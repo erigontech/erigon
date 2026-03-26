@@ -27,6 +27,7 @@ jobs:
           filter: ''
           submodules: true
           lfs: tests
+          cleanup-space: true
           ramdisk: true
 
       - name: Run tests with coverage

@@ -620,14 +620,6 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 		s.logger.Warn("Payload build failed (nil ExecutionPayload)", "payloadId", payloadId)
 		return nil, &engine_helpers.UnknownPayloadErr
 	}
-	var executionRequests []hexutil.Bytes
-	if version >= clparams.ElectraVersion {
-		executionRequests = make([]hexutil.Bytes, 0)
-		for _, r := range data.Requests.Requests {
-			executionRequests = append(executionRequests, r)
-		}
-	}
-
 	ts := data.ExecutionPayload.Timestamp
 	if (!s.config.IsCancun(ts) && version >= clparams.DenebVersion) ||
 		(s.config.IsCancun(ts) && version < clparams.DenebVersion) ||
@@ -638,6 +630,19 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 		(!s.config.IsAmsterdam(ts) && version >= clparams.GloasVersion) ||
 		(s.config.IsAmsterdam(ts) && version < clparams.GloasVersion) {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
+	}
+
+	var executionRequests []hexutil.Bytes
+	if version >= clparams.ElectraVersion {
+		if data.Requests == nil {
+			s.logger.Warn("Payload build failed (nil Requests)", "payloadId", payloadId)
+			return nil, errors.New("missing execution requests for Electra+ payload")
+		}
+
+		executionRequests = make([]hexutil.Bytes, 0, len(data.Requests.Requests))
+		for _, r := range data.Requests.Requests {
+			executionRequests = append(executionRequests, r)
+		}
 	}
 
 	payload := &engine_types.GetPayloadResponse{
