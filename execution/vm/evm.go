@@ -210,27 +210,32 @@ func (evm *EVM) handleFrameRevert(gas *mdgas.MdGas, err error, depth int,
 		evm.stateGasConsumed = savedStateGasConsumed
 	}
 
-	// Restore state gas spill (state gas charged from regular gas) back to
-	// gas.Regular, since the state operations were reverted.
+	// Compute spill: state gas that was charged from gas_left (regular)
+	// because the reservoir was insufficient.
 	reservoirUsed := initialChildState - gas.State
+	var spill uint64
 	if childStateConsumed > reservoirUsed {
-		spill := childStateConsumed - reservoirUsed
-		gas.Regular += spill
-		// At depth 0 (top-level REVERT), track the spill for receipt gas.
-		if depth == 0 && err == ErrExecutionReverted {
-			evm.revertedSpillGas += spill
-		}
+		spill = childStateConsumed - reservoirUsed
 	}
 
-	if err != ErrExecutionReverted {
-		// On exceptional halt at depth 0, zero regular gas but leave the
-		// state reservoir as-is (partially consumed). At depth > 0, restore
-		// the reservoir so the parent sees no consumption from the failed child.
-		if depth == 0 {
-			gas.Regular = 0
-		} else {
-			gas.State = initialChildState
+	// EIP-8037: "On child revert or exceptional halt, all state gas
+	// consumed by the child, both from the reservoir and any that spilled
+	// into gas_left, is restored to the parent's reservoir."
+	if depth == 0 {
+		if err == ErrExecutionReverted {
+			// Top-level REVERT: restore spill to gas_left for refund
+			// accounting; track it for receipt gas calculation.
+			gas.Regular += spill
+			evm.revertedSpillGas += spill
 		}
+		// Top-level exceptional halt: gas.Regular already zeroed in step 2;
+		// reservoir stays as-is for block gas accounting.
+	} else {
+		// Child frame (depth > 0): restore all consumed state gas
+		// (reservoir-sourced + spill) to the reservoir.
+		gas.State = initialChildState + spill
+		// Regular gas: REVERT preserves it (step 2 doesn't apply);
+		// exceptional halt burns it (step 2 zeroed gas.Regular).
 	}
 }
 
@@ -537,7 +542,8 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 		if evm.config.Tracer != nil && evm.config.Tracer.OnGasChange != nil {
 			evm.Config().Tracer.OnGasChange(gasRemaining.Regular, 0, tracing.GasChangeCallFailedExecution)
 		}
-		return nil, accounts.NilAddress, mdgas.MdGas{}, err
+		// Preserve State so the parent's reservoir is restored by restoreChildGas.
+		return nil, accounts.NilAddress, mdgas.MdGas{State: gasRemaining.State}, err
 	}
 	// Create a new account on the state
 	snapshot := evm.intraBlockState.PushSnapshot()

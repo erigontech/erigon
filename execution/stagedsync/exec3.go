@@ -205,14 +205,11 @@ func ExecV3(ctx context.Context,
 	if !isApplyingBlocks {
 		postValidator = newParallelBlockPostExecutionValidator()
 	}
-	// Enable deferred commitment updates for fork validation and parallel initial sync.
-	// Deferred updates batch commitment calculations to block boundaries rather than
-	// per-transaction, significantly reducing re-org validation overhead.
-	// For the parallel path during initial sync, Flush() now includes pending updates,
-	// so they are no longer silently discarded between StageLoopIteration cycles.
-	if isForkValidation || (parallel && isApplyingBlocks) {
-		doms.SetDeferCommitmentUpdates(true)
-	}
+	// Enable deferred commitment updates. Deferred updates batch commitment
+	// branch writes to a queue during fold(), avoiding per-write map insertion
+	// overhead. The queue is flushed into the correct block's changeset by
+	// SharedDomains.ComputeCommitment before the next block's commitment runs.
+	doms.SetDeferCommitmentUpdates(true)
 	defer doms.SetDeferCommitmentUpdates(false)
 	// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
 	// can't use OS-level ReadAhead - because Data >> RAM
