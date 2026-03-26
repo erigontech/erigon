@@ -1,6 +1,10 @@
 name: QA - RPC Integration Tests
 
 on:
+  push:
+    branches:
+      - main
+      - 'release/**'
   pull_request:
     branches:
       - main
@@ -17,6 +21,8 @@ concurrency:
     ${{
       github.event_name == 'pull_request' &&
       format('{0}-{1}', github.workflow, github.head_ref) ||
+      github.event_name == 'push' &&
+      format('{0}-{1}', github.workflow, github.ref_name) ||
       format('{0}-{1}', github.workflow, github.run_id)
     }}
   cancel-in-progress: true

@@ -120,7 +120,7 @@ func (cc *ExecutionClientDirect) NewPayload(
 	return PayloadStatusNone, errors.New("unexpected status")
 }
 
-func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized, safe, head common.Hash, attr *engine_types.PayloadAttributes) ([]byte, error) {
+func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized, safe, head common.Hash, attr *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
 	status, _, _, err := cc.chainRW.UpdateForkChoice(ctx, head, safe, finalized)
 	if err != nil {
 		return nil, fmt.Errorf("execution Client RPC failed to retrieve ForkChoiceUpdate response, err: %w", err)
@@ -189,7 +189,7 @@ func (cc *ExecutionClientDirect) HasBlock(ctx context.Context, hash common.Hash)
 	return cc.chainRW.HasBlock(ctx, hash)
 }
 
-func (cc *ExecutionClientDirect) GetAssembledBlock(_ context.Context, idBytes []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+func (cc *ExecutionClientDirect) GetAssembledBlock(_ context.Context, idBytes []byte, _ clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	return cc.chainRW.GetAssembledBlock(binary.LittleEndian.Uint64(idBytes))
 }
 
@@ -198,9 +198,9 @@ func (cc *ExecutionClientDirect) HasGapInSnapshots(ctx context.Context) bool {
 	return hasGap
 }
 
-func (cc *ExecutionClientDirect) GetBlobs(ctx context.Context, versionedHashes []common.Hash) (blobs [][]byte, proofs [][][]byte) {
+func (cc *ExecutionClientDirect) GetBlobs(ctx context.Context, versionedHashes []common.Hash, _ clparams.StateVersion) (blobs [][]byte, proofs [][][]byte, err error) {
 	if cc.txpool == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	req := &txpoolproto.GetBlobsRequest{BlobHashes: make([]*typesproto.H256, len(versionedHashes))}
@@ -209,7 +209,7 @@ func (cc *ExecutionClientDirect) GetBlobs(ctx context.Context, versionedHashes [
 	}
 	resp, err := cc.txpool.GetBlobs(ctx, req)
 	if err != nil {
-		return nil, nil
+		return nil, nil, fmt.Errorf("txpool GetBlobs: %w", err)
 	}
 	blobsWithProof := resp.BlobsWithProofs
 	blobs = make([][]byte, len(blobsWithProof))
@@ -218,5 +218,5 @@ func (cc *ExecutionClientDirect) GetBlobs(ctx context.Context, versionedHashes [
 		blobs[i] = bwp.Blob
 		proofs[i] = bwp.Proofs
 	}
-	return blobs, proofs
+	return blobs, proofs, nil
 }
