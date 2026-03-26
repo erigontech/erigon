@@ -844,8 +844,8 @@ func TestGasTracingNoUnderflowOnStateGas(t *testing.T) {
 
 	// Track all OnGasChange calls and check for underflow.
 	type gasChange struct {
-		oldGas    uint64
-		newGas    uint64
+		oldGas uint64
+		newGas uint64
 		reason tracing.GasChangeReason
 	}
 	var gasChanges []gasChange
@@ -865,9 +865,9 @@ func TestGasTracingNoUnderflowOnStateGas(t *testing.T) {
 	// Build bytecode: SSTORE(slot=0, value=1) then STOP.
 	// Under Amsterdam with an empty slot this triggers state gas.
 	code := []byte{
-		byte(vm.PUSH1), 1,  // value = 1
-		byte(vm.PUSH1), 0,  // slot = 0
-		byte(vm.SSTORE),    // creates new slot -> charges state gas
+		byte(vm.PUSH1), 1, // value = 1
+		byte(vm.PUSH1), 0, // slot = 0
+		byte(vm.SSTORE), // creates new slot -> charges state gas
 		byte(vm.STOP),
 	}
 
