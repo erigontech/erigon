@@ -395,6 +395,13 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 	if toBlock > 0 {
 		to = min(prevStageProgress, toBlock)
 	}
+	// OtterSync nodes: the gate stage may be stuck at the same value as the current
+	// execution progress (blocks are in the hot DB, not yet snapshotted). When the
+	// caller explicitly requests a toBlock beyond the gate, trust it directly so
+	// integration stage_exec can execute those blocks.
+	if to <= s.BlockNumber && toBlock > s.BlockNumber {
+		to = toBlock
+	}
 	if to < s.BlockNumber {
 		return nil
 	}
