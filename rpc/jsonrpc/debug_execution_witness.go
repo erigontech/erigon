@@ -1649,7 +1649,7 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 		for key := range m {
 			keyHash, _ := common.HashData(key[:])
 			cKey := dbutils.GenerateCompositeTrieKey(addrHash, keyHash)
-			fmt.Printf("DELETING Storage Key at path %x\n", cKey)
+			// fmt.Printf("DELETING Storage Key at path %x\n", cKey)
 			s.t.Delete(cKey)
 		}
 	}
@@ -1660,12 +1660,10 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 		if account, ok := s.accountUpdates[addr]; ok && account != nil {
 			addrHash, _ := common.HashData(addr[:])
 			gotRoot, root := s.t.DeepHash(addrHash[:])
-			// fmt.Printf("  Storage root for %x: gotRoot=%v, root=%x\n", addr[:8], gotRoot, root)
 			if gotRoot {
 				// Update the account's storage root and re-apply to trie
 				account.Root = root
 				s.t.UpdateAccount(addrHash[:], account)
-				// fmt.Printf("  Updated account %x with storage root %x\n", addr[:8], root)
 			}
 		}
 	}
@@ -1680,7 +1678,6 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 		}
 		addrHash, _ := common.HashData(addr[:])
 		s.t.DeleteSubtree(addrHash[:])
-		// fmt.Printf("  Deleted account subtrie %x, hash=%x\n", addr[:8], s.t.Hash())
 	}
 
 	// Compute and return the final hash
