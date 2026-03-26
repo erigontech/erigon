@@ -9,7 +9,7 @@ replace github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilte
 require (
 	github.com/erigontech/erigon-snapshot v1.3.1-0.20260210221902-e495954c7e78
 	github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116
-	github.com/erigontech/mdbx-go v0.39.12
+	github.com/erigontech/mdbx-go v0.39.17
 	github.com/erigontech/secp256k1 v1.2.1-0.20260218182123-377cc1bd6410
 	github.com/erigontech/silkworm-go v0.24.0
 )
@@ -46,7 +46,7 @@ require (
 	github.com/erigontech/fastkeccak v0.1.1-0.20260222164035-95925bf94241
 	github.com/ethereum/go-bigmodexpfix v0.0.0-20250911101455-f9e208c548ab
 	github.com/felixge/fgprof v0.9.5
-	github.com/go-chi/chi/v5 v5.2.3
+	github.com/go-chi/chi/v5 v5.2.5
 	github.com/go-chi/cors v1.2.2
 	github.com/go-echarts/go-echarts/v2 v2.6.7
 	github.com/go-quicktest/qt v1.101.0

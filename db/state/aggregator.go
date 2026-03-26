@@ -1540,7 +1540,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 		}
 	}
 
-	if r.anyDomain() { // Prioritize domain merges: if any domain has pending merges, skip II merges this round.
+	if r.anyDomainValues() { // Prioritize domain value merges: if any domain has pending value merges, skip standalone II merges this round.
 		r.invertedIndex = nil
 		return r
 	}

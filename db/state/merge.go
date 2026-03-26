@@ -211,6 +211,9 @@ func (ht *HistoryRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges
 //
 // 0-2,2-3: nothing to merge
 func (iit *InvertedIndexRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *MergeRange {
+	if dbg.NoDeepMergeHistory() {
+		maxSpan = min(maxSpan, 2*iit.stepSize)
+	}
 	var minFound bool
 	var startTxNum, endTxNum uint64
 	for _, item := range iit.files {
@@ -1099,9 +1102,9 @@ func (r Ranges) any() bool {
 	return false
 }
 
-func (r Ranges) anyDomain() bool {
+func (r Ranges) anyDomainValues() bool {
 	for _, d := range &r.domain {
-		if d.any() {
+		if d.values.needMerge {
 			return true
 		}
 	}
