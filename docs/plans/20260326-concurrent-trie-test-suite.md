@@ -46,22 +46,22 @@ Create a test suite that validates `ConcurrentPatriciaHashed` produces identical
 
 The core helper runs the same updates through both sequential and concurrent tries, asserts root hash equality. Also need a helper to find addresses that hash to a target nibble.
 
-- [ ] Add `findAddressForNibble(targetNibble int, seed int) []byte` — brute-force search for a 20-byte address whose keccak first nibble matches target. Cache results to avoid repeated work across tests.
-- [ ] Add `compareRoots(t, seqMs, parMs, seqTrie, parTrie, plainKeys, updates)` helper:
+- [x] Add `findAddressForNibble(targetNibble int, seed int) []byte` — brute-force search for a 20-byte address whose keccak first nibble matches target. Cache results to avoid repeated work across tests.
+- [x] Add `compareRoots(t, seqMs, parMs, seqTrie, parTrie, plainKeys, updates)` helper:
   1. Apply `plainKeys`/`updates` to both `MockState` instances
   2. Wrap via `WrapKeyUpdates` (sequential) and `WrapKeyUpdatesParallel` (concurrent)
   3. Call `seqTrie.Process(ctx, seqUpds, ...)` and `parTrie.Process(ctx, parUpds, ...)`
   4. `require.Equal(t, seqRoot, parRoot)`
   5. Return the root hash for chaining
-- [ ] Add `setupTriePair(t) (seqMs, parMs, seqTrie, parTrie)` factory:
+- [x] Add `setupTriePair(t) (seqMs, parMs, seqTrie, parTrie)` factory:
   1. Create two independent `MockState` instances
   2. `seqTrie = NewHexPatriciaHashed(length.Addr, seqMs)`
   3. `parTrie = NewConcurrentPatriciaHashed(NewHexPatriciaHashed(length.Addr, parMs), parMs)`
   4. Set `parMs.SetConcurrentCommitment(true)`
   5. Return all four
-- [ ] Add `mockTrieCtxFactory(ms *MockState) TrieContextFactory` — returns `func() (PatriciaContext, func()) { return ms, func(){} }`
-- [ ] Write `TestCompareRoots_Smoke` — single account balance update, verify sequential == concurrent root
-- [ ] Run `go test -run TestCompareRoots_Smoke ./execution/commitment/...` — must pass
+- [x] Add `mockTrieCtxFactory(ms *MockState) TrieContextFactory` — returns `func() (PatriciaContext, func()) { return ms, func(){} }`
+- [x] Write `TestCompareRoots_Smoke` — single account balance update, verify sequential == concurrent root
+- [x] Run `go test -run TestCompareRoots_Smoke ./execution/commitment/...` — must pass
 
 ### Task 2: Layer A — Key distribution pattern tests
 
