@@ -146,6 +146,22 @@ func ExecV3(ctx context.Context,
 		agg.BuildFilesInBackground(initialTxNum)
 	}
 
+	// OtterSync nodes bypass the Bodies stage and never write TxNums entries for
+	// hot-DB blocks (blocks received over the network but not yet snapshotted).
+	// Extend the TxNums index now so that restoreTxNum can compute the tx range.
+	{
+		txNumsReader := cfg.blockReader.TxnumReader()
+		lastTxNumBlock, _, err := txNumsReader.Last(applyTx)
+		if err != nil {
+			return err
+		}
+		if lastTxNumBlock <= blockNum {
+			if appendErr := rawdb.AppendCanonicalTxNums(applyTx, blockNum+1); appendErr != nil {
+				return fmt.Errorf("AppendCanonicalTxNums from block %d: %w", blockNum+1, appendErr)
+			}
+		}
+	}
+
 	var (
 		inputTxNum               uint64
 		offsetFromBlockBeginning uint64
