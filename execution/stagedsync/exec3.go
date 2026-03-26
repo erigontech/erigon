@@ -126,6 +126,7 @@ func ExecV3(ctx context.Context,
 	if err != nil {
 		return err
 	}
+	fmt.Printf("EXEC_DIAG: SeekCommitment: initialTxNum=%d blockNum=%d maxBlockNum=%d\n", initialTxNum, blockNum, maxBlockNum)
 
 	agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	if isApplyingBlocks {
@@ -137,6 +138,7 @@ func ExecV3(ctx context.Context,
 	}
 
 	if maxBlockNum < blockNum {
+		fmt.Printf("EXEC_DIAG: early return maxBlockNum(%d) < blockNum(%d)\n", maxBlockNum, blockNum)
 		return nil
 	}
 
@@ -153,6 +155,7 @@ func ExecV3(ctx context.Context,
 	if inputTxNum, maxTxNum, offsetFromBlockBeginning, blockNum, err = restoreTxNum(ctx, &cfg, applyTx, initialTxNum, maxBlockNum); err != nil {
 		return err
 	}
+	fmt.Printf("EXEC_DIAG: restoreTxNum: inputTxNum=%d maxTxNum=%d blockNum=%d offset=%d\n", inputTxNum, maxTxNum, blockNum, offsetFromBlockBeginning)
 
 	if maxTxNum == 0 {
 		// nothing to exec, make sure the stage is in sync with the sd

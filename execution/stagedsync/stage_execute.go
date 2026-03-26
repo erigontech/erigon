@@ -395,6 +395,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 	if toBlock > 0 {
 		to = min(prevStageProgress, toBlock)
 	}
+	fmt.Printf("SPAWN_DIAG: prevStageProgress=%d to=%d s.BlockNumber=%d toBlock=%d\n", prevStageProgress, to, s.BlockNumber, toBlock)
 	if to < s.BlockNumber {
 		return nil
 	}
