@@ -503,7 +503,82 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			fmt.Printf("%d (%d.%d) %5d %5d %s\n", blockNum, txIndex, txIncarnation, pc, traceGas(op, callGas, cost), opstr)
 		}
 
-		// execute the operation
+		// Fast-path: inline the hottest opcodes to avoid the indirect call
+		// through operation.execute, which forces a full register spill/reload.
+		switch op {
+		case PUSH1:
+			var val uint256.Int
+			if pc+1 < uint64(len(contract.Code)) {
+				val.SetUint64(uint64(contract.Code[pc+1]))
+			}
+			callContext.Stack.data[callContext.Stack.top] = val
+			callContext.Stack.top++
+			pc += 2
+			continue
+		case PUSH2:
+			var val uint256.Int
+			codeLen := uint64(len(contract.Code))
+			if pc+2 < codeLen {
+				val.SetBytes2(contract.Code[pc+1 : pc+3])
+			} else if pc+1 < codeLen {
+				val.SetUint64(uint64(contract.Code[pc+1]) << 8)
+			}
+			callContext.Stack.data[callContext.Stack.top] = val
+			callContext.Stack.top++
+			pc += 3
+			continue
+		case POP:
+			callContext.Stack.top--
+			pc++
+			continue
+		case DUP1:
+			callContext.Stack.data[callContext.Stack.top] = callContext.Stack.data[callContext.Stack.top-1]
+			callContext.Stack.top++
+			pc++
+			continue
+		case DUP2:
+			callContext.Stack.data[callContext.Stack.top] = callContext.Stack.data[callContext.Stack.top-2]
+			callContext.Stack.top++
+			pc++
+			continue
+		case SWAP1:
+			top := callContext.Stack.top
+			callContext.Stack.data[top-1], callContext.Stack.data[top-2] = callContext.Stack.data[top-2], callContext.Stack.data[top-1]
+			pc++
+			continue
+		case SWAP2:
+			top := callContext.Stack.top
+			callContext.Stack.data[top-1], callContext.Stack.data[top-3] = callContext.Stack.data[top-3], callContext.Stack.data[top-1]
+			pc++
+			continue
+		case ADD:
+			top := callContext.Stack.top
+			callContext.Stack.data[top-2].Add(&callContext.Stack.data[top-1], &callContext.Stack.data[top-2])
+			callContext.Stack.top--
+			pc++
+			continue
+		case SUB:
+			top := callContext.Stack.top
+			callContext.Stack.data[top-2].Sub(&callContext.Stack.data[top-1], &callContext.Stack.data[top-2])
+			callContext.Stack.top--
+			pc++
+			continue
+		case ISZERO:
+			top := callContext.Stack.top
+			if callContext.Stack.data[top-1].IsZero() {
+				callContext.Stack.data[top-1].SetOne()
+			} else {
+				callContext.Stack.data[top-1].Clear()
+			}
+			pc++
+			continue
+		case JUMPDEST:
+			pc++
+			continue
+		default:
+			// Fall through to generic indirect call.
+		}
+
 		pc, res, err = operation.execute(pc, evm, callContext)
 
 		if err != nil {
