@@ -90,7 +90,7 @@ func (s *RecordingState) SetAccountsToTrace(addrs []common.Address) {
 }
 
 func (s *RecordingState) tracing(addr common.Address) bool {
-	if s.accountsToTrace == nil {
+	if !s.trace {
 		return false
 	}
 	_, ok := s.accountsToTrace[addr]
@@ -909,7 +909,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, fmt.Errorf("parent header %d not found", parentNum)
 	}
 	expectedParentRoot = parentHeader.Root
-	fmt.Printf("EXPECTED PARENT ROOT = %x\n", expectedParentRoot)
+	log.Debug("expected parent root", "stateRoot", expectedParentRoot)
 
 	commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
 	if firstTxNumInBlock < commitmentStartingTxNum {
@@ -1038,17 +1038,6 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	for _, node := range allNodes {
 		result.State = append(result.State, common.Copy(node))
 	}
-
-	// // check the RLP decoded trie has the same root hash
-	// rlpDecodedTrie, err := trie.RLPDecode(allNodes)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("failed to rlp decode state nodes : %w", err)
-	// }
-
-	// decodedHash := rlpDecodedTrie.Hash()
-	// if decodedHash != common.Hash(witnessRoot) {
-	// 	return nil, fmt.Errorf("root hash of decoded trie is incorrect")
-	// }
 
 	// Collect headers for BLOCKHASH opcode support
 	// Include headers from accessed block numbers
@@ -1479,6 +1468,10 @@ type witnessStateless struct {
 }
 
 func (s *witnessStateless) SetAccountsToTrace(addrs []common.Address) {
+	if len(addrs) == 0 {
+		return // nothing to trace
+	}
+	s.trace = true
 	s.accountsToTrace = make(map[common.Address]struct{}, len(addrs))
 	for _, a := range addrs {
 		s.accountsToTrace[a] = struct{}{}
@@ -1971,7 +1964,6 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 			// fmt.Printf("  Storage write: account=%x, key=%x, value=%x\n", addr[:8], key[:8], v.Bytes())
 			s.t.Update(cKey, v.Bytes())
 			s.t.DeepHash(addrHash[:])
-			// Don't call Hash() here - it would cache node refs and interfere with later updates
 		}
 	}
 
@@ -2045,7 +2037,6 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	stateless.SetAccountsToTrace([]common.Address{
 		// Add addresses to trace here, e.g.:
 		// common.HexToAddress("0x8863786beBE8eB9659DF00b49f8f1eeEc7e2C8c1"),
-		common.HexToAddress("0xb1356799bA5f399bbc1Cf99778a0A6f1aA319c67"),
 	})
 
 	// Build header lookup map from result.Headers for BLOCKHASH opcode
