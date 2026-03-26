@@ -27,11 +27,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
@@ -133,9 +135,27 @@ func (extr *EngineXTestRunner) getOrCreateTester(fork Fork, preAllocHash PreAllo
 		return engineapitester.EngineApiTester{}, err
 	}
 	forkConfig = &forkConfigCopy
-	genesis := alloc.Genesis
-	genesis.Alloc = alloc.Alloc
-	genesis.Config = forkConfig
+	env := alloc.Environment
+	genesis := types.Genesis{
+		Config:     forkConfig,
+		Alloc:      alloc.Alloc,
+		ExtraData:  []byte{0},
+		Coinbase:   env.Coinbase,
+		GasLimit:   uint64(env.GasLimit),
+		Difficulty: uint256.NewInt(uint64(env.Difficulty)),
+		Timestamp:  uint64(env.Timestamp),
+	}
+	if env.BaseFee != nil {
+		genesis.BaseFee = uint256.NewInt(uint64(*env.BaseFee))
+	}
+	if env.ExcessBlobGas != nil {
+		v := uint64(*env.ExcessBlobGas)
+		genesis.ExcessBlobGas = &v
+	}
+	if env.BlobGasUsed != nil {
+		v := uint64(*env.BlobGasUsed)
+		genesis.BlobGasUsed = &v
+	}
 	engineApiClientTimeout := 10 * time.Minute
 	tester := engineapitester.InitialiseEngineApiTester(extr.t, engineapitester.EngineApiTesterInitArgs{
 		Logger:                 extr.logger,
@@ -269,8 +289,19 @@ type EngineXTestNewPayload struct {
 type PreAllocHash string
 
 type PreAlloc struct {
-	Genesis types.Genesis      `json:"genesis"`
-	Alloc   types.GenesisAlloc `json:"pre"`
+	Environment EngineXEnvironment `json:"environment"`
+	Alloc       types.GenesisAlloc `json:"pre"`
+}
+
+// EngineXEnvironment maps the "environment" field from engine-x pre-alloc JSON files.
+type EngineXEnvironment struct {
+	Coinbase      common.Address       `json:"currentCoinbase"`
+	GasLimit      math.HexOrDecimal64  `json:"currentGasLimit"`
+	Timestamp     math.HexOrDecimal64  `json:"currentTimestamp"`
+	Difficulty    math.HexOrDecimal64  `json:"currentDifficulty"`
+	BaseFee       *math.HexOrDecimal64 `json:"currentBaseFee"`
+	ExcessBlobGas *math.HexOrDecimal64 `json:"currentExcessBlobGas"`
+	BlobGasUsed   *math.HexOrDecimal64 `json:"currentBlobGasUsed"`
 }
 
 type Fork string
