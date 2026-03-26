@@ -830,3 +830,63 @@ func TestCreateCollisionWithEIP7702Delegation(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, val.IsZero(), "CREATE should have returned 0 (collision), but got %x", val)
 }
+
+// TestGasTracingNoUnderflowOnStateGas verifies that the OnGasChange tracer
+// callback receives correct (non-underflowing) gas values when an opcode
+// charges state gas under EIP-8037 multi-dimensional gas (Amsterdam rules).
+//
+// The bug: the interpreter accumulated both regular and state dynamic gas into
+// a single `cost` variable, then computed `gasCopy - cost` for the tracer
+// callback. Because `gasCopy` only captured regular gas, the subtraction
+// underflowed when state gas was non-zero (e.g. SSTORE creating a new slot).
+func TestGasTracingNoUnderflowOnStateGas(t *testing.T) {
+	t.Parallel()
+
+	// Track all OnGasChange calls and check for underflow.
+	type gasChange struct {
+		oldGas uint64
+		newGas uint64
+		reason tracing.GasChangeReason
+	}
+	var gasChanges []gasChange
+
+	hooks := &tracing.Hooks{
+		OnGasChange: func(old, newGas uint64, reason tracing.GasChangeReason) {
+			gasChanges = append(gasChanges, gasChange{old, newGas, reason})
+			// The key invariant: new gas must never exceed old gas for a
+			// consumption event (GasChangeCallOpCode). A uint64 underflow
+			// would produce a very large value.
+			if reason == tracing.GasChangeCallOpCode && newGas > old {
+				t.Errorf("OnGasChange underflow: old=%d new=%d reason=%s", old, newGas, reason)
+			}
+		},
+	}
+
+	// Build bytecode: SSTORE(slot=0, value=1) then STOP.
+	// Under Amsterdam with an empty slot this triggers state gas.
+	code := []byte{
+		byte(vm.PUSH1), 1, // value = 1
+		byte(vm.PUSH1), 0, // slot = 0
+		byte(vm.SSTORE), // creates new slot -> charges state gas
+		byte(vm.STOP),
+	}
+
+	cfg := &Config{
+		EVMConfig: vm.Config{Tracer: hooks},
+		GasLimit:  10_000_000,
+	}
+
+	_, _, err := Execute(code, nil, cfg, t.TempDir())
+	require.NoError(t, err)
+
+	// Verify we actually observed at least one GasChangeCallOpCode event
+	// (the SSTORE should have triggered it).
+	found := false
+	for _, gc := range gasChanges {
+		if gc.reason == tracing.GasChangeCallOpCode {
+			found = true
+			break
+		}
+	}
+	require.True(t, found, "expected at least one GasChangeCallOpCode event from SSTORE")
+}
