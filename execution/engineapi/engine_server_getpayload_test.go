@@ -91,6 +91,7 @@ func newProposingEngineServerForGetPayloadTests(stub *stubExecutionServer) *Engi
 		direct.NewExecutionClientDirect(stub),
 		nil,   // blockDownloader
 		false, // caplin
+		false, // internalCL
 		true,  // proposing
 		true,  // consuming
 		nil,   // txPool
