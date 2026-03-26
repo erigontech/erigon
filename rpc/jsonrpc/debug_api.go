@@ -393,9 +393,11 @@ func getModifiedAccounts(tx kv.TemporalTx, startTxNum, endTxNum uint64) ([]commo
 	}
 
 	// Pass 1 – AccountsDomain.
-	// HistoryRange returns (key, value_before_range); GetAsOf(endTxNum) gives the
-	// net post-range value.
-	//   • preVal == postVal  → no net change (e.g. precompile touched but not changed): skip.
+	// HistoryRange returns one entry per unique key: (key, value_before_first_change_in_range).
+	// Because the first change's pre-value equals the state at startTxNum-1 (no intervening
+	// change), this IS the pre-range value. GetAsOf(key, endTxNum) gives the post-range value.
+	// Comparing the two detects net changes regardless of intermediate modifications.
+	//   • preVal == postVal  → no net change (e.g. precompile touched but not modified): skip.
 	//   • len(postVal) == 0  → account deleted (SELFDESTRUCT / EIP-161): record in deletedAddrs.
 	// Geth compares two state roots by trie walk, so deleted accounts never appear in its output.
 	deletedAddrs := make(map[common.Address]struct{})
@@ -480,6 +482,11 @@ func (api *DebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHas
 	}
 	defer tx.Rollback()
 
+	latestBlock, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return nil, err
+	}
+
 	startNum, err := api.headerNumberByHash(ctx, tx, startHash)
 	if err != nil {
 		return nil, fmt.Errorf("start block %x not found", startHash)
@@ -505,6 +512,9 @@ func (api *DebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHas
 	endNum, err := api.headerNumberByHash(ctx, tx, *endHash)
 	if err != nil {
 		return nil, fmt.Errorf("end block %x not found", *endHash)
+	}
+	if endNum > latestBlock {
+		return nil, fmt.Errorf("end block (%d) is later than the latest block (%d)", endNum, latestBlock)
 	}
 	if startNum >= endNum {
 		return nil, fmt.Errorf("start block (%d) must be less than end block (%d)", startNum, endNum)
