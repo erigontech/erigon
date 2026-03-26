@@ -466,7 +466,7 @@ func opCallDataCopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	// These values are checked for overflow during gas cost calculation
 	memOffset64 := memOffset.Uint64()
 	length64 := length.Uint64()
-	scope.Memory.Set(memOffset64, length64, getData(scope.input, dataOffset64, length64))
+	scope.Memory.SetFromData(memOffset64, length64, dataOffset64, scope.input)
 	return pc, nil, nil
 }
 
@@ -571,8 +571,7 @@ func opCodeCopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	if overflow {
 		uint64CodeOffset = math.MaxUint64
 	}
-	codeCopy := getData(scope.Contract.Code, uint64CodeOffset, length.Uint64())
-	scope.Memory.Set(memOffset.Uint64(), length.Uint64(), codeCopy)
+	scope.Memory.SetFromData(memOffset.Uint64(), length.Uint64(), uint64CodeOffset, scope.Contract.Code)
 	return pc, nil, nil
 }
 
@@ -594,8 +593,11 @@ func opExtCodeCopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, err
 		return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
 
-	codeCopy := getDataBig(code, &codeOffset, len64)
-	scope.Memory.Set(memOffset.Uint64(), len64, codeCopy)
+	codeOffset64, overflow := codeOffset.Uint64WithOverflow()
+	if overflow {
+		codeOffset64 = math.MaxUint64
+	}
+	scope.Memory.SetFromData(memOffset.Uint64(), len64, codeOffset64, code)
 	return pc, nil, nil
 }
 
