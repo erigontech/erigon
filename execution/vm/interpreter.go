@@ -335,6 +335,10 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		blockNum               uint64
 		txIndex, txIncarnation int
 	)
+	if _bn := evm.intraBlockState.BlockNumber(); _bn >= 2486000 && _bn <= 2486400 {
+		fmt.Printf("TRACE_DIAG: depth=%d blockNum=%d txIndex=%d incarnation=%d traceTx=%v\n",
+			evm.depth, _bn, evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), traceTx)
+	}
 
 	// Make sure the readOnly is only set if we aren't in readOnly yet.
 	// This makes also sure that the readOnly flag isn't removed for child calls.
