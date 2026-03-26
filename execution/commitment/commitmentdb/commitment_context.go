@@ -60,10 +60,6 @@ type SharedDomainsCommitmentContext struct {
 	deferCommitmentUpdates bool
 	// pendingUpdate stores a single deferred branch update to be flushed at the next ComputeCommitment call.
 	pendingUpdate *commitment.PendingCommitmentUpdate
-
-	// pendingCollectors holds per-goroutine ETL collectors from concurrent commitment.
-	// Populated after ParallelHashSort completes; drained by caller (e.g. rebuildCommitmentShard).
-	pendingCollectors []*etl.Collector
 }
 
 // SetStateReader can be used to set a custom state reader (otherwise the default one is set in SharedDomainsCommitmentContext.trieContext).
@@ -138,14 +134,6 @@ func (sdc *SharedDomainsCommitmentContext) flushPendingUpdate(putter kv.Temporal
 	return nil
 }
 
-// DrainPendingCollectors returns and clears any per-goroutine ETL collectors
-// accumulated during concurrent commitment. Caller must Load and Close them.
-func (sdc *SharedDomainsCommitmentContext) DrainPendingCollectors() []*etl.Collector {
-	c := sdc.pendingCollectors
-	sdc.pendingCollectors = nil
-	return c
-}
-
 // SetHistoryStateReader sets the state reader to read *full* historical state at specified txNum.
 func (sdc *SharedDomainsCommitmentContext) SetHistoryStateReader(roTx kv.TemporalTx, limitReadAsOfTxNum uint64) {
 	sdc.SetStateReader(NewHistoryStateReader(roTx, limitReadAsOfTxNum))
@@ -205,10 +193,6 @@ func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNu
 }
 
 func (sdc *SharedDomainsCommitmentContext) Close() {
-	for _, c := range sdc.pendingCollectors {
-		c.Close()
-	}
-	sdc.pendingCollectors = nil
 	sdc.updates.Close()
 	sdc.patriciaTrie.Release()
 }
@@ -409,8 +393,23 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		}
 		return nil, err
 	}
+	// Merge per-goroutine ETL collectors into the main writer via PutBranch.
+	// This ensures all callers (rebuild, exec3, RPC, etc.) get the data merged
+	// automatically without needing to drain externally.
 	if drainCollectors != nil {
-		sdc.pendingCollectors = drainCollectors()
+		collectors := drainCollectors()
+		defer func() {
+			for _, c := range collectors {
+				c.Close()
+			}
+		}()
+		for _, c := range collectors {
+			if loadErr := c.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+				return trieContext.PutBranch(k, v, nil)
+			}, etl.TransformArgs{}); loadErr != nil {
+				return nil, loadErr
+			}
+		}
 	}
 
 	// Handle deferred branch updates left by Process() on the branch encoder.

@@ -91,3 +91,30 @@ Go's test result cache keys on the mtime+size of every file read (via Go stdlib)
 **When a test reads a data file at runtime** (via `os.Open`, `os.ReadFile`, `os.Stat`, etc.) that lives outside a `testdata/` directory, it must be added to the `git restore-mtime` pattern list in `setup-erigon/action.yml`. Otherwise that package's test results will never be cached in CI.
 
 Covered patterns already include `**/testdata/**`, `execution/tests/test-corners/**`, `cl/spectest/**/data_*/**`, `cl/transition/**/test_data/**`, `cl/utils/eth2shuffle/spec/**`, and `execution/state/genesiswrite/*.json`.
+
+## Concurrent Commitment Architecture
+
+`ConcurrentPatriciaHashed` (`execution/commitment/hex_concurrent_patricia_hashed.go`) splits the hex trie into 16 subtries by first nibble. During `ParallelHashSort`, each subtrie runs in its own goroutine with an independent `TrieContext` for **reads** (own `roTx`). **Writes** (`PutBranch`) are isolated via per-goroutine `etl.Collector` instances (field `TrieContext.localCollector`). The `concurrentTrieContextFactory` in `commitmentdb/commitment_context.go` creates these collectors and tracks them in a mutex-protected slice. After all goroutines complete, `ComputeCommitment` self-drains the collectors by loading each entry and writing it via the main `trieContext.PutBranch` (which routes through `DomainPut` since the main context has no `localCollector`). This happens automatically for all callers. The root fold after `g.Wait()` is single-threaded and uses the normal `DomainPut` path (no local collector).
+
+### Activation
+
+- **Normal sync/execution:** `--experimental.concurrent-commitment` CLI flag sets `statecfg.ExperimentalConcurrentCommitment` globally.
+- **Rebuild path:** `ERIGON_REBUILD_CONCURRENT_COMMITMENT=true` env var enables it only for `RebuildCommitmentFiles` (in `db/state/squeeze.go`). This also calls `domains.EnableParaTrieDB(rwDb)` to provide the DB handle for per-goroutine read transactions.
+
+Key packages:
+- `execution/commitment` — trie logic, `PatriciaContext` interface, `Trie` interface
+- `execution/commitment/commitmentdb` — `TrieContext` (implements `PatriciaContext`), `SharedDomainsCommitmentContext`, `trieContextFactory`, `concurrentTrieContextFactory`
+- `db/state` — `DomainBufferedWriter`, `TemporalMemBatch`, squeeze/rebuild (`rebuildCommitmentShard`)
+- `db/state/execctx` — `SharedDomains`, `temporalPutDel` (bridges `TrieContext.PutBranch` to domain writers)
+
+The `sd` interface in `commitmentdb` is the abstraction boundary to `SharedDomains` (provides `AsGetter`, `AsPutDel`, `StepSize`, `TxNum`).
+
+## Domain Value Format (ETL Encoding)
+
+For `LargeValues=false` domains (**Accounts, Storage, Commitment**), `DomainBufferedWriter.addValue` prepends an 8-byte inverted step (`^step` as big-endian uint64) to the **value** before collecting into ETL. `collateETL` strips these 8 bytes when building `.kv` files.
+
+For `LargeValues=true` domains (**Code, RCache**), the 8-byte inverted step is appended to the **key** instead; values are stored unchanged.
+
+This format mirrors the MDBX table layout where DupSort uses the step prefix for versioning within the same key.
+
+**Per-goroutine collectors (concurrent commitment):** Store raw `(prefix, branchData)` pairs *without* the step prefix. After `Process` completes, `ComputeCommitment` self-drains the collectors via `trieContext.PutBranch(k, v, nil)`, which routes through `DomainPut` → `PutWithPrev` → `addValue` (adding the step prefix automatically). Do not pre-encode the step in `localCollector.Collect` calls.

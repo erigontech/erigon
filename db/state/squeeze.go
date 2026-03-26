@@ -955,7 +955,9 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			defer rwTx.Rollback()
 
 			concurrent := dbg.EnvBool("ERIGON_REBUILD_CONCURRENT_COMMITMENT", false)
+			prevConcurrent := statecfg.ExperimentalConcurrentCommitment
 			statecfg.ExperimentalConcurrentCommitment = concurrent
+			defer func() { statecfg.ExperimentalConcurrentCommitment = prevConcurrent }()
 
 			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 			if err != nil {
@@ -1089,26 +1091,6 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 	rh, err := sd.GetCommitmentCtx().ComputeCommitment(ctx, tx, true, cfg.BlockNumber, cfg.TxnNumber, fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), nil)
 	if err != nil {
 		return nil, err
-	}
-
-	// Merge per-goroutine collectors into main writer (sequential, no race)
-	collectors := sd.GetCommitmentCtx().DrainPendingCollectors()
-	if len(collectors) > 0 {
-		defer func() {
-			for _, c := range collectors {
-				c.Close()
-			}
-		}()
-		batch := sd.GetMemBatch().(*TemporalMemBatch)
-		writer := batch.domainWriters[kv.CommitmentDomain]
-		for _, c := range collectors {
-			err = c.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-				return writer.addValue(k, v, cfg.StepFrom)
-			}, etl.TransformArgs{})
-			if err != nil {
-				return nil, err
-			}
-		}
 	}
 
 	logger.Info(cfg.LogPrefix+" now sealing (dumping on disk)", "root", hex.EncodeToString(rh),
