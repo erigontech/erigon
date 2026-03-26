@@ -54,7 +54,7 @@ type DomainPutter = stateifs.DomainPutter
 // CommitmentWrite represents a commitment domain write that needs to be added to changesets.
 type CommitmentWrite = stateifs.CommitmentWrite
 
-// CollapseTracer is a callback invoked when a trie node collapse occurs during commitment.
+// CollapseTracer is a callback invoked when a trie node collapse occurs during updates to commitment.
 // When a FullNode is reduced to a single child (updateKindPropagate), the remaining child
 // may be a HashNode that needs to be resolved for proper witness generation.
 // The callback receives the hashed key path (in nibble format) to the remaining child.
@@ -111,7 +111,7 @@ type HexPatriciaHashed struct {
 	leaveDeferredForCaller bool
 
 	// collapseTracer is called when a node collapse occurs (FullNode reduced to single child).
-	// Used by witness generation to capture paths that need resolution for collapsed HashNodes.
+	// Used by witness generation to capture paths that need resolution.
 	collapseTracer CollapseTracer
 
 	//processing metrics
@@ -1451,7 +1451,6 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 			extKey = append(extKey, terminatorHexByte) // append terminator byte
 		}
 		currentNode = &trie.ShortNode{Key: extKey, Val: &trie.FullNode{}}
-		// currentNode = &trie.ShortNode{Val: &trie.FullNode{}}
 		rootNode = currentNode             // use root node as the current node
 		keyPos = hph.root.hashedExtLen - 1 // start from the end of the root extension
 		fmt.Printf("[witness] root node %s, pos %d\n", hph.root.FullString(), keyPos)
@@ -2359,8 +2358,10 @@ func (hph *HexPatriciaHashed) detectCollapseBeforeDelete(hashedKey []byte) {
 
 	// collapse detected!
 	compact := NibblesToString(hashedKey)
-	fmt.Printf("[collapse-debug] updateCell: hashedKey=%s (len=%d nibbles), deleted=true, activeRows=%d\n",
-		compact, len(hashedKey), hph.activeRows)
+	if hph.trace {
+		fmt.Printf("[collapse] updateCell: hashedKey=%s (len=%d nibbles), deleted=true, activeRows=%d\n",
+			compact, len(hashedKey), hph.activeRows)
+	}
 
 	// Exactly 2 children in the parent row — one is on the delete path,
 	// the other is the sibling that will survive the collapse.
@@ -2390,13 +2391,14 @@ func (hph *HexPatriciaHashed) detectCollapseBeforeDelete(hashedKey []byte) {
 	}
 
 	compactSibling := NibblesToString(siblingPath)
-	fmt.Printf("[collapse] FOUND at parentRow=%d depth=%d: deleteNibble=%x, siblingNibble=%x, siblingPath=%s (len=%d), hashLen=%d, extLen=%d\n",
-		parentRow, depth, deleteNibble, siblingNibble, compactSibling, len(siblingPath), siblingCell.hashLen, siblingCell.hashedExtLen)
-
+	if hph.trace {
+		fmt.Printf("[collapse] found at parentRow=%d depth=%d: deleteNibble=%x, siblingNibble=%x, siblingPath=%s (len=%d), hashLen=%d, extLen=%d\n",
+			parentRow, depth, deleteNibble, siblingNibble, compactSibling, len(siblingPath), siblingCell.hashLen, siblingCell.hashedExtLen)
+	}
 	hph.collapseTracer(siblingPath)
 }
 
-// detectCascadingCollapseAtRow detects a branch→shortNode collapse caused by
+// detectCascadingCollapseAtRow detects a FullNode→ShortNode collapse caused by
 // a child deletion propagated upward from fold(). Called when afterMap[row]
 // has exactly 1 remaining child after a nibble was cleared.
 func (hph *HexPatriciaHashed) detectCascadingCollapseAtRow(row int) {
@@ -2413,9 +2415,10 @@ func (hph *HexPatriciaHashed) detectCascadingCollapseAtRow(row int) {
 	}
 
 	compactSibling := NibblesToString(siblingPath)
-	fmt.Printf("[cascade-collapse] FOUND at row=%d depth=%d: survivingNibble=%x, siblingPath=%s (len=%d), hashLen=%d, extLen=%d\n",
-		row, depth, survivingNibble, compactSibling, len(siblingPath), survivingCell.hashLen, survivingCell.hashedExtLen)
-
+	if hph.trace {
+		fmt.Printf("[cascade-collapse] found at row=%d depth=%d: survivingNibble=%x, siblingPath=%s (len=%d), hashLen=%d, hashedExtLen=%d\n",
+			row, depth, survivingNibble, compactSibling, len(siblingPath), survivingCell.hashLen, survivingCell.hashedExtLen)
+	}
 	hph.collapseTracer(siblingPath)
 }
 
@@ -2632,7 +2635,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 				}
 				if hph.trace {
 					addrHash := crypto.Keccak256(plainKey)
-					fmt.Printf("account with plainKey=%x, addrHash=%x FOUND = %v\n", plainKey, addrHash, update)
+					fmt.Printf("account with plainKey=%x, addrHash=%x found=%v\n", plainKey, addrHash, update)
 				}
 			} else {
 				update, err = hph.storageFromCacheOrDB(plainKey)
@@ -2643,7 +2646,6 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 					fmt.Printf("storage found = %v\n", update.Storage[:update.StorageLen])
 				}
 			}
-			_ = update // update is used for diagnostics; cells are populated during unfold
 		}
 
 		// Keep folding until the currentKey is the prefix of the key we modify
@@ -2697,18 +2699,12 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 			}
 		}
 
-		//hph.PrintGrid()
-		//hph.updateCell(plainKey, hashedKey, update)
-
 		// convert grid to trie.Trie
 		tr, err = hph.toWitnessTrie(hashedKey, codeReads) // build witness trie for this key, based on the current state of the grid
 		if err != nil {
 			return err
 		}
-		if len(plainKey) == 0 { // sibling trie
-			hashedKeyStr := NibblesToString(hashedKey)
-			fmt.Printf("sibling key #%d/%d hashedKey=%s tr.Hash=%x\n", ki+1, updatesCount, hashedKeyStr, tr.Hash())
-		}
+
 		tr.Reset()
 		tries = append(tries, tr)
 		ki++
