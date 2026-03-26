@@ -1,27 +1,46 @@
 # CI Guidelines
 
-## Workflow triggers
+## The four trigger buckets
 
-Each workflow should serve a distinct purpose with a distinct trigger pattern. Avoid
-duplicating workflows that fire on the same events — merge them instead.
+Every job belongs to exactly one of four buckets based on what it is trying to guarantee.
+Mixing concerns across buckets undermines each bucket's contract.
 
-**Trigger ladder** (fastest feedback to most comprehensive):
-
-| Stage | Trigger | Suitable for |
+| Bucket | Trigger | Contract |
 |---|---|---|
-| All commits | `push` to `main`/`release/**`, `pull_request` on `ready_for_review`/`synchronize` | Lint, build, fast unit tests |
-| Merge queue | `merge_group` | Full test suite, race tests, integration tests |
-| Scheduled | `schedule` | Flaky-test discovery, regression detection, QA |
-
-Run tests that developers can reproduce locally as late as possible — ideally only in
-the merge queue. This avoids burning runner time on every push and concentrates
-deterministic blocking checks at the point where they matter most.
+| Pull request | `pull_request` | Fast signal on things devs cannot easily check locally |
+| Merge queue | `merge_group` | Deterministic gate — a failure means the code is wrong |
+| Push to main/release | `push` to `main`/`release/**` | Cache warming only — no test validation |
+| Scheduled | `schedule` | Long-running or repeated runs not feasible on every commit |
 
 All workflows should include `workflow_dispatch` so they can be triggered manually
 without code changes. For workflows with inputs (e.g. QA), use dispatch inputs instead
 of separate workflow files.
 
-### Draft PRs
+---
+
+### Pull requests
+
+PR checks exist to give developers early signal on things they cannot easily reproduce
+locally — primarily cross-platform and cross-OS coverage. They are not the right place
+for the full correctness gate.
+
+**Belongs here:**
+- Builds and smoke tests on operating systems other than the developer's own (Windows,
+  Linux, macOS where not the primary dev platform)
+- Lint (fast, not reproducible identically outside CI toolchain versions)
+- Checks that fail quickly and cheaply, reducing wasted time submitting broken code to
+  the merge queue
+
+**Flaky tests belong here too.** A flaky test that runs on a PR is visible to the author
+and can be prioritized. The same test running on `main` or a release branch produces a
+failure that cannot be corrected and signals low-quality code to outside observers. Prefer
+surfacing flakiness on the PR where it can be acted on.
+
+**Does not belong here:**
+- Tests that developers can run locally with `make test-short` or equivalent — those
+  belong in the merge queue so runner time is not burned on every push.
+
+#### Draft PRs
 
 If a job uses `if: ${{ !github.event.pull_request.draft }}` to skip on draft PRs, the
 workflow **must** include `ready_for_review` in its `pull_request` event types:
@@ -40,7 +59,128 @@ Without `ready_for_review`, converting a draft PR to ready-for-review fires an e
 the workflow doesn't subscribe to, so the job never runs — the PR appears to have
 skipped CI until the next push.
 
-### CI gate and workflow_call
+#### Required checks and path filters
+
+Required checks must always report a status or they block the PR indefinitely.
+Do **not** use workflow-level `paths`/`paths-ignore` on workflows with required checks.
+Instead, use a step-level filter (e.g. `dorny/paths-filter`) so the job always runs and
+can report "skipped" rather than going missing.
+
+---
+
+### Merge queue
+
+Merge queue checks are the correctness gate. Their contract is strict:
+
+- **A failure means the code is wrong.** If something fails in the merge queue, merging
+  it would break `main`. There are no false positives.
+- **A pass means the code is correct.** Code that passes the merge queue must not then
+  fail on `main` or a release branch. There are no false negatives.
+
+This means only deterministic, reproducible checks belong here. A flaky test does not
+belong in the merge queue — by definition it cannot provide a reliable signal.
+
+**Belongs here:**
+- The full unit and integration test suite (things developers can reproduce with
+  `make test-all` or equivalent)
+- Race detector tests (`-race`), which are expensive but deterministic
+- Any check where a failure must block the merge
+
+**Does not belong here:**
+- Flaky tests — they produce false positives and erode trust in the gate
+- Checks that are not locally reproducible (those belong in the PR bucket)
+
+GitHub's merge queue supports running jobs multiple times before deciding on a result.
+This can mask flakiness in the short term but is not a long-term solution — it increases
+queue latency and still occasionally lets flaky failures block the queue. The right fix
+is to move flaky tests to the PR bucket and fix them there.
+
+**Merge queue batching** — multiple PRs can be grouped into a single merge-group run,
+reducing CI cost proportional to batch size. This works well when the merge queue gate
+is fast and reliable; a flaky gate undermines batching by causing entire batches to be
+re-queued.
+
+---
+
+### Push to main/release (cache warming)
+
+After a PR is merged through the merge queue, a `push` event fires on `main` (or the
+release branch). Correctness has already been established by the merge queue. The sole
+purpose of running workflows on this trigger is to **warm caches** for future PR and
+merge queue runs.
+
+**Never run tests on this trigger.** If a test fails on `main`, there is no PR to fix it
+in, no author to notify, and no way to correct the commit. Failures here are noise that
+misleads outside observers into thinking `main` is broken, when in fact the code passed
+all required checks before landing.
+
+For jobs that run tests on `pull_request` or `merge_group` but need a push-to-main run
+for cache warming, use conditional steps:
+
+```yaml
+- name: Run tests
+  if: github.event_name != 'push'
+  run: make test-all
+
+- name: Build test binaries (cache warming only)
+  if: github.event_name == 'push'
+  run: go test -run=^$ ./...
+```
+
+`go test -run=^$` compiles every test binary — producing identical `GOCACHE` entries
+to a full run — but executes nothing. The job always succeeds.
+
+#### GitHub cache isolation
+
+GitHub Actions caches are scoped by branch. A workflow run can restore caches from:
+
+1. **Its own branch** — caches saved by earlier runs on the same branch.
+2. **The base branch** (`main`) — caches saved by any workflow run on `main`.
+
+It cannot access caches from other PRs or other branches. Without a `push` trigger on
+`main`, every new PR starts cold. The push-to-main run exists to populate the
+base-branch cache that all future PRs and merge-queue runs can restore from.
+
+**Merge queue cache note** — `merge_group` runs use a temporary synthetic branch and
+cannot save durable caches back to `main`. Only the `push`-triggered run after the
+merge creates the base-branch cache entry.
+
+---
+
+### Scheduled
+
+Scheduled jobs cover work that is too long-running or too expensive to attach to every
+commit, or that is specifically designed to discover problems through repetition.
+
+**Belongs here:**
+- Very long-running test suites (multi-hour jobs) where per-commit triggering is not
+  feasible
+- Repeated runs of the test suite to surface flaky tests by statistical observation
+- QA and regression detection workflows that aggregate results over time
+
+**Known problem: scheduled failures are not a development priority.** Currently, QA
+collects and reports on scheduled failures, but there is no mechanism that links a
+scheduled failure back to the commit that introduced it. As a result, failures tend to
+accumulate rather than get fixed.
+
+Two directions under consideration:
+
+1. **Fix the flaky or slow tests** so they can be promoted into the PR or merge queue
+   buckets, where failures have a clear owner and block progress until resolved.
+
+2. **Retroactively annotate commits.** Using an alternate GitHub token, a scheduled
+   workflow could post a commit status or check run against the specific commit that
+   first introduced a failure. This surfaces the regression at the point where it landed
+   rather than at the point where the scheduled job happened to run, making it harder
+   to ignore.
+
+Neither approach excludes the other. Tests that can be made fast and deterministic
+should be promoted; tests that are inherently long-running can remain scheduled but
+with better failure attribution.
+
+---
+
+## CI gate and workflow_call
 
 All PR and merge-queue checks run through `.github/workflows/ci-gate.yml`. It calls
 each sub-workflow via `uses:` (reusable workflow call) rather than inlining the job
@@ -64,28 +204,28 @@ workflows called via `workflow_call` must **not** define their own job-level
 the caller's values (or empty) in a `workflow_call` context, which causes collisions
 that cancel sibling jobs within the same run.
 
-### Required checks and path filters
-
-Required checks must always report a status or they block the PR indefinitely.
-Do **not** use workflow-level `paths`/`paths-ignore` on workflows with required checks.
-Instead, use a step-level filter (e.g. `dorny/paths-filter`) so the job always runs and
-can report "skipped" rather than going missing.
+---
 
 ## Runtime goals
 
-| Run type | Target |
-|---|---|
-| Cached (source unchanged) | < 5 minutes |
-| Cold / no cache | ≤ 30 minutes |
+| Bucket | Cold target | Cached target |
+|---|---|---|
+| Pull request | ≤ 15 minutes | < 5 minutes |
+| Merge queue | ≤ 30 minutes | < 10 minutes |
+| Push to main/release | ≤ 15 minutes | < 5 minutes |
+| Scheduled | no hard limit | — |
 
-If a job regularly exceeds 30 minutes cold, fix the underlying cause — don't just raise
+If a job regularly exceeds its cold target, fix the underlying cause — don't just raise
 the timeout:
 
 - Split large packages into smaller ones so Go's test cache works at finer granularity.
 - Break a single large job into parallel jobs.
-- Move slow tests to the merge queue so they don't block developer iteration.
+- Move tests that can be reproduced locally to the merge queue so they only run once
+  per merge rather than on every PR push.
 
 PRs that make tests significantly slower should include workflow changes to compensate.
+
+---
 
 ## Go test caching
 
@@ -118,80 +258,7 @@ unnecessary re-runs.
 This is also why the `execution/tests/` package is broken into focused sub-packages
 rather than one monolithic package.
 
-### Cache warming and GitHub's cache isolation rules
-
-GitHub Actions caches are scoped by branch. A workflow run can restore caches from:
-
-1. **Its own branch** — caches saved by earlier runs on the same branch.
-2. **The base branch** (`main`) — caches saved by any workflow run on `main`.
-
-It cannot access caches from other PRs or other branches.
-
-**The cold-start problem** — If a workflow only triggers on `pull_request`, it never
-runs on `main` and therefore never populates the base-branch cache. Every new PR
-opens to a cold cache, even if the codebase hasn't changed at all. Subsequent pushes
-to the *same* PR do find each other's caches, but only until the GitHub-hosted cache
-is evicted (repos share a 10 GB limit; busy repos evict older entries within hours).
-
-**The fix** — add `push: {branches: [main, release/**]}` as a trigger. After each
-merge, a run warms the build and module caches on `main`. All future PR first-pushes
-restore from that warm base-branch cache instead of starting cold.
-
-**Cache warming without test validation** — For workflows where correctness is already
-enforced by the merge queue, the push-to-main run exists purely for cache warming. To
-prevent benchmark or test flakiness from showing as failures on main commits, use
-compile-only steps on non-PR events:
-
-```yaml
-- name: Run benchmarks
-  if: github.event_name == 'pull_request'
-  run: make test-bench
-
-- name: Build test binaries (cache warming)
-  if: github.event_name != 'pull_request'
-  run: go test -run=^$ ./...
-```
-
-`go test -run=^$` compiles every test binary (identical GOCACHE entries to a full
-run) but executes nothing. The job always succeeds, and the commit on `main` shows
-green. If a benchmark were broken post-merge it would have been caught by the PR or
-merge queue run before landing.
-
-**Merge queues** — `merge_group` runs use a temporary synthetic branch
-(`refs/heads/gh-readonly-queue/main/pr-N-SHA`). They can read from the base-branch
-(`main`) cache, so they benefit from the warm cache created by the `push` trigger.
-However, caches *saved* during a merge-group run are stored under that temporary
-branch and become inaccessible once the merge group completes — they do not
-contribute to the `main` cache. Only the `push`-triggered run after the merge creates
-a durable base-branch cache.
-
-**Implication for workflow design**: any workflow that should benefit from caching
-across PRs and merge queue runs needs a `push` trigger on `main` (or a nightly
-schedule on `main`). Without it, each PR and each merge-queue batch is always a cold
-start.
-
-## Required checks
-
-Required checks exist to block *regressions*, not to enforce perfection.
-
-- **Don't add a required check for a test that is already flaky.** Quarantine flaky
-  tests first (skip them, move them to a scheduled run, or fix them), then make the
-  check required.
-- **Checks must not be time-sensitive.** A test that passed yesterday on the same code
-  should pass today. Non-deterministic failures (timing, network, external state) must
-  not be required.
-- **Required checks should run on `pull_request` or `merge_group`, never only on
-  `push` to `main`.** Checking after merge is too late — it creates a broken `main`
-  that blocks everyone else.
-
-### Flaky tests
-
-Flaky tests should be discovered on scheduled runs that repeat the test suite, not
-tolerated silently in required checks. When a flaky test is identified:
-
-1. Skip or quarantine it so it no longer blocks PRs.
-2. File a bug and fix it separately.
-3. Re-enable it as a required check once it is stable.
+---
 
 ## Memory- and disk-intensive tests
 
@@ -213,24 +280,15 @@ These flags can be passed via `GO_FLAGS` in the Makefile:
 make test-all GO_FLAGS="-p 2 -parallel 4"
 ```
 
-Consider setting tighter defaults in the workflow matrix for jobs that are known to
-be memory- or disk-heavy, rather than working around pressure by adjusting unrelated
-constraints like timeouts or GC tuning.
+---
 
 ## Checking benchmarks
 
 The purpose of `make test-bench` in CI is to verify that benchmarks compile and
 execute at least one iteration — not to produce meaningful performance numbers.
 
-### Why benchmarks are slow by default
-
-Many benchmarks are sized for profiling or comparison work: a single iteration can
-take minutes. Go's benchmark runner will execute exactly 1 iteration in that case
-(`-benchtime=1x`), so the `ns/op` figure is meaningless and the run just wastes
-time.
-
-The fix is to keep benchmark iteration work small enough to be loopable, and use
-`testing.Short()` to trim parameter sweeps when all we need is a smoke test:
+Benchmarks sized for profiling work can take minutes per iteration. Use
+`testing.Short()` to trim parameter sweeps in CI:
 
 ```go
 if testing.Short() {
@@ -241,32 +299,22 @@ if testing.Short() {
 
 `make test-bench` passes `-short` so these guards are active in CI.
 
-### Why you cannot parallelize across packages
+`go test` forces benchmark packages to run **serially** regardless of the `-p` flag —
+the serialization is enforced at the action-graph level when `-bench` is set. Reducing
+per-iteration work (via `testing.Short()`) is the only effective way to reduce wall time.
 
-`go test` forces benchmark packages to run **serially** regardless of the `-p` flag.
-The serialization is enforced at the action-graph level in `cmd/go` when `-bench` is
-set — each package run is added as a dependency of the previous one. Passing
-`-p N` only affects compilation parallelism, not execution order.
-
-The only way to reduce `make test-bench` wall time is to reduce the work done per
-benchmark iteration, which is why right-sizing benchmarks (via `testing.Short()`) is
-the correct approach rather than parallelizing the runner.
+---
 
 ## Local reproducibility
 
-Every CI job should have a local equivalent so developers can pre-check before pushing.
-If you're changing code in `execution/`, you should be able to run the corresponding
-test group locally (`make test-group TEST_GROUP=execution-tests`) and get the same
-result as CI.
+Every CI job should have a local equivalent. If you're changing code in `execution/`,
+you should be able to run the corresponding test group locally
+(`make test-group TEST_GROUP=execution-tests`) and get the same result as CI.
 
-CI workflows should use the same Makefile targets that developers use locally (e.g.
-`make test-group`, `make lint`) rather than inline shell commands. This keeps CI and
-local test runs as similar as possible, reducing "works locally but fails in CI"
-surprises.
+CI workflows should use the same Makefile targets that developers use locally rather
+than inline shell commands. This keeps CI and local runs as similar as possible.
 
-Tests that can be reproduced locally should preferably only block in the merge queue,
-not on every PR push — this avoids burning runner time on checks developers can run
-themselves.
+---
 
 ## Debugging
 
@@ -283,49 +331,3 @@ Raw logs include per-line timestamps useful for profiling slow steps:
 ```bash
 gh run view <run-id> --log
 ```
-
-## Proposals
-
-Rough notes and proposals for future CI improvements:
-
-- **Use merge queues:**
-  - Fixes the issue of rerunning tests after a PR is merged
-  - Runs tests as though they were on the merge target, and become the new commit
-  - Batch multiple PRs together, reducing throughput from ~1 commit/1-2 hours to N commits/30 mins
-  - Reduces need to block PRs completely in a separate step
-  - Correct place to put and block on any tests that devs can reproduce locally
-  - Only, and can effectively, run most comprehensive tests here (like race)
-
-- **Change workflow use:**
-  - Group jobs by purpose: all commits, merge queue, QA
-  - Ensure dispatchability, but use dispatch variables (QA has this done well in a few places)
-
-- **Better caching:**
-  - Smarter go mod caching, reuse across jobs
-  - Constrain build caches to use case (test, coverage, specific tests)
-  - Set mtimes to allow test caching
-  - Caching for fixtures is per-package, so breaking up big packages for different fixtures fixes this
-
-- **Timeouts:**
-  - Aim for individual job limits of 30 minutes (cold); real target is 10 mins average
-  - Goal is not to catch overuse of runners, but to ensure tests evolve to be parallelizable (PRs that make them bigger should improve the workflow to accommodate if required)
-  - On merge queue, set timeouts higher (60 mins)
-
-- **Regressions:**
-  - No workflows should invalidate past success — e.g. lint should not run on main, it should block on PR (probably not in the merge queue either)
-  - Regressions should be detected asynchronously on schedules (QA does this)
-
-- **Local reproducibility:**
-  - All jobs should have a way to locally reproduce for testing and dev pre-checks
-  - Tests that can be reproduced locally should preferably only occur in merge group checks
-  - All workflows should have local invocation equivalents
-
-- **Flaky tests:**
-  - Aggressively trim flaky tests; unrelated failures in PRs should be reported and skipped rather than waited on
-  - Scheduled race and non-race workflows for discovering flaky tests by repeating tests
-  - Ideal place for bots to discover and fix
-
-- **Next steps:**
-  - 3-5x runner counts
-  - Enable merge queue, perhaps on a test branch (`merge-queue-experiment/main`)
-  - Look for flaky tests in scheduled runs that repeat tests constantly
