@@ -154,7 +154,6 @@ func ExecV3(ctx context.Context,
 		if err != nil {
 			return err
 		}
-		fmt.Printf("EXEC_DIAG: AppendTxNums: lastTxNumBlock=%d blockNum=%d maxBlockNum=%d\n", lastTxNumBlock, blockNum, maxBlockNum)
 		if lastTxNumBlock <= blockNum {
 			// Snapshot-aware: use block reader (covers both MDBX hot DB and snapshot files).
 			nextBaseTxNum, err := txNumsReader.Max(ctx, applyTx, blockNum)
@@ -168,7 +167,6 @@ func ExecV3(ctx context.Context,
 					return fmt.Errorf("CanonicalHash(%d): %w", bn, err)
 				}
 				if !ok || hash == (common.Hash{}) {
-					fmt.Printf("EXEC_DIAG: AppendTxNums: no canonical hash at block %d, stopping\n", bn)
 					break
 				}
 				_, txCount, err := cfg.blockReader.Body(ctx, applyTx, hash, bn)
@@ -176,14 +174,12 @@ func ExecV3(ctx context.Context,
 					return fmt.Errorf("Body(%d): %w", bn, err)
 				}
 				if txCount == 0 {
-					fmt.Printf("EXEC_DIAG: AppendTxNums: txCount=0 at block %d, stopping\n", bn)
 					break
 				}
 				maxTxNumForBlock := nextBaseTxNum + uint64(txCount) - 1
 				if appendErr := txNumsReader.Append(applyTx, bn, maxTxNumForBlock); appendErr != nil {
 					return fmt.Errorf("TxNums.Append(%d, %d): %w", bn, maxTxNumForBlock, appendErr)
 				}
-				fmt.Printf("EXEC_DIAG: AppendTxNums: appended block=%d txCount=%d maxTxNum=%d\n", bn, txCount, maxTxNumForBlock)
 				nextBaseTxNum += uint64(txCount)
 			}
 		}
