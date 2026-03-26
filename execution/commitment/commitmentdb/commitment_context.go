@@ -205,6 +205,10 @@ func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNu
 }
 
 func (sdc *SharedDomainsCommitmentContext) Close() {
+	for _, c := range sdc.pendingCollectors {
+		c.Close()
+	}
+	sdc.pendingCollectors = nil
 	sdc.updates.Close()
 	sdc.patriciaTrie.Release()
 }
@@ -397,11 +401,16 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 
 	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, onProgress, warmupConfig)
 
+	if err != nil {
+		if drainCollectors != nil {
+			for _, c := range drainCollectors() {
+				c.Close()
+			}
+		}
+		return nil, err
+	}
 	if drainCollectors != nil {
 		sdc.pendingCollectors = drainCollectors()
-	}
-	if err != nil {
-		return nil, err
 	}
 
 	// Handle deferred branch updates left by Process() on the branch encoder.
@@ -433,7 +442,7 @@ func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Contex
 	return func() (commitment.PatriciaContext, func()) {
 		roTx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
 		if err != nil {
-			return &errorTrieContext{err: err}, nil
+			return &errorTrieContext{err: err}, func() {}
 		}
 		warmupCtx := &TrieContext{
 			getter:   sdc.sharedDomains.AsGetter(roTx),
@@ -464,7 +473,7 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(ctx cont
 	factory := func() (commitment.PatriciaContext, func()) {
 		roTx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
 		if err != nil {
-			return &errorTrieContext{err: err}, nil
+			return &errorTrieContext{err: err}, func() {}
 		}
 
 		collector := etl.NewCollector("[concurrent_branch]", sdc.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize/16), log.Root()) //nolint:gocritic

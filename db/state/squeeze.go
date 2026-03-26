@@ -1094,13 +1094,17 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 	// Merge per-goroutine collectors into main writer (sequential, no race)
 	collectors := sd.GetCommitmentCtx().DrainPendingCollectors()
 	if len(collectors) > 0 {
+		defer func() {
+			for _, c := range collectors {
+				c.Close()
+			}
+		}()
 		batch := sd.GetMemBatch().(*TemporalMemBatch)
 		writer := batch.domainWriters[kv.CommitmentDomain]
 		for _, c := range collectors {
 			err = c.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 				return writer.addValue(k, v, cfg.StepFrom)
 			}, etl.TransformArgs{})
-			c.Close()
 			if err != nil {
 				return nil, err
 			}
