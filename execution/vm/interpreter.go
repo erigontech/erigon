@@ -331,7 +331,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		tracer                 = evm.config.Tracer
 		debug                  = tracer != nil && (tracer.OnOpcode != nil || tracer.OnGasChange != nil || tracer.OnFault != nil)
 		trace                  = dbg.TraceInstructions && evm.intraBlockState.Trace()
-		traceTx                = dbg.TraceTx(evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex())
+		traceTx                = dbg.TraceBlock(evm.intraBlockState.BlockNumber())
 		blockNum               uint64
 		txIndex, txIncarnation int
 	)
@@ -444,7 +444,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			if dbg.TraceDynamicGas && dynamicCost.Regular > 0 {
 				fmt.Printf("%d (%d.%d) Dynamic Gas: %d (%s)\n", blockNum, txIndex, txIncarnation, traceGas(op, callGas, cost), op)
 			}
-			if traceTx {
+			if traceTx && (op == CALL || op == DELEGATECALL || op == STATICCALL || op == CALLCODE) {
 				fmt.Printf("%d (%d.%d) gas %s: before=%d static=%d dynamic=%d callGasTemp=%d after=%d\n",
 					blockNum, txIndex, txIncarnation, op, gasCopy,
 					operation.constantGas, dynamicCost.Regular, evm.CallGasTemp(),
@@ -471,9 +471,6 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 					return nil, callContext.Gas(), ErrOutOfGas
 				}
 			}
-		} else if traceTx && operation.constantGas > 0 {
-			fmt.Printf("%d (%d.%d) gas %s: before=%d static=%d after=%d\n",
-				blockNum, txIndex, txIncarnation, op, gasCopy, operation.constantGas, callContext.gas)
 		}
 
 		// Do gas tracing before memory expansion
