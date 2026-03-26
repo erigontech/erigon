@@ -729,3 +729,138 @@ func TestCompareRoots_MultiBatch_AlternatingConcentration(t *testing.T) {
 	t.Logf("AlternatingConcentration batch 4 root (%d spread across all nibbles): %x", total, root4)
 }
 
+// --- Edge case tests ---
+
+func TestCompareRoots_EmptyUpdates(t *testing.T) {
+	t.Parallel()
+	seqMs, parMs, seqTrie, parTrie := setupTriePair(t)
+
+	// Zero keys — both tries should produce the same (empty) root.
+	plainKeys, updates := NewUpdateBuilder().Build()
+	require.Empty(t, plainKeys, "sanity: no keys expected")
+
+	root := compareRoots(t, seqMs, parMs, seqTrie, parTrie, plainKeys, updates)
+	t.Logf("EmptyUpdates root: %x", root)
+}
+
+func TestCompareRoots_SingleAccountManyStorageSlots(t *testing.T) {
+	t.Parallel()
+	seqMs, parMs, seqTrie, parTrie := setupTriePair(t)
+
+	addr := findAddressForNibble(0x7, 0)
+	ah := addrHex(addr)
+
+	ub := NewUpdateBuilder()
+	ub.Balance(ah, 42)
+	// 120 storage slots on a single account
+	for slot := 0; slot < 120; slot++ {
+		loc := makeStorageLoc(slot)
+		val := makeStorageLoc(slot + 10000)
+		ub.Storage(ah, loc, val)
+	}
+	plainKeys, updates := ub.Build()
+
+	root := compareRoots(t, seqMs, parMs, seqTrie, parTrie, plainKeys, updates)
+	require.NotEmpty(t, root)
+	t.Logf("SingleAccountManyStorageSlots root (1 account, 120 storage slots): %x", root)
+}
+
+// findAddressesWithSharedPrefix brute-force searches for `count` addresses
+// whose keccak256 hashes share the first `sharedNibbles` nibbles. Returns
+// a slice of plain 20-byte addresses.
+func findAddressesWithSharedPrefix(sharedNibbles int, count int) [][]byte {
+	// We'll find one reference address, then brute force more that share
+	// the same keccak prefix.
+	sharedBytes := sharedNibbles / 2
+	oddNibble := sharedNibbles%2 == 1
+
+	var results [][]byte
+	var refHash []byte
+
+	var addr [20]byte
+	counter := uint64(0)
+	for len(results) < count {
+		binary.BigEndian.PutUint64(addr[:8], counter)
+		// Use second 8 bytes too for more entropy
+		binary.BigEndian.PutUint64(addr[10:18], counter*7+3)
+		h := crypto.Keccak256(addr[:])
+
+		if refHash == nil {
+			// First address defines the reference prefix
+			refHash = h
+			result := make([]byte, 20)
+			copy(result, addr[:])
+			results = append(results, result)
+		} else {
+			match := true
+			for i := 0; i < sharedBytes && match; i++ {
+				if h[i] != refHash[i] {
+					match = false
+				}
+			}
+			if match && oddNibble {
+				// Check the upper nibble of the next byte
+				if (h[sharedBytes] >> 4) != (refHash[sharedBytes] >> 4) {
+					match = false
+				}
+			}
+			if match {
+				result := make([]byte, 20)
+				copy(result, addr[:])
+				results = append(results, result)
+			}
+		}
+		counter++
+	}
+	return results
+}
+
+func TestCompareRoots_ExtensionNodes(t *testing.T) {
+	t.Parallel()
+	seqMs, parMs, seqTrie, parTrie := setupTriePair(t)
+
+	// Find addresses that share the first 4 nibbles (2 bytes) of their
+	// keccak hash. These will land in the same nibble and force extension
+	// node creation deep in the trie.
+	addrs := findAddressesWithSharedPrefix(4, 10)
+
+	ub := NewUpdateBuilder()
+	for i, addr := range addrs {
+		ah := addrHex(addr)
+		ub.Balance(ah, uint64(1000+i))
+	}
+	plainKeys, updates := ub.Build()
+
+	root := compareRoots(t, seqMs, parMs, seqTrie, parTrie, plainKeys, updates)
+	require.NotEmpty(t, root)
+
+	// Verify the addresses actually share a prefix by checking keccak hashes
+	firstHash := crypto.Keccak256(addrs[0])
+	for i := 1; i < len(addrs); i++ {
+		h := crypto.Keccak256(addrs[i])
+		require.Equal(t, firstHash[:2], h[:2],
+			"address %d keccak prefix mismatch", i)
+	}
+	t.Logf("ExtensionNodes root (%d addresses sharing 4-nibble keccak prefix %x): %x",
+		len(addrs), firstHash[:2], root)
+}
+
+func TestCompareRoots_LargeScale(t *testing.T) {
+	t.Parallel()
+	seqMs, parMs, seqTrie, parTrie := setupTriePair(t)
+
+	const numAccounts = 1200
+	ub := NewUpdateBuilder()
+	for i := 0; i < numAccounts; i++ {
+		nibble := i % 16
+		seed := i / 16
+		addr := findAddressForNibble(nibble, seed)
+		ub.Balance(addrHex(addr), uint64(i+1))
+	}
+	plainKeys, updates := ub.Build()
+
+	root := compareRoots(t, seqMs, parMs, seqTrie, parTrie, plainKeys, updates)
+	require.NotEmpty(t, root)
+	t.Logf("LargeScale root (%d accounts spread across 16 nibbles): %x", numAccounts, root)
+}
+

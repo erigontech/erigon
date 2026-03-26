@@ -111,11 +111,11 @@ These tests DO NOT reset tries between batches — state carries forward. This t
 **Files:**
 - Modify: `execution/commitment/hex_concurrent_patricia_hashed_test.go`
 
-- [ ] `TestCompareRoots_EmptyUpdates` — zero keys, verify both produce same (empty or prior) root
-- [ ] `TestCompareRoots_SingleAccountManyStorageSlots` — one account with 100+ storage slots, compare roots
-- [ ] `TestCompareRoots_ExtensionNodes` — addresses that share a long keccak prefix (same first 4+ nibbles) within the same nibble, forcing extension node creation
-- [ ] `TestCompareRoots_LargeScale` — 1000+ accounts spread across nibbles (stress test for correctness, not perf)
-- [ ] Run `go test -run TestCompareRoots_ ./execution/commitment/...` — all must pass
+- [x] `TestCompareRoots_EmptyUpdates` — zero keys, verify both produce same (empty or prior) root
+- [x] `TestCompareRoots_SingleAccountManyStorageSlots` — one account with 100+ storage slots, compare roots
+- [x] `TestCompareRoots_ExtensionNodes` — addresses that share a long keccak prefix (same first 4+ nibbles) within the same nibble, forcing extension node creation
+- [x] `TestCompareRoots_LargeScale` — 1000+ accounts spread across nibbles (stress test for correctness, not perf)
+- [x] Run `go test -run TestCompareRoots_ ./execution/commitment/...` — all must pass
 
 ### Task 6: Verify acceptance criteria
 - [ ] Verify all key distribution patterns from Layer A are covered
