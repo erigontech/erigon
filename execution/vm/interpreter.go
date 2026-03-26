@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"slices"
 	"sync"
+	"sync/atomic"
 
 	"github.com/holiman/uint256"
 
@@ -64,6 +65,8 @@ type CallContext struct {
 	Stack    Stack
 	Contract Contract
 }
+
+var _diagCallCount atomic.Int64
 
 var contextPool = sync.Pool{
 	New: func() any {
@@ -335,9 +338,10 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		blockNum               uint64
 		txIndex, txIncarnation int
 	)
-	if _bn := evm.intraBlockState.BlockNumber(); _bn >= 2486000 && _bn <= 2486400 {
-		fmt.Printf("TRACE_DIAG: depth=%d blockNum=%d txIndex=%d incarnation=%d traceTx=%v\n",
-			evm.depth, _bn, evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), traceTx)
+	if n := _diagCallCount.Add(1); n <= 50 {
+		_bn := evm.intraBlockState.BlockNumber()
+		fmt.Printf("TRACE_DIAG[%d]: depth=%d blockNum=%d txIndex=%d incarnation=%d traceTx=%v\n",
+			n, evm.depth, _bn, evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), traceTx)
 	}
 
 	// Make sure the readOnly is only set if we aren't in readOnly yet.
