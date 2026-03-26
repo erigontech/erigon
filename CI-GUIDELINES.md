@@ -184,6 +184,24 @@ with better failure attribution.
 
 ---
 
+## Where to place a job
+
+`push` triggers are restricted to protected branches: `main`, `release/**`, and `performance`.
+
+| ci-gate | Trigger | Typical duration | When to use |
+|---|---|---|---|
+| yes | `pull_request` | < 15 min | Default for most PR checks. Lint, cross-platform builds, flaky tests for author visibility. |
+| yes | `merge_group` | 15–30 min | Default correctness gate. Full test suite, race tests. Must be deterministic — no flaky tests. |
+| yes | `push` | < 45 min | Cache warming only. Same gating workflows, compile-only. Warms caches for future PRs and merge queue runs. Never runs tests. |
+| no | `pull_request` | varies | Checks that must survive ci-gate's concurrency cancellation — e.g. long-running jobs you don't want restarted on every push, or deployment previews. |
+| no | `merge_group` | 30–60 min | Rare. Heavyweight checks (e.g. external integration) needing their own lifecycle, not cancelled when ci-gate restarts. |
+| no | `push` | varies | Work on merge that isn't cache warming — deploying docs, publishing artifacts, triggering downstream pipelines. |
+| no | `schedule` | 1–4+ hours | Very long-running suites, flaky test discovery by repetition, QA regression runs. Not feasible on every commit. |
+
+When a workflow appears in both ci-gate rows and standalone rows, the ci-gate path handles `pull_request`/`merge_group` via `workflow_call` and the standalone triggers (`push`/`schedule`) live in the workflow's own file — both share one job definition.
+
+---
+
 ## CI gate and workflow_call
 
 All PR and merge-queue checks run through `.github/workflows/ci-gate.yml`. It calls
