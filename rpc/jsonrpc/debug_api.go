@@ -321,6 +321,9 @@ func (api *DebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startN
 		return nil, fmt.Errorf("start block (%d) must be less than end block (%d)", startNum, endNum)
 	}
 
+	// Checking startNum+1 is sufficient under sequential-pruning semantics: if block N is
+	// available, all blocks > N are too. If pruning semantics ever change this would need
+	// to also check endNum.
 	if err = api.BaseAPI.checkPruneHistory(ctx, tx, startNum+1); err != nil {
 		return nil, err
 	}
@@ -383,7 +386,7 @@ func getModifiedAccounts(tx kv.TemporalTx, startTxNum, endTxNum uint64) ([]commo
 	saw := make(map[common.Address]struct{})
 	var result []common.Address
 
-	addrLen := len(common.Address{})
+	const addrLen = len(common.Address{})
 	addAddr := func(k []byte) {
 		addr := common.BytesToAddress(k[:addrLen])
 		if _, ok := saw[addr]; !ok {
@@ -411,6 +414,8 @@ func getModifiedAccounts(tx kv.TemporalTx, startTxNum, endTxNum uint64) ([]commo
 		if err != nil {
 			return nil, err
 		}
+		// ok==false (key not found at endTxNum) yields postVal==nil, so len(postVal)==0.
+		// That correctly maps to "deleted" — a key absent from the end state was removed.
 		postVal, _, err := tx.GetAsOf(kv.AccountsDomain, k, endTxNum)
 		if err != nil {
 			return nil, err
@@ -520,6 +525,9 @@ func (api *DebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHas
 		return nil, fmt.Errorf("start block (%d) must be less than end block (%d)", startNum, endNum)
 	}
 
+	// Checking startNum+1 is sufficient under sequential-pruning semantics: if block N is
+	// available, all blocks > N are too. If pruning semantics ever change this would need
+	// to also check endNum.
 	if err = api.BaseAPI.checkPruneHistory(ctx, tx, startNum+1); err != nil {
 		return nil, err
 	}
