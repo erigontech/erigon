@@ -82,6 +82,10 @@ func NewRecordingState(inner state.StateReader) *RecordingState {
 }
 
 func (s *RecordingState) SetAccountsToTrace(addrs []common.Address) {
+	if len(addrs) == 0 {
+		return
+	}
+	s.trace = true
 	s.accountsToTrace = make(map[common.Address]struct{}, len(addrs))
 	for _, a := range addrs {
 		s.accountsToTrace[a] = struct{}{}
@@ -510,7 +514,6 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	recordingState.SetAccountsToTrace([]common.Address{
 		// Add addresses to trace here, e.g.:
 		// common.HexToAddress("0x8863786beBE8eB9659DF00b49f8f1eeEc7e2C8c1"),
-		common.HexToAddress("0xb1356799bA5f399bbc1Cf99778a0A6f1aA319c67"),
 	})
 
 	// Create the in-block state with the recording state as reader
@@ -872,7 +875,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, fmt.Errorf("[debug_executionWitness] state root mismatch after stateless execution : got %x, expected %x", newStateRoot, expectedRoot)
 	}
 
-	log.Info("Witness successfully verified 🚀\n", "blockNum", blockNum)
+	log.Info("Witness successfully verified 🚀", "blockNum", blockNum)
 	return result, nil
 }
 
@@ -933,6 +936,7 @@ func (api *DebugAPIImpl) buildExpectedPostState(
 
 	// Verify the post-state root matches the block's state root
 	if !bytes.Equal(postRoot, block.Root().Bytes()) {
+		// only warn, so we can see comparison later
 		fmt.Printf("Warning: post-state trie root %x doesn't match block root %x\n", postRoot, block.Root())
 	}
 
