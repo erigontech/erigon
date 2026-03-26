@@ -7,6 +7,7 @@ import (
 	randOld "math/rand"
 	"math/rand/v2"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -123,4 +124,124 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	require.NoError(tb, err)
 
 	return compPath
+}
+
+// generateControlledKV creates a .kv file with keys that have specific 2-byte prefixes.
+// For each prefix, keysPerPrefix sorted keys are generated: prefix + 6-byte suffix.
+// Returns the path to the .kv file and the list of sorted (key, value) pairs.
+func generateControlledKV(tb testing.TB, tmp string, prefixes [][]byte, keysPerPrefix int, compressFlags seg.FileCompression) (string, [][]byte, [][]byte) {
+	tb.Helper()
+	logger := log.New()
+	rnd := newRnd(42)
+
+	type kv struct {
+		key, val []byte
+	}
+	var pairs []kv
+	for _, pfx := range prefixes {
+		for i := 0; i < keysPerPrefix; i++ {
+			suffix := make([]byte, 6)
+			binary.BigEndian.PutUint32(suffix, uint32(i))
+			suffix[4] = byte(rnd.IntN(256))
+			suffix[5] = byte(rnd.IntN(256))
+
+			key := make([]byte, len(pfx)+len(suffix))
+			copy(key, pfx)
+			copy(key[len(pfx):], suffix)
+
+			val := make([]byte, 8)
+			_, _ = rnd.Read(val)
+			pairs = append(pairs, kv{key: key, val: val})
+		}
+	}
+	sort.Slice(pairs, func(i, j int) bool {
+		return string(pairs[i].key) < string(pairs[j].key)
+	})
+
+	// Deduplicate keys
+	deduped := pairs[:0]
+	for i, p := range pairs {
+		if i > 0 && string(p.key) == string(pairs[i-1].key) {
+			continue
+		}
+		deduped = append(deduped, p)
+	}
+	pairs = deduped
+
+	dataPath := filepath.Join(tmp, fmt.Sprintf("controlled_%d.kv", len(pairs)))
+	comp, err := seg.NewCompressor(context.Background(), "cmp", dataPath, tmp, seg.DefaultCfg, log.LvlDebug, logger)
+	require.NoError(tb, err)
+
+	writer := seg.NewWriter(comp, compressFlags)
+	for _, p := range pairs {
+		_, err = writer.Write(p.key)
+		require.NoError(tb, err)
+		_, err = writer.Write(p.val)
+		require.NoError(tb, err)
+	}
+	err = comp.Compress()
+	require.NoError(tb, err)
+	comp.Close()
+
+	decomp, err := seg.NewDecompressor(dataPath)
+	require.NoError(tb, err)
+	defer decomp.Close()
+
+	// Build .bt index alongside
+	btPath := filepath.Join(tmp, fmt.Sprintf("controlled_%d.bt", len(pairs)))
+	ps := background.NewProgressSet()
+	r := seg.NewReader(decomp.MakeGetter(), compressFlags)
+	err = BuildBtreeIndexWithDecompressor(btPath, r, ps, tb.TempDir(), 777, logger, true, statecfg.AccessorBTree|statecfg.AccessorExistence)
+	require.NoError(tb, err)
+
+	keys := make([][]byte, len(pairs))
+	vals := make([][]byte, len(pairs))
+	for i, p := range pairs {
+		keys[i] = common.Copy(p.key)
+		vals[i] = common.Copy(p.val)
+	}
+	return decomp.FilePath(), keys, vals
+}
+
+// generateMinimalKV creates a .kv file with exactly the given key-value pairs (already sorted).
+// Returns the path to the .kv file.
+func generateMinimalKV(tb testing.TB, tmp string, keys, values [][]byte, compressFlags seg.FileCompression) string {
+	tb.Helper()
+	logger := log.New()
+
+	dataPath := filepath.Join(tmp, fmt.Sprintf("minimal_%d.kv", len(keys)))
+	comp, err := seg.NewCompressor(context.Background(), "cmp", dataPath, tmp, seg.DefaultCfg, log.LvlDebug, logger)
+	require.NoError(tb, err)
+
+	writer := seg.NewWriter(comp, compressFlags)
+	for i := range keys {
+		_, err = writer.Write(keys[i])
+		require.NoError(tb, err)
+		_, err = writer.Write(values[i])
+		require.NoError(tb, err)
+	}
+	err = comp.Compress()
+	require.NoError(tb, err)
+	comp.Close()
+
+	decomp, err := seg.NewDecompressor(dataPath)
+	require.NoError(tb, err)
+	defer decomp.Close()
+
+	return decomp.FilePath()
+}
+
+// gapKey returns a key that is just past k (last byte incremented).
+// Handles 0xFF overflow by incrementing higher bytes.
+func gapKey(k []byte) []byte {
+	g := common.Copy(k)
+	for i := len(g) - 1; i >= 0; i-- {
+		if g[i] < 0xFF {
+			g[i]++
+			return g
+		}
+		g[i] = 0x00
+	}
+	// All bytes were 0xFF; append 0x00 to make it longer (still > k)
+	return append(g, 0x00)
 }

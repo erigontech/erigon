@@ -166,6 +166,7 @@ func (p *PrefixIndex) addNode(n Node) {
 	prefix := uint16(n.key[0])<<8 | uint16(n.key[1])
 	bucket := &p.buckets[prefix]
 	if len(bucket.nodes) < maxNodesPerBucket {
+		n.key = common.Copy(n.key)
 		bucket.nodes = append(bucket.nodes, n)
 	}
 }
@@ -505,6 +506,9 @@ func (p *PrefixIndex) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset 
 
 		cmp, g.Buf, err = p.keyCmpFunc(key, m, g, g.Buf[:0])
 		if err != nil {
+			if errors.Is(err, ErrBtIndexLookupBounds) {
+				return nil, false, 0, nil
+			}
 			return nil, false, 0, err
 		}
 		if cmp == 0 {
@@ -521,9 +525,18 @@ func (p *PrefixIndex) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset 
 		}
 	}
 
+	if l >= count {
+		return nil, false, 0, nil
+	}
 	cmp, g.Buf, err = p.keyCmpFunc(key, l, g, g.Buf[:0])
-	if err != nil || cmp != 0 {
+	if err != nil {
+		if errors.Is(err, ErrBtIndexLookupBounds) {
+			return nil, false, 0, nil
+		}
 		return nil, false, 0, err
+	}
+	if cmp != 0 {
+		return nil, false, 0, nil
 	}
 	if !g.HasNext() {
 		return nil, false, 0, fmt.Errorf("pair %d/%d key not found in %s", l, count, g.FileName())
