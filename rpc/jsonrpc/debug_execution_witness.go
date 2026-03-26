@@ -770,7 +770,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	touchAllKeys()
 
 	sdCtx.SetCollapseTracer(func(hashedKeyPath []byte) {
-		fmt.Printf("[debug_executionWitness] node collapse detected at path %s (len=%d)\n", commitment.NibblesToString(hashedKeyPath), len(hashedKeyPath))
+		log.Debug("[debug_executionWitness] node collapse detected", "path", commitment.NibblesToString(hashedKeyPath), "len", len(hashedKeyPath))
 		collapseSiblingPaths = append(collapseSiblingPaths, common.Copy(hashedKeyPath))
 	})
 
@@ -792,14 +792,14 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	touchAllKeys()
 
 	if len(collapseSiblingPaths) > 0 {
-		fmt.Printf("[debug_executionWitness] detected %d sibling paths\n", len(collapseSiblingPaths))
+		log.Debug("[debug_executionWitness] detected sibling paths", "count", len(collapseSiblingPaths))
 
 		for _, siblingPath := range collapseSiblingPaths {
 			compactSiblingPath := commitment.NibblesToString(siblingPath)
 			if err != nil {
 				return nil, err
 			}
-			fmt.Printf("[debug_executionWitness] touching  sibling hashed key: %s (len=%d)\n", compactSiblingPath, len(siblingPath))
+			log.Debug("[debug_executionWitness] touching sibling hashed key", "path", compactSiblingPath, "len", len(siblingPath))
 			sdCtx.TouchHashedKey(siblingPath)
 		}
 	}
@@ -808,9 +808,6 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate witness: %w", err)
 	}
-
-	// printPreStateCheck(witnessTrie, readAddresses, writeAddresses, readStorageKeys, writeStorageKeys)
-
 	// pre-state root verification
 	if !bytes.Equal(witnessRoot, expectedParentRoot[:]) {
 		return nil, fmt.Errorf("collapse witness root mismatch: calculated=%x, expected=%x", common.BytesToHash(witnessRoot), expectedParentRoot)
@@ -880,7 +877,6 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 }
 
 // buildExpectedPostState queries the actual state DB to build expected post-state for verification.
-// It uses the commitment context to get correct storage roots (not stored in DB to save space).
 func (api *DebugAPIImpl) buildExpectedPostState(
 	ctx context.Context,
 	tx kv.TemporalTx,
