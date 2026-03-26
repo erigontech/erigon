@@ -28,22 +28,40 @@ import (
 	"github.com/erigontech/erigon/common/ssz"
 )
 
-// BlockRoot computes the block root for the state.
-// If LatestBlockHeader.Root is already set (e.g. filled by transitionSlot), use it directly.
-// Otherwise (Root == 0x0, i.e. the header was just written by processBlockHeader),
-// compute the state root via HashSSZ().
-// This distinction matters in GLOAS (EIP-7732): after ProcessExecutionPayloadEnvelope
-// the state has changed but LatestBlockHeader.Root still holds the pre-envelope state root,
-// which is the correct value for computing the block root.
+// BlockRoot computes hash_tree_root(latest_block_header) — the block root for the current state.
+//
+// LatestBlockHeader.Root (the state_root field) follows a deferred-fill pattern from the spec:
+//   - process_block_header sets it to Bytes32() (zero) because the state is still being modified.
+//   - It is backfilled later by either:
+//     (a) process_slot at the start of the next slot, or
+//     (b) process_execution_payload (GLOAS/EIP-7732) before envelope processing in the same slot.
+//
+// In GLOAS the envelope further mutates the state after the block, but the block root must
+// reflect the pre-envelope state. Since (b) locks Root before those mutations, we must use
+// the already-stored value when present rather than recomputing HashSSZ() on a post-envelope state.
 func (b *BeaconState) BlockRoot() ([32]byte, error) {
-	root := b.latestBlockHeader.Root
-	if root == [32]byte{} {
+	var root [32]byte
+	if b.version >= clparams.GloasVersion {
+		// GLOAS: use the stored state_root if already backfilled by process_slot or
+		// ProcessExecutionPayloadEnvelope; fall back to HashSSZ() only when Root is
+		// still zero (i.e. right after process_block_header, before envelope processing).
+		root = b.latestBlockHeader.Root
+		if root == [32]byte{} {
+			var err error
+			root, err = b.HashSSZ()
+			if err != nil {
+				return [32]byte{}, err
+			}
+		}
+	} else {
+		// Pre-GLOAS: always compute the current state root (original behaviour).
 		var err error
 		root, err = b.HashSSZ()
 		if err != nil {
 			return [32]byte{}, err
 		}
 	}
+	// Reconstruct a complete header (with the resolved state_root) and hash it.
 	return (&cltypes.BeaconBlockHeader{
 		Slot:          b.latestBlockHeader.Slot,
 		ProposerIndex: b.latestBlockHeader.ProposerIndex,

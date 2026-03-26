@@ -618,7 +618,10 @@ func (I *impl) ProcessExecutionPayloadEnvelope(s abstract.BeaconState, signedEnv
 		}
 	}
 
-	// Cache latest block header state root
+	// Backfill the deferred state_root in LatestBlockHeader before the envelope mutates
+	// the state. This locks the block root to the post-block / pre-envelope state, matching
+	// the spec's process_execution_payload. Without this, any later call to BlockRoot()
+	// would recompute HashSSZ() on a post-envelope state and produce the wrong block root.
 	previousStateRoot, err := s.HashSSZ()
 	if err != nil {
 		return fmt.Errorf("ProcessExecutionPayloadEnvelope: failed to compute state root: %w", err)
