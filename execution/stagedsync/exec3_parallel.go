@@ -1907,6 +1907,26 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 
 				txResult := be.results[tx]
+				txTask := be.tasks[tx].Task
+
+				// EIP-8037: check state gas dimension before committing.
+				// The spec's check_transaction validates:
+				//   tx.gas > block_gas_limit − Σ state_gas
+				// The regular dimension is handled by SubGas below (which
+				// produces GAS_USED_OVERFLOW for block-level gas mismatches).
+				// The state check only triggers when prior txs consumed state
+				// gas (e.g. SSTORE).
+				if txTask.Tx() != nil {
+					if be.blockStateGasUsed+txTask.Tx().GetGasLimit() > txTask.BlockGasLimit() {
+						return nil, fmt.Errorf("%w: could not apply tx %d:%d [%d:%v]: %w",
+							rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex,
+							txVersion.TxNum, txTask.TxHash(), protocol.ErrGasLimitReached)
+					}
+				}
+
+				// Accumulate gas dimensions for the next iteration's pre-check.
+				be.blockRegularGasUsed += txResult.ExecutionResult.BlockRegularGasUsed
+				be.blockStateGasUsed += txResult.ExecutionResult.BlockStateGasUsed
 
 				// EIP-8037: The net per-tx pool deduction must be BlockRegularGasUsed,
 				// not max(regular, state). Per-tx max gives Σ max(r_i, s_i) ≥
@@ -1915,8 +1935,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				if err := be.gasPool.SubGas(txResult.ExecutionResult.BlockRegularGasUsed); err != nil {
 					return nil, fmt.Errorf("%w, block=%d: block gas used overflow", rules.ErrInvalidBlock, be.blockNum)
 				}
-
-				txTask := be.tasks[tx].Task
 
 				if txTask.Tx() != nil {
 					blobGasUsed := txTask.Tx().GetBlobGas()
@@ -2027,8 +2045,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 
 			if result.Receipt != nil {
-				be.blockRegularGasUsed += result.ExecutionResult.BlockRegularGasUsed
-				be.blockStateGasUsed += result.ExecutionResult.BlockStateGasUsed
+				// blockRegularGasUsed and blockStateGasUsed are accumulated
+				// earlier in the commit phase (nextResult) for the pre-tx
+				// check_transaction gas dimension checks.
 				// EIP-8037: per-tx max(regular, state) overestimates vs the true block gas
 				// (max of sums, not sum of maxes), but is a safe upper bound for commit heuristics.
 				applyResult.blockGasUsed = int64(max(result.ExecutionResult.BlockRegularGasUsed, result.ExecutionResult.BlockStateGasUsed))
