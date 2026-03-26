@@ -388,8 +388,8 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 								return err
 							}
 
-							if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) || pe.cfg.experimentalBAL {
-								err = ProcessBAL(rwTx, lastHeader, applyResult.TxIO, pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime), pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir)
+							if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) {
+								err = ProcessBAL(rwTx, lastHeader, applyResult.TxIO, pe.cfg.dirs.DataDir)
 								if err != nil {
 									return err
 								}
@@ -1063,7 +1063,7 @@ type execResult struct {
 	writes state.VersionedWrites
 }
 
-func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engine, vm *state.VersionMap, stateReader state.StateReader, stateWriter state.StateWriter, balActive bool) (*types.Receipt, state.ReadSet, state.VersionedWrites, error) {
+func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engine, vm *state.VersionMap, stateReader state.StateReader, stateWriter state.StateWriter) (*types.Receipt, state.ReadSet, state.VersionedWrites, error) {
 	task, ok := result.Task.(*taskVersion)
 
 	if !ok {
@@ -1113,19 +1113,12 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 		return result.finalizeSystemTx(task, txTask, rules, vm, stateReader, stateWriter)
 	}
 
-	// When BAL is active, use the IBS-based finalize path which produces
-	// correct BAL reads/writes via full IntraBlockState reconstruction.
-	// The direct finalizeTx path computes fee-adjusted balances arithmetically
-	// which doesn't generate the BAL-compatible read/write sets.
-	if balActive {
-		result.CollectorWrites = nil
-		return result.finalizeWithIBS(task, txTask, prevReceipt, engine, vm, stateReader, stateWriter,
-			coinbaseDelta, coinbaseDeltaIncrease, hasCoinbaseDelta,
-			burntDelta, burntDeltaIncrease, hasBurntDelta,
-			rules, txTrace, tracePrefix)
-	}
-
-	return result.finalizeTx(task, txTask, prevReceipt, engine, vm, stateReader,
+	// Always use the IBS-based finalize path. The direct finalizeTx path
+	// computes fee-adjusted balances arithmetically but produces incorrect
+	// state roots for non-Amsterdam blocks. finalizeWithIBS uses full
+	// IntraBlockState reconstruction which is correct for all forks.
+	result.CollectorWrites = nil
+	return result.finalizeWithIBS(task, txTask, prevReceipt, engine, vm, stateReader, stateWriter,
 		coinbaseDelta, coinbaseDeltaIncrease, hasCoinbaseDelta,
 		burntDelta, burntDeltaIncrease, hasBurntDelta,
 		rules, txTrace, tracePrefix)
@@ -1936,14 +1929,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				collector := state.NewVersionedWriteCollector(pe.rs)
 
-				// Use finalizeWithIBS only for actual Amsterdam blocks where BAL
-				// is consensus-critical. The experimentalBAL flag generates BAL
-				// data at the block level (ProcessBAL) but must not change the
-				// TX finalization path — finalizeWithIBS has state-computation
-				// bugs during reorgs (wrong trie roots from arithmetic
-				// reconstruction of fee-adjusted balances).
-				balActive := pe.cfg.chainConfig.IsAmsterdam(txTask.BlockTime())
-				_, addReads, addWrites, err := txResult.finalize(prevReceipt, pe.cfg.engine, be.versionMap, stateReader, collector, balActive)
+				// Use finalizeWithIBS for Amsterdam blocks where BAL
+				// is consensus-critical.
+				_, addReads, addWrites, err := txResult.finalize(prevReceipt, pe.cfg.engine, be.versionMap, stateReader, collector)
 
 				if err != nil {
 					return nil, err

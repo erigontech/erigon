@@ -108,7 +108,7 @@ type BlockAssembler struct {
 func NewBlockAssembler(cfg AssemblerCfg, payloadId, parentTime uint64, header *types.Header, uncles []*types.Header, withdrawals []*types.Withdrawal) *BlockAssembler {
 	var balIO *state.VersionedIO
 
-	if cfg.ChainConfig.IsAmsterdam(header.Time) || cfg.ExperimentalBAL {
+	if cfg.ChainConfig.IsAmsterdam(header.Time) {
 		balIO = &state.VersionedIO{}
 	}
 	return &BlockAssembler{
