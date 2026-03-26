@@ -853,20 +853,21 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, fmt.Errorf("failed to get chain config: %w", err)
 	}
 
-	newStateRoot, stateless, err := execBlockStatelessly(result, block, chainCfg, fullEngine)
+	newStateRoot, _, err := execBlockStatelessly(result, block, chainCfg, fullEngine)
 	if err != nil {
 		return nil, fmt.Errorf("[debug_executionWitness] stateless block execution failed: %w", err)
 	}
 
+	/// // Comment out for debugging
 	// Query the expected state for all modified accounts from the actual state DB
-	expectedState, expectedStorage, err := api.buildExpectedPostState(ctx, tx, blockNum, block,
-		readAddresses, writeAddresses, readStorageKeys, writeStorageKeys)
-	if err != nil {
-		return nil, err
-	}
+	// expectedState, expectedStorage, err := api.buildExpectedPostState(ctx, tx, blockNum, block,
+	// 	readAddresses, writeAddresses, readStorageKeys, writeStorageKeys)
+	// if err != nil {
+	// 	return nil, err
+	// }
 
 	//  Compare computed state vs expected state for debugging
-	compareComputedVsExpectedState(stateless, expectedState, expectedStorage, stateless.storageDeletes)
+	// compareComputedVsExpectedState(stateless, expectedState, expectedStorage, stateless.storageDeletes)
 
 	// Verify the root matches the block's state root
 	expectedRoot := block.Root()
@@ -1050,118 +1051,6 @@ func printExpectedPostState(blockNum uint64, expectedStateRoot common.Hash, expe
 
 		fmt.Printf("└─────────────────────────────────────────────────────────────────────────────┘\n")
 		fmt.Printf("\n")
-	}
-}
-
-// printPreStateCheck prints the pre-state status of all touched accounts and storage.
-// Missing items aren't necessarily errors - they could be created during block execution.
-func printPreStateCheck(witnessTrie *trie.Trie, readAddresses, writeAddresses []common.Address, readStorageKeys, writeStorageKeys map[common.Address][]common.Hash) {
-	// Merge all addresses into a deduplicated map with their access type
-	type accessInfo struct {
-		read  bool
-		write bool
-	}
-	allAddrs := make(map[common.Address]*accessInfo)
-	for _, addr := range readAddresses {
-		if allAddrs[addr] == nil {
-			allAddrs[addr] = &accessInfo{}
-		}
-		allAddrs[addr].read = true
-	}
-	for _, addr := range writeAddresses {
-		if allAddrs[addr] == nil {
-			allAddrs[addr] = &accessInfo{}
-		}
-		allAddrs[addr].write = true
-	}
-
-	fmt.Printf("\n--- Pre-state check: %d touched accounts ---\n", len(allAddrs))
-	for addr, info := range allAddrs {
-		addrHash, _ := common.HashData(addr[:])
-		acc, found := witnessTrie.GetAccount(addrHash[:])
-
-		accessType := ""
-		if info.read && info.write {
-			accessType = "R/W"
-		} else if info.read {
-			accessType = "R"
-		} else {
-			accessType = "W"
-		}
-
-		if found && acc != nil {
-			fmt.Printf("  [%s] %s (hash %x): Nonce=%d, Balance=%s, Root=%x\n",
-				accessType, addr.Hex(), addrHash[:8], acc.Nonce, acc.Balance.String(), acc.Root[:8])
-		} else {
-			fmt.Printf("  [%s] %s (hash %x): not in pre-state (may be created)\n",
-				accessType, addr.Hex(), addrHash[:8])
-		}
-	}
-
-	// Merge all storage keys into a deduplicated map
-	type storageAccessInfo struct {
-		read  bool
-		write bool
-	}
-	allStorage := make(map[common.Address]map[common.Hash]*storageAccessInfo)
-	for addr, keys := range readStorageKeys {
-		if allStorage[addr] == nil {
-			allStorage[addr] = make(map[common.Hash]*storageAccessInfo)
-		}
-		for _, key := range keys {
-			if allStorage[addr][key] == nil {
-				allStorage[addr][key] = &storageAccessInfo{}
-			}
-			allStorage[addr][key].read = true
-		}
-	}
-	for addr, keys := range writeStorageKeys {
-		if allStorage[addr] == nil {
-			allStorage[addr] = make(map[common.Hash]*storageAccessInfo)
-		}
-		for _, key := range keys {
-			if allStorage[addr][key] == nil {
-				allStorage[addr][key] = &storageAccessInfo{}
-			}
-			allStorage[addr][key].write = true
-		}
-	}
-
-	// Count total storage keys
-	totalStorageKeys := 0
-	for _, keys := range allStorage {
-		totalStorageKeys += len(keys)
-	}
-
-	if totalStorageKeys > 0 {
-		fmt.Printf("\n--- Pre-state check: %d touched storage slots ---\n", totalStorageKeys)
-		for addr, keys := range allStorage {
-			addrHash, _ := common.HashData(addr[:])
-			fmt.Printf("  Account %s (hash %x):\n", addr.Hex(), addrHash[:8])
-			for key, info := range keys {
-				keyHash, _ := common.HashData(key[:])
-				cKey := dbutils.GenerateCompositeTrieKey(addrHash, keyHash)
-
-				accessType := ""
-				if info.read && info.write {
-					accessType = "R/W"
-				} else if info.read {
-					accessType = "R"
-				} else {
-					accessType = "W"
-				}
-
-				if val, found := witnessTrie.Get(cKey); found {
-					var valInt uint256.Int
-					valInt.SetBytes(val)
-					fmt.Printf("    [%s] Key %x (hash %x): value=%s\n",
-						accessType, key, keyHash[:8], valInt.String())
-				} else {
-					fmt.Printf("    [%s] Key %x (hash %x): not in pre-state (may be created)\n",
-						accessType, key, keyHash[:8])
-				}
-			}
-		}
 	}
 }
 
