@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"time"
 	"unsafe"
 
@@ -34,19 +35,149 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 )
 
-// nolint
-type indexSeeker interface {
-	WarmUp(g *seg.Reader) error
-	Get(g *seg.Reader, key []byte) (k []byte, found bool, di uint64, err error)
-	//seekInFiles(g *seg.Reader, key []byte) (indexSeekerIterator, error)
-	Seek(g *seg.Reader, seek []byte) (k []byte, di uint64, found bool, err error)
+const minKeysForPrefixIndex = 60_000
+const maxNodesPerBucket = 8
+
+// prefixBucket holds the DI range and cached nodes for a single 2-byte prefix.
+type prefixBucket struct {
+	firstDI uint64 // DI of first key with this 2-byte prefix (MaxUint64 = empty)
+	endDI   uint64 // DI past last key with this prefix (exclusive upper bound)
+	nodes   []Node // cached keys for per-bucket binary search, max 8
 }
 
-// nolint
-type indexSeekerIterator interface {
-	Next() bool
-	Di() uint64
-	KVFromGetter(g *seg.Reader) ([]byte, []byte, error)
+// prefixIndex maps first 2 bytes of keys to prefixBucket structs.
+// Each bucket tracks the [firstDI, endDI) range and embeds up to 8 cached nodes.
+// L1 arrays aggregate bucket ranges for 1-byte prefix fallback.
+type prefixIndex struct {
+	buckets [65536]prefixBucket
+	l1First [256]uint64 // min(firstDI) across buckets[b0<<8..b0<<8|0xFF]
+	l1End   [256]uint64 // max(endDI) across buckets[b0<<8..b0<<8|0xFF]
+}
+
+func newPrefixIndex() *prefixIndex {
+	p := new(prefixIndex)
+	for i := range p.buckets {
+		p.buckets[i].firstDI = math.MaxUint64
+	}
+	for i := range p.l1First {
+		p.l1First[i] = math.MaxUint64
+	}
+	return p
+}
+
+// record updates the bucket for the 2-byte prefix of key with the given di.
+// On first occurrence sets firstDI; always updates endDI = di + 1.
+func (p *prefixIndex) record(key []byte, di uint64) {
+	if len(key) < 2 {
+		return
+	}
+	prefix := uint16(key[0])<<8 | uint16(key[1])
+	b := &p.buckets[prefix]
+	if di < b.firstDI {
+		b.firstDI = di
+	}
+	if di+1 > b.endDI {
+		b.endDI = di + 1
+	}
+}
+
+// addNode appends a cached node to the bucket for the key's 2-byte prefix,
+// up to maxNodesPerBucket.
+func (p *prefixIndex) addNode(key []byte, node Node) {
+	if len(key) < 2 {
+		return
+	}
+	prefix := uint16(key[0])<<8 | uint16(key[1])
+	b := &p.buckets[prefix]
+	if len(b.nodes) < maxNodesPerBucket {
+		b.nodes = append(b.nodes, node)
+	}
+}
+
+// computeL1 aggregates bucket ranges into L1 summary arrays.
+// For each first byte b0, scans buckets[b0<<8..b0<<8|0xFF] to find
+// min non-sentinel firstDI and max endDI.
+func (p *prefixIndex) computeL1() {
+	for b0 := 0; b0 < 256; b0++ {
+		minFirst := uint64(math.MaxUint64)
+		maxEnd := uint64(0)
+		base := uint16(b0) << 8
+		for b1 := 0; b1 < 256; b1++ {
+			bkt := &p.buckets[base|uint16(b1)]
+			if bkt.firstDI < minFirst {
+				minFirst = bkt.firstDI
+			}
+			if bkt.endDI > maxEnd {
+				maxEnd = bkt.endDI
+			}
+		}
+		p.l1First[b0] = minFirst
+		p.l1End[b0] = maxEnd
+	}
+}
+
+// lookup returns the [l, r) DI range for a key based on its prefix.
+// len<1 returns full range, len==1 uses L1 tables, len>=2 uses bucket with L1 fallback.
+// Returns (0, 0) for an empty (non-existent) prefix.
+func (p *prefixIndex) lookup(key []byte, totalCount uint64) (l, r uint64) {
+	if len(key) < 1 {
+		return 0, totalCount
+	}
+	if len(key) == 1 {
+		b0 := key[0]
+		if p.l1First[b0] == math.MaxUint64 {
+			return 0, 0
+		}
+		return p.l1First[b0], p.l1End[b0]
+	}
+	// len >= 2: try exact bucket
+	prefix := uint16(key[0])<<8 | uint16(key[1])
+	bkt := &p.buckets[prefix]
+	if bkt.firstDI != math.MaxUint64 {
+		return bkt.firstDI, bkt.endDI
+	}
+	// Fallback to L1
+	b0 := key[0]
+	if p.l1First[b0] == math.MaxUint64 {
+		return 0, 0
+	}
+	return p.l1First[b0], p.l1End[b0]
+}
+
+// narrowWithNodes performs binary search over cached nodes in the bucket
+// for the key's 2-byte prefix. Returns narrowed [l, r) range, or exact match.
+// On exact match: found=true, exactDI=node.di. Otherwise narrows [l, r)
+// from node boundaries. Returns (0, 0, 0, false) when no narrowing is possible.
+func (p *prefixIndex) narrowWithNodes(key []byte) (l, r uint64, exactDI uint64, found bool) {
+	if len(key) < 2 {
+		return 0, 0, 0, false
+	}
+	prefix := uint16(key[0])<<8 | uint16(key[1])
+	bkt := &p.buckets[prefix]
+	if len(bkt.nodes) == 0 {
+		return 0, 0, 0, false
+	}
+
+	l, r = bkt.firstDI, bkt.endDI
+	lo, hi := 0, len(bkt.nodes)
+	for lo < hi {
+		mid := (lo + hi) >> 1
+		cmp := bytes.Compare(bkt.nodes[mid].key, key)
+		if cmp == 0 {
+			return 0, 0, bkt.nodes[mid].di, true
+		} else if cmp < 0 {
+			lo = mid + 1
+			if bkt.nodes[mid].di+1 > l {
+				l = bkt.nodes[mid].di + 1
+			}
+		} else {
+			hi = mid
+			if bkt.nodes[mid].di < r {
+				r = bkt.nodes[mid].di
+			}
+		}
+	}
+	return l, r, 0, false
 }
 
 type dataLookupFunc func(di uint64, g *seg.Reader) ([]byte, []byte, uint64, error)
@@ -65,7 +196,7 @@ func NewBpsTree(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, dataLooku
 var envAssertBTKeys = dbg.EnvBool("BT_ASSERT_OFFSETS", false)
 
 func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, dataLookup dataLookupFunc, keyCmp keyCmpFunc, nodes []Node) *BpsTree {
-	bt := &BpsTree{M: M, offt: offt, dataLookupFunc: dataLookup, keyCmpFunc: keyCmp, mx: nodes}
+	bt := &BpsTree{M: M, offt: offt, dataLookupFunc: dataLookup, keyCmpFunc: keyCmp}
 
 	nsz := uint64(unsafe.Sizeof(Node{}))
 	var cachedBytes uint64
@@ -84,14 +215,36 @@ func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, 
 		nodes[i].off = offt.Get(nodes[i].di)
 	}
 
+	N := offt.Count()
+	if N >= minKeysForPrefixIndex {
+		// Large-file path: build prefix index from sequential scan, distribute nodes into buckets.
+		bt.prefix = newPrefixIndex()
+
+		var key []byte
+		kv.Reset(0)
+		for di := uint64(0); di < N; di++ {
+			key, _ = kv.Next(key[:0])
+			kv.Skip()
+			bt.prefix.record(key, di)
+		}
+
+		for i := range nodes {
+			bt.prefix.addNode(nodes[i].key, nodes[i])
+		}
+		bt.prefix.computeL1()
+	} else {
+		// Small-file path: keep nodes in mx as before.
+		bt.mx = nodes
+	}
 	return bt
 }
 
 type BpsTree struct {
-	offt  *eliasfano32.EliasFano // ef with offsets to key/vals
-	mx    []Node
-	M     uint64 // limit on amount of 'children' for node
-	trace bool
+	offt   *eliasfano32.EliasFano // ef with offsets to key/vals
+	mx     []Node
+	prefix *prefixIndex // 2-level prefix index for O(1) range narrowing; nil when N < minKeysForPrefixIndex
+	M      uint64       // limit on amount of 'children' for node
+	trace  bool
 
 	dataLookupFunc dataLookupFunc
 	keyCmpFunc     keyCmpFunc
@@ -104,34 +257,6 @@ type BpsTreeIterator struct {
 	t *BpsTree
 	i uint64
 }
-
-//// If data[i] == key, returns 0 (equal) and value, nil err
-//// if data[i] <> key, returns comparation result and nil value and error -- to be able to compare later
-//func (b *BpsTree) matchKeyValue(g ArchiveGetter, i uint64, key []byte) (int, []byte, error) {
-//	if i >= b.offt.Count() {
-//		return 0, nil, ErrBtIndexLookupBounds
-//	}
-//	if b.trace {
-//		fmt.Printf("match %d-%x count %d\n", i, key, b.offt.Count())
-//	}
-//	g.Reset(b.offt.Get(i))
-//	buf, _ := g.Next(nil)
-//	if !bytes.Equal(buf, key) {
-//		return bytes.Compare(buf, key), nil, nil
-//	}
-//	val, _ := g.Next(nil)
-//	return 0, val, nil
-//}
-//
-//func (b *BpsTree) lookupKeyWGetter(g ArchiveGetter, i uint64) ([]byte, uint64) {
-//	if i >= b.offt.Count() {
-//		return nil, 0
-//	}
-//	o := b.offt.Get(i)
-//	g.Reset(o)
-//	buf, _ := g.Next(nil)
-//	return buf, o
-//}
 
 type Node struct {
 	key []byte
@@ -186,7 +311,6 @@ func (n *Node) Decode(buf []byte) (uint64, error) {
 		return 0, errors.New("short buffer")
 	}
 	n.key = buf[10 : 10+l]
-	//madvise(k, len(k), MADV_WILL_NEED)
 	return uint64(10 + l), nil
 }
 
@@ -196,34 +320,66 @@ func (b *BpsTree) WarmUp(kv *seg.Reader) (err error) {
 	if N == 0 {
 		return nil
 	}
-	b.mx = make([]Node, 0, N/b.M)
-	if b.trace {
-		fmt.Printf("mx cap %d N=%d M=%d\n", cap(b.mx), N, b.M)
-	}
 
 	step := b.M
 	if N < b.M { // cache all keys if less than M
 		step = 1
 	}
 
-	// extremely stupid picking of needed nodes:
+	if N >= minKeysForPrefixIndex {
+		b.prefix = newPrefixIndex()
+	}
+
 	cachedBytes := uint64(0)
 	nsz := uint64(unsafe.Sizeof(Node{}))
 	var key []byte
-	for i := step; i < N; i += step {
-		di := i - 1
-		_, key, err = b.keyCmpFunc(nil, di, kv, key[:0])
-		if err != nil {
-			return err
+	var cachedCount int
+
+	if b.prefix != nil {
+		// Large-file path: sequential scan, record all keys in prefix index,
+		// embed every M-th key as a node in its prefix bucket.
+		kv.Reset(0)
+		nextCache := step - 1
+		for di := uint64(0); di < N; di++ {
+			key, _ = kv.Next(key[:0])
+			kv.Skip()
+
+			b.prefix.record(key, di)
+
+			if di == nextCache {
+				node := Node{off: b.offt.Get(di), key: common.Copy(key), di: di}
+				b.prefix.addNode(key, node)
+				cachedBytes += nsz + uint64(len(key))
+				cachedCount++
+				nextCache += step
+			}
 		}
-		b.mx = append(b.mx, Node{off: b.offt.Get(di), key: common.Copy(key), di: di})
-		cachedBytes += nsz + uint64(len(key))
+		b.prefix.computeL1()
+	} else {
+		// Small-file path: read only every step-th key via random access, populate mx
+		b.mx = make([]Node, 0, N/b.M)
+		for i := step; i < N; i += step {
+			di := i - 1
+			_, key, err = b.keyCmpFunc(nil, di, kv, key[:0])
+			if err != nil {
+				return err
+			}
+			b.mx = append(b.mx, Node{off: b.offt.Get(di), key: common.Copy(key), di: di})
+			cachedBytes += nsz + uint64(len(key))
+			cachedCount++
+		}
 	}
 
-	log.Root().Debug("WarmUp finished", "file", kv.FileName(), "M", b.M, "N", common.PrettyCounter(N),
-		"cached", fmt.Sprintf("%d %.2f%%", len(b.mx), 100*(float64(len(b.mx))/float64(N))),
+	args := []interface{}{
+		"file", kv.FileName(), "M", b.M, "N", common.PrettyCounter(N),
+		"cached", fmt.Sprintf("%d %.2f%%", cachedCount, 100*(float64(cachedCount)/float64(N))),
 		"cacheSize", datasize.ByteSize(cachedBytes).HR(), "fileSize", datasize.ByteSize(kv.Size()).HR(),
-		"took", time.Since(t))
+		"took", time.Since(t),
+	}
+	if b.prefix != nil {
+		args = append(args, "prefixIdx", true)
+	}
+	log.Root().Debug("WarmUp finished", args...)
 	return nil
 }
 
@@ -271,17 +427,43 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
 		return cur, nil
 	}
 
-	// check cached nodes and narrow roi
-	n, l, r := b.bs(seekKey) // l===r when key is found
-	if l == r {
-		cur.Reset(n.di, g)
-		return cur, nil
+	// Start with full range
+	l, r := uint64(0), b.offt.Count()
+
+	if b.prefix != nil {
+		// Large-file path: use prefix index for range lookup and cached node search
+		pl, pr := b.prefix.lookup(seekKey, b.offt.Count())
+		if pl != 0 || pr != 0 {
+			l, r = pl, pr
+		}
+		nl, nr, exactDI, found := b.prefix.narrowWithNodes(seekKey)
+		if found {
+			err = cur.Reset(exactDI, g)
+			return cur, err
+		}
+		if nl != 0 || nr != 0 {
+			if nl > l {
+				l = nl
+			}
+			if nr < r {
+				r = nr
+			}
+		}
+	} else if r-l > b.M {
+		// Small-file path: use bs() for cached-node binary search
+		n, bl, br := b.bs(seekKey)
+		if bl == br {
+			cur.Reset(n.di, g)
+			return cur, nil
+		}
+		if bl > l {
+			l = bl
+		}
+		if br < r {
+			r = br
+		}
 	}
 
-	// if b.trace {
-	// 	fmt.Printf("pivot di:%d di(LR): [%d %d] k: %x found: %t\n", n.di, l, r, n.key, l == r)
-	// 	defer func() { fmt.Printf("found=%t %x [%d %d]\n", bytes.Equal(key, seekKey), seekKey, l, r) }()
-	// }
 	var m uint64
 	var cmp int
 
@@ -349,10 +531,45 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 		return v0, true, 0, nil
 	}
 
-	n, l, r := b.bs(key) // l===r when key is found
-	if b.trace {
-		fmt.Printf("pivot di: %d di(LR): [%d %d] k: %x found: %t\n", n.di, l, r, n.key, l == r)
-		defer func() { fmt.Printf("found %x [%d %d]\n", key, l, r) }()
+	// Start with full range
+	l, r := uint64(0), b.offt.Count()
+
+	if b.prefix != nil {
+		// Large-file path: use prefix index for range lookup and cached node search
+		pl, pr := b.prefix.lookup(key, b.offt.Count())
+		if pl == 0 && pr == 0 {
+			return nil, false, 0, nil // no keys with this prefix
+		}
+		l, r = pl, pr
+		nl, nr, exactDI, found := b.prefix.narrowWithNodes(key)
+		if found {
+			offset = b.offt.Get(exactDI)
+			g.Reset(offset)
+			g.Buf, _ = g.Next(g.Buf[:0]) // skip key
+			v, _ = g.Next(nil)
+			return v, true, offset, nil
+		}
+		if nl != 0 || nr != 0 {
+			if nl > l {
+				l = nl
+			}
+			if nr < r {
+				r = nr
+			}
+		}
+	} else if r-l > b.M {
+		// Small-file path: use bs() for cached-node binary search
+		n, bl, br := b.bs(key)
+		if b.trace {
+			fmt.Printf("pivot di: %d di(LR): [%d %d] k: %x found: %t\n", n.di, bl, br, n.key, bl == br)
+			defer func() { fmt.Printf("found %x [%d %d]\n", key, l, r) }()
+		}
+		if bl > l {
+			l = bl
+		}
+		if br < r {
+			r = br
+		}
 	}
 
 	var cmp int
@@ -435,4 +652,5 @@ func (b *BpsTree) Distances() (map[int]int, error) {
 func (b *BpsTree) Close() {
 	b.mx = nil
 	b.offt = nil
+	b.prefix = nil // release ~2.5MB prefix index memory
 }
