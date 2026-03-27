@@ -255,6 +255,10 @@ func emitNextPaylodAttributesEvent(cfg *Cfg, headSlot uint64, headRoot common.Ha
 		ParentBeaconBlockRoot: &headRoot,
 		Withdrawals:           withdrawals,
 	}
+	if cfg.beaconCfg.GetCurrentStateVersion(epoch).AfterOrEqual(clparams.GloasVersion) {
+		sn := hexutil.Uint64(nextSlot)
+		payloadAttributes.SlotNumber = &sn
+	}
 	e := &beaconevents.PayloadAttributesData{
 		Version: cfg.beaconCfg.GetCurrentStateVersion(epoch).String(),
 		Data: beaconevents.PayloadAttributesContent{
