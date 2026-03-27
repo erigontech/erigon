@@ -407,7 +407,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 			if err != nil {
 				return 0, fmt.Errorf("%w: recover authorization signer: %s stack: %s", ErrParseTxn, err, dbg.Stack()) //nolint
 			}
-			slot.AuthAndNonces = append(slot.AuthAndNonces, AuthAndNonce{*authority, auth.Nonce})
+			slot.AuthAndNonces = append(slot.AuthAndNonces, AuthAndNonce{Authority: *authority, Nonce: auth.Nonce})
 		}
 	}
 
@@ -437,8 +437,8 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 }
 
 type AuthAndNonce struct {
-	authority common.Address
-	nonce     uint64
+	Authority common.Address
+	Nonce     uint64
 }
 
 // PoolBlobBundle holds a single blob's data for the GetBlobs API.

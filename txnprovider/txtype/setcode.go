@@ -51,12 +51,11 @@ func (SetCodeHandler) ValidateTx(_ types.Transaction, _ bool, _ *txpoolcfg.Confi
 	return txpoolcfg.NotSet
 }
 
-// OnAdd and OnRemove manage (authority, nonce) reservations in the pool.
-// The "authority" is the recovered signer of each Authorization, not
-// Authorization.Address (which is the delegate target). Recovered authorities
-// are computed by the pool and stored in TxnSlot.AuthAndNonces.
+// OnAdd and OnRemove are no-ops for SetCode transactions.
 //
-// Phase 3 wiring will extend the call site to pass recovered authorities here.
-// Until then, these are no-ops — authority reservation logic stays in pool.go.
+// Authority reservations require recovered signers (TxnSlot.AuthAndNonces),
+// which are pool-internal and not accessible through the types.Transaction
+// interface. Reservation management therefore stays explicit in addLocked and
+// discardLocked, using TxPool.AuthReserve / TxPool.AuthRelease directly.
 func (SetCodeHandler) OnAdd(_ types.Transaction, _ PoolMutation)    {}
 func (SetCodeHandler) OnRemove(_ types.Transaction, _ PoolMutation) {}
