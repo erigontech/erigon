@@ -193,6 +193,8 @@ Flags for configuring various RPC servers and their behavior.
   * Default: `100`
 * `--rpc.returndata.limit value`: Sets the maximum return data size for `eth_call`.
   * Default: `100000`
+* `--rpc.blockrange.limit value`: Sets the maximum block range (`end - begin`) allowed for range queries such as `eth_getLogs`. Applies across all RPC methods that accept a block range.
+  * Default: `0` (unlimited)
 * `--rpc.allow-unprotected-txs`: Allows unprotected transactions via RPC.
   * Default: `false`
 * `--rpc.txfeecap value`: Sets a cap on transaction fees in ether.
