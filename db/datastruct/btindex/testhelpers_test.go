@@ -1,6 +1,7 @@
 package btindex
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -161,7 +162,7 @@ func generateControlledKV(tb testing.TB, tmp string, prefixes [][]byte, keysPerP
 	// Deduplicate keys
 	deduped := pairs[:0]
 	for i, p := range pairs {
-		if i > 0 && string(p.key) == string(pairs[i-1].key) {
+		if i > 0 && bytes.Equal(p.key, pairs[i-1].key) {
 			continue
 		}
 		deduped = append(deduped, p)

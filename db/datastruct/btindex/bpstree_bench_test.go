@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/seg"
 )
@@ -68,6 +69,10 @@ func BenchmarkPrefixIndexSeek(t *testing.B) {
 	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
 	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
 
+	saved := dbg.UsePrefixIndex
+	dbg.UsePrefixIndex = true
+	defer func() { dbg.UsePrefixIndex = saved }()
+
 	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, DefaultBtreeM, compressFlags, false)
 	require.NoError(t, err)
 	require.EqualValues(t, bt.KeyCount(), keyCount)
@@ -100,11 +105,17 @@ func BenchmarkPrefixIndexGet(t *testing.B) {
 	}
 	compress := seg.CompressKeys
 
-	kvPath := generateKV(t, t.TempDir(), 20, 10, keyCount, log.New(), compress)
+	logger := log.New()
+	kvPath := generateKV(t, t.TempDir(), 20, 10, keyCount, logger, compress)
 	keys, err := pivotKeysFromKV(kvPath)
 	require.NoError(t, err)
 
 	indexPath := strings.TrimSuffix(kvPath, ".kv") + ".bt"
+	buildBtreeIndex(t, kvPath, indexPath, compress, 1, logger, true)
+
+	saved := dbg.UsePrefixIndex
+	dbg.UsePrefixIndex = true
+	defer func() { dbg.UsePrefixIndex = saved }()
 
 	decomp, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, DefaultBtreeM, compress, false)
 	require.NoError(t, err)
@@ -136,11 +147,17 @@ func BenchmarkSeekComparison(t *testing.B) {
 	}
 	compress := seg.CompressKeys
 
-	kvPath := generateKV(t, t.TempDir(), 20, 10, keyCount, log.New(), compress)
+	logger := log.New()
+	kvPath := generateKV(t, t.TempDir(), 20, 10, keyCount, logger, compress)
 	keys, err := pivotKeysFromKV(kvPath)
 	require.NoError(t, err)
 
 	indexPath := strings.TrimSuffix(kvPath, ".kv") + ".bt"
+	buildBtreeIndex(t, kvPath, indexPath, compress, 1, logger, true)
+
+	saved := dbg.UsePrefixIndex
+	dbg.UsePrefixIndex = true
+	defer func() { dbg.UsePrefixIndex = saved }()
 
 	decomp, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, DefaultBtreeM, compress, false)
 	require.NoError(t, err)
@@ -193,11 +210,17 @@ func BenchmarkGetComparison(t *testing.B) {
 	}
 	compress := seg.CompressKeys
 
-	kvPath := generateKV(t, t.TempDir(), 20, 10, keyCount, log.New(), compress)
+	logger := log.New()
+	kvPath := generateKV(t, t.TempDir(), 20, 10, keyCount, logger, compress)
 	keys, err := pivotKeysFromKV(kvPath)
 	require.NoError(t, err)
 
 	indexPath := strings.TrimSuffix(kvPath, ".kv") + ".bt"
+	buildBtreeIndex(t, kvPath, indexPath, compress, 1, logger, true)
+
+	saved := dbg.UsePrefixIndex
+	dbg.UsePrefixIndex = true
+	defer func() { dbg.UsePrefixIndex = saved }()
 
 	decomp, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, DefaultBtreeM, compress, false)
 	require.NoError(t, err)

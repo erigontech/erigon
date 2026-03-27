@@ -1647,7 +1647,7 @@ func TestPrefixIndex_SeekBeforeAll(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, keys)
 
-	beforeKey := bytes.Repeat([]byte{0x00}, 10)
+	beforeKey := make([]byte, 10)
 	c, err := pi.Seek(g, beforeKey)
 	require.NoError(t, err)
 	require.NotNil(t, c, "seek before all keys should return first key")
@@ -2075,4 +2075,3 @@ func TestPrefixIndex_ConcurrentReads(t *testing.T) {
 	}
 	wg.Wait()
 }
-
