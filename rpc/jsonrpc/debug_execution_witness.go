@@ -455,7 +455,6 @@ type ExecutionWitnessResult struct {
 // ExecutionWitness implements debug_executionWitness.
 // It executes a block using a historical state reader, records all state accesses
 // (accounts, storage, code), and builds merkle proofs for the accessed keys.
-// This is compatible with the Geth/Reth format for execution witnesses.
 func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (*ExecutionWitnessResult, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -580,7 +579,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 
 	// Collect logs accumulated during transaction execution into a synthetic receipt
 	// so that Finalize can parse EIP-6110 deposit requests from them.
-	//   Finalize only uses receipt.Logs from each receipt — it doesn't read Status, GasUsed, CumulativeGasUsed, or any other field. It just concatenates all logs
+	// Finalize only uses receipt.Logs from each receipt — it doesn't read Status, GasUsed, CumulativeGasUsed, or any other field. It just concatenates all logs
 	// into a flat slice and passes them to ParseDepositLogs.
 	allLogs := ibs.Logs()
 	receipts := types.Receipts{&types.Receipt{Logs: allLogs}}
@@ -650,7 +649,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 
 	// Collect code from the recording state:
 	// - preStateCode: code from the inner reader (pre-block state), for witness trie & result.Codes
-	// - modifiedCode: code written during execution (new deployments, EIP-7702), for touchAllKeys
+	// - modifiedCode: code written during execution (new deployments, EIP-7702)
 	//
 	// Only pre-state code goes into result.Codes. Created/modified code (contract
 	// deployments, EIP-7702 delegations) is derived by the stateless verifier
@@ -758,7 +757,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	// the remaining child's data must be included in the witness for correct
 	// state root computation during stateless execution.
 	//
-	// We only record sibling paths  (not build witness tries) in this first step, because the grid
+	// We only record sibling paths (without building any witness) in this first step, because the grid
 	// is mutated during ComputeCommitment and would produce incorrect root hashes.
 	var collapseSiblingPaths [][]byte
 
@@ -875,7 +874,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, fmt.Errorf("[debug_executionWitness] state root mismatch after stateless execution : got %x, expected %x", newStateRoot, expectedRoot)
 	}
 
-	log.Info("Witness successfully verified 🚀", "blockNum", blockNum)
+	log.Info("[debug_executionWitness] witness successfully verified 🚀", "blockNum", blockNum)
 	return result, nil
 }
 
@@ -891,7 +890,7 @@ func (api *DebugAPIImpl) buildExpectedPostState(
 	expectedState := make(map[common.Address]*accounts.Account)
 	expectedStorage := make(map[common.Address]map[common.Hash]uint256.Int)
 
-	// Create commitment context for accurate storage roots
+	// Create commitment context for accurate storage roots (since they are not stored explicitly)
 	postDomains, err := execctx.NewSharedDomains(ctx, tx, log.New())
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create post-state domains: %w", err)
@@ -991,70 +990,7 @@ func (api *DebugAPIImpl) buildExpectedPostState(
 	return expectedState, expectedStorage, nil
 }
 
-// printExpectedPostState prints the expected post-state in a human-readable format
-func printExpectedPostState(blockNum uint64, expectedStateRoot common.Hash, expectedState map[common.Address]*accounts.Account, expectedStorage map[common.Address]map[common.Hash]uint256.Int) {
-	fmt.Printf("\n")
-	fmt.Printf("╔══════════════════════════════════════════════════════════════════════════════╗\n")
-	fmt.Printf("║              EXPECTED POST-STATE FOR BLOCK %-5d                             ║\n", blockNum)
-	fmt.Printf("╠══════════════════════════════════════════════════════════════════════════════╣\n")
-	fmt.Printf("║ Expected State Root: %x ║\n", expectedStateRoot)
-	fmt.Printf("╚══════════════════════════════════════════════════════════════════════════════╝\n")
-	fmt.Printf("\n")
-
-	// Sort addresses for consistent output
-	addrs := make([]common.Address, 0, len(expectedState))
-	for addr := range expectedState {
-		addrs = append(addrs, addr)
-	}
-
-	for _, addr := range addrs {
-		acc := expectedState[addr]
-		addrHash, _ := common.HashData(addr[:])
-
-		fmt.Printf("┌─────────────────────────────────────────────────────────────────────────────┐\n")
-		fmt.Printf("│ Account: %s\n", addr.Hex())
-		fmt.Printf("│ Hash:    %x\n", addrHash)
-		fmt.Printf("├─────────────────────────────────────────────────────────────────────────────┤\n")
-
-		if acc == nil {
-			fmt.Printf("│ Status: DELETED\n")
-		} else {
-			fmt.Printf("│ Nonce:        %d\n", acc.Nonce)
-			fmt.Printf("│ Balance:      %s wei\n", acc.Balance.String())
-
-			// Storage Root
-			if acc.Root == trie.EmptyRoot {
-				fmt.Printf("│ Storage Root: %x (empty)\n", acc.Root)
-			} else {
-				fmt.Printf("│ Storage Root: %x\n", acc.Root)
-			}
-
-			// Code Hash
-			if acc.CodeHash == accounts.EmptyCodeHash {
-				fmt.Printf("│ Code Hash:    %x (empty - EOA)\n", acc.CodeHash)
-			} else {
-				fmt.Printf("│ Code Hash:    %x (contract)\n", acc.CodeHash)
-			}
-		}
-
-		// Print storage for this account
-		if storage, ok := expectedStorage[addr]; ok && len(storage) > 0 {
-			fmt.Printf("├─────────────────────────────────────────────────────────────────────────────┤\n")
-			fmt.Printf("│ Storage (%d slots):\n", len(storage))
-			for key, val := range storage {
-				keyHash, _ := common.HashData(key[:])
-				fmt.Printf("│   Slot %x... (hash %x...):\n", key[:8], keyHash[:8])
-				fmt.Printf("│     Value: %s\n", val.String())
-				fmt.Printf("│     Hex:   0x%x\n", val.Bytes())
-			}
-		}
-
-		fmt.Printf("└─────────────────────────────────────────────────────────────────────────────┘\n")
-		fmt.Printf("\n")
-	}
-}
-
-// compareComputedVsExpectedState compares the state computed by witnessStateless against the expected state.
+// compareComputedVsExpectedState compares the post execution state computed by witnessStateless against the expected state.
 func compareComputedVsExpectedState(stateless *witnessStateless, expectedState map[common.Address]*accounts.Account, expectedStorage map[common.Address]map[common.Hash]uint256.Int, storageDeletes map[common.Address]map[common.Hash]struct{}) {
 	fmt.Printf("\n=== Comparing computed vs expected state ===\n")
 	for addr, expectedAcc := range expectedState {
@@ -1447,9 +1383,9 @@ func (s *witnessStateless) DeleteAccount(address accounts.Address, original *acc
 	}
 	// Only delete if the account exists in the original state (trie or was previously updated)
 	// Skip deletes for accounts that weren't in the witness - they don't affect the state root
-	existingInTrie, wasInTrie := s.t.GetAccount(addrHash[:])
+	accInTrie, isInTrie := s.t.GetAccount(addrHash[:])
 	_, wasUpdated := s.accountUpdates[addr]
-	if (!wasInTrie || existingInTrie == nil) && !wasUpdated {
+	if (!isInTrie || accInTrie == nil) && !wasUpdated {
 		if s.tracing(addr) {
 			fmt.Printf("[TRACE-S] DeleteAccount %s -> skipped (not in trie or updates)\n", addr.Hex())
 		}
@@ -1525,63 +1461,6 @@ func (s *witnessStateless) CreateContract(address accounts.Address) error {
 		fmt.Printf("[TRACE-S] CreateContract %s\n", addr.Hex())
 	}
 	return nil
-}
-
-// debugPrintPendingUpdates prints all pending state changes for debugging
-func (s *witnessStateless) debugPrintPendingUpdates(blockNum uint64) {
-	fmt.Printf("=== Block %d: Pending state updates before Finalize ===\n", blockNum)
-	fmt.Printf("Initial trie root: %x\n", s.t.Hash())
-	fmt.Printf("Trie root node type: %T\n", s.t.RootNode)
-
-	fmt.Printf("\n--- Account Updates (%d) ---\n", len(s.accountUpdates))
-	for addr, acc := range s.accountUpdates {
-		// Check if account exists in trie
-		addrHash, _ := common.HashData(addr[:])
-		existingAcc, existsInTrie := s.t.GetAccount(addrHash[:])
-		if acc != nil {
-			if existsInTrie && existingAcc != nil {
-				fmt.Printf("  UPDATE %x: Nonce=%d, Balance=%s, CodeHash=%x, Root=%x (exists in trie)\n",
-					addr[:], acc.Nonce, acc.Balance.String(), acc.CodeHash, acc.Root)
-			} else {
-				fmt.Printf("  INSERT %x: Nonce=%d, Balance=%s, CodeHash=%x, Root=%x (NEW - not in trie)\n",
-					addr[:], acc.Nonce, acc.Balance.String(), acc.CodeHash, acc.Root)
-			}
-		} else {
-			fmt.Printf("  DELETE %x\n", addr[:])
-		}
-	}
-
-	fmt.Printf("\n--- Created Contracts (%d) ---\n", len(s.created))
-	for addr := range s.created {
-		fmt.Printf("  CREATED %x\n", addr[:])
-	}
-
-	fmt.Printf("\n--- Deleted Accounts (%d) ---\n", len(s.deleted))
-	for addr := range s.deleted {
-		fmt.Printf("  DELETED %x\n", addr[:])
-	}
-
-	fmt.Printf("\n--- Storage Writes ---\n")
-	for addr, storageMap := range s.storageWrites {
-		fmt.Printf("  Account %x (%d slots):\n", addr[:8], len(storageMap))
-		for key, value := range storageMap {
-			fmt.Printf("    %x = %s\n", key[:], value.String())
-		}
-	}
-
-	fmt.Printf("\n--- Storage Deletes ---\n")
-	for addr, storageMap := range s.storageDeletes {
-		fmt.Printf("  Account %x (%d slots):\n", addr[:8], len(storageMap))
-		for key := range storageMap {
-			fmt.Printf("    %x\n", key[:])
-		}
-	}
-
-	fmt.Printf("\n--- Code Updates (%d) ---\n", len(s.codeUpdates))
-	for codeHash, code := range s.codeUpdates {
-		fmt.Printf("  %x: %d bytes\n", codeHash[:], len(code))
-	}
-	fmt.Println("=== End of pending updates ===")
 }
 
 // Finalize applies all pending updates to the trie and returns the new root hash
