@@ -151,18 +151,9 @@ func BenchmarkHexToKeybytes(b *testing.B) {
 }
 
 func TestRLPEncodeDecodeWithAccountsAndStorage(t *testing.T) {
-	// This test creates a single trie containing accounts with embedded storage subtries.
-	// - Accounts are created using UpdateAccount (creates AccountNode entries)
-	// - Storage is added using Update with composite keys (addressHash + storageKeyHash)
-	// - Storage gets embedded into AccountNode.Storage subtries
-	//
-	// Note: This test verifies that encoding captures all nodes (accounts + storage),
-	// and that the storage subtrie hashes match. Full roundtrip decode with AccountNode
-	// reconstruction is not yet implemented.
-
 	stateTrie := newEmpty()
 
-	// Define test addresses
+	// test addressed
 	addresses := []common.Address{
 		common.HexToAddress("0x1111111111111111111111111111111111111111"), // EOA
 		common.HexToAddress("0x2222222222222222222222222222222222222222"), // Contract with storage
@@ -265,25 +256,18 @@ func TestRLPEncodeDecodeWithAccountsAndStorage(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, encoded)
 
-	t.Logf("Unified state trie: %d nodes, %d bytes", len(encoded), totalSize(encoded))
-	t.Logf("Contains %d accounts (%d with storage), %d total storage slots",
-		len(addresses), 2, len(storageSlots1)+len(storageSlots2))
-	t.Logf("Original state root: %s", originalStateRoot.Hex())
-	t.Logf("Storage root 1: %s", storageRoot1.Hex())
-	t.Logf("Storage root 2: %s", storageRoot2.Hex())
-
 	// Decode the unified trie back
 	decodedStateTrie, err := RLPDecode(encoded)
 	require.NoError(t, err)
 
 	// Verify the decoded trie hash matches the original
 	decodedStateRoot := decodedStateTrie.Hash()
-	assert.Equal(t, originalStateRoot, decodedStateRoot, "decoded state trie hash should match original")
+	require.Equal(t, originalStateRoot, decodedStateRoot, "decoded state trie hash should match original")
 
 	// Verify that encoding captured all expected nodes:
 	// - Account trie nodes
 	// - Storage subtrie nodes for both contracts
-	assert.GreaterOrEqual(t, len(encoded), 10, "should have multiple nodes for accounts + storage")
+	require.GreaterOrEqual(t, len(encoded), 10, "should have multiple nodes for accounts + storage")
 
 	for i, addr := range addresses {
 		key := crypto.Keccak256(addr.Bytes())
@@ -292,12 +276,4 @@ func TestRLPEncodeDecodeWithAccountsAndStorage(t *testing.T) {
 		require.EqualValues(t, testAccounts[i], acc)
 	}
 
-}
-
-func totalSize(nodes [][]byte) int {
-	size := 0
-	for _, n := range nodes {
-		size += len(n)
-	}
-	return size
 }
