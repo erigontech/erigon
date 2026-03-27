@@ -679,16 +679,6 @@ jobs:
         fi
 
 
-  sync-gitbook:
-    name: Sync Gitbook docs branch and create variant if needed
-    permissions:
-      contents: write  # reusable workflow (gitbook-release.yml) pushes branches
-    needs: [publish-release]
-    if: ${{ inputs.perform_release }}
-    uses: ./.github/workflows/gitbook-release.yml
-    with:
-      release_version: ${{ inputs.release_version }}
-    secrets: inherit
 
   In-case-of-failure:
     name: "In case of failure: remove remote git tag pointing to the new version."
