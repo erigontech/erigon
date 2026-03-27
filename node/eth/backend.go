@@ -120,7 +120,6 @@ import (
 	"github.com/erigontech/erigon/rpc/mcp"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/txnprovider"
-	"github.com/erigontech/erigon/txnprovider/shutter"
 
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
@@ -192,9 +191,9 @@ type Ethereum struct {
 	waitForStageLoopStop chan struct{}
 
 	txPoolProvider            *txpoolcomp.Provider
+	shutterProvider           *txpoolcomp.ShutterProvider
 	txPoolGrpcServer          txpoolproto.TxpoolServer
 	txPoolRpcClient           txpoolproto.TxpoolClient
-	shutterPool               *shutter.Pool
 	blockBuilderNotifyNewTxns chan struct{}
 	downloaderProvider        *downloadercomp.Provider
 
@@ -825,31 +824,27 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}()
 	}
 
-	if config.Shutter.Enabled {
-		if config.TxPool.Disable {
-			panic("can't enable shutter pool when devp2p txpool is disabled")
-		}
-		contractBackend := contracts.NewDirectBackend(ethApi)
-		baseTxnProvider := backend.txPoolProvider.Pool
-		currentBlockNumReader := func(ctx context.Context) (*uint64, error) {
+	if config.Shutter.Enabled && config.TxPool.Disable {
+		panic("can't enable shutter pool when devp2p txpool is disabled")
+	}
+	backend.shutterProvider = &txpoolcomp.ShutterProvider{}
+	backend.shutterProvider.Configure(config.Shutter, logger)
+	if err = backend.shutterProvider.Initialize(ctx, txpoolcomp.ShutterDeps{
+		BaseTxnProvider:    txnProvider,
+		ContractBackend:    contracts.NewDirectBackend(ethApi),
+		StateChangesClient: backend.stateDiffClient,
+		CurrentBlock: func(ctx context.Context) (*uint64, error) {
 			tx, err := backend.chainDB.BeginRo(ctx)
 			if err != nil {
 				return nil, err
 			}
-
 			defer tx.Rollback()
 			return chain.CurrentBlockNumber(tx)
-		}
-		backend.shutterPool = shutter.NewPool(
-			logger,
-			config.Shutter,
-			baseTxnProvider,
-			contractBackend,
-			backend.stateDiffClient,
-			currentBlockNumReader,
-		)
-		txnProvider = backend.shutterPool
+		},
+	}); err != nil {
+		return nil, err
 	}
+	txnProvider = backend.shutterProvider.TxnProvider
 
 	blkBuilder := builder.NewBuilder(
 		backend.sentryCtx,
@@ -1451,17 +1446,7 @@ func (s *Ethereum) Start() error {
 	// to initialize it properly.
 	// 2) we cannot propose for block 1 regardless.
 	s.txPoolProvider.Start(s.sentryCtx, &s.bgComponentsEg)
-
-	if s.shutterPool != nil {
-		s.bgComponentsEg.Go(func() error {
-			defer s.logger.Info("[shutter] pool goroutine terminated")
-			err := s.shutterPool.Run(s.sentryCtx)
-			if err != nil && !errors.Is(err, context.Canceled) {
-				s.logger.Error("[shutter] Run error", "err", err)
-			}
-			return err
-		})
-	}
+	s.shutterProvider.Start(s.sentryCtx, &s.bgComponentsEg)
 
 	return nil
 }
