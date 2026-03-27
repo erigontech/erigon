@@ -36,8 +36,8 @@ import (
 	dl "github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
-	downloaderproto "github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon/node/ethconfig"
+	downloaderproto "github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
 
 // Provider holds the Downloader's runtime state. It implements the component
