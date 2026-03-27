@@ -12,9 +12,10 @@ Erigon use the following default port for each service:
 | engine    | `42069` | TCP & UDP | Snap sync (Bittorrent)      | Public        |
 | engine    | `8551`  | TCP       | Engine API (JWT auth)       | Private       |
 | sentry    | `30303` | TCP & UDP | eth/68 peering              | Public        |
-| sentry    | `30304` | TCP & UDP | eth/67 peering              | Public        |
+| sentry    | `30304` | TCP & UDP | eth/69 peering              | Public        |
 | sentry    | `9091`  | TCP       | incoming gRPC Connections   | Private       |
-| rpcdaemon | `8545`  | TCP       | HTTP & WebSockets & GraphQL | Private       |
+| rpcdaemon | `8545`  | TCP       | HTTP & GraphQL              | Private       |
+| rpcdaemon | `8546`  | TCP       | WebSockets                  | Private       |
 | shutter   | `23102` | TCP       | Peering                     | Public        |
 
 Typically, `30303` and `30304` are exposed to the internet to allow incoming peering connections. `9090` is exposed only internally for rpcdaemon or other connections, (e.g. rpcdaemon -> erigon). Port `8551` (JWT authenticated) is exposed only internally for Engine API JSON-RPC queries from the Consensus Layer node.
@@ -55,10 +56,6 @@ Here is an extensive list of port-related options from the [options](configuring
 ### BeaconAPI
 
 * `--beacon.api.port [value]`: Sets the port to listen for beacon api requests (default: `5555`)
-
-### Diagnostics
-
-* `--diagnostics.endpoint.port [value]`: Diagnostics HTTP server listening port (default: `6062`)
 
 ## Shutter Network Default Ports
 

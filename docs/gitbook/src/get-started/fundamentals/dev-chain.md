@@ -25,6 +25,9 @@ Key flags:
 | `--datadir=dev` | Store chain data in the `dev/` folder |
 | `--mine` | Enable block production |
 | `--dev.period <seconds>` | Block interval in seconds. Must be > 0 to mine empty blocks (default: 0, mines only when there are transactions) |
+| `--miner.etherbase <address>` | Coinbase address that receives block rewards. Defaults to a pre-funded dev account if not set. |
+| `--miner.gaslimit <value>` | Gas limit target for mined blocks (default: `30000000`). |
+| `--miner.extradata <hex>` | Extra data field appended to mined blocks (up to 32 bytes). |
 
 ## Running Multiple Nodes
 

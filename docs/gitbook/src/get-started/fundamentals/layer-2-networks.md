@@ -1,5 +1,11 @@
 # Layer 2 Networks
 
+### Polygon PoS — Stateless Witness Protocol
+
+Erigon supports the WIT (stateless witness) protocol for Polygon PoS chains via `--polygon.wit-protocol`. This flag is automatically enabled when running a Bor/Polygon chain and does not need to be set explicitly in most cases. It enables gossip and exchange of stateless witnesses between peers, which is used for validating blocks without full state.
+
+---
+
 ### Running an Op-Node alongside Erigon
 
 To run an op-node alongside Erigon, follow these steps:

@@ -59,6 +59,8 @@ These flags control database performance and memory usage.
   * Default: `2`
 * `--batchSize value`: Sets the batch size for the execution stage.
   * Default: `512M`
+* `--etl.bufferSize value`: Buffer size for ETL (Extract-Transform-Load) operations used during sync stages.
+  * Default: `256MB`
 * `--bodies.cache value`: Sets the size limit for the block bodies cache.
   * Default: `268435456`
 * `--state.cache value`: Sets the amount of data to store in the StateCache.
@@ -76,7 +78,7 @@ Flags for managing how old chain data is handled and stored.
   * Default: `0`
 * `--prune.distance.blocks value`: Keeps block history for the latest `N` blocks.
   * Default: `0`
-* `--prune.experimental.include-commitment-history, --experimental.commitment-history`: Enables faster `eth_getProof` for executed blocks.
+* `--prune.include-commitment-history`: Enables faster `eth_getProof` for executed blocks. Aliases: `--prune.experimental.include-commitment-history`, `--experimental.commitment-history`.
   * Default: `false`
 * `--snap.keepblocks`: Keeps ancient blocks in the database for debugging.
   * Default: `false`
@@ -143,6 +145,15 @@ These flags manage network connectivity, peer discovery, and traffic control.
 * `--trustedpeers value`: Comma-separated enode URLs for trusted peers.
 * `--maxpeers value`: The maximum number of network peers.
   * Default: `32`
+* `--maxpendpeers value`: Maximum number of pending (handshaking) peer connections.
+  * Default: `1000`
+* `--discovery.v4`: Enables/disables IPv4 peer discovery.
+  * Default: `true`
+* `--discovery.v5`: Enables/disables DISCV5 topic discovery. Equivalent to `--v5disc`.
+  * Default: `true`
+* `--whitelist value`: Comma-separated `block_number=block_hash` pairs enforced as checkpoints. Peers that do not agree on these blocks are disconnected. Useful for enforcing a canonical chain after a contentious fork.
+* `--aa`: Enables Account Abstraction (EIP-4337) transaction support in the mempool.
+  * Default: `false`
 
 ### RPC & API
 
@@ -172,16 +183,31 @@ Flags for configuring various RPC servers and their behavior.
 * `--http.corsdomain value`: A comma-separated list of domains for cross-origin requests.
 * `--http.vhosts value`: A comma-separated list of virtual hostnames.
   * Default: `localhost`
+* `--http.rpcprefix value`: HTTP path prefix for the JSON-RPC handler (e.g. `/rpc`). Useful for reverse-proxy setups. Empty string means the handler is mounted at `/`.
+* `--http.trace`: Logs every incoming HTTP request at INFO level. Useful for auditing or debugging traffic.
+  * Default: `false`
+* `--http.dbg.single`: Allows per-request debug mode when the request carries a `dbg: true` header.
+  * Default: `false`
+* `--ipcdisable`: Disables the IPC (Unix socket / named pipe) endpoint. Recommended for production servers where local IPC access is not needed.
+  * Default: `false`
+* `--ipcpath value`: Custom filename for the IPC socket within the datadir (OS default if not set).
 * `--authrpc.vhosts value`: A comma-separated list of virtual hostnames for the Engine API.
   * Default: `localhost`
 * `--http.api value`: The APIs offered over the HTTP-RPC interface.
   * Default: `eth,erigon,engine`
 * `--ws`: Enables the WS-RPC server.
   * Default: `false`
+* `--ws.addr value`: The WS-RPC server listening interface.
+  * Default: `localhost`
 * `--ws.port value`: The WS-RPC server listening port.
   * Default: `8546`
+* `--ws.api value`: The APIs offered over the WebSocket interface. If unset, inherits from `--http.api`.
+* `--ws.origins value`: Comma-separated list of allowed WebSocket origins. Empty by default (all cross-origin connections denied). Set explicitly when browser-based clients connect via WebSocket.
+* `--ws.rpcprefix value`: HTTP path prefix for the WebSocket JSON-RPC handler. Useful for reverse-proxy setups where WS is exposed on a sub-path.
 * `--ws.compression`: Enables compression over WebSocket.
   * Default: `true`
+* `--ws.api.subscribelogs.channelsize value`: Buffer size for WebSocket log subscription channels.
+  * Default: `8192`
 * `--rpc.batch.concurrency value`: Limits the number of goroutines for batch requests.
   * Default: `2`
 * `--rpc.streaming.disable`: Disables JSON streaming for heavy endpoints.
@@ -197,6 +223,14 @@ Flags for configuring various RPC servers and their behavior.
   * Default: `0` (unlimited)
 * `--rpc.allow-unprotected-txs`: Allows unprotected transactions via RPC.
   * Default: `false`
+* `--trace.compat`: Enables compatibility mode for `trace_*` calls (adjusts output format for tooling that expects Geth-style traces).
+  * Default: `false`
+* `--trace.maxtraces value`: Maximum number of traces returned per `trace_*` call. `0` means unlimited.
+  * Default: `200`
+* `--state.stream.disable`: Disables JSON streaming for heavy state endpoints, buffering the full response before sending.
+  * Default: `false`
+* `--ots.search.max.pagesize value`: Maximum page size for Otterscan search queries (`ots_search*` methods).
+  * Default: `25`
 * `--rpc.txfeecap value`: Sets a cap on transaction fees in ether.
   * Default: `1`
 * `--rpc.slow value`: Logs RPC requests slower than the specified threshold.
@@ -231,6 +265,11 @@ Flags for configuring various RPC servers and their behavior.
   * Default: `2m0s`
 * `--healthcheck`: Enables gRPC health checks.
   * Default: `false`
+* `--tls`: Enables TLS on the private gRPC API (`--private.api.addr`). See [TLS Authentication](tls-authentication.md) for certificate setup.
+  * Default: `false`
+* `--tls.cert value`: Path to the TLS certificate file for the private API.
+* `--tls.key value`: Path to the TLS private key file for the private API.
+* `--tls.cacert value`: Path to the CA certificate for mutual TLS verification on the private API.
 
 ### Logging and Profiling
 
@@ -254,6 +293,7 @@ Flags for controlling logging and performance profiling.
   * Default: `info`
 * `--log.delays`: Enables block delay logging.
   * Default: `false`
+* `--vmodule value`: Per-module verbosity overrides, format: `pattern=level` (e.g. `--vmodule=eth/*=5,p2p=4`). Overrides `--verbosity` for matching packages. See [Logs](logs.md) for details.
 * `--pprof`: Enables the pprof HTTP server.
   * Default: `false`
 * `--pprof.addr value`: The pprof HTTP server listening interface.
@@ -288,6 +328,8 @@ Flags related to consensus mechanisms and network forks.
   * Default: `20`
 * `--gpo.percentile value`: The percentile of recent transaction gas prices to use for a suggested gas price.
   * Default: `60`
+* `--gpo.maxprice value`: Maximum gas price cap returned by the oracle (in wei). Protects clients from unreasonably high suggestions during fee spikes.
+  * Default: `500000000000` (500 Gwei)
 * `--proposer.disable`: Disables the PoS proposer.
   * Default: `false`
 * `--bor.heimdall value`: The URL of the Heimdall service.
@@ -338,6 +380,13 @@ These flags control the block synchronization and data downloading process, incl
 * `--sync.loop.break.after value`: Sets the last stage of the sync loop to run.
 * `--bad.block value`: Marks a block as bad and forces a reorg.
 * `--webseed value`: Comma-separated URLs for network support infrastructure.
+* `--snap.download.to.block value`: Limits snapshot downloads to a specific block number. Useful for partial historical sync or disk space constraints.
+  * Default: `0` (no limit)
+* `--fcu.timeout value`: Timeout for synchronous Fork Choice Update processing. After this duration FCU handling switches to async. Set to `0` to always process synchronously (relevant for MEV builders and validators requiring low-latency FCU responses).
+* `--fcu.background.prune`: Enables background database pruning triggered after each Fork Choice Update, spreading I/O cost over time.
+  * Default: `false`
+* `--experimental.concurrent-commitment`: Enables concurrent trie commitment during block execution (experimental; may improve execution throughput on multi-core hardware).
+  * Default: `false`
 
 #### BitTorrent Options
 
@@ -410,6 +459,44 @@ Flags for configuring the Shutter Network encrypted transactions mempool.
 * `--shutter.p2p.bootstrap.nodes value`: Overrides the default P2P bootstrap nodes.
 * `--shutter.p2p.listen.port value`: Overrides the default P2P listen port.
   * Default: `0`
+
+### Silkworm (Experimental Embedded Components)
+
+Silkworm is a C++ library that can optionally replace parts of Erigon's block execution and RPC handling. All Silkworm flags are experimental and subject to change.
+
+{% hint style="warning" %}
+Silkworm integration requires `libsilkworm_capi.so` to be present alongside the binary. See [Common Errors](../../help-center/common-errors-and-solutions.md) if the library is missing.
+{% endhint %}
+
+* `--silkworm.exec`: Enables the Silkworm block execution engine.
+  * Default: `false`
+* `--silkworm.rpc`: Enables the embedded Silkworm RPC service.
+  * Default: `false`
+* `--silkworm.sentry`: Enables the embedded Silkworm Sentry service.
+  * Default: `false`
+* `--silkworm.verbosity value`: Log level for the Silkworm console output.
+  * Default: `info`
+* `--silkworm.contexts value`: Number of I/O contexts for Silkworm RPC/Sentry. `0` lets Silkworm choose automatically.
+  * Default: `0`
+* `--silkworm.workers value`: Worker threads for the embedded Silkworm RPC. `0` lets Silkworm choose automatically.
+  * Default: `0`
+* `--silkworm.rpc.compatibility`: Enables JSON-RPC compatibility mode for embedded Silkworm RPC.
+  * Default: `true`
+* `--silkworm.rpc.log`: Enables interface logging for the embedded Silkworm RPC.
+  * Default: `false`
+* `--silkworm.rpc.log.maxsize value`: Maximum interface log file size in MB.
+  * Default: `1`
+* `--silkworm.rpc.log.maxfiles value`: Maximum number of interface log files to retain.
+  * Default: `100`
+* `--silkworm.rpc.log.response`: Dumps full responses in the interface logs.
+  * Default: `false`
+
+### Miscellaneous
+
+* `--allow-insecure-unlock`: Allows `personal_unlockAccount` calls over HTTP RPC. **Never enable on production or public-facing nodes** — account unlocking over HTTP is a security risk.
+  * Default: `false`
+* `--keep.stored.chain.config`: Prevents Erigon from overriding the chain config stored in the database on startup. Useful when re-syncing with a custom chain configuration.
+  * Default: `false`
 
 ## Configuration file
 
