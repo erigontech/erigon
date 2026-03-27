@@ -90,6 +90,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node"
 	downloadercomp "github.com/erigontech/erigon/node/components/downloader"
+	txpoolcomp "github.com/erigontech/erigon/node/components/txpool"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/ethstats"
@@ -120,8 +121,6 @@ import (
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/txnprovider"
 	"github.com/erigontech/erigon/txnprovider/shutter"
-	"github.com/erigontech/erigon/txnprovider/txpool"
-	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
@@ -192,7 +191,7 @@ type Ethereum struct {
 
 	waitForStageLoopStop chan struct{}
 
-	txPool                    *txpool.TxPool
+	txPoolProvider            *txpoolcomp.Provider
 	txPoolGrpcServer          txpoolproto.TxpoolServer
 	txPoolRpcClient           txpoolproto.TxpoolClient
 	shutterPool               *shutter.Pool
@@ -386,7 +385,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.genesisHash = genesis.Hash()
 
 	setDefaultMinerGasLimit(config, chainConfig)
-	setBorDefaultTxPoolPriceLimit(&config.TxPool, chainConfig, logger)
+
+	backend.txPoolProvider = &txpoolcomp.Provider{}
+	backend.txPoolProvider.Configure(config.TxPool, chainConfig, logger)
 
 	logger.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
 	if dbg.OnlyCreateDB {
@@ -731,33 +732,27 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	)
 
 	backend.stateDiffClient = direct.NewStateDiffClientDirect(kvRPC)
-	var txnProvider txnprovider.TxnProvider
-	if config.TxPool.Disable {
-		backend.txPoolGrpcServer = &txpool.GrpcDisabled{}
-	} else {
-		sentries := backend.sentriesClient.Sentries()
-		blockBuilderNotifyNewTxns := func() {
-			select {
-			case backend.blockBuilderNotifyNewTxns <- struct{}{}:
-			default:
-			}
-		}
-		backend.txPool, backend.txPoolGrpcServer, err = txpool.Assemble(
-			ctx,
-			config.TxPool,
-			backend.chainDB,
-			kvcache.NewDummy(),
-			sentries,
-			backend.stateDiffClient,
-			blockBuilderNotifyNewTxns,
-			logger,
-			direct.NewEthBackendClientDirect(backend.ethBackendRPC),
-		)
-		if err != nil {
-			return nil, err
-		}
 
-		txnProvider = backend.txPool
+	blockBuilderNotifyNewTxns := func() {
+		select {
+		case backend.blockBuilderNotifyNewTxns <- struct{}{}:
+		default:
+		}
+	}
+	if err = backend.txPoolProvider.Initialize(ctx, txpoolcomp.Deps{
+		ChainDB:            backend.chainDB,
+		Sentries:           backend.sentriesClient.Sentries(),
+		StateChangesClient: backend.stateDiffClient,
+		EthBackend:         direct.NewEthBackendClientDirect(backend.ethBackendRPC),
+		BlockBuilderNotify: blockBuilderNotifyNewTxns,
+	}); err != nil {
+		return nil, err
+	}
+	backend.txPoolGrpcServer = backend.txPoolProvider.GrpcServer
+
+	var txnProvider txnprovider.TxnProvider
+	if backend.txPoolProvider.IsEnabled() {
+		txnProvider = backend.txPoolProvider.Pool
 	}
 
 	execmoduleCache := &execmodule.Cache{}
@@ -835,7 +830,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			panic("can't enable shutter pool when devp2p txpool is disabled")
 		}
 		contractBackend := contracts.NewDirectBackend(ethApi)
-		baseTxnProvider := backend.txPool
+		baseTxnProvider := backend.txPoolProvider.Pool
 		currentBlockNumReader := func(ctx context.Context) (*uint64, error) {
 			tx, err := backend.chainDB.BeginRo(ctx)
 			if err != nil {
@@ -1451,20 +1446,11 @@ func (s *Ethereum) Start() error {
 		go stageloop.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, s.blockReader, hook)
 	}
 
-	if s.txPool != nil {
-		// We start the transaction pool on startup, for a couple of reasons:
-		// 1) Hive tests requires us to do so and starting it from eth_sendRawTransaction is not viable as we have not enough data
-		// to initialize it properly.
-		// 2) we cannot propose for block 1 regardless.
-		s.bgComponentsEg.Go(func() error {
-			defer s.logger.Info("[devp2p] txn pool goroutine terminated")
-			err := s.txPool.Run(s.sentryCtx)
-			if err != nil && !errors.Is(err, context.Canceled) {
-				s.logger.Error("[devp2p] Run error", "err", err)
-			}
-			return err
-		})
-	}
+	// We start the transaction pool on startup, for a couple of reasons:
+	// 1) Hive tests requires us to do so and starting it from eth_sendRawTransaction is not viable as we have not enough data
+	// to initialize it properly.
+	// 2) we cannot propose for block 1 regardless.
+	s.txPoolProvider.Start(s.sentryCtx, &s.bgComponentsEg)
 
 	if s.shutterPool != nil {
 		s.bgComponentsEg.Go(func() error {
@@ -1629,15 +1615,6 @@ func setDefaultMinerGasLimit(config *ethconfig.Config, chainConfig *chain.Config
 		gasLimit := ethconfig.DefaultBlockGasLimitByChain(chainConfig)
 		config.Builder.GasLimit = &gasLimit
 	}
-}
-
-// setBorDefaultTxPoolPriceLimit enforces MinFeeCap to be equal to BorDefaultTxPoolPriceLimit (25gwei by default)
-func setBorDefaultTxPoolPriceLimit(config *txpoolcfg.Config, chainConfig *chain.Config, logger log.Logger) {
-	if chainConfig.Bor != nil && config.MinFeeCap != txpoolcfg.BorDefaultTxPoolPriceLimit {
-		logger.Warn("Sanitizing invalid bor min fee cap", "provided", config.MinFeeCap, "updated", txpoolcfg.BorDefaultTxPoolPriceLimit)
-		config.MinFeeCap = txpoolcfg.BorDefaultTxPoolPriceLimit
-	}
-	_ = config.MinFeeCap
 }
 
 func sentryMux(sentries []sentryproto.SentryClient) sentryproto.SentryClient {
