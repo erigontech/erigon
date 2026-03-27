@@ -814,6 +814,9 @@ func stSstore(_ uint64, scope *CallContext) string {
 }
 
 func opJump(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	if evm.Cancelled() {
+		return pc, nil, errStopToken
+	}
 	pos := scope.Stack.pop()
 	if valid, usedBitmap := scope.Contract.validJumpdest(pos); !valid {
 		if usedBitmap {
@@ -841,6 +844,9 @@ func stJump(_ uint64, scope *CallContext) string {
 }
 
 func opJumpi(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	if evm.Cancelled() {
+		return pc, nil, errStopToken
+	}
 	pos, cond := scope.Stack.pop(), scope.Stack.pop()
 	if !cond.IsZero() {
 		if valid, usedBitmap := scope.Contract.validJumpdest(pos); !valid {
