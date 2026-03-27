@@ -56,3 +56,20 @@ Your internet bandwidth is also an important factor, particularly for sync speed
 | -------------- | -------------------- | ----------------------- |
 | Staking/Mining | 10 Mbps              | 50 Mbps                 |
 | Non-Staking    | 5 Mbps               | 25 Mbps                 |
+
+## Sync Times
+
+Approximate sync times from scratch to chain tip. Results may vary depending on hardware and bandwidth.
+
+| Chain    | Archive              | Full                 | Minimal            |
+| -------- | -------------------- | -------------------- | ------------------ |
+| Ethereum | 7 hours, 55 minutes  | 4 hours, 23 minutes  | 1 hour, 41 minutes |
+| Gnosis   | 2 hours, 10 minutes  | 1 hour, 5 minutes    | 33 minutes         |
+
+{% hint style="info" %}
+Polygon is supported up to Erigon v3.1.x only. For Polygon, refer to [https://github.com/0xPolygon/erigon/releases](https://github.com/0xPolygon/erigon/releases).
+{% endhint %}
+
+{% hint style="success" %}
+See [Sync Modes](fundamentals/sync-modes.md) for a detailed explanation of Archive, Full, and Minimal modes.
+{% endhint %}
