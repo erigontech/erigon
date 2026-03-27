@@ -2,6 +2,7 @@ package state_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"math"
 	randOld "math/rand"
@@ -298,6 +299,58 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 
 func composite(k, k2 []byte) []byte {
 	return append(common.Copy(k), k2...)
+}
+
+// makeAccountAddr generates a deterministic 20-byte account address with uniform
+// first-nibble distribution using sha256(0xAC || idx).
+func makeAccountAddr(idx uint64) []byte {
+	var buf [9]byte
+	buf[0] = 0xAC
+	binary.BigEndian.PutUint64(buf[1:], idx)
+	h := sha256.Sum256(buf[:])
+	return h[:length.Addr]
+}
+
+// makeStorageKey generates a deterministic 52-byte composite storage key
+// (20-byte addr + 32-byte slot) using sha256(0x57 || addrIdx*maxSlots+slotIdx).
+func makeStorageKey(addrIdx, slotIdx uint64, maxSlots uint64) []byte {
+	addr := makeAccountAddr(addrIdx)
+	var buf [9]byte
+	buf[0] = 0x57
+	binary.BigEndian.PutUint64(buf[1:], addrIdx*maxSlots+slotIdx)
+	h := sha256.Sum256(buf[:])
+	return composite(addr, h[:length.Hash])
+}
+
+// makeCodeValue generates deterministic bytecode of 32-256 bytes.
+func makeCodeValue(idx uint64, rnd *rndGen) []byte {
+	size := 32 + rnd.IntN(225) // 32..256 bytes
+	code := make([]byte, size)
+	// Use sha256 of index as repeatable seed data
+	var buf [9]byte
+	buf[0] = 0xCD
+	binary.BigEndian.PutUint64(buf[1:], idx)
+	h := sha256.Sum256(buf[:])
+	// Fill code with hash-derived bytes, repeating as needed
+	for i := 0; i < size; i++ {
+		code[i] = h[i%len(h)]
+	}
+	return code
+}
+
+func TestMakeAccountAddr_NibbleDistribution(t *testing.T) {
+	nibbles := make(map[byte]int, 16)
+	const count = 1000
+	for i := uint64(0); i < count; i++ {
+		addr := makeAccountAddr(i)
+		firstNibble := addr[0] >> 4
+		nibbles[firstNibble]++
+	}
+	// All 16 nibble values must be present
+	for n := byte(0); n < 16; n++ {
+		require.Positive(t, nibbles[n], "missing first nibble %x in %d generated keys", n, count)
+	}
+	t.Logf("nibble distribution over %d keys: %v", count, nibbles)
 }
 
 func TestAggregatorV3_RestartOnDatadir(t *testing.T) {
