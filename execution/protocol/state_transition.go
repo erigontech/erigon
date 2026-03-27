@@ -335,19 +335,18 @@ func (st *StateTransition) preCheck(gasBailout bool, intrinsicGasResult mdgas.In
 
 	// EIP-7825: Transaction Gas Limit Cap.
 	// Intrinsic gas is computed before preCheck() in TransitionDb so that the
-	// fork-dependent cap (see IntrinsicGasCalcResult.RegularGasCap) can be
-	// validated here, before buyGas(), so pool gas is never consumed for
-	// rejected txs.
+	// fork-dependent cap can be validated here, before buyGas(), so pool gas
+	// is never consumed for rejected txs.
 	if st.msg.CheckGas() && rules.IsOsaka {
-		capGas := intrinsicGasResult.RegularGasCap(st.msg.Gas(), rules.IsAmsterdam)
-		if capGas > params.MaxTxnGasLimit {
-			if rules.IsAmsterdam && capGas != st.msg.Gas() {
-				// Amsterdam: intrinsic regular gas (or calldata floor) exceeds
-				// the cap — the transaction cannot execute.
+		if rules.IsAmsterdam {
+			// EIP-8037: TX_MAX_GAS_LIMIT applies to the regular gas dimension only.
+			gasToCap := max(intrinsicGasResult.RegularGas, intrinsicGasResult.FloorGasCost)
+			if gasToCap > params.MaxTxnGasLimit {
 				return fmt.Errorf("%w: regular gas cap %d exceeds TX_MAX_GAS_LIMIT %d",
-					ErrIntrinsicGas, capGas, params.MaxTxnGasLimit)
+					ErrIntrinsicGas, gasToCap, params.MaxTxnGasLimit)
 			}
-			return fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, from, capGas)
+		} else if st.msg.Gas() > params.MaxTxnGasLimit {
+			return fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, from, st.msg.Gas())
 		}
 	}
 
