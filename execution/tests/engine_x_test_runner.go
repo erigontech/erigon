@@ -143,26 +143,35 @@ func (extr *EngineXTestRunner) getOrCreateTester(fork Fork, preAllocHash PreAllo
 		return engineapitester.EngineApiTester{}, err
 	}
 	forkConfig = &forkConfigCopy
-	env := alloc.Environment
-	genesis := types.Genesis{
-		Config:     forkConfig,
-		Alloc:      alloc.Alloc,
-		ExtraData:  []byte{0},
-		Coinbase:   env.Coinbase,
-		GasLimit:   uint64(env.GasLimit),
-		Difficulty: uint256.NewInt(uint64(env.Difficulty)),
-		Timestamp:  uint64(env.Timestamp),
-	}
-	if env.BaseFee != nil {
-		genesis.BaseFee = uint256.NewInt(uint64(*env.BaseFee))
-	}
-	if env.ExcessBlobGas != nil {
-		v := uint64(*env.ExcessBlobGas)
-		genesis.ExcessBlobGas = &v
-	}
-	if env.BlobGasUsed != nil {
-		v := uint64(*env.BlobGasUsed)
-		genesis.BlobGasUsed = &v
+	var genesis types.Genesis
+	if alloc.Environment.GasLimit != 0 {
+		// New format: build genesis from environment fields
+		env := alloc.Environment
+		genesis = types.Genesis{
+			Config:     forkConfig,
+			Alloc:      alloc.Alloc,
+			ExtraData:  []byte{0},
+			Coinbase:   env.Coinbase,
+			GasLimit:   uint64(env.GasLimit),
+			Difficulty: uint256.NewInt(uint64(env.Difficulty)),
+			Timestamp:  uint64(env.Timestamp),
+		}
+		if env.BaseFee != nil {
+			genesis.BaseFee = uint256.NewInt(uint64(*env.BaseFee))
+		}
+		if env.ExcessBlobGas != nil {
+			v := uint64(*env.ExcessBlobGas)
+			genesis.ExcessBlobGas = &v
+		}
+		if env.BlobGasUsed != nil {
+			v := uint64(*env.BlobGasUsed)
+			genesis.BlobGasUsed = &v
+		}
+	} else {
+		// Old format: genesis parsed directly from JSON
+		genesis = alloc.Genesis
+		genesis.Alloc = alloc.Alloc
+		genesis.Config = forkConfig
 	}
 	engineApiClientTimeout := 10 * time.Minute
 	tester := engineapitester.InitialiseEngineApiTester(extr.t, engineapitester.EngineApiTesterInitArgs{
@@ -298,6 +307,7 @@ type PreAllocHash string
 
 type PreAlloc struct {
 	Environment EngineXEnvironment `json:"environment"`
+	Genesis     types.Genesis      `json:"genesis"`
 	Alloc       types.GenesisAlloc `json:"pre"`
 }
 
