@@ -70,13 +70,13 @@ This proves that `ERIGON_REBUILD_CONCURRENT_COMMITMENT=true` produces identical 
 **Files:**
 - Modify: `db/state/squeeze_concurrent_rebuild_test.go`
 
-- [ ] Close aggregator, reopen via `testAgg` + `temporal.New` (following pattern from `TestAggregator_RebuildCommitmentBasedOnFiles`)
-- [ ] Call `wipeCommitment(t, db, agg, dirs)` to delete all commitment state
-- [ ] Record `start := time.Now()`
-- [ ] Call `state.RebuildCommitmentFiles(ctx, db, &rawdbv3.TxNums, log.New(), true)` — sequential (env var not set)
-- [ ] Record sequential `rebuildResult`: root, duration, file sizes
-- [ ] `require.Equal(t, baselineRoot, sequentialResult.root)` — hard failure if sequential doesn't match baseline
-- [ ] Log sequential rebuild stats
+- [x] Close aggregator, reopen via `testAgg` + `temporal.New` (following pattern from `TestAggregator_RebuildCommitmentBasedOnFiles`)
+- [x] Call `wipeCommitment(t, db, agg, dirs)` to delete all commitment state
+- [x] Record `start := time.Now()`
+- [x] Call `state.RebuildCommitmentFiles(ctx, db, &rawdbv3.TxNums, log.New(), true)` — sequential (env var not set)
+- [x] Record sequential `rebuildResult`: root, duration, file sizes
+- [x] `require.Equal(t, baselineRoot, sequentialResult.root)` — hard failure if sequential doesn't match baseline
+- [x] Log sequential rebuild stats
 
 ### Task 4: Implement Phase 3 — concurrent rebuild (primary target)
 

@@ -382,9 +382,44 @@ func TestConcurrentRebuildCommitment(t *testing.T) {
 	}
 
 	// Store baseline result for later comparison
-	_ = rebuildResult{root: baselineRoot, duration: genDuration, fileSizes: originalSizes}
+	baselineResult := rebuildResult{root: baselineRoot, duration: genDuration, fileSizes: originalSizes}
 
-	// Phases 2-4 (sequential rebuild, concurrent rebuild, comparison) will be added in subsequent tasks.
+	// ========== Phase 2: Sequential Rebuild (Ground Truth) ==========
+	t.Logf("=== Phase 2: Sequential Rebuild ===")
+
+	// Close aggregator, reopen with fresh state
+	db, agg = reopenAggregator(t, db, agg, stepSize)
+
+	// Wipe all commitment state
+	wipeCommitment(t, db, agg, dirs)
+
+	// Run sequential rebuild (env var not set → defaults to false → sequential mode)
+	seqStart := time.Now()
+	seqRoot, err := state.RebuildCommitmentFiles(ctx, db, &rawdbv3.TxNums, log.New(), true)
+	require.NoError(t, err)
+	seqDuration := time.Since(seqStart)
+
+	// Collect file sizes after rebuild
+	seqSizes := collectCommitmentFiles(dirs)
+
+	sequentialResult := rebuildResult{
+		root:      seqRoot,
+		duration:  seqDuration,
+		fileSizes: seqSizes,
+	}
+
+	// Hard failure if sequential doesn't match baseline
+	require.Equal(t, baselineRoot, sequentialResult.root,
+		"sequential rebuild root must match baseline: baseline=%x sequential=%x", baselineRoot, sequentialResult.root)
+
+	t.Logf("Sequential rebuild: root=%x time=%s files=%d",
+		sequentialResult.root, sequentialResult.duration, len(sequentialResult.fileSizes))
+	for f, sz := range seqSizes {
+		t.Logf("  %s: %d bytes", f, sz)
+	}
+
+	// Phases 3-4 (concurrent rebuild, comparison) will be added in subsequent tasks.
+	_ = baselineResult
 	_ = dirs
 	_ = agg
 	_ = db
