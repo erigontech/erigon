@@ -12,7 +12,6 @@ network_params:
   preset: "minimal"
   deneb_fork_epoch: 0
   electra_fork_epoch: 0
-  fulu_fork_epoch: 99999999
 additional_services:
   - assertoor
 assertoor_params:
