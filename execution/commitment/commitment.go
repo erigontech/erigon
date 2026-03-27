@@ -1691,10 +1691,6 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 	}
 }
 
-// TouchHashedKey adds a pre-hashed key (in nibble format) to the update set without a corresponding plain key.
-// This is used for witness generation of collapse siblings and intermediate trie nodes
-// where no plain key exists. The key will be included in HashSort order and processed
-// by GenerateWitness, which will skip the DB lookup when plainKey is empty.
 func (t *Updates) TouchHashedKey(hashedKey []byte) {
 	switch t.mode {
 	case ModeDirect:
