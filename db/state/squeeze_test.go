@@ -363,8 +363,9 @@ func makeStorageKey(addrIdx, slotIdx uint64, maxSlots uint64) []byte {
 }
 
 // makeCodeValue generates deterministic bytecode of 32-256 bytes.
-func makeCodeValue(idx uint64, rnd *rndGen) []byte {
-	size := 32 + rnd.IntN(225) // 32..256 bytes
+// Size is derived from idx for full reproducibility independent of call order.
+func makeCodeValue(idx uint64) []byte {
+	size := 32 + int(idx%225) // 32..256 bytes
 	code := make([]byte, size)
 	// Use sha256 of index as repeatable seed data
 	var buf [9]byte
@@ -588,12 +589,10 @@ func TestGenerateCommitmentRebuildData(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
-	rnd := newRnd(42)
-
-	// Calculate per-tx batch sizes (distribute keys evenly across txs)
-	accPerTx := numAccounts / totalTxs
-	storPerTx := totalStorage / totalTxs
-	codePerTx := totalCode / totalTxs
+	// Calculate per-tx batch sizes (ceiling division to ensure all keys are written)
+	accPerTx := (numAccounts + totalTxs - 1) / totalTxs
+	storPerTx := (totalStorage + totalTxs - 1) / totalTxs
+	codePerTx := (totalCode + totalTxs - 1) / totalTxs
 	if accPerTx == 0 {
 		accPerTx = 1
 	}
@@ -649,7 +648,7 @@ func TestGenerateCommitmentRebuildData(t *testing.T) {
 		// Write code batch
 		for i := uint64(0); i < codePerTx && codeIdx < numCodeAccounts; i++ {
 			addr := makeAccountAddr(codeIdx)
-			code := makeCodeValue(codeIdx, rnd)
+			code := makeCodeValue(codeIdx)
 			err = domains.DomainPut(kv.CodeDomain, rwTx, addr, code, txNum, nil)
 			require.NoError(t, err)
 
@@ -698,7 +697,9 @@ func TestGenerateCommitmentRebuildData(t *testing.T) {
 
 	t.Logf("Done. Final root: %x", lastRoot)
 	t.Logf("Output datadir: %s", dirs.DataDir)
-	fmt.Fprintf(os.Stderr, "\n=== DATADIR: %s ===\n", dirs.DataDir)
+	if persistentDir != "" {
+		fmt.Fprintf(os.Stderr, "\n=== DATADIR: %s ===\n", dirs.DataDir)
+	}
 }
 
 func TestAggregatorV3_SharedDomains(t *testing.T) {
