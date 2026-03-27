@@ -56,6 +56,8 @@ type CallArgs struct {
 	ChainID              *hexutil.Big              `json:"chainId,omitempty"`
 	BlobVersionedHashes  []common.Hash             `json:"blobVersionedHashes,omitempty"`
 	AuthorizationList    []types.JsonAuthorization `json:"authorizationList"`
+
+	SkipL1Charging *bool `json:"skipL1Charging"` // Arbitrum
 }
 
 func (args *CallArgs) FromOrEmpty() accounts.Address {
@@ -317,6 +319,19 @@ func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (
 	return tx, nil
 }
 
+// Arbitrum: raises the vanilla gas cap by the tx's L1 data costs in L2 terms.
+func (args *CallArgs) L2OnlyGasCap(gasCap uint64, header *types.Header) (uint64, error) {
+	msg, err := args.ToMessage(gasCap, nil)
+	if err != nil {
+		return 0, err
+	}
+	InterceptRPCGasCap(&gasCap, msg, header)
+	return gasCap, nil
+}
+
+// Allows ArbOS to update the gas cap so that it ignores the message's specific L1 poster costs.
+var InterceptRPCGasCap = func(gascap *uint64, msg *types.Message, header *types.Header) {}
+
 // Account indicates the overriding fields of account during the execution of
 // a message call.
 // Note, state and stateDiff can't be specified at the same time. If state is
@@ -538,7 +553,6 @@ func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, b
 type RPCTransaction struct {
 	BlockHash            *common.Hash               `json:"blockHash"`
 	BlockNumber          *hexutil.Big               `json:"blockNumber"`
-	BlockTimestamp       *hexutil.Uint64            `json:"blockTimestamp"`
 	From                 common.Address             `json:"from"`
 	Gas                  hexutil.Uint64             `json:"gas"`
 	GasPrice             *hexutil.Big               `json:"gasPrice,omitempty"`
@@ -685,7 +699,6 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime u
 	if blockHash != (common.Hash{}) {
 		result.BlockHash = &blockHash
 		result.BlockNumber = (*hexutil.Big)(new(big.Int).SetUint64(blockNumber))
-		result.BlockTimestamp = (*hexutil.Uint64)(&blockTime)
 		result.TransactionIndex = (*hexutil.Uint64)(&index)
 	}
 	return result
