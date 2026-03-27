@@ -17,6 +17,8 @@
 package cltypes
 
 import (
+	"fmt"
+
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 	"github.com/erigontech/erigon/common"
@@ -117,7 +119,14 @@ func (a *Contribution) Copy() *Contribution {
 }
 
 func (a *Contribution) DecodeSSZ(buf []byte, version int) error {
-	a.AggregationBits = make([]byte, SyncCommitteeAggregationBitsSize)
+	// The AggregationBits size depends on SyncCommitteeSize/SyncCommitteeSubnetCount which
+	// differs between presets. Infer from the buffer: total = slot(8) + root(32) + subcommittee(8) + sig(96) + bits.
+	const fixedSize = length.BlockNum*2 + length.Hash + length.Bytes96
+	aggrBitsSize := len(buf) - fixedSize
+	if aggrBitsSize <= 0 {
+		return fmt.Errorf("contribution buffer too small: %d bytes", len(buf))
+	}
+	a.AggregationBits = make([]byte, aggrBitsSize)
 	return ssz2.UnmarshalSSZ(buf, version, &a.Slot, a.BeaconBlockRoot[:], &a.SubcommitteeIndex, []byte(a.AggregationBits), a.Signature[:])
 }
 

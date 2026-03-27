@@ -296,6 +296,9 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		}
 
 		if localValidatorIsProposer || aggregateAndProof.ImmediateProcess {
+			// Set beacon config on the aggregate's attestation so HashSSZ uses the correct
+			// AggregationBits limit for the active preset (e.g. minimal: 8192, mainnet: 131072).
+			aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.SetBeaconConfig(a.beaconCfg)
 			// aggregate signatures for later verification
 			aggregateVerificationData, err = GetSignaturesOnAggregate(headState, aggregateAndProof.SignedAggregateAndProof, attestingIndices)
 			if err != nil {

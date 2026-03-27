@@ -158,7 +158,7 @@ func addSszTests() {
 			}, withTestJson())).
 		With("LightClientUpdate", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *cltypes.LightClientUpdate {
-				return cltypes.NewLightClientUpdate(v)
+				return cltypes.NewLightClientUpdate(v, &clparams.MainnetBeaconConfig)
 			}, withTestJson())).
 		With("SignedBeaconBlock", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *cltypes.SignedBeaconBlock {
