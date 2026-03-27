@@ -377,7 +377,19 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 	isAmsterdam := evm.chainRules.IsAmsterdam
 	anyTrace := dbg.TraceDynamicGas || debug || trace
 
+	// Countdown for periodic cancellation check. Needed for straight-line
+	// code with no JUMP/JUMPI that could otherwise ignore context deadlines.
+	const cancelCheckInterval = 50_000
+	stepsToCancel := cancelCheckInterval
+
 	for {
+		stepsToCancel--
+		if stepsToCancel == 0 {
+			stepsToCancel = cancelCheckInterval
+			if evm.Cancelled() {
+				break
+			}
+		}
 		if anyTrace {
 			// Capture pre-execution values for tracing.
 			logged, pcCopy, gasCopy = false, pc, callContext.gas
