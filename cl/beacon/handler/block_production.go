@@ -334,8 +334,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	if block.IsBlinded() {
 		resp = newBeaconResponse(block.ToBlinded())
 	} else {
-		execution := block.ToExecution()
-		resp = newBeaconResponse(execution)
+		resp = newBeaconResponse(block.ToExecution())
 	}
 	return resp.WithVersion(block.Version()).With("execution_payload_blinded", block.IsBlinded()).
 		With("execution_payload_value", strconv.FormatUint(block.GetExecutionValue().Uint64(), 10)).
@@ -979,8 +978,6 @@ func (a *ApiHandler) postBeaconBlocks(w http.ResponseWriter, r *http.Request, ap
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 	validation := a.parseBlockPublishingValidation(w, r, apiVersion)
-	// Decode the block
-	log.Debug("[DEBUG] PostBeaconBlocks", "contentType", r.Header.Get("Content-Type"), "version", version)
 	// Decode the block
 	block, err := a.parseRequestBeaconBlock(version, r)
 	if err != nil {

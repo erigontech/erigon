@@ -263,12 +263,9 @@ func NewBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparams.State
 	}
 }
 
-func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
-	b.EncodingSizeSSZ() // ensure all nil fields are initialized
-	return ssz2.MarshalSSZ(dst, b.getSchema(false)...)
-}
-
-func (b *BeaconBody) EncodingSizeSSZ() (size int) {
+// ensureNilFields initializes any nil fields that must be present for SSZ encoding,
+// hashing, and size computation. It is idempotent and safe to call multiple times.
+func (b *BeaconBody) ensureNilFields() {
 	var (
 		maxAttSlashing = MaxAttesterSlashings
 		maxAttestation = MaxAttestations
@@ -277,7 +274,6 @@ func (b *BeaconBody) EncodingSizeSSZ() (size int) {
 		maxAttSlashing = MaxAttesterSlashingsElectra
 		maxAttestation = MaxAttestationsElectra
 	}
-
 	if b.Eth1Data == nil {
 		b.Eth1Data = &Eth1Data{}
 	}
@@ -288,7 +284,6 @@ func (b *BeaconBody) EncodingSizeSSZ() (size int) {
 		}
 		b.SyncAggregate = NewSyncAggregateWithSize(bitsSize)
 	}
-
 	if b.ProposerSlashings == nil {
 		b.ProposerSlashings = solid.NewStaticListSSZ[*ProposerSlashing](MaxProposerSlashings, 416)
 	}
@@ -313,6 +308,15 @@ func (b *BeaconBody) EncodingSizeSSZ() (size int) {
 	if b.BlobKzgCommitments == nil {
 		b.BlobKzgCommitments = solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48)
 	}
+}
+
+func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
+	b.ensureNilFields()
+	return ssz2.MarshalSSZ(dst, b.getSchema(false)...)
+}
+
+func (b *BeaconBody) EncodingSizeSSZ() (size int) {
+	b.ensureNilFields()
 
 	size += b.ProposerSlashings.EncodingSizeSSZ()
 	size += b.AttesterSlashings.EncodingSizeSSZ()
@@ -374,7 +378,7 @@ func (b *BeaconBody) Blinded() (*BlindedBeaconBody, error) {
 }
 
 func (b *BeaconBody) HashSSZ() ([32]byte, error) {
-	b.EncodingSizeSSZ() // ensure all nil fields are initialized
+	b.ensureNilFields()
 	return merkle_tree.HashTreeRoot(b.getSchema(false)...)
 }
 
