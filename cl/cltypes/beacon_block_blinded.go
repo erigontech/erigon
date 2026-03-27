@@ -251,7 +251,7 @@ func NewBlindedBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparam
 		Attestations:       solid.NewDynamicListSSZ[*solid.Attestation](maxAttestation),
 		Deposits:           solid.NewStaticListSSZ[*Deposit](MaxDeposits, 1240),
 		VoluntaryExits:     solid.NewStaticListSSZ[*SignedVoluntaryExit](MaxVoluntaryExits, 112),
-		SyncAggregate:      NewSyncAggregate(),
+		SyncAggregate:      NewSyncAggregateWithSize(int(beaconCfg.SyncCommitteeSize) / 8),
 		ExecutionPayload:   NewEth1Header(version),
 		ExecutionChanges:   solid.NewStaticListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172),
 		BlobKzgCommitments: solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48),
@@ -288,7 +288,7 @@ func (b *BlindedBeaconBody) EncodingSizeSSZ() (size int) {
 		b.Eth1Data = &Eth1Data{}
 	}
 	if b.SyncAggregate == nil {
-		b.SyncAggregate = &SyncAggregate{}
+		b.SyncAggregate = NewSyncAggregateWithSize(int(b.beaconCfg.SyncCommitteeSize) / 8)
 	}
 	if b.ExecutionPayload == nil {
 		b.ExecutionPayload = NewEth1Header(b.Version)

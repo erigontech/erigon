@@ -264,6 +264,7 @@ func NewBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparams.State
 }
 
 func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
+	b.EncodingSizeSSZ() // ensure all nil fields are initialized
 	return ssz2.MarshalSSZ(dst, b.getSchema(false)...)
 }
 
@@ -281,7 +282,11 @@ func (b *BeaconBody) EncodingSizeSSZ() (size int) {
 		b.Eth1Data = &Eth1Data{}
 	}
 	if b.SyncAggregate == nil {
-		b.SyncAggregate = &SyncAggregate{}
+		bitsSize := defaultSyncCommitteeBitsSize
+		if b.beaconCfg != nil {
+			bitsSize = int(b.beaconCfg.SyncCommitteeSize) / 8
+		}
+		b.SyncAggregate = NewSyncAggregateWithSize(bitsSize)
 	}
 
 	if b.ProposerSlashings == nil {
@@ -369,6 +374,7 @@ func (b *BeaconBody) Blinded() (*BlindedBeaconBody, error) {
 }
 
 func (b *BeaconBody) HashSSZ() ([32]byte, error) {
+	b.EncodingSizeSSZ() // ensure all nil fields are initialized
 	return merkle_tree.HashTreeRoot(b.getSchema(false)...)
 }
 

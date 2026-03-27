@@ -257,7 +257,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 				return fmt.Errorf("attester is not a member of the committee. attester index %d committeeIndex %v", att.SingleAttestation.AttesterIndex, committeeIndex)
 			}
 			vIndex = att.SingleAttestation.AttesterIndex
-			attestation = att.SingleAttestation.ToAttestation(memIndexInCommittee, len(beaconCommittee))
+			attestation = att.SingleAttestation.ToAttestation(memIndexInCommittee, len(beaconCommittee), int(s.beaconCfg.MaxCommitteesPerSlot))
 		}
 		// [IGNORE] There has been no other valid attestation seen on an attestation subnet that has an identical attestation.data.target.epoch and participating validator index.
 		// mark the validator as seen
