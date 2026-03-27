@@ -37,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/kv"
@@ -52,10 +51,9 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
-	"github.com/erigontech/erigon/db/state/execctx"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
-	enginehelpers "github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -123,7 +121,7 @@ type ExecModuleTester struct {
 	StreamWg        sync.WaitGroup
 	ReceiveWg       sync.WaitGroup
 	Address         common.Address
-	ForkValidator   *enginehelpers.ForkValidator
+	ForkValidator   *execmodule.ForkValidator
 	ExecModule      *execmodule.ExecModule
 	StateCache      *execmodule.Cache
 	retirementStart chan bool
@@ -313,6 +311,12 @@ func WithTxPool() Option {
 	}
 }
 
+func WithEnableDomain(domain kv.Domain) Option {
+	return func(opts *options) {
+		opts.enableDomains = append(opts.enableDomains, domain)
+	}
+}
+
 func WithChainConfig(cfg *chain.Config) Option {
 	return func(opts *options) {
 		opts.chainConfig = cfg
@@ -329,6 +333,7 @@ type options struct {
 	pruneMode       *prune.Mode
 	blockBufferSize int
 	withTxPool      bool
+	enableDomains   []kv.Domain
 }
 
 func applyOptions(opts []Option) options {
@@ -427,6 +432,15 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		db = temporaltest.NewTestDBWithStepSize(tb, dirs, *opt.stepSize)
 	} else {
 		db = temporaltest.NewTestDB(tb, dirs)
+	}
+
+	// Enable domains before any background goroutines start (e.g. InsertChain
+	// spawns a pipeline that calls agg.OpenFolder concurrently).
+	if len(opt.enableDomains) > 0 {
+		agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+		for _, domain := range opt.enableDomains {
+			agg.EnableDomain(domain)
+		}
 	}
 
 	if _, err := snaptype.LoadSalt(dirs.Snap, true, logger); err != nil {
@@ -534,32 +548,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	}
 
 	latestBlockBuiltStore := builder.NewLatestBlockBuiltStore()
-	inMemoryExecution := func(sd *execctx.SharedDomains, tx kv.TemporalRwTx, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
-		notifications *shards.Notifications) error {
-		terseLogger := log.New()
-		terseLogger.SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StderrHandler))
-		// Needs its own notifications to not update RPC daemon and txpool about pending blocks
-		stateSync := stageloop.NewInMemoryExecution(mock.Ctx, mock.DB, &cfg, mock.sentriesClient,
-			dirs, notifications, mock.BlockReader, blockWriter, terseLogger)
-		chainReader := consensuschain.NewReader(mock.ChainConfig, tx, mock.BlockReader, logger)
-		// We start the mining step
-		if err := stageloop.StateStep(ctx, chainReader, mock.Engine, sd, tx, stateSync, unwindPoint, headersChain, bodiesChain); err != nil {
-			logger.Warn("Could not validate block", "err", err)
-			return err
-		}
-		var progress uint64
-		progress, err = stages.GetStageProgress(tx, stages.Execution)
-		if err != nil {
-			return err
-		}
-		lastNum := headersChain[len(headersChain)-1].Number.Uint64()
-		if progress < lastNum {
-			return fmt.Errorf("unsuccessful execution, progress %d < expected %d", progress, lastNum)
-		}
-		return nil
-	}
-	forkValidator := enginehelpers.NewForkValidator(ctx, 1, inMemoryExecution, dirs.Tmp, mock.BlockReader, cfg.MaxReorgDepth)
-	mock.ForkValidator = forkValidator
+	// ForkValidator is created after pipelineStagedSync and PipelineExecutor are ready (below).
 
 	statusDataProvider := sentry.NewStatusDataProvider(
 		db,
@@ -666,7 +655,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 				false, /*experimentalBAL*/
 			),
 			stagedsync.StageTxLookupCfg(pruneMode, dirs.Tmp, mock.BlockReader),
-			stagedsync.StageFinishCfg(forkValidator),
+			stagedsync.StageFinishCfg(),
 		),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
@@ -683,8 +672,14 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	}
 
 	cfg.Genesis = gspec
-	pipelineStages := stageloop.NewPipelineStages(mock.Ctx, db, &cfg, mock.sentriesClient, mock.Notifications, snapDownloader, mock.BlockReader, blockRetire, forkValidator, tracer, nil)
+	pipelineStages := stageloop.NewPipelineStages(mock.Ctx, db, &cfg, mock.sentriesClient, mock.Notifications, snapDownloader, mock.BlockReader, blockRetire, tracer, nil)
 	mock.posStagedSync = stagedsync.New(cfg.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
+
+	// Create validation Sync and PipelineExecutor.
+	validationNotifications := shards.NewNotifications(nil)
+	validationSync := stageloop.NewInMemoryExecution(mock.Ctx, mock.DB, &cfg, mock.sentriesClient,
+		validationNotifications, mock.BlockReader, blockWriter, logger)
+	pipelineExecutor := execmodule.NewPipelineExecutor(mock.posStagedSync, mock.DB, mock.BlockReader, mock.ChainConfig, mock.Engine, validationSync, validationNotifications, logger)
 
 	hook := stageloop.NewHook(mock.Ctx, mock.Notifications, mock.posStagedSync, mock.ChainConfig, logger, nil, nil, nil)
 
@@ -695,8 +690,8 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		ctx,
 		mock.BlockReader,
 		mock.DB,
-		mock.posStagedSync,
-		forkValidator,
+		pipelineExecutor,
+		1, // currentBlockNumber
 		mock.ChainConfig,
 		blkBuilder.Build,
 		hook,
@@ -712,6 +707,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		onlySnapDownloadOnStart,
 		func() error { return nil },
 	)
+	mock.ForkValidator = mock.ExecModule.ForkValidator()
 
 	mock.sentriesClient.Hd.StartPoSDownloader(mock.Ctx, sendHeaderRequest, penalize)
 

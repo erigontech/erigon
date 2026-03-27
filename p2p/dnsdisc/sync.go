@@ -38,6 +38,7 @@ type clientTree struct {
 	loc *linkEntry // link to this tree
 
 	lastRootCheck mclock.AbsTime // last revalidation of root
+	rootTTL       time.Duration  // DNS TTL from the last successful root lookup
 	leafFailCount int
 	rootFailCount int
 
@@ -54,15 +55,19 @@ func newClientTree(c *Client, lc *linkCache, loc *linkEntry) *clientTree {
 	return &clientTree{c: c, lc: lc, loc: loc}
 }
 
-// syncAll retrieves all entries of the tree.
+// syncAll retrieves all entries of the tree.  The overall operation is bounded
+// by cfg.SyncTimeout so it cannot block indefinitely.
 func (ct *clientTree) syncAll(dest map[string]entry) error {
-	if err := ct.updateRoot(context.Background()); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), ct.c.cfg.SyncTimeout)
+	defer cancel()
+
+	if err := ct.updateRoot(ctx); err != nil {
 		return err
 	}
-	if err := ct.links.resolveAll(dest); err != nil {
+	if err := ct.links.resolveAll(ctx, dest); err != nil {
 		return err
 	}
-	if err := ct.enrs.resolveAll(dest); err != nil {
+	if err := ct.enrs.resolveAll(ctx, dest); err != nil {
 		return err
 	}
 	return nil
@@ -173,12 +178,13 @@ func (ct *clientTree) updateRoot(ctx context.Context) error {
 	ct.lastRootCheck = ct.c.clock.Now()
 	ctx, cancel := context.WithTimeout(ctx, ct.c.cfg.Timeout)
 	defer cancel()
-	root, err := ct.c.resolveRoot(ctx, ct.loc)
+	root, ttl, err := ct.c.resolveRoot(ctx, ct.loc)
 	if err != nil {
 		ct.rootFailCount++
 		return err
 	}
 	ct.root = &root
+	ct.rootTTL = ttl // honour the DNS TTL for the next scheduled re-check
 	ct.rootFailCount = 0
 	ct.leafFailCount = 0
 
@@ -200,12 +206,21 @@ func (ct *clientTree) rootUpdateDue() bool {
 	return ct.root == nil || tooManyFailures || scheduledCheck
 }
 
+// nextScheduledRootCheck returns the absolute time of the next scheduled root
+// re-check.  The interval is the lesser of cfg.RecheckInterval and the DNS TTL
+// of the last successful root lookup, so that we honour the authoritative
+// caching lifetime.
 func (ct *clientTree) nextScheduledRootCheck() mclock.AbsTime {
-	return ct.lastRootCheck.Add(ct.c.cfg.RecheckInterval)
+	interval := ct.c.cfg.RecheckInterval
+	if ct.rootTTL > 0 && ct.rootTTL < interval {
+		interval = ct.rootTTL
+	}
+	return ct.lastRootCheck.Add(interval)
 }
 
-// slowdownRootUpdate applies a delay to root resolution if is tried
-// too frequently. This avoids busy polling when the client is offline.
+// slowdownRootUpdate applies a delay (with ±25 % jitter) to root resolution
+// when it is tried too frequently.  This avoids busy polling when the client
+// is offline and prevents a thundering-herd when many nodes back off together.
 // Returns true if the timeout passed, false if sync was canceled.
 func (ct *clientTree) slowdownRootUpdate(ctx context.Context) bool {
 	var delay time.Duration
@@ -217,6 +232,11 @@ func (ct *clientTree) slowdownRootUpdate(ctx context.Context) bool {
 	default:
 		return true
 	}
+	// Add ±25 % jitter so that peers in the same situation don't all retry
+	// at exactly the same instant.
+	jitter := time.Duration(rand.Int63n(int64(delay/2))) - delay/4 //nolint:gosec
+	delay += jitter
+
 	timeout := ct.c.clock.NewTimer(delay)
 	defer timeout.Stop()
 	select {
@@ -245,11 +265,13 @@ func (ts *subtreeSync) done() bool {
 	return len(ts.missing) == 0
 }
 
-func (ts *subtreeSync) resolveAll(dest map[string]entry) error {
+// resolveAll fetches all missing entries.  ctx bounds the total operation;
+// each individual lookup additionally carries a cfg.Timeout deadline.
+func (ts *subtreeSync) resolveAll(ctx context.Context, dest map[string]entry) error {
 	for !ts.done() {
 		hash := ts.missing[0]
-		ctx, cancel := context.WithTimeout(context.Background(), ts.c.cfg.Timeout)
-		e, err := ts.resolveNext(ctx, hash)
+		entryCtx, cancel := context.WithTimeout(ctx, ts.c.cfg.Timeout)
+		e, err := ts.resolveNext(entryCtx, hash)
 		cancel()
 		if err != nil {
 			return err

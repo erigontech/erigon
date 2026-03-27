@@ -257,17 +257,6 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	}
 
 	start := time.Now()
-	sourceBlock, err := a.blockReader.ReadBlockByRoot(ctx, tx, baseBlockRoot)
-	if err != nil {
-		log.Warn("Failed to get source block", "err", err, "root", baseBlockRoot)
-		return nil, err
-	}
-	if sourceBlock == nil {
-		return nil, beaconhttp.NewEndpointError(
-			http.StatusNotFound,
-			fmt.Errorf("block not found %x", baseBlockRoot),
-		)
-	}
 
 	var baseState *state.CachingBeaconState
 	if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
@@ -289,11 +278,15 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 			fmt.Errorf("state not found %x", baseBlockRoot),
 		)
 	}
+
+	// Get the base block slot from the state header (avoids needing ReadBlockByRoot at genesis).
+	baseBlockSlot := baseState.LatestBlockHeader().Slot
+
 	if err := transition.DefaultMachine.ProcessSlots(baseState, targetSlot); err != nil {
 		return nil, err
 	}
 	log.Info("[Beacon API] Found BeaconState object for block production", "slot", targetSlot, "duration", time.Since(start))
-	block, err := a.produceBlock(ctx, builderBoostFactor, sourceBlock.Block, baseState, targetSlot, randaoReveal, graffiti)
+	block, err := a.produceBlock(ctx, builderBoostFactor, baseBlockSlot, baseBlockRoot, baseState, targetSlot, randaoReveal, graffiti)
 	if err != nil {
 		log.Warn("Failed to produce block", "err", err, "slot", targetSlot)
 		return nil, err
@@ -351,7 +344,8 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 func (a *ApiHandler) produceBlock(
 	ctx context.Context,
 	boostFactor uint64,
-	baseBlock *cltypes.BeaconBlock,
+	baseBlockSlot uint64,
+	baseBlockRoot common.Hash,
 	baseState *state.CachingBeaconState,
 	targetSlot uint64,
 	randaoReveal common.Bytes96,
@@ -373,7 +367,7 @@ func (a *ApiHandler) produceBlock(
 			a.logger.Debug("Produced BeaconBody", "slot", targetSlot, "duration", time.Since(start))
 		}()
 		defer wg.Done()
-		beaconBody, localExecValue, localErr = a.produceBeaconBody(ctx, 3, baseBlock, baseState, targetSlot, randaoReveal, graffiti)
+		beaconBody, localExecValue, localErr = a.produceBeaconBody(ctx, 3, baseBlockSlot, baseBlockRoot, baseState, targetSlot, randaoReveal, graffiti)
 		// collect blobs
 		if beaconBody != nil {
 			for i := 0; i < beaconBody.BlobKzgCommitments.Len(); i++ {
@@ -410,7 +404,7 @@ func (a *ApiHandler) produceBlock(
 		}()
 		defer wg.Done()
 		if a.routerCfg.Builder && a.builderClient != nil {
-			builderHeader, builderErr = a.getBuilderPayload(ctx, baseBlock, baseState, targetSlot)
+			builderHeader, builderErr = a.getBuilderPayload(ctx, baseState, targetSlot)
 			if builderErr != nil && builderErr != errBuilderNotEnabled {
 				log.Warn("Failed to get builder payload", "err", builderErr)
 			}
@@ -426,10 +420,6 @@ func (a *ApiHandler) produceBlock(
 	}
 	// prepare basic block
 	proposerIndex, err := baseState.GetBeaconProposerIndex()
-	if err != nil {
-		return nil, err
-	}
-	baseBlockRoot, err := baseBlock.HashSSZ()
 	if err != nil {
 		return nil, err
 	}
@@ -490,7 +480,6 @@ func (a *ApiHandler) produceBlock(
 
 func (a *ApiHandler) getBuilderPayload(
 	ctx context.Context,
-	baseBlock *cltypes.BeaconBlock,
 	baseState *state.CachingBeaconState,
 	targetSlot uint64,
 ) (*builder.ExecutionHeader, error) {
@@ -508,7 +497,7 @@ func (a *ApiHandler) getBuilderPayload(
 		return nil, err
 	}
 	// get the parent hash of base execution block
-	parentHash := baseBlock.Body.ExecutionPayload.BlockHash
+	parentHash := baseState.LatestExecutionPayloadHeader().BlockHash
 	header, err := a.builderClient.GetHeader(ctx, int64(targetSlot), parentHash, pubKey)
 	if err != nil {
 		return nil, err
@@ -559,17 +548,18 @@ func (a *ApiHandler) getBuilderPayload(
 func (a *ApiHandler) produceBeaconBody(
 	ctx context.Context,
 	apiVersion int,
-	baseBlock *cltypes.BeaconBlock,
+	baseBlockSlot uint64,
+	baseBlockRoot common.Hash,
 	baseState *state.CachingBeaconState,
 	targetSlot uint64,
 	randaoReveal common.Bytes96,
 	graffiti common.Hash,
 ) (*cltypes.BeaconBody, uint64, error) {
-	if targetSlot <= baseBlock.Slot {
+	if targetSlot <= baseBlockSlot {
 		return nil, 0, fmt.Errorf(
 			"target slot %d must be greater than base block slot %d",
 			targetSlot,
-			baseBlock.Slot,
+			baseBlockSlot,
 		)
 	}
 	var wg sync.WaitGroup
@@ -603,10 +593,7 @@ func (a *ApiHandler) produceBeaconBody(
 	var executionPayload *cltypes.Eth1Block
 	var executionValue uint64
 
-	blockRoot, err := baseBlock.HashSSZ()
-	if err != nil {
-		return nil, 0, err
-	}
+	blockRoot := baseBlockRoot
 	// Process the execution data in a thread.
 	wg.Add(1)
 	go func() {
@@ -617,7 +604,7 @@ func (a *ApiHandler) produceBeaconBody(
 		}()
 		timeoutForBlockBuilding := 2 * time.Second // keep asking for 2 seconds for block
 		retryTime := 10 * time.Millisecond
-		secsDiff := (targetSlot - baseBlock.Slot) * a.beaconChainCfg.SecondsPerSlot
+		secsDiff := (targetSlot - baseBlockSlot) * a.beaconChainCfg.SecondsPerSlot
 		feeRecipient, _ := a.validatorParams.GetFeeRecipient(proposerIndex)
 		clWithdrawals, _ := state.ExpectedWithdrawals(
 			baseState,
@@ -645,6 +632,7 @@ func (a *ApiHandler) produceBeaconBody(
 				Withdrawals:           withdrawals,
 				ParentBeaconBlockRoot: (*common.Hash)(&blockRoot),
 			},
+			stateVersion,
 		)
 		if err != nil {
 			log.Error("BlockProduction: Failed to get payload id", "err", err)
@@ -660,7 +648,7 @@ func (a *ApiHandler) produceBeaconBody(
 			case <-stopTimer.C:
 				return
 			case <-ticker.C:
-				payload, bundles, requestsBundle, blockValue, err := a.engine.GetAssembledBlock(ctx, idBytes)
+				payload, bundles, requestsBundle, blockValue, err := a.engine.GetAssembledBlock(ctx, idBytes, stateVersion)
 				if err != nil {
 					log.Error("BlockProduction: Failed to get payload", "err", err)
 					continue
@@ -800,6 +788,9 @@ func (a *ApiHandler) produceBeaconBody(
 					},
 				)
 				executionPayload.Transactions = payload.Transactions
+				// Cache the block body so the beacon API can return transactions
+				// immediately, before the EL commits to its database.
+				a.cacheExecutionBody(payload)
 				return
 			}
 		}
@@ -1343,6 +1334,10 @@ func (a *ApiHandler) storeBlockAndBlobs(
 		}
 	}
 
+	// Cache the execution payload body before writing to DB so the beacon API
+	// can return transactions/withdrawals immediately (before the EL commits).
+	a.cacheExecutionBody(block.Block.Body.ExecutionPayload)
+
 	if err := a.indiciesDB.Update(ctx, func(tx kv.RwTx) error {
 		if err := beacon_indicies.WriteHighestFinalized(tx, a.forkchoiceStore.FinalizedSlot()); err != nil {
 			return err
@@ -1357,7 +1352,7 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	}
 	finalizedHash := a.forkchoiceStore.GetEth1Hash(a.forkchoiceStore.FinalizedCheckpoint().Root)
 	safeHash := a.forkchoiceStore.GetEth1Hash(a.forkchoiceStore.JustifiedCheckpoint().Root)
-	if _, err := a.engine.ForkChoiceUpdate(ctx, finalizedHash, safeHash, a.forkchoiceStore.GetEth1Hash(blockRoot), nil); err != nil {
+	if _, err := a.engine.ForkChoiceUpdate(ctx, finalizedHash, safeHash, a.forkchoiceStore.GetEth1Hash(blockRoot), nil, block.Version()); err != nil {
 		return err
 	}
 	headState, err := a.forkchoiceStore.GetStateAtBlockRoot(blockRoot, false)
@@ -1760,4 +1755,32 @@ func computeAttestationReward(
 	proposerRewardDenominator := (beaconConfig.WeightDenominator - beaconConfig.ProposerWeight) * beaconConfig.WeightDenominator / beaconConfig.ProposerWeight
 	reward := proposerRewardNumerator / proposerRewardDenominator
 	return reward, nil
+}
+
+// cacheExecutionBody caches the execution payload body so the beacon API
+// can return transactions/withdrawals before the EL commits to its database.
+func (a *ApiHandler) cacheExecutionBody(payload *cltypes.Eth1Block) {
+	if payload == nil {
+		return
+	}
+	var rawTxs [][]byte
+	if payload.Transactions != nil {
+		payload.Transactions.ForEach(func(tx []byte, idx, total int) bool {
+			rawTxs = append(rawTxs, tx)
+			return true
+		})
+	}
+	var ws []*types.Withdrawal
+	if payload.Withdrawals != nil {
+		payload.Withdrawals.Range(func(idx int, w *cltypes.Withdrawal, total int) bool {
+			ws = append(ws, &types.Withdrawal{
+				Index:     w.Index,
+				Validator: w.Validator,
+				Address:   w.Address,
+				Amount:    w.Amount,
+			})
+			return true
+		})
+	}
+	a.blockReader.CacheBlockBody(payload.BlockNumber, rawTxs, ws)
 }

@@ -897,11 +897,22 @@ func (iit *InvertedIndexRoTx) tableScanningPrune(ctx context.Context, rwTx kv.Rw
 	if err != nil {
 		return nil, err
 	}
-	if prs != nil && prs.TxFrom == txFrom && prs.TxTo == txTo && prs.ValueProgress == prune.Done && prs.KeyProgress == prune.Done {
+	if prs != nil && prs.TxTo >= txTo && prs.ValueProgress == prune.Done && prs.KeyProgress == prune.Done {
 		stat = &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}
 		stat.Progress = prune.Done
 		return stat, nil
 	}
+	// Rolling scan: preserve B-tree key cursor across txTo advances.
+	// Keys cursor seeks by txNum directly (no scan penalty on reset),
+	// but values cursor has no txNum ordering — preserve its position.
+	if prs.ValueProgress == prune.Done {
+		prs.ValueProgress = prune.First
+		prs.LastPrunedValue = nil
+		prs.KeyProgress = prune.First
+		prs.LastPrunedKey = nil
+	}
+	prs.TxFrom = txFrom
+	prs.TxTo = txTo
 
 	pruneStat, err := prune.TableScanningPrune(ctx, name, iit.ii.FilenameBase, txFrom, txTo, limit, iit.stepSize,
 		logEvery, iit.ii.logger, keysCursor, valDelCursor, asserts, prs, mode)

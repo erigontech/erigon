@@ -217,24 +217,14 @@ func (ctx *CallContext) Gas() mdgas.MdGas {
 	}
 }
 
-// escrowStateGas hands the entire state gas reservoir to a child frame and
-// returns the parent's saved value.  After the child returns, call
-// settleStateGas to restore or adopt the child's leftover reservoir.
-func (ctx *CallContext) escrowStateGas() (parentStateGas uint64) {
-	parentStateGas = ctx.stateGas
-	ctx.stateGas = 0
-	return
-}
-
-// settleStateGas restores the state gas reservoir after a child frame.
-// On error the parent's original reservoir is restored; on success the
-// parent adopts whatever state gas the child didn't consume.
-func (ctx *CallContext) settleStateGas(childErr error, returnGas mdgas.MdGas, parentStateGas uint64, tracer *tracing.Hooks) {
-	if childErr != nil {
-		ctx.stateGas = parentStateGas
-	} else {
-		ctx.stateGas = returnGas.State
-	}
+// restoreChildGas returns the child frame's leftover gas to the parent.
+// On success the parent adopts the child's remaining reservoir.
+// On error handleFrameRevert sets returnGas.State = initialChildState + spill
+// per EIP-8037: "all state gas consumed by the child… is restored to the
+// parent's reservoir." Early-exit errors (collision, depth, insufficient
+// balance) preserve gasRemaining.State so the reservoir is returned intact.
+func (ctx *CallContext) restoreChildGas(returnGas mdgas.MdGas, tracer *tracing.Hooks) {
+	ctx.stateGas = returnGas.State
 	ctx.refundGas(returnGas.Regular, tracer, tracing.GasChangeCallLeftOverRefunded)
 }
 
@@ -468,7 +458,11 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 				evm.regularGasConsumed += dynamicCost.Regular - evm.CallGasTemp()
 			}
 			if dynamicCost.State > 0 {
-				cost += dynamicCost.State
+				// Note: do NOT add dynamicCost.State to `cost` here.
+				// `cost` is only used for tracing and is compared against `gasCopy`
+				// which captures only regular gas. Adding state gas would cause
+				// uint64 underflow in the OnGasChange(gasCopy, gasCopy-cost, ...) call below.
+				// State gas is charged separately via useMdGas.
 				ok := callContext.useMdGas(evm, dynamicCost.State, mdgas.StateGas, nil, tracing.GasChangeIgnored)
 				if !ok {
 					return nil, callContext.Gas(), ErrOutOfGas
