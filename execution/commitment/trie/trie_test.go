@@ -398,7 +398,7 @@ func TestCodeNodeGetHashedAccount(t *testing.T) {
 	fakeAccount := genRandomByteArrayOfLen(50)
 	fakeAccountHash := common.BytesToHash(crypto.Keccak256(fakeAccount))
 
-	hex := keyBytesToHex(crypto.Keccak256(address[:]))
+	hex := keybytesToHex(crypto.Keccak256(address[:]))
 
 	_, trie.RootNode = trie.insert(trie.RootNode, hex, &HashNode{hash: fakeAccountHash[:]})
 

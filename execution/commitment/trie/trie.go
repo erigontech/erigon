@@ -298,7 +298,7 @@ func (t *Trie) Get(key []byte) (value []byte, gotValue bool) {
 		return nil, true
 	}
 
-	hex := keyBytesToHex(key)
+	hex := keybytesToHex(key)
 	return t.get(t.RootNode, hex, 0)
 }
 
@@ -307,7 +307,7 @@ func (t *Trie) FindPath(key []byte) (value []byte, parents [][]byte, gotValue bo
 		return nil, nil, true
 	}
 
-	hex := keyBytesToHex(key)
+	hex := keybytesToHex(key)
 	return t.getPath(t.RootNode, nil, hex, 0)
 }
 
@@ -316,7 +316,7 @@ func (t *Trie) GetAccount(key []byte) (value *accounts.Account, gotValue bool) {
 		return nil, true
 	}
 
-	hex := keyBytesToHex(key)
+	hex := keybytesToHex(key)
 
 	accNode, gotValue := t.getAccount(t.RootNode, hex, 0)
 	if accNode != nil {
@@ -332,7 +332,7 @@ func (t *Trie) GetAccountCode(key []byte) (value []byte, gotValue bool) {
 		return nil, false
 	}
 
-	hex := keyBytesToHex(key)
+	hex := keybytesToHex(key)
 
 	accNode, gotValue := t.getAccount(t.RootNode, hex, 0)
 	if accNode != nil {
@@ -354,7 +354,7 @@ func (t *Trie) GetAccountCodeSize(key []byte) (value int, gotValue bool) {
 		return 0, false
 	}
 
-	hex := keyBytesToHex(key)
+	hex := keybytesToHex(key)
 
 	accNode, gotValue := t.getAccount(t.RootNode, hex, 0)
 	if accNode != nil {
@@ -498,7 +498,7 @@ func (t *Trie) getPath(origNode Node, parents [][]byte, key []byte, pos int) ([]
 // stored in the trie.
 // DESCRIBED: docs/programmers_guide/guide.md#root
 func (t *Trie) Update(key, value []byte) {
-	hex := keyBytesToHex(key)
+	hex := keybytesToHex(key)
 
 	newnode := ValueNode(value)
 
@@ -514,7 +514,7 @@ func (t *Trie) UpdateAccount(key []byte, acc *accounts.Account) {
 	value := new(accounts.Account)
 	value.Copy(acc)
 
-	hex := keyBytesToHex(key)
+	hex := keybytesToHex(key)
 
 	var newnode *AccountNode
 	if value.Root == EmptyRoot || value.Root == (common.Hash{}) {
@@ -536,7 +536,7 @@ func (t *Trie) UpdateAccountCode(key []byte, code CodeNode) error {
 		return nil
 	}
 
-	hex := keyBytesToHex(key)
+	hex := keybytesToHex(key)
 
 	accNode, gotValue := t.getAccount(t.RootNode, hex, 0)
 	if accNode == nil || !gotValue {
@@ -563,7 +563,7 @@ func (t *Trie) UpdateAccountCodeSize(key []byte, codeSize int) error {
 		return nil
 	}
 
-	hex := keyBytesToHex(key)
+	hex := keybytesToHex(key)
 
 	accNode, gotValue := t.getAccount(t.RootNode, hex, 0)
 	if accNode == nil || !gotValue {
@@ -1044,7 +1044,7 @@ func (t *Trie) touchAll(n Node, hex []byte, del bool, incarnation uint64) {
 // Delete removes any existing value for key from the trie.
 // DESCRIBED: docs/programmers_guide/guide.md#root
 func (t *Trie) Delete(key []byte) {
-	hex := keyBytesToHex(key)
+	hex := keybytesToHex(key)
 	_, t.RootNode = t.delete(t.RootNode, hex, false)
 }
 
@@ -1271,7 +1271,7 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 // The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
 // wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
 func (t *Trie) DeleteSubtree(keyPrefix []byte) {
-	hexPrefix := keyBytesToHex(keyPrefix)
+	hexPrefix := keybytesToHex(keyPrefix)
 
 	_, t.RootNode = t.delete(t.RootNode, hexPrefix, true)
 
@@ -1320,7 +1320,7 @@ func (t *Trie) getHasher() *hasher {
 // key prefix is removed from the key.
 // First returned value is `true` if the node with the specified prefix is found.
 func (t *Trie) DeepHash(keyPrefix []byte) (bool, common.Hash) {
-	hexPrefix := keyBytesToHex(keyPrefix)
+	hexPrefix := keybytesToHex(keyPrefix)
 	accNode, gotValue := t.getAccount(t.RootNode, hexPrefix, 0)
 	if !gotValue {
 		return false, common.Hash{}
