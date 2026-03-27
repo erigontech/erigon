@@ -53,8 +53,8 @@ func TestCreateLoadingPrefixes(t *testing.T) {
 	tr.Hash()
 
 	// Evict accounts only
-	tr.EvictNode(KeybytesToHex(kAcc1))
-	tr.EvictNode(KeybytesToHex(kAcc2))
+	tr.EvictNode(keyBytesToHex(kAcc1))
+	tr.EvictNode(keyBytesToHex(kAcc2))
 	rs := NewRetainList(0)
 	rs.AddKey(concat(concat(kAcc1, kInc...), ks1...))
 	rs.AddKey(concat(concat(kAcc2, kInc...), ks2...))

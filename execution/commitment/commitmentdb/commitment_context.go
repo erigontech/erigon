@@ -240,9 +240,8 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 	}
 }
 
-// TouchHashedKey adds a pre-hashed key (in nibble format) to the update set.
-// Unlike TouchKey, this does not require a plain key or domain. It is used for
-// witness generation of collapse siblings and intermediate trie nodes.
+// TouchHashedKey touches a hashed key which can be anywhere from 1 to 128 nibbles
+// This can be used to generate witnesses for intermediate trie nodes
 func (sdc *SharedDomainsCommitmentContext) TouchHashedKey(hashedKey []byte) {
 	if sdc.updates.Mode() == commitment.ModeDisabled {
 		return

@@ -41,7 +41,7 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, error) 
 	hasher := newHasher(t.valueNodesRLPEncoded)
 	defer returnHasherToPool(hasher)
 	// Collect all nodes on the path to key.
-	key = KeybytesToHex(key)
+	key = keyBytesToHex(key)
 	key = key[:len(key)-1] // Remove terminator
 	tn := t.RootNode
 	for len(key) > 0 && tn != nil {
@@ -239,7 +239,7 @@ func proofMap(proof []hexutil.Bytes) (map[common.Hash]Node, map[common.Hash]rawP
 
 func verifyProof(root common.Hash, key []byte, proofs map[common.Hash]Node, used map[common.Hash]rawProofElement) ([]byte, error) {
 	nextIndex := 0
-	key = KeybytesToHex(key)
+	key = keyBytesToHex(key)
 	var node Node = HashNode{hash: root[:]}
 	for {
 		switch nt := node.(type) {
