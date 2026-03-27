@@ -75,20 +75,20 @@ This test exercises the full SharedDomains write + ComputeCommitment + BuildFile
 **Files:**
 - Modify: `db/state/squeeze_test.go`
 
-- [ ] Add `TestGenerateCommitmentRebuildData` gated behind `!testing.Short()`
-- [ ] Read `TEST_DATADIR` env var for persistent directory
-- [ ] Configure: stepSize=100, totalSteps=59, totalTxs=5900
-- [ ] Configure: numAccounts=3_000_000, numStorageSlots=2 (per account = 6M total), numCodeAccounts=1_000_000
-- [ ] Call `ForTestReplaceKeysInValues(kv.CommitmentDomain, false)` before writes (matching rebuild default)
-- [ ] Main write loop: for each txNum, write batch of accounts + storage + code using deterministic key generators
+- [x] Add `TestGenerateCommitmentRebuildData` gated behind `!testing.Short()`
+- [x] Read `TEST_DATADIR` env var for persistent directory
+- [x] Configure: stepSize=100, totalSteps=59, totalTxs=5900
+- [x] Configure: numAccounts=3_000_000, numStorageSlots=2 (per account = 6M total), numCodeAccounts=1_000_000
+- [x] Call `ForTestReplaceKeysInValues(kv.CommitmentDomain, false)` before writes (matching rebuild default)
+- [x] Main write loop: for each txNum, write batch of accounts + storage + code using deterministic key generators
   - ~508 accounts per tx, ~1017 storage per tx, ~170 code per tx
   - All use `domains.DomainPut(domain, tx, key, value, txNum, nil)` with nil prev (first write)
-- [ ] At every step boundary (`(txNum+1) % stepSize == 0`): call `domains.ComputeCommitment(ctx, tx, true, blockNum, txNum, "", nil)` and log root
-- [ ] At every step boundary: call `domains.Flush(ctx, tx)` to manage memory
-- [ ] After all writes: final `Flush` + `tx.Commit()` + `agg.BuildFiles(totalTxs)`
-- [ ] Assert final root is non-empty and != `empty.RootHash.Bytes()`
-- [ ] Log the output datadir path for manual use
-- [ ] Run with small parameters first: `TEST_SMALL=true` mode with numAccounts=1000, stepSize=10, totalSteps=3
+- [x] At every step boundary (`(txNum+1) % stepSize == 0`): call `domains.ComputeCommitment(ctx, tx, true, blockNum, txNum, "", nil)` and log root
+- [x] At every step boundary: call `domains.Flush(ctx, tx)` to manage memory
+- [x] After all writes: final `Flush` + `tx.Commit()` + `agg.BuildFiles(totalTxs)`
+- [x] Assert final root is non-empty and != `empty.RootHash.Bytes()`
+- [x] Log the output datadir path for manual use
+- [x] Run with small parameters first: `TEST_SMALL=true` mode with numAccounts=1000, stepSize=10, totalSteps=3
 
 ### Task 4: Smoke test and parameter validation
 

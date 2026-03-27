@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"fmt"
 	"math"
 	randOld "math/rand"
 	"math/rand/v2"
+	"os"
 	"strings"
 	"testing"
 
@@ -15,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
@@ -529,6 +532,170 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	v, _, err := roTx.GetLatest(kv.CommitmentDomain, someKey)
 	require.NoError(t, err)
 	require.Equal(t, maxWrite, binary.BigEndian.Uint64(v))
+}
+
+// TestGenerateCommitmentRebuildData generates a large-scale dataset with valid commitment roots.
+// The resulting datadir can be used for manual testing of `integration commitment rebuild`.
+//
+// Environment variables:
+//   - TEST_DATADIR: persistent output directory (uses t.TempDir() if empty)
+//   - TEST_SMALL: when set to "true", uses small parameters for quick smoke testing
+func TestGenerateCommitmentRebuildData(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping large data generation in short mode")
+	}
+
+	persistentDir := os.Getenv("TEST_DATADIR")
+
+	// Parameters
+	var (
+		stepSize        uint64 = 100
+		totalSteps      uint64 = 59
+		numAccounts     uint64 = 3_000_000
+		slotsPerAcct    uint64 = 2
+		numCodeAccounts uint64 = 1_000_000
+	)
+
+	if os.Getenv("TEST_SMALL") == "true" {
+		stepSize = 10
+		totalSteps = 3
+		numAccounts = 1000
+		slotsPerAcct = 2
+		numCodeAccounts = 300
+	}
+
+	totalTxs := stepSize * totalSteps
+	totalStorage := numAccounts * slotsPerAcct
+	totalCode := numCodeAccounts
+	totalKeys := numAccounts + totalStorage + totalCode
+
+	t.Logf("Parameters: stepSize=%d totalSteps=%d totalTxs=%d", stepSize, totalSteps, totalTxs)
+	t.Logf("Keys: accounts=%d storage=%d code=%d total=%d", numAccounts, totalStorage, totalCode, totalKeys)
+
+	db, agg, dirs := testDbAndAggregatorForLargeData(t, stepSize, persistentDir)
+	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)
+
+	ctx := context.Background()
+
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	rnd := newRnd(42)
+
+	// Calculate per-tx batch sizes (distribute keys evenly across txs)
+	accPerTx := numAccounts / totalTxs
+	storPerTx := totalStorage / totalTxs
+	codePerTx := totalCode / totalTxs
+	if accPerTx == 0 {
+		accPerTx = 1
+	}
+	if storPerTx == 0 {
+		storPerTx = 1
+	}
+	if codePerTx == 0 {
+		codePerTx = 1
+	}
+
+	t.Logf("Per-tx batch: accounts=%d storage=%d code=%d", accPerTx, storPerTx, codePerTx)
+
+	var (
+		blockNum    uint64
+		accIdx      uint64
+		storAccIdx  uint64
+		storSlotIdx uint64
+		codeIdx     uint64
+		lastRoot    []byte
+	)
+
+	for txNum := uint64(0); txNum < totalTxs; txNum++ {
+		// Write accounts batch
+		for i := uint64(0); i < accPerTx && accIdx < numAccounts; i++ {
+			addr := makeAccountAddr(accIdx)
+			acc := accounts.Account{
+				Nonce:       txNum,
+				Balance:     *uint256.NewInt(txNum * 1000),
+				CodeHash:    accounts.EmptyCodeHash,
+				Incarnation: 0,
+			}
+			buf := accounts.SerialiseV3(&acc)
+			err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, buf, txNum, nil)
+			require.NoError(t, err)
+			accIdx++
+		}
+
+		// Write storage batch
+		for i := uint64(0); i < storPerTx && (storAccIdx*slotsPerAcct+storSlotIdx) < totalStorage; i++ {
+			skey := makeStorageKey(storAccIdx, storSlotIdx, slotsPerAcct)
+			var val [32]byte
+			binary.BigEndian.PutUint64(val[24:], txNum)
+			err = domains.DomainPut(kv.StorageDomain, rwTx, skey, val[:], txNum, nil)
+			require.NoError(t, err)
+
+			storSlotIdx++
+			if storSlotIdx >= slotsPerAcct {
+				storSlotIdx = 0
+				storAccIdx++
+			}
+		}
+
+		// Write code batch
+		for i := uint64(0); i < codePerTx && codeIdx < numCodeAccounts; i++ {
+			addr := makeAccountAddr(codeIdx)
+			code := makeCodeValue(codeIdx, rnd)
+			err = domains.DomainPut(kv.CodeDomain, rwTx, addr, code, txNum, nil)
+			require.NoError(t, err)
+
+			// Update account with real code hash
+			codeHash := accounts.InternCodeHash(common.BytesToHash(crypto.Keccak256(code)))
+			acc := accounts.Account{
+				Nonce:       txNum,
+				Balance:     *uint256.NewInt(txNum * 1000),
+				CodeHash:    codeHash,
+				Incarnation: 0,
+			}
+			buf := accounts.SerialiseV3(&acc)
+			err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, buf, txNum, nil)
+			require.NoError(t, err)
+			codeIdx++
+		}
+
+		// At step boundary: compute commitment and flush
+		if (txNum+1)%stepSize == 0 {
+			step := (txNum + 1) / stepSize
+			rh, err := domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
+			require.NoError(t, err)
+			require.NotEmpty(t, rh)
+			lastRoot = rh
+			t.Logf("Step %d/%d (txNum=%d): root=%x", step, totalSteps, txNum, rh)
+
+			err = domains.Flush(ctx, rwTx)
+			require.NoError(t, err)
+		}
+	}
+
+	// Final flush and commit
+	err = domains.Flush(ctx, rwTx)
+	require.NoError(t, err)
+	domains.Close()
+	require.NoError(t, rwTx.Commit())
+
+	// Build files
+	t.Logf("Building files for %d txs...", totalTxs)
+	err = agg.BuildFiles(totalTxs)
+	require.NoError(t, err)
+
+	// Validate
+	require.NotEmpty(t, lastRoot, "final root must be non-empty")
+	require.NotEqual(t, empty.RootHash.Bytes(), lastRoot, "final root must differ from empty trie root")
+
+	t.Logf("Done. Final root: %x", lastRoot)
+	t.Logf("Output datadir: %s", dirs.DataDir)
+	fmt.Fprintf(os.Stderr, "\n=== DATADIR: %s ===\n", dirs.DataDir)
 }
 
 func TestAggregatorV3_SharedDomains(t *testing.T) {
