@@ -110,10 +110,10 @@ This proves that `ERIGON_REBUILD_CONCURRENT_COMMITMENT=true` produces identical 
 
 ### Task 6: Smoke test and lint
 
-- [ ] Run `go build ./db/state/...` to verify compilation
-- [ ] Run `go test -run TestConcurrentRebuildCommitment -count=1 -v ./db/state/...` with small params (default env)
-- [ ] Run `make lint` and fix any issues
-- [ ] Verify test passes with `ERIGON_REBUILD_CONCURRENT_COMMITMENT` properly toggled between phases
+- [x] Run `go build ./db/state/...` to verify compilation
+- [x] Run `go test -run TestConcurrentRebuildCommitment -count=1 -v ./db/state/...` with small params (default env)
+- [x] Run `make lint` and fix any issues
+- [x] Verify test passes with `ERIGON_REBUILD_CONCURRENT_COMMITMENT` properly toggled between phases
 
 ### Task 7: Verify acceptance criteria
 
