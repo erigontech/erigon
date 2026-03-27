@@ -20,6 +20,9 @@ The Erigon RPC Service, managed by Erigon's modular [RPC daemon](../modules/rpc-
 * [`bor`](bor.md): Polygon Bor-specific API (when running on Polygon)
 * [`ots`](ots.md): These methods are specifically tailored for use with Otterscan, an open-source, fast block explorer.
 * [`internal`](internal.md): Erigon specific API for development and debugging purposes.
+* [`overlay`](overlay.md): Erigon-specific namespace for replaying historical blocks with modified contract bytecode (analytics / event injection). Requires archive node.
+* [`parity`](parity.md): OpenEthereum compatibility namespace. Only `parity_listStorageKeys` is implemented.
+* [`graphql`](graphql.md): EIP-1767 GraphQL interface. Enabled via `--graphql`, served on the same port as HTTP JSON-RPC.
 * [`gRPC`](grpc.md): API for lower-level data access.
 
 {% include "../../../.gitbook/includes/warning-admin_-and-debug_-....md" %}
