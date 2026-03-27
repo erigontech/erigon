@@ -158,7 +158,7 @@ type TxPool struct {
 	ethBackend              remoteproto.ETHBACKENDClient
 	builderNotifyNewTxns    func()
 	logger                  log.Logger
-	auths                   map[AuthAndNonce]*metaTxn // All authority accounts with a pooled authorization
+	auths                   map[AuthAndNonce]struct{} // All authority accounts with a pooled authorization
 	blobHashToTxn           map[common.Hash]struct {
 		index   int
 		txnHash common.Hash
@@ -254,7 +254,7 @@ func New(
 		builderNotifyNewTxns:    builderNotifyNewTxns,
 		newSlotsStreams:         newSlotsStreams,
 		logger:                  logger,
-		auths:                   make(map[AuthAndNonce]*metaTxn),
+		auths:                   make(map[AuthAndNonce]struct{}),
 		blobHashToTxn: make(map[common.Hash]struct {
 			index   int
 			txnHash common.Hash
@@ -1260,14 +1260,17 @@ func (p *TxPool) BlobRemoved(n int) {
 	p.totalBlobsInPool.Store(cur - uint64(n))
 }
 
-// AuthReserve implements txtype.PoolMutation.
-// SetCode authority reservation requires the *metaTxn reference which is not
-// available through the PoolMutation interface; wiring is deferred to Phase 3b.
-func (p *TxPool) AuthReserve(_ common.Address, _ uint64) {}
+// AuthReserve implements txtype.PoolMutation — registers an (authority, nonce)
+// pair in the pool's authority-reservation set.
+func (p *TxPool) AuthReserve(authority common.Address, nonce uint64) {
+	p.auths[AuthAndNonce{Authority: authority, Nonce: nonce}] = struct{}{}
+}
 
-// AuthRelease implements txtype.PoolMutation.
-// SetCode authority release is handled explicitly in discardLocked until Phase 3b.
-func (p *TxPool) AuthRelease(_ common.Address, _ uint64) {}
+// AuthRelease implements txtype.PoolMutation — removes an (authority, nonce)
+// pair from the pool's authority-reservation set.
+func (p *TxPool) AuthRelease(authority common.Address, nonce uint64) {
+	delete(p.auths, AuthAndNonce{Authority: authority, Nonce: nonce})
+}
 
 func (p *TxPool) GetMaxBlobsPerBlock() uint64 {
 	now := time.Now().Unix()
@@ -1681,25 +1684,29 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		p.logger.Info("senderID not registered, discarding transaction for safety")
 		return txpoolcfg.InvalidSender
 	}
-	if _, ok := p.auths[AuthAndNonce{senderAddr, mt.TxnSlot.Nonce}]; ok {
+	if _, ok := p.auths[AuthAndNonce{Authority: senderAddr, Nonce: mt.TxnSlot.Nonce}]; ok {
 		return txpoolcfg.ErrAuthorityReserved
 	}
 
-	// Check if we have txn with same authorization in the pool
+	// Check if we have txn with same authorization in the pool.
+	// Authority reservations are stored as (recovered-signer, nonce) pairs in p.auths.
+	// Recovered signers are in TxnSlot.AuthAndNonces and are not available through
+	// types.Transaction, so reservation management stays explicit here rather than
+	// being delegated to SetCodeHandler.OnAdd.
 	if mt.TxnSlot.TxType() == SetCodeTxnType {
 		for _, a := range mt.TxnSlot.AuthAndNonces {
 			// Self authorization nonce should be senderNonce + 1
-			if a.authority == senderAddr && a.nonce != mt.TxnSlot.Nonce+1 {
-				p.logger.Debug("Self authorization nonce should be senderNonce + 1", "authority", a.authority, "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
+			if a.Authority == senderAddr && a.Nonce != mt.TxnSlot.Nonce+1 {
+				p.logger.Debug("Self authorization nonce should be senderNonce + 1", "authority", a.Authority, "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
 				return txpoolcfg.NonceTooLow
 			}
-			if _, ok := p.auths[AuthAndNonce{a.authority, a.nonce}]; ok {
-				p.logger.Debug("setCodeTxn ", "DUPLICATE authority", a.authority, "at nonce", a.nonce, "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
+			if _, ok := p.auths[AuthAndNonce{Authority: a.Authority, Nonce: a.Nonce}]; ok {
+				p.logger.Debug("setCodeTxn ", "DUPLICATE authority", a.Authority, "at nonce", a.Nonce, "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
 				return txpoolcfg.ErrAuthorityReserved
 			}
 		}
 		for _, a := range mt.TxnSlot.AuthAndNonces {
-			p.auths[AuthAndNonce{a.authority, a.nonce}] = mt
+			p.AuthReserve(a.Authority, a.Nonce)
 		}
 	}
 
@@ -1717,7 +1724,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 	}
 	// All transactions are first added to the queued pool and then immediately promoted from there if required
 	p.queued.Add(mt, "addLocked", p.logger)
-	// Update type-specific pool state (blob count for blobs; SetCode auth wired in Phase 3b).
+	// Update type-specific pool state (blob count, SetCode authority reservations).
 	handler.OnAdd(mt.TxnSlot.Txn, p)
 	// Maintain the blob-hash → txn index map (requires TxnSlot.IDHash; stays here).
 	for i, b := range mt.TxnSlot.GetBlobHashes() {
@@ -1740,15 +1747,15 @@ func (p *TxPool) discardLocked(mt *metaTxn, reason txpoolcfg.DiscardReason) {
 	p.deletedTxns = append(p.deletedTxns, mt)
 	p.all.delete(mt, reason, p.logger)
 	p.discardReasonsLRU.Add(hashStr, reason)
-	// Update type-specific pool state on removal.
+	// Update type-specific pool state on removal (blob count via handler.OnRemove).
 	if handler, ok := txtype.Global.Get(mt.TxnSlot.TxType()); ok {
 		handler.OnRemove(mt.TxnSlot.Txn, p)
 	}
-	// SetCode: release authority reservations. Requires AuthAndNonces (recovered
-	// signers not available via types.Transaction); handled explicitly until Phase 3b.
+	// SetCode: release authority reservations. Recovered signers (AuthAndNonces) are
+	// not available through types.Transaction, so this stays explicit here.
 	if mt.TxnSlot.TxType() == SetCodeTxnType {
 		for _, a := range mt.TxnSlot.AuthAndNonces {
-			delete(p.auths, a)
+			p.AuthRelease(a.Authority, a.Nonce)
 		}
 	}
 }

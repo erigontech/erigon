@@ -285,7 +285,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 			feecap:         200_000,
 			tipcap:         200_000,
 			expectedReason: txpoolcfg.Success,
-			replacedAuth:   &AuthAndNonce{addrB, 3},
+			replacedAuth:   &AuthAndNonce{Authority: addrB, Nonce: 3},
 		},
 		{
 			title:          "B sends to replace own setcode txn with non setcode txn, with higher tipcap",
@@ -296,7 +296,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 			feecap:         300_000,
 			tipcap:         300_000,
 			expectedReason: txpoolcfg.Success,
-			replacedAuth:   &AuthAndNonce{addrA, 3},
+			replacedAuth:   &AuthAndNonce{Authority: addrA, Nonce: 3},
 		},
 		{
 			title:          "B sends to replace non setcode txn, with setcode txn (A's auth) with higher tipcap",
@@ -376,7 +376,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 			var txnSlot1 *TxnSlot
 			if c.authority != nil {
 				txnSlot1 = newTestSetCodeTxnSlot(c.senderNonce, 0, c.tipcap, c.feecap, 100000)
-				txnSlot1.AuthAndNonces = []AuthAndNonce{{*c.authority, c.authNonce}}
+				txnSlot1.AuthAndNonces = []AuthAndNonce{{Authority: *c.authority, Nonce: c.authNonce}}
 			} else {
 				txnSlot1 = newTestTxnSlot(c.senderNonce, 0, c.tipcap, c.feecap, 100000)
 			}
@@ -387,7 +387,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, []txpoolcfg.DiscardReason{c.expectedReason}, reasons)
 			if c.authority != nil && c.expectedReason == txpoolcfg.Success {
-				_, ok := pool.auths[AuthAndNonce{*c.authority, c.authNonce}]
+				_, ok := pool.auths[AuthAndNonce{Authority: *c.authority, Nonce: c.authNonce}]
 				assert.True(t, ok)
 			}
 			if c.replacedAuth != nil {
@@ -1019,7 +1019,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	require.NoError(t, err)
 
 	txn := newTestSetCodeTxnSlot(0, 0, 0, 21000, 500000)
-	txn.AuthAndNonces = []AuthAndNonce{{nonce: 0, authority: common.Address{}}}
+	txn.AuthAndNonces = []AuthAndNonce{{Nonce: 0, Authority: common.Address{}}}
 
 	txns := TxnSlots{
 		Txns:    append([]*TxnSlot{}, txn),
