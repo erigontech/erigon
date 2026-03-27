@@ -499,7 +499,7 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 		require.Error(t, err)
 
 		// end block beyond latest is an error (Geth semantics)
-		n2 := rpc.BlockNumber(12)
+		n2 := rpc.BlockNumber(77)
 		_, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.BlockNumber(11), &n2)
 		require.Error(t, err)
 	})
