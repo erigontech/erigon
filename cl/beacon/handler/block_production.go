@@ -620,18 +620,23 @@ func (a *ApiHandler) produceBeaconBody(
 			})
 		}
 
+		attrs := &engine_types.PayloadAttributes{
+			Timestamp:             hexutil.Uint64(latestExecutionPayload.Time + secsDiff),
+			PrevRandao:            random,
+			SuggestedFeeRecipient: feeRecipient,
+			Withdrawals:           withdrawals,
+			ParentBeaconBlockRoot: (*common.Hash)(&blockRoot),
+		}
+		if stateVersion.AfterOrEqual(clparams.GloasVersion) {
+			sn := hexutil.Uint64(targetSlot)
+			attrs.SlotNumber = &sn
+		}
 		idBytes, err := a.engine.ForkChoiceUpdate(
 			ctx,
 			finalizedHash,
 			safeHash,
 			head,
-			&engine_types.PayloadAttributes{
-				Timestamp:             hexutil.Uint64(latestExecutionPayload.Time + secsDiff),
-				PrevRandao:            random,
-				SuggestedFeeRecipient: feeRecipient,
-				Withdrawals:           withdrawals,
-				ParentBeaconBlockRoot: (*common.Hash)(&blockRoot),
-			},
+			attrs,
 			stateVersion,
 		)
 		if err != nil {
