@@ -163,6 +163,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		}
 		beaconConfig = &customBeaconCfg
 		networkConfig = &customNetworkCfg
+		cltypes.SetSyncCommitteeAggregationBitsSize(beaconConfig.SyncCommitteeSize, beaconConfig.SyncCommitteeSubnetCount)
 		genesisDb = genesisdb.NewGenesisDB(beaconConfig, dirs.CaplinGenesis)
 		stateBytes, err := os.ReadFile(config.CustomGenesisStatePath)
 		if err != nil {
