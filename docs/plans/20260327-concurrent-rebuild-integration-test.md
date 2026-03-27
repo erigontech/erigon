@@ -37,15 +37,15 @@ This proves that `ERIGON_REBUILD_CONCURRENT_COMMITMENT=true` produces identical 
 **Files:**
 - Create: `db/state/squeeze_concurrent_rebuild_test.go`
 
-- [ ] Create file with package `state_test`, imports matching squeeze_test.go patterns
-- [ ] Add `type rebuildResult` struct to hold: `root []byte`, `duration time.Duration`, `fileSizes map[string]int64`
-- [ ] Add `envIntOr(key string, def uint64) uint64` helper that reads `os.Getenv` + `strconv.ParseUint` with default fallback (for TEST_ACCOUNTS, TEST_STEPS, etc.)
-- [ ] Add `collectCommitmentFiles(dirs datadir.Dirs) map[string]int64` helper that uses `dir.ListFiles(dirs.SnapDomain, ".kv")` filtered by `kv.CommitmentDomain.String()`, returning filename→size map
-- [ ] Add `wipeCommitment(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, dirs datadir.Dirs)` helper that:
+- [x] Create file with package `state_test`, imports matching squeeze_test.go patterns
+- [x] Add `type rebuildResult` struct to hold: `root []byte`, `duration time.Duration`, `fileSizes map[string]int64`
+- [x] Add `envIntOr(key string, def uint64) uint64` helper that reads `os.Getenv` + `strconv.ParseUint` with default fallback (for TEST_ACCOUNTS, TEST_STEPS, etc.)
+- [x] Add `collectCommitmentFiles(dirs datadir.Dirs) map[string]int64` helper that uses `dir.ListFiles(dirs.SnapDomain, ".kv")` filtered by `kv.CommitmentDomain.String()`, returning filename→size map
+- [x] Add `wipeCommitment(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, dirs datadir.Dirs)` helper that:
   - Opens RwTx, lists tables, clears commitment tables, commits
   - Lists commitment `.kv` files via `collectCommitmentFiles` and deletes them (plus `.kvi`, `.kvei`, `.bt` siblings)
   - Calls `agg.OpenFolder()` to rescan
-- [ ] Add `logComparison(t *testing.T, baseline, sequential, concurrent rebuildResult, originalSizes map[string]int64)` helper that logs a summary table via `t.Logf`
+- [x] Add `logComparison(t *testing.T, baseline, sequential, concurrent rebuildResult, originalSizes map[string]int64)` helper that logs a summary table via `t.Logf`
 
 ### Task 2: Implement Phase 1 — data generation
 
