@@ -40,13 +40,14 @@ func (SetCodeHandler) ForkRequired(forks ForkState) bool { return forks.IsPrague
 // CanCreate returns false — set-code transactions cannot deploy contracts.
 func (SetCodeHandler) CanCreate() bool { return false }
 
-// ValidateTx checks that the authorization list is non-empty.
-// The pool enforces self-authorization nonce rules and duplicate authority
-// checks separately before calling this handler.
-func (SetCodeHandler) ValidateTx(txn types.Transaction, _ bool, _ *txpoolcfg.Config) txpoolcfg.DiscardReason {
-	if len(txn.GetAuthorizations()) == 0 {
-		return txpoolcfg.NoAuthorizations
-	}
+// ValidateTx is a stub in Phase 1/3.
+//
+// The authorizations non-empty check uses TxnSlot.AuthAndNonces (recovered
+// signers) rather than types.Transaction.GetAuthorizations() (raw structs),
+// so it stays in pool.go until Phase 3b adds recovered-authority plumbing.
+// Additional self-authorization nonce and duplicate authority checks also
+// remain in addLocked where the metaTxn reference is available.
+func (SetCodeHandler) ValidateTx(_ types.Transaction, _ bool, _ *txpoolcfg.Config) txpoolcfg.DiscardReason {
 	return txpoolcfg.NotSet
 }
 

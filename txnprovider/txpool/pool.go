@@ -60,6 +60,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/txnprovider"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
+	"github.com/erigontech/erigon/txnprovider/txtype"
 )
 
 // txMaxBroadcastSize is the max size of a transaction that will be broadcast.
@@ -910,17 +911,29 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 	isEIP3860 := p.isShanghai() || p.isAgra()
 	isPrague := p.isPrague() || p.isBhilai()
 	isEIP7954 := p.isAmsterdam()
+
+	// Handler dispatch: check fork activation and type-specific rules.
+	handler, ok := txtype.Global.Get(txn.TxType())
+	if !ok {
+		return txpoolcfg.TypeNotActivated
+	}
+	forks := p.forkState()
+	if !handler.ForkRequired(forks) {
+		return txpoolcfg.TypeNotActivated
+	}
+
 	if txn.IsCreation() {
 		if err := vm.CheckMaxInitCodeSize(uint64(txn.GetDataLen()), isEIP3860, isEIP7954); err != nil {
 			return txpoolcfg.InitCodeTooLarge
 		}
+		if !handler.CanCreate() {
+			return txpoolcfg.InvalidCreateTxn
+		}
 	}
 
+	// AA: ERC-7562 opcode restriction check via ethBackend.
+	// Phase 2 (Validation independence) will move this into handler.ValidateTx.
 	if txn.TxType() == types.AccountAbstractionTxType {
-		if !p.cfg.AllowAA {
-			return txpoolcfg.TypeNotActivated
-		}
-
 		res, err := p.ethBackend.AAValidation(context.Background(), &remoteproto.AAValidationRequest{Tx: txn.ToProtoAccountAbstractionTxn()}) // enforces ERC-7562 rules
 		if err != nil {
 			return txpoolcfg.InvalidAA
@@ -930,17 +943,17 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		}
 	}
 
-	authorizationLen := len(txn.AuthAndNonces)
-	if txn.TxType() == SetCodeTxnType {
-		if !isPrague {
-			return txpoolcfg.TypeNotActivated
-		}
-		if txn.IsCreation() {
-			return txpoolcfg.InvalidCreateTxn
-		}
-		if authorizationLen == 0 {
-			return txpoolcfg.NoAuthorizations
-		}
+	// Type-specific validation (blob hash count, etc).
+	// AA: handled above. SetCode auth count and blob bundle/KZG: see below.
+	if reason := handler.ValidateTx(txn.Txn, isLocal, &p.cfg); reason != txpoolcfg.NotSet {
+		return reason
+	}
+
+	// SetCode: non-empty authorization list required.
+	// Uses TxnSlot.AuthAndNonces (recovered signers) rather than
+	// types.Transaction.GetAuthorizations(); stays here until Phase 3b.
+	if txn.TxType() == SetCodeTxnType && len(txn.AuthAndNonces) == 0 {
+		return txpoolcfg.NoAuthorizations
 	}
 
 	// Drop non-local transactions under our own minimal accepted gas price or tip
@@ -951,7 +964,8 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		return txpoolcfg.UnderPriced
 	}
 
-	isAATxn := txn.TxType() == types.AccountAbstractionTxType
+	authorizationLen := len(txn.AuthAndNonces)
+	gasFlags := handler.IntrinsicGasFlags()
 	intrinsicGasResult, overflow := mdgas.CalcIntrinsicGas(mdgas.IntrinsicGasCalcArgs{
 		Data:               make([]byte, txn.GetDataLen()),
 		DataNonZeroLen:     uint64(txn.GetDataNonZeroLen()),
@@ -965,7 +979,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		IsEIP3860:          isEIP3860,
 		IsEIP7623:          isPrague,
 		IsEIP8037:          p.isAmsterdam(),
-		IsAATxn:            isAATxn,
+		IsAATxn:            gasFlags.IsAATxn,
 	})
 	gas := mdgas.MdGas{
 		Regular: intrinsicGasResult.RegularGas,
@@ -1004,9 +1018,9 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		return txpoolcfg.GasLimitTooHigh
 	}
 
-	if !isLocal && uint64(p.all.count(txn.SenderID)) > p.cfg.AccountSlots {
+	if !isLocal && uint64(p.all.count(txn.SenderID)) > handler.AccountLimit(&p.cfg) {
 		if txn.Traced {
-			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming idHash=%x slots=%d, limit=%d", txn.IDHash, p.all.count(txn.SenderID), p.cfg.AccountSlots))
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming idHash=%x slots=%d, limit=%d", txn.IDHash, p.all.count(txn.SenderID), handler.AccountLimit(&p.cfg)))
 		}
 		return txpoolcfg.Spammer
 	}
@@ -1035,18 +1049,12 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 }
 
 func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardReason {
-	if !p.isCancun() {
-		return txpoolcfg.TypeNotActivated
-	}
-	if txn.IsCreation() {
-		return txpoolcfg.InvalidCreateTxn
-	}
+	// Fork activation, creation prohibition, and basic blob count (> MaxBlobsPerTxn)
+	// are already checked in validateTx via the BlobHandler. Here we only enforce
+	// the dynamic per-block limit and verify the blob bundle contents.
 	blobHashes := txn.GetBlobHashes()
 	blobCount := len(blobHashes)
-	if blobCount == 0 {
-		return txpoolcfg.NoBlobs
-	}
-	if blobCount > min(params.MaxBlobsPerTxn, int(p.GetMaxBlobsPerBlock())) {
+	if blobCount > int(p.GetMaxBlobsPerBlock()) {
 		return txpoolcfg.TooManyBlobs
 	}
 
@@ -1228,6 +1236,38 @@ func (p *TxPool) isOsaka() bool {
 func (p *TxPool) isAmsterdam() bool {
 	return isTimeBasedForkActivated(&p.isPostAmsterdam, p.amsterdamTime)
 }
+
+// forkState builds the txtype.ForkState snapshot used for handler dispatch.
+func (p *TxPool) forkState() txtype.ForkState {
+	return txtype.ForkState{
+		IsShanghai:  p.isShanghai() || p.isAgra(),
+		IsCancun:    p.isCancun(),
+		IsPrague:    p.isPrague() || p.isBhilai(),
+		IsAmsterdam: p.isAmsterdam(),
+		AllowAA:     p.cfg.AllowAA,
+	}
+}
+
+// BlobAdded implements txtype.PoolMutation — increments the pool-wide blob count.
+func (p *TxPool) BlobAdded(n int) {
+	cur := p.totalBlobsInPool.Load()
+	p.totalBlobsInPool.Store(cur + uint64(n))
+}
+
+// BlobRemoved implements txtype.PoolMutation — decrements the pool-wide blob count.
+func (p *TxPool) BlobRemoved(n int) {
+	cur := p.totalBlobsInPool.Load()
+	p.totalBlobsInPool.Store(cur - uint64(n))
+}
+
+// AuthReserve implements txtype.PoolMutation.
+// SetCode authority reservation requires the *metaTxn reference which is not
+// available through the PoolMutation interface; wiring is deferred to Phase 3b.
+func (p *TxPool) AuthReserve(_ common.Address, _ uint64) {}
+
+// AuthRelease implements txtype.PoolMutation.
+// SetCode authority release is handled explicitly in discardLocked until Phase 3b.
+func (p *TxPool) AuthRelease(_ common.Address, _ uint64) {}
 
 func (p *TxPool) GetMaxBlobsPerBlock() uint64 {
 	now := time.Now().Unix()
@@ -1576,17 +1616,18 @@ func (p *TxPool) updateInSubPool(mt *metaTxn) {
 }
 
 func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.DiscardReason {
+	handler, _ := txtype.Global.Get(mt.TxnSlot.TxType())
+
 	// Insert to pending pool, if pool doesn't have txn with same Nonce and bigger Tip
 	found := p.all.get(mt.TxnSlot.SenderID, mt.TxnSlot.Nonce)
 	if found != nil {
-		if found.TxnSlot.TxType() == BlobTxnType && mt.TxnSlot.TxType() != BlobTxnType {
+		if !handler.CanReplace(found.TxnSlot.TxType()) {
 			return txpoolcfg.BlobTxReplace
 		}
-		priceBump := p.cfg.PriceBump
+		priceBump := handler.PriceBumpPercent(&p.cfg)
 
 		if mt.TxnSlot.TxType() == BlobTxnType {
 			//Blob txn threshold checks for replace txn
-			priceBump = p.cfg.BlobPriceBump
 			blobFeeThreshold, overflow := (&uint256.Int{}).MulDivOverflow(
 				found.TxnSlot.GetBlobFeeCap(),
 				uint256.NewInt(100+priceBump),
@@ -1628,8 +1669,9 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		p.discardLocked(found, txpoolcfg.ReplacedByHigherTip)
 	}
 
-	// Don't add blob txn to queued if it's less than current pending blob base fee
-	if mt.TxnSlot.TxType() == BlobTxnType && mt.TxnSlot.GetBlobFeeCap().LtUint64(p.pendingBlobFee.Load()) {
+	// Don't add txn to queued if it fails the type's promotion eligibility check
+	// (e.g. blob fee cap below current pending blob base fee).
+	if !handler.PromotionCheck(mt.TxnSlot.GetBlobFeeCap().Uint64(), p.pendingBlobFee.Load()) {
 		return txpoolcfg.FeeTooLow
 	}
 
@@ -1675,15 +1717,14 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 	}
 	// All transactions are first added to the queued pool and then immediately promoted from there if required
 	p.queued.Add(mt, "addLocked", p.logger)
-	if blobHashes := mt.TxnSlot.GetBlobHashes(); len(blobHashes) > 0 {
-		t := p.totalBlobsInPool.Load()
-		p.totalBlobsInPool.Store(t + uint64(len(blobHashes)))
-		for i, b := range blobHashes {
-			p.blobHashToTxn[b] = struct {
-				index   int
-				txnHash common.Hash
-			}{i, mt.TxnSlot.IDHash}
-		}
+	// Update type-specific pool state (blob count for blobs; SetCode auth wired in Phase 3b).
+	handler.OnAdd(mt.TxnSlot.Txn, p)
+	// Maintain the blob-hash → txn index map (requires TxnSlot.IDHash; stays here).
+	for i, b := range mt.TxnSlot.GetBlobHashes() {
+		p.blobHashToTxn[b] = struct {
+			index   int
+			txnHash common.Hash
+		}{i, mt.TxnSlot.IDHash}
 	}
 
 	// Remove from mined cache as we are now "resurrecting" it to a sub-pool
@@ -1699,10 +1740,12 @@ func (p *TxPool) discardLocked(mt *metaTxn, reason txpoolcfg.DiscardReason) {
 	p.deletedTxns = append(p.deletedTxns, mt)
 	p.all.delete(mt, reason, p.logger)
 	p.discardReasonsLRU.Add(hashStr, reason)
-	if mt.TxnSlot.TxType() == BlobTxnType {
-		t := p.totalBlobsInPool.Load()
-		p.totalBlobsInPool.Store(t - uint64(len(mt.TxnSlot.GetBlobHashes())))
+	// Update type-specific pool state on removal.
+	if handler, ok := txtype.Global.Get(mt.TxnSlot.TxType()); ok {
+		handler.OnRemove(mt.TxnSlot.Txn, p)
 	}
+	// SetCode: release authority reservations. Requires AuthAndNonces (recovered
+	// signers not available via types.Transaction); handled explicitly until Phase 3b.
 	if mt.TxnSlot.TxType() == SetCodeTxnType {
 		for _, a := range mt.TxnSlot.AuthAndNonces {
 			delete(p.auths, a)
@@ -2112,7 +2155,12 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 // being promoted to the pending or basefee pool, for re-broadcasting
 func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcements *Announcements, logger log.Logger) {
 	// Demote worst transactions that do not qualify for pending sub pool anymore, to other sub pools, or discard
-	for worst := p.pending.Worst(); p.pending.Len() > 0 && (worst.subPool < BaseFeePoolBits || worst.minFeeCap.LtUint64(pendingBaseFee) || (worst.TxnSlot.TxType() == BlobTxnType && worst.TxnSlot.GetBlobFeeCap().LtUint64(pendingBlobFee))); worst = p.pending.Worst() {
+	for worst := p.pending.Worst(); p.pending.Len() > 0; worst = p.pending.Worst() {
+		h, _ := txtype.Global.Get(worst.TxnSlot.TxType())
+		if worst.subPool >= BaseFeePoolBits && worst.minFeeCap.CmpUint64(pendingBaseFee) >= 0 &&
+			h.PromotionCheck(worst.TxnSlot.GetBlobFeeCap().Uint64(), pendingBlobFee) {
+			break
+		}
 		tx := p.pending.PopWorst()
 		if worst.subPool >= BaseFeePoolBits {
 			p.baseFee.Add(tx, "demote-pending", logger)
@@ -2122,7 +2170,12 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 	}
 
 	// Promote best transactions from base fee pool to pending pool while they qualify
-	for best := p.baseFee.Best(); p.baseFee.Len() > 0 && best.subPool >= BaseFeePoolBits && best.minFeeCap.CmpUint64(pendingBaseFee) >= 0 && (best.TxnSlot.TxType() != BlobTxnType || best.TxnSlot.GetBlobFeeCap().CmpUint64(pendingBlobFee) >= 0); best = p.baseFee.Best() {
+	for best := p.baseFee.Best(); p.baseFee.Len() > 0; best = p.baseFee.Best() {
+		bh, _ := txtype.Global.Get(best.TxnSlot.TxType())
+		if !(best.subPool >= BaseFeePoolBits && best.minFeeCap.CmpUint64(pendingBaseFee) >= 0 &&
+			bh.PromotionCheck(best.TxnSlot.GetBlobFeeCap().Uint64(), pendingBlobFee)) {
+			break
+		}
 		tx := p.baseFee.PopBest()
 		announcements.Append(tx.TxnSlot.TxType(), tx.TxnSlot.Size, tx.TxnSlot.IDHash[:])
 		p.pending.Add(tx, logger)
