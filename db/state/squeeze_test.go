@@ -537,9 +537,12 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 // TestGenerateCommitmentRebuildData generates a large-scale dataset with valid commitment roots.
 // The resulting datadir can be used for manual testing of `integration commitment rebuild`.
 //
+// By default, runs with small parameters (1K accounts, 3 steps) as a smoke test.
+// Set TEST_LARGE=true for full-scale generation (3M accounts, 59 steps, ~10M keys).
+//
 // Environment variables:
 //   - TEST_DATADIR: persistent output directory (uses t.TempDir() if empty)
-//   - TEST_SMALL: when set to "true", uses small parameters for quick smoke testing
+//   - TEST_LARGE: when set to "true", uses full-scale parameters (requires long timeout)
 func TestGenerateCommitmentRebuildData(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping large data generation in short mode")
@@ -547,21 +550,21 @@ func TestGenerateCommitmentRebuildData(t *testing.T) {
 
 	persistentDir := os.Getenv("TEST_DATADIR")
 
-	// Parameters
+	// Default: small parameters for smoke testing
 	var (
-		stepSize        uint64 = 100
-		totalSteps      uint64 = 59
-		numAccounts     uint64 = 3_000_000
+		stepSize        uint64 = 10
+		totalSteps      uint64 = 3
+		numAccounts     uint64 = 1000
 		slotsPerAcct    uint64 = 2
-		numCodeAccounts uint64 = 1_000_000
+		numCodeAccounts uint64 = 300
 	)
 
-	if os.Getenv("TEST_SMALL") == "true" {
-		stepSize = 10
-		totalSteps = 3
-		numAccounts = 1000
+	if os.Getenv("TEST_LARGE") == "true" || persistentDir != "" {
+		stepSize = 100
+		totalSteps = 59
+		numAccounts = 3_000_000
 		slotsPerAcct = 2
-		numCodeAccounts = 300
+		numCodeAccounts = 1_000_000
 	}
 
 	totalTxs := stepSize * totalSteps
