@@ -17,8 +17,6 @@
 package cltypes
 
 import (
-	"fmt"
-
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 	"github.com/erigontech/erigon/common"
@@ -85,7 +83,17 @@ func (a *SignedContributionAndProof) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(a.Message, a.Signature[:])
 }
 
+// SyncCommitteeAggregationBitsSize is the byte length of the aggregation bits
+// in a sync committee Contribution. It equals SyncCommitteeSize / SYNC_COMMITTEE_SUBNET_COUNT / 8.
+// Default is 16 (mainnet: 512/4/8). Call SetSyncCommitteeAggregationBitsSize to override for other presets.
 var SyncCommitteeAggregationBitsSize = 16
+
+// SetSyncCommitteeAggregationBitsSize updates the contribution aggregation bits size for the
+// active preset. Call this once at startup after loading a non-mainnet beacon chain config.
+// bits = syncCommitteeSize / syncCommitteeSubnetCount / 8
+func SetSyncCommitteeAggregationBitsSize(syncCommitteeSize, syncCommitteeSubnetCount uint64) {
+	SyncCommitteeAggregationBitsSize = int(syncCommitteeSize) / int(syncCommitteeSubnetCount) / 8
+}
 
 type Contribution struct {
 	Slot              uint64         `json:"slot,string"`
@@ -119,14 +127,7 @@ func (a *Contribution) Copy() *Contribution {
 }
 
 func (a *Contribution) DecodeSSZ(buf []byte, version int) error {
-	// The AggregationBits size depends on SyncCommitteeSize/SyncCommitteeSubnetCount which
-	// differs between presets. Infer from the buffer: total = slot(8) + root(32) + subcommittee(8) + sig(96) + bits.
-	const fixedSize = length.BlockNum*2 + length.Hash + length.Bytes96
-	aggrBitsSize := len(buf) - fixedSize
-	if aggrBitsSize <= 0 {
-		return fmt.Errorf("contribution buffer too small: %d bytes", len(buf))
-	}
-	a.AggregationBits = make([]byte, aggrBitsSize)
+	a.AggregationBits = make([]byte, SyncCommitteeAggregationBitsSize)
 	return ssz2.UnmarshalSSZ(buf, version, &a.Slot, a.BeaconBlockRoot[:], &a.SubcommitteeIndex, []byte(a.AggregationBits), a.Signature[:])
 }
 
