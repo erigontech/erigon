@@ -346,7 +346,13 @@ func (p *ConcurrentPatriciaHashed) Reset() {
 }
 
 func (p *ConcurrentPatriciaHashed) Release() {
+	for i := range p.mounts {
+		p.mounts[i].Release()
+		p.mounts[i] = nil
+		p.ctx[i] = nil
+	}
 	p.root.Release()
+	p.root = nil
 }
 
 // Set context for state IO
