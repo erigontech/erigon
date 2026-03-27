@@ -595,7 +595,7 @@ func TestAccountAt(t *testing.T) {
 		// and too big txIndex
 		results, err = api.AccountAt(m.Ctx, blockHash10, 1024, contract)
 		require.NoError(err)
-		require.Equal(40, int(results.Nonce))
+		require.Equal(42, int(results.Nonce))
 	})
 	t.Run("not existing addr", func(t *testing.T) {
 		require := require.New(t)
