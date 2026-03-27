@@ -85,6 +85,43 @@ func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byt
 	return keys, values
 }
 
+// testDbAndAggregatorForLargeData creates a temporal DB + aggregator sized for large datasets (10M+ keys).
+// When persistentDir is non-empty, creates an on-disk MDBX at that path (for integration binary compatibility).
+// When persistentDir is empty, uses t.TempDir() with InMem MDBX.
+// Returns dirs so the caller knows the output path.
+func testDbAndAggregatorForLargeData(tb testing.TB, aggStep uint64, persistentDir string) (kv.TemporalRwDB, *state.Aggregator, datadir.Dirs) {
+	tb.Helper()
+	logger := log.New()
+
+	var dirs datadir.Dirs
+	var db kv.RwDB
+
+	if persistentDir != "" {
+		dirs = datadir.New(persistentDir)
+		db = mdbx.New(dbcfg.ChainDB, logger).
+			Path(dirs.Chaindata).
+			GrowthStep(64 * datasize.MB).
+			MapSize(16 * datasize.GB).
+			MustOpen()
+	} else {
+		dirs = datadir.New(tb.TempDir())
+		db = mdbx.New(dbcfg.ChainDB, logger).
+			InMem(tb, dirs.Chaindata).
+			GrowthStep(64 * datasize.MB).
+			MapSize(16 * datasize.GB).
+			MustOpen()
+	}
+	tb.Cleanup(db.Close)
+
+	agg := testAgg(tb, db, dirs, aggStep, logger)
+	err := agg.OpenFolder()
+	require.NoError(tb, err)
+	tdb, err := temporal.New(db, agg)
+	require.NoError(tb, err)
+	tb.Cleanup(tdb.Close)
+	return tdb, agg, dirs
+}
+
 func testDbAndAggregatorv3(tb testing.TB, aggStep uint64) (kv.TemporalRwDB, *state.Aggregator) {
 	tb.Helper()
 	logger := log.New()

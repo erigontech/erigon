@@ -63,12 +63,12 @@ This test exercises the full SharedDomains write + ComputeCommitment + BuildFile
 **Files:**
 - Modify: `db/state/squeeze_test.go`
 
-- [ ] Add `testDbAndAggregatorForLargeData(tb testing.TB, aggStep uint64, persistentDir string) (kv.TemporalRwDB, *state.Aggregator, datadir.Dirs)` helper
-- [ ] When `persistentDir != ""`: use on-disk MDBX at that path with 16GB MapSize (for integration binary compatibility)
-- [ ] When `persistentDir == ""`: use `t.TempDir()` with InMem MDBX, 16GB MapSize
-- [ ] Set `GrowthStep(64 * datasize.MB)` for better large-write performance
-- [ ] Return `dirs` so caller knows the output path
-- [ ] Run existing tests to verify no regressions
+- [x] Add `testDbAndAggregatorForLargeData(tb testing.TB, aggStep uint64, persistentDir string) (kv.TemporalRwDB, *state.Aggregator, datadir.Dirs)` helper
+- [x] When `persistentDir != ""`: use on-disk MDBX at that path with 16GB MapSize (for integration binary compatibility)
+- [x] When `persistentDir == ""`: use `t.TempDir()` with InMem MDBX, 16GB MapSize
+- [x] Set `GrowthStep(64 * datasize.MB)` for better large-write performance
+- [x] Return `dirs` so caller knows the output path
+- [x] Run existing tests to verify no regressions
 
 ### Task 3: Implement TestGenerateCommitmentRebuildData
 
