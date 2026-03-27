@@ -16,9 +16,9 @@ The **`RES`** (Resident) column in `htop` combines the memory used by the applic
 
 For a more accurate view of Erigon's memory usage, use one of these tools:
 
-* **`vmmap -summary PID`**: Use this command to see a detailed breakdown. The **`MALLOC ZONE`** and **`REGION TYPE`** sections will show you the memory used by the application and the size of the OS page cache separately.
+* **`vmmap -summary PID`** _(macOS only)_: Shows a detailed breakdown with separate **`MALLOC ZONE`** and **`REGION TYPE`** sections for application memory and OS page cache.
+* **`pmap -x PID`** _(Linux)_: Prints a per-mapping breakdown of RSS and dirty pages. For the full raw detail use `cat /proc/<PID>/smaps`.
 * **Prometheus Dashboard**: This provides a graphical representation of the Go application's memory usage, excluding the OS page cache. You can run it with `make prometheus` and access it in your browser at `localhost:3000` with the credentials `admin/admin`.
-* **`cat /proc/<PID>/smaps`**: This command gives a raw text file of the memory maps, which can be useful for detailed analysis.
 
 Erigon typically uses about **4 GB of RAM** during a genesis sync and about **1 GB** during normal operation. The OS page cache, however, can use an unlimited amount of memory.
 
@@ -53,7 +53,7 @@ If you're encountering a BuildKit error when starting Erigon, it's likely due to
 
 {% code overflow="wrap" %}
 ```bash
-XDG_DATA_HOME=/preferred/data/folder DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 make docker-compose
+XDG_DATA_HOME=/preferred/data/folder make docker-compose
 ```
 {% endcode %}
 
