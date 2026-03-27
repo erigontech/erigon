@@ -495,18 +495,20 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, err
 	}
 
+	endTxNum := lastTxNumInBlock + 1
+	if blockNum == 0 {
+		firstTxNumInBlock = endTxNum
+	}
+
 	// Create a state reader at the parent block state using the exact txnum
 	var stateReader state.StateReader
 	var parentNum uint64
 	if blockNum == 0 {
-		// For genesis block, use empty state as parent since there's no block before it
-		// The genesis allocations are what get accessed during block 0 execution
-		stateReader = state.NewNoopReader()
 		parentNum = 0
 	} else {
 		parentNum = blockNum - 1
-		stateReader = state.NewHistoryReaderV3(tx, firstTxNumInBlock)
 	}
+	stateReader = state.NewHistoryReaderV3(tx, firstTxNumInBlock)
 
 	// Create a combined recording state (reader + writer with in-memory overlay)
 	recordingState := NewRecordingState(stateReader)
@@ -710,7 +712,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	log.Debug("expected parent root", "stateRoot", expectedParentRoot)
 
 	commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
-	if firstTxNumInBlock < commitmentStartingTxNum {
+	if blockNum != 0 && firstTxNumInBlock < commitmentStartingTxNum || commitmentStartingTxNum > 1 {
 		return nil, fmt.Errorf("commitment history pruned: start %d, last tx: %d", commitmentStartingTxNum, firstTxNumInBlock)
 	}
 
@@ -763,7 +765,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 
 	// Set up split reader: branch data from parent state, plain state from end of block
 	// need withHistory=false to have branch updates written using PutBranch()
-	splitStateReader := commitmentdb.NewSplitHistoryReader(tx, firstTxNumInBlock, lastTxNumInBlock+1, false /* withHistory */)
+	splitStateReader := commitmentdb.NewSplitHistoryReader(tx, firstTxNumInBlock, endTxNum, false /* withHistory */)
 	sdCtx.SetCustomHistoryStateReader(splitStateReader)
 	if _, _, err := domains.SeekCommitment(context.Background(), tx); err != nil {
 		return nil, fmt.Errorf("failed to re-seek commitment for collapse detection: %w", err)
@@ -857,7 +859,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, fmt.Errorf("[debug_executionWitness] stateless block execution failed: %w", err)
 	}
 
-	/// // Comment out for debugging
+	/// // Comment out for debugging failures
 	// Query the expected state for all modified accounts from the actual state DB
 	// expectedState, expectedStorage, err := api.buildExpectedPostState(ctx, tx, blockNum, block,
 	// 	readAddresses, writeAddresses, readStorageKeys, writeStorageKeys)
@@ -1574,7 +1576,7 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	// Skip verification for genesis block - it has no transactions to execute
 	// but has pre-allocated accounts which would cause a state root mismatch
 	if block.NumberU64() == 0 {
-		return
+		return block.Root(), nil, nil
 	}
 
 	// Skip verification if the witness trie is empty

@@ -736,7 +736,7 @@ func TestExecutionWitness(t *testing.T) {
 	require.NoError(t, err)
 	require.Greater(t, latestBlockNum, uint64(0), "test chain should have at least one block")
 	t.Run("genesis block", func(t *testing.T) {
-		t.Skip("Commitment history starts from 1 instead of 0 for some reason")
+		// Note: commitment history starts from 1 in this test suite
 		blockNum := rpc.BlockNumber(0)
 		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum})
 
@@ -759,9 +759,6 @@ func TestExecutionWitness(t *testing.T) {
 		require.NotNil(t, result)
 		require.NotNil(t, result.State, "State should not be nil")
 		require.NotNil(t, result.Keys, "Keys should not be nil")
-
-		t.Logf("Block 1: %d state nodes, %d codes, %d keys, %d headers",
-			len(result.State), len(result.Codes), len(result.Keys), len(result.Headers))
 	})
 
 	t.Run("by block hash", func(t *testing.T) {
@@ -776,9 +773,6 @@ func TestExecutionWitness(t *testing.T) {
 
 		require.NoError(t, err)
 		require.NotNil(t, result)
-
-		t.Logf("Block hash %s: %d state nodes, %d codes, %d keys",
-			blockHash.Hex()[:10], len(result.State), len(result.Codes), len(result.Keys))
 	})
 
 	t.Run("multiple blocks", func(t *testing.T) {
@@ -789,9 +783,6 @@ func TestExecutionWitness(t *testing.T) {
 			require.NoError(t, err, "ExecutionWitness failed for block %d", blockNum)
 			require.NotNil(t, result, "Result should not be nil for block %d", blockNum)
 			require.NotNil(t, result.State, "State should not be nil for block %d", blockNum)
-
-			t.Logf("Block %d: %d state nodes, %d codes, %d keys",
-				blockNum, len(result.State), len(result.Codes), len(result.Keys))
 		}
 	})
 
@@ -802,8 +793,6 @@ func TestExecutionWitness(t *testing.T) {
 		require.NotNil(t, result)
 		require.NotNil(t, result.State, "State should not be nil")
 		require.NotNil(t, result.Keys, "Keys should not be nil")
-		t.Logf("Latest block: %d state nodes, %d codes, %d keys",
-			len(result.State), len(result.Codes), len(result.Keys))
 	})
 
 	t.Run("non-existent block", func(t *testing.T) {
