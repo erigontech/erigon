@@ -53,12 +53,11 @@ func envIntOr(key string, def uint64) uint64 {
 
 // collectCommitmentFiles returns a map of filename→size for all commitment .kv files
 // in the domain snapshot directory.
-func collectCommitmentFiles(dirs datadir.Dirs) map[string]int64 {
+func collectCommitmentFiles(t *testing.T, dirs datadir.Dirs) map[string]int64 {
+	t.Helper()
 	result := make(map[string]int64)
 	paths, err := dir.ListFiles(dirs.SnapDomain, ".kv")
-	if err != nil {
-		return result
-	}
+	require.NoError(t, err)
 	commitStr := kv.CommitmentDomain.String()
 	for _, p := range paths {
 		name := filepath.Base(p)
@@ -66,9 +65,7 @@ func collectCommitmentFiles(dirs datadir.Dirs) map[string]int64 {
 			continue
 		}
 		info, err := os.Stat(p)
-		if err != nil {
-			continue
-		}
+		require.NoError(t, err)
 		result[name] = info.Size()
 	}
 	return result
@@ -134,6 +131,7 @@ func logComparison(t *testing.T, baseline, sequential, concurrent rebuildResult,
 	concTotal := totalSize(concurrent.fileSizes)
 
 	t.Logf("=== Rebuild Comparison ===")
+	t.Logf("Original:   files=%d totalSize=%d", len(originalSizes), origTotal)
 	t.Logf("Sequential: root=%x time=%s files=%d totalSize=%d",
 		sequential.root, sequential.duration, len(sequential.fileSizes), seqTotal)
 	t.Logf("Concurrent: root=%x time=%s files=%d totalSize=%d",
@@ -142,7 +140,7 @@ func logComparison(t *testing.T, baseline, sequential, concurrent rebuildResult,
 		bytes.Equal(sequential.root, baseline.root),
 		bytes.Equal(concurrent.root, baseline.root))
 
-	if sequential.duration > 0 {
+	if sequential.duration > 0 && concurrent.duration > 0 {
 		speedup := float64(sequential.duration) / float64(concurrent.duration)
 		t.Logf("Speedup: %.2fx", speedup)
 	}
@@ -169,7 +167,6 @@ func logComparison(t *testing.T, baseline, sequential, concurrent rebuildResult,
 		t.Logf("  %-50s original=%-10d sequential=%-10d concurrent=%-10d",
 			f, originalSizes[f], sequential.fileSizes[f], concurrent.fileSizes[f])
 	}
-	_ = origTotal // used via totalSize above
 }
 
 // reopenAggregator closes the current aggregator and reopens it with a fresh temporal DB wrapper.
@@ -344,7 +341,7 @@ func TestConcurrentRebuildCommitment(t *testing.T) {
 	require.NotEmpty(t, lastRoot, "generation root must be non-empty")
 	require.NotEqual(t, empty.RootHash.Bytes(), lastRoot, "generation root must differ from empty trie root")
 
-	originalSizes := collectCommitmentFiles(dirs)
+	originalSizes := collectCommitmentFiles(t, dirs)
 
 	// Extract root from files — this is the authoritative baseline for rebuild comparison,
 	// since RebuildCommitmentFiles operates on file data. The last step may not be frozen
@@ -352,7 +349,7 @@ func TestConcurrentRebuildCommitment(t *testing.T) {
 	// generation root). That's expected.
 	var baselineRoot []byte
 	{
-		roTx, err := db.BeginTemporalRw(ctx)
+		roTx, err := db.BeginTemporalRo(ctx)
 		require.NoError(t, err)
 		defer roTx.Rollback()
 
@@ -387,6 +384,9 @@ func TestConcurrentRebuildCommitment(t *testing.T) {
 	// ========== Phase 2: Sequential Rebuild (Ground Truth) ==========
 	t.Logf("=== Phase 2: Sequential Rebuild ===")
 
+	// Ensure sequential mode even if the env var is pre-set in the environment.
+	t.Setenv("ERIGON_REBUILD_CONCURRENT_COMMITMENT", "false")
+
 	// Close aggregator, reopen with fresh state
 	db, agg = reopenAggregator(t, db, agg, stepSize)
 
@@ -400,7 +400,7 @@ func TestConcurrentRebuildCommitment(t *testing.T) {
 	seqDuration := time.Since(seqStart)
 
 	// Collect file sizes after rebuild
-	seqSizes := collectCommitmentFiles(dirs)
+	seqSizes := collectCommitmentFiles(t, dirs)
 
 	sequentialResult := rebuildResult{
 		root:      seqRoot,
@@ -437,7 +437,7 @@ func TestConcurrentRebuildCommitment(t *testing.T) {
 	concDuration := time.Since(concStart)
 
 	// Collect file sizes after rebuild
-	concSizes := collectCommitmentFiles(dirs)
+	concSizes := collectCommitmentFiles(t, dirs)
 
 	concurrentResult := rebuildResult{
 		root:      concRoot,
