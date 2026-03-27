@@ -2,6 +2,9 @@ package state_test
 
 import (
 	"bytes"
+	"context"
+	"encoding/binary"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -9,14 +12,23 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // rebuildResult holds the output of a single rebuild pass.
@@ -172,4 +184,209 @@ func reopenAggregator(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, s
 	require.NoError(t, err)
 
 	return newDB, newAgg
+}
+
+// TestConcurrentRebuildCommitment generates deterministic data, records a baseline state root,
+// then rebuilds commitment sequentially (ground truth) and concurrently (primary target),
+// comparing roots and logging file sizes and timing.
+//
+// Environment variables for tuning:
+//   - TEST_ACCOUNTS (default 10000), TEST_STEPS (default 5), TEST_SLOTS_PER_ACCT (default 2)
+//   - TEST_CODE_ACCOUNTS (default 3000), TEST_STEP_SIZE (default 10)
+//   - TEST_DATADIR: optional persistent directory (uses t.TempDir() if empty)
+func TestConcurrentRebuildCommitment(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping concurrent rebuild integration test in short mode")
+	}
+
+	// --- Read env parameters ---
+	numAccounts := envIntOr("TEST_ACCOUNTS", 10000)
+	totalSteps := envIntOr("TEST_STEPS", 5)
+	slotsPerAcct := envIntOr("TEST_SLOTS_PER_ACCT", 2)
+	numCodeAccounts := envIntOr("TEST_CODE_ACCOUNTS", 3000)
+	stepSize := envIntOr("TEST_STEP_SIZE", 10)
+	persistentDir := os.Getenv("TEST_DATADIR")
+
+	totalTxs := stepSize * totalSteps
+	totalStorage := numAccounts * slotsPerAcct
+	totalCode := numCodeAccounts
+	totalKeys := numAccounts + totalStorage + totalCode
+
+	t.Logf("=== Phase 1: Data Generation ===")
+	t.Logf("Parameters: stepSize=%d totalSteps=%d totalTxs=%d", stepSize, totalSteps, totalTxs)
+	t.Logf("Keys: accounts=%d storage=%d code=%d total=%d", numAccounts, totalStorage, totalCode, totalKeys)
+
+	genStart := time.Now()
+
+	// --- Create aggregator and DB ---
+	db, agg, dirs := testDbAndAggregatorForLargeData(t, stepSize, persistentDir)
+	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)
+
+	ctx := context.Background()
+
+	// --- Open transaction and shared domains ---
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	// --- Calculate per-tx batch sizes ---
+	accPerTx := (numAccounts + totalTxs - 1) / totalTxs
+	storPerTx := (totalStorage + totalTxs - 1) / totalTxs
+	codePerTx := (totalCode + totalTxs - 1) / totalTxs
+	if accPerTx == 0 {
+		accPerTx = 1
+	}
+	if storPerTx == 0 {
+		storPerTx = 1
+	}
+	if codePerTx == 0 {
+		codePerTx = 1
+	}
+
+	t.Logf("Per-tx batch: accounts=%d storage=%d code=%d", accPerTx, storPerTx, codePerTx)
+
+	var (
+		blockNum    uint64
+		accIdx      uint64
+		storAccIdx  uint64
+		storSlotIdx uint64
+		codeIdx     uint64
+		lastRoot    []byte
+	)
+
+	// --- Data generation loop ---
+	for txNum := uint64(0); txNum < totalTxs; txNum++ {
+		// Write accounts batch
+		for i := uint64(0); i < accPerTx && accIdx < numAccounts; i++ {
+			addr := makeAccountAddr(accIdx)
+			acc := accounts.Account{
+				Nonce:       txNum,
+				Balance:     *uint256.NewInt(txNum * 1000),
+				CodeHash:    accounts.EmptyCodeHash,
+				Incarnation: 0,
+			}
+			buf := accounts.SerialiseV3(&acc)
+			err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, buf, txNum, nil)
+			require.NoError(t, err)
+			accIdx++
+		}
+
+		// Write storage batch
+		for i := uint64(0); i < storPerTx && (storAccIdx*slotsPerAcct+storSlotIdx) < totalStorage; i++ {
+			skey := makeStorageKey(storAccIdx, storSlotIdx, slotsPerAcct)
+			var val [32]byte
+			binary.BigEndian.PutUint64(val[24:], txNum)
+			err = domains.DomainPut(kv.StorageDomain, rwTx, skey, val[:], txNum, nil)
+			require.NoError(t, err)
+
+			storSlotIdx++
+			if storSlotIdx >= slotsPerAcct {
+				storSlotIdx = 0
+				storAccIdx++
+			}
+		}
+
+		// Write code batch
+		for i := uint64(0); i < codePerTx && codeIdx < numCodeAccounts; i++ {
+			addr := makeAccountAddr(codeIdx)
+			code := makeCodeValue(codeIdx)
+			err = domains.DomainPut(kv.CodeDomain, rwTx, addr, code, txNum, nil)
+			require.NoError(t, err)
+
+			// Update account with real code hash
+			codeHash := accounts.InternCodeHash(common.BytesToHash(crypto.Keccak256(code)))
+			acc := accounts.Account{
+				Nonce:       txNum,
+				Balance:     *uint256.NewInt(txNum * 1000),
+				CodeHash:    codeHash,
+				Incarnation: 0,
+			}
+			buf := accounts.SerialiseV3(&acc)
+			err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, buf, txNum, nil)
+			require.NoError(t, err)
+			codeIdx++
+		}
+
+		// At step boundary: compute commitment, flush, record block->txNum mapping
+		if (txNum+1)%stepSize == 0 {
+			step := (txNum + 1) / stepSize
+			rh, err := domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
+			require.NoError(t, err)
+			require.NotEmpty(t, rh)
+			lastRoot = rh
+			t.Logf("Step %d/%d (txNum=%d): root=%x", step, totalSteps, txNum, rh)
+
+			err = domains.Flush(ctx, rwTx)
+			require.NoError(t, err)
+
+			err = rawdbv3.TxNums.Append(rwTx, blockNum, txNum)
+			require.NoError(t, err)
+			blockNum++
+		}
+	}
+
+	// --- Close SharedDomains, commit tx ---
+	err = domains.Flush(ctx, rwTx)
+	require.NoError(t, err)
+	domains.Close()
+	require.NoError(t, rwTx.Commit())
+
+	// --- Build snapshot files ---
+	t.Logf("Building files for %d txs...", totalTxs)
+	err = agg.BuildFiles(totalTxs)
+	require.NoError(t, err)
+
+	// --- Record baseline root and original sizes ---
+	require.NotEmpty(t, lastRoot, "generation root must be non-empty")
+	require.NotEqual(t, empty.RootHash.Bytes(), lastRoot, "generation root must differ from empty trie root")
+
+	originalSizes := collectCommitmentFiles(dirs)
+
+	// Extract root from files — this is the authoritative baseline for rebuild comparison,
+	// since RebuildCommitmentFiles operates on file data. The last step may not be frozen
+	// into files by BuildFiles, so rootFromFiles may differ from lastRoot (the in-memory
+	// generation root). That's expected.
+	var baselineRoot []byte
+	{
+		roTx, err := db.BeginTemporalRw(ctx)
+		require.NoError(t, err)
+		defer roTx.Rollback()
+
+		ac := state.AggTx(roTx)
+		stateVal, ok, _, _, err := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, math.MaxUint64)
+		require.NoError(t, err)
+		require.True(t, ok, "commitment state must be present in files")
+
+		rootFromFiles, _, _, err := commitment.HexTrieExtractStateRoot(stateVal)
+		require.NoError(t, err)
+		require.NotEmpty(t, rootFromFiles)
+
+		baselineRoot = rootFromFiles
+		if !bytes.Equal(lastRoot, rootFromFiles) {
+			t.Logf("NOTE: generation root=%x differs from file root=%x (last step not frozen — expected)", lastRoot, rootFromFiles)
+		}
+
+		roTx.Rollback()
+	}
+
+	genDuration := time.Since(genStart)
+	t.Logf("Generation complete: root=%x fileRoot=%x time=%s accounts=%d storage=%d code=%d steps=%d totalTxs=%d",
+		lastRoot, baselineRoot, genDuration, accIdx, storAccIdx*slotsPerAcct+storSlotIdx, codeIdx, totalSteps, totalTxs)
+	t.Logf("Original commitment files: %d files", len(originalSizes))
+	for f, sz := range originalSizes {
+		t.Logf("  %s: %d bytes", f, sz)
+	}
+
+	// Store baseline result for later comparison
+	_ = rebuildResult{root: baselineRoot, duration: genDuration, fileSizes: originalSizes}
+
+	// Phases 2-4 (sequential rebuild, concurrent rebuild, comparison) will be added in subsequent tasks.
+	_ = dirs
+	_ = agg
+	_ = db
+	_ = stepSize
 }

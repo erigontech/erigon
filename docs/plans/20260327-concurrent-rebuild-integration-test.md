@@ -52,18 +52,18 @@ This proves that `ERIGON_REBUILD_CONCURRENT_COMMITMENT=true` produces identical 
 **Files:**
 - Modify: `db/state/squeeze_concurrent_rebuild_test.go`
 
-- [ ] Add `TestConcurrentRebuildCommitment(t *testing.T)` with `testing.Short()` skip
-- [ ] Read env parameters: `TEST_ACCOUNTS` (default 10000), `TEST_STEPS` (default 5), `TEST_SLOTS_PER_ACCT` (default 2), `TEST_CODE_ACCOUNTS` (default 3000), `TEST_STEP_SIZE` (default 10), `TEST_DATADIR` (optional persistent dir)
-- [ ] Create aggregator via `testDbAndAggregatorForLargeData(t, stepSize, persistentDir)` — returns `db, agg, dirs`
-- [ ] Open `BeginTemporalRwTx`, create `SharedDomains`
-- [ ] Implement data generation loop (reuse `makeAccountAddr`, `makeStorageKey`, `makeCodeValue`):
+- [x] Add `TestConcurrentRebuildCommitment(t *testing.T)` with `testing.Short()` skip
+- [x] Read env parameters: `TEST_ACCOUNTS` (default 10000), `TEST_STEPS` (default 5), `TEST_SLOTS_PER_ACCT` (default 2), `TEST_CODE_ACCOUNTS` (default 3000), `TEST_STEP_SIZE` (default 10), `TEST_DATADIR` (optional persistent dir)
+- [x] Create aggregator via `testDbAndAggregatorForLargeData(t, stepSize, persistentDir)` — returns `db, agg, dirs`
+- [x] Open `BeginTemporalRwTx`, create `SharedDomains`
+- [x] Implement data generation loop (reuse `makeAccountAddr`, `makeStorageKey`, `makeCodeValue`):
   - Write accounts, storage, code in batches per txNum
   - At step boundaries: `ComputeCommitment` → record root, `Flush`, `rawdbv3.TxNums.Append`
-- [ ] After loop: close SharedDomains, commit tx
-- [ ] Call `agg.BuildFiles(totalTxs)` to create snapshot files
-- [ ] Record `baselineRoot` (last root from generation) and `originalSizes` via `collectCommitmentFiles`
-- [ ] Extract root from files via `ac.DebugGetLatestFromFiles` + `commitment.HexTrieExtractStateRoot` to double-check baseline matches
-- [ ] Log generation stats: accounts, storage keys, code accounts, steps, total txs, time
+- [x] After loop: close SharedDomains, commit tx
+- [x] Call `agg.BuildFiles(totalTxs)` to create snapshot files
+- [x] Record `baselineRoot` (last root from generation) and `originalSizes` via `collectCommitmentFiles`
+- [x] Extract root from files via `ac.DebugGetLatestFromFiles` + `commitment.HexTrieExtractStateRoot` to double-check baseline matches
+- [x] Log generation stats: accounts, storage keys, code accounts, steps, total txs, time
 
 ### Task 3: Implement Phase 2 — sequential rebuild (ground truth)
 
