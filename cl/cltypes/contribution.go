@@ -131,7 +131,11 @@ func (a *Contribution) DecodeSSZ(buf []byte, version int) error {
 }
 
 func (a *Contribution) EncodingSizeSSZ() int {
-	return length.BlockNum*2 + length.Hash + length.Bytes96 + len(a.AggregationBits)
+	bitsSize := len(a.AggregationBits)
+	if bitsSize == 0 {
+		bitsSize = SyncCommitteeAggregationBitsSize
+	}
+	return length.BlockNum*2 + length.Hash + length.Bytes96 + bitsSize
 }
 
 func (a *Contribution) HashSSZ() ([32]byte, error) {
