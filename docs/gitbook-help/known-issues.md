@@ -62,6 +62,12 @@ XDG_DATA_HOME=/preferred/data/folder DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=
 If Erigon crashes with a **`cannot allocate memory`** error, your kernel's memory allocation limits might be too low. You can resolve this by adding the following lines to `/etc/sysctl.conf` or a new `.conf` file in `/etc/sysctl.d/`:
 
 ```bash
-vm.overcommit_memory = 1 
-vm.max_map_count = 16777216 
+vm.overcommit_memory = 1
+vm.max_map_count = 16777216
 ```
+
+### Changing `--db.pagesize` After First Sync <a href="#db-pagesize" id="db-pagesize"></a>
+
+The `--db.pagesize` flag sets the MDBX page size and **must be chosen before the first sync**. It cannot be changed on an existing database without deleting the datadir and re-syncing from scratch.
+
+The default page size is `4kb`. For cloud drives or any storage with high sequential I/O latency, a larger page size (e.g. `--db.pagesize=64kb`) reduces database fragmentation and improves I/O efficiency. For details and benchmarks, see the [integration layer README](https://github.com/erigontech/erigon/blob/main/erigon-lib/kv/mdbx/README.md).
