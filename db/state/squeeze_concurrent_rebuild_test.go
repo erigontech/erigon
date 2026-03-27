@@ -455,8 +455,7 @@ func TestConcurrentRebuildCommitment(t *testing.T) {
 		t.Logf("  %s: %d bytes", f, sz)
 	}
 
-	// Phases 4 (comparison report) will be added in the next task.
-	_ = baselineResult
-	_ = sequentialResult
-	_ = concurrentResult
+	// ========== Phase 4: Comparison Report ==========
+	t.Logf("=== Phase 4: Comparison Report ===")
+	logComparison(t, baselineResult, sequentialResult, concurrentResult, originalSizes)
 }

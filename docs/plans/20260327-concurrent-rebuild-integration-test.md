@@ -97,7 +97,7 @@ This proves that `ERIGON_REBUILD_CONCURRENT_COMMITMENT=true` produces identical 
 **Files:**
 - Modify: `db/state/squeeze_concurrent_rebuild_test.go`
 
-- [ ] Call `logComparison` to print summary table:
+- [x] Call `logComparison` to print summary table:
   ```
   === Rebuild Comparison ===
   Sequential: root=<hex> time=<dur> files=<count> totalSize=<bytes>
@@ -106,7 +106,7 @@ This proves that `ERIGON_REBUILD_CONCURRENT_COMMITMENT=true` produces identical 
   Speedup: <ratio>x
   Size delta: <bytes> (<percent>%)
   ```
-- [ ] Log per-file size comparison (original vs sequential vs concurrent)
+- [x] Log per-file size comparison (original vs sequential vs concurrent)
 
 ### Task 6: Smoke test and lint
 
