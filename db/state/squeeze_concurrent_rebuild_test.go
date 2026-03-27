@@ -418,10 +418,45 @@ func TestConcurrentRebuildCommitment(t *testing.T) {
 		t.Logf("  %s: %d bytes", f, sz)
 	}
 
-	// Phases 3-4 (concurrent rebuild, comparison) will be added in subsequent tasks.
+	// ========== Phase 3: Concurrent Rebuild (Primary Target) ==========
+	t.Logf("=== Phase 3: Concurrent Rebuild ===")
+
+	// Close aggregator, reopen with fresh state for concurrent run
+	db, agg = reopenAggregator(t, db, agg, stepSize)
+
+	// Wipe all commitment state
+	wipeCommitment(t, db, agg, dirs)
+
+	// Enable concurrent mode via env var (t.Setenv auto-restores on cleanup)
+	t.Setenv("ERIGON_REBUILD_CONCURRENT_COMMITMENT", "true")
+
+	// Run concurrent rebuild
+	concStart := time.Now()
+	concRoot, err := state.RebuildCommitmentFiles(ctx, db, &rawdbv3.TxNums, log.New(), true)
+	require.NoError(t, err)
+	concDuration := time.Since(concStart)
+
+	// Collect file sizes after rebuild
+	concSizes := collectCommitmentFiles(dirs)
+
+	concurrentResult := rebuildResult{
+		root:      concRoot,
+		duration:  concDuration,
+		fileSizes: concSizes,
+	}
+
+	// Hard failure if concurrent doesn't match baseline
+	require.Equal(t, baselineRoot, concurrentResult.root,
+		"concurrent rebuild root must match baseline: baseline=%x concurrent=%x", baselineRoot, concurrentResult.root)
+
+	t.Logf("Concurrent rebuild: root=%x time=%s files=%d",
+		concurrentResult.root, concurrentResult.duration, len(concurrentResult.fileSizes))
+	for f, sz := range concSizes {
+		t.Logf("  %s: %d bytes", f, sz)
+	}
+
+	// Phases 4 (comparison report) will be added in the next task.
 	_ = baselineResult
-	_ = dirs
-	_ = agg
-	_ = db
-	_ = stepSize
+	_ = sequentialResult
+	_ = concurrentResult
 }

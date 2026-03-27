@@ -83,14 +83,14 @@ This proves that `ERIGON_REBUILD_CONCURRENT_COMMITMENT=true` produces identical 
 **Files:**
 - Modify: `db/state/squeeze_concurrent_rebuild_test.go`
 
-- [ ] Close aggregator, reopen again (fresh state for concurrent run)
-- [ ] Call `wipeCommitment(t, db, agg, dirs)` to delete all commitment state
-- [ ] `t.Setenv("ERIGON_REBUILD_CONCURRENT_COMMITMENT", "true")` to enable concurrent mode
-- [ ] Record `start := time.Now()`
-- [ ] Call `state.RebuildCommitmentFiles(ctx, db, &rawdbv3.TxNums, log.New(), true)`
-- [ ] Record concurrent `rebuildResult`: root, duration, file sizes
-- [ ] `require.Equal(t, baselineRoot, concurrentResult.root)` — hard failure if concurrent doesn't match
-- [ ] Log concurrent rebuild stats
+- [x] Close aggregator, reopen again (fresh state for concurrent run)
+- [x] Call `wipeCommitment(t, db, agg, dirs)` to delete all commitment state
+- [x] `t.Setenv("ERIGON_REBUILD_CONCURRENT_COMMITMENT", "true")` to enable concurrent mode
+- [x] Record `start := time.Now()`
+- [x] Call `state.RebuildCommitmentFiles(ctx, db, &rawdbv3.TxNums, log.New(), true)`
+- [x] Record concurrent `rebuildResult`: root, duration, file sizes
+- [x] `require.Equal(t, baselineRoot, concurrentResult.root)` — hard failure if concurrent doesn't match
+- [x] Log concurrent rebuild stats
 
 ### Task 5: Implement Phase 4 — comparison report
 
