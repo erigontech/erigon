@@ -17,7 +17,6 @@
 package rpcdaemontest
 
 import (
-	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"encoding/binary"
@@ -42,7 +41,6 @@ import (
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
@@ -307,7 +305,6 @@ func generateChain(
 			fullPath := make([]byte, 64)
 			copy(fullPath[:32], tokenContract2AddrHash[:])
 			copy(fullPath[32:], hashedBalanceKey[:])
-			fmt.Printf("FULL PATH of node about to be deleted: %x\n", fullPath)
 
 			sameStoragePrefixAddresses = findAddressesWithMatchingStorageKeyPrefix(balanceStorageKeyPath, 1, 1, 1)
 			sameStorageKeyPath := computeMappingStorageKey(sameStoragePrefixAddresses[0], 1)
@@ -316,9 +313,8 @@ func generateChain(
 			fullPathSibling := make([]byte, 64)
 			copy(fullPathSibling[:32], tokenContract2AddrHash[:])
 			copy(fullPathSibling[32:], hashedSiblingKey[:])
-			fmt.Printf("FULL PATH of surviving sibling node: %x\n", fullPathSibling)
 
-			// Assert first nibble of the HASHED storage key is the same (trie path)
+			// Assert first nibble of the hashed storage key is the same (trie path)
 			if (hashedSiblingKey[0] >> 4) != (hashedBalanceKey[0] >> 4) {
 				panic("hashed storage key prefix mismatch in trie")
 			}
@@ -427,44 +423,6 @@ func findAddressesWithMatchingStorageKeyPrefix(targetKey common.Hash, slot uint6
 		}
 	}
 	return addresses
-}
-func generateKeyWithHashedPrefix(constHashedPrefixNibbles []byte, keyLen int) (plainKey []byte, hashedKey []byte) {
-	plainKey = make([]byte, keyLen)
-	for {
-		randMu.Lock()
-		randSrc.Read(plainKey[:keyLen]) // read random key
-		randMu.Unlock()
-		hashedKey := commitment.KeyToNibblizedHash(plainKey)
-		if bytes.HasPrefix(hashedKey, constHashedPrefixNibbles) {
-			// found key with desired hashed prefix, return result
-			return plainKey, hashedKey
-		}
-	}
-}
-
-// longer prefixLen - harder to find required keys
-func generatePlainKeysWithSameHashPrefix(constPrefixNibbles []byte, keyLen int, prefixLen int, keyCount int) (plainKeys [][]byte, hashedKeys [][]byte) {
-	plainKeys = make([][]byte, 0, keyCount)
-	hashedKeys = make([][]byte, 0, keyCount)
-	for {
-		key, hashed := generateKeyWithHashedPrefix(constPrefixNibbles, keyLen)
-		if len(plainKeys) == 0 {
-			plainKeys = append(plainKeys, key)
-			hashedKeys = append(hashedKeys, hashed)
-			if keyCount == 1 {
-				break
-			}
-			continue
-		}
-		if bytes.Equal(hashed[:prefixLen], hashedKeys[0][:prefixLen]) {
-			plainKeys = append(plainKeys, key)
-			hashedKeys = append(hashedKeys, hashed)
-		}
-		if len(plainKeys) == keyCount {
-			break
-		}
-	}
-	return plainKeys, hashedKeys
 }
 
 type IsMiningMock struct{}
