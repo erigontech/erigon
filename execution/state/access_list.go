@@ -20,11 +20,36 @@
 package state
 
 import (
+	"maps"
+
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
+// accessList tracks addresses and storage slots accessed during a transaction.
+// addresses maps each address to its index in slots (-1 if address-only, no slots).
+// This layout matches go-ethereum's design: the slots slice backing array is
+// reused across transactions via Reset, eliminating per-tx slot-map allocations.
 type accessList struct {
-	addresses map[accounts.Address]map[accounts.StorageKey]struct{}
+	addresses map[accounts.Address]int
+	slots     []map[accounts.StorageKey]struct{}
+}
+
+// newAccessList creates a new accessList.
+func newAccessList() *accessList {
+	return &accessList{
+		addresses: make(map[accounts.Address]int),
+	}
+}
+
+// Reset clears the access list for reuse, keeping allocated memory.
+// The slots backing array is retained; cleared inner maps are reused by
+// subsequent AddSlot calls without new allocations.
+func (al *accessList) Reset() {
+	for _, s := range al.slots {
+		clear(s)
+	}
+	al.slots = al.slots[:0]
+	clear(al.addresses)
 }
 
 // ContainsAddress returns true if the address is in the access list.
@@ -33,56 +58,29 @@ func (al *accessList) ContainsAddress(address accounts.Address) bool {
 	return ok
 }
 
-// Reset
-//func (al *accessList) Reset() {
-//	clear(al.addresses)
-//	clear(al.slots)
-//	al.slots = al.slots[:0]
-//}
-
 // Contains checks if a slot within an account is present in the access list, returning
 // separate flags for the presence of the account and the slot respectively.
 func (al *accessList) Contains(address accounts.Address, slot accounts.StorageKey) (addressPresent bool, slotPresent bool) {
-	slots, ok := al.addresses[address]
+	idx, ok := al.addresses[address]
 	if !ok {
-		// no such address (and hence zero slots)
 		return false, false
 	}
-	if slots == nil {
-		// address yes, but no slots
+	if idx == -1 {
 		return true, false
 	}
-	_, slotPresent = slots[slot]
+	_, slotPresent = al.slots[idx][slot]
 	return true, slotPresent
 }
 
-// newAccessList creates a new accessList.
-func newAccessList() *accessList {
-	return &accessList{
-		addresses: map[accounts.Address]map[accounts.StorageKey]struct{}{},
-	}
-}
-
-//func (al *accessList) Reset() {
-//	clear(al.addresses)
-//	clear(al.slots)
-//}
-
 // Copy creates an independent copy of an accessList.
 func (al *accessList) Copy() *accessList {
-	cp := newAccessList()
-	for k, v := range al.addresses {
-		if v == nil {
-			cp.addresses[k] = v
-		} else {
-			slots := map[accounts.StorageKey]struct{}{}
-			for k := range v {
-				slots[k] = struct{}{}
-			}
-			cp.addresses[k] = slots
-		}
+	cp := &accessList{
+		addresses: maps.Clone(al.addresses),
+		slots:     make([]map[accounts.StorageKey]struct{}, len(al.slots)),
 	}
-
+	for i, slotMap := range al.slots {
+		cp.slots[i] = maps.Clone(slotMap)
+	}
 	return cp
 }
 
@@ -92,7 +90,7 @@ func (al *accessList) AddAddress(address accounts.Address) bool {
 	if _, present := al.addresses[address]; present {
 		return false
 	}
-	al.addresses[address] = nil
+	al.addresses[address] = -1
 	return true
 }
 
@@ -102,51 +100,54 @@ func (al *accessList) AddAddress(address accounts.Address) bool {
 // - slot added
 // For any 'true' value returned, a corresponding journal entry must be made.
 func (al *accessList) AddSlot(address accounts.Address, slot accounts.StorageKey) (addrChange bool, slotChange bool) {
-	slots, addrPresent := al.addresses[address]
-	if !addrPresent || slots == nil {
-		// Address not present, or addr present but no slots there
-		al.addresses[address] = map[accounts.StorageKey]struct{}{slot: {}}
+	idx, addrPresent := al.addresses[address]
+	if !addrPresent || idx == -1 {
+		// Address not present, or addr present but no slots yet.
+		// Reuse a cleared slot map from the backing array if available.
+		newIdx := len(al.slots)
+		al.addresses[address] = newIdx
+		var slotmap map[accounts.StorageKey]struct{}
+		if newIdx < cap(al.slots) {
+			slotmap = al.slots[:cap(al.slots)][newIdx]
+		}
+		if slotmap == nil {
+			slotmap = make(map[accounts.StorageKey]struct{})
+		}
+		slotmap[slot] = struct{}{}
+		al.slots = append(al.slots, slotmap)
 		return !addrPresent, true
 	}
-	if _, ok := slots[slot]; !ok {
-		slots[slot] = struct{}{}
-		// Journal add slot change
+	slotmap := al.slots[idx]
+	if _, ok := slotmap[slot]; !ok {
+		slotmap[slot] = struct{}{}
 		return false, true
 	}
-	// No changes required
 	return false, false
 }
 
 // DeleteSlot removes an (address, slot)-tuple from the access list.
 // This operation needs to be performed in the same order as the addition happened.
-// This method is meant to be used  by the journal, which maintains ordering of
+// This method is meant to be used by the journal, which maintains ordering of
 // operations.
 func (al *accessList) DeleteSlot(address accounts.Address, slot accounts.StorageKey) {
-	slots, addrOk := al.addresses[address]
-	// There are two ways this can fail
+	idx, addrOk := al.addresses[address]
 	if !addrOk {
 		panic("reverting slot change, address not present in list")
 	}
-	delete(slots, slot)
-	// If that was the last (first) slot, remove it
-	// Since additions and rollbacks are always performed in order,
-	// we can delete the item without worrying about screwing up later indices
-	if len(slots) == 0 {
-		al.addresses[address] = nil
+	slotmap := al.slots[idx]
+	delete(slotmap, slot)
+	// Since additions and rollbacks are always in LIFO order, when a slot map
+	// becomes empty it must be the last one appended — truncate the slice.
+	if len(slotmap) == 0 {
+		al.slots = al.slots[:idx]
+		al.addresses[address] = -1
 	}
 }
 
 // DeleteAddress removes an address from the access list. This operation
 // needs to be performed in the same order as the addition happened.
-// This method is meant to be used  by the journal, which maintains ordering of
+// This method is meant to be used by the journal, which maintains ordering of
 // operations.
 func (al *accessList) DeleteAddress(address accounts.Address) {
-	slots, addrOk := al.addresses[address]
-	if !addrOk {
-		panic("reverting address change, address not present in list")
-	}
-	if len(slots) > 0 {
-		panic("reverting address change, address has slots")
-	}
 	delete(al.addresses, address)
 }

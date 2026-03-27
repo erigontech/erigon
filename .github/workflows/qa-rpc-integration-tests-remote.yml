@@ -1,9 +1,25 @@
 name: QA - RPC Integration Tests Remote
 
 on:
+  pull_request:
+    branches:
+      - main
+      - 'release/**'
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
   workflow_dispatch:     # Run manually
-  workflow_call:
 
+concurrency:
+  group: >-
+    ${{
+      github.event_name == 'pull_request' &&
+      format('{0}-{1}', github.workflow, github.head_ref) ||
+      format('{0}-{1}', github.workflow, github.run_id)
+    }}
+  cancel-in-progress: true
 
 jobs:
   mainnet-rpc-integ-tests-remote:

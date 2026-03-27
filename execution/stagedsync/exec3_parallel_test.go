@@ -920,6 +920,12 @@ func BenchmarkLessConflicts(b *testing.B) {
 	numReads := []int{20, 100, 200}
 	numWrites := []int{20, 100, 200}
 	numNonIO := []int{100, 500}
+	if testing.Short() {
+		totalTxs = totalTxs[:1]
+		numReads = numReads[:1]
+		numWrites = numWrites[:1]
+		numNonIO = numNonIO[:1]
+	}
 
 	for _, numTx := range totalTxs {
 		for _, numRead := range numReads {
@@ -953,6 +959,12 @@ func BenchmarkLessConflictsWithMetadata(b *testing.B) {
 	numReads := []int{100, 200}
 	numWrites := []int{100, 200}
 	numNonIO := []int{100, 500}
+	if testing.Short() {
+		totalTxs = totalTxs[:1]
+		numReads = numReads[:1]
+		numWrites = numWrites[:1]
+		numNonIO = numNonIO[:1]
+	}
 
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration, time.Duration) {
 		rng := rand.New(rand.NewSource(0))
@@ -976,6 +988,12 @@ func BenchmarkMoreConflicts(b *testing.B) {
 	numReads := []int{20, 100, 200}
 	numWrites := []int{20, 100, 200}
 	numNonIO := []int{100, 500}
+	if testing.Short() {
+		totalTxs = totalTxs[:1]
+		numReads = numReads[:1]
+		numWrites = numWrites[:1]
+		numNonIO = numNonIO[:1]
+	}
 
 	for _, numTx := range totalTxs {
 		for _, numRead := range numReads {
@@ -1009,6 +1027,12 @@ func BenchmarkMoreConflictsWithMetadata(b *testing.B) {
 	numReads := []int{100, 200}
 	numWrites := []int{100, 200}
 	numNonIO := []int{100, 500}
+	if testing.Short() {
+		totalTxs = totalTxs[:1]
+		numReads = numReads[:1]
+		numWrites = numWrites[:1]
+		numNonIO = numNonIO[:1]
+	}
 
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration, time.Duration) {
 		rng := rand.New(rand.NewSource(0))
@@ -1032,6 +1056,12 @@ func BenchmarkRandomTx(b *testing.B) {
 	numReads := []int{20, 100, 200}
 	numWrites := []int{20, 100, 200}
 	numNonIO := []int{100, 500}
+	if testing.Short() {
+		totalTxs = totalTxs[:1]
+		numReads = numReads[:1]
+		numWrites = numWrites[:1]
+		numNonIO = numNonIO[:1]
+	}
 
 	for _, numTx := range totalTxs {
 		for _, numRead := range numReads {
@@ -1065,6 +1095,12 @@ func BenchmarkRandomTxWithMetadata(b *testing.B) {
 	numReads := []int{100, 200}
 	numWrites := []int{100, 200}
 	numNonIO := []int{100, 500}
+	if testing.Short() {
+		totalTxs = totalTxs[:1]
+		numReads = numReads[:1]
+		numWrites = numWrites[:1]
+		numNonIO = numNonIO[:1]
+	}
 
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration, time.Duration) {
 		rng := rand.New(rand.NewSource(0))
@@ -1088,6 +1124,12 @@ func BenchmarkTxWithLongTailRead(b *testing.B) {
 	numReads := []int{20, 100, 200}
 	numWrites := []int{20, 100, 200}
 	numNonIO := []int{100, 500}
+	if testing.Short() {
+		totalTxs = totalTxs[:1]
+		numReads = numReads[:1]
+		numWrites = numWrites[:1]
+		numNonIO = numNonIO[:1]
+	}
 
 	for _, numTx := range totalTxs {
 		for _, numRead := range numReads {

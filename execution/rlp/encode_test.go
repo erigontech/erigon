@@ -483,12 +483,6 @@ func TestEncodeToReaderReturnToPool(t *testing.T) {
 
 var sink any
 
-func BenchmarkIntsize(b *testing.B) {
-	for b.Loop() {
-		sink = intsize(0x12345678)
-	}
-}
-
 func BenchmarkPutint(b *testing.B) {
 	buf := make([]byte, 8)
 	for b.Loop() {
@@ -522,7 +516,7 @@ func TestStringLen56(t *testing.T) {
 	assert.Equal(t, 56+2, strLen)
 
 	encoded := make([]byte, strLen)
-	EncodeString2(str, encoded)
+	EncodeStringToBuf(str, encoded)
 
 	dataPos, dataLen, err := ParseString(encoded, 0)
 	require.NoError(t, err)
