@@ -1441,8 +1441,7 @@ func (t *Trie) NumberOfAccounts() int {
 }
 
 // RLPEncode traverses the trie from root to leaves and collects
-// all unique RLP-encoded nodes. This is useful for building execution witnesses.
-// The first element is always the root node.
+// all unique RLP-encoded nodes.
 func (t *Trie) RLPEncode() ([][]byte, error) {
 	if t == nil || t.RootNode == nil {
 		return nil, nil
