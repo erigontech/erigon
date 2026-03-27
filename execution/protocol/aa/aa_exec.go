@@ -13,12 +13,14 @@ import (
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/frames"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	evmtypes "github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 func ValidateAATransaction(
@@ -62,7 +64,6 @@ func ValidateAATransaction(
 	if err != nil {
 		return nil, 0, err
 	}
-	validationGasUsed = preTxCost
 
 	if err = chargeGas(header, tx, gasPool, ibs, preTxCost); err != nil {
 		return nil, 0, err
@@ -84,81 +85,86 @@ func ValidateAATransaction(
 		return nil, 0, errors.New("nonce too low")
 	}
 
-	// Deployer frame
-	msg := tx.DeployerFrame(rules, hasEIP3860)
-	applyRes, err := protocol.ApplyFrame(innerEvm, msg, gasPool)
+	// Run the three validation frames through the generic pipeline.
+	// Each step's Build receives prior results so gas limits can be adjusted
+	// based on actual deployer gas usage.
+	var payCtx []byte
+	pipe := frames.New(innerEvm, gasPool)
+	results, err := pipe.Execute([]frames.FrameStep{
+		{
+			// Deployer frame: deploy the account contract if a deployer is specified.
+			Type: frames.FrameDeployer,
+			Build: func(_ []frames.FrameResult) (frames.Message, error) {
+				if tx.Deployer == nil {
+					return nil, nil
+				}
+				return tx.DeployerFrame(rules, hasEIP3860), nil
+			},
+			Validate: func(result *evmtypes.ExecutionResult) error {
+				if result.Failed() {
+					return newValidationPhaseError(result.Err, result.ReturnData, "deployer", true)
+				}
+				if err := deployValidation(tx, ibs); err != nil {
+					return err
+				}
+				entryPointTracer.Reset()
+				return nil
+			},
+		},
+		{
+			// Validation frame: account validates the transaction.
+			// Gas limit reduced by actual deployer gas usage.
+			Type: frames.FrameValidation,
+			Build: func(prior []frames.FrameResult) (frames.Message, error) {
+				deployGas := frames.GasUsedByType(prior, frames.FrameDeployer)
+				return tx.ValidationFrame(chainConfig.ChainID, deployGas, rules, hasEIP3860)
+			},
+			Validate: func(result *evmtypes.ExecutionResult) error {
+				if result.Failed() {
+					return newValidationPhaseError(result.Err, result.ReturnData, "account", true)
+				}
+				if err := validationValidation(tx, header, entryPointTracer); err != nil {
+					return err
+				}
+				entryPointTracer.Reset()
+				return nil
+			},
+		},
+		{
+			// Paymaster frame: paymaster validates it will cover fees (optional).
+			Type: frames.FramePaymaster,
+			Build: func(_ []frames.FrameResult) (frames.Message, error) {
+				return tx.PaymasterFrame(chainConfig.ChainID)
+			},
+			Validate: func(result *evmtypes.ExecutionResult) error {
+				if result.Failed() {
+					return newValidationPhaseError(result.Err, result.ReturnData, "paymaster", true)
+				}
+				var err error
+				payCtx, err = paymasterValidation(tx, header, entryPointTracer)
+				if err != nil {
+					return err
+				}
+				entryPointTracer.Reset()
+				return nil
+			},
+		},
+	})
 	if err != nil {
 		return nil, 0, err
 	}
-	if applyRes.Failed() {
-		return nil, 0, newValidationPhaseError(
-			applyRes.Err,
-			applyRes.ReturnData,
-			"deployer",
-			true,
-		)
-	}
-	if err := deployValidation(tx, ibs); err != nil {
-		return nil, 0, err
-	}
-	entryPointTracer.Reset()
 
-	deploymentGasUsed := applyRes.ReceiptGasUsed
-
-	// Validation frame
-	msg, err = tx.ValidationFrame(chainConfig.ChainID, deploymentGasUsed, rules, hasEIP3860)
-	if err != nil {
-		return nil, 0, err
-	}
-	applyRes, err = protocol.ApplyFrame(innerEvm, msg, gasPool)
-	if err != nil {
-		return nil, 0, err
-	}
-	if applyRes.Failed() {
-		return nil, 0, newValidationPhaseError(
-			applyRes.Err,
-			applyRes.ReturnData,
-			"account",
-			true,
-		)
-	}
-	if err := validationValidation(tx, header, entryPointTracer); err != nil {
-		return nil, 0, err
-	}
-	entryPointTracer.Reset()
-
-	validationGasUsed += applyRes.ReceiptGasUsed
-
-	// Paymaster frame
-	msg, err = tx.PaymasterFrame(chainConfig.ChainID)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	if msg != nil {
-		applyRes, err = protocol.ApplyFrame(innerEvm, msg, gasPool)
-		if err != nil {
-			return nil, 0, err
-		}
-		if applyRes.Failed() {
-			return nil, 0, newValidationPhaseError(
-				applyRes.Err,
-				applyRes.ReturnData,
-				"paymaster",
-				true,
-			)
-		}
-		paymasterContext, err = paymasterValidation(tx, header, entryPointTracer)
-		if err != nil {
-			return nil, 0, err
-		}
-		entryPointTracer.Reset()
-		validationGasUsed += applyRes.ReceiptGasUsed
-	}
+	// validationGasUsed = pre-tx cost + validation frame gas + paymaster frame gas.
+	// Deployer frame gas is NOT included here: it reduces the ValidationFrame gas
+	// limit (tx.ValidationGasLimit - intrinsicGas - deploymentGasUsed) rather than
+	// contributing to the returned validationGasUsed total.
+	validationGasUsed = preTxCost
+	validationGasUsed += frames.GasUsedByType(results, frames.FrameValidation)
+	validationGasUsed += frames.GasUsedByType(results, frames.FramePaymaster)
 
 	log.Info("validation gas report", "gasUsed", validationGasUsed, "nonceManager", 0, "refund", 0, "pretransactioncost", preTxCost)
 
-	return paymasterContext, validationGasUsed, nil
+	return payCtx, validationGasUsed, nil
 }
 
 func validateValidityTimeRange(time uint64, validAfter uint64, validUntil uint64) error {
@@ -265,48 +271,69 @@ func ExecuteAATransaction(
 		return 0, 0, err
 	}
 
-	// Execution frame
-	msg := tx.ExecutionFrame()
-	applyRes, err := protocol.ApplyFrame(evm, msg, gasPool)
+	// Run the two execution frames through the generic pipeline.
+	// The PaymasterPostOp step reads the execution frame's result from prior[]
+	// to compute the intermediate gasUsed needed by tx.PaymasterPostOp().
+	pipe := frames.New(evm, gasPool)
+	results, err := pipe.Execute([]frames.FrameStep{
+		{
+			// Execution frame: run the user's actual operation.
+			// Failure is non-fatal for the pipeline — we track status separately.
+			Type: frames.FrameExecution,
+			Build: func(_ []frames.FrameResult) (frames.Message, error) {
+				return tx.ExecutionFrame(), nil
+			},
+		},
+		{
+			// Paymaster post-op frame: cleanup/accounting after execution (optional).
+			// Build computes interimGasUsed from the execution frame result so that
+			// tx.PaymasterPostOp receives the correct gasUsed argument.
+			Type: frames.FramePaymasterPostOp,
+			Build: func(prior []frames.FrameResult) (frames.Message, error) {
+				if len(paymasterContext) == 0 {
+					return nil, nil
+				}
+				execGas := frames.GasUsedByType(prior, frames.FrameExecution)
+				execFailed := frames.FailedByType(prior, frames.FrameExecution)
+				executionGasPenalty := (tx.GasLimit - execGas) * types.AA_GAS_PENALTY_PCT / 100
+				interimGasUsed := validationGasUsed + execGas + executionGasPenalty
+				return tx.PaymasterPostOp(paymasterContext, interimGasUsed, !execFailed)
+			},
+		},
+	})
 	if err != nil {
 		return 0, 0, err
 	}
 
-	if applyRes.Failed() {
+	execFrameGas := frames.GasUsedByType(results, frames.FrameExecution)
+	execFailed := frames.FailedByType(results, frames.FrameExecution)
+	postOpFrameGas := frames.GasUsedByType(results, frames.FramePaymasterPostOp)
+	postOpFailed := frames.FailedByType(results, frames.FramePaymasterPostOp)
+
+	if execFailed {
 		executionStatus = types.ExecutionStatusExecutionFailure
 	}
 
-	execRefund := capRefund(tx.GasLimit-applyRes.ReceiptGasUsed, applyRes.ReceiptGasUsed) // TODO: can be moved into statetransition
+	execRefund := capRefund(tx.GasLimit-execFrameGas, execFrameGas) // TODO: can be moved into statetransition
 	validationRefund := capRefund(tx.ValidationGasLimit-validationGasUsed, validationGasUsed)
 
-	executionGasPenalty := (tx.GasLimit - applyRes.ReceiptGasUsed) * types.AA_GAS_PENALTY_PCT / 100
-	gasUsed = validationGasUsed + applyRes.ReceiptGasUsed + executionGasPenalty
+	executionGasPenalty := (tx.GasLimit - execFrameGas) * types.AA_GAS_PENALTY_PCT / 100
+	gasUsed = validationGasUsed + execFrameGas + executionGasPenalty
 	gasRefund := capRefund(execRefund+validationRefund, gasUsed)
-	log.Info("execution gas used", "gasUsed", applyRes.ReceiptGasUsed, "penalty", executionGasPenalty)
+	log.Info("execution gas used", "gasUsed", execFrameGas, "penalty", executionGasPenalty)
 
-	// Paymaster post-op frame
 	if len(paymasterContext) != 0 {
-		msg, err = tx.PaymasterPostOp(paymasterContext, gasUsed, !applyRes.Failed())
-		if err != nil {
-			return 0, 0, err
-		}
-
-		applyRes, err = protocol.ApplyFrame(evm, msg, gasPool)
-		if err != nil {
-			return 0, 0, err
-		}
-		if applyRes.Failed() {
+		if postOpFailed {
 			if executionStatus == types.ExecutionStatusExecutionFailure {
 				executionStatus = types.ExecutionStatusExecutionAndPostOpFailure
 			} else {
 				executionStatus = types.ExecutionStatusPostOpFailure
 			}
 		}
-
-		validationGasPenalty := (tx.PostOpGasLimit - applyRes.ReceiptGasUsed) * types.AA_GAS_PENALTY_PCT / 100
-		gasRefund += capRefund(tx.PostOpGasLimit-applyRes.ReceiptGasUsed, applyRes.ReceiptGasUsed)
-		gasUsed += applyRes.ReceiptGasUsed + validationGasPenalty
-		log.Info("post op gas used", "gasUsed", applyRes.ReceiptGasUsed, "penalty", validationGasPenalty)
+		validationGasPenalty := (tx.PostOpGasLimit - postOpFrameGas) * types.AA_GAS_PENALTY_PCT / 100
+		gasRefund += capRefund(tx.PostOpGasLimit-postOpFrameGas, postOpFrameGas)
+		gasUsed += postOpFrameGas + validationGasPenalty
+		log.Info("post op gas used", "gasUsed", postOpFrameGas, "penalty", validationGasPenalty)
 	}
 
 	if err = refundGas(header, tx, ibs, gasUsed-gasRefund); err != nil {
