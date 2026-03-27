@@ -33,6 +33,7 @@ func TestGlobalRegistryHasAllKnownTypes(t *testing.T) {
 		types.BlobTxType,
 		types.SetCodeTxType,
 		types.AccountAbstractionTxType,
+		types.FrameTxType,
 	}
 	for _, typeByte := range knownTypes {
 		h, ok := txtype.Global.Get(typeByte)
@@ -112,6 +113,15 @@ func TestAAHandlerPolicy(t *testing.T) {
 	require.True(t, h.ForkRequired(txtype.ForkState{AllowAA: true}))
 	require.False(t, h.CanCreate())
 	require.True(t, h.IntrinsicGasFlags().IsAATxn)
+}
+
+func TestFrameHandlerPolicy(t *testing.T) {
+	h, ok := txtype.Global.Get(types.FrameTxType)
+	require.True(t, ok)
+
+	require.False(t, h.ForkRequired(txtype.ForkState{}))
+	require.True(t, h.ForkRequired(txtype.ForkState{AllowFrameTx: true}))
+	require.False(t, h.CanCreate())
 }
 
 func TestDuplicateRegistrationPanics(t *testing.T) {

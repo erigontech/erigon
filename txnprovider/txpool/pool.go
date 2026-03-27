@@ -1240,11 +1240,12 @@ func (p *TxPool) isAmsterdam() bool {
 // forkState builds the txtype.ForkState snapshot used for handler dispatch.
 func (p *TxPool) forkState() txtype.ForkState {
 	return txtype.ForkState{
-		IsShanghai:  p.isShanghai() || p.isAgra(),
-		IsCancun:    p.isCancun(),
-		IsPrague:    p.isPrague() || p.isBhilai(),
-		IsAmsterdam: p.isAmsterdam(),
-		AllowAA:     p.cfg.AllowAA,
+		IsShanghai:   p.isShanghai() || p.isAgra(),
+		IsCancun:     p.isCancun(),
+		IsPrague:     p.isPrague() || p.isBhilai(),
+		IsAmsterdam:  p.isAmsterdam(),
+		AllowAA:      p.cfg.AllowAA,
+		AllowFrameTx: p.cfg.AllowFrameTx,
 	}
 }
 

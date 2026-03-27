@@ -82,6 +82,7 @@ func init() {
 	Global.Register(BlobHandler{})
 	Global.Register(SetCodeHandler{})
 	Global.Register(AAHandler{})
+	Global.Register(FrameHandler{})
 }
 
 // TypeName returns the human-readable name for a transaction type byte.
