@@ -66,7 +66,7 @@ type testAddresses struct {
 var randSrc = rand.New(rand.NewSource(42)) // fixed seed
 var randMu sync.Mutex
 
-var sameStoragePrefixAddresses []common.Address // plain keys with same balanceOf mapping storage mapping as address1
+var sameStoragePrefixAddresses []common.Address // plain keys with same balanceOf storage mapping (of address1)
 
 func makeTestAddresses() testAddresses {
 	var (
