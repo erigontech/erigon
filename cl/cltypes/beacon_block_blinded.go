@@ -270,11 +270,8 @@ func (b *BlindedBeaconBody) SetVersion(version clparams.StateVersion) *BlindedBe
 	return b
 }
 
-func (b *BlindedBeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(dst, b.getSchema(false)...)
-}
-
-func (b *BlindedBeaconBody) EncodingSizeSSZ() (size int) {
+// ensureNilFields initializes any nil fields required for SSZ encoding/hashing.
+func (b *BlindedBeaconBody) ensureNilFields() {
 	var (
 		maxAttSlashing = MaxAttesterSlashings
 		maxAttestation = MaxAttestations
@@ -283,12 +280,15 @@ func (b *BlindedBeaconBody) EncodingSizeSSZ() (size int) {
 		maxAttSlashing = MaxAttesterSlashingsElectra
 		maxAttestation = MaxAttestationsElectra
 	}
-
 	if b.Eth1Data == nil {
 		b.Eth1Data = &Eth1Data{}
 	}
 	if b.SyncAggregate == nil {
-		b.SyncAggregate = NewSyncAggregateWithSize(int(b.beaconCfg.SyncCommitteeSize) / 8)
+		bitsSize := defaultSyncCommitteeBitsSize
+		if b.beaconCfg != nil {
+			bitsSize = int(b.beaconCfg.SyncCommitteeSize) / 8
+		}
+		b.SyncAggregate = NewSyncAggregateWithSize(bitsSize)
 	}
 	if b.ExecutionPayload == nil {
 		b.ExecutionPayload = NewEth1Header(b.Version)
@@ -308,15 +308,21 @@ func (b *BlindedBeaconBody) EncodingSizeSSZ() (size int) {
 	if b.VoluntaryExits == nil {
 		b.VoluntaryExits = solid.NewStaticListSSZ[*SignedVoluntaryExit](MaxVoluntaryExits, 112)
 	}
-	if b.ExecutionPayload == nil {
-		b.ExecutionPayload = NewEth1Header(b.Version)
-	}
 	if b.ExecutionChanges == nil {
 		b.ExecutionChanges = solid.NewStaticListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172)
 	}
 	if b.BlobKzgCommitments == nil {
 		b.BlobKzgCommitments = solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48)
 	}
+}
+
+func (b *BlindedBeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
+	b.ensureNilFields()
+	return ssz2.MarshalSSZ(dst, b.getSchema(false)...)
+}
+
+func (b *BlindedBeaconBody) EncodingSizeSSZ() (size int) {
+	b.ensureNilFields()
 
 	size += b.ProposerSlashings.EncodingSizeSSZ()
 	size += b.AttesterSlashings.EncodingSizeSSZ()
@@ -354,6 +360,7 @@ func (b *BlindedBeaconBody) DecodeSSZ(buf []byte, version int) error {
 }
 
 func (b *BlindedBeaconBody) HashSSZ() ([32]byte, error) {
+	b.ensureNilFields()
 	return merkle_tree.HashTreeRoot(b.getSchema(false)...)
 }
 
