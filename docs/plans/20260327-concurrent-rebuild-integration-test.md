@@ -117,13 +117,13 @@ This proves that `ERIGON_REBUILD_CONCURRENT_COMMITMENT=true` produces identical 
 
 ### Task 7: Verify acceptance criteria
 
-- [ ] Verify: test generates data with env-parameterized sizes
-- [ ] Verify: sequential rebuild produces root matching baseline (asserted)
-- [ ] Verify: concurrent rebuild produces root matching baseline (asserted)
-- [ ] Verify: file sizes are logged (not asserted)
-- [ ] Verify: timing is logged for both paths
-- [ ] Verify: test runs in under 2 minutes with default (medium) params
-- [ ] Run full test suite: `go test -short ./db/state/...`
+- [x] Verify: test generates data with env-parameterized sizes
+- [x] Verify: sequential rebuild produces root matching baseline (asserted)
+- [x] Verify: concurrent rebuild produces root matching baseline (asserted)
+- [x] Verify: file sizes are logged (not asserted)
+- [x] Verify: timing is logged for both paths
+- [x] Verify: test runs in under 2 minutes with default (medium) params
+- [x] Run full test suite: `go test -short ./db/state/...`
 
 ## Technical Details
 
