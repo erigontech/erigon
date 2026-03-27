@@ -808,7 +808,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		}
 	}
 
-	witnessTrie, witnessRoot, err := sdCtx.Witness(ctx, codeReads, "debug_executionWitness_collapses")
+	witnessTrie, witnessRoot, err := sdCtx.Witness(ctx, codeReads, "debug_executionWitness_witness_construction")
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate witness: %w", err)
 	}
