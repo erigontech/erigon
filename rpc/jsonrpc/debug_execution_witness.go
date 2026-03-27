@@ -800,9 +800,6 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 
 		for _, siblingPath := range collapseSiblingPaths {
 			compactSiblingPath := commitment.NibblesToString(siblingPath)
-			if err != nil {
-				return nil, err
-			}
 			log.Debug("[debug_executionWitness] touching sibling hashed key", "path", compactSiblingPath, "len", len(siblingPath))
 			sdCtx.TouchHashedKey(siblingPath)
 		}
