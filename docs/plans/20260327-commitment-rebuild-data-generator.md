@@ -95,11 +95,11 @@ This test exercises the full SharedDomains write + ComputeCommitment + BuildFile
 **Files:**
 - Modify: `db/state/squeeze_test.go`
 
-- [ ] Run `TestGenerateCommitmentRebuildData` with small params (1K accounts, 3 steps, stepSize=10)
-- [ ] Verify all 3 commitment computations succeed with non-empty roots
-- [ ] Verify files are built in the snapshots directory
-- [ ] Verify test completes in reasonable time (<30s for small params)
-- [ ] Run `make lint` to check for linter issues
+- [x] Run `TestGenerateCommitmentRebuildData` with small params (1K accounts, 3 steps, stepSize=10)
+- [x] Verify all 3 commitment computations succeed with non-empty roots
+- [x] Verify files are built in the snapshots directory
+- [x] Verify test completes in reasonable time (<30s for small params)
+- [x] Run `make lint` to check for linter issues
 
 ### Task 5: Verify acceptance criteria
 
