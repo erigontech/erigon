@@ -551,6 +551,17 @@ func TestGenerateCommitmentRebuildData(t *testing.T) {
 
 	persistentDir := os.Getenv("TEST_DATADIR")
 
+	// Fail early if persistent directory already contains data (avoids mixing old+new state).
+	// Check chaindata and all snapshot subdirectories that OpenFolder/scanDirs will read.
+	if persistentDir != "" {
+		dirs := datadir.New(persistentDir)
+		for _, sub := range []string{dirs.Chaindata, dirs.SnapDomain, dirs.SnapHistory, dirs.SnapIdx, dirs.SnapAccessors} {
+			if entries, err := os.ReadDir(sub); err == nil && len(entries) > 0 {
+				t.Fatalf("TEST_DATADIR %q already contains data in %s; use an empty directory or remove the existing data first", persistentDir, sub)
+			}
+		}
+	}
+
 	// Default: small parameters for smoke testing
 	var (
 		stepSize        uint64 = 10
@@ -666,7 +677,7 @@ func TestGenerateCommitmentRebuildData(t *testing.T) {
 			codeIdx++
 		}
 
-		// At step boundary: compute commitment and flush
+		// At step boundary: compute commitment, flush, and record block→txNum mapping
 		if (txNum+1)%stepSize == 0 {
 			step := (txNum + 1) / stepSize
 			rh, err := domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
@@ -677,6 +688,11 @@ func TestGenerateCommitmentRebuildData(t *testing.T) {
 
 			err = domains.Flush(ctx, rwTx)
 			require.NoError(t, err)
+
+			// Populate MaxTxNum table so `integration commitment rebuild` passes TxNums check
+			err = rawdbv3.TxNums.Append(rwTx, blockNum, txNum)
+			require.NoError(t, err)
+			blockNum++
 		}
 	}
 
