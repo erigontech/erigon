@@ -55,7 +55,8 @@ func TestDefaultHandlerDefaults(t *testing.T) {
 	h, _ := txtype.Global.Get(types.LegacyTxType)
 	require.True(t, h.ForkRequired(forks))
 	require.True(t, h.CanCreate())
-	require.True(t, h.CanReplace(types.BlobTxType))
+	require.False(t, h.CanReplace(types.BlobTxType)) // non-blob cannot replace blob
+	require.True(t, h.CanReplace(types.LegacyTxType))
 	require.Equal(t, cfg.PriceBump, h.PriceBumpPercent(&cfg))
 	require.Equal(t, cfg.AccountSlots, h.AccountLimit(&cfg))
 	require.False(t, h.EvictOnNonceGap())

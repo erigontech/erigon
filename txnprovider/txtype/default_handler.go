@@ -52,8 +52,12 @@ func (DefaultHandler) IntrinsicGasFlags() IntrinsicGasFlags { return IntrinsicGa
 // PriceBumpPercent returns cfg.PriceBump (default 10%).
 func (DefaultHandler) PriceBumpPercent(cfg *txpoolcfg.Config) uint64 { return cfg.PriceBump }
 
-// CanReplace returns true — standard types can replace any same-nonce tx.
-func (DefaultHandler) CanReplace(_ byte) bool { return true }
+// CanReplace returns true for standard types replacing other standard types.
+// Non-blob transactions cannot replace blob transactions (the blob tx replacement
+// rule is asymmetric: blobs can only be replaced by blobs).
+func (DefaultHandler) CanReplace(existingType byte) bool {
+	return existingType != types.BlobTxType
+}
 
 // AccountLimit returns cfg.AccountSlots (default 16).
 func (DefaultHandler) AccountLimit(cfg *txpoolcfg.Config) uint64 { return cfg.AccountSlots }
