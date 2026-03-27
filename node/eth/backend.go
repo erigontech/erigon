@@ -54,8 +54,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader"
-	"github.com/erigontech/erigon/db/downloader/downloadercfg"
-	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
+	downloadercomp "github.com/erigontech/erigon/node/components/downloader"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/kvcache"
@@ -95,14 +94,12 @@ import (
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/ethstats"
-	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
-	"github.com/erigontech/erigon/node/nodecfg"
 	privateapi2 "github.com/erigontech/erigon/node/privateapi"
 	"github.com/erigontech/erigon/node/rulesconfig"
 	"github.com/erigontech/erigon/node/shards"
@@ -201,7 +198,7 @@ type Ethereum struct {
 	txPoolRpcClient           txpoolproto.TxpoolClient
 	shutterPool               *shutter.Pool
 	blockBuilderNotifyNewTxns chan struct{}
-	downloader                *downloader.Downloader
+	downloaderProvider        *downloadercomp.Provider
 
 	blockSnapshots *freezeblocks.RoSnapshots
 	blockReader    services.FullBlockReader
@@ -409,10 +406,41 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.blockSnapshots, backend.blockReader, backend.blockWriter = allSnapshots, blockReader, blockWriter
 	backend.chainDB = temporalDb
 
-	// Can happen in some configurations
-	if err := backend.setUpSnapDownloader(ctx, stack.Config(), config.Downloader); err != nil {
+	// Initialize the downloader component (local in-process or remote via gRPC).
+	backend.downloaderProvider = &downloadercomp.Provider{}
+	backend.downloaderProvider.Configure(config.Downloader, config.Snapshot, config.Dirs, logger, stack.Config().DebugMux)
+	if err := backend.downloaderProvider.Initialize(ctx); err != nil {
 		return nil, err
 	}
+	backend.downloaderClient = backend.downloaderProvider.Client
+
+	// Register file-change callbacks so completed snapshots are seeded and
+	// deleted snapshots are removed from the swarm. These stay here because
+	// they need chainDB and notifications (set below).
+	backend.chainDB.OnFilesChange(func(frozenFileNames []string) {
+		backend.logger.Debug("files changed...sending notification")
+		events := backend.notifications.Events
+		events.OnNewSnapshot()
+		if config.Downloader != nil && config.Downloader.ChainName == "" {
+			return
+		}
+		if backend.config.Snapshot.NoDownloader || backend.downloaderClient == nil || len(frozenFileNames) == 0 {
+			return
+		}
+		if err := backend.downloaderClient.Seed(ctx, frozenFileNames); err != nil {
+			backend.logger.Warn("[snapshots] downloader.Seed", "err", err)
+		}
+	}, func(deletedFiles []string) {
+		if config.Downloader != nil && config.Downloader.ChainName == "" {
+			return
+		}
+		if backend.config.Snapshot.NoDownloader || backend.downloaderClient == nil || len(deletedFiles) == 0 {
+			return
+		}
+		if err := backend.downloaderClient.Delete(ctx, deletedFiles); err != nil {
+			backend.logger.Warn("[snapshots] downloader.Delete", "err", err)
+		}
+	})
 
 	kvRPC := remotedbserver.NewKvServer(ctx, backend.chainDB, allSnapshots, allBorSnapshots, temporalDb.Debug(), logger)
 	backend.notifications = shards.NewNotifications(kvRPC)
@@ -936,9 +964,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	// snapshots not in that set could cause issues. That's an unsolved issue and probably requires
 	// always resetting before resuming/starting a sync.
 	var afterSnapshotDownload func(ctx context.Context) error
-	if backend.downloader != nil {
+	if backend.downloaderProvider != nil && backend.downloaderProvider.Downloader != nil {
 		afterSnapshotDownload = func(ctx context.Context) (err error) {
-			incomplete, err := backend.downloader.AddTorrentsFromDisk(ctx)
+			incomplete, err := backend.downloaderProvider.Downloader.AddTorrentsFromDisk(ctx)
 			if err != nil {
 				err = fmt.Errorf("adding torrents from disk: %w", err)
 				return
@@ -1229,88 +1257,6 @@ func (s *Ethereum) NodesInfo(limit int) (*remoteproto.NodesInfoReply, error) {
 }
 
 // sets up blockReader and client downloader
-func (s *Ethereum) setUpSnapDownloader(
-	ctx context.Context,
-	nodeCfg *nodecfg.Config,
-	downloaderCfg *downloadercfg.Cfg,
-) (err error) {
-	s.chainDB.OnFilesChange(func(frozenFileNames []string) {
-		s.logger.Debug("files changed...sending notification")
-		events := s.notifications.Events
-		events.OnNewSnapshot()
-		if downloaderCfg != nil && downloaderCfg.ChainName == "" {
-			return
-		}
-		if s.config.Snapshot.NoDownloader || s.downloaderClient == nil || len(frozenFileNames) == 0 {
-			return
-		}
-
-		if err := s.downloaderClient.Seed(ctx, frozenFileNames); err != nil {
-			s.logger.Warn("[snapshots] downloader.Seed", "err", err)
-		}
-	}, func(deletedFiles []string) {
-		if downloaderCfg != nil && downloaderCfg.ChainName == "" {
-			return
-		}
-		if s.config.Snapshot.NoDownloader || s.downloaderClient == nil || len(deletedFiles) == 0 {
-			return
-		}
-
-		if err := s.downloaderClient.Delete(ctx, deletedFiles); err != nil {
-			s.logger.Warn("[snapshots] downloader.Delete", "err", err)
-		}
-	})
-
-	if s.config.Snapshot.NoDownloader {
-		return nil
-	}
-
-	if downloaderCfg != nil {
-		if err := downloadercfg.LoadSnapshotsHashes(ctx, downloaderCfg.Dirs, downloaderCfg.ChainName); err != nil {
-			return err
-		}
-	}
-
-	client, err := s.initDownloader(ctx, nodeCfg, downloaderCfg)
-	if err != nil {
-		return
-	}
-	if client != nil {
-		s.downloaderClient = downloader.NewRpcClient(client, s.config.Dirs.Snap)
-	}
-	return err
-}
-
-// Init s.downloader, and return suitable client for it.
-func (s *Ethereum) initDownloader(
-	ctx context.Context,
-	nodeCfg *nodecfg.Config,
-	downloaderCfg *downloadercfg.Cfg,
-) (client downloaderproto.DownloaderClient, err error) {
-	if s.config.Snapshot.DownloaderAddr != "" {
-		// connect to external Downloader
-		return downloadergrpc.NewClient(ctx, s.config.Snapshot.DownloaderAddr)
-	}
-	if downloaderCfg == nil || downloaderCfg.ChainName == "" {
-		return
-	}
-
-	s.downloader, err = downloader.New(ctx, downloaderCfg, s.logger)
-	if err != nil {
-		return
-	}
-	s.downloader.HandleTorrentClientStatus(nodeCfg.DebugMux)
-
-	bittorrentServer, err := downloader.NewGrpcServer(s.downloader)
-	if err != nil {
-		err = fmt.Errorf("new server: %w", err)
-		return
-	}
-	s.downloader.InitBackgroundLogger(true)
-
-	client = downloader.DirectGrpcServerClient(bittorrentServer)
-	return
-}
 
 func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig *ethconfig.Config, chainConfig *chain.Config, dbReadConcurrency int, logger log.Logger, blockSnapBuildSema *semaphore.Weighted) (*freezeblocks.BlockReader, *blockio.BlockWriter, *freezeblocks.RoSnapshots, *heimdall.RoSnapshots, bridge.Store, heimdall.Store, kv.TemporalRwDB, error) {
 	snConfig.Snapshot.ChainName = chainConfig.ChainName
@@ -1550,8 +1496,8 @@ func (s *Ethereum) Stop() error {
 	if s.unsubscribeEthstat != nil {
 		s.unsubscribeEthstat()
 	}
-	if s.downloader != nil {
-		s.downloader.Close()
+	if s.downloaderProvider != nil {
+		s.downloaderProvider.Close()
 	}
 	if s.privateAPI != nil {
 		shutdownDone := make(chan bool)
