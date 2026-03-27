@@ -70,6 +70,9 @@ type Config struct {
 
 	// Account Abstraction
 	AllowAA bool
+
+	// EIP-8141 Frame Transactions (draft — gated until spec is finalized)
+	AllowFrameTx bool
 }
 
 var DefaultConfig = Config{

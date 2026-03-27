@@ -217,6 +217,8 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 		t = &SetCodeTransaction{}
 	case AccountAbstractionTxType:
 		t = &AccountAbstractionTransaction{}
+	case FrameTxType:
+		t = &FrameTransaction{}
 	default:
 		if data[0] >= 0x80 {
 			// txn is type legacy which is RLP encoded
