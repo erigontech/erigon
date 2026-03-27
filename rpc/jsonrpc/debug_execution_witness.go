@@ -712,7 +712,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	log.Debug("expected parent root", "stateRoot", expectedParentRoot)
 
 	commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
-	if blockNum != 0 && firstTxNumInBlock < commitmentStartingTxNum || commitmentStartingTxNum > 1 {
+	if firstTxNumInBlock < commitmentStartingTxNum {
 		return nil, fmt.Errorf("commitment history pruned: start %d, last tx: %d", commitmentStartingTxNum, firstTxNumInBlock)
 	}
 
