@@ -223,10 +223,16 @@ const (
 	RETURN
 	DELEGATECALL
 	CREATE2
-	STATICCALL   OpCode = 0xfa
-	REVERT       OpCode = 0xfd
-	INVALID      OpCode = 0xfe
+	STATICCALL OpCode = 0xfa
+	REVERT      OpCode = 0xfd
+	INVALID     OpCode = 0xfe
 	SELFDESTRUCT OpCode = 0xff
+
+	// APPROVE is the EIP-8141 (draft) opcode for VERIFY frames.
+	// A VERIFY frame contract calls APPROVE to signal that it authorises the
+	// enclosing frame transaction.  Slot 0xF8 is currently unassigned; the
+	// final slot number will be confirmed when the spec is ratified.
+	APPROVE OpCode = 0xf8
 )
 
 // Since the opcodes aren't all in order we can't use a regular slice.
@@ -402,6 +408,7 @@ var opCodeToString = map[OpCode]string{
 	CALLCODE:     "CALLCODE",
 	DELEGATECALL: "DELEGATECALL",
 	CREATE2:      "CREATE2",
+	APPROVE:      "APPROVE",
 	STATICCALL:   "STATICCALL",
 	REVERT:       "REVERT",
 	INVALID:      "INVALID",

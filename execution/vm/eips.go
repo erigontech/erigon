@@ -74,6 +74,30 @@ func ActivateableEips() []string {
 	return nums
 }
 
+// enableFrameTx installs the APPROVE opcode (EIP-8141 draft, slot 0xF8).
+//
+// APPROVE signals from a VERIFY frame that the enclosing frame transaction is
+// authorised.  At the EVM level the opcode is a pure no-op; the authorisation
+// check is performed by VerifyFrameTracer via the OnOpcode hook.
+//
+// NOTE: not in the activators map — this is feature-flag gated (AllowFrameTx),
+// not activated by an EIP number.
+func enableFrameTx(jt *JumpTable) {
+	jt[APPROVE] = &operation{
+		execute:     opApprove,
+		constantGas: GasFastStep,
+		numPop:      0,
+		numPush:     0,
+	}
+}
+
+func opApprove(pc uint64, _ *EVM, _ *CallContext) (uint64, []byte, error) {
+	// APPROVE is a no-op at the EVM level.  Its execution is observed by
+	// VerifyFrameTracer (via OnOpcode) to signal that the VERIFY frame has
+	// approved the transaction.  See EIP-8141 §4.2 (draft).
+	return pc, nil, nil
+}
+
 // enable1884 applies EIP-1884 to the given jump table:
 // - Increase cost of BALANCE to 700
 // - Increase cost of EXTCODEHASH to 700
