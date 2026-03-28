@@ -217,7 +217,11 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 
 	clear(t.keys)
 
-	g, ctx := errgroup.WithContext(ctx)
+	// Use a derived context for the errgroup goroutines only.
+	// The original ctx is preserved for the root fold loop below, because
+	// errgroup cancels the derived context after g.Wait() returns, and we
+	// must not see a spurious context.Canceled on the subsequent root fold.
+	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(16)
 
 	for n := 0; n < len(t.nibbles); n++ {
@@ -244,7 +248,7 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 					return fmt.Errorf("followAndUpdate[%x]: %w", ni, err)
 				}
 				return nil
-			}, etl.TransformArgs{Quit: ctx.Done()})
+			}, etl.TransformArgs{Quit: gctx.Done()})
 			if err != nil {
 				return err
 			}
@@ -254,7 +258,7 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 			if pph.mounts[ni].trace {
 				fmt.Printf("NOW FOLDING nib [%x] #%d d=%d\n", ni, cnt, phnib.depths[0])
 			}
-			return pph.foldNibble(ctx, ni)
+			return pph.foldNibble(gctx, ni)
 		})
 	}
 	if err := g.Wait(); err != nil {
