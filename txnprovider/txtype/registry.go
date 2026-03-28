@@ -81,7 +81,6 @@ func init() {
 	Global.Register(DynamicFeeHandler{})
 	Global.Register(BlobHandler{})
 	Global.Register(SetCodeHandler{})
-	Global.Register(AAHandler{})
 	Global.Register(FrameHandler{})
 }
 

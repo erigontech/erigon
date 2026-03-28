@@ -54,7 +54,6 @@ const (
 	DynamicFeeTxType
 	BlobTxType
 	SetCodeTxType
-	AccountAbstractionTxType
 )
 
 // Transaction is an Ethereum transaction.
@@ -215,8 +214,6 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 		}
 	case SetCodeTxType:
 		t = &SetCodeTransaction{}
-	case AccountAbstractionTxType:
-		t = &AccountAbstractionTransaction{}
 	case FrameTxType:
 		t = &FrameTransaction{}
 	default:
