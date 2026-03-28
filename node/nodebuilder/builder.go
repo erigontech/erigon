@@ -14,74 +14,77 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-// Package nodebuilder is the central component registry for an Erigon node.
+// Package nodebuilder assembles an Erigon node from its extracted components.
 //
-// Components are extracted from backend.go incrementally and registered here.
-// The registry provides:
-//   - A single field in the Ethereum struct instead of N individual provider fields
-//   - Centralized Start and Close lifecycle across all registered components
-//   - A clear inventory of what has been componentized vs what remains in backend.go
+// Components are extracted from backend.go incrementally. Each component lands
+// here as a Build* method that owns the full Configure → Initialize lifecycle
+// for that component. backend.go calls Build* methods and reads the resulting
+// provider fields; it no longer needs to know about Configure/Initialize directly.
 //
-// Usage pattern:
+// Usage pattern in backend.go:
 //
-//	// Construction (replaces N individual provider allocations in backend.go)
-//	backend.components = nodebuilder.New()
+//	b := nodebuilder.New()
 //
-//	// Per-component configuration and initialization (deps differ; stays in backend.go)
-//	backend.components.TxPool.Configure(cfg.TxPool, chainConfig, logger)
-//	backend.components.TxPool.Initialize(ctx, txpoolDeps)
-//	backend.components.Downloader.Configure(cfg.Downloader, ...)
-//	backend.components.Downloader.Initialize(ctx)
+//	// Each Build* call configures and fully initializes the component.
+//	if err := b.BuildDownloader(ctx, cfg.Downloader, cfg.Snapshot, dirs, logger, mux); err != nil {
+//	    return err
+//	}
+//	// ...later components added by downstream branches...
 //
-//	// Unified start (replaces N individual Start calls)
-//	backend.components.Start(ctx, &bg)
-//
-//	// Unified close (replaces N individual Close calls)
-//	backend.components.Close()
+//	// Unified lifecycle
+//	b.Start(ctx, &eg)
+//	defer b.Close()
 //
 // Adding a new component:
 //  1. Extract Provider to node/components/<name>/
-//  2. Add a field to Registry and allocate it in New()
-//  3. Wire Configure/Initialize in backend.go (same as before, just under backend.components)
-//  4. Add to Start/Close if the component has background goroutines or needs cleanup
+//  2. Add a <Name> field to Builder and allocate it in New()
+//  3. Add Build<Name>(ctx, ...) that calls Provider.Configure + Provider.Initialize
+//  4. Add to Start/Close if the component has background goroutines or cleanup
 package nodebuilder
 
 import (
 	"context"
+	"net/http"
 
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	downloadercomp "github.com/erigontech/erigon/node/components/downloader"
-	txpoolcomp "github.com/erigontech/erigon/node/components/txpool"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
-// Builder holds all extracted node component providers and manages their
-// shared lifecycle. Access components directly: b.TxPool.GrpcServer, etc.
+// Builder assembles an Erigon node from its extracted components.
+// Fields are the live provider instances after Build* methods have been called.
 //
-// Fields are added here as components graduate from backend.go.
-// Currently extracted:
-//   - Downloader  (node/components/downloader)
-//   - TxPool      (node/components/txpool)
-//   - Shutter     (node/components/txpool — Shutter encrypted mempool wrapper)
+// Components on this branch (feat/componentization):
+//   - Downloader — snapshot BitTorrent client
 //
-// Not yet extracted (still inline in backend.go):
-//   - Sentry / P2P
-//   - ExecModule / StagedSync
-//   - RPC servers / clients
-//   - Mining
-//   - Caplin (has its own internal stage machine)
+// Components added by downstream branches:
+//   - TxPool / Shutter — added by feat/txpool
+//   - (future) Sentry, ExecModule, RPC, Mining, Caplin
 type Builder struct {
 	Downloader *downloadercomp.Provider
-	TxPool     *txpoolcomp.Provider
-	Shutter    *txpoolcomp.ShutterProvider
 }
 
-// New allocates a Builder with all current providers pre-initialized.
-// Call once during node construction (replaces individual &Provider{} allocations).
+// New allocates a Builder with all providers pre-initialized.
 func New() *Builder {
 	return &Builder{
 		Downloader: &downloadercomp.Provider{},
-		TxPool:     &txpoolcomp.Provider{},
-		Shutter:    &txpoolcomp.ShutterProvider{},
 	}
+}
+
+// BuildDownloader configures and initializes the snapshot downloader component.
+// After this call, b.Downloader.Client is ready for consumers.
+func (b *Builder) BuildDownloader(
+	ctx context.Context,
+	cfg *downloadercfg.Cfg,
+	snapshotCfg ethconfig.BlocksFreezing,
+	dirs datadir.Dirs,
+	logger log.Logger,
+	debugMux *http.ServeMux,
+) error {
+	b.Downloader.Configure(cfg, snapshotCfg, dirs, logger, debugMux)
+	return b.Downloader.Initialize(ctx)
 }
 
 // ErrGroup is satisfied by errgroup.Group and similar constructs.
@@ -90,16 +93,13 @@ type ErrGroup interface {
 }
 
 // Start launches all component background goroutines.
-// Call after all components have been initialized.
-// Add new Start calls here when a component with background work is registered.
-func (b *Builder) Start(ctx context.Context, eg ErrGroup) {
-	b.TxPool.Start(ctx, eg)
-	b.Shutter.Start(ctx, eg)
-	// Downloader has no Start — it manages its own goroutines internally.
+// Call after all Build* methods have completed.
+func (b *Builder) Start(_ context.Context, _ ErrGroup) {
+	// Downloader manages its own goroutines internally — no Start needed.
+	// Downstream branches add their components' Start calls here.
 }
 
-// Close shuts down all closeable components.
-// Add new Close calls here when a closeable component is registered.
+// Close shuts down all components that hold resources.
 func (b *Builder) Close() {
 	b.Downloader.Close()
 }

@@ -27,21 +27,16 @@ import (
 func TestNewAllocatesAllProviders(t *testing.T) {
 	b := nodebuilder.New()
 	require.NotNil(t, b.Downloader, "Downloader provider must be allocated")
-	require.NotNil(t, b.TxPool, "TxPool provider must be allocated")
-	require.NotNil(t, b.Shutter, "Shutter provider must be allocated")
 }
 
 func TestCloseIsIdempotent(t *testing.T) {
 	b := nodebuilder.New()
-	// Close on a freshly-allocated builder (no underlying resources) must not panic.
 	require.NotPanics(t, func() { b.Close() })
 	require.NotPanics(t, func() { b.Close() })
 }
 
 func TestStartNoopWhenNotInitialized(t *testing.T) {
 	b := nodebuilder.New()
-	// Start on a builder whose providers have not been initialized must not panic.
-	// (TxPool.Pool == nil and Shutter.Pool == nil; both Start methods are no-ops.)
 	require.NotPanics(t, func() {
 		b.Start(t.Context(), &noopEg{})
 	})

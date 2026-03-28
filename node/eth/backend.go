@@ -191,6 +191,8 @@ type Ethereum struct {
 	waitForStageLoopStop chan struct{}
 
 	components                *nodebuilder.Builder
+	txPoolProvider            *txpoolcomp.Provider
+	shutterProvider           *txpoolcomp.ShutterProvider
 	txPoolGrpcServer          txpoolproto.TxpoolServer
 	txPoolRpcClient           txpoolproto.TxpoolClient
 	blockBuilderNotifyNewTxns chan struct{}
@@ -336,6 +338,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		minedBlocks:               make(chan *types.Block, 1),
 		minedBlockObservers:       event.NewObservers[*types.Block](),
 		components:                nodebuilder.New(),
+		txPoolProvider:            &txpoolcomp.Provider{},
+		shutterProvider:           &txpoolcomp.ShutterProvider{},
 		logger:                    logger,
 		stopNode: func() error {
 			return stack.Close()
@@ -383,8 +387,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.genesisHash = genesis.Hash()
 
 	setDefaultMinerGasLimit(config, chainConfig)
-
-	backend.components.TxPool.Configure(config.TxPool, chainConfig, logger)
+	backend.txPoolProvider.Configure(config.TxPool, chainConfig, logger)
 
 	logger.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
 	if dbg.OnlyCreateDB {
@@ -403,9 +406,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.blockSnapshots, backend.blockReader, backend.blockWriter = allSnapshots, blockReader, blockWriter
 	backend.chainDB = temporalDb
 
-	// Initialize the downloader component (local in-process or remote via gRPC).
-	backend.components.Downloader.Configure(config.Downloader, config.Snapshot, config.Dirs, logger, stack.Config().DebugMux)
-	if err := backend.components.Downloader.Initialize(ctx); err != nil {
+	// Build the downloader component (local in-process or remote via gRPC).
+	if err := backend.components.BuildDownloader(ctx, config.Downloader, config.Snapshot, config.Dirs, logger, stack.Config().DebugMux); err != nil {
 		return nil, err
 	}
 	backend.downloaderClient = backend.components.Downloader.Client
@@ -735,7 +737,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		default:
 		}
 	}
-	if err = backend.components.TxPool.Initialize(ctx, txpoolcomp.Deps{
+	if err = backend.txPoolProvider.Initialize(ctx, txpoolcomp.Deps{
 		ChainDB:            backend.chainDB,
 		Sentries:           backend.sentriesClient.Sentries(),
 		StateChangesClient: backend.stateDiffClient,
@@ -744,11 +746,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}); err != nil {
 		return nil, err
 	}
-	backend.txPoolGrpcServer = backend.components.TxPool.GrpcServer
+	backend.txPoolGrpcServer = backend.txPoolProvider.GrpcServer
 
 	var txnProvider txnprovider.TxnProvider
-	if backend.components.TxPool.IsEnabled() {
-		txnProvider = backend.components.TxPool.Pool
+	if backend.txPoolProvider.IsEnabled() {
+		txnProvider = backend.txPoolProvider.Pool
 	}
 
 	execmoduleCache := &execmodule.Cache{}
@@ -824,8 +826,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	if config.Shutter.Enabled && config.TxPool.Disable {
 		panic("can't enable shutter pool when devp2p txpool is disabled")
 	}
-	backend.components.Shutter.Configure(config.Shutter, logger)
-	if err = backend.components.Shutter.Initialize(ctx, txpoolcomp.ShutterDeps{
+	backend.shutterProvider.Configure(config.Shutter, logger)
+	if err = backend.shutterProvider.Initialize(ctx, txpoolcomp.ShutterDeps{
 		BaseTxnProvider:    txnProvider,
 		ContractBackend:    contracts.NewDirectBackend(ethApi),
 		StateChangesClient: backend.stateDiffClient,
@@ -840,7 +842,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}); err != nil {
 		return nil, err
 	}
-	txnProvider = backend.components.Shutter.TxnProvider
+	txnProvider = backend.shutterProvider.TxnProvider
 
 	blkBuilder := builder.NewBuilder(
 		backend.sentryCtx,
@@ -1442,6 +1444,8 @@ func (s *Ethereum) Start() error {
 	// to initialize it properly.
 	// 2) we cannot propose for block 1 regardless.
 	s.components.Start(s.sentryCtx, &s.bgComponentsEg)
+	s.txPoolProvider.Start(s.sentryCtx, &s.bgComponentsEg)
+	s.shutterProvider.Start(s.sentryCtx, &s.bgComponentsEg)
 
 	return nil
 }
