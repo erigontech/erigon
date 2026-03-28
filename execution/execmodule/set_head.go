@@ -108,8 +108,13 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 		return fmt.Errorf("failed to set unwind point: %w", err)
 	}
 
-	if err := e.hook.BeforeRun(tx, true); err != nil {
-		return fmt.Errorf("hook BeforeRun failed: %w", err)
+	if e.accumulator != nil {
+		stateVersion, err := rawdb.GetStateVersion(tx)
+		if err != nil {
+			e.logger.Error("problem reading plain state version", "err", err)
+		} else {
+			e.accumulator.Reset(stateVersion)
+		}
 	}
 
 	if err := e.pipelineExecutor.RunUnwind(sd, tx); err != nil {

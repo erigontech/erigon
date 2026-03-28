@@ -694,7 +694,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		1, // currentBlockNumber
 		mock.ChainConfig,
 		blkBuilder.Build,
-		hook,
+		mock.Notifications,
 		mock.Notifications.Accumulator,
 		mock.Notifications.RecentReceipts,
 		mock.StateCache,
@@ -707,6 +707,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		onlySnapDownloadOnStart,
 		func() error { return nil },
 	)
+	mock.ExecModule.SetHook(hook)
 	mock.ForkValidator = mock.ExecModule.ForkValidator()
 
 	mock.sentriesClient.Hd.StartPoSDownloader(mock.Ctx, sendHeaderRequest, penalize)

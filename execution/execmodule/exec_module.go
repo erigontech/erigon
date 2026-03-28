@@ -182,7 +182,7 @@ type ExecModule struct {
 	builders       map[uint64]*builder.BlockBuilder
 
 	// Changes accumulator
-	hook                *stageloop.Hook
+	notifications       *shards.Notifications
 	accumulator         *shards.Accumulator
 	recentReceipts      *shards.RecentReceipts
 	stateChangeConsumer shards.StateChangeConsumer
@@ -207,8 +207,15 @@ type ExecModule struct {
 
 	stopNode func() error
 
+	// hook is set after construction via SetHook; nil-guarded at call sites.
+	hook *stageloop.Hook
+
 	executionproto.UnimplementedExecutionServer
 }
+
+// SetHook sets the stageloop hook used for post-commit notifications (sentry
+// status, P2P announce, etc.). It must be called before Start.
+func (e *ExecModule) SetHook(hook *stageloop.Hook) { e.hook = hook }
 
 func NewExecModule(
 	ctx context.Context,
@@ -218,7 +225,7 @@ func NewExecModule(
 	currentBlockNumber uint64,
 	config *chain.Config,
 	builderFunc builder.BlockBuilderFunc,
-	hook *stageloop.Hook,
+	notifications *shards.Notifications,
 	accumulator *shards.Accumulator,
 	recentReceipts *shards.RecentReceipts,
 	stateCache *Cache,
@@ -244,7 +251,7 @@ func NewExecModule(
 		builderFunc:             builderFunc,
 		config:                  config,
 		semaphore:               semaphore.NewWeighted(1),
-		hook:                    hook,
+		notifications:           notifications,
 		accumulator:             accumulator,
 		recentReceipts:          recentReceipts,
 		stateChangeConsumer:     stateChangeConsumer,
@@ -334,8 +341,13 @@ func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.Te
 		return nil
 	}
 
-	if err := e.hook.BeforeRun(tx, true); err != nil {
-		return err
+	if e.accumulator != nil {
+		stateVersion, err := rawdb.GetStateVersion(tx)
+		if err != nil {
+			e.logger.Error("problem reading plain state version", "err", err)
+		} else {
+			e.accumulator.Reset(stateVersion)
+		}
 	}
 
 	if err := e.pipelineExecutor.UnwindTo(unwindPoint, stagedsync.ExecUnwind, tx); err != nil {
@@ -357,7 +369,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, req *executionproto.Vali
 	}
 	defer e.semaphore.Release(1)
 
-	e.hook.LastNewBlockSeen(req.Number) // used by eth_syncing
+	e.notifications.NewLastBlockSeen(req.Number) // used by eth_syncing
 	e.currentContext.ResetPendingUpdates()
 	e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
 	blockHash := gointerfaces.ConvertH256ToHash(req.Hash)

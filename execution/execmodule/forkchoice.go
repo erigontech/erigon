@@ -272,7 +272,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("forkchoice: block %x not found or was marked invalid", blockHash), false)
 	}
 
-	e.hook.LastNewBlockSeen(fcuHeader.Number.Uint64()) // used by eth_syncing
+	e.notifications.NewLastBlockSeen(fcuHeader.Number.Uint64()) // used by eth_syncing
 
 	finishProgressBefore, err := stages.GetStageProgress(tx, stages.Finish)
 	if err != nil {
@@ -379,8 +379,13 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		if err := e.pipelineExecutor.UnwindTo(unwindTarget, stagedsync.ForkChoice, tx); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
-		if err = e.hook.BeforeRun(tx, isSynced); err != nil {
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+		if e.accumulator != nil {
+			stateVersion, err := rawdb.GetStateVersion(tx)
+			if err != nil {
+				e.logger.Error("problem reading plain state version", "err", err)
+			} else {
+				e.accumulator.Reset(stateVersion)
+			}
 		}
 		// Run the unwind
 		if err := e.pipelineExecutor.RunUnwind(currentContext, tx); err != nil {

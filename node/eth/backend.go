@@ -725,8 +725,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	backend.stagedSync = stagedsync.New(config.Sync, backend.syncStages, backend.syncUnwindOrder, backend.syncPruneOrder, logger, stages.ModeApplyingBlocks)
 
-	hook := stageloop.NewHook(backend.sentryCtx, backend.notifications, backend.stagedSync, backend.chainConfig, backend.logger, backend.sentriesClient.SetStatus, backend.statusDataProvider, backend.executionP2PPublisher)
-
 	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, tracer)
 	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 
@@ -745,7 +743,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		currentBlockNumber,
 		chainConfig,
 		backend.components.BlockBuilding.Builder.Build,
-		hook,
+		backend.notifications,
 		backend.notifications.Accumulator,
 		backend.notifications.RecentReceipts,
 		execmoduleCache,
@@ -1148,6 +1146,7 @@ func (s *Ethereum) Start() error {
 	}
 
 	hook := stageloop.NewHook(s.sentryCtx, s.notifications, s.stagedSync, s.chainConfig, s.logger, s.sentriesClient.SetStatus, s.statusDataProvider, s.executionP2PPublisher)
+	s.execModule.SetHook(hook)
 
 	currentTDProvider := func() *big.Int {
 		currentTD, err := readCurrentTotalDifficulty(s.sentryCtx, s.chainDB, s.blockReader)
