@@ -81,8 +81,8 @@ func TestEIP7825_GasPoolPreservedOnReject(t *testing.T) {
 		msg := newSimpleTransferMsg(sender, recipient, params.MaxTxnGasLimit+1, true)
 		gp := new(GasPool).AddGas(blockGasLimit)
 
-		st := NewStateTransition(evm, msg, gp)
-		_, err := st.TransitionDb(true, false)
+		st := NewTxnExecutor(evm, msg, gp)
+		_, err := st.Execute(true, false)
 
 		require.ErrorIs(t, err, ErrGasLimitTooHigh)
 		require.Equal(t, uint64(blockGasLimit), gp.Gas(),
@@ -95,8 +95,8 @@ func TestEIP7825_GasPoolPreservedOnReject(t *testing.T) {
 		msg := newSimpleTransferMsg(sender, recipient, params.MaxTxnGasLimit, true)
 		gp := new(GasPool).AddGas(blockGasLimit)
 
-		st := NewStateTransition(evm, msg, gp)
-		result, err := st.TransitionDb(true, false)
+		st := NewTxnExecutor(evm, msg, gp)
+		result, err := st.Execute(true, false)
 
 		require.NoError(t, err)
 		require.NotNil(t, result)
@@ -113,8 +113,8 @@ func TestEIP7825_GasPoolPreservedOnReject(t *testing.T) {
 		// First: a tx that exceeds the cap — must be rejected without touching pool.
 		evm1 := newTestEVM(ibs, cfg, blockGasLimit)
 		msg1 := newSimpleTransferMsg(sender, recipient, params.MaxTxnGasLimit+1, true)
-		st1 := NewStateTransition(evm1, msg1, gp)
-		_, err := st1.TransitionDb(true, false)
+		st1 := NewTxnExecutor(evm1, msg1, gp)
+		_, err := st1.Execute(true, false)
 		require.ErrorIs(t, err, ErrGasLimitTooHigh)
 
 		poolAfterReject := gp.Gas()
@@ -124,8 +124,8 @@ func TestEIP7825_GasPoolPreservedOnReject(t *testing.T) {
 		// Second: a valid tx that fits within the cap and remaining pool.
 		evm2 := newTestEVM(ibs, cfg, blockGasLimit)
 		msg2 := newSimpleTransferMsg(sender, recipient, 100_000, true)
-		st2 := NewStateTransition(evm2, msg2, gp)
-		result, err := st2.TransitionDb(true, false)
+		st2 := NewTxnExecutor(evm2, msg2, gp)
+		result, err := st2.Execute(true, false)
 
 		require.NoError(t, err)
 		require.NotNil(t, result)
@@ -176,8 +176,8 @@ func TestEIP8037_GasPoolTracksOnlyRegularGas(t *testing.T) {
 		false, // isFree
 		nil,   // maxFeePerBlobGas
 	)
-	st1 := NewStateTransition(evm1, msg1, gp)
-	result1, err := st1.TransitionDb(true, false)
+	st1 := NewTxnExecutor(evm1, msg1, gp)
+	result1, err := st1.Execute(true, false)
 	require.NoError(t, err)
 	require.NotNil(t, result1)
 
@@ -193,8 +193,8 @@ func TestEIP8037_GasPoolTracksOnlyRegularGas(t *testing.T) {
 	// TX 2: 0-value transfer — regular gas only, no state gas.
 	evm2 := newAmsterdamEVM(ibs, blockGasLimit)
 	msg2 := newSimpleTransferMsg(sender, recipient, 100_000, true)
-	st2 := NewStateTransition(evm2, msg2, gp)
-	result2, err := st2.TransitionDb(true, false)
+	st2 := NewTxnExecutor(evm2, msg2, gp)
+	result2, err := st2.Execute(true, false)
 	require.NoError(t, err)
 	require.NotNil(t, result2)
 
