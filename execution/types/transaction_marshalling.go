@@ -75,6 +75,28 @@ type JsonAuthorization struct {
 	S       hexutil.Big    `json:"s"`
 }
 
+// JsonTxFrame is the JSON representation of a single EIP-8141 frame.
+// NOTE: field layout is draft and will change when the spec is finalized.
+type JsonTxFrame struct {
+	Kind     hexutil.Uint64  `json:"kind"`
+	To       common.Address  `json:"to"`
+	Data     hexutil.Bytes   `json:"data"`
+	GasLimit hexutil.Uint64  `json:"gas"`
+	Value    *hexutil.Big    `json:"value,omitempty"`
+}
+
+// FromTxFrame converts a TxFrame to its JSON representation.
+func (j JsonTxFrame) FromTxFrame(f TxFrame) JsonTxFrame {
+	j.Kind = hexutil.Uint64(f.Kind)
+	j.To = f.To
+	j.Data = f.Data
+	j.GasLimit = hexutil.Uint64(f.GasLimit)
+	if f.Value != nil {
+		j.Value = (*hexutil.Big)(f.Value.ToBig())
+	}
+	return j
+}
+
 func (a JsonAuthorization) FromAuthorization(authorization Authorization) JsonAuthorization {
 	a.ChainID = hexutil.Big(*authorization.ChainID.ToBig())
 	a.Address = authorization.Address

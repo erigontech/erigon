@@ -560,6 +560,7 @@ type RPCTransaction struct {
 	MaxFeePerBlobGas     *hexutil.Big               `json:"maxFeePerBlobGas,omitempty"`
 	BlobVersionedHashes  []common.Hash              `json:"blobVersionedHashes,omitempty"`
 	Authorizations       *[]types.JsonAuthorization `json:"authorizationList,omitempty"`
+	Frames               []types.JsonTxFrame        `json:"frames,omitempty"`
 	V                    *hexutil.Big               `json:"v"`
 	YParity              *hexutil.Big               `json:"yParity,omitempty"`
 	R                    *hexutil.Big               `json:"r"`
@@ -627,6 +628,13 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime u
 				ats[i] = types.JsonAuthorization{}.FromAuthorization(a)
 			}
 			result.Authorizations = &ats
+		} else if txn.Type() == types.FrameTxType {
+			frameTx := txn.(*types.FrameTransaction)
+			frames := make([]types.JsonTxFrame, len(frameTx.Frames))
+			for i, f := range frameTx.Frames {
+				frames[i] = types.JsonTxFrame{}.FromTxFrame(f)
+			}
+			result.Frames = frames
 		}
 	}
 
