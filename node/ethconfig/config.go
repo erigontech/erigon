@@ -257,6 +257,9 @@ type Config struct {
 	PolygonPosSingleSlotFinality        bool
 	PolygonPosSingleSlotFinalityBlockAt uint64
 
+	// EIP-8141 Frame Transactions (draft — experimental, gated until spec is finalized)
+	AllowFrameTx bool
+
 	// fork choice update timeout
 	FcuTimeout          time.Duration
 	FcuBackgroundPrune  bool

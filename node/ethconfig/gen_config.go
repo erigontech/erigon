@@ -56,6 +56,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		KeepStoredChainConfig               bool
 		PolygonPosSingleSlotFinality        bool
 		PolygonPosSingleSlotFinalityBlockAt uint64
+		AllowFrameTx                        bool
 		FcuTimeout                          time.Duration
 		FcuBackgroundPrune                  bool
 		FcuBackgroundCommit                 bool
@@ -94,6 +95,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.KeepStoredChainConfig = c.KeepStoredChainConfig
 	enc.PolygonPosSingleSlotFinality = c.PolygonPosSingleSlotFinality
 	enc.PolygonPosSingleSlotFinalityBlockAt = c.PolygonPosSingleSlotFinalityBlockAt
+	enc.AllowFrameTx = c.AllowFrameTx
 	enc.FcuTimeout = c.FcuTimeout
 	enc.FcuBackgroundPrune = c.FcuBackgroundPrune
 	enc.FcuBackgroundCommit = c.FcuBackgroundCommit
@@ -136,6 +138,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		KeepStoredChainConfig               *bool
 		PolygonPosSingleSlotFinality        *bool
 		PolygonPosSingleSlotFinalityBlockAt *uint64
+		AllowFrameTx                        *bool
 		FcuTimeout                          *time.Duration
 		FcuBackgroundPrune                  *bool
 		FcuBackgroundCommit                 *bool
@@ -240,6 +243,9 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.PolygonPosSingleSlotFinalityBlockAt != nil {
 		c.PolygonPosSingleSlotFinalityBlockAt = *dec.PolygonPosSingleSlotFinalityBlockAt
+	}
+	if dec.AllowFrameTx != nil {
+		c.AllowFrameTx = *dec.AllowFrameTx
 	}
 	if dec.FcuTimeout != nil {
 		c.FcuTimeout = *dec.FcuTimeout

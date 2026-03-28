@@ -173,9 +173,8 @@ type TxPool struct {
 	avgBlockTimeMs       atomic.Int64      // EWMA of block-to-block wall-clock interval (ms); default 12 000
 	lastBlockTimestampMs atomic.Int64      // unix-ms timestamp of the last processed block
 
-	// Pool-local handlers with CodeReader injected for static bytecode validation.
-	// These shadow the zero-value handlers in txtype.Global for AA and Frame types.
-	aaHandler    txtype.AAHandler
+	// Pool-local handler with CodeReader injected for static bytecode validation.
+	// Shadows the zero-value handler in txtype.Global for Frame transactions.
 	frameHandler txtype.FrameHandler
 }
 
@@ -266,9 +265,8 @@ func New(
 	// automatically after a few blocks, so the seed only affects the very first sweep interval.
 	res.avgBlockTimeMs.Store(12_000)
 
-	// Construct pool-local handlers with the injected CodeReader so that static
-	// bytecode validation runs at pool admission for AA and Frame transactions.
-	res.aaHandler = txtype.NewAAHandler(options.codeReader)
+	// Construct pool-local handler with the injected CodeReader so that static
+	// bytecode validation runs at pool admission for Frame transactions.
 	res.frameHandler = txtype.NewFrameHandler(options.codeReader)
 
 	res.shanghaiTime = chainConfig.ShanghaiTime
@@ -769,7 +767,6 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 		// make sure we have enough gas in the caller to add this transaction.
 		// not an exact science using intrinsic gas but as close as we could hope for at
 		// this stage
-		isAATxn := mt.TxnSlot.TxType() == types.AccountAbstractionTxType
 		authorizationLen := uint64(len(mt.TxnSlot.AuthAndNonces))
 		intrinsicGasResult, _ := mdgas.CalcIntrinsicGas(mdgas.IntrinsicGasCalcArgs{
 			Data:               make([]byte, mt.TxnSlot.GetDataLen()),
@@ -784,7 +781,6 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 			IsEIP3860:          isEIP3860,
 			IsEIP7623:          isEIP7623,
 			IsEIP8037:          p.isAmsterdam(),
-			IsAATxn:            isAATxn,
 		})
 		intrinsicGas := intrinsicGasResult.RegularGas
 		if isEIP7623 && intrinsicGasResult.FloorGasCost > intrinsicGas {
@@ -938,9 +934,8 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		}
 	}
 
-	// Type-specific validation. For AA this includes static ERC-7562 bytecode
-	// analysis via the pool-local AAHandler (Phase 2). For Frame transactions
-	// this includes EIP-8141 VERIFY frame checks via FrameHandler.
+	// Type-specific validation. For Frame transactions this includes
+	// EIP-8141 VERIFY frame checks via the pool-local FrameHandler.
 	if reason := handler.ValidateTx(txn.Txn, isLocal, &p.cfg); reason != txpoolcfg.NotSet {
 		return reason
 	}
@@ -961,7 +956,6 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 	}
 
 	authorizationLen := len(txn.AuthAndNonces)
-	gasFlags := handler.IntrinsicGasFlags()
 	intrinsicGasResult, overflow := mdgas.CalcIntrinsicGas(mdgas.IntrinsicGasCalcArgs{
 		Data:               make([]byte, txn.GetDataLen()),
 		DataNonZeroLen:     uint64(txn.GetDataNonZeroLen()),
@@ -975,7 +969,6 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		IsEIP3860:          isEIP3860,
 		IsEIP7623:          isPrague,
 		IsEIP8037:          p.isAmsterdam(),
-		IsAATxn:            gasFlags.IsAATxn,
 	})
 	gas := mdgas.MdGas{
 		Regular: intrinsicGasResult.RegularGas,
@@ -1240,18 +1233,15 @@ func (p *TxPool) forkState() txtype.ForkState {
 		IsCancun:     p.isCancun(),
 		IsPrague:     p.isPrague() || p.isBhilai(),
 		IsAmsterdam:  p.isAmsterdam(),
-		AllowAA:      p.cfg.AllowAA,
 		AllowFrameTx: p.cfg.AllowFrameTx,
 	}
 }
 
 // handlerFor returns the TypeHandler for the given transaction type byte.
-// For AA and Frame types it returns the pool-local handler (which has a
+// For Frame types it returns the pool-local handler (which has a
 // CodeReader injected); for all other types it falls back to txtype.Global.
 func (p *TxPool) handlerFor(txType byte) (txtype.TypeHandler, bool) {
 	switch txType {
-	case types.AccountAbstractionTxType:
-		return p.aaHandler, true
 	case types.FrameTxType:
 		return p.frameHandler, true
 	default:

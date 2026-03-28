@@ -32,7 +32,6 @@ func TestGlobalRegistryHasAllKnownTypes(t *testing.T) {
 		types.DynamicFeeTxType,
 		types.BlobTxType,
 		types.SetCodeTxType,
-		types.AccountAbstractionTxType,
 		types.FrameTxType,
 	}
 	for _, typeByte := range knownTypes {
@@ -103,16 +102,6 @@ func TestSetCodeHandlerPolicy(t *testing.T) {
 	require.False(t, h.ForkRequired(txtype.ForkState{}))
 	require.True(t, h.ForkRequired(txtype.ForkState{IsPrague: true}))
 	require.False(t, h.CanCreate())
-}
-
-func TestAAHandlerPolicy(t *testing.T) {
-	h, ok := txtype.Global.Get(types.AccountAbstractionTxType)
-	require.True(t, ok)
-
-	require.False(t, h.ForkRequired(txtype.ForkState{}))
-	require.True(t, h.ForkRequired(txtype.ForkState{AllowAA: true}))
-	require.False(t, h.CanCreate())
-	require.True(t, h.IntrinsicGasFlags().IsAATxn)
 }
 
 func TestFrameHandlerPolicy(t *testing.T) {

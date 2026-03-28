@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
 const (
@@ -41,7 +40,6 @@ const (
 	DynamicFeeTxnType byte = 2 // EIP-1559
 	BlobTxnType       byte = 3 // EIP-4844
 	SetCodeTxnType    byte = 4 // EIP-7702
-	AATxnType         byte = 5 // RIP-7560
 )
 
 var ErrParseTxn = fmt.Errorf("%w transaction", rlp.ErrParse)
@@ -131,8 +129,6 @@ func (ctx *TxnParseContext) decodeTxn(txBytes []byte) (types.Transaction, error)
 		txn = &types.BlobTx{}
 	case SetCodeTxnType:
 		txn = &types.SetCodeTransaction{}
-	case AATxnType:
-		txn = &types.AccountAbstractionTransaction{}
 	default:
 		return nil, fmt.Errorf("unknown transaction type: %d", txBytes[0])
 	}
@@ -413,24 +409,16 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 
 	// Step 8: Recover sender if needed.
 	if ctx.withSender && len(sender) == length.Addr {
-		if aaTx, ok := txn.(*types.AccountAbstractionTransaction); ok {
-			senderAddr := aaTx.SenderAddress.Value()
-			copy(sender, senderAddr[:])
-			if aaTx.Paymaster != nil {
-				copy(sender, aaTx.Paymaster[:])
-			}
-		} else {
-			signer := ctx.signer
-			if ctx.allowPreEip2s && txn.Type() == types.LegacyTxType {
-				signer = ctx.malleableSigner
-			}
-			addr, err := txn.Sender(*signer)
-			if err != nil {
-				return 0, fmt.Errorf("%w: recovering sender from signature: %s", ErrParseTxn, err) //nolint
-			}
-			addrBytes := addr.Value()
-			copy(sender, addrBytes[:])
+		signer := ctx.signer
+		if ctx.allowPreEip2s && txn.Type() == types.LegacyTxType {
+			signer = ctx.malleableSigner
 		}
+		addr, err := txn.Sender(*signer)
+		if err != nil {
+			return 0, fmt.Errorf("%w: recovering sender from signature: %s", ErrParseTxn, err) //nolint
+		}
+		addrBytes := addr.Value()
+		copy(sender, addrBytes[:])
 	}
 
 	return p, nil
@@ -482,19 +470,8 @@ func (tx *TxnSlot) GetBlobFeeCap() *uint256.Int {
 	return new(uint256.Int)
 }
 
-func (tx *TxnSlot) GetDataLen() int {
-	if aaTx, ok := tx.Txn.(*types.AccountAbstractionTransaction); ok {
-		return len(aaTx.DeployerData) + len(aaTx.PaymasterData) + len(aaTx.ExecutionData)
-	}
-	return len(tx.Txn.GetData())
-}
-
-func (tx *TxnSlot) GetDataNonZeroLen() int {
-	if aaTx, ok := tx.Txn.(*types.AccountAbstractionTransaction); ok {
-		return mdgas.CountNonZeroBytes(aaTx.DeployerData) + mdgas.CountNonZeroBytes(aaTx.PaymasterData) + mdgas.CountNonZeroBytes(aaTx.ExecutionData)
-	}
-	return mdgas.CountNonZeroBytes(tx.Txn.GetData())
-}
+func (tx *TxnSlot) GetDataLen() int    { return len(tx.Txn.GetData()) }
+func (tx *TxnSlot) GetDataNonZeroLen() int { return mdgas.CountNonZeroBytes(tx.Txn.GetData()) }
 
 func (tx *TxnSlot) GetAccessListAddrCount() int { return len(tx.Txn.GetAccessList()) }
 func (tx *TxnSlot) GetAccessListStorCount() int { return tx.Txn.GetAccessList().StorageKeys() }
@@ -536,57 +513,6 @@ func (tx *TxnSlot) BlobBundle(i int) (blob []byte, commitment goethkzg.KZGCommit
 	return bb.Blob, bb.Commitment, bb.Proofs
 }
 
-// ToProtoAccountAbstractionTxn converts a TxnSlot to a typesproto.AccountAbstractionTransaction
-func (tx *TxnSlot) ToProtoAccountAbstractionTxn() *typesproto.AccountAbstractionTransaction {
-	if tx == nil {
-		return nil
-	}
-	aaTx, ok := tx.Txn.(*types.AccountAbstractionTransaction)
-	if !ok {
-		return nil
-	}
-
-	var paymasterData, deployerData, paymaster, deployer, builderFee, nonceKey []byte
-	if aaTx.PaymasterData != nil {
-		paymasterData = aaTx.PaymasterData
-	}
-	if aaTx.DeployerData != nil {
-		deployerData = aaTx.DeployerData
-	}
-	if aaTx.Paymaster != nil {
-		paymaster = aaTx.Paymaster.Bytes()
-	}
-	if aaTx.Deployer != nil {
-		deployer = aaTx.Deployer.Bytes()
-	}
-	if aaTx.BuilderFee != nil {
-		builderFee = aaTx.BuilderFee.Bytes()
-	}
-	if aaTx.NonceKey != nil {
-		nonceKey = aaTx.NonceKey.Bytes()
-	}
-
-	senderAddr := aaTx.SenderAddress.Value()
-	return &typesproto.AccountAbstractionTransaction{
-		Nonce:                       aaTx.Nonce,
-		ChainId:                     aaTx.ChainID.Bytes(),
-		Tip:                         aaTx.Tip.Bytes(),
-		FeeCap:                      aaTx.FeeCap.Bytes(),
-		Gas:                         aaTx.GasLimit,
-		SenderAddress:               senderAddr[:],
-		SenderValidationData:        aaTx.SenderValidationData,
-		ExecutionData:               aaTx.ExecutionData,
-		Paymaster:                   paymaster,
-		PaymasterData:               paymasterData,
-		Deployer:                    deployer,
-		DeployerData:                deployerData,
-		BuilderFee:                  builderFee,
-		ValidationGasLimit:          aaTx.ValidationGasLimit,
-		PaymasterValidationGasLimit: aaTx.PaymasterValidationGasLimit,
-		PostOpGasLimit:              aaTx.PostOpGasLimit,
-		NonceKey:                    nonceKey,
-	}
-}
 
 type TxnSlots struct {
 	Txns    []*TxnSlot

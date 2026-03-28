@@ -118,7 +118,6 @@ func TestMiningBenchmark(t *testing.T) {
 			ChainID:   big.NewInt(1338),
 			Bor:       nil,
 			BorJSON:   nil,
-			AllowAA:   false,
 		},
 		Bootnodes:  nil,
 		DNSNetwork: "",

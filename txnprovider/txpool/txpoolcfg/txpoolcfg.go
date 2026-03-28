@@ -68,9 +68,6 @@ type Config struct {
 
 	NoGossip bool // this mode doesn't broadcast any txns, and if receive remote-txn - skip it
 
-	// Account Abstraction
-	AllowAA bool
-
 	// EIP-8141 Frame Transactions (draft — gated until spec is finalized)
 	AllowFrameTx bool
 }

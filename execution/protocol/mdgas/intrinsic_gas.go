@@ -36,8 +36,7 @@ type IntrinsicGasCalcArgs struct {
 	IsEIP2028          bool
 	IsEIP3860          bool
 	IsEIP7623          bool
-	IsEIP8037          bool
-	IsAATxn            bool
+	IsEIP8037 bool
 }
 
 type IntrinsicGasCalcResult struct {
@@ -86,8 +85,6 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 		result.StateGas = params.StateBytesNewAccount * args.CostPerStateByte
 	} else if args.IsContractCreation && args.IsEIP2 {
 		result.RegularGas = params.TxGasContractCreation
-	} else if args.IsAATxn {
-		result.RegularGas = params.TxAAGas
 	} else {
 		result.RegularGas = params.TxGas
 	}

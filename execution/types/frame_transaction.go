@@ -36,9 +36,8 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// FrameTxType is the EIP-8141 transaction type byte.
-// Value 6 follows AccountAbstractionTxType (5) in the EIP-2718 type space.
-const FrameTxType = AccountAbstractionTxType + 1 // = 6
+// FrameTxType is the EIP-8141 transaction type byte (6 in the EIP-2718 type space).
+const FrameTxType byte = 6
 
 // FrameKind identifies the role of a frame within a FrameTransaction.
 type FrameKind uint8

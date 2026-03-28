@@ -29,16 +29,11 @@ type ForkState struct {
 	IsCancun     bool // EIP-4844 blobs
 	IsPrague     bool // EIP-7702 set-code
 	IsAmsterdam  bool // EIP-7825 gas cap, EIP-8037
-	AllowAA      bool // RIP-7560 native account abstraction
 	AllowFrameTx bool // EIP-8141 frame transactions
 }
 
 // IntrinsicGasFlags carries type-specific flags for intrinsic gas calculation.
-type IntrinsicGasFlags struct {
-	// IsAATxn indicates this is a RIP-7560 account-abstraction transaction,
-	// which has a different intrinsic gas formula.
-	IsAATxn bool
-}
+type IntrinsicGasFlags struct{}
 
 // PoolMutation is a minimal interface the pool exposes to handlers for
 // type-specific state updates when transactions are added or removed.

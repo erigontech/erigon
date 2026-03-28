@@ -1081,6 +1081,11 @@ var (
 		Usage: "EXPERIMENTAL: enables concurrent trie for commitment",
 		Value: false,
 	}
+	FrameTxFlag = cli.BoolFlag{
+		Name:  "experimental.frame-tx",
+		Usage: "EXPERIMENTAL: enable EIP-8141 frame transactions (draft, not for production use)",
+		Value: false,
+	}
 	GDBMeFlag = cli.BoolFlag{
 		Name:  "gdbme",
 		Usage: "restart erigon under gdb for debug purposes",
@@ -1557,6 +1562,7 @@ func setTxPool(ctx *cli.Context, dbDir string, fullCfg *ethconfig.Config) {
 	if ctx.IsSet(TxPoolGossipDisableFlag.Name) {
 		cfg.NoGossip = ctx.Bool(TxPoolGossipDisableFlag.Name)
 	}
+	cfg.AllowFrameTx = ctx.Bool(FrameTxFlag.Name)
 	cfg.LogEvery = 3 * time.Minute
 	cfg.CommitEvery = common.RandomizeDuration(ctx.Duration(TxPoolCommitEveryFlag.Name))
 	if ctx.IsSet(TxPoolQueuedDormancyFlag.Name) {
@@ -1906,6 +1912,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	setCaplin(ctx, cfg)
 
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
+	cfg.AllowFrameTx = ctx.Bool(FrameTxFlag.Name)
 
 	if ctx.Bool(ExperimentalConcurrentCommitmentFlag.Name) {
 		cfg.ExperimentalConcurrentCommitment = true
