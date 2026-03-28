@@ -31,15 +31,8 @@ import (
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/protocol"
-	"github.com/erigontech/erigon/execution/protocol/aa"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
-	"github.com/erigontech/erigon/execution/state"
-	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/execution/vm"
-	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
@@ -510,56 +503,11 @@ func (s *EthBackendServer) BorEvents(ctx context.Context, req *remoteproto.BorEv
 	}, nil
 }
 
-func (s *EthBackendServer) AAValidation(ctx context.Context, req *remoteproto.AAValidationRequest) (*remoteproto.AAValidationReply, error) {
-	tx, err := s.db.BeginTemporalRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	currentBlock, err := s.blockReader.CurrentBlock(tx)
-	if err != nil {
-		return nil, err
-	}
-	header := currentBlock.HeaderNoCopy()
-
-	aaTxn := types.FromProto(req.Tx)
-	txNumsReader := s.blockReader.TxnumReader()
-	maxTxNum, err := txNumsReader.Max(ctx, tx, header.Number.Uint64())
-	if err != nil {
-		return nil, err
-	}
-
-	ibs := state.New(state.NewHistoryReaderV3(tx, maxTxNum))
-
-	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), nil, accounts.ZeroAddress, s.chainConfig)
-
-	senderCodeSize, err := ibs.GetCodeSize(aaTxn.SenderAddress)
-	if err != nil {
-		return nil, err
-	}
-
-	validationTracer := aa.NewValidationRulesTracer(aaTxn.SenderAddress, senderCodeSize != 0)
-	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, s.chainConfig, vm.Config{Tracer: validationTracer.Hooks(), ReadOnly: true})
-	ibs.SetHooks(validationTracer.Hooks())
-
-	vmConfig := evm.Config()
-	rules := evm.ChainRules()
-	hasEIP3860 := vmConfig.HasEip3860(rules)
-
-	preTxCost, err := aaTxn.PreTransactionGasCost(rules, hasEIP3860)
-	if err != nil {
-		return nil, err
-	}
-
-	totalGasLimit := preTxCost + aaTxn.ValidationGasLimit + aaTxn.PaymasterValidationGasLimit + aaTxn.GasLimit + aaTxn.PostOpGasLimit
-	_, _, err = aa.ValidateAATransaction(aaTxn, ibs, new(protocol.GasPool).AddGas(totalGasLimit), header, evm, s.chainConfig)
-	if err != nil {
-		log.Info("RIP-7560 validation err", "err", err.Error())
-		return &remoteproto.AAValidationReply{Valid: false}, nil
-	}
-
-	return &remoteproto.AAValidationReply{Valid: validationTracer.Err() == nil}, nil
+// AAValidation is superseded by EIP-8141 frame transaction validation.
+// This endpoint is no longer operational; it exists only to satisfy the gRPC
+// interface until the protobuf definition is updated.
+func (s *EthBackendServer) AAValidation(_ context.Context, _ *remoteproto.AAValidationRequest) (*remoteproto.AAValidationReply, error) {
+	return nil, errors.New("AAValidation: RIP-7560 AA validation is superseded by EIP-8141 frame transactions")
 }
 
 func (s *EthBackendServer) BlockForTxNum(ctx context.Context, req *remoteproto.BlockForTxNumRequest) (*remoteproto.BlockForTxNumResponse, error) {

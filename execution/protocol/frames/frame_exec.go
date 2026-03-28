@@ -22,6 +22,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -212,4 +213,27 @@ func frameMessage(frame types.TxFrame, tx *types.FrameTransaction, from accounts
 		true,  // isFree (gas purchased at tx level)
 		nil,   // maxFeePerBlobGas
 	)
+}
+
+// CreateFrameReceipt builds a receipt for a completed EIP-8141 frame transaction.
+// success mirrors types.ReceiptStatusSuccessful / ReceiptStatusFailed.
+func CreateFrameReceipt(
+	txnHash common.Hash,
+	success bool,
+	gasUsed, cumGasUsed, blockNum, txnIndex uint64,
+	logs types.Logs,
+) *types.Receipt {
+	receipt := &types.Receipt{Type: types.FrameTxType, CumulativeGasUsed: cumGasUsed}
+	if success {
+		receipt.Status = types.ReceiptStatusSuccessful
+	} else {
+		receipt.Status = types.ReceiptStatusFailed
+	}
+	receipt.TxHash = txnHash
+	receipt.GasUsed = gasUsed
+	receipt.Logs = logs
+	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
+	receipt.BlockNumber = uint256.NewInt(blockNum)
+	receipt.TransactionIndex = uint(txnIndex)
+	return receipt
 }

@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/aa"
+	"github.com/erigontech/erigon/execution/protocol/frames"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -279,6 +280,27 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 		logs := genEnv.ibs.GetLogs(genEnv.ibs.TxnIndex(), txn.Hash(), header.Number.Uint64(), header.Hash())
 		receipt = aa.CreateAAReceipt(txn.Hash(), status, gasUsed, header.GasUsed, header.Number.Uint64(), uint64(genEnv.ibs.TxnIndex()), logs)
+	} else if txn.Type() == types.FrameTxType {
+		genEnv, err = g.PrepareEnv(ctx, header, cfg, tx, index)
+		if err != nil {
+			return nil, err
+		}
+
+		frameTxn := txn.(*types.FrameTransaction)
+		blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, accounts.NilAddress, cfg)
+		evm = vm.NewEVM(blockContext, evmtypes.TxContext{}, genEnv.ibs, cfg, vm.Config{})
+
+		ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
+		defer cancel()
+		go func() {
+			<-ctx.Done()
+			evm.Cancel()
+		}()
+
+		frameGasUsed, execErr := frames.ExecuteFrameTransaction(frameTxn, genEnv.gp, evm, genEnv.ibs)
+		success := execErr == nil
+		logs := genEnv.ibs.GetLogs(genEnv.ibs.TxnIndex(), txn.Hash(), header.Number.Uint64(), header.Hash())
+		receipt = frames.CreateFrameReceipt(txn.Hash(), success, frameGasUsed, header.GasUsed, header.Number.Uint64(), uint64(genEnv.ibs.TxnIndex()), logs)
 	} else {
 		var sharedDomains *execctx.SharedDomains
 		defer func() {

@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/aa"
+	"github.com/erigontech/erigon/execution/protocol/frames"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -234,6 +235,26 @@ func (ba *BlockAssembler) AddTransactions(
 			header.GasUsed += aaGasUsed
 			logs := ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), header.Number.Uint64(), header.Hash())
 			receipt := aa.CreateAAReceipt(txn.Hash(), status, aaGasUsed, header.GasUsed, header.Number.Uint64(), uint64(ibs.TxnIndex()), logs)
+
+			current.AddTxn(txn)
+			current.Receipts = append(current.Receipts, receipt)
+			return receipt.Logs, nil
+		}
+
+		if txn.Type() == types.FrameTxType {
+			frameTxn := txn.(*types.FrameTransaction)
+			blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, getHeader), ba.cfg.Engine, coinbase, chainConfig)
+			evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, chainConfig, *vmConfig)
+			frameGasUsed, err := frames.ExecuteFrameTransaction(frameTxn, gasPool, evm, ibs)
+			if err != nil {
+				ibs.RevertToSnapshot(snap, err)
+				gasPool = new(protocol.GasPool).AddGas(gasSnap).AddBlobGas(blobGasSnap)
+				return nil, err
+			}
+
+			header.GasUsed += frameGasUsed
+			logs := ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), header.Number.Uint64(), header.Hash())
+			receipt := frames.CreateFrameReceipt(txn.Hash(), true, frameGasUsed, header.GasUsed, header.Number.Uint64(), uint64(ibs.TxnIndex()), logs)
 
 			current.AddTxn(txn)
 			current.Receipts = append(current.Receipts, receipt)
