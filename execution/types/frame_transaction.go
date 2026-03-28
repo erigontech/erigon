@@ -16,12 +16,18 @@
 
 package types
 
-// NOTE: EIP-8141 (Frame Transactions) is still in draft status. The encoding
-// format, opcode numbers, and gas rules are not yet finalized. This file
-// provides scaffolding — the struct and basic interface compliance — so that
-// Phase 5 work can proceed. Methods that depend on the final spec (Hash,
-// SigningHash, EncodeRLP, DecodeRLP) are stubs that will be completed when
-// the spec is finalized.
+// NOTE: EIP-8141 (Frame Transactions) is still in draft status.
+// Track the canonical spec at:
+//   https://github.com/ethereum/EIPs/blob/master/EIPS/eip-8141.md
+//
+// The struct layout here intentionally diverges from the current spec draft
+// (e.g. we have AccessList/Authorizations/Value that the spec dropped, and
+// v/r/s instead of an explicit Sender field). Do not update the encoding
+// until the spec is stable — the draft has already changed once between the
+// ethrex implementation and the current master version.
+//
+// Methods that depend on the final encoding (Hash, SigningHash, EncodeRLP,
+// DecodeRLP, MarshalBinary) are stubs returning ErrNotImplemented.
 
 import (
 	"errors"
