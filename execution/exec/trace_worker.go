@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/aa"
+	"github.com/erigontech/erigon/execution/protocol/frames"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -130,6 +131,12 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, 
 
 		_, _, err = aa.ExecuteAATransaction(aaTxn, paymasterContext, validationGasUsed, gp, evm, e.header, e.ibs)
 		if err != nil {
+			return err
+		}
+	} else if txn.Type() == types.FrameTxType {
+		frameTxn := txn.(*types.FrameTransaction)
+		evm := vm.NewEVM(*e.blockCtx, txContext, e.ibs, e.chainConfig, *e.vmConfig)
+		if _, err := frames.ExecuteFrameTransaction(frameTxn, gp, evm, e.ibs); err != nil {
 			return err
 		}
 	} else {

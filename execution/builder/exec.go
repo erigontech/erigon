@@ -379,7 +379,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 		missedTxs = 0
 
 		// Make sure the sender is an EOA (EIP-3607)
-		if !account.IsEmptyCodeHash() && transaction.Type() != types.AccountAbstractionTxType {
+		if !account.IsEmptyCodeHash() && transaction.Type() != types.AccountAbstractionTxType && transaction.Type() != types.FrameTxType {
 			isEoaCodeAllowed := false
 			if config.IsPrague(header.Time) || config.IsBhilai(header.Number.Uint64()) {
 				code, err := simStateReader.ReadAccountCode(senderAddress)

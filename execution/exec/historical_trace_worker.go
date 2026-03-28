@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/aa"
+	"github.com/erigontech/erigon/execution/protocol/frames"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
@@ -221,6 +222,21 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 				return result.Err
 			}
 
+			if txTask.Tx().Type() == types.FrameTxType {
+				if !cc.AllowFrameTx {
+					return errors.New("frame transactions are not allowed")
+				}
+
+				frameTxn := txn.(*types.FrameTransaction)
+				msg, err := txn.AsMessage(types.Signer{}, nil, nil)
+				if err != nil {
+					return err
+				}
+				rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, protocol.NewEVMTxContext(msg), ibs, *rw.vmCfg, rules)
+				result := rw.execFrameTxn(txTask, frameTxn, tracer)
+				return result.Err
+			}
+
 			msg, err := txTask.TxMessage()
 			if err != nil {
 				return err
@@ -323,6 +339,25 @@ func (rw *HistoricalTraceWorker) execAATxn(txTask *TxTask, tracer *calltracer.Ca
 	result.TraceTos = tracer.Tos()
 
 	log.Info("🚀[aa] executed AA bundle transaction", "txIndex", txTask.TxIndex, "status", status)
+	return result
+}
+
+func (rw *HistoricalTraceWorker) execFrameTxn(txTask *TxTask, frameTxn *types.FrameTransaction, tracer *calltracer.CallTracer) *TxResult {
+	result := &TxResult{}
+
+	gasUsed, err := frames.ExecuteFrameTransaction(frameTxn, rw.taskGasPool, rw.evm, rw.ibs)
+	if err != nil {
+		result.Err = err
+		return result
+	}
+
+	result.ExecutionResult.ReceiptGasUsed = gasUsed
+	result.ExecutionResult.BlockRegularGasUsed = gasUsed
+	rw.ibs.SoftFinalise()
+	result.Logs = rw.ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())
+	result.TraceFroms = tracer.Froms()
+	result.TraceTos = tracer.Tos()
+
 	return result
 }
 
