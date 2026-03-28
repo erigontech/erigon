@@ -170,17 +170,8 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			return fmt.Errorf("could not read provided genesis state file: %s", err)
 		}
 		genesisState = state.New(beaconConfig)
-		stateVersion := beaconConfig.GetCurrentStateVersion(beaconConfig.GenesisEpoch)
-		log.Info("[Phase1] Decoding custom genesis state",
-			"preset", beaconConfig.PresetBase,
-			"stateVersion", stateVersion,
-			"genesisBytes", len(stateBytes),
-			"SlotsPerHistoricalRoot", beaconConfig.SlotsPerHistoricalRoot,
-			"EpochsPerHistoricalVector", beaconConfig.EpochsPerHistoricalVector,
-			"EpochsPerSlashingsVector", beaconConfig.EpochsPerSlashingsVector,
-			"SyncCommitteeSize", beaconConfig.SyncCommitteeSize,
-		)
-		if err := genesisState.DecodeSSZ(stateBytes, int(stateVersion)); err != nil {
+
+		if err := genesisState.DecodeSSZ(stateBytes, int(beaconConfig.GetCurrentStateVersion(beaconConfig.GenesisEpoch))); err != nil {
 			return fmt.Errorf("could not decode genesis state: %s", err)
 		}
 	} else {
