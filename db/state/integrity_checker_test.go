@@ -122,33 +122,39 @@ func TestDependency_DisableInterDomain(t *testing.T) {
 	// commitment domain files: 0-1, 1-2
 	cf01 := getPopulatedCommitmentFilesItem(t, dirs, 0, 1, false, logger)
 	cf12 := getPopulatedCommitmentFilesItem(t, dirs, 1, 2, false, logger)
-	commitmentFiles := btree.NewBTreeGOptions(filesItemLess, btree.Options{Degree: 128, NoLocks: false})
-	commitmentFiles.Set(cf01)
-	commitmentFiles.Set(cf12)
+	commitmentFilesMap := btree2.MakeMap[*FilesItem, *FilesItem](filesItemCmp)
+	commitmentFilesMap.Upsert(cf01, cf01)
+	commitmentFilesMap.Upsert(cf12, cf12)
 
 	// history files: 0-1, 1-2 (simulating no merged 0-2)
 	// Reuse the same FilesItem objects — CheckDependentPresent only inspects
 	// startTxNum/endTxNum ranges, and reusing avoids Windows file-locking
 	// issues when two decompressors open the same path.
-	historyFiles := btree.NewBTreeGOptions(filesItemLess, btree.Options{Degree: 128, NoLocks: false})
-	historyFiles.Set(cf01)
-	historyFiles.Set(cf12)
+	historyFilesMap := btree2.MakeMap[*FilesItem, *FilesItem](filesItemCmp)
+	historyFilesMap.Upsert(cf01, cf01)
+	historyFilesMap.Upsert(cf12, cf12)
 
 	checker := NewDependencyIntegrityChecker(logger)
 
 	// Inter-domain: account → commitment
 	checker.AddDependency(AccountDomainUniversal, &DependentInfo{
-		entity:      CommitmentDomainUniversal,
-		filesGetter: func() *btree.BTreeG[*FilesItem] { return commitmentFiles.Copy() },
-		accessors:   statecfg.AccessorHashMap,
+		entity: CommitmentDomainUniversal,
+		filesGetter: func() *btree2.Map[*FilesItem, *FilesItem] {
+			m := commitmentFilesMap.Clone()
+			return &m
+		},
+		accessors: statecfg.AccessorHashMap,
 	})
 
 	// Intra-domain: commitment II → commitment history
 	commitmentII := FromII(kv.CommitmentHistoryIdx)
 	checker.AddDependency(commitmentII, &DependentInfo{
-		entity:      commitmentII,
-		filesGetter: func() *btree.BTreeG[*FilesItem] { return historyFiles.Copy() },
-		accessors:   statecfg.AccessorHashMap,
+		entity: commitmentII,
+		filesGetter: func() *btree2.Map[*FilesItem, *FilesItem] {
+			m := historyFilesMap.Clone()
+			return &m
+		},
+		accessors: statecfg.AccessorHashMap,
 	})
 
 	// Before DisableInterDomain: both should enforce
