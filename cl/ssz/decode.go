@@ -67,14 +67,14 @@ func UnmarshalSSZ(buf []byte, version int, schema ...any) (err error) {
 		switch obj := element.(type) {
 		case *uint64:
 			if len(buf) < position+8 {
-				return ssz.ErrLowBufferSize
+				return fmt.Errorf("element %d (uint64): %w (pos=%d, bufLen=%d)", i, ssz.ErrLowBufferSize, position, len(buf))
 			}
 			// If the element is a pointer to uint64, decode it from the buf using little-endian encoding
 			*obj = binary.LittleEndian.Uint64(buf[position:])
 			position += 8
 		case []byte:
 			if len(buf) < position+len(obj) {
-				return ssz.ErrLowBufferSize
+				return fmt.Errorf("element %d ([]byte, len=%d): %w (pos=%d, bufLen=%d)", i, len(obj), ssz.ErrLowBufferSize, position, len(buf))
 			}
 			// If the element is a byte slice, copy the corresponding data from the buf to the slice
 			copy(obj, buf[position:])
@@ -83,7 +83,7 @@ func UnmarshalSSZ(buf []byte, version int, schema ...any) (err error) {
 			// If the element implements the SizedObjectSSZ interface
 			if obj.Static() {
 				if len(buf) < position+obj.EncodingSizeSSZ() {
-					return ssz.ErrLowBufferSize
+					return fmt.Errorf("element %d (static %T, size=%d): %w (pos=%d, bufLen=%d)", i, obj, obj.EncodingSizeSSZ(), ssz.ErrLowBufferSize, position, len(buf))
 				}
 				// If the object is static (fixed size), decode it from the buf and update the position
 				if err = obj.DecodeSSZ(buf[position:], version); err != nil {
@@ -116,7 +116,7 @@ func UnmarshalSSZ(buf []byte, version int, schema ...any) (err error) {
 			return ssz.ErrBadOffset
 		}
 		if len(buf) < endOffset {
-			return ssz.ErrLowBufferSize
+			return fmt.Errorf("dynamic element %d/%T: %w (offset=%d, endOffset=%d, bufLen=%d)", i, obj, ssz.ErrLowBufferSize, offsets[i], endOffset, len(buf))
 		}
 		if err = obj.DecodeSSZ(buf[offsets[i]:endOffset], version); err != nil {
 			return fmt.Errorf("dynamic element (sz:%d) %d/%s: %w", endOffset-offsets[i], i, reflect.TypeOf(obj), err)
