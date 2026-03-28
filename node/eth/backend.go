@@ -408,6 +408,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		return nil, err
 	}
 	backend.downloaderClient = backend.components.Downloader.Client
+	backend.components.Downloader.Start(ctx, backend.notifications.Events, logger)
 
 	// Register file-change callbacks so completed snapshots are seeded and
 	// deleted snapshots are removed from the swarm. These stay here because
@@ -717,29 +718,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		Logger:              logger,
 	})
 
-	// This adds completed snapshots on disk after sync, so that we don't unnecessarily report
-	// incomplete torrents. There's still the issue of having torrents not in the preverified set:
-	// snapshots not in that set could cause issues. That's an unsolved issue and probably requires
-	// always resetting before resuming/starting a sync.
-	var afterSnapshotDownload func(ctx context.Context) error
-	if backend.components.Downloader.Downloader != nil {
-		afterSnapshotDownload = func(ctx context.Context) (err error) {
-			incomplete, err := backend.components.Downloader.Downloader.AddTorrentsFromDisk(ctx)
-			if err != nil {
-				err = fmt.Errorf("adding torrents from disk: %w", err)
-				return
-			}
-			if incomplete != 0 {
-				// Sync just completed, so incomplete snapshots are unexpected. They may be
-				// aberrations from torrents not in the preverified set; see comment above.
-				backend.logger.Warn("Downloader detected incomplete snapshots after sync", "count", incomplete)
-			}
-			return
-		}
-	}
-
 	backend.syncStages = stageloop.NewDefaultStages(backend.sentryCtx, backend.chainDB, p2pConfig, config, backend.sentriesClient, backend.notifications, backend.downloaderClient,
-		blockReader, blockRetire, tracer, afterSnapshotDownload)
+		blockReader, blockRetire, tracer)
 	backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder
 	backend.syncPruneOrder = stagedsync.DefaultPruneOrder
 
@@ -747,7 +727,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	hook := stageloop.NewHook(backend.sentryCtx, backend.notifications, backend.stagedSync, backend.chainConfig, backend.logger, backend.sentriesClient.SetStatus, backend.statusDataProvider, backend.executionP2PPublisher)
 
-	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, tracer, afterSnapshotDownload)
+	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, tracer)
 	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 
 	validationNotifications := shards.NewNotifications(nil)

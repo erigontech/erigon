@@ -60,8 +60,6 @@ type SnapshotsCfg struct {
 	caplinState        bool
 	syncConfig         ethconfig.Sync
 	prune              prune.Mode
-	// Called once after snapshot downloads complete on the first sync cycle.
-	afterDownload func(ctx context.Context) error
 }
 
 // Returns a seeder client for block management, a noop implementation if no downloader is attached.
@@ -84,7 +82,6 @@ func StageSnapshotsCfg(db kv.TemporalRwDB,
 	blobs bool,
 	caplinState bool,
 	prune prune.Mode,
-	afterDownload func(ctx context.Context) error,
 ) SnapshotsCfg {
 	cfg := SnapshotsCfg{
 		db:                 db,
@@ -99,7 +96,6 @@ func StageSnapshotsCfg(db kv.TemporalRwDB,
 		blobs:              blobs,
 		prune:              prune,
 		caplinState:        caplinState,
-		afterDownload:      afterDownload,
 	}
 
 	return cfg
@@ -213,10 +209,8 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
-	if cfg.afterDownload != nil {
-		if err := cfg.afterDownload(ctx); err != nil {
-			return fmt.Errorf("after snapshot download: %w", err)
-		}
+	if cfg.notifier != nil && cfg.notifier.Events != nil {
+		cfg.notifier.Events.OnSnapshotSyncDone()
 	}
 
 	{ // Now can open all files

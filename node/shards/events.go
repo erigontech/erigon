@@ -36,32 +36,34 @@ type LogsSubscription func([]*remoteproto.SubscribeLogsReply) error
 
 // Events manages event subscriptions and dissimination. Thread-safe
 type Events struct {
-	id                          int
-	headerSubscriptions         map[int]chan [][]byte
-	newSnapshotSubscription     map[int]chan struct{}
-	retirementStartSubscription map[int]chan bool
-	retirementDoneSubscription  map[int]chan struct{}
-	pendingLogsSubscriptions    map[int]PendingLogsSubscription
-	pendingBlockSubscriptions   map[int]PendingBlockSubscription
-	pendingTxsSubscriptions     map[int]PendingTxsSubscription
-	logsSubscriptions           map[int]chan []*remoteproto.SubscribeLogsReply
-	hasLogSubscriptions         bool
-	receiptsSubscriptions       map[int]chan []*remoteproto.SubscribeReceiptsReply
-	hasReceiptSubscriptions     bool
-	lock                        sync.RWMutex
+	id                           int
+	headerSubscriptions          map[int]chan [][]byte
+	newSnapshotSubscription      map[int]chan struct{}
+	snapshotSyncDoneSubscription map[int]chan struct{}
+	retirementStartSubscription  map[int]chan bool
+	retirementDoneSubscription   map[int]chan struct{}
+	pendingLogsSubscriptions     map[int]PendingLogsSubscription
+	pendingBlockSubscriptions    map[int]PendingBlockSubscription
+	pendingTxsSubscriptions      map[int]PendingTxsSubscription
+	logsSubscriptions            map[int]chan []*remoteproto.SubscribeLogsReply
+	hasLogSubscriptions          bool
+	receiptsSubscriptions        map[int]chan []*remoteproto.SubscribeReceiptsReply
+	hasReceiptSubscriptions      bool
+	lock                         sync.RWMutex
 }
 
 func NewEvents() *Events {
 	return &Events{
-		headerSubscriptions:         map[int]chan [][]byte{},
-		receiptsSubscriptions:       map[int]chan []*remoteproto.SubscribeReceiptsReply{},
-		pendingLogsSubscriptions:    map[int]PendingLogsSubscription{},
-		pendingBlockSubscriptions:   map[int]PendingBlockSubscription{},
-		pendingTxsSubscriptions:     map[int]PendingTxsSubscription{},
-		logsSubscriptions:           map[int]chan []*remoteproto.SubscribeLogsReply{},
-		newSnapshotSubscription:     map[int]chan struct{}{},
-		retirementStartSubscription: map[int]chan bool{},
-		retirementDoneSubscription:  map[int]chan struct{}{},
+		headerSubscriptions:          map[int]chan [][]byte{},
+		receiptsSubscriptions:        map[int]chan []*remoteproto.SubscribeReceiptsReply{},
+		pendingLogsSubscriptions:     map[int]PendingLogsSubscription{},
+		pendingBlockSubscriptions:    map[int]PendingBlockSubscription{},
+		pendingTxsSubscriptions:      map[int]PendingTxsSubscription{},
+		logsSubscriptions:            map[int]chan []*remoteproto.SubscribeLogsReply{},
+		newSnapshotSubscription:      map[int]chan struct{}{},
+		snapshotSyncDoneSubscription: map[int]chan struct{}{},
+		retirementStartSubscription:  map[int]chan bool{},
+		retirementDoneSubscription:   map[int]chan struct{}{},
 	}
 }
 
@@ -149,6 +151,34 @@ func (e *Events) AddRetirementDoneSubscription() (chan struct{}, func()) {
 		defer e.lock.Unlock()
 		delete(e.retirementDoneSubscription, id)
 		close(ch)
+	}
+}
+
+// AddSnapshotSyncDoneSubscription returns a channel that receives one signal
+// when the initial snapshot sync (download + index) completes. Callers should
+// drain the channel so the emitter never blocks.
+func (e *Events) AddSnapshotSyncDoneSubscription() (chan struct{}, func()) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	ch := make(chan struct{}, 1)
+	e.id++
+	id := e.id
+	e.snapshotSyncDoneSubscription[id] = ch
+	return ch, func() {
+		e.lock.Lock()
+		defer e.lock.Unlock()
+		delete(e.snapshotSyncDoneSubscription, id)
+		close(ch)
+	}
+}
+
+// OnSnapshotSyncDone signals that the initial snapshot sync is complete.
+// Called by the snapshots stage after the download+index step finishes.
+func (e *Events) OnSnapshotSyncDone() {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	for _, ch := range e.snapshotSyncDoneSubscription {
+		common.PrioritizedSend(ch, struct{}{})
 	}
 }
 

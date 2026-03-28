@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
 	"github.com/erigontech/erigon/node/ethconfig"
 	downloaderproto "github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon/node/shards"
 )
 
 // Provider holds the Downloader's runtime state. It implements the component
@@ -136,6 +137,35 @@ func (p *Provider) initDownloader(ctx context.Context) (downloaderproto.Download
 	d.InitBackgroundLogger(true)
 
 	return dl.DirectGrpcServerClient(bittorrentServer), nil
+}
+
+// Start subscribes to the SnapshotSyncDone event so that AddTorrentsFromDisk
+// is called once initial snapshot sync completes. This prevents incomplete
+// torrents from being reported after the first sync cycle.
+// Start is a no-op when the local Downloader is nil (remote-only mode).
+func (p *Provider) Start(ctx context.Context, events *shards.Events, logger log.Logger) {
+	if p.Downloader == nil || events == nil {
+		return
+	}
+	ch, unsub := events.AddSnapshotSyncDoneSubscription()
+	go func() {
+		defer unsub()
+		select {
+		case <-ctx.Done():
+			return
+		case <-ch:
+			incomplete, err := p.Downloader.AddTorrentsFromDisk(ctx)
+			if err != nil {
+				logger.Warn("[downloader] AddTorrentsFromDisk failed after snapshot sync", "err", err)
+				return
+			}
+			if incomplete != 0 {
+				// Incomplete snapshots after sync are unexpected — likely torrents not in
+				// the preverified set. See comment in backend.go for full context.
+				logger.Warn("[downloader] incomplete snapshots detected after sync", "count", incomplete)
+			}
+		}
+	}()
 }
 
 // Close shuts down the downloader. Safe to call multiple times.
