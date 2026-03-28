@@ -503,12 +503,6 @@ func (s *EthBackendServer) BorEvents(ctx context.Context, req *remoteproto.BorEv
 	}, nil
 }
 
-// AAValidation is superseded by EIP-8141 frame transaction validation.
-// This endpoint is no longer operational; it exists only to satisfy the gRPC
-// interface until the protobuf definition is updated.
-func (s *EthBackendServer) AAValidation(_ context.Context, _ *remoteproto.AAValidationRequest) (*remoteproto.AAValidationReply, error) {
-	return nil, errors.New("AAValidation: RIP-7560 AA validation is superseded by EIP-8141 frame transactions")
-}
 
 func (s *EthBackendServer) BlockForTxNum(ctx context.Context, req *remoteproto.BlockForTxNumRequest) (*remoteproto.BlockForTxNumResponse, error) {
 	tx, err := s.db.BeginRo(ctx)
