@@ -44,14 +44,6 @@ func (e nonCanonicalHashError) Error() string {
 	return fmt.Sprintf("hash %x is not currently canonical", e.hash)
 }
 
-type BlockNotFoundErr struct {
-	Hash common.Hash
-}
-
-func (e BlockNotFoundErr) Error() string {
-	return fmt.Sprintf("block %x not found", e.Hash)
-}
-
 func CheckBlockExecuted(tx kv.Tx, blockNumber uint64) error {
 	lastExecutedBlock, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {

@@ -9,6 +9,7 @@ import (
 	"github.com/libp2p/go-libp2p"
 	mplex "github.com/libp2p/go-libp2p-mplex"
 	"github.com/libp2p/go-libp2p/core/crypto"
+	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 	"github.com/libp2p/go-libp2p/p2p/security/noise"
 	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
@@ -105,5 +106,18 @@ func buildOptions(cfg *P2PConfig, privateKey *ecdsa.PrivateKey) ([]libp2p.Option
 	}
 	// Disable Ping Service.
 	options = append(options, libp2p.Ping(false))
+
+	// Enable libp2p resource manager with tightened per-peer inbound stream
+	// limits. The default PeerBaseLimit.StreamsInbound (256) is far too
+	// permissive; Lighthouse caps per-peer inbound substreams at 32.
+	limits := rcmgr.DefaultLimits
+	limits.PeerBaseLimit.StreamsInbound = 32
+	limits.PeerLimitIncrease.StreamsInbound = 0 // do not scale with memory
+	rm, err := rcmgr.NewResourceManager(rcmgr.NewFixedLimiter(limits.AutoScale()))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create libp2p resource manager: %w", err)
+	}
+	options = append(options, libp2p.ResourceManager(rm))
+
 	return options, nil
 }

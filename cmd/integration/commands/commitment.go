@@ -64,7 +64,10 @@ import (
 	"github.com/erigontech/erigon/node/debug"
 )
 
-var branchPrefixFlag string
+var (
+	branchPrefixFlag string
+	txnumFlag        uint64
+)
 
 // visualize command flags
 var (
@@ -95,6 +98,7 @@ func init() {
 	withChain(commitmentBranchCmd)
 	withDataDir(commitmentBranchCmd)
 	withConfig(commitmentBranchCmd)
+	commitmentBranchCmd.Flags().Uint64Var(&txnumFlag, "txnum", 0, "txnum to read as of")
 	commitmentBranchCmd.Flags().StringVar(&branchPrefixFlag, "prefix", "", "hex prefix to read (e.g., 'aa', '0a1b')")
 	commitmentCmd.AddCommand(commitmentBranchCmd)
 
@@ -164,9 +168,13 @@ var commitmentBranchCmd = &cobra.Command{
 	Long: `Opens the commitment domain from a given datadir and reads the branch data
 for the specified prefix. The prefix should be provided as hex nibbles.
 
+Use --txnum to read the state as of a specific txnum  (historical read via GetAsOf).
+Without --txnum, reads the latest state.
+
 Examples:
   integration commitment branch --chain=mainnet --datadir ~/data/eth-mainnet --prefix aa
   integration commitment branch --datadir /path/to/datadir --prefix 0a1b
+  integration commitment branch --datadir /path/to/datadir --prefix 0a1b --txnum 1000000
   integration commitment branch --datadir /path/to/datadir  # reads root (empty prefix)`,
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
@@ -193,25 +201,32 @@ Examples:
 			return
 		}
 		defer tx.Rollback()
-		sd, err := execctx.NewSharedDomains(ctx, tx, logger)
-		if err != nil {
-			logger.Error("Failed to create shared domains", "error", err)
-			return
-		}
-		defer sd.Close()
-		// Use LatestStateReader to read from the commitment domain.
-		// This is the same approach used by commitmentdb.TrieContext.Branch internally:
-		// TrieContext.Branch -> TrieContext.readDomain -> StateReader.Read
-		commitmentReader := commitmentdb.NewLatestStateReader(tx, sd)
 
-		if err := readBranch(commitmentReader, prefix, logger); err != nil {
-			logger.Error("Failed to read branch", "error", err)
-			return
+		if txnumFlag > 0 {
+			fmt.Printf("(asOfTxNum: %d)\n", txnumFlag)
+			reader := commitmentdb.NewHistoryStateReader(tx, txnumFlag)
+			if err := readBranch(reader, prefix, logger); err != nil {
+				logger.Error("Failed to read branch", "error", err)
+				return
+			}
+		} else {
+			// Latest state read
+			sd, err := execctx.NewSharedDomains(ctx, tx, logger)
+			if err != nil {
+				logger.Error("Failed to create shared domains", "error", err)
+				return
+			}
+			defer sd.Close()
+			reader := commitmentdb.NewLatestStateReader(tx, sd)
+			if err := readBranch(reader, prefix, logger); err != nil {
+				logger.Error("Failed to read branch", "error", err)
+				return
+			}
 		}
 	},
 }
 
-func readBranch(stateReader *commitmentdb.LatestStateReader, prefix []byte, logger interface {
+func readBranch(stateReader commitmentdb.StateReader, prefix []byte, logger interface {
 	Info(msg string, ctx ...any)
 }) error {
 	compactKey := commitment.HexNibblesToCompactBytes(prefix)

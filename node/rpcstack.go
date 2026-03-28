@@ -35,6 +35,8 @@ import (
 	"github.com/rs/cors"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
@@ -46,6 +48,10 @@ type httpConfig struct {
 	Vhosts             []string
 	Compression        bool
 	prefix             string // path prefix on which to mount http handler
+	// RpcConcurrencyLimit is the maximum number of concurrent HTTP RPC requests.
+	// Requests beyond this limit receive an immediate 503 before touching any middleware.
+	// 0 means unlimited (admission control disabled).
+	RpcConcurrencyLimit int64
 }
 
 // wsConfig is the JSON-RPC/Websocket configuration
@@ -193,6 +199,11 @@ func (h *httpServer) start() error {
 
 func (h *httpServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// check if ws request and serve if ws enabled
+	// Note: WebSocket connections bypass rpcAdmissionHandler intentionally.
+	// HTTP admission control limits inflight requests per connection, but WebSocket
+	// is a persistent long-lived connection where the relevant limit is the number
+	// of concurrent connections, not inflight requests. A dedicated WebSocket
+	// connection limiter will be addressed in a separate PR.
 	ws := h.wsHandler.Load().(*rpcHandler)
 	if ws != nil && isWebsocket(r) {
 		if checkPath(r, h.wsConfig.prefix) {
@@ -280,7 +291,7 @@ func (h *httpServer) enableRPC(apis []rpc.API, config httpConfig, allowList rpc.
 	}
 	h.httpConfig = config
 	h.httpHandler.Store(&rpcHandler{
-		Handler: NewHTTPHandlerStack(srv, config.CorsAllowedOrigins, config.Vhosts, config.Compression),
+		Handler: NewHTTPHandlerStack(srv, config.CorsAllowedOrigins, config.Vhosts, config.Compression, config.RpcConcurrencyLimit, true),
 		server:  srv,
 	})
 	return nil
@@ -345,15 +356,58 @@ func isWebsocket(r *http.Request) bool {
 		strings.Contains(strings.ToLower(r.Header.Get("Connection")), "upgrade")
 }
 
-// NewHTTPHandlerStack returns wrapped http-related handlers
-func NewHTTPHandlerStack(srv http.Handler, cors []string, vhosts []string, compression bool) http.Handler {
-	// Wrap the CORS-handler within a host-handler
+// NewHTTPHandlerStack returns wrapped http-related handlers.
+// When tagAsRPC is true and rpcConcurrencyLimit > 0, enforces admission control
+// (503 if inflight > limit) to prevent goroutine pile-up under load.
+func NewHTTPHandlerStack(srv http.Handler, cors []string, vhosts []string, compression bool, rpcConcurrencyLimit int64, tagAsRPC bool) http.Handler {
 	handler := newCorsHandler(srv, cors)
 	handler = newVHostHandler(vhosts, handler)
 	if compression {
 		handler = newGzipHandler(handler)
 	}
+	if tagAsRPC {
+		handler = newRPCAdmissionHandler(rpcConcurrencyLimit, handler)
+	}
 	return handler
+}
+
+// rpcAdmissionHandler limits the number of concurrent HTTP RPC requests.
+// Requests that exceed the limit receive an immediate HTTP 503 without going
+// through CORS, gzip, or JSON decoding.
+type rpcAdmissionHandler struct {
+	inflight atomic.Int64
+	limit    int64
+	next     http.Handler
+}
+
+var rpcAdmissionRejected = metrics.GetOrCreateCounter(`rpc_admission_rejected_total`)
+
+func newRPCAdmissionHandler(limit int64, next http.Handler) http.Handler {
+	return &rpcAdmissionHandler{limit: limit, next: next}
+}
+
+func (h *rpcAdmissionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if h.limit > 0 {
+		if h.inflight.Add(1) > h.limit {
+			h.inflight.Add(-1)
+			rpcAdmissionRejected.Inc()
+			w.Header().Set("Retry-After", "1")
+			// TODO: the 503 response here is plain text, not a JSON-RPC envelope.
+			// Similarly, when BeginRo returns ErrServerOverloaded (inner gate), the
+			// response is HTTP 200 with JSON-RPC code -32000 instead of -32005.
+			// Both paths should return HTTP 503 + JSON-RPC {"error":{"code":-32005,...}}.
+			// This requires buffering the response in rpc/http.go and will be
+			// addressed in a separate PR.
+			http.Error(w, "server overloaded, retry later", http.StatusServiceUnavailable)
+			return
+		}
+		defer h.inflight.Add(-1)
+	}
+	ctx := r.Context()
+	if h.limit > 0 {
+		ctx = kv.WithNonBlockingAcquire(ctx)
+	}
+	h.next.ServeHTTP(w, r.WithContext(ctx))
 }
 
 func newCorsHandler(srv http.Handler, allowedOrigins []string) http.Handler {
