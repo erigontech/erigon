@@ -163,7 +163,7 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 		b.proposerLookahead = solid.NewUint64VectorSSZ(int((b.beaconConfig.MinSeedLookahead + 1) * b.beaconConfig.SlotsPerEpoch))
 	}
 	if err := ssz2.UnmarshalSSZ(buf, version, b.getSchema()...); err != nil {
-		return err
+		return fmt.Errorf("[BeaconState] baseOffset=%d bufLen=%d version=%d: %w", b.baseOffsetSSZ(), len(buf), version, err)
 	}
 	// Capella
 	return b.init()
