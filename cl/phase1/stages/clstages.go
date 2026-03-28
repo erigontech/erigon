@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clstages"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/das"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
@@ -400,24 +401,19 @@ func writeGenesisBeaconBlock(ctx context.Context, cfg *Cfg) error {
 	}
 	blk.StateRoot = stateRoot
 
+	// The genesis block body is BeaconBlockBody() with all default/empty values per the spec.
+	// SyncAggregate needs preset-aware bitvector sizing; ExecutionPayload sub-fields
+	// must be initialized (non-nil) for SSZ encoding.
 	body := blk.Body
-	// Set eth1_data from genesis state so body.HashSSZ() matches state.LatestBlockHeader().BodyRoot.
-	body.Eth1Data = cfg.state.Eth1Data()
 	if version >= clparams.AltairVersion {
 		body.SyncAggregate = cltypes.NewSyncAggregateWithSize(int(cfg.beaconCfg.SyncCommitteeSize) / 8)
 	}
 	if version >= clparams.BellatrixVersion {
-		execHeader := cfg.state.LatestExecutionPayloadHeader()
-		body.ExecutionPayload = cltypes.NewEth1BlockFromExecutionHeader(execHeader, version, cfg.beaconCfg)
-	}
-
-	// Verify body root matches state's LatestBlockHeader — catches non-standard genesis issues.
-	bodyRoot, err := body.HashSSZ()
-	if err != nil {
-		return fmt.Errorf("genesis body HashSSZ failed: %w", err)
-	}
-	if bodyRoot != header.BodyRoot {
-		return fmt.Errorf("genesis body root mismatch: computed %x, expected %x", bodyRoot, header.BodyRoot)
+		body.ExecutionPayload.Extra = solid.NewExtraData()
+		body.ExecutionPayload.Transactions = &solid.TransactionsSSZ{}
+		if version >= clparams.CapellaVersion {
+			body.ExecutionPayload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.beaconCfg.MaxWithdrawalsPerPayload), 44)
+		}
 	}
 
 	return cfg.indiciesDB.Update(ctx, func(tx kv.RwTx) error {

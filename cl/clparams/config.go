@@ -1067,6 +1067,9 @@ func applyMinimalPreset(cfg *BeaconChainConfig) {
 	// Capella preset differences
 	cfg.MaxWithdrawalsPerPayload = 4
 	cfg.MaxValidatorsPerWithdrawalsSweep = 16
+
+	// Deneb preset differences
+	cfg.MaxBlobCommittmentsPerBlock = 16
 }
 
 func sepoliaConfig() BeaconChainConfig {
