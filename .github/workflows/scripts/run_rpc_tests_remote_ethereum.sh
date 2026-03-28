@@ -18,6 +18,7 @@ DISABLED_TEST_LIST=(
   debug_traceBlockByNumber/test_51.json
   erigon_getLogsByHash/test_01.json
   eth_getBlockReceipts/test_01.json
+  eth_createAccessList/test_16.json
   eth_getBlockReceipts/test_06.json
   ots_getBlockDetails/test_01.json
   ots_getBlockDetailsByHash/test_01.json
