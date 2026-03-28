@@ -336,8 +336,15 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 	// validated here, before buyGas(), so pool gas is never consumed for
 	// rejected txs.
 	if st.msg.CheckGas() && rules.IsOsaka {
-		if capGas := intrinsicGasResult.RegularGasCap(st.msg.Gas(), rules.IsAmsterdam); capGas > params.MaxTxnGasLimit {
-			return fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, from, capGas)
+		if rules.IsAmsterdam {
+			// EIP-8037: TX_MAX_GAS_LIMIT applies to the regular gas dimension only.
+			gasToCap := max(intrinsicGasResult.RegularGas, intrinsicGasResult.FloorGasCost)
+			if gasToCap > params.MaxTxnGasLimit {
+				return fmt.Errorf("%w: regular gas cap %d exceeds TX_MAX_GAS_LIMIT %d",
+					ErrIntrinsicGas, gasToCap, params.MaxTxnGasLimit)
+			}
+		} else if st.msg.Gas() > params.MaxTxnGasLimit {
+			return fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, from, st.msg.Gas())
 		}
 	}
 

@@ -143,8 +143,8 @@ jobs:
         if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
         uses: actions/upload-artifact@v6
         with:
-          name: fd-leak-analysis-${{ env.CHAIN }}
-          path: ${{ github.workspace }}/fd-leak-analysis-${{ env.CHAIN }}.md
+          name: fd-leak-analysis-${{ matrix.client }}-${{ matrix.chain }}
+          path: ${{ github.workspace }}/fd-leak-analysis-${{ matrix.chain }}.md
 
       - name: Clean up Erigon data directory
         if: always()

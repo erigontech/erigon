@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	"github.com/erigontech/erigon/cmd/caplin/caplincli"
@@ -88,12 +89,14 @@ func runCaplinNode(cliCtx *cli.Context) error {
 
 	var executionEngine execution_client.ExecutionEngine
 	if cfg.RunEngineAPI {
-		cc, err := execution_client.NewExecutionClientRPC(cfg.JwtSecret, cfg.EngineAPIAddr, cfg.EngineAPIPort)
+		cc, err := execution_client.NewExecutionClientEngineRPC(cfg.JwtSecret, cfg.EngineAPIAddr, cfg.EngineAPIPort, nil)
 		if err != nil {
 			log.Error("could not start engine api", "err", err)
+		} else {
+			log.Info("Started Engine API RPC Client", "addr", cfg.EngineAPIAddr)
+			defer cc.Close()
+			executionEngine = cc
 		}
-		log.Info("Started Engine API RPC Client", "addr", cfg.EngineAPIAddr)
-		executionEngine = cc
 	}
 	chainName := cliCtx.String(utils.ChainFlag.Name)
 	_, _, networkId, err := clparams.GetConfigsByNetworkName(chainName)
@@ -116,5 +119,5 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		MaxPeerCount:              cfg.MaxPeerCount,
 		MaxInboundTrafficPerPeer:  datasize.MB,
 		MaxOutboundTrafficPerPeer: datasize.MB,
-	}, cfg.Dirs, nil, nil, nil, blockSnapBuildSema)
+	}, cfg.Dirs, getters.NewExecutionEngineReader(ctx, executionEngine), nil, nil, blockSnapBuildSema)
 }
