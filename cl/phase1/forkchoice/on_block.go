@@ -84,6 +84,16 @@ func collectOnBlockLatencyToUnixTime(ethClock eth_clock.EthereumClock, slot uint
 	monitor.ObserveBlockImportingLatency(initialSlotTime)
 }
 
+// MarkHeadInvalid marks blockRoot as invalid in the fork graph and removes it
+// from the candidate head set so that GetHead no longer considers it.
+func (f *ForkChoiceStore) MarkHeadInvalid(blockRoot common.Hash) {
+	f.forkGraph.MarkHeaderAsInvalid(blockRoot)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.headSet, blockRoot)
+	f.headHash = common.Hash{}
+}
+
 func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

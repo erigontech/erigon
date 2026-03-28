@@ -18,6 +18,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/caches"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
+	execution_client "github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -71,6 +72,9 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 			cfg.forkChoice.GetEth1Hash(justifiedCheckpoint.Root),
 			cfg.forkChoice.GetEth1Hash(headRoot), nil,
 		); err != nil {
+			if errors.Is(err, execution_client.ErrBadBlockAsForkchoice) {
+				cfg.forkChoice.MarkHeadInvalid(headRoot)
+			}
 			err = fmt.Errorf("failed to run forkchoice: %w", err)
 			return
 		}

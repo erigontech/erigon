@@ -40,6 +40,11 @@ import (
 
 const reorgTooDeepDepth = 3
 
+// ErrBadBlockAsForkchoice is returned by ForkChoiceUpdate when the execution
+// layer reports the chosen head as a bad block. Callers can use errors.Is to
+// detect this specific condition and remove the block from the candidate head set.
+var ErrBadBlockAsForkchoice = errors.New("bad block as forkchoice")
+
 type ExecutionClientDirect struct {
 	chainRW chainreader.ChainReaderWriterEth1
 	txpool  txpoolproto.TxpoolClient
@@ -129,7 +134,7 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized
 		return nil, errors.New("forkchoice was invalid")
 	}
 	if status == executionproto.ExecutionStatus_BadBlock {
-		return nil, errors.New("bad block as forkchoice")
+		return nil, ErrBadBlockAsForkchoice
 	}
 	if attr == nil {
 		return nil, nil
