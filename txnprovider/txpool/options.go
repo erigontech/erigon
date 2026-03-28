@@ -20,6 +20,7 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon/execution/protocol/misc"
+	"github.com/erigontech/erigon/txnprovider/txtype/validate"
 )
 
 type Option func(*options)
@@ -48,11 +49,21 @@ func WithP2PSenderWg(wg *sync.WaitGroup) Option {
 	}
 }
 
+// WithCodeReader injects a CodeReader used for static bytecode validation of
+// AA (RIP-7560) and Frame (EIP-8141) transactions at pool admission.
+// If not supplied, bytecode validation is skipped (safe fallback).
+func WithCodeReader(r validate.CodeReader) Option {
+	return func(o *options) {
+		o.codeReader = r
+	}
+}
+
 type options struct {
 	feeCalculator     FeeCalculator
 	poolDBInitializer poolDBInitializer
 	p2pSenderWg       *sync.WaitGroup
 	p2pFetcherWg      *sync.WaitGroup
+	codeReader        validate.CodeReader
 }
 
 func applyOpts(opts ...Option) options {

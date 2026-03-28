@@ -19,6 +19,7 @@ package txtype
 import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
+	"github.com/erigontech/erigon/txnprovider/txtype/validate"
 )
 
 // AAHandler handles RIP-7560 native account abstraction transactions (type 5).
@@ -27,25 +28,29 @@ import (
 //   - Gated by the pool's AllowAA config flag (and eventually a fork activation)
 //   - Allow non-EOA senders (the sender is a smart contract wallet)
 //   - Use a different intrinsic gas formula (IsAATxn flag)
-//   - Require ERC-7562 opcode restriction validation via ethBackend.AAValidation()
+//   - ValidateTx performs static ERC-7562 bytecode analysis on the sender contract
 //
-// Note: The ERC-7562 validation call to ethBackend currently lives in pool.go
-// and is NOT yet delegated through this handler. Phase 2 of the design
-// (Validation independence) will move that call into a self-contained
-// txtype/validate/ package and wire it through ValidateTx.
-type AAHandler struct{ DefaultHandler }
+// Construct with NewAAHandler to enable bytecode validation.  The zero value
+// (AAHandler{}) has a nil reader and skips bytecode validation — safe for
+// contexts without state access (tests, the global registry).
+type AAHandler struct {
+	DefaultHandler
+	reader validate.CodeReader
+}
+
+// NewAAHandler creates an AAHandler with the given CodeReader for static
+// ERC-7562 bytecode validation at pool admission.
+func NewAAHandler(reader validate.CodeReader) AAHandler {
+	return AAHandler{reader: reader}
+}
 
 func (AAHandler) TypeByte() byte { return types.AccountAbstractionTxType }
 func (AAHandler) Name() string   { return "account-abstraction" }
 
 // ForkRequired returns true when AllowAA is set in the pool config.
-// This maps to the existing cfg.AllowAA flag; a proper fork activation
-// (similar to IsPrague for SetCode) will replace this in a future phase.
 func (AAHandler) ForkRequired(forks ForkState) bool { return forks.AllowAA }
 
-// CanCreate returns false — AA transactions cannot deploy contracts.
-// (The deployer is handled via a dedicated DeployerData frame, not via
-// the standard IsContractDeploy path.)
+// CanCreate returns false — AA transactions cannot deploy contracts directly.
 func (AAHandler) CanCreate() bool { return false }
 
 // IntrinsicGasFlags signals that AA intrinsic gas must use the AA formula.
@@ -53,13 +58,34 @@ func (AAHandler) IntrinsicGasFlags() IntrinsicGasFlags {
 	return IntrinsicGasFlags{IsAATxn: true}
 }
 
-// ValidateTx is a stub in Phase 1.
+// ValidateTx performs static ERC-7562 bytecode analysis on the sender contract.
 //
-// The real validation calls ethBackend.AAValidation() to run ERC-7562 opcode
-// restriction checks. That RPC call currently lives in pool.go:961 and will
-// be moved into txtype/validate/ in Phase 2, at which point this method will
-// delegate to a self-contained MempoolValidator.
-func (AAHandler) ValidateTx(_ types.Transaction, _ bool, _ *txpoolcfg.Config) txpoolcfg.DiscardReason {
-	// Phase 2: call mempoolValidator.ValidateAA(txn, cfg) here.
+// Rules checked statically (ERC-7562 §3):
+//   - Banned environment opcodes [OP-011]–[OP-014]: ORIGIN, GASPRICE, BLOCKHASH,
+//     COINBASE, TIMESTAMP, NUMBER, PREVRANDAO, GASLIMIT, BASEFEE, BLOBHASH,
+//     BLOBBASEFEE, INVALID, SELFDESTRUCT, SELFBALANCE
+//   - BALANCE ban [OP-011]
+//   - GAS must be immediately followed by a *CALL [OP-031]
+//
+// Rules that require execution context (CALL-with-value, storage slot
+// restrictions, out-of-gas revert ban) remain in ValidationRulesTracer and
+// are enforced at execution time.
+//
+// If no CodeReader was provided (nil reader), validation is skipped.
+func (h AAHandler) ValidateTx(tx types.Transaction, _ bool, _ *txpoolcfg.Config) txpoolcfg.DiscardReason {
+	if h.reader == nil {
+		return txpoolcfg.NotSet
+	}
+	aaTx, ok := tx.(*types.AccountAbstractionTransaction)
+	if !ok {
+		return txpoolcfg.InvalidAA
+	}
+	code, err := h.reader.Code(aaTx.SenderAddress.Value())
+	if err != nil {
+		return txpoolcfg.ErrGetCode
+	}
+	if v := validate.ERC7562Rules.Validate(code); v != nil {
+		return txpoolcfg.InvalidAA
+	}
 	return txpoolcfg.NotSet
 }
