@@ -482,6 +482,8 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			callContext.Memory.Resize(memorySize)
 		}
 
+		// TODO - move this to a trace & set in the worker
+
 		if trace {
 			var opstr string
 			if operation.string != nil {
