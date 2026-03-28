@@ -172,10 +172,11 @@ type TxPool struct {
 	senderLastActivity   map[uint64]uint64 // senderID → block of last on-chain state change
 	avgBlockTimeMs       atomic.Int64      // EWMA of block-to-block wall-clock interval (ms); default 12 000
 	lastBlockTimestampMs atomic.Int64      // unix-ms timestamp of the last processed block
-}
 
-type ValidateAA interface {
-	ValidateAA() (bool, error)
+	// Pool-local handlers with CodeReader injected for static bytecode validation.
+	// These shadow the zero-value handlers in txtype.Global for AA and Frame types.
+	aaHandler    txtype.AAHandler
+	frameHandler txtype.FrameHandler
 }
 
 type FeeCalculator interface {
@@ -264,6 +265,11 @@ func New(
 	// Seed the EWMA block time with 12 s (Ethereum mainnet slot time). The tracker adjusts
 	// automatically after a few blocks, so the seed only affects the very first sweep interval.
 	res.avgBlockTimeMs.Store(12_000)
+
+	// Construct pool-local handlers with the injected CodeReader so that static
+	// bytecode validation runs at pool admission for AA and Frame transactions.
+	res.aaHandler = txtype.NewAAHandler(options.codeReader)
+	res.frameHandler = txtype.NewFrameHandler(options.codeReader)
 
 	res.shanghaiTime = chainConfig.ShanghaiTime
 	if chainConfig.Bor != nil {
@@ -912,8 +918,9 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 	isPrague := p.isPrague() || p.isBhilai()
 	isEIP7954 := p.isAmsterdam()
 
-	// Handler dispatch: check fork activation and type-specific rules.
-	handler, ok := txtype.Global.Get(txn.TxType())
+	// Handler dispatch: returns pool-local handler (with CodeReader) for AA and
+	// Frame types; falls back to txtype.Global for all other types.
+	handler, ok := p.handlerFor(txn.TxType())
 	if !ok {
 		return txpoolcfg.TypeNotActivated
 	}
@@ -931,20 +938,9 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		}
 	}
 
-	// AA: ERC-7562 opcode restriction check via ethBackend.
-	// Phase 2 (Validation independence) will move this into handler.ValidateTx.
-	if txn.TxType() == types.AccountAbstractionTxType {
-		res, err := p.ethBackend.AAValidation(context.Background(), &remoteproto.AAValidationRequest{Tx: txn.ToProtoAccountAbstractionTxn()}) // enforces ERC-7562 rules
-		if err != nil {
-			return txpoolcfg.InvalidAA
-		}
-		if !res.Valid {
-			return txpoolcfg.InvalidAA
-		}
-	}
-
-	// Type-specific validation (blob hash count, etc).
-	// AA: handled above. SetCode auth count and blob bundle/KZG: see below.
+	// Type-specific validation. For AA this includes static ERC-7562 bytecode
+	// analysis via the pool-local AAHandler (Phase 2). For Frame transactions
+	// this includes EIP-8141 VERIFY frame checks via FrameHandler.
 	if reason := handler.ValidateTx(txn.Txn, isLocal, &p.cfg); reason != txpoolcfg.NotSet {
 		return reason
 	}
@@ -1246,6 +1242,20 @@ func (p *TxPool) forkState() txtype.ForkState {
 		IsAmsterdam:  p.isAmsterdam(),
 		AllowAA:      p.cfg.AllowAA,
 		AllowFrameTx: p.cfg.AllowFrameTx,
+	}
+}
+
+// handlerFor returns the TypeHandler for the given transaction type byte.
+// For AA and Frame types it returns the pool-local handler (which has a
+// CodeReader injected); for all other types it falls back to txtype.Global.
+func (p *TxPool) handlerFor(txType byte) (txtype.TypeHandler, bool) {
+	switch txType {
+	case types.AccountAbstractionTxType:
+		return p.aaHandler, true
+	case types.FrameTxType:
+		return p.frameHandler, true
+	default:
+		return txtype.Global.Get(txType)
 	}
 }
 

@@ -19,6 +19,7 @@ package txtype
 import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
+	"github.com/erigontech/erigon/txnprovider/txtype/validate"
 )
 
 // FrameHandler handles EIP-8141 frame transactions (type 6).
@@ -28,27 +29,61 @@ import (
 //   - SENDER frame: determines the effective transaction sender
 //   - DEFAULT frame: the actual user operation
 //
-// NOTE: EIP-8141 is still in draft status. This handler provides the registry
-// registration and fork-gating scaffolding. Full validation, parsing, and
-// execution will be completed when the spec is finalized (Phase 5 completion).
-type FrameHandler struct{ DefaultHandler }
+// Construct with NewFrameHandler to enable bytecode validation.  The zero value
+// (FrameHandler{}) has a nil reader and skips validation — safe for contexts
+// without state access (tests, the global registry).
+//
+// NOTE: EIP-8141 is still in draft status. Rule sets and frame semantics will
+// be updated as the spec evolves.
+type FrameHandler struct {
+	DefaultHandler
+	reader validate.CodeReader
+}
+
+// NewFrameHandler creates a FrameHandler with the given CodeReader for static
+// EIP-8141 bytecode validation of VERIFY frames at pool admission.
+func NewFrameHandler(reader validate.CodeReader) FrameHandler {
+	return FrameHandler{reader: reader}
+}
 
 func (FrameHandler) TypeByte() byte { return types.FrameTxType }
 func (FrameHandler) Name() string   { return "frame" }
 
 // ForkRequired returns true only when frame transactions are explicitly enabled.
-// Frame transactions are gated by the AllowFrameTx flag (set when the EIP-8141
-// hardfork is active) rather than a named fork, since the opcode number and
-// activation block are not yet assigned.
 func (FrameHandler) ForkRequired(forks ForkState) bool { return forks.AllowFrameTx }
 
-// CanCreate returns false — frame transactions cannot deploy contracts.
-// (Contract deployment happens implicitly via SENDER frame logic.)
+// CanCreate returns false — frame transactions cannot deploy contracts directly.
 func (FrameHandler) CanCreate() bool { return false }
 
-// ValidateTx is a stub — full EIP-8141 frame sequence validation (well-formedness,
-// VERIFY/SENDER/DEFAULT ordering, opcode restrictions) will be added when the
-// spec is finalized.
-func (FrameHandler) ValidateTx(_ types.Transaction, _ bool, _ *txpoolcfg.Config) txpoolcfg.DiscardReason {
+// ValidateTx applies static EIP-8141 §4.1 bytecode rules to every VERIFY frame.
+//
+// VERIFY frames must be read-only (no SSTORE) and must not use banned
+// environment opcodes (inherited from BaseRules).  SENDER and DEFAULT frames
+// execute under normal EVM rules and are not checked here.
+//
+// If no CodeReader was provided (nil reader), or if a code read fails,
+// validation is skipped (permissive — EIP-8141 is still a draft spec).
+func (h FrameHandler) ValidateTx(tx types.Transaction, _ bool, _ *txpoolcfg.Config) txpoolcfg.DiscardReason {
+	if h.reader == nil {
+		return txpoolcfg.NotSet
+	}
+	frameTx, ok := tx.(*types.FrameTransaction)
+	if !ok {
+		return txpoolcfg.NotSet
+	}
+	for _, frame := range frameTx.Frames {
+		if frame.Kind != types.FrameKindVerify {
+			continue
+		}
+		code, err := h.reader.Code(frame.To)
+		if err != nil {
+			// Permissive on read error: spec is still a draft and the contract
+			// may legitimately not exist yet (SENDER frame deploys it).
+			continue
+		}
+		if v := validate.EIP8141VerifyRules.Validate(code); v != nil {
+			return txpoolcfg.InvalidAA // reuse until FrameTx has its own discard reason
+		}
+	}
 	return txpoolcfg.NotSet
 }
