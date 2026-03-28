@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
-	"github.com/erigontech/erigon/execution/protocol/aa"
 	"github.com/erigontech/erigon/execution/protocol/frames"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
@@ -91,17 +90,11 @@ type Task interface {
 	isNil() bool
 }
 
-type AAValidationResult struct {
-	PaymasterContext []byte
-	GasUsed          uint64
-}
-
 // TxResult is the ouput of the task execute process
 type TxResult struct {
 	Task
-	ExecutionResult   evmtypes.ExecutionResult
-	ValidationResults []AAValidationResult
-	Err               error
+	ExecutionResult evmtypes.ExecutionResult
+	Err             error
 	Coinbase          accounts.Address
 	TxIn              state.ReadSet
 	TxOut             state.VersionedWrites
@@ -228,9 +221,6 @@ type TxTask struct {
 	Engine                rules.Engine
 	Logger                log.Logger
 	Trace                 bool
-	AAValidationBatchSize uint64 // number of consecutive RIP-7560 transactions, should be 0 for single transactions and transactions that are not first in the transaction order
-	InBatch               bool   // set to true for consecutive RIP-7560 transactions after the first one (first one is false)
-
 	gasPool      *protocol.GasPool
 	sender       accounts.Address
 	message      *types.Message
@@ -507,21 +497,6 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			result.TraceTos[accounts.InternAddress(uncle.Coinbase)] = struct{}{}
 		}
 	default:
-		if txTask.Tx().Type() == types.AccountAbstractionTxType {
-			if !chainConfig.AllowAA {
-				result.Err = errors.New("account abstraction transactions are not allowed")
-				return &result
-			}
-			aaTxn, ok := txTask.Tx().(*types.AccountAbstractionTransaction)
-			if !ok {
-				result.Err = fmt.Errorf("invalid transaction type, expected AccountAbstractionTx, got %T", txTask.Tx)
-				return &result
-			}
-
-			result = *txTask.executeAA(aaTxn, evm, txTask.GasPool(), ibs, chainConfig)
-			break
-		}
-
 		if txTask.Tx().Type() == types.FrameTxType {
 			if !chainConfig.AllowFrameTx {
 				result.Err = errors.New("frame transactions are not allowed")
@@ -602,80 +577,6 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 	return &result
 }
 
-func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
-	evm *vm.EVM,
-	gasPool *protocol.GasPool,
-	ibs *state.IntraBlockState,
-	chainConfig *chain.Config) *TxResult {
-	var result TxResult
-
-	if !txTask.InBatch {
-		// this is the first transaction in an AA transaction batch, run all validation frames, then execute execution frames in its own txtask
-		startIdx := uint64(txTask.TxIndex)
-		endIdx := startIdx + txTask.AAValidationBatchSize
-
-		validationResults := make([]AAValidationResult, txTask.AAValidationBatchSize+1)
-		log.Info("🕵️‍♂️[aa] found AA bundle", "startIdx", startIdx, "endIdx", endIdx)
-
-		var outerErr error
-		for i := startIdx; i <= endIdx; i++ {
-			// check if next n transactions are AA transactions and run validation
-			if txTask.Txs[i].Type() == types.AccountAbstractionTxType {
-				aaTxn, ok := txTask.Txs[i].(*types.AccountAbstractionTransaction)
-				if !ok {
-					outerErr = fmt.Errorf("invalid transaction type, expected AccountAbstractionTx, got %T", txTask.Tx)
-					break
-				}
-
-				paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, ibs, gasPool, txTask.Header, evm, chainConfig)
-				if err != nil {
-					outerErr = err
-					break
-				}
-
-				validationResults[i-startIdx] = AAValidationResult{
-					PaymasterContext: paymasterContext,
-					GasUsed:          validationGasUsed,
-				}
-			} else {
-				outerErr = fmt.Errorf("invalid txcount, expected txn %d to be type %d", i, types.AccountAbstractionTxType)
-				break
-			}
-		}
-
-		if outerErr != nil {
-			result.Err = outerErr
-			return &result
-		}
-		log.Info("✅[aa] validated AA bundle", "len", startIdx-endIdx)
-
-		result.ValidationResults = validationResults
-	}
-
-	if len(result.ValidationResults) == 0 {
-		result.Err = fmt.Errorf("found RIP-7560 but no remaining validation results, txIndex %d", txTask.TxIndex)
-	}
-
-	aaTxn = txTask.Tx().(*types.AccountAbstractionTransaction) // type cast checked earlier
-	validationRes := result.ValidationResults[0]
-	result.ValidationResults = result.ValidationResults[1:]
-
-	status, gasUsed, err := aa.ExecuteAATransaction(aaTxn, validationRes.PaymasterContext, validationRes.GasUsed, gasPool, evm, txTask.Header, ibs)
-	if err != nil {
-		result.Err = err
-		return &result
-	}
-
-	result.ExecutionResult.ReceiptGasUsed = gasUsed
-	result.ExecutionResult.BlockRegularGasUsed = gasUsed
-	// Update the state with pending changes
-	ibs.SoftFinalise()
-	result.Logs = ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())
-
-	log.Info("🚀[aa] executed AA bundle transaction", "txIndex", txTask.TxIndex, "status", status)
-
-	return &result
-}
 
 func (txTask *TxTask) executeFrame(
 	frameTxn *types.FrameTransaction,

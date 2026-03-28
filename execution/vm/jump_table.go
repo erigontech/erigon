@@ -96,10 +96,9 @@ func validateAndFillMaxStack(jt *JumpTable) {
 
 func newAmsterdamInstructionSet() JumpTable {
 	instructionSet := newOsakaInstructionSet()
-	enable8024(&instructionSet)    // EIP-8024 (DUPN, SWAPN, EXCHANGE)
-	enable7843(&instructionSet)    // EIP-7843 (SLOTNUM)
-	enable8037(&instructionSet)    // EIP-8037 (State Creation Gas Cost Increase)
-	enableFrameTx(&instructionSet) // EIP-8141 draft: APPROVE opcode for VERIFY frames
+	enable8024(&instructionSet) // EIP-8024 (DUPN, SWAPN, EXCHANGE)
+	enable7843(&instructionSet) // EIP-7843 (SLOTNUM)
+	enable8037(&instructionSet) // EIP-8037 (State Creation Gas Cost Increase)
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
 }

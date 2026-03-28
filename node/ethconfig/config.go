@@ -257,9 +257,6 @@ type Config struct {
 	PolygonPosSingleSlotFinality        bool
 	PolygonPosSingleSlotFinalityBlockAt uint64
 
-	// Account Abstraction
-	AllowAA bool
-
 	// fork choice update timeout
 	FcuTimeout          time.Duration
 	FcuBackgroundPrune  bool

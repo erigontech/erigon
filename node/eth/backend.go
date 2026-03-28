@@ -377,7 +377,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}); err != nil {
 		panic(err)
 	}
-	chainConfig.AllowAA = config.AllowAA
 	backend.chainConfig = chainConfig
 	backend.genesisBlock = genesis
 	backend.genesisHash = genesis.Hash()
