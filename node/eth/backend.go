@@ -89,9 +89,9 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node"
-	downloadercomp "github.com/erigontech/erigon/node/components/downloader"
 	txpoolcomp "github.com/erigontech/erigon/node/components/txpool"
 	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/noderegistry"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/ethstats"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
@@ -190,12 +190,10 @@ type Ethereum struct {
 
 	waitForStageLoopStop chan struct{}
 
-	txPoolProvider            *txpoolcomp.Provider
-	shutterProvider           *txpoolcomp.ShutterProvider
+	components                *noderegistry.Registry
 	txPoolGrpcServer          txpoolproto.TxpoolServer
 	txPoolRpcClient           txpoolproto.TxpoolClient
 	blockBuilderNotifyNewTxns chan struct{}
-	downloaderProvider        *downloadercomp.Provider
 
 	blockSnapshots *freezeblocks.RoSnapshots
 	blockReader    services.FullBlockReader
@@ -337,6 +335,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		miningSealingQuit:         make(chan struct{}),
 		minedBlocks:               make(chan *types.Block, 1),
 		minedBlockObservers:       event.NewObservers[*types.Block](),
+		components:                noderegistry.New(),
 		logger:                    logger,
 		stopNode: func() error {
 			return stack.Close()
@@ -385,8 +384,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	setDefaultMinerGasLimit(config, chainConfig)
 
-	backend.txPoolProvider = &txpoolcomp.Provider{}
-	backend.txPoolProvider.Configure(config.TxPool, chainConfig, logger)
+	backend.components.TxPool.Configure(config.TxPool, chainConfig, logger)
 
 	logger.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
 	if dbg.OnlyCreateDB {
@@ -406,12 +404,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.chainDB = temporalDb
 
 	// Initialize the downloader component (local in-process or remote via gRPC).
-	backend.downloaderProvider = &downloadercomp.Provider{}
-	backend.downloaderProvider.Configure(config.Downloader, config.Snapshot, config.Dirs, logger, stack.Config().DebugMux)
-	if err := backend.downloaderProvider.Initialize(ctx); err != nil {
+	backend.components.Downloader.Configure(config.Downloader, config.Snapshot, config.Dirs, logger, stack.Config().DebugMux)
+	if err := backend.components.Downloader.Initialize(ctx); err != nil {
 		return nil, err
 	}
-	backend.downloaderClient = backend.downloaderProvider.Client
+	backend.downloaderClient = backend.components.Downloader.Client
 
 	// Register file-change callbacks so completed snapshots are seeded and
 	// deleted snapshots are removed from the swarm. These stay here because
@@ -738,7 +735,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		default:
 		}
 	}
-	if err = backend.txPoolProvider.Initialize(ctx, txpoolcomp.Deps{
+	if err = backend.components.TxPool.Initialize(ctx, txpoolcomp.Deps{
 		ChainDB:            backend.chainDB,
 		Sentries:           backend.sentriesClient.Sentries(),
 		StateChangesClient: backend.stateDiffClient,
@@ -747,11 +744,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}); err != nil {
 		return nil, err
 	}
-	backend.txPoolGrpcServer = backend.txPoolProvider.GrpcServer
+	backend.txPoolGrpcServer = backend.components.TxPool.GrpcServer
 
 	var txnProvider txnprovider.TxnProvider
-	if backend.txPoolProvider.IsEnabled() {
-		txnProvider = backend.txPoolProvider.Pool
+	if backend.components.TxPool.IsEnabled() {
+		txnProvider = backend.components.TxPool.Pool
 	}
 
 	execmoduleCache := &execmodule.Cache{}
@@ -827,9 +824,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	if config.Shutter.Enabled && config.TxPool.Disable {
 		panic("can't enable shutter pool when devp2p txpool is disabled")
 	}
-	backend.shutterProvider = &txpoolcomp.ShutterProvider{}
-	backend.shutterProvider.Configure(config.Shutter, logger)
-	if err = backend.shutterProvider.Initialize(ctx, txpoolcomp.ShutterDeps{
+	backend.components.Shutter.Configure(config.Shutter, logger)
+	if err = backend.components.Shutter.Initialize(ctx, txpoolcomp.ShutterDeps{
 		BaseTxnProvider:    txnProvider,
 		ContractBackend:    contracts.NewDirectBackend(ethApi),
 		StateChangesClient: backend.stateDiffClient,
@@ -844,7 +840,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}); err != nil {
 		return nil, err
 	}
-	txnProvider = backend.shutterProvider.TxnProvider
+	txnProvider = backend.components.Shutter.TxnProvider
 
 	blkBuilder := builder.NewBuilder(
 		backend.sentryCtx,
@@ -950,9 +946,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	// snapshots not in that set could cause issues. That's an unsolved issue and probably requires
 	// always resetting before resuming/starting a sync.
 	var afterSnapshotDownload func(ctx context.Context) error
-	if backend.downloaderProvider != nil && backend.downloaderProvider.Downloader != nil {
+	if backend.components.Downloader.Downloader != nil {
 		afterSnapshotDownload = func(ctx context.Context) (err error) {
-			incomplete, err := backend.downloaderProvider.Downloader.AddTorrentsFromDisk(ctx)
+			incomplete, err := backend.components.Downloader.Downloader.AddTorrentsFromDisk(ctx)
 			if err != nil {
 				err = fmt.Errorf("adding torrents from disk: %w", err)
 				return
@@ -1445,8 +1441,7 @@ func (s *Ethereum) Start() error {
 	// 1) Hive tests requires us to do so and starting it from eth_sendRawTransaction is not viable as we have not enough data
 	// to initialize it properly.
 	// 2) we cannot propose for block 1 regardless.
-	s.txPoolProvider.Start(s.sentryCtx, &s.bgComponentsEg)
-	s.shutterProvider.Start(s.sentryCtx, &s.bgComponentsEg)
+	s.components.Start(s.sentryCtx, &s.bgComponentsEg)
 
 	return nil
 }
@@ -1459,9 +1454,7 @@ func (s *Ethereum) Stop() error {
 	if s.unsubscribeEthstat != nil {
 		s.unsubscribeEthstat()
 	}
-	if s.downloaderProvider != nil {
-		s.downloaderProvider.Close()
-	}
+	s.components.Close()
 	if s.privateAPI != nil {
 		shutdownDone := make(chan bool)
 		go func() {
