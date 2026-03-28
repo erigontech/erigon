@@ -131,21 +131,29 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 	logger.Debug("[engine-api-tester] selected ports", "sentry", sentryPort, "engineApi", engineApiPort, "jsonRpc", jsonRpcPort)
 
 	httpConfig := httpcfg.HttpCfg{
-		Enabled:                  true,
-		HttpServerEnabled:        true,
-		WebsocketEnabled:         true,
-		HttpListenAddress:        "127.0.0.1",
-		HttpPort:                 jsonRpcPort,
-		API:                      []string{"eth"},
-		AuthRpcHTTPListenAddress: "127.0.0.1",
-		AuthRpcPort:              engineApiPort,
-		JWTSecretPath:            path.Join(args.DataDir, "jwt.hex"),
-		ReturnDataLimit:          100_000,
-		EvmCallTimeout:           rpccfg.DefaultEvmCallTimeout,
-		AuthRpcTimeouts:          rpccfg.DefaultHTTPTimeouts,
-		HTTPTimeouts:             rpccfg.DefaultHTTPTimeouts,
-		RpcTxSyncDefaultTimeout:  rpccfg.DefaultRpcTxSyncDefaultTimeout,
-		RpcTxSyncMaxTimeout:      rpccfg.DefaultRpcTxSyncMaxTimeout,
+		Enabled: true,
+		SharedApiConfig: httpcfg.SharedApiConfig{
+			API:                     []string{"eth"},
+			ReturnDataLimit:         100_000,
+			EvmCallTimeout:          rpccfg.DefaultEvmCallTimeout,
+			RpcTxSyncDefaultTimeout: rpccfg.DefaultRpcTxSyncDefaultTimeout,
+			RpcTxSyncMaxTimeout:     rpccfg.DefaultRpcTxSyncMaxTimeout,
+		},
+		HttpServerConfig: httpcfg.HttpServerConfig{
+			HttpServerEnabled: true,
+			HttpListenAddress: "127.0.0.1",
+			HttpPort:          jsonRpcPort,
+			HTTPTimeouts:      rpccfg.DefaultHTTPTimeouts,
+		},
+		WsConfig: httpcfg.WsConfig{
+			WebsocketEnabled: true,
+		},
+		EngineApiConfig: httpcfg.EngineApiConfig{
+			AuthRpcHTTPListenAddress: "127.0.0.1",
+			AuthRpcPort:              engineApiPort,
+			JWTSecretPath:            path.Join(args.DataDir, "jwt.hex"),
+			AuthRpcTimeouts:          rpccfg.DefaultHTTPTimeouts,
+		},
 	}
 
 	nodeKeyConfig := p2p.NodeKeyConfig{}
@@ -206,7 +214,7 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 	chainDB.Close()
 
 	// note we need to create jwt secret before calling ethBackend.Init to avoid race conditions
-	jwtSecret, err := cli.ObtainJWTSecret(&httpConfig, logger)
+	jwtSecret, err := cli.ObtainJWTSecret(&httpConfig.EngineApiConfig, logger)
 	require.NoError(t, err)
 	ethBackend, err := eth.New(ctx, ethNode, &ethConfig, logger, nil)
 	require.NoError(t, err)

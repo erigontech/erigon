@@ -43,8 +43,8 @@ This is specially useful on devnets where there are network constraints (e.g. fe
 		dirs := datadir.New(datadirCli)
 		jwt := filepath.Join(dirs.DataDir, "jwt.hex")
 
-		jwtConfig := &httpcfg.HttpCfg{JWTSecretPath: jwt}
-		jwtSecret, err := cli.ObtainJWTSecret(jwtConfig, logger)
+		jwtEngineConfig := &httpcfg.EngineApiConfig{JWTSecretPath: jwt}
+		jwtSecret, err := cli.ObtainJWTSecret(jwtEngineConfig, logger)
 		if err != nil {
 			logger.Error("failed while reading jwt secret", "err", err)
 			panic(err)

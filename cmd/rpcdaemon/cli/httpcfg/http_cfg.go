@@ -26,93 +26,111 @@ import (
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
-type HttpCfg struct {
-	Enabled bool
+// SharedApiConfig holds all fields consumed when constructing JSON-RPC API
+// implementation objects. These are API-layer concerns, not transport concerns.
+type SharedApiConfig struct {
+	API                               []string
+	Gascap                            uint64
+	Feecap                            float64
+	BlockRangeLimit                   int
+	GetLogsMaxResults                 int
+	MaxTraces                         uint64
+	ReturnDataLimit                   int
+	AllowUnprotectedTxs               bool
+	MaxGetProofRewindBlockCount       int
+	WebsocketSubscribeLogsChannelSize int
+	RpcTxSyncDefaultTimeout           time.Duration
+	RpcTxSyncMaxTimeout               time.Duration
+	OtsMaxPageSize                    uint64
+	WithDatadir                       bool
+	DataDir                           string
+	Dirs                              datadir.Dirs
+	StateCache                        kvcache.CoherentConfig
+	Snap                              ethconfig.BlocksFreezing
+	Sync                              ethconfig.Sync
+	DBReadConcurrency                 int
+	RpcFiltersConfig                  rpchelper.FiltersConfig
+	GraphQLEnabled                    bool
+	GethCompatibility                 bool
+	TraceCompatibility                bool
+	EvmCallTimeout                    time.Duration
+	OverlayGetLogsTimeout             time.Duration
+	OverlayReplayBlockTimeout         time.Duration
+	RpcAllowListFilePath              string
+	RpcBatchConcurrency               uint
+	RpcStreamingDisable               bool
+	BatchLimit                        int
+	TraceRequests                     bool
+	DebugSingleRequest                bool
+	RPCSlowLogThreshold               time.Duration
+	TestingEnabled                    bool
+	LogDirVerbosity                   string
+	LogDirPath                        string
+	TxPoolApiAddr                     string
+	PrivateApiAddr                    string // outbound dial address for remote services
+}
 
-	GraphQLEnabled           bool
-	WithDatadir              bool // Erigon's database can be read by separated processes on same machine - in read-only mode - with full support of transactions. It will share same "OS PageCache" with Erigon process.
-	DataDir                  string
-	Dirs                     datadir.Dirs
-	AuthRpcHTTPListenAddress string
-	TLSCertfile              string
-	TLSCACert                string
-	TLSKeyFile               string
-
+// HttpServerConfig holds HTTP and HTTPS transport configuration.
+type HttpServerConfig struct {
 	HttpServerEnabled  bool
 	HttpURL            string
 	HttpListenAddress  string
 	HttpPort           int
 	HttpCORSDomain     []string
 	HttpVirtualHost    []string
-	AuthRpcVirtualHost []string
 	HttpCompression    bool
-
+	HTTPTimeouts       rpccfg.HTTPTimeouts
 	HttpsServerEnabled bool
 	HttpsURL           string
 	HttpsListenAddress string
 	HttpsPort          int
 	HttpsCertfile      string
 	HttpsKeyFile       string
+	TLSCertfile        string
+	TLSCACert          string
+	TLSKeyFile         string
+}
 
-	AuthRpcPort    int
-	PrivateApiAddr string
+// WsConfig holds WebSocket transport configuration.
+type WsConfig struct {
+	WebsocketEnabled     bool
+	WebsocketPort        int
+	WebsocketCompression bool
+}
 
-	API                               []string
-	Gascap                            uint64
-	BlockRangeLimit                   int
-	GetLogsMaxResults                 int
-	Feecap                            float64
-	MaxTraces                         uint64
-	WebsocketPort                     int
-	WebsocketEnabled                  bool
-	WebsocketCompression              bool
-	WebsocketSubscribeLogsChannelSize int
-	RpcAllowListFilePath              string
-	RpcBatchConcurrency               uint
-	RpcStreamingDisable               bool
-	RpcFiltersConfig                  rpchelper.FiltersConfig
-	DBReadConcurrency                 int
-	TraceCompatibility                bool // Bug for bug compatibility for trace_ routines with OpenEthereum
-	GethCompatibility                 bool // Geth-compatible storage iteration order for debug_storageRangeAt
-	TxPoolApiAddr                     string
-	StateCache                        kvcache.CoherentConfig
-	Snap                              ethconfig.BlocksFreezing
-	Sync                              ethconfig.Sync
+// EngineApiConfig holds Engine/Auth RPC configuration.
+type EngineApiConfig struct {
+	AuthRpcHTTPListenAddress string
+	AuthRpcPort              int
+	AuthRpcVirtualHost       []string
+	AuthRpcTimeouts          rpccfg.HTTPTimeouts
+	JWTSecretPath            string
+}
 
-	// GRPC server
+// GrpcConfig holds private gRPC server configuration.
+type GrpcConfig struct {
 	GRPCServerEnabled      bool
 	GRPCListenAddress      string
 	GRPCPort               int
 	GRPCHealthCheckEnabled bool
+}
 
-	// Socket Server
+// SocketConfig holds Unix socket server configuration.
+type SocketConfig struct {
 	SocketServerEnabled bool
 	SocketListenUrl     string
+}
 
-	JWTSecretPath             string // Engine API Authentication
-	TraceRequests             bool   // Print requests to logs at INFO level
-	DebugSingleRequest        bool   // Print single-request-related debugging info to logs at INFO level
-	HTTPTimeouts              rpccfg.HTTPTimeouts
-	AuthRpcTimeouts           rpccfg.HTTPTimeouts
-	EvmCallTimeout            time.Duration
-	OverlayGetLogsTimeout     time.Duration
-	OverlayReplayBlockTimeout time.Duration
-
-	LogDirVerbosity string
-	LogDirPath      string
-
-	BatchLimit                  int  // Maximum number of requests in a batch
-	ReturnDataLimit             int  // Maximum number of bytes returned from calls (like eth_call)
-	AllowUnprotectedTxs         bool // Whether to allow non EIP-155 protected transactions  txs over RPC
-	MaxGetProofRewindBlockCount int  //Max GetProof rewind block count
-	// Ots API
-	OtsMaxPageSize uint64
-
-	RPCSlowLogThreshold time.Duration
-
-	RpcTxSyncDefaultTimeout time.Duration // Default timeout for eth_sendRawTransactionSync
-	RpcTxSyncMaxTimeout     time.Duration // Maximum timeout for eth_sendRawTransactionSync
-
-	// TestingEnabled enables the testing_ RPC namespace. Should only be used in test/dev environments.
-	TestingEnabled bool
+// HttpCfg is the composite configuration for all RPC subsystems.
+// All existing field accesses (e.g. cfg.HttpPort, cfg.Gascap, cfg.AuthRpcPort)
+// continue to work via Go struct embedding — no changes to flag-binding code
+// or the many call sites that pass *HttpCfg are required.
+type HttpCfg struct {
+	Enabled bool
+	SharedApiConfig
+	HttpServerConfig
+	WsConfig
+	EngineApiConfig
+	GrpcConfig
+	SocketConfig
 }

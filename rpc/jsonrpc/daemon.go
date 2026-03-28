@@ -30,7 +30,7 @@ import (
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
-func NewEthApiConfig(cfg *httpcfg.HttpCfg) *EthApiConfig {
+func NewEthApiConfig(cfg *httpcfg.SharedApiConfig) *EthApiConfig {
 	return &EthApiConfig{
 		GasCap:                      cfg.Gascap,
 		FeeCap:                      cfg.Feecap,
@@ -46,7 +46,7 @@ func NewEthApiConfig(cfg *httpcfg.HttpCfg) *EthApiConfig {
 // APIList describes the list of available RPC apis
 func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient,
 	filters *rpchelper.Filters, stateCache kvcache.Cache,
-	blockReader services.FullBlockReader, cfg *httpcfg.HttpCfg, engine rules.EngineReader,
+	blockReader services.FullBlockReader, cfg *httpcfg.SharedApiConfig, engine rules.EngineReader,
 	logger log.Logger, bridgeReader bridgeReader, spanProducersReader spanProducersReader,
 ) (list []rpc.API) {
 	base := NewBaseApi(filters, stateCache, blockReader, cfg.WithDatadir, cfg.EvmCallTimeout, engine, cfg.Dirs, bridgeReader, cfg.BlockRangeLimit, cfg.GetLogsMaxResults)

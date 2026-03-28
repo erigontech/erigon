@@ -253,7 +253,7 @@ func (p *Provider) BuildApiList(deps BuildApiListDeps) {
 		p.RpcFilters,
 		p.RpcDaemonStateCache,
 		deps.BlockReader,
-		&p.HttpCfg,
+		&p.HttpCfg.SharedApiConfig,
 		deps.Engine,
 		deps.Logger,
 		deps.PolygonBridge,

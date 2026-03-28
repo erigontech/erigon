@@ -222,17 +222,18 @@ func runDatadirMode(ctx context.Context, logger log.Logger, dataDir, privAPI, lo
 	dirs := datadir.Open(dataDir)
 
 	cfg := &httpcfg.HttpCfg{
-		Sync:       ethconfig.Defaults.Sync,
-		Enabled:    true,
-		StateCache: kvcache.DefaultCoherentConfig,
-		API:        []string{"eth", "erigon", "ots"}, // APIs needed by MCP tools
-
-		DataDir:           dataDir,
-		Dirs:              dirs,
-		WithDatadir:       true,
-		PrivateApiAddr:    privAPI,
-		TxPoolApiAddr:     privAPI, // inherit from private API, same as rpcdaemon
-		DBReadConcurrency: min(max(10, runtime.GOMAXPROCS(-1)*64), 9_000),
+		Enabled: true,
+		SharedApiConfig: httpcfg.SharedApiConfig{
+			Sync:              ethconfig.Defaults.Sync,
+			StateCache:        kvcache.DefaultCoherentConfig,
+			API:               []string{"eth", "erigon", "ots"}, // APIs needed by MCP tools
+			DataDir:           dataDir,
+			Dirs:              dirs,
+			WithDatadir:       true,
+			PrivateApiAddr:    privAPI,
+			TxPoolApiAddr:     privAPI, // inherit from private API, same as rpcdaemon
+			DBReadConcurrency: min(max(10, runtime.GOMAXPROCS(-1)*64), 9_000),
+		},
 	}
 
 	db, backend, txPool, mining, stateCache, blockReader, engine, ff, bridgeReader, heimdallReader, err :=
@@ -252,7 +253,7 @@ func runDatadirMode(ctx context.Context, logger log.Logger, dataDir, privAPI, lo
 	}
 
 	// Create the typed JSON-RPC APIs — same path as rpcdaemon.
-	apiList := jsonrpc.APIList(db, backend, txPool, mining, ff, stateCache, blockReader, cfg, engine, logger, bridgeReader, heimdallReader)
+	apiList := jsonrpc.APIList(db, backend, txPool, mining, ff, stateCache, blockReader, &cfg.SharedApiConfig, engine, logger, bridgeReader, heimdallReader)
 
 	// Extract the EthAPI, ErigonAPI, OtterscanAPI from the API list.
 	var (
