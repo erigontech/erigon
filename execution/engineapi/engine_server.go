@@ -334,8 +334,8 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		if req.SlotNumber != nil {
 			slotNumber := uint64(*req.SlotNumber)
 			header.SlotNumber = &slotNumber
-			// TODO: No Slot Error Yet - Treate it as optional for hive testing
-			// qreturn nil, &rpc.InvalidParamsError{Message: "slotNumber missing"}
+		} else {
+			return nil, &rpc.InvalidParamsError{Message: "slotNumber missing"}
 		}
 	}
 
@@ -620,14 +620,6 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 		s.logger.Warn("Payload build failed (nil ExecutionPayload)", "payloadId", payloadId)
 		return nil, &engine_helpers.UnknownPayloadErr
 	}
-	var executionRequests []hexutil.Bytes
-	if version >= clparams.ElectraVersion {
-		executionRequests = make([]hexutil.Bytes, 0)
-		for _, r := range data.Requests.Requests {
-			executionRequests = append(executionRequests, r)
-		}
-	}
-
 	ts := data.ExecutionPayload.Timestamp
 	if (!s.config.IsCancun(ts) && version >= clparams.DenebVersion) ||
 		(s.config.IsCancun(ts) && version < clparams.DenebVersion) ||
@@ -638,6 +630,19 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 		(!s.config.IsAmsterdam(ts) && version >= clparams.GloasVersion) ||
 		(s.config.IsAmsterdam(ts) && version < clparams.GloasVersion) {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
+	}
+
+	var executionRequests []hexutil.Bytes
+	if version >= clparams.ElectraVersion {
+		if data.Requests == nil {
+			s.logger.Warn("Payload build failed (nil Requests)", "payloadId", payloadId)
+			return nil, errors.New("missing execution requests for Electra+ payload")
+		}
+
+		executionRequests = make([]hexutil.Bytes, 0, len(data.Requests.Requests))
+		for _, r := range data.Requests.Requests {
+			executionRequests = append(executionRequests, r)
+		}
 	}
 
 	payload := &engine_types.GetPayloadResponse{
@@ -733,6 +738,9 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	}
 	if version >= clparams.CapellaVersion && !s.isWithdrawalsPresenceValid(timestamp, payloadAttributes.Withdrawals) {
 		return nil, &engine_helpers.InvalidPayloadAttributesErr
+	}
+	if version >= clparams.GloasVersion && payloadAttributes.SlotNumber == nil {
+		return nil, &engine_helpers.InvalidPayloadAttributesErr // SlotNumber required for Glamsterdam (EIP-7843)
 	}
 
 	if !s.proposing {
