@@ -404,7 +404,7 @@ func writeGenesisBeaconBlock(ctx context.Context, cfg *Cfg) error {
 	// Set eth1_data from genesis state so body.HashSSZ() matches state.LatestBlockHeader().BodyRoot.
 	body.Eth1Data = cfg.state.Eth1Data()
 	if version >= clparams.AltairVersion {
-		body.SyncAggregate = cltypes.NewSyncAggregate()
+		body.SyncAggregate = cltypes.NewSyncAggregateWithSize(int(cfg.beaconCfg.SyncCommitteeSize) / 8)
 	}
 	if version >= clparams.BellatrixVersion {
 		execHeader := cfg.state.LatestExecutionPayloadHeader()
