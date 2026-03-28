@@ -2,11 +2,6 @@ name: Consensus spec
 on:
   workflow_dispatch:
   workflow_call:
-    inputs:
-      cache-warming-only:
-        description: "Compile test binaries only; skip test execution (for cache warming runs)"
-        type: boolean
-        default: false
 
 defaults:
   run:
@@ -30,7 +25,6 @@ jobs:
         id: erigon
 
       - name: test-integration-caplin
-        if: '!inputs.cache-warming-only'
         run: |
           cd cl/spectest
           if make tests; then
@@ -38,10 +32,6 @@ jobs:
           else
             echo "::warning::consensus spec test setup failed; skipping mainnet tests"
           fi
-
-      - name: Build test binaries (cache warming)
-        if: inputs.cache-warming-only
-        run: go test -run=^$ ./...
 
       - uses: ./.github/actions/cleanup-erigon
         if: always()
@@ -62,14 +52,9 @@ jobs:
         id: erigon
 
       - name: test-integration-caplin
-        if: '!inputs.cache-warming-only'
         run: |
           cd cl/spectest && make tests
           make mainnet 2>&1 | ../../tools/filter-test-output | tee run.log
-
-      - name: Build test binaries (cache warming)
-        if: inputs.cache-warming-only
-        run: go test -run=^$ ./...
 
       - uses: ./.github/actions/cleanup-erigon
         if: always()

@@ -3,11 +3,6 @@ name: All tests
 on:
   workflow_dispatch:
   workflow_call:
-    inputs:
-      cache-warming-only:
-        description: "Compile test binaries only; skip test execution (for cache warming runs)"
-        type: boolean
-        default: false
 
 defaults:
   run:
@@ -52,7 +47,6 @@ jobs:
           ramdisk: true
 
       - name: Run all tests on ${{ matrix.os }}
-        if: '!inputs.cache-warming-only'
         env:
           SKIP_FLAKY_TESTS: 'true'
           TEST_TIMEOUT: ${{ matrix.test_timeout || '20m' }}
@@ -68,10 +62,6 @@ jobs:
             time go clean -cache
             make test-all GO_FLAGS="--timeout $TEST_TIMEOUT"
           fi
-
-      - name: Build test binaries (cache warming)
-        if: inputs.cache-warming-only
-        run: go test -run=^$ ./...
 
       - uses: ./.github/actions/cleanup-erigon
         if: always()
