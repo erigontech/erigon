@@ -93,6 +93,8 @@ jobs:
           context: .
           load: true
           tags: test/erigon:current
+          build-args: |
+            BINARIES=erigon caplin
           cache-from: type=gha,scope=kurtosis-erigon-build
           cache-to: type=gha,mode=max,scope=kurtosis-erigon-build
 
