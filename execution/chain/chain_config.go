@@ -116,6 +116,10 @@ type Config struct {
 
 	// Account Abstraction
 	AllowAA bool
+
+	// Frame transactions (EIP-8141, draft). AllowFrameTx enables type-6
+	// transactions and the APPROVE opcode for VERIFY frames.
+	AllowFrameTx bool
 }
 
 var (

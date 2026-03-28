@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/aa"
+	"github.com/erigontech/erigon/execution/protocol/frames"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
@@ -521,6 +522,20 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			break
 		}
 
+		if txTask.Tx().Type() == types.FrameTxType {
+			if !chainConfig.AllowFrameTx {
+				result.Err = errors.New("frame transactions are not allowed")
+				return &result
+			}
+			frameTxn, ok := txTask.Tx().(*types.FrameTransaction)
+			if !ok {
+				result.Err = fmt.Errorf("invalid transaction type, expected FrameTransaction, got %T", txTask.Tx())
+				return &result
+			}
+			result = *txTask.executeFrame(frameTxn, evm, txTask.GasPool(), ibs)
+			break
+		}
+
 		result.Coinbase = evm.Context.Coinbase
 
 		// MA applytx
@@ -658,6 +673,30 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 	result.Logs = ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())
 
 	log.Info("🚀[aa] executed AA bundle transaction", "txIndex", txTask.TxIndex, "status", status)
+
+	return &result
+}
+
+func (txTask *TxTask) executeFrame(
+	frameTxn *types.FrameTransaction,
+	evm *vm.EVM,
+	gasPool *protocol.GasPool,
+	ibs *state.IntraBlockState,
+) *TxResult {
+	var result TxResult
+
+	gasUsed, err := frames.ExecuteFrameTransaction(frameTxn, gasPool, evm, ibs)
+	if err != nil {
+		result.Err = err
+		return &result
+	}
+
+	result.ExecutionResult.ReceiptGasUsed = gasUsed
+	result.ExecutionResult.BlockRegularGasUsed = gasUsed
+	ibs.SoftFinalise()
+	result.Logs = ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())
+
+	log.Debug("[frame] executed frame transaction", "txIndex", txTask.TxIndex, "gasUsed", gasUsed)
 
 	return &result
 }
