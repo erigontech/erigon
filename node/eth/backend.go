@@ -88,6 +88,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node"
+	blockbuildingcomp "github.com/erigontech/erigon/node/components/blockbuilding"
 	rpccomp "github.com/erigontech/erigon/node/components/rpc"
 	sentrycomp "github.com/erigontech/erigon/node/components/sentry"
 	txpoolcomp "github.com/erigontech/erigon/node/components/txpool"
@@ -160,7 +161,6 @@ type Ethereum struct {
 	mcpRPC              *mcp.ErigonMCPServer
 
 	miningSealingQuit   chan struct{}
-	pendingBlocks       chan *types.Block
 	minedBlocks         chan *types.Block
 	minedBlockObservers *event.Observers[*types.Block]
 
@@ -649,14 +649,14 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 	txnProvider = backend.shutterProvider.TxnProvider
 
-	blkBuilder := builder.NewBuilder(
-		backend.sentryCtx,
-		backend.chainDB,
-		&config.Builder,
-		backend.chainConfig,
-		backend.engine,
-		backend.blockReader,
-		stagedsync.StageExecuteBlocksCfg(
+	backend.components.BuildBlockBuilding(blockbuildingcomp.Deps{
+		Ctx:         backend.sentryCtx,
+		ChainDB:     backend.chainDB,
+		BuilderCfg:  &config.Builder,
+		ChainConfig: backend.chainConfig,
+		Engine:      backend.engine,
+		BlockReader: backend.blockReader,
+		ExecuteBlocksCfg: stagedsync.StageExecuteBlocksCfg(
 			backend.chainDB,
 			config.Prune,
 			config.BatchSize,
@@ -673,15 +673,13 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			config.Sync,
 			config.ExperimentalBAL,
 		),
-		backend.notifications.Events,
-		&vm.Config{},
-		tmpdir,
-		txnProvider,
-		backend.miningSealingQuit,
-		latestBlockBuiltStore,
-		logger,
-	)
-	backend.pendingBlocks = blkBuilder.PendingBlockCh()
+		NotificationsEvents:   backend.notifications.Events,
+		Tmpdir:                tmpdir,
+		TxnProvider:           txnProvider,
+		MiningSealingQuit:     backend.miningSealingQuit,
+		LatestBlockBuiltStore: latestBlockBuiltStore,
+		Logger:                logger,
+	})
 
 	blockRetire := freezeblocks.NewBlockRetire(1, dirs, blockReader, blockWriter, backend.chainDB, heimdallStore, bridgeStore, backend.chainConfig, config, backend.notifications.Events, segmentsBuildLimiter, logger)
 	var creds credentials.TransportCredentials
@@ -713,41 +711,13 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		currentBlock = genesis
 	}
 
-	go func() {
-		defer dbg.LogPanic()
-		for {
-			select {
-			case b := <-backend.minedBlocks:
-				const sentryMcDisableBlockDownload = true
-			if !sentryMcDisableBlockDownload {
-					// Add mined header and block body before broadcast. This is because the broadcast call
-					// will trigger the staged sync which will require headers and blocks to be available
-					// in their respective cache in the download stage. If not found, it would cause a
-					// liveness issue for the chain.
-					if err := backend.sentriesClient.Hd.AddMinedHeader(b.Header()); err != nil {
-						logger.Error("add mined block to header downloader", "err", err)
-					}
-					backend.sentriesClient.Bd.AddToPrefetch(b.Header(), b.RawBody())
-				}
-
-				backend.minedBlockObservers.Notify(b)
-
-				//p2p
-				//backend.sentriesClient.BroadcastNewBlock(context.Background(), b, b.Difficulty())
-				//rpcdaemon
-				if err := backend.miningRPC.BroadcastMinedBlock(b); err != nil {
-					logger.Error("txpool rpc mined block broadcast", "err", err)
-				}
-
-			case b := <-backend.pendingBlocks:
-				if err := backend.miningRPC.BroadcastPendingBlock(b); err != nil {
-					logger.Error("txpool rpc pending block broadcast", "err", err)
-				}
-			case <-backend.sentriesClient.Hd.QuitPoWMining:
-				return
-			}
-		}
-	}()
+	backend.components.BlockBuilding.Start(blockbuildingcomp.StartDeps{
+		MinedBlocks:         backend.minedBlocks,
+		MinedBlockObservers: backend.minedBlockObservers,
+		MiningRPC:           backend.miningRPC,
+		QuitPoWMining:       backend.sentriesClient.Hd.QuitPoWMining,
+		Logger:              logger,
+	})
 
 	// This adds completed snapshots on disk after sync, so that we don't unnecessarily report
 	// incomplete torrents. There's still the issue of having torrents not in the preverified set:
@@ -796,7 +766,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		pipelineExecutor,
 		currentBlockNumber,
 		chainConfig,
-		blkBuilder.Build,
+		backend.components.BlockBuilding.Builder.Build,
 		hook,
 		backend.notifications.Accumulator,
 		backend.notifications.RecentReceipts,
