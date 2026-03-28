@@ -754,7 +754,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		config.FcuBackgroundPrune,
 		config.FcuBackgroundCommit,
 		onlySnapDownloadOnStart,
-		backend.stopNode,
 	)
 	executionRpc := direct.NewExecutionClientDirect(backend.execModule)
 
@@ -1159,14 +1158,22 @@ func (s *Ethereum) Start() error {
 	if chainspec.IsChainPoS(s.chainConfig, currentTDProvider) {
 		diaglib.Send(diaglib.SyncStageList{StagesList: diaglib.InitStagesFromList(s.pipelineStagedSync.StagesIdsList())})
 		s.waitForStageLoopStop = nil // TODO: Ethereum.Stop should wait for execution_server shutdown
-		go s.execModule.Start(s.sentryCtx, hook)
+		go func() {
+			if err := s.execModule.Start(s.sentryCtx, hook); err != nil && !errors.Is(err, context.Canceled) {
+				s.logger.Error("execution server stopped with error — halting node", "err", err)
+				go func() {
+					if stopErr := s.stopNode(); stopErr != nil {
+						s.logger.Error("could not stop node", "err", stopErr)
+					}
+				}()
+			}
+		}()
 	} else if s.chainConfig.Bor != nil {
 		diaglib.Send(diaglib.SyncStageList{StagesList: diaglib.InitStagesFromList(s.stagedSync.StagesIdsList())})
 		s.waitForStageLoopStop = nil // Shutdown is handled by context
 		s.bgComponentsEg.Go(func() error {
 			defer s.logger.Info("[polygon.sync] exeuction server start goroutine completed")
-			s.execModule.Start(s.sentryCtx, hook)
-			return nil
+			return s.execModule.Start(s.sentryCtx, hook)
 		})
 		s.bgComponentsEg.Go(func() error {
 			defer s.logger.Info("[polygon.sync] goroutine terminated")

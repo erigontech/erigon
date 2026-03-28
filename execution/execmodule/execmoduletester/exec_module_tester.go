@@ -705,7 +705,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		cfg.FcuBackgroundPrune,
 		cfg.FcuBackgroundCommit,
 		onlySnapDownloadOnStart,
-		func() error { return nil },
 	)
 	mock.ExecModule.SetHook(hook)
 	mock.ForkValidator = mock.ExecModule.ForkValidator()
