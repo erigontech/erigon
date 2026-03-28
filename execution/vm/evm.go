@@ -108,6 +108,9 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state
 			blockCtx.BaseFee = uint256.Int{}
 		}
 	}
+	if chainConfig != nil && chainConfig.AllowFrameTx {
+		vmConfig.ExtraEips = append(vmConfig.ExtraEips, 8141)
+	}
 	evm := &EVM{
 		Context:         blockCtx,
 		TxContext:       txCtx,
@@ -136,6 +139,9 @@ func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtype
 		if txCtx.GasPrice.IsZero() {
 			blockCtx.BaseFee = uint256.Int{}
 		}
+	}
+	if evm.chainConfig != nil && evm.chainConfig.AllowFrameTx {
+		vmConfig.ExtraEips = append(vmConfig.ExtraEips, 8141)
 	}
 	evm.Context = blockCtx
 	evm.TxContext = txCtx

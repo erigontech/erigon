@@ -37,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
-	"github.com/erigontech/erigon/execution/protocol/aa"
 	"github.com/erigontech/erigon/execution/protocol/frames"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
@@ -207,21 +206,6 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 			ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 			txn := txTask.Tx()
 
-			if txTask.Tx().Type() == types.AccountAbstractionTxType {
-				if !cc.AllowAA {
-					return errors.New("account abstraction transactions are not allowed")
-				}
-
-				msg, err := txn.AsMessage(types.Signer{}, nil, nil)
-				if err != nil {
-					return err
-				}
-
-				rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, protocol.NewEVMTxContext(msg), ibs, *rw.vmCfg, rules)
-				result := rw.execAATxn(txTask, tracer)
-				return result.Err
-			}
-
 			if txTask.Tx().Type() == types.FrameTxType {
 				if !cc.AllowFrameTx {
 					return errors.New("frame transactions are not allowed")
@@ -268,78 +252,6 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 	}
 	rw.vmCfg.Tracer = nil
 	return &result
-}
-
-func (rw *HistoricalTraceWorker) execAATxn(txTask *TxTask, tracer *calltracer.CallTracer) *TxResult {
-	result := &TxResult{}
-
-	if !txTask.InBatch {
-		// this is the first transaction in an AA transaction batch, run all validation frames, then execute execution frames in its own txtask
-		startIdx := uint64(txTask.TxIndex)
-		endIdx := startIdx + txTask.AAValidationBatchSize
-
-		validationResults := make([]AAValidationResult, txTask.AAValidationBatchSize+1)
-		log.Info("🕵️‍♂️[aa] found AA bundle", "startIdx", startIdx, "endIdx", endIdx)
-
-		var outerErr error
-		for i := startIdx; i <= endIdx; i++ {
-			// check if next n transactions are AA transactions and run validation
-			if txTask.Txs[i].Type() == types.AccountAbstractionTxType {
-				aaTxn, ok := txTask.Txs[i].(*types.AccountAbstractionTransaction)
-				if !ok {
-					outerErr = fmt.Errorf("invalid transaction type, expected AccountAbstractionTx, got %T", txTask.Tx)
-					break
-				}
-
-				paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, rw.ibs, rw.taskGasPool, txTask.Header, rw.evm, rw.execArgs.ChainConfig)
-				if err != nil {
-					outerErr = err
-					break
-				}
-
-				validationResults[i-startIdx] = AAValidationResult{
-					PaymasterContext: paymasterContext,
-					GasUsed:          validationGasUsed,
-				}
-			} else {
-				outerErr = fmt.Errorf("invalid txcount, expected txn %d to be type %d", i, types.AccountAbstractionTxType)
-				break
-			}
-		}
-
-		if outerErr != nil {
-			result.Err = outerErr
-			return result
-		}
-		log.Info("✅[aa] validated AA bundle", "len", endIdx-startIdx+1)
-
-		result.ValidationResults = validationResults
-	}
-
-	if len(result.ValidationResults) == 0 {
-		result.Err = fmt.Errorf("found RIP-7560 but no remaining validation results, txIndex %d", txTask.TxIndex)
-	}
-
-	aaTxn := txTask.Tx().(*types.AccountAbstractionTransaction) // type cast checked earlier
-	validationRes := result.ValidationResults[0]
-	result.ValidationResults = result.ValidationResults[1:]
-
-	status, gasUsed, err := aa.ExecuteAATransaction(aaTxn, validationRes.PaymasterContext, validationRes.GasUsed, rw.taskGasPool, rw.evm, txTask.Header, rw.ibs)
-	if err != nil {
-		result.Err = err
-		return result
-	}
-
-	result.ExecutionResult.ReceiptGasUsed = gasUsed
-	result.ExecutionResult.BlockRegularGasUsed = gasUsed
-	// Update the state with pending changes
-	rw.ibs.SoftFinalise()
-	result.Logs = rw.ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())
-	result.TraceFroms = tracer.Froms()
-	result.TraceTos = tracer.Tos()
-
-	log.Info("🚀[aa] executed AA bundle transaction", "txIndex", txTask.TxIndex, "status", status)
-	return result
 }
 
 func (rw *HistoricalTraceWorker) execFrameTxn(txTask *TxTask, frameTxn *types.FrameTransaction, tracer *calltracer.CallTracer) *TxResult {

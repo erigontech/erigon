@@ -24,7 +24,6 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
-	"github.com/erigontech/erigon/execution/protocol/aa"
 	"github.com/erigontech/erigon/execution/protocol/frames"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
@@ -108,7 +107,7 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, 
 	e.ibs.SetTxContext(e.blockNum, txIndex)
 
 	msg, err := txn.AsMessage(*e.signer, e.header.BaseFee, e.rules)
-	if txn.Type() != types.AccountAbstractionTxType && err != nil {
+	if txn.Type() != types.FrameTxType && err != nil {
 		return err
 	}
 	msg.SetCheckNonce(!e.vmConfig.StatelessExec)
@@ -121,19 +120,7 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, 
 
 	gp := new(protocol.GasPool).AddGas(txn.GetGasLimit()).AddBlobGas(txn.GetBlobGas())
 
-	if txn.Type() == types.AccountAbstractionTxType {
-		aaTxn := txn.(*types.AccountAbstractionTransaction)
-		evm := vm.NewEVM(*e.blockCtx, txContext, e.ibs, e.chainConfig, *e.vmConfig)
-		paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, e.ibs, gp, e.header, evm, e.chainConfig)
-		if err != nil {
-			return err
-		}
-
-		_, _, err = aa.ExecuteAATransaction(aaTxn, paymasterContext, validationGasUsed, gp, evm, e.header, e.ibs)
-		if err != nil {
-			return err
-		}
-	} else if txn.Type() == types.FrameTxType {
+	if txn.Type() == types.FrameTxType {
 		frameTxn := txn.(*types.FrameTransaction)
 		evm := vm.NewEVM(*e.blockCtx, txContext, e.ibs, e.chainConfig, *e.vmConfig)
 		if _, err := frames.ExecuteFrameTransaction(frameTxn, gp, evm, e.ibs); err != nil {

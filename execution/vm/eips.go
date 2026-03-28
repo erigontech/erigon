@@ -31,6 +31,7 @@ import (
 )
 
 var activators = map[int]func(*JumpTable){
+	8141: enableFrameTx,
 	8024: enable8024,
 	7702: enable7702,
 	7516: enable7516,
@@ -80,8 +81,8 @@ func ActivateableEips() []string {
 // authorised.  At the EVM level the opcode is a pure no-op; the authorisation
 // check is performed by VerifyFrameTracer via the OnOpcode hook.
 //
-// NOTE: not in the activators map — this is feature-flag gated (AllowFrameTx),
-// not activated by an EIP number.
+// Activated via EIP number 8141 in ExtraEips, which is injected automatically
+// by NewEVM when chain.Config.AllowFrameTx is set.
 func enableFrameTx(jt *JumpTable) {
 	jt[APPROVE] = &operation{
 		execute:     opApprove,

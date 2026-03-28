@@ -114,9 +114,6 @@ type Config struct {
 	Bor     BorConfig       `json:"-"`
 	BorJSON json.RawMessage `json:"bor,omitempty"`
 
-	// Account Abstraction
-	AllowAA bool
-
 	// Frame transactions (EIP-8141, draft). AllowFrameTx enables type-6
 	// transactions and the APPROVE opcode for VERIFY frames.
 	AllowFrameTx bool

@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/protocol"
-	"github.com/erigontech/erigon/execution/protocol/aa"
 	"github.com/erigontech/erigon/execution/protocol/frames"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
@@ -252,35 +251,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		return nil, err
 	}
 
-	if txn.Type() == types.AccountAbstractionTxType {
-		genEnv, err = g.PrepareEnv(ctx, header, cfg, tx, index)
-		if err != nil {
-			return nil, err
-		}
-
-		aaTxn := txn.(*types.AccountAbstractionTransaction)
-		blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, accounts.NilAddress, cfg)
-		evm = vm.NewEVM(blockContext, evmtypes.TxContext{}, genEnv.ibs, cfg, vm.Config{})
-		paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, genEnv.ibs, genEnv.gp, header, evm, cfg)
-		if err != nil {
-			return nil, err
-		}
-
-		ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
-		defer cancel()
-		go func() {
-			<-ctx.Done()
-			evm.Cancel()
-		}()
-
-		status, gasUsed, err := aa.ExecuteAATransaction(aaTxn, paymasterContext, validationGasUsed, genEnv.gp, evm, header, genEnv.ibs)
-		if err != nil {
-			return nil, err
-		}
-
-		logs := genEnv.ibs.GetLogs(genEnv.ibs.TxnIndex(), txn.Hash(), header.Number.Uint64(), header.Hash())
-		receipt = aa.CreateAAReceipt(txn.Hash(), status, gasUsed, header.GasUsed, header.Number.Uint64(), uint64(genEnv.ibs.TxnIndex()), logs)
-	} else if txn.Type() == types.FrameTxType {
+	if txn.Type() == types.FrameTxType {
 		genEnv, err = g.PrepareEnv(ctx, header, cfg, tx, index)
 		if err != nil {
 			return nil, err
