@@ -1,0 +1,63 @@
+name: Cache Warming
+
+# Warms Go build and module caches on main, release, and performance branches
+# so that pull_request and merge_group runs start with a warm base-branch cache.
+#
+# Calls the same reusable sub-workflows that ci-gate uses. Because GitHub
+# Actions sets GITHUB_WORKFLOW_REF to the reusable workflow's own path,
+# the cache keys produced here are identical to those from ci-gate — allowing
+# PR and merge-queue runners to restore from this run.
+#
+# Each sub-workflow accepts cache-warming-only: true, which causes it to compile
+# test binaries without executing them. This keeps the run fast and avoids
+# flaky-test failures showing as red commits on main.
+
+on:
+  push:
+    branches:
+      - main
+      - 'release/**'
+      - performance
+      - performance-stable
+  workflow_dispatch:
+
+jobs:
+  tests:
+    uses: ./.github/workflows/test-all-erigon.yml
+    with:
+      cache-warming-only: true
+    secrets: inherit
+
+  race-tests:
+    uses: ./.github/workflows/test-all-erigon-race.yml
+    with:
+      cache-warming-only: true
+    secrets: inherit
+
+  caplin:
+    uses: ./.github/workflows/test-integration-caplin.yml
+    with:
+      cache-warming-only: true
+    secrets: inherit
+
+  bench:
+    uses: ./.github/workflows/test-bench.yml
+    with:
+      cache-warming-only: true
+    secrets: inherit
+
+  repro:
+    uses: ./.github/workflows/reproducible-build.yml
+    secrets: inherit
+
+  sonar:
+    uses: ./.github/workflows/sonar.yml
+    with:
+      cache-warming-only: true
+    secrets: inherit
+
+  kurtosis:
+    uses: ./.github/workflows/test-kurtosis-assertoor.yml
+    with:
+      cache-warming-only: true
+    secrets: inherit
