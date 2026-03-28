@@ -406,7 +406,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		return nil, err
 	}
 	backend.downloaderClient = backend.components.Downloader.Client
-	backend.components.Downloader.Start(ctx, backend.notifications.Events, logger)
 
 	// Register file-change callbacks so completed snapshots are seeded and
 	// deleted snapshots are removed from the swarm. These stay here because
@@ -439,6 +438,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	kvRPC := remotedbserver.NewKvServer(ctx, backend.chainDB, allSnapshots, allBorSnapshots, temporalDb.Debug(), logger)
 	backend.notifications = shards.NewNotifications(kvRPC)
 	backend.kvRPC = kvRPC
+	backend.components.Downloader.Start(ctx, backend.notifications.Events, logger)
 
 	// setup periodic logging and prometheus updates
 	go mem.LogMemStats(ctx, logger)
