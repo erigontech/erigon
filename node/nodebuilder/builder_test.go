@@ -30,6 +30,7 @@ func TestNewAllocatesAllProviders(t *testing.T) {
 	require.NotNil(t, b.Sentry, "Sentry provider must be allocated")
 	require.NotNil(t, b.Rpc, "Rpc provider must be allocated")
 	require.NotNil(t, b.BlockBuilding, "BlockBuilding provider must be allocated")
+	require.NotNil(t, b.Caplin, "Caplin provider must be allocated")
 }
 
 func TestCloseIsIdempotent(t *testing.T) {

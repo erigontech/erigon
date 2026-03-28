@@ -54,6 +54,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	blockbuildingcomp "github.com/erigontech/erigon/node/components/blockbuilding"
+	caplincomp "github.com/erigontech/erigon/node/components/caplin"
 	downloadercomp "github.com/erigontech/erigon/node/components/downloader"
 	rpccomp "github.com/erigontech/erigon/node/components/rpc"
 	sentrycomp "github.com/erigontech/erigon/node/components/sentry"
@@ -71,16 +72,17 @@ import (
 //   - Sentry         — P2P networking, sentry servers, execution P2P pipeline
 //   - Rpc            — embedded RPC services, JSON-RPC APIs, HTTP server
 //   - BlockBuilding  — block construction and mined/pending-block broadcast
+//   - Caplin         — embedded consensus layer (RunCaplinService)
 //
 // Not yet extracted (still inline in backend.go):
 //   - TxPool / Shutter — added by feat/txpool
 //   - ExecModule / StagedSync
-//   - Caplin (has its own internal stage machine)
 type Builder struct {
 	Downloader    *downloadercomp.Provider
 	Sentry        *sentrycomp.Provider
 	Rpc           *rpccomp.Provider
 	BlockBuilding *blockbuildingcomp.Provider
+	Caplin        *caplincomp.Provider
 }
 
 // New allocates a Builder with all providers pre-initialized.
@@ -90,6 +92,7 @@ func New() *Builder {
 		Sentry:        &sentrycomp.Provider{},
 		Rpc:           &rpccomp.Provider{},
 		BlockBuilding: &blockbuildingcomp.Provider{},
+		Caplin:        &caplincomp.Provider{},
 	}
 }
 
@@ -143,6 +146,13 @@ func (b *Builder) BuildRpc(
 // After this call, b.BlockBuilding.Builder and b.BlockBuilding.PendingBlocks are ready.
 func (b *Builder) BuildBlockBuilding(deps blockbuildingcomp.Deps) {
 	b.BlockBuilding.Initialize(deps)
+}
+
+// StartCaplin launches the embedded Caplin consensus layer in a background goroutine.
+// Must be called after the execution engine and TLS credentials are available.
+// Returns an error only when the EnableEngineAPI execution client cannot be created.
+func (b *Builder) StartCaplin(deps caplincomp.Deps) error {
+	return b.Caplin.Start(deps)
 }
 
 // ErrGroup is satisfied by errgroup.Group and similar constructs.

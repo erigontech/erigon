@@ -42,9 +42,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
 	executionclient "github.com/erigontech/erigon/cl/phase1/execution_client"
-	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
@@ -89,6 +87,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node"
 	blockbuildingcomp "github.com/erigontech/erigon/node/components/blockbuilding"
+	caplincomp "github.com/erigontech/erigon/node/components/caplin"
 	rpccomp "github.com/erigontech/erigon/node/components/rpc"
 	sentrycomp "github.com/erigontech/erigon/node/components/sentry"
 	txpoolcomp "github.com/erigontech/erigon/node/components/txpool"
@@ -813,28 +812,26 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.engineBackendRPC = engineBackendRPC
 	// If we choose not to run a consensus layer, run our embedded.
 	if config.InternalCL && (clparams.EmbeddedSupported(config.NetworkID) || config.CaplinConfig.IsDevnet()) {
-		config.CaplinConfig.NetworkId = clparams.NetworkType(config.NetworkID)
-		config.CaplinConfig.LoopBlockLimit = uint64(config.LoopBlockLimit)
-		if config.CaplinConfig.EnableEngineAPI {
-			jwtSecretHex, err := os.ReadFile(httpRpcCfg.JWTSecretPath)
-			if err != nil {
-				logger.Error("failed to read jwt secret", "err", err, "path", httpRpcCfg.JWTSecretPath)
-				return nil, err
-			}
-			jwtSecret := common.FromHex(strings.TrimSpace(string(jwtSecretHex)))
-			executionEngine, err = executionclient.NewExecutionClientRPC(jwtSecret, httpRpcCfg.AuthRpcHTTPListenAddress, httpRpcCfg.AuthRpcPort)
-			if err != nil {
-				logger.Error("failed to create execution client", "err", err)
-				return nil, err
-			}
+		if err := backend.components.StartCaplin(caplincomp.Deps{
+			Ctx:              ctx,
+			ExecutionEngine:  executionEngine,
+			CaplinConfig:     config.CaplinConfig,
+			NetworkID:        config.NetworkID,
+			LoopBlockLimit:   int(config.LoopBlockLimit),
+			Dirs:             dirs,
+			BlockReader:      blockReader,
+			ChainDB:          backend.chainDB,
+			DownloaderClient: backend.downloaderClient,
+			Creds:            creds,
+			SnBuildSema:      segmentsBuildLimiter,
+			JWTSecretPath:    httpRpcCfg.JWTSecretPath,
+			AuthRpcAddress:   httpRpcCfg.AuthRpcHTTPListenAddress,
+			AuthRpcPort:      httpRpcCfg.AuthRpcPort,
+			CtxCancel:        ctxCancel,
+			Logger:           logger,
+		}); err != nil {
+			return nil, err
 		}
-		go func() {
-			eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, backend.chainDB)
-			if err := caplin1.RunCaplinService(ctx, executionEngine, config.CaplinConfig, dirs, eth1Getter, backend.downloaderClient, creds, segmentsBuildLimiter); err != nil {
-				logger.Error("could not start caplin", "err", err)
-			}
-			ctxCancel()
-		}()
 	}
 
 	if chainConfig.Bor != nil {
