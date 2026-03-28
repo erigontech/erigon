@@ -56,6 +56,7 @@ import (
 	blockbuildingcomp "github.com/erigontech/erigon/node/components/blockbuilding"
 	caplincomp "github.com/erigontech/erigon/node/components/caplin"
 	downloadercomp "github.com/erigontech/erigon/node/components/downloader"
+	execcomp "github.com/erigontech/erigon/node/components/exec"
 	rpccomp "github.com/erigontech/erigon/node/components/rpc"
 	sentrycomp "github.com/erigontech/erigon/node/components/sentry"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -82,6 +83,7 @@ type Builder struct {
 	Sentry        *sentrycomp.Provider
 	Rpc           *rpccomp.Provider
 	BlockBuilding *blockbuildingcomp.Provider
+	Exec          *execcomp.Provider
 	Caplin        *caplincomp.Provider
 }
 
@@ -92,6 +94,7 @@ func New() *Builder {
 		Sentry:        &sentrycomp.Provider{},
 		Rpc:           &rpccomp.Provider{},
 		BlockBuilding: &blockbuildingcomp.Provider{},
+		Exec:          &execcomp.Provider{},
 		Caplin:        &caplincomp.Provider{},
 	}
 }
@@ -146,6 +149,14 @@ func (b *Builder) BuildRpc(
 // After this call, b.BlockBuilding.Builder and b.BlockBuilding.PendingBlocks are ready.
 func (b *Builder) BuildBlockBuilding(deps blockbuildingcomp.Deps) {
 	b.BlockBuilding.Initialize(deps)
+}
+
+// BuildExec initializes the execution pipeline component.
+// Must be called after Sentry, Rpc, BlockBuilding, and TxPool components.
+// After this call, b.Exec.ExecModule, ExecutionRpc, ExecutionEngine, PipelineSync,
+// and EngineServer are ready for consumers.
+func (b *Builder) BuildExec(deps execcomp.Deps) error {
+	return b.Exec.Initialize(deps)
 }
 
 // StartCaplin launches the embedded Caplin consensus layer in a background goroutine.

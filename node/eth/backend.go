@@ -42,7 +42,6 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/cl/clparams"
-	executionclient "github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
@@ -72,9 +71,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/engineapi"
-	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/execution/execmodule"
-	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	execp2p "github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
@@ -88,6 +85,7 @@ import (
 	"github.com/erigontech/erigon/node"
 	blockbuildingcomp "github.com/erigontech/erigon/node/components/blockbuilding"
 	caplincomp "github.com/erigontech/erigon/node/components/caplin"
+	execcomp "github.com/erigontech/erigon/node/components/exec"
 	rpccomp "github.com/erigontech/erigon/node/components/rpc"
 	sentrycomp "github.com/erigontech/erigon/node/components/sentry"
 	txpoolcomp "github.com/erigontech/erigon/node/components/txpool"
@@ -725,67 +723,32 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	backend.stagedSync = stagedsync.New(config.Sync, backend.syncStages, backend.syncUnwindOrder, backend.syncPruneOrder, logger, stages.ModeApplyingBlocks)
 
-	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, tracer)
-	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
-
-	validationNotifications := shards.NewNotifications(nil)
-	validationSync := stageloop.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentriesClient,
-		validationNotifications, blockReader, blockWriter, logger)
-	pipelineExecutor := execmodule.NewPipelineExecutor(backend.pipelineStagedSync, backend.chainDB, blockReader, chainConfig, backend.engine, validationSync, validationNotifications, logger)
-
-	// for polygon, we only need to download snapshots on start so that all driver components are correctly initialised before any block execution begins
-	onlySnapDownloadOnStart := chainConfig.Bor != nil
-	backend.execModule = execmodule.NewExecModule(
-		ctx,
-		blockReader,
-		backend.chainDB,
-		pipelineExecutor,
-		currentBlockNumber,
-		chainConfig,
-		backend.components.BlockBuilding.Builder.Build,
-		backend.notifications,
-		backend.notifications.Accumulator,
-		backend.notifications.RecentReceipts,
-		execmoduleCache,
-		backend.notifications.StateChangesConsumer,
-		logger,
-		backend.engine,
-		config.Sync,
-		config.FcuBackgroundPrune,
-		config.FcuBackgroundCommit,
-		onlySnapDownloadOnStart,
-	)
-	executionRpc := direct.NewExecutionClientDirect(backend.execModule)
-
-	var executionEngine executionclient.ExecutionEngine
-
-	executionEngine, err = executionclient.NewExecutionClientDirect(chainreader.NewChainReaderEth1(chainConfig, executionRpc, config.FcuTimeout), backend.txPoolRpcClient)
-	if err != nil {
+	if err = backend.components.BuildExec(execcomp.Deps{
+		Ctx:                ctx,
+		DB:                 backend.chainDB,
+		BlockReader:        blockReader,
+		BlockWriter:        blockWriter,
+		Config:             config,
+		ChainConfig:        chainConfig,
+		Notifications:      backend.notifications,
+		SentriesClient:     backend.sentriesClient,
+		DownloaderClient:   backend.downloaderClient,
+		BlockRetire:        blockRetire,
+		Tracer:             tracer,
+		BuilderFunc:        backend.components.BlockBuilding.Builder.Build,
+		TxPoolRpcClient:    backend.txPoolRpcClient,
+		BackwardBlockDl:    bbd,
+		ExecModuleCache:    execmoduleCache,
+		CurrentBlockNumber: currentBlockNumber,
+		Logger:             logger,
+	}); err != nil {
 		return nil, err
 	}
-
-	engineBackendRPC := engineapi.NewEngineServer(
-		logger,
-		chainConfig,
-		executionRpc,
-		engine_block_downloader.NewEngineBlockDownloader(
-			ctx,
-			logger,
-			executionRpc,
-			blockReader,
-			backend.chainDB,
-			chainConfig,
-			config.Sync,
-			bbd,
-		),
-		config.InternalCL && !config.CaplinConfig.EnableEngineAPI, // If the chain supports the engine API, then we should not make the server fail.
-		config.Builder.EnabledPOS,
-		!config.PolygonPosSingleSlotFinality,
-		backend.txPoolRpcClient,
-		config.FcuTimeout,
-		config.MaxReorgDepth,
-	)
-	backend.engineBackendRPC = engineBackendRPC
+	backend.execModule = backend.components.Exec.ExecModule
+	backend.pipelineStagedSync = backend.components.Exec.PipelineSync
+	backend.engineBackendRPC = backend.components.Exec.EngineServer
+	executionRpc := backend.components.Exec.ExecutionRpc
+	executionEngine := backend.components.Exec.ExecutionEngine
 	// If we choose not to run a consensus layer, run our embedded.
 	if config.InternalCL && (clparams.EmbeddedSupported(config.NetworkID) || config.CaplinConfig.IsDevnet()) {
 		if err := backend.components.StartCaplin(caplincomp.Deps{
