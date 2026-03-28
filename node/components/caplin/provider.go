@@ -33,8 +33,8 @@ import (
 	"google.golang.org/grpc/credentials"
 
 	"github.com/erigontech/erigon/cl/clparams"
-	executionclient "github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
+	executionclient "github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -51,17 +51,17 @@ type Provider struct{}
 
 // Deps holds the external dependencies needed by Start.
 type Deps struct {
-	Ctx             context.Context
-	ExecutionEngine executionclient.ExecutionEngine
-	CaplinConfig    clparams.CaplinConfig
-	NetworkID       uint64
-	LoopBlockLimit  int
-	Dirs            datadir.Dirs
-	BlockReader     services.FullBlockReader
-	ChainDB         kv.TemporalRoDB
+	Ctx              context.Context
+	ExecutionEngine  executionclient.ExecutionEngine
+	CaplinConfig     clparams.CaplinConfig
+	NetworkID        uint64
+	LoopBlockLimit   int
+	Dirs             datadir.Dirs
+	BlockReader      services.FullBlockReader
+	ChainDB          kv.TemporalRoDB
 	DownloaderClient downloader.Client
-	Creds           credentials.TransportCredentials
-	SnBuildSema     *semaphore.Weighted
+	Creds            credentials.TransportCredentials
+	SnBuildSema      *semaphore.Weighted
 	// For the EnableEngineAPI path: read JWT and dial execution engine over RPC.
 	JWTSecretPath  string
 	AuthRpcAddress string

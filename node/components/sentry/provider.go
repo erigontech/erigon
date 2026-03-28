@@ -45,8 +45,8 @@ import (
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/erigontech/erigon/polygon/bor"
 
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/chain"
 )
 
 // Provider holds the sentry/P2P component runtime state. It implements the
