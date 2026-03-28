@@ -63,6 +63,12 @@ jobs:
       run: |
         ${{ github.workspace }}/cmd/scripts/mirror-datadir.sh $ERIGON_REFERENCE_DATA_DIR $ERIGON_TESTBED_DATA_DIR
 
+    - name: Run Migrations
+      working-directory: ${{ github.workspace }}/build/bin
+      run: |
+        echo "Running migrations on datadir..."
+        ./integration run_migrations --datadir $ERIGON_TESTBED_DATA_DIR --chain $CHAIN
+
     - name: Run stage_exec smoke test
       id: test_step
       run: |
