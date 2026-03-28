@@ -25,13 +25,16 @@
 //
 //	b := nodebuilder.New()
 //
-//	// Each Build* call configures and fully initializes the component.
 //	if err := b.BuildDownloader(ctx, cfg.Downloader, cfg.Snapshot, dirs, logger, mux); err != nil {
 //	    return err
 //	}
-//	// ...later components added by downstream branches...
+//	if err := b.BuildSentry(ctx, p2pCfg, syncCfg, networkID, urls, chainName, genesisHash, deps); err != nil {
+//	    return err
+//	}
+//	if err := b.BuildRpc(ctx, httpCfg, mcpAddress, deps); err != nil {
+//	    return err
+//	}
 //
-//	// Unified lifecycle
 //	b.Start(ctx, &eg)
 //	defer b.Close()
 //
@@ -46,11 +49,17 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	downloadercomp "github.com/erigontech/erigon/node/components/downloader"
+	rpccomp "github.com/erigontech/erigon/node/components/rpc"
+	sentrycomp "github.com/erigontech/erigon/node/components/sentry"
 	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/p2p"
+
+	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 )
 
 // Builder assembles an Erigon node from its extracted components.
@@ -58,18 +67,26 @@ import (
 //
 // Components on this branch (feat/componentization):
 //   - Downloader — snapshot BitTorrent client
+//   - Sentry     — P2P networking, sentry servers, execution P2P pipeline
+//   - Rpc        — embedded RPC services, JSON-RPC APIs, HTTP server
 //
-// Components added by downstream branches:
+// Not yet extracted (still inline in backend.go):
 //   - TxPool / Shutter — added by feat/txpool
-//   - (future) Sentry, ExecModule, RPC, Mining, Caplin
+//   - ExecModule / StagedSync
+//   - Mining
+//   - Caplin (has its own internal stage machine)
 type Builder struct {
 	Downloader *downloadercomp.Provider
+	Sentry     *sentrycomp.Provider
+	Rpc        *rpccomp.Provider
 }
 
 // New allocates a Builder with all providers pre-initialized.
 func New() *Builder {
 	return &Builder{
 		Downloader: &downloadercomp.Provider{},
+		Sentry:     &sentrycomp.Provider{},
+		Rpc:        &rpccomp.Provider{},
 	}
 }
 
@@ -87,6 +104,37 @@ func (b *Builder) BuildDownloader(
 	return b.Downloader.Initialize(ctx)
 }
 
+// BuildSentry configures and initializes the P2P/sentry component.
+// After this call, b.Sentry.SentriesClient, SentryServers, Publisher etc.
+// are ready for consumers.
+func (b *Builder) BuildSentry(
+	ctx context.Context,
+	p2pCfg p2p.Config,
+	syncCfg ethconfig.Sync,
+	networkID uint64,
+	discoveryURLs []string,
+	chainName string,
+	genesisHash common.Hash,
+	deps sentrycomp.Deps,
+) error {
+	b.Sentry.Configure(p2pCfg, syncCfg, networkID, discoveryURLs, chainName, genesisHash)
+	return b.Sentry.Initialize(ctx, deps)
+}
+
+// BuildRpc configures and initializes the embedded RPC services component.
+// deps.EthBackendRPC, deps.MiningRPC, and deps.StateDiffClient must be
+// created by the caller before the txpool is initialised.
+// After this call, b.Rpc.EthRpcClient, TxPoolRpcClient, EthApi etc. are ready.
+func (b *Builder) BuildRpc(
+	ctx context.Context,
+	httpCfg httpcfg.HttpCfg,
+	mcpAddress string,
+	deps rpccomp.Deps,
+) error {
+	b.Rpc.Configure(httpCfg, mcpAddress)
+	return b.Rpc.Initialize(ctx, deps)
+}
+
 // ErrGroup is satisfied by errgroup.Group and similar constructs.
 type ErrGroup interface {
 	Go(func() error)
@@ -95,8 +143,8 @@ type ErrGroup interface {
 // Start launches all component background goroutines.
 // Call after all Build* methods have completed.
 func (b *Builder) Start(_ context.Context, _ ErrGroup) {
-	// Downloader manages its own goroutines internally — no Start needed.
-	// Downstream branches add their components' Start calls here.
+	// Downloader and Sentry manage their own goroutines internally.
+	// Rpc goroutines are started explicitly via Rpc.Start() from Init().
 }
 
 // Close shuts down all components that hold resources.
