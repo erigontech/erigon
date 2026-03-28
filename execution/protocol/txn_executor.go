@@ -332,9 +332,8 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 
 	// EIP-7825: Transaction Gas Limit Cap.
 	// Intrinsic gas is computed before preCheck() in Execute so that the
-	// fork-dependent cap (see IntrinsicGasCalcResult.RegularGasCap) can be
-	// validated here, before buyGas(), so pool gas is never consumed for
-	// rejected txs.
+	// fork-dependent cap can be validated here, before buyGas(), so pool gas
+	// is never consumed for rejected txs.
 	if st.msg.CheckGas() && rules.IsOsaka {
 		if rules.IsAmsterdam {
 			// EIP-8037: TX_MAX_GAS_LIMIT applies to the regular gas dimension only.
