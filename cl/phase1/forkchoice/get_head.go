@@ -193,6 +193,9 @@ func (f *ForkChoiceStore) getFilteredBlockTree(base common.Hash) map[common.Hash
 // It takes a block hash and a map of viable blocks as input parameters, and returns a boolean value indicating
 // whether the current block is viable.
 func (f *ForkChoiceStore) getFilterBlockTree(blockRoot common.Hash, blocks map[common.Hash]*cltypes.BeaconBlockHeader) bool {
+	if f.forkGraph.IsInvalid(blockRoot) {
+		return false
+	}
 	header, has := f.forkGraph.GetHeader(blockRoot)
 	if !has {
 		return false

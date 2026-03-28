@@ -485,6 +485,11 @@ func (f *forkGraphDisk) MarkHeaderAsInvalid(blockRoot common.Hash) {
 	f.badBlocks.Store(blockRoot, struct{}{})
 }
 
+func (f *forkGraphDisk) IsInvalid(blockRoot common.Hash) bool {
+	_, has := f.badBlocks.Load(blockRoot)
+	return has
+}
+
 func (f *forkGraphDisk) hasBeaconState(blockRoot common.Hash) bool {
 	exists, err := afero.Exists(f.fs, getBeaconStateFilename(blockRoot))
 	return err == nil && exists

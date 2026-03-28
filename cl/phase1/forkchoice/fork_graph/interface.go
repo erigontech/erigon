@@ -42,6 +42,7 @@ type ForkGraph interface {
 	GetFinalizedCheckpoint(blockRoot common.Hash) (solid.Checkpoint, bool)
 	GetSyncCommittees(period uint64) (*solid.SyncCommittee, *solid.SyncCommittee, bool)
 	MarkHeaderAsInvalid(blockRoot common.Hash)
+	IsInvalid(blockRoot common.Hash) bool
 	AnchorSlot() uint64
 	Prune(uint64) error
 	GetBlockRewards(blockRoot common.Hash) (*eth2.BlockRewardsCollector, bool)
