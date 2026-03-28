@@ -18,12 +18,14 @@ jobs:
         with:
           fetch-depth: 1
 
-      # No submodules, LFS, or space cleanup needed: benchmark functions
-      # only use in-memory or local testdata/ files. Submodules
-      # (legacy-tests, execution-spec-tests) and LFS fixtures are only
-      # read by regular Test* functions.
+      # No submodules or LFS needed: benchmark functions only use
+      # in-memory or local testdata/ files. Space cleanup is needed
+      # for the cache-warming path (go test -run=^$ ./...) which
+      # compiles test binaries for every package.
       - uses: ./.github/actions/setup-erigon
         id: erigon
+        with:
+          cleanup-space: true
 
       - name: Run benchmarks
         if: github.event_name == 'pull_request'

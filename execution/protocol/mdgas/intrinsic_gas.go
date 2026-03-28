@@ -46,16 +46,6 @@ type IntrinsicGasCalcResult struct {
 	StateGas     uint64
 }
 
-// RegularGasCap returns the gas value to compare against EIP-7825's MaxTxnGasLimit.
-// Amsterdam (EIP-8037): cap = max(RegularGas, FloorGasCost) — only regular-dimension gas.
-// Osaka (pre-Amsterdam): cap = full tx gas limit.
-func (r IntrinsicGasCalcResult) RegularGasCap(txGas uint64, isAmsterdam bool) uint64 {
-	if isAmsterdam {
-		return max(r.RegularGas, r.FloorGasCost)
-	}
-	return txGas
-}
-
 // CountNonZeroBytes returns the number of non-zero bytes in data.
 func CountNonZeroBytes(data []byte) int {
 	count := 0

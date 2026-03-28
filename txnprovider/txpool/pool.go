@@ -996,10 +996,18 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		}
 		return txpoolcfg.GasLimitTooHigh
 	}
-	// EIP-7825: Transaction Gas Limit Cap (fork-dependent, see RegularGasCap).
-	if capGas := intrinsicGasResult.RegularGasCap(txn.GetGas(), p.isAmsterdam()); capGas > params.MaxTxnGasLimit {
+	// EIP-7825: Transaction Gas Limit Cap.
+	// EIP-8037 (Amsterdam): TX_MAX_GAS_LIMIT applies to the regular gas dimension only.
+	// Pre-Amsterdam: cap = full tx gas limit.
+	var gasToCap uint64
+	if p.isAmsterdam() {
+		gasToCap = max(intrinsicGasResult.RegularGas, intrinsicGasResult.FloorGasCost)
+	} else {
+		gasToCap = txn.GetGas()
+	}
+	if gasToCap > params.MaxTxnGasLimit {
 		if txn.Traced {
-			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx gas cap exceeded idHash=%x capGas=%d, max=%d", txn.IDHash, capGas, params.MaxTxnGasLimit))
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx gas cap exceeded idHash=%x gasToCap=%d, max=%d", txn.IDHash, gasToCap, params.MaxTxnGasLimit))
 		}
 		return txpoolcfg.GasLimitTooHigh
 	}

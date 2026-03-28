@@ -43,10 +43,10 @@ func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) {
 }
 
 type ConcurrentPatriciaHashed struct {
-	root   *HexPatriciaHashed
-	rootMu sync.Mutex
-	mounts [16]*HexPatriciaHashed
-	ctx    [16]PatriciaContext
+	root       *HexPatriciaHashed
+	rootMu     sync.Mutex
+	mounts     [16]*HexPatriciaHashed
+	ctxClosers [16]func()
 }
 
 // Subtrie inherits root state, address length
@@ -55,7 +55,6 @@ func NewConcurrentPatriciaHashed(root *HexPatriciaHashed, ctx PatriciaContext) *
 
 	for i := range p.mounts {
 		p.mounts[i] = p.root.SpawnSubTrie(ctx, i)
-		p.ctx[i] = ctx // todo barely needed
 	}
 	return p
 }
@@ -113,7 +112,7 @@ func (p *ConcurrentPatriciaHashed) foldNibble(nib int) error {
 	return nil
 }
 
-func (p *ConcurrentPatriciaHashed) unfoldRoot() error {
+func (p *ConcurrentPatriciaHashed) unfoldRoot(ctxFactory TrieContextFactory) error {
 	if p.root.trace {
 		fmt.Printf("=============ROOT unfold============\n")
 	}
@@ -135,7 +134,9 @@ func (p *ConcurrentPatriciaHashed) unfoldRoot() error {
 			panic(fmt.Sprintf("nibble %x is nil", i))
 		}
 		p.mounts[i].mountTo(p.root, i)
-		p.mounts[i].ctx = p.ctx[i]
+		mountCtx, mountCtxClose := ctxFactory()
+		p.mounts[i].ctx = mountCtx
+		p.ctxClosers[i] = mountCtxClose
 	}
 	return nil
 }
@@ -143,6 +144,10 @@ func (p *ConcurrentPatriciaHashed) unfoldRoot() error {
 func (p *ConcurrentPatriciaHashed) Close() {
 	for i := range p.mounts {
 		p.mounts[i].Reset()
+		if p.ctxClosers[i] != nil {
+			p.ctxClosers[i]()
+			p.ctxClosers[i] = nil
+		}
 	}
 }
 
@@ -205,7 +210,7 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 		return nil, errors.New("sortPerNibble disabled")
 	}
 
-	if err := pph.unfoldRoot(); err != nil {
+	if err := pph.unfoldRoot(trieCtxFactory); err != nil {
 		return nil, err
 	}
 
@@ -220,6 +225,11 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 		ni := n
 
 		g.Go(func() error {
+			// close the temporary context provisioned by unfoldRoot before replacing it
+			if pph.ctxClosers[ni] != nil {
+				pph.ctxClosers[ni]()
+				pph.ctxClosers[ni] = nil
+			}
 			trieCtx, trieCtxClose := trieCtxFactory()
 			defer trieCtxClose()
 			phnib.ResetContext(trieCtx)
@@ -354,7 +364,6 @@ func (p *ConcurrentPatriciaHashed) ResetContext(ctx PatriciaContext) {
 	p.root.ctx = ctx
 	for i := 0; i < len(p.mounts); i++ {
 		p.mounts[i].ResetContext(ctx)
-		p.ctx[i] = ctx
 	}
 }
 
