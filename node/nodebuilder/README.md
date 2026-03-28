@@ -1,6 +1,6 @@
-# Node Component Registry
+# Node Component Builder
 
-`noderegistry` is the central inventory of extracted node components.
+`nodebuilder` is the central inventory of extracted node components.
 
 `backend.go` (`node/eth/`) is a ~1 300-line constructor that builds the entire Erigon
 node inline. The componentization effort moves each subsystem into its own
@@ -28,7 +28,7 @@ Initialize(ctx, runtime deps)   ← deps from other already-constructed things
 Start(ctx, eg)                  ← optional; only if the provider owns goroutines
 ```
 
-`Close()` is called by `Registry.Close()` during node shutdown.
+`Close()` is called by `Builder.Close()` during node shutdown.
 
 Configure and Initialize are called inline in `backend.go` because each provider
 needs different deps (there is no single dependency graph yet). The registry is
@@ -93,7 +93,7 @@ Rules:
 
 ### Step 2 — Register in the registry
 
-In [registry.go](registry.go):
+In [builder.go](builder.go):
 
 ```go
 // 1. Import the new package.
@@ -102,8 +102,8 @@ import (
     // existing imports …
 )
 
-// 2. Add a typed field to Registry.
-type Registry struct {
+// 2. Add a typed field to Builder.
+type Builder struct {
     Downloader *downloadercomp.Provider
     TxPool     *txpoolcomp.Provider
     Shutter    *txpoolcomp.ShutterProvider
@@ -111,8 +111,8 @@ type Registry struct {
 }
 
 // 3. Allocate in New().
-func New() *Registry {
-    return &Registry{
+func New() *Builder {
+    return &Builder{
         Downloader: &downloadercomp.Provider{},
         TxPool:     &txpoolcomp.Provider{},
         Shutter:    &txpoolcomp.ShutterProvider{},
@@ -120,21 +120,21 @@ func New() *Registry {
     }
 }
 
-// 4. If the provider has a Start method, add it to Registry.Start().
-func (r *Registry) Start(ctx context.Context, eg ErrGroup) {
+// 4. If the provider has a Start method, add it to Builder.Start().
+func (r *Builder) Start(ctx context.Context, eg ErrGroup) {
     r.TxPool.Start(ctx, eg)
     r.Shutter.Start(ctx, eg)
     r.<Name>.Start(ctx, eg)   // ← add here
 }
 
-// 5. If the provider has a Close method, add it to Registry.Close().
-func (r *Registry) Close() {
+// 5. If the provider has a Close method, add it to Builder.Close().
+func (r *Builder) Close() {
     r.Downloader.Close()
     r.<Name>.Close()   // ← add here
 }
 ```
 
-Update the inventory comment at the top of `Registry` to reflect what has been
+Update the inventory comment at the top of `Builder` to reflect what has been
 extracted and what remains.
 
 ### Step 3 — Wire in backend.go
@@ -170,7 +170,7 @@ stable and callers are comfortable with `backend.components.<Name>.Output`.
 
 ```bash
 go build ./node/...          # must pass
-go test ./node/noderegistry/ # registry unit tests must pass
+go test ./node/nodebuilder/ # registry unit tests must pass
 go test ./node/components/<name>/... # provider unit tests must pass
 make lint                    # must pass
 ```

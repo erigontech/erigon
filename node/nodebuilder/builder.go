@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-// Package noderegistry is the central component registry for an Erigon node.
+// Package nodebuilder is the central component registry for an Erigon node.
 //
 // Components are extracted from backend.go incrementally and registered here.
 // The registry provides:
@@ -25,7 +25,7 @@
 // Usage pattern:
 //
 //	// Construction (replaces N individual provider allocations in backend.go)
-//	backend.components = noderegistry.New()
+//	backend.components = nodebuilder.New()
 //
 //	// Per-component configuration and initialization (deps differ; stays in backend.go)
 //	backend.components.TxPool.Configure(cfg.TxPool, chainConfig, logger)
@@ -44,7 +44,7 @@
 //  2. Add a field to Registry and allocate it in New()
 //  3. Wire Configure/Initialize in backend.go (same as before, just under backend.components)
 //  4. Add to Start/Close if the component has background goroutines or needs cleanup
-package noderegistry
+package nodebuilder
 
 import (
 	"context"
@@ -53,8 +53,8 @@ import (
 	txpoolcomp "github.com/erigontech/erigon/node/components/txpool"
 )
 
-// Registry groups all extracted node component providers.
-// Access components directly: r.TxPool.GrpcServer, r.Downloader.Client, etc.
+// Builder holds all extracted node component providers and manages their
+// shared lifecycle. Access components directly: b.TxPool.GrpcServer, etc.
 //
 // Fields are added here as components graduate from backend.go.
 // Currently extracted:
@@ -68,16 +68,16 @@ import (
 //   - RPC servers / clients
 //   - Mining
 //   - Caplin (has its own internal stage machine)
-type Registry struct {
+type Builder struct {
 	Downloader *downloadercomp.Provider
 	TxPool     *txpoolcomp.Provider
 	Shutter    *txpoolcomp.ShutterProvider
 }
 
-// New allocates a Registry with all current providers pre-initialized.
+// New allocates a Builder with all current providers pre-initialized.
 // Call once during node construction (replaces individual &Provider{} allocations).
-func New() *Registry {
-	return &Registry{
+func New() *Builder {
+	return &Builder{
 		Downloader: &downloadercomp.Provider{},
 		TxPool:     &txpoolcomp.Provider{},
 		Shutter:    &txpoolcomp.ShutterProvider{},
@@ -92,14 +92,14 @@ type ErrGroup interface {
 // Start launches all component background goroutines.
 // Call after all components have been initialized.
 // Add new Start calls here when a component with background work is registered.
-func (r *Registry) Start(ctx context.Context, eg ErrGroup) {
-	r.TxPool.Start(ctx, eg)
-	r.Shutter.Start(ctx, eg)
+func (b *Builder) Start(ctx context.Context, eg ErrGroup) {
+	b.TxPool.Start(ctx, eg)
+	b.Shutter.Start(ctx, eg)
 	// Downloader has no Start — it manages its own goroutines internally.
 }
 
 // Close shuts down all closeable components.
 // Add new Close calls here when a closeable component is registered.
-func (r *Registry) Close() {
-	r.Downloader.Close()
+func (b *Builder) Close() {
+	b.Downloader.Close()
 }

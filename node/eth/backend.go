@@ -91,7 +91,7 @@ import (
 	"github.com/erigontech/erigon/node"
 	txpoolcomp "github.com/erigontech/erigon/node/components/txpool"
 	"github.com/erigontech/erigon/node/direct"
-	"github.com/erigontech/erigon/node/noderegistry"
+	"github.com/erigontech/erigon/node/nodebuilder"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/ethstats"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
@@ -190,7 +190,7 @@ type Ethereum struct {
 
 	waitForStageLoopStop chan struct{}
 
-	components                *noderegistry.Registry
+	components                *nodebuilder.Builder
 	txPoolGrpcServer          txpoolproto.TxpoolServer
 	txPoolRpcClient           txpoolproto.TxpoolClient
 	blockBuilderNotifyNewTxns chan struct{}
@@ -335,7 +335,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		miningSealingQuit:         make(chan struct{}),
 		minedBlocks:               make(chan *types.Block, 1),
 		minedBlockObservers:       event.NewObservers[*types.Block](),
-		components:                noderegistry.New(),
+		components:                nodebuilder.New(),
 		logger:                    logger,
 		stopNode: func() error {
 			return stack.Close()
