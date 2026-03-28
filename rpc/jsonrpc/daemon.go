@@ -43,13 +43,26 @@ func NewEthApiConfig(cfg *httpcfg.SharedApiConfig) *EthApiConfig {
 	}
 }
 
-// APIList describes the list of available RPC apis
-func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient,
-	filters *rpchelper.Filters, stateCache kvcache.Cache,
-	blockReader services.FullBlockReader, cfg *httpcfg.SharedApiConfig, engine rules.EngineReader,
-	logger log.Logger, bridgeReader bridgeReader, spanProducersReader spanProducersReader,
-) (list []rpc.API) {
-	base := NewBaseApi(filters, stateCache, blockReader, cfg.WithDatadir, cfg.EvmCallTimeout, engine, cfg.Dirs, bridgeReader, cfg.BlockRangeLimit, cfg.GetLogsMaxResults)
+// PopulateConnections registers the standard JSON-RPC API set on conn using
+// conn.BaseApi as the shared base. The enabled namespaces are taken from
+// cfg.API; graphql is registered unconditionally when cfg.GraphQLEnabled is set.
+//
+// External components that want to expose additional namespaces should call
+// conn.Register(...) directly, either before or after PopulateConnections.
+func PopulateConnections(
+	conn *Connections,
+	db kv.TemporalRoDB,
+	eth rpchelper.ApiBackend,
+	txPool txpoolproto.TxpoolClient,
+	mining txpoolproto.MiningClient,
+	blockReader services.FullBlockReader,
+	cfg *httpcfg.SharedApiConfig,
+	engine rules.EngineReader,
+	logger log.Logger,
+	bridge bridgeReader,
+	spans spanProducersReader,
+) {
+	base := conn.BaseApi
 	ethImpl := NewEthAPI(base, db, eth, txPool, mining, NewEthApiConfig(cfg), logger)
 	erigonImpl := NewErigonAPI(base, db, eth)
 	txpoolImpl := NewTxPoolAPI(base, db, txPool)
@@ -67,12 +80,12 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 		Engine() rules.EngineReader
 	}
 
-	switch engine := engine.(type) {
+	switch eng := engine.(type) {
 	case *bor.Bor:
-		borImpl = NewBorAPI(base, db, spanProducersReader)
+		borImpl = NewBorAPI(base, db, spans)
 	case lazy:
-		if _, ok := engine.Engine().(*bor.Bor); !engine.HasEngine() || ok {
-			borImpl = NewBorAPI(base, db, spanProducersReader)
+		if _, ok := eng.Engine().(*bor.Bor); !eng.HasEngine() || ok {
+			borImpl = NewBorAPI(base, db, spans)
 		}
 	}
 
@@ -82,7 +95,7 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 	overlayImpl := NewOverlayAPI(base, db, cfg.Gascap, cfg.OverlayGetLogsTimeout, cfg.OverlayReplayBlockTimeout, otsImpl)
 
 	if cfg.GraphQLEnabled {
-		list = append(list, rpc.API{
+		conn.Register(rpc.API{
 			Namespace: "graphql",
 			Public:    true,
 			Service:   GraphQLAPI(gqlImpl),
@@ -93,42 +106,42 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 	for _, enabledAPI := range cfg.API {
 		switch enabledAPI {
 		case "eth":
-			list = append(list, rpc.API{
+			conn.Register(rpc.API{
 				Namespace: "eth",
 				Public:    true,
 				Service:   EthAPI(ethImpl),
 				Version:   "1.0",
 			})
 		case "debug":
-			list = append(list, rpc.API{
+			conn.Register(rpc.API{
 				Namespace: "debug",
 				Public:    true,
 				Service:   PrivateDebugAPI(debugImpl),
 				Version:   "1.0",
 			})
 		case "net":
-			list = append(list, rpc.API{
+			conn.Register(rpc.API{
 				Namespace: "net",
 				Public:    true,
 				Service:   NetAPI(netImpl),
 				Version:   "1.0",
 			})
 		case "txpool":
-			list = append(list, rpc.API{
+			conn.Register(rpc.API{
 				Namespace: "txpool",
 				Public:    true,
 				Service:   TxPoolAPI(txpoolImpl),
 				Version:   "1.0",
 			})
 		case "web3":
-			list = append(list, rpc.API{
+			conn.Register(rpc.API{
 				Namespace: "web3",
 				Public:    true,
 				Service:   Web3API(web3Impl),
 				Version:   "1.0",
 			})
 		case "trace":
-			list = append(list, rpc.API{
+			conn.Register(rpc.API{
 				Namespace: "trace",
 				Public:    true,
 				Service:   TraceAPI(traceImpl),
@@ -136,14 +149,14 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 			})
 		case "db": /* Deprecated */
 			dbImpl := NewDBAPIImpl() /* deprecated */
-			list = append(list, rpc.API{
+			conn.Register(rpc.API{
 				Namespace: "db",
 				Public:    true,
 				Service:   DBAPI(dbImpl),
 				Version:   "1.0",
 			})
 		case "erigon":
-			list = append(list, rpc.API{
+			conn.Register(rpc.API{
 				Namespace: "erigon",
 				Public:    true,
 				Service:   ErigonAPI(erigonImpl),
@@ -151,7 +164,7 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 			})
 		case "bor":
 			if borImpl != nil {
-				list = append(list, rpc.API{
+				conn.Register(rpc.API{
 					Namespace: "bor",
 					Public:    true,
 					Service:   BorAPI(borImpl),
@@ -159,37 +172,37 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 				})
 			}
 		case "admin":
-			list = append(list, rpc.API{
+			conn.Register(rpc.API{
 				Namespace: "admin",
 				Public:    false,
 				Service:   AdminAPI(adminImpl),
 				Version:   "1.0",
 			})
 		case "parity":
-			list = append(list, rpc.API{
+			conn.Register(rpc.API{
 				Namespace: "parity",
 				Public:    false,
 				Service:   ParityAPI(parityImpl),
 				Version:   "1.0",
 			})
 		case "ots":
-			list = append(list, rpc.API{
+			conn.Register(rpc.API{
 				Namespace: "ots",
 				Public:    true,
 				Service:   OtterscanAPI(otsImpl),
 				Version:   "1.0",
 			})
 		case "internal":
-			list = append(list, rpc.API{
+			conn.Register(rpc.API{
 				Namespace: "internal",
 				Public:    true,
 				Service:   InternalAPI(internalImpl),
 				Version:   "1.0",
 			})
 		case "clique":
-			list = append(list, clique.NewCliqueAPI(db, engine, blockReader))
+			conn.Register(clique.NewCliqueAPI(db, engine, blockReader))
 		case "overlay":
-			list = append(list, rpc.API{
+			conn.Register(rpc.API{
 				Namespace: "overlay",
 				Public:    true,
 				Service:   OverlayAPI(overlayImpl),
@@ -197,6 +210,17 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 			})
 		}
 	}
+}
 
-	return list
+// APIList describes the list of available RPC apis.
+// It is a convenience wrapper around NewConnections + PopulateConnections.
+func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient,
+	filters *rpchelper.Filters, stateCache kvcache.Cache,
+	blockReader services.FullBlockReader, cfg *httpcfg.SharedApiConfig, engine rules.EngineReader,
+	logger log.Logger, bridge bridgeReader, spans spanProducersReader,
+) []rpc.API {
+	base := NewBaseApi(filters, stateCache, blockReader, cfg.WithDatadir, cfg.EvmCallTimeout, engine, cfg.Dirs, bridge, cfg.BlockRangeLimit, cfg.GetLogsMaxResults)
+	conn := NewConnections(base)
+	PopulateConnections(conn, db, eth, txPool, mining, blockReader, cfg, engine, logger, bridge, spans)
+	return conn.APIs()
 }

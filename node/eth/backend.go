@@ -92,7 +92,6 @@ import (
 	sentrycomp "github.com/erigontech/erigon/node/components/sentry"
 	txpoolcomp "github.com/erigontech/erigon/node/components/txpool"
 	"github.com/erigontech/erigon/node/direct"
-	"github.com/erigontech/erigon/node/nodebuilder"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/ethstats"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
@@ -101,6 +100,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/node/nodebuilder"
 	privateapi2 "github.com/erigontech/erigon/node/privateapi"
 	"github.com/erigontech/erigon/node/rulesconfig"
 	"github.com/erigontech/erigon/node/shards"
@@ -441,7 +441,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.notifications = shards.NewNotifications(kvRPC)
 	backend.kvRPC = kvRPC
 
-
 	// setup periodic logging and prometheus updates
 	go mem.LogMemStats(ctx, logger)
 	go disk.UpdateDiskStats(ctx, logger)
@@ -600,7 +599,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	if err := backend.components.BuildRpc(
 		ctx,
-		stack.Config().Http,
+		&stack.Config().Http,
 		config.MCPAddress,
 		rpccomp.Deps{
 			EthBackendRPC:    backend.ethBackendRPC,
@@ -923,7 +922,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		HeimdallService: s.heimdallService,
 		Logger:          s.logger,
 	})
-	s.apiList = s.components.Rpc.ApiList
+	s.apiList = s.components.Rpc.Connections.APIs()
 	s.components.Rpc.Start(rpccomp.StartDeps{
 		Ctx:                          ctx,
 		Eg:                           &s.bgComponentsEg,

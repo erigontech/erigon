@@ -133,7 +133,7 @@ func (b *Builder) BuildSentry(
 // After this call, b.Rpc.EthRpcClient, TxPoolRpcClient, EthApi etc. are ready.
 func (b *Builder) BuildRpc(
 	ctx context.Context,
-	httpCfg httpcfg.HttpCfg,
+	httpCfg *httpcfg.HttpCfg,
 	mcpAddress string,
 	deps rpccomp.Deps,
 ) error {

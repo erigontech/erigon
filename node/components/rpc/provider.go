@@ -46,7 +46,6 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
-	gorpc "github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/rpc/mcp"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -71,8 +70,9 @@ type spanProducersReader interface {
 // owns everything that follows: EmbeddedServices, JSON-RPC API objects,
 // MCP server, and the HTTP/engine goroutines.
 //
-// After Initialize, all public fields except ApiList are ready.
-// ApiList is set by BuildApiList.
+// After Initialize, all public fields except Connections.apis are ready.
+// Connections is populated by BuildApiList (standard namespaces) and may be
+// extended by other components via Connections.Register before Start is called.
 type Provider struct {
 	// Public outputs — available after Initialize.
 	EthBackendRPC       *privateapi.EthBackendServer
@@ -85,11 +85,9 @@ type Provider struct {
 	RpcFilters          *rpchelper.Filters
 	EthApi              *jsonrpc.APIImpl
 	McpServer           *mcp.ErigonMCPServer
-	ExecModuleCache     *execmodule.Cache // shared with execmodule.NewExecModule
-	HttpCfg             httpcfg.HttpCfg   // modified copy (LocalCache set), shared downstream
-
-	// ApiList is set by BuildApiList.
-	ApiList []gorpc.API
+	ExecModuleCache     *execmodule.Cache    // shared with execmodule.NewExecModule
+	HttpCfg             httpcfg.HttpCfg      // modified copy (LocalCache set), shared downstream
+	Connections         *jsonrpc.Connections // populated by BuildApiList; extend via Register before Start
 
 	// Configuration — set by Configure.
 	httpCfgInput httpcfg.HttpCfg
@@ -147,8 +145,8 @@ type StartDeps struct {
 }
 
 // Configure stores configuration. Must be called before Initialize.
-func (p *Provider) Configure(httpCfg httpcfg.HttpCfg, mcpAddress string) {
-	p.httpCfgInput = httpCfg
+func (p *Provider) Configure(httpCfg *httpcfg.HttpCfg, mcpAddress string) {
+	p.httpCfgInput = *httpCfg
 	p.mcpAddress = mcpAddress
 }
 
@@ -205,6 +203,8 @@ func (p *Provider) Initialize(ctx context.Context, deps Deps) error {
 		httpCfg.BlockRangeLimit,
 		httpCfg.GetLogsMaxResults,
 	)
+	p.Connections = jsonrpc.NewConnections(baseApi)
+
 	ethApiConfig := &jsonrpc.EthApiConfig{
 		GasCap:                      httpCfg.Gascap,
 		FeeCap:                      httpCfg.Feecap,
@@ -216,7 +216,7 @@ func (p *Provider) Initialize(ctx context.Context, deps Deps) error {
 		RpcTxSyncMaxTimeout:         httpCfg.RpcTxSyncMaxTimeout,
 	}
 	p.EthApi = jsonrpc.NewEthAPI(
-		baseApi,
+		p.Connections.BaseApi,
 		deps.ChainDB,
 		p.EthRpcClient,
 		p.TxPoolRpcClient,
@@ -225,8 +225,8 @@ func (p *Provider) Initialize(ctx context.Context, deps Deps) error {
 		logger,
 	)
 
-	erigonApi := jsonrpc.NewErigonAPI(baseApi, deps.ChainDB, p.EthRpcClient)
-	otsApi := jsonrpc.NewOtterscanAPI(baseApi, deps.ChainDB, httpCfg.OtsMaxPageSize)
+	erigonApi := jsonrpc.NewErigonAPI(p.Connections.BaseApi, deps.ChainDB, p.EthRpcClient)
+	otsApi := jsonrpc.NewOtterscanAPI(p.Connections.BaseApi, deps.ChainDB, httpCfg.OtsMaxPageSize)
 
 	p.McpServer = mcp.NewErigonMCPServer(p.EthApi, erigonApi, otsApi, deps.DirsLog)
 
@@ -242,16 +242,17 @@ func (p *Provider) Initialize(ctx context.Context, deps Deps) error {
 	return nil
 }
 
-// BuildApiList constructs the full JSON-RPC API list.
+// BuildApiList registers the standard JSON-RPC API set on Connections.
 // Call after the engine server is available (i.e. from Init()).
+// Additional namespaces from other components may be registered on
+// Connections before or after this call, but always before Start.
 func (p *Provider) BuildApiList(deps BuildApiListDeps) {
-	p.ApiList = jsonrpc.APIList(
+	jsonrpc.PopulateConnections(
+		p.Connections,
 		deps.ChainKv,
 		p.EthRpcClient,
 		p.TxPoolRpcClient,
 		p.MiningRpcClient,
-		p.RpcFilters,
-		p.RpcDaemonStateCache,
 		deps.BlockReader,
 		&p.HttpCfg.SharedApiConfig,
 		deps.Engine,
@@ -262,10 +263,11 @@ func (p *Provider) BuildApiList(deps BuildApiListDeps) {
 }
 
 // Start launches the background RPC and engine goroutines.
-// Call from Init() after BuildApiList.
+// Call from Init() after BuildApiList (and after any additional
+// conn.Register calls from other components).
 func (p *Provider) Start(deps StartDeps) {
 	logger := deps.Logger
-	apiList := p.ApiList
+	apiList := p.Connections.APIs()
 	httpCfg := p.HttpCfg
 
 	deps.Eg.Go(func() error {
