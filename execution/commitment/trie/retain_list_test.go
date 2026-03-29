@@ -87,14 +87,14 @@ func TestProofRetainerConstruction(t *testing.T) {
 	require.Len(t, rl.hexes, 4)
 
 	validKeys := [][]byte{
-		pr.storageHexKeys[2][:],
+		pr.storageHexKeys[2],
 		pr.storageHexKeys[2][:98],
 		pr.storageHexKeys[2][:95],
-		pr.storageHexKeys[1][:],
+		pr.storageHexKeys[1],
 		pr.storageHexKeys[1][:90],
-		pr.storageHexKeys[0][:],
+		pr.storageHexKeys[0],
 		pr.storageHexKeys[0][:85],
-		pr.accHexKey[:],
+		pr.accHexKey,
 		pr.accHexKey[:15],
 		{},
 	}

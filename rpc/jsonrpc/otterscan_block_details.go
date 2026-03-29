@@ -78,7 +78,7 @@ func (api *OtterscanAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash com
 	if b == nil {
 		return nil, nil
 	}
-	number := rpc.BlockNumber(b.Number().Int64())
+	number := rpc.BlockNumber(b.NumberU64())
 
 	return api.getBlockDetailsImpl(ctx, tx, b, number, b.Body().SendersFromTxs())
 }

@@ -27,8 +27,6 @@ import (
 	"strings"
 	"time"
 
-	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/prune"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -40,7 +38,9 @@ import (
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/bitmapdb"
+	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
@@ -71,6 +71,9 @@ type History struct {
 	// _visibleFiles - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
 	_visibleFiles []visibleFile
+
+	// _testBuildVIHook - test-only: called with the recsplit before the build loop in buildVI
+	_testBuildVIHook func(rs *recsplit.RecSplit)
 }
 
 func NewHistory(cfg statecfg.HistCfg, stepSize, stepsInFrozenFile uint64, dirs datadir.Dirs, logger log.Logger) (*History, error) {
@@ -192,15 +195,15 @@ func (ht *HistoryRoTx) Files() (res VisibleFiles) {
 }
 
 func (h *History) MissedMapAccessors() (l []*FilesItem) {
-	return h.missedMapAccessors(h.dirtyFiles.Items())
+	return h.missedMapAccessors(h.dirtyFiles.Items(), readDirNames(h.dirs.SnapAccessors))
 }
 
-func (h *History) missedMapAccessors(source []*FilesItem) (l []*FilesItem) {
+func (h *History) missedMapAccessors(source []*FilesItem, dl dirListing) (l []*FilesItem) {
 	if !h.Accessors.Has(statecfg.AccessorHashMap) {
 		return nil
 	}
 	return fileItemsWithMissedAccessors(source, h.stepSize, func(fromStep, toStep kv.Step) []string {
-		fPath, _, _, err := version.FindFilesWithVersionsByPattern(h.vAccessorFilePathMask(fromStep, toStep))
+		fPath, _, _, err := version.MatchVersionedFile(h.vAccessorFileNameMask(fromStep, toStep), dl.names, dl.dir)
 		if err != nil {
 			panic(err)
 		}
@@ -269,30 +272,36 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		IndexFile:  historyIdxPath,
 		Salt:       h.salt.Load(),
 		NoFsync:    h.noFsync,
+		Workers:    h.BuildAccessorsWorkers,
 	}, h.logger)
 	if err != nil {
 		return fmt.Errorf("create recsplit: %w", err)
 	}
 	defer rs.Close()
 	rs.LogLvl(log.LvlTrace)
+	if h._testBuildVIHook != nil {
+		h._testBuildVIHook(rs)
+	}
 
 	seq := &multiencseq.SequenceReader{}
+	it := &multiencseq.SequenceIterator{}
 
-	i := 0
 	for {
 		histReader.Reset(0)
 		iiReader.Reset(0)
+		rs.SetProgress(p)
+
+		i := 0
 
 		valOffset = 0
 		for iiReader.HasNext() {
 			keyBuf, _ = iiReader.Next(keyBuf[:0])
 			valBuf, _ = iiReader.Next(valBuf[:0])
-			p.Processed.Add(1)
 
 			// fmt.Printf("ef key %x\n", keyBuf)
 
 			seq.Reset(efBaseTxNum, valBuf)
-			it := seq.Iterator(0)
+			it.Reset(seq, 0)
 			for it.HasNext() {
 				txNum, err := it.Next()
 				if err != nil {
@@ -546,7 +555,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 	if h.noFsync {
 		_histComp.DisableFsync()
 	}
-	historyWriter := h.dataWriter(_histComp)
+	historyWriter := h.dataWriter(ctx, _histComp)
 
 	_efComp, err = seg.NewCompressor(ctx, "collate idx "+h.FilenameBase, efHistoryPath, h.dirs.Tmp, h.CompressorCfg, log.LvlTrace, h.logger)
 	if err != nil {
@@ -788,24 +797,14 @@ func (h *History) buildFiles(ctx context.Context, step kv.Step, collation Histor
 	}
 
 	{
-		ps := background.NewProgressSet()
-		_, efHistoryFileName := filepath.Split(collation.efHistoryPath)
-		p := ps.AddNew(efHistoryFileName, 1)
-		defer ps.Delete(p)
-
 		if err = collation.efHistoryComp.Compress(); err != nil {
 			return HistoryFiles{}, fmt.Errorf("compress %s .ef history: %w", h.FilenameBase, err)
 		}
-		ps.Delete(p)
 	}
 	{
-		_, historyFileName := filepath.Split(collation.historyPath)
-		p := ps.AddNew(historyFileName, 1)
-		defer ps.Delete(p)
 		if err = collation.historyComp.Compress(); err != nil {
 			return HistoryFiles{}, fmt.Errorf("compress %s .v history: %w", h.FilenameBase, err)
 		}
-		ps.Delete(p)
 	}
 	collation.Close()
 
@@ -853,6 +852,9 @@ func (h *History) integrateDirtyFiles(sf HistoryFiles, txNumFrom, txNumTo uint64
 	if txNumFrom == txNumTo {
 		panic(fmt.Sprintf("assert: txNumFrom(%d) == txNumTo(%d)", txNumFrom, txNumTo))
 	}
+	if sf.historyDecomp == nil {
+		return // build was skipped — don't overwrite existing dirty files
+	}
 
 	h.InvertedIndex.integrateDirtyFiles(InvertedFiles{
 		decomp:    sf.efHistoryDecomp,
@@ -872,15 +874,15 @@ func (h *History) dataReader(f *seg.Decompressor) *seg.Reader {
 	}
 	return seg.NewReader(f.MakeGetter(), h.Compression)
 }
-func (h *History) dataWriter(f *seg.Compressor) *seg.PagedWriter {
+func (h *History) dataWriter(ctx context.Context, f *seg.Compressor) *seg.PagedWriter {
 	if !strings.Contains(f.FileName(), ".v") {
 		panic("assert: miss-use " + f.FileName())
 	}
-	return seg.NewPagedWriter(seg.NewWriter(f, h.Compression), f.GetValuesOnCompressedPage() > 0, h.dirs.Tmp)
+	return seg.NewPagedWriter(ctx, seg.NewWriter(f, h.Compression), f.GetValuesOnCompressedPage() > 0)
 }
 func (ht *HistoryRoTx) dataReader(f *seg.Decompressor) *seg.Reader { return ht.h.dataReader(f) }
-func (ht *HistoryRoTx) dataWriter(f *seg.Compressor) *seg.PagedWriter {
-	return ht.h.dataWriter(f)
+func (ht *HistoryRoTx) dataWriter(ctx context.Context, f *seg.Compressor) *seg.PagedWriter {
+	return ht.h.dataWriter(ctx, f)
 }
 
 func (h *History) isEmpty(tx kv.Tx) (bool, error) {
@@ -1105,7 +1107,7 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 		case *mdbx2.MdbxDupSortCursor:
 			valsCP = valsC.(*mdbx2.MdbxDupSortCursor)
 		default:
-			return nil, fmt.Errorf("unexpected cursor type %T for table %s", valsC, ht.h.ValuesTable)
+			valsCP = &kv.RwCursorPseudoDupSort{RwCursor: c}
 		}
 	}
 
@@ -1170,7 +1172,7 @@ func (ht *HistoryRoTx) oldPrune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 		case *mdbx2.MdbxDupSortCursor:
 			valsCP = valsC.(*mdbx2.MdbxDupSortCursor)
 		default:
-			return nil, fmt.Errorf("unexpected cursor type %T for table %s", valsC, ht.h.ValuesTable)
+			valsCP = &kv.RwCursorPseudoDupSort{RwCursor: c}
 		}
 	}
 
@@ -1424,14 +1426,20 @@ func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By
 		}
 		g := ht.iit.dataReader(item.src.decompressor)
 		g.Reset(0)
-		wrapper := NewSegReaderWrapper(g)
-		if wrapper.HasNext() {
-			key, val, err := wrapper.Next()
-			if err != nil {
-				s.Close()
-				return nil, err
+		if g.HasNext() {
+			key, _ := g.Next(nil)
+			var val []byte
+			if g.HasNext() {
+				val, _ = g.Next(nil)
 			}
-			heap.Push(&s.h, &ReconItem{g: wrapper, key: key, val: val, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum})
+			histFileIdx := -1
+			for j := range ht.files {
+				if ht.files[j].startTxNum == item.startTxNum && ht.files[j].endTxNum == item.endTxNum {
+					histFileIdx = j
+					break
+				}
+			}
+			heap.Push(&s.h, &ReconItem{g: g, key: key, val: val, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum, histFileIdx: histFileIdx})
 		}
 	}
 	if err := s.advance(); err != nil {

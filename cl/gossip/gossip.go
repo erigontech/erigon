@@ -17,7 +17,6 @@
 package gossip
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 )
@@ -75,13 +74,4 @@ func IsTopicSyncCommittee(d string) bool {
 }
 func IsTopicBeaconAttestation(d string) bool {
 	return strings.Contains(d, "beacon_attestation_")
-}
-
-func SubnetIdFromTopicBeaconAttestation(d string) (uint64, error) {
-	if !IsTopicBeaconAttestation(d) {
-		return 0, errors.New("not a beacon attestation topic")
-	}
-	var id uint64
-	_, err := fmt.Sscanf(d, TopicNamePrefixBeaconAttestation, &id)
-	return id, err
 }

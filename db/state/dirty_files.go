@@ -19,6 +19,7 @@ package state
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -33,6 +34,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
@@ -53,7 +55,7 @@ import (
 type FilesItem struct {
 	decompressor         *seg.Decompressor
 	index                *recsplit.Index
-	bindex               *BtIndex
+	bindex               *btindex.BtIndex
 	existence            *existence.Filter
 	startTxNum, endTxNum uint64 //[startTxNum, endTxNum)
 
@@ -93,7 +95,7 @@ func (i *FilesItem) Segment() *seg.Decompressor { return i.decompressor }
 
 func (i *FilesItem) AccessorIndex() *recsplit.Index { return i.index }
 
-func (i *FilesItem) BtIndex() *BtIndex { return i.bindex }
+func (i *FilesItem) BtIndex() *btindex.BtIndex { return i.bindex }
 
 func (i *FilesItem) ExistenceFilter() *existence.Filter { return i.existence }
 func (i *FilesItem) MadvNormal() {
@@ -208,19 +210,9 @@ func (i *FilesItem) closeFilesAndRemove() {
 	if i == nil {
 		return
 	}
-	if i.decompressor != nil {
-		i.decompressor.Close()
-		// paranoic-mode on: don't delete frozen files
-		if !i.frozen {
-			if err := dir.RemoveFile(i.decompressor.FilePath()); err != nil {
-				log.Trace("remove after close", "err", err, "file", i.decompressor.FileName())
-			}
-			if err := dir.RemoveFile(i.decompressor.FilePath() + ".torrent"); err != nil {
-				log.Trace("remove after close", "err", err, "file", i.decompressor.FileName()+".torrent")
-			}
-		}
-		i.decompressor = nil
-	}
+	// Delete accessors before the data file. If the process is killed between
+	// deleting the data file and accessors, the accessor files become
+	// permanently orphaned.
 	if i.index != nil {
 		i.index.Close()
 		// paranoic-mode on: don't delete frozen files
@@ -254,10 +246,31 @@ func (i *FilesItem) closeFilesAndRemove() {
 		}
 		i.existence = nil
 	}
+	if i.decompressor != nil {
+		i.decompressor.Close()
+		// paranoic-mode on: don't delete frozen files
+		if !i.frozen {
+			if err := dir.RemoveFile(i.decompressor.FilePath()); err != nil {
+				log.Trace("remove after close", "err", err, "file", i.decompressor.FileName())
+			}
+			if err := dir.RemoveFile(i.decompressor.FilePath() + ".torrent"); err != nil {
+				log.Trace("remove after close", "err", err, "file", i.decompressor.FileName()+".torrent")
+			}
+		}
+		i.decompressor = nil
+	}
 }
 
+var filterDirtyFilesReCache sync.Map // pattern string → *regexp.Regexp
+
 func filterDirtyFiles(fileNames []string, stepSize, stepsInFrozenFile uint64, filenameBase, ext string, logger log.Logger) (res []*FilesItem) {
-	re := regexp.MustCompile(`^v(\d+(?:\.\d+)?)-` + filenameBase + `\.(\d+)-(\d+)\.` + ext + `$`)
+	pattern := `^v(\d+(?:\.\d+)?)-` + filenameBase + `\.(\d+)-(\d+)\.` + ext + `$`
+	reVal, ok := filterDirtyFilesReCache.Load(pattern)
+	if !ok {
+		re := regexp.MustCompile(pattern)
+		reVal, _ = filterDirtyFilesReCache.LoadOrStore(pattern, re)
+	}
+	re := reVal.(*regexp.Regexp)
 	var err error
 
 	for _, name := range fileNames {
@@ -397,7 +410,7 @@ func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 						_, fName := filepath.Split(fPath)
 						versionTooLowPanic(fName, d.FileVersion.AccessorBT)
 					}
-					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, DefaultBtreeM, d.dataReader(item.decompressor)); err != nil {
+					if item.bindex, err = btindex.OpenBtreeIndexWithDecompressor(fPath, btindex.DefaultBtreeM, d.dataReader(item.decompressor)); err != nil {
 						_, fName := filepath.Split(fPath)
 						d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
@@ -770,6 +783,25 @@ func (files visibleFiles) VisibleFiles() []VisibleFile {
 		res = append(res, file)
 	}
 	return res
+}
+
+// dirListing holds a directory path and its pre-read entry names.
+type dirListing struct {
+	dir   string
+	names []string
+}
+
+// readDirNames reads a directory once and returns a dirListing for reuse.
+func readDirNames(dir string) dirListing {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		panic(err)
+	}
+	names := make([]string, len(entries))
+	for i, e := range entries {
+		names[i] = e.Name()
+	}
+	return dirListing{dir: dir, names: names}
 }
 
 // fileItemsWithMissedAccessors returns list of files with missed accessors

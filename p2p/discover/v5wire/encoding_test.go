@@ -272,6 +272,34 @@ func TestHandshake_BadHandshakeAttack(t *testing.T) {
 	net.nodeB.expectDecodeErr(t, errUnexpectedHandshake, findnode)
 }
 
+func TestEncodeWhoareyouResend(t *testing.T) {
+	t.Parallel()
+	net := newHandshakeTest()
+	defer net.close()
+
+	// A -> B   WHOAREYOU
+	challenge := &Whoareyou{
+		Nonce:     Nonce{1, 2, 3, 4},
+		IDNonce:   testIDnonce,
+		RecordSeq: 0,
+	}
+	enc, _ := net.nodeA.encode(t, net.nodeB, challenge)
+	net.nodeB.expectDecode(t, WhoareyouPacket, enc)
+	whoareyou1 := bytes.Clone(enc)
+
+	if len(challenge.ChallengeData) == 0 {
+		t.Fatal("ChallengeData not assigned by encode")
+	}
+
+	// A sends the same WHOAREYOU challenge once more.
+	// The encoded result should be identical to the previous output.
+	enc, _ = net.nodeA.encode(t, net.nodeB, challenge)
+	whoareyou2 := bytes.Clone(enc)
+	if !bytes.Equal(whoareyou2, whoareyou1) {
+		t.Fatal("re-encoded challenge not equal to first")
+	}
+}
+
 // This test checks some malformed packets.
 func TestDecodeErrorsV5(t *testing.T) {
 	t.Parallel()
@@ -623,7 +651,7 @@ func hexFile(file string) []byte {
 
 	// Gather hex data, ignore comments.
 	var text []byte
-	for _, line := range bytes.Split(fileContent, []byte("\n")) {
+	for line := range bytes.SplitSeq(fileContent, []byte("\n")) {
 		line = bytes.TrimSpace(line)
 		if len(line) > 0 && line[0] == '#' {
 			continue
@@ -651,7 +679,7 @@ func writeTestVector(file, comment string, data []byte) {
 	defer fd.Close()
 
 	if len(comment) > 0 {
-		for _, line := range strings.Split(strings.TrimSpace(comment), "\n") {
+		for line := range strings.SplitSeq(strings.TrimSpace(comment), "\n") {
 			fmt.Fprintf(fd, "# %s\n", line)
 		}
 		fmt.Fprintln(fd)

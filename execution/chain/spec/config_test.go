@@ -20,12 +20,12 @@
 package chainspec
 
 import (
-	"math/big"
 	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 )
 
@@ -39,8 +39,8 @@ func TestCheckCompatible(t *testing.T) {
 		{stored: chain.AllProtocolChanges, new: chain.AllProtocolChanges, head: 0, wantErr: nil},
 		{stored: chain.AllProtocolChanges, new: chain.AllProtocolChanges, head: 100, wantErr: nil},
 		{
-			stored:  &chain.Config{TangerineWhistleBlock: big.NewInt(10)},
-			new:     &chain.Config{TangerineWhistleBlock: big.NewInt(20)},
+			stored:  &chain.Config{TangerineWhistleBlock: common.NewUint64(10)},
+			new:     &chain.Config{TangerineWhistleBlock: common.NewUint64(20)},
 			head:    9,
 			wantErr: nil,
 		},
@@ -50,47 +50,47 @@ func TestCheckCompatible(t *testing.T) {
 			head:   3,
 			wantErr: &chain.ConfigCompatError{
 				What:         "Homestead fork block",
-				StoredConfig: big.NewInt(0),
+				StoredConfig: common.NewUint64(0),
 				NewConfig:    nil,
 				RewindTo:     0,
 			},
 		},
 		{
 			stored: chain.AllProtocolChanges,
-			new:    &chain.Config{HomesteadBlock: big.NewInt(1)},
+			new:    &chain.Config{HomesteadBlock: common.NewUint64(1)},
 			head:   3,
 			wantErr: &chain.ConfigCompatError{
 				What:         "Homestead fork block",
-				StoredConfig: big.NewInt(0),
-				NewConfig:    big.NewInt(1),
+				StoredConfig: common.NewUint64(0),
+				NewConfig:    common.NewUint64(1),
 				RewindTo:     0,
 			},
 		},
 		{
-			stored: &chain.Config{HomesteadBlock: big.NewInt(30), TangerineWhistleBlock: big.NewInt(10)},
-			new:    &chain.Config{HomesteadBlock: big.NewInt(25), TangerineWhistleBlock: big.NewInt(20)},
+			stored: &chain.Config{HomesteadBlock: common.NewUint64(30), TangerineWhistleBlock: common.NewUint64(10)},
+			new:    &chain.Config{HomesteadBlock: common.NewUint64(25), TangerineWhistleBlock: common.NewUint64(20)},
 			head:   25,
 			wantErr: &chain.ConfigCompatError{
 				What:         "Tangerine Whistle fork block",
-				StoredConfig: big.NewInt(10),
-				NewConfig:    big.NewInt(20),
+				StoredConfig: common.NewUint64(10),
+				NewConfig:    common.NewUint64(20),
 				RewindTo:     9,
 			},
 		},
 		{
-			stored:  &chain.Config{ConstantinopleBlock: big.NewInt(30)},
-			new:     &chain.Config{ConstantinopleBlock: big.NewInt(30), PetersburgBlock: big.NewInt(30)},
+			stored:  &chain.Config{ConstantinopleBlock: common.NewUint64(30)},
+			new:     &chain.Config{ConstantinopleBlock: common.NewUint64(30), PetersburgBlock: common.NewUint64(30)},
 			head:    40,
 			wantErr: nil,
 		},
 		{
-			stored: &chain.Config{ConstantinopleBlock: big.NewInt(30)},
-			new:    &chain.Config{ConstantinopleBlock: big.NewInt(30), PetersburgBlock: big.NewInt(31)},
+			stored: &chain.Config{ConstantinopleBlock: common.NewUint64(30)},
+			new:    &chain.Config{ConstantinopleBlock: common.NewUint64(30), PetersburgBlock: common.NewUint64(31)},
 			head:   40,
 			wantErr: &chain.ConfigCompatError{
 				What:         "Petersburg fork block",
 				StoredConfig: nil,
-				NewConfig:    big.NewInt(31),
+				NewConfig:    common.NewUint64(31),
 				RewindTo:     30,
 			},
 		},
@@ -107,13 +107,13 @@ func TestCheckCompatible(t *testing.T) {
 func TestMainnetBlobSchedule(t *testing.T) {
 	c := Mainnet.Config
 	// Original EIP-4844 values
-	time := c.CancunTime.Uint64()
+	time := *c.CancunTime
 	assert.Equal(t, uint64(6), c.GetMaxBlobsPerBlock(time))
 	assert.Equal(t, uint64(3), c.GetTargetBlobsPerBlock(time))
 	assert.Equal(t, uint64(3338477), c.GetBlobGasPriceUpdateFraction(time))
 
 	// EIP-7691: Blob throughput increase
-	time = c.PragueTime.Uint64()
+	time = *c.PragueTime
 	assert.Equal(t, uint64(9), c.GetMaxBlobsPerBlock(time))
 	assert.Equal(t, uint64(6), c.GetTargetBlobsPerBlock(time))
 	assert.Equal(t, uint64(5007716), c.GetBlobGasPriceUpdateFraction(time))
@@ -123,7 +123,7 @@ func TestGnosisBlobSchedule(t *testing.T) {
 	c := Gnosis.Config
 
 	// Cancun values
-	time := c.CancunTime.Uint64()
+	time := *c.CancunTime
 	assert.Equal(t, uint64(2), c.GetMaxBlobsPerBlock(time))
 	assert.Equal(t, uint64(1), c.GetTargetBlobsPerBlock(time))
 	assert.Equal(t, uint64(1112826), c.GetBlobGasPriceUpdateFraction(time))

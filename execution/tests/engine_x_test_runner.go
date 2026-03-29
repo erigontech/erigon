@@ -27,18 +27,22 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
-func NewEngineXTestRunner(t *testing.T, logger log.Logger, preAllocsDir string) (*EngineXTestRunner, error) {
+func NewEngineXTestRunner(t testing.TB, logger log.Logger, preAllocsDir string) (*EngineXTestRunner, error) {
 	preAllocs := make(map[PreAllocHash]*PreAlloc)
 	err := filepath.WalkDir(preAllocsDir, func(path string, info os.DirEntry, err error) error {
 		if info.IsDir() {
@@ -63,17 +67,17 @@ func NewEngineXTestRunner(t *testing.T, logger log.Logger, preAllocsDir string) 
 		t:         t,
 		logger:    logger,
 		preAllocs: preAllocs,
-		testers:   make(map[Fork]map[PreAllocHash]EngineApiTester),
+		testers:   make(map[Fork]map[PreAllocHash]engineapitester.EngineApiTester),
 	}
 	return runner, nil
 }
 
 type EngineXTestRunner struct {
-	t         *testing.T
+	t         testing.TB
 	logger    log.Logger
 	preAllocs map[PreAllocHash]*PreAlloc
 	mu        sync.Mutex
-	testers   map[Fork]map[PreAllocHash]EngineApiTester
+	testers   map[Fork]map[PreAllocHash]engineapitester.EngineApiTester
 	wg        sync.WaitGroup
 }
 
@@ -82,28 +86,36 @@ func (extr *EngineXTestRunner) Run(ctx context.Context, test EngineXTestDefiniti
 	if err != nil {
 		return err
 	}
-	if len(test.NewPayloads) > 0 {
-		// make sure each test begins at genesis
-		// TODO actually this should be a call to debug_setHead once we implement it
-		//      because a FCU to an older canonical hash does NOT have to do an unwind as per spec
-		//      (in fact it is in our interest NOT to unwind, and currently this is a no-op)
-		//      hence debug_setHead will be the right way to do this once
-		//      https://github.com/erigontech/erigon/issues/18922 is ready
-		//err = processFcu(ctx, tester, tester.GenesisBlock.Hash(), test.NewPayloads[0].FcuVersion)
-		//if err != nil {
-		//	return err
-		//}
+	return extr.execute(ctx, tester, test)
+}
+
+// EnsureTester pre-creates the tester for the given test's fork+preAllocHash.
+// Call before benchmark timing to exclude setup costs.
+func (extr *EngineXTestRunner) EnsureTester(test EngineXTestDefinition) error {
+	_, err := extr.getOrCreateTester(test.Fork, test.PreAllocHash)
+	return err
+}
+
+// Execute runs the payload execution for a test (NewPayload + FCU)
+// without any tester setup. The tester must already exist.
+func (extr *EngineXTestRunner) Execute(ctx context.Context, test EngineXTestDefinition) error {
+	tester, err := extr.getOrCreateTester(test.Fork, test.PreAllocHash)
+	if err != nil {
+		return err
 	}
+	return extr.execute(ctx, tester, test)
+}
+
+func (extr *EngineXTestRunner) execute(ctx context.Context, tester engineapitester.EngineApiTester, test EngineXTestDefinition) error {
 	for _, newPayload := range test.NewPayloads {
-		err = processNewPayload(ctx, tester, newPayload)
-		if err != nil {
+		if err := processNewPayload(ctx, tester, newPayload); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (extr *EngineXTestRunner) getOrCreateTester(fork Fork, preAllocHash PreAllocHash) (EngineApiTester, error) {
+func (extr *EngineXTestRunner) getOrCreateTester(fork Fork, preAllocHash PreAllocHash) (engineapitester.EngineApiTester, error) {
 	extr.mu.Lock()
 	defer extr.mu.Unlock()
 	testersPerAlloc, ok := extr.testers[fork]
@@ -113,40 +125,70 @@ func (extr *EngineXTestRunner) getOrCreateTester(fork Fork, preAllocHash PreAllo
 			return tester, nil
 		}
 	} else {
-		testersPerAlloc = make(map[PreAllocHash]EngineApiTester)
+		testersPerAlloc = make(map[PreAllocHash]engineapitester.EngineApiTester)
 		extr.testers[fork] = testersPerAlloc
 	}
 	// create an engine api tester for [fork, preAllocHash] tuple
 	forkConfig, ok := testforks.Forks[fork.String()]
 	if !ok {
-		return EngineApiTester{}, testforks.UnsupportedForkError{Name: fork.String()}
+		return engineapitester.EngineApiTester{}, testforks.UnsupportedForkError{Name: fork.String()}
 	}
 	alloc, ok := extr.preAllocs[preAllocHash]
 	if !ok {
-		return EngineApiTester{}, fmt.Errorf("pre_alloc %s not found", preAllocHash)
+		return engineapitester.EngineApiTester{}, fmt.Errorf("pre_alloc %s not found", preAllocHash)
 	}
 	var forkConfigCopy chain.Config
 	err := copier.Copy(&forkConfigCopy, forkConfig)
 	if err != nil {
-		return EngineApiTester{}, err
+		return engineapitester.EngineApiTester{}, err
 	}
 	forkConfig = &forkConfigCopy
-	genesis := alloc.Genesis
-	genesis.Alloc = alloc.Alloc
-	genesis.Config = forkConfig
+	var genesis types.Genesis
+	if alloc.Environment.GasLimit != 0 {
+		// New format: build genesis from environment fields
+		env := alloc.Environment
+		genesis = types.Genesis{
+			Config:     forkConfig,
+			Alloc:      alloc.Alloc,
+			ExtraData:  []byte{0},
+			Coinbase:   env.Coinbase,
+			GasLimit:   uint64(env.GasLimit),
+			Difficulty: uint256.NewInt(uint64(env.Difficulty)),
+			Timestamp:  uint64(env.Timestamp),
+		}
+		if env.BaseFee != nil {
+			genesis.BaseFee = uint256.NewInt(uint64(*env.BaseFee))
+		}
+		if env.ExcessBlobGas != nil {
+			v := uint64(*env.ExcessBlobGas)
+			genesis.ExcessBlobGas = &v
+		}
+		if env.BlobGasUsed != nil {
+			v := uint64(*env.BlobGasUsed)
+			genesis.BlobGasUsed = &v
+		}
+	} else {
+		// Old format: genesis parsed directly from JSON
+		genesis = alloc.Genesis
+		genesis.Alloc = alloc.Alloc
+		genesis.Config = forkConfig
+	}
 	engineApiClientTimeout := 10 * time.Minute
-	tester := InitialiseEngineApiTester(extr.t, EngineApiTesterInitArgs{
+	tester := engineapitester.InitialiseEngineApiTester(extr.t, engineapitester.EngineApiTesterInitArgs{
 		Logger:                 extr.logger,
 		DataDir:                extr.t.TempDir(),
 		Genesis:                &genesis,
 		NoEmptyBlock1:          true,
 		EngineApiClientTimeout: &engineApiClientTimeout,
+		EthConfigTweaker: func(config *ethconfig.Config) {
+			config.MaxReorgDepth = 512
+		},
 	})
 	testersPerAlloc[preAllocHash] = tester
 	return testersPerAlloc[preAllocHash], nil
 }
 
-func processNewPayload(ctx context.Context, tester EngineApiTester, payload EngineXTestNewPayload) error {
+func processNewPayload(ctx context.Context, tester engineapitester.EngineApiTester, payload EngineXTestNewPayload) error {
 	var enginePayload enginetypes.ExecutionPayload
 	var blobHashes []common.Hash
 	var parentBeaconRoot common.Hash
@@ -173,7 +215,7 @@ func processNewPayload(ctx context.Context, tester EngineApiTester, payload Engi
 			return err
 		}
 	}
-	enginePayloadStatus, err := retryEngine(
+	enginePayloadStatus, err := engineapitester.RetryEngine(
 		ctx,
 		[]enginetypes.EngineStatus{enginetypes.SyncingStatus},
 		nil,
@@ -209,13 +251,13 @@ func processNewPayload(ctx context.Context, tester EngineApiTester, payload Engi
 	return processFcu(ctx, tester, enginePayload.BlockHash, payload.FcuVersion)
 }
 
-func processFcu(ctx context.Context, tester EngineApiTester, head common.Hash, version string) error {
+func processFcu(ctx context.Context, tester engineapitester.EngineApiTester, head common.Hash, version string) error {
 	fcu := enginetypes.ForkChoiceState{
 		HeadHash:           head,
 		SafeBlockHash:      common.Hash{},
 		FinalizedBlockHash: common.Hash{},
 	}
-	r, err := retryEngine(
+	r, err := engineapitester.RetryEngine(
 		ctx,
 		[]enginetypes.EngineStatus{enginetypes.SyncingStatus},
 		nil,
@@ -229,6 +271,8 @@ func processFcu(ctx context.Context, tester EngineApiTester, head common.Hash, v
 				r, err = tester.EngineApiClient.ForkchoiceUpdatedV2(ctx, &fcu, nil)
 			case "3":
 				r, err = tester.EngineApiClient.ForkchoiceUpdatedV3(ctx, &fcu, nil)
+			case "4":
+				r, err = tester.EngineApiClient.ForkchoiceUpdatedV4(ctx, &fcu, nil)
 			default:
 				return nil, "", fmt.Errorf("unsupported fcu version: %s", version)
 			}
@@ -262,8 +306,20 @@ type EngineXTestNewPayload struct {
 type PreAllocHash string
 
 type PreAlloc struct {
-	Genesis types.Genesis      `json:"genesis"`
-	Alloc   types.GenesisAlloc `json:"pre"`
+	Environment EngineXEnvironment `json:"environment"`
+	Genesis     types.Genesis      `json:"genesis"`
+	Alloc       types.GenesisAlloc `json:"pre"`
+}
+
+// EngineXEnvironment maps the "environment" field from engine-x pre-alloc JSON files.
+type EngineXEnvironment struct {
+	Coinbase      common.Address       `json:"currentCoinbase"`
+	GasLimit      math.HexOrDecimal64  `json:"currentGasLimit"`
+	Timestamp     math.HexOrDecimal64  `json:"currentTimestamp"`
+	Difficulty    math.HexOrDecimal64  `json:"currentDifficulty"`
+	BaseFee       *math.HexOrDecimal64 `json:"currentBaseFee"`
+	ExcessBlobGas *math.HexOrDecimal64 `json:"currentExcessBlobGas"`
+	BlobGasUsed   *math.HexOrDecimal64 `json:"currentBlobGasUsed"`
 }
 
 type Fork string

@@ -34,6 +34,9 @@ import (
 )
 
 func TestUDPv4_Lookup(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	test := newUDPTest(t)
 
@@ -69,6 +72,9 @@ func TestUDPv4_Lookup(t *testing.T) {
 }
 
 func TestUDPv4_LookupIterator(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	test := newUDPTest(t)
 	var wg sync.WaitGroup
@@ -263,7 +269,7 @@ type preminedTestnet struct {
 
 func (tn *preminedTestnet) len() int {
 	n := 0
-	for _, keys := range tn.dists {
+	for _, keys := range &tn.dists {
 		n += len(keys)
 	}
 	return n
@@ -271,7 +277,7 @@ func (tn *preminedTestnet) len() int {
 
 func (tn *preminedTestnet) nodes() []*enode.Node {
 	result := make([]*enode.Node, 0, tn.len())
-	for dist, keys := range tn.dists {
+	for dist, keys := range &tn.dists {
 		for index := range keys {
 			result = append(result, tn.node(dist, index))
 		}
@@ -359,7 +365,7 @@ func (tn *preminedTestnet) mine() {
 	fmt.Printf("&preminedTestnet{\n")
 	fmt.Printf("	target: hexEncPubkey(\"%x\"),\n", tn.target[:])
 	fmt.Printf("	dists: [%d][]*ecdsa.PrivateKey{\n", len(tn.dists))
-	for ld, ns := range tn.dists {
+	for ld, ns := range &tn.dists {
 		if len(ns) == 0 {
 			continue
 		}

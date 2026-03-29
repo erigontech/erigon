@@ -48,8 +48,11 @@ var (
 
 	dbWriteMap bool
 
-	chainTipMode bool
-	syncCfg      = ethconfig.Defaults.Sync
+	chainTipMode    bool
+	clearCommitment bool
+	resume          bool
+	noHistory       bool
+	syncCfg         = ethconfig.Defaults.Sync
 )
 
 func must(err error) {
@@ -111,6 +114,18 @@ func withReset(cmd *cobra.Command) {
 
 func withSqueeze(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&squeeze, "squeeze", true, "use offset-pointers from commitment.kv to account.kv")
+}
+
+func withClearCommitment(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&clearCommitment, "clear-commitment", false, "remove commitment data from DB and delete state files, then exit without rebuilding")
+}
+
+func withResume(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&resume, "resume", false, "resume a previously interrupted commitment rebuild")
+}
+
+func withNoHistory(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&noHistory, "no-history", false, "skip history regeneration and only rebuild commitment KV files")
 }
 
 func withBucket(cmd *cobra.Command) {
@@ -183,6 +198,25 @@ func withOutputCsvFile(cmd *cobra.Command) {
 func withChaosMonkey(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&syncCfg.ChaosMonkey, utils.ChaosMonkeyFlag.Name, utils.ChaosMonkeyFlag.Value, utils.ChaosMonkeyFlag.Usage)
 }
+
+// withStageBase applies flags common to most stage commands: config, datadir, chain, chaos monkey, heimdall, unwind.
+func withStageBase(cmd *cobra.Command) {
+	withConfig(cmd)
+	withDataDir(cmd)
+	withChain(cmd)
+	withChaosMonkey(cmd)
+	withHeimdall(cmd)
+	withUnwind(cmd)
+}
+
+// withTraceFlags applies flags shared by exec-style tracing commands.
+func withTraceFlags(cmd *cobra.Command) {
+	withNoCommit(cmd)
+	withBatchSize(cmd)
+	withTxTrace(cmd)
+	withWorkers(cmd)
+}
+
 func withChainTipMode(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&chainTipMode, "sync.mode.chaintip", false, "Every block does: `CalcCommitment`, `rwtx.Commit()`, generate diffs/changesets. Also can use it to generate diffs before `integration loop_exec`")
 }

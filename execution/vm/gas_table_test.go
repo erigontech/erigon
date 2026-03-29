@@ -38,7 +38,9 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -117,8 +119,10 @@ func TestEIP2200(t *testing.T) {
 			t.Parallel()
 
 			tx, sd := testTemporalTxSD(t)
+			txNum, _, err := sd.SeekCommitment(t.Context(), tx)
+			require.NoError(t, err)
 
-			r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, sd.TxNum())
+			r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 			s := state.New(r)
 
 			address := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
@@ -134,15 +138,17 @@ func TestEIP2200(t *testing.T) {
 			}
 			_ = s.CommitBlock(vmctx.Rules(chain.AllProtocolChanges), w)
 			vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.AllProtocolChanges, vm.Config{ExtraEips: []int{2200}})
-
-			_, gas, err := vmenv.Call(accounts.ZeroAddress, address, nil, tt.gaspool, uint256.Int{}, false /* bailout */)
+			mdGas := mdgas.MdGas{
+				Regular: tt.gaspool,
+			}
+			_, gas, err := vmenv.Call(accounts.ZeroAddress, address, nil, mdGas, uint256.Int{}, false /* bailout */)
 			if !errors.Is(err, tt.failure) {
 				t.Errorf("test %d: failure mismatch: have %v, want %v", i, err, tt.failure)
 			}
-			if used := tt.gaspool - gas; used != tt.used {
+			if used := tt.gaspool - gas.Regular; used != tt.used {
 				t.Errorf("test %d: gas used mismatch: have %v, want %v", i, used, tt.used)
 			}
-			if refund := vmenv.IntraBlockState().GetRefund(); refund != tt.refund {
+			if refund := vmenv.IntraBlockState().GetRefund(); refund.Regular != tt.refund {
 				t.Errorf("test %d: gas refund mismatch: have %v, want %v", i, refund, tt.refund)
 			}
 		})
@@ -166,7 +172,7 @@ var createGasTests = []struct {
 
 func TestCreateGas(t *testing.T) {
 	t.Parallel()
-	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	db := testutil.TemporalDB(t)
 	tx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -176,7 +182,6 @@ func TestCreateGas(t *testing.T) {
 
 		domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 		require.NoError(t, err)
-		defer domains.Close()
 
 		stateReader := rpchelper.NewLatestStateReader(domains.AsGetter(tx))
 		stateWriter := rpchelper.NewLatestStateWriter(tx, domains, (*freezeblocks.BlockReader)(nil), 0)
@@ -191,6 +196,9 @@ func TestCreateGas(t *testing.T) {
 				return nil
 			},
 		}
+		//
+		// TODO revis BlockContext and add test for eip8037?
+		//
 		_ = s.CommitBlock(vmctx.Rules(chain.TestChainConfig), stateWriter)
 		config := vm.Config{}
 		if tt.eip3860 {
@@ -198,13 +206,14 @@ func TestCreateGas(t *testing.T) {
 		}
 
 		vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.TestChainConfig, config)
-
-		var startGas uint64 = math.MaxUint64
+		startGas := mdgas.MdGas{
+			Regular: math.MaxUint64,
+		}
 		_, gas, err := vmenv.Call(accounts.ZeroAddress, address, nil, startGas, uint256.Int{}, false /* bailout */)
 		if err != nil {
 			t.Errorf("test %d execution failed: %v", i, err)
 		}
-		if gasUsed := startGas - gas; gasUsed != tt.gasUsed {
+		if gasUsed := startGas.Regular - gas.Regular; gasUsed != tt.gasUsed {
 			t.Errorf("test %d: gas used mismatch: have %v, want %v", i, gasUsed, tt.gasUsed)
 		}
 		domains.Close()

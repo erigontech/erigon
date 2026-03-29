@@ -31,10 +31,10 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
@@ -166,7 +166,7 @@ func (c *spanner) CommitSpan(heimdallSpan heimdall.Span, syscall rules.SystemCal
 }
 
 type validator struct {
-	*mock.MockSentry
+	*execmoduletester.ExecModuleTester
 	heimdall *testHeimdall
 	blocks   map[uint64]*types.Block
 }
@@ -291,7 +291,14 @@ func newValidator(t *testing.T, testHeimdall *testHeimdall, blocks map[uint64]*t
 	})
 
 	return validator{
-		mock.MockWithEverything(t, &types.Genesis{Config: testHeimdall.chainConfig}, validatorKey, prune.DefaultMode, bor, 1024, false),
+		execmoduletester.New(
+			t,
+			execmoduletester.WithGenesisSpec(&types.Genesis{Config: testHeimdall.chainConfig}),
+			execmoduletester.WithKey(validatorKey),
+			execmoduletester.WithPruneMode(prune.DefaultMode),
+			execmoduletester.WithEngine(bor),
+			execmoduletester.WithBlockBufferSize(1024),
+		),
 		testHeimdall,
 		blocks,
 	}
@@ -399,6 +406,9 @@ func testVerify(t *testing.T, noValidators int, chainLength int) {
 }
 
 func TestSendBlock(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	heimdall := newTestHeimdall(polychain.BorDevnet.Config)
 	blocks := map[uint64]*types.Block{}
 

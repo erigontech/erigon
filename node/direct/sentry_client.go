@@ -34,6 +34,7 @@ import (
 const (
 	ETH68 = 68
 	ETH69 = 69
+	ETH70 = 70
 
 	WIT0 = 1
 )
@@ -42,10 +43,12 @@ var (
 	ProtocolToUintMap = map[sentryproto.Protocol]uint{
 		sentryproto.Protocol_ETH68: ETH68,
 		sentryproto.Protocol_ETH69: ETH69,
+		sentryproto.Protocol_ETH70: ETH70,
 	}
 	UintToProtocolMap = map[uint]sentryproto.Protocol{
 		ETH68: sentryproto.Protocol_ETH68,
 		ETH69: sentryproto.Protocol_ETH69,
+		ETH70: sentryproto.Protocol_ETH70,
 	}
 	SupportedSideProtocols = map[sentryproto.Protocol]struct{}{
 		sentryproto.Protocol_WIT0: {},
@@ -323,6 +326,14 @@ func (c *SentryClientDirect) AddPeer(ctx context.Context, in *sentryproto.AddPee
 
 func (c *SentryClientDirect) RemovePeer(ctx context.Context, in *sentryproto.RemovePeerRequest, opts ...grpc.CallOption) (*sentryproto.RemovePeerReply, error) {
 	return c.server.RemovePeer(ctx, in)
+}
+
+func (c *SentryClientDirect) AddTrustedPeer(ctx context.Context, in *sentryproto.AddPeerRequest, opts ...grpc.CallOption) (*sentryproto.AddPeerReply, error) {
+	return c.server.AddTrustedPeer(ctx, in)
+}
+
+func (c *SentryClientDirect) RemoveTrustedPeer(ctx context.Context, in *sentryproto.RemovePeerRequest, opts ...grpc.CallOption) (*sentryproto.RemovePeerReply, error) {
+	return c.server.RemoveTrustedPeer(ctx, in)
 }
 
 type peersReply struct {

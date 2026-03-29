@@ -79,7 +79,7 @@ func seedableSegmentFiles(dir string, chainName string, skipSeedableCheck bool) 
 		return nil, err
 	}
 
-	segConfig, _ := snapcfg.KnownCfg(chainName)
+	segConfig := snapcfg.KnownCfgOrDevnet(chainName)
 
 	res := make([]string, 0, len(files))
 	for _, fPath := range files {

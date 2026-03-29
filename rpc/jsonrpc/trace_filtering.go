@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	jsoniter "github.com/json-iterator/go"
 
@@ -374,8 +375,8 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	var fromTxNum, toTxNum uint64
 	var err error
 
-	if api.rangeLimit != 0 && (toBlock-fromBlock) > uint64(api.rangeLimit) {
-		return fmt.Errorf("%s: %d", errExceedBlockRange, api.rangeLimit)
+	if api.blockRangeLimit != 0 && (toBlock-fromBlock) > uint64(api.blockRangeLimit) {
+		return fmt.Errorf("%s: %d", errExceedBlockRange, api.blockRangeLimit)
 	}
 
 	if fromBlock > 0 {
@@ -427,7 +428,11 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 
 	noop := state.NewNoopWriter()
 	isPos := false
+
 	for it.HasNext() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		txNum, blockNum, txIndex, isFnalTxn, blockNumChanged, err := it.Next()
 		if err != nil {
 			if first {
@@ -467,7 +472,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 
 			if !isPos && chainConfig.TerminalTotalDifficulty != nil {
 				header := lastHeader
-				isPos = header.Difficulty.Sign() == 0 || header.Difficulty.Cmp(chainConfig.TerminalTotalDifficulty) >= 0
+				isPos = header.Difficulty.IsZero() || header.Difficulty.CmpBig(chainConfig.TerminalTotalDifficulty) >= 0
 			}
 
 			lastBlockHash = lastHeader.Hash()
@@ -632,8 +637,8 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		ibs := state.New(cachedReader)
 
 		blockCtx := transactions.NewEVMBlockContext(engine, lastHeader, true /* requireCanonical */, dbtx, api._blockReader, chainConfig)
-		txCtx := protocol.NewEVMTxContext(msg)
-		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
+		evmTxCtx := protocol.NewEVMTxContext(msg)
+		evm := vm.NewEVM(blockCtx, evmTxCtx, ibs, chainConfig, vmConfig)
 
 		gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 		ibs.SetTxContext(blockNum, txIndex)
@@ -643,8 +648,35 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			ot.Tracer().OnTxStart(evm.GetVMContext(), txn, msg.From())
 		}
 
+		var timer *time.Timer
+		if api.evmCallTimeout > 0 {
+			timer = time.AfterFunc(api.evmCallTimeout, evm.Cancel)
+		}
 		var execResult *evmtypes.ExecutionResult
 		execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailOut, engine)
+		if timer != nil {
+			timer.Stop()
+		}
+		timedOut := timer != nil && evm.Cancelled()
+
+		if timedOut {
+			timeoutErr := fmt.Errorf("execution aborted (timeout = %v)", api.evmCallTimeout)
+			if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
+				ot.Tracer().OnTxEnd(nil, timeoutErr)
+			}
+			if first {
+				first = false
+			} else {
+				stream.WriteMore()
+			}
+			stream.WriteObjectStart()
+			rpc.HandleError(timeoutErr, stream)
+			stream.WriteObjectEnd()
+			// Safe to skip FinalizeTx/CommitBlock: each iteration creates a fresh
+			// stateCache, cachedReader and ibs from the next txNum, and writes go
+			// to a noop writer, so no partial state escapes this scope.
+			continue
+		}
 		if err != nil {
 			if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
 				ot.Tracer().OnTxEnd(nil, err)

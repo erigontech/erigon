@@ -22,8 +22,8 @@ import (
 	"testing"
 
 	"github.com/c2h5oh/datasize"
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/stretchr/testify/assert"
-	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -67,7 +67,7 @@ func TestCacheBtreeOrderAccountStorage(t *testing.T) {
 	sc.SetStorageWrite(a1.Bytes(), 1, l2.Bytes(), nil)
 	sc.SetStorageWrite(a2.Bytes(), 1, l3.Bytes(), nil)
 	lastK = lastK[:0]
-	if err := sc.WalkStorage(common.BytesToHash(sha3.NewLegacyKeccak256().Sum(a1.Bytes())), 1, nil, func(locHash common.Hash, val []byte) error {
+	if err := sc.WalkStorage(common.BytesToHash(keccak.NewFastKeccak().Sum(a1.Bytes())), 1, nil, func(locHash common.Hash, val []byte) error {
 		curK = append(curK[:0], locHash.Bytes()...)
 		assert.Negative(t, bytes.Compare(lastK, curK))
 		lastK = append(lastK[:0], curK...)

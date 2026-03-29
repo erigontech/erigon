@@ -18,10 +18,12 @@ package memdb
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -38,9 +40,15 @@ func NewChainDB(tb testing.TB, tmpDir string) kv.RwDB {
 
 func NewTestDB(tb testing.TB, label kv.Label) kv.RwDB {
 	tb.Helper()
-	tmpDir := tb.TempDir()
-	db := New(tb, tmpDir, label)
-	tb.Cleanup(db.Close)
+	// we can't use tb.TempDir() here becuase things like TestExecutionSpecBlockchain
+	// produces test names that cause 'file name too long' errors
+	dirname, err := os.MkdirTemp("", "testdb-"+string(label)+"-*")
+	if err != nil {
+		tb.Fatal(err)
+	}
+	tb.Cleanup(func() { dir.RemoveAll(dirname) })
+	db := New(tb, dirname, label)
+	tb.Cleanup(func() { db.Close() })
 	return db
 }
 

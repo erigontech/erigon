@@ -31,18 +31,19 @@ func NewEnv(cfg *Config) *vm.EVM {
 		Origin:   cfg.Origin,
 		GasPrice: cfg.GasPrice,
 	}
-
 	blockContext := evmtypes.BlockContext{
 		CanTransfer: protocol.CanTransfer,
 		Transfer:    misc.Transfer,
 		GetHash:     cfg.GetHashFn,
 		Coinbase:    cfg.Coinbase,
-		BlockNumber: cfg.BlockNumber.Uint64(),
-		Time:        cfg.Time.Uint64(),
-		Difficulty:  cfg.Difficulty,
+		BlockNumber: cfg.BlockNumber,
+		Time:        cfg.Time,
+		Difficulty:  *cfg.Difficulty,
 		GasLimit:    cfg.GasLimit,
 		BaseFee:     cfg.BaseFee,
 	}
-
+	if cfg.ChainConfig.IsAmsterdam(cfg.Time) {
+		blockContext.CostPerStateByte = misc.CostPerStateByte(cfg.GasLimit)
+	}
 	return vm.NewEVM(blockContext, txContext, cfg.State, cfg.ChainConfig, cfg.EVMConfig)
 }

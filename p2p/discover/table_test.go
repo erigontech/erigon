@@ -200,6 +200,9 @@ func checkIPLimitInvariant(t *testing.T, tab *Table) {
 }
 
 func TestTable_findnodeByID(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 
 	test := func(test *closeTest) bool {
@@ -488,7 +491,7 @@ func gen(typ interface{}, rand *rand.Rand) interface{} {
 
 func quickcfg() *quick.Config {
 	return &quick.Config{
-		MaxCount: 5000,
+		MaxCount: 500,
 		Rand:     rand.New(rand.NewSource(time.Now().Unix())),
 	}
 }

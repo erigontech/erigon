@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
@@ -52,7 +53,7 @@ type CursorItem struct {
 	iter         btree2.MapIter[string, []dataWithTxNum]
 	kvReader     *seg.Reader
 	hist         *seg.PagedReader
-	btCursor     *Cursor
+	btCursor     *btindex.Cursor
 	key          []byte
 	val          []byte
 	step         kv.Step
@@ -375,7 +376,7 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 	var err error
 
 	if ramIter.Seek(string(prefix)) {
-		k := toBytesZeroCopy(ramIter.Key())
+		k := common.ToBytesZeroCopy(ramIter.Key())
 
 		v = ramIter.Value()[len(ramIter.Value())-1].data
 
@@ -430,7 +431,7 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 			switch ci1.t {
 			case RAM_CURSOR:
 				if ci1.iter.Next() {
-					k = toBytesZeroCopy(ci1.iter.Key())
+					k = common.ToBytesZeroCopy(ci1.iter.Key())
 					if k != nil && bytes.HasPrefix(k, prefix) {
 						ci1.key = common.Copy(k)
 						ci1.val = common.Copy(ci1.iter.Value()[len(ci1.iter.Value())-1].data)

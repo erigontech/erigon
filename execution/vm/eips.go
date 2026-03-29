@@ -369,3 +369,21 @@ func enable8024(jt *JumpTable) {
 		numPush:     0,
 	}
 }
+
+// enable7843 applies EIP-7843 (SLOTNUM)
+func enable7843(jt *JumpTable) {
+	jt[SLOTNUM] = &operation{
+		execute:     opSlotNum,
+		constantGas: GasQuickStep,
+		numPop:      0,
+		numPush:     1,
+	}
+}
+
+// enable8037 applies EIP-8037 (State Creation Gas Cost Increase)
+func enable8037(jt *JumpTable) {
+	jt[CREATE].constantGas = params.CreateGasEIP8037
+	jt[CREATE].dynamicGas = gasCreateEip8037
+	jt[CREATE2].constantGas = params.Create2GasEIP8037
+	jt[CREATE2].dynamicGas = gasCreate2Eip8037
+}

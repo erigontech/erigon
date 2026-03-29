@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"sync/atomic"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -34,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
@@ -72,9 +74,9 @@ type SimulationRequest struct {
 
 // SimulatedBlock defines the simulation for a single block.
 type SimulatedBlock struct {
-	BlockOverrides *transactions.BlockOverrides `json:"blockOverrides,omitempty"`
-	StateOverrides *ethapi.StateOverrides       `json:"stateOverrides,omitempty"`
-	Calls          []ethapi.CallArgs            `json:"calls"`
+	BlockOverrides *ethapi.BlockOverrides `json:"blockOverrides,omitempty"`
+	StateOverrides *ethapi.StateOverrides `json:"stateOverrides,omitempty"`
+	Calls          []ethapi.CallArgs      `json:"calls"`
 }
 
 // CallResult represents the result of a single call in the simulation.
@@ -82,6 +84,7 @@ type CallResult struct {
 	ReturnData string          `json:"returnData"`
 	Logs       []*types.RPCLog `json:"logs"`
 	GasUsed    hexutil.Uint64  `json:"gasUsed"`
+	MaxUsedGas hexutil.Uint64  `json:"maxUsedGas"`
 	Status     hexutil.Uint64  `json:"status"`
 	Error      any             `json:"error,omitempty"`
 }
@@ -229,35 +232,35 @@ func newSimulator(
 // Note: this can modify BlockOverrides objects in simulated blocks.
 func (s *simulator) sanitizeSimulatedBlocks(blocks []SimulatedBlock) ([]SimulatedBlock, error) {
 	sanitizedBlocks := make([]SimulatedBlock, 0, len(blocks))
-	prevNumber := s.base.Number
+	prevNumber := s.base.Number.Uint64()
 	prevTimestamp := s.base.Time
 	for _, block := range blocks {
 		if block.BlockOverrides == nil {
-			block.BlockOverrides = &transactions.BlockOverrides{}
+			block.BlockOverrides = &ethapi.BlockOverrides{}
 		}
-		if block.BlockOverrides.BlockNumber == nil {
-			nextNumber := prevNumber.Uint64() + 1
-			block.BlockOverrides.BlockNumber = (*hexutil.Uint64)(&nextNumber)
+		if block.BlockOverrides.Number == nil {
+			nextNumber := prevNumber + 1
+			block.BlockOverrides.Number = (*hexutil.Big)(new(big.Int).SetUint64(nextNumber))
 		}
-		blockNumber := new(big.Int).SetUint64(block.BlockOverrides.BlockNumber.Uint64())
-		diff := new(big.Int).Sub(blockNumber, prevNumber)
-		if diff.Cmp(common.Big0) <= 0 {
+		blockNumber := block.BlockOverrides.Number.Uint64()
+		if blockNumber <= prevNumber {
 			return nil, invalidBlockNumberError(fmt.Sprintf("block numbers must be in order: %d <= %d", blockNumber, prevNumber))
 		}
-		if total := new(big.Int).Sub(blockNumber, s.base.Number); total.Cmp(big.NewInt(maxSimulateBlocks)) > 0 {
+		if total := blockNumber - s.base.Number.Uint64(); total > maxSimulateBlocks {
 			return nil, clientLimitExceededError(fmt.Sprintf("too many blocks: %d > %d", total, maxSimulateBlocks))
 		}
-		if diff.Cmp(big.NewInt(1)) > 0 {
+		diff := blockNumber - prevNumber
+		if diff > 1 {
 			// Fill the gap with empty blocks.
-			gap := new(big.Int).Sub(diff, big.NewInt(1))
+			gap := diff - 1
 			// Assign block number to the empty blocks.
-			for i := uint64(0); i < gap.Uint64(); i++ {
-				n := new(big.Int).Add(prevNumber, big.NewInt(int64(i+1))).Uint64()
+			for i := uint64(0); i < gap; i++ {
+				n := prevNumber + i + 1
 				t := prevTimestamp + timestampIncrement
 				b := SimulatedBlock{
-					BlockOverrides: &transactions.BlockOverrides{
-						BlockNumber: (*hexutil.Uint64)(&n),
-						Timestamp:   (*hexutil.Uint64)(&t),
+					BlockOverrides: &ethapi.BlockOverrides{
+						Number: (*hexutil.Big)(new(big.Int).SetUint64(n)),
+						Time:   (*hexutil.Uint64)(&t),
 					},
 				}
 				prevTimestamp = t
@@ -267,11 +270,11 @@ func (s *simulator) sanitizeSimulatedBlocks(blocks []SimulatedBlock) ([]Simulate
 		// Only append block after filling a potential gap.
 		prevNumber = blockNumber
 		var timestamp uint64
-		if block.BlockOverrides.Timestamp == nil {
+		if block.BlockOverrides.Time == nil {
 			timestamp = prevTimestamp + timestampIncrement
-			block.BlockOverrides.Timestamp = (*hexutil.Uint64)(&timestamp)
+			block.BlockOverrides.Time = (*hexutil.Uint64)(&timestamp)
 		} else {
-			timestamp = block.BlockOverrides.Timestamp.Uint64()
+			timestamp = block.BlockOverrides.Time.Uint64()
 			if timestamp <= prevTimestamp {
 				return nil, invalidBlockTimestampError(fmt.Sprintf("block timestamps must be in order: %d <= %d", timestamp, prevTimestamp))
 			}
@@ -290,17 +293,17 @@ func (s *simulator) makeHeaders(blocks []SimulatedBlock) ([]*types.Header, error
 	header := s.base
 	headers := make([]*types.Header, len(blocks))
 	for bi, block := range blocks {
-		if block.BlockOverrides == nil || block.BlockOverrides.BlockNumber == nil {
+		if block.BlockOverrides == nil || block.BlockOverrides.Number == nil {
 			return nil, errors.New("empty block number")
 		}
 		overrides := block.BlockOverrides
 
 		var withdrawalsHash *common.Hash
-		if s.chainConfig.IsShanghai((uint64)(*overrides.Timestamp)) {
+		if s.chainConfig.IsShanghai((uint64)(*overrides.Time)) {
 			withdrawalsHash = &empty.WithdrawalsHash
 		}
 		var parentBeaconRoot *common.Hash
-		if s.chainConfig.IsCancun((uint64)(*overrides.Timestamp)) {
+		if s.chainConfig.IsCancun((uint64)(*overrides.Time)) {
 			parentBeaconRoot = &common.Hash{}
 			if overrides.BeaconRoot != nil {
 				parentBeaconRoot = overrides.BeaconRoot
@@ -326,7 +329,7 @@ func (s *simulator) sanitizeCall(
 	args *ethapi.CallArgs,
 	intraBlockState *state.IntraBlockState,
 	blockContext *evmtypes.BlockContext,
-	baseFee *big.Int,
+	baseFee *uint256.Int,
 	gasUsed uint64,
 	globalGasCap uint64,
 ) error {
@@ -476,7 +479,7 @@ func (s *simulator) simulateBlock(
 			if s.validation {
 				header.BaseFee = misc.CalcBaseFee(s.chainConfig, parent)
 			} else {
-				header.BaseFee = big.NewInt(0)
+				header.BaseFee = uint256.NewInt(0)
 			}
 		}
 	}
@@ -490,42 +493,22 @@ func (s *simulator) simulateBlock(
 
 	blockNumber := header.Number.Uint64()
 
-	blockHashOverrides := transactions.BlockHashOverrides{}
+	blockHashOverrides := ethapi.BlockHashOverrides{}
 	txnList := make([]types.Transaction, 0, len(bsc.Calls))
 	receiptList := make(types.Receipts, 0, len(bsc.Calls))
 	tracer := rpchelper.NewLogTracer(s.traceTransfers, blockNumber, common.Hash{}, common.Hash{}, 0)
 	cumulativeGasUsed := uint64(0)
 	cumulativeBlobGasUsed := uint64(0)
 
-	minTxNum, err := s.txNumReader.Min(ctx, tx, blockNumber)
+	stateReader, minTxNum, firstMinTxNum, err := s.newStateReaderForBlock(ctx, tx, sharedDomains, blockNumber, ancestors, latest)
 	if err != nil {
 		return nil, nil, err
-	}
-	sharedDomains.SetBlockNum(blockNumber)
-	sharedDomains.SetTxNum(minTxNum)
-
-	var stateReader state.StateReader
-	if latest {
-		stateReader = state.NewReaderV3(sharedDomains.AsGetter(tx))
-	} else {
-		if minTxNum < state.StateHistoryStartTxNum(tx) {
-			return nil, nil, fmt.Errorf("%w: min tx: %d", state.PrunedError, minTxNum)
-		}
-		stateReader = state.NewHistoryReaderV3(tx, minTxNum)
-
-		commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
-		if s.commitmentHistory && minTxNum < commitmentStartingTxNum {
-			return nil, nil, fmt.Errorf("%w: min commitment: %d, min tx: %d", state.PrunedError, commitmentStartingTxNum, minTxNum)
-		}
 	}
 	intraBlockState := state.New(stateReader)
 
 	// Create a custom block context and apply any custom block overrides
 	blockCtx := transactions.NewEVMBlockContextWithOverrides(ctx, s.engine, header, tx, s.newSimulatedCanonicalReader(ancestors), s.chainConfig,
 		bsc.BlockOverrides, blockHashOverrides)
-	if bsc.BlockOverrides.BlobBaseFee != nil {
-		blockCtx.BlobBaseFee = *bsc.BlockOverrides.BlobBaseFee.ToUint256()
-	}
 	rules := blockCtx.Rules(s.chainConfig)
 
 	// Determine the active precompiled contracts for this block.
@@ -564,7 +547,7 @@ func (s *simulator) simulateBlock(
 		return nil, nil, err
 	}
 
-	stateWriter := newDiffTrackingWriter(sharedDomains.AsPutDel(tx), sharedDomains.TxNum())
+	stateWriter := newDiffTrackingWriter(sharedDomains.AsPutDel(tx), minTxNum)
 	callResults := make([]CallResult, 0, len(bsc.Calls))
 	for callIndex, call := range bsc.Calls {
 		callResult, txn, receipt, err := s.simulateCall(ctx, blockCtx, intraBlockState, callIndex, &call, header,
@@ -602,34 +585,8 @@ func (s *simulator) simulateBlock(
 		return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
 	}
 
-	// Compute the state root for execution on the latest state and also on the historical state if commitment history is present.
-	if latest || s.commitmentHistory {
-		if !latest {
-			// Restore the commitment state at the start of the simulated block using historical state reader.
-			sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, minTxNum)
-			if err := sharedDomains.SeekCommitment(context.Background(), tx); err != nil {
-				return nil, nil, err
-			}
-			// Change the state reader to a commitment-only history reader that reads non-commitment domains from the latest state.
-			txNum := minTxNum + 1 + uint64(len(bsc.Calls))
-			sharedDomains.GetCommitmentContext().SetStateReader(newHistoryCommitmentOnlyReader(tx, sharedDomains, txNum+1))
-		}
-		stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, false, blockNumber, sharedDomains.TxNum(), "eth_simulateV1", nil)
-		if err != nil {
-			return nil, nil, err
-		}
-		block.HeaderNoCopy().Root = common.BytesToHash(stateRoot)
-	} else {
-		// We can efficiently compute the root from state history if it's not frozen, otherwise we just use the zero hash (default value).
-		if s.blockReader.FrozenBlocks() == 0 {
-			txNum := minTxNum + 1 + uint64(len(bsc.Calls))
-			stateRoot, err := s.computeCommitmentFromStateHistory(ctx, tx, sharedDomains, stateWriter.touchedKeys, parent.Number.Uint64(), txNum)
-			if err != nil {
-				return nil, nil, err
-			}
-			s.logger.Debug("stateRoot", "root", common.Bytes2Hex(stateRoot))
-			block.HeaderNoCopy().Root = common.BytesToHash(stateRoot)
-		}
+	if err := s.computeSimulatedStateRoot(ctx, tx, sharedDomains, bsc, block, parent, minTxNum, firstMinTxNum, stateWriter.touchedKeys, ancestors, latest); err != nil {
+		return nil, nil, err
 	}
 
 	// Marshal the block in RPC format including the call results in a custom field.
@@ -641,6 +598,115 @@ func (s *simulator) simulateBlock(
 	repairLogs(callResults, block.Hash())
 	blockResult["calls"] = callResults
 	return blockResult, block, nil
+}
+
+// newStateReaderForBlock returns the appropriate StateReader for a simulated block, along with
+// minTxNum (txNum of the current block) and firstMinTxNum (txNum of the first simulated block).
+//
+// For the first simulated block (len(ancestors)==0): uses HistoryReaderV3 anchored at minTxNum.
+// For subsequent blocks (len(ancestors)>0): uses simulationIntraBlockStateReader which overlays
+// sharedDomains.mem (state changes from previous simulation blocks) on top of the canonical base state.
+func (s *simulator) newStateReaderForBlock(
+	ctx context.Context,
+	tx kv.TemporalTx,
+	sharedDomains *execctx.SharedDomains,
+	blockNumber uint64,
+	ancestors []*types.Header,
+	latest bool,
+) (state.StateReader, uint64, uint64, error) {
+	minTxNum, err := s.txNumReader.Min(ctx, tx, blockNumber)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+
+	// firstMinTxNum: minTxNum of the first simulated block (or this block if it's the first).
+	// Used both here and for the commitment reader to anchor reads at the canonical base-parent.
+	firstMinTxNum := minTxNum
+	if len(ancestors) > 0 {
+		firstMinTxNum, err = s.txNumReader.Min(ctx, tx, ancestors[0].Number.Uint64())
+		if err != nil {
+			return nil, 0, 0, err
+		}
+	}
+
+	if latest {
+		return state.NewReaderV3(sharedDomains.AsGetter(tx)), minTxNum, firstMinTxNum, nil
+	}
+
+	if minTxNum < state.StateHistoryStartTxNum(tx) {
+		return nil, 0, 0, fmt.Errorf("%w: min tx: %d", state.PrunedError, minTxNum)
+	}
+	commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+	if s.commitmentHistory && minTxNum < commitmentStartingTxNum {
+		return nil, 0, 0, fmt.Errorf("%w: min commitment: %d, min tx: %d", state.PrunedError, commitmentStartingTxNum, minTxNum)
+	}
+
+	if len(ancestors) > 0 {
+		// Multi-block simulation: overlay sharedDomains.mem (previous blocks' simulation changes)
+		// on top of the canonical base state so the EVM sees the correct simulated balances.
+		return newSimulationIntraBlockStateReader(tx, sharedDomains, firstMinTxNum), minTxNum, firstMinTxNum, nil
+	}
+	return state.NewHistoryReaderV3(tx, minTxNum), minTxNum, firstMinTxNum, nil
+}
+
+// computeSimulatedStateRoot computes the stateRoot for the simulated block and sets it on the block header.
+func (s *simulator) computeSimulatedStateRoot(
+	ctx context.Context,
+	tx kv.TemporalTx,
+	sharedDomains *execctx.SharedDomains,
+	bsc *SimulatedBlock,
+	block *types.Block,
+	parent *types.Header,
+	minTxNum, firstMinTxNum uint64,
+	touchedKeys keysByAccount,
+	ancestors []*types.Header,
+	latest bool,
+) error {
+	if latest || s.commitmentHistory {
+		commitTxNum := minTxNum
+		if !latest {
+			// In a multi-block simulation (len(ancestors) > 0) the trie is already at parent.Root
+			// because the previous simulation step left it there.  Calling SeekCommitment would
+			// overwrite that correct trie state with the canonical chain's state, producing a wrong stateRoot.
+			if len(ancestors) == 0 {
+				// First simulated block: restore the commitment state from history and seek to it.
+				sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, minTxNum)
+				var err error
+				commitTxNum, _, err = sharedDomains.SeekCommitment(ctx, tx)
+				if err != nil {
+					return err
+				}
+			} else {
+				// Subsequent simulated blocks: trie is already correct from the previous step.
+				// SeekCommitment always returns commitTxNum = minTxNum - 1 (off-by-1, expected).
+				commitTxNum = minTxNum - 1
+			}
+			// firstMinTxNum anchors both readers at the canonical base-parent state:
+			// - commitmentAsOfTxNum = firstMinTxNum+1: trie branches from the base-parent commitment.
+			// - plainStateAsOfTxNum = firstMinTxNum: clean sibling accounts from the base-parent state.
+			sharedDomains.GetCommitmentContext().SetStateReader(
+				newHistoryCommitmentOnlyReader(tx, sharedDomains, firstMinTxNum+1, firstMinTxNum),
+			)
+		}
+		stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, false, block.NumberU64(), commitTxNum, "eth_simulateV1", nil)
+		if err != nil {
+			return err
+		}
+		block.HeaderNoCopy().Root = common.BytesToHash(stateRoot)
+		return nil
+	}
+
+	// No commitment history: compute from state history if blocks are not frozen, otherwise leave root as zero.
+	if s.blockReader.FrozenBlocks() == 0 {
+		txNum := minTxNum + 1 + uint64(len(bsc.Calls))
+		stateRoot, err := s.computeCommitmentFromStateHistory(ctx, tx, sharedDomains, touchedKeys, parent.Number.Uint64(), txNum)
+		if err != nil {
+			return err
+		}
+		s.logger.Debug("stateRoot", "root", common.Bytes2Hex(stateRoot))
+		block.HeaderNoCopy().Root = common.BytesToHash(stateRoot)
+	}
+	return nil
 }
 
 // simulateCall simulates a single call in the EVM using the given intra-block state and possibly tracing transfers.
@@ -692,10 +758,17 @@ func (s *simulator) simulateCall(
 	// It is possible to override precompiles with EVM bytecode or move them to another address.
 	evm.SetPrecompiles(precompiles)
 
-	// Wait for the context to be done and cancel the EVM. Even if the EVM has finished, cancelling may be done (repeatedly)
+	done := make(chan struct{})
+	defer close(done)
+
+	var timedOut atomic.Bool
 	go func() {
-		<-ctx.Done()
-		evm.Cancel()
+		select {
+		case <-ctx.Done():
+			timedOut.Store(true)
+			evm.Cancel()
+		case <-done:
+		}
 	}()
 
 	s.gasPool.AddBlobGas(msg.BlobGas())
@@ -705,11 +778,11 @@ func (s *simulator) simulateCall(
 	}
 
 	// If the timer caused an abort, return an appropriate error message
-	if evm.Cancelled() {
+	if timedOut.Load() {
 		return nil, nil, nil, fmt.Errorf("execution aborted (timeout = %v)", s.evmCallTimeout)
 	}
 	*cumulativeGasUsed += result.ReceiptGasUsed
-	receipt := protocol.MakeReceipt(header.Number, common.Hash{}, msg, txn, *cumulativeGasUsed, result, intraBlockState, evm)
+	receipt := protocol.MakeReceipt(&header.Number, common.Hash{}, msg, txn, *cumulativeGasUsed, result, intraBlockState, evm)
 	*cumulativeBlobGasUsed += receipt.BlobGasUsed
 
 	var logs []*types.Log
@@ -719,7 +792,7 @@ func (s *simulator) simulateCall(
 		logs = receipt.Logs
 	}
 
-	callResult := CallResult{GasUsed: hexutil.Uint64(result.ReceiptGasUsed)}
+	callResult := CallResult{GasUsed: hexutil.Uint64(result.ReceiptGasUsed), MaxUsedGas: hexutil.Uint64(result.MaxGasUsed)}
 	callResult.Logs = make([]*types.RPCLog, 0, len(logs))
 	for _, l := range logs {
 		rpcLog := &types.RPCLog{
@@ -847,14 +920,191 @@ func clientLimitExceededError(message string) error {
 	return &rpc.CustomError{Message: message, Code: rpc.ErrCodeClientLimitExceeded}
 }
 
-func newHistoryCommitmentOnlyReader(roTx kv.TemporalTx, sd *execctx.SharedDomains, limitReadAsOfTxNum uint64) commitmentdb.StateReader {
-	// Commitment values are read from history, whereas account/storage/code values are read from latest state
-	return rpchelper.NewCommitmentSplitStateReader(commitmentdb.NewHistoryStateReader(roTx, limitReadAsOfTxNum), commitmentdb.NewLatestStateReader(roTx, sd), true)
+// simulationStateReader implements commitmentdb.StateReader for eth_simulateV1.
+//
+// WithHistory()=false enables PutBranch to write modified trie branches to sd.mem.
+// This is critical for multi-block simulations: after block N's ComputeCommitment,
+// trie branches are folded back (stored as hashes). When block N+1 needs to re-read
+// a branch that block N modified, this reader finds it in sd.mem (written by PutBranch)
+// rather than falling back to the canonical parent's version (which would not include
+// block N's simulation changes, causing a wrong stateRoot).
+//
+// Read routing:
+//   - sd.GetMemBatch() hit (any domain): post-simulation value from previous or current block.
+//   - CommitmentDomain miss: GetAsOf at commitmentAsOfTxNum = base-parent commitment.
+//   - Other domains miss: GetAsOf at plainStateAsOfTxNum = base-parent account state.
+type simulationStateReader struct {
+	sd                  *execctx.SharedDomains
+	roTx                kv.TemporalTx
+	commitmentAsOfTxNum uint64
+	plainStateAsOfTxNum uint64
 }
 
+func (r *simulationStateReader) WithHistory() bool { return false }
+
+func (r *simulationStateReader) CheckDataAvailable(kv.Domain, kv.Step) error { return nil }
+
+func (r *simulationStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
+	if v, s, ok := r.sd.GetMemBatch().GetLatest(d, plainKey); ok {
+		return v, s, nil
+	}
+	asOf := r.plainStateAsOfTxNum
+	if d == kv.CommitmentDomain {
+		asOf = r.commitmentAsOfTxNum
+	}
+	enc, _, err = r.roTx.GetAsOf(d, plainKey, asOf)
+	if err != nil {
+		return nil, 0, fmt.Errorf("simulationStateReader(GetAsOf) %q: %w", d, err)
+	}
+	return enc, kv.Step(asOf / stepSize), nil
+}
+
+func (r *simulationStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
+	return newHistoryCommitmentOnlyReader(tx, r.sd, r.commitmentAsOfTxNum, r.plainStateAsOfTxNum)
+}
+
+func newHistoryCommitmentOnlyReader(roTx kv.TemporalTx, sd *execctx.SharedDomains, commitmentAsOfTxNum uint64, plainStateAsOfTxNum uint64) commitmentdb.StateReader {
+	return &simulationStateReader{sd: sd, roTx: roTx, commitmentAsOfTxNum: commitmentAsOfTxNum, plainStateAsOfTxNum: plainStateAsOfTxNum}
+}
+
+// simulationIntraBlockStateReader is a state.StateReader for the 2nd+ block of an eth_simulateV1
+// multi-block simulation.
+//
+// A plain HistoryReaderV3 reads from the canonical DB via GetAsOf and misses state changes written
+// by previous simulation blocks (which live in sharedDomains.mem). This reader overlays those
+// in-memory changes on top of the canonical base-parent state so that block N+1's EVM execution
+// sees the correct simulated state from block N.
+//
+// Read routing:
+//   - sharedDomains.GetMemBatch().GetLatest(domain, key) hit: return the simulated value.
+//   - miss: GetAsOf at firstMinTxNum (canonical state at the start of the first simulated block).
+type simulationIntraBlockStateReader struct {
+	sd            *execctx.SharedDomains
+	roTx          kv.TemporalTx
+	firstMinTxNum uint64
+	composite     []byte // reusable buffer for storage composite key
+}
+
+var _ state.StateReader = (*simulationIntraBlockStateReader)(nil)
+
+func newSimulationIntraBlockStateReader(roTx kv.TemporalTx, sd *execctx.SharedDomains, firstMinTxNum uint64) *simulationIntraBlockStateReader {
+	return &simulationIntraBlockStateReader{
+		sd:            sd,
+		roTx:          roTx,
+		firstMinTxNum: firstMinTxNum,
+		composite:     make([]byte, 20+32),
+	}
+}
+
+// getEncoded returns the encoded value for a domain key: checks mem batch first, then falls back to GetAsOf.
+func (r *simulationIntraBlockStateReader) getEncoded(domain kv.Domain, key []byte) ([]byte, error) {
+	enc, _, ok := r.sd.GetMemBatch().GetLatest(domain, key)
+	if ok {
+		return enc, nil
+	}
+	enc, _, err := r.roTx.GetAsOf(domain, key, r.firstMinTxNum)
+	return enc, err
+}
+
+func (r *simulationIntraBlockStateReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
+	addressValue := address.Value()
+	enc, err := r.getEncoded(kv.AccountsDomain, addressValue[:])
+	if err != nil || len(enc) == 0 {
+		return nil, err
+	}
+	var a accounts.Account
+	if err := accounts.DeserialiseV3(&a, enc); err != nil {
+		return nil, fmt.Errorf("simulationIntraBlockStateReader ReadAccountData(%x): %w", address, err)
+	}
+	return &a, nil
+}
+
+func (r *simulationIntraBlockStateReader) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(address)
+}
+
+func (r *simulationIntraBlockStateReader) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
+	addressValue := address.Value()
+	keyValue := key.Value()
+	r.composite = append(append(r.composite[:0], addressValue[:]...), keyValue[:]...)
+	enc, err := r.getEncoded(kv.StorageDomain, r.composite)
+	if err != nil {
+		return uint256.Int{}, false, err
+	}
+	var res uint256.Int
+	if len(enc) > 0 {
+		(&res).SetBytes(enc)
+	}
+	return res, len(enc) > 0, nil
+}
+
+func (r *simulationIntraBlockStateReader) HasStorage(address accounts.Address) (bool, error) {
+	// The mem batch doesn't support prefix scans, so we check the canonical base-parent state.
+	// TODO: this gives a wrong answer when a prior simulated block deployed a brand-new contract
+	// (i.e. added storage to a previously storage-less account): the mem batch contains that
+	// storage but we never scan it, so HasStorage returns false for the new contract in
+	// subsequent simulation blocks. Fix: iterate r.sd.GetMemBatch() storage keys for the
+	// address as a prefix-scan fallback before (or instead of) the RangeAsOf call.
+	addressValue := address.Value()
+	to, ok := kv.NextSubtree(addressValue[:])
+	if !ok {
+		to = nil
+	}
+	it, err := r.roTx.RangeAsOf(kv.StorageDomain, addressValue[:], to, r.firstMinTxNum, order.Asc, kv.Unlim)
+	if err != nil {
+		return false, err
+	}
+	defer it.Close()
+	for it.HasNext() {
+		_, v, err := it.Next()
+		if err != nil {
+			return false, err
+		}
+		if len(v) != 0 {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (r *simulationIntraBlockStateReader) ReadAccountCode(address accounts.Address) ([]byte, error) {
+	addressValue := address.Value()
+	return r.getEncoded(kv.CodeDomain, addressValue[:])
+}
+
+func (r *simulationIntraBlockStateReader) ReadAccountCodeSize(address accounts.Address) (int, error) {
+	code, err := r.ReadAccountCode(address)
+	return len(code), err
+}
+
+func (r *simulationIntraBlockStateReader) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
+	acc, err := r.ReadAccountData(address)
+	if err != nil || acc == nil {
+		return 0, err
+	}
+	if acc.Incarnation == 0 {
+		return 0, nil
+	}
+	return acc.Incarnation - 1, nil
+}
+
+func (r *simulationIntraBlockStateReader) SetTrace(_ bool, _ string) {}
+func (r *simulationIntraBlockStateReader) Trace() bool               { return false }
+func (r *simulationIntraBlockStateReader) TracePrefix() string       { return "" }
+
 func newSimulateStateReader(ttx, tx kv.TemporalTx, tsd, sd *execctx.SharedDomains) commitmentdb.StateReader {
-	// Both commitment and account/storage/code values are read from latest state *but* on different SharedDomains instances
-	return rpchelper.NewCommitmentSplitStateReader(commitmentdb.NewLatestStateReader(ttx, tsd), commitmentdb.NewLatestStateReader(tx, sd), false)
+	// Both commitment and account/storage/code values are read from latest state *but* on different SharedDomains instances.
+	// We use CommitmentReplayStateReader (not a plain SplitStateReader) so that Clone() only propagates the new tx to
+	// the commitment (temp DB) reader, keeping the plain state (main DB) reader pointing at the original outer-DB tx.
+	// This is critical: accounts whose data didn't change during simulation are not written to sd.mem, so when the trie
+	// reads them it must fall back to the real DB (via the original tx), not to the empty temp DB (via ttx).
+	return &commitmentdb.CommitmentReplayStateReader{
+		SplitStateReader: commitmentdb.NewCommitmentSplitStateReader(
+			commitmentdb.NewLatestStateReader(ttx, tsd),
+			commitmentdb.NewLatestStateReader(tx, sd),
+			false,
+		),
+	}
 }
 
 // computeCommitmentFromStateHistory calculates the commitment root for simulated block from state history

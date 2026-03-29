@@ -204,8 +204,6 @@ func BenchEthGetBalanceRandomAccount(erigonURL string, concurentRequests int) er
 					panic(fmt.Errorf("Error getting account balance (Erigon): %d %s", balance.Error.Code, balance.Error.Message))
 				}
 
-				fmt.Println("LAL balance:", balance)
-
 				reqLatency := int(time.Since(launchedAt).Microseconds())
 				<-reqQueue
 

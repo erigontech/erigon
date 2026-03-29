@@ -160,7 +160,7 @@ func parseTag(field Field, lastPublic int) (Tags, error) {
 	name := field.Name
 	tag := reflect.StructTag(field.Tag)
 	var ts Tags
-	for _, t := range strings.Split(tag.Get("rlp"), ",") {
+	for t := range strings.SplitSeq(tag.Get("rlp"), ",") {
 		switch t = strings.TrimSpace(t); t {
 		case "":
 			// empty tag is allowed for some reason
@@ -168,7 +168,7 @@ func parseTag(field Field, lastPublic int) (Tags, error) {
 			ts.Ignored = true
 		case "nil", "nilString", "nilList":
 			ts.NilOK = true
-			if field.Type.Kind != reflect.Ptr {
+			if field.Type.Kind != reflect.Pointer {
 				return ts, TagError{Field: name, Tag: t, Err: "field is not a pointer"}
 			}
 			switch t {

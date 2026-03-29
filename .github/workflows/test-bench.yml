@@ -1,0 +1,39 @@
+name: Benchmarks
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  benchmarks:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout custom actions
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      # No submodules or LFS needed: benchmark functions only use
+      # in-memory or local testdata/ files. Space cleanup is needed
+      # for the cache-warming path (go test -run=^$ ./...) which
+      # compiles test binaries for every package.
+      - uses: ./.github/actions/setup-erigon
+        id: erigon
+        with:
+          cleanup-space: true
+
+      - name: Run benchmarks
+        if: github.event_name == 'pull_request'
+        run: make test-bench
+
+      - name: Build test binaries (cache warming)
+        if: github.event_name != 'pull_request'
+        run: go test -run=^$ ./...
+
+      - uses: ./.github/actions/cleanup-erigon
+        if: always()

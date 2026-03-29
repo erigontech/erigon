@@ -25,21 +25,8 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/common"
 )
-
-func copyLRU[K comparable, V any](dst *lru.Cache[K, V], src *lru.Cache[K, V]) *lru.Cache[K, V] {
-	dst.Purge()
-	for _, key := range src.Keys() {
-		val, has := src.Get(key)
-		if !has {
-			continue
-		}
-		dst.Add(key, val)
-	}
-	return dst
-}
 
 func GetIndexedAttestation(attestation *solid.Attestation, attestingIndicies []uint64) *cltypes.IndexedAttestation {
 	// Sort the attestation indicies.

@@ -25,9 +25,9 @@ import (
 	"math/big"
 	"testing"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -37,11 +37,10 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -321,8 +320,11 @@ func TestWriteRawTransactions_UniqueKeys(t *testing.T) {
 
 // Tests block header storage and retrieval operations.
 func TestHeaderStorage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
-	m := mock.Mock(t)
+	m := execmoduletester.New(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -330,7 +332,7 @@ func TestHeaderStorage(t *testing.T) {
 	br := m.BlockReader
 
 	// Create a test header to move around the database and make sure it's really new
-	header := &types.Header{Number: big.NewInt(42), Extra: []byte("test header")}
+	header := &types.Header{Number: *uint256.NewInt(42), Extra: []byte("test header")}
 	entry, err := br.Header(ctx, tx, header.Hash(), header.Number.Uint64())
 	require.NoError(t, err)
 	if entry != nil {
@@ -346,7 +348,7 @@ func TestHeaderStorage(t *testing.T) {
 	if entry := rawdb.ReadHeaderRLP(tx, header.Hash(), header.Number.Uint64()); entry == nil {
 		t.Fatalf("Stored header RLP not found")
 	} else {
-		hasher := sha3.NewLegacyKeccak256()
+		hasher := keccak.NewFastKeccak()
 		hasher.Write(entry)
 
 		if hash := common.BytesToHash(hasher.Sum(nil)); hash != header.Hash() {
@@ -362,8 +364,11 @@ func TestHeaderStorage(t *testing.T) {
 
 // Tests block body storage and retrieval operations.
 func TestBodyStorage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
-	m := mock.Mock(t)
+	m := execmoduletester.New(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -391,10 +396,10 @@ func TestBodyStorage(t *testing.T) {
 	}
 
 	// Create a test body to move around the database and make sure it's really new
-	hasher := sha3.NewLegacyKeccak256()
+	hasher := keccak.NewFastKeccak()
 	_ = rlp.Encode(hasher, body)
 	hash := common.BytesToHash(hasher.Sum(nil))
-	header := &types.Header{Number: common.Big1}
+	header := &types.Header{Number: *common.Num1}
 
 	if entry, _ := br.BodyWithTransactions(ctx, tx, header.Hash(), 1); entry != nil {
 		t.Fatalf("Non existent body returned: %v", entry)
@@ -415,7 +420,7 @@ func TestBodyStorage(t *testing.T) {
 		if err != nil {
 			log.Error("ReadBodyRLP failed", "err", err)
 		}
-		hasher := sha3.NewLegacyKeccak256()
+		hasher := keccak.NewFastKeccak()
 		hasher.Write(bodyRlp)
 
 		if calc := common.BytesToHash(hasher.Sum(nil)); calc != hash {
@@ -431,8 +436,11 @@ func TestBodyStorage(t *testing.T) {
 
 // Tests block storage and retrieval operations.
 func TestBlockStorage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
-	m := mock.Mock(t)
+	m := execmoduletester.New(t)
 	require := require.New(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(err)
@@ -442,7 +450,7 @@ func TestBlockStorage(t *testing.T) {
 
 	// Create a test block to move around the database and make sure it's really new
 	block := types.NewBlockWithHeader(&types.Header{
-		Number:      big.NewInt(1),
+		Number:      *common.Num1,
 		Extra:       []byte("test block"),
 		UncleHash:   empty.UncleHash,
 		TxHash:      empty.RootHash,
@@ -549,8 +557,11 @@ func TestBlockStorage(t *testing.T) {
 
 // Tests that partial block contents don't get reassembled into full blocks.
 func TestPartialBlockStorage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
-	m := mock.Mock(t)
+	m := execmoduletester.New(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -596,8 +607,11 @@ func TestPartialBlockStorage(t *testing.T) {
 
 // Tests block total difficulty storage and retrieval operations.
 func TestTdStorage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
-	m := mock.Mock(t)
+	m := execmoduletester.New(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -641,8 +655,11 @@ func TestTdStorage(t *testing.T) {
 
 // Tests that canonical numbers can be mapped to hashes and retrieved.
 func TestCanonicalMappingStorage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
-	m := mock.Mock(t)
+	m := execmoduletester.New(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -715,15 +732,17 @@ func TestHeadStorage2(t *testing.T) {
 
 // Tests that head headers and head blocks can be assigned, individually.
 func TestHeadStorage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
-	m := mock.Mock(t)
-	m.DB.(state.HasAgg).Agg().(*state.Aggregator).EnableDomain(kv.RCacheDomain)
+	m := execmoduletester.New(t, execmoduletester.WithEnableDomain(kv.RCacheDomain))
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	blockHead := types.NewBlockWithHeader(&types.Header{Extra: []byte("test block header"), Number: common.Big1})
-	blockFull := types.NewBlockWithHeader(&types.Header{Extra: []byte("test block full"), Number: common.Big1})
+	blockHead := types.NewBlockWithHeader(&types.Header{Extra: []byte("test block header"), Number: *common.Num1})
+	blockFull := types.NewBlockWithHeader(&types.Header{Extra: []byte("test block full"), Number: *common.Num1})
 
 	// Assign separate entries for the head header and block
 	rawdb.WriteHeadHeaderHash(tx, blockHead.Hash())
@@ -740,9 +759,11 @@ func TestHeadStorage(t *testing.T) {
 
 // Tests that receipts associated with a single block can be stored and retrieved.
 func TestBlockReceiptStorage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
-	m := mock.Mock(t)
-	m.DB.(state.HasAgg).Agg().(*state.Aggregator).EnableDomain(kv.RCacheDomain)
+	m := execmoduletester.New(t, execmoduletester.WithEnableDomain(kv.RCacheDomain))
 	tx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -755,7 +776,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 	tx1 := types.NewTransaction(1, common.HexToAddress("0x1"), &u256.Num1, 1, &u256.Num1, nil)
 	tx2 := types.NewTransaction(2, common.HexToAddress("0x2"), &u256.Num2, 2, &u256.Num2, nil)
 
-	header := &types.Header{Number: big.NewInt(1)}
+	header := &types.Header{Number: *common.Num1}
 	body := &types.Body{Transactions: types.Transactions{tx1, tx2}}
 
 	// Create the two receipts to manage afterwards
@@ -769,7 +790,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 		TxHash:          tx1.Hash(),
 		ContractAddress: common.BytesToAddress([]byte{0x01, 0x11, 0x11}),
 		GasUsed:         111111,
-		BlockNumber:     header.Number,
+		BlockNumber:     &header.Number,
 		BlockHash:       header.Hash(),
 
 		TransactionIndex: 0,
@@ -786,7 +807,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 		TxHash:           tx2.Hash(),
 		ContractAddress:  common.BytesToAddress([]byte{0x02, 0x22, 0x22}),
 		GasUsed:          222222,
-		BlockNumber:      header.Number,
+		BlockNumber:      &header.Number,
 		BlockHash:        header.Hash(),
 		TransactionIndex: 1,
 	}
@@ -850,8 +871,11 @@ func TestBlockReceiptStorage(t *testing.T) {
 
 // Tests block storage and retrieval operations with withdrawals.
 func TestBlockWithdrawalsStorage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
-	m := mock.Mock(t)
+	m := execmoduletester.New(t)
 	require := require.New(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(err)
@@ -874,13 +898,11 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 		Amount:    1001,
 	}
 
-	withdrawals := make([]*types.Withdrawal, 0)
-	withdrawals = append(withdrawals, &w)
-	withdrawals = append(withdrawals, &w2)
+	withdrawals := []*types.Withdrawal{&w, &w2}
 
 	// Create a test block to move around the database and make sure it's really new
 	block := types.NewBlockWithHeader(&types.Header{
-		Number:      big.NewInt(1),
+		Number:      *common.Num1,
 		Extra:       []byte("test block"),
 		UncleHash:   empty.UncleHash,
 		TxHash:      empty.RootHash,
@@ -997,7 +1019,7 @@ func TestBlockAccessListStorage(t *testing.T) {
 	defer tx.Rollback()
 
 	block := types.NewBlockWithHeader(&types.Header{
-		Number:      big.NewInt(1),
+		Number:      *uint256.NewInt(1),
 		Extra:       []byte("test block"),
 		UncleHash:   empty.UncleHash,
 		TxHash:      empty.RootHash,
@@ -1104,8 +1126,11 @@ func TestShanghaiBodyForStorageNoWithdrawals(t *testing.T) {
 }
 
 func TestBadBlocks(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
-	m := mock.Mock(t)
+	m := execmoduletester.New(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -1131,7 +1156,8 @@ func TestBadBlocks(t *testing.T) {
 			Uncles: []*types.Header{{Extra: []byte("test header")}},
 		}
 
-		header := &types.Header{Number: big.NewInt(int64(number))}
+		header := &types.Header{}
+		header.Number.SetUint64(number)
 		require.NoError(rawdb.WriteCanonicalHash(tx, header.Hash(), number))
 		require.NoError(rawdb.WriteHeader(tx, header))
 		require.NoError(rawdb.WriteBody(tx, header.Hash(), number, body))

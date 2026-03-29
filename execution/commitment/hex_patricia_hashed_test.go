@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"math/rand"
 	"sort"
-	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -34,8 +34,8 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-var randSrc = rand.New(rand.NewSource(42)) // fixed seed
-var randMu sync.Mutex
+// randSrc and randMu removed — generateKeyWithHashedPrefix now uses per-call
+// rand.New with atomic counter seed, eliminating parallel test interference.
 
 func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 	t.Parallel()
@@ -433,10 +433,10 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 			fmt.Printf("\n4. Trie batch update (%d updates)\n", len(updates))
 			fmt.Printf("active rows %d touchmap %16b aftermap %16b\n", trieBatchR.activeRows, trieBatchR.touchMap[0], trieBatchR.afterMap[0])
 
-			err := stateBatch.applyPlainUpdates(plainKeys[:], updates[:])
+			err := stateBatch.applyPlainUpdates(plainKeys, updates)
 			require.NoError(t, err)
 
-			updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:], updates[:])
+			updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 			wc := WarmupConfig{
 				CtxFactory: func() (PatriciaContext, func()) {
 					return stateBatch, func() {}
@@ -488,10 +488,10 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 			fmt.Printf("\n6. Trie batch update (%d updates)\n", len(updates))
 			fmt.Printf("active rows %d touchmap %16b aftermap %16b\n", trieBatchR.activeRows, trieBatchR.touchMap[0], trieBatchR.afterMap[0])
 
-			err := stateBatch.applyPlainUpdates(plainKeys[:], updates[:])
+			err := stateBatch.applyPlainUpdates(plainKeys, updates)
 			require.NoError(t, err)
 
-			updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:], updates[:])
+			updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 			wc := WarmupConfig{
 				CtxFactory: func() (PatriciaContext, func()) {
 					return stateBatch, func() {}
@@ -584,10 +584,10 @@ func Test_ParallelHexPatriciaHashed_EdgeCases(t *testing.T) {
 		fmt.Printf("1. Trie sequential update (%d updates)\n", len(updates))
 		// for i := 0; i < len(updates); i++ {
 		// err := stateSeq.applyPlainUpdates(plainKeys[i:i+1], updates[i:i+1])
-		err := stateSeq.applyPlainUpdates(plainKeys[:], updates[:])
+		err := stateSeq.applyPlainUpdates(plainKeys, updates)
 		require.NoError(t, err)
 
-		updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:], updates[:])
+		updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 
 		sequentialRoot, err := trieSequential.Process(ctx, updsOne, "", nil, WarmupConfig{})
 		require.NoError(t, err)
@@ -612,10 +612,10 @@ func Test_ParallelHexPatriciaHashed_EdgeCases(t *testing.T) {
 
 		fmt.Printf("\n2. Trie batch update (%d updates)\n", len(updates))
 
-		err := stateBatch.applyPlainUpdates(plainKeys[:], updates[:])
+		err := stateBatch.applyPlainUpdates(plainKeys, updates)
 		require.NoError(t, err)
 
-		updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:], updates[:])
+		updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 
 		wc := WarmupConfig{
 			CtxFactory: func() (PatriciaContext, func()) {
@@ -750,9 +750,9 @@ func Test_HexPatriciaHashed_UniqueRepresentation(t *testing.T) {
 		Build()
 
 	trieSequential := NewHexPatriciaHashed(length.Addr, stateSeq)
-	trieSequential.trace = true
+	//trieSequential.trace = true
 	trieBatch := NewHexPatriciaHashed(length.Addr, stateBatch)
-	trieBatch.trace = true
+	//trieBatch.trace = true
 
 	plainKeys, updates = sortUpdatesByHashIncrease(t, trieSequential, plainKeys, updates)
 
@@ -960,7 +960,7 @@ func Test_HexPatriciaHashed_StateEncode(t *testing.T) {
 	s.Root = make([]byte, 128)
 	rnd := rand.New(rand.NewSource(42))
 
-	n, err := rnd.Read(s.Root[:])
+	n, err := rnd.Read(s.Root)
 	require.NoError(t, err)
 	require.Equal(t, len(s.Root), n)
 	s.RootPresent = true
@@ -990,7 +990,7 @@ func Test_HexPatriciaHashed_StateEncode(t *testing.T) {
 	err = s1.Decode(enc)
 	require.NoError(t, err)
 
-	require.Equal(t, s.Root[:], s1.Root[:])
+	require.Equal(t, s.Root, s1.Root)
 	require.Equal(t, s.Depths[:], s1.Depths[:])
 	require.Equal(t, s.AfterMap[:], s1.AfterMap[:])
 	require.Equal(t, s.TouchMap[:], s1.TouchMap[:])
@@ -1099,7 +1099,7 @@ func Test_HexPatriciaHashed_StateRestoreAndContinue(t *testing.T) {
 	// Previously we did not apply updates in this test - trieTwo simply read same commitment data from msOne.
 	// Now when branch data is written during ProcessKeys, need to use separated state for this exact case.
 	for ck, cv := range msOne.cm {
-		err = msTwo.PutBranch([]byte(ck), cv, nil, 0)
+		err = msTwo.PutBranch([]byte(ck), cv, nil)
 		require.NoError(t, err)
 	}
 
@@ -1199,7 +1199,7 @@ func Test_HexPatriciaHashed_RestoreAndContinue(t *testing.T) {
 
 	err = trieOne.SetState(buf)
 	require.NoError(t, err)
-	require.Equal(t, beforeRestore[:], trieOne.root.hash[:])
+	require.Equal(t, beforeRestore, trieOne.root.hash[:])
 
 	hashAfterRestore, err := trieOne.RootHash()
 	require.NoError(t, err)
@@ -1657,6 +1657,11 @@ func TestUpdate_Merge(t *testing.T) {
 			b: Update{Flags: DeleteUpdate, CodeHash: empty.CodeHash},
 			e: Update{Flags: DeleteUpdate, CodeHash: empty.CodeHash},
 		},
+		{
+			a: Update{Flags: DeleteUpdate, CodeHash: empty.CodeHash},
+			b: Update{Flags: StorageUpdate, Storage: common.Hash{0x21, 0x22, 0x23, 0x24}, StorageLen: 4, CodeHash: empty.CodeHash},
+			e: Update{Flags: StorageUpdate, Storage: common.Hash{0x21, 0x22, 0x23, 0x24}, StorageLen: 4, CodeHash: empty.CodeHash},
+		},
 	}
 
 	var numBuf [10]byte
@@ -1936,12 +1941,13 @@ func Test_HexPatriciaHashed_ProcessWithDozensOfStorageKeys(t *testing.T) {
 	require.Equal(t, rBatch, rSeq, "sequential and batch root should match")
 }
 
+var keyGenCounter atomic.Int64
+
 func generateKeyWithHashedPrefix(constHashedPrefixNibbles []byte, keyLen int) (plainKey []byte, hashedKey []byte) {
 	plainKey = make([]byte, keyLen)
+	rnd := rand.New(rand.NewSource(keyGenCounter.Add(1)))
 	for {
-		randMu.Lock()
-		randSrc.Read(plainKey[:keyLen]) // read random key
-		randMu.Unlock()
+		rnd.Read(plainKey[:keyLen])
 		hashedKey := KeyToNibblizedHash(plainKey)
 		if bytes.HasPrefix(hashedKey, constHashedPrefixNibbles) {
 			// found key with desired hashed prefix, return result
@@ -1988,12 +1994,12 @@ func sortUpdatesByHashIncrease(t *testing.T, hph *HexPatriciaHashed, plainKeys [
 		ku[i] = &KeyUpdate{plainKey: string(pk), hashedKey: KeyToHexNibbleHash(pk), update: &updates[i]}
 	}
 
-	sort.Slice(updates, func(i, j int) bool {
+	sort.Slice(ku, func(i, j int) bool {
 		return bytes.Compare(ku[i].hashedKey, ku[j].hashedKey) < 0
 	})
 
-	pks := make([][]byte, len(updates))
-	upds := make([]Update, len(updates))
+	pks := make([][]byte, len(ku))
+	upds := make([]Update, len(ku))
 	for i, u := range ku {
 		pks[i] = []byte(u.plainKey)
 		upds[i] = *u.update
@@ -2003,6 +2009,9 @@ func sortUpdatesByHashIncrease(t *testing.T, hph *HexPatriciaHashed, plainKeys [
 }
 
 func Test_WitnessTrie_GenerateWitness(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	// t.Parallel()
 
 	buildTrieAndWitness := func(t *testing.T, builder *UpdateBuilder, plainKeysToWitness [][]byte, keyExists []bool) {
@@ -2021,7 +2030,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		toProcess := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 		defer toProcess.Close()
 
-		hph.trace = true
+		//hph.trace = true
 		root, err := hph.Process(ctx, toProcess, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 
@@ -2537,5 +2546,43 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		keysToProve := [][]byte{addrWithStorage, fullExistingStorageKey, fullNonExistentStorageKey}
 		keyExists := []bool{true, true, false}
 		buildTrieAndWitness(t, builder, keysToProve, keyExists)
+	})
+	t.Run("StorageLeafRLPShorterThan32Bytes", func(t *testing.T) {
+		// Reproduces a bug where storage leaf nodes whose RLP encoding is < 32 bytes
+		// should be embedded inline in the parent branch node per MPT spec, but the
+		// witness builder incorrectly treated them as 32-byte hash references.
+		//
+		// The two storage keys below were precomputed to share 9 common nibbles in
+		// their keccak256 hashes (both hash to 35557922a...):
+		//   key1 hash: 35557922aa8f35ae04c5ae94a030a746...
+		//   key2 hash: 35557922a8443b7853fb2c5131223cf4...
+		// They diverge at nibble 10, leaving 54 remaining nibbles in each leaf.
+		// Compact encoding of 54 nibbles (even) = 28 bytes. With 1-byte value:
+		//   RLP = list_prefix(1) + key_prefix(1) + key(28) + value(1) = 31 bytes < 32
+		// This triggers the embedded node case where the leaf is inlined in the parent
+		// branch rather than referenced by its hash.
+		t.Logf("StorageLeafRLPShorterThan32Bytes")
+		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 2)
+
+		addrToProve := common.Copy(plainKeysList[0])
+
+		storageKey1 := decodeHex("046c24c7d866b0b0d5006628ab3d12ffb72aeef3af4c779c78e8c107b126d1f9")
+		storageKey2 := decodeHex("6099e0415032aade138f20f8adb3b61a9a7ffc73053d7751ff88a2a5c45df18e")
+		storageSlotToProve := common.Copy(storageKey1)
+
+		fullStorageKeyToProve := common.Copy(addrToProve)
+		fullStorageKeyToProve = append(fullStorageKeyToProve, storageSlotToProve...)
+		require.Equal(t, len(fullStorageKeyToProve), length.Addr+length.Hash)
+
+		builder := NewUpdateBuilder()
+		for i := 0; i < len(plainKeysList); i++ {
+			builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
+		}
+
+		// Small 1-byte storage values ensure leaf RLP stays < 32 bytes
+		builder.Storage(common.Bytes2Hex(addrToProve), common.Bytes2Hex(storageKey1), "01")
+		builder.Storage(common.Bytes2Hex(addrToProve), common.Bytes2Hex(storageKey2), "02")
+
+		buildTrieAndWitness(t, builder, [][]byte{fullStorageKeyToProve}, []bool{true})
 	})
 }

@@ -76,7 +76,7 @@ var (
 
 	PruneModeFlag = cli.StringFlag{
 		Name: "prune.mode",
-		Usage: `Choose a pruning preset to run onto. Available values: "full", "archive", "minimal", "blocks".
+		Usage: `Choose a pruning preset to run on. Available values: "full", "archive", "minimal", "blocks".
 				full: Keep only necessary blocks and latest state,
 				blocks: Keep all blocks but not the state history,
 				archive: Keep the entire state history and all blocks,
@@ -118,6 +118,7 @@ var (
 	ExperimentalBALFlag = cli.BoolFlag{
 		Name:  "experimental.bal",
 		Usage: "generate block access list",
+		Value: false,
 	}
 
 	// Throttling Flags
@@ -446,6 +447,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		RpcBatchConcurrency:       ctx.Uint(utils.RpcBatchConcurrencyFlag.Name),
 		RpcStreamingDisable:       ctx.Bool(utils.RpcStreamingDisableFlag.Name),
 		DBReadConcurrency:         ctx.Int(utils.DBReadConcurrencyFlag.Name),
+		RpcMaxConcurrentRequests:  ctx.Int(utils.RpcMaxConcurrentRequestsFlag.Name),
 		RpcAllowListFilePath:      ctx.String(utils.RpcAccessListFlag.Name),
 		RpcFiltersConfig: rpchelper.FiltersConfig{
 			RpcSubscriptionFiltersMaxLogs:      ctx.Int(RpcSubscriptionFiltersMaxLogsFlag.Name),
@@ -455,10 +457,12 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 			RpcSubscriptionFiltersMaxTopics:    ctx.Int(RpcSubscriptionFiltersMaxTopicsFlag.Name),
 		},
 		Gascap:              ctx.Uint64(utils.RpcGasCapFlag.Name),
-		RangeLimit:          ctx.Int(utils.RpcBlockRangeLimit.Name),
+		BlockRangeLimit:     ctx.Int(utils.RpcBlockRangeLimit.Name),
+		GetLogsMaxResults:   ctx.Int(utils.RpcGetLogsMaxResults.Name),
 		Feecap:              ctx.Float64(utils.RPCGlobalTxFeeCapFlag.Name),
 		MaxTraces:           ctx.Uint64(utils.TraceMaxtracesFlag.Name),
 		TraceCompatibility:  ctx.Bool(utils.RpcTraceCompatFlag.Name),
+		GethCompatibility:   ctx.Bool(utils.RpcGethCompatFlag.Name),
 		BatchLimit:          ctx.Int(utils.RpcBatchLimit.Name),
 		ReturnDataLimit:     ctx.Int(utils.RpcReturnDataLimit.Name),
 		AllowUnprotectedTxs: ctx.Bool(utils.AllowUnprotectedTxs.Name),

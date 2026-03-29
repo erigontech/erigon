@@ -440,12 +440,14 @@ const (
 	RecentLocalTransaction = "RecentLocalTransaction" // sequence_u64 -> tx_hash
 	PoolTransaction        = "PoolTransaction"        // txHash -> sender+tx_rlp
 	PoolInfo               = "PoolInfo"               // option_key -> option_value
+	SenderLastActivity     = "SenderLastActivity"     // senderID_u64 -> last_on_chain_block_u64
 )
 
 var TxPoolTables = []string{
 	RecentLocalTransaction,
 	PoolTransaction,
 	PoolInfo,
+	SenderLastActivity,
 }
 var SentryTables = []string{
 	Inodes,
@@ -491,35 +493,14 @@ const (
 )
 
 type TableCfgItem struct {
-	Flags TableFlags
-	// AutoDupSortKeysConversion - enables some keys transformation - to change db layout without changing app code.
-	// Use it wisely - it helps to do experiments with DB format faster, but better reduce amount of Magic in app.
-	// If good DB format found, push app code to accept this format and then disable this property.
-	AutoDupSortKeysConversion bool
-	IsDeprecated              bool
-	DBI                       DBI
-	// DupFromLen - if user provide key of this length, then next transformation applied:
-	// v = append(k[DupToLen:], v...)
-	// k = k[:DupToLen]
-	// And opposite at retrieval
-	// Works only if AutoDupSortKeysConversion enabled
-	DupFromLen int
-	DupToLen   int
+	Flags        TableFlags
+	IsDeprecated bool
+	DBI          DBI
 }
 
 var ChaindataTablesCfg = TableCfg{
-	HashedStorageDeprecated: {
-		Flags:                     DupSort,
-		AutoDupSortKeysConversion: true,
-		DupFromLen:                72,
-		DupToLen:                  40,
-	},
-	PlainState: {
-		Flags:                     DupSort,
-		AutoDupSortKeysConversion: true,
-		DupFromLen:                60,
-		DupToLen:                  28,
-	},
+	HashedStorageDeprecated: {Flags: DupSort},
+	PlainState:              {Flags: DupSort},
 
 	TblAccountVals:        {Flags: DupSort},
 	TblAccountHistoryKeys: {Flags: DupSort},
@@ -588,11 +569,14 @@ var DownloaderTablesCfg = TableCfg{}
 var DiagnosticsTablesCfg = TableCfg{}
 var HeimdallTablesCfg = TableCfg{}
 var PolygonBridgeTablesCfg = TableCfg{}
+var MigrationsTablesCfg = TableCfg{Migrations: {}}
 
 func TablesCfgByLabel(label Label) TableCfg {
 	switch label {
 	case dbcfg.ChainDB, dbcfg.TemporaryDB, dbcfg.CaplinDB: //TODO: move caplindb tables to own table config
 		return ChaindataTablesCfg
+	case dbcfg.MigrationsDB:
+		return MigrationsTablesCfg
 	case dbcfg.TxPoolDB:
 		return TxpoolTablesCfg
 	case dbcfg.SentryDB:
