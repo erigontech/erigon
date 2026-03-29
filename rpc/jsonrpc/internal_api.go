@@ -48,14 +48,14 @@ func (api *InternalAPIImpl) GetTxNumInfo(ctx context.Context, txNum uint64) (*Tx
 	}
 	defer tx.Rollback()
 
-	bn, ok, err := api._txNumReader.FindBlockNum(tx, txNum)
+	bn, ok, err := api._txNumReader.FindBlockNum(ctx, tx, txNum)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
 		return nil, fmt.Errorf("block not found by txnID=%d", txNum)
 	}
-	minTxNum, err := api._txNumReader.Min(tx, bn)
+	minTxNum, err := api._txNumReader.Min(ctx, tx, bn)
 	if err != nil {
 		return nil, err
 	}
@@ -100,19 +100,11 @@ func (api *InternalAPIImpl) GetPruningProgress(ctx context.Context) ([]*PruningP
 		return nil, err
 	}
 	for k != nil {
-		if len(v) == 1 && v[0] == 0 {
-			p := &PruningProgress{
-				Table: string(k),
-				Step:  0,
-			}
-			prog = append(prog, p)
-		} else {
-			p := &PruningProgress{
-				Table: string(k),
-				Step:  binary.BigEndian.Uint64(v),
-			}
-			prog = append(prog, p)
+		step := uint64(0)
+		if !(len(v) == 1 && v[0] == 0) {
+			step = binary.BigEndian.Uint64(v)
 		}
+		prog = append(prog, &PruningProgress{Table: string(k), Step: step})
 
 		k, v, err = cursor.Next()
 		if err != nil {

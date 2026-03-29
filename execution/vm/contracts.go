@@ -36,6 +36,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/bitutil"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/crypto/blake2b"
 	libbn254 "github.com/erigontech/erigon/common/crypto/bn254"
@@ -333,16 +334,16 @@ func (c *ecrecover) Run(input []byte) ([]byte, error) {
 	v := input[63] - 27
 
 	// tighter sig s values input homestead only apply to txn sigs
-	if !allZero(input[32:63]) || !crypto.TransactionSignatureIsValid(v, r, s, true /* allowPreEip2s */) {
+	if bitutil.TestBytes(input[32:63]) || !crypto.TransactionSignatureIsValid(v, r, s, true /* allowPreEip2s */) {
 		return nil, nil
 	}
 	// We must make sure not to modify the 'input', so placing the 'v' along with
 	// the signature needs to be done on a new allocation
-	sig := make([]byte, 65)
-	copy(sig, input[64:128])
+	var sig [65]byte
+	copy(sig[:], input[64:128])
 	sig[64] = v
 	// v needs to be at the end for libsecp256k1
-	pubKey, err := crypto.Ecrecover(input[:32], sig)
+	pubKey, err := crypto.Ecrecover(input[:32], sig[:])
 	// make sure the public key is a valid one
 	if err != nil {
 		return nil, nil
@@ -364,7 +365,7 @@ type sha256hash struct{}
 // This method does not require any overflow checking as the input size gas costs
 // required for anything significant is so high it's impossible to pay for.
 func (c *sha256hash) RequiredGas(input []byte) uint64 {
-	return uint64(len(input)+31)/32*params.Sha256PerWordGas + params.Sha256BaseGas
+	return ToWordSize(uint64(len(input)))*params.Sha256PerWordGas + params.Sha256BaseGas
 }
 func (c *sha256hash) Run(input []byte) ([]byte, error) {
 	h := sha256.Sum256(input)
@@ -383,7 +384,7 @@ type ripemd160hash struct{}
 // This method does not require any overflow checking as the input size gas costs
 // required for anything significant is so high it's impossible to pay for.
 func (c *ripemd160hash) RequiredGas(input []byte) uint64 {
-	return uint64(len(input)+31)/32*params.Ripemd160PerWordGas + params.Ripemd160BaseGas
+	return ToWordSize(uint64(len(input)))*params.Ripemd160PerWordGas + params.Ripemd160BaseGas
 }
 func (c *ripemd160hash) Run(input []byte) ([]byte, error) {
 	ripemd := ripemd160.New()
@@ -403,7 +404,7 @@ type dataCopy struct{}
 // This method does not require any overflow checking as the input size gas costs
 // required for anything significant is so high it's impossible to pay for.
 func (c *dataCopy) RequiredGas(input []byte) uint64 {
-	return uint64(len(input)+31)/32*params.IdentityPerWordGas + params.IdentityBaseGas
+	return ToWordSize(uint64(len(input)))*params.IdentityPerWordGas + params.IdentityBaseGas
 }
 func (c *dataCopy) Run(in []byte) ([]byte, error) {
 	return common.Copy(in), nil
@@ -577,9 +578,9 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 		modLen  = binary.BigEndian.Uint64(header[96-8 : 96])
 
 		// 32 - 8 bytes are truncated in the Uint64 conversion above
-		baseLenHighBitsAreZero = allZero(header[0 : 32-8])
-		expLenHighBitsAreZero  = allZero(header[32 : 64-8])
-		modLenHighBitsAreZero  = allZero(header[64 : 96-8])
+		baseLenHighBitsAreZero = !bitutil.TestBytes(header[0 : 32-8])
+		expLenHighBitsAreZero  = !bitutil.TestBytes(header[32 : 64-8])
+		modLenHighBitsAreZero  = !bitutil.TestBytes(header[64 : 96-8])
 	)
 	if c.osaka {
 		// EIP-7823: Set upper bounds for MODEXP

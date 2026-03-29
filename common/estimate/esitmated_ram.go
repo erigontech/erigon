@@ -27,9 +27,9 @@ type EstimatedRamPerWorker datasize.ByteSize
 // Workers - return max workers amount based on total Memory/CPU's and estimated RAM per worker
 func (r EstimatedRamPerWorker) Workers() int {
 	maxWorkersForGivenMemory := r.WorkersByRAMOnly()
-	res := min(AlmostAllCPUs(), maxWorkersForGivenMemory)
-	return max(1, res) // must have at-least 1 worker
+	return min(AlmostAllCPUs(), maxWorkersForGivenMemory)
 }
+func (r EstimatedRamPerWorker) WorkersHalf() int { return max(1, r.Workers()/2) }
 
 // WorkersByRAMOnly - return max workers amount based on total Memory and estimated RAM per worker
 func (r EstimatedRamPerWorker) WorkersByRAMOnly() int {

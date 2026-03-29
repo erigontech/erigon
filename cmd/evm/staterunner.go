@@ -25,11 +25,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
@@ -122,7 +122,12 @@ func runStateTest(fname string, cfg vm.Config, jsonOut bool, bench bool) error {
 func aggregateResultsFromStateTests(
 	stateTests map[string]testutil.StateTest, cfg vm.Config,
 	jsonOut bool, bench bool) ([]StatetestResult, error) {
-	dirs := datadir.New(filepath.Join(os.TempDir(), "erigon-statetest"))
+	tmpDir, err := os.MkdirTemp("", "erigon-statetest-*")
+	if err != nil {
+		return nil, err
+	}
+	defer dir.RemoveAll(tmpDir)
+	dirs := datadir.New(tmpDir)
 
 	db := temporaltest.NewTestDB(nil, dirs)
 	defer db.Close()

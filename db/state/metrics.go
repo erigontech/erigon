@@ -53,6 +53,7 @@ var (
 	mxPruneSizeDomain      = metrics.GetOrCreateCounter(`domain_prune_size{type="domain"}`)
 	mxPruneSizeHistory     = metrics.GetOrCreateCounter(`domain_prune_size{type="history"}`)
 	mxPruneSizeIndex       = metrics.GetOrCreateCounter(`domain_prune_size{type="index"}`)
+	mxDupsPruneSizeIndex   = metrics.GetOrCreateCounter(`domain_dups_prune_size{type="index"}`)
 	mxBuildTook            = metrics.GetOrCreateSummary("domain_build_files_took")
 	mxStepTook             = metrics.GetOrCreateSummary("domain_step_took")
 )

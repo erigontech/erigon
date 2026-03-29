@@ -283,7 +283,7 @@ func (back *RemoteBackend) SubscribeLogs(ctx context.Context, onNewLogs func(rep
 	return nil
 }
 
-func (back *RemoteBackend) SubscribeReceipts(ctx context.Context, onNewReceipts func(reply *remoteproto.SubscribeReceiptsReply), requestor *atomic.Value) error {
+func (back *RemoteBackend) SubscribeReceipts(ctx context.Context, onNewReceipts func(reply *remoteproto.SubscribeReceiptsReply), onReady func(func(*remoteproto.ReceiptsFilterRequest) error)) error {
 	subscription, err := back.remoteEthBackend.SubscribeReceipts(ctx, grpc.WaitForReady(true))
 	if err != nil {
 		if s, ok := status.FromError(err); ok {
@@ -291,7 +291,9 @@ func (back *RemoteBackend) SubscribeReceipts(ctx context.Context, onNewReceipts 
 		}
 		return err
 	}
-	requestor.Store(subscription.Send)
+	if onReady != nil {
+		onReady(subscription.Send)
+	}
 	for {
 		receipts, err := subscription.Recv()
 		if errors.Is(err, io.EOF) {
@@ -371,7 +373,7 @@ func (back *RemoteBackend) NodeInfo(ctx context.Context, limit uint32) ([]p2p.No
 			return nil, fmt.Errorf("cannot decode protocols metadata: %w", err)
 		}
 
-		protocols := make(map[string]interface{}, len(rawProtocols))
+		protocols := make(map[string]any, len(rawProtocols))
 		for k, v := range rawProtocols {
 			protocols[k] = v
 		}
@@ -413,6 +415,30 @@ func (back *RemoteBackend) RemovePeer(ctx context.Context, request *remoteproto.
 	return result, nil
 }
 
+func (back *RemoteBackend) AddTrustedPeer(ctx context.Context, request *remoteproto.AddPeerRequest) (*remoteproto.AddPeerReply, error) {
+	result, err := back.remoteEthBackend.AddTrustedPeer(ctx, request)
+	if err != nil {
+		return nil, fmt.Errorf("ETHBACKENDClient.AddTrustedPeer() error: %w", err)
+	}
+	return result, nil
+}
+
+func (back *RemoteBackend) RemoveTrustedPeer(ctx context.Context, request *remoteproto.RemovePeerRequest) (*remoteproto.RemovePeerReply, error) {
+	result, err := back.remoteEthBackend.RemoveTrustedPeer(ctx, request)
+	if err != nil {
+		return nil, fmt.Errorf("ETHBACKENDClient.RemoveTrustedPeer() error: %w", err)
+	}
+	return result, nil
+}
+
+func (back *RemoteBackend) SetHead(ctx context.Context, request *remoteproto.SetHeadRequest) (*remoteproto.SetHeadReply, error) {
+	result, err := back.remoteEthBackend.SetHead(ctx, request)
+	if err != nil {
+		return nil, fmt.Errorf("ETHBACKENDClient.SetHead() error: %w", err)
+	}
+	return result, nil
+}
+
 func (back *RemoteBackend) Peers(ctx context.Context) ([]*p2p.PeerInfo, error) {
 	rpcPeers, err := back.remoteEthBackend.Peers(ctx, &emptypb.Empty{})
 	if err != nil {
@@ -450,8 +476,8 @@ func (back *RemoteBackend) Peers(ctx context.Context) ([]*p2p.PeerInfo, error) {
 	return peers, nil
 }
 
-func (back *RemoteBackend) TxnumReader(ctx context.Context) rawdbv3.TxNumsReader {
-	return back.blockReader.TxnumReader(ctx)
+func (back *RemoteBackend) TxnumReader() rawdbv3.TxNumsReader {
+	return back.blockReader.TxnumReader()
 }
 
 func (back *RemoteBackend) BlockForTxNum(ctx context.Context, tx kv.Tx, txNum uint64) (uint64, bool, error) {

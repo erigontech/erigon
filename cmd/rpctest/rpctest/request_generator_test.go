@@ -19,8 +19,9 @@ package rpctest
 import (
 	"testing"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
 )
 
 func MockRequestGenerator(reqId int) *RequestGenerator {

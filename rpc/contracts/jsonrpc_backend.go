@@ -20,6 +20,8 @@ import (
 	"context"
 	"math/big"
 
+	"github.com/holiman/uint256"
+
 	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -38,11 +40,11 @@ type JsonRpcBackend struct {
 	client requests.RequestGenerator
 }
 
-func (b JsonRpcBackend) CodeAt(ctx context.Context, contract common.Address, blockNum *big.Int) ([]byte, error) {
+func (b JsonRpcBackend) CodeAt(ctx context.Context, contract common.Address, blockNum *uint256.Int) ([]byte, error) {
 	return b.client.GetCode(contract, rpc.BlockReference(BlockNumArg(blockNum)))
 }
 
-func (b JsonRpcBackend) CallContract(ctx context.Context, call ethereum.CallMsg, blockNum *big.Int) ([]byte, error) {
+func (b JsonRpcBackend) CallContract(ctx context.Context, call ethereum.CallMsg, blockNum *uint256.Int) ([]byte, error) {
 	return b.client.Call(CallArgsFromCallMsg(call), rpc.BlockReference(BlockNumArg(blockNum)), nil)
 }
 
@@ -52,6 +54,20 @@ func (b JsonRpcBackend) PendingCodeAt(ctx context.Context, account common.Addres
 
 func (b JsonRpcBackend) PendingNonceAt(ctx context.Context, account common.Address) (uint64, error) {
 	res, err := b.client.GetTransactionCount(account, rpc.PendingBlock)
+	if err != nil {
+		return 0, err
+	}
+	return res.Uint64(), nil
+}
+
+func (b JsonRpcBackend) NonceAt(ctx context.Context, account common.Address, blockNumber *big.Int) (uint64, error) {
+	var blockRef rpc.BlockReference
+	if blockNumber == nil {
+		blockRef = rpc.LatestBlock
+	} else {
+		blockRef = rpc.BlockNumber(blockNumber.Int64()).AsBlockReference()
+	}
+	res, err := b.client.GetTransactionCount(account, blockRef)
 	if err != nil {
 		return 0, err
 	}

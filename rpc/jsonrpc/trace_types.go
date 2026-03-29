@@ -53,11 +53,11 @@ type GethTraces []*GethTrace
 // ParityTrace A trace in the desired format (Parity/OpenEthereum) See: https://openethereum.github.io/JSONRPC-trace-module
 type ParityTrace struct {
 	// Do not change the ordering of these fields -- allows for easier comparison with other clients
-	Action              interface{}  `json:"action"` // Can be either CallTraceAction or CreateTraceAction
+	Action              any          `json:"action"` // Can be either CallTraceAction or CreateTraceAction
 	BlockHash           *common.Hash `json:"blockHash,omitempty"`
 	BlockNumber         *uint64      `json:"blockNumber,omitempty"`
 	Error               string       `json:"error,omitempty"`
-	Result              interface{}  `json:"result"`
+	Result              any          `json:"result"`
 	Subtraces           int          `json:"subtraces"`
 	TraceAddress        []int        `json:"traceAddress"`
 	TransactionHash     *common.Hash `json:"transactionHash,omitempty"`
@@ -126,20 +126,6 @@ type TraceResult struct {
 	// Do not change the ordering of these fields -- allows for easier comparison with other clients
 	GasUsed *hexutil.Big  `json:"gasUsed"`
 	Output  hexutil.Bytes `json:"output"`
-}
-
-// Allows for easy printing of a geth trace for debugging
-func (p GethTrace) String() string {
-	var ret strings.Builder
-	ret.WriteString(fmt.Sprintf("Type: %s\n", p.Type))
-	ret.WriteString(fmt.Sprintf("From: %s\n", p.From))
-	ret.WriteString(fmt.Sprintf("To: %s\n", p.To))
-	ret.WriteString(fmt.Sprintf("Value: %s\n", p.Value))
-	ret.WriteString(fmt.Sprintf("Gas: %s\n", p.Gas))
-	ret.WriteString(fmt.Sprintf("GasUsed: %s\n", p.GasUsed))
-	ret.WriteString(fmt.Sprintf("Input: %s\n", p.Input))
-	ret.WriteString(fmt.Sprintf("Output: %s\n", p.Output))
-	return ret.String()
 }
 
 // Allows for easy printing of a parity trace for debugging

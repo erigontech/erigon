@@ -18,15 +18,17 @@ package p2p
 
 import (
 	"context"
+	"maps"
 	"math/big"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
-	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
@@ -78,7 +80,7 @@ func TestPublisher(t *testing.T) {
 		})
 
 		// we hear about block1 from peers 1,2,3,4
-		header1 := &types.Header{Number: big.NewInt(1)}
+		header1 := &types.Header{Number: *uint256.NewInt(1)}
 		block1 := types.NewBlockWithHeader(header1)
 		td1 := big.NewInt(5)
 		waitPeersMayMissHash := func(peersCount int) func() bool {
@@ -157,7 +159,7 @@ func TestPublisher(t *testing.T) {
 		require.False(t, known)
 		knownSends[capturedSend4PeerId] = struct{}{}
 		require.Len(t, knownSends, 8)
-		allPeerIds := maps.Keys(knownSends)
+		allPeerIds := slices.Collect(maps.Keys(knownSends))
 		require.ElementsMatch(t, allPeerIds, []PeerId{
 			*PeerIdFromUint64(1),
 			*PeerIdFromUint64(2),

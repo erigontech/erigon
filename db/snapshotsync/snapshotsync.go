@@ -25,9 +25,8 @@ import (
 	"strings"
 	"time"
 
-	"google.golang.org/grpc"
-
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -39,47 +38,8 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 )
-
-var GreatOtterBanner = `
-   _____ _             _   _                ____  _   _                                       
-  / ____| |           | | (_)              / __ \| | | |                                      
- | (___ | |_ __ _ _ __| |_ _ _ __   __ _  | |  | | |_| |_ ___ _ __ ___ _   _ _ __   ___       
-  \___ \| __/ _ | '__| __| | '_ \ / _ | | |  | | __| __/ _ \ '__/ __| | | | '_ \ / __|      
-  ____) | || (_| | |  | |_| | | | | (_| | | |__| | |_| ||  __/ |  \__ \ |_| | | | | (__ _ _ _ 
- |_____/ \__\__,_|_|   \__|_|_| |_|\__, |  \____/ \__|\__\___|_|  |___/\__, |_| |_|\___(_|_|_)
-                                    __/ |                               __/ |                 
-                                   |___/                               |___/                                            
-
-
-                                        .:-===++**++===-:                                 
-                                   :=##%@@@@@@@@@@@@@@@@@@%#*=.                           
-                               .=#@@@@@@%##+====--====+##@@@@@@@#=.     ...               
-                   .=**###*=:+#@@@@%*=:.                  .:=#%@@@@#==#@@@@@%#-           
-                 -#@@@@%%@@@@@@%+-.                            .=*%@@@@#*+*#@@@%=         
-                =@@@*:    -%%+:                                    -#@+.     =@@@-        
-                %@@#     +@#.                                        :%%-     %@@*        
-                @@@+    +%=.     -+=                        :=-       .#@-    %@@#        
-                *@@%:  #@-      =@@@*                      +@@@%.       =@= -*@@@:        
-                 #@@@##@+       #@@@@.                     %@@@@=        #@%@@@#-         
-                  :#@@@@:       +@@@#       :=++++==-.     *@@@@:        =@@@@-           
-                  =%@@%=         +#*.    =#%#+==-==+#%%=:  .+#*:         .#@@@#.          
-                 +@@%+.               .+%+-.          :=##-                :#@@@-         
-                -@@@=                -%#:     ..::.      +@*                 +@@%.        
-    .::-========*@@@..              -@#      +%@@@@%.     -@#               .-@@@+=======-
-.:-====----:::::#@@%:--=::::..      #@:      *@@@@@%:      *@=      ..:-:-=--:@@@+::::----
-                =@@@:.......        @@        :+@#=.       -@+        .......-@@@:        
-       .:=++####*%@@%=--::::..      @@   %#     %*    :@*  -@+      ...::---+@@@#*#*##+=-:
-  ..--==::..     :%@@@-   ..:::..   @@   +@*:.-#@@+-.-#@-  -@+   ..:::..  .+@@@#.     ..:-
-                  .#@@@##-:.        @@    :+#@%=.:+@@#=.   -@+        .-=#@@@@+           
-             -=+++=--+%@@%+=.       @@       +%*=+#%-      -@+       :=#@@@%+--++++=:     
-         .=**=:.      .=*@@@@@#=:.  @@         :--.        -@+  .-+#@@@@%+:       .:=*+-. 
-        ::.              .=*@@@@@@%#@@+=-:..         ..::=+#@%#@@@@@@%+-.             ..-.
-                            ..=*#@@@@@@@@@@@@@@@%%@@@@@@@@@@@@@@%#+-.                     
-                                  .:-==++*#######%######**+==-:                           
-
-             
-`
 
 type CaplinMode int
 
@@ -112,12 +72,12 @@ func BuildDownloadRequest(
 func RequestSnapshotsDownload(
 	ctx context.Context,
 	downloadRequest []services.DownloadRequest,
-	downloader downloaderproto.DownloaderClient,
+	downloaderClient downloader.Client,
 	logTarget string,
 ) error {
 	// start seed large .seg of large size
 	req := BuildDownloadRequest(downloadRequest, logTarget)
-	if _, err := downloader.Download(ctx, req, grpc.WaitForReady(true)); err != nil {
+	if err := downloaderClient.Download(ctx, req); err != nil {
 		return err
 	}
 	return nil
@@ -195,7 +155,7 @@ type blockReader interface {
 	FreezingCfg() ethconfig.BlocksFreezing
 	AllTypes() []snaptype.Type
 	FrozenFiles() (list []string)
-	TxnumReader(ctx context.Context) rawdbv3.TxNumsReader
+	TxnumReader() rawdbv3.TxNumsReader
 }
 
 // getMinimumBlocksToDownload - get the minimum number of blocks to download
@@ -296,13 +256,13 @@ func isTransactionsSegmentExpired(cc *chain.Config, pruneMode prune.Mode, p snap
 }
 
 // isReceiptsSegmentExpired - check if the receipts segment is expired according to whichever history expiry policy we use.
-func isReceiptsSegmentPruned(tx kv.RwTx, txNumsReader rawdbv3.TxNumsReader, cc *chain.Config, pruneMode prune.Mode, head uint64, p snapcfg.PreverifiedItem, stepSize uint64) bool {
+func isReceiptsSegmentPruned(ctx context.Context, tx kv.RwTx, txNumsReader rawdbv3.TxNumsReader, cc *chain.Config, pruneMode prune.Mode, head uint64, p snapcfg.PreverifiedItem, stepSize uint64) bool {
 	if strings.Contains(p.Name, "domain") {
 		return false // domain snapshots are never pruned
 	}
 	pruneHeight := pruneMode.Blocks.PruneTo(head) // if a receipt is below this height, it is pruned
 	if pruneMode.Blocks == prune.DefaultBlocksPruneMode && cc.MergeHeight != nil {
-		pruneHeight = cc.MergeHeight.Uint64()
+		pruneHeight = *cc.MergeHeight
 	}
 
 	// We use the pre-merge data policy.
@@ -310,7 +270,7 @@ func isReceiptsSegmentPruned(tx kv.RwTx, txNumsReader rawdbv3.TxNumsReader, cc *
 	if !ok {
 		return false
 	}
-	minTxNum, err := txNumsReader.Min(tx, pruneHeight)
+	minTxNum, err := txNumsReader.Min(ctx, tx, pruneHeight)
 	if err != nil {
 		log.Crit("Failed to get minimum transaction number", "err", err)
 		return false
@@ -341,14 +301,14 @@ func SyncSnapshots(
 	tx kv.RwTx,
 	blockReader blockReader,
 	cc *chain.Config,
-	snapshotDownloader downloaderproto.DownloaderClient,
+	snapshotDownloader downloader.Client,
 	syncCfg ethconfig.Sync,
 	stepSize uint64,
 ) error {
 	if blockReader.FreezingCfg().NoDownloader || snapshotDownloader == nil {
 		return nil
 	}
-	snapCfg, _ := snapcfg.KnownCfg(cc.ChainName)
+	snapCfg := snapcfg.KnownCfgOrDevnet(cc.ChainName)
 	// Skip getMinimumBlocksToDownload if we can because it's slow.
 	if snapCfg.Local {
 		// This belongs higher up the call chain.
@@ -359,7 +319,7 @@ func SyncSnapshots(
 		toBlock := syncCfg.SnapshotDownloadToBlock // exclusive [0, toBlock)
 		toStep := uint64(math.MaxUint64)           // exclusive [0, toStep)
 		if !headerchain && toBlock > 0 {
-			toTxNum, err := blockReader.TxnumReader(ctx).Min(tx, syncCfg.SnapshotDownloadToBlock)
+			toTxNum, err := blockReader.TxnumReader().Min(ctx, tx, syncCfg.SnapshotDownloadToBlock)
 			if err != nil {
 				return err
 			}
@@ -377,7 +337,7 @@ func SyncSnapshots(
 				toDeleteDownloader = append(toDeleteDownloader, f, strings.Replace(f, ".seg", ".idx", 1))
 			}
 			log.Debug(fmt.Sprintf("[%s] deleting", logPrefix), "toDeleteSeg", toDeleteSeg, "toDeleteDownloader", toDeleteDownloader)
-			_, err = snapshotDownloader.Delete(ctx, &downloaderproto.DeleteRequest{Paths: toDeleteDownloader})
+			err = snapshotDownloader.Delete(ctx, toDeleteDownloader)
 			if err != nil {
 				return err
 			}
@@ -393,7 +353,7 @@ func SyncSnapshots(
 			}
 		}
 
-		txNumsReader := blockReader.TxnumReader(ctx)
+		txNumsReader := blockReader.TxnumReader()
 
 		// This clause belongs in another function. We can take a long time here to determine what
 		// requests to send to the Downloader. Need to communicate that.
@@ -452,7 +412,7 @@ func SyncSnapshots(
 				continue
 			}
 			if headerchain &&
-				!(strings.Contains(p.Name, "headers") || strings.Contains(p.Name, "bodies") || p.Name == "salt-blocks.txt") {
+				!(strings.Contains(p.Name, "headers") || strings.Contains(p.Name, "bodies") || p.Name == "salt-blocks.txt" || p.Name == "erigondb.toml") {
 				continue
 			}
 			if !syncCfg.KeepExecutionProofs && isStateHistory(p.Name) && strings.Contains(p.Name, kv.CommitmentDomain.String()) {
@@ -471,7 +431,7 @@ func SyncSnapshots(
 				strings.Contains(p.Name, kv.LogAddrIdx.String()) ||
 				strings.Contains(p.Name, kv.LogTopicIdx.String())
 
-			if isRcacheRelatedSegment && isReceiptsSegmentPruned(tx, txNumsReader, cc, prune, frozenBlocks, p, stepSize) {
+			if isRcacheRelatedSegment && isReceiptsSegmentPruned(ctx, tx, txNumsReader, cc, prune, frozenBlocks, p, stepSize) {
 				continue
 			}
 
@@ -498,9 +458,12 @@ func SyncSnapshots(
 				break
 			}
 			if ctx.Err() != nil {
-				return context.Cause(ctx)
+				return err
 			}
-			log.Error(fmt.Sprintf("[%s] call downloader", logPrefix), "err", err)
+			if !grpcutil.IsRetryLater(err) {
+				return err
+			}
+			log.Error(fmt.Sprintf("[%s] error requesting snapshots download from downloader", logPrefix), "err", err)
 			select {
 			case <-ctx.Done():
 				return context.Cause(ctx)

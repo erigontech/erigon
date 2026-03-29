@@ -2,6 +2,9 @@
 description: >-
   Understanding the JWT Secret: Authentication for Erigon and the Consensus
   Layer
+metaLinks:
+  alternates:
+    - https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/fundamentals/jwt
 ---
 
 # JWT Secret

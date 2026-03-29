@@ -35,6 +35,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -232,7 +233,7 @@ func Main(ctx *cli.Context) error {
 	}
 
 	eip1559 := chainConfig.IsLondon(prestate.Env.Number)
-	// Sanity check, to not `panic` in state_transition
+	// Sanity check, to not `panic` in txn_executor
 	if eip1559 {
 		if prestate.Env.BaseFee == nil {
 			return NewError(ErrorVMConfig, errors.New("EIP-1559 config but missing 'currentBaseFee' in env section"))
@@ -270,18 +271,18 @@ func Main(ctx *cli.Context) error {
 				env.Timestamp, env.ParentTimestamp))
 		}
 		prestate.Env.Difficulty = calcDifficulty(chainConfig, env.Number, env.Timestamp,
-			env.ParentTimestamp, env.ParentDifficulty, env.ParentUncleHash)
+			env.ParentTimestamp, *env.ParentDifficulty, env.ParentUncleHash)
 	}
 
 	// manufacture block from above inputs
 	header := NewHeader(prestate.Env)
 
 	var ommerHeaders = make([]*types.Header, len(prestate.Env.Ommers))
-	header.Number.Add(header.Number, big.NewInt(int64(len(prestate.Env.Ommers))))
+	header.Number.AddUint64(&header.Number, uint64(len(prestate.Env.Ommers)))
 	for i, ommer := range prestate.Env.Ommers {
-		var ommerN big.Int
+		var ommerN uint256.Int
 		ommerN.SetUint64(header.Number.Uint64() - ommer.Delta)
-		ommerHeaders[i] = &types.Header{Coinbase: ommer.Address, Number: &ommerN}
+		ommerHeaders[i] = &types.Header{Coinbase: ommer.Address, Number: ommerN}
 	}
 	block := types.NewBlock(header, txs, ommerHeaders, nil /* receipts */, prestate.Env.Withdrawals)
 
@@ -296,7 +297,12 @@ func Main(ctx *cli.Context) error {
 		return h, nil
 	}
 
-	db := temporaltest.NewTestDB(nil, datadir.New(""))
+	tmpDir, err := os.MkdirTemp("", "erigon-t8n-*")
+	if err != nil {
+		return err
+	}
+	defer dir.RemoveAll(tmpDir)
+	db := temporaltest.NewTestDB(nil, datadir.New(tmpDir))
 	defer db.Close()
 
 	tx, err := db.BeginTemporalRw(context.Background())
@@ -312,12 +318,8 @@ func Main(ctx *cli.Context) error {
 	defer sd.Close()
 
 	blockNum, txNum := uint64(0), uint64(0)
-	sd.SetTxNum(txNum)
-	sd.SetBlockNum(blockNum)
 	reader, writer := MakePreState((&evmtypes.BlockContext{}).Rules(chainConfig), tx, sd, prestate.Pre, blockNum, txNum)
 	blockNum, txNum = uint64(1), uint64(2)
-	sd.SetTxNum(txNum)
-	sd.SetBlockNum(blockNum)
 
 	// Merge engine can be used for pre-merge blocks as well, as it
 	// redirects to the ethash engine based on the block number
@@ -343,7 +345,7 @@ func Main(ctx *cli.Context) error {
 	collector := make(Alloc)
 
 	dumper := state.NewDumper(tx, rawdbv3.TxNums, prestate.Env.Number)
-	dumper.DumpToCollector(collector, false, false, common.Address{}, 0)
+	dumper.DumpToCollector(context.Background(), collector, false, false, common.Address{}, 0)
 	return dispatchOutput(ctx, baseDir, result, collector, body)
 }
 
@@ -391,7 +393,7 @@ func (t *txWithKey) UnmarshalJSON(input []byte) error {
 func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 	gasPrice, value := uint256.NewInt(0), uint256.NewInt(0)
 	var overflow bool
-	var chainId *uint256.Int
+	var chainId uint256.Int
 
 	if txJson.Value != nil {
 		value, overflow = uint256.FromBig(txJson.Value.ToInt())
@@ -408,26 +410,12 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 	}
 
 	if txJson.ChainID != nil {
-		chainId, overflow = uint256.FromBig(txJson.ChainID.ToInt())
+		cid, overflow := uint256.FromBig(txJson.ChainID.ToInt())
 		if overflow {
 			return nil, errors.New("chainId field caused an overflow (uint256)")
 		}
+		chainId = *cid
 	}
-
-	commonTx := types.CommonTx{
-		Nonce:    uint64(txJson.Nonce),
-		To:       txJson.To,
-		Value:    value,
-		GasLimit: uint64(txJson.Gas),
-		Data:     txJson.Input,
-	}
-
-	commonTx.V.SetFromBig(txJson.V.ToInt())
-	commonTx.R.SetFromBig(txJson.R.ToInt())
-	commonTx.S.SetFromBig(txJson.S.ToInt())
-
-	//TODO: remove after https://github.com/erigontech/erigon/issues/17942
-	_, _, _, _, _, _, _, _ = commonTx.V, commonTx.R, commonTx.S, commonTx.Data, commonTx.Value, commonTx.To, commonTx.GasLimit, commonTx.Nonce
 
 	if txJson.Type == types.LegacyTxType || txJson.Type == types.AccessListTxType {
 		if txJson.Type == types.LegacyTxType {
@@ -435,11 +423,11 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 				CommonTx: types.CommonTx{
 					Nonce:    uint64(txJson.Nonce),
 					To:       txJson.To,
-					Value:    value,
+					Value:    *value,
 					GasLimit: uint64(txJson.Gas),
 					Data:     txJson.Input,
 				},
-				GasPrice: gasPrice,
+				GasPrice: *gasPrice,
 			}, nil
 		}
 
@@ -448,30 +436,31 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 				CommonTx: types.CommonTx{
 					Nonce:    uint64(txJson.Nonce),
 					To:       txJson.To,
-					Value:    value,
+					Value:    *value,
 					GasLimit: uint64(txJson.Gas),
 					Data:     txJson.Input,
 				},
-				GasPrice: gasPrice,
+				GasPrice: *gasPrice,
 			},
 			ChainID:    chainId,
 			AccessList: *txJson.Accesses,
 		}, nil
 	} else if txJson.Type == types.DynamicFeeTxType || txJson.Type == types.SetCodeTxType {
-		var tipCap *uint256.Int
-		var feeCap *uint256.Int
+		var tipCap, feeCap uint256.Int
 		if txJson.MaxPriorityFeePerGas != nil {
-			tipCap, overflow = uint256.FromBig(txJson.MaxPriorityFeePerGas.ToInt())
+			tc, overflow := uint256.FromBig(txJson.MaxPriorityFeePerGas.ToInt())
 			if overflow {
 				return nil, errors.New("maxPriorityFeePerGas field caused an overflow (uint256)")
 			}
+			tipCap = *tc
 		}
 
 		if txJson.MaxFeePerGas != nil {
-			feeCap, overflow = uint256.FromBig(txJson.MaxFeePerGas.ToInt())
+			fc, overflow := uint256.FromBig(txJson.MaxFeePerGas.ToInt())
 			if overflow {
 				return nil, errors.New("maxFeePerGas field caused an overflow (uint256)")
 			}
+			feeCap = *fc
 		}
 
 		if txJson.Type == types.DynamicFeeTxType {
@@ -479,7 +468,7 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 				CommonTx: types.CommonTx{
 					Nonce:    uint64(txJson.Nonce),
 					To:       txJson.To,
-					Value:    value,
+					Value:    *value,
 					GasLimit: uint64(txJson.Gas),
 					Data:     txJson.Input,
 				},
@@ -505,7 +494,7 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 				CommonTx: types.CommonTx{
 					Nonce:    uint64(txJson.Nonce),
 					To:       txJson.To,
-					Value:    value,
+					Value:    *value,
 					GasLimit: uint64(txJson.Gas),
 					Data:     txJson.Input,
 				},
@@ -577,7 +566,7 @@ func (g Alloc) OnAccount(addr common.Address, dumpAccount state.DumpAccount) {
 }
 
 // saveFile marshalls the object to the given file
-func saveFile(baseDir, filename string, data interface{}) error {
+func saveFile(baseDir, filename string, data any) error {
 	b, err := json.MarshalIndent(data, "", " ")
 	if err != nil {
 		return NewError(ErrorJson, fmt.Errorf("failed marshalling output: %v", err))
@@ -593,9 +582,9 @@ func saveFile(baseDir, filename string, data interface{}) error {
 // dispatchOutput writes the output data to either stderr or stdout, or to the specified
 // files
 func dispatchOutput(ctx *cli.Context, baseDir string, result *protocol.EphemeralExecResult, alloc Alloc, body hexutil.Bytes) error {
-	stdOutObject := make(map[string]interface{})
-	stdErrObject := make(map[string]interface{})
-	dispatch := func(baseDir, fName, name string, obj interface{}) error {
+	stdOutObject := make(map[string]any)
+	stdErrObject := make(map[string]any)
+	dispatch := func(baseDir, fName, name string, obj any) error {
 		switch fName {
 		case "stdout":
 			stdOutObject[name] = obj
@@ -639,9 +628,11 @@ func dispatchOutput(ctx *cli.Context, baseDir string, result *protocol.Ephemeral
 func NewHeader(env stEnv) *types.Header {
 	var header types.Header
 	header.Coinbase = env.Coinbase
-	header.Difficulty = env.Difficulty
+	if env.Difficulty != nil {
+		header.Difficulty = *env.Difficulty
+	}
 	header.GasLimit = env.GasLimit
-	header.Number = new(big.Int).SetUint64(env.Number)
+	header.Number.SetUint64(env.Number)
 	header.Time = env.Timestamp
 	header.BaseFee = env.BaseFee
 	header.MixDigest = env.MixDigest

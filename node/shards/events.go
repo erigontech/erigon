@@ -20,8 +20,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -75,6 +73,8 @@ func (e *Events) AddHeaderSubscription() (chan [][]byte, func()) {
 	id := e.id
 	e.headerSubscriptions[id] = ch
 	return ch, func() {
+		e.lock.Lock()
+		defer e.lock.Unlock()
 		delete(e.headerSubscriptions, id)
 		close(ch)
 	}
@@ -88,6 +88,8 @@ func (e *Events) AddReceiptsSubscription() (chan []*remoteproto.SubscribeReceipt
 	id := e.id
 	e.receiptsSubscriptions[id] = ch
 	return ch, func() {
+		e.lock.Lock()
+		defer e.lock.Unlock()
 		delete(e.receiptsSubscriptions, id)
 		close(ch)
 	}
@@ -113,6 +115,8 @@ func (e *Events) AddNewSnapshotSubscription() (chan struct{}, func()) {
 	id := e.id
 	e.newSnapshotSubscription[id] = ch
 	return ch, func() {
+		e.lock.Lock()
+		defer e.lock.Unlock()
 		delete(e.newSnapshotSubscription, id)
 		close(ch)
 	}
@@ -126,6 +130,8 @@ func (e *Events) AddRetirementStartSubscription() (chan bool, func()) {
 	id := e.id
 	e.retirementStartSubscription[id] = ch
 	return ch, func() {
+		e.lock.Lock()
+		defer e.lock.Unlock()
 		delete(e.retirementStartSubscription, id)
 		close(ch)
 	}
@@ -139,6 +145,8 @@ func (e *Events) AddRetirementDoneSubscription() (chan struct{}, func()) {
 	id := e.id
 	e.retirementDoneSubscription[id] = ch
 	return ch, func() {
+		e.lock.Lock()
+		defer e.lock.Unlock()
 		delete(e.retirementDoneSubscription, id)
 		close(ch)
 	}
@@ -152,6 +160,8 @@ func (e *Events) AddLogsSubscription() (chan []*remoteproto.SubscribeLogsReply, 
 	id := e.id
 	e.logsSubscriptions[id] = ch
 	return ch, func() {
+		e.lock.Lock()
+		defer e.lock.Unlock()
 		delete(e.logsSubscriptions, id)
 		close(ch)
 	}
@@ -279,6 +289,15 @@ func NewRecentReceipts(limit uint64) *RecentReceipts {
 		headers:  make(map[uint64]*types.Header, limit),
 		limit:    limit,
 	}
+}
+
+// Clear removes all stored receipts, transactions, and headers.
+func (r *RecentReceipts) Clear() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	clear(r.receipts)
+	clear(r.txs)
+	clear(r.headers)
 }
 
 // Notify sends log notifications (for logs subscription)
@@ -464,8 +483,7 @@ func (r *RecentReceipts) NotifyReceipts(n *Events, from, to uint64, isUnwind boo
 
 			// Add header data
 			if header.BaseFee != nil {
-				baseFee, _ := uint256.FromBig(header.BaseFee)
-				protoReceipt.BaseFee = gointerfaces.ConvertUint256IntToH256(baseFee)
+				protoReceipt.BaseFee = gointerfaces.ConvertUint256IntToH256(header.BaseFee)
 			}
 			protoReceipt.BlockTime = header.Time
 			if header.ExcessBlobGas != nil {

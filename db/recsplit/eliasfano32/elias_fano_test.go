@@ -18,6 +18,7 @@ package eliasfano32
 
 import (
 	"bytes"
+	"fmt"
 	"math"
 	"math/bits"
 	"testing"
@@ -94,9 +95,8 @@ func TestEliasFanoSeekBoundaries(t *testing.T) {
 
 func TestEliasFanoSeek(t *testing.T) {
 	if testing.Short() {
-		t.Skip()
+		t.Skip("slow test")
 	}
-
 	count := uint64(100_000)
 	maxOffset := (count - 1) * 123
 	ef := NewEliasFano(count, maxOffset)
@@ -270,6 +270,11 @@ func TestEliasFano(t *testing.T) {
 	assert.Equal(t, ef2.Max(), Max(buf.Bytes()))
 	assert.Equal(t, ef2.Min(), Min(buf.Bytes()))
 	assert.Equal(t, ef2.Count(), Count(buf.Bytes()))
+
+	ref := RebasedEliasFano{}
+	ref.Reset(1000, buf.Bytes())
+	assert.True(t, ref.Has(1037))
+	assert.False(t, ref.Has(1038))
 }
 
 func BenchmarkRead(b *testing.B) {
@@ -290,26 +295,26 @@ func BenchmarkRead(b *testing.B) {
 	require.NoError(b, ef.Write(buf))
 
 	b.Run("read", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			ReadEliasFano(buf.Bytes())
 		}
 	})
 
 	b.Run("reset", func(b *testing.B) {
 		ef := NewEliasFano(1, 1)
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			ef.Reset(buf.Bytes())
 		}
 	})
 	b.Run("read.search", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			Seek(buf.Bytes(), 1)
 		}
 	})
 
 	b.Run("reset.search", func(b *testing.B) {
 		ef := NewEliasFano(1, 1)
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			ef.Reset(buf.Bytes()).Seek(1)
 		}
 	})
@@ -521,7 +526,7 @@ func BenchmarkEF(b *testing.B) {
 	}
 	ef.Build()
 	b.Run("next to value 1_000_000", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			it := ef.Iterator()
 			for it.HasNext() {
 				n, err := it.Next()
@@ -533,13 +538,13 @@ func BenchmarkEF(b *testing.B) {
 		}
 	})
 	b.Run("seek to value 1_000_000", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			it := ef.Iterator()
 			it.Seek(1_000_000)
 		}
 	})
 	b.Run("reverse next to value 1_230", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			it := ef.ReverseIterator()
 			for it.HasNext() {
 				n, err := it.Next()
@@ -555,7 +560,10 @@ func BenchmarkEF(b *testing.B) {
 		}
 	})
 	b.Run("reverse seek to value 1_230", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		it := ef.ReverseIterator()
+		it.Seek(1_230)
+
+		for b.Loop() {
 			it := ef.ReverseIterator()
 			it.Seek(1_230)
 			n, err := it.Next()
@@ -564,7 +572,7 @@ func BenchmarkEF(b *testing.B) {
 		}
 	})
 	b.Run("naive reverse iterator", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			it := naiveReverseIterator(ef)
 			for it.HasNext() {
 				_, err := it.Next()
@@ -573,7 +581,7 @@ func BenchmarkEF(b *testing.B) {
 		}
 	})
 	b.Run("reverse iterator", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			it := ef.ReverseIterator()
 			for it.HasNext() {
 				_, err := it.Next()
@@ -581,6 +589,22 @@ func BenchmarkEF(b *testing.B) {
 			}
 		}
 	})
+}
+
+func BenchmarkBuild(b *testing.B) {
+	for _, count := range []uint64{100, 1_000_000} {
+		b.Run(fmt.Sprintf("count=%d", count), func(b *testing.B) {
+			maxOffset := (count - 1) * 123
+			ef := NewEliasFano(count, maxOffset)
+			for i := uint64(0); i < count; i++ {
+				ef.AddOffset(i * 123)
+			}
+			b.ResetTimer()
+			for b.Loop() {
+				ef.Build()
+			}
+		})
+	}
 }
 
 func naiveReverseIterator(ef *EliasFano) *stream.ArrStream[uint64] {

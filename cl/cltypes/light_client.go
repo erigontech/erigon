@@ -104,8 +104,8 @@ func (l *LightClientHeader) Clone() clonable.Clonable {
 	return NewLightClientHeader(l.version)
 }
 
-func (l *LightClientHeader) getSchema() []interface{} {
-	schema := []interface{}{
+func (l *LightClientHeader) getSchema() []any {
+	schema := []any{
 		l.Beacon,
 	}
 	if l.version >= clparams.CapellaVersion {
@@ -338,11 +338,4 @@ func getFinalizedBranchSize(version clparams.StateVersion) int {
 		return FinalizedBranchSizeElectra
 	}
 	return FinalizedBranchSize
-}
-
-func getSyncCommitteeBranchSize(version clparams.StateVersion) int {
-	if version >= clparams.ElectraVersion {
-		return SyncCommitteeBranchSizeElectra
-	}
-	return SyncCommitteeBranchSize
 }

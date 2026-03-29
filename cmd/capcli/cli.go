@@ -32,7 +32,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/spf13/afero"
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/cl/antiquary"
@@ -92,11 +91,6 @@ type chainCfg struct {
 	Chain string `help:"chain" default:"mainnet"`
 }
 
-func (c *chainCfg) configs() (beaconConfig *clparams.BeaconChainConfig, err error) {
-	_, beaconConfig, _, err = clparams.GetConfigsByNetworkName(c.Chain)
-	return
-}
-
 type outputFolder struct {
 	Datadir string `help:"datadir" default:"~/.local/share/erigon" type:"existingdir"`
 }
@@ -122,10 +116,6 @@ func (w *withSentinel) connectSentinel() (sentinelproto.SentinelClient, error) {
 		return nil, err
 	}
 	return sentinelproto.NewSentinelClient(gconn), nil
-}
-
-func openFs(fsName string, path string) (afero.Fs, error) {
-	return afero.NewBasePathFs(afero.NewBasePathFs(afero.NewOsFs(), fsName), path), nil
 }
 
 type Chain struct {
@@ -819,7 +809,7 @@ type ArchiveSanitizer struct {
 }
 
 func getHead(beaconApiURL string) (uint64, error) {
-	headResponse := map[string]interface{}{}
+	headResponse := map[string]any{}
 	req, err := http.NewRequest("GET", beaconApiURL+"/eth/v2/debug/beacon/heads", nil)
 	if err != nil {
 		return 0, err
@@ -833,11 +823,11 @@ func getHead(beaconApiURL string) (uint64, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&headResponse); err != nil {
 		return 0, err
 	}
-	data := headResponse["data"].([]interface{})
+	data := headResponse["data"].([]any)
 	if len(data) == 0 {
 		return 0, errors.New("no head found")
 	}
-	head := data[0].(map[string]interface{})
+	head := data[0].(map[string]any)
 	slotStr, ok := head["slot"].(string)
 	if !ok {
 		return 0, errors.New("no slot found")
@@ -850,7 +840,7 @@ func getHead(beaconApiURL string) (uint64, error) {
 }
 
 func getStateRootAtSlot(beaconApiURL string, slot uint64) (common.Hash, error) {
-	response := map[string]interface{}{}
+	response := map[string]any{}
 	req, err := http.NewRequest("GET", fmt.Sprintf("%s/eth/v1/beacon/states/%d/root", beaconApiURL, slot), nil)
 	if err != nil {
 		return common.Hash{}, err
@@ -867,7 +857,7 @@ func getStateRootAtSlot(beaconApiURL string, slot uint64) (common.Hash, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
 		return common.Hash{}, err
 	}
-	data := response["data"].(map[string]interface{})
+	data := response["data"].(map[string]any)
 	if len(data) == 0 {
 		return common.Hash{}, errors.New("no head found")
 	}
@@ -1501,7 +1491,7 @@ func (m *MakeDepositArgs) Run(ctx *Context) error {
 	privateKey := privateKeyBls.Bytes()
 
 	// Print all the details in json format
-	depositDetails := map[string]interface{}{
+	depositDetails := map[string]any{
 		"deposit":           deposit,
 		"deposit_tree_root": common.Hash(depositTreeRoot),
 		"private_key":       "0x" + common.Bytes2Hex(privateKey),

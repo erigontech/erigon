@@ -22,10 +22,10 @@ There are two main ways a backtest can be started:
 erigon backtest-commitment --from 1000000 --to 2000000 --datadir <datadir> --output-dir <output-dir>
 ```
 
-* using `--tMinusN 1,000,000` to specify the number of blocks prior to the current tip:
+* using `--tMinusN 1000000` to specify the number of blocks prior to the current tip:
 
 ```
-erigon backtest-commitment --tMinusN 1,000,000 --datadir <datadir> --output-dir <output-dir>
+erigon backtest-commitment --tMinusN 1000000 --datadir <datadir> --output-dir <output-dir>
 ```
 
 To explore other available flags run:
@@ -92,6 +92,8 @@ be extracted.
 
 ![](examples/overview_page1.png)
 ![](examples/overview_page2.png)
+![](examples/overview_page3.png)
+![](examples/overview_page4.png)
 
 ### Detailed timeseries page
 
@@ -101,3 +103,23 @@ be extracted.
 ![](examples/detailed_timeseries_page4.png)
 ![](examples/detailed_timeseries_page5.png)
 ![](examples/detailed_timeseries_page6.png)
+
+## Comparing runs
+
+To compare the results of several backtest runs we can use the backtester comparison command:
+
+```
+backtest-commitment compare-runs \
+--run-output-dirs \
+/results/hph_nowarm_1752740_1752747_1768799062,\
+/results/hph_warm_1752740_1752747_1768799942,\
+/results/para_nowarm_1752740_1752747_1768799778 \
+--output-dir /results/comparison-results \
+--log.console.verbosity=debug
+```
+
+The output will be a single HTML page with charts comparing the results of all the provided runs that looks like this:
+![](examples/comparison_page.png)
+
+You can navigate to the more detailed overview pages of each run by clicking on the line chart points itself or using
+the overview pages catalogue at the bottom.

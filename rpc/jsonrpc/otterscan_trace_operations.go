@@ -72,7 +72,7 @@ func (t *OperationsTracer) OnEnter(depth int, typ byte, from accounts.Address, t
 		return
 	}
 
-	if vm.OpCode(typ) == vm.CALL && value.Uint64() != 0 {
+	if vm.OpCode(typ) == vm.CALL && !value.IsZero() {
 		t.Results = append(t.Results, &InternalOperation{OP_TRANSFER, from, to, (*hexutil.Big)(value.ToBig())})
 		return
 	}

@@ -19,7 +19,6 @@ package logger
 import (
 	"context"
 	"encoding/hex"
-	"sort"
 
 	"github.com/holiman/uint256"
 
@@ -158,10 +157,10 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 	l.stream.WriteObjectField("depth")
 	l.stream.WriteInt(depth)
 	refund := l.env.IntraBlockState.GetRefund()
-	if refund != 0 {
+	if refund.Total() != 0 {
 		l.stream.WriteMore()
 		l.stream.WriteObjectField("refund")
-		l.stream.WriteUint64(l.env.IntraBlockState.GetRefund())
+		l.stream.WriteUint64(l.env.IntraBlockState.GetRefund().Total())
 	}
 
 	if err != nil {
@@ -207,7 +206,7 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 		for loc := range s {
 			l.locations = append(l.locations, loc)
 		}
-		sort.Sort(l.locations)
+		l.locations.Sort()
 		for _, loc := range l.locations {
 			value := s[loc]
 			if first {

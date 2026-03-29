@@ -64,16 +64,13 @@ type t8nInput struct {
 func (args *t8nInput) get(base string) []string {
 	var out []string
 	if opt := args.inAlloc; opt != "" {
-		out = append(out, "--input.alloc")
-		out = append(out, fmt.Sprintf("%v/%v", base, opt))
+		out = append(out, "--input.alloc", fmt.Sprintf("%v/%v", base, opt))
 	}
 	if opt := args.inTxs; opt != "" {
-		out = append(out, "--input.txs")
-		out = append(out, fmt.Sprintf("%v/%v", base, opt))
+		out = append(out, "--input.txs", fmt.Sprintf("%v/%v", base, opt))
 	}
 	if opt := args.inEnv; opt != "" {
-		out = append(out, "--input.env")
-		out = append(out, fmt.Sprintf("%v/%v", base, opt))
+		out = append(out, "--input.env", fmt.Sprintf("%v/%v", base, opt))
 	}
 	if opt := args.stFork; opt != "" {
 		out = append(out, "--state.fork", opt)
@@ -329,7 +326,7 @@ func checkExpectedOutput(t *testing.T, output []byte, expectationFilePath string
 
 // cmpJson compares the JSON in two byte slices.
 func cmpJson(a, b []byte) (bool, error) {
-	var j, j2 interface{}
+	var j, j2 any
 	if err := json.Unmarshal(a, &j); err != nil {
 		return false, err
 	}

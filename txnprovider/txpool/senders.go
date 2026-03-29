@@ -101,12 +101,7 @@ func (b *BySenderAndNonce) blobCount(senderID uint64) uint64 {
 }
 
 func (b *BySenderAndNonce) hasTxns(senderID uint64) bool {
-	has := false
-	b.ascend(senderID, func(*metaTxn) bool {
-		has = true
-		return false
-	})
-	return has
+	return b.senderIDTxnCount[senderID] > 0
 }
 
 func (b *BySenderAndNonce) get(senderID, txNonce uint64) *metaTxn {
@@ -138,9 +133,9 @@ func (b *BySenderAndNonce) delete(mt *metaTxn, reason txpoolcfg.DiscardReason, l
 			delete(b.senderIDTxnCount, senderID)
 		}
 
-		if mt.TxnSlot.Type == BlobTxnType && mt.TxnSlot.BlobBundles != nil {
+		if blobHashes := mt.TxnSlot.GetBlobHashes(); len(blobHashes) > 0 {
 			accBlobCount := b.senderIDBlobCount[senderID]
-			txnBlobCount := uint64(len(mt.TxnSlot.BlobBundles))
+			txnBlobCount := uint64(len(blobHashes))
 			if accBlobCount > txnBlobCount {
 				b.senderIDBlobCount[senderID] = accBlobCount - txnBlobCount
 			} else {
@@ -165,8 +160,8 @@ func (b *BySenderAndNonce) replaceOrInsert(mt *metaTxn, logger log.Logger) *meta
 	}
 
 	b.senderIDTxnCount[mt.TxnSlot.SenderID]++
-	if mt.TxnSlot.Type == BlobTxnType && mt.TxnSlot.BlobBundles != nil {
-		b.senderIDBlobCount[mt.TxnSlot.SenderID] += uint64(len(mt.TxnSlot.BlobBundles))
+	if blobHashes := mt.TxnSlot.GetBlobHashes(); len(blobHashes) > 0 {
+		b.senderIDBlobCount[mt.TxnSlot.SenderID] += uint64(len(blobHashes))
 	}
 	return nil
 }
@@ -192,11 +187,6 @@ func newSendersBatch(tracedSenders map[common.Address]struct{}) *sendersBatch {
 func (sc *sendersBatch) getID(addr common.Address) (uint64, bool) {
 	id, ok := sc.senderIDs[addr]
 	return id, ok
-}
-
-func (sc *sendersBatch) getAddr(id uint64) (common.Address, bool) {
-	addr, ok := sc.senderID2Addr[id]
-	return addr, ok
 }
 
 var traceAllSenders = false
@@ -250,18 +240,25 @@ func (sc *sendersBatch) registerNewSenders(newTxns *TxnSlots, logger log.Logger)
 }
 
 func (sc *sendersBatch) onNewBlock(stateChanges *remoteproto.StateChangeBatch, unwindTxns, minedTxns TxnSlots, logger log.Logger) error {
+	var processedTxns bool
 	for _, diff := range stateChanges.ChangeBatch {
 		for _, change := range diff.Changes { // merge state changes
 			addrB := gointerfaces.ConvertH160toAddress(change.Address)
 			sc.getOrCreateID(addrB, logger)
 		}
 
-		for i, txn := range unwindTxns.Txns {
-			txn.SenderID, txn.Traced = sc.getOrCreateID(unwindTxns.Senders.AddressAt(i), logger)
+		// unwindTxns/minedTxns do not depend on individual diffs inside the batch.
+		// Processing them for every diff only repeats the same work.
+		if processedTxns {
+			continue
 		}
+		processedTxns = true
 
-		for i, txn := range minedTxns.Txns {
-			txn.SenderID, txn.Traced = sc.getOrCreateID(minedTxns.Senders.AddressAt(i), logger)
+		if err := sc.registerNewSenders(&unwindTxns, logger); err != nil {
+			return err
+		}
+		if err := sc.registerNewSenders(&minedTxns, logger); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -286,7 +283,6 @@ func EncodeSender(nonce uint64, balance uint256.Int, buffer []byte) {
 		fieldSet = 1
 		nonceBytes := common.BitLenToByteLen(bits.Len64(nonce))
 		buffer[pos] = byte(nonceBytes)
-		var nonce = nonce
 		for i := nonceBytes; i > 0; i-- {
 			buffer[pos+i] = byte(nonce)
 			nonce >>= 8

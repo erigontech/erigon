@@ -152,11 +152,11 @@ func (s *GrpcServer) Pending(ctx context.Context, _ *emptypb.Empty) (*txpoolprot
 	if _, err := s.txPool.PeekBest(ctx, math.MaxInt16, &txnsRlp, 0 /* onTopOf */, math.MaxUint64 /* availableGas */, math.MaxUint64 /* availableBlobGas */, math.MaxInt /* availableRlpSpace */); err != nil {
 		return nil, err
 	}
-	var senderArr [20]byte
+
 	for i := range txnsRlp.Txns {
-		copy(senderArr[:], txnsRlp.Senders.At(i)) // TODO: optimize
+		sender := txnsRlp.Senders.AddressAt(i)
 		reply.Txs = append(reply.Txs, &txpoolproto.PendingReply_Tx{
-			Sender:  gointerfaces.ConvertAddressToH160(senderArr),
+			Sender:  gointerfaces.ConvertAddressToH160(sender),
 			RlpTx:   txnsRlp.Txns[i],
 			IsLocal: txnsRlp.IsLocal[i],
 		})
@@ -226,12 +226,6 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpo
 }
 
 func (s *GrpcServer) GetBlobs(ctx context.Context, in *txpoolproto.GetBlobsRequest) (*txpoolproto.GetBlobsReply, error) {
-	tx, err := s.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
 	hashes := make([]common.Hash, len(in.BlobHashes))
 	for i := range in.BlobHashes {
 		hashes[i] = gointerfaces.ConvertH256ToHash(in.BlobHashes[i])
@@ -239,9 +233,9 @@ func (s *GrpcServer) GetBlobs(ctx context.Context, in *txpoolproto.GetBlobsReque
 	blobBundles := s.txPool.GetBlobs(hashes)
 	reply := make([]*txpoolproto.BlobAndProof, len(blobBundles))
 	for i, bb := range blobBundles {
-		var proofs [][]byte
-		for _, p := range bb.Proofs {
-			proofs = append(proofs, p[:])
+		proofs := make([][]byte, len(bb.Proofs))
+		for j, p := range bb.Proofs {
+			proofs[j] = p[:]
 		}
 		reply[i] = &txpoolproto.BlobAndProof{
 			Blob:   bb.Blob,
@@ -378,8 +372,8 @@ func StartGrpc(txPoolServer txpoolproto.TxpoolServer, miningServer txpoolproto.M
 	}
 
 	var (
-		streamInterceptors []grpc.StreamServerInterceptor
-		unaryInterceptors  []grpc.UnaryServerInterceptor
+		streamInterceptors = make([]grpc.StreamServerInterceptor, 0, 2)
+		unaryInterceptors  = make([]grpc.UnaryServerInterceptor, 0, 2)
 	)
 	streamInterceptors = append(streamInterceptors, recovery.StreamServerInterceptor())
 	unaryInterceptors = append(unaryInterceptors, recovery.UnaryServerInterceptor())

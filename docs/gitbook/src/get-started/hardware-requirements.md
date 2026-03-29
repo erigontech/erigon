@@ -1,5 +1,9 @@
 ---
 description: 'Erigon Hardware Requirements: Disk Type and Size, RAM, and CPU for Node Types'
+metaLinks:
+  alternates:
+    - >-
+      https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/get-started/hardware-requirements
 ---
 
 # Hardware Requirements

@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func makeBlock(txCount, uncleCount, withdrawalCount int) *types.Block {
@@ -41,8 +40,8 @@ func makeBlock(txCount, uncleCount, withdrawalCount int) *types.Block {
 		withdrawals = make([]*types.Withdrawal, withdrawalCount)
 	)
 	header := &types.Header{
-		Difficulty: math.BigPow(11, 11),
-		Number:     math.BigPow(2, 9),
+		Difficulty: *uint256.NewInt(285311670611), // 11^11
+		Number:     *uint256.NewInt(0x200),        // 2^9
 		GasLimit:   12345678,
 		GasUsed:    1476322,
 		Time:       9876543,
@@ -62,8 +61,8 @@ func makeBlock(txCount, uncleCount, withdrawalCount int) *types.Block {
 	}
 	for i := range uncles {
 		uncles[i] = &types.Header{
-			Difficulty: math.BigPow(11, 11),
-			Number:     math.BigPow(2, 9),
+			Difficulty: *uint256.NewInt(285311670611), // 11^11
+			Number:     *uint256.NewInt(0x200),        // 2^9
 			GasLimit:   12345678,
 			GasUsed:    1476322,
 			Time:       9876543,
@@ -84,31 +83,7 @@ func makeBlock(txCount, uncleCount, withdrawalCount int) *types.Block {
 			Amount:    uint64(10 * i),
 		}
 	}
-	blockAccessList := types.BlockAccessList{
-		{
-			Address: accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000000001")),
-			StorageChanges: []*types.SlotChanges{
-				{
-					Slot: accounts.InternKey(common.HexToHash("0x01")),
-					Changes: []*types.StorageChange{
-						{Index: 0, Value: common.HexToHash("0x02")},
-					},
-				},
-			},
-			StorageReads: []accounts.StorageKey{accounts.InternKey(common.HexToHash("0x03"))},
-			BalanceChanges: []*types.BalanceChange{
-				{Index: 0, Value: *uint256.NewInt(5)},
-			},
-			NonceChanges: []*types.NonceChange{
-				{Index: 1, Value: 7},
-			},
-			CodeChanges: []*types.CodeChange{
-				{Index: 0, Data: []byte{0xaa, 0xbb}},
-			},
-		},
-	}
 	block := types.NewBlock(header, txs, uncles, receipts, withdrawals)
-	block.SetBlockAccessList(blockAccessList)
 	return block
 }
 

@@ -59,6 +59,9 @@ type Dirs struct {
 	CaplinLatest     string
 	CaplinGenesis    string
 	CaplinHistory    string
+	Migrations       string // persistent DB tracking which migrations have been applied
+
+	Log string
 }
 
 func New(datadir string) Dirs {
@@ -82,11 +85,16 @@ func New(datadir string) Dirs {
 		dirs.CaplinGenesis,
 		dirs.CaplinColumnData,
 		dirs.CaplinHistory,
-		filepath.Join(datadir, "logs"),
+		dirs.Migrations,
 	)
 
 	return dirs
 }
+
+// The subdirectory in the datadir for snapshots. This isn't encoded anywhere else because it's not
+// an MDBX name, but also a bunch of other datadir subdirs aren't encoded in Dirs, and Dirs does
+// absolute path stuff I don't want.
+const SnapDir = "snapshots"
 
 // Open new Dirs instance without forcing all the directories to exist.
 func Open(datadir string) Dirs {
@@ -105,13 +113,13 @@ func Open(datadir string) Dirs {
 		DataDir:          datadir,
 		Chaindata:        filepath.Join(datadir, "chaindata"),
 		Tmp:              filepath.Join(datadir, "temp"),
-		Snap:             filepath.Join(datadir, "snapshots"),
-		SnapIdx:          filepath.Join(datadir, "snapshots", "idx"),
-		SnapHistory:      filepath.Join(datadir, "snapshots", "history"),
-		SnapDomain:       filepath.Join(datadir, "snapshots", "domain"),
-		SnapAccessors:    filepath.Join(datadir, "snapshots", "accessor"),
-		SnapCaplin:       filepath.Join(datadir, "snapshots", "caplin"),
-		SnapForkable:     filepath.Join(datadir, "snapshots", "forkable"),
+		Snap:             filepath.Join(datadir, SnapDir),
+		SnapIdx:          filepath.Join(datadir, SnapDir, "idx"),
+		SnapHistory:      filepath.Join(datadir, SnapDir, "history"),
+		SnapDomain:       filepath.Join(datadir, SnapDir, "domain"),
+		SnapAccessors:    filepath.Join(datadir, SnapDir, "accessor"),
+		SnapCaplin:       filepath.Join(datadir, SnapDir, "caplin"),
+		SnapForkable:     filepath.Join(datadir, SnapDir, "forkable"),
 		Downloader:       filepath.Join(datadir, "downloader"),
 		TxPool:           filepath.Join(datadir, "txpool"),
 		Nodes:            filepath.Join(datadir, "nodes"),
@@ -121,6 +129,8 @@ func Open(datadir string) Dirs {
 		CaplinLatest:     filepath.Join(datadir, "caplin", "latest"),
 		CaplinGenesis:    filepath.Join(datadir, "caplin", "genesis-state"),
 		CaplinHistory:    filepath.Join(datadir, "caplin", "history"),
+		Migrations:       filepath.Join(datadir, "migrations"),
+		Log:              filepath.Join(datadir, "logs"),
 	}
 	return dirs
 }
@@ -143,7 +153,7 @@ func TryFlock(dirs Dirs) (*flock.Flock, bool, error) {
 	l := dirs.newFlock()
 	locked, err := l.TryLock()
 	if err != nil {
-		return nil, false, convertFileLockError(err)
+		return nil, false, fmt.Errorf("%w, %s", convertFileLockError(err), dirs.DataDir)
 	}
 	return l, locked, nil
 }
@@ -162,7 +172,7 @@ func (d Dirs) MustFlock() (Dirs, *flock.Flock, error) {
 		return d, l, err
 	}
 	if !locked {
-		return d, l, ErrDataDirLocked
+		return d, l, fmt.Errorf("%w, %s", ErrDataDirLocked, d.DataDir)
 	}
 	return d, l, nil
 }
@@ -178,7 +188,7 @@ func (d Dirs) TryFlock() (unlock func(), err error) {
 	}()
 	locked, err := f.TryLock()
 	if err != nil {
-		err = convertFileLockError(err)
+		err = fmt.Errorf("%w, %s", convertFileLockError(err), d.DataDir)
 		return
 	}
 	if locked {
@@ -187,7 +197,7 @@ func (d Dirs) TryFlock() (unlock func(), err error) {
 			panicif.Err(f.Unlock())
 		}
 	} else {
-		err = ErrDataDirLocked
+		err = fmt.Errorf("%w %s", ErrDataDirLocked, d.DataDir)
 	}
 	return
 }

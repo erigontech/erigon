@@ -123,7 +123,7 @@ func ResubscribeErr(backoffMax time.Duration, fn ResubscribeErrFunc) Subscriptio
 		backoffMax: backoffMax,
 		fn:         fn,
 		err:        make(chan error),
-		unsub:      make(chan struct{}),
+		unsub:      make(chan struct{}, 1),
 	}
 	go s.loop()
 	return s

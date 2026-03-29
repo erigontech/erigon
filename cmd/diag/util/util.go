@@ -31,7 +31,7 @@ import (
 	"github.com/jedib0t/go-pretty/v6/text"
 )
 
-func MakeHttpGetCall(ctx context.Context, url string, data interface{}) error {
+func MakeHttpGetCall(ctx context.Context, url string, data any) error {
 	var client = &http.Client{
 		Timeout: time.Second * 20,
 	}
@@ -67,7 +67,7 @@ func MakeHttpGetCall(ctx context.Context, url string, data interface{}) error {
 	return nil
 }
 
-func RenderJson(data interface{}) {
+func RenderJson(data any) {
 	bytes, err := json.Marshal(data)
 
 	if err == nil {

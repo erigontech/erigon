@@ -23,6 +23,12 @@ type MetricValues struct {
 	BatchId uint64
 }
 
+type crossPageAggMetrics struct {
+	top                  *slowestBatchesHeap
+	branchJumpdestCounts *[128][16]uint64
+	branchKeyLenCounts   *[128]uint64
+}
+
 type slowestBatchesHeap []MetricValues
 
 func (h *slowestBatchesHeap) Len() int {

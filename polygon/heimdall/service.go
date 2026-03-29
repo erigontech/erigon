@@ -80,7 +80,8 @@ func NewService(config ServiceConfig) *Service {
 	// case where FetchFirstMilestoneNum returned 10 but by the time our request reaches heimdall milestone=10
 	// has been already pruned. Additionally, we've been observing this error happening sporadically for the
 	// latest milestone.
-	milestoneScraperTransientErrors := []error{ErrNotInMilestoneList}
+	milestoneScraperTransientErrors := make([]error, 0, 1+len(poshttp.TransientErrors))
+	milestoneScraperTransientErrors = append(milestoneScraperTransientErrors, ErrNotInMilestoneList)
 	milestoneScraperTransientErrors = append(milestoneScraperTransientErrors, poshttp.TransientErrors...)
 	milestoneScraper := NewScraper(
 		"milestones",

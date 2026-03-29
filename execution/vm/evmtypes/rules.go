@@ -43,11 +43,11 @@ func (bc *BlockContext) Rules(c *chain.Config) *chain.Rules {
 		IsShanghai:         c.IsShanghai(bc.Time) || c.IsAgra(bc.BlockNumber),
 		IsCancun:           c.IsCancun(bc.Time),
 		IsNapoli:           c.IsNapoli(bc.BlockNumber),
+		IsAhmedabad:        c.IsAhmedabad(bc.BlockNumber),
 		IsBhilai:           c.IsBhilai(bc.BlockNumber),
 		IsPrague:           c.IsPrague(bc.Time) || c.IsBhilai(bc.BlockNumber),
 		IsOsaka:            c.IsOsaka(bc.Time),
 		IsAmsterdam:        c.IsAmsterdam(bc.Time),
 		IsAura:             c.Aura != nil,
-		Censoring:          chain.ConfigValueLookup(c.CensoringSchedule, bc.Time),
 	}
 }

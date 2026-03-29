@@ -181,6 +181,10 @@ func (hc *httpConn) doRequest(ctx context.Context, msg any) ([]byte, error) {
 		return nil, fmt.Errorf("%s: %s", resp.Status, string(respBody))
 	}
 
+	if len(respBody) == 0 {
+		return nil, errors.New("empty response from JSON-RPC server")
+	}
+
 	return respBody, nil
 }
 
@@ -246,6 +250,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Don't serve if server is stopped.
+	if !s.run.Load() {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		return
+	}
+
 	// Create request-scoped context.
 	connInfo := PeerInfo{Transport: "http", RemoteAddr: r.RemoteAddr}
 	connInfo.HTTP.Version = r.Proto
@@ -269,8 +279,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if s.debugSingleRequest {
 		if v := r.Header.Get(dbg.HTTPHeader); v == "true" {
-			ctx = dbg.ContextWithDebug(ctx, true)
-
+			ctx = dbg.WithDebug(ctx, true)
 		}
 	}
 

@@ -65,11 +65,12 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 		logger.Debug("Caplin is sending forkchoice")
 
 		// Run fork choice update with finalized checkpoint and head
+		headVersion := cfg.beaconCfg.GetCurrentStateVersion(headSlot / cfg.beaconCfg.SlotsPerEpoch)
 		if _, err = cfg.forkChoice.Engine().ForkChoiceUpdate(
 			ctx,
 			cfg.forkChoice.GetEth1Hash(finalizedCheckpoint.Root),
 			cfg.forkChoice.GetEth1Hash(justifiedCheckpoint.Root),
-			cfg.forkChoice.GetEth1Hash(headRoot), nil,
+			cfg.forkChoice.GetEth1Hash(headRoot), nil, headVersion,
 		); err != nil {
 			err = fmt.Errorf("failed to run forkchoice: %w", err)
 			return
@@ -103,8 +104,9 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 	}
 
 	oldCanonical := common.Hash{}
-	for i := currentSlot - 1; i > 0; i-- {
-		oldCanonical, err = beacon_indicies.ReadCanonicalBlockRoot(tx, i)
+	// Guard against uint64 underflow: currentSlot=0 → currentSlot-1 = MaxUint64 → infinite loop.
+	for i := currentSlot; i > 1; i-- {
+		oldCanonical, err = beacon_indicies.ReadCanonicalBlockRoot(tx, i-1)
 		if err != nil {
 			return fmt.Errorf("failed to read canonical block root: %w", err)
 		}
@@ -253,6 +255,10 @@ func emitNextPaylodAttributesEvent(cfg *Cfg, headSlot uint64, headRoot common.Ha
 		ParentBeaconBlockRoot: &headRoot,
 		Withdrawals:           withdrawals,
 	}
+	if cfg.beaconCfg.GetCurrentStateVersion(epoch).AfterOrEqual(clparams.GloasVersion) {
+		sn := hexutil.Uint64(nextSlot)
+		payloadAttributes.SlotNumber = &sn
+	}
 	e := &beaconevents.PayloadAttributesData{
 		Version: cfg.beaconCfg.GetCurrentStateVersion(epoch).String(),
 		Data: beaconevents.PayloadAttributesContent{
@@ -389,36 +395,72 @@ func preCacheNextShuffledValidatorSet(ctx context.Context, logger log.Logger, cf
 	workingPreCacheNextShuffledValidatorSet.Store(true)
 	go func() {
 		defer workingPreCacheNextShuffledValidatorSet.Store(false)
-		nextEpoch := state.Epoch(b) + 1
+		currentEpoch := state.Epoch(b)
 		beaconConfig := cfg.beaconCfg
 
-		// Check if any action is needed
-		refSlot := ((nextEpoch - 1) * b.BeaconConfig().SlotsPerEpoch) - 1
-		if refSlot >= b.Slot() {
-			return
-		}
-		// Get the block root at the beginning of the previous epoch
-		blockRootAtBegginingPrevEpoch, err := b.GetBlockRootAtSlot(refSlot)
-		if err != nil {
-			logger.Warn("failed to get block root at slot for pre-caching shuffled set", "err", err)
-			return
-		}
-		// Skip if the shuffled set is already pre-cached
-		if _, ok := caches.ShuffledIndiciesCacheGlobal.Get(nextEpoch, blockRootAtBegginingPrevEpoch); ok {
-			return
+		// Pre-cache shuffled sets for epochs: current-2, current-1, current, and next
+		epochsToCache := []uint64{currentEpoch + 1}
+		if currentEpoch >= 2 {
+			epochsToCache = append(epochsToCache, currentEpoch-2, currentEpoch-1, currentEpoch)
+		} else if currentEpoch >= 1 {
+			epochsToCache = append(epochsToCache, currentEpoch-1, currentEpoch)
+		} else {
+			epochsToCache = append(epochsToCache, currentEpoch)
 		}
 
-		indicies := b.GetActiveValidatorsIndices(nextEpoch)
-		shuffledIndicies := make([]uint64, len(indicies))
-		mixPosition := (nextEpoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %
-			beaconConfig.EpochsPerHistoricalVector
-		// Input for the seed hash.
-		mix := b.GetRandaoMix(int(mixPosition))
-		start := time.Now()
-		shuffledIndicies = shuffling.ComputeShuffledIndicies(b.BeaconConfig(), mix, shuffledIndicies, indicies, nextEpoch*beaconConfig.SlotsPerEpoch)
-		shuffling_metrics.ObserveComputeShuffledIndiciesTime(start)
-
-		caches.ShuffledIndiciesCacheGlobal.Put(nextEpoch, blockRootAtBegginingPrevEpoch, shuffledIndicies)
-		log.Info("Pre-cached shuffled set", "epoch", nextEpoch, "len", len(shuffledIndicies), "mix", common.Hash(mix))
+		for _, epoch := range epochsToCache {
+			preCacheShuffledSetForEpoch(logger, beaconConfig, b, epoch)
+		}
 	}()
+}
+
+func preCacheShuffledSetForEpoch(logger log.Logger, beaconConfig *clparams.BeaconChainConfig, b *state.CachingBeaconState, epoch uint64) {
+	// Check if any action is needed
+	refSlot := ((epoch - 1) * b.BeaconConfig().SlotsPerEpoch) - 1
+	if epoch == 0 || refSlot >= b.Slot() {
+		return
+	}
+	// Get the block root at the beginning of the previous epoch
+	blockRootAtBegginingPrevEpoch, err := b.GetBlockRootAtSlot(refSlot)
+	if err != nil {
+		logger.Warn("failed to get block root at slot for pre-caching shuffled set", "err", err)
+		return
+	}
+
+	// Pre-cache active validators if not already cached
+	preCacheActiveValidatorsForEpoch(b, epoch, blockRootAtBegginingPrevEpoch)
+
+	// Skip if the shuffled set is already pre-cached
+	if _, ok := caches.ShuffledIndiciesCacheGlobal.Get(epoch, blockRootAtBegginingPrevEpoch); ok {
+		return
+	}
+
+	indicies := b.GetActiveValidatorsIndices(epoch)
+	shuffledIndicies := make([]uint64, len(indicies))
+	mixPosition := (epoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %
+		beaconConfig.EpochsPerHistoricalVector
+	// Input for the seed hash.
+	mix := b.GetRandaoMix(int(mixPosition))
+	start := time.Now()
+	shuffledIndicies = shuffling.ComputeShuffledIndicies(b.BeaconConfig(), mix, shuffledIndicies, indicies, epoch*beaconConfig.SlotsPerEpoch)
+	shuffling_metrics.ObserveComputeShuffledIndiciesTime(start)
+
+	caches.ShuffledIndiciesCacheGlobal.Put(epoch, blockRootAtBegginingPrevEpoch, shuffledIndicies)
+	log.Info("Pre-cached shuffled set", "epoch", epoch, "len", len(shuffledIndicies), "mix", common.Hash(mix))
+}
+
+func preCacheActiveValidatorsForEpoch(b *state.CachingBeaconState, epoch uint64, blockRoot common.Hash) {
+	// Skip if already fully cached (both active validators and total balance)
+	if indicies, totalBalance, ok := caches.ActiveValidatorsCacheGlobal.Get(epoch, blockRoot); ok && len(indicies) > 0 && totalBalance > 0 {
+		return
+	}
+
+	// GetActiveValidatorsIndices and GetTotalActiveBalance will compute and cache the results
+	indicies := b.GetActiveValidatorsIndices(epoch)
+	if epoch != state.Epoch(b) {
+		caches.ActiveValidatorsCacheGlobal.Put(epoch, blockRoot, indicies, 0)
+		return
+	}
+	totalBalance := b.GetTotalActiveBalance()
+	caches.ActiveValidatorsCacheGlobal.Put(epoch, blockRoot, indicies, totalBalance)
 }

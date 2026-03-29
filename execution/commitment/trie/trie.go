@@ -519,7 +519,7 @@ func (t *Trie) UpdateAccount(key []byte, acc *accounts.Account) {
 	if value.Root == EmptyRoot || value.Root == (common.Hash{}) {
 		newnode = &AccountNode{*value, nil, true, nil, codeSizeUncached}
 	} else {
-		newnode = &AccountNode{*value, HashNode{hash: value.Root[:]}, true, nil, codeSizeUncached}
+		newnode = &AccountNode{*value, &HashNode{hash: value.Root[:]}, true, nil, codeSizeUncached}
 	}
 
 	if t.RootNode == nil {

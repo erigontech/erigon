@@ -135,7 +135,7 @@ func (s *KvServer) begin(ctx context.Context) (id uint64, err error) {
 	}
 	s.txsMapLock.Lock()
 	defer s.txsMapLock.Unlock()
-	tx, errBegin := s.kv.BeginTemporalRo(ctx) //nolint:gocritic
+	tx, errBegin := s.kv.BeginTemporalRo(ctx) //nolint:gocritic // tx is stored in s.txs and rolled back by rollback(); defer would close it prematurely
 	if errBegin != nil {
 		return 0, errBegin
 	}
@@ -157,7 +157,7 @@ func (s *KvServer) renew(ctx context.Context, id uint64) (err error) {
 		defer tx.Unlock()
 		tx.Rollback()
 	}
-	newTx, errBegin := s.kv.BeginTemporalRo(ctx) //nolint:gocritic
+	newTx, errBegin := s.kv.BeginTemporalRo(ctx) //nolint:gocritic // tx is stored in s.txs and rolled back by rollback(); defer would close it prematurely
 	if errBegin != nil {
 		return fmt.Errorf("kvserver: %w", errBegin)
 	}
@@ -421,9 +421,20 @@ func handleOp(c kv.Cursor, stream remoteproto.KV_TxServer, in *remoteproto.Curso
 	return nil
 }
 
+// SubscriptionReadyNotifier is an optional interface that KV_StateChangesServer
+// implementations can satisfy to be notified when their pub/sub subscription
+// is fully registered. This eliminates the timing hole between starting the
+// server goroutine and the subscription becoming active.
+type SubscriptionReadyNotifier interface {
+	NotifySubscribed()
+}
+
 func (s *KvServer) StateChanges(_ *remoteproto.StateChangeRequest, server remoteproto.KV_StateChangesServer) error {
 	ch, remove := s.stateChangeStreams.Sub()
 	defer remove()
+	if n, ok := server.(SubscriptionReadyNotifier); ok {
+		n.NotifySubscribed()
+	}
 	for {
 		select {
 		case reply := <-ch:

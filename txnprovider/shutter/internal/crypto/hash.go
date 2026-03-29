@@ -19,14 +19,14 @@ package crypto
 import (
 	"math/big"
 
+	keccak "github.com/erigontech/fastkeccak"
 	blst "github.com/supranational/blst/bindings/go"
-	"golang.org/x/crypto/sha3"
 )
 
 const HashToG1DST = "SHUTTER_V01_BLS12381G1_XMD:SHA-256_SSWU_RO_"
 
 func keccak256(ds ...[]byte) []byte {
-	state := sha3.NewLegacyKeccak256()
+	state := keccak.NewFastKeccak()
 	for _, d := range ds {
 		state.Write(d)
 	}

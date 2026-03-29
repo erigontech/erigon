@@ -219,6 +219,54 @@ func FindFilesWithVersionsByPattern(pattern string) (string, Version, bool, erro
 	return matches[0], ver, true, nil
 }
 
+// MatchVersionedFile searches for files matching a pattern within a pre-scanned list.
+// This avoids filesystem calls by searching within the provided dirEntries slice.
+// filePattern is the filename pattern (e.g., "*-accounts.0-1.kv")
+// dirEntries is a slice of filenames (not full paths)
+// dir is the directory path to join with matched filenames
+func MatchVersionedFile(filePattern string, dirEntries []string, dir string) (string, Version, bool, error) {
+	var bestMatch string
+	var bestVersion Version
+	found := false
+
+	// Optimization: patterns like "*-accounts.0-1.kv" are common — a single leading wildcard
+	// followed by a literal suffix. Use HasSuffix instead of filepath.Match (which is ~50x slower).
+	if strings.HasPrefix(filePattern, "*") && !strings.ContainsAny(filePattern[1:], "*?[") {
+		suffix := filePattern[1:]
+		for _, name := range dirEntries {
+			if !strings.HasSuffix(name, suffix) {
+				continue
+			}
+			ver, _ := ParseVersion(name)
+			if !found || ver.Greater(bestVersion) {
+				bestVersion = ver
+				bestMatch = name
+				found = true
+			}
+		}
+	} else {
+		for _, name := range dirEntries {
+			matched, err := filepath.Match(filePattern, name)
+			if err != nil {
+				return "", Version{}, false, fmt.Errorf("invalid pattern: %w", err)
+			}
+			if matched {
+				ver, _ := ParseVersion(name)
+				if !found || ver.Greater(bestVersion) {
+					bestVersion = ver
+					bestMatch = name
+					found = true
+				}
+			}
+		}
+	}
+
+	if !found {
+		return "", Version{}, false, nil
+	}
+	return filepath.Join(dir, bestMatch), bestVersion, true, nil
+}
+
 func CheckIsThereFileWithSupportedVersion(pattern string, minSup Version) error {
 	_, fileVer, ok, err := FindFilesWithVersionsByPattern(pattern)
 	if err != nil {

@@ -337,7 +337,7 @@ func (api *APIImpl) TransactionReceipts(ctx context.Context, crit filters.Receip
 			case protoReceipt, ok := <-receipts:
 				if protoReceipt != nil {
 					receipt := ethutils.MarshalSubscribeReceipt(protoReceipt)
-					err := notifier.Notify(rpcSub.ID, []map[string]interface{}{receipt})
+					err := notifier.Notify(rpcSub.ID, []map[string]any{receipt})
 					if err != nil {
 						log.Warn("[rpc] error while notifying subscription", "err", err)
 					}

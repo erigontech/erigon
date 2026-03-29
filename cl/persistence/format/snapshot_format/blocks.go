@@ -26,16 +26,20 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 type ExecutionBlockReaderByNumber interface {
 	Transactions(number uint64, hash common.Hash) (*solid.TransactionsSSZ, error)
 	Withdrawals(number uint64, hash common.Hash) (*solid.ListSSZ[*cltypes.Withdrawal], error)
 	SetBeaconChainConfig(beaconCfg *clparams.BeaconChainConfig)
+	// CacheBody stores a recently produced block body for immediate retrieval.
+	// Implementations that don't support caching should no-op.
+	CacheBody(blockNumber uint64, transactions [][]byte, withdrawals []*types.Withdrawal)
 }
 
 var buffersPool = sync.Pool{
-	New: func() interface{} { return &bytes.Buffer{} },
+	New: func() any { return &bytes.Buffer{} },
 }
 
 // WriteBlockForSnapshot writes a block to the given writer in the format expected by the snapshot.
@@ -112,6 +116,10 @@ func ReadBlockFromSnapshot(r io.Reader, executionReader ExecutionBlockReaderByNu
 	}
 	// No execution data for pre-altair blocks
 	if v <= clparams.AltairVersion {
+		return blindedBlock.Full(nil, nil), nil
+	}
+	// No execution reader: return with nil txs/withdrawals (sufficient for block parent lookup).
+	if executionReader == nil {
 		return blindedBlock.Full(nil, nil), nil
 	}
 	blockNumber := blindedBlock.Block.Body.ExecutionPayload.BlockNumber

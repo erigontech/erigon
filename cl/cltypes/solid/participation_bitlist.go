@@ -19,6 +19,7 @@ package solid
 import (
 	"encoding/json"
 	"math/bits"
+	"strconv"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/cl/utils"
@@ -218,14 +219,34 @@ func (u *ParticipationBitList) Bits() int {
 }
 
 func (u *ParticipationBitList) MarshalJSON() ([]byte, error) {
-	enc, err := u.EncodeSSZ(nil)
-	if err != nil {
-		return nil, err
+	// Beacon API spec: List[ParticipationFlags] is an array of decimal strings.
+	list := make([]string, u.l)
+	for i := 0; i < u.l; i++ {
+		list[i] = strconv.FormatUint(uint64(u.u[i]), 10)
 	}
-	return json.Marshal(hexutil.Bytes(enc))
+	return json.Marshal(list)
 }
 
 func (u *ParticipationBitList) UnmarshalJSON(input []byte) error {
+	// Try spec-compliant format first: array of decimal strings.
+	var list []string
+	if err := json.Unmarshal(input, &list); err == nil {
+		u.l = len(list)
+		if cap(u.u) < u.l+32 {
+			u.u = make([]byte, u.l+32)
+		} else {
+			u.u = u.u[:u.l+32]
+		}
+		for i, s := range list {
+			val, err := strconv.ParseUint(s, 10, 8)
+			if err != nil {
+				return err
+			}
+			u.u[i] = byte(val)
+		}
+		return nil
+	}
+	// Fallback: legacy hex-encoded SSZ format.
 	var hex hexutil.Bytes
 	if err := json.Unmarshal(input, &hex); err != nil {
 		return err

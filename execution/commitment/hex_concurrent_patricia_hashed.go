@@ -5,9 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
 )
 
@@ -40,10 +43,10 @@ func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) {
 }
 
 type ConcurrentPatriciaHashed struct {
-	root   *HexPatriciaHashed
-	rootMu sync.Mutex
-	mounts [16]*HexPatriciaHashed
-	ctx    [16]PatriciaContext
+	root       *HexPatriciaHashed
+	rootMu     sync.Mutex
+	mounts     [16]*HexPatriciaHashed
+	ctxClosers [16]func()
 }
 
 // Subtrie inherits root state, address length
@@ -52,7 +55,6 @@ func NewConcurrentPatriciaHashed(root *HexPatriciaHashed, ctx PatriciaContext) *
 
 	for i := range p.mounts {
 		p.mounts[i] = p.root.SpawnSubTrie(ctx, i)
-		p.ctx[i] = ctx // todo barely needed
 	}
 	return p
 }
@@ -110,7 +112,7 @@ func (p *ConcurrentPatriciaHashed) foldNibble(nib int) error {
 	return nil
 }
 
-func (p *ConcurrentPatriciaHashed) unfoldRoot() error {
+func (p *ConcurrentPatriciaHashed) unfoldRoot(ctxFactory TrieContextFactory) error {
 	if p.root.trace {
 		fmt.Printf("=============ROOT unfold============\n")
 	}
@@ -132,7 +134,9 @@ func (p *ConcurrentPatriciaHashed) unfoldRoot() error {
 			panic(fmt.Sprintf("nibble %x is nil", i))
 		}
 		p.mounts[i].mountTo(p.root, i)
-		p.mounts[i].ctx = p.ctx[i]
+		mountCtx, mountCtxClose := ctxFactory()
+		p.mounts[i].ctx = mountCtx
+		p.ctxClosers[i] = mountCtxClose
 	}
 	return nil
 }
@@ -140,6 +144,10 @@ func (p *ConcurrentPatriciaHashed) unfoldRoot() error {
 func (p *ConcurrentPatriciaHashed) Close() {
 	for i := range p.mounts {
 		p.mounts[i].Reset()
+		if p.ctxClosers[i] != nil {
+			p.ctxClosers[i]()
+			p.ctxClosers[i] = nil
+		}
 	}
 }
 
@@ -153,6 +161,12 @@ func (p *ConcurrentPatriciaHashed) SetTraceDomain(b bool) {
 	p.root.SetTraceDomain(b)
 	for i := range p.mounts {
 		p.mounts[i].SetTraceDomain(b)
+	}
+}
+func (p *ConcurrentPatriciaHashed) EnableWarmupCache(b bool) {
+	p.root.EnableWarmupCache(b)
+	for i := range p.mounts {
+		p.mounts[i].EnableWarmupCache(b)
 	}
 }
 func (p *ConcurrentPatriciaHashed) GetCapture(truncate bool) []string {
@@ -176,6 +190,7 @@ func (p *ConcurrentPatriciaHashed) EnableCsvMetrics(filePathPrefix string) {
 	p.root.EnableCsvMetrics(filePathPrefix)
 	for i := range p.mounts {
 		p.mounts[i].EnableCsvMetrics(filePathPrefix)
+		p.mounts[i].metrics = p.root.metrics
 	}
 }
 
@@ -187,7 +202,7 @@ func (p *ConcurrentPatriciaHashed) SetParticularTrace(b bool, n int) {
 	}
 }
 
-func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaHashed) ([]byte, error) {
+func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaHashed, trieCtxFactory TrieContextFactory) ([]byte, error) {
 	if t.mode != ModeDirect {
 		return nil, errors.New("parallel hashsort for indirect mode is not supported")
 	}
@@ -195,7 +210,7 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 		return nil, errors.New("sortPerNibble disabled")
 	}
 
-	if err := pph.unfoldRoot(); err != nil {
+	if err := pph.unfoldRoot(trieCtxFactory); err != nil {
 		return nil, err
 	}
 
@@ -210,6 +225,14 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 		ni := n
 
 		g.Go(func() error {
+			// close the temporary context provisioned by unfoldRoot before replacing it
+			if pph.ctxClosers[ni] != nil {
+				pph.ctxClosers[ni]()
+				pph.ctxClosers[ni] = nil
+			}
+			trieCtx, trieCtxClose := trieCtxFactory()
+			defer trieCtxClose()
+			phnib.ResetContext(trieCtx)
 			cnt := 0
 			err := nib.Load(nil, "", func(hashedKey, plainKey []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 				cnt++
@@ -262,24 +285,38 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 }
 
 // Computing commitment root hash. If possible, use parallel commitment and after evaluation decides, if it can be used next time
-func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress) (rootHash []byte, err error) {
-	// start := time.Now()
-	// wasConcurrent := updates.IsConcurrentCommitment()
-	// updCount := updates.Size()
-	// defer func(s time.Time, wasConcurrent bool) {
-	// 	fmt.Printf("commitment time %s; keys %s; was concurrent: %t\n", time.Since(s), common.PrettyCounter(updCount), wasConcurrent)
-	// }(start, wasConcurrent)
-
+func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string, onProgress func(*CommitProgress), warmup WarmupConfig) (rootHash []byte, err error) {
+	start := time.Now()
+	wasConcurrent := updates.IsConcurrentCommitment()
+	updatesCount := updates.Size()
+	defer func() {
+		log.Debug(
+			"concurrent commitment processed",
+			"dur", time.Since(start),
+			"updates", common.PrettyCounter(updatesCount),
+			"wasConcurrent", wasConcurrent,
+		)
+	}()
+	p.root.metrics.Reset()
+	p.root.metrics.updates.Store(updatesCount)
+	if p.root.metrics.collectCommitmentMetrics {
+		defer func() {
+			p.root.metrics.TotalProcessingTimeInc(start)
+			p.root.metrics.WriteToCSV()
+		}()
+	}
 	switch updates.IsConcurrentCommitment() {
 	case true:
-		rootHash, err = updates.ParallelHashSort(ctx, p)
+		rootHash, err = updates.ParallelHashSort(ctx, p, warmup.CtxFactory)
+		if err != nil {
+			return nil, err
+		}
 	default:
-		rootHash, err = p.root.Process(ctx, updates, logPrefix, progress)
+		rootHash, err = p.root.Process(ctx, updates, logPrefix, onProgress, warmup)
+		if err != nil {
+			return nil, err
+		}
 	}
-	if err != nil {
-		return nil, err
-	}
-
 	nextConcurrent, err := p.CanDoConcurrentNext()
 	if err != nil {
 		return nil, err
@@ -290,7 +327,7 @@ func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, updates *Updates
 
 func (p *ConcurrentPatriciaHashed) CanDoConcurrentNext() (bool, error) {
 	if p.root.root.extLen == 0 {
-		zeroPrefixBranch, _, err := p.root.ctx.Branch(hexNibblesToCompactBytes([]byte{0}))
+		zeroPrefixBranch, _, err := p.root.ctx.Branch(HexNibblesToCompactBytes([]byte{0}))
 		if err != nil {
 			return false, fmt.Errorf("checking shortes prefix branch failed: %w", err)
 		}
@@ -318,12 +355,15 @@ func (p *ConcurrentPatriciaHashed) Reset() {
 	}
 }
 
+func (p *ConcurrentPatriciaHashed) Release() {
+	p.root.Release()
+}
+
 // Set context for state IO
 func (p *ConcurrentPatriciaHashed) ResetContext(ctx PatriciaContext) {
 	p.root.ctx = ctx
 	for i := 0; i < len(p.mounts); i++ {
 		p.mounts[i].ResetContext(ctx)
-		p.ctx[i] = ctx
 	}
 }
 

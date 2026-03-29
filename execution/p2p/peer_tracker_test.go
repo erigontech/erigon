@@ -19,12 +19,12 @@ package p2p
 import (
 	"context"
 	"encoding/binary"
-	"math/big"
 	"sort"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
@@ -224,7 +224,7 @@ func TestPeerTrackerNewBlocksObserver(t *testing.T) {
 			EventId: sentryproto.PeerEvent_Connect,
 		})
 
-		header := &types.Header{Number: big.NewInt(123)}
+		header := &types.Header{Number: *uint256.NewInt(123)}
 		var peerIds []*PeerId
 		waitCond := func(wantPeerIdsLen int) func() bool {
 			return func() bool {
