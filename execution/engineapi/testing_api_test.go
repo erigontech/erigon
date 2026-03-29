@@ -268,7 +268,10 @@ func makeAssembledBlock(blockHash, parentHash, stateRoot common.Hash, blockNumbe
 	h.ExcessBlobGas = &excessBlobGas
 
 	blk := types.NewBlockFromStorage(blockHash, h, nil, nil, []*types.Withdrawal{})
-	return &types.BlockWithReceipts{Block: blk}
+	return &types.BlockWithReceipts{
+		Block:    blk,
+		Requests: make(types.FlatRequests, 0), // empty but non-nil: valid for Prague+
+	}
 }
 
 // ---------------------------------------------------------------------------
