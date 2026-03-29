@@ -329,12 +329,13 @@ func (c *ecrecover) Run(input []byte) ([]byte, error) {
 	// "input" is (hash, v, r, s), each 32 bytes
 	// but for ecrecover we want (r, s, v)
 
-	r := new(uint256.Int).SetBytes(input[64:96])
-	s := new(uint256.Int).SetBytes(input[96:128])
+	var r, s uint256.Int
+	r.SetBytes(input[64:96])
+	s.SetBytes(input[96:128])
 	v := input[63] - 27
 
 	// tighter sig s values input homestead only apply to txn sigs
-	if bitutil.TestBytes(input[32:63]) || !crypto.TransactionSignatureIsValid(v, r, s, true /* allowPreEip2s */) {
+	if bitutil.TestBytes(input[32:63]) || !crypto.TransactionSignatureIsValid(v, &r, &s, true /* allowPreEip2s */) {
 		return nil, nil
 	}
 	// We must make sure not to modify the 'input', so placing the 'v' along with
@@ -350,7 +351,9 @@ func (c *ecrecover) Run(input []byte) ([]byte, error) {
 	}
 
 	// the first byte of pubkey is bitcoin heritage
-	return common.LeftPadBytes(crypto.Keccak256(pubKey[1:])[12:], 32), nil
+	result := make([]byte, 32)
+	copy(result[12:], crypto.Keccak256(pubKey[1:])[12:])
+	return result, nil
 }
 
 func (c *ecrecover) Name() string {
@@ -389,7 +392,9 @@ func (c *ripemd160hash) RequiredGas(input []byte) uint64 {
 func (c *ripemd160hash) Run(input []byte) ([]byte, error) {
 	ripemd := ripemd160.New()
 	ripemd.Write(input)
-	return common.LeftPadBytes(ripemd.Sum(nil), 32), nil
+	// Pre-allocate 32 bytes with 12-byte zero prefix for left-padding.
+	// Sum appends the 20-byte hash after the prefix.
+	return ripemd.Sum(make([]byte, 12, 32)), nil
 }
 
 func (c *ripemd160hash) Name() string {
@@ -611,21 +616,26 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 	}
 	// Retrieve the operands and execute the exponentiation
 	var (
-		base = new(patched_big.Int).SetBytes(getData(input, 0, baseLen))
-		exp  = new(patched_big.Int).SetBytes(getData(input, baseLen, expLen))
-		mod  = new(patched_big.Int).SetBytes(getData(input, baseLen+expLen, modLen))
-		v    []byte
+		base patched_big.Int
+		exp  patched_big.Int
+		mod  patched_big.Int
 	)
+	base.SetBytes(getData(input, 0, baseLen))
+	exp.SetBytes(getData(input, baseLen, expLen))
+	mod.SetBytes(getData(input, baseLen+expLen, modLen))
+
+	// Allocate the result buffer once, zero-filled.
+	result := make([]byte, modLen)
 	switch {
 	case mod.Cmp(patchedBig1) <= 0:
 		// Leave the result as zero for mod 0 (undefined) and 1
 	case base.Cmp(patchedBig1) == 0:
 		// If base == 1 (and mod > 1), then the result is 1
-		v = patchedBig1.Bytes()
+		result[modLen-1] = 1
 	default:
-		v = base.Exp(base, exp, mod).Bytes()
+		base.Exp(&base, &exp, &mod).FillBytes(result)
 	}
-	return common.LeftPadBytes(v, int(modLen)), nil
+	return result, nil
 }
 
 func (c *bigModExp) Name() string {
@@ -691,7 +701,9 @@ func runBn254ScalarMul(input []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return libbn254.MarshalCurvePointG1(x.ScalarMultiplication(&x, new(big.Int).SetBytes(getData(input, 64, 32)))), nil
+	var scalar big.Int
+	scalar.SetBytes(getData(input, 64, 32))
+	return libbn254.MarshalCurvePointG1(x.ScalarMultiplication(&x, &scalar)), nil
 }
 
 // bn254ScalarMulIstanbul implements a native elliptic curve scalar
@@ -751,22 +763,19 @@ func runBn254Pairing(input []byte) ([]byte, error) {
 	}
 
 	// Convert the input into a set of coordinates
-	as := make([]bn254.G1Affine, 0, len(input)/192)
-	bs := make([]bn254.G2Affine, 0, len(input)/192)
-	for i := 0; i < len(input); i += 192 {
-		ai := bn254.G1Affine{}
-		err := libbn254.UnmarshalCurvePointG1(input[i:i+64], &ai)
+	n := len(input) / 192
+	as := make([]bn254.G1Affine, n)
+	bs := make([]bn254.G2Affine, n)
+	for j := 0; j < n; j++ {
+		i := j * 192
+		err := libbn254.UnmarshalCurvePointG1(input[i:i+64], &as[j])
 		if err != nil {
 			return nil, err
 		}
-
-		bi := bn254.G2Affine{}
-		err = libbn254.UnmarshalCurvePointG2(input[i+64:i+192], &bi)
+		err = libbn254.UnmarshalCurvePointG2(input[i+64:i+192], &bs[j])
 		if err != nil {
 			return nil, err
 		}
-		as = append(as, ai)
-		bs = append(bs, bi)
 	}
 
 	success, err := bn254.PairingCheck(as, bs)
@@ -901,23 +910,22 @@ func (c *bls12381G1Add) Run(input []byte) ([]byte, error) {
 	if len(input) != 256 {
 		return nil, errBLS12381InvalidInputLength
 	}
-	var err error
-	var p0, p1 *bls12381.G1Affine
-
 	// Decode G1 point p_0
-	if p0, err = decodePointG1(input[:128]); err != nil {
+	p0, err := decodePointG1(input[:128])
+	if err != nil {
 		return nil, err
 	}
 	// Decode G1 point p_1
-	if p1, err = decodePointG1(input[128:]); err != nil {
+	p1, err := decodePointG1(input[128:])
+	if err != nil {
 		return nil, err
 	}
 
 	// Compute r = p_0 + p_1
-	p0.Add(p0, p1)
+	p0.Add(&p0, &p1)
 
 	// Encode the G1 point result into 128 bytes
-	return encodePointG1(p0), nil
+	return encodePointG1(&p0), nil
 }
 
 func (c *bls12381G1Add) Name() string {
@@ -970,20 +978,20 @@ func (c *bls12381G1MultiExp) Run(input []byte) ([]byte, error) {
 		if !p.IsInSubGroup() {
 			return nil, errBLS12381G1PointSubgroup
 		}
-		points[i] = *p
+		points[i] = p
 		// Decode scalar value
-		scalars[i] = *new(fr.Element).SetBytes(input[t1:t2])
+		scalars[i].SetBytes(input[t1:t2])
 	}
 
 	// Compute r = e_0 * p_0 + e_1 * p_1 + ... + e_(k-1) * p_(k-1)
-	r := new(bls12381.G1Affine)
+	var r bls12381.G1Affine
 	_, err := r.MultiExp(points, scalars, ecc.MultiExpConfig{})
 	if err != nil {
 		return nil, err
 	}
 
 	// Encode the G1 point to 128 bytes
-	return encodePointG1(r), nil
+	return encodePointG1(&r), nil
 }
 
 func (c *bls12381G1MultiExp) Name() string {
@@ -1005,24 +1013,23 @@ func (c *bls12381G2Add) Run(input []byte) ([]byte, error) {
 	if len(input) != 512 {
 		return nil, errBLS12381InvalidInputLength
 	}
-	var err error
-	var p0, p1 *bls12381.G2Affine
-
 	// Decode G2 point p_0
-	if p0, err = decodePointG2(input[:256]); err != nil {
+	p0, err := decodePointG2(input[:256])
+	if err != nil {
 		return nil, err
 	}
 	// Decode G2 point p_1
-	if p1, err = decodePointG2(input[256:]); err != nil {
+	p1, err := decodePointG2(input[256:])
+	if err != nil {
 		return nil, err
 	}
 
 	// Compute r = p_0 + p_1
-	r := new(bls12381.G2Affine)
-	r.Add(p0, p1)
+	var r bls12381.G2Affine
+	r.Add(&p0, &p1)
 
 	// Encode the G2 point into 256 bytes
-	return encodePointG2(r), nil
+	return encodePointG2(&r), nil
 }
 
 func (c *bls12381G2Add) Name() string {
@@ -1075,20 +1082,20 @@ func (c *bls12381G2MultiExp) Run(input []byte) ([]byte, error) {
 		if !p.IsInSubGroup() {
 			return nil, errBLS12381G2PointSubgroup
 		}
-		points[i] = *p
+		points[i] = p
 		// Decode scalar value
-		scalars[i] = *new(fr.Element).SetBytes(input[t1:t2])
+		scalars[i].SetBytes(input[t1:t2])
 	}
 
 	// Compute r = e_0 * p_0 + e_1 * p_1 + ... + e_(k-1) * p_(k-1)
-	r := new(bls12381.G2Affine)
+	var r bls12381.G2Affine
 	_, err := r.MultiExp(points, scalars, ecc.MultiExpConfig{})
 	if err != nil {
 		return nil, err
 	}
 
 	// Encode the G2 point to 256 bytes.
-	return encodePointG2(r), nil
+	return encodePointG2(&r), nil
 }
 
 func (c *bls12381G2MultiExp) Name() string {
@@ -1115,10 +1122,8 @@ func (c *bls12381Pairing) Run(input []byte) ([]byte, error) {
 		return nil, errBLS12381InvalidInputLength
 	}
 
-	var (
-		p []bls12381.G1Affine
-		q []bls12381.G2Affine
-	)
+	p := make([]bls12381.G1Affine, k)
+	q := make([]bls12381.G2Affine, k)
 
 	// Decode pairs
 	for i := 0; i < k; i++ {
@@ -1144,8 +1149,8 @@ func (c *bls12381Pairing) Run(input []byte) ([]byte, error) {
 		if !p2.IsInSubGroup() {
 			return nil, errBLS12381G2PointSubgroup
 		}
-		p = append(p, *p1)
-		q = append(q, *p2)
+		p[i] = p1
+		q[i] = p2
 	}
 	// Prepare 32 byte output
 	out := make([]byte, 32)
@@ -1162,55 +1167,55 @@ func (c *bls12381Pairing) Name() string {
 	return "BLS12_PAIRING_CHECK"
 }
 
-func decodePointG1(in []byte) (*bls12381.G1Affine, error) {
+func decodePointG1(in []byte) (bls12381.G1Affine, error) {
 	if len(in) != 128 {
-		return nil, errors.New("invalid g1 point length")
+		return bls12381.G1Affine{}, errors.New("invalid g1 point length")
 	}
 	// decode x
 	x, err := decodeBLS12381FieldElement(in[:64])
 	if err != nil {
-		return nil, err
+		return bls12381.G1Affine{}, err
 	}
 	// decode y
 	y, err := decodeBLS12381FieldElement(in[64:])
 	if err != nil {
-		return nil, err
+		return bls12381.G1Affine{}, err
 	}
 	elem := bls12381.G1Affine{X: x, Y: y}
 	if !elem.IsOnCurve() {
-		return nil, errors.New("invalid point: not on curve")
+		return bls12381.G1Affine{}, errors.New("invalid point: not on curve")
 	}
 
-	return &elem, nil
+	return elem, nil
 }
 
 // decodePointG2 given encoded (x, y) coordinates in 256 bytes returns a valid G2 Point.
-func decodePointG2(in []byte) (*bls12381.G2Affine, error) {
+func decodePointG2(in []byte) (bls12381.G2Affine, error) {
 	if len(in) != 256 {
-		return nil, errors.New("invalid g2 point length")
+		return bls12381.G2Affine{}, errors.New("invalid g2 point length")
 	}
 	x0, err := decodeBLS12381FieldElement(in[:64])
 	if err != nil {
-		return nil, err
+		return bls12381.G2Affine{}, err
 	}
 	x1, err := decodeBLS12381FieldElement(in[64:128])
 	if err != nil {
-		return nil, err
+		return bls12381.G2Affine{}, err
 	}
 	y0, err := decodeBLS12381FieldElement(in[128:192])
 	if err != nil {
-		return nil, err
+		return bls12381.G2Affine{}, err
 	}
 	y1, err := decodeBLS12381FieldElement(in[192:])
 	if err != nil {
-		return nil, err
+		return bls12381.G2Affine{}, err
 	}
 
 	p := bls12381.G2Affine{X: bls12381.E2{A0: x0, A1: x1}, Y: bls12381.E2{A0: y0, A1: y1}}
 	if !p.IsOnCurve() {
-		return nil, errors.New("invalid point: not on curve")
+		return bls12381.G2Affine{}, errors.New("invalid point: not on curve")
 	}
-	return &p, err
+	return p, nil
 }
 
 // decodeBLS12381FieldElement decodes BLS12-381 elliptic curve field element.
@@ -1364,17 +1369,19 @@ func (c *p256Verify) Run(input []byte) ([]byte, error) {
 
 	// Extract the hash, r, s, x, y from the input
 	hash := input[0:32]
-	r, s := new(big.Int).SetBytes(input[32:64]), new(big.Int).SetBytes(input[64:96])
-	x, y := new(big.Int).SetBytes(input[96:128]), new(big.Int).SetBytes(input[128:160])
+	var r, s, x, y big.Int
+	r.SetBytes(input[32:64])
+	s.SetBytes(input[64:96])
+	x.SetBytes(input[96:128])
+	y.SetBytes(input[128:160])
 
 	// Verify the secp256r1 signature
-	if secp256r1.Verify(hash, r, s, x, y) {
+	if secp256r1.Verify(hash, &r, &s, &x, &y) {
 		// Signature is valid
-		return common.LeftPadBytes(common.Big1.Bytes(), 32), nil
-	} else {
-		// Signature is invalid
-		return nil, nil
+		return true32Byte, nil
 	}
+	// Signature is invalid
+	return nil, nil
 }
 
 func (c *p256Verify) Name() string {
