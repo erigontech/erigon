@@ -884,15 +884,24 @@ func (api *TraceAPIImpl) callBlock(
 		msgs[i] = msg
 	}
 
-	// Use parallel execution when replaying historical blocks without stateDiff:
+	// Use parallel execution when replaying historical blocks without stateDiff or vmTrace:
 	// each tx can read its own pre-state independently from the temporal DB,
 	// so workers never share mutable state and need no conflict detection.
 	// Bor state-sync txns are excluded because they require bridgeReader.Events
-	// which uses the shared dbtx.
+	// which uses the shared dbtx. vmTrace is excluded because the parallel path
+	// does not initialise traceResult.VmTrace.
+	// When the parallel path is taken, ibs only has InitializeBlockExecution effects
+	// (no user-tx state); CalculateRewards is safe because rewards are header-derived.
 	hasStateDiff := false
+	hasVmTrace := false
 	for _, t := range traceTypes {
-		if t == TraceTypeStateDiff {
+		switch t {
+		case TraceTypeStateDiff:
 			hasStateDiff = true
+		case TraceTypeVmTrace:
+			hasVmTrace = true
+		}
+		if hasStateDiff && hasVmTrace {
 			break
 		}
 	}
@@ -904,7 +913,7 @@ func (api *TraceAPIImpl) callBlock(
 
 	var traces []*TraceCallResult
 	var cmErr error
-	if isHistoricalStateReader && !hasStateDiff && borStateSyncTxn == nil && len(txs) > 1 {
+	if isHistoricalStateReader && !hasStateDiff && !hasVmTrace && borStateSyncTxn == nil && len(txs) > 1 {
 		traces, cmErr = api.doCallBlockParallel(ctx, dbtx, baseTxNum, txs, msgs, callParams, header, gasBailOut, traceConfig)
 	} else {
 		traces, _, cmErr = api.doCallBlock(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txs, msgs, callParams,
