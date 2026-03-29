@@ -977,10 +977,10 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 
 	results := make([]*TraceCallResult, len(txns))
 
-	numWorkers := len(txns)
-	if n := runtime.GOMAXPROCS(0); n < numWorkers {
-		numWorkers = n
-	}
+	// Cap at 32 to bound memory from concurrent IntraBlockState instances and
+	// MDBX read transactions even on high-core-count machines.
+	const maxParallelWorkers = 32
+	numWorkers := min(runtime.GOMAXPROCS(0), len(txns), maxParallelWorkers)
 
 	// Pre-fill a buffered channel so the main goroutine never blocks.
 	jobs := make(chan blockTraceTxJob, len(txns))
@@ -1033,6 +1033,8 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 				ot.compat = api.compatibility
 				ot.r = traceResult
 				ot.idx = []string{fmt.Sprintf("%d-", job.txIndex)}
+				// The parallel path only activates when !hasStateDiff && !hasVmTrace, so
+				// TraceTypeTrace is always active here; initialise traceAddr unconditionally.
 				ot.traceAddr = []int{}
 
 				tracer := ot.Tracer()
