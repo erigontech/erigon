@@ -25,6 +25,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
@@ -33,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing/calltracer"
@@ -124,6 +126,26 @@ type Worker struct {
 	dirs datadir.Dirs
 
 	metrics *WorkerMetrics
+}
+
+// installWorkerGetHash replaces the EVM's GetHash function with one that
+// uses the worker's own chainTx for BLOCKHASH lookups. This avoids sharing
+// the executeBlocks goroutine's roTx across worker goroutines (data race).
+func (rw *Worker) installWorkerGetHash(txTask Task) {
+	header := txTask.BlockHeader()
+	if header == nil {
+		return
+	}
+	workerTx := rw.chainTx
+	br := rw.blockReader
+	ctx := rw.ctx
+	rw.evm.Context.GetHash = protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
+		h, err := br.Header(ctx, workerTx, hash, number)
+		if h == nil && err == nil {
+			h = &types.Header{}
+		}
+		return h, err
+	})
 }
 
 func NewWorker(ctx context.Context, background bool, metrics *WorkerMetrics, chainDb kv.TemporalRoDB, in *QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *ResultsQueue, engine rules.Engine, dirs datadir.Dirs, logger log.Logger) *Worker {
@@ -446,6 +468,12 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 			Task: txTask,
 			Err:  err,
 		}
+	}
+
+	// Override GetHash with a per-worker function that uses the worker's
+	// own chainTx. The shared blockTx from executeBlocks is not thread-safe.
+	if rw.background && rw.chainTx != nil && rw.blockReader != nil {
+		rw.installWorkerGetHash(txTask)
 	}
 
 	result := txTask.Execute(rw.evm, rw.engine, rw.genesis, rw.ibs, rw.stateWriter, rw.chainConfig, rw.chain, rw.dirs, true)

@@ -16,6 +16,7 @@ type StateReader interface {
 type LatestStateReader struct {
 	sharedDomains sd
 	getter        kv.TemporalGetter
+	traceReads    bool
 }
 
 func NewLatestStateReader(tx kv.TemporalTx, sd sd) *LatestStateReader {
@@ -39,7 +40,30 @@ func (r *LatestStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) 
 	if err != nil {
 		return nil, 0, fmt.Errorf("LatestStateReader(GetLatest) %q: %w", d, err)
 	}
+	// Trace target address for sibling read investigation
+	if d == kv.AccountsDomain && len(plainKey) == 20 && fmt.Sprintf("%x", plainKey) == "000000000004444c5dc75cb358380d2e3de08a90" {
+		valSnip := enc
+		if len(valSnip) > 16 {
+			valSnip = valSnip[:16]
+		}
+		fmt.Printf("SIBLING_READ: d=%d key=%x valLen=%d val=%x\n", d, plainKey, len(enc), valSnip)
+	}
+	if d == kv.CommitmentDomain && TraceCommitReads {
+		dataPrefix := enc
+		if len(dataPrefix) > 16 {
+			dataPrefix = dataPrefix[:16]
+		}
+		fmt.Printf("COMMIT_READ: key=%x len=%d step=%d data=%x\n", plainKey, len(enc), step, dataPrefix)
+	}
 	return enc, step, nil
+}
+
+// TraceCommitReads enables global commitment read tracing for debugging.
+var TraceCommitReads bool
+
+// SetTraceReads enables per-read tracing for debugging.
+func (r *LatestStateReader) SetTraceReads(trace bool) {
+	r.traceReads = trace
 }
 
 func (r *LatestStateReader) Clone(tx kv.TemporalTx) StateReader {

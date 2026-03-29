@@ -243,7 +243,12 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 			for i, r := range rs {
 				fmt.Printf("REQUESTS: block=%d idx=%d type=%d len=%d data_prefix=%x\n",
 					header.Number.Uint64(), i, r.Type, len(r.RequestData),
-					func() []byte { if len(r.RequestData) > 32 { return r.RequestData[:32] }; return r.RequestData }())
+					func() []byte {
+						if len(r.RequestData) > 32 {
+							return r.RequestData[:32]
+						}
+						return r.RequestData
+					}())
 			}
 			fmt.Printf("REQUESTS: block=%d total=%d hash=%x\n",
 				header.Number.Uint64(), len(rs), rs.Hash())

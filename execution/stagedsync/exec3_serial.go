@@ -17,6 +17,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -218,7 +219,15 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				se.doms.SetTrace(true, false)
 			}
 			// Warmup is enabled via EnableTrieWarmup at executor init
+			if blockNum <= 24364010 {
+				fmt.Printf("SERIAL_COMPUTE: block=%d txNum=%d updatesLen=%d\n", blockNum, inputTxNum-1, se.doms.GetCommitmentCtx().GetUpdates().Size())
+			}
+			if blockNum == 24364003 {
+				commitmentdb.TraceCommitReads = true
+			}
 			rh, err := se.doms.ComputeCommitment(ctx, execDomainRoTx, true, blockNum, inputTxNum-1, se.logPrefix, nil)
+			commitmentdb.TraceCommitReads = false
+			commitment.TraceTouchKeys = false
 			se.doms.SetTrace(false, false)
 
 			if err != nil {

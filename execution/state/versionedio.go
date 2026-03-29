@@ -13,9 +13,9 @@ import (
 	"github.com/heimdalr/dag"
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -492,9 +492,13 @@ func (writes VersionedWrites) TouchUpdates(updates *commitment.Updates) {
 				CodeHash: crypto.Keccak256Hash(code),
 			})
 		case SelfDestructPath:
-			updates.TouchPlainKeyDirect(string(address[:]), &commitment.Update{
-				Flags: commitment.DeleteUpdate,
-			})
+			// Only emit DeleteUpdate when the account was actually self-destructed.
+			// SelfDestructPath=false means the account is NOT deleted (e.g., resurrection).
+			if destructed, ok := w.Val.(bool); ok && destructed {
+				updates.TouchPlainKeyDirect(string(address[:]), &commitment.Update{
+					Flags: commitment.DeleteUpdate,
+				})
+			}
 		case StoragePath:
 			keyVal := w.Key.Value()
 			composite := make([]byte, 20+32)
@@ -886,16 +890,16 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 						}
 					}
 
-					// a previous dependency has been removed from the map
+					// A previous dependency has been removed from the map
+					// (prior TX is being re-executed, entry marked Estimate).
+					// Instead of aborting with ErrDependency (which causes
+					// cascading re-executions and livelocks in dense blocks),
+					// fall through to read from storage. Validation will catch
+					// any mismatch when the prior TX's value returns to Done.
 					if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
-						fmt.Printf("%d (%d.%d) RM DEP (%d.%d)!=(%d.%d) %x %s\n", s.blockNum, s.txIndex, s.version, pr.Version.TxIndex, pr.Version.Incarnation, vr.Version.TxIndex, vr.Version.Incarnation, addr, AccountKey{path, key})
+						fmt.Printf("%d (%d.%d) RM DEP FALLTHROUGH (%d.%d)!=(%d.%d) %x %s\n", s.blockNum, s.txIndex, s.version, pr.Version.TxIndex, pr.Version.Incarnation, vr.Version.TxIndex, vr.Version.Incarnation, addr, AccountKey{path, key})
 					}
-
-					if pr.Version.TxIndex > s.dep {
-						s.dep = pr.Version.TxIndex
-					}
-
-					panic(ErrDependency)
+					// Fall through to storage read below
 				}
 			}
 		}

@@ -42,11 +42,12 @@ import (
 )
 
 type StateV3 struct {
-	domains *execctx.SharedDomains
-	logger  log.Logger
-	syncCfg ethconfig.Sync
-	txNum   uint64
-	trace   bool
+	domains                    *execctx.SharedDomains
+	logger                     log.Logger
+	syncCfg                    ethconfig.Sync
+	txNum                      uint64
+	trace                      bool
+	skipStepBoundaryCommitment bool
 }
 
 func NewStateV3(domains *execctx.SharedDomains, syncCfg ethconfig.Sync, logger log.Logger) *StateV3 {
@@ -84,13 +85,14 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 
 	if len(writes) > 0 {
 		type addrState struct {
-			balance      *uint256.Int
-			nonce        *uint64
-			incarnation  *uint64
-			codeHash     *accounts.CodeHash
-			code         []byte
-			selfDestruct bool
-			storage      []storageItem
+			balance        *uint256.Int
+			nonce          *uint64
+			incarnation    *uint64
+			codeHash       *accounts.CodeHash
+			code           []byte
+			selfDestruct   bool
+			createContract bool
+			storage        []storageItem
 		}
 
 		perAddr := make(map[accounts.Address]*addrState, len(writes)/4+1)
@@ -120,6 +122,8 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 				d.code = w.Val.([]byte)
 			case SelfDestructPath:
 				d.selfDestruct = w.Val.(bool)
+			case CreateContractPath:
+				d.createContract = w.Val.(bool)
 			case StoragePath:
 				d.storage = append(d.storage, storageItem{w.Key, w.Val.(uint256.Int)})
 			}
@@ -165,11 +169,29 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 				// (originalIncarnation > account.Incarnation case).
 			}
 
+			// Contract creation: clear stale storage before writing new account.
+			// Matches Writer.CreateContract which calls DomainDelPrefix.
+			if d.createContract {
+				if err := domains.DomainDelPrefix(kv.StorageDomain, roTx, address[:], txNum); err != nil {
+					return err
+				}
+			}
+
 			if d.balance != nil || d.nonce != nil || d.incarnation != nil || d.codeHash != nil || d.code != nil {
-				// All account fields are always present in the writes —
-				// LightCollector and versionedWriteCollector both emit all fields.
-				// No GetLatest needed; just build the account from the writes.
+				// When blockCache is present (parallel path), read the current
+				// base from the cache/domain, then overlay only fields present
+				// in the writes. LightCollector emits all 4 account fields,
+				// but some may carry stale values from speculative execution.
+				// Reading the base ensures unmodified fields keep their correct
+				// accumulated values.
 				acc := accounts.NewAccount()
+				if blockCache != nil {
+					if enc, ok := blockCache.GetCurrentAccount(addr); ok && len(enc) > 0 {
+						_ = accounts.DeserialiseV3(&acc, enc)
+					} else if enc0, _, err := domains.GetLatest(kv.AccountsDomain, roTx, address[:]); err == nil && len(enc0) > 0 {
+						_ = accounts.DeserialiseV3(&acc, enc0)
+					}
+				}
 				if d.balance != nil {
 					acc.Balance = *d.balance
 				}
@@ -186,6 +208,11 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 				}
 				if dbg.TraceApply && (rs.trace || dbg.TraceAccount(addr.Handle())) {
 					fmt.Printf("%d apply:put account: %x balance:%d,nonce:%d,codehash:%x\n", blockNum, addr, &acc.Balance, acc.Nonce, acc.CodeHash)
+				}
+				// Trace target address
+				if fmt.Sprintf("%x", addr.Value()) == "000000000004444c5dc75cb358380d2e3de08a90" {
+					fmt.Printf("APPLY_ACCOUNT: block=%d txNum=%d balance=%d nonce=%d hasBal=%v hasNonce=%v hasCode=%v\n",
+						blockNum, txNum, &acc.Balance, acc.Nonce, d.balance != nil, d.nonce != nil, d.codeHash != nil)
 				}
 				enc := accounts.SerialiseV3(&acc)
 				if blockCache != nil {
@@ -211,7 +238,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 				if blockCache != nil {
 					blockCache.WriteCode(addr, d.code)
 					if !domains.InlineTouchKeyDisabled() {
-					domains.GetCommitmentContext().TouchKey(kv.CodeDomain, string(address[:]), d.code)
+						domains.GetCommitmentContext().TouchKey(kv.CodeDomain, string(address[:]), d.code)
 					}
 				} else {
 					if err := domains.DomainPut(kv.CodeDomain, roTx, address[:], d.code, txNum, nil); err != nil {
@@ -231,7 +258,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 					if blockCache != nil {
 						blockCache.WriteStorage(addr, item.key, nil)
 						if !domains.InlineTouchKeyDisabled() {
-						domains.GetCommitmentContext().TouchKey(kv.StorageDomain, string(composite), nil)
+							domains.GetCommitmentContext().TouchKey(kv.StorageDomain, string(composite), nil)
 						}
 					} else {
 						if err := domains.DomainDel(kv.StorageDomain, roTx, composite, txNum, nil); err != nil {
@@ -245,7 +272,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 					if blockCache != nil {
 						blockCache.WriteStorage(addr, item.key, v)
 						if !domains.InlineTouchKeyDisabled() {
-						domains.GetCommitmentContext().TouchKey(kv.StorageDomain, string(composite), v)
+							domains.GetCommitmentContext().TouchKey(kv.StorageDomain, string(composite), v)
 						}
 					} else {
 						if err := domains.DomainPut(kv.StorageDomain, roTx, composite, v, txNum, nil); err != nil {
@@ -292,7 +319,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 			if blockCache != nil {
 				blockCache.DeleteAccount(addr)
 				if !domains.InlineTouchKeyDisabled() {
-				domains.GetCommitmentContext().TouchKey(kv.AccountsDomain, string(addrValue[:]), nil)
+					domains.GetCommitmentContext().TouchKey(kv.AccountsDomain, string(addrValue[:]), nil)
 				}
 			} else {
 				if err := domains.DomainDel(kv.AccountsDomain, roTx, addrValue[:], txNum, enc0); err != nil {
@@ -304,7 +331,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 			if blockCache != nil {
 				blockCache.WriteAccount(addr, enc1)
 				if !domains.InlineTouchKeyDisabled() {
-				domains.GetCommitmentContext().TouchKey(kv.AccountsDomain, string(addrValue[:]), enc1)
+					domains.GetCommitmentContext().TouchKey(kv.AccountsDomain, string(addrValue[:]), enc1)
 				}
 			} else {
 				if err := domains.DomainPut(kv.AccountsDomain, roTx, addrValue[:], enc1, txNum, enc0); err != nil {
@@ -341,7 +368,7 @@ func (rs *StateV3) ApplyStateWrites(ctx context.Context,
 	// the Updates buffer and handles all commitment computation).
 	// Also skip if the step is already frozen (nothing to commit).
 	stepSize := rs.domains.StepSize()
-	if (txNum+1)%stepSize == 0 && !dbg.DiscardCommitment() && !rs.domains.InlineTouchKeyDisabled() {
+	if (txNum+1)%stepSize == 0 && !dbg.DiscardCommitment() && !rs.domains.InlineTouchKeyDisabled() && !rs.skipStepBoundaryCommitment {
 		step := txNum / stepSize
 		lastFrozenStep := uint64(roTx.StepsInFiles(kv.CommitmentDomain))
 		if step >= lastFrozenStep {
@@ -376,7 +403,7 @@ func (rs *StateV3) ApplyTxIndexes(
 // contain a commitment state at each step end, even when the boundary falls
 // mid-block.
 func (rs *StateV3) CommitStepBoundary(ctx context.Context, roTx kv.TemporalTx, blockNum, txNum uint64) error {
-	if (txNum+1)%rs.domains.StepSize() == 0 && !dbg.DiscardCommitment() && !rs.domains.InlineTouchKeyDisabled() {
+	if (txNum+1)%rs.domains.StepSize() == 0 && !dbg.DiscardCommitment() && !rs.domains.InlineTouchKeyDisabled() && !rs.skipStepBoundaryCommitment {
 		_, err := rs.domains.ComputeCommitment(ctx, roTx, true, blockNum, txNum,
 			fmt.Sprintf("applying step %d", txNum/rs.domains.StepSize()), nil)
 		if err != nil {
@@ -384,6 +411,13 @@ func (rs *StateV3) CommitStepBoundary(ctx context.Context, roTx kv.TemporalTx, b
 		}
 	}
 	return nil
+}
+
+// SetSkipStepBoundaryCommitment disables step-boundary commitment computation.
+// Used by the parallel executor where step-boundary commitment would clear
+// the Updates buffer mid-batch, corrupting the batch-end commitment.
+func (rs *StateV3) SetSkipStepBoundaryCommitment(skip bool) {
+	rs.skipStepBoundaryCommitment = skip
 }
 
 func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *types.Receipt, cummulativeBlobGas uint64, logs []*types.Log, traceFroms map[accounts.Address]struct{}, traceTos map[accounts.Address]struct{}, historyExecution bool) error {
@@ -651,13 +685,10 @@ func (c *LightCollector) UpdateAccountData(address accounts.Address, original, a
 		c.writes = append(c.writes, &VersionedWrite{Address: address, Path: SelfDestructPath, Val: true})
 	}
 
-	// Emit ALL fields from the post-execution account state. The `account`
-	// parameter has correct values from the IBS (which reads via versionMap
-	// in the parallel executor). The `original` parameter comes from
-	// blockOriginStorage (pre-block) and may be stale — we don't use it
-	// for field values. With all fields present, applyVersionedWrites
-	// doesn't need to read the domain base via GetLatest, avoiding
-	// cross-thread sd.mem races.
+	// Emit ALL fields. In the parallel executor, the account values come
+	// from the worker's IBS (via versionMap reads). These may contain stale
+	// values for accounts loaded but not modified by this TX.
+	// TODO: filter to only emit fields the TX actually modified.
 	c.writes = append(c.writes,
 		&VersionedWrite{Address: address, Path: BalancePath, Val: accountCopy.Balance},
 		&VersionedWrite{Address: address, Path: NoncePath, Val: accountCopy.Nonce},
@@ -1049,7 +1080,7 @@ func (c *BlockStateCache) PutCommittedStorage(addr accounts.Address, key account
 func (c *BlockStateCache) WriteAccount(addr accounts.Address, enc []byte) {
 	c.mu.Lock()
 	c.currentAccounts[addr] = enc
-	if committed, ok := c.committedAccounts[addr]; ok {
+	if committed, ok := c.committedAccounts[addr]; ok && committed != nil {
 		committedEnc := accounts.SerialiseV3(committed)
 		if !bytes.Equal(committedEnc, enc) {
 			c.dirtyAccounts[addr] = true
@@ -1277,19 +1308,12 @@ func (r *CachedReaderV3) ReadAccountData(address accounts.Address) (*accounts.Ac
 }
 
 func (r *CachedReaderV3) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
-	// DEBUG: trace withdrawal contract slot 4
-	isWdSlot4 := address.Value() == [20]byte{0x00, 0x00, 0x09, 0x61, 0xef, 0x48, 0x0e, 0xb5, 0x5e, 0x80, 0xd1, 0x9a, 0xd8, 0x35, 0x79, 0xa6, 0x4c, 0x00, 0x70, 0x02} &&
-		key.Value() == [32]byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04}
-
 	if r.blockCache != nil {
 		if r.readCurrent {
 			if val, ok := r.blockCache.GetCurrentStorage(address, key); ok {
 				var v uint256.Int
 				if len(val) > 0 {
 					v.SetBytes(val)
-				}
-				if isWdSlot4 {
-					fmt.Printf("WD_SLOT4: source=currentStorage val=%x readCurrent=%v\n", val, r.readCurrent)
 				}
 				return v, len(val) > 0, nil
 			}
@@ -1299,18 +1323,12 @@ func (r *CachedReaderV3) ReadAccountStorage(address accounts.Address, key accoun
 			if len(val) > 0 {
 				v.SetBytes(val)
 			}
-			if isWdSlot4 {
-				fmt.Printf("WD_SLOT4: source=committedStorage val=%x readCurrent=%v\n", val, r.readCurrent)
-			}
 			return v, len(val) > 0, nil
 		}
 	}
 	v, ok, err := r.ReaderV3.ReadAccountStorage(address, key)
 	if err != nil {
 		return v, ok, err
-	}
-	if isWdSlot4 {
-		fmt.Printf("WD_SLOT4: source=ReaderV3/sd.mem val=%x ok=%v\n", v.Bytes(), ok)
 	}
 	if r.blockCache != nil {
 		if ok {
@@ -1392,12 +1410,6 @@ func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.Sto
 	var res uint256.Int
 	if ok {
 		(&res).SetBytes(enc)
-	}
-
-	// DEBUG: trace withdrawal contract slot 4
-	if addressValue == [20]byte{0x00, 0x00, 0x09, 0x61, 0xef, 0x48, 0x0e, 0xb5, 0x5e, 0x80, 0xd1, 0x9a, 0xd8, 0x35, 0x79, 0xa6, 0x4c, 0x00, 0x70, 0x02} &&
-		keyValue == [32]byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04} {
-		fmt.Printf("WD_SLOT4_RV3: source=GetLatest val=%x ok=%v\n", enc, ok)
 	}
 
 	if r.trace {

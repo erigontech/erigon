@@ -98,8 +98,8 @@ type SharedDomains struct {
 	// Used when the commitment calculator goroutine owns the Updates buffer
 	// and feeds touches via TouchPlainKeyDirect from the fan-out channel.
 	disableInlineTouchKey bool
-	mem               kv.TemporalMemBatch
-	metrics           changeset.DomainMetrics
+	mem                   kv.TemporalMemBatch
+	metrics               changeset.DomainMetrics
 
 	// blockOverlay is an in-memory overlay for block-level metadata writes (headers, bodies,
 	// canonical hashes, TD, stage progress, forkchoice markers). It allows execution to
@@ -340,6 +340,9 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 	if resetCommitment && sd.sdCtx != nil && !sd.disableInlineTouchKey {
 		sd.sdCtx.ClearRam()
 	}
+	if v, _, ok := sd.mem.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState); ok {
+		fmt.Printf("CLEAR_RAM: commitment state in sd.mem len=%d (will be cleared)\n", len(v))
+	}
 	sd.mem.ClearRam()
 }
 
@@ -414,6 +417,14 @@ func (sd *SharedDomains) Close() {
 
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	defer mxFlushTook.ObserveDuration(time.Now())
+
+	// Trace: check if commitment state is in sd.mem before flush
+	if v, _, ok := sd.mem.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState); ok {
+		fmt.Printf("FLUSH_CHECK: commitment state in sd.mem len=%d\n", len(v))
+	} else {
+		fmt.Printf("FLUSH_CHECK: commitment state NOT in sd.mem\n")
+	}
+
 	if sd.sdCtx.HasPendingUpdate() {
 		if ttx, ok := tx.(kv.TemporalTx); ok {
 			if err := sd.FlushPendingUpdates(ctx, ttx); err != nil {
@@ -563,7 +574,9 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 	if !sd.disableInlineTouchKey {
 		sd.sdCtx.TouchKey(domain, ks, v)
 	}
-
+	// Trace specific account key under branch 10 for investigation
+	// Branch 10 = hashedKey starts with nibble "1","0"
+	// A quick check: addr 8d5dddc5966e07fb... hashes to 000103... (not under 10)
 	if prevVal == nil {
 		var err error
 		prevVal, _, err = sd.GetLatest(domain, roTx, k)
@@ -598,6 +611,9 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 //   - user can append k2 into k1, then underlying methods will not preform append
 //   - if `val == nil` it will call DomainDel
 func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte, txNum uint64, prevVal []byte) error {
+	if domain == kv.AccountsDomain && len(k) == 20 && fmt.Sprintf("%x", k) == "24674cb7465dc7dc47e81c09cc9d1e8f6f92b614" {
+		fmt.Printf("SD_TARGET_DEL: txNum=%d\n", txNum)
+	}
 	ks := string(k)
 	if !sd.disableInlineTouchKey {
 		sd.sdCtx.TouchKey(domain, ks, nil)
@@ -698,10 +714,18 @@ func (sd *SharedDomains) GetCommitmentContext() *commitmentdb.SharedDomainsCommi
 
 // SeekCommitment lookups latest available commitment and sets it as current
 func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (txNum, blockNum uint64, err error) {
+	// Trace: check sd.mem before seeking
+	if v, _, ok := sd.mem.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState); ok {
+		fmt.Printf("SEEK_CHECK: commitment state in sd.mem len=%d\n", len(v))
+	} else {
+		fmt.Printf("SEEK_CHECK: commitment state NOT in sd.mem\n")
+	}
+
 	txNum, blockNum, err = sd.sdCtx.SeekCommitment(ctx, tx)
 	if err != nil {
 		return 0, 0, err
 	}
+	fmt.Printf("SEEK_RESULT: txNum=%d blockNum=%d\n", txNum, blockNum)
 	sd.SetTxNum(txNum)
 	return txNum, blockNum, nil
 }

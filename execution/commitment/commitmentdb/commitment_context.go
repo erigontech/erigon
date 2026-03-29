@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"runtime"
 	"sync/atomic"
 	"time"
@@ -233,6 +234,11 @@ func (sdc *SharedDomainsCommitmentContext) Trie() commitment.Trie {
 func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val []byte) {
 	if sdc.updates.Mode() == commitment.ModeDisabled {
 		return
+	}
+
+	// Trace target address
+	if len(key) == 20 && len(key) >= 20 && fmt.Sprintf("%x", key[:20]) == "163f8c2467924be0ae7b5347228cabf260318753" {
+		fmt.Printf("SERIAL_TOUCH: domain=%s valLen=%d val=%x\n", d, len(val), val)
 	}
 
 	switch d {
@@ -514,6 +520,7 @@ func (sdc *SharedDomainsCommitmentContext) encodeAndStoreCommitmentState(trieCon
 		return nil
 	}
 
+	fmt.Printf("COMMIT_STATE_WRITE: block=%d txNum=%d prevLen=%d newLen=%d\n", blockNum, txNum, len(prevState), len(encodedState))
 	return trieContext.PutBranch(KeyCommitmentState, encodedState, prevState)
 }
 
@@ -601,12 +608,25 @@ type TrieContext struct {
 }
 
 func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
-	return sdc.readDomain(kv.CommitmentDomain, pref)
+	enc, step, err := sdc.readDomain(kv.CommitmentDomain, pref)
+	// Trace divergent branch key
+	if len(pref) == 4 && pref[0] == 0x00 && pref[1] == 0x0a && pref[2] == 0x44 && pref[3] == 0xcb {
+		fmt.Printf("BRANCH_000a44cb_READ: len=%d step=%d data=%x\n", len(enc), step, enc)
+	}
+	return enc, step, err
 }
 
 func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {
 	if sdc.stateReader.WithHistory() { // do not store branches if explicitly operate on history
 		return nil
+	}
+	if TraceCommitReads {
+		fmt.Printf("COMMIT_WRITE: key=%x len=%d txNum=%d\n", prefix, len(data), sdc.txNum)
+	}
+	// Log every PutBranch with key+len+hash for block 24364003
+	if TraceCommitReads {
+		h := crc32.ChecksumIEEE(data)
+		fmt.Printf("PUTBRANCH: key=%x len=%d crc=%08x\n", prefix, len(data), h)
 	}
 	if sdc.trace {
 		fmt.Printf("[SDC] PutBranch: %x: %x\n", prefix, data)

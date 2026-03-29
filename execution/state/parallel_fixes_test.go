@@ -11,6 +11,24 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
+// emptyReader is a stub StateReader that returns empty/nil for all reads.
+type emptyReader struct{}
+
+func (r *emptyReader) ReadAccountData(accounts.Address) (*accounts.Account, error) { return nil, nil }
+func (r *emptyReader) ReadAccountDataForDebug(accounts.Address) (*accounts.Account, error) {
+	return nil, nil
+}
+func (r *emptyReader) ReadAccountStorage(accounts.Address, accounts.StorageKey) (uint256.Int, bool, error) {
+	return uint256.Int{}, false, nil
+}
+func (r *emptyReader) HasStorage(accounts.Address) (bool, error)               { return false, nil }
+func (r *emptyReader) ReadAccountCode(accounts.Address) ([]byte, error)        { return nil, nil }
+func (r *emptyReader) ReadAccountCodeSize(accounts.Address) (int, error)       { return 0, nil }
+func (r *emptyReader) ReadAccountIncarnation(accounts.Address) (uint64, error) { return 0, nil }
+func (r *emptyReader) SetTrace(bool, string)                                   {}
+func (r *emptyReader) Trace() bool                                             { return false }
+func (r *emptyReader) TracePrefix() string                                     { return "" }
+
 // TestValueTiebreaker_BalancePath verifies that validation does not
 // invalidate a StorageRead when the versionMap Done value matches the
 // read value. This prevents unnecessary re-executions that cause
@@ -282,4 +300,116 @@ func TestTouchUpdates_MixedBatch(t *testing.T) {
 	// addr2+slot: 1 storage key
 	// Total: 2 unique keys
 	assert.Equal(t, uint64(2), updates.Size(), "2 unique keys (addr1 merged, addr2 storage)")
+}
+
+// TestBlockStateCacheWriteAccount_NilCommitted verifies that WriteAccount
+// doesn't panic when the committed cache has a nil account entry.
+// This can happen when PutCommittedAccount stores nil (account doesn't exist).
+func TestBlockStateCacheWriteAccount_NilCommitted(t *testing.T) {
+	cache := NewBlockStateCache()
+
+	addr := accounts.InternAddress([20]byte{0x42})
+
+	// Put a nil committed account (account doesn't exist in pre-block state)
+	cache.PutCommittedAccount(addr, nil)
+
+	// Write a new account — should not panic
+	acc := accounts.NewAccount()
+	acc.Balance = *uint256.NewInt(1000)
+	acc.Nonce = 1
+	enc := accounts.SerialiseV3(&acc)
+
+	assert.NotPanics(t, func() {
+		cache.WriteAccount(addr, enc)
+	}, "WriteAccount should not panic with nil committed account")
+
+	// Verify the account is marked dirty
+	current, ok := cache.GetCurrentAccount(addr)
+	assert.True(t, ok, "Should have current account")
+	assert.Equal(t, enc, current, "Current account should match written value")
+}
+
+// TestBlockStateCacheWriteAccount_DirtyTracking verifies that accounts
+// are only marked dirty when the value actually changes.
+func TestBlockStateCacheWriteAccount_DirtyTracking(t *testing.T) {
+	cache := NewBlockStateCache()
+
+	addr := accounts.InternAddress([20]byte{0x55})
+
+	// Set up committed account
+	acc := accounts.NewAccount()
+	acc.Balance = *uint256.NewInt(500)
+	acc.Nonce = 3
+	cache.PutCommittedAccount(addr, &acc)
+
+	// Write the same value — should NOT be dirty
+	enc := accounts.SerialiseV3(&acc)
+	cache.WriteAccount(addr, enc)
+
+	// Write a different value — should be dirty
+	acc2 := accounts.NewAccount()
+	acc2.Balance = *uint256.NewInt(600)
+	acc2.Nonce = 3
+	enc2 := accounts.SerialiseV3(&acc2)
+	cache.WriteAccount(addr, enc2)
+
+	current, ok := cache.GetCurrentAccount(addr)
+	assert.True(t, ok)
+	assert.Equal(t, enc2, current, "Should have the updated value")
+}
+
+// TestSelfDestructRecordsStorageDeletes verifies that when an account
+// self-destructs and versionMap is active, the IBS records storage DELETE
+// entries via versionWritten for each dirty storage slot. This ensures
+// the parallel commitment calculator knows which storage keys to delete.
+func TestSelfDestructRecordsStorageDeletes(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xAA})
+	slot0 := accounts.InternKey([32]byte{0x00})
+	slot1 := accounts.InternKey([32]byte{0x01})
+
+	vm := NewVersionMap(nil)
+
+	// Create an IBS with versionMap
+	ibs := New(&emptyReader{})
+	ibs.SetVersionMap(vm)
+	ibs.SetTxContext(100, 0)
+	ibs.SetVersion(0)
+
+	// Create the account and write storage
+	ibs.CreateAccount(addr, true)
+	require.NoError(t, ibs.SetState(addr, slot0, *uint256.NewInt(42)))
+	require.NoError(t, ibs.SetState(addr, slot1, *uint256.NewInt(99)))
+
+	// Now self-destruct
+	_, err := ibs.Selfdestruct(addr)
+	require.NoError(t, err)
+
+	// Flush the IBS writes to the versionMap (simulates what FlushVersionedWrites does)
+	writes := ibs.VersionedWrites(false)
+	t.Logf("VersionedWrites count: %d", len(writes))
+	for _, w := range writes {
+		t.Logf("  write: addr=%x path=%d key=%x val=%v", w.Address.Value(), w.Path, w.Key.Value(), w.Val)
+	}
+	vm.FlushVersionedWrites(writes, true, "")
+
+	// Check versionMap has storage DELETE entries (value = zero)
+	t.Logf("Reading slot0=%x slot1=%x", slot0.Value(), slot1.Value())
+	rr0 := vm.Read(addr, StoragePath, slot0, 1)
+	t.Logf("slot0 read: status=%d value=%v", rr0.Status(), rr0.Value())
+	assert.Equal(t, MVReadResultDone, rr0.Status(), "slot0 should have versionMap entry")
+	if rr0.Value() != nil {
+		v := rr0.Value().(uint256.Int)
+		assert.True(t, v.IsZero(), "slot0 should be zero (deleted)")
+	}
+
+	rr1 := vm.Read(addr, StoragePath, slot1, 1)
+	assert.Equal(t, MVReadResultDone, rr1.Status(), "slot1 should have versionMap entry")
+	if rr1.Value() != nil {
+		v := rr1.Value().(uint256.Int)
+		assert.True(t, v.IsZero(), "slot1 should be zero (deleted)")
+	}
+
+	// SelfDestructPath should also be recorded
+	rrSD := vm.Read(addr, SelfDestructPath, accounts.NilKey, 1)
+	assert.Equal(t, MVReadResultDone, rrSD.Status(), "SelfDestructPath should be in versionMap")
 }

@@ -1383,6 +1383,17 @@ func (sdb *IntraBlockState) Selfdestruct(addr accounts.Address) (bool, error) {
 	versionWritten(sdb, addr, SelfDestructPath, accounts.NilKey, stateObject.selfdestructed)
 	versionWritten(sdb, addr, BalancePath, accounts.NilKey, uint256.Int{})
 
+	// Record storage deletes for the parallel commitment calculator.
+	// When versionMap is active, the calculator needs explicit DELETE entries
+	// for each storage slot — it can't use DomainDelPrefix like the serial path.
+	if sdb.versionMap != nil {
+		dirtyCount := len(stateObject.dirtyStorage)
+		for key := range stateObject.dirtyStorage {
+			versionWritten(sdb, addr, StoragePath, key, uint256.Int{})
+		}
+		_ = dirtyCount
+	}
+
 	return true, nil
 }
 
@@ -1798,6 +1809,10 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	if contractCreation {
 		newObj.createdContract = true
 		newObj.data.Incarnation = prevInc + 1
+		// Record contract creation in the versioned writes so that
+		// normalizeWriteSet knows this address was created (prevents
+		// empty account deletion for newly deployed contracts).
+		versionWritten(sdb, addr, CreateContractPath, accounts.NilKey, true)
 		if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 			fmt.Printf("%d (%d.%d) New Incarnation %x: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, newObj.data.Incarnation)
 		}
@@ -1899,9 +1914,21 @@ func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, add
 					stateObject.db.blockNum, stateObject.db.txIndex, stateObject.db.version, stateWriter, addr, &stateObject.data.Balance, stateObject.data.Nonce, stateObject.data.CodeHash)
 			}
 		}
+		// Trace target contract
+		if fmt.Sprintf("%x", addr.Value()) == "1a44076050125825900e736c501f859c50fe728c" {
+			fmt.Printf("TRACE_CONTRACT_SERIAL: block=%d tx=%d inc=%d balance=%d nonce=%d codeHash=%x dirty=%v selfdestructed=%v created=%v writer=%T\n",
+				stateObject.db.blockNum, stateObject.db.txIndex, stateObject.db.version,
+				&stateObject.data.Balance, stateObject.data.Nonce, stateObject.data.CodeHash,
+				isDirty, stateObject.selfdestructed, stateObject.createdContract, stateWriter)
+		}
 		if err := stateWriter.UpdateAccountData(addr, &stateObject.original, &stateObject.data); err != nil {
 			return err
 		}
+		// Note: in parallel mode, individual setters (AddBalance, SetNonce)
+		// call versionWritten for their specific field. Fields not modified
+		// by the TX (e.g., CodeHash when only balance changed) are NOT in
+		// the versionMap's WriteSet. The normalizeWriteSet function handles
+		// this by reading missing account fields from the stateReader.
 	}
 	return nil
 }
@@ -2056,6 +2083,10 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 	}
 
 	for _, addr := range reverted {
+		if fmt.Sprintf("%x", addr.Value()) == "1a44076050125825900e736c501f859c50fe728c" {
+			fmt.Printf("TRACE_CONTRACT_REVERTED: block=%d tx=%d inc=%d addr=%x\n",
+				sdb.blockNum, sdb.txIndex, sdb.version, addr)
+		}
 		sdb.versionMap.DeleteAll(addr, sdb.txIndex)
 		delete(sdb.versionedWrites, addr)
 	}
@@ -2286,6 +2317,12 @@ func versionWritten[T any](sdb *IntraBlockState, addr accounts.Address, path Acc
 
 		sdb.versionedWrites.Set(vw)
 
+		// Trace target contract for investigation
+		if fmt.Sprintf("%x", addr.Value()) == "1a44076050125825900e736c501f859c50fe728c" {
+			fmt.Printf("TRACE_CONTRACT: block=%d tx=%d inc=%d path=%d val=%v\n",
+				sdb.blockNum, sdb.txIndex, sdb.version, path, val)
+		}
+
 		if dbg.TraceTransactionIO && (sdb.trace || (dbg.TraceAccount(addr.Handle()) && (key == accounts.NilKey || traceKey(key)))) {
 			fmt.Printf("%d (%d.%d) WRT %s\n", sdb.blockNum, sdb.txIndex, sdb.version, vw.String())
 		}
@@ -2401,7 +2438,7 @@ func (sdb *IntraBlockState) VersionedWrites(checkDirty bool) VersionedWrites {
 					}
 				} else {
 					if selfDestructed {
-						if v.Path == BalancePath || v.Path == IncarnationPath {
+						if v.Path == BalancePath || v.Path == IncarnationPath || v.Path == StoragePath {
 							appends = append(appends, &v)
 						}
 					} else {
@@ -2526,6 +2563,15 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 					// resurrection; subsequent workers reading SelfDestructPath will see the
 					// updated value and not mistake the account for still being selfdestructed.
 					versionWritten(sdb, addr, SelfDestructPath, accounts.NilKey, false)
+				}
+			case CreateContractPath:
+				// Contract creation: set createdContract flag on the stateObject.
+				so, err := sdb.GetOrNewStateObject(addr)
+				if err != nil {
+					return err
+				}
+				if so != nil {
+					so.createdContract = true
 				}
 			default:
 				return fmt.Errorf("unknown key type: %d", path)

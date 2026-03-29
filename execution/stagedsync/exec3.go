@@ -42,6 +42,7 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -127,6 +128,9 @@ func ExecV3(ctx context.Context,
 	if err != nil {
 		return err
 	}
+	logger.Info(fmt.Sprintf("[%s] SeekCommitment result", execStage.LogPrefix()),
+		"txNum", initialTxNum, "blockNum", blockNum,
+		"stageProgress", execStage.BlockNumber)
 
 	agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	if isApplyingBlocks {
@@ -242,7 +246,7 @@ func ExecV3(ctx context.Context,
 				hooks:             hooks,
 				postValidator:     postValidator,
 			},
-			workerCount:  cfg.syncCfg.ExecWorkerCount,
+			workerCount: cfg.syncCfg.ExecWorkerCount,
 		}
 		pe.lastCommittedTxNum.Store(inputTxNum)
 		// blockNum is the next block to execute (from doms.BlockNum()), so the last
@@ -367,7 +371,13 @@ func ExecV3(ctx context.Context,
 	}
 
 	lastCommitedStep := kv.Step((lastCommittedTxNum) / doms.StepSize())
-	lastFrozenStep := applyTx.StepsInFiles(kv.CommitmentDomain)
+	// applyTx may be stale after parallel execution (the underlying mdbx tx
+	// was invalidated by Flush/CommitAndBegin). Use a fresh roTx for the check.
+	var lastFrozenStep kv.Step
+	if stepCheckTx, stepErr := cfg.db.BeginTemporalRo(ctx); stepErr == nil {
+		lastFrozenStep = kv.Step(stepCheckTx.StepsInFiles(kv.CommitmentDomain))
+		stepCheckTx.Rollback()
+	}
 
 	if lastCommitedStep > 0 && lastCommitedStep < lastFrozenStep && !dbg.DiscardCommitment() {
 		logger.Warn("["+execStage.LogPrefix()+"] can't persist comittement: txn step frozen",
@@ -573,10 +583,8 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			}
 		}()
 
-		// Open a thread-local roTx for DB reads (StepsInFiles, block metadata
-		// fallthrough). Block metadata reads go through an overlay read-view:
-		// checks the in-memory overlay first (InsertBlocks writes at chain tip),
-		// then falls through to this local roTx for snapshot/DB data.
+		// Open a thread-local roTx for block metadata and StepsInFiles.
+		// Must NOT use the stageloop's rwTx — it's thread-bound.
 		execRoTx, err := te.cfg.db.BeginTemporalRo(ctx)
 		if err != nil {
 			return fmt.Errorf("executeBlocks: open roTx: %w", err)
@@ -591,14 +599,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 		}
 
 		// Use the max of all state domain steps (not just commitment) to
-		// determine which txNums need history reads. State domains (accounts,
-		// storage, code) can be ahead of commitment — TXs in those extra steps
-		// have their state in snapshot files but haven't been commitment-verified.
-		// Without marking them historic, workers use GetLatest which returns
-		// values from beyond the current execution point, causing nonce mismatches.
-		// Verify that state domain snapshot files are aligned with commitment.
-		// If state domains are ahead of commitment, GetLatest returns values
-		// from beyond the committed point, causing nonce mismatches.
+		// determine which txNums need history reads.
 		cmtStep := execRoTx.StepsInFiles(kv.CommitmentDomain)
 		acctStep := execRoTx.StepsInFiles(kv.AccountsDomain)
 		storStep := execRoTx.StepsInFiles(kv.StorageDomain)
@@ -662,12 +663,15 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			txs := b.Transactions()
 			header := b.HeaderNoCopy()
 
-			// BLOCKHASH looks back at most 256 blocks — those headers are always
-			// in frozen snapshots. Pass nil tx so blockReader skips MDBX/overlay
-			// and reads directly from snapshots. This is thread-safe without a
-			// mutex and avoids races with fcuOverlay lifecycle.
-			blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
-				return te.cfg.blockReader.Header(ctx, nil, hash, number)
+			// BlockContext: workers override GetHash with their own per-worker
+			// function (installWorkerGetHash) using their own roTx. The
+			// placeholder here uses execRoTx for the serial path fallback.
+			blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, func(hash common.Hash, number uint64) (h *types.Header, err error) {
+				h, err = te.cfg.blockReader.Header(ctx, blockTx, hash, number)
+				if h == nil && err == nil {
+					h = &types.Header{}
+				}
+				return h, err
 			}), te.cfg.engine, te.cfg.author, te.cfg.chainConfig)
 
 			var txTasks []exec.Task
@@ -869,6 +873,12 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 	blockTxNum, err := txNumsReader.Max(ctx, commitRoTx, header.Number.Uint64())
 	if err != nil {
 		return false, times, err
+	}
+	// Trace commitment reads for the first 5 blocks
+	if header.Number.Uint64() <= 24408870 {
+		commitmentdb.TraceCommitReads = true
+		defer func() { commitmentdb.TraceCommitReads = false }()
+		fmt.Printf("SERIAL_COMPUTE: block=%d txNum=%d\n", header.Number.Uint64(), blockTxNum)
 	}
 	computedRootHash, err := doms.ComputeCommitment(ctx, commitRoTx, true, header.Number.Uint64(), blockTxNum, e.LogPrefix(), nil)
 

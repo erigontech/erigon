@@ -75,6 +75,7 @@ type Task interface {
 	BlockTime() uint64
 	BlockGasLimit() uint64
 	BlockRoot() common.Hash
+	BlockHeader() *types.Header
 
 	Rules() *chain.Rules
 
@@ -348,6 +349,10 @@ func (t *TxTask) BlockRoot() common.Hash {
 		return common.Hash{}
 	}
 	return t.Header.Root
+}
+
+func (t *TxTask) BlockHeader() *types.Header {
+	return t.Header
 }
 
 func (t *TxTask) BlockTime() uint64 {

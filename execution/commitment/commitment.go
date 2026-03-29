@@ -1515,12 +1515,13 @@ func (m Mode) String() string {
 }
 
 type Updates struct {
-	hasher keyHasher
-	keys   map[string]struct{}       // plain keys to keep only unique keys in etl
-	etl    *etl.Collector            // all-in-one collector
-	tree   *btree.BTreeG[*KeyUpdate] // TODO since it's thread safe to read, maybe instead of all collectors we can use one tree
-	mode   Mode
-	tmpdir string
+	hasher  keyHasher
+	keys    map[string]struct{}       // plain keys to keep only unique keys in etl
+	etl     *etl.Collector            // all-in-one collector
+	tree    *btree.BTreeG[*KeyUpdate] // sorted by hashedKey for correct trie traversal order
+	treeIdx map[string]*KeyUpdate     // plainKey → btree entry for O(1) lookup in ModeUpdate
+	mode    Mode
+	tmpdir  string
 
 	sortPerNibble bool // if true, use nibbles collectors instead of etl (all-in-one)
 	nibbles       [16]*etl.Collector
@@ -1591,6 +1592,7 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 		t.initCollector()
 	} else if t.mode == ModeUpdate {
 		t.tree = btree.NewG(64, keyUpdateLessFn)
+		t.treeIdx = make(map[string]*KeyUpdate)
 	}
 	return t
 }
@@ -1602,6 +1604,7 @@ func (t *Updates) SetMode(m Mode) {
 		t.initCollector()
 	} else if t.mode == ModeUpdate && t.tree == nil {
 		t.tree = btree.NewG(64, keyUpdateLessFn)
+		t.treeIdx = make(map[string]*KeyUpdate)
 	}
 	t.Reset()
 }
@@ -1645,24 +1648,57 @@ func (t *Updates) Size() (updates uint64) {
 	}
 }
 
+// TraceTouchKeys enables global touch key tracing for debugging.
+var TraceTouchKeys bool
+
+// DumpKeys prints all plain keys in the Updates tree with their flags.
+func (t *Updates) DumpKeys(prefix string) {
+	t.DumpKeysN(prefix, -1)
+}
+
+// DumpKeysN prints up to n plain keys. Pass -1 for all.
+func (t *Updates) DumpKeysN(prefix string, n int) {
+	count := 0
+	switch t.mode {
+	case ModeUpdate:
+		t.tree.Ascend(func(item *KeyUpdate) bool {
+			if n >= 0 && count >= n {
+				return false
+			}
+			fmt.Printf("%s: key=%x len=%d flags=%d update=%s\n", prefix, item.plainKey, len(item.plainKey), item.update.Flags, item.update)
+			count++
+			return true
+		})
+	case ModeDirect:
+		for k := range t.keys {
+			if n >= 0 && count >= n {
+				break
+			}
+			fmt.Printf("%s: key=%x len=%d\n", prefix, k, len(k))
+			count++
+		}
+	}
+}
+
 // TouchPlainKey marks plainKey as updated and applies different fn for different key types
 // (different behaviour for Code, Account and Storage key modifications).
 func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, val []byte)) {
+	if TraceTouchKeys {
+		fmt.Printf("TOUCH_KEY: key=%x len=%d valLen=%d\n", key, len(key), len(val))
+	}
 	switch t.mode {
 	case ModeUpdate:
-		pivot, updated := &KeyUpdate{plainKey: key, update: new(Update)}, false
-
-		t.tree.DescendLessOrEqual(pivot, func(item *KeyUpdate) bool {
-			if item.plainKey == pivot.plainKey {
-				fn(item, val)
-				updated = true
+		if existing, ok := t.treeIdx[key]; ok {
+			fn(existing, val)
+		} else {
+			pivot := &KeyUpdate{
+				plainKey:  key,
+				hashedKey: t.hasher(common.ToBytesZeroCopy(key)),
+				update:    new(Update),
 			}
-			return false
-		})
-		if !updated {
-			pivot.hashedKey = t.hasher(common.ToBytesZeroCopy(pivot.plainKey))
 			fn(pivot, val)
 			t.tree.ReplaceOrInsert(pivot)
+			t.treeIdx[key] = pivot
 		}
 	case ModeDirect:
 		if _, ok := t.keys[key]; !ok {
@@ -1689,42 +1725,45 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 // receives aggregated state changes via channel instead of serialized bytes
 // from DomainPut.
 func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
+	if TraceTouchKeys {
+		fmt.Printf("TOUCH_DIRECT: key=%x len=%d flags=%d\n", key, len(key), update.Flags)
+	}
 	switch t.mode {
 	case ModeUpdate:
-		pivot, updated := &KeyUpdate{plainKey: key, update: new(Update)}, false
-
-		t.tree.DescendLessOrEqual(pivot, func(item *KeyUpdate) bool {
-			if item.plainKey == pivot.plainKey {
-				// Merge: apply the new update's flags and values
-				if update.Flags&DeleteUpdate != 0 {
-					item.update.Flags = DeleteUpdate
-				} else {
-					if update.Flags&BalanceUpdate != 0 {
-						item.update.Balance.Set(&update.Balance)
-						item.update.Flags |= BalanceUpdate
-					}
-					if update.Flags&NonceUpdate != 0 {
-						item.update.Nonce = update.Nonce
-						item.update.Flags |= NonceUpdate
-					}
-					if update.Flags&CodeUpdate != 0 {
-						item.update.CodeHash = update.CodeHash
-						item.update.Flags |= CodeUpdate
-					}
-					if update.Flags&StorageUpdate != 0 {
-						item.update.Storage = update.Storage
-						item.update.StorageLen = update.StorageLen
-						item.update.Flags |= StorageUpdate
-					}
+		if existing, ok := t.treeIdx[key]; ok {
+			// Merge into existing entry
+			if update.Flags&DeleteUpdate != 0 {
+				existing.update.Flags = DeleteUpdate
+				existing.update.CodeHash = empty.CodeHash
+			} else {
+				existing.update.Flags &^= DeleteUpdate
+				if update.Flags&BalanceUpdate != 0 {
+					existing.update.Balance.Set(&update.Balance)
+					existing.update.Flags |= BalanceUpdate
 				}
-				updated = true
+				if update.Flags&NonceUpdate != 0 {
+					existing.update.Nonce = update.Nonce
+					existing.update.Flags |= NonceUpdate
+				}
+				if update.Flags&CodeUpdate != 0 {
+					existing.update.CodeHash = update.CodeHash
+					existing.update.Flags |= CodeUpdate
+				}
+				if update.Flags&StorageUpdate != 0 {
+					existing.update.Storage = update.Storage
+					existing.update.StorageLen = update.StorageLen
+					existing.update.Flags |= StorageUpdate
+				}
 			}
-			return false
-		})
-		if !updated {
-			pivot.hashedKey = t.hasher(common.ToBytesZeroCopy(pivot.plainKey))
+		} else {
+			pivot := &KeyUpdate{
+				plainKey:  key,
+				hashedKey: t.hasher(common.ToBytesZeroCopy(key)),
+				update:    new(Update),
+			}
 			*pivot.update = *update
 			t.tree.ReplaceOrInsert(pivot)
+			t.treeIdx[key] = pivot
 		}
 	case ModeDirect:
 		if _, ok := t.keys[key]; !ok {
@@ -1905,10 +1944,6 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 
 	case ModeUpdate:
 		t.batchSlab = t.batchSlab[:0]
-		// Pre-allocate arena to avoid mid-batch reallocation that would
-		// invalidate previously returned sub-slices (hk in batchSlab).
-		// ModeUpdate only arenas hashedKey: up to 128 bytes for nibblized
-		// storage key hashes. Use 144 with headroom.
 		t.arenaEnsureCap(hashSortBatchSize * 144)
 		t.byteArena = t.byteArena[:0]
 		var prevKey []byte
@@ -1922,15 +1957,12 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 			default:
 			}
 
-			// Copy hashedKey into arena; plainKey references tree item directly
 			hk := t.arenaAlloc(item.hashedKey)
 			t.batchSlab = append(t.batchSlab, KeyUpdate{hashedKey: hk, plainKey: item.plainKey, update: item.update})
 
-			// Submit to warmuper with start depth based on divergence from previous key
 			if warmuper != nil {
 				startDepth := 0
 				if prevKey != nil {
-					// Find common prefix length
 					minLen := min(len(prevKey), len(hk))
 					for startDepth < minLen && prevKey[startDepth] == hk[startDepth] {
 						startDepth++
@@ -1940,7 +1972,6 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 				prevKey = append(prevKey[:0], hk...)
 			}
 
-			// Process batch when full
 			if len(t.batchSlab) >= hashSortBatchSize {
 				for i := range t.batchSlab {
 					select {
@@ -1995,6 +2026,7 @@ func (t *Updates) Reset() {
 		t.initCollector()
 	case ModeUpdate:
 		t.tree.Clear(true)
+		clear(t.treeIdx)
 	default:
 	}
 	t.batchSlab = t.batchSlab[:0]
@@ -2008,7 +2040,7 @@ type KeyUpdate struct {
 }
 
 func keyUpdateLessFn(i, j *KeyUpdate) bool {
-	return i.plainKey < j.plainKey
+	return bytes.Compare(i.hashedKey, j.hashedKey) < 0 // sorted by hashedKey for correct trie traversal order
 }
 
 type UpdateFlags uint8

@@ -355,6 +355,11 @@ func (so *stateObject) applyStorageChanges(stateWriter StateWriter, updatedStora
 					stateWriter, so.address, key, originValue.Hex(), value.Hex())
 			}
 		}
+		// Trace target contract for data flow investigation
+		if fmt.Sprintf("%x", so.address.Value()) == "1a44076050125825900e736c501f859c50fe728c" {
+			fmt.Printf("TRACE_SLOT: block=%d tx=%d inc=%d addr=%x slot=%x origin=%s dirty=%s skip=%v writer=%T\n",
+				so.db.blockNum, so.db.txIndex, so.db.version, so.address, key, originValue.Hex(), value.Hex(), originValue.Eq(&value), stateWriter)
+		}
 		if err := stateWriter.WriteAccountStorage(so.address, so.data.GetIncarnation(), key, originValue, value); err != nil {
 			return err
 		}

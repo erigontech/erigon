@@ -16,9 +16,9 @@ import (
 // block's writes via sd.mem.
 //
 // This test verifies that:
-// 1. Serial path: DomainPut writes are visible to the next block's GetLatest
-// 2. Parallel path: BlockStateCache Flush writes are visible to the next
-//    block's CachedReaderV3 fallthrough to GetLatest
+//  1. Serial path: DomainPut writes are visible to the next block's GetLatest
+//  2. Parallel path: BlockStateCache Flush writes are visible to the next
+//     block's CachedReaderV3 fallthrough to GetLatest
 //
 // The test uses a withdrawal request contract pattern: each block reads
 // a queue pointer (slot 4), dequeues a request, and writes a new pointer.
