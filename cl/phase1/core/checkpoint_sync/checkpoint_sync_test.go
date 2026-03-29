@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -53,6 +54,11 @@ func newMockSlowHttpServer(ctx context.Context) *httptest.Server {
 }
 
 func TestRemoteCheckpointSync(t *testing.T) {
+	if ln, err := net.Listen("tcp", "127.0.0.1:0"); err != nil {
+		t.Skip("cannot bind to local address:", err)
+	} else {
+		ln.Close()
+	}
 	// Create a mock HTTP server always returning the passed expected state
 	_, expectedState, _ := tests.GetPhase0Random()
 	rec := false
@@ -76,6 +82,11 @@ func TestRemoteCheckpointSync(t *testing.T) {
 }
 
 func TestRemoteCheckpointSyncTimeout(t *testing.T) {
+	if ln, err := net.Listen("tcp", "127.0.0.1:0"); err != nil {
+		t.Skip("cannot bind to local address:", err)
+	} else {
+		ln.Close()
+	}
 	// Create a mock for very slow HTTP server
 	ctx, cancel := context.WithCancel(context.Background())
 	mockSlowServer := newMockSlowHttpServer(ctx)

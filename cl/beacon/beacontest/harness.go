@@ -22,8 +22,10 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -42,6 +44,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"sigs.k8s.io/yaml"
 )
+
+// errNoLocalListener is returned when a test server cannot bind to a local port.
+// Callers may treat this as a skip condition rather than a failure.
+var errNoLocalListener = errors.New("cannot bind to local address")
 
 type HarnessOption func(*Harness) error
 
@@ -172,6 +178,10 @@ func (h *Harness) Execute() {
 			fullname := fmt.Sprintf("%s_%s_%d", suiteName, name, idx)
 			h.t.Run(fullname, func(t *testing.T) {
 				err := v.Execute(ctx, t)
+				if errors.Is(err, errNoLocalListener) {
+					t.Skip(err)
+					return
+				}
 				require.NoError(t, err)
 			})
 		}
@@ -378,7 +388,13 @@ func (s *Source) executeRemote(ctx context.Context) (json.RawMessage, int, error
 		if !ok {
 			return nil, 0, fmt.Errorf("handler not registered: %s", *s.Handler)
 		}
-		server := httptest.NewServer(handler)
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			return nil, 0, fmt.Errorf("%w: %v", errNoLocalListener, err)
+		}
+		server := httptest.NewUnstartedServer(handler)
+		server.Listener = ln
+		server.Start()
 		defer server.Close()
 		niceUrl, err := url.Parse(server.URL)
 		if err != nil {

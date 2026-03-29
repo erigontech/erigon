@@ -503,12 +503,9 @@ func TestUpdates_TouchStorageClearsDeleteOnRewrite(t *testing.T) {
 
 	var got *Update
 	pivot := &KeyUpdate{plainKey: key}
-	updates.tree.DescendLessOrEqual(pivot, func(item *KeyUpdate) bool {
-		if item.plainKey == key {
-			got = item.update
-		}
-		return false
-	})
+	if item, ok := updates.tree.Get(pivot); ok {
+		got = item.update
+	}
 
 	require.NotNil(t, got)
 	require.Equal(t, StorageUpdate, got.Flags)
