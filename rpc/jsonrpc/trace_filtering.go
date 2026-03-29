@@ -20,6 +20,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
+	"sync"
 	"time"
 
 	jsoniter "github.com/json-iterator/go"
@@ -882,8 +884,41 @@ func (api *TraceAPIImpl) callBlock(
 		msgs[i] = msg
 	}
 
-	traces, _, cmErr := api.doCallBlock(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txs, msgs, callParams,
-		&parentNrOrHash, header, gasBailOut /* gasBailout */, traceConfig)
+	// Use parallel execution when replaying historical blocks without stateDiff or vmTrace:
+	// each tx can read its own pre-state independently from the temporal DB,
+	// so workers never share mutable state and need no conflict detection.
+	// Bor state-sync txns are excluded because they require bridgeReader.Events
+	// which uses the shared dbtx. vmTrace is excluded because the parallel path
+	// does not initialise traceResult.VmTrace.
+	// When the parallel path is taken, ibs only has InitializeBlockExecution effects
+	// (no user-tx state); CalculateRewards is safe because rewards are header-derived.
+	hasStateDiff := false
+	hasVmTrace := false
+	for _, t := range traceTypes {
+		switch t {
+		case TraceTypeStateDiff:
+			hasStateDiff = true
+		case TraceTypeVmTrace:
+			hasVmTrace = true
+		}
+		if hasStateDiff && hasVmTrace {
+			break
+		}
+	}
+	hsr, isHistoricalStateReader := stateReader.(state.HistoricalStateReader)
+	var baseTxNum uint64
+	if isHistoricalStateReader {
+		baseTxNum = hsr.GetTxNum()
+	}
+
+	var traces []*TraceCallResult
+	var cmErr error
+	if isHistoricalStateReader && !hasStateDiff && !hasVmTrace && borStateSyncTxn == nil && len(txs) > 1 {
+		traces, cmErr = api.doCallBlockParallel(ctx, dbtx, baseTxNum, txs, msgs, callParams, header, gasBailOut, traceConfig)
+	} else {
+		traces, _, cmErr = api.doCallBlock(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txs, msgs, callParams,
+			&parentNrOrHash, header, gasBailOut /* gasBailout */, traceConfig)
+	}
 
 	if cmErr != nil {
 		return nil, nil, cmErr
@@ -895,6 +930,157 @@ func (api *TraceAPIImpl) callBlock(
 	}
 
 	return traces, syscall, nil
+}
+
+type blockTraceTxJob struct {
+	txIndex   int
+	txn       types.Transaction
+	msg       *types.Message
+	callParam TraceCallParam
+}
+
+// doCallBlockParallel traces all transactions in a block concurrently using a
+// worker pool of size min(GOMAXPROCS, len(txns)).  Each worker opens its own
+// read-only temporal transaction so that the underlying MDBX transaction is
+// never accessed from more than one goroutine.  Because the temporal DB stores
+// the exact pre-state for every txNum, each transaction can be replayed
+// independently without conflict detection or state forwarding.
+//
+// Preconditions (checked by the caller):
+//   - stateReader is a HistoricalStateReader (historical block, not latest)
+//   - no stateDiff is requested (stateDiff needs per-tx cloneCache isolation)
+//   - no Bor state-sync txn (it uses bridgeReader.Events via the shared dbtx)
+func (api *TraceAPIImpl) doCallBlockParallel(
+	ctx context.Context,
+	dbtx kv.TemporalTx,
+	baseTxNum uint64,
+	txns []types.Transaction,
+	msgs []*types.Message,
+	callParams []TraceCallParam,
+	header *types.Header,
+	gasBailout bool,
+	traceConfig *config.TraceConfig,
+) ([]*TraceCallResult, error) {
+	chainConfig, err := api.chainConfig(ctx, dbtx)
+	if err != nil {
+		return nil, err
+	}
+	engine := api.engine()
+
+	var cancel context.CancelFunc
+	if api.evmCallTimeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, api.evmCallTimeout)
+	} else {
+		ctx, cancel = context.WithCancel(ctx)
+	}
+	defer cancel()
+
+	results := make([]*TraceCallResult, len(txns))
+
+	// Cap at 32 to bound memory from concurrent IntraBlockState instances and
+	// MDBX read transactions even on high-core-count machines.
+	const maxParallelWorkers = 32
+	numWorkers := min(runtime.GOMAXPROCS(0), len(txns), maxParallelWorkers)
+
+	// Pre-fill a buffered channel so the main goroutine never blocks.
+	jobs := make(chan blockTraceTxJob, len(txns))
+	for txIndex, msg := range msgs {
+		jobs <- blockTraceTxJob{txIndex: txIndex, txn: txns[txIndex], msg: msg, callParam: callParams[txIndex]}
+	}
+	close(jobs)
+
+	var wg sync.WaitGroup
+	var errOnce sync.Once
+	var firstErr error
+
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			workerTx, err := api.kv.BeginTemporalRo(ctx)
+			if err != nil {
+				errOnce.Do(func() { firstErr = err; cancel() })
+				return
+			}
+			defer workerTx.Rollback()
+
+			// Per-worker constants: same for every job this worker processes.
+			// blockCtx captures workerTx in its GetHash closure, so it cannot
+			// be shared across workers (each needs its own copy).
+			blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, workerTx, api._blockReader, chainConfig)
+			chainRules := blockCtx.Rules(chainConfig)
+			oeConfig, err := parseOeTracerConfig(traceConfig)
+			if err != nil {
+				errOnce.Do(func() { firstErr = err; cancel() })
+				return
+			}
+			noop := state.NewNoopWriter()
+
+			for job := range jobs {
+				if err := common.Stopped(ctx.Done()); err != nil {
+					errOnce.Do(func() { firstErr = err })
+					return
+				}
+
+				workerReader := state.NewHistoryReaderV3(workerTx, baseTxNum+uint64(job.txIndex))
+				workerIbs := state.New(workerReader)
+
+				traceResult := &TraceCallResult{Trace: []*ParityTrace{}, TransactionHash: job.callParam.txHash}
+
+				var ot OeTracer
+				ot.config = oeConfig
+				ot.compat = api.compatibility
+				ot.r = traceResult
+				ot.idx = []string{fmt.Sprintf("%d-", job.txIndex)}
+				// The parallel path only activates when !hasStateDiff && !hasVmTrace, so
+				// TraceTypeTrace is always active here; initialise traceAddr unconditionally.
+				ot.traceAddr = []int{}
+
+				tracer := ot.Tracer()
+				vmConfig := vm.Config{Tracer: tracer.Hooks}
+
+				workerIbs.SetTxContext(blockCtx.BlockNumber, job.txIndex)
+				workerIbs.SetHooks(tracer.Hooks)
+
+				txCtx := protocol.NewEVMTxContext(job.msg)
+				evm := vm.NewEVM(blockCtx, txCtx, workerIbs, chainConfig, vmConfig)
+				gp := new(protocol.GasPool).AddGas(job.msg.Gas()).AddBlobGas(job.msg.BlobGas())
+
+				if tracer.Hooks.OnTxStart != nil {
+					tracer.Hooks.OnTxStart(evm.GetVMContext(), job.txn, job.msg.From())
+				}
+
+				execResult, execErr := protocol.ApplyMessage(evm, job.msg, gp, true /* refunds */, gasBailout, engine)
+				if execErr != nil {
+					if tracer.Hooks.OnTxEnd != nil {
+						tracer.Hooks.OnTxEnd(nil, execErr)
+					}
+					errOnce.Do(func() { firstErr = fmt.Errorf("txIndex %d: %w", job.txIndex, execErr); cancel() })
+					return
+				}
+
+				if tracer.Hooks.OnTxEnd != nil {
+					tracer.Hooks.OnTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, nil)
+				}
+
+				if err := workerIbs.FinalizeTx(chainRules, noop); err != nil {
+					errOnce.Do(func() { firstErr = err; cancel() })
+					return
+				}
+
+				traceResult.Output = common.Copy(execResult.ReturnData)
+				results[job.txIndex] = traceResult
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	return results, nil
 }
 
 func (api *TraceAPIImpl) callTransaction(
