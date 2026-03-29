@@ -1112,7 +1112,10 @@ func assembledBlockToPayloadResponse(br *types.BlockWithReceipts, blockValue *ui
 	}
 
 	var executionRequests []hexutil.Bytes
-	if version >= clparams.ElectraVersion && br.Requests != nil {
+	if version >= clparams.ElectraVersion {
+		if br.Requests == nil {
+			return nil, errors.New("missing execution requests for Electra+ payload")
+		}
 		executionRequests = make([]hexutil.Bytes, 0, len(br.Requests))
 		for _, r := range br.Requests {
 			executionRequests = append(executionRequests, r.Encode())

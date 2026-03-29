@@ -203,7 +203,7 @@ func TestCaplinBlockProductionGlamsterdamSlotNumber(t *testing.T) {
 
 	chainRW := chainreader.NewChainReaderEth1(
 		m.ChainConfig,
-		direct.NewExecutionClientDirect(m.ExecModule),
+		m.ExecModule,
 		time.Hour,
 	)
 	engine, err := execution_client.NewExecutionClientDirect(chainRW, nil)
