@@ -1,5 +1,8 @@
 ---
 description: Driving Ethereum progress through community-supported research and development
+metaLinks:
+  alternates:
+    - https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/about/donate
 ---
 
 # Donate

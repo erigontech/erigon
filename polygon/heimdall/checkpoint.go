@@ -258,7 +258,6 @@ func (v *CheckpointListResponseV2) ToList() ([]*Checkpoint, error) {
 
 		r.Id = CheckpointId(id)
 		r.Fields.RootHash = common.BytesToHash(decoded)
-		r.Fields.RootHash = common.BytesToHash(decoded)
 		r.Fields.StartBlock = big.NewInt(int64(startBlock))
 		r.Fields.EndBlock = big.NewInt(int64(endBlock))
 

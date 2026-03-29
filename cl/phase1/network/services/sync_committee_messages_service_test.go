@@ -103,5 +103,5 @@ func TestSyncCommitteesSuccess(t *testing.T) {
 	synced.OnHeadState(state)
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(msg.SyncCommitteeMessage.Slot).Return(true).AnyTimes()
 	require.NoError(t, s.ProcessMessage(context.Background(), new(uint64), msg))
-	require.Error(t, s.ProcessMessage(context.Background(), new(uint64), msg)) // Ignore if done twice
+	require.NoError(t, s.ProcessMessage(context.Background(), new(uint64), msg)) // Silent ignore: returns nil if done twice
 }

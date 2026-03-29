@@ -6,6 +6,7 @@ import (
 	"path"
 	"testing"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -51,6 +52,22 @@ func Test_CheckStartFrom0(t *testing.T) {
 	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false))
 }
 
+func Test_CheckAllowedNonStartFrom0(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	touchFiles(t, dirs, []snapRange{
+		{0, 10}, {10, 20}, {20, 30},
+	})
+
+	delFile(t, dirs.Snap, "v1.0-000000-000010-blocksidecars.idx") // blobsidecars start at 1942 step on mainnet after dencun upgrade
+	delFile(t, dirs.Snap, "v1.0-000000-000010-blobsidecars.seg")
+	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, false))
+
+	// but removing other files should still error
+	delFile(t, dirs.Snap, "v1.0-000000-000010-beaconblocks.idx")
+	delFile(t, dirs.Snap, "v1.0-000000-000010-beaconblocks.seg")
+	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false))
+}
+
 func Test_CheckOverlaps(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	touchFiles(t, dirs, []snapRange{
@@ -89,6 +106,9 @@ func Test_LastFileMissingForOneEnum(t *testing.T) {
 }
 
 func Test_VersionLessThanMin(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	dirs := datadir.New(t.TempDir())
 	touchFiles(t, dirs, []snapRange{
 		{0, 10}, {10, 20}, {20, 30},
@@ -119,6 +139,9 @@ func Test_VersionLessThanMin(t *testing.T) {
 }
 
 func Test_VersionMoreThanCurrent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	dirs := datadir.New(t.TempDir())
 	touchFiles(t, dirs, []snapRange{
 		{0, 10}, {10, 20}, {20, 30},
@@ -196,5 +219,5 @@ func touchFiles(t *testing.T, dirs datadir.Dirs, ranges []snapRange) {
 func delFile(t *testing.T, folder string, filename string) {
 	t.Helper()
 	fullpath := path.Join(folder, filename)
-	require.NoError(t, os.Remove(fullpath))
+	require.NoError(t, dir.RemoveFile(fullpath))
 }

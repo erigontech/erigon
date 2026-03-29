@@ -30,7 +30,8 @@ func (b *CachingBeaconState) SetSlot(slot uint64) {
 
 func (b *CachingBeaconState) AddValidator(validator solid.Validator, balance uint64) {
 	b.BeaconState.AddValidator(validator, balance)
-	b.publicKeyIndicies[validator.PublicKey()] = uint64(b.ValidatorLength()) - 1
+	pk := validator.PublicKey()
+	b.publicKeyIndicies.Set(pk[:], uint64(b.ValidatorLength())-1)
 	// change in validator set means cache purging
 	b.totalActiveBalanceCache = nil
 }

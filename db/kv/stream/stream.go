@@ -21,11 +21,13 @@ import (
 	"fmt"
 	"slices"
 
-	"golang.org/x/exp/constraints"
-
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/order"
 )
+
+type integer interface {
+	~int | ~int8 | ~int16 | ~int32 | ~int64 | ~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr
+}
 
 type (
 	Empty[T any]             struct{}
@@ -87,11 +89,11 @@ func (it *ArrStream[V]) NextBatch() ([]V, error) {
 	return v, nil
 }
 
-func Range[T constraints.Integer](from, to T) *RangeIter[T] {
+func Range[T integer](from, to T) *RangeIter[T] {
 	return &RangeIter[T]{i: from, to: to}
 }
 
-type RangeIter[T constraints.Integer] struct {
+type RangeIter[T integer] struct {
 	i, to T
 }
 
@@ -103,11 +105,11 @@ func (it *RangeIter[T]) Next() (T, error) {
 	return v, nil
 }
 
-func ReverseRange[T constraints.Integer](from, to T) *ReverseRangeIter[T] {
+func ReverseRange[T integer](from, to T) *ReverseRangeIter[T] {
 	return &ReverseRangeIter[T]{i: from, to: to}
 }
 
-type ReverseRangeIter[T constraints.Integer] struct {
+type ReverseRangeIter[T integer] struct {
 	i, to T
 }
 
@@ -325,6 +327,29 @@ func (m *TransformedDuo[K, V]) Next() (K, V, error) {
 	return m.transform(k, v)
 }
 func (m *TransformedDuo[K, v]) Close() {
+	if x, ok := m.it.(Closer); ok {
+		x.Close()
+	}
+}
+
+// TransformedDuoV - analog `map` (in terms of map-filter-reduce pattern) but with different value type
+type TransformedDuoV[K, V, VR any] struct {
+	it        Duo[K, V]
+	transform func(K, V) (K, VR, error)
+}
+
+func TransformDuoV[K, V, VR any](it Duo[K, V], transform func(K, V) (K, VR, error)) *TransformedDuoV[K, V, VR] {
+	return &TransformedDuoV[K, V, VR]{it: it, transform: transform}
+}
+func (m *TransformedDuoV[K, V, VR]) HasNext() bool { return m.it.HasNext() }
+func (m *TransformedDuoV[K, V, VR]) Next() (k K, vr VR, err error) {
+	k, v, err := m.it.Next()
+	if err != nil {
+		return k, vr, err
+	}
+	return m.transform(k, v)
+}
+func (m *TransformedDuoV[K, V, VR]) Close() {
 	if x, ok := m.it.(Closer); ok {
 		x.Close()
 	}

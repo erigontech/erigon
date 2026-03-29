@@ -80,7 +80,7 @@ func TestOpenFolder(t *testing.T) {
 
 	rwtx, err = db.BeginRw(context.Background())
 	require.NoError(t, err)
-	defer rwtx.Commit()
+	t.Cleanup(rwtx.Rollback)
 	checkGet(headerTx, bodyTx, rwtx)
 	rwtx.Commit()
 
@@ -107,7 +107,7 @@ func TestOpenFolder(t *testing.T) {
 
 	rwtx, err = db.BeginRw(context.Background())
 	require.NoError(t, err)
-	defer rwtx.Commit()
+	t.Cleanup(rwtx.Rollback)
 
 	aggTx = agg.BeginTemporalTx()
 	defer aggTx.Close()
@@ -156,7 +156,7 @@ func TestRecalcVisibleFilesAligned(t *testing.T) {
 
 	rwtx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
-	defer rwtx.Commit()
+	t.Cleanup(rwtx.Rollback)
 
 	amount := 36
 
@@ -217,7 +217,7 @@ func TestRecalcVisibleFilesUnaligned(t *testing.T) {
 
 	rwtx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
-	defer rwtx.Commit()
+	t.Cleanup(rwtx.Rollback)
 
 	amount := 36
 
@@ -304,7 +304,7 @@ func TestClose(t *testing.T) {
 
 	rwtx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
-	defer rwtx.Commit()
+	t.Cleanup(rwtx.Rollback)
 
 	amount := 36
 	aggTx := agg.BeginTemporalTx()
@@ -409,7 +409,7 @@ func TestMergedFileGet(t *testing.T) {
 
 	rwtx, err = db.BeginRw(context.Background())
 	require.NoError(t, err)
-	defer rwtx.Commit()
+	defer rwtx.Rollback()
 	checkGet(headerTx, bodyTx, rwtx)
 	rwtx.Commit()
 
@@ -435,7 +435,7 @@ func TestMergedFileGet(t *testing.T) {
 	defer aggTx.Close()
 	rwtx, err = db.BeginRw(context.Background())
 	require.NoError(t, err)
-	defer rwtx.Commit()
+	defer rwtx.Rollback()
 	headerTx, bodyTx = aggTx.Marked(headerId), aggTx.Marked(bodyId)
 	checkGet(headerTx, bodyTx, rwtx)
 
@@ -446,6 +446,7 @@ func setupDb(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
 	logger := log.New()
 	dirs := datadir.New(tb.TempDir())
 	db := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	tb.Cleanup(db.Close)
 	return dirs, db, logger
 }
 

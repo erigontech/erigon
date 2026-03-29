@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	jsoniter "github.com/json-iterator/go"
 
@@ -76,6 +77,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 	if err != nil {
 		return nil, err
 	}
+
 	if !ok {
 		if chainConfig.Bor == nil {
 			return nil, nil
@@ -93,7 +95,12 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		isBorStateSyncTxn = true
 	}
 
-	header, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(blockNumber), tx)
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	header, err := api.headerByNumber(ctx, rpc.BlockNumber(blockNumber), tx)
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +108,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		return nil, nil
 	}
 
-	txNumMin, err := api._txNumReader.Min(tx, blockNumber)
+	txNumMin, err := api._txNumReader.Min(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -193,6 +200,13 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 		return []ParityTrace{}, nil
 	}
 	bn := hexutil.Uint64(blockNum)
+
+	// if we've pruned this history away for this block then just return early
+	// to save any red herring errors
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
 
 	// Extract transactions from block
 	block, bErr := api.blockWithSenders(ctx, tx, hash, blockNum)
@@ -318,6 +332,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	} else {
 		fromBlock, _, _, err = rpchelper.GetBlockNumber(ctx, *req.FromBlock, dbtx, api._blockReader, api.filters)
 		if err != nil {
+			if errors.As(err, &rpc.BlockNotFoundErr{}) {
+				stream.WriteEmptyArray()
+				return nil // waiting for spec: not error for historical reasons
+			}
 			return err
 		}
 	}
@@ -331,11 +349,23 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	} else {
 		toBlock, _, _, err = rpchelper.GetBlockNumber(ctx, *req.ToBlock, dbtx, api._blockReader, api.filters)
 		if err != nil {
+			if errors.As(err, &rpc.BlockNotFoundErr{}) {
+				stream.WriteEmptyArray()
+				return nil // waiting for spec: not error for historical reasons
+			}
 			return err
 		}
 	}
 	if fromBlock > toBlock {
 		return errors.New("invalid parameters: fromBlock cannot be greater than toBlock")
+	}
+
+	// if we've pruned this history away for this block then just return early
+	// to save any red herring errors
+
+	err = api.BaseAPI.checkPruneHistory(ctx, dbtx, fromBlock)
+	if err != nil {
+		return err
 	}
 
 	return api.filterV3(ctx, dbtx, fromBlock, toBlock, req, stream, *gasBailOut, traceConfig)
@@ -345,13 +375,17 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	var fromTxNum, toTxNum uint64
 	var err error
 
+	if api.blockRangeLimit != 0 && (toBlock-fromBlock) > uint64(api.blockRangeLimit) {
+		return fmt.Errorf("%s: %d", errExceedBlockRange, api.blockRangeLimit)
+	}
+
 	if fromBlock > 0 {
-		fromTxNum, err = api._txNumReader.Min(dbtx, fromBlock)
+		fromTxNum, err = api._txNumReader.Min(ctx, dbtx, fromBlock)
 		if err != nil {
 			return err
 		}
 	}
-	toTxNum, err = api._txNumReader.Max(dbtx, toBlock) // toBlock is an inclusive bound
+	toTxNum, err = api._txNumReader.Max(ctx, dbtx, toBlock) // toBlock is an inclusive bound
 	if err != nil {
 		return err
 	}
@@ -360,7 +394,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	if err != nil {
 		return err
 	}
-	it := rawdbv3.TxNums2BlockNums(dbtx, api._txNumReader, allTxs, order.Asc)
+	it := rawdbv3.TxNums2BlockNums(ctx, dbtx, api._txNumReader, allTxs, order.Asc)
 	defer it.Close()
 
 	chainConfig, err := api.chainConfig(ctx, dbtx)
@@ -392,11 +426,13 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	var lastSigner *types.Signer
 	var lastRules *chain.Rules
 
-	stateReader := state.NewHistoryReaderV3()
-	stateReader.SetTx(dbtx)
 	noop := state.NewNoopWriter()
 	isPos := false
+
 	for it.HasNext() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		txNum, blockNum, txIndex, isFnalTxn, blockNumChanged, err := it.Next()
 		if err != nil {
 			if first {
@@ -436,7 +472,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 
 			if !isPos && chainConfig.TerminalTotalDifficulty != nil {
 				header := lastHeader
-				isPos = header.Difficulty.Sign() == 0 || header.Difficulty.Cmp(chainConfig.TerminalTotalDifficulty) >= 0
+				isPos = header.Difficulty.IsZero() || header.Difficulty.CmpBig(chainConfig.TerminalTotalDifficulty) >= 0
 			}
 
 			lastBlockHash = lastHeader.Hash()
@@ -583,12 +619,9 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			continue
 		}
 
-		stateReader.SetTxNum(txNum)
 		stateCache := shards.NewStateCache(32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
-		cachedReader := state.NewCachedReader(stateReader, stateCache)
-		//cachedReader := stateReader
+		cachedReader := state.NewCachedReader(state.NewHistoryReaderV3(dbtx, txNum), stateCache)
 		cachedWriter := state.NewCachedWriter(noop, stateCache)
-		//cachedWriter := noop
 
 		traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
 		var ot OeTracer
@@ -604,8 +637,8 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		ibs := state.New(cachedReader)
 
 		blockCtx := transactions.NewEVMBlockContext(engine, lastHeader, true /* requireCanonical */, dbtx, api._blockReader, chainConfig)
-		txCtx := protocol.NewEVMTxContext(msg)
-		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
+		evmTxCtx := protocol.NewEVMTxContext(msg)
+		evm := vm.NewEVM(blockCtx, evmTxCtx, ibs, chainConfig, vmConfig)
 
 		gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 		ibs.SetTxContext(blockNum, txIndex)
@@ -615,8 +648,35 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			ot.Tracer().OnTxStart(evm.GetVMContext(), txn, msg.From())
 		}
 
+		var timer *time.Timer
+		if api.evmCallTimeout > 0 {
+			timer = time.AfterFunc(api.evmCallTimeout, evm.Cancel)
+		}
 		var execResult *evmtypes.ExecutionResult
 		execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailOut, engine)
+		if timer != nil {
+			timer.Stop()
+		}
+		timedOut := timer != nil && evm.Cancelled()
+
+		if timedOut {
+			timeoutErr := fmt.Errorf("execution aborted (timeout = %v)", api.evmCallTimeout)
+			if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
+				ot.Tracer().OnTxEnd(nil, timeoutErr)
+			}
+			if first {
+				first = false
+			} else {
+				stream.WriteMore()
+			}
+			stream.WriteObjectStart()
+			rpc.HandleError(timeoutErr, stream)
+			stream.WriteObjectEnd()
+			// Safe to skip FinalizeTx/CommitBlock: each iteration creates a fresh
+			// stateCache, cachedReader and ibs from the next txNum, and writes go
+			// to a noop writer, so no partial state escapes this scope.
+			continue
+		}
 		if err != nil {
 			if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
 				ot.Tracer().OnTxEnd(nil, err)
@@ -632,7 +692,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			continue
 		}
 		if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
-			ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.GasUsed}, nil)
+			ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, nil)
 		}
 		traceResult.Output = common.Copy(execResult.ReturnData)
 		if err = ibs.FinalizeTx(evm.ChainRules(), noop); err != nil {
@@ -770,6 +830,11 @@ func (api *TraceAPIImpl) callBlock(
 		RequireCanonical: true,
 	}
 
+	err := rpchelper.CheckBlockExecuted(dbtx, blockNumber)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, parentNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, nil, err
@@ -781,7 +846,7 @@ func (api *TraceAPIImpl) callBlock(
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
 
-	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, nil, nil)
+	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, nil)
 	logger := log.New("trace_filtering")
 	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, ibs, nil, logger, nil)
 	if err != nil {
@@ -884,6 +949,11 @@ func (api *TraceAPIImpl) callTransaction(
 		RequireCanonical: true,
 	}
 
+	err := rpchelper.CheckBlockExecuted(dbtx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+
 	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, parentNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
@@ -895,7 +965,7 @@ func (api *TraceAPIImpl) callTransaction(
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
 
-	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, nil, nil)
+	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, nil)
 	logger := log.New("trace_filtering")
 	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader, header, cfg, ibs, nil, logger, nil)
 	if err != nil {

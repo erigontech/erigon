@@ -34,7 +34,7 @@ import (
 // and holds the tokens for the program.
 type Compiler struct {
 	tokens []token
-	binary []interface{}
+	binary []any
 
 	labels map[string]int
 
@@ -237,7 +237,7 @@ func (c *Compiler) compileLabel() {
 }
 
 // pushBin pushes the value v to the binary stack.
-func (c *Compiler) pushBin(v interface{}) {
+func (c *Compiler) pushBin(v any) {
 	if c.debug {
 		fmt.Printf("%d: %v\n", len(c.binary), v)
 	}

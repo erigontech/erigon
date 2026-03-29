@@ -31,23 +31,35 @@ var PrunedError = errors.New("old data not available due to pruning")
 
 // HistoryReaderV3 Implements StateReader and StateWriter
 type HistoryReaderV3 struct {
-	txNum     uint64
-	trace     bool
-	ttx       kv.TemporalTx
-	composite []byte
+	txNum       uint64
+	trace       bool
+	tracePrefix string
+	ttx         kv.TemporalTx
+	composite   []byte
 }
 
-func NewHistoryReaderV3() *HistoryReaderV3 {
-	return &HistoryReaderV3{composite: make([]byte, 20+32)}
+func NewHistoryReaderV3(ttx kv.TemporalTx, txNum uint64) *HistoryReaderV3 {
+	return &HistoryReaderV3{composite: make([]byte, 20+32), ttx: ttx, txNum: txNum}
 }
 
 func (hr *HistoryReaderV3) String() string {
 	return fmt.Sprintf("txNum:%d", hr.txNum)
 }
-func (hr *HistoryReaderV3) SetTx(tx kv.Tx)                          { hr.ttx = tx.(kv.TemporalTx) }
-func (hr *HistoryReaderV3) SetTxNum(txNum uint64)                   { hr.txNum = txNum }
-func (hr *HistoryReaderV3) GetTxNum() uint64                        { return hr.txNum }
-func (hr *HistoryReaderV3) SetTrace(trace bool, tracePrefix string) { hr.trace = trace }
+func (hr *HistoryReaderV3) SetTx(tx kv.TemporalTx) { hr.ttx = tx }
+func (hr *HistoryReaderV3) SetTxNum(txNum uint64)  { hr.txNum = txNum }
+func (hr *HistoryReaderV3) GetTxNum() uint64       { return hr.txNum }
+func (hr *HistoryReaderV3) SetTrace(trace bool, tracePrefix string) {
+	hr.trace = trace
+	hr.tracePrefix = tracePrefix
+}
+
+func (r *HistoryReaderV3) Trace() bool {
+	return r.trace
+}
+
+func (r *HistoryReaderV3) TracePrefix() string {
+	return r.tracePrefix
+}
 
 // Gets the txNum where Account, Storage and Code history begins.
 // If the node is an archive node all history will be available therefore
@@ -55,8 +67,8 @@ func (hr *HistoryReaderV3) SetTrace(trace bool, tracePrefix string) { hr.trace =
 //
 // For non-archive node old history files get deleted, so this number will vary
 // but the goal is to know where the historical data begins.
-func (hr *HistoryReaderV3) StateHistoryStartFrom() uint64 {
-	dbg := hr.ttx.Debug()
+func StateHistoryStartTxNum(ttx kv.TemporalTx) uint64 {
+	dbg := ttx.Debug()
 	return min(
 		dbg.HistoryStartFrom(kv.AccountsDomain),
 		dbg.HistoryStartFrom(kv.StorageDomain),
@@ -71,16 +83,16 @@ func (hr *HistoryReaderV3) ReadAccountData(address accounts.Address) (*accounts.
 	enc, ok, err := hr.ttx.GetAsOf(kv.AccountsDomain, addressValue[:], hr.txNum)
 	if err != nil || !ok || len(enc) == 0 {
 		if hr.trace {
-			fmt.Printf("ReadAccountData [%x] => []\n", address)
+			fmt.Printf("%sReadAccountData (hist)[%x] => []\n", hr.tracePrefix, address)
 		}
 		return nil, err
 	}
 	var a accounts.Account
 	if err := accounts.DeserialiseV3(&a, enc); err != nil {
-		return nil, fmt.Errorf("ReadAccountData(%x): %w", address, err)
+		return nil, fmt.Errorf("%sread account data (hist)(%x): %w", hr.tracePrefix, address, err)
 	}
 	if hr.trace {
-		fmt.Printf("ReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x]\n", address, a.Nonce, &a.Balance, a.CodeHash)
+		fmt.Printf("%sReadAccountData (hist)[%x] => [nonce: %d, balance: %d, codeHash: %x]\n", hr.tracePrefix, address, a.Nonce, &a.Balance, a.CodeHash)
 	}
 	return &a, nil
 }
@@ -97,7 +109,7 @@ func (hr *HistoryReaderV3) ReadAccountStorage(address accounts.Address, key acco
 	hr.composite = append(append(hr.composite[:0], addressValue[:]...), keyValue[:]...)
 	enc, ok, err := hr.ttx.GetAsOf(kv.StorageDomain, hr.composite, hr.txNum)
 	if hr.trace {
-		fmt.Printf("ReadAccountStorage [%x] [%x] => [%x]\n", address, key, enc)
+		fmt.Printf("%sReadAccountStorage (hist)[%x] [%x] => [%x]\n", hr.tracePrefix, address, key, enc)
 	}
 	var res uint256.Int
 	if ok {
@@ -144,7 +156,7 @@ func (hr *HistoryReaderV3) ReadAccountCode(address accounts.Address) ([]byte, er
 	code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, addressValue[:], hr.txNum)
 	if hr.trace {
 		lenc, cs := printCode(code)
-		fmt.Printf("ReadAccountCode [%x] => [%d:%s]\n", address, lenc, cs)
+		fmt.Printf("%sReadAccountCode (hist)[%x] => [%d:%s]\n", hr.tracePrefix, address, lenc, cs)
 	}
 	return code, err
 }
@@ -160,22 +172,22 @@ func (hr *HistoryReaderV3) ReadAccountIncarnation(address accounts.Address) (uin
 	enc, ok, err := hr.ttx.GetAsOf(kv.AccountsDomain, addressValue[:], hr.txNum)
 	if err != nil || !ok || len(enc) == 0 {
 		if hr.trace {
-			fmt.Printf("ReadAccountIncarnation [%x] => [0]\n", address)
+			fmt.Printf("%sReadAccountIncarnation (hist)[%x] => [0]\n", hr.tracePrefix, address)
 		}
 		return 0, err
 	}
 	var a accounts.Account
 	if err := a.DecodeForStorage(enc); err != nil {
-		return 0, fmt.Errorf("ReadAccountIncarnation(%x): %w", address, err)
+		return 0, fmt.Errorf("%sread account incarnation (hist)[%x]: %w", hr.tracePrefix, address, err)
 	}
 	if a.Incarnation == 0 {
 		if hr.trace {
-			fmt.Printf("ReadAccountIncarnation [%x] => [%d]\n", address, 0)
+			fmt.Printf("%sReadAccountIncarnation (hist)[%x] => [%d]\n", hr.tracePrefix, address, 0)
 		}
 		return 0, nil
 	}
 	if hr.trace {
-		fmt.Printf("ReadAccountIncarnation [%x] => [%d]\n", address, a.Incarnation-1)
+		fmt.Printf("%sReadAccountIncarnation (hist)[%x] => [%d]\n", hr.tracePrefix, address, a.Incarnation-1)
 	}
 	return a.Incarnation - 1, nil
 }

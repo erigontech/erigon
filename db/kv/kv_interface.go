@@ -19,13 +19,11 @@ package kv
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/mdbx-go/mdbx"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/datadir"
@@ -300,6 +298,49 @@ type RwCursorDupSort interface {
 	AppendDup(key, value []byte) error    // AppendDup - same as Append, but for sorted dup data
 }
 
+type PseudoDupSortRwCursor interface { // For both DupSort and usual cursors (usual imitates functionality of ds)
+	RwCursor
+	DeleteCurrentDuplicates() error     // DeleteCurrentDuplicates - deletes all values of the current key
+	DeleteExact(k1, k2 []byte) error    // DeleteExact - delete 1 value from given key
+	FirstDup() ([]byte, error)          // FirstDup - position at first data item of current key
+	NextDup() ([]byte, []byte, error)   // NextDup - position at next data item of current key
+	NextNoDup() ([]byte, []byte, error) // NextNoDup - position at first data item of next key
+	LastDup() ([]byte, error)           // LastDup - position at last data item of current key
+
+	CountDuplicates() (uint64, error) // CountDuplicates - number of duplicates for the current key
+}
+
+// RwCursorPseudoDupSort wraps any RwCursor to satisfy PseudoDupSortRwCursor
+// for non-DupSort tables. Each key has exactly one value, so dup operations
+// are trivial: CountDuplicates returns 1, NextDup returns nil, etc.
+type RwCursorPseudoDupSort struct {
+	RwCursor
+}
+
+func (c *RwCursorPseudoDupSort) DeleteExact(k1, k2 []byte) error {
+	return c.Delete(k1)
+}
+func (c *RwCursorPseudoDupSort) NextNoDup() ([]byte, []byte, error) {
+	return c.Next()
+}
+func (c *RwCursorPseudoDupSort) NextDup() ([]byte, []byte, error) {
+	return nil, nil, nil
+}
+func (c *RwCursorPseudoDupSort) FirstDup() ([]byte, error) {
+	_, v, err := c.Current()
+	return v, err
+}
+func (c *RwCursorPseudoDupSort) LastDup() ([]byte, error) {
+	_, v, err := c.Current()
+	return v, err
+}
+func (c *RwCursorPseudoDupSort) DeleteCurrentDuplicates() error {
+	return c.DeleteCurrent()
+}
+func (c *RwCursorPseudoDupSort) CountDuplicates() (uint64, error) {
+	return 1, nil
+}
+
 const Unlim int = -1 // const Unbounded/EOF/EndOfTable []byte = nil
 
 type StatelessRwTx interface {
@@ -439,6 +480,9 @@ type TemporalDebugTx interface {
 	// TraceKey returns stream of <txNum->value_after_txnum_change> for a given key
 	TraceKey(domain Domain, k []byte, fromTxNum, toTxNum uint64) (stream.U64V, error)
 
+	// HistoryKeyTxNumRange returns (key, txNum) pairs for every txNum at which a key changed in [fromTs, toTs)
+	HistoryKeyTxNumRange(name Domain, fromTs, toTs int, asc order.By, limit int) (it stream.KU64, err error)
+
 	DomainFiles(domain ...Domain) VisibleFiles
 	CurrentDomainVersion(domain Domain) version.Version
 	TxNumsInFiles(domains ...Domain) (minTxNum uint64)
@@ -452,7 +496,7 @@ type TemporalDebugTx interface {
 	Dirs() datadir.Dirs
 	AllForkableIds() []ForkableId
 
-	NewMemBatch(ioMetrics interface{}) TemporalMemBatch
+	NewMemBatch(ioMetrics any) TemporalMemBatch
 }
 
 type TemporalDebugDB interface {
@@ -469,19 +513,23 @@ type TemporalDebugDB interface {
 }
 
 type TemporalMemBatch interface {
-	DomainPut(domain Domain, k string, v []byte, txNum uint64, preval []byte, prevStep Step) error
-	DomainDel(domain Domain, k string, txNum uint64, preval []byte, prevStep Step) error
+	DomainPut(domain Domain, k string, v []byte, txNum uint64, preval []byte) error
+	DomainDel(domain Domain, k string, txNum uint64, preval []byte) error
 	GetLatest(domain Domain, key []byte) (v []byte, step Step, ok bool)
 	GetDiffset(tx RwTx, blockHash common.Hash, blockNumber uint64) ([DomainLen][]DomainEntryDiff, bool, error)
+	Merge(other TemporalMemBatch) error
 	ClearRam()
 	IndexAdd(table InvertedIdx, key []byte, txNum uint64) (err error)
 	IteratePrefix(domain Domain, prefix []byte, roTx Tx, it func(k []byte, v []byte, step Step) (cont bool, err error)) error
+	HasPrefix(domain Domain, prefix []byte, roTx Tx) ([]byte, []byte, bool, error)
 	SizeEstimate() uint64
 	Flush(ctx context.Context, tx RwTx) error
 	Close()
 	PutForkable(id ForkableId, num Num, v []byte) error
 	DiscardWrites(domain Domain)
 	Unwind(txNumUnwindTo uint64, changeset *[DomainLen][]DomainEntryDiff)
+	GetAsOf(domain Domain, key []byte, ts uint64) (v []byte, ok bool, err error)
+	SetInMemHistoryReads(v bool)
 }
 
 type WithFreezeInfo interface {
@@ -500,7 +548,6 @@ type TemporalRwTx interface {
 
 	UnmarkedRw(ForkableId) UnmarkedRwTx
 
-	GreedyPruneHistory(ctx context.Context, domain Domain) error
 	PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error)
 	Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[DomainLen][]DomainEntryDiff) error
 }
@@ -510,7 +557,7 @@ type TemporalPutDel interface {
 	// Optimizations:
 	//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
 	//   - user can append k2 into k1, then underlying methods will not perform append
-	DomainPut(domain Domain, k, v []byte, txNum uint64, prevVal []byte, prevStep Step) error
+	DomainPut(domain Domain, k, v []byte, txNum uint64, prevVal []byte) error
 	//DomainPut2(domain Domain, k1 []byte, val []byte, ts uint64) error
 
 	// DomainDel
@@ -518,7 +565,7 @@ type TemporalPutDel interface {
 	//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
 	//   - user can append k2 into k1, then underlying methods will not perform append
 	//   - if `val == nil` it will call DomainDel
-	DomainDel(domain Domain, k []byte, txNum uint64, prevVal []byte, prevStep Step) error
+	DomainDel(domain Domain, k []byte, txNum uint64, prevVal []byte) error
 	DomainDelPrefix(domain Domain, prefix []byte, txNum uint64) error
 }
 
@@ -640,26 +687,6 @@ func InitSummaries(dbLabel Label) {
 	}
 }
 
-func RecordSummaries(dbLabel Label, latency mdbx.CommitLatency) error {
-	_summaries, ok := MDBXSummaries.Load(string(dbLabel))
-	if !ok {
-		return fmt.Errorf("MDBX summaries not initialized yet for db=%s", string(dbLabel))
-	}
-	// cast to *DBSummaries
-	summaries, ok := _summaries.(*DBSummaries)
-	if !ok {
-		return fmt.Errorf("type casting to *DBSummaries failed")
-	}
-
-	summaries.DbCommitPreparation.Observe(latency.Preparation.Seconds())
-	summaries.DbCommitWrite.Observe(latency.Write.Seconds())
-	summaries.DbCommitSync.Observe(latency.Sync.Seconds())
-	summaries.DbCommitEnding.Observe(latency.Ending.Seconds())
-	summaries.DbCommitTotal.Observe(latency.Whole.Seconds())
-	return nil
-
-}
-
 var MDBXGauges = InitMDBXMGauges() // global mdbx gauges. each gauge can be filtered by db name
 var MDBXSummaries sync.Map         // dbName => Summaries mapping
 
@@ -698,6 +725,23 @@ var (
 	//DbGcSelfPnlMergeVolume = metrics.NewCounter(`db_gc_pnl{phase="self_merge_volume"}`)               //nolint
 	//DbGcSelfPnlMergeCalls  = metrics.NewCounter(`db_gc_pnl{phase="slef_merge_calls"}`)                //nolint
 )
+
+// ErrServerOverloaded is returned by BeginRo when the DB semaphore is full and the caller is an RPC handler.
+var ErrServerOverloaded = errors.New("server overloaded, retry later")
+
+type nonBlockingAcquireKey struct{}
+
+// WithNonBlockingAcquire tags ctx to request fail-fast semaphore acquisition in BeginRo.
+// When set, BeginRo uses TryAcquire and returns ErrServerOverloaded immediately if the
+// read-tx semaphore is full, instead of blocking until a slot is available.
+func WithNonBlockingAcquire(ctx context.Context) context.Context {
+	return context.WithValue(ctx, nonBlockingAcquireKey{}, struct{}{})
+}
+
+// IsNonBlockingAcquire reports whether ctx was tagged by WithNonBlockingAcquire.
+func IsNonBlockingAcquire(ctx context.Context) bool {
+	return ctx.Value(nonBlockingAcquireKey{}) != nil
+}
 
 type Closer interface {
 	Close()

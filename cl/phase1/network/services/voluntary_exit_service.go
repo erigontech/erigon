@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 type voluntaryExitService struct {
@@ -69,16 +70,20 @@ func NewVoluntaryExitService(
 	}
 }
 
+func (s *voluntaryExitService) Names() []string {
+	return []string{gossip.TopicNameVoluntaryExit}
+}
+
 func (s *voluntaryExitService) IsMyGossipMessage(name string) bool {
 	return name == gossip.TopicNameVoluntaryExit
 }
 
-func (s *voluntaryExitService) DecodeGossipMessage(data *sentinelproto.GossipData, version clparams.StateVersion) (*SignedVoluntaryExitForGossip, error) {
+func (s *voluntaryExitService) DecodeGossipMessage(pid peer.ID, data []byte, version clparams.StateVersion) (*SignedVoluntaryExitForGossip, error) {
 	obj := &SignedVoluntaryExitForGossip{
-		Receiver:            copyOfPeerData(data),
+		Receiver:            &sentinelproto.Peer{Pid: pid.String()},
 		SignedVoluntaryExit: &cltypes.SignedVoluntaryExit{},
 	}
-	if err := obj.SignedVoluntaryExit.DecodeSSZ(data.Data, int(version)); err != nil {
+	if err := obj.SignedVoluntaryExit.DecodeSSZ(data, int(version)); err != nil {
 		return nil, err
 	}
 	return obj, nil
@@ -90,7 +95,7 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 
 	// [IGNORE] The voluntary exit is the first valid voluntary exit received for the validator with index signed_voluntary_exit.message.validator_index.
 	if s.operationsPool.VoluntaryExitsPool.Has(voluntaryExit.ValidatorIndex) {
-		return ErrIgnore
+		return nil
 	}
 
 	var (
@@ -178,5 +183,5 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 	// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves
 	// in BatchSignatureVerifier service. After validating signatures, if they are valid we will publish the
 	// gossip ourselves or ban the peer which sent that particular invalid signature.
-	return ErrIgnore
+	return nil
 }

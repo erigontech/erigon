@@ -29,12 +29,16 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/maphash"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 )
+
+// errInternalDB wraps errors that originate from local DB lookups (not from the peer's data).
+// This prevents penalizing peers for our own internal failures.
+var errInternalDB = errors.New("internal db error")
 
 // Fetch connects to sentry and implements eth/66 protocol regarding the transaction
 // messages. It tries to "prime" the sentry with StatusData message containing given
@@ -46,6 +50,7 @@ type Fetch struct {
 	db                       kv.RwDB
 	stateChangesClient       StateChangesClient
 	wg                       *sync.WaitGroup // used for synchronisation in the tests (nil when not in tests)
+	connectWg                sync.WaitGroup  // tracks goroutines spawned by ConnectCore/ConnectSentries
 	stateChangesParseCtx     *TxnParseContext
 	pooledTxnsParseCtx       *TxnParseContext
 	sentryClients            []sentryproto.SentryClient // sentry clients that will be used for accessing the network
@@ -104,17 +109,22 @@ func (f *Fetch) threadSafeParseStateChangeTxn(cb func(*TxnParseContext) error) e
 // ConnectSentries initialises connection to the sentry
 func (f *Fetch) ConnectSentries() {
 	for i := range f.sentryClients {
+		f.connectWg.Add(2)
 		go func(i int) {
+			defer f.connectWg.Done()
 			f.receiveMessageLoop(f.sentryClients[i])
 		}(i)
 		go func(i int) {
+			defer f.connectWg.Done()
 			f.receivePeerLoop(f.sentryClients[i])
 		}(i)
 	}
 }
 
 func (f *Fetch) ConnectCore() {
+	f.connectWg.Add(1)
 	go func() {
+		defer f.connectWg.Done()
 		for {
 			select {
 			case <-f.ctx.Done():
@@ -123,7 +133,11 @@ func (f *Fetch) ConnectCore() {
 			}
 			if err := f.handleStateChanges(f.ctx, f.stateChangesClient); err != nil {
 				if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-					time.Sleep(3 * time.Second)
+					select {
+					case <-f.ctx.Done():
+						return
+					case <-time.After(3 * time.Second):
+					}
 					continue
 				}
 				f.logger.Warn("[txpool.handleStateChanges]", "err", err)
@@ -131,6 +145,9 @@ func (f *Fetch) ConnectCore() {
 		}
 	}()
 }
+
+// Wait blocks until all goroutines spawned by ConnectCore and ConnectSentries have exited.
+func (f *Fetch) Wait() { f.connectWg.Wait() }
 
 func (f *Fetch) receiveMessageLoop(sentryClient sentryproto.SentryClient) {
 	for {
@@ -141,7 +158,11 @@ func (f *Fetch) receiveMessageLoop(sentryClient sentryproto.SentryClient) {
 		}
 		if _, err := sentryClient.HandShake(f.ctx, &emptypb.Empty{}, grpc.WaitForReady(true)); err != nil {
 			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-				time.Sleep(3 * time.Second)
+				select {
+				case <-f.ctx.Done():
+					return
+				case <-time.After(3 * time.Second):
+				}
 				continue
 			}
 			// Report error and wait more
@@ -150,7 +171,11 @@ func (f *Fetch) receiveMessageLoop(sentryClient sentryproto.SentryClient) {
 		}
 		if err := f.receiveMessage(f.ctx, sentryClient); err != nil {
 			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-				time.Sleep(3 * time.Second)
+				select {
+				case <-f.ctx.Done():
+					return
+				case <-time.After(3 * time.Second):
+				}
 				continue
 			}
 			f.logger.Warn("[txpool.recvMessage]", "err", err)
@@ -176,6 +201,76 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 		}
 		return err
 	}
+
+	var (
+		batch     = make([]*sentryproto.InboundMessage, 0, 256)
+		batchLock sync.Mutex
+	)
+
+	// LRU cache for deduplication - filters duplicates before they enter the batch
+	// Uses maphash to avoid string allocations
+	seenLRU, _ := maphash.NewLRU[struct{}](1024)
+
+	flushBatch := func() {
+		batchLock.Lock()
+		if len(batch) == 0 {
+			batchLock.Unlock()
+			return
+		}
+		toProcess := batch
+		batch = make([]*sentryproto.InboundMessage, 0, 256)
+		batchLock.Unlock()
+
+		if !f.pool.Started() {
+			return
+		}
+
+		if f.db == nil {
+			for range toProcess {
+				if f.wg != nil {
+					f.wg.Done()
+				}
+			}
+			return
+		}
+
+		tx, txErr := f.db.BeginRo(streamCtx)
+		if txErr != nil {
+			f.logger.Warn("[txpool.fetch] failed to begin batch transaction", "err", txErr)
+			return
+		}
+		defer tx.Rollback()
+
+		for _, req := range toProcess {
+			if handleErr := f.handleInboundMessageWithTx(streamCtx, tx, req, sentryClient); handleErr != nil {
+				if !grpcutil.IsRetryLater(handleErr) && !grpcutil.IsEndOfStream(handleErr) {
+					f.logger.Trace("[txpool.fetch] Handling batched message", "reqID", req.Id.String(), "err", handleErr)
+				}
+			}
+			if f.wg != nil {
+				f.wg.Done()
+			}
+		}
+	}
+
+	// Start ticker goroutine to flush batch.
+	// Reduced from 1s to 250ms to lower worst-case latency between receiving
+	// a POOLED_TRANSACTIONS_66 response and the transaction entering the pool.
+	// This matters for block builders that need freshly-gossiped transactions
+	// (e.g. multi-client blob tx ordering tests with a 2s payload window).
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+	go func() {
+		for {
+			select {
+			case <-streamCtx.Done():
+				return
+			case <-ticker.C:
+				flushBatch()
+			}
+		}
+	}()
+
 	var req *sentryproto.InboundMessage
 	for req, err = stream.Recv(); ; req, err = stream.Recv() {
 		if err != nil {
@@ -187,22 +282,26 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 			return fmt.Errorf("txpool.receiveMessage: %w", err)
 		}
 		if req == nil {
+			flushBatch()
 			return nil
 		}
-		if err = f.handleInboundMessage(streamCtx, req, sentryClient); err != nil {
-			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-				time.Sleep(3 * time.Second)
-				continue
+
+		// Skip duplicates using LRU cache with maphash to avoid string allocs
+		if _, seen := seenLRU.Get(req.Data); seen {
+			if f.wg != nil {
+				f.wg.Done()
 			}
-			f.logger.Trace("[txpool.fetch] Handling incoming message", "reqID", req.Id.String(), "err", err)
+			continue
 		}
-		if f.wg != nil {
-			f.wg.Done()
-		}
+		seenLRU.Set(req.Data, struct{}{})
+
+		batchLock.Lock()
+		batch = append(batch, req)
+		batchLock.Unlock()
 	}
 }
 
-func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient) (err error) {
+func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s, rlp: %x", rec, dbg.Stack(), req.Data)
@@ -212,17 +311,14 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentryproto.Inbou
 	if !f.pool.Started() {
 		return nil
 	}
-	tx, err := f.db.BeginRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
 
 	switch req.Id {
 	case sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_66:
 		hashCount, pos, err := ParseHashesCount(req.Data, 0)
 		if err != nil {
-			return fmt.Errorf("parsing NewPooledTransactionHashes: %w", err)
+			f.logger.Debug("[txpool] penalizing peer for malformed NewPooledTransactionHashes66", "peer", req.PeerId, "err", err)
+			sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
+			return nil
 		}
 
 		const maxHashesPerMsg = 4096 // See https://github.com/ethereum/devp2p/blob/master/caps/eth.md#newpooledtransactionhashes-0x08
@@ -236,7 +332,9 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentryproto.Inbou
 		hashes := make([]byte, 32*hashCount)
 		for i := 0; i < len(hashes); i += 32 {
 			if _, pos, err = ParseHash(req.Data, pos, hashes[i:]); err != nil {
-				return err
+				f.logger.Debug("[txpool] penalizing peer for malformed NewPooledTransactionHashes66", "peer", req.PeerId, "err", err)
+				sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
+				return nil
 			}
 		}
 		unknownHashes, err := f.pool.FilterKnownIdHashes(tx, hashes)
@@ -258,9 +356,11 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentryproto.Inbou
 			}
 		}
 	case sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68:
-		_, _, hashes, _, err := rlp.ParseAnnouncements(req.Data, 0)
+		_, _, hashes, _, err := parseAnnouncements(req.Data, 0)
 		if err != nil {
-			return fmt.Errorf("parsing NewPooledTransactionHashes88: %w", err)
+			f.logger.Debug("[txpool] penalizing peer for malformed NewPooledTransactionHashes68", "peer", req.PeerId, "err", err)
+			sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
+			return nil
 		}
 		unknownHashes, err := f.pool.FilterKnownIdHashes(tx, hashes)
 		if err != nil {
@@ -288,7 +388,9 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentryproto.Inbou
 		messageID = sentryproto.MessageId_POOLED_TRANSACTIONS_66
 		requestID, hashes, _, err := ParseGetPooledTransactions66(req.Data, 0, nil)
 		if err != nil {
-			return err
+			f.logger.Debug("[txpool] penalizing peer for malformed GetPooledTransactions66", "peer", req.PeerId, "err", err)
+			sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
+			return nil
 		}
 
 		// limit to max 256 transactions in a reply
@@ -338,7 +440,7 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentryproto.Inbou
 				if _, err := ParseTransactions(req.Data, 0, parseContext, &txns, func(hash []byte) error {
 					known, err := f.pool.IdHashKnown(tx, hash)
 					if err != nil {
-						return err
+						return fmt.Errorf("%w: %w", errInternalDB, err)
 					}
 					if known {
 						return ErrRejected
@@ -349,14 +451,19 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentryproto.Inbou
 				}
 				return nil
 			}); err != nil {
-				return err
+				if errors.Is(err, errInternalDB) {
+					return err
+				}
+				f.logger.Debug("[txpool] penalizing peer for malformed Transactions66", "peer", req.PeerId, "err", err)
+				sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
+				return nil
 			}
 		case sentryproto.MessageId_POOLED_TRANSACTIONS_66:
 			if err := f.threadSafeParsePooledTxn(func(parseContext *TxnParseContext) error {
 				if _, _, err := ParsePooledTransactions66(req.Data, 0, parseContext, &txns, func(hash []byte) error {
 					known, err := f.pool.IdHashKnown(tx, hash)
 					if err != nil {
-						return err
+						return fmt.Errorf("%w: %w", errInternalDB, err)
 					}
 					if known {
 						return ErrRejected
@@ -367,7 +474,12 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentryproto.Inbou
 				}
 				return nil
 			}); err != nil {
-				return err
+				if errors.Is(err, errInternalDB) {
+					return err
+				}
+				f.logger.Debug("[txpool] penalizing peer for malformed PooledTransactions66", "peer", req.PeerId, "err", err)
+				sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
+				return nil
 			}
 		default:
 			return fmt.Errorf("unexpected message: %s", req.Id.String())
@@ -393,17 +505,29 @@ func (f *Fetch) receivePeerLoop(sentryClient sentryproto.SentryClient) {
 		}
 		if _, err := sentryClient.HandShake(f.ctx, &emptypb.Empty{}, grpc.WaitForReady(true)); err != nil {
 			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-				time.Sleep(3 * time.Second)
+				select {
+				case <-f.ctx.Done():
+					return
+				case <-time.After(3 * time.Second):
+				}
 				continue
 			}
 			// Report error and wait more
 			f.logger.Warn("[txpool.recvPeers] sentry not ready yet", "err", err)
-			time.Sleep(time.Second)
+			select {
+			case <-f.ctx.Done():
+				return
+			case <-time.After(time.Second):
+			}
 			continue
 		}
 		if err := f.receivePeer(sentryClient); err != nil {
 			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-				time.Sleep(3 * time.Second)
+				select {
+				case <-f.ctx.Done():
+					return
+				case <-time.After(3 * time.Second):
+				}
 				continue
 			}
 
@@ -483,16 +607,22 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remoteproto.
 	var unwindTxns, unwindBlobTxns, minedTxns TxnSlots
 	for _, change := range req.ChangeBatch {
 		if change.Direction == remoteproto.Direction_FORWARD {
-			minedTxns.Resize(uint(len(change.Txs)))
 			for i := range change.Txs {
-				minedTxns.Txns[i] = &TxnSlot{}
 				if err := f.threadSafeParseStateChangeTxn(func(parseContext *TxnParseContext) error {
-					_, err := parseContext.ParseTransaction(change.Txs[i], 0, minedTxns.Txns[i], minedTxns.Senders.At(i), false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
-					return err
+					utx := &TxnSlot{}
+					sender := make([]byte, 20)
+					_, err := parseContext.ParseTransaction(change.Txs[i], 0, utx, sender, false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
+					if err != nil {
+						return err
+					}
+					minedTxns.Append(utx, sender, false)
+					return nil
 				}); err != nil && !errors.Is(err, context.Canceled) {
-					f.logger.Debug("[txpool.fetch] stream.Recv", "err", err)
+					txnType, _ := PeekTransactionType(change.Txs[i])
+					f.logger.Debug("[txpool.fetch] stream.Recv", "dir", change.Direction, "txnType", txnType, "index", i, "err", err)
 					continue // 1 txn handling error must not stop batch processing
 				}
+
 			}
 		} else if change.Direction == remoteproto.Direction_UNWIND {
 			for i := range change.Txs {
@@ -503,14 +633,15 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remoteproto.
 					if err != nil {
 						return err
 					}
-					if utx.Type == BlobTxnType {
+					if utx.TxType() == BlobTxnType {
 						unwindBlobTxns.Append(utx, sender, false)
 					} else {
 						unwindTxns.Append(utx, sender, false)
 					}
 					return nil
 				}); err != nil && !errors.Is(err, context.Canceled) {
-					f.logger.Debug("[txpool.fetch] stream.Recv", "err", err)
+					txnType, _ := PeekTransactionType(change.Txs[i])
+					f.logger.Debug("[txpool.fetch] stream.Recv", "dir", change.Direction, "txnType", txnType, "index", i, "err", err)
 					continue // 1 txn handling error must not stop batch processing
 				}
 			}

@@ -140,7 +140,7 @@ retry:
 var trySolo = errors.New("batch function returned an error and should be re-run solo")
 
 type panicked struct {
-	reason interface{}
+	reason any
 }
 
 func (p panicked) Error() string {

@@ -197,7 +197,7 @@ func (pr *DefaultProofRetainer) ProofResult() (*accounts.AccProofResult, error) 
 		}
 	}
 
-	if pr.acc.Initialised && result.StorageHash == (common.Hash{}) {
+	if result.StorageHash == (common.Hash{}) {
 		return nil, errors.New("did not find storage root in proof elements")
 	}
 
@@ -205,7 +205,7 @@ func (pr *DefaultProofRetainer) ProofResult() (*accounts.AccProofResult, error) 
 	for i, sk := range pr.storageKeys {
 		result.StorageProof[i].Key = uint256.NewInt(0).SetBytes(sk[:]).Hex()
 		hexKey := pr.storageHexKeys[i]
-		if !pr.acc.Initialised || result.StorageHash == EmptyRoot {
+		if result.StorageHash == EmptyRoot {
 			// The yellow paper makes it clear that the EmptyRoot is a special case
 			// when the trie has no nodes, but EIP-1186 states that the proof is
 			// "starting with the storageHash-Node".  Since the trie has no nodes,

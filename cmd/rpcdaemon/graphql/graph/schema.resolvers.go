@@ -72,7 +72,7 @@ func (r *queryResolver) Block(ctx context.Context, number *string, hash *string)
 	absBlk := res["block"]
 
 	if absBlk != nil {
-		blk := absBlk.(map[string]interface{})
+		blk := absBlk.(map[string]any)
 
 		block.Difficulty = *convertDataToStringP(blk, "difficulty")
 		block.ExtraData = *convertDataToStringP(blk, "extraData")
@@ -117,7 +117,7 @@ func (r *queryResolver) Block(ctx context.Context, number *string, hash *string)
 
 		// Transactions
 		absRcp := res["receipts"]
-		rcp := absRcp.([]map[string]interface{})
+		rcp := absRcp.([]map[string]any)
 		for _, transReceipt := range rcp {
 			trans := &model.Transaction{}
 			trans.CumulativeGasUsed = convertDataToUint64P(transReceipt, "cumulativeGasUsed")
@@ -167,7 +167,7 @@ func (r *queryResolver) Block(ctx context.Context, number *string, hash *string)
 		// Withdrawals
 		block.Withdrawals = []*model.Withdrawal{}
 		absWthd := res["withdrawals"]
-		wthd := absWthd.([]map[string]interface{})
+		wthd := absWthd.([]map[string]any)
 		for _, withdrawal := range wthd {
 			wthd := &model.Withdrawal{}
 			wthd.Index = *convertDataToIntP(withdrawal, "index")

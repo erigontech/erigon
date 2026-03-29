@@ -219,7 +219,6 @@ func TestMultipleFilters(t *testing.T) {
 
 		writer, err := NewWriter(filePath)
 		require.NoError(err, "Failed to create writer %d", i)
-		defer writer.Close()
 
 		// Add some keys
 		for j := 0; j < 100; j++ {
@@ -233,7 +232,6 @@ func TestMultipleFilters(t *testing.T) {
 		// Read back and verify
 		reader, err := NewReader(filePath)
 		require.NoError(err, "Failed to create reader for filter %d", i)
-		defer reader.Close()
 		for j := 0; j < 100; j++ {
 			key := baseKey + uint64(j)
 			require.True(reader.ContainsHash(key), "Key %d not found in filter %d", key, i)

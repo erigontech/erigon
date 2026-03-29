@@ -51,7 +51,7 @@ func Assemble(
 		return nil, nil, err
 	}
 
-	chainConfig, _, err := SaveChainConfigIfNeed(ctx, chainDB, poolDB, true, logger)
+	chainConfig, _, err := SaveChainConfigIfNeed(ctx, chainDB, poolDB, logger)
 	if err != nil {
 		return nil, nil, err
 	}

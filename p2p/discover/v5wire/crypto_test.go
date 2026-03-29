@@ -30,7 +30,6 @@ import (
 
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/p2p/enode"
 )
 
@@ -45,11 +44,10 @@ func TestVector_ECDH(t *testing.T) {
 }
 
 func TestVector_KDF(t *testing.T) {
-	logger := log.New()
 	var (
 		ephKey = hexPrivkey("0xfb757dc581730490a1d7a00deea65e9b1936924caaea8f44d476014856b68736")
 		cdata  = hexutil.MustDecode("0x000000000000000000000000000000006469736376350001010102030405060708090a0b0c00180102030405060708090a0b0c0d0e0f100000000000000000")
-		net    = newHandshakeTest(t.TempDir(), logger)
+		net    = newHandshakeTest()
 	)
 	defer net.close()
 

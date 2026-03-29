@@ -721,7 +721,7 @@ func TestStackStream_ExtremeNesting(t *testing.T) {
 	assert.Equal(t, 0, ss.CurrentDepth())
 
 	// Verify the JSON is valid by parsing it back
-	var result interface{}
+	var result any
 	err := jsoniter.Unmarshal(ss.Buffer(), &result)
 	assert.NoError(t, err)
 }

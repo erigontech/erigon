@@ -39,6 +39,9 @@ func (cr *CachedReader) SetTrace(trace bool, tracePrefix string) {
 	cr.r.SetTrace(trace, tracePrefix)
 }
 
+func (cr *CachedReader) Trace() bool         { return cr.r.Trace() }
+func (cr *CachedReader) TracePrefix() string { return cr.r.TracePrefix() }
+
 // ReadAccountData is called when an account needs to be fetched from the state
 func (cr *CachedReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	addrValue := address.Value()

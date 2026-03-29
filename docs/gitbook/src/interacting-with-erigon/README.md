@@ -2,6 +2,10 @@
 description: >-
   The Erigon RPC Service: Enabling JSON-RPC, Transports (HTTP/WS/gRPC), and API
   Namespaces
+metaLinks:
+  alternates:
+    - >-
+      https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/interacting-with-erigon/interacting-with-erigon
 ---
 
 # RPC Service
@@ -22,9 +26,7 @@ The Erigon RPC Service, managed by Erigon's modular [RPC daemon](../fundamentals
 * [`internal`](internal.md): Erigon specific API for development and debugging purposes.
 * [`gRPC`](grpc.md): API for lower-level data access.
 
-{% include "../../../.gitbook/includes/warning-admin_-and-debug_-....md" %}
-
-For a complete reference on the standard Ethereum JSON-RPC methods, especially those in the `eth`, `net`, and `web3` namespaces, it is recommended to consult the general documentation on [ethereum.org's JSON-RPC API page](https://ethereum.org/en/developers/docs/apis/json-rpc/). Additionally, for the formal specification of the `debug`, `engine`, and `eth` namespaces, including unique, detailed descriptions for methods like `eth_getProof` and `eth_simulateV1`, refer to the [Execution APIs documentation](https://ethereum.github.io/execution-apis/api-documentation/).
+For a complete reference on the standard Ethereum JSON-RPC methods, especially those in the `eth`, `net`, and `web3` namespaces, it is recommended to consult the general documentation on [ethereum.org's JSON-RPC API page](https://ethereum.org/en/developers/docs/apis/json-rpc/). Additionally, for the formal specification of the `debug`, `engine`, and `eth` namespaces, including unique, detailed descriptions for methods like `eth_getProof` and `eth_simulateV1`, refer to the [Execution APIs documentation](https://ethereum.github.io/execution-apis).
 
 {% embed url="https://ethereum.org/en/developers/docs/apis/json-rpc/" %}
 
@@ -113,13 +115,62 @@ erigon --http --ws --http.api eth,net,debug,trace
 
 IPC is a simpler transport protocol for use in local environments where the node and the client exist on the same machine.
 
-The IPC transport can be enabled using `--socket.enabled` and configured with `--socket.url`:
+**Note:** IPC is only available through the separate `rpcdaemon` process, not the main `erigon` binary. Erigon uses a
+modular architecture where RPC functionality is handled by a standalone daemon.
+
+#### Enabling IPC with rpcdaemon
+
+First, start Erigon with the private API enabled:
 
 ```bash
-erigon --socket.enabled --socket.url unix:///var/run/erigon.ipc
+erigon --datadir=<path-to-datadir> --private.api.addr=localhost:9090
 ```
 
-On Linux and macOS, Erigon uses UNIX sockets. On Windows, IPC is provided using named pipes. The socket inherits the namespaces from `--http.api`.
+Then, in a separate terminal, start rpcdaemon with IPC enabled:
+
+```bash
+rpcdaemon --private.api.addr=localhost:9090 --socket.enabled --socket.url unix:///<path-to-datadir>/erigon.ipc
+```
+
+**Important:** Make sure you have write permissions to the directory where the socket will be created.
+
+On Linux and macOS, Erigon uses UNIX sockets. On Windows, IPC is provided using named pipes (use `\\.\pipe\erigon.ipc`
+format). The socket inherits the API namespaces from the `--http.api` flag passed to `rpcdaemon`:
+
+```bash
+rpcdaemon --private.api.addr=localhost:9090 --socket.enabled --socket.url unix:///<path-to-datadir>/erigon.ipc --http.api eth,net,web3,debug,trace
+```
+
+#### TCP Socket Alternative (Advanced)
+
+You can also serve the raw JSON-RPC2 protocol over TCP instead of Unix sockets:
+
+```bash
+rpcdaemon --private.api.addr=localhost:9090 --socket.enabled --socket.url tcp://127.0.0.1:8546
+```
+
+**Note**: This creates a raw JSON-RPC2 socket without HTTP wrapping. Most users should use the HTTP endpoint (enabled by
+default on port 8545) instead. The TCP socket is for specialized clients that support raw JSON-RPC2 protocol.
+
+#### Testing IPC Connection
+
+Test your IPC connection using curl:
+
+```bash
+curl --unix-socket <path-to-datadir>/erigon.ipc \
+     -X POST http://localhost/ \
+     -H "Content-Type: application/json" \
+     --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
+```
+
+Or use the HTTP endpoint (enabled by default on port 8545):
+
+```bash
+curl http://127.0.0.1:8545 \
+     -X POST \
+     -H "Content-Type: application/json" \
+     --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
+```
 
 ### gRPC
 

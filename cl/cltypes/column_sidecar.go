@@ -85,9 +85,9 @@ func (d *DataColumnSidecar) EncodeSSZ(buf []byte) ([]byte, error) {
 	return ssz2.MarshalSSZ(buf, d.getSchema()...)
 }
 
-func (d *DataColumnSidecar) getSchema() []interface{} {
+func (d *DataColumnSidecar) getSchema() []any {
 	d.tryInit()
-	return []interface{}{&d.Index, d.Column, d.KzgCommitments, d.KzgProofs, d.SignedBlockHeader, d.KzgCommitmentsInclusionProof}
+	return []any{&d.Index, d.Column, d.KzgCommitments, d.KzgProofs, d.SignedBlockHeader, d.KzgCommitmentsInclusionProof}
 }
 
 func (d *DataColumnSidecar) EncodingSizeSSZ() int {

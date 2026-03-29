@@ -16,7 +16,12 @@
 
 package rlp
 
-import "io"
+import (
+	"io"
+	"math/bits"
+
+	"github.com/erigontech/erigon/common"
+)
 
 // RLP-related utilities necessary for computing commitments for state root hash
 
@@ -25,7 +30,7 @@ import "io"
 func generateRlpPrefixLenDouble(l int, firstByte byte) int {
 	if l < 2 {
 		// firstByte only matters when there is 1 byte to encode
-		if firstByte >= 0x80 {
+		if firstByte >= SingleByteThreshold {
 			return 2
 		}
 		return 0
@@ -60,54 +65,26 @@ func multiByteHeaderPrefixOfLen(l int) byte {
 	// > the first byte is thus [0xB8, 0xBF].
 	//
 	// see package rlp/decode.go:887
-	return byte(0xB7 + l)
+	return byte(LongStringCode + l)
 }
 
 func generateByteArrayLen(buffer []byte, pos int, l int) int {
-	if l < 56 {
-		buffer[pos] = byte(0x80 + l)
-		pos++
-	} else if l < 256 {
-		// len(vn) can be encoded as 1 byte
-		buffer[pos] = multiByteHeaderPrefixOfLen(1)
-		pos++
-		buffer[pos] = byte(l)
-		pos++
-	} else if l < 65536 {
-		// len(vn) is encoded as two bytes
-		buffer[pos] = multiByteHeaderPrefixOfLen(2)
-		pos++
-		buffer[pos] = byte(l >> 8)
-		pos++
-		buffer[pos] = byte(l & 255)
-		pos++
-	} else {
-		// len(vn) is encoded as three bytes
-		buffer[pos] = multiByteHeaderPrefixOfLen(3)
-		pos++
-		buffer[pos] = byte(l >> 16)
-		pos++
-		buffer[pos] = byte((l >> 8) & 255)
-		pos++
-		buffer[pos] = byte(l & 255)
-		pos++
-	}
-	return pos
+	return pos + encodePrefixToBuf(l, buffer[pos:], EmptyStringCode, LongStringCode)
 }
 
 func generateByteArrayLenDouble(buffer []byte, pos int, l int) int {
 	if l < 55 {
 		// After first wrapping, the length will be l + 1 < 56
-		buffer[pos] = byte(0x80 + l + 1)
+		buffer[pos] = byte(EmptyStringCode + l + 1)
 		pos++
-		buffer[pos] = byte(0x80 + l)
+		buffer[pos] = byte(EmptyStringCode + l)
 		pos++
 	} else if l < 56 {
 		buffer[pos] = multiByteHeaderPrefixOfLen(1)
 		pos++
 		buffer[pos] = byte(l + 1)
 		pos++
-		buffer[pos] = byte(0x80 + l)
+		buffer[pos] = byte(EmptyStringCode + l)
 		pos++
 	} else if l < 254 {
 		// After first wrapping, the length will be l + 2 < 256
@@ -190,13 +167,7 @@ func generateRlpPrefixLen(l int) int {
 	if l < 56 {
 		return 1
 	}
-	if l < 256 {
-		return 2
-	}
-	if l < 65536 {
-		return 3
-	}
-	return 4
+	return 1 + common.BitLenToByteLen(bits.Len64(uint64(l)))
 }
 
 // RlpSerializable is a value that can be double-RLP coded.
@@ -239,7 +210,7 @@ func (b RlpEncodedBytes) DoubleRLPLen() int {
 
 func encodeBytesAsRlpToWriter(source []byte, w io.Writer, prefixGenFunc func([]byte, int, int) int, prefixBuf []byte) error {
 	// > 1 byte, write a prefix or prefixes first
-	if len(source) > 1 || (len(source) == 1 && source[0] >= 0x80) {
+	if len(source) > 1 || (len(source) == 1 && source[0] >= SingleByteThreshold) {
 		prefixLen := prefixGenFunc(prefixBuf, 0, len(source))
 
 		if _, err := w.Write(prefixBuf[:prefixLen]); err != nil {
@@ -251,34 +222,9 @@ func encodeBytesAsRlpToWriter(source []byte, w io.Writer, prefixGenFunc func([]b
 	return err
 }
 
-func EncodeByteArrayAsRlp(raw []byte, w io.Writer, prefixBuf []byte) (int, error) {
-	err := encodeBytesAsRlpToWriter(raw, w, generateByteArrayLen, prefixBuf)
-	if err != nil {
+func EncodeStringWithLen(raw []byte, w io.Writer, prefixBuf []byte) (int, error) {
+	if err := EncodeString(raw, w, prefixBuf); err != nil {
 		return 0, err
 	}
-	return generateRlpPrefixLen(len(raw)) + len(raw), nil
-}
-
-func GenerateStructLen(buffer []byte, l int) int {
-	if l < 56 {
-		buffer[0] = byte(192 + l)
-		return 1
-	}
-	if l < 256 {
-		// l can be encoded as 1 byte
-		buffer[1] = byte(l)
-		buffer[0] = byte(247 + 1)
-		return 2
-	}
-	if l < 65536 {
-		buffer[2] = byte(l & 255)
-		buffer[1] = byte(l >> 8)
-		buffer[0] = byte(247 + 2)
-		return 3
-	}
-	buffer[3] = byte(l & 255)
-	buffer[2] = byte((l >> 8) & 255)
-	buffer[1] = byte(l >> 16)
-	buffer[0] = byte(247 + 3)
-	return 4
+	return StringLen(raw), nil
 }

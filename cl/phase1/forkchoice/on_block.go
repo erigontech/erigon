@@ -46,6 +46,7 @@ const foreseenProposers = 16
 var (
 	ErrEIP4844DataNotAvailable       = errors.New("EIP-4844 blob data is not available")
 	ErrEIP7594ColumnDataNotAvailable = errors.New("EIP-7594 column data is not available")
+	ErrNewPayloadNoStatus            = errors.New("newPayload returned no status")
 )
 
 func verifyKzgCommitmentsAgainstTransactions(cfg *clparams.BeaconChainConfig, block *cltypes.BeaconBlock) error {
@@ -97,9 +98,14 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	}
 
 	// Check that block is later than the finalized epoch slot (optimization to reduce calls to get_ancestor)
-	finalizedSlot := f.computeStartSlotAtEpoch(f.finalizedCheckpoint.Load().(solid.Checkpoint).Epoch)
+	finalizedCheckpoint := f.finalizedCheckpoint.Load().(solid.Checkpoint)
+	finalizedSlot := f.computeStartSlotAtEpoch(finalizedCheckpoint.Epoch)
 	if block.Block.Slot <= finalizedSlot {
 		return nil
+	}
+	// Check block is a descendant of the finalized block at the checkpoint finalized slot
+	if ancestorRoot := f.Ancestor(block.Block.ParentRoot, finalizedSlot); ancestorRoot != finalizedCheckpoint.Root {
+		return fmt.Errorf("block is not a descendant of the finalized checkpoint")
 	}
 	// Now we find the versioned hashes
 	var versionedHashes []common.Hash
@@ -117,8 +123,11 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 
 	elHasBlobs := false
 	if f.engine != nil && checkDataAvaiability && block.Block.Body.BlobKzgCommitments.Len() > 0 && !f.peerDas.IsArchivedMode() {
-		blobsWithProof, proofs := f.engine.GetBlobs(ctx, versionedHashes)
-		elHasBlobs = len(blobsWithProof) == len(versionedHashes) && len(proofs) == len(versionedHashes)
+		blobsWithProof, proofs, err := f.engine.GetBlobs(ctx, versionedHashes, block.Version())
+		if err != nil {
+			log.Warn("OnBlock: GetBlobs failed", "blockRoot", common.Hash(blockRoot), "err", err)
+		}
+		elHasBlobs = err == nil && len(blobsWithProof) == len(versionedHashes) && len(proofs) == len(versionedHashes)
 		log.Debug("OnBlock: EL blob data availability", "blockRoot", common.Hash(blockRoot), "elHasBlobs", elHasBlobs)
 	}
 
@@ -169,6 +178,9 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		monitor.ObserveNewPayloadTime(timeStartExec)
 		log.Debug("[OnBlock] NewPayload", "status", payloadStatus, "blockSlot", block.Block.Slot)
 		switch payloadStatus {
+		case execution_client.PayloadStatusNone:
+			log.Debug("OnBlock: EL failed to process block", "block", common.Hash(blockRoot), "err", err)
+			return fmt.Errorf("%w: %v", ErrNewPayloadNoStatus, err)
 		case execution_client.PayloadStatusNotValidated:
 			log.Debug("OnBlock: block is not validated yet", "block", common.Hash(blockRoot))
 			// optimistic block candidate
@@ -272,7 +284,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	var (
 		previousJustifiedCheckpoint = lastProcessedState.PreviousJustifiedCheckpoint()
 		currentJustifiedCheckpoint  = lastProcessedState.CurrentJustifiedCheckpoint()
-		finalizedCheckpoint         = lastProcessedState.FinalizedCheckpoint()
+		stateFinalized              = lastProcessedState.FinalizedCheckpoint()
 		justificationBits           = lastProcessedState.JustificationBits().Copy()
 	)
 	f.operationsPool.NotifyBlock(block.Block)
@@ -281,11 +293,14 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	if err := statechange.ProcessJustificationBitsAndFinality(lastProcessedState, nil); err != nil {
 		return err
 	}
+	// Store per-block unrealized checkpoints (spec: store.unrealized_justifications[block_root])
+	f.unrealizedJustifications.Store(common.Hash(blockRoot), lastProcessedState.CurrentJustifiedCheckpoint())
+	f.unrealizedFinalizations.Store(common.Hash(blockRoot), lastProcessedState.FinalizedCheckpoint())
 	f.updateUnrealizedCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint(), lastProcessedState.FinalizedCheckpoint())
 	// Set the changed value pre-simulation
 	lastProcessedState.SetPreviousJustifiedCheckpoint(previousJustifiedCheckpoint)
 	lastProcessedState.SetCurrentJustifiedCheckpoint(currentJustifiedCheckpoint)
-	lastProcessedState.SetFinalizedCheckpoint(finalizedCheckpoint)
+	lastProcessedState.SetFinalizedCheckpoint(stateFinalized)
 	lastProcessedState.SetJustificationBits(justificationBits)
 
 	// If the block is from a prior epoch, apply the realized values

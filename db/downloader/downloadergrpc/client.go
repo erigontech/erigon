@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/anacrolix/torrent/metainfo"
 	"github.com/c2h5oh/datasize"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
@@ -36,18 +35,15 @@ import (
 
 func NewClient(ctx context.Context, downloaderAddr string) (downloaderproto.DownloaderClient, error) {
 	// creating grpc client connection
-	var dialOpts []grpc.DialOption
-
 	backoffCfg := backoff.DefaultConfig
 	backoffCfg.BaseDelay = 500 * time.Millisecond
 	backoffCfg.MaxDelay = 10 * time.Second
-	dialOpts = []grpc.DialOption{
+	dialOpts := []grpc.DialOption{
 		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoffCfg, MinConnectTimeout: 10 * time.Minute}),
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(16 * datasize.MB))),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	}
-
-	dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	conn, err := grpc.DialContext(ctx, downloaderAddr, dialOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("creating client connection to sentry P2P: %w", err)
@@ -55,34 +51,9 @@ func NewClient(ctx context.Context, downloaderAddr string) (downloaderproto.Down
 	return downloaderproto.NewDownloaderClient(conn), nil
 }
 
-func InfoHashes2Proto(in []metainfo.Hash) []*typesproto.H160 {
-	infoHashes := make([]*typesproto.H160, len(in))
-	i := 0
-	for _, h := range in {
-		infoHashes[i] = gointerfaces.ConvertAddressToH160(h)
-		i++
-	}
-	return infoHashes
-}
-
-func Strings2Proto(in []string) []*typesproto.H160 {
-	infoHashes := make([]*typesproto.H160, len(in))
-	i := 0
-	for _, h := range in {
-		infoHashes[i] = String2Proto(h)
-		i++
-	}
-	return infoHashes
-}
-
 func String2Proto(in string) *typesproto.H160 {
 	var infoHash [20]byte
 	inHex, _ := hex.DecodeString(in)
 	copy(infoHash[:], inHex)
 	return gointerfaces.ConvertAddressToH160(infoHash)
-}
-
-func Proto2String(in *typesproto.H160) string {
-	addr := gointerfaces.ConvertH160toAddress(in)
-	return hex.EncodeToString(addr[:])
 }

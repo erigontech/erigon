@@ -25,7 +25,7 @@ import (
 
 	"github.com/holiman/uint256"
 
-	common "github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
@@ -162,7 +162,7 @@ type EngineWriter interface {
 	// Finalize runs any post-transaction state modifications (e.g. block rewards)
 	// but does not assemble the block.
 	Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-		txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain ChainReader, syscall SystemCall, skipReceiptsEval bool, logger log.Logger,
+		uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain ChainReader, syscall SystemCall, skipReceiptsEval bool, logger log.Logger,
 	) (types.FlatRequests, error)
 
 	// FinalizeAndAssemble runs any post-transaction state modifications (e.g. block
@@ -186,8 +186,8 @@ type EngineWriter interface {
 
 	// CalcDifficulty is the difficulty adjustment algorithm. It returns the difficulty
 	// that a new block should have.
-	CalcDifficulty(chain ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64,
-		parentHash, parentUncleHash common.Hash, parentAuRaStep uint64) *big.Int
+	CalcDifficulty(chain ChainHeaderReader, time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64,
+		parentHash, parentUncleHash common.Hash, parentAuRaStep uint64) uint256.Int
 
 	// APIs returns the RPC APIs this rules engine provides.
 	APIs(chain ChainHeaderReader) []rpc.API
@@ -199,15 +199,4 @@ type PoW interface {
 
 	// Hashrate returns the current mining hashrate of a PoW rules engine.
 	Hashrate() float64
-}
-
-// Transfer subtracts amount from sender and adds amount to recipient using the given Db
-func Transfer(db evmtypes.IntraBlockState, sender, recipient accounts.Address, amount uint256.Int, bailout bool) error {
-	if !bailout {
-		err := db.SubBalance(sender, amount, tracing.BalanceChangeTransfer)
-		if err != nil {
-			return err
-		}
-	}
-	return db.AddBalance(recipient, amount, tracing.BalanceChangeTransfer)
 }

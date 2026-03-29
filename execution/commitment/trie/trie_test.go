@@ -237,7 +237,7 @@ func BenchmarkHash(b *testing.B) {
 			root    = EmptyRoot
 			code    = crypto.Keccak256(nil)
 		)
-		accounts[i], _ = rlp.EncodeToBytes([]interface{}{nonce, balance, root, code})
+		accounts[i], _ = rlp.EncodeToBytes([]any{nonce, balance, root, code})
 	}
 	// Insert the accounts into the trie and hash it
 	trie := newEmpty()

@@ -28,6 +28,13 @@ var (
 
 var (
 	peersCandidateRefreshInterval = time.Second * 15
+	allCustodyIndices             = func() map[uint64]bool {
+		indices := make(map[uint64]bool)
+		for i := uint64(0); i < 128; i++ {
+			indices[i] = true
+		}
+		return indices
+	}()
 )
 
 type columnDataPeers struct {
@@ -105,12 +112,10 @@ func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 				log.Debug("[peerSelector] empty cgc", "peer", pid)
 				continue
 			}
-			custodyIndices := map[cltypes.CustodyIndex]bool{}
+			var custodyIndices map[cltypes.CustodyIndex]bool
 			if peer.EnodeId == "" {
-				// fill all custody indices
-				for i := cltypes.CustodyIndex(0); i < c.beaconConfig.NumberOfCustodyGroups; i++ {
-					custodyIndices[i] = true
-				}
+				// if no enode id, use all custody indices
+				custodyIndices = allCustodyIndices
 			} else {
 				// get custody indices
 				enodeId := enode.HexID(peer.EnodeId)
@@ -130,11 +135,12 @@ func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 		c.peersQueue = newPeers
 		c.peersIndex = 0
 		c.peersMutex.Unlock()
-		custodies := []uint64{}
-		for _, peer := range newPeers {
-			custodies = append(custodies, uint64(len(peer.mask)))
-		}
-		log.Debug("[peerSelector] updated peers", "totalPeers", len(peers.Peers), "peerCount", len(newPeers), "custodies", custodies, "elapsedTime", time.Since(begin))
+		//custodies := []uint64{}
+		//for _, peer := range newPeers {
+		//	custodies = append(custodies, uint64(len(peer.mask)))
+		//}
+		//log.Debug("[peerSelector] updated peers", "totalPeers", len(peers.Peers), "peerCount", len(newPeers), "custodies", custodies, "elapsedTime", time.Since(begin))
+		log.Debug("[peerSelector] updated peers", "totalPeers", len(peers.Peers), "peerCount", len(newPeers), "elapsedTime", time.Since(begin))
 	}
 
 	// begin

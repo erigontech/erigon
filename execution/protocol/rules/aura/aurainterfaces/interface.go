@@ -28,7 +28,7 @@ type BlockRewardABI interface {
 	Reward(benefactors []common.Address, kind []rules.RewardKind) ([]common.Address, []*uint256.Int, error)
 }
 
-type abiDecoder func([]byte, interface{}) error
+type abiDecoder func([]byte, any) error
 
 // see openethereum/crates/ethcore/res/contracts/validator_set.json
 type ValidatorSetABI interface {

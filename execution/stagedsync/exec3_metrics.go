@@ -99,7 +99,6 @@ var (
 
 	mxCommitmentTransactions            = metrics.NewGauge(`commit_txns`)
 	mxCommitmentBlocks                  = metrics.NewGauge("commit_blocks")
-	mxCommitmentMGasSec                 = metrics.NewGauge(`commit_mgas_sec`)
 	mxCommitmentBlockDuration           = metrics.NewGauge("commit_block_dur")
 	mxCommitmentReadRate                = metrics.NewGauge("commit_read_rate")
 	mxCommitmentAccountReadRate         = metrics.NewGauge("commit_account_read_rate")
@@ -209,7 +208,7 @@ func resetCommitmentGauges(ctx context.Context) {
 		commitResetTask.Timer = time.NewTimer(resetDelay)
 		commitResetTask.ctx = ctx
 		commitResetTask.gauges = []metrics.Gauge{
-			mxCommitmentTransactions, mxCommitmentBlocks, mxCommitmentMGasSec, mxCommitmentBlockDuration,
+			mxCommitmentTransactions, mxCommitmentBlocks, mxCommitmentBlockDuration,
 		}
 		commitResetTask.run(ctx)
 	}
@@ -509,7 +508,7 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 	seconds := interval.Seconds()
 
 	var suffix string
-	var execVals []interface{}
+	execVals := make([]any, 0, 2)
 	var te *txExecutor
 
 	switch ex := ex.(type) {
@@ -591,8 +590,8 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 
 	curTaskGasPerSec := int64(float64(curTaskGas) / seconds)
 
-	uncommitedGas := uint64(te.executedGas.Load() - te.committedGas)
-	sizeEstimate := rs.SizeEstimate()
+	uncommitedGas := uint64(te.executedGas.Load() - te.committedGas.Load())
+	sizeEstimate := rs.SizeEstimateBeforeCommitment()
 
 	switch ex.(type) {
 	case *parallelExecutor:
@@ -633,7 +632,7 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 		mxTaskMgasSec.Set(float64(curTaskGasPerSec / 1e6))
 		mxExecCPUs.Set(float64(curTaskDur) / float64(interval))
 
-		execVals = []interface{}{
+		execVals = []any{
 			"exec", common.PrettyCounter(execDiff),
 			"repeat%", fmt.Sprintf("%.2f", repeatRatio),
 			"abort", common.PrettyCounter(abortCount - p.prevAbortCount),
@@ -664,7 +663,7 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 		curReadCount := readCount - p.prevReadCount
 		p.prevReadCount = readCount
 
-		execVals = []interface{}{
+		execVals = []any{
 			"tgas/s", fmt.Sprintf("%s(%s)", common.PrettyCounter(curTaskGasPerSec), common.PrettyCounter(avgTaskGasPerSec)),
 			"aratio", fmt.Sprintf("%.1f", float64(curTaskDur)/float64(interval)),
 			"tdur", common.Round(avgTaskDur, 0),
@@ -745,12 +744,12 @@ func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, commitStart ti
 	currentTime := time.Now()
 	interval := currentTime.Sub(p.prevCommitTime)
 
-	committedGasSec := uint64(float64(te.committedGas-p.prevCommittedGas) / interval.Seconds())
+	committedGasSec := uint64(float64(te.committedGas.Load()-p.prevCommittedGas) / interval.Seconds())
 	var committedTxSec uint64
-	if te.lastCommittedTxNum > p.prevCommittedTxNum {
-		committedTxSec = uint64(float64(te.lastCommittedTxNum-p.prevCommittedTxNum) / interval.Seconds())
+	if te.lastCommittedTxNum.Load() > p.prevCommittedTxNum {
+		committedTxSec = uint64(float64(te.lastCommittedTxNum.Load()-p.prevCommittedTxNum) / interval.Seconds())
 	}
-	committedDiffBlocks := max(int64(te.lastCommittedBlockNum)-int64(p.prevCommittedBlockNum), 0)
+	committedDiffBlocks := max(int64(te.lastCommittedBlockNum.Load())-int64(p.prevCommittedBlockNum), 0)
 
 	var commitedBlockDur time.Duration
 
@@ -766,6 +765,12 @@ func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, commitStart ti
 	storageReadCount := lastProgress.Metrics.LoadStorage
 	branchReadCount := lastProgress.Metrics.LoadBranch
 	branchWriteCount := lastProgress.Metrics.UpdateBranch
+	cacheBranchHits := lastProgress.Metrics.CacheBranch
+	cacheAccountHits := lastProgress.Metrics.CacheAccount
+	cacheStorageHits := lastProgress.Metrics.CacheStorage
+	missBranchCount := lastProgress.Metrics.MissBranch
+	missAccountCount := lastProgress.Metrics.MissAccount
+	missStorageCount := lastProgress.Metrics.MissStorage
 	lastProgress.Metrics.RUnlock()
 
 	curKeyCount := int64(keyCount - p.prevCommitmentKeyCount)
@@ -792,26 +797,32 @@ func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, commitStart ti
 	mxCommitmentBrancgWriteRate.SetUint64(curBranchWriteRate)
 
 	mxCommitmentTransactions.Set(float64(committedTxSec))
-	mxCommitmentMGasSec.Set(float64(committedGasSec / 1e6))
+	mxCommitmentBlocks.Set(float64(committedDiffBlocks))
 	mxCommitmentBlockDuration.Set(float64(commitedBlockDur))
 
+	totalCacheHits := cacheBranchHits + cacheAccountHits + cacheStorageHits
+	totalCacheMisses := missBranchCount + missAccountCount + missStorageCount
+
+	rs.Domains().Metrics().RLock()
 	commitVals := []any{
 		"bdur", common.Round(commitedBlockDur, 0),
 		"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(lastProgress.KeyIndex), common.PrettyCounter(lastProgress.UpdateCount)),
 		"buf", common.ByteCount(uint64(rs.Domains().Metrics().CachePutSize + rs.Domains().Metrics().CacheGetSize)),
+		"chit", common.PrettyCounter(totalCacheHits), "cmiss", common.PrettyCounter(totalCacheMisses),
 	}
+	rs.Domains().Metrics().RUnlock()
 
-	p.log("committed", suffix, te, rs, interval, te.lastCommittedBlockNum, committedDiffBlocks,
-		te.lastCommittedTxNum-p.prevCommittedTxNum, committedTxSec, committedGasSec, 0, stepsInDb, commitVals)
+	p.log("committed", suffix, te, rs, interval, te.lastCommittedBlockNum.Load(), committedDiffBlocks,
+		te.lastCommittedTxNum.Load()-p.prevCommittedTxNum, committedTxSec, committedGasSec, 0, stepsInDb, commitVals)
 
 	p.prevDomainMetrics = updateExecDomainMetrics(te.doms.Metrics(), p.prevDomainMetrics, interval, false)
 
 	p.prevCommitTime = currentTime
 
-	if te.lastCommittedTxNum > 0 {
-		p.prevCommittedTxNum = te.lastCommittedTxNum
-		p.prevCommittedGas = te.committedGas
-		p.prevCommittedBlockNum = te.lastCommittedBlockNum
+	if te.lastCommittedTxNum.Load() > 0 {
+		p.prevCommittedTxNum = te.lastCommittedTxNum.Load()
+		p.prevCommittedGas = te.committedGas.Load()
+		p.prevCommittedBlockNum = te.lastCommittedBlockNum.Load()
 	}
 }
 
@@ -830,19 +841,19 @@ func (p *Progress) LogComplete(rs *state.StateV3, ex executor, stepsInDb float64
 		suffix = " serial"
 	}
 
-	gas := te.committedGas
+	gas := te.committedGas.Load()
 
 	if gas == 0 {
 		gas = te.executedGas.Load()
 	}
 
-	lastTxNum := te.lastCommittedTxNum
+	lastTxNum := te.lastCommittedTxNum.Load()
 
 	if lastTxNum == 0 {
 		lastTxNum = uint64(te.lastExecutedTxNum.Load())
 	}
 
-	lastBlockNum := te.lastCommittedBlockNum
+	lastBlockNum := te.lastCommittedBlockNum.Load()
 
 	if lastBlockNum == 0 {
 		lastBlockNum = uint64(te.lastExecutedBlockNum.Load())
@@ -859,7 +870,7 @@ func (p *Progress) LogComplete(rs *state.StateV3, ex executor, stepsInDb float64
 }
 
 func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.StateV3, interval time.Duration,
-	blk uint64, blks int64, txs uint64, txsSec uint64, gasSec uint64, uncommitedGas uint64, stepsInDb float64, extraVals []interface{}) {
+	blk uint64, blks int64, txs uint64, txsSec uint64, gasSec uint64, uncommitedGas uint64, stepsInDb float64, extraVals []any) {
 
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
@@ -869,13 +880,16 @@ func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.Sta
 		suffix += " "
 	}
 
-	var vals []interface{}
+	var vals []any
 
 	if mode == "done" {
-		vals = []interface{}{"in", interval}
+		vals = []any{
+			"in", interval,
+			"buf", fmt.Sprintf("%s/%s", common.ByteCount(rs.SizeEstimateAfterCommitment()), common.ByteCount(p.commitThreshold)),
+		}
 	}
 
-	vals = append(vals, []interface{}{
+	vals = append(vals, []any{
 		"blk", blk,
 		"blks", blks,
 		"blk/s", common.PrettyCounter(float64(blks) / interval.Seconds()),
@@ -889,21 +903,23 @@ func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.Sta
 	}
 
 	if stepsInDb > 0 {
-		vals = append(vals, []interface{}{
+		vals = append(vals, []any{
 			"stepsInDB", fmt.Sprintf("%.2f", stepsInDb),
-			"step", fmt.Sprintf("%.1f", float64(te.lastCommittedTxNum)/float64(te.agg.StepSize())),
+			"step", fmt.Sprintf("%.1f", float64(te.lastCommittedTxNum.Load())/float64(te.agg.StepSize())),
 		}...)
 	}
 
 	if uncommitedGas > 0 {
-		vals = append(vals, []interface{}{
+		vals = append(vals, []any{
 			"ucgas", common.PrettyCounter(uncommitedGas),
 		}...)
 	}
 
-	vals = append(vals, []interface{}{
-		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
-		"inMem", te.inMemExec,
+	vals = append(vals, []any{
+		"alloc", common.ByteCount(m.Alloc),
+		"sys", common.ByteCount(m.Sys),
+		"isForkValidation", te.isForkValidation,
+		"isApplyingBlocks", te.isApplyingBlocks,
 	}...)
 
 	p.logger.Info(fmt.Sprintf("[%s]%s%s", p.logPrefix, suffix, mode), vals...)

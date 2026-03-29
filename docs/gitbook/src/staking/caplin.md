@@ -1,5 +1,8 @@
 ---
 description: Running Erigon with Caplin as validator
+metaLinks:
+  alternates:
+    - https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/staking/caplin
 ---
 
 # Using Caplin as Validator

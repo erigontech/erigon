@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/RoaringBitmap/roaring/v2"
@@ -132,6 +133,10 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		return nil, err
 	}
 
+	if block == nil {
+		return nil, fmt.Errorf("block not found: %d", blockNum)
+	}
+
 	// -1 is a default value for transaction index.
 	// If it's -1, we will try to replay every single transaction in that block
 	transactionIndex := -1
@@ -143,10 +148,15 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	}
 
 	if transactionIndex == -1 {
-		return nil, errors.New("could not find txn hash")
+		return nil, fmt.Errorf("could not find txn hash")
 	}
 
 	replayTransactions = block.Transactions()[:transactionIndex]
+
+	err = rpchelper.CheckBlockExecuted(tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
 
 	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum-1)), 0, api.filters, api.stateCache, api._txNumReader)
 	if err != nil {
@@ -282,6 +292,15 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 		return nil, err
 	}
 
+	err = api.BaseAPI.checkReceiptsAvailable(ctx, tx, begin)
+	if err != nil {
+		return nil, err
+	}
+
+	if api.blockRangeLimit != 0 && (end-begin) > uint64(api.blockRangeLimit) {
+		return nil, fmt.Errorf("%s: %d", errExceedBlockRange, api.blockRangeLimit)
+	}
+
 	numBlocks := end - begin + 1
 	var (
 		results = make([]*blockReplayResult, numBlocks)
@@ -391,7 +410,12 @@ blockLoop:
 		if res == nil {
 			continue
 		}
-		logs = append(logs, res.Logs...)
+		for _, l := range res.Logs {
+			if api.getLogsMaxResults != 0 && len(logs) >= api.getLogsMaxResults {
+				return nil, fmt.Errorf("%s: %d", errExceedLogResults, api.getLogsMaxResults)
+			}
+			logs = append(logs, l)
+		}
 	}
 	return logs, nil
 }
@@ -467,11 +491,17 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	// this makes sure resources are cleaned up.
 	defer cancel()
 
-	// Wait for the context to be done and cancel the evm. Even if the
-	// EVM has finished, cancelling may be done (repeatedly)
+	done := make(chan struct{})
+	defer close(done)
+
+	var timedOut atomic.Bool
 	go func() {
-		<-ctx.Done()
-		evm.Cancel()
+		select {
+		case <-ctx.Done():
+			timedOut.Store(true)
+			evm.Cancel()
+		case <-done:
+		}
 	}()
 
 	// Setup the gas pool (also for unmetered requests)
@@ -537,7 +567,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 		}
 
 		// If the timer caused an abort, return an appropriate error message
-		if evm.Cancelled() {
+		if timedOut.Load() {
 			log.Error("EVM cancelled")
 			return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
 		}

@@ -115,8 +115,4 @@ var (
 	// ErrGasLimitTooHigh is returned if the gas limit of a transaction exceeds MaxTxnGasLimit.
 	// See EIP-7825: Transaction Gas Limit Cap.
 	ErrGasLimitTooHigh = errors.New("gas limit too high")
-
-	// ErrCensored is returned when a transaction is censored.
-	// See https://hackmd.io/@filoozom/rycoQITlWl
-	ErrCensored = errors.New("censored transaction")
 )

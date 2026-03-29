@@ -94,7 +94,7 @@ func benchmarkFastAND(b *testing.B, size int) {
 	b.Helper()
 	p, q := make([]byte, size), make([]byte, size)
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		ANDBytes(p, p, q)
 	}
 }
@@ -108,7 +108,7 @@ func benchmarkBaseAND(b *testing.B, size int) {
 	b.Helper()
 	p, q := make([]byte, size), make([]byte, size)
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		safeANDBytes(p, p, q)
 	}
 }
@@ -122,7 +122,7 @@ func benchmarkFastOR(b *testing.B, size int) {
 	b.Helper()
 	p, q := make([]byte, size), make([]byte, size)
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		ORBytes(p, p, q)
 	}
 }
@@ -136,7 +136,7 @@ func benchmarkBaseOR(b *testing.B, size int) {
 	b.Helper()
 	p, q := make([]byte, size), make([]byte, size)
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		safeORBytes(p, p, q)
 	}
 }
@@ -152,7 +152,7 @@ func benchmarkFastTest(b *testing.B, size int) {
 	b.Helper()
 	p := make([]byte, size)
 	a := false
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		a = a != TestBytes(p)
 	}
 	GloBool = a // Use of benchmark "result" to prevent total dead code elimination.
@@ -167,7 +167,7 @@ func benchmarkBaseTest(b *testing.B, size int) {
 	b.Helper()
 	p := make([]byte, size)
 	a := false
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		a = a != safeTestBytes(p)
 	}
 	GloBool = a // Use of benchmark "result" to prevent total dead code elimination.
