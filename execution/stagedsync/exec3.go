@@ -583,6 +583,22 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			}
 		}()
 
+		// Close channels on exit so the apply loop and calculator
+		// see the close and drain. The exec loop is the owner of
+		// channel lifecycle — it decides when to stop.
+		// Recover from double-close if the batch size check already
+		// closed the channels.
+		defer func() {
+			safeClose := func(ch chan applyResult) {
+				defer func() { recover() }()
+				close(ch)
+			}
+			for _, ch := range commitResults {
+				safeClose(ch)
+			}
+			safeClose(applyResults)
+		}()
+
 		// Open a thread-local roTx for block metadata and StepsInFiles.
 		// Must NOT use the stageloop's rwTx — it's thread-bound.
 		execRoTx, err := te.cfg.db.BeginTemporalRo(ctx)

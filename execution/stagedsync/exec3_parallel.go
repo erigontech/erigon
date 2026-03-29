@@ -171,7 +171,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	var uncommittedBlocks int64
 	var uncommittedTransactions uint64
 	var uncommittedGas int64
-	var flushPending bool
 	var hasLoggedExecution bool
 	var hasLoggedCommittments atomic.Bool
 	var commitStart time.Time
@@ -233,9 +232,28 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 			return nil
 		}
 
+		// Apply loop: exits ONLY when applyResults is closed by the exec loop.
+		// Do NOT add ctx.Done or executorContext.Done cases here — the exec
+		// loop owns shutdown sequencing. Adding context checks here causes
+		// the apply loop to exit before the calculator finishes, leaving
+		// sd.mem inconsistent with the commitment boundary.
 		for {
 			select {
-			case applyResult := <-applyResults:
+			case applyResult, ok := <-applyResults:
+				if !ok {
+					// Exec loop closed the channel — batch is complete.
+					// Drain calculator results, then exit.
+					for cr := range rootResults {
+						if err := handleCommitResult(cr); err != nil {
+							return err
+						}
+					}
+					if lastBlockResult.BlockNum > 0 {
+						pe.txExecutor.lastCommittedBlockNum.Store(lastBlockResult.BlockNum)
+						pe.txExecutor.lastCommittedTxNum.Store(lastBlockResult.lastTxNum)
+					}
+					return &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult.BlockNum, Reason: "block batch is full"}
+				}
 				switch applyResult := applyResult.(type) {
 				case *txResult:
 					uncommittedGas += applyResult.blockGasUsed
@@ -320,8 +338,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						lastBlockResult = *applyResult
 					}
 
-					flushPending = pe.rs.SizeEstimateBeforeCommitment() > pe.cfg.batchSize.Bytes()
-
 					blockUpdateCount = 0
 					blockApplyCount = 0
 
@@ -349,68 +365,21 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					}
 					pe.domains().SetChangesetAccumulator(nil)
 
-					// drainBeforeExit: the calculator processes blocks
-					// asynchronously. Wait for it to finish all pending blocks
-					// by closing the commitResults channel and waiting for the
-					// calculator to stop. The calculator's last computeAndCheck
-					// saves commitment to sd.mem. Then drain any error results.
-					drainBeforeExit := func() error {
-						// Close the calculator's input to signal completion.
-						close(commitResults)
-
-						// Drain any error results the calculator published.
-						for cr := range rootResults {
-							if err := handleCommitResult(cr); err != nil {
-								return err
-							}
-						}
-
-						// Update progress from the last block.
-						if lastBlockResult.BlockNum > 0 {
-							pe.txExecutor.lastCommittedBlockNum.Store(lastBlockResult.BlockNum)
-							pe.txExecutor.lastCommittedTxNum.Store(lastBlockResult.lastTxNum)
-						}
-						return nil
-					}
-
 					if dbg.StopAfterBlock > 0 && applyResult.BlockNum == dbg.StopAfterBlock {
 						pe.logger.Warn(fmt.Sprintf("[%s] STOP_AFTER_BLOCK reached, exiting without commit (debug mode)", pe.logPrefix), "block", applyResult.BlockNum)
 						os.Exit(0)
 					}
 
-					if applyResult.BlockNum == maxBlockNum {
-						return drainBeforeExit()
-					}
-					if applyResult.Exhausted != nil {
-						if err := drainBeforeExit(); err != nil {
-							return err
-						}
-						return applyResult.Exhausted
-					}
 					if shouldGenerateChangesets && applyResult.BlockNum > 0 {
 						changeSet = &changeset.StateChangeSet{}
 						pe.domains().SetChangesetAccumulator(changeSet)
 					}
-					if flushPending {
-						if err := drainBeforeExit(); err != nil {
-							return err
-						}
-						return &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult.BlockNum, Reason: "block batch is full"}
-					}
 				}
 
 			case cr := <-rootResults:
-				// Per-block mode: results arrive asynchronously.
-				// In batch mode: only errors arrive here (the calculator
-				// doesn't produce results until commitComputeRequest).
 				if err := handleCommitResult(cr); err != nil {
 					return err
 				}
-			case <-executorContext.Done():
-				err = pe.wait(ctx)
-				return fmt.Errorf("executor context failed: %w", err)
-			case <-ctx.Done():
-				return ctx.Err()
 			case <-logEvery.C:
 				if time.Since(lastExecutedLog) > logInterval-(logInterval/90) {
 					hasLoggedExecution = true
@@ -547,6 +516,13 @@ func (pe *parallelExecutor) resetWorkers(ctx context.Context, rs *state.StateV3B
 }
 
 func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
+	// The exec loop is the owner of shutdown sequencing. It handles
+	// ctx.Done via sendResult (which returns ctx.Err on cancelled
+	// context). On exit — whether from batch full, context cancel,
+	// error, or natural completion — executeBlocks' deferred close
+	// closes applyResults and commitResults, causing the apply loop
+	// and calculator to drain and exit.
+	//
 	// Note: pe.applyTx is the stageloop's rwTx (externally supplied).
 	// Do NOT rollback it here — the stageloop owns its lifecycle.
 
@@ -655,9 +631,21 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				if err := blockExecutor.sendResult(ctx, blockResult); err != nil {
 					return err
 				}
+
 				pe.Lock()
 				delete(pe.blockExecutors, blockResult.BlockNum)
 				pe.Unlock()
+
+				// Batch size check — the exec loop is the synchronous control
+				// point. When the batch is full, return nil. The deferred
+				// channel close in executeBlocks signals the apply loop and
+				// calculator to drain. sd.mem stays consistent with the
+				// last published block.
+				// maxBlockNum and Exhausted are handled by natural exit
+				// (no more blocks to process).
+				if pe.rs.SizeEstimateBeforeCommitment() > pe.cfg.batchSize.Bytes() {
+					return nil
+				}
 			}
 
 			// State writes and Flush happen in the execLoop (before the
@@ -1752,8 +1740,6 @@ type blockExecutor struct {
 
 // sendResult fans out an applyResult to both the apply loop and
 // the commitment calculator. Blocks if either channel is full.
-// The commitResults channel may be closed by drainBeforeExit while
-// the exec loop is still running — recover from the panic gracefully.
 func (be *blockExecutor) sendResult(ctx context.Context, r applyResult) error {
 	select {
 	case be.applyResults <- r:
@@ -1761,14 +1747,6 @@ func (be *blockExecutor) sendResult(ctx context.Context, r applyResult) error {
 		return ctx.Err()
 	}
 	if be.commitResults != nil {
-		defer func() {
-			if rec := recover(); rec != nil {
-				// commitResults was closed by drainBeforeExit — the calculator
-				// is shutting down. Stop sending; the exec loop will exit via
-				// context cancellation or exhaustion.
-				be.commitResults = nil
-			}
-		}()
 		select {
 		case be.commitResults <- r:
 		case <-ctx.Done():
@@ -2190,10 +2168,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 			}
 
-			// Apply state writes to the block cache.
-			// normalizeWriteSet already produces the correct write set
-			// (filtered, resolved, with account field fill). No further
-			// filtering needed — the writes are ready for sd.mem.
+			// Apply state writes to sd.mem and block cache.
 			if err := pe.rs.ApplyStateWrites(ctx, applyTx, applyResult.blockNum, applyResult.txNum, applyResult.writes,
 				nil, applyResult.rules, be.blockStateCache); err != nil {
 				return nil, err

@@ -574,9 +574,6 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 	if !sd.disableInlineTouchKey {
 		sd.sdCtx.TouchKey(domain, ks, v)
 	}
-	// Trace specific account key under branch 10 for investigation
-	// Branch 10 = hashedKey starts with nibble "1","0"
-	// A quick check: addr 8d5dddc5966e07fb... hashes to 000103... (not under 10)
 	if prevVal == nil {
 		var err error
 		prevVal, _, err = sd.GetLatest(domain, roTx, k)

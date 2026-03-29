@@ -147,28 +147,17 @@ func (cc *commitmentCalculator) Stop() {
 
 func (cc *commitmentCalculator) loop(ctx context.Context) {
 	defer cc.wg.Done()
-	defer close(cc.out) // Signal drain loop that no more results will come.
+	defer close(cc.out) // Signal apply loop that no more results will come.
 
-	for {
-		// Check done FIRST — prioritize shutdown over processing.
-		select {
-		case <-cc.done:
-			return
-		default:
-		}
-
-		select {
-		case result, ok := <-cc.in:
-			if !ok {
-				return
-			}
-			cc.handleMessage(ctx, result)
-
-		case <-ctx.Done():
-			return
-		case <-cc.done:
-			return
-		}
+	// The calculator exits ONLY when cc.in is closed (by the exec loop).
+	// Do NOT add ctx.Done or cc.done checks here — the exec loop owns
+	// shutdown sequencing. Exiting early would leave commitment behind
+	// sd.mem, causing nonce mismatches on batch restart. The calculator
+	// must process ALL buffered items before exiting.
+	// Context cancellation is handled by the exec loop which closes
+	// cc.in after stopping.
+	for result := range cc.in {
+		cc.handleMessage(ctx, result)
 	}
 }
 
