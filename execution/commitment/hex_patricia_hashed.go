@@ -2930,7 +2930,6 @@ func (hph *HexPatriciaHashed) SetTrace(trace bool)               { hph.trace = t
 func (hph *HexPatriciaHashed) SetTraceDomain(trace bool)         { hph.traceDomain = trace }
 func (hph *HexPatriciaHashed) EnableWarmupCache(enable bool)     { hph.enableWarmupCache = enable }
 func (hph *HexPatriciaHashed) SetBranchCache(cache *BranchCache) { hph.branchCache = cache }
-func (hph *HexPatriciaHashed) BranchCache() *BranchCache         { return hph.branchCache }
 func (hph *HexPatriciaHashed) GetBranchCache() *BranchCache      { return hph.branchCache }
 
 func (hph *HexPatriciaHashed) GetCapture(truncate bool) []string {
@@ -3021,7 +3020,7 @@ func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
 			}
 			return data, nil
 		}
-		}
+	}
 
 	// Level 2: persistent branch cache (survives across Process calls)
 	if hph.branchCache != nil {
@@ -3047,7 +3046,7 @@ func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
 		hph.branchCache.Put(key, data)
 	}
 
-	return data, err
+	return data, nil
 }
 
 // accountFromCacheOrDB reads account data from cache if available, otherwise from DB.

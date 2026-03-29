@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
@@ -192,9 +191,6 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 	}
 	toTxNum := maxTxNum + 1
 	bt.logger.Info("backtesting block commitment", "fromTxNum", fromTxNum, "toTxNum", toTxNum, "paraTrie", bt.paraTrie)
-	if bt.paraTrie {
-		statecfg.ExperimentalConcurrentCommitment = true
-	}
 	sd, err := execctx.NewSharedDomains(ctx, tx, bt.logger)
 	if err != nil {
 		return err

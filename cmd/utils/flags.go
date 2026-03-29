@@ -1088,11 +1088,6 @@ var (
 		Name:  "polygon.wit-protocol",
 		Usage: "Enable WIT protocol for stateless witness data exchange (auto-enabled for Bor chains)",
 	}
-	ExperimentalConcurrentCommitmentFlag = cli.BoolFlag{
-		Name:  "experimental.concurrent-commitment",
-		Usage: "EXPERIMENTAL: enables concurrent trie for commitment",
-		Value: false,
-	}
 	GDBMeFlag = cli.BoolFlag{
 		Name:  "gdbme",
 		Usage: "restart erigon under gdb for debug purposes",
@@ -1921,11 +1916,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 	cfg.AllowAA = ctx.Bool(AAFlag.Name)
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
-
-	if ctx.Bool(ExperimentalConcurrentCommitmentFlag.Name) {
-		// cfg.ExperimentalConcurrentCommitment = true
-		statecfg.ExperimentalConcurrentCommitment = true
-	}
 
 	cfg.FcuTimeout = ctx.Duration(FcuTimeoutFlag.Name)
 	cfg.FcuBackgroundPrune = ctx.Bool(FcuBackgroundPruneFlag.Name)

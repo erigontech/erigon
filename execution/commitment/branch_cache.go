@@ -91,28 +91,29 @@ func CompactKeyIsPinned(key []byte) bool {
 	return false
 }
 
-// Get retrieves branch data from the cache. Returns nil, false on miss.
+// Get retrieves a copy of branch data from the cache. Returns nil, false on miss.
+// A copy is returned so callers may not modify the cached entry.
 // Compact key format: byte[0] bit 4 (0x10) = odd nibble count, bits 0-3 = first nibble.
 func (c *BranchCache) Get(key []byte) ([]byte, bool) {
+	var data []byte
+	var found bool
+
 	if CompactKeyIsPinned(key) {
 		c.mu.RLock()
-		data, found := c.getPinned(key)
+		data, found = c.getPinned(key)
 		c.mu.RUnlock()
-		if found {
-			c.hits.Add(1)
-		} else {
-			c.misses.Add(1)
-		}
-		return data, found
+	} else {
+		data, found = c.branches.Get(key)
 	}
 
-	data, found := c.branches.Get(key)
 	if found {
 		c.hits.Add(1)
-	} else {
-		c.misses.Add(1)
+		cp := make([]byte, len(data))
+		copy(cp, data)
+		return cp, true
 	}
-	return data, found
+	c.misses.Add(1)
+	return nil, false
 }
 
 // getPinned returns data from the pinned tier arrays. Caller must hold mu.RLock.

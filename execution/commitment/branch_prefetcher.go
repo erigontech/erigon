@@ -29,9 +29,11 @@ type BranchPrefetcher struct {
 }
 
 // NewBranchPrefetcher creates a prefetcher that populates the given BranchCache.
+// The prefetcher's goroutine lifecycle is tied to ctx: if ctx is cancelled the
+// workers exit even without an explicit Stop() call. Call Stop() for orderly drain.
 // Call Start() to begin processing, then Submit() hashed keys as they arrive.
-func NewBranchPrefetcher(cache *BranchCache, ctxFactory TrieContextFactory, numWorkers, maxDepth int) *BranchPrefetcher {
-	ctx, cancel := context.WithCancel(context.Background())
+func NewBranchPrefetcher(ctx context.Context, cache *BranchCache, ctxFactory TrieContextFactory, numWorkers, maxDepth int) *BranchPrefetcher {
+	ctx, cancel := context.WithCancel(ctx)
 	return &BranchPrefetcher{
 		cache:      cache,
 		ctxFactory: ctxFactory,

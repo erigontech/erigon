@@ -95,7 +95,7 @@ func (sdc *SharedDomainsCommitmentContext) StartBranchPrefetcher(ctx context.Con
 
 	txNum := sdc.sharedDomains.TxNum()
 	factory := sdc.trieContextFactory(ctx, sdc.paraTrieDB, txNum)
-	sdc.branchPrefetcher = commitment.NewBranchPrefetcher(branchCache, factory, 4, commitment.WarmupMaxDepth)
+	sdc.branchPrefetcher = commitment.NewBranchPrefetcher(ctx, branchCache, factory, 4, commitment.WarmupMaxDepth)
 	sdc.branchPrefetcher.Start()
 
 	// Wire the callback so TouchPlainKey feeds hashed keys to the prefetcher

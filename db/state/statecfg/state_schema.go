@@ -187,8 +187,6 @@ func (s *SchemaGen) GetBlockIdxFilesCfg(name string) BlockIdxFilesCfg {
 	return v
 }
 
-var ExperimentalConcurrentCommitment = false // set true to use concurrent commitment by default
-
 var Schema = SchemaGen{
 	AccountsDomain: DomainCfg{
 		Name: kv.AccountsDomain, ValuesTable: kv.TblAccountVals,
