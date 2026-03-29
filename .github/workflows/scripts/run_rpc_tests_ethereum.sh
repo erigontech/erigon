@@ -26,6 +26,8 @@ DISABLED_TEST_LIST=(
   eth_getTransactionByHash/test_02.json
   # Small prune issue that leads to wrong ReceiptDomain data at 16999999 (probably at every million) block: https://github.com/erigontech/erigon/issues/13050
   ots_searchTransactionsBefore/test_04.tar
+  # Temporary disable required block 23917742
+  debug_traceTransaction/test_149.json
   eth_getWork/test_01.json
   eth_mining/test_01.json
   eth_protocolVersion/test_1.json
