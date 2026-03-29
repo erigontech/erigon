@@ -86,6 +86,10 @@ jobs:
           cache-to: type=gha,mode=max,scope=kurtosis-erigon-build
 
       - name: Run ${{ matrix.suite }} Kurtosis + assertoor tests
+        # On branch push, tests already passed in the merge queue. This run exists
+        # solely to warm Docker image and BuildKit caches on main for future PRs
+        # and merge queue runs. Skip the actual tests to avoid redundant execution.
+        if: github.event_name != 'push'
         uses: ethpandaops/kurtosis-assertoor-github-action@v1
         with:
             enclave_name: "kurtosis-${{ matrix.suite }}-${{ github.run_id }}"

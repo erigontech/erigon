@@ -18,7 +18,9 @@ package p2p
 
 import (
 	"context"
+	"maps"
 	"math/big"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -27,7 +29,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
-	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
@@ -158,7 +159,7 @@ func TestPublisher(t *testing.T) {
 		require.False(t, known)
 		knownSends[capturedSend4PeerId] = struct{}{}
 		require.Len(t, knownSends, 8)
-		allPeerIds := maps.Keys(knownSends)
+		allPeerIds := slices.Collect(maps.Keys(knownSends))
 		require.ElementsMatch(t, allPeerIds, []PeerId{
 			*PeerIdFromUint64(1),
 			*PeerIdFromUint64(2),

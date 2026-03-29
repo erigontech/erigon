@@ -30,10 +30,10 @@ import (
 func ParseHashesCount(payload []byte, pos int) (count int, dataPos int, err error) {
 	dataPos, dataLen, err := rlp.ParseList(payload, pos)
 	if err != nil {
-		return 0, 0, fmt.Errorf("%s: hashes len: %w", rlp.ParseHashErrorPrefix, err)
+		return 0, 0, fmt.Errorf("%s: hashes len: %w", parseHashErrorPrefix, err)
 	}
 	if dataLen%33 != 0 {
-		return 0, 0, fmt.Errorf("%s: hashes len must be multiple of 33", rlp.ParseHashErrorPrefix)
+		return 0, 0, fmt.Errorf("%s: hashes len must be multiple of 33", parseHashErrorPrefix)
 	}
 	return dataLen / 33, dataPos, nil
 }
@@ -46,7 +46,7 @@ func EncodeHashes(hashes []byte, encodeBuf []byte) []byte {
 	hashesLen := len(hashes) / length.Hash * 33
 	dataLen := hashesLen
 	encodeBuf = common.EnsureEnoughSize(encodeBuf, rlp.ListPrefixLen(hashesLen)+dataLen)
-	rlp.EncodeHashes(hashes, encodeBuf)
+	encodeHashList(hashes, encodeBuf)
 	return encodeBuf
 }
 
@@ -57,9 +57,9 @@ func EncodeHashes(hashes []byte, encodeBuf []byte) []byte {
 // of the hash.
 func ParseHash(payload []byte, pos int, hashbuf []byte) ([]byte, int, error) {
 	hashbuf = common.EnsureEnoughSize(hashbuf, length.Hash)
-	pos, err := rlp.ParseHash(payload, pos, hashbuf)
+	pos, err := parseRLPHash(payload, pos, hashbuf)
 	if err != nil {
-		return nil, 0, fmt.Errorf("%s: hash len: %w", rlp.ParseHashErrorPrefix, err)
+		return nil, 0, err
 	}
 	return hashbuf, pos, nil
 }
@@ -71,9 +71,9 @@ func EncodeGetPooledTransactions66(hashes []byte, requestID uint64, encodeBuf []
 	dataLen := rlp.ListPrefixLen(hashesLen) + hashesLen + rlp.U64Len(requestID)
 	encodeBuf = common.EnsureEnoughSize(encodeBuf, rlp.ListPrefixLen(dataLen)+dataLen)
 	// Length Prefix for the entire structure
-	pos += rlp.EncodeListPrefix(dataLen, encodeBuf[pos:])
-	pos += rlp.EncodeU64(requestID, encodeBuf[pos:])
-	pos += rlp.EncodeHashes(hashes, encodeBuf[pos:])
+	pos += rlp.EncodeListPrefixToBuf(dataLen, encodeBuf[pos:])
+	pos += rlp.EncodeU64ToBuf(requestID, encodeBuf[pos:])
+	pos += encodeHashList(hashes, encodeBuf[pos:])
 	_ = pos
 	return encodeBuf, nil
 }
@@ -96,7 +96,7 @@ func ParseGetPooledTransactions66(payload []byte, pos int, hashbuf []byte) (requ
 	hashes = common.EnsureEnoughSize(hashbuf, length.Hash*hashesCount)
 
 	for i := 0; i < hashesCount; i++ {
-		pos, err = rlp.ParseHash(payload, pos, hashes[i*length.Hash:])
+		pos, err = parseRLPHash(payload, pos, hashes[i*length.Hash:])
 		if err != nil {
 			return 0, hashes, 0, err
 		}
@@ -123,16 +123,16 @@ func EncodePooledTransactions66(txnsRlp [][]byte, requestID uint64, encodeBuf []
 	encodeBuf = common.EnsureEnoughSize(encodeBuf, rlp.ListPrefixLen(dataLen)+dataLen)
 
 	// Length Prefix for the entire structure
-	pos += rlp.EncodeListPrefix(dataLen, encodeBuf[pos:])
-	pos += rlp.EncodeU64(requestID, encodeBuf[pos:])
-	pos += rlp.EncodeListPrefix(txnsRlpLen, encodeBuf[pos:])
+	pos += rlp.EncodeListPrefixToBuf(dataLen, encodeBuf[pos:])
+	pos += rlp.EncodeU64ToBuf(requestID, encodeBuf[pos:])
+	pos += rlp.EncodeListPrefixToBuf(txnsRlpLen, encodeBuf[pos:])
 	for i := range txnsRlp {
 		_, _, isLegacy, _ := rlp.Prefix(txnsRlp[i], 0)
 		if isLegacy {
 			copy(encodeBuf[pos:], txnsRlp[i])
 			pos += len(txnsRlp[i])
 		} else {
-			pos += rlp.EncodeString2(txnsRlp[i], encodeBuf[pos:])
+			pos += rlp.EncodeStringToBuf(txnsRlp[i], encodeBuf[pos:])
 		}
 	}
 	_ = pos
@@ -154,14 +154,14 @@ func EncodeTransactions(txnsRlp [][]byte, encodeBuf []byte) []byte {
 
 	encodeBuf = common.EnsureEnoughSize(encodeBuf, rlp.ListPrefixLen(dataLen)+dataLen)
 	// Length Prefix for the entire structure
-	pos += rlp.EncodeListPrefix(dataLen, encodeBuf[pos:])
+	pos += rlp.EncodeListPrefixToBuf(dataLen, encodeBuf[pos:])
 	for i := range txnsRlp {
 		_, _, isLegacy, _ := rlp.Prefix(txnsRlp[i], 0)
 		if isLegacy {
 			copy(encodeBuf[pos:], txnsRlp[i])
 			pos += len(txnsRlp[i])
 		} else {
-			pos += rlp.EncodeString2(txnsRlp[i], encodeBuf[pos:])
+			pos += rlp.EncodeStringToBuf(txnsRlp[i], encodeBuf[pos:])
 		}
 	}
 	_ = pos

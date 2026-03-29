@@ -158,7 +158,7 @@ func (s *testFinalizeScenario) buildExecResult() *execResult {
 			FeeBurnt:             s.feeBurnt,
 			BurntContractAddress: s.burntAddr,
 			ReceiptGasUsed:       21000,
-			BlockGasUsed:         21000,
+			BlockRegularGasUsed:  21000,
 		},
 		Coinbase: s.coinbase,
 	}

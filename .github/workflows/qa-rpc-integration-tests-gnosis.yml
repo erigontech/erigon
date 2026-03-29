@@ -1,9 +1,31 @@
 name: QA - RPC Integration Tests (Gnosis)
 
 on:
+  push:
+    branches:
+      - main
+      - 'release/**'
+  pull_request:
+    branches:
+      - main
+      - 'release/**'
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
   workflow_dispatch:     # Run manually
-  workflow_call:
 
+concurrency:
+  group: >-
+    ${{
+      github.event_name == 'pull_request' &&
+      format('{0}-{1}', github.workflow, github.head_ref) ||
+      github.event_name == 'push' &&
+      format('{0}-{1}', github.workflow, github.ref_name) ||
+      format('{0}-{1}', github.workflow, github.run_id)
+    }}
+  cancel-in-progress: true
 
 jobs:
   gnosis-rpc-integ-tests:

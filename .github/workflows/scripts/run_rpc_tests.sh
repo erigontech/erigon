@@ -71,7 +71,7 @@ fi
 cd "$WORKSPACE/rpc-tests"
 
 # Create and activate Python virtual environment, reusing existing one if already set up for this version
-VENV_MARKER=".venv/.installed-${RPC_VERSION}"
+VENV_MARKER=".venv/.installed-${RPC_VERSION//\//_}"
 if [ -f ".venv/bin/activate" ] && [ -f "$VENV_MARKER" ]; then
   echo "Using cached Python virtual environment"
   source .venv/bin/activate

@@ -133,7 +133,7 @@ func newHandler(
 	rpcSlowLogThreshold time.Duration,
 ) *handler {
 	rootCtx, cancelRoot := context.WithCancel(connCtx)
-	forbiddenList := newForbiddenList()
+	forbiddenList := ForbiddenList{}
 
 	h := &handler{
 		reg:            reg,

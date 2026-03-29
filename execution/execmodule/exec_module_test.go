@@ -39,12 +39,14 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	eth1utils "github.com/erigontech/erigon/execution/execmodule/moduleutil"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
@@ -735,6 +737,121 @@ func TestAssembleBlockMixedTxTypes(t *testing.T) {
 	require.True(t, hasTransfer, "block should contain transfer transactions")
 	require.True(t, hasContractCreation, "block should contain contract creation transaction")
 
+	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
+	require.NoError(t, err)
+}
+
+// TestAssembleBlockWithWithdrawalRequest sends a withdrawal request transaction
+// to the EIP-7002 system contract, builds a block via the real EL builder, and
+// verifies execution requests are returned through ChainReaderWriterEth1.GetAssembledBlock
+// — the exact interface Caplin uses in production (PR #14326 fixed this path).
+// It then validates the block and extends the chain via insert + validate + FCU.
+func TestAssembleBlockWithWithdrawalRequest(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+
+	m := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	exec := m.ExecModule
+	txpool := m.TxPoolGrpcServer
+
+	// Insert 1 initial block.
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
+		tx, err := types.SignTx(
+			types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
+			*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key,
+		)
+		require.NoError(t, err)
+		gen.AddTx(tx)
+	})
+	require.NoError(t, err)
+	err = m.InsertChain(chainPack)
+	require.NoError(t, err)
+
+	// Submit withdrawal request transaction.
+	var pubkey [48]byte
+	for i := range pubkey {
+		pubkey[i] = 0x02
+	}
+	var calldata []byte
+	calldata = append(calldata, pubkey[:]...)
+	calldata = append(calldata, make([]byte, 8)...) // amount=0
+
+	baseFee := chainPack.TopBlock.BaseFee().Uint64()
+	withdrawalAddr := params.WithdrawalRequestAddress.Value()
+	withdrawalTx, err := types.SignTx(
+		&types.LegacyTx{
+			CommonTx: types.CommonTx{
+				Nonce:    1,
+				GasLimit: 1_000_000,
+				To:       &withdrawalAddr,
+				Value:    *uint256.NewInt(500_000_000_000_000_000),
+				Data:     calldata,
+			},
+			GasPrice: *uint256.NewInt(baseFee),
+		},
+		*types.LatestSignerForChainID(m.ChainConfig.ChainID),
+		m.Key,
+	)
+	require.NoError(t, err)
+
+	var txBuf bytes.Buffer
+	err = withdrawalTx.EncodeRLP(&txBuf)
+	require.NoError(t, err)
+	addResp, err := txpool.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{txBuf.Bytes()}})
+	require.NoError(t, err)
+	require.Equal(t, "success", addResp.Errors[0])
+
+	// Assemble block.
+	payloadId, err := assembleBlock(ctx, exec, &executionproto.AssembleBlockRequest{
+		ParentHash:            gointerfaces.ConvertHashToH256(chainPack.TopBlock.Hash()),
+		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		PrevRandao:            gointerfaces.ConvertHashToH256(randomHash()),
+		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(common.Address{1}),
+		Withdrawals:           make([]*typesproto.Withdrawal, 0),
+		ParentBeaconBlockRoot: gointerfaces.ConvertHashToH256(randomHash()),
+	})
+	require.NoError(t, err)
+
+	// Get the assembled block via ChainReaderWriterEth1 — Caplin's production interface.
+	chainRW := chainreader.NewChainReaderEth1(
+		m.ChainConfig,
+		direct.NewExecutionClientDirect(exec),
+		time.Hour,
+	)
+
+	eth1Block, blobsBundle, requestsBundle, blockValue, err := chainRW.GetAssembledBlock(payloadId)
+	require.NoError(t, err)
+	require.NotNil(t, eth1Block, "Eth1Block should not be nil")
+	require.NotNil(t, blobsBundle, "BlobsBundle should not be nil")
+	require.NotNil(t, blockValue, "blockValue should not be nil")
+
+	// This is the critical assertion: the RequestsBundle must be returned.
+	// PR #14326 added this return value. If reverted, this would be nil.
+	require.NotNil(t, requestsBundle, "RequestsBundle must not be nil — "+
+		"this is the return value added by PR #14326 to fix issue #14319")
+	require.NotEmpty(t, requestsBundle.GetRequests(),
+		"should contain at least one execution request")
+
+	// Find and decode the withdrawal request.
+	var foundWithdrawalRequest bool
+	for _, req := range requestsBundle.GetRequests() {
+		if len(req) == 0 || req[0] != types.WithdrawalRequestType {
+			continue
+		}
+		requestData := req[1:]
+		require.Equal(t, types.WithdrawalRequestDataLen, len(requestData))
+
+		gotPubkey := requestData[20:68]
+		require.Equal(t, pubkey[:], gotPubkey,
+			"withdrawal request pubkey should match what was submitted")
+		foundWithdrawalRequest = true
+	}
+	require.True(t, foundWithdrawalRequest,
+		"should find a withdrawal request via ChainReaderWriterEth1.GetAssembledBlock")
+
+	// Verify the block also passes validation.
+	block, err := getAssembledBlock(ctx, exec, payloadId)
+	require.NoError(t, err)
 	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
 	require.NoError(t, err)
 }

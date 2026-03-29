@@ -38,6 +38,11 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) e
 		return nil
 	})
 
+	// Consume additional rate-limit tokens: slots × columns per slot, capped at config max.
+	if cost := min(int(req.Count)*req.Columns.Length(), int(c.beaconConfig.MaxRequestDataColumnSidecars)) - 1; !c.consumeRateLimit(s, cost) {
+		return nil
+	}
+
 	curSlot := c.ethClock.GetCurrentSlot()
 
 	tx, err := c.indiciesDB.BeginRo(c.ctx)
@@ -125,6 +130,15 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRootHandler(s network.Stream) er
 	}
 	if req.Len() > int(c.beaconConfig.MaxRequestBlocksDeneb) {
 		return errors.New("request is too large")
+	}
+
+	// Consume additional rate-limit tokens: sum of column counts across all roots.
+	totalColumns := 0
+	for i := 0; i < req.Len(); i++ {
+		totalColumns += req.Get(i).Columns.Length()
+	}
+	if cost := min(totalColumns, int(c.beaconConfig.MaxRequestDataColumnSidecars)) - 1; !c.consumeRateLimit(s, cost) {
+		return nil
 	}
 
 	curSlot := c.ethClock.GetCurrentSlot()

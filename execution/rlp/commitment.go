@@ -17,7 +17,6 @@
 package rlp
 
 import (
-	"encoding/binary"
 	"io"
 	"math/bits"
 
@@ -31,7 +30,7 @@ import (
 func generateRlpPrefixLenDouble(l int, firstByte byte) int {
 	if l < 2 {
 		// firstByte only matters when there is 1 byte to encode
-		if firstByte >= 0x80 {
+		if firstByte >= SingleByteThreshold {
 			return 2
 		}
 		return 0
@@ -66,35 +65,26 @@ func multiByteHeaderPrefixOfLen(l int) byte {
 	// > the first byte is thus [0xB8, 0xBF].
 	//
 	// see package rlp/decode.go:887
-	return byte(0xB7 + l)
+	return byte(LongStringCode + l)
 }
 
 func generateByteArrayLen(buffer []byte, pos int, l int) int {
-	if l < 56 {
-		buffer[pos] = byte(0x80 + l)
-		return pos + 1
-	}
-	var tmp [8]byte
-	binary.BigEndian.PutUint64(tmp[:], uint64(l))
-	size := common.BitLenToByteLen(bits.Len64(uint64(l)))
-	buffer[pos] = multiByteHeaderPrefixOfLen(size)
-	copy(buffer[pos+1:], tmp[8-size:])
-	return pos + 1 + size
+	return pos + encodePrefixToBuf(l, buffer[pos:], EmptyStringCode, LongStringCode)
 }
 
 func generateByteArrayLenDouble(buffer []byte, pos int, l int) int {
 	if l < 55 {
 		// After first wrapping, the length will be l + 1 < 56
-		buffer[pos] = byte(0x80 + l + 1)
+		buffer[pos] = byte(EmptyStringCode + l + 1)
 		pos++
-		buffer[pos] = byte(0x80 + l)
+		buffer[pos] = byte(EmptyStringCode + l)
 		pos++
 	} else if l < 56 {
 		buffer[pos] = multiByteHeaderPrefixOfLen(1)
 		pos++
 		buffer[pos] = byte(l + 1)
 		pos++
-		buffer[pos] = byte(0x80 + l)
+		buffer[pos] = byte(EmptyStringCode + l)
 		pos++
 	} else if l < 254 {
 		// After first wrapping, the length will be l + 2 < 256
@@ -220,7 +210,7 @@ func (b RlpEncodedBytes) DoubleRLPLen() int {
 
 func encodeBytesAsRlpToWriter(source []byte, w io.Writer, prefixGenFunc func([]byte, int, int) int, prefixBuf []byte) error {
 	// > 1 byte, write a prefix or prefixes first
-	if len(source) > 1 || (len(source) == 1 && source[0] >= 0x80) {
+	if len(source) > 1 || (len(source) == 1 && source[0] >= SingleByteThreshold) {
 		prefixLen := prefixGenFunc(prefixBuf, 0, len(source))
 
 		if _, err := w.Write(prefixBuf[:prefixLen]); err != nil {
@@ -232,23 +222,9 @@ func encodeBytesAsRlpToWriter(source []byte, w io.Writer, prefixGenFunc func([]b
 	return err
 }
 
-func EncodeByteArrayAsRlp(raw []byte, w io.Writer, prefixBuf []byte) (int, error) {
-	err := encodeBytesAsRlpToWriter(raw, w, generateByteArrayLen, prefixBuf)
-	if err != nil {
+func EncodeStringWithLen(raw []byte, w io.Writer, prefixBuf []byte) (int, error) {
+	if err := EncodeString(raw, w, prefixBuf); err != nil {
 		return 0, err
 	}
-	return generateRlpPrefixLen(len(raw)) + len(raw), nil
-}
-
-func GenerateStructLen(buffer []byte, l int) int {
-	if l < 56 {
-		buffer[0] = byte(192 + l)
-		return 1
-	}
-	var tmp [8]byte
-	binary.BigEndian.PutUint64(tmp[:], uint64(l))
-	size := common.BitLenToByteLen(bits.Len64(uint64(l)))
-	buffer[0] = byte(247 + size)
-	copy(buffer[1:], tmp[8-size:])
-	return 1 + size
+	return StringLen(raw), nil
 }

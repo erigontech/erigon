@@ -41,7 +41,6 @@ import (
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -170,10 +169,10 @@ type ExecModule struct {
 	blockReader services.FullBlockReader
 
 	// MDBX database
-	db                kv.TemporalRwDB // main database
-	semaphore         *semaphore.Weighted
-	executionPipeline *stagedsync.Sync
-	forkValidator     *engine_helpers.ForkValidator
+	db               kv.TemporalRwDB // main database
+	semaphore        *semaphore.Weighted
+	forkValidator    *ForkValidator
+	pipelineExecutor *PipelineExecutor
 
 	logger log.Logger
 	// Block building
@@ -215,8 +214,8 @@ func NewExecModule(
 	ctx context.Context,
 	blockReader services.FullBlockReader,
 	db kv.TemporalRwDB,
-	executionPipeline *stagedsync.Sync,
-	forkValidator *engine_helpers.ForkValidator,
+	pipelineExecutor *PipelineExecutor,
+	currentBlockNumber uint64,
 	config *chain.Config,
 	builderFunc builder.BlockBuilderFunc,
 	hook *stageloop.Hook,
@@ -233,13 +232,14 @@ func NewExecModule(
 	stopNode func() error,
 ) *ExecModule {
 	domainCache := cache.NewDefaultStateCache()
+	forkValidator := newForkValidator(ctx, currentBlockNumber, pipelineExecutor, blockReader, syncCfg.MaxReorgDepth)
 
 	em := &ExecModule{
 		blockReader:             blockReader,
 		db:                      db,
-		executionPipeline:       executionPipeline,
 		logger:                  logger,
 		forkValidator:           forkValidator,
+		pipelineExecutor:        pipelineExecutor,
 		builders:                make(map[uint64]*builder.BlockBuilder),
 		builderFunc:             builderFunc,
 		config:                  config,
@@ -263,6 +263,9 @@ func NewExecModule(
 	}
 	return em
 }
+
+// ForkValidator returns the fork validator owned by this module.
+func (e *ExecModule) ForkValidator() *ForkValidator { return e.forkValidator }
 
 func (e *ExecModule) getHeader(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*types.Header, error) {
 	if e.blockReader == nil {
@@ -335,10 +338,10 @@ func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.Te
 		return err
 	}
 
-	if err := e.executionPipeline.UnwindTo(unwindPoint, stagedsync.ExecUnwind, tx); err != nil {
+	if err := e.pipelineExecutor.UnwindTo(unwindPoint, stagedsync.ExecUnwind, tx); err != nil {
 		return err
 	}
-	if err := e.executionPipeline.RunUnwind(sd, tx); err != nil {
+	if err := e.pipelineExecutor.RunUnwind(sd, tx); err != nil {
 		return err
 	}
 	return nil
@@ -538,7 +541,7 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 	}
 	defer e.semaphore.Release(1)
 
-	if err := stageloop.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline, hook, e.onlySnapDownloadOnStart, e.logger); err != nil {
+	if err := e.pipelineExecutor.ProcessFrozenBlocks(ctx, hook, e.onlySnapDownloadOnStart); err != nil {
 		if !errors.Is(err, context.Canceled) {
 			e.logger.Error("Could not start execution service", "err", err)
 		}
@@ -555,6 +558,17 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 			}()
 			return
 		}
+	}
+	// Notify the fork validator of the current execution height after startup sync.
+	if err := e.db.View(ctx, func(tx kv.Tx) error {
+		progress, err := stages.GetStageProgress(tx, stages.Execution)
+		if err != nil {
+			return err
+		}
+		e.forkValidator.NotifyCurrentHeight(progress)
+		return nil
+	}); err != nil {
+		e.logger.Warn("Could not notify fork validator of current height", "err", err)
 	}
 }
 
