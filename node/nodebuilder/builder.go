@@ -57,8 +57,10 @@ import (
 	caplincomp "github.com/erigontech/erigon/node/components/caplin"
 	downloadercomp "github.com/erigontech/erigon/node/components/downloader"
 	execcomp "github.com/erigontech/erigon/node/components/exec"
+	polygoncomp "github.com/erigontech/erigon/node/components/polygon"
 	rpccomp "github.com/erigontech/erigon/node/components/rpc"
 	sentrycomp "github.com/erigontech/erigon/node/components/sentry"
+	storagecomp "github.com/erigontech/erigon/node/components/storage"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/p2p"
 
@@ -68,18 +70,22 @@ import (
 // Builder assembles an Erigon node from its extracted components.
 // Fields are the live provider instances after Build* methods have been called.
 //
-// Components on this branch (feat/componentization):
-//   - Downloader     — snapshot BitTorrent client
-//   - Sentry         — P2P networking, sentry servers, execution P2P pipeline
-//   - Rpc            — embedded RPC services, JSON-RPC APIs, HTTP server
-//   - BlockBuilding  — block construction and mined/pending-block broadcast
-//   - Caplin         — embedded consensus layer (RunCaplinService)
+// Build ordering on this branch (feat/componentization):
+//  1. Downloader     — snapshot BitTorrent client (no DB needed)
+//  2. Storage        — DB open, snapshots, blockReader/Writer, KV RPC, notifications
+//  3. Polygon        — Heimdall/Bridge services, PolygonSyncService (Bor-only)
+//  4. Sentry         — P2P networking, sentry servers, execution P2P pipeline
+//  5. Rpc            — embedded RPC services, JSON-RPC APIs, HTTP server
+//  6. BlockBuilding  — block construction and mined/pending-block broadcast
+//  7. Caplin         — embedded consensus layer (RunCaplinService)
 //
 // Not yet extracted (still inline in backend.go):
 //   - TxPool / Shutter — added by feat/txpool
 //   - ExecModule / StagedSync
 type Builder struct {
+	Storage       *storagecomp.Provider
 	Downloader    *downloadercomp.Provider
+	Polygon       *polygoncomp.Provider
 	Sentry        *sentrycomp.Provider
 	Rpc           *rpccomp.Provider
 	BlockBuilding *blockbuildingcomp.Provider
@@ -90,7 +96,9 @@ type Builder struct {
 // New allocates a Builder with all providers pre-initialized.
 func New() *Builder {
 	return &Builder{
+		Storage:       &storagecomp.Provider{},
 		Downloader:    &downloadercomp.Provider{},
+		Polygon:       &polygoncomp.Provider{},
 		Sentry:        &sentrycomp.Provider{},
 		Rpc:           &rpccomp.Provider{},
 		BlockBuilding: &blockbuildingcomp.Provider{},
@@ -99,8 +107,25 @@ func New() *Builder {
 	}
 }
 
+// BuildStorage initializes the storage component.
+// Must be called after BuildDownloader (needs DownloaderClient for file-change callbacks).
+// After this call, b.Storage.ChainDB, BlockReader, Notifications, etc. are ready.
+func (b *Builder) BuildStorage(deps storagecomp.Deps) error {
+	return b.Storage.Initialize(deps)
+}
+
+// BuildPolygon initializes the Polygon (Heimdall/Bridge) component.
+// Must be called after BuildStorage (needs HeimdallStore, BridgeStore).
+// For non-Bor chains this is a no-op and b.Polygon fields remain nil.
+// After this call (on Bor chains), b.Polygon.Bridge, HeimdallService,
+// BridgeRPC, and HeimdallRPC are ready.
+func (b *Builder) BuildPolygon(deps polygoncomp.InitDeps) error {
+	return b.Polygon.Initialize(deps)
+}
+
 // BuildDownloader configures and initializes the snapshot downloader component.
-// After this call, b.Downloader.Client is ready for consumers.
+// Must be the first Build* call — it requires no database.
+// After this call, b.Downloader.Client is ready and can be passed into BuildStorage.
 func (b *Builder) BuildDownloader(
 	ctx context.Context,
 	cfg *downloadercfg.Cfg,

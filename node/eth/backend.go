@@ -53,8 +53,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/kvcache"
-	"github.com/erigontech/erigon/db/kv/kvcfg"
-	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/remotedbserver"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -64,7 +62,6 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/diagnostics/mem"
 	"github.com/erigontech/erigon/execution/builder"
@@ -78,7 +75,6 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
-	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
@@ -86,8 +82,10 @@ import (
 	blockbuildingcomp "github.com/erigontech/erigon/node/components/blockbuilding"
 	caplincomp "github.com/erigontech/erigon/node/components/caplin"
 	execcomp "github.com/erigontech/erigon/node/components/exec"
+	polygoncomp "github.com/erigontech/erigon/node/components/polygon"
 	rpccomp "github.com/erigontech/erigon/node/components/rpc"
 	sentrycomp "github.com/erigontech/erigon/node/components/sentry"
+	storagecomp "github.com/erigontech/erigon/node/components/storage"
 	txpoolcomp "github.com/erigontech/erigon/node/components/txpool"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -106,10 +104,8 @@ import (
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
 	polygonsync "github.com/erigontech/erigon/polygon/sync"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/contracts"
@@ -262,60 +258,53 @@ const blockBufferSize = 128
 func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger log.Logger, tracer *tracers.Tracer) (*Ethereum, error) {
 	go dbg.SaveHeapProfileNearOOMPeriodically(ctx, dbg.SaveHeapWithLogger(&logger))
 
+	var err error
+
 	dirs := stack.Config().Dirs
 
 	tmpdir := dirs.Tmp
-	if err := RemoveContents(tmpdir); err != nil { // clean it on startup
+	if err = RemoveContents(tmpdir); err != nil { // clean it on startup
 		return nil, fmt.Errorf("clean tmp dir: %s, %w", tmpdir, err)
 	}
 
-	// Assemble the Ethereum object
-	rawChainDB, err := node.OpenDatabase(ctx, stack.Config(), dbcfg.ChainDB, "", false, logger)
-	if err != nil {
+	// 1. Downloader component: must be first — needs no DB.
+	//    The downloaderClient is then passed into BuildStorage so that the
+	//    file-change callbacks can be wired inside Initialize.
+	storageComponents := nodebuilder.New()
+	if err := storageComponents.BuildDownloader(ctx, config.Downloader, config.Snapshot, config.Dirs, logger, stack.Config().DebugMux); err != nil {
 		return nil, err
 	}
-	latestBlockBuiltStore := builder.NewLatestBlockBuiltStore()
 
-	if err := rawChainDB.Update(context.Background(), func(tx kv.RwTx) error {
-		var notChanged bool
-
-		inConfig := config.PersistReceiptsCacheV2
-		notChanged, config.PersistReceiptsCacheV2, err = kvcfg.PersistReceipts.EnsureNotChanged(tx, inConfig)
-		if err != nil {
-			return err
-		}
-		if !notChanged {
-			logger.Warn("--persist.receipt changed since the last run, enabling historical receipts cache. full resync will be required to use the new configuration. if you do not need this feature, ignore this warning.", "inDB", config.PersistReceiptsCacheV2, "inConfig", inConfig)
-		}
-		if config.PersistReceiptsCacheV2 {
-			statecfg.EnableHistoricalRCache()
-		}
-
-		if err := checkAndSetCommitmentHistoryFlag(tx, logger, dirs, config); err != nil {
-			return err
-		}
-
-		// Apply config-driven global state for the commitment and trie subsystems.
-		// These globals are read by 80+ call sites; the config fields are the source of truth.
-		if config.KeepExecutionProofs {
-			statecfg.EnableHistoricalCommitment()
-		}
-		if config.ExperimentalConcurrentCommitment {
-			statecfg.ExperimentalConcurrentCommitment = true
-		}
-
-		if err = stages.UpdateMetrics(tx); err != nil {
-			return err
-		}
-
-		config.Prune, err = prune.EnsureNotChanged(tx, config.Prune)
-		if err != nil {
-			return err
-		}
-
-		return nil
+	// 2. Storage component: open DB, setup snapshots, blockReader/Writer, KV RPC,
+	//    notifications, genesis, chainConfig, currentBlockNumber, blockRetire.
+	//    Must be called after BuildDownloader so the client can be passed in.
+	if err := storageComponents.BuildStorage(storagecomp.Deps{
+		Ctx:              ctx,
+		Stack:            stack,
+		Config:           config,
+		Tracer:           tracer,
+		Logger:           logger,
+		DownloaderClient: storageComponents.Downloader.Client,
 	}); err != nil {
 		return nil, err
+	}
+	s := storageComponents.Storage
+	chainConfig := s.ChainConfig
+	genesis := s.Genesis
+	blockReader := s.BlockReader
+	blockWriter := s.BlockWriter
+	allSnapshots := s.AllSnapshots
+	allBorSnapshots := s.AllBorSnapshots
+	bridgeStore := s.BridgeStore
+	heimdallStore := s.HeimdallStore
+	segmentsBuildLimiter := s.SegmentsBuildLimiter
+	currentBlockNumber := s.CurrentBlockNumber
+
+	latestBlockBuiltStore := builder.NewLatestBlockBuiltStore()
+
+	if dbg.OnlyCreateDB {
+		logger.Info("done")
+		os.Exit(1)
 	}
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
@@ -332,7 +321,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		miningSealingQuit:         make(chan struct{}),
 		minedBlocks:               make(chan *types.Block, 1),
 		minedBlockObservers:       event.NewObservers[*types.Block](),
-		components:                nodebuilder.New(),
+		components:                storageComponents,
 		txPoolProvider:            &txpoolcomp.Provider{},
 		shutterProvider:           &txpoolcomp.ShutterProvider{},
 		logger:                    logger,
@@ -341,122 +330,29 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		},
 	}
 
-	var chainConfig *chain.Config
-	var genesis *types.Block
-	if err := rawChainDB.Update(context.Background(), func(tx kv.RwTx) error {
-
-		genesisConfig, err := rawdb.ReadGenesis(tx)
-		if err != nil {
-			return err
-		}
-
-		if genesisConfig != nil {
-			config.Genesis = genesisConfig
-		}
-
-		if tracer != nil && tracer.Hooks != nil && tracer.Hooks.OnBlockchainInit != nil {
-			tracer.Hooks.OnBlockchainInit(config.Genesis.Config)
-		}
-
-		h, err := rawdb.ReadCanonicalHash(tx, 0)
-		if err != nil {
-			panic(err)
-		}
-		genesisSpec := config.Genesis
-		if h != (common.Hash{}) { // fallback to db content
-			genesisSpec = nil
-		}
-		var genesisErr error
-		chainConfig, genesis, genesisErr = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.Snapshot.ChainName, config.OverrideOsakaTime, config.OverrideAmsterdamTime, config.KeepStoredChainConfig, dirs, logger)
-		if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
-			return genesisErr
-		}
-
-		return nil
-	}); err != nil {
-		panic(err)
-	}
 	chainConfig.AllowAA = config.AllowAA
 	backend.chainConfig = chainConfig
 	backend.genesisBlock = genesis
 	backend.genesisHash = genesis.Hash()
+	backend.chainDB = s.ChainDB
+	backend.blockSnapshots = allSnapshots
+	backend.blockReader = blockReader
+	backend.blockWriter = blockWriter
+	backend.notifications = s.Notifications
+	backend.kvRPC = s.KvRPC
 
 	setDefaultMinerGasLimit(config, chainConfig)
 	backend.txPoolProvider.Configure(config.TxPool, chainConfig, logger)
 
 	logger.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
-	if dbg.OnlyCreateDB {
-		logger.Info("done")
-		os.Exit(1)
-	}
 
-	segmentsBuildLimiter := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
-
-	// Check if we have an already initialized chain and fall back to
-	// that if so. Otherwise we need to generate a new genesis spec.
-	blockReader, blockWriter, allSnapshots, allBorSnapshots, bridgeStore, heimdallStore, temporalDb, err := SetUpBlockReader(ctx, rawChainDB, config.Dirs, config, chainConfig, stack.Config().Http.DBReadConcurrency, logger, segmentsBuildLimiter)
-	if err != nil {
-		return nil, err
-	}
-	backend.blockSnapshots, backend.blockReader, backend.blockWriter = allSnapshots, blockReader, blockWriter
-	backend.chainDB = temporalDb
-
-	// Build the downloader component (local in-process or remote via gRPC).
-	if err := backend.components.BuildDownloader(ctx, config.Downloader, config.Snapshot, config.Dirs, logger, stack.Config().DebugMux); err != nil {
-		return nil, err
-	}
 	backend.downloaderClient = backend.components.Downloader.Client
-
-	// Register file-change callbacks so completed snapshots are seeded and
-	// deleted snapshots are removed from the swarm. These stay here because
-	// they need chainDB and notifications (set below).
-	backend.chainDB.OnFilesChange(func(frozenFileNames []string) {
-		backend.logger.Debug("files changed...sending notification")
-		events := backend.notifications.Events
-		events.OnNewSnapshot()
-		if config.Downloader != nil && config.Downloader.ChainName == "" {
-			return
-		}
-		if backend.config.Snapshot.NoDownloader || backend.downloaderClient == nil || len(frozenFileNames) == 0 {
-			return
-		}
-		if err := backend.downloaderClient.Seed(ctx, frozenFileNames); err != nil {
-			backend.logger.Warn("[snapshots] downloader.Seed", "err", err)
-		}
-	}, func(deletedFiles []string) {
-		if config.Downloader != nil && config.Downloader.ChainName == "" {
-			return
-		}
-		if backend.config.Snapshot.NoDownloader || backend.downloaderClient == nil || len(deletedFiles) == 0 {
-			return
-		}
-		if err := backend.downloaderClient.Delete(ctx, deletedFiles); err != nil {
-			backend.logger.Warn("[snapshots] downloader.Delete", "err", err)
-		}
-	})
-
-	kvRPC := remotedbserver.NewKvServer(ctx, backend.chainDB, allSnapshots, allBorSnapshots, temporalDb.Debug(), logger)
-	backend.notifications = shards.NewNotifications(kvRPC)
-	backend.kvRPC = kvRPC
 	backend.components.Downloader.Start(ctx, backend.notifications.Events, logger)
 
 	// setup periodic logging and prometheus updates
 	go mem.LogMemStats(ctx, logger)
 	go disk.UpdateDiskStats(ctx, logger)
 	go kv.CollectTableSizesPeriodically(ctx, backend.chainDB, dbcfg.ChainDB, logger)
-
-	var currentBlock *types.Block
-	if err := backend.chainDB.View(context.Background(), func(tx kv.Tx) error {
-		currentBlock, err = blockReader.CurrentBlock(tx)
-		return err
-	}); err != nil {
-		panic(err)
-	}
-
-	currentBlockNumber := uint64(0)
-	if currentBlock != nil {
-		currentBlockNumber = currentBlock.NumberU64()
-	}
 
 	logger.Info("Initialising Ethereum protocol", "network", config.NetworkID)
 	var rulesConfig any
@@ -471,53 +367,24 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		rulesConfig = &config.Ethash
 	}
 
-	var heimdallClient heimdall.Client
-	var bridgeClient bridge.Client
-	var polygonBridge *bridge.Service
-	var heimdallService *heimdall.Service
-	var bridgeRPC *bridge.BackendServer
-	var heimdallRPC *heimdall.BackendServer
-
-	if chainConfig.Bor != nil {
-		if !config.WithoutHeimdall {
-			heimdallClient = heimdall.NewHttpClient(config.HeimdallURL, logger, poshttp.WithApiVersioner(ctx))
-			bridgeClient = bridge.NewHttpClient(config.HeimdallURL, logger, poshttp.WithApiVersioner(ctx))
-		} else {
-			heimdallClient = heimdall.NewIdleClient(config.Builder)
-			bridgeClient = bridge.NewIdleClient()
-		}
-		borConfig := rulesConfig.(*borcfg.BorConfig)
-
-		polygonBridge = bridge.NewService(bridge.ServiceConfig{
-			Store:        bridgeStore,
-			Logger:       logger,
-			BorConfig:    borConfig,
-			EventFetcher: bridgeClient,
-		})
-
-		if err := heimdallStore.Milestones().Prepare(ctx); err != nil {
-			return nil, err
-		}
-
-		_, err := heimdallStore.Milestones().DeleteFromBlockNum(ctx, 0)
-		if err != nil {
-			return nil, err
-		}
-
-		heimdallService = heimdall.NewService(heimdall.ServiceConfig{
-			Store:       heimdallStore,
-			ChainConfig: chainConfig,
-			BorConfig:   borConfig,
-			Client:      heimdallClient,
-			Logger:      logger,
-		})
-
-		bridgeRPC = bridge.NewBackendServer(ctx, polygonBridge)
-		heimdallRPC = heimdall.NewBackendServer(ctx, heimdallService)
-
-		backend.polygonBridge = polygonBridge
-		backend.heimdallService = heimdallService
+	// 3. Polygon component: Heimdall/Bridge services (Bor-only, no-ops otherwise).
+	if err := backend.components.BuildPolygon(polygoncomp.InitDeps{
+		Ctx:             ctx,
+		Config:          config,
+		ChainConfig:     chainConfig,
+		HeimdallStore:   heimdallStore,
+		BridgeStore:     bridgeStore,
+		AllBorSnapshots: allBorSnapshots,
+		Logger:          logger,
+	}); err != nil {
+		return nil, err
 	}
+	polygonBridge := backend.components.Polygon.Bridge
+	heimdallService := backend.components.Polygon.HeimdallService
+	bridgeRPC := backend.components.Polygon.BridgeRPC
+	heimdallRPC := backend.components.Polygon.HeimdallRPC
+	backend.polygonBridge = polygonBridge
+	backend.heimdallService = heimdallService
 
 	backend.engine = rulesconfig.CreateRulesEngine(ctx, stack.Config(), chainConfig, rulesConfig, false /* noVerify */, config.WithoutHeimdall, blockReader, false /* readonly */, logger, polygonBridge, heimdallService)
 
@@ -572,7 +439,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		chainConfig,
 	)
 
-	backend.stateDiffClient = direct.NewStateDiffClientDirect(kvRPC)
+	backend.stateDiffClient = direct.NewStateDiffClientDirect(backend.kvRPC)
 
 	blockBuilderNotifyNewTxns := func() {
 		select {
@@ -688,7 +555,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			}
 		}
 		backend.privateAPI, err = privateapi2.StartGrpc(
-			kvRPC,
+			backend.kvRPC,
 			backend.ethBackendRPC,
 			backend.txPoolGrpcServer,
 			backend.miningRPC,
@@ -702,10 +569,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if err != nil {
 			return nil, fmt.Errorf("private api: %w", err)
 		}
-	}
-
-	if currentBlock == nil {
-		currentBlock = genesis
 	}
 
 	backend.components.BlockBuilding.Start(blockbuildingcomp.StartDeps{
@@ -773,50 +636,29 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}
 
-	if chainConfig.Bor != nil {
-		backend.polygonSyncService = polygonsync.NewService(
-			config,
-			logger,
-			chainConfig,
-			sentryMux(backend.components.Sentry.Sentries),
-			p2pConfig.MaxPeers,
-			backend.statusDataProvider,
-			executionRpc,
-			config.LoopBlockLimit,
-			polygonBridge,
-			heimdallService,
-			backend.notifications,
-			backend.engineBackendRPC,
-			backend,
-			config.Dirs.Tmp,
-		)
-
-		// these range extractors set the db to the local db instead of the chain db
-		// TODO this needs be refactored away by having a retire/merge component per
-		// snapshot instead of global processing in the stage loop
-		type extractableStore interface {
-			RangeExtractor() snaptype.RangeExtractor
-		}
-
-		if withRangeExtractor, ok := heimdallStore.Spans().(extractableStore); ok {
-			allBorSnapshots.SetRangeExtractor(heimdall.Spans, withRangeExtractor.RangeExtractor())
-		}
-
-		if withRangeExtractor, ok := heimdallStore.Checkpoints().(extractableStore); ok {
-			allBorSnapshots.SetRangeExtractor(heimdall.Checkpoints, withRangeExtractor.RangeExtractor())
-		}
-
-		if withRangeExtractor, ok := heimdallStore.Milestones().(extractableStore); ok {
-			allBorSnapshots.SetRangeExtractor(heimdall.Milestones, withRangeExtractor.RangeExtractor())
-		}
-
-		if withRangeExtractor, ok := bridgeStore.(extractableStore); ok {
-			allBorSnapshots.SetRangeExtractor(heimdall.Events, withRangeExtractor.RangeExtractor())
-		}
-	}
+	// Polygon sync service (Bor-only; no-op for other chains).
+	backend.components.Polygon.InitializeSyncService(
+		polygoncomp.SyncServiceDeps{
+			Ctx:                ctx,
+			Config:             config,
+			ChainConfig:        chainConfig,
+			Sentries:           backend.components.Sentry.Sentries,
+			MaxPeers:           p2pConfig.MaxPeers,
+			StatusDataProvider: backend.statusDataProvider,
+			ExecutionRpc:       executionRpc,
+			Notifications:      backend.notifications,
+			EngineServer:       backend.engineBackendRPC,
+			Backend:            backend,
+			Logger:             logger,
+		},
+		allBorSnapshots,
+		heimdallStore,
+		bridgeStore,
+	)
+	backend.polygonSyncService = backend.components.Polygon.SyncService
 
 	go func() {
-		if err := temporalDb.Debug().MergeLoop(ctx); err != nil {
+		if err := backend.chainDB.Debug().MergeLoop(ctx); err != nil {
 			logger.Error("snapashot merge loop error", "err", err)
 		}
 	}()
