@@ -1752,6 +1752,8 @@ type blockExecutor struct {
 
 // sendResult fans out an applyResult to both the apply loop and
 // the commitment calculator. Blocks if either channel is full.
+// The commitResults channel may be closed by drainBeforeExit while
+// the exec loop is still running — recover from the panic gracefully.
 func (be *blockExecutor) sendResult(ctx context.Context, r applyResult) error {
 	select {
 	case be.applyResults <- r:
@@ -1759,6 +1761,14 @@ func (be *blockExecutor) sendResult(ctx context.Context, r applyResult) error {
 		return ctx.Err()
 	}
 	if be.commitResults != nil {
+		defer func() {
+			if rec := recover(); rec != nil {
+				// commitResults was closed by drainBeforeExit — the calculator
+				// is shutting down. Stop sending; the exec loop will exit via
+				// context cancellation or exhaustion.
+				be.commitResults = nil
+			}
+		}()
 		select {
 		case be.commitResults <- r:
 		case <-ctx.Done():
