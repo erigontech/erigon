@@ -2942,6 +2942,8 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 
 		keyExists := []bool{true, true, true}
 		buildTrieAndWitness(t, builder, witnessKeys, keyExists)
+	})
+
 	t.Run("StorageLeafRLPShorterThan32Bytes", func(t *testing.T) {
 		// Reproduces a bug where storage leaf nodes whose RLP encoding is < 32 bytes
 		// should be embedded inline in the parent branch node per MPT spec, but the
