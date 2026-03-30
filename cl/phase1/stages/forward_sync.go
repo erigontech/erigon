@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	"github.com/erigontech/erigon/cl/phase1/core/checkpoint_sync"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	network2 "github.com/erigontech/erigon/cl/phase1/network"
@@ -289,6 +290,14 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 	finalizedSlot := cfg.forkChoice.FinalizedCheckpoint().Epoch * cfg.beaconCfg.SlotsPerEpoch
 	startSlot = max(startSlot, finalizedSlot, cfg.forkChoice.AnchorSlot()) // we cap how low we go with the finalized slot and anchor slot
 
+	// [New in Gloas:EIP7732] Before starting forward sync, ensure the anchor's envelope
+	// is on disk if the anchor was a FULL block. This must happen before any blocks are
+	// processed (via forward sync OR gossip), because blocks built on a FULL parent need
+	// the execution_payload_state which requires the envelope.
+	if err := ensureAnchorEnvelopeOnce(ctx, cfg); err != nil {
+		logger.Warn("[Caplin] Failed to fetch anchor envelope (will retry)", "err", err)
+	}
+
 	// Initialize the slot to download from the finalized checkpoint
 	currentSlot.Store(startSlot)
 
@@ -354,5 +363,79 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 		}
 	}
 
+	return nil
+}
+
+// ensureAnchorEnvelopeOnce proactively fetches the anchor block's execution payload
+// envelope from P2P if it is not already on disk. Called once at the start of
+// forwardSync, before any blocks are processed.
+// [New in Gloas:EIP7732]
+func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
+	anchorSlot := cfg.forkChoice.AnchorSlot()
+	epoch := anchorSlot / cfg.beaconCfg.SlotsPerEpoch
+	if cfg.beaconCfg.GetCurrentStateVersion(epoch) < clparams.GloasVersion {
+		return nil // Pre-GLOAS anchor, nothing to do
+	}
+
+	// Find the anchor block root via the header stored in the fork graph
+	anchorHeader, ok := cfg.forkChoice.GetHeader(cfg.forkChoice.FinalizedCheckpoint().Root)
+	if !ok {
+		// Try to find by iterating — the anchor root should be the finalized root
+		log.Debug("[ensureAnchorEnvelopeOnce] anchor header not found, skipping")
+		return nil
+	}
+	_ = anchorHeader
+
+	// Get anchor block root from state
+	anchorRoot := cfg.forkChoice.FinalizedCheckpoint().Root
+	if cfg.forkChoice.HasEnvelope(anchorRoot) {
+		return nil // Already have it
+	}
+
+	anchorBlock, ok := cfg.forkChoice.GetBlock(anchorRoot)
+	if !ok || anchorBlock == nil {
+		log.Debug("[ensureAnchorEnvelopeOnce] anchor block not in fork graph, skipping")
+		return nil
+	}
+
+	// The anchor block's bid tells us its BlockHash. We can't know if the NEXT block
+	// expects FULL or EMPTY without seeing it, but we can optimistically fetch the
+	// envelope. If the anchor was actually EMPTY, the envelope won't exist and the
+	// timeout will just expire harmlessly.
+	bid := anchorBlock.Block.Body.GetSignedExecutionPayloadBid()
+	if bid == nil || bid.Message == nil {
+		return nil
+	}
+
+	log.Info("[Caplin] Proactively fetching anchor envelope for GLOAS checkpoint sync",
+		"anchorSlot", anchorSlot, "anchorRoot", common.Hash(anchorRoot),
+		"bidBlockHash", bid.Message.BlockHash)
+
+	// Try HTTP API first (checkpoint sync endpoint), then fall back to P2P.
+	// HTTP is more reliable on devnets with few peers.
+	var env *cltypes.SignedExecutionPayloadEnvelope
+	if httpEnv := checkpoint_sync.FetchFinalizedEnvelope(ctx, cfg.beaconCfg, cfg.caplinConfig); httpEnv != nil {
+		log.Info("[Caplin] Anchor envelope fetched via HTTP checkpoint sync", "anchorSlot", anchorSlot)
+		env = httpEnv
+	} else {
+		// Fall back to P2P
+		log.Info("[Caplin] HTTP envelope fetch returned nil, trying P2P...", "anchorSlot", anchorSlot)
+		envMap, err := network2.RequestEnvelopesFrantically(ctx, cfg.rpc, [][32]byte{anchorRoot})
+		if err != nil {
+			return fmt.Errorf("failed to request anchor envelope: %w", err)
+		}
+		env = envMap[common.Hash(anchorRoot)]
+	}
+	if env == nil {
+		log.Info("[Caplin] Anchor envelope not received (block may be EMPTY)", "anchorSlot", anchorSlot)
+		return nil // Not fatal — if EMPTY, envelope doesn't exist
+	}
+
+	if err := cfg.forkChoice.OnExecutionPayload(ctx, env, false, false); err != nil {
+		return fmt.Errorf("failed to apply anchor envelope: %w", err)
+	}
+
+	log.Info("[Caplin] Anchor envelope applied successfully",
+		"anchorSlot", anchorSlot, "anchorRoot", common.Hash(anchorRoot))
 	return nil
 }

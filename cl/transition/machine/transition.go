@@ -18,7 +18,10 @@ package machine
 
 import (
 	"github.com/erigontech/erigon/cl/abstract"
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/common"
+	log "github.com/erigontech/erigon/common/log/v3"
 )
 
 // TransitionState will call impl..ProcessSlots, then impl.VerifyBlockSignature, then ProcessBlock, then impl.VerifyTransition
@@ -28,6 +31,18 @@ func TransitionState(impl Interface, s abstract.BeaconState, block *cltypes.Sign
 		return err
 	}
 
+	// DEBUG: log state hash after ProcessSlots, before ProcessBlock
+	if s.Version() >= clparams.GloasVersion {
+		afterSlotsHash, _ := s.HashSSZ()
+		header := s.LatestBlockHeader()
+		log.Info("[DEBUG] TransitionState: after ProcessSlots",
+			"slot", currentBlock.Slot,
+			"stateHash", common.Hash(afterSlotsHash),
+			"headerSlot", header.Slot, "headerRoot", header.Root,
+			"expectedStateRoot", currentBlock.StateRoot,
+		)
+	}
+
 	if err := impl.VerifyBlockSignature(s, block); err != nil {
 		return err
 	}
@@ -35,6 +50,18 @@ func TransitionState(impl Interface, s abstract.BeaconState, block *cltypes.Sign
 	// Transition block
 	if err := ProcessBlock(impl, s, block.Block); err != nil {
 		return err
+	}
+
+	// DEBUG: log state hash after ProcessBlock, before VerifyTransition
+	if s.Version() >= clparams.GloasVersion {
+		afterBlockHash, _ := s.HashSSZ()
+		header := s.LatestBlockHeader()
+		log.Info("[DEBUG] TransitionState: after ProcessBlock",
+			"slot", currentBlock.Slot,
+			"stateHash", common.Hash(afterBlockHash),
+			"headerSlot", header.Slot, "headerRoot", header.Root,
+			"expectedStateRoot", currentBlock.StateRoot,
+		)
 	}
 
 	// perform validation
