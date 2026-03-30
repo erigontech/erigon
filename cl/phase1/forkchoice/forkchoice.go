@@ -492,11 +492,18 @@ func (f *ForkChoiceStore) GetEth1Hash(eth2Root common.Hash) common.Hash {
 	return ret
 }
 
-// FinalizedCheckpoint returns justified checkpoint
+// AnchorSlot returns the slot of the anchor state.
 func (f *ForkChoiceStore) AnchorSlot() uint64 {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	return f.forkGraph.AnchorSlot()
+}
+
+// AnchorRoot returns the block root of the anchor state. [New in Gloas:EIP7732]
+func (f *ForkChoiceStore) AnchorRoot() common.Hash {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.forkGraph.AnchorRoot()
 }
 
 func (f *ForkChoiceStore) GetStateAtBlockRoot(blockRoot common.Hash, alwaysCopy bool) (*state2.CachingBeaconState, error) {

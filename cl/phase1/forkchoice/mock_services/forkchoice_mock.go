@@ -42,6 +42,7 @@ import (
 type ForkChoiceStorageMock struct {
 	Ancestors              map[uint64]forkchoice.ForkChoiceNode
 	AnchorSlotVal          uint64
+	AnchorRootVal          common.Hash
 	FinalizedCheckpointVal solid.Checkpoint
 	FinalizedSlotVal       uint64
 	HeadVal                common.Hash
@@ -218,6 +219,10 @@ func (f *ForkChoiceStorageMock) Ancestor(root common.Hash, slot uint64) forkchoi
 
 func (f *ForkChoiceStorageMock) AnchorSlot() uint64 {
 	return f.AnchorSlotVal
+}
+
+func (f *ForkChoiceStorageMock) AnchorRoot() common.Hash {
+	return f.AnchorRootVal
 }
 
 func (f *ForkChoiceStorageMock) Engine() execution_client.ExecutionEngine {
