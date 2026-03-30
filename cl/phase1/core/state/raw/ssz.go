@@ -58,6 +58,8 @@ func (b *BeaconState) baseOffsetSSZ() uint32 {
 		return 2736653
 	case clparams.FuluVersion:
 		return 2736653
+	case clparams.GloasVersion:
+		return 2736653 // Gloas (Amsterdam) adds no new beacon state fields
 	default:
 		// ?????
 		panic("tf is that")
