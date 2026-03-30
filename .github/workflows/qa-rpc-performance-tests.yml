@@ -166,7 +166,7 @@ jobs:
         run: |
           echo "Starting RpcDaemon..."
           
-          ./rpcdaemon --datadir $ERIGON_REFERENCE_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net > erigon.log 2>&1 &
+          ./rpcdaemon --datadir $ERIGON_REFERENCE_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --http.port 51515 > erigon.log 2>&1 &
 
           RPC_DAEMON_PID=$!          
           RPC_DAEMON_EXIT_STATUS=$?
@@ -183,22 +183,22 @@ jobs:
           fi
           echo "RpcDaemon started"
 
-      - name: Wait for port 8545 to be opened
+      - name: Wait for port 51515 to be opened
         if: matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true'
         run: |
           # Geth is expected to be pre-running for the rpc-latest-geth runner
-          # Erigon was started above
+          # Erigon was started above on port 51515 to avoid conflict with production instance on 8545
           for i in {1..30}; do
-            if nc -z localhost 8545; then
-              echo "Port 8545 is open"
+            if nc -z localhost 51515; then
+              echo "Port 51515 is open"
               break
             fi
-            echo "Waiting for port 8545 to open..."
+            echo "Waiting for port 51515 to open..."
             sleep 10
           done
-          if ! nc -z localhost 8545; then
-            echo "Port 8545 did not open in time"
-            echo "::error::Error detected during tests: Port 8545 did not open in time"
+          if ! nc -z localhost 51515; then
+            echo "Port 51515 did not open in time"
+            echo "::error::Error detected during tests: Port 51515 did not open in time"
             exit 1
           fi
 
@@ -251,7 +251,7 @@ jobs:
                                       --client-build-dir "/" \
                                       --test-report \
                                       --json-report $result_dir/$result_file \
-                                      --testing-client $client \
+                                      --testing-client other-daemon \
                                       --process-name rpcdaemon
           
             # Capture test runner script exit status
