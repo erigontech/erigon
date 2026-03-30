@@ -226,7 +226,7 @@ jobs:
 
     - name: Upload Downloader Torrent Client Status
       if: always() && matrix.client == 'erigon'
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: torrent-client-status
         path: torrent-client-status.txt
@@ -265,35 +265,35 @@ jobs:
 
     - name: Upload test results
       if: always() && steps.test_step.outputs.test_executed == 'true'
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: test-results-${{ env.CHAIN }}-${{ matrix.client }}
         path: ${{ github.workspace }}/result-${{ env.CHAIN }}.json
 
     - name: Upload erigon logs
       if: always() && steps.test_step.outputs.test_executed == 'true' && matrix.client == 'erigon'
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: erigon-logs
         path: ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/
 
     - name: Upload metric plots
       if: always() && steps.test_step.outputs.test_executed == 'true'
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: metric-plots-${{ env.CHAIN }}-${{ matrix.client }}
         path: ${{ github.workspace }}/metrics-${{ env.CHAIN }}-plots*
 
     - name: Upload profiling data
       if: always() && steps.test_step.outputs.test_executed == 'true'
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: profiling-data-${{ env.CHAIN }}-${{ matrix.client }}
         path: ${{ github.workspace }}/profiling-data*
 
     - name: Upload FD Leak Analysis
       if: always() && matrix.client == 'erigon'
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: fd-leak-analysis
         path: ${{ github.workspace }}/fd-leak-analysis-${{ env.CHAIN }}.md
