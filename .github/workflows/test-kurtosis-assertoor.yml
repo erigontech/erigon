@@ -77,7 +77,7 @@ jobs:
           docker save ${{ env.ASSERTOOR_IMAGE }}   -o /tmp/docker-cache/assertoor.tar
 
       - name: Build erigon Docker image (with BuildKit layer cache)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           load: true
