@@ -919,7 +919,8 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			view, err := cache.View(ctx, tx)
 			asrt.NoError(err)
 			pool.blockGasLimit.Store(30_000_000)
-			reason := pool.validateTx(txn, false, view)
+			reason, err := pool.validateTx(txn, false, view)
+			asrt.NoError(err)
 
 			if reason != test.expected {
 				t.Errorf("expected %v, got %v", test.expected, reason)
@@ -1030,7 +1031,8 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	view, err := cache.View(ctx, tx)
 	require.NoError(t, err)
 
-	result := pool.validateTx(txn, false /* isLocal */, view)
+	result, err := pool.validateTx(txn, false /* isLocal */, view)
+	require.NoError(t, err)
 	assert.Equal(t, txpoolcfg.Success, result)
 }
 
