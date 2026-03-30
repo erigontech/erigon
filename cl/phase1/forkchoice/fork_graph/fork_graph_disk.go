@@ -563,7 +563,10 @@ func (f *forkGraphDisk) getState(blockRoot common.Hash, alwaysCopy bool, addChai
 	for i := len(blocksInTheWay) - 1; i >= 0; i-- {
 		rb := blocksInTheWay[i]
 		// [New in Gloas:EIP7732] Apply parent envelope before block if parent was FULL.
-		if rb.parentEnvelope != nil {
+		// Skip if the envelope slot is behind the state slot — this happens during
+		// checkpoint sync where the anchor state already incorporates the envelope.
+		if rb.parentEnvelope != nil && rb.parentEnvelope.Message != nil &&
+			rb.parentEnvelope.Message.Slot >= copyReferencedState.Slot() {
 			if err := transition.DefaultMachine.ProcessExecutionPayloadEnvelope(copyReferencedState, rb.parentEnvelope); err != nil {
 				if addChainSegment {
 					f.currentState = nil
@@ -627,7 +630,12 @@ func (f *forkGraphDisk) GetExecutionPayloadState(blockRoot common.Hash) (*state.
 		return nil, fmt.Errorf("GetExecutionPayloadState: block state not found for %x", blockRoot)
 	}
 
-	// 3. Apply target envelope to get exec_payload_state
+	// 3. Apply target envelope to get exec_payload_state.
+	// For checkpoint sync, the anchor state already incorporates the envelope's effects
+	// (state.Slot > envelope.Slot), so skip the replay to avoid the slot mismatch error.
+	if targetEnvelope.Message != nil && targetEnvelope.Message.Slot < blockState.Slot() {
+		return blockState, nil
+	}
 	if err := transition.DefaultMachine.ProcessExecutionPayloadEnvelope(blockState, targetEnvelope); err != nil {
 		return nil, fmt.Errorf("GetExecutionPayloadState: failed to process envelope: %w", err)
 	}
