@@ -179,7 +179,7 @@ func (cc *ExecutionClientEngine) NewPayload(
 		payloadStatus, err = cc.engine.NewPayloadV2(ctx, request)
 	case clparams.DenebVersion:
 		payloadStatus, err = cc.engine.NewPayloadV3(ctx, request, versionedHashes, beaconParentRoot)
-	case clparams.ElectraVersion, clparams.FuluVersion:
+	case clparams.ElectraVersion, clparams.FuluVersion, clparams.GloasVersion:
 		payloadStatus, err = cc.engine.NewPayloadV4(ctx, request, versionedHashes, beaconParentRoot, executionRequestsList)
 	default:
 		return PayloadStatusNone, fmt.Errorf("unsupported payload version: %d", payload.Version())
