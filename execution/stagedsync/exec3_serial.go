@@ -363,6 +363,12 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			se.txCount++
 			se.blockGasUsed += result.ExecutionResult.BlockRegularGasUsed
 			se.blockStateGasUsed += result.ExecutionResult.BlockStateGasUsed
+			if dbg.TraceGas && !txTask.IsBlockEnd() && result.ExecutionResult.BlockStateGasUsed > 0 {
+				se.logger.Warn("tx state gas", "block", txTask.BlockNumber(), "txIdx", txTask.TxIndex,
+					"blockRegular", result.ExecutionResult.BlockRegularGasUsed,
+					"blockState", result.ExecutionResult.BlockStateGasUsed,
+					"cumRegular", se.blockGasUsed, "cumState", se.blockStateGasUsed)
+			}
 			mxExecTransactions.Add(1)
 			if txTask.Tx() != nil {
 				se.blobGasUsed += txTask.Tx().GetBlobGas()
@@ -409,6 +415,12 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					//Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 					// Block gas = max(regular, state). Pre-Amsterdam: blockStateGasUsed is 0.
 					blockGasUsed := max(se.blockGasUsed, se.blockStateGasUsed)
+					if dbg.TraceGas {
+						se.logger.Warn("block gas breakdown", "block", txTask.BlockNumber(),
+							"blockRegular", se.blockGasUsed, "blockState", se.blockStateGasUsed,
+							"sysCallGas", sysCallGasUsed, "computed", blockGasUsed,
+							"header", txTask.Header.GasUsed, "diff", int64(blockGasUsed)-int64(txTask.Header.GasUsed))
+					}
 					if err := se.getPostValidator().Process(blockGasUsed, se.blobGasUsed, checkReceipts, blockReceipts, txTask.Header, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {
 						return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 					}
