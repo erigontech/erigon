@@ -1936,8 +1936,11 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 func (t *Updates) Reset() {
 	switch t.mode {
 	case ModeDirect:
-		t.keys = nil
-		t.keys = make(map[string]struct{})
+		if t.keys == nil {
+			t.keys = make(map[string]struct{})
+		} else {
+			clear(t.keys)
+		}
 		t.initCollector()
 	case ModeUpdate:
 		t.tree.Clear(true)
