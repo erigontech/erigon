@@ -197,11 +197,11 @@ func (f *ForkChoiceStore) getParentPayloadStatus(block *cltypes.BeaconBlock) clt
 
 	// Compare parent_block_hash with message_block_hash
 	if parentBlockHash == messageBlockHash {
-		log.Trace("[DEBUG] getParentPayloadStatus: FULL",
+		log.Trace("[getParentPayloadStatus] FULL",
 			"slot", block.Slot, "parentBlockHash", parentBlockHash, "messageBlockHash", messageBlockHash)
 		return cltypes.PayloadStatusFull
 	}
-	log.Info("[DEBUG] getParentPayloadStatus: EMPTY",
+	log.Trace("[getParentPayloadStatus] EMPTY",
 		"slot", block.Slot, "parentBlockHash", parentBlockHash, "messageBlockHash", messageBlockHash,
 		"parentRoot", block.ParentRoot)
 	return cltypes.PayloadStatusEmpty
