@@ -177,9 +177,9 @@ func (p *ConcurrentPatriciaHashed) SetCapture(capture []string) {
 	if capture != nil {
 		recorder = newTrieDebugRecorder(capture)
 	}
-	p.root.setCaptureRecorder(recorder)
+	p.root.capture = recorder
 	for i := range p.mounts {
-		p.mounts[i].setCaptureRecorder(recorder)
+		p.mounts[i].capture = recorder
 	}
 }
 
@@ -233,16 +233,27 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 					fmt.Printf("\n%x) %d plainKey [%x] hashedKey [%x] currentKey [%x]\n", ni, cnt, plainKey, hashedKey, phnib.currentKey[:phnib.currentKeyLen])
 				}
 				if phnib.traceDomain || phnib.capture != nil {
-					var trace string
-					var err error
-					stateUpdate, trace, err = phnib.debugUpdateTrace(fmt.Sprintf("(%x/%d)", ni, cnt), plainKey, hashedKey, nil)
-					if err != nil {
-						return fmt.Errorf("debugUpdateTrace[%x]: %w", ni, err)
+					var traceErr error
+					if int16(len(plainKey)) == phnib.accountKeyLen {
+						phnib.metrics.AccountLoad(plainKey)
+						stateUpdate, traceErr = phnib.accountFromCacheOrDB(plainKey)
+						if traceErr != nil {
+							return fmt.Errorf("GetAccount[%x] for key %x failed: %w", ni, plainKey, traceErr)
+						}
+					} else {
+						phnib.metrics.StorageLoad(plainKey)
+						stateUpdate, traceErr = phnib.storageFromCacheOrDB(plainKey)
+						if traceErr != nil {
+							return fmt.Errorf("GetStorage[%x] for key %x failed: %w", ni, plainKey, traceErr)
+						}
 					}
+					trace := phnib.debugTraceLine(fmt.Sprintf("(%x/%d)", ni, cnt), plainKey, stateUpdate, hashedKey)
 					if phnib.traceDomain {
 						fmt.Println(trace)
 					}
-					phnib.appendCapture(trace)
+					if phnib.capture != nil {
+						phnib.capture.Append(trace)
+					}
 				}
 				if err := phnib.followAndUpdate(hashedKey, plainKey, stateUpdate); err != nil {
 					return fmt.Errorf("followAndUpdate[%x]: %w", ni, err)

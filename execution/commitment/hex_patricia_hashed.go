@@ -2726,16 +2726,33 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		}
 
 		if hph.trace || hph.traceDomain || hph.capture != nil {
-			_, trace, err := hph.debugUpdateTrace(fmt.Sprintf("(%d/%d)", ki+1, updatesCount), plainKey, hashedKey, stateUpdate)
-			if err != nil {
-				return err
+			update := stateUpdate
+			if update == nil {
+				if int16(len(plainKey)) == hph.accountKeyLen {
+					hph.metrics.AccountLoad(plainKey)
+					update, err = hph.accountFromCacheOrDB(plainKey)
+					if err != nil {
+						return fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
+					}
+				} else {
+					hph.metrics.StorageLoad(plainKey)
+					update, err = hph.storageFromCacheOrDB(plainKey)
+					if err != nil {
+						return fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
+					}
+				}
+				stateUpdate = update
 			}
+
+			trace := hph.debugTraceLine(fmt.Sprintf("(%d/%d)", ki+1, updatesCount), plainKey, update, hashedKey)
 
 			if hph.trace || hph.traceDomain {
 				fmt.Println(trace)
 			}
 
-			hph.appendCapture(trace)
+			if hph.capture != nil {
+				hph.capture.Append(trace)
+			}
 		}
 
 		if err := hph.followAndUpdate(hashedKey, plainKey, stateUpdate); err != nil {
@@ -2956,35 +2973,8 @@ func (hph *HexPatriciaHashed) storageFromCacheOrDB(plainKey []byte) (*Update, er
 	return hph.ctx.Storage(plainKey)
 }
 
-func (hph *HexPatriciaHashed) debugUpdateTrace(prefix string, plainKey, hashedKey []byte, stateUpdate *Update) (*Update, string, error) {
-	update := stateUpdate
-	var err error
-	if update == nil {
-		if int16(len(plainKey)) == hph.accountKeyLen {
-			update, err = hph.accountFromCacheOrDB(plainKey)
-			if err != nil {
-				return nil, "", fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
-			}
-		} else {
-			update, err = hph.storageFromCacheOrDB(plainKey)
-			if err != nil {
-				return nil, "", fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
-			}
-		}
-	}
-
-	trace := fmt.Sprintf("%s plainKey [%x] %s hashedKey [%x] currentKey [%x]", prefix, plainKey, update, hashedKey, hph.currentKey[:hph.currentKeyLen])
-	return update, trace, nil
-}
-
-func (hph *HexPatriciaHashed) appendCapture(trace string) {
-	if hph.capture != nil {
-		hph.capture.Append(trace)
-	}
-}
-
-func (hph *HexPatriciaHashed) setCaptureRecorder(recorder *trieDebugRecorder) {
-	hph.capture = recorder
+func (hph *HexPatriciaHashed) debugTraceLine(prefix string, plainKey []byte, update *Update, hashedKey []byte) string {
+	return fmt.Sprintf("%s plainKey [%x] %s hashedKey [%x] currentKey [%x]", prefix, plainKey, update, hashedKey, hph.currentKey[:hph.currentKeyLen])
 }
 
 type stateRootFlag int8
