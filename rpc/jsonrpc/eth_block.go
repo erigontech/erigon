@@ -62,7 +62,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	var txs types.Transactions
 
 	for _, txHash := range txHashes {
-		blockNumber, _, ok, err := api.txnLookup(ctx, tx, txHash)
+		blockNumber, txNum, ok, err := api.txnLookup(ctx, tx, txHash)
 		if err != nil {
 			return nil, err
 		}
@@ -75,19 +75,17 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 			return nil, err
 		}
 
-		block, err := api.blockByNumberWithSenders(ctx, tx, blockNumber)
+		txNumMin, err := api._txNumReader.Min(ctx, tx, blockNumber)
 		if err != nil {
 			return nil, err
 		}
-		if block == nil {
-			return nil, fmt.Errorf("block not found %d", blockNumber)
+		if txNumMin+1 > txNum {
+			return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNumber)
 		}
-		var txn types.Transaction
-		for _, transaction := range block.Transactions() {
-			if transaction.Hash() == txHash {
-				txn = transaction
-				break
-			}
+		txnIndex := int(txNum - txNumMin - 1)
+		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNumber, txnIndex)
+		if err != nil {
+			return nil, err
 		}
 		if txn == nil {
 			return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645

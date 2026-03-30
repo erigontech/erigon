@@ -458,7 +458,11 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 				evm.regularGasConsumed += dynamicCost.Regular - evm.CallGasTemp()
 			}
 			if dynamicCost.State > 0 {
-				cost += dynamicCost.State
+				// Note: do NOT add dynamicCost.State to `cost` here.
+				// `cost` is only used for tracing and is compared against `gasCopy`
+				// which captures only regular gas. Adding state gas would cause
+				// uint64 underflow in the OnGasChange(gasCopy, gasCopy-cost, ...) call below.
+				// State gas is charged separately via useMdGas.
 				ok := callContext.useMdGas(evm, dynamicCost.State, mdgas.StateGas, nil, tracing.GasChangeIgnored)
 				if !ok {
 					return nil, callContext.Gas(), ErrOutOfGas

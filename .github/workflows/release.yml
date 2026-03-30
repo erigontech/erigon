@@ -88,6 +88,14 @@ jobs:
           fi
           echo "OK: No existing GitHub Release found for ${RELEASE_VERSION}. Proceeding."
 
+      - name: Generate GitHub App token for git operations
+        id: generate_token_build
+        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf  ## v2.2.1
+        with:
+          app-id: ${{ vars.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
+          repositories: "erigon"
+
       - name: Checkout git repository ${{ env.APP_REPO }} reference ${{ inputs.checkout_ref }}
         uses: actions/checkout@v6
         with:
@@ -95,6 +103,7 @@ jobs:
           fetch-depth: 0
           ref: ${{ inputs.checkout_ref }}
           path: 'erigon'
+          token: ${{ steps.generate_token_build.outputs.token }}
 
       - name: Check if tag ${{ inputs.release_version }} already exists and create it in case perform_release is set.
         if: ${{ (inputs.perform_release) && (inputs.release_version != '') }}
@@ -250,7 +259,7 @@ jobs:
           echo "=== All artifacts verified OK ==="
 
       - name: Upload artifact -- linux/arm64
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  ## v6.0.0
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  ## v7.0.0
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar
           path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar
@@ -259,7 +268,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload artifact -- linux/amd64
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  ## v6.0.0
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  ## v7.0.0
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar
           path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar
@@ -268,7 +277,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload artifact -- linux/amd64/v2
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  ## v6.0.0
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  ## v7.0.0
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
           path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
@@ -303,7 +312,7 @@ jobs:
           python-version: '3.12'
 
       - name: Download artifact ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar
           path: .
@@ -363,7 +372,7 @@ jobs:
 
       - name: Upload Downloader Torrent Client Status
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: torrent-client-status-${{ matrix.artifact }}
           path: torrent-client-status.txt
@@ -380,12 +389,12 @@ jobs:
 
     steps:
       - name: Download arm64 artifact
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar
 
       - name: Download amd64v2 artifact
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
 
@@ -472,7 +481,7 @@ jobs:
           echo "=== All debian packages verified OK ==="
 
       - name: Upload artifact amd64.deb
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  ## v6.0.0
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  ## v7.0.0
         with:
           name: ${{ env.APPLICATION }}_${{ needs.build-release.outputs.parsed-version }}_amd64.deb
           path: ./deb-pkg/${{ env.APPLICATION }}_${{ needs.build-release.outputs.parsed-version }}_amd64.deb
@@ -481,7 +490,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload artifact arm64.deb
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  ## v6.0.0
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  ## v7.0.0
         with:
           name: ${{ env.APPLICATION }}_${{ needs.build-release.outputs.parsed-version }}_arm64.deb
           path: ./deb-pkg/${{ env.APPLICATION }}_${{ needs.build-release.outputs.parsed-version }}_arm64.deb
@@ -556,31 +565,31 @@ jobs:
         repositories: "erigon"
 
     - name: Download linux/arm64 artifact
-      uses: actions/download-artifact@v7
+      uses: actions/download-artifact@v8
       with:
         name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar
         path: dist/
 
     - name: Download linux/amd64 artifact
-      uses: actions/download-artifact@v7
+      uses: actions/download-artifact@v8
       with:
         name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar
         path: dist/
 
     - name: Download linux/amd64v2 artifact
-      uses: actions/download-artifact@v7
+      uses: actions/download-artifact@v8
       with:
         name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
         path: dist/
 
     - name: Download arm64 debian package
-      uses: actions/download-artifact@v7
+      uses: actions/download-artifact@v8
       with:
         name: ${{ env.APPLICATION }}_${{ needs.build-release.outputs.parsed-version }}_arm64.deb
         path: dist/
 
     - name: Download amd64 debian package
-      uses: actions/download-artifact@v7
+      uses: actions/download-artifact@v8
       with:
         name: ${{ env.APPLICATION }}_${{ needs.build-release.outputs.parsed-version }}_amd64.deb
         path: dist/
@@ -690,6 +699,14 @@ jobs:
     env:
       RELEASE_VERSION: ${{ inputs.release_version }}
     steps:
+      - name: Generate GitHub App token for git operations
+        id: generate_token_rollback
+        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf  ## v2.2.1
+        with:
+          app-id: ${{ vars.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
+          repositories: "erigon"
+
       - name: Checkout git repository ${{ env.APP_REPO }} reference ${{ inputs.checkout_ref }}
         uses: actions/checkout@v6
         with:
@@ -697,6 +714,7 @@ jobs:
           fetch-depth: 0
           ref: ${{ inputs.checkout_ref }}
           path: 'erigon'
+          token: ${{ steps.generate_token_rollback.outputs.token }}
 
       - name: Rollback - remove git tag ${{ inputs.release_version }}
         if: ${{ (inputs.perform_release) && (inputs.release_version != '') }}

@@ -160,7 +160,7 @@ jobs:
         continue-on-error: true
 
       - name: Upload output log
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: hive-workspace-log-${{ matrix.sim }}-${{ matrix.sim-limit }}
           path: hive/workspace/logs
