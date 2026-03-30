@@ -119,7 +119,7 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool, chain string, logger log.Lo
 		}
 		if has {
 			logger.Info("Re-Opening DB in exclusive mode to apply DB migrations")
-			rawDBExcl := opts.Exclusive(true).MustOpen()
+			rawDBExcl := opts.Accede(false).Exclusive(true).MustOpen()
 			if err := migrator.Apply(rawDBExcl, migrationsDB, datadirCli, "", logger); err != nil {
 				rawDBExcl.Close()
 				return nil, err
