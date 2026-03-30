@@ -111,10 +111,10 @@ func (a *ApiHandler) PostEthV1ValidatorDutiesPtc(w http.ResponseWriter, r *http.
 
 // payloadAttestationDataResponse matches the PayloadAttestationData spec type.
 type payloadAttestationDataResponse struct {
-	BeaconBlockRoot common.Hash `json:"beacon_block_root"`
-	Slot            uint64      `json:"slot,string"`
-	PayloadPresent  bool        `json:"payload_present"`
-	BlobDataAvailable bool      `json:"blob_data_available"`
+	BeaconBlockRoot   common.Hash `json:"beacon_block_root"`
+	Slot              uint64      `json:"slot,string"`
+	PayloadPresent    bool        `json:"payload_present"`
+	BlobDataAvailable bool        `json:"blob_data_available"`
 }
 
 // GetEthV1ValidatorPayloadAttestationData returns PayloadAttestationData for PTC validators.
@@ -157,9 +157,9 @@ func (a *ApiHandler) GetEthV1ValidatorPayloadAttestationData(w http.ResponseWrit
 	blobDataAvailable := payloadPresent
 
 	return newBeaconResponse(payloadAttestationDataResponse{
-		BeaconBlockRoot: headRoot,
-		Slot:            slot,
-		PayloadPresent:  payloadPresent,
+		BeaconBlockRoot:   headRoot,
+		Slot:              slot,
+		PayloadPresent:    payloadPresent,
 		BlobDataAvailable: blobDataAvailable,
 	}), nil
 }

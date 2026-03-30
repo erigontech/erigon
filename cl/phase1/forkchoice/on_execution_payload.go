@@ -387,6 +387,41 @@ func (f *ForkChoiceStore) applyEnvelope(ctx context.Context, signedEnvelope *clt
 	return true, nil
 }
 
+// StoreAnchorEnvelope persists an envelope to disk and updates eth2Roots without
+// running the CL state transition. Used during checkpoint sync where the finalized
+// state already includes the envelope's effects but forward sync needs the envelope
+// on disk to resolve parent execution payloads for subsequent blocks.
+// [New in Gloas:EIP7732]
+func (f *ForkChoiceStore) StoreAnchorEnvelope(blockRoot common.Hash, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
+	if signedEnvelope == nil || signedEnvelope.Message == nil {
+		return errors.New("StoreAnchorEnvelope: nil envelope")
+	}
+	envelope := signedEnvelope.Message
+
+	f.mu.Lock()
+	// Update eth2Roots mapping so FCU can resolve the EL block hash
+	if envelope.Payload != nil {
+		f.eth2Roots.Add(blockRoot, envelope.Payload.BlockHash)
+	}
+	// Persist to disk so HasEnvelope() returns true and forward sync can find it
+	if err := f.forkGraph.DumpEnvelopeOnDisk(blockRoot, signedEnvelope); err != nil {
+		f.mu.Unlock()
+		return fmt.Errorf("StoreAnchorEnvelope: failed to dump envelope: %w", err)
+	}
+	f.mu.Unlock()
+
+	// Write DB indices outside the lock
+	if f.db != nil {
+		ctx := context.Background()
+		if err := f.db.Update(ctx, func(tx kv.RwTx) error {
+			return beacon_indicies.WriteExecutionPayloadEnvelopeIndicies(tx, blockRoot, envelope)
+		}); err != nil {
+			return fmt.Errorf("StoreAnchorEnvelope: failed to write indices: %w", err)
+		}
+	}
+	return nil
+}
+
 // OnExecutionPayload processes an incoming execution payload envelope.
 // Run upon receiving a new execution payload from the builder.
 // If the corresponding block hasn't arrived yet, the envelope is queued and processed
