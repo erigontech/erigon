@@ -820,57 +820,30 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	if err != nil {
 		return err
 	}
-	sd.GetCommitmentCtx().SetHistoryStateReader(tx, toTxNum)
+	// For blockNum==0 there is no prior commitment state (GetAsOf at txNum=0
+	// falls back to latest for the commitment domain). Use commitmentAsOf=toTxNum
+	// so the trie is restored from the committed state at the end of block 0.
+	commitmentAsOf := minTxNum
+	if blockNum == 0 {
+		commitmentAsOf = toTxNum
+	}
+	// commitment branch data view: as of beginning of the block (or end for block 0)
+	// plain state data view: as of end of the block
+	splitStateReader := commitmentdb.NewSplitHistoryReader(tx, commitmentAsOf, toTxNum, true /* withHistory */)
+	sd.GetCommitmentCtx().SetStateReader(splitStateReader)
 	sd.GetCommitmentCtx().SetTrace(logger.Enabled(ctx, log.LvlTrace))
 	sd.GetCommitmentContext().SetDeferBranchUpdates(false)
 	latestTxNum, latestBlockNum, err := sd.SeekCommitment(ctx, tx) // seek commitment again with new history state reader
 	if err != nil {
 		return err
 	}
-	if latestBlockNum > blockNum {
-		return fmt.Errorf("commitment state blockNum is ahead of blockNum: %d > %d", latestBlockNum, blockNum)
+	if blockNum > 0 && latestBlockNum != blockNum-1 { // commitment domain reads branches at end of blockNum-1
+		return fmt.Errorf("commitment state blockNum doesn't match blockNum-1: %d != %d", latestBlockNum, blockNum-1)
 	}
-	if latestBlockNum < blockNum {
-		// Commitment state is from an earlier block. This is expected when intermediate blocks
-		// had no state changes (empty blocks). Verify the gap is truly empty.
-		if minTxNum > latestTxNum+1 {
-			gapAcc, err := touchHistoricalKeys(sd, tx, kv.AccountsDomain, latestTxNum+1, minTxNum, nil)
-			if err != nil {
-				return err
-			}
-			gapStorage, err := touchHistoricalKeys(sd, tx, kv.StorageDomain, latestTxNum+1, minTxNum, nil)
-			if err != nil {
-				return err
-			}
-			gapCode, err := touchHistoricalKeys(sd, tx, kv.CodeDomain, latestTxNum+1, minTxNum, nil)
-			if err != nil {
-				return err
-			}
-			if gapAcc+gapStorage+gapCode > 0 {
-				return fmt.Errorf("commitment state blockNum doesn't match blockNum: %d != %d (gap has %d acc, %d storage, %d code changes)", latestBlockNum, blockNum, gapAcc, gapStorage, gapCode)
-			}
-		}
-
-		// Verify gap blocks all share the same state root (no state changes confirmed above).
-		refHeader, err := br.HeaderByNumber(ctx, tx, latestBlockNum)
-		if err != nil {
-			return err
-		}
-		for gapBlock := latestBlockNum + 1; gapBlock < blockNum; gapBlock++ {
-			gapHeader, err := br.HeaderByNumber(ctx, tx, gapBlock)
-			if err != nil {
-				return err
-			}
-			if gapHeader.Root != refHeader.Root {
-				return fmt.Errorf("commitment state blockNum doesn't match blockNum: %d != %d (block %d has different state root: ref=%x header=%x)", latestBlockNum, blockNum, gapBlock, refHeader.Root, gapHeader.Root)
-			}
-		}
-		logger.Log(lvl, "commitment state is from earlier block (empty blocks in between)", "commitmentBlockNum", latestBlockNum, "blockNum", blockNum)
+	if blockNum > 0 && latestTxNum != minTxNum-1 { // commitment state is read as of minTxNum-1
+		return fmt.Errorf("commitment state txNum doesn't match minTxNum-1: %d != %d", latestTxNum, minTxNum-1)
 	}
-	if latestTxNum != maxTxNum && latestBlockNum == blockNum {
-		return fmt.Errorf("commitment state txNum doesn't match maxTxNum: %d != %d", latestTxNum, maxTxNum)
-	}
-	logger.Log(lvl, "commitment recalc info", "blockNum", blockNum, "minTxNum", minTxNum, "maxTxNum", maxTxNum, "toTxNum", toTxNum)
+	logger.Info("commitment recalc info", "blockNum", blockNum, "minTxNum", minTxNum, "maxTxNum", maxTxNum, "toTxNum", toTxNum)
 	trace := logger.Enabled(ctx, log.LvlTrace)
 	touchLoggingVisitor := func(k []byte) {
 		if trace {
