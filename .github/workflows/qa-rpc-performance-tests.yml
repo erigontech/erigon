@@ -309,21 +309,21 @@ jobs:
             echo outcome=$outcome
             echo result_file=$result_file
           
-            python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
-              --repo $client \
-              --branch $branch_name \
-              --commit $commit_hash \
-              --test_name rpc-performance-test-$client-$method \
-              --chain $CHAIN \
-              --runner ${{ runner.name }} \
-              --db_version $db_version \
-              --outcome $outcome \
-              --result_file $result_dir/$result_file
-        
-            if [ $? -ne 0 ]; then
-              failed_test=1
-              echo "Failure saving test results on DB"
-            fi
+            #python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
+            #  --repo $client \
+            #  --branch $branch_name \
+            #  --commit $commit_hash \
+            #  --test_name rpc-performance-test-$client-$method \
+            #  --chain $CHAIN \
+            #  --runner ${{ runner.name }} \
+            #  --db_version $db_version \
+            #  --outcome $outcome \
+            #  --result_file $result_dir/$result_file
+
+            #if [ $? -ne 0 ]; then
+            #  failed_test=1
+            #  echo "Failure saving test results on DB"
+            #fi
           
             # Save test results to a directory with timestamp and commit hash
             if [ -d "$result_dir" ]; then
