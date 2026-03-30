@@ -128,7 +128,8 @@ func NewHexPatriciaHashed(accountKeyLen int16, ctx PatriciaContext) *HexPatricia
 	if !ok {
 		hph = newHexPatriciaHashed()
 	}
-	hph.resetForReuse()
+	// No resetForReuse() needed — Release() already cleaned the object,
+	// and newHexPatriciaHashed() produces a zero-state struct.
 	hph.accountKeyLen = accountKeyLen
 	hph.ctx = ctx
 	return hph
@@ -206,13 +207,12 @@ func (hph *HexPatriciaHashed) resetForReuse() {
 	clear(hph.depthsToTxNum[:])
 }
 
-// Release returns this HexPatriciaHashed to the pool for reuse.
+// Release clears all mutable state and returns this HexPatriciaHashed to the pool for reuse.
+// This ensures no stale database cursor references (PatriciaContext, WarmupCache) survive
+// in the pool and releases large transient data (maps, buffers) for GC promptly.
 // After calling Release, the caller must not use the struct.
 func (hph *HexPatriciaHashed) Release() {
-	hph.ctx = nil
-	hph.cache = nil
-	hph.mountedTries = nil
-	hph.capture = nil
+	hph.resetForReuse()
 	hphPool.Put(hph)
 }
 

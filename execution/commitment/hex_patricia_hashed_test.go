@@ -2052,10 +2052,9 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		require.Equal(t, root, rootWitness, "root witness should have the same root hash as trie")
 
 		for i, plainKeyToWitness := range plainKeysToWitness {
-			keyExists := keyExists[i]
-			if keyExists { // to be checked only if key should exist
-				hashedKeyWitnessed, err := CompactKey(KeyToHexNibbleHash(plainKeyToWitness))
-				require.NoError(t, err)
+			hashedKeyWitnessed, err := CompactKey(KeyToHexNibbleHash(plainKeyToWitness))
+			require.NoError(t, err)
+			if keyExists[i] {
 				var gotValue bool
 				if len(plainKeyToWitness) == length.Addr {
 					_, gotValue = witnessTrie.GetAccount(hashedKeyWitnessed)
@@ -2063,6 +2062,84 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 					_, gotValue = witnessTrie.Get(hashedKeyWitnessed)
 				}
 				require.True(t, gotValue, "value not found in witness trie for key %x", plainKeyToWitness)
+			} else {
+				// Verify non-existing keys: the witness trie should have proof nodes
+				// (gotValue==true) but no actual value, proving absence without hitting a HashNode.
+				if len(plainKeyToWitness) == length.Addr {
+					acc, gotValue := witnessTrie.GetAccount(hashedKeyWitnessed)
+					require.True(t, gotValue, "witness trie missing proof for non-existing key %x", plainKeyToWitness)
+					require.Nil(t, acc, "non-existing key %x should not have account in witness trie", plainKeyToWitness)
+				} else {
+					val, gotValue := witnessTrie.Get(hashedKeyWitnessed)
+					require.True(t, gotValue, "witness trie missing proof for non-existing key %x", plainKeyToWitness)
+					require.Nil(t, val, "non-existing key %x should not have value in witness trie", plainKeyToWitness)
+				}
+			}
+		}
+	}
+
+	// buildTrieMultiRoundAndWitness processes multiple rounds of updates through
+	// the same trie, then generates a witness and validates it. Each round is a
+	// separate UpdateBuilder whose updates are applied and processed sequentially.
+	buildTrieMultiRoundAndWitness := func(t *testing.T, builders []*UpdateBuilder, plainKeysToWitness [][]byte, keyExists []bool) {
+		t.Helper()
+		require.Equal(t, len(plainKeysToWitness), len(keyExists), "plainKeysToWitness and keysExist must have the same length")
+
+		ctx := context.Background()
+		ms := NewMockState(t)
+		hph := NewHexPatriciaHashed(length.Addr, ms)
+		hph.SetTrace(false)
+
+		var root []byte
+		for _, builder := range builders {
+			plainKeys, updates := builder.Build()
+			err := ms.applyPlainUpdates(plainKeys, updates)
+			require.NoError(t, err)
+
+			toProcess := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+			r, err := hph.Process(ctx, toProcess, "", nil, WarmupConfig{})
+			toProcess.Close()
+			require.NoError(t, err)
+			root = r
+		}
+
+		toWitness := NewUpdates(ModeDirect, "", KeyToHexNibbleHash)
+		defer toWitness.Close()
+		for _, plainKeyToWitness := range plainKeysToWitness {
+			if len(plainKeyToWitness) == length.Addr {
+				toWitness.TouchPlainKey(string(plainKeyToWitness), nil, toWitness.TouchAccount)
+			} else {
+				toWitness.TouchPlainKey(string(plainKeyToWitness), nil, toWitness.TouchStorage)
+			}
+		}
+
+		witnessTrie, rootWitness, err := hph.GenerateWitness(ctx, toWitness, nil, "")
+		require.NoError(t, err)
+		require.NotNil(t, witnessTrie, "witness trie should not be nil")
+		require.NotNil(t, rootWitness, "root witness should not be nil")
+		require.Equal(t, root, rootWitness, "root witness should have the same root hash as trie")
+
+		for i, plainKeyToWitness := range plainKeysToWitness {
+			hashedKeyWitnessed, err := CompactKey(KeyToHexNibbleHash(plainKeyToWitness))
+			require.NoError(t, err)
+			if keyExists[i] {
+				var gotValue bool
+				if len(plainKeyToWitness) == length.Addr {
+					_, gotValue = witnessTrie.GetAccount(hashedKeyWitnessed)
+				} else {
+					_, gotValue = witnessTrie.Get(hashedKeyWitnessed)
+				}
+				require.True(t, gotValue, "value not found in witness trie for key %x", plainKeyToWitness)
+			} else {
+				if len(plainKeyToWitness) == length.Addr {
+					acc, gotValue := witnessTrie.GetAccount(hashedKeyWitnessed)
+					require.True(t, gotValue, "witness trie missing proof for non-existing key %x", plainKeyToWitness)
+					require.Nil(t, acc, "non-existing key %x should not have account in witness trie", plainKeyToWitness)
+				} else {
+					val, gotValue := witnessTrie.Get(hashedKeyWitnessed)
+					require.True(t, gotValue, "witness trie missing proof for non-existing key %x", plainKeyToWitness)
+					require.Nil(t, val, "non-existing key %x should not have value in witness trie", plainKeyToWitness)
+				}
 			}
 		}
 	}
@@ -2444,7 +2521,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 			fmt.Printf("storage %x -> %x\n", storageKeysList[sl], storageKeysList[sl])
 		}
 
-		buildTrieAndWitness(t, builder, [][]byte{addrToProve}, []bool{false} /* keyExists */)
+		buildTrieAndWitness(t, builder, [][]byte{fullStorageKeyToProve}, []bool{false} /* keyExists */)
 	})
 
 	t.Run("MultiKeyWitness_AccountWithSingletonStorage", func(t *testing.T) {
@@ -2547,6 +2624,326 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		keyExists := []bool{true, true, false}
 		buildTrieAndWitness(t, builder, keysToProve, keyExists)
 	})
+
+	// ===== Category 1: Multi-Round Process (Non-Empty Starting State) =====
+
+	t.Run("MultiRound_AccountBalanceUpdate", func(t *testing.T) {
+		// Round 1: Create 5 accounts with balances
+		accounts, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 5)
+
+		builder1 := NewUpdateBuilder()
+		for i, addr := range accounts {
+			builder1.Balance(common.Bytes2Hex(addr), uint64(i+1)*100)
+		}
+
+		// Round 2: Update balance of 2 existing accounts
+		builder2 := NewUpdateBuilder()
+		builder2.Balance(common.Bytes2Hex(accounts[0]), 9999)
+		builder2.Balance(common.Bytes2Hex(accounts[2]), 8888)
+
+		// Witness one of the updated accounts
+		buildTrieMultiRoundAndWitness(t, []*UpdateBuilder{builder1, builder2},
+			[][]byte{accounts[0]}, []bool{true})
+	})
+
+	t.Run("MultiRound_AddAccountsToExistingTrie", func(t *testing.T) {
+		// Round 1: Create 3 accounts with prefix 0x3
+		round1Accounts, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x3}, length.Addr, 0, 3)
+
+		builder1 := NewUpdateBuilder()
+		for i, addr := range round1Accounts {
+			builder1.Balance(common.Bytes2Hex(addr), uint64(i+1)*10)
+		}
+
+		// Round 2: Add 3 new accounts with prefix 0x7 (different branch)
+		round2Accounts, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x7}, length.Addr, 0, 3)
+
+		builder2 := NewUpdateBuilder()
+		for i, addr := range round2Accounts {
+			builder2.Balance(common.Bytes2Hex(addr), uint64(i+1)*20)
+		}
+
+		// Witness one from each round
+		buildTrieMultiRoundAndWitness(t, []*UpdateBuilder{builder1, builder2},
+			[][]byte{round1Accounts[0], round2Accounts[0]}, []bool{true, true})
+	})
+
+	t.Run("MultiRound_StorageUpdateOnExistingAccount", func(t *testing.T) {
+		// Round 1: Create 2 accounts, one with 3 storage slots
+		accounts, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 2)
+		storageSlots, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Hash, 0, 3)
+
+		builder1 := NewUpdateBuilder()
+		for i, addr := range accounts {
+			builder1.Balance(common.Bytes2Hex(addr), uint64(i+1)*50)
+		}
+		for _, slot := range storageSlots {
+			builder1.Storage(common.Bytes2Hex(accounts[0]), common.Bytes2Hex(slot), common.Bytes2Hex(slot))
+		}
+
+		// Round 2: Update value of one existing storage slot + add 1 new slot
+		newSlot, _ := generateKeyWithHashedPrefix([]byte{0xf}, length.Hash)
+
+		builder2 := NewUpdateBuilder()
+		// Update existing slot with a new value
+		updatedValue := make([]byte, length.Hash)
+		copy(updatedValue, []byte{0xaa, 0xbb, 0xcc})
+		builder2.Storage(common.Bytes2Hex(accounts[0]), common.Bytes2Hex(storageSlots[0]), common.Bytes2Hex(updatedValue))
+		// Add new slot
+		builder2.Storage(common.Bytes2Hex(accounts[0]), common.Bytes2Hex(newSlot), common.Bytes2Hex(newSlot))
+
+		// Witness: updated storage slot + new storage slot
+		fullUpdatedKey := append(common.Copy(accounts[0]), storageSlots[0]...)
+		fullNewKey := append(common.Copy(accounts[0]), newSlot...)
+
+		buildTrieMultiRoundAndWitness(t, []*UpdateBuilder{builder1, builder2},
+			[][]byte{fullUpdatedKey, fullNewKey}, []bool{true, true})
+	})
+
+	// ===== Category 2: Deletions =====
+
+	t.Run("DeletedAccount_NonExistentProof", func(t *testing.T) {
+		// Note: UpdateBuilder.Delete() removes the balance from its internal maps,
+		// so Build() emits only a DeleteUpdate for this key (never a create+delete).
+		// The trie sees a delete for a key it never had, making this effectively a
+		// non-existence proof test. MultiRound_DeleteAccount_ThenWitness (test 2.2)
+		// covers the true create-then-delete scenario via separate Process rounds.
+		accounts, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 5)
+
+		builder := NewUpdateBuilder()
+		for i, addr := range accounts {
+			builder.Balance(common.Bytes2Hex(addr), uint64(i+1)*100)
+		}
+		// Delete one account in the same round
+		builder.Delete(common.Bytes2Hex(accounts[2]))
+
+		buildTrieAndWitness(t, builder, [][]byte{accounts[2]}, []bool{false})
+	})
+
+	t.Run("MultiRound_DeleteAccount_ThenWitness", func(t *testing.T) {
+		accounts, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 5)
+
+		// Round 1: Create 5 accounts
+		builder1 := NewUpdateBuilder()
+		for i, addr := range accounts {
+			builder1.Balance(common.Bytes2Hex(addr), uint64(i+1)*100)
+		}
+
+		// Round 2: Delete 1 account
+		builder2 := NewUpdateBuilder()
+		builder2.Delete(common.Bytes2Hex(accounts[1]))
+
+		// Witness: deleted account = false, surviving account = true
+		buildTrieMultiRoundAndWitness(t, []*UpdateBuilder{builder1, builder2},
+			[][]byte{accounts[1], accounts[3]}, []bool{false, true})
+	})
+
+	t.Run("MultiRound_DeleteStorage_ThenWitness", func(t *testing.T) {
+		accounts, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 2)
+		addr := accounts[0]
+		storageSlots, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Hash, 0, 5)
+
+		// Round 1: Create 2 accounts, one with 5 storage slots
+		builder1 := NewUpdateBuilder()
+		for i, a := range accounts {
+			builder1.Balance(common.Bytes2Hex(a), uint64(i+1)*100)
+		}
+		for _, slot := range storageSlots {
+			builder1.Storage(common.Bytes2Hex(addr), common.Bytes2Hex(slot), common.Bytes2Hex(slot))
+		}
+
+		// Round 2: Delete 2 storage slots
+		builder2 := NewUpdateBuilder()
+		builder2.DeleteStorage(common.Bytes2Hex(addr), common.Bytes2Hex(storageSlots[0]))
+		builder2.DeleteStorage(common.Bytes2Hex(addr), common.Bytes2Hex(storageSlots[1]))
+
+		// Witness: deleted slot = false, surviving slot = true
+		deletedKey := append(common.Copy(addr), storageSlots[0]...)
+		survivingKey := append(common.Copy(addr), storageSlots[3]...)
+		require.Equal(t, length.Addr+length.Hash, len(deletedKey))
+		require.Equal(t, length.Addr+length.Hash, len(survivingKey))
+
+		buildTrieMultiRoundAndWitness(t, []*UpdateBuilder{builder1, builder2},
+			[][]byte{deletedKey, survivingKey}, []bool{false, true})
+	})
+
+	// ===== Category 3: Accounts With Code =====
+
+	t.Run("AccountWithCodeHash", func(t *testing.T) {
+		accounts, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 3)
+
+		// Non-empty code hash (32 bytes)
+		codeHashBytes := make([]byte, length.Hash)
+		for i := range codeHashBytes {
+			codeHashBytes[i] = byte(i + 1)
+		}
+
+		builder := NewUpdateBuilder()
+		for i, addr := range accounts {
+			builder.Balance(common.Bytes2Hex(addr), uint64(i+1)*100)
+		}
+		// Set CodeHash on one account
+		builder.CodeHash(common.Bytes2Hex(accounts[1]), common.Bytes2Hex(codeHashBytes))
+
+		buildTrieAndWitness(t, builder, [][]byte{accounts[1]}, []bool{true})
+	})
+
+	t.Run("AccountWithCodeHash_AndStorage", func(t *testing.T) {
+		accounts, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 2)
+		addr := accounts[0]
+		storageSlots, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Hash, 0, 3)
+
+		codeHashBytes := make([]byte, length.Hash)
+		for i := range codeHashBytes {
+			codeHashBytes[i] = byte(i + 1)
+		}
+
+		builder := NewUpdateBuilder()
+		for i, a := range accounts {
+			builder.Balance(common.Bytes2Hex(a), uint64(i+1)*500)
+		}
+		builder.CodeHash(common.Bytes2Hex(addr), common.Bytes2Hex(codeHashBytes))
+		for _, slot := range storageSlots {
+			builder.Storage(common.Bytes2Hex(addr), common.Bytes2Hex(slot), common.Bytes2Hex(slot))
+		}
+
+		// Witness: account key + 1 storage slot key
+		fullStorageKey := append(common.Copy(addr), storageSlots[1]...)
+		require.Equal(t, length.Addr+length.Hash, len(fullStorageKey))
+
+		buildTrieAndWitness(t, builder, [][]byte{addr, fullStorageKey}, []bool{true, true})
+	})
+
+	// ===== Category 4: Mixed Existing + Non-Existing Keys =====
+
+	t.Run("MixedAccountProof_ExistingAndNonExisting", func(t *testing.T) {
+		accounts, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 10)
+
+		builder := NewUpdateBuilder()
+		for i, addr := range accounts {
+			builder.Balance(common.Bytes2Hex(addr), uint64(i+1)*10)
+		}
+
+		// Generate 2 non-existing account keys
+		nonExistent1, _ := generateKeyWithHashedPrefix([]byte{0xe, 0xe}, length.Addr)
+		nonExistent2, _ := generateKeyWithHashedPrefix([]byte{0xd, 0xd}, length.Addr)
+
+		keysToWitness := [][]byte{accounts[0], accounts[5], nonExistent1, nonExistent2}
+		keyExists := []bool{true, true, false, false}
+		buildTrieAndWitness(t, builder, keysToWitness, keyExists)
+	})
+
+	t.Run("MixedStorageProof_ExistingAndNonExisting", func(t *testing.T) {
+		accounts, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 2)
+		addr := accounts[0]
+		storageSlots, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Hash, 0, 5)
+
+		builder := NewUpdateBuilder()
+		for i, a := range accounts {
+			builder.Balance(common.Bytes2Hex(a), uint64(i+1)*100)
+		}
+		for _, slot := range storageSlots {
+			builder.Storage(common.Bytes2Hex(addr), common.Bytes2Hex(slot), common.Bytes2Hex(slot))
+		}
+
+		// Generate 2 non-existing storage keys for the same account
+		nonExistSlot1, _ := generateKeyWithHashedPrefix([]byte{0xe, 0xe}, length.Hash)
+		nonExistSlot2, _ := generateKeyWithHashedPrefix([]byte{0xd, 0xd}, length.Hash)
+
+		existKey1 := append(common.Copy(addr), storageSlots[0]...)
+		existKey2 := append(common.Copy(addr), storageSlots[3]...)
+		nonExistKey1 := append(common.Copy(addr), nonExistSlot1...)
+		nonExistKey2 := append(common.Copy(addr), nonExistSlot2...)
+
+		keysToWitness := [][]byte{existKey1, existKey2, nonExistKey1, nonExistKey2}
+		keyExists := []bool{true, true, false, false}
+		buildTrieAndWitness(t, builder, keysToWitness, keyExists)
+	})
+
+	// ===== Category 5: Deep/Large Tries =====
+
+	t.Run("DeepStorageTrie_ManySlots", func(t *testing.T) {
+		accounts, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 2)
+		addr := accounts[0]
+		storageSlots, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Hash, 0, 50)
+
+		builder := NewUpdateBuilder()
+		for i, a := range accounts {
+			builder.Balance(common.Bytes2Hex(a), uint64(i+1)*100)
+		}
+		for _, slot := range storageSlots {
+			builder.Storage(common.Bytes2Hex(addr), common.Bytes2Hex(slot), common.Bytes2Hex(slot))
+		}
+
+		// Witness 1 storage slot from deep in the trie
+		fullStorageKey := append(common.Copy(addr), storageSlots[25]...)
+		require.Equal(t, length.Addr+length.Hash, len(fullStorageKey))
+
+		buildTrieAndWitness(t, builder, [][]byte{fullStorageKey}, []bool{true})
+	})
+
+	t.Run("LargeAccountTrie_100Accounts", func(t *testing.T) {
+		accounts, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 100)
+
+		builder := NewUpdateBuilder()
+		for i, addr := range accounts {
+			builder.Balance(common.Bytes2Hex(addr), uint64(i+1))
+		}
+
+		// Witness 3 accounts spread across the trie
+		keysToWitness := [][]byte{accounts[0], accounts[50], accounts[99]}
+		keyExists := []bool{true, true, true}
+		buildTrieAndWitness(t, builder, keysToWitness, keyExists)
+	})
+
+	// ===== Category 6: Edge Cases =====
+
+	t.Run("AccountWithZeroBalanceNonZeroNonce", func(t *testing.T) {
+		accounts, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 1)
+
+		builder := NewUpdateBuilder()
+		builder.Balance(common.Bytes2Hex(accounts[0]), 0)
+		builder.Nonce(common.Bytes2Hex(accounts[0]), 42)
+
+		buildTrieAndWitness(t, builder, [][]byte{accounts[0]}, []bool{true})
+	})
+
+	t.Run("AccountsWithLongCommonPrefix", func(t *testing.T) {
+		// Generate 5 accounts whose hashed keys share a 4-nibble common prefix.
+		// 4 nibbles is enough to create deep extension nodes while keeping
+		// brute-force key generation fast (~65K attempts vs ~16M for 6 nibbles).
+		accounts, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0xa, 0xb, 0xc, 0xd}, length.Addr, 4, 5)
+
+		builder := NewUpdateBuilder()
+		for i, addr := range accounts {
+			builder.Balance(common.Bytes2Hex(addr), uint64(i+1)*10)
+		}
+
+		buildTrieAndWitness(t, builder, [][]byte{accounts[2]}, []bool{true})
+	})
+
+	t.Run("MultipleAccountsWithStorage_WitnessStorageAcrossAccounts", func(t *testing.T) {
+		// Create 3 accounts, each with 3 storage slots
+		accounts, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 3)
+
+		builder := NewUpdateBuilder()
+		witnessKeys := make([][]byte, 0, 3)
+		for i, addr := range accounts {
+			builder.Balance(common.Bytes2Hex(addr), uint64(i+1)*100)
+			storageSlots, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Hash, 0, 3)
+			for _, slot := range storageSlots {
+				builder.Storage(common.Bytes2Hex(addr), common.Bytes2Hex(slot), common.Bytes2Hex(slot))
+			}
+			// Pick 1 storage slot from this account for the witness
+			fullKey := append(common.Copy(addr), storageSlots[1]...)
+			require.Equal(t, length.Addr+length.Hash, len(fullKey))
+			witnessKeys = append(witnessKeys, fullKey)
+		}
+
+		keyExists := []bool{true, true, true}
+		buildTrieAndWitness(t, builder, witnessKeys, keyExists)
+	})
+
 	t.Run("StorageLeafRLPShorterThan32Bytes", func(t *testing.T) {
 		// Reproduces a bug where storage leaf nodes whose RLP encoding is < 32 bytes
 		// should be embedded inline in the parent branch node per MPT spec, but the
