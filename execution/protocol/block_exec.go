@@ -164,6 +164,29 @@ func ExecuteBlockEphemerally(
 		return nil, fmt.Errorf("mismatched receipt headers for block %d (%s != %s)", block.NumberU64(), receiptSha.Hex(), block.ReceiptHash().Hex())
 	}
 
+	var bloom types.Bloom
+	if !vmConfig.NoReceipts {
+		bloom = types.CreateBloom(receipts)
+		if !vmConfig.StatelessExec && bloom != header.Bloom {
+			return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
+		}
+	}
+
+	// Run block finalization (EIP-7002/EIP-7251 system calls) before checking gas,
+	// so that system call gas is included in the block gas total.
+	var newBlock *types.Block
+	var err error
+	var sysCallGasUsed uint64
+	if !vmConfig.ReadOnly {
+		txs := block.Transactions()
+		newBlock, _, sysCallGasUsed, err = FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, true, logger, vmConfig.Tracer)
+		if err != nil {
+			return nil, err
+		}
+	}
+	// Include gas consumed by EIP-7002/EIP-7251 system calls (counted in header.GasUsed).
+	gasUsed.BlockRegular += sysCallGasUsed
+
 	// EIP-8037: compute block-level Bottleneck for Amsterdam.
 	// Pre-Amsterdam: blockStateGasUsed is 0, so this is a no-op.
 	blockGasUsed := gasUsed.BlockGasUsed()
@@ -175,22 +198,6 @@ func ExecuteBlockEphemerally(
 		return nil, fmt.Errorf("blob gas used by execution: %d, in header: %d", gasUsed.Blob, *header.BlobGasUsed)
 	}
 
-	var bloom types.Bloom
-	if !vmConfig.NoReceipts {
-		bloom = types.CreateBloom(receipts)
-		if !vmConfig.StatelessExec && bloom != header.Bloom {
-			return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
-		}
-	}
-	var newBlock *types.Block
-	var err error
-	if !vmConfig.ReadOnly {
-		txs := block.Transactions()
-		newBlock, _, err = FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, true, logger, vmConfig.Tracer)
-		if err != nil {
-			return nil, err
-		}
-	}
 	blockLogs := ibs.Logs()
 	newRoot := newBlock.Root()
 	execRs := &EphemeralExecResult{
@@ -237,7 +244,7 @@ func rlpHash(x any) (h common.Hash) {
 	return h
 }
 
-func SysCallContract(contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine rules.EngineReader, constCall bool, vmCfg vm.Config) (result []byte, err error) {
+func SysCallContract(contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine rules.EngineReader, constCall bool, vmCfg vm.Config) (result []byte, gasUsed uint64, err error) {
 	isBor := chainConfig.Bor != nil
 	var author accounts.Address
 	if isBor {
@@ -249,7 +256,7 @@ func SysCallContract(contract accounts.Address, data []byte, chainConfig *chain.
 	return SysCallContractWithBlockContext(contract, data, chainConfig, ibs, blockContext, constCall, vmCfg)
 }
 
-func SysCallContractWithBlockContext(contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, blockContext evmtypes.BlockContext, constCall bool, vmCfg vm.Config) (result []byte, err error) {
+func SysCallContractWithBlockContext(contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, blockContext evmtypes.BlockContext, constCall bool, vmCfg vm.Config) (result []byte, gasUsed uint64, err error) {
 	isBor := chainConfig.Bor != nil
 	msg := types.NewMessage(
 		params.SystemAddress,
@@ -281,7 +288,7 @@ func SysCallContractWithBlockContext(contract accounts.Address, data []byte, cha
 		Regular: msg.Gas(),
 		State:   0, // state gas reservoir will consume from regular gas for sys calls
 	}
-	ret, _, err := evm.Call(
+	ret, leftover, err := evm.Call(
 		msg.From(),
 		msg.To(),
 		msg.Data(),
@@ -290,10 +297,10 @@ func SysCallContractWithBlockContext(contract accounts.Address, data []byte, cha
 		false,
 	)
 	if isBor && err != nil {
-		return nil, nil
+		return nil, 0, nil
 	}
 
-	return ret, err
+	return ret, mdGas.Regular - leftover.Regular, err
 }
 
 // SysCreate is a special (system) contract creation methods for genesis constructors.
@@ -341,9 +348,10 @@ func FinalizeBlockExecution(
 	isMining bool,
 	logger log.Logger,
 	tracer *tracing.Hooks,
-) (newBlock *types.Block, retRequests types.FlatRequests, err error) {
+) (newBlock *types.Block, retRequests types.FlatRequests, sysCallGasUsed uint64, err error) {
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-		ret, err := SysCallContract(contract, data, cc, ibs, header, engine, false /* constCall */, vm.Config{})
+		ret, gas, err := SysCallContract(contract, data, cc, ibs, header, engine, false /* constCall */, vm.Config{})
+		sysCallGasUsed += gas
 		return ret, err
 	}
 
@@ -353,22 +361,22 @@ func FinalizeBlockExecution(
 		retRequests, err = engine.Finalize(cc, header, ibs, uncles, receipts, withdrawals, chainReader, syscall, false, logger)
 	}
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, accounts.NilAddress, cc)
 	if err := ibs.CommitBlock(blockContext.Rules(cc), stateWriter); err != nil {
-		return nil, nil, fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
+		return nil, nil, 0, fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
 	}
 
-	return newBlock, retRequests, nil
+	return newBlock, retRequests, sysCallGasUsed, nil
 }
 
 func InitializeBlockExecution(engine rules.Engine, chain rules.ChainHeaderReader, header *types.Header,
 	cc *chain.Config, ibs *state.IntraBlockState, stateWriter state.StateWriter, logger log.Logger, tracer *tracing.Hooks,
 ) error {
 	err := engine.Initialize(cc, chain, header, ibs, func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-		ret, err := SysCallContract(contract, data, cc, ibState, header, engine, constCall, vm.Config{})
+		ret, _, err := SysCallContract(contract, data, cc, ibState, header, engine, constCall, vm.Config{})
 		return ret, err
 	}, logger, tracer)
 	if err != nil {
