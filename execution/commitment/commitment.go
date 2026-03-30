@@ -1538,7 +1538,9 @@ type Updates struct {
 
 	// onHashedKey is called with the hashed key after TouchPlainKey computes it.
 	// Used by the branch prefetcher to pre-warm the persistent cache.
-	onHashedKey func(hashedKey []byte)
+	// Stored as atomic.Pointer because SetOnHashedKey may be called from
+	// StopBranchPrefetcher concurrently with TouchPlainKey reads.
+	onHashedKey atomic.Pointer[func(hashedKey []byte)]
 }
 
 // arenaAlloc appends b to the byte arena and returns the sub-slice.
@@ -1654,7 +1656,14 @@ func (t *Updates) PlainKeys() map[string]struct{} {
 }
 
 // SetOnHashedKey sets a callback invoked with each hashed key during TouchPlainKey.
-func (t *Updates) SetOnHashedKey(fn func(hashedKey []byte)) { t.onHashedKey = fn }
+// Pass nil to clear the callback. Thread-safe (uses atomic store).
+func (t *Updates) SetOnHashedKey(fn func(hashedKey []byte)) {
+	if fn == nil {
+		t.onHashedKey.Store(nil)
+	} else {
+		t.onHashedKey.Store(&fn)
+	}
+}
 
 func (t *Updates) Size() (updates uint64) {
 	switch t.mode {
@@ -1691,8 +1700,8 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 			keyBytes := common.ToBytesZeroCopy(key)
 			hashedKey := t.hasher(keyBytes)
 
-			if t.onHashedKey != nil {
-				t.onHashedKey(hashedKey)
+			if fn := t.onHashedKey.Load(); fn != nil {
+				(*fn)(hashedKey)
 			}
 
 			var err error

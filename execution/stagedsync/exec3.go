@@ -199,7 +199,12 @@ func ExecV3(ctx context.Context,
 
 	doms.EnableParaTrieDB(cfg.db)
 	doms.EnableTrieWarmup(true)
-	// Do it only for chain-tip blocks!
+	// Enable warmup cache only for chain-tip (non-applying) blocks.
+	// When isApplyingBlocks is true we are processing a backlog of blocks in bulk
+	// and the warmup cache would be counter-productive: cached account/storage
+	// values become stale quickly and the memory overhead is not worthwhile.
+	// At the chain tip (isApplyingBlocks=false), blocks arrive one at a time and
+	// the cache significantly reduces DB reads across consecutive commitments.
 	doms.EnableWarmupCache(!isApplyingBlocks)
 	doms.StartBranchPrefetcher(ctx)
 	postValidator := newBlockPostExecutionValidator()

@@ -42,6 +42,11 @@ import (
 //
 // Thread safety: pinned arrays protected by RWMutex (low contention — mostly reads).
 // LRU tier uses hashicorp/golang-lru which is internally thread-safe.
+// Note on struct layout: hits/misses atomics share a cache line with the LRU
+// pointer and mu. In theory this could cause false sharing under heavy
+// contention, but in practice the pinned tier (hot path) is RWMutex-guarded
+// and the atomics are simple counters — the overhead is negligible compared
+// to the DB reads this cache avoids. Not worth a cache-line pad for now.
 type BranchCache struct {
 	t0 []byte
 	t1 [16][]byte

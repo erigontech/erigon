@@ -25,7 +25,6 @@ type BranchPrefetcher struct {
 
 	prefetched atomic.Uint64
 	started    atomic.Bool
-	closed     atomic.Bool
 }
 
 // NewBranchPrefetcher creates a prefetcher that populates the given BranchCache.
@@ -94,26 +93,40 @@ func (p *BranchPrefetcher) prefetchBranches(trieCtx PatriciaContext, hashedKey [
 }
 
 // Submit enqueues a hashed key for branch prefetching. Non-blocking; drops if full.
+// Safe to call concurrently with Stop — uses defer/recover to handle the channel
+// being closed between the ctx.Done() check and the send.
 func (p *BranchPrefetcher) Submit(hashedKey []byte) {
-	if !p.started.Load() || p.closed.Load() {
+	if !p.started.Load() {
 		return
 	}
 	// Make a copy since caller may reuse the buffer
 	key := make([]byte, len(hashedKey))
 	copy(key, hashedKey)
+
+	// Use ctx.Done() to detect shutdown. The defer/recover guards against the
+	// narrow window where Stop() closes the channel between our select check
+	// and the actual send.
+	defer func() { recover() }() //nolint:errcheck
 	select {
+	case <-p.ctx.Done():
+		return
 	case p.work <- key:
 	default: // drop if channel full — prefetching is best-effort
 	}
 }
 
 // SubmitPlainKey hashes a plain key (address or address+slot) and submits it for prefetch.
+// Safe to call concurrently with Stop (see Submit for details).
 func (p *BranchPrefetcher) SubmitPlainKey(plainKey []byte) {
-	if !p.started.Load() || p.closed.Load() {
+	if !p.started.Load() {
 		return
 	}
 	hashedKey := KeyToHexNibbleHash(plainKey)
+
+	defer func() { recover() }() //nolint:errcheck
 	select {
+	case <-p.ctx.Done():
+		return
 	case p.work <- hashedKey:
 	default:
 	}
@@ -124,16 +137,21 @@ func (p *BranchPrefetcher) Prefetched() uint64 {
 	return p.prefetched.Load()
 }
 
-// Stop drains pending work, waits for workers to finish, and releases resources.
+// Stop cancels the context, closes the work channel, and waits for workers to finish.
+// Safe to call multiple times — only the first call has effect.
 func (p *BranchPrefetcher) Stop() {
-	if p.closed.Swap(true) {
+	if !p.started.Load() {
 		return
 	}
+	// Cancel first so Submit/SubmitPlainKey observe ctx.Done() before we close
+	// the channel, eliminating the TOCTOU race.
+	p.cancel()
 	if p.work != nil {
 		close(p.work)
 	}
 	if p.g != nil {
 		p.g.Wait()
 	}
-	p.cancel()
+	// Mark not started so subsequent Stop() calls are no-ops and Submit is rejected.
+	p.started.Store(false)
 }

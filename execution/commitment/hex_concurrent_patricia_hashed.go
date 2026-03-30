@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -43,9 +44,11 @@ func (b *bufferedTrieContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
 
 func (b *bufferedTrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {
 	key := string(prefix)
-	b.writes[key] = data
+	// Clone data and prevData: callers (CollectUpdate) already copy today, but
+	// cloning here makes the buffer self-contained regardless of caller changes.
+	b.writes[key] = slices.Clone(data)
 	if _, exists := b.prev[key]; !exists {
-		b.prev[key] = prevData
+		b.prev[key] = slices.Clone(prevData)
 	}
 	return nil
 }
@@ -63,6 +66,9 @@ func (b *bufferedTrieContext) TxNum() uint64 {
 }
 
 // flush writes all buffered PutBranch calls through the target context.
+// Map iteration order is non-deterministic, but that is fine: each prefix
+// is independent — PutBranch writes are keyed by distinct compact prefixes
+// and the underlying domain storage is order-independent.
 func (b *bufferedTrieContext) flush(target PatriciaContext) error {
 	for key, data := range b.writes {
 		if err := target.PutBranch([]byte(key), data, b.prev[key]); err != nil {

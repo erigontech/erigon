@@ -29,8 +29,7 @@ func (m *mockPatriciaContext) Storage(plainKey []byte) (*Update, error) { return
 func (m *mockPatriciaContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {
 	return nil
 }
-func (m *mockPatriciaContext) TxNum() uint64        { return 0 }
-func (m *mockPatriciaContext) Variant() TrieVariant { return VariantHexPatriciaTrie }
+func (m *mockPatriciaContext) TxNum() uint64 { return 0 }
 
 func TestBranchPrefetcher_StartStop(t *testing.T) {
 	cache := NewBranchCache(1024)
