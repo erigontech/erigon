@@ -7,8 +7,8 @@ import (
 )
 
 const (
-	epbsPreferencesPoolSize        = 64  // ~2 epochs of slots
-	epbsHighestBidsPoolSize        = 128 // multiple builders × parent hashes × a few slots
+	epbsPreferencesPoolSize         = 64  // ~2 epochs of slots
+	epbsHighestBidsPoolSize         = 128 // multiple builders × parent hashes × a few slots
 	epbsPayloadAttestationsPoolSize = 512 // one slot's worth of PTC votes
 )
 
