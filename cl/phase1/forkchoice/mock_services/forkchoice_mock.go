@@ -333,6 +333,10 @@ func (f *ForkChoiceStorageMock) OnExecutionPayload(ctx context.Context, signedEn
 	return nil
 }
 
+func (f *ForkChoiceStorageMock) StoreAnchorEnvelope(blockRoot common.Hash, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
+	return nil
+}
+
 func (f *ForkChoiceStorageMock) OnPayloadAttestationMessage(msg *cltypes.PayloadAttestationMessage, isFromBlock bool) error {
 	return nil
 }
