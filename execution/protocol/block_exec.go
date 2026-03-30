@@ -300,7 +300,11 @@ func SysCallContractWithBlockContext(contract accounts.Address, data []byte, cha
 		return nil, 0, nil
 	}
 
-	return ret, mdGas.Regular - leftover.Regular, err
+	consumed := mdGas.Regular - leftover.Regular
+	if dbg.TraceGas {
+		log.Warn("SysCallContractWithBlockContext gas", "contract", contract, "initial", mdGas.Regular, "leftoverRegular", leftover.Regular, "leftoverState", leftover.State, "gasUsed", consumed, "err", err)
+	}
+	return ret, consumed, err
 }
 
 // SysCreate is a special (system) contract creation methods for genesis constructors.

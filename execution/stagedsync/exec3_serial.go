@@ -376,6 +376,9 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				var sysCallGasUsed uint64
 				syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 					ret, gas, err := protocol.SysCallContract(contract, data, se.cfg.chainConfig, ibs, txTask.Header, se.cfg.engine, false /* constCall */, *se.cfg.vmConfig)
+					if dbg.TraceGas {
+						se.logger.Warn("syscall gas", "block", txTask.BlockNumber(), "contract", contract, "gasUsed", gas, "err", err)
+					}
 					if err != nil {
 						return nil, err
 					}
