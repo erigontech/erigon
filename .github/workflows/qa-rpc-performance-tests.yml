@@ -167,7 +167,7 @@ jobs:
           echo "rpc_daemon_started=true" >> $GITHUB_OUTPUT
           
           sleep 5
-          tail erigon.log
+          tail -f erigon.log
           
           if [ $RPC_DAEMON_EXIT_STATUS -ne 0 ]; then            
             echo "RpcDaemon failed to start"
