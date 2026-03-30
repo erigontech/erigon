@@ -490,8 +490,24 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		InitialCycle: initialCycle,
 		FirstCycle:   firstCycle,
 		PruneTimeout: 500 * time.Millisecond,
-		BeforeIteration: func(sd *execctx.SharedDomains) {
+		BeforeIteration: func(sd *execctx.SharedDomains) error {
 			sd.SetStateCache(e.stateCache)
+			// Refresh the base RO transaction before each pipeline run so that
+			// pages freed by the main execution stage since the last CommitCycle
+			// are reclaimable when CommitCycle's sd.Flush allocates space.
+			// Without this, the old roTx is held open during sd.Flush, blocking
+			// MDBX from recycling freed pages and causing MDBX_MAP_FULL under
+			// heavy pruning (issue #20080).
+			roTx.Rollback()
+			var refreshErr error
+			roTx, refreshErr = e.db.BeginTemporalRo(ctx) //nolint:gocritic
+			if refreshErr != nil {
+				return fmt.Errorf("updateForkChoice: refresh roTx: %w", refreshErr)
+			}
+			if overlay := sd.BlockOverlay(); overlay != nil {
+				overlay.UpdateTxn(roTx)
+			}
+			return nil
 		},
 		CommitCycle: func(ctx context.Context, sd *execctx.SharedDomains) (kv.TemporalRwTx, error) {
 			// Flush SD + overlay to a brief RwTx to relieve memory pressure.

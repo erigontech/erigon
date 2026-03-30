@@ -109,8 +109,10 @@ type CommitCycleFn func(ctx context.Context, sd *execctx.SharedDomains) (kv.Temp
 // to check whether the loop should stop early. Return true to break.
 type ShouldBreakFn func(tx kv.TemporalRwTx) (bool, error)
 
-// BeforeIterationFn is called before each pipeline Run (e.g. to set state cache).
-type BeforeIterationFn func(sd *execctx.SharedDomains)
+// BeforeIterationFn is called before each pipeline Run (e.g. to refresh the
+// base RO transaction or set the state cache). It may return an error to abort
+// the loop.
+type BeforeIterationFn func(sd *execctx.SharedDomains) error
 
 // RunLoopConfig configures a single RunLoop invocation.
 type RunLoopConfig struct {
@@ -136,7 +138,9 @@ type RunLoopConfig struct {
 func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg RunLoopConfig) (kv.TemporalRwTx, error) {
 	for hasMore := true; hasMore; {
 		if cfg.BeforeIteration != nil {
-			cfg.BeforeIteration(sd)
+			if err := cfg.BeforeIteration(sd); err != nil {
+				return tx, err
+			}
 		}
 
 		var err error
