@@ -174,7 +174,7 @@ jobs:
           echo "rpc_daemon_started=true" >> $GITHUB_OUTPUT
           
           sleep 5
-          tail -f erigon.log
+          tail erigon.log
           
           if [ $RPC_DAEMON_EXIT_STATUS -ne 0 ]; then            
             echo "RpcDaemon failed to start"
@@ -378,7 +378,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: rpcdaemon-logs
-          path: $ERIGON_REFERENCE_DATA_DIR/logs/rpcdaemon.log
+          path: ${{ github.workspace }}/build/bin/erigon.log
 
       - name: Restore Erigon Chaindata Directory
         if: always() && matrix.client == 'erigon' && steps.save_chaindata_step.outputs.datadir_saved == 'true'
