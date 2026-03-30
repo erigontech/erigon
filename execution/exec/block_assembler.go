@@ -361,7 +361,8 @@ func (ba *BlockAssembler) AssembleBlock(stateReader state.StateReader, ibs *stat
 		ibs.SetTxContext(ba.Header.Number.Uint64(), len(ba.Txns))
 		ibs.ResetVersionedIO()
 	}
-	block, ba.Requests, _, err = protocol.FinalizeBlockExecution(ba.cfg.Engine, stateReader, ba.Header, ba.Txns, ba.Uncles,
+	var sysCallGasUsed uint64
+	block, ba.Requests, sysCallGasUsed, err = protocol.FinalizeBlockExecution(ba.cfg.Engine, stateReader, ba.Header, ba.Txns, ba.Uncles,
 		ba.writer(), ba.cfg.ChainConfig, ibs, ba.Receipts, ba.Withdrawals, chainReader, true, logger, nil)
 
 	if err != nil {
@@ -371,6 +372,9 @@ func (ba *BlockAssembler) AssembleBlock(stateReader state.StateReader, ibs *stat
 	// Note: NewBlock (called by FinalizeBlockExecution) copies the header,
 	// so we must modify the block's header directly, not ba.Header.
 	header := block.HeaderNoCopy()
+	// Add gas consumed by system calls (EIP-7002, EIP-7251, etc.) to header.GasUsed.
+	// These are not counted in the per-tx gasUsed accumulation in AddTransactions.
+	header.GasUsed += sysCallGasUsed
 	if ba.HasBAL() {
 		// Record finalize system call I/O (EIP-7002, EIP-7251, etc.)
 		ba.balIO = ba.balIO.Merge(ibs.TxIO())
