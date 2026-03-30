@@ -115,6 +115,7 @@ type forkGraphDisk struct {
 	genesisTime uint64
 	// highest block seen
 	anchorSlot           uint64
+	anchorRoot           common.Hash
 	lowestAvailableBlock atomic.Uint64
 
 	newestLightClientUpdate atomic.Value
@@ -162,17 +163,6 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_d
 		anchorState.SetLatestBlockHeader(&anchorHeader)
 	}
 
-	log.Info("[DEBUG] NewForkGraphDisk anchor state",
-		"slot", anchorState.Slot(),
-		"anchorRoot", common.Hash(anchorRoot),
-		"headerSlot", anchorHeader.Slot,
-		"headerProposer", anchorHeader.ProposerIndex,
-		"headerParentRoot", anchorHeader.ParentRoot,
-		"headerBodyRoot", anchorHeader.BodyRoot,
-		"headerRoot(stateHash)", stateHash,
-		"latestBlockHeaderRoot", anchorState.LatestBlockHeader().Root,
-	)
-
 	farthestExtendingPath[anchorRoot] = true
 
 	f := &forkGraphDisk{
@@ -183,6 +173,7 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_d
 		beaconCfg:   anchorState.BeaconConfig(),
 		genesisTime: anchorState.GenesisTime(),
 		anchorSlot:  anchorState.Slot(),
+		anchorRoot:  anchorRoot,
 		rcfg:        rcfg,
 		emitter:     emitter,
 		syncedData:  syncedData,
@@ -195,7 +186,7 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_d
 	// determine FULL/EMPTY for the first block after checkpoint sync.
 	if len(anchorBlock) > 0 && anchorBlock[0] != nil {
 		f.blocks.Store(common.Hash(anchorRoot), anchorBlock[0])
-		log.Info("[ForkGraph] Stored anchor block for GLOAS parent detection",
+		log.Debug("[ForkGraph] Stored anchor block for GLOAS parent detection",
 			"slot", anchorBlock[0].Block.Slot, "root", common.Hash(anchorRoot))
 	}
 
@@ -206,6 +197,10 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_d
 
 func (f *forkGraphDisk) AnchorSlot() uint64 {
 	return f.anchorSlot
+}
+
+func (f *forkGraphDisk) AnchorRoot() common.Hash {
+	return f.anchorRoot
 }
 
 func (f *forkGraphDisk) isBlockRootTheCurrentState(blockRoot common.Hash) bool {
