@@ -118,9 +118,9 @@ type ApiHandler struct {
 	enableMemoizedHeadState          bool
 
 	// [New in Gloas:EIP7732]
-	epbsPool                    *pool.EpbsPool
-	executionPayloadBidService  services.ExecutionPayloadBidService
-	payloadAttestationService   services.PayloadAttestationService
+	epbsPool                   *pool.EpbsPool
+	executionPayloadBidService services.ExecutionPayloadBidService
+	payloadAttestationService  services.PayloadAttestationService
 }
 
 func NewApiHandler(

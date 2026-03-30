@@ -175,6 +175,17 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 				logger.Debug("[Caplin] forward sync missing segment, will retry", "blockSlot", block.Block.Slot)
 				return highestBlockProcessed, nil
 			}
+			if errors.Is(err, forkchoice.ErrParentEnvelopePending) {
+				// Parent is FULL but its envelope is not yet on disk.  This is
+				// normal during forward sync: the envelope either arrives in this
+				// batch (for a later block) or in a subsequent batch.  Return
+				// whatever progress was made so far (do NOT ban the peer).
+				logger.Debug("[Caplin] forward sync: parent envelope pending, will retry", "blockSlot", block.Block.Slot)
+				if newHighestBlockProcessed > 0 {
+					return newHighestBlockProcessed, nil
+				}
+				return highestBlockProcessed, nil
+			}
 			// Return an error if block processing fails
 			err = fmt.Errorf("bad blocks segment received: %w", err)
 			return
@@ -431,11 +442,15 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 		return nil // Not fatal — if EMPTY, envelope doesn't exist
 	}
 
-	if err := cfg.forkChoice.OnExecutionPayload(ctx, env, false, false); err != nil {
-		return fmt.Errorf("failed to apply anchor envelope: %w", err)
+	// Use StoreAnchorEnvelope instead of OnExecutionPayload because the checkpoint
+	// sync state already incorporates the envelope's effects (state.Slot > envelope.Slot).
+	// We only need to persist the envelope to disk so forward sync can resolve parent
+	// execution payloads for subsequent blocks.
+	if err := cfg.forkChoice.StoreAnchorEnvelope(anchorRoot, env); err != nil {
+		return fmt.Errorf("failed to store anchor envelope: %w", err)
 	}
 
-	log.Info("[Caplin] Anchor envelope applied successfully",
+	log.Info("[Caplin] Anchor envelope stored successfully (checkpoint sync)",
 		"anchorSlot", anchorSlot, "anchorRoot", common.Hash(anchorRoot))
 	return nil
 }

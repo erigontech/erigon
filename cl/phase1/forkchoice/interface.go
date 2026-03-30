@@ -118,6 +118,11 @@ type ForkChoiceStorageWriter interface {
 	// [New in Gloas:EIP7732] OnPayloadAttestationMessage processes a PTC attestation message from gossip.
 	// Returns error if validation fails (REJECT), nil if accepted or ignored.
 	OnPayloadAttestationMessage(msg *cltypes.PayloadAttestationMessage, isFromBlock bool) error
+	// [New in Gloas:EIP7732] StoreAnchorEnvelope persists an envelope to disk and updates
+	// eth2Roots without running state transition. Used during checkpoint sync where the
+	// finalized state already incorporates the envelope's effects but subsequent blocks
+	// need the envelope on disk to resolve their parent execution payload.
+	StoreAnchorEnvelope(blockRoot common.Hash, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error
 	AddPreverifiedBlobSidecar(blobSidecar *cltypes.BlobSidecar) error
 	OnTick(time uint64)
 	SetSynced(synced bool)
