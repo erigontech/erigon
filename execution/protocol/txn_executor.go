@@ -623,6 +623,21 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Regular)
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
 			st.blockRegularGasUsed = st.txnGasUsed
+			if dbg.TraceGas {
+				log.Info("[GAS_DBG] Prague tx gas",
+					"block", st.state.BlockNumber(),
+					"txIdx", st.state.TxIndex(),
+					"from", st.msg.From(),
+					"gasLimit", st.msg.Gas(),
+					"intrinsicRegular", intrinsicGasResult.RegularGas,
+					"floorGasCost", intrinsicGasResult.FloorGasCost,
+					"rawGasUsed", st.txnGasUsedB4Refunds,
+					"refundCounter", st.state.GetRefund().Regular,
+					"refund", refund,
+					"txnGasUsed", st.txnGasUsed,
+					"vmerr", vmerr,
+				)
+			}
 		} else {
 			st.txnGasUsedB4Refunds = mdGasUsed.Regular
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Regular)
