@@ -46,6 +46,7 @@ type ForkGraph interface {
 	GetSyncCommittees(period uint64) (*solid.SyncCommittee, *solid.SyncCommittee, bool)
 	MarkHeaderAsInvalid(blockRoot common.Hash)
 	AnchorSlot() uint64
+	AnchorRoot() common.Hash
 	Prune(uint64) error
 	GetBlockRewards(blockRoot common.Hash) (*eth2.BlockRewardsCollector, bool)
 	LowestAvailableSlot() uint64
