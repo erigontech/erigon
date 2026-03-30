@@ -823,6 +823,13 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	// different visibleFiles
 	a.DisableAllDependencies()
 
+	// Disable ReplaceKeysInValues during rebuild. The merge loop after each range would
+	// otherwise shorten keys in commitment branch data, embedding file-range references
+	// (e.g. storage.0-16) that become stale once those files are merged into larger ranges
+	// (storage.0-32). The squeeze pass at the end re-enables this flag and applies the
+	// shortening in one shot when all files are finalized.
+	a.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)
+
 	acRo := a.BeginFilesRo() // this tx is used to read existing domain files and closed in the end
 	defer acRo.Close()
 	defer acRo.MadvNormal().DisableReadAhead()
