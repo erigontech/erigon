@@ -265,13 +265,32 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	if blockVersion >= clparams.GloasVersion {
 		isParentFull := f.isParentNodeFull(block.Block)
 		hasEnvelope := f.forkGraph.HasEnvelope(block.Block.ParentRoot)
-		_, parentInForkChoice := f.forkGraph.GetBlock(block.Block.ParentRoot)
+		parentBlock, parentInForkChoice := f.forkGraph.GetBlock(block.Block.ParentRoot)
+		log.Info("[DEBUG] OnBlock GLOAS parent detection",
+			"slot", block.Block.Slot,
+			"parentRoot", block.Block.ParentRoot,
+			"isParentFull", isParentFull,
+			"hasEnvelope", hasEnvelope,
+			"parentInForkChoice", parentInForkChoice,
+		)
 		if isParentFull {
 			if hasEnvelope {
 				// Reconstruct the execution payload state from disk
 				parentFullState, err = f.forkGraph.GetExecutionPayloadState(block.Block.ParentRoot)
 				if err != nil {
 					log.Warn("OnBlock: FULL parent but GetExecutionPayloadState failed",
+						"slot", block.Block.Slot, "parentRoot", block.Block.ParentRoot, "err", err)
+					parentFullState = nil
+				}
+			} else if parentInForkChoice && parentBlock != nil && parentBlock.Block.Slot == f.forkGraph.AnchorSlot() {
+				// [New in Gloas:EIP7732] Anchor block from checkpoint sync: the checkpoint
+				// state is already post-envelope (finalized = fully processed), so getState()
+				// returns the correct parent state without needing the envelope on disk.
+				log.Info("[OnBlock] Parent is anchor block from checkpoint sync, using post-envelope state directly",
+					"slot", block.Block.Slot, "anchorSlot", f.forkGraph.AnchorSlot())
+				parentFullState, err = f.forkGraph.GetState(block.Block.ParentRoot, true)
+				if err != nil {
+					log.Warn("OnBlock: anchor parent GetState failed",
 						"slot", block.Block.Slot, "parentRoot", block.Block.ParentRoot, "err", err)
 					parentFullState = nil
 				}

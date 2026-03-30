@@ -137,8 +137,11 @@ type forkGraphDisk struct {
 	stateDumpLock sync.Mutex
 }
 
-// Initialize fork graph with a new state
-func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_data.SyncedData, aferoFs afero.Fs, rcfg beacon_router_configuration.RouterConfiguration, emitter *beaconevents.EventEmitter) ForkGraph {
+// Initialize fork graph with a new state.
+// anchorBlock is optional: when provided (e.g. from checkpoint sync), it is stored so that
+// getParentPayloadStatus can determine FULL/EMPTY status for the first forward-sync block.
+// [New in Gloas:EIP7732]
+func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_data.SyncedData, aferoFs afero.Fs, rcfg beacon_router_configuration.RouterConfiguration, emitter *beaconevents.EventEmitter, anchorBlock ...*cltypes.SignedBeaconBlock) ForkGraph {
 	farthestExtendingPath := make(map[common.Hash]bool)
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
@@ -188,6 +191,14 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_d
 	f.lowestAvailableBlock.Store(anchorState.Slot())
 	f.headers.Store(common.Hash(anchorRoot), &anchorHeader)
 	f.sszBuffer = make([]byte, 0, (anchorState.EncodingSizeSSZ()*3)/2)
+
+	// [New in Gloas:EIP7732] Store the anchor block so getParentPayloadStatus can
+	// determine FULL/EMPTY for the first block after checkpoint sync.
+	if len(anchorBlock) > 0 && anchorBlock[0] != nil {
+		f.blocks.Store(common.Hash(anchorRoot), anchorBlock[0])
+		log.Info("[ForkGraph] Stored anchor block for GLOAS parent detection",
+			"slot", anchorBlock[0].Block.Slot, "root", common.Hash(anchorRoot))
+	}
 
 	f.DumpBeaconStateOnDisk(anchorRoot, anchorState, true)
 	// preallocate buffer
