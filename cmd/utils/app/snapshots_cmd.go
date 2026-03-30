@@ -1302,6 +1302,9 @@ func doIntegrity(cliCtx *cli.Context) error {
 	for _, chk := range requestedChecks {
 		chk := chk
 		g.Go(func() error {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			logger.Info("[integrity] starting", "check", chk)
 			if err := func() error {
 				switch chk {
