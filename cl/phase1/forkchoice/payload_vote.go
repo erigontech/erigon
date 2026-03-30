@@ -9,6 +9,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/common"
+	log "github.com/erigontech/erigon/common/log/v3"
 )
 
 func (f *ForkChoiceStore) calculateCommitteeFraction(s *state.CachingBeaconState, committeePercent uint64) uint64 {
@@ -196,8 +197,13 @@ func (f *ForkChoiceStore) getParentPayloadStatus(block *cltypes.BeaconBlock) clt
 
 	// Compare parent_block_hash with message_block_hash
 	if parentBlockHash == messageBlockHash {
+		log.Trace("[DEBUG] getParentPayloadStatus: FULL",
+			"slot", block.Slot, "parentBlockHash", parentBlockHash, "messageBlockHash", messageBlockHash)
 		return cltypes.PayloadStatusFull
 	}
+	log.Info("[DEBUG] getParentPayloadStatus: EMPTY",
+		"slot", block.Slot, "parentBlockHash", parentBlockHash, "messageBlockHash", messageBlockHash,
+		"parentRoot", block.ParentRoot)
 	return cltypes.PayloadStatusEmpty
 }
 

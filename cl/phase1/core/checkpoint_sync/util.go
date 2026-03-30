@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/afero"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/genesisdb"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils"
@@ -73,4 +74,38 @@ func ReadLocalHeadState(dirs datadir.Dirs, beaconCfg *clparams.BeaconChainConfig
 		return nil, fmt.Errorf("could not decode local head state: %w", err)
 	}
 	return bs, nil
+}
+
+// FetchFinalizedBlock fetches the finalized beacon block from the checkpoint sync endpoint.
+func FetchFinalizedBlock(ctx context.Context, beaconCfg *clparams.BeaconChainConfig, caplinConfig clparams.CaplinConfig) *cltypes.SignedBeaconBlock {
+	hasCustomCheckpointURL := len(clparams.ConfigurableCheckpointsURLs) > 0
+	remoteSync := !caplinConfig.DisabledCheckpointSync && (!caplinConfig.IsDevnet() || hasCustomCheckpointURL)
+	if !remoteSync {
+		return nil
+	}
+
+	syncer := NewRemoteCheckpointSync(beaconCfg, caplinConfig.NetworkId).(*RemoteCheckpointSync)
+	block, err := syncer.FetchFinalizedBlock(ctx)
+	if err != nil {
+		log.Warn("[Checkpoint Sync] Could not fetch finalized block (non-fatal)", "err", err)
+		return nil
+	}
+	return block
+}
+
+// FetchFinalizedEnvelope fetches the finalized execution payload envelope from the checkpoint sync endpoint.
+func FetchFinalizedEnvelope(ctx context.Context, beaconCfg *clparams.BeaconChainConfig, caplinConfig clparams.CaplinConfig) *cltypes.SignedExecutionPayloadEnvelope {
+	hasCustomCheckpointURL := len(clparams.ConfigurableCheckpointsURLs) > 0
+	remoteSync := !caplinConfig.DisabledCheckpointSync && (!caplinConfig.IsDevnet() || hasCustomCheckpointURL)
+	if !remoteSync {
+		return nil
+	}
+
+	syncer := NewRemoteCheckpointSync(beaconCfg, caplinConfig.NetworkId).(*RemoteCheckpointSync)
+	envelope, err := syncer.FetchFinalizedEnvelope(ctx)
+	if err != nil {
+		log.Warn("[Checkpoint Sync] Could not fetch finalized envelope (non-fatal)", "err", err)
+		return nil
+	}
+	return envelope
 }
