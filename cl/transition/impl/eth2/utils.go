@@ -20,10 +20,8 @@ import (
 	"encoding/binary"
 
 	"github.com/erigontech/erigon/cl/abstract"
-	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
-	log "github.com/erigontech/erigon/common/log/v3"
 )
 
 func computeSigningRootEpoch(epoch uint64, domain []byte) (common.Hash, error) {
@@ -37,8 +35,7 @@ func transitionSlot(s abstract.BeaconState) error {
 	slot := s.Slot()
 	previousStateRoot := s.PreviousStateRoot()
 	var err error
-	wasZero := previousStateRoot == (common.Hash{})
-	if wasZero {
+	if previousStateRoot == (common.Hash{}) {
 		previousStateRoot, err = s.HashSSZ()
 		if err != nil {
 			return err
@@ -46,18 +43,6 @@ func transitionSlot(s abstract.BeaconState) error {
 	}
 
 	beaconConfig := s.BeaconConfig()
-
-	if s.Version() >= clparams.GloasVersion {
-		latestBlockHeader := s.LatestBlockHeader()
-		log.Info("[DEBUG] transitionSlot",
-			"slot", slot,
-			"previousStateRoot", previousStateRoot,
-			"wasZero", wasZero,
-			"headerSlot", latestBlockHeader.Slot,
-			"headerRoot", latestBlockHeader.Root,
-			"latestBlockHash", s.GetLatestBlockHash(),
-		)
-	}
 
 	s.SetStateRootAt(int(slot%beaconConfig.SlotsPerHistoricalRoot), previousStateRoot)
 
