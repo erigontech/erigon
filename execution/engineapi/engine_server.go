@@ -334,8 +334,8 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		if req.SlotNumber != nil {
 			slotNumber := uint64(*req.SlotNumber)
 			header.SlotNumber = &slotNumber
-			// TODO: No Slot Error Yet - Treate it as optional for hive testing
-			// qreturn nil, &rpc.InvalidParamsError{Message: "slotNumber missing"}
+		} else {
+			return nil, &rpc.InvalidParamsError{Message: "slotNumber missing"}
 		}
 	}
 
@@ -738,6 +738,9 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	}
 	if version >= clparams.CapellaVersion && !s.isWithdrawalsPresenceValid(timestamp, payloadAttributes.Withdrawals) {
 		return nil, &engine_helpers.InvalidPayloadAttributesErr
+	}
+	if version >= clparams.GloasVersion && payloadAttributes.SlotNumber == nil {
+		return nil, &engine_helpers.InvalidPayloadAttributesErr // SlotNumber required for Glamsterdam (EIP-7843)
 	}
 
 	if !s.proposing {

@@ -124,7 +124,7 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, ams
 		return fmt.Errorf("block %d: invalid computed block access list: %w", blockNum, err)
 	}
 	if err := bal.ValidateMaxItems(h.GasLimit); err != nil {
-		return fmt.Errorf("block %d: %w", blockNum, err)
+		return fmt.Errorf("%w, block %d: %w", rules.ErrInvalidBlock, blockNum, err)
 	}
 	log.Debug("bal", "blockNum", blockNum, "hash", bal.Hash())
 	if !amsterdam {
@@ -148,6 +148,9 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, ams
 		}
 		if err = dbBAL.Validate(); err != nil {
 			return fmt.Errorf("block %d: db block access list is invalid: %w", blockNum, err)
+		}
+		if err = dbBAL.ValidateMaxItems(h.GasLimit); err != nil {
+			return fmt.Errorf("block %d: stored block access list exceeds max items: %w", blockNum, err)
 		}
 
 		if headerBALHash != dbBAL.Hash() {

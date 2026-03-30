@@ -577,6 +577,8 @@ type BeaconChainConfig struct {
 	ElectraForkEpoch     uint64            `yaml:"ELECTRA_FORK_EPOCH" spec:"true" json:"ELECTRA_FORK_EPOCH,string"`     // ElectraForkEpoch is used to represent the assigned fork epoch for Electra.
 	FuluForkVersion      ConfigForkVersion `yaml:"FULU_FORK_VERSION" spec:"true" json:"FULU_FORK_VERSION"`              // FuluForkVersion is used to represent the fork version for Fulu.
 	FuluForkEpoch        uint64            `yaml:"FULU_FORK_EPOCH" spec:"true" json:"FULU_FORK_EPOCH,string"`           // FuluForkEpoch is used to represent the assigned fork epoch for Fulu.
+	GloasForkVersion     ConfigForkVersion `yaml:"GLOAS_FORK_VERSION" spec:"true" json:"GLOAS_FORK_VERSION"`            // GloasForkVersion is used to represent the fork version for Gloas (Glamsterdam).
+	GloasForkEpoch       uint64            `yaml:"GLOAS_FORK_EPOCH" spec:"true" json:"GLOAS_FORK_EPOCH,string"`         // GloasForkEpoch is used to represent the assigned fork epoch for Gloas (Glamsterdam).
 
 	ForkVersionSchedule map[common.Bytes4]VersionScheduleEntry `json:"-"` // Schedule of fork epochs by version.
 
@@ -720,6 +722,7 @@ func (b *BeaconChainConfig) GetCurrentStateVersion(epoch uint64) StateVersion {
 		b.DenebForkEpoch,
 		b.ElectraForkEpoch,
 		b.FuluForkEpoch,
+		b.GloasForkEpoch,
 	}
 	stateVersion := Phase0Version
 	for _, forkEpoch := range forkEpochList {
@@ -749,6 +752,7 @@ func configForkSchedule(b *BeaconChainConfig) map[common.Bytes4]VersionScheduleE
 	fvs[utils.Uint32ToBytes4(uint32(b.DenebForkVersion))] = VersionScheduleEntry{b.DenebForkEpoch, DenebVersion}
 	fvs[utils.Uint32ToBytes4(uint32(b.ElectraForkVersion))] = VersionScheduleEntry{b.ElectraForkEpoch, ElectraVersion}
 	fvs[utils.Uint32ToBytes4(uint32(b.FuluForkVersion))] = VersionScheduleEntry{b.FuluForkEpoch, FuluVersion}
+	fvs[utils.Uint32ToBytes4(uint32(b.GloasForkVersion))] = VersionScheduleEntry{b.GloasForkEpoch, GloasVersion}
 	return fvs
 }
 
@@ -905,6 +909,8 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	ElectraForkEpoch:     364032,
 	FuluForkVersion:      0x06000000,
 	FuluForkEpoch:        411392,
+	GloasForkVersion:     0x07000000,
+	GloasForkEpoch:       math.MaxUint64,
 
 	// New values introduced in Altair hard fork 1.
 	// Participation flag indices.
@@ -1410,6 +1416,8 @@ func (b *BeaconChainConfig) GetForkVersionByVersion(v StateVersion) uint32 {
 		return uint32(b.ElectraForkVersion)
 	case FuluVersion:
 		return uint32(b.FuluForkVersion)
+	case GloasVersion:
+		return uint32(b.GloasForkVersion)
 	}
 	panic("invalid version")
 }
@@ -1430,6 +1438,8 @@ func (b *BeaconChainConfig) GetForkEpochByVersion(v StateVersion) uint64 {
 		return b.ElectraForkEpoch
 	case FuluVersion:
 		return b.FuluForkEpoch
+	case GloasVersion:
+		return b.GloasForkEpoch
 	}
 	panic("invalid version")
 }

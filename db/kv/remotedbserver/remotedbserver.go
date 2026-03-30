@@ -135,7 +135,7 @@ func (s *KvServer) begin(ctx context.Context) (id uint64, err error) {
 	}
 	s.txsMapLock.Lock()
 	defer s.txsMapLock.Unlock()
-	tx, errBegin := s.kv.BeginTemporalRo(ctx) //nolint:gocritic
+	tx, errBegin := s.kv.BeginTemporalRo(ctx) //nolint:gocritic // tx is stored in s.txs and rolled back by rollback(); defer would close it prematurely
 	if errBegin != nil {
 		return 0, errBegin
 	}
@@ -157,7 +157,7 @@ func (s *KvServer) renew(ctx context.Context, id uint64) (err error) {
 		defer tx.Unlock()
 		tx.Rollback()
 	}
-	newTx, errBegin := s.kv.BeginTemporalRo(ctx) //nolint:gocritic
+	newTx, errBegin := s.kv.BeginTemporalRo(ctx) //nolint:gocritic // tx is stored in s.txs and rolled back by rollback(); defer would close it prematurely
 	if errBegin != nil {
 		return fmt.Errorf("kvserver: %w", errBegin)
 	}
