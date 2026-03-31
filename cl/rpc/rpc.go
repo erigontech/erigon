@@ -340,8 +340,9 @@ func (b *BeaconRpcP2P) parseResponseData(message *sentinelproto.ResponseData) ([
 	if message.Error {
 		rd := snappy.NewReader(bytes.NewBuffer(message.Data))
 		errBytes, _ := io.ReadAll(rd)
-		log.Trace("received range req error", "err", string(errBytes), "raw", string(message.Data))
-		return nil, message.Peer.Pid, nil
+		errMsg := string(errBytes)
+		log.Trace("received range req error", "err", errMsg, "raw", string(message.Data))
+		return nil, message.Peer.Pid, fmt.Errorf("peer error response: %s", errMsg)
 	}
 
 	responsePacket := []responseData{}
