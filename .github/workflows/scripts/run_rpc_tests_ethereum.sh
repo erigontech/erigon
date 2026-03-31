@@ -29,13 +29,6 @@ DISABLED_TEST_LIST=(
   eth_getWork/test_01.json
   eth_mining/test_01.json
   eth_protocolVersion/test_1.json
-<<<<<<< HEAD
-  # eth_simulateV1 stateRoot issues under investigation (see PR #20062)
-  eth_simulateV1/test_23.json
-  eth_simulateV1/test_24.json
-  eth_simulateV1/test_26.json
-=======
->>>>>>> ca07330cac (update stateRoot according Geth and re-enable commented tests (#20062))
   eth_submitHashrate/test_1.json
   eth_submitWork/test_1.json
   net_peerCount/test_1.json
