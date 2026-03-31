@@ -394,6 +394,11 @@ var (
 		Usage: "Does limit amount of parallel db reads. Default: equal to GOMAXPROCS (or number of CPU)",
 		Value: min(max(10, runtime.GOMAXPROCS(-1)*64), 9_000),
 	}
+	RpcMaxConcurrentRequestsFlag = cli.IntFlag{
+		Name:  "rpc.max.concurrency",
+		Usage: "Maximum number of concurrent HTTP RPC requests (HTTP admission control). 0 = use db.read.concurrency, -1 = unlimited (no admission control)",
+		Value: 0,
+	}
 	RpcAccessListFlag = cli.StringFlag{
 		Name:  "rpc.accessList",
 		Usage: "Specify granular (method-by-method) API allowlist",

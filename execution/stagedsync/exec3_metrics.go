@@ -99,7 +99,6 @@ var (
 
 	mxCommitmentTransactions            = metrics.NewGauge(`commit_txns`)
 	mxCommitmentBlocks                  = metrics.NewGauge("commit_blocks")
-	mxCommitmentMGasSec                 = metrics.NewGauge(`commit_mgas_sec`)
 	mxCommitmentBlockDuration           = metrics.NewGauge("commit_block_dur")
 	mxCommitmentReadRate                = metrics.NewGauge("commit_read_rate")
 	mxCommitmentAccountReadRate         = metrics.NewGauge("commit_account_read_rate")
@@ -209,7 +208,7 @@ func resetCommitmentGauges(ctx context.Context) {
 		commitResetTask.Timer = time.NewTimer(resetDelay)
 		commitResetTask.ctx = ctx
 		commitResetTask.gauges = []metrics.Gauge{
-			mxCommitmentTransactions, mxCommitmentBlocks, mxCommitmentMGasSec, mxCommitmentBlockDuration,
+			mxCommitmentTransactions, mxCommitmentBlocks, mxCommitmentBlockDuration,
 		}
 		commitResetTask.run(ctx)
 	}
@@ -798,7 +797,7 @@ func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, commitStart ti
 	mxCommitmentBrancgWriteRate.SetUint64(curBranchWriteRate)
 
 	mxCommitmentTransactions.Set(float64(committedTxSec))
-	mxCommitmentMGasSec.Set(float64(committedGasSec / 1e6))
+	mxCommitmentBlocks.Set(float64(committedDiffBlocks))
 	mxCommitmentBlockDuration.Set(float64(commitedBlockDur))
 
 	totalCacheHits := cacheBranchHits + cacheAccountHits + cacheStorageHits

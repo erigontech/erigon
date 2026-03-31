@@ -422,6 +422,14 @@ func writeGenesisBeaconBlock(ctx context.Context, cfg *Cfg) error {
 		}
 	}
 
+	// Verify body root matches state's LatestBlockHeader as a sanity check.
+	bodyRoot, err := body.HashSSZ()
+	if err != nil {
+		log.Warn("genesis body HashSSZ failed", "err", err)
+	} else if bodyRoot != header.BodyRoot {
+		log.Warn("genesis body root mismatch", "computed", bodyRoot, "expected", header.BodyRoot)
+	}
+
 	return cfg.indiciesDB.Update(ctx, func(tx kv.RwTx) error {
 		return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, genesisBlock, true)
 	})

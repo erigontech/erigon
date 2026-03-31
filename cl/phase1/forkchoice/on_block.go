@@ -160,9 +160,12 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		}
 	}
 
-	var executionRequestsList []hexutil.Bytes = nil
+	var executionRequestsList []hexutil.Bytes
 	if block.Version() >= clparams.ElectraVersion {
 		executionRequestsList = block.Block.Body.GetExecutionRequestsList()
+		if executionRequestsList == nil {
+			executionRequestsList = []hexutil.Bytes{}
+		}
 	}
 
 	isVerifiedExecutionPayload := f.verifiedExecutionPayload.Contains(blockRoot)

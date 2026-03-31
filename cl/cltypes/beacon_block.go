@@ -320,8 +320,6 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 }
 
 func (b *BeaconBody) EncodingSizeSSZ() (size int) {
-	b.ensureNilFields()
-
 	size += b.ProposerSlashings.EncodingSizeSSZ()
 	size += b.AttesterSlashings.EncodingSizeSSZ()
 	size += b.Attestations.EncodingSizeSSZ()
@@ -544,7 +542,11 @@ func (b *BeaconBody) GetExecutionRequests() *ExecutionRequests {
 }
 
 func (b *BeaconBody) GetExecutionRequestsList() []hexutil.Bytes {
-	return GetExecutionRequestsList(b.beaconCfg, b.ExecutionRequests)
+	requestsList := GetExecutionRequestsList(b.beaconCfg, b.ExecutionRequests)
+	if b.Version >= clparams.ElectraVersion && requestsList == nil {
+		return []hexutil.Bytes{}
+	}
+	return requestsList
 }
 
 func GetExecutionRequestsList(beaconCfg *clparams.BeaconChainConfig, r *ExecutionRequests) []hexutil.Bytes {

@@ -1728,6 +1728,7 @@ func (t *Updates) TouchStorage(c *KeyUpdate, val []byte) {
 	if len(val) == 0 {
 		c.update.Flags = DeleteUpdate
 	} else {
+		c.update.Flags &^= DeleteUpdate
 		c.update.Flags |= StorageUpdate
 		copy(c.update.Storage[:], val)
 	}
@@ -1935,8 +1936,11 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 func (t *Updates) Reset() {
 	switch t.mode {
 	case ModeDirect:
-		t.keys = nil
-		t.keys = make(map[string]struct{})
+		if t.keys == nil {
+			t.keys = make(map[string]struct{})
+		} else {
+			clear(t.keys)
+		}
 		t.initCollector()
 	case ModeUpdate:
 		t.tree.Clear(true)
@@ -2023,6 +2027,9 @@ func (u *Update) Merge(b *Update) {
 	if b.Flags == DeleteUpdate {
 		u.Flags = DeleteUpdate
 		return
+	}
+	if b.Flags&(BalanceUpdate|NonceUpdate|CodeUpdate|StorageUpdate) != 0 {
+		u.Flags &^= DeleteUpdate
 	}
 	if b.Flags&BalanceUpdate != 0 {
 		u.Flags |= BalanceUpdate

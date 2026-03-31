@@ -242,6 +242,15 @@ func NewBlindedBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparam
 		executionRequests = NewExecutionRequests(beaconCfg)
 	}
 
+	maxBlobCommitments := MaxBlobsCommittmentsPerBlock
+	if beaconCfg != nil && beaconCfg.MaxBlobCommittmentsPerBlock > 0 {
+		maxBlobCommitments = int(beaconCfg.MaxBlobCommittmentsPerBlock)
+	}
+	syncCommBitsSize := defaultSyncCommitteeBitsSize
+	if beaconCfg != nil {
+		syncCommBitsSize = int(beaconCfg.SyncCommitteeSize) / 8
+	}
+
 	return &BlindedBeaconBody{
 		RandaoReveal:       common.Bytes96{},
 		Eth1Data:           NewEth1Data(),
@@ -251,10 +260,10 @@ func NewBlindedBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparam
 		Attestations:       solid.NewDynamicListSSZ[*solid.Attestation](maxAttestation),
 		Deposits:           solid.NewStaticListSSZ[*Deposit](MaxDeposits, 1240),
 		VoluntaryExits:     solid.NewStaticListSSZ[*SignedVoluntaryExit](MaxVoluntaryExits, 112),
-		SyncAggregate:      NewSyncAggregateWithSize(int(beaconCfg.SyncCommitteeSize) / 8),
+		SyncAggregate:      NewSyncAggregateWithSize(syncCommBitsSize),
 		ExecutionPayload:   NewEth1Header(version),
 		ExecutionChanges:   solid.NewStaticListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172),
-		BlobKzgCommitments: solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48),
+		BlobKzgCommitments: solid.NewStaticListSSZ[*KZGCommitment](maxBlobCommitments, 48),
 		ExecutionRequests:  executionRequests,
 		Version:            0,
 		beaconCfg:          beaconCfg,
@@ -312,7 +321,11 @@ func (b *BlindedBeaconBody) ensureNilFields() {
 		b.ExecutionChanges = solid.NewStaticListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172)
 	}
 	if b.BlobKzgCommitments == nil {
-		b.BlobKzgCommitments = solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48)
+		maxBlobCommitments := MaxBlobsCommittmentsPerBlock
+		if b.beaconCfg != nil && b.beaconCfg.MaxBlobCommittmentsPerBlock > 0 {
+			maxBlobCommitments = int(b.beaconCfg.MaxBlobCommittmentsPerBlock)
+		}
+		b.BlobKzgCommitments = solid.NewStaticListSSZ[*KZGCommitment](maxBlobCommitments, 48)
 	}
 }
 
@@ -322,8 +335,6 @@ func (b *BlindedBeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 }
 
 func (b *BlindedBeaconBody) EncodingSizeSSZ() (size int) {
-	b.ensureNilFields()
-
 	size += b.ProposerSlashings.EncodingSizeSSZ()
 	size += b.AttesterSlashings.EncodingSizeSSZ()
 	size += b.Attestations.EncodingSizeSSZ()

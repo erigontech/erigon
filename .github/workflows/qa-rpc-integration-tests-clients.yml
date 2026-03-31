@@ -1,0 +1,144 @@
+name: QA - RPC Integration Tests (Other Clients)
+
+on:
+  schedule:
+    - cron: '0 5 * * *'  # Run daily at 05:00 UTC
+  workflow_dispatch:     # Run manually
+
+concurrency:
+  group: rpc-clients-integration-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  client-rpc-integ-tests:
+    name: RPC Integration Tests - ${{ matrix.client }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - client: geth
+            runs-on: [ self-hosted, qa, Ethereum, rpc-integration-geth ]
+            test_script: run_rpc_tests_geth.sh
+            install_dir: /opt/go-ethereum
+          - client: nethermind
+            runs-on: [ self-hosted, qa, Ethereum, rpc-integration-nethermind ]
+            test_script: run_rpc_tests_nethermind.sh
+            install_dir: /opt/nethermind
+    runs-on: ${{ matrix.runs-on }}
+    env:
+      ERIGON_QA_PATH: /home/qarunner/erigon-qa
+      RPC_PAST_TEST_DIR: /opt/rpc-past-tests
+      CHAIN: mainnet
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Wait for port 8545 to be available
+        run: |
+          for i in {1..30}; do
+            if nc -z localhost 8545; then
+              echo "Port 8545 is open"
+              break
+            fi
+            echo "Waiting for port 8545 to open..."
+            sleep 10
+          done
+          if ! nc -z localhost 8545; then
+            echo "::error::Port 8545 did not open in time - ${{ matrix.client }} may not be running"
+            exit 1
+          fi
+
+      - name: Restore rpc-tests cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.workspace }}/rpc-tests
+          key: rpc-tests-${{ runner.os }}-${{ runner.arch }}-v2.2.0
+
+      - name: Run RPC Integration Tests
+        id: test_step
+        run: |
+          client_version=$(git -C ${{ matrix.install_dir }} rev-parse --short HEAD 2>/dev/null || echo "no-version")
+          TEST_RESULT_DIR="$RPC_PAST_TEST_DIR/mainnet_$(date +%Y%m%d_%H%M%S)_integration_${{ matrix.client }}_${client_version}_http"
+          echo "TEST_RESULT_DIR=$TEST_RESULT_DIR" >> $GITHUB_ENV
+
+          set +e # Disable exit on error for test run
+          ${{ github.workspace }}/.github/workflows/scripts/${{ matrix.test_script }} \
+            "${{ runner.workspace }}" \
+            "$TEST_RESULT_DIR"
+          test_exit_status=$?
+          set -e # Re-enable exit on error after test run
+
+          echo "test_executed=true" >> $GITHUB_OUTPUT
+
+          echo
+          if [ $test_exit_status -eq 0 ]; then
+            echo "RPC tests completed successfully"
+            echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Error detected during RPC tests: some tests failed, check the logs or the artifacts for more details"
+            echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+      - name: Generate Summary
+        if: always() && steps.test_step.outputs.test_executed == 'true'
+        run: |
+          SUMMARY_FILE="${{ env.TEST_RESULT_DIR }}/summary.md"
+          LOG_FILE="${{ env.TEST_RESULT_DIR }}/output.log"
+
+          cat << 'EOF' > $SUMMARY_FILE
+          # ${{ github.workflow }} - ${{ matrix.client }} Report
+
+          ## Test Configuration
+          - **Client:** ${{ matrix.client }}
+          - **Chain:** ${{ env.CHAIN }}
+          - **Result:** ${{ steps.test_step.outputs.TEST_RESULT }}
+
+          ## Test Output
+          ```
+          EOF
+
+          cat $LOG_FILE >> $SUMMARY_FILE
+
+          echo '```' >> $SUMMARY_FILE
+
+          cat $SUMMARY_FILE
+          cat $SUMMARY_FILE >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload test results
+        if: always() && steps.test_step.outputs.test_executed == 'true'
+        uses: actions/upload-artifact@v6
+        with:
+          name: test-results-${{ matrix.client }}
+          path: ${{ env.TEST_RESULT_DIR }}
+
+      - name: Save test results
+        if: always() && steps.test_step.outputs.test_executed == 'true'
+        env:
+          TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
+        run: |
+          client_version=$(git -C ${{ matrix.install_dir }} rev-parse HEAD 2>/dev/null || echo "no-version")
+
+          python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
+            --repo ${{ matrix.client }} \
+            --commit $client_version \
+            --branch release \
+            --test_name rpc-integration-tests \
+            --chain $CHAIN \
+            --runner ${{ runner.name }} \
+            --db_version no-version \
+            --outcome $TEST_RESULT \
+            --result_file $TEST_RESULT_DIR/results/test_report.json
+
+      - name: Action to check failure condition
+        if: failure()
+        run: |
+          if [ "${{ steps.test_step.outputs.test_executed }}" != "true" ]; then
+            echo "::error::Test not executed, workflow failed for infrastructure reasons"
+          fi
+          exit 1
+
+      - name: Action for Success
+        if: steps.test_step.outputs.TEST_RESULT == 'success'
+        run: echo "::notice::Tests completed successfully for ${{ matrix.client }}"

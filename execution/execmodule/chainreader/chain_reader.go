@@ -465,6 +465,10 @@ func (c ChainReaderWriterEth1) AssembleBlock(baseHash common.Hash, attributes *e
 	if attributes.ParentBeaconBlockRoot != nil {
 		request.ParentBeaconBlockRoot = gointerfaces.ConvertHashToH256(*attributes.ParentBeaconBlockRoot)
 	}
+	if attributes.SlotNumber != nil {
+		sn := uint64(*attributes.SlotNumber)
+		request.SlotNumber = &sn
+	}
 	resp, err := c.executionModule.AssembleBlock(context.Background(), request)
 	if err != nil {
 		return 0, err
