@@ -510,7 +510,51 @@ func (b *CachingBeaconState) GetValidatorActivationChurnLimit() uint64 {
 	return b.GetValidatorChurnLimit()
 }
 
+// GetPTC returns the Payload Timeliness Committee for the given slot.
+// For Gloas and later, it reads from the precomputed ptcWindow.
+// For earlier versions, it computes on the fly.
 func (b *CachingBeaconState) GetPTC(slot uint64) ([]uint64, error) {
+	if b.Version() >= clparams.GloasVersion {
+		return b.getPTCFromWindow(slot)
+	}
+	return b.ComputePTC(slot)
+}
+
+// getPTCFromWindow reads the PTC for a given slot from the ptc_window state field.
+// Index calculation follows the spec's get_ptc:
+//   - previous epoch: index = slot % SLOTS_PER_EPOCH
+//   - current/lookahead: index = (epoch - state_epoch + 1) * SLOTS_PER_EPOCH + slot % SLOTS_PER_EPOCH
+func (b *CachingBeaconState) getPTCFromWindow(slot uint64) ([]uint64, error) {
+	cfg := b.BeaconConfig()
+	epoch := GetEpochAtSlot(cfg, slot)
+	stateEpoch := b.Slot() / cfg.SlotsPerEpoch
+	slotInEpoch := slot % cfg.SlotsPerEpoch
+
+	var index uint64
+	if epoch == stateEpoch-1 {
+		// Previous epoch
+		index = slotInEpoch
+	} else {
+		// Current epoch or lookahead
+		index = (epoch-stateEpoch+1)*cfg.SlotsPerEpoch + slotInEpoch
+	}
+
+	ptcWindow := b.GetPtcWindow()
+	if int(index) >= ptcWindow.Length() {
+		return nil, fmt.Errorf("getPTCFromWindow: index %d out of range (window size %d)", index, ptcWindow.Length())
+	}
+
+	vec := ptcWindow.Get(int(index))
+	result := make([]uint64, vec.Length())
+	for i := 0; i < vec.Length(); i++ {
+		result[i] = vec.Get(i)
+	}
+	return result, nil
+}
+
+// ComputePTC computes the Payload Timeliness Committee for a given slot from scratch.
+// This is used internally by ProcessPtcWindow and InitializePtcWindow to populate the window.
+func (b *CachingBeaconState) ComputePTC(slot uint64) ([]uint64, error) {
 	epoch := GetEpochAtSlot(b.BeaconConfig(), slot)
 	beaconConfig := b.BeaconConfig()
 	mixPosition := (epoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %
@@ -548,6 +592,43 @@ func (b *CachingBeaconState) GetPTC(slot uint64) ([]uint64, error) {
 	}
 
 	return ptcIndices, nil
+}
+
+// InitializePtcWindow populates the ptc_window for a fork upgrade to Gloas.
+// The first SLOTS_PER_EPOCH entries (previous epoch) are zero vectors.
+// The remaining (1 + MIN_SEED_LOOKAHEAD) epochs are filled via ComputePTC.
+func (b *CachingBeaconState) InitializePtcWindow() error {
+	cfg := b.BeaconConfig()
+	slotsPerEpoch := cfg.SlotsPerEpoch
+	totalSlots := (2 + cfg.MinSeedLookahead) * slotsPerEpoch
+
+	ptcWindow := solid.NewUint64VectorOfVectors(int(totalSlots), int(clparams.PtcSize))
+
+	// First SLOTS_PER_EPOCH entries (previous epoch) remain as zero vectors (already initialized).
+
+	// Fill current epoch and lookahead epochs: (1 + MIN_SEED_LOOKAHEAD) epochs.
+	currentEpoch := b.Slot() / slotsPerEpoch
+	for epochOffset := uint64(0); epochOffset < 1+cfg.MinSeedLookahead; epochOffset++ {
+		epoch := currentEpoch + epochOffset
+		epochStartSlot := epoch * slotsPerEpoch
+		for i := uint64(0); i < slotsPerEpoch; i++ {
+			slot := epochStartSlot + i
+			ptc, err := b.ComputePTC(slot)
+			if err != nil {
+				return fmt.Errorf("InitializePtcWindow: failed to compute PTC for slot %d: %w", slot, err)
+			}
+			vec := solid.NewUint64VectorSSZ(int(clparams.PtcSize))
+			for j, idx := range ptc {
+				vec.Set(j, idx)
+			}
+			// Window index: previous epoch takes [0, slotsPerEpoch), so current epoch starts at slotsPerEpoch
+			windowIndex := (epochOffset+1)*slotsPerEpoch + i
+			ptcWindow.Set(int(windowIndex), vec)
+		}
+	}
+
+	b.SetPtcWindow(ptcWindow)
+	return nil
 }
 
 func (b *CachingBeaconState) GetIndexedPayloadAttestation(payloadAttestation *cltypes.PayloadAttestation) (*cltypes.IndexedPayloadAttestation, error) {

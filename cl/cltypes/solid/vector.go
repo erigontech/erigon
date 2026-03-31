@@ -48,6 +48,32 @@ func NewVectorSSZ[T ssz2.HashableSizedObjectSSZ](size int) *VectorSSZ[T] {
 	}
 }
 
+// NewUint64VectorOfVectors creates a VectorSSZ of Uint64VectorSSZ elements.
+// Each inner vector is initialized with the given innerSize.
+// This is needed because Uint64VectorSSZ is an interface type whose zero value is nil,
+// so the generic NewVectorSSZ cannot initialize items via Clone on nil interface.
+func NewUint64VectorOfVectors(outerSize, innerSize int) *VectorSSZ[Uint64VectorSSZ] {
+	items := make([]Uint64VectorSSZ, outerSize)
+	for i := range items {
+		items[i] = NewUint64VectorSSZ(innerSize)
+	}
+
+	var isStatic bool
+	var staticItemSize int
+	if outerSize > 0 {
+		isStatic = items[0].Static()
+		if isStatic {
+			staticItemSize = items[0].EncodingSizeSSZ()
+		}
+	}
+
+	return &VectorSSZ[Uint64VectorSSZ]{
+		items:          items,
+		isStatic:       isStatic,
+		staticItemSize: staticItemSize,
+	}
+}
+
 func (v *VectorSSZ[T]) Clear() {
 	// Reset all items to zero values
 	for i := range v.items {

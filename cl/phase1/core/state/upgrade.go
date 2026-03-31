@@ -17,6 +17,7 @@
 package state
 
 import (
+	"fmt"
 	"sort"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -340,6 +341,11 @@ func (b *CachingBeaconState) UpgradeToGloas() error {
 	// Initialize empty payload_expected_withdrawals
 	payloadExpectedWithdrawals := solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), new(cltypes.Withdrawal).EncodingSizeSSZ())
 	b.SetPayloadExpectedWithdrawals(payloadExpectedWithdrawals)
+
+	// Initialize ptc_window: first epoch zeros, remaining epochs computed via ComputePTC
+	if err := b.InitializePtcWindow(); err != nil {
+		return fmt.Errorf("upgrade to Gloas: %w", err)
+	}
 
 	// Update the state version
 	b.SetVersion(clparams.GloasVersion)

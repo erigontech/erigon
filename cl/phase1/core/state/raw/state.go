@@ -99,6 +99,7 @@ type BeaconState struct {
 	builderPendingWithdrawals    *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal] // List[BuilderPendingWithdrawal, BUILDER_PENDING_WITHDRAWALS_LIMIT]
 	latestBlockHash              common.Hash                                       // latest_block_hash
 	payloadExpectedWithdrawals   *solid.ListSSZ[*cltypes.Withdrawal]               // List[Withdrawal, MAX_WITHDRAWALS_PER_PAYLOAD]
+	ptcWindow                    *solid.VectorSSZ[solid.Uint64VectorSSZ]           // Vector[Vector[uint64, PTC_SIZE], (2 + MIN_SEED_LOOKAHEAD) * SLOTS_PER_EPOCH]
 
 	//  leaves for computing hashes
 	leaves        []byte          // Pre-computed leaves.
@@ -149,6 +150,7 @@ func New(cfg *clparams.BeaconChainConfig) *BeaconState {
 		builderPendingWithdrawals:    solid.NewStaticListSSZ[*cltypes.BuilderPendingWithdrawal](int(cfg.BuilderPendingWithdrawalsLimit), new(cltypes.BuilderPendingWithdrawal).EncodingSizeSSZ()),
 		latestBlockHash:              common.Hash{},
 		payloadExpectedWithdrawals:   solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), new(cltypes.Withdrawal).EncodingSizeSSZ()),
+		ptcWindow:                    solid.NewUint64VectorOfVectors(int((2+cfg.MinSeedLookahead)*cfg.SlotsPerEpoch), int(clparams.PtcSize)),
 	}
 	state.init()
 	return state
@@ -229,6 +231,7 @@ func (b *BeaconState) MarshalJSON() ([]byte, error) {
 		obj["builder_pending_withdrawals"] = b.builderPendingWithdrawals
 		obj["latest_block_hash"] = b.latestBlockHash
 		obj["payload_expected_withdrawals"] = b.payloadExpectedWithdrawals
+		obj["ptc_window"] = b.ptcWindow
 	}
 	return json.Marshal(obj)
 }
