@@ -100,12 +100,9 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	if err != nil {
 		return err
 	}
-	// Use wall-clock time with MAXIMUM_GOSSIP_CLOCK_DISPARITY (500ms) tolerance
-	// to avoid rejecting blocks that arrive slightly before the slot boundary.
-	// f.Slot() uses second-precision time from OnTick and can lag up to ~1s behind.
-	wallNow := uint64(time.Now().Add(500 * time.Millisecond).Unix())
-	wallSlot := f.beaconCfg.GenesisSlot + ((wallNow - f.genesisTime) / f.beaconCfg.SecondsPerSlot)
-	if wallSlot < block.Block.Slot {
+	// Use the store's current slot (set via OnTick) to validate the block is not from the future.
+	// The spec says: assert get_current_slot(store) >= block.slot
+	if f.Slot() < block.Block.Slot {
 		return errors.New("block is too early compared to current_slot")
 	}
 
