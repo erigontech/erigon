@@ -112,5 +112,11 @@ func ProcessEpoch(s abstract.BeaconState) error {
 		}
 	}
 
+	if s.Version() >= clparams.GloasVersion {
+		if err := ProcessPtcWindow(s); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }

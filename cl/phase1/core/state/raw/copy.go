@@ -107,6 +107,7 @@ func (b *BeaconState) CopyInto(dst *BeaconState) error {
 		dst.builderPendingWithdrawals = b.builderPendingWithdrawals.ShallowCopy()
 		dst.latestBlockHash = b.latestBlockHash
 		dst.payloadExpectedWithdrawals = b.payloadExpectedWithdrawals.ShallowCopy()
+		b.ptcWindow.CopyTo(dst.ptcWindow)
 	}
 	dst.version = b.version
 	// Now sync internals

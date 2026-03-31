@@ -81,6 +81,9 @@ type BeaconStateExtension interface {
 	GetNextWithdrawalBuilderIndex() uint64
 	GetPayloadExpectedWithdrawals() *solid.ListSSZ[*cltypes.Withdrawal]
 	GetIndexedPayloadAttestation(payloadAttestation *cltypes.PayloadAttestation) (*cltypes.IndexedPayloadAttestation, error)
+	GetPtcWindow() *solid.VectorSSZ[solid.Uint64VectorSSZ]
+	GetPTC(slot uint64) ([]uint64, error)
+	ComputePTC(slot uint64) ([]uint64, error)
 }
 
 type BeaconStateBasic interface {
@@ -163,6 +166,7 @@ type BeaconStateMutator interface {
 	SetNextWithdrawalBuilderIndex(index uint64)
 	SetBuilders(builders *solid.ListSSZ[*cltypes.Builder])
 	SetLatestExecutionPayloadBid(bid *cltypes.ExecutionPayloadBid)
+	SetPtcWindow(ptcWindow *solid.VectorSSZ[solid.Uint64VectorSSZ])
 
 	AddEth1DataVote(vote *cltypes.Eth1Data)
 	AddValidator(validator solid.Validator, balance uint64)
