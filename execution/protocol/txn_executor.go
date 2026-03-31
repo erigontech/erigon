@@ -618,6 +618,23 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			st.txnGasUsedB4Refunds = mdGasUsed.Total() + st.evm.RevertedSpillGas()
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Total())
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
+			if dbg.TraceGas {
+				log.Warn("[amsterdam] tx gas breakdown",
+					"imdRegular", imdGas.Regular,
+					"imdState", imdGas.State,
+					"stateIgasRefund", stateIgasRefund,
+					"regularConsumed", st.evm.RegularGasConsumed(),
+					"stateConsumed", st.evm.StateGasConsumed(),
+					"revertedSpill", st.evm.RevertedSpillGas(),
+					"blockRegular", blockRegular,
+					"blockState", blockState,
+					"blockRegularUsed", st.blockRegularGasUsed,
+					"floorGasCost", intrinsicGasResult.FloorGasCost,
+					"txnGasUsedB4Refunds", st.txnGasUsedB4Refunds,
+					"refund", refund,
+					"txnGasUsed", st.txnGasUsed,
+				)
+			}
 		} else if rules.IsPrague {
 			st.txnGasUsedB4Refunds = mdGasUsed.Regular
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Regular)
@@ -638,6 +655,21 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		st.blockStateGasUsed = blockState
 		st.txnGasUsedB4Refunds = mdGasUsed.Total() + st.evm.RevertedSpillGas()
 		st.txnGasUsed = max(st.txnGasUsedB4Refunds, intrinsicGasResult.FloorGasCost)
+		if dbg.TraceGas {
+			log.Warn("[amsterdam] tx gas breakdown (no-refund)",
+				"imdRegular", imdGas.Regular,
+				"imdState", imdGas.State,
+				"stateIgasRefund", stateIgasRefund,
+				"regularConsumed", st.evm.RegularGasConsumed(),
+				"stateConsumed", st.evm.StateGasConsumed(),
+				"revertedSpill", st.evm.RevertedSpillGas(),
+				"blockRegular", blockRegular,
+				"blockState", blockState,
+				"blockRegularUsed", st.blockRegularGasUsed,
+				"floorGasCost", intrinsicGasResult.FloorGasCost,
+				"txnGasUsed", st.txnGasUsed,
+			)
+		}
 	} else {
 		// No-refund path: gasBailout (trace_call) or !refunds.
 		// Don't apply Prague floor or refunds — just record raw gas used.
