@@ -596,7 +596,17 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 		stateGasOk := true
 		if evm.chainRules.IsEIP8037 {
 			stateGas := uint64(len(ret)) * evm.Context.CostPerStateByte
+			if dbg.TraceGas {
+				fmt.Printf("[code deposit] block=%d tx=%d depth=%d codeLen=%d stateGas=%d preConsumed=%d\n",
+					evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), depth,
+					len(ret), stateGas, evm.stateGasConsumed)
+			}
 			gasRemaining, stateGasOk = useMdGas(evm, gasRemaining, stateGas, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage)
+			if dbg.TraceGas {
+				fmt.Printf("[code deposit] block=%d tx=%d depth=%d postConsumed=%d ok=%v\n",
+					evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), depth,
+					evm.stateGasConsumed, stateGasOk)
+			}
 		}
 
 		// Charge regular gas.

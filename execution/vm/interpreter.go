@@ -462,9 +462,17 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 				// which captures only regular gas. Adding state gas would cause
 				// uint64 underflow in the OnGasChange(gasCopy, gasCopy-cost, ...) call below.
 				// State gas is charged separately via useMdGas.
+				if dbg.TraceGas {
+					fmt.Printf("[interp state] block=%d tx=%d depth=%d op=%s dynamicState=%d preConsumed=%d\n",
+						blockNum, txIndex, evm.depth, op, dynamicCost.State, evm.StateGasConsumed())
+				}
 				ok := callContext.useMdGas(evm, dynamicCost.State, mdgas.StateGas, nil, tracing.GasChangeIgnored)
 				if !ok {
 					return nil, callContext.Gas(), ErrOutOfGas
+				}
+				if dbg.TraceGas {
+					fmt.Printf("[interp state] block=%d tx=%d depth=%d op=%s postConsumed=%d\n",
+						blockNum, txIndex, evm.depth, op, evm.StateGasConsumed())
 				}
 			}
 		}

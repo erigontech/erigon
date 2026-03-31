@@ -379,6 +379,11 @@ func gasCreateEip8037(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 		return mdgas.MdGas{}, ErrGasUintOverflow
 	}
 	gas.State = params.StateBytesNewAccount * evm.Context.CostPerStateByte
+	if dbg.TraceGas {
+		fmt.Printf("[gasCreateEip8037] block=%d tx=%d depth=%d cpsb=%d stateGas=%d regularGas=%d preConsumed=%d\n",
+			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.depth,
+			evm.Context.CostPerStateByte, gas.State, gas.Regular, evm.StateGasConsumed())
+	}
 	return gas, nil
 }
 
