@@ -505,7 +505,7 @@ func statefulGasCall(evm *EVM, callContext *CallContext, gas mdgas.MdGas, availa
 		// whether the CALL proceeds or transfers value.
 		evm.IntraBlockState().MarkAddressAccess(address, false)
 		if transfersValue && empty {
-			if rules.IsAmsterdam {
+			if rules.IsEIP8037 {
 				stateGas = params.StateBytesNewAccount * evm.Context.CostPerStateByte
 			} else {
 				accountGas = params.CallNewAccountGas

@@ -78,6 +78,7 @@ type Config struct {
 	PragueTime    *uint64 `json:"pragueTime,omitempty"`
 	OsakaTime     *uint64 `json:"osakaTime,omitempty"`
 	AmsterdamTime *uint64 `json:"amsterdamTime,omitempty"`
+	Eip8037Time   *uint64 `json:"eip8037Time,omitempty"`
 
 	// Optional EIP-4844 parameters (see also EIP-7691, EIP-7840, EIP-7892)
 	MinBlobGasPrice       *uint64                       `json:"minBlobGasPrice,omitempty"`
@@ -202,6 +203,7 @@ var (
 		PragueTime:                    common.NewUint64(0),
 		OsakaTime:                     common.NewUint64(0),
 		AmsterdamTime:                 common.NewUint64(0),
+		Eip8037Time:                   common.NewUint64(0),
 		DepositContract:               common.HexToAddress("0x00000000219ab540356cBB839Cbe05303d7705Fa"),
 		Ethash:                        new(EthashConfig),
 	}
@@ -401,6 +403,15 @@ func (c *Config) IsCancun(time uint64) bool {
 // IsAmsterdam returns whether time is either equal to the Amsterdam fork time or greater.
 func (c *Config) IsAmsterdam(time uint64) bool {
 	return isForked(c.AmsterdamTime, time)
+}
+
+// IsEIP8037 returns whether EIP-8037 (State Creation Gas Cost Increase) is active.
+// If Eip8037Time is set, it uses that timestamp; otherwise falls back to AmsterdamTime.
+func (c *Config) IsEIP8037(time uint64) bool {
+	if c.Eip8037Time != nil {
+		return isForked(c.Eip8037Time, time)
+	}
+	return c.IsAmsterdam(time)
 }
 
 // IsPrague returns whether time is either equal to the Prague fork time or greater.
@@ -778,6 +789,7 @@ type Rules struct {
 	IsIstanbul, IsBerlin, IsLondon, IsShanghai        bool
 	IsCancun, IsNapoli, IsAhmedabad, IsBhilai         bool
 	IsPrague, IsOsaka, IsAmsterdam                    bool
+	IsEIP8037                                         bool
 	IsAura                                            bool
 }
 

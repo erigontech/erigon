@@ -48,6 +48,7 @@ func (bc *BlockContext) Rules(c *chain.Config) *chain.Rules {
 		IsPrague:           c.IsPrague(bc.Time) || c.IsBhilai(bc.BlockNumber),
 		IsOsaka:            c.IsOsaka(bc.Time),
 		IsAmsterdam:        c.IsAmsterdam(bc.Time),
+		IsEIP8037:          c.IsEIP8037(bc.Time),
 		IsAura:             c.Aura != nil,
 	}
 }

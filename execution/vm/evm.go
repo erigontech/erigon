@@ -536,7 +536,7 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 		// so 2D block gas accounting reflects the gas consumed on EIP-684 collision.
 		// At depth 0 (CREATE transaction), the burned gas is accounted for through
 		// the zero-gas return in txn_executor.go (regular_gas_used=0 per spec).
-		if evm.chainRules.IsAmsterdam && depth > 0 {
+		if evm.chainRules.IsEIP8037 && depth > 0 {
 			evm.regularGasConsumed += gasRemaining.Regular
 		}
 		if evm.config.Tracer != nil && evm.config.Tracer.OnGasChange != nil {
@@ -592,9 +592,9 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 		preDepositGas := gasRemaining
 		preDepositStateGasConsumed := evm.stateGasConsumed
 
-		// Charge state gas (Amsterdam only).
+		// Charge state gas (EIP-8037 only).
 		stateGasOk := true
-		if evm.chainRules.IsAmsterdam {
+		if evm.chainRules.IsEIP8037 {
 			stateGas := uint64(len(ret)) * evm.Context.CostPerStateByte
 			gasRemaining, stateGasOk = useMdGas(evm, gasRemaining, stateGas, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage)
 		}
@@ -603,7 +603,7 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 		var regularGasOk bool
 		if stateGasOk {
 			var regularGas uint64
-			if evm.chainRules.IsAmsterdam {
+			if evm.chainRules.IsEIP8037 {
 				// EIP-8037 "Contract deployment cost calculation", success path:
 				// HASH_COST(L) = 6*ceil(L/32); the state component (cpsb*L) is charged above.
 				regularGas = params.Keccak256WordGas * ToWordSize(uint64(len(ret)))
@@ -616,7 +616,7 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 		if stateGasOk && regularGasOk {
 			evm.intraBlockState.SetCode(address, ret)
 		} else {
-			if evm.chainRules.IsAmsterdam {
+			if evm.chainRules.IsEIP8037 {
 				// Code deposit failed: per EIP-8037 the failure cost is
 				// GAS_CREATE + initcode_execution_cost only; code deposit
 				// gas (both state and regular) is excluded. Undo the

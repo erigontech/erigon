@@ -69,8 +69,9 @@ var (
 	bhilaiInstructionSet           = newBhilaiInstructionSet()
 	cancunInstructionSet           = newCancunInstructionSet()
 	pragueInstructionSet           = newPragueInstructionSet()
-	osakaInstructionSet            = newOsakaInstructionSet()
-	amsterdamInstructionSet        = newAmsterdamInstructionSet()
+	osakaInstructionSet                   = newOsakaInstructionSet()
+	amsterdamWithoutEIP8037InstructionSet = newAmsterdamWithoutEIP8037InstructionSet()
+	amsterdamInstructionSet               = newAmsterdamInstructionSet()
 )
 
 // JumpTable contains the EVM opcodes supported at a given fork.
@@ -92,6 +93,16 @@ func validateAndFillMaxStack(jt *JumpTable) {
 		}
 		op.maxStack = maxStack(op.numPop, op.numPush)
 	}
+}
+
+// newAmsterdamWithoutEIP8037InstructionSet is the Amsterdam instruction set without EIP-8037
+// gas changes. Used for Amsterdam blocks produced before EIP-8037 activation.
+func newAmsterdamWithoutEIP8037InstructionSet() JumpTable {
+	instructionSet := newOsakaInstructionSet()
+	enable8024(&instructionSet) // EIP-8024 (DUPN, SWAPN, EXCHANGE)
+	enable7843(&instructionSet) // EIP-7843 (SLOTNUM)
+	validateAndFillMaxStack(&instructionSet)
+	return instructionSet
 }
 
 func newAmsterdamInstructionSet() JumpTable {

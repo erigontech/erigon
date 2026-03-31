@@ -74,7 +74,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		var original, _ = evm.IntraBlockState().GetCommittedState(callContext.Address(), slotCommited)
 		if original.Eq(&current) {
 			if original.IsZero() { // create slot (2.1.1)
-				if rules.IsAmsterdam {
+				if rules.IsEIP8037 {
 					return mdgas.MdGas{Regular: cost + params.SstoreSetGasEIP8037, State: 32 * evm.Context.CostPerStateByte}, nil
 				} else {
 					return mdgas.MdGas{Regular: cost + params.SstoreSetGasEIP2200}, nil
@@ -98,7 +98,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 			if original.IsZero() { // reset to original inexistent slot (2.2.2.1)
 				// EIP 2200 Original clause:
 				//evm.StateDB.AddRefund(params.SstoreSetGasEIP2200 - params.SloadGasEIP2200)
-				if rules.IsAmsterdam {
+				if rules.IsEIP8037 {
 					evm.IntraBlockState().AddRefund(params.SstoreSetGasEIP8037 - params.WarmStorageReadCostEIP2929)
 					evm.IntraBlockState().AddStateRefund(32 * evm.Context.CostPerStateByte)
 				} else {
@@ -285,7 +285,7 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 			evm.IntraBlockState().MarkReadsInternal(address)
 		}
 		if empty && !balance.IsZero() {
-			if evm.chainRules.IsAmsterdam {
+			if evm.chainRules.IsEIP8037 {
 				gas.State = params.StateBytesNewAccount * evm.Context.CostPerStateByte
 			} else {
 				gas.Regular += params.CreateBySelfdestructGas
