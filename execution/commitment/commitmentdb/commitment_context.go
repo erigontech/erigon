@@ -315,13 +315,9 @@ func (sdc *SharedDomainsCommitmentContext) SetCollapseTracer(tracer commitment.C
 
 // ComputeCommitment Evaluates commitment for gathered updates.
 // If warmup was set via EnableTrieWarmup, pre-warms MDBX page cache by reading Branch data in parallel before processing.
-// ComputeCommitment should normally be called via SharedDomains.ComputeCommitment,
-// which flushes pending deferred updates first. Direct callers must ensure
-// pendingUpdate is nil (i.e. deferred mode is not active or was flushed).
+// ComputeCommitment Evaluates commitment for gathered updates.
+// If warmup was set via EnableTrieWarmup, pre-warms MDBX page cache by reading Branch data in parallel before processing.
 func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveState bool, blockNum uint64, txNum uint64, logPrefix string, onProgress func(*commitment.CommitProgress)) (rootHash []byte, err error) {
-	if sdc.pendingUpdate != nil {
-		panic("sdCtx.ComputeCommitment called directly with non-nil pendingUpdate; use SharedDomains.ComputeCommitment wrapper instead")
-	}
 	if dbg.KVReadLevelledMetrics {
 		mxCommitmentRunning.Inc()
 		defer mxCommitmentRunning.Dec()
@@ -437,9 +433,12 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		}
 	}
 
-	// Note: pending deferred updates are flushed by SharedDomains.ComputeCommitment
-	// (the public wrapper) BEFORE this method is called. The wrapper routes the flush
-	// through FlushPendingUpdates which writes into the correct block's changeset.
+	// Flush pending commitment update before processing new ones.
+	if sdc.pendingUpdate != nil {
+		if err = sdc.flushPendingUpdate(trieContext.putter); err != nil {
+			return nil, err
+		}
+	}
 
 	// When deferring commitment updates, tell Process() to leave deferred updates
 	// on the branch encoder instead of applying inline — we'll take them after.
@@ -451,6 +450,13 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, onProgress, warmupConfig)
 	if err != nil {
 		return nil, err
+	}
+
+	// ConcurrentPatriciaHashed.Process unconditionally calls SetConcurrentCommitment
+	// based on trie topology. Override back to serial when paraTrieDB is nil because
+	// ParallelHashSort requires per-goroutine DB contexts that only paraTrieDB can provide.
+	if sdc.paraTrieDB == nil {
+		sdc.updates.SetConcurrentCommitment(false)
 	}
 
 	// Handle deferred branch updates left by Process() on the branch encoder.
@@ -564,8 +570,12 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *Tr
 	return blockNum, txNum, state, nil
 }
 
-// enable concurrent commitment if we are using concurrent patricia trie and this trie diverges on very top (first branch is straight at nibble 0)
+// enable concurrent commitment if we are using concurrent patricia trie and this trie diverges on very top (first branch is straight at nibble 0).
+// Concurrent commitment requires paraTrieDB to create per-goroutine DB contexts.
 func (sdc *SharedDomainsCommitmentContext) enableConcurrentCommitmentIfPossible() error {
+	if sdc.paraTrieDB == nil {
+		return nil // concurrent commitment needs per-goroutine DB contexts
+	}
 	if pt, ok := sdc.patriciaTrie.(*commitment.ConcurrentPatriciaHashed); ok {
 		nextConcurrent, err := pt.CanDoConcurrentNext()
 		if err != nil {
