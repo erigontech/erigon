@@ -289,8 +289,13 @@ LOOP:
 			// ensure we run for at least 500ms after the request to stop comes in from GetPayload
 			stopped = time.NewTicker(500 * time.Millisecond)
 		}
-		// If we don't have enough gas for any further transactions then we're done
-		if gasPool.Gas() < params.TxGas {
+		// If we don't have enough gas for any further transactions then we're done.
+		// EIP-8037: also stop when the bottleneck gas (max of regular, state)
+		// leaves less than TxGas headroom, so we don't produce blocks that
+		// violate gas_used <= gas_limit.
+		poolGasRemaining := gasPool.Gas()
+		bottleneckRemaining := header.GasLimit - min(gasUsed.BlockGasUsed(), header.GasLimit)
+		if min(poolGasRemaining, bottleneckRemaining) < params.TxGas {
 			logger.Debug(fmt.Sprintf("[%s] Not enough gas for further transactions", logPrefix), "have", gasPool, "want", params.TxGas)
 			done = true
 			break

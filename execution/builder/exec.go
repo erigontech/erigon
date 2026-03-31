@@ -263,7 +263,9 @@ func getNextTransactions(
 	logger log.Logger,
 ) ([]types.Transaction, error) {
 	availableRlpSpace := cfg.builderState.BuiltBlock.AvailableRlpSpace(cfg.chainConfig)
-	remainingGas := header.GasLimit - header.GasUsed
+	// EIP-8037: header.GasUsed = max(regular, state) which can exceed
+	// GasLimit when state gas dominates. Clamp to avoid uint64 underflow.
+	remainingGas := header.GasLimit - min(header.GasUsed, header.GasLimit)
 	remainingBlobGas := uint64(0)
 	if header.BlobGasUsed != nil {
 		maxBlobs := cfg.chainConfig.GetMaxBlobsPerBlock(header.Time)
