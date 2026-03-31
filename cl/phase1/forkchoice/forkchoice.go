@@ -158,6 +158,11 @@ type ForkChoiceStore struct {
 	// [New in Gloas:EIP7732]
 	payloadTimelinessVote       sync.Map // map[common.Hash][clparams.PtcSize]bool
 	payloadDataAvailabilityVote sync.Map // map[common.Hash][clparams.PtcSize]bool
+	// [New in Gloas:EIP7732] Block timeliness tracking.
+	// Pre-GLOAS: stores [block_timely, false] (only index 0 is meaningful).
+	// Post-GLOAS: stores [block_timely, payload_timely] — two independent booleans.
+	// Used by is_head_late and proposer boost reorg logic.
+	blockTimeliness sync.Map // map[common.Hash][clparams.NumBlockTimelinessDeadlines]bool
 	// [New in Gloas:EIP7732] Indexed weight store for optimized weight calculation
 	indexedWeightStore *indexedWeightStore
 	// [New in Gloas:EIP7732] Envelopes waiting for their corresponding block to arrive.
@@ -391,6 +396,46 @@ func (f *ForkChoiceStore) GetPeerDas() das.PeerDas {
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) GetRecentExecutionPayloadStatus(executionBlockHash common.Hash) (execution_client.PayloadStatus, bool) {
 	return f.executionPayloadStatus.Get(executionBlockHash)
+}
+
+// IsBlobDataAvailable returns the local node's assessment of blob data availability
+// for a given block. Used by the payload_attestation_data beacon API so PTC validators
+// can independently determine the blob_data_available flag.
+// Returns true when: (a) the envelope exists and the committed bid has zero blob
+// commitments (trivially available), or (b) PeerDAS confirms custody columns are present.
+// [New in Gloas:EIP7732]
+func (f *ForkChoiceStore) IsBlobDataAvailable(slot uint64, blockRoot common.Hash) bool {
+	// Envelope must exist locally
+	if !f.forkGraph.HasEnvelope(blockRoot) {
+		return false
+	}
+
+	// Get the block to inspect its committed bid's blob commitments
+	block, ok := f.forkGraph.GetBlock(blockRoot)
+	if !ok || block == nil {
+		return false
+	}
+
+	committedBid := block.Block.Body.GetSignedExecutionPayloadBid()
+	if committedBid == nil || committedBid.Message == nil {
+		// No bid → no blobs → trivially available
+		return true
+	}
+
+	if committedBid.Message.BlobKzgCommitments.Len() == 0 {
+		// No blob commitments → trivially available
+		return true
+	}
+
+	// Has blob commitments — check PeerDAS
+	if f.peerDas == nil {
+		return false
+	}
+	available, err := f.peerDas.IsDataAvailable(slot, blockRoot)
+	if err != nil {
+		return false
+	}
+	return available
 }
 
 // Highest seen returns highest seen slot
@@ -891,6 +936,9 @@ func (f *ForkChoiceStore) GetPendingPartialWithdrawals(blockRoot common.Hash) (*
 }
 
 func (f *ForkChoiceStore) GetProposerLookahead(slot uint64) (solid.Uint64VectorSSZ, bool) {
+	if f.proposerLookahead == nil {
+		return nil, false
+	}
 	epoch := slot / f.beaconCfg.SlotsPerEpoch
 	return f.proposerLookahead.Get(epoch)
 }

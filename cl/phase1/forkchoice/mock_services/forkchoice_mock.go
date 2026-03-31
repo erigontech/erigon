@@ -414,6 +414,10 @@ func (f *ForkChoiceStorageMock) ReadEnvelopeFromDisk(blockRoot common.Hash) (*cl
 	return f.Envelopes[blockRoot], nil
 }
 
+func (f *ForkChoiceStorageMock) IsBlobDataAvailable(slot uint64, blockRoot common.Hash) bool {
+	return true
+}
+
 func (f *ForkChoiceStorageMock) GetBalances(blockRoot common.Hash) (solid.Uint64ListSSZ, error) {
 	panic("implement me")
 }

@@ -374,7 +374,7 @@ func TestAggregateAndProofGloasAllowIndex0WhenSlotsDiffer(t *testing.T) {
 }
 
 // TestAggregateAndProofGloasAllowIndex1WhenSlotsDiffer tests that GLOAS allows
-// aggregate.data.index == 1 when block.slot != aggregate.data.slot
+// aggregate.data.index == 1 when block.slot != aggregate.data.slot AND envelope exists
 func TestAggregateAndProofGloasAllowIndex1WhenSlotsDiffer(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -402,11 +402,15 @@ func TestAggregateAndProofGloasAllowIndex1WhenSlotsDiffer(t *testing.T) {
 
 	// Set the block header with DIFFERENT slot than aggregate.data.slot
 	blockSlot := agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot - 1
-	fcu.Headers[agg.SignedAggregateAndProof.Message.Aggregate.Data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{
+	blockRoot := agg.SignedAggregateAndProof.Message.Aggregate.Data.BeaconBlockRoot
+	fcu.Headers[blockRoot] = &cltypes.BeaconBlockHeader{
 		Slot: blockSlot, // Different slot from aggregate
 	}
 
-	// Should pass (index=1 is allowed when slots differ)
+	// Set envelope as seen/validated (required for index=1)
+	fcu.Envelopes[blockRoot] = &cltypes.SignedExecutionPayloadEnvelope{}
+
+	// Should pass (index=1 is allowed when slots differ and envelope exists)
 	err := aggService.ProcessMessage(context.Background(), nil, agg)
 	require.NoError(t, err)
 }
@@ -447,6 +451,85 @@ func TestAggregateAndProofGloasAllowIndex0WhenSlotsMatch(t *testing.T) {
 	}
 
 	// Should pass (index=0 is required when slots match)
+	err := aggService.ProcessMessage(context.Background(), nil, agg)
+	require.NoError(t, err)
+}
+
+// TestAggregateAndProofGloasIgnoreIndex1NoEnvelope tests that GLOAS ignores
+// aggregate.data.index == 1 when the execution payload envelope has NOT been seen.
+func TestAggregateAndProofGloasIgnoreIndex1NoEnvelope(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create a config with all forks at epoch 0
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 0
+
+	agg, s := getAggregateAndProofAndStateForVersion(t, clparams.GloasVersion)
+
+	// Set CommitteeIndex to 1 (payload present attestation)
+	agg.SignedAggregateAndProof.Message.Aggregate.Data.CommitteeIndex = 1
+
+	aggService, sd, fcu := setupAggregateAndProofTestWithConfig(t, &cfg)
+	sd.OnHeadState(s)
+	fcu.FinalizedCheckpointVal = s.FinalizedCheckpoint()
+	fcu.Ancestors[s.FinalizedCheckpoint().Epoch*32] = forkchoice.ForkChoiceNode{Root: s.FinalizedCheckpoint().Root}
+
+	// Set the block header with DIFFERENT slot than aggregate.data.slot
+	blockSlot := agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot - 1
+	fcu.Headers[agg.SignedAggregateAndProof.Message.Aggregate.Data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{
+		Slot: blockSlot,
+	}
+
+	// Do NOT set envelope — simulate payload not yet seen
+	// fcu.Envelopes is empty
+
+	err := aggService.ProcessMessage(context.Background(), nil, agg)
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrIgnore)
+	require.Contains(t, err.Error(), "execution payload envelope not seen/validated")
+}
+
+// TestAggregateAndProofGloasIndex0NoEnvelopeOk tests that GLOAS does NOT require
+// an envelope when index=0 (beacon block attestation, not payload attestation).
+func TestAggregateAndProofGloasIndex0NoEnvelopeOk(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create a config with all forks at epoch 0
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 0
+
+	agg, s := getAggregateAndProofAndStateForVersion(t, clparams.GloasVersion)
+
+	// Set CommitteeIndex to 0 (beacon block attestation — no envelope required)
+	agg.SignedAggregateAndProof.Message.Aggregate.Data.CommitteeIndex = 0
+
+	aggService, sd, fcu := setupAggregateAndProofTestWithConfig(t, &cfg)
+	sd.OnHeadState(s)
+	fcu.FinalizedCheckpointVal = s.FinalizedCheckpoint()
+	fcu.Ancestors[s.FinalizedCheckpoint().Epoch*32] = forkchoice.ForkChoiceNode{Root: s.FinalizedCheckpoint().Root}
+	fcu.Ancestors[agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot] = forkchoice.ForkChoiceNode{Root: agg.SignedAggregateAndProof.Message.Aggregate.Data.Target.Root}
+
+	// Set the block header with DIFFERENT slot than aggregate.data.slot
+	blockSlot := agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot - 1
+	fcu.Headers[agg.SignedAggregateAndProof.Message.Aggregate.Data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{
+		Slot: blockSlot,
+	}
+
+	// No envelope set — should still pass for index=0
 	err := aggService.ProcessMessage(context.Background(), nil, agg)
 	require.NoError(t, err)
 }

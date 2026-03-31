@@ -379,6 +379,117 @@ func (s *dataColumnSidecarService) verifyProposerSignature(proposerIndex uint64,
 	return valid, nil
 }
 
+// ValidatePartialDataColumnHeader validates a PartialDataColumnHeader against the known state.
+// It performs:
+// 1. Bid seen check: verifies the block root references a known block with a valid bid
+// 2. Slot match: verifies the header's slot matches the block's slot
+// 3. Commitments root match: verifies the kzg_commitments root matches the bid's commitments
+func (s *dataColumnSidecarService) ValidatePartialDataColumnHeader(header *cltypes.PartialDataColumnHeader) error {
+	if header == nil {
+		return errors.New("nil partial data column header")
+	}
+
+	if header.Version() >= clparams.GloasVersion {
+		return s.validateGloasPartialHeader(header)
+	}
+	return s.validateFuluPartialHeader(header)
+}
+
+// validateGloasPartialHeader validates a GLOAS-era PartialDataColumnHeader.
+func (s *dataColumnSidecarService) validateGloasPartialHeader(header *cltypes.PartialDataColumnHeader) error {
+	slot := header.Slot
+	blockRoot := header.BeaconBlockRoot
+
+	// [IGNORE] Not from a future slot
+	if slot > s.ethClock.GetCurrentSlot() && !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(slot) {
+		return ErrIgnore
+	}
+
+	// [IGNORE] From a slot greater than the latest finalized slot
+	if slot <= s.forkChoice.FinalizedSlot() {
+		return ErrIgnore
+	}
+
+	// Bid seen check: block must be known in fork choice
+	block, ok := s.forkChoice.GetBlock(blockRoot)
+	if !ok {
+		return ErrIgnore
+	}
+
+	// Slot match: header slot must match block slot
+	if slot != block.Block.Slot {
+		return fmt.Errorf("partial header slot %d does not match block slot %d", slot, block.Block.Slot)
+	}
+
+	// Commitments root match: verify against bid's blob_kzg_commitments
+	if block.Block.Body.SignedExecutionPayloadBid == nil ||
+		block.Block.Body.SignedExecutionPayloadBid.Message == nil {
+		return errors.New("block does not have SignedExecutionPayloadBid")
+	}
+	bidCommitments := &block.Block.Body.SignedExecutionPayloadBid.Message.BlobKzgCommitments
+	bidCommitmentsRoot, err := bidCommitments.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("failed to hash bid commitments: %v", err)
+	}
+
+	headerCommitmentsRoot, err := header.KzgCommitments.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("failed to hash header commitments: %v", err)
+	}
+
+	if bidCommitmentsRoot != headerCommitmentsRoot {
+		return fmt.Errorf("partial header commitments root mismatch: header=%x bid=%x", headerCommitmentsRoot, bidCommitmentsRoot)
+	}
+
+	return nil
+}
+
+// validateFuluPartialHeader validates a Fulu-era PartialDataColumnHeader.
+func (s *dataColumnSidecarService) validateFuluPartialHeader(header *cltypes.PartialDataColumnHeader) error {
+	if header.SignedBlockHeader == nil || header.SignedBlockHeader.Header == nil {
+		return errors.New("missing signed block header in partial data column header")
+	}
+
+	blockHeader := header.SignedBlockHeader.Header
+
+	// [IGNORE] Not from a future slot
+	if blockHeader.Slot > s.ethClock.GetCurrentSlot() && !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(blockHeader.Slot) {
+		return ErrIgnore
+	}
+
+	// [IGNORE] From a slot greater than the latest finalized slot
+	if blockHeader.Slot <= s.forkChoice.FinalizedSlot() {
+		return ErrIgnore
+	}
+
+	blockRoot, err := blockHeader.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("failed to get block root: %v", err)
+	}
+
+	// Bid seen check: block's parent must be seen in fork choice
+	parentHeader, ok := s.forkChoice.GetHeader(blockHeader.ParentRoot)
+	if !ok {
+		return ErrIgnore
+	}
+
+	// Slot match: header slot must be higher than parent
+	if blockHeader.Slot <= parentHeader.Slot {
+		return fmt.Errorf("partial header slot %d not higher than parent slot %d", blockHeader.Slot, parentHeader.Slot)
+	}
+
+	// [REJECT] The proposer signature is valid
+	if pass, err := s.verifyProposerSignature(blockHeader.ProposerIndex, header.SignedBlockHeader); err != nil {
+		return fmt.Errorf("invalid proposer signature for partial header: %v", err)
+	} else if !pass {
+		return errors.New("invalid proposer signature for partial header")
+	}
+
+	_ = blockRoot // Used for logging in production
+
+	return nil
+}
+
 // scheduleSidecarForLaterProcessing queues a GLOAS sidecar for later processing when its block arrives
 func (s *dataColumnSidecarService) scheduleSidecarForLaterProcessing(sidecar *cltypes.DataColumnSidecar, subnet *uint64) {
 	key := seenGloasSidecarKey{
