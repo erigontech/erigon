@@ -1251,6 +1251,178 @@ func DumpHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br services.FullBloc
 	return err
 }
 
+// FindDeletedStorageSlots scans storage history in [fromBlock, toBlock] to find slots that:
+//  1. Were modified in the block range
+//  2. Currently have latest value = zero/nil (deleted)
+//  3. Had at least one prior non-deletion EF entry
+//
+// For each such slot, it outputs the deletion entry and the previous entry's block number,
+// which is where check-commitment-hist-at-blk would fail if the deletion recorded a stale prevVal.
+func FindDeletedStorageSlots(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, fromBlock, toBlock uint64, limit int, w io.Writer, logger log.Logger) error {
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	txNumsReader := br.TxnumReader()
+	fromTxNum, err := txNumsReader.Min(ctx, tx, fromBlock)
+	if err != nil {
+		return err
+	}
+	toTxNum, err := txNumsReader.Max(ctx, tx, toBlock)
+	if err != nil {
+		return err
+	}
+	toTxNum++ // exclusive
+	logger.Info("scanning storage history for deleted slots", "fromBlock", fromBlock, "toBlock", toBlock, "fromTxNum", fromTxNum, "toTxNum", toTxNum)
+
+	type result struct {
+		Address       string `json:"address"`
+		Slot          string `json:"slot"`
+		DeletionTxNum uint64 `json:"deletionTxNum"`
+		DeletionBlock uint64 `json:"deletionBlock"`
+		PrevTxNum     uint64 `json:"prevTxNum"`
+		PrevBlock     uint64 `json:"prevBlock"`
+		RawAtDeletion string `json:"rawAtDeletion"`
+		RawAtPrev     string `json:"rawAtPrev"`
+	}
+
+	var results []result
+	seen := make(map[string]bool)
+	scanned := 0
+
+	stream, err := tx.HistoryRange(kv.StorageDomain, int(fromTxNum), int(toTxNum), order.Asc, -1)
+	if err != nil {
+		return err
+	}
+	defer stream.Close()
+
+	for stream.HasNext() {
+		if err := common.Stopped(ctx.Done()); err != nil {
+			return err
+		}
+
+		k, _, err := stream.Next()
+		if err != nil {
+			return err
+		}
+		if len(k) < length.Addr+length.Hash {
+			continue
+		}
+
+		compositeKey := string(k[:length.Addr+length.Hash])
+		if seen[compositeKey] {
+			continue
+		}
+		seen[compositeKey] = true
+		scanned++
+
+		if scanned%10000 == 0 {
+			logger.Info("scanning...", "scanned", scanned, "found", len(results))
+		}
+
+		// Check if latest value is zero/nil (deleted)
+		latestVal, _, err := tx.GetLatest(kv.StorageDomain, k[:length.Addr+length.Hash])
+		if err != nil {
+			return err
+		}
+		if len(latestVal) > 0 {
+			continue // not deleted, skip
+		}
+
+		// Get full EF sequence
+		idxIter, err := tx.IndexRange(kv.StorageHistoryIdx, k[:length.Addr+length.Hash], 0, int(toTxNum+1000000), order.Asc, -1)
+		if err != nil {
+			return err
+		}
+
+		var efTxNums []uint64
+		for idxIter.HasNext() {
+			txNum, err := idxIter.Next()
+			if err != nil {
+				idxIter.Close()
+				return err
+			}
+			efTxNums = append(efTxNums, txNum)
+		}
+		idxIter.Close()
+
+		if len(efTxNums) < 2 {
+			continue // need at least 2 entries
+		}
+
+		// Last entry should be the deletion, second-to-last is the previous write
+		lastTxNum := efTxNums[len(efTxNums)-1]
+		prevTxNum := efTxNums[len(efTxNums)-2]
+
+		// Get raw values at both entries
+		rawAtLast, _, err := tx.HistorySeek(kv.StorageDomain, k[:length.Addr+length.Hash], lastTxNum)
+		if err != nil {
+			return err
+		}
+		rawAtPrev, _, err := tx.HistorySeek(kv.StorageDomain, k[:length.Addr+length.Hash], prevTxNum)
+		if err != nil {
+			return err
+		}
+
+		// Find block numbers
+		lastBlock, lastBlockOk, err := txNumsReader.FindBlockNum(ctx, tx, lastTxNum)
+		if err != nil || !lastBlockOk {
+			continue
+		}
+		prevBlock, prevBlockOk, err := txNumsReader.FindBlockNum(ctx, tx, prevTxNum)
+		if err != nil || !prevBlockOk {
+			continue
+		}
+
+		addr := "0x" + hex.EncodeToString(k[:length.Addr])
+		slot := "0x" + hex.EncodeToString(k[length.Addr:length.Addr+length.Hash])
+
+		rawLastHex := "0x0"
+		if len(rawAtLast) > 0 {
+			rawLastHex = "0x" + hex.EncodeToString(rawAtLast)
+		}
+		rawPrevHex := "0x0"
+		if len(rawAtPrev) > 0 {
+			rawPrevHex = "0x" + hex.EncodeToString(rawAtPrev)
+		}
+
+		results = append(results, result{
+			Address:       addr,
+			Slot:          slot,
+			DeletionTxNum: lastTxNum,
+			DeletionBlock: lastBlock,
+			PrevTxNum:     prevTxNum,
+			PrevBlock:     prevBlock,
+			RawAtDeletion: rawLastHex,
+			RawAtPrev:     rawPrevHex,
+		})
+
+		logger.Info("found deleted slot",
+			"address", addr,
+			"slot", slot,
+			"deletionBlock", lastBlock,
+			"prevBlock", prevBlock,
+			"rawAtDeletion", rawLastHex,
+			"rawAtPrev", rawPrevHex,
+		)
+
+		if limit > 0 && len(results) >= limit {
+			break
+		}
+	}
+
+	logger.Info("scan complete", "scanned", scanned, "found", len(results))
+
+	enc, err := json.MarshalIndent(results, "", "  ")
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(enc)
+	return err
+}
+
 // DumpSlotHistory dumps detailed history information for a single storage slot (or account)
 // around a given block. It outputs:
 //   - The EF (inverted index) entries: all txNums where this key was modified in a window

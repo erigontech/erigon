@@ -403,6 +403,26 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
+			Name: "find-deleted-slots",
+			Action: func(cliCtx *cli.Context) error {
+				logger := log.Root()
+				err := doFindDeletedSlots(cliCtx, logger)
+				if err != nil {
+					log.Error("[find-deleted-slots] failure", "err", err)
+					return err
+				}
+				return nil
+			},
+			Description: "scan storage history for deleted slots that had prior non-zero values (for detecting stale prevVal bugs)",
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.Uint64Flag{Name: "from", Usage: "start block", Required: true},
+				&cli.Uint64Flag{Name: "to", Usage: "end block", Required: true},
+				&cli.IntFlag{Name: "limit", Usage: "max results", Value: 20},
+				&cli.StringFlag{Name: "output", Usage: "output file path (default: stdout)"},
+			}),
+		},
+		{
 			Name: "check-commitment-with-override",
 			Action: func(cliCtx *cli.Context) error {
 				logger := log.Root()
@@ -1396,6 +1416,44 @@ func stateProgress(ctx context.Context, db kv.TemporalRoDB, txNumsReader rawdbv3
 		return 0, err
 	}
 	return blockNum, nil
+}
+
+func doFindDeletedSlots(cliCtx *cli.Context, logger log.Logger) error {
+	ctx := cliCtx.Context
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+	chainConfig := fromdb.ChainConfig(chainDB)
+	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
+	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	blockRetire, agg := res.BlockRetire, res.Aggregator
+	if err != nil {
+		return err
+	}
+	defer clean()
+	defer blockRetire.MadvNormal().DisableReadAhead()
+	defer agg.MadvNormal().DisableReadAhead()
+	db, err := temporal.New(chainDB, agg)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	blockReader, _ := blockRetire.IO()
+
+	fromBlock := cliCtx.Uint64("from")
+	toBlock := cliCtx.Uint64("to")
+	limit := cliCtx.Int("limit")
+
+	var w io.Writer = os.Stdout
+	if outPath := cliCtx.String("output"); outPath != "" {
+		f, err := os.Create(outPath)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		w = f
+	}
+	return integrity.FindDeletedStorageSlots(ctx, db, blockReader, fromBlock, toBlock, limit, w, logger)
 }
 
 func doCheckCommitmentWithOverride(cliCtx *cli.Context, logger log.Logger) error {
