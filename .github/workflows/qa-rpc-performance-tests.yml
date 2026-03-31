@@ -263,7 +263,7 @@ jobs:
                                       --test-type "$method" \
                                       --pattern-file perf/pattern/"$network"/"$pattern".tar \
                                       --test-sequence "$sequence" \
-                                      --repetitions 2 \
+                                      --repetitions 5 \
                                       --client-build-dir "/" \
                                       --test-report \
                                       --json-report $result_dir/$result_file \
