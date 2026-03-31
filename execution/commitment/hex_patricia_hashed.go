@@ -268,6 +268,52 @@ func (f loadFlags) addFlag(loadFlags loadFlags) loadFlags {
 	return f | loadFlags
 }
 
+// CellType classifies a cell by its role in the trie, derived from which length
+// fields are set. The precedence is: Extension > Storage > Account > Hash > Empty.
+type CellType uint8
+
+const (
+	CellTypeEmpty     CellType = iota // all lengths == 0
+	CellTypeHash                      // hashLen > 0, unloaded/pruned node
+	CellTypeExtension                 // hashedExtLen > 0 (may also have accountAddrLen or storageAddrLen)
+	CellTypeStorage                   // storageAddrLen > 0 (and hashedExtLen == 0)
+	CellTypeAccount                   // accountAddrLen > 0 (and hashedExtLen == 0, storageAddrLen == 0)
+)
+
+// Type derives the CellType from the cell's length fields without storing it.
+func (c *cell) Type() CellType {
+	if c.hashedExtLen > 0 {
+		return CellTypeExtension
+	}
+	if c.storageAddrLen > 0 {
+		return CellTypeStorage
+	}
+	if c.accountAddrLen > 0 {
+		return CellTypeAccount
+	}
+	if c.hashLen > 0 {
+		return CellTypeHash
+	}
+	return CellTypeEmpty
+}
+
+func (ct CellType) String() string {
+	switch ct {
+	case CellTypeEmpty:
+		return "Empty"
+	case CellTypeHash:
+		return "Hash"
+	case CellTypeExtension:
+		return "Extension"
+	case CellTypeAccount:
+		return "Account"
+	case CellTypeStorage:
+		return "Storage"
+	default:
+		return fmt.Sprintf("CellType(%d)", ct)
+	}
+}
+
 var (
 	emptyRootHashBytes = empty.RootHash.Bytes()
 )
@@ -1720,7 +1766,7 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int16) error {
 	var touched, present bool
 	var upDepth, depth int16
 	if hph.activeRows == 0 {
-		if hph.rootChecked && hph.root.hashLen == 0 && hph.root.hashedExtLen == 0 {
+		if hph.rootChecked && hph.root.Type() == CellTypeEmpty {
 			return nil // No unfolding for empty root
 		}
 		upCell = &hph.root
@@ -1749,47 +1795,48 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int16) error {
 	}
 	hph.touchMap[row], hph.afterMap[row], hph.branchBefore[row] = 0, 0, false
 
-	if upCell.hashedExtLen == 0 {
+	switch upCell.Type() {
+	case CellTypeExtension:
+		var nibble uint8
+		var copyLen int16
+		if upCell.hashedExtLen >= unfolding {
+			depth = upDepth + unfolding
+			nibble = upCell.hashedExtension[unfolding-1]
+			copyLen = unfolding - 1
+		} else {
+			depth = upDepth + upCell.hashedExtLen
+			nibble = upCell.hashedExtension[upCell.hashedExtLen-1]
+			copyLen = upCell.hashedExtLen - 1
+		}
+
+		if touched {
+			hph.touchMap[row] = uint16(1) << nibble
+		}
+		if present {
+			hph.afterMap[row] = uint16(1) << nibble
+		}
+
+		cell := &hph.grid[row][nibble]
+		cell.fillFromUpperCell(upCell, depth, min(unfolding, upCell.hashedExtLen))
+		if hph.trace {
+			fmt.Printf("unfolded cell (%d, %x, depth=%d) %s\n", row, nibble, depth, cell.FullString())
+		}
+		if row >= 64 {
+			cell.accountAddrLen = 0
+		}
+
+		if copyLen > 0 {
+			copy(hph.currentKey[hph.currentKeyLen:], upCell.hashedExtension[:copyLen])
+			hph.currentKeyLen += copyLen
+		}
+
+		hph.depths[hph.activeRows] = depth
+		hph.activeRows++
+		return nil
+	default: // CellTypeHash, CellTypeAccount, CellTypeStorage, CellTypeEmpty
 		depth = upDepth + 1
 		return hph.unfoldBranchNode(row, depth, touched && !present)
 	}
-
-	var nibble uint8
-	var copyLen int16
-	if upCell.hashedExtLen >= unfolding {
-		depth = upDepth + unfolding
-		nibble = upCell.hashedExtension[unfolding-1]
-		copyLen = unfolding - 1
-	} else {
-		depth = upDepth + upCell.hashedExtLen
-		nibble = upCell.hashedExtension[upCell.hashedExtLen-1]
-		copyLen = upCell.hashedExtLen - 1
-	}
-
-	if touched {
-		hph.touchMap[row] = uint16(1) << nibble
-	}
-	if present {
-		hph.afterMap[row] = uint16(1) << nibble
-	}
-
-	cell := &hph.grid[row][nibble]
-	cell.fillFromUpperCell(upCell, depth, min(unfolding, upCell.hashedExtLen))
-	if hph.trace {
-		fmt.Printf("unfolded cell (%d, %x, depth=%d) %s\n", row, nibble, depth, cell.FullString())
-	}
-	if row >= 64 {
-		cell.accountAddrLen = 0
-	}
-
-	if copyLen > 0 {
-		copy(hph.currentKey[hph.currentKeyLen:], upCell.hashedExtension[:copyLen])
-		hph.currentKeyLen += copyLen
-	}
-
-	hph.depths[hph.activeRows] = depth
-	hph.activeRows++
-	return nil
 }
 
 func (hph *HexPatriciaHashed) needFolding(hashedKey []byte) bool {

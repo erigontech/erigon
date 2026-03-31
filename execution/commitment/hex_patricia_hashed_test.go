@@ -2983,3 +2983,87 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		buildTrieAndWitness(t, builder, [][]byte{fullStorageKeyToProve}, []bool{true})
 	})
 }
+
+func TestCellType(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		cell     cell
+		expected CellType
+	}{
+		{
+			name:     "empty cell",
+			cell:     cell{},
+			expected: CellTypeEmpty,
+		},
+		{
+			name:     "hash only",
+			cell:     cell{hashLen: 32},
+			expected: CellTypeHash,
+		},
+		{
+			name:     "extension only",
+			cell:     cell{hashedExtLen: 5},
+			expected: CellTypeExtension,
+		},
+		{
+			name:     "account only",
+			cell:     cell{accountAddrLen: length.Addr},
+			expected: CellTypeAccount,
+		},
+		{
+			name:     "storage only",
+			cell:     cell{storageAddrLen: length.Addr + length.Hash},
+			expected: CellTypeStorage,
+		},
+		{
+			name:     "extension with account (extension takes precedence)",
+			cell:     cell{hashedExtLen: 10, accountAddrLen: length.Addr},
+			expected: CellTypeExtension,
+		},
+		{
+			name:     "extension with storage (extension takes precedence)",
+			cell:     cell{hashedExtLen: 10, storageAddrLen: length.Addr + length.Hash},
+			expected: CellTypeExtension,
+		},
+		{
+			name:     "extension with account and storage",
+			cell:     cell{hashedExtLen: 64, accountAddrLen: length.Addr, storageAddrLen: length.Addr + length.Hash},
+			expected: CellTypeExtension,
+		},
+		{
+			name:     "account with hash (account takes precedence)",
+			cell:     cell{accountAddrLen: length.Addr, hashLen: 32},
+			expected: CellTypeAccount,
+		},
+		{
+			name:     "storage with account (storage takes precedence)",
+			cell:     cell{accountAddrLen: length.Addr, storageAddrLen: length.Addr + length.Hash},
+			expected: CellTypeStorage,
+		},
+		{
+			name:     "storage with hash (storage takes precedence)",
+			cell:     cell{storageAddrLen: length.Addr + length.Hash, hashLen: 32},
+			expected: CellTypeStorage,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.cell.Type()
+			require.Equal(t, tt.expected, got, "Type() = %s, want %s", got, tt.expected)
+		})
+	}
+}
+
+func TestCellType_String(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "Empty", CellTypeEmpty.String())
+	require.Equal(t, "Hash", CellTypeHash.String())
+	require.Equal(t, "Extension", CellTypeExtension.String())
+	require.Equal(t, "Account", CellTypeAccount.String())
+	require.Equal(t, "Storage", CellTypeStorage.String())
+	require.Equal(t, "CellType(255)", CellType(255).String())
+}
