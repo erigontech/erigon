@@ -1346,7 +1346,7 @@ func (s *witnessStateless) HasStorage(address accounts.Address) (bool, error) {
 		return false, nil
 	}
 
-	has := acc.Root != trie.EmptyRoot
+	has := acc != nil && acc.Root != trie.EmptyRoot
 	if s.tracing(addr) {
 		fmt.Printf("[TRACE-S] HasStorage %s -> trie root=%x has=%v\n", addr.Hex(), acc.Root, has)
 	}
