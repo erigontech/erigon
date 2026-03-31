@@ -105,6 +105,9 @@ type ForkChoiceStore struct {
 	forkGraph            fork_graph.ForkGraph
 	blobStorage          blob_storage.BlobStorage
 	peerDas              das.PeerDas
+	// Per-block unrealized checkpoints (spec: store.unrealized_justifications)
+	unrealizedJustifications sync.Map // blockRoot -> solid.Checkpoint
+	unrealizedFinalizations  sync.Map // blockRoot -> solid.Checkpoint
 	// I use the cache due to the convenient auto-cleanup feauture.
 	checkpointStates   sync.Map // We keep ssz snappy of it as the full beacon state is full of rendundant data.
 	publicKeysRegistry public_keys_registry.PublicKeyRegistry
@@ -292,6 +295,10 @@ func NewForkChoiceStore(
 	f.finalizedCheckpoint.Store(anchorCheckpoint)
 	f.unrealizedFinalizedCheckpoint.Store(anchorCheckpoint)
 	f.unrealizedJustifiedCheckpoint.Store(anchorCheckpoint)
+	// Store anchor root in per-block unrealized maps so filter_block_tree
+	// lookups succeed for the anchor block without falling through to the fork graph.
+	f.unrealizedJustifications.Store(common.Hash(anchorRoot), anchorCheckpoint)
+	f.unrealizedFinalizations.Store(common.Hash(anchorRoot), anchorCheckpoint)
 	f.proposerBoostRoot.Store(common.Hash{})
 
 	f.highestSeen.Store(anchorState.Slot())
@@ -354,6 +361,24 @@ func (f *ForkChoiceStore) JustifiedCheckpoint() solid.Checkpoint {
 // FinalizedCheckpoint returns justified checkpoint
 func (f *ForkChoiceStore) JustifiedSlot() uint64 {
 	return f.computeStartSlotAtEpoch(f.justifiedCheckpoint.Load().(solid.Checkpoint).Epoch)
+}
+
+// getUnrealizedJustification returns the per-block unrealized justified checkpoint
+// (spec: store.unrealized_justifications[block_root])
+func (f *ForkChoiceStore) getUnrealizedJustification(blockRoot common.Hash) (solid.Checkpoint, bool) {
+	obj, ok := f.unrealizedJustifications.Load(blockRoot)
+	if !ok {
+		return solid.Checkpoint{}, false
+	}
+	return obj.(solid.Checkpoint), true
+}
+
+func (f *ForkChoiceStore) getUnrealizedFinalization(blockRoot common.Hash) (solid.Checkpoint, bool) {
+	obj, ok := f.unrealizedFinalizations.Load(blockRoot)
+	if !ok {
+		return solid.Checkpoint{}, false
+	}
+	return obj.(solid.Checkpoint), true
 }
 
 // FinalizedCheckpoint returns justified checkpoint

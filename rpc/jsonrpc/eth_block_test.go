@@ -113,8 +113,13 @@ func TestGetBlockByNumber_WithFinalizedTag_NoFinalizedBlockInDb(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx := context.Background()
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
-	if _, err := api.GetBlockByNumber(ctx, rpc.FinalizedBlockNumber, false); err != nil {
-		assert.ErrorIs(t, rpchelper.UnknownBlockError, err)
+	_, err := api.GetBlockByNumber(ctx, rpc.FinalizedBlockNumber, false)
+	if err != nil {
+		var customErr *rpc.CustomError
+		if assert.ErrorAs(t, err, &customErr) {
+			assert.Equal(t, rpchelper.UnknownBlockCode, customErr.Code)
+			assert.Contains(t, customErr.Message, "finalized")
+		}
 	}
 }
 
@@ -152,8 +157,13 @@ func TestGetBlockByNumber_WithSafeTag_NoSafeBlockInDb(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx := context.Background()
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
-	if _, err := api.GetBlockByNumber(ctx, rpc.SafeBlockNumber, false); err != nil {
-		assert.ErrorIs(t, rpchelper.UnknownBlockError, err)
+	_, err := api.GetBlockByNumber(ctx, rpc.SafeBlockNumber, false)
+	if err != nil {
+		var customErr *rpc.CustomError
+		if assert.ErrorAs(t, err, &customErr) {
+			assert.Equal(t, rpchelper.UnknownBlockCode, customErr.Code)
+			assert.Contains(t, customErr.Message, "safe")
+		}
 	}
 }
 

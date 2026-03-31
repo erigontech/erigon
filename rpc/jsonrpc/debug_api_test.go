@@ -450,6 +450,8 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 		result, err := api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
 		require.NoError(t, err)
 		require.Len(t, result, 3)
+		// block 2 sends ETH to theAddr{1} — verify it appears in the result
+		require.Contains(t, result, common.Address{1})
 
 		n, n2 = rpc.BlockNumber(5), rpc.BlockNumber(8)
 		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
@@ -461,20 +463,26 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, result, 40)
 
-		//nil value means: to = from + 1
+		// nil second param: returns accounts modified exactly in block startNum (Geth semantics)
 		n = rpc.BlockNumber(0)
 		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, nil)
 		require.NoError(t, err)
 		require.Len(t, result, 3)
 
-		// latest block is 11, should work both ways: [11,12) and [11,nil)
-		n2 = rpc.BlockNumber(12)
-		_, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.BlockNumber(11), &n2)
-		require.NoError(t, err)
-		require.Len(t, result, 3)
+		// latest block is 11, nil means single-block query
 		_, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.BlockNumber(11), nil)
 		require.NoError(t, err)
-		require.Len(t, result, 3)
+	})
+	t.Run("storage-only modified contracts", func(t *testing.T) {
+		// Block 8 (i=7) executes a token.Transfer which writes to the ERC20 balances
+		// mapping in storage, but does NOT change the contract's balance/nonce/code.
+		// Without the StorageDomain pass the contract would be invisible to this API.
+		// The token contract was deployed in block 7 and is known from the AccountRange test.
+		tokenContract := common.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcae5")
+		n, n2 := rpc.BlockNumber(7), rpc.BlockNumber(8)
+		result, err := api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
+		require.NoError(t, err)
+		require.Contains(t, result, tokenContract, "storage-only modified contract must be included")
 	})
 	t.Run("invalid input", func(t *testing.T) {
 		n := rpc.BlockNumber(1_000_000)
@@ -483,6 +491,11 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 
 		n = rpc.BlockNumber(11)
 		_, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &n)
+		require.Error(t, err)
+
+		// end block beyond latest is an error (Geth semantics)
+		n2 := rpc.BlockNumber(12)
+		_, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.BlockNumber(11), &n2)
 		require.Error(t, err)
 	})
 }

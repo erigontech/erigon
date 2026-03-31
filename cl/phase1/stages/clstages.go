@@ -18,6 +18,7 @@ package stages
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/erigontech/erigon/cl/antiquary"
@@ -242,8 +243,11 @@ func ConsensusClStages(ctx context.Context,
 			args.seenSlot = cfg.forkChoice.HighestSeen()
 			args.seenEpoch = args.seenSlot / cfg.beaconCfg.SlotsPerEpoch
 			args.targetSlot = cfg.ethClock.GetCurrentSlot()
-			// Note that the target epoch is always one behind. this is because we are always behind in the current epoch, so it would not be very useful
-			args.targetEpoch = cfg.ethClock.GetCurrentEpoch() - 1
+			// Note that the target epoch is always one behind. this is because we are always behind in the current epoch, so it would not be very useful.
+			// Guard against uint64 underflow at genesis (GetCurrentEpoch() == 0).
+			if currentEpoch := cfg.ethClock.GetCurrentEpoch(); currentEpoch > 0 {
+				args.targetEpoch = currentEpoch - 1
+			}
 			return
 		},
 		Stages: map[string]clstages.Stage[*Cfg, Args]{
@@ -266,6 +270,15 @@ func ConsensusClStages(ctx context.Context,
 						return err
 					}
 					if cfg.state.Slot() == 0 {
+						// Initialize syncedData so Syncing() returns false at genesis.
+						// Without this, the VC gets 503 "beacon node is syncing" forever.
+						if err := cfg.syncedData.OnHeadState(cfg.state); err != nil {
+							return fmt.Errorf("failed to set genesis head state: %w", err)
+						}
+						// Write genesis beacon block to DB so block production can find the parent block.
+						if err := writeGenesisBeaconBlock(ctx, cfg); err != nil {
+							return fmt.Errorf("failed to write genesis beacon block: %w", err)
+						}
 						cfg.state = nil // Release the state
 						return nil
 					}
@@ -357,4 +370,57 @@ func ConsensusClStages(ctx context.Context,
 			},
 		},
 	}
+}
+
+// writeGenesisBeaconBlock writes a synthetic genesis beacon block to the DB.
+// This allows block production to find the parent block when starting from genesis (slot 0).
+// The genesis beacon block body is reconstructed from the genesis state:
+//   - All lists are empty (no deposits, attestations, etc.)
+//   - ExecutionPayload is reconstructed from the genesis state's LatestExecutionPayloadHeader
+//   - SyncAggregate is all-zero (for Altair+)
+//
+// This works because for genesis the execution payload has empty transactions/withdrawals,
+// so Eth1Block.HashSSZ() == Eth1Header.HashSSZ() and body_root matches exactly.
+func writeGenesisBeaconBlock(ctx context.Context, cfg *Cfg) error {
+	if cfg.state == nil {
+		return nil
+	}
+	version := cfg.state.Version()
+	genesisBlock := cltypes.NewSignedBeaconBlock(cfg.beaconCfg, version)
+	blk := genesisBlock.Block
+	header := cfg.state.LatestBlockHeader()
+	blk.Slot = header.Slot
+	blk.ProposerIndex = header.ProposerIndex
+	blk.ParentRoot = header.ParentRoot
+	// header.Root (LatestBlockHeader.StateRoot) is zeroed during state transitions.
+	// We must fill in the actual state root so the block root matches syncedData.HeadRoot().
+	stateRoot, err := cfg.state.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("failed to compute genesis state root: %w", err)
+	}
+	blk.StateRoot = stateRoot
+
+	body := blk.Body
+	// Set eth1_data from genesis state so body.HashSSZ() matches state.LatestBlockHeader().BodyRoot.
+	body.Eth1Data = cfg.state.Eth1Data()
+	if version >= clparams.AltairVersion {
+		body.SyncAggregate = cltypes.NewSyncAggregate()
+	}
+	if version >= clparams.BellatrixVersion {
+		execHeader := cfg.state.LatestExecutionPayloadHeader()
+		body.ExecutionPayload = cltypes.NewEth1BlockFromExecutionHeader(execHeader, version, cfg.beaconCfg)
+	}
+
+	// Verify body root matches state's LatestBlockHeader — catches non-standard genesis issues.
+	bodyRoot, err := body.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("genesis body HashSSZ failed: %w", err)
+	}
+	if bodyRoot != header.BodyRoot {
+		return fmt.Errorf("genesis body root mismatch: computed %x, expected %x", bodyRoot, header.BodyRoot)
+	}
+
+	return cfg.indiciesDB.Update(ctx, func(tx kv.RwTx) error {
+		return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, genesisBlock, true)
+	})
 }

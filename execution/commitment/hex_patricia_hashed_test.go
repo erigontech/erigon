@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"math/rand"
 	"sort"
-	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -34,8 +34,8 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-var randSrc = rand.New(rand.NewSource(42)) // fixed seed
-var randMu sync.Mutex
+// randSrc and randMu removed — generateKeyWithHashedPrefix now uses per-call
+// rand.New with atomic counter seed, eliminating parallel test interference.
 
 func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 	t.Parallel()
@@ -1657,6 +1657,11 @@ func TestUpdate_Merge(t *testing.T) {
 			b: Update{Flags: DeleteUpdate, CodeHash: empty.CodeHash},
 			e: Update{Flags: DeleteUpdate, CodeHash: empty.CodeHash},
 		},
+		{
+			a: Update{Flags: DeleteUpdate, CodeHash: empty.CodeHash},
+			b: Update{Flags: StorageUpdate, Storage: common.Hash{0x21, 0x22, 0x23, 0x24}, StorageLen: 4, CodeHash: empty.CodeHash},
+			e: Update{Flags: StorageUpdate, Storage: common.Hash{0x21, 0x22, 0x23, 0x24}, StorageLen: 4, CodeHash: empty.CodeHash},
+		},
 	}
 
 	var numBuf [10]byte
@@ -1936,12 +1941,13 @@ func Test_HexPatriciaHashed_ProcessWithDozensOfStorageKeys(t *testing.T) {
 	require.Equal(t, rBatch, rSeq, "sequential and batch root should match")
 }
 
+var keyGenCounter atomic.Int64
+
 func generateKeyWithHashedPrefix(constHashedPrefixNibbles []byte, keyLen int) (plainKey []byte, hashedKey []byte) {
 	plainKey = make([]byte, keyLen)
+	rnd := rand.New(rand.NewSource(keyGenCounter.Add(1)))
 	for {
-		randMu.Lock()
-		randSrc.Read(plainKey[:keyLen]) // read random key
-		randMu.Unlock()
+		rnd.Read(plainKey[:keyLen])
 		hashedKey := KeyToNibblizedHash(plainKey)
 		if bytes.HasPrefix(hashedKey, constHashedPrefixNibbles) {
 			// found key with desired hashed prefix, return result
@@ -2540,5 +2546,43 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		keysToProve := [][]byte{addrWithStorage, fullExistingStorageKey, fullNonExistentStorageKey}
 		keyExists := []bool{true, true, false}
 		buildTrieAndWitness(t, builder, keysToProve, keyExists)
+	})
+	t.Run("StorageLeafRLPShorterThan32Bytes", func(t *testing.T) {
+		// Reproduces a bug where storage leaf nodes whose RLP encoding is < 32 bytes
+		// should be embedded inline in the parent branch node per MPT spec, but the
+		// witness builder incorrectly treated them as 32-byte hash references.
+		//
+		// The two storage keys below were precomputed to share 9 common nibbles in
+		// their keccak256 hashes (both hash to 35557922a...):
+		//   key1 hash: 35557922aa8f35ae04c5ae94a030a746...
+		//   key2 hash: 35557922a8443b7853fb2c5131223cf4...
+		// They diverge at nibble 10, leaving 54 remaining nibbles in each leaf.
+		// Compact encoding of 54 nibbles (even) = 28 bytes. With 1-byte value:
+		//   RLP = list_prefix(1) + key_prefix(1) + key(28) + value(1) = 31 bytes < 32
+		// This triggers the embedded node case where the leaf is inlined in the parent
+		// branch rather than referenced by its hash.
+		t.Logf("StorageLeafRLPShorterThan32Bytes")
+		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 2)
+
+		addrToProve := common.Copy(plainKeysList[0])
+
+		storageKey1 := decodeHex("046c24c7d866b0b0d5006628ab3d12ffb72aeef3af4c779c78e8c107b126d1f9")
+		storageKey2 := decodeHex("6099e0415032aade138f20f8adb3b61a9a7ffc73053d7751ff88a2a5c45df18e")
+		storageSlotToProve := common.Copy(storageKey1)
+
+		fullStorageKeyToProve := common.Copy(addrToProve)
+		fullStorageKeyToProve = append(fullStorageKeyToProve, storageSlotToProve...)
+		require.Equal(t, len(fullStorageKeyToProve), length.Addr+length.Hash)
+
+		builder := NewUpdateBuilder()
+		for i := 0; i < len(plainKeysList); i++ {
+			builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
+		}
+
+		// Small 1-byte storage values ensure leaf RLP stays < 32 bytes
+		builder.Storage(common.Bytes2Hex(addrToProve), common.Bytes2Hex(storageKey1), "01")
+		builder.Storage(common.Bytes2Hex(addrToProve), common.Bytes2Hex(storageKey2), "02")
+
+		buildTrieAndWitness(t, builder, [][]byte{fullStorageKeyToProve}, []bool{true})
 	})
 }

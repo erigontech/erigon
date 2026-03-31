@@ -23,6 +23,7 @@ import (
 	"math/rand/v2"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -275,4 +276,167 @@ func generateRandomTxNum(r *rndGen, maxTxNum uint64, usedTxNums map[uint64]bool)
 	}
 
 	return txNum
+}
+
+// BenchmarkPruneSmallBatches benchmarks the PruneSmallBatches path.
+// It populates domains with data across multiple steps, builds snapshot files,
+// then measures the time to prune the data covered by those snapshots.
+func BenchmarkPruneSmallBatches(b *testing.B) {
+	stepSize := uint64(100)
+	db, agg := testDbAndAggregatorBench(b, stepSize)
+
+	ctx := context.Background()
+	rnd := newRnd(0)
+
+	// Populate data: write enough txs to span several steps
+	maxTx := stepSize * 50
+	keysCount := uint64(100)
+
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(b, err)
+	defer rwTx.Rollback()
+
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(b, err)
+
+	usedKeys := make(map[string]struct{}, keysCount*maxTx)
+	for txNum := uint64(1); txNum <= maxTx; txNum++ {
+		generateSharedDomainsUpdatesForBench(b, domains, rwTx, txNum, rnd, usedKeys, length.Addr, keysCount)
+		if txNum%(stepSize/2) == 0 {
+			_, err := domains.ComputeCommitment(ctx, rwTx, true, txNum/(stepSize/2), txNum, "", nil)
+			require.NoError(b, err)
+		}
+	}
+
+	err = domains.Flush(ctx, rwTx)
+	require.NoError(b, err)
+	err = rwTx.Commit()
+	require.NoError(b, err)
+	domains.Close()
+
+	// Build snapshot files so there is data to prune
+	err = agg.BuildFiles(maxTx)
+	require.NoError(b, err)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for b.Loop() {
+		b.StopTimer()
+		pruneTx, err := db.BeginTemporalRw(ctx) //nolint:gocritic
+		require.NoError(b, err)
+		b.StartTimer()
+
+		for {
+			more, err := pruneTx.PruneSmallBatches(ctx, 10*time.Hour)
+			require.NoError(b, err)
+			if !more {
+				break
+			}
+		}
+
+		b.StopTimer()
+		pruneTx.Rollback() // rollback so next iteration has data to prune again
+		b.StartTimer()
+	}
+}
+
+// generateSharedDomainsUpdatesForBench is a benchmark-compatible version of generateSharedDomainsUpdatesForTx.
+func generateSharedDomainsUpdatesForBench(b *testing.B, domains *execctx.SharedDomains, tx kv.TemporalTx, txNum uint64, rnd *rndGen, prevKeys map[string]struct{}, keyMaxLen, keysCount uint64) {
+	b.Helper()
+
+	getKey := func() ([]byte, bool) {
+		r := rnd.IntN(100)
+		if r < 50 && len(prevKeys) > 0 {
+			ri := rnd.IntN(len(prevKeys))
+			for k := range prevKeys {
+				if ri == 0 {
+					return []byte(k), true
+				}
+				ri--
+			}
+		}
+		return []byte(generateRandomKey(rnd, keyMaxLen)), false
+	}
+
+	for j := uint64(0); j < keysCount; j++ {
+		key, existed := getKey()
+
+		r := rnd.IntN(101)
+		switch {
+		case r <= 33:
+			acc := accounts3.Account{
+				Nonce:       txNum,
+				Balance:     *uint256.NewInt(txNum * 100_000),
+				CodeHash:    accounts3.EmptyCodeHash,
+				Incarnation: 0,
+			}
+			buf := accounts3.SerialiseV3(&acc)
+			prev, _, err := domains.GetLatest(kv.AccountsDomain, tx, key)
+			require.NoError(b, err)
+
+			prevKeys[string(key)] = struct{}{}
+
+			err = domains.DomainPut(kv.AccountsDomain, tx, key, buf, txNum, prev)
+			require.NoError(b, err)
+
+		case r > 33 && r <= 66:
+			codeUpd := make([]byte, rnd.IntN(24576))
+			rnd.Read(codeUpd)
+			for limit := 1000; len(key) > length.Addr && limit > 0; limit-- {
+				key, existed = getKey() //nolint
+				if !existed {
+					continue
+				}
+			}
+			prevKeys[string(key)] = struct{}{}
+
+			prev, _, err := domains.GetLatest(kv.CodeDomain, tx, key)
+			require.NoError(b, err)
+
+			err = domains.DomainPut(kv.CodeDomain, tx, key, codeUpd, txNum, prev)
+			require.NoError(b, err)
+
+		case r > 80:
+			if !existed {
+				continue
+			}
+			prevKeys[string(key)] = struct{}{}
+
+			err := domains.DomainDel(kv.AccountsDomain, tx, key, txNum, nil)
+			require.NoError(b, err)
+
+		case r > 66 && r <= 80:
+			if len(key) > length.Addr {
+				key = key[:length.Addr]
+			}
+
+			prev, _, err := domains.GetLatest(kv.AccountsDomain, tx, key)
+			require.NoError(b, err)
+			if prev == nil {
+				prevKeys[string(key)] = struct{}{}
+				acc := accounts3.Account{
+					Nonce:       txNum,
+					Balance:     *uint256.NewInt(txNum * 100_000),
+					CodeHash:    accounts3.EmptyCodeHash,
+					Incarnation: 0,
+				}
+				buf := accounts3.SerialiseV3(&acc)
+				err = domains.DomainPut(kv.AccountsDomain, tx, key, buf, txNum, prev)
+				require.NoError(b, err)
+			}
+
+			sk := make([]byte, length.Addr+length.Hash)
+			copy(sk, key)
+			rnd.Read(sk[length.Addr:])
+
+			prev, _, err = domains.GetLatest(kv.StorageDomain, tx, sk)
+			require.NoError(b, err)
+
+			prevKeys[string(sk)] = struct{}{}
+
+			err = domains.DomainPut(kv.StorageDomain, tx, sk, append(common.Copy(prev), []byte("v")...), txNum, prev)
+			require.NoError(b, err)
+		}
+	}
 }
