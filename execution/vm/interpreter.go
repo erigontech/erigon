@@ -67,9 +67,7 @@ type CallContext struct {
 
 var contextPool = sync.Pool{
 	New: func() any {
-		return &CallContext{
-			Stack: Stack{data: make([]uint256.Int, 0, 16)},
-		}
+		return &CallContext{}
 	},
 }
 
@@ -178,7 +176,7 @@ func (ctx *CallContext) MemoryData() []byte {
 // StackData returns the stack data. Callers must not modify the contents
 // of the returned data.
 func (ctx *CallContext) StackData() []uint256.Int {
-	return ctx.Stack.data
+	return ctx.Stack.data[:ctx.Stack.top]
 }
 
 // Caller returns the current caller.
@@ -365,7 +363,6 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 	// explicit STOP, RETURN or SELFDESTRUCT is executed, an error occurred during
 	// the execution of one of the operations or until the done flag is set by the
 	// parent context.
-	steps := 0
 
 	var traceGas = func(op OpCode, callGas, cost uint64) uint64 {
 		switch op {
@@ -376,12 +373,12 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		}
 	}
 
+	// Hoist to locals so the compiler sees them as loop-invariant.
+	isAmsterdam := evm.chainRules.IsAmsterdam
+	anyTrace := dbg.TraceDynamicGas || debug || trace
+
 	for {
-		steps++
-		if steps%50_000 == 0 && evm.Cancelled() {
-			break
-		}
-		if dbg.TraceDynamicGas || debug || trace {
+		if anyTrace {
 			// Capture pre-execution values for tracing.
 			logged, pcCopy, gasCopy = false, pc, callContext.gas
 			blockNum, txIndex, txIncarnation = evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation()
@@ -404,7 +401,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			callContext.gas -= cost
 		}
 		// EIP-8037: Track constantGas immediately after deduction for block-level accounting.
-		if evm.chainRules.IsAmsterdam && cost > 0 {
+		if isAmsterdam && cost > 0 {
 			evm.regularGasConsumed += cost
 		}
 
@@ -451,7 +448,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 				return nil, callContext.Gas(), ErrOutOfGas
 			}
 			callContext.gas -= dynamicCost.Regular
-			if evm.chainRules.IsAmsterdam {
+			if isAmsterdam {
 				// EIP-8037: Track dynamic regular gas immediately after deduction.
 				// For CALL variants, callGasTemp is the gas forwarded to child (escrow),
 				// so we subtract it to get parent's actual cost.
@@ -471,7 +468,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		}
 
 		// Do gas tracing before memory expansion
-		if tracer != nil {
+		if debug {
 			if tracer.OnGasChange != nil {
 				tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
 			}

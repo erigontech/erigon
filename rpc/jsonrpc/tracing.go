@@ -264,19 +264,16 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 
 	if !ok {
 		if chainConfig.Bor == nil {
-			stream.WriteNil()
-			return nil
+			return fmt.Errorf("transaction not found")
 		}
 
 		// otherwise this may be a bor state sync transaction - check
 		blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, hash)
 		if err != nil {
-			stream.WriteNil()
 			return err
 		}
 		if !ok {
-			stream.WriteNil()
-			return nil
+			return fmt.Errorf("transaction not found")
 		}
 		if config == nil || config.BorTraceEnabled == nil || !*config.BorTraceEnabled {
 			stream.WriteEmptyArray() // matches maticnetwork/bor API behaviour for consistency
