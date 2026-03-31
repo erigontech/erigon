@@ -178,7 +178,12 @@ func (ba *BlockAssembler) AddTransactions(
 
 	txnIdx := ibs.TxnIndex() + 1
 	header := ba.AssembledBlock.Header
-	gasPool := new(protocol.GasPool).AddGas(header.GasLimit - header.GasUsed)
+	// EIP-8037: initialize the pool from cumulative regular gas, not the
+	// bottleneck (max of regular, state) stored in header.GasUsed. This
+	// gives compute-heavy transactions access to the full regular gas
+	// budget even when state gas dominates the bottleneck. State gas is
+	// enforced post-execution with a rollback in commitTx below.
+	gasPool := new(protocol.GasPool).AddGas(header.GasLimit - ba.gasUsed.BlockRegular)
 	if header.BlobGasUsed != nil {
 		gasPool.AddBlobGas(ba.cfg.ChainConfig.GetMaxBlobGasPerBlock(header.Time) - *header.BlobGasUsed)
 	}
@@ -254,6 +259,17 @@ func (ba *BlockAssembler) AddTransactions(
 		}
 		protocol.SetGasUsed(header, gasUsed)
 
+		// EIP-8037: the regular gas pool constrains Σ regular but not
+		// Σ state. Check the block-level invariant post-execution and
+		// roll back the transaction if it would breach gas_limit.
+		if gasUsed.BlockGasUsed() > header.GasLimit {
+			*gasUsed = gasSnapshot
+			protocol.SetGasUsed(header, gasUsed)
+			ibs.RevertToSnapshot(snap, protocol.ErrGasLimitReached)
+			gasPool = new(protocol.GasPool).AddGas(gasSnap).AddBlobGas(blobGasSnap)
+			return nil, protocol.ErrGasLimitReached
+		}
+
 		current.AddTxn(txn)
 		current.Receipts = append(current.Receipts, receipt)
 		return receipt.Logs, nil
@@ -290,12 +306,7 @@ LOOP:
 			stopped = time.NewTicker(500 * time.Millisecond)
 		}
 		// If we don't have enough gas for any further transactions then we're done.
-		// EIP-8037: also stop when the bottleneck gas (max of regular, state)
-		// leaves less than TxGas headroom, so we don't produce blocks that
-		// violate gas_used <= gas_limit.
-		poolGasRemaining := gasPool.Gas()
-		bottleneckRemaining := header.GasLimit - min(gasUsed.BlockGasUsed(), header.GasLimit)
-		if min(poolGasRemaining, bottleneckRemaining) < params.TxGas {
+		if gasPool.Gas() < params.TxGas {
 			logger.Debug(fmt.Sprintf("[%s] Not enough gas for further transactions", logPrefix), "have", gasPool, "want", params.TxGas)
 			done = true
 			break
