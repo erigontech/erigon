@@ -51,6 +51,18 @@ type FallbackClient interface {
 var bigZero = big.NewInt(0)
 var uintZero = uint256.NewInt(0)
 
+// IsArbitrumTxType returns true for all Arbitrum-specific transaction types.
+func IsArbitrumTxType(t byte) bool {
+	switch t {
+	case ArbitrumDepositTxType, ArbitrumUnsignedTxType, ArbitrumContractTxType,
+		ArbitrumRetryTxType, ArbitrumSubmitRetryableTxType, ArbitrumInternalTxType,
+		ArbitrumLegacyTxType:
+		return true
+	default:
+		return false
+	}
+}
+
 var skipAccountChecks = [...]bool{
 	ArbitrumDepositTxType:         true,
 	ArbitrumRetryTxType:           true,

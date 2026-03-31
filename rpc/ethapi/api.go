@@ -625,6 +625,12 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime u
 			}
 		}
 		result.GasPrice = (*hexutil.Big)(txn.GetTipCap().ToBig())
+	} else if types.IsArbitrumTxType(txn.Type()) {
+		// Arbitrum tx types set their own fields in the switch below;
+		// only populate chainId here — skip EIP-2930/1559 fields
+		// (accessList, yParity, maxFeePerGas, maxPriorityFeePerGas).
+		chainId.Set(txn.GetChainID())
+		result.ChainID = (*hexutil.Big)(chainId.ToBig())
 	} else {
 		chainId.Set(txn.GetChainID())
 		result.ChainID = (*hexutil.Big)(chainId.ToBig())
