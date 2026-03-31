@@ -230,6 +230,9 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 				txContext.TxHash = txn.Hash()
 			}
 			rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, txContext, ibs, *rw.vmCfg, rules)
+			if vm.ReadyEVMForL2 != nil {
+				vm.ReadyEVMForL2(rw.evm, msg)
+			}
 			if hooks != nil && hooks.OnTxStart != nil {
 				hooks.OnTxStart(rw.evm.GetVMContext(), txn, msg.From())
 			}
