@@ -279,10 +279,7 @@ func operationVoluntaryExitHandler(t *testing.T, root fs.FS, c spectest.TestCase
 	// we have removed signature verification from the function, to make this test pass we do it here.
 	var domain []byte
 	voluntaryExit := vo.VoluntaryExit
-	validator, err := preState.ValidatorForValidatorIndex(int(voluntaryExit.ValidatorIndex))
-	if err != nil {
-		return err
-	}
+
 	if preState.Version() < clparams.DenebVersion {
 		domain, err = preState.GetDomain(preState.BeaconConfig().DomainVoluntaryExit, voluntaryExit.Epoch)
 	} else if preState.Version() >= clparams.DenebVersion {
@@ -295,7 +292,27 @@ func operationVoluntaryExitHandler(t *testing.T, root fs.FS, c spectest.TestCase
 	if err != nil {
 		return err
 	}
-	pk := validator.PublicKey()
+
+	// [New in Gloas:EIP7732] Get pubkey from builders for builder indices
+	var pk [48]byte
+	if preState.Version() >= clparams.GloasVersion && state.IsBuilderIndex(voluntaryExit.ValidatorIndex) {
+		builderIndex := state.ConvertValidatorIndexToBuilderIndex(voluntaryExit.ValidatorIndex)
+		builders := preState.GetBuilders()
+		if builders == nil || int(builderIndex) >= builders.Len() {
+			if expectedError {
+				return nil
+			}
+			return fmt.Errorf("invalid builder index %d", builderIndex)
+		}
+		pk = builders.Get(int(builderIndex)).Pubkey
+	} else {
+		validator, err := preState.ValidatorForValidatorIndex(int(voluntaryExit.ValidatorIndex))
+		if err != nil {
+			return err
+		}
+		pk = validator.PublicKey()
+	}
+
 	valid, err := bls.Verify(vo.Signature[:], signingRoot[:], pk[:])
 	if err != nil || !valid {
 		if expectedError {

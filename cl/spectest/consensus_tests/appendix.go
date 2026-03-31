@@ -53,7 +53,8 @@ func init() {
 		With("pending_consolidations", PendingConsolidationTest).
 		With("proposer_lookahead", ProposerLookaheadTest).
 		With("historical_summaries_update", historicalSummariesUpdateTest).
-		With("builder_pending_payments", builderPendingPaymentsTest)
+		With("builder_pending_payments", builderPendingPaymentsTest).
+		With("ptc_window", ptcWindowTest)
 	TestFormats.Add("finality").
 		With("finality", FinalityFinality)
 	TestFormats.Add("fork_choice").
