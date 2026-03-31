@@ -2109,12 +2109,6 @@ func deriveDecompAndReaderForOtherDomain(baseFile string, oldDomain, newDomain k
 }
 
 func touchHistoricalKeys(sd *execctx.SharedDomains, tx kv.TemporalTx, d kv.Domain, fromTxNum uint64, toTxNum uint64, visitor func(k []byte)) (uint64, error) {
-	// Use HistoryKeyTxNumRange to avoid fetching historical values.
-	// We only need the keys to touch them in the commitment trie.
-	// Returns (key, txNum) pairs from the inverted index without resolving
-	// values from history files.
-	// Note: may return duplicate keys (multiset semantics), but TouchKey
-	// already deduplicates internally via its keys map.
 	it, err := tx.Debug().HistoryKeyTxNumRange(d, int(fromTxNum), int(toTxNum), order.Asc, -1)
 	if err != nil {
 		return 0, err
