@@ -1081,34 +1081,9 @@ func assembledBlockToPayloadResponse(br *types.BlockWithReceipts, blockValue *ui
 		}
 	}
 
-	blobsBundle := &engine_types.BlobsBundle{
-		Commitments: make([]hexutil.Bytes, 0),
-		Proofs:      make([]hexutil.Bytes, 0),
-		Blobs:       make([]hexutil.Bytes, 0),
-	}
-	for i, txn := range block.Transactions() {
-		if txn.Type() != types.BlobTxType {
-			continue
-		}
-		blobTx, ok := txn.(*types.BlobTxWrapper)
-		if !ok {
-			return nil, fmt.Errorf("expected BlobTxWrapper for tx %d, got %T", i, txn)
-		}
-		for _, c := range blobTx.Commitments {
-			cp := make([]byte, len(c))
-			copy(cp, c[:])
-			blobsBundle.Commitments = append(blobsBundle.Commitments, cp)
-		}
-		for _, p := range blobTx.Proofs {
-			pp := make([]byte, len(p))
-			copy(pp, p[:])
-			blobsBundle.Proofs = append(blobsBundle.Proofs, pp)
-		}
-		for _, b := range blobTx.Blobs {
-			bp := make([]byte, len(b))
-			copy(bp, b[:])
-			blobsBundle.Blobs = append(blobsBundle.Blobs, bp)
-		}
+	blobsBundle, err := engine_types.BlobsBundleFromTransactions(block.Transactions())
+	if err != nil {
+		return nil, err
 	}
 
 	var executionRequests []hexutil.Bytes

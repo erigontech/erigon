@@ -101,7 +101,7 @@ func (d *Dispatcher) Dispatch(
 		var notifyFrom uint64
 		var isUnwind bool
 		if prevUnwindPoint != nil && *prevUnwindPoint != 0 && (*prevUnwindPoint) < finishProgressBefore {
-			notifyFrom = *prevUnwindPoint
+			notifyFrom = *prevUnwindPoint + 1 // +1: unwind already reverted *prevUnwindPoint; notify starting from the block after
 			isUnwind = true
 		} else if finishProgressAfter == 0 {
 			// Genesis (block 0): notify from block 0.
@@ -114,7 +114,7 @@ func (d *Dispatcher) Dispatch(
 		notifyTo := finishProgressAfter + 1 //[from, to)
 
 		if err := stagedsync.NotifyNewHeaders(ctx, notifyFrom, notifyTo, d.events, tx, d.logger); err != nil {
-			return nil
+			return err
 		}
 		if recentReceipts != nil {
 			recentReceipts.NotifyReceipts(d.events, notifyFrom, notifyTo, isUnwind)
