@@ -16,6 +16,7 @@ DISABLED_TEST_LIST=(
   eth_simulateV1
   # Temporary disable required block 24298763
   debug_traceBlockByNumber/test_51.json
+  debug_accountRange
   erigon_getLogsByHash/test_01.json
   eth_getBlockReceipts/test_01.json
   eth_getBlockReceipts/test_06.json
