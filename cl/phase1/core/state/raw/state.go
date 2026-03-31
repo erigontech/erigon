@@ -30,10 +30,12 @@ import (
 )
 
 const (
+	// These legacy constants are kept for reference but are NOT used in state
+	// initialization — New() reads all vector sizes from the BeaconChainConfig
+	// so that minimal and mainnet presets work correctly.
 	BlockRootsLength = 8192
 	StateRootsLength = 8192
 	RandoMixesLength = 65536
-	SlashingsLength  = 8192
 
 	// slot offset in the state = genesis time + genesis validators root
 	SlotOffsetSSZ = 8 + length.Hash
@@ -128,7 +130,7 @@ func New(cfg *clparams.BeaconChainConfig) *BeaconState {
 		balances:                     solid.NewUint64ListSSZ(int(cfg.ValidatorRegistryLimit)),
 		previousEpochParticipation:   solid.NewParticipationBitList(0, int(cfg.ValidatorRegistryLimit)),
 		currentEpochParticipation:    solid.NewParticipationBitList(0, int(cfg.ValidatorRegistryLimit)),
-		slashings:                    solid.NewUint64VectorSSZ(SlashingsLength),
+		slashings:                    solid.NewUint64VectorSSZ(int(cfg.EpochsPerSlashingsVector)),
 		currentEpochAttestations:     solid.NewDynamicListSSZ[*solid.PendingAttestation](int(cfg.CurrentEpochAttestationsLength())),
 		previousEpochAttestations:    solid.NewDynamicListSSZ[*solid.PendingAttestation](int(cfg.PreviousEpochAttestationsLength())),
 		historicalRoots:              solid.NewHashList(int(cfg.HistoricalRootsLimit)),
