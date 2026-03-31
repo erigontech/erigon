@@ -212,6 +212,19 @@ func addSszTests() {
 			func(v clparams.StateVersion) *cltypes.DataColumnSidecar {
 				return cltypes.NewDataColumnSidecarWithVersion(v)
 			}, withTestJson(), runAfterVersion(clparams.FuluVersion))).
+		// [New in Fulu] Partial data column types
+		With("PartialDataColumnHeader", sszStaticTestNewObjectByFunc(
+			func(v clparams.StateVersion) *cltypes.PartialDataColumnHeader {
+				return cltypes.NewPartialDataColumnHeader(v)
+			}, runAfterVersion(clparams.FuluVersion))).
+		With("PartialDataColumnSidecar", sszStaticTestNewObjectByFunc(
+			func(v clparams.StateVersion) *cltypes.PartialDataColumnSidecar {
+				return cltypes.NewPartialDataColumnSidecar(v)
+			}, runAfterVersion(clparams.FuluVersion))).
+		With("PartialDataColumnPartsMetadata", sszStaticTestNewObjectByFunc(
+			func(v clparams.StateVersion) *cltypes.PartialDataColumnPartsMetadata {
+				return cltypes.NewPartialDataColumnPartsMetadata()
+			}, runAfterVersion(clparams.FuluVersion))).
 		// [New in Gloas:EIP7732] GLOAS SSZ types
 		With("Builder", sszStaticTestByEmptyObject(&cltypes.Builder{}, runAfterVersion(clparams.GloasVersion))).
 		With("BuilderPendingPayment", sszStaticTestByEmptyObject(&cltypes.BuilderPendingPayment{
