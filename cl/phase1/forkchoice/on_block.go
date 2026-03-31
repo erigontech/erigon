@@ -336,12 +336,13 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	// Remove the parent from the head set
 	delete(f.headSet, block.Block.ParentRoot)
 	f.headSet[blockRoot] = struct{}{}
-	// record_block_timeliness: set proposer boost root if the block is timely.
-	// [Modified in Gloas:EIP7732] Uses BPS-based shouldApplyProposerBoost instead of
-	// the legacy IntervalsPerSlot division. Pre-GLOAS epochs still use the old threshold.
-	if f.Slot() == block.Block.Slot && f.shouldApplyProposerBoost() && f.proposerBoostRoot.Load().(common.Hash) == (common.Hash{}) {
-		f.proposerBoostRoot.Store(common.Hash(blockRoot))
-	}
+	// record_block_timeliness: store [block_timely, ptc_timely] vector.
+	// [Modified in Gloas:EIP7732] Post-GLOAS stores a two-element timeliness vector;
+	// pre-GLOAS stores [block_timely, false]. See recordBlockTimeliness for details.
+	f.recordBlockTimeliness(block.Block, common.Hash(blockRoot))
+	// update_proposer_boost_root: conditionally set proposer boost root.
+	// Separated from recordBlockTimeliness per spec: checks timeliness + proposer index.
+	f.updateProposerBoostRoot(block.Block, common.Hash(blockRoot))
 
 	// [New in Gloas:EIP7732] GLOAS-specific on_block logic (post state transition)
 	if blockVersion >= clparams.GloasVersion {
