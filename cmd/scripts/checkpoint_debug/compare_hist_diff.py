@@ -20,6 +20,11 @@ def accumulate_post_state(rpc_data):
     For each account, the last tx that touches it gives the final post value.
     We merge pre (initial state at start of block) and post (changes) to get
     the full picture of what the state looks like after the block.
+
+    IMPORTANT: prestateTracer with diffMode=true omits default/zero values from
+    the "post" section. So if a key appears in "pre" but not "post", it means the
+    value was SET TO ZERO (not that it was unchanged). Unchanged keys don't appear
+    in either pre or post.
     """
     # Track the latest pre and post values per account
     accounts = {}   # addr -> {balance, nonce, codeHash, storage: {slot: val}}
@@ -29,20 +34,26 @@ def accumulate_post_state(rpc_data):
         pre = result.get("pre", {})
         post = result.get("post", {})
 
-        # First pass: record pre-state for accounts we haven't seen yet
-        for addr, fields in pre.items():
-            addr_lower = addr.lower()
-            if addr_lower not in accounts:
-                accounts[addr_lower] = {
-                    "balance": fields.get("balance", "0x0"),
-                    "nonce": int(fields.get("nonce", "0x0"), 16) if isinstance(fields.get("nonce"), str) else fields.get("nonce", 0),
-                    "codeHash": fields.get("codeHash"),
-                    "storage": dict(fields.get("storage", {})),
-                }
+        # Collect all addresses touched in this tx
+        all_addrs = set()
+        for addr in pre:
+            all_addrs.add(addr.lower())
+        for addr in post:
+            all_addrs.add(addr.lower())
 
-        # Second pass: apply post-state updates
-        for addr, fields in post.items():
-            addr_lower = addr.lower()
+        for addr_lower in all_addrs:
+            # Find pre/post data (case-insensitive lookup)
+            pre_fields = None
+            post_fields = None
+            for a, f in pre.items():
+                if a.lower() == addr_lower:
+                    pre_fields = f
+                    break
+            for a, f in post.items():
+                if a.lower() == addr_lower:
+                    post_fields = f
+                    break
+
             if addr_lower not in accounts:
                 accounts[addr_lower] = {
                     "balance": "0x0",
@@ -51,16 +62,44 @@ def accumulate_post_state(rpc_data):
                     "storage": {},
                 }
             acc = accounts[addr_lower]
-            if "balance" in fields:
-                acc["balance"] = fields["balance"]
-            if "nonce" in fields:
-                n = fields["nonce"]
-                acc["nonce"] = int(n, 16) if isinstance(n, str) else n
-            if "codeHash" in fields:
-                acc["codeHash"] = fields["codeHash"]
-            if "storage" in fields:
-                for slot, val in fields["storage"].items():
-                    acc["storage"][slot.lower()] = val.lower()
+
+            # Initialize from pre if first time seeing this account
+            if pre_fields:
+                if "balance" in pre_fields and acc["balance"] == "0x0":
+                    acc["balance"] = pre_fields["balance"]
+                if "nonce" in pre_fields and acc["nonce"] == 0:
+                    n = pre_fields["nonce"]
+                    acc["nonce"] = int(n, 16) if isinstance(n, str) else n
+
+            # Apply post-state updates
+            if post_fields:
+                if "balance" in post_fields:
+                    acc["balance"] = post_fields["balance"]
+                if "nonce" in post_fields:
+                    n = post_fields["nonce"]
+                    acc["nonce"] = int(n, 16) if isinstance(n, str) else n
+                if "codeHash" in post_fields:
+                    acc["codeHash"] = post_fields["codeHash"]
+                if "storage" in post_fields:
+                    for slot, val in post_fields["storage"].items():
+                        acc["storage"][slot.lower()] = val.lower()
+
+            # Handle keys in pre but NOT in post: these were set to zero/default
+            if pre_fields and pre_fields.get("storage"):
+                post_storage = post_fields.get("storage", {}) if post_fields else {}
+                post_slots_lower = {s.lower() for s in post_storage}
+                for slot in pre_fields["storage"]:
+                    if slot.lower() not in post_slots_lower:
+                        # In pre but not post = set to zero
+                        acc["storage"][slot.lower()] = "0x0"
+
+            # Handle balance/nonce in pre but not post (set to default)
+            if pre_fields and not post_fields:
+                # Account appeared in pre but not post at all — values set to defaults
+                if "balance" in pre_fields:
+                    acc["balance"] = "0x0"
+                if "nonce" in pre_fields:
+                    acc["nonce"] = 0
 
     return accounts
 

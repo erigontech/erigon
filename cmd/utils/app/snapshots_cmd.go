@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -399,6 +400,24 @@ var snapshotCommand = cli.Command{
 				&cli.BoolFlag{Name: "skip-torrent-verify", Usage: "skip torrent piece verification when using file-integrity-cache"},
 				&cli.Int64Flag{Name: "seed", Usage: "random seed for sampling (auto-generated if not set)"},
 				&cli.Float64Flag{Name: "sample", Usage: "fraction of items to check via pseudo-random sampling (0.0-1.0)", Value: 0.01},
+			}),
+		},
+		{
+			Name: "check-commitment-with-override",
+			Action: func(cliCtx *cli.Context) error {
+				logger := log.Root()
+				err := doCheckCommitmentWithOverride(cliCtx, logger)
+				if err != nil {
+					log.Error("[check-commitment-with-override] failure", "err", err)
+					return err
+				}
+				return nil
+			},
+			Description: "check commitment root after patching specific storage/account values (for debugging bad history entries)",
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.Uint64Flag{Name: "block", Usage: "block number to verify", Required: true},
+				&cli.StringSliceFlag{Name: "override", Usage: "overrides in format domain:hexkey=hexvalue (e.g. storage:aabb...ccdd=0004)"},
 			}),
 		},
 		{
@@ -1377,6 +1396,76 @@ func stateProgress(ctx context.Context, db kv.TemporalRoDB, txNumsReader rawdbv3
 		return 0, err
 	}
 	return blockNum, nil
+}
+
+func doCheckCommitmentWithOverride(cliCtx *cli.Context, logger log.Logger) error {
+	ctx := cliCtx.Context
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+	chainConfig := fromdb.ChainConfig(chainDB)
+	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
+	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	blockRetire, agg := res.BlockRetire, res.Aggregator
+	if err != nil {
+		return err
+	}
+	defer clean()
+	defer blockRetire.MadvNormal().DisableReadAhead()
+	defer agg.MadvNormal().DisableReadAhead()
+	db, err := temporal.New(chainDB, agg)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	blockReader, _ := blockRetire.IO()
+	blockNum := cliCtx.Uint64("block")
+
+	// Parse overrides: "domain:hexkey=hexvalue"
+	var overrides []integrity.StateOverride
+	for _, s := range cliCtx.StringSlice("override") {
+		parts := strings.SplitN(s, "=", 2)
+		if len(parts) != 2 {
+			return fmt.Errorf("invalid override format %q, expected domain:hexkey=hexvalue", s)
+		}
+		domainAndKey := parts[0]
+		hexValue := parts[1]
+
+		dkParts := strings.SplitN(domainAndKey, ":", 2)
+		if len(dkParts) != 2 {
+			return fmt.Errorf("invalid override format %q, expected domain:hexkey=hexvalue", s)
+		}
+		domainStr := dkParts[0]
+		hexKey := dkParts[1]
+
+		var domain kv.Domain
+		switch domainStr {
+		case "storage":
+			domain = kv.StorageDomain
+		case "accounts":
+			domain = kv.AccountsDomain
+		case "code":
+			domain = kv.CodeDomain
+		default:
+			return fmt.Errorf("unknown domain %q (use storage, accounts, or code)", domainStr)
+		}
+
+		key, err := hex.DecodeString(hexKey)
+		if err != nil {
+			return fmt.Errorf("invalid hex key %q: %w", hexKey, err)
+		}
+		value, err := hex.DecodeString(hexValue)
+		if err != nil {
+			return fmt.Errorf("invalid hex value %q: %w", hexValue, err)
+		}
+		overrides = append(overrides, integrity.StateOverride{Domain: domain, Key: key, Value: value})
+	}
+
+	if len(overrides) == 0 {
+		return fmt.Errorf("no overrides provided")
+	}
+
+	return integrity.CheckCommitmentHistAtBlkWithOverrides(ctx, db, blockReader, blockNum, overrides, log.LvlInfo, logger)
 }
 
 func doDumpSlotHistory(cliCtx *cli.Context, logger log.Logger) error {

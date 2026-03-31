@@ -970,6 +970,140 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	return nil
 }
 
+// OverrideStateReader wraps a StateReader and overrides specific key values.
+// Used for debugging: patch a known-bad value to verify if the commitment root matches.
+type OverrideStateReader struct {
+	inner     commitmentdb.StateReader
+	overrides map[string][]byte // key = domain_string + hex(plainKey), value = override bytes
+}
+
+func NewOverrideStateReader(inner commitmentdb.StateReader, overrides map[string][]byte) *OverrideStateReader {
+	return &OverrideStateReader{inner: inner, overrides: overrides}
+}
+
+func (r *OverrideStateReader) WithHistory() bool { return r.inner.WithHistory() }
+func (r *OverrideStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error {
+	return r.inner.CheckDataAvailable(d, step)
+}
+func (r *OverrideStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
+	return NewOverrideStateReader(r.inner.Clone(tx), r.overrides)
+}
+func (r *OverrideStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]byte, kv.Step, error) {
+	overrideKey := d.String() + ":" + hex.EncodeToString(plainKey)
+	if v, ok := r.overrides[overrideKey]; ok {
+		enc, step, _ := r.inner.Read(d, plainKey, stepSize)
+		_ = enc
+		return v, step, nil
+	}
+	return r.inner.Read(d, plainKey, stepSize)
+}
+
+// StateOverride describes a single key/value override for CheckCommitmentHistAtBlkWithOverrides.
+type StateOverride struct {
+	Domain kv.Domain
+	Key    []byte // plainKey (e.g. addr+slot for storage)
+	Value  []byte // override value
+}
+
+// CheckCommitmentHistAtBlkWithOverrides is like CheckCommitmentHistAtBlk but patches
+// specific key values before computing the commitment root. This is for debugging to
+// verify whether fixing known-bad values produces the correct root.
+func CheckCommitmentHistAtBlkWithOverrides(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, blockNum uint64, overrides []StateOverride, lvl log.Lvl, logger log.Logger) error {
+	logger.Log(lvl, "checking commitment hist at block (with overrides)", "blockNum", blockNum, "numOverrides", len(overrides))
+	start := time.Now()
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	header, err := br.HeaderByNumber(ctx, tx, blockNum)
+	if err != nil {
+		return err
+	}
+	txNumsReader := br.TxnumReader()
+	minTxNum, err := txNumsReader.Min(ctx, tx, blockNum)
+	if err != nil {
+		return err
+	}
+	maxTxNum, err := txNumsReader.Max(ctx, tx, blockNum)
+	if err != nil {
+		return err
+	}
+	if aggMax := db.(state.HasAgg).Agg().(*state.Aggregator).EndTxNumMinimax(); maxTxNum+1 > aggMax {
+		blockNumOfState, _, _ := txNumsReader.FindBlockNum(ctx, tx, aggMax)
+		return fmt.Errorf("block %d is beyond latest block with state %d", blockNum, blockNumOfState)
+	}
+	toTxNum := maxTxNum + 1
+	sd, err := execctx.NewSharedDomains(ctx, tx, logger)
+	if err != nil {
+		return err
+	}
+	commitmentAsOf := minTxNum
+	if blockNum == 0 {
+		commitmentAsOf = toTxNum
+	}
+
+	// Build override map
+	overrideMap := make(map[string][]byte, len(overrides))
+	for _, o := range overrides {
+		key := o.Domain.String() + ":" + hex.EncodeToString(o.Key)
+		overrideMap[key] = o.Value
+		logger.Log(lvl, "override", "domain", o.Domain.String(), "key", hex.EncodeToString(o.Key), "value", hex.EncodeToString(o.Value))
+	}
+
+	splitStateReader := commitmentdb.NewSplitHistoryReader(tx, commitmentAsOf, toTxNum, true)
+	overrideReader := NewOverrideStateReader(splitStateReader, overrideMap)
+
+	sd.GetCommitmentCtx().SetStateReader(overrideReader)
+	sd.GetCommitmentCtx().SetTrace(logger.Enabled(ctx, log.LvlTrace))
+	sd.GetCommitmentContext().SetDeferBranchUpdates(false)
+	_, latestBlockNum, err := sd.SeekCommitment(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if latestBlockNum > blockNum {
+		return fmt.Errorf("commitment state blockNum is ahead of blockNum: %d > %d", latestBlockNum, blockNum)
+	}
+	if latestBlockNum < blockNum {
+		logger.Log(lvl, "commitment state is from earlier block (empty blocks in between)", "commitmentBlockNum", latestBlockNum, "blockNum", blockNum)
+	}
+	logger.Log(lvl, "commitment recalc info", "blockNum", blockNum, "minTxNum", minTxNum, "maxTxNum", maxTxNum, "toTxNum", toTxNum)
+	touchStart := time.Now()
+	accTouches, err := touchHistoricalKeys(sd, tx, kv.AccountsDomain, minTxNum, toTxNum, nil)
+	if err != nil {
+		return err
+	}
+	storageTouches, err := touchHistoricalKeys(sd, tx, kv.StorageDomain, minTxNum, toTxNum, nil)
+	if err != nil {
+		return err
+	}
+	codeTouches, err := touchHistoricalKeys(sd, tx, kv.CodeDomain, minTxNum, toTxNum, nil)
+	if err != nil {
+		return err
+	}
+	touchDur := time.Since(touchStart)
+	logger.Log(lvl, "commitment touched keys", "accTouches", accTouches, "storageTouches", storageTouches, "codeTouches", codeTouches, "touchDur", touchDur)
+	recalcStart := time.Now()
+	root, err := sd.ComputeCommitment(ctx, tx, false, blockNum, maxTxNum, "integrity-override", nil)
+	if err != nil {
+		return err
+	}
+	rootHash := common.Hash(root)
+	if header.Root != rootHash {
+		return fmt.Errorf("commitment root mismatch (even with overrides): %s != %s (blockNum=%d,txNum=%d)", header.Root, rootHash, blockNum, maxTxNum)
+	}
+	logger.Log(lvl,
+		"commitment root matches (with overrides)",
+		"blockNum", blockNum,
+		"txNum", maxTxNum,
+		"root", rootHash,
+		"totalDur", time.Since(start),
+		"touchDur", touchDur,
+		"recalcDur", time.Since(recalcStart),
+	)
+	return nil
+}
+
 // DumpHistAtBlk dumps all touched account/storage/code values at the end of a block
 // (i.e. GetAsOf at maxTxNum+1) as JSON to the given writer. This is useful for comparing
 // Erigon's historical state against a reference (e.g. prestateTracer diff output).
