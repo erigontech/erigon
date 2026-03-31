@@ -3,6 +3,7 @@ package jsonrpc
 import (
 	"context"
 	"errors"
+	"math/big"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -11,6 +12,10 @@ import (
 
 type ArbAPIImpl struct {
 	*APIImpl
+}
+
+func (api *ArbAPIImpl) Accounts(_ context.Context) ([]common.Address, error) {
+	return []common.Address{}, nil
 }
 
 func (api *ArbAPIImpl) Coinbase(ctx context.Context) (common.Address, error) {
@@ -39,4 +44,9 @@ func (api *ArbAPIImpl) SubmitHashrate(ctx context.Context, hashRate hexutil.Uint
 
 func (api *ArbAPIImpl) ProtocolVersion(_ context.Context) (hexutil.Uint, error) {
 	return 0, errors.New("the method eth_protocolVersion does not exist/is not available")
+}
+
+func (api *ArbAPIImpl) MaxPriorityFeePerGas(_ context.Context) (*hexutil.Big, error) {
+	tip := big.NewInt(0)
+	return (*hexutil.Big)(tip), nil
 }

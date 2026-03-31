@@ -1150,6 +1150,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 
 	// start HTTP API
 	httpRpcCfg := stack.Config().Http
+	httpRpcCfg.IsArbitrum = s.chainConfig.IsArbitrum()
 	if config.Ethstats != "" {
 		var headCh chan [][]byte
 		headCh, s.unsubscribeEthstat = s.notifications.Events.AddHeaderSubscription()
