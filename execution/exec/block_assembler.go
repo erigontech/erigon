@@ -184,7 +184,7 @@ func (ba *BlockAssembler) AddTransactions(
 	// bottleneck (max of regular, state) stored in header.GasUsed. This
 	// gives compute-heavy transactions access to the full regular gas
 	// budget even when state gas dominates the bottleneck. State gas is
-	// enforced post-execution with a rollback in commitTx below.
+	// enforced in applyTransaction before FinalizeTx.
 	gasPool := new(protocol.GasPool).AddGas(header.GasLimit - ba.gasUsed.BlockRegular)
 	if header.BlobGasUsed != nil {
 		gasPool.AddBlobGas(ba.cfg.ChainConfig.GetMaxBlobGasPerBlock(header.Time) - *header.BlobGasUsed)

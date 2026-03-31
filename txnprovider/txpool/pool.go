@@ -662,6 +662,10 @@ func (p *TxPool) Started() bool {
 	return p.started.Load()
 }
 
+// best returns the highest-priority pending transactions that fit within the
+// given gas, blob gas, and RLP space budgets.
+// EIP-8037: availableGas tracks regular gas only. State gas is enforced by
+// applyTransaction in the block assembler, not here.
 func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availableGas, availableBlobGas uint64, yielded mapset.Set[[32]byte], availableRlpSpace int) (bool, int, error) {
 	p.lock.Lock()
 	for last := p.lastSeenBlock.Load(); last < onTopOf; last = p.lastSeenBlock.Load() {
@@ -703,8 +707,6 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 	var toDiscard []*metaTxn
 	count := 0
 	i := 0
-	// EIP-8037: availableGas tracks regular gas only. State gas is enforced
-	// by post-execution rollback in the block assembler, not here.
 
 	defer func() {
 		p.logger.Debug("[txpool] Processing best request", "last", onTopOf, "txRequested", n, "txAvailable", len(best.ms), "txProcessed", i, "txReturned", count)
