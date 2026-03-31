@@ -755,10 +755,15 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					}
 
 					blockExecutor.blockRegularGasUsed += sysCallGasUsed
+					// Fix: update blockResult.BlockGasUsed to include finalize syscall gas.
+					// blockResult is computed in nextResult() before finalize runs, so we must
+					// recalculate here after finalize gas is accounted for.
+					blockResult.BlockGasUsed = max(blockExecutor.blockRegularGasUsed, blockExecutor.blockStateGasUsed)
 					if dbg.TraceGas {
 						log.Warn("[parallel] finalize syscall gas", "block", blockResult.BlockNum,
 							"sysCallGasUsed", sysCallGasUsed, "cumRegular", blockExecutor.blockRegularGasUsed,
-							"cumState", blockExecutor.blockStateGasUsed)
+							"cumState", blockExecutor.blockStateGasUsed,
+							"blockGasUsed", blockResult.BlockGasUsed)
 					}
 
 					blockResult.ApplyCount += len(applyWrites)
@@ -2028,8 +2033,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			if result.Receipt != nil {
 				be.blockRegularGasUsed += result.ExecutionResult.BlockRegularGasUsed
 				be.blockStateGasUsed += result.ExecutionResult.BlockStateGasUsed
-				if dbg.TraceGas && result.ExecutionResult.BlockStateGasUsed > 0 {
+				if dbg.TraceGas {
 					log.Warn("[parallel] tx gas", "block", be.blockNum, "txIdx", tx,
+						"txnGasUsed", result.ExecutionResult.ReceiptGasUsed,
 						"blockRegular", result.ExecutionResult.BlockRegularGasUsed,
 						"blockState", result.ExecutionResult.BlockStateGasUsed,
 						"cumRegular", be.blockRegularGasUsed, "cumState", be.blockStateGasUsed)
