@@ -329,13 +329,12 @@ func (c *ecrecover) Run(input []byte) ([]byte, error) {
 	// "input" is (hash, v, r, s), each 32 bytes
 	// but for ecrecover we want (r, s, v)
 
-	var r, s uint256.Int
-	r.SetBytes(input[64:96])
-	s.SetBytes(input[96:128])
+	r := new(uint256.Int).SetBytes(input[64:96])
+	s := new(uint256.Int).SetBytes(input[96:128])
 	v := input[63] - 27
 
 	// tighter sig s values input homestead only apply to txn sigs
-	if bitutil.TestBytes(input[32:63]) || !crypto.TransactionSignatureIsValid(v, &r, &s, true /* allowPreEip2s */) {
+	if bitutil.TestBytes(input[32:63]) || !crypto.TransactionSignatureIsValid(v, r, s, true /* allowPreEip2s */) {
 		return nil, nil
 	}
 	// We must make sure not to modify the 'input', so placing the 'v' along with
@@ -351,9 +350,7 @@ func (c *ecrecover) Run(input []byte) ([]byte, error) {
 	}
 
 	// the first byte of pubkey is bitcoin heritage
-	result := make([]byte, 32)
-	copy(result[12:], crypto.Keccak256(pubKey[1:])[12:])
-	return result, nil
+	return common.LeftPadBytes(crypto.Keccak256(pubKey[1:])[12:], 32), nil
 }
 
 func (c *ecrecover) Name() string {
@@ -616,13 +613,10 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 	}
 	// Retrieve the operands and execute the exponentiation
 	var (
-		base patched_big.Int
-		exp  patched_big.Int
-		mod  patched_big.Int
+		base = new(patched_big.Int).SetBytes(getData(input, 0, baseLen))
+		exp  = new(patched_big.Int).SetBytes(getData(input, baseLen, expLen))
+		mod  = new(patched_big.Int).SetBytes(getData(input, baseLen+expLen, modLen))
 	)
-	base.SetBytes(getData(input, 0, baseLen))
-	exp.SetBytes(getData(input, baseLen, expLen))
-	mod.SetBytes(getData(input, baseLen+expLen, modLen))
 
 	// Allocate the result buffer once, zero-filled.
 	result := make([]byte, modLen)
@@ -633,7 +627,7 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 		// If base == 1 (and mod > 1), then the result is 1
 		result[modLen-1] = 1
 	default:
-		base.Exp(&base, &exp, &mod).FillBytes(result)
+		base.Exp(base, exp, mod).FillBytes(result)
 	}
 	return result, nil
 }
@@ -701,9 +695,7 @@ func runBn254ScalarMul(input []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	var scalar big.Int
-	scalar.SetBytes(getData(input, 64, 32))
-	return libbn254.MarshalCurvePointG1(x.ScalarMultiplication(&x, &scalar)), nil
+	return libbn254.MarshalCurvePointG1(x.ScalarMultiplication(&x, new(big.Int).SetBytes(getData(input, 64, 32)))), nil
 }
 
 // bn254ScalarMulIstanbul implements a native elliptic curve scalar
@@ -763,19 +755,22 @@ func runBn254Pairing(input []byte) ([]byte, error) {
 	}
 
 	// Convert the input into a set of coordinates
-	n := len(input) / 192
-	as := make([]bn254.G1Affine, n)
-	bs := make([]bn254.G2Affine, n)
-	for j := 0; j < n; j++ {
-		i := j * 192
-		err := libbn254.UnmarshalCurvePointG1(input[i:i+64], &as[j])
+	as := make([]bn254.G1Affine, 0, len(input)/192)
+	bs := make([]bn254.G2Affine, 0, len(input)/192)
+	for i := 0; i < len(input); i += 192 {
+		ai := bn254.G1Affine{}
+		err := libbn254.UnmarshalCurvePointG1(input[i:i+64], &ai)
 		if err != nil {
 			return nil, err
 		}
-		err = libbn254.UnmarshalCurvePointG2(input[i+64:i+192], &bs[j])
+
+		bi := bn254.G2Affine{}
+		err = libbn254.UnmarshalCurvePointG2(input[i+64:i+192], &bi)
 		if err != nil {
 			return nil, err
 		}
+		as = append(as, ai)
+		bs = append(bs, bi)
 	}
 
 	success, err := bn254.PairingCheck(as, bs)
