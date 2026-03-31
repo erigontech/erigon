@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
@@ -597,15 +598,13 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 		if evm.chainRules.IsEIP8037 {
 			stateGas := uint64(len(ret)) * evm.Context.CostPerStateByte
 			if dbg.TraceGas {
-				fmt.Printf("[code deposit] block=%d tx=%d depth=%d codeLen=%d stateGas=%d preConsumed=%d\n",
-					evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), depth,
-					len(ret), stateGas, evm.stateGasConsumed)
+				log.Warn("[code deposit] pre", "block", evm.intraBlockState.BlockNumber(), "tx", evm.intraBlockState.TxIndex(),
+					"depth", depth, "codeLen", len(ret), "stateGas", stateGas, "preConsumed", evm.stateGasConsumed)
 			}
 			gasRemaining, stateGasOk = useMdGas(evm, gasRemaining, stateGas, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage)
 			if dbg.TraceGas {
-				fmt.Printf("[code deposit] block=%d tx=%d depth=%d postConsumed=%d ok=%v\n",
-					evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), depth,
-					evm.stateGasConsumed, stateGasOk)
+				log.Warn("[code deposit] post", "block", evm.intraBlockState.BlockNumber(), "tx", evm.intraBlockState.TxIndex(),
+					"depth", depth, "postConsumed", evm.stateGasConsumed, "ok", stateGasOk)
 			}
 		}
 

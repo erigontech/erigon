@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -380,9 +381,9 @@ func gasCreateEip8037(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 	}
 	gas.State = params.StateBytesNewAccount * evm.Context.CostPerStateByte
 	if dbg.TraceGas {
-		fmt.Printf("[gasCreateEip8037] block=%d tx=%d depth=%d cpsb=%d stateGas=%d regularGas=%d preConsumed=%d\n",
-			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.depth,
-			evm.Context.CostPerStateByte, gas.State, gas.Regular, evm.StateGasConsumed())
+		log.Warn("[gasCreateEip8037]", "block", evm.intraBlockState.BlockNumber(), "tx", evm.intraBlockState.TxIndex(),
+			"depth", evm.depth, "cpsb", evm.Context.CostPerStateByte, "stateGas", gas.State,
+			"regularGas", gas.Regular, "preConsumed", evm.StateGasConsumed())
 	}
 	return gas, nil
 }
