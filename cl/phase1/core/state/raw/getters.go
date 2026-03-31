@@ -460,3 +460,7 @@ func (b *BeaconState) GetLatestBlockHash() common.Hash {
 func (b *BeaconState) GetPayloadExpectedWithdrawals() *solid.ListSSZ[*cltypes.Withdrawal] {
 	return b.payloadExpectedWithdrawals
 }
+
+func (b *BeaconState) GetPtcWindow() *solid.VectorSSZ[solid.Uint64VectorSSZ] {
+	return b.ptcWindow
+}

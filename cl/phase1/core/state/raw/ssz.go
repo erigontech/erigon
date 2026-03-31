@@ -178,7 +178,7 @@ func (b *BeaconState) getSchema() []any {
 		s = append(s, b.proposerLookahead)
 	}
 	if b.version >= clparams.GloasVersion {
-		s = append(s, b.builders, &b.nextWithdrawalBuilderIndex, b.executionPayloadAvailability, b.builderPendingPayments, b.builderPendingWithdrawals, b.latestBlockHash[:], b.payloadExpectedWithdrawals)
+		s = append(s, b.builders, &b.nextWithdrawalBuilderIndex, b.executionPayloadAvailability, b.builderPendingPayments, b.builderPendingWithdrawals, b.latestBlockHash[:], b.payloadExpectedWithdrawals, b.ptcWindow)
 	}
 	return s
 }
@@ -208,6 +208,7 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 		b.builderPendingWithdrawals = solid.NewStaticListSSZ[*cltypes.BuilderPendingWithdrawal](int(b.beaconConfig.BuilderPendingWithdrawalsLimit), new(cltypes.BuilderPendingWithdrawal).EncodingSizeSSZ())
 		b.latestBlockHash = common.Hash{}
 		b.payloadExpectedWithdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(b.beaconConfig.MaxWithdrawalsPerPayload), new(cltypes.Withdrawal).EncodingSizeSSZ())
+		b.ptcWindow = solid.NewUint64VectorOfVectors(int((2+b.beaconConfig.MinSeedLookahead)*b.beaconConfig.SlotsPerEpoch), int(clparams.PtcSize))
 	}
 	if err := ssz2.UnmarshalSSZ(buf, version, b.getSchema()...); err != nil {
 		return err
@@ -250,6 +251,7 @@ func (b *BeaconState) EncodingSizeSSZ() (size int) {
 		size += b.builderPendingWithdrawals.EncodingSizeSSZ()
 		size += 32
 		size += b.payloadExpectedWithdrawals.EncodingSizeSSZ()
+		size += b.ptcWindow.EncodingSizeSSZ()
 	}
 	return
 }
