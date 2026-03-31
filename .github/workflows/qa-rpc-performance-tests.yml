@@ -159,29 +159,45 @@ jobs:
           echo "Running migrations on datadir..."
           ./integration run_migrations --datadir $ERIGON_REFERENCE_DATA_DIR --chain $CHAIN
 
+      - name: Kill any lingering rpcdaemon processes
+        if: matrix.client == 'erigon'
+        run: |
+          if pgrep -x rpcdaemon > /dev/null; then
+            echo "Found running rpcdaemon processes, killing them..."
+            pkill -x rpcdaemon || true
+            sleep 3
+            if pgrep -x rpcdaemon > /dev/null; then
+              echo "Force killing rpcdaemon..."
+              pkill -9 -x rpcdaemon || true
+              sleep 2
+            fi
+            echo "rpcdaemon processes killed"
+          else
+            echo "No rpcdaemon processes found"
+          fi
+
       - name: Run RpcDaemon
         id: rpcdaemon_running_step
         if: matrix.client == 'erigon'
         working-directory: ${{ github.workspace }}/build/bin
         run: |
           echo "Starting RpcDaemon..."
-          
+
           ./rpcdaemon --datadir $ERIGON_REFERENCE_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net > erigon.log 2>&1 &
 
-          RPC_DAEMON_PID=$!          
-          RPC_DAEMON_EXIT_STATUS=$?
+          RPC_DAEMON_PID=$!
           echo "RPC_DAEMON_PID=$RPC_DAEMON_PID" >> $GITHUB_ENV
           echo "rpc_daemon_started=true" >> $GITHUB_OUTPUT
-          
+
           sleep 5
           tail erigon.log
-          
-          if [ $RPC_DAEMON_EXIT_STATUS -ne 0 ]; then            
-            echo "RpcDaemon failed to start"
+
+          if ! kill -0 $RPC_DAEMON_PID 2>/dev/null; then
+            echo "RpcDaemon failed to start (process exited)"
             echo "::error::Error detected during tests: RpcDaemon failed to start"
             exit 1
           fi
-          echo "RpcDaemon started"
+          echo "RpcDaemon started (PID=$RPC_DAEMON_PID)"
 
       - name: Wait for port 8545 to be opened
         if: matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true'
