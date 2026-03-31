@@ -242,9 +242,11 @@ func (w *indexedWeightStore) GetProposerScore() uint64 {
 	return (committeeWeight * w.f.beaconCfg.ProposerScoreBoost) / 100
 }
 
-// ShouldApplyProposerBoost returns whether the proposer boost should be applied.
+// ShouldApplyProposerBoost returns whether the proposer boost should be applied
+// during weight calculation. This checks whether proposer_boost_root has been set
+// (which happens in record_block_timeliness via shouldApplyProposerBoost).
+// The time-awareness is handled at record time, not here.
 func (w *indexedWeightStore) ShouldApplyProposerBoost() bool {
-	// TODO: Not implemented yet. New in Gloas
 	proposerBoostRoot := w.f.ProposerBoostRoot()
 	return proposerBoostRoot != (common.Hash{})
 }
