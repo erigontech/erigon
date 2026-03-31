@@ -153,8 +153,11 @@ func (a *ApiHandler) GetEthV1ValidatorPayloadAttestationData(w http.ResponseWrit
 	// Check payload status: has the execution payload envelope been received?
 	payloadPresent := a.forkchoiceStore.HasEnvelope(headRoot)
 
-	// TODO: check blob data availability separately when data availability tracking is available
-	blobDataAvailable := payloadPresent
+	// Check blob data availability independently via PeerDAS.
+	// blob_data_available is true when the envelope exists AND either:
+	// (a) the block has no blob commitments (trivially available), or
+	// (b) all local custody columns are present per PeerDAS.
+	blobDataAvailable := a.forkchoiceStore.IsBlobDataAvailable(slot, headRoot)
 
 	return newBeaconResponse(payloadAttestationDataResponse{
 		BeaconBlockRoot:   headRoot,

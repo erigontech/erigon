@@ -78,6 +78,13 @@ type ForkChoiceStorageReader interface {
 	HasEnvelope(blockRoot common.Hash) bool
 	// [New in Gloas:EIP7732] ReadEnvelopeFromDisk reads a signed execution payload envelope from disk.
 	ReadEnvelopeFromDisk(blockRoot common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error)
+	// [New in Gloas:EIP7732] IsBlobDataAvailable returns the local node's assessment of whether
+	// blob data is available for the given block. Used by the payload_attestation_data API so PTC
+	// validators can set the blob_data_available flag independently of payload_present.
+	// Returns true if: (a) the block has no blob commitments (trivially available), or
+	// (b) PeerDAS confirms all custody columns are locally available.
+	// Returns false if the envelope does not exist or blob data is missing.
+	IsBlobDataAvailable(slot uint64, blockRoot common.Hash) bool
 
 	GetBalances(blockRoot common.Hash) (solid.Uint64ListSSZ, error)
 	GetInactivitiesScores(blockRoot common.Hash) (solid.Uint64ListSSZ, error)
