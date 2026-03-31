@@ -336,10 +336,10 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	// Remove the parent from the head set
 	delete(f.headSet, block.Block.ParentRoot)
 	f.headSet[blockRoot] = struct{}{}
-	// Add proposer score boost if the block is timely
-	timeIntoSlot := (f.time.Load() - f.genesisTime) % lastProcessedState.BeaconConfig().SecondsPerSlot
-	isBeforeAttestingInterval := timeIntoSlot < f.beaconCfg.SecondsPerSlot/f.beaconCfg.IntervalsPerSlot
-	if f.Slot() == block.Block.Slot && isBeforeAttestingInterval && f.proposerBoostRoot.Load().(common.Hash) == (common.Hash{}) {
+	// record_block_timeliness: set proposer boost root if the block is timely.
+	// [Modified in Gloas:EIP7732] Uses BPS-based shouldApplyProposerBoost instead of
+	// the legacy IntervalsPerSlot division. Pre-GLOAS epochs still use the old threshold.
+	if f.Slot() == block.Block.Slot && f.shouldApplyProposerBoost() && f.proposerBoostRoot.Load().(common.Hash) == (common.Hash{}) {
 		f.proposerBoostRoot.Store(common.Hash(blockRoot))
 	}
 
