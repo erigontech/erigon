@@ -28,7 +28,7 @@ spamoor_params:
     - scenario: setcodetx
       config: {throughput: 20, funding_gas_limit: 200000}
 ethereum_genesis_generator_params:
-  image: ethpandaops/ethereum-genesis-generator:5.3.1
+  image: ethpandaops/ethereum-genesis-generator:5.3.5
 additional_services: [spamoor, assertoor]
 assertoor_params:
   run_stability_check: true
