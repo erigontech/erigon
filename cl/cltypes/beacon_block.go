@@ -320,6 +320,7 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 }
 
 func (b *BeaconBody) EncodingSizeSSZ() (size int) {
+	b.ensureNilFields()
 	size += b.ProposerSlashings.EncodingSizeSSZ()
 	size += b.AttesterSlashings.EncodingSizeSSZ()
 	size += b.Attestations.EncodingSizeSSZ()

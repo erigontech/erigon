@@ -335,6 +335,7 @@ func (b *BlindedBeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 }
 
 func (b *BlindedBeaconBody) EncodingSizeSSZ() (size int) {
+	b.ensureNilFields()
 	size += b.ProposerSlashings.EncodingSizeSSZ()
 	size += b.AttesterSlashings.EncodingSizeSSZ()
 	size += b.Attestations.EncodingSizeSSZ()
