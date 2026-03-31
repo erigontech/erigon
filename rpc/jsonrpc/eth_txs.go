@@ -152,7 +152,7 @@ func (api *APIImpl) GetRawTransactionByHash(ctx context.Context, hash common.Has
 	defer tx.Rollback()
 
 	// https://www.quicknode.com/docs/ethereum/eth_getTransactionByHash
-	blockNum, _, ok, err := api.txnLookup(ctx, tx, hash)
+	blockNum, txNum, ok, err := api.txnLookup(ctx, tx, hash)
 	if err != nil {
 		return nil, err
 	}
@@ -165,19 +165,17 @@ func (api *APIImpl) GetRawTransactionByHash(ctx context.Context, hash common.Has
 		return nil, err
 	}
 
-	block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
+	txNumMin, err := api._txNumReader.Min(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
-	if block == nil {
-		return nil, fmt.Errorf("block not found: %d", blockNum)
+	if txNumMin+1 > txNum {
+		return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
 	}
-	var txn types.Transaction
-	for _, transaction := range block.Transactions() {
-		if transaction.Hash() == hash {
-			txn = transaction
-			break
-		}
+	txnIndex := int(txNum - txNumMin - 1)
+	txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txnIndex)
+	if err != nil {
+		return nil, err
 	}
 
 	if txn != nil {

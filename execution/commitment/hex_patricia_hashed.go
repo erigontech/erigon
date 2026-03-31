@@ -87,9 +87,8 @@ type HexPatriciaHashed struct {
 	auxBuffer     *bytes.Buffer // auxiliary buffer used during branch updates encoding
 	branchEncoder *BranchEncoder
 
-	mounted      bool                 // true if this trie is mounted to some root trie
-	mountedNib   int                  // if 0 <= nib <= 15 means mounted to some root. If -1, means it's a storage subtrie so must not be folded above depth 63
-	mountedTries []*HexPatriciaHashed // list of mounted tries to unmount
+	mounted    bool // true if this trie is mounted to some root trie
+	mountedNib int  // if 0 <= nib <= 15 means mounted to some root. If -1, means it's a storage subtrie so must not be folded above depth 63
 
 	memoizationOff bool // if true, do not rely on memoized hashes
 	//temp buffers
@@ -128,7 +127,8 @@ func NewHexPatriciaHashed(accountKeyLen int16, ctx PatriciaContext) *HexPatricia
 	if !ok {
 		hph = newHexPatriciaHashed()
 	}
-	hph.resetForReuse()
+	// No resetForReuse() needed — Release() already cleaned the object,
+	// and newHexPatriciaHashed() produces a zero-state struct.
 	hph.accountKeyLen = accountKeyLen
 	hph.ctx = ctx
 	return hph
@@ -175,8 +175,6 @@ func (hph *HexPatriciaHashed) resetForReuse() {
 	// reuse map, don't reallocate
 	clear(hph.hadToLoadL)
 
-	// reuse slice backing
-	hph.mountedTries = hph.mountedTries[:0]
 	hph.mounted = false
 	hph.mountedNib = 0
 
@@ -206,13 +204,12 @@ func (hph *HexPatriciaHashed) resetForReuse() {
 	clear(hph.depthsToTxNum[:])
 }
 
-// Release returns this HexPatriciaHashed to the pool for reuse.
+// Release clears all mutable state and returns this HexPatriciaHashed to the pool for reuse.
+// This ensures no stale database cursor references (PatriciaContext, WarmupCache) survive
+// in the pool and releases large transient data (maps, buffers) for GC promptly.
 // After calling Release, the caller must not use the struct.
 func (hph *HexPatriciaHashed) Release() {
-	hph.ctx = nil
-	hph.cache = nil
-	hph.mountedTries = nil
-	hph.capture = nil
+	hph.resetForReuse()
 	hphPool.Put(hph)
 }
 
@@ -2393,7 +2390,7 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 	return nil
 }
 
-func (hph *HexPatriciaHashed) foldMounted(nib int) (cell, error) {
+func (hph *HexPatriciaHashed) foldMounted(ctx context.Context, nib int) (cell, error) {
 	if nib != hph.mountedNib {
 		panic(fmt.Sprintf("foldMounted: nib (%x)!= mountedNib (%x)", nib, hph.mountedNib))
 	}
@@ -2404,6 +2401,9 @@ func (hph *HexPatriciaHashed) foldMounted(nib int) (cell, error) {
 	}
 
 	for hph.activeRows > 0 {
+		if err := ctx.Err(); err != nil {
+			return cell{}, err
+		}
 		// fmt.Printf("===[%x] folding prefix %x (len %d)\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hph.currentKeyLen)
 		if hph.activeRows == 1 && hph.depths[hph.activeRows-1] == 1 {
 			if hph.trace {
