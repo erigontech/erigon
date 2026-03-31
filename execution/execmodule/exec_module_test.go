@@ -856,7 +856,6 @@ func TestAssembleBlockWithWithdrawalRequest(t *testing.T) {
 	require.NoError(t, err)
 }
 
-
 // TestAssembleBlockStateGasLimit verifies that the builder respects the EIP-8037
 // block validity invariant: gas_used = max(regular, state) <= gas_limit.
 //
