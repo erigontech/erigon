@@ -264,6 +264,15 @@ func NewExecModule(
 	return em
 }
 
+// WaitIdle blocks until any in-flight updateForkChoice goroutine finishes.
+// Call before closing the database to avoid waitTxsAllDoneOnClose hangs.
+func (e *ExecModule) WaitIdle(ctx context.Context) {
+	if err := e.semaphore.Acquire(ctx, 1); err != nil {
+		return // context cancelled — best effort
+	}
+	e.semaphore.Release(1)
+}
+
 // ForkValidator returns the fork validator owned by this module.
 func (e *ExecModule) ForkValidator() *ForkValidator { return e.forkValidator }
 

@@ -149,6 +149,9 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, ams
 		if err = dbBAL.Validate(); err != nil {
 			return fmt.Errorf("block %d: db block access list is invalid: %w", blockNum, err)
 		}
+		if err = dbBAL.ValidateMaxItems(h.GasLimit); err != nil {
+			return fmt.Errorf("block %d: stored block access list exceeds max items: %w", blockNum, err)
+		}
 
 		if headerBALHash != dbBAL.Hash() {
 			log.Info(fmt.Sprintf("bal from block: %s", dbBAL.DebugString()))
