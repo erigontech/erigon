@@ -336,10 +336,10 @@ jobs:
               --outcome $outcome \
               --result_file $result_dir/$result_file
 
-            #if [ $? -ne 0 ]; then
-            #  failed_test=1
-            #  echo "Failure saving test results on DB"
-            #fi
+            if [ $? -ne 0 ]; then
+              failed_test=1
+              echo "Failure saving test results on DB"
+            fi
           
             # Save test results to a directory with timestamp and commit hash
             if [ -d "$result_dir" ]; then
