@@ -27,7 +27,7 @@ spamoor_params:
     - scenario: eoatx
       config: {throughput: 25}
 ethereum_genesis_generator_params:
-  image: ethpandaops/ethereum-genesis-generator:5.3.1
+  image: ethpandaops/ethereum-genesis-generator:5.3.5
 additional_services: [spamoor, assertoor]
 assertoor_params:
   run_stability_check: true
