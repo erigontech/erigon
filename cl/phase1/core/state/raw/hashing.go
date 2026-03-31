@@ -267,6 +267,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		beaconStateHasher.add(BuilderPendingWithdrawalsLeafIndex, b.builderPendingWithdrawals)
 		beaconStateHasher.add(LatestBlockHashLeafIndex, b.latestBlockHash)
 		beaconStateHasher.add(PayloadExpectedWithdrawalsLeafIndex, b.payloadExpectedWithdrawals)
+		beaconStateHasher.add(PtcWindowLeafIndex, b.ptcWindow)
 	}
 
 	beaconStateHasher.run()
