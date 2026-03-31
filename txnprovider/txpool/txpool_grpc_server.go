@@ -214,7 +214,6 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpo
 	j := 0
 	for i := range reply.Imported {
 		if reply.Imported[i] != txpoolproto.ImportResult_SUCCESS {
-			j++
 			continue
 		}
 
