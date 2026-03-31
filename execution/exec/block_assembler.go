@@ -105,6 +105,8 @@ type BlockAssembler struct {
 	gasUsed     protocol.GasUsed  // EIP-8037: cumulative per-dimension gas across AddTransactions calls
 }
 
+func (ba *BlockAssembler) CumulativeGasUsed() protocol.GasUsed { return ba.gasUsed }
+
 func NewBlockAssembler(cfg AssemblerCfg, payloadId, parentTime uint64, header *types.Header, uncles []*types.Header, withdrawals []*types.Withdrawal) *BlockAssembler {
 	var balIO *state.VersionedIO
 
@@ -258,17 +260,6 @@ func (ba *BlockAssembler) AddTransactions(
 			return nil, err
 		}
 		protocol.SetGasUsed(header, gasUsed)
-
-		// EIP-8037: the regular gas pool constrains Σ regular but not
-		// Σ state. Check the block-level invariant post-execution and
-		// roll back the transaction if it would breach gas_limit.
-		if gasUsed.BlockGasUsed() > header.GasLimit {
-			*gasUsed = gasSnapshot
-			protocol.SetGasUsed(header, gasUsed)
-			ibs.RevertToSnapshot(snap, protocol.ErrGasLimitReached)
-			gasPool = new(protocol.GasPool).AddGas(gasSnap).AddBlobGas(blobGasSnap)
-			return nil, protocol.ErrGasLimitReached
-		}
 
 		current.AddTxn(txn)
 		current.Receipts = append(current.Receipts, receipt)

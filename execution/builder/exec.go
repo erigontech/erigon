@@ -172,7 +172,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	interrupt := cfg.interrupt
 	const amount = 50
 	for {
-		txns, err := getNextTransactions(ctx, cfg, chainID, current.Header, amount, executionAt, yielded, filterReader, filterWriter, logger)
+		txns, err := getNextTransactions(ctx, cfg, chainID, current.Header, ba.CumulativeGasUsed(), amount, executionAt, yielded, filterReader, filterWriter, logger)
 		if err != nil {
 			return err
 		}
@@ -255,6 +255,7 @@ func getNextTransactions(
 	cfg BuilderExecCfg,
 	chainID *uint256.Int,
 	header *types.Header,
+	gasUsed protocol.GasUsed,
 	amount int,
 	executionAt uint64,
 	alreadyYielded mapset.Set[[32]byte],
@@ -263,9 +264,10 @@ func getNextTransactions(
 	logger log.Logger,
 ) ([]types.Transaction, error) {
 	availableRlpSpace := cfg.builderState.BuiltBlock.AvailableRlpSpace(cfg.chainConfig)
-	// EIP-8037: header.GasUsed = max(regular, state) which can exceed
-	// GasLimit when state gas dominates. Clamp to avoid uint64 underflow.
-	remainingGas := header.GasLimit - min(header.GasUsed, header.GasLimit)
+	// EIP-8037: use remaining regular gas as the gas target for the txpool.
+	// State gas is enforced by post-execution rollback in the block assembler,
+	// so the txpool only needs to filter by regular gas.
+	remainingRegularGas := header.GasLimit - gasUsed.BlockRegular
 	remainingBlobGas := uint64(0)
 	if header.BlobGasUsed != nil {
 		maxBlobs := cfg.chainConfig.GetMaxBlobsPerBlock(header.Time)
@@ -279,7 +281,7 @@ func getNextTransactions(
 		txnprovider.WithAmount(amount),
 		txnprovider.WithParentBlockNum(executionAt),
 		txnprovider.WithBlockTime(header.Time),
-		txnprovider.WithGasTarget(remainingGas),
+		txnprovider.WithGasTarget(remainingRegularGas),
 		txnprovider.WithBlobGasTarget(remainingBlobGas),
 		txnprovider.WithTxnIdsFilter(alreadyYielded),
 		txnprovider.WithAvailableRlpSpace(availableRlpSpace),

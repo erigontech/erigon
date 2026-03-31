@@ -703,7 +703,8 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 	var toDiscard []*metaTxn
 	count := 0
 	i := 0
-	availableStateGas := availableGas // EIP-8037: state gas is independently capped at block gas limit
+	// EIP-8037: availableGas tracks regular gas only. State gas is enforced
+	// by post-execution rollback in the block assembler, not here.
 
 	defer func() {
 		p.logger.Debug("[txpool] Processing best request", "last", onTopOf, "txRequested", n, "txAvailable", len(best.ms), "txProcessed", i, "txReturned", count)
@@ -787,13 +788,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 			// we might find another txn with a low enough intrinsic gas to include so carry on
 			continue
 		}
-		// EIP-8037: block gas is max(blockRegularGasUsed, blockStateGasUsed),
-		// so state gas is independently capped at the block gas limit.
-		if intrinsicGasResult.StateGas > availableStateGas {
-			continue
-		}
 		availableGas -= intrinsicGas
-		availableStateGas -= intrinsicGasResult.StateGas
 		availableRlpSpace -= len(rlpTxn)
 		txns.Txns[count] = rlpTxn
 		// For blob transactions, slot.Txn is the inner BlobTx without the
