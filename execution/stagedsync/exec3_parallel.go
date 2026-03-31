@@ -758,7 +758,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					// Fix: update blockResult.BlockGasUsed to include finalize syscall gas.
 					// blockResult is computed in nextResult() before finalize runs, so we must
 					// recalculate here after finalize gas is accounted for.
-					blockResult.BlockGasUsed = max(blockExecutor.blockRegularGasUsed, blockExecutor.blockStateGasUsed)
+					blockResult.BlockGasUsed = blockExecutor.blockRegularGasUsed + blockExecutor.blockStateGasUsed
 					if dbg.TraceGas {
 						log.Warn("[parallel] finalize syscall gas", "block", blockResult.BlockNum,
 							"sysCallGasUsed", sysCallGasUsed, "cumRegular", blockExecutor.blockRegularGasUsed,
@@ -2040,8 +2040,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 						"blockState", result.ExecutionResult.BlockStateGasUsed,
 						"cumRegular", be.blockRegularGasUsed, "cumState", be.blockStateGasUsed)
 				}
-				// Commit heuristic: use per-tx max(regular, state) as a conservative upper bound.
-				applyResult.blockGasUsed = int64(max(result.ExecutionResult.BlockRegularGasUsed, result.ExecutionResult.BlockStateGasUsed))
+				// Per-tx gas pool contribution: regular + state dimensions.
+				applyResult.blockGasUsed = int64(result.ExecutionResult.BlockRegularGasUsed + result.ExecutionResult.BlockStateGasUsed)
 				receipt := *result.Receipt
 				applyResult.receipt = &receipt
 				applyResult.receipt.Logs = append([]*types.Log{}, result.Receipt.Logs...)
@@ -2097,8 +2097,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			header = tt.Header
 			txs = tt.Txs
 		}
-		// Block gas = max(regular, state). Pre-Amsterdam: blockStateGasUsed is 0.
-		blockGasUsed := max(be.blockRegularGasUsed, be.blockStateGasUsed)
+		// Block gas = regular + state. Pre-Amsterdam: blockStateGasUsed is 0.
+		blockGasUsed := be.blockRegularGasUsed + be.blockStateGasUsed
 		if dbg.TraceGas {
 			log.Warn("[parallel] block gas", "block", be.blockNum,
 				"blockRegular", be.blockRegularGasUsed, "blockState", be.blockStateGasUsed,
@@ -2136,8 +2136,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 	txTask := be.tasks[0].Task
 
-	// Block gas = max(regular, state). Pre-Amsterdam: blockStateGasUsed is 0.
-	blockGasUsed := max(be.blockRegularGasUsed, be.blockStateGasUsed)
+	// Block gas = regular + state. Pre-Amsterdam: blockStateGasUsed is 0.
+	blockGasUsed := be.blockRegularGasUsed + be.blockStateGasUsed
 
 	return &blockResult{
 		BlockNum:     be.blockNum,

@@ -39,9 +39,9 @@ type GasUsed struct {
 	Blob         uint64 // Blob gas - see EIP-4844
 }
 
-// BlockGasUsed returns the EIP-8037 "bottleneck" gas: max(regular, state).
-// Pre-Amsterdam blockStateGasUsed is 0, so this equals BlockRegular.
-func (gu *GasUsed) BlockGasUsed() uint64 { return max(gu.BlockRegular, gu.BlockState) }
+// BlockGasUsed returns the EIP-7778 / EIP-8037 block gas: regular + state.
+// Pre-Amsterdam BlockState is 0, so this equals BlockRegular.
+func (gu *GasUsed) BlockGasUsed() uint64 { return gu.BlockRegular + gu.BlockState }
 
 func SetGasUsed(h *types.Header, gu *GasUsed) {
 	h.GasUsed = gu.BlockGasUsed()

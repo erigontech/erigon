@@ -680,10 +680,10 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	// Also return remaining gas to the block gas counter so it is
 	// available for the next transaction.
 	// EIP-8037: The net per-tx pool deduction must be blockRegularGasUsed,
-	// not max(regular, state). Using max per-tx would give Σ max(r_i, s_i) ≥
-	// max(Σ r_i, Σ s_i), rejecting valid blocks. State gas (including any
-	// spill from reservoir into gas_left) is tracked in stateGasConsumed and
-	// validated at block end via GasUsed.BlockGasUsed() = max(Σ regular, Σ state).
+	// not regular+state per-tx. Using per-tx sum would give Σ (r_i+s_i) but
+	// block gas deduction from pool must be regular-only to avoid over-counting.
+	// State gas (including any spill from reservoir into gas_left) is tracked in
+	// stateGasConsumed and validated at block end via GasUsed.BlockGasUsed() = Σ regular + Σ state.
 	st.gp.AddGas(st.initialGas.Total() - st.blockRegularGasUsed)
 
 	effectiveTip := *st.gasPrice

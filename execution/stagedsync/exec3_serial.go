@@ -413,8 +413,8 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 
 				if txTask.BlockNumber() > 0 && startTxIndex == 0 {
 					//Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-					// Block gas = max(regular, state). Pre-Amsterdam: blockStateGasUsed is 0.
-					blockGasUsed := max(se.blockGasUsed, se.blockStateGasUsed)
+					// Block gas = regular + state. Pre-Amsterdam: blockStateGasUsed is 0.
+					blockGasUsed := se.blockGasUsed + se.blockStateGasUsed
 					if dbg.TraceGas {
 						se.logger.Warn("block gas breakdown", "block", txTask.BlockNumber(),
 							"blockRegular", se.blockGasUsed, "blockState", se.blockStateGasUsed,
@@ -567,7 +567,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 		se.lastExecutedBlockNum.Store(int64(txTask.BlockNumber()))
 
 		if task.IsBlockEnd() {
-			se.executedGas.Add(int64(max(se.blockGasUsed, se.blockStateGasUsed)))
+			se.executedGas.Add(int64(se.blockGasUsed + se.blockStateGasUsed))
 			se.blockGasUsed = 0
 			se.blockStateGasUsed = 0
 			se.blobGasUsed = 0
