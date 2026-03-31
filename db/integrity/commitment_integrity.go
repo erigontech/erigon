@@ -1258,7 +1258,7 @@ func DumpHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br services.FullBloc
 //   - Boundary probes: GetAsOf at key points around the block
 //
 // This is for debugging cases where GetAsOf returns a wrong value for a specific key.
-func DumpSlotHistory(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, blockNum uint64, address common.Address, slot *common.Hash, window uint64, w io.Writer, logger log.Logger) error {
+func DumpSlotHistory(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, blockNum uint64, address common.Address, slot *common.Hash, window uint64, stepSize uint64, w io.Writer, logger log.Logger) error {
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
@@ -1311,11 +1311,15 @@ func DumpSlotHistory(ctx context.Context, db kv.TemporalRoDB, br services.FullBl
 	windowTo := toTxNum + window
 
 	type efEntry struct {
-		TxNum    uint64 `json:"txNum"`
-		BlockNum uint64 `json:"blockNum,omitempty"`
-		InBlock  bool   `json:"inBlock,omitempty"`
-		ValueHex string `json:"valueHex"`
-		ValueLen int    `json:"valueLen"`
+		TxNum       uint64 `json:"txNum"`
+		BlockNum    uint64 `json:"blockNum,omitempty"`
+		InBlock     bool   `json:"inBlock,omitempty"`
+		Step        uint64 `json:"step"`
+		ValueHex    string `json:"valueHex"`
+		ValueLen    int    `json:"valueLen"`
+		RawValueHex string `json:"rawValueHex"`
+		RawValueLen int    `json:"rawValueLen"`
+		RawOk       bool   `json:"rawOk"`
 	}
 
 	type probeEntry struct {
@@ -1367,7 +1371,9 @@ func DumpSlotHistory(ctx context.Context, db kv.TemporalRoDB, br services.FullBl
 	}
 	logger.Info("found EF entries", "count", len(efTxNums))
 
-	// 2. For each EF entry, read the history value (GetAsOf at txNum+1 gives the value written at txNum)
+	// 2. For each EF entry, read both:
+	//    - GetAsOf(txNum+1): the value "after" this write (resolves via next EF entry)
+	//    - HistorySeek(txNum): the raw value stored at this EF entry (the OLD value before this write)
 	for _, txNum := range efTxNums {
 		val, ok, err := tx.GetAsOf(domain, key, txNum+1)
 		if err != nil {
@@ -1382,12 +1388,31 @@ func DumpSlotHistory(ctx context.Context, db kv.TemporalRoDB, br services.FullBl
 			valHex = "<not_found>"
 		}
 
+		// Raw history value: what's actually stored at this EF position
+		rawVal, rawOk, err := tx.HistorySeek(domain, key, txNum)
+		if err != nil {
+			return fmt.Errorf("HistorySeek(%s, %d): %w", keyDesc, txNum, err)
+		}
+		rawHex := "0x0"
+		if rawOk && len(rawVal) > 0 {
+			rawHex = "0x" + hex.EncodeToString(rawVal)
+		}
+		if !rawOk {
+			rawHex = "<not_found>"
+		}
+
 		inBlock := txNum >= minTxNum && txNum <= maxTxNum
 		entry := efEntry{
-			TxNum:    txNum,
-			InBlock:  inBlock,
-			ValueHex: valHex,
-			ValueLen: len(val),
+			TxNum:       txNum,
+			InBlock:     inBlock,
+			ValueHex:    valHex,
+			ValueLen:    len(val),
+			RawValueHex: rawHex,
+			RawValueLen: len(rawVal),
+			RawOk:       rawOk,
+		}
+		if stepSize > 0 {
+			entry.Step = txNum / stepSize
 		}
 
 		// Try to map txNum to a block

@@ -1508,7 +1508,7 @@ func doDumpSlotHistory(cliCtx *cli.Context, logger log.Logger) error {
 		defer f.Close()
 		w = f
 	}
-	return integrity.DumpSlotHistory(ctx, db, blockReader, blockNum, address, slot, window, w, logger)
+	return integrity.DumpSlotHistory(ctx, db, blockReader, blockNum, address, slot, window, agg.StepSize(), w, logger)
 }
 
 func doDumpHistAtBlk(cliCtx *cli.Context, logger log.Logger) error {
