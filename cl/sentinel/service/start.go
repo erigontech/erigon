@@ -128,6 +128,7 @@ func StartServe(
 	lis, err := net.Listen(srvCfg.Network, srvCfg.Addr)
 	if err != nil {
 		log.Warn("[Sentinel] could not serve service", "reason", err)
+		return
 	}
 	// Create a gRPC server
 	gRPCserver := grpc.NewServer(grpc.Creds(creds))

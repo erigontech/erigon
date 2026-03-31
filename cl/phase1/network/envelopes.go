@@ -26,7 +26,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-var requestEnvelopeBatchExpiration = 15 * time.Second
+var requestEnvelopeBatchExpiration = 30 * time.Second
 
 // RequestEnvelopesFrantically requests execution payload envelopes from the network for the given beacon block roots.
 // It retries until all envelopes are received or a timeout occurs.

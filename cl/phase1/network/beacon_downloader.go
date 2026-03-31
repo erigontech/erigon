@@ -85,7 +85,10 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 	count := uint64(32)
 	var atomicResp atomic.Value
 	atomicResp.Store(peerAndBlocks{})
-	reqInterval := time.NewTicker(300 * time.Millisecond)
+	// Start with a base interval; backoff increases it on repeated failures.
+	baseInterval := 300 * time.Millisecond
+	var consecutiveFailures atomic.Int32
+	reqInterval := time.NewTicker(baseInterval)
 	defer reqInterval.Stop()
 
 Loop:
@@ -121,17 +124,31 @@ Loop:
 					if errors.Is(err, peers.ErrNoPeers) {
 						log.Debug("[Caplin] no peers available for beacon blocks by range request", "slot", reqSlot, "reqCount", reqCount)
 					} else {
-						log.Debug("Failed to send beacon blocks by range request", "err", err, "peer", peerId, "slot", reqSlot, "reqCount", reqCount)
+						// Peer returned an error response (e.g. rate limited, invalid request).
+						// Do NOT ban — apply backoff instead.
+						log.Debug("Beacon blocks by range request failed", "err", err, "peer", peerId, "slot", reqSlot, "reqCount", reqCount)
 					}
+					// Exponential backoff: 300ms, 600ms, 1.2s, 2.4s, capped at 5s
+					failures := int(consecutiveFailures.Add(1))
+					backoff := baseInterval * time.Duration(1<<uint(min(failures, 4)))
+					if backoff > 5*time.Second {
+						backoff = 5 * time.Second
+					}
+					reqInterval.Reset(backoff)
 					return
 				}
 				if responses == nil {
 					return
 				}
 				if len(responses) == 0 {
-					f.rpc.BanPeer(peerId)
+					// Empty response: peer has no blocks for this range.
+					// Do NOT ban — this can happen legitimately (peer is still syncing).
+					log.Trace("Peer returned empty block range response", "peer", peerId, "slot", reqSlot, "reqCount", reqCount)
 					return
 				}
+				// Success: reset backoff
+				consecutiveFailures.Store(0)
+				reqInterval.Reset(baseInterval)
 				if len(atomicResp.Load().(peerAndBlocks).blocks) > 0 {
 					return
 				}
@@ -183,6 +200,24 @@ Loop:
 			// skipping it would create an unrecoverable gap.
 			processBlocks = trimAtMissingEnvelope(processBlocks, extraBlock, envelopes)
 			if len(processBlocks) == 0 {
+				// All blocks were trimmed due to missing envelopes.
+				// Still advance highestSlotProcessed past the pre-GLOAS blocks
+				// to avoid re-requesting the same slot range indefinitely.
+				f.mu.Lock()
+				lastSlot := blocks[0].Block.Slot
+				for _, b := range blocks {
+					if b.Version() >= clparams.GloasVersion {
+						break
+					}
+					lastSlot = b.Block.Slot
+				}
+				if lastSlot > f.highestSlotProcessed {
+					log.Debug("[ForwardBeaconDownloader] envelope trim produced empty batch, advancing past pre-GLOAS blocks",
+						"from", f.highestSlotProcessed, "to", lastSlot)
+					f.highestSlotProcessed = lastSlot
+					f.highestSlotUpdateTime = time.Now()
+				}
+				f.mu.Unlock()
 				return
 			}
 		}
