@@ -613,6 +613,11 @@ func (b *BeaconState) SetPayloadExpectedWithdrawals(withdrawals *solid.ListSSZ[*
 	b.markLeaf(PayloadExpectedWithdrawalsLeafIndex)
 }
 
+func (b *BeaconState) SetPtcWindow(ptcWindow *solid.VectorSSZ[solid.Uint64VectorSSZ]) {
+	b.ptcWindow = ptcWindow
+	b.markLeaf(PtcWindowLeafIndex)
+}
+
 func (b *BeaconState) SetNextWithdrawalBuilderIndex(index uint64) {
 	b.nextWithdrawalBuilderIndex = index
 	b.markLeaf(NextWithdrawalBuilderIndexLeafIndex)
