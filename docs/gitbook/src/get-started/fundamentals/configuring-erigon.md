@@ -25,7 +25,7 @@ These flags cover the general behavior and configuration of the Erigon client.
 * `--config value`: Sets Erigon flags using a YAML/TOML file.
 * `--version, -v`: Prints the version information.
 * `--help, -h`: Displays help information.
-* `--chain value`: Sets the name of the [network](https://erigon.gitbook.io/docs/fundamentals/supported-networks) to join.
+* `--chain value`: Sets the name of the [network](https://docs.erigon.tech/fundamentals/supported-networks) to join.
   * Default: `mainnet`
 * `--networkid value`: Explicitly sets the network ID.
   * Default: `1`
@@ -465,7 +465,7 @@ Flags for configuring the Shutter Network encrypted transactions mempool.
 Silkworm is a C++ library that can optionally replace parts of Erigon's block execution and RPC handling. All Silkworm flags are experimental and subject to change.
 
 {% hint style="warning" %}
-Silkworm integration requires `libsilkworm_capi.so` to be present alongside the binary. See [Common Errors](../../help-center/common-errors-and-solutions.md) if the library is missing.
+Silkworm integration requires `libsilkworm_capi.so` to be present alongside the binary. If the library is missing, Erigon will fail to start with an error referencing the missing shared object file.
 {% endhint %}
 
 * `--silkworm.exec`: Enables the Silkworm block execution engine.

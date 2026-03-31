@@ -10,4 +10,4 @@ For comprehensive API details, refer to two official sources: the general Ethere
 
 and the formal Execution APIs documentation (for detailed specifications of `debug`, `engine`, and advanced `eth` methods like `eth_getProof`).
 
-{% embed url="https://ethereum.github.io/execution-apis/api-documentation/" %}
+{% embed url="https://ethereum.github.io/execution-apis/" %}
