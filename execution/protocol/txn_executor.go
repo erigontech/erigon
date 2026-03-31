@@ -692,6 +692,11 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 
 	if dbg.TraceGas || st.state.Trace() || dbg.TraceAccount(st.msg.From().Handle()) {
 		fmt.Printf("%d (%d.%d) Fees %x: tipped: %d, burnt: %d, price: %d, gas: %d\n", st.state.BlockNumber(), st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), &tipAmount, &burnAmount, st.gasPrice, st.txnGasUsed)
+		if st.evm.ChainRules().IsAmsterdam {
+			fmt.Printf("%d (%d.%d) AmsterdamGas: blockRegular=%d blockState=%d txnGas=%d\n",
+				st.state.BlockNumber(), st.state.TxIndex(), st.state.Incarnation(),
+				st.blockRegularGasUsed, st.blockStateGasUsed, st.txnGasUsed)
+		}
 	}
 
 	result = &evmtypes.ExecutionResult{
