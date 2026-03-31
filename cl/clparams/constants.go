@@ -16,4 +16,11 @@ const (
 	AttestationTimelinessIndex  = 0
 	PtcTimelinessIndex          = 1
 	NumBlockTimelinessDeadlines = 2
+
+	// [New in Gloas:EIP7732] BPS (basis points) timing constants.
+	// These define slot-relative deadlines as basis points (1/10000 of a slot).
+	BpsFactor                  = uint64(10000) // Denominator for BPS calculations
+	AttestationDueBpsGloas     = uint64(2500)  // 25% of slot — attestation deadline
+	AggregateDueBpsGloas       = uint64(5000)  // 50% of slot — aggregate deadline
+	PayloadAttestationDueBps   = uint64(7500)  // 75% of slot — PTC payload attestation deadline
 )
