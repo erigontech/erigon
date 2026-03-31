@@ -600,6 +600,19 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
 	}
 
+	if vmerr != nil && rules.IsAmsterdam {
+		log.Warn("[amsterdam] tx reverted",
+			"block", st.evm.Context.BlockNumber,
+			"from", st.msg.From(),
+			"to", st.msg.To(),
+			"nonce", st.msg.Nonce(),
+			"gasLimit", st.msg.Gas(),
+			"gasRemainingRegular", st.gasRemaining.Regular,
+			"gasRemainingState", st.gasRemaining.State,
+			"vmerr", vmerr,
+		)
+	}
+
 	if refunds && !gasBailout {
 		refundQuotient := params.RefundQuotient
 		if rules.IsLondon {
