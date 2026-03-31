@@ -12,9 +12,6 @@ on:
       - reopened
       - synchronize
       - ready_for_review
-  push:
-    branches:
-      - 'release/**'
   merge_group:
   workflow_dispatch:
 

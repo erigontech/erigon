@@ -13,6 +13,11 @@ env:
 on:
   workflow_dispatch:
   workflow_call:
+    inputs:
+      cache-warming-only:
+        description: "Compile test binaries only; skip test execution (for cache warming runs)"
+        type: boolean
+        default: false
 
 jobs:
   assertoor_test:
@@ -89,7 +94,7 @@ jobs:
         # On branch push, tests already passed in the merge queue. This run exists
         # solely to warm Docker image and BuildKit caches on main for future PRs
         # and merge queue runs. Skip the actual tests to avoid redundant execution.
-        if: github.event_name != 'push'
+        if: '!inputs.cache-warming-only'
         uses: ethpandaops/kurtosis-assertoor-github-action@v1
         with:
             enclave_name: "kurtosis-${{ matrix.suite }}-${{ github.run_id }}"
