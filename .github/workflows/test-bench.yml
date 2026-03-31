@@ -3,6 +3,11 @@ name: Benchmarks
 on:
   workflow_dispatch:
   workflow_call:
+    inputs:
+      cache-warming-only:
+        description: "Compile test binaries only; skip test execution (for cache warming runs)"
+        type: boolean
+        default: false
 
 defaults:
   run:
@@ -28,11 +33,11 @@ jobs:
           cleanup-space: true
 
       - name: Run benchmarks
-        if: github.event_name == 'pull_request'
+        if: '!inputs.cache-warming-only'
         run: make test-bench
 
       - name: Build test binaries (cache warming)
-        if: github.event_name != 'pull_request'
+        if: inputs.cache-warming-only
         run: go test -run=^$ ./...
 
       - uses: ./.github/actions/cleanup-erigon
