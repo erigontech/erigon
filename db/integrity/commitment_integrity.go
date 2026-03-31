@@ -850,7 +850,7 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	if err != nil {
 		return err
 	}
-	if aggMax := db.(state.HasAgg).Agg().(*state.Aggregator).EndTxNumMinimax(); maxTxNum+1 > aggMax { // don't use .SeekCommitment to check "state progress" - because we are in method which checking "files validity" (can't rely on them here)
+	if aggMax := db.(state.HasAgg).Agg().(*state.Aggregator).EndTxNumMinimax(); maxTxNum+1 > aggMax { // don't use seek-commitment to check "state progress" - because we are in method which checking "files validity" (can't rely on them here)
 		blockNumOfState, _, _ := txNumsReader.FindBlockNum(ctx, tx, aggMax)
 		return fmt.Errorf("block %d is beyond latest block with state %d", blockNum, blockNumOfState)
 	}
@@ -2109,15 +2109,20 @@ func deriveDecompAndReaderForOtherDomain(baseFile string, oldDomain, newDomain k
 }
 
 func touchHistoricalKeys(sd *execctx.SharedDomains, tx kv.TemporalTx, d kv.Domain, fromTxNum uint64, toTxNum uint64, visitor func(k []byte)) (uint64, error) {
-	// toTxNum is exclusive per kv.TemporalTx.HistoryRange contract [from,to)
-	stream, err := tx.HistoryRange(d, int(fromTxNum), int(toTxNum), order.Asc, -1)
+	// Use HistoryKeyTxNumRange to avoid fetching historical values.
+	// We only need the keys to touch them in the commitment trie.
+	// Returns (key, txNum) pairs from the inverted index without resolving
+	// values from history files.
+	// Note: may return duplicate keys (multiset semantics), but TouchKey
+	// already deduplicates internally via its keys map.
+	it, err := tx.Debug().HistoryKeyTxNumRange(d, int(fromTxNum), int(toTxNum), order.Asc, -1)
 	if err != nil {
 		return 0, err
 	}
-	defer stream.Close()
+	defer it.Close()
 	var touches uint64
-	for stream.HasNext() {
-		k, _, err := stream.Next()
+	for it.HasNext() {
+		k, _, err := it.Next()
 		if err != nil {
 			return 0, err
 		}
