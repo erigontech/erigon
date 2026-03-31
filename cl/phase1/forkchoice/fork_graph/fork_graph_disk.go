@@ -96,7 +96,7 @@ type forkGraphDisk struct {
 	badBlocks sync.Map // blocks that are invalid and that leads to automatic fail of extension.
 
 	// current state data
-	currentState         *state.CachingBeaconState
+	currentState          *state.CachingBeaconState
 	currentStateBlockRoot common.Hash // block root of the last processed block (avoids BlockRoot() zeroed-StateRoot issue)
 
 	// for each block root we also keep track of te equivalent current justified and finalized checkpoints for faster head retrieval.
