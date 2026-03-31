@@ -21,8 +21,10 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -35,6 +37,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/length"
@@ -50,6 +53,7 @@ import (
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, failFast bool, logger log.Logger) error {
@@ -964,6 +968,153 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 		"recalcDur", time.Since(recalcStart),
 	)
 	return nil
+}
+
+// DumpHistAtBlk dumps all touched account/storage/code values at the end of a block
+// (i.e. GetAsOf at maxTxNum+1) as JSON to the given writer. This is useful for comparing
+// Erigon's historical state against a reference (e.g. prestateTracer diff output).
+func DumpHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, blockNum uint64, w io.Writer, logger log.Logger) error {
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	txNumsReader := br.TxnumReader()
+	minTxNum, err := txNumsReader.Min(ctx, tx, blockNum)
+	if err != nil {
+		return err
+	}
+	maxTxNum, err := txNumsReader.Max(ctx, tx, blockNum)
+	if err != nil {
+		return err
+	}
+	toTxNum := maxTxNum + 1
+	logger.Info("dump hist at block", "blockNum", blockNum, "minTxNum", minTxNum, "maxTxNum", maxTxNum, "toTxNum", toTxNum)
+
+	type accountEntry struct {
+		Nonce    uint64 `json:"nonce"`
+		Balance  string `json:"balance"`
+		CodeHash string `json:"codeHash,omitempty"`
+	}
+	type storageEntry struct {
+		Value string `json:"value"`
+	}
+	type codeEntry struct {
+		CodeLen int    `json:"codeLen"`
+		Hash    string `json:"hash,omitempty"`
+	}
+
+	type dumpResult struct {
+		BlockNum uint64                       `json:"blockNum"`
+		TxNum    uint64                       `json:"toTxNum"`
+		Accounts map[string]*accountEntry     `json:"accounts"`
+		Storage  map[string]*storageEntry     `json:"storage"`
+		Code     map[string]*codeEntry        `json:"code"`
+	}
+
+	result := &dumpResult{
+		BlockNum: blockNum,
+		TxNum:    toTxNum,
+		Accounts: make(map[string]*accountEntry),
+		Storage:  make(map[string]*storageEntry),
+		Code:     make(map[string]*codeEntry),
+	}
+
+	// Collect touched account keys
+	accStream, err := tx.HistoryRange(kv.AccountsDomain, int(minTxNum), int(toTxNum), order.Asc, -1)
+	if err != nil {
+		return err
+	}
+	defer accStream.Close()
+	for accStream.HasNext() {
+		k, _, err := accStream.Next()
+		if err != nil {
+			return err
+		}
+		addr := "0x" + hex.EncodeToString(k[:length.Addr])
+		enc, _, err := tx.GetAsOf(kv.AccountsDomain, k[:length.Addr], toTxNum)
+		if err != nil {
+			return fmt.Errorf("GetAsOf(accounts, %s, %d): %w", addr, toTxNum, err)
+		}
+		if len(enc) == 0 {
+			result.Accounts[addr] = &accountEntry{Balance: "0x0"}
+			continue
+		}
+		var a accounts.Account
+		if err := accounts.DeserialiseV3(&a, enc); err != nil {
+			return fmt.Errorf("DeserialiseV3(%s): %w", addr, err)
+		}
+		entry := &accountEntry{
+			Nonce:   a.Nonce,
+			Balance: a.Balance.Hex(),
+		}
+		if !a.IsEmptyCodeHash() {
+			cv := a.CodeHash.Value()
+			entry.CodeHash = "0x" + hex.EncodeToString(cv[:])
+		}
+		result.Accounts[addr] = entry
+	}
+	logger.Info("dumped accounts", "count", len(result.Accounts))
+
+	// Collect touched storage keys
+	storageStream, err := tx.HistoryRange(kv.StorageDomain, int(minTxNum), int(toTxNum), order.Asc, -1)
+	if err != nil {
+		return err
+	}
+	defer storageStream.Close()
+	for storageStream.HasNext() {
+		k, _, err := storageStream.Next()
+		if err != nil {
+			return err
+		}
+		addr := "0x" + hex.EncodeToString(k[:length.Addr])
+		slot := "0x" + hex.EncodeToString(k[length.Addr:length.Addr+length.Hash])
+		compositeKey := addr + ":" + slot
+
+		enc, _, err := tx.GetAsOf(kv.StorageDomain, k[:length.Addr+length.Hash], toTxNum)
+		if err != nil {
+			return fmt.Errorf("GetAsOf(storage, %s, %d): %w", compositeKey, toTxNum, err)
+		}
+		val := "0x0"
+		if len(enc) > 0 {
+			val = "0x" + hex.EncodeToString(enc)
+		}
+		result.Storage[compositeKey] = &storageEntry{Value: val}
+	}
+	logger.Info("dumped storage", "count", len(result.Storage))
+
+	// Collect touched code keys
+	codeStream, err := tx.HistoryRange(kv.CodeDomain, int(minTxNum), int(toTxNum), order.Asc, -1)
+	if err != nil {
+		return err
+	}
+	defer codeStream.Close()
+	for codeStream.HasNext() {
+		k, _, err := codeStream.Next()
+		if err != nil {
+			return err
+		}
+		addr := "0x" + hex.EncodeToString(k[:length.Addr])
+		enc, _, err := tx.GetAsOf(kv.CodeDomain, k[:length.Addr], toTxNum)
+		if err != nil {
+			return fmt.Errorf("GetAsOf(code, %s, %d): %w", addr, toTxNum, err)
+		}
+		entry := &codeEntry{CodeLen: len(enc)}
+		if len(enc) > 0 {
+			h := crypto.Keccak256Hash(enc)
+			entry.Hash = "0x" + hex.EncodeToString(h[:])
+		}
+		result.Code[addr] = entry
+	}
+	logger.Info("dumped code", "count", len(result.Code))
+
+	enc, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(enc)
+	return err
 }
 
 func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, br services.FullBlockReader, from, to uint64, failFast bool, logger log.Logger) error {

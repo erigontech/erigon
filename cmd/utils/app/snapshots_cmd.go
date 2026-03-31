@@ -402,6 +402,24 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
+			Name: "dump-hist-at-blk",
+			Action: func(cliCtx *cli.Context) error {
+				logger := log.Root()
+				err := doDumpHistAtBlk(cliCtx, logger)
+				if err != nil {
+					log.Error("[dump-hist-at-blk] failure", "err", err)
+					return err
+				}
+				return nil
+			},
+			Description: "dump all touched account/storage/code values at a given block as JSON (for comparing against reference data)",
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.Uint64Flag{Name: "block", Usage: "block number to dump", Required: true},
+				&cli.StringFlag{Name: "output", Usage: "output file path (default: stdout)"},
+			}),
+		},
+		{
 			Name: "check-commitment-hist-at-blk",
 			Action: func(cliCtx *cli.Context) error {
 				logger := log.Root()
@@ -1338,6 +1356,41 @@ func stateProgress(ctx context.Context, db kv.TemporalRoDB, txNumsReader rawdbv3
 		return 0, err
 	}
 	return blockNum, nil
+}
+
+func doDumpHistAtBlk(cliCtx *cli.Context, logger log.Logger) error {
+	ctx := cliCtx.Context
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+	chainConfig := fromdb.ChainConfig(chainDB)
+	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
+	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	blockRetire, agg := res.BlockRetire, res.Aggregator
+	if err != nil {
+		return err
+	}
+	defer clean()
+	defer blockRetire.MadvNormal().DisableReadAhead()
+	defer agg.MadvNormal().DisableReadAhead()
+	db, err := temporal.New(chainDB, agg)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	blockReader, _ := blockRetire.IO()
+	blockNum := cliCtx.Uint64("block")
+
+	var w io.Writer = os.Stdout
+	if outPath := cliCtx.String("output"); outPath != "" {
+		f, err := os.Create(outPath)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		w = f
+	}
+	return integrity.DumpHistAtBlk(ctx, db, blockReader, blockNum, w, logger)
 }
 
 func doCheckCommitmentHistAtBlk(cliCtx *cli.Context, logger log.Logger) error {
