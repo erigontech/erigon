@@ -402,6 +402,27 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
+			Name: "dump-slot-history",
+			Action: func(cliCtx *cli.Context) error {
+				logger := log.Root()
+				err := doDumpSlotHistory(cliCtx, logger)
+				if err != nil {
+					log.Error("[dump-slot-history] failure", "err", err)
+					return err
+				}
+				return nil
+			},
+			Description: "dump EF index entries, history values, and GetAsOf probes for a single storage slot or account around a block",
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.Uint64Flag{Name: "block", Usage: "block number to investigate", Required: true},
+				&cli.StringFlag{Name: "address", Usage: "account address (0x...)", Required: true},
+				&cli.StringFlag{Name: "slot", Usage: "storage slot (0x...). Omit for account-level query"},
+				&cli.Uint64Flag{Name: "window", Usage: "txNum window around the block for EF entries", Value: 100000},
+				&cli.StringFlag{Name: "output", Usage: "output file path (default: stdout)"},
+			}),
+		},
+		{
 			Name: "dump-hist-at-blk",
 			Action: func(cliCtx *cli.Context) error {
 				logger := log.Root()
@@ -1356,6 +1377,49 @@ func stateProgress(ctx context.Context, db kv.TemporalRoDB, txNumsReader rawdbv3
 		return 0, err
 	}
 	return blockNum, nil
+}
+
+func doDumpSlotHistory(cliCtx *cli.Context, logger log.Logger) error {
+	ctx := cliCtx.Context
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+	chainConfig := fromdb.ChainConfig(chainDB)
+	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
+	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	blockRetire, agg := res.BlockRetire, res.Aggregator
+	if err != nil {
+		return err
+	}
+	defer clean()
+	defer blockRetire.MadvNormal().DisableReadAhead()
+	defer agg.MadvNormal().DisableReadAhead()
+	db, err := temporal.New(chainDB, agg)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	blockReader, _ := blockRetire.IO()
+	blockNum := cliCtx.Uint64("block")
+	window := cliCtx.Uint64("window")
+
+	address := common.HexToAddress(cliCtx.String("address"))
+	var slot *common.Hash
+	if slotStr := cliCtx.String("slot"); slotStr != "" {
+		s := common.HexToHash(slotStr)
+		slot = &s
+	}
+
+	var w io.Writer = os.Stdout
+	if outPath := cliCtx.String("output"); outPath != "" {
+		f, err := os.Create(outPath)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		w = f
+	}
+	return integrity.DumpSlotHistory(ctx, db, blockReader, blockNum, address, slot, window, w, logger)
 }
 
 func doDumpHistAtBlk(cliCtx *cli.Context, logger log.Logger) error {

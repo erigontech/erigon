@@ -1117,6 +1117,222 @@ func DumpHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br services.FullBloc
 	return err
 }
 
+// DumpSlotHistory dumps detailed history information for a single storage slot (or account)
+// around a given block. It outputs:
+//   - The EF (inverted index) entries: all txNums where this key was modified in a window
+//   - The history value at each of those txNums
+//   - Boundary probes: GetAsOf at key points around the block
+//
+// This is for debugging cases where GetAsOf returns a wrong value for a specific key.
+func DumpSlotHistory(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, blockNum uint64, address common.Address, slot *common.Hash, window uint64, w io.Writer, logger log.Logger) error {
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	txNumsReader := br.TxnumReader()
+	minTxNum, err := txNumsReader.Min(ctx, tx, blockNum)
+	if err != nil {
+		return err
+	}
+	maxTxNum, err := txNumsReader.Max(ctx, tx, blockNum)
+	if err != nil {
+		return err
+	}
+	toTxNum := maxTxNum + 1
+
+	// Determine domain and key
+	var domain kv.Domain
+	var histIdx kv.InvertedIdx
+	var key []byte
+	var keyDesc string
+
+	if slot != nil {
+		domain = kv.StorageDomain
+		histIdx = kv.StorageHistoryIdx
+		key = append(address.Bytes(), slot.Bytes()...)
+		keyDesc = fmt.Sprintf("storage %s slot %s", address.Hex(), slot.Hex())
+	} else {
+		domain = kv.AccountsDomain
+		histIdx = kv.AccountsHistoryIdx
+		key = address.Bytes()
+		keyDesc = fmt.Sprintf("account %s", address.Hex())
+	}
+
+	logger.Info("dump slot history",
+		"key", keyDesc,
+		"blockNum", blockNum,
+		"minTxNum", minTxNum,
+		"maxTxNum", maxTxNum,
+		"toTxNum", toTxNum,
+		"window", window,
+	)
+
+	// Calculate window bounds
+	var windowFrom uint64
+	if minTxNum > window {
+		windowFrom = minTxNum - window
+	}
+	windowTo := toTxNum + window
+
+	type efEntry struct {
+		TxNum    uint64 `json:"txNum"`
+		BlockNum uint64 `json:"blockNum,omitempty"`
+		InBlock  bool   `json:"inBlock,omitempty"`
+		ValueHex string `json:"valueHex"`
+		ValueLen int    `json:"valueLen"`
+	}
+
+	type probeEntry struct {
+		Label    string `json:"label"`
+		TxNum    uint64 `json:"txNum"`
+		ValueHex string `json:"valueHex"`
+		ValueLen int    `json:"valueLen"`
+		Ok       bool   `json:"ok"`
+	}
+
+	type result struct {
+		Key         string       `json:"key"`
+		Domain      string       `json:"domain"`
+		BlockNum    uint64       `json:"blockNum"`
+		MinTxNum    uint64       `json:"minTxNum"`
+		MaxTxNum    uint64       `json:"maxTxNum"`
+		ToTxNum     uint64       `json:"toTxNum"`
+		WindowFrom  uint64       `json:"windowFrom"`
+		WindowTo    uint64       `json:"windowTo"`
+		EFEntries   []efEntry    `json:"efEntries"`
+		Probes      []probeEntry `json:"probes"`
+	}
+
+	res := &result{
+		Key:        keyDesc,
+		Domain:     domain.String(),
+		BlockNum:   blockNum,
+		MinTxNum:   minTxNum,
+		MaxTxNum:   maxTxNum,
+		ToTxNum:    toTxNum,
+		WindowFrom: windowFrom,
+		WindowTo:   windowTo,
+	}
+
+	// 1. Get EF entries: all txNums in the inverted index for this key in the window
+	idxIter, err := tx.IndexRange(histIdx, key, int(windowFrom), int(windowTo), order.Asc, -1)
+	if err != nil {
+		return fmt.Errorf("IndexRange: %w", err)
+	}
+	defer idxIter.Close()
+
+	var efTxNums []uint64
+	for idxIter.HasNext() {
+		txNum, err := idxIter.Next()
+		if err != nil {
+			return fmt.Errorf("IndexRange.Next: %w", err)
+		}
+		efTxNums = append(efTxNums, txNum)
+	}
+	logger.Info("found EF entries", "count", len(efTxNums))
+
+	// 2. For each EF entry, read the history value (GetAsOf at txNum+1 gives the value written at txNum)
+	for _, txNum := range efTxNums {
+		val, ok, err := tx.GetAsOf(domain, key, txNum+1)
+		if err != nil {
+			return fmt.Errorf("GetAsOf(%s, %d): %w", keyDesc, txNum+1, err)
+		}
+
+		valHex := "0x0"
+		if ok && len(val) > 0 {
+			valHex = "0x" + hex.EncodeToString(val)
+		}
+		if !ok {
+			valHex = "<not_found>"
+		}
+
+		inBlock := txNum >= minTxNum && txNum <= maxTxNum
+		entry := efEntry{
+			TxNum:    txNum,
+			InBlock:  inBlock,
+			ValueHex: valHex,
+			ValueLen: len(val),
+		}
+
+		// Try to map txNum to a block
+		bn, bnOk, err := txNumsReader.FindBlockNum(ctx, tx, txNum)
+		if err == nil && bnOk {
+			entry.BlockNum = bn
+		}
+
+		res.EFEntries = append(res.EFEntries, entry)
+	}
+
+	// 3. Boundary probes
+	probePoints := []struct {
+		label string
+		txNum uint64
+	}{
+		{"before_block (minTxNum)", minTxNum},
+		{"block_start (minTxNum+1)", minTxNum + 1},
+		{"block_end (toTxNum)", toTxNum},
+		{"after_block (toTxNum+100)", toTxNum + 100},
+		{"after_block (toTxNum+10000)", toTxNum + 10000},
+	}
+
+	for _, p := range probePoints {
+		val, ok, err := tx.GetAsOf(domain, key, p.txNum)
+		if err != nil {
+			return fmt.Errorf("GetAsOf probe %s (%d): %w", p.label, p.txNum, err)
+		}
+		valHex := "0x0"
+		if ok && len(val) > 0 {
+			valHex = "0x" + hex.EncodeToString(val)
+		}
+		if !ok {
+			valHex = "<not_found>"
+		}
+		res.Probes = append(res.Probes, probeEntry{
+			Label:    p.label,
+			TxNum:    p.txNum,
+			ValueHex: valHex,
+			ValueLen: len(val),
+			Ok:       ok,
+		})
+	}
+
+	// 4. Also probe GetAsOf at each txNum in the block range (per-tx resolution)
+	// This shows exactly how the value evolves across the block
+	blockTxCount := maxTxNum - minTxNum
+	if blockTxCount <= 500 { // only if block isn't huge
+		for txNum := minTxNum; txNum <= toTxNum; txNum++ {
+			val, ok, err := tx.GetAsOf(domain, key, txNum)
+			if err != nil {
+				return fmt.Errorf("GetAsOf per-tx (%d): %w", txNum, err)
+			}
+			valHex := "0x0"
+			if ok && len(val) > 0 {
+				valHex = "0x" + hex.EncodeToString(val)
+			}
+			if !ok {
+				valHex = "<not_found>"
+			}
+			label := fmt.Sprintf("tx_offset_%d", txNum-minTxNum)
+			res.Probes = append(res.Probes, probeEntry{
+				Label:    label,
+				TxNum:    txNum,
+				ValueHex: valHex,
+				ValueLen: len(val),
+				Ok:       ok,
+			})
+		}
+	}
+
+	enc, err := json.MarshalIndent(res, "", "  ")
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(enc)
+	return err
+}
+
 func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, br services.FullBlockReader, from, to uint64, failFast bool, logger log.Logger) error {
 	if from >= to {
 		return fmt.Errorf("invalid blk range: %d >= %d", from, to)
