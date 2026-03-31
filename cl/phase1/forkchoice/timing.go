@@ -16,7 +16,11 @@
 
 package forkchoice
 
-import "github.com/erigontech/erigon/cl/clparams"
+import (
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/common"
+)
 
 // [New in Gloas:EIP7732] Timing helper functions.
 //
@@ -68,17 +72,210 @@ func (f *ForkChoiceStore) getPayloadAttestationDueMs(_ uint64) uint64 {
 }
 
 // shouldApplyProposerBoost returns whether a block arriving at the current store time
-// is timely enough to receive the proposer boost.
+// is timely enough to receive the proposer boost (i.e. arrived before the attestation deadline).
 //
-// Pre-GLOAS:  seconds_into_slot < SecondsPerSlot / IntervalsPerSlot
-// Post-GLOAS: seconds_into_slot * 1000 < get_attestation_due_ms(epoch)
-//
-// This function is used by record_block_timeliness (on_block) to decide whether
-// to set proposer_boost_root. It is NOT the same as WeightStore.ShouldApplyProposerBoost(),
+// This is equivalent to checking block_timeliness[ATTESTATION_TIMELINESS_INDEX] at the
+// current store time. It is NOT the same as WeightStore.ShouldApplyProposerBoost(),
 // which simply checks whether proposer_boost_root has been set.
 func (f *ForkChoiceStore) shouldApplyProposerBoost() bool {
-	secondsIntoSlot := (f.time.Load() - f.genesisTime) % f.beaconCfg.SecondsPerSlot
+	secondsSinceGenesis := f.time.Load() - f.genesisTime
+	timeIntoSlotMs := (secondsSinceGenesis % f.beaconCfg.SecondsPerSlot) * 1000
 	epoch := f.computeEpochAtSlot(f.Slot())
 	attestationDueMs := f.getAttestationDueMs(epoch)
-	return secondsIntoSlot*1000 < attestationDueMs
+	return timeIntoSlotMs < attestationDueMs
+}
+
+// recordBlockTimeliness implements record_block_timeliness from the spec.
+// It stores a two-element timeliness vector keyed by block root.
+//
+// Spec (GLOAS fork-choice.md):
+//
+//	store.block_timeliness[root] = [
+//	    is_current_slot and time_into_slot_ms < threshold
+//	    for threshold in [attestation_threshold_ms, ptc_threshold_ms]
+//	]
+//
+// [Modified in Gloas:EIP7732]
+// Pre-GLOAS:  stores [block_timely, false] in blockTimeliness.
+// Post-GLOAS: stores [block_timely, block_before_ptc_deadline] in blockTimeliness.
+//
+// NOTE: Both elements are time-based checks on when the *block* was received.
+// PTC_TIMELINESS_INDEX records whether the block arrived before the PTC deadline
+// (75% of slot), NOT whether the PTC has voted the payload present.
+func (f *ForkChoiceStore) recordBlockTimeliness(block *cltypes.BeaconBlock, blockRoot common.Hash) {
+	if f.Slot() != block.Slot {
+		return
+	}
+
+	epoch := f.computeEpochAtSlot(block.Slot)
+
+	// Compute time_into_slot_ms
+	secondsSinceGenesis := f.time.Load() - f.genesisTime
+	timeIntoSlotMs := (secondsSinceGenesis % f.beaconCfg.SecondsPerSlot) * 1000
+
+	attestationThresholdMs := f.getAttestationDueMs(epoch)
+
+	var timeliness [clparams.NumBlockTimelinessDeadlines]bool
+	timeliness[clparams.AttestationTimelinessIndex] = timeIntoSlotMs < attestationThresholdMs
+
+	// [New in Gloas:EIP7732] Post-GLOAS: also check if block arrived before PTC deadline.
+	// This is a time-based check (not a PTC vote count check).
+	if epoch >= f.beaconCfg.GloasForkEpoch {
+		ptcThresholdMs := f.getPayloadAttestationDueMs(epoch)
+		timeliness[clparams.PtcTimelinessIndex] = timeIntoSlotMs < ptcThresholdMs
+	}
+
+	f.blockTimeliness.Store(blockRoot, timeliness)
+}
+
+// updateProposerBoostRoot implements update_proposer_boost_root from the spec.
+// It sets the proposer boost root if the block is timely, the boost has not
+// already been assigned this slot, AND the block's proposer matches the
+// expected proposer for the current slot.
+//
+// Spec (GLOAS fork-choice.md):
+//
+//	if is_timely and is_first_block:
+//	    head_state = copy(store.block_states[get_head(store).root])
+//	    process_slots(head_state, slot)
+//	    if block.proposer_index == get_beacon_proposer_index(head_state):
+//	        store.proposer_boost_root = root
+func (f *ForkChoiceStore) updateProposerBoostRoot(block *cltypes.BeaconBlock, blockRoot common.Hash) {
+	timeliness, ok := f.getBlockTimeliness(blockRoot)
+	if !ok {
+		return
+	}
+	isTimely := timeliness[clparams.AttestationTimelinessIndex]
+	isFirstBlock := f.proposerBoostRoot.Load().(common.Hash) == (common.Hash{})
+
+	if !isTimely || !isFirstBlock {
+		return
+	}
+
+	// [New in Gloas:EIP7732] Verify the block's proposer matches the expected proposer
+	// for this slot. This check is only performed post-GLOAS; pre-GLOAS does not verify
+	// proposer identity for the boost (matching legacy behavior).
+	// We use the proposer lookahead (computed during state transition) to avoid
+	// the expensive get_head + process_slots path from the spec.
+	epoch := f.computeEpochAtSlot(block.Slot)
+	if epoch >= f.beaconCfg.GloasForkEpoch {
+		currentSlot := f.Slot()
+		lookahead, hasLookahead := f.GetProposerLookahead(currentSlot)
+		if hasLookahead {
+			slotInEpoch := currentSlot % f.beaconCfg.SlotsPerEpoch
+			if slotInEpoch < uint64(lookahead.Length()) {
+				expectedProposer := lookahead.Get(int(slotInEpoch))
+				if block.ProposerIndex != expectedProposer {
+					return // Wrong proposer — no boost
+				}
+			}
+		}
+		// If we don't have a lookahead yet (e.g. first GLOAS block), fall through
+		// and grant the boost optimistically.
+	}
+
+	f.proposerBoostRoot.Store(blockRoot)
+}
+
+// isHeadLate returns true if the head block was not received on time.
+// Uses the block_timely element (index 0) of the timeliness vector.
+// [New in Gloas:EIP7732] Updated to use the two-element timeliness vector.
+func (f *ForkChoiceStore) isHeadLate(root common.Hash) bool {
+	raw, ok := f.blockTimeliness.Load(root)
+	if !ok {
+		// Unknown block — treat as late (conservative)
+		return true
+	}
+	timeliness := raw.([clparams.NumBlockTimelinessDeadlines]bool)
+	return !timeliness[clparams.AttestationTimelinessIndex]
+}
+
+// isHeadWeak returns true if the head block has insufficient attestation support
+// and is therefore eligible for proposer-boost reorgs.
+//
+// Spec (GLOAS fork-choice.md):
+//
+//	reorg_threshold = calculate_committee_fraction(justified_state, REORG_HEAD_WEIGHT_THRESHOLD)
+//	head_weight = get_attestation_score(store, head_node, justified_state)
+//	for index in range(get_committee_count_per_slot(head_state, epoch)):
+//	    committee = get_beacon_committee(head_state, head_block.slot, index)
+//	    head_weight += sum(
+//	        justified_state.validators[i].effective_balance
+//	        for i in committee if i in store.equivocating_indices
+//	    )
+//	return head_weight < reorg_threshold
+//
+// The equivocating validator adjustment only sums validators assigned to the
+// head block's slot committees (not the entire validator set).
+//
+// [New in Gloas:EIP7732] This function considers equivocating validators.
+func (f *ForkChoiceStore) isHeadWeak(root common.Hash) bool {
+	justifiedCheckpoint := f.JustifiedCheckpoint()
+	checkpointState, err := f.getCheckpointState(justifiedCheckpoint)
+	if err != nil || checkpointState == nil {
+		return false
+	}
+
+	// Calculate reorg threshold: committee_weight * REORG_HEAD_WEIGHT_THRESHOLD / 100
+	committeeWeight := checkpointState.activeBalance / f.beaconCfg.SlotsPerEpoch
+	reorgThreshold := committeeWeight * clparams.ReorgHeadWeightThreshold / 100
+
+	// Get head weight using WeightStore
+	currentEpoch := f.computeEpochAtSlot(f.Slot())
+	var headWeight uint64
+	if f.beaconCfg.GetCurrentStateVersion(currentEpoch) >= clparams.GloasVersion {
+		node := ForkChoiceNode{
+			Root:          root,
+			PayloadStatus: cltypes.PayloadStatusPending,
+		}
+		ws := NewWeightStore(f)
+		headWeight = ws.GetAttestationScore(node)
+	} else {
+		// Pre-GLOAS: use legacy weight from weights map
+		headWeight = f.weights[root]
+	}
+
+	// Add back weight from equivocating validators assigned to the head block's slot.
+	// Spec: iterate over beacon committees for the head block's slot only.
+	headBlock, ok := f.forkGraph.GetBlock(root)
+	if !ok || headBlock == nil {
+		return false
+	}
+	headSlot := headBlock.Block.Slot
+	epoch := f.computeEpochAtSlot(headSlot)
+
+	// Compute the committees for the head block's slot using the checkpoint state's shuffled set.
+	lenIndicies := uint64(len(checkpointState.shuffledSet))
+	if lenIndicies > 0 {
+		committeesPerSlot := checkpointState.committeeCount(epoch, lenIndicies)
+		count := committeesPerSlot * f.beaconCfg.SlotsPerEpoch
+		for ci := uint64(0); ci < committeesPerSlot; ci++ {
+			index := (headSlot%f.beaconCfg.SlotsPerEpoch)*committeesPerSlot + ci
+			start := (lenIndicies * index) / count
+			end := (lenIndicies * (index + 1)) / count
+			for _, validatorIndex := range checkpointState.shuffledSet[start:end] {
+				if !f.isUnequivocating(validatorIndex) {
+					continue
+				}
+				vi := int(validatorIndex)
+				if vi < checkpointState.validatorSetSize &&
+					readFromBitset(checkpointState.actives, vi) &&
+					!readFromBitset(checkpointState.slasheds, vi) {
+					headWeight += checkpointState.balances[vi]
+				}
+			}
+		}
+	}
+
+	return headWeight < reorgThreshold
+}
+
+// getBlockTimeliness returns the timeliness vector for a block root.
+// Returns (timeliness, true) if found, or (zero value, false) if not tracked.
+func (f *ForkChoiceStore) getBlockTimeliness(root common.Hash) ([clparams.NumBlockTimelinessDeadlines]bool, bool) {
+	raw, ok := f.blockTimeliness.Load(root)
+	if !ok {
+		return [clparams.NumBlockTimelinessDeadlines]bool{}, false
+	}
+	return raw.([clparams.NumBlockTimelinessDeadlines]bool), true
 }

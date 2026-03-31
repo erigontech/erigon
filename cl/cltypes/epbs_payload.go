@@ -46,7 +46,7 @@ const PayloadAttestationSSZSize = int(clparams.PtcSize/8) + length.Hash + 8 + 1 
 // PayloadAttestationData represents attestation data for a payload.
 type PayloadAttestationData struct {
 	BeaconBlockRoot   common.Hash `json:"beacon_block_root"`
-	Slot              uint64      `json:"slot"`
+	Slot              uint64      `json:"slot,string"`
 	PayloadPresent    bool        `json:"payload_present"`
 	BlobDataAvailable bool        `json:"blob_data_available"`
 }

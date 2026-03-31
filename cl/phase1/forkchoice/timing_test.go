@@ -5,6 +5,9 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/require"
 )
 
@@ -22,6 +25,7 @@ func newTestForkChoiceStore(secondsPerSlot, intervalsPerSlot, slotsPerEpoch, glo
 		beaconCfg:   cfg,
 	}
 	f.time.Store(currentTime)
+	f.proposerBoostRoot.Store(common.Hash{})
 	return f
 }
 
@@ -151,4 +155,181 @@ func TestShouldApplyProposerBoost_ForkTransition(t *testing.T) {
 	// Slot 320, 2s into slot: 2*1000=2000 < 3000, timely
 	f.time.Store(320*12 + 2)
 	require.True(t, f.shouldApplyProposerBoost())
+}
+
+// --- recordBlockTimeliness tests ---
+
+func TestRecordBlockTimeliness_PreGloas_Timely(t *testing.T) {
+	// Pre-GLOAS: block arrives on time (0s into slot)
+	f := newTestForkChoiceStore(12, 3, 32, math.MaxUint64, 0, 0)
+
+	block := &cltypes.BeaconBlock{Slot: 0}
+	blockRoot := common.Hash{0x01}
+
+	f.recordBlockTimeliness(block, blockRoot)
+
+	timeliness, ok := f.getBlockTimeliness(blockRoot)
+	require.True(t, ok)
+	require.True(t, timeliness[clparams.AttestationTimelinessIndex], "block should be timely")
+	require.False(t, timeliness[clparams.PtcTimelinessIndex], "pre-GLOAS PTC timeliness is always false")
+}
+
+func TestRecordBlockTimeliness_PreGloas_Late(t *testing.T) {
+	// Pre-GLOAS: block arrives late (5s into slot, threshold 4s)
+	f := newTestForkChoiceStore(12, 3, 32, math.MaxUint64, 0, 5)
+
+	block := &cltypes.BeaconBlock{Slot: 0}
+	blockRoot := common.Hash{0x02}
+
+	f.recordBlockTimeliness(block, blockRoot)
+
+	timeliness, ok := f.getBlockTimeliness(blockRoot)
+	require.True(t, ok)
+	require.False(t, timeliness[clparams.AttestationTimelinessIndex], "block should be late")
+}
+
+func TestRecordBlockTimeliness_PostGloas_TwoElementVector(t *testing.T) {
+	// Post-GLOAS: block arrives at 1s into slot
+	// Attestation threshold: 3000ms, PTC threshold: 9000ms
+	// 1s = 1000ms < both thresholds → both timely
+	f := newTestForkChoiceStore(12, 3, 32, 0, 0, 1)
+
+	block := &cltypes.BeaconBlock{Slot: 0}
+	blockRoot := common.Hash{0x03}
+
+	f.recordBlockTimeliness(block, blockRoot)
+
+	timeliness, ok := f.getBlockTimeliness(blockRoot)
+	require.True(t, ok)
+	require.True(t, timeliness[clparams.AttestationTimelinessIndex], "block should be timely (1000ms < 3000ms)")
+	// PTC_TIMELINESS_INDEX is now a time-based check: did block arrive before PTC deadline?
+	// 1s = 1000ms < 9000ms (PTC threshold) → true
+	require.True(t, timeliness[clparams.PtcTimelinessIndex], "block arrived before PTC deadline (1000ms < 9000ms)")
+}
+
+func TestRecordBlockTimeliness_PostGloas_AfterPtcDeadline(t *testing.T) {
+	// Post-GLOAS: block arrives at 10s into slot
+	// Attestation threshold: 3000ms, PTC threshold: 9000ms
+	// 10s = 10000ms > both thresholds → both false
+	f := newTestForkChoiceStore(12, 3, 32, 0, 0, 10)
+
+	block := &cltypes.BeaconBlock{Slot: 0}
+	blockRoot := common.Hash{0x04}
+
+	f.recordBlockTimeliness(block, blockRoot)
+
+	timeliness, ok := f.getBlockTimeliness(blockRoot)
+	require.True(t, ok)
+	require.False(t, timeliness[clparams.AttestationTimelinessIndex], "block should be late (10000ms >= 3000ms)")
+	require.False(t, timeliness[clparams.PtcTimelinessIndex], "block after PTC deadline (10000ms >= 9000ms)")
+}
+
+func TestRecordBlockTimeliness_PostGloas_BetweenDeadlines(t *testing.T) {
+	// Post-GLOAS: block arrives at 5s into slot
+	// Attestation threshold: 3000ms → late
+	// PTC threshold: 9000ms → timely
+	f := newTestForkChoiceStore(12, 3, 32, 0, 0, 5)
+
+	block := &cltypes.BeaconBlock{Slot: 0}
+	blockRoot := common.Hash{0x05}
+
+	f.recordBlockTimeliness(block, blockRoot)
+
+	timeliness, ok := f.getBlockTimeliness(blockRoot)
+	require.True(t, ok)
+	require.False(t, timeliness[clparams.AttestationTimelinessIndex], "block late for attestation (5000ms >= 3000ms)")
+	require.True(t, timeliness[clparams.PtcTimelinessIndex], "block timely for PTC (5000ms < 9000ms)")
+}
+
+func TestRecordBlockTimeliness_WrongSlot(t *testing.T) {
+	// Block slot doesn't match current slot — should not record
+	f := newTestForkChoiceStore(12, 3, 32, math.MaxUint64, 0, 24) // time=24 → slot 2
+
+	block := &cltypes.BeaconBlock{Slot: 0} // block for slot 0
+	blockRoot := common.Hash{0x04}
+
+	f.recordBlockTimeliness(block, blockRoot)
+
+	_, ok := f.getBlockTimeliness(blockRoot)
+	require.False(t, ok, "should not record timeliness for wrong slot")
+}
+
+func TestUpdateProposerBoostRoot_TimelyBlock(t *testing.T) {
+	// Timely block (0s into slot) should get boost if no lookahead (pre-GLOAS fallback)
+	f := newTestForkChoiceStore(12, 3, 32, math.MaxUint64, 0, 0)
+
+	block := &cltypes.BeaconBlock{Slot: 0}
+	blockRoot := common.Hash{0x10}
+
+	f.recordBlockTimeliness(block, blockRoot)
+	f.updateProposerBoostRoot(block, blockRoot)
+	require.Equal(t, blockRoot, f.proposerBoostRoot.Load().(common.Hash))
+}
+
+func TestUpdateProposerBoostRoot_LateBlock(t *testing.T) {
+	// Late block (5s into slot, threshold 4s) should NOT get boost
+	f := newTestForkChoiceStore(12, 3, 32, math.MaxUint64, 0, 5)
+
+	block := &cltypes.BeaconBlock{Slot: 0}
+	blockRoot := common.Hash{0x11}
+
+	f.recordBlockTimeliness(block, blockRoot)
+	f.updateProposerBoostRoot(block, blockRoot)
+	require.Equal(t, common.Hash{}, f.proposerBoostRoot.Load().(common.Hash))
+}
+
+func TestUpdateProposerBoostRoot_NotOverwritten(t *testing.T) {
+	// If proposer boost root is already set, a second timely block should not overwrite it
+	f := newTestForkChoiceStore(12, 3, 32, math.MaxUint64, 0, 0)
+
+	firstRoot := common.Hash{0x10}
+	secondRoot := common.Hash{0x20}
+
+	block1 := &cltypes.BeaconBlock{Slot: 0}
+	block2 := &cltypes.BeaconBlock{Slot: 0}
+
+	f.recordBlockTimeliness(block1, firstRoot)
+	f.updateProposerBoostRoot(block1, firstRoot)
+	require.Equal(t, firstRoot, f.proposerBoostRoot.Load().(common.Hash))
+
+	f.recordBlockTimeliness(block2, secondRoot)
+	f.updateProposerBoostRoot(block2, secondRoot)
+	require.Equal(t, firstRoot, f.proposerBoostRoot.Load().(common.Hash), "boost root should not be overwritten")
+
+	// But the second block's timeliness should still be recorded
+	timeliness, ok := f.getBlockTimeliness(secondRoot)
+	require.True(t, ok)
+	require.True(t, timeliness[clparams.AttestationTimelinessIndex])
+}
+
+// --- isHeadLate tests ---
+
+func TestIsHeadLate_Timely(t *testing.T) {
+	f := newTestForkChoiceStore(12, 3, 32, math.MaxUint64, 0, 0)
+	root := common.Hash{0x01}
+	block := &cltypes.BeaconBlock{Slot: 0}
+	f.recordBlockTimeliness(block, root)
+	require.False(t, f.isHeadLate(root), "timely block should not be late")
+}
+
+func TestIsHeadLate_Late(t *testing.T) {
+	f := newTestForkChoiceStore(12, 3, 32, math.MaxUint64, 0, 5)
+	root := common.Hash{0x02}
+	block := &cltypes.BeaconBlock{Slot: 0}
+	f.recordBlockTimeliness(block, root)
+	require.True(t, f.isHeadLate(root), "late block should be late")
+}
+
+func TestIsHeadLate_Unknown(t *testing.T) {
+	f := newTestForkChoiceStore(12, 3, 32, math.MaxUint64, 0, 0)
+	require.True(t, f.isHeadLate(common.Hash{0xFF}), "unknown block should be treated as late")
+}
+
+// --- isHeadWeak tests ---
+
+func TestIsHeadWeak_NoCheckpointState(t *testing.T) {
+	// Without a checkpoint state, isHeadWeak returns false (safe default)
+	f := newTestForkChoiceStore(12, 3, 32, math.MaxUint64, 0, 0)
+	f.justifiedCheckpoint.Store(solid.Checkpoint{})
+	require.False(t, f.isHeadWeak(common.Hash{0x01}))
 }
