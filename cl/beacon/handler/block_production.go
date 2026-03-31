@@ -157,10 +157,6 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 			attestationData.BeaconBlockRoot, "duration", time.Since(start))
 	}()
 
-	if ok {
-		return newBeaconResponse(attestationData), nil
-	}
-
 	clversion := a.beaconChainCfg.GetCurrentStateVersion(*slot / a.beaconChainCfg.SlotsPerEpoch)
 	if clversion.BeforeOrEqual(clparams.DenebVersion) && committeeIndex == nil {
 		return nil, beaconhttp.NewEndpointError(
@@ -171,6 +167,16 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 		// electra case
 		zero := uint64(0)
 		committeeIndex = &zero
+	}
+
+	if ok {
+		// Set committee_index from the request parameter. The cached attestation data
+		// has CommitteeIndex=0 (shared across all committees for the same slot), but
+		// the VC expects it to match the requested committee_index.
+		if committeeIndex != nil {
+			attestationData.CommitteeIndex = *committeeIndex
+		}
+		return newBeaconResponse(attestationData), nil
 	}
 
 	if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
@@ -194,6 +200,10 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 		return nil, err
 	}
 
+	// Set committee_index from the request parameter for pre-Electra versions.
+	if committeeIndex != nil {
+		attestationData.CommitteeIndex = *committeeIndex
+	}
 	return newBeaconResponse(attestationData), nil
 }
 
@@ -594,6 +604,7 @@ func (a *ApiHandler) produceBeaconBody(
 	var executionValue uint64
 
 	blockRoot := baseBlockRoot
+	secsDiff := (targetSlot - baseBlockSlot) * a.beaconChainCfg.SecondsPerSlot
 	// Process the execution data in a thread.
 	wg.Add(1)
 	go func() {
@@ -604,7 +615,6 @@ func (a *ApiHandler) produceBeaconBody(
 		}()
 		timeoutForBlockBuilding := 2 * time.Second // keep asking for 2 seconds for block
 		retryTime := 10 * time.Millisecond
-		secsDiff := (targetSlot - baseBlockSlot) * a.beaconChainCfg.SecondsPerSlot
 		feeRecipient, _ := a.validatorParams.GetFeeRecipient(proposerIndex)
 		clWithdrawals, _ := state.ExpectedWithdrawals(
 			baseState,
@@ -819,7 +829,12 @@ func (a *ApiHandler) produceBeaconBody(
 		defer wg.Done()
 		start := time.Now()
 		defer func() {
-			log.Info("BlockProduction: GetBlockOperations&findBestAttestations took", "duration", time.Since(start))
+			poolSize := len(a.operationsPool.AttestationsPool.Raw())
+			attCount := 0
+			if beaconBody.Attestations != nil {
+				attCount = beaconBody.Attestations.Len()
+			}
+			log.Info("BlockProduction: GetBlockOperations&findBestAttestations took", "duration", time.Since(start), "poolSize", poolSize, "selectedAtts", attCount)
 		}()
 		beaconBody.AttesterSlashings, beaconBody.ProposerSlashings, beaconBody.VoluntaryExits, beaconBody.ExecutionChanges = a.getBlockOperations(
 			baseState,
@@ -1352,7 +1367,12 @@ func (a *ApiHandler) storeBlockAndBlobs(
 		return err
 	}
 
-	if err := a.forkchoiceStore.OnBlock(ctx, block, true, true, false); err != nil {
+	// Use fullValidation=false for locally-produced blocks. The block was
+	// just built by this node — BLS re-verification against the replayed state
+	// would fail when the head state lags behind (e.g., genesis start) because
+	// ProcessSlots(genesis, slot) without intermediate blocks produces a different
+	// RANDAO mix than the state with blocks applied.
+	if err := a.forkchoiceStore.OnBlock(ctx, block, true, false, false); err != nil {
 		return err
 	}
 	finalizedHash := a.forkchoiceStore.GetEth1Hash(a.forkchoiceStore.FinalizedCheckpoint().Root)

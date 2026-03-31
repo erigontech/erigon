@@ -152,12 +152,16 @@ func MetaCatchingUp(args Args) StageName {
 	if !args.hasDownloaded {
 		return DownloadHistoricalBlocks
 	}
-	// If we have no peers, sleep until the next slot rather than entering sync
-	// stages that will fail. This avoids CPU-burning retry loops when peer
-	// discovery has not completed yet (common on Gnosis with 5-second slots).
+	// If we have no peers and are behind, sleep until the next slot rather than
+	// entering sync stages that will fail. However, if we're already at the
+	// target (solo validator / genesis start), proceed to ForkChoice so the head
+	// advances and attestations can be processed.
+	// If we have no peers, skip sync stages and go directly to ForkChoice.
+	// Sync stages (ForwardSync, ChainTipSync) require peers to download blocks
+	// and will just timeout. ForkChoice still needs to run to advance the head
+	// from blocks received via the beacon API (solo validator / single node).
 	if args.peers == 0 {
-		log.Debug("[Caplin] no peers available, waiting for peer discovery before syncing")
-		return WaitForPeers
+		return ""
 	}
 	if args.seenEpoch < args.targetEpoch {
 		return ForwardSync
@@ -276,6 +280,8 @@ func ConsensusClStages(ctx context.Context,
 						if err := cfg.syncedData.OnHeadState(cfg.state); err != nil {
 							return fmt.Errorf("failed to set genesis head state: %w", err)
 						}
+						// Mark forkchoice as synced so OnAttestation processes attestations.
+						cfg.forkChoice.SetSynced(true)
 						// Write genesis beacon block to DB so block production can find the parent block.
 						if err := writeGenesisBeaconBlock(ctx, cfg); err != nil {
 							return fmt.Errorf("failed to write genesis beacon block: %w", err)
