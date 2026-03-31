@@ -11,25 +11,25 @@ participants:
     el_image: test/erigon:current
     el_log_level: "debug"
     supernode: true
-global_log_level: 'debug'
+global_log_level: debug
 network_params:
   preset: minimal
   seconds_per_slot: 6
-  genesis_delay: 20
+  genesis_delay: 30
   fulu_fork_epoch: 0
-  gloas_fork_epoch: 1
+  gloas_fork_epoch: 2
 snooper_enabled: true
+dora_params:
+  image: ethpandaops/dora:eip7928-support
 spamoor_params:
   image: ethpandaops/spamoor:master
   spammers:
-    - scenario: evm-fuzz
-      config: {throughput: 15, payload_seed: "0x0070"}
     - scenario: eoatx
-      config: {throughput: 25}
+      config: {throughput: 15, funding_gas_limit: 2000000}
+    - scenario: evm-fuzz
+      config: {throughput: 8, funding_gas_limit: 2000000}
+    - scenario: deploytx
+      config: {throughput: 1, bytecodes: "0x61780080600b6000396000f3", gas_limit: 20000000, funding_gas_limit: 2000000}
 ethereum_genesis_generator_params:
   image: ethpandaops/ethereum-genesis-generator:5.3.5
-additional_services: [spamoor, assertoor]
-assertoor_params:
-  run_stability_check: true
-  run_block_proposal_check: true
-  image: ethpandaops/assertoor:gloas-support-latest
+additional_services: [dora, spamoor]
