@@ -2023,8 +2023,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			if result.Receipt != nil {
 				be.blockRegularGasUsed += result.ExecutionResult.BlockRegularGasUsed
 				be.blockStateGasUsed += result.ExecutionResult.BlockStateGasUsed
-				// EIP-8037: per-tx max(regular, state) overestimates vs the true block gas
-				// (max of sums, not sum of maxes), but is a safe upper bound for commit heuristics.
+				// Commit heuristic: use per-tx max(regular, state) as a conservative upper bound.
+				// True block gas = sum(regular) + sum(state) across all txs (computed at block end).
 				applyResult.blockGasUsed = int64(max(result.ExecutionResult.BlockRegularGasUsed, result.ExecutionResult.BlockStateGasUsed))
 				receipt := *result.Receipt
 				applyResult.receipt = &receipt
@@ -2081,8 +2081,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			header = tt.Header
 			txs = tt.Txs
 		}
-		// Block gas = max(regular, state). Pre-Amsterdam: blockStateGasUsed is 0.
-		blockGasUsed := max(be.blockRegularGasUsed, be.blockStateGasUsed)
+		// Block gas = regular + state (EIP-8037: two additive dimensions). Pre-Amsterdam: blockStateGasUsed is 0.
+		blockGasUsed := be.blockRegularGasUsed + be.blockStateGasUsed
 		be.result = &blockResult{
 			BlockNum:     be.blockNum,
 			BlockTime:    txTask.BlockTime(),
@@ -2115,8 +2115,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 	txTask := be.tasks[0].Task
 
-	// Block gas = max(regular, state). Pre-Amsterdam: blockStateGasUsed is 0.
-	blockGasUsed := max(be.blockRegularGasUsed, be.blockStateGasUsed)
+	// Block gas = regular + state (EIP-8037: two additive dimensions). Pre-Amsterdam: blockStateGasUsed is 0.
+	blockGasUsed := be.blockRegularGasUsed + be.blockStateGasUsed
 
 	return &blockResult{
 		BlockNum:     be.blockNum,
