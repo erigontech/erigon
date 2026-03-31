@@ -18,70 +18,78 @@ package services
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"log"
-	"runtime"
 	"testing"
-	"time"
 
-	mockState "github.com/erigontech/erigon/cl/abstract/mock_services"
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
-	"github.com/stretchr/testify/suite"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 )
 
-type blsToExecutionChangeTestSuite struct {
-	suite.Suite
+type blsToExecutionChangeTestContext struct {
 	gomockCtrl     *gomock.Controller
 	operationsPool *pool.OperationsPool
-	emitters       *beaconevents.EventEmitter
-	syncedData     synced_data.SyncedData
+	syncedData     *synced_data.SyncedDataManager
 	beaconCfg      *clparams.BeaconChainConfig
 
 	service   BLSToExecutionChangeService
 	mockFuncs *mockFuncs
 }
 
-func (t *blsToExecutionChangeTestSuite) SetupTest() {
-	t.gomockCtrl = gomock.NewController(t.T())
-	t.operationsPool = &pool.OperationsPool{
+func setupBLSToExecutionChangeTest(t *testing.T) (*blsToExecutionChangeTestContext, *state.CachingBeaconState) {
+	t.Helper()
+
+	gomockCtrl := gomock.NewController(t)
+	t.Cleanup(gomockCtrl.Finish)
+
+	operationsPool := &pool.OperationsPool{
 		BLSToExecutionChangesPool: pool.NewOperationPool[common.Bytes96, *cltypes.SignedBLSToExecutionChange](10, "blsToExecutionChangesPool"),
 	}
 	_, st, _ := tests.GetCapellaRandom()
-	t.syncedData = synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
-	t.syncedData.OnHeadState(st)
-	t.emitters = beaconevents.NewEventEmitter()
-	t.beaconCfg = &clparams.BeaconChainConfig{}
-	batchSignatureVerifier := NewBatchSignatureVerifier(context.TODO(), nil)
+
+	syncedData := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	require.NoError(t, syncedData.OnHeadState(st))
+
+	verifierCtx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	batchSignatureVerifier := NewBatchSignatureVerifier(verifierCtx, nil)
 	go batchSignatureVerifier.Start()
 
-	t.service = NewBLSToExecutionChangeService(*t.operationsPool, t.emitters, t.syncedData, t.beaconCfg, batchSignatureVerifier)
-	// mock global functions
-	t.mockFuncs = &mockFuncs{
-		ctrl: t.gomockCtrl,
+	mockFuncs := &mockFuncs{
+		ctrl: gomockCtrl,
 	}
-	computeSigningRoot = t.mockFuncs.ComputeSigningRoot
-	blsVerify = t.mockFuncs.BlsVerify
-	blsVerifyMultipleSignatures = t.mockFuncs.BlsVerifyMultipleSignatures
+
+	prevComputeSigningRoot := computeSigningRoot
+	prevBlsVerifyMultipleSignatures := blsVerifyMultipleSignatures
+	computeSigningRoot = mockFuncs.ComputeSigningRoot
+	blsVerifyMultipleSignatures = mockFuncs.BlsVerifyMultipleSignatures
+	t.Cleanup(func() {
+		computeSigningRoot = prevComputeSigningRoot
+		blsVerifyMultipleSignatures = prevBlsVerifyMultipleSignatures
+	})
+
+	return &blsToExecutionChangeTestContext{
+		gomockCtrl:     gomockCtrl,
+		operationsPool: operationsPool,
+		syncedData:     syncedData,
+		beaconCfg:      &clparams.MainnetBeaconConfig,
+		service:        NewBLSToExecutionChangeService(*operationsPool, beaconevents.NewEventEmitter(), syncedData, &clparams.MainnetBeaconConfig, batchSignatureVerifier),
+		mockFuncs:      mockFuncs,
+	}, st
 }
 
-func (t *blsToExecutionChangeTestSuite) TearDownTest() {
-	t.gomockCtrl.Finish()
-}
-
-func (t *blsToExecutionChangeTestSuite) TestProcessMessage() {
-	mockMsg := &SignedBLSToExecutionChangeForGossip{
+func newSignedBLSToExecutionChangeForGossip(validatorIndex uint64) *SignedBLSToExecutionChangeForGossip {
+	return &SignedBLSToExecutionChangeForGossip{
 		SignedBLSToExecutionChange: &cltypes.SignedBLSToExecutionChange{
 			Message: &cltypes.BLSToExecutionChange{
-				ValidatorIndex: 1,
+				ValidatorIndex: validatorIndex,
 				From:           common.Bytes48{1, 2, 3, 4, 5, 6},
 				To:             common.Address{3, 2, 1},
 			},
@@ -89,134 +97,109 @@ func (t *blsToExecutionChangeTestSuite) TestProcessMessage() {
 		},
 		ImmediateVerification: true,
 	}
+}
+
+func syncHeadState(t *testing.T, syncedData *synced_data.SyncedDataManager, st *state.CachingBeaconState) {
+	t.Helper()
+	require.NoError(t, syncedData.OnHeadState(st))
+}
+
+func matchingWithdrawalCredentials(cfg *clparams.BeaconChainConfig, from common.Bytes48) common.Hash {
+	hashedFrom := utils.Sha256(from[:])
+	wc := common.Hash{byte(cfg.BLSWithdrawalPrefixByte)}
+	copy(wc[1:], hashedFrom[1:])
+	return wc
+}
+
+func TestBlsToExecutionChangeProcessMessage(t *testing.T) {
+	const validatorIndex = uint64(1)
 
 	tests := []struct {
-		name        string
-		mock        func()
-		msg         *SignedBLSToExecutionChangeForGossip
-		wantErr     bool
-		specificErr error
+		name          string
+		prepare       func(t *testing.T, testCtx *blsToExecutionChangeTestContext, st *state.CachingBeaconState, msg *SignedBLSToExecutionChangeForGossip)
+		wantErr       error
+		wantErrString string
+		wantInPool    bool
 	}{
 		{
 			name: "signature already exists in pool",
-			mock: func() {
-				t.operationsPool.BLSToExecutionChangesPool.Insert(mockMsg.SignedBLSToExecutionChange.Signature, mockMsg.SignedBLSToExecutionChange)
+			prepare: func(t *testing.T, testCtx *blsToExecutionChangeTestContext, _ *state.CachingBeaconState, msg *SignedBLSToExecutionChangeForGossip) {
+				testCtx.operationsPool.BLSToExecutionChangesPool.Insert(msg.SignedBLSToExecutionChange.Signature, msg.SignedBLSToExecutionChange)
 			},
-			msg:     mockMsg,
-			wantErr: false, // Silent ignore: returns nil when already in pool
+			wantInPool: true,
 		},
 		{
 			name: "version is less than CapellaVersion",
-			mock: func() {
-				_, st, _ := tests.GetBellatrixRandom()
-				t.syncedData.OnHeadState(st)
+			prepare: func(t *testing.T, testCtx *blsToExecutionChangeTestContext, _ *state.CachingBeaconState, _ *SignedBLSToExecutionChangeForGossip) {
+				_, bellatrixState, _ := tests.GetBellatrixRandom()
+				syncHeadState(t, testCtx.syncedData, bellatrixState)
 			},
-			msg:         mockMsg,
-			wantErr:     true,
-			specificErr: ErrIgnore,
+			wantErr: ErrIgnore,
 		},
 		{
 			name: "unable to retrieve validator",
-			mock: func() {
-				mockStateReader := mockState.NewMockBeaconStateReader(t.gomockCtrl)
-				mockStateReader.EXPECT().Version().Return(clparams.CapellaVersion).AnyTimes()
-				mockStateReader.EXPECT().ValidatorForValidatorIndex(int(mockMsg.SignedBLSToExecutionChange.Message.ValidatorIndex)).Return(nil, errors.New("not found")).AnyTimes()
+			prepare: func(t *testing.T, _ *blsToExecutionChangeTestContext, st *state.CachingBeaconState, msg *SignedBLSToExecutionChangeForGossip) {
+				msg.SignedBLSToExecutionChange.Message.ValidatorIndex = uint64(st.ValidatorLength())
 			},
-			msg:     mockMsg,
-			wantErr: true,
+			wantErrString: "unable to retrieve validator: invalid validator index",
 		},
 		{
 			name: "invalid withdrawal credentials prefix",
-			mock: func() {
-				mockStateReader := mockState.NewMockBeaconStateReader(t.gomockCtrl)
-				mockValidator := solid.NewValidator()
-				mockValidator.SetWithdrawalCredentials([32]byte{1, 1, 1}) // should be equal to BLS_WITHDRAWAL_PREFIX
-				mockStateReader.EXPECT().Version().Return(clparams.CapellaVersion).AnyTimes()
-				mockStateReader.EXPECT().ValidatorForValidatorIndex(int(mockMsg.SignedBLSToExecutionChange.Message.ValidatorIndex)).Return(mockValidator, nil).AnyTimes()
+			prepare: func(t *testing.T, testCtx *blsToExecutionChangeTestContext, st *state.CachingBeaconState, msg *SignedBLSToExecutionChangeForGossip) {
+				wc := matchingWithdrawalCredentials(testCtx.beaconCfg, msg.SignedBLSToExecutionChange.Message.From)
+				wc[0] = byte(testCtx.beaconCfg.ETH1AddressWithdrawalPrefixByte)
+				st.ValidatorSet().SetWithdrawalCredentialForValidatorAtIndex(int(validatorIndex), wc)
+				syncHeadState(t, testCtx.syncedData, st)
 			},
-			msg:     mockMsg,
-			wantErr: true,
+			wantErrString: "invalid withdrawal credentials prefix",
 		},
 		{
 			name: "hashed from is not equal to withdrawal credentials",
-			mock: func() {
-				mockStateReader := mockState.NewMockBeaconStateReader(t.gomockCtrl)
-				mockValidator := solid.NewValidator()
-				mockValidator.SetWithdrawalCredentials([32]byte{0}) // first byte is equal to BLS_WITHDRAWAL_PREFIX
-				mockStateReader.EXPECT().Version().Return(clparams.CapellaVersion).AnyTimes()
-				mockStateReader.EXPECT().ValidatorForValidatorIndex(int(mockMsg.SignedBLSToExecutionChange.Message.ValidatorIndex)).Return(mockValidator, nil).AnyTimes()
+			prepare: func(t *testing.T, testCtx *blsToExecutionChangeTestContext, st *state.CachingBeaconState, _ *SignedBLSToExecutionChangeForGossip) {
+				st.ValidatorSet().SetWithdrawalCredentialForValidatorAtIndex(int(validatorIndex), common.Hash{byte(testCtx.beaconCfg.BLSWithdrawalPrefixByte)})
+				syncHeadState(t, testCtx.syncedData, st)
 			},
-			msg:     mockMsg,
-			wantErr: true,
+			wantErrString: "invalid withdrawal credentials hash",
 		},
-		// {
-		// 	name: "invalid bls signature",
-		// 	mock: func() {
-		// 		mockStateReader := mockState.NewMockBeaconStateReader(t.gomockCtrl)
-		// 		mockValidator := solid.NewValidator()
-		// 		hashedFrom := utils.Sha256(mockMsg.SignedBLSToExecutionChange.Message.From[:])
-		// 		wc := [32]byte{0}
-		// 		copy(wc[1:], hashedFrom[1:])
-		// 		mockValidator.SetWithdrawalCredentials(wc)
-		// 		mockStateReader.EXPECT().Version().Return(clparams.CapellaVersion).AnyTimes()
-		// 		mockStateReader.EXPECT().ValidatorForValidatorIndex(int(mockMsg.SignedBLSToExecutionChange.Message.ValidatorIndex)).Return(mockValidator, nil).AnyTimes()
-		// 		mockStateReader.EXPECT().GenesisValidatorsRoot().Return([32]byte{}).AnyTimes()
-		// 		// bls verify
-		// 		t.gomockCtrl.RecordCall(t.mockFuncs, "ComputeSigningRoot", mockMsg.SignedBLSToExecutionChange.Message, gomock.Any()).Return([32]byte{}, nil).AnyTimes()
-		// 		t.gomockCtrl.RecordCall(t.mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(false, nil).Times(2)
-		// 	},
-		// 	msg:         mockMsg,
-		// 	specificErr: ErrInvalidBlsSignature,
-		// 	wantErr:     true,
-		// },
-		// {
-		// 	name: "pass",
-		// 	mock: func() {
-		// 		mockStateReader := mockState.NewMockBeaconStateReader(t.gomockCtrl)
-		// 		mockValidator := solid.NewValidator()
-		// 		hashedFrom := utils.Sha256(mockMsg.SignedBLSToExecutionChange.Message.From[:])
-		// 		wc := [32]byte{0}
-		// 		copy(wc[1:], hashedFrom[1:])
-		// 		mockValidator.SetWithdrawalCredentials(wc)
-		// 		mockStateReader.EXPECT().Version().Return(clparams.CapellaVersion).AnyTimes()
-		// 		mockStateReader.EXPECT().ValidatorForValidatorIndex(int(mockMsg.SignedBLSToExecutionChange.Message.ValidatorIndex)).Return(mockValidator, nil).AnyTimes()
-		// 		mockStateReader.EXPECT().GenesisValidatorsRoot().Return([32]byte{}).AnyTimes()
-		// 		// bls verify
-		// 		t.gomockCtrl.RecordCall(t.mockFuncs, "ComputeSigningRoot", mockMsg.SignedBLSToExecutionChange.Message, gomock.Any()).Return([32]byte{}, nil).AnyTimes()
-		// 		// update withdrawal credentials
-		// 		mockNewWc := common.Hash{byte(t.beaconCfg.ETH1AddressWithdrawalPrefixByte)}
-		// 		copy(mockNewWc[1:], make([]byte, 11))
-		// 		copy(mockNewWc[12:], mockMsg.SignedBLSToExecutionChange.Message.To[:])
-		// 		t.gomockCtrl.RecordCall(t.mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
-		// 	},
-		// 	msg: mockMsg,
-		// 	// specificErr: ErrInvalidBlsSignature,
-		// 	// wantErr:     true,
-		// },
+		{
+			name: "invalid bls signature",
+			prepare: func(t *testing.T, testCtx *blsToExecutionChangeTestContext, st *state.CachingBeaconState, msg *SignedBLSToExecutionChangeForGossip) {
+				st.ValidatorSet().SetWithdrawalCredentialForValidatorAtIndex(int(validatorIndex), matchingWithdrawalCredentials(testCtx.beaconCfg, msg.SignedBLSToExecutionChange.Message.From))
+				syncHeadState(t, testCtx.syncedData, st)
+				testCtx.gomockCtrl.RecordCall(testCtx.mockFuncs, "ComputeSigningRoot", msg.SignedBLSToExecutionChange.Message, gomock.Any()).Return([32]byte{}, nil).Times(1)
+				testCtx.gomockCtrl.RecordCall(testCtx.mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(false, nil).Times(2)
+			},
+			wantErr: ErrInvalidBlsSignature,
+		},
+		{
+			name: "success",
+			prepare: func(t *testing.T, testCtx *blsToExecutionChangeTestContext, st *state.CachingBeaconState, msg *SignedBLSToExecutionChangeForGossip) {
+				st.ValidatorSet().SetWithdrawalCredentialForValidatorAtIndex(int(validatorIndex), matchingWithdrawalCredentials(testCtx.beaconCfg, msg.SignedBLSToExecutionChange.Message.From))
+				syncHeadState(t, testCtx.syncedData, st)
+				testCtx.gomockCtrl.RecordCall(testCtx.mockFuncs, "ComputeSigningRoot", msg.SignedBLSToExecutionChange.Message, gomock.Any()).Return([32]byte{}, nil).Times(1)
+				testCtx.gomockCtrl.RecordCall(testCtx.mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).Times(1)
+			},
+			wantInPool: true,
+		},
 	}
 
 	for _, tt := range tests {
-		log.Printf("Running test case: %s", tt.name)
-		t.SetupTest()
-		tt.mock()
-		err := t.service.ProcessMessage(context.Background(), nil, tt.msg)
-		time.Sleep(10 * time.Millisecond)
-		if tt.wantErr {
-			t.Require().Error(err)
-			fmt.Printf("Error: %v\n", err)
-			if tt.specificErr != nil {
-				t.Require().Equal(tt.specificErr, err)
-			}
-		} else {
-			t.Require().NoError(err)
-		}
-		t.gomockCtrl.Satisfied()
-	}
-}
+		t.Run(tt.name, func(t *testing.T) {
+			testCtx, st := setupBLSToExecutionChangeTest(t)
+			msg := newSignedBLSToExecutionChangeForGossip(validatorIndex)
 
-func TestBlsToExecutionChangeTestSuite(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("fix me on win please")
+			tt.prepare(t, testCtx, st, msg)
+
+			err := testCtx.service.ProcessMessage(context.Background(), nil, msg)
+			if tt.wantErr != nil {
+				require.ErrorIs(t, err, tt.wantErr)
+			} else if tt.wantErrString != "" {
+				require.ErrorContains(t, err, tt.wantErrString)
+			} else {
+				require.NoError(t, err)
+			}
+			require.Equal(t, tt.wantInPool, testCtx.operationsPool.BLSToExecutionChangesPool.Has(msg.SignedBLSToExecutionChange.Signature))
+			require.True(t, testCtx.gomockCtrl.Satisfied())
+		})
 	}
-	suite.Run(t, new(blsToExecutionChangeTestSuite))
 }
