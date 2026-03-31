@@ -73,13 +73,14 @@ const (
 	BuilderPendingWithdrawalsLeafIndex    StateLeafIndex = 42
 	LatestBlockHashLeafIndex              StateLeafIndex = 43
 	PayloadExpectedWithdrawalsLeafIndex   StateLeafIndex = 44
+	PtcWindowLeafIndex                    StateLeafIndex = 45
 )
 
 const (
 	StateLeafSizeDeneb   = 32
 	StateLeafSizeElectra = 37
 	StateLeafSizeFulu    = 38
-	StateLeafSizeGloas   = 45
+	StateLeafSizeGloas   = 46
 
 	StateLeafSizeLatest = StateLeafSizeGloas
 

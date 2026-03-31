@@ -932,6 +932,45 @@ func (c *MockBeaconStateComputeNextSyncCommitteeCall) DoAndReturn(f func() (*sol
 	return c
 }
 
+// ComputePTC mocks base method.
+func (m *MockBeaconState) ComputePTC(slot uint64) ([]uint64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ComputePTC", slot)
+	ret0, _ := ret[0].([]uint64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ComputePTC indicates an expected call of ComputePTC.
+func (mr *MockBeaconStateMockRecorder) ComputePTC(slot any) *MockBeaconStateComputePTCCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ComputePTC", reflect.TypeOf((*MockBeaconState)(nil).ComputePTC), slot)
+	return &MockBeaconStateComputePTCCall{Call: call}
+}
+
+// MockBeaconStateComputePTCCall wrap *gomock.Call
+type MockBeaconStateComputePTCCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateComputePTCCall) Return(arg0 []uint64, arg1 error) *MockBeaconStateComputePTCCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateComputePTCCall) Do(f func(uint64) ([]uint64, error)) *MockBeaconStateComputePTCCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateComputePTCCall) DoAndReturn(f func(uint64) ([]uint64, error)) *MockBeaconStateComputePTCCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // CurrentEpochAttestations mocks base method.
 func (m *MockBeaconState) CurrentEpochAttestations() *solid.ListSSZ[*solid.PendingAttestation] {
 	m.ctrl.T.Helper()
@@ -2453,6 +2492,45 @@ func (c *MockBeaconStateGetNextWithdrawalBuilderIndexCall) DoAndReturn(f func() 
 	return c
 }
 
+// GetPTC mocks base method.
+func (m *MockBeaconState) GetPTC(slot uint64) ([]uint64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetPTC", slot)
+	ret0, _ := ret[0].([]uint64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetPTC indicates an expected call of GetPTC.
+func (mr *MockBeaconStateMockRecorder) GetPTC(slot any) *MockBeaconStateGetPTCCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPTC", reflect.TypeOf((*MockBeaconState)(nil).GetPTC), slot)
+	return &MockBeaconStateGetPTCCall{Call: call}
+}
+
+// MockBeaconStateGetPTCCall wrap *gomock.Call
+type MockBeaconStateGetPTCCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateGetPTCCall) Return(arg0 []uint64, arg1 error) *MockBeaconStateGetPTCCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateGetPTCCall) Do(f func(uint64) ([]uint64, error)) *MockBeaconStateGetPTCCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateGetPTCCall) DoAndReturn(f func(uint64) ([]uint64, error)) *MockBeaconStateGetPTCCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // GetPayloadExpectedWithdrawals mocks base method.
 func (m *MockBeaconState) GetPayloadExpectedWithdrawals() *solid.ListSSZ[*cltypes.Withdrawal] {
 	m.ctrl.T.Helper()
@@ -2639,6 +2717,44 @@ func (c *MockBeaconStateGetProposerLookaheadCall) Do(f func() solid.Uint64Vector
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateGetProposerLookaheadCall) DoAndReturn(f func() solid.Uint64VectorSSZ) *MockBeaconStateGetProposerLookaheadCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// GetPtcWindow mocks base method.
+func (m *MockBeaconState) GetPtcWindow() *solid.VectorSSZ[solid.Uint64VectorSSZ] {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetPtcWindow")
+	ret0, _ := ret[0].(*solid.VectorSSZ[solid.Uint64VectorSSZ])
+	return ret0
+}
+
+// GetPtcWindow indicates an expected call of GetPtcWindow.
+func (mr *MockBeaconStateMockRecorder) GetPtcWindow() *MockBeaconStateGetPtcWindowCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPtcWindow", reflect.TypeOf((*MockBeaconState)(nil).GetPtcWindow))
+	return &MockBeaconStateGetPtcWindowCall{Call: call}
+}
+
+// MockBeaconStateGetPtcWindowCall wrap *gomock.Call
+type MockBeaconStateGetPtcWindowCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateGetPtcWindowCall) Return(arg0 *solid.VectorSSZ[solid.Uint64VectorSSZ]) *MockBeaconStateGetPtcWindowCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateGetPtcWindowCall) Do(f func() *solid.VectorSSZ[solid.Uint64VectorSSZ]) *MockBeaconStateGetPtcWindowCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateGetPtcWindowCall) DoAndReturn(f func() *solid.VectorSSZ[solid.Uint64VectorSSZ]) *MockBeaconStateGetPtcWindowCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -5092,6 +5208,42 @@ func (c *MockBeaconStateSetProposerLookaheadCall) Do(f func(solid.Uint64VectorSS
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateSetProposerLookaheadCall) DoAndReturn(f func(solid.Uint64VectorSSZ)) *MockBeaconStateSetProposerLookaheadCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// SetPtcWindow mocks base method.
+func (m *MockBeaconState) SetPtcWindow(ptcWindow *solid.VectorSSZ[solid.Uint64VectorSSZ]) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetPtcWindow", ptcWindow)
+}
+
+// SetPtcWindow indicates an expected call of SetPtcWindow.
+func (mr *MockBeaconStateMockRecorder) SetPtcWindow(ptcWindow any) *MockBeaconStateSetPtcWindowCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetPtcWindow", reflect.TypeOf((*MockBeaconState)(nil).SetPtcWindow), ptcWindow)
+	return &MockBeaconStateSetPtcWindowCall{Call: call}
+}
+
+// MockBeaconStateSetPtcWindowCall wrap *gomock.Call
+type MockBeaconStateSetPtcWindowCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateSetPtcWindowCall) Return() *MockBeaconStateSetPtcWindowCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateSetPtcWindowCall) Do(f func(*solid.VectorSSZ[solid.Uint64VectorSSZ])) *MockBeaconStateSetPtcWindowCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateSetPtcWindowCall) DoAndReturn(f func(*solid.VectorSSZ[solid.Uint64VectorSSZ])) *MockBeaconStateSetPtcWindowCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
