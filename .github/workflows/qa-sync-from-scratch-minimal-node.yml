@@ -140,8 +140,18 @@ jobs:
       actions: read
     runs-on: ubuntu-latest
     steps:
+      - name: Get failed job IDs
+        id: failed_jobs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          failed_job_ids=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
+            --jq '[.jobs[] | select(.conclusion == "failure") | .id] | join(",")')
+          echo "ids=$failed_job_ids" >> "$GITHUB_OUTPUT"
+
       - name: AI failure analysis
         id: inference
+        if: steps.failed_jobs.outputs.ids != ''
         uses: actions/ai-inference@v2
         with:
           enable-github-mcp: true
@@ -151,9 +161,10 @@ jobs:
             highlight the most relevant error messages, and suggest what to investigate.
             The repository is: ${{ github.repository }}
             The workflow run ID is: ${{ github.run_id }}
+            The failed job IDs are: ${{ steps.failed_jobs.outputs.ids }}
 
       - name: Print AI failure analysis
-        if: steps.inference.outcome == 'success'
+        if: steps.failed_jobs.outputs.ids != '' && steps.inference.outcome == 'success'
         run: |
           echo "## AI Failure Analysis" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
