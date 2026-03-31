@@ -87,6 +87,11 @@ type parallelExecutor struct {
 	rws            *exec.ResultsQueue
 	workerCount    int
 	blockExecutors map[uint64]*blockExecutor
+	// applyResultsCh and commitResultsCh are set before execLoop starts.
+	// The exec loop closes them on exit to signal the apply loop and
+	// calculator to drain.
+	applyResultsCh  chan applyResult
+	commitResultsCh chan applyResult
 	// accumulator for txpool state-diff notifications; set before execLoop
 	// starts so that AuRa system-call nonce changes are emitted per block.
 	accumulator *shards.Accumulator
@@ -152,6 +157,10 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	// Skip step-boundary commitment — the calculator handles this.
 	pe.rs.StateV3.SetSkipStepBoundaryCommitment(true)
 	defer pe.rs.StateV3.SetSkipStepBoundaryCommitment(false)
+
+	// Store channels on pe so execLoop and triggerBatchCommitment can access them.
+	pe.applyResultsCh = applyResults
+	pe.commitResultsCh = commitResults
 
 	// Start the commitment calculator.
 	calculator, err := newCommitmentCalculator(executorContext, pe.rs.Domains(), pe.cfg.db, pe.logPrefix, commitResults, rootResults)
@@ -323,7 +332,10 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 						if err := pe.getPostValidator().Process(applyResult.BlockGasUsed, applyResult.BlobGasUsed, checkReceipts, applyResult.Receipts,
 							lastHeader, b.Transactions(), pe.cfg.chainConfig, pe.logger); err != nil {
-							dumpTxIODebug(applyResult.BlockNum, applyResult.TxIO)
+							// Error may be from THIS block (sync) or a PREVIOUS
+							// block (async, cached in validator). Dump both.
+							dumpGasMismatchDiag(applyResult, pe.logger)
+							dumpGasMismatchDiag(&lastBlockResult, pe.logger)
 							return fmt.Errorf("%w, block=%d, %v", rules.ErrInvalidBlock, applyResult.BlockNum, err) //same as in stage_exec.go
 						}
 
@@ -350,6 +362,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					// Post-execution validation (receipts, BAL) runs here.
 					err = pe.getPostValidator().Wait()
 					if err != nil {
+						dumpGasMismatchDiag(applyResult, pe.logger)
 						return err
 					}
 
@@ -492,7 +505,18 @@ func (pe *parallelExecutor) LogCommitments(commitStart time.Time, committedBlock
 	}
 }
 
-// collectCommitmentResult drains the commitment calculator, verifies the root
+// triggerBatchCommitment sends a commitComputeRequest to the calculator so it
+// computes the batch commitment before the exec loop exits and closes channels.
+func (pe *parallelExecutor) triggerBatchCommitment(ctx context.Context) {
+	if pe.commitResultsCh == nil {
+		return
+	}
+	select {
+	case pe.commitResultsCh <- &commitComputeRequest{}:
+	case <-ctx.Done():
+	}
+}
+
 func (pe *parallelExecutor) LogComplete(stepsInDb float64) {
 	pe.progress.LogComplete(pe.rs.StateV3, pe, stepsInDb)
 	if domainMetrics := pe.domains().LogMetrics(); len(domainMetrics) > 0 {
@@ -516,16 +540,24 @@ func (pe *parallelExecutor) resetWorkers(ctx context.Context, rs *state.StateV3B
 }
 
 func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
-	// The exec loop is the owner of shutdown sequencing. It handles
-	// ctx.Done via sendResult (which returns ctx.Err on cancelled
-	// context). On exit — whether from batch full, context cancel,
-	// error, or natural completion — executeBlocks' deferred close
-	// closes applyResults and commitResults, causing the apply loop
-	// and calculator to drain and exit.
+	// The exec loop is the owner of shutdown sequencing. On exit it
+	// closes commitResults then applyResults, causing the calculator
+	// and apply loop to drain and exit.
 	//
 	// Note: pe.applyTx is the stageloop's rwTx (externally supplied).
 	// Do NOT rollback it here — the stageloop owns its lifecycle.
 
+	defer func() {
+		// Close channels so apply loop and calculator drain and exit.
+		if pe.commitResultsCh != nil {
+			close(pe.commitResultsCh)
+			pe.commitResultsCh = nil
+		}
+		if pe.applyResultsCh != nil {
+			close(pe.applyResultsCh)
+			pe.applyResultsCh = nil
+		}
+	}()
 	defer func() {
 		if rec := recover(); rec != nil {
 			pe.logger.Warn("["+pe.logPrefix+"] exec loop panic", "rec", rec, "stack", dbg.Stack())
@@ -644,6 +676,13 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				// maxBlockNum and Exhausted are handled by natural exit
 				// (no more blocks to process).
 				if pe.rs.SizeEstimateBeforeCommitment() > pe.cfg.batchSize.Bytes() {
+					pe.triggerBatchCommitment(ctx)
+					return nil
+				}
+
+				// STOP_AFTER_BLOCK: trigger commitment and exit cleanly.
+				if dbg.StopAfterBlock > 0 && blockResult.BlockNum >= dbg.StopAfterBlock {
+					pe.triggerBatchCommitment(ctx)
 					return nil
 				}
 			}
@@ -2807,4 +2846,59 @@ func resolveStorageWrites(writes state.VersionedWrites, vm *state.VersionMap, tx
 		filtered = append(filtered, w)
 	}
 	return filtered
+}
+
+// dumpGasMismatchDiag identifies which TX(s) have wrong gas and dumps
+// diagnostic data for the divergent TX and its predecessors.
+func dumpGasMismatchDiag(br *blockResult, logger log.Logger) {
+	if br == nil || br.Header == nil || br.TxIO == nil {
+		return
+	}
+	headerGas := br.Header.GasUsed
+	execGas := br.BlockGasUsed
+	if execGas == headerGas {
+		return
+	}
+
+	fmt.Printf("\n=== GAS MISMATCH DIAGNOSTIC block=%d ===\n", br.BlockNum)
+	fmt.Printf("header=%d exec=%d diff=%+d txCount=%d\n",
+		headerGas, execGas, int64(execGas)-int64(headerGas), len(br.Receipts))
+
+	// Summary: all TXs with gas + incarnation
+	fmt.Printf("\nALL TX SUMMARY:\n")
+	for i, r := range br.Receipts {
+		inc := br.TxIO.ReadSetIncarnation(i)
+		fmt.Printf("  tx[%d] gas=%d inc=%d status=%d\n", i, r.GasUsed, inc, r.Status)
+	}
+
+	// Dump full read/write sets for the first few TXs and any retried TX.
+	limit := min(5, len(br.Receipts))
+	for i := 0; i < len(br.Receipts); i++ {
+		inc := br.TxIO.ReadSetIncarnation(i)
+		if i >= limit && inc == 0 {
+			continue
+		}
+
+		var txHash string
+		if i < len(br.Txs) {
+			txHash = br.Txs[i].Hash().Hex()
+		}
+		fmt.Printf("\nGAS_DIAG tx[%d] inc=%d gas=%d status=%d hash=%s\n",
+			i, inc, br.Receipts[i].GasUsed, br.Receipts[i].Status, txHash)
+
+		readSet := br.TxIO.ReadSet(i)
+		fmt.Printf("  READS (%d):\n", readSet.Len())
+		readSet.Scan(func(vr *state.VersionedRead) bool {
+			fmt.Printf("    %s\n", vr.String())
+			return true
+		})
+
+		writeSet := br.TxIO.WriteSet(i)
+		fmt.Printf("  WRITES (%d):\n", len(writeSet))
+		for _, vw := range writeSet {
+			fmt.Printf("    %s\n", vw.String())
+		}
+	}
+	fmt.Printf("=== END DIAGNOSTIC ===\n\n")
+	os.Stdout.Sync()
 }

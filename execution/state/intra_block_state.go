@@ -1102,19 +1102,22 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readA
 		return nil, UnknownSource, UnknownVersion, err
 	}
 
-	if cversion.TxIndex > readVersion.TxIndex || (cversion.TxIndex == readVersion.TxIndex && cversion.Incarnation >= readVersion.Incarnation) {
-		if codeHash != account.CodeHash {
-			if account == readAccount {
-				account = &accounts.Account{}
-				account.Copy(readAccount)
-			}
-			account.CodeHash = codeHash
+	// Always apply CodeHash from versionMap if it differs from the account
+	// read. The version check (cversion > readVersion) can skip the update
+	// when both AddressPath and CodeHashPath were written by the same TX,
+	// leaving account.CodeHash stale. This causes the revert-to-original
+	// optimisation in SetCode to incorrectly delete CodePath writes.
+	if codeHash != account.CodeHash {
+		if account == readAccount {
+			account = &accounts.Account{}
+			account.Copy(readAccount)
 		}
-		if cversion.TxIndex > version.TxIndex || (cversion.TxIndex == version.TxIndex && cversion.Incarnation > version.Incarnation) {
-			version = cversion
-			if csource != source {
-				source = csource
-			}
+		account.CodeHash = codeHash
+	}
+	if cversion.TxIndex > version.TxIndex || (cversion.TxIndex == version.TxIndex && cversion.Incarnation > version.Incarnation) {
+		version = cversion
+		if csource != source {
+			source = csource
 		}
 	}
 
@@ -1212,16 +1215,31 @@ func (sdb *IntraBlockState) SetCode(addr accounts.Address, code []byte) error {
 		return err
 	}
 	codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
+	// Capture the current CodeHash BEFORE SetCode modifies it.
+	// In parallel execution, data.CodeHash was refreshed from the
+	// versionMap by getStateObject/refreshVersionedAccount and reflects
+	// the latest committed state (not the pre-block domain value in
+	// original.CodeHash). This is the correct base for the
+	// revert-to-original optimisation.
+	baseCodeHash := stateObject.data.CodeHash
 	written, err := stateObject.SetCode(codeHash, code, !sdb.hasWrite(addr, CodePath, accounts.NilKey))
 	if err != nil {
 		return err
 	}
 	if written {
-		if codeHash == stateObject.original.CodeHash {
+		if codeHash == baseCodeHash {
+			if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
+				fmt.Printf("%d (%d.%d) SetCode SKIP (matches base) %x codeHash=%x baseHash=%x codeLen=%d\n",
+					sdb.blockNum, sdb.txIndex, sdb.version, addr, codeHash, baseCodeHash, len(code))
+			}
 			sdb.versionedWrites.Delete(addr, AccountKey{Path: CodePath})
 			sdb.versionedWrites.Delete(addr, AccountKey{Path: CodeHashPath})
 			sdb.versionedWrites.Delete(addr, AccountKey{Path: CodeSizePath})
 		} else {
+			if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
+				fmt.Printf("%d (%d.%d) SetCode WRITE %x codeHash=%x baseHash=%x codeLen=%d\n",
+					sdb.blockNum, sdb.txIndex, sdb.version, addr, codeHash, baseCodeHash, len(code))
+			}
 			versionWritten(sdb, addr, CodePath, accounts.NilKey, code)
 			versionWritten(sdb, addr, CodeHashPath, accounts.NilKey, codeHash)
 			versionWritten(sdb, addr, CodeSizePath, accounts.NilKey, len(code))
