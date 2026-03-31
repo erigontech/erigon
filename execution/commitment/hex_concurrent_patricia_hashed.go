@@ -33,8 +33,6 @@ func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) {
 
 	hph.mountedNib = nibble
 	hph.mounted = true
-	root.mountedTries = append(root.mountedTries, hph) // TODO clean up
-
 	for row := 0; row <= hph.activeRows; row++ {
 		for nib := 0; nib < len(hph.grid[row]); nib++ {
 			hph.grid[row][nib] = root.grid[row][nib]
@@ -63,8 +61,8 @@ func (p *ConcurrentPatriciaHashed) RootTrie() *HexPatriciaHashed {
 	return p.root
 }
 
-func (p *ConcurrentPatriciaHashed) foldNibble(nib int) error {
-	c, err := p.mounts[nib].foldMounted(nib)
+func (p *ConcurrentPatriciaHashed) foldNibble(ctx context.Context, nib int) error {
+	c, err := p.mounts[nib].foldMounted(ctx, nib)
 	if err != nil {
 		return err
 	}
@@ -112,13 +110,16 @@ func (p *ConcurrentPatriciaHashed) foldNibble(nib int) error {
 	return nil
 }
 
-func (p *ConcurrentPatriciaHashed) unfoldRoot(ctxFactory TrieContextFactory) error {
+func (p *ConcurrentPatriciaHashed) unfoldRoot(ctx context.Context, ctxFactory TrieContextFactory) error {
 	if p.root.trace {
 		fmt.Printf("=============ROOT unfold============\n")
 	}
 	// if p.root.rootPresent && p.root.root.hashedExtLen == 0 { // if root has no extension, we have to unfold
 	zero := []byte{0}
 	for unfolding := p.root.needUnfolding(zero); unfolding > 0; unfolding = p.root.needUnfolding(zero) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err := p.root.unfold(zero, unfolding); err != nil {
 			return fmt.Errorf("unfold: %w", err)
 		}
@@ -210,13 +211,17 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 		return nil, errors.New("sortPerNibble disabled")
 	}
 
-	if err := pph.unfoldRoot(trieCtxFactory); err != nil {
+	if err := pph.unfoldRoot(ctx, trieCtxFactory); err != nil {
 		return nil, err
 	}
 
 	clear(t.keys)
 
-	g, ctx := errgroup.WithContext(ctx)
+	// Use a derived context for the errgroup goroutines only.
+	// The original ctx is preserved for the root fold loop below, because
+	// errgroup cancels the derived context after g.Wait() returns, and we
+	// must not see a spurious context.Canceled on the subsequent root fold.
+	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(16)
 
 	for n := 0; n < len(t.nibbles); n++ {
@@ -243,7 +248,7 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 					return fmt.Errorf("followAndUpdate[%x]: %w", ni, err)
 				}
 				return nil
-			}, etl.TransformArgs{Quit: ctx.Done()})
+			}, etl.TransformArgs{Quit: gctx.Done()})
 			if err != nil {
 				return err
 			}
@@ -253,7 +258,7 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 			if pph.mounts[ni].trace {
 				fmt.Printf("NOW FOLDING nib [%x] #%d d=%d\n", ni, cnt, phnib.depths[0])
 			}
-			return pph.foldNibble(ni)
+			return pph.foldNibble(gctx, ni)
 		})
 	}
 	if err := g.Wait(); err != nil {
@@ -269,6 +274,9 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 	}
 
 	for pph.root.activeRows > 0 {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if err := pph.root.fold(); err != nil {
 			return nil, err
 		}
