@@ -1,11 +1,12 @@
-# epbs-devnet-1: EIP-7732 ePBS / GLOAS devnet (minimal preset)
+# epbs-devnet-1: EIP-7732 ePBS / GLOAS devnet (mainnet preset)
 name: epbs-devnet-1
-description: EIP-7732 ePBS (enshrined Proposer-Builder Separation) / GLOAS — minimal preset
-branch: feature/caplin_gloas
+description: EIP-7732 ePBS (enshrined Proposer-Builder Separation) / GLOAS — mainnet preset
+branch: feature/caplin_gloas_devnet1
 
 # Network
-chain_id: 7055777153
-genesis_timestamp: 0  # TBD — set by ethpandaops at launch
+chain_id: 7070339337
+genesis_timestamp: 1774958400  # MIN_GENESIS_TIME 1774958340 + GENESIS_DELAY 60
+amsterdam_timestamp: 1774960320  # EL fork time for GLOAS
 
 # CL architecture
 embedded_cl: true   # Caplin (single process, no external CL)
@@ -29,7 +30,7 @@ genesis_ssz_url: ${config_base}/genesis.ssz
 enodes_url: ${config_base}/enodes.txt
 bootnodes_url: ${config_base}/bootstrap_nodes.txt
 
-# Port assignments (offset +300)
+# Port assignments (offset +300 to avoid conflicts with devnet-0)
 port_offset: 300
 el_http: 8845
 el_authrpc: 8851
@@ -66,18 +67,20 @@ extra_cl_flags: >-
 # Process management
 stop_command: pkill -f "datadir.*epbs-devnet-1/erigon-data"
 
-# --- Minimal Preset Notes ---
-# epbs-devnet-1 uses the minimal preset (PRESET_BASE: minimal).
-# Key differences from mainnet:
-#   SLOTS_PER_EPOCH: 8 (vs 32)
-#   EPOCHS_PER_HISTORICAL_VECTOR: 64 (vs 65536)
-#   SLOTS_PER_HISTORICAL_ROOT: 64 (vs 8192)
-#   EPOCHS_PER_SLASHINGS_VECTOR: 64 (vs 8192)
-#   MIN_SEED_LOOKAHEAD: 1 (same)
-#   GENESIS_DELAY: 20
-#   GLOAS_FORK_EPOCH: 1 (fork at epoch 1, i.e. slot 8)
+# --- Mainnet Preset Notes ---
+# epbs-devnet-1 uses the mainnet preset (PRESET_BASE: mainnet).
+# Key parameters:
+#   SLOTS_PER_EPOCH: 32
+#   SECONDS_PER_SLOT: 12
+#   MIN_GENESIS_ACTIVE_VALIDATOR_COUNT: 2000
+#   GENESIS_DELAY: 60
+#   GLOAS_FORK_EPOCH: 5 (fork at epoch 5, i.e. slot 160)
+#   All prior forks (Altair through Fulu): epoch 0
+#   Heze / EIP7928: disabled (epoch max uint64)
+#   Deposit contract: 0x00000000219ab540356cBB839Cbe05303d7705Fa
+#   Genesis validators root: 0x2a4a6c8a454f151f5a5d1490bcdc3ff44ac3ea76ac70b3c670562a0018b9a7ff
 #
-# ptc_window size under minimal: (2 + MIN_SEED_LOOKAHEAD) * SLOTS_PER_EPOCH = 3 * 8 = 24 slots
+# ptc_window size: (2 + MIN_SEED_LOOKAHEAD) * SLOTS_PER_EPOCH = 3 * 32 = 96 slots
 #
 # The ethpandaops config.yaml for devnet-1 provides all these values.
 # Caplin loads them via --caplin.custom-config which calls CustomConfig(),
