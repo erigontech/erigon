@@ -753,7 +753,7 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 	if version >= clparams.CapellaVersion && !s.isWithdrawalsPresenceValid(timestamp, payloadAttributes.Withdrawals) {
-		return nil, &engine_helpers.InvalidPayloadAttributesErr
+		return nil, &rpc.InvalidParamsError{Message: "missing or unexpected withdrawals for payload attributes"}
 	}
 	if version >= clparams.GloasVersion && payloadAttributes.SlotNumber == nil {
 		return nil, &engine_helpers.InvalidPayloadAttributesErr // SlotNumber required for Glamsterdam (EIP-7843)
