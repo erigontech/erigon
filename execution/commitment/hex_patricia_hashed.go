@@ -1801,23 +1801,10 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int16) error {
 	}
 
 	// CellTypeHash, CellTypeAccount, CellTypeStorage, CellTypeEmpty
-	var nibble uint8
-	var copyLen int16
-
 	lowest := min(unfolding, upCell.hashedExtLen)
 	depth = upDepth + lowest
-	copyLen = lowest - 1
-	nibble = upCell.hashedExtension[copyLen]
-
-	//if upCell.hashedExtLen >= unfolding {
-	//	depth = upDepth + unfolding
-	//	nibble = upCell.hashedExtension[unfolding-1]
-	//	copyLen = unfolding - 1
-	//} else {
-	//	depth = upDepth + upCell.hashedExtLen
-	//	nibble = upCell.hashedExtension[upCell.hashedExtLen-1]
-	//	copyLen = upCell.hashedExtLen - 1
-	//}
+	copyLen := int16(lowest - 1)
+	nibble := uint8(upCell.hashedExtension[copyLen])
 
 	if touched {
 		hph.touchMap[row] = uint16(1) << nibble
