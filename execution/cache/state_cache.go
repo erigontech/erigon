@@ -67,8 +67,8 @@ func NewDefaultStateCache() *StateCache {
 }
 
 // Get retrieves data for the given domain and key.
-// Returns (nil, true) for keys cached as deleted (empty value),
-// and (nil, false) for keys not present in the cache.
+// Returns (value, true) on cache hit — including (nil, true) for deleted keys —
+// and (nil, false) on cache miss.
 func (c *StateCache) Get(domain kv.Domain, key []byte) ([]byte, bool) {
 	cache := c.caches[domain]
 	if cache == nil {
