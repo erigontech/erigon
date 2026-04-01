@@ -24,6 +24,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/gossip"
@@ -67,6 +68,7 @@ type payloadAttestationService struct {
 	forkchoiceStore forkchoice.ForkChoiceStorage
 	ethClock        eth_clock.EthereumClock
 	netCfg          *clparams.NetworkConfig
+	emitters        *beaconevents.EventEmitter
 
 	// Cache to track seen attestations: (slot, validatorIndex) -> struct{}
 	seenAttestationsCache *lru.Cache[seenPayloadAttestationKey, struct{}]
@@ -84,6 +86,7 @@ func NewPayloadAttestationService(
 	forkchoiceStore forkchoice.ForkChoiceStorage,
 	ethClock eth_clock.EthereumClock,
 	netCfg *clparams.NetworkConfig,
+	emitters *beaconevents.EventEmitter,
 ) PayloadAttestationService {
 	seenCache, err := lru.New[seenPayloadAttestationKey, struct{}]("seen_payload_attestations", seenPayloadAttestationCacheSize)
 	if err != nil {
@@ -93,6 +96,7 @@ func NewPayloadAttestationService(
 		forkchoiceStore:       forkchoiceStore,
 		ethClock:              ethClock,
 		netCfg:                netCfg,
+		emitters:              emitters,
 		seenAttestationsCache: seenCache,
 		pendingCond:           sync.NewCond(&sync.Mutex{}),
 	}
@@ -170,6 +174,9 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 
 	// Mark as seen AFTER successful validation
 	s.seenAttestationsCache.Add(seenKey, struct{}{})
+
+	// Emit SSE event for payload_attestation_message [New in Gloas:EIP7732]
+	s.emitters.Operation().SendPayloadAttestationMessage(msg)
 
 	log.Debug("Processed payload attestation message via gossip",
 		"slot", slot,
