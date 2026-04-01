@@ -67,16 +67,14 @@ func NewDefaultStateCache() *StateCache {
 }
 
 // Get retrieves data for the given domain and key.
+// Returns (nil, true) for keys cached as deleted (empty value),
+// and (nil, false) for keys not present in the cache.
 func (c *StateCache) Get(domain kv.Domain, key []byte) ([]byte, bool) {
 	cache := c.caches[domain]
 	if cache == nil {
 		return nil, false
 	}
-	v, ok := cache.Get(key)
-	if len(v) == 0 {
-		return nil, false
-	}
-	return v, ok
+	return cache.Get(key)
 }
 
 // Put stores data for the given domain and key.
@@ -89,7 +87,12 @@ func (c *StateCache) Put(domain kv.Domain, key []byte, value []byte) {
 		return
 	}
 	if len(value) == 0 {
-		cache.Delete(key)
+		// Store an empty (non-nil) sentinel so that Get returns ([]byte{}, true)
+		// for deleted keys, distinguishing them from keys not in the cache.
+		// Without this, a DomainDel followed by a read in a later transaction
+		// would miss the cache and fall through to the DB, returning the stale
+		// pre-delete value.
+		cache.Put(key, []byte{})
 		return
 	}
 	cache.Put(key, common.Copy(value))
