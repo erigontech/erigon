@@ -476,3 +476,5 @@ tool (
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc
 	google.golang.org/protobuf/cmd/protoc-gen-go
 )
+
+replace github.com/crate-crypto/go-eth-kzg => github.com/erigontech/go-eth-kzg v0.0.0-20260401161010-070339460d07
