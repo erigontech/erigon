@@ -86,15 +86,6 @@ func (c *StateCache) Put(domain kv.Domain, key []byte, value []byte) {
 	if domain == kv.CommitmentDomain && bytes.Equal(key, commitmentdb.KeyCommitmentState) {
 		return
 	}
-	if len(value) == 0 {
-		// Store an empty (non-nil) sentinel so that Get returns ([]byte{}, true)
-		// for deleted keys, distinguishing them from keys not in the cache.
-		// Without this, a DomainDel followed by a read in a later transaction
-		// would miss the cache and fall through to the DB, returning the stale
-		// pre-delete value.
-		cache.Put(key, []byte{})
-		return
-	}
 	cache.Put(key, common.Copy(value))
 }
 
