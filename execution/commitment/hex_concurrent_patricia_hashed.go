@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -13,6 +14,11 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
 )
+
+// ParallelProcessCount tracks how many times ConcurrentPatriciaHashed.Process
+// took the parallel (ParallelHashSort) path. Used by integration tests to verify
+// that concurrent mode was actually exercised.
+var ParallelProcessCount atomic.Int64
 
 // if nibble set is -1 then subtrie is not mounted to the nibble, but limited by depth: eg do not fold mounted trie above depth 63
 func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) {
@@ -238,6 +244,7 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 			trieCtx, trieCtxClose := trieCtxFactory()
 			defer trieCtxClose()
 			phnib.ResetContext(trieCtx)
+
 			cnt := 0
 			err := nib.Load(nil, "", func(hashedKey, plainKey []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 				cnt++
@@ -256,7 +263,7 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 				return nil
 			}
 			if pph.mounts[ni].trace {
-				fmt.Printf("NOW FOLDING nib [%x] #%d d=%d\n", ni, cnt, phnib.depths[0])
+				fmt.Printf("ConcurrentTrie: folding [%2x] keys %d maxDepth %d\n", ni, cnt, phnib.depths[0])
 			}
 			return pph.foldNibble(gctx, ni)
 		})
@@ -315,6 +322,7 @@ func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, updates *Updates
 	}
 	switch updates.IsConcurrentCommitment() {
 	case true:
+		ParallelProcessCount.Add(1)
 		rootHash, err = updates.ParallelHashSort(ctx, p, warmup.CtxFactory)
 		if err != nil {
 			return nil, err
