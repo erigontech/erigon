@@ -34,9 +34,9 @@ var (
 type PayloadStatus uint64
 
 const (
-	PayloadStatusPending PayloadStatus = 0
-	PayloadStatusEmpty   PayloadStatus = 1
-	PayloadStatusFull    PayloadStatus = 2
+	PayloadStatusPending PayloadStatus = 0 // PAYLOAD_PENDING per EIP-7732 fork-choice spec
+	PayloadStatusFull    PayloadStatus = 1 // PAYLOAD_FULL per EIP-7732 fork-choice spec
+	PayloadStatusEmpty   PayloadStatus = 2 // PAYLOAD_EMPTY per EIP-7732 fork-choice spec
 )
 
 // PayloadAttestationSSZSize is the fixed SSZ encoding size of PayloadAttestation:

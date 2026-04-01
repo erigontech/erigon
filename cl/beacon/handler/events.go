@@ -40,7 +40,10 @@ var validTopics = map[event.EventTopic]struct{}{
 	event.OpBlsToExecution:    {},
 	event.OpContributionProof: {},
 	event.OpProposerSlashing:  {},
-	event.OpVoluntaryExit:     {},
+	event.OpVoluntaryExit:              {},
+	event.OpPayloadAttestationMessage:  {},
+	event.OpExecutionPayloadBid:        {},
+	event.OpExecutionPayloadAvailable:  {},
 	// state events
 	event.StateBlock:                       {},
 	event.StateBlockGossip:                 {},

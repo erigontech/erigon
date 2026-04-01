@@ -23,6 +23,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -70,6 +71,7 @@ type executionPayloadBidService struct {
 	ethClock          eth_clock.EthereumClock
 	beaconCfg         *clparams.BeaconChainConfig
 	epbsPool          *pool.EpbsPool
+	emitters          *beaconevents.EventEmitter
 
 	seenCache *lru.Cache[seenBidKey, struct{}]
 
@@ -88,6 +90,7 @@ func NewExecutionPayloadBidService(
 	ethClock eth_clock.EthereumClock,
 	beaconCfg *clparams.BeaconChainConfig,
 	epbsPool *pool.EpbsPool,
+	emitters *beaconevents.EventEmitter,
 ) ExecutionPayloadBidService {
 	seenCache, err := lru.New[seenBidKey, struct{}]("seen_execution_payload_bids", seenBidCacheSize)
 	if err != nil {
@@ -99,6 +102,7 @@ func NewExecutionPayloadBidService(
 		ethClock:          ethClock,
 		beaconCfg:         beaconCfg,
 		epbsPool:          epbsPool,
+		emitters:          emitters,
 		seenCache:         seenCache,
 		pendingCond:       sync.NewCond(&sync.Mutex{}),
 	}
@@ -262,6 +266,9 @@ func (s *executionPayloadBidService) validateAndStoreBid(
 	// All checks passed — mark as seen and store
 	s.seenCache.Add(seenKey, struct{}{})
 	s.epbsPool.HighestBids.Add(bidKey, msg)
+
+	// Emit SSE event for execution_payload_bid [New in Gloas:EIP7732]
+	s.emitters.Operation().SendExecutionPayloadBid(msg)
 
 	log.Trace("Processed execution payload bid via gossip",
 		"slot", slot,

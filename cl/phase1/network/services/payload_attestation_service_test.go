@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
@@ -46,6 +47,7 @@ func setupPayloadAttestationService(t *testing.T, ctrl *gomock.Controller) (*pay
 		ethClock:              ethClockMock,
 		netCfg:                nil, // Not used in current implementation
 		seenAttestationsCache: seenCache,
+		emitters:              beaconevents.NewEventEmitter(),
 		pendingCond:           sync.NewCond(&sync.Mutex{}), // Needed for queuePendingAttestation
 	}
 
