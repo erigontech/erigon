@@ -28,3 +28,20 @@ In addition, Caplin can backfill recent blobs for an op-node or other uses with 
 * `--caplin.blobs-immediate-backfill`: Backfills the last 18 days' worth of blobs to quickly populate historical blob data for operational needs or analytics.
 
 Caplin can also be used for [block production](../staking/caplin.md), aka **staking**.
+
+## Beacon API Configuration
+
+When Caplin is running, it exposes a Beacon API that external tools can query. The following flags control the Beacon API server:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--beacon.api.addr` | `localhost` | Listening address for the Beacon API |
+| `--beacon.api.port` | `5555` | Listening port for the Beacon API |
+| `--beacon.api.cors.allow-origins` | (empty) | CORS allowed origins |
+| `--beacon.api.cors.allow-methods` | (empty) | CORS allowed methods |
+| `--beacon.api.cors.allow-credentials` | `false` | Allow credentials in CORS requests |
+| `--beacon.api.protocol` | `tcp` | Network protocol (`tcp` or `tcp4` or `tcp6`) |
+| `--beacon.api.read-timeout` | `5s` | HTTP server read timeout |
+| `--beacon.api.read-header-timeout` | `600s` | HTTP server read header timeout |
+| `--beacon.api.write-timeout` | `600s` | HTTP server write timeout |
+| `--beacon.api.idle-timeout` | `600s` | HTTP server idle timeout |
