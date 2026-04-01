@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -113,10 +114,22 @@ func benchmarkEngineX(b *testing.B, preAllocDir, testsDir string) {
 			totalGas += e.def.GasUsed()
 		}
 		b.Run(subcat, func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
-				for _, e := range entries {
-					require.NoError(b, runner.Execute(b.Context(), e.def), "%s/%s", subcat, e.name)
-				}
+			for _, e := range entries {
+				e := e
+				gasUsed := e.def.GasUsed()
+				b.Run(e.name, func(b *testing.B) {
+					start := time.Now()
+					b.ResetTimer()
+					for i := 0; i < b.N; i++ {
+						require.NoError(b, runner.Execute(b.Context(), e.def), e.name)
+					}
+					b.StopTimer()
+					elapsed := uint64(time.Since(start))
+					if elapsed > 0 && gasUsed > 0 {
+						mgasps := (100 * 1000 * gasUsed * uint64(b.N)) / elapsed
+						b.ReportMetric(float64(mgasps)/100, "Mgas/s")
+					}
+				})
 			}
 			if totalGas > 0 {
 				b.ReportMetric(float64(totalGas)/float64(b.Elapsed().Nanoseconds())*1e3, "Mgas/s")
