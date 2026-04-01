@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	synced_data_mock "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -48,6 +49,7 @@ func setupExecutionPayloadBidService(t *testing.T, ctrl *gomock.Controller) (
 		ethClock:          ethClockMock,
 		beaconCfg:         beaconCfg,
 		epbsPool:          epbsPool,
+		emitters:          beaconevents.NewEventEmitter(),
 		seenCache:         seenCache,
 		pendingCond:       sync.NewCond(&sync.Mutex{}),
 	}
