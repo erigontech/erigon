@@ -67,16 +67,14 @@ func NewDefaultStateCache() *StateCache {
 }
 
 // Get retrieves data for the given domain and key.
+// Returns (value, true) on cache hit — including (nil, true) for deleted keys —
+// and (nil, false) on cache miss.
 func (c *StateCache) Get(domain kv.Domain, key []byte) ([]byte, bool) {
 	cache := c.caches[domain]
 	if cache == nil {
 		return nil, false
 	}
-	v, ok := cache.Get(key)
-	if len(v) == 0 {
-		return nil, false
-	}
-	return v, ok
+	return cache.Get(key)
 }
 
 // Put stores data for the given domain and key.
@@ -86,10 +84,6 @@ func (c *StateCache) Put(domain kv.Domain, key []byte, value []byte) {
 		return
 	}
 	if domain == kv.CommitmentDomain && bytes.Equal(key, commitmentdb.KeyCommitmentState) {
-		return
-	}
-	if len(value) == 0 {
-		cache.Delete(key)
 		return
 	}
 	cache.Put(key, common.Copy(value))
