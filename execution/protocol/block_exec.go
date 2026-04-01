@@ -185,7 +185,8 @@ func ExecuteBlockEphemerally(
 		}
 	}
 	// Include gas consumed by EIP-7002/EIP-7251 system calls (counted in header.GasUsed).
-	gasUsed.BlockRegular += sysCallGasUsed
+	// EIP-7778: syscall gas adds to Receipt (the block-level total).
+	gasUsed.Receipt += sysCallGasUsed
 
 	// EIP-8037: compute block-level Bottleneck for Amsterdam.
 	// Pre-Amsterdam: blockStateGasUsed is 0, so this is a no-op.

@@ -361,7 +361,9 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			}
 
 			se.txCount++
-			se.blockGasUsed += result.ExecutionResult.BlockRegularGasUsed
+			// EIP-7778: block gas = Σ ReceiptGasUsed (txnGasUsed with refunds) + syscall.
+			// ReceiptGasUsed = blockRegular + blockState - refund, so refunds are already applied.
+			se.blockGasUsed += result.ExecutionResult.ReceiptGasUsed
 			se.blockStateGasUsed += result.ExecutionResult.BlockStateGasUsed
 			if dbg.TraceGas && !txTask.IsBlockEnd() && result.ExecutionResult.BlockStateGasUsed > 0 {
 				se.logger.Warn("tx state gas", "block", txTask.BlockNumber(), "txIdx", txTask.TxIndex,
@@ -413,8 +415,8 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 
 				if txTask.BlockNumber() > 0 && startTxIndex == 0 {
 					//Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-					// Block gas = regular + state. Pre-Amsterdam: blockStateGasUsed is 0.
-					blockGasUsed := se.blockGasUsed + se.blockStateGasUsed
+					// EIP-7778: block gas = Σ ReceiptGasUsed (txnGasUsed with refunds) + syscall.
+					blockGasUsed := se.blockGasUsed
 					if dbg.TraceGas {
 						se.logger.Warn("block gas breakdown", "block", txTask.BlockNumber(),
 							"blockRegular", se.blockGasUsed, "blockState", se.blockStateGasUsed,
@@ -567,7 +569,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 		se.lastExecutedBlockNum.Store(int64(txTask.BlockNumber()))
 
 		if task.IsBlockEnd() {
-			se.executedGas.Add(int64(se.blockGasUsed + se.blockStateGasUsed))
+			se.executedGas.Add(int64(se.blockGasUsed))
 			se.blockGasUsed = 0
 			se.blockStateGasUsed = 0
 			se.blobGasUsed = 0

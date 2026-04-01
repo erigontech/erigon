@@ -755,10 +755,10 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					}
 
 					blockExecutor.blockRegularGasUsed += sysCallGasUsed
-					// Fix: update blockResult.BlockGasUsed to include finalize syscall gas.
+					// EIP-7778: blockGasUsed = Σ ReceiptGasUsed + syscall (no + blockState).
 					// blockResult is computed in nextResult() before finalize runs, so we must
 					// recalculate here after finalize gas is accounted for.
-					blockResult.BlockGasUsed = blockExecutor.blockRegularGasUsed + blockExecutor.blockStateGasUsed
+					blockResult.BlockGasUsed = blockExecutor.blockRegularGasUsed
 					if dbg.TraceGas {
 						log.Warn("[parallel] finalize syscall gas", "block", blockResult.BlockNum,
 							"sysCallGasUsed", sysCallGasUsed, "cumRegular", blockExecutor.blockRegularGasUsed,
@@ -2031,7 +2031,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 
 			if result.Receipt != nil {
-				be.blockRegularGasUsed += result.ExecutionResult.BlockRegularGasUsed
+				// EIP-7778: accumulate ReceiptGasUsed (txnGasUsed with refunds applied).
+				be.blockRegularGasUsed += result.ExecutionResult.ReceiptGasUsed
 				be.blockStateGasUsed += result.ExecutionResult.BlockStateGasUsed
 				if dbg.TraceGas {
 					log.Warn("[parallel] tx gas", "block", be.blockNum, "txIdx", tx,
@@ -2040,8 +2041,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 						"blockState", result.ExecutionResult.BlockStateGasUsed,
 						"cumRegular", be.blockRegularGasUsed, "cumState", be.blockStateGasUsed)
 				}
-				// Per-tx gas pool contribution: regular + state dimensions.
-				applyResult.blockGasUsed = int64(result.ExecutionResult.BlockRegularGasUsed + result.ExecutionResult.BlockStateGasUsed)
+				// EIP-7778: per-tx block gas contribution = ReceiptGasUsed (after refunds).
+				applyResult.blockGasUsed = int64(result.ExecutionResult.ReceiptGasUsed)
 				receipt := *result.Receipt
 				applyResult.receipt = &receipt
 				applyResult.receipt.Logs = append([]*types.Log{}, result.Receipt.Logs...)
@@ -2097,8 +2098,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			header = tt.Header
 			txs = tt.Txs
 		}
-		// Block gas = regular + state. Pre-Amsterdam: blockStateGasUsed is 0.
-		blockGasUsed := be.blockRegularGasUsed + be.blockStateGasUsed
+		// EIP-7778: block gas = Σ ReceiptGasUsed (with refunds) + syscall, no + blockState.
+		blockGasUsed := be.blockRegularGasUsed
 		if dbg.TraceGas {
 			log.Warn("[parallel] block gas", "block", be.blockNum,
 				"blockRegular", be.blockRegularGasUsed, "blockState", be.blockStateGasUsed,
@@ -2136,8 +2137,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 	txTask := be.tasks[0].Task
 
-	// Block gas = regular + state. Pre-Amsterdam: blockStateGasUsed is 0.
-	blockGasUsed := be.blockRegularGasUsed + be.blockStateGasUsed
+	// EIP-7778: block gas = Σ ReceiptGasUsed (with refunds) + syscall, no + blockState.
+	blockGasUsed := be.blockRegularGasUsed
 
 	return &blockResult{
 		BlockNum:     be.blockNum,
