@@ -256,6 +256,20 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		if header.RequestsHash != nil {
 			rh := rs.Hash()
 			if *header.RequestsHash != *rh {
+				fmt.Printf("REQUESTS_MISMATCH: block=%d receipts=%d totalLogs=%d deposits=%v withdrawals=%v consolidations=%v requestCount=%d expected=%x got=%x depositContract=%x\n",
+					header.Number.Uint64(), len(receipts), len(allLogs),
+					depositReqs != nil, withdrawalReq != nil, consolidations != nil,
+					len(rs), *header.RequestsHash, *rh, config.DepositContract)
+				for i, r := range rs {
+					fmt.Printf("  req[%d] type=%d dataLen=%d\n", i, r.Type, len(r.RequestData))
+				}
+				for i, rec := range receipts {
+					if len(rec.Logs) > 0 {
+						for _, l := range rec.Logs {
+							fmt.Printf("  receipt[%d] logAddr=%x topics=%d\n", i, l.Address, len(l.Topics))
+						}
+					}
+				}
 				return nil, fmt.Errorf("error: invalid requests root hash in header, expected: %v, got:%v", header.RequestsHash, rh)
 			}
 		}

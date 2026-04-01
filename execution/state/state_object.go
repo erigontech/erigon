@@ -184,6 +184,10 @@ func (so *stateObject) GetCommittedState(key accounts.StorageKey) (uint256.Int, 
 		}
 	}
 	if so.createdContract {
+		if dbg.TraceTransactionIO && (so.db.trace || dbg.TraceAccount(so.address.Handle())) {
+			fmt.Printf("%d (%d.%d) GetCommittedState SKIP (createdContract) %x key=%x\n",
+				so.db.blockNum, so.db.txIndex, so.db.version, so.address, key)
+		}
 		return uint256.Int{}, nil
 	}
 	// Load from DB in case it is missing.

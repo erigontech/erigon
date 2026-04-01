@@ -48,9 +48,10 @@ type commitComputeRequest struct{}
 // so by the time the calculator receives the blockResult, sd.mem has the
 // correct block-boundary state.
 type commitmentCalculator struct {
-	doms      *execctx.SharedDomains
-	db        kv.TemporalRoDB
-	logPrefix string
+	doms         *execctx.SharedDomains
+	db           kv.TemporalRoDB
+	logPrefix    string
+	trimHistory  bool // trim old sd.mem entries after each commitment (batch processing only)
 
 	// updates is the calculator's OWN buffer — never shared with the
 	// execLoop or apply loop. Only this goroutine reads/writes it.
@@ -247,6 +248,7 @@ func (cc *commitmentCalculator) computeAndPublish(ctx context.Context, br *block
 	}
 
 	cc.lastComputedBlock = br.BlockNum
+	if cc.trimHistory { cc.doms.TrimHistory(br.lastTxNum) }
 	cc.publish(ctx, r)
 }
 
@@ -277,6 +279,7 @@ func (cc *commitmentCalculator) computeWithoutCheck(ctx context.Context, br *blo
 	}
 
 	cc.lastComputedBlock = br.BlockNum
+	if cc.trimHistory { cc.doms.TrimHistory(br.lastTxNum) }
 }
 
 func (cc *commitmentCalculator) computeAndCheck(ctx context.Context, br *blockResult) {
@@ -308,6 +311,11 @@ func (cc *commitmentCalculator) computeAndCheck(ctx context.Context, br *blockRe
 	}
 
 	cc.lastComputedBlock = br.BlockNum
+
+	// Trim old version entries from sd.mem — only keeps the latest
+	// entry at or before this block's txNum. Reclaims memory from
+	// accumulated inMemHistoryReads entries during batch processing.
+	if cc.trimHistory { cc.doms.TrimHistory(br.lastTxNum) }
 
 	// Only publish on mismatch — success is silent.
 	if !bytes.Equal(rh, br.StateRoot.Bytes()) {

@@ -616,20 +616,25 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 		select {
 		case exec := <-pendingCh:
 			if err := pe.processRequest(ctx, exec); err != nil {
+				fmt.Printf("FLOW: processRequest err=%v\n", err)
 				return err
 			}
 			continue
 		case <-ctx.Done():
+			fmt.Printf("FLOW: ctx.Done lastBlock=%d\n", pe.lastExecutedBlockNum.Load())
 			return ctx.Err()
 		case nextResult, ok := <-pe.rws.ResultCh():
 			if !ok {
+				fmt.Printf("FLOW: rws closed lastBlock=%d\n", pe.lastExecutedBlockNum.Load())
 				return nil
 			}
 			closed, err := pe.rws.Drain(ctx, nextResult)
 			if err != nil {
+				fmt.Printf("FLOW: drain err=%v lastBlock=%d\n", err, pe.lastExecutedBlockNum.Load())
 				return err
 			}
 			if closed {
+				fmt.Printf("FLOW: drain closed lastBlock=%d\n", pe.lastExecutedBlockNum.Load())
 				return nil
 			}
 		}
@@ -637,6 +642,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 		blockResult, err := pe.processResults(ctx, applyTx)
 
 		if err != nil {
+			fmt.Printf("FLOW: processResults err=%v\n", err)
 			return err
 		}
 
@@ -653,14 +659,12 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				pe.readCount.Add(blockExecutor.blockIO.ReadCount())
 				pe.writeCount.Add(blockExecutor.blockIO.WriteCount())
 
-				// Block finalize already ran in the execLoop (producer side).
-				// Finalize txResult was sent through the channel before the blockResult.
-
 				if !blockExecutor.execStarted.IsZero() {
 					pe.blockExecMetrics.Duration.Add(time.Since(blockExecutor.execStarted))
 					pe.blockExecMetrics.BlockCount.Add(1)
 				}
 				if err := blockExecutor.sendResult(ctx, blockResult); err != nil {
+					fmt.Printf("FLOW: sendResult err=%v block=%d\n", err, blockResult.BlockNum)
 					return err
 				}
 
@@ -668,20 +672,25 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				delete(pe.blockExecutors, blockResult.BlockNum)
 				pe.Unlock()
 
-				// Batch size check — the exec loop is the synchronous control
-				// point. When the batch is full, return nil. The deferred
-				// channel close in executeBlocks signals the apply loop and
-				// calculator to drain. sd.mem stays consistent with the
-				// last published block.
-				// maxBlockNum and Exhausted are handled by natural exit
-				// (no more blocks to process).
-				if pe.rs.SizeEstimateBeforeCommitment() > pe.cfg.batchSize.Bytes() {
+				// Use AfterCommitment estimate (2x) in per-block mode since
+				// commitment is already computed. BeforeCommitment (4x) is
+				// for batch mode where commitment hasn't run yet.
+				var sizeEst uint64
+				if dbg.BatchCommitments {
+					sizeEst = pe.rs.SizeEstimateBeforeCommitment()
+				} else {
+					sizeEst = pe.rs.SizeEstimateAfterCommitment()
+				}
+				batchLimit := pe.cfg.batchSize.Bytes()
+				if sizeEst > batchLimit {
+					fmt.Printf("FLOW: batch full block=%d size=%d limit=%d breakdown=%s\n",
+						blockResult.BlockNum, sizeEst, batchLimit, pe.rs.Domains().GetMemBatch().SizeBreakdown())
 					pe.triggerBatchCommitment(ctx)
 					return nil
 				}
 
-				// STOP_AFTER_BLOCK: trigger commitment and exit cleanly.
 				if dbg.StopAfterBlock > 0 && blockResult.BlockNum >= dbg.StopAfterBlock {
+					fmt.Printf("FLOW: STOP_AFTER_BLOCK block=%d\n", blockResult.BlockNum)
 					pe.triggerBatchCommitment(ctx)
 					return nil
 				}
@@ -1026,16 +1035,29 @@ func (result *execResult) finalizeSystemTx(
 	txIndex := task.Version().TxIndex
 	txIncarnation := task.Version().Incarnation
 
-	ibs := state.New(state.NewVersionedStateReader(txIndex, result.TxIn, vm, stateReader))
+	// Use an empty ReadSet so all reads go through the versionMap (which
+	// has all prior TX writes). The execution-phase ReadSet (result.TxIn)
+	// may be stale if the system TX ran speculatively before all regular
+	// TXs completed — cached reads would return pre-block values instead
+	// of the post-block state needed by syscalls (withdrawal/consolidation).
+	ibs := state.New(state.NewVersionedStateReader(txIndex, state.ReadSet{}, vm, stateReader))
 	ibs.SetTxContext(blockNum, txIndex)
 	ibs.SetVersion(txIncarnation)
-	ibs.SetVersionMap(&state.VersionMap{})
+	// Use the block's versionMap so the IBS's versionedRead (used by
+	// GetState for storage reads) can see writes from prior TXs.
+	// The system TX's syscalls read withdrawal/consolidation contract
+	// storage which was modified by regular TXs in this block.
+	ibs.SetVersionMap(vm)
 	if err := ibs.ApplyVersionedWrites(result.TxOut); err != nil {
 		return nil, nil, nil, err
 	}
 	ibs.SetTrace(txTask.Trace)
 
+	fmt.Printf("SYSTEM_TX: block=%d txIndex=%d inc=%d txOutLen=%d\n",
+		blockNum, txIndex, txIncarnation, len(result.TxOut))
+
 	if err := ibs.FinalizeTx(rules, stateWriter); err != nil {
+		fmt.Printf("SYSTEM_TX_ERR: block=%d err=%v\n", blockNum, err)
 		return nil, nil, nil, err
 	}
 	return nil, ibs.VersionedReads(), ibs.VersionedWrites(true), nil
@@ -2251,6 +2273,17 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		// side so finalize writes go to the BlockStateCache before the Flush.
 		var finalizeWrites state.VersionedWrites
 		if be.blockNum > 0 {
+			if be.blockNum == 24268193 {
+				// Check if consolidation contract storage is in the cache
+				consolidationAddr := accounts.InternAddress([20]byte{0x00, 0x00, 0xbb, 0xdd, 0xc7, 0xce, 0x48, 0x86, 0x42, 0xfb, 0x57, 0x9f, 0x8b, 0x00, 0xf3, 0xa5, 0x90, 0x00, 0x72, 0x51})
+				slot0 := accounts.StorageKey{}
+				if val, ok := be.blockStateCache.GetCurrentStorage(consolidationAddr, slot0); ok {
+					fmt.Printf("FINALIZE_CHECK: block=24268193 consolidation slot0 in cache: len=%d val=%x\n", len(val), val)
+				} else {
+					fmt.Printf("FINALIZE_CHECK: block=24268193 consolidation slot0 NOT in cache\n")
+				}
+				fmt.Printf("FINALIZE_CHECK: block=24268193 results=%d tasks=%d\n", len(be.results), len(be.tasks))
+			}
 			lastResult := be.results[len(be.results)-1]
 			finalTask := be.tasks[len(be.tasks)-1].Task
 			finalVersion := finalTask.Version()
@@ -2260,10 +2293,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			if finalTask.IsHistoric() {
 				reader = state.NewHistoryReaderV3(applyTx, finalVersion.TxNum)
 			} else {
-				// Use CurrentCachedReaderV3 so the finalize IBS reads per-TX
-				// writes from the BlockStateCache write buffer (e.g.,
-				// accumulated coinbase balance with all tips from this block)
-				// instead of the stale pre-block sd.mem values.
 				reader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsGetter(applyTx), be.blockStateCache)
 			}
 			pe.RUnlock()
@@ -2273,14 +2302,35 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			localVersionMap := state.NewVersionMap(nil)
 			ibs.SetVersionMap(localVersionMap)
 			ibs.SetTxContext(finalVersion.BlockNum, finalVersion.TxIndex)
+			if be.blockNum == 24268193 {
+				ibs.SetTrace(true)
+			}
 
 			if tt, ok := lastResult.Task.(*taskVersion).Task.(*exec.TxTask); ok {
+				// Syscalls need to see intra-block storage writes (e.g.,
+				// consolidation requests queued by regular TXs). When the main
+				// IBS uses HistoryReaderV3 (historic blocks), create a separate
+				// IBS with CurrentCachedReaderV3 for syscalls. The syscall
+				// writes (dequeue operations) are applied back to the main IBS
+				// and BlockStateCache so subsequent blocks see the dequeued state.
+				var syscallIBS *state.IntraBlockState
+				if finalTask.IsHistoric() {
+					pe.RLock()
+					syscallReader := state.NewCurrentCachedReaderV3(pe.rs.Domains().AsGetter(applyTx), be.blockStateCache)
+					pe.RUnlock()
+					syscallIBS = state.New(syscallReader)
+					syscallIBS.SetTxContext(finalVersion.BlockNum, finalVersion.TxIndex)
+					syscallIBS.SetVersionMap(state.NewVersionMap(nil))
+				} else {
+					syscallIBS = ibs
+				}
+
 				syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-					ret, err := protocol.SysCallContract(contract, data, pe.cfg.chainConfig, ibs, tt.Header, pe.cfg.engine, false, *pe.cfg.vmConfig)
+					ret, err := protocol.SysCallContract(contract, data, pe.cfg.chainConfig, syscallIBS, tt.Header, pe.cfg.engine, false, *pe.cfg.vmConfig)
 					if err != nil {
 						return nil, err
 					}
-					lastResult.Logs = append(lastResult.Logs, ibs.GetRawLogs(tt.TxIndex)...)
+					lastResult.Logs = append(lastResult.Logs, syscallIBS.GetRawLogs(tt.TxIndex)...)
 					return ret, err
 				}
 
@@ -2289,6 +2339,19 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					pe.cfg.chainConfig, types.CopyHeader(tt.Header), ibs, tt.Uncles, receipts,
 					tt.Withdrawals, chainReader, syscall, false, pe.logger); err != nil {
 					return nil, fmt.Errorf("%w: can't finalize block %d: %v", rules.ErrInvalidBlock, be.blockNum, err)
+				}
+
+				// If syscall used a separate IBS, apply its writes back to
+				// the BlockStateCache so the dequeued values (zeros) are
+				// visible to subsequent blocks in this batch.
+				if syscallIBS != ibs {
+					syscallWrites := syscallIBS.VersionedWrites(true)
+					if len(syscallWrites) > 0 {
+						if err := pe.rs.ApplyStateWrites(ctx, applyTx, be.blockNum, finalVersion.TxNum,
+							syscallWrites, nil, lastResult.Rules(), be.blockStateCache); err != nil {
+							return nil, err
+						}
+					}
 				}
 
 				be.blockIO.RecordReads(finalVersion, ibs.VersionedReads())
@@ -2498,6 +2561,14 @@ func MergeVersionedWrites(prev, next state.VersionedWrites) state.VersionedWrite
 // The input is blockIO.WriteSet(txIndex) — the raw versionWritten output.
 // The output is ready for applyVersionedWrites and TouchUpdates.
 func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txIndex int, incarnation int, stateReader state.StateReader) state.VersionedWrites {
+	// Debug: check if consolidation contract storage is in writes
+	consolidationAddr := accounts.InternAddress([20]byte{0x00, 0x00, 0xbb, 0xdd, 0xc7, 0xce, 0x48, 0x86, 0x42, 0xfb, 0x57, 0x9f, 0x8b, 0x00, 0xf3, 0xa5, 0x90, 0x00, 0x72, 0x51})
+	for _, w := range writes {
+		if w.Address == consolidationAddr && w.Path == state.StoragePath {
+			fmt.Printf("NORMALIZE_IN: tx=%d inc=%d consolidation storage key=%x val=%v ver=(%d.%d)\n",
+				txIndex, incarnation, w.Key.Value(), w.Val, w.Version.TxIndex, w.Version.Incarnation)
+		}
+	}
 	filtered := make(state.VersionedWrites, 0, len(writes))
 
 	// Track which addresses have account-level writes vs storage-only writes.
@@ -2529,13 +2600,22 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 				if err == nil {
 					if writeVal, ok := w.Val.(uint256.Int); ok {
 						if !found && writeVal.IsZero() {
+							if w.Address == consolidationAddr {
+								fmt.Printf("NORMALIZE_SKIP: tx=%d consolidation key=%x reason=both_zero\n", txIndex, w.Key.Value())
+							}
 							continue // both zero — no-op
 						}
 						if found && writeVal.Eq(&preVal) {
+							if w.Address == consolidationAddr {
+								fmt.Printf("NORMALIZE_SKIP: tx=%d consolidation key=%x reason=same_as_preblock val=%v\n", txIndex, w.Key.Value(), writeVal)
+							}
 							continue // same as pre-block — no-op
 						}
 					}
 				}
+			}
+			if w.Address == consolidationAddr {
+				fmt.Printf("NORMALIZE_KEEP: tx=%d consolidation key=%x val=%v\n", txIndex, w.Key.Value(), w.Val)
 			}
 			hasStorageWrite[w.Address] = true
 		case state.BalancePath, state.NoncePath, state.IncarnationPath, state.CodeHashPath:

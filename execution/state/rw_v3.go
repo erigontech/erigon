@@ -1094,6 +1094,10 @@ func (c *BlockStateCache) WriteAccount(addr accounts.Address, enc []byte) {
 
 // WriteStorage stores a storage value in the write buffer.
 func (c *BlockStateCache) WriteStorage(addr accounts.Address, key accounts.StorageKey, val []byte) {
+	// Debug: log consolidation contract writes
+	if addr == accounts.InternAddress([20]byte{0x00, 0x00, 0xbb, 0xdd, 0xc7, 0xce, 0x48, 0x86, 0x42, 0xfb, 0x57, 0x9f, 0x8b, 0x00, 0xf3, 0xa5, 0x90, 0x00, 0x72, 0x51}) {
+		fmt.Printf("CACHE_WRITE: consolidation key=%x valLen=%d\n", key.Value(), len(val))
+	}
 	c.mu.Lock()
 	slots, ok := c.currentStorage[addr]
 	if !ok {

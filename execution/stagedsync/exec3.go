@@ -643,14 +643,11 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			go warmTxsHashes(b)
 
 			var dbBAL types.BlockAccessList
-			var data []byte
-			// Use a fresh read tx (not tx.Apply) so we can see BAL data
-			// committed by InsertBlocks after this execution's tx was opened.
-			if err = te.cfg.db.View(ctx, func(roTx kv.Tx) error {
-				var e error
-				data, e = rawdb.ReadBlockAccessListBytes(roTx, b.Hash(), blockNum)
-				return e
-			}); err != nil {
+			// Read BAL through blockTx (overlay or execRoTx) — do NOT open
+			// a separate db.View() as it can deadlock with the stageloop's
+			// RW transaction when BlockOverlay is active.
+			data, err := rawdb.ReadBlockAccessListBytes(blockTx, b.Hash(), blockNum)
+			if err != nil {
 				return err
 			}
 			if len(data) > 0 && !dbg.IgnoreBAL {
