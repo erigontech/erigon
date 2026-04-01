@@ -154,7 +154,7 @@ func (ba *BlockAssembler) Initialize(ibs *state.IntraBlockState, tx kv.TemporalT
 	// because CommitBlock's blockOriginStorage==dirtyStorage check skips the
 	// undo write. All final state is correctly written by CommitBlock in
 	// AssembleBlock using the real writer.
-	if err := protocol.InitializeBlockExecution(ba.cfg.Engine,
+	if _, err := protocol.InitializeBlockExecution(ba.cfg.Engine,
 		NewChainReader(ba.cfg.ChainConfig, tx, ba.cfg.BlockReader, logger), ba.Header, ba.cfg.ChainConfig, ibs, state.NewNoopWriter(), logger, nil); err != nil {
 		return err
 	}

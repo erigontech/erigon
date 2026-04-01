@@ -108,7 +108,7 @@ func TestCallBlockParallelMatchesSequential(t *testing.T) {
 
 	consensusHeaderReader := consensuschain.NewReader(cfg, tx, api._blockReader, nil)
 	logger := log.New("trace_filtering_test")
-	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader,
+	_, err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader,
 		block.HeaderNoCopy(), cfg, ibs, nil, logger, nil)
 	require.NoError(t, err)
 	err = ibs.CommitBlock(rules, cachedWriter)

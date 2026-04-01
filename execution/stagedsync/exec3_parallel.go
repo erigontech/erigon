@@ -754,14 +754,21 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						return err
 					}
 
-					blockExecutor.blockRegularGasUsed += sysCallGasUsed
-					// EIP-7778: blockGasUsed = Σ ReceiptGasUsed + syscall (no + blockState).
+					// EIP-7778: for Amsterdam+, blockGasUsed uses begin-block (EIP-4788) gas,
+					// not finalize (EIP-7002/EIP-7251) gas. For pre-Amsterdam, use finalize gas.
+					if pe.cfg.chainConfig.IsAmsterdam(finalTask.BlockTime()) {
+						blockExecutor.blockRegularGasUsed += blockExecutor.initGasUsed
+					} else {
+						blockExecutor.blockRegularGasUsed += sysCallGasUsed
+					}
 					// blockResult is computed in nextResult() before finalize runs, so we must
-					// recalculate here after finalize gas is accounted for.
+					// recalculate here after gas is accounted for.
 					blockResult.BlockGasUsed = blockExecutor.blockRegularGasUsed
 					if dbg.TraceGas {
 						log.Warn("[parallel] finalize syscall gas", "block", blockResult.BlockNum,
-							"sysCallGasUsed", sysCallGasUsed, "cumRegular", blockExecutor.blockRegularGasUsed,
+							"sysCallGasUsed", sysCallGasUsed, "initGasUsed", blockExecutor.initGasUsed,
+							"isAmsterdam", pe.cfg.chainConfig.IsAmsterdam(finalTask.BlockTime()),
+							"cumRegular", blockExecutor.blockRegularGasUsed,
 							"cumState", blockExecutor.blockStateGasUsed,
 							"blockGasUsed", blockResult.BlockGasUsed)
 					}
@@ -1690,6 +1697,7 @@ type blockExecutor struct {
 	blockRegularGasUsed uint64 // accumulated regular gas (pre-Amsterdam: same as block gas)
 	blockStateGasUsed   uint64 // EIP-8037: accumulated state gas
 	blobGasUsed         uint64
+	initGasUsed         uint64 // EIP-4788 gas from block initialization (Amsterdam+)
 	gasPool             *protocol.GasPool
 
 	execFailed, execAborted []int
@@ -2047,6 +2055,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				applyResult.receipt = &receipt
 				applyResult.receipt.Logs = append([]*types.Log{}, result.Receipt.Logs...)
 				applyResult.logs = applyResult.receipt.Logs
+			} else if task.Version().TxIndex < 0 && be.blockNum > 0 {
+				// Capture EIP-4788 init gas (Amsterdam+) from the block-init task.
+				be.initGasUsed = result.InitGasUsed
 			}
 
 			maps.Copy(applyResult.traceFroms, result.TraceFroms)

@@ -116,7 +116,8 @@ func ExecuteBlockEphemerally(
 		}()
 	}
 
-	if err := InitializeBlockExecution(engine, chainReader, block.Header(), chainConfig, ibs, stateWriter, logger, vmConfig.Tracer); err != nil {
+	initGasUsed, err := InitializeBlockExecution(engine, chainReader, block.Header(), chainConfig, ibs, stateWriter, logger, vmConfig.Tracer)
+	if err != nil {
 		return nil, err
 	}
 
@@ -175,7 +176,6 @@ func ExecuteBlockEphemerally(
 	// Run block finalization (EIP-7002/EIP-7251 system calls) before checking gas,
 	// so that system call gas is included in the block gas total.
 	var newBlock *types.Block
-	var err error
 	var sysCallGasUsed uint64
 	if !vmConfig.ReadOnly {
 		txs := block.Transactions()
@@ -184,9 +184,13 @@ func ExecuteBlockEphemerally(
 			return nil, err
 		}
 	}
-	// Include gas consumed by EIP-7002/EIP-7251 system calls (counted in header.GasUsed).
-	// EIP-7778: syscall gas adds to Receipt (the block-level total).
-	gasUsed.Receipt += sysCallGasUsed
+	// EIP-7778: for Amsterdam+, blockGasUsed uses begin-block (EIP-4788) gas,
+	// not finalize (EIP-7002/EIP-7251) gas. For pre-Amsterdam, use finalize gas.
+	if chainConfig.IsAmsterdam(header.Time) {
+		gasUsed.Receipt += initGasUsed
+	} else {
+		gasUsed.Receipt += sysCallGasUsed
+	}
 
 	// EIP-8037: compute block-level Bottleneck for Amsterdam.
 	// Pre-Amsterdam: blockStateGasUsed is 0, so this is a no-op.
@@ -379,19 +383,20 @@ func FinalizeBlockExecution(
 
 func InitializeBlockExecution(engine rules.Engine, chain rules.ChainHeaderReader, header *types.Header,
 	cc *chain.Config, ibs *state.IntraBlockState, stateWriter state.StateWriter, logger log.Logger, tracer *tracing.Hooks,
-) error {
-	err := engine.Initialize(cc, chain, header, ibs, func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-		ret, _, err := SysCallContract(contract, data, cc, ibState, header, engine, constCall, vm.Config{})
-		return ret, err
+) (initGasUsed uint64, err error) {
+	err = engine.Initialize(cc, chain, header, ibs, func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
+		ret, gas, e := SysCallContract(contract, data, cc, ibState, header, engine, constCall, vm.Config{})
+		initGasUsed += gas
+		return ret, e
 	}, logger, tracer)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if stateWriter == nil {
 		stateWriter = state.NewNoopWriter()
 	}
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, accounts.NilAddress, cc)
-	return ibs.FinalizeTx(blockContext.Rules(cc), stateWriter)
+	return initGasUsed, ibs.FinalizeTx(blockContext.Rules(cc), stateWriter)
 }
 
 var alwaysSkipReceiptCheck = dbg.EnvBool("EXEC_SKIP_RECEIPT_CHECK", false)

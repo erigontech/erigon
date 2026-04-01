@@ -34,6 +34,7 @@ type serialExecutor struct {
 	blockGasUsed      uint64 // accumulated regular gas (pre-Amsterdam: same as block gas)
 	blockStateGasUsed uint64 // EIP-8037: accumulated state gas
 	blobGasUsed       uint64
+	initGasUsed       uint64 // EIP-4788 gas from block initialization (Amsterdam+)
 	lastBlockResult   *blockResult
 	worker            *exec.Worker
 
@@ -365,6 +366,10 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			// ReceiptGasUsed = blockRegular + blockState - refund, so refunds are already applied.
 			se.blockGasUsed += result.ExecutionResult.ReceiptGasUsed
 			se.blockStateGasUsed += result.ExecutionResult.BlockStateGasUsed
+			// Capture EIP-4788 init gas (Amsterdam+) from the block-init task (TxIndex == -1).
+			if txTask.TxIndex < 0 && txTask.BlockNumber() > 0 {
+				se.initGasUsed = result.InitGasUsed
+			}
 			if dbg.TraceGas && !txTask.IsBlockEnd() && result.ExecutionResult.BlockStateGasUsed > 0 {
 				se.logger.Warn("tx state gas", "block", txTask.BlockNumber(), "txIdx", txTask.TxIndex,
 					"blockRegular", result.ExecutionResult.BlockRegularGasUsed,
@@ -405,8 +410,13 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err)
 				}
 
-				// Include gas consumed by EIP-7002/EIP-7251 system calls (counted in header.GasUsed).
-				se.blockGasUsed += sysCallGasUsed
+				// EIP-7778: for Amsterdam+, blockGasUsed uses begin-block (EIP-4788) gas,
+				// not finalize (EIP-7002/EIP-7251) gas. For pre-Amsterdam, use finalize gas.
+				if se.cfg.chainConfig.IsAmsterdam(txTask.Header.Time) {
+					se.blockGasUsed += se.initGasUsed
+				} else {
+					se.blockGasUsed += sysCallGasUsed
+				}
 
 				if startTxIndex == 0 && !isInitialCycle {
 					se.cfg.notifications.RecentReceipts.Add(blockReceipts, txTask.Txs, txTask.Header)
@@ -573,6 +583,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			se.blockGasUsed = 0
 			se.blockStateGasUsed = 0
 			se.blobGasUsed = 0
+			se.initGasUsed = 0
 			gasPool = nil
 		}
 	}

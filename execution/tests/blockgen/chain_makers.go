@@ -497,7 +497,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 				ibs.ResetVersionedIO()
 				ibs.SetTxContext(b.header.Number.Uint64(), -1)
 			}
-			err := protocol.InitializeBlockExecution(b.engine, chainreader, b.header, config, ibs, nil, logger, nil)
+			_, err := protocol.InitializeBlockExecution(b.engine, chainreader, b.header, config, ibs, nil, logger, nil)
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("call to InitializeBlockExecution: %w", err)
 			}

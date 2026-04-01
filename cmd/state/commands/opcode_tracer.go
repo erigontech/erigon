@@ -739,7 +739,7 @@ func runBlock(engine rules.Engine, ibs *state.IntraBlockState, txnWriter state.S
 	gp := new(protocol.GasPool).AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time))
 	gasUsed := new(protocol.GasUsed)
 	var receipts types.Receipts
-	protocol.InitializeBlockExecution(engine, nil, header, chainConfig, ibs, nil, logger, nil)
+	_, _ = protocol.InitializeBlockExecution(engine, nil, header, chainConfig, ibs, nil, logger, nil)
 	blockNum := block.NumberU64()
 	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), engine, accounts.NilAddress, chainConfig)
 	rules := blockContext.Rules(chainConfig)
