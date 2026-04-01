@@ -1,6 +1,6 @@
 ---
 name: launch-epbs-devnet
-description: "Launch erigon with Caplin on an epbs devnet. Usage: /launch-epbs-devnet <N> (e.g. /launch-epbs-devnet 0 for epbs-devnet-0). Reads config from devnet/configs/epbs-devnet-<N>.yaml."
+description: "Launch erigon with Caplin on an epbs devnet. Usage: /launch-epbs-devnet <N> (e.g. /launch-epbs-devnet 0 for epbs-devnet-0). Reads config from .claude/skills/devnet/configs/epbs-devnet-<N>.yaml."
 allowed-tools: Bash, Read, Write, Edit, Glob
 allowed-prompts:
   - tool: Bash
