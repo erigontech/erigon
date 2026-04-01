@@ -377,6 +377,7 @@ func (t PoolTest) Run(testCase func(ctx context.Context, t *testing.T, pool *shu
 			contractBackend,
 			stateChangesClient,
 			currentBlockNumReader,
+			nil, // no overlay subscriber in tests
 			shutter.WithSlotCalculator(slotCalculator),
 			shutter.WithDecryptionKeysSourceFactory(keySenderFactory.NewDecryptionKeysSource),
 		)

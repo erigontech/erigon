@@ -601,6 +601,11 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		// After this, all consumers have the data — the semaphore can be
 		// released and flush/commit/prune can proceed without blocking the
 		// next FCU.
+		e.logger.Debug("[updateForkChoice] dispatching notifications", "head", blockHash, "bgCommit", e.fcuBackgroundCommit)
+		if err := e.dispatchNotificationsFromOverlay(currentContext, finishProgressBefore); err != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("fcu: dispatch notifications: %w", err), stateFlushingInParallel)
+		}
+
 		// Flush + commit: foreground by default, background only if
 		// fcuBackgroundCommit is explicitly enabled.
 		var commitTimings []any
@@ -614,11 +619,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				if err != nil && !errors.Is(err, context.Canceled) {
 					e.logger.Error("Error running background post forkchoice", "err", err)
 				}
-				// Dispatch notifications AFTER commit so consumers (e.g.
-				// shutter eon tracker) can read from the committed DB.
-				if notifyErr := e.dispatchNotificationsFromDB(finishProgressBefore); notifyErr != nil {
-					e.logger.Error("Error dispatching notifications", "err", notifyErr)
-				}
 				// Signal that the DB commit is done — RPC consumers can
 				// drop their SD reference and read from committed DB.
 				if dispatcher != nil {
@@ -631,13 +631,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 			}
 			commitTimings = ct
-
-			// Dispatch notifications AFTER commit so consumers (e.g. shutter
-			// eon tracker) can read block data from the committed DB.
-			e.logger.Debug("[updateForkChoice] dispatching notifications from DB", "head", blockHash)
-			if err := e.dispatchNotificationsFromDB(finishProgressBefore); err != nil {
-				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("fcu: dispatch notifications: %w", err), stateFlushingInParallel)
-			}
 		}
 
 		// Prune: background by default (fcuBackgroundPrune=true).
@@ -727,6 +720,12 @@ func (e *ExecModule) dispatchNotificationsFromOverlay(sd *execctx.SharedDomains,
 	if err != nil {
 		return err
 	}
+	// Publish the overlay BEFORE dispatching notifications. This ensures
+	// the BlockListener (overlay-aware shutter) sees the overlay as active
+	// before any StateChangeBatch arrives, so it can buffer events properly.
+	e.logger.Debug("[dispatchNotifications] publishing SD")
+	dispatcher.PublishOverlay(sd)
+
 	e.logger.Debug("[dispatchNotifications] dispatching", "finishBefore", finishProgressBefore, "finishAfter", finishProgressAfter)
 	if err := dispatcher.Dispatch(
 		e.bacgroundCtx,
@@ -740,43 +739,7 @@ func (e *ExecModule) dispatchNotificationsFromOverlay(sd *execctx.SharedDomains,
 		return err
 	}
 
-	// Publish the SharedDomains for in-process consumers (RPC, builder).
-	// The SD holds both block overlay (table data) and domain state.
-	// The background commit goroutine owns the SD lifecycle — it will
-	// close it after flush+commit completes.
-	e.logger.Debug("[dispatchNotifications] publishing SD")
-	dispatcher.PublishOverlay(sd)
 	return nil
-}
-
-// dispatchNotificationsFromDB sends notifications reading from the committed DB.
-// Used in the foreground-commit path where data is already flushed to disk,
-// ensuring consumers (e.g. shutter eon tracker) can read block data.
-func (e *ExecModule) dispatchNotificationsFromDB(finishProgressBefore uint64) error {
-	dispatcher := e.pipelineExecutor.Dispatcher()
-	if dispatcher == nil || e.accum == nil {
-		return nil
-	}
-	tx, err := e.db.BeginRo(e.bacgroundCtx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	finishProgressAfter, err := stages.GetStageProgress(tx, stages.Finish)
-	if err != nil {
-		return err
-	}
-	e.logger.Debug("[dispatchNotificationsFromDB] dispatching", "finishBefore", finishProgressBefore, "finishAfter", finishProgressAfter)
-	return dispatcher.Dispatch(
-		e.bacgroundCtx,
-		tx,
-		e.accum.Accumulator,
-		e.accum.RecentReceipts,
-		finishProgressBefore,
-		finishProgressAfter,
-		e.pipelineExecutor.Sync().PrevUnwindPoint(),
-	)
 }
 
 // runForkchoiceCommitAndPrune does flush → commit → UpdateHead → prune
