@@ -32,25 +32,27 @@ import (
 
 var engineXDir = filepath.Join(eestDir, "benchmark", "blockchain_tests_engine_x")
 
+var eestPreAllocDir = filepath.Join(engineXDir, "pre_alloc")
+
 // BenchmarkEngineXInstruction measures payload execution time per instruction category,
 // excluding one-time setup (genesis write, node startup, DB init).
 // Usage: BENCH_ENGINE_X_MANUAL_ALLOW=true go test -run='^$' -bench BenchmarkEngineXInstruction -benchtime=1x -timeout 60m ./execution/tests/
 func BenchmarkEngineXInstruction(b *testing.B) {
-	benchmarkEngineX(b, filepath.Join(engineXDir, "benchmark", "compute", "instruction"))
+	benchmarkEngineX(b, eestPreAllocDir, filepath.Join(engineXDir, "benchmark", "compute", "instruction"))
 }
 
 func BenchmarkEngineXPrecompile(b *testing.B) {
-	benchmarkEngineX(b, filepath.Join(engineXDir, "benchmark", "compute", "precompile"))
+	benchmarkEngineX(b, eestPreAllocDir, filepath.Join(engineXDir, "benchmark", "compute", "precompile"))
 }
 
 func BenchmarkEngineXScenario(b *testing.B) {
-	benchmarkEngineX(b, filepath.Join(engineXDir, "benchmark", "compute", "scenario"))
+	benchmarkEngineX(b, eestPreAllocDir, filepath.Join(engineXDir, "benchmark", "compute", "scenario"))
 }
 
 // BenchmarkEngineXExtraFixtures runs locally stored fixtures from benchmark-fixtures/.
 // Usage: BENCH_ENGINE_X_MANUAL_ALLOW=true go test -run='^$' -bench BenchmarkEngineXExtraFixtures -benchtime=1x -timeout 60m ./execution/tests/
 func BenchmarkEngineXExtraFixtures(b *testing.B) {
-	benchmarkEngineX(b, "benchmark-fixtures")
+	benchmarkEngineX(b, filepath.Join("benchmark-fixtures", "pre_alloc"), filepath.Join("benchmark-fixtures", "benchmark"))
 }
 
 type testEntry struct {
@@ -60,13 +62,12 @@ type testEntry struct {
 
 // benchmarkEngineX walks the given directories for engine-x JSON fixtures,
 // groups them by first-level subdirectory into sub-benchmarks, and executes them.
-func benchmarkEngineX(b *testing.B, testsDir string) {
+func benchmarkEngineX(b *testing.B, preAllocDir, testsDir string) {
 	if !dbg.EnvBool("BENCH_ENGINE_X_MANUAL_ALLOW", false) {
 		b.Skip("benchmark engine x tests are for manual use; enable via BENCH_ENGINE_X_MANUAL_ALLOW=true")
 	}
 
 	logger := testlog.Logger(b, log.LvlDebug)
-	preAllocDir := filepath.Join(engineXDir, "pre_alloc")
 	runner, err := NewEngineXTestRunner(b, logger, preAllocDir)
 	require.NoError(b, err)
 
