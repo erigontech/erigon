@@ -30,6 +30,7 @@ Erigon provides extensive logging configuration through command-line flags. Key 
 * `--log.dir.path`: Specify directory for log files. By default Erigon writing logs to `datadir/logs` directory.
 * `--log.dir.verbosity`: Set file log level
 * `--log.delays`: Enable block delay logging
+* `--vmodule`: Per-module verbosity overrides in the format `pattern=level` (comma-separated). Example: `--vmodule=eth/*=5,p2p=4`
 
 **Log Levels**
 
