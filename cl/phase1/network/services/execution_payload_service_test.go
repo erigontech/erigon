@@ -24,6 +24,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -37,7 +38,7 @@ func setupExecutionPayloadService(t *testing.T) (ExecutionPayloadService, *mock_
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	service := NewExecutionPayloadService(ctx, forkchoiceMock, cfg)
+	service := NewExecutionPayloadService(ctx, forkchoiceMock, cfg, beaconevents.NewEventEmitter())
 	return service, forkchoiceMock
 }
 
@@ -209,6 +210,7 @@ func TestExecutionPayloadServicePendingEnvelopeExpiry(t *testing.T) {
 	impl := &executionPayloadService{
 		forkchoiceStore: forkchoiceMock,
 		beaconCfg:       cfg,
+		emitters:        beaconevents.NewEventEmitter(),
 		pendingCond:     nil, // Don't start background loop
 	}
 	seenCache, err := lru.New[seenEnvelopeKey, struct{}]("seen_envelopes", seenEnvelopeCacheSize)
@@ -249,6 +251,7 @@ func TestExecutionPayloadServicePendingEnvelopeProcessing(t *testing.T) {
 	impl := &executionPayloadService{
 		forkchoiceStore: forkchoiceMock,
 		beaconCfg:       cfg,
+		emitters:        beaconevents.NewEventEmitter(),
 		pendingCond:     nil,
 	}
 	seenCache, err := lru.New[seenEnvelopeKey, struct{}]("seen_envelopes", seenEnvelopeCacheSize)
@@ -301,6 +304,7 @@ func TestExecutionPayloadServiceMultiplePendingForSameBlock(t *testing.T) {
 	impl := &executionPayloadService{
 		forkchoiceStore: forkchoiceMock,
 		beaconCfg:       cfg,
+		emitters:        beaconevents.NewEventEmitter(),
 		pendingCond:     nil,
 	}
 	seenCache, err := lru.New[seenEnvelopeKey, struct{}]("seen_envelopes", seenEnvelopeCacheSize)

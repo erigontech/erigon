@@ -24,7 +24,10 @@ const (
 	OpBlsToExecution    EventTopic = "bls_to_execution_change"
 	OpContributionProof EventTopic = "contribution_and_proof"
 	OpBlobSidecar       EventTopic = "blob_sidecar"
-	OpDataColumnSidecar EventTopic = "data_column_sidecar"
+	OpDataColumnSidecar             EventTopic = "data_column_sidecar"
+	OpPayloadAttestationMessage     EventTopic = "payload_attestation_message"     // [New in Gloas:EIP7732]
+	OpExecutionPayloadBid           EventTopic = "execution_payload_bid"           // [New in Gloas:EIP7732]
+	OpExecutionPayloadAvailable     EventTopic = "execution_payload_available"     // [New in Gloas:EIP7732]
 )
 
 type (
@@ -36,7 +39,10 @@ type (
 	AttesterSlashingData      = cltypes.AttesterSlashing
 	BlsToExecutionChangesData = cltypes.SignedBLSToExecutionChange
 	ContributionAndProofData  = cltypes.SignedContributionAndProof
-	BlobSidecarData           = cltypes.BlobSidecar
+	BlobSidecarData                    = cltypes.BlobSidecar
+	PayloadAttestationMessageData      = cltypes.PayloadAttestationMessage
+	SignedExecutionPayloadBidData      = cltypes.SignedExecutionPayloadBid
+	SignedExecutionPayloadEnvelopeData = cltypes.SignedExecutionPayloadEnvelope
 )
 
 // DataColumnSidecarData includes block_root and slot for SSE events

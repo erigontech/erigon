@@ -24,6 +24,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/gossip"
@@ -66,6 +67,7 @@ const (
 type executionPayloadService struct {
 	forkchoiceStore forkchoice.ForkChoiceStorage
 	beaconCfg       *clparams.BeaconChainConfig
+	emitters        *beaconevents.EventEmitter
 
 	// Cache to track seen envelopes: (beaconBlockRoot, builderIndex) -> struct{}
 	seenEnvelopesCache *lru.Cache[seenEnvelopeKey, struct{}]
@@ -81,6 +83,7 @@ func NewExecutionPayloadService(
 	ctx context.Context,
 	forkchoiceStore forkchoice.ForkChoiceStorage,
 	beaconCfg *clparams.BeaconChainConfig,
+	emitters *beaconevents.EventEmitter,
 ) ExecutionPayloadService {
 	seenEnvelopesCache, err := lru.New[seenEnvelopeKey, struct{}]("seen_envelopes", seenEnvelopeCacheSize)
 	if err != nil {
@@ -89,6 +92,7 @@ func NewExecutionPayloadService(
 	s := &executionPayloadService{
 		forkchoiceStore:    forkchoiceStore,
 		beaconCfg:          beaconCfg,
+		emitters:           emitters,
 		seenEnvelopesCache: seenEnvelopesCache,
 		pendingCond:        sync.NewCond(&sync.Mutex{}),
 	}
@@ -176,6 +180,9 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 	// Mark as seen AFTER successful validation
 	// This ensures invalid envelopes (e.g., with forged signatures) don't block valid ones
 	s.seenEnvelopesCache.Add(seenKey, struct{}{})
+
+	// Emit SSE event for execution_payload_available [New in Gloas:EIP7732]
+	s.emitters.Operation().SendExecutionPayloadAvailable(signedEnvelope)
 
 	log.Debug("Processed execution payload via gossip",
 		"slot", envelope.Slot,
