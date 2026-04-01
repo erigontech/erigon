@@ -24,11 +24,6 @@ import (
 )
 
 func CostPerStateByte(gasLimit uint64) uint64 {
-	// TODO this should be removed after bal-devnet-3 (we use hardcoded cspb=1174 for now)
-	const balDevnet3Spec = true
-	if balDevnet3Spec {
-		return 1174
-	}
 	//raw = ceil((gas_limit * 2_628_000) / (2 * TARGET_STATE_GROWTH_PER_YEAR))
 	//shifted = raw + CPSB_OFFSET
 	//shift = max(bit_length(shifted) - CPSB_SIGNIFICANT_BITS, 0)
