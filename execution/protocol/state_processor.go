@@ -39,9 +39,10 @@ type GasUsed struct {
 	Blob         uint64 // Blob gas - see EIP-4844
 }
 
-// BlockGasUsed returns the EIP-7778 block gas: Σ ReceiptGasUsed (txnGasUsed with refunds) + syscall.
-// Receipt accumulates per-tx txnGasUsed; syscall gas is added to Receipt at finalization.
-func (gu *GasUsed) BlockGasUsed() uint64 { return gu.Receipt }
+// BlockGasUsed returns the EIP-7778 block gas per gaspool.go: Σ regular + Σ state.
+// BlockRegular accumulates per-tx BlockRegularGasUsed; for pre-Amsterdam finalize syscall gas
+// is also added to BlockRegular. BlockState accumulates per-tx BlockStateGasUsed.
+func (gu *GasUsed) BlockGasUsed() uint64 { return gu.BlockRegular + gu.BlockState }
 
 func SetGasUsed(h *types.Header, gu *GasUsed) {
 	h.GasUsed = gu.BlockGasUsed()

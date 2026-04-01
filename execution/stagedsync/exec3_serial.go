@@ -31,10 +31,9 @@ type serialExecutor struct {
 	txExecutor
 	// outputs
 	txCount           uint64
-	blockGasUsed      uint64 // accumulated regular gas (pre-Amsterdam: same as block gas)
-	blockStateGasUsed uint64 // EIP-8037: accumulated state gas
+	blockGasUsed      uint64 // accumulated BlockRegularGasUsed per tx (EIP-7778: Σ BlockRegular)
+	blockStateGasUsed uint64 // accumulated BlockStateGasUsed per tx (EIP-8037: Σ BlockState)
 	blobGasUsed       uint64
-	initGasUsed       uint64 // EIP-4788 gas from block initialization (Amsterdam+)
 	lastBlockResult   *blockResult
 	worker            *exec.Worker
 
@@ -362,14 +361,9 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			}
 
 			se.txCount++
-			// EIP-7778: block gas = Σ ReceiptGasUsed (txnGasUsed with refunds) + syscall.
-			// ReceiptGasUsed = blockRegular + blockState - refund, so refunds are already applied.
-			se.blockGasUsed += result.ExecutionResult.ReceiptGasUsed
+			// EIP-7778 + gaspool.go: blockGasUsed = Σ BlockRegular + Σ BlockState.
+			se.blockGasUsed += result.ExecutionResult.BlockRegularGasUsed
 			se.blockStateGasUsed += result.ExecutionResult.BlockStateGasUsed
-			// Capture EIP-4788 init gas (Amsterdam+) from the block-init task (TxIndex == -1).
-			if txTask.TxIndex < 0 && txTask.BlockNumber() > 0 {
-				se.initGasUsed = result.InitGasUsed
-			}
 			if dbg.TraceGas && !txTask.IsBlockEnd() && result.ExecutionResult.BlockStateGasUsed > 0 {
 				se.logger.Warn("tx state gas", "block", txTask.BlockNumber(), "txIdx", txTask.TxIndex,
 					"blockRegular", result.ExecutionResult.BlockRegularGasUsed,
@@ -410,11 +404,10 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err)
 				}
 
-				// EIP-7778: for Amsterdam+, blockGasUsed uses begin-block (EIP-4788) gas,
-				// not finalize (EIP-7002/EIP-7251) gas. For pre-Amsterdam, use finalize gas.
-				if se.cfg.chainConfig.IsAmsterdam(txTask.Header.Time) {
-					se.blockGasUsed += se.initGasUsed
-				} else {
+				// EIP-7778 + gaspool.go: blockGasUsed = Σ BlockRegular + Σ BlockState.
+				// For pre-Amsterdam: add finalize syscall gas (EIP-7002/EIP-7251) to blockRegular.
+				// For Amsterdam: no syscall gas added to blockGasUsed.
+				if !se.cfg.chainConfig.IsAmsterdam(txTask.Header.Time) {
 					se.blockGasUsed += sysCallGasUsed
 				}
 
@@ -425,8 +418,8 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 
 				if txTask.BlockNumber() > 0 && startTxIndex == 0 {
 					//Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-					// EIP-7778: block gas = Σ ReceiptGasUsed (txnGasUsed with refunds) + syscall.
-					blockGasUsed := se.blockGasUsed
+					// EIP-7778 + gaspool.go: blockGasUsed = Σ BlockRegular + Σ BlockState.
+					blockGasUsed := se.blockGasUsed + se.blockStateGasUsed
 					if dbg.TraceGas {
 						se.logger.Warn("block gas breakdown", "block", txTask.BlockNumber(),
 							"blockRegular", se.blockGasUsed, "blockState", se.blockStateGasUsed,
@@ -583,7 +576,6 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			se.blockGasUsed = 0
 			se.blockStateGasUsed = 0
 			se.blobGasUsed = 0
-			se.initGasUsed = 0
 			gasPool = nil
 		}
 	}

@@ -116,7 +116,7 @@ func ExecuteBlockEphemerally(
 		}()
 	}
 
-	initGasUsed, err := InitializeBlockExecution(engine, chainReader, block.Header(), chainConfig, ibs, stateWriter, logger, vmConfig.Tracer)
+	_, err := InitializeBlockExecution(engine, chainReader, block.Header(), chainConfig, ibs, stateWriter, logger, vmConfig.Tracer)
 	if err != nil {
 		return nil, err
 	}
@@ -184,12 +184,11 @@ func ExecuteBlockEphemerally(
 			return nil, err
 		}
 	}
-	// EIP-7778: for Amsterdam+, blockGasUsed uses begin-block (EIP-4788) gas,
-	// not finalize (EIP-7002/EIP-7251) gas. For pre-Amsterdam, use finalize gas.
-	if chainConfig.IsAmsterdam(header.Time) {
-		gasUsed.Receipt += initGasUsed
-	} else {
-		gasUsed.Receipt += sysCallGasUsed
+	// EIP-7778 + gaspool.go: blockGasUsed = Σ BlockRegular + Σ BlockState.
+	// For Amsterdam: no syscall gas added; blockGasUsed is determined by per-tx BlockRegular/BlockState.
+	// For pre-Amsterdam: add finalize syscall gas (EIP-7002/EIP-7251) to BlockRegular.
+	if !chainConfig.IsAmsterdam(header.Time) {
+		gasUsed.BlockRegular += sysCallGasUsed
 	}
 
 	// EIP-8037: compute block-level Bottleneck for Amsterdam.
