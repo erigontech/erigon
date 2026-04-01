@@ -601,6 +601,10 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	}
 
 	if vmerr != nil && rules.IsAmsterdam {
+		revertReason := ""
+		if errors.Is(vmerr, vm.ErrExecutionReverted) && len(ret) >= 4 {
+			revertReason = fmt.Sprintf("0x%x", ret)
+		}
 		log.Warn("[amsterdam] tx reverted",
 			"block", st.evm.Context.BlockNumber,
 			"from", st.msg.From(),
@@ -610,6 +614,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			"gasRemainingRegular", st.gasRemaining.Regular,
 			"gasRemainingState", st.gasRemaining.State,
 			"vmerr", vmerr,
+			"revertData", revertReason,
 		)
 	}
 
