@@ -98,7 +98,10 @@ func (f *ForkChoiceStore) applyPayloadAttestationVote(
 		return
 	}
 
-	// Update the payload timeliness vote
+	// Atomically update PTC vote arrays under mutex to prevent concurrent
+	// Load→modify→Store from losing votes. See also OnPayloadAttestationMessage.
+	f.ptcVoteMu.Lock()
+
 	var timelinessVotes [clparams.PtcSize]bool
 	if existing, ok := f.payloadTimelinessVote.Load(blockRoot); ok {
 		timelinessVotes = existing.([clparams.PtcSize]bool)
@@ -106,13 +109,14 @@ func (f *ForkChoiceStore) applyPayloadAttestationVote(
 	timelinessVotes[ptcIndex] = data.PayloadPresent
 	f.payloadTimelinessVote.Store(blockRoot, timelinessVotes)
 
-	// Update the data availability vote
 	var dataAvailabilityVotes [clparams.PtcSize]bool
 	if existing, ok := f.payloadDataAvailabilityVote.Load(blockRoot); ok {
 		dataAvailabilityVotes = existing.([clparams.PtcSize]bool)
 	}
 	dataAvailabilityVotes[ptcIndex] = data.BlobDataAvailable
 	f.payloadDataAvailabilityVote.Store(blockRoot, dataAvailabilityVotes)
+
+	f.ptcVoteMu.Unlock()
 }
 
 // isPayloadTimely returns whether the execution payload for the beacon block with root
