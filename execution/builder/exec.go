@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/metrics"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
@@ -264,12 +265,6 @@ func getNextTransactions(
 	logger log.Logger,
 ) ([]types.Transaction, error) {
 	availableRlpSpace := cfg.builderState.BuiltBlock.AvailableRlpSpace(cfg.chainConfig)
-	// EIP-8037: use remaining regular gas as the primary gas target for the
-	// txpool, and remaining state gas for intrinsic state gas filtering.
-	// Execution-time state gas (SSTOREs) is enforced by post-execution
-	// rollback in the block assembler.
-	remainingRegularGas := header.GasLimit - gasUsed.BlockRegular
-	remainingStateGas := header.GasLimit - gasUsed.BlockState
 	remainingBlobGas := uint64(0)
 	if header.BlobGasUsed != nil {
 		maxBlobs := cfg.chainConfig.GetMaxBlobsPerBlock(header.Time)
@@ -283,9 +278,14 @@ func getNextTransactions(
 		txnprovider.WithAmount(amount),
 		txnprovider.WithParentBlockNum(executionAt),
 		txnprovider.WithBlockTime(header.Time),
-		txnprovider.WithRegularGasTarget(remainingRegularGas),
-		txnprovider.WithStateGasTarget(remainingStateGas),
-		txnprovider.WithBlobGasTarget(remainingBlobGas),
+		// EIP-8037: remaining regular gas is the primary budget; remaining state
+		// gas filters by intrinsic state gas. Execution-time state gas (SSTOREs)
+		// is enforced by post-execution rollback in the block assembler.
+		txnprovider.WithGasTarget(mdgas.NewFullMdGas(
+			header.GasLimit-gasUsed.BlockRegular,
+			header.GasLimit-gasUsed.BlockState,
+			remainingBlobGas,
+		)),
 		txnprovider.WithTxnIdsFilter(alreadyYielded),
 		txnprovider.WithAvailableRlpSpace(availableRlpSpace),
 	}

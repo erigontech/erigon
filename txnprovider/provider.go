@@ -22,6 +22,7 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -29,9 +30,7 @@ type TxnProvider interface {
 	// ProvideTxns provides transactions ready to be included in a block for block building. Available request options:
 	//   - WithParentBlockNum
 	//   - WithAmount
-	//   - WithRegularGasTarget
-	//   - WithStateGasTarget
-	//   - WithBlobGasTarget
+	//   - WithGasTarget
 	//   - WithTxnIdsFilter
 	//   - WithAvailableRlpSpace
 	ProvideTxns(ctx context.Context, opts ...ProvideOption) ([]types.Transaction, error)
@@ -57,21 +56,9 @@ func WithAmount(amount int) ProvideOption {
 	}
 }
 
-func WithRegularGasTarget(gasTarget uint64) ProvideOption {
+func WithGasTarget(gasTarget mdgas.FullMdGas) ProvideOption {
 	return func(opt *ProvideOptions) {
-		opt.RegularGasTarget = gasTarget
-	}
-}
-
-func WithStateGasTarget(stateGasTarget uint64) ProvideOption {
-	return func(opt *ProvideOptions) {
-		opt.StateGasTarget = stateGasTarget
-	}
-}
-
-func WithBlobGasTarget(blobGasTarget uint64) ProvideOption {
-	return func(opt *ProvideOptions) {
-		opt.BlobGasTarget = blobGasTarget
+		opt.GasTarget = gasTarget
 	}
 }
 
@@ -91,9 +78,7 @@ type ProvideOptions struct {
 	BlockTime         uint64
 	ParentBlockNum    uint64
 	Amount            int
-	RegularGasTarget  uint64
-	StateGasTarget    uint64
-	BlobGasTarget     uint64
+	GasTarget         mdgas.FullMdGas
 	TxnIdsFilter      mapset.Set[[32]byte]
 	AvailableRlpSpace int
 }
@@ -107,11 +92,9 @@ func ApplyProvideOptions(opts ...ProvideOption) ProvideOptions {
 }
 
 var defaultProvideOptions = ProvideOptions{
-	ParentBlockNum:    0,              // no parent block to wait for by default
-	Amount:            math.MaxInt,    // all transactions by default
-	RegularGasTarget:  math.MaxUint64, // all transactions by default
-	StateGasTarget:    math.MaxUint64, // all transactions by default
-	BlobGasTarget:     math.MaxUint64, // all transactions by default
-	TxnIdsFilter:      nil,            // no filter by default
-	AvailableRlpSpace: math.MaxInt,    // unlimited by default
+	ParentBlockNum:    0,           // no parent block to wait for by default
+	Amount:            math.MaxInt, // all transactions by default
+	GasTarget:         mdgas.NewFullMdGas(math.MaxUint64, math.MaxUint64, math.MaxUint64),
+	TxnIdsFilter:      nil,         // no filter by default
+	AvailableRlpSpace: math.MaxInt, // unlimited by default
 }

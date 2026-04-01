@@ -841,7 +841,7 @@ func (p *TxPool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOpt
 		provideOptions.Amount,
 		&txnsRlp,
 		provideOptions.ParentBlockNum,
-		mdgas.NewFullMdGas(provideOptions.RegularGasTarget, provideOptions.StateGasTarget, provideOptions.BlobGasTarget),
+		provideOptions.GasTarget,
 		provideOptions.TxnIdsFilter,
 		provideOptions.AvailableRlpSpace,
 	)

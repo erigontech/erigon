@@ -286,8 +286,7 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 	// dimensions. State gas enforcement ultimately relies on best() in
 	// the base txpool (for additional public txns) and applyTransaction
 	// (for all txns).
-	availableRegularGas := provideOpts.RegularGasTarget
-	availableStateGas := provideOpts.StateGasTarget
+	availableGas := provideOpts.GasTarget
 	txnsIdFilter := provideOpts.TxnIdsFilter
 	txns := make([]types.Transaction, 0, len(decryptedTxns.Transactions))
 	decryptedTxnsGas := uint64(0)
@@ -296,11 +295,11 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 			continue
 		}
 		gasLimit := txn.GetGasLimit()
-		if gasLimit > availableRegularGas || gasLimit > availableStateGas {
+		if gasLimit > availableGas.Regular || gasLimit > availableGas.State {
 			continue
 		}
-		availableRegularGas -= gasLimit
-		availableStateGas -= gasLimit
+		availableGas.Regular -= gasLimit
+		availableGas.State -= gasLimit
 		decryptedTxnsGas += gasLimit
 		txns = append(txns, txn)
 		if txnsIdFilter != nil {
@@ -309,10 +308,7 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 	}
 
 	p.logger.Debug("providing decrypted txns", "count", len(txns), "gas", decryptedTxnsGas)
-	opts = append(opts,
-		txnprovider.WithRegularGasTarget(availableRegularGas),
-		txnprovider.WithStateGasTarget(availableStateGas),
-	)
+	opts = append(opts, txnprovider.WithGasTarget(availableGas))
 	additionalTxns, err := p.baseTxnProvider.ProvideTxns(ctx, opts...)
 	if err != nil {
 		return nil, err
