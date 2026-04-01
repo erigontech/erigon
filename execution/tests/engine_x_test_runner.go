@@ -303,6 +303,22 @@ type EngineXTestNewPayload struct {
 	FcuVersion        string            `json:"forkchoiceUpdatedVersion"`
 }
 
+// GasUsed returns the total gas used across all payloads in the test.
+func (d *EngineXTestDefinition) GasUsed() uint64 {
+	var total uint64
+	for _, p := range d.NewPayloads {
+		if len(p.Params) > 0 {
+			var ep struct {
+				GasUsed hexutil.Uint64 `json:"gasUsed"`
+			}
+			if json.Unmarshal(p.Params[0], &ep) == nil {
+				total += uint64(ep.GasUsed)
+			}
+		}
+	}
+	return total
+}
+
 type PreAllocHash string
 
 type PreAlloc struct {

@@ -108,11 +108,18 @@ func benchmarkEngineX(b *testing.B, preAllocDir, testsDir string) {
 	b.ResetTimer()
 	for subcat, entries := range subcategories {
 		entries := entries
+		var totalGas uint64
+		for _, e := range entries {
+			totalGas += e.def.GasUsed()
+		}
 		b.Run(subcat, func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				for _, e := range entries {
 					require.NoError(b, runner.Execute(b.Context(), e.def), "%s/%s", subcat, e.name)
 				}
+			}
+			if totalGas > 0 {
+				b.ReportMetric(float64(totalGas)/float64(b.Elapsed().Nanoseconds())*1e3, "Mgas/s")
 			}
 		})
 	}
