@@ -96,13 +96,15 @@ func (f *ForkChoiceStore) OnPayloadAttestationMessage(
 		}
 	}
 
+	// Atomically update PTC vote arrays under mutex to prevent concurrent
+	// Load→modify→Store from losing votes. See also applyPayloadAttestationVote.
+	f.ptcVoteMu.Lock()
+
 	// Get or initialize the payload timeliness vote array for this block root
 	var timelinessVotes [clparams.PtcSize]bool
 	if existing, ok := f.payloadTimelinessVote.Load(blockRoot); ok {
 		timelinessVotes = existing.([clparams.PtcSize]bool)
 	}
-
-	// Update the payload timeliness vote for the block
 	timelinessVotes[ptcIndex] = data.PayloadPresent
 	f.payloadTimelinessVote.Store(blockRoot, timelinessVotes)
 
@@ -111,10 +113,10 @@ func (f *ForkChoiceStore) OnPayloadAttestationMessage(
 	if existing, ok := f.payloadDataAvailabilityVote.Load(blockRoot); ok {
 		dataAvailabilityVotes = existing.([clparams.PtcSize]bool)
 	}
-
-	// Update the data availability vote for the block
 	dataAvailabilityVotes[ptcIndex] = data.BlobDataAvailable
 	f.payloadDataAvailabilityVote.Store(blockRoot, dataAvailabilityVotes)
+
+	f.ptcVoteMu.Unlock()
 
 	return nil
 }
