@@ -401,10 +401,10 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	blsToExecutionChangeService := services.NewBLSToExecutionChangeService(pool, emitters, syncedDataManager, beaconConfig, batchSignatureVerifier)
 	proposerSlashingService := services.NewProposerSlashingService(pool, syncedDataManager, beaconConfig, ethClock, emitters)
 	attesterSlashingService := services.NewAttesterSlashingService(forkChoice)
-	executionPayloadService := services.NewExecutionPayloadService(ctx, forkChoice, beaconConfig)
-	payloadAttestationService := services.NewPayloadAttestationService(ctx, forkChoice, ethClock, networkConfig)
+	executionPayloadService := services.NewExecutionPayloadService(ctx, forkChoice, beaconConfig, emitters)
+	payloadAttestationService := services.NewPayloadAttestationService(ctx, forkChoice, ethClock, networkConfig, emitters)
 	proposerPreferencesService := services.NewProposerPreferencesService(syncedDataManager, ethClock, beaconConfig, epbsPool)
-	executionPayloadBidService := services.NewExecutionPayloadBidService(ctx, syncedDataManager, forkChoice, ethClock, beaconConfig, epbsPool)
+	executionPayloadBidService := services.NewExecutionPayloadBidService(ctx, syncedDataManager, forkChoice, ethClock, beaconConfig, epbsPool, emitters)
 	registry.RegisterGossipServices(
 		gossipManager,
 		forkChoice,
