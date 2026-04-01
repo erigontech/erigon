@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -236,7 +237,18 @@ func Main(ctx *cli.Context) error {
 	// Sanity check, to not `panic` in txn_executor
 	if eip1559 {
 		if prestate.Env.BaseFee == nil {
-			return NewError(ErrorVMConfig, errors.New("EIP-1559 config but missing 'currentBaseFee' in env section"))
+			// Calculate basefee from parent parameters if not explicitly provided
+			if prestate.Env.ParentBaseFee != nil {
+				parent := &types.Header{
+					GasLimit: prestate.Env.ParentGasLimit,
+					GasUsed:  prestate.Env.ParentGasUsed,
+					BaseFee:  prestate.Env.ParentBaseFee,
+				}
+				baseFee := misc.CalcBaseFee(chainConfig, parent)
+				prestate.Env.BaseFee = baseFee
+			} else {
+				return NewError(ErrorVMConfig, errors.New("EIP-1559 config but missing 'currentBaseFee' in env section"))
+			}
 		}
 	} else {
 		prestate.Env.Random = nil
@@ -244,6 +256,18 @@ func Main(ctx *cli.Context) error {
 
 	if chainConfig.IsShanghai(prestate.Env.Timestamp) && prestate.Env.Withdrawals == nil {
 		return NewError(ErrorVMConfig, errors.New("shanghai config but missing 'withdrawals' in env section"))
+	}
+
+	// Calculate excess blob gas from parent fields if not explicitly provided
+	if chainConfig.IsCancun(prestate.Env.Timestamp) {
+		if prestate.Env.ExcessBlobGas == nil && prestate.Env.ParentExcessBlobGas != nil && prestate.Env.ParentBlobGasUsed != nil {
+			parentHeader := &types.Header{
+				ExcessBlobGas: prestate.Env.ParentExcessBlobGas,
+				BlobGasUsed:   prestate.Env.ParentBlobGasUsed,
+			}
+			excess := misc.CalcExcessBlobGas(chainConfig, parentHeader, prestate.Env.Timestamp)
+			prestate.Env.ExcessBlobGas = &excess
+		}
 	}
 
 	isMerged := chainConfig.TerminalTotalDifficulty != nil && chainConfig.TerminalTotalDifficulty.BitLen() == 0
@@ -340,13 +364,32 @@ func Main(ctx *cli.Context) error {
 	}
 	result.StateRoot = *root
 
+	// Build extended result with fields EEST expects
+	extResult := &ExtendedResult{EphemeralExecResult: result}
+	if prestate.Env.BaseFee != nil {
+		extResult.BaseFee = (*math.HexOrDecimal256)(prestate.Env.BaseFee.ToBig())
+	}
+	if prestate.Env.ExcessBlobGas != nil {
+		extResult.CurrentExcessBlobGas = (*math.HexOrDecimal64)(prestate.Env.ExcessBlobGas)
+	}
+	if prestate.Env.Withdrawals != nil {
+		h := types.DeriveSha(types.Withdrawals(prestate.Env.Withdrawals))
+		extResult.WithdrawalsRoot = &h
+	}
+	if chainConfig.IsPrague(prestate.Env.Timestamp) {
+		h := common.HexToHash("0x6036c41849da9c076ed79654d434017571571ba34b4729bdae97e46202e72f13") // SHA256 of empty requests list per EIP-7685
+		extResult.RequestsHash = &h
+	}
+	var blobGasUsed uint64
+	extResult.BlobGasUsed = (*math.HexOrDecimal64)(&blobGasUsed)
+
 	// Dump the execution result
 	body, _ := rlp.EncodeToBytes(txs)
 	collector := make(Alloc)
 
 	dumper := state.NewDumper(tx, rawdbv3.TxNums, prestate.Env.Number)
 	dumper.DumpToCollector(context.Background(), collector, false, false, common.Address{}, 0)
-	return dispatchOutput(ctx, baseDir, result, collector, body)
+	return dispatchOutput(ctx, baseDir, extResult, collector, body)
 }
 
 // txWithKey is a helper-struct, to allow us to use the types.Transaction along with
@@ -543,6 +586,16 @@ func signUnsignedTransactions(txs []*txWithKey, signer types.Signer) (types.Tran
 	return signedTxs, nil
 }
 
+// ExtendedResult wraps EphemeralExecResult with additional fields that EEST expects.
+type ExtendedResult struct {
+	*protocol.EphemeralExecResult
+	BaseFee              *math.HexOrDecimal256 `json:"currentBaseFee,omitempty"`
+	CurrentExcessBlobGas *math.HexOrDecimal64  `json:"currentExcessBlobGas,omitempty"`
+	WithdrawalsRoot      *common.Hash          `json:"withdrawalsRoot,omitempty"`
+	RequestsHash         *common.Hash          `json:"requestsHash,omitempty"`
+	BlobGasUsed          *math.HexOrDecimal64  `json:"blobGasUsed,omitempty"`
+}
+
 type Alloc map[common.Address]types.GenesisAccount
 
 func (g Alloc) OnRoot(common.Hash) {}
@@ -581,7 +634,7 @@ func saveFile(baseDir, filename string, data any) error {
 
 // dispatchOutput writes the output data to either stderr or stdout, or to the specified
 // files
-func dispatchOutput(ctx *cli.Context, baseDir string, result *protocol.EphemeralExecResult, alloc Alloc, body hexutil.Bytes) error {
+func dispatchOutput(ctx *cli.Context, baseDir string, result *ExtendedResult, alloc Alloc, body hexutil.Bytes) error {
 	stdOutObject := make(map[string]any)
 	stdErrObject := make(map[string]any)
 	dispatch := func(baseDir, fName, name string, obj any) error {
@@ -640,6 +693,12 @@ func NewHeader(env stEnv) *types.Header {
 	header.UncleHash = env.UncleHash
 	header.WithdrawalsHash = env.WithdrawalsHash
 	header.RequestsHash = env.RequestsHash
+	if env.ExcessBlobGas != nil {
+		header.ExcessBlobGas = env.ExcessBlobGas
+	}
+	if env.ParentBeaconBlockRoot != nil {
+		header.ParentBeaconBlockRoot = env.ParentBeaconBlockRoot
+	}
 
 	return &header
 }
