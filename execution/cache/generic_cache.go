@@ -81,7 +81,7 @@ func (c *DomainCache) Delete(key []byte) {
 // Get retrieves data for the given key.
 func (c *GenericCache[T]) Get(key []byte) (T, bool) {
 	value, ok := c.data.Get(key)
-	if !ok || c.sizeFunc(value) == 0 {
+	if !ok {
 		c.misses.Add(1)
 		var zero T
 		return zero, false
