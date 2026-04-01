@@ -336,7 +336,7 @@ func (a *Aggregator) AddDependencyBtwnDomains(dependency kv.Domain, dependent kv
 	// only corresponding files should be included. e.g. commitment + account -
 	// cannot have merged account visibleFile, and unmerged commitment visibleFile for same step range.
 	if a.checker == nil {
-		a.checker = NewDependencyIntegrityChecker(a.dirs, a.logger)
+		a.checker = NewDependencyIntegrityChecker(a.logger)
 	}
 
 	a.checker.AddDependency(FromDomain(dependency), &DependentInfo{
@@ -356,7 +356,7 @@ func (a *Aggregator) AddDependencyBtwnHistoryII(domain kv.Domain) {
 	}
 
 	if a.checker == nil {
-		a.checker = NewDependencyIntegrityChecker(a.dirs, a.logger)
+		a.checker = NewDependencyIntegrityChecker(a.logger)
 	}
 
 	h := dd.History
@@ -386,6 +386,16 @@ func (a *Aggregator) DisableAllDependencies() {
 		return
 	}
 	a.checker.Disable()
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
+}
+
+func (a *Aggregator) DisableInterDomainDependencies() {
+	if a.checker == nil {
+		return
+	}
+	a.checker.DisableInterDomain()
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
@@ -931,7 +941,7 @@ Loop:
 }
 
 // [from, to)
-func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step) error {
+func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step, doMerge bool) error {
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
 		return nil
 	}
@@ -956,11 +966,13 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step) 
 			a.onFilesChange(nil)
 		}
 
-		go func() {
-			if err := a.MergeLoop(ctx); err != nil {
-				panic(err)
-			}
-		}()
+		if doMerge {
+			go func() {
+				if err := a.MergeLoop(ctx); err != nil {
+					panic(err)
+				}
+			}()
+		}
 	}()
 	return nil
 }
@@ -1794,7 +1806,6 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 		a.logger.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB)
 
 		// check if db has enough data (maybe we didn't commit them yet or all keys are unique so history is empty)
-		//lastInDB := lastIdInDB(a.db, a.d[kv.AccountsDomain])
 		hasData := lastInDB > step // `step` must be fully-written - means `step+1` records must be visible
 		if !hasData {
 			close(fin)
@@ -1824,7 +1835,6 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 		}
 		go func() {
 			defer close(fin)
-
 			if err := a.MergeLoop(a.ctx); err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
 					return
@@ -1864,6 +1874,10 @@ func (at *AggregatorRoTx) HistorySeek(domain kv.Domain, key []byte, ts uint64, t
 
 func (at *AggregatorRoTx) HistoryRange(domain kv.Domain, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (it stream.KV, err error) {
 	return at.d[domain].ht.HistoryRange(fromTs, toTs, asc, limit, tx)
+}
+
+func (at *AggregatorRoTx) HistoryKeyTxNumRange(domain kv.Domain, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (stream.KU64, error) {
+	return at.d[domain].ht.HistoryKeyTxNumRange(fromTs, toTs, asc, limit, tx)
 }
 
 func (at *AggregatorRoTx) KeyCountInFiles(d kv.Domain, start, end uint64) (totalKeys uint64) {

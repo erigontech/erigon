@@ -2874,6 +2874,11 @@ func (hph *HexPatriciaHashed) ResetContext(ctx PatriciaContext) {
 	hph.ctx = ctx
 }
 
+// Cache returns the active warmup cache, or nil if none is set.
+func (hph *HexPatriciaHashed) Cache() *WarmupCache {
+	return hph.cache
+}
+
 // branchFromCacheOrDB reads branch data from cache if available, otherwise from DB.
 func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
 	if hph.cache != nil {

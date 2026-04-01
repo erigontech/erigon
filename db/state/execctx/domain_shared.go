@@ -650,6 +650,10 @@ func (sd *SharedDomains) EnableWarmupCache(enable bool) {
 	sd.sdCtx.EnableWarmupCache(enable)
 }
 
+func (sd *SharedDomains) ClearWarmupCache() {
+	sd.sdCtx.ClearWarmupCache()
+}
+
 // SetDeferCommitmentUpdates enables or disables deferred commitment updates.
 // When enabled, commitment branch updates are stored in the commitment context
 // instead of being applied inline, and must be flushed later via FlushPendingUpdates.
@@ -676,7 +680,7 @@ func (sd *SharedDomains) TouchChangedKeysFromHistory(tx kv.TemporalTx, fromTxNum
 // touches them onto the commitment trie.
 func (sd *SharedDomains) touchChangedKeys(tx kv.TemporalTx, d kv.Domain, fromTxNum uint64, toTxNum uint64) (int, error) {
 	changes := 0
-	it, err := tx.HistoryRange(d, int(fromTxNum), int(toTxNum), order.Asc, -1)
+	it, err := tx.Debug().HistoryKeyTxNumRange(d, int(fromTxNum), int(toTxNum), order.Asc, -1)
 	if err != nil {
 		return changes, err
 	}
