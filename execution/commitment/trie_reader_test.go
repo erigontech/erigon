@@ -18,12 +18,26 @@ package commitment
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/db/kv"
 )
+
+// errTrieReaderTestCtx is a mock PatriciaContext that returns an error for a specific prefix.
+type errTrieReaderTestCtx struct {
+	trieReaderTestCtx
+	errPrefix string
+}
+
+func (tc *errTrieReaderTestCtx) Branch(prefix []byte) ([]byte, kv.Step, error) {
+	if string(prefix) == tc.errPrefix {
+		return nil, 0, fmt.Errorf("disk I/O error")
+	}
+	return tc.trieReaderTestCtx.Branch(prefix)
+}
 
 // trieReaderTestCtx is a mock PatriciaContext backed by a map of compact prefix -> branch data.
 type trieReaderTestCtx struct {
@@ -134,7 +148,7 @@ func TestTrieReader_AccountLookupHit(t *testing.T) {
 	hashedKey := make([]byte, 64)
 	hashedKey[0] = 0xa
 
-	tr := NewTrieReader(ctx, 64)
+	tr := NewTrieReader(ctx)
 	c, found, err := tr.Lookup(hashedKey)
 	require.NoError(t, err)
 	require.True(t, found, "expected account to be found")
@@ -154,7 +168,7 @@ func TestTrieReader_Miss(t *testing.T) {
 	hashedKey := make([]byte, 64)
 	hashedKey[0] = 0x3
 
-	tr := NewTrieReader(ctx, 64)
+	tr := NewTrieReader(ctx)
 	_, found, err := tr.Lookup(hashedKey)
 	require.NoError(t, err)
 	require.False(t, found, "expected key not found")
@@ -168,7 +182,7 @@ func TestTrieReader_MissEmptyTrie(t *testing.T) {
 	hashedKey := make([]byte, 64)
 	hashedKey[0] = 0x1
 
-	tr := NewTrieReader(ctx, 64)
+	tr := NewTrieReader(ctx)
 	_, found, err := tr.Lookup(hashedKey)
 	require.NoError(t, err)
 	require.False(t, found, "expected not found in empty trie")
@@ -200,7 +214,7 @@ func TestTrieReader_ExtensionTraversal(t *testing.T) {
 	hashedKey[2] = 0x2
 	hashedKey[3] = 0x1
 
-	tr := NewTrieReader(ctx, 64)
+	tr := NewTrieReader(ctx)
 	c, found, err := tr.Lookup(hashedKey)
 	require.NoError(t, err)
 	require.True(t, found, "expected account found after extension traversal")
@@ -222,7 +236,7 @@ func TestTrieReader_ExtensionMismatch(t *testing.T) {
 	hashedKey[1] = 0x7
 	hashedKey[2] = 0x9 // mismatch
 
-	tr := NewTrieReader(ctx, 64)
+	tr := NewTrieReader(ctx)
 	_, found, err := tr.Lookup(hashedKey)
 	require.NoError(t, err)
 	require.False(t, found, "expected miss on extension mismatch")
@@ -256,7 +270,7 @@ func TestTrieReader_MultiLevelDescent(t *testing.T) {
 	copy(hashedKey, nibbles)
 	hashedKey[depth] = 0xc
 
-	tr := NewTrieReader(ctx, 64)
+	tr := NewTrieReader(ctx)
 	c, found, err := tr.Lookup(hashedKey)
 	require.NoError(t, err)
 	require.True(t, found, "expected account found after multi-level descent (depth > 9)")
@@ -278,7 +292,7 @@ func TestTrieReader_StorageLookup(t *testing.T) {
 	hashedKey := make([]byte, 64)
 	hashedKey[0] = 0x7
 
-	tr := NewTrieReader(ctx, 64)
+	tr := NewTrieReader(ctx)
 	c, found, err := tr.Lookup(hashedKey)
 	require.NoError(t, err)
 	require.True(t, found, "expected storage leaf found")
@@ -300,7 +314,7 @@ func TestTrieReader_MultipleChildrenInBranch(t *testing.T) {
 	rootCells[0xb] = makeAccountCell(addrB, dummyHash())
 	ctx.putBranch(nil, rootCells)
 
-	tr := NewTrieReader(ctx, 64)
+	tr := NewTrieReader(ctx)
 
 	for _, tc := range []struct {
 		nibble byte
@@ -318,4 +332,52 @@ func TestTrieReader_MultipleChildrenInBranch(t *testing.T) {
 		require.True(t, found, "expected hit for nibble %x", tc.nibble)
 		require.Equal(t, tc.addr, c.accountAddr[:c.accountAddrLen])
 	}
+}
+
+func TestTrieReader_BranchError(t *testing.T) {
+	t.Parallel()
+
+	// Root branch has nibble 0x5 pointing to a hash cell, so Lookup descends.
+	// The second Branch() call (at depth 1) returns an error.
+	inner := newTrieReaderTestCtx()
+	var rootCells [16]*cell
+	rootCells[0x5] = makeBranchCell(dummyHash())
+	inner.putBranch(nil, rootCells)
+
+	// Make the second-level Branch() fail.
+	hashedKey := make([]byte, 64)
+	hashedKey[0] = 0x5
+	secondPrefix := HexNibblesToCompactBytes(hashedKey[:1])
+
+	ctx := &errTrieReaderTestCtx{
+		trieReaderTestCtx: *inner,
+		errPrefix:         string(secondPrefix),
+	}
+
+	tr := NewTrieReader(ctx)
+	_, _, err := tr.Lookup(hashedKey)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "disk I/O error")
+	require.Contains(t, err.Error(), "Branch at depth 1")
+}
+
+func TestTrieReader_EmptyKey(t *testing.T) {
+	t.Parallel()
+
+	ctx := newTrieReaderTestCtx()
+	var rootCells [16]*cell
+	rootCells[0x0] = makeAccountCell(bytes.Repeat([]byte{0xAA}, 20), dummyHash())
+	ctx.putBranch(nil, rootCells)
+
+	tr := NewTrieReader(ctx)
+
+	// Empty key should return not-found without error.
+	_, found, err := tr.Lookup([]byte{})
+	require.NoError(t, err)
+	require.False(t, found)
+
+	// Nil key should behave the same.
+	_, found, err = tr.Lookup(nil)
+	require.NoError(t, err)
+	require.False(t, found)
 }

@@ -25,14 +25,12 @@ import (
 // TrieReader navigates the Patricia trie by hashed key without any mutable grid
 // state. Each Lookup call starts from the root and descends independently.
 type TrieReader struct {
-	ctx           PatriciaContext
-	accountKeyLen int16
+	ctx PatriciaContext
 }
 
 // NewTrieReader creates a TrieReader that uses ctx for branch lookups.
-// accountKeyLen is the hashed account key length in nibbles (typically 64).
-func NewTrieReader(ctx PatriciaContext, accountKeyLen int16) *TrieReader {
-	return &TrieReader{ctx: ctx, accountKeyLen: accountKeyLen}
+func NewTrieReader(ctx PatriciaContext) *TrieReader {
+	return &TrieReader{ctx: ctx}
 }
 
 // parseCellAt parses exactly one cell from branch cell data at position nibble.
@@ -78,7 +76,7 @@ func parseCellAt(data []byte, bitmap uint16, nibble int) (c cell, err error) {
 func (tr *TrieReader) Lookup(hashedKey []byte) (c cell, found bool, err error) {
 	depth := 0
 	for {
-		if depth > len(hashedKey) {
+		if depth >= len(hashedKey) {
 			return c, false, nil
 		}
 
@@ -94,10 +92,6 @@ func (tr *TrieReader) Lookup(hashedKey []byte) (c cell, found bool, err error) {
 
 		afterMap := binary.BigEndian.Uint16(branchData[2:4])
 		cellData := branchData[4:]
-
-		if depth >= len(hashedKey) {
-			return c, false, nil
-		}
 		nibble := int(hashedKey[depth])
 
 		if afterMap&(uint16(1)<<nibble) == 0 {
