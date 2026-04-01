@@ -663,11 +663,11 @@ func (p *TxPool) Started() bool {
 }
 
 // best returns the highest-priority pending transactions that fit within the given gas and RLP space budgets.
-// EIP-8037: availableRegularGas tracks regular gas; availableStateGas tracks intrinsic
+// EIP-8037: availableGas.Regular tracks regular gas; availableGas.State tracks intrinsic
 // state gas. Execution-time state gas (SSTOREs) cannot be predicted here and is
 // enforced by applyTransaction in the block assembler.
-func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf,
-	availableRegularGas, availableStateGas, availableBlobGas uint64,
+func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
+	availableGas mdgas.FullMdGas,
 	yielded mapset.Set[[32]byte], availableRlpSpace int) (bool, int, error) {
 
 	p.lock.Lock()
@@ -717,7 +717,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf,
 
 	for ; count < n && i < len(best.ms); i++ {
 		// if we wouldn't have enough gas for a standard transaction then quit out early
-		if availableRegularGas < params.TxGas {
+		if availableGas.Regular < params.TxGas {
 			break
 		}
 		if availableRlpSpace <= 0 {
@@ -759,10 +759,10 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf,
 					continue
 				}
 			}
-			if blobCount*params.GasPerBlob > availableBlobGas {
+			if blobCount*params.GasPerBlob > availableGas.Blob {
 				continue
 			}
-			availableBlobGas -= blobCount * params.GasPerBlob
+			availableGas.Blob -= blobCount * params.GasPerBlob
 		}
 
 		// make sure we have enough gas in the caller to add this transaction.
@@ -789,17 +789,17 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf,
 		if isEIP7623 && intrinsicGasResult.FloorGasCost > intrinsicRegularGas {
 			intrinsicRegularGas = intrinsicGasResult.FloorGasCost
 		}
-		if intrinsicRegularGas > availableRegularGas {
+		if intrinsicRegularGas > availableGas.Regular {
 			// we might find another txn with a low enough intrinsic gas to include so carry on
 			continue
 		}
 		// EIP-8037: filter by intrinsic state gas. Execution-time state gas
 		// (SSTOREs) is unpredictable and enforced in applyTransaction instead.
-		if intrinsicGasResult.StateGas > availableStateGas {
+		if intrinsicGasResult.StateGas > availableGas.State {
 			continue
 		}
-		availableRegularGas -= intrinsicRegularGas
-		availableStateGas -= intrinsicGasResult.StateGas
+		availableGas.Regular -= intrinsicRegularGas
+		availableGas.State -= intrinsicGasResult.StateGas
 		availableRlpSpace -= len(rlpTxn)
 		txns.Txns[count] = rlpTxn
 		// For blob transactions, slot.Txn is the inner BlobTx without the
@@ -841,9 +841,7 @@ func (p *TxPool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOpt
 		provideOptions.Amount,
 		&txnsRlp,
 		provideOptions.ParentBlockNum,
-		provideOptions.RegularGasTarget,
-		provideOptions.StateGasTarget,
-		provideOptions.BlobGasTarget,
+		mdgas.NewFullMdGas(provideOptions.RegularGasTarget, provideOptions.StateGasTarget, provideOptions.BlobGasTarget),
 		provideOptions.TxnIdsFilter,
 		provideOptions.AvailableRlpSpace,
 	)
@@ -871,9 +869,10 @@ func (p *TxPool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOpt
 	return txns, nil
 }
 
-func (p *TxPool) PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availableGas, availableBlobGas uint64, availableRlpSpace int) (bool, error) {
+func (p *TxPool) PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64) (bool, error) {
 	set := mapset.NewThreadUnsafeSet[[32]byte]()
-	onTime, _, err := p.best(ctx, n, txns, onTopOf, availableGas, math.MaxUint64, availableBlobGas, set, availableRlpSpace)
+	onTime, _, err := p.best(ctx, n, txns, onTopOf,
+		mdgas.NewFullMdGas(math.MaxUint64, math.MaxUint64, math.MaxUint64), set, math.MaxInt)
 	return onTime, err
 }
 
