@@ -29,7 +29,8 @@ type TxnProvider interface {
 	// ProvideTxns provides transactions ready to be included in a block for block building. Available request options:
 	//   - WithParentBlockNum
 	//   - WithAmount
-	//   - WithGasTarget
+	//   - WithRegularGasTarget
+	//   - WithStateGasTarget
 	//   - WithBlobGasTarget
 	//   - WithTxnIdsFilter
 	//   - WithAvailableRlpSpace
@@ -56,9 +57,15 @@ func WithAmount(amount int) ProvideOption {
 	}
 }
 
-func WithGasTarget(gasTarget uint64) ProvideOption {
+func WithRegularGasTarget(gasTarget uint64) ProvideOption {
 	return func(opt *ProvideOptions) {
-		opt.GasTarget = gasTarget
+		opt.RegularGasTarget = gasTarget
+	}
+}
+
+func WithStateGasTarget(stateGasTarget uint64) ProvideOption {
+	return func(opt *ProvideOptions) {
+		opt.StateGasTarget = stateGasTarget
 	}
 }
 
@@ -84,7 +91,8 @@ type ProvideOptions struct {
 	BlockTime         uint64
 	ParentBlockNum    uint64
 	Amount            int
-	GasTarget         uint64
+	RegularGasTarget  uint64
+	StateGasTarget    uint64
 	BlobGasTarget     uint64
 	TxnIdsFilter      mapset.Set[[32]byte]
 	AvailableRlpSpace int
@@ -101,7 +109,8 @@ func ApplyProvideOptions(opts ...ProvideOption) ProvideOptions {
 var defaultProvideOptions = ProvideOptions{
 	ParentBlockNum:    0,              // no parent block to wait for by default
 	Amount:            math.MaxInt,    // all transactions by default
-	GasTarget:         math.MaxUint64, // all transactions by default
+	RegularGasTarget:  math.MaxUint64, // all transactions by default
+	StateGasTarget:    math.MaxUint64, // all transactions by default
 	BlobGasTarget:     math.MaxUint64, // all transactions by default
 	TxnIdsFilter:      nil,            // no filter by default
 	AvailableRlpSpace: math.MaxInt,    // unlimited by default

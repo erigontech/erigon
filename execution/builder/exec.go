@@ -264,10 +264,12 @@ func getNextTransactions(
 	logger log.Logger,
 ) ([]types.Transaction, error) {
 	availableRlpSpace := cfg.builderState.BuiltBlock.AvailableRlpSpace(cfg.chainConfig)
-	// EIP-8037: use remaining regular gas as the gas target for the txpool.
-	// State gas is enforced by post-execution rollback in the block assembler,
-	// so the txpool only needs to filter by regular gas.
+	// EIP-8037: use remaining regular gas as the primary gas target for the
+	// txpool, and remaining state gas for intrinsic state gas filtering.
+	// Execution-time state gas (SSTOREs) is enforced by post-execution
+	// rollback in the block assembler.
 	remainingRegularGas := header.GasLimit - gasUsed.BlockRegular
+	remainingStateGas := header.GasLimit - gasUsed.BlockState
 	remainingBlobGas := uint64(0)
 	if header.BlobGasUsed != nil {
 		maxBlobs := cfg.chainConfig.GetMaxBlobsPerBlock(header.Time)
@@ -281,7 +283,8 @@ func getNextTransactions(
 		txnprovider.WithAmount(amount),
 		txnprovider.WithParentBlockNum(executionAt),
 		txnprovider.WithBlockTime(header.Time),
-		txnprovider.WithGasTarget(remainingRegularGas),
+		txnprovider.WithRegularGasTarget(remainingRegularGas),
+		txnprovider.WithStateGasTarget(remainingStateGas),
 		txnprovider.WithBlobGasTarget(remainingBlobGas),
 		txnprovider.WithTxnIdsFilter(alreadyYielded),
 		txnprovider.WithAvailableRlpSpace(availableRlpSpace),
