@@ -152,13 +152,6 @@ jobs:
           rm -f $ERIGON_REFERENCE_DATA_DIR/logs/rpcdaemon.log || true
           echo "datadir_saved=true" >> $GITHUB_OUTPUT
 
-      - name: Run Migrations
-        if: matrix.client == 'erigon'
-        working-directory: ${{ github.workspace }}/build/bin
-        run: |
-          echo "Running migrations on datadir..."
-          ./integration run_migrations --datadir $ERIGON_REFERENCE_DATA_DIR --chain $CHAIN
-
       - name: Kill any lingering rpcdaemon processes
         if: matrix.client == 'erigon'
         run: |
