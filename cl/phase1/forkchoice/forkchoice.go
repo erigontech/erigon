@@ -156,8 +156,9 @@ type ForkChoiceStore struct {
 	probabilisticHeadGetter bool
 
 	// [New in Gloas:EIP7732]
-	payloadTimelinessVote       sync.Map // map[common.Hash][clparams.PtcSize]bool
-	payloadDataAvailabilityVote sync.Map // map[common.Hash][clparams.PtcSize]bool
+	ptcVoteMu                   sync.Mutex // protects read-modify-write on payloadTimelinessVote and payloadDataAvailabilityVote
+	payloadTimelinessVote       sync.Map   // map[common.Hash][clparams.PtcSize]bool
+	payloadDataAvailabilityVote sync.Map   // map[common.Hash][clparams.PtcSize]bool
 	// [New in Gloas:EIP7732] Block timeliness tracking.
 	// Pre-GLOAS: stores [block_timely, false] (only index 0 is meaningful).
 	// Post-GLOAS: stores [block_timely, payload_timely] — two independent booleans.

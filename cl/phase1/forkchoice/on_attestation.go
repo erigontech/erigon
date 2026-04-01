@@ -150,15 +150,17 @@ func (f *ForkChoiceStore) verifyAttestationWithState(
 }
 
 func (f *ForkChoiceStore) setLatestMessage(index uint64, message LatestMessage) {
-	f.latestMessages.set(int(index), message)
-
-	// Update indexed weight store if present
+	// Update indexed weight store if present: read old value BEFORE overwriting
 	if f.indexedWeightStore != nil {
-		// Get old message to remove from index
 		if oldMessage, has := f.latestMessages.get(int(index)); has && oldMessage != (LatestMessage{}) {
 			f.indexedWeightStore.RemoveVote(index, oldMessage.Root)
 		}
-		// Add new vote to index (balance looked up internally)
+	}
+
+	f.latestMessages.set(int(index), message)
+
+	// Add new vote to index (balance looked up internally)
+	if f.indexedWeightStore != nil {
 		f.indexedWeightStore.IndexVote(index, message)
 	}
 }
