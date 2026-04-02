@@ -614,8 +614,10 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			blockRegular := imdGas.Regular + st.evm.RegularGasConsumed()
 			st.blockRegularGasUsed = max(blockRegular, intrinsicGasResult.FloorGasCost)
 			st.blockStateGasUsed = blockState
-			// Receipt gasUsed: total gas pool depletion + spill restored on depth-0 REVERT.
-			st.txnGasUsedB4Refunds = mdGasUsed.Total() + st.evm.RevertedSpillGas()
+			// Receipt gasUsed: EIP-8037 formula tx.gas - gas_left - reservoir.
+			// Use Total()-level subtraction to avoid per-component uint64 underflow
+			// when gasRemaining.State > initialGas.State (reservoir grew via child reverts).
+			st.txnGasUsedB4Refunds = st.initialGas.Total() - st.gasRemaining.Total() + st.evm.RevertedSpillGas()
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Total())
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
 		} else if rules.IsPrague {
@@ -631,12 +633,11 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		}
 		st.refundGas()
 	} else if rules.IsAmsterdam {
-		mdGasUsed := st.mdGasUsed()
 		blockState := imdGas.State + st.evm.StateGasConsumed()
 		blockRegular := imdGas.Regular + st.evm.RegularGasConsumed()
 		st.blockRegularGasUsed = max(blockRegular, intrinsicGasResult.FloorGasCost)
 		st.blockStateGasUsed = blockState
-		st.txnGasUsedB4Refunds = mdGasUsed.Total() + st.evm.RevertedSpillGas()
+		st.txnGasUsedB4Refunds = st.initialGas.Total() - st.gasRemaining.Total() + st.evm.RevertedSpillGas()
 		st.txnGasUsed = max(st.txnGasUsedB4Refunds, intrinsicGasResult.FloorGasCost)
 	} else {
 		// No-refund path: gasBailout (trace_call) or !refunds.
