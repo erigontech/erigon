@@ -46,7 +46,7 @@ kill -SIGUSR1 $(pidof erigon)
 # Stack traces are printed to the erigon log / stdout
 ```
 
-**Capture a CPU or heap profile via pprof** (requires `--pprof` flag at startup):
+**Capture a CPU or heap profile via pprof** (requires `--pprof` flag at startup — default address `localhost:6060`; override with `--pprof.addr` and `--pprof.port`):
 
 ```bash
 # CPU profile — 30-second sample
