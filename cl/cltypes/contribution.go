@@ -83,17 +83,8 @@ func (a *SignedContributionAndProof) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(a.Message, a.Signature[:])
 }
 
-// SyncCommitteeAggregationBitsSize is the byte length of the aggregation bits
-// in a sync committee Contribution. It equals SyncCommitteeSize / SYNC_COMMITTEE_SUBNET_COUNT / 8.
-// Default is 16 (mainnet: 512/4/8). Call SetSyncCommitteeAggregationBitsSize to override for other presets.
-var SyncCommitteeAggregationBitsSize = 16
-
-// SetSyncCommitteeAggregationBitsSize updates the contribution aggregation bits size for the
-// active preset. Call this once at startup after loading a non-mainnet beacon chain config.
-// bits = syncCommitteeSize / syncCommitteeSubnetCount / 8
-func SetSyncCommitteeAggregationBitsSize(syncCommitteeSize, syncCommitteeSubnetCount uint64) {
-	SyncCommitteeAggregationBitsSize = int(syncCommitteeSize) / int(syncCommitteeSubnetCount) / 8
-}
+// DefaultSyncCommitteeAggregationBitsSize is the mainnet default: 512/4/8 = 16 bytes.
+const DefaultSyncCommitteeAggregationBitsSize = 16
 
 type Contribution struct {
 	Slot              uint64         `json:"slot,string"`
@@ -101,6 +92,20 @@ type Contribution struct {
 	SubcommitteeIndex uint64         `json:"subcommittee_index,string"`
 	AggregationBits   hexutil.Bytes  `json:"aggregation_bits"`
 	Signature         common.Bytes96 `json:"signature"`
+
+	aggregationBitsSize int // config-driven; 0 means use DefaultSyncCommitteeAggregationBitsSize
+}
+
+// SetAggregationBitsSize overrides the aggregation bits byte length for non-mainnet presets.
+func (a *Contribution) SetAggregationBitsSize(size int) {
+	a.aggregationBitsSize = size
+}
+
+func (a *Contribution) getAggregationBitsSize() int {
+	if a.aggregationBitsSize > 0 {
+		return a.aggregationBitsSize
+	}
+	return DefaultSyncCommitteeAggregationBitsSize
 }
 
 type ContributionKey struct {
@@ -111,7 +116,7 @@ type ContributionKey struct {
 
 func (a *Contribution) EncodeSSZ(dst []byte) ([]byte, error) {
 	if len(a.AggregationBits) == 0 {
-		a.AggregationBits = make([]byte, SyncCommitteeAggregationBitsSize)
+		a.AggregationBits = make([]byte, a.getAggregationBitsSize())
 	}
 	return ssz2.MarshalSSZ(dst, &a.Slot, a.BeaconBlockRoot[:], &a.SubcommitteeIndex, []byte(a.AggregationBits), a.Signature[:])
 }
@@ -127,14 +132,14 @@ func (a *Contribution) Copy() *Contribution {
 }
 
 func (a *Contribution) DecodeSSZ(buf []byte, version int) error {
-	a.AggregationBits = make([]byte, SyncCommitteeAggregationBitsSize)
+	a.AggregationBits = make([]byte, a.getAggregationBitsSize())
 	return ssz2.UnmarshalSSZ(buf, version, &a.Slot, a.BeaconBlockRoot[:], &a.SubcommitteeIndex, []byte(a.AggregationBits), a.Signature[:])
 }
 
 func (a *Contribution) EncodingSizeSSZ() int {
 	bitsSize := len(a.AggregationBits)
 	if bitsSize == 0 {
-		bitsSize = SyncCommitteeAggregationBitsSize
+		bitsSize = a.getAggregationBitsSize()
 	}
 	return length.BlockNum*2 + length.Hash + length.Bytes96 + bitsSize
 }
