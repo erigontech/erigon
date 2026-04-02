@@ -2039,8 +2039,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 
 			if result.Receipt != nil {
-				// EIP-7778: accumulate ReceiptGasUsed (txnGasUsed with refunds applied).
-				be.blockRegularGasUsed += result.ExecutionResult.ReceiptGasUsed
+				// EIP-7778: accumulate BlockRegularGasUsed (regular-dimension only, excludes state gas).
+				// State gas is a separate dimension and does not count toward the block gas limit.
+				be.blockRegularGasUsed += result.ExecutionResult.BlockRegularGasUsed
 				be.blockStateGasUsed += result.ExecutionResult.BlockStateGasUsed
 				if dbg.TraceGas {
 					log.Warn("[parallel] tx gas", "block", be.blockNum, "txIdx", tx,
@@ -2108,7 +2109,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			header = tt.Header
 			txs = tt.Txs
 		}
-		// EIP-7778: block gas = Σ ReceiptGasUsed (with refunds) + syscall, no + blockState.
+		// EIP-7778: block gas = Σ BlockRegularGasUsed (regular dimension) + syscall.
 		blockGasUsed := be.blockRegularGasUsed
 		if dbg.TraceGas {
 			log.Warn("[parallel] block gas", "block", be.blockNum,
@@ -2147,7 +2148,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 	txTask := be.tasks[0].Task
 
-	// EIP-7778: block gas = Σ ReceiptGasUsed (with refunds) + syscall, no + blockState.
+	// EIP-7778: block gas = Σ BlockRegularGasUsed (regular dimension) + syscall.
 	blockGasUsed := be.blockRegularGasUsed
 
 	return &blockResult{

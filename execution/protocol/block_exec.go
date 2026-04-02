@@ -184,12 +184,13 @@ func ExecuteBlockEphemerally(
 			return nil, err
 		}
 	}
-	// EIP-7778: for Amsterdam+, blockGasUsed uses begin-block (EIP-4788) gas,
-	// not finalize (EIP-7002/EIP-7251) gas. For pre-Amsterdam, use finalize gas.
+	// EIP-7778: block gas = Σ BlockRegularGasUsed + syscall (regular dimension only).
+	// For Amsterdam+: syscall = begin-block (EIP-4788) regular gas.
+	// For pre-Amsterdam: syscall = finalize (EIP-7002/EIP-7251) gas.
 	if chainConfig.IsAmsterdam(header.Time) {
-		gasUsed.Receipt += initGasUsed
+		gasUsed.BlockRegular += initGasUsed
 	} else {
-		gasUsed.Receipt += sysCallGasUsed
+		gasUsed.BlockRegular += sysCallGasUsed
 	}
 
 	blockGasUsed := gasUsed.BlockGasUsed()
@@ -303,11 +304,11 @@ func SysCallContractWithBlockContext(contract accounts.Address, data []byte, cha
 		return nil, 0, nil
 	}
 
-	// Amsterdam (EIP-7778): only regular-dimension ops count toward header.GasUsed.
-	// SSTORE ops inside syscalls spill from the state reservoir (State=0) into the
-	// regular pool, so mdGas.Regular-leftover.Regular would overcount by StateGasConsumed().
-	// evm.RegularGasConsumed() tracks only non-SSTORE regular ops, giving the correct value.
-	// Pre-Amsterdam: StateGasConsumed()=0, so this is equivalent to the old formula.
+	// Use RegularGasConsumed() to get the regular-dimension gas for this syscall.
+	// For Amsterdam (EIP-7778), syscall gas adds to header.GasUsed via initGasUsed.
+	// If the state reservoir (State=0) causes any state gas to spill to regular,
+	// RegularGasConsumed() excludes that spill while mdGas.Regular-leftover.Regular would include it.
+	// Pre-Amsterdam: StateGasConsumed()=0, so both formulas are equivalent.
 	consumed := evm.RegularGasConsumed()
 	if dbg.TraceGas {
 		log.Warn("SysCallContractWithBlockContext gas", "contract", contract, "initial", mdGas.Regular, "leftoverRegular", leftover.Regular, "leftoverState", leftover.State, "regularConsumed", consumed, "stateConsumed", evm.StateGasConsumed(), "err", err)

@@ -31,7 +31,7 @@ type serialExecutor struct {
 	txExecutor
 	// outputs
 	txCount           uint64
-	blockGasUsed      uint64 // accumulated ReceiptGasUsed per tx (EIP-7778: Σ txnGasUsed with refunds)
+	blockGasUsed      uint64 // accumulated BlockRegularGasUsed per tx (EIP-7778: Σ regular-dimension gas)
 	blockStateGasUsed uint64 // EIP-8037: accumulated state gas (informational; not used in blockGasUsed)
 	blobGasUsed       uint64
 	initGasUsed       uint64 // EIP-4788 gas from block initialization (Amsterdam+)
@@ -362,9 +362,10 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			}
 
 			se.txCount++
-			// EIP-7778: block gas = Σ ReceiptGasUsed (txnGasUsed with refunds) + syscall.
-			// ReceiptGasUsed = blockRegular + blockState - refund, so refunds are already applied.
-			se.blockGasUsed += result.ExecutionResult.ReceiptGasUsed
+			// EIP-7778: block gas = Σ BlockRegularGasUsed (regular-dimension only) + syscall.
+			// BlockRegularGasUsed excludes state gas, matching the regular gas limit dimension.
+			// ReceiptGasUsed includes net state gas and is used only for per-tx receipts.
+			se.blockGasUsed += result.ExecutionResult.BlockRegularGasUsed
 			se.blockStateGasUsed += result.ExecutionResult.BlockStateGasUsed
 			// Capture EIP-4788 init gas (Amsterdam+) from the block-init task (TxIndex == -1).
 			if txTask.TxIndex < 0 && txTask.BlockNumber() > 0 {
@@ -425,7 +426,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 
 				if txTask.BlockNumber() > 0 && startTxIndex == 0 {
 					//Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-					// EIP-7778: block gas = Σ ReceiptGasUsed (txnGasUsed with refunds) + syscall.
+					// EIP-7778: block gas = Σ BlockRegularGasUsed (regular dimension) + syscall.
 					blockGasUsed := se.blockGasUsed
 					if dbg.TraceGas {
 						se.logger.Warn("block gas breakdown", "block", txTask.BlockNumber(),
