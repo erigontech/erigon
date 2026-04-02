@@ -59,7 +59,7 @@ Your internet bandwidth is also an important factor, particularly for sync speed
 
 ## Sync Times
 
-Approximate sync times from scratch to chain tip. Results may vary depending on hardware and bandwidth.
+Approximate sync times from scratch to chain tip, measured with Erigon v3.3 on a mid-range server (NVMe SSD, 64 GB RAM). Results may vary significantly depending on hardware, network bandwidth, and peer availability.
 
 | Chain    | Archive              | Full                 | Minimal            |
 | -------- | -------------------- | -------------------- | ------------------ |
