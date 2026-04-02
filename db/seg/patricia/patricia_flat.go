@@ -17,9 +17,7 @@
 package patricia
 
 import (
-	"cmp"
 	"math/bits"
-	"slices"
 
 	"github.com/erigontech/erigon/db/seg/sais"
 )
@@ -41,12 +39,31 @@ type FlatTree struct {
 
 // Flatten converts a pointer-based PatriciaTree into a flat arena representation.
 func (pt *PatriciaTree) Flatten() *FlatTree {
+	nc, vc := countNodes(&pt.root)
 	ft := &FlatTree{
-		nodes:  make([]flatNode, 1, 256), // index 0 is nil sentinel
-		values: make([]any, 1, 256),      // index 0 is nil sentinel
+		nodes:  make([]flatNode, 1, nc+1), // index 0 is nil sentinel
+		values: make([]any, 1, vc+1),      // index 0 is nil sentinel
 	}
 	ft.flattenNode(&pt.root)
 	return ft
+}
+
+func countNodes(n *node) (nodes, values int) {
+	nodes = 1
+	if n.val != nil {
+		values = 1
+	}
+	if n.n0 != nil {
+		cn, cv := countNodes(n.n0)
+		nodes += cn
+		values += cv
+	}
+	if n.n1 != nil {
+		cn, cv := countNodes(n.n1)
+		nodes += cn
+		values += cv
+	}
+	return
 }
 
 func (ft *FlatTree) flattenNode(n *node) uint32 {
@@ -333,23 +350,5 @@ func (mf *MatchFinder3) FindLongestMatches(data []byte) []Match {
 			m.Val = lastMatch.Val
 		}
 	}
-	if len(mf.matches) < 2 {
-		return mf.matches
-	}
-	slices.SortFunc(mf.matches, func(i, j Match) int { return cmp.Compare(i.Start, j.Start) })
-
-	lastEnd := mf.matches[0].End
-	j := 1
-	for i, m := range mf.matches {
-		if i > 0 {
-			if m.End > lastEnd {
-				if i != j {
-					mf.matches[j] = m
-				}
-				lastEnd = m.End
-				j++
-			}
-		}
-	}
-	return mf.matches[:j]
+	return deduplicateMatches(mf.matches)
 }
