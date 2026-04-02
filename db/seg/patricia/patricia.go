@@ -359,11 +359,9 @@ func deduplicateMatches(matches Matches) Matches {
 	slices.SortFunc(matches, func(i, j Match) int { return cmp.Compare(i.Start, j.Start) })
 	lastEnd := matches[0].End
 	j := 1
-	for i, m := range matches {
-		if i > 0 && m.End > lastEnd {
-			if i != j {
-				matches[j] = m
-			}
+	for _, m := range matches[1:] {
+		if m.End > lastEnd {
+			matches[j] = m
 			lastEnd = m.End
 			j++
 		}
