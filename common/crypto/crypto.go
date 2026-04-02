@@ -67,14 +67,9 @@ type EllipticCurve interface {
 	Unmarshal(data []byte) (x, y *big.Int)
 }
 
-// HashData hashes the provided data using the KeccakState and returns a 32 byte hash
-func HashData(kh keccak.KeccakState, data []byte) (h common.Hash) {
-	kh.Reset()
-	//nolint:errcheck
-	kh.Write(data)
-	//nolint:errcheck
-	kh.Read(h[:])
-	return h
+// HashData hashes the provided data and returns a 32 byte hash.
+func HashData(data []byte) common.Hash {
+	return keccak.Sum256(data)
 }
 
 // Keccak256 calculates and returns the Keccak256 hash of the input data.
@@ -91,12 +86,12 @@ func Keccak256(data ...[]byte) []byte {
 
 // Keccak256Hash calculates and returns the Keccak256 hash of the input data,
 // converting it to an internal Hash data structure.
-func Keccak256Hash(data ...[]byte) (h common.Hash) {
+func Keccak256Hash(data ...[]byte) common.Hash {
 	d := NewKeccakState()
 	for _, b := range data {
 		d.Write(b)
 	}
-	d.Read(h[:]) //nolint:errcheck
+	h := FinalizeHash(d)
 	ReturnToPool(d)
 	return h
 }
@@ -328,3 +323,14 @@ func NewKeccakState() keccak.KeccakState {
 	return h
 }
 func ReturnToPool(h keccak.KeccakState) { hasherPool.Put(h) }
+
+// FinalizeHash finalizes sha and returns a Keccak-256 digest as a value type,
+// avoiding the heap escape that occurs when passing h[:] to an interface Read method.
+func FinalizeHash(sha keccak.KeccakState) common.Hash {
+	if h, ok := sha.(*keccak.Hasher); ok {
+		return h.Sum256()
+	}
+	var out common.Hash
+	sha.Read(out[:]) //nolint:errcheck
+	return out
+}

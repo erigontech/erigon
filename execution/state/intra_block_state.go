@@ -1205,7 +1205,7 @@ func (sdb *IntraBlockState) SetCode(addr accounts.Address, code []byte) error {
 	if err != nil {
 		return err
 	}
-	codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
+	codeHash := accounts.InternCodeHash(crypto.HashData(code))
 	written, err := stateObject.SetCode(codeHash, code, !sdb.hasWrite(addr, CodePath, accounts.NilKey))
 	if err != nil {
 		return err
@@ -1563,7 +1563,7 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 		// optimisation in SetCode to incorrectly delete code writes when
 		// clearing a delegation that was set by a prior transaction in the
 		// same block.
-		codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
+		codeHash := accounts.InternCodeHash(crypto.HashData(code))
 		if codeHash != obj.data.CodeHash {
 			obj.data.CodeHash = codeHash
 			obj.original.CodeHash = codeHash
@@ -2446,7 +2446,7 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 				if err != nil {
 					return err
 				}
-				codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
+				codeHash := accounts.InternCodeHash(crypto.HashData(code))
 				// Force-set code bypassing stateObject.SetCode's equality check.
 				// The finalize IBS uses a VersionedStateReader whose ReadSet may
 				// contain the post-write code value (when the worker read the code

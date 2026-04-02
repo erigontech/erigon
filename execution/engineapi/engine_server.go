@@ -317,7 +317,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 					ValidationError: engine_types.NewStringifiedErrorFromString(fmt.Sprintf("invalid block access list validate: %v", err)),
 				}, nil
 			}
-			hash := crypto.Keccak256Hash(req.BlockAccessList)
+			hash := crypto.HashData(req.BlockAccessList)
 			header.BlockAccessListHash = &hash
 			blockAccessListBytes = req.BlockAccessList
 		}

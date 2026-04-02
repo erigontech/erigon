@@ -36,47 +36,38 @@ import (
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 )
 
-// splitStateReader implements commitmentdb.StateReader using (potentially) different state readers for commitment
-// data and account/storage/code data.
-type splitStateReader struct {
+// simulateStateReader is a StateReader for eth_simulateV1 whose Clone() method mirrors
+// commitmentdb.CommitmentReplayStateReader from main: the commitment reader (temp DB) is
+// re-cloned with the new tx so warmup goroutines get their own fresh read-only transaction,
+// while the plain state reader (outer DB) is kept unchanged so non-modified accounts are
+// always read from real on-chain state, not the empty temp DB.
+type simulateStateReader struct {
 	commitmentReader commitmentdb.StateReader
 	plainStateReader commitmentdb.StateReader
-	withHistory      bool
 }
 
-var _ commitmentdb.StateReader = (*splitStateReader)(nil)
-
-func (r splitStateReader) WithHistory() bool {
-	return r.withHistory
+func NewSimulateStateReader(commitmentReader, plainStateReader commitmentdb.StateReader) commitmentdb.StateReader {
+	return simulateStateReader{commitmentReader: commitmentReader, plainStateReader: plainStateReader}
 }
 
-func (r splitStateReader) CheckDataAvailable(_ kv.Domain, _ kv.Step) error {
-	return nil
-}
+func (r simulateStateReader) WithHistory() bool { return false }
 
-func (r splitStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]byte, kv.Step, error) {
+func (r simulateStateReader) CheckDataAvailable(_ kv.Domain, _ kv.Step) error { return nil }
+
+func (r simulateStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]byte, kv.Step, error) {
 	if d == kv.CommitmentDomain {
 		return r.commitmentReader.Read(d, plainKey, stepSize)
 	}
 	return r.plainStateReader.Read(d, plainKey, stepSize)
 }
 
-func (r splitStateReader) Clone(kv.TemporalTx) commitmentdb.StateReader {
-	// Do *NOT* propagate kv.TemporalTx because each reader may need its own
-	return NewCommitmentSplitStateReader(r.commitmentReader, r.plainStateReader, r.withHistory)
-}
-
-func NewCommitmentSplitStateReader(commitmentReader commitmentdb.StateReader, plainStateReader commitmentdb.StateReader, withHistory bool) commitmentdb.StateReader {
-	return splitStateReader{
-		commitmentReader: commitmentReader,
-		plainStateReader: plainStateReader,
-		withHistory:      withHistory,
+func (r simulateStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
+	// Propagate new tx only to the commitment reader (temp DB) for warmup goroutines;
+	// keep the plain state reader on the original outer-DB tx.
+	return simulateStateReader{
+		commitmentReader: r.commitmentReader.Clone(tx),
+		plainStateReader: r.plainStateReader,
 	}
-}
-
-func NewCommitmentReplayStateReader(ttx, tx kv.TemporalTx, tsd *execctx.SharedDomains, plainStateAsOf uint64) commitmentdb.StateReader {
-	// Claim that during replay we do not operate on history, so we can temporarily save commitment state
-	return NewCommitmentSplitStateReader(commitmentdb.NewLatestStateReader(ttx, tsd), commitmentdb.NewHistoryStateReader(tx, plainStateAsOf), false)
 }
 
 type CommitmentReplay struct {
@@ -162,7 +153,7 @@ func (r *CommitmentReplay) ComputeCustomCommitmentFromStateHistory(
 		if err != nil {
 			return nil, err
 		}
-		tsd.GetCommitmentCtx().SetStateReader(NewCommitmentReplayStateReader(ttx, tx, tsd, maxTxNum+1))
+		tsd.GetCommitmentCtx().SetStateReader(commitmentdb.NewCommitmentReplayStateReader(ttx, tx, tsd, maxTxNum+1))
 		r.logger.Debug("Touch historical keys", "fromTxNum", minTxNum, "toTxNum", maxTxNum+1)
 		_, _, err = tsd.TouchChangedKeysFromHistory(tx, minTxNum, maxTxNum+1)
 		if err != nil {

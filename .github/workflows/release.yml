@@ -88,6 +88,14 @@ jobs:
           fi
           echo "OK: No existing GitHub Release found for ${RELEASE_VERSION}. Proceeding."
 
+      - name: Generate GitHub App token for git operations
+        id: generate_token_build
+        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf  ## v2.2.1
+        with:
+          app-id: ${{ vars.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
+          repositories: "erigon"
+
       - name: Checkout git repository ${{ env.APP_REPO }} reference ${{ inputs.checkout_ref }}
         uses: actions/checkout@v6
         with:
@@ -95,6 +103,7 @@ jobs:
           fetch-depth: 0
           ref: ${{ inputs.checkout_ref }}
           path: 'erigon'
+          token: ${{ steps.generate_token_build.outputs.token }}
 
       - name: Check if tag ${{ inputs.release_version }} already exists and create it in case perform_release is set.
         if: ${{ (inputs.perform_release) && (inputs.release_version != '') }}
@@ -681,6 +690,14 @@ jobs:
     env:
       RELEASE_VERSION: ${{ inputs.release_version }}
     steps:
+      - name: Generate GitHub App token for git operations
+        id: generate_token_rollback
+        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf  ## v2.2.1
+        with:
+          app-id: ${{ vars.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
+          repositories: "erigon"
+
       - name: Checkout git repository ${{ env.APP_REPO }} reference ${{ inputs.checkout_ref }}
         uses: actions/checkout@v6
         with:
@@ -688,6 +705,7 @@ jobs:
           fetch-depth: 0
           ref: ${{ inputs.checkout_ref }}
           path: 'erigon'
+          token: ${{ steps.generate_token_rollback.outputs.token }}
 
       - name: Rollback - remove git tag ${{ inputs.release_version }}
         if: ${{ (inputs.perform_release) && (inputs.release_version != '') }}

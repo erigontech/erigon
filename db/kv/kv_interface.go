@@ -293,6 +293,7 @@ type RwCursorDupSort interface {
 	RwCursor
 
 	PutNoDupData(key, value []byte) error // PutNoDupData - inserts key without dupsort
+	PutCurrent(key, value []byte) error   // PutCurrent - replaces the current dup entry in-place (cursor must be positioned); saves Del+Put round-trip
 	DeleteCurrentDuplicates() error       // DeleteCurrentDuplicates - deletes all values of the current key
 	DeleteExact(k1, k2 []byte) error      // DeleteExact - delete 1 value from given key
 	AppendDup(key, value []byte) error    // AppendDup - same as Append, but for sorted dup data
@@ -448,6 +449,9 @@ type TemporalDebugTx interface {
 
 	// TraceKey returns stream of <txNum->value_after_txnum_change> for a given key
 	TraceKey(domain Domain, k []byte, fromTxNum, toTxNum uint64) (stream.U64V, error)
+
+	// HistoryKeyTxNumRange returns (key, txNum) pairs for every txNum at which a key changed in [fromTs, toTs)
+	HistoryKeyTxNumRange(name Domain, fromTs, toTs int, asc order.By, limit int) (it stream.KU64, err error)
 
 	DomainFiles(domain ...Domain) VisibleFiles
 	CurrentDomainVersion(domain Domain) version.Version
