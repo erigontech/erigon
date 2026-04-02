@@ -417,10 +417,6 @@ func tableScanningPrune(
 			logger.Info("[snapshots] prune index", args...)
 		default:
 		}
-
-		if ctx.Err() != nil {
-			return common.Copy(val), nil
-		}
 	}
 
 	return nil, nil
