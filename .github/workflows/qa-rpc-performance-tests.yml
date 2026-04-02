@@ -122,18 +122,19 @@ jobs:
         if: matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true'
         run: |
           rm -rf ${{runner.workspace}}/rpc-tests
-          git -c advice.detachedHead=false clone --depth 1 --branch v1.124.0 https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
+          git -c advice.detachedHead=false clone --depth 1 --branch v2.4.0 https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
           cd ${{runner.workspace}}/rpc-tests
+          make rpc_perf
 
       - name: Clean Erigon Build Directory
         if: matrix.client == 'erigon'
         run: |
           make clean
 
-      - name: Build Erigon RPCDaemon
+      - name: Build Erigon RPCDaemon and integration
         if: matrix.client == 'erigon'
         run: |
-          make rpcdaemon
+          make rpcdaemon integration
         working-directory: ${{ github.workspace }}
 
       - name: Pause the Erigon instance dedicated to db maintenance
@@ -151,35 +152,51 @@ jobs:
           rm -f $ERIGON_REFERENCE_DATA_DIR/logs/rpcdaemon.log || true
           echo "datadir_saved=true" >> $GITHUB_OUTPUT
 
+      - name: Kill any lingering rpcdaemon processes
+        if: matrix.client == 'erigon'
+        run: |
+          if pgrep -x rpcdaemon > /dev/null; then
+            echo "Found running rpcdaemon processes, killing them..."
+            pkill -x rpcdaemon || true
+            sleep 3
+            if pgrep -x rpcdaemon > /dev/null; then
+              echo "Force killing rpcdaemon..."
+              pkill -9 -x rpcdaemon || true
+              sleep 2
+            fi
+            echo "rpcdaemon processes killed"
+          else
+            echo "No rpcdaemon processes found"
+          fi
+
       - name: Run RpcDaemon
         id: rpcdaemon_running_step
         if: matrix.client == 'erigon'
         working-directory: ${{ github.workspace }}/build/bin
         run: |
           echo "Starting RpcDaemon..."
-          
-          ./rpcdaemon --datadir $ERIGON_REFERENCE_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws > erigon.log 2>&1 &
 
-          RPC_DAEMON_PID=$!          
-          RPC_DAEMON_EXIT_STATUS=$?
+          ./rpcdaemon --datadir $ERIGON_REFERENCE_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net > erigon.log 2>&1 &
+
+          RPC_DAEMON_PID=$!
           echo "RPC_DAEMON_PID=$RPC_DAEMON_PID" >> $GITHUB_ENV
           echo "rpc_daemon_started=true" >> $GITHUB_OUTPUT
-          
+
           sleep 5
           tail erigon.log
-          
-          if [ $RPC_DAEMON_EXIT_STATUS -ne 0 ]; then            
-            echo "RpcDaemon failed to start"
+
+          if ! kill -0 $RPC_DAEMON_PID 2>/dev/null; then
+            echo "RpcDaemon failed to start (process exited)"
             echo "::error::Error detected during tests: RpcDaemon failed to start"
             exit 1
           fi
-          echo "RpcDaemon started"
+          echo "RpcDaemon started (PID=$RPC_DAEMON_PID)"
 
       - name: Wait for port 8545 to be opened
         if: matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true'
         run: |
           # Geth is expected to be pre-running for the rpc-latest-geth runner
-          # Erigon was started above
+          # Erigon rpcdaemon starts on default port 8545 (production instance was killed above)
           for i in {1..30}; do
             if nc -z localhost 8545; then
               echo "Port 8545 is open"
@@ -232,18 +249,19 @@ jobs:
             # clean temporary area
             cd $workspace/rpc-tests/perf
             rm -rf ./reports/$network
-          
-            python3 ./run_perf_tests.py --blockchain "$network" \
+
+            # Move to home dir of rpc-tests
+            cd ..
+            ./build/bin/rpc_perf --blockchain "$network" \
                                       --test-type "$method" \
-                                      --pattern-file pattern/"$network"/"$pattern".tar \
+                                      --pattern-file perf/pattern/"$network"/"$pattern".tar \
                                       --test-sequence "$sequence" \
                                       --repetitions 5 \
-                                      --erigon-dir "/" \
-                                      --silk-dir "/" \
-                                      --test-mode 2 \
+                                      --client-build-dir "/" \
                                       --test-report \
                                       --json-report $result_dir/$result_file \
-                                      --testing-daemon $client
+                                      --testing-client $client \
+                                      --process-name rpcdaemon
           
             # Capture test runner script exit status
             perf_exit_status=$?
@@ -310,7 +328,7 @@ jobs:
               --db_version $db_version \
               --outcome $outcome \
               --result_file $result_dir/$result_file
-        
+
             if [ $? -ne 0 ]; then
               failed_test=1
               echo "Failure saving test results on DB"
@@ -364,11 +382,11 @@ jobs:
           fi
 
       - name: Upload RpcDaemon logs
-        if: matrix.client == 'erigon' && steps.test_step.outputs.test_executed == 'true'
-        uses: actions/upload-artifact@v7
+        if: always() && matrix.client == 'erigon' && steps.rpcdaemon_running_step.outputs.rpc_daemon_started == 'true'
+        uses: actions/upload-artifact@v6
         with:
           name: rpcdaemon-logs
-          path: $ERIGON_REFERENCE_DATA_DIR/logs/rpcdaemon.log
+          path: ${{ github.workspace }}/build/bin/erigon.log
 
       - name: Restore Erigon Chaindata Directory
         if: always() && matrix.client == 'erigon' && steps.save_chaindata_step.outputs.datadir_saved == 'true'
