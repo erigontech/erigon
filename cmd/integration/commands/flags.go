@@ -33,7 +33,7 @@ var (
 	unwindEvery                  uint64
 	batchSizeStr                 string
 	domain                       string
-	reset, noCommit, squeeze     bool
+	reset, noCommit, squeeze, yes bool
 	bucket                       string
 	datadirCli, toChaindata      string
 	migration                    string
@@ -110,6 +110,10 @@ func withUnwindEvery(cmd *cobra.Command) {
 
 func withReset(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&reset, "reset", false, "reset given stage")
+}
+
+func withYes(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&yes, "yes", false, "skip interactive prompts (for non-interactive/background use)")
 }
 
 func withSqueeze(cmd *cobra.Command) {
