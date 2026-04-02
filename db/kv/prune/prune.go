@@ -300,6 +300,13 @@ func TableScanningPrune(
 		txNum := txNumGetter(val, txNumBytes)
 		// Early skip: avoid LastDup/FirstDup/CountDuplicates cursor ops for out-of-range entries
 		if txNum >= txTo {
+			select {
+			case <-ctx.Done():
+				stat.LastPrunedValue = common.Copy(val)
+				stat.ValueProgress = InProgress
+				return stat, nil
+			default:
+			}
 			continue
 		}
 
