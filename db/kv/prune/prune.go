@@ -334,17 +334,14 @@ func tableScanningPrune(
 			return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
 		}
 
+		if ctx.Err() != nil {
+			return common.Copy(val), nil
+		}
+
 		txNum := txNumGetter(val, txNumBytes)
 		// Early skip: avoid LastDup/FirstDup/CountDuplicates cursor ops for out-of-range entries
 		if txNum >= txTo {
-			if ctx.Err() != nil {
-				return common.Copy(val), nil
-			}
 			continue
-		}
-
-		if ctx.Err() != nil {
-			return common.Copy(val), nil
 		}
 
 		if asserts && txNum < txFrom {
