@@ -21,14 +21,14 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/spf13/cobra"
+
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/node/debug"
-	"github.com/spf13/cobra"
 )
 
 func init() {
@@ -85,6 +85,14 @@ var printCmd = &cobra.Command{
 		}
 		defer l.Unlock()
 
+		erigonDBSettings, err := state.ResolveErigonDBSettings(dirs, logger, false)
+		if err != nil {
+			logger.Error("Failed to resolve erigondb settings", "error", err)
+			return
+		}
+		stepSize := erigonDBSettings.StepSize
+		stepsInFrozenFile := erigonDBSettings.StepsInFrozenFile
+
 		domainKV, err := kv.String2Domain(historyDomain)
 		if err != nil {
 			logger.Error("Failed to resolve domain", "error", err)
@@ -93,8 +101,8 @@ var printCmd = &cobra.Command{
 
 		history, err := state.NewHistory(
 			statecfg.Schema.GetDomainCfg(domainKV).Hist,
-			config3.DefaultStepSize,
-			config3.DefaultStepsInFrozenFile,
+			stepSize,
+			stepsInFrozenFile,
 			dirs,
 			logger,
 		)
@@ -102,7 +110,7 @@ var printCmd = &cobra.Command{
 			logger.Error("Failed to init history", "error", err)
 			return
 		}
-		history.Scan(toStep * config3.DefaultStepSize)
+		history.Scan(toStep * stepSize)
 
 		roTx := history.BeginFilesRo()
 		defer roTx.Close()
@@ -115,8 +123,8 @@ var printCmd = &cobra.Command{
 		}
 
 		err = roTx.HistoryDump(
-			int(fromStep)*config3.DefaultStepSize,
-			int(toStep)*config3.DefaultStepSize,
+			int(fromStep)*int(stepSize),
+			int(toStep)*int(stepSize),
 			keyToDump,
 			func(key []byte, txNum uint64, val []byte) {
 				fmt.Printf("key: %x, txn: %d, val: %x\n", key, txNum, val)
@@ -141,6 +149,14 @@ var distributionCmd = &cobra.Command{
 		}
 		defer l.Unlock()
 
+		erigonDBSettings, err := state.ResolveErigonDBSettings(dirs, logger, false)
+		if err != nil {
+			logger.Error("Failed to resolve erigondb settings", "error", err)
+			return
+		}
+		stepSize := erigonDBSettings.StepSize
+		stepsInFrozenFile := erigonDBSettings.StepsInFrozenFile
+
 		domainKV, err := kv.String2Domain(historyDomain)
 		if err != nil {
 			logger.Error("Failed to resolve domain", "error", err)
@@ -149,8 +165,8 @@ var distributionCmd = &cobra.Command{
 
 		history, err := state.NewHistory(
 			statecfg.Schema.GetDomainCfg(domainKV).Hist,
-			config3.DefaultStepSize,
-			config3.DefaultStepsInFrozenFile,
+			stepSize,
+			stepsInFrozenFile,
 			dirs,
 			logger,
 		)
@@ -158,7 +174,7 @@ var distributionCmd = &cobra.Command{
 			logger.Error("Failed to init history", "error", err)
 			return
 		}
-		history.Scan(toStep * config3.DefaultStepSize)
+		history.Scan(toStep * stepSize)
 
 		roTx := history.BeginFilesRo()
 		defer roTx.Close()
@@ -167,8 +183,8 @@ var distributionCmd = &cobra.Command{
 		uniqueEntries := 0
 
 		err = roTx.HistoryDump(
-			int(fromStep)*config3.DefaultStepSize,
-			int(toStep)*config3.DefaultStepSize,
+			int(fromStep)*int(stepSize),
+			int(toStep)*int(stepSize),
 			nil,
 			func(key []byte, txNum uint64, val []byte) {
 				keysEntries[string(key)] += 1
@@ -241,6 +257,14 @@ var rebuildCmd = &cobra.Command{
 		}
 		defer l.Unlock()
 
+		erigonDBSettings, err := state.ResolveErigonDBSettings(dirs, logger, false)
+		if err != nil {
+			logger.Error("Failed to resolve erigondb settings", "error", err)
+			return
+		}
+		stepSize := erigonDBSettings.StepSize
+		stepsInFrozenFile := erigonDBSettings.StepsInFrozenFile
+
 		domainKV, err := kv.String2Domain(historyDomain)
 		if err != nil {
 			logger.Error("Failed to resolve domain", "error", err)
@@ -249,8 +273,8 @@ var rebuildCmd = &cobra.Command{
 
 		history, err := state.NewHistory(
 			statecfg.Schema.GetDomainCfg(domainKV).Hist,
-			config3.DefaultStepSize,
-			config3.DefaultStepsInFrozenFile,
+			stepSize,
+			stepsInFrozenFile,
 			dirs,
 			logger,
 		)
@@ -258,20 +282,20 @@ var rebuildCmd = &cobra.Command{
 			logger.Error("Failed to init history", "error", err)
 			return
 		}
-		history.Scan(toStep * config3.DefaultStepSize)
+		history.Scan(toStep * stepSize)
 
 		roTx := history.BeginFilesRo()
 		defer roTx.Close()
 
-		for i := uint64(0); i < roTx.FirstStepNotInFiles().ToTxNum(config3.DefaultStepSize); {
+		for i := uint64(0); i < roTx.FirstStepNotInFiles().ToTxNum(stepSize); {
 			fromTxNum := i
-			i += config3.DefaultStepSize * config3.DefaultStepsInFrozenFile
+			i += stepSize * stepsInFrozenFile
 
-			if i > roTx.FirstStepNotInFiles().ToTxNum(config3.DefaultStepSize) {
-				i = roTx.FirstStepNotInFiles().ToTxNum(config3.DefaultStepSize)
+			if i > roTx.FirstStepNotInFiles().ToTxNum(stepSize) {
+				i = roTx.FirstStepNotInFiles().ToTxNum(stepSize)
 			}
 
-			fmt.Printf("Compacting files %d-%d step\n", fromTxNum/config3.DefaultStepSize, i/config3.DefaultStepSize)
+			fmt.Printf("Compacting files %d-%d step\n", fromTxNum/stepSize, i/stepSize)
 
 			err = roTx.CompactRange(context.TODO(), fromTxNum, i)
 			if err != nil {

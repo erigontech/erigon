@@ -27,7 +27,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -154,7 +153,10 @@ func printStages(tx kv.TemporalTx, snapshots *freezeblocks.RoSnapshots, borSn *h
 
 	_lb, _lt, _ := rawdbv3.TxNums.Last(tx)
 
-	fmt.Fprintf(w, "state.history: idx steps: %.02f, TxNums_Index(%d,%d)\n\n", rawdbhelpers.IdxStepsCountV3(tx, config3.DefaultStepSize), _lb, _lt)
+	dbg := tx.Debug()
+	stepSize := dbg.StepSize()
+
+	fmt.Fprintf(w, "state.history: idx steps: %.02f, TxNums_Index(%d,%d)\n\n", rawdbhelpers.IdxStepsCountV3(tx, stepSize), _lb, _lt)
 	ethTxSequence, err := tx.ReadSequence(kv.EthTx)
 	if err != nil {
 		return err
@@ -193,8 +195,6 @@ func printStages(tx kv.TemporalTx, snapshots *freezeblocks.RoSnapshots, borSn *h
 	fmt.Fprintf(w, "Note: progress for commitment domain (in terms of txNum) is not presented.\n")
 	fmt.Fprint(w, "\n \t\t historyStartFrom \t\t progress(txnum) \t\t progress(step)\n")
 
-	dbg := tx.Debug()
-	stepSize := dbg.StepSize()
 	for i := 0; i < int(kv.DomainLen); i++ {
 		d := kv.Domain(i)
 		txNum := dbg.DomainProgress(d)

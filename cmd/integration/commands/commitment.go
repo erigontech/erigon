@@ -47,7 +47,6 @@ import (
 	"github.com/erigontech/erigon/cmd/utils/app"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -205,18 +204,18 @@ Examples:
 		// TrieContext.Branch -> TrieContext.readDomain -> StateReader.Read
 		commitmentReader := commitmentdb.NewLatestStateReader(tx, sd)
 
-		if err := readBranch(commitmentReader, prefix, logger); err != nil {
+		if err := readBranch(commitmentReader, prefix, tx.Debug().StepSize(), logger); err != nil {
 			logger.Error("Failed to read branch", "error", err)
 			return
 		}
 	},
 }
 
-func readBranch(stateReader *commitmentdb.LatestStateReader, prefix []byte, logger interface {
+func readBranch(stateReader *commitmentdb.LatestStateReader, prefix []byte, stepSize uint64, logger interface {
 	Info(msg string, ctx ...any)
 }) error {
 	compactKey := commitment.HexNibblesToCompactBytes(prefix)
-	val, step, err := stateReader.Read(kv.CommitmentDomain, compactKey, config3.DefaultStepSize)
+	val, step, err := stateReader.Read(kv.CommitmentDomain, compactKey, stepSize)
 	if err != nil {
 		return fmt.Errorf("failed to get branch for prefix %x: %w", prefix, err)
 	}
@@ -605,7 +604,7 @@ func benchLookup(ctx context.Context, logger log.Logger) error {
 	startTime := time.Now()
 	for i, key := range keys {
 		lookupStart := time.Now()
-		val, _, err := commitmentReader.Read(kv.CommitmentDomain, key, config3.DefaultStepSize)
+		val, _, err := commitmentReader.Read(kv.CommitmentDomain, key, tx.Debug().StepSize())
 		durations[i] = time.Since(lookupStart)
 
 		if err != nil {
@@ -792,7 +791,7 @@ func benchSnapshotsHistoryLookup(ctx context.Context, tx kv.TemporalTx, historyF
 			reader := commitmentdb.NewHistoryStateReader(tx, txNum)
 
 			lookupStart := time.Now()
-			_, _, err := reader.Read(kv.CommitmentDomain, compactKey, config3.DefaultStepSize)
+			_, _, err := reader.Read(kv.CommitmentDomain, compactKey, tx.Debug().StepSize())
 			elapsed := time.Since(lookupStart)
 
 			if err != nil {
@@ -885,7 +884,7 @@ func benchMdbxHistoryLookup(ctx context.Context, tx kv.TemporalTx, compactKey []
 		reader := commitmentdb.NewHistoryStateReader(tx, txNum)
 
 		lookupStart := time.Now()
-		_, _, err := reader.Read(kv.CommitmentDomain, compactKey, config3.DefaultStepSize)
+		_, _, err := reader.Read(kv.CommitmentDomain, compactKey, tx.Debug().StepSize())
 		elapsed := time.Since(lookupStart)
 
 		if err != nil {
