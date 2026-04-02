@@ -149,7 +149,7 @@ These flags manage network connectivity, peer discovery, and traffic control.
   * Default: `1000`
 * `--discovery.v4`: Enables/disables IPv4 peer discovery.
   * Default: `true`
-* `--discovery.v5`: Enables/disables DISCV5 topic discovery. Equivalent to `--v5disc`.
+* `--discovery.v5`: Enables/disables DISCV5 topic discovery. Aliases: `--discv5`, `--v5disc`.
   * Default: `true`
 * `--whitelist value`: Comma-separated `block_number=block_hash` pairs enforced as checkpoints. Peers that do not agree on these blocks are disconnected. Useful for enforcing a canonical chain after a contentious fork.
 * `--aa`: Enables Account Abstraction (EIP-4337) transaction support in the mempool.
@@ -384,7 +384,7 @@ These flags control the block synchronization and data downloading process, incl
   * Default: `0` (no limit)
 * `--fcu.timeout value`: Timeout for synchronous Fork Choice Update processing. After this duration FCU handling switches to async. Set to `0` to always process synchronously (relevant for MEV builders and validators requiring low-latency FCU responses).
 * `--fcu.background.prune`: Enables background database pruning triggered after each Fork Choice Update, spreading I/O cost over time.
-  * Default: `false`
+  * Default: `true`
 * `--experimental.concurrent-commitment`: Enables concurrent trie commitment during block execution (experimental; may improve execution throughput on multi-core hardware).
   * Default: `false`
 
