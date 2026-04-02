@@ -17,6 +17,7 @@
 package state
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -332,6 +333,36 @@ func (sd *TemporalMemBatch) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.T
 		return true, nil
 	})
 	return firstKey, firstVal, hasPrefix, err
+}
+
+// HasPrefixInRAM reports whether the RAM batch contains any non-deleted entry
+// for the given domain whose key starts with prefix.  It never touches disk or
+// segment files — only the in-memory btree (StorageDomain) or the domain map.
+func (sd *TemporalMemBatch) HasPrefixInRAM(domain kv.Domain, prefix []byte) bool {
+	sd.latestStateLock.RLock()
+	defer sd.latestStateLock.RUnlock()
+
+	if domain == kv.StorageDomain {
+		iter := sd.storage.Iter()
+		for ok := iter.Seek(string(prefix)); ok; ok = iter.Next() {
+			k := common.ToBytesZeroCopy(iter.Key())
+			if !bytes.HasPrefix(k, prefix) {
+				break
+			}
+			vals := iter.Value()
+			if len(vals) > 0 && len(vals[len(vals)-1].data) > 0 {
+				return true
+			}
+		}
+		return false
+	}
+
+	for k, vals := range sd.domains[domain] {
+		if bytes.HasPrefix([]byte(k), prefix) && len(vals) > 0 && len(vals[len(vals)-1].data) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func (sd *TemporalMemBatch) GetChangesetAccumulator() *changeset.StateChangeSet {

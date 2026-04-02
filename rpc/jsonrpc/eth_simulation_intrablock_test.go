@@ -26,9 +26,12 @@ import (
 // in-memory batch.
 //
 // With the bug:  HasStorage returns false for a brand-new contract even though
-//                its storage slot lives in sd.GetMemBatch().
+//
+//	its storage slot lives in sd.GetMemBatch().
+//
 // With the fix:  HasStorage checks the RAM batch first (via HasPrefixInRAM or
-//                IteratePrefix) and returns true.
+//
+//	IteratePrefix) and returns true.
 func TestSimulationIntraBlockHasStorageRAMBatch(t *testing.T) {
 	ctx := context.Background()
 	logger := log.New()
