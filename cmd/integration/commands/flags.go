@@ -26,23 +26,23 @@ import (
 )
 
 var (
-	chaindata                    string
-	databaseVerbosity            int
-	referenceChaindata           string
-	block, pruneTo, unwind       uint64
-	unwindEvery                  uint64
-	batchSizeStr                 string
-	domain                       string
+	chaindata                     string
+	databaseVerbosity             int
+	referenceChaindata            string
+	block, pruneTo, unwind        uint64
+	unwindEvery                   uint64
+	batchSizeStr                  string
+	domain                        string
 	reset, noCommit, squeeze, yes bool
-	bucket                       string
-	datadirCli, toChaindata      string
-	migration                    string
-	integrityFast, integritySlow bool
-	file                         string
-	HeimdallURL                  string
-	txtrace                      bool   // Whether to trace the execution (should only be used together with `block`)
-	chain                        string // Which chain to use (mainnet, sepolia, etc.)
-	outputCsvFile                string
+	bucket                        string
+	datadirCli, toChaindata       string
+	migration                     string
+	integrityFast, integritySlow  bool
+	file                          string
+	HeimdallURL                   string
+	txtrace                       bool   // Whether to trace the execution (should only be used together with `block`)
+	chain                         string // Which chain to use (mainnet, sepolia, etc.)
+	outputCsvFile                 string
 
 	startTxNum uint64
 
