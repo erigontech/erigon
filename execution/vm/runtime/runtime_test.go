@@ -743,7 +743,7 @@ func TestCreate2CollisionWithEIP7702Delegation(t *testing.T) {
 	// Compute the CREATE2 target address: keccak256(0xff ++ factory ++ salt ++ keccak256(initcode))[12:]
 	salt := uint256.NewInt(0)
 	factoryAddr := common.HexToAddress("0xfac0")
-	create2Addr := types.CreateAddress2(factoryAddr, salt.Bytes32(), accounts.InternCodeHash(crypto.Keccak256Hash(initcode)))
+	create2Addr := types.CreateAddress2(factoryAddr, salt.Bytes32(), accounts.InternCodeHash(crypto.HashData(initcode)))
 	delegatedAddr := accounts.InternAddress(create2Addr)
 
 	// Set an EIP-7702 delegation on the target address (points to some arbitrary empty account).

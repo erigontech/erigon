@@ -9,7 +9,7 @@ replace github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilte
 require (
 	github.com/erigontech/erigon-snapshot v1.3.1-0.20260210221902-e495954c7e78
 	github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116
-	github.com/erigontech/mdbx-go v0.39.12
+	github.com/erigontech/mdbx-go v0.39.17
 	github.com/erigontech/secp256k1 v1.2.1-0.20260218182123-377cc1bd6410
 	github.com/erigontech/silkworm-go v0.24.0
 )
@@ -22,12 +22,12 @@ require (
 	github.com/RoaringBitmap/roaring/v2 v2.14.4
 	github.com/alecthomas/kong v0.8.1
 	github.com/anacrolix/envpprof v1.5.0
-	github.com/anacrolix/generics v0.1.1-0.20251125230353-15d98d46693b
+	github.com/anacrolix/generics v0.2.0
 	github.com/anacrolix/go-libutp v1.3.3-0.20251121015447-f294e5ed5b4d
 	github.com/anacrolix/log v0.17.1-0.20251118025802-918f1157b7bb
 	github.com/anacrolix/missinggo/v2 v2.10.0
 	github.com/anacrolix/sync v0.5.5-0.20251119100342-d78dd1f686f1
-	github.com/anacrolix/torrent v1.61.1-0.20260205044246-b4fcea2871e5
+	github.com/anacrolix/torrent v1.61.1-0.20260306043331-7dea980541ac
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
 	github.com/cenkalti/backoff/v4 v4.3.0
@@ -46,7 +46,7 @@ require (
 	github.com/erigontech/fastkeccak v0.1.1-0.20260222164035-95925bf94241
 	github.com/ethereum/go-bigmodexpfix v0.0.0-20250911101455-f9e208c548ab
 	github.com/felixge/fgprof v0.9.5
-	github.com/go-chi/chi/v5 v5.2.3
+	github.com/go-chi/chi/v5 v5.2.5
 	github.com/go-chi/cors v1.2.2
 	github.com/go-echarts/go-echarts/v2 v2.6.7
 	github.com/go-quicktest/qt v1.101.0

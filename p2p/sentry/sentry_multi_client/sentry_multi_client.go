@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon/db/datadir"
 	"golang.org/x/sync/semaphore"
 
 	"google.golang.org/grpc"
@@ -39,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/services"
@@ -354,7 +354,8 @@ func (cs *MultiClient) blockHeaders66(ctx context.Context, in *sentryproto.Inbou
 	}
 
 	// Prepare to extract raw headers from the block
-	rlpStream := rlp.NewStream(bytes.NewReader(in.Data), uint64(len(in.Data)))
+	rlpStream := rlp.NewStreamFromPool(in.Data)
+	defer rlpStream.Release()
 	if _, err := rlpStream.List(); err != nil { // Now stream is at the beginning of 66 object
 		return fmt.Errorf("decode 1 BlockHeadersPacket66: %w", err)
 	}
@@ -452,7 +453,8 @@ func (cs *MultiClient) newBlock66(ctx context.Context, inreq *sentryproto.Inboun
 	}
 
 	// Extract header from the block
-	rlpStream := rlp.NewStream(bytes.NewReader(inreq.Data), uint64(len(inreq.Data)))
+	rlpStream := rlp.NewStreamFromPool(inreq.Data)
+	defer rlpStream.Release()
 	_, err := rlpStream.List() // Now stream is at the beginning of the block record
 	if err != nil {
 		return fmt.Errorf("decode 1 NewBlockMsg: %w", err)

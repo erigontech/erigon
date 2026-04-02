@@ -564,7 +564,8 @@ func decodeBlockAccessList(out *BlockAccessList, s *rlp.Stream) error {
 
 // DecodeBlockAccessListBytes decodes an RLP-encoded block access list and returns it.
 func DecodeBlockAccessListBytes(data []byte) (BlockAccessList, error) {
-	stream := rlp.NewStream(bytes.NewReader(data), 0)
+	stream := rlp.NewStreamFromPool(data)
+	defer stream.Release()
 	var bal BlockAccessList
 	if err := decodeBlockAccessList(&bal, stream); err != nil {
 		return nil, err

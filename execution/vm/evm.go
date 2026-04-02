@@ -356,7 +356,7 @@ func NewCodeAndHash(code []byte) *codeAndHash {
 
 func (c *codeAndHash) Hash() accounts.CodeHash {
 	if c.hash.IsZero() {
-		c.hash = accounts.InternCodeHash(crypto.Keccak256Hash(c.code))
+		c.hash = accounts.InternCodeHash(crypto.HashData(c.code))
 	}
 	return c.hash
 }
