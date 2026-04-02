@@ -285,16 +285,6 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	}
 
 	updateCount := sdc.updates.Size()
-<<<<<<< HEAD
-=======
-	_ = logPrefix
-	//if logPrefix != "" {
-	//	start := time.Now()
-	//	defer func() {
-	//		log.Debug("[commitment] processed", "block", blockNum, "txNum", txNum, "keys", common.PrettyCounter(updateCount), "mode", sdc.updates.Mode(), "spent", time.Since(start), "rootHash", hex.EncodeToString(rootHash))
-	//	}()
-	//}
->>>>>>> 1f0b5005e4 (logs: move some Info logs to Debug level (to simplify logs for Users) (#20329))
 	if updateCount == 0 {
 		rootHash, err = sdc.patriciaTrie.RootHash()
 		return rootHash, err

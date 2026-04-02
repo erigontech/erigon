@@ -2110,7 +2110,7 @@ func TestRangeAsOf_DBIteratorSkipsFileRange(t *testing.T) {
 		db, h, txs := filledHistory(t, largeValues, logger)
 		collateAndMergeHistory(t, db, h, txs, false)
 
-		hc := h.BeginFilesRo()
+		hc := h.beginForTests()
 		defer hc.Close()
 
 		endTxNum := hc.iit.files.EndTxNum()
@@ -2249,7 +2249,7 @@ func TestHistory_IterateChangedRecent_SkipsFileRange(t *testing.T) {
 
 		var filesEnd int
 		func() {
-			hc2 := h2.BeginFilesRo()
+			hc2 := h2.beginForTests()
 			defer hc2.Close()
 			filesEnd = int(hc2.iit.files.EndTxNum())
 			require.Greater(filesEnd, 0, "expected files to cover some range")
@@ -2260,7 +2260,7 @@ func TestHistory_IterateChangedRecent_SkipsFileRange(t *testing.T) {
 		require.NoError(err)
 		defer rwTx.Rollback()
 		func() {
-			hc2 := h2.BeginFilesRo()
+			hc2 := h2.beginForTests()
 			defer hc2.Close()
 			_, err = hc2.Prune(ctx, rwTx, 0, uint64(filesEnd), math.MaxUint64, true, logEvery)
 			require.NoError(err)
@@ -2277,7 +2277,7 @@ func TestHistory_IterateChangedRecent_SkipsFileRange(t *testing.T) {
 			require.NoError(err)
 			defer tx.Rollback()
 
-			hc := h.BeginFilesRo()
+			hc := h.beginForTests()
 			defer hc.Close()
 
 			it, err := hc.HistoryRange(fromTxNum, toTxNum, order.Asc, -1, tx)
@@ -2336,7 +2336,7 @@ func TestHistory_IterateChangedRecent_PhantomDBKey(t *testing.T) {
 		var filesEnd int
 		var valsTable string
 		func() {
-			hc := h.BeginFilesRo()
+			hc := h.beginForTests()
 			defer hc.Close()
 			filesEnd = int(hc.iit.files.EndTxNum())
 			valsTable = hc.h.ValuesTable
@@ -2375,7 +2375,7 @@ func TestHistory_IterateChangedRecent_PhantomDBKey(t *testing.T) {
 		require.NoError(err)
 		defer roTx.Rollback()
 
-		hc := h.BeginFilesRo()
+		hc := h.beginForTests()
 		defer hc.Close()
 
 		it, err := hc.HistoryRange(fromTxNum, -1, order.Asc, -1, roTx)
