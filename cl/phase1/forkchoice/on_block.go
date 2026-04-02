@@ -239,9 +239,10 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	if block.Block.Body.ExecutionPayload != nil {
 		f.eth2Roots.Add(blockRoot, block.Block.Body.ExecutionPayload.BlockHash)
 	}
-	if block.Block.Slot > f.highestSeen.Load() {
-		f.highestSeen.Store(block.Block.Slot)
-	}
+	// Note: highestSeen was already updated before AddChainSegment (line ~216)
+	// so aggregates/attestations for this slot are accepted promptly. No second
+	// update needed here.
+
 	// Remove the parent from the head set
 	delete(f.headSet, block.Block.ParentRoot)
 	f.headSet[blockRoot] = struct{}{}

@@ -1367,12 +1367,13 @@ func (a *ApiHandler) storeBlockAndBlobs(
 		return err
 	}
 
-	// Use fullValidation=false for locally-produced blocks. The block was
-	// just built by this node — BLS re-verification against the replayed state
-	// would fail when the head state lags behind (e.g., genesis start) because
-	// ProcessSlots(genesis, slot) without intermediate blocks produces a different
-	// RANDAO mix than the state with blocks applied.
-	if err := a.forkchoiceStore.OnBlock(ctx, block, true, false, false); err != nil {
+	// Skip BLS re-verification only during the genesis epoch, where the replayed
+	// state (ProcessSlots from genesis without intermediate blocks) can produce a
+	// different RANDAO mix than the head state with blocks applied. After the first
+	// epoch, state replay is reliable and full validation should be enabled.
+	blockEpoch := block.Block.Slot / a.beaconChainCfg.SlotsPerEpoch
+	fullValidation := blockEpoch > 0
+	if err := a.forkchoiceStore.OnBlock(ctx, block, true, fullValidation, false); err != nil {
 		return err
 	}
 	finalizedHash := a.forkchoiceStore.GetEth1Hash(a.forkchoiceStore.FinalizedCheckpoint().Root)

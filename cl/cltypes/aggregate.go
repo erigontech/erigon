@@ -87,6 +87,9 @@ const defaultSyncCommitteeBitsSize = 64
  * SyncAggregate, Determines successful committee, bits shows active participants,
  * and signature is the aggregate BLS signature of the committee.
  * The bits length equals SYNC_COMMITTEE_SIZE / 8 (64 bytes for mainnet, 4 bytes for minimal).
+ *
+ * IMPORTANT: Always construct via NewSyncAggregate() or NewSyncAggregateWithSize().
+ * Zero-value (&SyncAggregate{}) is not valid — SSZ methods require initialized bits.
  */
 type SyncAggregate struct {
 	SyncCommiteeBits      []byte         `json:"-"`
@@ -104,9 +107,12 @@ func NewSyncAggregateWithSize(bitsSize int) *SyncAggregate {
 	}
 }
 
-func (agg *SyncAggregate) ensureBits() {
+// assertBitsInitialized panics if SyncCommiteeBits has not been initialized.
+// All SyncAggregate instances must be created via NewSyncAggregate() or
+// NewSyncAggregateWithSize(), never as bare &SyncAggregate{} literals.
+func (agg *SyncAggregate) assertBitsInitialized() {
 	if len(agg.SyncCommiteeBits) == 0 {
-		agg.SyncCommiteeBits = make([]byte, defaultSyncCommitteeBitsSize)
+		panic("SyncAggregate: SyncCommiteeBits not initialized — use NewSyncAggregate() or NewSyncAggregateWithSize()")
 	}
 }
 
@@ -131,7 +137,7 @@ func (agg *SyncAggregate) IsSet(idx uint64) bool {
 }
 
 func (agg *SyncAggregate) EncodeSSZ(buf []byte) ([]byte, error) {
-	agg.ensureBits()
+	agg.assertBitsInitialized()
 	return ssz2.MarshalSSZ(buf, agg.SyncCommiteeBits, agg.SyncCommiteeSignature[:])
 }
 
@@ -140,7 +146,7 @@ func (*SyncAggregate) Static() bool {
 }
 
 func (agg *SyncAggregate) DecodeSSZ(buf []byte, version int) error {
-	agg.ensureBits()
+	agg.assertBitsInitialized()
 	bitsSize := len(agg.SyncCommiteeBits)
 	if len(buf) < bitsSize+96 {
 		return ssz.ErrLowBufferSize
@@ -152,17 +158,17 @@ func (agg *SyncAggregate) DecodeSSZ(buf []byte, version int) error {
 }
 
 func (agg *SyncAggregate) EncodingSizeSSZ() int {
-	agg.ensureBits()
+	agg.assertBitsInitialized()
 	return len(agg.SyncCommiteeBits) + 96
 }
 
 func (agg *SyncAggregate) HashSSZ() ([32]byte, error) {
-	agg.ensureBits()
+	agg.assertBitsInitialized()
 	return merkle_tree.HashTreeRoot(agg.SyncCommiteeBits, agg.SyncCommiteeSignature[:])
 }
 
 func (agg *SyncAggregate) MarshalJSON() ([]byte, error) {
-	agg.ensureBits()
+	agg.assertBitsInitialized()
 	return json.Marshal(struct {
 		SyncCommiteeBits      string         `json:"sync_committee_bits"`
 		SyncCommiteeSignature common.Bytes96 `json:"sync_committee_signature"`
