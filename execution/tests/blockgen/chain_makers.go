@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/misc"
-	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -365,8 +364,10 @@ var withdrawalRequestCodeHash = accounts.InternCodeHash(common.BytesToHash(crypt
 var consolidationRequestCode = common.Hex2Bytes("3373fffffffffffffffffffffffffffffffffffffffe1460d35760115f54807fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff1461019a57600182026001905f5b5f82111560685781019083028483029004916001019190604d565b9093900492505050366060146088573661019a573461019a575f5260205ff35b341061019a57600154600101600155600354806004026004013381556001015f358155600101602035815560010160403590553360601b5f5260605f60143760745fa0600101600355005b6003546002548082038060021160e7575060025b5f5b8181146101295782810160040260040181607402815460601b815260140181600101548152602001816002015481526020019060030154905260010160e9565b910180921461013b5790600255610146565b90505f6002555f6003555b5f54807fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff141561017357505f5b6001546001828201116101885750505f61018e565b01600190035b5f555f6001556074025ff35b5f5ffd")
 var consolidationRequestCodeHash = accounts.InternCodeHash(common.BytesToHash(crypto.Keccak256(consolidationRequestCode)))
 
-func InitPraguePreDeploys(db kv.TemporalRwDB, logger log.Logger) error {
+func InitPraguePreDeploys(db kv.TemporalRwDB, config *chain.Config, logger log.Logger) error {
 	ctx := context.Background()
+	withdrawalAddr := config.GetWithdrawalRequestContract()
+	consolidationAddr := config.GetConsolidationRequestContract()
 	return db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
 		domains, err := execctx.NewSharedDomains(ctx, tx, logger)
 		if err != nil {
@@ -379,14 +380,14 @@ func InitPraguePreDeploys(db kv.TemporalRwDB, logger log.Logger) error {
 		}
 		stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, latestTxNum)
 
-		stateWriter.UpdateAccountData(params.WithdrawalRequestAddress, &accounts.Account{}, &accounts.Account{
+		stateWriter.UpdateAccountData(withdrawalAddr, &accounts.Account{}, &accounts.Account{
 			CodeHash: withdrawalRequestCodeHash,
 		})
-		stateWriter.UpdateAccountCode(params.WithdrawalRequestAddress, 0, withdrawalRequestCodeHash, withdrawalRequestCode)
-		stateWriter.UpdateAccountData(params.ConsolidationRequestAddress, &accounts.Account{}, &accounts.Account{
+		stateWriter.UpdateAccountCode(withdrawalAddr, 0, withdrawalRequestCodeHash, withdrawalRequestCode)
+		stateWriter.UpdateAccountData(consolidationAddr, &accounts.Account{}, &accounts.Account{
 			CodeHash: consolidationRequestCodeHash,
 		})
-		stateWriter.UpdateAccountCode(params.ConsolidationRequestAddress, 0, consolidationRequestCodeHash, consolidationRequestCode)
+		stateWriter.UpdateAccountCode(consolidationAddr, 0, consolidationRequestCodeHash, consolidationRequestCode)
 
 		if err := domains.Flush(ctx, tx); err != nil {
 			return err
