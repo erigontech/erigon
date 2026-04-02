@@ -1,6 +1,8 @@
 {
   "testIds": [
-    "tests/benchmark/stateful/bloatnet/test_account_query.py::test_account_query[fork_Osaka-blockchain_test_engine_x-EXTCODECOPY-False-0-max_code_size-0-benchmark-gas-value_120M]"
+    "tests/benchmark/stateful/bloatnet/test_account_query.py::test_account_query[fork_Osaka-blockchain_test_engine_x-EXTCODECOPY-False-0-max_code_size-0-benchmark-gas-value_120M]",
+    "tests/benchmark/stateful/bloatnet/test_account_query.py::test_account_query[fork_Osaka-blockchain_test_engine_x-opcode_CALL-access_warm_False-mem_size_0-code_size_0-value_sent_1-benchmark-gas-value_120M]",
+    "tests/benchmark/stateful/bloatnet/test_account_query.py::test_account_query[fork_Osaka-blockchain_test_engine_x-opcode_CALLCODE-access_warm_False-mem_size_0-code_size_0-value_sent_1-benchmark-gas-value_120M]"
   ],
   "environment": {
     "currentCoinbase": "0x0000000000000000000000000000000000000000",
@@ -117,6 +119,30 @@
       "nonce": "0x00",
       "balance": "0x3635c9adc5dea00000",
       "code": "0x",
+      "storage": {}
+    },
+    "0xc226e5af6a8d9bd8f7754725bfecfb9a995db177": {
+      "nonce": "0x01",
+      "balance": "0x00",
+      "code": "0x3060005260006000f3",
+      "storage": {}
+    },
+    "0xbc92f5ec0f211ce6d8ae71ee0621efc37ddae266": {
+      "nonce": "0x01",
+      "balance": "0x00",
+      "code": "0x60096000600073c226e5af6a8d9bd8f7754725bfecfb9a995db1773c6020356001016000355b80600960006000f550600101808211630000001558035700",
+      "storage": {}
+    },
+    "0xcff33c5a8031b9080a442e5dfdb7f43c12fd95c8": {
+      "nonce": "0x01",
+      "balance": "0x3635c9adc5dea00000",
+      "code": "0x73bc92f5ec0f211ce6d8ae71ee0621efc37ddae26660005260ff600b536000356020527fd3bd1092b20d863d4cf6aa20eae9ff07c5e5c6dac00f962764babbfcea96afc26040525b600060006000600060016055600b205af1506001602051016020526300000021580356",
+      "storage": {}
+    },
+    "0x980ce3d7bee60b08187efd18107bcb90c8979aff": {
+      "nonce": "0x01",
+      "balance": "0x3635c9adc5dea00000",
+      "code": "0x73bc92f5ec0f211ce6d8ae71ee0621efc37ddae26660005260ff600b536000356020527fd3bd1092b20d863d4cf6aa20eae9ff07c5e5c6dac00f962764babbfcea96afc26040525b600060006000600060016055600b205af2506001602051016020526300000021580356",
       "storage": {}
     }
   }
