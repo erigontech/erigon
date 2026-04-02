@@ -113,7 +113,7 @@ func init() {
 
 func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFunc, name string) {
 	var (
-		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
+		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
 		callContext = &CallContext{}
 		pc          = uint64(0)
 	)
@@ -216,7 +216,7 @@ func TestSAR(t *testing.T) {
 func TestAddMod(t *testing.T) {
 	t.Parallel()
 	var (
-		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
+		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
 		callContext = &CallContext{}
 		pc          = uint64(0)
 	)
@@ -254,7 +254,7 @@ func TestAddMod(t *testing.T) {
 // getResult is a convenience function to generate the expected values
 // func getResult(args []*twoOperandParams, opFn executionFunc) []TwoOperandTestcase {
 // 	var (
-// 		evm         = NewEVM(BlockContext{}, TxContext{}, nil, chain.TestChainConfig, Config{})
+// 		evm         = NewEVM(BlockContext{}, TxContext{}, nil, chain.AllProtocolChanges, Config{})
 // 		stack       = stack.New()
 // 		pc          = uint64(0)
 // 	)
@@ -302,7 +302,7 @@ func TestJsonTestcases(t *testing.T) {
 
 func opBenchmark(b *testing.B, op executionFunc, args ...string) {
 	var (
-		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
+		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
 		callContext = &CallContext{}
 	)
 
@@ -533,7 +533,7 @@ func BenchmarkOpIsZero(b *testing.B) {
 func TestOpMstore(t *testing.T) {
 	t.Parallel()
 	var (
-		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
+		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
 		callContext = &CallContext{}
 	)
 
@@ -556,7 +556,7 @@ func TestOpMstore(t *testing.T) {
 
 func BenchmarkOpMstore(bench *testing.B) {
 	var (
-		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
+		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
 		callContext = &CallContext{}
 	)
 
@@ -576,7 +576,7 @@ func TestOpTstore(t *testing.T) {
 	t.Parallel()
 	var (
 		state       = state.New(nil)
-		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, state, chain.TestChainConfig, Config{})
+		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, state, chain.AllProtocolChanges, Config{})
 		caller      = accounts.ZeroAddress
 		to          = accounts.InternAddress(common.Address{1})
 		callContext = &CallContext{Contract: *NewContract(caller, caller, to, uint256.Int{})}
@@ -608,7 +608,7 @@ func TestOpTstore(t *testing.T) {
 
 func BenchmarkOpKeccak256(bench *testing.B) {
 	var (
-		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
+		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
 		callContext = &CallContext{}
 	)
 	callContext.Memory.Resize(32)
@@ -780,7 +780,7 @@ func TestOpMCopy(t *testing.T) {
 		},
 	} {
 		var (
-			evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
+			evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
 			callContext = &CallContext{}
 			pc          = uint64(0)
 		)
@@ -849,7 +849,7 @@ func TestOpCLZ(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var (
-				evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
+				evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
 				callContext = &CallContext{}
 			)
 
@@ -883,7 +883,7 @@ func TestPush(t *testing.T) {
 	code := common.FromHex("0011223344556677889900aabbccddeeff0102030405060708090a0b0c0d0e0ff1e1d1c1b1a19181716151413121")
 	push32 := makePush(32, 32)
 
-	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
 	callContext := &CallContext{}
 	callContext.Contract.Code = code
 
@@ -945,7 +945,7 @@ func TestPush(t *testing.T) {
 }
 
 func TestEIP8024_Execution(t *testing.T) {
-	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
 
 	tests := []struct {
 		name       string
