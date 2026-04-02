@@ -214,7 +214,6 @@ func TableScanningPrune(
 		throttling = v.(*time.Duration)
 	}
 
-	var keyCursorPosition, valCursorPosition = &StartPos{}, &StartPos{}
 	// invalidate progress if new params here
 	if !(prevStat.TxFrom == txFrom && prevStat.TxTo == txTo) {
 		prevStat.ValueProgress = First
@@ -222,12 +221,8 @@ func TableScanningPrune(
 			prevStat.KeyProgress = First
 		}
 	}
-	if prevStat.ValueProgress == InProgress {
-		valCursorPosition.StartVal, valCursorPosition.StartKey, err = valDelCursor.Seek(prevStat.LastPrunedValue)
-	} else if prevStat.ValueProgress == First {
-		valCursorPosition.StartVal, valCursorPosition.StartKey, err = valDelCursor.First()
-	}
 
+	var keyCursorPosition = &StartPos{}
 	if keysCursor != nil {
 		if prevStat.KeyProgress == InProgress {
 			keyCursorPosition.StartKey, keyCursorPosition.StartVal, err = keysCursor.Seek(prevStat.LastPrunedKey) //nolint:govet
@@ -291,7 +286,7 @@ func TableScanningPrune(
 		}
 	}
 
-	lastVal, err := tableScanningPrune(ctx, stat, filenameBase, txFrom, txTo, txNumGetter, valDelCursor, keysCursor, asserts, throttling, logEvery, logger)
+	lastVal, err := tableScanningPrune(ctx, stat, filenameBase, txFrom, txTo, txNumGetter, valDelCursor, keysCursor, asserts, throttling, logEvery, logger, prevStat.ValueProgress, prevStat.LastPrunedValue)
 	if err != nil {
 		return nil, err
 	}
@@ -319,10 +314,20 @@ func tableScanningPrune(
 	throttling *time.Duration,
 	logEvery *time.Ticker,
 	logger log.Logger,
+	valueProgress Progress,
+	lastPrunedValue []byte,
 ) (interrupted []byte, err error) {
-	val, txNumBytes, err := valDelCursor.Current()
+	var val, txNumBytes []byte
+	switch valueProgress {
+	case InProgress:
+		val, txNumBytes, err = valDelCursor.Seek(lastPrunedValue)
+	case First:
+		val, txNumBytes, err = valDelCursor.First()
+	default: // Done or unknown — nothing to scan
+		return nil, nil
+	}
 	if err != nil {
-		return nil, fmt.Errorf("cursor current %s: %w", filenameBase, err)
+		return nil, fmt.Errorf("cursor position %s: %w", filenameBase, err)
 	}
 	for ; val != nil; val, txNumBytes, err = valDelCursor.NextNoDup() {
 		if err != nil {

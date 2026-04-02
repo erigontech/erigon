@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/debug"
@@ -156,14 +157,19 @@ func printStages(tx kv.TemporalTx, snapshots *freezeblocks.RoSnapshots, borSn *h
 	stepSize := tx.Debug().StepSize()
 
 	fmt.Fprintf(w, "state.history: idx steps: %.02f, TxNums_Index(%d,%d)\n", rawdbhelpers.IdxStepsCountV3(tx, stepSize), _lb, _lt)
-	commKeysSteps := rawdbhelpers.IdxStepsInDB(tx, kv.TblCommitmentHistoryKeys, stepSize)
-	commValsPrg, _ := dbstate.GetPruneValProgress(tx, []byte(kv.TblCommitmentHistoryVals))
-	fmt.Fprintf(w, "commitment.hist.keys: steps in db: %.02f\n", commKeysSteps)
-	if commValsPrg != nil {
-		fmt.Fprintf(w, "commitment.hist.vals: pruneProgress(txTo=%d/step=%d keys=%s vals=%s)\n\n", commValsPrg.TxTo, commValsPrg.TxTo/stepSize, commValsPrg.KeyProgress, commValsPrg.ValueProgress)
-	} else {
-		fmt.Fprintf(w, "commitment.hist.vals: no pruneProgress\n\n")
+	for i := 0; i < int(kv.DomainLen); i++ {
+		d := kv.Domain(i)
+		cfg := statecfg.Schema.GetDomainCfg(d)
+		keysSteps := rawdbhelpers.IdxStepsInDB(tx, cfg.Hist.IiCfg.KeysTable, stepSize)
+		valsPrg, _ := dbstate.GetPruneValProgress(tx, []byte(cfg.Hist.ValuesTable))
+		if valsPrg != nil {
+			fmt.Fprintf(w, "%s.hist: keys steps=%.02f, vals pruneProgress(txTo=%d/step=%d keys=%s vals=%s)\n",
+				d, keysSteps, valsPrg.TxTo, valsPrg.TxTo/stepSize, valsPrg.KeyProgress, valsPrg.ValueProgress)
+		} else {
+			fmt.Fprintf(w, "%s.hist: keys steps=%.02f, vals no pruneProgress\n", d, keysSteps)
+		}
 	}
+	fmt.Fprintf(w, "\n")
 	ethTxSequence, err := tx.ReadSequence(kv.EthTx)
 	if err != nil {
 		return err
