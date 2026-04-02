@@ -975,7 +975,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 	var checked atomic.Uint64
 	var lastBlockNum atomic.Uint64
 	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(runtime.GOMAXPROCS(-1)) // all cpus, because no producer-worker
+	g.SetLimit(runtime.GOMAXPROCS(-1) - 1) // all cpus, because no producer-worker
 
 	logTicker := time.NewTicker(20 * time.Second)
 	defer logTicker.Stop()
