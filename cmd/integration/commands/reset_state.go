@@ -27,7 +27,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -35,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/debug"
@@ -153,8 +153,17 @@ func printStages(tx kv.TemporalTx, snapshots *freezeblocks.RoSnapshots, borSn *h
 	}
 
 	_lb, _lt, _ := rawdbv3.TxNums.Last(tx)
+	stepSize := tx.Debug().StepSize()
 
-	fmt.Fprintf(w, "state.history: idx steps: %.02f, TxNums_Index(%d,%d)\n\n", rawdbhelpers.IdxStepsCountV3(tx, config3.DefaultStepSize), _lb, _lt)
+	fmt.Fprintf(w, "state.history: idx steps: %.02f, TxNums_Index(%d,%d)\n", rawdbhelpers.IdxStepsCountV3(tx, stepSize), _lb, _lt)
+	commKeysSteps := rawdbhelpers.IdxStepsInDB(tx, kv.TblCommitmentHistoryKeys, stepSize)
+	commValsPrg, _ := dbstate.GetPruneValProgress(tx, []byte(kv.TblCommitmentHistoryVals))
+	fmt.Fprintf(w, "commitment.hist.keys: steps in db: %.02f\n", commKeysSteps)
+	if commValsPrg != nil {
+		fmt.Fprintf(w, "commitment.hist.vals: pruneProgress(txTo=%d/step=%d keys=%s vals=%s)\n\n", commValsPrg.TxTo, commValsPrg.TxTo/stepSize, commValsPrg.KeyProgress, commValsPrg.ValueProgress)
+	} else {
+		fmt.Fprintf(w, "commitment.hist.vals: no pruneProgress\n\n")
+	}
 	ethTxSequence, err := tx.ReadSequence(kv.EthTx)
 	if err != nil {
 		return err
@@ -194,7 +203,6 @@ func printStages(tx kv.TemporalTx, snapshots *freezeblocks.RoSnapshots, borSn *h
 	fmt.Fprint(w, "\n \t\t historyStartFrom \t\t progress(txnum) \t\t progress(step)\n")
 
 	dbg := tx.Debug()
-	stepSize := dbg.StepSize()
 	for i := 0; i < int(kv.DomainLen); i++ {
 		d := kv.Domain(i)
 		txNum := dbg.DomainProgress(d)
