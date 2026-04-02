@@ -1024,13 +1024,6 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 	} else {
 		canPruneIdx := ht.iit.CanPrune(tx, untilTx)
 		if !canPruneIdx {
-			if ht.h.FilenameBase == "commitment" {
-				ht.h.logger.Info("[dbg] canPruneUntil: canPruneIdx=false",
-					"untilTx", untilTx, "idxInDB", fmt.Sprintf("[%d-%d]", minIdxTx, maxIdxTx),
-					"histFiles", ht.files.EndTxNum(), "iiFiles", ht.iit.files.EndTxNum(),
-					"pruneInProgress", pruneInProgress,
-					"statKeyPrg", stat.KeyProgress.String(), "statValPrg", stat.ValueProgress.String(), "statTxTo", stat.TxTo)
-			}
 			return false, 0
 		}
 		txTo = min(ht.files.EndTxNum(), ht.iit.files.EndTxNum(), untilTx)
@@ -1052,17 +1045,7 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 		mxPrunableHComm.Set(delta)
 	}
 
-	result := minIdxTx < txTo || pruneInProgress
-	if ht.h.FilenameBase == "commitment" {
-		ht.h.logger.Info("[dbg] canPruneUntil[commitment]",
-			"result", result, "untilTx", untilTx, "txTo", txTo,
-			"idxInDB", fmt.Sprintf("[%d-%d]", minIdxTx, maxIdxTx),
-			"minTxDB", minTxDB, "delta_steps", fmt.Sprintf("%.2f", delta),
-			"histFiles", ht.files.EndTxNum(), "iiFiles", ht.iit.files.EndTxNum(),
-			"pruneInProgress", pruneInProgress,
-			"statKeyPrg", stat.KeyProgress.String(), "statValPrg", stat.ValueProgress.String(), "statTxTo", stat.TxTo)
-	}
-	return result, txTo
+	return minIdxTx < txTo || pruneInProgress, txTo
 }
 
 // Prune [txFrom; txTo)
@@ -1071,7 +1054,6 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 //   - E.g. Unwind can't use progress, because it's not linear
 //     and will wrongly update progress of steps cleaning and could end up with inconsistent history.
 func (ht *HistoryRoTx) Prune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
-	origTxTo := txTo
 	if !forced {
 		if ht.files.EndTxNum() > 0 {
 			txTo = min(txTo, ht.files.EndTxNum())
@@ -1079,18 +1061,8 @@ func (ht *HistoryRoTx) Prune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limi
 		var can bool
 		can, txTo = ht.canPruneUntil(tx, txTo)
 		if !can {
-			if ht.h.FilenameBase == "commitment" {
-				ht.h.logger.Info("[dbg] history.Prune[commitment]: can't prune",
-					"origTxTo", origTxTo, "filesEndTxNum", ht.files.EndTxNum(),
-					"forced", forced, "snapshotsDisabled", ht.h.SnapshotsDisabled)
-			}
 			return nil, nil
 		}
-	}
-	if ht.h.FilenameBase == "commitment" {
-		ht.h.logger.Info("[dbg] history.Prune[commitment]: pruning",
-			"txFrom", txFrom, "txTo", txTo, "origTxTo", origTxTo,
-			"limit", limit, "forced", forced)
 	}
 	return ht.prune(ctx, tx, txFrom, txTo, limit, forced, logEvery)
 }

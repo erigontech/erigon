@@ -1343,9 +1343,6 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 		logEvery = time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
 	}
-	at.a.logger.Info("[dbg] aggregator.prune", "step", step,
-		"txn_range", fmt.Sprintf("[%d,%d)", txFrom, txTo), "limit", limit,
-		"stepsRangeInDB", at.stepsRangeInDBAsStr(tx))
 	aggStat := newAggregatorPruneStat()
 	for id, d := range at.d {
 		//if _, ok := invalidateOnce[fmt.Sprintf("domain%s", d.d.ValuesTable)]; !ok {
