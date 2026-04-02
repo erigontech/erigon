@@ -636,8 +636,11 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			blockRegular := mdGasUsed.Regular - st.evm.RevertedSpillGas()
 			st.blockRegularGasUsed = max(blockRegular, intrinsicGasResult.FloorGasCost)
 			st.blockStateGasUsed = blockState
-			// Receipt gasUsed: total gas pool depletion + spill restored on depth-0 REVERT.
-			st.txnGasUsedB4Refunds = mdGasUsed.Total() + st.evm.RevertedSpillGas()
+			// Receipt gasUsed: mdGasUsed.Total() wraps correctly for REVERT txs with spill:
+			// mdGasUsed.State underflows (gasRemaining.State > initialGas.State when child
+			// REVERT restores spill to reservoir), and the uint64 wraparound of Total()
+			// cancels the spill, leaving exactly the gas the user paid for.
+			st.txnGasUsedB4Refunds = mdGasUsed.Total()
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Total())
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
 			if dbg.TraceGas {
@@ -675,7 +678,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		blockRegular := mdGasUsed.Regular - st.evm.RevertedSpillGas()
 		st.blockRegularGasUsed = max(blockRegular, intrinsicGasResult.FloorGasCost)
 		st.blockStateGasUsed = blockState
-		st.txnGasUsedB4Refunds = mdGasUsed.Total() + st.evm.RevertedSpillGas()
+		st.txnGasUsedB4Refunds = mdGasUsed.Total()
 		st.txnGasUsed = max(st.txnGasUsedB4Refunds, intrinsicGasResult.FloorGasCost)
 		if dbg.TraceGas {
 			log.Warn("[amsterdam] tx gas breakdown (no-refund)",

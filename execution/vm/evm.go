@@ -213,10 +213,19 @@ func (evm *EVM) handleFrameRevert(gas *mdgas.MdGas, err error, depth int,
 
 	// Compute spill: state gas that was charged from gas_left (regular)
 	// because the reservoir was insufficient.
-	reservoirUsed := initialChildState - gas.State
+	//
+	// gas.State can exceed initialChildState when a child frame reverted and
+	// restored its own spill back to this frame's reservoir, making the
+	// reservoir larger than it started. In that case the surplus directly
+	// equals the spill that was drawn from regular gas.
 	var spill uint64
-	if childStateConsumed > reservoirUsed {
-		spill = childStateConsumed - reservoirUsed
+	if gas.State > initialChildState {
+		spill = gas.State - initialChildState
+	} else {
+		reservoirUsed := initialChildState - gas.State
+		if childStateConsumed > reservoirUsed {
+			spill = childStateConsumed - reservoirUsed
+		}
 	}
 
 	// EIP-8037: "On child revert or exceptional halt, all state gas
@@ -224,9 +233,14 @@ func (evm *EVM) handleFrameRevert(gas *mdgas.MdGas, err error, depth int,
 	// into gas_left, is restored to the parent's reservoir."
 	if depth == 0 {
 		if err == ErrExecutionReverted {
-			// Top-level REVERT: restore spill to gas_left for refund
-			// accounting; track it for receipt gas calculation.
-			gas.Regular += spill
+			// Top-level REVERT: record spill for block-gas accounting.
+			// We intentionally do NOT restore spill to gas.Regular here:
+			// mdGasUsed.Regular (= initialGas.Regular - gasRemaining.Regular)
+			// already includes the spill because spill was deducted from
+			// gasRemaining.Regular when it occurred. The formula
+			//   blockRegular = mdGasUsed.Regular - revertedSpillGas
+			// in txn_executor.go then subtracts it exactly once. Adding it
+			// back to gas.Regular would cause a double-subtraction there.
 			evm.revertedSpillGas += spill
 		}
 		// Top-level exceptional halt: gas.Regular already zeroed in step 2;
