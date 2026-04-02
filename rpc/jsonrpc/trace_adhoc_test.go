@@ -17,6 +17,7 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -411,6 +412,9 @@ func TestOeTracer(t *testing.T) {
 				context.BaseFee = *baseFee
 			}
 			rules := context.Rules(test.Genesis.Config)
+			if rules.IsAmsterdam {
+				context.CostPerStateByte = misc.CostPerStateByte(uint64(test.Context.GasLimit))
+			}
 
 			m := execmoduletester.New(t)
 			dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
@@ -429,8 +433,8 @@ func TestOeTracer(t *testing.T) {
 			require.NoError(t, err)
 			evm := vm.NewEVM(context, txContext, statedb, test.Genesis.Config, vm.Config{Tracer: tracer.Tracer().Hooks})
 
-			st := protocol.NewStateTransition(evm, msg, new(protocol.GasPool).AddGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()))
-			_, err = st.TransitionDb(true /* refunds */, false /* gasBailout */)
+			st := protocol.NewTxnExecutor(evm, msg, new(protocol.GasPool).AddGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()))
+			_, err = st.Execute(true /* refunds */, false /* gasBailout */)
 			require.NoError(t, err)
 
 			for _, trace := range traceResult.Trace {
@@ -458,4 +462,32 @@ func TestOeTracer(t *testing.T) {
 			require.Equal(t, string(want), string(have))
 		})
 	}
+}
+
+func TestRawTransaction(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+
+	// Read a transaction from block 6 and re-encode it as raw bytes.
+	var encodedTx []byte
+	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
+		b, err := m.BlockReader.BlockByNumber(m.Ctx, tx, 6)
+		if err != nil {
+			return err
+		}
+		txn := b.Transactions()[0]
+		var buf bytes.Buffer
+		if err = txn.MarshalBinary(&buf); err != nil {
+			return err
+		}
+		encodedTx = buf.Bytes()
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := api.RawTransaction(context.Background(), encodedTx, []string{"trace"})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotEmpty(t, result.Trace)
 }

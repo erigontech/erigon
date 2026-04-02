@@ -202,7 +202,7 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	}
 
 	var canUseAppend bool
-	isDupSort := kv.ChaindataTablesCfg[bucket].Flags&kv.DupSort != 0 && !kv.ChaindataTablesCfg[bucket].AutoDupSortKeysConversion
+	isDupSort := kv.ChaindataTablesCfg[bucket].Flags&kv.DupSort != 0
 
 	i := 0
 	loadNextFunc := func(_, k, v []byte) error {
@@ -296,7 +296,7 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 	h := &Heap{}
 	heapInit(h)
 	for i, provider := range providers {
-		if key, value, err := provider.Next(nil, nil); err == nil {
+		if key, value, err := provider.Next(); err == nil {
 			heapPush(h, &HeapElem{key, value, i})
 		} else /* we must have at least one entry per file */ {
 			eee := fmt.Errorf("%s: error reading first readers: n=%d current=%d provider=%s err=%w",
@@ -328,8 +328,7 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 				if err = loadFunc(element.Key, element.Value); err != nil {
 					return err
 				}
-				// Need to copy k because the underlying space will be re-used for the next key
-				prevK = common.Copy(element.Key)
+				prevK = element.Key
 			}
 		} else if args.BufferType == SortableAppendBuffer {
 			if !bytes.Equal(prevK, element.Key) {
@@ -338,9 +337,8 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 						return err
 					}
 				}
-				// Need to copy k because the underlying space will be re-used for the next key
-				prevK = common.Copy(element.Key)
-				prevV = common.Copy(element.Value)
+				prevK = element.Key
+				prevV = common.Copy(element.Value) // copy needed: prevV is mutated by append below; element.Value may point into read-only mmap
 			} else {
 				prevV = append(prevV, element.Value...)
 			}
@@ -350,7 +348,7 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 			}
 		}
 
-		if element.Key, element.Value, err = provider.Next(element.Key[:0], element.Value[:0]); err == nil {
+		if element.Key, element.Value, err = provider.Next(); err == nil {
 			heapPush(h, element)
 		} else if !errors.Is(err, io.EOF) {
 			return fmt.Errorf("%s: error while reading next element from disk: %w", logPrefix, err)

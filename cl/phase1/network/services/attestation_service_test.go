@@ -137,7 +137,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 			},
 			args: args{
 				ctx:    context.Background(),
-				subnet: uint64Ptr(1),
+				subnet: common.NewUint64(1),
 				msg:    att,
 			},
 			wantErr: true,
@@ -156,7 +156,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 			},
 			args: args{
 				ctx:    context.Background(),
-				subnet: uint64Ptr(1),
+				subnet: common.NewUint64(1),
 				msg:    att,
 			},
 			wantErr: true,
@@ -175,7 +175,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 			},
 			args: args{
 				ctx:    context.Background(),
-				subnet: uint64Ptr(1),
+				subnet: common.NewUint64(1),
 				msg: &solid.Attestation{
 					AggregationBits: solid.BitlistFromBytes([]byte{0b10000001, 1}, 2048),
 					Data:            attData,
@@ -198,7 +198,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 			},
 			args: args{
 				ctx:    context.Background(),
-				subnet: uint64Ptr(1),
+				subnet: common.NewUint64(1),
 				msg: &solid.Attestation{
 					AggregationBits: solid.BitlistFromBytes([]byte{0b0, 1}, 2048),
 					Data:            attData,
@@ -224,7 +224,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 			},
 			args: args{
 				ctx:    context.Background(),
-				subnet: uint64Ptr(1),
+				subnet: common.NewUint64(1),
 				msg:    att,
 			},
 			wantErr: true,
@@ -246,7 +246,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 			},
 			args: args{
 				ctx:    context.Background(),
-				subnet: uint64Ptr(1),
+				subnet: common.NewUint64(1),
 				msg:    att,
 			},
 			wantErr: true,
@@ -271,7 +271,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 			},
 			args: args{
 				ctx:    context.Background(),
-				subnet: uint64Ptr(1),
+				subnet: common.NewUint64(1),
 				msg:    att,
 			},
 			wantErr: true,
@@ -302,7 +302,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 			},
 			args: args{
 				ctx:    context.Background(),
-				subnet: uint64Ptr(1),
+				subnet: common.NewUint64(1),
 				msg:    att,
 			},
 			wantErr: true,
@@ -339,7 +339,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 			},
 			args: args{
 				ctx:    context.Background(),
-				subnet: uint64Ptr(1),
+				subnet: common.NewUint64(1),
 				msg:    att,
 			},
 		},
@@ -370,8 +370,4 @@ func TestAttestation(t *testing.T) {
 	}
 
 	suite.Run(t, &attestationTestSuite{})
-}
-
-func uint64Ptr(i uint64) *uint64 {
-	return &i
 }

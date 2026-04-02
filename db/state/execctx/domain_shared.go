@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -96,6 +97,12 @@ type SharedDomains struct {
 	mem               kv.TemporalMemBatch
 	metrics           changeset.DomainMetrics
 
+	// blockOverlay is an in-memory overlay for block-level metadata writes (headers, bodies,
+	// canonical hashes, TD, stage progress, forkchoice markers). It allows execution to
+	// operate without holding an RwTx — writes accumulate here and are flushed atomically
+	// alongside domain state via Flush().
+	blockOverlay *membatchwithdb.MemoryMutation
+
 	// stateCache is an optional cache for state data (accounts, storage, code)
 	stateCache *cache.StateCache
 }
@@ -150,17 +157,26 @@ type changesetSwitcher interface {
 	// GetChangesetByBlockNum returns the changeset for a given block number and
 	// the block hash it is keyed under.
 	GetChangesetByBlockNum(blockNumber uint64) (common.Hash, *changeset.StateChangeSet)
+	GetChangesetAccumulator() *changeset.StateChangeSet
 	SetChangesetAccumulator(acc *changeset.StateChangeSet)
 	SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *changeset.StateChangeSet)
 }
 
-func (sd *SharedDomains) Merge(sdTxNum uint64, other *SharedDomains, otherTxNum uint64) error {
+func (sd *SharedDomains) Merge(ctx context.Context, sdTxNum uint64, other *SharedDomains, otherTxNum uint64) error {
 	if sdTxNum > otherTxNum {
 		return fmt.Errorf("can't merge backwards: txnum: %d > %d", sdTxNum, otherTxNum)
 	}
 
 	if err := sd.mem.Merge(other.mem); err != nil {
 		return err
+	}
+
+	// Merge block-level metadata from other's overlay into ours by flushing
+	// other's overlay writes directly into our overlay (which implements kv.RwTx).
+	if other.blockOverlay != nil && sd.blockOverlay != nil {
+		if err := other.blockOverlay.Flush(ctx, sd.blockOverlay); err != nil {
+			return fmt.Errorf("blockOverlay merge: %w", err)
+		}
 	}
 
 	// Transfer pending commitment update from other to sd (other's mem is invalidated after merge)
@@ -202,21 +218,25 @@ func (sd *SharedDomains) FlushPendingUpdates(ctx context.Context, tx kv.Temporal
 
 	blockHash, cs := switcher.GetChangesetByBlockNum(upd.BlockNum)
 	if cs != nil {
+		// Save current accumulator, switch to the pending update's block
+		// changeset, apply deferred branch writes, save it back, then
+		// restore the original accumulator.
+		prev := switcher.GetChangesetAccumulator()
 		switcher.SetChangesetAccumulator(cs)
-	}
 
-	if _, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch); err != nil {
-		if cs != nil {
-			switcher.SetChangesetAccumulator(nil)
+		if _, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch); err != nil {
+			switcher.SetChangesetAccumulator(prev)
+			return err
 		}
-		return err
+
+		switcher.SavePastChangesetAccumulator(blockHash, upd.BlockNum, cs)
+		switcher.SetChangesetAccumulator(prev)
+		return nil
 	}
 
-	if cs != nil {
-		switcher.SavePastChangesetAccumulator(blockHash, upd.BlockNum, cs)
-		switcher.SetChangesetAccumulator(nil)
-	}
-	return nil
+	// No past changeset found — write into whatever is current
+	_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch)
+	return err
 }
 
 type temporalGetter struct {
@@ -278,6 +298,28 @@ func (sd *SharedDomains) CommitmentCapture() bool {
 }
 
 func (sd *SharedDomains) GetMemBatch() kv.TemporalMemBatch { return sd.mem }
+func (sd *SharedDomains) SetInMemHistoryReads(v bool)      { sd.mem.SetInMemHistoryReads(v) }
+
+// BlockOverlay returns the in-memory overlay for block-level metadata (headers, bodies,
+// canonical hashes, TD, stage progress, forkchoice markers). Callers can use this
+// as a kv.RwTx to route rawdb writes through the overlay instead of a real RwTx.
+// Returns nil if no overlay has been initialized via InitBlockOverlay.
+func (sd *SharedDomains) BlockOverlay() *membatchwithdb.MemoryMutation { return sd.blockOverlay }
+
+// InitBlockOverlay creates (or replaces) the block-level metadata overlay backed by
+// the given base transaction. Writes to the overlay are visible to subsequent reads
+// and are flushed atomically alongside domain state via Flush().
+func (sd *SharedDomains) InitBlockOverlay(tx kv.TemporalTx, tmpDir string) error {
+	if sd.blockOverlay != nil {
+		sd.blockOverlay.Close()
+	}
+	var err error
+	sd.blockOverlay, err = membatchwithdb.NewMemoryBatch(tx, tmpDir, sd.logger)
+	if err != nil {
+		return fmt.Errorf("init block overlay: %w", err)
+	}
+	return nil
+}
 func (sd *SharedDomains) GetCommitmentCtx() *commitmentdb.SharedDomainsCommitmentContext {
 	return sd.sdCtx
 }
@@ -348,12 +390,29 @@ func (sd *SharedDomains) Close() {
 
 	sd.mem.Close()
 
+	if sd.blockOverlay != nil {
+		sd.blockOverlay.Close()
+		sd.blockOverlay = nil
+	}
+
 	sd.sdCtx.Close()
 	sd.sdCtx = nil
 }
 
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	defer mxFlushTook.ObserveDuration(time.Now())
+	if sd.sdCtx.HasPendingUpdate() {
+		if ttx, ok := tx.(kv.TemporalTx); ok {
+			if err := sd.FlushPendingUpdates(ctx, ttx); err != nil {
+				return err
+			}
+		}
+	}
+	if sd.blockOverlay != nil {
+		if err := sd.blockOverlay.Flush(ctx, tx); err != nil {
+			return err
+		}
+	}
 	return sd.mem.Flush(ctx, tx)
 }
 
@@ -632,8 +691,15 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (
 
 // ComputeCommitment evaluates commitment for gathered updates.
 // If trieWarmup toggle was enabled via EnableTrieWarmup, pre-warms MDBX page cache by reading Branch data in parallel before processing.
-func (sd *SharedDomains) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveStateAfter bool, blockNum, txNum uint64, logPrefix string, commitProgress chan *commitment.CommitProgress) (rootHash []byte, err error) {
-	return sd.sdCtx.ComputeCommitment(ctx, tx, saveStateAfter, blockNum, txNum, logPrefix, commitProgress)
+func (sd *SharedDomains) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveStateAfter bool, blockNum, txNum uint64, logPrefix string, onProgress func(*commitment.CommitProgress)) (rootHash []byte, err error) {
+	// Flush any pending deferred commitment updates from the previous block
+	// into the CORRECT block's changeset (via FlushPendingUpdates which uses
+	// GetChangesetByBlockNum). This ensures the branch writes are recorded in
+	// the original block's diffset so they can be properly reverted on unwind.
+	if err := sd.FlushPendingUpdates(ctx, tx); err != nil {
+		return nil, err
+	}
+	return sd.sdCtx.ComputeCommitment(ctx, tx, saveStateAfter, blockNum, txNum, logPrefix, onProgress)
 }
 
 // EnableTrieWarmup enables parallel warmup of MDBX page cache during commitment.
@@ -648,6 +714,10 @@ func (sd *SharedDomains) EnableParaTrieDB(db kv.TemporalRoDB) {
 
 func (sd *SharedDomains) EnableWarmupCache(enable bool) {
 	sd.sdCtx.EnableWarmupCache(enable)
+}
+
+func (sd *SharedDomains) ClearWarmupCache() {
+	sd.sdCtx.ClearWarmupCache()
 }
 
 // SetDeferCommitmentUpdates enables or disables deferred commitment updates.
@@ -676,7 +746,7 @@ func (sd *SharedDomains) TouchChangedKeysFromHistory(tx kv.TemporalTx, fromTxNum
 // touches them onto the commitment trie.
 func (sd *SharedDomains) touchChangedKeys(tx kv.TemporalTx, d kv.Domain, fromTxNum uint64, toTxNum uint64) (int, error) {
 	changes := 0
-	it, err := tx.HistoryRange(d, int(fromTxNum), int(toTxNum), order.Asc, -1)
+	it, err := tx.Debug().HistoryKeyTxNumRange(d, int(fromTxNum), int(toTxNum), order.Asc, -1)
 	if err != nil {
 		return changes, err
 	}

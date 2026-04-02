@@ -190,11 +190,12 @@ func (e *ExecModule) GetAssembledBlock(ctx context.Context, req *executionproto.
 		payload.ExcessBlobGas = header.ExcessBlobGas
 	}
 	blockAccessList := blockWithReceipts.BlockAccessList
-	if header.BlockAccessListHash != nil || blockAccessList != nil {
+	// Only bump payload version for Amsterdam+ chains where the BAL hash
+	// is part of the block header. For pre-Amsterdam chains with ExperimentalBAL,
+	// the BAL is computed for validation but not included in the payload.
+	if header.BlockAccessListHash != nil {
 		payload.Version = 4
-		if header.BlockAccessListHash != nil {
-			payload.BlockAccessListHash = gointerfaces.ConvertHashToH256(*header.BlockAccessListHash)
-		}
+		payload.BlockAccessListHash = gointerfaces.ConvertHashToH256(*header.BlockAccessListHash)
 		payload.BlockAccessList = types.ConvertBlockAccessListToTypesProto(blockAccessList)
 		if payload.BlockAccessList == nil {
 			payload.BlockAccessList = []*typesproto.BlockAccessListAccount{}

@@ -379,10 +379,6 @@ func (p Penalty) String() string {
 	}
 }
 
-func (pp PeerPenalty) String() string {
-	return fmt.Sprintf("peerPenalty{peer: %d, penalty: %s, err: %v}", pp.peerHandle, pp.penalty, pp.err)
-}
-
 func (hd *HeaderDownload) moveLinkToQueue(link *Link, queueId QueueID) {
 	if link.queueId == queueId {
 		return

@@ -582,9 +582,3 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	}
 	return nil
 }
-
-func removeManyIgnoreError(filePaths ...string) {
-	for _, filePath := range filePaths {
-		dir.RemoveFile(filePath)
-	}
-}

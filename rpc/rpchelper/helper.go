@@ -44,14 +44,6 @@ func (e nonCanonicalHashError) Error() string {
 	return fmt.Sprintf("hash %x is not currently canonical", e.hash)
 }
 
-type BlockNotFoundErr struct {
-	Hash common.Hash
-}
-
-func (e BlockNotFoundErr) Error() string {
-	return fmt.Sprintf("block %x not found", e.Hash)
-}
-
 func CheckBlockExecuted(tx kv.Tx, blockNumber uint64) error {
 	lastExecutedBlock, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
@@ -77,8 +69,14 @@ func GetBlockNumber(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, tx
 }
 
 func GetCanonicalBlockNumber(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br services.FullBlockReader, filters *Filters) (uint64, common.Hash, bool, error) {
-	bn, bh, latest, _, err := _GetBlockNumber(ctx, true, blockNrOrHash, tx, br, filters)
-	return bn, bh, latest, err
+	bn, bh, latest, found, err := _GetBlockNumber(ctx, true, blockNrOrHash, tx, br, filters)
+	if err != nil {
+		return 0, common.Hash{}, false, err
+	}
+	if !found {
+		return bn, bh, latest, rpc.BlockNotFoundErr{BlockId: blockNrOrHash.String()}
+	}
+	return bn, bh, latest, nil
 }
 
 func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br services.FullBlockReader, filters *Filters) (blockNumber uint64, hash common.Hash, latest bool, found bool, err error) {

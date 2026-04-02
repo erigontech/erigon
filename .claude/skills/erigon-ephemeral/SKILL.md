@@ -1,6 +1,6 @@
 ---
 name: erigon-ephemeral
-description: Run an ephemeral Erigon instance with a temporary datadir. Checks for port conflicts, applies port offsets, and supports safe cleanup. Use this when the user wants a temporary/throwaway Erigon instance.
+description: Run an ephemeral Erigon instance with a temporary datadir. Use this whenever the user wants to spin up a temporary, throwaway, or sandboxed Erigon node for quick testing, launch a second Erigon instance alongside an existing one, clone a datadir into a temp copy for safe experimentation, or find and clean up leftover ephemeral datadirs and processes from previous sessions. Handles port conflict detection and automatic port offsetting. Trigger on any mention of temporary/throwaway/ephemeral/disposable Erigon instances, running erigon briefly for testing or debugging, starting a second/additional erigon node, or cleaning up old temp erigon data.
 allowed-tools: Bash, Read
 allowed-prompts:
   - tool: Bash

@@ -19,31 +19,17 @@ package sentinel
 import (
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/p2p"
 )
 
 type SentinelConfig struct {
-	NetworkConfig *clparams.NetworkConfig
-	BeaconConfig  *clparams.BeaconChainConfig
-	IpAddr        string
-	Port          int
-	TCPPort       uint
+	p2p.P2PConfig
 
 	MaxInboundTrafficPerPeer     datasize.ByteSize
 	MaxOutboundTrafficPerPeer    datasize.ByteSize
 	AdaptableTrafficRequirements bool
-	// Optional
-	LocalIP        string
-	EnableUPnP     bool
-	RelayNodeAddr  string
-	HostAddress    string
-	HostDNS        string
-	NoDiscovery    bool
-	TmpDir         string
-	LocalDiscovery bool
 
 	EnableBlocks       bool
 	SubscribeAllTopics bool // Capture all topics
 	ActiveIndicies     uint64
-	MaxPeerCount       uint64
 }

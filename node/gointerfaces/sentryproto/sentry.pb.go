@@ -71,6 +71,9 @@ const (
 	MessageId_STATUS_69             MessageId = 37
 	MessageId_GET_RECEIPTS_69       MessageId = 38
 	MessageId_BLOCK_RANGE_UPDATE_69 MessageId = 39
+	// ======= eth 70 protocol ===========
+	MessageId_GET_RECEIPTS_70 MessageId = 40
+	MessageId_RECEIPTS_70     MessageId = 41
 )
 
 // Enum value maps for MessageId.
@@ -115,6 +118,8 @@ var (
 		37: "STATUS_69",
 		38: "GET_RECEIPTS_69",
 		39: "BLOCK_RANGE_UPDATE_69",
+		40: "GET_RECEIPTS_70",
+		41: "RECEIPTS_70",
 	}
 	MessageId_value = map[string]int32{
 		"STATUS_65":                        0,
@@ -156,6 +161,8 @@ var (
 		"STATUS_69":                        37,
 		"GET_RECEIPTS_69":                  38,
 		"BLOCK_RANGE_UPDATE_69":            39,
+		"GET_RECEIPTS_70":                  40,
+		"RECEIPTS_70":                      41,
 	}
 )
 
@@ -237,6 +244,7 @@ const (
 	Protocol_ETH67 Protocol = 2
 	Protocol_ETH68 Protocol = 3
 	Protocol_ETH69 Protocol = 4
+	Protocol_ETH70 Protocol = 6
 	Protocol_WIT0  Protocol = 5
 )
 
@@ -249,6 +257,7 @@ var (
 		3: "ETH68",
 		4: "ETH69",
 		5: "WIT0",
+		6: "ETH70",
 	}
 	Protocol_value = map[string]int32{
 		"ETH65": 0,
@@ -256,6 +265,7 @@ var (
 		"ETH67": 2,
 		"ETH68": 3,
 		"ETH69": 4,
+		"ETH70": 6,
 		"WIT0":  5,
 	}
 )
