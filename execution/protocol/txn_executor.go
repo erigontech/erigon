@@ -605,7 +605,6 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		if rules.IsLondon {
 			refundQuotient = params.RefundQuotientEIP3529
 		}
-		mdGasUsed := st.mdGasUsed()
 		if rules.IsAmsterdam {
 			// EIP-8037 + EIP-7778: Block gas accounting uses two dimensions.
 			// stateGasConsumed tracks ALL state gas charges (including spill to regular gas).
@@ -621,12 +620,14 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Total())
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
 		} else if rules.IsPrague {
-			st.txnGasUsedB4Refunds = mdGasUsed.Regular
+			regularGasUsed := st.initialGas.Regular - st.gasRemaining.Regular
+			st.txnGasUsedB4Refunds = regularGasUsed
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Regular)
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
 			st.blockRegularGasUsed = st.txnGasUsed
 		} else {
-			st.txnGasUsedB4Refunds = mdGasUsed.Regular
+			regularGasUsed := st.initialGas.Regular - st.gasRemaining.Regular
+			st.txnGasUsedB4Refunds = regularGasUsed
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Regular)
 			st.txnGasUsed = st.txnGasUsedB4Refunds - refund
 			st.blockRegularGasUsed = st.txnGasUsed
@@ -642,7 +643,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	} else {
 		// No-refund path: gasBailout (trace_call) or !refunds.
 		// Don't apply Prague floor or refunds — just record raw gas used.
-		st.txnGasUsedB4Refunds = st.mdGasUsed().Regular
+		st.txnGasUsedB4Refunds = st.initialGas.Regular - st.gasRemaining.Regular
 		st.txnGasUsed = st.txnGasUsedB4Refunds
 		st.blockRegularGasUsed = st.msg.Gas() // match pre-refactor: consume full gas limit from pool
 	}
@@ -844,6 +845,3 @@ func (st *TxnExecutor) calcIntrinsicGas(contractCreation bool, auths []types.Aut
 	})
 }
 
-func (st *TxnExecutor) mdGasUsed() mdgas.MdGas {
-	return st.initialGas.Minus(st.gasRemaining)
-}

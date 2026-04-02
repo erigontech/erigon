@@ -29,13 +29,6 @@ type MdGas struct {
 	State   uint64
 }
 
-func (g MdGas) Minus(other MdGas) MdGas {
-	return MdGas{
-		Regular: g.Regular - other.Regular,
-		State:   g.State - other.State,
-	}
-}
-
 func (g MdGas) Plus(other MdGas) MdGas {
 	return MdGas{
 		Regular: g.Regular + other.Regular,
