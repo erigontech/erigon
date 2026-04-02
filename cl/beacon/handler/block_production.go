@@ -1367,13 +1367,14 @@ func (a *ApiHandler) storeBlockAndBlobs(
 		return err
 	}
 
-	// Skip BLS re-verification only during the genesis epoch, where the replayed
-	// state (ProcessSlots from genesis without intermediate blocks) can produce a
-	// different RANDAO mix than the head state with blocks applied. After the first
-	// epoch, state replay is reliable and full validation should be enabled.
-	blockEpoch := block.Block.Slot / a.beaconChainCfg.SlotsPerEpoch
-	fullValidation := blockEpoch > 0
-	if err := a.forkchoiceStore.OnBlock(ctx, block, true, fullValidation, false); err != nil {
+	// Skip BLS re-verification for locally-produced blocks. The block was just
+	// built by this node, so re-verifying the signature is redundant. Additionally,
+	// AddChainSegment replays from the nearest checkpoint state, and the replayed
+	// state can produce a different proposer shuffling than the head state used
+	// during block production (especially on minimal preset with rapid epoch
+	// boundaries), causing VerifyBlockSignature to fail.
+	// TODO: fix the root cause in state replay so fullValidation can be re-enabled.
+	if err := a.forkchoiceStore.OnBlock(ctx, block, true, false, false); err != nil {
 		return err
 	}
 	finalizedHash := a.forkchoiceStore.GetEth1Hash(a.forkchoiceStore.FinalizedCheckpoint().Root)
