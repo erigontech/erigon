@@ -107,7 +107,7 @@ func (b *Builder) Build(param *Parameters, interrupt *atomic.Bool) (result *type
 		}
 	}()
 
-	// Per-build state: fresh BuiltBlock and result channel, shared pendingBlockCh.
+	// Per-build state: fresh AssembledBlock and result channel, shared pendingBlockCh.
 	perBuildCfg := *b.builderCfg
 	perBuildCfg.Etherbase = param.SuggestedFeeRecipient
 	state := BuilderState{
