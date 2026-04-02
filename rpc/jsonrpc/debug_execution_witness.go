@@ -738,7 +738,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		}
 		for addr, keys := range allStorageKeys {
 			for key := range keys {
-				storageKey := string(common.FromHex(addr.Hex()[2:] + key.Hex()[2:]))
+				storageKey := string(append(addr.Bytes(), key.Bytes()...))
 				sdCtx.TouchKey(kv.StorageDomain, storageKey, nil)
 			}
 		}
@@ -921,7 +921,7 @@ func (api *DebugAPIImpl) buildExpectedPostState(
 	}
 	for addr, keys := range writeStorageKeys {
 		for _, key := range keys {
-			storageKey := string(common.FromHex(addr.Hex()[2:] + key.Hex()[2:]))
+			storageKey := string(append(addr.Bytes(), key.Bytes()...))
 			postSdCtx.TouchKey(kv.StorageDomain, storageKey, nil)
 		}
 	}
