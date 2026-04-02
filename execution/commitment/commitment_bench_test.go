@@ -27,6 +27,73 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func BenchmarkHexPatriciaHashedFold(b *testing.B) {
+	ctx := context.Background()
+	ms := NewMockState(b)
+	hph := NewHexPatriciaHashed(1, ms)
+	hph.SetTrace(false)
+
+	// Build a trie with accounts and storage to exercise all fold paths
+	plainKeys, updates := NewUpdateBuilder().
+		Balance("00", 4).
+		Balance("01", 5).
+		Balance("02", 6).
+		Balance("03", 7).
+		Balance("04", 8).
+		Storage("04", "01", "0401").
+		Storage("03", "56", "050505").
+		Storage("03", "57", "060606").
+		Balance("05", 9).
+		Storage("05", "02", "8989").
+		Storage("05", "04", "9898").
+		Build()
+
+	err := ms.applyPlainUpdates(plainKeys, updates)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	// Initial process to populate the trie
+	upds := WrapKeyUpdates(b, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+	_, err = hph.Process(ctx, upds, "", nil, WarmupConfig{})
+	if err != nil {
+		b.Fatal(err)
+	}
+	upds.Close()
+
+	// Build incremental updates for the benchmark loop
+	incKeys, incUpdates := NewUpdateBuilder().
+		Balance("00", 100).
+		Storage("03", "56", "070707").
+		Balance("05", 200).
+		Storage("05", "02", "abab").
+		Build()
+
+	err = ms.applyPlainUpdates(incKeys, incUpdates)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for b.Loop() {
+		b.StopTimer()
+		hph.Reset()
+		upds = WrapKeyUpdates(b, ModeDirect, KeyToHexNibbleHash, incKeys, incUpdates)
+		b.StartTimer()
+
+		_, err = hph.Process(ctx, upds, "", nil, WarmupConfig{})
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		b.StopTimer()
+		upds.Close()
+		b.StartTimer()
+	}
+}
+
 func BenchmarkBranchMerger_Merge(b *testing.B) {
 
 	row, bm := generateCellRow(b, 16)

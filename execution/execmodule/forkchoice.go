@@ -214,7 +214,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	if err != nil {
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
-	defer roTx.Rollback()
+	defer func() { roTx.Rollback() }() // closure: CommitCycle may reassign roTx
 
 	closeOnReturn := true
 
@@ -235,6 +235,9 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		if !isDomainAheadOfBlocks {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
+	}
+	if currentContext != nil {
+		currentContext.SetInMemHistoryReads(inMemHistoryReads)
 	}
 
 	defer func() {

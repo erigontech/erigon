@@ -76,6 +76,7 @@ type EngineServer struct {
 	consuming        atomic.Bool
 	test             bool
 	caplin           bool // we need to send errors for caplin.
+	internalCL       bool // true when any embedded CL is active (suppresses "no CL" warning)
 	executionService executionproto.ExecutionClient
 	txpool           txpoolproto.TxpoolClient // needed for getBlobs
 
@@ -95,6 +96,7 @@ func NewEngineServer(
 	executionService executionproto.ExecutionClient,
 	blockDownloader *engine_block_downloader.EngineBlockDownloader,
 	caplin bool,
+	internalCL bool,
 	proposing bool,
 	consuming bool,
 	txPool txpoolproto.TxpoolClient,
@@ -110,6 +112,7 @@ func NewEngineServer(
 		chainRW:           chainRW,
 		proposing:         proposing,
 		caplin:            caplin,
+		internalCL:        internalCL,
 		engineLogSpamer:   engine_logs_spammer.NewEngineLogsSpammer(logger, config),
 		printPectraBanner: true,
 		txpool:            txPool,
@@ -133,7 +136,7 @@ func (e *EngineServer) Start(
 	mining txpoolproto.MiningClient,
 ) error {
 	var eg errgroup.Group
-	if !e.caplin {
+	if !e.internalCL {
 		eg.Go(func() error {
 			defer e.logger.Debug("[EngineServer] engine log spammer goroutine terminated")
 			e.engineLogSpamer.Start(ctx)
@@ -331,8 +334,8 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		if req.SlotNumber != nil {
 			slotNumber := uint64(*req.SlotNumber)
 			header.SlotNumber = &slotNumber
-			// TODO: No Slot Error Yet - Treate it as optional for hive testing
-			// qreturn nil, &rpc.InvalidParamsError{Message: "slotNumber missing"}
+		} else {
+			return nil, &rpc.InvalidParamsError{Message: "slotNumber missing"}
 		}
 	}
 
@@ -528,6 +531,9 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
 		if shouldWait, _ := waitForResponse(50*time.Millisecond, func() (bool, error) {
+			if parent == nil {
+				parent = s.chainRW.GetHeaderByHash(ctx, parentHash)
+			}
 			return parent == nil && s.blockDownloader.Status() == engine_block_downloader.Syncing, nil
 		}); shouldWait {
 			s.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS blocks", prefix), "hash", blockHash)
@@ -541,10 +547,10 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 
-		// We add the extra restriction blockHash != headHash for the FCU case of canonicalHash == blockHash
-		// because otherwise (when FCU points to the head) we want go to stage headers
-		// so that it calls writeForkChoiceHashes.
-		if currentHeader != nil && blockHash != currentHeader.Hash() && header != nil && isCanonical {
+		// For NewPayload: if the block is already canonical and known, return VALID immediately.
+		// For FCU: we must always go through HandleForkChoice so the EL head actually moves,
+		// even if the requested head is a canonical ancestor (e.g. fork choice head regression).
+		if newPayload && currentHeader != nil && header != nil && isCanonical {
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
 	}
@@ -614,14 +620,6 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 		s.logger.Warn("Payload build failed (nil ExecutionPayload)", "payloadId", payloadId)
 		return nil, &engine_helpers.UnknownPayloadErr
 	}
-	var executionRequests []hexutil.Bytes
-	if version >= clparams.ElectraVersion {
-		executionRequests = make([]hexutil.Bytes, 0)
-		for _, r := range data.Requests.Requests {
-			executionRequests = append(executionRequests, r)
-		}
-	}
-
 	ts := data.ExecutionPayload.Timestamp
 	if (!s.config.IsCancun(ts) && version >= clparams.DenebVersion) ||
 		(s.config.IsCancun(ts) && version < clparams.DenebVersion) ||
@@ -632,6 +630,19 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 		(!s.config.IsAmsterdam(ts) && version >= clparams.GloasVersion) ||
 		(s.config.IsAmsterdam(ts) && version < clparams.GloasVersion) {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
+	}
+
+	var executionRequests []hexutil.Bytes
+	if version >= clparams.ElectraVersion {
+		if data.Requests == nil {
+			s.logger.Warn("Payload build failed (nil Requests)", "payloadId", payloadId)
+			return nil, errors.New("missing execution requests for Electra+ payload")
+		}
+
+		executionRequests = make([]hexutil.Bytes, 0, len(data.Requests.Requests))
+		for _, r := range data.Requests.Requests {
+			executionRequests = append(executionRequests, r)
+		}
 	}
 
 	payload := &engine_types.GetPayloadResponse{
@@ -727,6 +738,9 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	}
 	if version >= clparams.CapellaVersion && !s.isWithdrawalsPresenceValid(timestamp, payloadAttributes.Withdrawals) {
 		return nil, &engine_helpers.InvalidPayloadAttributesErr
+	}
+	if version >= clparams.GloasVersion && payloadAttributes.SlotNumber == nil {
+		return nil, &engine_helpers.InvalidPayloadAttributesErr // SlotNumber required for Glamsterdam (EIP-7843)
 	}
 
 	if !s.proposing {

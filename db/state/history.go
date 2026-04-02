@@ -1104,7 +1104,7 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 		case *mdbx2.MdbxDupSortCursor:
 			valsCP = valsC.(*mdbx2.MdbxDupSortCursor)
 		default:
-			return nil, fmt.Errorf("unexpected cursor type %T for table %s", valsC, ht.h.ValuesTable)
+			valsCP = &kv.RwCursorPseudoDupSort{RwCursor: c}
 		}
 	}
 
@@ -1169,7 +1169,7 @@ func (ht *HistoryRoTx) oldPrune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 		case *mdbx2.MdbxDupSortCursor:
 			valsCP = valsC.(*mdbx2.MdbxDupSortCursor)
 		default:
-			return nil, fmt.Errorf("unexpected cursor type %T for table %s", valsC, ht.h.ValuesTable)
+			valsCP = &kv.RwCursorPseudoDupSort{RwCursor: c}
 		}
 	}
 

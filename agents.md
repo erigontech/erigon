@@ -82,7 +82,7 @@ Common lint categories and fixes:
 
 Make sure all scripts and shell code used from GitHub workflows is cross platform, for macOS, Windows and Linux.
 
-Read [`.github/README.md`](.github/README.md) for guidelines before making changes to workflows.
+Read [`CI-GUIDELINES.md`](CI-GUIDELINES.md) for guidelines before making changes to workflows.
 
 ## Go Test Caching
 

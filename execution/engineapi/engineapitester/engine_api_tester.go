@@ -117,7 +117,7 @@ func DefaultEngineApiTesterGenesis(t *testing.T) (*types.Genesis, *ecdsa.Private
 	return genesis, coinbasePrivKey
 }
 
-func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) EngineApiTester {
+func InitialiseEngineApiTester(t testing.TB, args EngineApiTesterInitArgs) EngineApiTester {
 	ctx := t.Context()
 	logger := args.Logger
 	dirs := datadir.New(args.DataDir)

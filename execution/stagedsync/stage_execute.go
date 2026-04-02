@@ -404,6 +404,11 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 
 	logger.Info(fmt.Sprintf("[%s] Unwind Execution", u.LogPrefix()), "from", s.BlockNumber, "to", u.UnwindPoint, "stack", dbg.Stack())
 
+	// Discard any pending deferred commitment updates from the previous
+	// (failed) execution. If left in place, the next ComputeCommitment
+	// would flush stale branch data that doesn't match the unwound state.
+	doms.ResetPendingUpdates()
+
 	unwindToLimit, ok, err := rawtemporaldb.CanUnwindBeforeBlockNum(u.UnwindPoint, rwTx)
 	if err != nil {
 		return err

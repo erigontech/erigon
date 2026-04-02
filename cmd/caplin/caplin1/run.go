@@ -244,6 +244,9 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	if eth1Getter != nil {
 		eth1Getter.SetBeaconChainConfig(beaconConfig)
 	}
+	if engineWithCfg, ok := engine.(*execution_client.ExecutionClientEngine); ok {
+		engineWithCfg.SetBeaconChainConfig(beaconConfig)
+	}
 
 	ctx, cn := context.WithCancel(ctx)
 	defer cn()

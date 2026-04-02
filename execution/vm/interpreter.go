@@ -67,9 +67,7 @@ type CallContext struct {
 
 var contextPool = sync.Pool{
 	New: func() any {
-		return &CallContext{
-			Stack: Stack{data: make([]uint256.Int, 0, 16)},
-		}
+		return &CallContext{}
 	},
 }
 
@@ -178,7 +176,7 @@ func (ctx *CallContext) MemoryData() []byte {
 // StackData returns the stack data. Callers must not modify the contents
 // of the returned data.
 func (ctx *CallContext) StackData() []uint256.Int {
-	return ctx.Stack.data
+	return ctx.Stack.data[:ctx.Stack.top]
 }
 
 // Caller returns the current caller.
@@ -217,24 +215,14 @@ func (ctx *CallContext) Gas() mdgas.MdGas {
 	}
 }
 
-// escrowStateGas hands the entire state gas reservoir to a child frame and
-// returns the parent's saved value.  After the child returns, call
-// settleStateGas to restore or adopt the child's leftover reservoir.
-func (ctx *CallContext) escrowStateGas() (parentStateGas uint64) {
-	parentStateGas = ctx.stateGas
-	ctx.stateGas = 0
-	return
-}
-
-// settleStateGas restores the state gas reservoir after a child frame.
-// On error the parent's original reservoir is restored; on success the
-// parent adopts whatever state gas the child didn't consume.
-func (ctx *CallContext) settleStateGas(childErr error, returnGas mdgas.MdGas, parentStateGas uint64, tracer *tracing.Hooks) {
-	if childErr != nil {
-		ctx.stateGas = parentStateGas
-	} else {
-		ctx.stateGas = returnGas.State
-	}
+// restoreChildGas returns the child frame's leftover gas to the parent.
+// On success the parent adopts the child's remaining reservoir.
+// On error handleFrameRevert sets returnGas.State = initialChildState + spill
+// per EIP-8037: "all state gas consumed by the child… is restored to the
+// parent's reservoir." Early-exit errors (collision, depth, insufficient
+// balance) preserve gasRemaining.State so the reservoir is returned intact.
+func (ctx *CallContext) restoreChildGas(returnGas mdgas.MdGas, tracer *tracing.Hooks) {
+	ctx.stateGas = returnGas.State
 	ctx.refundGas(returnGas.Regular, tracer, tracing.GasChangeCallLeftOverRefunded)
 }
 
@@ -375,7 +363,6 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 	// explicit STOP, RETURN or SELFDESTRUCT is executed, an error occurred during
 	// the execution of one of the operations or until the done flag is set by the
 	// parent context.
-	steps := 0
 
 	var traceGas = func(op OpCode, callGas, cost uint64) uint64 {
 		switch op {
@@ -386,12 +373,12 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		}
 	}
 
+	// Hoist to locals so the compiler sees them as loop-invariant.
+	isAmsterdam := evm.chainRules.IsAmsterdam
+	anyTrace := dbg.TraceDynamicGas || debug || trace
+
 	for {
-		steps++
-		if steps%50_000 == 0 && evm.Cancelled() {
-			break
-		}
-		if dbg.TraceDynamicGas || debug || trace {
+		if anyTrace {
 			// Capture pre-execution values for tracing.
 			logged, pcCopy, gasCopy = false, pc, callContext.gas
 			blockNum, txIndex, txIncarnation = evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation()
@@ -414,7 +401,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			callContext.gas -= cost
 		}
 		// EIP-8037: Track constantGas immediately after deduction for block-level accounting.
-		if evm.chainRules.IsAmsterdam && cost > 0 {
+		if isAmsterdam && cost > 0 {
 			evm.regularGasConsumed += cost
 		}
 
@@ -461,14 +448,18 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 				return nil, callContext.Gas(), ErrOutOfGas
 			}
 			callContext.gas -= dynamicCost.Regular
-			if evm.chainRules.IsAmsterdam {
+			if isAmsterdam {
 				// EIP-8037: Track dynamic regular gas immediately after deduction.
 				// For CALL variants, callGasTemp is the gas forwarded to child (escrow),
 				// so we subtract it to get parent's actual cost.
 				evm.regularGasConsumed += dynamicCost.Regular - evm.CallGasTemp()
 			}
 			if dynamicCost.State > 0 {
-				cost += dynamicCost.State
+				// Note: do NOT add dynamicCost.State to `cost` here.
+				// `cost` is only used for tracing and is compared against `gasCopy`
+				// which captures only regular gas. Adding state gas would cause
+				// uint64 underflow in the OnGasChange(gasCopy, gasCopy-cost, ...) call below.
+				// State gas is charged separately via useMdGas.
 				ok := callContext.useMdGas(evm, dynamicCost.State, mdgas.StateGas, nil, tracing.GasChangeIgnored)
 				if !ok {
 					return nil, callContext.Gas(), ErrOutOfGas
@@ -477,7 +468,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		}
 
 		// Do gas tracing before memory expansion
-		if tracer != nil {
+		if debug {
 			if tracer.OnGasChange != nil {
 				tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
 			}

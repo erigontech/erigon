@@ -195,7 +195,9 @@ func DialContext(ctx context.Context, rawurl string, logger log.Logger) (*Client
 // 'reverse calls' in a handler method.
 func ClientFromContext(ctx context.Context, logger log.Logger) (*Client, bool) {
 	client, ok := ctx.Value(clientContextKey{}).(*Client)
-	client.logger = logger
+	if ok {
+		client.logger = logger
+	}
 	return client, ok
 }
 
