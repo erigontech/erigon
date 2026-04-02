@@ -32,7 +32,7 @@ func DequeueWithdrawalRequests7002(syscall rules.SystemCall, state *state.IntraB
 		return nil, err
 	}
 	if codeSize == 0 {
-		return nil, fmt.Errorf("[EIP-7002] Syscall failure: Empty Code at WithdrawalRequestAddress=%x", params.WithdrawalRequestAddress)
+		return nil, nil
 	}
 
 	res, err := syscall(params.WithdrawalRequestAddress, nil)
