@@ -82,6 +82,11 @@ runs:
         echo "TMP=D:/tmp" >> "$GITHUB_ENV"
         echo "TMPDIR=D:/tmp" >> "$GITHUB_ENV"
 
+    - name: Enable long paths on Windows
+      if: ${{ runner.os == 'Windows' }}
+      shell: bash
+      run: git config --global core.longpaths true
+
     - name: Enable git debug tracing
       if: ${{ runner.debug }}
       shell: bash
