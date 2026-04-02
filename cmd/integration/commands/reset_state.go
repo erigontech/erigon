@@ -224,7 +224,9 @@ func printStages(tx kv.TemporalTx, snapshots *freezeblocks.RoSnapshots, borSn *h
 	for _, ii := range []kv.InvertedIdx{kv.LogTopicIdx, kv.LogAddrIdx, kv.TracesFromIdx, kv.TracesToIdx} {
 		txNum := dbg.IIProgress(ii)
 		step := txNum / stepSize
-		fmt.Fprintf(w, "%s \t\t - \t\t %d \t\t %d\n", ii.String(), txNum, step)
+		iiCfg := statecfg.Schema.GetIICfg(ii)
+		keysSteps := rawdbhelpers.IdxStepsInDB(tx, iiCfg.KeysTable, stepSize)
+		fmt.Fprintf(w, "%s \t\t - \t\t %d \t\t %d \t\t db_steps=%.02f\n", ii.String(), txNum, step, keysSteps)
 	}
 	fmt.Fprintf(w, "--\n")
 
