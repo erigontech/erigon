@@ -272,8 +272,6 @@ func TableScanningPrune(
 
 	// Invariant: if some `txNum=N` pruned - it's pruned Fully
 	// Means: can use DeleteCurrentDuplicates all values of given `txNum`
-	txNumBytes, val := common.Copy(valCursorPosition.StartKey), common.Copy(valCursorPosition.StartVal)
-
 	txNumGetter := func(key, val []byte) uint64 { // key == valCursor key, val – usually txnum
 		switch mode {
 		case KeyStorageMode:
@@ -292,6 +290,40 @@ func TableScanningPrune(
 			return 0
 		}
 	}
+
+	lastVal, err := tableScanningPrune(ctx, stat, filenameBase, txFrom, txTo, txNumGetter, valDelCursor, keysCursor, asserts, throttling, logEvery, logger)
+	if err != nil {
+		return nil, err
+	}
+	if lastVal != nil {
+		stat.LastPrunedValue = lastVal
+		stat.ValueProgress = InProgress
+	} else {
+		stat.LastPrunedValue = nil
+		stat.ValueProgress = Done
+	}
+	return stat, nil
+}
+
+// tableScanningPrune scans values and deletes those in [txFrom, txTo).
+// Returns the last cursor position (non-nil) if interrupted by ctx, or nil if completed.
+func tableScanningPrune(
+	ctx context.Context,
+	stat *Stat,
+	filenameBase string,
+	txFrom, txTo uint64,
+	txNumGetter func(key, val []byte) uint64,
+	valDelCursor kv.PseudoDupSortRwCursor,
+	keysCursor kv.RwCursorDupSort,
+	asserts bool,
+	throttling *time.Duration,
+	logEvery *time.Ticker,
+	logger log.Logger,
+) (interrupted []byte, err error) {
+	val, txNumBytes, err := valDelCursor.Current()
+	if err != nil {
+		return nil, fmt.Errorf("cursor current %s: %w", filenameBase, err)
+	}
 	for ; val != nil; val, txNumBytes, err = valDelCursor.NextNoDup() {
 		if err != nil {
 			return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
@@ -300,22 +332,14 @@ func TableScanningPrune(
 		txNum := txNumGetter(val, txNumBytes)
 		// Early skip: avoid LastDup/FirstDup/CountDuplicates cursor ops for out-of-range entries
 		if txNum >= txTo {
-			select {
-			case <-ctx.Done():
-				stat.LastPrunedValue = common.Copy(val)
-				stat.ValueProgress = InProgress
-				return stat, nil
-			default:
+			if ctx.Err() != nil {
+				return common.Copy(val), nil
 			}
 			continue
 		}
 
-		select {
-		case <-ctx.Done():
-			stat.LastPrunedValue = common.Copy(val)
-			stat.ValueProgress = InProgress
-			return stat, nil
-		default:
+		if ctx.Err() != nil {
+			return common.Copy(val), nil
 		}
 
 		if asserts && txNum < txFrom {
@@ -368,12 +392,8 @@ func TableScanningPrune(
 				if throttling != nil {
 					time.Sleep(*throttling)
 				}
-				select {
-				case <-ctx.Done():
-					stat.LastPrunedValue = common.Copy(val)
-					stat.ValueProgress = InProgress
-					return stat, nil
-				default:
+				if ctx.Err() != nil {
+					return common.Copy(val), nil
 				}
 
 				stat.MinTxNum = min(stat.MinTxNum, txNumDup)
@@ -396,16 +416,10 @@ func TableScanningPrune(
 		default:
 		}
 
-		select {
-		case <-ctx.Done():
-			stat.LastPrunedValue = common.Copy(val)
-			stat.ValueProgress = InProgress
-			return stat, nil
-		default:
+		if ctx.Err() != nil {
+			return common.Copy(val), nil
 		}
 	}
 
-	stat.LastPrunedValue = nil
-	stat.ValueProgress = Done
-	return stat, err
+	return nil, nil
 }
