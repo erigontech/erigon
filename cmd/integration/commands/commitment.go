@@ -301,6 +301,9 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	if err != nil {
 		return err
 	}
+	if commitmentHistoryEnabled {
+		statecfg.EnableHistoricalCommitment()
+	}
 
 	if resume && !commitmentHistoryEnabled {
 		return errors.New("--resume requires commitment history to be enabled")
