@@ -20,7 +20,7 @@ You must first enable metrics collection in your running Erigon instance.
 ./erigon --metrics --datadir=/your/data/dir
 ```
 
-To specify a custom address and port for metrics, use the `--metrics.addr` and `--metrics.port` flags (default port: `6060`).
+To specify a custom address and port for metrics, use the `--metrics.addr` and `--metrics.port` flags (default port: `6061`).
 
 #### Step 2: Configure Prometheus Targets
 
@@ -91,7 +91,7 @@ ERIGON_PROMETHEUS_CONFIG=/path/to/custom/prometheus.yml docker compose up promet
 #### Troubleshooting
 
 * Ensure Erigon is running with the `--metrics` flag enabled.
-* Verify Prometheus can reach your Erigon metrics endpoint (default port: `6060`).
+* Verify Prometheus can reach your Erigon metrics endpoint (default port: `6061`).
 * Check Docker container logs if services fail to start.
 * Confirm firewall settings allow access to monitoring ports.
 
