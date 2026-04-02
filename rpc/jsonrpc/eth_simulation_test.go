@@ -7,7 +7,10 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
 
@@ -99,6 +102,60 @@ func TestSimulateSanitizeBlockOrder(t *testing.T) {
 				t.Errorf("testcase %d: block number mismatch. Want %d, have %d", i, tc.expected[bi].number, have)
 			}
 		}
+	}
+}
+
+func TestSimulateSanitizeCallDefaultGas(t *testing.T) {
+	const gasUsed = uint64(100)
+	const blockTime = uint64(1)
+	blockGasLimit := params.MaxTxnGasLimit + 1000 + gasUsed
+	remaining := blockGasLimit - gasUsed
+
+	tests := []struct {
+		name      string
+		sim       *simulator
+		wantGas   uint64
+		globalCap uint64
+	}{
+		{
+			name:    "validation mode caps default gas at Osaka tx limit",
+			sim:     &simulator{chainConfig: chain.TestChainOsakaConfig, validation: true},
+			wantGas: params.MaxTxnGasLimit,
+		},
+		{
+			name:    "non-validation mode keeps block remaining gas",
+			sim:     &simulator{chainConfig: chain.TestChainOsakaConfig, validation: false},
+			wantGas: remaining,
+		},
+		{
+			name:    "amsterdam keeps full block remaining gas in validation mode",
+			sim:     &simulator{chainConfig: chain.AllProtocolChanges, validation: true},
+			wantGas: remaining,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			nonce := hexutil.Uint64(0)
+			args := ethapi.CallArgs{
+				Nonce: &nonce, // Keep nonce explicit so sanitizeCall does not need state access.
+			}
+			blockCtx := evmtypes.BlockContext{
+				GasLimit: blockGasLimit,
+				Time:     blockTime,
+			}
+
+			err := tc.sim.sanitizeCall(&args, nil, &blockCtx, nil, gasUsed, tc.globalCap)
+			if err != nil {
+				t.Fatalf("sanitizeCall failed: %v", err)
+			}
+			if args.Gas == nil {
+				t.Fatal("expected gas to be populated")
+			}
+			if got := uint64(*args.Gas); got != tc.wantGas {
+				t.Fatalf("unexpected default gas: got %d, want %d", got, tc.wantGas)
+			}
+		})
 	}
 }
 
