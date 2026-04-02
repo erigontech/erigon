@@ -92,6 +92,7 @@ type parallelExecutor struct {
 	// calculator to drain.
 	applyResultsCh  chan applyResult
 	commitResultsCh chan applyResult
+	maxBlockNum     uint64 // set before execLoop; exec loop exits when reached
 	// accumulator for txpool state-diff notifications; set before execLoop
 	// starts so that AuRa system-call nonce changes are emitted per block.
 	accumulator *shards.Accumulator
@@ -158,9 +159,10 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	pe.rs.StateV3.SetSkipStepBoundaryCommitment(true)
 	defer pe.rs.StateV3.SetSkipStepBoundaryCommitment(false)
 
-	// Store channels on pe so execLoop and triggerBatchCommitment can access them.
+	// Store channels and limits on pe so execLoop can access them.
 	pe.applyResultsCh = applyResults
 	pe.commitResultsCh = commitResults
+	pe.maxBlockNum = maxBlockNum
 
 	// Start the commitment calculator.
 	calculator, err := newCommitmentCalculator(executorContext, pe.rs.Domains(), pe.cfg.db, pe.logPrefix, commitResults, rootResults)
@@ -689,6 +691,11 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					return nil
 				}
 
+				if blockResult.BlockNum >= pe.maxBlockNum {
+					pe.triggerBatchCommitment(ctx)
+					return nil
+				}
+
 				if dbg.StopAfterBlock > 0 && blockResult.BlockNum >= dbg.StopAfterBlock {
 					fmt.Printf("FLOW: STOP_AFTER_BLOCK block=%d\n", blockResult.BlockNum)
 					pe.triggerBatchCommitment(ctx)
@@ -1053,14 +1060,13 @@ func (result *execResult) finalizeSystemTx(
 	}
 	ibs.SetTrace(txTask.Trace)
 
-	fmt.Printf("SYSTEM_TX: block=%d txIndex=%d inc=%d txOutLen=%d\n",
-		blockNum, txIndex, txIncarnation, len(result.TxOut))
-
 	if err := ibs.FinalizeTx(rules, stateWriter); err != nil {
-		fmt.Printf("SYSTEM_TX_ERR: block=%d err=%v\n", blockNum, err)
 		return nil, nil, nil, err
 	}
-	return nil, ibs.VersionedReads(), ibs.VersionedWrites(true), nil
+	// Use checkDirty=false because FinalizeTx clears the journal (dirties map).
+	// With checkDirty=true, all writes would be deleted from the versionMap
+	// since no address appears dirty after the journal reset.
+	return nil, ibs.VersionedReads(), ibs.VersionedWrites(false), nil
 }
 
 // finalizeWithIBS handles regular TX finalization via full IBS reconstruction.
@@ -2561,14 +2567,6 @@ func MergeVersionedWrites(prev, next state.VersionedWrites) state.VersionedWrite
 // The input is blockIO.WriteSet(txIndex) — the raw versionWritten output.
 // The output is ready for applyVersionedWrites and TouchUpdates.
 func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txIndex int, incarnation int, stateReader state.StateReader) state.VersionedWrites {
-	// Debug: check if consolidation contract storage is in writes
-	consolidationAddr := accounts.InternAddress([20]byte{0x00, 0x00, 0xbb, 0xdd, 0xc7, 0xce, 0x48, 0x86, 0x42, 0xfb, 0x57, 0x9f, 0x8b, 0x00, 0xf3, 0xa5, 0x90, 0x00, 0x72, 0x51})
-	for _, w := range writes {
-		if w.Address == consolidationAddr && w.Path == state.StoragePath {
-			fmt.Printf("NORMALIZE_IN: tx=%d inc=%d consolidation storage key=%x val=%v ver=(%d.%d)\n",
-				txIndex, incarnation, w.Key.Value(), w.Val, w.Version.TxIndex, w.Version.Incarnation)
-		}
-	}
 	filtered := make(state.VersionedWrites, 0, len(writes))
 
 	// Track which addresses have account-level writes vs storage-only writes.
@@ -2600,22 +2598,13 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 				if err == nil {
 					if writeVal, ok := w.Val.(uint256.Int); ok {
 						if !found && writeVal.IsZero() {
-							if w.Address == consolidationAddr {
-								fmt.Printf("NORMALIZE_SKIP: tx=%d consolidation key=%x reason=both_zero\n", txIndex, w.Key.Value())
-							}
 							continue // both zero — no-op
 						}
 						if found && writeVal.Eq(&preVal) {
-							if w.Address == consolidationAddr {
-								fmt.Printf("NORMALIZE_SKIP: tx=%d consolidation key=%x reason=same_as_preblock val=%v\n", txIndex, w.Key.Value(), writeVal)
-							}
 							continue // same as pre-block — no-op
 						}
 					}
 				}
-			}
-			if w.Address == consolidationAddr {
-				fmt.Printf("NORMALIZE_KEEP: tx=%d consolidation key=%x val=%v\n", txIndex, w.Key.Value(), w.Val)
 			}
 			hasStorageWrite[w.Address] = true
 		case state.BalancePath, state.NoncePath, state.IncarnationPath, state.CodeHashPath:
