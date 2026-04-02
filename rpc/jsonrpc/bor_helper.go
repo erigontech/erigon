@@ -18,9 +18,7 @@ package jsonrpc
 
 import (
 	"cmp"
-	"context"
 	"errors"
-	"fmt"
 	"slices"
 
 	"github.com/erigontech/erigon/common"
@@ -30,8 +28,6 @@ import (
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 const (
@@ -60,48 +56,6 @@ var (
 	// 32 bytes, which is required to store the signer vanity.
 	errMissingVanity = errors.New("extra-data 32 byte vanity prefix missing")
 )
-
-// getHeaderByNumber returns a block's header given a block number ignoring the block's transaction and uncle list (may be faster).
-// derived from erigon_getHeaderByNumber implementation (see ./erigon_block.go)
-func getHeaderByNumber(ctx context.Context, number rpc.BlockNumber, api *BorImpl, tx kv.Tx) (*types.Header, error) {
-	// Pending block is only known by the miner
-	if number == rpc.PendingBlockNumber {
-		block := api.pendingBlock()
-		if block == nil {
-			return nil, nil
-		}
-		return block.Header(), nil
-	}
-
-	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
-	if err != nil {
-		return nil, err
-	}
-
-	header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNum)
-	if err != nil {
-		return nil, err
-	}
-	if header == nil {
-		return nil, fmt.Errorf("block header not found: %d", blockNum)
-	}
-
-	return header, nil
-}
-
-// getHeaderByHash returns a block's header given a block's hash.
-// derived from erigon_getHeaderByHash implementation (see ./erigon_block.go)
-func getHeaderByHash(ctx context.Context, api *BorImpl, tx kv.Tx, hash common.Hash) (*types.Header, error) {
-	header, err := api._blockReader.HeaderByHash(ctx, tx, hash)
-	if err != nil {
-		return nil, err
-	}
-	if header == nil {
-		return nil, fmt.Errorf("block header not found: %s", hash.String())
-	}
-
-	return header, nil
-}
 
 // ecrecover extracts the Ethereum account address from a signed header.
 func ecrecover(header *types.Header, c *borcfg.BorConfig) (common.Address, error) {

@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
@@ -51,6 +50,7 @@ type Fetch struct {
 	db                       kv.RwDB
 	stateChangesClient       StateChangesClient
 	wg                       *sync.WaitGroup // used for synchronisation in the tests (nil when not in tests)
+	connectWg                sync.WaitGroup  // tracks goroutines spawned by ConnectCore/ConnectSentries
 	stateChangesParseCtx     *TxnParseContext
 	pooledTxnsParseCtx       *TxnParseContext
 	sentryClients            []sentryproto.SentryClient // sentry clients that will be used for accessing the network
@@ -109,17 +109,22 @@ func (f *Fetch) threadSafeParseStateChangeTxn(cb func(*TxnParseContext) error) e
 // ConnectSentries initialises connection to the sentry
 func (f *Fetch) ConnectSentries() {
 	for i := range f.sentryClients {
+		f.connectWg.Add(2)
 		go func(i int) {
+			defer f.connectWg.Done()
 			f.receiveMessageLoop(f.sentryClients[i])
 		}(i)
 		go func(i int) {
+			defer f.connectWg.Done()
 			f.receivePeerLoop(f.sentryClients[i])
 		}(i)
 	}
 }
 
 func (f *Fetch) ConnectCore() {
+	f.connectWg.Add(1)
 	go func() {
+		defer f.connectWg.Done()
 		for {
 			select {
 			case <-f.ctx.Done():
@@ -128,7 +133,11 @@ func (f *Fetch) ConnectCore() {
 			}
 			if err := f.handleStateChanges(f.ctx, f.stateChangesClient); err != nil {
 				if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-					time.Sleep(3 * time.Second)
+					select {
+					case <-f.ctx.Done():
+						return
+					case <-time.After(3 * time.Second):
+					}
 					continue
 				}
 				f.logger.Warn("[txpool.handleStateChanges]", "err", err)
@@ -136,6 +145,9 @@ func (f *Fetch) ConnectCore() {
 		}
 	}()
 }
+
+// Wait blocks until all goroutines spawned by ConnectCore and ConnectSentries have exited.
+func (f *Fetch) Wait() { f.connectWg.Wait() }
 
 func (f *Fetch) receiveMessageLoop(sentryClient sentryproto.SentryClient) {
 	for {
@@ -146,7 +158,11 @@ func (f *Fetch) receiveMessageLoop(sentryClient sentryproto.SentryClient) {
 		}
 		if _, err := sentryClient.HandShake(f.ctx, &emptypb.Empty{}, grpc.WaitForReady(true)); err != nil {
 			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-				time.Sleep(3 * time.Second)
+				select {
+				case <-f.ctx.Done():
+					return
+				case <-time.After(3 * time.Second):
+				}
 				continue
 			}
 			// Report error and wait more
@@ -155,7 +171,11 @@ func (f *Fetch) receiveMessageLoop(sentryClient sentryproto.SentryClient) {
 		}
 		if err := f.receiveMessage(f.ctx, sentryClient); err != nil {
 			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-				time.Sleep(3 * time.Second)
+				select {
+				case <-f.ctx.Done():
+					return
+				case <-time.After(3 * time.Second):
+				}
 				continue
 			}
 			f.logger.Warn("[txpool.recvMessage]", "err", err)
@@ -336,7 +356,7 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 			}
 		}
 	case sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68:
-		_, _, hashes, _, err := rlp.ParseAnnouncements(req.Data, 0)
+		_, _, hashes, _, err := parseAnnouncements(req.Data, 0)
 		if err != nil {
 			f.logger.Debug("[txpool] penalizing peer for malformed NewPooledTransactionHashes68", "peer", req.PeerId, "err", err)
 			sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
@@ -485,17 +505,29 @@ func (f *Fetch) receivePeerLoop(sentryClient sentryproto.SentryClient) {
 		}
 		if _, err := sentryClient.HandShake(f.ctx, &emptypb.Empty{}, grpc.WaitForReady(true)); err != nil {
 			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-				time.Sleep(3 * time.Second)
+				select {
+				case <-f.ctx.Done():
+					return
+				case <-time.After(3 * time.Second):
+				}
 				continue
 			}
 			// Report error and wait more
 			f.logger.Warn("[txpool.recvPeers] sentry not ready yet", "err", err)
-			time.Sleep(time.Second)
+			select {
+			case <-f.ctx.Done():
+				return
+			case <-time.After(time.Second):
+			}
 			continue
 		}
 		if err := f.receivePeer(sentryClient); err != nil {
 			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-				time.Sleep(3 * time.Second)
+				select {
+				case <-f.ctx.Done():
+					return
+				case <-time.After(3 * time.Second):
+				}
 				continue
 			}
 
@@ -601,7 +633,7 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remoteproto.
 					if err != nil {
 						return err
 					}
-					if utx.Type == BlobTxnType {
+					if utx.TxType() == BlobTxnType {
 						unwindBlobTxns.Append(utx, sender, false)
 					} else {
 						unwindTxns.Append(utx, sender, false)

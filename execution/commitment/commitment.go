@@ -111,7 +111,8 @@ type Trie interface {
 	ResetContext(ctx PatriciaContext)
 
 	// Process updates. If warmup.Enabled is true, pre-warms MDBX page cache in parallel.
-	Process(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress, warmup WarmupConfig) (rootHash []byte, err error)
+	// onProgress (optional) is called periodically with commitment progress info.
+	Process(ctx context.Context, updates *Updates, logPrefix string, onProgress func(*CommitProgress), warmup WarmupConfig) (rootHash []byte, err error)
 
 	// Release returns the trie to a pool for reuse. After calling Release,
 	// the caller must not use the trie.
@@ -563,6 +564,9 @@ func (be *BranchEncoder) CollectUpdate(
 
 	if be.cache != nil {
 		prev, foundInCache = be.cache.GetAndEvictBranch(prefix)
+		if foundInCache && be.metrics != nil {
+			be.metrics.cacheBranch.Add(1)
+		}
 	}
 	if !foundInCache {
 		prev, _, err = ctx.Branch(prefix)
@@ -641,6 +645,9 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 
 	if be.cache != nil {
 		prev, foundInCache = be.cache.GetAndEvictBranch(prefix)
+		if foundInCache && be.metrics != nil {
+			be.metrics.cacheBranch.Add(1)
+		}
 	}
 	if !foundInCache {
 		prev, _, err = ctx.Branch(prefix)
@@ -1621,6 +1628,19 @@ func (t *Updates) initCollector() {
 
 func (t *Updates) Mode() Mode { return t.mode }
 
+// PlainKeys returns a copy of the set of plain keys that have been touched.
+// Only meaningful in ModeDirect; returns nil otherwise.
+func (t *Updates) PlainKeys() map[string]struct{} {
+	if t.mode != ModeDirect || t.keys == nil {
+		return nil
+	}
+	cp := make(map[string]struct{}, len(t.keys))
+	for k := range t.keys {
+		cp[k] = struct{}{}
+	}
+	return cp
+}
+
 func (t *Updates) Size() (updates uint64) {
 	switch t.mode {
 	case ModeDirect:
@@ -1708,6 +1728,7 @@ func (t *Updates) TouchStorage(c *KeyUpdate, val []byte) {
 	if len(val) == 0 {
 		c.update.Flags = DeleteUpdate
 	} else {
+		c.update.Flags &^= DeleteUpdate
 		c.update.Flags |= StorageUpdate
 		copy(c.update.Storage[:], val)
 	}
@@ -1915,8 +1936,11 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 func (t *Updates) Reset() {
 	switch t.mode {
 	case ModeDirect:
-		t.keys = nil
-		t.keys = make(map[string]struct{})
+		if t.keys == nil {
+			t.keys = make(map[string]struct{})
+		} else {
+			clear(t.keys)
+		}
 		t.initCollector()
 	case ModeUpdate:
 		t.tree.Clear(true)
@@ -2003,6 +2027,9 @@ func (u *Update) Merge(b *Update) {
 	if b.Flags == DeleteUpdate {
 		u.Flags = DeleteUpdate
 		return
+	}
+	if b.Flags&(BalanceUpdate|NonceUpdate|CodeUpdate|StorageUpdate) != 0 {
+		u.Flags &^= DeleteUpdate
 	}
 	if b.Flags&BalanceUpdate != 0 {
 		u.Flags |= BalanceUpdate

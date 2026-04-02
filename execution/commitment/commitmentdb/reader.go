@@ -196,6 +196,51 @@ func (crsr *CommitmentReplayStateReader) Clone(tx kv.TemporalTx) StateReader {
 	}
 }
 
+// RebuildStateReader creates a StateReader for building commitment from scratch, block-by-block.
+// Commitment is read from SharedDomains' in-memory batch (LatestStateReader) because we are generating
+// it incrementally - prior commitment state lives in the MemBatch, not yet on disk.
+// Plain state (acc/storage/code) is read from history since it already exists in DB/files.
+//
+//   - commitment domain: LatestStateReader via SharedDomains (reads in-memory MemBatch being built)
+//   - acc/storage/code:  HistoryStateReader as-of plainStateAsOf (reads persisted plain state)
+type RebuildStateReader struct {
+	commitmentReader StateReader
+	plainStateReader StateReader
+	plainStateAsOf   uint64
+	sd               sd
+}
+
+var _ StateReader = (*RebuildStateReader)(nil)
+
+func NewRebuildStateReader(tx kv.TemporalTx, sharedDomains sd, plainStateAsOf uint64) *RebuildStateReader {
+	return &RebuildStateReader{
+		commitmentReader: NewLatestStateReader(tx, sharedDomains),
+		plainStateReader: NewHistoryStateReader(tx, plainStateAsOf),
+		plainStateAsOf:   plainStateAsOf,
+		sd:               sharedDomains,
+	}
+}
+
+func (r *RebuildStateReader) WithHistory() bool {
+	// we lie it is without history so we can exercise SharedDomain's in-memory DomainPut(kv.CommitmentDomain)
+	return false
+}
+
+func (r *RebuildStateReader) CheckDataAvailable(_ kv.Domain, _ kv.Step) error {
+	return nil
+}
+
+func (r *RebuildStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]byte, kv.Step, error) {
+	if d == kv.CommitmentDomain {
+		return r.commitmentReader.Read(d, plainKey, stepSize)
+	}
+	return r.plainStateReader.Read(d, plainKey, stepSize)
+}
+
+func (r *RebuildStateReader) Clone(tx kv.TemporalTx) StateReader {
+	return NewRebuildStateReader(tx, r.sd, r.plainStateAsOf)
+}
+
 // A history reader that reads:
 //   - commitment data as-of  commitmentAsOf txnum
 //   - account/storage/code data as-of plainsStateAsOf txnum

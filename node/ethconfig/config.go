@@ -247,8 +247,8 @@ type Config struct {
 	// Consensus layer
 	InternalCL bool
 
-	OverrideOsakaTime     *big.Int `toml:",omitempty"`
-	OverrideAmsterdamTime *big.Int `toml:",omitempty"`
+	OverrideOsakaTime     *uint64 `toml:",omitempty"`
+	OverrideAmsterdamTime *uint64 `toml:",omitempty"`
 
 	// Whether to avoid overriding chain config already stored in the DB
 	KeepStoredChainConfig bool

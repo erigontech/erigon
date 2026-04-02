@@ -36,6 +36,8 @@ type Reader struct {
 	*Getter
 	nextValue bool            // if nextValue true then getter.Next() expected to return value
 	c         FileCompression // compressed
+
+	Buf []byte // reusable buffer for callers (e.g. BpsTree binary search)
 }
 
 func NewReader(g *Getter, c FileCompression) *Reader {
