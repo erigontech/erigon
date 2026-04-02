@@ -1438,7 +1438,6 @@ func doCheckStateRootByHistory(cliCtx *cli.Context, logger log.Logger) error {
 		return err
 	}
 	defer clean()
-	defer agg.MadvNormal().DisableReadAhead()
 	db, err := temporal.New(chainDB, agg)
 	if err != nil {
 		return err
