@@ -754,18 +754,19 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						return err
 					}
 
-					// EIP-7778 + gaspool.go: blockGasUsed = Σ BlockRegular + Σ BlockState.
-					// For pre-Amsterdam: add finalize syscall gas (EIP-7002/EIP-7251) to blockRegular.
-					// For Amsterdam: no syscall gas added to blockGasUsed.
-					if !pe.cfg.chainConfig.IsAmsterdam(finalTask.BlockTime()) {
+					// EIP-7778: for Amsterdam+, blockGasUsed uses begin-block (EIP-4788) gas,
+					// not finalize (EIP-7002/EIP-7251) gas. For pre-Amsterdam, use finalize gas.
+					if pe.cfg.chainConfig.IsAmsterdam(finalTask.BlockTime()) {
+						blockExecutor.blockRegularGasUsed += blockExecutor.initGasUsed
+					} else {
 						blockExecutor.blockRegularGasUsed += sysCallGasUsed
 					}
 					// blockResult is computed in nextResult() before finalize runs, so we must
 					// recalculate here after gas is accounted for.
-					blockResult.BlockGasUsed = blockExecutor.blockRegularGasUsed + blockExecutor.blockStateGasUsed
+					blockResult.BlockGasUsed = blockExecutor.blockRegularGasUsed
 					if dbg.TraceGas {
-						log.Warn("[parallel] finalize gas", "block", blockResult.BlockNum,
-							"sysCallGasUsed", sysCallGasUsed,
+						log.Warn("[parallel] finalize syscall gas", "block", blockResult.BlockNum,
+							"sysCallGasUsed", sysCallGasUsed, "initGasUsed", blockExecutor.initGasUsed,
 							"isAmsterdam", pe.cfg.chainConfig.IsAmsterdam(finalTask.BlockTime()),
 							"cumRegular", blockExecutor.blockRegularGasUsed,
 							"cumState", blockExecutor.blockStateGasUsed,
@@ -1693,9 +1694,10 @@ type blockExecutor struct {
 	cntExec, cntSpecExec, cntSuccess, cntAbort, cntTotalValidations, cntValidationFail, cntFinalized int
 
 	// cumulative gas for this block
-	blockRegularGasUsed uint64 // accumulated BlockRegularGasUsed per tx (EIP-7778: Σ BlockRegular)
-	blockStateGasUsed   uint64 // accumulated BlockStateGasUsed per tx (EIP-8037: Σ BlockState)
+	blockRegularGasUsed uint64 // accumulated ReceiptGasUsed per tx (EIP-7778: Σ txnGasUsed with refunds)
+	blockStateGasUsed   uint64 // EIP-8037: accumulated state gas (informational; not used in blockGasUsed)
 	blobGasUsed         uint64
+	initGasUsed         uint64 // EIP-4788 gas from block initialization (Amsterdam+)
 	gasPool             *protocol.GasPool
 
 	execFailed, execAborted []int
@@ -2037,8 +2039,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 
 			if result.Receipt != nil {
-				// EIP-7778 + gaspool.go: blockGasUsed = Σ BlockRegular + Σ BlockState.
-				be.blockRegularGasUsed += result.ExecutionResult.BlockRegularGasUsed
+				// EIP-7778: accumulate ReceiptGasUsed (txnGasUsed with refunds applied).
+				be.blockRegularGasUsed += result.ExecutionResult.ReceiptGasUsed
 				be.blockStateGasUsed += result.ExecutionResult.BlockStateGasUsed
 				if dbg.TraceGas {
 					log.Warn("[parallel] tx gas", "block", be.blockNum, "txIdx", tx,
@@ -2052,6 +2054,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				applyResult.receipt = &receipt
 				applyResult.receipt.Logs = append([]*types.Log{}, result.Receipt.Logs...)
 				applyResult.logs = applyResult.receipt.Logs
+			} else if task.Version().TxIndex < 0 && be.blockNum > 0 {
+				// Capture EIP-4788 init gas (Amsterdam+) from the block-init task.
+				be.initGasUsed = result.InitGasUsed
 			}
 
 			maps.Copy(applyResult.traceFroms, result.TraceFroms)
@@ -2103,8 +2108,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			header = tt.Header
 			txs = tt.Txs
 		}
-		// EIP-7778 + gaspool.go: blockGasUsed = Σ BlockRegular + Σ BlockState.
-		blockGasUsed := be.blockRegularGasUsed + be.blockStateGasUsed
+		// EIP-7778: block gas = Σ ReceiptGasUsed (with refunds) + syscall, no + blockState.
+		blockGasUsed := be.blockRegularGasUsed
 		if dbg.TraceGas {
 			log.Warn("[parallel] block gas", "block", be.blockNum,
 				"blockRegular", be.blockRegularGasUsed, "blockState", be.blockStateGasUsed,
@@ -2142,8 +2147,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 	txTask := be.tasks[0].Task
 
-	// EIP-7778 + gaspool.go: blockGasUsed = Σ BlockRegular + Σ BlockState.
-	blockGasUsed := be.blockRegularGasUsed + be.blockStateGasUsed
+	// EIP-7778: block gas = Σ ReceiptGasUsed (with refunds) + syscall, no + blockState.
+	blockGasUsed := be.blockRegularGasUsed
 
 	return &blockResult{
 		BlockNum:     be.blockNum,
