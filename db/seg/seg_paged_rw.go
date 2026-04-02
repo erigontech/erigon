@@ -26,7 +26,6 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/compress"
 )
 
