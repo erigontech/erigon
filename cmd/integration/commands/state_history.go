@@ -24,6 +24,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
@@ -73,6 +74,29 @@ var historyCmd = &cobra.Command{
 	Use: "history",
 }
 
+func openHistory(dirs datadir.Dirs, domainName string, scanToStep uint64, logger log.Logger) (*state.History, *state.ErigonDBSettings, error) {
+	settings, err := state.ResolveErigonDBSettings(dirs, logger, false)
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve erigondb settings: %w", err)
+	}
+	domainKV, err := kv.String2Domain(domainName)
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve domain: %w", err)
+	}
+	history, err := state.NewHistory(
+		statecfg.Schema.GetDomainCfg(domainKV).Hist,
+		settings.StepSize,
+		settings.StepsInFrozenFile,
+		dirs,
+		logger,
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("init history: %w", err)
+	}
+	history.Scan(scanToStep * settings.StepSize)
+	return history, settings, nil
+}
+
 var printCmd = &cobra.Command{
 	Use: "print",
 	Run: func(cmd *cobra.Command, args []string) {
@@ -85,32 +109,12 @@ var printCmd = &cobra.Command{
 		}
 		defer l.Unlock()
 
-		erigonDBSettings, err := state.ResolveErigonDBSettings(dirs, logger, false)
+		history, settings, err := openHistory(dirs, historyDomain, toStep, logger)
 		if err != nil {
-			logger.Error("Failed to resolve erigondb settings", "error", err)
+			logger.Error("Failed to open history", "error", err)
 			return
 		}
-		stepSize := erigonDBSettings.StepSize
-		stepsInFrozenFile := erigonDBSettings.StepsInFrozenFile
-
-		domainKV, err := kv.String2Domain(historyDomain)
-		if err != nil {
-			logger.Error("Failed to resolve domain", "error", err)
-			return
-		}
-
-		history, err := state.NewHistory(
-			statecfg.Schema.GetDomainCfg(domainKV).Hist,
-			stepSize,
-			stepsInFrozenFile,
-			dirs,
-			logger,
-		)
-		if err != nil {
-			logger.Error("Failed to init history", "error", err)
-			return
-		}
-		history.Scan(toStep * stepSize)
+		stepSize := settings.StepSize
 
 		roTx := history.BeginFilesRo()
 		defer roTx.Close()
@@ -149,32 +153,12 @@ var distributionCmd = &cobra.Command{
 		}
 		defer l.Unlock()
 
-		erigonDBSettings, err := state.ResolveErigonDBSettings(dirs, logger, false)
+		history, settings, err := openHistory(dirs, historyDomain, toStep, logger)
 		if err != nil {
-			logger.Error("Failed to resolve erigondb settings", "error", err)
+			logger.Error("Failed to open history", "error", err)
 			return
 		}
-		stepSize := erigonDBSettings.StepSize
-		stepsInFrozenFile := erigonDBSettings.StepsInFrozenFile
-
-		domainKV, err := kv.String2Domain(historyDomain)
-		if err != nil {
-			logger.Error("Failed to resolve domain", "error", err)
-			return
-		}
-
-		history, err := state.NewHistory(
-			statecfg.Schema.GetDomainCfg(domainKV).Hist,
-			stepSize,
-			stepsInFrozenFile,
-			dirs,
-			logger,
-		)
-		if err != nil {
-			logger.Error("Failed to init history", "error", err)
-			return
-		}
-		history.Scan(toStep * stepSize)
+		stepSize := settings.StepSize
 
 		roTx := history.BeginFilesRo()
 		defer roTx.Close()
@@ -257,32 +241,13 @@ var rebuildCmd = &cobra.Command{
 		}
 		defer l.Unlock()
 
-		erigonDBSettings, err := state.ResolveErigonDBSettings(dirs, logger, false)
+		history, settings, err := openHistory(dirs, historyDomain, toStep, logger)
 		if err != nil {
-			logger.Error("Failed to resolve erigondb settings", "error", err)
+			logger.Error("Failed to open history", "error", err)
 			return
 		}
-		stepSize := erigonDBSettings.StepSize
-		stepsInFrozenFile := erigonDBSettings.StepsInFrozenFile
-
-		domainKV, err := kv.String2Domain(historyDomain)
-		if err != nil {
-			logger.Error("Failed to resolve domain", "error", err)
-			return
-		}
-
-		history, err := state.NewHistory(
-			statecfg.Schema.GetDomainCfg(domainKV).Hist,
-			stepSize,
-			stepsInFrozenFile,
-			dirs,
-			logger,
-		)
-		if err != nil {
-			logger.Error("Failed to init history", "error", err)
-			return
-		}
-		history.Scan(toStep * stepSize)
+		stepSize := settings.StepSize
+		stepsInFrozenFile := settings.StepsInFrozenFile
 
 		roTx := history.BeginFilesRo()
 		defer roTx.Close()

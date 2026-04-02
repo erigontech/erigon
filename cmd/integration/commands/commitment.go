@@ -600,11 +600,12 @@ func benchLookup(ctx context.Context, logger log.Logger) error {
 	}
 	durations := make([]time.Duration, len(keys))
 	var totalSize int64
+	stepSize := tx.Debug().StepSize()
 
 	startTime := time.Now()
 	for i, key := range keys {
 		lookupStart := time.Now()
-		val, _, err := commitmentReader.Read(kv.CommitmentDomain, key, tx.Debug().StepSize())
+		val, _, err := commitmentReader.Read(kv.CommitmentDomain, key, stepSize)
 		durations[i] = time.Since(lookupStart)
 
 		if err != nil {
@@ -747,6 +748,7 @@ func benchHistoryLookup(ctx context.Context, logger log.Logger) error {
 // benchSnapshotsHistoryLookup benchmarks history lookups across snapshot files
 func benchSnapshotsHistoryLookup(ctx context.Context, tx kv.TemporalTx, historyFiles []dbstate.VisibleFile, compactKey []byte, samplePct float64, rng *rand.Rand, logger log.Logger) ([]HistoryBenchStats, error) {
 	allFileStats := make([]HistoryBenchStats, 0, len(historyFiles))
+	stepSize := tx.Debug().StepSize()
 
 	for _, f := range historyFiles {
 		fpath := f.Fullpath()
@@ -791,7 +793,7 @@ func benchSnapshotsHistoryLookup(ctx context.Context, tx kv.TemporalTx, historyF
 			reader := commitmentdb.NewHistoryStateReader(tx, txNum)
 
 			lookupStart := time.Now()
-			_, _, err := reader.Read(kv.CommitmentDomain, compactKey, tx.Debug().StepSize())
+			_, _, err := reader.Read(kv.CommitmentDomain, compactKey, stepSize)
 			elapsed := time.Since(lookupStart)
 
 			if err != nil {
@@ -877,6 +879,7 @@ func benchMdbxHistoryLookup(ctx context.Context, tx kv.TemporalTx, compactKey []
 	// Benchmark lookups using HistoryStateReader - same API as file benchmarks
 	// The reader has logic to determine whether to look in snapshots or MDBX
 	durations := make([]time.Duration, 0, sampleCount)
+	stepSize := tx.Debug().StepSize()
 
 	benchStart := time.Now()
 	for _, txNum := range sampledTxNums {
@@ -884,7 +887,7 @@ func benchMdbxHistoryLookup(ctx context.Context, tx kv.TemporalTx, compactKey []
 		reader := commitmentdb.NewHistoryStateReader(tx, txNum)
 
 		lookupStart := time.Now()
-		_, _, err := reader.Read(kv.CommitmentDomain, compactKey, tx.Debug().StepSize())
+		_, _, err := reader.Read(kv.CommitmentDomain, compactKey, stepSize)
 		elapsed := time.Since(lookupStart)
 
 		if err != nil {
