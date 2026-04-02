@@ -303,9 +303,14 @@ func SysCallContractWithBlockContext(contract accounts.Address, data []byte, cha
 		return nil, 0, nil
 	}
 
-	consumed := mdGas.Regular - leftover.Regular
+	// Amsterdam (EIP-7778): only regular-dimension ops count toward header.GasUsed.
+	// SSTORE ops inside syscalls spill from the state reservoir (State=0) into the
+	// regular pool, so mdGas.Regular-leftover.Regular would overcount by StateGasConsumed().
+	// evm.RegularGasConsumed() tracks only non-SSTORE regular ops, giving the correct value.
+	// Pre-Amsterdam: StateGasConsumed()=0, so this is equivalent to the old formula.
+	consumed := evm.RegularGasConsumed()
 	if dbg.TraceGas {
-		log.Warn("SysCallContractWithBlockContext gas", "contract", contract, "initial", mdGas.Regular, "leftoverRegular", leftover.Regular, "leftoverState", leftover.State, "gasUsed", consumed, "err", err)
+		log.Warn("SysCallContractWithBlockContext gas", "contract", contract, "initial", mdGas.Regular, "leftoverRegular", leftover.Regular, "leftoverState", leftover.State, "regularConsumed", consumed, "stateConsumed", evm.StateGasConsumed(), "err", err)
 	}
 	return ret, consumed, err
 }
