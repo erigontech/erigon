@@ -626,10 +626,14 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		mdGasUsed := st.mdGasUsed()
 		if rules.IsAmsterdam {
 			// EIP-8037 + EIP-7778: Block gas accounting uses two dimensions.
-			// stateGasConsumed tracks ALL state gas charges (including spill to regular gas).
-			// regularGasConsumed tracks only regular-dimension opcode gas.
+			// blockRegular = mdGasUsed.Regular - RevertedSpillGas:
+			//   - mdGasUsed.Regular (= initialGas.Regular - gasRemaining.Regular) includes state-to-regular
+			//     spill because spill deducts from gasRemaining.Regular but evm.RegularGasConsumed() does not
+			//     track it. For OOG txs this captures the full regular dimension cost.
+			//   - RevertedSpillGas is the spill that was restored to the state reservoir on depth-0 REVERT;
+			//     subtracting it avoids double-counting spill that the REVERT undid.
 			blockState := imdGas.State + st.evm.StateGasConsumed()
-			blockRegular := imdGas.Regular + st.evm.RegularGasConsumed()
+			blockRegular := mdGasUsed.Regular - st.evm.RevertedSpillGas()
 			st.blockRegularGasUsed = max(blockRegular, intrinsicGasResult.FloorGasCost)
 			st.blockStateGasUsed = blockState
 			// Receipt gasUsed: total gas pool depletion + spill restored on depth-0 REVERT.
@@ -668,7 +672,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	} else if rules.IsAmsterdam {
 		mdGasUsed := st.mdGasUsed()
 		blockState := imdGas.State + st.evm.StateGasConsumed()
-		blockRegular := imdGas.Regular + st.evm.RegularGasConsumed()
+		blockRegular := mdGasUsed.Regular - st.evm.RevertedSpillGas()
 		st.blockRegularGasUsed = max(blockRegular, intrinsicGasResult.FloorGasCost)
 		st.blockStateGasUsed = blockState
 		st.txnGasUsedB4Refunds = mdGasUsed.Total() + st.evm.RevertedSpillGas()
