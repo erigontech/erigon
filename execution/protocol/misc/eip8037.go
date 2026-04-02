@@ -33,7 +33,7 @@ func CostPerStateByte(gasLimit uint64) uint64 {
 	//shifted = raw + CPSB_OFFSET
 	//shift = max(bit_length(shifted) - CPSB_SIGNIFICANT_BITS, 0)
 	//cost_per_state_byte = max(((shifted >> shift) << shift) - CPSB_OFFSET, 1)
-	raw := uint64(math.Ceil(float64(gasLimit*2_628_000) / float64(2*params.TargetStateGrowthPerYear)))
+	raw := uint64(math.Ceil(float64(gasLimit) * 2_628_000 / float64(2*params.TargetStateGrowthPerYear)))
 	shifted := raw + params.CpsbOffset
 	shift := max(bits.Len64(shifted)-params.CpsbSignificantBits, 0)
 	rounded := (shifted >> shift) << shift

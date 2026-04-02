@@ -600,23 +600,26 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
 	}
 
+	if rules.IsAmsterdam {
+		// EIP-8037 + EIP-7778: Block gas accounting uses two dimensions.
+		// stateGasConsumed tracks ALL state gas charges (including spill to regular gas).
+		// regularGasConsumed tracks only regular-dimension opcode gas.
+		blockState := imdGas.State + st.evm.StateGasConsumed()
+		blockRegular := imdGas.Regular + st.evm.RegularGasConsumed()
+		st.blockRegularGasUsed = max(blockRegular, intrinsicGasResult.FloorGasCost)
+		st.blockStateGasUsed = blockState
+		// Receipt gasUsed: EIP-8037 formula tx.gas - gas_left - reservoir.
+		// Use Total()-level subtraction to avoid per-component uint64 underflow
+		// when gasRemaining.State > initialGas.State (reservoir grew via child reverts).
+		st.txnGasUsedB4Refunds = st.initialGas.Total() - st.gasRemaining.Total() + st.evm.RevertedSpillGas()
+	}
+
 	if refunds && !gasBailout {
 		refundQuotient := params.RefundQuotient
 		if rules.IsLondon {
 			refundQuotient = params.RefundQuotientEIP3529
 		}
 		if rules.IsAmsterdam {
-			// EIP-8037 + EIP-7778: Block gas accounting uses two dimensions.
-			// stateGasConsumed tracks ALL state gas charges (including spill to regular gas).
-			// regularGasConsumed tracks only regular-dimension opcode gas.
-			blockState := imdGas.State + st.evm.StateGasConsumed()
-			blockRegular := imdGas.Regular + st.evm.RegularGasConsumed()
-			st.blockRegularGasUsed = max(blockRegular, intrinsicGasResult.FloorGasCost)
-			st.blockStateGasUsed = blockState
-			// Receipt gasUsed: EIP-8037 formula tx.gas - gas_left - reservoir.
-			// Use Total()-level subtraction to avoid per-component uint64 underflow
-			// when gasRemaining.State > initialGas.State (reservoir grew via child reverts).
-			st.txnGasUsedB4Refunds = st.initialGas.Total() - st.gasRemaining.Total() + st.evm.RevertedSpillGas()
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Total())
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
 		} else if rules.IsPrague {
@@ -632,11 +635,6 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		}
 		st.refundGas()
 	} else if rules.IsAmsterdam {
-		blockState := imdGas.State + st.evm.StateGasConsumed()
-		blockRegular := imdGas.Regular + st.evm.RegularGasConsumed()
-		st.blockRegularGasUsed = max(blockRegular, intrinsicGasResult.FloorGasCost)
-		st.blockStateGasUsed = blockState
-		st.txnGasUsedB4Refunds = st.initialGas.Total() - st.gasRemaining.Total() + st.evm.RevertedSpillGas()
 		st.txnGasUsed = max(st.txnGasUsedB4Refunds, intrinsicGasResult.FloorGasCost)
 	} else {
 		// No-refund path: gasBailout (trace_call) or !refunds.

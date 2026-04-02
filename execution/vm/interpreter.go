@@ -129,22 +129,26 @@ func useMdGas(evm *EVM, initial mdgas.MdGas, gas uint64, t mdgas.MdGasType, trac
 		originalGas := gas
 		initial.State, ok = useGas(initial.State, gas, tracer, reason)
 		if ok {
-			if evm != nil {
-				evm.stateGasConsumed += originalGas
-			}
+			evm.stateGasConsumed += originalGas
 			return initial, true
 		}
-		// otherwise use up all remaining state gas and try to use some from the regular gas
+		// Reservoir insufficient — drain it and spill the remainder to regular gas.
+		// Fire tracer event for the reservoir drain (useGas above skipped it on failure).
+		if initial.State > 0 {
+			if tracer != nil && tracer.OnGasChange != nil && reason != tracing.GasChangeIgnored {
+				tracer.OnGasChange(initial.State, 0, reason)
+			}
+		}
 		gas = gas - initial.State
 		initial.State = 0
 		initial.Regular, ok = useGas(initial.Regular, gas, tracer, reason)
-		if ok && evm != nil {
+		if ok {
 			evm.stateGasConsumed += originalGas
 		}
 		return initial, ok
 	case mdgas.RegularGas:
 		initial.Regular, ok = useGas(initial.Regular, gas, tracer, reason)
-		if ok && evm != nil {
+		if ok {
 			evm.regularGasConsumed += gas
 		}
 		return initial, ok
