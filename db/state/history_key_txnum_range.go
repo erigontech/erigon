@@ -63,6 +63,7 @@ func (ht *HistoryRoTx) iterateKeyTxNumFrozen(fromTxNum, toTxNum int, asc order.B
 			heap.Push(&s.h, &ReconItem{g: g, key: key, val: val, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum})
 		}
 	}
+	ht.h.logger.Info("[dbg] iterateKeyTxNumFrozen", "name", ht.h.FilenameBase, "fromTxNum", fromTxNum, "toTxNum", toTxNum, "filesInHeap", s.h.Len(), "totalFiles", len(ht.iit.files))
 	if err := s.advance(); err != nil {
 		s.Close()
 		return nil, err
