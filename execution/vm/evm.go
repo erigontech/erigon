@@ -210,20 +210,6 @@ func (evm *EVM) handleFrameRevert(gas *mdgas.MdGas, err error, depth int,
 		evm.stateGasConsumed = savedStateGasConsumed
 	}
 
-	// Compute spill: state gas that was charged from gas_left (regular)
-	// because the reservoir was insufficient.
-	// When gas.State > initialChildState the reservoir grew via sub-child
-	// reverts — no reservoir was consumed net, so all childStateConsumed
-	// was spilled.
-	var reservoirUsed uint64
-	if initialChildState > gas.State {
-		reservoirUsed = initialChildState - gas.State
-	}
-	var spill uint64
-	if childStateConsumed > reservoirUsed {
-		spill = childStateConsumed - reservoirUsed
-	}
-
 	// EIP-8037: "On child revert or exceptional halt, all state gas
 	// consumed by the child, both from the reservoir and any that spilled
 	// into gas_left, is restored to the parent's reservoir."
@@ -231,6 +217,16 @@ func (evm *EVM) handleFrameRevert(gas *mdgas.MdGas, err error, depth int,
 		if err == ErrExecutionReverted {
 			// Top-level REVERT: restore spill to gas_left for refund
 			// accounting; track it for receipt gas calculation.
+			// Spill = state gas that was charged from gas_left (regular)
+			// because the reservoir was insufficient. When gas.State >
+			// initialChildState the reservoir grew via sub-child reverts —
+			// no reservoir was consumed net, so all childStateConsumed
+			// was spilled.
+			var reservoirUsed uint64
+			if initialChildState > gas.State {
+				reservoirUsed = initialChildState - gas.State
+			}
+			spill := childStateConsumed - reservoirUsed
 			gas.Regular += spill
 			evm.revertedSpillGas += spill
 		}

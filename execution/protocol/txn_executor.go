@@ -620,14 +620,12 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Total())
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
 		} else if rules.IsPrague {
-			regularGasUsed := st.initialGas.Regular - st.gasRemaining.Regular
-			st.txnGasUsedB4Refunds = regularGasUsed
+			st.txnGasUsedB4Refunds = st.initialGas.Regular - st.gasRemaining.Regular
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Regular)
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
 			st.blockRegularGasUsed = st.txnGasUsed
 		} else {
-			regularGasUsed := st.initialGas.Regular - st.gasRemaining.Regular
-			st.txnGasUsedB4Refunds = regularGasUsed
+			st.txnGasUsedB4Refunds = st.initialGas.Regular - st.gasRemaining.Regular
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Regular)
 			st.txnGasUsed = st.txnGasUsedB4Refunds - refund
 			st.blockRegularGasUsed = st.txnGasUsed
