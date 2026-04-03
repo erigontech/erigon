@@ -82,10 +82,9 @@ func (idx *ChangedKeysPerBlock) RamBytes() uint64 {
 	return n
 }
 
-// changedKeysPerBlock scans it once and builds the index.  The caller is responsible
-// for closing it.  onNewKey is called on key change before txNum2Block so a stateful
-// cursor can reset; pass nil if not needed.
-func changedKeysPerBlock(it stream.KU64, txNum2Block func(txNum uint64) (uint64, error), onNewKey func()) (*ChangedKeysPerBlock, error) {
+// changedKeysPerBlock scans it once and builds the index.
+// The caller is responsible for closing it.
+func changedKeysPerBlock(it stream.KU64, txNums *TxNumToBlock) (*ChangedKeysPerBlock, error) {
 	idx := &ChangedKeysPerBlock{
 		blocks: make(map[uint64][]uint32),
 	}
@@ -104,11 +103,11 @@ func changedKeysPerBlock(it stream.KU64, txNum2Block func(txNum uint64) (uint64,
 		}
 
 		ks := string(k)
-		if ks != prevKey && onNewKey != nil {
-			onNewKey() // txNums restart from a lower value on each new key, so cursor must reset
+		if ks != prevKey {
+			txNums.ResetCursor() // txNums restart from a lower value on each new key, so cursor must reset
 		}
 
-		blockNum, err := txNum2Block(txNum)
+		blockNum, err := txNums.BlockOf(txNum)
 		if err != nil {
 			return nil, err
 		}
@@ -138,7 +137,7 @@ func NewChangedKeysPerBlock(tx kv.TemporalDebugTx, domain kv.Domain, fromTxNum, 
 		return nil, err
 	}
 	defer it.Close()
-	return changedKeysPerBlock(it, txNums.BlockOf, txNums.ResetCursor)
+	return changedKeysPerBlock(it, txNums)
 }
 
 // TxNumToBlock maps txNums to block numbers within a contiguous block window.
