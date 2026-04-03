@@ -21,8 +21,10 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -35,6 +37,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/length"
@@ -50,6 +53,7 @@ import (
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, failFast bool, logger log.Logger) error {
@@ -848,10 +852,9 @@ func checkCommitmentHistAtBlkWithIdx(ctx context.Context, tx kv.TemporalTx, sd *
 	if err != nil {
 		return err
 	}
-	if aggMax := db.(state.HasAgg).Agg().(*state.Aggregator).EndTxNumMinimax(); maxTxNum+1 > aggMax { // don't use seek-commitment to check "state progress" - because we are in method which checking "files validity" (can't rely on them here)
-		blockNumOfState, _, _ := txNumsReader.FindBlockNum(ctx, tx, aggMax)
-		return fmt.Errorf("block %d is beyond latest block with state %d", blockNum, blockNumOfState)
-	}
+	// Note: we no longer gate on EndTxNumMinimax() here because MDBX may contain
+	// state beyond what's in snapshot files. The temporal read methods (GetAsOf,
+	// HistoryRange, SplitHistoryReader) resolve from both snapshots and MDBX.
 	toTxNum := maxTxNum + 1
 	// For blockNum==0 there is no prior commitment state (GetAsOf at txNum=0
 	// falls back to latest for the commitment domain). Use commitmentAsOf=toTxNum
@@ -956,6 +959,697 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 		return err
 	}
 	return checkCommitmentHistAtBlkWithIdx(ctx, tx, sd, db, br, blockNum, idx, lvl, logger)
+}
+
+// OverrideStateReader wraps a StateReader and overrides specific key values.
+// Used for debugging: patch a known-bad value to verify if the commitment root matches.
+type OverrideStateReader struct {
+	inner     commitmentdb.StateReader
+	overrides map[string][]byte // key = domain_string + hex(plainKey), value = override bytes
+}
+
+func NewOverrideStateReader(inner commitmentdb.StateReader, overrides map[string][]byte) *OverrideStateReader {
+	return &OverrideStateReader{inner: inner, overrides: overrides}
+}
+
+func (r *OverrideStateReader) WithHistory() bool { return r.inner.WithHistory() }
+func (r *OverrideStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error {
+	return r.inner.CheckDataAvailable(d, step)
+}
+func (r *OverrideStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
+	return NewOverrideStateReader(r.inner.Clone(tx), r.overrides)
+}
+func (r *OverrideStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]byte, kv.Step, error) {
+	overrideKey := d.String() + ":" + hex.EncodeToString(plainKey)
+	if v, ok := r.overrides[overrideKey]; ok {
+		enc, step, _ := r.inner.Read(d, plainKey, stepSize)
+		_ = enc
+		return v, step, nil
+	}
+	return r.inner.Read(d, plainKey, stepSize)
+}
+
+// StateOverride describes a single key/value override for CheckCommitmentHistAtBlkWithOverrides.
+type StateOverride struct {
+	Domain kv.Domain
+	Key    []byte // plainKey (e.g. addr+slot for storage)
+	Value  []byte // override value
+}
+
+// CheckCommitmentHistAtBlkWithOverrides is like CheckCommitmentHistAtBlk but patches
+// specific key values before computing the commitment root. This is for debugging to
+// verify whether fixing known-bad values produces the correct root.
+func CheckCommitmentHistAtBlkWithOverrides(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, blockNum uint64, overrides []StateOverride, lvl log.Lvl, logger log.Logger) error {
+	logger.Log(lvl, "checking commitment hist at block (with overrides)", "blockNum", blockNum, "numOverrides", len(overrides))
+	start := time.Now()
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	header, err := br.HeaderByNumber(ctx, tx, blockNum)
+	if err != nil {
+		return err
+	}
+	txNumsReader := br.TxnumReader()
+	minTxNum, err := txNumsReader.Min(ctx, tx, blockNum)
+	if err != nil {
+		return err
+	}
+	maxTxNum, err := txNumsReader.Max(ctx, tx, blockNum)
+	if err != nil {
+		return err
+	}
+	// Note: no EndTxNumMinimax() gate — MDBX may contain state beyond snapshots
+	toTxNum := maxTxNum + 1
+	sd, err := execctx.NewSharedDomains(ctx, tx, logger)
+	if err != nil {
+		return err
+	}
+	commitmentAsOf := minTxNum
+	if blockNum == 0 {
+		commitmentAsOf = toTxNum
+	}
+
+	// Build override map
+	overrideMap := make(map[string][]byte, len(overrides))
+	for _, o := range overrides {
+		key := o.Domain.String() + ":" + hex.EncodeToString(o.Key)
+		overrideMap[key] = o.Value
+		logger.Log(lvl, "override", "domain", o.Domain.String(), "key", hex.EncodeToString(o.Key), "value", hex.EncodeToString(o.Value))
+	}
+
+	splitStateReader := commitmentdb.NewSplitHistoryReader(tx, commitmentAsOf, toTxNum, true)
+	overrideReader := NewOverrideStateReader(splitStateReader, overrideMap)
+
+	sd.GetCommitmentCtx().SetStateReader(overrideReader)
+	sd.GetCommitmentCtx().SetTrace(logger.Enabled(ctx, log.LvlTrace))
+	sd.GetCommitmentContext().SetDeferBranchUpdates(false)
+	_, latestBlockNum, err := sd.SeekCommitment(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if latestBlockNum > blockNum {
+		return fmt.Errorf("commitment state blockNum is ahead of blockNum: %d > %d", latestBlockNum, blockNum)
+	}
+	if latestBlockNum < blockNum {
+		logger.Log(lvl, "commitment state is from earlier block (empty blocks in between)", "commitmentBlockNum", latestBlockNum, "blockNum", blockNum)
+	}
+	logger.Log(lvl, "commitment recalc info", "blockNum", blockNum, "minTxNum", minTxNum, "maxTxNum", maxTxNum, "toTxNum", toTxNum)
+	touchStart := time.Now()
+	accTouches, err := touchHistoricalKeys(sd, tx, kv.AccountsDomain, minTxNum, toTxNum, blockNum, nil, nil)
+	if err != nil {
+		return err
+	}
+	storageTouches, err := touchHistoricalKeys(sd, tx, kv.StorageDomain, minTxNum, toTxNum, blockNum, nil, nil)
+	if err != nil {
+		return err
+	}
+	codeTouches, err := touchHistoricalKeys(sd, tx, kv.CodeDomain, minTxNum, toTxNum, blockNum, nil, nil)
+	if err != nil {
+		return err
+	}
+	touchDur := time.Since(touchStart)
+	logger.Log(lvl, "commitment touched keys", "accTouches", accTouches, "storageTouches", storageTouches, "codeTouches", codeTouches, "touchDur", touchDur)
+	recalcStart := time.Now()
+	root, err := sd.ComputeCommitment(ctx, tx, false, blockNum, maxTxNum, "integrity-override", nil)
+	if err != nil {
+		return err
+	}
+	rootHash := common.Hash(root)
+	if header.Root != rootHash {
+		return fmt.Errorf("commitment root mismatch (even with overrides): %s != %s (blockNum=%d,txNum=%d)", header.Root, rootHash, blockNum, maxTxNum)
+	}
+	logger.Log(lvl,
+		"commitment root matches (with overrides)",
+		"blockNum", blockNum,
+		"txNum", maxTxNum,
+		"root", rootHash,
+		"totalDur", time.Since(start),
+		"touchDur", touchDur,
+		"recalcDur", time.Since(recalcStart),
+	)
+	return nil
+}
+
+// DumpHistAtBlk dumps all touched account/storage/code values at the end of a block
+// (i.e. GetAsOf at maxTxNum+1) as JSON to the given writer. This is useful for comparing
+// Erigon's historical state against a reference (e.g. prestateTracer diff output).
+func DumpHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, blockNum uint64, w io.Writer, logger log.Logger) error {
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	txNumsReader := br.TxnumReader()
+	minTxNum, err := txNumsReader.Min(ctx, tx, blockNum)
+	if err != nil {
+		return err
+	}
+	maxTxNum, err := txNumsReader.Max(ctx, tx, blockNum)
+	if err != nil {
+		return err
+	}
+	toTxNum := maxTxNum + 1
+	logger.Info("dump hist at block", "blockNum", blockNum, "minTxNum", minTxNum, "maxTxNum", maxTxNum, "toTxNum", toTxNum)
+
+	type accountEntry struct {
+		Nonce    uint64 `json:"nonce"`
+		Balance  string `json:"balance"`
+		CodeHash string `json:"codeHash,omitempty"`
+	}
+	type storageEntry struct {
+		Value string `json:"value"`
+	}
+	type codeEntry struct {
+		CodeLen int    `json:"codeLen"`
+		Hash    string `json:"hash,omitempty"`
+	}
+
+	type dumpResult struct {
+		BlockNum uint64                   `json:"blockNum"`
+		TxNum    uint64                   `json:"toTxNum"`
+		Accounts map[string]*accountEntry `json:"accounts"`
+		Storage  map[string]*storageEntry `json:"storage"`
+		Code     map[string]*codeEntry    `json:"code"`
+	}
+
+	result := &dumpResult{
+		BlockNum: blockNum,
+		TxNum:    toTxNum,
+		Accounts: make(map[string]*accountEntry),
+		Storage:  make(map[string]*storageEntry),
+		Code:     make(map[string]*codeEntry),
+	}
+
+	// Collect touched account keys
+	accStream, err := tx.HistoryRange(kv.AccountsDomain, int(minTxNum), int(toTxNum), order.Asc, -1)
+	if err != nil {
+		return err
+	}
+	defer accStream.Close()
+	for accStream.HasNext() {
+		k, _, err := accStream.Next()
+		if err != nil {
+			return err
+		}
+		addr := "0x" + hex.EncodeToString(k[:length.Addr])
+		enc, _, err := tx.GetAsOf(kv.AccountsDomain, k[:length.Addr], toTxNum)
+		if err != nil {
+			return fmt.Errorf("GetAsOf(accounts, %s, %d): %w", addr, toTxNum, err)
+		}
+		if len(enc) == 0 {
+			result.Accounts[addr] = &accountEntry{Balance: "0x0"}
+			continue
+		}
+		var a accounts.Account
+		if err := accounts.DeserialiseV3(&a, enc); err != nil {
+			return fmt.Errorf("DeserialiseV3(%s): %w", addr, err)
+		}
+		entry := &accountEntry{
+			Nonce:   a.Nonce,
+			Balance: a.Balance.Hex(),
+		}
+		if !a.IsEmptyCodeHash() {
+			cv := a.CodeHash.Value()
+			entry.CodeHash = "0x" + hex.EncodeToString(cv[:])
+		}
+		result.Accounts[addr] = entry
+	}
+	logger.Info("dumped accounts", "count", len(result.Accounts))
+
+	// Collect touched storage keys
+	storageStream, err := tx.HistoryRange(kv.StorageDomain, int(minTxNum), int(toTxNum), order.Asc, -1)
+	if err != nil {
+		return err
+	}
+	defer storageStream.Close()
+	for storageStream.HasNext() {
+		k, _, err := storageStream.Next()
+		if err != nil {
+			return err
+		}
+		addr := "0x" + hex.EncodeToString(k[:length.Addr])
+		slot := "0x" + hex.EncodeToString(k[length.Addr:length.Addr+length.Hash])
+		compositeKey := addr + ":" + slot
+
+		enc, _, err := tx.GetAsOf(kv.StorageDomain, k[:length.Addr+length.Hash], toTxNum)
+		if err != nil {
+			return fmt.Errorf("GetAsOf(storage, %s, %d): %w", compositeKey, toTxNum, err)
+		}
+		val := "0x0"
+		if len(enc) > 0 {
+			val = "0x" + hex.EncodeToString(enc)
+		}
+		result.Storage[compositeKey] = &storageEntry{Value: val}
+	}
+	logger.Info("dumped storage", "count", len(result.Storage))
+
+	// Collect touched code keys
+	codeStream, err := tx.HistoryRange(kv.CodeDomain, int(minTxNum), int(toTxNum), order.Asc, -1)
+	if err != nil {
+		return err
+	}
+	defer codeStream.Close()
+	for codeStream.HasNext() {
+		k, _, err := codeStream.Next()
+		if err != nil {
+			return err
+		}
+		addr := "0x" + hex.EncodeToString(k[:length.Addr])
+		enc, _, err := tx.GetAsOf(kv.CodeDomain, k[:length.Addr], toTxNum)
+		if err != nil {
+			return fmt.Errorf("GetAsOf(code, %s, %d): %w", addr, toTxNum, err)
+		}
+		entry := &codeEntry{CodeLen: len(enc)}
+		if len(enc) > 0 {
+			h := crypto.Keccak256Hash(enc)
+			entry.Hash = "0x" + hex.EncodeToString(h[:])
+		}
+		result.Code[addr] = entry
+	}
+	logger.Info("dumped code", "count", len(result.Code))
+
+	enc, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(enc)
+	return err
+}
+
+// FindDeletedStorageSlots scans storage history in [fromBlock, toBlock] to find slots that:
+//  1. Were modified in the block range
+//  2. Currently have latest value = zero/nil (deleted)
+//  3. Had at least one prior non-deletion EF entry
+//
+// For each such slot, it outputs the deletion entry and the previous entry's block number,
+// which is where check-commitment-hist-at-blk would fail if the deletion recorded a stale prevVal.
+func FindDeletedStorageSlots(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, fromBlock, toBlock uint64, limit int, w io.Writer, logger log.Logger) error {
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	txNumsReader := br.TxnumReader()
+	fromTxNum, err := txNumsReader.Min(ctx, tx, fromBlock)
+	if err != nil {
+		return err
+	}
+	toTxNum, err := txNumsReader.Max(ctx, tx, toBlock)
+	if err != nil {
+		return err
+	}
+	toTxNum++ // exclusive
+	logger.Info("scanning storage history for deleted slots", "fromBlock", fromBlock, "toBlock", toBlock, "fromTxNum", fromTxNum, "toTxNum", toTxNum)
+
+	type result struct {
+		Address       string `json:"address"`
+		Slot          string `json:"slot"`
+		DeletionTxNum uint64 `json:"deletionTxNum"`
+		DeletionBlock uint64 `json:"deletionBlock"`
+		PrevTxNum     uint64 `json:"prevTxNum"`
+		PrevBlock     uint64 `json:"prevBlock"`
+		RawAtDeletion string `json:"rawAtDeletion"`
+		RawAtPrev     string `json:"rawAtPrev"`
+	}
+
+	var results []result
+	seen := make(map[string]bool)
+	scanned := 0
+
+	stream, err := tx.HistoryRange(kv.StorageDomain, int(fromTxNum), int(toTxNum), order.Asc, -1)
+	if err != nil {
+		return err
+	}
+	defer stream.Close()
+
+	for stream.HasNext() {
+		if err := common.Stopped(ctx.Done()); err != nil {
+			return err
+		}
+
+		k, _, err := stream.Next()
+		if err != nil {
+			return err
+		}
+		if len(k) < length.Addr+length.Hash {
+			continue
+		}
+
+		compositeKey := string(k[:length.Addr+length.Hash])
+		if seen[compositeKey] {
+			continue
+		}
+		seen[compositeKey] = true
+		scanned++
+
+		if scanned%10000 == 0 {
+			logger.Info("scanning...", "scanned", scanned, "found", len(results))
+		}
+
+		// Check if latest value is zero/nil (deleted)
+		latestVal, _, err := tx.GetLatest(kv.StorageDomain, k[:length.Addr+length.Hash])
+		if err != nil {
+			return err
+		}
+		if len(latestVal) > 0 {
+			continue // not deleted, skip
+		}
+
+		// Get full EF sequence
+		idxIter, err := tx.IndexRange(kv.StorageHistoryIdx, k[:length.Addr+length.Hash], 0, int(toTxNum+1000000), order.Asc, -1)
+		if err != nil {
+			return err
+		}
+
+		var efTxNums []uint64
+		for idxIter.HasNext() {
+			txNum, err := idxIter.Next()
+			if err != nil {
+				idxIter.Close()
+				return err
+			}
+			efTxNums = append(efTxNums, txNum)
+		}
+		idxIter.Close()
+
+		if len(efTxNums) < 2 {
+			continue // need at least 2 entries
+		}
+
+		// Last entry should be the deletion, second-to-last is the previous write
+		lastTxNum := efTxNums[len(efTxNums)-1]
+		prevTxNum := efTxNums[len(efTxNums)-2]
+
+		// Get raw values at both entries
+		rawAtLast, _, err := tx.HistorySeek(kv.StorageDomain, k[:length.Addr+length.Hash], lastTxNum)
+		if err != nil {
+			return err
+		}
+		rawAtPrev, _, err := tx.HistorySeek(kv.StorageDomain, k[:length.Addr+length.Hash], prevTxNum)
+		if err != nil {
+			return err
+		}
+
+		// Find block numbers
+		lastBlock, lastBlockOk, err := txNumsReader.FindBlockNum(ctx, tx, lastTxNum)
+		if err != nil || !lastBlockOk {
+			continue
+		}
+		prevBlock, prevBlockOk, err := txNumsReader.FindBlockNum(ctx, tx, prevTxNum)
+		if err != nil || !prevBlockOk {
+			continue
+		}
+
+		addr := "0x" + hex.EncodeToString(k[:length.Addr])
+		slot := "0x" + hex.EncodeToString(k[length.Addr:length.Addr+length.Hash])
+
+		rawLastHex := "0x0"
+		if len(rawAtLast) > 0 {
+			rawLastHex = "0x" + hex.EncodeToString(rawAtLast)
+		}
+		rawPrevHex := "0x0"
+		if len(rawAtPrev) > 0 {
+			rawPrevHex = "0x" + hex.EncodeToString(rawAtPrev)
+		}
+
+		results = append(results, result{
+			Address:       addr,
+			Slot:          slot,
+			DeletionTxNum: lastTxNum,
+			DeletionBlock: lastBlock,
+			PrevTxNum:     prevTxNum,
+			PrevBlock:     prevBlock,
+			RawAtDeletion: rawLastHex,
+			RawAtPrev:     rawPrevHex,
+		})
+
+		logger.Info("found deleted slot",
+			"address", addr,
+			"slot", slot,
+			"deletionBlock", lastBlock,
+			"prevBlock", prevBlock,
+			"rawAtDeletion", rawLastHex,
+			"rawAtPrev", rawPrevHex,
+		)
+
+		if limit > 0 && len(results) >= limit {
+			break
+		}
+	}
+
+	logger.Info("scan complete", "scanned", scanned, "found", len(results))
+
+	enc, err := json.MarshalIndent(results, "", "  ")
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(enc)
+	return err
+}
+
+// DumpSlotHistory dumps detailed history information for a single storage slot (or account)
+// around a given block. It outputs:
+//   - The EF (inverted index) entries: all txNums where this key was modified in a window
+//   - The history value at each of those txNums
+//   - Boundary probes: GetAsOf at key points around the block
+//
+// This is for debugging cases where GetAsOf returns a wrong value for a specific key.
+func DumpSlotHistory(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, blockNum uint64, address common.Address, slot *common.Hash, window uint64, stepSize uint64, w io.Writer, logger log.Logger) error {
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	txNumsReader := br.TxnumReader()
+	minTxNum, err := txNumsReader.Min(ctx, tx, blockNum)
+	if err != nil {
+		return err
+	}
+	maxTxNum, err := txNumsReader.Max(ctx, tx, blockNum)
+	if err != nil {
+		return err
+	}
+	toTxNum := maxTxNum + 1
+
+	// Determine domain and key
+	var domain kv.Domain
+	var histIdx kv.InvertedIdx
+	var key []byte
+	var keyDesc string
+
+	if slot != nil {
+		domain = kv.StorageDomain
+		histIdx = kv.StorageHistoryIdx
+		key = append(address.Bytes(), slot.Bytes()...)
+		keyDesc = fmt.Sprintf("storage %s slot %s", address.Hex(), slot.Hex())
+	} else {
+		domain = kv.AccountsDomain
+		histIdx = kv.AccountsHistoryIdx
+		key = address.Bytes()
+		keyDesc = fmt.Sprintf("account %s", address.Hex())
+	}
+
+	logger.Info("dump slot history",
+		"key", keyDesc,
+		"blockNum", blockNum,
+		"minTxNum", minTxNum,
+		"maxTxNum", maxTxNum,
+		"toTxNum", toTxNum,
+		"window", window,
+	)
+
+	// Calculate window bounds
+	var windowFrom uint64
+	if minTxNum > window {
+		windowFrom = minTxNum - window
+	}
+	windowTo := toTxNum + window
+
+	type efEntry struct {
+		TxNum       uint64 `json:"txNum"`
+		BlockNum    uint64 `json:"blockNum,omitempty"`
+		InBlock     bool   `json:"inBlock,omitempty"`
+		Step        uint64 `json:"step"`
+		ValueHex    string `json:"valueHex"`
+		ValueLen    int    `json:"valueLen"`
+		RawValueHex string `json:"rawValueHex"`
+		RawValueLen int    `json:"rawValueLen"`
+		RawOk       bool   `json:"rawOk"`
+	}
+
+	type probeEntry struct {
+		Label    string `json:"label"`
+		TxNum    uint64 `json:"txNum"`
+		ValueHex string `json:"valueHex"`
+		ValueLen int    `json:"valueLen"`
+		Ok       bool   `json:"ok"`
+	}
+
+	type result struct {
+		Key        string       `json:"key"`
+		Domain     string       `json:"domain"`
+		BlockNum   uint64       `json:"blockNum"`
+		MinTxNum   uint64       `json:"minTxNum"`
+		MaxTxNum   uint64       `json:"maxTxNum"`
+		ToTxNum    uint64       `json:"toTxNum"`
+		WindowFrom uint64       `json:"windowFrom"`
+		WindowTo   uint64       `json:"windowTo"`
+		EFEntries  []efEntry    `json:"efEntries"`
+		Probes     []probeEntry `json:"probes"`
+	}
+
+	res := &result{
+		Key:        keyDesc,
+		Domain:     domain.String(),
+		BlockNum:   blockNum,
+		MinTxNum:   minTxNum,
+		MaxTxNum:   maxTxNum,
+		ToTxNum:    toTxNum,
+		WindowFrom: windowFrom,
+		WindowTo:   windowTo,
+	}
+
+	// 1. Get EF entries: all txNums in the inverted index for this key in the window
+	idxIter, err := tx.IndexRange(histIdx, key, int(windowFrom), int(windowTo), order.Asc, -1)
+	if err != nil {
+		return fmt.Errorf("IndexRange: %w", err)
+	}
+	defer idxIter.Close()
+
+	var efTxNums []uint64
+	for idxIter.HasNext() {
+		txNum, err := idxIter.Next()
+		if err != nil {
+			return fmt.Errorf("IndexRange.Next: %w", err)
+		}
+		efTxNums = append(efTxNums, txNum)
+	}
+	logger.Info("found EF entries", "count", len(efTxNums))
+
+	// 2. For each EF entry, read both:
+	//    - GetAsOf(txNum+1): the value "after" this write (resolves via next EF entry)
+	//    - HistorySeek(txNum): the raw value stored at this EF entry (the OLD value before this write)
+	for _, txNum := range efTxNums {
+		val, ok, err := tx.GetAsOf(domain, key, txNum+1)
+		if err != nil {
+			return fmt.Errorf("GetAsOf(%s, %d): %w", keyDesc, txNum+1, err)
+		}
+
+		valHex := "0x0"
+		if ok && len(val) > 0 {
+			valHex = "0x" + hex.EncodeToString(val)
+		}
+		if !ok {
+			valHex = "<not_found>"
+		}
+
+		// Raw history value: what's actually stored at this EF position
+		rawVal, rawOk, err := tx.HistorySeek(domain, key, txNum)
+		if err != nil {
+			return fmt.Errorf("HistorySeek(%s, %d): %w", keyDesc, txNum, err)
+		}
+		rawHex := "0x0"
+		if rawOk && len(rawVal) > 0 {
+			rawHex = "0x" + hex.EncodeToString(rawVal)
+		}
+		if !rawOk {
+			rawHex = "<not_found>"
+		}
+
+		inBlock := txNum >= minTxNum && txNum <= maxTxNum
+		entry := efEntry{
+			TxNum:       txNum,
+			InBlock:     inBlock,
+			ValueHex:    valHex,
+			ValueLen:    len(val),
+			RawValueHex: rawHex,
+			RawValueLen: len(rawVal),
+			RawOk:       rawOk,
+		}
+		if stepSize > 0 {
+			entry.Step = txNum / stepSize
+		}
+
+		// Try to map txNum to a block
+		bn, bnOk, err := txNumsReader.FindBlockNum(ctx, tx, txNum)
+		if err == nil && bnOk {
+			entry.BlockNum = bn
+		}
+
+		res.EFEntries = append(res.EFEntries, entry)
+	}
+
+	// 3. Boundary probes
+	probePoints := []struct {
+		label string
+		txNum uint64
+	}{
+		{"before_block (minTxNum)", minTxNum},
+		{"block_start (minTxNum+1)", minTxNum + 1},
+		{"block_end (toTxNum)", toTxNum},
+		{"after_block (toTxNum+100)", toTxNum + 100},
+		{"after_block (toTxNum+10000)", toTxNum + 10000},
+	}
+
+	for _, p := range probePoints {
+		val, ok, err := tx.GetAsOf(domain, key, p.txNum)
+		if err != nil {
+			return fmt.Errorf("GetAsOf probe %s (%d): %w", p.label, p.txNum, err)
+		}
+		valHex := "0x0"
+		if ok && len(val) > 0 {
+			valHex = "0x" + hex.EncodeToString(val)
+		}
+		if !ok {
+			valHex = "<not_found>"
+		}
+		res.Probes = append(res.Probes, probeEntry{
+			Label:    p.label,
+			TxNum:    p.txNum,
+			ValueHex: valHex,
+			ValueLen: len(val),
+			Ok:       ok,
+		})
+	}
+
+	// 4. Also probe GetAsOf at each txNum in the block range (per-tx resolution)
+	// This shows exactly how the value evolves across the block
+	blockTxCount := maxTxNum - minTxNum
+	if blockTxCount <= 500 { // only if block isn't huge
+		for txNum := minTxNum; txNum <= toTxNum; txNum++ {
+			val, ok, err := tx.GetAsOf(domain, key, txNum)
+			if err != nil {
+				return fmt.Errorf("GetAsOf per-tx (%d): %w", txNum, err)
+			}
+			valHex := "0x0"
+			if ok && len(val) > 0 {
+				valHex = "0x" + hex.EncodeToString(val)
+			}
+			if !ok {
+				valHex = "<not_found>"
+			}
+			label := fmt.Sprintf("tx_offset_%d", txNum-minTxNum)
+			res.Probes = append(res.Probes, probeEntry{
+				Label:    label,
+				TxNum:    txNum,
+				ValueHex: valHex,
+				ValueLen: len(val),
+				Ok:       ok,
+			})
+		}
+	}
+
+	enc, err := json.MarshalIndent(res, "", "  ")
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(enc)
+	return err
 }
 
 // checkCommitmentHistWindowSize is the number of blocks covered by a single

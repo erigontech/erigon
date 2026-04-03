@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -399,6 +400,83 @@ var snapshotCommand = cli.Command{
 				&cli.BoolFlag{Name: "skip-torrent-verify", Usage: "skip torrent piece verification when using file-integrity-cache"},
 				&cli.Int64Flag{Name: "seed", Usage: "random seed for sampling (auto-generated if not set)"},
 				&cli.Float64Flag{Name: "sample", Usage: "fraction of items to check via pseudo-random sampling (0.0-1.0)", Value: 0.01},
+			}),
+		},
+		{
+			Name: "find-deleted-slots",
+			Action: func(cliCtx *cli.Context) error {
+				logger := log.Root()
+				err := doFindDeletedSlots(cliCtx, logger)
+				if err != nil {
+					log.Error("[find-deleted-slots] failure", "err", err)
+					return err
+				}
+				return nil
+			},
+			Description: "scan storage history for deleted slots that had prior non-zero values (for detecting stale prevVal bugs)",
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.Uint64Flag{Name: "from", Usage: "start block", Required: true},
+				&cli.Uint64Flag{Name: "to", Usage: "end block", Required: true},
+				&cli.IntFlag{Name: "limit", Usage: "max results", Value: 20},
+				&cli.StringFlag{Name: "output", Usage: "output file path (default: stdout)"},
+			}),
+		},
+		{
+			Name: "check-commitment-with-override",
+			Action: func(cliCtx *cli.Context) error {
+				logger := log.Root()
+				err := doCheckCommitmentWithOverride(cliCtx, logger)
+				if err != nil {
+					log.Error("[check-commitment-with-override] failure", "err", err)
+					return err
+				}
+				return nil
+			},
+			Description: "check commitment root after patching specific storage/account values (for debugging bad history entries)",
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.Uint64Flag{Name: "block", Usage: "block number to verify", Required: true},
+				&cli.StringSliceFlag{Name: "override", Usage: "overrides in format domain:hexkey=hexvalue (e.g. storage:aabb...ccdd=0004)"},
+			}),
+		},
+		{
+			Name: "dump-slot-history",
+			Action: func(cliCtx *cli.Context) error {
+				logger := log.Root()
+				err := doDumpSlotHistory(cliCtx, logger)
+				if err != nil {
+					log.Error("[dump-slot-history] failure", "err", err)
+					return err
+				}
+				return nil
+			},
+			Description: "dump EF index entries, history values, and GetAsOf probes for a single storage slot or account around a block",
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.Uint64Flag{Name: "block", Usage: "block number to investigate", Required: true},
+				&cli.StringFlag{Name: "address", Usage: "account address (0x...)", Required: true},
+				&cli.StringFlag{Name: "slot", Usage: "storage slot (0x...). Omit for account-level query"},
+				&cli.Uint64Flag{Name: "window", Usage: "txNum window around the block for EF entries", Value: 100000},
+				&cli.StringFlag{Name: "output", Usage: "output file path (default: stdout)"},
+			}),
+		},
+		{
+			Name: "dump-hist-at-blk",
+			Action: func(cliCtx *cli.Context) error {
+				logger := log.Root()
+				err := doDumpHistAtBlk(cliCtx, logger)
+				if err != nil {
+					log.Error("[dump-hist-at-blk] failure", "err", err)
+					return err
+				}
+				return nil
+			},
+			Description: "dump all touched account/storage/code values at a given block as JSON (for comparing against reference data)",
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.Uint64Flag{Name: "block", Usage: "block number to dump", Required: true},
+				&cli.StringFlag{Name: "output", Usage: "output file path (default: stdout)"},
 			}),
 		},
 		{
@@ -1378,9 +1456,8 @@ func doIntegrity(cliCtx *cli.Context) error {
 	return g.Wait()
 }
 
-// stateProgress returns the latest block number covered by state snapshots,
-// derived from the aggregator's EndTxNumMinimax. This may differ from the block
-// files progress — block snapshots and state snapshots advance independently.
+// stateProgress returns the latest block number for which state history is available.
+// It considers both snapshot files (EndTxNumMinimax) and MDBX data (Execution stage progress).
 // Use this as the upper bound for state-history integrity commands.
 func stateProgress(ctx context.Context, db kv.TemporalRoDB, txNumsReader rawdbv3.TxNumsReader) (uint64, error) {
 	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
@@ -1397,7 +1474,201 @@ func stateProgress(ctx context.Context, db kv.TemporalRoDB, txNumsReader rawdbv3
 	if blockNum > 0 {
 		blockNum-- // FindBlockNum returns the block *containing* aggMax, but the per-block check needs the entire block covered
 	}
+	// Also check execution stage progress — MDBX may have state beyond snapshots
+	execProgress, err := stages.GetStageProgress(roTx, stages.Execution)
+	if err != nil {
+		return blockNum, nil // fall back to snapshot-only progress
+	}
+	if execProgress > blockNum {
+		blockNum = execProgress
+	}
 	return blockNum, nil
+}
+
+func doFindDeletedSlots(cliCtx *cli.Context, logger log.Logger) error {
+	ctx := cliCtx.Context
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+	chainConfig := fromdb.ChainConfig(chainDB)
+	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
+	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	blockRetire, agg := res.BlockRetire, res.Aggregator
+	if err != nil {
+		return err
+	}
+	defer clean()
+	defer blockRetire.MadvNormal().DisableReadAhead()
+	defer agg.MadvNormal().DisableReadAhead()
+	db, err := temporal.New(chainDB, agg)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	blockReader, _ := blockRetire.IO()
+
+	fromBlock := cliCtx.Uint64("from")
+	toBlock := cliCtx.Uint64("to")
+	limit := cliCtx.Int("limit")
+
+	var w io.Writer = os.Stdout
+	if outPath := cliCtx.String("output"); outPath != "" {
+		f, err := os.Create(outPath)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		w = f
+	}
+	return integrity.FindDeletedStorageSlots(ctx, db, blockReader, fromBlock, toBlock, limit, w, logger)
+}
+
+func doCheckCommitmentWithOverride(cliCtx *cli.Context, logger log.Logger) error {
+	ctx := cliCtx.Context
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+	chainConfig := fromdb.ChainConfig(chainDB)
+	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
+	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	blockRetire, agg := res.BlockRetire, res.Aggregator
+	if err != nil {
+		return err
+	}
+	defer clean()
+	defer blockRetire.MadvNormal().DisableReadAhead()
+	defer agg.MadvNormal().DisableReadAhead()
+	db, err := temporal.New(chainDB, agg)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	blockReader, _ := blockRetire.IO()
+	blockNum := cliCtx.Uint64("block")
+
+	// Parse overrides: "domain:hexkey=hexvalue"
+	var overrides []integrity.StateOverride
+	for _, s := range cliCtx.StringSlice("override") {
+		parts := strings.SplitN(s, "=", 2)
+		if len(parts) != 2 {
+			return fmt.Errorf("invalid override format %q, expected domain:hexkey=hexvalue", s)
+		}
+		domainAndKey := parts[0]
+		hexValue := parts[1]
+
+		dkParts := strings.SplitN(domainAndKey, ":", 2)
+		if len(dkParts) != 2 {
+			return fmt.Errorf("invalid override format %q, expected domain:hexkey=hexvalue", s)
+		}
+		domainStr := dkParts[0]
+		hexKey := dkParts[1]
+
+		var domain kv.Domain
+		switch domainStr {
+		case "storage":
+			domain = kv.StorageDomain
+		case "accounts":
+			domain = kv.AccountsDomain
+		case "code":
+			domain = kv.CodeDomain
+		default:
+			return fmt.Errorf("unknown domain %q (use storage, accounts, or code)", domainStr)
+		}
+
+		key, err := hex.DecodeString(hexKey)
+		if err != nil {
+			return fmt.Errorf("invalid hex key %q: %w", hexKey, err)
+		}
+		value, err := hex.DecodeString(hexValue)
+		if err != nil {
+			return fmt.Errorf("invalid hex value %q: %w", hexValue, err)
+		}
+		overrides = append(overrides, integrity.StateOverride{Domain: domain, Key: key, Value: value})
+	}
+
+	if len(overrides) == 0 {
+		return fmt.Errorf("no overrides provided")
+	}
+
+	return integrity.CheckCommitmentHistAtBlkWithOverrides(ctx, db, blockReader, blockNum, overrides, log.LvlInfo, logger)
+}
+
+func doDumpSlotHistory(cliCtx *cli.Context, logger log.Logger) error {
+	ctx := cliCtx.Context
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+	chainConfig := fromdb.ChainConfig(chainDB)
+	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
+	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	blockRetire, agg := res.BlockRetire, res.Aggregator
+	if err != nil {
+		return err
+	}
+	defer clean()
+	defer blockRetire.MadvNormal().DisableReadAhead()
+	defer agg.MadvNormal().DisableReadAhead()
+	db, err := temporal.New(chainDB, agg)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	blockReader, _ := blockRetire.IO()
+	blockNum := cliCtx.Uint64("block")
+	window := cliCtx.Uint64("window")
+
+	address := common.HexToAddress(cliCtx.String("address"))
+	var slot *common.Hash
+	if slotStr := cliCtx.String("slot"); slotStr != "" {
+		s := common.HexToHash(slotStr)
+		slot = &s
+	}
+
+	var w io.Writer = os.Stdout
+	if outPath := cliCtx.String("output"); outPath != "" {
+		f, err := os.Create(outPath)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		w = f
+	}
+	return integrity.DumpSlotHistory(ctx, db, blockReader, blockNum, address, slot, window, agg.StepSize(), w, logger)
+}
+
+func doDumpHistAtBlk(cliCtx *cli.Context, logger log.Logger) error {
+	ctx := cliCtx.Context
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+	chainConfig := fromdb.ChainConfig(chainDB)
+	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
+	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	blockRetire, agg := res.BlockRetire, res.Aggregator
+	if err != nil {
+		return err
+	}
+	defer clean()
+	defer blockRetire.MadvNormal().DisableReadAhead()
+	defer agg.MadvNormal().DisableReadAhead()
+	db, err := temporal.New(chainDB, agg)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	blockReader, _ := blockRetire.IO()
+	blockNum := cliCtx.Uint64("block")
+
+	var w io.Writer = os.Stdout
+	if outPath := cliCtx.String("output"); outPath != "" {
+		f, err := os.Create(outPath)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		w = f
+	}
+	return integrity.DumpHistAtBlk(ctx, db, blockReader, blockNum, w, logger)
 }
 
 func doCheckCommitmentHistAtBlk(cliCtx *cli.Context, logger log.Logger) error {
