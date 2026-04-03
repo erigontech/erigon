@@ -3,7 +3,6 @@ package qmtree
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -32,13 +31,9 @@ func (e *proofEntry) Components() (pre, stateChange, transition common.Hash) {
 }
 
 // Tracker holds per-sync qmtree state for the serial executor.
-// When a datadir is provided, the tree is backed by disk files (EntryFile +
-// TwigFile) so it survives restarts and can generate proofs after the fact.
-// It also retains leaf component data for witness generation.
-//
-// Storage is segmented into steps aligned with erigon's domain step size.
-// Each HPFile segment covers one step's worth of entries/twigs, making
-// completed segments individually distributable.
+// Entry data is written to MDBX tables during execution and frozen to
+// snapshot files (.kv/.kvi) at step boundaries via the SnapshotManager.
+// Leaf component data is cached in an LRU for witness/proof generation.
 type Tracker struct {
 	tree     *Tree
 	hasher   *Keccak256Hasher
@@ -78,17 +73,12 @@ type Tracker struct {
 	// twigPrevLeaf[twigId] is the prevLeaf value at the START of that twig
 	// (i.e. leafHash of the last entry of the prior twig, or zero for twig 0).
 	// This lets us reconstruct any entry's PreviousLeafHash in at most
-	// LEAF_COUNT_IN_TWIG steps from the entry file. Not persisted — rebuilt
-	// from the entry file during LoadFromDisk.
+	// LEAF_COUNT_IN_TWIG steps. Rebuilt from entries during LoadFromDB.
 	twigPrevLeaf []common.Hash
 
-	// Disk storage handles.
-	// MDBX mode: rwTx is set → entries/keyindex written to MDBX tables.
-	// HPFile mode (legacy): entryFile/twigFile set → written to HPFile segments.
-	// In-memory mode: both nil.
-	rwTx      kv.RwTx   // current write transaction (set per batch via SetTx)
-	entryFile *EntryFile // legacy HPFile storage (nil in MDBX mode)
-	twigFile  *TwigFile  // legacy HPFile storage (nil in MDBX mode)
+	// MDBX write transaction for the current batch. Set via SetTx().
+	// When set, entries and key-index updates are written to MDBX tables.
+	rwTx kv.RwTx
 
 	// Step tracking.
 	stepSize       uint64 // entries per step (matches config3.DefaultStepSize)
@@ -100,30 +90,14 @@ const (
 	trackerEntrySubdir = "entries"
 	trackerTwigSubdir  = "twigs"
 
-	// Entry segments: one step = stepSize entries × 96 bytes/entry (3 × 32B components).
-	// Buffer size chosen so segmentSize % bufferSize == 0.
-	// 150,000,000 / 1,500,000 = 100.
-	trackerEntryBufSize = 1_500_000
-
-	// Twig segments: one step ≈ 763 twigs (ceil(stepSize / 2048)).
-	// Buffer size = TWIG_SIZE so each buffer flush writes exactly one twig.
-	trackerTwigBufSize = 73_708 // = TWIG_SIZE = 12 + (4095-1792)*32
-
-	// Twigs per step: ceil(stepSize / LEAF_COUNT_IN_TWIG).
-	trackerTwigsPerStep = 763 // ceil(1_562_500 / 2048)
-
 	// DefaultLeafCacheSize is the default number of LeafData entries to keep
 	// in the bounded LRU cache. Each entry is ~160 bytes, so 200k ≈ 32 MB.
 	DefaultLeafCacheSize = 200_000
 )
 
-// NewTracker creates a qmtree tracker. If snapDir is non-empty, the tree is
-// backed by disk files under <snapDir>/qmtree/{entries,twigs}/. This matches
-// the existing snapshot layout (e.g. snapshots/domain/, snapshots/history/).
-//
-// Storage is segmented by step: each HPFile segment covers exactly one step
-// worth of data. Entry segment size = stepSize × 96 bytes. Twig segment
-// size = ceil(stepSize/2048) × TWIG_SIZE bytes.
+// NewTracker creates a qmtree tracker. If snapDir is non-empty, KeyIndex
+// and SnapshotManager are initialized for snapshot persistence.
+// Entry data is written to MDBX via SetTx(); the tree is always in-memory.
 func NewTracker(snapDir string, stepSize uint64) (*Tracker, error) {
 	hasher := &Keccak256Hasher{}
 	cache, err := lru.New[uint64, LeafData](DefaultLeafCacheSize)
@@ -137,19 +111,13 @@ func NewTracker(snapDir string, stepSize uint64) (*Tracker, error) {
 		stepSize:      stepSize,
 		keyIndex:      NewKeyIndex(),
 		keyIndexDirty: make(map[common.Hash]uint64),
+		tree:          NewTree(hasher, 0, nil, nil),
 	}
 
 	if snapDir != "" {
 		qmdir := filepath.Join(snapDir, trackerSubdir)
-		entryDir := filepath.Join(qmdir, trackerEntrySubdir)
-		twigDir := filepath.Join(qmdir, trackerTwigSubdir)
 		keyIdxDir := filepath.Join(qmdir, keyIndexSubdir)
-		if err := os.MkdirAll(entryDir, 0755); err != nil {
-			return nil, fmt.Errorf("create qmtree entry dir: %w", err)
-		}
-		if err := os.MkdirAll(twigDir, 0755); err != nil {
-			return nil, fmt.Errorf("create qmtree twig dir: %w", err)
-		}
+
 		kif, err := NewKeyIndexFile(keyIdxDir)
 		if err != nil {
 			return nil, fmt.Errorf("create keyindex file: %w", err)
@@ -161,25 +129,6 @@ func NewTracker(snapDir string, stepSize uint64) (*Tracker, error) {
 			return nil, fmt.Errorf("create snapshot manager: %w", err)
 		}
 		qt.snapManager = sm
-
-		entrySegSize := stepSize * entrySize // one step per segment (stepSize × 96 bytes)
-		twigSegSize := uint64(trackerTwigsPerStep) * uint64(trackerTwigBufSize)
-
-		ef, err := NewEntryFile(trackerEntryBufSize, entrySegSize, entryDir)
-		if err != nil {
-			return nil, fmt.Errorf("open qmtree entry file: %w", err)
-		}
-		tf, err := NewTwigFile(trackerTwigBufSize, twigSegSize, twigDir, hasher)
-		if err != nil {
-			ef.Close()
-			return nil, fmt.Errorf("open qmtree twig file: %w", err)
-		}
-
-		qt.entryFile = ef
-		qt.twigFile = tf
-		qt.tree = NewTree(hasher, 0, ef, tf)
-	} else {
-		qt.tree = NewTree(hasher, 0, nil, nil)
 	}
 
 	return qt, nil
@@ -290,20 +239,15 @@ func (qt *Tracker) LogStepProgress(logPrefix string) {
 	completed := qt.completedSteps()
 	if completed > qt.lastStepLogged {
 		for step := qt.lastStepLogged + 1; step <= completed; step++ {
-			entryBytes := int64(0)
-			twigBytes := int64(0)
-			if qt.entryFile != nil {
-				entryBytes = qt.entryFile.Size()
-			}
-			if qt.twigFile != nil {
-				twigBytes = qt.twigFile.Size()
+			frozen := 0
+			if qt.snapManager != nil {
+				frozen = qt.snapManager.FrozenEntries()
 			}
 			log.Info(fmt.Sprintf("[%s] qmtree step completed", logPrefix),
 				"step", step,
 				"entries", step*qt.stepSize,
-				"entryStorage", common.ByteCount(uint64(entryBytes)),
-				"twigStorage", common.ByteCount(uint64(twigBytes)),
-				"totalStorage", common.ByteCount(uint64(entryBytes+twigBytes)),
+				"frozenEntries", frozen,
+				"frozenSteps", qt.lastCollatedStep,
 			)
 		}
 		qt.lastStepLogged = completed
@@ -312,13 +256,13 @@ func (qt *Tracker) LogStepProgress(logPrefix string) {
 
 // StorageStats returns current storage sizes.
 type StorageStats struct {
-	Entries       uint64 // total entries (leaves)
-	Steps         uint64 // completed steps
-	CurrentStep   uint64 // current (possibly incomplete) step
-	EntryBytes    int64  // entry file size
-	TwigBytes     int64  // twig file size
-	TotalBytes    int64  // total storage
-	LeafDataCount int    // cached leaf data entries
+	Entries        uint64 // total entries (leaves)
+	Steps          uint64 // completed steps
+	CurrentStep    uint64 // current (possibly incomplete) step
+	FrozenEntries  int    // entries in frozen snapshots
+	FrozenSteps    uint64 // steps frozen to snapshots
+	LeafDataCount  int    // cached leaf data entries
+	KeyIndexKeys   int    // distinct keys in key index
 }
 
 func (qt *Tracker) StorageStats() StorageStats {
@@ -326,15 +270,13 @@ func (qt *Tracker) StorageStats() StorageStats {
 		Entries:       qt.NextSN,
 		Steps:         qt.completedSteps(),
 		CurrentStep:   qt.currentStep(),
+		FrozenSteps:   qt.lastCollatedStep,
 		LeafDataCount: qt.leafData.Len(),
+		KeyIndexKeys:  qt.keyIndex.Len(),
 	}
-	if qt.entryFile != nil {
-		stats.EntryBytes = qt.entryFile.Size()
+	if qt.snapManager != nil {
+		stats.FrozenEntries = qt.snapManager.FrozenEntries()
 	}
-	if qt.twigFile != nil {
-		stats.TwigBytes = qt.twigFile.Size()
-	}
-	stats.TotalBytes = stats.EntryBytes + stats.TwigBytes
 	return stats
 }
 
@@ -346,15 +288,32 @@ func (qt *Tracker) twigStartPrevLeaf(twigId uint64) common.Hash {
 	return common.Hash{}
 }
 
+// readComponents reads entry components for the given serial number.
+// Checks: MDBX (hot) → snapshots (frozen). Returns error if not found.
+func (qt *Tracker) readComponents(sn uint64) (pre, sc, trans common.Hash, err error) {
+	// Try MDBX first (hot data).
+	if qt.rwTx != nil {
+		pre, sc, trans, err = GetEntry(qt.rwTx, sn)
+		if err == nil {
+			return
+		}
+	}
+	// Try frozen snapshots.
+	if qt.snapManager != nil {
+		pre, sc, trans, found := qt.snapManager.GetEntryFromSnapshots(sn)
+		if found {
+			return pre, sc, trans, nil
+		}
+	}
+	return common.Hash{}, common.Hash{}, common.Hash{}, fmt.Errorf("entry not found: sn=%d", sn)
+}
+
 // getLeafData returns LeafData for sn from the LRU cache, reconstructing from
-// the entry file on a cache miss. Reconstruction starts from twigPrevLeaf[twigId]
+// MDBX/snapshots on a cache miss. Reconstruction starts from twigPrevLeaf[twigId]
 // so the chain walk is at most LEAF_COUNT_IN_TWIG (2048) steps.
 func (qt *Tracker) getLeafData(sn uint64) (LeafData, bool) {
 	if ld, ok := qt.leafData.Get(sn); ok {
 		return ld, true
-	}
-	if qt.entryFile == nil {
-		return LeafData{}, false
 	}
 	twigId := sn >> TWIG_SHIFT
 	twigBase := twigId * LEAF_COUNT_IN_TWIG
@@ -362,12 +321,11 @@ func (qt *Tracker) getLeafData(sn uint64) (LeafData, bool) {
 
 	for s := twigBase; s <= sn; s++ {
 		if _, ok := qt.leafData.Peek(s); ok {
-			// Already cached: get (updates LRU order) and advance prevLeaf.
 			ld, _ := qt.leafData.Get(s)
 			prevLeaf = ld.LeafHash()
 			continue
 		}
-		pre, sc, trans, err := qt.entryFile.ReadComponents(s)
+		pre, sc, trans, err := qt.readComponents(s)
 		if err != nil {
 			return LeafData{}, false
 		}
@@ -386,7 +344,7 @@ func (qt *Tracker) getLeafData(sn uint64) (LeafData, bool) {
 }
 
 // getTwigLeafHashes returns all LEAF_COUNT_IN_TWIG leaf hashes for the given twig,
-// using the LRU cache where possible and the entry file for misses.
+// using the LRU cache where possible and MDBX/snapshots for misses.
 // The returned slice always has length LEAF_COUNT_IN_TWIG; positions beyond
 // NextSN-1 are the null entry hash.
 func (qt *Tracker) getTwigLeafHashes(twigId uint64) ([]common.Hash, error) {
@@ -403,10 +361,7 @@ func (qt *Tracker) getTwigLeafHashes(twigId uint64) ([]common.Hash, error) {
 			prevLeaf = hashes[i]
 			continue
 		}
-		if qt.entryFile == nil {
-			return nil, fmt.Errorf("entry file unavailable for sn=%d", sn)
-		}
-		pre, sc, trans, err := qt.entryFile.ReadComponents(sn)
+		pre, sc, trans, err := qt.readComponents(sn)
 		if err != nil {
 			return nil, fmt.Errorf("read entry sn=%d: %w", sn, err)
 		}
@@ -434,12 +389,10 @@ func buildTwigMT(hasher Hasher, leafHashes []common.Hash) TwigMT {
 }
 
 // getProof builds a ProofPath for sn with LeftOfTwig derived from the LRU
-// cache and entry file rather than from the twig file. This ensures correct
-// proofs regardless of the twig file's state (handles datasets written with
-// a stale prevLeaf due to a prior restart without LoadFromDisk).
+// cache and MDBX/snapshot entries rather than from a twig file.
 //
-// For completed twigs the proof is assembled directly from tree internals,
-// never reading the twig file, to avoid EOF panics on incomplete twig data.
+// For completed twigs the proof is assembled from tree internals and entry
+// data reconstructed via readComponents.
 func (qt *Tracker) getProof(sn uint64) (ProofPath, error) {
 	twigId := sn >> TWIG_SHIFT
 
@@ -448,11 +401,9 @@ func (qt *Tracker) getProof(sn uint64) (ProofPath, error) {
 		return qt.tree.GetProof(sn)
 	}
 
-	// Completed twig: assemble the proof without touching the twig file.
-	// The twig file may be corrupt (stale prevLeaf) or incomplete (EOF) due
-	// to a prior restart without LoadFromDisk, so we never read it here.
+	// Completed twig: assemble the proof from entry data and upper tree.
 
-	// UpperPath + Root: from the upper tree (in-memory, always correct after LoadFromDisk).
+	// UpperPath + Root: from the upper tree (in-memory, always correct after LoadFromDB).
 	upperPath, root := qt.tree.getUpperPathAndRoot(twigId)
 	if len(upperPath) == 0 {
 		return ProofPath{}, fmt.Errorf("cannot find upper path for twig=%d", twigId)
@@ -529,12 +480,6 @@ func (qt *Tracker) GetRangeWitness(fromSN, toSN uint64) (*RangeWitness, error) {
 // Called at commit boundaries to keep qmtree storage in sync with domain commits.
 // Implements execctx.AppendOnlyFlusher.
 func (qt *Tracker) Flush() {
-	if qt.entryFile != nil {
-		qt.entryFile.Flush()
-	}
-	if qt.twigFile != nil {
-		qt.twigFile.Flush()
-	}
 	qt.flushKeyIndex()
 	// Persist metadata to MDBX so LoadFromDB can resume.
 	if qt.rwTx != nil {
@@ -671,102 +616,9 @@ func (qt *Tracker) UnwindTo(toSN uint64) {
 	}
 }
 
-// LoadFromDisk rebuilds in-memory tree state from existing entry files on disk.
-// Call this after NewTracker when the snapDir already contains data from a
-// previous run, before calling GetWitness or SyncRoot.
-//
-// Strategy: replay all entries through an in-memory-only tree (nil storage so
-// no data is re-written to disk). The twig file is left unchanged — LeftOfTwig
-// paths for completed twigs are computed from the LRU cache and twigPrevLeaf
-// checkpoints via Tracker.getProof, not from the twig file directly.
-func (qt *Tracker) LoadFromDisk() error {
-	if qt.entryFile == nil {
-		return nil // in-memory only, nothing to load
-	}
-	fileSize := qt.entryFile.Size()
-	if fileSize == 0 {
-		return nil // empty, nothing to do
-	}
-	if fileSize%int64(entrySize) != 0 {
-		return fmt.Errorf("qmtree entry file size %d is not aligned to entrySize=%d", fileSize, entrySize)
-	}
-	count := uint64(fileSize) / uint64(entrySize)
-
-	// Replay through an in-memory tree (nil storage — don't re-write files).
-	replayTree := NewTree(qt.hasher, 0, nil, nil)
-
-	var prevLeaf common.Hash
-	twigPrevLeaf := []common.Hash{{}} // twig 0 starts with zero prevLeaf
-
-	for sn := uint64(0); sn < count; sn++ {
-		// Record twig-start prevLeaf checkpoint.
-		if sn > 0 && sn%LEAF_COUNT_IN_TWIG == 0 {
-			twigId := sn / LEAF_COUNT_IN_TWIG
-			for uint64(len(twigPrevLeaf)) <= twigId {
-				twigPrevLeaf = append(twigPrevLeaf, common.Hash{})
-			}
-			twigPrevLeaf[twigId] = prevLeaf
-		}
-
-		pre, stateChange, transition, err := qt.entryFile.ReadComponents(sn)
-		if err != nil {
-			return fmt.Errorf("qmtree LoadFromDisk: read components sn=%d: %w", sn, err)
-		}
-		ld := LeafData{
-			SerialNum:        sn,
-			PreStateHash:     pre,
-			StateChangeHash:  stateChange,
-			TransitionHash:   transition,
-			PreviousLeafHash: prevLeaf,
-		}
-		leafHash := ld.LeafHash()
-		entry := &proofEntry{sn: sn, hash: leafHash, pre: pre, stateChange: stateChange, transition: transition}
-		replayTree.AppendEntry(entry) //nolint:errcheck
-		qt.leafData.Add(sn, ld)      // LRU evicts oldest entries automatically
-		prevLeaf = leafHash
-	}
-
-	// Attach the real disk handles to the replay tree. The caller is responsible
-	// for calling SyncRoot() to build the upper-tree node cache.
-	replayTree.entryStorage = qt.tree.entryStorage
-	replayTree.twigStorage = qt.tree.twigStorage
-
-	qt.tree = replayTree
-	qt.twigPrevLeaf = twigPrevLeaf
-	qt.prevLeaf = prevLeaf
-	qt.NextSN = count
-
-	// Load persisted KeyIndex segments if available. If no segments exist,
-	// the KeyIndex was already rebuilt during the entry replay above (via
-	// the caller's NotifyKeyWrites calls). On first run after adding
-	// persistence, the caller should flush to bootstrap the .kv/.kvi files.
-	if qt.keyIndexFile != nil {
-		maxStep, err := qt.keyIndexFile.LoadAll()
-		if err != nil {
-			log.Warn("qmtree: failed to load keyindex files, will rebuild from entries", "err", err)
-		} else if maxStep > 0 {
-			qt.keyIndexFile.PopulateKeyIndex(qt.keyIndex)
-			qt.keyIndexLastFlushedQStep = maxStep
-			log.Info("qmtree: loaded keyindex from disk",
-				"keys", qt.keyIndex.Len(),
-				"segments", qt.keyIndexFile.SegmentCount(),
-				"maxStep", maxStep,
-			)
-		}
-	}
-
-	log.Info("qmtree: loaded from disk",
-		"entries", count,
-		"entryStorage", common.ByteCount(uint64(fileSize)),
-		"cachedLeaves", qt.leafData.Len(),
-		"keyIndexKeys", qt.keyIndex.Len(),
-	)
-	return nil
-}
-
-// LoadFromDB rebuilds the in-memory tree from QMTreeEntries in MDBX.
-// This is faster than LoadFromDisk (HPFile replay) because MDBX reads are
-// sequential and the metadata (NextSN, prevLeaf) is stored directly.
+// LoadFromDB rebuilds the in-memory tree from QMTreeEntries in MDBX and
+// frozen snapshot files. Reads NextSN/prevLeaf from QMTreeMeta, then replays
+// all entries (snapshots + MDBX hot) through the in-memory tree.
 func (qt *Tracker) LoadFromDB(tx kv.Tx) error {
 	nextSN, err := GetNextSN(tx)
 	if err != nil {
@@ -844,12 +696,6 @@ func (qt *Tracker) LoadFromDB(tx kv.Tx) error {
 // Implements execctx.AppendOnlyFlusher.
 func (qt *Tracker) Close() {
 	qt.Flush()
-	if qt.entryFile != nil {
-		qt.entryFile.Close()
-	}
-	if qt.twigFile != nil {
-		qt.twigFile.Close()
-	}
 	if qt.keyIndexFile != nil {
 		qt.keyIndexFile.Close()
 	}

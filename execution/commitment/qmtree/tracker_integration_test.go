@@ -1,171 +1,111 @@
 package qmtree
 
 import (
+	"context"
 	"fmt"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
+	dbcfg "github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/memdb"
 )
 
-// TestTracker_LoadFromDisk loads a real qmtree dataset from disk and verifies
-// that witnesses can be generated and verified.
-//
-// To run against the n1 dataset:
-//
-//	QMTREE_SNAP_DIR=/erigon/qmdb-test-datadir/snapshots \
-//	  go test ./execution/commitment/qmtree/... -run TestTracker_LoadFromDisk -v -timeout 120s
-//
-// The snap dir must be the parent of the qmtree/ subdirectory
-// (i.e. <datadir>/snapshots, not <datadir>/snapshots/qmtree).
-func TestTracker_LoadFromDisk(t *testing.T) {
-	snapDir := os.Getenv("QMTREE_SNAP_DIR")
-	if snapDir == "" {
-		t.Skip("QMTREE_SNAP_DIR not set — point to <datadir>/snapshots")
-	}
+// TestTracker_MDBX_RoundTrip writes entries via AppendLeaf with an MDBX tx,
+// then creates a fresh tracker and loads from MDBX, verifying that roots
+// and witnesses match.
+func TestTracker_MDBX_RoundTrip(t *testing.T) {
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	const stepSize = 100
+	const numEntries = 250 // 2.5 steps
 
-	const stepSize = 1_562_500
-	tracker, err := NewTracker(snapDir, stepSize)
-	require.NoError(t, err)
-	defer tracker.Close()
-
-	err = tracker.LoadFromDisk()
+	// Phase 1: write entries to MDBX.
+	tracker1, err := NewTracker("", stepSize)
 	require.NoError(t, err)
 
-	require.Greater(t, tracker.NextSN, uint64(0), "expected entries after LoadFromDisk")
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	tracker1.SetTx(tx)
 
-	root := tracker.SyncRoot()
-	require.NotEqual(t, [32]byte{}, [32]byte(root), "root must be non-zero")
-
-	t.Logf("loaded %d entries, root=%s", tracker.NextSN, root.Hex())
-
-	hasher := &Keccak256Hasher{}
-
-	// verifySN returns nil if the witness verifies, or the error.
-	verifySN := func(sn uint64) error {
-		w, err := tracker.GetWitness(sn)
-		if err != nil {
-			return fmt.Errorf("GetWitness: %w", err)
-		}
-		if root != w.Proof.Root {
-			return fmt.Errorf("root mismatch: want %s, got %s", root.Hex(), w.Proof.Root.Hex())
-		}
-		return w.Verify(hasher)
+	for i := 0; i < numEntries; i++ {
+		var pre, sc, trans [32]byte
+		pre[0] = byte(i)
+		sc[1] = byte(i)
+		trans[2] = byte(i)
+		tracker1.AppendLeaf(pre, sc, trans)
 	}
+	tracker1.Flush()
+	root1 := tracker1.SyncRoot()
+	nextSN1 := tracker1.NextSN
 
-	// Verify witnesses for the first few serial numbers.
-	checkCount := uint64(3)
-	if tracker.NextSN < checkCount {
-		checkCount = tracker.NextSN
-	}
-	for sn := uint64(0); sn < checkCount; sn++ {
-		require.NoError(t, verifySN(sn), "witness should verify for sn=%d", sn)
-		ld, _ := tracker.getLeafData(sn)
-		t.Logf("sn=%d verified OK (prevLeaf=%s)", sn, ld.PreviousLeafHash.Hex())
-	}
+	require.Equal(t, uint64(numEntries), nextSN1)
+	require.NotEqual(t, [32]byte{}, [32]byte(root1))
 
-	// Binary-search for the first failing SN to diagnose chain breaks.
-	if tracker.NextSN > checkCount {
-		firstFail := findFirstFailing(tracker.NextSN, checkCount, func(sn uint64) bool {
-			return verifySN(sn) != nil
-		})
+	// Verify a witness from the first tracker.
+	w1, err := tracker1.GetWitness(0)
+	require.NoError(t, err)
+	require.NoError(t, w1.Verify(&Keccak256Hasher{}))
 
-		if firstFail == tracker.NextSN {
-			// All pass — run the standard middle/end checks.
-			for _, sn := range []uint64{tracker.NextSN / 2, tracker.NextSN - 1} {
-				require.NoError(t, verifySN(sn), "witness should verify for sn=%d", sn)
-				t.Logf("sn=%d verified OK", sn)
-			}
-			t.Logf("ALL %d witnesses verified OK", tracker.NextSN)
-		} else {
-			// Diagnose the first failure.
-			diagnoseMismatch(t, tracker, hasher, firstFail)
-			t.Fatalf("first failing SN: %d (twig %d, pos %d)",
-				firstFail, firstFail>>TWIG_SHIFT, firstFail&TWIG_MASK)
-		}
-	}
+	require.NoError(t, tx.Commit())
+
+	// Phase 2: load into a fresh tracker from MDBX.
+	tracker2, err := NewTracker("", stepSize)
+	require.NoError(t, err)
+
+	roTx, err := db.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	err = tracker2.LoadFromDB(roTx)
+	require.NoError(t, err)
+	require.Equal(t, nextSN1, tracker2.NextSN)
+
+	root2 := tracker2.SyncRoot()
+	require.Equal(t, root1, root2, "roots must match after LoadFromDB")
+
+	// Verify the same witness from the loaded tracker.
+	w2, err := tracker2.GetWitness(0)
+	require.NoError(t, err)
+	require.NoError(t, w2.Verify(&Keccak256Hasher{}))
+	require.Equal(t, w1.Proof.Root, w2.Proof.Root)
+
+	t.Logf("round-trip OK: %d entries, root=%s", nextSN1, root1.Hex())
 }
 
-// findFirstFailing returns the smallest sn in [lo, total) where failing(sn)==true,
-// or returns total if none fail.
-func findFirstFailing(total, lo uint64, failing func(uint64) bool) uint64 {
-	hi := total
-	for lo < hi {
-		mid := (lo + hi) / 2
-		if failing(mid) {
-			hi = mid
-		} else {
-			lo = mid + 1
-		}
+// TestTracker_MDBX_WithKeyIndex tests that key writes survive round-trip.
+func TestTracker_MDBX_WithKeyIndex(t *testing.T) {
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	const stepSize = 100
+
+	tracker, err := NewTracker("", stepSize)
+	require.NoError(t, err)
+
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	tracker.SetTx(tx)
+
+	// Write entries with key hashes.
+	for i := 0; i < 10; i++ {
+		var pre, sc, trans [32]byte
+		pre[0] = byte(i)
+		tracker.AppendLeaf(pre, sc, trans)
+		kh := KeyHash(0, []byte(fmt.Sprintf("key%d", i)))
+		tracker.NotifyKeyWrites([]common.Hash{kh}, uint64(i))
 	}
-	return lo
-}
+	tracker.Flush()
+	require.NoError(t, tx.Commit())
 
-// diagnoseMismatch prints detailed info about a failing SN and the SN before it.
-func diagnoseMismatch(t *testing.T, tracker *Tracker, hasher Hasher, sn uint64) {
-	t.Helper()
+	// Verify key-index entries in MDBX.
+	roTx, err := db.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer roTx.Rollback()
 
-	ld, _ := tracker.getLeafData(sn)
-	computed := ld.LeafHash()
-	t.Logf("=== Diagnosis for failing sn=%d (twig=%d, pos=%d) ===",
-		sn, sn>>TWIG_SHIFT, sn&TWIG_MASK)
-	t.Logf("  PreStateHash:    %s", ld.PreStateHash.Hex())
-	t.Logf("  StateChangeHash: %s", ld.StateChangeHash.Hex())
-	t.Logf("  TransitionHash:  %s", ld.TransitionHash.Hex())
-	t.Logf("  PreviousLeafHash (from chain): %s", ld.PreviousLeafHash.Hex())
-	t.Logf("  Computed LeafHash: %s", computed.Hex())
-
-	if sn > 0 {
-		prev, _ := tracker.getLeafData(sn - 1)
-		prevLeafHash := prev.LeafHash()
-		t.Logf("  leafData[sn-1].LeafHash(): %s", prevLeafHash.Hex())
-		if ld.PreviousLeafHash != prevLeafHash {
-			t.Logf("  CHAIN BREAK: PreviousLeafHash != leafHash(sn-1)")
-		} else {
-			t.Logf("  chain is consistent: PreviousLeafHash == leafHash(sn-1)")
-		}
-	}
-
-	// Read what the twig file says the leaf hash is.
-	proof, err := tracker.tree.GetProof(sn)
-	if err != nil {
-		t.Logf("  GetProof error: %v", err)
-		return
-	}
-	storedLeaf := proof.LeftOfTwig[0].SelfHash
-	t.Logf("  Stored leaf (twig file): %s", storedLeaf.Hex())
-	if computed == storedLeaf {
-		t.Logf("  MATCH: computed == stored (mismatch is elsewhere)")
-	} else {
-		t.Logf("  MISMATCH: computed=%s vs stored=%s", computed.Hex(), storedLeaf.Hex())
-	}
-
-	// Check the proof verification result with non-complete mode to find exact failure level.
-	proof.LeftOfTwig[0].SelfHash = computed
-	if err := proof.Check(hasher, false); err != nil {
-		t.Logf("  Proof.Check(complete=false): FAIL (%v)", err)
-	} else {
-		t.Logf("  Proof.Check(complete=false): OK")
-	}
-
-	// Use complete=true to fill in all SelfHash values, then compare the computed
-	// root against proof.Root to understand the divergence.
-	proof2, _ := tracker.tree.GetProof(sn)
-	proof2.LeftOfTwig[0].SelfHash = computed
-	_ = proof2.Check(hasher, true) // fills in all SelfHash values
-	t.Logf("  proof.Root:           %s", proof2.Root.Hex())
-
-	// Print the full UpperPath to trace divergence.
-	for i, node := range proof2.UpperPath {
-		t.Logf("  UpperPath[%d]: SelfHash=%s PeerHash=%s PeerAtLeft=%v",
-			i, node.SelfHash.Hex(), node.PeerHash.Hex(), node.PeerAtLeft)
-	}
-
-	// Also print twig root from disk.
-	diskRoot, err := tracker.tree.twigStorage.GetHashRoot(sn >> TWIG_SHIFT)
-	if err != nil {
-		t.Logf("  GetHashRoot error: %v", err)
-	} else {
-		t.Logf("  TwigRoot from disk: %s", diskRoot.Hex())
+	for i := 0; i < 10; i++ {
+		kh := KeyHash(0, []byte(fmt.Sprintf("key%d", i)))
+		txNum, found, err := GetKeyIndex(roTx, kh)
+		require.NoError(t, err)
+		require.True(t, found, "key%d not found in MDBX", i)
+		require.Equal(t, uint64(i), txNum)
 	}
 }
