@@ -133,7 +133,7 @@ func changedKeysPerBlock(it stream.KU64, txNum2Block func(txNum uint64) (uint64,
 
 		ks := string(k)
 		if ks != prevKey && onNewKey != nil {
-			onNewKey() // reset cursor before first txNum2Block call for new key
+			onNewKey() // txNums restart from a lower value on each new key, so cursor must reset
 		}
 
 		blockNum, err := txNum2Block(txNum)
