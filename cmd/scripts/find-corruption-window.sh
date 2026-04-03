@@ -74,8 +74,9 @@ get_exec_block() {
     local datadir="$1"
     # Parse: "Execution                0               0"
     # Extract the stage_at column (first number after "Execution")
+    # Use || true to ignore SIGPIPE (141) when awk exits early
     "$INTEGRATION" print_stages --datadir="$datadir" 2>&1 \
-        | awk '/^Execution[[:space:]]/ { print $2; exit }'
+        | awk '/^Execution[[:space:]]/ { print $2 }' || true
 }
 
 iter=$START_ITER
