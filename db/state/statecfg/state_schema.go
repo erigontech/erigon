@@ -53,9 +53,8 @@ func Configure(Schema SchemaGen, a AggSetters, dirs datadir.Dirs, salt *uint32, 
 	if err := a.RegisterDomain(Schema.GetDomainCfg(kv.RCacheDomain), salt, dirs, logger); err != nil {
 		return err
 	}
-	if err := a.RegisterDomain(Schema.GetDomainCfg(kv.QMTreeDomain), salt, dirs, logger); err != nil {
-		return err
-	}
+	// QMTreeDomain is not registered with the Aggregator — it uses a standalone
+	// SnapshotManager for collation/merge. See QMTreeDomain constant comment.
 	if err := a.RegisterII(Schema.GetIICfg(kv.LogAddrIdx), salt, dirs, logger); err != nil {
 		return err
 	}

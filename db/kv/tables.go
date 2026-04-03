@@ -692,9 +692,16 @@ const (
 	CodeDomain       Domain = 2 // Eth Smart-Contract Code
 	CommitmentDomain Domain = 3 // Merkle Trie
 	ReceiptDomain    Domain = 4 // Tiny Receipts - without logs. Required for node-operations.
-	RCacheDomain     Domain = 5 // Fat Receipts - with logs. Optional.
-	QMTreeDomain     Domain = 6 // QMTree proof-of-execution entries. Optional (--experimental.qmtree).
-	DomainLen        Domain = 7 // Technical marker of Enum. Not real Domain.
+	RCacheDomain Domain = 5 // Fat Receipts - with logs. Optional.
+	DomainLen    Domain = 6 // Technical marker of Enum. Not real Domain.
+)
+
+const (
+	// QMTreeDomain is defined outside the DomainLen range because registering
+	// it in the Aggregator's fixed-size domain array causes initialization to
+	// hang on large datadirs. The standalone SnapshotManager handles qmtree
+	// collation/merge instead. TODO: investigate and integrate properly.
+	QMTreeDomain Domain = 100
 )
 
 var StateDomains = []Domain{AccountsDomain, StorageDomain, CodeDomain, CommitmentDomain}
