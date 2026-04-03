@@ -17,9 +17,9 @@ import (
 
 const (
 	entrySnapshotVersion = "v1.0"
-	entrySnapshotName    = "qmtree-entries"
-	entrySnapshotExtKV   = ".qmtree.kv"
-	entrySnapshotExtKVI  = ".qmtree.kvi"
+	entrySnapshotName    = "qmtree"
+	entrySnapshotExtKV   = ".kv"
+	entrySnapshotExtKVI  = ".kvi"
 	// Each entry in the snapshot: serialNum (8B) + pre(32B) + sc(32B) + trans(32B) = 104 bytes
 	snapshotEntrySize = 104
 )

@@ -18,11 +18,11 @@ const (
 	// Each record in the .kv file: 32-byte keyHash + 8-byte txNum (big-endian).
 	keyIndexRecordSize = 40
 
-	// File naming: v1.0-qmtree-keyindex.{fromStep}-{toStep}.qmtree.kv / .qmtree.kvi
+	// File naming: v1.0-qmtree-keyindex.{fromStep}-{toStep}.kv / .kvi
 	keyIndexVersion = "v1.0"
 	keyIndexName    = "qmtree-keyindex"
-	keyIndexExtKV   = ".qmtree.kv"
-	keyIndexExtKVI  = ".qmtree.kvi"
+	keyIndexExtKV   = ".kv"
+	keyIndexExtKVI  = ".kvi"
 )
 
 // keyIndexSegment represents one persisted segment: a .kv data file and its
