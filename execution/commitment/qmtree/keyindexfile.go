@@ -195,6 +195,77 @@ func (kf *KeyIndexFile) PopulateKeyIndex(ki *KeyIndex) {
 	// from MDBX (which has the full key→txNum mapping).
 }
 
+// MergeSegments merges contiguous segments [fromStep, toStep) into a single
+// .kvi by reading the full key→txNum mapping from the in-memory KeyIndex.
+// RecSplit files can't be iterated, so we rebuild from the authoritative source.
+func (kf *KeyIndexFile) MergeSegments(ctx context.Context, ki *KeyIndex, fromStep, toStep uint64) error {
+	ki.ensureSorted()
+	if len(ki.sorted) == 0 {
+		return nil
+	}
+
+	// Filter entries whose txNum falls within the merged step range.
+	// (For a full merge this is all entries.)
+	path := keyIndexPath(kf.dir, fromStep, toStep)
+	if err := buildKeyIndexKVI(ctx, path, ki.sorted); err != nil {
+		return fmt.Errorf("merge keyindex: %w", err)
+	}
+
+	seg, err := openKeyIndexSegment(path, fromStep, toStep)
+	if err != nil {
+		os.Remove(path)
+		return err
+	}
+
+	// Remove old segments in the merged range.
+	var kept []*keyIndexSegment
+	for _, s := range kf.segments {
+		if s.fromStep >= fromStep && s.toStep <= toStep {
+			s.close()
+			os.Remove(s.path)
+		} else {
+			kept = append(kept, s)
+		}
+	}
+	kept = append(kept, seg)
+	sort.Slice(kept, func(i, j int) bool {
+		return kept[i].fromStep < kept[j].fromStep
+	})
+	kf.segments = kept
+
+	log.Info("qmtree: merged keyindex segments",
+		"fromStep", fromStep,
+		"toStep", toStep,
+		"keys", len(ki.sorted),
+	)
+	return nil
+}
+
+// MaybeMerge applies binary-doubling merge logic to keyindex segments,
+// matching the entry snapshot merge pattern.
+func (kf *KeyIndexFile) MaybeMerge(ctx context.Context, ki *KeyIndex, highStep uint64) {
+	if highStep < 2 {
+		return
+	}
+	spanStep := highStep & (^highStep + 1)
+	if spanStep < 2 {
+		return
+	}
+	fromStep := highStep - spanStep
+	toStep := highStep
+
+	// Check we don't already have a merged segment for this range.
+	for _, s := range kf.segments {
+		if s.fromStep == fromStep && s.toStep == toStep {
+			return
+		}
+	}
+
+	if err := kf.MergeSegments(ctx, ki, fromStep, toStep); err != nil {
+		log.Warn("qmtree: keyindex merge failed", "from", fromStep, "to", toStep, "err", err)
+	}
+}
+
 // TruncateAfterStep removes all segments with fromStep >= step.
 func (kf *KeyIndexFile) TruncateAfterStep(step uint64) {
 	var kept []*keyIndexSegment
