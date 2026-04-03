@@ -88,7 +88,7 @@ func TestChangedKeysPerBlock_Basic(t *testing.T) {
 		pair("c", 7),
 	)
 
-	idx, err := changedKeysPerBlock(it, simpleTxNum2Block)
+	idx, err := changedKeysPerBlock(it, simpleTxNum2Block, nil)
 	require.NoError(t, err)
 
 	require.Equal(t, []string{"a", "c"}, keysForBlock(idx, 0))
@@ -110,7 +110,7 @@ func TestChangedKeysPerBlock_DeduplicatesSameKeyInBlock(t *testing.T) {
 		pair("b", 15),
 	)
 
-	idx, err := changedKeysPerBlock(it, simpleTxNum2Block)
+	idx, err := changedKeysPerBlock(it, simpleTxNum2Block, nil)
 	require.NoError(t, err)
 
 	require.Equal(t, []string{"a", "b"}, keysForBlock(idx, 1))
@@ -128,7 +128,7 @@ func TestChangedKeysPerBlock_KeysSharedAcrossBlocks(t *testing.T) {
 	}
 	it := &pairKU64{pairs: pairs}
 
-	idx, err := changedKeysPerBlock(it, simpleTxNum2Block)
+	idx, err := changedKeysPerBlock(it, simpleTxNum2Block, nil)
 	require.NoError(t, err)
 
 	require.Equal(t, 1, idx.NumKeys()) // "x" stored exactly once
@@ -143,13 +143,13 @@ func TestChangedKeysPerBlock_TxNum2BlockError(t *testing.T) {
 	errFn := func(txNum uint64) (uint64, error) {
 		return 0, fmt.Errorf("txNum %d not found", txNum)
 	}
-	_, err := changedKeysPerBlock(it, errFn)
+	_, err := changedKeysPerBlock(it, errFn, nil)
 	require.Error(t, err)
 }
 
 func TestChangedKeysPerBlock_Empty(t *testing.T) {
 	it := newPairKU64()
-	idx, err := changedKeysPerBlock(it, simpleTxNum2Block)
+	idx, err := changedKeysPerBlock(it, simpleTxNum2Block, nil)
 	require.NoError(t, err)
 	require.Equal(t, 0, idx.NumKeys())
 	require.Equal(t, 0, idx.NumBlocks())
@@ -165,17 +165,20 @@ func TestTxNumToBlock_BlockOf(t *testing.T) {
 		toBlockNum:   13,
 	}
 
-	for txNum, wantBlock := range map[uint64]uint64{
-		0: 10, 4: 10, // block 10 boundary
-		5: 11, 9: 11, // block 11 boundary
-		10: 12, 14: 12, // block 12 boundary
+	// Each sub-slice simulates one key's ascending txNums; reset cursor between keys.
+	for _, tc := range [][2]uint64{
+		{0, 10}, {4, 10}, // block 10 boundary
+		{5, 11}, {9, 11}, // block 11 boundary
+		{10, 12}, {14, 12}, // block 12 boundary
 	} {
-		got, err := m.BlockOf(txNum)
-		require.NoError(t, err, "txNum=%d", txNum)
-		require.Equal(t, wantBlock, got, "txNum=%d", txNum)
+		m.ResetCursor()
+		got, err := m.BlockOf(tc[0])
+		require.NoError(t, err, "txNum=%d", tc[0])
+		require.Equal(t, tc[1], got, "txNum=%d", tc[0])
 	}
 
 	// txNum beyond window must error.
+	m.ResetCursor()
 	_, err := m.BlockOf(15)
 	require.Error(t, err)
 }
@@ -190,11 +193,15 @@ func TestTxNumToBlock_NonMonotone(t *testing.T) {
 		fromBlockNum: 0,
 		toBlockNum:   3,
 	}
-	cases := [][2]uint64{
-		{2, 0}, {12, 1}, {22, 2}, // key "a"
-		{7, 0}, {17, 1}, // key "b" — txNums restart, not globally sorted
+	// key "a": ascending txNums, cursor advances forward
+	for _, c := range [][2]uint64{{2, 0}, {12, 1}, {22, 2}} {
+		got, err := m.BlockOf(c[0])
+		require.NoError(t, err, "txNum=%d", c[0])
+		require.Equal(t, c[1], got, "txNum=%d", c[0])
 	}
-	for _, c := range cases {
+	// key "b": new key — txNums restart from a lower value, cursor must reset
+	m.ResetCursor()
+	for _, c := range [][2]uint64{{7, 0}, {17, 1}} {
 		got, err := m.BlockOf(c[0])
 		require.NoError(t, err, "txNum=%d", c[0])
 		require.Equal(t, c[1], got, "txNum=%d", c[0])

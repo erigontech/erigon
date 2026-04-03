@@ -19,7 +19,6 @@ package integrity
 import (
 	"context"
 	"fmt"
-	"sort"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -47,12 +46,15 @@ type ChangedKeysPerBlock struct {
 
 // TxNumToBlock maps txNums to block numbers for a contiguous block window using
 // a pre-built per-block maxTxNum array.
-// HistoryKeyTxNumRange sorts by key, so txNums are NOT globally ascending —
-// binary search on the maxTxNums slice is required for a correct mapping.
+// HistoryKeyTxNumRange sorts by key; within a key txNums are ascending, so
+// blockNums are non-decreasing per key.  BlockOf uses a forward-scan cursor
+// that is reset to 0 on each new key (via ResetCursor), giving O(1) amortized
+// cost instead of O(log N) binary search per txNum.
 type TxNumToBlock struct {
 	maxTxNums    []uint64
 	fromBlockNum uint64
 	toBlockNum   uint64
+	cursor       int
 }
 
 // NewTxNumToBlock builds a TxNumToBlock for [fromBlockNum, toBlockNum) by reading
@@ -78,11 +80,18 @@ func NewTxNumToBlock(ctx context.Context, tx kv.Tx, br services.FullBlockReader,
 // ToTxNum returns the exclusive upper txNum bound for the window (maxTxNum of last block + 1).
 func (m *TxNumToBlock) ToTxNum() uint64 { return m.maxTxNums[len(m.maxTxNums)-1] + 1 }
 
-// BlockOf returns the block number that contains txNum, using binary search.
+// ResetCursor resets the forward-scan position to the start of the window.
+// Must be called whenever the iterator moves to a new key.
+func (m *TxNumToBlock) ResetCursor() { m.cursor = 0 }
+
+// BlockOf returns the block number that contains txNum by scanning forward from
+// the current cursor position.  Callers must invoke ResetCursor on each new key.
 func (m *TxNumToBlock) BlockOf(txNum uint64) (uint64, error) {
-	i := sort.Search(len(m.maxTxNums), func(i int) bool { return m.maxTxNums[i] >= txNum })
-	if i < len(m.maxTxNums) {
-		return m.fromBlockNum + uint64(i), nil
+	for m.cursor < len(m.maxTxNums) && m.maxTxNums[m.cursor] < txNum {
+		m.cursor++
+	}
+	if m.cursor < len(m.maxTxNums) {
+		return m.fromBlockNum + uint64(m.cursor), nil
 	}
 	return 0, fmt.Errorf("TxNumToBlock: txNum %d beyond window [%d,%d)", txNum, m.fromBlockNum, m.toBlockNum)
 }
@@ -95,12 +104,13 @@ func NewChangedKeysPerBlock(tx kv.TemporalDebugTx, domain kv.Domain, fromTxNum, 
 		return nil, err
 	}
 	defer it.Close()
-	return changedKeysPerBlock(it, txNums.BlockOf)
+	return changedKeysPerBlock(it, txNums.BlockOf, txNums.ResetCursor)
 }
 
 // changedKeysPerBlock scans it once and builds the index.  The caller is
-// responsible for closing it.
-func changedKeysPerBlock(it stream.KU64, txNum2Block func(txNum uint64) (uint64, error)) (*ChangedKeysPerBlock, error) {
+// responsible for closing it.  onNewKey is called whenever the key changes so
+// that a stateful txNum2Block can reset its cursor; pass nil if not needed.
+func changedKeysPerBlock(it stream.KU64, txNum2Block func(txNum uint64) (uint64, error), onNewKey func()) (*ChangedKeysPerBlock, error) {
 	idx := &ChangedKeysPerBlock{
 		blocks: make(map[uint64][]uint32),
 	}
@@ -120,12 +130,16 @@ func changedKeysPerBlock(it stream.KU64, txNum2Block func(txNum uint64) (uint64,
 		if err != nil {
 			return nil, err
 		}
+
+		ks := string(k)
+		if ks != prevKey && onNewKey != nil {
+			onNewKey() // reset cursor before first txNum2Block call for new key
+		}
+
 		blockNum, err := txNum2Block(txNum)
 		if err != nil {
 			return nil, err
 		}
-
-		ks := string(k)
 		if blockNum == prevBlockNum && ks == prevKey {
 			continue
 		}
