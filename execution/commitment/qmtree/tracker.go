@@ -116,9 +116,8 @@ func NewTracker(snapDir string, stepSize uint64) (*Tracker, error) {
 
 	if snapDir != "" {
 		qmdir := filepath.Join(snapDir, trackerSubdir)
-		keyIdxDir := filepath.Join(qmdir, keyIndexSubdir)
 
-		kif, err := NewKeyIndexFile(keyIdxDir)
+		kif, err := NewKeyIndexFile(qmdir)
 		if err != nil {
 			return nil, fmt.Errorf("create keyindex file: %w", err)
 		}

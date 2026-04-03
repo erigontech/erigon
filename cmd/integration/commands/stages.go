@@ -890,6 +890,38 @@ func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 		"qmtree_dir", dirs.Snap)
 
 	startTime := time.Now()
+	// Open a write tx for qmtree MDBX tables. We commit periodically
+	// (every 1000 blocks at the flush point) to avoid dirty-page OOM.
+	qmRwTx, err := db.BeginRw(ctx)
+	if err != nil {
+		return fmt.Errorf("begin rw tx for qmtree: %w", err)
+	}
+	defer func() {
+		if qmRwTx != nil {
+			qmRwTx.Rollback()
+		}
+	}()
+	tracker.SetTx(qmRwTx)
+
+	// Load existing qmtree state from MDBX (resume after restart).
+	if err := tracker.LoadFromDB(qmRwTx); err != nil {
+		logger.Warn("[stage_exec_replay] LoadFromDB failed, starting fresh", "err", err)
+	}
+
+	// commitQmTx commits the current write tx and opens a fresh one.
+	commitQmTx := func() error {
+		tracker.Flush()
+		if err := qmRwTx.Commit(); err != nil {
+			return fmt.Errorf("commit qmtree tx: %w", err)
+		}
+		qmRwTx, err = db.BeginRw(ctx)
+		if err != nil {
+			return fmt.Errorf("reopen qmtree tx: %w", err)
+		}
+		tracker.SetTx(qmRwTx)
+		return nil
+	}
+
 	var lastBlockNum uint64
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -914,14 +946,16 @@ func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 				}
 			}
 
-			// At block end: log root and flush periodically.
+			// At block end: log root and commit MDBX periodically.
 			if txTask.IsBlockEnd() {
 				blockNum := txTask.BlockNumber()
 				if blockNum%1000 == 0 || blockNum <= 10 {
 					root := tracker.SyncRoot()
 					logger.Info("[stage_exec_replay] qmtree root",
 						"block", blockNum, "root", root, "leaves", tracker.NextSN)
-					tracker.Flush()
+					if err := commitQmTx(); err != nil {
+						return err
+					}
 				}
 				tracker.LogStepProgress("[stage_exec_replay]")
 			}
@@ -950,7 +984,12 @@ func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 		return err
 	}
 
+	// Final commit.
 	tracker.Flush()
+	if err := qmRwTx.Commit(); err != nil {
+		return fmt.Errorf("final commit qmtree tx: %w", err)
+	}
+	qmRwTx = nil // prevent deferred rollback
 	elapsed := time.Since(startTime)
 	blkPerSec := float64(lastBlockNum) / elapsed.Seconds()
 	finalRoot := tracker.SyncRoot()
