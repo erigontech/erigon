@@ -116,5 +116,14 @@ func (so *StateOverrides) Override(ibs *state.IntraBlockState, precompiles vm.Pr
 		}
 	}
 
-	return ibs.FinalizeTx(rules, state.NewNoopWriter())
+	// Use SoftFinalise (not FinalizeTx) to clear the journal without triggering
+	// EIP-161 empty-account removal.  FinalizeTx with a NoopWriter would mark
+	// any account that becomes empty after the override (nonce=0, code=0x,
+	// balance=0) as deleted inside the IBS, even though the deletion is never
+	// written to the DB.  That spurious deleted=true flag causes HasStorage to
+	// short-circuit to false, breaking EIP-7610 collision detection in
+	// multi-block eth_simulateV1 when a prior block deployed a contract at the
+	// overridden address.
+	ibs.SoftFinalise()
+	return nil
 }
