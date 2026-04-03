@@ -742,21 +742,6 @@ func (e *ExecModule) dispatchNotificationsFromOverlay(sd *execctx.SharedDomains,
 	return nil
 }
 
-// runForkchoiceCommitAndPrune does flush → commit → UpdateHead → prune
-// synchronously. No notifications — those are dispatched before this is called.
-func (e *ExecModule) runForkchoiceCommitAndPrune(sd *execctx.SharedDomains, finishProgressBefore uint64, isSynced bool, initialCycle bool) ([]any, error) {
-	timings, err := e.runForkchoiceFlushCommit(sd, finishProgressBefore, isSynced)
-	if err != nil {
-		return nil, err
-	}
-	pruneTimings, err := e.runForkchoicePrune(initialCycle)
-	if err != nil {
-		return nil, err
-	}
-	timings = append(timings, pruneTimings...)
-	return timings, nil
-}
-
 // runForkchoiceFlushCommit opens a brief RwTx, flushes the SharedDomains
 // (block overlay + domain mem), commits, then updates the sentry head.
 func (e *ExecModule) runForkchoiceFlushCommit(sd *execctx.SharedDomains, finishProgressBefore uint64, isSynced bool) ([]any, error) {

@@ -254,7 +254,7 @@ func (c ChainReaderWriterEth1) InsertBlocksWithAccessLists(ctx context.Context, 
 		return context.DeadlineExceeded
 	}
 	if status != execmodule.ExecutionStatusSuccess {
-		return fmt.Errorf("InsertBlocks: invalid code received from execution module: %d", status)
+		return fmt.Errorf("InsertBlocks: invalid code received from execution module: %s", status)
 	}
 	return nil
 }

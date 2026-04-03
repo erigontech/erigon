@@ -957,19 +957,22 @@ func (m *MemoryMutation) Unwind(ctx context.Context, txNumUnwindTo uint64, chang
 	return fmt.Errorf("unwind requires TemporalRwTx, got %T", m.db)
 }
 
-// OverlayReadView is the overlay-aware read-only view returned by NewReadView.
-// It is a type alias for MemoryMutation so that callers can embed it by name
-// (e.g. OverlayTemporalReadView) while sharing MemoryMutation's full method set.
-type OverlayReadView = MemoryMutation
-
 // NewReadView creates a lightweight read-only view of this overlay backed by
 // the given tx for fallback reads. The view shares the same in-memory data
 // (memTx, deletedEntries, clearedTables) and the parent's mutex, but has its
 // own db field set to the caller's tx. All existing cursor/read logic works
 // naturally — memTx first, then db fallback.
 //
-// The caller must not Close the returned view (it doesn't own the memDb).
-func (m *MemoryMutation) NewReadView(tx kv.Tx) *OverlayReadView {
+// The returned kv.TemporalTx only exposes read methods. Callers cannot write
+// to the overlay through this view. The caller must not Close the returned
+// view (it doesn't own the memDb).
+func (m *MemoryMutation) NewReadView(tx kv.Tx) kv.TemporalTx {
+	return m.newReadViewMut(tx)
+}
+
+// newReadViewMut is the internal constructor that returns the full
+// *MemoryMutation. Used by NewTemporalReadView which needs to embed it.
+func (m *MemoryMutation) newReadViewMut(tx kv.Tx) *MemoryMutation {
 	var dbTx kv.TemporalTx
 	if t, ok := tx.(kv.TemporalTx); ok {
 		dbTx = t
@@ -985,15 +988,15 @@ func (m *MemoryMutation) NewReadView(tx kv.Tx) *OverlayReadView {
 	}
 }
 
-// OverlayTemporalReadView extends OverlayReadView with kv.TemporalTx support.
-// It embeds OverlayReadView for all overlay-aware KV methods (GetOne, Cursor,
-// etc.) and delegates temporal methods (GetLatest, GetAsOf, etc.) to its own
-// independent temporal tx.
+// OverlayTemporalReadView extends an overlay read view with kv.TemporalTx
+// support. It embeds a *MemoryMutation for all overlay-aware KV methods
+// (GetOne, Cursor, etc.) and delegates temporal methods (GetLatest, GetAsOf,
+// etc.) to its own independent temporal tx.
 //
 // Use NewTemporalReadView to create one. The caller is responsible for rolling
 // back the underlying temporalTx when done.
 type OverlayTemporalReadView struct {
-	*OverlayReadView
+	*MemoryMutation
 	temporalTx kv.TemporalTx
 }
 
@@ -1005,24 +1008,24 @@ var _ kv.TemporalTx = (*OverlayTemporalReadView)(nil)
 // overlay's internal backing tx.
 func (m *MemoryMutation) NewTemporalReadView(temporalTx kv.TemporalTx) *OverlayTemporalReadView {
 	return &OverlayTemporalReadView{
-		OverlayReadView: m.NewReadView(temporalTx),
-		temporalTx:      temporalTx,
+		MemoryMutation: m.newReadViewMut(temporalTx),
+		temporalTx:     temporalTx,
 	}
 }
 
-// GetOne explicitly delegates to OverlayReadView.GetOne so that reads check
+// GetOne explicitly delegates to MemoryMutation.GetOne so that reads check
 // the in-memory overlay first. Without this, Go's method promotion creates an
-// ambiguity: both *OverlayReadView and the embedded temporalTx (kv.TemporalTx
+// ambiguity: both *MemoryMutation and the embedded temporalTx (kv.TemporalTx
 // → kv.Tx) promote GetOne. In practice the temporalTx promotion can win,
 // causing reads to bypass the overlay and hit the stale DB snapshot — which
 // breaks reorgs where canonical hashes were rewritten in the overlay.
 func (v *OverlayTemporalReadView) GetOne(table string, key []byte) ([]byte, error) {
-	return v.OverlayReadView.GetOne(table, key)
+	return v.MemoryMutation.GetOne(table, key)
 }
 
-// Has explicitly delegates to OverlayReadView.Has for the same reason as GetOne.
+// Has explicitly delegates to MemoryMutation.Has for the same reason as GetOne.
 func (v *OverlayTemporalReadView) Has(table string, key []byte) (bool, error) {
-	return v.OverlayReadView.Has(table, key)
+	return v.MemoryMutation.Has(table, key)
 }
 
 func (v *OverlayTemporalReadView) Apply(_ context.Context, f func(tx kv.Tx) error) error {

@@ -40,7 +40,7 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 	// SharedDomains block overlay and are flushed via a brief RwTx.
 	roTx, err := e.db.BeginTemporalRo(ctx)
 	if err != nil {
-		return ExecutionStatusSuccess, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not begin transaction: %s", err)
+		return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not begin transaction: %s", err)
 	}
 	defer roTx.Rollback()
 
@@ -49,7 +49,7 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 	if sd == nil {
 		sd, err = execctx.NewSharedDomains(ctx, roTx, e.logger)
 		if err != nil {
-			return ExecutionStatusSuccess, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not create shared domains: %s", err)
+			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not create shared domains: %s", err)
 		}
 		e.lock.Lock()
 		e.currentContext = sd
@@ -57,7 +57,7 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 	}
 	if sd.BlockOverlay() == nil {
 		if err := sd.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
-			return ExecutionStatusSuccess, fmt.Errorf("ethereumExecutionModule.InsertBlocks: %w", err)
+			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: %w", err)
 		}
 	} else {
 		sd.BlockOverlay().UpdateTxn(roTx)
@@ -75,7 +75,7 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 
 		rawBlock := types.RawBlock{Header: header, Body: body}
 		if err := rawBlock.ValidateMaxRlpSize(e.config); err != nil {
-			return ExecutionStatusSuccess, fmt.Errorf("ethereumExecutionModule.InsertBlocks: max rlp size validation: %w", err)
+			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: max rlp size validation: %w", err)
 		}
 
 		var parentTd *big.Int
@@ -96,27 +96,27 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 		// Sum TDs.
 		td := parentTd.Add(parentTd, header.Difficulty.ToBig())
 		if err := rawdb.WriteHeader(blockOverlay, header); err != nil {
-			return ExecutionStatusSuccess, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeHeader: %s", err)
+			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeHeader: %s", err)
 		}
 		if err := rawdb.WriteTd(blockOverlay, header.Hash(), height, td); err != nil {
-			return ExecutionStatusSuccess, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeTd: %s", err)
+			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeTd: %s", err)
 		}
 		if _, err := rawdb.WriteRawBodyIfNotExists(blockOverlay, header.Hash(), height, body); err != nil {
-			return ExecutionStatusSuccess, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBody: %s", err)
+			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBody: %s", err)
 		}
 		if len(block.BlockAccessList) > 0 {
 			if header.BlockAccessListHash == nil {
-				return ExecutionStatusSuccess, fmt.Errorf("ethereumExecutionModule.InsertBlocks: block access list provided without hash for block %d", height)
+				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: block access list provided without hash for block %d", height)
 			}
 			balBytes := block.BlockAccessList
 			if len(balBytes) == 0 {
 				balBytes, err = types.EncodeBlockAccessListBytes(nil)
 				if err != nil {
-					return ExecutionStatusSuccess, fmt.Errorf("ethereumExecutionModule.InsertBlocks: encode empty block access list, block %d: %s", height, err)
+					return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: encode empty block access list, block %d: %s", height, err)
 				}
 			}
 			if err := rawdb.WriteBlockAccessListBytes(blockOverlay, header.Hash(), height, balBytes); err != nil {
-				return ExecutionStatusSuccess, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBlockAccessList, block %d: %s", height, err)
+				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBlockAccessList, block %d: %s", height, err)
 			}
 		}
 		e.logger.Trace("Inserted block", "hash", header.Hash(), "number", header.Number)
