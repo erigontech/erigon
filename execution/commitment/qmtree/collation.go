@@ -444,6 +444,64 @@ func (sm *SnapshotManager) MergeEntries(ctx context.Context, fromStep, toStep ui
 	return nil
 }
 
+// MaybeMerge finds a mergeable range using binary-doubling (same algorithm
+// as the Aggregator) and merges if possible. Call after each collation.
+//
+// Binary-doubling: for endStep, find the largest power-of-2 span that fits.
+// E.g., after step 4: merge 0-4. After step 6: merge 4-6. After step 8: merge 0-8.
+func (sm *SnapshotManager) MaybeMerge(ctx context.Context) {
+	high := sm.HighestFrozenStep()
+	if high < 2 {
+		return
+	}
+
+	// Find the largest power-of-2 aligned merge ending at high.
+	// spanStep = high & -high extracts the rightmost set bit.
+	spanStep := high & (^high + 1) // same as high & -high
+	if spanStep < 2 {
+		return
+	}
+	fromStep := high - spanStep
+	toStep := high
+
+	// Check that we have all the individual step files needed.
+	haveAll := true
+	for s := fromStep; s < toStep; s++ {
+		found := false
+		for _, snap := range sm.entries {
+			if snap.fromStep == s && snap.toStep == s+1 {
+				found = true
+				break
+			}
+		}
+		// Also check if there's already a merged file covering this range.
+		for _, snap := range sm.entries {
+			if snap.fromStep <= s && snap.toStep > s {
+				found = true
+				break
+			}
+		}
+		if !found {
+			haveAll = false
+			break
+		}
+	}
+	if !haveAll {
+		return
+	}
+
+	// Check we don't already have a merged file for this exact range.
+	for _, snap := range sm.entries {
+		if snap.fromStep == fromStep && snap.toStep == toStep {
+			return // already merged
+		}
+	}
+
+	if err := sm.MergeEntries(ctx, fromStep, toStep); err != nil {
+		log.Warn("qmtree: merge failed", "from", fromStep, "to", toStep, "err", err)
+	}
+}
+
 // -------------------------------------------------------------------
 // Loading existing snapshots from disk
 // -------------------------------------------------------------------

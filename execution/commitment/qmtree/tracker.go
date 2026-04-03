@@ -508,6 +508,11 @@ func (qt *Tracker) maybeCollate() {
 		}
 		qt.lastCollatedStep = step + 1
 	}
+
+	// Try to merge after collation. Binary-doubling: if step N completes and
+	// N is a power of 2 boundary, merge the preceding range. E.g., after step
+	// 4 completes, merge 0-4 from 0-2 + 2-4. After step 8, merge 0-8, etc.
+	qt.snapManager.MaybeMerge(context.Background())
 }
 
 // maybeFlushKeyIndex checks if we've crossed a step boundary since the last
