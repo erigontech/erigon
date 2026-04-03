@@ -178,15 +178,15 @@ func (idx *ChangedKeysPerBlock) RamBytes() uint64 {
 	return n
 }
 
-// BlockDomainIndex holds pre-built per-domain key change indices for a block window.
+// ChangedKeysPerBlockIdx holds pre-built per-domain key change indices for a block window.
 // Populated by ChangedKeysPerBlockIdx for the requested domains.
-type BlockDomainIndex [kv.DomainLen]*ChangedKeysPerBlock
+type ChangedKeysPerBlockIdx [kv.DomainLen]*ChangedKeysPerBlock
 
 // ChangedKeysPerBlockIdx scans HistoryKeyTxNumRange once per domain for the txNum
 // range covering [fromBlockNum, toBlockNum) blocks and returns the resulting index.
 // The index is fully in-memory; the tx used for scanning is closed on return.
 // domains selects which domains to index; typically kv.StateDomains[:kv.CommitmentDomain].
-func ChangedKeysPerBlockIdx(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, fromBlockNum, toBlockNum uint64, domains []kv.Domain, logger log.Logger) (*BlockDomainIndex, error) {
+func NewChangedKeysPerBlockIdx(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, fromBlockNum, toBlockNum uint64, domains []kv.Domain, logger log.Logger) (*ChangedKeysPerBlockIdx, error) {
 	start := time.Now()
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -206,7 +206,7 @@ func ChangedKeysPerBlockIdx(ctx context.Context, db kv.TemporalRoDB, br services
 	}
 	toTxNum := txNums.ToTxNum()
 
-	var idx BlockDomainIndex
+	var idx ChangedKeysPerBlockIdx
 	var ramBytes uint64
 	logArgs := []any{"fromBlockNum", fromBlockNum, "toBlockNum", toBlockNum}
 	for _, d := range domains {
