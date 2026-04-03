@@ -775,6 +775,9 @@ func (r *ReaderV3) HasStorage(address accounts.Address) (bool, error) {
 }
 
 func (r *ReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
+	if dbg.TraceAccount(address.Handle()) {
+		fmt.Printf("found ReadAccountData [%x]\n", address)
+	}
 	_, acc, err := r.readAccountData(address)
 	return acc, err
 }
