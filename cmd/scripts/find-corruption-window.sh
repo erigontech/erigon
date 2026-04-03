@@ -16,6 +16,7 @@
 ##   --minutes N         Minutes to run stage_exec per iteration (default: 20)
 ##   --start-iter N      Starting iteration number (default: 1)
 ##   --sample FRAC       Fraction of blocks to sample in check (default: 1.0)
+##   --batch-size SIZE   Batch size for stage_exec (default: 50mb)
 
 set -euo pipefail
 trap 'echo "ERROR: Script failed at line $LINENO (exit code $?)" >&2' ERR
@@ -32,6 +33,7 @@ WORKDIR="/erigon-data/sepolia-mirrors"
 EXEC_MINUTES=20
 START_ITER=1
 SAMPLE="1"
+BATCH_SIZE="50mb"
 CHAIN="sepolia"
 
 # Parse args
@@ -42,6 +44,7 @@ while [[ $# -gt 0 ]]; do
         --minutes)   EXEC_MINUTES="$2"; shift 2 ;;
         --start-iter) START_ITER="$2"; shift 2 ;;
         --sample)    SAMPLE="$2"; shift 2 ;;
+        --batch-size) BATCH_SIZE="$2"; shift 2 ;;
         --chain)     CHAIN="$2"; shift 2 ;;
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
@@ -67,6 +70,7 @@ echo "  source:    $SOURCE"
 echo "  workdir:   $WORKDIR"
 echo "  chain:     $CHAIN"
 echo "  exec time: ${EXEC_MINUTES}m per iteration"
+echo "  batch:     $BATCH_SIZE"
 echo "  sample:    $SAMPLE"
 echo ""
 
@@ -108,7 +112,7 @@ while true; do
     timeout --signal=INT --kill-after=60s "${EXEC_MINUTES}m" "$INTEGRATION" stage_exec \
         --datadir="$mirror_dir" \
         --chain="$CHAIN" \
-        --batchSize=50mb \
+        --batchSize="$BATCH_SIZE" \
         2>&1 | tee "$mirror_dir/stage_exec.log" || true
     # timeout returns 124 on timeout (SIGINT sent), which is expected
     # --kill-after=60s sends SIGKILL if process doesn't exit within 60s of SIGINT
