@@ -1,17 +1,24 @@
-# QMTree State Proof Analysis, Design & Plan
+# QMTree State Proof Analysis & Design
 
 ## Context
 
-The qmtree PoC has demonstrated feasibility: ~21x smaller than the existing
-commitment domain, append-only O(1) writes, ~1120-byte Merkle proofs. The
-tree is built from four-component leaves:
+The qmtree is implemented and integrated into Erigon's execution pipeline.
+Core metrics: ~21x smaller than the existing commitment domain, append-only
+O(1) writes, ~1120-byte Merkle proofs. The tree is built from four-component
+leaves:
 
 ```
 leaf = keccak256(preStateHash || stateChangeHash || transitionHash || previousLeafHash)
 ```
 
-We now need to determine whether this tree can serve as a **complete state
-commitment** — replacing the MPT root — and what RPC interfaces are needed.
+Where:
+- `preStateHash` = DeriveSha MPT root over all state reads (BAL-ordered)
+- `stateChangeHash` = DeriveSha MPT root over all state writes (BAL-ordered)
+- `transitionHash` = rolling keccak256 over 11 record types (embeds exec hash)
+- `previousLeafHash` = hash chain linking to prior leaf
+
+The 10-method `qm_` RPC namespace, execution/transition hashing, KeyIndex
+with exclusion proofs, and SharedDomains integration are all implemented.
 
 **Deployment strategy**: Rollup-first. The qmtree replaces MPT in a rollup
 where we control the state commitment scheme. Mainnet adoption follows via
@@ -29,27 +36,27 @@ tree as state commitment. Both EIPs are prerequisites for each other.
 | Capability | MPT | QMTree |
 |---|---|---|
 | Positive inclusion proof ("key K has value V") | Yes — trie path | Yes — Merkle path to leaf containing (K,V) in stateChangeHash |
-| Negative/exclusion proof ("key K does not exist") | Yes — branch/extension | **Not yet** — needs NextKeyHash (QMDB §7.0) |
-| Latest-value proof ("V is *current* value of K") | Implicit — stores only latest | ActiveBit proof + inverted index |
+| Negative/exclusion proof ("key K does not exist") | Yes — branch/extension | Yes — KeyIndex ExclusionProof (sorted commitment over all written keys) |
+| Latest-value proof ("V is *current* value of K") | Implicit — stores only latest | KeyIndex inclusion proof (key → latest txNum) + qmtree witness |
 | Block-level binding | Root in block header | Root after final txnum of block |
 | Light client sync | Yes (snap sync) | Yes — proof size ~3-4x smaller |
 
-### Gaps to close
+### Remaining gaps
 
-1. **Negative proofs** — needs NextKeyHash extension. Medium priority — most
-   rollup consumers don't need negative proofs initially, but full
-   eth_getProof compat requires it.
+1. **KeyIndex unwind** — KeyIndex does not support incremental reorg unwind;
+   affected keys require full replay from genesis. Medium priority.
 
-2. **Key-to-txnum lookup** — inverted index (trusted) works now. Committed
-   key index needed for trustless light clients. Low priority for rollup.
+2. **KeyIndex persistence** — currently in-memory only, rebuilt on
+   `LoadFromDisk`. Low priority for PoC; required for production.
 
-3. **ActiveBit management** — must deactivate old entries when keys update.
-   High priority — without this, stale leaves look current.
+3. **RPC exposure of exclusion proofs** — `KeyIndex.GetProof()` implements
+   both inclusion and non-membership proofs but they are not yet exposed
+   via the `qm_` RPC namespace.
 
 ### Verdict
 
 The root is sufficient for a rollup where we control the commitment scheme.
-The three gaps are engineering work, not fundamental blockers.
+The remaining gaps are engineering work, not fundamental blockers.
 
 ---
 
@@ -60,14 +67,14 @@ Given (account key, block number), prove inclusion:
 1. **Resolve txnum**: inverted index → latest txnum T modifying key before block end. O(1).
 2. **Get leaf data**: LeafData for SN=T. O(1).
 3. **Get Merkle proof**: `tree.GetProof(T)` — 14-20 levels. O(log N).
-4. **Reconstruct SMT**: load all writes for txnum T from history files; build
-   `SMT(writes)`; confirm `SMT.Root() == stateChangeHash`. O(writes in tx).
-5. **Get SMT branch**: `SMT.GetBranch(keccak256(domain || key))`. O(log N_keys).
+4. **Reconstruct DeriveSha trie**: load all writes for txnum T from history files;
+   build `DeriveSha(writes)`; confirm `Root() == stateChangeHash`. O(writes in tx).
+5. **Get trie branch**: trie proof for the requested key. O(log N_keys).
 6. **Verify**: recompute leaf hash, walk qmtree path, compare root; walk SMT
    branch, confirm key→value is included.
 
-Full proof = qmtree witness (~1.1 KB) + SMT branch (~O(log N_keys) × 32B).
-For a tx touching 100 keys, SMT depth ~7, branch ~224B. Total ~1.3 KB.
+Full proof = qmtree witness (~1.1 KB) + trie branch (~O(log N_keys) × 32B).
+For a tx touching 100 keys, trie depth ~7, branch ~224B. Total ~1.3 KB.
 
 | Metric | QMTree + SMT | MPT |
 |---|---|---|
@@ -75,8 +82,9 @@ For a tx touching 100 keys, SMT depth ~7, branch ~224B. Total ~1.3 KB.
 | Proof size | ~1.3 KB | ~3-5 KB |
 | Verification | ~20-50 μs | ~100-500 μs |
 
-*Note: Step 0 of the implementation plan must complete before SMT proofs work.
-Until then, proof generation requires revealing the full read/write set.*
+*Note: `preStateHash` and `stateChangeHash` are now DeriveSha MPT roots
+(not flat keccak hashes), so per-key SMT branch proofs are possible. See
+the "Canonical Format" section under Question 3b for details.*
 
 ---
 
@@ -93,67 +101,57 @@ No new storage needed — reuse existing history. The qmtree hashes bind it.
 
 ---
 
-## Question 3b: Proving an Individual Key (The Flat-Hash Limitation)
+## Question 3b: Proving an Individual Key
 
-**Current limitation**: `preStateHash` and `stateChangeHash` are currently
-computed as `keccak256(sorted_reads)` and `keccak256(sorted_writes)` — flat
-hashes over the entire read/write set for a transaction. This means:
+**Resolved.** `preStateHash` and `stateChangeHash` are now computed as
+DeriveSha MPT roots over the read/write sets — not flat keccak256 hashes.
+This means:
 
-- To prove "address A had value V before this tx", you must reveal the
-  **entire** read set for the tx (potentially hundreds of (key, value) pairs)
-- There is no way to produce a short proof for a single key
-- This is a disclosure and scalability problem: high-activity txs have large
-  read sets that must be fully transmitted
+- A short O(log N_keys) trie branch proves any single key's inclusion
+- No need to reveal the entire read/write set
+- The trie is reconstructed on-demand from history files per RPC request
 
-**Fix: replace flat hashes with Sparse Merkle Tree (SMT) roots**
+**Implemented: DeriveSha MPT roots replace flat hashes**
 
-Instead of `keccak256(sorted_reads)`, compute the SMT root over the read set:
+`preStateHash` and `stateChangeHash` are now computed as `DeriveSha` MPT
+roots — the same trie format Ethereum uses for transaction roots, receipt
+roots, and withdrawal roots:
 
 ```
-preStateHash  = SMT_root({ (domain, key) → value } for all reads)
-stateChangeHash = SMT_root({ (domain, key) → value } for all writes)
+preStateHash    = DeriveSha({ (domain, key) → value } for all reads)
+stateChangeHash = DeriveSha({ (domain, key) → value } for all writes)
 ```
 
-A state proof for a specific key then becomes:
+A state proof for a specific key is:
 1. qmtree witness for the tx (proves the leaf is committed in the tree)
-2. SMT Merkle branch within `preStateHash` for the requested key
+2. MPT branch within `preStateHash` for the requested key
 
 This gives an O(log N_keys) proof for any single key, without revealing
 the full read/write set.
 
-### SMT Storage Strategy
+### Storage Strategy
 
-Building a per-tx SMT and storing it permanently would be expensive
-(~1-2 KB per tx × 2 billion mainnet txs = 2-4 TB). Instead:
+The per-tx DeriveSha trie is **not stored permanently** — it is reconstructed
+on-demand from Erigon's existing history files:
 
-**On-demand reconstruction (primary approach)**:
-- The SMT is built on-the-fly per RPC request from history files
-- On an archival node, history files already store every key's value at
-  every txnum — they are the source of truth
-- Flow: `GetAccountStateProof(address, keys, block)` →
+- Flow: `qm_getAccountStateProof(address, keys, block)` →
   1. Inverted index → txnum T touching address near block
   2. `HistoryRange(T)` → all reads/writes for tx T
-  3. Build SMT in memory from those reads/writes
-  4. Verify `SMT.Root() == witness.preStateHash` (proves SMT matches leaf)
-  5. Return: qmtree witness + SMT branch for requested key
+  3. Build DeriveSha trie in memory from those reads/writes
+  4. Verify `Root() == witness.preStateHash` (proves trie matches leaf)
+  5. Return: qmtree witness + trie branch for requested key
 - No new permanent storage required
-
-**Optional persistent cache**:
-- Store only the 64 bytes of SMT roots per tx (preStateHash + stateChangeHash)
-  alongside the entry files — this is already what we do today
-- Full per-tx SMTs (~1-2 KB each) are only needed transiently per RPC call
-- Hot-path caching (LRU of recent block SMTs) covers most use cases
 
 **This approach aligns with Erigon's existing architecture**: history files are
 already queryable per txnum, and archival nodes are the ones expected to serve
 detailed state proofs. Non-archival nodes without history files serve the
-qmtree witness only; archival nodes additionally provide the SMT branch.
+qmtree witness only; archival nodes additionally provide the trie branch.
 
-### Required Changes
+### Format Change (completed)
 
-To implement this, `preStateHash` and `stateChangeHash` must change from
-flat keccak256 to Merkle roots. This is a **breaking format change** to the
-entry file — all existing qmtree data would need to be regenerated.
+`preStateHash` and `stateChangeHash` were changed from flat keccak256 to
+DeriveSha MPT roots. This was a **breaking format change** to the entry file —
+all pre-existing qmtree data was regenerated.
 
 ### Canonical Format (implemented in `execution/exec/qmtree_reader.go`)
 
@@ -437,74 +435,51 @@ Two related EIPs, both prerequisites for mainnet adoption:
 
 ---
 
-## Implementation Plan
+## Implementation Status
 
-This is PoC/experimental code on the qmdb branch. No production constraints.
+All core implementation steps are complete on the `qmtree` branch.
 
-### Step 0: SMT hash format (2-3 days) ⚠️ breaking change
+### Completed
 
-This must happen before any other step — it changes the on-disk entry format
-and invalidates all existing qmtree data. After this change, the n1 dataset
-must be regenerated.
+| Step | Description | Files |
+|------|-------------|-------|
+| 0 | **DeriveSha hash format** — `preStateHash` and `stateChangeHash` use `DeriveSha` MPT roots (same format as tx/receipt roots). BAL-ordered (domain, key) sorting. | `execution/exec/qmtree_reader.go`, `qmtree_writer.go` |
+| 1 | **KeyIndex** — sorted key commitment with inclusion and exclusion proofs. Tracks latest txNum per `keccak256(domain \|\| key)`. | `keyindex.go` |
+| 2 | **LeafData persistence** — bounded LRU cache with twig-anchored reconstruction from entry files. | `tracker.go` (leafData cache, twigPrevLeaf) |
+| 3 | **`qm_getProof` RPC** — inclusion proof via inverted history index → txnum → Merkle proof. | `rpc/jsonrpc/qm_api.go` |
+| 4 | **`qm_getWitness` / `qm_getTxWitness` RPC** — block-level range witness and single-tx variant. | `rpc/jsonrpc/qm_api.go` |
+| 5 | **Verification endpoints** — `qm_verifyProof`, `qm_verifyWitness` (stateless). | `rpc/jsonrpc/qm_api.go` |
+| 6 | **`qm_call` / `qm_callProof`** — simulated call with witnesses, compact twig-grouped format. | `rpc/jsonrpc/qm_api.go` |
+| 7 | **`qm_getAccountStateProof` / `qm_getTxStateProof` / `qm_getLatestStateProof`** — state values + qmtree witness. | `rpc/jsonrpc/qm_api.go` |
+| 8 | **Execution hash** — per-opcode rolling keccak256 over EVM interpreter loop. Precompile synthetic records. Wired into EVM via `ExecHasher`. | `execution/vm/exec_hasher.go` |
+| 9 | **Transition hash** — rolling keccak256 over all 11 spec-mandated record types (TX_CONTEXT through FEE_DISTRIBUTION). Embeds exec hash. Wired into `TransitionDb()`. | `execution/vm/transition_hasher.go`, `execution/protocol/state_transition.go` |
+| 10 | **SharedDomains integration** — tracker attached via `SetAppendOnly`, per-tx `AppendLeaf`, periodic `Flush`. | `execution/stagedsync/exec3_serial.go` |
+| 11 | **`stage_exec_replay`** — conflict-free historical replay with qmtree dataset building. | `cmd/integration/commands/stages.go` |
+| 12 | **`qmtree-bench` CLI** — benchmark tool for tree creation and storage measurement. | `cmd/utils/app/qmtree_bench_cmd.go` |
 
-**What changes:**
-- `qmtree_reader.go`: replace `hashStateOps()` flat-hash with SMT construction.
-  `hashingReader.Finalize()` must return `SMT_root(reads)` not `keccak256(all_reads)`.
-- `qmtree_writer.go`: same change for writes. `hashingWriter.Finalize()` returns
-  `SMT_root(writes)`.
-- SMT implementation: a simple binary sparse Merkle tree over 32-byte keys with
-  keccak256 internal nodes. Can be a lightweight in-package implementation — no
-  need for a full library. Keyed by `keccak256(domain_byte || key_bytes)`.
-- `GetAccountStateProof` (and related RPCs): extend to accept a list of storage
-  keys, reconstruct the per-tx SMT from `HistoryRange(txnum)`, verify
-  `SMT.Root() == leaf.preStateHash`, and return the SMT branch.
+### Remaining work
 
-**Verification:** after regenerating, `TestTracker_LoadFromDisk` plus a new
-`TestSMT_RoundTrip` that checks SMT_root(reads) matches the stored leaf.
-
-### Step 1: ActiveBit deactivation (1-2 days)
-
-- Add key→lastSN tracking to Tracker
-- On AppendLeaf, if key was previously written at SN_old, call DeactiveEntry(SN_old)
-- Wire through the hashingWriter which already sees all writes
-
-### Step 2: Persist leafData to disk (1 day)
-
-- Add a leafData file in qmtree/ alongside entries/twigs
-- Format: `[8B sn][32B preState][32B stateChange][32B transition][32B prevLeaf]` = 136 bytes/leaf
-- Load on recovery, truncate on unwind
-
-### Step 3: `qm_getProof` RPC (1-2 days)
-
-- Add `qm` namespace to the RPC daemon
-- Implement proof generation:
-  - Inverted index → txnum
-  - tracker.GetWitness(txnum) → Merkle proof
-  - HistoryRange → preimage
-  - Hash + verify internally
-  - Return QMProofResult
-
-### Step 4: `qm_getWitness` / `qm_getTxWitness` RPC (1-2 days)
-
-- Block → txnum range → tracker.GetRangeWitness()
-- Include preState/stateChange preimages per leaf from history tables
-- Single-tx variant for qm_getTxWitness
-
-### Step 5: Verification endpoints (half day)
-
-- `qm_verifyProof(proof)` — stateless proof check
-- `qm_verifyWitness(witness)` — stateless witness check
-- These are thin wrappers over ProofPath.Check() and RangeWitness.Verify()
-
-**Total: ~5-7 days of work.**
+| Item | Priority | Description |
+|------|----------|-------------|
+| KeyIndex unwind | Medium | No incremental reorg support; affected keys require full replay |
+| KeyIndex persistence | Medium | In-memory only; rebuilt on LoadFromDisk |
+| RPC exclusion proofs | Low | `KeyIndex.GetProof()` works but not exposed via `qm_` RPC |
+| Head pruning | Low | HPFile design ready; twig eviction logic not implemented |
+| Pipelined execution | Low | Serial `tracker.Flush()` only; no prefetcher-updater-flusher pipeline |
+| `eth_getProof` compat | Low | Native qmtree format only; no MPT compatibility adapter |
+| Transition hash → SSZ | Future | Phase 6 (rolling keccak) is live; Phase 8 (SSZ field-level Merkle proofs) deferred |
 
 ---
 
-## Implemented: `qm_call` and `qm_callProof`
+## Implemented RPC API
 
-Steps 0–5 and the `qm_call` / `qm_callProof` RPCs (Question 6) are implemented
-on the `qmtree-dataset-builder` branch. This section documents the actual API
-contracts and data structures.
+All 10 methods are served under the `qm_` RPC namespace via `QMAPIImpl`
+(`rpc/jsonrpc/qm_api.go`). The namespace is registered in `daemon.go` when the
+`--experimental.qmtree` flag is set:
+
+```go
+qmImpl := NewQMAPI(base, db, qmTracker, cfg.Gascap, logger)
+```
 
 ### Namespace and wiring
 
@@ -725,13 +700,18 @@ A verifier receiving a `QMCallProof` can check:
    - Walk the `UpperPeerHashes` from `Twigs[lf.TwigIndex]` up to the root
    - Confirm the recomputed root matches `proof.Root`
 
-3. **Execution integrity** (requires SMT — future work): Verify that the state
-   values in `Accessed` are consistent with the `preStateHash` fields in the
-   leaves, once `preStateHash` is an SMT root rather than a flat hash.
+3. **Execution integrity**: Verify that the state values in `Accessed` are
+   consistent with the `preStateHash` fields in the leaves. Since `preStateHash`
+   is now a DeriveSha MPT root, the verifier can reconstruct the trie from the
+   accessed set and confirm the root matches. Per-key trie branch proofs are
+   also possible.
 
-4. **Call binding** (future work): Verify that the accessed state matches the
-   call's execution trace (requires a committed `transitionHash` that encodes
-   the call arguments and code hash).
+4. **Call binding**: Verify that the accessed state matches the call's execution
+   trace via the committed `transitionHash`. The transition hash (rolling
+   keccak256 over TX_CONTEXT through FEE_DISTRIBUTION records) is now computed
+   live during execution. Full call binding requires the verifier to replay the
+   EVM against the proved inputs — the transition hash confirms the replay
+   matches the original execution.
 
 ### Verification endpoints
 
