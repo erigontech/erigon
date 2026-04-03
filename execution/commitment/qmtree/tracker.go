@@ -477,7 +477,7 @@ func (qt *Tracker) GetRangeWitness(fromSN, toSN uint64) (*RangeWitness, error) {
 // Called at commit boundaries to keep qmtree storage in sync with domain commits.
 // Implements execctx.AppendOnlyFlusher.
 func (qt *Tracker) Flush() {
-	qt.flushKeyIndex()
+	qt.maybeFlushKeyIndex()
 	// Persist metadata to MDBX so LoadFromDB can resume.
 	if qt.rwTx != nil {
 		if err := PutNextTxNum(qt.rwTx, qt.NextTxNum); err != nil {
