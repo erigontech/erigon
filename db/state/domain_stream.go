@@ -75,7 +75,13 @@ func (ch CursorHeap) Less(i, j int) bool {
 	if cmp == 0 {
 		// when keys match, the items with later blocks are preferred
 		if ch[i].reverse {
+			if ch[i].endTxNum == ch[j].endTxNum {
+				return ch[i].t > ch[j].t // RAM > DB > FILE
+			}
 			return ch[i].endTxNum > ch[j].endTxNum
+		}
+		if ch[i].endTxNum == ch[j].endTxNum {
+			return ch[i].t > ch[j].t // RAM > DB > FILE
 		}
 		return ch[i].endTxNum < ch[j].endTxNum
 	}
