@@ -35,6 +35,7 @@ On the `qmtree` branch:
 | [state-proof-analysis.md](state-proof-analysis.md) | Design decisions, RPC implementation details, compact proof sizing analysis, and the vision for provable calls and agent authorization |
 | [transition-design.md](transition-design.md) | Architecture for proof-of-transition: the 25 spec-mandated operations outside the EVM that complete the leaf hash |
 | [transition-format.md](transition-format.md) | **Normative.** Exact byte layout for all 11 transition record types with worked examples |
+| [keyindex-persistence-plan.md](keyindex-persistence-plan.md) | Implementation plan: persist KeyIndex to disk using RecSplit + segmented data files |
 
 ## Reading order
 
@@ -64,7 +65,7 @@ These items are needed before qmtree proofs are fully self-contained and verifia
 
 These improve production readiness and performance but are not needed for a working proof system:
 
-4. **KeyIndex persistence** — the current `KeyIndex` is in-memory only and is rebuilt during `LoadFromDisk`. A persistent sorted file would survive node restarts without a full replay.
+4. **KeyIndex persistence** — the current `KeyIndex` is in-memory only and is rebuilt during `LoadFromDisk`. Plan: segmented `.kv` data files + RecSplit `.kvi` indices, matching Erigon's Domain pattern. See [keyindex-persistence-plan.md](keyindex-persistence-plan.md).
 
 5. **Head pruning** — prune inactive twigs from disk using HPFile once twig eviction logic is added (QMDB §10).
 

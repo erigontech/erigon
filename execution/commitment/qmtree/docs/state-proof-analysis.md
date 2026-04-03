@@ -47,7 +47,8 @@ tree as state commitment. Both EIPs are prerequisites for each other.
    affected keys require full replay from genesis. Medium priority.
 
 2. **KeyIndex persistence** — currently in-memory only, rebuilt on
-   `LoadFromDisk`. Low priority for PoC; required for production.
+   `LoadFromDisk`. Plan: RecSplit + segmented data files. See
+   [keyindex-persistence-plan.md](keyindex-persistence-plan.md).
 
 3. **RPC exposure of exclusion proofs** — `KeyIndex.GetProof()` implements
    both inclusion and non-membership proofs but they are not yet exposed
@@ -462,7 +463,7 @@ All core implementation steps are complete on the `qmtree` branch.
 | Item | Priority | Description |
 |------|----------|-------------|
 | KeyIndex unwind | Medium | No incremental reorg support; affected keys require full replay |
-| KeyIndex persistence | Medium | In-memory only; rebuilt on LoadFromDisk |
+| KeyIndex persistence | Medium | In-memory only; rebuilt on LoadFromDisk. See [plan](keyindex-persistence-plan.md) |
 | RPC exclusion proofs | Low | `KeyIndex.GetProof()` works but not exposed via `qm_` RPC |
 | Head pruning | Low | HPFile design ready; twig eviction logic not implemented |
 | Pipelined execution | Low | Serial `tracker.Flush()` only; no prefetcher-updater-flusher pipeline |
