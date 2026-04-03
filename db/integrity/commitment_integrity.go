@@ -832,7 +832,6 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br serv
 // checkCommitmentHistAtBlkWithIdx checks commitment for blockNum using the pre-built
 // per-domain key index from ChangedKeysPerBlockIdx.
 func checkCommitmentHistAtBlkWithIdx(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, blockNum uint64, idx *ChangedKeysPerBlockIdx, lvl log.Lvl, logger log.Logger) error {
-	logger.Log(lvl, "checking commitment hist at block", "blockNum", blockNum)
 	start := time.Now()
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
