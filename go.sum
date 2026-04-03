@@ -321,8 +321,8 @@ github.com/elastic/go-freelru v0.16.0 h1:gG2HJ1WXN2tNl5/p40JS/l59HjvjRhjyAa+oFTR
 github.com/elastic/go-freelru v0.16.0/go.mod h1:bSdWT4M0lW79K8QbX6XY2heQYSCqD7THoYf82pT/H3I=
 github.com/emirpasic/gods v1.18.1 h1:FXtiHYKDGKCW2KzwZKx0iC0PQmdlorYgdFG9jPXJ1Bc=
 github.com/emirpasic/gods v1.18.1/go.mod h1:8tpGGwCnJ5H4r6BWwaV6OrWmMoPhUl5jm/FMNAnJvWQ=
-github.com/erigontech/erigon-snapshot v1.3.1-0.20260210221902-e495954c7e78 h1:z3x7o3QoOw96XDs7noQ3KdQpiWZR51PGKF428kLLPCU=
-github.com/erigontech/erigon-snapshot v1.3.1-0.20260210221902-e495954c7e78/go.mod h1:ooHlCl+eEYzebiPu+FP6Q6SpPUeMADn8Jxabv3IKb9M=
+github.com/erigontech/erigon-snapshot v1.3.1-0.20260402120223-7bb412bc89cd h1:wSSc83NNfqBlDArQ1ph/rFAFp6E27N2Z8WO5VIBdbC4=
+github.com/erigontech/erigon-snapshot v1.3.1-0.20260402120223-7bb412bc89cd/go.mod h1:ooHlCl+eEYzebiPu+FP6Q6SpPUeMADn8Jxabv3IKb9M=
 github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116 h1:KCFa2uXEfZoBjV4buzjWmCmoqVLXiGCq0ZmQ2OjeRvQ=
 github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116/go.mod h1:8vQ+VjvLu2gkPs8EwdPrOTAAo++WuLuBi54N7NuAF0I=
 github.com/erigontech/fastkeccak v0.1.1-0.20260222164035-95925bf94241 h1:L82GiRxJ9KhUI24BMzDkWOeKrKGyEaC9Bo+CmVqs7ag=
