@@ -1576,7 +1576,7 @@ func Test_ParallelHexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMidd
 		t.Logf("(first half) batch of %d root hash %x\n", somewhere, rh)
 		require.Equal(t, somewhereRoot, rh)
 
-		// trieBatch.SetParticularTrace(true, 0x9)
+		// trieBatch.SetParticularTrace(os.Stderr, 0x9)
 		WrapKeyUpdatesInto(t, updsTwo, plainKeys[somewhere+1:], updates[somewhere+1:])
 
 		rh, err = trieBatch.Process(ctx, updsTwo, "", nil, wc)

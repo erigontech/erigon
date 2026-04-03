@@ -205,9 +205,17 @@ func (p *ConcurrentPatriciaHashed) EnableCsvMetrics(filePathPrefix string) {
 
 // pass -1 to enable trace just for root trie
 func (p *ConcurrentPatriciaHashed) SetParticularTrace(w io.Writer, n int) {
-	p.root.SetTraceWriter(w)
-	if n < len(p.mounts) && n >= 0 {
-		p.mounts[n].SetTraceWriter(w)
+	if w != nil {
+		sw := &syncWriter{w: w}
+		p.root.SetTraceWriter(sw)
+		if n < len(p.mounts) && n >= 0 {
+			p.mounts[n].SetTraceWriter(sw)
+		}
+	} else {
+		p.root.SetTraceWriter(nil)
+		if n < len(p.mounts) && n >= 0 {
+			p.mounts[n].SetTraceWriter(nil)
+		}
 	}
 }
 
