@@ -18,6 +18,7 @@
 ##   --sample FRAC       Fraction of blocks to sample in check (default: 1.0)
 
 set -euo pipefail
+trap 'echo "ERROR: Script failed at line $LINENO (exit code $?)" >&2' ERR
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ERIGON_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
