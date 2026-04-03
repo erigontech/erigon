@@ -7,7 +7,7 @@ description: 'Erigon RPC overlay Namespace: Stateless Contract Bytecode Injectio
 The `overlay` namespace is an **Erigon-specific** extension that allows you to replay historical blocks with a modified contract bytecode, without deploying anything on-chain. It is designed for analytics use cases where you need to inject custom event emissions into an existing contract and retrieve the logs those events would have produced.
 
 {% hint style="warning" %}
-The `overlay` namespace requires an **archive node** (`--prune.mode=archive`). All methods replay historical state, which is not available on pruned nodes.
+The `overlay` namespace requires **historical state to be available**. All methods replay historical transactions and state — a node with sufficient history retention (e.g. `--prune.mode=archive`) is needed; the methods will fail if the requested block's state has been pruned.
 {% endhint %}
 
 Enable the namespace with `--http.api=...,overlay`.
