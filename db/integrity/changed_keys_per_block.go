@@ -29,27 +29,121 @@ import (
 	"github.com/erigontech/erigon/db/services"
 )
 
-// ChangedKeysPerBlock is an in-memory index of changed keys grouped by block number.
-// Built from a single pass over HistoryKeyTxNumRange output for a txNum window.
+// ChangedKeysPerBlock is an in-memory index of changed keys grouped by block number,
+// built from a single HistoryKeyTxNumRange pass over a txNum window.
 //
-// Memory layout: unique keys are stored once in a flat slice; each block maps to
-// a []uint32 of offsets (indices) into that slice.  Keys that change in multiple
-// txNums within the same block are deduplicated, so each key appears at most once
-// per block entry.
+// HistoryKeyTxNumRange emits (key, txNum) sorted by key ASC; txNums are ascending
+// within each key but restart from an arbitrary lower value on each new key.
+// TxNumToBlock exploits this: its cursor advances monotonically within a key and
+// resets to zero on each key change, giving O(1) amortized txNum→block lookup.
 //
-// Typical usage: build once for a 10K-block window, look up O(1) per block instead
-// of driving a merge-heap per block.
+// Memory layout: unique keys are stored once in a flat slice; each block maps to a
+// []uint32 of offsets into that slice.  Multiple txNums mapping to the same block
+// are deduplicated — each key appears at most once per block entry.
+//
+// Typical usage: build once for a 10K-block window via NewChangedKeysPerBlockIdx,
+// then look up O(1) per block instead of driving a merge-heap per block.
 type ChangedKeysPerBlock struct {
 	keys   []string            // flat, deduplicated key storage
 	blocks map[uint64][]uint32 // blockNum -> offsets into keys
 }
 
-// TxNumToBlock maps txNums to block numbers for a contiguous block window using
-// a pre-built per-block maxTxNum array.
-// HistoryKeyTxNumRange sorts by key; within a key txNums are ascending, so
-// blockNums are non-decreasing per key.  BlockOf uses a forward-scan cursor
-// that is reset to 0 on each new key (via ResetCursor), giving O(1) amortized
-// cost instead of O(log N) binary search per txNum.
+// Offsets returns the key offsets (indices into Key()) for the given blockNum.
+// Returns nil if no keys changed in that block within the indexed window.
+func (idx *ChangedKeysPerBlock) Offsets(blockNum uint64) []uint32 {
+	return idx.blocks[blockNum]
+}
+
+// Key returns the key at the given offset (as returned by Offsets).
+func (idx *ChangedKeysPerBlock) Key(offset uint32) string {
+	return idx.keys[offset]
+}
+
+// Has reports whether any keys changed in blockNum within the indexed window.
+func (idx *ChangedKeysPerBlock) Has(blockNum uint64) bool {
+	return len(idx.blocks[blockNum]) > 0
+}
+
+// NumKeys returns the total number of unique keys in the index.
+func (idx *ChangedKeysPerBlock) NumKeys() int { return len(idx.keys) }
+
+// NumBlocks returns the number of blocks that have at least one changed key.
+func (idx *ChangedKeysPerBlock) NumBlocks() int { return len(idx.blocks) }
+
+// RamBytes returns an estimate of heap bytes used by the index.
+func (idx *ChangedKeysPerBlock) RamBytes() uint64 {
+	var n uint64
+	for _, k := range idx.keys {
+		n += uint64(len(k)) + 16 // string header (ptr+len) + backing bytes
+	}
+	for _, offsets := range idx.blocks {
+		n += uint64(len(offsets))*4 + 24 // uint32 entries + slice header + map overhead
+	}
+	return n
+}
+
+// changedKeysPerBlock scans it once and builds the index.  The caller is responsible
+// for closing it.  onNewKey is called on key change before txNum2Block so a stateful
+// cursor can reset; pass nil if not needed.
+func changedKeysPerBlock(it stream.KU64, txNum2Block func(txNum uint64) (uint64, error), onNewKey func()) (*ChangedKeysPerBlock, error) {
+	idx := &ChangedKeysPerBlock{
+		blocks: make(map[uint64][]uint32),
+	}
+	keyIdx := make(map[string]uint32) // key -> offset in idx.keys; only used during build
+
+	// prevKey/prevBlockNum deduplicate multiple txNums for the same key in the same block.
+	// blockNums per key are non-decreasing, so a duplicate (key, block) is always
+	// the immediately preceding entry.
+	var prevKey string
+	prevBlockNum := ^uint64(0) // sentinel: no previous entry
+
+	for it.HasNext() {
+		k, txNum, err := it.Next()
+		if err != nil {
+			return nil, err
+		}
+
+		ks := string(k)
+		if ks != prevKey && onNewKey != nil {
+			onNewKey() // txNums restart from a lower value on each new key, so cursor must reset
+		}
+
+		blockNum, err := txNum2Block(txNum)
+		if err != nil {
+			return nil, err
+		}
+		if blockNum == prevBlockNum && ks == prevKey {
+			continue
+		}
+
+		ki, ok := keyIdx[ks]
+		if !ok {
+			ki = uint32(len(idx.keys))
+			keyIdx[ks] = ki
+			idx.keys = append(idx.keys, ks)
+		}
+
+		idx.blocks[blockNum] = append(idx.blocks[blockNum], ki)
+		prevKey = ks
+		prevBlockNum = blockNum
+	}
+	return idx, nil
+}
+
+// NewChangedKeysPerBlock calls HistoryKeyTxNumRange for domain over [fromTxNum, toTxNum)
+// and builds a blockNum→keys index from the result.
+func NewChangedKeysPerBlock(tx kv.TemporalDebugTx, domain kv.Domain, fromTxNum, toTxNum int, txNums *TxNumToBlock) (*ChangedKeysPerBlock, error) {
+	it, err := tx.HistoryKeyTxNumRange(domain, fromTxNum, toTxNum, order.Asc, -1)
+	if err != nil {
+		return nil, err
+	}
+	defer it.Close()
+	return changedKeysPerBlock(it, txNums.BlockOf, txNums.ResetCursor)
+}
+
+// TxNumToBlock maps txNums to block numbers within a contiguous block window.
+// BlockOf uses a forward-scan cursor: because txNums are ascending within a key,
+// the cursor never goes backward within one key — only needs resetting between keys.
 type TxNumToBlock struct {
 	maxTxNums    []uint64
 	fromBlockNum uint64
@@ -96,107 +190,11 @@ func (m *TxNumToBlock) BlockOf(txNum uint64) (uint64, error) {
 	return 0, fmt.Errorf("TxNumToBlock: txNum %d beyond window [%d,%d)", txNum, m.fromBlockNum, m.toBlockNum)
 }
 
-// NewChangedKeysPerBlock calls HistoryKeyTxNumRange for domain over [fromTxNum, toTxNum)
-// and builds a blockNum→keys index from the result.
-func NewChangedKeysPerBlock(tx kv.TemporalDebugTx, domain kv.Domain, fromTxNum, toTxNum int, txNums *TxNumToBlock) (*ChangedKeysPerBlock, error) {
-	it, err := tx.HistoryKeyTxNumRange(domain, fromTxNum, toTxNum, order.Asc, -1)
-	if err != nil {
-		return nil, err
-	}
-	defer it.Close()
-	return changedKeysPerBlock(it, txNums.BlockOf, txNums.ResetCursor)
-}
-
-// changedKeysPerBlock scans it once and builds the index.  The caller is
-// responsible for closing it.  onNewKey is called whenever the key changes so
-// that a stateful txNum2Block can reset its cursor; pass nil if not needed.
-func changedKeysPerBlock(it stream.KU64, txNum2Block func(txNum uint64) (uint64, error), onNewKey func()) (*ChangedKeysPerBlock, error) {
-	idx := &ChangedKeysPerBlock{
-		blocks: make(map[uint64][]uint32),
-	}
-	// keyIdx maps key string -> offset in idx.keys (used only during build).
-	keyIdx := make(map[string]uint32)
-
-	// prevKey / prevBlockNum track the previous (key, blockNum) pair so that
-	// multiple txNums for the same key in the same block are deduplicated.
-	// The iterator emits keys in ascending order; txNums per key are ascending,
-	// so blockNums per key are non-decreasing — a duplicate (key, block) pair is
-	// always the immediately preceding entry.
-	var prevKey string
-	prevBlockNum := ^uint64(0) // sentinel: no previous entry
-
-	for it.HasNext() {
-		k, txNum, err := it.Next()
-		if err != nil {
-			return nil, err
-		}
-
-		ks := string(k)
-		if ks != prevKey && onNewKey != nil {
-			onNewKey() // txNums restart from a lower value on each new key, so cursor must reset
-		}
-
-		blockNum, err := txNum2Block(txNum)
-		if err != nil {
-			return nil, err
-		}
-		if blockNum == prevBlockNum && ks == prevKey {
-			continue
-		}
-
-		ki, ok := keyIdx[ks]
-		if !ok {
-			ki = uint32(len(idx.keys))
-			keyIdx[ks] = ki
-			idx.keys = append(idx.keys, ks)
-		}
-
-		idx.blocks[blockNum] = append(idx.blocks[blockNum], ki)
-		prevKey = ks
-		prevBlockNum = blockNum
-	}
-	return idx, nil
-}
-
-// Offsets returns the key offsets (indices into Key()) for the given blockNum.
-// Returns nil if no keys changed in that block within the indexed window.
-func (idx *ChangedKeysPerBlock) Offsets(blockNum uint64) []uint32 {
-	return idx.blocks[blockNum]
-}
-
-// Key returns the key at the given offset (as returned by Offsets).
-func (idx *ChangedKeysPerBlock) Key(offset uint32) string {
-	return idx.keys[offset]
-}
-
-// Has reports whether any keys changed in blockNum within the indexed window.
-func (idx *ChangedKeysPerBlock) Has(blockNum uint64) bool {
-	return len(idx.blocks[blockNum]) > 0
-}
-
-// NumKeys returns the total number of unique keys in the index.
-func (idx *ChangedKeysPerBlock) NumKeys() int { return len(idx.keys) }
-
-// NumBlocks returns the number of blocks that have at least one changed key.
-func (idx *ChangedKeysPerBlock) NumBlocks() int { return len(idx.blocks) }
-
-// RamBytes returns an estimate of heap bytes used by the index.
-func (idx *ChangedKeysPerBlock) RamBytes() uint64 {
-	var n uint64
-	for _, k := range idx.keys {
-		n += uint64(len(k)) + 16 // string header (ptr+len) + backing bytes
-	}
-	for _, offsets := range idx.blocks {
-		n += uint64(len(offsets))*4 + 24 // uint32 entries + slice header + map overhead
-	}
-	return n
-}
-
 // ChangedKeysPerBlockIdx holds pre-built per-domain key change indices for a block window.
 // Populated by NewChangedKeysPerBlockIdx for the requested domains.
 type ChangedKeysPerBlockIdx [kv.DomainLen]*ChangedKeysPerBlock
 
-// ChangedKeysPerBlockIdx scans HistoryKeyTxNumRange once per domain for the txNum
+// NewChangedKeysPerBlockIdx scans HistoryKeyTxNumRange once per domain for the txNum
 // range covering [fromBlockNum, toBlockNum) blocks and returns the resulting index.
 // The index is fully in-memory; the tx used for scanning is closed on return.
 // domains selects which domains to index; typically kv.StateDomains[:kv.CommitmentDomain].
@@ -213,7 +211,7 @@ func NewChangedKeysPerBlockIdx(ctx context.Context, db kv.TemporalRoDB, br servi
 		return nil, err
 	}
 	// NewTxNumToBlock reads Max for every block in the window; derive toTxNum from
-	// its last entry instead of making a separate redundant Max(toBlockNum-1) call.
+	// its last entry instead of a separate redundant Max(toBlockNum-1) call.
 	txNums, err := NewTxNumToBlock(ctx, tx, br, fromBlockNum, toBlockNum)
 	if err != nil {
 		return nil, err
