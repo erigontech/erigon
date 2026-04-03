@@ -963,7 +963,7 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 // across many sampled blocks; small enough to keep memory bounded (~few hundred MB).
 const checkCommitmentHistWindowSize = 10_000
 
-func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, br services.FullBlockReader, from, to uint64, failFast bool, logger log.Logger) error {
+func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, br services.FullBlockReader, from, to uint64, logger log.Logger) error {
 	if from >= to {
 		return fmt.Errorf("invalid blk range: %d >= %d", from, to)
 	}
@@ -990,9 +990,6 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 		}
 	}()
 
-	var integrityErr atomic.Pointer[error]
-	var blks atomic.Uint64
-
 	// Each worker owns a window: builds its own ChangedKeysPerBlockIdx then checks
 	// its own sampled blocks — index building and block checking both run in parallel.
 	g, wCtx := errgroup.WithContext(ctx)
@@ -1009,15 +1006,8 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 				return fmt.Errorf("CheckCommitmentHistAtBlkRange: build index window=[%d,%d): %w", windowStart, windowEnd, err)
 			}
 			for blockNum := range sampler.BlockNums(windowStart, windowEnd) {
-				blks.Add(1)
 				if err := checkCommitmentHistAtBlkWithIdx(wCtx, db, br, blockNum, idx, log.LvlTrace, logger); err != nil {
-					err = fmt.Errorf("checkCommitmentHistAtBlk: %d, %w", blockNum, err)
-					if failFast {
-						return err
-					}
-					logger.Warn(err.Error())
-					integrityErr.Store(&err)
-					return nil
+					return fmt.Errorf("checkCommitmentHistAtBlk: %d, %w", blockNum, err)
 				}
 				checked.Add(1)
 				lastBlockNum.Store(blockNum)
@@ -1030,12 +1020,9 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 	}
 
 	dur := time.Since(start)
-	n := blks.Load()
+	n := checked.Load()
 	rate := float64(n) / dur.Seconds()
 	logger.Info("checked commitment hist at blk range", "dur", dur, "blks", n, "blks/s", rate, "from", from, "to", to, "seed", sampler.Seed, "sampleRatio", sampler.SampleRatio)
-	if p := integrityErr.Load(); p != nil {
-		return *p
-	}
 	return nil
 }
 
