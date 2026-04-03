@@ -40,8 +40,10 @@ type testResult struct {
 	Name  string       `json:"name"`
 	Pass  bool         `json:"pass"`
 	Root  *common.Hash `json:"stateRoot,omitempty"`
+	Fork  string       `json:"fork,omitempty"`
 	Error string       `json:"error,omitempty"`
 	State *state.Dump  `json:"state,omitempty"`
+	Stats *execStats   `json:"benchStats,omitempty"`
 }
 
 func (r testResult) String() string {
@@ -55,6 +57,9 @@ func (r testResult) String() string {
 	var extra string
 	if !r.Pass {
 		extra = fmt.Sprintf(", err=%v", r.Error)
+		if r.Fork != "" {
+			extra += fmt.Sprintf(", fork=%s", r.Fork)
+		}
 	}
 
 	out := fmt.Sprintf("%s %s%s", status, r.Name, extra)
@@ -67,6 +72,11 @@ func (r testResult) String() string {
 
 // report prints the after-test summary.
 func report(ctx *cli.Context, results []testResult) {
+	if ctx.Bool(JSONOutputFlag.Name) {
+		out, _ := json.MarshalIndent(results, "", "  ")
+		fmt.Println(string(out))
+		return
+	}
 	pass := 0
 	for _, r := range results {
 		if r.Pass {

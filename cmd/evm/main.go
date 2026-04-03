@@ -131,6 +131,20 @@ var (
 		Name:  "noreturndata",
 		Usage: "disable return data output",
 	}
+	RunFlag = cli.StringFlag{
+		Name:  "run",
+		Value: ".*",
+		Usage: "Run only those tests matching the regular expression.",
+	}
+	WorkersFlag = cli.IntFlag{
+		Name:  "workers",
+		Usage: "Number of parallel workers for processing fixture files",
+		Value: 1,
+	}
+	JSONOutputFlag = cli.BoolFlag{
+		Name:  "jsonout",
+		Usage: "Output results as JSON array instead of human-readable format",
+	}
 )
 
 var stateTransitionCommand = cli.Command{
