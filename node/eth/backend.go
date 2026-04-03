@@ -817,7 +817,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			contractBackend,
 			backend.stateDiffClient,
 			currentBlockNumReader,
-			backend.notifications.Events,
 		)
 		txnProvider = backend.shutterPool
 	}

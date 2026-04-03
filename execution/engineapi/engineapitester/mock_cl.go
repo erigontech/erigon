@@ -68,7 +68,7 @@ func NewMockCl(ctx context.Context, logger log.Logger, elClient *engineapi.JsonR
 	mcl := &MockCl{
 		logger:                logger,
 		engineApiClient:       elClient,
-		blockListener:         shutter.NewBlockListener(logger, stateChangesClient, nil),
+		blockListener:         shutter.NewBlockListener(logger, stateChangesClient),
 		suggestedFeeRecipient: genesis.Coinbase(),
 		genesis:               genesis.Hash(),
 		chainConfig:           chainConfig,

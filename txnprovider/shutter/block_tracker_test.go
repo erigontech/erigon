@@ -38,7 +38,7 @@ func TestBlockTracker(t *testing.T) {
 	defer cancel()
 	logger := testlog.Logger(t, log.LvlTrace)
 	recvC := make(chan *remoteproto.StateChangeBatch)
-	bl := shutter.NewBlockListener(logger, testhelpers.NewStateChangesClientMock(ctx, recvC), nil)
+	bl := shutter.NewBlockListener(logger, testhelpers.NewStateChangesClientMock(ctx, recvC))
 	btInitialisationWg := &sync.WaitGroup{}
 	btInitialisationWg.Add(1)
 	bnReader := func(ctx context.Context) (*uint64, error) {

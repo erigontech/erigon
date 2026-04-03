@@ -53,10 +53,6 @@ type KsmEonTracker struct {
 	recentEons           *btree.BTreeG[Eon]
 	cleanupThreshold     uint64
 	lastCleanupBlockNum  uint64
-	// Keyper set events may arrive before the block is committed (pre-commit
-	// overlay). They are buffered here and processed in handleBlockEvent
-	// which is overlay-buffered and only fires after commit.
-	pendingKeyperSetEvents []*contracts.KeyperSetManagerKeyperSetAdded
 }
 
 func NewKsmEonTracker(logger log.Logger, config shuttercfg.Config, bl *BlockListener, cb bind.ContractBackend) *KsmEonTracker {
@@ -191,7 +187,6 @@ func (et *KsmEonTracker) handleBlockEvent(blockEvent BlockEvent) error {
 
 	et.currentEon = &eon
 	et.recentEons.ReplaceOrInsert(eon)
-	et.processPendingKeyperSetEvents()
 	et.maybeCleanup(blockNum)
 	return nil
 }
@@ -375,29 +370,19 @@ func (et *KsmEonTracker) handleKeyperSetAddedEvent(event *contracts.KeyperSetMan
 		return nil
 	}
 
-	// Log subscription events may arrive before the block is committed
-	// (pre-commit overlay dispatch). Buffer the event and process it in
-	// the next handleBlockEvent call, which is overlay-buffered.
-	et.pendingKeyperSetEvents = append(et.pendingKeyperSetEvents, event)
-	return nil
-}
-
-// processPendingKeyperSetEvents drains any buffered keyper set events.
-// Called from handleBlockEvent (which is overlay-buffered → committed data).
-func (et *KsmEonTracker) processPendingKeyperSetEvents() {
-	for _, event := range et.pendingKeyperSetEvents {
-		eon, ok, err := et.readEonAtKeyperSetAddedEvent(event)
-		if err != nil {
-			et.logger.Warn("failed to read eon at keyper set added event", "eon", event.Eon, "err", err)
-			continue
-		}
-		if !ok {
-			et.logger.Warn("no eon at keyper set added event", "eon", event.Eon)
-			continue
-		}
-		et.recentEons.ReplaceOrInsert(eon)
+	// eth_call is overlay-aware, so contract reads see uncommitted block
+	// data via the overlay. Process the event directly.
+	eon, ok, err := et.readEonAtKeyperSetAddedEvent(event)
+	if err != nil {
+		et.logger.Warn("failed to read eon at keyper set added event", "eon", event.Eon, "err", err)
+		return nil
 	}
-	et.pendingKeyperSetEvents = nil
+	if !ok {
+		et.logger.Warn("no eon at keyper set added event", "eon", event.Eon)
+		return nil
+	}
+	et.recentEons.ReplaceOrInsert(eon)
+	return nil
 }
 
 func (et *KsmEonTracker) readEonAtKeyperSetAddedEvent(event *contracts.KeyperSetManagerKeyperSetAdded) (Eon, bool, error) {

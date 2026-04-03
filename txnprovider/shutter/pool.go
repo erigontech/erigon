@@ -59,7 +59,6 @@ func NewPool(
 	contractBackend bind.ContractBackend,
 	stateChangesClient stateChangesClient,
 	currentBlockNumReader currentBlockNumReader,
-	overlaySubscriber OverlaySubscriber,
 	opts ...Option,
 ) *Pool {
 	logger = logger.New("component", "shutter")
@@ -68,7 +67,7 @@ func NewPool(
 		opt(&flatOpts)
 	}
 
-	blockListener := NewBlockListener(logger, stateChangesClient, overlaySubscriber)
+	blockListener := NewBlockListener(logger, stateChangesClient)
 	blockTracker := NewBlockTracker(logger, blockListener, currentBlockNumReader)
 	eonTracker := NewKsmEonTracker(logger, config, blockListener, contractBackend)
 
