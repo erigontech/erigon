@@ -29,6 +29,23 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
+// bodyToRawBody converts a parsed Body to a RawBody using MarshalBinary
+// (canonical binary encoding) for transactions. This differs from
+// Body.RawBody() which uses rlp.EncodeToBytes and wraps typed transactions
+// in an extra RLP string header — incorrect for the engine API which expects
+// raw binary tx format (type prefix + RLP payload, no outer wrapper).
+func bodyToRawBody(body *types.Body) (*types.RawBody, error) {
+	txs, err := types.MarshalTransactionsBinary(body.Transactions)
+	if err != nil {
+		return nil, err
+	}
+	return &types.RawBody{
+		Transactions: txs,
+		Uncles:       body.Uncles,
+		Withdrawals:  body.Withdrawals,
+	}, nil
+}
+
 var errNotFound = errors.New("notfound")
 
 // beginOverlayOrRo returns a tx that reads from the block overlay (if a
@@ -120,7 +137,7 @@ func (e *ExecModule) GetBody(ctx context.Context, blockHash *common.Hash, blockN
 	if body == nil {
 		return nil, nil
 	}
-	return body.RawBody(), nil
+	return bodyToRawBody(body)
 }
 
 func (e *ExecModule) GetHeader(ctx context.Context, blockHash *common.Hash, blockNumber *uint64) (*types.Header, error) {
@@ -165,7 +182,11 @@ func (e *ExecModule) GetBodiesByHashes(ctx context.Context, hashes []common.Hash
 			bodies = append(bodies, nil)
 			continue
 		}
-		bodies = append(bodies, body.RawBody())
+		rb, err := bodyToRawBody(body)
+		if err != nil {
+			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByHashes: MarshalTransactionsBinary error %w", err)
+		}
+		bodies = append(bodies, rb)
 	}
 	return bodies, nil
 }
@@ -195,7 +216,11 @@ func (e *ExecModule) GetBodiesByRange(ctx context.Context, start, count uint64) 
 			bodies = append(bodies, nil)
 			continue
 		}
-		bodies = append(bodies, body.RawBody())
+		rb, err := bodyToRawBody(body)
+		if err != nil {
+			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByRange: MarshalTransactionsBinary error %w", err)
+		}
+		bodies = append(bodies, rb)
 	}
 	// Remove trailing nil values as per spec
 	// See point 4 in https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#specification-4
