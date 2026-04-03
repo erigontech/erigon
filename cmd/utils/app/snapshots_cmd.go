@@ -1394,6 +1394,9 @@ func stateProgress(ctx context.Context, db kv.TemporalRoDB, txNumsReader rawdbv3
 	if err != nil {
 		return 0, err
 	}
+	if blockNum > 0 {
+		blockNum-- // FindBlockNum returns the block *containing* aggMax, but the per-block check needs the entire block covered
+	}
 	return blockNum, nil
 }
 
