@@ -153,10 +153,33 @@ func (p *ConcurrentPatriciaHashed) Close() {
 	}
 }
 
+// syncWriter wraps an io.Writer with a mutex for goroutine-safe writes.
+// Used by ConcurrentPatriciaHashed to protect concurrent fmt.Fprintf calls
+// from root and mount goroutines writing to the same underlying writer.
+type syncWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (sw *syncWriter) Write(p []byte) (n int, err error) {
+	sw.mu.Lock()
+	n, err = sw.w.Write(p)
+	sw.mu.Unlock()
+	return
+}
+
 func (p *ConcurrentPatriciaHashed) SetTraceWriter(w io.Writer) {
-	p.root.SetTraceWriter(w)
-	for i := range p.mounts {
-		p.mounts[i].SetTraceWriter(w)
+	if w != nil {
+		sw := &syncWriter{w: w}
+		p.root.SetTraceWriter(sw)
+		for i := range p.mounts {
+			p.mounts[i].SetTraceWriter(sw)
+		}
+	} else {
+		p.root.SetTraceWriter(nil)
+		for i := range p.mounts {
+			p.mounts[i].SetTraceWriter(nil)
+		}
 	}
 }
 func (p *ConcurrentPatriciaHashed) SetTraceDomain(b bool) {

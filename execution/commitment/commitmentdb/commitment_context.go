@@ -284,6 +284,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		if sdc.captureBuf == nil {
 			sdc.captureBuf = new(bytes.Buffer)
 		}
+		sdc.captureBuf.Reset() // ensure clean slate for this computation
 		sdc.patriciaTrie.SetTraceWriter(sdc.captureBuf)
 	} else if sdc.trace {
 		sdc.patriciaTrie.SetTraceWriter(os.Stderr)

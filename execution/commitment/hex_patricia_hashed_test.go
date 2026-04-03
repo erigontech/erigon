@@ -2034,7 +2034,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		toProcess := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 		defer toProcess.Close()
 
-		//hph.trace = true
+		//hph.SetTraceWriter(os.Stderr)
 		root, err := hph.Process(ctx, toProcess, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 
@@ -3048,10 +3048,11 @@ func TestSetTraceWriter_BufferCapturesOutput(t *testing.T) {
 	require.NotEmpty(t, output, "trace buffer should contain output when traceW is set")
 
 	// Process should emit [proc] lines — one per key update processed.
-	require.True(t, strings.Contains(output, "[proc]"),
-		"trace output should contain [proc] lines, got:\n%s", output)
+	procCount := strings.Count(output, "[proc]")
+	require.True(t, procCount >= 4,
+		"trace output should contain at least 4 [proc] lines (one per update), got %d in:\n%s", procCount, output)
 
-	// fold is called during commitment computation.
-	require.True(t, strings.Contains(output, "fold"),
+	// fold is called during commitment computation — match the tagged prefix.
+	require.True(t, strings.Contains(output, "fold ["),
 		"trace output should contain fold-related lines, got:\n%s", output)
 }
