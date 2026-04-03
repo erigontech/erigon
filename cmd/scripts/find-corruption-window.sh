@@ -33,7 +33,7 @@ WORKDIR="/erigon-data/sepolia-mirrors"
 EXEC_MINUTES=20
 START_ITER=1
 SAMPLE="1"
-BATCH_SIZE="50mb"
+BATCH_SIZE="512mb"
 CHAIN="sepolia"
 
 # Parse args
