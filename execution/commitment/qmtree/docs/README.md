@@ -36,6 +36,7 @@ On the `qmtree` branch:
 | [transition-design.md](transition-design.md) | Architecture for proof-of-transition: the 25 spec-mandated operations outside the EVM that complete the leaf hash |
 | [transition-format.md](transition-format.md) | **Normative.** Exact byte layout for all 11 transition record types with worked examples |
 | [keyindex-persistence-plan.md](keyindex-persistence-plan.md) | Implementation plan: persist KeyIndex to disk using RecSplit + segmented data files |
+| [dataset-generation.md](dataset-generation.md) | How to generate a qmtree dataset from a synced datadir (mainnet or hoodi) |
 
 ## Reading order
 
