@@ -21,6 +21,7 @@ import (
 	"iter"
 	"math"
 	"math/rand/v2"
+	"time"
 )
 
 // Sampler encapsulates pseudo-random sampling logic for integrity checks.
@@ -126,6 +127,17 @@ func (s *Sampler) nums(from, to uint64) iter.Seq[uint64] {
 			}
 		}
 	}
+}
+
+// ETA estimates the remaining duration given how many items have been checked,
+// the total range size, and elapsed time. Returns 0 if done == 0.
+func (s *Sampler) ETA(done uint64, rangeSize uint64, elapsed time.Duration) time.Duration {
+	if done == 0 {
+		return 0
+	}
+	totalExpected := float64(rangeSize) * s.SampleRatio
+	rate := float64(done) / elapsed.Seconds()
+	return time.Duration((totalExpected-float64(done))/rate) * time.Second
 }
 
 // geometricSkip draws the number of items to skip before the next sampled item,
