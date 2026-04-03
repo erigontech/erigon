@@ -351,12 +351,13 @@ var Schema = SchemaGen{
 			FileVersion:       HistVersionTypes{DataV: version.V1_0_standart, AccessorVI: version.V1_0_standart},
 			HistoryIdx:        kv.AccountsHistoryIdx, // placeholder
 			IiCfg: InvIdxCfg{
-				// Disable=false so Domain.Disable is false and the Aggregator
-				// handles collation/merge for the domain values table.
-				Disable:      false,
+				// Disable=true: standalone SnapshotManager handles collation/merge.
+				// Setting false causes Aggregator init to hang on large datadirs.
+				// TODO: investigate and re-enable for full Aggregator integration.
+				Disable:      true,
 				FilenameBase: kv.QMTreeDomain.String(),
-				KeysTable:    kv.TblQMTreeMeta,     // placeholder — II is effectively unused
-				ValuesTable:  kv.TblQMTreeKeyIndex,  // placeholder — II is effectively unused
+				KeysTable:    kv.TblQMTreeMeta,     // placeholder
+				ValuesTable:  kv.TblQMTreeKeyIndex,  // placeholder
 				FileVersion:  IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart},
 			},
 		},
