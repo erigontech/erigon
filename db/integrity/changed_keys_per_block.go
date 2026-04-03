@@ -17,9 +17,11 @@
 package integrity
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"time"
+	"unsafe"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -134,7 +136,7 @@ func changedKeysPerBlock(it stream.KU64, txNums *TxNumToBlock) (*ChangedKeysPerB
 	// prevKey/prevBlockNum deduplicate multiple txNums for the same key in the same block.
 	// blockNums per key are non-decreasing, so a duplicate (key, block) is always
 	// the immediately preceding entry.
-	var prevKey string
+	var prevKey []byte
 	prevBlockNum := ^uint64(0) // sentinel: no previous entry
 
 	for it.HasNext() {
@@ -143,8 +145,8 @@ func changedKeysPerBlock(it stream.KU64, txNums *TxNumToBlock) (*ChangedKeysPerB
 			return nil, err
 		}
 
-		ks := string(k)
-		if ks != prevKey {
+		keyChanged := !bytes.Equal(k, prevKey)
+		if keyChanged {
 			txNums.ResetCursor() // txNums restart from a lower value on each new key, so cursor must reset
 		}
 
@@ -152,19 +154,24 @@ func changedKeysPerBlock(it stream.KU64, txNums *TxNumToBlock) (*ChangedKeysPerB
 		if err != nil {
 			return nil, err
 		}
-		if blockNum == prevBlockNum && ks == prevKey {
+		if blockNum == prevBlockNum && !keyChanged {
 			continue
 		}
 
+		// unsafe.String avoids allocating a string copy on every iteration just for the map
+		// lookup. Safe: the lookup is synchronous and k remains valid for its duration.
+		// Only allocate a real string copy when storing a new key permanently.
+		ks := unsafe.String(unsafe.SliceData(k), len(k))
 		ki, ok := keyIdx[ks]
 		if !ok {
+			ksCopy := string(k)
 			ki = uint32(len(idx.keys))
-			keyIdx[ks] = ki
-			idx.keys = append(idx.keys, ks)
+			keyIdx[ksCopy] = ki
+			idx.keys = append(idx.keys, ksCopy)
 		}
 
 		idx.blocks[blockNum] = append(idx.blocks[blockNum], ki)
-		prevKey = ks
+		prevKey = append(prevKey[:0], k...)
 		prevBlockNum = blockNum
 	}
 	return idx, nil
