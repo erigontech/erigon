@@ -890,22 +890,29 @@ func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 		"qmtree_dir", dirs.Snap)
 
 	startTime := time.Now()
-	// Open a write tx for qmtree MDBX tables. We commit periodically
-	// (every 1000 blocks at the flush point) to avoid dirty-page OOM.
-	qmRwTx, err := db.BeginRw(ctx)
-	if err != nil {
-		return fmt.Errorf("begin rw tx for qmtree: %w", err)
-	}
-	defer func() {
-		if qmRwTx != nil {
-			qmRwTx.Rollback()
-		}
-	}()
-	tracker.SetTx(qmRwTx)
+	// The consumer callback runs on a worker pool goroutine — MDBX write
+	// transactions are thread-bound, so we open/commit them inside the
+	// consumer itself (same goroutine) rather than on the main goroutine.
+	var qmRwTx kv.RwTx
+	qmTxInitDone := false
 
-	// Load existing qmtree state from MDBX (resume after restart).
-	if err := tracker.LoadFromDB(qmRwTx); err != nil {
-		logger.Warn("[stage_exec_replay] LoadFromDB failed, starting fresh", "err", err)
+	// ensureQmTx opens the MDBX write tx on first call (from the consumer
+	// goroutine) and loads existing state. Subsequent calls are no-ops.
+	ensureQmTx := func() error {
+		if qmTxInitDone {
+			return nil
+		}
+		var err error
+		qmRwTx, err = db.BeginRw(ctx)
+		if err != nil {
+			return fmt.Errorf("begin rw tx for qmtree: %w", err)
+		}
+		tracker.SetTx(qmRwTx)
+		if err := tracker.LoadFromDB(qmRwTx); err != nil {
+			logger.Warn("[stage_exec_replay] LoadFromDB failed, starting fresh", "err", err)
+		}
+		qmTxInitDone = true
+		return nil
 	}
 
 	// commitQmTx commits the current write tx and opens a fresh one.
@@ -914,6 +921,7 @@ func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 		if err := qmRwTx.Commit(); err != nil {
 			return fmt.Errorf("commit qmtree tx: %w", err)
 		}
+		var err error
 		qmRwTx, err = db.BeginRw(ctx)
 		if err != nil {
 			return fmt.Errorf("reopen qmtree tx: %w", err)
@@ -931,6 +939,11 @@ func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 			if result.Err != nil {
 				return result.Err
 			}
+			// Lazy-init the write tx on the consumer's goroutine (MDBX thread-bound).
+			if err := ensureQmTx(); err != nil {
+				return err
+			}
+
 			txTask := result.Task.(*exec.TxTask)
 			lastBlockNum = txTask.BlockNumber()
 
@@ -984,12 +997,14 @@ func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 		return err
 	}
 
-	// Final commit.
-	tracker.Flush()
-	if err := qmRwTx.Commit(); err != nil {
-		return fmt.Errorf("final commit qmtree tx: %w", err)
+	// Final commit (consumer and this code run on the same goroutine
+	// after CustomTraceMapReduce returns).
+	if qmRwTx != nil {
+		tracker.Flush()
+		if err := qmRwTx.Commit(); err != nil {
+			return fmt.Errorf("final commit qmtree tx: %w", err)
+		}
 	}
-	qmRwTx = nil // prevent deferred rollback
 	elapsed := time.Since(startTime)
 	blkPerSec := float64(lastBlockNum) / elapsed.Seconds()
 	finalRoot := tracker.SyncRoot()
