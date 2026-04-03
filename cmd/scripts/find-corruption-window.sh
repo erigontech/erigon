@@ -79,6 +79,7 @@ get_exec_block() {
 
 iter=$START_ITER
 current_source="$SOURCE"
+prev_end_block=""
 
 while true; do
     mirror_dir="$WORKDIR/mirror-$iter"
@@ -105,6 +106,7 @@ while true; do
     timeout --signal=INT --kill-after=60s "${EXEC_MINUTES}m" "$INTEGRATION" stage_exec \
         --datadir="$mirror_dir" \
         --chain="$CHAIN" \
+        --batchSize=50mb \
         2>&1 | tee "$mirror_dir/stage_exec.log" || true
     # timeout returns 124 on timeout (SIGINT sent), which is expected
     # --kill-after=60s sends SIGKILL if process doesn't exit within 60s of SIGINT
@@ -117,6 +119,10 @@ while true; do
     fi
     if [ "$end_block" = "$start_block" ]; then
         echo "[iter $iter] ERROR: Execution made no progress (still at block $end_block)"
+        exit 1
+    fi
+    if [ "$end_block" = "$prev_end_block" ]; then
+        echo "[iter $iter] ERROR: Execution stuck at block $end_block for 2 consecutive iterations"
         exit 1
     fi
     echo "[iter $iter] Execution reached block: $end_block (started at ${start_block:-unknown})"
@@ -135,6 +141,7 @@ while true; do
         echo ""
 
         # Step 6: Mirror becomes the new source
+        prev_end_block="$end_block"
         current_source="$mirror_dir"
         iter=$((iter + 1))
     else
