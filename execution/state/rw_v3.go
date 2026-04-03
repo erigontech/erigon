@@ -119,12 +119,18 @@ func (rs *StateV3) applyUpdates(roTx kv.TemporalTx, blockNum, txNum uint64, stat
 							if dbg.TraceApply && (rs.trace || dbg.TraceAccount(update.address.Handle())) {
 								fmt.Printf("%d apply:del storage: %x q%x\n", blockNum, update.address, i.key)
 							}
+							if dbg.TraceAccount(update.address.Handle()) {
+								fmt.Printf("%d applyUpdates:DomainDel(StorageDomain): addr=%x slot=%x txNum=%d\n", blockNum, update.address, i.key, txNum)
+							}
 							if err = domains.DomainDel(kv.StorageDomain, roTx, composite, txNum, nil); err != nil {
 								return false
 							}
 						} else {
 							if dbg.TraceApply && (rs.trace || dbg.TraceAccount(update.address.Handle())) {
 								fmt.Printf("%d apply:put storage: %x %x %x\n", blockNum, update.address, i.key, &i.value)
+							}
+							if dbg.TraceAccount(update.address.Handle()) {
+								fmt.Printf("%d applyUpdates:DomainPut(StorageDomain): addr=%x slot=%x val=%x txNum=%d\n", blockNum, update.address, i.key, v, txNum)
 							}
 							if err = domains.DomainPut(kv.StorageDomain, roTx, composite, v, txNum, nil); err != nil {
 								return false
@@ -573,6 +579,9 @@ func (w *BufferedWriter) WriteAccountStorage(address accounts.Address, incarnati
 	if w.trace {
 		fmt.Printf("BufferedWriter: storage: %x,%x,%x\n", address, key, &value)
 	}
+	if dbg.TraceAccount(address.Handle()) {
+		fmt.Printf("BufferedWriter.WriteAccountStorage: addr=%x slot=%x orig=%x new=%x stack=%s\n", address, key, original.Bytes(), value.Bytes(), dbg.Stack())
+	}
 
 	if w.accumulator != nil {
 		vb := value.Bytes32()
@@ -708,6 +717,9 @@ func (w *Writer) WriteAccountStorage(address accounts.Address, incarnation uint6
 	v := value.Bytes()
 	if w.trace {
 		fmt.Printf("storage: %x,%x,%x\n", address, key, v)
+	}
+	if dbg.TraceAccount(address.Handle()) {
+		fmt.Printf("Writer.WriteAccountStorage: addr=%x slot=%x orig=%x new=%x txNum=%d stack=%s\n", address, key, original.Bytes(), v, w.txNum, dbg.Stack())
 	}
 	if len(v) == 0 {
 		return w.tx.DomainDel(kv.StorageDomain, composite, w.txNum, nil)

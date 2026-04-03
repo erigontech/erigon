@@ -515,6 +515,9 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 		sd.stateCache.Put(domain, k, v)
 	}
 
+	if domain == kv.StorageDomain && len(k) >= 20 && dbg.TraceStateKey(k) {
+		fmt.Printf("SharedDomains.DomainPut(StorageDomain): key=%x val=%x prevVal=%x txNum=%d prevValWasNil=%t\n", k, v, prevVal, txNum, prevVal == nil)
+	}
 	return sd.mem.DomainPut(domain, ks, v, txNum, prevVal)
 }
 
@@ -550,6 +553,9 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 		}
 		return sd.mem.DomainDel(kv.AccountsDomain, ks, txNum, prevVal)
 	case kv.StorageDomain:
+		if len(k) >= 20 && dbg.TraceStateKey(k) {
+			fmt.Printf("SharedDomains.DomainDel(StorageDomain): key=%x prevVal=%x txNum=%d\n", k, prevVal, txNum)
+		}
 		// Remove from state cache when storage is deleted
 		if sd.stateCache != nil {
 			sd.stateCache.Delete(kv.StorageDomain, k)

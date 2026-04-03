@@ -326,6 +326,7 @@ var tracedBlocks map[uint64]struct{}
 var traceAllBlocks bool
 var tracedTxIndexes map[int64]struct{}
 var tracedAccounts map[unique.Handle[common.Address]]struct{}
+var tracedStateKeys map[string]struct{} // hex-encoded composite keys (addr+slot)
 var traceAllDomains bool
 var tracedDomains map[uint16]struct{}
 
@@ -347,6 +348,11 @@ func initTraceMaps() {
 	for _, account := range TraceAccounts {
 		account, _ = strings.CutPrefix(strings.ToLower(account), "Ox")
 		tracedAccounts[unique.Make(common.HexToAddress(account))] = struct{}{}
+	}
+	tracedStateKeys = map[string]struct{}{}
+	for _, key := range TraceStateKeys {
+		key, _ = strings.CutPrefix(strings.ToLower(key), "0x")
+		tracedStateKeys[key] = struct{}{}
 	}
 	if len(traceDomains) == 1 &&
 		(strings.EqualFold(traceDomains[0], "all") || strings.EqualFold(traceDomains[0], "any") ||
@@ -426,6 +432,18 @@ func TraceAccount(addr unique.Handle[common.Address]) bool {
 
 func TracingAccounts() bool {
 	return len(tracedAccounts) > 0
+}
+
+// TraceStateKey checks if a composite key (e.g. addr+slot for storage domain)
+// matches any key in TRACE_STATE_KEYS. Keys are hex-encoded without 0x prefix.
+func TraceStateKey(compositeKey []byte) bool {
+	traceInit.Do(initTraceMaps)
+	if len(tracedStateKeys) == 0 {
+		return false
+	}
+	hexKey := fmt.Sprintf("%x", compositeKey)
+	_, ok := tracedStateKeys[hexKey]
+	return ok
 }
 
 func TraceDomain(domain uint16) bool {
