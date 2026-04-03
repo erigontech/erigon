@@ -1244,7 +1244,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
 	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
-	borSnaps, blockRetire, agg := res.BorSnaps, res.BlockRetire, res.Aggregator
+	_, blockRetire, agg := res.BorSnaps, res.BlockRetire, res.Aggregator
 	if err != nil {
 		return err
 	}
@@ -1260,7 +1260,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 	defer db.Close()
 
 	blockReader, _ := blockRetire.IO()
-	heimdallStore, _ := blockRetire.BorStore()
+	_, _ = blockRetire.BorStore()
 
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(1)
