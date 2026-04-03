@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math/bits"
 	"math/rand"
 	"sort"
 	"sync/atomic"
@@ -1760,19 +1761,22 @@ func TestCell_fillFromFields(t *testing.T) {
 	row, bm := generateCellRow(t, 16)
 	rnd := rand.New(rand.NewSource(0))
 
-	cg := func(nibble int, skip bool) (*cell, error) {
+	// Apply stateHash to cells with account or storage data (matches old callback behavior)
+	for bitset := bm; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
 		c := row[nibble]
 		if c.storageAddrLen > 0 || c.accountAddrLen > 0 {
 			rnd.Read(c.stateHash[:])
 			c.stateHashLen = 32
 		}
 		fmt.Printf("enc cell %x %v\n", nibble, c.FullString())
-
-		return c, nil
+		bitset ^= bit
 	}
 
 	be := NewBranchEncoder(1024)
-	enc, _, err := be.EncodeBranch(bm, bm, bm, cg)
+	cellData := generateCellEncodeDataRow(t, row, bm)
+	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
 	require.NoError(t, err)
 
 	//original := common.Copy(enc)
@@ -1816,6 +1820,109 @@ func cellMustEqual(tb testing.TB, first, second *cell) {
 	require.Equal(tb, first.stateHash[:first.stateHashLen], second.stateHash[:second.stateHashLen])
 
 	// encode doesn't code Nonce, Balance, CodeHash and Storage, Delete fields
+}
+
+func Test_HexPatriciaHashed_hashRow(t *testing.T) {
+	t.Parallel()
+
+	ms := NewMockState(t)
+	hph := NewHexPatriciaHashed(1, ms)
+	hph.SetTrace(false)
+
+	row := 0
+	depth := int16(0)
+
+	// Set up 3 cells at nibbles 1, 5, 10 as pure hash nodes.
+	// computeCellHash for these returns [0xA0, hash...] (33 bytes).
+	hph.afterMap[row] = (1 << 1) | (1 << 5) | (1 << 10)
+
+	for _, nibble := range []int{1, 5, 10} {
+		cell := &hph.grid[row][nibble]
+		cell.hashLen = 32
+		for i := range cell.hash {
+			cell.hash[i] = byte(nibble*17 + i) // unique per nibble
+		}
+	}
+
+	// Step 1: Run the old two-step approach to get reference values.
+	hph.keccak2.Reset()
+	b := [...]byte{0x80}
+	err := hph.feedBranchHashesToKeccak(row, depth, b[:])
+	require.NoError(t, err)
+
+	var refHash [32]byte
+	_, err = hph.keccak2.Read(refHash[:])
+	require.NoError(t, err)
+
+	var refCellData [16]cellEncodeData
+	for bitset := hph.afterMap[row]; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		refCellData[nibble] = cellEncodeDataFromCell(&hph.grid[row][nibble])
+		bitset ^= bit
+	}
+
+	// Step 2: Run hashRow (new single-pass approach).
+	// Note: computeCellHash for pure hash nodes is idempotent, so calling twice is safe.
+	hph.keccak2.Reset()
+	cellData, err := hph.hashRow(row, depth)
+	require.NoError(t, err)
+
+	var newHash [32]byte
+	_, err = hph.keccak2.Read(newHash[:])
+	require.NoError(t, err)
+
+	// Step 3: Verify equivalence.
+	require.Equal(t, refHash, newHash, "keccak2 hash must match between old and new approach")
+
+	// Verify cellEncodeData for present nibbles
+	for _, nibble := range []int{1, 5, 10} {
+		require.Equal(t, refCellData[nibble].hashLen, cellData[nibble].hashLen, "nibble %d hashLen", nibble)
+		require.Equal(t, refCellData[nibble].hash, cellData[nibble].hash, "nibble %d hash", nibble)
+		require.Equal(t, refCellData[nibble].extLen, cellData[nibble].extLen, "nibble %d extLen", nibble)
+		require.Equal(t, refCellData[nibble].accountAddrLen, cellData[nibble].accountAddrLen, "nibble %d accountAddrLen", nibble)
+		require.Equal(t, refCellData[nibble].storageAddrLen, cellData[nibble].storageAddrLen, "nibble %d storageAddrLen", nibble)
+		require.Equal(t, refCellData[nibble].stateHashLen, cellData[nibble].stateHashLen, "nibble %d stateHashLen", nibble)
+	}
+
+	// Verify cellEncodeData for absent nibbles are zero-valued
+	for nibble := 0; nibble < 16; nibble++ {
+		if nibble == 1 || nibble == 5 || nibble == 10 {
+			continue
+		}
+		require.Equal(t, int16(0), cellData[nibble].hashLen, "nibble %d should be empty", nibble)
+		require.Equal(t, int16(0), cellData[nibble].extLen, "nibble %d should be empty", nibble)
+		require.Equal(t, int16(0), cellData[nibble].accountAddrLen, "nibble %d should be empty", nibble)
+		require.Equal(t, int16(0), cellData[nibble].storageAddrLen, "nibble %d should be empty", nibble)
+	}
+
+	// Verify non-zero hash was produced
+	require.NotEqual(t, [32]byte{}, newHash, "keccak2 hash must be non-zero")
+}
+
+func Test_HexPatriciaHashed_hashRow_allEmpty(t *testing.T) {
+	t.Parallel()
+
+	ms := NewMockState(t)
+	hph := NewHexPatriciaHashed(1, ms)
+
+	// afterMap=0 means all 17 slots are empty (0x80 each)
+	hph.afterMap[0] = 0
+
+	hph.keccak2.Reset()
+	cellData, err := hph.hashRow(0, 0)
+	require.NoError(t, err)
+
+	// All cellEncodeData should be zero
+	for nibble := 0; nibble < 16; nibble++ {
+		require.Equal(t, int16(0), cellData[nibble].hashLen)
+	}
+
+	// keccak2 should still produce a hash (of 17 x 0x80 bytes)
+	var hash [32]byte
+	_, err = hph.keccak2.Read(hash[:])
+	require.NoError(t, err)
+	require.NotEqual(t, [32]byte{}, hash)
 }
 
 func Test_HexPatriciaHashed_ProcessWithDozensOfStorageKeys(t *testing.T) {
