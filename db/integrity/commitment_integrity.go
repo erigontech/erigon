@@ -852,7 +852,7 @@ func checkCommitmentHistAtBlkWithIdx(ctx context.Context, db kv.TemporalRoDB, br
 	if err != nil {
 		return err
 	}
-	if aggMax := db.(state.HasAgg).Agg().(*state.Aggregator).EndTxNumMinimax(); maxTxNum+1 > aggMax {
+	if aggMax := db.(state.HasAgg).Agg().(*state.Aggregator).EndTxNumMinimax(); maxTxNum+1 > aggMax { // don't use seek-commitment to check "state progress" - because we are in method which checking "files validity" (can't rely on them here)
 		blockNumOfState, _, _ := txNumsReader.FindBlockNum(ctx, tx, aggMax)
 		return fmt.Errorf("block %d is beyond latest block with state %d", blockNum, blockNumOfState)
 	}
@@ -862,15 +862,20 @@ func checkCommitmentHistAtBlkWithIdx(ctx context.Context, db kv.TemporalRoDB, br
 		return err
 	}
 	defer sd.Close()
+	// For blockNum==0 there is no prior commitment state (GetAsOf at txNum=0
+	// falls back to latest for the commitment domain). Use commitmentAsOf=toTxNum
+	// so the trie is restored from the committed state at the end of block 0.
 	commitmentAsOf := minTxNum
 	if blockNum == 0 {
 		commitmentAsOf = toTxNum
 	}
+	// commitment branch data view: as of beginning of the block (or end for block 0)
+	// plain state data view: as of end of the block
 	splitStateReader := commitmentdb.NewSplitHistoryReader(tx, commitmentAsOf, toTxNum, true /* withHistory */)
 	sd.GetCommitmentCtx().SetStateReader(splitStateReader)
 	sd.GetCommitmentCtx().SetTrace(logger.Enabled(ctx, log.LvlTrace))
 	sd.GetCommitmentContext().SetDeferBranchUpdates(false)
-	latestTxNum, latestBlockNum, err := sd.SeekCommitment(ctx, tx)
+	latestTxNum, latestBlockNum, err := sd.SeekCommitment(ctx, tx) // seek commitment again with new history state reader
 	if err != nil {
 		return err
 	}
@@ -993,7 +998,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 	// Each worker owns a window: builds its own ChangedKeysPerBlockIdx then checks
 	// its own sampled blocks — index building and block checking both run in parallel.
 	g, wCtx := errgroup.WithContext(ctx)
-	g.SetLimit(runtime.GOMAXPROCS(-1))
+	g.SetLimit(runtime.GOMAXPROCS(-1)) // all cpus, because no producer-worker
 	for windowStart := from; windowStart < to; windowStart += checkCommitmentHistWindowSize {
 		windowStart := windowStart
 		windowEnd := min(windowStart+checkCommitmentHistWindowSize, to)
