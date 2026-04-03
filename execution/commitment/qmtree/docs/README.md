@@ -37,6 +37,7 @@ On the `qmtree` branch:
 | [transition-format.md](transition-format.md) | **Normative.** Exact byte layout for all 11 transition record types with worked examples |
 | [keyindex-persistence-plan.md](keyindex-persistence-plan.md) | Implementation plan: persist KeyIndex to disk using RecSplit + segmented data files |
 | [dataset-generation.md](dataset-generation.md) | How to generate a qmtree dataset from a synced datadir (mainnet or hoodi) |
+| [snapshot-format.md](snapshot-format.md) | On-disk snapshot file format: .kv entry data, .kvi RecSplit indices, MDBX hot tables |
 | [domain-integration-plan.md](domain-integration-plan.md) | Plan: integrate qmtree into Erigon's domain/snapshot/torrent pipeline (6 phases) |
 
 ## Reading order
