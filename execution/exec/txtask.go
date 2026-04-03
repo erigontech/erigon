@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -43,6 +44,13 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
+
+var debugTraceTxHash = func() common.Hash {
+	if h := os.Getenv("ERIGON_TRACE_TX"); h != "" {
+		return common.HexToHash(h)
+	}
+	return common.Hash{}
+}()
 
 type Task interface {
 	Execute(evm *vm.EVM,
@@ -429,9 +437,8 @@ func (t *TxTask) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *call
 			vmCfg.Tracer = callTracer.Tracer().Hooks
 		}
 
-		// DEBUG: dump opcodes for a specific tx
-		targetTxHash := common.HexToHash("0xYOUR_TX_HASH_HERE")
-		if t.TxHash() == targetTxHash {
+		// DEBUG: dump opcodes for a specific tx (set ERIGON_TRACE_TX=0x...)
+		if debugTraceTxHash != (common.Hash{}) && t.TxHash() == debugTraceTxHash {
 			fmt.Printf("=== TRACING TX %s in block %d ===\n", t.TxHash().Hex(), t.BlockNumber())
 			vmCfg.Tracer = &tracing.Hooks{
 				OnOpcode: func(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
