@@ -38,21 +38,24 @@ func main() {
 	reader.Reset(0)
 
 	var key, val []byte
+	var keyOffset, valOffset uint64
 	count := 0
 	for reader.HasNext() {
-		key, _ = reader.Next(key[:0])
+		key, keyOffset = reader.Next(key[:0])
 		if !reader.HasNext() {
 			fmt.Fprintf(os.Stderr, "key %x has no value (truncated file?)\n", key)
 			break
 		}
-		val, _ = reader.Next(val[:0])
+		val, valOffset = reader.Next(val[:0])
 		count++
 
 		if len(key) == len(addrBytes) && equal(key, addrBytes) {
 			fmt.Printf("FOUND at entry #%d\n", count)
-			fmt.Printf("  key:       %x\n", key)
-			fmt.Printf("  value len: %d\n", len(val))
-			fmt.Printf("  value hex: %x\n", val)
+			fmt.Printf("  key:        %x\n", key)
+			fmt.Printf("  key offset: %d\n", keyOffset)
+			fmt.Printf("  val offset: %d\n", valOffset)
+			fmt.Printf("  value len:  %d\n", len(val))
+			fmt.Printf("  value hex:  %x\n", val)
 			os.Exit(0)
 		}
 	}
