@@ -17,7 +17,6 @@
 package integrity
 
 import (
-	"fmt"
 	"sort"
 	"testing"
 
@@ -58,8 +57,19 @@ func pair(key string, txNum uint64) struct {
 	}{[]byte(key), txNum}
 }
 
-// simpleTxNum2Block maps txNum -> txNum/10 (10 txNums per block).
-func simpleTxNum2Block(txNum uint64) (uint64, error) { return txNum / 10, nil }
+// simpleTxNums returns a TxNumToBlock where block i covers txNums [i*10, i*10+9].
+// Matches the txNum/10 mapping used in simple test cases.
+func simpleTxNums(numBlocks int) *TxNumToBlock {
+	m := &TxNumToBlock{
+		maxTxNums:    make([]uint64, numBlocks),
+		fromBlockNum: 0,
+		toBlockNum:   uint64(numBlocks),
+	}
+	for i := range m.maxTxNums {
+		m.maxTxNums[i] = uint64(i)*10 + 9
+	}
+	return m
+}
 
 func keysForBlock(idx *ChangedKeysPerBlock, blockNum uint64) []string {
 	offsets := idx.Offsets(blockNum)
@@ -88,7 +98,7 @@ func TestChangedKeysPerBlock_Basic(t *testing.T) {
 		pair("c", 7),
 	)
 
-	idx, err := changedKeysPerBlock(it, simpleTxNum2Block, nil)
+	idx, err := changedKeysPerBlock(it, simpleTxNums(3))
 	require.NoError(t, err)
 
 	require.Equal(t, []string{"a", "c"}, keysForBlock(idx, 0))
@@ -110,7 +120,7 @@ func TestChangedKeysPerBlock_DeduplicatesSameKeyInBlock(t *testing.T) {
 		pair("b", 15),
 	)
 
-	idx, err := changedKeysPerBlock(it, simpleTxNum2Block, nil)
+	idx, err := changedKeysPerBlock(it, simpleTxNums(2))
 	require.NoError(t, err)
 
 	require.Equal(t, []string{"a", "b"}, keysForBlock(idx, 1))
@@ -128,7 +138,7 @@ func TestChangedKeysPerBlock_KeysSharedAcrossBlocks(t *testing.T) {
 	}
 	it := &pairKU64{pairs: pairs}
 
-	idx, err := changedKeysPerBlock(it, simpleTxNum2Block, nil)
+	idx, err := changedKeysPerBlock(it, simpleTxNums(50))
 	require.NoError(t, err)
 
 	require.Equal(t, 1, idx.NumKeys()) // "x" stored exactly once
@@ -139,17 +149,15 @@ func TestChangedKeysPerBlock_KeysSharedAcrossBlocks(t *testing.T) {
 }
 
 func TestChangedKeysPerBlock_TxNum2BlockError(t *testing.T) {
+	// txNum 999 is beyond the single-block window [0,9] — BlockOf must error.
 	it := newPairKU64(pair("a", 999))
-	errFn := func(txNum uint64) (uint64, error) {
-		return 0, fmt.Errorf("txNum %d not found", txNum)
-	}
-	_, err := changedKeysPerBlock(it, errFn, nil)
+	_, err := changedKeysPerBlock(it, simpleTxNums(1))
 	require.Error(t, err)
 }
 
 func TestChangedKeysPerBlock_Empty(t *testing.T) {
 	it := newPairKU64()
-	idx, err := changedKeysPerBlock(it, simpleTxNum2Block, nil)
+	idx, err := changedKeysPerBlock(it, simpleTxNums(1))
 	require.NoError(t, err)
 	require.Equal(t, 0, idx.NumKeys())
 	require.Equal(t, 0, idx.NumBlocks())
