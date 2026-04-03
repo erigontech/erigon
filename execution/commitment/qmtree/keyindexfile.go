@@ -2,7 +2,6 @@ package qmtree
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,45 +14,34 @@ import (
 )
 
 const (
-	// Each record in the .kv file: 32-byte keyHash + 8-byte txNum (big-endian).
-	keyIndexRecordSize = 40
-
-	// File naming: v1.0-qmtree-keyindex.{fromStep}-{toStep}.kv / .kvi
-	keyIndexVersion = "v1.0"
-	keyIndexName    = "qmtree-keyindex"
-	keyIndexExtKV   = ".kv"
-	keyIndexExtKVI  = ".kvi"
+	// File naming: qmtree-keyindex.{fromStep}-{toStep}.kvi
+	// Single RecSplit index mapping keyHash (32B) → txNum.
+	keyIndexName = "qmtree-keyindex"
 )
 
-// keyIndexSegment represents one persisted segment: a .kv data file and its
-// .kvi RecSplit index. Each segment covers one flush (a step range).
+// keyIndexSegment represents one persisted RecSplit index mapping keyHash → txNum.
 type keyIndexSegment struct {
 	fromStep uint64
 	toStep   uint64
-	kvPath   string
-	kviPath  string
-	data     []byte          // mmap'd .kv file (nil until opened)
-	index    *recsplit.Index // opened .kvi (nil until opened)
-	count    int             // number of records in the .kv
+	path     string
+	index    *recsplit.Index
 }
 
-// close releases the segment's resources.
 func (s *keyIndexSegment) close() {
 	if s.index != nil {
 		s.index.Close()
 		s.index = nil
 	}
-	s.data = nil
 }
 
 // KeyIndexFile manages persisted KeyIndex segments on disk.
+// Each segment is a single .kvi RecSplit file (no .kv data file).
 type KeyIndexFile struct {
 	dir      string
 	segments []*keyIndexSegment // sorted by fromStep ascending
 }
 
 // NewKeyIndexFile creates a KeyIndexFile rooted at the given directory.
-// The directory is created if it doesn't exist.
 func NewKeyIndexFile(dir string) (*KeyIndexFile, error) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, fmt.Errorf("create keyindex dir: %w", err)
@@ -61,75 +49,45 @@ func NewKeyIndexFile(dir string) (*KeyIndexFile, error) {
 	return &KeyIndexFile{dir: dir}, nil
 }
 
-func keyIndexKVPath(dir string, fromStep, toStep uint64) string {
-	return filepath.Join(dir, fmt.Sprintf("%s-%s.%d-%d%s", keyIndexVersion, keyIndexName, fromStep, toStep, keyIndexExtKV))
+func keyIndexPath(dir string, fromStep, toStep uint64) string {
+	return filepath.Join(dir, fmt.Sprintf("%s.%d-%d.kvi", keyIndexName, fromStep, toStep))
 }
 
-func keyIndexKVIPath(dir string, fromStep, toStep uint64) string {
-	return filepath.Join(dir, fmt.Sprintf("%s-%s.%d-%d%s", keyIndexVersion, keyIndexName, fromStep, toStep, keyIndexExtKVI))
-}
-
-// FlushDelta writes a delta of dirty key-index entries to a new .kv file and
-// builds a .kvi RecSplit index over it. The entries must be sorted by keyHash.
+// FlushDelta builds a RecSplit index from dirty key-index entries.
+// The RecSplit maps keyHash → txNum directly (txNum stored as the "offset" value).
 func (kf *KeyIndexFile) FlushDelta(ctx context.Context, entries []KeyIndexEntry, fromStep, toStep uint64) error {
 	if len(entries) == 0 {
 		return nil
 	}
 
-	// Sort entries by keyHash.
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].KeyHash.Cmp(entries[j].KeyHash) < 0
 	})
 
-	kvPath := keyIndexKVPath(kf.dir, fromStep, toStep)
-	kviPath := keyIndexKVIPath(kf.dir, fromStep, toStep)
+	path := keyIndexPath(kf.dir, fromStep, toStep)
 
-	// Write .kv data file: fixed-size records, no compression.
-	f, err := os.Create(kvPath)
+	if err := buildKeyIndexKVI(ctx, path, entries); err != nil {
+		return fmt.Errorf("build keyindex: %w", err)
+	}
+
+	seg, err := openKeyIndexSegment(path, fromStep, toStep)
 	if err != nil {
-		return fmt.Errorf("create keyindex .kv: %w", err)
-	}
-	var buf [keyIndexRecordSize]byte
-	for _, e := range entries {
-		copy(buf[:32], e.KeyHash[:])
-		binary.BigEndian.PutUint64(buf[32:40], e.TxNum)
-		if _, err := f.Write(buf[:]); err != nil {
-			f.Close()
-			return fmt.Errorf("write keyindex record: %w", err)
-		}
-	}
-	if err := f.Sync(); err != nil {
-		f.Close()
-		return fmt.Errorf("sync keyindex .kv: %w", err)
-	}
-	f.Close()
-
-	// Build .kvi RecSplit index: key=keyHash, value=byte offset into .kv.
-	if err := buildKeyIndexRecSplit(ctx, kvPath, kviPath, len(entries)); err != nil {
-		os.Remove(kvPath)
-		return fmt.Errorf("build keyindex .kvi: %w", err)
-	}
-
-	// Open and register the segment.
-	seg, err := openKeyIndexSegment(kvPath, kviPath, fromStep, toStep)
-	if err != nil {
-		os.Remove(kvPath)
-		os.Remove(kviPath)
+		os.Remove(path)
 		return err
 	}
 	kf.segments = append(kf.segments, seg)
 	return nil
 }
 
-// buildKeyIndexRecSplit builds a RecSplit perfect hash index over a .kv file.
-func buildKeyIndexRecSplit(ctx context.Context, kvPath, kviPath string, keyCount int) error {
-	tmpDir := filepath.Dir(kviPath)
+// buildKeyIndexKVI builds a RecSplit index mapping keyHash → txNum.
+func buildKeyIndexKVI(ctx context.Context, path string, entries []KeyIndexEntry) error {
+	tmpDir := filepath.Dir(path)
 	for {
 		rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-			KeyCount:           keyCount,
+			KeyCount:           len(entries),
 			BucketSize:         recsplit.DefaultBucketSize,
 			LeafSize:           recsplit.DefaultLeafSize,
-			IndexFile:          kviPath,
+			IndexFile:          path,
 			TmpDir:             tmpDir,
 			Enums:              false,
 			LessFalsePositives: true,
@@ -138,21 +96,15 @@ func buildKeyIndexRecSplit(ctx context.Context, kvPath, kviPath string, keyCount
 			return err
 		}
 
-		// Read .kv and add each keyHash with its byte offset.
-		data, err := os.ReadFile(kvPath)
-		if err != nil {
-			return err
-		}
-		for i := 0; i < len(data); i += keyIndexRecordSize {
-			key := data[i : i+32]
-			if err := rs.AddKey(key, uint64(i)); err != nil {
+		for _, e := range entries {
+			if err := rs.AddKey(e.KeyHash[:], e.TxNum); err != nil {
 				return err
 			}
 		}
 		if err := rs.Build(ctx); err != nil {
 			if rs.Collision() {
 				rs.ResetNextSalt()
-				continue // retry with new salt
+				continue
 			}
 			return err
 		}
@@ -160,29 +112,23 @@ func buildKeyIndexRecSplit(ctx context.Context, kvPath, kviPath string, keyCount
 	}
 }
 
-// openKeyIndexSegment opens an existing .kv/.kvi pair.
-func openKeyIndexSegment(kvPath, kviPath string, fromStep, toStep uint64) (*keyIndexSegment, error) {
-	data, err := os.ReadFile(kvPath)
+func openKeyIndexSegment(path string, fromStep, toStep uint64) (*keyIndexSegment, error) {
+	idx, err := recsplit.OpenIndex(path)
 	if err != nil {
-		return nil, fmt.Errorf("read keyindex .kv: %w", err)
-	}
-	idx, err := recsplit.OpenIndex(kviPath)
-	if err != nil {
-		return nil, fmt.Errorf("open keyindex .kvi: %w", err)
+		return nil, fmt.Errorf("open keyindex: %w", err)
 	}
 	return &keyIndexSegment{
 		fromStep: fromStep,
 		toStep:   toStep,
-		kvPath:   kvPath,
-		kviPath:  kviPath,
-		data:     data,
+		path:     path,
 		index:    idx,
-		count:    len(data) / keyIndexRecordSize,
 	}, nil
 }
 
 // Lookup searches all segments (newest first) for the given keyHash.
 // Returns (txNum, true) if found, (0, false) otherwise.
+// Note: RecSplit may return false positives; callers should verify
+// against the entry data if needed.
 func (kf *KeyIndexFile) Lookup(keyHash common.Hash) (uint64, bool) {
 	for i := len(kf.segments) - 1; i >= 0; i-- {
 		seg := kf.segments[i]
@@ -190,27 +136,15 @@ func (kf *KeyIndexFile) Lookup(keyHash common.Hash) (uint64, bool) {
 			continue
 		}
 		reader := recsplit.NewIndexReader(seg.index)
-		offset, ok := reader.Lookup(keyHash[:])
-		if !ok {
-			continue
+		txNum, ok := reader.Lookup(keyHash[:])
+		if ok {
+			return txNum, true
 		}
-		// Verify the key matches (RecSplit can have false positives).
-		if int(offset)+keyIndexRecordSize > len(seg.data) {
-			continue
-		}
-		var storedKey common.Hash
-		copy(storedKey[:], seg.data[offset:offset+32])
-		if storedKey != keyHash {
-			continue // false positive
-		}
-		txNum := binary.BigEndian.Uint64(seg.data[offset+32 : offset+40])
-		return txNum, true
 	}
 	return 0, false
 }
 
-// LoadAll scans the directory for existing .kv/.kvi files and opens them.
-// Returns the highest toStep found (0 if no files).
+// LoadAll scans the directory for existing .kvi files and opens them.
 func (kf *KeyIndexFile) LoadAll() (uint64, error) {
 	entries, err := os.ReadDir(kf.dir)
 	if err != nil {
@@ -221,28 +155,20 @@ func (kf *KeyIndexFile) LoadAll() (uint64, error) {
 	}
 
 	var maxStep uint64
+	prefix := keyIndexName + "."
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), keyIndexExtKV) {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".kvi") || !strings.HasPrefix(e.Name(), prefix) {
 			continue
 		}
 		var fromStep, toStep uint64
-		pattern := keyIndexVersion + "-" + keyIndexName + ".%d-%d" + keyIndexExtKV
-		n, _ := fmt.Sscanf(e.Name(), pattern, &fromStep, &toStep)
+		n, _ := fmt.Sscanf(e.Name(), prefix+"%d-%d.kvi", &fromStep, &toStep)
 		if n != 2 {
 			continue
 		}
-		kvPath := filepath.Join(kf.dir, e.Name())
-		kviPath := kvPath[:len(kvPath)-len(keyIndexExtKV)] + keyIndexExtKVI
-
-		// Skip if .kvi doesn't exist (incomplete flush).
-		if _, err := os.Stat(kviPath); os.IsNotExist(err) {
-			log.Warn("keyindex: skipping .kv without .kvi", "file", kvPath)
-			continue
-		}
-
-		seg, err := openKeyIndexSegment(kvPath, kviPath, fromStep, toStep)
+		path := filepath.Join(kf.dir, e.Name())
+		seg, err := openKeyIndexSegment(path, fromStep, toStep)
 		if err != nil {
-			log.Warn("keyindex: failed to open segment", "file", kvPath, "err", err)
+			log.Warn("keyindex: failed to open segment", "file", path, "err", err)
 			continue
 		}
 		kf.segments = append(kf.segments, seg)
@@ -251,35 +177,30 @@ func (kf *KeyIndexFile) LoadAll() (uint64, error) {
 		}
 	}
 
-	// Sort segments by fromStep ascending.
 	sort.Slice(kf.segments, func(i, j int) bool {
 		return kf.segments[i].fromStep < kf.segments[j].fromStep
 	})
 	return maxStep, nil
 }
 
-// PopulateKeyIndex reads all segments and populates the given KeyIndex.
-// Segments are read oldest-first so newer entries override older ones.
+// PopulateKeyIndex is no longer needed — the RecSplit index IS the lookup.
+// Kept for backward compat with LoadFromDB which populates the in-memory KeyIndex.
+// This iterates all segments but cannot extract entries from RecSplit (it's a
+// hash function, not a key-value store). The in-memory KeyIndex is populated
+// from MDBX via LoadFromDB instead.
 func (kf *KeyIndexFile) PopulateKeyIndex(ki *KeyIndex) {
-	for _, seg := range kf.segments {
-		for off := 0; off+keyIndexRecordSize <= len(seg.data); off += keyIndexRecordSize {
-			var kh common.Hash
-			copy(kh[:], seg.data[off:off+32])
-			txNum := binary.BigEndian.Uint64(seg.data[off+32 : off+40])
-			ki.UpdateKey(kh, txNum)
-		}
-	}
+	// RecSplit is a perfect hash function — it can look up known keys but
+	// cannot enumerate all keys. The in-memory KeyIndex must be populated
+	// from MDBX (which has the full key→txNum mapping).
 }
 
-// TruncateAfterStep removes all segments with fromStep >= step and deletes
-// their files from disk.
+// TruncateAfterStep removes all segments with fromStep >= step.
 func (kf *KeyIndexFile) TruncateAfterStep(step uint64) {
 	var kept []*keyIndexSegment
 	for _, seg := range kf.segments {
 		if seg.fromStep >= step {
 			seg.close()
-			os.Remove(seg.kvPath)
-			os.Remove(seg.kviPath)
+			os.Remove(seg.path)
 		} else {
 			kept = append(kept, seg)
 		}
