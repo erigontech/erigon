@@ -221,6 +221,8 @@ func NewChangedKeysPerBlockIdx(ctx context.Context, db kv.TemporalRoDB, br servi
 	var idx ChangedKeysPerBlockIdx
 	var ramBytes uint64
 	logArgs := []any{"fromBlockNum", fromBlockNum, "toBlockNum", toBlockNum}
+	// txNums cursor is shared across domains: safe because each NewChangedKeysPerBlock
+	// call starts with prevKey="", so the very first key triggers ResetCursor immediately.
 	for _, d := range domains {
 		if idx[d], err = NewChangedKeysPerBlock(tx.Debug(), d, int(fromTxNum), int(toTxNum), txNums); err != nil {
 			return nil, fmt.Errorf("ChangedKeysPerBlockIdx domain=%s blocks=[%d,%d): %w", d, fromBlockNum, toBlockNum, err)
