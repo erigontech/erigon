@@ -53,9 +53,13 @@ func Configure(Schema SchemaGen, a AggSetters, dirs datadir.Dirs, salt *uint32, 
 	if err := a.RegisterDomain(Schema.GetDomainCfg(kv.RCacheDomain), salt, dirs, logger); err != nil {
 		return err
 	}
-	if err := a.RegisterDomain(Schema.GetDomainCfg(kv.QMTreeDomain), salt, dirs, logger); err != nil {
-		return err
-	}
+	// QMTree domain registration is gated by --experimental.qmtree flag.
+	// When enabled, the Tracker handles writes directly; the Aggregator
+	// integration (collation/merge) will be wired once the initialization
+	// deadlock on large datadirs is resolved.
+	// if err := a.RegisterDomain(Schema.GetDomainCfg(kv.QMTreeDomain), salt, dirs, logger); err != nil {
+	// 	return err
+	// }
 	if err := a.RegisterII(Schema.GetIICfg(kv.LogAddrIdx), salt, dirs, logger); err != nil {
 		return err
 	}
