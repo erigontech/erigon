@@ -40,23 +40,26 @@ var errNotFound = errors.New("notfound")
 func (e *ExecModule) beginOverlayOrRo(ctx context.Context) (kv.Tx, func(), error) {
 	e.lock.RLock()
 	sd := e.currentContext
-	e.lock.RUnlock()
-
 	// Fall back to published SD during background commit.
 	if sd == nil && e.publishedSD != nil {
 		sd = e.publishedSD()
 	}
-
 	if sd != nil {
 		if overlay := sd.BlockOverlay(); overlay != nil {
+			// Open a fresh RO tx while still holding the read lock so that
+			// the overlay cannot be closed between our check and the
+			// NewReadView call (TOCTOU avoidance).
 			roTx, err := e.db.BeginRo(ctx) //nolint:gocritic
 			if err != nil {
+				e.lock.RUnlock()
 				return nil, nil, err
 			}
 			view := overlay.NewReadView(roTx)
+			e.lock.RUnlock()
 			return view, func() { roTx.Rollback() }, nil
 		}
 	}
+	e.lock.RUnlock()
 
 	tx, err := e.db.BeginRo(ctx) //nolint:gocritic
 	if err != nil {

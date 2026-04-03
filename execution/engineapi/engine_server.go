@@ -22,6 +22,8 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
+	"runtime"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -688,8 +690,18 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	defer s.lock.Unlock()
 
 	if status == nil {
+		fcuStart := time.Now()
 		s.logger.Debug("[ForkChoiceUpdated] calling HandleForkChoice", "head", forkchoiceState.HeadHash)
+		// Watchdog: panic if FCU takes > 60s so hive gets a crash instead of hanging
+		watchdog := time.AfterFunc(60*time.Second, func() {
+			buf := make([]byte, 1<<20)
+			n := runtime.Stack(buf, true)
+			_, _ = fmt.Fprintf(os.Stderr, "[ForkChoiceUpdated WATCHDOG] FCU stuck for 60s, goroutine dump:\n%s\n", buf[:n])
+			panic("[ForkChoiceUpdated] FCU stuck for 60s — likely deadlock")
+		})
 		status, err = s.HandleForkChoice(ctx, "ForkChoiceUpdated", forkchoiceState)
+		watchdog.Stop()
+		s.logger.Debug("[ForkChoiceUpdated] HandleForkChoice done", "elapsed", time.Since(fcuStart))
 		if err != nil {
 			if errors.Is(err, rules.ErrInvalidBlock) {
 				return &engine_types.ForkChoiceUpdatedResponse{
@@ -838,7 +850,16 @@ func (s *EngineServer) getPayloadBodiesByRange(ctx context.Context, start, count
 	if count > 1024 {
 		return nil, &engine_helpers.TooLargeRequestErr
 	}
+	bodiesStart := time.Now()
+	watchdog2 := time.AfterFunc(60*time.Second, func() {
+		buf := make([]byte, 1<<20)
+		n := runtime.Stack(buf, true)
+		_, _ = fmt.Fprintf(os.Stderr, "[getPayloadBodiesByRange WATCHDOG] stuck for 60s, start=%d count=%d goroutines:\n%s\n", start, count, buf[:n])
+		panic("[getPayloadBodiesByRange] stuck for 60s — likely deadlock")
+	})
 	bodies, err := s.chainRW.GetBodiesByRange(ctx, start, count)
+	watchdog2.Stop()
+	s.logger.Debug("[getPayloadBodiesByRange] done", "start", start, "count", count, "elapsed", time.Since(bodiesStart))
 	if err != nil {
 		return nil, err
 	}
