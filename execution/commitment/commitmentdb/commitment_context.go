@@ -272,13 +272,8 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	defer func() {
 		log.Debug("[commitment] processed", "block", blockNum, "txNum", txNum, "keys", common.PrettyCounter(updateCount), "mode", sdc.updates.Mode(), "spent", time.Since(start), "rootHash", hex.EncodeToString(rootHash))
 	}()
-	if updateCount == 0 {
-		rootHash, err = sdc.patriciaTrie.RootHash()
-		return rootHash, err
-	}
-
-	// data accessing functions should be set when domain is opened/shared context updated
-
+	// Configure trace writer before any trie operations (including the early-return
+	// RootHash below) so a stale traceW from a prior call doesn't leak into captureBuf.
 	sdc.patriciaTrie.SetTraceDomain(sdc.sharedDomains.Trace())
 	if sdc.sharedDomains.CommitmentCapture() {
 		if sdc.captureBuf == nil {
@@ -291,6 +286,13 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	} else {
 		sdc.patriciaTrie.SetTraceWriter(nil)
 	}
+
+	if updateCount == 0 {
+		rootHash, err = sdc.patriciaTrie.RootHash()
+		return rootHash, err
+	}
+
+	// data accessing functions should be set when domain is opened/shared context updated
 
 	trieContext := sdc.trieContext(tx, blockNum, txNum)
 
