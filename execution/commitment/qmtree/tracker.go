@@ -54,6 +54,13 @@ type Tracker struct {
 	// nil when in-memory only (no snapDir).
 	keyIndexFile *KeyIndexFile
 
+	// snapManager handles collation (MDBX → snapshot), pruning, and merging.
+	// nil when in-memory only (no snapDir).
+	snapManager *SnapshotManager
+
+	// lastCollatedStep is the last step that was collated to snapshots.
+	lastCollatedStep uint64
+
 	// keyIndexDirty tracks keys updated since the last KeyIndex flush.
 	// On Flush(), only these entries are written to a new segment file.
 	keyIndexDirty map[common.Hash]uint64
@@ -149,6 +156,12 @@ func NewTracker(snapDir string, stepSize uint64) (*Tracker, error) {
 		}
 		qt.keyIndexFile = kif
 
+		sm, err := NewSnapshotManager(qmdir, stepSize)
+		if err != nil {
+			return nil, fmt.Errorf("create snapshot manager: %w", err)
+		}
+		qt.snapManager = sm
+
 		entrySegSize := stepSize * entrySize // one step per segment (stepSize × 96 bytes)
 		twigSegSize := uint64(trackerTwigsPerStep) * uint64(trackerTwigBufSize)
 
@@ -213,6 +226,9 @@ func (qt *Tracker) AppendLeaf(preStateHash, stateChangeHash, transitionHash comm
 	qt.leafData.Add(qt.NextSN, ld)
 	qt.prevLeaf = leafHash
 	qt.NextSN++
+
+	// Auto-collate when a step boundary is crossed.
+	qt.maybeCollate()
 }
 
 // SyncRoot computes and returns the current qmtree root.
@@ -531,6 +547,27 @@ func (qt *Tracker) Flush() {
 	}
 }
 
+// maybeCollate checks if a full step has been completed since the last
+// collation and, if so, freezes that step's entries from MDBX to a snapshot
+// file and prunes the MDBX rows. Requires rwTx to be set.
+func (qt *Tracker) maybeCollate() {
+	if qt.snapManager == nil || qt.rwTx == nil {
+		return
+	}
+	completedStep := qt.completedSteps()
+	if completedStep <= qt.lastCollatedStep {
+		return
+	}
+	// Collate all steps that have completed since the last collation.
+	for step := qt.lastCollatedStep; step < completedStep; step++ {
+		if err := qt.snapManager.CollateAndPrune(context.Background(), qt.rwTx, qt.rwTx, step); err != nil {
+			log.Warn("qmtree: collation failed", "step", step, "err", err)
+			return
+		}
+		qt.lastCollatedStep = step + 1
+	}
+}
+
 // quarterStep returns the current quarter-step number: NextSN / (stepSize/4).
 func (qt *Tracker) quarterStep() uint64 {
 	qSize := qt.stepSize / 4
@@ -785,9 +822,20 @@ func (qt *Tracker) LoadFromDB(tx kv.Tx) error {
 	qt.prevLeaf = prevLeaf
 	qt.NextSN = nextSN
 
+	// Load existing entry snapshots so we know what's already frozen.
+	if qt.snapManager != nil {
+		maxFrozenStep, err := qt.snapManager.LoadSnapshots()
+		if err != nil {
+			log.Warn("qmtree: failed to load snapshots", "err", err)
+		} else {
+			qt.lastCollatedStep = maxFrozenStep
+		}
+	}
+
 	log.Info("qmtree: loaded from MDBX",
 		"entries", nextSN,
 		"cachedLeaves", qt.leafData.Len(),
+		"frozenSteps", qt.lastCollatedStep,
 	)
 	return nil
 }
@@ -804,5 +852,8 @@ func (qt *Tracker) Close() {
 	}
 	if qt.keyIndexFile != nil {
 		qt.keyIndexFile.Close()
+	}
+	if qt.snapManager != nil {
+		qt.snapManager.Close()
 	}
 }
