@@ -831,7 +831,7 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br serv
 
 // checkCommitmentHistAtBlkWithIdx checks commitment for blockNum using the pre-built
 // per-domain key index from ChangedKeysPerBlockIdx.
-func checkCommitmentHistAtBlkWithIdx(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, blockNum uint64, idx *BlockDomainIndex, lvl log.Lvl, logger log.Logger) error {
+func checkCommitmentHistAtBlkWithIdx(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, blockNum uint64, idx *ChangedKeysPerBlockIdx, lvl log.Lvl, logger log.Logger) error {
 	logger.Log(lvl, "checking commitment hist at block", "blockNum", blockNum)
 	start := time.Now()
 	tx, err := db.BeginTemporalRo(ctx)
@@ -946,7 +946,7 @@ func checkCommitmentHistAtBlkWithIdx(ctx context.Context, db kv.TemporalRoDB, br
 }
 
 func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, blockNum uint64, lvl log.Lvl, logger log.Logger) error {
-	idx, err := ChangedKeysPerBlockIdx(ctx, db, br, blockNum, blockNum+1, kv.StateDomains[:kv.CommitmentDomain], logger)
+	idx, err := NewChangedKeysPerBlockIdx(ctx, db, br, blockNum, blockNum+1, kv.StateDomains[:kv.CommitmentDomain], logger)
 	if err != nil {
 		return err
 	}
@@ -954,7 +954,7 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 }
 
 // checkCommitmentHistWindowSize is the number of blocks covered by a single
-// pre-built BlockDomainIndex.  Large enough to amortize the index build cost
+// pre-built ChangedKeysPerBlockIdx.  Large enough to amortize the index build cost
 // across many sampled blocks; small enough to keep memory bounded (~few hundred MB).
 const checkCommitmentHistWindowSize = 10_000
 
@@ -986,7 +986,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 	var integrityErr atomic.Pointer[error]
 	var blks uint64
 
-	// Process the range in windows.  For each window we build a BlockDomainIndex
+	// Process the range in windows.  For each window we build a ChangedKeysPerBlockIdx
 	// with a single HistoryKeyTxNumRange scan per domain, then reuse it across all
 	// sampled blocks in the window — replacing per-block heap-driven scans with
 	// O(1) index lookups.
@@ -996,7 +996,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 		}
 		windowEnd := min(windowStart+checkCommitmentHistWindowSize, to)
 
-		idx, err := ChangedKeysPerBlockIdx(ctx, db, br, windowStart, windowEnd, kv.StateDomains[:kv.CommitmentDomain], logger)
+		idx, err := NewChangedKeysPerBlockIdx(ctx, db, br, windowStart, windowEnd, kv.StateDomains[:kv.CommitmentDomain], logger)
 		if err != nil {
 			return fmt.Errorf("CheckCommitmentHistAtBlkRange: build index window=[%d,%d): %w", windowStart, windowEnd, err)
 		}
@@ -2122,7 +2122,7 @@ func deriveDecompAndReaderForOtherDomain(baseFile string, oldDomain, newDomain k
 	return decomp, seg.NewReader(decomp.MakeGetter(), compression), decomp.Close, nil
 }
 
-func touchHistoricalKeys(sd *execctx.SharedDomains, tx kv.TemporalTx, d kv.Domain, fromTxNum uint64, toTxNum uint64, blockNum uint64, idx *BlockDomainIndex, visitor func(k []byte)) (uint64, error) {
+func touchHistoricalKeys(sd *execctx.SharedDomains, tx kv.TemporalTx, d kv.Domain, fromTxNum uint64, toTxNum uint64, blockNum uint64, idx *ChangedKeysPerBlockIdx, visitor func(k []byte)) (uint64, error) {
 	if idx != nil {
 		domainIdx := idx[d]
 		offsets := domainIdx.Offsets(blockNum)
