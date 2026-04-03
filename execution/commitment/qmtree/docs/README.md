@@ -37,6 +37,7 @@ On the `qmtree` branch:
 | [transition-format.md](transition-format.md) | **Normative.** Exact byte layout for all 11 transition record types with worked examples |
 | [keyindex-persistence-plan.md](keyindex-persistence-plan.md) | Implementation plan: persist KeyIndex to disk using RecSplit + segmented data files |
 | [dataset-generation.md](dataset-generation.md) | How to generate a qmtree dataset from a synced datadir (mainnet or hoodi) |
+| [domain-integration-plan.md](domain-integration-plan.md) | Plan: integrate qmtree into Erigon's domain/snapshot/torrent pipeline (6 phases) |
 
 ## Reading order
 
@@ -62,18 +63,22 @@ These items are needed before qmtree proofs are fully self-contained and verifia
 
 3. **KeyIndex unwind** — the `KeyIndex` does not yet support incremental reorg unwind (requires rebuilding from genesis for affected keys). Needed for correctness under reorgs.
 
-### Future enhancements
+### Domain integration (production path)
 
-These improve production readiness and performance but are not needed for a working proof system:
+These phases migrate qmtree from standalone HPFile storage into Erigon's
+standard domain/snapshot/torrent pipeline. See [domain-integration-plan.md](domain-integration-plan.md)
+for full details.
 
-4. **KeyIndex persistence** — the current `KeyIndex` is in-memory only and is rebuilt during `LoadFromDisk`. Plan: segmented `.kv` data files + RecSplit `.kvi` indices, matching Erigon's Domain pattern. See [keyindex-persistence-plan.md](keyindex-persistence-plan.md).
+4. **MDBX hot tables** — write entries + key-index to MDBX during execution (Phase 1)
+5. **Collation** — freeze completed steps to `.kv`/`.kvi` snapshot files (Phase 2)
+6. **Pruning + merging** — standard domain lifecycle (Phases 3-4)
+7. **Remove HPFile** — MDBX/snapshots only, eliminate `stage_exec_replay` (Phase 5)
+8. **Torrent distribution** — register qmtree files with downloader (Phase 6)
 
-5. **Head pruning** — prune inactive twigs from disk using HPFile once twig eviction logic is added (QMDB §10).
+### Other enhancements
 
-6. **Prefetcher-updater-flusher pipeline** — pipelined execution for production throughput (QMDB architecture).
+9. **KeyIndex persistence** — implemented. See [keyindex-persistence-plan.md](keyindex-persistence-plan.md). Flushes at quarter-step boundaries with RecSplit indices.
 
-7. **HybridIndexer** — SSD+DRAM indexing for production memory efficiency.
+10. **eth_getProof compatibility** — adapter translating qmtree proofs to the format expected by existing Ethereum tooling.
 
-8. **eth_getProof compatibility** — adapter translating qmtree proofs to the format expected by existing Ethereum tooling.
-
-9. **Parallel twig sync** — use the 4-shard design (`TWIG_SHARD_COUNT=4`) for parallel hash computation during execution.
+11. **Parallel twig sync** — use the 4-shard design (`TWIG_SHARD_COUNT=4`) for parallel hash computation during execution.

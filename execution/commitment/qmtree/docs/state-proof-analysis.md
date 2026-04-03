@@ -462,11 +462,10 @@ All core implementation steps are complete on the `qmtree` branch.
 
 | Item | Priority | Description |
 |------|----------|-------------|
+| Domain integration | High | Migrate to MDBX hot tables → snapshot collation → torrent distribution. See [domain-integration-plan.md](domain-integration-plan.md) |
 | KeyIndex unwind | Medium | No incremental reorg support; affected keys require full replay |
-| KeyIndex persistence | Medium | In-memory only; rebuilt on LoadFromDisk. See [plan](keyindex-persistence-plan.md) |
+| ~~KeyIndex persistence~~ | Done | Implemented with RecSplit + quarter-step flush. See [keyindex-persistence-plan.md](keyindex-persistence-plan.md) |
 | RPC exclusion proofs | Low | `KeyIndex.GetProof()` works but not exposed via `qm_` RPC |
-| Head pruning | Low | HPFile design ready; twig eviction logic not implemented |
-| Pipelined execution | Low | Serial `tracker.Flush()` only; no prefetcher-updater-flusher pipeline |
 | `eth_getProof` compat | Low | Native qmtree format only; no MPT compatibility adapter |
 | Transition hash → SSZ | Future | Phase 6 (rolling keccak) is live; Phase 8 (SSZ field-level Merkle proofs) deferred |
 
