@@ -193,7 +193,7 @@ func (idx *ChangedKeysPerBlock) RamBytes() uint64 {
 }
 
 // ChangedKeysPerBlockIdx holds pre-built per-domain key change indices for a block window.
-// Populated by ChangedKeysPerBlockIdx for the requested domains.
+// Populated by NewChangedKeysPerBlockIdx for the requested domains.
 type ChangedKeysPerBlockIdx [kv.DomainLen]*ChangedKeysPerBlock
 
 // ChangedKeysPerBlockIdx scans HistoryKeyTxNumRange once per domain for the txNum
@@ -230,7 +230,7 @@ func NewChangedKeysPerBlockIdx(ctx context.Context, db kv.TemporalRoDB, br servi
 		ramBytes += idx[d].RamBytes()
 		logArgs = append(logArgs, d.String(), idx[d].NumKeys())
 	}
-	logger.Debug("[integrity] built block domain index",
+	logger.Info("[integrity] built block domain index",
 		append(logArgs, "ram", common.ByteCount(ramBytes), "took", time.Since(start))...,
 	)
 	return &idx, nil
