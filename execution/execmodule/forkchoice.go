@@ -631,6 +631,11 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 			}
 			commitTimings = ct
+			// Clear the published overlay — the SD is closed after commit.
+			// Without this, beginOverlayOrRo would use a stale/closed overlay.
+			if d := e.pipelineExecutor.Dispatcher(); d != nil {
+				d.PublishOverlay(nil)
+			}
 		}
 
 		// Prune: background by default (fcuBackgroundPrune=true).

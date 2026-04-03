@@ -687,24 +687,8 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	// Subscribe to overlay notifications BEFORE executing the fork choice so
-	// the subscription is in place when PublishOverlay sends through Events.
-	var overlayCh chan *execctx.SharedDomains
-	var unsubOverlay func()
-	if s.events != nil {
-		overlayCh, unsubOverlay = s.events.AddOverlaySubscription()
-		defer unsubOverlay()
-	}
-
-	// Track whether the head hash changed — only new-block FCUs produce an overlay.
-	headChanged := false
 	if status == nil {
-		// Read the current head before HandleForkChoice to detect head changes.
-		currentHead, _, _, _ := s.chainRW.GetForkChoice(ctx)
-		headChanged = forkchoiceState.HeadHash != currentHead
-
-		s.logger.Debug("[ForkChoiceUpdated] calling HandleForkChoice", "head", forkchoiceState.HeadHash, "currentHead", currentHead, "headChanged", headChanged)
-
+		s.logger.Debug("[ForkChoiceUpdated] calling HandleForkChoice", "head", forkchoiceState.HeadHash)
 		status, err = s.HandleForkChoice(ctx, "ForkChoiceUpdated", forkchoiceState)
 		if err != nil {
 			if errors.Is(err, rules.ErrInvalidBlock) {
@@ -724,13 +708,6 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		}
 	} else {
 		s.logger.Debug("[ForkChoiceUpdated] got quick payload status", "status", status.Status)
-	}
-
-	// Wait for the overlay to be published before returning Valid.
-	// Only wait when the head hash actually changed — safe/finalized-only
-	// FCUs don't execute new blocks and won't produce an overlay.
-	if headChanged && status.Status == engine_types.ValidStatus && overlayCh != nil {
-		s.waitForOverlayPublish(ctx, overlayCh)
 	}
 
 	// No need for payload building
@@ -753,7 +730,7 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 	if version >= clparams.CapellaVersion && !s.isWithdrawalsPresenceValid(timestamp, payloadAttributes.Withdrawals) {
-		return nil, &rpc.InvalidParamsError{Message: "missing or unexpected withdrawals for payload attributes"}
+		return nil, &engine_helpers.InvalidPayloadAttributesErr
 	}
 	if version >= clparams.GloasVersion && payloadAttributes.SlotNumber == nil {
 		return nil, &engine_helpers.InvalidPayloadAttributesErr // SlotNumber required for Glamsterdam (EIP-7843)
