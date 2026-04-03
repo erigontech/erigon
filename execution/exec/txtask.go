@@ -439,8 +439,14 @@ func (t *TxTask) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *call
 
 		// DEBUG: dump opcodes for a specific tx (set ERIGON_TRACE_TX=0x...)
 		if debugTraceTxHash != (common.Hash{}) && t.TxHash() == debugTraceTxHash {
-			fmt.Printf("=== TRACING TX %s in block %d ===\n", t.TxHash().Hex(), t.BlockNumber())
+			fmt.Printf("=== TRACING TX %s in block %d txIndex %d ===\n", t.TxHash().Hex(), t.BlockNumber(), t.TxIndex)
 			vmCfg.Tracer = &tracing.Hooks{
+				OnEnter: func(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
+					fmt.Printf("ENTER depth=%d type=%s from=%x to=%x gas=%d precompile=%v codeLen=%d\n", depth, vm.OpCode(typ).String(), from.Value(), to.Value(), gas, precompile, len(code))
+				},
+				OnExit: func(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+					fmt.Printf("EXIT depth=%d gasUsed=%d err=%v reverted=%v\n", depth, gasUsed, err, reverted)
+				},
 				OnOpcode: func(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
 					fmt.Printf("pc=%d op=%s gas=%d cost=%d depth=%d err=%v\n", pc, vm.OpCode(op).String(), gas, cost, depth, err)
 				},
@@ -535,6 +541,15 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		}
 
 		result.Coinbase = evm.Context.Coinbase
+
+		// DEBUG: verify tracer survived to Execute()
+		if debugTraceTxHash != (common.Hash{}) && txTask.TxHash() == debugTraceTxHash {
+			cfg := evm.Config()
+			fmt.Printf("=== EXECUTE TX %s tracer=%v onOpcode=%v onEnter=%v ===\n",
+				txTask.TxHash().Hex(), cfg.Tracer != nil,
+				cfg.Tracer != nil && cfg.Tracer.OnOpcode != nil,
+				cfg.Tracer != nil && cfg.Tracer.OnEnter != nil)
+		}
 
 		// MA applytx
 		result.ExecutionResult, result.Err = func() (evmtypes.ExecutionResult, error) {
