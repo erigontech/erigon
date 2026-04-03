@@ -36,8 +36,6 @@ type sd interface {
 	AsGetter(tx kv.TemporalTx) kv.TemporalGetter
 	AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel
 	StepSize() uint64
-	TxNum() uint64
-
 	Trace() bool
 	CommitmentCapture() bool
 }
@@ -452,9 +450,7 @@ func (e *errorTrieContext) Storage(plainKey []byte) (*commitment.Update, error) 
 	return nil, e.err
 }
 
-func (e *errorTrieContext) TxNum() uint64 {
-	return 0
-}
+
 
 // by that key stored latest root hash and tree state
 const keyCommitmentStateS = "state"
@@ -683,9 +679,7 @@ func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) e
 	return sdc.putter.DomainPut(kv.CommitmentDomain, prefix, data, sdc.txNum, prevData)
 }
 
-func (sdc *TrieContext) TxNum() uint64 {
-	return sdc.txNum
-}
+
 
 // readDomain reads data from domain, dereferences key and returns encoded value and step.
 // Step returned only when reading from domain files, otherwise it is always 0.
