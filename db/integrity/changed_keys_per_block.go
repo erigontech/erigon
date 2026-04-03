@@ -29,20 +29,61 @@ import (
 	"github.com/erigontech/erigon/db/services"
 )
 
-// ChangedKeysPerBlock is an in-memory index of changed keys grouped by block number,
-// built from a single HistoryKeyTxNumRange pass over a txNum window.
+// ChangedKeysPerBlockIdx holds pre-built per-domain key change indices for a block window.
+// Built by NewChangedKeysPerBlockIdx via a single HistoryKeyTxNumRange scan per domain.
 //
 // HistoryKeyTxNumRange emits (key, txNum) sorted by key ASC; txNums are ascending
 // within each key but restart from an arbitrary lower value on each new key.
 // TxNumToBlock exploits this: its cursor advances monotonically within a key and
-// resets to zero on each key change, giving O(1) amortized txNum→block lookup.
+// resets to zero on each key change, giving O(1) amortized txNum→block lookup
+// instead of O(log N) binary search per txNum.
+//
+// Typical usage: build once for a 10K-block window, then look up O(1) per block
+// instead of driving a merge-heap per block.
+type ChangedKeysPerBlockIdx [kv.DomainLen]*ChangedKeysPerBlock
+
+// NewChangedKeysPerBlockIdx scans HistoryKeyTxNumRange once per domain for the txNum
+// range covering [fromBlockNum, toBlockNum) blocks and returns the resulting index.
+// The index is fully in-memory.
+func NewChangedKeysPerBlockIdx(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, fromBlockNum, toBlockNum uint64, logger log.Logger) (*ChangedKeysPerBlockIdx, error) {
+	domains := []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain}
+	start := time.Now()
+	fromTxNum, err := br.TxnumReader().Min(ctx, tx, fromBlockNum)
+	if err != nil {
+		return nil, err
+	}
+	// NewTxNumToBlock reads Max for every block in the window; derive toTxNum from
+	// its last entry instead of a separate redundant Max(toBlockNum-1) call.
+	txNums, err := NewTxNumToBlock(ctx, tx, br, fromBlockNum, toBlockNum)
+	if err != nil {
+		return nil, err
+	}
+	toTxNum := txNums.ToTxNum()
+
+	var idx ChangedKeysPerBlockIdx
+	var ramBytes uint64
+	logArgs := []any{"fromBlockNum", fromBlockNum, "toBlockNum", toBlockNum}
+	// txNums cursor is shared across domains: safe because each NewChangedKeysPerBlock
+	// call starts with prevKey="", so the very first key triggers ResetCursor immediately.
+	for _, d := range domains {
+		if idx[d], err = NewChangedKeysPerBlock(tx.Debug(), d, int(fromTxNum), int(toTxNum), txNums); err != nil {
+			return nil, fmt.Errorf("ChangedKeysPerBlockIdx domain=%s blocks=[%d,%d): %w", d, fromBlockNum, toBlockNum, err)
+		}
+		ramBytes += idx[d].RamBytes()
+		logArgs = append(logArgs, d.String(), idx[d].NumKeys())
+	}
+	logger.Debug("[integrity] built block domain index",
+		append(logArgs, "ram", common.ByteCount(ramBytes), "took", time.Since(start))...,
+	)
+	return &idx, nil
+}
+
+// ChangedKeysPerBlock is an in-memory index of changed keys for a single domain,
+// grouped by block number.  One entry per domain in ChangedKeysPerBlockIdx.
 //
 // Memory layout: unique keys are stored once in a flat slice; each block maps to a
 // []uint32 of offsets into that slice.  Multiple txNums mapping to the same block
 // are deduplicated — each key appears at most once per block entry.
-//
-// Typical usage: build once for a 10K-block window via NewChangedKeysPerBlockIdx,
-// then look up O(1) per block instead of driving a merge-heap per block.
 type ChangedKeysPerBlock struct {
 	keys   []string            // flat, deduplicated key storage
 	blocks map[uint64][]uint32 // blockNum -> offsets into keys
@@ -187,44 +228,4 @@ func (m *TxNumToBlock) BlockOf(txNum uint64) (uint64, error) {
 		return m.fromBlockNum + uint64(m.cursor), nil
 	}
 	return 0, fmt.Errorf("TxNumToBlock: txNum %d beyond window [%d,%d)", txNum, m.fromBlockNum, m.toBlockNum)
-}
-
-// ChangedKeysPerBlockIdx holds pre-built per-domain key change indices for a block window.
-// Populated by NewChangedKeysPerBlockIdx for the requested domains.
-type ChangedKeysPerBlockIdx [kv.DomainLen]*ChangedKeysPerBlock
-
-// NewChangedKeysPerBlockIdx scans HistoryKeyTxNumRange once per domain for the txNum
-// range covering [fromBlockNum, toBlockNum) blocks and returns the resulting index.
-// The index is fully in-memory.
-func NewChangedKeysPerBlockIdx(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, fromBlockNum, toBlockNum uint64, logger log.Logger) (*ChangedKeysPerBlockIdx, error) {
-	domains := []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain}
-	start := time.Now()
-	fromTxNum, err := br.TxnumReader().Min(ctx, tx, fromBlockNum)
-	if err != nil {
-		return nil, err
-	}
-	// NewTxNumToBlock reads Max for every block in the window; derive toTxNum from
-	// its last entry instead of a separate redundant Max(toBlockNum-1) call.
-	txNums, err := NewTxNumToBlock(ctx, tx, br, fromBlockNum, toBlockNum)
-	if err != nil {
-		return nil, err
-	}
-	toTxNum := txNums.ToTxNum()
-
-	var idx ChangedKeysPerBlockIdx
-	var ramBytes uint64
-	logArgs := []any{"fromBlockNum", fromBlockNum, "toBlockNum", toBlockNum}
-	// txNums cursor is shared across domains: safe because each NewChangedKeysPerBlock
-	// call starts with prevKey="", so the very first key triggers ResetCursor immediately.
-	for _, d := range domains {
-		if idx[d], err = NewChangedKeysPerBlock(tx.Debug(), d, int(fromTxNum), int(toTxNum), txNums); err != nil {
-			return nil, fmt.Errorf("ChangedKeysPerBlockIdx domain=%s blocks=[%d,%d): %w", d, fromBlockNum, toBlockNum, err)
-		}
-		ramBytes += idx[d].RamBytes()
-		logArgs = append(logArgs, d.String(), idx[d].NumKeys())
-	}
-	logger.Debug("[integrity] built block domain index",
-		append(logArgs, "ram", common.ByteCount(ramBytes), "took", time.Since(start))...,
-	)
-	return &idx, nil
 }
