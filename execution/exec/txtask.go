@@ -428,6 +428,18 @@ func (t *TxTask) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *call
 		if callTracer != nil {
 			vmCfg.Tracer = callTracer.Tracer().Hooks
 		}
+
+		// DEBUG: dump opcodes for a specific tx
+		targetTxHash := common.HexToHash("0xYOUR_TX_HASH_HERE")
+		if t.TxHash() == targetTxHash {
+			fmt.Printf("=== TRACING TX %s in block %d ===\n", t.TxHash().Hex(), t.BlockNumber())
+			vmCfg.Tracer = &tracing.Hooks{
+				OnOpcode: func(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
+					fmt.Printf("pc=%d op=%s gas=%d cost=%d depth=%d err=%v\n", pc, vm.OpCode(op).String(), gas, cost, depth, err)
+				},
+			}
+		}
+
 		msg, err := t.TxMessage()
 
 		if err != nil {
