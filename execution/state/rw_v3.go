@@ -847,6 +847,9 @@ func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.Sto
 }
 
 func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
+	if dbg.TraceAccount(address.Handle()) {
+		fmt.Printf("found ReadAccountCode [%x]\n", address)
+	}
 	var addressValue common.Address
 	if !address.IsNil() {
 		addressValue = address.Value()
