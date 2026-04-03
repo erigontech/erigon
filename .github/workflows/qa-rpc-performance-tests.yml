@@ -132,7 +132,7 @@ jobs:
       - name: Build Erigon RPCDaemon
         if: matrix.client == 'erigon'
         run: |
-          make rpcdaemon
+          make rpcdaemon integration
         working-directory: ${{ github.workspace }}
 
       - name: Pause the Erigon instance dedicated to db maintenance
@@ -149,6 +149,13 @@ jobs:
           cp -r $ERIGON_REFERENCE_DATA_DIR/chaindata $ERIGON_TESTBED_AREA/chaindata-prev
           rm -f $ERIGON_REFERENCE_DATA_DIR/logs/rpcdaemon.log || true
           echo "datadir_saved=true" >> $GITHUB_OUTPUT
+
+      - name: Run Migrations
+        if: matrix.client == 'erigon'
+        working-directory: ${{ github.workspace }}/build/bin
+        run: |
+          echo "Running migrations on datadir..."
+          ./integration run_migrations --datadir $ERIGON_REFERENCE_DATA_DIR --chain $CHAIN
 
       - name: Run RpcDaemon
         id: rpcdaemon_running_step
