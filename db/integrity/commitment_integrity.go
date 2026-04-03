@@ -923,7 +923,9 @@ func checkCommitmentHistAtBlkWithIdx(ctx context.Context, db kv.TemporalRoDB, br
 		return err
 	}
 	touchDur := time.Since(touchStart)
-	logger.Log(lvl, "commitment touched keys", "accTouches", accTouches, "storageTouches", storageTouches, "codeTouches", codeTouches, "touchDur", touchDur)
+	if trace {
+		logger.Log(lvl, "commitment touched keys", "accTouches", accTouches, "storageTouches", storageTouches, "codeTouches", codeTouches, "touchDur", touchDur)
+	}
 	recalcStart := time.Now()
 	root, err := sd.ComputeCommitment(ctx, tx, false /* saveStateAfter */, blockNum, maxTxNum, "integrity", nil /* commitProgress */)
 	if err != nil {
