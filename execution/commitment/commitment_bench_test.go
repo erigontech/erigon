@@ -31,7 +31,7 @@ func BenchmarkHexPatriciaHashedFold(b *testing.B) {
 	ctx := context.Background()
 	ms := NewMockState(b)
 	hph := NewHexPatriciaHashed(1, ms)
-	hph.SetTrace(false)
+	hph.SetTraceWriter(nil)
 
 	// Build a trie with accounts and storage to exercise all fold paths
 	plainKeys, updates := NewUpdateBuilder().

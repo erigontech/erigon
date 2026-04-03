@@ -363,10 +363,10 @@ func (sd *SharedDomains) SetTxNum(txNum uint64) {
 
 func (sd *SharedDomains) TxNum() uint64 { return sd.txNum }
 
-func (sd *SharedDomains) SetTrace(b, capture bool) []string {
+func (sd *SharedDomains) SetTrace(b, capture bool) string {
 	sd.trace = b
 	sd.commitmentCapture = capture
-	return sd.sdCtx.GetCapture(true)
+	return sd.sdCtx.DrainCapture()
 }
 
 func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) ([]byte, []byte, bool, error) {

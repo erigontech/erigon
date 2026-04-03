@@ -403,8 +403,8 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							if !bytes.Equal(rh, applyResult.StateRoot.Bytes()) {
 								pe.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", pe.logPrefix, applyResult.BlockNum, rh, applyResult.StateRoot.Bytes(), applyResult.BlockHash))
 								if !dbg.BatchCommitments {
-									for _, line := range captured {
-										fmt.Println(line)
+									if captured != "" {
+										fmt.Println(captured)
 									}
 
 									dumpTxIODebug(applyResult.BlockNum, applyResult.TxIO)

@@ -21,7 +21,9 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"os"
 	"sort"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -43,7 +45,7 @@ func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 	ctx := context.Background()
 	ms := NewMockState(t)
 	hph := NewHexPatriciaHashed(1, ms)
-	hph.SetTrace(false)
+	hph.SetTraceWriter(nil)
 	plainKeys, updates := NewUpdateBuilder().
 		Balance("00", 4).
 		Balance("01", 5).
@@ -73,7 +75,7 @@ func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 	t.Logf("rootHash %x\n", firstRootHash)
 
 	hph.Reset()
-	//hph.SetTrace(true)
+	//hph.SetTraceWriter(os.Stderr)
 	plainKeys, updates = NewUpdateBuilder().
 		Storage("03", "58", "050506").
 		Build()
@@ -112,7 +114,7 @@ func Test_HexPatriciaHashed_EmptyUpdate(t *testing.T) {
 	ms := NewMockState(t)
 	ctx := context.Background()
 	hph := NewHexPatriciaHashed(1, ms)
-	hph.SetTrace(false)
+	hph.SetTraceWriter(nil)
 	plainKeys, updates := NewUpdateBuilder().
 		Balance("00", 4).
 		Nonce("00", 246462653).
@@ -169,8 +171,8 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 	trieOne := NewHexPatriciaHashed(length.Addr, msOne)
 	trieTwo := NewHexPatriciaHashed(length.Addr, msTwo)
 
-	//trieOne.SetTrace(true)
-	//trieTwo.SetTrace(true)
+	//trieOne.SetTraceWriter(os.Stderr)
+	//trieTwo.SetTraceWriter(os.Stderr)
 
 	var rSeq, rBatch []byte
 	{
@@ -254,7 +256,7 @@ func Test_Trie_CorrectSwitchForConcurrentAndSequential(t *testing.T) {
 	ctx := context.Background()
 	ms := NewMockState(t)
 	hph := NewHexPatriciaHashed(length.Addr, ms)
-	hph.SetTrace(false)
+	hph.SetTraceWriter(nil)
 
 	// generate list of updates diverging from first nibble (good case for parallelization))
 	plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 150)
@@ -347,8 +349,8 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 			plainKeys, updates = sortUpdatesByHashIncrease(t, trieSequential, plainKeys, updates)
 		}
 
-		//trieSequential.SetTrace(trace)
-		//trieBatch.SetParticularTrace(trace, 9)
+		//trieSequential.SetTraceWriter(os.Stderr)
+		//trieBatch.SetParticularTrace(os.Stderr, 9)
 
 		var rSeq, rBatch []byte
 		{
@@ -409,8 +411,8 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 			plainKeys, updates = sortUpdatesByHashIncrease(t, trieSequential, plainKeys, updates)
 		}
 
-		trieSequential.SetTrace(false)
-		trieBatch.SetTrace(false)
+		trieSequential.SetTraceWriter(nil)
+		trieBatch.SetTraceWriter(nil)
 
 		{
 			fmt.Printf("3. Trie sequential update (%d updates)\n", len(updates))
@@ -464,8 +466,8 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 			plainKeys, updates = sortUpdatesByHashIncrease(t, trieSequential, plainKeys, updates)
 		}
 
-		trieSequential.SetTrace(false)
-		trieBatch.SetTrace(false)
+		trieSequential.SetTraceWriter(nil)
+		trieBatch.SetTraceWriter(nil)
 
 		{
 			fmt.Printf("5. Trie sequential update (%d updates)\n", len(updates))
@@ -576,8 +578,8 @@ func Test_ParallelHexPatriciaHashed_EdgeCases(t *testing.T) {
 	plainKeys, updates = sortUpdatesByHashIncrease(t, trieSequential, plainKeys, updates)
 	ctx := context.Background()
 
-	trieSequential.SetTrace(false)
-	trieBatch.SetTrace(false)
+	trieSequential.SetTraceWriter(nil)
+	trieBatch.SetTraceWriter(nil)
 
 	var rSeq, rBatch []byte
 	{
@@ -673,8 +675,10 @@ func Test_HexPatriciaHashed_BrokenUniqueRepr(t *testing.T) {
 			plainKeys, updates = sortUpdatesByHashIncrease(t, trieSequential, plainKeys, updates)
 		}
 
-		trieSequential.SetTrace(trace)
-		trieBatch.SetTrace(trace)
+		if trace {
+			trieSequential.SetTraceWriter(os.Stderr)
+			trieBatch.SetTraceWriter(os.Stderr)
+		}
 
 		var rSeq, rBatch []byte
 		{
@@ -756,8 +760,8 @@ func Test_HexPatriciaHashed_UniqueRepresentation(t *testing.T) {
 
 	plainKeys, updates = sortUpdatesByHashIncrease(t, trieSequential, plainKeys, updates)
 
-	// trieSequential.SetTrace(true)
-	// trieBatch.SetTrace(true)
+	// trieSequential.SetTraceWriter(os.Stderr)
+	// trieBatch.SetTraceWriter(os.Stderr)
 
 	var rSeq, rBatch []byte
 	{
@@ -899,7 +903,7 @@ func Test_HexPatriciaHashed_Sepolia(t *testing.T) {
 	}
 
 	hph := NewHexPatriciaHashed(length.Addr, state)
-	//hph.SetTrace(true)
+	//hph.SetTraceWriter(os.Stderr)
 
 	for _, testData := range tests {
 		builder := NewUpdateBuilder()
@@ -1361,8 +1365,8 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMiddle(t *te
 
 	plainKeys, updates = sortUpdatesByHashIncrease(t, sequential, plainKeys, updates)
 
-	//sequential.SetTrace(true)
-	//batch.SetTrace(true)
+	//sequential.SetTraceWriter(os.Stderr)
+	//batch.SetTraceWriter(os.Stderr)
 	somewhere := 6
 	somewhereRoot := make([]byte, 0)
 
@@ -1512,8 +1516,8 @@ func Test_ParallelHexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMidd
 
 	plainKeys, updates = sortUpdatesByHashIncrease(t, sequential, plainKeys, updates)
 
-	//sequential.SetTrace(true)
-	//batch.SetTrace(true)
+	//sequential.SetTraceWriter(os.Stderr)
+	//batch.SetTraceWriter(os.Stderr)
 	somewhere := 16
 	var rSeq, rBatch, somewhereRoot []byte
 	_ = rSeq
@@ -1524,10 +1528,10 @@ func Test_ParallelHexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMidd
 
 		updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:somewhere+1], updates[:somewhere+1])
 
-		sequential.SetTrace(false)
+		sequential.SetTraceWriter(nil)
 		sequentialRoot, err := sequential.Process(ctx, updsOne, "", nil, WarmupConfig{})
 		require.NoError(t, err)
-		//sequential.SetTrace(false)
+		//sequential.SetTraceWriter(nil)
 
 		t.Logf("sequential root @%d hash %x\n", somewhere, sequentialRoot)
 		somewhereRoot = common.Copy(sequentialRoot)
@@ -1566,7 +1570,7 @@ func Test_ParallelHexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMidd
 				return stateBatch, func() {}
 			},
 		}
-		trieBatch.SetTrace(false)
+		trieBatch.SetTraceWriter(nil)
 		rh, err := trieBatch.Process(ctx, updsTwo, "", nil, wc)
 		require.NoError(t, err)
 		t.Logf("(first half) batch of %d root hash %x\n", somewhere, rh)
@@ -1902,8 +1906,8 @@ func Test_HexPatriciaHashed_ProcessWithDozensOfStorageKeys(t *testing.T) {
 
 	trieTwo := NewHexPatriciaHashed(length.Addr, msTwo)
 
-	trieOne.SetTrace(false)
-	trieTwo.SetTrace(false)
+	trieOne.SetTraceWriter(nil)
+	trieTwo.SetTraceWriter(nil)
 
 	var rSeq, rBatch []byte
 	{
@@ -2021,7 +2025,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		ctx := context.Background()
 		ms := NewMockState(t)
 		hph := NewHexPatriciaHashed(length.Addr, ms)
-		hph.SetTrace(false)
+		hph.SetTraceWriter(nil)
 
 		plainKeys, updates := builder.Build()
 		err := ms.applyPlainUpdates(plainKeys, updates)
@@ -2088,7 +2092,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		ctx := context.Background()
 		ms := NewMockState(t)
 		hph := NewHexPatriciaHashed(length.Addr, ms)
-		hph.SetTrace(false)
+		hph.SetTraceWriter(nil)
 
 		var root []byte
 		for _, builder := range builders {
@@ -2982,4 +2986,72 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 
 		buildTrieAndWitness(t, builder, [][]byte{fullStorageKeyToProve}, []bool{true})
 	})
+}
+
+func TestSetTraceWriter_NilDisablesTrace(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	ms := NewMockState(t)
+	hph := NewHexPatriciaHashed(1, ms)
+
+	// Explicitly set traceW to nil — no output should be produced.
+	hph.SetTraceWriter(nil)
+
+	plainKeys, updates := NewUpdateBuilder().
+		Balance("00", 4).
+		Balance("01", 5).
+		Build()
+
+	upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+	defer upds.Close()
+
+	err := ms.applyPlainUpdates(plainKeys, updates)
+	require.NoError(t, err)
+
+	rootHash, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	require.NotEmpty(t, rootHash, "root hash must not be empty")
+
+	// With nil traceW, there is nowhere to capture output — the test verifies
+	// that Process completes without panicking on nil writer.
+}
+
+func TestSetTraceWriter_BufferCapturesOutput(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	ms := NewMockState(t)
+	hph := NewHexPatriciaHashed(1, ms)
+
+	var buf bytes.Buffer
+	hph.SetTraceWriter(&buf)
+
+	plainKeys, updates := NewUpdateBuilder().
+		Balance("00", 4).
+		Balance("01", 5).
+		Balance("02", 6).
+		Storage("00", "01", "0401").
+		Build()
+
+	upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+	defer upds.Close()
+
+	err := ms.applyPlainUpdates(plainKeys, updates)
+	require.NoError(t, err)
+
+	rootHash, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	require.NotEmpty(t, rootHash, "root hash must not be empty")
+
+	output := buf.String()
+	require.NotEmpty(t, output, "trace buffer should contain output when traceW is set")
+
+	// Process should emit [proc] lines — one per key update processed.
+	require.True(t, strings.Contains(output, "[proc]"),
+		"trace output should contain [proc] lines, got:\n%s", output)
+
+	// fold is called during commitment computation.
+	require.True(t, strings.Contains(output, "fold"),
+		"trace output should contain fold-related lines, got:\n%s", output)
 }

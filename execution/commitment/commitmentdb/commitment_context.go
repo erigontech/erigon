@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"runtime"
 	"sync/atomic"
 	"time"
@@ -48,6 +49,7 @@ type SharedDomainsCommitmentContext struct {
 	patriciaTrie  commitment.Trie
 	justRestored  atomic.Bool // set to true when commitment trie was just restored from snapshot
 	trace         bool
+	captureBuf    *bytes.Buffer // buffer for CommitmentCapture trace output
 	stateReader   StateReader
 	paraTrieDB    kv.TemporalRoDB // DB used for para trie and/or parallel trie warmup
 	trieWarmup    bool            // toggle for parallel trie warmup of MDBX page cache during commitment
@@ -143,7 +145,16 @@ func (sdc *SharedDomainsCommitmentContext) SetLimitedHistoryStateReader(roTx kv.
 
 func (sdc *SharedDomainsCommitmentContext) SetTrace(trace bool) {
 	sdc.trace = trace
-	sdc.patriciaTrie.SetTrace(trace)
+}
+
+// DrainCapture returns the accumulated capture buffer content and resets the buffer.
+func (sdc *SharedDomainsCommitmentContext) DrainCapture() string {
+	if sdc.captureBuf == nil || sdc.captureBuf.Len() == 0 {
+		return ""
+	}
+	s := sdc.captureBuf.String()
+	sdc.captureBuf.Reset()
+	return s
 }
 
 // EnableWarmupCache enables/disables warmup cache during commitment processing.
@@ -197,10 +208,6 @@ func (sdc *SharedDomainsCommitmentContext) Reset() {
 	if !sdc.justRestored.Load() {
 		sdc.patriciaTrie.Reset()
 	}
-}
-
-func (sdc *SharedDomainsCommitmentContext) GetCapture(truncate bool) []string {
-	return sdc.patriciaTrie.GetCapture(truncate)
 }
 
 func (sdc *SharedDomainsCommitmentContext) ClearRam() {
@@ -272,12 +279,16 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 
 	// data accessing functions should be set when domain is opened/shared context updated
 
-	sdc.patriciaTrie.SetTrace(sdc.trace)
 	sdc.patriciaTrie.SetTraceDomain(sdc.sharedDomains.Trace())
 	if sdc.sharedDomains.CommitmentCapture() {
-		if sdc.patriciaTrie.GetCapture(false) == nil {
-			sdc.patriciaTrie.SetCapture([]string{})
+		if sdc.captureBuf == nil {
+			sdc.captureBuf = new(bytes.Buffer)
 		}
+		sdc.patriciaTrie.SetTraceWriter(sdc.captureBuf)
+	} else if sdc.trace {
+		sdc.patriciaTrie.SetTraceWriter(os.Stderr)
+	} else {
+		sdc.patriciaTrie.SetTraceWriter(nil)
 	}
 
 	trieContext := sdc.trieContext(tx, blockNum, txNum)
