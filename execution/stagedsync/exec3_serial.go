@@ -69,6 +69,12 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		if err != nil {
 			return nil, rwTx, fmt.Errorf("init qmtree tracker: %w", err)
 		}
+		// Write entries + keyindex to MDBX tables alongside domain data.
+		se.qmtracker.SetTx(rwTx)
+		// Try loading existing qmtree state from MDBX.
+		if err := se.qmtracker.LoadFromDB(rwTx); err != nil {
+			log.Warn("qmtree: LoadFromDB failed, starting fresh", "err", err)
+		}
 		// Attach to SharedDomains so qmtree flushes alongside domain data.
 		se.doms.SetAppendOnly(se.qmtracker)
 	}

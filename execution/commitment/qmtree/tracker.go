@@ -10,6 +10,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 // proofEntry is a minimal Entry for the production pipeline.
@@ -74,9 +75,13 @@ type Tracker struct {
 	// from the entry file during LoadFromDisk.
 	twigPrevLeaf []common.Hash
 
-	// Disk storage handles (nil when in-memory only).
-	entryFile *EntryFile
-	twigFile  *TwigFile
+	// Disk storage handles.
+	// MDBX mode: rwTx is set → entries/keyindex written to MDBX tables.
+	// HPFile mode (legacy): entryFile/twigFile set → written to HPFile segments.
+	// In-memory mode: both nil.
+	rwTx      kv.RwTx   // current write transaction (set per batch via SetTx)
+	entryFile *EntryFile // legacy HPFile storage (nil in MDBX mode)
+	twigFile  *TwigFile  // legacy HPFile storage (nil in MDBX mode)
 
 	// Step tracking.
 	stepSize       uint64 // entries per step (matches config3.DefaultStepSize)
@@ -167,6 +172,11 @@ func NewTracker(snapDir string, stepSize uint64) (*Tracker, error) {
 	return qt, nil
 }
 
+// SetTx sets the current MDBX write transaction for this batch. When set,
+// entries and key-index updates are written to MDBX tables instead of HPFile.
+// Call with nil to detach.
+func (qt *Tracker) SetTx(tx kv.RwTx) { qt.rwTx = tx }
+
 // AppendLeaf builds a proof leaf from individual hash components and appends
 // it to the qmtree. The preStateHash, stateChangeHash, and transitionHash
 // come from execution; previousLeafHash is chained automatically.
@@ -193,6 +203,13 @@ func (qt *Tracker) AppendLeaf(preStateHash, stateChangeHash, transitionHash comm
 	entry := &proofEntry{sn: qt.NextSN, hash: leafHash, pre: preStateHash, stateChange: stateChangeHash, transition: transitionHash}
 	qt.tree.AppendEntry(entry)
 
+	// Write to MDBX if a transaction is set.
+	if qt.rwTx != nil {
+		if err := PutEntry(qt.rwTx, qt.NextSN, preStateHash, stateChangeHash, transitionHash); err != nil {
+			log.Warn("qmtree: failed to write entry to MDBX", "sn", qt.NextSN, "err", err)
+		}
+	}
+
 	qt.leafData.Add(qt.NextSN, ld)
 	qt.prevLeaf = leafHash
 	qt.NextSN++
@@ -211,6 +228,12 @@ func (qt *Tracker) NotifyKeyWrites(keyHashes []common.Hash, txNum uint64) {
 	for _, kh := range keyHashes {
 		qt.keyIndex.UpdateKey(kh, txNum)
 		qt.keyIndexDirty[kh] = txNum
+		// Write to MDBX if a transaction is set.
+		if qt.rwTx != nil {
+			if err := PutKeyIndex(qt.rwTx, kh, txNum); err != nil {
+				log.Warn("qmtree: failed to write keyindex to MDBX", "err", err)
+			}
+		}
 	}
 	qt.maybeFlushKeyIndex()
 }
@@ -497,6 +520,15 @@ func (qt *Tracker) Flush() {
 		qt.twigFile.Flush()
 	}
 	qt.flushKeyIndex()
+	// Persist metadata to MDBX so LoadFromDB can resume.
+	if qt.rwTx != nil {
+		if err := PutNextSN(qt.rwTx, qt.NextSN); err != nil {
+			log.Warn("qmtree: failed to write nextSN to MDBX", "err", err)
+		}
+		if err := PutPrevLeaf(qt.rwTx, qt.prevLeaf); err != nil {
+			log.Warn("qmtree: failed to write prevLeaf to MDBX", "err", err)
+		}
+	}
 }
 
 // quarterStep returns the current quarter-step number: NextSN / (stepSize/4).
@@ -691,6 +723,71 @@ func (qt *Tracker) LoadFromDisk() error {
 		"entryStorage", common.ByteCount(uint64(fileSize)),
 		"cachedLeaves", qt.leafData.Len(),
 		"keyIndexKeys", qt.keyIndex.Len(),
+	)
+	return nil
+}
+
+// LoadFromDB rebuilds the in-memory tree from QMTreeEntries in MDBX.
+// This is faster than LoadFromDisk (HPFile replay) because MDBX reads are
+// sequential and the metadata (NextSN, prevLeaf) is stored directly.
+func (qt *Tracker) LoadFromDB(tx kv.Tx) error {
+	nextSN, err := GetNextSN(tx)
+	if err != nil {
+		return fmt.Errorf("qmtree LoadFromDB: read nextSN: %w", err)
+	}
+	if nextSN == 0 {
+		return nil // empty, nothing to load
+	}
+
+	prevLeaf, err := GetPrevLeaf(tx)
+	if err != nil {
+		return fmt.Errorf("qmtree LoadFromDB: read prevLeaf: %w", err)
+	}
+
+	// Replay through an in-memory tree.
+	replayTree := NewTree(qt.hasher, 0, nil, nil)
+	var currentPrevLeaf common.Hash
+	twigPrevLeaf := []common.Hash{{}}
+
+	for sn := uint64(0); sn < nextSN; sn++ {
+		if sn > 0 && sn%LEAF_COUNT_IN_TWIG == 0 {
+			twigId := sn / LEAF_COUNT_IN_TWIG
+			for uint64(len(twigPrevLeaf)) <= twigId {
+				twigPrevLeaf = append(twigPrevLeaf, common.Hash{})
+			}
+			twigPrevLeaf[twigId] = currentPrevLeaf
+		}
+
+		pre, sc, trans, err := GetEntry(tx, sn)
+		if err != nil {
+			return fmt.Errorf("qmtree LoadFromDB: read entry sn=%d: %w", sn, err)
+		}
+		ld := LeafData{
+			SerialNum:        sn,
+			PreStateHash:     pre,
+			StateChangeHash:  sc,
+			TransitionHash:   trans,
+			PreviousLeafHash: currentPrevLeaf,
+		}
+		leafHash := ld.LeafHash()
+		entry := &proofEntry{sn: sn, hash: leafHash, pre: pre, stateChange: sc, transition: trans}
+		replayTree.AppendEntry(entry)
+		qt.leafData.Add(sn, ld)
+		currentPrevLeaf = leafHash
+	}
+
+	// Attach disk handles from existing tree if any.
+	replayTree.entryStorage = qt.tree.entryStorage
+	replayTree.twigStorage = qt.tree.twigStorage
+
+	qt.tree = replayTree
+	qt.twigPrevLeaf = twigPrevLeaf
+	qt.prevLeaf = prevLeaf
+	qt.NextSN = nextSN
+
+	log.Info("qmtree: loaded from MDBX",
+		"entries", nextSN,
+		"cachedLeaves", qt.leafData.Len(),
 	)
 	return nil
 }
