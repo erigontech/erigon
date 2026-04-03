@@ -831,14 +831,10 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br serv
 
 // checkCommitmentHistAtBlkWithIdx checks commitment for blockNum using the pre-built
 // per-domain key index from ChangedKeysPerBlockIdx.
-func checkCommitmentHistAtBlkWithIdx(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, blockNum uint64, idx *ChangedKeysPerBlockIdx, lvl log.Lvl, logger log.Logger) error {
+func checkCommitmentHistAtBlkWithIdx(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, db kv.TemporalRoDB, br services.FullBlockReader, blockNum uint64, idx *ChangedKeysPerBlockIdx, lvl log.Lvl, logger log.Logger) error {
+	sd.ClearRam(true)
 	logger.Log(lvl, "checking commitment hist at block", "blockNum", blockNum)
 	start := time.Now()
-	tx, err := db.BeginTemporalRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
 	header, err := br.HeaderByNumber(ctx, tx, blockNum)
 	if err != nil {
 		return err
@@ -857,11 +853,6 @@ func checkCommitmentHistAtBlkWithIdx(ctx context.Context, db kv.TemporalRoDB, br
 		return fmt.Errorf("block %d is beyond latest block with state %d", blockNum, blockNumOfState)
 	}
 	toTxNum := maxTxNum + 1
-	sd, err := execctx.NewSharedDomains(ctx, tx, logger)
-	if err != nil {
-		return err
-	}
-	defer sd.Close()
 	// For blockNum==0 there is no prior commitment state (GetAsOf at txNum=0
 	// falls back to latest for the commitment domain). Use commitmentAsOf=toTxNum
 	// so the trie is restored from the committed state at the end of block 0.
@@ -916,22 +907,16 @@ func checkCommitmentHistAtBlkWithIdx(ctx context.Context, db kv.TemporalRoDB, br
 		}
 	}
 	touchStart := time.Now()
-	accTouches, err := touchHistoricalKeys(sd, tx, kv.AccountsDomain, minTxNum, toTxNum, blockNum, idx, touchLoggingVisitor)
-	if err != nil {
+	if _, err := touchHistoricalKeys(sd, tx, kv.AccountsDomain, minTxNum, toTxNum, blockNum, idx, touchLoggingVisitor); err != nil {
 		return err
 	}
-	storageTouches, err := touchHistoricalKeys(sd, tx, kv.StorageDomain, minTxNum, toTxNum, blockNum, idx, touchLoggingVisitor)
-	if err != nil {
+	if _, err := touchHistoricalKeys(sd, tx, kv.StorageDomain, minTxNum, toTxNum, blockNum, idx, touchLoggingVisitor); err != nil {
 		return err
 	}
-	codeTouches, err := touchHistoricalKeys(sd, tx, kv.CodeDomain, minTxNum, toTxNum, blockNum, idx, touchLoggingVisitor)
-	if err != nil {
+	if _, err := touchHistoricalKeys(sd, tx, kv.CodeDomain, minTxNum, toTxNum, blockNum, idx, touchLoggingVisitor); err != nil {
 		return err
 	}
 	touchDur := time.Since(touchStart)
-	if trace {
-		logger.Log(lvl, "commitment touched keys", "accTouches", accTouches, "storageTouches", storageTouches, "codeTouches", codeTouches, "touchDur", touchDur)
-	}
 	recalcStart := time.Now()
 	root, err := sd.ComputeCommitment(ctx, tx, false /* saveStateAfter */, blockNum, maxTxNum, "integrity", nil /* commitProgress */)
 	if err != nil {
@@ -956,11 +941,21 @@ func checkCommitmentHistAtBlkWithIdx(ctx context.Context, db kv.TemporalRoDB, br
 }
 
 func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, blockNum uint64, lvl log.Lvl, logger log.Logger) error {
-	idx, err := NewChangedKeysPerBlockIdx(ctx, db, br, blockNum, blockNum+1, logger)
+	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
 	}
-	return checkCommitmentHistAtBlkWithIdx(ctx, db, br, blockNum, idx, lvl, logger)
+	defer tx.Rollback()
+	sd, err := execctx.NewSharedDomains(ctx, tx, logger)
+	if err != nil {
+		return err
+	}
+	defer sd.Close()
+	idx, err := NewChangedKeysPerBlockIdx(ctx, tx, br, blockNum, blockNum+1, logger)
+	if err != nil {
+		return err
+	}
+	return checkCommitmentHistAtBlkWithIdx(ctx, tx, sd, db, br, blockNum, idx, lvl, logger)
 }
 
 // checkCommitmentHistWindowSize is the number of blocks covered by a single
@@ -1006,12 +1001,22 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 			if wCtx.Err() != nil {
 				return wCtx.Err()
 			}
-			idx, err := NewChangedKeysPerBlockIdx(wCtx, db, br, windowStart, windowEnd, logger)
+			tx, err := db.BeginTemporalRo(wCtx)
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
+			sd, err := execctx.NewSharedDomains(wCtx, tx, logger)
+			if err != nil {
+				return err
+			}
+			defer sd.Close()
+			idx, err := NewChangedKeysPerBlockIdx(wCtx, tx, br, windowStart, windowEnd, logger)
 			if err != nil {
 				return fmt.Errorf("CheckCommitmentHistAtBlkRange: build index window=[%d,%d): %w", windowStart, windowEnd, err)
 			}
 			for blockNum := range sampler.BlockNums(windowStart, windowEnd) {
-				if err := checkCommitmentHistAtBlkWithIdx(wCtx, db, br, blockNum, idx, log.LvlTrace, logger); err != nil {
+				if err := checkCommitmentHistAtBlkWithIdx(wCtx, tx, sd, db, br, blockNum, idx, log.LvlTrace, logger); err != nil {
 					return fmt.Errorf("checkCommitmentHistAtBlk: %d, %w", blockNum, err)
 				}
 				checked.Add(1)
