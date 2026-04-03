@@ -164,6 +164,29 @@ func TestChangedKeysPerBlock_Empty(t *testing.T) {
 	require.False(t, idx.Has(0))
 }
 
+func TestChangedKeysPerBlock_WithRealTxNumToBlock(t *testing.T) {
+	// key "b" has txNum 7 (block 0) — lower than key "a"'s last txNum 22 (block 2).
+	// Without cursor reset between keys, BlockOf(7) would fail (cursor stuck at 2).
+	it := newPairKU64(
+		pair("a", 2),
+		pair("a", 12),
+		pair("a", 22),
+		pair("b", 7),
+		pair("b", 17),
+	)
+	txNums := &TxNumToBlock{
+		maxTxNums:    []uint64{9, 19, 29},
+		fromBlockNum: 0,
+		toBlockNum:   3,
+	}
+	idx, err := changedKeysPerBlock(it, txNums)
+	require.NoError(t, err)
+
+	require.Equal(t, []string{"a", "b"}, keysForBlock(idx, 0)) // a@2, b@7 → block 0
+	require.Equal(t, []string{"a", "b"}, keysForBlock(idx, 1)) // a@12, b@17 → block 1
+	require.Equal(t, []string{"a"}, keysForBlock(idx, 2))      // a@22 → block 2
+}
+
 func TestTxNumToBlock_BlockOf(t *testing.T) {
 	// 3 blocks: block 10 has txNums [0,4], block 11 has [5,9], block 12 has [10,14].
 	// maxTxNums: [4, 9, 14]
