@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"maps"
 	"sort"
+	"strings"
 	"sync"
 
 	btree2 "github.com/tidwall/btree"
@@ -357,8 +358,9 @@ func (sd *TemporalMemBatch) HasPrefixInRAM(domain kv.Domain, prefix []byte) bool
 		return false
 	}
 
+	prefixStr := string(prefix)
 	for k, vals := range sd.domains[domain] {
-		if bytes.HasPrefix([]byte(k), prefix) && len(vals) > 0 && len(vals[len(vals)-1].data) > 0 {
+		if strings.HasPrefix(k, prefixStr) && len(vals) > 0 && len(vals[len(vals)-1].data) > 0 {
 			return true
 		}
 	}

@@ -24,6 +24,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -1998,10 +1999,7 @@ func (sdb *IntraBlockState) CommitBlock(chainRules *chain.Rules, stateWriter Sta
 // dirtied by actual transaction execution, so CommitBlock does not apply EIP-161 to
 // override-only accounts.
 func (sdb *IntraBlockState) ExtractAndClearDirty() map[accounts.Address]struct{} {
-	dirty := make(map[accounts.Address]struct{}, len(sdb.stateObjectsDirty))
-	for addr := range sdb.stateObjectsDirty {
-		dirty[addr] = struct{}{}
-	}
+	dirty := maps.Clone(sdb.stateObjectsDirty)
 	clear(sdb.stateObjectsDirty)
 	return dirty
 }
@@ -2011,8 +2009,6 @@ func (sdb *IntraBlockState) ExtractAndClearDirty() map[accounts.Address]struct{}
 // intentionally disabled: override accounts are simulation-only mutations and must not
 // be removed simply because they are "empty" by consensus rules.
 func (sdb *IntraBlockState) CommitOverrideDirtyAccounts(chainRules *chain.Rules, stateWriter StateWriter, overrideDirty map[accounts.Address]struct{}) error {
-	noEIP161Rules := *chainRules
-	noEIP161Rules.IsSpuriousDragon = false
 	for addr := range overrideDirty {
 		if _, alsoTxDirty := sdb.stateObjectsDirty[addr]; alsoTxDirty {
 			continue // CommitBlock already handled this address
@@ -2021,7 +2017,7 @@ func (sdb *IntraBlockState) CommitOverrideDirtyAccounts(chainRules *chain.Rules,
 		if !exists || so.deleted {
 			continue
 		}
-		if err := updateAccount(noEIP161Rules.IsSpuriousDragon, noEIP161Rules.IsAura, stateWriter, addr, so, true, sdb.trace, sdb.tracingHooks, true); err != nil {
+		if err := updateAccount(false, chainRules.IsAura, stateWriter, addr, so, true, sdb.trace, sdb.tracingHooks, true); err != nil {
 			return err
 		}
 	}
