@@ -72,7 +72,7 @@ func NewChangedKeysPerBlockIdx(ctx context.Context, tx kv.TemporalTx, br service
 		ramBytes += idx[d].RamBytes()
 		logArgs = append(logArgs, d.String(), idx[d].NumKeys())
 	}
-	logger.Debug("[integrity] built block domain index",
+	logger.Debug("[integrity] collected changed keys",
 		append(logArgs, "ram", common.ByteCount(ramBytes), "took", time.Since(start))...,
 	)
 	return &idx, nil
