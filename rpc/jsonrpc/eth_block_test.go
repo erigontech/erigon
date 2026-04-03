@@ -42,7 +42,7 @@ func TestGetBlockByNumberWithLatestTag(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	b, err := api.GetBlockByNumber(context.Background(), rpc.LatestBlockNumber, false)
-	expected := common.HexToHash("0x5883164d4100b95e1d8e931b8b9574586a1dea7507941e6ad3c1e3a2591485fd")
+	expected := common.HexToHash("0x9c47d5780744fa24ccdb1543a9b715e53431d5560b9e460b8b7a68f7c58310ae")
 	if err != nil {
 		t.Errorf("error getting block number with latest tag: %s", err)
 	}

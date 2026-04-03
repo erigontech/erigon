@@ -140,12 +140,13 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	defer ibs.Release(false)
 	ibs.SetTxContext(current.Header.Number.Uint64(), -1)
 
+	current.PayloadId = cfg.payloadId
 	ba := exec.NewBlockAssembler(exec.AssemblerCfg{
 		ChainConfig:     cfg.chainConfig,
 		Engine:          cfg.engine,
 		BlockReader:     cfg.blockReader,
 		ExperimentalBAL: execCfg.IsExperimentalBAL(),
-	}, cfg.payloadId, current.ParentHeaderTime, current.Header, current.Uncles, current.Withdrawals)
+	}, current)
 	ba.SetStateWriter(stateWriter)
 
 	if ba.HasBAL() {
@@ -217,12 +218,6 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	if err != nil {
 		return err
 	}
-
-	// Copy results back to BuiltBlock
-	current.Txns = ba.Txns
-	current.Receipts = ba.Receipts
-	current.Requests = ba.Requests
-	current.BlockAccessList = ba.BlockAccessList
 
 	header := block.HeaderNoCopy()
 
