@@ -34,7 +34,7 @@ The QMDB twig Merkle tree offers a fundamentally different model:
 
 ### 2.1 Mapping TxNum to Serial Number
 
-The QMDB design (Section 1.0) defines entries as `Entry := (Height, Key, Value, SerialNum)` where SerialNum is a monotonically increasing index. Erigon already maintains an equivalent: the global **transaction number** (`txnum`), a sequential counter that increments for every transaction across all blocks.
+The QMDB design (Section 1.0) defines entries as `Entry := (Height, Key, Value, TxNum)` where TxNum is a monotonically increasing index. Erigon already maintains an equivalent: the global **transaction number** (`txnum`), a sequential counter that increments for every transaction across all blocks.
 
 ```
 Block 0:   txnums 0..4
@@ -43,7 +43,7 @@ Block 2:   txnums 13..25
 ...
 ```
 
-Each txnum maps 1:1 to a qmtree serial number. This gives us:
+Each txnum maps 1:1 to a qmtree txNum. This gives us:
 
 - **Twig ID** = `txnum >> 11` (each twig holds 2048 leaves)
 - **Position in twig** = `txnum & 2047`
@@ -51,7 +51,7 @@ Each txnum maps 1:1 to a qmtree serial number. This gives us:
 
 ### 2.2 Leaf Hash Construction
 
-Each leaf at serial number `txnum` commits to four 32-byte fields:
+Each leaf at txNum `txnum` commits to four 32-byte fields:
 
 ```
 preStateHash     = DeriveSha_MPT({ (domain, key) → value } for all state reads by this tx)
@@ -148,13 +148,13 @@ write history for any key is traversable without additional tree metadata.
 
 ### 3.1 QMTree Proof Structure
 
-A qmtree proof for serial number `sn` (see `proof.go`) consists of:
+A qmtree proof for a given `txNum` (see `proof.go`) consists of:
 
 | Component | Size | Purpose |
 |---|---|---|
 | `LeftOfTwig[11]` | 11 x 32 bytes | Sibling hashes through the 2048-leaf Merkle tree |
 | `UpperPath[N]` | N x 32 bytes | Sibling hashes through the upper tree to root |
-| `SerialNum` | 8 bytes | The txnum being proven |
+| `TxNum` | 8 bytes | The txnum being proven |
 | `Root` | 32 bytes | The tree root |
 
 Total proof size: `(13 + N) x 32` bytes where N = `log2(num_twigs)`. For 1 billion transactions (~10 years of Ethereum mainnet), N ~ 19, giving **~1024 bytes** per proof.
@@ -205,7 +205,7 @@ The QMDB design addresses this in the architecture doc under "Crash recovery mec
 The qmtree is append-only and indexed by sequential txnum. Unwinding block N means reverting to `max_txnum(N-1)`. This requires:
 
 1. **Determine the revert point**: `revertToTxNum = max_txnum(targetBlock)`
-2. **Truncate the entry storage**: Remove all entries with `serialNum > revertToTxNum`
+2. **Truncate the entry storage**: Remove all entries with `txNum > revertToTxNum`
 3. **Truncate the twig file**: Discard any twigs beyond `revertToTxNum >> 11`
 4. **Rebuild the youngest twig**: Re-read remaining entries for the youngest twig from storage and recompute its Merkle tree
 5. **Recompute upper tree**: Sync upper nodes from the now-youngest twig upward

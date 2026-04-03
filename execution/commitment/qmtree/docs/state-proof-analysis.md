@@ -256,7 +256,7 @@ block — the hash chain (previousLeafHash) links intermediate leaves.
         "firstProof": "0x...",
         "lastProof": "0x...",
         "leaves": [{
-            "serialNum": 100,
+            "txNum": 100,
             "txHash": "0x...",
             "preStateHash": "0x...",
             "stateChangeHash": "0x...",
@@ -425,11 +425,11 @@ Two related EIPs, both prerequisites for mainnet adoption:
 
 1. **EIP: Transaction Linearisation** — formalise the global transaction
    numbering (txnum) that Erigon already uses internally. Every transaction
-   across all blocks gets a monotonically increasing serial number. This is
+   across all blocks gets a monotonically increasing txNum. This is
    the foundation the qmtree indexes on.
 
 2. **EIP: QMTree State Commitment** — replace MPT root with qmtree root in
-   block headers. Depends on EIP-1 for the serial numbering. Specifies leaf
+   block headers. Depends on EIP-1 for the txNum-based ordering. Specifies leaf
    format, hash function, twig structure, proof format.
 
 **Rollup-first** validates both EIPs in production before proposing for L1.
@@ -515,7 +515,7 @@ or before the given block. Uses the inverted history index to find the txnum.
 ```
 
 `merkleProof` is the binary-encoded `ProofPath` (`ToBytes()` format:
-`8B serialNum + 32B selfHash + 11×32B LeftOfTwig + U×32B UpperPath + 32B root`).
+`8B txNum + 32B selfHash + 11×32B LeftOfTwig + U×32B UpperPath + 32B root`).
 
 ### `qm_getWitness(blockNrOrHash)` / `qm_getTxWitness(blockNrOrHash, txIndex)`
 
@@ -530,7 +530,7 @@ intermediate leaves). Single-tx variant takes a 0-based `txIndex`.
   "lastProof":   "0x...",
   "leaves": [
     {
-      "serialNum": "0x0",
+      "txNum": "0x0",
       "leafData": { "preStateHash": "0x...", ... },
       "leafHash":  "0x..."
     }
@@ -596,7 +596,7 @@ then fetches the qmtree witness for that txnum.
 
 Same execution as `qm_call`, but the witnesses are compressed by deduplicating
 upper-tree peer hashes that are shared among all leaves belonging to the same
-twig. This is valid because all leaves in the same twig (serial numbers
+twig. This is valid because all leaves in the same twig (txNums
 `[twigId*2048 .. twigId*2048+2047]`) share identical upper-path peer hashes.
 
 **Twig-grouping savings (at U=10 upper levels, hoodi ~615 twigs — computed by `TestFormatSizes_CallProof`):**

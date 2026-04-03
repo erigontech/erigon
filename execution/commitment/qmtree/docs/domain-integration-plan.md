@@ -39,7 +39,7 @@ The qmtree becomes two new Erigon domains:
 
 | Domain | Key | Value | Purpose |
 |--------|-----|-------|---------|
-| `QMTreeEntry` | serialNum (8B) | preStateHash \|\| stateChangeHash \|\| transitionHash (96B) | Leaf components |
+| `QMTreeEntry` | txNum (8B) | preStateHash \|\| stateChangeHash \|\| transitionHash (96B) | Leaf components |
 | `QMTreeKeyIndex` | keyHash (32B) | txNum (8B) | Latest-write tracking |
 
 Upper-tree nodes and twig Merkle data are derived (computed from entries
@@ -54,9 +54,9 @@ during block execution, alongside the existing HPFile writes.
 
 **Tables:**
 ```
-QMTreeEntries:   serialNum (8B BE) → pre(32B) || sc(32B) || trans(32B)
+QMTreeEntries:   txNum (8B BE) → pre(32B) || sc(32B) || trans(32B)
 QMTreeKeyIndex:  keyHash (32B)     → txNum (8B BE)
-QMTreeMeta:      "nextSN"          → uint64
+QMTreeMeta:      "nextTxNum"       → uint64
                  "prevLeaf"        → hash
 ```
 
@@ -77,7 +77,7 @@ source of truth. Once Phase 2 is validated, HPFile writes are removed.
 for that step range into standard `.kv`/`.kvi` snapshot files.
 
 **Entry collation:**
-1. Iterate `QMTreeEntries` for serialNums in `[step*stepSize, (step+1)*stepSize)`
+1. Iterate `QMTreeEntries` for txNums in `[step*stepSize, (step+1)*stepSize)`
 2. Write sorted entries to `v1-qmtree-entries.{fromStep}-{toStep}.kv`
 3. Build RecSplit index → `.kvi`
 4. Compute twig Merkle trees for all twigs in the step → write upper-tree
@@ -99,7 +99,7 @@ custom domain via the existing `DomainCfg` mechanism.
 the corresponding entries from MDBX to keep the hot dataset small.
 
 **Prune logic:**
-- Delete `QMTreeEntries` rows with serialNum < frozenUpToSN
+- Delete `QMTreeEntries` rows with txNum < frozenUpToTxNum
 - For `QMTreeKeyIndex`, only prune entries where a newer write exists in
   a frozen file (the key's latest txNum moved to a newer step)
 
@@ -113,7 +113,7 @@ the corresponding entries from MDBX to keep the hot dataset small.
 as domains do today.
 
 **Entry merging:** concatenate sorted step files (entries are already
-ordered by serialNum which is monotonically increasing across steps).
+ordered by txNum which is monotonically increasing across steps).
 Rebuild RecSplit index over merged file.
 
 **KeyIndex merging:** merge-sort by keyHash, keep latest txNum per key
@@ -183,7 +183,7 @@ Phases 3, 4, 6 can proceed in parallel after Phase 2.
 
 ### Why two domains, not one?
 
-`QMTreeEntry` is append-only and keyed by serialNum (monotonically increasing).
+`QMTreeEntry` is append-only and keyed by txNum (monotonically increasing).
 `QMTreeKeyIndex` is keyed by keyHash and gets updated (latest txNum per key).
 These have fundamentally different access patterns and collation strategies —
 entries are immutable once written, key-index entries are overwritten.

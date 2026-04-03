@@ -30,7 +30,7 @@ On the `qmtree` branch:
 
 | Document | What it covers |
 |---|---|
-| [design.md](design.md) | Tree architecture: serial numbering, leaf hash construction (including [execution hash per-opcode format](design.md#execution-hash-per-opcode-record-format-exechasher)), proof structure, unwind/reorg handling, keyset strategy, exclusion proofs |
+| [design.md](design.md) | Tree architecture: txNum-based ordering, leaf hash construction (including [execution hash per-opcode format](design.md#execution-hash-per-opcode-record-format-exechasher)), proof structure, unwind/reorg handling, keyset strategy, exclusion proofs |
 | [protocol-spec.md](protocol-spec.md) | **Normative.** Wire formats, RPC type signatures, proof digest algorithm, and verification steps |
 | [state-proof-analysis.md](state-proof-analysis.md) | Design decisions, RPC implementation details, compact proof sizing analysis, and the vision for provable calls and agent authorization |
 | [transition-design.md](transition-design.md) | Architecture for proof-of-transition: the 25 spec-mandated operations outside the EVM that complete the leaf hash |

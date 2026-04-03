@@ -12,8 +12,8 @@ single source of truth.
 ### 1.1 Serial numbering
 
 Every transaction in Erigon's chain history receives a monotonically increasing
-**serial number** (`txNum`), starting from 0. This is Erigon's global
-transaction number, reused directly as the qmtree serial number.
+**txNum** (`txNum`), starting from 0. This is Erigon's global
+transaction number, reused directly as the qmtree txNum.
 
 ```
 Block 0:  txNums  0 .. B0-1
@@ -30,20 +30,20 @@ TWIG_SHIFT        = 11          // log2(leaves per twig)
 LEAF_COUNT_IN_TWIG = 2048       // 1 << TWIG_SHIFT
 TWIG_MASK         = 2047
 
-twigId       = serialNum >> TWIG_SHIFT
-posInTwig    = serialNum &  TWIG_MASK
+twigId       = txNum >> TWIG_SHIFT
+posInTwig    = txNum &  TWIG_MASK
 ```
 
 ### 1.3 Leaf hash
 
-Each leaf is keyed by its serial number and contains four 32-byte hash fields
+Each leaf is keyed by its txNum and contains four 32-byte hash fields
 committed by the executor:
 
 ```
 preStateHash     = DeriveSha_MPT({ (domain, key) → value } for all state reads)
 stateChangeHash  = DeriveSha_MPT({ (domain, key) → value } for all state writes)
 transitionHash   = keccak256(EVM opcode trace + transition records — see transition-format.md)
-previousLeafHash = leafHash(serialNum - 1), or 0x00..00 for sn=0
+previousLeafHash = leafHash(txNum - 1), or 0x00..00 for txNum=0
 ```
 
 The leaf hash is:
@@ -78,12 +78,12 @@ at level `13 + 63 - bits.LeadingZeros64(youngestTwigId)` for
 
 ### 2.1 `ProofPath` — single-leaf inclusion proof
 
-A `ProofPath` proves that the leaf at `serialNum` is committed in the tree with
+A `ProofPath` proves that the leaf at `txNum` is committed in the tree with
 the given `Root`. It is serialised by `ProofPath.ToBytes()` as:
 
 ```
-[8 bytes]       serialNum      (little-endian uint64)
-[32 bytes]      selfHash       = LeftOfTwig[0].SelfHash = leafHash(serialNum)
+[8 bytes]       txNum      (little-endian uint64)
+[32 bytes]      selfHash       = LeftOfTwig[0].SelfHash = leafHash(txNum)
 [11 × 32 bytes] intraTwigPeers = LeftOfTwig[0..10].PeerHash
 [U × 32 bytes]  upperPeers     = UpperPath[0..U-1].PeerHash
 [32 bytes]      root           = tree root at serialisation time
@@ -112,7 +112,7 @@ Deserialise with `qmtree.BytesToProofPath(bytes)` (returns error if truncated).
 A range witness for transactions `[from, to]` consists of:
 - `FirstProof`: `ProofPath` for `from`
 - `LastProof`: `ProofPath` for `to`
-- `Leaves[]`: leaf data for all serial numbers in `[from, to]`
+- `Leaves[]`: leaf data for all txNums in `[from, to]`
 
 The hash chain through `previousLeafHash` links all intermediate leaves,
 allowing a verifier to confirm the full range from just the two boundary proofs.
@@ -167,7 +167,7 @@ type QMProofResult = {
 Returns a range witness covering all transactions in the given block.
 
 ```typescript
-type QMWitnessLeaf = { serialNum: Uint64, leafData: LeafData, leafHash: Hash }
+type QMWitnessLeaf = { txNum: Uint64, leafData: LeafData, leafHash: Hash }
 
 type QMWitnessResult = {
   blockNumber: Uint64
@@ -252,7 +252,7 @@ upper-tree peer hashes shared by leaves in the same twig are stored once, plus a
 
 ```typescript
 type QMCallProofTwig = {
-  twigId:          Uint64    // serialNum >> TWIG_SHIFT
+  twigId:          Uint64    // txNum >> TWIG_SHIFT
   upperPeerHashes: Hash[]    // U peer hashes, levels FIRST_LEVEL_ABOVE_TWIG..root-1
 }
 
