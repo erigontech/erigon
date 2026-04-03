@@ -686,7 +686,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				batchLimit := pe.cfg.batchSize.Bytes()
 				if sizeEst > batchLimit {
 					fmt.Printf("FLOW: batch full block=%d size=%d limit=%d breakdown=%s\n",
-						blockResult.BlockNum, sizeEst, batchLimit, pe.rs.Domains().GetMemBatch().SizeBreakdown())
+						blockResult.BlockNum, sizeEst, batchLimit, "n/a")
 					pe.triggerBatchCommitment(ctx)
 					return nil
 				}
