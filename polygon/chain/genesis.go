@@ -50,33 +50,6 @@ func AmoyGenesisBlock() *types.Genesis {
 	}
 }
 
-// BorMainnetGenesisBlock returns the Bor Mainnet network genesis block.
-func BorMainnetGenesisBlock() *types.Genesis {
-	return &types.Genesis{
-		Config:     borMainnetChainConfig,
-		Nonce:      0,
-		Timestamp:  1590824836,
-		GasLimit:   10000000,
-		Difficulty: uint256.NewInt(1),
-		Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
-		Coinbase:   common.HexToAddress("0x0000000000000000000000000000000000000000"),
-		Alloc:      chainspec.ReadPrealloc(allocs, "allocs/bor_mainnet.json"),
-	}
-}
-
-func BorDevnetGenesisBlock() *types.Genesis {
-	return &types.Genesis{
-		Config:     borDevnetChainConfig,
-		Nonce:      0,
-		Timestamp:  1558348305,
-		GasLimit:   10000000,
-		Difficulty: uint256.NewInt(1),
-		Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
-		Coinbase:   common.HexToAddress("0x0000000000000000000000000000000000000000"),
-		Alloc:      chainspec.ReadPrealloc(allocs, "allocs/bor_devnet.json"),
-	}
-}
-
 // MumbaiGenesisBlock returns the Mumbai network genesis block.
 func MumbaiGenesisBlock() *types.Genesis {
 	return &types.Genesis{
