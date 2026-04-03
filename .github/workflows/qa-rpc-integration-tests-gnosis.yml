@@ -75,6 +75,19 @@ jobs:
           path: ${{ runner.workspace }}/rpc-tests
           key: rpc-tests-${{ runner.os }}-${{ runner.arch }}-v1.121.0
 
+      - name: Save Erigon Chaindata Directory
+        id: save_chaindata_step
+        run: |
+          rm -rf $ERIGON_TESTBED_AREA/chaindata-prev || true
+          echo "Backup chaindata"
+          cp -r $ERIGON_REFERENCE_DATA_DIR/chaindata $ERIGON_TESTBED_AREA/chaindata-prev
+
+      - name: Run Migrations
+        working-directory: ${{ github.workspace }}/build/bin
+        run: |
+          echo "Running migrations on datadir..."
+          ./integration run_migrations --datadir $ERIGON_REFERENCE_DATA_DIR --chain $CHAIN
+
       - name: Run RPC Integration Tests
         id: test_step
         run: |
