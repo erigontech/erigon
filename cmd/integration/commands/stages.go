@@ -947,16 +947,15 @@ func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 			txTask := result.Task.(*exec.TxTask)
 			lastBlockNum = txTask.BlockNumber()
 
-			// Feed every non-block-boundary tx into the qmtree.
-			if !txTask.IsBlockEnd() && txTask.TxIndex >= 0 {
-				tracker.AppendLeaf(
-					result.ExecutionResult.PreStateHash,
-					result.ExecutionResult.StateChangeHash,
-					result.ExecutionResult.TransitionHash,
-				)
-				if len(result.ExecutionResult.WrittenKeyHashes) > 0 {
-					tracker.NotifyKeyWrites(result.ExecutionResult.WrittenKeyHashes, txTask.TxNum)
-				}
+			// Feed every transaction into the qmtree (including block
+			// boundary transactions like mining rewards and system calls).
+			tracker.AppendLeaf(
+				result.ExecutionResult.PreStateHash,
+				result.ExecutionResult.StateChangeHash,
+				result.ExecutionResult.TransitionHash,
+			)
+			if len(result.ExecutionResult.WrittenKeyHashes) > 0 {
+				tracker.NotifyKeyWrites(result.ExecutionResult.WrittenKeyHashes, txTask.TxNum)
 			}
 
 			// At block end: log root and commit MDBX periodically.
