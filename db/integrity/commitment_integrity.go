@@ -893,7 +893,7 @@ func checkCommitmentHistAtBlkWithIdx(ctx context.Context, db kv.TemporalRoDB, br
 				return fmt.Errorf("commitment state blockNum doesn't match blockNum: %d != %d (block %d has different state root: ref=%x header=%x)", latestBlockNum, blockNum, gapBlock, refHeader.Root, gapHeader.Root)
 			}
 		}
-		logger.Log(lvl, "commitment state is from earlier block (empty blocks in between)", "commitmentBlockNum", latestBlockNum, "blockNum", blockNum)
+		//logger.Log(lvl, "commitment state is from earlier block (empty blocks in between)", "commitmentBlockNum", latestBlockNum, "blockNum", blockNum)
 	}
 	if latestTxNum != maxTxNum && latestBlockNum == blockNum {
 		return fmt.Errorf("commitment state txNum doesn't match maxTxNum: %d != %d", latestTxNum, maxTxNum)
@@ -935,15 +935,17 @@ func checkCommitmentHistAtBlkWithIdx(ctx context.Context, db kv.TemporalRoDB, br
 	if header.Root != rootHash {
 		return fmt.Errorf("commitment root mismatch: %s != %s (blockNum=%d,txNum=%d)", header.Root, rootHash, blockNum, maxTxNum)
 	}
-	logger.Log(lvl,
-		"commitment root matches",
-		"blockNum", blockNum,
-		"txNum", maxTxNum,
-		"root", rootHash,
-		"totalDur", time.Since(start),
-		"touchDur", touchDur,
-		"recalcDur", time.Since(recalcStart),
-	)
+	if trace {
+		logger.Log(lvl,
+			"commitment root matches",
+			"blockNum", blockNum,
+			"txNum", maxTxNum,
+			"root", rootHash,
+			"totalDur", time.Since(start),
+			"touchDur", touchDur,
+			"recalcDur", time.Since(recalcStart),
+		)
+	}
 	return nil
 }
 
