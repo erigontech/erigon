@@ -1,6 +1,7 @@
 package qmtree
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -47,6 +48,17 @@ type Tracker struct {
 	// during execution. It supports exclusion proofs: proving that key K
 	// was last written at txNum T, or was never written at all.
 	keyIndex *KeyIndex
+
+	// keyIndexFile persists the KeyIndex to disk as segmented .kv/.kvi files.
+	// nil when in-memory only (no snapDir).
+	keyIndexFile *KeyIndexFile
+
+	// keyIndexDirty tracks keys updated since the last KeyIndex flush.
+	// On Flush(), only these entries are written to a new segment file.
+	keyIndexDirty map[common.Hash]uint64
+
+	// keyIndexLastFlushedStep is the toStep of the last flushed KeyIndex segment.
+	keyIndexLastFlushedStep uint64
 
 	// leafData is a bounded LRU cache of LeafData keyed by serial number.
 	// PreviousLeafHash is stored in each entry but is NOT persisted to disk;
@@ -106,23 +118,30 @@ func NewTracker(snapDir string, stepSize uint64) (*Tracker, error) {
 		return nil, fmt.Errorf("create leaf data cache: %w", err)
 	}
 	qt := &Tracker{
-		hasher:       hasher,
-		leafData:     cache,
-		twigPrevLeaf: []common.Hash{{}}, // twig 0 starts with zero prevLeaf
-		stepSize:     stepSize,
-		keyIndex:     NewKeyIndex(),
+		hasher:        hasher,
+		leafData:      cache,
+		twigPrevLeaf:  []common.Hash{{}}, // twig 0 starts with zero prevLeaf
+		stepSize:      stepSize,
+		keyIndex:      NewKeyIndex(),
+		keyIndexDirty: make(map[common.Hash]uint64),
 	}
 
 	if snapDir != "" {
 		qmdir := filepath.Join(snapDir, trackerSubdir)
 		entryDir := filepath.Join(qmdir, trackerEntrySubdir)
 		twigDir := filepath.Join(qmdir, trackerTwigSubdir)
+		keyIdxDir := filepath.Join(qmdir, keyIndexSubdir)
 		if err := os.MkdirAll(entryDir, 0755); err != nil {
 			return nil, fmt.Errorf("create qmtree entry dir: %w", err)
 		}
 		if err := os.MkdirAll(twigDir, 0755); err != nil {
 			return nil, fmt.Errorf("create qmtree twig dir: %w", err)
 		}
+		kif, err := NewKeyIndexFile(keyIdxDir)
+		if err != nil {
+			return nil, fmt.Errorf("create keyindex file: %w", err)
+		}
+		qt.keyIndexFile = kif
 
 		entrySegSize := stepSize * entrySize // one step per segment (stepSize × 96 bytes)
 		twigSegSize := uint64(trackerTwigsPerStep) * uint64(trackerTwigBufSize)
@@ -190,6 +209,7 @@ func (qt *Tracker) SyncRoot() common.Hash {
 func (qt *Tracker) NotifyKeyWrites(keyHashes []common.Hash, txNum uint64) {
 	for _, kh := range keyHashes {
 		qt.keyIndex.UpdateKey(kh, txNum)
+		qt.keyIndexDirty[kh] = txNum
 	}
 }
 
@@ -474,6 +494,35 @@ func (qt *Tracker) Flush() {
 	if qt.twigFile != nil {
 		qt.twigFile.Flush()
 	}
+	qt.flushKeyIndex()
+}
+
+// flushKeyIndex writes dirty KeyIndex entries to a new segment file.
+func (qt *Tracker) flushKeyIndex() {
+	if qt.keyIndexFile == nil || len(qt.keyIndexDirty) == 0 {
+		return
+	}
+	entries := make([]KeyIndexEntry, 0, len(qt.keyIndexDirty))
+	for kh, txNum := range qt.keyIndexDirty {
+		entries = append(entries, KeyIndexEntry{KeyHash: kh, TxNum: txNum})
+	}
+	fromStep := qt.keyIndexLastFlushedStep
+	toStep := qt.completedSteps()
+	if toStep <= fromStep {
+		toStep = fromStep + 1 // ensure unique step range
+	}
+	if err := qt.keyIndexFile.FlushDelta(context.Background(), entries, fromStep, toStep); err != nil {
+		log.Warn("qmtree: failed to flush keyindex", "err", err)
+		return
+	}
+	qt.keyIndexDirty = make(map[common.Hash]uint64)
+	qt.keyIndexLastFlushedStep = toStep
+	log.Info("qmtree: flushed keyindex delta",
+		"entries", len(entries),
+		"fromStep", fromStep,
+		"toStep", toStep,
+		"segments", qt.keyIndexFile.SegmentCount(),
+	)
 }
 
 // UnwindTo truncates the tree and storage back to the given serial number.
@@ -594,10 +643,30 @@ func (qt *Tracker) LoadFromDisk() error {
 	qt.prevLeaf = prevLeaf
 	qt.NextSN = count
 
+	// Load persisted KeyIndex segments if available. If no segments exist,
+	// the KeyIndex was already rebuilt during the entry replay above (via
+	// the caller's NotifyKeyWrites calls). On first run after adding
+	// persistence, the caller should flush to bootstrap the .kv/.kvi files.
+	if qt.keyIndexFile != nil {
+		maxStep, err := qt.keyIndexFile.LoadAll()
+		if err != nil {
+			log.Warn("qmtree: failed to load keyindex files, will rebuild from entries", "err", err)
+		} else if maxStep > 0 {
+			qt.keyIndexFile.PopulateKeyIndex(qt.keyIndex)
+			qt.keyIndexLastFlushedStep = maxStep
+			log.Info("qmtree: loaded keyindex from disk",
+				"keys", qt.keyIndex.Len(),
+				"segments", qt.keyIndexFile.SegmentCount(),
+				"maxStep", maxStep,
+			)
+		}
+	}
+
 	log.Info("qmtree: loaded from disk",
 		"entries", count,
 		"entryStorage", common.ByteCount(uint64(fileSize)),
 		"cachedLeaves", qt.leafData.Len(),
+		"keyIndexKeys", qt.keyIndex.Len(),
 	)
 	return nil
 }
@@ -611,5 +680,8 @@ func (qt *Tracker) Close() {
 	}
 	if qt.twigFile != nil {
 		qt.twigFile.Close()
+	}
+	if qt.keyIndexFile != nil {
+		qt.keyIndexFile.Close()
 	}
 }
