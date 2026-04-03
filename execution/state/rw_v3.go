@@ -498,8 +498,8 @@ func (w *BufferedWriter) UpdateAccountData(address accounts.Address, original, a
 }
 
 func (w *BufferedWriter) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
-	if w.trace {
-		fmt.Printf("code: %x, %x, valLen: %d\n", address, codeHash, len(code))
+	if w.trace || dbg.TraceAccount(address.Handle()) {
+		fmt.Printf("BufferedWriter.UpdateAccountCode: %x, codeHash: %x, codeLen: %d, stack: %s\n", address, codeHash, len(code), dbg.Stack())
 	}
 	if w.accumulator != nil {
 		w.accumulator.ChangeCode(address.Value(), incarnation, code)
@@ -524,8 +524,8 @@ func (w *BufferedWriter) UpdateAccountCode(address accounts.Address, incarnation
 }
 
 func (w *BufferedWriter) DeleteAccount(address accounts.Address, original *accounts.Account) error {
-	if w.trace {
-		fmt.Printf("del acc: %x\n", address)
+	if w.trace || dbg.TraceAccount(address.Handle()) {
+		fmt.Printf("BufferedWriter.DeleteAccount: %x, stack: %s\n", address, dbg.Stack())
 	}
 	if w.accumulator != nil {
 		w.accumulator.DeleteAccount(address.Value())
