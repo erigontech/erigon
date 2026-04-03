@@ -15,14 +15,14 @@ import (
 )
 
 const (
-	keyIndexSubdir = "keyindex"
-
 	// Each record in the .kv file: 32-byte keyHash + 8-byte txNum (big-endian).
 	keyIndexRecordSize = 40
 
-	// File naming: v1-keyindex.{fromStep}-{toStep}.kv / .kvi
-	keyIndexVersion = "v1"
-	keyIndexName    = "keyindex"
+	// File naming: v1.0-qmtree-keyindex.{fromStep}-{toStep}.qmtree.kv / .qmtree.kvi
+	keyIndexVersion = "v1.0"
+	keyIndexName    = "qmtree-keyindex"
+	keyIndexExtKV   = ".qmtree.kv"
+	keyIndexExtKVI  = ".qmtree.kvi"
 )
 
 // keyIndexSegment represents one persisted segment: a .kv data file and its
@@ -61,9 +61,12 @@ func NewKeyIndexFile(dir string) (*KeyIndexFile, error) {
 	return &KeyIndexFile{dir: dir}, nil
 }
 
-// segmentFilename returns the .kv or .kvi path for a step range.
-func segmentFilename(dir string, fromStep, toStep uint64, ext string) string {
-	return filepath.Join(dir, fmt.Sprintf("%s-%s.%d-%d%s", keyIndexVersion, keyIndexName, fromStep, toStep, ext))
+func keyIndexKVPath(dir string, fromStep, toStep uint64) string {
+	return filepath.Join(dir, fmt.Sprintf("%s-%s.%d-%d%s", keyIndexVersion, keyIndexName, fromStep, toStep, keyIndexExtKV))
+}
+
+func keyIndexKVIPath(dir string, fromStep, toStep uint64) string {
+	return filepath.Join(dir, fmt.Sprintf("%s-%s.%d-%d%s", keyIndexVersion, keyIndexName, fromStep, toStep, keyIndexExtKVI))
 }
 
 // FlushDelta writes a delta of dirty key-index entries to a new .kv file and
@@ -78,8 +81,8 @@ func (kf *KeyIndexFile) FlushDelta(ctx context.Context, entries []KeyIndexEntry,
 		return entries[i].KeyHash.Cmp(entries[j].KeyHash) < 0
 	})
 
-	kvPath := segmentFilename(kf.dir, fromStep, toStep, ".kv")
-	kviPath := segmentFilename(kf.dir, fromStep, toStep, ".kvi")
+	kvPath := keyIndexKVPath(kf.dir, fromStep, toStep)
+	kviPath := keyIndexKVIPath(kf.dir, fromStep, toStep)
 
 	// Write .kv data file: fixed-size records, no compression.
 	f, err := os.Create(kvPath)
@@ -219,16 +222,17 @@ func (kf *KeyIndexFile) LoadAll() (uint64, error) {
 
 	var maxStep uint64
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".kv") {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), keyIndexExtKV) {
 			continue
 		}
 		var fromStep, toStep uint64
-		n, _ := fmt.Sscanf(e.Name(), keyIndexVersion+"-"+keyIndexName+".%d-%d.kv", &fromStep, &toStep)
+		pattern := keyIndexVersion + "-" + keyIndexName + ".%d-%d" + keyIndexExtKV
+		n, _ := fmt.Sscanf(e.Name(), pattern, &fromStep, &toStep)
 		if n != 2 {
 			continue
 		}
 		kvPath := filepath.Join(kf.dir, e.Name())
-		kviPath := kvPath[:len(kvPath)-3] + ".kvi"
+		kviPath := kvPath[:len(kvPath)-len(keyIndexExtKV)] + keyIndexExtKVI
 
 		// Skip if .kvi doesn't exist (incomplete flush).
 		if _, err := os.Stat(kviPath); os.IsNotExist(err) {

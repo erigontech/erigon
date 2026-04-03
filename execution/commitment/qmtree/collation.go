@@ -16,8 +16,10 @@ import (
 )
 
 const (
-	entrySnapshotVersion = "v1"
+	entrySnapshotVersion = "v1.0"
 	entrySnapshotName    = "qmtree-entries"
+	entrySnapshotExtKV   = ".qmtree.kv"
+	entrySnapshotExtKVI  = ".qmtree.kvi"
 	// Each entry in the snapshot: serialNum (8B) + pre(32B) + sc(32B) + trans(32B) = 104 bytes
 	snapshotEntrySize = 104
 )
@@ -42,29 +44,36 @@ func (s *entrySnapshot) close() {
 }
 
 // SnapshotManager handles collation, pruning, and merging of qmtree data
-// from MDBX hot tables to frozen snapshot files.
+// from MDBX hot tables to frozen snapshot files in snapshots/domain/.
 type SnapshotManager struct {
-	snapshotDir string
-	stepSize    uint64
-	entries     []*entrySnapshot // sorted by fromStep ascending
-	keyIndex    *KeyIndexFile    // reuses existing KeyIndexFile for key snapshots
+	domainDir string // path to snapshots/domain/ (shared with other domains)
+	stepSize  uint64
+	entries   []*entrySnapshot // sorted by fromStep ascending
+	keyIndex  *KeyIndexFile    // reuses existing KeyIndexFile for key snapshots
 }
 
 // NewSnapshotManager creates a manager for qmtree snapshot files.
-func NewSnapshotManager(snapshotDir string, stepSize uint64) (*SnapshotManager, error) {
-	entryDir := filepath.Join(snapshotDir, "domain")
-	if err := os.MkdirAll(entryDir, 0755); err != nil {
-		return nil, fmt.Errorf("create qmtree snapshot dir: %w", err)
+// domainDir should be the snapshots/domain/ directory (shared with accounts, storage, etc.).
+func NewSnapshotManager(domainDir string, stepSize uint64) (*SnapshotManager, error) {
+	if err := os.MkdirAll(domainDir, 0755); err != nil {
+		return nil, fmt.Errorf("create domain dir: %w", err)
 	}
 	return &SnapshotManager{
-		snapshotDir: snapshotDir,
-		stepSize:    stepSize,
+		domainDir: domainDir,
+		stepSize:  stepSize,
 	}, nil
 }
 
 func entrySnapshotFilename(dir string, fromStep, toStep uint64, ext string) string {
-	return filepath.Join(dir, "domain",
-		fmt.Sprintf("%s-%s.%d-%d%s", entrySnapshotVersion, entrySnapshotName, fromStep, toStep, ext))
+	return filepath.Join(dir, fmt.Sprintf("%s-%s.%d-%d%s", entrySnapshotVersion, entrySnapshotName, fromStep, toStep, ext))
+}
+
+func entryKVPath(dir string, fromStep, toStep uint64) string {
+	return entrySnapshotFilename(dir, fromStep, toStep, entrySnapshotExtKV)
+}
+
+func entryKVIPath(dir string, fromStep, toStep uint64) string {
+	return entrySnapshotFilename(dir, fromStep, toStep, entrySnapshotExtKVI)
 }
 
 // -------------------------------------------------------------------
@@ -77,8 +86,8 @@ func (sm *SnapshotManager) CollateEntries(ctx context.Context, tx kv.Tx, step ui
 	fromSN := step * sm.stepSize
 	toSN := (step + 1) * sm.stepSize
 
-	kvPath := entrySnapshotFilename(sm.snapshotDir, step, step+1, ".kv")
-	kviPath := entrySnapshotFilename(sm.snapshotDir, step, step+1, ".kvi")
+	kvPath := entryKVPath(sm.domainDir, step, step+1)
+	kviPath := entryKVIPath(sm.domainDir, step, step+1)
 
 	// Read entries from MDBX and write to .kv file.
 	f, err := os.Create(kvPath)
@@ -371,8 +380,8 @@ func (sm *SnapshotManager) MergeEntries(ctx context.Context, fromStep, toStep ui
 	mergedFrom := toMerge[0].fromStep
 	mergedTo := toMerge[len(toMerge)-1].toStep
 
-	kvPath := entrySnapshotFilename(sm.snapshotDir, mergedFrom, mergedTo, ".kv")
-	kviPath := entrySnapshotFilename(sm.snapshotDir, mergedFrom, mergedTo, ".kvi")
+	kvPath := entryKVPath(sm.domainDir, mergedFrom, mergedTo)
+	kviPath := entryKVIPath(sm.domainDir, mergedFrom, mergedTo)
 
 	// Concatenate data files.
 	f, err := os.Create(kvPath)
@@ -442,7 +451,7 @@ func (sm *SnapshotManager) MergeEntries(ctx context.Context, fromStep, toStep ui
 // LoadSnapshots scans the snapshot directory for existing .kv/.kvi files
 // and opens them. Returns the highest frozen step.
 func (sm *SnapshotManager) LoadSnapshots() (uint64, error) {
-	dir := filepath.Join(sm.snapshotDir, "domain")
+	dir := sm.domainDir
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -453,19 +462,20 @@ func (sm *SnapshotManager) LoadSnapshots() (uint64, error) {
 
 	var maxStep uint64
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".kv") {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), entrySnapshotExtKV) {
 			continue
 		}
 		if !strings.HasPrefix(e.Name(), entrySnapshotVersion+"-"+entrySnapshotName+".") {
 			continue
 		}
 		var fromStep, toStep uint64
-		n, _ := fmt.Sscanf(e.Name(), entrySnapshotVersion+"-"+entrySnapshotName+".%d-%d.kv", &fromStep, &toStep)
+		pattern := entrySnapshotVersion + "-" + entrySnapshotName + ".%d-%d" + entrySnapshotExtKV
+		n, _ := fmt.Sscanf(e.Name(), pattern, &fromStep, &toStep)
 		if n != 2 {
 			continue
 		}
 		kvPath := filepath.Join(dir, e.Name())
-		kviPath := kvPath[:len(kvPath)-3] + ".kvi"
+		kviPath := kvPath[:len(kvPath)-len(entrySnapshotExtKV)] + entrySnapshotExtKVI
 		if _, err := os.Stat(kviPath); os.IsNotExist(err) {
 			log.Warn("qmtree: skipping snapshot without index", "file", kvPath)
 			continue

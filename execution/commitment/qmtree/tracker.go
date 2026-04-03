@@ -86,10 +86,6 @@ type Tracker struct {
 }
 
 const (
-	trackerSubdir      = "qmtree" // lives under snapshots/
-	trackerEntrySubdir = "entries"
-	trackerTwigSubdir  = "twigs"
-
 	// DefaultLeafCacheSize is the default number of LeafData entries to keep
 	// in the bounded LRU cache. Each entry is ~160 bytes, so 200k ≈ 32 MB.
 	DefaultLeafCacheSize = 200_000
@@ -115,15 +111,17 @@ func NewTracker(snapDir string, stepSize uint64) (*Tracker, error) {
 	}
 
 	if snapDir != "" {
-		qmdir := filepath.Join(snapDir, trackerSubdir)
+		// All qmtree snapshot files go to snapshots/domain/ alongside
+		// other domain files, distinguished by the .qmtree.kv extension.
+		domainDir := filepath.Join(snapDir, "domain")
 
-		kif, err := NewKeyIndexFile(qmdir)
+		kif, err := NewKeyIndexFile(domainDir)
 		if err != nil {
 			return nil, fmt.Errorf("create keyindex file: %w", err)
 		}
 		qt.keyIndexFile = kif
 
-		sm, err := NewSnapshotManager(qmdir, stepSize)
+		sm, err := NewSnapshotManager(domainDir, stepSize)
 		if err != nil {
 			return nil, fmt.Errorf("create snapshot manager: %w", err)
 		}
