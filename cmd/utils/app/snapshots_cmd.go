@@ -462,6 +462,23 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
+			Name: "dump-account-latest",
+			Action: func(cliCtx *cli.Context) error {
+				logger := log.Root()
+				err := doDumpAccountLatest(cliCtx, logger)
+				if err != nil {
+					log.Error("[dump-account-latest] failure", "err", err)
+					return err
+				}
+				return nil
+			},
+			Description: "print deserialized GetLatest for an account (nonce, balance, codeHash, codeLen)",
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.StringFlag{Name: "address", Usage: "account address (0x...)", Required: true},
+			}),
+		},
+		{
 			Name: "dump-hist-at-blk",
 			Action: func(cliCtx *cli.Context) error {
 				logger := log.Root()
@@ -1634,6 +1651,31 @@ func doDumpSlotHistory(cliCtx *cli.Context, logger log.Logger) error {
 		w = f
 	}
 	return integrity.DumpSlotHistory(ctx, db, blockReader, blockNum, address, slot, window, agg.StepSize(), w, logger)
+}
+
+func doDumpAccountLatest(cliCtx *cli.Context, logger log.Logger) error {
+	ctx := cliCtx.Context
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+	chainConfig := fromdb.ChainConfig(chainDB)
+	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
+	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	blockRetire, agg := res.BlockRetire, res.Aggregator
+	if err != nil {
+		return err
+	}
+	defer clean()
+	defer blockRetire.MadvNormal().DisableReadAhead()
+	defer agg.MadvNormal().DisableReadAhead()
+	db, err := temporal.New(chainDB, agg)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	address := common.HexToAddress(cliCtx.String("address"))
+	return integrity.DumpAccountLatest(ctx, db, address, os.Stdout, logger)
 }
 
 func doDumpHistAtBlk(cliCtx *cli.Context, logger log.Logger) error {

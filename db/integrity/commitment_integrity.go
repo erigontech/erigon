@@ -1092,6 +1092,56 @@ func CheckCommitmentHistAtBlkWithOverrides(ctx context.Context, db kv.TemporalRo
 	return nil
 }
 
+// DumpAccountLatest prints the deserialized GetLatest values for a given address.
+func DumpAccountLatest(ctx context.Context, db kv.TemporalRoDB, address common.Address, w io.Writer, logger log.Logger) error {
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	type result struct {
+		Address  string `json:"address"`
+		Nonce    uint64 `json:"nonce"`
+		Balance  string `json:"balance"`
+		CodeHash string `json:"codeHash,omitempty"`
+		CodeLen  int    `json:"codeLen,omitempty"`
+	}
+
+	enc, _, err := tx.GetLatest(kv.AccountsDomain, address.Bytes())
+	if err != nil {
+		return fmt.Errorf("GetLatest(accounts, %s): %w", address.Hex(), err)
+	}
+	res := &result{Address: address.Hex()}
+	if len(enc) > 0 {
+		var a accounts.Account
+		if err := accounts.DeserialiseV3(&a, enc); err != nil {
+			return fmt.Errorf("DeserialiseV3(%s): %w", address.Hex(), err)
+		}
+		res.Nonce = a.Nonce
+		res.Balance = a.Balance.Hex()
+		if !a.IsEmptyCodeHash() {
+			cv := a.CodeHash.Value()
+			res.CodeHash = "0x" + hex.EncodeToString(cv[:])
+		}
+	}
+
+	// Also check code
+	code, _, err := tx.GetLatest(kv.CodeDomain, address.Bytes())
+	if err != nil {
+		logger.Warn("GetLatest(code) failed", "err", err)
+	} else {
+		res.CodeLen = len(code)
+	}
+
+	out, err := json.MarshalIndent(res, "", "  ")
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(out)
+	return err
+}
+
 // DumpHistAtBlk dumps all touched account/storage/code values at the end of a block
 // (i.e. GetAsOf at maxTxNum+1) as JSON to the given writer. This is useful for comparing
 // Erigon's historical state against a reference (e.g. prestateTracer diff output).
