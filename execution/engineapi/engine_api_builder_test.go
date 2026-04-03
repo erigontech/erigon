@@ -18,13 +18,15 @@ package engineapi_test
 
 import (
 	"context"
+	"encoding/binary"
 	"math/big"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
-	"github.com/stretchr/testify/require"
 
 	"github.com/holiman/uint256"
 
@@ -309,7 +311,8 @@ func TestEngineApiMultipleSendersInBlock(t *testing.T) {
 
 func TestEngineApiHighGasContractsFillBlock(t *testing.T) {
 	genesis, coinbaseKey := engineapitester.DefaultEngineApiTesterGenesis(t)
-	genesis.GasLimit = 200_000 // tight budget for contracts + transfers
+	genesis.Config.AmsterdamTime = nil // EIP-8037 state gas changes intrinsic costs; test pre-Amsterdam
+	genesis.GasLimit = 200_000         // tight budget for contracts + transfers
 	eat := engineapitester.InitialiseEngineApiTester(t, engineapitester.EngineApiTesterInitArgs{
 		Logger:      testlog.Logger(t, log.LvlDebug),
 		DataDir:     t.TempDir(),
@@ -400,10 +403,10 @@ func TestEngineApiBuiltBlockWithWithdrawalRequest(t *testing.T) {
 				Nonce:    nonce.Uint64(),
 				GasLimit: 1_000_000,
 				To:       &withdrawalRequestAddr,
-				Value:    uint256.NewInt(500_000_000_000_000_000), // 0.5 ETH
+				Value:    *uint256.NewInt(500_000_000_000_000_000), // 0.5 ETH
 				Data:     calldata,
 			},
-			GasPrice: gasPriceU256,
+			GasPrice: *gasPriceU256,
 		}
 		signer := types.LatestSignerForChainID(eat.ChainConfig.ChainID)
 		signedTxn, err := types.SignTx(txn, *signer, eat.CoinbaseKey)
@@ -424,5 +427,32 @@ func TestEngineApiBuiltBlockWithWithdrawalRequest(t *testing.T) {
 
 		// Verify execution requests are present in the payload (Prague includes withdrawal requests).
 		require.NotNil(t, payload.ExecutionRequests)
+
+		// Verify withdrawal request content — the system contract should have
+		// dequeued the request we submitted and included it in the block.
+		var foundWithdrawalRequest bool
+		for _, req := range payload.ExecutionRequests {
+			if len(req) == 0 || req[0] != types.WithdrawalRequestType {
+				continue
+			}
+			requestData := []byte(req[1:])
+			// A withdrawal request is: 20-byte source address + 48-byte pubkey + 8-byte LE amount.
+			require.Equal(t, types.WithdrawalRequestDataLen, len(requestData),
+				"withdrawal request should be exactly %d bytes", types.WithdrawalRequestDataLen)
+
+			sourceAddr := common.BytesToAddress(requestData[:20])
+			gotPubkey := requestData[20:68]
+			gotAmount := binary.LittleEndian.Uint64(requestData[68:76])
+
+			require.Equal(t, sender, sourceAddr,
+				"withdrawal request source address should be the sender")
+			require.Equal(t, pubkey, gotPubkey,
+				"withdrawal request pubkey should match the one we sent")
+			require.Equal(t, uint64(0), gotAmount,
+				"withdrawal request amount should be 0 (full exit)")
+			foundWithdrawalRequest = true
+		}
+		require.True(t, foundWithdrawalRequest,
+			"should find at least one withdrawal request in execution requests")
 	})
 }

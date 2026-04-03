@@ -3,7 +3,6 @@
 package ethconfig
 
 import (
-	"math/big"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -53,8 +52,8 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		WithoutHeimdall                     bool
 		Ethstats                            string
 		InternalCL                          bool
-		OverrideOsakaTime                   *big.Int `toml:",omitempty"`
-		OverrideAmsterdamTime               *big.Int `toml:",omitempty"`
+		OverrideOsakaTime                   *uint64 `toml:",omitempty"`
+		OverrideAmsterdamTime               *uint64 `toml:",omitempty"`
 		KeepStoredChainConfig               bool
 		PolygonPosSingleSlotFinality        bool
 		PolygonPosSingleSlotFinalityBlockAt uint64
@@ -137,8 +136,8 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		WithoutHeimdall                     *bool
 		Ethstats                            *string
 		InternalCL                          *bool
-		OverrideOsakaTime                   *big.Int `toml:",omitempty"`
-		OverrideAmsterdamTime               *big.Int `toml:",omitempty"`
+		OverrideOsakaTime                   *uint64 `toml:",omitempty"`
+		OverrideAmsterdamTime               *uint64 `toml:",omitempty"`
 		KeepStoredChainConfig               *bool
 		PolygonPosSingleSlotFinality        *bool
 		PolygonPosSingleSlotFinalityBlockAt *uint64

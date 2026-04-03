@@ -1230,6 +1230,7 @@ func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, va
 		}
 		g.Reset(0)
 		rs.SetProgress(p)
+
 		for g.HasNext() {
 			word, valPos = g.Next(word[:0])
 			if values {
@@ -1918,10 +1919,22 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	if err != nil {
 		return stat, err
 	}
-	if prg != nil && prg.TxFrom == txFrom && prg.TxTo == txTo && prg.ValueProgress == prune.Done {
+	if prg != nil && prg.TxTo >= txTo && prg.ValueProgress == prune.Done {
 		stat.Progress = prune.Done
 		return stat, nil
 	}
+	if prg == nil {
+		prg = &prune.Stat{}
+	}
+	// Rolling scan: preserve the B-tree key cursor across txTo advances.
+	// Only reset to First when the previous rotation completed.
+	if prg.ValueProgress == prune.Done {
+		prg.ValueProgress = prune.First
+		prg.LastPrunedValue = nil
+		prg.LastPrunedKey = nil
+	}
+	prg.TxFrom = txFrom
+	prg.TxTo = txTo
 
 	mxPruneInProgress.Inc()
 	defer mxPruneInProgress.Dec()
@@ -1942,7 +1955,7 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 		case *mdbx2.MdbxDupSortCursor:
 			valsCursor = valsRwCursor.(*mdbx2.MdbxDupSortCursor)
 		default:
-			return stat, fmt.Errorf("unexpected cursor type %T for table %s", valsRwCursor, dt.d.ValuesTable)
+			valsCursor = &kv.RwCursorPseudoDupSort{RwCursor: c}
 		}
 		defer valsCursor.Close()
 	} else {

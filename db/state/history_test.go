@@ -733,6 +733,7 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 		t.Logf("stat=%v", stat)
 
 		assertResults(t, h, rwTx, hc)
+		checkHistoryDBCleanliness(t, h, hc, rwTx, nonPruned)
 	})
 
 	t.Run("scan_prune", func(t *testing.T) {
@@ -763,6 +764,7 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 		t.Logf("stat=%v", stat)
 
 		assertResults(t, h, rwTx, hc)
+		checkHistoryDBCleanliness(t, h, hc, rwTx, nonPruned)
 	})
 }
 
@@ -1013,6 +1015,187 @@ func checkHistoryHistory(t *testing.T, h *History, txs uint64) {
 				}
 			}
 		}
+	}
+
+	checkHistoryProperties(t, hc)
+}
+
+// checkHistoryProperties verifies structural invariants of frozen history files:
+// checkHistoryProperties runs all structural invariant checks on frozen history files.
+func checkHistoryProperties(t *testing.T, hc *HistoryRoTx) {
+	t.Helper()
+	checkHistoryFileMetadata(t, hc)
+	checkHistoryNoDuplicates(t, hc)
+	checkHistoryIndexConsistency(t, hc)
+}
+
+// checkHistoryFileMetadata verifies structural invariants on file metadata:
+//   - No empty files: startTxNum < endTxNum for every file.
+//   - Step alignment: startTxNum and endTxNum are multiples of stepSize.
+//   - No gaps or overlaps: adjacent files satisfy file[i-1].endTxNum == file[i].startTxNum.
+//   - Symmetric coverage: history and index files cover the exact same set of ranges.
+func checkHistoryFileMetadata(t *testing.T, hc *HistoryRoTx) {
+	t.Helper()
+
+	for _, label := range []struct {
+		name  string
+		files visibleFiles
+	}{
+		{"history", hc.files},
+		{"index", hc.iit.files},
+	} {
+		files := label.files
+		for i, f := range files {
+			require.Less(t, f.startTxNum, f.endTxNum,
+				"%s file %d: empty range [%d, %d)", label.name, i, f.startTxNum, f.endTxNum)
+
+			require.Zero(t, f.startTxNum%hc.stepSize,
+				"%s file %d: startTxNum=%d not aligned to stepSize=%d",
+				label.name, i, f.startTxNum, hc.stepSize)
+
+			require.Zero(t, f.endTxNum%hc.stepSize,
+				"%s file %d: endTxNum=%d not aligned to stepSize=%d",
+				label.name, i, f.endTxNum, hc.stepSize)
+
+			if i > 0 {
+				require.Equal(t, files[i-1].endTxNum, f.startTxNum,
+					"%s files: gap or overlap between file %d [%d-%d) and file %d [%d-%d)",
+					label.name, i-1, files[i-1].startTxNum, files[i-1].endTxNum,
+					i, f.startTxNum, f.endTxNum)
+			}
+		}
+	}
+
+	// History and index must cover the identical set of ranges.
+	require.Equal(t, len(hc.files), len(hc.iit.files),
+		"history has %d files but index has %d files", len(hc.files), len(hc.iit.files))
+	for i := range hc.files {
+		hf, idx := hc.files[i], hc.iit.files[i]
+		require.Equal(t, hf.startTxNum, idx.startTxNum,
+			"file %d: history range [%d-%d) != index range [%d-%d)",
+			i, hf.startTxNum, hf.endTxNum, idx.startTxNum, idx.endTxNum)
+		require.Equal(t, hf.endTxNum, idx.endTxNum,
+			"file %d: history range [%d-%d) != index range [%d-%d)",
+			i, hf.startTxNum, hf.endTxNum, idx.startTxNum, idx.endTxNum)
+	}
+}
+
+// checkHistoryDBCleanliness verifies that after pruning [0, prunedUpTo), the history
+// ValuesTable, II KeysTable, and II ValuesTable contain no entries for txNum < prunedUpTo.
+// This complements prune-correctness tests that only check the first remaining entry.
+func checkHistoryDBCleanliness(t *testing.T, h *History, hc *HistoryRoTx, tx kv.Tx, prunedUpTo uint64) {
+	t.Helper()
+
+	// History ValuesTable: keys encode txNum in the last 8 bytes.
+	{
+		c, err := tx.CursorDupSort(h.ValuesTable)
+		require.NoError(t, err)
+		defer c.Close()
+		for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
+			require.NoError(t, err)
+			txNum := binary.BigEndian.Uint64(k[len(k)-8:])
+			require.GreaterOrEqual(t, txNum, prunedUpTo,
+				"history ValuesTable has entry with txNum=%d below prunedUpTo=%d (key=%x)",
+				txNum, prunedUpTo, k)
+		}
+	}
+
+	// II KeysTable: keys start with txNum (8 bytes).
+	{
+		c, err := tx.CursorDupSort(hc.iit.ii.KeysTable)
+		require.NoError(t, err)
+		defer c.Close()
+		for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
+			require.NoError(t, err)
+			if len(k) < 8 {
+				continue
+			}
+			txNum := binary.BigEndian.Uint64(k[:8])
+			require.GreaterOrEqual(t, txNum, prunedUpTo,
+				"II KeysTable has entry with txNum=%d below prunedUpTo=%d (key=%x)",
+				txNum, prunedUpTo, k)
+		}
+	}
+
+	// II ValuesTable: values encode txNum as 8 bytes.
+	{
+		c, err := tx.CursorDupSort(hc.iit.ii.ValuesTable)
+		require.NoError(t, err)
+		defer c.Close()
+		for _, v, err := c.First(); v != nil; _, v, err = c.Next() {
+			require.NoError(t, err)
+			if len(v) < 8 {
+				continue
+			}
+			txNum := binary.BigEndian.Uint64(v[:8])
+			require.GreaterOrEqual(t, txNum, prunedUpTo,
+				"II ValuesTable has entry with txNum=%d below prunedUpTo=%d (val=%x)",
+				txNum, prunedUpTo, v)
+		}
+	}
+}
+
+// checkHistoryNoDuplicates iterates all (key, txNum) entries from frozen inverted index files
+// and verifies two properties per key:
+//   - Monotonic ordering: txNums must be strictly increasing.
+//   - No consecutive duplicates: adjacent entries must have different values.
+func checkHistoryNoDuplicates(t *testing.T, hc *HistoryRoTx) {
+	t.Helper()
+
+	it, err := hc.iterateKeyTxNumFrozen(0, -1, order.Asc, -1)
+	require.NoError(t, err)
+	defer it.Close()
+
+	type prevEntry struct {
+		val   []byte
+		txNum uint64
+	}
+	prevByKey := map[string]prevEntry{}
+
+	for it.HasNext() {
+		key, txNum, err := it.Next()
+		require.NoError(t, err)
+
+		val, ok, err := hc.historySeekInFiles(key, txNum+1)
+		require.NoError(t, err)
+		if !ok {
+			continue
+		}
+
+		ks := string(key)
+		if prev, exists := prevByKey[ks]; exists {
+			require.Greater(t, txNum, prev.txNum,
+				"non-monotonic txNum for key %x: txNum=%d after txNum=%d",
+				key, txNum, prev.txNum)
+
+			require.False(t, bytes.Equal(prev.val, val),
+				"duplicate history entry for key %x: same value %x at txNum=%d and txNum=%d",
+				key, val, prev.txNum, txNum)
+		}
+		prevByKey[ks] = prevEntry{val: common.Copy(val), txNum: txNum}
+	}
+}
+
+// checkHistoryIndexConsistency verifies that every (key, txNum) from the inverted index
+// that falls within the history files' range is covered by a history file.
+func checkHistoryIndexConsistency(t *testing.T, hc *HistoryRoTx) {
+	t.Helper()
+
+	it, err := hc.iterateKeyTxNumFrozen(0, -1, order.Asc, -1)
+	require.NoError(t, err)
+	defer it.Close()
+
+	histEndTxNum := hc.files.EndTxNum()
+	for it.HasNext() {
+		key, txNum, err := it.Next()
+		require.NoError(t, err)
+		if txNum >= histEndTxNum {
+			continue // index may cover more txNums than history files
+		}
+		_, ok := hc.getFile(txNum)
+		require.True(t, ok,
+			"index has entry for key %x txNum=%d but no history file covers it (histEndTxNum=%d)",
+			key, txNum, histEndTxNum)
 	}
 }
 

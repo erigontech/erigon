@@ -415,7 +415,7 @@ func (ethash *Ethash) Prepare(chain rules.ChainHeaderReader, header *types.Heade
 
 func (ethash *Ethash) Initialize(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header,
 	state *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) error {
-	if config.DAOForkBlock != nil && header.Number.CmpBig(config.DAOForkBlock) == 0 {
+	if config.DAOForkBlock != nil && header.Number.Uint64() == *config.DAOForkBlock {
 		if err := misc.ApplyDAOHardFork(state); err != nil {
 			return err
 		}

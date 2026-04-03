@@ -33,7 +33,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -53,7 +52,6 @@ import (
 	"github.com/erigontech/erigon/common/disk"
 	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
@@ -72,17 +70,15 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/diagnostics/mem"
 	"github.com/erigontech/erigon/execution/builder"
-	"github.com/erigontech/erigon/execution/builder/builderstages"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/engineapi"
 	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
-	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	execp2p "github.com/erigontech/erigon/execution/p2p"
@@ -205,7 +201,6 @@ type Ethereum struct {
 	txPoolRpcClient           txpoolproto.TxpoolClient
 	shutterPool               *shutter.Pool
 	blockBuilderNotifyNewTxns chan struct{}
-	forkValidator             *engine_helpers.ForkValidator
 	downloader                *downloader.Downloader
 
 	blockSnapshots *freezeblocks.RoSnapshots
@@ -267,9 +262,6 @@ func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, logger log.Logger, dirs datadi
 	}
 	if err := rawdb.WriteDBCommitmentHistoryEnabled(tx, cfg.KeepExecutionProofs); err != nil {
 		return err
-	}
-	if cfg.KeepExecutionProofs {
-		logger.Warn("[experiment] enabling commitment history. this is an experimental flag so run at your own risk!", "enabled", cfg.KeepExecutionProofs)
 	}
 	return nil
 }
@@ -613,31 +605,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	backend.engine = rulesconfig.CreateRulesEngine(ctx, stack.Config(), chainConfig, rulesConfig, false /* noVerify */, config.WithoutHeimdall, blockReader, false /* readonly */, logger, polygonBridge, heimdallService)
 
-	inMemoryExecution := func(sd *execctx.SharedDomains, tx kv.TemporalRwTx, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
-		notifications *shards.Notifications) error {
-		terseLogger := log.New()
-		terseLogger.SetHandler(log.LvlFilterHandler(log.Lvl(dbg.ExecTerseLoggerLevel), log.StderrHandler))
-		// Needs its own notifications to not update RPC daemon and txpool about pending blocks
-		stateSync := stageloop.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentriesClient,
-			dirs, notifications, blockReader, blockWriter, terseLogger)
-		chainReader := consensuschain.NewReader(chainConfig, tx, blockReader, logger)
-		// We start the mining step
-		if err := stageloop.StateStep(ctx, chainReader, backend.engine, sd, tx, stateSync, unwindPoint, headersChain, bodiesChain); err != nil {
-			logger.Warn("Could not validate block", "err", err)
-			return err
-		}
-		var progress uint64
-		progress, err = stages.GetStageProgress(tx, stages.Execution)
-		if err != nil {
-			return err
-		}
-		lastNum := headersChain[len(headersChain)-1].Number.Uint64()
-		if progress < lastNum {
-			return fmt.Errorf("unsuccessful execution, progress %d < expected %d", progress, lastNum)
-		}
-		return nil
-	}
-	backend.forkValidator = engine_helpers.NewForkValidator(ctx, currentBlockNumber, inMemoryExecution, tmpdir, backend.blockReader, config.MaxReorgDepth)
+	// ForkValidator is created later, after pipelineStagedSync and PipelineExecutor are ready.
 
 	statusDataProvider := sentry.NewStatusDataProvider(
 		backend.chainDB,
@@ -785,7 +753,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.engine,
 		httpRpcCfg.Dirs,
 		backend.polygonBridge,
-		httpRpcCfg.RangeLimit,
+		httpRpcCfg.BlockRangeLimit,
+		httpRpcCfg.GetLogsMaxResults,
 	)
 	ethApiConfig := &jsonrpc.EthApiConfig{
 		GasCap:                      httpRpcCfg.Gascap,
@@ -850,50 +819,40 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		txnProvider = backend.shutterPool
 	}
 
-	miner := builderstages.NewBuilderState(&config.Builder)
-	backend.pendingBlocks = miner.PendingResultCh
-	// proof-of-stake mining
-	assembleBlockPOS := func(param *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
-		builderStatePos := builderstages.NewBuilderState(&config.Builder)
-		builderStatePos.BuilderConfig.Etherbase = param.SuggestedFeeRecipient
-		proposingSync := stagedsync.New(
+	blkBuilder := builder.NewBuilder(
+		backend.sentryCtx,
+		backend.chainDB,
+		&config.Builder,
+		backend.chainConfig,
+		backend.engine,
+		backend.blockReader,
+		stagedsync.StageExecuteBlocksCfg(
+			backend.chainDB,
+			config.Prune,
+			config.BatchSize,
+			chainConfig,
+			backend.engine,
+			&vm.Config{},
+			backend.notifications,
+			config.StateStream,
+			false, /*badBlockHalt*/
+			dirs,
+			blockReader,
+			backend.sentriesClient.Hd,
+			config.Genesis,
 			config.Sync,
-			builderstages.BuilderStages(
-				backend.sentryCtx,
-				builderstages.StageBuilderCreateBlockCfg(builderStatePos, backend.chainConfig, backend.engine, param, backend.blockReader),
-				stagedsync.StageExecuteBlocksCfg(
-					backend.chainDB,
-					config.Prune,
-					config.BatchSize,
-					chainConfig,
-					backend.engine,
-					&vm.Config{},
-					backend.notifications,
-					config.StateStream,
-					false, /*badBlockHalt*/
-					dirs,
-					blockReader,
-					backend.sentriesClient.Hd,
-					config.Genesis,
-					config.Sync,
-					config.ExperimentalBAL,
-					config.ExperimentalQmtree,
-				),
-				builderstages.StageBuilderExecCfg(builderStatePos, backend.notifications.Events, backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, txnProvider, blockReader),
-				builderstages.StageBuilderFinishCfg(backend.chainConfig, backend.engine, builderStatePos, backend.miningSealingQuit, backend.blockReader, latestBlockBuiltStore),
-			),
-			builderstages.BuilderUnwindOrder,
-			builderstages.BuilderPruneOrder,
-			logger,
-			stages.ModeApplyingBlocks,
-		)
-		// We start the mining step
-		if err := stageloop.MiningStep(ctx, backend.chainDB, proposingSync, tmpdir, logger); err != nil {
-			return nil, err
-		}
-		block := <-builderStatePos.BuilderResultCh
-		return block, nil
-	}
+			config.ExperimentalBAL,
+			config.ExperimentalQmtree,
+		),
+		backend.notifications.Events,
+		&vm.Config{},
+		tmpdir,
+		txnProvider,
+		backend.miningSealingQuit,
+		latestBlockBuiltStore,
+		logger,
+	)
+	backend.pendingBlocks = blkBuilder.PendingBlockCh()
 
 	blockRetire := freezeblocks.NewBlockRetire(1, dirs, blockReader, blockWriter, backend.chainDB, heimdallStore, bridgeStore, backend.chainConfig, config, backend.notifications.Events, segmentsBuildLimiter, logger)
 	var creds credentials.TransportCredentials
@@ -960,8 +919,29 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}()
 
+	// This adds completed snapshots on disk after sync, so that we don't unnecessarily report
+	// incomplete torrents. There's still the issue of having torrents not in the preverified set:
+	// snapshots not in that set could cause issues. That's an unsolved issue and probably requires
+	// always resetting before resuming/starting a sync.
+	var afterSnapshotDownload func(ctx context.Context) error
+	if backend.downloader != nil {
+		afterSnapshotDownload = func(ctx context.Context) (err error) {
+			incomplete, err := backend.downloader.AddTorrentsFromDisk(ctx)
+			if err != nil {
+				err = fmt.Errorf("adding torrents from disk: %w", err)
+				return
+			}
+			if incomplete != 0 {
+				// Sync just completed, so incomplete snapshots are unexpected. They may be
+				// aberrations from torrents not in the preverified set; see comment above.
+				backend.logger.Warn("Downloader detected incomplete snapshots after sync", "count", incomplete)
+			}
+			return
+		}
+	}
+
 	backend.syncStages = stageloop.NewDefaultStages(backend.sentryCtx, backend.chainDB, p2pConfig, config, backend.sentriesClient, backend.notifications, backend.downloaderClient,
-		blockReader, blockRetire, backend.forkValidator, tracer)
+		blockReader, blockRetire, tracer, afterSnapshotDownload)
 	backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder
 	backend.syncPruneOrder = stagedsync.DefaultPruneOrder
 
@@ -969,18 +949,24 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	hook := stageloop.NewHook(backend.sentryCtx, backend.notifications, backend.stagedSync, backend.chainConfig, backend.logger, backend.sentriesClient.SetStatus, statusDataProvider, executionPublisher)
 
-	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, backend.forkValidator, tracer)
+	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, tracer, afterSnapshotDownload)
 	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
+
+	validationNotifications := shards.NewNotifications(nil)
+	validationSync := stageloop.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentriesClient,
+		validationNotifications, blockReader, blockWriter, logger)
+	pipelineExecutor := execmodule.NewPipelineExecutor(backend.pipelineStagedSync, backend.chainDB, blockReader, chainConfig, backend.engine, validationSync, validationNotifications, logger)
+
 	// for polygon, we only need to download snapshots on start so that all driver components are correctly initialised before any block execution begins
 	onlySnapDownloadOnStart := chainConfig.Bor != nil
 	backend.execModule = execmodule.NewExecModule(
 		ctx,
 		blockReader,
 		backend.chainDB,
-		backend.pipelineStagedSync,
-		backend.forkValidator,
+		pipelineExecutor,
+		currentBlockNumber,
 		chainConfig,
-		assembleBlockPOS,
+		blkBuilder.Build,
 		hook,
 		backend.notifications.Accumulator,
 		backend.notifications.RecentReceipts,
@@ -992,6 +978,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		config.FcuBackgroundPrune,
 		config.FcuBackgroundCommit,
 		onlySnapDownloadOnStart,
+		backend.stopNode,
 	)
 	executionRpc := direct.NewExecutionClientDirect(backend.execModule)
 
@@ -1017,6 +1004,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			bbd,
 		),
 		config.InternalCL && !config.CaplinConfig.EnableEngineAPI, // If the chain supports the engine API, then we should not make the server fail.
+		config.InternalCL, // Suppress "no CL" warning when any embedded CL is active.
 		config.Builder.EnabledPOS,
 		!config.PolygonPosSingleSlotFinality,
 		backend.txPoolRpcClient,
@@ -1029,13 +1017,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		config.CaplinConfig.NetworkId = clparams.NetworkType(config.NetworkID)
 		config.CaplinConfig.LoopBlockLimit = uint64(config.LoopBlockLimit)
 		if config.CaplinConfig.EnableEngineAPI {
-			jwtSecretHex, err := os.ReadFile(httpRpcCfg.JWTSecretPath)
-			if err != nil {
-				logger.Error("failed to read jwt secret", "err", err, "path", httpRpcCfg.JWTSecretPath)
-				return nil, err
-			}
-			jwtSecret := common.FromHex(strings.TrimSpace(string(jwtSecretHex)))
-			executionEngine, err = executionclient.NewExecutionClientRPC(jwtSecret, httpRpcCfg.AuthRpcHTTPListenAddress, httpRpcCfg.AuthRpcPort)
+			executionEngine, err = executionclient.NewExecutionClientEngineLocal(
+				engineBackendRPC,
+				chainreader.NewChainReaderEth1(chainConfig, executionRpc, config.FcuTimeout),
+				txPoolRpcClient,
+				nil, // beaconCfg: local mode uses chainRW which returns properly versioned blocks
+			)
 			if err != nil {
 				logger.Error("failed to create execution client", "err", err)
 				return nil, err
@@ -1299,25 +1286,6 @@ func (s *Ethereum) initDownloader(
 	}
 	s.downloader.HandleTorrentClientStatus(nodeCfg.DebugMux)
 
-	// This adds completed snapshots on disk. Ideally we'd do this after completing sync, so that we
-	// don't unnecessarily report incomplete torrents. But to do that we need access to
-	// Downloader.AddTorrentsFromDisk in the sync stage, which only has the GPRC client. There's
-	// also the issue of having torrents not in the preverified set: If we are performing a sync for
-	// missing snapshots, any snapshots not in that set could cause issues. That's an unsolved issue
-	// and probably requires always resetting before resuming/starting a sync.
-	incomplete, err := s.downloader.AddTorrentsFromDisk(ctx)
-	if err != nil {
-		err = fmt.Errorf("adding torrents from disk: %w", err)
-		return
-	}
-
-	if incomplete != 0 {
-		// This is fine if we're resuming a sync. If not, there are files that will just float
-		// around. See the comment about resetting above. If that is resolved, we could delete or
-		// ignore incomplete torrents as aberrations.
-		s.logger.Warn("Downloader detected incomplete snapshots", "count", incomplete)
-	}
-
 	bittorrentServer, err := downloader.NewGrpcServer(s.downloader)
 	if err != nil {
 		err = fmt.Errorf("new server: %w", err)
@@ -1330,6 +1298,7 @@ func (s *Ethereum) initDownloader(
 }
 
 func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig *ethconfig.Config, chainConfig *chain.Config, dbReadConcurrency int, logger log.Logger, blockSnapBuildSema *semaphore.Weighted) (*freezeblocks.BlockReader, *blockio.BlockWriter, *freezeblocks.RoSnapshots, *heimdall.RoSnapshots, bridge.Store, heimdall.Store, kv.TemporalRwDB, error) {
+	snConfig.Snapshot.ChainName = chainConfig.ChainName
 	allSnapshots := freezeblocks.NewRoSnapshots(snConfig.Snapshot, dirs.Snap, logger)
 
 	var allBorSnapshots *heimdall.RoSnapshots
@@ -1435,6 +1404,10 @@ func (s *Ethereum) RemoveTrustedPeer(ctx context.Context, req *remoteproto.Remov
 		}
 	}
 	return &remoteproto.RemovePeerReply{Success: true}, nil
+}
+
+func (s *Ethereum) SetHead(ctx context.Context, targetBlock uint64) error {
+	return s.execModule.SetHead(ctx, targetBlock)
 }
 
 // Protocols returns all the currently configured
@@ -1584,11 +1557,33 @@ func (s *Ethereum) Stop() error {
 	for _, sentryServer := range s.sentryServers {
 		sentryServer.Close()
 	}
-	s.chainDB.Close()
 
+	// Wait for background goroutines to release DB transactions before closing DB.
+	// Background components (txpool, sentry loops, p2p) hold read transactions that
+	// must be rolled back before chainDB.Close() can complete.
 	if err := s.bgComponentsEg.Wait(); err != nil && !errors.Is(err, context.Canceled) {
 		s.logger.Error("background component error", "err", err)
 	}
+
+	// Wait for any in-flight updateForkChoice goroutine to finish. These are
+	// fire-and-forget goroutines that hold DB read transactions; without this
+	// wait, chainDB.Close() can hang in waitTxsAllDoneOnClose.
+	if s.execModule != nil {
+		waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		s.execModule.WaitIdle(waitCtx)
+		waitCancel()
+	}
+
+	// Wait for any in-flight read-ahead warmup goroutines that hold DB read
+	// transactions. The global read-aheader spawns fire-and-forget goroutines
+	// via AddHeaderAndBodyToGlobalReadAheader during ValidateChain.
+	{
+		warmCtx, warmCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		exec.WaitForWarmup(warmCtx)
+		warmCancel()
+	}
+
+	s.chainDB.Close()
 
 	if s.config.Downloader != nil {
 		_ = s.config.Downloader.CloseTorrentLogFile()
