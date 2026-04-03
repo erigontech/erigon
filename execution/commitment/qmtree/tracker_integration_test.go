@@ -37,9 +37,9 @@ func TestTracker_MDBX_RoundTrip(t *testing.T) {
 	}
 	tracker1.Flush()
 	root1 := tracker1.SyncRoot()
-	nextSN1 := tracker1.NextSN
+	nextTxNum1 := tracker1.NextTxNum
 
-	require.Equal(t, uint64(numEntries), nextSN1)
+	require.Equal(t, uint64(numEntries), nextTxNum1)
 	require.NotEqual(t, [32]byte{}, [32]byte(root1))
 
 	// Verify a witness from the first tracker.
@@ -59,7 +59,7 @@ func TestTracker_MDBX_RoundTrip(t *testing.T) {
 
 	err = tracker2.LoadFromDB(roTx)
 	require.NoError(t, err)
-	require.Equal(t, nextSN1, tracker2.NextSN)
+	require.Equal(t, nextTxNum1, tracker2.NextTxNum)
 
 	root2 := tracker2.SyncRoot()
 	require.Equal(t, root1, root2, "roots must match after LoadFromDB")
@@ -70,7 +70,7 @@ func TestTracker_MDBX_RoundTrip(t *testing.T) {
 	require.NoError(t, w2.Verify(&Keccak256Hasher{}))
 	require.Equal(t, w1.Proof.Root, w2.Proof.Root)
 
-	t.Logf("round-trip OK: %d entries, root=%s", nextSN1, root1.Hex())
+	t.Logf("round-trip OK: %d entries, root=%s", nextTxNum1, root1.Hex())
 }
 
 // TestTracker_MDBX_WithKeyIndex tests that key writes survive round-trip.

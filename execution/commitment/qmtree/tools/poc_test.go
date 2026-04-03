@@ -76,7 +76,7 @@ func TestStateEntryHashUniqueKeys(t *testing.T) {
 func TestStateEntryEmptyChanges(t *testing.T) {
 	e := NewStateEntry(42, nil)
 	require.NotEqual(t, common.Hash{}, e.Hash(), "empty entry must have non-zero hash")
-	require.Equal(t, uint64(42), e.SerialNumber())
+	require.Equal(t, uint64(42), e.TxNum())
 	require.Nil(t, e.Changes())
 }
 
@@ -98,7 +98,7 @@ func TestStateEntryImplementsEntry(t *testing.T) {
 	})
 	// Verify it satisfies the interface
 	var _ qmtree.Entry = e
-	require.Equal(t, uint64(99), e.SerialNumber())
+	require.Equal(t, uint64(99), e.TxNum())
 	require.Equal(t, int64(0), e.Len())
 	require.NotEqual(t, common.Hash{}, e.Hash())
 }

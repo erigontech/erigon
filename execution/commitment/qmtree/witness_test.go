@@ -8,9 +8,9 @@ import (
 )
 
 // makeLeafEntry creates a tree entry whose hash is the four-component leaf hash.
-func makeLeafEntry(sn uint64, preState, stateChange, transition, prevLeaf common.Hash) *testEntry {
+func makeLeafEntry(txNum uint64, preState, stateChange, transition, prevLeaf common.Hash) *testEntry {
 	h := ComputeLeafHash(preState, stateChange, transition, prevLeaf)
-	return &testEntry{sn: sn, hash: h}
+	return &testEntry{txNum: txNum, hash: h}
 }
 
 // buildWitnessTree creates a tree with N entries using chained leaf hashes
@@ -24,14 +24,14 @@ func buildWitnessTree(t *testing.T, n int) (*Tree, []LeafData, *Keccak256Hasher)
 
 	for i := 0; i < n; i++ {
 		ld := LeafData{
-			SerialNum:        uint64(i),
+			TxNum:        uint64(i),
 			PreStateHash:     hashFromUint(uint64(i*4 + 1)),
 			StateChangeHash:  hashFromUint(uint64(i*4 + 2)),
 			TransitionHash:   hashFromUint(uint64(i*4 + 3)),
 			PreviousLeafHash: prevLeaf,
 		}
 		leafHash := ld.LeafHash()
-		entry := &testEntry{sn: uint64(i), hash: leafHash}
+		entry := &testEntry{txNum: uint64(i), hash: leafHash}
 		_, err := tree.AppendEntry(entry)
 		require.NoError(t, err)
 		leaves[i] = ld
@@ -132,7 +132,7 @@ func TestWitness_SerializationRoundtrip(t *testing.T) {
 	require.Equal(t, w.StateChangeHash, w2.StateChangeHash)
 	require.Equal(t, w.TransitionHash, w2.TransitionHash)
 	require.Equal(t, w.PreviousLeafHash, w2.PreviousLeafHash)
-	require.Equal(t, w.Proof.SerialNum, w2.Proof.SerialNum)
+	require.Equal(t, w.Proof.TxNum, w2.Proof.TxNum)
 	require.Equal(t, w.Proof.Root, w2.Proof.Root)
 }
 
@@ -242,7 +242,7 @@ func TestRangeWitness_SerializationRoundtrip(t *testing.T) {
 	require.Equal(t, rw.FirstProof.Root, rw2.FirstProof.Root)
 	require.Equal(t, rw.LastProof.Root, rw2.LastProof.Root)
 	for i := range rw.Leaves {
-		require.Equal(t, rw.Leaves[i].SerialNum, rw2.Leaves[i].SerialNum)
+		require.Equal(t, rw.Leaves[i].TxNum, rw2.Leaves[i].TxNum)
 		require.Equal(t, rw.Leaves[i].TransitionHash, rw2.Leaves[i].TransitionHash)
 	}
 }

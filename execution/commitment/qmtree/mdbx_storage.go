@@ -13,21 +13,21 @@ import (
 // tables that participate in the snapshot collation/pruning/torrent pipeline.
 //
 // Tables used:
-//   - QMTreeEntries:  serialNum (8B BE) → pre(32B) || sc(32B) || trans(32B) = 96B value
+//   - QMTreeEntries:  txNum (8B BE) → pre(32B) || sc(32B) || trans(32B) = 96B value
 //   - QMTreeKeyIndex: keyHash (32B) → txNum (8B BE)
 //   - QMTreeMeta:     string key → value
 type MDBXStorage struct{}
 
 // Meta keys for QMTreeMeta table.
 var (
-	metaKeyNextSN   = []byte("nextSN")
-	metaKeyPrevLeaf = []byte("prevLeaf")
+	metaKeyNextTxNum = []byte("nextTxNum")
+	metaKeyPrevLeaf  = []byte("prevLeaf")
 )
 
 // PutEntry writes a single entry's three hash components to QMTreeEntries.
-func PutEntry(tx kv.RwTx, sn uint64, pre, stateChange, transition common.Hash) error {
+func PutEntry(tx kv.RwTx, txNum uint64, pre, stateChange, transition common.Hash) error {
 	var key [8]byte
-	binary.BigEndian.PutUint64(key[:], sn)
+	binary.BigEndian.PutUint64(key[:], txNum)
 
 	var val [96]byte
 	copy(val[0:32], pre[:])
@@ -38,19 +38,19 @@ func PutEntry(tx kv.RwTx, sn uint64, pre, stateChange, transition common.Hash) e
 }
 
 // GetEntry reads an entry's three hash components from QMTreeEntries.
-func GetEntry(tx kv.Tx, sn uint64) (pre, stateChange, transition common.Hash, err error) {
+func GetEntry(tx kv.Tx, txNum uint64) (pre, stateChange, transition common.Hash, err error) {
 	var key [8]byte
-	binary.BigEndian.PutUint64(key[:], sn)
+	binary.BigEndian.PutUint64(key[:], txNum)
 
 	val, err := tx.GetOne(kv.TblQMTreeEntries, key[:])
 	if err != nil {
 		return common.Hash{}, common.Hash{}, common.Hash{}, err
 	}
 	if val == nil {
-		return common.Hash{}, common.Hash{}, common.Hash{}, fmt.Errorf("qmtree entry not found: sn=%d", sn)
+		return common.Hash{}, common.Hash{}, common.Hash{}, fmt.Errorf("qmtree entry not found: txNum=%d", txNum)
 	}
 	if len(val) < 96 {
-		return common.Hash{}, common.Hash{}, common.Hash{}, fmt.Errorf("qmtree entry too short: sn=%d len=%d", sn, len(val))
+		return common.Hash{}, common.Hash{}, common.Hash{}, fmt.Errorf("qmtree entry too short: txNum=%d len=%d", txNum, len(val))
 	}
 	copy(pre[:], val[0:32])
 	copy(stateChange[:], val[32:64])
@@ -87,16 +87,16 @@ func GetMeta(tx kv.Tx, key string) ([]byte, error) {
 	return tx.GetOne(kv.TblQMTreeMeta, []byte(key))
 }
 
-// PutNextSN writes the next serial number to QMTreeMeta.
-func PutNextSN(tx kv.RwTx, nextSN uint64) error {
+// PutNextTxNum writes the next txNum to QMTreeMeta.
+func PutNextTxNum(tx kv.RwTx, nextTxNum uint64) error {
 	var buf [8]byte
-	binary.BigEndian.PutUint64(buf[:], nextSN)
-	return PutMeta(tx, string(metaKeyNextSN), buf[:])
+	binary.BigEndian.PutUint64(buf[:], nextTxNum)
+	return PutMeta(tx, string(metaKeyNextTxNum), buf[:])
 }
 
-// GetNextSN reads the next serial number from QMTreeMeta.
-func GetNextSN(tx kv.Tx) (uint64, error) {
-	val, err := GetMeta(tx, string(metaKeyNextSN))
+// GetNextTxNum reads the next txNum from QMTreeMeta.
+func GetNextTxNum(tx kv.Tx) (uint64, error) {
+	val, err := GetMeta(tx, string(metaKeyNextTxNum))
 	if err != nil {
 		return 0, err
 	}
@@ -125,10 +125,10 @@ func GetPrevLeaf(tx kv.Tx) (common.Hash, error) {
 	return h, nil
 }
 
-// DeleteEntriesFrom deletes all entries with serialNum >= fromSN.
-func DeleteEntriesFrom(tx kv.RwTx, fromSN uint64) error {
+// DeleteEntriesFrom deletes all entries with txNum >= fromTxNum.
+func DeleteEntriesFrom(tx kv.RwTx, fromTxNum uint64) error {
 	var key [8]byte
-	binary.BigEndian.PutUint64(key[:], fromSN)
+	binary.BigEndian.PutUint64(key[:], fromTxNum)
 
 	c, err := tx.Cursor(kv.TblQMTreeEntries)
 	if err != nil {
@@ -147,7 +147,7 @@ func DeleteEntriesFrom(tx kv.RwTx, fromSN uint64) error {
 	return nil
 }
 
-// EntryCount returns the number of entries in QMTreeEntries by reading NextSN.
+// EntryCount returns the number of entries in QMTreeEntries.
 func EntryCount(tx kv.Tx) (uint64, error) {
-	return GetNextSN(tx)
+	return GetNextTxNum(tx)
 }

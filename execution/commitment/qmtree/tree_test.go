@@ -10,21 +10,21 @@ import (
 
 // testEntry is a minimal Entry implementation for use in tree tests.
 type testEntry struct {
-	sn   uint64
-	hash common.Hash
+	txNum uint64
+	hash  common.Hash
 }
 
-func (e *testEntry) Hash() common.Hash    { return e.hash }
-func (e *testEntry) SerialNumber() uint64 { return e.sn }
+func (e *testEntry) Hash() common.Hash { return e.hash }
+func (e *testEntry) TxNum() uint64     { return e.txNum }
 func (e *testEntry) Len() int64           { return 0 }
 func (e *testEntry) Components() (pre, stateChange, transition common.Hash) {
 	return e.hash, common.Hash{}, common.Hash{}
 }
 
-func makeEntry(sn uint64) *testEntry {
+func makeEntry(txNum uint64) *testEntry {
 	var h common.Hash
-	binary.LittleEndian.PutUint64(h[:], sn+1) // non-zero hash
-	return &testEntry{sn: sn, hash: h}
+	binary.LittleEndian.PutUint64(h[:], txNum+1) // non-zero hash
+	return &testEntry{txNum: txNum, hash: h}
 }
 
 // ---------------------------------------------------------------------------
@@ -162,7 +162,7 @@ func TestTwigRollover(t *testing.T) {
 func TestProofCheckNoPanic(t *testing.T) {
 	hasher := &Sha256Hasher{}
 	path := ProofPath{
-		SerialNum: 0,
+		TxNum: 0,
 		UpperPath: []ProofNode{{}},
 	}
 	// Should not panic; hash mismatches are expected but no OOB access
@@ -176,7 +176,7 @@ func TestProofCheckNoPanic(t *testing.T) {
 
 func TestProofPathBytesRoundtrip(t *testing.T) {
 	original := ProofPath{
-		SerialNum: 12345,
+		TxNum: 12345,
 		UpperPath: []ProofNode{{SelfHash: common.Hash{1}, PeerHash: common.Hash{2}}, {}},
 		Root:      common.Hash{0xFF},
 	}
@@ -185,7 +185,7 @@ func TestProofPathBytesRoundtrip(t *testing.T) {
 	bz := original.ToBytes()
 	recovered, err := BytesToProofPath(bz)
 	require.NoError(t, err)
-	require.Equal(t, original.SerialNum, recovered.SerialNum)
+	require.Equal(t, original.TxNum, recovered.TxNum)
 	require.Equal(t, original.Root, recovered.Root)
 	require.Len(t, recovered.UpperPath, len(original.UpperPath))
 }

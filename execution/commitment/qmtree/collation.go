@@ -20,7 +20,7 @@ const (
 	entrySnapshotName    = "qmtree"
 	entrySnapshotExtKV   = ".kv"
 	entrySnapshotExtKVI  = ".kvi"
-	// Each entry in the snapshot: serialNum (8B) + pre(32B) + sc(32B) + trans(32B) = 104 bytes
+	// Each entry in the snapshot: txNum (8B) + pre(32B) + sc(32B) + trans(32B) = 104 bytes
 	snapshotEntrySize = 104
 )
 
@@ -31,7 +31,7 @@ type entrySnapshot struct {
 	kvPath   string
 	kviPath  string
 	data     []byte          // raw .kv content
-	index    *recsplit.Index // RecSplit for serialNum → offset lookup
+	index    *recsplit.Index // RecSplit for txNum → offset lookup
 	count    int
 }
 
@@ -131,7 +131,7 @@ func (sm *SnapshotManager) CollateEntries(ctx context.Context, tx kv.Tx, step ui
 		return fmt.Errorf("step %d: no entries to collate", step)
 	}
 
-	// Build RecSplit index: key=serialNum (8B), value=byte offset.
+	// Build RecSplit index: key=txNum (8B), value=byte offset.
 	if err := buildEntryRecSplit(ctx, kvPath, kviPath, count); err != nil {
 		os.Remove(kvPath)
 		return fmt.Errorf("build entry RecSplit: %w", err)
@@ -187,7 +187,7 @@ func buildEntryRecSplit(ctx context.Context, kvPath, kviPath string, keyCount in
 			return err
 		}
 		for i := 0; i < len(data); i += snapshotEntrySize {
-			key := data[i : i+8] // serialNum as key
+			key := data[i : i+8] // txNum as key
 			if err := rs.AddKey(key, uint64(i)); err != nil {
 				return err
 			}
@@ -223,7 +223,7 @@ func openEntrySnapshot(kvPath, kviPath string, fromStep, toStep uint64) (*entryS
 	}, nil
 }
 
-// GetEntryFromSnapshots looks up an entry by serialNum in frozen snapshots.
+// GetEntryFromSnapshots looks up an entry by txNum in frozen snapshots.
 // Returns (pre, sc, trans, true) if found, (zero, zero, zero, false) if not.
 func (sm *SnapshotManager) GetEntryFromSnapshots(sn uint64) (pre, sc, trans common.Hash, found bool) {
 	step := sn / sm.stepSize
@@ -236,7 +236,7 @@ func (sm *SnapshotManager) GetEntryFromSnapshots(sn uint64) (pre, sc, trans comm
 			if !ok || int(offset)+snapshotEntrySize > len(snap.data) {
 				return common.Hash{}, common.Hash{}, common.Hash{}, false
 			}
-			// Verify serialNum matches (RecSplit can false-positive).
+			// Verify txNum matches (RecSplit can false-positive).
 			storedSN := binary.BigEndian.Uint64(snap.data[offset : offset+8])
 			if storedSN != sn {
 				return common.Hash{}, common.Hash{}, common.Hash{}, false
@@ -350,7 +350,7 @@ func (sm *SnapshotManager) CollateAndPrune(ctx context.Context, roTx kv.Tx, rwTx
 // -------------------------------------------------------------------
 
 // MergeEntries merges multiple consecutive entry snapshots into a single file.
-// Since entries are ordered by serialNum (monotonically increasing), merging
+// Since entries are ordered by txNum (monotonically increasing), merging
 // is a simple concatenation of sorted ranges.
 func (sm *SnapshotManager) MergeEntries(ctx context.Context, fromStep, toStep uint64) error {
 	// Find snapshots to merge.

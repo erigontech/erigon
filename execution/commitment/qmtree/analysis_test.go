@@ -195,7 +195,7 @@ func TestBench_GetWitness(t *testing.T) {
 	tracker, err := qmtree.NewTracker(snapDir, uint64(stepSize))
 	require.NoError(t, err, "open tracker from %s", snapDir)
 
-	N := tracker.NextSN
+	N := tracker.NextTxNum
 	if N == 0 {
 		t.Skip("tracker is empty — run stage_exec_replay first")
 	}
@@ -207,7 +207,7 @@ func TestBench_GetWitness(t *testing.T) {
 		N, N>>qmtree.TWIG_SHIFT, step)
 
 	type result struct {
-		sn        uint64
+		txNum     uint64
 		proofSize int
 		dur       time.Duration
 	}
@@ -221,7 +221,7 @@ func TestBench_GetWitness(t *testing.T) {
 			continue
 		}
 		pb := w.Proof.ToBytes()
-		results = append(results, result{sn: sn, proofSize: len(pb), dur: dur})
+		results = append(results, result{txNum: sn, proofSize: len(pb), dur: dur})
 	}
 
 	var totalDur time.Duration
@@ -254,7 +254,7 @@ func TestBench_GetWitness(t *testing.T) {
 	w := csv.NewWriter(f)
 	_ = w.Write([]string{"serial_num", "proof_bytes", "duration_ns"})
 	for _, r := range results {
-		_ = w.Write([]string{str(r.sn), strconv.Itoa(r.proofSize), strconv.FormatInt(r.dur.Nanoseconds(), 10)})
+		_ = w.Write([]string{str(r.txNum), strconv.Itoa(r.proofSize), strconv.FormatInt(r.dur.Nanoseconds(), 10)})
 	}
 	w.Flush()
 	t.Logf("CSV written to %s", f.Name())
@@ -272,7 +272,7 @@ func TestBench_ProofSizeByTwig(t *testing.T) {
 	tracker, err := qmtree.NewTracker(snapDir, uint64(stepSize))
 	require.NoError(t, err)
 
-	N := tracker.NextSN
+	N := tracker.NextTxNum
 	if N == 0 {
 		t.Skip("tracker is empty")
 	}

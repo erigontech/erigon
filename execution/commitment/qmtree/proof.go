@@ -22,7 +22,7 @@ type ProofNode struct {
 type ProofPath struct {
 	LeftOfTwig [11]ProofNode
 	UpperPath  []ProofNode
-	SerialNum  uint64
+	TxNum  uint64
 	Root       common.Hash
 }
 
@@ -31,7 +31,7 @@ const OTHER_NODE_COUNT = 1 + 11 + 1
 
 func (p *ProofPath) ToBytes() []byte {
 	res := make([]byte, 0, (8+(len(p.UpperPath)+OTHER_NODE_COUNT)*32))
-	res = binary.LittleEndian.AppendUint64(res, p.SerialNum) // 8-byte
+	res = binary.LittleEndian.AppendUint64(res, p.TxNum) // 8-byte
 	res = append(res, p.LeftOfTwig[0].SelfHash[:]...)        // 1
 	for i := range p.LeftOfTwig {
 		//11
@@ -107,19 +107,19 @@ func BytesToProofPath(bz []byte) (*ProofPath, error) {
 	upperPath := make([]ProofNode, 0, upperCount)
 	emptyNode := ProofNode{}
 	leftOfTwig := [11]ProofNode{}
-	serialNum := binary.LittleEndian.Uint64(bz[0:8])
+	txNum := binary.LittleEndian.Uint64(bz[0:8])
 	bz = bz[8:]
 	copy(leftOfTwig[0].SelfHash[:], bz[:32])
 	bz = bz[32:]
 	for i := range leftOfTwig {
 		copy(leftOfTwig[i].PeerHash[:], bz[:32])
-		leftOfTwig[i].PeerAtLeft = (serialNum>>i)&1 == 1
+		leftOfTwig[i].PeerAtLeft = (txNum>>i)&1 == 1
 		bz = bz[32:]
 	}
 	for i := range upperCount {
 		node := emptyNode
 		copy(node.PeerHash[:], bz[:32])
-		node.PeerAtLeft = ((serialNum >> (FIRST_LEVEL_ABOVE_TWIG - 2 + i)) & 1) == 1
+		node.PeerAtLeft = ((txNum >> (FIRST_LEVEL_ABOVE_TWIG - 2 + i)) & 1) == 1
 		upperPath = append(upperPath, node)
 		bz = bz[32:]
 	}
@@ -128,7 +128,7 @@ func BytesToProofPath(bz []byte) (*ProofPath, error) {
 	return &ProofPath{
 		leftOfTwig,
 		upperPath,
-		serialNum,
+		txNum,
 		root,
 	}, nil
 }

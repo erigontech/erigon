@@ -568,7 +568,7 @@ func (t *Tree) TruncateFiles(entryFileSize int64, twigFileSize int64) {
 }
 
 func (t *Tree) AppendEntry(entry Entry) (int64, error) {
-	sn := entry.SerialNumber()
+	sn := entry.TxNum()
 
 	twigId := sn >> TWIG_SHIFT
 	t.youngestTwigId = twigId
@@ -790,7 +790,7 @@ func (t *Tree) getUpperPathAndRoot(twigId uint64) ([]ProofNode, [32]byte) {
 func (t *Tree) GetProof(sn uint64) (ProofPath, error) {
 	twigId := sn >> TWIG_SHIFT
 	path := ProofPath{
-		SerialNum: sn,
+		TxNum: sn,
 	}
 
 	if twigId > t.youngestTwigId {

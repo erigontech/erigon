@@ -72,7 +72,7 @@ type RangeWitness struct {
 
 // LeafData holds the four components needed to recompute a leaf hash.
 type LeafData struct {
-	SerialNum    uint64
+	TxNum        uint64
 	PreStateHash     common.Hash
 	StateChangeHash  common.Hash
 	TransitionHash   common.Hash
@@ -96,11 +96,11 @@ func (rw *RangeWitness) Verify(hasher Hasher) error {
 	}
 
 	// Verify serial numbers are contiguous.
-	firstSN := rw.Leaves[0].SerialNum
+	firstSN := rw.Leaves[0].TxNum
 	for i, ld := range rw.Leaves {
-		if ld.SerialNum != firstSN+uint64(i) {
+		if ld.TxNum != firstSN+uint64(i) {
 			return fmt.Errorf("non-contiguous serial numbers: expected %d, got %d at index %d",
-				firstSN+uint64(i), ld.SerialNum, i)
+				firstSN+uint64(i), ld.TxNum, i)
 		}
 	}
 
@@ -113,13 +113,13 @@ func (rw *RangeWitness) Verify(hasher Hasher) error {
 		// the computed hash of the prior leaf.
 		if i > 0 && rw.Leaves[i].PreviousLeafHash != leafHashes[i-1] {
 			return fmt.Errorf("chain break at index %d (sn=%d): previousLeafHash %x != computed %x",
-				i, rw.Leaves[i].SerialNum, rw.Leaves[i].PreviousLeafHash, leafHashes[i-1])
+				i, rw.Leaves[i].TxNum, rw.Leaves[i].PreviousLeafHash, leafHashes[i-1])
 		}
 	}
 
 	// Verify first Merkle proof.
-	if rw.FirstProof.SerialNum != firstSN {
-		return fmt.Errorf("first proof serial number mismatch: %d != %d", rw.FirstProof.SerialNum, firstSN)
+	if rw.FirstProof.TxNum != firstSN {
+		return fmt.Errorf("first proof serial number mismatch: %d != %d", rw.FirstProof.TxNum, firstSN)
 	}
 	if leafHashes[0] != rw.FirstProof.LeftOfTwig[0].SelfHash {
 		return fmt.Errorf("first leaf hash mismatch: computed %x, proof has %x",
@@ -132,9 +132,9 @@ func (rw *RangeWitness) Verify(hasher Hasher) error {
 	// Verify last Merkle proof (if range has more than one entry).
 	lastIdx := len(rw.Leaves) - 1
 	if lastIdx > 0 {
-		lastSN := rw.Leaves[lastIdx].SerialNum
-		if rw.LastProof.SerialNum != lastSN {
-			return fmt.Errorf("last proof serial number mismatch: %d != %d", rw.LastProof.SerialNum, lastSN)
+		lastSN := rw.Leaves[lastIdx].TxNum
+		if rw.LastProof.TxNum != lastSN {
+			return fmt.Errorf("last proof serial number mismatch: %d != %d", rw.LastProof.TxNum, lastSN)
 		}
 		if leafHashes[lastIdx] != rw.LastProof.LeftOfTwig[0].SelfHash {
 			return fmt.Errorf("last leaf hash mismatch: computed %x, proof has %x",
@@ -214,7 +214,7 @@ func BytesToWitness(bz []byte) (*Witness, error) {
 func RangeWitnessToBytes(rw *RangeWitness) []byte {
 	firstBytes := rw.FirstProof.ToBytes()
 	lastBytes := rw.LastProof.ToBytes()
-	leafSize := 8 + 4*32 // serialNum + 4 hashes
+	leafSize := 8 + 4*32 // txNum + 4 hashes
 	totalSize := 4 + len(firstBytes) + 4 + len(lastBytes) + 4 + len(rw.Leaves)*leafSize
 	buf := make([]byte, 0, totalSize)
 
@@ -232,7 +232,7 @@ func RangeWitnessToBytes(rw *RangeWitness) []byte {
 
 	var snBuf [8]byte
 	for _, ld := range rw.Leaves {
-		binary.LittleEndian.PutUint64(snBuf[:], ld.SerialNum)
+		binary.LittleEndian.PutUint64(snBuf[:], ld.TxNum)
 		buf = append(buf, snBuf[:]...)
 		buf = append(buf, ld.PreStateHash[:]...)
 		buf = append(buf, ld.StateChangeHash[:]...)
@@ -288,7 +288,7 @@ func BytesToRangeWitness(bz []byte) (*RangeWitness, error) {
 
 	leaves := make([]LeafData, leafCount)
 	for i := range leaves {
-		leaves[i].SerialNum = binary.LittleEndian.Uint64(bz[off : off+8])
+		leaves[i].TxNum = binary.LittleEndian.Uint64(bz[off : off+8])
 		off += 8
 		copy(leaves[i].PreStateHash[:], bz[off:off+32])
 		off += 32

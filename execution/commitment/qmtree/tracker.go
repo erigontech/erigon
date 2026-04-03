@@ -16,14 +16,14 @@ import (
 // It stores the three raw hash components; the leaf hash is computed from them
 // plus the chained previousLeafHash (tracked externally by Tracker.prevLeaf).
 type proofEntry struct {
-	sn          uint64
+	txNum       uint64
 	hash        common.Hash // precomputed leaf hash, used by tree for twig building
 	pre         common.Hash
 	stateChange common.Hash
 	transition  common.Hash
 }
 
-func (e *proofEntry) SerialNumber() uint64 { return e.sn }
+func (e *proofEntry) TxNum() uint64 { return e.txNum }
 func (e *proofEntry) Hash() common.Hash    { return e.hash }
 func (e *proofEntry) Len() int64           { return 0 }
 func (e *proofEntry) Components() (pre, stateChange, transition common.Hash) {
@@ -37,7 +37,7 @@ func (e *proofEntry) Components() (pre, stateChange, transition common.Hash) {
 type Tracker struct {
 	tree     *Tree
 	hasher   *Keccak256Hasher
-	NextSN   uint64
+	NextTxNum uint64
 	prevLeaf common.Hash
 
 	// keyIndex tracks the latest txNum for each (domain, key) pair written
@@ -61,7 +61,7 @@ type Tracker struct {
 	keyIndexDirty map[common.Hash]uint64
 
 	// keyIndexLastFlushedQStep is the quarter-step number at the last KeyIndex flush.
-	// Quarter-steps = NextSN / (stepSize/4). Segments are named by quarter-step range.
+	// Quarter-steps = NextTxNum / (stepSize/4). Segments are named by quarter-step range.
 	keyIndexLastFlushedQStep uint64
 
 	// leafData is a bounded LRU cache of LeafData keyed by serial number.
@@ -142,8 +142,8 @@ func (qt *Tracker) SetTx(tx kv.RwTx) { qt.rwTx = tx }
 func (qt *Tracker) AppendLeaf(preStateHash, stateChangeHash, transitionHash common.Hash) {
 	// Record the prevLeaf at the start of each new twig so that cache misses
 	// can be reconstructed in O(LEAF_COUNT_IN_TWIG) steps.
-	if qt.NextSN%LEAF_COUNT_IN_TWIG == 0 {
-		twigId := qt.NextSN / LEAF_COUNT_IN_TWIG
+	if qt.NextTxNum%LEAF_COUNT_IN_TWIG == 0 {
+		twigId := qt.NextTxNum / LEAF_COUNT_IN_TWIG
 		for uint64(len(qt.twigPrevLeaf)) <= twigId {
 			qt.twigPrevLeaf = append(qt.twigPrevLeaf, common.Hash{})
 		}
@@ -151,7 +151,7 @@ func (qt *Tracker) AppendLeaf(preStateHash, stateChangeHash, transitionHash comm
 	}
 
 	ld := LeafData{
-		SerialNum:        qt.NextSN,
+		TxNum:            qt.NextTxNum,
 		PreStateHash:     preStateHash,
 		StateChangeHash:  stateChangeHash,
 		TransitionHash:   transitionHash,
@@ -159,19 +159,19 @@ func (qt *Tracker) AppendLeaf(preStateHash, stateChangeHash, transitionHash comm
 	}
 	leafHash := ld.LeafHash()
 
-	entry := &proofEntry{sn: qt.NextSN, hash: leafHash, pre: preStateHash, stateChange: stateChangeHash, transition: transitionHash}
+	entry := &proofEntry{txNum: qt.NextTxNum, hash: leafHash, pre: preStateHash, stateChange: stateChangeHash, transition: transitionHash}
 	qt.tree.AppendEntry(entry)
 
 	// Write to MDBX if a transaction is set.
 	if qt.rwTx != nil {
-		if err := PutEntry(qt.rwTx, qt.NextSN, preStateHash, stateChangeHash, transitionHash); err != nil {
-			log.Warn("qmtree: failed to write entry to MDBX", "sn", qt.NextSN, "err", err)
+		if err := PutEntry(qt.rwTx, qt.NextTxNum, preStateHash, stateChangeHash, transitionHash); err != nil {
+			log.Warn("qmtree: failed to write entry to MDBX", "txNum", qt.NextTxNum, "err", err)
 		}
 	}
 
-	qt.leafData.Add(qt.NextSN, ld)
+	qt.leafData.Add(qt.NextTxNum, ld)
 	qt.prevLeaf = leafHash
-	qt.NextSN++
+	qt.NextTxNum++
 
 	// Auto-collate when a step boundary is crossed.
 	qt.maybeCollate()
@@ -220,15 +220,15 @@ func (qt *Tracker) GetExclusionProof(keyHash common.Hash) *ExclusionProof {
 
 // currentStep returns the step number for the current serial number.
 func (qt *Tracker) currentStep() uint64 {
-	if qt.NextSN == 0 {
+	if qt.NextTxNum == 0 {
 		return 0
 	}
-	return (qt.NextSN - 1) / qt.stepSize
+	return (qt.NextTxNum - 1) / qt.stepSize
 }
 
 // completedSteps returns the number of fully completed steps.
 func (qt *Tracker) completedSteps() uint64 {
-	return qt.NextSN / qt.stepSize
+	return qt.NextTxNum / qt.stepSize
 }
 
 // LogStepProgress logs when a new step is completed.
@@ -264,7 +264,7 @@ type StorageStats struct {
 
 func (qt *Tracker) StorageStats() StorageStats {
 	stats := StorageStats{
-		Entries:       qt.NextSN,
+		Entries:       qt.NextTxNum,
 		Steps:         qt.completedSteps(),
 		CurrentStep:   qt.currentStep(),
 		FrozenSteps:   qt.lastCollatedStep,
@@ -285,38 +285,38 @@ func (qt *Tracker) twigStartPrevLeaf(twigId uint64) common.Hash {
 	return common.Hash{}
 }
 
-// readComponents reads entry components for the given serial number.
+// readComponents reads entry components for the given txNum.
 // Checks: MDBX (hot) → snapshots (frozen). Returns error if not found.
-func (qt *Tracker) readComponents(sn uint64) (pre, sc, trans common.Hash, err error) {
+func (qt *Tracker) readComponents(txNum uint64) (pre, sc, trans common.Hash, err error) {
 	// Try MDBX first (hot data).
 	if qt.rwTx != nil {
-		pre, sc, trans, err = GetEntry(qt.rwTx, sn)
+		pre, sc, trans, err = GetEntry(qt.rwTx, txNum)
 		if err == nil {
 			return
 		}
 	}
 	// Try frozen snapshots.
 	if qt.snapManager != nil {
-		pre, sc, trans, found := qt.snapManager.GetEntryFromSnapshots(sn)
+		pre, sc, trans, found := qt.snapManager.GetEntryFromSnapshots(txNum)
 		if found {
 			return pre, sc, trans, nil
 		}
 	}
-	return common.Hash{}, common.Hash{}, common.Hash{}, fmt.Errorf("entry not found: sn=%d", sn)
+	return common.Hash{}, common.Hash{}, common.Hash{}, fmt.Errorf("entry not found: txNum=%d", txNum)
 }
 
-// getLeafData returns LeafData for sn from the LRU cache, reconstructing from
+// getLeafData returns LeafData for txNum from the LRU cache, reconstructing from
 // MDBX/snapshots on a cache miss. Reconstruction starts from twigPrevLeaf[twigId]
 // so the chain walk is at most LEAF_COUNT_IN_TWIG (2048) steps.
-func (qt *Tracker) getLeafData(sn uint64) (LeafData, bool) {
-	if ld, ok := qt.leafData.Get(sn); ok {
+func (qt *Tracker) getLeafData(txNum uint64) (LeafData, bool) {
+	if ld, ok := qt.leafData.Get(txNum); ok {
 		return ld, true
 	}
-	twigId := sn >> TWIG_SHIFT
+	twigId := txNum >> TWIG_SHIFT
 	twigBase := twigId * LEAF_COUNT_IN_TWIG
 	prevLeaf := qt.twigStartPrevLeaf(twigId)
 
-	for s := twigBase; s <= sn; s++ {
+	for s := twigBase; s <= txNum; s++ {
 		if _, ok := qt.leafData.Peek(s); ok {
 			ld, _ := qt.leafData.Get(s)
 			prevLeaf = ld.LeafHash()
@@ -327,7 +327,7 @@ func (qt *Tracker) getLeafData(sn uint64) (LeafData, bool) {
 			return LeafData{}, false
 		}
 		ld := LeafData{
-			SerialNum:        s,
+			TxNum:            s,
 			PreStateHash:     pre,
 			StateChangeHash:  sc,
 			TransitionHash:   trans,
@@ -336,41 +336,41 @@ func (qt *Tracker) getLeafData(sn uint64) (LeafData, bool) {
 		qt.leafData.Add(s, ld)
 		prevLeaf = ld.LeafHash()
 	}
-	ld, ok := qt.leafData.Get(sn)
+	ld, ok := qt.leafData.Get(txNum)
 	return ld, ok
 }
 
 // getTwigLeafHashes returns all LEAF_COUNT_IN_TWIG leaf hashes for the given twig,
 // using the LRU cache where possible and MDBX/snapshots for misses.
 // The returned slice always has length LEAF_COUNT_IN_TWIG; positions beyond
-// NextSN-1 are the null entry hash.
+// NextTxNum-1 are the null entry hash.
 func (qt *Tracker) getTwigLeafHashes(twigId uint64) ([]common.Hash, error) {
 	twigBase := twigId * LEAF_COUNT_IN_TWIG
 	hashes := make([]common.Hash, LEAF_COUNT_IN_TWIG)
 
 	prevLeaf := qt.twigStartPrevLeaf(twigId)
-	end := min(twigBase+LEAF_COUNT_IN_TWIG, qt.NextSN)
+	end := min(twigBase+LEAF_COUNT_IN_TWIG, qt.NextTxNum)
 
-	for sn := twigBase; sn < end; sn++ {
-		i := sn - twigBase
-		if ld, ok := qt.leafData.Get(sn); ok {
+	for txNum := twigBase; txNum < end; txNum++ {
+		i := txNum - twigBase
+		if ld, ok := qt.leafData.Get(txNum); ok {
 			hashes[i] = ld.LeafHash()
 			prevLeaf = hashes[i]
 			continue
 		}
-		pre, sc, trans, err := qt.readComponents(sn)
+		pre, sc, trans, err := qt.readComponents(txNum)
 		if err != nil {
-			return nil, fmt.Errorf("read entry sn=%d: %w", sn, err)
+			return nil, fmt.Errorf("read entry txNum=%d: %w", txNum, err)
 		}
 		ld := LeafData{
-			SerialNum:        sn,
+			TxNum:            txNum,
 			PreStateHash:     pre,
 			StateChangeHash:  sc,
 			TransitionHash:   trans,
 			PreviousLeafHash: prevLeaf,
 		}
 		hashes[i] = ld.LeafHash()
-		qt.leafData.Add(sn, ld)
+		qt.leafData.Add(txNum, ld)
 		prevLeaf = hashes[i]
 	}
 	return hashes, nil
@@ -385,17 +385,17 @@ func buildTwigMT(hasher Hasher, leafHashes []common.Hash) TwigMT {
 	return mt
 }
 
-// getProof builds a ProofPath for sn with LeftOfTwig derived from the LRU
+// getProof builds a ProofPath for txNum with LeftOfTwig derived from the LRU
 // cache and MDBX/snapshot entries rather than from a twig file.
 //
 // For completed twigs the proof is assembled from tree internals and entry
 // data reconstructed via readComponents.
-func (qt *Tracker) getProof(sn uint64) (ProofPath, error) {
-	twigId := sn >> TWIG_SHIFT
+func (qt *Tracker) getProof(txNum uint64) (ProofPath, error) {
+	twigId := txNum >> TWIG_SHIFT
 
 	if twigId == qt.tree.youngestTwigId {
 		// Youngest twig: tree has the correct TwigMT in memory already.
-		return qt.tree.GetProof(sn)
+		return qt.tree.GetProof(txNum)
 	}
 
 	// Completed twig: assemble the proof from entry data and upper tree.
@@ -414,23 +414,23 @@ func (qt *Tracker) getProof(sn uint64) (ProofPath, error) {
 	mt := buildTwigMT(qt.hasher, leafHashes)
 
 	return ProofPath{
-		SerialNum:  sn,
-		LeftOfTwig: GetLeftPathInMem(mt, sn),
+		TxNum:  txNum,
+		LeftOfTwig: GetLeftPathInMem(mt, txNum),
 		UpperPath:  upperPath,
 		Root:       common.Hash(root),
 	}, nil
 }
 
-// GetWitness generates a Witness for a single leaf by serial number.
+// GetWitness generates a Witness for a single leaf by txNum.
 // The tree must be synced (SyncRoot called) before calling this.
-func (qt *Tracker) GetWitness(sn uint64) (*Witness, error) {
-	ld, ok := qt.getLeafData(sn)
+func (qt *Tracker) GetWitness(txNum uint64) (*Witness, error) {
+	ld, ok := qt.getLeafData(txNum)
 	if !ok {
-		return nil, fmt.Errorf("leaf data not found for sn=%d", sn)
+		return nil, fmt.Errorf("leaf data not found for txNum=%d", txNum)
 	}
-	proof, err := qt.getProof(sn)
+	proof, err := qt.getProof(txNum)
 	if err != nil {
-		return nil, fmt.Errorf("get proof for sn=%d: %w", sn, err)
+		return nil, fmt.Errorf("get proof for txNum=%d: %w", txNum, err)
 	}
 	return &Witness{
 		Proof:            proof,
@@ -449,21 +449,21 @@ func (qt *Tracker) GetRangeWitness(fromSN, toSN uint64) (*RangeWitness, error) {
 	}
 
 	leaves := make([]LeafData, 0, toSN-fromSN+1)
-	for sn := fromSN; sn <= toSN; sn++ {
-		ld, ok := qt.getLeafData(sn)
+	for txNum := fromSN; txNum <= toSN; txNum++ {
+		ld, ok := qt.getLeafData(txNum)
 		if !ok {
-			return nil, fmt.Errorf("leaf data not found for sn=%d", sn)
+			return nil, fmt.Errorf("leaf data not found for txNum=%d", txNum)
 		}
 		leaves = append(leaves, ld)
 	}
 
 	firstProof, err := qt.getProof(fromSN)
 	if err != nil {
-		return nil, fmt.Errorf("get first proof for sn=%d: %w", fromSN, err)
+		return nil, fmt.Errorf("get first proof for txNum=%d: %w", fromSN, err)
 	}
 	lastProof, err := qt.getProof(toSN)
 	if err != nil {
-		return nil, fmt.Errorf("get last proof for sn=%d: %w", toSN, err)
+		return nil, fmt.Errorf("get last proof for txNum=%d: %w", toSN, err)
 	}
 
 	return &RangeWitness{
@@ -480,8 +480,8 @@ func (qt *Tracker) Flush() {
 	qt.flushKeyIndex()
 	// Persist metadata to MDBX so LoadFromDB can resume.
 	if qt.rwTx != nil {
-		if err := PutNextSN(qt.rwTx, qt.NextSN); err != nil {
-			log.Warn("qmtree: failed to write nextSN to MDBX", "err", err)
+		if err := PutNextTxNum(qt.rwTx, qt.NextTxNum); err != nil {
+			log.Warn("qmtree: failed to write nextTxNum to MDBX", "err", err)
 		}
 		if err := PutPrevLeaf(qt.rwTx, qt.prevLeaf); err != nil {
 			log.Warn("qmtree: failed to write prevLeaf to MDBX", "err", err)
@@ -510,13 +510,13 @@ func (qt *Tracker) maybeCollate() {
 	}
 }
 
-// quarterStep returns the current quarter-step number: NextSN / (stepSize/4).
+// quarterStep returns the current quarter-step number: NextTxNum / (stepSize/4).
 func (qt *Tracker) quarterStep() uint64 {
 	qSize := qt.stepSize / 4
 	if qSize == 0 {
 		qSize = 1
 	}
-	return qt.NextSN / qSize
+	return qt.NextTxNum / qSize
 }
 
 // maybeFlushKeyIndex checks if we've crossed a quarter-step boundary since
@@ -564,7 +564,7 @@ func (qt *Tracker) flushKeyIndex() {
 // All entries with sn >= toSN are discarded. The target SN is the first
 // entry to discard (i.e. entries 0..toSN-1 are kept).
 func (qt *Tracker) UnwindTo(toSN uint64) {
-	if toSN >= qt.NextSN {
+	if toSN >= qt.NextTxNum {
 		return // nothing to unwind
 	}
 
@@ -588,10 +588,10 @@ func (qt *Tracker) UnwindTo(toSN uint64) {
 	}
 
 	// Remove unwound entries from the LRU cache.
-	for sn := toSN; sn < qt.NextSN; sn++ {
-		qt.leafData.Remove(sn)
+	for txNum := toSN; txNum < qt.NextTxNum; txNum++ {
+		qt.leafData.Remove(txNum)
 	}
-	qt.NextSN = toSN
+	qt.NextTxNum = toSN
 
 	// Truncate twigPrevLeaf to the twigs that remain.
 	if toSN > 0 {
@@ -614,14 +614,14 @@ func (qt *Tracker) UnwindTo(toSN uint64) {
 }
 
 // LoadFromDB rebuilds the in-memory tree from QMTreeEntries in MDBX and
-// frozen snapshot files. Reads NextSN/prevLeaf from QMTreeMeta, then replays
+// frozen snapshot files. Reads NextTxNum/prevLeaf from QMTreeMeta, then replays
 // all entries (snapshots + MDBX hot) through the in-memory tree.
 func (qt *Tracker) LoadFromDB(tx kv.Tx) error {
-	nextSN, err := GetNextSN(tx)
+	nextTxNum, err := GetNextTxNum(tx)
 	if err != nil {
-		return fmt.Errorf("qmtree LoadFromDB: read nextSN: %w", err)
+		return fmt.Errorf("qmtree LoadFromDB: read nextTxNum: %w", err)
 	}
-	if nextSN == 0 {
+	if nextTxNum == 0 {
 		return nil // empty, nothing to load
 	}
 
@@ -635,30 +635,30 @@ func (qt *Tracker) LoadFromDB(tx kv.Tx) error {
 	var currentPrevLeaf common.Hash
 	twigPrevLeaf := []common.Hash{{}}
 
-	for sn := uint64(0); sn < nextSN; sn++ {
-		if sn > 0 && sn%LEAF_COUNT_IN_TWIG == 0 {
-			twigId := sn / LEAF_COUNT_IN_TWIG
+	for txNum := uint64(0); txNum < nextTxNum; txNum++ {
+		if txNum > 0 && txNum%LEAF_COUNT_IN_TWIG == 0 {
+			twigId := txNum / LEAF_COUNT_IN_TWIG
 			for uint64(len(twigPrevLeaf)) <= twigId {
 				twigPrevLeaf = append(twigPrevLeaf, common.Hash{})
 			}
 			twigPrevLeaf[twigId] = currentPrevLeaf
 		}
 
-		pre, sc, trans, err := GetEntry(tx, sn)
+		pre, sc, trans, err := GetEntry(tx, txNum)
 		if err != nil {
-			return fmt.Errorf("qmtree LoadFromDB: read entry sn=%d: %w", sn, err)
+			return fmt.Errorf("qmtree LoadFromDB: read entry txNum=%d: %w", txNum, err)
 		}
 		ld := LeafData{
-			SerialNum:        sn,
+			TxNum:            txNum,
 			PreStateHash:     pre,
 			StateChangeHash:  sc,
 			TransitionHash:   trans,
 			PreviousLeafHash: currentPrevLeaf,
 		}
 		leafHash := ld.LeafHash()
-		entry := &proofEntry{sn: sn, hash: leafHash, pre: pre, stateChange: sc, transition: trans}
+		entry := &proofEntry{txNum: txNum, hash: leafHash, pre: pre, stateChange: sc, transition: trans}
 		replayTree.AppendEntry(entry)
-		qt.leafData.Add(sn, ld)
+		qt.leafData.Add(txNum, ld)
 		currentPrevLeaf = leafHash
 	}
 
@@ -669,7 +669,7 @@ func (qt *Tracker) LoadFromDB(tx kv.Tx) error {
 	qt.tree = replayTree
 	qt.twigPrevLeaf = twigPrevLeaf
 	qt.prevLeaf = prevLeaf
-	qt.NextSN = nextSN
+	qt.NextTxNum = nextTxNum
 
 	// Load existing entry snapshots so we know what's already frozen.
 	if qt.snapManager != nil {
@@ -682,7 +682,7 @@ func (qt *Tracker) LoadFromDB(tx kv.Tx) error {
 	}
 
 	log.Info("qmtree: loaded from MDBX",
-		"entries", nextSN,
+		"entries", nextTxNum,
 		"cachedLeaves", qt.leafData.Len(),
 		"frozenSteps", qt.lastCollatedStep,
 	)

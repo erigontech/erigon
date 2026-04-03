@@ -965,7 +965,7 @@ func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 				if blockNum%1000 == 0 || blockNum <= 10 {
 					root := tracker.SyncRoot()
 					logger.Info("[stage_exec_replay] qmtree root",
-						"block", blockNum, "root", root, "leaves", tracker.NextSN)
+						"block", blockNum, "root", root, "leaves", tracker.NextTxNum)
 					if err := commitQmTx(); err != nil {
 						return err
 					}
@@ -980,7 +980,7 @@ func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 				logger.Info("[stage_exec_replay] progress",
 					"block", lastBlockNum, "elapsed", elapsed,
 					"blk/s", fmt.Sprintf("%.1f", blkPerSec),
-					"leaves", tracker.NextSN)
+					"leaves", tracker.NextTxNum)
 			default:
 			}
 
@@ -1011,7 +1011,7 @@ func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 	logger.Info("[stage_exec_replay] finished",
 		"blocks", lastBlockNum, "elapsed", elapsed,
 		"blk/s", fmt.Sprintf("%.1f", blkPerSec),
-		"qmtree_leaves", tracker.NextSN, "qmtree_root", finalRoot)
+		"qmtree_leaves", tracker.NextTxNum, "qmtree_root", finalRoot)
 
 	return nil
 }

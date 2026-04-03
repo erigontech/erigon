@@ -65,7 +65,7 @@ func NewStateEntry(txNum uint64, changes []StateChange, opts ...LeafHashInputs) 
 }
 
 func (e *StateEntry) Hash() common.Hash    { return e.hash }
-func (e *StateEntry) SerialNumber() uint64 { return e.txNum }
+func (e *StateEntry) TxNum() uint64 { return e.txNum }
 func (e *StateEntry) Len() int64           { return 0 }
 func (e *StateEntry) Changes() []StateChange { return e.changes }
 // Components is not implemented for PoC StateEntry (hash was computed externally).

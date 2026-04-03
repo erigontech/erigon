@@ -29,7 +29,7 @@ func populateEntries(t *testing.T, tx kv.RwTx, from, to uint64) {
 		binary.BigEndian.PutUint64(trans[:], sn*3)
 		require.NoError(t, PutEntry(tx, sn, pre, sc, trans))
 	}
-	require.NoError(t, PutNextSN(tx, to))
+	require.NoError(t, PutNextTxNum(tx, to))
 }
 
 func TestCollateEntries(t *testing.T) {

@@ -7,7 +7,7 @@ const ENTRY_BASE_LENGTH int = ENTRY_FIXED_LENGTH
 
 type Entry interface {
 	Hash() common.Hash
-	SerialNumber() uint64
+	TxNum() uint64
 	Len() int64
 	// Components returns the three raw hash inputs used to compute the leaf hash.
 	// These are stored in the entry file (96 bytes) instead of the derived hash,
@@ -30,7 +30,7 @@ var nullEntryHash = common.Hash{
 }
 
 func (_ NullEntry) Hash() common.Hash                                          { return nullEntryHash }
-func (_ NullEntry) SerialNumber() uint64                                        { return ^uint64(0) }
+func (_ NullEntry) TxNum() uint64                                               { return ^uint64(0) }
 func (_ NullEntry) Len() int64                                                  { return 0 }
 func (_ NullEntry) Components() (pre, stateChange, transition common.Hash)      { return }
 

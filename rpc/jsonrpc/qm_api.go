@@ -86,7 +86,7 @@ type QMProofResult struct {
 }
 
 type QMWitnessLeaf struct {
-	SerialNum hexutil.Uint64 `json:"serialNum"`
+	TxNum hexutil.Uint64 `json:"txNum"`
 	LeafData  QMLeafData     `json:"leafData"`
 	LeafHash  common.Hash    `json:"leafHash"`
 }
@@ -192,7 +192,7 @@ type QMCallProofTwig struct {
 	// up to (but not including) the tree root level. Length = upper tree height.
 	// Combined with the twig root (derived from LeftOfTwig), they reproduce the
 	// full path to Root. PeerAtLeft for level i is derivable from
-	// (serialNum >> (FIRST_LEVEL_ABOVE_TWIG - 2 + i)) & 1.
+	// (txNum >> (FIRST_LEVEL_ABOVE_TWIG - 2 + i)) & 1.
 	UpperPeerHashes []hexutil.Bytes `json:"upperPeerHashes"`
 }
 
@@ -205,7 +205,7 @@ type QMCallProofLeaf struct {
 	// SelfHash = LeftOfTwig[0].SelfHash = the leaf hash itself.
 	SelfHash hexutil.Bytes `json:"selfHash"`
 	// IntraTwigPeerHashes: 11 peer hashes for levels 0..10 within the twig.
-	// PeerAtLeft for level i is derivable from (serialNum >> i) & 1.
+	// PeerAtLeft for level i is derivable from (txNum >> i) & 1.
 	IntraTwigPeerHashes []hexutil.Bytes `json:"intraTwigPeerHashes"`
 	Verified            bool            `json:"verified"`
 }
@@ -702,7 +702,7 @@ func (api *QMAPIImpl) CallProof(ctx context.Context, args ethapi2.CallArgs, bloc
 			continue
 		}
 
-		sn := w.Proof.SerialNum
+		sn := w.Proof.TxNum
 		twigId := sn >> qmtree.TWIG_SHIFT
 		root = w.Proof.Root // same for all witnesses from the same synced tree
 
@@ -875,7 +875,7 @@ func (api *QMAPIImpl) GetWitness(ctx context.Context, blockNrOrHash rpc.BlockNum
 	leaves := make([]QMWitnessLeaf, len(rw.Leaves))
 	for i, ld := range rw.Leaves {
 		leaves[i] = QMWitnessLeaf{
-			SerialNum: hexutil.Uint64(ld.SerialNum),
+			TxNum: hexutil.Uint64(ld.TxNum),
 			LeafData: QMLeafData{
 				PreStateHash:     ld.PreStateHash,
 				StateChangeHash:  ld.StateChangeHash,
@@ -1153,7 +1153,7 @@ func (api *QMAPIImpl) GetLatestStateProof(ctx context.Context, address common.Ad
 	defer tx.Rollback()
 
 	// Find the most recent txnum that touched this address across all history.
-	it, err := tx.IndexRange(kv.AccountsHistoryIdx, address.Bytes(), -1, int(api.tracker.NextSN), false, -1)
+	it, err := tx.IndexRange(kv.AccountsHistoryIdx, address.Bytes(), -1, int(api.tracker.NextTxNum), false, -1)
 	if err != nil {
 		return nil, fmt.Errorf("index range: %w", err)
 	}
