@@ -857,6 +857,10 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	// loop, accumulating all decoded transaction objects in memory simultaneously.
 	// 128 blocks (~25 k txns on mainnet) is sufficient to keep workers busy.
 	pe.execRequests = make(chan *execRequest, 128)
+	// Clear stale blockExecutors from previous batch — unprocessed blocks left
+	// in the map after a "batch full" exit would prevent the first block of the
+	// new batch from being scheduled (processRequest only schedules when map is empty).
+	pe.blockExecutors = nil
 	// in is the per-transaction work queue consumed by OCC workers.
 	// 2048 entries keeps all workers saturated without unbounded accumulation.
 	pe.in = exec.NewQueueWithRetry(2_048)
@@ -2453,11 +2457,13 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 		if !isNextValidated {
 			txIndex := execTask.Version().TxIndex
 			if be.txIncarnations[nextTx] > 0 &&
-				(be.execAborted[nextTx] > 0 || be.execFailed[nextTx] > 0 || !be.blockIO.HasReads(txIndex) ||
+				(be.execTasks.isBlocked(nextTx) || !be.blockIO.HasReads(txIndex) ||
 					be.versionMap.ValidateVersion(txIndex, be.blockIO,
 						func(_, writtenVersion state.Version) state.VersionValidity {
-							if writtenVersion.TxIndex < maxValidated &&
-								writtenVersion.Incarnation == be.txIncarnations[writtenVersion.TxIndex+1] {
+							wi := writtenVersion.TxIndex + 1
+							if wi >= 0 && wi < len(be.txIncarnations) &&
+								writtenVersion.TxIndex < maxValidated &&
+								writtenVersion.Incarnation == be.txIncarnations[wi] {
 								return state.VersionValid
 							}
 							return state.VersionInvalid

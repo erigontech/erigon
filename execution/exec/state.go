@@ -129,14 +129,21 @@ type Worker struct {
 }
 
 // installWorkerGetHash replaces the EVM's GetHash function with one that
-// uses the worker's own chainTx for BLOCKHASH lookups. This avoids sharing
+// uses the worker's own roTx for BLOCKHASH lookups. This avoids sharing
 // the executeBlocks goroutine's roTx across worker goroutines (data race).
+// When a BlockOverlay is active (post-snapshot Caplin blocks), the roTx is
+// wrapped with the overlay so the worker can see headers not yet in MDBX.
 func (rw *Worker) installWorkerGetHash(txTask Task) {
 	header := txTask.BlockHeader()
 	if header == nil {
 		return
 	}
-	workerTx := rw.chainTx
+	var workerTx kv.Getter = rw.chainTx
+	if rw.rs != nil {
+		if overlay := rw.rs.Domains().BlockOverlay(); overlay != nil {
+			workerTx = overlay.NewReadView(rw.chainTx)
+		}
+	}
 	br := rw.blockReader
 	ctx := rw.ctx
 	rw.evm.Context.GetHash = protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
