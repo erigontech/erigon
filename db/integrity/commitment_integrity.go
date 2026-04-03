@@ -951,7 +951,7 @@ func checkCommitmentHistAtBlkWithIdx(ctx context.Context, db kv.TemporalRoDB, br
 }
 
 func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, blockNum uint64, lvl log.Lvl, logger log.Logger) error {
-	idx, err := NewChangedKeysPerBlockIdx(ctx, db, br, blockNum, blockNum+1, kv.StateDomains[:kv.CommitmentDomain], logger)
+	idx, err := NewChangedKeysPerBlockIdx(ctx, db, br, blockNum, blockNum+1, logger)
 	if err != nil {
 		return err
 	}
@@ -989,33 +989,25 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 	}()
 
 	var integrityErr atomic.Pointer[error]
-	var blks uint64
+	var blks atomic.Uint64
 
-	// Process the range in windows.  For each window we build a ChangedKeysPerBlockIdx
-	// with a single HistoryKeyTxNumRange scan per domain, then reuse it across all
-	// sampled blocks in the window — replacing per-block heap-driven scans with
-	// O(1) index lookups.
+	// Each worker owns a window: builds its own ChangedKeysPerBlockIdx then checks
+	// its own sampled blocks — index building and block checking both run in parallel.
+	g, wCtx := errgroup.WithContext(ctx)
+	g.SetLimit(runtime.GOMAXPROCS(-1))
 	for windowStart := from; windowStart < to; windowStart += checkCommitmentHistWindowSize {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
+		windowStart := windowStart
 		windowEnd := min(windowStart+checkCommitmentHistWindowSize, to)
-
-		idx, err := NewChangedKeysPerBlockIdx(ctx, db, br, windowStart, windowEnd, kv.StateDomains[:kv.CommitmentDomain], logger)
-		if err != nil {
-			return fmt.Errorf("CheckCommitmentHistAtBlkRange: build index window=[%d,%d): %w", windowStart, windowEnd, err)
-		}
-
-		g, wCtx := errgroup.WithContext(ctx)
-		g.SetLimit(runtime.GOMAXPROCS(-1))
-
-		for blockNum := range sampler.BlockNums(windowStart, windowEnd) {
-			blks++
-			blockNum := blockNum
-			g.Go(func() error {
-				if wCtx.Err() != nil {
-					return wCtx.Err()
-				}
+		g.Go(func() error {
+			if wCtx.Err() != nil {
+				return wCtx.Err()
+			}
+			idx, err := NewChangedKeysPerBlockIdx(wCtx, db, br, windowStart, windowEnd, logger)
+			if err != nil {
+				return fmt.Errorf("CheckCommitmentHistAtBlkRange: build index window=[%d,%d): %w", windowStart, windowEnd, err)
+			}
+			for blockNum := range sampler.BlockNums(windowStart, windowEnd) {
+				blks.Add(1)
 				if err := checkCommitmentHistAtBlkWithIdx(wCtx, db, br, blockNum, idx, log.LvlTrace, logger); err != nil {
 					err = fmt.Errorf("checkCommitmentHistAtBlk: %d, %w", blockNum, err)
 					if failFast {
@@ -1027,17 +1019,18 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 				}
 				checked.Add(1)
 				lastBlockNum.Store(blockNum)
-				return nil
-			})
-		}
-		if err := g.Wait(); err != nil {
-			return err
-		}
+			}
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return err
 	}
 
 	dur := time.Since(start)
-	rate := float64(blks) / dur.Seconds()
-	logger.Info("checked commitment hist at blk range", "dur", dur, "blks", blks, "blks/s", rate, "from", from, "to", to, "seed", sampler.Seed, "sampleRatio", sampler.SampleRatio)
+	n := blks.Load()
+	rate := float64(n) / dur.Seconds()
+	logger.Info("checked commitment hist at blk range", "dur", dur, "blks", n, "blks/s", rate, "from", from, "to", to, "seed", sampler.Seed, "sampleRatio", sampler.SampleRatio)
 	if p := integrityErr.Load(); p != nil {
 		return *p
 	}

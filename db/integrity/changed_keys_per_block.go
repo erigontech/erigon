@@ -196,8 +196,8 @@ type ChangedKeysPerBlockIdx [kv.DomainLen]*ChangedKeysPerBlock
 // NewChangedKeysPerBlockIdx scans HistoryKeyTxNumRange once per domain for the txNum
 // range covering [fromBlockNum, toBlockNum) blocks and returns the resulting index.
 // The index is fully in-memory; the tx used for scanning is closed on return.
-// domains selects which domains to index; typically kv.StateDomains[:kv.CommitmentDomain].
-func NewChangedKeysPerBlockIdx(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, fromBlockNum, toBlockNum uint64, domains []kv.Domain, logger log.Logger) (*ChangedKeysPerBlockIdx, error) {
+func NewChangedKeysPerBlockIdx(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, fromBlockNum, toBlockNum uint64, logger log.Logger) (*ChangedKeysPerBlockIdx, error) {
+	domains := []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain}
 	start := time.Now()
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
