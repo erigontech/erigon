@@ -107,7 +107,7 @@ func TestChangedKeysPerBlock_Basic(t *testing.T) {
 	require.Equal(t, []string{"a", "b"}, keysForBlock(idx, 2))
 	require.Nil(t, keysForBlock(idx, 3))
 
-	require.Equal(t, 3, idx.NumKeys())  // "a", "b", "c" stored once each
+	require.Equal(t, 3, idx.NumKeys())   // "a", "b", "c" stored once each
 	require.Equal(t, 3, idx.NumBlocks()) // blocks 0, 1, 2
 }
 
