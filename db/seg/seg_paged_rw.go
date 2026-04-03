@@ -32,12 +32,14 @@ import (
 var be = binary.BigEndian
 
 func GetFromPage(key, compressedPage []byte, compressionBuf []byte, compressionEnabled bool) (v []byte, compressionBufOut []byte) {
+	touch := func(page []byte) byte { return page[0] | page[len(page)-1] }
 	var err error
 	var page []byte
 	compressionBuf, page, err = compress.DecodeZstdIfNeed(compressionBuf[:0], compressedPage, compressionEnabled)
 	if err != nil {
 		panic(err)
 	}
+	_ = touch(page)
 
 	cnt := int(page[0])
 	if cnt == 0 {
