@@ -693,7 +693,8 @@ const (
 	CommitmentDomain Domain = 3 // Merkle Trie
 	ReceiptDomain    Domain = 4 // Tiny Receipts - without logs. Required for node-operations.
 	RCacheDomain     Domain = 5 // Fat Receipts - with logs. Optional.
-	DomainLen        Domain = 6 // Technical marker of Enum. Not real Domain.
+	QMTreeDomain     Domain = 6 // QMTree proof-of-execution entries. Optional (--experimental.qmtree).
+	DomainLen        Domain = 7 // Technical marker of Enum. Not real Domain.
 )
 
 var StateDomains = []Domain{AccountsDomain, StorageDomain, CodeDomain, CommitmentDomain}
@@ -796,6 +797,8 @@ func (d Domain) String() string {
 		return "receipt"
 	case RCacheDomain:
 		return "rcache"
+	case QMTreeDomain:
+		return "qmtree"
 	default:
 		return "unknown domain"
 	}
@@ -815,6 +818,8 @@ func String2Domain(in string) (Domain, error) {
 		return ReceiptDomain, nil
 	case "rcache":
 		return RCacheDomain, nil
+	case "qmtree":
+		return QMTreeDomain, nil
 	default:
 		return Domain(MaxUint16), fmt.Errorf("unknown name: %s", in)
 	}

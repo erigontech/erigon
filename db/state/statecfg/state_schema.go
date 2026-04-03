@@ -53,6 +53,9 @@ func Configure(Schema SchemaGen, a AggSetters, dirs datadir.Dirs, salt *uint32, 
 	if err := a.RegisterDomain(Schema.GetDomainCfg(kv.RCacheDomain), salt, dirs, logger); err != nil {
 		return err
 	}
+	if err := a.RegisterDomain(Schema.GetDomainCfg(kv.QMTreeDomain), salt, dirs, logger); err != nil {
+		return err
+	}
 	if err := a.RegisterII(Schema.GetIICfg(kv.LogAddrIdx), salt, dirs, logger); err != nil {
 		return err
 	}
@@ -83,6 +86,10 @@ func init() {
 		Schema.CommitmentDomain.Accessors = AccessorBTree | AccessorExistence
 	}
 	InitSchemas()
+
+	// QMTree domain versions (after InitSchemas so gen versions are set first).
+	Schema.QMTreeDomain.FileVersion.DataKV = version.V1_0_standart
+	Schema.QMTreeDomain.FileVersion.AccessorKVI = version.V1_0_standart
 }
 
 type SchemaGen struct {
@@ -92,6 +99,7 @@ type SchemaGen struct {
 	CommitmentDomain      DomainCfg
 	ReceiptDomain         DomainCfg
 	RCacheDomain          DomainCfg
+	QMTreeDomain          DomainCfg
 	LogAddrIdx            InvIdxCfg
 	LogTopicIdx           InvIdxCfg
 	TracesFromIdx         InvIdxCfg
@@ -104,7 +112,7 @@ type SchemaGen struct {
 
 func (s *SchemaGen) GetVersioned(name string) (Versioned, error) {
 	switch name {
-	case kv.AccountsDomain.String(), kv.StorageDomain.String(), kv.CodeDomain.String(), kv.CommitmentDomain.String(), kv.ReceiptDomain.String(), kv.RCacheDomain.String():
+	case kv.AccountsDomain.String(), kv.StorageDomain.String(), kv.CodeDomain.String(), kv.CommitmentDomain.String(), kv.ReceiptDomain.String(), kv.RCacheDomain.String(), kv.QMTreeDomain.String():
 		domain, err := kv.String2Domain(name)
 		if err != nil {
 			return nil, err
@@ -140,6 +148,8 @@ func (s *SchemaGen) GetDomainCfg(name kv.Domain) DomainCfg {
 		v = s.ReceiptDomain
 	case kv.RCacheDomain:
 		v = s.RCacheDomain
+	case kv.QMTreeDomain:
+		v = s.QMTreeDomain
 	default:
 		v = DomainCfg{}
 	}
@@ -325,6 +335,27 @@ var Schema = SchemaGen{
 				FilenameBase: kv.RCacheDomain.String(), KeysTable: kv.TblRCacheHistoryKeys, ValuesTable: kv.TblRCacheIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
+			},
+		},
+	},
+
+	QMTreeDomain: DomainCfg{
+		Name: kv.QMTreeDomain, ValuesTable: kv.TblQMTreeEntries,
+		CompressCfg: seg.DefaultCfg, Compression: seg.CompressNone,
+		Accessors: AccessorHashMap,
+
+		Hist: HistCfg{
+			HistoryDisabled:   true,
+			SnapshotsDisabled: true,
+			ValuesTable:       kv.TblQMTreeMeta, // placeholder — history is disabled but prune code opens a cursor
+			FileVersion:       HistVersionTypes{DataV: version.V1_0_standart, AccessorVI: version.V1_0_standart},
+			HistoryIdx:        kv.AccountsHistoryIdx, // placeholder — not used since disabled
+			IiCfg: InvIdxCfg{
+				Disable:      true,
+				FilenameBase: kv.QMTreeDomain.String(),
+				KeysTable:    kv.TblQMTreeMeta, // placeholder
+				ValuesTable:  kv.TblQMTreeMeta, // placeholder
+				FileVersion:  IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart},
 			},
 		},
 	},

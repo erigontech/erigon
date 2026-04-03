@@ -62,6 +62,10 @@ func InitSchemas() {
 			".vi":  Schema.RCacheDomain.Hist.FileVersion.AccessorVI.MinSupported,
 			".v":   Schema.RCacheDomain.Hist.FileVersion.DataV.MinSupported,
 		},
+		"qmtree": {
+			".kv":  Schema.QMTreeDomain.FileVersion.DataKV.MinSupported,
+			".kvi": Schema.QMTreeDomain.FileVersion.AccessorKVI.MinSupported,
+		},
 		"logaddrs": {
 			".ef":  Schema.LogAddrIdx.FileVersion.DataEF.MinSupported,
 			".efi": Schema.LogAddrIdx.FileVersion.AccessorEFI.MinSupported,

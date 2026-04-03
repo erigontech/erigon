@@ -155,7 +155,7 @@ func (c *StateCache) PrintStatsAndReset() {
 	}
 }
 
-func (c *StateCache) RevertWithDiffset(diffset *[6][]kv.DomainEntryDiff, revertFromHash, newBlockHash common.Hash) {
+func (c *StateCache) RevertWithDiffset(diffset *[kv.DomainLen][]kv.DomainEntryDiff, revertFromHash, newBlockHash common.Hash) {
 	// If the cache's block hash doesn't match the block we're unwinding from,
 	// the cache was modified by a rolled-back tx (e.g. ValidatePayload).
 	// Clear everything and set the new hash — surgical eviction can't fix stale data
