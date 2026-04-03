@@ -861,6 +861,7 @@ func checkCommitmentHistAtBlkWithIdx(ctx context.Context, db kv.TemporalRoDB, br
 	if err != nil {
 		return err
 	}
+	defer sd.Close()
 	commitmentAsOf := minTxNum
 	if blockNum == 0 {
 		commitmentAsOf = toTxNum
