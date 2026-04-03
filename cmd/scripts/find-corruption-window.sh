@@ -134,12 +134,14 @@ while true; do
     echo "[iter $iter] Execution reached block: $end_block (started at ${start_block:-unknown})"
 
     # Step 4: Run check-commitment-hist-at-blk-range
-    echo "[iter $iter] Checking commitment history from 0 to $end_block..."
+    # Use end_block-1 to avoid boundary issue where state files don't cover the very last block
+    check_to=$((end_block - 1))
+    echo "[iter $iter] Checking commitment history from 0 to $check_to..."
     check_log="$mirror_dir/check-commitment.log"
     if "$ERIGON" seg check-commitment-hist-at-blk-range \
         --datadir="$mirror_dir" \
         --from=0 \
-        --to="$end_block" \
+        --to="$check_to" \
         --sample="$SAMPLE" \
         2>&1 | tee "$check_log"; then
 
