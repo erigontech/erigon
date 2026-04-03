@@ -68,6 +68,9 @@ func (rs *StateV3) applyUpdates(roTx kv.TemporalTx, blockNum, txNum uint64, stat
 				if dbg.TraceApply && (rs.trace || dbg.TraceAccount(update.address.Handle())) {
 					fmt.Printf("%d apply:del code+storage: %x\n", blockNum, update.address)
 				}
+				if dbg.TraceAccount(update.address.Handle()) {
+					fmt.Printf("%d applyUpdates:DomainDel(CodeDomain): %x, deleteAccount=%t, origInc=%d, txNum=%d, stack: %s\n", blockNum, update.address, update.deleteAccount, update.originalIncarnation, txNum, dbg.Stack())
+				}
 				//del, before create: to clanup code/storage
 				address := update.address.Value()
 				if err = domains.DomainDel(kv.CodeDomain, roTx, address[:], txNum, nil); err != nil {
@@ -96,6 +99,9 @@ func (rs *StateV3) applyUpdates(roTx kv.TemporalTx, blockNum, txNum uint64, stat
 							code = code[:40]
 						}
 						fmt.Printf("%d apply:put code: %x %x\n", blockNum, update.address, code)
+					}
+					if dbg.TraceAccount(update.address.Handle()) {
+						fmt.Printf("%d applyUpdates:DomainPut(CodeDomain): %x, codeLen=%d, txNum=%d, stack: %s\n", blockNum, update.address, len(update.code), txNum, dbg.Stack())
 					}
 					address := update.address.Value()
 					if err = domains.DomainPut(kv.CodeDomain, roTx, address[:], update.code, txNum, nil); err != nil {
@@ -630,6 +636,9 @@ func (w *Writer) UpdateAccountData(address accounts.Address, original, account *
 	addressValue := address.Value()
 	if original.Incarnation > account.Incarnation {
 		//del, before create: to clanup code/storage
+		if dbg.TraceAccount(address.Handle()) {
+			fmt.Printf("UpdateAccountData:DomainDel(CodeDomain): %x, origInc: %d, newInc: %d, txNum: %d, stack: %s\n", address, original.Incarnation, account.Incarnation, w.txNum, dbg.Stack())
+		}
 		if err := w.tx.DomainDel(kv.CodeDomain, addressValue[:], w.txNum, nil); err != nil {
 			return err
 		}
@@ -649,8 +658,8 @@ func (w *Writer) UpdateAccountData(address accounts.Address, original, account *
 }
 
 func (w *Writer) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
-	if w.trace {
-		fmt.Printf("code: %x, %x, valLen: %d\n", address, codeHash, len(code))
+	if w.trace || dbg.TraceAccount(address.Handle()) {
+		fmt.Printf("UpdateAccountCode: %x, codeHash: %x, codeLen: %d, txNum: %d, stack: %s\n", address, codeHash, len(code), w.txNum, dbg.Stack())
 	}
 	addressValue := address.Value()
 	if err := w.tx.DomainPut(kv.CodeDomain, addressValue[:], code, w.txNum, nil); err != nil {
