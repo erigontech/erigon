@@ -34,6 +34,7 @@ This section details common error messages and provides clear, actionable steps 
    * **Error Description:** The node cannot connect to an external service, such as a local or remote Heimdall instance.
    * **Cause:** This is a configuration error. The dependent service is either not running, or the command-line flag is pointing to an incorrect address.
    * **Solution:** Confirm that the required services are running and that the command-line flags (e.g., `--bor.heimdall.url`) are correctly set.
+
 8. **Permission denied inside Docker (UID/GID mismatch):**
    * **Error Description:** When running the official Docker image, Erigon fails to read or write files in the mounted datadir with a `permission denied` error.
    * **Cause:** The container runs the Erigon process as UID/GID `1000`. If the host directory is owned by a different user, the process cannot access it.
