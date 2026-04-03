@@ -56,7 +56,7 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/stats"
-	"github.com/erigontech/erigon/db/config3"
+
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	chain2 "github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -875,7 +875,12 @@ func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 	}
 
 	// Initialise qmtree tracker backed by disk storage under snapshots/qmtree/.
-	tracker, err := qmtree.NewTracker(dirs.Snap, uint64(config3.DefaultStepSize))
+	// Use the datadir's actual step size from erigondb.toml.
+	erigonSettings, err := dbstate.ResolveErigonDBSettings(dirs, logger, false)
+	if err != nil {
+		return fmt.Errorf("read erigondb settings: %w", err)
+	}
+	tracker, err := qmtree.NewTracker(dirs.Snap, erigonSettings.StepSize)
 	if err != nil {
 		return fmt.Errorf("init qmtree tracker: %w", err)
 	}

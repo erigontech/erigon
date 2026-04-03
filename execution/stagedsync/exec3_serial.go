@@ -11,7 +11,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/config3"
+
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -66,7 +66,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 	if se.cfg.experimentalQmtree && se.qmtracker == nil {
 		var err error
-		se.qmtracker, err = qmtree.NewTracker(se.cfg.dirs.Snap, uint64(config3.DefaultStepSize))
+		se.qmtracker, err = qmtree.NewTracker(se.cfg.dirs.Snap, se.doms.StepSize())
 		if err != nil {
 			return nil, rwTx, fmt.Errorf("init qmtree tracker: %w", err)
 		}
