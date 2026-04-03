@@ -14,9 +14,10 @@ import (
 )
 
 const (
-	// File naming: qmtree-keyindex.{fromStep}-{toStep}.kvi
+	// File naming: v1.0-qmtree-keyindex.{fromStep}-{toStep}.kvi
 	// Single RecSplit index mapping keyHash (32B) → txNum.
-	keyIndexName = "qmtree-keyindex"
+	keyIndexVersion = "v1.0"
+	keyIndexName    = "qmtree-keyindex"
 )
 
 // keyIndexSegment represents one persisted RecSplit index mapping keyHash → txNum.
@@ -50,7 +51,7 @@ func NewKeyIndexFile(dir string) (*KeyIndexFile, error) {
 }
 
 func keyIndexPath(dir string, fromStep, toStep uint64) string {
-	return filepath.Join(dir, fmt.Sprintf("%s.%d-%d.kvi", keyIndexName, fromStep, toStep))
+	return filepath.Join(dir, fmt.Sprintf("%s-%s.%d-%d.kvi", keyIndexVersion, keyIndexName, fromStep, toStep))
 }
 
 // FlushDelta builds a RecSplit index from dirty key-index entries.
@@ -155,7 +156,7 @@ func (kf *KeyIndexFile) LoadAll() (uint64, error) {
 	}
 
 	var maxStep uint64
-	prefix := keyIndexName + "."
+	prefix := keyIndexVersion + "-" + keyIndexName + "."
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".kvi") || !strings.HasPrefix(e.Name(), prefix) {
 			continue
