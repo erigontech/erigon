@@ -71,11 +71,10 @@ echo ""
 
 get_exec_block() {
     local datadir="$1"
-    "$INTEGRATION" print_stages --datadir="$datadir" 2>/dev/null \
-        | grep -i 'execution\|Execution' \
-        | head -1 \
-        | grep -oE '[0-9]+' \
-        | head -1
+    # Parse: "Execution                0               0"
+    # Extract the stage_at column (first number after "Execution")
+    "$INTEGRATION" print_stages --datadir="$datadir" 2>&1 \
+        | awk '/^Execution[[:space:]]/ { print $2; exit }'
 }
 
 iter=$START_ITER
@@ -101,18 +100,23 @@ while true; do
         bash "$MIRROR_SCRIPT" "$current_source" "$mirror_dir"
     fi
 
-    # Step 2: Run stage_exec for N minutes
+    # Step 2: Run stage_exec for N minutes, then send SIGINT for graceful commit
     echo "[iter $iter] Running stage_exec for ${EXEC_MINUTES} minutes..."
-    timeout "${EXEC_MINUTES}m" "$INTEGRATION" stage_exec \
+    timeout --signal=INT --kill-after=60s "${EXEC_MINUTES}m" "$INTEGRATION" stage_exec \
         --datadir="$mirror_dir" \
         --chain="$CHAIN" \
         2>&1 | tee "$mirror_dir/stage_exec.log" || true
-    # timeout returns 124 on timeout, which is expected
+    # timeout returns 124 on timeout (SIGINT sent), which is expected
+    # --kill-after=60s sends SIGKILL if process doesn't exit within 60s of SIGINT
 
     # Step 3: Get block number reached
     end_block=$(get_exec_block "$mirror_dir")
-    if [ -z "$end_block" ] || [ "$end_block" = "0" ]; then
+    if [ -z "$end_block" ]; then
         echo "[iter $iter] ERROR: Could not determine execution block from print_stages"
+        exit 1
+    fi
+    if [ "$end_block" = "$start_block" ]; then
+        echo "[iter $iter] ERROR: Execution made no progress (still at block $end_block)"
         exit 1
     fi
     echo "[iter $iter] Execution reached block: $end_block (started at ${start_block:-unknown})"
