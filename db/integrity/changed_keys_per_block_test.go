@@ -40,8 +40,8 @@ func newPairKU64(pairs ...struct {
 	return &pairKU64{pairs: pairs}
 }
 
-func (p *pairKU64) HasNext() bool        { return p.pos < len(p.pairs) }
-func (p *pairKU64) Close()               {}
+func (p *pairKU64) HasNext() bool { return p.pos < len(p.pairs) }
+func (p *pairKU64) Close()        {}
 func (p *pairKU64) Next() ([]byte, uint64, error) {
 	e := p.pairs[p.pos]
 	p.pos++
