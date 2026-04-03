@@ -17,6 +17,7 @@
 package integrity
 
 import (
+	"fmt"
 	"sort"
 	"testing"
 
@@ -185,6 +186,45 @@ func TestChangedKeysPerBlock_WithRealTxNumToBlock(t *testing.T) {
 	require.Equal(t, []string{"a", "b"}, keysForBlock(idx, 0)) // a@2, b@7 → block 0
 	require.Equal(t, []string{"a", "b"}, keysForBlock(idx, 1)) // a@12, b@17 → block 1
 	require.Equal(t, []string{"a"}, keysForBlock(idx, 2))      // a@22 → block 2
+}
+
+func TestChangedKeysPerBlock_KeyAtLastBlock(t *testing.T) {
+	// txNum 25 → block 2 (last in window), cursor must advance all the way to position 2.
+	it := newPairKU64(pair("z", 25))
+	idx, err := changedKeysPerBlock(it, simpleTxNums(3))
+	require.NoError(t, err)
+	require.Nil(t, keysForBlock(idx, 0))
+	require.Nil(t, keysForBlock(idx, 1))
+	require.Equal(t, []string{"z"}, keysForBlock(idx, 2))
+}
+
+func TestChangedKeysPerBlock_ManyKeysOneBlock(t *testing.T) {
+	// 100 distinct keys all change within block 0 — verifies offset slice grows
+	// correctly and all offsets are unique and valid.
+	pairs := make([]struct {
+		key   []byte
+		txNum uint64
+	}, 100)
+	for i := range pairs {
+		pairs[i] = pair(fmt.Sprintf("key%03d", i), uint64(i%10))
+	}
+	sort.Slice(pairs, func(a, b int) bool { return string(pairs[a].key) < string(pairs[b].key) })
+	idx, err := changedKeysPerBlock(&pairKU64{pairs: pairs}, simpleTxNums(1))
+	require.NoError(t, err)
+	require.Equal(t, 100, idx.NumKeys())
+	require.Equal(t, 1, idx.NumBlocks())
+	require.Equal(t, 100, len(idx.Offsets(0)))
+	seen := make(map[uint32]bool)
+	for _, off := range idx.Offsets(0) {
+		require.False(t, seen[off], "duplicate offset %d", off)
+		seen[off] = true
+	}
+}
+
+func TestTxNumToBlock_ToTxNum(t *testing.T) {
+	// ToTxNum must return maxTxNums[last]+1 (exclusive upper bound), not maxTxNums[last].
+	m := &TxNumToBlock{maxTxNums: []uint64{4, 9, 14}}
+	require.Equal(t, uint64(15), m.ToTxNum())
 }
 
 func TestTxNumToBlock_BlockOf(t *testing.T) {
