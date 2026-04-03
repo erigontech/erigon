@@ -347,14 +347,16 @@ var Schema = SchemaGen{
 		Hist: HistCfg{
 			HistoryDisabled:   true,
 			SnapshotsDisabled: true,
-			ValuesTable:       kv.TblQMTreeMeta, // placeholder — history is disabled but prune code opens a cursor
+			ValuesTable:       kv.TblQMTreeMeta, // placeholder — history is disabled
 			FileVersion:       HistVersionTypes{DataV: version.V1_0_standart, AccessorVI: version.V1_0_standart},
-			HistoryIdx:        kv.AccountsHistoryIdx, // placeholder — not used since disabled
+			HistoryIdx:        kv.AccountsHistoryIdx, // placeholder
 			IiCfg: InvIdxCfg{
-				Disable:      true,
+				// Disable=false so Domain.Disable is false and the Aggregator
+				// handles collation/merge for the domain values table.
+				Disable:      false,
 				FilenameBase: kv.QMTreeDomain.String(),
-				KeysTable:    kv.TblQMTreeMeta, // placeholder
-				ValuesTable:  kv.TblQMTreeMeta, // placeholder
+				KeysTable:    kv.TblQMTreeMeta,     // placeholder — II is effectively unused
+				ValuesTable:  kv.TblQMTreeKeyIndex,  // placeholder — II is effectively unused
 				FileVersion:  IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart},
 			},
 		},
