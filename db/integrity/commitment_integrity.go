@@ -832,6 +832,7 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br serv
 // checkCommitmentHistAtBlkWithIdx checks commitment for blockNum using the pre-built
 // per-domain key index from ChangedKeysPerBlockIdx.
 func checkCommitmentHistAtBlkWithIdx(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, blockNum uint64, idx *ChangedKeysPerBlockIdx, lvl log.Lvl, logger log.Logger) error {
+	logger.Log(lvl, "checking commitment hist at block", "blockNum", blockNum)
 	start := time.Now()
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -892,12 +893,12 @@ func checkCommitmentHistAtBlkWithIdx(ctx context.Context, db kv.TemporalRoDB, br
 				return fmt.Errorf("commitment state blockNum doesn't match blockNum: %d != %d (block %d has different state root: ref=%x header=%x)", latestBlockNum, blockNum, gapBlock, refHeader.Root, gapHeader.Root)
 			}
 		}
-		//logger.Log(lvl, "commitment state is from earlier block (empty blocks in between)", "commitmentBlockNum", latestBlockNum, "blockNum", blockNum)
+		logger.Log(lvl, "commitment state is from earlier block (empty blocks in between)", "commitmentBlockNum", latestBlockNum, "blockNum", blockNum)
 	}
 	if latestTxNum != maxTxNum && latestBlockNum == blockNum {
 		return fmt.Errorf("commitment state txNum doesn't match maxTxNum: %d != %d", latestTxNum, maxTxNum)
 	}
-	//logger.Log(lvl, "commitment recalc info", "blockNum", blockNum, "minTxNum", minTxNum, "maxTxNum", maxTxNum, "toTxNum", toTxNum)
+	logger.Log(lvl, "commitment recalc info", "blockNum", blockNum, "minTxNum", minTxNum, "maxTxNum", maxTxNum, "toTxNum", toTxNum)
 	trace := logger.Enabled(ctx, log.LvlTrace)
 	touchLoggingVisitor := func(k []byte) {
 		if trace {
@@ -1014,7 +1015,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 				if wCtx.Err() != nil {
 					return wCtx.Err()
 				}
-				if err := checkCommitmentHistAtBlkWithIdx(wCtx, db, br, blockNum, idx, log.LvlDebug, logger); err != nil {
+				if err := checkCommitmentHistAtBlkWithIdx(wCtx, db, br, blockNum, idx, log.LvlTrace, logger); err != nil {
 					err = fmt.Errorf("checkCommitmentHistAtBlk: %d, %w", blockNum, err)
 					if failFast {
 						return err
