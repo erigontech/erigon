@@ -57,8 +57,9 @@ type Tracker struct {
 	// On Flush(), only these entries are written to a new segment file.
 	keyIndexDirty map[common.Hash]uint64
 
-	// keyIndexLastFlushedStep is the toStep of the last flushed KeyIndex segment.
-	keyIndexLastFlushedStep uint64
+	// keyIndexLastFlushedQStep is the quarter-step number at the last KeyIndex flush.
+	// Quarter-steps = NextSN / (stepSize/4). Segments are named by quarter-step range.
+	keyIndexLastFlushedQStep uint64
 
 	// leafData is a bounded LRU cache of LeafData keyed by serial number.
 	// PreviousLeafHash is stored in each entry but is NOT persisted to disk;
@@ -211,6 +212,7 @@ func (qt *Tracker) NotifyKeyWrites(keyHashes []common.Hash, txNum uint64) {
 		qt.keyIndex.UpdateKey(kh, txNum)
 		qt.keyIndexDirty[kh] = txNum
 	}
+	qt.maybeFlushKeyIndex()
 }
 
 // KeyIndexRoot returns the Merkle root of the current key index.
@@ -497,6 +499,27 @@ func (qt *Tracker) Flush() {
 	qt.flushKeyIndex()
 }
 
+// quarterStep returns the current quarter-step number: NextSN / (stepSize/4).
+func (qt *Tracker) quarterStep() uint64 {
+	qSize := qt.stepSize / 4
+	if qSize == 0 {
+		qSize = 1
+	}
+	return qt.NextSN / qSize
+}
+
+// maybeFlushKeyIndex checks if we've crossed a quarter-step boundary since
+// the last flush and, if so, writes the dirty KeyIndex entries to a new segment.
+// Called automatically from NotifyKeyWrites to keep flush frequency aligned
+// with Erigon's step structure (4 flushes per step).
+func (qt *Tracker) maybeFlushKeyIndex() {
+	currentQStep := qt.quarterStep()
+	if currentQStep <= qt.keyIndexLastFlushedQStep {
+		return
+	}
+	qt.flushKeyIndex()
+}
+
 // flushKeyIndex writes dirty KeyIndex entries to a new segment file.
 func (qt *Tracker) flushKeyIndex() {
 	if qt.keyIndexFile == nil || len(qt.keyIndexDirty) == 0 {
@@ -506,21 +529,22 @@ func (qt *Tracker) flushKeyIndex() {
 	for kh, txNum := range qt.keyIndexDirty {
 		entries = append(entries, KeyIndexEntry{KeyHash: kh, TxNum: txNum})
 	}
-	fromStep := qt.keyIndexLastFlushedStep
-	toStep := qt.completedSteps()
-	if toStep <= fromStep {
-		toStep = fromStep + 1 // ensure unique step range
+	currentQStep := qt.quarterStep()
+	fromQStep := qt.keyIndexLastFlushedQStep
+	toQStep := currentQStep
+	if toQStep <= fromQStep {
+		toQStep = fromQStep + 1 // ensure unique range
 	}
-	if err := qt.keyIndexFile.FlushDelta(context.Background(), entries, fromStep, toStep); err != nil {
+	if err := qt.keyIndexFile.FlushDelta(context.Background(), entries, fromQStep, toQStep); err != nil {
 		log.Warn("qmtree: failed to flush keyindex", "err", err)
 		return
 	}
 	qt.keyIndexDirty = make(map[common.Hash]uint64)
-	qt.keyIndexLastFlushedStep = toStep
+	qt.keyIndexLastFlushedQStep = toQStep
 	log.Info("qmtree: flushed keyindex delta",
 		"entries", len(entries),
-		"fromStep", fromStep,
-		"toStep", toStep,
+		"fromQStep", fromQStep,
+		"toQStep", toQStep,
 		"segments", qt.keyIndexFile.SegmentCount(),
 	)
 }
@@ -653,7 +677,7 @@ func (qt *Tracker) LoadFromDisk() error {
 			log.Warn("qmtree: failed to load keyindex files, will rebuild from entries", "err", err)
 		} else if maxStep > 0 {
 			qt.keyIndexFile.PopulateKeyIndex(qt.keyIndex)
-			qt.keyIndexLastFlushedStep = maxStep
+			qt.keyIndexLastFlushedQStep = maxStep
 			log.Info("qmtree: loaded keyindex from disk",
 				"keys", qt.keyIndex.Len(),
 				"segments", qt.keyIndexFile.SegmentCount(),
