@@ -854,7 +854,7 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 	defer completion.Done()
 	dictVal := make([]byte, 8)
 	dictKey := make([]byte, maxPatternLen)
-	var lcp, sa, inv []int32
+	var lcp, sa, inv, saisBuf []int32
 	for superstring := range superstringCh {
 		select {
 		case <-ctx.Done():
@@ -869,7 +869,7 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 		}
 		//log.Info("Superstring", "len", len(superstring))
 		//start := time.Now()
-		if err := sais.Sais(superstring, sa); err != nil {
+		if err := sais.SaisWithBuf(superstring, sa, &saisBuf); err != nil {
 			panic(err)
 		}
 		//log.Info("Suffix array built", "in", time.Since(start))
