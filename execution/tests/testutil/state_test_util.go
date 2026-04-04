@@ -107,7 +107,48 @@ type stTransaction struct {
 	AccessLists          []*types.AccessList       `json:"accessLists,omitempty"`
 	BlobVersionedHashes  []common.Hash             `json:"blobVersionedHashes,omitempty"`
 	BlobGasFeeCap        *math.HexOrDecimal256     `json:"maxFeePerBlobGas,omitempty"`
-	Authorizations       []types.JsonAuthorization `json:"authorizationList,omitempty"`
+	Authorizations       []stAuthorization         `json:"authorizationList,omitempty"`
+}
+
+// stAuthorization is a test-specific authorization type that accepts "0x00"
+// for chainId (which hexutil.Big rejects due to leading zero).
+type stAuthorization struct {
+	ChainID *math.HexOrDecimal256 `json:"chainId"`
+	Address common.Address        `json:"address"`
+	Nonce   math.HexOrDecimal64   `json:"nonce"`
+	V       math.HexOrDecimal64   `json:"v"`
+	R       *math.HexOrDecimal256 `json:"r"`
+	S       *math.HexOrDecimal256 `json:"s"`
+}
+
+func (a stAuthorization) ToAuthorization() (types.Authorization, error) {
+	auth := types.Authorization{
+		Address: a.Address,
+		Nonce:   uint64(a.Nonce),
+	}
+	if a.ChainID != nil {
+		chainId, overflow := uint256.FromBig((*big.Int)(a.ChainID))
+		if overflow {
+			return auth, errors.New("chainId does not fit in 256 bits")
+		}
+		auth.ChainID = *chainId
+	}
+	auth.YParity = uint8(a.V)
+	if a.R != nil {
+		r, overflow := uint256.FromBig((*big.Int)(a.R))
+		if overflow {
+			return auth, errors.New("r does not fit in 256 bits")
+		}
+		auth.R = *r
+	}
+	if a.S != nil {
+		s, overflow := uint256.FromBig((*big.Int)(a.S))
+		if overflow {
+			return auth, errors.New("s does not fit in 256 bits")
+		}
+		auth.S = *s
+	}
+	return auth, nil
 }
 
 //go:generate gencodec -type stEnv -field-override stEnvMarshaling -out gen_stenv.go
