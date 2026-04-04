@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	log "github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -83,8 +84,10 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 	// overlayTx transparently reads from the block overlay when a background
 	// commit is pending, falling back to the DB tx otherwise.
 	overlayTx := tx
+	overlayActive := false
 	if filters != nil {
 		overlayTx = filters.WithOverlay(tx)
+		overlayActive = overlayTx != tx
 	}
 
 	// Due to the changed semantics of `latest` block in RPC request, it is now distinct
@@ -136,6 +139,7 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 			return 0, common.Hash{}, false, false, err
 		}
 		if !ok {
+			log.Warn("[_GetBlockNumber] canonical hash not found", "blockNum", blockNumber, "overlayActive", overlayActive, "plainStateBlockNum", plainStateBlockNumber)
 			return blockNumber, hash, blockNumber == plainStateBlockNumber, false, nil
 		}
 	} else {
