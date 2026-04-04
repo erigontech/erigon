@@ -140,7 +140,7 @@ func (p *BranchPrefetcher) Prefetched() uint64 {
 // Stop cancels the context, closes the work channel, and waits for workers to finish.
 // Safe to call multiple times — only the first call has effect.
 func (p *BranchPrefetcher) Stop() {
-	if !p.started.Load() {
+	if !p.started.CompareAndSwap(true, false) {
 		return
 	}
 	// Cancel first so Submit/SubmitPlainKey observe ctx.Done() before we close
@@ -152,6 +152,4 @@ func (p *BranchPrefetcher) Stop() {
 	if p.g != nil {
 		p.g.Wait()
 	}
-	// Mark not started so subsequent Stop() calls are no-ops and Submit is rejected.
-	p.started.Store(false)
 }
