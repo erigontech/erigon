@@ -54,32 +54,45 @@ On the `qmtree` branch:
 
 ## Roadmap
 
-### Required to complete this work
+### Completed
 
-These items are needed before qmtree proofs are fully self-contained and verifiable by a third party:
+- **MDBX hot tables** — entries written to MDBX during execution, collated
+  to `.kv`/`.kvi` snapshot files at step boundaries with binary-doubling merge
+- **KeyIndex removed** — redundant with Erigon's existing inverted index
+  (`IndexRange` with desc limit=1 gives latest txNum for any key)
+- **Domain registration** — `QMTreeDomain` registered in the Aggregator
+  (Disable=true for now; standalone SnapshotManager handles collation/merge)
 
-1. **Integration benchmarks** — run `TestBench_GetWitness` and `TestBench_ProofSizeByTwig` against a fully synced hoodi datadir (set `QMTREE_DATADIR` to the qmtree snap directory). A node is accumulating data on `dev-bm-e3-ethmainnet-n1`.
+### TODO
 
-2. **RPC exposure of exclusion proofs** — extend the `qm_` RPC namespace to serve `KeyIndexRoot` alongside the qmtree root, and to serve `ExclusionProof` responses from `GetExclusionProof`. The on-node data structures are implemented; only the RPC layer remains.
+1. **Twig root persistence for pruning/fresh-start** — `LoadFromDB` currently
+   replays ALL entries from txNum 0 to rebuild the in-memory tree. This
+   blocks both historical pruning and fresh-start from downloaded snapshots.
+   **Root cause**: the upper tree needs twig roots for every completed twig
+   to compute the current qmtree root. Without individual entries, we can't
+   derive twig roots.
+   **Fix**: persist twig roots as MDBX metadata (`twigId → twigRoot`, 32
+   bytes each, ~24 KB per step). On load, populate the upper tree directly
+   from twig roots instead of replaying entries. Then:
+   - Pruned entries → upper tree still works (twig roots preserved)
+   - Fresh-start from snapshots → load twig roots from snapshot trailer or
+     separate file, skip entry replay entirely
+   - Proofs for pruned entries return "not available" (non-archival)
+   - Proofs for recent entries still work (entries in MDBX)
 
-3. **KeyIndex unwind** — the `KeyIndex` does not yet support incremental reorg unwind (requires rebuilding from genesis for affected keys). Needed for correctness under reorgs.
+2. **Aggregator integration** — setting `IiCfg.Disable=false` causes the
+   Aggregator to hang during initialization on large datadirs (24M+ blocks).
+   Once fixed, the Aggregator handles collation/merge/prune automatically
+   and the standalone SnapshotManager can be removed.
 
-### Domain integration (production path)
+3. **Integration benchmarks** — run `TestBench_GetWitness` and
+   `TestBench_ProofSizeByTwig` against a fully synced mainnet dataset.
 
-These phases migrate qmtree from standalone HPFile storage into Erigon's
-standard domain/snapshot/torrent pipeline. See [domain-integration-plan.md](domain-integration-plan.md)
-for full details.
+4. **Torrent distribution** — register qmtree snapshot files with the
+   downloader so new nodes download instead of replaying from genesis.
 
-4. **MDBX hot tables** — write entries + key-index to MDBX during execution (Phase 1)
-5. **Collation** — freeze completed steps to `.kv`/`.kvi` snapshot files (Phase 2)
-6. **Pruning + merging** — standard domain lifecycle (Phases 3-4)
-7. **Remove HPFile** — MDBX/snapshots only, eliminate `stage_exec_replay` (Phase 5)
-8. **Torrent distribution** — register qmtree files with downloader (Phase 6)
+5. **eth_getProof compatibility** — adapter translating qmtree proofs to
+   the format expected by existing Ethereum tooling.
 
-### Other enhancements
-
-9. **KeyIndex persistence** — implemented. See [keyindex-persistence-plan.md](keyindex-persistence-plan.md). Flushes at quarter-step boundaries with RecSplit indices.
-
-10. **eth_getProof compatibility** — adapter translating qmtree proofs to the format expected by existing Ethereum tooling.
-
-11. **Parallel twig sync** — use the 4-shard design (`TWIG_SHARD_COUNT=4`) for parallel hash computation during execution.
+6. **Parallel twig sync** — use the 4-shard design (`TWIG_SHARD_COUNT=4`)
+   for parallel hash computation during execution.
