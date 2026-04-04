@@ -249,6 +249,10 @@ func (t *EngineTest) RunCLI() error {
 		return fmt.Errorf("genesis block state root does not match test: computed=%x, test=%x", m.Genesis.Root().Bytes()[:6], t.json.Genesis.StateRoot[:6])
 	}
 
+	// Send initial forkchoiceUpdated to genesis (matching consume engine behavior)
+	// InsertChain internally calls InsertBlocksAndWait + UpdateForkChoice,
+	// which is the same path as the real engine API.
+
 	for i, payload := range t.json.Payloads {
 		// Version validation
 		if err := validatePayloadVersion(&payload, config); err != nil {
@@ -256,6 +260,14 @@ func (t *EngineTest) RunCLI() error {
 				var rpcErr *rpc.InvalidParamsError
 				var unsupportedErr *rpc.UnsupportedForkError
 				if errors.As(err, &rpcErr) || errors.As(err, &unsupportedErr) {
+					// Check error code matches
+					if rpcErr != nil {
+						// InvalidParamsError maps to -32602
+						expectedCode := *payload.ErrorCode
+						if expectedCode != -32602 {
+							return fmt.Errorf("payload %d: expected error code %d, got -32602", i, expectedCode)
+						}
+					}
 					continue // Expected error
 				}
 			}
@@ -263,6 +275,11 @@ func (t *EngineTest) RunCLI() error {
 				continue // Expected to be invalid
 			}
 			return fmt.Errorf("payload %d: %v", i, err)
+		}
+
+		// Check error code was expected but not triggered
+		if payload.ErrorCode != nil {
+			return fmt.Errorf("payload %d: expected error code %d but no error occurred", i, *payload.ErrorCode)
 		}
 
 		// Convert payload to block
