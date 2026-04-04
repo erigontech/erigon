@@ -9,7 +9,6 @@ All files live in `snapshots/domain/` alongside other Erigon domain files.
 |------|---------|-------------|
 | `v1.0-qmtree.{from}-{to}.kv` | Entry data | txNum (8B BE) → pre(32B) \|\| sc(32B) \|\| trans(32B) |
 | `v1.0-qmtree.{from}-{to}.kvi` | Entry index | txNum (8B) → byte offset into .kv (RecSplit) |
-| `v1.0-qmtree-keyindex.{from}-{to}.kvi` | Key index | keyHash (32B) → txNum (RecSplit) |
 
 `{from}` and `{to}` are step numbers (not block numbers or txNums).
 One step = `stepSize` transactions (read from `erigondb.toml`).
@@ -46,42 +45,45 @@ corresponding `.kv` data file.
 
 Built with `recsplit.RecSplitArgs{Enums: false, LessFalsePositives: true}`.
 
-## Key Index (.kvi)
+## Key → TxNum Lookup
 
-RecSplit perfect hash index mapping `keyHash → txNum` directly. No
-separate data file — the txNum is stored as the RecSplit "offset" value.
+The separate keyindex has been removed. To find the latest txNum for a
+state key, use Erigon's existing inverted index:
 
-- **Key**: keyHash (32 bytes) = `keccak256(domain_byte || key_bytes)`
-- **Value**: txNum (uint64) of the last transaction that wrote this key
-- **Lookup**: `txNum, ok := reader.Lookup(keyHash)` → use txNum to look
-  up the entry via the entry `.kvi`
-
-Domain byte values: 0 = accounts, 1 = storage, 2 = code.
-
-Key index files are flushed at quarter-step boundaries (`stepSize/4`
-transactions). Multiple small segments are produced during execution;
-these can be merged into larger files.
+```go
+iter, _ := tx.IndexRange(kv.AccountsHistoryIdx, key, -1, -1, order.Desc, 1)
+txNum := iter.Next()  // most recent txNum that wrote this key
+```
 
 ## Lookup Chain
 
 To prove a state key was written:
 
 ```
-keyHash → txNum     (qmtree-keyindex.kvi)
+key     → txNum     (Erigon inverted index: IndexRange desc limit=1)
 txNum   → offset    (qmtree.kvi)
 offset  → entry     (qmtree.kv)
 entry   → proof     (in-memory tree: GetProof(txNum))
 ```
 
+## Future: Twig Roots
+
+Twig roots (~24 KB per step) will be stored in snapshots alongside entries.
+These are needed for:
+- **Fresh-start**: new nodes load twig roots from snapshots to build the
+  upper tree without replaying all entries
+- **Pruning**: non-archival nodes can prune old entries while keeping twig
+  roots to maintain the correct qmtree root
+- Twig roots are never pruned — they're small and required for the upper tree
+
 ## MDBX Hot Tables
 
-During execution, entries and key-index updates are written to MDBX
-tables before being frozen to snapshot files:
+During execution, entries are written to MDBX tables before being
+frozen to snapshot files:
 
 | Table | Key | Value |
 |-------|-----|-------|
 | `QMTreeEntries` | txNum (8B BE) | pre(32B) \|\| sc(32B) \|\| trans(32B) |
-| `QMTreeKeyIndex` | keyHash (32B) | txNum (8B BE) |
 | `QMTreeMeta` | `"nextTxNum"` | uint64 |
 | `QMTreeMeta` | `"prevLeaf"` | hash (32B) |
 
