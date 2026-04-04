@@ -45,6 +45,10 @@ profile.cov
 
 # IdeaIDE
 .idea
+.air
+.cursor
+.zed
+
 
 # VS Code
 .vscode
@@ -120,6 +124,7 @@ mdbx.lck
 
 .claude/settings.local.json
 .claude/projects/
+.claude/worktrees
 
 # Prevent accidental commit of locally-built binaries
 /erigon
