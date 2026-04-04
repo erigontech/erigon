@@ -458,17 +458,12 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 		}
 	}
 
-	// Flush domains to persist sd.mem to the rwTx.
-	// ErrLoopExhausted is not a real error — just batch-full signal.
-	shouldFlush := (execErr == nil || errors.Is(execErr, &ErrLoopExhausted{})) && rwTx != nil
-	if shouldFlush {
-		if err := pe.doms.Flush(ctx, rwTx); err != nil {
-			return nil, rwTx, fmt.Errorf("parallel exec: flush: %w", err)
-		}
-	}
-
-	// Update stage progress so the stageloop knows we advanced.
-	if shouldFlush {
+	// Do NOT flush here — the stageloop owns flush/commit lifecycle.
+	// pe.exec() returns with sd.mem containing the batch's writes.
+	// The stageloop will flush, commit the rwTx, and create a new sd.
+	//
+	// But DO update stage progress so the stageloop knows we advanced.
+	if (execErr == nil || errors.Is(execErr, &ErrLoopExhausted{})) && rwTx != nil {
 		overlay := pe.doms.BlockOverlay()
 		if overlay != nil {
 			if err = execStage.Update(overlay, pe.lastCommittedBlockNum.Load()); err != nil {
