@@ -356,7 +356,7 @@ var Schema = SchemaGen{
 				Disable:      true,
 				FilenameBase: kv.QMTreeDomain.String(),
 				KeysTable:    kv.TblQMTreeMeta,     // placeholder
-				ValuesTable:  kv.TblQMTreeKeyIndex,  // placeholder
+				ValuesTable:  kv.TblQMTreeMeta,      // placeholder
 				FileVersion:  IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart},
 			},
 		},

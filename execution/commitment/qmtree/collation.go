@@ -49,7 +49,6 @@ type SnapshotManager struct {
 	domainDir string // path to snapshots/domain/ (shared with other domains)
 	stepSize  uint64
 	entries   []*entrySnapshot // sorted by fromStep ascending
-	keyIndex  *KeyIndexFile    // reuses existing KeyIndexFile for key snapshots
 }
 
 // NewSnapshotManager creates a manager for qmtree snapshot files.
@@ -154,17 +153,6 @@ func (sm *SnapshotManager) CollateEntries(ctx context.Context, tx kv.Tx, step ui
 	return nil
 }
 
-// CollateKeyIndex flushes dirty KeyIndex entries for the completed step to
-// snapshot files. Delegates to the existing KeyIndexFile infrastructure.
-func (sm *SnapshotManager) CollateKeyIndex(ctx context.Context, tx kv.Tx, ki *KeyIndex, step uint64) error {
-	if sm.keyIndex == nil {
-		return nil
-	}
-	// KeyIndex collation is already handled by KeyIndexFile.FlushDelta via
-	// the Tracker's maybeFlushKeyIndex(). This method exists for explicit
-	// step-boundary collation if needed.
-	return nil
-}
 
 func buildEntryRecSplit(ctx context.Context, kvPath, kviPath string, keyCount int) error {
 	tmpDir := filepath.Dir(kviPath)
@@ -291,45 +279,6 @@ func (sm *SnapshotManager) PruneEntries(tx kv.RwTx, step uint64) (int, error) {
 	return pruned, nil
 }
 
-// PruneKeyIndex removes KeyIndex entries from MDBX for keys that have been
-// frozen into snapshot files. Only removes entries where the txNum falls
-// within the given step range AND a newer entry exists (either in MDBX or
-// in a newer snapshot).
-func (sm *SnapshotManager) PruneKeyIndex(tx kv.RwTx, step uint64) (int, error) {
-	fromTxNum := step * sm.stepSize
-	toTxNum := (step + 1) * sm.stepSize
-
-	c, err := tx.Cursor(kv.TblQMTreeKeyIndex)
-	if err != nil {
-		return 0, err
-	}
-	defer c.Close()
-
-	pruned := 0
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return pruned, err
-		}
-		if len(v) < 8 {
-			continue
-		}
-		txNum := binary.BigEndian.Uint64(v)
-		// Only prune if txNum is in the collated step range.
-		if txNum >= fromTxNum && txNum < toTxNum {
-			if err := tx.Delete(kv.TblQMTreeKeyIndex, k); err != nil {
-				return pruned, err
-			}
-			pruned++
-		}
-	}
-
-	log.Info("qmtree: pruned keyindex from MDBX",
-		"step", step,
-		"pruned", pruned,
-	)
-	return pruned, nil
-}
-
 // CollateAndPrune performs collation + pruning for a completed step.
 // This is the typical call from the Tracker at step boundaries.
 func (sm *SnapshotManager) CollateAndPrune(ctx context.Context, roTx kv.Tx, rwTx kv.RwTx, step uint64) error {
@@ -338,9 +287,6 @@ func (sm *SnapshotManager) CollateAndPrune(ctx context.Context, roTx kv.Tx, rwTx
 	}
 	if _, err := sm.PruneEntries(rwTx, step); err != nil {
 		return fmt.Errorf("prune entries step %d: %w", step, err)
-	}
-	if _, err := sm.PruneKeyIndex(rwTx, step); err != nil {
-		return fmt.Errorf("prune keyindex step %d: %w", step, err)
 	}
 	return nil
 }

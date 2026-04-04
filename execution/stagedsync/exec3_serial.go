@@ -70,7 +70,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		if err != nil {
 			return nil, rwTx, fmt.Errorf("init qmtree tracker: %w", err)
 		}
-		// Write entries + keyindex to MDBX tables alongside domain data.
+		// Write entries to MDBX tables alongside domain data.
 		se.qmtracker.SetTx(rwTx)
 		// Try loading existing qmtree state from MDBX.
 		if err := se.qmtracker.LoadFromDB(rwTx); err != nil {
@@ -401,9 +401,6 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					result.ExecutionResult.StateChangeHash,
 					result.ExecutionResult.TransitionHash,
 				)
-				if len(result.ExecutionResult.WrittenKeyHashes) > 0 {
-					se.qmtracker.NotifyKeyWrites(result.ExecutionResult.WrittenKeyHashes, txTask.TxNum)
-				}
 			}
 
 			se.txCount++

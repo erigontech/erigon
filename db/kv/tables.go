@@ -176,9 +176,8 @@ const (
 
 	// QMTree tables — optional, created when --experimental.qmtree is set.
 	// Simple value tables for hot data; collation to snapshot files is separate.
-	TblQMTreeEntries  = "QMTreeEntries"  // serialNum (8B BE) → pre(32B) || sc(32B) || trans(32B)
-	TblQMTreeKeyIndex = "QMTreeKeyIndex" // keyHash (32B) → txNum (8B BE)
-	TblQMTreeMeta     = "QMTreeMeta"     // string key → value (nextSN, prevLeaf, etc.)
+	TblQMTreeEntries = "QMTreeEntries" // serialNum (8B BE) → pre(32B) || sc(32B) || trans(32B)
+	TblQMTreeMeta    = "QMTreeMeta"    // string key → value (nextSN, prevLeaf, etc.)
 
 	TblLogAddressKeys = "LogAddressKeys"
 	TblLogAddressIdx  = "LogAddressIdx"
@@ -378,7 +377,6 @@ var ChaindataTables = []string{
 	TblRCacheIdx,
 
 	TblQMTreeEntries,
-	TblQMTreeKeyIndex,
 	TblQMTreeMeta,
 
 	TblLogAddressKeys,

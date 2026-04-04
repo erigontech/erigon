@@ -8,13 +8,12 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 )
 
-// MDBXStorage reads and writes qmtree entry components and KeyIndex data
-// to MDBX tables. It replaces HPFile-based storage with standard Erigon DB
-// tables that participate in the snapshot collation/pruning/torrent pipeline.
+// MDBXStorage reads and writes qmtree entry components to MDBX tables.
+// It replaces HPFile-based storage with standard Erigon DB tables that
+// participate in the snapshot collation/pruning/torrent pipeline.
 //
 // Tables used:
 //   - QMTreeEntries:  txNum (8B BE) → pre(32B) || sc(32B) || trans(32B) = 96B value
-//   - QMTreeKeyIndex: keyHash (32B) → txNum (8B BE)
 //   - QMTreeMeta:     string key → value
 type MDBXStorage struct{}
 
@@ -56,25 +55,6 @@ func GetEntry(tx kv.Tx, txNum uint64) (pre, stateChange, transition common.Hash,
 	copy(stateChange[:], val[32:64])
 	copy(transition[:], val[64:96])
 	return
-}
-
-// PutKeyIndex writes a keyHash → txNum mapping to QMTreeKeyIndex.
-func PutKeyIndex(tx kv.RwTx, keyHash common.Hash, txNum uint64) error {
-	var val [8]byte
-	binary.BigEndian.PutUint64(val[:], txNum)
-	return tx.Put(kv.TblQMTreeKeyIndex, keyHash[:], val[:])
-}
-
-// GetKeyIndex reads the latest txNum for a keyHash from QMTreeKeyIndex.
-func GetKeyIndex(tx kv.Tx, keyHash common.Hash) (txNum uint64, found bool, err error) {
-	val, err := tx.GetOne(kv.TblQMTreeKeyIndex, keyHash[:])
-	if err != nil {
-		return 0, false, err
-	}
-	if val == nil {
-		return 0, false, nil
-	}
-	return binary.BigEndian.Uint64(val), true, nil
 }
 
 // PutMeta writes a metadata value to QMTreeMeta.

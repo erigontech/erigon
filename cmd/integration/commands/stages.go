@@ -954,10 +954,6 @@ func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 				result.ExecutionResult.StateChangeHash,
 				result.ExecutionResult.TransitionHash,
 			)
-			if len(result.ExecutionResult.WrittenKeyHashes) > 0 {
-				tracker.NotifyKeyWrites(result.ExecutionResult.WrittenKeyHashes, txTask.TxNum)
-			}
-
 			// At block end: log root and commit MDBX periodically.
 			if txTask.IsBlockEnd() {
 				blockNum := txTask.BlockNumber()

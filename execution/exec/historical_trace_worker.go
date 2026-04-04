@@ -291,7 +291,6 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 					return err
 				}
 				result.ExecutionResult.StateChangeHash = rw.hashWriter.Finalize()
-				result.ExecutionResult.WrittenKeyHashes = rw.hashWriter.KeyHashes()
 				// TransitionHash is already set on result.ExecutionResult by ApplyMessage via TransitionHasher.
 			}
 

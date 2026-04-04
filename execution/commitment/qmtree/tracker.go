@@ -40,29 +40,12 @@ type Tracker struct {
 	NextTxNum uint64
 	prevLeaf common.Hash
 
-	// keyIndex tracks the latest txNum for each (domain, key) pair written
-	// during execution. It supports exclusion proofs: proving that key K
-	// was last written at txNum T, or was never written at all.
-	keyIndex *KeyIndex
-
-	// keyIndexFile persists the KeyIndex to disk as segmented .kv/.kvi files.
-	// nil when in-memory only (no snapDir).
-	keyIndexFile *KeyIndexFile
-
 	// snapManager handles collation (MDBX → snapshot), pruning, and merging.
 	// nil when in-memory only (no snapDir).
 	snapManager *SnapshotManager
 
 	// lastCollatedStep is the last step that was collated to snapshots.
 	lastCollatedStep uint64
-
-	// keyIndexDirty tracks keys updated since the last KeyIndex flush.
-	// On Flush(), only these entries are written to a new segment file.
-	keyIndexDirty map[common.Hash]uint64
-
-	// keyIndexLastFlushedStep is the step number at the last KeyIndex flush.
-	// Aligned to the same step boundaries as entry collation.
-	keyIndexLastFlushedStep uint64
 
 	// leafData is a bounded LRU cache of LeafData keyed by serial number.
 	// PreviousLeafHash is stored in each entry but is NOT persisted to disk;
@@ -91,8 +74,8 @@ const (
 	DefaultLeafCacheSize = 200_000
 )
 
-// NewTracker creates a qmtree tracker. If snapDir is non-empty, KeyIndex
-// and SnapshotManager are initialized for snapshot persistence.
+// NewTracker creates a qmtree tracker. If snapDir is non-empty, the
+// SnapshotManager is initialized for snapshot persistence.
 // Entry data is written to MDBX via SetTx(); the tree is always in-memory.
 func NewTracker(snapDir string, stepSize uint64) (*Tracker, error) {
 	hasher := &Keccak256Hasher{}
@@ -101,25 +84,17 @@ func NewTracker(snapDir string, stepSize uint64) (*Tracker, error) {
 		return nil, fmt.Errorf("create leaf data cache: %w", err)
 	}
 	qt := &Tracker{
-		hasher:        hasher,
-		leafData:      cache,
-		twigPrevLeaf:  []common.Hash{{}}, // twig 0 starts with zero prevLeaf
-		stepSize:      stepSize,
-		keyIndex:      NewKeyIndex(),
-		keyIndexDirty: make(map[common.Hash]uint64),
-		tree:          NewTree(hasher, 0, nil, nil),
+		hasher:       hasher,
+		leafData:     cache,
+		twigPrevLeaf: []common.Hash{{}}, // twig 0 starts with zero prevLeaf
+		stepSize:     stepSize,
+		tree:         NewTree(hasher, 0, nil, nil),
 	}
 
 	if snapDir != "" {
 		// All qmtree snapshot files go to snapshots/domain/ alongside
 		// other domain files, distinguished by the .qmtree.kv extension.
 		domainDir := filepath.Join(snapDir, "domain")
-
-		kif, err := NewKeyIndexFile(domainDir)
-		if err != nil {
-			return nil, fmt.Errorf("create keyindex file: %w", err)
-		}
-		qt.keyIndexFile = kif
 
 		sm, err := NewSnapshotManager(domainDir, stepSize)
 		if err != nil {
@@ -132,8 +107,7 @@ func NewTracker(snapDir string, stepSize uint64) (*Tracker, error) {
 }
 
 // SetTx sets the current MDBX write transaction for this batch. When set,
-// entries and key-index updates are written to MDBX tables instead of HPFile.
-// Call with nil to detach.
+// entries are written to MDBX tables. Call with nil to detach.
 func (qt *Tracker) SetTx(tx kv.RwTx) { qt.rwTx = tx }
 
 // AppendLeaf builds a proof leaf from individual hash components and appends
@@ -182,42 +156,6 @@ func (qt *Tracker) SyncRoot() common.Hash {
 	return common.Hash(qt.tree.SyncAndRoot(qt.hasher))
 }
 
-// NotifyKeyWrites records that each key hash in keyHashes was written at txNum.
-// Call this after AppendLeaf for each transaction with the set of (domain, key)
-// hashes produced by the transaction's state writes.
-// keyHashes is computed as keccak256(domain_byte || key_bytes) per write.
-func (qt *Tracker) NotifyKeyWrites(keyHashes []common.Hash, txNum uint64) {
-	for _, kh := range keyHashes {
-		qt.keyIndex.UpdateKey(kh, txNum)
-		qt.keyIndexDirty[kh] = txNum
-		// Write to MDBX if a transaction is set.
-		if qt.rwTx != nil {
-			if err := PutKeyIndex(qt.rwTx, kh, txNum); err != nil {
-				log.Warn("qmtree: failed to write keyindex to MDBX", "err", err)
-			}
-		}
-	}
-	qt.maybeFlushKeyIndex()
-}
-
-// KeyIndexRoot returns the Merkle root of the current key index.
-// This commits to the set {(keyHash, latestTxNum)} for all keys written so far.
-func (qt *Tracker) KeyIndexRoot() common.Hash {
-	return qt.keyIndex.Root()
-}
-
-// KeyIndexLen returns the number of distinct keys in the index.
-func (qt *Tracker) KeyIndexLen() int {
-	return qt.keyIndex.Len()
-}
-
-// GetExclusionProof returns a proof that the given key hash was last written
-// at the returned txNum (inclusion), or was never written (non-membership).
-// The proof is verified against KeyIndexRoot().
-func (qt *Tracker) GetExclusionProof(keyHash common.Hash) *ExclusionProof {
-	return qt.keyIndex.GetProof(keyHash)
-}
-
 // currentStep returns the step number for the current serial number.
 func (qt *Tracker) currentStep() uint64 {
 	if qt.NextTxNum == 0 {
@@ -253,13 +191,12 @@ func (qt *Tracker) LogStepProgress(logPrefix string) {
 
 // StorageStats returns current storage sizes.
 type StorageStats struct {
-	Entries        uint64 // total entries (leaves)
-	Steps          uint64 // completed steps
-	CurrentStep    uint64 // current (possibly incomplete) step
-	FrozenEntries  int    // entries in frozen snapshots
-	FrozenSteps    uint64 // steps frozen to snapshots
-	LeafDataCount  int    // cached leaf data entries
-	KeyIndexKeys   int    // distinct keys in key index
+	Entries       uint64 // total entries (leaves)
+	Steps         uint64 // completed steps
+	CurrentStep   uint64 // current (possibly incomplete) step
+	FrozenEntries int    // entries in frozen snapshots
+	FrozenSteps   uint64 // steps frozen to snapshots
+	LeafDataCount int    // cached leaf data entries
 }
 
 func (qt *Tracker) StorageStats() StorageStats {
@@ -269,7 +206,6 @@ func (qt *Tracker) StorageStats() StorageStats {
 		CurrentStep:   qt.currentStep(),
 		FrozenSteps:   qt.lastCollatedStep,
 		LeafDataCount: qt.leafData.Len(),
-		KeyIndexKeys:  qt.keyIndex.Len(),
 	}
 	if qt.snapManager != nil {
 		stats.FrozenEntries = qt.snapManager.FrozenEntries()
@@ -477,7 +413,6 @@ func (qt *Tracker) GetRangeWitness(fromSN, toSN uint64) (*RangeWitness, error) {
 // Called at commit boundaries to keep qmtree storage in sync with domain commits.
 // Implements execctx.AppendOnlyFlusher.
 func (qt *Tracker) Flush() {
-	qt.maybeFlushKeyIndex()
 	// Persist metadata to MDBX so LoadFromDB can resume.
 	if qt.rwTx != nil {
 		if err := PutNextTxNum(qt.rwTx, qt.NextTxNum); err != nil {
@@ -513,49 +448,6 @@ func (qt *Tracker) maybeCollate() {
 	// N is a power of 2 boundary, merge the preceding range. E.g., after step
 	// 4 completes, merge 0-4 from 0-2 + 2-4. After step 8, merge 0-8, etc.
 	qt.snapManager.MaybeMerge(context.Background())
-	if qt.keyIndexFile != nil {
-		qt.keyIndexFile.MaybeMerge(context.Background(), qt.keyIndex, qt.lastCollatedStep)
-	}
-}
-
-// maybeFlushKeyIndex checks if we've crossed a step boundary since the last
-// flush and, if so, writes the dirty KeyIndex entries to a new segment.
-// Aligned to the same step boundaries as entry collation.
-func (qt *Tracker) maybeFlushKeyIndex() {
-	currentStep := qt.completedSteps()
-	if currentStep <= qt.keyIndexLastFlushedStep {
-		return
-	}
-	qt.flushKeyIndex()
-}
-
-// flushKeyIndex writes dirty KeyIndex entries to a new segment file.
-func (qt *Tracker) flushKeyIndex() {
-	if qt.keyIndexFile == nil || len(qt.keyIndexDirty) == 0 {
-		return
-	}
-	entries := make([]KeyIndexEntry, 0, len(qt.keyIndexDirty))
-	for kh, txNum := range qt.keyIndexDirty {
-		entries = append(entries, KeyIndexEntry{KeyHash: kh, TxNum: txNum})
-	}
-	currentStep := qt.completedSteps()
-	fromStep := qt.keyIndexLastFlushedStep
-	toStep := currentStep
-	if toStep <= fromStep {
-		toStep = fromStep + 1
-	}
-	if err := qt.keyIndexFile.FlushDelta(context.Background(), entries, fromStep, toStep); err != nil {
-		log.Warn("qmtree: failed to flush keyindex", "err", err)
-		return
-	}
-	qt.keyIndexDirty = make(map[common.Hash]uint64)
-	qt.keyIndexLastFlushedStep = toStep
-	log.Info("qmtree: flushed keyindex delta",
-		"entries", len(entries),
-		"fromStep", fromStep,
-		"toStep", toStep,
-		"segments", qt.keyIndexFile.SegmentCount(),
-	)
 }
 
 // UnwindTo truncates the tree and storage back to the given serial number.
@@ -691,9 +583,6 @@ func (qt *Tracker) LoadFromDB(tx kv.Tx) error {
 // Implements execctx.AppendOnlyFlusher.
 func (qt *Tracker) Close() {
 	qt.Flush()
-	if qt.keyIndexFile != nil {
-		qt.keyIndexFile.Close()
-	}
 	if qt.snapManager != nil {
 		qt.snapManager.Close()
 	}

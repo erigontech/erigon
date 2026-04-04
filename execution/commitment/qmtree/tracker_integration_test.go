@@ -2,12 +2,10 @@ package qmtree
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	dbcfg "github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
 )
@@ -73,39 +71,3 @@ func TestTracker_MDBX_RoundTrip(t *testing.T) {
 	t.Logf("round-trip OK: %d entries, root=%s", nextTxNum1, root1.Hex())
 }
 
-// TestTracker_MDBX_WithKeyIndex tests that key writes survive round-trip.
-func TestTracker_MDBX_WithKeyIndex(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
-	const stepSize = 100
-
-	tracker, err := NewTracker("", stepSize)
-	require.NoError(t, err)
-
-	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
-	tracker.SetTx(tx)
-
-	// Write entries with key hashes.
-	for i := 0; i < 10; i++ {
-		var pre, sc, trans [32]byte
-		pre[0] = byte(i)
-		tracker.AppendLeaf(pre, sc, trans)
-		kh := KeyHash(0, []byte(fmt.Sprintf("key%d", i)))
-		tracker.NotifyKeyWrites([]common.Hash{kh}, uint64(i))
-	}
-	tracker.Flush()
-	require.NoError(t, tx.Commit())
-
-	// Verify key-index entries in MDBX.
-	roTx, err := db.BeginRo(context.Background())
-	require.NoError(t, err)
-	defer roTx.Rollback()
-
-	for i := 0; i < 10; i++ {
-		kh := KeyHash(0, []byte(fmt.Sprintf("key%d", i)))
-		txNum, found, err := GetKeyIndex(roTx, kh)
-		require.NoError(t, err)
-		require.True(t, found, "key%d not found in MDBX", i)
-		require.Equal(t, uint64(i), txNum)
-	}
-}

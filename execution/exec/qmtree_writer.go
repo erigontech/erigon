@@ -4,7 +4,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -35,25 +34,6 @@ func (w *hashingWriter) Reset() {
 func (w *hashingWriter) Finalize() common.Hash {
 	w.enabled = false
 	return stateOpsRoot(w.writes)
-}
-
-// KeyHashes returns keccak256(domain_byte || key_bytes) for each write collected
-// since the last Reset. Used to populate the KeyIndex for exclusion proofs.
-// A key that was written multiple times in one transaction appears multiple times;
-// the caller (NotifyKeyWrites) will keep the last txNum, which is correct since
-// all writes in a single tx share the same txNum.
-func (w *hashingWriter) KeyHashes() []common.Hash {
-	if len(w.writes) == 0 {
-		return nil
-	}
-	hashes := make([]common.Hash, len(w.writes))
-	for i, op := range w.writes {
-		buf := make([]byte, 1+len(op.key))
-		buf[0] = byte(op.domain)
-		copy(buf[1:], op.key)
-		hashes[i] = crypto.Keccak256Hash(buf)
-	}
-	return hashes
 }
 
 func (w *hashingWriter) addWrite(domain kv.Domain, key, value []byte) {

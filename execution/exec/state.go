@@ -484,7 +484,6 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 		if txIndex >= 0 && !txTask.IsBlockEnd() {
 			result.ExecutionResult.PreStateHash = rw.hashReader.Finalize()
 			result.ExecutionResult.StateChangeHash = rw.hashWriter.Finalize()
-			result.ExecutionResult.WrittenKeyHashes = rw.hashWriter.KeyHashes()
 		}
 	}
 
