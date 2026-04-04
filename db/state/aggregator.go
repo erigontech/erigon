@@ -77,9 +77,8 @@ type Aggregator struct {
 
 	// To keep DB small - need move data to small files ASAP.
 	// It means goroutine which creating small files - can't be locked by merge or indexing.
-	buildingFiles       atomic.Bool
-	mergingFiles        atomic.Bool
-	rebuildingAccessors atomic.Bool
+	buildingFiles atomic.Bool
+	mergingFiles  atomic.Bool
 
 	//warmupWorking          atomic.Bool
 	ctx       context.Context
@@ -626,7 +625,7 @@ func (a *Aggregator) LockWorkersEditing()   { a.lockWorkersEditing = true }
 func (a *Aggregator) UnlockWorkersEditing() { a.lockWorkersEditing = false }
 
 func (a *Aggregator) HasBackgroundFilesBuild2() bool {
-	return a.buildingFiles.Load() || a.mergingFiles.Load() || a.rebuildingAccessors.Load()
+	return a.buildingFiles.Load() || a.mergingFiles.Load()
 }
 
 func (a *Aggregator) HasBackgroundFilesBuild() bool { return a.ps.Has() }
@@ -688,15 +687,14 @@ func (a *Aggregator) WaitForBuildAndMerge(ctx context.Context) chan struct{} {
 
 		chkEvery := time.NewTicker(3 * time.Second)
 		defer chkEvery.Stop()
-		for a.buildingFiles.Load() || a.mergingFiles.Load() || a.rebuildingAccessors.Load() {
+		for a.buildingFiles.Load() || a.mergingFiles.Load() {
 			select {
 			case <-ctx.Done():
 				return
 			case <-chkEvery.C:
 				a.logger.Trace("[agg] waiting for files",
 					"building files", a.buildingFiles.Load(),
-					"merging files", a.mergingFiles.Load(),
-					"rebuilding accessors", a.rebuildingAccessors.Load())
+					"merging files", a.mergingFiles.Load())
 			}
 		}
 	}()
@@ -751,39 +749,6 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int) erro
 		return err
 	}
 	return nil
-}
-
-// BuildMissedAccessorsInBackground starts a background goroutine to rebuild
-// any missing E3 state accessors. Returns true if the rebuild was started,
-// false if one is already running.
-// This mirrors RetireBlocksInBackground (which calls BuildMissedIndicesIfNeed)
-// for E2 block indices.
-func (a *Aggregator) BuildMissedAccessorsInBackground(workers int) bool {
-	if !a.rebuildingAccessors.CompareAndSwap(false, true) {
-		return false
-	}
-	a.wg.Add(1)
-	go func() {
-		defer a.wg.Done()
-		defer a.rebuildingAccessors.Store(false)
-
-		if a.snapshotBuildSema != nil {
-			// We are inside our own goroutine — it's fine to block here.
-			if err := a.snapshotBuildSema.Acquire(a.ctx, 1); err != nil {
-				a.logger.Warn("[snapshots] BuildMissedAccessors background: sema", "err", err)
-				return
-			}
-			defer a.snapshotBuildSema.Release(1)
-		}
-
-		if err := a.BuildMissedAccessors(a.ctx, workers); err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
-				return
-			}
-			a.logger.Warn("[snapshots] BuildMissedAccessors background", "err", err)
-		}
-	}()
-	return true
 }
 
 type AggV3StaticFiles struct {
