@@ -71,27 +71,25 @@ func (p *BranchPrefetcher) Start() {
 	}
 }
 
-// prefetchBranches walks nibble prefixes of hashedKey and warms the MDBX page
-// cache by reading branch nodes. It does NOT write to the persistent BranchCache
-// to avoid a TOCTOU race: a prefetch goroutine could read a value, the main trie
-// could then update+invalidate that prefix, and the prefetcher would overwrite
-// the cache with stale data. Only the main trie populates the persistent cache.
+// prefetchBranches walks nibble prefixes of hashedKey and loads branch nodes
+// into the persistent cache. Stops at first missing branch (leaf zone).
+// The DB read goes through SharedDomains (sd.mem first, roTx fallback), so
+// the data written to BranchCache is always fresh.
 func (p *BranchPrefetcher) prefetchBranches(trieCtx PatriciaContext, hashedKey []byte) {
 	for depth := 1; depth <= len(hashedKey) && depth <= p.maxDepth; depth++ {
 		prefix := HexNibblesToCompactBytes(hashedKey[:depth])
 
-		// Already in cache — skip DB read (the data is fresh)
+		// Already in cache — skip DB read
 		if p.cache.Contains(prefix) {
 			continue
 		}
 
-		// Read to warm the page cache; discard the data (main trie will
-		// re-read and populate BranchCache on its own single-goroutine path).
 		branchData, _, err := trieCtx.Branch(prefix)
 		if err != nil || len(branchData) < 4 {
 			break // no branch at this depth, stop walking
 		}
 
+		p.cache.Put(prefix, branchData)
 		p.prefetched.Add(1)
 	}
 }

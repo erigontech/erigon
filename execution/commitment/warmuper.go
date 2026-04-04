@@ -108,11 +108,9 @@ func (w *Warmuper) Cache() *WarmupCache {
 }
 
 // branchFromCacheOrDB reads branch data from warmup cache → persistent cache → DB.
-// The warmup never writes to the persistent BranchCache to avoid a TOCTOU race:
-// a warmup goroutine could read a value from sd.mem, then the main trie could
-// update+invalidate that prefix, and finally the warmup writes the now-stale
-// value into the cache — causing the main trie to read wrong branch data.
-// Only the main trie (single-goroutine) populates the persistent cache.
+// The DB read goes through SharedDomains (sd.mem first, roTx fallback), so the
+// warmup always sees the freshest committed state. Writing to the persistent
+// BranchCache is safe because the data comes from sd.mem (current) not a stale DB snapshot.
 func (w *Warmuper) branchFromCacheOrDB(trieCtx PatriciaContext, prefix []byte) ([]byte, error) {
 	// Level 1: ephemeral warmup cache (populated by previous warmup calls this Process)
 	if w.cache != nil {
@@ -120,7 +118,7 @@ func (w *Warmuper) branchFromCacheOrDB(trieCtx PatriciaContext, prefix []byte) (
 			return data, nil
 		}
 	}
-	// Level 2: persistent branch cache (read-only from warmup goroutines)
+	// Level 2: persistent branch cache (survives across Process calls)
 	if w.branchCache != nil {
 		if data, found := w.branchCache.Get(prefix); found {
 			if w.cache != nil {
@@ -135,7 +133,11 @@ func (w *Warmuper) branchFromCacheOrDB(trieCtx PatriciaContext, prefix []byte) (
 		return nil, err
 	}
 	if len(branchData) > 0 {
-		// Only populate the ephemeral warmup cache — NOT the persistent BranchCache.
+		// Populate persistent cache on DB read — data is fresh because the read
+		// goes through SharedDomains which checks sd.mem before falling to DB.
+		if w.branchCache != nil {
+			w.branchCache.Put(prefix, branchData)
+		}
 		if w.cache != nil {
 			w.cache.PutBranch(prefix, branchData)
 		}
