@@ -62,6 +62,19 @@ type SharedDomainsCommitmentContext struct {
 	branchPrefetcher *commitment.BranchPrefetcher
 }
 
+// rootHPH extracts the underlying *HexPatriciaHashed from either a direct
+// instance or a ConcurrentPatriciaHashed wrapper. Returns nil when the trie
+// is neither variant.
+func (sdc *SharedDomainsCommitmentContext) rootHPH() *commitment.HexPatriciaHashed {
+	if hph, ok := sdc.patriciaTrie.(*commitment.HexPatriciaHashed); ok {
+		return hph
+	}
+	if cph, ok := sdc.patriciaTrie.(*commitment.ConcurrentPatriciaHashed); ok {
+		return cph.RootTrie()
+	}
+	return nil
+}
+
 // SetStateReader can be used to set a custom state reader (otherwise the default one is set in SharedDomainsCommitmentContext.trieContext).
 func (sdc *SharedDomainsCommitmentContext) SetStateReader(stateReader StateReader) {
 	sdc.stateReader = stateReader
@@ -120,8 +133,8 @@ func (sdc *SharedDomainsCommitmentContext) PrefetchPlainKey(plainKey []byte) {
 }
 
 func (sdc *SharedDomainsCommitmentContext) SetDeferBranchUpdates(deferBranchUpdates bool) {
-	if sdc.patriciaTrie.Variant() == commitment.VariantHexPatriciaTrie {
-		sdc.patriciaTrie.(*commitment.HexPatriciaHashed).SetDeferBranchUpdates(deferBranchUpdates)
+	if hph := sdc.rootHPH(); hph != nil {
+		hph.SetDeferBranchUpdates(deferBranchUpdates)
 	}
 }
 
@@ -202,7 +215,7 @@ func (sdc *SharedDomainsCommitmentContext) EnableWarmupCache(enable bool) {
 // ClearWarmupCache discards any stale account/storage values held in the active
 // warmup cache. Safe to call at block boundaries between ComputeCommitment calls.
 func (sdc *SharedDomainsCommitmentContext) ClearWarmupCache() {
-	if hph, ok := sdc.patriciaTrie.(*commitment.HexPatriciaHashed); ok && hph.Cache() != nil {
+	if hph := sdc.rootHPH(); hph != nil && hph.Cache() != nil {
 		hph.Cache().Clear()
 	}
 }
@@ -295,9 +308,8 @@ func (sdc *SharedDomainsCommitmentContext) TouchHashedKey(hashedKey []byte) {
 }
 
 func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeReads map[common.Hash]witnesstypes.CodeWithHash, logPrefix string) (proofTrie *trie.Trie, rootHash []byte, err error) {
-	hexPatriciaHashed, ok := sdc.Trie().(*commitment.HexPatriciaHashed)
-	if ok {
-		return hexPatriciaHashed.GenerateWitness(ctx, sdc.updates, codeReads, logPrefix)
+	if hph := sdc.rootHPH(); hph != nil {
+		return hph.GenerateWitness(ctx, sdc.updates, codeReads, logPrefix)
 	}
 
 	return nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")
@@ -307,9 +319,8 @@ func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeRead
 // during commitment calculation. This is used by witness generation to capture paths
 // to HashNodes that need resolution when a FullNode is reduced to a single child.
 func (sdc *SharedDomainsCommitmentContext) SetCollapseTracer(tracer commitment.CollapseTracer) {
-	hexPatriciaHashed, ok := sdc.Trie().(*commitment.HexPatriciaHashed)
-	if ok {
-		hexPatriciaHashed.SetCollapseTracer(tracer)
+	if hph := sdc.rootHPH(); hph != nil {
+		hph.SetCollapseTracer(tracer)
 	}
 }
 
@@ -442,7 +453,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 
 	// When deferring commitment updates, tell Process() to leave deferred updates
 	// on the branch encoder instead of applying inline — we'll take them after.
-	if hph, ok := sdc.patriciaTrie.(*commitment.HexPatriciaHashed); ok && sdc.deferCommitmentUpdates {
+	if hph := sdc.rootHPH(); hph != nil && sdc.deferCommitmentUpdates {
 		hph.SetLeaveDeferredForCaller(true)
 		defer hph.SetLeaveDeferredForCaller(false)
 	}
@@ -460,7 +471,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	}
 
 	// Handle deferred branch updates left by Process() on the branch encoder.
-	if hph, ok := sdc.patriciaTrie.(*commitment.HexPatriciaHashed); ok && hph.HasPendingDeferredUpdates() {
+	if hph := sdc.rootHPH(); hph != nil && hph.HasPendingDeferredUpdates() {
 		// Store deferred updates for later flushing (fork validation path).
 		// This path is reached only when deferCommitmentUpdates is true because
 		// Process() applies inline by default.
@@ -700,24 +711,8 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 		}
 		// nil value is acceptable for SetState and will reset trie
 	}
-	tv := sdc.patriciaTrie.Variant()
-
-	var hext *commitment.HexPatriciaHashed
-	if tv == commitment.VariantHexPatriciaTrie {
-		var ok bool
-		hext, ok = sdc.patriciaTrie.(*commitment.HexPatriciaHashed)
-		if !ok {
-			return 0, 0, errors.New("cannot typecast hex patricia trie")
-		}
-	}
-	if tv == commitment.VariantConcurrentHexPatricia {
-		phext, ok := sdc.patriciaTrie.(*commitment.ConcurrentPatriciaHashed)
-		if !ok {
-			return 0, 0, errors.New("cannot typecast parallel hex patricia trie")
-		}
-		hext = phext.RootTrie()
-	}
-	if tv == commitment.VariantBinPatriciaTrie || hext == nil {
+	hext := sdc.rootHPH()
+	if hext == nil {
 		return 0, 0, errors.New("state storing is only supported hex patricia trie")
 	}
 
