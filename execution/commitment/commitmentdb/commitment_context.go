@@ -493,8 +493,12 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	return rootHash, err
 }
 
+// trieContextFactory creates a TrieContextFactory that reads through the
+// active SharedDomains (including sd.mem) with a per-goroutine roTx opened
+// from db for thread-safe cold DB reads. Each goroutine gets its own roTx
+// but reads go through sd.GetLatest which checks sd.mem first, ensuring
+// warmup/prefetch goroutines always see the latest committed state.
 func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Context, db kv.TemporalRoDB, txNum uint64) commitment.TrieContextFactory {
-	// avoid races like this
 	stepSize := sdc.sharedDomains.StepSize()
 	return func() (commitment.PatriciaContext, func()) {
 		roTx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
