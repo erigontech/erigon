@@ -597,17 +597,19 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			e.lock.Unlock()
 		}
 
+		// Dispatch notifications from the SD overlay (before flush/commit).
+		// After this, all consumers have the data — the semaphore can be
+		// released and flush/commit/prune can proceed without blocking the
+		// next FCU.
+		e.logger.Debug("[updateForkChoice] dispatching notifications", "head", blockHash, "bgCommit", e.fcuBackgroundCommit)
+		if err := e.dispatchNotificationsFromOverlay(currentContext, finishProgressBefore); err != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("fcu: dispatch notifications: %w", err), stateFlushingInParallel)
+		}
+
 		// Flush + commit: foreground by default, background only if
 		// fcuBackgroundCommit is explicitly enabled.
 		var commitTimings []any
 		if e.fcuBackgroundCommit {
-			// Background commit: dispatch notifications from the overlay
-			// BEFORE the async flush/commit so consumers see the data
-			// immediately via the overlay-aware RPC path.
-			e.logger.Debug("[updateForkChoice] dispatching notifications (pre-commit, background)", "head", blockHash)
-			if err := e.dispatchNotificationsFromOverlay(currentContext, finishProgressBefore); err != nil {
-				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("fcu: dispatch notifications: %w", err), stateFlushingInParallel)
-			}
 			shouldReleaseSema = false
 			closeOnReturn = false
 			dispatcher := e.pipelineExecutor.Dispatcher()
@@ -629,14 +631,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 			}
 			commitTimings = ct
-
-			// Foreground commit: dispatch notifications AFTER commit so
-			// consumers that query by explicit block number (e.g. shutter
-			// eon tracker with eth_call at block N) find the data in DB.
-			e.logger.Debug("[updateForkChoice] dispatching notifications (post-commit, foreground)", "head", blockHash)
-			if err := e.dispatchNotificationsFromOverlay(currentContext, finishProgressBefore); err != nil {
-				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("fcu: dispatch notifications: %w", err), stateFlushingInParallel)
-			}
 		}
 
 		// Prune: background by default (fcuBackgroundPrune=true).
