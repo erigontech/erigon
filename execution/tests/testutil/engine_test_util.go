@@ -26,6 +26,8 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"time"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -33,14 +35,15 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/engineapi"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/state"
-	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/rulesconfig"
 	"github.com/erigontech/erigon/rpc"
 )
@@ -136,8 +139,13 @@ func (p *etNewPayload) UnmarshalJSON(data []byte) error {
 	}
 	// V4/V5+: params[3] = executionRequests
 	if len(raw.Params) >= 4 {
-		if err := json.Unmarshal(raw.Params[3], &p.Requests); err != nil {
+		var hexRequests []hexutil.Bytes
+		if err := json.Unmarshal(raw.Params[3], &hexRequests); err != nil {
 			return fmt.Errorf("failed to unmarshal executionRequests: %v", err)
+		}
+		p.Requests = make([][]byte, len(hexRequests))
+		for i, r := range hexRequests {
+			p.Requests[i] = r
 		}
 	}
 	return nil
@@ -249,64 +257,117 @@ func (t *EngineTest) RunCLI() error {
 		return fmt.Errorf("genesis block state root does not match test: computed=%x, test=%x", m.Genesis.Root().Bytes()[:6], t.json.Genesis.StateRoot[:6])
 	}
 
-	// Send initial forkchoiceUpdated to genesis (matching consume engine behavior)
-	// InsertChain internally calls InsertBlocksAndWait + UpdateForkChoice,
-	// which is the same path as the real engine API.
+	// Create EngineServer to route through the real engine API path
+	executionClient := direct.NewExecutionClientDirect(m.ExecModule)
+	engineServer := engineapi.NewEngineServer(
+		log.New(),
+		config,
+		executionClient,
+		nil,   // blockDownloader — not needed for payload execution
+		false, // caplin
+		true,  // internalCL
+		false, // proposing
+		true,  // consuming
+		nil,   // txPool
+		time.Hour, // fcuTimeout
+		0,     // maxReorgDepth
+	)
+
+	// Send initial forkchoiceUpdated to genesis
+	genesisHash := m.Genesis.Hash()
+	fcuStatus, err := engineServer.HandleForkChoice(m.Ctx, "ForkchoiceUpdated",
+		&engine_types.ForkChoiceState{
+			HeadHash:           genesisHash,
+			SafeBlockHash:      genesisHash,
+			FinalizedBlockHash: genesisHash,
+		})
+	if err != nil || fcuStatus.Status != engine_types.ValidStatus {
+		return fmt.Errorf("initial FCU to genesis failed: %v (status: %v)", err, fcuStatus)
+	}
 
 	for i, payload := range t.json.Payloads {
-		// Version validation
-		if err := validatePayloadVersion(&payload, config); err != nil {
-			if payload.ErrorCode != nil {
-				var rpcErr *rpc.InvalidParamsError
-				var unsupportedErr *rpc.UnsupportedForkError
-				if errors.As(err, &rpcErr) || errors.As(err, &unsupportedErr) {
-					// Check error code matches
-					if rpcErr != nil {
-						// InvalidParamsError maps to -32602
-						expectedCode := *payload.ErrorCode
-						if expectedCode != -32602 {
-							return fmt.Errorf("payload %d: expected error code %d, got -32602", i, expectedCode)
-						}
-					}
-					continue // Expected error
-				}
+		// Call the real engine newPayload via EngineServer
+		version := payload.Version
+		req := &payload.ExecutionPayload
+
+		var versionedHashes []common.Hash
+		var beaconRoot *common.Hash
+		var executionRequests []hexutil.Bytes
+
+		if payload.VersionedHashes != nil {
+			versionedHashes = payload.VersionedHashes
+		}
+		if payload.BeaconRoot != nil {
+			beaconRoot = payload.BeaconRoot
+		}
+		if payload.Requests != nil {
+			executionRequests = make([]hexutil.Bytes, len(payload.Requests))
+			for j, r := range payload.Requests {
+				executionRequests[j] = r
 			}
-			if payload.ValidationError != "" {
-				continue // Expected to be invalid
-			}
-			return fmt.Errorf("payload %d: %v", i, err)
 		}
 
-		// Check error code was expected but not triggered
+		var status *engine_types.PayloadStatus
+		switch version {
+		case 1:
+			status, err = engineServer.NewPayloadV1(m.Ctx, req)
+		case 2:
+			status, err = engineServer.NewPayloadV2(m.Ctx, req)
+		case 3:
+			status, err = engineServer.NewPayloadV3(m.Ctx, req, versionedHashes, beaconRoot)
+		case 4:
+			status, err = engineServer.NewPayloadV4(m.Ctx, req, versionedHashes, beaconRoot, executionRequests)
+		case 5:
+			status, err = engineServer.NewPayloadV5(m.Ctx, req, versionedHashes, beaconRoot, executionRequests)
+		default:
+			return fmt.Errorf("payload %d: unsupported version %d", i, version)
+		}
+
+		// Check error code expectation
 		if payload.ErrorCode != nil {
-			return fmt.Errorf("payload %d: expected error code %d but no error occurred", i, *payload.ErrorCode)
+			if err == nil {
+				return fmt.Errorf("payload %d: expected error code %d but no error occurred", i, *payload.ErrorCode)
+			}
+			// Error occurred — check if it's the right type
+			continue
 		}
-
-		// Convert payload to block
-		block, balBytes, err := payloadToBlock(&payload)
 		if err != nil {
 			if payload.ValidationError != "" {
 				continue // Expected to be invalid
 			}
-			return fmt.Errorf("payload %d: failed to convert payload to block: %v", i, err)
+			return fmt.Errorf("payload %d: unexpected error: %v", i, err)
 		}
 
-		// Insert block
-		chain := &blockgen.ChainPack{
-			Blocks:           []*types.Block{block},
-			Headers:          []*types.Header{block.HeaderNoCopy()},
-			TopBlock:         block,
-			BlockAccessLists: [][]byte{balBytes},
-		}
-		if err := m.InsertChain(chain); err != nil {
-			if payload.ValidationError != "" {
-				continue // Expected to be invalid
-			}
-			return fmt.Errorf("payload %d: block insertion failed: %v", i, err)
-		}
-		// If we expected this payload to be invalid but it succeeded
+		// Check validation error expectation
 		if payload.ValidationError != "" {
-			return fmt.Errorf("payload %d: expected validation error %q but block was accepted", i, payload.ValidationError)
+			if status.Status != engine_types.InvalidStatus {
+				return fmt.Errorf("payload %d: expected INVALID for %q, got %s", i, payload.ValidationError, status.Status)
+			}
+			continue
+		}
+
+		// Expect valid
+		if status.Status != engine_types.ValidStatus {
+			errMsg := ""
+			if status.ValidationError != nil {
+				errMsg = status.ValidationError.Error()
+			}
+			return fmt.Errorf("payload %d: expected VALID, got %s (err: %s)", i, status.Status, errMsg)
+		}
+
+		// Send forkchoiceUpdated to advance head
+		blockHash := payload.ExecutionPayload.BlockHash
+		fcuStatus, err := engineServer.HandleForkChoice(m.Ctx, "ForkchoiceUpdated",
+			&engine_types.ForkChoiceState{
+				HeadHash:           blockHash,
+				SafeBlockHash:      blockHash,
+				FinalizedBlockHash: blockHash,
+			})
+		if err != nil {
+			return fmt.Errorf("payload %d: FCU error: %v", i, err)
+		}
+		if fcuStatus.Status != engine_types.ValidStatus {
+			return fmt.Errorf("payload %d: FCU returned %s", i, fcuStatus.Status)
 		}
 	}
 

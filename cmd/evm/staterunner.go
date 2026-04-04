@@ -185,22 +185,6 @@ func runStateTest(ctx *cli.Context, cfg vm.Config, fname string) ([]testResult, 
 		return nil, fmt.Errorf("invalid regex -%s: %v", RunFlag.Name, err)
 	}
 
-	tmpDir, err := os.MkdirTemp("", "erigon-statetest-*")
-	if err != nil {
-		return nil, err
-	}
-	defer dir.RemoveAll(tmpDir)
-	dirs := datadir.New(tmpDir)
-
-	db := temporaltest.NewTestDB(nil, dirs)
-	defer db.Close()
-
-	tx, txErr := db.BeginTemporalRw(context.Background())
-	if txErr != nil {
-		return nil, txErr
-	}
-	defer tx.Rollback()
-
 	bench := ctx.Bool(BenchFlag.Name)
 	results := make([]testResult, 0, len(stateTests))
 
@@ -210,6 +194,24 @@ func runStateTest(ctx *cli.Context, cfg vm.Config, fname string) ([]testResult, 
 		}
 		for _, st := range test.Subtests() {
 			result := &testResult{Name: key, Fork: st.Fork, Pass: true}
+
+			// Create fresh DB per subtest to avoid state pollution
+			tmpDir, err := os.MkdirTemp("", "erigon-statetest-*")
+			if err != nil {
+				result.Pass, result.Error = false, err.Error()
+				results = append(results, *result)
+				continue
+			}
+			dirs := datadir.New(tmpDir)
+			db := temporaltest.NewTestDB(nil, dirs)
+			tx, txErr := db.BeginTemporalRw(context.Background())
+			if txErr != nil {
+				db.Close()
+				dir.RemoveAll(tmpDir)
+				result.Pass, result.Error = false, txErr.Error()
+				results = append(results, *result)
+				continue
+			}
 
 			statedb, root, err := test.Run(nil, tx, st, cfg, dirs)
 			if err != nil {
@@ -228,6 +230,10 @@ func runStateTest(ctx *cli.Context, cfg vm.Config, fname string) ([]testResult, 
 				})
 				result.Stats = &stats
 			}
+
+			tx.Rollback()
+			db.Close()
+			dir.RemoveAll(tmpDir)
 
 			results = append(results, *result)
 		}
