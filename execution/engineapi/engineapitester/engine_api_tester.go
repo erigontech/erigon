@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net"
 	"path"
 	"testing"
 	"time"
@@ -122,12 +123,17 @@ func InitialiseEngineApiTester(t testing.TB, args EngineApiTesterInitArgs) Engin
 	logger := args.Logger
 	dirs := datadir.New(args.DataDir)
 	genesis := args.Genesis
+
+	// Pre-create listeners on port 0 (kernel-assigned) to avoid TOCTOU port races.
+	// The listeners are kept open and handed off to the servers that will use them.
 	sentryPort, err := freeport.NextFreePort()
 	require.NoError(t, err)
-	engineApiPort, err := freeport.NextFreePort()
+	jsonRpcListener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
-	jsonRpcPort, err := freeport.NextFreePort()
+	jsonRpcPort := jsonRpcListener.Addr().(*net.TCPAddr).Port
+	engineApiListener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
+	engineApiPort := engineApiListener.Addr().(*net.TCPAddr).Port
 	logger.Debug("[engine-api-tester] selected ports", "sentry", sentryPort, "engineApi", engineApiPort, "jsonRpc", jsonRpcPort)
 
 	httpConfig := httpcfg.HttpCfg{
@@ -136,9 +142,11 @@ func InitialiseEngineApiTester(t testing.TB, args EngineApiTesterInitArgs) Engin
 		WebsocketEnabled:         true,
 		HttpListenAddress:        "127.0.0.1",
 		HttpPort:                 jsonRpcPort,
+		HttpListener:             jsonRpcListener,
 		API:                      []string{"eth"},
 		AuthRpcHTTPListenAddress: "127.0.0.1",
 		AuthRpcPort:              engineApiPort,
+		AuthRpcListener:          engineApiListener,
 		JWTSecretPath:            path.Join(args.DataDir, "jwt.hex"),
 		ReturnDataLimit:          100_000,
 		EvmCallTimeout:           rpccfg.DefaultEvmCallTimeout,
