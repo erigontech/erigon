@@ -299,7 +299,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 	if failed {
 		if result != nil && !errors.Is(result.Err, vm.ErrOutOfGas) {
-			if len(result.Revert()) > 0 {
+			if errors.Is(result.Err, vm.ErrExecutionReverted) {
 				return 0, ethapi2.NewRevertError(result)
 			}
 			return 0, result.Err
