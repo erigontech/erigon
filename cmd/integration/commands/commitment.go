@@ -47,7 +47,6 @@ import (
 	"github.com/erigontech/erigon/cmd/utils/app"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -205,18 +204,18 @@ Examples:
 		// TrieContext.Branch -> TrieContext.readDomain -> StateReader.Read
 		commitmentReader := commitmentdb.NewLatestStateReader(tx, sd)
 
-		if err := readBranch(commitmentReader, prefix, logger); err != nil {
+		if err := readBranch(commitmentReader, prefix, tx.Debug().StepSize(), logger); err != nil {
 			logger.Error("Failed to read branch", "error", err)
 			return
 		}
 	},
 }
 
-func readBranch(stateReader *commitmentdb.LatestStateReader, prefix []byte, logger interface {
+func readBranch(stateReader *commitmentdb.LatestStateReader, prefix []byte, stepSize uint64, logger interface {
 	Info(msg string, ctx ...any)
 }) error {
 	compactKey := commitment.HexNibblesToCompactBytes(prefix)
-	val, step, err := stateReader.Read(kv.CommitmentDomain, compactKey, config3.DefaultStepSize)
+	val, step, err := stateReader.Read(kv.CommitmentDomain, compactKey, stepSize)
 	if err != nil {
 		return fmt.Errorf("failed to get branch for prefix %x: %w", prefix, err)
 	}
@@ -604,11 +603,12 @@ func benchLookup(ctx context.Context, logger log.Logger) error {
 	}
 	durations := make([]time.Duration, len(keys))
 	var totalSize int64
+	stepSize := tx.Debug().StepSize()
 
 	startTime := time.Now()
 	for i, key := range keys {
 		lookupStart := time.Now()
-		val, _, err := commitmentReader.Read(kv.CommitmentDomain, key, config3.DefaultStepSize)
+		val, _, err := commitmentReader.Read(kv.CommitmentDomain, key, stepSize)
 		durations[i] = time.Since(lookupStart)
 
 		if err != nil {
@@ -751,6 +751,7 @@ func benchHistoryLookup(ctx context.Context, logger log.Logger) error {
 // benchSnapshotsHistoryLookup benchmarks history lookups across snapshot files
 func benchSnapshotsHistoryLookup(ctx context.Context, tx kv.TemporalTx, historyFiles []dbstate.VisibleFile, compactKey []byte, samplePct float64, rng *rand.Rand, logger log.Logger) ([]HistoryBenchStats, error) {
 	allFileStats := make([]HistoryBenchStats, 0, len(historyFiles))
+	stepSize := tx.Debug().StepSize()
 
 	for _, f := range historyFiles {
 		fpath := f.Fullpath()
@@ -795,7 +796,7 @@ func benchSnapshotsHistoryLookup(ctx context.Context, tx kv.TemporalTx, historyF
 			reader := commitmentdb.NewHistoryStateReader(tx, txNum)
 
 			lookupStart := time.Now()
-			_, _, err := reader.Read(kv.CommitmentDomain, compactKey, config3.DefaultStepSize)
+			_, _, err := reader.Read(kv.CommitmentDomain, compactKey, stepSize)
 			elapsed := time.Since(lookupStart)
 
 			if err != nil {
@@ -881,6 +882,7 @@ func benchMdbxHistoryLookup(ctx context.Context, tx kv.TemporalTx, compactKey []
 	// Benchmark lookups using HistoryStateReader - same API as file benchmarks
 	// The reader has logic to determine whether to look in snapshots or MDBX
 	durations := make([]time.Duration, 0, sampleCount)
+	stepSize := tx.Debug().StepSize()
 
 	benchStart := time.Now()
 	for _, txNum := range sampledTxNums {
@@ -888,7 +890,7 @@ func benchMdbxHistoryLookup(ctx context.Context, tx kv.TemporalTx, compactKey []
 		reader := commitmentdb.NewHistoryStateReader(tx, txNum)
 
 		lookupStart := time.Now()
-		_, _, err := reader.Read(kv.CommitmentDomain, compactKey, config3.DefaultStepSize)
+		_, _, err := reader.Read(kv.CommitmentDomain, compactKey, stepSize)
 		elapsed := time.Since(lookupStart)
 
 		if err != nil {

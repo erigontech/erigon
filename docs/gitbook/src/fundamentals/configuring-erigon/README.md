@@ -193,6 +193,9 @@ Flags for configuring various RPC servers and their behavior.
   * Default: `true`
 * `--rpc.batch.concurrency value`: Limits the number of goroutines for batch requests.
   * Default: `2`
+* `--rpc.max.concurrency value`: Maximum number of concurrent HTTP RPC requests (HTTP admission control).
+  * Default: `0` (inherits value from `--db.read.concurrency`)
+  * Set to `-1` to disable admission control (unlimited)
 * `--rpc.streaming.disable`: Disables JSON streaming for heavy endpoints.
   * Default: `false`
 * `--rpc.accessList value`: Specifies a granular API allowlist.
@@ -656,6 +659,7 @@ GLOBAL OPTIONS:
    --rpc.batch.concurrency value                                                                                           Does limit amount of goroutines to process 1 batch request. Means 1 bach request can't overload server. 1 batch still can have unlimited amount of request (default: 2)
    --rpc.streaming.disable                                                                                                 Erigon has enabled json streaming for some heavy endpoints (like trace_*). It's a trade-off: greatly reduce amount of RAM (in some cases from 30GB to 30mb), but it produce invalid json format if error happened in the middle of streaming (because json is not streaming-friendly format) (default: false)
    --db.read.concurrency value                                                                                             Does limit amount of parallel db reads. Default: equal to GOMAXPROCS (or number of CPU) (default: 1408)
+   --rpc.max.concurrency value                                                                                             Maximum number of concurrent HTTP RPC requests (HTTP admission control). 0 = use db.read.concurrency, -1 = unlimited (no admission control) (default: 0)
    --rpc.accessList value                                                                                                  Specify granular (method-by-method) API allowlist
    --trace.compat                                                                                                          Bug for bug compatibility with OE for trace_ routines (default: false)
    --rpc.gascap value                                                                                                      Sets a cap on gas that can be used in eth_call/estimateGas (default: 50000000)
