@@ -807,7 +807,7 @@ GLOBAL OPTIONS:
    --beacon.api.read.timeout value                                                                                         Sets the seconds for a read time out in the beacon api (default: 5)
    --beacon.api.write.timeout value                                                                                        Sets the seconds for a write time out in the beacon api (default: 31536000)
    --beacon.api.protocol value                                                                                             Protocol for beacon API (default: "tcp")
-   --beacon.api.ide.timeout value                                                                                          Sets the seconds for a write time out in the beacon api (default: 25)
+   --beacon.api.idle.timeout value                                                                                          Sets the seconds for a write time out in the beacon api (default: 25)
    --caplin.blocks-archive                                                                                                 sets whether backfilling is enabled for caplin (default: false)
    --caplin.blobs-archive                                                                                                  sets whether backfilling is enabled for caplin (default: false)
    --caplin.states-archive                                                                                                 enables archival node for historical states in caplin (it will enable block archival as well) (default: false)

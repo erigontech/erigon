@@ -79,7 +79,7 @@ jobs:
 
       - name: Upload preparing-step logs on failure
         if: failure() && steps.preparing_step.outcome == 'failure'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: preparing-step-logs
           path: ${{ env.ERIGON_REFERENCE_DATA_DIR }}/logs/
@@ -136,7 +136,7 @@ jobs:
 
       - name: Upload pre-test logs on failure
         if: failure() && steps.pre_test_step.outcome == 'failure'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: pre-test-logs
           path: ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/
@@ -213,7 +213,7 @@ jobs:
 
       - name: Upload test results
         if: always() && steps.test_step.outputs.test_executed == 'true'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: test-results
           path: |

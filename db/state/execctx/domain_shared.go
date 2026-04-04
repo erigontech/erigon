@@ -427,13 +427,12 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	}
 	maxStep := kv.Step(math.MaxUint64)
 
-	// Check mem batch first - it has the current transaction's uncommitted state
+	// Check mem batch first - it has the current transaction's uncommitted state.
+	// No need to populate stateCache here — mem is checked first on every read,
+	// so the value is already accessible without caching it again.
 	if v, step, ok := sd.mem.GetLatest(domain, k); ok {
 		if dbg.KVReadLevelledMetrics {
 			sd.metrics.UpdateCacheReads(domain, start)
-		}
-		if sd.stateCache != nil {
-			sd.stateCache.Put(domain, k, v)
 		}
 		return v, step, nil
 	} else {
@@ -746,7 +745,7 @@ func (sd *SharedDomains) TouchChangedKeysFromHistory(tx kv.TemporalTx, fromTxNum
 // touches them onto the commitment trie.
 func (sd *SharedDomains) touchChangedKeys(tx kv.TemporalTx, d kv.Domain, fromTxNum uint64, toTxNum uint64) (int, error) {
 	changes := 0
-	it, err := tx.HistoryRange(d, int(fromTxNum), int(toTxNum), order.Asc, -1)
+	it, err := tx.Debug().HistoryKeyTxNumRange(d, int(fromTxNum), int(toTxNum), order.Asc, -1)
 	if err != nil {
 		return changes, err
 	}
