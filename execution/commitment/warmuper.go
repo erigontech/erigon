@@ -109,8 +109,10 @@ func (w *Warmuper) Cache() *WarmupCache {
 
 // branchFromCacheOrDB reads branch data from warmup cache → persistent cache → DB.
 // The DB read goes through SharedDomains (sd.mem first, roTx fallback), so the
-// warmup always sees the freshest committed state. Writing to the persistent
-// BranchCache is safe because the data comes from sd.mem (current) not a stale DB snapshot.
+// warmup always sees the freshest committed state. Writes to the persistent
+// BranchCache use PutIfClean to skip keys that the main trie has invalidated
+// (modified during fold), preventing stale warmup data from overwriting
+// authoritative trie writes.
 func (w *Warmuper) branchFromCacheOrDB(trieCtx PatriciaContext, prefix []byte) ([]byte, error) {
 	// Level 1: ephemeral warmup cache (populated by previous warmup calls this Process)
 	if w.cache != nil {
@@ -133,10 +135,10 @@ func (w *Warmuper) branchFromCacheOrDB(trieCtx PatriciaContext, prefix []byte) (
 		return nil, err
 	}
 	if len(branchData) > 0 {
-		// Populate persistent cache on DB read — data is fresh because the read
-		// goes through SharedDomains which checks sd.mem before falling to DB.
+		// Populate persistent cache on DB read if the key hasn't been
+		// invalidated by the main trie (PutIfClean checks the dirty flag).
 		if w.branchCache != nil {
-			w.branchCache.Put(prefix, branchData)
+			w.branchCache.PutIfClean(prefix, branchData)
 		}
 		if w.cache != nil {
 			w.cache.PutBranch(prefix, branchData)

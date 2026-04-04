@@ -73,8 +73,8 @@ func (p *BranchPrefetcher) Start() {
 
 // prefetchBranches walks nibble prefixes of hashedKey and loads branch nodes
 // into the persistent cache. Stops at first missing branch (leaf zone).
-// The DB read goes through SharedDomains (sd.mem first, roTx fallback), so
-// the data written to BranchCache is always fresh.
+// Uses PutIfClean to skip keys that the main trie has invalidated, preventing
+// stale prefetch data from overwriting authoritative trie writes.
 func (p *BranchPrefetcher) prefetchBranches(trieCtx PatriciaContext, hashedKey []byte) {
 	for depth := 1; depth <= len(hashedKey) && depth <= p.maxDepth; depth++ {
 		prefix := HexNibblesToCompactBytes(hashedKey[:depth])
@@ -89,7 +89,7 @@ func (p *BranchPrefetcher) prefetchBranches(trieCtx PatriciaContext, hashedKey [
 			break // no branch at this depth, stop walking
 		}
 
-		p.cache.Put(prefix, branchData)
+		p.cache.PutIfClean(prefix, branchData)
 		p.prefetched.Add(1)
 	}
 }

@@ -55,6 +55,11 @@ type BranchCache struct {
 	t4 [65536][]byte
 	mu sync.RWMutex //nolint:gocritic
 
+	// dirty tracks keys that the main trie has Invalidated (modified) but not
+	// yet written via Put. Background warmup goroutines check this set via
+	// PutIfClean to avoid overwriting authoritative trie data with stale reads.
+	dirty map[string]struct{}
+
 	branches *maphash.LRU[[]byte] // LRU for deeper branches
 	hits     atomic.Uint64
 	misses   atomic.Uint64
@@ -70,6 +75,7 @@ func NewBranchCache(lruCapacity int) *BranchCache {
 		panic("BranchCache: " + err.Error())
 	}
 	return &BranchCache{
+		dirty:    make(map[string]struct{}),
 		branches: cache,
 	}
 }
@@ -148,6 +154,8 @@ func (c *BranchCache) getPinned(key []byte) ([]byte, bool) {
 }
 
 // Put stores branch data in the cache, making a copy to avoid buffer reuse issues.
+// Put always writes (authoritative data from main trie or DB reads) and clears
+// the dirty flag for the key.
 func (c *BranchCache) Put(key []byte, data []byte) {
 	dataCopy := make([]byte, len(data))
 	copy(dataCopy, data)
@@ -155,10 +163,46 @@ func (c *BranchCache) Put(key []byte, data []byte) {
 	if CompactKeyIsPinned(key) {
 		c.mu.Lock()
 		c.setPinned(key, dataCopy)
+		delete(c.dirty, string(key))
 		c.mu.Unlock()
 		return
 	}
 
+	c.mu.Lock()
+	delete(c.dirty, string(key))
+	c.mu.Unlock()
+	c.branches.Set(key, dataCopy)
+}
+
+// PutIfClean stores branch data only if the key has not been marked dirty by
+// Invalidate. This is used by background warmup goroutines and prefetchers
+// to avoid overwriting authoritative data that the main trie has written or
+// is about to write.
+func (c *BranchCache) PutIfClean(key []byte, data []byte) {
+	c.mu.RLock()
+	_, isDirty := c.dirty[string(key)]
+	c.mu.RUnlock()
+	if isDirty {
+		return
+	}
+
+	dataCopy := make([]byte, len(data))
+	copy(dataCopy, data)
+
+	if CompactKeyIsPinned(key) {
+		c.mu.Lock()
+		// Re-check under write lock to avoid TOCTOU race.
+		if _, isDirty = c.dirty[string(key)]; !isDirty {
+			c.setPinned(key, dataCopy)
+		}
+		c.mu.Unlock()
+		return
+	}
+
+	// For LRU tier, the RLock check above is sufficient: if the key became
+	// dirty between the check and this Set, the next authoritative Put will
+	// overwrite with correct data. The window is tiny and the consequence
+	// is a single stale cache entry that gets corrected immediately.
 	c.branches.Set(key, dataCopy)
 }
 
@@ -183,15 +227,22 @@ func (c *BranchCache) setPinned(key []byte, data []byte) {
 	}
 }
 
-// Invalidate removes a branch entry from the cache.
+// Invalidate removes a branch entry from the cache and marks the key as dirty.
+// The dirty flag prevents background warmup goroutines from writing stale data
+// back via PutIfClean. The flag is cleared when the main trie writes
+// authoritative data via Put, or when Clear is called.
 func (c *BranchCache) Invalidate(key []byte) {
 	if CompactKeyIsPinned(key) {
 		c.mu.Lock()
 		c.setPinned(key, nil)
+		c.dirty[string(key)] = struct{}{}
 		c.mu.Unlock()
 		return
 	}
 
+	c.mu.Lock()
+	c.dirty[string(key)] = struct{}{}
+	c.mu.Unlock()
 	c.branches.Delete(key)
 }
 
@@ -259,7 +310,7 @@ func (c *BranchCache) ResetCounters() {
 	c.misses.Store(0)
 }
 
-// Clear removes all entries and resets counters.
+// Clear removes all entries, resets dirty flags, and resets counters.
 func (c *BranchCache) Clear() {
 	c.mu.Lock()
 	c.t0 = nil
@@ -275,6 +326,7 @@ func (c *BranchCache) Clear() {
 	for i := range c.t4 {
 		c.t4[i] = nil
 	}
+	clear(c.dirty)
 	c.mu.Unlock()
 
 	c.branches.Purge()
