@@ -450,6 +450,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, req *executionproto.Vali
 	if err != nil {
 		return nil, err
 	}
+	doms.SetInMemHistoryReads(inMemHistoryReads)
 
 	// Set state cache in SharedDomains for use during state reading
 	if e.stateCache != nil && dbg.UseStateCache {

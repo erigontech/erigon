@@ -36,6 +36,8 @@ import (
 	"github.com/erigontech/erigon/node/shards"
 )
 
+var inMemHistoryReads = dbg.EnvBool("ERIGON_IN_MEM_HISTORY", true)
+
 // PipelineExecutor centralises all staged sync pipeline invocations:
 // ProcessFrozenBlocks (startup), RunLoop (FCU catchup), and ValidateBlock
 // (fork validation). It is created once and stored on ExecModule.
@@ -199,7 +201,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		return err
 	}
 	defer doms.Close()
-	doms.SetInMemHistoryReads(false)
+	doms.SetInMemHistoryReads(inMemHistoryReads)
 
 	var finishStageBeforeSync uint64
 	if hook != nil {

@@ -136,6 +136,10 @@ func (sdc *SharedDomainsCommitmentContext) SetHistoryStateReader(roTx kv.Tempora
 	sdc.SetStateReader(NewHistoryStateReader(roTx, limitReadAsOfTxNum))
 }
 
+func (sdc *SharedDomainsCommitmentContext) SetCustomHistoryStateReader(stateReader StateReader) {
+	sdc.SetStateReader(stateReader)
+}
+
 // SetLimitedHistoryStateReader sets the state reader to read *limited* (i.e. *without-recent-files*) historical state at specified txNum.
 func (sdc *SharedDomainsCommitmentContext) SetLimitedHistoryStateReader(roTx kv.TemporalTx, limitReadAsOfTxNum uint64) {
 	sdc.SetStateReader(NewLimitedHistoryStateReader(roTx, sdc.sharedDomains, limitReadAsOfTxNum))
@@ -236,6 +240,15 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 	}
 }
 
+// TouchHashedKey touches a hashed key which can be anywhere from 1 to 128 nibbles
+// This can be used to generate witnesses for intermediate trie nodes
+func (sdc *SharedDomainsCommitmentContext) TouchHashedKey(hashedKey []byte) {
+	if sdc.updates.Mode() == commitment.ModeDisabled {
+		return
+	}
+	sdc.updates.TouchHashedKey(hashedKey)
+}
+
 func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeReads map[common.Hash]witnesstypes.CodeWithHash, logPrefix string) (proofTrie *trie.Trie, rootHash []byte, err error) {
 	hexPatriciaHashed, ok := sdc.Trie().(*commitment.HexPatriciaHashed)
 	if ok {
@@ -243,6 +256,16 @@ func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeRead
 	}
 
 	return nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")
+}
+
+// SetCollapseTracer sets a callback that will be invoked when a node collapse occurs
+// during commitment calculation. This is used by witness generation to capture paths
+// to HashNodes that need resolution when a FullNode is reduced to a single child.
+func (sdc *SharedDomainsCommitmentContext) SetCollapseTracer(tracer commitment.CollapseTracer) {
+	hexPatriciaHashed, ok := sdc.Trie().(*commitment.HexPatriciaHashed)
+	if ok {
+		hexPatriciaHashed.SetCollapseTracer(tracer)
+	}
 }
 
 // ComputeCommitment Evaluates commitment for gathered updates.
