@@ -5,8 +5,8 @@ import (
 	"slices"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
@@ -124,7 +124,7 @@ func (m *SelectorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *SelectorModel) View() string {
+func (m *SelectorModel) View() tea.View {
 	header := "←/→ to switch columns or OK/Cancel, ↑/↓ to move, enter/space to toggle, tab to confirm"
 	var s strings.Builder
 	s.WriteString(lipgloss.NewStyle().Margin(1, 2).Render(header) + "\n")
@@ -171,7 +171,9 @@ func (m *SelectorModel) View() string {
 	} else {
 		s.WriteString("(Tab to switch to OK/Cancel)\n")
 	}
-	return s.String()
+	v := tea.NewView(s.String())
+	v.AltScreen = true
+	return v
 }
 
 func (m *SelectorModel) toggleCurrent() {

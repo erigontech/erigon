@@ -9,10 +9,10 @@ import (
 
 	"github.com/erigontech/erigon/db/version"
 
-	"github.com/charmbracelet/bubbles/table"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/table"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/erigontech/erigon/cmd/bumper/internal/schema"
 )
@@ -78,7 +78,7 @@ func Run(file string) error {
 		return err
 	}
 	m := newModel(file, s)
-	_, err = tea.NewProgram(m, tea.WithAltScreen()).Run()
+	_, err = tea.NewProgram(m).Run()
 	return err
 }
 
@@ -346,12 +346,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "e":
 			m.edit = cCurrent
-			m.beginEdit()
-			return m, nil
+			return m, m.beginEdit()
 		case "m":
 			m.edit = cMin
-			m.beginEdit()
-			return m, nil
+			return m, m.beginEdit()
 		case ".":
 			m.bump(minor)
 			return m, nil
@@ -363,10 +361,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *model) beginEdit() {
+func (m *model) beginEdit() tea.Cmd {
 	r := m.right.Cursor()
 	if r < 0 || r >= len(m.rows) {
-		return
+		return nil
 	}
 	row := m.rows[r]
 	v := m.get(row.cat, row.part, row.key)
@@ -376,11 +374,12 @@ func (m *model) beginEdit() {
 	}
 	m.editor.SetValue(cur)
 	m.editor.CursorEnd()
-	m.editor.Focus()
+	cmd := m.editor.Focus()
 	m.foc = fEdit
+	return cmd
 }
 
-func (m *model) View() string {
+func (m *model) View() tea.View {
 	title := lipgloss.NewStyle().Bold(true).Render("Bumper 1.0.1")
 	left := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Render(
 		lipgloss.JoinVertical(lipgloss.Left, "Schemas", m.left.View()),
@@ -424,10 +423,12 @@ func (m *model) View() string {
 			txt = "Save changes now? [enter/y] Yes • [esc] Cancel"
 		}
 		overlay := box.Render(txt)
-		return lipgloss.PlaceHorizontal(lipgloss.Width(body), lipgloss.Center,
+		body = lipgloss.PlaceHorizontal(lipgloss.Width(body), lipgloss.Center,
 			lipgloss.JoinVertical(lipgloss.Center, body, overlay))
 	}
-	return body
+	v := tea.NewView(body)
+	v.AltScreen = true
+	return v
 }
 
 func (m *model) bump(mode string) {
