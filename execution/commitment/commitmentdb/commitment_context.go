@@ -254,6 +254,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	}
 
 	updateCount := sdc.updates.Size()
+	_ = logPrefix
 	//if logPrefix != "" {
 	//	start := time.Now()
 	//	defer func() {
