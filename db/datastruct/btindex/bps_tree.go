@@ -369,18 +369,15 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 				offset = b.offt.Get(m)
 				g.Reset(offset)
 			}
-			// MatchCmp returns Compare(key, fileKey): 0 match, <0 key<fileKey, >0 key>fileKey
 			if cmp = g.MatchCmp(key); cmp < 0 {
-				// key < fileKey: overshot
 				return nil, false, 0, err
 			} else if cmp > 0 {
-				// key > fileKey: MatchCmp reset position on non-match, skip key+value to advance
-				g.Skip() // skip key
-				g.Skip() // skip value
+				// on non-match MatchCmp resets position; skip key+value to advance
+				g.Skip()
+				g.Skip()
 				l++
 				continue
 			}
-			// match: MatchCmp advanced past key, read value
 			v, _ = g.Next(nil)
 			offset = b.offt.Get(m)
 			return v, true, offset, nil
