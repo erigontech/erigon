@@ -337,6 +337,14 @@ func (rw *Worker) Run() (err error) {
 			rw.logger.Warn("Worker failed", "err", err)
 		}
 	}()
+	// Ensure the worker's roTx is closed when Run exits, preventing
+	// MDBX reader slot leaks that block GC page reclamation.
+	defer func() {
+		if rw.background && rw.chainTx != nil {
+			rw.chainTx.Rollback()
+			rw.chainTx = nil
+		}
+	}()
 
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
 		result := func() (result *TxResult) {

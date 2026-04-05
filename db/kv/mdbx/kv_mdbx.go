@@ -1030,14 +1030,24 @@ func (tx *MdbxTx) Commit() error {
 		if err != nil {
 			tx.db.opts.log.Error("failed to record mdbx summaries", "err", err)
 		}
-
-		//kv.DbGcWorkPnlMergeTime.Update(latency.GCDetails.WorkPnlMergeTime.Seconds())
-		//kv.DbGcWorkPnlMergeVolume.Set(uint64(latency.GCDetails.WorkPnlMergeVolume))
-		//kv.DbGcWorkPnlMergeCalls.Set(uint64(latency.GCDetails.WorkPnlMergeCalls))
-		//
-		//kv.DbGcSelfPnlMergeTime.Update(latency.GCDetails.SelfPnlMergeTime.Seconds())
-		//kv.DbGcSelfPnlMergeVolume.Set(uint64(latency.GCDetails.SelfPnlMergeVolume))
-		//kv.DbGcSelfPnlMergeCalls.Set(uint64(latency.GCDetails.SelfPnlMergeCalls))
+	}
+	var numReaders uint
+	if info, infoErr := tx.db.env.Info(nil); infoErr == nil {
+		numReaders = info.NumReaders
+	}
+	if latency.Whole > 2*time.Second || numReaders > 1 {
+		tx.db.opts.log.Info("[mdbx] commit",
+			"label", tx.db.opts.label,
+			"whole", latency.Whole,
+			"gc", latency.GCWallClock,
+			"write", latency.Write,
+			"sync", latency.Sync,
+			"readers", numReaders,
+			"gcLoops", latency.GCDetails.Wloops,
+			"gcCoalesce", latency.GCDetails.Coalescences,
+			"gcWorkSteps", latency.GCDetails.WorkRsteps,
+			"gcSelfSteps", latency.GCDetails.SelfRsteps,
+		)
 	}
 
 	return nil
