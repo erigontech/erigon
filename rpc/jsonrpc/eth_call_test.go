@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
@@ -75,6 +76,41 @@ func TestEstimateGas(t *testing.T) {
 	}, nil, nil, nil); err != nil {
 		t.Errorf("calling EstimateGas: %v", err)
 	}
+}
+
+// TestEstimateGasBlockOverridesGasLimit verifies that blockOverrides.gasLimit is
+// used as the binary-search ceiling rather than the on-chain header gas limit.
+// A contract call is used to bypass the plain-transfer short-circuit path.
+func TestEstimateGasBlockOverridesGasLimit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m, bankAddr, contractAddr, _ := chainWithDeployedContract(t)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, execmoduletester.New(t))
+	mining := txpoolproto.NewMiningClient(conn)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log)
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, stateCache, m), m.DB, nil, nil)
+
+	callData := hexutil.Bytes(contractInvocationData(1))
+
+	// Sanity check: without overrides the estimation succeeds.
+	_, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
+		From: &bankAddr,
+		To:   &contractAddr,
+		Data: &callData,
+	}, nil, nil, nil)
+	require.NoError(t, err)
+
+	// Override gasLimit to below intrinsic gas (21000). The binary search ceiling
+	// becomes 20999, so execution must fail regardless of the actual gas needed.
+	lowGasLimit := hexutil.Uint64(params.TxGas - 1)
+	_, err = api.EstimateGas(context.Background(), &ethapi.CallArgs{
+		From: &bankAddr,
+		To:   &contractAddr,
+		Data: &callData,
+	}, nil, nil, &ethapi.BlockOverrides{GasLimit: &lowGasLimit})
+	require.ErrorContains(t, err, fmt.Sprintf("gas required exceeds allowance (%d)", params.TxGas-1))
 }
 
 type stubTxPoolClient struct{ txpoolproto.TxpoolClient }
