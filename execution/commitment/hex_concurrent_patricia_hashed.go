@@ -408,23 +408,21 @@ func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, updates *Updates
 			p.root.metrics.WriteToCSV()
 		}()
 	}
-	if updates.IsConcurrentCommitment() && warmup.CtxFactory != nil {
+	switch updates.IsConcurrentCommitment() {
+	case true:
 		rootHash, err = updates.ParallelHashSort(ctx, p, warmup.CtxFactory)
 		if err != nil {
 			return nil, err
 		}
-	} else {
+	default:
 		rootHash, err = p.root.Process(ctx, updates, logPrefix, onProgress, warmup)
 		if err != nil {
 			return nil, err
 		}
 	}
-	nextConcurrent := false
-	if warmup.CtxFactory != nil {
-		nextConcurrent, err = p.CanDoConcurrentNext()
-		if err != nil {
-			return nil, err
-		}
+	nextConcurrent, err := p.CanDoConcurrentNext()
+	if err != nil {
+		return nil, err
 	}
 	updates.SetConcurrentCommitment(nextConcurrent)
 	return rootHash, nil
