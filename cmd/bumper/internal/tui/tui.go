@@ -389,15 +389,12 @@ func (m *model) View() tea.View {
 	if c := m.left.Cursor(); c >= 0 && c < len(m.cats) {
 		cat = m.cats[c]
 	}
+	editorLine := " "
+	if m.foc == fEdit {
+		editorLine = "Edit: " + m.editor.View()
+	}
 	right := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Render(
-		lipgloss.JoinVertical(lipgloss.Left, cat, m.right.View(),
-			func() string {
-				if m.foc == fEdit {
-					return "\nEdit: " + m.editor.View()
-				}
-				return ""
-			}(),
-		),
+		lipgloss.JoinVertical(lipgloss.Left, cat, m.right.View(), editorLine),
 	)
 	help := "[↑/↓] move  [Tab] switch  [e] edit current  [m] edit min  [.] +0.1  [M] +1.0  [S] save  [Ctrl+S] save&exit  [Q] quit"
 	stat := m.status
