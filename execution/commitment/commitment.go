@@ -161,9 +161,7 @@ func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *
 	case VariantConcurrentHexPatricia:
 		root := NewHexPatriciaHashed(length.Addr, nil)
 		trie := NewConcurrentPatriciaHashed(root, nil)
-		// BranchCache temporarily disabled to isolate concurrent HPH reorg bug.
-		// trie.SetBranchCache(branchCache)
-		_ = branchCache
+		trie.SetBranchCache(branchCache)
 		tree := NewUpdates(mode, tmpdir, KeyToHexNibbleHash)
 		// tree.SetConcurrentCommitment(true) // first run always sequential
 		return trie, tree

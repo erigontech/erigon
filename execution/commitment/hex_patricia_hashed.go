@@ -3041,9 +3041,11 @@ func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	// Populate persistent cache on miss
+	// Populate persistent cache on DB read miss. Use PutIfClean to avoid
+	// overwriting data that has been invalidated by a concurrent fold()
+	// operation on the same or related branch key.
 	if hph.branchCache != nil && len(data) > 0 {
-		hph.branchCache.Put(key, data)
+		hph.branchCache.PutIfClean(key, data)
 	}
 
 	return data, nil
