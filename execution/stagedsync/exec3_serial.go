@@ -75,6 +75,8 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 	}
 	stateCache := se.doms.GetStateCache()
 
+	stateCache := se.doms.GetStateCache()
+
 	for ; blockNum <= maxBlockNum; blockNum++ {
 		shouldGenerateChangesets := shouldGenerateChangeSets(se.cfg, blockNum, maxBlockNum, initialCycle)
 		changeSet := &changeset.StateChangeSet{}
@@ -260,6 +262,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			}
 		}
 	}
+	stateCache.PrintStatsAndReset()
 
 	stateCache.PrintStatsAndReset()
 	return b.HeaderNoCopy(), rwTx, nil
