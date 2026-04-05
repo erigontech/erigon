@@ -327,6 +327,9 @@ func (sd *SharedDomains) Logger() log.Logger { return sd.logger }
 
 // SetStateCache sets the state cache for faster lookups.
 func (sd *SharedDomains) SetStateCache(stateCache *cache.StateCache) {
+	if !dbg.UseStateCache || stateCache == nil {
+		return
+	}
 	sd.stateCache = stateCache
 }
 
@@ -345,8 +348,6 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 func (sd *SharedDomains) Size() uint64 {
 	return sd.mem.SizeEstimate()
 }
-
-const CodeSizeTableFake = "CodeSize"
 
 func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte, txNum uint64) (err error) {
 	return sd.mem.IndexAdd(table, key, txNum)
