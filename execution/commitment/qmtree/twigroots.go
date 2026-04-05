@@ -307,7 +307,8 @@ func prevLeafAtStep(dir string, step, stepSize uint64) common.Hash {
 // merged .v file covering [fromStep, toStep). Old per-step files are deleted.
 func mergeRootFiles(dir string, fromStep, toStep, stepSize uint64) {
 	mergedPath := twigRootsPath(dir, fromStep, toStep)
-	out, err := os.Create(mergedPath)
+	tmpPath := mergedPath + ".tmp"
+	out, err := os.Create(tmpPath)
 	if err != nil {
 		log.Warn("qmtree: failed to create merged roots file", "err", err)
 		return
@@ -339,7 +340,7 @@ func mergeRootFiles(dir string, fromStep, toStep, stepSize uint64) {
 
 	if len(files) == 0 {
 		out.Close()
-		os.Remove(mergedPath)
+		os.Remove(tmpPath)
 		return
 	}
 
@@ -369,6 +370,9 @@ func mergeRootFiles(dir string, fromStep, toStep, stepSize uint64) {
 	out.Write(lastPrevLeaf[:])
 	out.Sync()
 	out.Close()
+
+	// Rename tmp to final path.
+	os.Rename(tmpPath, mergedPath)
 
 	// Delete all root files whose range falls within the merged range.
 	entries, _ = os.ReadDir(dir)
