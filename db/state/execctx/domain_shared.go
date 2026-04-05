@@ -301,6 +301,12 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 		sd.sdCtx.ClearRam()
 	}
 	sd.mem.ClearRam()
+	// CommitmentDomain stateCache entries come only from DomainPut (never from DB reads),
+	// so they represent in-flight trie state that is no longer backed by the mem batch.
+	// Clear them immediately to avoid stateCache/truth mismatches on subsequent reads.
+	if sd.stateCache != nil {
+		sd.stateCache.ClearCommitment()
+	}
 }
 
 // InvalidateCommitmentCache marks the CommitmentDomain stateCache as dirty.

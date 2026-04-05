@@ -112,6 +112,17 @@ func (c *StateCache) Clear() {
 	}
 }
 
+// ClearCommitment clears the CommitmentDomain cache immediately.
+// Must be called when the mem batch is cleared (ClearRam) because CommitmentDomain
+// stateCache entries are populated only via DomainPut (not DB reads), so they represent
+// in-flight trie state that becomes stale once the mem batch is reset.
+func (c *StateCache) ClearCommitment() {
+	if cache := c.caches[kv.CommitmentDomain]; cache != nil {
+		cache.Clear()
+	}
+	c.commitmentDirty = false
+}
+
 // InvalidateCommitment marks the CommitmentDomain cache as dirty (stale from a rolled-back tx).
 // The cache is cleared lazily at the start of the next PrepareForCommitment call.
 func (c *StateCache) InvalidateCommitment() {
