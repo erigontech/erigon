@@ -317,16 +317,15 @@ func (w *Warmuper) DrainPending() {
 	}
 }
 
-// WaitAndClose waits for all warmup work to complete and then closes the warmuper.
+// WaitAndClose cancels work, closes the channel, and waits for all goroutines to exit.
+// Must be used instead of Close when the caller may reuse memory (e.g. byteArena) that
+// goroutines hold references to via hashedKey slices.
 func (w *Warmuper) WaitAndClose() {
-	if w.closed.Swap(true) {
-		return // Already closed
-	}
-	w.Wait()
 	w.Close()
+	_ = w.g.Wait()
 }
 
-// Close cancels all warmup work and releases resources.
+// Close cancels all warmup work and releases resources. Does NOT wait for goroutines to exit.
 func (w *Warmuper) Close() {
 	if w.closed.Swap(true) {
 		return // Already closed
