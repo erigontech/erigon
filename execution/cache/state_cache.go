@@ -43,6 +43,10 @@ const (
 // Code uses CodeCache (two-level for deduplication).
 type StateCache struct {
 	caches [kv.DomainLen]Cache
+	// commitmentDirty marks the CommitmentDomain cache as stale (from a rolled-back
+	// commitment tx). Cleared and the cache is wiped at the start of the next
+	// ComputeCommitment so the warmuper never reads stale branch data.
+	commitmentDirty bool
 }
 
 // NewStateCache creates a new StateCache with the specified byte capacities.
@@ -106,6 +110,25 @@ func (c *StateCache) Clear() {
 			cache.Clear()
 		}
 	}
+}
+
+// InvalidateCommitment marks the CommitmentDomain cache as dirty (stale from a rolled-back tx).
+// The cache is cleared lazily at the start of the next PrepareForCommitment call.
+func (c *StateCache) InvalidateCommitment() {
+	c.commitmentDirty = true
+}
+
+// PrepareForCommitment clears the CommitmentDomain cache if it was marked dirty by
+// InvalidateCommitment. Must be called before ComputeCommitment so the warmuper goroutine
+// never reads stale branch data written by a rolled-back commitment.
+func (c *StateCache) PrepareForCommitment() {
+	if !c.commitmentDirty {
+		return
+	}
+	if cache := c.caches[kv.CommitmentDomain]; cache != nil {
+		cache.ClearWithHash(common.Hash{})
+	}
+	c.commitmentDirty = false
 }
 
 // ValidateAndPrepare validates and prepares all caches for a new block.

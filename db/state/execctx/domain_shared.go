@@ -97,9 +97,6 @@ type SharedDomains struct {
 
 	// stateCache is an optional cache for state data (accounts, storage, code)
 	stateCache *cache.StateCache
-	// commitmentCacheDirty is set when a commitment fails (wrong root or error), so the
-	// CommitmentDomain stateCache is cleared before the next ComputeCommitment call.
-	commitmentCacheDirty bool
 }
 
 func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
@@ -312,7 +309,9 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 // Must be called when a commitment is rolled back (wrong trie root or error),
 // because DomainPut already wrote branch values to the cache that are now stale.
 func (sd *SharedDomains) InvalidateCommitmentCache() {
-	sd.commitmentCacheDirty = true
+	if sd.stateCache != nil {
+		sd.stateCache.InvalidateCommitment()
+	}
 }
 
 func (sd *SharedDomains) Size() uint64 {
@@ -671,11 +670,8 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (
 // ComputeCommitment evaluates commitment for gathered updates.
 // If trieWarmup toggle was enabled via EnableTrieWarmup, pre-warms MDBX page cache by reading Branch data in parallel before processing.
 func (sd *SharedDomains) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveStateAfter bool, blockNum, txNum uint64, logPrefix string, commitProgress chan *commitment.CommitProgress) (rootHash []byte, err error) {
-	if sd.commitmentCacheDirty && sd.stateCache != nil {
-		if c := sd.stateCache.GetCache(kv.CommitmentDomain); c != nil {
-			c.ClearWithHash(common.Hash{})
-		}
-		sd.commitmentCacheDirty = false
+	if sd.stateCache != nil {
+		sd.stateCache.PrepareForCommitment()
 	}
 	return sd.sdCtx.ComputeCommitment(ctx, tx, saveStateAfter, blockNum, txNum, logPrefix, commitProgress)
 }
