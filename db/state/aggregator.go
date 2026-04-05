@@ -1176,7 +1176,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 			return false, err
 		}
 		if stat == nil || stat.PrunedNothing() {
-			at.a.logger.Debug("[snapshots] PruneSmallBatches nilled or nothing")
+			//at.a.logger.Debug("[snapshots] PruneSmallBatches nilled or nothing")
 			if !fullStat.PrunedNothing() {
 				at.a.logger.Debug("[snapshots] PruneSmallBatches finished", "took", time.Since(started).String(), "stat", fullStat.String())
 			}
