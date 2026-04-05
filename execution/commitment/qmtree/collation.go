@@ -397,6 +397,9 @@ func (sm *SnapshotManager) MergeEntries(ctx context.Context, fromStep, toStep ui
 		return err
 	}
 
+	// Merge corresponding twig root files.
+	mergeRootFiles(sm.domainDir, mergedFrom, mergedTo, sm.stepSize)
+
 	// Close and delete old snapshots.
 	var kept []*entrySnapshot
 	for _, snap := range sm.entries {

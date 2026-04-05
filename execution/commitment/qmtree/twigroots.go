@@ -302,4 +302,72 @@ func prevLeafAtStep(dir string, step, stepSize uint64) common.Hash {
 	return common.Hash{}
 }
 
+// mergeRootFiles concatenates individual per-step .v root files into a single
+// merged .v file covering [fromStep, toStep). Old per-step files are deleted.
+func mergeRootFiles(dir string, fromStep, toStep, stepSize uint64) {
+	mergedPath := twigRootsPath(dir, fromStep, toStep)
+	out, err := os.Create(mergedPath)
+	if err != nil {
+		log.Warn("qmtree: failed to create merged roots file", "err", err)
+		return
+	}
+
+	// The merged file has one prevLeaf (from the last step) followed by all twig roots.
+	// We stream-copy the twig roots from each step file, keeping only the last prevLeaf.
+	var lastPrevLeaf common.Hash
+	firstFile := true
+
+	for step := fromStep; step < toStep; step++ {
+		path := twigRootsPath(dir, step, step+1)
+		f, err := os.Open(path)
+		if err != nil {
+			// Try merged ranges that might already exist
+			continue
+		}
+
+		// Read this file's prevLeaf (first 32 bytes).
+		var prevLeaf [32]byte
+		if _, err := io.ReadFull(f, prevLeaf[:]); err != nil {
+			f.Close()
+			continue
+		}
+		lastPrevLeaf = prevLeaf
+
+		if firstFile {
+			// Write placeholder prevLeaf — we'll overwrite at the end.
+			out.Write(make([]byte, 32))
+			firstFile = false
+		}
+
+		// Copy all twig roots (rest of file).
+		if _, err := io.Copy(out, f); err != nil {
+			f.Close()
+			log.Warn("qmtree: failed to copy roots in merge", "step", step, "err", err)
+		}
+		f.Close()
+	}
+
+	if firstFile {
+		// No files found — clean up.
+		out.Close()
+		os.Remove(mergedPath)
+		return
+	}
+
+	// Write the last prevLeaf at the start.
+	out.Seek(0, io.SeekStart)
+	out.Write(lastPrevLeaf[:])
+	out.Sync()
+	out.Close()
+
+	// Delete the individual step files.
+	for step := fromStep; step < toStep; step++ {
+		os.Remove(twigRootsPath(dir, step, step+1))
+	}
+
+	log.Info("qmtree: merged root files",
+		"fromStep", fromStep, "toStep", toStep,
+	)
+}
+
 // nodePos and GetShardIdxAndKey are defined in tree.go.
