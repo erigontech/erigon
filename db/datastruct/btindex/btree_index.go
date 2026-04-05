@@ -544,25 +544,6 @@ func (b *BtIndex) dataLookup(di uint64, g *seg.Reader) (k, v []byte, offset uint
 	return k, v, offset, nil
 }
 
-// comparing `k` with item of index `di`. using buffer `kBuf` to avoid allocations
-func (b *BtIndex) keyCmp(k []byte, di uint64, g *seg.Reader, resBuf []byte) (int, []byte, error) {
-	if di >= b.ef.Count() {
-		return 0, resBuf, fmt.Errorf("%w: keyCount=%d, but key %d requested. file: %s", ErrBtIndexLookupBounds, b.ef.Count(), di+1, b.FileName())
-	}
-
-	offset := b.ef.Get(di)
-	g.Reset(offset)
-	if !g.HasNext() {
-		return 0, resBuf, fmt.Errorf("key at %d/%d not found, file: %s", di, b.ef.Count(), b.FileName())
-	}
-
-	resBuf, _ = g.Next(resBuf)
-
-	//TODO: use `b.getter.Match` after https://github.com/erigontech/erigon/issues/7855
-	return bytes.Compare(resBuf, k), resBuf, nil
-	//return b.getter.Match(k), result, nil
-}
-
 // getter should be alive all the time of cursor usage
 // Key and value is valid until cursor.Next is called
 func (b *BtIndex) newCursor(k, v []byte, d uint64, g *seg.Reader) *Cursor {
