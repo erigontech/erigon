@@ -73,6 +73,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			"initialBlockTxOffset", offsetFromBlockBeginning, "lastFrozenStep", lastFrozenStep,
 			"initialCycle", initialCycle, "isForkValidation", se.isForkValidation, "isBlockProduction", se.isBlockProduction)
 	}
+	stateCache := se.doms.GetStateCache()
 
 	for ; blockNum <= maxBlockNum; blockNum++ {
 		shouldGenerateChangesets := shouldGenerateChangeSets(se.cfg, blockNum, maxBlockNum, initialCycle)
@@ -104,7 +105,6 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		}
 		go warmTxsHashes(b)
 
-		stateCache := se.doms.GetStateCache()
 		if stateCache != nil {
 			stateCache.ValidateAndPrepare(b.ParentHash(), b.Hash())
 		}
@@ -167,9 +167,6 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		log.Debug(fmt.Sprintf("[%s] executed block %d in %s", se.logPrefix, blockNum, time.Since(start)))
 		if err != nil {
 			return nil, rwTx, err
-		}
-		if stateCache != nil {
-			stateCache.PrintStatsAndReset()
 		}
 
 		if !continueLoop {
@@ -240,6 +237,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				"txNum", inputTxNum,
 				"commitment", times.ComputeCommitment,
 			)
+			stateCache.PrintStatsAndReset()
 			if isBatchFull {
 				return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch is full"}
 			}
@@ -263,6 +261,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		}
 	}
 
+	stateCache.PrintStatsAndReset()
 	return b.HeaderNoCopy(), rwTx, nil
 }
 

@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/metrics"
@@ -73,7 +74,8 @@ func StageLoop(
 ) {
 	defer close(waitForDone)
 
-	if err := ProcessFrozenBlocks(ctx, db, blockReader, sync, hook, false /* onlySnapDownload */, logger); err != nil {
+	domainCache := cache.NewDefaultStateCache()
+	if err := ProcessFrozenBlocks(ctx, db, blockReader, sync, hook, false /* onlySnapDownload */, domainCache, logger); err != nil {
 		if errors.Is(err, common.ErrStopped) || errors.Is(err, context.Canceled) {
 			return
 		}
@@ -127,7 +129,7 @@ func StageLoop(
 	}
 }
 
-func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader services.FullBlockReader, sync *stagedsync.Sync, hook *Hook, onlySnapDownload bool, logger log.Logger) error {
+func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader services.FullBlockReader, sync *stagedsync.Sync, hook *Hook, onlySnapDownload bool, stateCache *cache.StateCache, logger log.Logger) error {
 	sawZeroBlocksTimes := 0
 	tx, err := db.BeginTemporalRw(ctx)
 	if err != nil {
@@ -155,6 +157,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 	}
 	defer doms.Close()
 	doms.SetInMemHistoryReads(inMemHistoryReads)
+	doms.SetStateCache(stateCache)
 
 	var finishStageBeforeSync uint64
 	if hook != nil {
