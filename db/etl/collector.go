@@ -130,7 +130,7 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 	}
 
 	// go bg - but without server overloading
-	doInBackground := c.sortAndFlushInBackground && c.sortAndFlushInBackgroundActive.CompareAndSwap(false, true)
+	doInBackground := c.sortAndFlushInBackground //&& c.sortAndFlushInBackgroundActive.CompareAndSwap(false, true)
 	if !doInBackground {
 		provider, err := FlushToDisk(c.logPrefix, c.buf, c.tmpdir, c.logLvl)
 		if err != nil {
