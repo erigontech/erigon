@@ -23,19 +23,20 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/holiman/uint256"
 
-	"time"
-
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi"
+	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
@@ -44,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/rulesconfig"
 	"github.com/erigontech/erigon/rpc"
 )
@@ -139,13 +141,8 @@ func (p *etNewPayload) UnmarshalJSON(data []byte) error {
 	}
 	// V4/V5+: params[3] = executionRequests
 	if len(raw.Params) >= 4 {
-		var hexRequests []hexutil.Bytes
-		if err := json.Unmarshal(raw.Params[3], &hexRequests); err != nil {
+		if err := json.Unmarshal(raw.Params[3], &p.Requests); err != nil {
 			return fmt.Errorf("failed to unmarshal executionRequests: %v", err)
-		}
-		p.Requests = make([][]byte, len(hexRequests))
-		for i, r := range hexRequests {
-			p.Requests[i] = r
 		}
 	}
 	return nil
@@ -240,7 +237,17 @@ func payloadToBlock(p *etNewPayload) (*types.Block, []byte, error) {
 	return block, blockAccessListBytes, nil
 }
 
-// RunCLI executes the engine test.
+// RunCLI executes the engine test through the real Engine API path:
+// HandleNewPayload (block insertion + chain validation) and
+// HandleForkChoice (canonical head advancement).
+//
+// Parameter validation is done upfront via validatePayloadVersion which
+// calls engineapi.ValidateExecutionRequests — the same validation that
+// EngineServer.newPayload performs.
+//
+// The only EngineServer method NOT called is getQuickPayloadStatusIfPossible
+// which has a db.BeginRo deadlock when called after HandleForkChoice in
+// test mode (the FCU's temporal write transaction blocks subsequent reads).
 func (t *EngineTest) RunCLI() error {
 	config, ok := testforks.Forks[t.json.Network]
 	if !ok {
@@ -257,85 +264,48 @@ func (t *EngineTest) RunCLI() error {
 		return fmt.Errorf("genesis block state root does not match test: computed=%x, test=%x", m.Genesis.Root().Bytes()[:6], t.json.Genesis.StateRoot[:6])
 	}
 
-	// Create EngineServer to route through the real engine API path
+	// Create EngineServer for HandleNewPayload + HandleForkChoice
 	executionClient := direct.NewExecutionClientDirect(m.ExecModule)
-	engineServer := engineapi.NewEngineServer(
-		log.New(),
-		config,
-		executionClient,
-		nil,   // blockDownloader — not needed for payload execution
-		false, // caplin
-		true,  // internalCL
-		false, // proposing
-		true,  // consuming
-		nil,   // txPool
-		time.Hour, // fcuTimeout
-		0,     // maxReorgDepth
+	blockDownloader := engine_block_downloader.NewEngineBlockDownloader(
+		m.Ctx, log.New(), executionClient, m.BlockReader, m.DB,
+		config, ethconfig.Defaults.Sync, nil,
 	)
-
-	// Send initial forkchoiceUpdated to genesis
-	genesisHash := m.Genesis.Hash()
-	fcuStatus, err := engineServer.HandleForkChoice(m.Ctx, "ForkchoiceUpdated",
-		&engine_types.ForkChoiceState{
-			HeadHash:           genesisHash,
-			SafeBlockHash:      genesisHash,
-			FinalizedBlockHash: genesisHash,
-		})
-	if err != nil || fcuStatus.Status != engine_types.ValidStatus {
-		return fmt.Errorf("initial FCU to genesis failed: %v (status: %v)", err, fcuStatus)
-	}
+	engineServer := engineapi.NewEngineServer(
+		log.New(), config, executionClient, blockDownloader,
+		false, true, false, true, nil, time.Hour, ^uint64(0),
+	)
+	engineServer.SetTest(true)
 
 	for i, payload := range t.json.Payloads {
-		// Call the real engine newPayload via EngineServer
-		version := payload.Version
-		req := &payload.ExecutionPayload
-
-		var versionedHashes []common.Hash
-		var beaconRoot *common.Hash
-		var executionRequests []hexutil.Bytes
-
-		if payload.VersionedHashes != nil {
-			versionedHashes = payload.VersionedHashes
-		}
-		if payload.BeaconRoot != nil {
-			beaconRoot = payload.BeaconRoot
-		}
-		if payload.Requests != nil {
-			executionRequests = make([]hexutil.Bytes, len(payload.Requests))
-			for j, r := range payload.Requests {
-				executionRequests[j] = r
+		// Phase 1: Engine parameter validation (same checks as EngineServer.newPayload)
+		if err := validatePayloadVersion(&payload, config); err != nil {
+			if payload.ErrorCode != nil {
+				continue // Expected error code
 			}
+			return fmt.Errorf("payload %d: unexpected validation error: %v", i, err)
 		}
-
-		var status *engine_types.PayloadStatus
-		switch version {
-		case 1:
-			status, err = engineServer.NewPayloadV1(m.Ctx, req)
-		case 2:
-			status, err = engineServer.NewPayloadV2(m.Ctx, req)
-		case 3:
-			status, err = engineServer.NewPayloadV3(m.Ctx, req, versionedHashes, beaconRoot)
-		case 4:
-			status, err = engineServer.NewPayloadV4(m.Ctx, req, versionedHashes, beaconRoot, executionRequests)
-		case 5:
-			status, err = engineServer.NewPayloadV5(m.Ctx, req, versionedHashes, beaconRoot, executionRequests)
-		default:
-			return fmt.Errorf("payload %d: unsupported version %d", i, version)
-		}
-
-		// Check error code expectation
 		if payload.ErrorCode != nil {
-			if err == nil {
-				return fmt.Errorf("payload %d: expected error code %d but no error occurred", i, *payload.ErrorCode)
-			}
-			// Error occurred — check if it's the right type
-			continue
+			return fmt.Errorf("payload %d: expected error code %d but validation passed", i, *payload.ErrorCode)
 		}
+
+		// Phase 2: Convert payload to block (same as EngineServer.newPayload block construction)
+		block, blockAccessListBytes, err := payloadToBlock(&payload)
 		if err != nil {
 			if payload.ValidationError != "" {
-				continue // Expected to be invalid
+				continue
 			}
-			return fmt.Errorf("payload %d: unexpected error: %v", i, err)
+			return fmt.Errorf("payload %d: block conversion failed: %v", i, err)
+		}
+
+		// Phase 3: Call the real HandleNewPayload (insert + ValidateChain)
+		status, err := engineServer.HandleNewPayload(
+			m.Ctx, "NewPayload", block, payload.VersionedHashes, blockAccessListBytes,
+		)
+		if err != nil {
+			if payload.ValidationError != "" {
+				continue
+			}
+			return fmt.Errorf("payload %d: HandleNewPayload error: %v", i, err)
 		}
 
 		// Check validation error expectation
@@ -350,12 +320,12 @@ func (t *EngineTest) RunCLI() error {
 		if status.Status != engine_types.ValidStatus {
 			errMsg := ""
 			if status.ValidationError != nil {
-				errMsg = status.ValidationError.Error()
+				errMsg = status.ValidationError.Error().Error()
 			}
 			return fmt.Errorf("payload %d: expected VALID, got %s (err: %s)", i, status.Status, errMsg)
 		}
 
-		// Send forkchoiceUpdated to advance head
+		// Phase 4: Call the real HandleForkChoice to advance canonical head
 		blockHash := payload.ExecutionPayload.BlockHash
 		fcuStatus, err := engineServer.HandleForkChoice(m.Ctx, "ForkchoiceUpdated",
 			&engine_types.ForkChoiceState{
@@ -519,5 +489,28 @@ func validatePayloadVersion(p *etNewPayload, config *chain.Config) error {
 			return &rpc.UnsupportedForkError{Message: "newPayloadV5 must only be called for amsterdam payloads"}
 		}
 	}
+
+	// Validate execution request content via the real engine API validation
+	if err := engineapi.ValidateExecutionRequests(versionToClVersion(p.Version), p.Requests); err != nil {
+		return err
+	}
+
 	return nil
+}
+
+func versionToClVersion(v int) clparams.StateVersion {
+	switch v {
+	case 1:
+		return clparams.BellatrixVersion
+	case 2:
+		return clparams.CapellaVersion
+	case 3:
+		return clparams.DenebVersion
+	case 4:
+		return clparams.ElectraVersion
+	case 5:
+		return clparams.GloasVersion
+	default:
+		return clparams.BellatrixVersion
+	}
 }

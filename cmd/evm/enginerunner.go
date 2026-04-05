@@ -83,41 +83,87 @@ func engineTestCmd(ctx *cli.Context) error {
 	return nil
 }
 
+// engineTestItem is a single parsed test case ready for execution.
+type engineTestItem struct {
+	index int
+	name  string
+	test  *testutil.EngineTest
+}
+
 func runEngineTestsParallel(ctx *cli.Context, files []string, workers int) ([]testResult, error) {
-	if workers == 1 {
-		var results []testResult
-		for _, fname := range files {
-			r, err := runEngineTest(ctx, fname)
-			if err != nil {
-				return nil, err
+	re, err := regexp.Compile(ctx.String(RunFlag.Name))
+	if err != nil {
+		return nil, fmt.Errorf("invalid regex -%s: %v", RunFlag.Name, err)
+	}
+
+	// Phase 1: Parse all files and flatten to individual test cases.
+	// This is fast (JSON parsing only) and lets us distribute evenly.
+	var items []engineTestItem
+	for _, fname := range files {
+		src, err := os.ReadFile(fname)
+		if err != nil {
+			return nil, err
+		}
+		var tests map[string]*testutil.EngineTest
+		if err = json.Unmarshal(src, &tests); err != nil {
+			continue // Skip non-fixture JSON files
+		}
+		keys := slices.Sorted(maps.Keys(tests))
+		for _, name := range keys {
+			if !re.MatchString(name) {
+				continue
 			}
-			results = append(results, r...)
+			items = append(items, engineTestItem{
+				index: len(items),
+				name:  name,
+				test:  tests[name],
+			})
+		}
+	}
+
+	if len(items) == 0 {
+		return nil, nil
+	}
+
+	// Phase 2: Execute test cases across workers.
+	if workers == 1 {
+		results := make([]testResult, 0, len(items))
+		for _, item := range items {
+			result := testResult{Name: item.name, Pass: true}
+			if err := item.test.RunCLI(); err != nil {
+				result.Pass = false
+				result.Error = err.Error()
+			}
+			result.Fork = item.test.Network()
+			results = append(results, result)
 		}
 		return results, nil
 	}
-	var (
-		wg     sync.WaitGroup
-		fileCh = make(chan struct {
-			index int
-			fname string
-		}, len(files))
-		resultCh = make(chan fileResult, len(files))
-	)
-	for i, fname := range files {
-		fileCh <- struct {
-			index int
-			fname string
-		}{i, fname}
-	}
-	close(fileCh)
 
+	type indexedResult struct {
+		index  int
+		result testResult
+	}
+
+	itemCh := make(chan engineTestItem, len(items))
+	for _, item := range items {
+		itemCh <- item
+	}
+	close(itemCh)
+
+	resultCh := make(chan indexedResult, len(items))
+	var wg sync.WaitGroup
 	for w := 0; w < workers; w++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for item := range fileCh {
-				r, err := runEngineTest(ctx, item.fname)
-				resultCh <- fileResult{index: item.index, results: r, err: err}
+			for item := range itemCh {
+				result := testResult{Name: item.name, Pass: true, Fork: item.test.Network()}
+				if err := item.test.RunCLI(); err != nil {
+					result.Pass = false
+					result.Error = err.Error()
+				}
+				resultCh <- indexedResult{index: item.index, result: result}
 			}
 		}()
 	}
@@ -126,18 +172,11 @@ func runEngineTestsParallel(ctx *cli.Context, files []string, workers int) ([]te
 		close(resultCh)
 	}()
 
-	ordered := make([]fileResult, len(files))
-	for fr := range resultCh {
-		if fr.err != nil {
-			return nil, fr.err
-		}
-		ordered[fr.index] = fr
+	ordered := make([]testResult, len(items))
+	for ir := range resultCh {
+		ordered[ir.index] = ir.result
 	}
-	var results []testResult
-	for _, fr := range ordered {
-		results = append(results, fr.results...)
-	}
-	return results, nil
+	return ordered, nil
 }
 
 func runEngineTest(ctx *cli.Context, fname string) ([]testResult, error) {
@@ -164,7 +203,7 @@ func runEngineTest(ctx *cli.Context, fname string) ([]testResult, error) {
 			continue
 		}
 
-		result := &testResult{Name: name, Pass: true}
+		result := &testResult{Name: name, Pass: true, Fork: tests[name].Network()}
 		if err := tests[name].RunCLI(); err != nil {
 			result.Pass = false
 			result.Error = err.Error()

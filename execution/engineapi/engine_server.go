@@ -124,6 +124,10 @@ func NewEngineServer(
 	return srv
 }
 
+// SetTest enables test mode which skips block downloading attempts
+// and returns SYNCING status immediately when parent blocks aren't found.
+func (e *EngineServer) SetTest(t bool) { e.test = t }
+
 func (e *EngineServer) Start(
 	ctx context.Context,
 	httpConfig *httpcfg.HttpCfg,
@@ -198,14 +202,28 @@ func (s *EngineServer) isWithdrawalsPresenceValid(time uint64, withdrawals types
 }
 
 func (s *EngineServer) checkRequestsPresence(version clparams.StateVersion, executionRequests []hexutil.Bytes) error {
+	return ValidateExecutionRequests(version, executionRequests)
+}
+
+// ValidateExecutionRequests checks execution request parameters per the Engine API spec:
+// presence/absence by version, minimum item length, and strictly increasing type ordering.
+func ValidateExecutionRequests(version clparams.StateVersion, executionRequests []hexutil.Bytes) error {
 	if version < clparams.ElectraVersion {
 		if executionRequests != nil {
 			return &rpc.InvalidParamsError{Message: "requests in EngineAPI not supported before Prague"}
 		}
-	} else if executionRequests == nil {
+		return nil
+	}
+	if executionRequests == nil {
 		return &rpc.InvalidParamsError{Message: "missing requests list"}
 	}
-
+	lastReqType := -1
+	for i, r := range executionRequests {
+		if len(r) <= 1 || (lastReqType >= 0 && int(r[0]) <= lastReqType) {
+			return &rpc.InvalidParamsError{Message: fmt.Sprintf("Invalid Request at index %d", i)}
+		}
+		lastReqType = int(r[0])
+	}
 	return nil
 }
 
