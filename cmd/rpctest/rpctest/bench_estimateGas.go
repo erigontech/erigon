@@ -94,7 +94,7 @@ func BenchEthEstimateGas(erigonURL, gethURL string, needCompare bool, blockFrom,
 					rec.Flush()
 					continue
 				} else {
-					return fmt.Errorf("Block one or more fields areis different for block %d\n", bn)
+					return fmt.Errorf("Block one or more fields are different for block %d\n", bn)
 				}
 			}
 		}
