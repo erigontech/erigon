@@ -43,7 +43,7 @@ type testResult struct {
 	Pass  bool         `json:"pass"`
 	Root  *common.Hash `json:"stateRoot,omitempty"`
 	Fork  string       `json:"fork,omitempty"`
-	Error string       `json:"error,omitempty"`
+	Error string       `json:"error"`
 	State *state.Dump  `json:"state,omitempty"`
 	Stats *execStats   `json:"benchStats,omitempty"`
 }
