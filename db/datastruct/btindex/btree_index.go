@@ -507,7 +507,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 	defer kvGetter.MadvNormal().DisableReadAhead()
 
 	if len(idx.data[pos:]) == 0 {
-		idx.bplus = NewBpsTree(kvGetter, idx.ef, M, idx.dataLookup, idx.keyCmp)
+		idx.bplus = NewBpsTree(kvGetter, idx.ef, M, idx.dataLookup)
 		idx.bplus.cursorGetter = idx.newCursor
 		// fallback for files without nodes encoded
 	} else {
@@ -515,7 +515,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 		if err != nil {
 			return nil, err
 		}
-		idx.bplus = NewBpsTreeWithNodes(kvGetter, idx.ef, M, idx.dataLookup, idx.keyCmp, nodes)
+		idx.bplus = NewBpsTreeWithNodes(kvGetter, idx.ef, M, idx.dataLookup, nodes)
 		idx.bplus.cursorGetter = idx.newCursor
 	}
 
