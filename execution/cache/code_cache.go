@@ -22,6 +22,7 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
@@ -118,9 +119,11 @@ func (c *CodeCache) Put(addr []byte, code []byte) {
 	}
 
 	codeHash := maphash.Hash(code)
-	addrEntrySize := int64(len(addr) + 8) // addr + uint64 hash
+	addrEntrySize := int64(len(addr) + 8) // addr key + uint64 hash value
 
-	// Check if addr already exists - updates are always allowed
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	if _, exists := c.addrToHash.Get(addr); exists {
 		c.addrToHash.Set(addr, versionedAddressID{addrID: codeHash})
 	} else if c.addrSize.Load()+addrEntrySize <= int64(c.addrCapacityB) {
@@ -128,16 +131,16 @@ func (c *CodeCache) Put(addr []byte, code []byte) {
 		c.addrSize.Add(addrEntrySize)
 	}
 
-	// Check if code already stored
+	// hashToCode is write-once: code for a given hash never changes, so a
+	// concurrent double-store of the same value is safe. The lock still covers
+	// this section to keep the codeSize capacity check-and-add atomic.
 	hashKey := uint64AsBytes(&codeHash)
 	if _, exists := c.hashToCode.Get(hashKey); exists {
 		return
 	}
-
-	// New code entry - check capacity
-	codeEntrySize := int64(8 + len(code)) // hash + code
+	codeEntrySize := int64(8 + len(code)) // hash key + code value
 	if c.codeSize.Load()+codeEntrySize > int64(c.codeCapacityB) {
-		return // no-op when full
+		return
 	}
 	c.hashToCode.Set(hashKey, code)
 	c.codeSize.Add(codeEntrySize)
@@ -146,16 +149,19 @@ func (c *CodeCache) Put(addr []byte, code []byte) {
 // Delete removes the address → codeHash mapping.
 // The codeHash → code mapping is kept since it's immutable.
 func (c *CodeCache) Delete(addr []byte) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if _, exists := c.addrToHash.Get(addr); exists {
-		addrEntrySize := int64(len(addr) + 8)
 		c.addrToHash.Delete(addr)
-		c.addrSize.Add(-addrEntrySize)
+		c.addrSize.Add(-int64(len(addr) + 8))
 	}
 }
 
 // Clear removes all address mappings from the cache.
 // The codeHash → code mappings are preserved since they're immutable.
 func (c *CodeCache) Clear() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.addrToHash.Clear()
 	c.addrSize.Store(0)
 }

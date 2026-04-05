@@ -21,6 +21,7 @@ import (
 	"sync/atomic"
 
 	"github.com/c2h5oh/datasize"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
@@ -94,7 +95,9 @@ func (c *GenericCache[T]) Get(key []byte) (T, bool) {
 func (c *GenericCache[T]) Put(key []byte, value T) {
 	entrySize := int64(8 + c.sizeFunc(value))
 
-	// Check if key already exists
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	if existing, ok := c.data.Get(key); ok {
 		oldSize := int64(8 + c.sizeFunc(existing))
 		sizeDiff := entrySize - oldSize
@@ -103,7 +106,6 @@ func (c *GenericCache[T]) Put(key []byte, value T) {
 		return
 	}
 
-	// New key
 	if c.currentSize.Load()+entrySize > int64(c.capacityB) {
 		return
 	}
@@ -114,6 +116,8 @@ func (c *GenericCache[T]) Put(key []byte, value T) {
 
 // Delete removes the data for the given key.
 func (c *GenericCache[T]) Delete(key []byte) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if existing, ok := c.data.Get(key); ok {
 		entrySize := int64(8 + c.sizeFunc(existing))
 		c.data.Delete(key)
@@ -123,6 +127,8 @@ func (c *GenericCache[T]) Delete(key []byte) {
 
 // Clear removes all entries from the cache.
 func (c *GenericCache[T]) Clear() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.data.Clear()
 	c.currentSize.Store(0)
 }
