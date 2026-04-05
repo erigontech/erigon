@@ -30,7 +30,7 @@ type Map[V any] struct {
 
 // NewMap creates a new Map.
 func NewMap[V any]() *Map[V] {
-	return &Map[V]{m: xsync.NewMapOf[uint64, V]()}
+	return &Map[V]{m: xsync.NewMap[uint64, V]()}
 }
 
 // Get retrieves a value by key.
