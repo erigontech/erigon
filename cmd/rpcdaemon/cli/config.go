@@ -758,6 +758,11 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 	default:
 		rpcConcurrencyLimit = int64(cfg.DBReadConcurrency)
 	}
+	if rpcConcurrencyLimit == 0 {
+		logger.Info("RPC admission control disabled (unlimited concurrent requests)")
+	} else {
+		logger.Info("RPC admission control enabled", "max_concurrent_requests", rpcConcurrencyLimit, "db.read.concurrency", cfg.DBReadConcurrency)
+	}
 	httpHandler := node.NewHTTPHandlerStack(srv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, cfg.HttpCompression, rpcConcurrencyLimit, true)
 	var wsHandler http.Handler
 	if cfg.WebsocketEnabled {

@@ -169,6 +169,14 @@ jobs:
             echo "No rpcdaemon processes found"
           fi
 
+      - name: Run Migrations
+        if: matrix.client == 'erigon' && steps.save_chaindata_step.outputs.datadir_saved == 'true'
+        working-directory: ${{ github.workspace }}/build/bin
+        run: |
+          set -euo pipefail
+          echo "Running migrations on datadir..."
+          ./integration run_migrations --datadir $ERIGON_REFERENCE_DATA_DIR --chain $CHAIN
+
       - name: Run RpcDaemon
         id: rpcdaemon_running_step
         if: matrix.client == 'erigon'
