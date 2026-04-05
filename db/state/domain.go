@@ -509,7 +509,6 @@ type DomainRoTx struct {
 	btReaders   []*btindex.BtIndex
 	mapReaders  []*recsplit.IndexReader
 
-	comBuf        []byte
 	lookupFullKey []byte // scratch buffer for lookupByShortenedKey
 
 	valsC      kv.Cursor
