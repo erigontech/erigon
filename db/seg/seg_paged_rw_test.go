@@ -629,4 +629,27 @@ func TestReaderBinarySearch(t *testing.T) {
 	}
 	_, ok = g.BinarySearch(bigKey, numPairs, getOffset)
 	require.False(t, ok, "big key should not be found")
+
+	// Test 4: MatchPrefix/MatchCmp on last key with prefix beyond it
+	lastKey := keys[len(keys)-1]
+	lastOffset := offsets[len(offsets)-1]
+
+	// exact prefix of last key should match
+	g.Reset(lastOffset)
+	require.True(t, g.MatchPrefix(lastKey[:10]), "prefix of last key should match")
+
+	// prefix larger than last key (appended 0xFF) should not match
+	beyondKey := append(lastKey[:len(lastKey):len(lastKey)], 0xFF)
+	g.Reset(lastOffset)
+	require.False(t, g.MatchPrefix(beyondKey), "prefix beyond last key should not match")
+
+	// MatchCmp with key larger than last key
+	g.Reset(lastOffset)
+	cmpResult := g.MatchCmp(beyondKey)
+	require.Equal(t, 1, cmpResult, "key beyond last should be > last key")
+
+	// MatchCmp with exact last key should match
+	g.Reset(lastOffset)
+	cmpResult = g.MatchCmp(lastKey)
+	require.Equal(t, 0, cmpResult, "exact last key should match")
 }
