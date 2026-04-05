@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -314,17 +315,43 @@ func mergeRootFiles(dir string, fromStep, toStep, stepSize uint64) {
 
 	// The merged file has one prevLeaf (from the last step) followed by all twig roots.
 	// We stream-copy the twig roots from each step file, keeping only the last prevLeaf.
-	var lastPrevLeaf common.Hash
-	firstFile := true
-
-	for step := fromStep; step < toStep; step++ {
-		path := twigRootsPath(dir, step, step+1)
-		f, err := os.Open(path)
-		if err != nil {
-			// Try merged ranges that might already exist
+	// Collect all root files in the range, sorted by fromStep.
+	type rootFile struct {
+		from, to uint64
+		path     string
+	}
+	var files []rootFile
+	entries, _ := os.ReadDir(dir)
+	prefix := twigRootsVersion + "-" + twigRootsName + "."
+	for _, e := range entries {
+		if !hasExtension(e.Name(), twigRootsExt) || !hasPrefix(e.Name(), prefix) {
 			continue
 		}
+		var fs, ts uint64
+		pattern := prefix + "%d-%d" + twigRootsExt
+		if n, _ := fmt.Sscanf(e.Name(), pattern, &fs, &ts); n == 2 {
+			if fs >= fromStep && ts <= toStep {
+				files = append(files, rootFile{fs, ts, filepath.Join(dir, e.Name())})
+			}
+		}
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].from < files[j].from })
 
+	if len(files) == 0 {
+		out.Close()
+		os.Remove(mergedPath)
+		return
+	}
+
+	// Write placeholder prevLeaf.
+	out.Write(make([]byte, 32))
+
+	var lastPrevLeaf common.Hash
+	for _, rf := range files {
+		f, err := os.Open(rf.path)
+		if err != nil {
+			continue
+		}
 		// Read this file's prevLeaf (first 32 bytes).
 		var prevLeaf [32]byte
 		if _, err := io.ReadFull(f, prevLeaf[:]); err != nil {
@@ -332,26 +359,9 @@ func mergeRootFiles(dir string, fromStep, toStep, stepSize uint64) {
 			continue
 		}
 		lastPrevLeaf = prevLeaf
-
-		if firstFile {
-			// Write placeholder prevLeaf — we'll overwrite at the end.
-			out.Write(make([]byte, 32))
-			firstFile = false
-		}
-
 		// Copy all twig roots (rest of file).
-		if _, err := io.Copy(out, f); err != nil {
-			f.Close()
-			log.Warn("qmtree: failed to copy roots in merge", "step", step, "err", err)
-		}
+		io.Copy(out, f)
 		f.Close()
-	}
-
-	if firstFile {
-		// No files found — clean up.
-		out.Close()
-		os.Remove(mergedPath)
-		return
 	}
 
 	// Write the last prevLeaf at the start.
@@ -360,9 +370,20 @@ func mergeRootFiles(dir string, fromStep, toStep, stepSize uint64) {
 	out.Sync()
 	out.Close()
 
-	// Delete the individual step files.
-	for step := fromStep; step < toStep; step++ {
-		os.Remove(twigRootsPath(dir, step, step+1))
+	// Delete all root files whose range falls within the merged range.
+	entries, _ = os.ReadDir(dir)
+	prefix = twigRootsVersion + "-" + twigRootsName + "."
+	for _, e := range entries {
+		if !hasExtension(e.Name(), twigRootsExt) || !hasPrefix(e.Name(), prefix) {
+			continue
+		}
+		var fs, ts uint64
+		pattern := prefix + "%d-%d" + twigRootsExt
+		if n, _ := fmt.Sscanf(e.Name(), pattern, &fs, &ts); n == 2 {
+			if fs >= fromStep && ts <= toStep && !(fs == fromStep && ts == toStep) {
+				os.Remove(filepath.Join(dir, e.Name()))
+			}
+		}
 	}
 
 	log.Info("qmtree: merged root files",
