@@ -173,12 +173,9 @@ type (
 	}
 
 	// Changes to the access list
-	accessListAddAccountChange struct {
+	accessListAddAccountChange struct{}
+	accessListAddSlotChange    struct {
 		address accounts.Address
-	}
-	accessListAddSlotChange struct {
-		address accounts.Address
-		slot    accounts.StorageKey
 	}
 
 	transientStorageChange struct {
@@ -535,16 +532,12 @@ func (ch addLogChange) dirtied() (accounts.Address, bool) {
 }
 
 func (ch accessListAddAccountChange) revert(s *IntraBlockState) error {
-	/*
-		One important invariant here, is that whenever a (addr, slot) is added, if the
-		addr is not already present, the add causes two journal entries:
-		- one for the address,
-		- one for the (address,slot)
-		Therefore, when unrolling the change, we can always blindly delete the
-		(addr) at this point, since no storage adds can remain when come upon
-		a single (addr) change.
-	*/
-	s.accessList.DeleteAddress(ch.address)
+	// Whenever (addr, slot) is added and addr is not already present, two
+	// journal entries are created: one for the address, one for the slot.
+	// The LIFO journal guarantees that all slot entries for this address
+	// have already been reverted by the time we reach this entry, so
+	// PopAddress (which removes the last address by position) is safe.
+	s.accessList.PopAddress()
 	return nil
 }
 
@@ -553,7 +546,7 @@ func (ch accessListAddAccountChange) dirtied() (accounts.Address, bool) {
 }
 
 func (ch accessListAddSlotChange) revert(s *IntraBlockState) error {
-	s.accessList.DeleteSlot(ch.address, ch.slot)
+	s.accessList.PopSlot(ch.address)
 	return nil
 }
 

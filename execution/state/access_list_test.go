@@ -17,6 +17,7 @@
 package state
 
 import (
+	"encoding/binary"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -43,7 +44,7 @@ func verifyAddrs(t *testing.T, s *IntraBlockState, astrings ...string) {
 		}
 	}
 	// Check that only the expected addresses are present in the acesslist
-	for address := range s.accessList.addresses {
+	for _, address := range s.accessList.addrs {
 		if _, exist := addressMap[address]; !exist {
 			t.Fatalf("extra address %x in access list", address)
 		}
@@ -70,12 +71,14 @@ func verifySlots(t *testing.T, s *IntraBlockState, addrString string, slotString
 		}
 	}
 	// Check that no extra elements are in the access list
-	idx := s.accessList.addresses[address]
-	if idx >= 0 {
-		for s := range s.accessList.slots[idx] {
-			if _, slotPresent := slotMap[s]; !slotPresent {
-				t.Fatalf("scope has extra slot %v (address %v)", s, addrString)
+	for i, a := range s.accessList.addrs {
+		if a == address {
+			for _, s := range s.accessList.slots[i] {
+				if _, slotPresent := slotMap[s]; !slotPresent {
+					t.Fatalf("scope has extra slot %v (address %v)", s, addrString)
+				}
 			}
+			break
 		}
 	}
 }
@@ -103,7 +106,7 @@ func TestAccessList(t *testing.T) {
 
 	verifyAddrs(t, state, "aa", "bb")
 	verifySlots(t, state, "bb", "01", "02")
-	if got, exp := len(state.accessList.addresses), 2; got != exp {
+	if got, exp := len(state.accessList.addrs), 2; got != exp {
 		t.Fatalf("expected empty, got %d", got)
 	}
 
@@ -186,56 +189,101 @@ func TestAccessList(t *testing.T) {
 	if state.AddressInAccessList(addr("aa")) {
 		t.Fatalf("addr present, expected missing")
 	}
-	if got, exp := len(state.accessList.addresses), 0; got != exp {
+	if got, exp := len(state.accessList.addrs), 0; got != exp {
 		t.Fatalf("expected empty, got %d", got)
 	}
 }
 
-func BenchmarkAccessListReset(b *testing.B) {
-	sender := accounts.InternAddress(common.HexToAddress("0x1111"))
-	dst := accounts.InternAddress(common.HexToAddress("0x2222"))
-	precompiles := []accounts.Address{
-		accounts.InternAddress(common.HexToAddress("0x0001")),
-		accounts.InternAddress(common.HexToAddress("0x0002")),
-		accounts.InternAddress(common.HexToAddress("0x0003")),
-		accounts.InternAddress(common.HexToAddress("0x0004")),
-		accounts.InternAddress(common.HexToAddress("0x0005")),
-		accounts.InternAddress(common.HexToAddress("0x0006")),
-		accounts.InternAddress(common.HexToAddress("0x0007")),
-		accounts.InternAddress(common.HexToAddress("0x0008")),
-		accounts.InternAddress(common.HexToAddress("0x0009")),
+// BenchmarkAccessList simulates per-transaction access list usage:
+// 10 addresses with 3 slots each (realistic EVM tx pattern).
+// Reset sub-benchmark uses the reuse path (real production path after Berlin).
+// New sub-benchmark allocates a fresh access list per iteration (isolates struct cost).
+func BenchmarkAccessList(b *testing.B) {
+	const nAddr, nSlot = 10, 3
+	addrs := make([]accounts.Address, nAddr)
+	slots := make([]accounts.StorageKey, nSlot)
+	var buf [32]byte
+	for i := range addrs {
+		binary.BigEndian.PutUint64(buf[12:], uint64(i+1))
+		addrs[i] = accounts.InternAddress(common.BytesToAddress(buf[:]))
 	}
-	slots := []accounts.StorageKey{
-		accounts.InternKey(common.HexToHash("0xabc1")),
-		accounts.InternKey(common.HexToHash("0xabc2")),
-		accounts.InternKey(common.HexToHash("0xabc3")),
+	for i := range slots {
+		binary.BigEndian.PutUint64(buf[24:], uint64(i+1))
+		slots[i] = accounts.InternKey(common.BytesToHash(buf[:]))
 	}
 
-	populate := func(al *accessList) {
-		al.AddAddress(sender)
-		al.AddAddress(dst)
-		for _, p := range precompiles {
-			al.AddAddress(p)
-		}
-		for _, s := range slots {
-			al.AddSlot(dst, s)
+	fill := func(al *accessList) {
+		for _, addr := range addrs {
+			al.AddAddress(addr)
+			for _, slot := range slots {
+				al.AddSlot(addr, slot)
+			}
 		}
 	}
 
-	b.Run("new", func(b *testing.B) {
+	b.Run("Reset", func(b *testing.B) {
+		al := newAccessList()
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			al := newAccessList()
-			populate(al)
+		for b.Loop() {
+			al.Reset()
+			fill(al)
+		}
+	})
+	b.Run("New", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			fill(newAccessList())
+		}
+	})
+}
+
+// BenchmarkAccessListLarge tests access list performance at EIP-2930 scale:
+// 100 addresses with 10 slots each (large batch/multicall transactions).
+func BenchmarkAccessListLarge(b *testing.B) {
+	const nAddr, nSlot = 100, 10
+	addrs := make([]accounts.Address, nAddr)
+	slots := make([]accounts.StorageKey, nSlot)
+	var buf [32]byte
+	for i := range addrs {
+		binary.BigEndian.PutUint64(buf[12:], uint64(i+1))
+		addrs[i] = accounts.InternAddress(common.BytesToAddress(buf[:]))
+	}
+	for i := range slots {
+		binary.BigEndian.PutUint64(buf[24:], uint64(i+1))
+		slots[i] = accounts.InternKey(common.BytesToHash(buf[:]))
+	}
+
+	fill := func(al *accessList) {
+		for _, addr := range addrs {
+			al.AddAddress(addr)
+			for _, slot := range slots {
+				al.AddSlot(addr, slot)
+			}
+		}
+	}
+
+	b.Run("Reset", func(b *testing.B) {
+		al := newAccessList()
+		b.ReportAllocs()
+		for b.Loop() {
+			al.Reset()
+			fill(al)
 		}
 	})
 
-	b.Run("reset", func(b *testing.B) {
-		b.ReportAllocs()
+	// Benchmark Contains (cold miss + warm hit) at scale
+	b.Run("Contains", func(b *testing.B) {
 		al := newAccessList()
-		for i := 0; i < b.N; i++ {
-			al.Reset()
-			populate(al)
+		fill(al)
+		// pick address/slot near the end to measure worst-case scan
+		lastAddr := addrs[nAddr-1]
+		lastSlot := slots[nSlot-1]
+		missAddr := accounts.InternAddress(common.HexToAddress("0xdead"))
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			al.Contains(lastAddr, lastSlot) // hit (worst position)
+			al.ContainsAddress(missAddr)    // miss
 		}
 	})
 }

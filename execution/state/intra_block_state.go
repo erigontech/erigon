@@ -169,7 +169,7 @@ type IntraBlockState struct {
 	logSize  uint
 
 	// Per-transaction access list
-	accessList accessList
+	accessList *accessList
 
 	// Transient storage
 	transientStorage transientStorage
@@ -209,7 +209,7 @@ func New(stateReader StateReader) *IntraBlockState {
 		nilAccounts:       map[accounts.Address]struct{}{},
 		logs:              []types.Logs{},
 		journal:           newJournal(),
-		accessList:        accessList{addresses: make(map[accounts.Address]int)},
+		accessList:        newAccessList(),
 		transientStorage:  newTransientStorage(),
 		balanceInc:        map[accounts.Address]*BalanceIncrease{},
 		addressAccess:     nil,
@@ -2120,9 +2120,10 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 		fmt.Printf("%d (%d.%d) ibs.Prepare: sender: %x, coinbase: %x, dest: %x, %x, %v, %v, %v\n", sdb.blockNum, sdb.txIndex, sdb.version, sender, coinbase, dst, precompiles, list, rules, authorities)
 	}
 	if rules.IsBerlin {
-		// Clear out any leftover from previous executions
+		// Clear out any leftover from previous executions.
+		// Reset keeps the map's bucket array allocated for reuse across transactions.
 		sdb.accessList.Reset()
-		al := &sdb.accessList
+		al := sdb.accessList
 
 		al.AddAddress(sender)
 		if !dst.IsNil() {
@@ -2169,7 +2170,7 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 func (sdb *IntraBlockState) AddAddressToAccessList(addr accounts.Address) (addrMod bool) {
 	addrMod = sdb.accessList.AddAddress(addr)
 	if addrMod {
-		sdb.journal.append(accessListAddAccountChange{addr})
+		sdb.journal.append(accessListAddAccountChange{})
 	}
 	return addrMod
 }
@@ -2182,13 +2183,10 @@ func (sdb *IntraBlockState) AddSlotToAccessList(addr accounts.Address, slot acco
 		// scope of 'address' without having the 'address' become already added
 		// to the access list (via call-variant, create, etc).
 		// Better safe than sorry, though
-		sdb.journal.append(accessListAddAccountChange{addr})
+		sdb.journal.append(accessListAddAccountChange{})
 	}
 	if slotMod {
-		sdb.journal.append(accessListAddSlotChange{
-			address: addr,
-			slot:    slot,
-		})
+		sdb.journal.append(accessListAddSlotChange{address: addr})
 	}
 	return addrMod, slotMod
 }
