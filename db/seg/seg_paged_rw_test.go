@@ -17,10 +17,13 @@
 package seg
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"hash/crc32"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -470,4 +473,160 @@ func BenchmarkName(b *testing.B) {
 		}
 	})
 
+}
+
+// prepareKVUncompressedKeysCompressedVals creates a file with sorted KV pairs:
+// uncompressed keys (like domain keys) and compressed values.
+func prepareKVUncompressedKeysCompressedVals(t *testing.T, keyLen int, numPairs int) (*Decompressor, [][]byte, [][]byte) {
+	t.Helper()
+	logger := log.New()
+	tmpDir := t.TempDir()
+	file := filepath.Join(tmpDir, "kv_uncomp_keys")
+	cfg := DefaultCfg
+	cfg.MinPatternScore = 1
+	cfg.Workers = 2
+	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	require.NoError(t, err)
+
+	keys := make([][]byte, numPairs)
+	vals := make([][]byte, numPairs)
+	for i := range keys {
+		k := make([]byte, keyLen)
+		binary.BigEndian.PutUint64(k[keyLen-8:], uint64(i*37+1))
+		k[0] = byte(i >> 8)
+		k[1] = byte(i)
+		keys[i] = k
+		// values have common patterns to trigger compression
+		v := make([]byte, 50+i%30)
+		copy(v, []byte("common_prefix_value_"))
+		binary.BigEndian.PutUint64(v[20:], uint64(i))
+		vals[i] = v
+	}
+	slices.SortFunc(keys, func(a, b []byte) int {
+		return bytes.Compare(a, b)
+	})
+
+	for i, k := range keys {
+		require.NoError(t, c.AddUncompressedWord(k)) // key: uncompressed
+		require.NoError(t, c.AddWord(vals[i]))       // value: compressed
+	}
+	require.NoError(t, c.Compress())
+	c.Close()
+
+	d, err := NewDecompressor(file)
+	require.NoError(t, err)
+	t.Cleanup(d.Close)
+	return d, keys, vals
+}
+
+// TestReaderMatchCmpUncompressedKeys tests Reader.MatchCmp with CompressVals (uncompressed keys).
+// This simulates domain file lookups (accounts, code, storage).
+func TestReaderMatchCmpUncompressedKeys(t *testing.T) {
+	d, keys, vals := prepareKVUncompressedKeysCompressedVals(t, 20, 200)
+
+	g := NewReader(d.MakeGetter(), CompressVals)
+
+	// Sanity check: read all pairs with Next first
+	g.Reset(0)
+	for i := 0; g.HasNext(); i++ {
+		k, _ := g.Next(nil)
+		require.Equal(t, keys[i], k, "sanity pair %d: key mismatch (Next)", i)
+		v, _ := g.Next(nil)
+		require.Equal(t, vals[i], v, "sanity pair %d: val mismatch (Next)", i)
+	}
+
+	g.Reset(0)
+	// Test 1: sequential exact matches — MatchCmp should advance past key, Next reads value
+	for i, k := range keys {
+		require.True(t, g.HasNext(), "pair %d", i)
+		cmp := g.MatchCmp(k)
+		require.Equal(t, 0, cmp, "pair %d: expected match for key %x", i, k)
+		v, _ := g.Next(nil)
+		require.Equal(t, vals[i], v, "pair %d: wrong value", i)
+	}
+
+	// Test 2: random access — Reset + MatchCmp then read value
+	g.Reset(0)
+	for g.HasNext() {
+		pos := g.Getter.dataP
+		key, _ := g.Next(nil)
+		val, _ := g.Next(nil)
+
+		// re-read same pair with MatchCmp
+		g.Reset(pos)
+		cmp := g.MatchCmp(key)
+		require.Equal(t, 0, cmp, "expected match for key %x at offset %d", key, pos)
+		v2, _ := g.Next(nil)
+		require.Equal(t, val, v2, "value mismatch after MatchCmp for key %x", key)
+	}
+
+	// Test 3: MatchCmp with wrong key resets position
+	g.Reset(0)
+	wrongKey := make([]byte, 20)
+	wrongKey[0] = 0xFF
+	cmp := g.MatchCmp(wrongKey)
+	require.NotEqual(t, 0, cmp, "should not match wrong key")
+	firstKey, _ := g.Next(nil)
+	require.Equal(t, keys[0], firstKey, "position should be reset after MatchCmp mismatch")
+
+	// Test 4: verify MatchCmp result matches bytes.Compare for every key against neighbors
+	g.Reset(0)
+	for i := range keys {
+		pos := g.Getter.dataP
+		cmp := g.MatchCmp(keys[i])
+		require.Equal(t, 0, cmp, "pair %d should match", i)
+		g.Skip() // skip value
+
+		if i > 0 {
+			g.Reset(pos)
+			cmp = g.MatchCmp(keys[i-1])
+			expectedCmp := bytes.Compare(keys[i-1], keys[i])
+			require.Equal(t, expectedCmp, cmp, "pair %d: MatchCmp(keys[%d]) wrong", i, i-1)
+			g.Reset(pos)
+			g.Skip() // skip key
+			g.Skip() // skip value
+		}
+	}
+}
+
+// TestReaderBinarySearch tests Reader.BinarySearch with CompressVals (uncompressed keys).
+func TestReaderBinarySearch(t *testing.T) {
+	numPairs := 500
+	d, keys, _ := prepareKVUncompressedKeysCompressedVals(t, 20, numPairs)
+
+	g := NewReader(d.MakeGetter(), CompressVals)
+
+	// Build offset table
+	offsets := make([]uint64, 0, numPairs)
+	g.Reset(0)
+	for g.HasNext() {
+		offsets = append(offsets, g.Getter.dataP)
+		g.Skip() // skip key
+		g.Skip() // skip value
+	}
+	require.Equal(t, numPairs, len(offsets))
+
+	getOffset := func(i uint64) uint64 { return offsets[i] }
+
+	// Test 1: find every existing key
+	for i, k := range keys {
+		foundOffset, ok := g.BinarySearch(k, numPairs, getOffset)
+		require.True(t, ok, "key %d not found: %x", i, k)
+		require.Equal(t, offsets[i], foundOffset, "key %d: wrong offset", i)
+	}
+
+	// Test 2: key smaller than all — should find first
+	smallKey := make([]byte, 20)
+	foundOffset, ok := g.BinarySearch(smallKey, numPairs, getOffset)
+	if ok {
+		require.Equal(t, offsets[0], foundOffset, "small key should find first entry")
+	}
+
+	// Test 3: key larger than all — should not find
+	bigKey := make([]byte, 20)
+	for i := range bigKey {
+		bigKey[i] = 0xFF
+	}
+	_, ok = g.BinarySearch(bigKey, numPairs, getOffset)
+	require.False(t, ok, "big key should not be found")
 }

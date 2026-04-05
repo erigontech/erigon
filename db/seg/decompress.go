@@ -1262,7 +1262,11 @@ func (g *Getter) MatchPrefixUncompressed(prefix []byte) bool {
 		return true // empty prefix matches any word
 	}
 
-	g.nextPosClean()
+	g.nextPos()
+	if g.dataBit > 0 {
+		g.dataP++
+		g.dataBit = 0
+	}
 
 	return bytes.HasPrefix(g.data[g.dataP:g.dataP+wordLen], prefix)
 }
@@ -1288,7 +1292,11 @@ func (g *Getter) MatchCmpUncompressed(buf []byte) int {
 		return -1
 	}
 
-	g.nextPosClean()
+	g.nextPos()
+	if g.dataBit > 0 {
+		g.dataP++
+		g.dataBit = 0
+	}
 
 	cmp := bytes.Compare(buf, g.data[g.dataP:g.dataP+wordLen])
 	if cmp == 0 {
