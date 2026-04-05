@@ -200,7 +200,7 @@ func (c *GenericCache[T]) PrintStatsAndReset(name string) {
 	}
 	sizeBytes := c.currentSize.Load()
 	usagePct := float64(sizeBytes) / float64(c.capacityB) * 100
-	log.Info(name+" cache stats",
+	log.Info("[cache] stats"+name,
 		"hits", hits, "misses", misses, "hit_rate", hitRate,
 		"entries", c.data.Len(), "size_mb", sizeBytes/(1024*1024),
 		"capacity_mb", c.capacityB/datasize.MB, "usage_pct", usagePct,
