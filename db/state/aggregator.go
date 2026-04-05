@@ -1173,7 +1173,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 				return true, nil
 			}
 			at.a.logger.Warn("[snapshots] PruneSmallBatches failed", "err", err, "is deadline?", errors.Is(err, context.DeadlineExceeded))
-			return false, errDebug
+			return false, err
 		}
 		if stat == nil || stat.PrunedNothing() {
 			at.a.logger.Debug("[snapshots] PruneSmallBatches nilled or nothing")
