@@ -20,6 +20,7 @@ import (
 	"bytes"
 
 	"github.com/c2h5oh/datasize"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -27,11 +28,11 @@ import (
 
 const (
 	// DefaultAccountCacheBytes is the byte limit for account cache (1 GB)
-	DefaultAccountCacheBytes = 1 * datasize.GB
+	DefaultAccountCacheBytes = 2 * 1 * datasize.GB
 	// DefaultStorageCacheBytes is the byte limit for storage cache (1 GB)
-	DefaultStorageCacheBytes = 1 * datasize.GB
+	DefaultStorageCacheBytes = 2 * 1 * datasize.GB
 	// DefaultCommitmentCacheBytes is the byte limit for commitment cache (128 MB)
-	DefaultCommitmentCacheBytes = 128 * datasize.MB
+	DefaultCommitmentCacheBytes = 8 * 128 * datasize.MB
 )
 
 // StateCache is a unified cache for domain data (Account, Storage, Code).
@@ -141,6 +142,9 @@ func (c *StateCache) GetCache(domain kv.Domain) Cache {
 
 // PrintStatsAndReset prints cache statistics for all domains and resets counters.
 func (c *StateCache) PrintStatsAndReset() {
+	if c == nil {
+		return
+	}
 	if acc, ok := c.caches[kv.AccountsDomain].(*DomainCache); ok {
 		acc.PrintStatsAndReset("Account")
 	}
