@@ -940,10 +940,11 @@ func BenchmarkLogCustomVsGeneratedFixed(b *testing.B) {
 	})
 }
 
+var benchJSONSink []byte
+
 func BenchmarkLogJSON(b *testing.B) {
 	tr := NewTRand()
 
-	// Single log with all derived fields populated (as returned by eth_getLogs)
 	mkLog := func() *Log {
 		l := tr.RandLogFixed()
 		l.BlockNumber = hexutil.Uint64(tr.rnd.Uint64())
@@ -959,11 +960,10 @@ func BenchmarkLogJSON(b *testing.B) {
 	b.Run("Log/Single", func(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
-			json.Marshal(log)
+			benchJSONSink, _ = json.Marshal(log)
 		}
 	})
 
-	// Batch of 100 logs (typical eth_getLogs response)
 	logs := make([]*Log, 100)
 	for i := range logs {
 		logs[i] = mkLog()
@@ -971,11 +971,10 @@ func BenchmarkLogJSON(b *testing.B) {
 	b.Run("Log/Batch100", func(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
-			json.Marshal(logs)
+			benchJSONSink, _ = json.Marshal(logs)
 		}
 	})
 
-	// RPCLog (eth_getLogs with blockTimestamp)
 	rpcLog := &RPCLog{
 		Log:            *log,
 		BlockTimestamp: hexutil.Uint64(1700000000),
@@ -983,11 +982,10 @@ func BenchmarkLogJSON(b *testing.B) {
 	b.Run("RPCLog/Single", func(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
-			json.Marshal(rpcLog)
+			benchJSONSink, _ = json.Marshal(rpcLog)
 		}
 	})
 
-	// ErigonLog
 	erigonLog := &ErigonLog{
 		Log:       *log,
 		Timestamp: hexutil.Uint64(1700000000),
@@ -995,7 +993,7 @@ func BenchmarkLogJSON(b *testing.B) {
 	b.Run("ErigonLog/Single", func(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
-			json.Marshal(erigonLog)
+			benchJSONSink, _ = json.Marshal(erigonLog)
 		}
 	})
 }

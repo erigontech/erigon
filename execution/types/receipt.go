@@ -488,7 +488,7 @@ func (rs Receipts) AssertLogIndex(blockNum uint64) {
 		return
 	}
 	logIndex := 0
-	seen := make(map[uint]struct{}, 16)
+	seen := make(map[hexutil.Uint]struct{}, 16)
 	for _, r := range rs {
 		// ensure valid field
 		if logIndex != int(r.FirstLogIndexWithinBlock) {
@@ -502,10 +502,10 @@ func (rs Receipts) AssertLogIndex(blockNum uint64) {
 		}
 
 		for i := 0; i < len(r.Logs); i++ {
-			if _, ok := seen[uint(r.Logs[i].Index)]; ok {
+			if _, ok := seen[r.Logs[i].Index]; ok {
 				panic(fmt.Sprintf("assert: duplicated log_index %d,  bn=%d", r.Logs[i].Index, blockNum))
 			}
-			seen[uint(r.Logs[i].Index)] = struct{}{}
+			seen[r.Logs[i].Index] = struct{}{}
 		}
 	}
 }
