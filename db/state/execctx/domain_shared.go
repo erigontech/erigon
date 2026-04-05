@@ -393,11 +393,18 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	// callers no longer require an accurate step from this path.
 	if sd.stateCache != nil {
 		if v, ok := sd.stateCache.Get(domain, k); ok {
-			if dbg.AssertEnabled { //nolint:gosec
-				dbV, _, dbErr := tx.GetLatest(domain, k)
-				if dbErr == nil && !bytes.Equal(v, dbV) {
-					panic(fmt.Sprintf("assert: stateCache mismatch: domain=%v key=%x cache=%x db=%x", domain, k, v, dbV))
+			if dbg.AssertEnabled {
+				// Check mem first (in-flight writes not yet in DB), then DB
+				trueV, _, inMem := sd.mem.GetLatest(domain, k)
+				if !inMem {
+					trueV, _, _ = tx.GetLatest(domain, k)
 				}
+				if !bytes.Equal(v, trueV) {
+					panic(fmt.Sprintf("assert: stateCache mismatch: domain=%v key=%x cache=%x truth=%x (inMem=%v)", domain, k, v, trueV, inMem))
+				}
+			}
+			if domain == kv.CommitmentDomain && v == nil {
+				log.Debug("stateCache: nil branch in CommitmentDomain", "key", fmt.Sprintf("%x", k))
 			}
 			return v, 0, nil
 		}
@@ -418,6 +425,9 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 
 	// Populate state cache on successful storage read
 	if sd.stateCache != nil {
+		if dbg.AssertEnabled && domain == kv.CommitmentDomain && v == nil {
+			log.Debug("stateCache: caching nil for CommitmentDomain key (key not in DB)", "key", fmt.Sprintf("%x", k))
+		}
 		sd.stateCache.Put(domain, k, v)
 	}
 
