@@ -1647,7 +1647,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 	err = g.Wait()
 	if err == nil {
 		closeFiles = false
-		at.a.logger.Info("[snapshots] state merge done "+r.String(), "in", time.Since(t))
+		at.a.logger.Debug("[snapshots] state merge done "+r.String(), "in", time.Since(t))
 	} else if !errors.Is(err, context.Canceled) {
 		at.a.logger.Warn(fmt.Sprintf("[snapshots] state merge failed err=%v %s", err, r.String()))
 	}
