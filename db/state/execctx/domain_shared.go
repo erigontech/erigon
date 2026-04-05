@@ -410,8 +410,12 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	// callers no longer require an accurate step from this path.
 	if sd.stateCache != nil {
 		if v, ok := sd.stateCache.Get(domain, k); ok {
-			if dbg.AssertEnabled {
-				// Check mem first (in-flight writes not yet in DB), then DB
+			if dbg.AssertEnabled && domain != kv.CommitmentDomain {
+				// Check mem first (in-flight writes not yet in DB), then DB.
+				// CommitmentDomain is skipped: the warmuper goroutine reads stateCache
+				// concurrently with DomainPut (mem-first, stateCache-second), so there is
+				// a benign window where stateCache lags mem. Asserting here would be a
+				// false positive. ClearRam already clears the CommitmentDomain stateCache.
 				trueV, _, inMem := sd.mem.GetLatest(domain, k)
 				if !inMem {
 					trueV, _, _ = tx.GetLatest(domain, k)
@@ -547,7 +551,15 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 		}
 	}
 
-	// Update state cache when writing
+	// Write to mem batch BEFORE updating stateCache.
+	// The warmuper goroutine calls GetLatest concurrently: if stateCache.Put happened first,
+	// the warmuper could see the stateCache value while mem.GetLatest still returns nothing,
+	// triggering the assert. Writing mem first ensures mem is always consistent with stateCache.
+	if err := sd.mem.DomainPut(domain, ks, v, txNum, prevVal); err != nil {
+		return err
+	}
+
+	// Update state cache after mem is written so any concurrent GetLatest sees a consistent state.
 	if sd.stateCache != nil {
 		sd.stateCache.Put(domain, k, v)
 		if dbg.AssertEnabled {
@@ -557,7 +569,7 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 		}
 	}
 
-	return sd.mem.DomainPut(domain, ks, v, txNum, prevVal)
+	return nil
 }
 
 // DomainDel
