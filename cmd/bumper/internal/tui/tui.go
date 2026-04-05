@@ -94,6 +94,15 @@ func newModel(file string, s schema.Schema) *model {
 	l.SetRows(lrows)
 	l.Focus()
 
+	rCols := []table.Column{
+		{Title: "Part", Width: 8},
+		{Title: "Key", Width: 6},
+		{Title: "Current", Width: 8},
+		{Title: "Min", Width: 6},
+		{Title: "Status", Width: 12},
+	}
+	r := table.New(table.WithColumns(rCols), table.WithWidth(colsWidth(rCols)), table.WithHeight(18))
+
 	ti := textinput.New()
 	ti.Placeholder = "1.1"
 	ti.CharLimit = 8
@@ -105,6 +114,7 @@ func newModel(file string, s schema.Schema) *model {
 		orig:   clone(s),
 		cats:   cats,
 		left:   l,
+		right:  r,
 		editor: ti,
 	}
 	m.rebuildRight()
@@ -139,16 +149,6 @@ func (m *model) rebuildRight() {
 	add("hist", cat.Hist)
 	add("ii", cat.Ii)
 	add("block", cat.Block)
-
-	cols := []table.Column{
-		{Title: "Part", Width: 8},
-		{Title: "Key", Width: 6},
-		{Title: "Current", Width: 8},
-		{Title: "Min", Width: 6},
-		{Title: "Status", Width: 12},
-	}
-	m.right = table.New(table.WithColumns(cols), table.WithWidth(colsWidth(cols)))
-	m.right.SetHeight(18)
 
 	m.rows = m.rows[:0]
 	trows := make([]table.Row, 0, len(list))
@@ -498,9 +498,7 @@ func eqGroup(x, y schema.Group) bool {
 	return true
 }
 
-// colsWidth returns the total viewport width needed for the given columns.
-// In bubbles v2, the viewport requires an explicit width; each column occupies
-// col.Width plus 2 chars of horizontal cell padding (1 per side, from DefaultStyles).
+// colsWidth sums column widths including 2-char cell padding per column (bubbles v2 DefaultStyles).
 func colsWidth(cols []table.Column) int {
 	w := 0
 	for _, c := range cols {
