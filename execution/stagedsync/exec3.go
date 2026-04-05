@@ -819,6 +819,7 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 
 	times.ComputeCommitment = time.Since(start)
 	if err != nil {
+		doms.InvalidateCommitmentCache()
 		return false, times, fmt.Errorf("compute commitment: %w", err)
 	}
 
@@ -828,6 +829,7 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 	}
 	if !bytes.Equal(computedRootHash, header.Root.Bytes()) {
 		logger.Warn(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), computedRootHash, header.Root.Bytes(), header.Hash()))
+		doms.InvalidateCommitmentCache()
 		err = handleIncorrectRootHashError(header.Number.Uint64(), header.Hash(), header.ParentHash, applyTx, cfg, e, logger, u)
 		return false, times, err
 	}

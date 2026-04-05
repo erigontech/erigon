@@ -303,6 +303,18 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 	sd.mem.ClearRam()
 }
 
+// InvalidateCommitmentCache clears CommitmentDomain entries from stateCache.
+// Must be called when a commitment is rolled back (wrong trie root or error),
+// because DomainPut already wrote branch values to the cache that are now stale.
+func (sd *SharedDomains) InvalidateCommitmentCache() {
+	if sd.stateCache == nil {
+		return
+	}
+	if c := sd.stateCache.GetCache(kv.CommitmentDomain); c != nil {
+		c.ClearWithHash(common.Hash{})
+	}
+}
+
 func (sd *SharedDomains) Size() uint64 {
 	return sd.mem.SizeEstimate()
 }
