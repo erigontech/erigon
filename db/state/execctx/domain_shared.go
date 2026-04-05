@@ -307,8 +307,6 @@ func (sd *SharedDomains) Size() uint64 {
 	return sd.mem.SizeEstimate()
 }
 
-const CodeSizeTableFake = "CodeSize"
-
 func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte, txNum uint64) (err error) {
 	return sd.mem.IndexAdd(table, key, txNum)
 }

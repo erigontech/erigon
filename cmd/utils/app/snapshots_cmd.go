@@ -1385,6 +1385,9 @@ func doIntegrity(cliCtx *cli.Context) error {
 func stateProgress(ctx context.Context, db kv.TemporalRoDB, txNumsReader rawdbv3.TxNumsReader) (uint64, error) {
 	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
 	aggMax := agg.EndTxNumMinimax()
+	if aggMax == 0 {
+		return 0, nil
+	}
 	roTx, err := db.BeginRo(ctx)
 	if err != nil {
 		return 0, err
@@ -1393,6 +1396,16 @@ func stateProgress(ctx context.Context, db kv.TemporalRoDB, txNumsReader rawdbv3
 	blockNum, _, err := txNumsReader.FindBlockNum(ctx, roTx, aggMax)
 	if err != nil {
 		return 0, err
+	}
+	// FindBlockNum returns the first block whose maxTxNum >= aggMax, but that
+	// block may not be fully covered by state (maxTxNum+1 > aggMax). Back up
+	// to the last block that is fully covered.
+	maxTxNum, err := txNumsReader.Max(ctx, roTx, blockNum)
+	if err != nil {
+		return 0, err
+	}
+	if maxTxNum+1 > aggMax && blockNum > 0 {
+		blockNum--
 	}
 	return blockNum, nil
 }
