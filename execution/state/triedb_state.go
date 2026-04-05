@@ -314,7 +314,7 @@ func (tds *TrieDbState) buildPlainStorageReads() ([][]byte, [][]byte) {
 // modifications of the contract's storage. In such case, all previously modified storage
 // item updates would be inclided.
 func (tds *TrieDbState) BuildStorageReads() common.StorageKeys {
-	storageTouches := common.StorageKeys{}
+	storageTouches := make(common.StorageKeys, 0, len(tds.aggregateBuffer.storageReads))
 	for storageKey := range tds.aggregateBuffer.storageReads {
 		storageTouches = append(storageTouches, storageKey)
 	}
@@ -373,7 +373,7 @@ func (tds *TrieDbState) buildCodeSizeTouches() map[common.Hash]common.Hash {
 // (or also just read, if tds.resolveReads flags is turned one) within the
 // period for which we are aggregating update
 func (tds *TrieDbState) BuildAccountReads() common.Hashes {
-	accountTouches := common.Hashes{}
+	accountTouches := make(common.Hashes, 0, len(tds.aggregateBuffer.accountReads))
 	for addrHash := range tds.aggregateBuffer.accountReads {
 		accountTouches = append(accountTouches, addrHash)
 	}
