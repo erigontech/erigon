@@ -317,8 +317,8 @@ func (w *Warmuper) DrainPending() {
 	}
 }
 
-// WaitAndClose cancel and waits for all warmup work
-func (w *Warmuper) WaitAndClose() {
+// CloseAndWait cancel and waits for all warmup work
+func (w *Warmuper) CloseAndWait() {
 	w.Close()
 	if w.g != nil {
 		_ = w.g.Wait()
