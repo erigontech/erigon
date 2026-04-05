@@ -85,7 +85,8 @@ func Run(file string) error {
 func newModel(file string, s schema.Schema) *model {
 	cats := schema.Cats(s)
 
-	l := table.New(table.WithColumns([]table.Column{{Title: "Schemas", Width: 18}}))
+	lCols := []table.Column{{Title: "Schemas", Width: 18}}
+	l := table.New(table.WithColumns(lCols), table.WithWidth(colsWidth(lCols)))
 	lrows := make([]table.Row, len(cats))
 	for i, c := range cats {
 		lrows[i] = table.Row{c}
@@ -146,7 +147,7 @@ func (m *model) rebuildRight() {
 		{Title: "Min", Width: 6},
 		{Title: "Status", Width: 12},
 	}
-	m.right = table.New(table.WithColumns(cols))
+	m.right = table.New(table.WithColumns(cols), table.WithWidth(colsWidth(cols)))
 	m.right.SetHeight(18)
 
 	m.rows = m.rows[:0]
@@ -495,4 +496,15 @@ func eqGroup(x, y schema.Group) bool {
 		}
 	}
 	return true
+}
+
+// colsWidth returns the total viewport width needed for the given columns.
+// In bubbles v2, the viewport requires an explicit width; each column occupies
+// col.Width plus 2 chars of horizontal cell padding (1 per side, from DefaultStyles).
+func colsWidth(cols []table.Column) int {
+	w := 0
+	for _, c := range cols {
+		w += c.Width + 2
+	}
+	return w
 }
