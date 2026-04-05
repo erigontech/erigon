@@ -377,6 +377,9 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 			sd.metrics.UpdateCacheReads(domain, start)
 		}
 		if sd.stateCache != nil {
+			if dbg.AssertEnabled && domain == kv.CommitmentDomain && v == nil {
+				log.Debug("stateCache: caching nil for CommitmentDomain from mem (deleted entry?)", "key", fmt.Sprintf("%x", k))
+			}
 			sd.stateCache.Put(domain, k, v)
 		}
 		return v, step, nil
