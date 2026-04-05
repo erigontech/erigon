@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/rand/v2"
 	"runtime"
 	"time"
 
@@ -394,10 +393,10 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	// callers no longer require an accurate step from this path.
 	if sd.stateCache != nil {
 		if v, ok := sd.stateCache.Get(domain, k); ok {
-			if dbg.AssertEnabled && rand.Uint32()%100 == 0 { //nolint:gosec
+			if dbg.AssertEnabled { //nolint:gosec
 				dbV, _, dbErr := tx.GetLatest(domain, k)
 				if dbErr == nil && !bytes.Equal(v, dbV) {
-					panic(fmt.Sprintf("stateCache mismatch: domain=%v key=%x cache=%x db=%x", domain, k, v, dbV))
+					panic(fmt.Sprintf("assert: stateCache mismatch: domain=%v key=%x cache=%x db=%x", domain, k, v, dbV))
 				}
 			}
 			return v, 0, nil
