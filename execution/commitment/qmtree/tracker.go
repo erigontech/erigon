@@ -447,17 +447,22 @@ func (qt *Tracker) maybeCollate() {
 		}
 	}
 	for step := qt.lastCollatedStep; step < completedStep; step++ {
+		// Write twig roots BEFORE collation/prune — entries are still in MDBX.
+		readEntry := func(txNum uint64) (pre, sc, trans common.Hash, err error) {
+			return qt.readComponents(txNum)
+		}
+		if err := writeTwigRoots(qt.snapManager.domainDir, step, step+1, qt.stepSize, qt.hasher, stepPrevLeaf, readEntry); err != nil {
+			log.Warn("qmtree: failed to write twig roots", "step", step, "err", err)
+		}
+		// Read the prevLeaf at the end of this step for the next step's chaining.
+		if pl, _, err := loadTwigRoots(qt.snapManager.domainDir, step, step+1, qt.stepSize); err == nil {
+			stepPrevLeaf = pl
+		}
+
+		// Now collate entries to snapshot and prune from MDBX.
 		if err := qt.snapManager.CollateAndPrune(context.Background(), qt.rwTx, qt.rwTx, step); err != nil {
 			log.Warn("qmtree: collation failed", "step", step, "err", err)
 			return
-		}
-		// Write twig roots for this step (needed for fresh-start from snapshots).
-		if err := writeTwigRootsForStep(qt.snapManager.domainDir, step, qt.stepSize, qt.hasher, stepPrevLeaf); err != nil {
-			log.Warn("qmtree: failed to write twig roots", "step", step, "err", err)
-		}
-		// Read the prevLeaf at the end of this step from the .v file we just wrote.
-		if pl, _, err := loadTwigRoots(qt.snapManager.domainDir, step, step+1, qt.stepSize); err == nil {
-			stepPrevLeaf = pl
 		}
 		qt.lastCollatedStep = step + 1
 	}
