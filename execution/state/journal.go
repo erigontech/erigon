@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -162,7 +163,7 @@ type (
 
 	// Changes to other state values.
 	refundChange struct {
-		prev uint64
+		prev mdgas.MdGas
 	}
 	addLogChange struct {
 		txIndex int
@@ -416,6 +417,7 @@ func (ch codeChange) revert(s *IntraBlockState) error {
 			}
 			s.versionedWrites.Delete(ch.account, AccountKey{Path: CodeHashPath})
 			s.versionedWrites.Delete(ch.account, AccountKey{Path: CodePath})
+			s.versionedWrites.Delete(ch.account, AccountKey{Path: CodeSizePath})
 		} else {
 			if v, ok := s.versionedWrites[ch.account][AccountKey{Path: CodePath}]; ok {
 				if trace {
@@ -430,6 +432,9 @@ func (ch codeChange) revert(s *IntraBlockState) error {
 					fmt.Printf("%s WRT Revert %x: %x -> %x\n", tracePrefix, ch.account, v.Val, ch.prevhash)
 				}
 				s.versionedWrites.UpdateVal(ch.account, AccountKey{Path: CodeHashPath}, ch.prevhash)
+			}
+			if _, ok := s.versionedWrites[ch.account][AccountKey{Path: CodeSizePath}]; ok {
+				s.versionedWrites.UpdateVal(ch.account, AccountKey{Path: CodeSizePath}, len(ch.prevcode))
 			}
 		}
 	}
@@ -448,10 +453,9 @@ func (ch storageChange) revert(s *IntraBlockState) error {
 
 	trace := dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(ch.account.Handle()))
 	var tracePrefix string
-	var val uint256.Int
 	if trace {
 		tracePrefix = fmt.Sprintf("%d (%d.%d)", s.blockNum, s.txIndex, s.version)
-		val, _ = obj.GetState(ch.key)
+		val, _ := obj.GetState(ch.key)
 		commited, _ := obj.GetCommittedState(ch.key)
 		fmt.Printf("%s Revert State %x %x: %d, prev: %d, orig: %d, commited: %v\n", tracePrefix, ch.account, ch.key, &val, &ch.prevalue, &commited, ch.wasCommited)
 	}

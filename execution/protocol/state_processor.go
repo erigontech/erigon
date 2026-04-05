@@ -33,21 +33,18 @@ import (
 )
 
 type GasUsed struct {
-	Receipt uint64 // Gas used with refunds (what the user pays) - see EIP-7778
-	Block   uint64 // Gas used for block limit accounting - see EIP-7778
-	Blob    uint64 // Blob gas - see EIP-4844
+	Receipt      uint64 // Gas used with refunds (what the user pays) - see EIP-7778
+	BlockRegular uint64 // Regular gas accumulated across block (pre-Amsterdam: same as block gas)
+	BlockState   uint64 // State gas accumulated across block (EIP-8037)
+	Blob         uint64 // Blob gas - see EIP-4844
 }
 
-func NewGasUsed(h *types.Header, receiptGas uint64) *GasUsed {
-	gu := &GasUsed{Receipt: receiptGas, Block: h.GasUsed}
-	if h.BlobGasUsed != nil {
-		gu.Blob = *h.BlobGasUsed
-	}
-	return gu
-}
+// BlockGasUsed returns the EIP-8037 "bottleneck" gas: max(regular, state).
+// Pre-Amsterdam blockStateGasUsed is 0, so this equals BlockRegular.
+func (gu *GasUsed) BlockGasUsed() uint64 { return max(gu.BlockRegular, gu.BlockState) }
 
 func SetGasUsed(h *types.Header, gu *GasUsed) {
-	h.GasUsed = gu.Block
+	h.GasUsed = gu.BlockGasUsed()
 	if h.BlobGasUsed != nil {
 		h.BlobGasUsed = &gu.Blob
 	}
@@ -100,7 +97,8 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 		return nil, err
 	}
 	gasUsed.Receipt += result.ReceiptGasUsed
-	gasUsed.Block += result.BlockGasUsed
+	gasUsed.BlockRegular += result.BlockRegularGasUsed
+	gasUsed.BlockState += result.BlockStateGasUsed
 	gasUsed.Blob += txn.GetBlobGas()
 
 	// Set the receipt logs and create the bloom filter.

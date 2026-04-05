@@ -211,6 +211,9 @@ func (ht *HistoryRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges
 //
 // 0-2,2-3: nothing to merge
 func (iit *InvertedIndexRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *MergeRange {
+	if dbg.NoDeepMergeHistory() {
+		maxSpan = min(maxSpan, 2*iit.stepSize)
+	}
 	var minFound bool
 	var startTxNum, endTxNum uint64
 	for _, item := range iit.files {
@@ -440,7 +443,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		cnt += item.decompressor.Count()
 	}
 
-	p := ps.AddNew("merge "+path.Base(kvFilePath), uint64(cnt)*2) // *2 because after adding words - will happen compression (which also slow)
+	p := ps.AddNew("merge "+path.Base(kvFilePath), uint64(cnt))
 	defer ps.Delete(p)
 
 	var cp CursorHeap

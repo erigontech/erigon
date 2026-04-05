@@ -157,6 +157,7 @@ type changesetSwitcher interface {
 	// GetChangesetByBlockNum returns the changeset for a given block number and
 	// the block hash it is keyed under.
 	GetChangesetByBlockNum(blockNumber uint64) (common.Hash, *changeset.StateChangeSet)
+	GetChangesetAccumulator() *changeset.StateChangeSet
 	SetChangesetAccumulator(acc *changeset.StateChangeSet)
 	SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *changeset.StateChangeSet)
 }
@@ -217,21 +218,25 @@ func (sd *SharedDomains) FlushPendingUpdates(ctx context.Context, tx kv.Temporal
 
 	blockHash, cs := switcher.GetChangesetByBlockNum(upd.BlockNum)
 	if cs != nil {
+		// Save current accumulator, switch to the pending update's block
+		// changeset, apply deferred branch writes, save it back, then
+		// restore the original accumulator.
+		prev := switcher.GetChangesetAccumulator()
 		switcher.SetChangesetAccumulator(cs)
-	}
 
-	if _, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch); err != nil {
-		if cs != nil {
-			switcher.SetChangesetAccumulator(nil)
+		if _, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch); err != nil {
+			switcher.SetChangesetAccumulator(prev)
+			return err
 		}
-		return err
+
+		switcher.SavePastChangesetAccumulator(blockHash, upd.BlockNum, cs)
+		switcher.SetChangesetAccumulator(prev)
+		return nil
 	}
 
-	if cs != nil {
-		switcher.SavePastChangesetAccumulator(blockHash, upd.BlockNum, cs)
-		switcher.SetChangesetAccumulator(nil)
-	}
-	return nil
+	// No past changeset found — write into whatever is current
+	_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch)
+	return err
 }
 
 type temporalGetter struct {
@@ -422,13 +427,12 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	}
 	maxStep := kv.Step(math.MaxUint64)
 
-	// Check mem batch first - it has the current transaction's uncommitted state
+	// Check mem batch first - it has the current transaction's uncommitted state.
+	// No need to populate stateCache here — mem is checked first on every read,
+	// so the value is already accessible without caching it again.
 	if v, step, ok := sd.mem.GetLatest(domain, k); ok {
 		if dbg.KVReadLevelledMetrics {
 			sd.metrics.UpdateCacheReads(domain, start)
-		}
-		if sd.stateCache != nil {
-			sd.stateCache.Put(domain, k, v)
 		}
 		return v, step, nil
 	} else {
@@ -687,6 +691,13 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (
 // ComputeCommitment evaluates commitment for gathered updates.
 // If trieWarmup toggle was enabled via EnableTrieWarmup, pre-warms MDBX page cache by reading Branch data in parallel before processing.
 func (sd *SharedDomains) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveStateAfter bool, blockNum, txNum uint64, logPrefix string, onProgress func(*commitment.CommitProgress)) (rootHash []byte, err error) {
+	// Flush any pending deferred commitment updates from the previous block
+	// into the CORRECT block's changeset (via FlushPendingUpdates which uses
+	// GetChangesetByBlockNum). This ensures the branch writes are recorded in
+	// the original block's diffset so they can be properly reverted on unwind.
+	if err := sd.FlushPendingUpdates(ctx, tx); err != nil {
+		return nil, err
+	}
 	return sd.sdCtx.ComputeCommitment(ctx, tx, saveStateAfter, blockNum, txNum, logPrefix, onProgress)
 }
 
@@ -702,6 +713,10 @@ func (sd *SharedDomains) EnableParaTrieDB(db kv.TemporalRoDB) {
 
 func (sd *SharedDomains) EnableWarmupCache(enable bool) {
 	sd.sdCtx.EnableWarmupCache(enable)
+}
+
+func (sd *SharedDomains) ClearWarmupCache() {
+	sd.sdCtx.ClearWarmupCache()
 }
 
 // SetDeferCommitmentUpdates enables or disables deferred commitment updates.
@@ -730,7 +745,7 @@ func (sd *SharedDomains) TouchChangedKeysFromHistory(tx kv.TemporalTx, fromTxNum
 // touches them onto the commitment trie.
 func (sd *SharedDomains) touchChangedKeys(tx kv.TemporalTx, d kv.Domain, fromTxNum uint64, toTxNum uint64) (int, error) {
 	changes := 0
-	it, err := tx.HistoryRange(d, int(fromTxNum), int(toTxNum), order.Asc, -1)
+	it, err := tx.Debug().HistoryKeyTxNumRange(d, int(fromTxNum), int(toTxNum), order.Asc, -1)
 	if err != nil {
 		return changes, err
 	}

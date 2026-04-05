@@ -88,10 +88,13 @@ cleanup() {
     mv "$BACKUP_DIR/chaindata" "$DATADIR/chaindata"
   fi
   if $OWN_BACKUP_DIR && [ -n "$BACKUP_DIR" ]; then
-    rmdir "$BACKUP_DIR" 2>/dev/null || true
+    rm -rf "$BACKUP_DIR"
   fi
   if $OWN_WORKSPACE && [ -n "$WORKSPACE" ]; then
     rm -rf "$WORKSPACE"
+  fi
+  if $OWN_RESULT_DIR && [ -n "$RESULT_DIR" ]; then
+    rm -rf "$RESULT_DIR"
   fi
 }
 trap cleanup EXIT

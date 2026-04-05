@@ -65,8 +65,8 @@ func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) {
 		return nil, err
 	}
 
-	a.stepSize = opts.stepSize
-	a.stepsInFrozenFile = opts.stepsInFrozenFile
+	a.stepSize.Store(opts.stepSize)
+	a.stepsInFrozenFile.Store(opts.stepsInFrozenFile)
 
 	a.disableHistory = opts.disableHistory
 	a.disableFsync = opts.disableFsync

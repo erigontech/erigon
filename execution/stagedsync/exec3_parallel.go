@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -115,10 +116,19 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 		temporalTx := applyTx.AsyncClone(mdbx.NewAsyncRwTx(applyTx.RwTx, 1000))
 		asyncTxChan = temporalTx.ApplyChan()
 		asyncTx = temporalTx
-	case kv.TemporalTx:
-		// MemoryMutation overlay — pure Go, no thread affinity.
-		// No asyncTx needed; exec goroutine reads directly from the overlay.
-		asyncTx = applyTx
+	case *membatchwithdb.MemoryMutation:
+		// MemoryMutation overlay — pure Go, no thread affinity for the in-memory
+		// layer. However, cursor operations on the underlying MdbxTx are NOT
+		// thread-safe. Create an OverlayTemporalReadView with its own independent
+		// RO tx for the executor goroutine, so it doesn't share MDBX cursors
+		// with the apply goroutine. The overlay's in-memory data is still shared
+		// (protected by MemoryMutation's RWMutex).
+		execRoTx, err := pe.cfg.db.BeginTemporalRo(ctx)
+		if err != nil {
+			return nil, rwTx, fmt.Errorf("open RO tx for executor overlay: %w", err)
+		}
+		defer execRoTx.Rollback()
+		asyncTx = applyTx.NewTemporalReadView(execRoTx)
 	default:
 		return nil, rwTx, fmt.Errorf("expected *temporal.RwTx: got %T", rwTx)
 	}
@@ -289,6 +299,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					if applyResult.BlockNum > lastBlockResult.BlockNum {
 						uncommittedBlocks++
 						pe.doms.SetTxNum(applyResult.lastTxNum)
+						pe.executedGas.Add(int64(applyResult.BlockGasUsed))
 						lastBlockResult = *applyResult
 					}
 
@@ -958,7 +969,6 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	}
 
 	pe.execLoopGroup.Go(func() error {
-		defer pe.rws.Close()
 		defer pe.in.Release()
 		pe.resetWorkers(execLoopCtx, pe.rs, nil)
 		return pe.execLoop(execLoopCtx)
@@ -986,6 +996,7 @@ func (pe *parallelExecutor) wait(ctx context.Context) error {
 				return
 			}
 			pe.waitWorkers()
+			pe.rws.Close()
 		}
 		doneCh <- nil
 	}()
@@ -1662,9 +1673,10 @@ type blockExecutor struct {
 	cntExec, cntSpecExec, cntSuccess, cntAbort, cntTotalValidations, cntValidationFail, cntFinalized int
 
 	// cumulative gas for this block
-	blockGasUsed uint64
-	blobGasUsed  uint64
-	gasPool      *protocol.GasPool
+	blockRegularGasUsed uint64 // accumulated regular gas (pre-Amsterdam: same as block gas)
+	blockStateGasUsed   uint64 // EIP-8037: accumulated state gas
+	blobGasUsed         uint64
+	gasPool             *protocol.GasPool
 
 	execFailed, execAborted []int
 
@@ -1892,7 +1904,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				txResult := be.results[tx]
 
-				if err := be.gasPool.SubGas(txResult.ExecutionResult.BlockGasUsed); err != nil {
+				// EIP-8037: The net per-tx pool deduction must be BlockRegularGasUsed,
+				// not max(regular, state). Per-tx max gives Σ max(r_i, s_i) ≥
+				// max(Σ r_i, Σ s_i), rejecting valid blocks. State gas is validated
+				// at block end via max(Σ regular, Σ state). Pre-Amsterdam: no change.
+				if err := be.gasPool.SubGas(txResult.ExecutionResult.BlockRegularGasUsed); err != nil {
 					return nil, fmt.Errorf("%w, block=%d: block gas used overflow", rules.ErrInvalidBlock, be.blockNum)
 				}
 
@@ -2001,13 +2017,15 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 
 			if result.Receipt != nil {
-				applyResult.blockGasUsed = int64(result.ExecutionResult.BlockGasUsed)
-				be.blockGasUsed += result.ExecutionResult.BlockGasUsed
+				be.blockRegularGasUsed += result.ExecutionResult.BlockRegularGasUsed
+				be.blockStateGasUsed += result.ExecutionResult.BlockStateGasUsed
+				// EIP-8037: per-tx max(regular, state) overestimates vs the true block gas
+				// (max of sums, not sum of maxes), but is a safe upper bound for commit heuristics.
+				applyResult.blockGasUsed = int64(max(result.ExecutionResult.BlockRegularGasUsed, result.ExecutionResult.BlockStateGasUsed))
 				receipt := *result.Receipt
 				applyResult.receipt = &receipt
 				applyResult.receipt.Logs = append([]*types.Log{}, result.Receipt.Logs...)
 				applyResult.logs = applyResult.receipt.Logs
-				pe.executedGas.Add(int64(applyResult.blockGasUsed))
 			}
 
 			maps.Copy(applyResult.traceFroms, result.TraceFroms)
@@ -2059,13 +2077,15 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			header = tt.Header
 			txs = tt.Txs
 		}
+		// Block gas = max(regular, state). Pre-Amsterdam: blockStateGasUsed is 0.
+		blockGasUsed := max(be.blockRegularGasUsed, be.blockStateGasUsed)
 		be.result = &blockResult{
 			BlockNum:     be.blockNum,
 			BlockTime:    txTask.BlockTime(),
 			BlockHash:    txTask.BlockHash(),
 			ParentHash:   txTask.ParentHash(),
 			StateRoot:    txTask.BlockRoot(),
-			BlockGasUsed: be.blockGasUsed,
+			BlockGasUsed: blockGasUsed,
 			BlobGasUsed:  be.blobGasUsed,
 			lastTxNum:    txTask.Version().TxNum,
 			complete:     true,
@@ -2091,13 +2111,16 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 	txTask := be.tasks[0].Task
 
+	// Block gas = max(regular, state). Pre-Amsterdam: blockStateGasUsed is 0.
+	blockGasUsed := max(be.blockRegularGasUsed, be.blockStateGasUsed)
+
 	return &blockResult{
 		BlockNum:     be.blockNum,
 		BlockTime:    txTask.BlockTime(),
 		BlockHash:    txTask.BlockHash(),
 		ParentHash:   txTask.ParentHash(),
 		StateRoot:    txTask.BlockRoot(),
-		BlockGasUsed: be.blockGasUsed,
+		BlockGasUsed: blockGasUsed,
 		BlobGasUsed:  be.blobGasUsed,
 		lastTxNum:    lastTxNum,
 		isPartial:    len(be.tasks) > 0 && be.tasks[0].Version().TxIndex != -1,

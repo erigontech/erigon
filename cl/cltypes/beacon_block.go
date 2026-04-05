@@ -526,7 +526,11 @@ func (b *BeaconBody) GetExecutionRequests() *ExecutionRequests {
 }
 
 func (b *BeaconBody) GetExecutionRequestsList() []hexutil.Bytes {
-	return GetExecutionRequestsList(b.beaconCfg, b.ExecutionRequests)
+	requestsList := GetExecutionRequestsList(b.beaconCfg, b.ExecutionRequests)
+	if b.Version >= clparams.ElectraVersion && requestsList == nil {
+		return []hexutil.Bytes{}
+	}
+	return requestsList
 }
 
 func GetExecutionRequestsList(beaconCfg *clparams.BeaconChainConfig, r *ExecutionRequests) []hexutil.Bytes {
