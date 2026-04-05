@@ -498,7 +498,7 @@ func prepareKVUncompressedKeysCompressedVals(t *testing.T, keyLen int, numPairs 
 		keys[i] = k
 		// values have common patterns to trigger compression
 		v := make([]byte, 50+i%30)
-		copy(v, []byte("common_prefix_value_"))
+		copy(v, "common_prefix_value_")
 		binary.BigEndian.PutUint64(v[20:], uint64(i))
 		vals[i] = v
 	}
