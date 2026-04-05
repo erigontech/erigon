@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -25,14 +26,15 @@ const (
 )
 
 // entrySnapshot represents a frozen snapshot of entries for one step range.
+// Data is NOT held in memory — reads go through the RecSplit index + file I/O.
 type entrySnapshot struct {
 	fromStep uint64
 	toStep   uint64
 	kvPath   string
 	kviPath  string
-	data     []byte          // raw .kv content
 	index    *recsplit.Index // RecSplit for txNum → offset lookup
-	count    int
+	size     int64           // .kv file size in bytes
+	count    int             // number of entries (size / snapshotEntrySize)
 }
 
 func (s *entrySnapshot) close() {
@@ -40,7 +42,6 @@ func (s *entrySnapshot) close() {
 		s.index.Close()
 		s.index = nil
 	}
-	s.data = nil
 }
 
 // SnapshotManager handles collation, pruning, and merging of qmtree data
@@ -170,16 +171,26 @@ func buildEntryRecSplit(ctx context.Context, kvPath, kviPath string, keyCount in
 			return err
 		}
 
-		data, err := os.ReadFile(kvPath)
+		// Stream through the .kv file — don't load into memory.
+		f, err := os.Open(kvPath)
 		if err != nil {
 			return err
 		}
-		for i := 0; i < len(data); i += snapshotEntrySize {
-			key := data[i : i+8] // txNum as key
-			if err := rs.AddKey(key, uint64(i)); err != nil {
+		var buf [snapshotEntrySize]byte
+		offset := uint64(0)
+		for {
+			_, err := io.ReadFull(f, buf[:])
+			if err != nil {
+				break // EOF or error
+			}
+			if err := rs.AddKey(buf[:8], offset); err != nil {
+				f.Close()
 				return err
 			}
+			offset += snapshotEntrySize
 		}
+		f.Close()
+
 		if err := rs.Build(ctx); err != nil {
 			if rs.Collision() {
 				rs.ResetNextSalt()
@@ -192,9 +203,9 @@ func buildEntryRecSplit(ctx context.Context, kvPath, kviPath string, keyCount in
 }
 
 func openEntrySnapshot(kvPath, kviPath string, fromStep, toStep uint64) (*entrySnapshot, error) {
-	data, err := os.ReadFile(kvPath)
+	fi, err := os.Stat(kvPath)
 	if err != nil {
-		return nil, fmt.Errorf("read entry snapshot: %w", err)
+		return nil, fmt.Errorf("stat entry snapshot: %w", err)
 	}
 	idx, err := recsplit.OpenIndex(kviPath)
 	if err != nil {
@@ -205,33 +216,47 @@ func openEntrySnapshot(kvPath, kviPath string, fromStep, toStep uint64) (*entryS
 		toStep:   toStep,
 		kvPath:   kvPath,
 		kviPath:  kviPath,
-		data:     data,
 		index:    idx,
-		count:    len(data) / snapshotEntrySize,
+		size:     fi.Size(),
+		count:    int(fi.Size()) / snapshotEntrySize,
 	}, nil
+}
+
+// readEntryAt reads a single entry from the .kv file at the given byte offset.
+func readEntryAt(kvPath string, offset uint64) (pre, sc, trans common.Hash, err error) {
+	f, err := os.Open(kvPath)
+	if err != nil {
+		return common.Hash{}, common.Hash{}, common.Hash{}, err
+	}
+	defer f.Close()
+	var buf [snapshotEntrySize]byte
+	if _, err := f.ReadAt(buf[:], int64(offset)); err != nil {
+		return common.Hash{}, common.Hash{}, common.Hash{}, err
+	}
+	copy(pre[:], buf[8:40])
+	copy(sc[:], buf[40:72])
+	copy(trans[:], buf[72:104])
+	return pre, sc, trans, nil
 }
 
 // GetEntryFromSnapshots looks up an entry by txNum in frozen snapshots.
 // Returns (pre, sc, trans, true) if found, (zero, zero, zero, false) if not.
-func (sm *SnapshotManager) GetEntryFromSnapshots(sn uint64) (pre, sc, trans common.Hash, found bool) {
-	step := sn / sm.stepSize
+func (sm *SnapshotManager) GetEntryFromSnapshots(txNum uint64) (pre, sc, trans common.Hash, found bool) {
+	step := txNum / sm.stepSize
 	for _, snap := range sm.entries {
 		if step >= snap.fromStep && step < snap.toStep {
 			reader := recsplit.NewIndexReader(snap.index)
 			var key [8]byte
-			binary.BigEndian.PutUint64(key[:], sn)
+			binary.BigEndian.PutUint64(key[:], txNum)
 			offset, ok := reader.Lookup(key[:])
-			if !ok || int(offset)+snapshotEntrySize > len(snap.data) {
+			if !ok || int64(offset)+int64(snapshotEntrySize) > snap.size {
 				return common.Hash{}, common.Hash{}, common.Hash{}, false
 			}
-			// Verify txNum matches (RecSplit can false-positive).
-			storedSN := binary.BigEndian.Uint64(snap.data[offset : offset+8])
-			if storedSN != sn {
+			// Read entry from file at offset.
+			pre, sc, trans, err := readEntryAt(snap.kvPath, offset)
+			if err != nil {
 				return common.Hash{}, common.Hash{}, common.Hash{}, false
 			}
-			copy(pre[:], snap.data[offset+8:offset+40])
-			copy(sc[:], snap.data[offset+40:offset+72])
-			copy(trans[:], snap.data[offset+72:offset+104])
 			return pre, sc, trans, true
 		}
 	}
@@ -329,18 +354,26 @@ func (sm *SnapshotManager) MergeEntries(ctx context.Context, fromStep, toStep ui
 	kvPath := entryKVPath(sm.domainDir, mergedFrom, mergedTo)
 	kviPath := entryKVIPath(sm.domainDir, mergedFrom, mergedTo)
 
-	// Concatenate data files.
+	// Stream-concatenate data files — no full-file memory allocation.
 	f, err := os.Create(kvPath)
 	if err != nil {
 		return fmt.Errorf("create merged snapshot: %w", err)
 	}
 	totalCount := 0
 	for _, snap := range toMerge {
-		if _, err := f.Write(snap.data); err != nil {
+		src, err := os.Open(snap.kvPath)
+		if err != nil {
 			f.Close()
 			os.Remove(kvPath)
-			return fmt.Errorf("write merged data: %w", err)
+			return fmt.Errorf("open source for merge: %w", err)
 		}
+		if _, err := io.Copy(f, src); err != nil {
+			src.Close()
+			f.Close()
+			os.Remove(kvPath)
+			return fmt.Errorf("copy merged data: %w", err)
+		}
+		src.Close()
 		totalCount += snap.count
 	}
 	if err := f.Sync(); err != nil {
