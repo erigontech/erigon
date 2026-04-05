@@ -274,34 +274,6 @@ func writeTwigRootsForStep(dir string, step, stepSize uint64, hasher Hasher, pre
 	return writeTwigRoots(dir, step, step+1, stepSize, hasher, prevLeafAtStepStart, readEntry)
 }
 
-// prevLeafAtStep returns the prevLeaf hash at the start of the given step.
-// It reads from the .twigs file of the previous step, or returns zero for step 0.
-func prevLeafAtStep(dir string, step, stepSize uint64) common.Hash {
-	if step == 0 {
-		return common.Hash{}
-	}
-	// Try to find a roots file that ends at this step.
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return common.Hash{}
-	}
-	prefix := twigRootsVersion + "-" + twigRootsName + "."
-	for _, e := range entries {
-		if !hasExtension(e.Name(), twigRootsExt) || !hasPrefix(e.Name(), prefix) {
-			continue
-		}
-		var fromStep, toStep uint64
-		pattern := prefix + "%d-%d" + twigRootsExt
-		n, _ := fmt.Sscanf(e.Name(), pattern, &fromStep, &toStep)
-		if n == 2 && toStep == step {
-			prevLeaf, _, err := loadTwigRoots(dir, fromStep, toStep, stepSize)
-			if err == nil {
-				return prevLeaf
-			}
-		}
-	}
-	return common.Hash{}
-}
 
 // mergeRootFiles concatenates individual per-step .v root files into a single
 // merged .v file covering [fromStep, toStep). Old per-step files are deleted.

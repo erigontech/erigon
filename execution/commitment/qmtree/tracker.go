@@ -436,15 +436,28 @@ func (qt *Tracker) maybeCollate() {
 		return
 	}
 	// Collate all steps that have completed since the last collation.
+	// Track prevLeaf across steps for twig root computation.
+	// Get prevLeaf at the start of the first step to collate.
+	// This is the leafHash of the last entry before the step boundary.
+	var stepPrevLeaf common.Hash
+	firstTxNum := qt.lastCollatedStep * qt.stepSize
+	if firstTxNum > 0 {
+		if ld, ok := qt.getLeafData(firstTxNum - 1); ok {
+			stepPrevLeaf = ld.LeafHash()
+		}
+	}
 	for step := qt.lastCollatedStep; step < completedStep; step++ {
 		if err := qt.snapManager.CollateAndPrune(context.Background(), qt.rwTx, qt.rwTx, step); err != nil {
 			log.Warn("qmtree: collation failed", "step", step, "err", err)
 			return
 		}
 		// Write twig roots for this step (needed for fresh-start from snapshots).
-		prevLeaf := prevLeafAtStep(qt.snapManager.domainDir, step, qt.stepSize)
-		if err := writeTwigRootsForStep(qt.snapManager.domainDir, step, qt.stepSize, qt.hasher, prevLeaf); err != nil {
+		if err := writeTwigRootsForStep(qt.snapManager.domainDir, step, qt.stepSize, qt.hasher, stepPrevLeaf); err != nil {
 			log.Warn("qmtree: failed to write twig roots", "step", step, "err", err)
+		}
+		// Read the prevLeaf at the end of this step from the .v file we just wrote.
+		if pl, _, err := loadTwigRoots(qt.snapManager.domainDir, step, step+1, qt.stepSize); err == nil {
+			stepPrevLeaf = pl
 		}
 		qt.lastCollatedStep = step + 1
 	}
