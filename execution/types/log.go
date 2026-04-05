@@ -20,6 +20,8 @@
 package types
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -34,11 +36,11 @@ import (
 type Log struct {
 	// Consensus fields:
 	// address of the contract that generated the event
-	Address common.Address `json:"address" gencodec:"required" codec:"1"`
+	Address common.Address `json:"address" codec:"1"`
 	// list of topics provided by the contract.
-	Topics []common.Hash `json:"topics" gencodec:"required" codec:"2"`
+	Topics []common.Hash `json:"topics" codec:"2"`
 	// supplied by the contract, usually ABI-encoded
-	Data hexutil.Bytes `json:"data" gencodec:"required" codec:"3"`
+	Data hexutil.Bytes `json:"data" codec:"3"`
 
 	// Derived fields. These fields are filled in by the node
 	// but not secured by consensus.
@@ -46,7 +48,7 @@ type Log struct {
 	BlockNumber hexutil.Uint64 `json:"blockNumber" codec:"-"`
 
 	// hash of the transaction
-	TxHash common.Hash `json:"transactionHash" gencodec:"required" codec:"-"`
+	TxHash common.Hash `json:"transactionHash" codec:"-"`
 	// index of the transaction in the block
 	TxIndex hexutil.Uint `json:"transactionIndex" codec:"-"`
 	// hash of the block in which the transaction was included
@@ -57,6 +59,75 @@ type Log struct {
 	// The Removed field is true if this log was reverted due to a chain reorganisation.
 	// You must pay attention to this field if you receive logs through a filter query.
 	Removed bool `json:"removed" codec:"-"`
+}
+
+// UnmarshalJSON validates required fields: address, topics, data, transactionHash.
+func (l *Log) UnmarshalJSON(input []byte) error {
+	type log struct {
+		Address     *common.Address `json:"address"`
+		Topics      *[]common.Hash  `json:"topics"`
+		Data        *hexutil.Bytes  `json:"data"`
+		BlockNumber *hexutil.Uint64 `json:"blockNumber"`
+		TxHash      *common.Hash    `json:"transactionHash"`
+		TxIndex     *hexutil.Uint   `json:"transactionIndex"`
+		BlockHash   *common.Hash    `json:"blockHash"`
+		Index       *hexutil.Uint   `json:"logIndex"`
+		Removed     *bool           `json:"removed"`
+	}
+	var dec log
+	if err := json.Unmarshal(input, &dec); err != nil {
+		return err
+	}
+	if dec.Address == nil {
+		return errors.New("missing required field 'address' for Log")
+	}
+	l.Address = *dec.Address
+	if dec.Topics == nil {
+		return errors.New("missing required field 'topics' for Log")
+	}
+	l.Topics = *dec.Topics
+	if dec.Data == nil {
+		return errors.New("missing required field 'data' for Log")
+	}
+	l.Data = *dec.Data
+	if dec.TxHash == nil {
+		return errors.New("missing required field 'transactionHash' for Log")
+	}
+	l.TxHash = *dec.TxHash
+	if dec.BlockNumber != nil {
+		l.BlockNumber = *dec.BlockNumber
+	}
+	if dec.TxIndex != nil {
+		l.TxIndex = *dec.TxIndex
+	}
+	if dec.BlockHash != nil {
+		l.BlockHash = *dec.BlockHash
+	}
+	if dec.Index != nil {
+		l.Index = *dec.Index
+	}
+	if dec.Removed != nil {
+		l.Removed = *dec.Removed
+	}
+	return nil
+}
+
+// UnmarshalJSON validates required fields and parses the Timestamp field.
+func (l *ErigonLog) UnmarshalJSON(input []byte) error {
+	if err := l.Log.UnmarshalJSON(input); err != nil {
+		return err
+	}
+	type erigonExtra struct {
+		Timestamp *hexutil.Uint64 `json:"timestamp"`
+	}
+	var dec erigonExtra
+	if err := json.Unmarshal(input, &dec); err != nil {
+		return err
+	}
+	if dec.Timestamp != nil {
+		l.Timestamp = *dec.Timestamp
+	}
+	return nil
 }
 
 type Logs []*Log
