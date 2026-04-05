@@ -387,7 +387,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		if dbg.KVReadLevelledMetrics {
 			sd.metrics.UpdateCacheReads(domain, start)
 		}
-		if sd.stateCache != nil && !(domain == kv.CommitmentDomain && v == nil) {
+		if sd.stateCache != nil && domain != kv.CommitmentDomain {
 			sd.stateCache.Put(domain, k, v)
 		}
 		return v, step, nil
@@ -435,9 +435,11 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	}
 
 	// Populate state cache on successful storage read.
-	// Don't cache nil for CommitmentDomain: branch keys are only absent before first write;
-	// caching nil would prevent the trie from seeing the branch after it's first created.
-	if sd.stateCache != nil && !(domain == kv.CommitmentDomain && v == nil) {
+	// CommitmentDomain is excluded: the warmuper goroutine calls GetLatest concurrently
+	// with the main goroutine's DomainPut. If we cached DB reads here, the warmuper
+	// could overwrite a freshly-DomainPut'd branch with a stale DB value, corrupting
+	// the trie computation. CommitmentDomain stateCache is populated only via DomainPut.
+	if sd.stateCache != nil && domain != kv.CommitmentDomain {
 		sd.stateCache.Put(domain, k, v)
 	}
 
