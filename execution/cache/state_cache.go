@@ -17,10 +17,13 @@
 package cache
 
 import (
+	"bytes"
+
 	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
 const (
@@ -81,9 +84,9 @@ func (c *StateCache) Put(domain kv.Domain, key []byte, value []byte) {
 	if cache == nil {
 		return
 	}
-	//if domain == kv.CommitmentDomain && bytes.Equal(key, commitmentdb.KeyCommitmentState) {
-	//	return
-	//}
+	if domain == kv.CommitmentDomain && bytes.Equal(key, commitmentdb.KeyCommitmentState) {
+		return
+	}
 	cache.Put(key, common.Copy(value))
 }
 
