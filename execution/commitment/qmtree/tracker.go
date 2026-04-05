@@ -441,6 +441,11 @@ func (qt *Tracker) maybeCollate() {
 			log.Warn("qmtree: collation failed", "step", step, "err", err)
 			return
 		}
+		// Write twig roots for this step (needed for fresh-start from snapshots).
+		prevLeaf := prevLeafAtStep(qt.snapManager.domainDir, step, qt.stepSize)
+		if err := writeTwigRootsForStep(qt.snapManager.domainDir, step, qt.stepSize, qt.hasher, prevLeaf); err != nil {
+			log.Warn("qmtree: failed to write twig roots", "step", step, "err", err)
+		}
 		qt.lastCollatedStep = step + 1
 	}
 
@@ -503,16 +508,59 @@ func (qt *Tracker) UnwindTo(toSN uint64) {
 	}
 }
 
-// LoadFromDB rebuilds the in-memory tree from QMTreeEntries in MDBX and
-// frozen snapshot files. Reads NextTxNum/prevLeaf from QMTreeMeta, then replays
-// all entries (snapshots + MDBX hot) through the in-memory tree.
+// LoadFromDB rebuilds the in-memory tree. Tries twig roots first (fast path),
+// falls back to full entry replay if twig roots are unavailable.
 func (qt *Tracker) LoadFromDB(tx kv.Tx) error {
+	// Load existing entry snapshots.
+	if qt.snapManager != nil {
+		maxFrozenStep, err := qt.snapManager.LoadSnapshots()
+		if err != nil {
+			log.Warn("qmtree: failed to load snapshots", "err", err)
+		} else {
+			qt.lastCollatedStep = maxFrozenStep
+		}
+	}
+
+	// Try fast path: rebuild upper tree from persisted twig roots.
+	if qt.snapManager != nil {
+		prevLeaf, twigRoots, highestStep, err := loadAllTwigRoots(qt.snapManager.domainDir, qt.stepSize)
+		if err == nil && highestStep > 0 {
+			frozenTxNum := highestStep * qt.stepSize
+			// Check if MDBX has entries beyond the frozen range.
+			mdbxNextTxNum, _ := GetNextTxNum(tx)
+
+			qt.tree = rebuildUpperTreeFromTwigRoots(qt.hasher, twigRoots, frozenTxNum)
+			qt.prevLeaf = prevLeaf
+			qt.NextTxNum = frozenTxNum
+
+			// Replay only the hot entries from MDBX (beyond frozen range).
+			if mdbxNextTxNum > frozenTxNum {
+				for txNum := frozenTxNum; txNum < mdbxNextTxNum; txNum++ {
+					pre, sc, trans, err := GetEntry(tx, txNum)
+					if err != nil {
+						break // no more entries in MDBX
+					}
+					qt.AppendLeaf(pre, sc, trans)
+				}
+			}
+
+			log.Info("qmtree: loaded from twig roots + MDBX",
+				"frozenTxNum", frozenTxNum,
+				"totalTxNum", qt.NextTxNum,
+				"twigRoots", len(twigRoots),
+				"frozenSteps", qt.lastCollatedStep,
+			)
+			return nil
+		}
+	}
+
+	// Slow path: full replay from MDBX.
 	nextTxNum, err := GetNextTxNum(tx)
 	if err != nil {
 		return fmt.Errorf("qmtree LoadFromDB: read nextTxNum: %w", err)
 	}
 	if nextTxNum == 0 {
-		return nil // empty, nothing to load
+		return nil
 	}
 
 	prevLeaf, err := GetPrevLeaf(tx)
@@ -520,7 +568,6 @@ func (qt *Tracker) LoadFromDB(tx kv.Tx) error {
 		return fmt.Errorf("qmtree LoadFromDB: read prevLeaf: %w", err)
 	}
 
-	// Replay through an in-memory tree.
 	replayTree := NewTree(qt.hasher, 0, nil, nil)
 	var currentPrevLeaf common.Hash
 	twigPrevLeaf := []common.Hash{{}}
@@ -552,26 +599,12 @@ func (qt *Tracker) LoadFromDB(tx kv.Tx) error {
 		currentPrevLeaf = leafHash
 	}
 
-	// Attach disk handles from existing tree if any.
-	replayTree.entryStorage = qt.tree.entryStorage
-	replayTree.twigStorage = qt.tree.twigStorage
-
 	qt.tree = replayTree
 	qt.twigPrevLeaf = twigPrevLeaf
 	qt.prevLeaf = prevLeaf
 	qt.NextTxNum = nextTxNum
 
-	// Load existing entry snapshots so we know what's already frozen.
-	if qt.snapManager != nil {
-		maxFrozenStep, err := qt.snapManager.LoadSnapshots()
-		if err != nil {
-			log.Warn("qmtree: failed to load snapshots", "err", err)
-		} else {
-			qt.lastCollatedStep = maxFrozenStep
-		}
-	}
-
-	log.Info("qmtree: loaded from MDBX",
+	log.Info("qmtree: loaded from MDBX (full replay)",
 		"entries", nextTxNum,
 		"cachedLeaves", qt.leafData.Len(),
 		"frozenSteps", qt.lastCollatedStep,
