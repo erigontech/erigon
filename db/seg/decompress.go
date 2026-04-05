@@ -1312,13 +1312,11 @@ func (g *Getter) MatchCmpUncompressed(buf []byte) int {
 // use `.Next` to read found
 // at `ok = false` leaving `g` in unpredictible state
 func (g *Getter) BinarySearch(seek []byte, count int, getOffset func(i uint64) (offset uint64)) (foundOffset uint64, ok bool) {
-	var key []byte
 	foundItem := sort.Search(count, func(i int) bool {
 		offset := getOffset(uint64(i))
 		g.Reset(offset)
 		if g.HasNext() {
-			key, _ = g.Next(key[:0])
-			return bytes.Compare(key, seek) >= 0
+			return g.MatchCmp(seek) <= 0 // MatchCmp returns Compare(seek, word); word >= seek when seek <= word
 		}
 		return false
 	})
