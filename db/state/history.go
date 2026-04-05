@@ -118,12 +118,6 @@ func (h *History) vAccessorNewFilePath(fromStep, toStep kv.Step) string {
 func (h *History) vFileNameMask(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("*-%s.%d-%d.v", h.FilenameBase, fromStep, toStep)
 }
-func (h *History) vFilePathMask(fromStep, toStep kv.Step) string {
-	return filepath.Join(h.dirs.SnapHistory, h.vFileNameMask(fromStep, toStep))
-}
-func (h *History) vAccessorFilePathMask(fromStep, toStep kv.Step) string {
-	return filepath.Join(h.dirs.SnapAccessors, h.vAccessorFileNameMask(fromStep, toStep))
-}
 func (h *History) vAccessorFileNameMask(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("*-%s.%d-%d.vi", h.FilenameBase, fromStep, toStep)
 }
@@ -1210,14 +1204,6 @@ func (ht *HistoryRoTx) Close() {
 	ht.iit.Close()
 }
 
-func (ht *HistoryRoTx) getFileDeprecated(from, to uint64) (it visibleFile, ok bool) {
-	for i := 0; i < len(ht.files); i++ {
-		if ht.files[i].startTxNum == from && ht.files[i].endTxNum == to {
-			return ht.files[i], true
-		}
-	}
-	return it, false
-}
 func (ht *HistoryRoTx) getFile(txNum uint64) (it visibleFile, ok bool) {
 	for i := 0; i < len(ht.files); i++ {
 		if ht.files[i].startTxNum <= txNum && ht.files[i].endTxNum > txNum {
