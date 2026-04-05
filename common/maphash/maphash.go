@@ -25,7 +25,7 @@ func Hash(key []byte) uint64 {
 
 // Map is a concurrent map that uses maphash to hash []byte keys.
 type Map[V any] struct {
-	m *xsync.MapOf[uint64, V]
+	m *xsync.Map[uint64, V]
 }
 
 // NewMap creates a new Map.
