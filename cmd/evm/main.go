@@ -202,6 +202,7 @@ func init() {
 		&runCommand,
 		&blockTestCommand,
 		&engineTestCommand,
+		&engineXTestCommand,
 		&stateTestCommand,
 		&stateTransitionCommand,
 	}

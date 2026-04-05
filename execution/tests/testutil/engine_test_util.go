@@ -514,3 +514,22 @@ func versionToClVersion(v int) clparams.StateVersion {
 		return clparams.BellatrixVersion
 	}
 }
+
+// EngineNewPayloadPublic is an exported version of etNewPayload for use by CLI commands.
+type EngineNewPayloadPublic struct {
+	ExecutionPayload engine_types.ExecutionPayload
+	VersionedHashes  []common.Hash
+	BeaconRoot       *common.Hash
+	Requests         []hexutil.Bytes
+}
+
+// PayloadToBlock converts an engine ExecutionPayload to a types.Block.
+// Exported wrapper around payloadToBlock for CLI use.
+func PayloadToBlock(p *EngineNewPayloadPublic) (*types.Block, []byte, error) {
+	return payloadToBlock(&etNewPayload{
+		ExecutionPayload: p.ExecutionPayload,
+		VersionedHashes:  p.VersionedHashes,
+		BeaconRoot:       p.BeaconRoot,
+		Requests:         p.Requests,
+	})
+}
