@@ -1316,7 +1316,7 @@ func (g *Getter) BinarySearch(seek []byte, count int, getOffset func(i uint64) (
 		offset := getOffset(uint64(i))
 		g.Reset(offset)
 		if g.HasNext() {
-			return g.MatchCmp(seek) <= 0 // MatchCmp returns Compare(seek, word); word >= seek when seek <= word
+			return g.MatchCmp(seek) <= 0 // MatchCmp returns Compare(seek, word); <=0 means word >= seek
 		}
 		return false
 	})
