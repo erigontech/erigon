@@ -29,7 +29,7 @@ func (r *LatestStateReader) WithHistory() bool {
 func (r *LatestStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error {
 	// we're processing the latest state - in which case it needs to be writable
 	if frozenSteps := r.getter.StepsInFiles(d); step < frozenSteps {
-		return fmt.Errorf("%q state out of date: step %d, expected step %d", d, step, frozenSteps)
+		return fmt.Errorf("%w: %q step %d, frozenSteps %d", errCommitmentStateOutOfDate, d, step, frozenSteps)
 	}
 	return nil
 }

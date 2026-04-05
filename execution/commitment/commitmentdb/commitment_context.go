@@ -389,6 +389,7 @@ const keyCommitmentStateS = "state"
 var KeyCommitmentState = []byte(keyCommitmentStateS)
 
 var ErrBehindCommitment = errors.New("behind commitment")
+var errCommitmentStateOutOfDate = errors.New("commitment state out of date")
 
 func _decodeTxBlockNums(v []byte) (txNum, blockNum uint64) {
 	return binary.BigEndian.Uint64(v), binary.BigEndian.Uint64(v[8:16])
@@ -438,7 +439,14 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 
 	_, _, state, err := sdc.LatestCommitmentState(trieContext)
 	if err != nil {
-		return 0, 0, err
+		if errors.Is(err, errCommitmentStateOutOfDate) {
+			// State is in frozen snapshot files but no longer in writable MDBX region.
+			// Fall through as if no commitment state was found; execution will rescan from SyncStageProgress.
+			log.Debug("[commitment] state out of date, will rescan", "err", err)
+			state = nil
+		} else {
+			return 0, 0, err
+		}
 	}
 	if state != nil {
 		blockNum, txNum, err = sdc.restorePatriciaState(state)

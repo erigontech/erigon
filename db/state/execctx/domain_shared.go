@@ -376,10 +376,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		if dbg.KVReadLevelledMetrics {
 			sd.metrics.UpdateCacheReads(domain, start)
 		}
-		if sd.stateCache != nil {
-			if dbg.AssertEnabled && domain == kv.CommitmentDomain && v == nil {
-				log.Debug("stateCache: caching nil for CommitmentDomain from mem (deleted entry?)", "key", fmt.Sprintf("%x", k))
-			}
+		if sd.stateCache != nil && !(domain == kv.CommitmentDomain && v == nil) {
 			sd.stateCache.Put(domain, k, v)
 		}
 		return v, step, nil
@@ -406,8 +403,8 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 					panic(fmt.Sprintf("assert: stateCache mismatch: domain=%v key=%x cache=%x truth=%x (inMem=%v)", domain, k, v, trueV, inMem))
 				}
 			}
-			if domain == kv.CommitmentDomain && v == nil {
-				log.Debug("stateCache: nil branch in CommitmentDomain", "key", fmt.Sprintf("%x", k))
+			if dbg.AssertEnabled && domain == kv.CommitmentDomain && v == nil {
+				panic(fmt.Sprintf("assert: nil CommitmentDomain branch in stateCache key=%x — nil-caching should be prevented", k))
 			}
 			return v, 0, nil
 		}
@@ -426,11 +423,10 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
 
-	// Populate state cache on successful storage read
-	if sd.stateCache != nil {
-		if dbg.AssertEnabled && domain == kv.CommitmentDomain && v == nil {
-			log.Debug("stateCache: caching nil for CommitmentDomain key (key not in DB)", "key", fmt.Sprintf("%x", k))
-		}
+	// Populate state cache on successful storage read.
+	// Don't cache nil for CommitmentDomain: branch keys are only absent before first write;
+	// caching nil would prevent the trie from seeing the branch after it's first created.
+	if sd.stateCache != nil && !(domain == kv.CommitmentDomain && v == nil) {
 		sd.stateCache.Put(domain, k, v)
 	}
 
@@ -535,6 +531,11 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 	// Update state cache when writing
 	if sd.stateCache != nil {
 		sd.stateCache.Put(domain, k, v)
+		if dbg.AssertEnabled {
+			if cached, ok := sd.stateCache.Get(domain, k); ok && !bytes.Equal(cached, v) {
+				panic(fmt.Sprintf("assert: stateCache not updated after DomainPut: domain=%v key=%x cache=%x written=%x", domain, k, cached, v))
+			}
+		}
 	}
 
 	return sd.mem.DomainPut(domain, ks, v, txNum, prevVal)
@@ -546,6 +547,9 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 //   - user can append k2 into k1, then underlying methods will not preform append
 //   - if `val == nil` it will call DomainDel
 func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte, txNum uint64, prevVal []byte) error {
+	if dbg.AssertEnabled && domain == kv.CommitmentDomain {
+		panic(fmt.Sprintf("assert: DomainDel called for CommitmentDomain key=%x — commitment branches are never deleted", k))
+	}
 	ks := string(k)
 	sd.sdCtx.TouchKey(domain, ks, nil)
 
