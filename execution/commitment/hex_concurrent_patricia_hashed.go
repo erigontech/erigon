@@ -458,6 +458,14 @@ func (p *ConcurrentPatriciaHashed) Reset() {
 	}
 }
 
+// ResetMounts resets the 16 mounted subtries without touching the root.
+// Used after restoring root state (SetState) to discard stale subtrie data.
+func (p *ConcurrentPatriciaHashed) ResetMounts() {
+	for i := 0; i < len(p.mounts); i++ {
+		p.mounts[i].Reset()
+	}
+}
+
 func (p *ConcurrentPatriciaHashed) Release() {
 	for i := range p.mounts {
 		if p.ctxClosers[i] != nil {
