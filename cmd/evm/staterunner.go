@@ -114,7 +114,7 @@ func stateTestCmd(ctx *cli.Context) error {
 
 func runStateTestsParallel(ctx *cli.Context, cfg vm.Config, files []string, workers int) ([]testResult, error) {
 	if workers == 1 {
-		var results []testResult
+		results := make([]testResult, 0, len(files)*4) // pre-allocate
 		for _, fname := range files {
 			r, err := runStateTest(ctx, cfg, fname)
 			if err != nil {
@@ -162,7 +162,12 @@ func runStateTestsParallel(ctx *cli.Context, cfg vm.Config, files []string, work
 		}
 		ordered[fr.index] = fr
 	}
-	var results []testResult
+	// Pre-estimate total results
+	total := 0
+	for _, fr := range ordered {
+		total += len(fr.results)
+	}
+	results := make([]testResult, 0, total)
 	for _, fr := range ordered {
 		results = append(results, fr.results...)
 	}

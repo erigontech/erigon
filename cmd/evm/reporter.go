@@ -20,8 +20,10 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/urfave/cli/v2"
 
@@ -73,8 +75,11 @@ func (r testResult) String() string {
 // report prints the after-test summary.
 func report(ctx *cli.Context, results []testResult) {
 	if ctx.Bool(JSONOutputFlag.Name) {
-		out, _ := json.MarshalIndent(results, "", "  ")
-		fmt.Println(string(out))
+		// Write directly to stdout via encoder to avoid the intermediate
+		// MarshalIndent -> string -> Println allocation chain.
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		enc.Encode(results) //nolint:errcheck
 		return
 	}
 	pass := 0
@@ -84,10 +89,12 @@ func report(ctx *cli.Context, results []testResult) {
 		}
 	}
 
+	// Use buffered writer to reduce syscalls when printing many results
+	w := bufio.NewWriter(os.Stdout)
 	for _, r := range results {
-		fmt.Println(r)
+		fmt.Fprintln(w, r)
 	}
-
-	fmt.Println("--")
-	fmt.Printf("%d tests passed, %d tests failed.\n", pass, len(results)-pass)
+	fmt.Fprintln(w, "--")
+	fmt.Fprintf(w, "%d tests passed, %d tests failed.\n", pass, len(results)-pass)
+	w.Flush()
 }

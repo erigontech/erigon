@@ -98,7 +98,7 @@ type fileResult struct {
 
 func runBlockTestsParallel(ctx *cli.Context, files []string, workers int) ([]testResult, error) {
 	if workers == 1 {
-		var results []testResult
+		results := make([]testResult, 0, len(files)*4) // pre-allocate: most files have a few tests
 		for _, fname := range files {
 			r, err := runBlockTest(ctx, fname)
 			if err != nil {
@@ -146,7 +146,12 @@ func runBlockTestsParallel(ctx *cli.Context, files []string, workers int) ([]tes
 		}
 		ordered[fr.index] = fr
 	}
-	var results []testResult
+	// Pre-estimate total results
+	total := 0
+	for _, fr := range ordered {
+		total += len(fr.results)
+	}
+	results := make([]testResult, 0, total)
 	for _, fr := range ordered {
 		results = append(results, fr.results...)
 	}
@@ -156,16 +161,17 @@ func runBlockTestsParallel(ctx *cli.Context, files []string, workers int) ([]tes
 // collectFiles walks the given path and returns all JSON files.
 // If path is a file, it returns that file directly.
 func collectFiles(path string) []string {
-	var out []string
 	info, err := os.Stat(path)
 	if err != nil {
-		return out
+		return nil
 	}
 
 	if !info.IsDir() {
 		return []string{path}
 	}
 
+	// Pre-allocate with a reasonable estimate to avoid repeated slice growth
+	out := make([]string, 0, 256)
 	err = filepath.WalkDir(path, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err

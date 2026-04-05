@@ -237,6 +237,10 @@ func payloadToBlock(p *etNewPayload) (*types.Block, []byte, error) {
 	return block, blockAccessListBytes, nil
 }
 
+// Shared logger for engine test CLI mode. Using a single logger avoids
+// repeated allocations of loggers that all write to stderr at the same level.
+var cliLogger = log.New()
+
 // RunCLI executes the engine test through the real Engine API path:
 // HandleNewPayload (block insertion + chain validation) and
 // HandleForkChoice (canonical head advancement).
@@ -253,9 +257,9 @@ func (t *EngineTest) RunCLI() error {
 	if !ok {
 		return testforks.UnsupportedForkError{Name: t.json.Network}
 	}
-	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
+	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, cliLogger)
 	m := execmoduletester.New(nil, execmoduletester.WithGenesisSpec(t.genesis(config)), execmoduletester.WithEngine(engine))
-	defer m.DB.Close()
+	defer m.CloseCLI()
 
 	if m.Genesis.Hash() != t.json.Genesis.Hash {
 		return fmt.Errorf("genesis block hash doesn't match test: computed=%x, test=%x", m.Genesis.Hash().Bytes()[:6], t.json.Genesis.Hash[:6])
@@ -267,11 +271,11 @@ func (t *EngineTest) RunCLI() error {
 	// Create EngineServer for HandleNewPayload + HandleForkChoice
 	executionClient := direct.NewExecutionClientDirect(m.ExecModule)
 	blockDownloader := engine_block_downloader.NewEngineBlockDownloader(
-		m.Ctx, log.New(), executionClient, m.BlockReader, m.DB,
+		m.Ctx, cliLogger, executionClient, m.BlockReader, m.DB,
 		config, ethconfig.Defaults.Sync, nil,
 	)
 	engineServer := engineapi.NewEngineServer(
-		log.New(), config, executionClient, blockDownloader,
+		cliLogger, config, executionClient, blockDownloader,
 		false, true, false, true, nil, time.Hour, ^uint64(0),
 	)
 	engineServer.SetTest(true)

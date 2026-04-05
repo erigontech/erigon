@@ -96,28 +96,80 @@ func runEngineTestsParallel(ctx *cli.Context, files []string, workers int) ([]te
 		return nil, fmt.Errorf("invalid regex -%s: %v", RunFlag.Name, err)
 	}
 
-	// Phase 1: Parse all files and flatten to individual test cases.
-	// This is fast (JSON parsing only) and lets us distribute evenly.
-	var items []engineTestItem
-	for _, fname := range files {
-		src, err := os.ReadFile(fname)
-		if err != nil {
-			return nil, err
-		}
-		var tests map[string]*testutil.EngineTest
-		if err = json.Unmarshal(src, &tests); err != nil {
-			continue // Skip non-fixture JSON files
-		}
-		keys := slices.Sorted(maps.Keys(tests))
-		for _, name := range keys {
-			if !re.MatchString(name) {
-				continue
+	// Phase 1: Parse all files in parallel and flatten to individual test cases.
+	// JSON parsing is CPU-bound, so parallelizing across files helps significantly.
+	type fileItems struct {
+		index int
+		items []engineTestItem // items with placeholder indices; reindexed after merge
+		err   error
+	}
+
+	parseCh := make(chan struct{ index int; fname string }, len(files))
+	for i, fname := range files {
+		parseCh <- struct{ index int; fname string }{i, fname}
+	}
+	close(parseCh)
+
+	parseWorkers := workers
+	if parseWorkers > len(files) {
+		parseWorkers = len(files)
+	}
+	resultsCh := make(chan fileItems, len(files))
+	var parseWg sync.WaitGroup
+	for w := 0; w < parseWorkers; w++ {
+		parseWg.Add(1)
+		go func() {
+			defer parseWg.Done()
+			for item := range parseCh {
+				src, err := os.ReadFile(item.fname)
+				if err != nil {
+					resultsCh <- fileItems{index: item.index, err: err}
+					continue
+				}
+				var tests map[string]*testutil.EngineTest
+				if err = json.Unmarshal(src, &tests); err != nil {
+					resultsCh <- fileItems{index: item.index} // Skip non-fixture JSON
+					continue
+				}
+				keys := slices.Sorted(maps.Keys(tests))
+				var localItems []engineTestItem
+				for _, name := range keys {
+					if !re.MatchString(name) {
+						continue
+					}
+					localItems = append(localItems, engineTestItem{
+						name: name,
+						test: tests[name],
+					})
+				}
+				resultsCh <- fileItems{index: item.index, items: localItems}
 			}
-			items = append(items, engineTestItem{
-				index: len(items),
-				name:  name,
-				test:  tests[name],
-			})
+		}()
+	}
+	go func() {
+		parseWg.Wait()
+		close(resultsCh)
+	}()
+
+	// Collect and order results by file index, then flatten
+	ordered := make([]fileItems, len(files))
+	for fi := range resultsCh {
+		if fi.err != nil {
+			return nil, fi.err
+		}
+		ordered[fi.index] = fi
+	}
+
+	// Estimate total items for pre-allocation
+	totalItems := 0
+	for _, fi := range ordered {
+		totalItems += len(fi.items)
+	}
+	items := make([]engineTestItem, 0, totalItems)
+	for _, fi := range ordered {
+		for _, item := range fi.items {
+			item.index = len(items)
+			items = append(items, item)
 		}
 	}
 
@@ -172,11 +224,11 @@ func runEngineTestsParallel(ctx *cli.Context, files []string, workers int) ([]te
 		close(resultCh)
 	}()
 
-	ordered := make([]testResult, len(items))
+	results := make([]testResult, len(items))
 	for ir := range resultCh {
-		ordered[ir.index] = ir.result
+		results[ir.index] = ir.result
 	}
-	return ordered, nil
+	return results, nil
 }
 
 func runEngineTest(ctx *cli.Context, fname string) ([]testResult, error) {

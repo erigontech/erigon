@@ -112,26 +112,70 @@ func engineXTestCmd(ctx *cli.Context) error {
 		log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 	}
 
-	// Load pre-allocs
+	// Load pre-allocs in parallel. The directory can contain 24k+ files,
+	// so we first collect the file paths, then parse them concurrently.
 	preAllocDir := ctx.String("pre-alloc-dir")
-	preAllocs := make(map[string]*exPreAlloc)
+	type preAllocFile struct {
+		path string
+		key  string
+	}
+	var paFiles []preAllocFile
 	if err := filepath.WalkDir(preAllocDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return nil
 		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil
-		}
-		var pa exPreAlloc
-		if err := json.Unmarshal(data, &pa); err != nil {
-			return nil
-		}
 		key := strings.TrimSuffix(d.Name(), filepath.Ext(d.Name()))
-		preAllocs[key] = &pa
+		paFiles = append(paFiles, preAllocFile{path: path, key: key})
 		return nil
 	}); err != nil {
-		return fmt.Errorf("loading pre-allocs: %v", err)
+		return fmt.Errorf("scanning pre-alloc dir: %v", err)
+	}
+
+	preAllocs := make(map[string]*exPreAlloc, len(paFiles))
+	{
+		type paResult struct {
+			key string
+			pa  *exPreAlloc
+		}
+		paWorkers := ctx.Int(WorkersFlag.Name)
+		if paWorkers <= 0 {
+			paWorkers = 1
+		}
+		if paWorkers > 32 {
+			paWorkers = 32
+		}
+		paCh := make(chan preAllocFile, len(paFiles))
+		for _, f := range paFiles {
+			paCh <- f
+		}
+		close(paCh)
+
+		paResultCh := make(chan paResult, 256)
+		var paWg sync.WaitGroup
+		for w := 0; w < paWorkers; w++ {
+			paWg.Add(1)
+			go func() {
+				defer paWg.Done()
+				for f := range paCh {
+					data, err := os.ReadFile(f.path)
+					if err != nil {
+						continue
+					}
+					var pa exPreAlloc
+					if err := json.Unmarshal(data, &pa); err != nil {
+						continue
+					}
+					paResultCh <- paResult{key: f.key, pa: &pa}
+				}
+			}()
+		}
+		go func() {
+			paWg.Wait()
+			close(paResultCh)
+		}()
+		for r := range paResultCh {
+			preAllocs[r.key] = r.pa
+		}
 	}
 	fmt.Fprintf(os.Stderr, "Loaded %d pre-allocs\n", len(preAllocs))
 
@@ -153,21 +197,71 @@ func engineXTestCmd(ctx *cli.Context) error {
 	}
 
 	collected := collectFiles(path)
-	var items []testItem
-	for _, fname := range collected {
-		src, err := os.ReadFile(fname)
-		if err != nil {
-			continue
-		}
-		var tests map[string]exTestDef
-		if err := json.Unmarshal(src, &tests); err != nil {
-			continue
-		}
-		for _, name := range slices.Sorted(maps.Keys(tests)) {
-			if !re.MatchString(name) {
-				continue
+
+	// Parse test files in parallel
+	type fileTestItems struct {
+		index int
+		items []testItem
+	}
+	testParseCh := make(chan struct{ index int; fname string }, len(collected))
+	for i, fname := range collected {
+		testParseCh <- struct{ index int; fname string }{i, fname}
+	}
+	close(testParseCh)
+
+	testParseWorkers := ctx.Int(WorkersFlag.Name)
+	if testParseWorkers <= 0 {
+		testParseWorkers = 1
+	}
+	if testParseWorkers > len(collected) {
+		testParseWorkers = len(collected)
+	}
+	testResultsCh := make(chan fileTestItems, len(collected))
+	var testParseWg sync.WaitGroup
+	for w := 0; w < testParseWorkers; w++ {
+		testParseWg.Add(1)
+		go func() {
+			defer testParseWg.Done()
+			for item := range testParseCh {
+				src, err := os.ReadFile(item.fname)
+				if err != nil {
+					testResultsCh <- fileTestItems{index: item.index}
+					continue
+				}
+				var tests map[string]exTestDef
+				if err := json.Unmarshal(src, &tests); err != nil {
+					testResultsCh <- fileTestItems{index: item.index}
+					continue
+				}
+				var localItems []testItem
+				for _, name := range slices.Sorted(maps.Keys(tests)) {
+					if !re.MatchString(name) {
+						continue
+					}
+					localItems = append(localItems, testItem{name: name, def: tests[name]})
+				}
+				testResultsCh <- fileTestItems{index: item.index, items: localItems}
 			}
-			items = append(items, testItem{index: len(items), name: name, def: tests[name]})
+		}()
+	}
+	go func() {
+		testParseWg.Wait()
+		close(testResultsCh)
+	}()
+
+	orderedFiles := make([]fileTestItems, len(collected))
+	for fi := range testResultsCh {
+		orderedFiles[fi.index] = fi
+	}
+	totalItems := 0
+	for _, fi := range orderedFiles {
+		totalItems += len(fi.items)
+	}
+	items := make([]testItem, 0, totalItems)
+	for _, fi := range orderedFiles {
+		for _, item := range fi.items {
+			item.index = len(items)
+			items = append(items, item)
 		}
 	}
 	fmt.Fprintf(os.Stderr, "Collected %d tests\n", len(items))
@@ -176,99 +270,137 @@ func engineXTestCmd(ctx *cli.Context) error {
 		return nil
 	}
 
-	// Cache of engines keyed by "fork:preHash"
+	// Cache of engines keyed by "fork:preHash".
+	// Use per-key sync.Once to avoid duplicate creation and reduce contention.
 	var mu sync.Mutex
 	engines := make(map[string]*cachedEngine)
+	creating := make(map[string]*sync.Once)
 
 	getOrCreate := func(fork, preHash string) (*cachedEngine, error) {
 		key := fork + ":" + preHash
+
+		// Fast path: engine already exists
 		mu.Lock()
 		if ce, ok := engines[key]; ok {
 			mu.Unlock()
 			return ce, nil
 		}
+		// Get or create a sync.Once for this key
+		once, exists := creating[key]
+		if !exists {
+			once = &sync.Once{}
+			creating[key] = once
+		}
 		mu.Unlock()
 
-		config, ok := testforks.Forks[fork]
-		if !ok {
-			return nil, fmt.Errorf("unsupported fork: %s", fork)
-		}
-		pa, ok := preAllocs[preHash]
-		if !ok {
-			return nil, fmt.Errorf("pre-alloc %s not found", preHash)
-		}
-
-		// Build genesis from pre-alloc
-		var genesis types.Genesis
-		if pa.Environment.GasLimit != 0 {
-			env := pa.Environment
-			genesis = types.Genesis{
-				Config:    config,
-				Alloc:     pa.Alloc,
-				ExtraData: []byte{0},
-				Coinbase:  env.Coinbase,
-				GasLimit:  uint64(env.GasLimit),
-				Difficulty: uint256.NewInt(uint64(env.Difficulty)),
-				Timestamp: uint64(env.Timestamp),
+		var ce *cachedEngine
+		var createErr error
+		once.Do(func() {
+			config, ok := testforks.Forks[fork]
+			if !ok {
+				createErr = fmt.Errorf("unsupported fork: %s", fork)
+				return
 			}
-			if env.BaseFee != nil {
-				genesis.BaseFee = uint256.NewInt(uint64(*env.BaseFee))
+			pa, ok := preAllocs[preHash]
+			if !ok {
+				createErr = fmt.Errorf("pre-alloc %s not found", preHash)
+				return
 			}
-			if env.ExcessBlobGas != nil {
-				v := uint64(*env.ExcessBlobGas)
-				genesis.ExcessBlobGas = &v
+
+			// Build genesis from pre-alloc
+			var genesis types.Genesis
+			if pa.Environment.GasLimit != 0 {
+				env := pa.Environment
+				genesis = types.Genesis{
+					Config:     config,
+					Alloc:      pa.Alloc,
+					ExtraData:  []byte{0},
+					Coinbase:   env.Coinbase,
+					GasLimit:   uint64(env.GasLimit),
+					Difficulty: uint256.NewInt(uint64(env.Difficulty)),
+					Timestamp:  uint64(env.Timestamp),
+				}
+				if env.BaseFee != nil {
+					genesis.BaseFee = uint256.NewInt(uint64(*env.BaseFee))
+				}
+				if env.ExcessBlobGas != nil {
+					v := uint64(*env.ExcessBlobGas)
+					genesis.ExcessBlobGas = &v
+				}
+				if env.BlobGasUsed != nil {
+					v := uint64(*env.BlobGasUsed)
+					genesis.BlobGasUsed = &v
+				}
+			} else {
+				genesis = pa.Genesis
+				genesis.Alloc = pa.Alloc
+				genesis.Config = config
 			}
-			if env.BlobGasUsed != nil {
-				v := uint64(*env.BlobGasUsed)
-				genesis.BlobGasUsed = &v
+
+			engine := rulesconfig.CreateRulesEngineBareBones(ctx.Context, config, log.New())
+			m := execmoduletester.New(nil,
+				execmoduletester.WithGenesisSpec(&genesis),
+				execmoduletester.WithEngine(engine),
+			)
+
+			executionClient := direct.NewExecutionClientDirect(m.ExecModule)
+			blockDownloader := engine_block_downloader.NewEngineBlockDownloader(
+				m.Ctx, log.New(), executionClient, m.BlockReader, m.DB,
+				config, ethconfig.Defaults.Sync, nil,
+			)
+			server := engineapi.NewEngineServer(
+				log.New(), config, executionClient, blockDownloader,
+				false, true, false, true, nil, time.Hour, ^uint64(0),
+			)
+			server.SetTest(true)
+
+			// Send initial FCU to genesis so the chain head is set
+			genesisHash := m.Genesis.Hash()
+			fcuStatus, err := server.HandleForkChoice(m.Ctx, "ForkchoiceUpdated",
+				&engine_types.ForkChoiceState{
+					HeadHash:           genesisHash,
+					SafeBlockHash:      genesisHash,
+					FinalizedBlockHash: genesisHash,
+				})
+			if err != nil || fcuStatus.Status != engine_types.ValidStatus {
+				m.DB.Close()
+				createErr = fmt.Errorf("initial FCU to genesis failed: %v (status: %v)", err, fcuStatus)
+				return
 			}
-		} else {
-			genesis = pa.Genesis
-			genesis.Alloc = pa.Alloc
-			genesis.Config = config
-		}
 
-		engine := rulesconfig.CreateRulesEngineBareBones(ctx.Context, config, log.New())
-		m := execmoduletester.New(nil,
-			execmoduletester.WithGenesisSpec(&genesis),
-			execmoduletester.WithEngine(engine),
-		)
-
-		executionClient := direct.NewExecutionClientDirect(m.ExecModule)
-		blockDownloader := engine_block_downloader.NewEngineBlockDownloader(
-			m.Ctx, log.New(), executionClient, m.BlockReader, m.DB,
-			config, ethconfig.Defaults.Sync, nil,
-		)
-		server := engineapi.NewEngineServer(
-			log.New(), config, executionClient, blockDownloader,
-			false, true, false, true, nil, time.Hour, ^uint64(0),
-		)
-		server.SetTest(true)
-
-		// Send initial FCU to genesis so the chain head is set
-		genesisHash := m.Genesis.Hash()
-		fcuStatus, err := server.HandleForkChoice(m.Ctx, "ForkchoiceUpdated",
-			&engine_types.ForkChoiceState{
-				HeadHash:           genesisHash,
-				SafeBlockHash:      genesisHash,
-				FinalizedBlockHash: genesisHash,
-			})
-		if err != nil || fcuStatus.Status != engine_types.ValidStatus {
-			m.DB.Close()
-			return nil, fmt.Errorf("initial FCU to genesis failed: %v (status: %v)", err, fcuStatus)
-		}
-
-		ce := &cachedEngine{m: m, server: server}
-		mu.Lock()
-		// Double-check after lock
-		if existing, ok := engines[key]; ok {
+			ce = &cachedEngine{m: m, server: server}
+			mu.Lock()
+			engines[key] = ce
 			mu.Unlock()
-			m.DB.Close()
-			return existing, nil
+		})
+
+		if createErr != nil {
+			return nil, createErr
 		}
-		engines[key] = ce
+
+		// After once.Do, the engine must be in the map
+		mu.Lock()
+		ce = engines[key]
 		mu.Unlock()
 		return ce, nil
+	}
+
+	// Pre-create all needed engines before parallel execution.
+	// This avoids lazy creation during the test phase, where it would
+	// add latency to the first test hitting each (fork, preHash) pair.
+	{
+		uniqueKeys := make(map[string]struct{})
+		for _, item := range items {
+			key := item.def.Fork + ":" + item.def.PreHash
+			uniqueKeys[key] = struct{}{}
+		}
+		fmt.Fprintf(os.Stderr, "Pre-creating %d engines\n", len(uniqueKeys))
+		for key := range uniqueKeys {
+			parts := strings.SplitN(key, ":", 2)
+			if _, err := getOrCreate(parts[0], parts[1]); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to pre-create engine for %s: %v\n", key, err)
+			}
+		}
 	}
 
 	// Execute tests
