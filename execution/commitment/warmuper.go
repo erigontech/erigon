@@ -322,7 +322,9 @@ func (w *Warmuper) DrainPending() {
 // goroutines hold references to via hashedKey slices.
 func (w *Warmuper) WaitAndClose() {
 	w.Close()
-	_ = w.g.Wait()
+	if w.g != nil {
+		_ = w.g.Wait()
+	}
 }
 
 // Close cancels all warmup work and releases resources. Does NOT wait for goroutines to exit.
@@ -331,5 +333,7 @@ func (w *Warmuper) Close() {
 		return // Already closed
 	}
 	w.cancel()
-	close(w.work)
+	if w.work != nil {
+		close(w.work)
+	}
 }
