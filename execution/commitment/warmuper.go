@@ -319,11 +319,10 @@ func (w *Warmuper) DrainPending() {
 
 // WaitAndClose waits for all warmup work to complete and then closes the warmuper.
 func (w *Warmuper) WaitAndClose() {
-	if w.closed.Swap(true) {
-		return // Already closed
-	}
-	w.Wait()
 	w.Close()
+	if w.g != nil {
+		_ = w.g.Wait()
+	}
 }
 
 // Close cancels all warmup work and releases resources.
