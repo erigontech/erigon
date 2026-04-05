@@ -25,7 +25,7 @@ import (
 const (
 	twigRootsVersion = "v1.0"
 	twigRootsName    = "qmtree-roots"
-	twigRootsExt     = ".dat"
+	twigRootsExt     = ".v"
 )
 
 func twigRootsPath(dir string, fromStep, toStep uint64) string {
