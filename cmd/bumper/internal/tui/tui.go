@@ -86,7 +86,7 @@ func newModel(file string, s schema.Schema) *model {
 	cats := schema.Cats(s)
 
 	lCols := []table.Column{{Title: "Schemas", Width: 18}}
-	l := table.New(table.WithColumns(lCols), table.WithWidth(colsWidth(lCols)))
+	l := table.New(table.WithColumns(lCols), table.WithWidth(colsWidth(lCols)), table.WithHeight(18))
 	lrows := make([]table.Row, len(cats))
 	for i, c := range cats {
 		lrows[i] = table.Row{c}
