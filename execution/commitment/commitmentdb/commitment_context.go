@@ -220,6 +220,11 @@ func (sdc *SharedDomainsCommitmentContext) ClearWarmupCache() {
 	}
 }
 
+// BranchCache returns the persistent branch cache, or nil if not set.
+func (sdc *SharedDomainsCommitmentContext) BranchCache() *commitment.BranchCache {
+	return sdc.patriciaTrie.GetBranchCache()
+}
+
 func (sdc *SharedDomainsCommitmentContext) EnableCsvMetrics(filePathPrefix string) {
 	sdc.patriciaTrie.EnableCsvMetrics(filePathPrefix)
 }

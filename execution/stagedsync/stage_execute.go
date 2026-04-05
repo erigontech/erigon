@@ -442,6 +442,16 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 		accumulator.StartChange(header, txs, true)
 	}
 
+	// Clear the persistent branch cache before unwind. The cache contains
+	// branch nodes from the chain tip; applying changesets backwards will
+	// produce wrong trie roots if stale cached branches are read instead
+	// of the DB values that the changesets reference.
+	if sdCtx := doms.GetCommitmentCtx(); sdCtx != nil {
+		if cache := sdCtx.BranchCache(); cache != nil {
+			cache.Clear()
+		}
+	}
+
 	if err := unwindExec3(u, s, doms, rwTx, ctx, cfg, accumulator, logger); err != nil {
 		return err
 	}
