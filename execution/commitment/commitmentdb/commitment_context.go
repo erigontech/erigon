@@ -723,6 +723,12 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 	if err := hext.SetState(cs.trieState); err != nil {
 		return 0, 0, fmt.Errorf("failed restore state : %w", err)
 	}
+	// Clear the persistent branch cache — restoring state means we're at a
+	// different trie point (e.g. after unwind/reorg), so all cached branches
+	// are potentially stale and must not be reused.
+	if cache := hext.GetBranchCache(); cache != nil {
+		cache.Clear()
+	}
 	sdc.justRestored.Store(true) // to prevent double reset
 	if sdc.trace {
 		rootHash, err := hext.RootHash()
