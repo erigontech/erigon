@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/trie"
@@ -407,8 +408,8 @@ func releaseResources(stateObjects map[accounts.Address]*stateObject, journal *j
 
 func (sdb *IntraBlockState) AddLog(log *types.Log) {
 	sdb.journal.append(addLogChange{txIndex: sdb.txIndex})
-	log.TxIndex = uint(sdb.txIndex)
-	log.Index = sdb.logSize
+	log.TxIndex = hexutil.Uint(sdb.txIndex)
+	log.Index = hexutil.Uint(sdb.logSize)
 	if dbg.TraceLogs && (sdb.trace || dbg.TraceAccount(accounts.InternAddress(log.Address).Handle())) {
 		var topics string
 		for i := 0; i < 4 && i < len(log.Topics); i++ {
@@ -436,7 +437,7 @@ func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash common.Hash, blockNumbe
 	logs := sdb.logs[txIndex+1]
 	for _, l := range logs {
 		l.TxHash = txnHash
-		l.BlockNumber = blockNumber
+		l.BlockNumber = hexutil.Uint64(blockNumber)
 		l.BlockHash = blockHash
 	}
 	return slices.Clone(logs)

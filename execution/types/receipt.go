@@ -502,10 +502,10 @@ func (rs Receipts) AssertLogIndex(blockNum uint64) {
 		}
 
 		for i := 0; i < len(r.Logs); i++ {
-			if _, ok := seen[r.Logs[i].Index]; ok {
+			if _, ok := seen[uint(r.Logs[i].Index)]; ok {
 				panic(fmt.Sprintf("assert: duplicated log_index %d,  bn=%d", r.Logs[i].Index, blockNum))
 			}
-			seen[r.Logs[i].Index] = struct{}{}
+			seen[uint(r.Logs[i].Index)] = struct{}{}
 		}
 	}
 }
@@ -565,11 +565,11 @@ func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash common.Ha
 
 	// The derived log fields can simply be set from the block and transaction
 	for j := 0; j < len(r.Logs); j++ {
-		r.Logs[j].BlockNumber = blockNum
+		r.Logs[j].BlockNumber = hexutil.Uint64(blockNum)
 		r.Logs[j].BlockHash = blockHash
 		r.Logs[j].TxHash = r.TxHash
-		r.Logs[j].TxIndex = uint(txnIdx)
-		r.Logs[j].Index = uint(logIndex)
+		r.Logs[j].TxIndex = hexutil.Uint(txnIdx)
+		r.Logs[j].Index = hexutil.Uint(logIndex)
 		logIndex++
 	}
 	return nil
@@ -586,11 +586,11 @@ func (r *Receipt) DeriveFieldsV4ForCachedReceipt(blockHash common.Hash, blockNum
 
 	// The derived log fields can simply be set from the block and transaction
 	for j := 0; j < len(r.Logs); j++ {
-		r.Logs[j].BlockNumber = blockNum
+		r.Logs[j].BlockNumber = hexutil.Uint64(blockNum)
 		r.Logs[j].BlockHash = r.BlockHash
 		r.Logs[j].TxHash = r.TxHash
-		r.Logs[j].TxIndex = r.TransactionIndex
-		r.Logs[j].Index = uint(logIndex)
+		r.Logs[j].TxIndex = hexutil.Uint(r.TransactionIndex)
+		r.Logs[j].Index = hexutil.Uint(logIndex)
 		logIndex++
 	}
 	if calcBloom {
