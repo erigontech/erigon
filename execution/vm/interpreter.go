@@ -148,7 +148,7 @@ func (ctx *CallContext) MemoryData() []byte {
 // StackData returns the stack data. Callers must not modify the contents
 // of the returned data.
 func (ctx *CallContext) StackData() []uint256.Int {
-	return ctx.Stack.data[:ctx.Stack.top]
+	return ctx.Stack.data[:ctx.Stack.top:ctx.Stack.top]
 }
 
 // Caller returns the current caller.

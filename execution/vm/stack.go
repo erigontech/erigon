@@ -21,9 +21,11 @@ package vm
 
 import (
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/execution/protocol/params"
 )
 
-const stackLimit = 1024
+const stackLimit = params.StackLimit
 
 // Stack is an object for basic stack operations. Items popped to the stack are
 // expected to be changed and modified. stack does not take care of adding newly
@@ -34,7 +36,7 @@ type Stack struct {
 }
 
 func (st *Stack) push(d uint256.Int) {
-	// NOTE push limit (1024) is checked in baseCheck
+	// NOTE: stack overflow is enforced by the interpreter via operation.maxStack.
 	st.data[st.top] = d
 	st.top++
 }
@@ -46,7 +48,7 @@ func (st *Stack) pop() (ret uint256.Int) {
 }
 
 func (st *Stack) Cap() int {
-	return stackLimit
+	return int(stackLimit)
 }
 
 func (st *Stack) swap(n int) {
