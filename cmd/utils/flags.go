@@ -42,6 +42,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/devgenesis"
+	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/common"
@@ -1892,7 +1893,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 			}
 
 		}
-	} else {
+	} else if chain != networkname.Dev && chain != networkname.BorDevnet {
 		spec, err := chainspec.ChainSpecByName(chain)
 		if err != nil {
 			Fatalf("chain name is not recognized: %s", chain)
@@ -2012,9 +2013,13 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		beaconCfg := clparams.MainnetBeaconConfig
 		clparams.ApplyMinimalPreset(&beaconCfg)
 		genesisTime := uint64(time.Now().Unix())
-		// Use a placeholder EL genesis hash — the actual hash is computed later
-		// during chain init. The beacon state just needs a non-zero reference.
-		elGenesisHash := common.Hash{0x01}
+		// Compute the EL genesis block hash so the beacon state's Eth1Data
+		// matches the actual chain genesis.
+		elGenesisBlock, _, err := genesiswrite.GenesisToBlock(nil, cfg.Genesis, cfg.Dirs, logger)
+		if err != nil {
+			Fatalf("Failed to compute dev EL genesis hash: %v", err)
+		}
+		elGenesisHash := elGenesisBlock.Hash()
 		beaconState, _, err := devgenesis.BuildGenesisState(seed, validatorCount, &beaconCfg, genesisTime, elGenesisHash)
 		if err != nil {
 			Fatalf("Failed to build dev beacon genesis: %v", err)
