@@ -247,8 +247,8 @@ func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *
 		if err := domains.IndexAdd(kv.LogAddrIdx, lg.Address[:], txNum); err != nil {
 			return err
 		}
-		for _, topic := range lg.Topics {
-			if err := domains.IndexAdd(kv.LogTopicIdx, topic[:], txNum); err != nil {
+		for i := range lg.Topics {
+			if err := domains.IndexAdd(kv.LogTopicIdx, lg.Topics[i][:], txNum); err != nil {
 				return err
 			}
 		}
