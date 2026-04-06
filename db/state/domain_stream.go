@@ -61,7 +61,7 @@ type CursorItem struct {
 	endTxNum     uint64
 	latestOffset uint64     // offset of the latest value in the file
 	t            CursorType // Whether this item represents state file or DB record, or tree
-	reverse      bool
+	reverse bool // controls tiebreaker direction of endTxNum between entries with equal keys (not key order itself)
 }
 
 type CursorHeap []*CursorItem
