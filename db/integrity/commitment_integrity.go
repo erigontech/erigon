@@ -1044,7 +1044,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 	dur := time.Since(start)
 	n := checked.Load()
 	rate := float64(n) / dur.Seconds()
-	logger.Info("checked commitment hist at blk range", "dur", dur, "blks", n, "blks/s", rate, "from", from, "to", to, "seed", sampler.Seed, "sampleRatio", sampler.SampleRatio)
+	logger.Info("checked commitment hist at blk range", "dur", dur, "blks", n, "blks/s", fmt.Sprintf("%.1f", rate), "from", from, "to", to, "seed", sampler.Seed, "sampleRatio", sampler.SampleRatio)
 	return nil
 }
 
