@@ -271,6 +271,7 @@ func StageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sync *stagedsyn
 			}); err != nil {
 				return err
 			}
+			logger.Info("[stageloop] collate check", "stepsInDB", stepsInDB)
 			for stepsInDB > 2 {
 				logger.Info("[stageloop] steps accumulated, running synchronous collate", "stepsInDB", stepsInDB)
 				if err := agg.BuildFiles(agg.EndTxNumMinimax() + agg.StepSize()); err != nil {

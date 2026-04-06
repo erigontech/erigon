@@ -32,6 +32,8 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -501,10 +503,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
 		if hasMore {
-			err = e.executionPipeline.RunPrune(ctx, tx, initialCycle, 500*time.Millisecond)
-			if err != nil {
-				return sendError("updateForkChoice: RunPrune after hasMore", err)
-			}
 			// Flush SD (block overlay + domain mem) to a brief RwTx to relieve memory pressure.
 			commitRwTx, err := e.db.BeginTemporalRw(ctx) //nolint:gocritic
 			if err != nil {
@@ -517,6 +515,38 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			currentContext.ClearRam(true)
 			if err = commitRwTx.Commit(); err != nil {
 				return sendError("updateForkChoice: tx commit after hasMore", err)
+			}
+			// Collate + prune in separate transaction after commit so
+			// MDBX GC can reclaim freed pages in subsequent writes.
+			if a, ok := e.db.(state.HasAgg); ok {
+				agg := a.Agg().(*state.Aggregator)
+				var stepsInDB float64
+				if viewErr := e.db.View(ctx, func(vtx kv.Tx) error {
+					stepsInDB = rawdbhelpers.IdxStepsCountV3(vtx, agg.StepSize())
+					return nil
+				}); viewErr != nil {
+					return sendError("updateForkChoice: view for steps check", viewErr)
+				}
+				for stepsInDB > 2 {
+					e.logger.Info("[forkchoice] steps accumulated, running synchronous collate", "stepsInDB", stepsInDB)
+					if buildErr := agg.BuildFiles(agg.EndTxNumMinimax() + agg.StepSize()); buildErr != nil {
+						return sendError("updateForkChoice: sync collate", buildErr)
+					}
+					if viewErr := e.db.View(ctx, func(vtx kv.Tx) error {
+						stepsInDB = rawdbhelpers.IdxStepsCountV3(vtx, agg.StepSize())
+						return nil
+					}); viewErr != nil {
+						return sendError("updateForkChoice: view for steps recheck", viewErr)
+					}
+					if stepsInDB <= 1 {
+						break
+					}
+				}
+			}
+			if pruneErr := e.db.UpdateTemporal(ctx, func(pruneTx kv.TemporalRwTx) error {
+				return e.executionPipeline.RunPrune(ctx, pruneTx, initialCycle, 500*time.Millisecond)
+			}); pruneErr != nil {
+				return sendError("updateForkChoice: RunPrune after hasMore", pruneErr)
 			}
 			// Recreate RO tx + block overlay on the fresh committed state.
 			roTx.Rollback()
@@ -765,6 +795,34 @@ func (e *ExecModule) runForkchoiceCommit(sd *execctx.SharedDomains, tx kv.Tempor
 }
 
 func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
+	// When steps accumulate beyond threshold, run collate synchronously
+	// before prune so freed pages are available for MDBX GC reclamation.
+	if a, ok := e.db.(state.HasAgg); ok {
+		agg := a.Agg().(*state.Aggregator)
+		var stepsInDB float64
+		if err := e.db.View(e.bacgroundCtx, func(tx kv.Tx) error {
+			stepsInDB = rawdbhelpers.IdxStepsCountV3(tx, agg.StepSize())
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+		for stepsInDB > 2 {
+			e.logger.Info("[forkchoice] steps accumulated, running synchronous collate", "stepsInDB", stepsInDB)
+			if err := agg.BuildFiles(agg.EndTxNumMinimax() + agg.StepSize()); err != nil {
+				return nil, err
+			}
+			if err := e.db.View(e.bacgroundCtx, func(tx kv.Tx) error {
+				stepsInDB = rawdbhelpers.IdxStepsCountV3(tx, agg.StepSize())
+				return nil
+			}); err != nil {
+				return nil, err
+			}
+			if stepsInDB <= 1 {
+				break
+			}
+		}
+	}
+
 	var timings []any
 	pruneStart := time.Now()
 	defer UpdateForkChoicePruneDuration(pruneStart)
