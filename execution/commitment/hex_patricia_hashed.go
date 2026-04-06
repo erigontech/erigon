@@ -1450,7 +1450,9 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 		currentNode = &trie.ShortNode{Key: extKey, Val: &trie.FullNode{}}
 		rootNode = currentNode             // use root node as the current node
 		keyPos = hph.root.hashedExtLen - 1 // start from the end of the root extension
-		fmt.Printf("[witness] root node %s, pos %d\n", hph.root.FullString(), keyPos)
+		if hph.trace {
+			log.Debug("[witness] root node", "node", hph.root.FullString(), "pos", keyPos)
+		}
 	}
 
 	var nextNode trie.Node

@@ -482,9 +482,9 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 		require.Len(t, result, 3)
 
 		n2 = rpc.BlockNumber(12)
-		_, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.BlockNumber(11), &n2)
+		result, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.BlockNumber(11), &n2)
 		require.NoError(t, err)
-		require.Len(t, result, 3)
+		require.NotEmpty(t, result)
 		_, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.BlockNumber(11), nil)
 		require.NoError(t, err)
 	})
@@ -747,7 +747,11 @@ func TestGetRawTransaction(t *testing.T) {
 
 func TestExecutionWitness(t *testing.T) {
 	// Enable historical commitment to allow witness generation for historical blocks
+	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() {
+		statecfg.Schema = previousSchema
+	})
 
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
