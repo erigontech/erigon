@@ -93,7 +93,9 @@ func openHistory(dirs datadir.Dirs, domainName string, scanToStep uint64, logger
 	if err != nil {
 		return nil, nil, fmt.Errorf("init history: %w", err)
 	}
-	history.Scan(scanToStep * settings.StepSize)
+	if err := history.Scan(scanToStep * settings.StepSize); err != nil {
+		return nil, nil, fmt.Errorf("scan history: %w", err)
+	}
 	return history, settings, nil
 }
 
