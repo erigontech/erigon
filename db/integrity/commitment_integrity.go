@@ -846,14 +846,6 @@ func checkCommitmentHistAtBlkWithIdx(ctx context.Context, tx kv.TemporalTx, sd *
 	if err != nil {
 		return err
 	}
-	// Use EndTxNumNoCommitment: this check reconstructs commitment from history
-	// files only (not commitment domain), so commitment domain coverage must not
-	// limit which blocks can be verified.
-	aggTx := state.AggTx(tx)
-	if aggMax := aggTx.EndTxNumNoCommitment(); maxTxNum+1 > aggMax {
-		blockNumOfState, _, _ := txNumsReader.FindBlockNum(ctx, tx, aggMax)
-		return fmt.Errorf("block %d is beyond latest block with state %d", blockNum, blockNumOfState)
-	}
 	toTxNum := maxTxNum + 1
 	// For blockNum==0 there is no prior commitment state (GetAsOf at txNum=0
 	// falls back to latest for the commitment domain). Use commitmentAsOf=toTxNum
