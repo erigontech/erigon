@@ -24,6 +24,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/hexutil"
+
 	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
