@@ -328,5 +328,7 @@ func (w *Warmuper) Close() {
 		return // Already closed
 	}
 	w.cancel()
-	close(w.work)
+	if w.work != nil {
+		close(w.work)
+	}
 }
