@@ -175,10 +175,18 @@ func (sdc *SharedDomainsCommitmentContext) HasPendingUpdate() bool {
 // flushPendingUpdate applies the pending commitment update using the given putter.
 // The update is written with its original TxNum. Called at the start of ComputeCommitment
 // to ensure the previously deferred update is applied before processing new ones.
-func (sdc *SharedDomainsCommitmentContext) flushPendingUpdate(putter kv.TemporalPutDel) error {
+func (sdc *SharedDomainsCommitmentContext) flushPendingUpdate(putter kv.TemporalPutDel, branchCache *commitment.BranchCache) error {
 	upd := sdc.pendingUpdate
 	putBranch := func(prefix, data, prevData []byte) error {
-		return putter.DomainPut(kv.CommitmentDomain, prefix, data, upd.TxNum, prevData)
+		if err := putter.DomainPut(kv.CommitmentDomain, prefix, data, upd.TxNum, prevData); err != nil {
+			return err
+		}
+		// Keep the persistent cache in sync with sd.mem so the next
+		// Process() reads the flushed values instead of stale cached data.
+		if branchCache != nil {
+			branchCache.Put(prefix, data)
+		}
+		return nil
 	}
 	if _, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch); err != nil {
 		return err
@@ -451,7 +459,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 
 	// Flush pending commitment update before processing new ones.
 	if sdc.pendingUpdate != nil {
-		if err = sdc.flushPendingUpdate(trieContext.putter); err != nil {
+		if err = sdc.flushPendingUpdate(trieContext.putter, sdc.patriciaTrie.GetBranchCache()); err != nil {
 			return nil, err
 		}
 	}

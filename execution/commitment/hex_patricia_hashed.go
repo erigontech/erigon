@@ -3022,12 +3022,8 @@ func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
 		}
 	}
 
-	// Level 2: persistent branch cache (survives across Process calls).
-	// Only the root trie reads from the cache. Mounted subtries run with
-	// independent DB contexts (per-goroutine roTx in ParallelHashSort)
-	// that may not reflect the root's rwTx writes. Serving cached data
-	// from the root's context to a mount would produce wrong trie roots.
-	if hph.branchCache != nil && !hph.mounted {
+	// Level 2: persistent branch cache (survives across Process calls)
+	if hph.branchCache != nil {
 		if data, found := hph.branchCache.Get(key); found {
 			if hph.metrics != nil {
 				hph.metrics.pCacheBranchHit.Add(1)
@@ -3045,12 +3041,8 @@ func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	// Populate persistent cache on miss — but only from the root trie.
-	// Mounted subtries run with independent DB contexts (per-goroutine
-	// snapshots in ParallelHashSort) that may not reflect the root's
-	// latest PutBranch writes. Caching their reads would pollute the
-	// shared cache with stale data.
-	if hph.branchCache != nil && len(data) > 0 && !hph.mounted {
+	// Populate persistent cache on miss
+	if hph.branchCache != nil && len(data) > 0 {
 		hph.branchCache.Put(key, data)
 	}
 
