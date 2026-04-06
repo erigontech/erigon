@@ -1628,6 +1628,19 @@ func (t *Updates) initCollector() {
 
 func (t *Updates) Mode() Mode { return t.mode }
 
+// PlainKeys returns a copy of the set of plain keys that have been touched.
+// Only meaningful in ModeDirect; returns nil otherwise.
+func (t *Updates) PlainKeys() map[string]struct{} {
+	if t.mode != ModeDirect || t.keys == nil {
+		return nil
+	}
+	cp := make(map[string]struct{}, len(t.keys))
+	for k := range t.keys {
+		cp[k] = struct{}{}
+	}
+	return cp
+}
+
 func (t *Updates) Size() (updates uint64) {
 	switch t.mode {
 	case ModeDirect:
@@ -1678,6 +1691,29 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 	}
 }
 
+func (t *Updates) TouchHashedKey(hashedKey []byte) {
+	switch t.mode {
+	case ModeDirect:
+		dedupKey := string(hashedKey)
+		if _, ok := t.keys[dedupKey]; !ok {
+			var err error
+			if !t.sortPerNibble {
+				err = t.etl.Collect(hashedKey, []byte{})
+			} else {
+				err = t.nibbles[hashedKey[0]].Collect(hashedKey, []byte{})
+			}
+			if err != nil {
+				log.Warn("failed to collect hashed key", "hashedKey", fmt.Sprintf("%x", hashedKey), "err", err)
+			}
+			t.keys[dedupKey] = struct{}{}
+		}
+	case ModeUpdate:
+		pivot := &KeyUpdate{hashedKey: common.Copy(hashedKey), update: new(Update)}
+		t.tree.ReplaceOrInsert(pivot)
+	default:
+	}
+}
+
 func (t *Updates) TouchAccount(c *KeyUpdate, val []byte) {
 	if len(val) == 0 {
 		c.update.Flags = DeleteUpdate
@@ -1715,6 +1751,7 @@ func (t *Updates) TouchStorage(c *KeyUpdate, val []byte) {
 	if len(val) == 0 {
 		c.update.Flags = DeleteUpdate
 	} else {
+		c.update.Flags &^= DeleteUpdate
 		c.update.Flags |= StorageUpdate
 		copy(c.update.Storage[:], val)
 	}
@@ -1922,8 +1959,11 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 func (t *Updates) Reset() {
 	switch t.mode {
 	case ModeDirect:
-		t.keys = nil
-		t.keys = make(map[string]struct{})
+		if t.keys == nil {
+			t.keys = make(map[string]struct{})
+		} else {
+			clear(t.keys)
+		}
 		t.initCollector()
 	case ModeUpdate:
 		t.tree.Clear(true)
@@ -2010,6 +2050,9 @@ func (u *Update) Merge(b *Update) {
 	if b.Flags == DeleteUpdate {
 		u.Flags = DeleteUpdate
 		return
+	}
+	if b.Flags&(BalanceUpdate|NonceUpdate|CodeUpdate|StorageUpdate) != 0 {
+		u.Flags &^= DeleteUpdate
 	}
 	if b.Flags&BalanceUpdate != 0 {
 		u.Flags |= BalanceUpdate

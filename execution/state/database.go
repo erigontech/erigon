@@ -76,7 +76,6 @@ func NewNoopWriter(trace ...bool) *NoopWriter {
 	return &NoopWriter{trace[0]}
 }
 
-func (*NoopWriter) SetTx(kv.TemporalTx) {}
 func (nw *NoopWriter) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
 	if nw.trace {
 		fmt.Printf("acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)

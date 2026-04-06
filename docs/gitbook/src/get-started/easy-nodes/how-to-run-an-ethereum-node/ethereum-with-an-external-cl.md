@@ -24,7 +24,7 @@ You can use **Prysm**, **Lighthouse**, or any other Consensus Layer client with 
 
     * `--authrpc.addr 0.0.0.0`, since the Engine API listens on localhost by default;
     * `--authrpc.vhosts <CL_host>` where \<CL\_host> is the source host or the appropriate hostname that your CL client is using.
-2.  Install and run **Prysm** by following the official guide: [https://docs.prylabs.network/docs/install/install-with-script](https://docs.prylabs.network/docs/install/install-with-script).
+2.  Install and run **Prysm** by following the official guide: [https://prysm.offchainlabs.com/docs/](https://prysm.offchainlabs.com/docs/).
 
     Prysm must fully synchronize before Erigon can start syncing, since Erigon requires an existing target head to sync to. The quickest way to get Prysm synced is to use a public checkpoint synchronization endpoint from the list at [https://eth-clients.github.io/checkpoint-sync-endpoints](https://eth-clients.github.io/checkpoint-sync-endpoints).
 3. To communicate with Erigon, the `--execution-endpoint` must be specified as `<erigon address>:8551`, where `<erigon address>` is either `http://localhost` or the IP address of the device running Erigon.

@@ -361,16 +361,8 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 						return nil, fmt.Errorf("%s: %d", errExceedLogResults, maxResults)
 					}
 					logs = append(logs, &types.ErigonLog{
-						Address:     filteredLog.Address,
-						Topics:      filteredLog.Topics,
-						Data:        filteredLog.Data,
-						BlockNumber: filteredLog.BlockNumber,
-						TxHash:      filteredLog.TxHash,
-						TxIndex:     filteredLog.TxIndex,
-						BlockHash:   filteredLog.BlockHash,
-						Index:       filteredLog.Index,
-						Removed:     filteredLog.Removed,
-						Timestamp:   header.Time,
+						Log:       *filteredLog,
+						Timestamp: header.Time,
 					})
 				}
 			}
@@ -401,16 +393,8 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				return nil, fmt.Errorf("%s: %d", errExceedLogResults, maxResults)
 			}
 			logs = append(logs, &types.ErigonLog{
-				Address:     filteredLog.Address,
-				Topics:      filteredLog.Topics,
-				Data:        filteredLog.Data,
-				BlockNumber: filteredLog.BlockNumber,
-				TxHash:      filteredLog.TxHash,
-				TxIndex:     filteredLog.TxIndex,
-				BlockHash:   filteredLog.BlockHash,
-				Index:       filteredLog.Index,
-				Removed:     filteredLog.Removed,
-				Timestamp:   header.Time,
+				Log:       *filteredLog,
+				Timestamp: header.Time,
 			})
 		}
 	}

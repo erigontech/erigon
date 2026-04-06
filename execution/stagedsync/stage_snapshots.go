@@ -60,6 +60,8 @@ type SnapshotsCfg struct {
 	caplinState        bool
 	syncConfig         ethconfig.Sync
 	prune              prune.Mode
+	// Called once after snapshot downloads complete on the first sync cycle.
+	afterDownload func(ctx context.Context) error
 }
 
 // Returns a seeder client for block management, a noop implementation if no downloader is attached.
@@ -82,6 +84,7 @@ func StageSnapshotsCfg(db kv.TemporalRwDB,
 	blobs bool,
 	caplinState bool,
 	prune prune.Mode,
+	afterDownload func(ctx context.Context) error,
 ) SnapshotsCfg {
 	cfg := SnapshotsCfg{
 		db:                 db,
@@ -96,6 +99,7 @@ func StageSnapshotsCfg(db kv.TemporalRwDB,
 		blobs:              blobs,
 		prune:              prune,
 		caplinState:        caplinState,
+		afterDownload:      afterDownload,
 	}
 
 	return cfg
@@ -209,7 +213,11 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
-	// want to add remaining snapshots here?
+	if cfg.afterDownload != nil {
+		if err := cfg.afterDownload(ctx); err != nil {
+			return fmt.Errorf("after snapshot download: %w", err)
+		}
+	}
 
 	{ // Now can open all files
 		if err := cfg.blockReader.Snapshots().OpenFolder(); err != nil {
@@ -427,15 +435,6 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 		if cfg.notifier != nil {
 			cfg.notifier.Events.OnRetirementStart(started)
 		}
-	}
-
-	// Build any missed E3 state accessors in the background.
-	// This is the counterpart to RetireBlocksInBackground → BuildMissedIndicesIfNeed for E2.
-	// On restart, buildOrDeferE3Accessors skips synchronous accessor building;
-	// this call ensures missing accessors are rebuilt in the background on every sync cycle.
-	if freezingCfg.ProduceE3 {
-		agg := cfg.db.(state.HasAgg).Agg().(*state.Aggregator)
-		agg.BuildMissedAccessorsInBackground(estimate.IndexSnapshot.Workers())
 	}
 
 	pruneLimit := 10

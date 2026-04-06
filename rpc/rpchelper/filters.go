@@ -422,13 +422,15 @@ func (ff *Filters) SubscribePendingLogs(size int) (<-chan types.Logs, PendingLog
 }
 
 // UnsubscribePendingLogs unsubscribes from pending logs using the given subscription ID.
-func (ff *Filters) UnsubscribePendingLogs(id PendingLogsSubID) {
+// It returns true if the unsubscription was successful, otherwise false.
+func (ff *Filters) UnsubscribePendingLogs(id PendingLogsSubID) bool {
 	ch, ok := ff.pendingLogsSubs.Get(id)
 	if !ok {
-		return
+		return false
 	}
 	ch.Close()
 	ff.pendingLogsSubs.Delete(id)
+	return true
 }
 
 // SubscribePendingBlock subscribes to pending blocks and returns a channel to receive the blocks
@@ -441,13 +443,15 @@ func (ff *Filters) SubscribePendingBlock(size int) (<-chan *types.Block, Pending
 }
 
 // UnsubscribePendingBlock unsubscribes from pending blocks using the given subscription ID.
-func (ff *Filters) UnsubscribePendingBlock(id PendingBlockSubID) {
+// It returns true if the unsubscription was successful, otherwise false.
+func (ff *Filters) UnsubscribePendingBlock(id PendingBlockSubID) bool {
 	ch, ok := ff.pendingBlockSubs.Get(id)
 	if !ok {
-		return
+		return false
 	}
 	ch.Close()
 	ff.pendingBlockSubs.Delete(id)
+	return true
 }
 
 // SubscribePendingTxs subscribes to pending transactions and returns a channel to receive the transactions
@@ -767,16 +771,11 @@ func (ff *Filters) AddLogs(id LogsSubID, log *types.Log) {
 
 		maxLogs := ff.config.RpcSubscriptionFiltersMaxLogs
 		if maxLogs > 0 && len(st)+1 > maxLogs {
-			// Calculate the number of logs to remove
 			excessLogs := len(st) + 1 - maxLogs
-			if excessLogs > 0 {
-				if excessLogs >= len(st) {
-					// If excessLogs is greater than or equal to the length of st, remove all
-					st = []*types.Log{}
-				} else {
-					// Otherwise, remove the oldest logs
-					st = st[excessLogs:]
-				}
+			if excessLogs >= len(st) {
+				st = []*types.Log{}
+			} else {
+				st = st[excessLogs:]
 			}
 		}
 
@@ -789,11 +788,7 @@ func (ff *Filters) AddLogs(id LogsSubID, log *types.Log) {
 // ReadLogs reads logs from the store associated with the given subscription ID.
 // It returns the logs and a boolean indicating whether the logs were found.
 func (ff *Filters) ReadLogs(id LogsSubID) ([]*types.Log, bool) {
-	res, ok := ff.logsStores.Delete(id)
-	if !ok {
-		return res, false
-	}
-	return res, true
+	return ff.logsStores.Delete(id)
 }
 
 // AddPendingBlock adds a pending block header to the store associated with the given subscription ID.
@@ -805,16 +800,11 @@ func (ff *Filters) AddPendingBlock(id HeadsSubID, block *types.Header) {
 
 		maxHeaders := ff.config.RpcSubscriptionFiltersMaxHeaders
 		if maxHeaders > 0 && len(st)+1 > maxHeaders {
-			// Calculate the number of headers to remove
 			excessHeaders := len(st) + 1 - maxHeaders
-			if excessHeaders > 0 {
-				if excessHeaders >= len(st) {
-					// If excessHeaders is greater than or equal to the length of st, remove all
-					st = []*types.Header{}
-				} else {
-					// Otherwise, remove the oldest headers
-					st = st[excessHeaders:]
-				}
+			if excessHeaders >= len(st) {
+				st = []*types.Header{}
+			} else {
+				st = st[excessHeaders:]
 			}
 		}
 
@@ -827,11 +817,7 @@ func (ff *Filters) AddPendingBlock(id HeadsSubID, block *types.Header) {
 // ReadPendingBlocks reads pending block headers from the store associated with the given subscription ID.
 // It returns the block headers and a boolean indicating whether the headers were found.
 func (ff *Filters) ReadPendingBlocks(id HeadsSubID) ([]*types.Header, bool) {
-	res, ok := ff.pendingHeadsStores.Delete(id)
-	if !ok {
-		return res, false
-	}
-	return res, true
+	return ff.pendingHeadsStores.Delete(id)
 }
 
 // AddPendingTxs adds pending transactions to the store associated with the given subscription ID.
@@ -856,16 +842,11 @@ func (ff *Filters) AddPendingTxs(id PendingTxsSubID, txs []types.Transaction) {
 				flatSt = append(flatSt, txBatch...)
 			}
 
-			// Calculate how many transactions need to be removed
 			excessTxs := len(flatSt) + len(txs) - maxTxs
-			if excessTxs > 0 {
-				if excessTxs >= len(flatSt) {
-					// If excessTxs is greater than or equal to the length of flatSt, remove all
-					flatSt = []types.Transaction{}
-				} else {
-					// Otherwise, remove the oldest transactions
-					flatSt = flatSt[excessTxs:]
-				}
+			if excessTxs >= len(flatSt) {
+				flatSt = []types.Transaction{}
+			} else {
+				flatSt = flatSt[excessTxs:]
 			}
 
 			// Convert flatSt back to [][]types.Transaction with a single batch
@@ -881,9 +862,5 @@ func (ff *Filters) AddPendingTxs(id PendingTxsSubID, txs []types.Transaction) {
 // ReadPendingTxs reads pending transactions from the store associated with the given subscription ID.
 // It returns the transactions and a boolean indicating whether the transactions were found.
 func (ff *Filters) ReadPendingTxs(id PendingTxsSubID) ([][]types.Transaction, bool) {
-	res, ok := ff.pendingTxsStores.Delete(id)
-	if !ok {
-		return res, false
-	}
-	return res, true
+	return ff.pendingTxsStores.Delete(id)
 }

@@ -217,6 +217,16 @@ else
 endif
 
 test-filtered:
+	@_rd=""; \
+	_cleanup() { [ -n "$$_rd" ] && hdiutil detach -force "$$_rd" >/dev/null 2>&1 || true; }; \
+	trap _cleanup EXIT; \
+	if [ -z "$${ERIGON_EXECUTION_TESTS_TMPDIR:-}" ] && [ "$$(uname -s)" = "Darwin" ]; then \
+		_rd=$$(bash tools/create-ramdisk) || true; \
+		if [ -n "$$_rd" ]; then \
+			export ERIGON_EXECUTION_TESTS_TMPDIR="$$_rd"; \
+			echo "ramdisk: $$_rd"; \
+		fi; \
+	fi; \
 	(set -o pipefail && $(GOTEST) | ./tools/filter-test-output | tee run.log)
 
 test-short: override GO_FLAGS += -short -failfast
@@ -226,7 +236,7 @@ test-all: override GO_FLAGS := -timeout $(default_test_timeout) $(GO_FLAGS)
 test-all: test-filtered
 
 ## test-bench:                         check the benchmarks compile and run
-test-bench: override GO_FLAGS += -run=^$$ -bench=. -benchtime=1x
+test-bench: override GO_FLAGS += -run=^$$ -bench=. -benchtime=1x -short -timeout=5m
 test-bench:
 	$(GOTEST)
 

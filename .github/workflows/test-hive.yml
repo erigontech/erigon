@@ -1,34 +1,20 @@
 name: Test Hive
 
 on:
-  push:
-    branches:
-      - main
-      - 'release/**'
-  pull_request:
-    branches:
-      - main
-      - 'release/**'
-      - performance
-      - performance-stable
-    types:
-      - opened
-      - reopened
-      - synchronize
-      - ready_for_review
   schedule:
     - cron: "0 05 * * *" # daily at 5 am UTC
   workflow_dispatch:
+  workflow_call:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('push-{0}-{1}', github.run_id, github.run_attempt) }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || format('push-{0}-{1}', github.run_id, github.run_attempt) }}
+  cancel-in-progress: ${{ github.event.pull_request.number != 0 }}
 
 jobs:
   test-hive:
     name: test-hive (${{ matrix.sim }}, ${{ matrix.sim-limit }})
     if: >-
-      ${{ github.event_name == 'push'
+      ${{ !github.event.pull_request.number
       || (!github.event.pull_request.draft
       && !contains(github.event.pull_request.labels.*.name, 'skip-uncaching')) }}
     runs-on:
@@ -60,21 +46,27 @@ jobs:
             max-allowed-failures: 0
           - sim: rpc
             sim-limit: compat
-            max-allowed-failures: 57 # 56 missing eth_simulateV1 MaxGasUsed in Hive tests + 1 https://github.com/erigontech/erigon/issues/19758
+            max-allowed-failures: 0
     steps:
-      - name: Checkout Erigon go.mod
+      - name: Checkout Erigon meta
         uses: actions/checkout@v6
         with:
-          sparse-checkout: go.mod
+          sparse-checkout: |
+            go.mod
+            .github/workflows/hive-versions.json
           sparse-checkout-cone-mode: false
           path: erigon-src
+
+      - name: Read pinned Hive ref
+        id: hive-version
+        run: echo "ref=$(jq -r .hive_ref erigon-src/.github/workflows/hive-versions.json)" >> "$GITHUB_OUTPUT"
 
       - name: Checkout Hive
         uses: actions/checkout@v6
         with:
           repository: ethereum/hive
           # version hive and update periodically/on-demand to prevent upstream changes in Hive affecting us with red CI
-          ref: 0ee187ce394720a5902c135324ac7de4240cbb37
+          ref: ${{ steps.hive-version.outputs.ref }}
           path: hive
 
       - name: Setup go env and cache
@@ -90,11 +82,11 @@ jobs:
         # continue-on-error: transient Docker Hub network timeouts should not
         # abort the entire workflow — the run proceeds without login (unlogged pull).
         if: |
-          github.repository == 'erigontech/erigon' && 
+          github.repository == 'erigontech/erigon' &&
           github.actor != 'dependabot[bot]' &&
-          (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork)
+          !github.event.pull_request.head.repo.fork
         continue-on-error: true
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
           password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
@@ -168,7 +160,7 @@ jobs:
         continue-on-error: true
 
       - name: Upload output log
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: hive-workspace-log-${{ matrix.sim }}-${{ matrix.sim-limit }}
           path: hive/workspace/logs
