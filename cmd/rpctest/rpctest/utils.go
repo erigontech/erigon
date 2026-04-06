@@ -53,7 +53,8 @@ func openWriters(recordFileName, errorFileName string) (rec, errs *bufio.Writer,
 	if recordFileName != "" {
 		f, err := os.Create(recordFileName)
 		if err != nil {
-			return nil, nil, cleanup, fmt.Errorf("cannot create file %s: %v", recordFileName, err)
+			cleanup() // close any files already opened above
+			return nil, nil, nil, fmt.Errorf("cannot create file %s: %v", recordFileName, err)
 		}
 		rec = bufio.NewWriter(f)
 		closers = append(closers, func() { rec.Flush(); f.Close() })
