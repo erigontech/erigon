@@ -934,15 +934,6 @@ func checkCommitmentHistAtBlkWithIdx(ctx context.Context, tx kv.TemporalTx, sd *
 	if header.Root != rootHash {
 		return fmt.Errorf("commitment root mismatch: %s != %s (blockNum=%d,txNum=%d)", header.Root, rootHash, blockNum, maxTxNum)
 	}
-	hits, misses, invalidated, cacheSize := cr.Stats()
-	if hits+misses < 50000 { // log first few blocks at Info to debug cache
-		logger.Info("[integrity] cache stats",
-			"blockNum", blockNum,
-			"hits", hits, "misses", misses, "invalidated", invalidated, "cacheSize", cacheSize,
-			"totalDur", time.Since(start),
-		)
-	}
-	cr.ResetStats()
 	return nil
 }
 
