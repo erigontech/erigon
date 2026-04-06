@@ -366,6 +366,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 
 	peerDasState.SetLocalNodeID(localNode)
 	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, ethClock, state)
+	gossipManager.SetPeerBanner(beaconRpc)
 	peerDas := das.NewPeerDas(ctx, beaconRpc, beaconConfig, &config, columnStorage, blobStorage, sentinel, localNode.ID(), ethClock, peerDasState, gossipManager)
 	forkChoice.InitPeerDas(peerDas) // hack init
 	committeeSub := committee_subscription.NewCommitteeSubscribeManagement(ctx, beaconConfig, networkConfig, ethClock, aggregationPool, syncedDataManager, gossipManager)
