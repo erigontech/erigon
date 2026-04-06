@@ -74,4 +74,3 @@ func (st *Stack) Reset() {
 func (st *Stack) len() int {
 	return st.top
 }
-
