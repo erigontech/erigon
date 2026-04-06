@@ -995,7 +995,6 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 
 	// Each worker owns a window: builds its own ChangedKeysPerBlockIdx then checks
 	// its own sampled blocks — index building and block checking both run in parallel.
-	// Limit concurrency: each window allocates ~few hundred MB for its ChangedKeysPerBlockIdx.
 	workerLimit := max(1, runtime.GOMAXPROCS(-1))
 	g, wCtx := errgroup.WithContext(ctx)
 	g.SetLimit(workerLimit)
