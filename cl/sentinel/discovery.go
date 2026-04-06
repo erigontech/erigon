@@ -242,20 +242,20 @@ func (s *Sentinel) proactiveSubnetPeerSearch() {
 			s.findPeersForSubnets(underserved)
 
 			// Log post-search global coverage
-			postCoverage := s.getSubnetCoverage()
-			stillUnderserved := []int{}
-			atMin := 0
-			for i, count := range &postCoverage {
-				if count >= minimumPeersPerSubnet {
-					atMin++
-				} else {
-					stillUnderserved = append(stillUnderserved, i)
-				}
-			}
-			log.Debug("[Sentinel] Subnet coverage after search",
-				"subnetsAtMinPeers", atMin,
-				"minPeersPerSubnet", minimumPeersPerSubnet,
-				"stillUnderserved", stillUnderserved)
+			//postCoverage := s.getSubnetCoverage()
+			//stillUnderserved := []int{}
+			//atMin := 0
+			//for i, count := range &postCoverage {
+			//	if count >= minimumPeersPerSubnet {
+			//		atMin++
+			//	} else {
+			//		stillUnderserved = append(stillUnderserved, i)
+			//	}
+			//}
+			//log.Debug("[Sentinel] Subnet coverage after search",
+			//	"subnetsAtMinPeers", atMin,
+			//	"minPeersPerSubnet", minimumPeersPerSubnet,
+			//	"stillUnderserved", stillUnderserved)
 		}
 	}
 }
