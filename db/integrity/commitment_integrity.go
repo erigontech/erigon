@@ -855,7 +855,10 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	// limit which blocks can be verified.
 	aggTx := state.AggTx(tx)
 	if aggMax := aggTx.EndTxNumNoCommitment(); maxTxNum+1 > aggMax {
-		blockNumOfState, _, _ := txNumsReader.FindBlockNum(ctx, tx, aggMax)
+		var blockNumOfState uint64
+		if aggMax > 0 {
+			blockNumOfState, _, _ = txNumsReader.FindBlockNum(ctx, tx, aggMax-1)
+		}
 		return fmt.Errorf("block %d is beyond latest block with state %d", blockNum, blockNumOfState)
 	}
 	toTxNum := maxTxNum + 1

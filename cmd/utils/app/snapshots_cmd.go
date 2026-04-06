@@ -1413,21 +1413,21 @@ func doIntegrity(cliCtx *cli.Context) error {
 	return g.Wait()
 }
 
-// stateProgress returns the latest block number covered by state snapshots,
-// derived from the aggregator's EndTxNumMinimax. This may differ from the block
-// files progress — block snapshots and state snapshots advance independently.
-// Use this as the upper bound for state-history integrity commands.
+// stateProgress returns the latest block number covered by state snapshots
+// (excluding commitment domain), derived from EndTxNumNoCommitment. This may
+// differ from the block files progress — block snapshots and state snapshots
+// advance independently. Use this as the upper bound for state-history integrity
+// commands.
 func stateProgress(ctx context.Context, db kv.TemporalRoDB, txNumsReader rawdbv3.TxNumsReader) (uint64, error) {
-	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
-	aggMax := agg.EndTxNumMinimax()
-	if aggMax == 0 {
-		return 0, nil
-	}
 	roTx, err := db.BeginRo(ctx)
 	if err != nil {
 		return 0, err
 	}
 	defer roTx.Rollback()
+	aggMax := state.AggTx(roTx).EndTxNumNoCommitment()
+	if aggMax == 0 {
+		return 0, nil
+	}
 	blockNum, _, err := txNumsReader.FindBlockNum(ctx, roTx, aggMax)
 	if err != nil {
 		return 0, err
