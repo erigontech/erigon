@@ -187,6 +187,10 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 }
 
 func validateSimulationRequest(blocks []SimulatedBlock) error {
+	// Reject requests that exceed the maximum number of simulated blocks.
+	if len(blocks) > maxSimulateBlocks {
+		return clientLimitExceededError(fmt.Sprintf("too many blocks in request: %d > %d", len(blocks), maxSimulateBlocks))
+	}
 	var totalCalls int
 	for _, block := range blocks {
 		if len(block.Calls) > maxSimulateCallsPerBlock {
