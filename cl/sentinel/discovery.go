@@ -153,32 +153,32 @@ func (s *Sentinel) findPeersForSubnets(subnets []subnetSearchState) {
 			continue
 		}
 
-		coveredSubnets := []int{}
-		for i := range subnets {
-			if subnets[i].found < subnets[i].wanted {
-				subnetIdx := subnets[i].idx
-				if peerSubnets[subnetIdx/8]&(1<<(subnetIdx%8)) != 0 {
-					subnets[i].found++
-					coveredSubnets = append(coveredSubnets, subnetIdx)
-				}
-			}
-		}
+		//coveredSubnets := []int{}
+		//for i := range subnets {
+		//	if subnets[i].found < subnets[i].wanted {
+		//		subnetIdx := subnets[i].idx
+		//		if peerSubnets[subnetIdx/8]&(1<<(subnetIdx%8)) != 0 {
+		//			subnets[i].found++
+		//			coveredSubnets = append(coveredSubnets, subnetIdx)
+		//		}
+		//	}
+		//}
 
-		if len(coveredSubnets) > 0 {
-			log.Debug("[Sentinel] Subnet search: connected to peer", "peer", peerInfo.ID, "subnets", coveredSubnets)
-		}
+		//if len(coveredSubnets) > 0 {
+		//	log.Debug("[Sentinel] Subnet search: connected to peer", "peer", peerInfo.ID, "subnets", coveredSubnets)
+		//}
 	}
 
 	// Log final results
-	satisfied, totalFound := 0, 0
-	for _, info := range subnets {
-		log.Trace("[Sentinel] Subnet peer search result", "subnet", info.idx, "found", info.found, "wanted", info.wanted)
-		totalFound += info.found
-		if info.found >= info.wanted {
-			satisfied++
-		}
-	}
-	log.Debug("[Sentinel] Subnet peer search completed", "nodesChecked", checked, "subnetsReachedMinPeers", satisfied, "subnetsSearched", len(subnets), "peersFound", totalFound)
+	//satisfied, totalFound := 0, 0
+	//for _, info := range subnets {
+	//	//log.Trace("[Sentinel] Subnet peer search result", "subnet", info.idx, "found", info.found, "wanted", info.wanted)
+	//	totalFound += info.found
+	//	if info.found >= info.wanted {
+	//		satisfied++
+	//	}
+	//}
+	//log.Debug("[Sentinel] Subnet peer search completed", "nodesChecked", checked, "subnetsReachedMinPeers", satisfied, "subnetsSearched", len(subnets), "peersFound", totalFound)
 }
 
 // proactiveSubnetPeerSearch is a goroutine that monitors subnet coverage
