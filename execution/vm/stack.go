@@ -20,18 +20,10 @@
 package vm
 
 import (
-	"sync"
-
 	"github.com/holiman/uint256"
 )
 
 const stackLimit = 1024
-
-var stackPool = sync.Pool{
-	New: func() any {
-		return &Stack{}
-	},
-}
 
 // Stack is an object for basic stack operations. Items popped to the stack are
 // expected to be changed and modified. stack does not take care of adding newly
@@ -39,10 +31,6 @@ var stackPool = sync.Pool{
 type Stack struct {
 	data [stackLimit]uint256.Int
 	top  int
-}
-
-func New() *Stack {
-	return stackPool.Get().(*Stack)
 }
 
 func (st *Stack) push(d uint256.Int) {
@@ -87,7 +75,3 @@ func (st *Stack) len() int {
 	return st.top
 }
 
-func ReturnNormalStack(s *Stack) {
-	s.top = 0
-	stackPool.Put(s)
-}

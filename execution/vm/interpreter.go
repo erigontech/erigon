@@ -74,7 +74,7 @@ var contextPool = sync.Pool{
 func getCallContext(contract Contract, input []byte, gas uint64) *CallContext {
 	ctx, ok := contextPool.Get().(*CallContext)
 	if !ok {
-		log.Error("Type assertion failure", "err", "cannot get Stack pointer from stackPool")
+		log.Error("Type assertion failure", "err", "cannot get CallContext pointer from contextPool")
 	}
 
 	ctx.gas = gas
