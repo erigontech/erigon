@@ -283,11 +283,8 @@ func (w *Warmuper) Wait() error {
 	if !w.started.Load() || w.numWorkers <= 0 {
 		return nil
 	}
-
-	// Only close the channel once
-	close(w.work)
+	w.Close()
 	w.g.Wait()
-
 	return nil
 }
 

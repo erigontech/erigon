@@ -971,7 +971,6 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 	if from >= to {
 		return fmt.Errorf("invalid blk range: %d >= %d", from, to)
 	}
-	sampler := sc.NewSampler()
 	start := time.Now()
 	var checked atomic.Uint64
 	var lastBlockNum atomic.Uint64
@@ -996,8 +995,10 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 
 	// Each worker owns a window: builds its own ChangedKeysPerBlockIdx then checks
 	// its own sampled blocks — index building and block checking both run in parallel.
+	// Limit concurrency: each window uses ~few hundred MB for its in-memory index.
+	workerLimit := max(1, runtime.GOMAXPROCS(-1)/4)
 	g, wCtx := errgroup.WithContext(ctx)
-	g.SetLimit(runtime.GOMAXPROCS(-1)) // all cpus, because no producer-worker
+	g.SetLimit(workerLimit)
 	for windowStart := from; windowStart < to; windowStart += checkCommitmentHistWindowSize {
 		windowStart := windowStart
 		windowEnd := min(windowStart+checkCommitmentHistWindowSize, to)
@@ -1019,6 +1020,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 			if err != nil {
 				return fmt.Errorf("CheckCommitmentHistAtBlkRange: build index window=[%d,%d): %w", windowStart, windowEnd, err)
 			}
+			sampler := sc.NewSampler() // per-goroutine: Sampler.rng is not goroutine-safe
 			for blockNum := range sampler.BlockNums(windowStart, windowEnd) {
 				if err := checkCommitmentHistAtBlkWithIdx(wCtx, tx, sd, db, br, blockNum, idx, log.LvlTrace, logger); err != nil {
 					return fmt.Errorf("checkCommitmentHistAtBlk: %d, %w", blockNum, err)
@@ -1036,7 +1038,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 	dur := time.Since(start)
 	n := checked.Load()
 	rate := float64(n) / dur.Seconds()
-	logger.Info("checked commitment hist at blk range", "dur", dur, "blks", n, "blks/s", rate, "from", from, "to", to, "seed", sampler.Seed, "sampleRatio", sampler.SampleRatio)
+	logger.Info("checked commitment hist at blk range", "dur", dur, "blks", n, "blks/s", rate, "from", from, "to", to, "seed", sc.Seed, "sampleRatio", sc.SampleRatio)
 	return nil
 }
 

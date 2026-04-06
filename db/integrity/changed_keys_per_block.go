@@ -195,17 +195,17 @@ type TxNumToBlock struct {
 // MaxTxNum for each block from the provided reader.
 func NewTxNumToBlock(ctx context.Context, tx kv.Tx, br services.FullBlockReader, fromBlockNum, toBlockNum uint64) (*TxNumToBlock, error) {
 	r := br.TxnumReader()
-	windowLen := toBlockNum - fromBlockNum
+	windowLen := int(toBlockNum - fromBlockNum)
 	m := &TxNumToBlock{
 		maxTxNums:    make([]uint64, windowLen),
 		fromBlockNum: fromBlockNum,
 		toBlockNum:   toBlockNum,
 	}
 	var err error
-	for i := uint64(0); i < windowLen; i++ {
-		m.maxTxNums[i], err = r.Max(ctx, tx, fromBlockNum+i)
+	for i := range windowLen {
+		m.maxTxNums[i], err = r.Max(ctx, tx, fromBlockNum+uint64(i))
 		if err != nil {
-			return nil, fmt.Errorf("NewTxNumToBlock: Max(block=%d): %w", fromBlockNum+i, err)
+			return nil, fmt.Errorf("NewTxNumToBlock: Max(block=%d): %w", fromBlockNum+uint64(i), err)
 		}
 	}
 	return m, nil
