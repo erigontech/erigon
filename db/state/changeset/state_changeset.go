@@ -478,7 +478,7 @@ type DomainIOMetrics struct {
 type DomainMetrics struct {
 	sync.RWMutex
 	DomainIOMetrics
-	Domains map[kv.Domain]*DomainIOMetrics
+	Domains [kv.DomainLen]*DomainIOMetrics
 }
 
 func (dm *DomainMetrics) UpdateCacheReads(domain kv.Domain, start time.Time) {
@@ -487,7 +487,7 @@ func (dm *DomainMetrics) UpdateCacheReads(domain kv.Domain, start time.Time) {
 	dm.CacheReadCount++
 	readDuration := time.Since(start)
 	dm.CacheReadDuration += readDuration
-	if d, ok := dm.Domains[domain]; ok {
+	if d := dm.Domains[domain]; d != nil {
 		d.CacheReadCount++
 		d.CacheReadDuration += readDuration
 	} else {
@@ -504,7 +504,7 @@ func (dm *DomainMetrics) UpdateDbReads(domain kv.Domain, start time.Time) {
 	dm.DbReadCount++
 	readDuration := time.Since(start)
 	dm.DbReadDuration += readDuration
-	if d, ok := dm.Domains[domain]; ok {
+	if d := dm.Domains[domain]; d != nil {
 		d.DbReadCount++
 		d.DbReadDuration += readDuration
 	} else {
@@ -521,7 +521,7 @@ func (dm *DomainMetrics) UpdateFileReads(domain kv.Domain, start time.Time) {
 	dm.FileReadCount++
 	readDuration := time.Since(start)
 	dm.FileReadDuration += readDuration
-	if d, ok := dm.Domains[domain]; ok {
+	if d := dm.Domains[domain]; d != nil {
 		d.FileReadCount++
 		d.FileReadDuration += readDuration
 	} else {
