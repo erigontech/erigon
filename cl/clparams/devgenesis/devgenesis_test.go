@@ -67,6 +67,24 @@ func TestBuildGenesisState_Deterministic(t *testing.T) {
 	require.NotEqual(t, r1, r3, "different seed should produce different state root")
 }
 
+func TestDeriveSignerKey(t *testing.T) {
+	key1, addr1 := DeriveSignerKey("test")
+	key2, addr2 := DeriveSignerKey("test")
+
+	// Deterministic.
+	require.Equal(t, key1.D.Bytes(), key2.D.Bytes())
+	require.Equal(t, addr1, addr2)
+
+	// Non-zero address.
+	require.NotEqual(t, common.Address{}, addr1)
+
+	// Different seed → different key.
+	_, addr3 := DeriveSignerKey("other")
+	require.NotEqual(t, addr1, addr3)
+
+	t.Logf("signer address: %s", addr1.Hex())
+}
+
 func TestDeriveKeys(t *testing.T) {
 	keys, err := DeriveKeys("test", 10)
 	require.NoError(t, err)

@@ -4,6 +4,7 @@
 package devgenesis
 
 import (
+	"crypto/ecdsa"
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
@@ -41,6 +42,25 @@ func DeriveKeys(seed string, count int) ([]*bls.PrivateKey, error) {
 		}
 	}
 	return keys, nil
+}
+
+// DeriveSignerKey derives a deterministic secp256k1 private key from the seed.
+// This is the EL transaction signing key — the corresponding address is pre-funded
+// in the dev genesis. Not for production.
+func DeriveSignerKey(seed string) (*ecdsa.PrivateKey, common.Address) {
+	h := sha256.Sum256(append([]byte("signer:"), []byte(seed)...))
+	key, _ := crypto.ToECDSA(h[:])
+	addr := crypto.PubkeyToAddress(key.PublicKey)
+	return key, addr
+}
+
+// DevConfig holds all the pieces needed to start a dev node.
+type DevConfig struct {
+	BeaconState    *state.CachingBeaconState
+	ValidatorKeys  []*bls.PrivateKey
+	SignerKey      *ecdsa.PrivateKey
+	SignerAddress  common.Address
+	BeaconConfig   *clparams.BeaconChainConfig
 }
 
 // BuildGenesisState creates a valid beacon genesis state for dev mode.
