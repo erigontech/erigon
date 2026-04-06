@@ -1,0 +1,172 @@
+// Package devgenesis builds a valid beacon genesis state for dev mode.
+// It creates deterministic validators from a seed string, producing
+// a self-contained PoS genesis that can run with an embedded validator.
+package devgenesis
+
+import (
+	"crypto/ecdsa"
+	"crypto/sha256"
+	"encoding/binary"
+	"fmt"
+	"math"
+
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	clutils "github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/bls"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+)
+
+// DeriveKey derives a deterministic BLS private key from a seed and index.
+// Uses KeyGen (IKM expansion) to ensure the result is a valid BLS scalar.
+// Not for production — dev/test only.
+func DeriveKey(seed string, index uint64) (*bls.PrivateKey, error) {
+	var buf [8]byte
+	binary.BigEndian.PutUint64(buf[:], index)
+	// Use sha256 to get 32 bytes of IKM, then KeyGen to reduce modulo curve order.
+	ikm := sha256.Sum256(append([]byte(seed), buf[:]...))
+	return bls.NewPrivateKeyFromIKM(ikm[:])
+}
+
+// DeriveKeys derives N deterministic BLS keypairs from a seed.
+func DeriveKeys(seed string, count int) ([]*bls.PrivateKey, error) {
+	keys := make([]*bls.PrivateKey, count)
+	for i := 0; i < count; i++ {
+		var err error
+		keys[i], err = DeriveKey(seed, uint64(i))
+		if err != nil {
+			return nil, fmt.Errorf("derive key %d: %w", i, err)
+		}
+	}
+	return keys, nil
+}
+
+// DeriveSignerKey derives a deterministic secp256k1 private key from the seed.
+// This is the EL transaction signing key — the corresponding address is pre-funded
+// in the dev genesis. Not for production.
+func DeriveSignerKey(seed string) (*ecdsa.PrivateKey, common.Address) {
+	h := sha256.Sum256(append([]byte("signer:"), []byte(seed)...))
+	key, _ := crypto.ToECDSA(h[:])
+	addr := crypto.PubkeyToAddress(key.PublicKey)
+	return key, addr
+}
+
+// DevConfig holds all the pieces needed to start a dev node.
+type DevConfig struct {
+	BeaconState    *state.CachingBeaconState
+	ValidatorKeys  []*bls.PrivateKey
+	SignerKey      *ecdsa.PrivateKey
+	SignerAddress  common.Address
+	BeaconConfig   *clparams.BeaconChainConfig
+}
+
+// BuildGenesisState creates a valid beacon genesis state for dev mode.
+//
+// Parameters:
+//   - seed: deterministic key derivation seed
+//   - validatorCount: number of genesis validators
+//   - cfg: beacon chain config (use minimal preset for dev)
+//   - genesisTime: unix timestamp for genesis
+//   - elGenesisHash: execution layer genesis block hash (for Eth1Data)
+//
+// The returned state is ready to be SSZ-encoded and used by Caplin.
+func BuildGenesisState(
+	seed string,
+	validatorCount int,
+	cfg *clparams.BeaconChainConfig,
+	genesisTime uint64,
+	elGenesisHash common.Hash,
+) (*state.CachingBeaconState, []*bls.PrivateKey, error) {
+	if validatorCount == 0 {
+		return nil, nil, fmt.Errorf("validator count must be > 0")
+	}
+
+	// Derive BLS keys.
+	keys, err := DeriveKeys(seed, validatorCount)
+	if err != nil {
+		return nil, nil, fmt.Errorf("derive keys: %w", err)
+	}
+
+	// Create empty state with the given config.
+	beaconState := state.New(cfg)
+
+	// Set genesis time and slot.
+	beaconState.SetGenesisTime(genesisTime)
+	beaconState.SetSlot(0)
+
+	// Set fork parameters for genesis.
+	forkVersion := clutils.Uint32ToBytes4(uint32(cfg.GenesisForkVersion))
+	beaconState.SetFork(&cltypes.Fork{
+		PreviousVersion: forkVersion,
+		CurrentVersion:  forkVersion,
+		Epoch:           0,
+	})
+
+	// Set Eth1Data linking to the EL genesis.
+	beaconState.SetEth1Data(&cltypes.Eth1Data{
+		Root:         common.Hash{}, // empty deposit root for dev genesis
+		DepositCount: uint64(validatorCount),
+		BlockHash:    elGenesisHash,
+	})
+
+	// Add validators.
+	maxEffectiveBalance := cfg.MaxEffectiveBalance
+	for i := 0; i < validatorCount; i++ {
+		pubkey := keys[i].PublicKey()
+		pubkeyCompressed := bls.CompressPublicKey(pubkey)
+		var pubkeyBytes [48]byte
+		copy(pubkeyBytes[:], pubkeyCompressed)
+
+		// Withdrawal credentials: 0x01 prefix + 11 zero bytes + 20-byte address.
+		// Address derived from pubkey hash for simplicity.
+		var withdrawalCreds [32]byte
+		withdrawalCreds[0] = 0x01 // ETH1_ADDRESS_WITHDRAWAL_PREFIX
+		pubkeyHash := crypto.Keccak256(pubkeyBytes[:])
+		copy(withdrawalCreds[12:], pubkeyHash[12:]) // last 20 bytes as address
+
+		validator := solid.NewValidatorFromParameters(
+			pubkeyBytes,
+			withdrawalCreds,
+			maxEffectiveBalance,
+			false,                  // not slashed
+			0,                      // activation eligibility epoch
+			0,                      // activation epoch (active from genesis)
+			math.MaxUint64,         // exit epoch (far future)
+			math.MaxUint64,         // withdrawable epoch (far future)
+		)
+
+		beaconState.AddValidator(validator, maxEffectiveBalance)
+	}
+
+	// Compute genesis validators root.
+	validatorsRoot, err := beaconState.Validators().HashSSZ()
+	if err != nil {
+		return nil, nil, fmt.Errorf("hash validators: %w", err)
+	}
+	beaconState.SetGenesisValidatorsRoot(common.Hash(validatorsRoot))
+
+	// Initialize RANDAO mixes with the genesis validators root.
+	for i := uint64(0); i < cfg.EpochsPerHistoricalVector; i++ {
+		beaconState.SetRandaoMixAt(int(i), common.Hash(validatorsRoot))
+	}
+
+	// Set latest block header. The body root for genesis is the hash of
+	// an empty BeaconBlockBody at the genesis version.
+	genesisBody := cltypes.NewBeaconBody(cfg, cfg.GetCurrentStateVersion(0))
+	bodyRoot, err := genesisBody.HashSSZ()
+	if err != nil {
+		return nil, nil, fmt.Errorf("hash genesis body: %w", err)
+	}
+	latestHeader := &cltypes.BeaconBlockHeader{
+		BodyRoot: common.Hash(bodyRoot),
+	}
+	beaconState.SetLatestBlockHeader(latestHeader)
+
+	// Set justification bits (all zero for genesis).
+	beaconState.SetJustificationBits(cltypes.JustificationBits{})
+
+	return beaconState, keys, nil
+}
