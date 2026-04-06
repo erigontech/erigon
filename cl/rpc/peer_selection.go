@@ -84,7 +84,7 @@ func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 		if currentVersion < clparams.FuluVersion {
 			return
 		}
-		begin := time.Now()
+		//begin := time.Now()
 		state := "connected"
 		peers, err := c.sentinel.PeersInfo(ctx, &sentinelproto.PeersInfoRequest{
 			State: &state,
@@ -121,7 +121,7 @@ func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 				enodeId := enode.HexID(peer.EnodeId)
 				custodyIndices, err = peerdasutils.GetCustodyColumns(enodeId, *metadata.CustodyGroupCount)
 				if err != nil {
-					log.Debug("[peerSelector] failed to get custody indices", "peer", pid, "err", err)
+					//log.Debug("[peerSelector] failed to get custody indices", "peer", pid, "err", err)
 					continue
 				}
 			}
@@ -129,7 +129,7 @@ func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 			data := &peerData{pid: pid, mask: custodyIndices}
 			c.peerMetaCache.Add(peerKey, data)
 			newPeers = append(newPeers, *data)
-			log.Debug("[peerSelector] added peer", "peer", pid, "custodies", len(custodyIndices))
+			//log.Debug("[peerSelector] added peer", "peer", pid, "custodies", len(custodyIndices))
 		}
 		c.peersMutex.Lock()
 		c.peersQueue = newPeers
@@ -140,7 +140,7 @@ func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 		//	custodies = append(custodies, uint64(len(peer.mask)))
 		//}
 		//log.Debug("[peerSelector] updated peers", "totalPeers", len(peers.Peers), "peerCount", len(newPeers), "custodies", custodies, "elapsedTime", time.Since(begin))
-		log.Debug("[peerSelector] updated peers", "totalPeers", len(peers.Peers), "peerCount", len(newPeers), "elapsedTime", time.Since(begin))
+		//log.Debug("[peerSelector] updated peers", "totalPeers", len(peers.Peers), "peerCount", len(newPeers), "elapsedTime", time.Since(begin))
 	}
 
 	// begin
