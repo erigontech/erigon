@@ -17,10 +17,8 @@
 package rpctest
 
 import (
-	"bufio"
 	"context"
 	"fmt"
-	"os"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -42,38 +40,20 @@ import (
 func BenchEthGetTransactionByHash(ctx context.Context, erigonURL, gethURL string, needCompare bool, blockFrom, blockTo uint64, recordFileName string, errorFileName string) error {
 	setRoutes(erigonURL, gethURL)
 
-	var rec *bufio.Writer
-	var errs *bufio.Writer
+	rec, errs, cleanup, err := openWriters(recordFileName, errorFileName)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
 	var teeToVegeta chan CallResult
 	var nTransactions = 0
-
-	if errorFileName != "" {
-		f, err := os.Create(errorFileName)
-		if err != nil {
-			return fmt.Errorf("Cannot create file %s for errorFile: %v\n", errorFileName, err)
-		}
-		defer f.Close()
-		errs = bufio.NewWriter(f)
-		defer errs.Flush()
-	}
-
-	if recordFileName != "" {
-		frec, errRec := os.Create(recordFileName)
-		if errRec != nil {
-			return fmt.Errorf("Cannot create file %s for errorFile: %v\n", recordFileName, errRec)
-		}
-		defer frec.Close()
-		rec = bufio.NewWriter(frec)
-		defer rec.Flush()
-	}
 
 	if !needCompare {
 		teeToVegeta = make(chan CallResult, 1000)
 		defer close(teeToVegeta)
 		go vegetaWrite(true, []string{"eth_getTransactionByHash"}, teeToVegeta)
 	}
-	var res CallResult
-
 	reqGen := &RequestGenerator{}
 
 	logEvery, lastLoggedNTxs, lastLoggedTime := time.NewTicker(10*time.Second), 0, time.Now()
@@ -103,36 +83,15 @@ func BenchEthGetTransactionByHash(ctx context.Context, erigonURL, gethURL string
 	})
 
 	for bn := blockFrom; bn <= blockTo; bn++ {
-		var b EthBlockByNumber
-		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &b)
-		if res.Err != nil {
-			return fmt.Errorf("Could not retrieve block (Erigon) %d: %v\n", bn, res.Err)
+		b, skip, err := fetchBlock(reqGen, bn, needCompare, rec)
+		if err != nil {
+			return err
 		}
-		if b.Error != nil {
-			return fmt.Errorf("Error retrieving block (Erigon): %d %s\n", b.Error.Code, b.Error.Message)
+		if skip {
+			continue
 		}
 		if b.Result == nil {
-			return fmt.Errorf("Could not retrieve block (Erigon) %d: %v\n", bn, res.Err)
-		}
-
-		if needCompare {
-			var bg EthBlockByNumber
-			res = reqGen.Geth("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &bg)
-			if res.Err != nil {
-				return fmt.Errorf("Could not retrieve block (geth) %d: %v\n", bn, res.Err)
-			}
-			if bg.Error != nil {
-				return fmt.Errorf("Error retrieving block (geth): %d %s\n", bg.Error.Code, bg.Error.Message)
-			}
-			if !compareBlocks(&b, &bg) {
-				if rec != nil {
-					fmt.Fprintf(rec, "Block difference for block=%d\n", bn)
-					rec.Flush()
-					continue
-				} else {
-					return fmt.Errorf("Block one or more fields areis different for block %d\n", bn)
-				}
-			}
+			return fmt.Errorf("Could not retrieve block (Erigon) %d\n", bn)
 		}
 
 		nTransactions += len(b.Result.Transactions)
