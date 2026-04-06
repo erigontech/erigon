@@ -866,10 +866,11 @@ func checkCommitmentHistAtBlkWithIdx(ctx context.Context, tx kv.TemporalTx, sd *
 	// commitment branch data view: as of beginning of the block (or end for block 0)
 	// plain state data view: as of end of the block
 	splitStateReader := commitmentdb.NewSplitHistoryReader(tx, commitmentAsOf, toTxNum, true /* withHistory */)
-	// Within-block cache: during Process, the trie unfolds/folds/unfolds for keys
-	// sharing prefixes — the same branch nodes are read multiple times. Reset between
-	// blocks because commitmentAsOf changes.
-	cr.Reset()
+	// Cross-block cache: data is immutable (frozen snapshots), so cached branch
+	// values are valid as long as no commitment history entry exists between the
+	// previous and current commitmentAsOf. Most branches don't change between
+	// consecutive blocks, giving high hit rate. If a stale entry causes a root
+	// mismatch, the caller retries with a fresh cache to distinguish real errors.
 	cr.SetInner(splitStateReader)
 	sd.GetCommitmentCtx().SetStateReader(cr)
 	sd.GetCommitmentCtx().SetTrace(logger.Enabled(ctx, log.LvlTrace))
@@ -1022,7 +1023,14 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 			cr := newCachingCommitmentReader(nil) // inner set per block
 			for blockNum := range sampler.BlockNums(windowStart, windowEnd) {
 				if err := checkCommitmentHistAtBlkWithIdx(wCtx, tx, sd, db, br, blockNum, idx, cr, log.LvlTrace, logger); err != nil {
-					return fmt.Errorf("checkCommitmentHistAtBlk: %d, %w", blockNum, err)
+					// Root mismatch may be caused by stale cache (cross-block caching
+					// without invalidation). Retry with a fresh cache to distinguish
+					// real errors from false positives.
+					cr.Reset()
+					if retryErr := checkCommitmentHistAtBlkWithIdx(wCtx, tx, sd, db, br, blockNum, idx, cr, log.LvlTrace, logger); retryErr != nil {
+						return fmt.Errorf("checkCommitmentHistAtBlk: %d, %w", blockNum, retryErr)
+					}
+					logger.Debug("[integrity] stale cache caused false mismatch, retry passed", "blockNum", blockNum)
 				}
 				checked.Add(1)
 			}
