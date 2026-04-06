@@ -911,13 +911,16 @@ func checkCommitmentHistAtBlkWithIdx(ctx context.Context, tx kv.TemporalTx, sd *
 		}
 	}
 	touchStart := time.Now()
-	if _, err := touchHistoricalKeys(sd, tx, kv.AccountsDomain, minTxNum, toTxNum, blockNum, idx, touchLoggingVisitor); err != nil {
-		return err
+	// Parallelize domain touches since they're independent
+	touchG, _ := errgroup.WithContext(ctx)
+	for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		domain := d
+		touchG.Go(func() error {
+			_, err := touchHistoricalKeys(sd, tx, domain, minTxNum, toTxNum, blockNum, idx, touchLoggingVisitor)
+			return err
+		})
 	}
-	if _, err := touchHistoricalKeys(sd, tx, kv.StorageDomain, minTxNum, toTxNum, blockNum, idx, touchLoggingVisitor); err != nil {
-		return err
-	}
-	if _, err := touchHistoricalKeys(sd, tx, kv.CodeDomain, minTxNum, toTxNum, blockNum, idx, touchLoggingVisitor); err != nil {
+	if err := touchG.Wait(); err != nil {
 		return err
 	}
 	touchDur := time.Since(touchStart)
@@ -1015,6 +1018,11 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 				return err
 			}
 			defer sd.Close()
+			// Enable warmup optimizations for batch verification
+			sd.GetCommitmentCtx().EnableTrieWarmup(true)
+			if hph, ok := sd.GetCommitmentCtx().Trie().(*commitment.HexPatriciaHashed); ok {
+				hph.EnableWarmupCache(true)
+			}
 			idx, err := NewChangedKeysPerBlockIdx(wCtx, tx, br, windowStart, windowEnd, logger)
 			if err != nil {
 				return fmt.Errorf("CheckCommitmentHistAtBlkRange: build index window=[%d,%d): %w", windowStart, windowEnd, err)
