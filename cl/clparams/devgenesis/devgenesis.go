@@ -153,9 +153,15 @@ func BuildGenesisState(
 		beaconState.SetRandaoMixAt(int(i), common.Hash(validatorsRoot))
 	}
 
+	// Set the latest execution payload header referencing the EL genesis block.
+	version := cfg.GetCurrentStateVersion(0)
+	execHeader := cltypes.NewEth1Header(version)
+	execHeader.BlockHash = elGenesisHash
+	beaconState.SetLatestExecutionPayloadHeader(execHeader)
+
 	// Set latest block header. The body root for genesis is the hash of
 	// an empty BeaconBlockBody at the genesis version.
-	genesisBody := cltypes.NewBeaconBody(cfg, cfg.GetCurrentStateVersion(0))
+	genesisBody := cltypes.NewBeaconBody(cfg, version)
 	bodyRoot, err := genesisBody.HashSSZ()
 	if err != nil {
 		return nil, nil, fmt.Errorf("hash genesis body: %w", err)

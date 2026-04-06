@@ -417,6 +417,18 @@ func writeGenesisBeaconBlock(ctx context.Context, cfg *Cfg) error {
 	if version >= clparams.BellatrixVersion {
 		body.ExecutionPayload.Extra = solid.NewExtraData()
 		body.ExecutionPayload.Transactions = &solid.TransactionsSSZ{}
+		// Copy execution payload header from genesis state so the block hash
+		// matches (needed for fork choice to find the EL genesis block).
+		execHeader := cfg.state.LatestExecutionPayloadHeader()
+		if execHeader != nil {
+			body.ExecutionPayload.BlockHash = execHeader.BlockHash
+			body.ExecutionPayload.StateRoot = execHeader.StateRoot
+			body.ExecutionPayload.ParentHash = execHeader.ParentHash
+			body.ExecutionPayload.BlockNumber = execHeader.BlockNumber
+			body.ExecutionPayload.GasLimit = execHeader.GasLimit
+			body.ExecutionPayload.Time = execHeader.Time
+			body.ExecutionPayload.BaseFeePerGas = execHeader.BaseFeePerGas
+		}
 		if version >= clparams.CapellaVersion {
 			body.ExecutionPayload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.beaconCfg.MaxWithdrawalsPerPayload), 44)
 		}
