@@ -1445,6 +1445,59 @@ func (at *AggregatorRoTx) MinStepInDb(tx kv.Tx, domain kv.Domain) (lstInDb uint6
 }
 
 func (a *Aggregator) EndTxNumMinimax() uint64 { return a.visibleFilesMinimaxTxNum.Load() }
+
+// stepsInDB returns the number of steps of data currently in MDBX
+// (not yet collated to snapshot files).
+func (a *Aggregator) stepsInDB(ctx context.Context, db kv.RoDB) (float64, error) {
+	var steps float64
+	if err := db.View(ctx, func(tx kv.Tx) error {
+		fst, _ := kv.FirstKey(tx, kv.TblAccountHistoryKeys)
+		lst, _ := kv.LastKey(tx, kv.TblAccountHistoryKeys)
+		if len(fst) > 0 && len(lst) > 0 {
+			fstTxNum := binary.BigEndian.Uint64(fst)
+			lstTxNum := binary.BigEndian.Uint64(lst)
+			steps = float64(lstTxNum-fstTxNum) / float64(a.StepSize())
+		}
+		return nil
+	}); err != nil {
+		return 0, err
+	}
+	return steps, nil
+}
+
+// CollateAndPruneIfNeeded runs synchronous collate when stepsInDB exceeds
+// 1.5 steps, looping until it drops to 1 or below. Then runs prune in a
+// separate transaction so MDBX GC can reclaim freed pages.
+// This prevents step accumulation during initial sync when background
+// collate can't keep up with execution throughput.
+func (a *Aggregator) CollateAndPruneIfNeeded(ctx context.Context, db kv.TemporalRwDB, pruneFn func(tx kv.TemporalRwTx) error, logger log.Logger) error {
+	stepsInDB, err := a.stepsInDB(ctx, db)
+	if err != nil {
+		return err
+	}
+	for stepsInDB > 1.5 {
+		logger.Info("[aggregator] steps accumulated, running synchronous collate+prune", "stepsInDB", stepsInDB)
+		if err := a.BuildFiles(a.EndTxNumMinimax() + a.StepSize()); err != nil {
+			return err
+		}
+		// Prune after each collate so stepsInDB actually decreases.
+		// Collate creates files but doesn't remove data from MDBX.
+		if err := db.UpdateTemporal(ctx, pruneFn); err != nil {
+			return err
+		}
+		prevSteps := stepsInDB
+		stepsInDB, err = a.stepsInDB(ctx, db)
+		if err != nil {
+			return err
+		}
+		if stepsInDB <= 1 || stepsInDB >= prevSteps {
+			// Stop if we reached target or made no progress
+			break
+		}
+	}
+	// Final prune to clean up any remaining prunable data.
+	return db.UpdateTemporal(ctx, pruneFn)
+}
 func (a *Aggregator) FilesAmount() (res []int) {
 	for _, d := range a.d {
 		res = append(res, d.dirtyFiles.Len())

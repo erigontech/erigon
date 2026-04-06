@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
@@ -258,45 +257,14 @@ func StageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sync *stagedsyn
 		if err != nil {
 			return err
 		}
-		// When steps accumulate in MDBX beyond a threshold, run collate
-		// synchronously before prune. Collate moves step data to snapshot
-		// files, making it available for prune to delete. Without this,
-		// background collate can't keep up with execution during initial sync.
+		// Collate (if steps accumulated) + prune in separate transaction.
 		if a, ok := db.(state.HasAgg); ok {
 			agg := a.Agg().(*state.Aggregator)
-			var stepsInDB float64
-			if err := db.View(ctx, func(tx kv.Tx) error {
-				stepsInDB = rawdbhelpers.IdxStepsCountV3(tx, agg.StepSize())
-				return nil
-			}); err != nil {
+			if err := agg.CollateAndPruneIfNeeded(ctx, db, func(tx kv.TemporalRwTx) error {
+				return sync.RunPrune(ctx, tx, initialCycle, 0)
+			}, logger); err != nil {
 				return err
 			}
-			logger.Info("[stageloop] collate check", "stepsInDB", stepsInDB)
-			for stepsInDB > 2 {
-				logger.Info("[stageloop] steps accumulated, running synchronous collate", "stepsInDB", stepsInDB)
-				if err := agg.BuildFiles(agg.EndTxNumMinimax() + agg.StepSize()); err != nil {
-					return err
-				}
-				if err := db.View(ctx, func(tx kv.Tx) error {
-					stepsInDB = rawdbhelpers.IdxStepsCountV3(tx, agg.StepSize())
-					return nil
-				}); err != nil {
-					return err
-				}
-				if stepsInDB <= 1 {
-					break
-				}
-			}
-		}
-		// Prune in a separate transaction so freed pages are committed
-		// to MDBX before the next execution batch. This allows the GC
-		// to reclaim them in subsequent writes instead of always
-		// appending to the end of the file.
-		err = db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-			return sync.RunPrune(ctx, tx, initialCycle, 0)
-		})
-		if err != nil {
-			return err
 		}
 	}
 	return nil
