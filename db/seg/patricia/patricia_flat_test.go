@@ -1,7 +1,7 @@
 package patricia
 
 import (
-	"crypto/rand"
+	"math/rand"
 	"reflect"
 	"testing"
 )
@@ -201,13 +201,12 @@ func TestFlatTreeCorrectness_RandomData(t *testing.T) {
 	mf2 := NewMatchFinder2(pt)
 	mf3 := NewMatchFinder3(ft)
 
-	// Run several random inputs
+	// Run several random inputs with a fixed seed for reproducibility
+	rng := rand.New(rand.NewSource(42))
 	for trial := 0; trial < 100; trial++ {
 		size := 32 + trial*8
 		data := make([]byte, size)
-		if _, err := rand.Read(data); err != nil {
-			t.Fatalf("rand.Read failed on trial %d: %v", trial, err)
-		}
+		rng.Read(data)
 
 		m2 := mf2.FindLongestMatches(data)
 		m3 := mf3.FindLongestMatches(data)

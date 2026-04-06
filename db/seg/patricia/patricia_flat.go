@@ -234,9 +234,11 @@ func (mf *MatchFinder3) fold(nbits int) {
 			if nodes[topIdx].n[0] == prevTopIdx {
 				side = 0
 				headLen = int(nodes[topIdx].p[0] & 0x1f)
-			} else {
+			} else if nodes[topIdx].n[1] == prevTopIdx {
 				side = 1
 				headLen = int(nodes[topIdx].p[1] & 0x1f)
+			} else {
+				panic("invalid nodeStack: previous node is not a child of current node")
 			}
 			tailLen = 0
 		}
