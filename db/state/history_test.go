@@ -2296,6 +2296,85 @@ func TestHistory_IterateChangedRecent_SkipsFileRange(t *testing.T) {
 	t.Run("small_values", func(t *testing.T) { test(t, false) })
 }
 
+// TestHistory_IterateChangedRecent_PhantomDBKey inserts a "phantom" key into
+// the DB at a txNum within the file range — a key that does not exist in
+// segment files. Because iterateChangedRecent now starts the DB iterator at
+// files.EndTxNum(), the phantom is never reached and must not appear in the
+// HistoryRange output. This directly proves the DB iterator skips the file
+// range rather than relying on the union to mask duplicates.
+func TestHistory_IterateChangedRecent_PhantomDBKey(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	logger := log.New()
+	ctx := context.Background()
+
+	test := func(t *testing.T, largeValues bool) {
+		t.Helper()
+		require := require.New(t)
+
+		db, h, txs := filledHistory(t, largeValues, logger)
+		collateAndMergeHistory(t, db, h, txs, false)
+
+		hc := h.BeginFilesRo()
+		filesEnd := int(hc.iit.files.EndTxNum())
+		valsTable := hc.h.ValuesTable
+		hc.Close()
+		require.Greater(filesEnd, 0)
+
+		// Pick a txNum well inside the file range.
+		phantomTxNum := uint64(filesEnd / 2)
+		// A key that filledHistory never generates (marker byte 0x02 vs 0x01).
+		var phantomKey [8]byte
+		binary.BigEndian.PutUint64(phantomKey[:], 0x0200000000000099)
+		phantomVal := []byte("phantom")
+
+		// Insert the phantom entry into the DB values table.
+		rwTx, err := db.BeginRw(ctx)
+		require.NoError(err)
+		if largeValues {
+			// Large: key layout is actualKey+txNum -> value.
+			dbKey := make([]byte, len(phantomKey)+8)
+			copy(dbKey, phantomKey[:])
+			binary.BigEndian.PutUint64(dbKey[len(phantomKey):], phantomTxNum)
+			require.NoError(rwTx.Put(valsTable, dbKey, phantomVal))
+		} else {
+			// Small (DupSort): key layout is actualKey, dup is txNum+value.
+			dup := make([]byte, 8+len(phantomVal))
+			binary.BigEndian.PutUint64(dup[:8], phantomTxNum)
+			copy(dup[8:], phantomVal)
+			require.NoError(rwTx.Put(valsTable, phantomKey[:], dup))
+		}
+		require.NoError(rwTx.Commit())
+
+		// Query HistoryRange starting from within the file range.
+		fromTxNum := filesEnd / 4 // well before the phantom
+		roTx, err := db.BeginRo(ctx)
+		require.NoError(err)
+		defer roTx.Rollback()
+
+		hc = h.BeginFilesRo()
+		defer hc.Close()
+
+		it, err := hc.HistoryRange(fromTxNum, -1, order.Asc, -1, roTx)
+		require.NoError(err)
+		defer it.Close()
+
+		phantomKeyHex := fmt.Sprintf("%x", phantomKey[:])
+		for it.HasNext() {
+			k, _, err := it.Next()
+			require.NoError(err)
+			require.NotEqual(phantomKeyHex, fmt.Sprintf("%x", k),
+				"phantom DB key within file range must not appear in HistoryRange output")
+		}
+	}
+
+	t.Run("large_values", func(t *testing.T) { test(t, true) })
+	t.Run("small_values", func(t *testing.T) { test(t, false) })
+}
+
 // BenchmarkHistoryRange benchmarks the hot path: iterating all changed keys
 // across a wide txNum range from segment files (exercises HistoryChangesIterFiles.advance).
 func BenchmarkHistoryRange(b *testing.B) {
