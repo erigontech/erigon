@@ -1022,7 +1022,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 	// Check nonce and balance
 	senderNonce, senderBalance, err := p.senders.info(stateCache, txn.SenderID)
 	if err != nil {
-		return txpoolcfg.NotSet, fmt.Errorf("validateTx: sender info for senderID=%d: %w", txn.SenderID, err)
+		return txpoolcfg.NotSet, fmt.Errorf("validateTx: sender info for idHash=%x senderID=%d: %w", txn.IDHash, txn.SenderID, err)
 	}
 	if senderNonce > txn.Nonce {
 		if txn.Traced {
