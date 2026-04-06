@@ -157,6 +157,23 @@ type RPCLog struct {
 	BlockTimestamp hexutil.Uint64 `json:"blockTimestamp" codec:"-"`
 }
 
+// UnmarshalJSON parses both the embedded Log fields and the RPC-specific blockTimestamp field.
+func (l *RPCLog) UnmarshalJSON(input []byte) error {
+	if err := l.Log.UnmarshalJSON(input); err != nil {
+		return err
+	}
+	var dec struct {
+		BlockTimestamp *hexutil.Uint64 `json:"blockTimestamp"`
+	}
+	if err := json.Unmarshal(input, &dec); err != nil {
+		return err
+	}
+	if dec.BlockTimestamp != nil {
+		l.BlockTimestamp = *dec.BlockTimestamp
+	}
+	return nil
+}
+
 type RPCLogs []*RPCLog
 
 func (logs Logs) Copy() Logs {
