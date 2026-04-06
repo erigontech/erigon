@@ -2209,6 +2209,93 @@ func TestHistoryRange_EmptyRange(t *testing.T) {
 	})
 }
 
+// TestHistory_IterateChangedRecent_SkipsFileRange verifies that HistoryRange
+// returns correct results when the queried range spans both files and DB,
+// even after DB entries within the file range have been pruned.
+// This tests the fix where iterateChangedRecent adjusts fromTxNum to
+// max(fromTxNum, files.EndTxNum()) so the DB iterator never reads data
+// that belongs to the file range.
+func TestHistory_IterateChangedRecent_SkipsFileRange(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	logger := log.New()
+	ctx := context.Background()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
+	test := func(t *testing.T, largeValues bool) {
+		t.Helper()
+		require := require.New(t)
+
+		// Instance 1: build files, no prune (reference).
+		db1, h1, txs := filledHistory(t, largeValues, logger)
+		collateAndMergeHistory(t, db1, h1, txs, false)
+
+		// Instance 2: build files, then prune DB entries in the file range.
+		db2, h2, _ := filledHistory(t, largeValues, logger)
+		collateAndMergeHistory(t, db2, h2, txs, false)
+
+		hc2 := h2.BeginFilesRo()
+		filesEnd := int(hc2.iit.files.EndTxNum())
+		require.Greater(filesEnd, 0, "expected files to cover some range")
+		hc2.Close()
+
+		// Prune DB entries [0, filesEnd) — these are covered by files.
+		rwTx, err := db2.BeginRw(ctx)
+		require.NoError(err)
+		hc2 = h2.BeginFilesRo()
+		_, err = hc2.Prune(ctx, rwTx, 0, uint64(filesEnd), math.MaxUint64, true, logEvery)
+		require.NoError(err)
+		hc2.Close()
+		require.NoError(rwTx.Commit())
+
+		// Query a range that spans both files and DB.
+		// fromTxNum is well within file range, toTxNum extends past it.
+		fromTxNum := filesEnd / 2
+		toTxNum := -1 // unlimited
+
+		collect := func(db kv.RwDB, h *History) (keys, vals []string) {
+			tx, err := db.BeginRo(ctx)
+			require.NoError(err)
+			defer tx.Rollback()
+
+			hc := h.BeginFilesRo()
+			defer hc.Close()
+
+			it, err := hc.HistoryRange(fromTxNum, toTxNum, order.Asc, -1, tx)
+			require.NoError(err)
+			defer it.Close()
+			for it.HasNext() {
+				k, v, err := it.Next()
+				require.NoError(err)
+				keys = append(keys, fmt.Sprintf("%x", k))
+				vals = append(vals, fmt.Sprintf("%x", v))
+			}
+			return
+		}
+
+		keys1, vals1 := collect(db1, h1)
+		keys2, vals2 := collect(db2, h2)
+
+		require.NotEmpty(keys1, "expected non-empty results")
+		require.Equal(keys1, keys2, "keys mismatch after pruning DB entries in file range")
+		require.Equal(vals1, vals2, "values mismatch after pruning DB entries in file range")
+
+		// Also verify with a bounded toTxNum that still spans the boundary.
+		toTxNum = filesEnd + (int(txs)-filesEnd)/2
+		keys1b, vals1b := collect(db1, h1)
+		keys2b, vals2b := collect(db2, h2)
+		require.Equal(keys1b, keys2b, "bounded range: keys mismatch after prune")
+		require.Equal(vals1b, vals2b, "bounded range: values mismatch after prune")
+	}
+
+	t.Run("large_values", func(t *testing.T) { test(t, true) })
+	t.Run("small_values", func(t *testing.T) { test(t, false) })
+}
+
 // BenchmarkHistoryRange benchmarks the hot path: iterating all changed keys
 // across a wide txNum range from segment files (exercises HistoryChangesIterFiles.advance).
 func BenchmarkHistoryRange(b *testing.B) {
