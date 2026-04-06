@@ -57,6 +57,8 @@ import (
 
 var ErrMissingChainSegment = errors.New("missing chain segment")
 
+var inMemHistoryReads = dbg.EnvBool("ERIGON_IN_MEM_HISTORY", true)
+
 func makeErrMissingChainSegment(blockHash common.Hash) error {
 	return errors.Join(ErrMissingChainSegment, errors.New("block hash: "+blockHash.String()))
 }
