@@ -20,6 +20,7 @@ import (
 	"bytes"
 
 	"github.com/c2h5oh/datasize"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -67,16 +68,14 @@ func NewDefaultStateCache() *StateCache {
 }
 
 // Get retrieves data for the given domain and key.
+// Returns (value, true) on cache hit — including (nil, true) for deleted keys —
+// and (nil, false) on cache miss.
 func (c *StateCache) Get(domain kv.Domain, key []byte) ([]byte, bool) {
 	cache := c.caches[domain]
 	if cache == nil {
 		return nil, false
 	}
-	v, ok := cache.Get(key)
-	if len(v) == 0 {
-		return nil, false
-	}
-	return v, ok
+	return cache.Get(key)
 }
 
 // Put stores data for the given domain and key.
@@ -86,10 +85,6 @@ func (c *StateCache) Put(domain kv.Domain, key []byte, value []byte) {
 		return
 	}
 	if domain == kv.CommitmentDomain && bytes.Equal(key, commitmentdb.KeyCommitmentState) {
-		return
-	}
-	if len(value) == 0 {
-		cache.Delete(key)
 		return
 	}
 	cache.Put(key, common.Copy(value))
@@ -147,6 +142,9 @@ func (c *StateCache) GetCache(domain kv.Domain) Cache {
 
 // PrintStatsAndReset prints cache statistics for all domains and resets counters.
 func (c *StateCache) PrintStatsAndReset() {
+	if c == nil {
+		return
+	}
 	if acc, ok := c.caches[kv.AccountsDomain].(*DomainCache); ok {
 		acc.PrintStatsAndReset("Account")
 	}

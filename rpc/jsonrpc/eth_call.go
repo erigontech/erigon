@@ -174,6 +174,10 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		return 0, fmt.Errorf("could not find the header %s in cache or db", blockNrOrHash.String())
 	}
 
+	// Use overridden header for fork-detection and gas ceiling; keep original for
+	// DB lookups (state reader, prune history) which must reference the on-chain block.
+	effectiveHeader := blockOverrides.OverrideHeader(header)
+
 	blockNum := header.Number
 
 	err = api.BaseAPI.checkPruneHistory(ctx, dbtx, blockNum.Uint64())
@@ -206,9 +210,9 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		hi = uint64(*args.Gas)
 	} else {
 		// Retrieve the block to act as the gas ceiling
-		hi = header.GasLimit
+		hi = effectiveHeader.GasLimit
 	}
-	if hi > params.MaxTxnGasLimit && chainConfig.IsOsaka(header.Time) && !chainConfig.IsAmsterdam(header.Time) {
+	if hi > params.MaxTxnGasLimit && chainConfig.IsOsaka(effectiveHeader.Time) && !chainConfig.IsAmsterdam(effectiveHeader.Time) {
 		// Cap the maximum gas allowance according to EIP-7825 if Osaka (but not Amsterdam).
 		// In Amsterdam (EIP-8037), transactions can provide state gas via a total gas limit > MaxTxnGasLimit.
 		hi = params.MaxTxnGasLimit
@@ -264,7 +268,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		hi = api.GasCap
 	}
 
-	caller, err := transactions.NewReusableCaller(engine, stateReader, stateOverrides, blockOverrides, header, args, api.GasCap, *blockNrOrHash, dbtx, api._blockReader, chainConfig, api.evmCallTimeout)
+	caller, err := transactions.NewReusableCaller(engine, stateReader, stateOverrides, blockOverrides, effectiveHeader, args, api.GasCap, *blockNrOrHash, dbtx, api._blockReader, chainConfig, api.evmCallTimeout)
 	if err != nil {
 		return 0, err
 	}
@@ -299,7 +303,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 	if failed {
 		if result != nil && !errors.Is(result.Err, vm.ErrOutOfGas) {
-			if len(result.Revert()) > 0 {
+			if errors.Is(result.Err, vm.ErrExecutionReverted) {
 				return 0, ethapi2.NewRevertError(result)
 			}
 			return 0, result.Err
@@ -566,9 +570,11 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		}
 
 		// prepare key path (keccak(address) | keccak(key))
+		addrHash := crypto.HashData(address.Bytes())
+		keyHash := crypto.HashData(storageKey.Hash.Bytes())
 		fullKey := make([]byte, 0, 64)
-		fullKey = append(fullKey, crypto.Keccak256(address.Bytes())...)
-		fullKey = append(fullKey, crypto.Keccak256(storageKey.Hash.Bytes())...)
+		fullKey = append(fullKey, addrHash[:]...)
+		fullKey = append(fullKey, keyHash[:]...)
 
 		// get proof for the given key
 		storageProof, err := proofTrie.Prove(fullKey, len(proof.AccountProof), true)

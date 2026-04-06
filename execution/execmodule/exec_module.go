@@ -57,6 +57,8 @@ import (
 
 var ErrMissingChainSegment = errors.New("missing chain segment")
 
+var inMemHistoryReads = dbg.EnvBool("ERIGON_IN_MEM_HISTORY", true)
+
 func makeErrMissingChainSegment(blockHash common.Hash) error {
 	return errors.Join(ErrMissingChainSegment, errors.New("block hash: "+blockHash.String()))
 }
@@ -450,11 +452,10 @@ func (e *ExecModule) ValidateChain(ctx context.Context, req *executionproto.Vali
 	if err != nil {
 		return nil, err
 	}
+	doms.SetInMemHistoryReads(inMemHistoryReads)
 
 	// Set state cache in SharedDomains for use during state reading
-	if e.stateCache != nil && dbg.UseStateCache {
-		doms.SetStateCache(e.stateCache)
-	}
+	doms.SetStateCache(e.stateCache)
 	if err = e.unwindToCommonCanonical(doms, tx, header); err != nil {
 		doms.Close()
 		return nil, err
