@@ -272,6 +272,20 @@ func (s *Service) proposeBlock(ctx context.Context, slot uint64, key *ValidatorK
 		return fmt.Errorf("parse block template: %w", err)
 	}
 
+	// Ensure execution payload sub-fields are initialized (the JSON response
+	// may leave some nil which causes HashSSZ to panic).
+	if block.Block.Body.ExecutionPayload != nil {
+		if block.Block.Body.ExecutionPayload.Extra == nil {
+			block.Block.Body.ExecutionPayload.Extra = solid.NewExtraData()
+		}
+		if block.Block.Body.ExecutionPayload.Transactions == nil {
+			block.Block.Body.ExecutionPayload.Transactions = &solid.TransactionsSSZ{}
+		}
+		if version >= clparams.CapellaVersion && block.Block.Body.ExecutionPayload.Withdrawals == nil {
+			block.Block.Body.ExecutionPayload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(s.cfg.MaxWithdrawalsPerPayload), 44)
+		}
+	}
+
 	// Sign the block.
 	sig, err := signBlock(key, block.Block, slot, s.cfg, s.genesisValidatorsRoot)
 	if err != nil {
@@ -279,9 +293,18 @@ func (s *Service) proposeBlock(ctx context.Context, slot uint64, key *ValidatorK
 	}
 	block.Signature = sig
 
-	// Submit the signed block.
+	// Submit the signed block. For Deneb+, wrap in DenebSignedBeaconBlock
+	// with empty blob sidecars.
 	versionStr := version.String()
-	if err := s.client.postJSON(ctx, "/eth/v2/beacon/blocks", block, versionStr); err != nil {
+	var submitBody interface{} = block
+	if version >= clparams.DenebVersion {
+		submitBody = &cltypes.DenebSignedBeaconBlock{
+			SignedBlock: block,
+			KZGProofs:  solid.NewStaticListSSZ[*cltypes.KZGProof](cltypes.MaxBlobsCommittmentsPerBlock*int(s.cfg.NumberOfColumns), cltypes.BYTES_KZG_PROOF),
+			Blobs:      solid.NewStaticListSSZ[*cltypes.Blob](cltypes.MaxBlobsCommittmentsPerBlock, int(cltypes.BYTES_PER_BLOB)),
+		}
+	}
+	if err := s.client.postJSON(ctx, "/eth/v2/beacon/blocks", submitBody, versionStr); err != nil {
 		return fmt.Errorf("submit block: %w", err)
 	}
 
