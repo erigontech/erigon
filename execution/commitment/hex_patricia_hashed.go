@@ -3023,12 +3023,21 @@ func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
 	}
 
 	// Level 2: persistent branch cache (survives across Process calls).
-	// Only read from cache during warmup (mounted=true or cache warmup path).
-	// The inline trie Process path skips the persistent cache to avoid
-	// stale data after unwind/reorg — the ephemeral warmup cache (level 1)
-	// and DB reads (level 3) are always authoritative.
-	// The persistent cache is still used by warmup workers (warmuper.go)
-	// and branch prefetchers which have their own branchFromCacheOrDB.
+	// Only the root trie reads from the cache. Mounted subtries run with
+	// independent DB contexts (per-goroutine roTx in ParallelHashSort)
+	// that may not reflect the root's rwTx writes. Serving cached data
+	// from the root's context to a mount would produce wrong trie roots.
+	if hph.branchCache != nil && !hph.mounted {
+		if data, found := hph.branchCache.Get(key); found {
+			if hph.metrics != nil {
+				hph.metrics.pCacheBranchHit.Add(1)
+			}
+			return data, nil
+		}
+		if hph.metrics != nil {
+			hph.metrics.pCacheBranchMiss.Add(1)
+		}
+	}
 
 	// Level 3: DB read
 	data, _, err := hph.ctx.Branch(key)
@@ -3036,7 +3045,14 @@ func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	// Don't populate persistent cache from inline reads — see level 2 comment above.
+	// Populate persistent cache on miss — but only from the root trie.
+	// Mounted subtries run with independent DB contexts (per-goroutine
+	// snapshots in ParallelHashSort) that may not reflect the root's
+	// latest PutBranch writes. Caching their reads would pollute the
+	// shared cache with stale data.
+	if hph.branchCache != nil && len(data) > 0 && !hph.mounted {
+		hph.branchCache.Put(key, data)
+	}
 
 	return data, nil
 }
