@@ -162,6 +162,9 @@ func (al *accessList) PopSlot(address accounts.Address) {
 		if a != address {
 			continue
 		}
+		if len(al.slots[i]) == 0 {
+			panic("reverting slot change, address has no slots in access list")
+		}
 		al.slots[i] = al.slots[i][:len(al.slots[i])-1]
 		return
 	}
@@ -175,6 +178,9 @@ func (al *accessList) PopAddress() {
 		panic("reverting address change, access list is empty")
 	}
 	n := len(al.addrs)
+	if len(al.slots[n-1]) != 0 {
+		panic("reverting address change, address still has warm slots")
+	}
 	al.slots[n-1] = nil // release slot slice references for GC
 	al.addrs = al.addrs[:n-1]
 	al.slots = al.slots[:n-1]
