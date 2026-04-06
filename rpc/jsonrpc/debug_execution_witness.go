@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"sort"
+	"slices"
 
 	"github.com/holiman/uint256"
 
@@ -652,9 +652,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		}
 	}
 
-	sort.Slice(result.Keys, func(i, j int) bool {
-		return bytes.Compare(result.Keys[i], result.Keys[j]) < 0
-	})
+	slices.SortFunc(result.Keys, func(a, b hexutil.Bytes) int { return bytes.Compare(a, b) })
 
 	// Collect code from the recording state:
 	// - preStateCode: code from the inner reader (pre-block state), for witness trie & result.Codes
@@ -683,8 +681,8 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 			}
 		}
 	}
-	sort.Slice(uniqueCodes, func(i, j int) bool {
-		return bytes.Compare(uniqueCodes[i].hash[:], uniqueCodes[j].hash[:]) < 0
+	slices.SortFunc(uniqueCodes, func(a, b codeWithHash) int {
+		return bytes.Compare(a.hash[:], b.hash[:])
 	})
 	for _, c := range uniqueCodes {
 		result.Codes = append(result.Codes, c.code)
