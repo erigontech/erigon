@@ -116,9 +116,12 @@ func (p *ConcurrentPatriciaHashed) unfoldRoot(ctx context.Context, ctxFactory Tr
 	}
 	// if p.root.rootPresent && p.root.root.hashedExtLen == 0 { // if root has no extension, we have to unfold
 	zero := []byte{0}
-	for unfolding := p.root.needUnfolding(zero); unfolding > 0; unfolding = p.root.needUnfolding(zero) {
-		if err := ctx.Err(); err != nil {
-			return err
+	for unfolding, uErr := p.root.needUnfolding(zero); ; unfolding, uErr = p.root.needUnfolding(zero) {
+		if uErr != nil {
+			return fmt.Errorf("needUnfolding: %w", uErr)
+		}
+		if unfolding <= 0 {
+			break
 		}
 		if err := p.root.unfold(zero, unfolding); err != nil {
 			return fmt.Errorf("unfold: %w", err)

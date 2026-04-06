@@ -92,13 +92,16 @@ func Benchmark_HexPatriciaHashed_Process_Batch(b *testing.B) {
 			defer upds.Close()
 
 			ctx := context.Background()
-			for i := 0; b.Loop(); i++ {
-				if i+batchSize >= len(pk) {
-					i = 0
+			b.ResetTimer()
+			idx := 0
+			for b.Loop() {
+				if idx+batchSize >= len(pk) {
+					idx = 0
 				}
-				WrapKeyUpdatesInto(b, upds, pk[i:i+batchSize], updates[i:i+batchSize])
+				WrapKeyUpdatesInto(b, upds, pk[idx:idx+batchSize], updates[idx:idx+batchSize])
 				_, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
 				require.NoError(b, err)
+				idx++
 			}
 		})
 	}
@@ -138,17 +141,19 @@ func Benchmark_HexPatriciaHashed_Unfold_Isolated(b *testing.B) {
 	require.NoError(b, err)
 
 	b.ResetTimer()
-	for i := 0; b.Loop(); i++ {
-		if i >= len(pk) {
-			i = 0
-		}
+	idx := 0
+	for b.Loop() {
 		// SetState(nil) fully clears grid, depths, touchMap, afterMap and root
 		// so next Process unfolds from scratch exactly as a cold trie would.
 		if err := hph.SetState(nil); err != nil {
 			b.Fatal(err)
 		}
-		WrapKeyUpdatesInto(b, upds, pk[i:i+1], updates[i:i+1])
+		WrapKeyUpdatesInto(b, upds, pk[idx:idx+1], updates[idx:idx+1])
 		_, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
 		require.NoError(b, err)
+		idx++
+		if idx >= len(pk) {
+			idx = 0
+		}
 	}
 }
