@@ -130,7 +130,7 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 		sd.metrics.CachePutSize += putKeySize + putValueSize
 		sd.metrics.CachePutKeySize += putKeySize
 		sd.metrics.CachePutValueSize += putValueSize
-		if dm, ok := sd.metrics.Domains[domain]; ok {
+		if dm := sd.metrics.Domains[domain]; dm != nil {
 			dm.CachePutCount++
 			dm.CachePutSize += putKeySize + putValueSize
 			dm.CachePutKeySize += putKeySize
@@ -284,12 +284,7 @@ func (sd *TemporalMemBatch) ClearRam() {
 	sd.metrics.CachePutSize = 0
 	sd.metrics.CachePutKeySize = 0
 	sd.metrics.CachePutValueSize = 0
-	for _, dm := range sd.metrics.Domains {
-		dm.CachePutCount = 0
-		dm.CachePutSize = 0
-		dm.CachePutKeySize = 0
-		dm.CachePutValueSize = 0
-	}
+	sd.metrics.Domains = [kv.DomainLen]*changeset.DomainIOMetrics{}
 }
 
 func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte, step kv.Step) (cont bool, err error)) error {
