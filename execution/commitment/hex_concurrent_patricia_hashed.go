@@ -437,19 +437,15 @@ func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, updates *Updates
 }
 
 func (p *ConcurrentPatriciaHashed) CanDoConcurrentNext() (bool, error) {
-	if p.root.root.extLen == 0 {
-		zeroPrefixBranch, _, err := p.root.ctx.Branch(HexNibblesToCompactBytes([]byte{0}))
-		if err != nil {
-			return false, fmt.Errorf("checking shortes prefix branch failed: %w", err)
-		}
-		if len(zeroPrefixBranch) > 4 { // tm+am+cells
-			// if root has no extension and there is a branch of zero prefix, can use parallel commitment next time
-			// fmt.Printf("use concurrent next\n")
-			return true, nil
-		}
-		// fmt.Printf(" 00 [branch %x len %d]\n", zeroPrefixBranch, len(zeroPrefixBranch))
-	}
-	// fmt.Printf("use seq trie next [root extLen=%d][ext '%x']\n", p.root.root.extLen, p.root.root.extension[:p.root.root.extLen])
+	// ParallelHashSort produces wrong trie roots for certain chain patterns
+	// (confirmed with hive rpc-compat). The buffered flush + root fold
+	// sequence doesn't correctly reconstruct the trie state. Force serial
+	// mode through the ConcurrentPatriciaHashed wrapper (which still gets
+	// the BranchCache, mount infrastructure, etc.) until the parallel
+	// fold algorithm is fixed.
+	//
+	// The topology check below is correct — the issue is in ParallelHashSort
+	// itself, not in the eligibility check.
 	return false, nil
 }
 
