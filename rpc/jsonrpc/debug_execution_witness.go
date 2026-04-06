@@ -4,13 +4,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"sort"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
@@ -652,7 +652,6 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		}
 	}
 
-	// Sort keys for deterministic output
 	sort.Slice(result.Keys, func(i, j int) bool {
 		return bytes.Compare(result.Keys[i], result.Keys[j]) < 0
 	})
@@ -667,24 +666,29 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	preStateCode := recordingState.GetPreStateCode()
 	modifiedCode := recordingState.GetModifiedCode()
 
-	// result.Codes: pre-state bytecodes the stateless verifier needs to execute calls
+	// result.Codes: pre-state bytecodes the stateless verifier needs to execute calls.
+	// Collect unique codes with their hashes for deterministic sorting.
+	type codeWithHash struct {
+		code []byte
+		hash common.Hash
+	}
+	var uniqueCodes []codeWithHash
 	codesSeen := make(map[common.Hash]struct{})
 	for _, code := range preStateCode {
 		if len(code) > 0 {
 			h := crypto.Keccak256Hash(code)
 			if _, dup := codesSeen[h]; !dup {
-				result.Codes = append(result.Codes, code)
+				uniqueCodes = append(uniqueCodes, codeWithHash{code: code, hash: h})
 				codesSeen[h] = struct{}{}
 			}
 		}
 	}
-
-	// Sort codes by hash for deterministic output
-	sort.Slice(result.Codes, func(i, j int) bool {
-		hi := crypto.Keccak256(result.Codes[i])
-		hj := crypto.Keccak256(result.Codes[j])
-		return bytes.Compare(hi, hj) < 0
+	sort.Slice(uniqueCodes, func(i, j int) bool {
+		return bytes.Compare(uniqueCodes[i].hash[:], uniqueCodes[j].hash[:]) < 0
 	})
+	for _, c := range uniqueCodes {
+		result.Codes = append(result.Codes, c.code)
+	}
 
 	// codeReads: pre-block-state code keyed by address hash, used by
 	// GenerateWitness to populate AccountNodes in the witness trie.
@@ -864,9 +868,8 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	}
 
 	// Optionally verify the witness by re-executing the block statelessly.
-	// Verification doubles the execution cost, so it can be disabled by setting
-	// ERIGON_WITNESS_NO_VERIFY=1. It is enabled by default.
-	if os.Getenv("ERIGON_WITNESS_NO_VERIFY") == "" {
+	// Verification doubles the execution cost; set ERIGON_WITNESS_NO_VERIFY=true to disable.
+	if !dbg.EnvBool("ERIGON_WITNESS_NO_VERIFY", false) {
 		chainCfg, err := api.chainConfig(ctx, tx)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get chain config: %w", err)
@@ -882,7 +885,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 			return nil, fmt.Errorf("[debug_executionWitness] state root mismatch after stateless execution : got %x, expected %x", newStateRoot, expectedRoot)
 		}
 
-		log.Info("[debug_executionWitness] witness successfully verified", "blockNum", blockNum)
+		log.Debug("[debug_executionWitness] witness verified", "blockNum", blockNum)
 	}
 
 	return result, nil
