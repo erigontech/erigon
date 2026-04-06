@@ -624,9 +624,10 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
 			if rules.IsOsaka {
 				// EIP-7778: Block gas accounting without refunds (activated with Osaka on mainnet).
-				// Receipt gasUsed (txnGasUsed) still reflects what the user pays (after refunds).
-				// Block gasUsed uses gas before refunds so refunds don't free up block capacity.
-				st.blockRegularGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds)
+				// Receipt gasUsed (txnGasUsed) still reflects what the user pays (after refunds + EIP-7623 floor).
+				// Block gasUsed uses actual pre-refund gas consumed: SSTORE refunds don't free up block capacity,
+				// and EIP-7623 floor applies only to the user's ETH payment, not to block gas.
+				st.blockRegularGasUsed = st.txnGasUsedB4Refunds
 			} else {
 				st.blockRegularGasUsed = st.txnGasUsed
 			}
