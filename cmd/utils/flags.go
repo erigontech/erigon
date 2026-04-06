@@ -23,6 +23,8 @@ package utils
 import (
 	"crypto/ecdsa"
 	"fmt"
+	"math/big"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -39,6 +41,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/clparams/devgenesis"
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/common"
@@ -102,6 +105,16 @@ var (
 	DeveloperPeriodFlag = cli.IntFlag{
 		Name:  "dev.period",
 		Usage: "Block period to use in developer mode (0 = mine only if transaction pending)",
+	}
+	DevValidatorSeedFlag = cli.StringFlag{
+		Name:  "dev-validator-seed",
+		Usage: "Deterministic BLS key seed for embedded dev validator (enables PoS dev mode)",
+		Value: "devnet",
+	}
+	DevValidatorCountFlag = cli.IntFlag{
+		Name:  "dev-validator-count",
+		Usage: "Number of validators for PoS dev mode",
+		Value: 64,
 	}
 	ChainFlag = cli.StringFlag{
 		Name:  "chain",
@@ -1967,16 +1980,59 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 			SetDNSDiscoveryDefaults(cfg, chainspec.Mainnet)
 		}
 	case networkname.Dev:
-		// Create new developer account or reuse existing one
-		developer := cfg.Builder.Etherbase
-		if developer == (common.Address{}) {
-			Fatalf("Please specify developer account address using --miner.etherbase")
+		seed := ctx.String(DevValidatorSeedFlag.Name)
+		validatorCount := ctx.Int(DevValidatorCountFlag.Name)
+		if validatorCount == 0 {
+			validatorCount = 64
 		}
-		logger.Info("Using developer account", "address", developer)
 
-		// Create a new developer genesis block or reuse existing one
-		cfg.Genesis = chainspec.DeveloperGenesisBlock(uint64(ctx.Int(DeveloperPeriodFlag.Name)), developer)
-		logger.Info("Using custom developer period", "seconds", cfg.Genesis.Config.Clique.Period)
+		// Derive the signer key for the dev account.
+		signerKey, signerAddr := devgenesis.DeriveSignerKey(seed)
+		_ = signerKey // available for future use (e.g., auto-funding txs)
+		logger.Info("Using PoS dev mode",
+			"seed", seed,
+			"validators", validatorCount,
+			"signer", signerAddr.Hex(),
+		)
+
+		// Build PoS EL genesis (TTD=0, post-merge from genesis).
+		cfg.Genesis = chainspec.DeveloperGenesisBlock(0, signerAddr)
+		// Override: remove Clique, set TTD=0 for PoS.
+		cfg.Genesis.Config.Clique = nil
+		cfg.Genesis.Config.TerminalTotalDifficulty = big.NewInt(0)
+		cfg.Genesis.Config.TerminalTotalDifficultyPassed = true
+		cfg.Genesis.ExtraData = make([]byte, 32) // no Clique signer in extra data
+
+		// Configure embedded Caplin + dev validator.
+		cfg.InternalCL = true
+		cfg.CaplinConfig.DevValidatorSeed = seed
+		cfg.CaplinConfig.DevValidatorCount = validatorCount
+
+		// Build beacon genesis state and write to temp file for Caplin.
+		beaconCfg := clparams.MainnetBeaconConfig
+		clparams.ApplyMinimalPreset(&beaconCfg)
+		genesisTime := uint64(time.Now().Unix())
+		// Use a placeholder EL genesis hash — the actual hash is computed later
+		// during chain init. The beacon state just needs a non-zero reference.
+		elGenesisHash := common.Hash{0x01}
+		beaconState, _, err := devgenesis.BuildGenesisState(seed, validatorCount, &beaconCfg, genesisTime, elGenesisHash)
+		if err != nil {
+			Fatalf("Failed to build dev beacon genesis: %v", err)
+		}
+		// Write beacon config and genesis state to temp files.
+		tmpDir := filepath.Join(cfg.Dirs.DataDir, "dev-beacon")
+		os.MkdirAll(tmpDir, 0755)
+		stateSSZ, _ := beaconState.EncodeSSZ(nil)
+		genesisStatePath := filepath.Join(tmpDir, "genesis.ssz")
+		os.WriteFile(genesisStatePath, stateSSZ, 0644)
+
+		// Write minimal beacon config YAML.
+		configPath := filepath.Join(tmpDir, "config.yaml")
+		configYAML := fmt.Sprintf("PRESET_BASE: minimal\nMIN_GENESIS_TIME: %d\n", genesisTime)
+		os.WriteFile(configPath, []byte(configYAML), 0644)
+
+		cfg.CaplinConfig.CustomConfigPath = configPath
+		cfg.CaplinConfig.CustomGenesisStatePath = genesisStatePath
 	}
 
 	if ctx.IsSet(OverrideOsakaFlag.Name) {

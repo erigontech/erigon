@@ -61,6 +61,10 @@ type CaplinConfig struct {
 	CustomConfigPath       string
 	CustomGenesisStatePath string
 
+	// Dev validator (embedded VC for --chain=dev)
+	DevValidatorSeed  string // deterministic BLS key seed; empty = disabled
+	DevValidatorCount int    // number of validators (default 64)
+
 	// Network stuff
 	CaplinDiscoveryAddr         string
 	CaplinDiscoveryPort         uint64
@@ -87,7 +91,7 @@ type CaplinConfig struct {
 }
 
 func (c CaplinConfig) IsDevnet() bool {
-	return c.CustomConfigPath != "" || c.CustomGenesisStatePath != ""
+	return c.CustomConfigPath != "" || c.CustomGenesisStatePath != "" || c.DevValidatorSeed != ""
 }
 
 func (c CaplinConfig) HaveInvalidDevnetParams() bool {
@@ -1036,7 +1040,7 @@ func CustomConfig(configFile string) (BeaconChainConfig, NetworkConfig, error) {
 		return BeaconChainConfig{}, NetworkConfig{}, err
 	}
 	if presetProbe.PresetBase == "minimal" {
-		applyMinimalPreset(beaconCfg)
+		ApplyMinimalPreset(beaconCfg)
 	}
 
 	// setup beacon chain config
@@ -1052,11 +1056,11 @@ func CustomConfig(configFile string) (BeaconChainConfig, NetworkConfig, error) {
 	return *beaconCfg, *networkConfig, nil
 }
 
-// applyMinimalPreset overrides the mainnet base config with values from the
+// ApplyMinimalPreset overrides the mainnet base config with values from the
 // Ethereum consensus-specs "minimal" preset. Only fields that differ from
 // mainnet are changed. Reference:
 // https://github.com/ethereum/consensus-specs/tree/dev/presets/minimal
-func applyMinimalPreset(cfg *BeaconChainConfig) {
+func ApplyMinimalPreset(cfg *BeaconChainConfig) {
 	cfg.PresetBase = "minimal"
 
 	// Phase0 preset differences
