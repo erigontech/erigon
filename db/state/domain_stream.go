@@ -396,11 +396,6 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 	if len(k) > 0 && bytes.HasPrefix(k, prefix) {
 		step := kv.Step(^binary.BigEndian.Uint64(v[:8]))
 		val := v[8:]
-		//endTxNum := step * stepSize // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
-		//if haveRamUpdates && endTxNum >= txNum {
-		//	return fmt.Errorf("probably you didn't set SharedDomains.SetTxNum(). ram must be ahead of db: %d, %d", txNum, endTxNum)
-		//}
-
 		heap.Push(cpPtr, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(val), step: step, cDup: valsCursor, endTxNum: math.MaxUint64, reverse: true})
 	}
 
