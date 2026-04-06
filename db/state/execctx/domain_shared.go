@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"runtime"
 	"time"
 
@@ -367,7 +366,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	if dbg.KVReadLevelledMetrics {
 		start = time.Now()
 	}
-	maxStep := kv.Step(math.MaxUint64)
+	//maxStep := kv.Step(math.MaxUint64)
 
 	// Check mem batch first - it has the current transaction's uncommitted state
 	if v, step, ok := sd.mem.GetLatest(domain, k); ok {
@@ -379,9 +378,9 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		}
 		return v, step, nil
 	} else {
-		if step > 0 {
-			maxStep = step
-		}
+		//if step > 0 {
+		//	maxStep = step
+		//}
 	}
 
 	// stateCache holds in-flight values from previous transactions in the same batch
@@ -395,15 +394,15 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		}
 	}
 
-	type MeteredGetter interface {
-		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
-	}
-
-	if aggTx, ok := tx.AggTx().(MeteredGetter); ok {
-		v, step, _, err = aggTx.MeteredGetLatest(domain, k, tx, maxStep, &sd.metrics, start)
-	} else {
-		v, step, err = tx.GetLatest(domain, k)
-	}
+	//type MeteredGetter interface {
+	//	MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
+	//}
+	//
+	//if aggTx, ok := tx.AggTx().(MeteredGetter); ok {
+	//	v, step, _, err = aggTx.MeteredGetLatest(domain, k, tx, maxStep, &sd.metrics, start)
+	//} else {
+	v, step, err = tx.GetLatest(domain, k)
+	//}
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
