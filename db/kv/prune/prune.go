@@ -206,9 +206,9 @@ func TableScanningPrune(
 	//		"val prune status", stat.ValueProgress.String())
 	//}()
 
-	if limit == 0 { // limits amount of txn to be pruned
-		limit = math.MaxUint64
-	}
+	//if limit == 0 { // limits amount of txn to be pruned
+	//	limit = math.MaxUint64
+	//}
 	var throttling *time.Duration
 	if v := ctx.Value("throttle"); v != nil {
 		throttling = v.(*time.Duration)
