@@ -870,7 +870,7 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 		}
 		//log.Info("Superstring", "len", len(superstring))
 		//start := time.Now()
-		if err := sais.SaisWithBuf(superstring, sa, &saisBuf); err != nil {
+		if err := sais.Sais(superstring, sa, &saisBuf); err != nil {
 			panic(err)
 		}
 		//log.Info("Suffix array built", "in", time.Since(start))

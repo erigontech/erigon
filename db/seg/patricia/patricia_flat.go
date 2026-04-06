@@ -266,7 +266,7 @@ func (mf *MatchFinder3) FindLongestMatches(data []byte) []Match {
 	} else {
 		mf.sa = mf.sa[:n]
 	}
-	if err := sais.SaisWithBuf(data, mf.sa, &mf.saisBuf); err != nil {
+	if err := sais.Sais(data, mf.sa, &mf.saisBuf); err != nil {
 		panic(err)
 	}
 	if cap(mf.inv) < n {

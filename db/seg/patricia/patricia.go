@@ -584,7 +584,7 @@ func (mf2 *MatchFinder2) FindLongestMatches(data []byte) []Match {
 	} else {
 		mf2.sa = mf2.sa[:n]
 	}
-	if err := sais.SaisWithBuf(data, mf2.sa, &mf2.saisBuf); err != nil {
+	if err := sais.Sais(data, mf2.sa, &mf2.saisBuf); err != nil {
 		panic(err)
 	}
 	if cap(mf2.inv) < n {
