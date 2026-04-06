@@ -107,11 +107,18 @@ func BuildGenesisState(
 	})
 
 	// Set Eth1Data linking to the EL genesis.
+	// DepositCount = validatorCount, and eth1DepositIndex = validatorCount
+	// so the spec thinks all deposits have been processed (genesis validators
+	// are injected directly, not via deposit transactions).
 	beaconState.SetEth1Data(&cltypes.Eth1Data{
 		Root:         common.Hash{}, // empty deposit root for dev genesis
 		DepositCount: uint64(validatorCount),
 		BlockHash:    elGenesisHash,
 	})
+	beaconState.SetEth1DepositIndex(uint64(validatorCount))
+
+	// Collect pubkeys for sync committee initialization.
+	var allPubkeys []common.Bytes48
 
 	// Add validators.
 	maxEffectiveBalance := cfg.MaxEffectiveBalance
@@ -140,6 +147,33 @@ func BuildGenesisState(
 		)
 
 		beaconState.AddValidator(validator, maxEffectiveBalance)
+		allPubkeys = append(allPubkeys, common.Bytes48(pubkeyBytes))
+	}
+
+	// Initialize sync committees (Altair+). Fill with validator pubkeys
+	// cycling through the set to reach SyncCommitteeSize.
+	version := cfg.GetCurrentStateVersion(0)
+	if version >= clparams.AltairVersion {
+		committeeSize := int(cfg.SyncCommitteeSize)
+		committeePubkeys := make([]common.Bytes48, committeeSize)
+		for i := 0; i < committeeSize; i++ {
+			committeePubkeys[i] = allPubkeys[i%len(allPubkeys)]
+		}
+		// Compute aggregate pubkey (needed for sync committee verification).
+		aggPubkeyBytes := make([][]byte, committeeSize)
+		for i, pk := range committeePubkeys {
+			aggPubkeyBytes[i] = pk[:]
+		}
+		aggPubkey, err := bls.AggregatePublickKeys(aggPubkeyBytes)
+		if err != nil {
+			return nil, nil, fmt.Errorf("aggregate sync committee pubkeys: %w", err)
+		}
+		var aggPubkeyFixed common.Bytes48
+		copy(aggPubkeyFixed[:], aggPubkey)
+
+		syncCommittee := solid.NewSyncCommitteeFromParameters(committeePubkeys, aggPubkeyFixed)
+		beaconState.SetCurrentSyncCommittee(syncCommittee)
+		beaconState.SetNextSyncCommittee(syncCommittee)
 	}
 
 	// Compute genesis validators root.
@@ -155,7 +189,6 @@ func BuildGenesisState(
 	}
 
 	// Set the latest execution payload header referencing the EL genesis block.
-	version := cfg.GetCurrentStateVersion(0)
 	execHeader := cltypes.NewEth1Header(version)
 	execHeader.BlockHash = elGenesisHash
 	beaconState.SetLatestExecutionPayloadHeader(execHeader)

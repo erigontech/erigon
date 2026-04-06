@@ -116,6 +116,11 @@ var (
 		Usage: "Number of validators for PoS dev mode",
 		Value: 64,
 	}
+	DevSlotTimeFlag = cli.IntFlag{
+		Name:  "dev.slot-time",
+		Usage: "Slot duration in seconds for PoS dev mode (default: 6)",
+		Value: 6,
+	}
 	ChainFlag = cli.StringFlag{
 		Name:  "chain",
 		Usage: "name of the network to join",
@@ -2001,17 +2006,21 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 		// Build PoS EL genesis (TTD=0, post-merge from genesis).
 		cfg.Genesis = chainspec.DeveloperGenesisBlock(0, signerAddr)
-		// Override: remove Clique, set TTD=0 for PoS.
+		// Override: remove Clique, set TTD=0, enable all forks from genesis.
 		cfg.Genesis.Config.Clique = nil
 		cfg.Genesis.Config.TerminalTotalDifficulty = big.NewInt(0)
 		cfg.Genesis.Config.TerminalTotalDifficultyPassed = true
 		cfg.Genesis.ExtraData = make([]byte, 32) // no Clique signer in extra data
+		zero := uint64(0)
+		cfg.Genesis.Config.ShanghaiTime = &zero
+		cfg.Genesis.Config.CancunTime = &zero
+		cfg.Genesis.Config.PragueTime = nil // Prague may need more config; leave disabled
 
 		// Configure embedded Caplin + dev validator.
 		cfg.InternalCL = true
 		cfg.CaplinConfig.DevValidatorSeed = seed
 		cfg.CaplinConfig.DevValidatorCount = validatorCount
-		// Enable Beacon API endpoints needed by the dev validator.
+		// Enable Beacon API for dev mode.
 		cfg.CaplinConfig.BeaconAPIRouter.Active = true
 		if cfg.CaplinConfig.BeaconAPIRouter.Address == "" {
 			cfg.CaplinConfig.BeaconAPIRouter.Address = "127.0.0.1:5555"
@@ -2025,6 +2034,10 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		beaconCfg.BellatrixForkEpoch = 0
 		beaconCfg.CapellaForkEpoch = 0
 		beaconCfg.DenebForkEpoch = 0
+		slotTime := uint64(ctx.Int(DevSlotTimeFlag.Name))
+		if slotTime > 0 {
+			beaconCfg.SecondsPerSlot = slotTime
+		}
 		beaconCfg.InitializeForkSchedule()
 		genesisTime := uint64(time.Now().Unix())
 		// Compute the EL genesis block hash so the beacon state's Eth1Data
@@ -2050,12 +2063,13 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		configYAML := fmt.Sprintf(
 			"PRESET_BASE: minimal\n"+
 				"MIN_GENESIS_TIME: %d\n"+
+				"SECONDS_PER_SLOT: %d\n"+
 				"ALTAIR_FORK_EPOCH: 0\n"+
 				"BELLATRIX_FORK_EPOCH: 0\n"+
 				"CAPELLA_FORK_EPOCH: 0\n"+
 				"DENEB_FORK_EPOCH: 0\n"+
 				"TERMINAL_TOTAL_DIFFICULTY: 0\n",
-			genesisTime)
+			genesisTime, beaconCfg.SecondsPerSlot)
 		os.WriteFile(configPath, []byte(configYAML), 0644)
 
 		cfg.CaplinConfig.CustomConfigPath = configPath

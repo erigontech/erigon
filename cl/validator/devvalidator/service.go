@@ -215,8 +215,8 @@ func (s *Service) maybePropose(ctx context.Context, slot uint64) {
 	for _, duty := range duties {
 		dutySlot := uint64(0)
 		fmt.Sscanf(duty.Slot, "%d", &dutySlot)
-		if dutySlot != slot {
-			continue
+		if dutySlot != slot || slot == 0 {
+			continue // skip genesis slot
 		}
 
 		pubBytes, err := hexutil.Decode(duty.Pubkey)
@@ -247,13 +247,22 @@ func (s *Service) proposeBlock(ctx context.Context, slot uint64, key *ValidatorK
 		return fmt.Errorf("randao reveal: %w", err)
 	}
 
-	// Get block template (unsigned BeaconBlock).
+	// Get block template (unsigned BeaconBlock). Retry a few times if the EL
+	// is busy with fork choice (semaphore contention in AssembleBlock).
 	path := fmt.Sprintf("/eth/v3/validator/blocks/%d?randao_reveal=%s",
 		slot, hexutil.Encode(randaoReveal[:]))
 
 	var blockResponse json.RawMessage
-	if err := s.client.get(ctx, path, &blockResponse); err != nil {
-		return fmt.Errorf("get block template: %w", err)
+	var getErr error
+	for attempt := 0; attempt < 5; attempt++ {
+		getErr = s.client.get(ctx, path, &blockResponse)
+		if getErr == nil {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if getErr != nil {
+		return fmt.Errorf("get block template: %w", getErr)
 	}
 
 	// Parse the block into a SignedBeaconBlock (signature is zero initially).
