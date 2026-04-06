@@ -197,14 +197,14 @@ func TableScanningPrune(
 	mode StorageMode,
 ) (stat *Stat, err error) {
 	stat = &Stat{MinTxNum: math.MaxUint64}
-	start := time.Now()
-	defer func() {
-		logger.Trace("scan prune res", "name", name, "txFrom", txFrom, "txTo", txTo, "limit", limit, "keys",
-			stat.PruneCountTx, "vals", stat.PruneCountValues, "dups", stat.DupsDeleted,
-			"spent ms", time.Since(start).Milliseconds(),
-			"key prune status", stat.KeyProgress.String(),
-			"val prune status", stat.ValueProgress.String())
-	}()
+	//start := time.Now()
+	//defer func() {
+	//	logger.Trace("scan prune res", "name", name, "txFrom", txFrom, "txTo", txTo, "limit", limit, "keys",
+	//		stat.PruneCountTx, "vals", stat.PruneCountValues, "dups", stat.DupsDeleted,
+	//		"spent ms", time.Since(start).Milliseconds(),
+	//		"key prune status", stat.KeyProgress.String(),
+	//		"val prune status", stat.ValueProgress.String())
+	//}()
 
 	if limit == 0 { // limits amount of txn to be pruned
 		limit = math.MaxUint64
