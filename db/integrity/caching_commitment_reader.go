@@ -18,16 +18,15 @@ package integrity
 
 import (
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
 // cachingCommitmentReader wraps a StateReader and caches commitment domain
-// reads in memory. During a single block's ComputeCommitment / Process call,
-// the trie walks many keys that share branch prefixes — the same branch node
-// is read (unfold), written (fold, which is a no-op with history reader), then
-// read again for the next key. This cache eliminates those redundant disk reads.
-//
-// Between blocks, call Reset() to clear stale entries (commitmentAsOf changes).
+// reads in memory across blocks within a window. Between consecutive blocks,
+// most branch nodes are identical — only branches on trie paths of changed
+// keys differ. The caller must call InvalidateChangedKeys between blocks to
+// evict stale entries.
 type cachingCommitmentReader struct {
 	inner commitmentdb.StateReader
 	cache map[string]cachedEntry
@@ -80,9 +79,32 @@ func (r *cachingCommitmentReader) Clone(tx kv.TemporalTx) commitmentdb.StateRead
 }
 
 // SetInner replaces the underlying reader (e.g. when commitmentAsOf changes
-// between blocks). Call Reset() if the new reader may return different values.
+// between blocks).
 func (r *cachingCommitmentReader) SetInner(inner commitmentdb.StateReader) {
 	r.inner = inner
+}
+
+// InvalidateChangedKeys scans the commitment domain history for keys that
+// changed between prevCommitmentAsOf and newCommitmentAsOf, and removes them
+// from the cache. All other entries remain valid because GetAsOf returns the
+// same value when no history entry exists between the two txNums.
+func (r *cachingCommitmentReader) InvalidateChangedKeys(tx kv.TemporalTx, prevCommitmentAsOf, newCommitmentAsOf uint64) error {
+	if prevCommitmentAsOf >= newCommitmentAsOf {
+		return nil
+	}
+	it, err := tx.Debug().HistoryKeyTxNumRange(kv.CommitmentDomain, int(prevCommitmentAsOf), int(newCommitmentAsOf), order.Asc, -1)
+	if err != nil {
+		return err
+	}
+	defer it.Close()
+	for it.HasNext() {
+		k, _, err := it.Next()
+		if err != nil {
+			return err
+		}
+		delete(r.cache, string(k))
+	}
+	return nil
 }
 
 // Reset clears all cached entries.

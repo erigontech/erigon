@@ -831,7 +831,7 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br serv
 
 // checkCommitmentHistAtBlkWithIdx checks commitment for blockNum using the pre-built
 // per-domain key index from ChangedKeysPerBlockIdx.
-func checkCommitmentHistAtBlkWithIdx(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, db kv.TemporalRoDB, br services.FullBlockReader, blockNum uint64, idx *ChangedKeysPerBlockIdx, cr *cachingCommitmentReader, lvl log.Lvl, logger log.Logger) error {
+func checkCommitmentHistAtBlkWithIdx(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, db kv.TemporalRoDB, br services.FullBlockReader, blockNum uint64, idx *ChangedKeysPerBlockIdx, cr *cachingCommitmentReader, prevCommitmentAsOf *uint64, lvl log.Lvl, logger log.Logger) error {
 	sd.ClearRam(true)
 	logger.Log(lvl, "checking commitment hist at block", "blockNum", blockNum)
 	start := time.Now()
@@ -867,11 +867,18 @@ func checkCommitmentHistAtBlkWithIdx(ctx context.Context, tx kv.TemporalTx, sd *
 	// commitment branch data view: as of beginning of the block (or end for block 0)
 	// plain state data view: as of end of the block
 	splitStateReader := commitmentdb.NewSplitHistoryReader(tx, commitmentAsOf, toTxNum, true /* withHistory */)
-	// Wrap with caching reader: within a block's Process call, the same branch
-	// nodes are read repeatedly (unfold→fold→unfold for keys sharing prefixes).
-	// The cache eliminates these redundant disk reads.
-	// Reset between blocks because commitmentAsOf changes.
-	cr.Reset()
+	// Cross-block caching: invalidate only the commitment keys that changed since
+	// the previous block's commitmentAsOf. All other cached branch nodes are still
+	// valid because GetAsOf returns the same value when no history entry exists
+	// between the two txNums.
+	if *prevCommitmentAsOf > 0 && *prevCommitmentAsOf < commitmentAsOf {
+		if err := cr.InvalidateChangedKeys(tx, *prevCommitmentAsOf, commitmentAsOf); err != nil {
+			return err
+		}
+	} else {
+		cr.Reset()
+	}
+	*prevCommitmentAsOf = commitmentAsOf
 	cr.SetInner(splitStateReader)
 	sd.GetCommitmentCtx().SetStateReader(cr)
 	sd.GetCommitmentCtx().SetTrace(logger.Enabled(ctx, log.LvlTrace))
@@ -966,7 +973,8 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 		return err
 	}
 	cr := newCachingCommitmentReader(nil)
-	return checkCommitmentHistAtBlkWithIdx(ctx, tx, sd, db, br, blockNum, idx, cr, lvl, logger)
+	var prevCommitmentAsOf uint64
+	return checkCommitmentHistAtBlkWithIdx(ctx, tx, sd, db, br, blockNum, idx, cr, &prevCommitmentAsOf, lvl, logger)
 }
 
 // checkCommitmentHistWindowSize is the number of blocks covered by a single
@@ -1035,8 +1043,9 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 				return fmt.Errorf("CheckCommitmentHistAtBlkRange: build index window=[%d,%d): %w", windowStart, windowEnd, err)
 			}
 			cr := newCachingCommitmentReader(nil) // inner set per block
+			var prevCommitmentAsOf uint64
 			for blockNum := range sampler.BlockNums(windowStart, windowEnd) {
-				if err := checkCommitmentHistAtBlkWithIdx(wCtx, tx, sd, db, br, blockNum, idx, cr, log.LvlTrace, logger); err != nil {
+				if err := checkCommitmentHistAtBlkWithIdx(wCtx, tx, sd, db, br, blockNum, idx, cr, &prevCommitmentAsOf, log.LvlTrace, logger); err != nil {
 					return fmt.Errorf("checkCommitmentHistAtBlk: %d, %w", blockNum, err)
 				}
 				checked.Add(1)
