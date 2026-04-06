@@ -1042,16 +1042,18 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				if beaconAddr == "" {
 					beaconAddr = "127.0.0.1:5555"
 				}
-				protocol := config.CaplinConfig.BeaconAPIRouter.Protocol
-				if protocol == "" {
-					protocol = "http"
-				}
-				beaconURL := fmt.Sprintf("%s://%s", protocol, beaconAddr)
+				beaconURL := fmt.Sprintf("http://%s", beaconAddr)
 				validatorCount := config.CaplinConfig.DevValidatorCount
 				if validatorCount == 0 {
 					validatorCount = 64
 				}
-				svc, err := devvalidator.NewService(beaconURL, config.CaplinConfig.DevValidatorSeed, validatorCount, nil, logger)
+				// Load the beacon config from the custom config path.
+			beaconCfg, _, err := clparams.CustomConfig(config.CaplinConfig.CustomConfigPath)
+			if err != nil {
+				logger.Error("[dev-validator] failed to load beacon config", "err", err)
+				return
+			}
+			svc, err := devvalidator.NewService(beaconURL, config.CaplinConfig.DevValidatorSeed, validatorCount, &beaconCfg, logger)
 				if err != nil {
 					logger.Error("[dev-validator] failed to create service", "err", err)
 					return

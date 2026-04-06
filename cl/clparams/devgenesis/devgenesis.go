@@ -90,8 +90,9 @@ func BuildGenesisState(
 		return nil, nil, fmt.Errorf("derive keys: %w", err)
 	}
 
-	// Create empty state with the given config.
+	// Create empty state with the given config at the correct version.
 	beaconState := state.New(cfg)
+	beaconState.SetVersion(cfg.GetCurrentStateVersion(0))
 
 	// Set genesis time and slot.
 	beaconState.SetGenesisTime(genesisTime)
@@ -162,6 +163,15 @@ func BuildGenesisState(
 	// Set latest block header. The body root for genesis is the hash of
 	// an empty BeaconBlockBody at the genesis version.
 	genesisBody := cltypes.NewBeaconBody(cfg, version)
+	// Ensure the execution payload has all required sub-fields initialized.
+	genesisBody.ExecutionPayload.Extra = solid.NewExtraData()
+	genesisBody.ExecutionPayload.Transactions = &solid.TransactionsSSZ{}
+	if version >= clparams.CapellaVersion {
+		genesisBody.ExecutionPayload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
+	}
+	if version >= clparams.AltairVersion {
+		genesisBody.SyncAggregate = cltypes.NewSyncAggregateWithSize(int(cfg.SyncCommitteeSize) / 8)
+	}
 	bodyRoot, err := genesisBody.HashSSZ()
 	if err != nil {
 		return nil, nil, fmt.Errorf("hash genesis body: %w", err)
