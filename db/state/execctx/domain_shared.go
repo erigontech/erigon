@@ -363,7 +363,6 @@ func (sd *SharedDomains) GetStateCache() *cache.StateCache {
 	return sd.stateCache
 }
 
-
 func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 	if resetCommitment && sd.sdCtx != nil {
 		sd.sdCtx.ClearRam()

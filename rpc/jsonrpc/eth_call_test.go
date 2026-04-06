@@ -89,7 +89,7 @@ func TestEstimateGasBlockOverridesGasLimit(t *testing.T) {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, execmoduletester.New(t))
 	mining := txpoolproto.NewMiningClient(conn)
-	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log, nil)
 	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, stateCache, m), m.DB, nil, nil)
 
 	callData := hexutil.Bytes(contractInvocationData(1))
