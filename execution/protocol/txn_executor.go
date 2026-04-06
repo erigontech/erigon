@@ -622,7 +622,14 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			st.txnGasUsedB4Refunds = mdGasUsed.Regular
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Regular)
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
-			st.blockRegularGasUsed = st.txnGasUsed
+			if rules.IsOsaka {
+				// EIP-7778: Block gas accounting without refunds (activated with Osaka on mainnet).
+				// Receipt gasUsed (txnGasUsed) still reflects what the user pays (after refunds).
+				// Block gasUsed uses gas before refunds so refunds don't free up block capacity.
+				st.blockRegularGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds)
+			} else {
+				st.blockRegularGasUsed = st.txnGasUsed
+			}
 		} else {
 			st.txnGasUsedB4Refunds = mdGasUsed.Regular
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Regular)
