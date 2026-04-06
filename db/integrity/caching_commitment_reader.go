@@ -17,26 +17,20 @@
 package integrity
 
 import (
-	"sync/atomic"
-
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
 // cachingCommitmentReader wraps a StateReader and caches commitment domain
-// reads in memory across blocks within a window. Between consecutive blocks,
-// most branch nodes are identical — only branches on trie paths of changed
-// keys differ. The caller must call InvalidateChangedKeys between blocks to
-// evict stale entries.
+// reads within a single block's ComputeCommitment call. During Process, the
+// trie unfolds/folds/unfolds for keys sharing prefixes — the same branch nodes
+// are read multiple times. This cache eliminates those redundant disk reads,
+// giving ~50% hit rate per block.
+//
+// The cache is reset between blocks because commitmentAsOf changes.
 type cachingCommitmentReader struct {
 	inner commitmentdb.StateReader
 	cache map[string]cachedEntry
-
-	// stats for debugging — shared across clones via pointer
-	hits        *atomic.Uint64
-	misses      *atomic.Uint64
-	invalidated *atomic.Uint64
 }
 
 type cachedEntry struct {
@@ -46,11 +40,8 @@ type cachedEntry struct {
 
 func newCachingCommitmentReader(inner commitmentdb.StateReader) *cachingCommitmentReader {
 	return &cachingCommitmentReader{
-		inner:       inner,
-		cache:       make(map[string]cachedEntry, 4096),
-		hits:        &atomic.Uint64{},
-		misses:      &atomic.Uint64{},
-		invalidated: &atomic.Uint64{},
+		inner: inner,
+		cache: make(map[string]cachedEntry, 4096),
 	}
 }
 
@@ -66,10 +57,8 @@ func (r *cachingCommitmentReader) Read(d kv.Domain, plainKey []byte, stepSize ui
 	}
 	k := string(plainKey)
 	if e, ok := r.cache[k]; ok {
-		r.hits.Add(1)
 		return e.enc, e.step, nil
 	}
-	r.misses.Add(1)
 	enc, step, err := r.inner.Read(d, plainKey, stepSize)
 	if err != nil {
 		return nil, 0, err
@@ -82,57 +71,17 @@ func (r *cachingCommitmentReader) Read(d kv.Domain, plainKey []byte, stepSize ui
 }
 
 func (r *cachingCommitmentReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
-	// Clone shares the cache and stats — the cloned reader is used within the
-	// same block's ComputeCommitment call.
+	// Clone shares the cache — the cloned reader is used within the same block's
+	// ComputeCommitment call, so cache coherence is guaranteed.
 	return &cachingCommitmentReader{
-		inner:       r.inner.Clone(tx),
-		cache:       r.cache,
-		hits:        r.hits,
-		misses:      r.misses,
-		invalidated: r.invalidated,
+		inner: r.inner.Clone(tx),
+		cache: r.cache,
 	}
 }
 
-// SetInner replaces the underlying reader (e.g. when commitmentAsOf changes
-// between blocks).
+// SetInner replaces the underlying reader.
 func (r *cachingCommitmentReader) SetInner(inner commitmentdb.StateReader) {
 	r.inner = inner
-}
-
-// InvalidateChangedKeys scans the commitment domain history for keys that
-// changed between prevCommitmentAsOf and newCommitmentAsOf, and removes them
-// from the cache. All other entries remain valid because GetAsOf returns the
-// same value when no history entry exists between the two txNums.
-func (r *cachingCommitmentReader) InvalidateChangedKeys(tx kv.TemporalTx, prevCommitmentAsOf, newCommitmentAsOf uint64) error {
-	if prevCommitmentAsOf >= newCommitmentAsOf {
-		return nil
-	}
-	it, err := tx.Debug().HistoryKeyTxNumRange(kv.CommitmentDomain, int(prevCommitmentAsOf), int(newCommitmentAsOf), order.Asc, -1)
-	if err != nil {
-		return err
-	}
-	defer it.Close()
-	for it.HasNext() {
-		k, _, err := it.Next()
-		if err != nil {
-			return err
-		}
-		delete(r.cache, string(k))
-		r.invalidated.Add(1)
-	}
-	return nil
-}
-
-// Stats returns (hits, misses, invalidated, cacheSize).
-func (r *cachingCommitmentReader) Stats() (uint64, uint64, uint64, int) {
-	return r.hits.Load(), r.misses.Load(), r.invalidated.Load(), len(r.cache)
-}
-
-// ResetStats zeroes the hit/miss/invalidated counters.
-func (r *cachingCommitmentReader) ResetStats() {
-	r.hits.Store(0)
-	r.misses.Store(0)
-	r.invalidated.Store(0)
 }
 
 // Reset clears all cached entries.
