@@ -2011,10 +2011,21 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		cfg.InternalCL = true
 		cfg.CaplinConfig.DevValidatorSeed = seed
 		cfg.CaplinConfig.DevValidatorCount = validatorCount
+		// Enable Beacon API endpoints needed by the dev validator.
+		cfg.CaplinConfig.BeaconAPIRouter.Active = true
+		if cfg.CaplinConfig.BeaconAPIRouter.Address == "" {
+			cfg.CaplinConfig.BeaconAPIRouter.Address = "127.0.0.1:5555"
+		}
 
 		// Build beacon genesis state and write to temp file for Caplin.
 		beaconCfg := clparams.MainnetBeaconConfig
 		clparams.ApplyMinimalPreset(&beaconCfg)
+		// Enable all forks from genesis (PoS from block 0).
+		beaconCfg.AltairForkEpoch = 0
+		beaconCfg.BellatrixForkEpoch = 0
+		beaconCfg.CapellaForkEpoch = 0
+		beaconCfg.DenebForkEpoch = 0
+		beaconCfg.InitializeForkSchedule()
 		genesisTime := uint64(time.Now().Unix())
 		// Compute the EL genesis block hash so the beacon state's Eth1Data
 		// matches the actual chain genesis.
@@ -2034,9 +2045,17 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		genesisStatePath := filepath.Join(tmpDir, "genesis.ssz")
 		os.WriteFile(genesisStatePath, stateSSZ, 0644)
 
-		// Write minimal beacon config YAML.
+		// Write beacon config YAML with all forks enabled from genesis.
 		configPath := filepath.Join(tmpDir, "config.yaml")
-		configYAML := fmt.Sprintf("PRESET_BASE: minimal\nMIN_GENESIS_TIME: %d\n", genesisTime)
+		configYAML := fmt.Sprintf(
+			"PRESET_BASE: minimal\n"+
+				"MIN_GENESIS_TIME: %d\n"+
+				"ALTAIR_FORK_EPOCH: 0\n"+
+				"BELLATRIX_FORK_EPOCH: 0\n"+
+				"CAPELLA_FORK_EPOCH: 0\n"+
+				"DENEB_FORK_EPOCH: 0\n"+
+				"TERMINAL_TOTAL_DIFFICULTY: 0\n",
+			genesisTime)
 		os.WriteFile(configPath, []byte(configYAML), 0644)
 
 		cfg.CaplinConfig.CustomConfigPath = configPath
