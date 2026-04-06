@@ -1941,6 +1941,75 @@ func Test_HexPatriciaHashed_ProcessWithDozensOfStorageKeys(t *testing.T) {
 	require.Equal(t, rBatch, rSeq, "sequential and batch root should match")
 }
 
+// Test_HexPatriciaHashed_LazyDerivation_SharedPrefix verifies that lazy
+// hashed-key derivation (deferring deriveHashedKeys for non-target siblings)
+// produces the same root as a fresh trie that derives everything eagerly.
+// Uses many keys with shared hashed prefixes to force deep branch unfolds
+// where sibling cells carry deferred derivation state.
+func Test_HexPatriciaHashed_LazyDerivation_SharedPrefix(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	const keysCount = 200
+	rnd := rand.New(rand.NewSource(42))
+
+	builder := NewUpdateBuilder()
+	for i := 0; i < keysCount; i++ {
+		key := make([]byte, length.Addr)
+		rnd.Read(key)
+		builder.Balance(fmt.Sprintf("%x", key), rnd.Uint64())
+	}
+	pk, updates := builder.Build()
+
+	// Trie 1: apply all keys in one batch (hot grid, lazy siblings present).
+	ms1 := NewMockState(t)
+	require.NoError(t, ms1.applyPlainUpdates(pk, updates))
+	trie1 := NewHexPatriciaHashed(length.Addr, ms1)
+	upds1 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, pk, updates)
+	defer upds1.Close()
+	root1, err := trie1.Process(ctx, upds1, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+
+	// Trie 2: apply keys one-by-one (each Process call unfolds from a mostly
+	// cold grid, so siblings from prior iterations carry deferred state that
+	// must be resolved when later keys traverse the same branch).
+	ms2 := NewMockState(t)
+	trie2 := NewHexPatriciaHashed(length.Addr, ms2)
+	var root2 []byte
+	for i := 0; i < len(updates); i++ {
+		require.NoError(t, ms2.applyPlainUpdates(pk[i:i+1], updates[i:i+1]))
+		upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, pk[i:i+1], updates[i:i+1])
+		root2, err = trie2.Process(ctx, upds, "", nil, WarmupConfig{})
+		require.NoError(t, err)
+		upds.Close()
+	}
+	require.Equal(t, root1, root2, "batch and sequential roots must match with lazy derivation")
+
+	// Trie 3: apply a second batch of updates to each trie and verify roots
+	// still match — exercises lazy cells surviving across Process calls.
+	builder2 := NewUpdateBuilder()
+	for i := 0; i < 50; i++ {
+		key := make([]byte, length.Addr)
+		rnd.Read(key)
+		builder2.Balance(fmt.Sprintf("%x", key), rnd.Uint64())
+	}
+	pk2, updates2 := builder2.Build()
+
+	require.NoError(t, ms1.applyPlainUpdates(pk2, updates2))
+	WrapKeyUpdatesInto(t, upds1, pk2, updates2)
+	root1b, err := trie1.Process(ctx, upds1, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+
+	for i := 0; i < len(updates2); i++ {
+		require.NoError(t, ms2.applyPlainUpdates(pk2[i:i+1], updates2[i:i+1]))
+		upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, pk2[i:i+1], updates2[i:i+1])
+		root2, err = trie2.Process(ctx, upds, "", nil, WarmupConfig{})
+		require.NoError(t, err)
+		upds.Close()
+	}
+	require.Equal(t, root1b, root2, "batch and sequential roots must match after second round")
+}
+
 var keyGenCounter atomic.Int64
 
 func generateKeyWithHashedPrefix(constHashedPrefixNibbles []byte, keyLen int) (plainKey []byte, hashedKey []byte) {
