@@ -471,7 +471,8 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 
 				if len(k) > 0 && bytes.HasPrefix(k, prefix) {
 					ci1.key = common.Copy(k)
-					ci1.endTxNum = kv.Step(^binary.BigEndian.Uint64(v[:8])).ToTxNum(dt.stepSize) // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+					step := kv.Step(^binary.BigEndian.Uint64(v[:8]))
+					ci1.endTxNum = step.ToTxNum(dt.stepSize) // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
 					ci1.val = common.Copy(v[8:])
 					heap.Push(cpPtr, ci1)
 				} else {
