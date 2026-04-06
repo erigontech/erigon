@@ -240,6 +240,7 @@ func StageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sync *stagedsyn
 	defer dbg.RecoverPanicIntoError(logger, &err)
 	hasMore := true
 	for hasMore {
+		// Execution + flush in one transaction.
 		err = db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
 			sd, err := execctx.NewSharedDomains(ctx, tx, logger)
 			if err != nil {
@@ -251,6 +252,16 @@ func StageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sync *stagedsyn
 				return err
 			}
 			return sd.Flush(ctx, tx)
+		})
+		if err != nil {
+			return err
+		}
+		// Prune in a separate transaction so freed pages are committed
+		// to MDBX before the next execution batch. This allows the GC
+		// to reclaim them in subsequent writes instead of always
+		// appending to the end of the file.
+		err = db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+			return sync.RunPrune(ctx, tx, initialCycle, 0)
 		})
 		if err != nil {
 			return err
@@ -312,11 +323,7 @@ func stageLoopIteration(ctx context.Context, sd *execctx.SharedDomains, tx kv.Te
 	logCtx = append(logCtx, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 	logger.Info("Timings", logCtx...)
 	// -- send notifications END
-	// -- Prune+commit(sync)
-	err = sync.RunPrune(ctx, tx, initialCycle, 0)
-	if err != nil {
-		return false, err
-	}
+	// Prune is called in a separate transaction by the caller.
 	return hasMore, nil
 }
 
