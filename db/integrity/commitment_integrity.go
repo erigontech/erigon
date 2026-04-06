@@ -965,7 +965,7 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 // checkCommitmentHistWindowSize is the number of blocks covered by a single
 // pre-built ChangedKeysPerBlockIdx.  Large enough to amortize the index build cost
 // across many sampled blocks; small enough to keep memory bounded (~few hundred MB).
-const checkCommitmentHistWindowSize = 1_000
+const checkCommitmentHistWindowSize = 10_000
 
 func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, br services.FullBlockReader, from, to uint64, logger log.Logger) error {
 	if from >= to {
