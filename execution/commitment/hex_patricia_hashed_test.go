@@ -3197,3 +3197,129 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 			[]bool{true, false})
 	})
 }
+
+func Test_ConcurrentWrapper_SerialMode_MatchesPlainHPH(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	// Two identical mock states
+	statePlain := NewMockState(t)
+	stateConcurrent := NewMockState(t)
+
+	plainKeys, updates := NewUpdateBuilder().
+		Balance("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", 4).
+		Balance("18f4dcf2d94402019d5b00f71d5f9d02e4f70e40", 900234).
+		Balance("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", 1233).
+		Storage("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", "24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed", "0401").
+		Balance("27456647f49ba65e220e86cba9abfc4fc1587b81", 065606).
+		Balance("b13363d527cdc18173c54ac5d4a54af05dbec22e", 4*1e17).
+		Balance("d995768ab23a0a333eb9584df006da740e66f0aa", 5).
+		Balance("eabf041afbb6c6059fbd25eab0d3202db84e842d", 6).
+		Balance("93fe03620e4d70ea39ab6e8c0e04dd0d83e041f2", 7).
+		Balance("ba7a3b7b095d3370c022ca655c790f0c0ead66f5", 5*1e17).
+		Storage("ba7a3b7b095d3370c022ca655c790f0c0ead66f5", "0fa41642c48ecf8f2059c275353ce4fee173b3a8ce5480f040c4d2901603d14e", "050505").
+		Balance("a8f8d73af90eee32dc9729ce8d5bb762f30d21a4", 9*1e16).
+		Storage("93fe03620e4d70ea39ab6e8c0e04dd0d83e041f2", "de3fea338c95ca16954e80eb603cd81a261ed6e2b10a03d0c86cf953fe8769a4", "060606").
+		Balance("14c4d3bba7f5009599257d3701785d34c7f2aa27", 6*1e18).
+		Build()
+
+	triePlain := NewHexPatriciaHashed(length.Addr, statePlain)
+	trieRoot := NewHexPatriciaHashed(length.Addr, stateConcurrent)
+	trieConcurrent := NewConcurrentPatriciaHashed(trieRoot, stateConcurrent)
+
+	// Process updates in blocks of 3-5 (simulating multi-tx blocks with
+	// state save/restore between blocks like SeekCommitment)
+	blockSizes := []int{3, 5, 3, 3}
+	idx := 0
+	for block, bs := range blockSizes {
+		if idx >= len(updates) {
+			break
+		}
+		end := idx + bs
+		if end > len(updates) {
+			end = len(updates)
+		}
+		batchKeys := plainKeys[idx:end]
+		batchUpdates := updates[idx:end]
+
+		err := statePlain.applyPlainUpdates(batchKeys, batchUpdates)
+		require.NoError(t, err)
+		err = stateConcurrent.applyPlainUpdates(batchKeys, batchUpdates)
+		require.NoError(t, err)
+
+		updsPlain := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, batchKeys, batchUpdates)
+		updsConcurrent := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, batchKeys, batchUpdates)
+
+		rootPlain, err := triePlain.Process(ctx, updsPlain, "", nil, WarmupConfig{})
+		require.NoError(t, err)
+
+		rootConcurrent, err := trieConcurrent.Process(ctx, updsConcurrent, "", nil, WarmupConfig{})
+		require.NoError(t, err)
+
+		updsPlain.Close()
+		updsConcurrent.Close()
+
+		if !bytes.Equal(rootPlain, rootConcurrent) {
+			t.Fatalf("root mismatch at block %d (updates %d-%d): plain=%x concurrent=%x", block, idx, end-1, rootPlain, rootConcurrent)
+		}
+		t.Logf("block %d (updates %d-%d): root %x (match)", block, idx, end-1, rootPlain)
+
+		// Save/restore state between blocks
+		statePlainEnc, err := triePlain.EncodeCurrentState(nil)
+		require.NoError(t, err)
+		stateConcurrentEnc, err := trieConcurrent.RootTrie().EncodeCurrentState(nil)
+		require.NoError(t, err)
+
+		triePlain.Reset()
+		err = triePlain.SetState(statePlainEnc)
+		require.NoError(t, err)
+
+		trieConcurrent.Reset()
+		err = trieConcurrent.RootTrie().SetState(stateConcurrentEnc)
+		require.NoError(t, err)
+
+		idx = end
+	}
+	// Process remaining one by one
+	for i := idx; i < len(updates); i++ {
+		err := statePlain.applyPlainUpdates(plainKeys[i:i+1], updates[i:i+1])
+		require.NoError(t, err)
+		err = stateConcurrent.applyPlainUpdates(plainKeys[i:i+1], updates[i:i+1])
+		require.NoError(t, err)
+
+		updsPlain := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
+		updsConcurrent := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
+
+		rootPlain, err := triePlain.Process(ctx, updsPlain, "", nil, WarmupConfig{})
+		require.NoError(t, err)
+
+		rootConcurrent, err := trieConcurrent.Process(ctx, updsConcurrent, "", nil, WarmupConfig{})
+		require.NoError(t, err)
+
+		updsPlain.Close()
+		updsConcurrent.Close()
+
+		if !bytes.Equal(rootPlain, rootConcurrent) {
+			t.Fatalf("root mismatch at update %d: plain=%x concurrent=%x", i, rootPlain, rootConcurrent)
+		}
+		t.Logf("update %d: root %x (match)", i, rootPlain)
+
+		// Every 3 updates, save and restore state (like SeekCommitment between blocks)
+		if (i+1)%3 == 0 && i < len(updates)-1 {
+			statePlainEnc, err := triePlain.EncodeCurrentState(nil)
+			require.NoError(t, err)
+			stateConcurrentEnc, err := trieConcurrent.RootTrie().EncodeCurrentState(nil)
+			require.NoError(t, err)
+
+			triePlain.Reset()
+			err = triePlain.SetState(statePlainEnc)
+			require.NoError(t, err)
+
+			trieConcurrent.Reset()
+			err = trieConcurrent.RootTrie().SetState(stateConcurrentEnc)
+			require.NoError(t, err)
+
+			t.Logf("  state saved/restored after update %d", i)
+		}
+	}
+}

@@ -420,11 +420,19 @@ func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, updates *Updates
 			return nil, err
 		}
 	}
-	nextConcurrent, err := p.CanDoConcurrentNext()
-	if err != nil {
-		return nil, err
+	// Only evaluate concurrent eligibility when a context factory is
+	// available — ParallelHashSort requires per-goroutine DB contexts.
+	// Calling SetConcurrentCommitment when CtxFactory is nil would
+	// reinitialize ETL collectors via initCollector(), disrupting
+	// callers that create SharedDomains without EnableParaTrieDB
+	// (e.g. receipts generator, eth_simulateV1).
+	if warmup.CtxFactory != nil {
+		nextConcurrent, err := p.CanDoConcurrentNext()
+		if err != nil {
+			return nil, err
+		}
+		updates.SetConcurrentCommitment(nextConcurrent)
 	}
-	updates.SetConcurrentCommitment(nextConcurrent)
 	return rootHash, nil
 }
 
