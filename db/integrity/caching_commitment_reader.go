@@ -17,6 +17,8 @@
 package integrity
 
 import (
+	"sync/atomic"
+
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -30,6 +32,11 @@ import (
 type cachingCommitmentReader struct {
 	inner commitmentdb.StateReader
 	cache map[string]cachedEntry
+
+	// stats for debugging — shared across clones via pointer
+	hits        *atomic.Uint64
+	misses      *atomic.Uint64
+	invalidated *atomic.Uint64
 }
 
 type cachedEntry struct {
@@ -39,8 +46,11 @@ type cachedEntry struct {
 
 func newCachingCommitmentReader(inner commitmentdb.StateReader) *cachingCommitmentReader {
 	return &cachingCommitmentReader{
-		inner: inner,
-		cache: make(map[string]cachedEntry, 4096),
+		inner:       inner,
+		cache:       make(map[string]cachedEntry, 4096),
+		hits:        &atomic.Uint64{},
+		misses:      &atomic.Uint64{},
+		invalidated: &atomic.Uint64{},
 	}
 }
 
@@ -56,8 +66,10 @@ func (r *cachingCommitmentReader) Read(d kv.Domain, plainKey []byte, stepSize ui
 	}
 	k := string(plainKey)
 	if e, ok := r.cache[k]; ok {
+		r.hits.Add(1)
 		return e.enc, e.step, nil
 	}
+	r.misses.Add(1)
 	enc, step, err := r.inner.Read(d, plainKey, stepSize)
 	if err != nil {
 		return nil, 0, err
@@ -70,11 +82,14 @@ func (r *cachingCommitmentReader) Read(d kv.Domain, plainKey []byte, stepSize ui
 }
 
 func (r *cachingCommitmentReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
-	// Clone shares the cache — the cloned reader is used within the same block's
-	// ComputeCommitment call, so cache coherence is guaranteed.
+	// Clone shares the cache and stats — the cloned reader is used within the
+	// same block's ComputeCommitment call.
 	return &cachingCommitmentReader{
-		inner: r.inner.Clone(tx),
-		cache: r.cache,
+		inner:       r.inner.Clone(tx),
+		cache:       r.cache,
+		hits:        r.hits,
+		misses:      r.misses,
+		invalidated: r.invalidated,
 	}
 }
 
@@ -103,8 +118,21 @@ func (r *cachingCommitmentReader) InvalidateChangedKeys(tx kv.TemporalTx, prevCo
 			return err
 		}
 		delete(r.cache, string(k))
+		r.invalidated.Add(1)
 	}
 	return nil
+}
+
+// Stats returns (hits, misses, invalidated, cacheSize).
+func (r *cachingCommitmentReader) Stats() (uint64, uint64, uint64, int) {
+	return r.hits.Load(), r.misses.Load(), r.invalidated.Load(), len(r.cache)
+}
+
+// ResetStats zeroes the hit/miss/invalidated counters.
+func (r *cachingCommitmentReader) ResetStats() {
+	r.hits.Store(0)
+	r.misses.Store(0)
+	r.invalidated.Store(0)
 }
 
 // Reset clears all cached entries.
