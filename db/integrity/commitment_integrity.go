@@ -850,14 +850,6 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	if err != nil {
 		return err
 	}
-	// Use EndTxNumNoCommitment: this check reconstructs commitment from history
-	// files only (not commitment domain), so commitment domain coverage must not
-	// limit which blocks can be verified.
-	aggTx := state.AggTx(tx)
-	if aggMax := aggTx.EndTxNumNoCommitment(); maxTxNum+1 > aggMax {
-		blockNumOfState, _, _ := txNumsReader.FindBlockNum(ctx, tx, aggMax)
-		return fmt.Errorf("block %d is beyond latest block with state %d", blockNum, blockNumOfState)
-	}
 	toTxNum := maxTxNum + 1
 	sd, err := execctx.NewSharedDomains(ctx, tx, logger)
 	if err != nil {
