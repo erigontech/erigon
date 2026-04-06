@@ -51,11 +51,12 @@ func KeyToNibblizedHash(key []byte) []byte {
 	return nibblized
 }
 
-// HexNibblesToCompactBytes Converts slice of hex nibbles into regular bytes form, combining two nibbles into one byte.
-func HexNibblesToCompactBytes(key []byte) []byte {
+// HexNibblesToCompactBytesTo is like HexNibblesToCompactBytes but writes into dst, returning the used slice.
+// dst must be large enough (len(key)/2 + 1).
+func HexNibblesToCompactBytesTo(dst, key []byte) []byte {
 	var compactZeroByte byte
 	keyLen := len(key)
-	if HasTerm(key) { // trim terminator if needed
+	if HasTerm(key) {
 		keyLen--
 		compactZeroByte = 0x20
 	}
@@ -64,27 +65,30 @@ func HexNibblesToCompactBytes(key []byte) []byte {
 		firstNibble = key[0]
 	}
 
-	// decode first byte
 	var keyIndex int
-	if keyLen&1 == 1 { // check if key length is odd
-		compactZeroByte |= 0x10 | firstNibble // Odd: (1<<4) + first nibble
+	if keyLen&1 == 1 {
+		compactZeroByte |= 0x10 | firstNibble
 		keyIndex++
 	}
 
-	bufLen := keyLen/2 + 1 // always > 0
-	buf := make([]byte, bufLen)
+	bufLen := keyLen/2 + 1
+	buf := dst[:bufLen]
 	buf[0] = compactZeroByte
 
-	// decode the rest of the key
 	for bufIndex := 1; keyIndex < keyLen; keyIndex, bufIndex = keyIndex+2, bufIndex+1 {
 		if keyIndex == keyLen-1 {
-			buf[bufIndex] = buf[bufIndex] & 0xf
+			buf[bufIndex] = 0 // clear stale data from shared buffer
 		} else {
 			buf[bufIndex] = key[keyIndex+1]
 		}
 		buf[bufIndex] |= key[keyIndex] << 4
 	}
 	return buf
+}
+
+// HexNibblesToCompactBytes Converts slice of hex nibbles into regular bytes form, combining two nibbles into one byte.
+func HexNibblesToCompactBytes(key []byte) []byte {
+	return HexNibblesToCompactBytesTo(make([]byte, len(key)/2+1), key)
 }
 
 // uncompactNibbles converts a slice of bytes representing nibbles in regular form into 1-nibble-per-byte form.

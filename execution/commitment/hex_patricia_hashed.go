@@ -82,6 +82,7 @@ type HexPatriciaHashed struct {
 	traceDomain   bool
 	capture       []string
 	ctx           PatriciaContext
+	compactKeyBuf [65]byte      // scratch buffer for HexNibblesToCompactBytesTo (max 128/2+1 = 65)
 	hashAuxBuffer [128]byte     // buffer to compute cell hash or write hash-related things
 	cellHashBuf   common.Hash   // shared scratch buffer for hashKey calls (avoids per-cell allocation)
 	auxBuffer     *bytes.Buffer // auxiliary buffer used during branch updates encoding
@@ -1768,7 +1769,7 @@ func (hph *HexPatriciaHashed) readBranchAndCheckForFlushing(prefix []byte) ([]by
 
 // unfoldBranchNode returns true if unfolding has been done
 func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bool) error {
-	key := HexNibblesToCompactBytes(hph.currentKey[:hph.currentKeyLen])
+	key := HexNibblesToCompactBytesTo(hph.compactKeyBuf[:], hph.currentKey[:hph.currentKeyLen])
 	hph.metrics.BranchLoad(hph.currentKey[:hph.currentKeyLen])
 
 	branchData, err := hph.readBranchAndCheckForFlushing(key)
@@ -2063,7 +2064,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 
 	depth := hph.depths[row]
 
-	updateKey := HexNibblesToCompactBytes(hph.currentKey[:updateKeyLen])
+	updateKey := HexNibblesToCompactBytesTo(hph.compactKeyBuf[:], hph.currentKey[:updateKeyLen])
 	defer func() { hph.depthsToTxNum[depth] = 0 }()
 
 	if hph.trace {
@@ -2246,7 +2247,8 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 				bitset ^= bit
 			}
 			// Defer the branch encoding
-			if err := hph.branchEncoder.CollectDeferredUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], &hph.grid[row], depth); err != nil {
+			// CollectDeferredUpdate retains the prefix slice; copy because updateKey aliases compactKeyBuf.
+			if err := hph.branchEncoder.CollectDeferredUpdate(hph.ctx, common.Copy(updateKey), bitmap, hph.touchMap[row], hph.afterMap[row], &hph.grid[row], depth); err != nil {
 				return fmt.Errorf("failed to collect deferred branch update: %w", err)
 			}
 		} else {
