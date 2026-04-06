@@ -817,6 +817,22 @@ func (sdb *IntraBlockState) GetDelegatedDesignation(addr accounts.Address) (acco
 // GetState retrieves a value from the given account's storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetState(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error) {
+	// Fast path: serial execution — avoid closure allocations from versionedRead.
+	if sdb.versionMap == nil {
+		so, err := sdb.getStateObject(addr, true)
+		if err != nil {
+			return u256.N0, err
+		}
+		var value uint256.Int
+		if so != nil && !so.deleted {
+			value, _ = so.GetState(key)
+		}
+		if dbg.TraceTransactionIO && (sdb.trace || (dbg.TraceAccount(addr.Handle()) && traceKey(key))) {
+			fmt.Printf("%d (%d.%d) GetState (%s) %x, %x=%x\n", sdb.blockNum, sdb.txIndex, sdb.version, StorageRead, addr, key, &value)
+		}
+		return value, nil
+	}
+
 	versionedValue, source, _, err := versionedRead(sdb, addr, StoragePath, key, false, u256.N0,
 		func(v uint256.Int) uint256.Int {
 			return v
