@@ -257,9 +257,7 @@ func updateExecDomainMetrics(metrics *changeset.DomainMetrics, prevMetrics *chan
 	defer metrics.RUnlock()
 
 	if prevMetrics == nil {
-		prevMetrics = &changeset.DomainMetrics{
-			Domains: map[kv.Domain]*changeset.DomainIOMetrics{},
-		}
+		prevMetrics = &changeset.DomainMetrics{}
 	}
 
 	seconds := interval.Seconds()
@@ -290,10 +288,10 @@ func updateExecDomainMetrics(metrics *changeset.DomainMetrics, prevMetrics *chan
 
 	prevMetrics.DomainIOMetrics = metrics.DomainIOMetrics
 
-	if accountMetrics, ok := metrics.Domains[kv.AccountsDomain]; ok {
+	if accountMetrics := metrics.Domains[kv.AccountsDomain]; accountMetrics != nil {
 		var prevAccountMetrics changeset.DomainIOMetrics
 
-		if prev, ok := prevMetrics.Domains[kv.AccountsDomain]; ok {
+		if prev := prevMetrics.Domains[kv.AccountsDomain]; prev != nil {
 			prevAccountMetrics = *prev
 		}
 
@@ -327,10 +325,10 @@ func updateExecDomainMetrics(metrics *changeset.DomainMetrics, prevMetrics *chan
 		prevMetrics.Domains[kv.AccountsDomain] = &prevAccountMetrics
 	}
 
-	if storageMetrics, ok := metrics.Domains[kv.StorageDomain]; ok {
+	if storageMetrics := metrics.Domains[kv.StorageDomain]; storageMetrics != nil {
 		var prevStorageMetrics changeset.DomainIOMetrics
 
-		if prev, ok := prevMetrics.Domains[kv.StorageDomain]; ok {
+		if prev := prevMetrics.Domains[kv.StorageDomain]; prev != nil {
 			prevStorageMetrics = *prev
 		}
 
@@ -364,10 +362,10 @@ func updateExecDomainMetrics(metrics *changeset.DomainMetrics, prevMetrics *chan
 		prevMetrics.Domains[kv.StorageDomain] = &prevStorageMetrics
 	}
 
-	if codeMetrics, ok := metrics.Domains[kv.CodeDomain]; ok && executing {
+	if codeMetrics := metrics.Domains[kv.CodeDomain]; codeMetrics != nil && executing {
 		var prevCodeMetrics changeset.DomainIOMetrics
 
-		if prev, ok := prevMetrics.Domains[kv.CodeDomain]; ok {
+		if prev := prevMetrics.Domains[kv.CodeDomain]; prev != nil {
 			prevCodeMetrics = *prev
 		}
 
@@ -399,10 +397,10 @@ func updateExecDomainMetrics(metrics *changeset.DomainMetrics, prevMetrics *chan
 		prevMetrics.Domains[kv.CodeDomain] = &prevCodeMetrics
 	}
 
-	if commitmentMetrics, ok := metrics.Domains[kv.CommitmentDomain]; !executing && ok {
+	if commitmentMetrics := metrics.Domains[kv.CommitmentDomain]; commitmentMetrics != nil && !executing {
 		var prevCommitmentMetrics changeset.DomainIOMetrics
 
-		if prev, ok := prevMetrics.Domains[kv.CommitmentDomain]; ok {
+		if prev := prevMetrics.Domains[kv.CommitmentDomain]; prev != nil {
 			prevCommitmentMetrics = *prev
 		}
 
