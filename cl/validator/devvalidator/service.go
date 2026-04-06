@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -237,46 +239,140 @@ func (s *Service) maybePropose(ctx context.Context, slot uint64) {
 
 // proposeBlock fetches a block template, signs it, and submits it.
 func (s *Service) proposeBlock(ctx context.Context, slot uint64, key *ValidatorKey) error {
-	// Compute RANDAO reveal: sign(epoch, DOMAIN_RANDAO).
 	epoch := slot / s.cfg.SlotsPerEpoch
-	randaoReveal, err := s.signEpoch(epoch, key)
+
+	// Compute RANDAO reveal.
+	randaoReveal, err := signRandaoReveal(key, epoch, s.cfg, s.genesisValidatorsRoot)
 	if err != nil {
 		return fmt.Errorf("randao reveal: %w", err)
 	}
 
-	// Get block template.
-	path := fmt.Sprintf("/eth/v3/validator/blocks/%d?randao_reveal=%s&graffiti=0x%064x",
-		slot, hexutil.Encode(randaoReveal[:]), 0)
+	// Get block template (unsigned BeaconBlock).
+	path := fmt.Sprintf("/eth/v3/validator/blocks/%d?randao_reveal=%s",
+		slot, hexutil.Encode(randaoReveal[:]))
 
 	var blockResponse json.RawMessage
 	if err := s.client.get(ctx, path, &blockResponse); err != nil {
-		return fmt.Errorf("get block: %w", err)
+		return fmt.Errorf("get block template: %w", err)
 	}
 
-	// The block template needs to be signed and submitted.
-	// For now, submit the unsigned block — the beacon node will handle it.
-	// TODO: parse block, compute signing root, sign with BLS, submit signed block.
-	s.logger.Info("[dev-validator] got block template", "slot", slot, "size", len(blockResponse))
+	// Parse the block into a SignedBeaconBlock (signature is zero initially).
+	version := s.cfg.GetCurrentStateVersion(epoch)
+	block := cltypes.NewSignedBeaconBlock(s.cfg, version)
+	if err := json.Unmarshal(blockResponse, block.Block); err != nil {
+		return fmt.Errorf("parse block template: %w", err)
+	}
 
+	// Sign the block.
+	sig, err := signBlock(key, block.Block, slot, s.cfg, s.genesisValidatorsRoot)
+	if err != nil {
+		return fmt.Errorf("sign block: %w", err)
+	}
+	block.Signature = sig
+
+	// Submit the signed block.
+	versionStr := version.String()
+	if err := s.client.postJSON(ctx, "/eth/v2/beacon/blocks", block, versionStr); err != nil {
+		return fmt.Errorf("submit block: %w", err)
+	}
+
+	s.logger.Info("[dev-validator] proposed block", "slot", slot, "validator", key.ValidatorIndex)
 	return nil
-}
-
-// signEpoch computes the RANDAO reveal using proper domain separation.
-func (s *Service) signEpoch(epoch uint64, key *ValidatorKey) (common.Bytes96, error) {
-	return signRandaoReveal(key, epoch, s.cfg, s.genesisValidatorsRoot)
 }
 
 // maybeAttest submits attestations for validators with duties at this slot.
 func (s *Service) maybeAttest(ctx context.Context, slot uint64) {
-	// Get attestation data for this slot.
-	path := fmt.Sprintf("/eth/v1/validator/attestation_data?slot=%d&committee_index=0", slot)
+	epoch := slot / s.cfg.SlotsPerEpoch
 
-	var attData json.RawMessage
-	if err := s.client.get(ctx, path, &attData); err != nil {
-		return // silently skip
+	// Get attester duties for this epoch.
+	type attesterDuty struct {
+		Pubkey                  string `json:"pubkey"`
+		ValidatorIndex          string `json:"validator_index"`
+		Slot                    string `json:"slot"`
+		CommitteeIndex          string `json:"committee_index"`
+		CommitteeLength         string `json:"committee_length"`
+		ValidatorCommitteeIndex string `json:"validator_committee_index"`
 	}
 
-	s.logger.Debug("[dev-validator] got attestation data", "slot", slot)
-	// TODO: for each validator with attester duty at this slot,
-	// sign the attestation data and submit via POST /eth/v1/beacon/pool/attestations
+	// POST attester duties with our validator indices.
+	indices := make([]string, 0, len(s.keys))
+	for _, k := range s.keys {
+		indices = append(indices, fmt.Sprintf("%d", k.ValidatorIndex))
+	}
+
+	var duties []attesterDuty
+	path := fmt.Sprintf("/eth/v1/validator/duties/attester/%d", epoch)
+	if err := s.client.post(ctx, path, indices); err != nil {
+		// Fall back to getting attestation data without duties.
+		return
+	}
+	// Re-fetch as GET with response.
+	if err := s.client.get(ctx, path, &duties); err != nil {
+		return
+	}
+
+	attested := 0
+	for _, duty := range duties {
+		dutySlot := uint64(0)
+		fmt.Sscanf(duty.Slot, "%d", &dutySlot)
+		if dutySlot != slot {
+			continue
+		}
+
+		pubBytes, err := hexutil.Decode(duty.Pubkey)
+		if err != nil || len(pubBytes) != 48 {
+			continue
+		}
+		var pub common.Bytes48
+		copy(pub[:], pubBytes)
+		key, ok := s.keysByPub[pub]
+		if !ok {
+			continue
+		}
+
+		committeeIndex := uint64(0)
+		fmt.Sscanf(duty.CommitteeIndex, "%d", &committeeIndex)
+
+		// Get attestation data for this slot + committee.
+		attPath := fmt.Sprintf("/eth/v1/validator/attestation_data?slot=%d&committee_index=%d",
+			slot, committeeIndex)
+
+		var attData solid.AttestationData
+		if err := s.client.get(ctx, attPath, &attData); err != nil {
+			continue
+		}
+
+		// Sign the attestation data.
+		sig, err := signAttestation(key, &attData, slot, s.cfg, s.genesisValidatorsRoot)
+		if err != nil {
+			s.logger.Warn("[dev-validator] attestation sign failed", "err", err)
+			continue
+		}
+
+		// Build aggregation bits — set our bit position.
+		committeeLength := uint64(0)
+		validatorPosition := uint64(0)
+		fmt.Sscanf(duty.CommitteeLength, "%d", &committeeLength)
+		fmt.Sscanf(duty.ValidatorCommitteeIndex, "%d", &validatorPosition)
+
+		aggBitsLen := (committeeLength + 7) / 8
+		aggBits := make([]byte, aggBitsLen)
+		aggBits[validatorPosition/8] |= 1 << (validatorPosition % 8)
+
+		// Submit attestation.
+		attestation := map[string]interface{}{
+			"aggregation_bits": hexutil.Encode(aggBits),
+			"data":             &attData,
+			"signature":        hexutil.Encode(sig[:]),
+		}
+		if err := s.client.post(ctx, "/eth/v1/beacon/pool/attestations", []interface{}{attestation}); err != nil {
+			s.logger.Debug("[dev-validator] attestation submit failed", "slot", slot, "err", err)
+			continue
+		}
+		attested++
+	}
+
+	if attested > 0 {
+		s.logger.Debug("[dev-validator] attested", "slot", slot, "count", attested)
+	}
 }
