@@ -6,7 +6,6 @@ package devvalidator
 
 import (
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -20,12 +19,14 @@ import (
 // Service is the embedded dev validator. It runs as a goroutine inside
 // Caplin, producing blocks and attestations for all configured validators.
 type Service struct {
-	client    *BeaconClient
-	keys      []*ValidatorKey
-	keysByPub map[common.Bytes48]*ValidatorKey
-	cfg       *clparams.BeaconChainConfig
-	logger    log.Logger
-	cancel    context.CancelFunc
+	client                *BeaconClient
+	keys                  []*ValidatorKey
+	keysByPub             map[common.Bytes48]*ValidatorKey
+	cfg                   *clparams.BeaconChainConfig
+	genesisValidatorsRoot common.Hash
+	genesisTime           uint64
+	logger                log.Logger
+	cancel                context.CancelFunc
 }
 
 // NewService creates a dev validator service.
@@ -79,7 +80,8 @@ func (s *Service) Stop() {
 	}
 }
 
-// waitForReady polls the beacon node until it responds.
+// waitForReady polls the beacon node until it responds, then fetches
+// genesis time and validators root needed for signing.
 func (s *Service) waitForReady(ctx context.Context) {
 	for {
 		select {
@@ -89,10 +91,19 @@ func (s *Service) waitForReady(ctx context.Context) {
 		}
 
 		var genesis struct {
-			GenesisTime string `json:"genesis_time"`
+			GenesisTime           string `json:"genesis_time"`
+			GenesisValidatorsRoot string `json:"genesis_validators_root"`
 		}
 		if err := s.client.get(ctx, "/eth/v1/beacon/genesis", &genesis); err == nil {
-			s.logger.Info("[dev-validator] beacon node ready", "genesisTime", genesis.GenesisTime)
+			fmt.Sscanf(genesis.GenesisTime, "%d", &s.genesisTime)
+			root, err := hexutil.Decode(genesis.GenesisValidatorsRoot)
+			if err == nil && len(root) == 32 {
+				copy(s.genesisValidatorsRoot[:], root)
+			}
+			s.logger.Info("[dev-validator] beacon node ready",
+				"genesisTime", s.genesisTime,
+				"validatorsRoot", s.genesisValidatorsRoot.Hex(),
+			)
 			return
 		}
 		time.Sleep(time.Second)
@@ -138,18 +149,8 @@ func (s *Service) resolveIndices(ctx context.Context) error {
 
 // slotLoop runs once per slot, checking duties and performing them.
 func (s *Service) slotLoop(ctx context.Context) {
-	// Get genesis time to compute slot boundaries.
-	var genesis struct {
-		GenesisTime string `json:"genesis_time"`
-	}
-	if err := s.client.get(ctx, "/eth/v1/beacon/genesis", &genesis); err != nil {
-		s.logger.Error("[dev-validator] failed to get genesis", "err", err)
-		return
-	}
-	genesisTime := uint64(0)
-	fmt.Sscanf(genesis.GenesisTime, "%d", &genesisTime)
-
 	secPerSlot := s.cfg.SecondsPerSlot
+	genesisTime := s.genesisTime
 	slotDuration := time.Duration(secPerSlot) * time.Second
 
 	for {
@@ -260,16 +261,9 @@ func (s *Service) proposeBlock(ctx context.Context, slot uint64, key *ValidatorK
 	return nil
 }
 
-// signEpoch computes the RANDAO reveal: BLS signature of the epoch.
-func (s *Service) signEpoch(epoch uint64, key *ValidatorKey) ([96]byte, error) {
-	var epochBytes [32]byte
-	binary.LittleEndian.PutUint64(epochBytes[:8], epoch)
-	// TODO: compute proper signing root with domain separation
-	sig := key.PrivKey.Sign(epochBytes[:])
-	sigBytes := sig.Bytes()
-	var result [96]byte
-	copy(result[:], sigBytes)
-	return result, nil
+// signEpoch computes the RANDAO reveal using proper domain separation.
+func (s *Service) signEpoch(epoch uint64, key *ValidatorKey) (common.Bytes96, error) {
+	return signRandaoReveal(key, epoch, s.cfg, s.genesisValidatorsRoot)
 }
 
 // maybeAttest submits attestations for validators with duties at this slot.
