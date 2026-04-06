@@ -90,7 +90,7 @@ jobs:
           cd ..
 
       - name: Login to Docker Hub
-        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567  ## v3.3.0
+        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2  ## v4.0.0
         with:
           username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
           password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}

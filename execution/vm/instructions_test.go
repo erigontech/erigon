@@ -125,8 +125,8 @@ func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFu
 		callContext.Stack.push(x)
 		callContext.Stack.push(y)
 		opFn(pc, evm, callContext)
-		if len(callContext.Stack.data) != 1 {
-			t.Errorf("Expected one item on stack after %v, got %d: ", name, len(callContext.Stack.data))
+		if callContext.Stack.top != 1 {
+			t.Errorf("Expected one item on stack after %v, got %d: ", name, callContext.Stack.top)
 		}
 		actual := callContext.Stack.pop()
 

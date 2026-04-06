@@ -726,13 +726,14 @@ var (
 	//DbGcSelfPnlMergeCalls  = metrics.NewCounter(`db_gc_pnl{phase="slef_merge_calls"}`)                //nolint
 )
 
-// ErrServerOverloaded is returned by BeginRo when the DB semaphore is full and the caller is an RPC handler.
-var ErrServerOverloaded = errors.New("server overloaded, retry later")
+// ErrReadTxLimitExceeded is returned by BeginRo when the read-tx semaphore is full and no slot is
+// available for a new concurrent read transaction. The RPC layer remaps this to HTTP 503 / JSON-RPC -32005.
+var ErrReadTxLimitExceeded = errors.New("read-tx limit exceeded: too many concurrent read transactions")
 
 type nonBlockingAcquireKey struct{}
 
 // WithNonBlockingAcquire tags ctx to request fail-fast semaphore acquisition in BeginRo.
-// When set, BeginRo uses TryAcquire and returns ErrServerOverloaded immediately if the
+// When set, BeginRo uses TryAcquire and returns ErrReadTxLimitExceeded immediately if the
 // read-tx semaphore is full, instead of blocking until a slot is available.
 func WithNonBlockingAcquire(ctx context.Context) context.Context {
 	return context.WithValue(ctx, nonBlockingAcquireKey{}, struct{}{})

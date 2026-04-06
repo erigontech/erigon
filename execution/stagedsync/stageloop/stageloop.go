@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
-
 	"github.com/erigontech/erigon/execution/metrics"
 	execp2p "github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/protocol/misc"
@@ -53,6 +52,8 @@ import (
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 )
+
+var inMemHistoryReads = dbg.EnvBool("ERIGON_IN_MEM_HISTORY", true)
 
 // StageLoop runs the continuous loop of staged sync
 func StageLoop(
@@ -156,7 +157,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		return err
 	}
 	defer doms.Close()
-	doms.SetInMemHistoryReads(false)
+	doms.SetInMemHistoryReads(inMemHistoryReads)
 
 	var finishStageBeforeSync uint64
 	if hook != nil {
@@ -245,6 +246,7 @@ func StageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sync *stagedsyn
 				return err
 			}
 			defer sd.Close()
+			sd.SetInMemHistoryReads(inMemHistoryReads)
 			hasMore, err = stageLoopIteration(ctx, sd, tx, sync, initialCycle, firstCycle, logger, blockReader, hook)
 			if err != nil {
 				return err

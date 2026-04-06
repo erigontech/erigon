@@ -18,6 +18,8 @@ env:
   DOCKERFILE_PATH: "Dockerfile"
   LABEL_DESCRIPTION: "Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency frontier. Archive Node by default."
 
+permissions: {}
+
 on:
   workflow_dispatch:
     inputs:
@@ -54,6 +56,8 @@ on:
 jobs:
 
   build-release:
+    permissions:
+      contents: read  # github.token used in curl to check existing GitHub release
     #runs-on: ubuntu-latest
     runs-on: [devops-01-self-hosted]
     timeout-minutes: 60
@@ -501,6 +505,8 @@ jobs:
 
   publish-docker-image:
     needs: [ build-release, test-release ]
+    permissions:
+      contents: read  # actions/checkout without custom token
     if: always() && contains(needs.build-release.result, 'success') && !contains(needs.test-release.result, 'failure')
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -675,6 +681,8 @@ jobs:
 
   sync-gitbook:
     name: Sync Gitbook docs branch and create variant if needed
+    permissions:
+      contents: write  # reusable workflow (gitbook-release.yml) pushes branches
     needs: [publish-release]
     if: ${{ inputs.perform_release }}
     uses: ./.github/workflows/gitbook-release.yml
