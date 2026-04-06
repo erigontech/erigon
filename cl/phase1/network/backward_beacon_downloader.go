@@ -18,6 +18,7 @@ package network
 
 import (
 	"context"
+	"errors"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -28,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/rpc"
+	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -186,7 +188,17 @@ func (b *BackwardBeaconDownloader) sendBlockRequest(
 	requestSent *atomic.Bool,
 ) {
 	blocks, peerId, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count)
-	if err != nil || blocks == nil || len(blocks) == 0 {
+	if err != nil {
+		// Don't ban when the error is due to no peers being available.
+		if !errors.Is(err, peers.ErrNoPeers) {
+			b.rpc.BanPeer(peerId)
+		} else {
+			log.Debug("[Caplin] no peers available for backward beacon block request", "start", start, "count", count)
+		}
+		requestSent.Store(false)
+		return
+	}
+	if blocks == nil || len(blocks) == 0 {
 		b.rpc.BanPeer(peerId)
 		requestSent.Store(false)
 		return

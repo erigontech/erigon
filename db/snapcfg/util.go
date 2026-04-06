@@ -62,14 +62,12 @@ type preverifiedRegistry struct {
 
 var registry = &preverifiedRegistry{
 	raw: map[string][]byte{
-		networkname.Mainnet:    snapshothashes.Mainnet,
-		networkname.Sepolia:    snapshothashes.Sepolia,
-		networkname.Amoy:       snapshothashes.Amoy,
-		networkname.BorMainnet: snapshothashes.BorMainnet,
-		networkname.Gnosis:     snapshothashes.Gnosis,
-		networkname.Chiado:     snapshothashes.Chiado,
-		networkname.Hoodi:      snapshothashes.Hoodi,
-		networkname.Bloatnet:   snapshothashes.Bloatnet,
+		networkname.Mainnet:  snapshothashes.Mainnet,
+		networkname.Sepolia:  snapshothashes.Sepolia,
+		networkname.Gnosis:   snapshothashes.Gnosis,
+		networkname.Chiado:   snapshothashes.Chiado,
+		networkname.Hoodi:    snapshothashes.Hoodi,
+		networkname.Bloatnet: snapshothashes.Bloatnet,
 	},
 	data:   make(map[string]Preverified),
 	cached: make(map[string]*Cfg),
@@ -145,14 +143,12 @@ func (r *preverifiedRegistry) Has(networkName string) bool {
 }
 
 var snapshotHashPtrs = map[string]*[]byte{
-	networkname.Mainnet:    &snapshothashes.Mainnet,
-	networkname.Sepolia:    &snapshothashes.Sepolia,
-	networkname.Amoy:       &snapshothashes.Amoy,
-	networkname.BorMainnet: &snapshothashes.BorMainnet,
-	networkname.Gnosis:     &snapshothashes.Gnosis,
-	networkname.Chiado:     &snapshothashes.Chiado,
-	networkname.Hoodi:      &snapshothashes.Hoodi,
-	networkname.Bloatnet:   &snapshothashes.Bloatnet,
+	networkname.Mainnet:  &snapshothashes.Mainnet,
+	networkname.Sepolia:  &snapshothashes.Sepolia,
+	networkname.Gnosis:   &snapshothashes.Gnosis,
+	networkname.Chiado:   &snapshothashes.Chiado,
+	networkname.Hoodi:    &snapshothashes.Hoodi,
+	networkname.Bloatnet: &snapshothashes.Bloatnet,
 }
 
 func fromEmbeddedToml(in []byte) Preverified {
@@ -504,14 +500,12 @@ func KnownCfgOrDevnet(networkName string) *Cfg {
 
 // EmbeddedWebseedsRaw holds the unparsed embedded webseed TOML bytes per chain.
 var EmbeddedWebseedsRaw = map[string][]byte{
-	networkname.Mainnet:    webseed.Mainnet,
-	networkname.Sepolia:    webseed.Sepolia,
-	networkname.Amoy:       webseed.Amoy,
-	networkname.BorMainnet: webseed.BorMainnet,
-	networkname.Gnosis:     webseed.Gnosis,
-	networkname.Chiado:     webseed.Chiado,
-	networkname.Hoodi:      webseed.Hoodi,
-	networkname.Bloatnet:   webseed.Bloatnet,
+	networkname.Mainnet:  webseed.Mainnet,
+	networkname.Sepolia:  webseed.Sepolia,
+	networkname.Gnosis:   webseed.Gnosis,
+	networkname.Chiado:   webseed.Chiado,
+	networkname.Hoodi:    webseed.Hoodi,
+	networkname.Bloatnet: webseed.Bloatnet,
 }
 
 // GetEmbeddedWebseeds parses and returns the webseed URLs for a single chain.

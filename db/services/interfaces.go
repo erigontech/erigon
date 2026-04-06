@@ -133,10 +133,6 @@ type DBEventNotifier interface {
 	OnNewSnapshot()
 }
 
-type Range struct {
-	From, To uint64
-}
-
 type BlockSnapshots interface {
 	LogStat(label string)
 	OpenFolder() error

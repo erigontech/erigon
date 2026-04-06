@@ -206,9 +206,9 @@ func TestEIP1559BlockEncoding(t *testing.T) {
 			GasLimit: 123457,
 			Data:     []byte{},
 		},
-		ChainID:    &u256.Num1,
-		FeeCap:     feeCap,
-		TipCap:     &u256.Num0,
+		ChainID:    u256.Num1,
+		FeeCap:     *feeCap,
+		TipCap:     u256.Num0,
 		AccessList: accesses,
 	}
 	tx2, err := tx2.WithSignature(*LatestSignerForChainID(big.NewInt(1)), common.Hex2Bytes("fe38ca4e44a30002ac54af7cf922a6ac2ba11b7d22f548e8ecb3f51f41cb31b06de6a5cbae13c0c856e33acf021b51819636cfc009d39eafb9f606d546e305a800"))
@@ -254,7 +254,7 @@ func TestEIP2718BlockEncoding(t *testing.T) {
 
 	// Create legacy tx.
 	to := common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87")
-	ten := new(uint256.Int).SetUint64(10)
+	ten := *new(uint256.Int).SetUint64(10)
 	var tx1 Transaction = &LegacyTx{
 		CommonTx: CommonTx{
 			Nonce:    0,
@@ -271,7 +271,7 @@ func TestEIP2718BlockEncoding(t *testing.T) {
 	// Create ACL tx.
 	addr := common.HexToAddress("0x0000000000000000000000000000000000000001")
 	var tx2 Transaction = &AccessListTx{
-		ChainID: chainID,
+		ChainID: *chainID,
 		LegacyTx: LegacyTx{
 			CommonTx: CommonTx{
 				Nonce:    0,
@@ -602,11 +602,11 @@ func TestCopyTxs(t *testing.T) {
 	txs = append(txs, &LegacyTx{
 		CommonTx: CommonTx{
 			Nonce:    0,
-			Value:    new(uint256.Int).SetUint64(10000),
+			Value:    *new(uint256.Int).SetUint64(10000),
 			GasLimit: 50000,
 			Data:     []byte("Sparta"),
 		},
-		GasPrice: new(uint256.Int).SetUint64(10),
+		GasPrice: *new(uint256.Int).SetUint64(10),
 	})
 
 	populateBlobTxs()

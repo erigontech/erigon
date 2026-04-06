@@ -21,7 +21,7 @@ func (obj *LogForStorageGen) EncodingSize() (size int) {
 
 func (obj *LogForStorageGen) EncodeRLP(w io.Writer) error {
 	var b [32]byte
-	if err := rlp.EncodeStructSizePrefix(obj.EncodingSize(), w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(obj.EncodingSize(), w, b[:]); err != nil {
 		return err
 	}
 	b[0] = 128 + 20
@@ -33,7 +33,7 @@ func (obj *LogForStorageGen) EncodeRLP(w io.Writer) error {
 	}
 	gidx := 0
 	gidx = (32 + 1) * len(obj.Topics)
-	if err := rlp.EncodeStructSizePrefix(gidx, w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(gidx, w, b[:]); err != nil {
 		return err
 	}
 	for i := 0; i < len(obj.Topics); i++ {

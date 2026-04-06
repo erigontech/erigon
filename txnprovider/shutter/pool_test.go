@@ -903,9 +903,9 @@ func MockEncryptedTxn(t *testing.T, chainId *uint256.Int, eon shutter.Eon) testh
 			Nonce:    uint64(99),
 			GasLimit: 21_000,
 			To:       &senderAddr, // send to self
-			Value:    uint256.NewInt(123),
+			Value:    *uint256.NewInt(123),
 		},
-		GasPrice: uint256.NewInt(555),
+		GasPrice: *uint256.NewInt(555),
 	}
 	signer := types.LatestSignerForChainID(chainId.ToBig())
 	signedTxn, err := types.SignTx(txn, *signer, senderPrivKey)

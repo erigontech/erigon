@@ -211,6 +211,9 @@ func (ht *HistoryRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges
 //
 // 0-2,2-3: nothing to merge
 func (iit *InvertedIndexRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *MergeRange {
+	if dbg.NoDeepMergeHistory() {
+		maxSpan = min(maxSpan, 2*iit.stepSize)
+	}
 	var minFound bool
 	var startTxNum, endTxNum uint64
 	for _, item := range iit.files {
@@ -327,8 +330,6 @@ func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyF
 	}
 
 	if r.history.needMerge {
-		// Get history files from HistoryRoTx (no "garbage/overalps"), but index files not from InvertedIndexRoTx
-		// because index files may already be merged (before `kill -9`) and it means not visible in InvertedIndexRoTx
 		for _, item := range ht.files {
 			if item.startTxNum < r.history.from {
 				continue
@@ -338,13 +339,21 @@ func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyF
 			}
 
 			historyFiles = append(historyFiles, item.src)
-			idxFile, ok := ht.h.InvertedIndex.dirtyFiles.Get(item.src)
-			if ok {
-				indexFiles = append(indexFiles, idxFile)
-			} else {
-				walkErr := fmt.Errorf("History.staticFilesInRange: required file not found: %s-%s.%d-%d.efi", ht.h.InvertedIndex.FileVersion.AccessorEFI.String(), ht.h.FilenameBase, item.startTxNum/ht.stepSize, item.endTxNum/ht.stepSize)
-				return nil, nil, walkErr
+
+			found := false
+			for _, iiItem := range ht.iit.files {
+				if iiItem.startTxNum == item.startTxNum && iiItem.endTxNum == item.endTxNum {
+					indexFiles = append(indexFiles, iiItem.src)
+					found = true
+					break
+				}
 			}
+			if found {
+				continue
+			}
+
+			walkErr := fmt.Errorf("History.staticFilesInRange: required file not found: %s-%s.%d-%d.efi", ht.h.InvertedIndex.FileVersion.AccessorEFI.String(), ht.h.FilenameBase, item.startTxNum/ht.stepSize, item.endTxNum/ht.stepSize)
+			return nil, nil, walkErr
 		}
 
 		for _, f := range historyFiles {
@@ -434,7 +443,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		cnt += item.decompressor.Count()
 	}
 
-	p := ps.AddNew("merge "+path.Base(kvFilePath), uint64(cnt)*2) // *2 because after adding words - will happen compression (which also slow)
+	p := ps.AddNew("merge "+path.Base(kvFilePath), uint64(cnt))
 	defer ps.Delete(p)
 
 	var cp CursorHeap

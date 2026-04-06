@@ -60,8 +60,8 @@ func newTestTxnSlot(nonce uint64, senderID uint64, tip, feeCap uint64, gas uint6
 			GasLimit: gas,
 			To:       &to,
 		},
-		TipCap: uint256.NewInt(tip),
-		FeeCap: uint256.NewInt(feeCap),
+		TipCap: *uint256.NewInt(tip),
+		FeeCap: *uint256.NewInt(feeCap),
 	}
 	return &TxnSlot{
 		Txn:      txn,
@@ -79,8 +79,8 @@ func newTestSetCodeTxnSlot(nonce uint64, senderID uint64, tip, feeCap uint64, ga
 				GasLimit: gas,
 				To:       &to,
 			},
-			TipCap: uint256.NewInt(tip),
-			FeeCap: uint256.NewInt(feeCap),
+			TipCap: *uint256.NewInt(tip),
+			FeeCap: *uint256.NewInt(feeCap),
 		},
 	}
 	return &TxnSlot{
@@ -412,10 +412,10 @@ func TestRecoverSignerFromRLP_ValidData(t *testing.T) {
 	authLen := rlp.U64Len(chainID)
 	authLen += 1 + length.Addr
 	authLen += rlp.U64Len(0) // nonce
-	require.NoError(t, rlp.EncodeStructSizePrefix(authLen, data, b[:]))
-	require.NoError(t, rlp.EncodeInt(chainID, data, b[:]))
-	require.NoError(t, rlp.EncodeOptionalAddress(&pubKey, data, b[:]))
-	require.NoError(t, rlp.EncodeInt(0, data, b[:]))
+	require.NoError(t, rlp.EncodeListPrefix(authLen, data, b[:]))
+	require.NoError(t, rlp.EncodeU64(chainID, data, b[:]))
+	require.NoError(t, types.EncodeOptionalAddress(&pubKey, data, b[:]))
+	require.NoError(t, rlp.EncodeU64(0, data, b[:]))
 
 	// Prepare hash data exactly as before
 	hashData := []byte{params.SetCodeMagicPrefix}
@@ -905,7 +905,7 @@ func TestShanghaiValidateTxn(t *testing.T) {
 						Data:     make([]byte, test.dataLen),
 						To:       to,
 					},
-					FeeCap: uint256.NewInt(21000),
+					FeeCap: *uint256.NewInt(21000),
 				},
 				SenderID: 0,
 			}
@@ -1132,8 +1132,8 @@ func TestBlobTxnReplacement(t *testing.T) {
 					GasLimit: 500000,
 					Data:     make([]byte, 32),
 				},
-				FeeCap: uint256.NewInt(1).Mul(uint256.NewInt(10), feeCap),
-				TipCap: uint256.NewInt(1).Mul(uint256.NewInt(10), tip),
+				FeeCap: *uint256.NewInt(1).Mul(uint256.NewInt(10), feeCap),
+				TipCap: *uint256.NewInt(1).Mul(uint256.NewInt(10), tip),
 			},
 			Nonce:    0x2,
 			SenderID: 0,
@@ -1152,8 +1152,8 @@ func TestBlobTxnReplacement(t *testing.T) {
 	{
 		blobTxn := makeBlobTxn()
 		w := blobTxn.Txn.(*types.BlobTx)
-		origTip := *w.TipCap
-		origFee := *w.FeeCap
+		origTip := w.TipCap
+		origFee := w.FeeCap
 		blobTxn.Nonce = 0x2
 		blobTxn.IDHash[0] = 0x03
 		txnSlots := TxnSlots{}
@@ -1175,7 +1175,7 @@ func TestBlobTxnReplacement(t *testing.T) {
 		assert.Equal(txpoolcfg.ReplaceUnderpriced, reasons[0], reasons[0].String())
 
 		// Bump only Feecap
-		*w.TipCap = origTip
+		w.TipCap = origTip
 		reasons, err = pool.AddLocalTxns(ctx, txnSlots)
 		require.NoError(err)
 		assert.Equal(txpoolcfg.ReplaceUnderpriced, reasons[0], reasons[0].String())
@@ -1187,7 +1187,7 @@ func TestBlobTxnReplacement(t *testing.T) {
 		assert.Equal(txpoolcfg.NotReplaced, reasons[0], reasons[0].String())
 
 		// Bump only blobFee cap
-		*w.FeeCap = origFee
+		w.FeeCap = origFee
 		reasons, err = pool.AddLocalTxns(ctx, txnSlots)
 		require.NoError(err)
 		assert.Equal(txpoolcfg.NotReplaced, reasons[0], reasons[0].String())
@@ -1216,9 +1216,9 @@ func makeBlobTxn() TxnSlot {
 	bt.BlobVersionedHashes = make([]common.Hash, 2)
 	bt.BlobVersionedHashes[0] = common.Hash(kzg.KZGToVersionedHash(commitment0))
 	bt.BlobVersionedHashes[1] = common.Hash(kzg.KZGToVersionedHash(commitment1))
-	bt.TipCap = tip
-	bt.FeeCap = feeCap
-	bt.MaxFeePerBlobGas = blobFeeCap
+	bt.TipCap = *tip
+	bt.FeeCap = *feeCap
+	bt.MaxFeePerBlobGas = *blobFeeCap
 	return blobTxn
 }
 
@@ -1237,14 +1237,14 @@ func makeWrappedBlobTxnRlpWithCellProofs(t *testing.T, chainID *uint256.Int, blo
 					Nonce:    0,
 					To:       &common.Address{1},
 					GasLimit: 1_000_000,
-					Value:    uint256.NewInt(0),
+					Value:    *uint256.NewInt(0),
 					Data:     []byte{0x01},
 				},
-				ChainID: chainID,
-				TipCap:  tipCap,
-				FeeCap:  feeCap,
+				ChainID: *chainID,
+				TipCap:  *tipCap,
+				FeeCap:  *feeCap,
 			},
-			MaxFeePerBlobGas: maxFeePerBlobGas,
+			MaxFeePerBlobGas: *maxFeePerBlobGas,
 		},
 		WrapperVersion: 1,
 		Commitments:    make(types.BlobKzgs, blobCount),
@@ -1474,6 +1474,110 @@ func TestBlobSlots(t *testing.T) {
 	require.NoError(err)
 	for _, reason := range reasons {
 		assert.Equal(txpoolcfg.BlobPoolOverflow, reason, reason.String())
+	}
+}
+
+// TestOsakaProofShapeMismatchDiscardsCompletely verifies that when Osaka activates,
+// pre-Osaka-shape blob transactions are fully discarded by best() — not just removed
+// from the Pending sub-pool. This ensures totalBlobsInPool and byHash are cleaned up,
+// so new Osaka-shaped blob transactions can be admitted.
+func TestOsakaProofShapeMismatchDiscardsCompletely(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	require := require.New(t)
+
+	ch := make(chan Announcements, 5)
+	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	db := memdb.NewTestPoolDB(t)
+	cfg := txpoolcfg.DefaultConfig
+	cfg.TotalBlobPoolLimit = 2 // tight limit: one 2-blob txn fills it
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testforks.Forks["Cancun"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	require.NoError(err)
+
+	// Fund one account
+	var addr [20]byte
+	addr[0] = 1
+	h1 := gointerfaces.ConvertHashToH256([32]byte{})
+	change := &remoteproto.StateChangeBatch{
+		StateVersionId:       0,
+		PendingBlockBaseFee:  200_000,
+		BlockGasLimit:        math.MaxUint64,
+		PendingBlobFeePerGas: 100_000,
+		ChangeBatch: []*remoteproto.StateChange{
+			{BlockHeight: 0, BlockHash: h1},
+		},
+	}
+	acc := accounts3.Account{
+		Nonce:       0,
+		Balance:     *uint256.NewInt(1 * common.Ether),
+		CodeHash:    accounts.EmptyCodeHash,
+		Incarnation: 1,
+	}
+	v := accounts3.SerialiseV3(&acc)
+	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
+		Action:  remoteproto.Action_UPSERT,
+		Address: gointerfaces.ConvertAddressToH160(addr),
+		Data:    v,
+	})
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+	require.NoError(err)
+
+	// Step 1: Add a pre-Osaka-shape blob txn (2 blobs, 2 proofs — one per blob).
+	blobTxn := makeBlobTxn()
+	blobTxn.IDHash[0] = 33
+	blobTxn.Nonce = 0
+	{
+		var txnSlots TxnSlots
+		txnSlots.Append(&blobTxn, addr[:], true)
+		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
+		require.NoError(err)
+		require.Equal(txpoolcfg.Success, reasons[0], reasons[0].String())
+	}
+
+	// Sanity: pool has 2 blobs and 1 pending txn.
+	require.Equal(uint64(2), pool.totalBlobsInPool.Load())
+	require.Equal(1, pool.pending.Len())
+
+	// Step 2: Simulate Osaka activation.
+	pool.isPostOsaka.Store(true)
+
+	// Step 3: Trigger best() via PeekBest — it will detect the proof-shape mismatch
+	// and should fully discard the pre-Osaka txn.
+	var txnsRlp TxnsRlp
+	_, err = pool.PeekBest(ctx, 10, &txnsRlp, 0, math.MaxUint64, math.MaxUint64, math.MaxInt)
+	require.NoError(err)
+
+	// Step 4: Verify the pre-Osaka txn was fully discarded.
+	require.Equal(0, pool.pending.Len(), "txn must be removed from pending")
+	require.Equal(uint64(0), pool.totalBlobsInPool.Load(), "blob counter must be decremented to 0")
+	_, inByHash := pool.byHash[string(blobTxn.IDHash[:])]
+	require.False(inByHash, "txn must be removed from byHash")
+
+	// Step 5: A valid Osaka-shaped blob txn must now be admittable (not rejected
+	// with BlobPoolOverflow), proving the counters were properly cleaned up.
+	chainID := uint256.MustFromBig(testforks.Forks["Cancun"].ChainID)
+	osakaRlp := makeWrappedBlobTxnRlpWithCellProofs(t, chainID, 2)
+	parseCtx := NewTxnParseContext(*chainID)
+	parseCtx.WithSender(false)
+	var osakaSlot TxnSlot
+	_, err = parseCtx.ParseTransaction(osakaRlp, 0, &osakaSlot, nil, false, true, nil)
+	require.NoError(err)
+	osakaSlot.IDHash[0] = 34
+	{
+		var txnSlots TxnSlots
+		txnSlots.Append(&osakaSlot, addr[:], true)
+		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
+		require.NoError(err)
+		require.Equal(txpoolcfg.Success, reasons[0], reasons[0].String())
 	}
 }
 
@@ -1740,7 +1844,7 @@ func BenchmarkProcessRemoteTxns(b *testing.B) {
 
 	// Run the benchmark: process transactions one by one
 	// This measures the performance of adding and processing remote transactions
-	for i := 0; b.Loop(); i++ {
+	for i := 0; i < b.N; i++ {
 		pool.AddRemoteTxns(ctx, TxnSlots{testTxns.Txns[i : i+1], testTxns.Senders[i : i+1], testTxns.IsLocal[i : i+1]})
 		err := pool.processRemoteTxns(ctx)
 		require.NoError(err)

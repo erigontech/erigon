@@ -166,18 +166,14 @@ func intsize(i uint) (size int) {
 	}
 }
 
-func RawRlpHash(rawRlpData rlp.RawValue) (h common.Hash) {
-	sha := crypto.NewKeccakState()
-	sha.Write(rawRlpData) //nolint:errcheck
-	sha.Read(h[:])        //nolint:errcheck
-	crypto.ReturnToPool(sha)
-	return h
+func RawRlpHash(rawRlpData rlp.RawValue) common.Hash {
+	return crypto.HashData(rawRlpData)
 }
 
-func rlpHash(x any) (h common.Hash) {
+func rlpHash(x any) common.Hash {
 	sha := crypto.NewKeccakState()
 	rlp.Encode(sha, x) //nolint:errcheck
-	sha.Read(h[:])     //nolint:errcheck
+	h := crypto.FinalizeHash(sha)
 	crypto.ReturnToPool(sha)
 	return h
 }
@@ -196,15 +192,13 @@ func init() {
 
 // prefixedRlpHash writes the prefix into the hasher before rlp-encoding the
 // given interface. It's used for typed transactions.
-func prefixedRlpHash(prefix byte, x any) (h common.Hash) {
+func prefixedRlpHash(prefix byte, x any) common.Hash {
 	sha := crypto.NewKeccakState()
-	//nolint:errcheck
-	sha.Write(prefixSlices[prefix])
+	sha.Write(prefixSlices[prefix]) //nolint:errcheck
 	if err := rlp.Encode(sha, x); err != nil {
 		panic(err)
 	}
-	//nolint:errcheck
-	sha.Read(h[:])
+	h := crypto.FinalizeHash(sha)
 	crypto.ReturnToPool(sha)
 	return h
 }
