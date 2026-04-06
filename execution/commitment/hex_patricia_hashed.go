@@ -3041,12 +3041,13 @@ func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	// Populate persistent cache on DB read miss. Use PutIfClean to avoid
-	// overwriting data that has been invalidated by a concurrent fold()
-	// operation on the same or related branch key.
-	if hph.branchCache != nil && len(data) > 0 {
-		hph.branchCache.PutIfClean(key, data)
-	}
+	// Do NOT populate the persistent cache from inline DB reads during
+	// Process/fold. The cache is populated by warmup workers and
+	// prefetchers which use PutIfClean. Inline reads during fold can
+	// see intermediate states that become stale within the same Process
+	// call, leading to wrong trie roots after unwind/reorg.
+	// The cache is read-only during Process — hits return cached data,
+	// misses fall through to DB.
 
 	return data, nil
 }
