@@ -974,7 +974,9 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 	sampler := sc.NewSampler()
 	start := time.Now()
 	var checked atomic.Uint64
-	var lastBlockNum atomic.Uint64
+	var windowsDone atomic.Uint64
+	totalWindows := (to - from + checkCommitmentHistWindowSize - 1) / checkCommitmentHistWindowSize
+	expectedBlks := sampler.ExpectedN(to - from)
 
 	const logInterval = 20 * time.Second
 	logTicker := time.NewTicker(logInterval)
@@ -989,7 +991,13 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 				done := checked.Load()
 				rate := float64(done-prevChecked) / logInterval.Seconds()
 				prevChecked = done
-				logger.Info("[integrity] "+string(StateRootVerifyByHistory), "blks/s", rate, "checked", common.PrettyCounter(done), "blockNum", common.PrettyCounter(lastBlockNum.Load()))
+				wDone := windowsDone.Load()
+				logger.Info("[integrity] "+string(StateRootVerifyByHistory),
+					"blks/s", fmt.Sprintf("%.1f", rate),
+					"checked", fmt.Sprintf("%s/%s", common.PrettyCounter(done), common.PrettyCounter(expectedBlks)),
+					"windows", fmt.Sprintf("%d/%d", wDone, totalWindows),
+					"blkRange", fmt.Sprintf("%s-%s", common.PrettyCounter(from), common.PrettyCounter(to)),
+				)
 			}
 		}
 	}()
@@ -1024,8 +1032,8 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 					return fmt.Errorf("checkCommitmentHistAtBlk: %d, %w", blockNum, err)
 				}
 				checked.Add(1)
-				lastBlockNum.Store(blockNum)
 			}
+			windowsDone.Add(1)
 			return nil
 		})
 	}
