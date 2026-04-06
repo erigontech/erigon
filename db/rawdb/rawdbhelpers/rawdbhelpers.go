@@ -38,7 +38,7 @@ func IdxStepsCountV3(tx kv.Tx, stepSize uint64) float64 {
 func IdxStepsInDB(tx kv.Tx, table string, stepSize uint64) float64 {
 	fst, _ := kv.FirstKey(tx, table)
 	lst, _ := kv.LastKey(tx, table)
-	if len(fst) >= 8 && len(lst) >= 8 {
+	if len(fst) >= 8 && len(lst) >= 8 { // keys have a big-endian uint64 txNum prefix
 		fstTxNum := binary.BigEndian.Uint64(fst)
 		lstTxNum := binary.BigEndian.Uint64(lst)
 		return float64(lstTxNum-fstTxNum) / float64(stepSize)
