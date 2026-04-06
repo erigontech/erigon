@@ -34,17 +34,9 @@ import (
 	"github.com/erigontech/erigon/db/state/changeset"
 )
 
-type iodir int
-
-const (
-	get iodir = iota
-	put
-)
-
 type dataWithTxNum struct {
 	data  []byte
 	txNum uint64
-	dir   iodir
 }
 
 // TemporalMemBatch - temporal read-write interface - which storing updates in RAM. Don't forget to call `.Flush()`
@@ -204,43 +196,35 @@ func (sd *TemporalMemBatch) GetLatest(domain kv.Domain, key []byte) (v []byte, s
 // The caller must already hold latestStateLock (either RLock or Lock),
 // e.g. from within an IteratePrefix callback.
 func (sd *TemporalMemBatch) getLatest(domain kv.Domain, key []byte) (v []byte, step kv.Step, ok bool) {
-	var unwoundLatest = func(domain kv.Domain, key string) (v []byte, step kv.Step, ok bool) {
-		if sd.unwindChangeset != nil {
-			if values := sd.unwindChangeset[domain]; values != nil {
-				if value, ok := values[key]; ok {
-					keyStep := kv.Step(^binary.BigEndian.Uint64([]byte(value.Key[len(value.Key)-8:])))
-
-					if value.Value == nil {
-						// Different step: the entry at this step was deleted, key doesn't exist here
-						return nil, keyStep, false
-					}
-					// Same step: restore this value
-					return value.Value, keyStep, true
-				}
-			}
-		}
-
-		return nil, 0, false
-	}
-
 	keyS := toStringZeroCopy(key)
+
 	var dataWithTxNums []dataWithTxNum
 	if domain == kv.StorageDomain {
 		dataWithTxNums, ok = sd.storage.Get(keyS)
-		if !ok {
-			return unwoundLatest(domain, keyS)
+	} else {
+		dataWithTxNums, ok = sd.domains[domain][keyS]
+	}
+	if ok {
+		d := dataWithTxNums[len(dataWithTxNums)-1]
+		return d.data, kv.Step(d.txNum / sd.stepSize), true
+	}
+
+	// Fast path: no unwind in progress (common case)
+	if sd.unwindChangeset == nil {
+		return nil, 0, false
+	}
+	if values := sd.unwindChangeset[domain]; values != nil {
+		if value, ok2 := values[keyS]; ok2 {
+			keyStep := kv.Step(^binary.BigEndian.Uint64([]byte(value.Key[len(value.Key)-8:])))
+			if value.Value == nil {
+				// Different step: the entry at this step was deleted, key doesn't exist here
+				return nil, keyStep, false
+			}
+			// Same step: restore this value
+			return value.Value, keyStep, true
 		}
-		dataWithTxNum := dataWithTxNums[len(dataWithTxNums)-1]
-		return dataWithTxNum.data, kv.Step(dataWithTxNum.txNum / sd.stepSize), ok
-
 	}
-
-	dataWithTxNums, ok = sd.domains[domain][keyS]
-	if !ok {
-		return unwoundLatest(domain, keyS)
-	}
-	dataWithTxNum := dataWithTxNums[len(dataWithTxNums)-1]
-	return dataWithTxNum.data, kv.Step(dataWithTxNum.txNum / sd.stepSize), ok
+	return nil, 0, false
 }
 
 func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
