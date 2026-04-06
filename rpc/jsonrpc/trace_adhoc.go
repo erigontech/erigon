@@ -25,7 +25,6 @@ import (
 	"math"
 	"math/big"
 	"strings"
-	"sync/atomic"
 
 	"github.com/holiman/uint256"
 
@@ -1179,18 +1178,8 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		evm.SetPrecompiles(precompiles)
 	}
 
-	done := make(chan struct{})
-	defer close(done)
-
-	var timedOut atomic.Bool
-	go func() {
-		select {
-		case <-ctx.Done():
-			timedOut.Store(true)
-			evm.Cancel()
-		case <-done:
-		}
-	}()
+	stop := context.AfterFunc(ctx, evm.Cancel)
+	defer stop()
 
 	gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 	var execResult *evmtypes.ExecutionResult
@@ -1223,8 +1212,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		sd.CompareStates(initialIbs, ibs)
 	}
 
-	// If the timer caused an abort, return an appropriate error message
-	if timedOut.Load() {
+	if evm.Cancelled() {
 		return nil, fmt.Errorf("execution aborted (timeout = %v)", api.evmCallTimeout)
 	}
 
@@ -1867,18 +1855,8 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Tracer: ot.Tracer().Hooks})
 
-	done := make(chan struct{})
-	defer close(done)
-
-	var timedOut atomic.Bool
-	go func() {
-		select {
-		case <-ctx.Done():
-			timedOut.Store(true)
-			evm.Cancel()
-		case <-done:
-		}
-	}()
+	stop := context.AfterFunc(ctx, evm.Cancel)
+	defer stop()
 
 	gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 	var execResult *evmtypes.ExecutionResult
@@ -1911,7 +1889,7 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 		sd.CompareStates(initialIbs, ibs)
 	}
 
-	if timedOut.Load() {
+	if evm.Cancelled() {
 		return nil, fmt.Errorf("execution aborted (timeout = %v)", api.evmCallTimeout)
 	}
 

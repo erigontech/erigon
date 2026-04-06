@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"runtime"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/RoaringBitmap/roaring/v2"
@@ -491,24 +490,14 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	// this makes sure resources are cleaned up.
 	defer cancel()
 
-	done := make(chan struct{})
-	defer close(done)
-
-	var timedOut atomic.Bool
-	go func() {
-		select {
-		case <-ctx.Done():
-			timedOut.Store(true)
-			evm.Cancel()
-		case <-done:
-		}
-	}()
-
 	// Setup the gas pool (also for unmetered requests)
 	// and apply the message.
 	gp := new(protocol.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
 	vmConfig := vm.Config{}
 	evm = vm.NewEVM(blockCtx, evmtypes.TxContext{}, statedb, chainConfig, vmConfig)
+
+	stop := context.AfterFunc(ctx, evm.Cancel)
+	defer stop()
 	receipts, err := api.getReceipts(ctx, tx, block)
 	if err != nil {
 		return nil, err
@@ -566,8 +555,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 			return nil, err
 		}
 
-		// If the timer caused an abort, return an appropriate error message
-		if timedOut.Load() {
+		if evm.Cancelled() {
 			log.Error("EVM cancelled")
 			return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
 		}

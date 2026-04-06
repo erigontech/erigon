@@ -151,8 +151,8 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	signer := types.MakeSigner(chainConfig, blockNum, blockCtx.Time)
 	rules := evm.ChainRules()
 
-	// evmPtr is updated atomically each time evm is recreated in the loops,
-	// so the watcher goroutine always cancels the current instance.
+	// evmPtr is updated atomically each time evm is recreated in the loop,
+	// so the AfterFunc callback always cancels the current instance.
 	var evmPtr atomic.Pointer[vm.EVM]
 	evmPtr.Store(evm)
 
@@ -174,18 +174,8 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	// this makes sure resources are cleaned up.
 	defer cancel()
 
-	done := make(chan struct{})
-	defer close(done)
-
-	var timedOut atomic.Bool
-	go func() {
-		select {
-		case <-ctx.Done():
-			timedOut.Store(true)
-			evmPtr.Load().Cancel()
-		case <-done:
-		}
-	}()
+	stop := context.AfterFunc(ctx, func() { evmPtr.Load().Cancel() })
+	defer stop()
 
 	// Setup the gas pool (also for unmetered requests)
 	// and apply the message.
@@ -207,8 +197,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 
 		_ = st.FinalizeTx(rules, state.NewNoopWriter())
 
-		// If the timer caused an abort, return an appropriate error message
-		if timedOut.Load() {
+		if evm.Cancelled() {
 			return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
 		}
 	}

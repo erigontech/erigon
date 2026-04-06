@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/exec"
@@ -221,6 +222,9 @@ type ExecModule struct {
 	currentContext *execctx.SharedDomains
 	publishedSD    func() *execctx.SharedDomains // fallback for background commit
 
+	// stateCache is a cache for state data (accounts, storage, code)
+	stateCache *cache.StateCache
+
 	stopNode func() error
 }
 
@@ -245,6 +249,7 @@ func NewExecModule(
 	onlySnapDownloadOnStart bool,
 	stopNode func() error,
 ) *ExecModule {
+	domainCache := cache.NewDefaultStateCache()
 	forkValidator := newForkValidator(ctx, currentBlockNumber, pipelineExecutor, blockReader, syncCfg.MaxReorgDepth)
 
 	em := &ExecModule{
@@ -265,6 +270,7 @@ func NewExecModule(
 		fcuBackgroundPrune:      fcuBackgroundPrune,
 		fcuBackgroundCommit:     fcuBackgroundCommit,
 		onlySnapDownloadOnStart: onlySnapDownloadOnStart,
+		stateCache:              domainCache,
 		stopNode:                stopNode,
 	}
 
@@ -466,6 +472,8 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	}
 	doms.SetInMemHistoryReads(inMemHistoryReads)
 
+	// Set state cache in SharedDomains for use during state reading
+	doms.SetStateCache(e.stateCache)
 	if err = e.unwindToCommonCanonical(doms, tx, header); err != nil {
 		doms.Close()
 		return ValidationResult{}, err
@@ -474,6 +482,12 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(ctx, doms, tx, header, body.RawBody(), e.logger)
 	if criticalError != nil {
 		return ValidationResult{}, criticalError
+	}
+
+	// Clear state cache on invalid block
+	isInvalid := status == engine_types.InvalidStatus || status == engine_types.InvalidBlockHashStatus || validationError != nil
+	if e.stateCache != nil && isInvalid {
+		e.stateCache.ClearWithHash(header.ParentHash)
 	}
 
 	// Throw away the tx and start a new one (do not persist changes to the canonical chain)

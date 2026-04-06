@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/diagnostics/metrics"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
@@ -110,6 +111,9 @@ type SharedDomains struct {
 	// mem batch before consulting the underlying tx. Used by the block builder
 	// to read from the FCU's published SD without writing to it.
 	parent *SharedDomains
+
+	// stateCache is an optional cache for state data (accounts, storage, code)
+	stateCache *cache.StateCache
 }
 
 func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
@@ -346,6 +350,20 @@ func (sd *SharedDomains) GetCommitmentCtx() *commitmentdb.SharedDomainsCommitmen
 }
 func (sd *SharedDomains) Logger() log.Logger { return sd.logger }
 
+// SetStateCache sets the state cache for faster lookups.
+func (sd *SharedDomains) SetStateCache(stateCache *cache.StateCache) {
+	if !dbg.UseStateCache || stateCache == nil {
+		return
+	}
+	sd.stateCache = stateCache
+}
+
+// GetStateCache returns the StateCache, or nil if not set.
+func (sd *SharedDomains) GetStateCache() *cache.StateCache {
+	return sd.stateCache
+}
+
+
 func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 	if resetCommitment && sd.sdCtx != nil {
 		sd.sdCtx.ClearRam()
@@ -356,8 +374,6 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 func (sd *SharedDomains) Size() uint64 {
 	return sd.mem.SizeEstimate()
 }
-
-const CodeSizeTableFake = "CodeSize"
 
 func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte, txNum uint64) (err error) {
 	return sd.mem.IndexAdd(table, key, txNum)
@@ -465,6 +481,14 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		}
 	}
 
+	// stateCache holds in-flight values from previous transactions in the same batch
+	// that haven't been flushed to DB yet. Early return keeps correctness AND performance.
+	if sd.stateCache != nil {
+		if v, ok := sd.stateCache.Get(domain, k); ok {
+			return v, 0, nil
+		}
+	}
+
 	type MeteredGetter interface {
 		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
 	}
@@ -476,6 +500,11 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	}
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
+	}
+
+	// Populate state cache on successful storage read
+	if sd.stateCache != nil {
+		sd.stateCache.Put(domain, k, v)
 	}
 
 	return v, step, nil
@@ -576,6 +605,11 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 		}
 	}
 
+	// Update state cache when writing
+	if sd.stateCache != nil {
+		sd.stateCache.Put(domain, k, v)
+	}
+
 	return sd.mem.DomainPut(domain, ks, v, txNum, prevVal)
 }
 
@@ -604,12 +638,24 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 		if err := sd.DomainDel(kv.CodeDomain, tx, k, txNum, nil); err != nil {
 			return err
 		}
+		// Remove from state cache when account is deleted
+		if sd.stateCache != nil {
+			sd.stateCache.Delete(kv.AccountsDomain, k)
+			sd.stateCache.Delete(kv.CodeDomain, k)
+		}
 		return sd.mem.DomainDel(kv.AccountsDomain, ks, txNum, prevVal)
 	case kv.StorageDomain:
-		// noop
+		// Remove from state cache when storage is deleted
+		if sd.stateCache != nil {
+			sd.stateCache.Delete(kv.StorageDomain, k)
+		}
 	case kv.CodeDomain:
 		if prevVal == nil {
 			return nil
+		}
+		// Remove from state cache when code is deleted
+		if sd.stateCache != nil {
+			sd.stateCache.Delete(kv.CodeDomain, k)
 		}
 	default:
 		//noop

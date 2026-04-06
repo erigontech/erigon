@@ -153,9 +153,6 @@ func (ii *InvertedIndex) efAccessorFilePathMask(fromStep, toStep kv.Step) string
 	}
 	return filepath.Join(ii.dirs.SnapAccessors, fmt.Sprintf("*-%s.%d-%d.efi", ii.FilenameBase, fromStep, toStep))
 }
-func (ii *InvertedIndex) efFilePathMask(fromStep, toStep kv.Step) string {
-	return filepath.Join(ii.dirs.SnapIdx, fmt.Sprintf("*-%s.%d-%d.ef", ii.FilenameBase, fromStep, toStep))
-}
 
 func (ii *InvertedIndex) efFileNameMask(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("*-%s.%d-%d.ef", ii.FilenameBase, fromStep, toStep)
