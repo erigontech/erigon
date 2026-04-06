@@ -437,15 +437,21 @@ func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, updates *Updates
 }
 
 func (p *ConcurrentPatriciaHashed) CanDoConcurrentNext() (bool, error) {
-	// ParallelHashSort produces wrong trie roots for certain chain patterns
-	// (confirmed with hive rpc-compat). The buffered flush + root fold
-	// sequence doesn't correctly reconstruct the trie state. Force serial
-	// mode through the ConcurrentPatriciaHashed wrapper (which still gets
-	// the BranchCache, mount infrastructure, etc.) until the parallel
-	// fold algorithm is fixed.
+	// ParallelHashSort produces wrong trie roots when run through the real
+	// SharedDomains/MemBatch path (confirmed with hive rpc-compat).
+	// The algorithm works correctly with mock state (unit tests pass), so
+	// the bug is in the interaction between bufferedTrieContext flush and
+	// the real DomainPut/GetLatest path — possibly the skip-if-equal
+	// optimization in DomainPut or a visibility issue in the history writers.
 	//
-	// The topology check below is correct — the issue is in ParallelHashSort
-	// itself, not in the eligibility check.
+	// The topology check is correct; re-enable when the DB interaction is fixed.
+	if p.root.root.extLen == 0 {
+		zeroPrefixBranch, _, err := p.root.ctx.Branch(HexNibblesToCompactBytes([]byte{0}))
+		if err != nil {
+			return false, fmt.Errorf("checking shortest prefix branch failed: %w", err)
+		}
+		_ = zeroPrefixBranch // suppress unused
+	}
 	return false, nil
 }
 

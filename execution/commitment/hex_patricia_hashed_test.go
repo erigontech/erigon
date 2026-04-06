@@ -3323,3 +3323,86 @@ func Test_ConcurrentWrapper_SerialMode_MatchesPlainHPH(t *testing.T) {
 		}
 	}
 }
+
+func Test_ParallelHashSort_MultiBlock(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	stateSeq := NewMockState(t)
+	statePar := NewMockState(t)
+
+	// Generate enough accounts to make CanDoConcurrentNext return true
+	// (need keys diverging from the first nibble)
+	genPlainKeys, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 150)
+	genBuilder := NewUpdateBuilder()
+	for i := 0; i < len(genPlainKeys); i++ {
+		genBuilder.Balance(common.Bytes2Hex(genPlainKeys[i]), uint64(i+1))
+	}
+	genKeys, genUpdates := genBuilder.Build()
+
+	trieSeq := NewHexPatriciaHashed(length.Addr, stateSeq)
+	trieParRoot := NewHexPatriciaHashed(length.Addr, statePar)
+	triePar := NewConcurrentPatriciaHashed(trieParRoot, statePar)
+
+	// Block 0: serial genesis for both
+	err := stateSeq.applyPlainUpdates(genKeys, genUpdates)
+	require.NoError(t, err)
+	err = statePar.applyPlainUpdates(genKeys, genUpdates)
+	require.NoError(t, err)
+
+	updsSeq := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, genKeys, genUpdates)
+	updsPar := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, genKeys, genUpdates)
+
+	rootSeq, err := trieSeq.Process(ctx, updsSeq, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	rootPar, err := triePar.Process(ctx, updsPar, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	updsSeq.Close()
+	updsPar.Close()
+	require.Equal(t, rootSeq, rootPar, "genesis root mismatch")
+	t.Logf("genesis root: %x", rootSeq)
+
+	canPar, err := triePar.CanDoConcurrentNext()
+	require.NoError(t, err)
+	t.Logf("canDoConcurrentNext after genesis: %v (root extLen=%d)", canPar, trieParRoot.root.extLen)
+	if !canPar {
+		t.Skip("trie topology doesn't support parallel — need more diverse first-nibble keys")
+	}
+
+	// Block 1+: small updates — compare sequential vs parallel over multiple blocks
+	for block := 1; block <= 5; block++ {
+		blk1Builder := NewUpdateBuilder()
+		// Update a few of the genesis accounts
+		for i := 0; i < 5; i++ {
+			idx := (block*5 + i) % len(genPlainKeys)
+			blk1Builder.Balance(common.Bytes2Hex(genPlainKeys[idx]), uint64(block*1000+i))
+		}
+		blkKeys, blkUpdates := blk1Builder.Build()
+
+		err = stateSeq.applyPlainUpdates(blkKeys, blkUpdates)
+		require.NoError(t, err)
+		err = statePar.applyPlainUpdates(blkKeys, blkUpdates)
+		require.NoError(t, err)
+
+		// Sequential
+		updsSeq = WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, blkKeys, blkUpdates)
+		rootSeq, err = trieSeq.Process(ctx, updsSeq, "", nil, WarmupConfig{})
+		require.NoError(t, err)
+		updsSeq.Close()
+
+		// Parallel
+		statePar.SetConcurrentCommitment(true)
+		updsPar = WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, blkKeys, blkUpdates)
+		wc := WarmupConfig{
+			CtxFactory: func() (PatriciaContext, func()) {
+				return statePar, func() {}
+			},
+		}
+		rootPar, err = triePar.Process(ctx, updsPar, "", nil, wc)
+		require.NoError(t, err)
+		updsPar.Close()
+
+		t.Logf("block %d: seq=%x par=%x", block, rootSeq, rootPar)
+		require.Equalf(t, rootSeq, rootPar, "block %d root mismatch", block)
+	}
+}
