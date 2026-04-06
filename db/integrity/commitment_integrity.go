@@ -831,7 +831,7 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br serv
 
 // checkCommitmentHistAtBlkWithIdx checks commitment for blockNum using the pre-built
 // per-domain key index from ChangedKeysPerBlockIdx.
-func checkCommitmentHistAtBlkWithIdx(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, db kv.TemporalRoDB, br services.FullBlockReader, blockNum uint64, idx *ChangedKeysPerBlockIdx, lvl log.Lvl, logger log.Logger) error {
+func checkCommitmentHistAtBlkWithIdx(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, br services.FullBlockReader, blockNum uint64, idx *ChangedKeysPerBlockIdx, lvl log.Lvl, logger log.Logger) error {
 	sd.ClearRam(true)
 	logger.Log(lvl, "checking commitment hist at block", "blockNum", blockNum)
 	start := time.Now()
@@ -959,7 +959,7 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	if err != nil {
 		return err
 	}
-	return checkCommitmentHistAtBlkWithIdx(ctx, tx, sd, db, br, blockNum, idx, lvl, logger)
+	return checkCommitmentHistAtBlkWithIdx(ctx, tx, sd, br, blockNum, idx, lvl, logger)
 }
 
 // checkCommitmentHistWindowSize is the number of blocks covered by a single
@@ -1023,7 +1023,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 			}
 			sampler := sc.NewSampler() // per-goroutine: Sampler.rng is not goroutine-safe
 			for blockNum := range sampler.BlockNums(windowStart, windowEnd) {
-				if err := checkCommitmentHistAtBlkWithIdx(wCtx, tx, sd, db, br, blockNum, idx, log.LvlTrace, logger); err != nil {
+				if err := checkCommitmentHistAtBlkWithIdx(wCtx, tx, sd, br, blockNum, idx, log.LvlTrace, logger); err != nil {
 					return fmt.Errorf("checkCommitmentHistAtBlk: %d, %w", blockNum, err)
 				}
 				checked.Add(1)
