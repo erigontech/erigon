@@ -745,12 +745,11 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 	// If using ConcurrentPatriciaHashed, the mounted subtries carry stale
 	// internal state (cells, depths) from the previous execution. Reset them
 	// so they don't corrupt the next Process() run if it goes concurrent.
-	// Also reset the concurrent flag to force the first post-restore run
-	// through the serial path (the trie topology after restore may differ).
+	// unfoldRoot re-mounts from root state before each ParallelHashSort, but
+	// resetting here prevents any stale data from being visible in between.
 	if cph, ok := sdc.patriciaTrie.(*commitment.ConcurrentPatriciaHashed); ok {
 		cph.ResetMounts()
 	}
-	sdc.updates.SetConcurrentCommitment(false)
 	sdc.justRestored.Store(true) // to prevent double reset
 	if sdc.trace {
 		rootHash, err := hext.RootHash()
