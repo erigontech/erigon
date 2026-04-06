@@ -867,18 +867,10 @@ func checkCommitmentHistAtBlkWithIdx(ctx context.Context, tx kv.TemporalTx, sd *
 	// commitment branch data view: as of beginning of the block (or end for block 0)
 	// plain state data view: as of end of the block
 	splitStateReader := commitmentdb.NewSplitHistoryReader(tx, commitmentAsOf, toTxNum, true /* withHistory */)
-	// Cross-block caching: invalidate only the commitment keys that changed since
-	// the previous block's commitmentAsOf. All other cached branch nodes are still
-	// valid because GetAsOf returns the same value when no history entry exists
-	// between the two txNums.
-	if *prevCommitmentAsOf > 0 && *prevCommitmentAsOf < commitmentAsOf {
-		if err := cr.InvalidateChangedKeys(tx, *prevCommitmentAsOf, commitmentAsOf); err != nil {
-			return err
-		}
-	} else {
-		cr.Reset()
-	}
-	*prevCommitmentAsOf = commitmentAsOf
+	// Within-block cache: during Process, the trie unfolds/folds/unfolds for keys
+	// sharing prefixes — the same branch nodes are read multiple times. Reset between
+	// blocks because commitmentAsOf changes.
+	cr.Reset()
 	cr.SetInner(splitStateReader)
 	sd.GetCommitmentCtx().SetStateReader(cr)
 	sd.GetCommitmentCtx().SetTrace(logger.Enabled(ctx, log.LvlTrace))
