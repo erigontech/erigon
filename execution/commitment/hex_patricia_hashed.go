@@ -2634,7 +2634,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 					return fmt.Errorf("account with plainkey=%x not found: %w", plainKey, err)
 				}
 				if hph.trace {
-					addrHash := crypto.Keccak256(plainKey)
+					addrHash := crypto.HashData(plainKey)
 					fmt.Printf("account with plainKey=%x, addrHash=%x found=%v\n", plainKey, addrHash, update)
 				}
 			} else {
@@ -2770,7 +2770,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		warmup.EnableWarmupCache = hph.enableWarmupCache
 		warmuper = NewWarmuper(ctx, warmup)
 		warmuper.Start()
-		defer warmuper.WaitAndClose()
+		defer warmuper.CloseAndWait()
 		// Set cache on trie if warmup cache is enabled
 		if warmup.EnableWarmupCache {
 			hph.cache = warmuper.Cache()
