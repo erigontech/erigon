@@ -2238,18 +2238,24 @@ func TestHistory_IterateChangedRecent_SkipsFileRange(t *testing.T) {
 		db2, h2, _ := filledHistory(t, largeValues, logger)
 		collateAndMergeHistory(t, db2, h2, txs, false)
 
-		hc2 := h2.BeginFilesRo()
-		filesEnd := int(hc2.iit.files.EndTxNum())
-		require.Greater(filesEnd, 0, "expected files to cover some range")
-		hc2.Close()
+		var filesEnd int
+		func() {
+			hc2 := h2.BeginFilesRo()
+			defer hc2.Close()
+			filesEnd = int(hc2.iit.files.EndTxNum())
+			require.Greater(filesEnd, 0, "expected files to cover some range")
+		}()
 
 		// Prune DB entries [0, filesEnd) — these are covered by files.
 		rwTx, err := db2.BeginRw(ctx)
 		require.NoError(err)
-		hc2 = h2.BeginFilesRo()
-		_, err = hc2.Prune(ctx, rwTx, 0, uint64(filesEnd), math.MaxUint64, true, logEvery)
-		require.NoError(err)
-		hc2.Close()
+		defer rwTx.Rollback()
+		func() {
+			hc2 := h2.BeginFilesRo()
+			defer hc2.Close()
+			_, err = hc2.Prune(ctx, rwTx, 0, uint64(filesEnd), math.MaxUint64, true, logEvery)
+			require.NoError(err)
+		}()
 		require.NoError(rwTx.Commit())
 
 		// Query a range that spans both files and DB.
@@ -2318,11 +2324,15 @@ func TestHistory_IterateChangedRecent_PhantomDBKey(t *testing.T) {
 		db, h, txs := filledHistory(t, largeValues, logger)
 		collateAndMergeHistory(t, db, h, txs, false)
 
-		hc := h.BeginFilesRo()
-		filesEnd := int(hc.iit.files.EndTxNum())
-		valsTable := hc.h.ValuesTable
-		hc.Close()
-		require.Greater(filesEnd, 0)
+		var filesEnd int
+		var valsTable string
+		func() {
+			hc := h.BeginFilesRo()
+			defer hc.Close()
+			filesEnd = int(hc.iit.files.EndTxNum())
+			valsTable = hc.h.ValuesTable
+			require.Greater(filesEnd, 0)
+		}()
 
 		// Pick a txNum well inside the file range.
 		phantomTxNum := uint64(filesEnd / 2)
@@ -2334,6 +2344,7 @@ func TestHistory_IterateChangedRecent_PhantomDBKey(t *testing.T) {
 		// Insert the phantom entry into the DB values table.
 		rwTx, err := db.BeginRw(ctx)
 		require.NoError(err)
+		defer rwTx.Rollback()
 		if largeValues {
 			// Large: key layout is actualKey+txNum -> value.
 			dbKey := make([]byte, len(phantomKey)+8)
@@ -2355,7 +2366,7 @@ func TestHistory_IterateChangedRecent_PhantomDBKey(t *testing.T) {
 		require.NoError(err)
 		defer roTx.Rollback()
 
-		hc = h.BeginFilesRo()
+		hc := h.BeginFilesRo()
 		defer hc.Close()
 
 		it, err := hc.HistoryRange(fromTxNum, -1, order.Asc, -1, roTx)
