@@ -261,6 +261,9 @@ func NewForkChoiceStore(
 	anchorExecHeader := anchorState.LatestExecutionPayloadHeader()
 	if anchorExecHeader != nil && anchorExecHeader.BlockHash != (common.Hash{}) {
 		eth2Roots.Add(anchorRoot, anchorExecHeader.BlockHash)
+		// Also map the zero hash → EL genesis for the finalized checkpoint
+		// which starts as zero at genesis.
+		eth2Roots.Add(common.Hash{}, anchorExecHeader.BlockHash)
 	}
 
 	headSet := make(map[common.Hash]struct{})

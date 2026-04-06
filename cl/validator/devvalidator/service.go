@@ -265,10 +265,25 @@ func (s *Service) proposeBlock(ctx context.Context, slot uint64, key *ValidatorK
 		return fmt.Errorf("get block template: %w", getErr)
 	}
 
-	// Parse the block into a SignedBeaconBlock (signature is zero initially).
+	// Parse the block template. The v3 response is a DenebBeaconBlock
+	// ({"block": {...}, "kzg_proofs": [...], "blobs": [...]}).
 	version := s.cfg.GetCurrentStateVersion(epoch)
+	var denebBlock struct {
+		Block     json.RawMessage `json:"block"`
+		KZGProofs json.RawMessage `json:"kzg_proofs"`
+		Blobs     json.RawMessage `json:"blobs"`
+	}
+	if err := json.Unmarshal(blockResponse, &denebBlock); err != nil {
+		return fmt.Errorf("parse deneb block wrapper: %w", err)
+	}
+	// The inner "block" is a BeaconBlock.
+	blockJSON := denebBlock.Block
+	if len(blockJSON) == 0 {
+		// Pre-Deneb or non-wrapped response: use the raw response directly.
+		blockJSON = blockResponse
+	}
 	block := cltypes.NewSignedBeaconBlock(s.cfg, version)
-	if err := json.Unmarshal(blockResponse, block.Block); err != nil {
+	if err := json.Unmarshal(blockJSON, block.Block); err != nil {
 		return fmt.Errorf("parse block template: %w", err)
 	}
 

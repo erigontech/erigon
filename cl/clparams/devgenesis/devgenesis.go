@@ -174,6 +174,11 @@ func BuildGenesisState(
 		syncCommittee := solid.NewSyncCommitteeFromParameters(committeePubkeys, aggPubkeyFixed)
 		beaconState.SetCurrentSyncCommittee(syncCommittee)
 		beaconState.SetNextSyncCommittee(syncCommittee)
+
+		// Initialize epoch participation flags and inactivity scores.
+		beaconState.SetPreviousEpochParticipationFlags(make(cltypes.ParticipationFlagsList, validatorCount))
+		beaconState.SetCurrentEpochParticipationFlags(make(cltypes.ParticipationFlagsList, validatorCount))
+		beaconState.SetInactivityScores(make([]uint64, validatorCount))
 	}
 
 	// Compute genesis validators root.
