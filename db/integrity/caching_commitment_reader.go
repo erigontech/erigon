@@ -63,8 +63,11 @@ func (r *cachingCommitmentReader) Read(d kv.Domain, plainKey []byte, stepSize ui
 	if err != nil {
 		return nil, 0, err
 	}
-	r.cache[k] = cachedEntry{enc: enc, step: step}
-	return enc, step, nil
+	// Copy enc — the underlying buffer may be reused by the decompressor.
+	encCopy := make([]byte, len(enc))
+	copy(encCopy, enc)
+	r.cache[k] = cachedEntry{enc: encCopy, step: step}
+	return encCopy, step, nil
 }
 
 func (r *cachingCommitmentReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
