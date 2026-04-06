@@ -134,8 +134,18 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized
 	if attr == nil {
 		return nil, nil
 	}
+	// Retry AssembleBlock if the EL is busy (semaphore contention with
+	// fork choice commits). This is common in single-process dev mode
+	// where the CL and EL share the same process.
 	idBytes := make([]byte, 8)
-	id, err := cc.chainRW.AssembleBlock(head, attr)
+	var id uint64
+	for attempt := 0; attempt < 30; attempt++ {
+		id, err = cc.chainRW.AssembleBlock(head, attr)
+		if err == nil {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
 	if err != nil {
 		return nil, err
 	}

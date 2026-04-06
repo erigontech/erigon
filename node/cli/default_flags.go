@@ -152,6 +152,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.DeveloperPeriodFlag,
 	&utils.DevValidatorSeedFlag,
 	&utils.DevValidatorCountFlag,
+	&utils.DevSlotTimeFlag,
 	&utils.VMEnableDebugFlag,
 	&utils.NetworkIdFlag,
 	&utils.PersistReceiptsV2Flag,
