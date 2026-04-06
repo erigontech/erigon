@@ -218,14 +218,14 @@ func TestEthGetLogsDoNotGetAffectedAfterNewPayloadOnSideChain(t *testing.T) {
 		logs, err := eat.RpcApiClient.FilterLogs(ctx, ethereum.FilterQuery{BlockHash: &latestBlock.Hash})
 		require.NoError(t, err)
 		require.Len(t, logs, 1)
-		require.Equal(t, uint64(3), logs[0].BlockNumber)
+		require.Equal(t, hexutil.Uint64(3), logs[0].BlockNumber)
 		// now insert a new payload on the side chain and check the log is still present
 		_, err = eat.MockCl.InsertNewPayload(ctx, b2Side)
 		require.NoError(t, err)
 		logs, err = eat.RpcApiClient.FilterLogs(ctx, ethereum.FilterQuery{BlockHash: &latestBlock.Hash})
 		require.NoError(t, err)
 		require.Len(t, logs, 1)
-		require.Equal(t, uint64(3), logs[0].BlockNumber)
+		require.Equal(t, hexutil.Uint64(3), logs[0].BlockNumber)
 	})
 }
 
