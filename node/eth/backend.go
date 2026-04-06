@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
 	executionclient "github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/validator/devvalidator"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	rpcdaemoncli "github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/common"
@@ -1050,6 +1051,30 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			}
 			ctxCancel()
 		}()
+		// Start embedded dev validator if configured.
+		if config.CaplinConfig.DevValidatorSeed != "" {
+			go func() {
+				beaconAddr := config.CaplinConfig.BeaconAPIRouter.Address
+				if beaconAddr == "" {
+					beaconAddr = "127.0.0.1:5555"
+				}
+				protocol := config.CaplinConfig.BeaconAPIRouter.Protocol
+				if protocol == "" {
+					protocol = "http"
+				}
+				beaconURL := fmt.Sprintf("%s://%s", protocol, beaconAddr)
+				validatorCount := config.CaplinConfig.DevValidatorCount
+				if validatorCount == 0 {
+					validatorCount = 64
+				}
+				svc, err := devvalidator.NewService(beaconURL, config.CaplinConfig.DevValidatorSeed, validatorCount, nil, logger)
+				if err != nil {
+					logger.Error("[dev-validator] failed to create service", "err", err)
+					return
+				}
+				svc.Start(ctx)
+			}()
+		}
 	}
 
 	if chainConfig.Bor != nil {
