@@ -2056,10 +2056,9 @@ func (hph *HexPatriciaHashed) foldBranch(row int, nibble, upDepth, depth int16, 
 	if hph.trace {
 		fmt.Printf("} [%x]\n", upCell.hash[:])
 	}
-	// TODO: re-enable once cache interaction with fold is fixed
-	// if hph.branchCache != nil {
-	// 	hph.branchCache.Invalidate(updateKey)
-	// }
+	if hph.branchCache != nil {
+		hph.branchCache.Invalidate(updateKey)
+	}
 	return nil
 }
 
@@ -2221,10 +2220,9 @@ func (hph *HexPatriciaHashed) collectDeleteUpdate(updateKey []byte, row int, evi
 		if evictCache && hph.cache != nil {
 			hph.cache.EvictBranch(updateKey)
 		}
-		// TODO: re-enable once cache interaction with fold is fixed
-		// if evictCache && hph.branchCache != nil {
-		// 	hph.branchCache.Invalidate(updateKey)
-		// }
+		if evictCache && hph.branchCache != nil {
+			hph.branchCache.Invalidate(updateKey)
+		}
 	}
 	return nil
 }
@@ -3024,20 +3022,13 @@ func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
 		}
 	}
 
-	// Level 2: persistent branch cache — disabled during Process to
-	// isolate a trie root bug during reorgs. TODO: re-enable once the
-	// interaction between Invalidate and fold is understood.
-	// if hph.branchCache != nil {
-	// 	if data, found := hph.branchCache.Get(key); found {
-	// 		if hph.metrics != nil {
-	// 			hph.metrics.pCacheBranchHit.Add(1)
-	// 		}
-	// 		return data, nil
-	// 	}
-	// 	if hph.metrics != nil {
-	// 		hph.metrics.pCacheBranchMiss.Add(1)
-	// 	}
-	// }
+	// Level 2: persistent branch cache (survives across Process calls).
+	// Only read from cache during warmup (mounted=true or cache warmup path).
+	// The inline trie Process path skips the persistent cache to avoid
+	// stale data after unwind/reorg — the ephemeral warmup cache (level 1)
+	// and DB reads (level 3) are always authoritative.
+	// The persistent cache is still used by warmup workers (warmuper.go)
+	// and branch prefetchers which have their own branchFromCacheOrDB.
 
 	// Level 3: DB read
 	data, _, err := hph.ctx.Branch(key)
@@ -3045,13 +3036,7 @@ func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	// Do NOT populate the persistent cache from inline DB reads during
-	// Process/fold. The cache is populated by warmup workers and
-	// prefetchers which use PutIfClean. Inline reads during fold can
-	// see intermediate states that become stale within the same Process
-	// call, leading to wrong trie roots after unwind/reorg.
-	// The cache is read-only during Process — hits return cached data,
-	// misses fall through to DB.
+	// Don't populate persistent cache from inline reads — see level 2 comment above.
 
 	return data, nil
 }
