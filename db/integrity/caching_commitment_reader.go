@@ -22,12 +22,13 @@ import (
 )
 
 // cachingCommitmentReader wraps a StateReader and caches commitment domain
-// reads within a single block's ComputeCommitment call. During Process, the
-// trie unfolds/folds/unfolds for keys sharing prefixes — the same branch nodes
-// are read multiple times. This cache eliminates those redundant disk reads,
-// giving ~50% hit rate per block.
+// reads. During Process, the trie unfolds/folds/unfolds for keys sharing
+// prefixes — the same branch nodes are read multiple times. This cache
+// eliminates those redundant disk reads, giving ~50% within-block hit rate.
 //
-// The cache is reset between blocks because commitmentAsOf changes.
+// The cache is NOT reset between blocks: since data comes from immutable
+// frozen snapshots, most branch values remain valid across consecutive blocks.
+// If a stale entry causes a root mismatch, the caller retries with Reset().
 type cachingCommitmentReader struct {
 	inner commitmentdb.StateReader
 	cache map[string]cachedEntry
