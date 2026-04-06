@@ -207,6 +207,7 @@ func BenchmarkAccessList(b *testing.B) {
 		binary.BigEndian.PutUint64(buf[12:], uint64(i+1))
 		addrs[i] = accounts.InternAddress(common.BytesToAddress(buf[:]))
 	}
+	buf = [32]byte{} // clear address residue so slot hashes are independent
 	for i := range slots {
 		binary.BigEndian.PutUint64(buf[24:], uint64(i+1))
 		slots[i] = accounts.InternKey(common.BytesToHash(buf[:]))
@@ -248,6 +249,7 @@ func BenchmarkAccessListLarge(b *testing.B) {
 		binary.BigEndian.PutUint64(buf[12:], uint64(i+1))
 		addrs[i] = accounts.InternAddress(common.BytesToAddress(buf[:]))
 	}
+	buf = [32]byte{} // clear address residue so slot hashes are independent
 	for i := range slots {
 		binary.BigEndian.PutUint64(buf[24:], uint64(i+1))
 		slots[i] = accounts.InternKey(common.BytesToHash(buf[:]))

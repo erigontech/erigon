@@ -39,7 +39,7 @@ import (
 // slot slices), so steady-state allocations per transaction are zero.
 type accessList struct {
 	addrs []accounts.Address      // parallel to slots
-	slots [][]accounts.StorageKey // slots[i] is the slot set for addrs[i]; nil = warm, no slots
+	slots [][]accounts.StorageKey // slots[i] is the slot set for addrs[i]; nil or empty = warm, no slots
 }
 
 // ContainsAddress returns true if the address is in the access list.
@@ -107,8 +107,7 @@ func (al *accessList) Copy() *accessList {
 // backing array when available (left by a prior Reset).
 //
 // addrs grows via append (may reallocate), while slots is resliced when possible.
-// This is safe because both slices start empty and grow in lockstep: append only
-// triggers when n >= cap(al.slots), which implies addrs also needs to grow.
+// Both slices' lengths are kept in lockstep; their capacities are independent.
 func (al *accessList) appendAddr(address accounts.Address) {
 	n := len(al.addrs)
 	al.addrs = append(al.addrs, address)

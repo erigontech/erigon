@@ -2121,7 +2121,7 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 	}
 	if rules.IsBerlin {
 		// Clear out any leftover from previous executions.
-		// Reset keeps the map's bucket array allocated for reuse across transactions.
+		// Reset preserves the access list's backing storage for reuse across transactions.
 		sdb.accessList.Reset()
 		al := sdb.accessList
 
