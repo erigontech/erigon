@@ -962,8 +962,7 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 		return err
 	}
 	cr := newCachingCommitmentReader(nil)
-	var prevCommitmentAsOf uint64
-	return checkCommitmentHistAtBlkWithIdx(ctx, tx, sd, db, br, blockNum, idx, cr, &prevCommitmentAsOf, lvl, logger)
+	return checkCommitmentHistAtBlkWithIdx(ctx, tx, sd, db, br, blockNum, idx, cr, lvl, logger)
 }
 
 // checkCommitmentHistWindowSize is the number of blocks covered by a single
@@ -1032,9 +1031,8 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 				return fmt.Errorf("CheckCommitmentHistAtBlkRange: build index window=[%d,%d): %w", windowStart, windowEnd, err)
 			}
 			cr := newCachingCommitmentReader(nil) // inner set per block
-			var prevCommitmentAsOf uint64
 			for blockNum := range sampler.BlockNums(windowStart, windowEnd) {
-				if err := checkCommitmentHistAtBlkWithIdx(wCtx, tx, sd, db, br, blockNum, idx, cr, &prevCommitmentAsOf, log.LvlTrace, logger); err != nil {
+				if err := checkCommitmentHistAtBlkWithIdx(wCtx, tx, sd, db, br, blockNum, idx, cr, log.LvlTrace, logger); err != nil {
 					return fmt.Errorf("checkCommitmentHistAtBlk: %d, %w", blockNum, err)
 				}
 				checked.Add(1)
