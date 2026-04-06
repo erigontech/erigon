@@ -834,7 +834,6 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br serv
 func checkCommitmentHistAtBlkWithIdx(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, db kv.TemporalRoDB, br services.FullBlockReader, blockNum uint64, idx *ChangedKeysPerBlockIdx, cr *cachingCommitmentReader, lvl log.Lvl, logger log.Logger) error {
 	sd.ClearRam(true)
 	logger.Log(lvl, "checking commitment hist at block", "blockNum", blockNum)
-	start := time.Now()
 	header, err := br.HeaderByNumber(ctx, tx, blockNum)
 	if err != nil {
 		return err
