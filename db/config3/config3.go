@@ -16,17 +16,19 @@
 
 package config3
 
-// This is the default step size up to Erigon 3.3
+// Step size up to Erigon 3.3
 const LegacyStepSize = 1_562_500
 
-// This is the steps in frozen files up to Erigon 3.3
+// Steps in frozen files up to Erigon 3.3
 const LegacyStepsInFrozenFile = 64
 
-// Default number of transactions (txNums) in one "step". One static file can have [1, DefaultStepsInFrozenFile] steps.
+// DefaultStepSize is the default number of transactions (txNums) in one "step".
+// Prefer reading the actual step size from erigondb.toml via state.ResolveErigonDBSettings or tx.Debug().StepSize().
 const DefaultStepSize = 1_562_500
 
 // DefaultStepsInFrozenFile - files of this size are completely frozen/immutable.
 // files of smaller size are also immutable, but can be removed after merge to bigger files.
+// Prefer reading the actual value from erigondb.toml via state.ResolveErigonDBSettings.
 // TODO: there are exceptions to this rule; domains override this limit hardcoded inside domain construction to be unlimited; it could be made more explicit in the schema.
 const DefaultStepsInFrozenFile = 64
 

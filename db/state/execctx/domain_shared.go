@@ -327,6 +327,9 @@ func (sd *SharedDomains) Logger() log.Logger { return sd.logger }
 
 // SetStateCache sets the state cache for faster lookups.
 func (sd *SharedDomains) SetStateCache(stateCache *cache.StateCache) {
+	if !dbg.UseStateCache || stateCache == nil {
+		return
+	}
 	sd.stateCache = stateCache
 }
 
@@ -345,8 +348,6 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 func (sd *SharedDomains) Size() uint64 {
 	return sd.mem.SizeEstimate()
 }
-
-const CodeSizeTableFake = "CodeSize"
 
 func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte, txNum uint64) (err error) {
 	return sd.mem.IndexAdd(table, key, txNum)
@@ -427,13 +428,12 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	}
 	maxStep := kv.Step(math.MaxUint64)
 
-	// Check mem batch first - it has the current transaction's uncommitted state
+	// Check mem batch first - it has the current transaction's uncommitted state.
+	// No need to populate stateCache here — mem is checked first on every read,
+	// so the value is already accessible without caching it again.
 	if v, step, ok := sd.mem.GetLatest(domain, k); ok {
 		if dbg.KVReadLevelledMetrics {
 			sd.metrics.UpdateCacheReads(domain, start)
-		}
-		if sd.stateCache != nil {
-			sd.stateCache.Put(domain, k, v)
 		}
 		return v, step, nil
 	} else {
