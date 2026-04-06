@@ -1,12 +1,13 @@
 package btindex
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"math/rand"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -217,7 +218,7 @@ func BenchmarkBpsTree_bs(b *testing.B) {
 				binary.BigEndian.PutUint64(k[keySize-8:], uint64(i))
 				allKeys[i] = k
 			}
-			sort.Slice(allKeys, func(i, j int) bool { return string(allKeys[i]) < string(allKeys[j]) })
+			slices.SortFunc(allKeys, bytes.Compare)
 
 			nodes := make([]Node, nodeCount)
 			for i, k := range allKeys {

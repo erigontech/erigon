@@ -17,13 +17,14 @@
 package seg
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
 	"math/rand"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -114,7 +115,7 @@ func prepareBinaryDict(b testing.TB, keyCount int, keySize int, compressed bool)
 		binary.BigEndian.PutUint64(k[keySize-8:], uint64(i))
 		keys[i] = k
 	}
-	sort.Slice(keys, func(i, j int) bool { return string(keys[i]) < string(keys[j]) })
+	slices.SortFunc(keys, bytes.Compare)
 
 	for _, k := range keys {
 		if compressed {

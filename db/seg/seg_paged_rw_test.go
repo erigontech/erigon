@@ -488,27 +488,35 @@ func prepareKVUncompressedKeysCompressedVals(t *testing.T, keyLen int, numPairs 
 	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	require.NoError(t, err)
 
-	keys := make([][]byte, numPairs)
-	vals := make([][]byte, numPairs)
-	for i := range keys {
+	require.GreaterOrEqual(t, keyLen, 8, "keyLen must be >= 8 for binary.BigEndian.PutUint64")
+
+	type kvPair struct {
+		key []byte
+		val []byte
+	}
+	pairs := make([]kvPair, numPairs)
+	for i := range pairs {
 		k := make([]byte, keyLen)
 		binary.BigEndian.PutUint64(k[keyLen-8:], uint64(i*37+1))
 		k[0] = byte(i >> 8)
 		k[1] = byte(i)
-		keys[i] = k
 		// values have common patterns to trigger compression
 		v := make([]byte, 50+i%30)
 		copy(v, "common_prefix_value_")
 		binary.BigEndian.PutUint64(v[20:], uint64(i))
-		vals[i] = v
+		pairs[i] = kvPair{key: k, val: v}
 	}
-	slices.SortFunc(keys, func(a, b []byte) int {
-		return bytes.Compare(a, b)
+	slices.SortFunc(pairs, func(a, b kvPair) int {
+		return bytes.Compare(a.key, b.key)
 	})
 
-	for i, k := range keys {
-		require.NoError(t, c.AddUncompressedWord(k)) // key: uncompressed
-		require.NoError(t, c.AddWord(vals[i]))       // value: compressed
+	keys := make([][]byte, numPairs)
+	vals := make([][]byte, numPairs)
+	for i, p := range pairs {
+		keys[i] = p.key
+		vals[i] = p.val
+		require.NoError(t, c.AddUncompressedWord(p.key)) // key: uncompressed
+		require.NoError(t, c.AddWord(p.val))             // value: compressed
 	}
 	require.NoError(t, c.Compress())
 	c.Close()
