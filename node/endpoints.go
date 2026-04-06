@@ -57,7 +57,7 @@ func StartHTTPEndpoint(urlEndpoint string, cfg *HttpEndpointConfig, handler http
 	} else {
 		socketUrl, err := url.Parse(urlEndpoint)
 		if err != nil {
-			return nil, nil, fmt.Errorf("malformatted http listen url %s: %w", urlEndpoint, err)
+			return nil, nil, fmt.Errorf("malformed http listen url %s: %w", urlEndpoint, err)
 		}
 		if listener, err = net.Listen(socketUrl.Scheme, socketUrl.Host+socketUrl.EscapedPath()); err != nil {
 			return nil, nil, err

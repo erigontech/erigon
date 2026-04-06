@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/freeport"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
@@ -126,13 +125,17 @@ func InitialiseEngineApiTester(t testing.TB, args EngineApiTesterInitArgs) Engin
 
 	// Pre-create listeners on port 0 (kernel-assigned) to avoid TOCTOU port races.
 	// The listeners are kept open and handed off to the servers that will use them.
-	sentryPort, err := freeport.NextFreePort()
+	sentryListener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = sentryListener.Close() })
+	sentryPort := sentryListener.Addr().(*net.TCPAddr).Port
 	jsonRpcListener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = jsonRpcListener.Close() })
 	jsonRpcPort := jsonRpcListener.Addr().(*net.TCPAddr).Port
 	engineApiListener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = engineApiListener.Close() })
 	engineApiPort := engineApiListener.Addr().(*net.TCPAddr).Port
 	logger.Debug("[engine-api-tester] selected ports", "sentry", sentryPort, "engineApi", engineApiPort, "jsonRpc", jsonRpcPort)
 
@@ -193,6 +196,9 @@ func InitialiseEngineApiTester(t testing.TB, args EngineApiTesterInitArgs) Engin
 		args.EthConfigTweaker(&ethConfig)
 	}
 
+	// Close the sentry listener to release the port before the sentry binds to it.
+	// The listener was only held open to reserve the port and prevent TOCTOU races.
+	sentryListener.Close()
 	ethNode, err := node.New(ctx, &nodeConfig, logger)
 	require.NoError(t, err)
 	cleanNode := func(ethNode *node.Node) func() {
