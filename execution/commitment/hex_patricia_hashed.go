@@ -2056,9 +2056,10 @@ func (hph *HexPatriciaHashed) foldBranch(row int, nibble, upDepth, depth int16, 
 	if hph.trace {
 		fmt.Printf("} [%x]\n", upCell.hash[:])
 	}
-	if hph.branchCache != nil {
-		hph.branchCache.Invalidate(updateKey)
-	}
+	// TODO: re-enable once cache interaction with fold is fixed
+	// if hph.branchCache != nil {
+	// 	hph.branchCache.Invalidate(updateKey)
+	// }
 	return nil
 }
 
@@ -2220,9 +2221,10 @@ func (hph *HexPatriciaHashed) collectDeleteUpdate(updateKey []byte, row int, evi
 		if evictCache && hph.cache != nil {
 			hph.cache.EvictBranch(updateKey)
 		}
-		if evictCache && hph.branchCache != nil {
-			hph.branchCache.Invalidate(updateKey)
-		}
+		// TODO: re-enable once cache interaction with fold is fixed
+		// if evictCache && hph.branchCache != nil {
+		// 	hph.branchCache.Invalidate(updateKey)
+		// }
 	}
 	return nil
 }
@@ -3022,18 +3024,20 @@ func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
 		}
 	}
 
-	// Level 2: persistent branch cache (survives across Process calls)
-	if hph.branchCache != nil {
-		if data, found := hph.branchCache.Get(key); found {
-			if hph.metrics != nil {
-				hph.metrics.pCacheBranchHit.Add(1)
-			}
-			return data, nil
-		}
-		if hph.metrics != nil {
-			hph.metrics.pCacheBranchMiss.Add(1)
-		}
-	}
+	// Level 2: persistent branch cache — disabled during Process to
+	// isolate a trie root bug during reorgs. TODO: re-enable once the
+	// interaction between Invalidate and fold is understood.
+	// if hph.branchCache != nil {
+	// 	if data, found := hph.branchCache.Get(key); found {
+	// 		if hph.metrics != nil {
+	// 			hph.metrics.pCacheBranchHit.Add(1)
+	// 		}
+	// 		return data, nil
+	// 	}
+	// 	if hph.metrics != nil {
+	// 		hph.metrics.pCacheBranchMiss.Add(1)
+	// 	}
+	// }
 
 	// Level 3: DB read
 	data, _, err := hph.ctx.Branch(key)
