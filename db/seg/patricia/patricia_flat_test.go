@@ -2,6 +2,7 @@ package patricia
 
 import (
 	"crypto/rand"
+	"reflect"
 	"testing"
 )
 
@@ -204,7 +205,9 @@ func TestFlatTreeCorrectness_RandomData(t *testing.T) {
 	for trial := 0; trial < 100; trial++ {
 		size := 32 + trial*8
 		data := make([]byte, size)
-		_, _ = rand.Read(data)
+		if _, err := rand.Read(data); err != nil {
+			t.Fatalf("rand.Read failed on trial %d: %v", trial, err)
+		}
 
 		m2 := mf2.FindLongestMatches(data)
 		m3 := mf3.FindLongestMatches(data)
@@ -219,9 +222,9 @@ func assertMatchesEqual(t *testing.T, expected, got []Match) {
 	}
 	for i, m := range expected {
 		g := got[i]
-		if m.Start != g.Start || m.End != g.End {
-			t.Errorf("match[%d] mismatch: expected {Start:%d End:%d}, got {Start:%d End:%d}",
-				i, m.Start, m.End, g.Start, g.End)
+		if m.Start != g.Start || m.End != g.End || !reflect.DeepEqual(m.Val, g.Val) {
+			t.Errorf("match[%d] mismatch: expected {Start:%d End:%d Val:%v}, got {Start:%d End:%d Val:%v}",
+				i, m.Start, m.End, m.Val, g.Start, g.End, g.Val)
 		}
 	}
 }
@@ -343,6 +346,9 @@ func BenchmarkMatchFinder3_LargeParallel(b *testing.B) {
 }
 
 func TestFlatTreeCorrectness_Large(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping large correctness test in short mode")
+	}
 	pt, data := buildLargeTestTree()
 	ft := pt.Flatten()
 	mf2 := NewMatchFinder2(pt)
