@@ -96,14 +96,15 @@ jobs:
       - name: Pin execution-apis ref in rpc-compat simulator
         run: |
           EXEC_APIS_REF="${{ steps.hive-version.outputs.execution_apis_ref }}"
-          DOCKERFILE="hive/simulators/ethereum/rpc-compat/Dockerfile"
-          if [ "$EXEC_APIS_REF" != "main" ] && [ -f "$DOCKERFILE" ]; then
+          SIM_DIR="hive/simulators/ethereum/rpc-compat"
+          if [ "$EXEC_APIS_REF" != "main" ] && [ -d "$SIM_DIR" ]; then
             echo "Pinning execution-apis to $EXEC_APIS_REF"
-            sed -i "s|ARG branch=main|ARG branch=$EXEC_APIS_REF|" "$DOCKERFILE"
-            sed -i '/git init \/execution-apis/,/git checkout FETCH_HEAD/{
-              s|.*|# replaced by erigon CI|
-            }' "$DOCKERFILE"
-            sed -i 's|# replaced by erigon CI|RUN git clone https://github.com/ethereum/execution-apis.git /execution-apis \&\& cd /execution-apis \&\& git checkout $GIT_REF|' "$DOCKERFILE"
+            git clone https://github.com/ethereum/execution-apis.git /tmp/execution-apis
+            cd /tmp/execution-apis && git checkout "$EXEC_APIS_REF" && cd -
+            cp -r /tmp/execution-apis/tests "$SIM_DIR/tests"
+            # Replace the git clone in Dockerfile with a local COPY
+            sed -i '/^RUN git init/,/checkout FETCH_HEAD/d' "$SIM_DIR/Dockerfile"
+            sed -i '/^# uncomment the line below/d; s|^# ADD tests|ADD tests|' "$SIM_DIR/Dockerfile"
           fi
 
       # Targetting the clients/erigon/Dockerfile.git in the Hive director -
