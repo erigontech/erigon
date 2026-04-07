@@ -450,7 +450,9 @@ func (p *ConcurrentPatriciaHashed) CanDoConcurrentNext() (bool, error) {
 		if err != nil {
 			return false, fmt.Errorf("checking shortest prefix branch failed: %w", err)
 		}
-		_ = zeroPrefixBranch // suppress unused
+		if len(zeroPrefixBranch) > 4 {
+			return true, nil
+		}
 	}
 	return false, nil
 }
