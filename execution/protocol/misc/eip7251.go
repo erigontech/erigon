@@ -37,7 +37,7 @@ func DequeueConsolidationRequests7251(syscall rules.SystemCall, state *state.Int
 
 	res, err := syscall(consolidationRequestAddress, nil)
 	if err != nil {
-		return nil, fmt.Errorf("[EIP-7251] Unprecedented Syscall failure: ConsolidationRequestAddress=%x error=%s ", consolidationRequestAddress, err.Error())
+		return nil, fmt.Errorf("[EIP-7251] Unprecedented Syscall failure: ConsolidationRequestAddress=%x error=%s", consolidationRequestAddress, err.Error())
 	}
 	if res != nil {
 		// Just append the contract output as the request data
