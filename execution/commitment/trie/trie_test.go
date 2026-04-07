@@ -34,6 +34,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -398,7 +399,7 @@ func TestCodeNodeGetHashedAccount(t *testing.T) {
 	fakeAccount := genRandomByteArrayOfLen(50)
 	fakeAccountHash := common.BytesToHash(crypto.Keccak256(fakeAccount))
 
-	hex := keybytesToHex(crypto.Keccak256(address[:]))
+	hex := nibbles.KeybytesToHex(crypto.Keccak256(address[:]))
 
 	_, trie.RootNode = trie.insert(trie.RootNode, hex, &HashNode{hash: fakeAccountHash[:]})
 
