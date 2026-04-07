@@ -519,6 +519,9 @@ func (db *MdbxKV) trackTxBegin() bool {
 	isOpen := !db.closed.Load()
 	if isOpen {
 		db.txsCount++
+		if db.txsCount > 2 {
+			fmt.Printf("MDBX_TX_OPEN: count=%d stack=%s\n", db.txsCount, dbg.Stack())
+		}
 	}
 	return isOpen
 }
@@ -1031,22 +1034,24 @@ func (tx *MdbxTx) Commit() error {
 			tx.db.opts.log.Error("failed to record mdbx summaries", "err", err)
 		}
 	}
-	var numReaders uint
-	if info, infoErr := tx.db.env.Info(nil); infoErr == nil {
-		numReaders = info.NumReaders
-	}
-	if latency.Whole > 2*time.Second || numReaders > 1 {
+	if tx.db.opts.label == dbcfg.ChainDB {
 		tx.db.opts.log.Info("[mdbx] commit",
-			"label", tx.db.opts.label,
 			"whole", latency.Whole,
 			"gc", latency.GCWallClock,
 			"write", latency.Write,
 			"sync", latency.Sync,
-			"readers", numReaders,
+			"openTxs", tx.db.txsCount,
 			"gcLoops", latency.GCDetails.Wloops,
 			"gcCoalesce", latency.GCDetails.Coalescences,
-			"gcWorkSteps", latency.GCDetails.WorkRsteps,
-			"gcSelfSteps", latency.GCDetails.SelfRsteps,
+			"gcWorkRsteps", latency.GCDetails.WorkRsteps,
+			"gcWorkRxpages", latency.GCDetails.WorkRxpages,
+			"gcWorkCounter", latency.GCDetails.WorkCounter,
+			"gcSelfRsteps", latency.GCDetails.SelfRsteps,
+			"gcSelfXpages", latency.GCDetails.SelfXpages,
+			"gcSelfCounter", latency.GCDetails.SelfCounter,
+			"gcWipes", latency.GCDetails.Wipes,
+			"gcFlushes", latency.GCDetails.Flushes,
+			"gcKicks", latency.GCDetails.Kicks,
 		)
 	}
 

@@ -726,7 +726,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 				protocol.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time())),
 				dbBAL, txTasks, applyResults, commitCh, false, exhausted}:
 			case <-ctx.Done():
-				break
+				return ctx.Err()
 			}
 			mxExecBlocks.Add(1)
 
@@ -735,7 +735,23 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			}
 		}
 
-		return nil
+		// All blocks loaded. Close channels to signal the exec loop
+		// that no more blocks are coming, then wait for the context
+		// to be cancelled (exec loop finishes processing remaining
+		// blocks). Without this wait, returning nil would cancel the
+		// errgroup context and kill the exec loop prematurely.
+		{
+			safeClose := func(ch chan applyResult) {
+				defer func() { recover() }()
+				close(ch)
+			}
+			for _, ch := range commitResults {
+				safeClose(ch)
+			}
+			safeClose(applyResults)
+		}
+		<-ctx.Done()
+		return ctx.Err()
 	})
 
 	return nil
