@@ -22,8 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"os"
-	"runtime"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -46,7 +44,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
-	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
@@ -692,15 +689,7 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	if status == nil {
 		fcuStart := time.Now()
 		s.logger.Debug("[ForkChoiceUpdated] calling HandleForkChoice", "head", forkchoiceState.HeadHash)
-		// Watchdog: panic if FCU takes > 60s so hive gets a crash instead of hanging
-		watchdog := time.AfterFunc(60*time.Second, func() {
-			buf := make([]byte, 1<<20)
-			n := runtime.Stack(buf, true)
-			_, _ = fmt.Fprintf(os.Stderr, "[ForkChoiceUpdated WATCHDOG] FCU stuck for 60s, goroutine dump:\n%s\n", buf[:n])
-			panic("[ForkChoiceUpdated] FCU stuck for 60s — likely deadlock")
-		})
 		status, err = s.HandleForkChoice(ctx, "ForkChoiceUpdated", forkchoiceState)
-		watchdog.Stop()
 		s.logger.Debug("[ForkChoiceUpdated] HandleForkChoice done", "elapsed", time.Since(fcuStart))
 		if err != nil {
 			if errors.Is(err, rules.ErrInvalidBlock) {
@@ -850,16 +839,7 @@ func (s *EngineServer) getPayloadBodiesByRange(ctx context.Context, start, count
 	if count > 1024 {
 		return nil, &engine_helpers.TooLargeRequestErr
 	}
-	bodiesStart := time.Now()
-	watchdog2 := time.AfterFunc(60*time.Second, func() {
-		buf := make([]byte, 1<<20)
-		n := runtime.Stack(buf, true)
-		_, _ = fmt.Fprintf(os.Stderr, "[getPayloadBodiesByRange WATCHDOG] stuck for 60s, start=%d count=%d goroutines:\n%s\n", start, count, buf[:n])
-		panic("[getPayloadBodiesByRange] stuck for 60s — likely deadlock")
-	})
 	bodies, err := s.chainRW.GetBodiesByRange(ctx, start, count)
-	watchdog2.Stop()
-	s.logger.Debug("[getPayloadBodiesByRange] done", "start", start, "count", count, "elapsed", time.Since(bodiesStart))
 	if err != nil {
 		return nil, err
 	}
@@ -1161,24 +1141,6 @@ func (e *EngineServer) HandleForkChoice(
 		payloadStatus.ValidationError = engine_types.NewStringifiedErrorFromString(*validationErr)
 	}
 	return payloadStatus, nil
-}
-
-// waitForOverlayPublish waits for the SharedDomains to be published via
-// Events.PublishOverlay, or the context to be cancelled. The SD is
-// published synchronously during HandleForkChoice → dispatchNotificationsFromOverlay,
-// so this resolves immediately after HandleForkChoice returns.
-func (e *EngineServer) waitForOverlayPublish(ctx context.Context, ch chan *execctx.SharedDomains) {
-	e.logger.Debug("[engine] waitForOverlayPublish: waiting", "chanLen", len(ch))
-	timer := time.NewTimer(5 * time.Second)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		e.logger.Warn("[engine] waitForOverlayPublish: context cancelled")
-	case sd := <-ch:
-		e.logger.Debug("[engine] waitForOverlayPublish: received SD", "nil", sd == nil)
-	case <-timer.C:
-		e.logger.Warn("[engine] waitForOverlayPublish: timed out after 5s")
-	}
 }
 
 func (e *EngineServer) SetConsuming(consuming bool) {
