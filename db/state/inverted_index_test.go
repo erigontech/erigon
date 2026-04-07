@@ -1110,3 +1110,178 @@ func TestInvIndex_OpenFolder(t *testing.T) {
 	require.NoError(t, err)
 	ii.Close()
 }
+
+// TestInvertedIndex_IdxRange_SkipsFileRange verifies that recentIterateRange narrows
+// its DB query to exclude txNums already covered by frozen files.
+// Without the fix the DB query would read prunable data in the file range,
+// and after that data is pruned the results would be incomplete.
+func TestInvertedIndex_IdxRange_SkipsFileRange(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
+	aggStep := uint64(16)
+	db, ii := testDbAndInvertedIndex(t, aggStep, logger)
+	ctx := context.Background()
+	require := require.New(t)
+
+	// Write entries for a single key across 3 steps (txNums 1..47).
+	// Step 0: txNums 0-15, Step 1: 16-31, Step 2: 32-47
+	var key [8]byte
+	binary.BigEndian.PutUint64(key[:], 1)
+
+	txNums := []uint64{2, 5, 10, 18, 25, 30, 35, 42}
+
+	err := db.Update(ctx, func(tx kv.RwTx) error {
+		ic := ii.BeginFilesRo()
+		defer ic.Close()
+		writer := ic.NewWriter()
+		defer writer.close()
+		for _, txNum := range txNums {
+			if err := writer.Add(key[:], txNum); err != nil {
+				return err
+			}
+		}
+		return writer.Flush(ctx, tx)
+	})
+	require.NoError(err)
+
+	// Build files for steps 0 and 1 (covers txNums 0..31).
+	tx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+
+	for step := kv.Step(0); step <= 1; step++ {
+		require.NoError(ii.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
+	}
+
+	// Prune DB entries that are now covered by files (txNums 0..31).
+	ic := ii.BeginFilesRo()
+	_, err = ic.TableScanningPrune(ctx, tx, 0, aggStep*2, math.MaxUint64, logEvery, false, nil, nil, mxPruneSizeIndex, prune.DefaultStorageMode)
+	require.NoError(err)
+	ic.Close()
+
+	require.NoError(tx.Commit())
+
+	// Now query IdxRange spanning both file and DB ranges.
+	roTx, err := db.BeginRo(ctx)
+	require.NoError(err)
+	defer roTx.Rollback()
+
+	ic = ii.BeginFilesRo()
+	defer ic.Close()
+
+	// Ascending: full range [0, 48) should return all txNums.
+	it, err := ic.IdxRange(key[:], 0, 48, order.Asc, -1, roTx)
+	require.NoError(err)
+	var got []uint64
+	for it.HasNext() {
+		v, err := it.Next()
+		require.NoError(err)
+		got = append(got, v)
+	}
+	it.Close()
+	require.Equal(txNums, got, "ascending IdxRange after prune")
+
+	// Descending: full range (48, 0] should return all txNums reversed.
+	it, err = ic.IdxRange(key[:], 48, 0, order.Desc, -1, roTx)
+	require.NoError(err)
+	var gotDesc []uint64
+	for it.HasNext() {
+		v, err := it.Next()
+		require.NoError(err)
+		gotDesc = append(gotDesc, v)
+	}
+	it.Close()
+	wantDesc := make([]uint64, len(txNums))
+	copy(wantDesc, txNums)
+	for i, j := 0, len(wantDesc)-1; i < j; i, j = i+1, j-1 {
+		wantDesc[i], wantDesc[j] = wantDesc[j], wantDesc[i]
+	}
+	require.Equal(wantDesc, gotDesc, "descending IdxRange after prune")
+}
+
+// TestInvertedIndex_IdxRange_IgnoresDBInFileRange proves the DB is not consulted
+// for txNums within the file range. It inserts a rogue txNum directly into the DB's
+// ValuesTable inside the frozen range; IdxRange must NOT return it.
+func TestInvertedIndex_IdxRange_IgnoresDBInFileRange(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+
+	aggStep := uint64(16)
+	db, ii := testDbAndInvertedIndex(t, aggStep, logger)
+	ctx := context.Background()
+	require := require.New(t)
+
+	var key [8]byte
+	binary.BigEndian.PutUint64(key[:], 1)
+
+	txNums := []uint64{2, 5, 10, 18, 25, 30, 35, 42}
+
+	err := db.Update(ctx, func(tx kv.RwTx) error {
+		ic := ii.BeginFilesRo()
+		defer ic.Close()
+		writer := ic.NewWriter()
+		defer writer.close()
+		for _, txNum := range txNums {
+			if err := writer.Add(key[:], txNum); err != nil {
+				return err
+			}
+		}
+		return writer.Flush(ctx, tx)
+	})
+	require.NoError(err)
+
+	// Build files for steps 0 and 1 (covers txNums 0..31).
+	tx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+
+	for step := kv.Step(0); step <= 1; step++ {
+		require.NoError(ii.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
+	}
+
+	// Inject a rogue txNum (7) into the DB's ValuesTable within the frozen range.
+	// If the DB is queried for the file range, this would appear in results.
+	var rogueTxNum [8]byte
+	binary.BigEndian.PutUint64(rogueTxNum[:], 7)
+	require.NoError(tx.Put(ii.ValuesTable, key[:], rogueTxNum[:]))
+	require.NoError(tx.Commit())
+
+	roTx, err := db.BeginRo(ctx)
+	require.NoError(err)
+	defer roTx.Rollback()
+
+	ic := ii.BeginFilesRo()
+	defer ic.Close()
+
+	// Ascending: rogue txNum 7 must not appear.
+	it, err := ic.IdxRange(key[:], 0, 48, order.Asc, -1, roTx)
+	require.NoError(err)
+	var got []uint64
+	for it.HasNext() {
+		v, err := it.Next()
+		require.NoError(err)
+		got = append(got, v)
+	}
+	it.Close()
+	require.Equal(txNums, got, "ascending: rogue DB entry in file range must be invisible")
+
+	// Descending: rogue txNum 7 must not appear.
+	it, err = ic.IdxRange(key[:], 48, 0, order.Desc, -1, roTx)
+	require.NoError(err)
+	var gotDesc []uint64
+	for it.HasNext() {
+		v, err := it.Next()
+		require.NoError(err)
+		gotDesc = append(gotDesc, v)
+	}
+	it.Close()
+	wantDesc := make([]uint64, len(txNums))
+	copy(wantDesc, txNums)
+	for i, j := 0, len(wantDesc)-1; i < j; i, j = i+1, j-1 {
+		wantDesc[i], wantDesc[j] = wantDesc[j], wantDesc[i]
+	}
+	require.Equal(wantDesc, gotDesc, "descending: rogue DB entry in file range must be invisible")
+}
