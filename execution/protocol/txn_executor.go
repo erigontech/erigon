@@ -622,14 +622,16 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			st.txnGasUsedB4Refunds = mdGasUsed.Regular
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Regular)
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
-			if rules.IsOsaka {
-				// For Osaka (non-Amsterdam), block gas uses actual pre-refund gas consumed.
-				// SSTORE refunds do not free up block capacity, and the EIP-7623 calldata
-				// floor is a minimum ETH payment only — it does not inflate block gas.
-				st.blockRegularGasUsed = st.txnGasUsedB4Refunds
-			} else {
-				st.blockRegularGasUsed = st.txnGasUsed
-			}
+			st.blockRegularGasUsed = st.txnGasUsed
+			log.Debug("[gas debug] prague tx gas",
+				"block", st.evm.Context.BlockNumber,
+				"txIdx", st.state.TxIndex(),
+				"preRefund", st.txnGasUsedB4Refunds,
+				"refund", refund,
+				"stateRefund", st.state.GetRefund().Regular,
+				"postRefund", st.txnGasUsed,
+				"floor", intrinsicGasResult.FloorGasCost,
+			)
 		} else {
 			st.txnGasUsedB4Refunds = mdGasUsed.Regular
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Regular)
