@@ -604,7 +604,6 @@ func (a *ApiHandler) produceBeaconBody(
 	var executionValue uint64
 
 	blockRoot := baseBlockRoot
-	secsDiff := (targetSlot - baseBlockSlot) * a.beaconChainCfg.SecondsPerSlot
 	// Process the execution data in a thread.
 	wg.Add(1)
 	go func() {
@@ -631,7 +630,7 @@ func (a *ApiHandler) produceBeaconBody(
 		}
 
 		attrs := &engine_types.PayloadAttributes{
-			Timestamp:             hexutil.Uint64(latestExecutionPayload.Time + secsDiff),
+			Timestamp:             hexutil.Uint64(state.ComputeTimestampAtSlot(baseState, targetSlot)),
 			PrevRandao:            random,
 			SuggestedFeeRecipient: feeRecipient,
 			Withdrawals:           withdrawals,
