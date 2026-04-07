@@ -51,7 +51,7 @@ func VerifyBranchHashes(
 	// because the branch stores children one level deeper than its prefix path.
 	// E.g., root branch (0 nibbles) → depth=1; branch at "3a" (2 nibbles) → depth=3.
 	nib := nibbles.CompactToHex(branchKey)
-	if HasTerm(nib) {
+	if nibbles.HasTerm(nib) {
 		nib = nib[:len(nib)-1]
 	}
 	depth := int16(len(nib)) + 1

@@ -842,7 +842,7 @@ func (hph *HexPatriciaHashed) accountLeafHashWithKey(buf, key []byte, val rlp.Rl
 	var compactLen int
 	var ni int
 	var compact0 byte
-	if HasTerm(key) {
+	if nibbles.HasTerm(key) {
 		compactLen = (len(key)-1)/2 + 1
 		if len(key)&1 == 0 {
 			compact0 = 48 + key[0] // Odd (1<<4) + first nibble
@@ -869,7 +869,7 @@ func (hph *HexPatriciaHashed) extensionHash(key []byte, hash []byte) (common.Has
 	var compactLen int
 	var ni int
 	var compact0 byte
-	if HasTerm(key) {
+	if nibbles.HasTerm(key) {
 		compactLen = (len(key)-1)/2 + 1
 		if len(key)&1 == 0 {
 			compact0 = 0x30 + key[0] // Odd: (3<<4) + first nibble
@@ -1329,7 +1329,7 @@ func (hph *HexPatriciaHashed) needUnfolding(hashedKey []byte) int16 {
 		return 1 // unfold branch node
 	}
 
-	cpl := commonPrefixLen(hashedKey[depth:], cell.hashedExtension[:cell.hashedExtLen-1])
+	cpl := nibbles.CommonPrefixLen(hashedKey[depth:], cell.hashedExtension[:cell.hashedExtLen-1])
 	if hph.trace {
 		fmt.Printf("cpl=%d cell.hashedExtension=[%x] hashedKey[depth=%d:]=[%x]\n", cpl, cell.hashedExtension[:cell.hashedExtLen], depth, hashedKey[depth:])
 	}

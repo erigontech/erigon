@@ -1174,7 +1174,7 @@ func validateAfterMap(afterMap uint16, row [16]*cell) error {
 
 func validatePlainKeys(branchKey []byte, row [16]*cell, keccak keccak.KeccakState) error {
 	uncompactedBranchKey := nibbles.CompactToHex(branchKey)
-	if HasTerm(uncompactedBranchKey) {
+	if nibbles.HasTerm(uncompactedBranchKey) {
 		uncompactedBranchKey = uncompactedBranchKey[:len(uncompactedBranchKey)-1]
 	}
 	if len(uncompactedBranchKey) > 128 {
