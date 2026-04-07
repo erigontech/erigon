@@ -574,6 +574,17 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 
 	te.execLoopGroup.Go(func() (err error) {
 		defer func() {
+			// Close channels on exit — signals exec loop / apply loop / calculator.
+			safeClose := func(ch chan applyResult) {
+				defer func() { recover() }()
+				close(ch)
+			}
+			for _, ch := range commitResults {
+				safeClose(ch)
+			}
+			safeClose(applyResults)
+		}()
+		defer func() {
 			if rec := recover(); rec != nil {
 				err = fmt.Errorf("exec blocks panic: %s", rec)
 			} else if err != nil && !errors.Is(err, context.Canceled) {
@@ -735,23 +746,8 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			}
 		}
 
-		// All blocks loaded. Close channels to signal the exec loop
-		// that no more blocks are coming, then wait for the context
-		// to be cancelled (exec loop finishes processing remaining
-		// blocks). Without this wait, returning nil would cancel the
-		// errgroup context and kill the exec loop prematurely.
-		{
-			safeClose := func(ch chan applyResult) {
-				defer func() { recover() }()
-				close(ch)
-			}
-			for _, ch := range commitResults {
-				safeClose(ch)
-			}
-			safeClose(applyResults)
-		}
-		<-ctx.Done()
-		return ctx.Err()
+		// Channels closed by deferred close above.
+		return nil
 	})
 
 	return nil

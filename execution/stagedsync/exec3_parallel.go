@@ -617,9 +617,11 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				return err
 			}
 			continue
-		case <-ctx.Done():
-			fmt.Printf("FLOW: ctx.Done lastBlock=%d\n", pe.lastExecutedBlockNum.Load())
-			return ctx.Err()
+		// Do NOT select on ctx.Done here. The errgroup cancels the
+		// context when executeBlocks returns (after loading all blocks),
+		// but the exec loop must keep running to process queued results.
+		// The exec loop exits when rws is closed (all results drained)
+		// or when processResults returns an error.
 		case nextResult, ok := <-pe.rws.ResultCh():
 			if !ok {
 				fmt.Printf("FLOW: rws closed lastBlock=%d\n", pe.lastExecutedBlockNum.Load())
