@@ -14,7 +14,7 @@ Erigon is highly resilient and uses a fully-transactional database. This design 
 
 When an issue arises, follow these steps to methodically diagnose and resolve the problem.
 
-1. **Check Hardware Requirements:** The most common cause of issues is insufficient disk or RAM. Ensure your system meets the recommended specifications. Note that Erigon is very adaptive—adding more RAM to the server will make Erigon faster without requiring any setting changes.
+1. **Check Hardware Requirements:** The most common cause of issues is insufficient disk or RAM. Ensure your system meets the recommended [specifications](https://docs.erigon.tech/get-started/hardware-requirements). Note that Erigon is very adaptive—adding more RAM to the server will make Erigon faster without requiring any setting changes.
 2. **Inspect Erigon Logs:** The logs are your best friend. Use `tail -f erigon.log` or `journalctl` to see real-time output and identify error messages or warnings.
 3. **Verify Sync Status:** Use `curl localhost:8545 \-X POST \-H "Content-Type: application/json" \--data '{"jsonrpc":"2.0","method":"eth\_syncing","params":\[\],"id":1}'` to check if the node is actively syncing.
 4. **Monitor System Resources:** Use `htop`, `top`, or `iostat` to monitor CPU, RAM, and disk I/O. This can help you identify a performance bottleneck.
@@ -26,9 +26,50 @@ When an issue arises, follow these steps to methodically diagnose and resolve th
 10. **Check P2P Peer Connections:** Use `net\_peerCount` or similar RPC methods to check if you have a healthy number of peers. A low count may indicate a network problem.
 11. **Review Firewall Rules:** Confirm that your firewall is not blocking inbound or outbound traffic on the required P2P and RPC ports.
 12. **Double-Check Configuration Flags:** Review all your command-line flags for typos or incorrect values. A single misplaced character can cause a cryptic error.
-13. **Check for Snapshot File Issues:** For version upgrades, a known issue with snapshot filenames can cause problems. Use snapshot [upgrade](https://docs.erigon.tech/get-started/installation-2/upgrading#snapshots-upgrade-options) and [repair](https://docs.erigon.tech/get-started/installation-2/upgrading#managing-your-data) options.
+13. **Check for Snapshot File Issues:** For version upgrades, a known issue with snapshot filenames can cause problems. Use snapshot [upgrade](https://docs.erigon.tech/get-started/installation/upgrading) and repair options.
 14. **Correct File Ownership:** If using a dedicated user or Docker, confirm that the user has full read/write access to the datadir.
 15. **Adjust RPC Timeouts:** If specific RPC requests are timing out, try increasing the timeout values to allow more time for heavy requests to complete.
 16. **Check for `DB.read.concurrency` issues:** If you have high RPC traffic and low TPS, try reducing the `--DB.read.concurrency` flag.
 17. **Report a Bug:** If all else fails, open a detailed bug report on GitHub with logs, version info, and a clear description of the problem.
 18. **Engage with the Community:** The Erigon Discord server is an invaluable resource for seeking help from core developers and experienced users.
+
+---
+
+**Collecting Diagnostics for Bug Reports**
+
+Before opening a GitHub issue, gather the following information to help the team reproduce and fix your problem faster.
+
+**Dump goroutine stacks** (sends `SIGUSR1` to the running process — safe, non-destructive):
+
+```bash
+kill -SIGUSR1 $(pidof erigon)
+# Stack traces are printed to the erigon log / stdout
+```
+
+**Capture a CPU or heap profile via pprof** (requires `--pprof` flag at startup — default address `localhost:6060`; override with `--pprof.addr` and `--pprof.port`):
+
+```bash
+# CPU profile — 30-second sample
+curl -o cpu.pprof http://localhost:6060/debug/pprof/profile?seconds=30
+
+# Heap profile
+curl -o heap.pprof http://localhost:6060/debug/pprof/heap
+
+# Inspect locally
+go tool pprof -http=:8080 cpu.pprof
+```
+
+Attach the `.pprof` files and the goroutine dump to your GitHub issue.
+
+---
+
+**Hetzner Cloud / Dedicated Server Firewall Note**
+
+Hetzner applies a stateless firewall at the network edge. Ensure the following ports are open for **both TCP and UDP, inbound and outbound**:
+
+| Purpose        | Port  | Protocol |
+| -------------- | ----- | -------- |
+| P2P (Ethereum) | 30303 | TCP+UDP  |
+| P2P (Caplin)   | 9000  | TCP+UDP  |
+
+Without these, the node may appear to have peers (via the cloud dashboard) but will suffer poor block propagation. Configure the firewall in the Hetzner Cloud Console under **Firewalls** or via `hcloud firewall`.

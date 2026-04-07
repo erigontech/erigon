@@ -56,3 +56,16 @@ Your internet bandwidth is also an important factor, particularly for sync speed
 | -------------- | -------------------- | ----------------------- |
 | Staking/Mining | 10 Mbps              | 50 Mbps                 |
 | Non-Staking    | 5 Mbps               | 25 Mbps                 |
+
+## Sync Times
+
+Approximate sync times from scratch to chain tip, measured with Erigon v3.3 on a mid-range server (NVMe SSD, 64 GB RAM). Results may vary significantly depending on hardware, network bandwidth, and peer availability.
+
+| Chain    | Archive              | Full                 | Minimal            |
+| -------- | -------------------- | -------------------- | ------------------ |
+| Ethereum | 7 hours, 55 minutes  | 4 hours, 23 minutes  | 1 hour, 41 minutes |
+| Gnosis   | 2 hours, 10 minutes  | 1 hour, 5 minutes    | 33 minutes         |
+
+{% hint style="success" %}
+See [Sync Modes](fundamentals/sync-modes.md) for a detailed explanation of Archive, Full, and Minimal modes.
+{% endhint %}

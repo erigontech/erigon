@@ -26,6 +26,7 @@ When exposing public RPC endpoints (like those on port 8545), use the following 
 
 * Avoid using a wildcard `*` for Cross-Origin Resource Sharing (CORS) domains.
 * Set specific hostnames or IP addresses for CORS to ensure only authorized frontend applications can interact with your RPC service.
+* For WebSocket connections, set `--ws.origins` to a comma-separated list of allowed origins (default: empty, which denies all cross-origin WS connections). Leaving this unconfigured while exposing WebSocket publicly is a security risk.
 
 ## API Security
 
@@ -64,6 +65,9 @@ For production environments where RPC endpoints are exposed publicly, it is stro
 
 **Dedicated User**: Run Erigon as a dedicated system user rather than root to limit potential damage from security breaches.
 
-**Transaction Pool Security**: Use `--txpool.nolocals=true` for public nodes to prevent local transaction injection.
+**IPC Endpoint**: The `erigon` binary force-disables its IPC socket at startup (`nodeConfig.IPCPath` is set to `""`), so there is no local IPC endpoint to secure. If you use `rpcdaemon` as a separate process, refer to its own `socket.*` flags for local IPC configuration.
+
+**Insecure Account Unlock**: Never set `--allow-insecure-unlock` on a production node. This flag permits `personal_unlockAccount` calls over HTTP, which is disabled by default for security reasons.
 
 **Virtual Host Protection**: Configure `HTTPVirtualHosts` to prevent DNS rebinding attacks. This validates the Host header to ensure requests come from authorized domains.
+

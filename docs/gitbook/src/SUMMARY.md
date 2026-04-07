@@ -25,6 +25,7 @@
   * [Layer 2 Networks](get-started/fundamentals/layer-2-networks.md)
   * [Caplin](get-started/fundamentals/caplin.md)
   * [Optimizing Storage](get-started/fundamentals/optimizing-storage.md)
+  * [Datadir Structure](get-started/fundamentals/datadir-structure.md)
   * [Performance Tricks](get-started/fundamentals/performance-tricks.md)
   * [Logs](get-started/fundamentals/logs.md)
   * [Security](get-started/fundamentals/security.md)
@@ -49,11 +50,15 @@
     * [bor](get-started/fundamentals/interacting-with-erigon/bor.md)
     * [ots](get-started/fundamentals/interacting-with-erigon/ots.md)
     * [internal](get-started/fundamentals/interacting-with-erigon/internal.md)
+    * [overlay](get-started/fundamentals/interacting-with-erigon/overlay.md)
+    * [parity](get-started/fundamentals/interacting-with-erigon/parity.md)
+    * [graphql](get-started/fundamentals/interacting-with-erigon/graphql.md)
     * [gRPC](get-started/fundamentals/interacting-with-erigon/grpc.md)
   * [Creating a dashboard](get-started/fundamentals/creating-a-dashboard.md)
   * [Docker Compose](get-started/fundamentals/docker-compose.md)
   * [Otterscan](get-started/fundamentals/otterscan.md)
   * [web3 Wallet](get-started/fundamentals/web3-wallet.md)
+  * [Dev Chain](get-started/fundamentals/dev-chain.md)
 
 ## STAKING
 
