@@ -27,13 +27,14 @@ import (
 // CachedReader3 is a wrapper for an instance of type StateReader
 // This wrapper only makes calls to the underlying reader if the item is not in the cache
 type CachedReader3 struct {
-	cache kvcache.CacheView
-	db    kv.TemporalTx
+	cache    kvcache.CacheView
+	db       kv.TemporalTx
+	accArena *accounts.AccountArena
 }
 
 // NewCachedReader3 wraps a given state reader into the cached reader
 func NewCachedReader3(cache kvcache.CacheView, tx kv.TemporalTx) *CachedReader3 {
-	return &CachedReader3{cache: cache, db: tx}
+	return &CachedReader3{cache: cache, db: tx, accArena: &accounts.AccountArena{}}
 }
 
 func (r *CachedReader3) SetTrace(_ bool, _ string) {}
@@ -50,11 +51,11 @@ func (r *CachedReader3) ReadAccountData(address accounts.Address) (*accounts.Acc
 	if len(enc) == 0 {
 		return nil, nil
 	}
-	a := accounts.Account{}
-	if err = accounts.DeserialiseV3(&a, enc); err != nil {
+	acc := r.accArena.Alloc()
+	if err = accounts.DeserialiseV3(acc, enc); err != nil {
 		return nil, err
 	}
-	return &a, nil
+	return acc, nil
 }
 
 // ReadAccountDataForDebug - is like ReadAccountData, but without adding key to `readList`.
@@ -68,11 +69,11 @@ func (r *CachedReader3) ReadAccountDataForDebug(address accounts.Address) (*acco
 	if len(enc) == 0 {
 		return nil, nil
 	}
-	a := accounts.Account{}
-	if err = accounts.DeserialiseV3(&a, enc); err != nil {
+	acc := r.accArena.Alloc()
+	if err = accounts.DeserialiseV3(acc, enc); err != nil {
 		return nil, err
 	}
-	return &a, nil
+	return acc, nil
 }
 
 func (r *CachedReader3) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {

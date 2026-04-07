@@ -731,17 +731,19 @@ type ReaderV3 struct {
 	trace       bool
 	tracePrefix string
 	getter      kv.TemporalGetter
+	accArena    *accounts.AccountArena
 }
 
 func NewReaderV3(getter kv.TemporalGetter) *ReaderV3 {
 	return &ReaderV3{
 		//trace:  true,
-		getter: getter,
+		getter:   getter,
+		accArena: &accounts.AccountArena{},
 	}
 }
 
 func (r *ReaderV3) DiscardReadList()                   {}
-func (r *ReaderV3) SetTxNum(txNum uint64)              { r.txNum = txNum }
+func (r *ReaderV3) SetTxNum(txNum uint64)              { r.txNum = txNum; r.accArena.Reset() }
 func (r *ReaderV3) SetGetter(getter kv.TemporalGetter) { r.getter = getter }
 
 func (r *ReaderV3) SetTrace(trace bool, tracePrefix string) {
@@ -795,14 +797,14 @@ func (r *ReaderV3) readAccountData(address accounts.Address) ([]byte, *accounts.
 		return nil, nil, nil
 	}
 
-	var acc accounts.Account
-	if err := accounts.DeserialiseV3(&acc, enc); err != nil {
+	acc := r.accArena.Alloc()
+	if err := accounts.DeserialiseV3(acc, enc); err != nil {
 		return nil, nil, err
 	}
 	if r.trace {
 		fmt.Printf("%sReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", r.tracePrefix, address, acc.Nonce, &acc.Balance, acc.CodeHash, r.txNum)
 	}
-	return enc, &acc, nil
+	return enc, acc, nil
 }
 
 func (r *ReaderV3) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {

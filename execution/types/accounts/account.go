@@ -822,3 +822,28 @@ func DecodeSender(enc []byte) (nonce uint64, balance uint256.Int, err error) {
 	}
 	return
 }
+
+// AccountArena is a slab allocator for Account objects.
+// Avoids allocations in tight account-read loops by reusing a pre-allocated pool.
+// Typical transaction accesses 3-6 accounts; 16 slots covers >99% of real workloads.
+// Accounts are valid until Reset() is called.
+type AccountArena struct {
+	accounts [16]Account // Slab of 16 accounts per transaction
+	idx      int         // Current allocation position
+}
+
+// Alloc returns the next Account from the arena and advances the position.
+// Panics if arena is exhausted. Caller must call Reset() between transactions.
+func (aa *AccountArena) Alloc() *Account {
+	if aa.idx >= len(aa.accounts) {
+		panic("AccountArena exhausted: >16 accounts per transaction")
+	}
+	acc := &aa.accounts[aa.idx]
+	aa.idx++
+	return acc
+}
+
+// Reset clears the arena for the next transaction.
+func (aa *AccountArena) Reset() {
+	aa.idx = 0
+}

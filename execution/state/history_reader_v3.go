@@ -36,17 +36,18 @@ type HistoryReaderV3 struct {
 	tracePrefix string
 	ttx         kv.TemporalTx
 	composite   []byte
+	accArena    *accounts.AccountArena
 }
 
 func NewHistoryReaderV3(ttx kv.TemporalTx, txNum uint64) *HistoryReaderV3 {
-	return &HistoryReaderV3{composite: make([]byte, 20+32), ttx: ttx, txNum: txNum}
+	return &HistoryReaderV3{composite: make([]byte, 20+32), ttx: ttx, txNum: txNum, accArena: &accounts.AccountArena{}}
 }
 
 func (hr *HistoryReaderV3) String() string {
 	return fmt.Sprintf("txNum:%d", hr.txNum)
 }
 func (hr *HistoryReaderV3) SetTx(tx kv.TemporalTx) { hr.ttx = tx }
-func (hr *HistoryReaderV3) SetTxNum(txNum uint64)  { hr.txNum = txNum }
+func (hr *HistoryReaderV3) SetTxNum(txNum uint64)  { hr.txNum = txNum; hr.accArena.Reset() }
 func (hr *HistoryReaderV3) GetTxNum() uint64       { return hr.txNum }
 func (hr *HistoryReaderV3) SetTrace(trace bool, tracePrefix string) {
 	hr.trace = trace
@@ -87,14 +88,14 @@ func (hr *HistoryReaderV3) ReadAccountData(address accounts.Address) (*accounts.
 		}
 		return nil, err
 	}
-	var a accounts.Account
-	if err := accounts.DeserialiseV3(&a, enc); err != nil {
+	acc := hr.accArena.Alloc()
+	if err := accounts.DeserialiseV3(acc, enc); err != nil {
 		return nil, fmt.Errorf("%sread account data (hist)(%x): %w", hr.tracePrefix, address, err)
 	}
 	if hr.trace {
-		fmt.Printf("%sReadAccountData (hist)[%x] => [nonce: %d, balance: %d, codeHash: %x]\n", hr.tracePrefix, address, a.Nonce, &a.Balance, a.CodeHash)
+		fmt.Printf("%sReadAccountData (hist)[%x] => [nonce: %d, balance: %d, codeHash: %x]\n", hr.tracePrefix, address, acc.Nonce, &acc.Balance, acc.CodeHash)
 	}
-	return &a, nil
+	return acc, nil
 }
 
 // ReadAccountDataForDebug - is like ReadAccountData, but without adding key to `readList`.
