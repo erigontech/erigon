@@ -361,9 +361,8 @@ func gasCreate2Eip3860(evm *EVM, callContext *CallContext, availableGas mdgas.Md
 }
 
 // gasCreateEip8037 is the dynamic gas function for CREATE under EIP-8037.
-// The initcode size is capped (not rejected) here; the actual check happens in
-// opCreate. State gas for account creation is charged in opCreate after the
-// static-context and initcode-size checks (per execution-specs#2608).
+// Initcode size is capped (not rejected) here; the actual check and state gas
+// charge happen in opCreate after the static-context check (per execution-specs#2608).
 func gasCreateEip8037(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (gas mdgas.MdGas, err error) {
 	gas.Regular, err = memoryGasCost(callContext, memorySize)
 	if err != nil {
@@ -383,8 +382,8 @@ func gasCreateEip8037(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 }
 
 // gasCreate2Eip8037 is the dynamic gas function for CREATE2 under EIP-8037.
-// State gas for account creation is charged in opCreate2 after the
-// static-context and initcode-size checks (per execution-specs#2608).
+// Initcode size is capped (not rejected) here; the actual check and state gas
+// charge happen in opCreate2 after the static-context check (per execution-specs#2608).
 func gasCreate2Eip8037(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (gas mdgas.MdGas, err error) {
 	gas.Regular, err = memoryGasCost(callContext, memorySize)
 	if err != nil {
