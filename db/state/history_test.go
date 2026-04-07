@@ -2217,9 +2217,8 @@ func TestRangeAsOf_DBIteratorSkipsFileRange(t *testing.T) {
 		for it.HasNext() {
 			k, _, err := it.Next()
 			require.NoError(err)
-			require.NotEqual(
-				fmt.Sprintf("%x", phantomKey),
-				fmt.Sprintf("%x", k),
+			require.False(
+				bytes.Equal(phantomKey, k),
 				"DB iterator leaked phantom key from within the file range",
 			)
 		}
