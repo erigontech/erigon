@@ -100,6 +100,7 @@ jobs:
           SIM_DIR="hive/simulators/ethereum/rpc-compat"
           if [ "$EXEC_APIS_REF" != "main" ]; then
             echo "Pinning execution-apis to $EXEC_APIS_REF"
+            rm -rf /tmp/execution-apis
             git clone --single-branch https://github.com/ethereum/execution-apis.git /tmp/execution-apis
             (cd /tmp/execution-apis && git checkout "$EXEC_APIS_REF")
             cp -r /tmp/execution-apis/tests "$SIM_DIR/tests"
