@@ -1087,7 +1087,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, fmt.Errorf("block %d(%x) not found", blockNumber, hash)
 	}
 
-	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
+	err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -1306,7 +1306,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 		}
 	}
 
-	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
+	err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -1787,7 +1787,7 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 		return nil, fmt.Errorf("block %d(%x) not found", blockNumber, hash)
 	}
 
-	err = rpchelper.CheckBlockExecuted(dbtx, blockNumber)
+	err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(dbtx), blockNumber)
 	if err != nil {
 		return nil, err
 	}

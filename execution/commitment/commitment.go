@@ -1694,6 +1694,11 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 func (t *Updates) TouchHashedKey(hashedKey []byte) {
 	switch t.mode {
 	case ModeDirect:
+		if len(hashedKey) == 0 {
+			return
+		}
+		// string(hashedKey) copies the bytes, so dedupKey is safe even if the caller reuses the slice.
+		// No extra copy needed before etl.Collect: see Collector.Collect — it copies k and v internally.
 		dedupKey := string(hashedKey)
 		if _, ok := t.keys[dedupKey]; !ok {
 			var err error

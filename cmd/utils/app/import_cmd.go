@@ -37,14 +37,13 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/debug"
-	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/eth"
-	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
@@ -255,7 +254,7 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 		insertedBlocks[block.NumberU64()] = struct{}{}
 	}
 
-	chainRW := chainreader.NewChainReaderEth1(ethereum.ChainConfig(), direct.NewExecutionClientDirect(ethereum.ExecutionModule()), time.Hour)
+	chainRW := chainreader.NewChainReaderEth1(ethereum.ChainConfig(), ethereum.ExecutionModule(), time.Hour)
 
 	ctx := context.Background()
 	if err := chainRW.InsertBlocksAndWait(ctx, chain.Blocks); err != nil {
@@ -308,7 +307,7 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 	if err != nil {
 		return err
 	}
-	if status != executionproto.ExecutionStatus_Success {
+	if status != execmodule.ExecutionStatusSuccess {
 		return fmt.Errorf("insertion failed for block %d, code: %s", chain.Blocks[chain.Length()-1].NumberU64(), status.String())
 	}
 

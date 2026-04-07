@@ -80,30 +80,42 @@ func GetCanonicalBlockNumber(ctx context.Context, blockNrOrHash rpc.BlockNumberO
 }
 
 func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br services.FullBlockReader, filters *Filters) (blockNumber uint64, hash common.Hash, latest bool, found bool, err error) {
+	// overlayTx transparently reads from the block overlay when a background
+	// commit is pending, falling back to the DB tx otherwise.
+	overlayTx := tx
+	if filters != nil {
+		overlayTx = filters.WithOverlay(tx)
+	}
+
 	// Due to the changed semantics of `latest` block in RPC request, it is now distinct
-	// from the block number corresponding to the plain state
+	// from the block number corresponding to the plain state.
+	// Read from overlayTx so the execution progress includes uncommitted blocks
+	// during background commits — otherwise "latest" resolves to a block number
+	// ahead of plainStateBlockNumber, causing state reads to use the historical
+	// path (which fails because history isn't committed yet).
 	var plainStateBlockNumber uint64
-	if plainStateBlockNumber, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
+	if plainStateBlockNumber, err = stages.GetStageProgress(overlayTx, stages.Execution); err != nil {
 		return 0, common.Hash{}, false, false, fmt.Errorf("getting plain state block number: %w", err)
 	}
+
 	var ok bool
 	hash, ok = blockNrOrHash.Hash()
 	if !ok {
 		number := *blockNrOrHash.BlockNumber
 		switch number {
 		case rpc.LatestBlockNumber:
-			if blockNumber, err = GetLatestBlockNumber(tx); err != nil {
+			if blockNumber, err = GetLatestBlockNumber(overlayTx); err != nil {
 				return 0, common.Hash{}, false, false, err
 			}
 		case rpc.EarliestBlockNumber:
 			blockNumber = 0
 		case rpc.FinalizedBlockNumber:
-			blockNumber, err = GetFinalizedBlockNumber(tx)
+			blockNumber, err = GetFinalizedBlockNumber(overlayTx)
 			if err != nil {
 				return 0, common.Hash{}, false, false, err
 			}
 		case rpc.SafeBlockNumber:
-			blockNumber, err = GetSafeBlockNumber(tx)
+			blockNumber, err = GetSafeBlockNumber(overlayTx)
 			if err != nil {
 				return 0, common.Hash{}, false, false, err
 			}
@@ -119,7 +131,7 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 		default:
 			blockNumber = uint64(number.Int64())
 		}
-		hash, ok, err = br.CanonicalHash(ctx, tx, blockNumber)
+		hash, ok, err = br.CanonicalHash(ctx, overlayTx, blockNumber)
 		if err != nil {
 			return 0, common.Hash{}, false, false, err
 		}
@@ -127,7 +139,7 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 			return blockNumber, hash, blockNumber == plainStateBlockNumber, false, nil
 		}
 	} else {
-		number, err := br.HeaderNumber(ctx, tx, hash)
+		number, err := br.HeaderNumber(ctx, overlayTx, hash)
 		if err != nil {
 			return 0, common.Hash{}, false, false, err
 		}
@@ -136,7 +148,7 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 		}
 		blockNumber = *number
 
-		ch, ok, err := br.CanonicalHash(ctx, tx, blockNumber)
+		ch, ok, err := br.CanonicalHash(ctx, overlayTx, blockNumber)
 		if err != nil {
 			return 0, common.Hash{}, false, false, err
 		}
@@ -155,7 +167,15 @@ func CreateStateReader(ctx context.Context, tx kv.TemporalTx, br services.FullBl
 	if !found {
 		return nil, rpc.BlockNotFoundErr{BlockId: blockNrOrHash.String()}
 	}
-	return CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, txnIndex, stateCache, txNumReader)
+	// Use overlay tx for the state reader so the kvcache View sees the
+	// correct state version during background commits.
+	stateTx := tx
+	if filters != nil {
+		if overlayTx, ok := filters.WithOverlay(tx).(kv.TemporalTx); ok {
+			stateTx = overlayTx
+		}
+	}
+	return CreateStateReaderFromBlockNumber(ctx, stateTx, blockNumber, latest, txnIndex, stateCache, txNumReader)
 }
 
 func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.TemporalTx, blockNumber uint64, latest bool, txnIndex int, stateCache kvcache.Cache, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {

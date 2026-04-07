@@ -280,6 +280,12 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 		return p.baseTxnProvider.ProvideTxns(ctx, opts...)
 	}
 
+	// TODO(yperbasis): revisit Shutter gas filtering for EIP-8037.
+	// The shutter pool lacks chain config to compute intrinsic state gas,
+	// so txn.GetGasLimit() is used as a conservative proxy for both
+	// dimensions. State gas enforcement ultimately relies on best() in
+	// the base txpool (for additional public txns) and applyTransaction
+	// (for all txns).
 	availableGas := provideOpts.GasTarget
 	txnsIdFilter := provideOpts.TxnIdsFilter
 	txns := make([]types.Transaction, 0, len(decryptedTxns.Transactions))
@@ -288,11 +294,13 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 		if txnsIdFilter != nil && txnsIdFilter.Contains(txn.Hash()) {
 			continue
 		}
-		if txn.GetGasLimit() > availableGas {
+		gasLimit := txn.GetGasLimit()
+		if gasLimit > availableGas.Regular || gasLimit > availableGas.State {
 			continue
 		}
-		availableGas -= txn.GetGasLimit()
-		decryptedTxnsGas += txn.GetGasLimit()
+		availableGas.Regular -= gasLimit
+		availableGas.State -= gasLimit
+		decryptedTxnsGas += gasLimit
 		txns = append(txns, txn)
 		if txnsIdFilter != nil {
 			txnsIdFilter.Add(txn.Hash())
