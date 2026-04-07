@@ -57,7 +57,7 @@ jobs:
           sparse-checkout-cone-mode: false
           path: erigon-src
 
-      - name: Read pinned Hive ref
+      - name: Read pinned versions
         id: hive-version
         run: |
           echo "ref=$(jq -r .hive_ref erigon-src/.github/workflows/hive-versions.json)" >> "$GITHUB_OUTPUT"
@@ -93,7 +93,7 @@ jobs:
           username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
           password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
 
-      # Targetting the clients/erigon/Dockerfile.git in the Hive director - 
+      # Targeting the clients/erigon/Dockerfile.git in the Hive directory -
       # this builds the container from github and uses it for tests
       - name: Get dependencies and build hive
         env:
