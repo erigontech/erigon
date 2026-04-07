@@ -65,8 +65,9 @@ For production environments where RPC endpoints are exposed publicly, it is stro
 
 **Dedicated User**: Run Erigon as a dedicated system user rather than root to limit potential damage from security breaches.
 
-**IPC Endpoint**: The IPC socket is enabled by default and accessible to any local process with filesystem access to the socket file. On production servers, disable it with `--ipcdisable` or restrict access via filesystem permissions. Use `--ipcpath` to set a custom socket path.
+**IPC Endpoint**: The `erigon` binary force-disables its IPC socket at startup (`nodeConfig.IPCPath` is set to `""`), so there is no local IPC endpoint to secure. If you use `rpcdaemon` as a separate process, refer to its own `socket.*` flags for local IPC configuration.
 
 **Insecure Account Unlock**: Never set `--allow-insecure-unlock` on a production node. This flag permits `personal_unlockAccount` calls over HTTP, which is disabled by default for security reasons.
 
 **Virtual Host Protection**: Configure `HTTPVirtualHosts` to prevent DNS rebinding attacks. This validates the Host header to ensure requests come from authorized domains.
+
