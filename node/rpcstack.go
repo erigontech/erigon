@@ -391,14 +391,7 @@ func (h *rpcAdmissionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		if h.inflight.Add(1) > h.limit {
 			h.inflight.Add(-1)
 			rpcAdmissionRejected.Inc()
-			w.Header().Set("Retry-After", "1")
-			// TODO: the 503 response here is plain text, not a JSON-RPC envelope.
-			// Similarly, when BeginRo returns ErrServerOverloaded (inner gate), the
-			// response is HTTP 200 with JSON-RPC code -32000 instead of -32005.
-			// Both paths should return HTTP 503 + JSON-RPC {"error":{"code":-32005,...}}.
-			// This requires buffering the response in rpc/http.go and will be
-			// addressed in a separate PR.
-			http.Error(w, "server overloaded, retry later", http.StatusServiceUnavailable)
+			rpc.WriteOverloadedResponse(w)
 			return
 		}
 		defer h.inflight.Add(-1)
