@@ -139,7 +139,10 @@ func ParseVersion(v string) (Version, error) {
 	}
 
 	verStr, _, _ := strings.Cut(v[1:], "-")
-	majorStr, minorStr, _ := strings.Cut(verStr, ".")
+	majorStr, minorStr, hasDot := strings.Cut(verStr, ".")
+	if hasDot && minorStr == "" {
+		return Version{}, ErrInvalidVersion
+	}
 
 	major, err := strconv.ParseUint(majorStr, 10, 8)
 	if err != nil {
