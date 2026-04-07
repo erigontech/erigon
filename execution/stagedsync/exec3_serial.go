@@ -375,6 +375,16 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 				var sysCallGasUsed uint64
 				syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
+					codeHash, _ := ibs.GetCodeHash(contract)
+					codeSize, _ := ibs.GetCodeSize(contract)
+					se.logger.Debug("[finalize code]", "block", txTask.BlockNumber(), "contract", contract, "codeHash", codeHash, "codeSize", codeSize)
+					for slotIdx := 0; slotIdx < 4; slotIdx++ {
+						var slotHash common.Hash
+						slotHash[31] = byte(slotIdx)
+						slotKey := accounts.InternKey(slotHash)
+						val, _ := ibs.GetState(contract, slotKey)
+						se.logger.Debug("[finalize slot]", "block", txTask.BlockNumber(), "contract", contract, "slot", slotIdx, "value", val.Hex())
+					}
 					ret, gas, err := protocol.SysCallContract(contract, data, se.cfg.chainConfig, ibs, txTask.Header, se.cfg.engine, false /* constCall */, *se.cfg.vmConfig)
 					se.logger.Debug("[finalize syscall]", "block", txTask.BlockNumber(), "contract", contract, "gas", gas, "err", err)
 					if err != nil {
