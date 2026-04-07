@@ -67,16 +67,14 @@ type CallContext struct {
 
 var contextPool = sync.Pool{
 	New: func() any {
-		return &CallContext{
-			Stack: Stack{data: make([]uint256.Int, 0, 16)},
-		}
+		return &CallContext{}
 	},
 }
 
 func getCallContext(contract Contract, input []byte, gas uint64) *CallContext {
 	ctx, ok := contextPool.Get().(*CallContext)
 	if !ok {
-		log.Error("Type assertion failure", "err", "cannot get Stack pointer from stackPool")
+		log.Error("Type assertion failure", "err", "cannot get CallContext pointer from contextPool")
 	}
 
 	ctx.gas = gas
@@ -150,7 +148,7 @@ func (ctx *CallContext) MemoryData() []byte {
 // StackData returns the stack data. Callers must not modify the contents
 // of the returned data.
 func (ctx *CallContext) StackData() []uint256.Int {
-	return ctx.Stack.data
+	return ctx.Stack.data[:ctx.Stack.top:ctx.Stack.top]
 }
 
 // Caller returns the current caller.
@@ -314,7 +312,6 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 	// explicit STOP, RETURN or SELFDESTRUCT is executed, an error occurred during
 	// the execution of one of the operations or until the done flag is set by the
 	// parent context.
-	steps := 0
 
 	var traceGas = func(op OpCode, callGas, cost uint64) uint64 {
 		switch op {
@@ -325,12 +322,11 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 		}
 	}
 
+	// Hoist to locals so the compiler sees them as loop-invariant.
+	anyTrace := dbg.TraceDynamicGas || debug || trace
+
 	for {
-		steps++
-		if steps%50_000 == 0 && evm.Cancelled() {
-			break
-		}
-		if dbg.TraceDynamicGas || debug || trace {
+		if anyTrace {
 			// Capture pre-execution values for tracing.
 			logged, pcCopy, gasCopy = false, pc, callContext.gas
 			blockNum, txIndex, txIncarnation = evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation()
@@ -396,7 +392,7 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 		}
 
 		// Do gas tracing before memory expansion
-		if tracer != nil {
+		if debug {
 			if tracer.OnGasChange != nil {
 				tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
 			}
