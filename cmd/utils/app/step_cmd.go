@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pelletier/go-toml"
+	"github.com/pelletier/go-toml/v2"
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon/common/dir"

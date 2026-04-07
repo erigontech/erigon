@@ -1553,7 +1553,7 @@ func TestOsakaProofShapeMismatchDiscardsCompletely(t *testing.T) {
 	// Step 3: Trigger best() via PeekBest — it will detect the proof-shape mismatch
 	// and should fully discard the pre-Osaka txn.
 	var txnsRlp TxnsRlp
-	_, err = pool.PeekBest(ctx, 10, &txnsRlp, 0, math.MaxUint64, math.MaxUint64, math.MaxInt)
+	_, err = pool.PeekBest(ctx, 10, &txnsRlp, 0)
 	require.NoError(err)
 
 	// Step 4: Verify the pre-Osaka txn was fully discarded.

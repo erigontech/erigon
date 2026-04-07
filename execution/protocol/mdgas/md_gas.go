@@ -23,10 +23,20 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 )
 
-// MdGas represents multi-dimensional gas
+// MdGas represents multi-dimensional gas (regular + state).
 type MdGas struct {
 	Regular uint64
 	State   uint64
+}
+
+// FullMdGas extends MdGas with blob gas.
+type FullMdGas struct {
+	MdGas
+	Blob uint64
+}
+
+func NewFullMdGas(regular, state, blob uint64) FullMdGas {
+	return FullMdGas{MdGas: MdGas{Regular: regular, State: state}, Blob: blob}
 }
 
 func (g MdGas) Minus(other MdGas) MdGas {

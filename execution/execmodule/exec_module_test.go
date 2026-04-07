@@ -855,3 +855,199 @@ func TestAssembleBlockWithWithdrawalRequest(t *testing.T) {
 	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
 	require.NoError(t, err)
 }
+
+// TestAssembleBlockStateGasLimit verifies that the builder respects the EIP-8037
+// block validity invariant: gas_used = max(regular, state) <= gas_limit.
+//
+// Contract creations have high intrinsic state gas (~131K per create at
+// CostPerStateByte=1174) but low regular gas (~30K). With a 500K gas limit,
+// about 4 creates would push state gas past the limit even though regular gas
+// has room. Without the fix the builder would produce an invalid block.
+func TestAssembleBlockStateGasLimit(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+
+	genesis := &types.Genesis{
+		Config:   chain.AllProtocolChanges,
+		GasLimit: 500_000, // low limit so state gas from a few creates exceeds it
+		Alloc: types.GenesisAlloc{
+			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		},
+	}
+
+	m := execmoduletester.New(t,
+		execmoduletester.WithGenesisSpec(genesis),
+		execmoduletester.WithKey(privKey),
+		execmoduletester.WithTxPool(),
+	)
+	exec := m.ExecModule
+	txpool := m.TxPoolGrpcServer
+
+	// Generate 1 empty block as initial chain state.
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1,
+		func(i int, gen *blockgen.BlockGen) {})
+	require.NoError(t, err)
+	err = m.InsertChain(chainPack)
+	require.NoError(t, err)
+
+	// Submit 10 contract creation txns to the pool.
+	// Each has ~131K intrinsic state gas but only ~30K regular gas.
+	baseFee := chainPack.TopBlock.BaseFee().Uint64()
+	deployCode := []byte{0x60, 0x00} // PUSH1 0x00 — minimal contract
+	rlpTxs := make([][]byte, 10)
+	for i := range rlpTxs {
+		tx, txErr := types.SignTx(
+			types.NewContractCreation(uint64(i), uint256.NewInt(0), 200_000, uint256.NewInt(baseFee), deployCode),
+			*types.LatestSignerForChainID(m.ChainConfig.ChainID), privKey,
+		)
+		require.NoError(t, txErr)
+		var buf bytes.Buffer
+		require.NoError(t, tx.EncodeRLP(&buf))
+		rlpTxs[i] = buf.Bytes()
+	}
+	r, err := txpool.Add(ctx, &txpoolproto.AddRequest{RlpTxs: rlpTxs})
+	require.NoError(t, err)
+	for _, e := range r.Errors {
+		require.Equal(t, "success", e)
+	}
+
+	// Assemble block — builder must stop before state gas exceeds gas limit.
+	slotNumber := uint64(1)
+	payloadId, err := assembleBlock(ctx, exec, &executionproto.AssembleBlockRequest{
+		ParentHash:            gointerfaces.ConvertHashToH256(chainPack.TopBlock.Hash()),
+		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		PrevRandao:            gointerfaces.ConvertHashToH256(randomHash()),
+		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(common.Address{1}),
+		Withdrawals:           make([]*typesproto.Withdrawal, 0),
+		ParentBeaconBlockRoot: gointerfaces.ConvertHashToH256(randomHash()),
+		SlotNumber:            &slotNumber,
+	})
+	require.NoError(t, err)
+	block, err := getAssembledBlock(ctx, exec, payloadId)
+	require.NoError(t, err)
+
+	// The block must include some but not all 10 creates (state gas limited).
+	txCount := len(block.Transactions())
+	require.Greater(t, txCount, 0, "block should contain at least one tx")
+	require.Less(t, txCount, 10, "builder should stop before all 10 creates fit")
+
+	// EIP-8037 invariant: gas_used <= gas_limit.
+	require.LessOrEqual(t, block.GasUsed(), block.GasLimit(),
+		"gas_used (max of regular, state) must not exceed gas_limit")
+
+	// Block must pass full validation (insert + validate + FCU).
+	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
+	require.NoError(t, err)
+}
+
+// TestAssembleBlockStateGasLimitSSTORE verifies the EIP-8037 block validity
+// invariant for execution-time state gas (SSTOREs), as opposed to intrinsic
+// state gas (contract creations tested above).
+//
+// A deployed contract writes 4 new storage slots per call (~150K execution
+// state gas, ~41K regular gas, 0 intrinsic state gas). The txpool cannot
+// filter these by state gas — only the check inside applyTransaction
+// (between ApplyMessage and FinalizeTx) prevents the block from exceeding
+// gas_limit.
+func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+
+	genesis := &types.Genesis{
+		Config:   chain.AllProtocolChanges,
+		GasLimit: 500_000,
+		Alloc: types.GenesisAlloc{
+			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		},
+	}
+
+	m := execmoduletester.New(t,
+		execmoduletester.WithGenesisSpec(genesis),
+		execmoduletester.WithKey(privKey),
+		execmoduletester.WithTxPool(),
+	)
+	exec := m.ExecModule
+	txpool := m.TxPoolGrpcServer
+
+	// Deploy a contract whose runtime writes to 4 storage slots per call.
+	// Runtime: base = calldataload(0); sstore(base+i, 1) for i in 0..3.
+	deployCode, err := hex.DecodeString(
+		"601d600c600039601d6000f3" + // initcode: deploy 29-byte runtime
+			"6000356001815560018160010155600181600201556001816003015500") // runtime
+	require.NoError(t, err)
+
+	signer := *types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	baseFee := m.Genesis.BaseFee().Uint64()
+	deployTx, err := types.SignTx(
+		types.NewContractCreation(0, uint256.NewInt(0), 300_000, uint256.NewInt(baseFee), deployCode),
+		signer, privKey,
+	)
+	require.NoError(t, err)
+	contractAddr := types.CreateAddress(senderAddr, 0)
+
+	// Generate block 1 with the deployment.
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1,
+		func(i int, gen *blockgen.BlockGen) { gen.AddTx(deployTx) })
+	require.NoError(t, err)
+	err = m.InsertChain(chainPack)
+	require.NoError(t, err)
+
+	// Submit 10 call txns. Each writes 4 new slots (~150K state gas, ~41K
+	// regular gas). With a 500K gas limit, 3 calls fit (~451K state gas)
+	// but the 4th would push to ~601K. Intrinsic state gas is 0 for all
+	// calls, so the txpool's regular-gas filter lets them all through —
+	// the applyTransaction check is the only defense.
+	baseFee = chainPack.TopBlock.BaseFee().Uint64()
+	rlpTxs := make([][]byte, 10)
+	for i := range rlpTxs {
+		var calldata [32]byte
+		binary.BigEndian.PutUint64(calldata[24:], uint64(i*4))
+		tx, txErr := types.SignTx(
+			types.NewTransaction(uint64(i+1), contractAddr, uint256.NewInt(0), 300_000, uint256.NewInt(baseFee), calldata[:]),
+			signer, privKey,
+		)
+		require.NoError(t, txErr)
+		var buf bytes.Buffer
+		require.NoError(t, tx.EncodeRLP(&buf))
+		rlpTxs[i] = buf.Bytes()
+	}
+	r, err := txpool.Add(ctx, &txpoolproto.AddRequest{RlpTxs: rlpTxs})
+	require.NoError(t, err)
+	for _, e := range r.Errors {
+		require.Equal(t, "success", e)
+	}
+
+	// Assemble block 2.
+	slotNumber := uint64(1)
+	payloadId, err := assembleBlock(ctx, exec, &executionproto.AssembleBlockRequest{
+		ParentHash:            gointerfaces.ConvertHashToH256(chainPack.TopBlock.Hash()),
+		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		PrevRandao:            gointerfaces.ConvertHashToH256(randomHash()),
+		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(common.Address{1}),
+		Withdrawals:           make([]*typesproto.Withdrawal, 0),
+		ParentBeaconBlockRoot: gointerfaces.ConvertHashToH256(randomHash()),
+		SlotNumber:            &slotNumber,
+	})
+	require.NoError(t, err)
+	block, err := getAssembledBlock(ctx, exec, payloadId)
+	require.NoError(t, err)
+
+	txCount := len(block.Transactions())
+	require.Greater(t, txCount, 0, "block should contain at least one tx")
+	require.Less(t, txCount, 10, "builder should stop before all 10 calls fit")
+
+	// EIP-8037 invariant: gas_used <= gas_limit.
+	require.LessOrEqual(t, block.GasUsed(), block.GasLimit(),
+		"gas_used (max of regular, state) must not exceed gas_limit")
+
+	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
+	require.NoError(t, err)
+}
