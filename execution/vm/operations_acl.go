@@ -148,7 +148,19 @@ func gasSLoadEIP2929(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, m
 	// If the caller cannot afford the cost, this change will be rolled back
 	// If he does afford it, we can skip checking the same thing later on, during execution
 	if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(callContext.Address(), accounts.InternKey(loc.Bytes32())); slotMod {
+		if evm.Context.BlockNumber == 24809877 {
+			txIdx := evm.IntraBlockState().TxIndex()
+			if txIdx == 63 || txIdx == 72 {
+				log.Debug("[sload debug] cold SLOAD", "block", evm.Context.BlockNumber, "txIdx", txIdx, "contract", callContext.Address(), "slot", fmt.Sprintf("%x", loc.Bytes32()), "gas", params.ColdSloadCostEIP2929)
+			}
+		}
 		return mdgas.MdGas{Regular: params.ColdSloadCostEIP2929}, nil
+	}
+	if evm.Context.BlockNumber == 24809877 {
+		txIdx := evm.IntraBlockState().TxIndex()
+		if txIdx == 63 || txIdx == 72 {
+			log.Debug("[sload debug] warm SLOAD", "block", evm.Context.BlockNumber, "txIdx", txIdx, "contract", callContext.Address(), "slot", fmt.Sprintf("%x", loc.Bytes32()), "gas", params.WarmStorageReadCostEIP2929)
+		}
 	}
 	return mdgas.MdGas{Regular: params.WarmStorageReadCostEIP2929}, nil
 }
@@ -189,6 +201,12 @@ func gasEip2929AccountCheck(evm *EVM, callContext *CallContext, scopeGas mdgas.M
 	// If the caller cannot afford the cost, this change will be rolled back
 	if evm.IntraBlockState().AddAddressToAccessList(addr) {
 		// The warm storage read cost is already charged as constantGas
+		if evm.Context.BlockNumber == 24809877 {
+			txIdx := evm.IntraBlockState().TxIndex()
+			if txIdx == 63 || txIdx == 72 {
+				log.Debug("[acct debug] cold account check (EXT*)", "block", evm.Context.BlockNumber, "txIdx", txIdx, "caller", callContext.Address(), "addr", addr, "gas", params.ColdAccountAccessCostEIP2929-params.WarmStorageReadCostEIP2929)
+			}
+		}
 		return mdgas.MdGas{Regular: params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929}, nil
 	}
 	return mdgas.MdGas{}, nil
@@ -434,6 +452,12 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 			fmt.Printf("%d (%d.%d) Variant Gas: base %d, access: %d, delegation: %d, call: %d\n",
 				evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(),
 				statefulBaseGas, accessGas, delegationGas, callGas)
+		}
+		if evm.intraBlockState.BlockNumber() == 24809877 {
+			txIdx := evm.intraBlockState.TxIndex()
+			if txIdx == 63 || txIdx == 72 {
+				log.Debug("[call debug] CALL gas", "block", evm.intraBlockState.BlockNumber(), "txIdx", txIdx, "addr", addr, "accessGas", accessGas, "delegationGas", delegationGas, "baseGas", statefulBaseGas.Regular, "callGas", callGas, "total", accessGas+delegationGas+statefulBaseGas.Regular+callGas)
+			}
 		}
 		var overflow bool
 		if gas.Regular, overflow = math.SafeAdd(gas.Regular, accessGas+delegationGas); overflow {
