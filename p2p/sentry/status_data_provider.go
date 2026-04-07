@@ -21,6 +21,8 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"sync"
+	"time"
 
 	"github.com/holiman/uint256"
 
@@ -60,6 +62,13 @@ type StatusDataProvider struct {
 	timeForks   []uint64
 
 	logger log.Logger
+
+	// Cached status data — avoids opening MDBX readers on every
+	// peer status exchange. Valid until the next expected block
+	// (headTime + 12s slot duration).
+	cacheMu      sync.Mutex
+	cachedStatus *sentryproto.StatusData
+	cacheExpiry  time.Time // when the cached data becomes stale
 }
 
 func NewStatusDataProvider(
@@ -125,8 +134,17 @@ func (s *StatusDataProvider) makeStatusData(head ChainHead) *sentryproto.StatusD
 }
 
 // GetStatusData returns the current StatusData.
-// Uses DB head, falls back to snapshot data when unavailable
+// Results are cached until the next expected block (headTime + 12s)
+// to avoid opening MDBX readers on every peer status exchange.
 func (s *StatusDataProvider) GetStatusData(ctx context.Context) (*sentryproto.StatusData, error) {
+	s.cacheMu.Lock()
+	if s.cachedStatus != nil && time.Now().Before(s.cacheExpiry) {
+		cached := s.cachedStatus
+		s.cacheMu.Unlock()
+		return cached, nil
+	}
+	s.cacheMu.Unlock()
+
 	var minimumBlock uint64
 	if err := s.db.View(ctx, func(tx kv.Tx) error {
 		var err error
@@ -136,21 +154,35 @@ func (s *StatusDataProvider) GetStatusData(ctx context.Context) (*sentryproto.St
 		return nil, fmt.Errorf("GetStatusData: minimumBlock error: %w", err)
 	}
 
+	var result *sentryproto.StatusData
+
 	chainHead, err := ReadChainHead(ctx, s.db, minimumBlock)
 	if err == nil {
-		return s.makeStatusData(chainHead), nil
-	}
-	if !errors.Is(err, ErrNoHead) {
+		result = s.makeStatusData(chainHead)
+	} else if !errors.Is(err, ErrNoHead) {
 		return nil, err
+	} else {
+		s.logger.Warn("sentry.StatusDataProvider: The canonical chain current header not found in the database. Check the database consistency. Using latest available snapshot data.")
+		snapHead, err := s.ReadChainHeadFromSnapshots(ctx, minimumBlock)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read chain head from snapshots: %w", err)
+		}
+		result = s.makeStatusData(snapHead)
 	}
 
-	s.logger.Warn("sentry.StatusDataProvider: The canonical chain current header not found in the database. Check the database consistency. Using latest available snapshot data.")
-
-	snapHead, err := s.ReadChainHeadFromSnapshots(ctx, minimumBlock)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read chain head from snapshots: %w", err)
+	// Cache duration depends on how close we are to the chain tip.
+	// At tip (headTime within 60s of now): 12s (one slot).
+	// During initial sync (headTime far in the past): 60s.
+	cacheDuration := 60 * time.Second
+	if result.MaxBlockTime > 0 && time.Since(time.Unix(int64(result.MaxBlockTime), 0)) < 60*time.Second {
+		cacheDuration = 12 * time.Second
 	}
-	return s.makeStatusData(snapHead), nil
+	s.cacheMu.Lock()
+	s.cachedStatus = result
+	s.cacheExpiry = time.Now().Add(cacheDuration)
+	s.cacheMu.Unlock()
+
+	return result, nil
 }
 
 // ReadChainHeadWithTx reads chain head in DB

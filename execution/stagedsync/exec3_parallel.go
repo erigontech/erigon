@@ -508,6 +508,7 @@ func (pe *parallelExecutor) triggerBatchCommitment(ctx context.Context) {
 	if pe.commitResultsCh == nil {
 		return
 	}
+	defer func() { recover() }() // channel may be closed by executeBlocks
 	select {
 	case pe.commitResultsCh <- &commitComputeRequest{}:
 	case <-ctx.Done():
@@ -545,13 +546,21 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 	// Do NOT rollback it here — the stageloop owns its lifecycle.
 
 	defer func() {
-		// Close channels so apply loop and calculator drain and exit.
+		// Close channels AFTER the exec loop finishes processing all
+		// blocks. This ensures all blockResults reach the apply loop
+		// and calculator before channels close. executeBlocks does NOT
+		// close channels — it returns from the errgroup after loading
+		// blocks, but the exec loop keeps processing.
+		safeClose := func(ch chan applyResult) {
+			defer func() { recover() }()
+			close(ch)
+		}
 		if pe.commitResultsCh != nil {
-			close(pe.commitResultsCh)
+			safeClose(pe.commitResultsCh)
 			pe.commitResultsCh = nil
 		}
 		if pe.applyResultsCh != nil {
-			close(pe.applyResultsCh)
+			safeClose(pe.applyResultsCh)
 			pe.applyResultsCh = nil
 		}
 	}()
@@ -613,15 +622,28 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 		select {
 		case exec := <-pendingCh:
 			if err := pe.processRequest(ctx, exec); err != nil {
-				fmt.Printf("FLOW: processRequest err=%v\n", err)
 				return err
 			}
 			continue
-		// Do NOT select on ctx.Done here. The errgroup cancels the
-		// context when executeBlocks returns (after loading all blocks),
-		// but the exec loop must keep running to process queued results.
-		// The exec loop exits when rws is closed (all results drained)
-		// or when processResults returns an error.
+		case <-ctx.Done():
+			// Context cancelled (executeBlocks returned from errgroup).
+			// Drain any remaining results then exit.
+			for {
+				select {
+				case nextResult, ok := <-pe.rws.ResultCh():
+					if !ok {
+						return nil
+					}
+					if closed, err := pe.rws.Drain(ctx, nextResult); err != nil || closed {
+						return err
+					}
+					if _, err := pe.processResults(ctx, applyTx); err != nil {
+						return err
+					}
+				default:
+					return nil
+				}
+			}
 		case nextResult, ok := <-pe.rws.ResultCh():
 			if !ok {
 				fmt.Printf("FLOW: rws closed lastBlock=%d\n", pe.lastExecutedBlockNum.Load())
@@ -681,9 +703,11 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					sizeEst = pe.rs.SizeEstimateAfterCommitment()
 				}
 				batchLimit := pe.cfg.batchSize.Bytes()
-				if sizeEst > batchLimit {
-					fmt.Printf("FLOW: batch full block=%d size=%d limit=%d breakdown=%s\n",
-						blockResult.BlockNum, sizeEst, batchLimit, "n/a")
+				// Always process at least 10 blocks before checking size.
+				// sd.mem starts with a large commitment baseline (~500MB) from
+				// the snapshot trie state. Without this minimum, the batch
+				// exits immediately after the first block.
+				if pe.blockExecMetrics.BlockCount.Load() > 10 && sizeEst > batchLimit {
 					pe.triggerBatchCommitment(ctx)
 					return nil
 				}
@@ -887,12 +911,17 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 
 	return execLoopCtx, func() {
 		execLoopCtxCancel()
-		defer pe.stopWorkers()
-		defer pe.in.Release()
 
+		pe.in.Release()
+		fmt.Printf("LIFECYCLE: stopWorkers start\n")
+		pe.stopWorkers()
+		fmt.Printf("LIFECYCLE: stopWorkers done\n")
+
+		fmt.Printf("LIFECYCLE: wait start\n")
 		if err := pe.wait(ctx); err != nil {
-			pe.logger.Debug("exec loop cancel failed", "err", err)
+			fmt.Printf("LIFECYCLE: wait err=%v\n", err)
 		}
+		fmt.Printf("LIFECYCLE: wait done\n")
 	}, nil
 }
 
@@ -1808,7 +1837,15 @@ type blockExecutor struct {
 
 // sendResult fans out an applyResult to both the apply loop and
 // the commitment calculator. Blocks if either channel is full.
-func (be *blockExecutor) sendResult(ctx context.Context, r applyResult) error {
+// Channels may be closed by executeBlocks — recover from panic.
+func (be *blockExecutor) sendResult(ctx context.Context, r applyResult) (err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			// Channel closed — executeBlocks finished and closed channels.
+			// This is normal during batch shutdown.
+			err = context.Canceled
+		}
+	}()
 	select {
 	case be.applyResults <- r:
 	case <-ctx.Done():

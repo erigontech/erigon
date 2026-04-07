@@ -573,17 +573,10 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 	}
 
 	te.execLoopGroup.Go(func() (err error) {
-		defer func() {
-			// Close channels on exit — signals exec loop / apply loop / calculator.
-			safeClose := func(ch chan applyResult) {
-				defer func() { recover() }()
-				close(ch)
-			}
-			for _, ch := range commitResults {
-				safeClose(ch)
-			}
-			safeClose(applyResults)
-		}()
+		// Do NOT close channels here. The exec loop closes them
+		// after processing all blocks (via pe.commitResultsCh/applyResultsCh
+		// deferred close, or via the ctx.Done drain path).
+		// Closing here would race with the exec loop sending results.
 		defer func() {
 			if rec := recover(); rec != nil {
 				err = fmt.Errorf("exec blocks panic: %s", rec)
