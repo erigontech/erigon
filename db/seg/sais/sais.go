@@ -35,6 +35,30 @@ func Sais(data []byte, sa []int32) error {
 	return nil
 }
 
+// SaisWithBuf computes the suffix array of data into sa, using *buf as reusable scratch space.
+// buf is grown as needed. Callers should preserve *buf across calls to amortize allocations:
+// without it, recurse_32 allocates ~len(data)/4 ints on every call.
+func SaisWithBuf(data []byte, sa []int32, buf *[]int32) error {
+	n := len(data)
+	if n != len(sa) {
+		panic("sais: len(data) != len(sa)")
+	}
+	if n <= 1 {
+		if n == 1 {
+			sa[0] = 0
+		}
+		return nil
+	}
+	clear(sa)
+
+	// Pre-size buf to n/2 so recurse_32's "len(tmp) < numLMS" check never triggers.
+	// numLMS is at most n/2, so a buf of n/2 ints is sufficient for all recursion levels.
+	needed := max(512, n/2)
+	*buf = growslice32(*buf, needed)
+	sais_8_32(data, 256, sa, *buf)
+	return nil
+}
+
 func sais_8_32(text []byte, textMax int, sa, tmp []int32) {
 	if len(sa) != len(text) || len(tmp) < textMax {
 		panic("sais: misuse of sais_8_32")
@@ -428,4 +452,11 @@ func induceS_8_32(text []byte, sa, freq, bucket []int32) {
 		b--
 		sa[b] = int32(k)
 	}
+}
+
+func growslice32(b []int32, wantLength int) []int32 {
+	if cap(b) >= wantLength {
+		return b[:wantLength]
+	}
+	return make([]int32, wantLength, max(wantLength, 2*cap(b)))
 }

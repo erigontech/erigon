@@ -214,7 +214,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	if err != nil {
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
-	defer func() { roTx.Rollback() }()
+	defer func() { roTx.Rollback() }() // closure: CommitCycle may reassign roTx
 
 	closeOnReturn := true
 
@@ -235,6 +235,9 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		if !isDomainAheadOfBlocks {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
+	}
+	if currentContext != nil {
+		currentContext.SetInMemHistoryReads(inMemHistoryReads)
 	}
 
 	defer func() {
@@ -499,11 +502,11 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			// MDBX from recycling freed pages and causing MDBX_MAP_FULL under
 			// heavy pruning (issue #20080).
 			roTx.Rollback()
-			var refreshErr error
-			roTx, refreshErr = e.db.BeginTemporalRo(ctx) //nolint:gocritic
+			newRoTx, refreshErr := e.db.BeginTemporalRo(ctx)
 			if refreshErr != nil {
 				return fmt.Errorf("updateForkChoice: refresh roTx: %w", refreshErr)
 			}
+			roTx = newRoTx
 			if overlay := sd.BlockOverlay(); overlay != nil {
 				overlay.UpdateTxn(roTx)
 			}
@@ -525,10 +528,11 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}
 			// Recreate RO tx + block overlay on the fresh committed state.
 			roTx.Rollback()
-			roTx, err = e.db.BeginTemporalRo(ctx) //nolint:gocritic
+			newRoTx, err := e.db.BeginTemporalRo(ctx)
 			if err != nil {
 				return nil, fmt.Errorf("updateForkChoice: begin ro after hasMore: %w", err)
 			}
+			roTx = newRoTx
 			if err := sd.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
 				roTx.Rollback()
 				return nil, fmt.Errorf("updateForkChoice: init overlay after hasMore: %w", err)

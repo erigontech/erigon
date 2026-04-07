@@ -203,7 +203,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		return err
 	}
 	defer doms.Close()
-	doms.SetInMemHistoryReads(false)
+	doms.SetInMemHistoryReads(inMemHistoryReads)
 
 	var finishStageBeforeSync uint64
 	if hook != nil {
