@@ -317,8 +317,6 @@ Flags related to consensus mechanisms and network forks.
   * Default: `20`
 * `--gpo.percentile value`: The percentile of recent transaction gas prices to use for a suggested gas price.
   * Default: `60`
-* `--gpo.maxprice value`: The maximum gas price recommended by the gas price oracle.
-  * Default: `500000000000` (500 GWei)
 * `--proposer.disable`: Disables the PoS proposer.
   * Default: `false`
 * `--builder.maxblobs value`: Cap the number of blob transactions included in a built block.
