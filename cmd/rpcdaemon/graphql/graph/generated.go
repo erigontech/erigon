@@ -1459,7 +1459,7 @@ func (ec *executionContext) _Account_storage(ctx context.Context, field graphql.
 		ec.fieldContext_Account_storage,
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.resolvers.Account().Storage(ctx, obj, fc.Args["slot"].(string))
+			return ec.Resolvers.Account().Storage(ctx, obj, fc.Args["slot"].(string))
 		},
 		nil,
 		ec.marshalNBytes322string,
@@ -2593,7 +2593,7 @@ func (ec *executionContext) _Block_account(ctx context.Context, field graphql.Co
 		ec.fieldContext_Block_account,
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.resolvers.Block().Account(ctx, obj, fc.Args["address"].(string))
+			return ec.Resolvers.Block().Account(ctx, obj, fc.Args["address"].(string))
 		},
 		nil,
 		ec.marshalNAccount2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount,
