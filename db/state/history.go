@@ -118,12 +118,6 @@ func (h *History) vAccessorNewFilePath(fromStep, toStep kv.Step) string {
 func (h *History) vFileNameMask(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("*-%s.%d-%d.v", h.FilenameBase, fromStep, toStep)
 }
-func (h *History) vFilePathMask(fromStep, toStep kv.Step) string {
-	return filepath.Join(h.dirs.SnapHistory, h.vFileNameMask(fromStep, toStep))
-}
-func (h *History) vAccessorFilePathMask(fromStep, toStep kv.Step) string {
-	return filepath.Join(h.dirs.SnapAccessors, h.vAccessorFileNameMask(fromStep, toStep))
-}
 func (h *History) vAccessorFileNameMask(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("*-%s.%d-%d.vi", h.FilenameBase, fromStep, toStep)
 }
@@ -878,7 +872,7 @@ func (h *History) dataWriter(ctx context.Context, f *seg.Compressor) *seg.PagedW
 	if !strings.Contains(f.FileName(), ".v") {
 		panic("assert: miss-use " + f.FileName())
 	}
-	return seg.NewPagedWriter(ctx, seg.NewWriter(f, h.Compression), f.GetValuesOnCompressedPage() > 0)
+	return seg.NewPagedWriter(ctx, seg.NewWriter(f, h.Compression), f.GetValuesOnCompressedPage() > 0, h.CompressorCfg.Workers)
 }
 func (ht *HistoryRoTx) dataReader(f *seg.Decompressor) *seg.Reader { return ht.h.dataReader(f) }
 func (ht *HistoryRoTx) dataWriter(ctx context.Context, f *seg.Compressor) *seg.PagedWriter {
@@ -1210,14 +1204,6 @@ func (ht *HistoryRoTx) Close() {
 	ht.iit.Close()
 }
 
-func (ht *HistoryRoTx) getFileDeprecated(from, to uint64) (it visibleFile, ok bool) {
-	for i := 0; i < len(ht.files); i++ {
-		if ht.files[i].startTxNum == from && ht.files[i].endTxNum == to {
-			return ht.files[i], true
-		}
-	}
-	return it, false
-}
 func (ht *HistoryRoTx) getFile(txNum uint64) (it visibleFile, ok bool) {
 	for i := 0; i < len(ht.files); i++ {
 		if ht.files[i].startTxNum <= txNum && ht.files[i].endTxNum > txNum {
@@ -1457,6 +1443,10 @@ func (ht *HistoryRoTx) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By
 	if rangeIsInFiles {
 		return stream.EmptyKV, nil
 	}
+	dbFrom := fromTxNum
+	if len(ht.iit.files) > 0 {
+		dbFrom = max(fromTxNum, int(ht.iit.files.EndTxNum()))
+	}
 	s := &HistoryChangesIterDB{
 		endTxNum:    toTxNum,
 		roTx:        roTx,
@@ -1464,8 +1454,8 @@ func (ht *HistoryRoTx) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By
 		valsTable:   ht.h.ValuesTable,
 		limit:       limit,
 	}
-	if fromTxNum >= 0 {
-		binary.BigEndian.PutUint64(s.startTxKey[:], uint64(fromTxNum))
+	if dbFrom >= 0 {
+		binary.BigEndian.PutUint64(s.startTxKey[:], uint64(dbFrom))
 	}
 	if err := s.advance(); err != nil {
 		s.Close() //it's responsibility of constructor (our) to close resource on error

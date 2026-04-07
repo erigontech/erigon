@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"runtime"
@@ -282,10 +281,6 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	}
 
 	updateCount := sdc.updates.Size()
-	start := time.Now()
-	defer func() {
-		log.Debug("[commitment] processed", "block", blockNum, "txNum", txNum, "keys", common.PrettyCounter(updateCount), "mode", sdc.updates.Mode(), "spent", time.Since(start), "rootHash", hex.EncodeToString(rootHash))
-	}()
 	if updateCount == 0 {
 		rootHash, err = sdc.patriciaTrie.RootHash()
 		return rootHash, err
@@ -746,7 +741,7 @@ func (sdc *TrieContext) Account(plainKey []byte) (u *commitment.Update, err erro
 			return nil, err
 		}
 		if len(code) > 0 {
-			copy(u.CodeHash[:], crypto.Keccak256(code))
+			u.CodeHash = crypto.HashData(code)
 			u.Flags |= commitment.CodeUpdate
 		}
 		if acc.CodeHash.Value() != u.CodeHash {

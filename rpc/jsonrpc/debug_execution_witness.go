@@ -4,9 +4,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"slices"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
@@ -28,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
-	"github.com/holiman/uint256"
 )
 
 // RecordingState combines a StateReader and StateWriter with an in-memory overlay.
@@ -649,6 +652,8 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		}
 	}
 
+	slices.SortFunc(result.Keys, func(a, b hexutil.Bytes) int { return bytes.Compare(a, b) })
+
 	// Collect code from the recording state:
 	// - preStateCode: code from the inner reader (pre-block state), for witness trie & result.Codes
 	// - modifiedCode: code written during execution (new deployments, EIP-7702)
@@ -659,16 +664,28 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	preStateCode := recordingState.GetPreStateCode()
 	modifiedCode := recordingState.GetModifiedCode()
 
-	// result.Codes: pre-state bytecodes the stateless verifier needs to execute calls
+	// result.Codes: pre-state bytecodes the stateless verifier needs to execute calls.
+	// Collect unique codes with their hashes for deterministic sorting.
+	type codeWithHash struct {
+		code []byte
+		hash common.Hash
+	}
+	var uniqueCodes []codeWithHash
 	codesSeen := make(map[common.Hash]struct{})
 	for _, code := range preStateCode {
 		if len(code) > 0 {
 			h := crypto.Keccak256Hash(code)
 			if _, dup := codesSeen[h]; !dup {
-				result.Codes = append(result.Codes, code)
+				uniqueCodes = append(uniqueCodes, codeWithHash{code: code, hash: h})
 				codesSeen[h] = struct{}{}
 			}
 		}
+	}
+	slices.SortFunc(uniqueCodes, func(a, b codeWithHash) int {
+		return bytes.Compare(a.hash[:], b.hash[:])
+	})
+	for _, c := range uniqueCodes {
+		result.Codes = append(result.Codes, c.code)
 	}
 
 	// codeReads: pre-block-state code keyed by address hash, used by
@@ -750,7 +767,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	// Helper to reset commitment to parent block state and re-seek
 	resetToParentState := func() (txNum uint64, blockNum uint64, err error) {
 		sdCtx.SetHistoryStateReader(tx, firstTxNumInBlock)
-		return domains.SeekCommitment(context.Background(), tx)
+		return domains.SeekCommitment(ctx, tx)
 	}
 
 	// === STEP 1: Collapse Detection via ComputeCommitment ===
@@ -767,7 +784,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	// need withHistory=false to have branch updates written using PutBranch()
 	splitStateReader := commitmentdb.NewSplitHistoryReader(tx, firstTxNumInBlock, endTxNum, false /* withHistory */)
 	sdCtx.SetCustomHistoryStateReader(splitStateReader)
-	if _, _, err := domains.SeekCommitment(context.Background(), tx); err != nil {
+	if _, _, err := domains.SeekCommitment(ctx, tx); err != nil {
 		return nil, fmt.Errorf("failed to re-seek commitment for collapse detection: %w", err)
 	}
 
@@ -834,46 +851,41 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		seenBlockNums[bn] = struct{}{}
 
 		blockHeader, err := api._blockReader.HeaderByNumber(ctx, tx, bn)
-		if err != nil || blockHeader == nil {
-			continue
+		if err != nil {
+			return nil, fmt.Errorf("failed to load header for accessed block number %d: %w", bn, err)
+		}
+		if blockHeader == nil {
+			return nil, fmt.Errorf("missing header for accessed block number %d", bn)
 		}
 
 		headerRLP, err := rlp.EncodeToBytes(blockHeader)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("failed to encode header for accessed block number %d: %w", bn, err)
 		}
 		result.Headers = append(result.Headers, headerRLP)
 	}
 
-	// Verify the execution witness result by re-executing the block statelessly
-	chainCfg, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get chain config: %w", err)
+	// Optionally verify the witness by re-executing the block statelessly.
+	// Verification doubles the execution cost; set ERIGON_WITNESS_NO_VERIFY=true to disable.
+	if !dbg.EnvBool("ERIGON_WITNESS_NO_VERIFY", false) {
+		chainCfg, err := api.chainConfig(ctx, tx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get chain config: %w", err)
+		}
+
+		newStateRoot, _, err := execBlockStatelessly(result, block, chainCfg, fullEngine)
+		if err != nil {
+			return nil, fmt.Errorf("[debug_executionWitness] stateless block execution failed: %w", err)
+		}
+
+		expectedRoot := block.Root()
+		if newStateRoot != expectedRoot {
+			return nil, fmt.Errorf("[debug_executionWitness] state root mismatch after stateless execution : got %x, expected %x", newStateRoot, expectedRoot)
+		}
+
+		log.Debug("[debug_executionWitness] witness verified", "blockNum", blockNum)
 	}
 
-	newStateRoot, _, err := execBlockStatelessly(result, block, chainCfg, fullEngine)
-	if err != nil {
-		return nil, fmt.Errorf("[debug_executionWitness] stateless block execution failed: %w", err)
-	}
-
-	/// // Comment out for debugging failures
-	// Query the expected state for all modified accounts from the actual state DB
-	// expectedState, expectedStorage, err := api.buildExpectedPostState(ctx, tx, blockNum, block,
-	// 	readAddresses, writeAddresses, readStorageKeys, writeStorageKeys)
-	// if err != nil {
-	// 	return nil, err
-	// }
-
-	//  Compare computed state vs expected state for debugging
-	// compareComputedVsExpectedState(stateless, expectedState, expectedStorage, stateless.storageDeletes)
-
-	// Verify the root matches the block's state root
-	expectedRoot := block.Root()
-	if newStateRoot != expectedRoot {
-		return nil, fmt.Errorf("[debug_executionWitness] state root mismatch after stateless execution : got %x, expected %x", newStateRoot, expectedRoot)
-	}
-
-	log.Info("[debug_executionWitness] witness successfully verified 🚀", "blockNum", blockNum)
 	return result, nil
 }
 
@@ -910,7 +922,7 @@ func (api *DebugAPIImpl) buildExpectedPostState(
 			return nil, nil, fmt.Errorf("failed to get last txn in block: %w", err)
 		}
 		postSdCtx.SetHistoryStateReader(tx, lastTxnInBlock)
-		if _, _, err := postDomains.SeekCommitment(context.Background(), tx); err != nil {
+		if _, _, err := postDomains.SeekCommitment(ctx, tx); err != nil {
 			return nil, nil, fmt.Errorf("failed to seek commitment: %w", err)
 		}
 	}
@@ -1483,7 +1495,6 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 			// fmt.Printf("  UpdateAccount %x: Nonce=%d, Balance=%s\n", addr[:8], account.Nonce, account.Balance.String())
 			s.t.UpdateAccount(addrHash[:], account)
 		} else {
-			fmt.Printf("  Delete %x\n", addr[:8])
 			s.t.Delete(addrHash[:])
 		}
 	}
