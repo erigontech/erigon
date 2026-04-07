@@ -183,31 +183,20 @@ Flags for configuring various RPC servers and their behavior.
 * `--http.corsdomain value`: A comma-separated list of domains for cross-origin requests.
 * `--http.vhosts value`: A comma-separated list of virtual hostnames.
   * Default: `localhost`
-* `--http.rpcprefix value`: HTTP path prefix for the JSON-RPC handler (e.g. `/rpc`). Useful for reverse-proxy setups. Empty string means the handler is mounted at `/`.
 * `--http.trace`: Logs every incoming HTTP request at INFO level. Useful for auditing or debugging traffic.
   * Default: `false`
 * `--http.dbg.single`: Allows per-request debug mode when the request carries a `dbg: true` header.
   * Default: `false`
-* `--ipcdisable`: Disables the IPC (Unix socket / named pipe) endpoint. Recommended for production servers where local IPC access is not needed.
-  * Default: `false`
-* `--ipcpath value`: Custom filename for the IPC socket within the datadir (OS default if not set).
 * `--authrpc.vhosts value`: A comma-separated list of virtual hostnames for the Engine API.
   * Default: `localhost`
 * `--http.api value`: The APIs offered over the HTTP-RPC interface.
   * Default: `eth,erigon,engine`
 * `--ws`: Enables the WS-RPC server.
   * Default: `false`
-* `--ws.addr value`: The WS-RPC server listening interface.
-  * Default: `localhost`
 * `--ws.port value`: The WS-RPC server listening port.
   * Default: `8546`
-* `--ws.api value`: The APIs offered over the WebSocket interface. If unset, inherits from `--http.api`.
-* `--ws.origins value`: Comma-separated list of allowed WebSocket origins. Empty by default (all cross-origin connections denied). Set explicitly when browser-based clients connect via WebSocket.
-* `--ws.rpcprefix value`: HTTP path prefix for the WebSocket JSON-RPC handler. Useful for reverse-proxy setups where WS is exposed on a sub-path.
 * `--ws.compression`: Enables compression over WebSocket.
   * Default: `true`
-* `--ws.api.subscribelogs.channelsize value`: Buffer size for WebSocket log subscription channels.
-  * Default: `8192`
 * `--rpc.batch.concurrency value`: Limits the number of goroutines for batch requests.
   * Default: `2`
 * `--rpc.streaming.disable`: Disables JSON streaming for heavy endpoints.
@@ -899,3 +888,4 @@ GLOBAL OPTIONS:
    --version, -v                                                                                                           print the version
 ```
 {% endcode %}
+
