@@ -208,8 +208,15 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 	// In that case, only apply the overrides.
 	if genesis == nil {
 		if !keepStoredChainConfig {
-			_, err := chainspec.ChainSpecByName(chainName)
-			keepStoredChainConfig = err != nil
+			spec, err := chainspec.ChainSpecByName(chainName)
+			if err != nil {
+				// Unknown chain name — always keep stored config
+				keepStoredChainConfig = true
+			} else if spec.GenesisHash != (common.Hash{}) && spec.GenesisHash != storedHash {
+				// Known chain name but genesis hash doesn't match (e.g. custom
+				// genesis with chainId 1 in Hive tests) — keep stored config
+				keepStoredChainConfig = true
+			}
 		}
 		if keepStoredChainConfig {
 			newCfg = storedCfg
