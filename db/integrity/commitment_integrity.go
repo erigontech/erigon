@@ -834,7 +834,6 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br serv
 func checkCommitmentHistAtBlkWithIdx(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, db kv.TemporalRoDB, br services.FullBlockReader, blockNum uint64, idx *ChangedKeysPerBlockIdx, lvl log.Lvl, logger log.Logger) error {
 	sd.ClearRam(true)
 	logger.Log(lvl, "checking commitment hist at block", "blockNum", blockNum)
-	start := time.Now()
 	header, err := br.HeaderByNumber(ctx, tx, blockNum)
 	if err != nil {
 		return err
@@ -910,7 +909,6 @@ func checkCommitmentHistAtBlkWithIdx(ctx context.Context, tx kv.TemporalTx, sd *
 			logger.Trace("commitment touched key", args...)
 		}
 	}
-	touchStart := time.Now()
 	if _, err := touchHistoricalKeys(sd, tx, kv.AccountsDomain, minTxNum, toTxNum, blockNum, idx, touchLoggingVisitor); err != nil {
 		return err
 	}
@@ -920,8 +918,6 @@ func checkCommitmentHistAtBlkWithIdx(ctx context.Context, tx kv.TemporalTx, sd *
 	if _, err := touchHistoricalKeys(sd, tx, kv.CodeDomain, minTxNum, toTxNum, blockNum, idx, touchLoggingVisitor); err != nil {
 		return err
 	}
-	touchDur := time.Since(touchStart)
-	recalcStart := time.Now()
 	root, err := sd.ComputeCommitment(ctx, tx, false /* saveStateAfter */, blockNum, maxTxNum, "", nil /* commitProgress */)
 	if err != nil {
 		return err
@@ -929,17 +925,6 @@ func checkCommitmentHistAtBlkWithIdx(ctx context.Context, tx kv.TemporalTx, sd *
 	rootHash := common.Hash(root)
 	if header.Root != rootHash {
 		return fmt.Errorf("commitment root mismatch: %s != %s (blockNum=%d,txNum=%d)", header.Root, rootHash, blockNum, maxTxNum)
-	}
-	if trace {
-		logger.Log(lvl,
-			"commitment root matches",
-			"blockNum", blockNum,
-			"txNum", maxTxNum,
-			"root", rootHash,
-			"totalDur", time.Since(start),
-			"touchDur", touchDur,
-			"recalcDur", time.Since(recalcStart),
-		)
 	}
 	return nil
 }
@@ -971,10 +956,11 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 	if from >= to {
 		return fmt.Errorf("invalid blk range: %d >= %d", from, to)
 	}
-	sampler := sc.NewSampler()
 	start := time.Now()
 	var checked atomic.Uint64
-	var lastBlockNum atomic.Uint64
+	var windowsDone atomic.Uint64
+	totalWindows := (to - from + checkCommitmentHistWindowSize - 1) / checkCommitmentHistWindowSize
+	expectedBlks := sc.NewSampler().ExpectedN(to - from)
 
 	const logInterval = 20 * time.Second
 	logTicker := time.NewTicker(logInterval)
@@ -989,7 +975,13 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 				done := checked.Load()
 				rate := float64(done-prevChecked) / logInterval.Seconds()
 				prevChecked = done
-				logger.Info("[integrity] "+string(StateRootVerifyByHistory), "blks/s", rate, "checked", common.PrettyCounter(done), "blockNum", common.PrettyCounter(lastBlockNum.Load()))
+				wDone := windowsDone.Load()
+				logger.Info("[integrity] "+string(StateRootVerifyByHistory),
+					"blks/s", fmt.Sprintf("%.1f", rate),
+					"checked", fmt.Sprintf("%s/%s", common.PrettyCounter(done), common.PrettyCounter(expectedBlks)),
+					"windows", fmt.Sprintf("%d/%d", wDone, totalWindows),
+					"blkRange", fmt.Sprintf("%s-%s", common.PrettyCounter(from), common.PrettyCounter(to)),
+				)
 			}
 		}
 	}()
@@ -1019,13 +1011,15 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 			if err != nil {
 				return fmt.Errorf("CheckCommitmentHistAtBlkRange: build index window=[%d,%d): %w", windowStart, windowEnd, err)
 			}
+			// Each goroutine needs its own Sampler — the RNG is not goroutine-safe.
+			sampler := sc.NewSampler()
 			for blockNum := range sampler.BlockNums(windowStart, windowEnd) {
 				if err := checkCommitmentHistAtBlkWithIdx(wCtx, tx, sd, db, br, blockNum, idx, log.LvlTrace, logger); err != nil {
 					return fmt.Errorf("checkCommitmentHistAtBlk: %d, %w", blockNum, err)
 				}
 				checked.Add(1)
-				lastBlockNum.Store(blockNum)
 			}
+			windowsDone.Add(1)
 			return nil
 		})
 	}
@@ -1036,7 +1030,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 	dur := time.Since(start)
 	n := checked.Load()
 	rate := float64(n) / dur.Seconds()
-	logger.Info("checked commitment hist at blk range", "dur", dur, "blks", n, "blks/s", rate, "from", from, "to", to, "seed", sampler.Seed, "sampleRatio", sampler.SampleRatio)
+	logger.Info("checked commitment hist at blk range", "dur", dur, "blks", n, "blks/s", fmt.Sprintf("%.1f", rate), "from", from, "to", to, "seed", sc.Seed, "sampleRatio", sc.SampleRatio)
 	return nil
 }
 
