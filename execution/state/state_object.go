@@ -410,13 +410,6 @@ func (so *stateObject) Code() ([]byte, error) {
 		return nil, nil
 	}
 
-	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (so.db.trace || dbg.TraceAccount(so.address.Handle()))) {
-		so.db.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", so.db.blockNum, so.db.txIndex, so.db.version))
-	}
-	var readStart time.Time
-	if dbg.KVReadLevelledMetrics {
-		readStart = time.Now()
-	}
 	// When a versionMap is present (parallel execution), check for CodePath
 	// entries from prior TXs (e.g. EIP-7702 SetCode). The versionMap has the
 	// synthetic code but the domain/stateReader does not.
@@ -428,6 +421,13 @@ func (so *stateObject) Code() ([]byte, error) {
 				return code, nil
 			}
 		}
+	}
+	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (so.db.trace || dbg.TraceAccount(so.address.Handle()))) {
+		so.db.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", so.db.blockNum, so.db.txIndex, so.db.version))
+	}
+	var readStart time.Time
+	if dbg.KVReadLevelledMetrics {
+		readStart = time.Now()
 	}
 	code, err := so.db.stateReader.ReadAccountCode(so.Address())
 	if dbg.KVReadLevelledMetrics {
