@@ -271,7 +271,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	if bufsize := ctx.String(EtlBufferSizeFlag.Name); bufsize != "" {
 		sizeVal := datasize.ByteSize(0)
 		if err := (&sizeVal).UnmarshalText([]byte(bufsize)); err != nil {
-			utils.Fatalf("Invalid batchSize provided: %v", err)
+			utils.Fatalf("Invalid etl.bufferSize provided: %v", err)
 		}
 		etl.BufferOptimalSize = sizeVal
 	}
@@ -351,7 +351,7 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 		size := &sizeVal
 		err := size.UnmarshalText([]byte(v))
 		if err != nil {
-			utils.Fatalf("Invalid batchSize provided: %v", err)
+			utils.Fatalf("Invalid etl.bufferSize provided: %v", err)
 		}
 		etl.BufferOptimalSize = *size
 	}
@@ -370,7 +370,7 @@ func cobraStringValueOrDefault(f *pflag.FlagSet, name, fallback string) string {
 	}
 	v, err := f.GetString(name)
 	if err != nil {
-		panic(err)
+		utils.Fatalf("failed to read --%s: %v", name, err)
 	}
 	return v
 }
@@ -381,7 +381,7 @@ func cobraUint64ValueOrDefault(f *pflag.FlagSet, name string, fallback uint64) u
 	}
 	v, err := f.GetUint64(name)
 	if err != nil {
-		panic(err)
+		utils.Fatalf("failed to read --%s: %v", name, err)
 	}
 	return v
 }
@@ -392,7 +392,7 @@ func cobraBoolValueOrDefault(f *pflag.FlagSet, name string, fallback bool) bool 
 	}
 	v, err := f.GetBool(name)
 	if err != nil {
-		panic(err)
+		utils.Fatalf("failed to read --%s: %v", name, err)
 	}
 	return v
 }
