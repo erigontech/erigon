@@ -24,7 +24,6 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -83,70 +82,6 @@ func TestHexKeybytes(t *testing.T) {
 		if k := hexToKeybytes(test.hexIn); !bytes.Equal(k, test.key) {
 			t.Errorf("hexToKeybytes(%x) -> %x, want %x", test.hexIn, k, test.key)
 		}
-	}
-}
-
-func TestKeybytesToCompact(t *testing.T) {
-	keybytes := Keybytes{common.FromHex("5a70"), true, true}
-	compact := keybytes.ToCompact()
-	assert.Equal(t, common.FromHex("35a7"), compact)
-
-	keybytes = Keybytes{common.FromHex("5a70"), true, false}
-	compact = keybytes.ToCompact()
-	assert.Equal(t, common.FromHex("15a7"), compact)
-
-	keybytes = Keybytes{common.FromHex("5a7c"), false, true}
-	compact = keybytes.ToCompact()
-	assert.Equal(t, common.FromHex("205a7c"), compact)
-
-	keybytes = Keybytes{common.FromHex("5a7c"), false, false}
-	compact = keybytes.ToCompact()
-	assert.Equal(t, common.FromHex("005a7c"), compact)
-}
-
-func TestCompactToKeybytes(t *testing.T) {
-	compact := common.FromHex("35a7")
-	keybytes := CompactToKeybytes(compact)
-	assert.Equal(t, Keybytes{common.FromHex("5a70"), true, true}, keybytes)
-
-	compact = common.FromHex("15a7")
-	keybytes = CompactToKeybytes(compact)
-	assert.Equal(t, Keybytes{common.FromHex("5a70"), true, false}, keybytes)
-
-	compact = common.FromHex("205a7c")
-	keybytes = CompactToKeybytes(compact)
-	assert.Equal(t, Keybytes{common.FromHex("5a7c"), false, true}, keybytes)
-
-	compact = common.FromHex("005a7c")
-	keybytes = CompactToKeybytes(compact)
-	assert.Equal(t, Keybytes{common.FromHex("5a7c"), false, false}, keybytes)
-}
-
-func BenchmarkHexToCompact(b *testing.B) {
-	testBytes := []byte{0, 15, 1, 12, 11, 8, 16 /*term*/}
-	for b.Loop() {
-		hexToCompact(testBytes)
-	}
-}
-
-func BenchmarkCompactToHex(b *testing.B) {
-	testBytes := []byte{0, 15, 1, 12, 11, 8, 16 /*term*/}
-	for b.Loop() {
-		compactToHex(testBytes)
-	}
-}
-
-func BenchmarkKeybytesToHex(b *testing.B) {
-	testBytes := []byte{7, 6, 6, 5, 7, 2, 6, 2, 16}
-	for b.Loop() {
-		keybytesToHex(testBytes)
-	}
-}
-
-func BenchmarkHexToKeybytes(b *testing.B) {
-	testBytes := []byte{7, 6, 6, 5, 7, 2, 6, 2, 16}
-	for b.Loop() {
-		hexToKeybytes(testBytes)
 	}
 }
 
