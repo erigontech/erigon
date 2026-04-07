@@ -51,6 +51,7 @@ func TestSimulationIntraBlockHasStorageRAMBatch(t *testing.T) {
 
 	tdb, err := temporal.New(db, agg, nil)
 	require.NoError(t, err)
+	t.Cleanup(tdb.Close)
 
 	rwTx, err := tdb.BeginTemporalRw(ctx)
 	require.NoError(t, err)

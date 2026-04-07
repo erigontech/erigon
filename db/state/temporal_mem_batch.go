@@ -17,7 +17,6 @@
 package state
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -344,10 +343,10 @@ func (sd *TemporalMemBatch) HasPrefixInRAM(domain kv.Domain, prefix []byte) bool
 	defer sd.latestStateLock.RUnlock()
 
 	if domain == kv.StorageDomain {
+		prefixStr := common.ToStringZeroCopy(prefix)
 		iter := sd.storage.Iter()
-		for ok := iter.Seek(string(prefix)); ok; ok = iter.Next() {
-			k := common.ToBytesZeroCopy(iter.Key())
-			if !bytes.HasPrefix(k, prefix) {
+		for ok := iter.Seek(prefixStr); ok; ok = iter.Next() {
+			if !strings.HasPrefix(iter.Key(), prefixStr) {
 				break
 			}
 			vals := iter.Value()
@@ -358,7 +357,7 @@ func (sd *TemporalMemBatch) HasPrefixInRAM(domain kv.Domain, prefix []byte) bool
 		return false
 	}
 
-	prefixStr := string(prefix)
+	prefixStr := common.ToStringZeroCopy(prefix)
 	for k, vals := range sd.domains[domain] {
 		if strings.HasPrefix(k, prefixStr) && len(vals) > 0 && len(vals[len(vals)-1].data) > 0 {
 			return true
