@@ -75,7 +75,6 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
-	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
@@ -323,17 +322,31 @@ func WithChainConfig(cfg *chain.Config) Option {
 	}
 }
 
+func WithFcuBackgroundCommit() Option {
+	return func(opts *options) {
+		opts.fcuBackgroundCommit = true
+	}
+}
+
+func WithFcuBackgroundPrune() Option {
+	return func(opts *options) {
+		opts.fcuBackgroundPrune = true
+	}
+}
+
 type options struct {
-	stepSize        *uint64
-	experimentalBAL bool
-	genesis         *types.Genesis
-	chainConfig     *chain.Config
-	key             *ecdsa.PrivateKey
-	engine          rules.Engine
-	pruneMode       *prune.Mode
-	blockBufferSize int
-	withTxPool      bool
-	enableDomains   []kv.Domain
+	stepSize            *uint64
+	experimentalBAL     bool
+	genesis             *types.Genesis
+	chainConfig         *chain.Config
+	key                 *ecdsa.PrivateKey
+	engine              rules.Engine
+	pruneMode           *prune.Mode
+	blockBufferSize     int
+	withTxPool          bool
+	enableDomains       []kv.Domain
+	fcuBackgroundCommit bool
+	fcuBackgroundPrune  bool
 }
 
 func applyOptions(opts []Option) options {
@@ -412,8 +425,8 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	cfg.Genesis = gspec
 	cfg.Prune = pruneMode
 	cfg.ExperimentalBAL = opt.experimentalBAL
-	cfg.FcuBackgroundPrune = false
-	cfg.FcuBackgroundCommit = false
+	cfg.FcuBackgroundPrune = opt.fcuBackgroundPrune
+	cfg.FcuBackgroundCommit = opt.fcuBackgroundCommit
 
 	logLvl := log.LvlError
 	if lvl, ok := os.LookupEnv("MOCK_SENTRY_LOG_LEVEL"); ok {
@@ -624,6 +637,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		mock.TxPool,
 		miningCancel,
 		latestBlockBuiltStore,
+		nil, /*sdProvider*/
 		logger,
 	)
 
@@ -679,13 +693,18 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	validationNotifications := shards.NewNotifications(nil)
 	validationSync := stageloop.NewInMemoryExecution(mock.Ctx, mock.DB, &cfg, mock.sentriesClient,
 		validationNotifications, mock.BlockReader, blockWriter, logger)
-	pipelineExecutor := execmodule.NewPipelineExecutor(mock.posStagedSync, mock.DB, mock.BlockReader, mock.ChainConfig, mock.Engine, validationSync, validationNotifications, logger)
+	dispatcher := execmodule.NewDispatcher(mock.ChainConfig, mock.Notifications.Events, mock.Notifications.StateChangesConsumer, logger)
+	pipelineExecutor := execmodule.NewPipelineExecutor(mock.posStagedSync, mock.DB, mock.BlockReader, mock.ChainConfig, mock.Engine, validationSync, validationNotifications, dispatcher, logger)
 
-	hook := stageloop.NewHook(mock.Ctx, mock.Notifications, mock.posStagedSync, mock.ChainConfig, logger, nil, nil, nil)
+	hook := stageloop.NewHook(mock.Ctx, mock.Notifications, mock.posStagedSync, mock.ChainConfig, logger, dispatcher, nil, nil, nil)
 
 	mock.StateCache = &execmodule.Cache{}
 	onlySnapDownloadOnStart := cfg.Genesis.Config.Bor != nil
 
+	accum := &execmodule.Accumulation{
+		Accumulator:    mock.Notifications.Accumulator,
+		RecentReceipts: mock.Notifications.RecentReceipts,
+	}
 	mock.ExecModule = execmodule.NewExecModule(
 		ctx,
 		mock.BlockReader,
@@ -695,10 +714,8 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		mock.ChainConfig,
 		blkBuilder.Build,
 		hook,
-		mock.Notifications.Accumulator,
-		mock.Notifications.RecentReceipts,
+		accum,
 		mock.StateCache,
-		mock.Notifications.StateChangesConsumer,
 		logger,
 		engine,
 		cfg.Sync,
@@ -761,7 +778,7 @@ func (emt *ExecModuleTester) EnableLogs() {
 func (emt *ExecModuleTester) Cfg() ethconfig.Config { return emt.cfg }
 
 func (emt *ExecModuleTester) insertPoSBlocks(chain *blockgen.ChainPack) error {
-	wr := chainreader.NewChainReaderEth1(emt.ChainConfig, direct.NewExecutionClientDirect(emt.ExecModule), time.Hour)
+	wr := chainreader.NewChainReaderEth1(emt.ChainConfig, emt.ExecModule, time.Hour)
 
 	streamCtx, cancel := context.WithCancel(emt.Ctx)
 	defer cancel()
@@ -779,18 +796,14 @@ func (emt *ExecModuleTester) insertPoSBlocks(chain *blockgen.ChainPack) error {
 		insertedBlocks[chain.Blocks[i].NumberU64()] = struct{}{}
 	}
 
-	var balEntries []*executionproto.BlockAccessListEntry
+	balMap := make(map[common.Hash][]byte)
 	for i, bal := range chain.BlockAccessLists {
 		if len(bal) > 0 {
 			block := chain.Blocks[i]
-			balEntries = append(balEntries, &executionproto.BlockAccessListEntry{
-				BlockHash:       gointerfaces.ConvertHashToH256(block.Hash()),
-				BlockNumber:     block.NumberU64(),
-				BlockAccessList: bal,
-			})
+			balMap[block.Hash()] = bal
 		}
 	}
-	if err := wr.InsertBlocksAndWaitWithAccessLists(emt.Ctx, chain.Blocks, balEntries); err != nil {
+	if err := wr.InsertBlocksAndWaitWithAccessLists(emt.Ctx, chain.Blocks, balMap); err != nil {
 		return err
 	}
 
@@ -801,7 +814,7 @@ func (emt *ExecModuleTester) insertPoSBlocks(chain *blockgen.ChainPack) error {
 		return err
 	}
 
-	if status != executionproto.ExecutionStatus_Success {
+	if status != execmodule.ExecutionStatusSuccess {
 		if verr != nil {
 			return fmt.Errorf("insertion failed for block %d, code: %s err: %s", chain.Blocks[chain.Length()-1].NumberU64(), status.String(), *verr)
 		}
