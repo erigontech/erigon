@@ -53,17 +53,17 @@ func (obj *Withdrawal) EncodeRLP(w io.Writer) error {
 
 	encodingSize := obj.EncodingSize()
 
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 
-	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(encodingSize, w, b[:]); err != nil {
 		return err
 	}
 
-	if err := rlp.EncodeInt(obj.Index, w, b[:]); err != nil {
+	if err := rlp.EncodeU64(obj.Index, w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(obj.Validator, w, b[:]); err != nil {
+	if err := rlp.EncodeU64(obj.Validator, w, b[:]); err != nil {
 		return err
 	}
 
@@ -75,7 +75,7 @@ func (obj *Withdrawal) EncodeRLP(w io.Writer) error {
 		return err
 	}
 
-	return rlp.EncodeInt(obj.Amount, w, b[:])
+	return rlp.EncodeU64(obj.Amount, w, b[:])
 }
 
 func (obj *Withdrawal) DecodeRLP(s *rlp.Stream) error {

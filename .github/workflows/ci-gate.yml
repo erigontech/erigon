@@ -5,15 +5,13 @@ on:
     branches:
       - main
       - 'release/**'
+      - performance
+      - performance-stable
     types:
       - opened
       - reopened
       - synchronize
       - ready_for_review
-  push:
-    branches:
-      - main
-      - 'release/**'
   merge_group:
   workflow_dispatch:
 
@@ -46,6 +44,11 @@ jobs:
     uses: ./.github/workflows/test-hive.yml
     secrets: inherit
 
+  hive-eest:
+    if: github.event_name != 'pull_request'
+    uses: ./.github/workflows/test-hive-eest.yml
+    secrets: inherit
+
   caplin:
     uses: ./.github/workflows/test-integration-caplin.yml
     secrets: inherit
@@ -64,20 +67,15 @@ jobs:
     uses: ./.github/workflows/test-kurtosis-assertoor.yml
     secrets: inherit
 
-  manifest:
-    uses: ./.github/workflows/manifest.yml
-    secrets: inherit
-
   repro:
     uses: ./.github/workflows/reproducible-build.yml
     secrets: inherit
 
-  qa-rpc-gnosis:
-    uses: ./.github/workflows/qa-rpc-integration-tests-gnosis.yml
-    secrets: inherit
-
-  qa-rpc-remote:
-    uses: ./.github/workflows/qa-rpc-integration-tests-remote.yml
+  sonar:
+    # SONAR_TOKEN is a repo secret unavailable to fork PRs, so skip the scan
+    # for external contributions to avoid a guaranteed failure in ci-gate.
+    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
+    uses: ./.github/workflows/sonar.yml
     secrets: inherit
 
   ci-gate:
@@ -87,14 +85,13 @@ jobs:
       - tests
       - race-tests
       - hive
+      - hive-eest
       - caplin
       - large-files
       - bench
       - kurtosis
-      - manifest
       - repro
-      - qa-rpc-gnosis
-      - qa-rpc-remote
+      - sonar
     runs-on: ubuntu-latest
     steps:
       - name: Check all required jobs

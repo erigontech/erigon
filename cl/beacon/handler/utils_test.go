@@ -68,6 +68,13 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 		bcfg.BellatrixForkEpoch = 1
 		bcfg.CapellaForkEpoch = 1
 		blocks, preState, postState = tests.GetCapellaRandom()
+	} else if v == clparams.ElectraVersion {
+		bcfg.AltairForkEpoch = 1
+		bcfg.BellatrixForkEpoch = 1
+		bcfg.CapellaForkEpoch = 1
+		bcfg.DenebForkEpoch = 1
+		bcfg.ElectraForkEpoch = 1
+		blocks, preState, postState = tests.GetElectraRandom()
 	}
 	fcu = mock_services2.NewForkChoiceStorageMock(t)
 	db = memdb.NewTestDB(t, dbcfg.ChainDB)

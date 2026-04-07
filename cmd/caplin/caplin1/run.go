@@ -78,6 +78,7 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/node/ethconfig"
+	p2pnat "github.com/erigontech/erigon/p2p/nat"
 )
 
 func OpenCaplinDatabase(ctx context.Context,
@@ -243,6 +244,9 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	if eth1Getter != nil {
 		eth1Getter.SetBeaconChainConfig(beaconConfig)
 	}
+	if engineWithCfg, ok := engine.(*execution_client.ExecutionClientEngine); ok {
+		engineWithCfg.SetBeaconChainConfig(beaconConfig)
+	}
 
 	ctx, cn := context.WithCancel(ctx)
 	defer cn()
@@ -294,11 +298,24 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		return err
 	}
 	activeIndicies := state.GetActiveValidatorsIndices(state.Slot() / beaconConfig.SlotsPerEpoch)
+
+	// Parse --caplin.nat into a NAT interface so both P2P managers advertise the correct
+	// external IP in discv5 ENR and libp2p multiaddrs (needed for Docker/NAT deployments).
+	var caplinNAT p2pnat.Interface
+	if config.CaplinNAT != "" {
+		var natErr error
+		caplinNAT, natErr = p2pnat.Parse(config.CaplinNAT)
+		if natErr != nil {
+			return fmt.Errorf("invalid --caplin.nat option %q: %w", config.CaplinNAT, natErr)
+		}
+	}
+
 	p2p, err := clp2p.NewP2Pmanager(ctx, &clp2p.P2PConfig{
 		IpAddr:     config.CaplinDiscoveryAddr,
 		Port:       int(config.CaplinDiscoveryPort),
 		TCPPort:    uint(config.CaplinDiscoveryTCPPort),
 		EnableUPnP: config.EnableUPnP,
+		NAT:        caplinNAT,
 		//MaxInboundTrafficPerPeer:     config.MaxInboundTrafficPerPeer,
 		//MaxOutboundTrafficPerPeer:    config.MaxOutboundTrafficPerPeer,
 		//AdaptableTrafficRequirements: config.AdptableTrafficRequirements,
@@ -320,6 +337,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			Port:          int(config.CaplinDiscoveryPort),
 			TCPPort:       uint(config.CaplinDiscoveryTCPPort),
 			EnableUPnP:    config.EnableUPnP,
+			NAT:           caplinNAT,
 			NetworkConfig: networkConfig,
 			BeaconConfig:  beaconConfig,
 			TmpDir:        dirs.Tmp,
@@ -351,6 +369,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 
 	peerDasState.SetLocalNodeID(localNode)
 	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, ethClock, state)
+	gossipManager.SetPeerBanner(beaconRpc)
 	peerDas := das.NewPeerDas(ctx, beaconRpc, beaconConfig, &config, columnStorage, blobStorage, sentinel, localNode.ID(), ethClock, peerDasState, gossipManager)
 	forkChoice.InitPeerDas(peerDas) // hack init
 	committeeSub := committee_subscription.NewCommitteeSubscribeManagement(ctx, beaconConfig, networkConfig, ethClock, aggregationPool, syncedDataManager, gossipManager)

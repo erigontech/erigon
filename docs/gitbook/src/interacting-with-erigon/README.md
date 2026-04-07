@@ -25,6 +25,9 @@ The Erigon RPC Service, managed by Erigon's modular [RPC daemon](../fundamentals
 * [`ots`](ots.md): These methods are specifically tailored for use with Otterscan, an open-source, fast block explorer.
 * [`internal`](internal.md): Erigon specific API for development and debugging purposes.
 * [`gRPC`](grpc.md): API for lower-level data access.
+* [`overlay`](overlay.md): Erigon-specific overlay API for replaying blocks with state overrides (archive nodes only).
+* [`parity`](parity.md): Partial OpenEthereum compatibility (`parity_listStorageKeys`).
+* [`graphql`](graphql.md): GraphQL endpoint following EIP-1767.
 
 For a complete reference on the standard Ethereum JSON-RPC methods, especially those in the `eth`, `net`, and `web3` namespaces, it is recommended to consult the general documentation on [ethereum.org's JSON-RPC API page](https://ethereum.org/en/developers/docs/apis/json-rpc/). Additionally, for the formal specification of the `debug`, `engine`, and `eth` namespaces, including unique, detailed descriptions for methods like `eth_getProof` and `eth_simulateV1`, refer to the [Execution APIs documentation](https://ethereum.github.io/execution-apis).
 
