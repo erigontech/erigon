@@ -23,7 +23,7 @@ Erigon implements a custom logging framework that supports structured logging wi
 Erigon provides extensive logging configuration through command-line flags. Key configuration options include:
 
 * `--log.json`: Enable JSON formatting for console logs
-* `--verbosity`: Set console log level (default: `3` / `info`)
+* `--verbosity`: Set console log level (default: `info`; corresponds to level 3)
 * `--log.dir.path`: Specify directory for log files. By default Erigon writing logs to `datadir/logs` directory.
 * `--log.dir.verbosity`: Set file log level
 * `--log.delays`: Enable block delay logging
@@ -89,3 +89,4 @@ All log messages follow a consistent structured format with key-value pairs for 
 The sync engine uses a sophisticated prefix system to identify stage context.
 
 The prefix format includes stage position and total count (e.g., "1/10 Headers") for easy identification of sync progress.
+
