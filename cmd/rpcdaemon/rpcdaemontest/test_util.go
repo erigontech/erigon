@@ -176,7 +176,6 @@ func generateChain(
 	var poly *contracts.Poly
 	var tokenContract *contracts.Token
 	var tokenContract2 *contracts.Token
-	var tokenContract2Address common.Address
 
 	// We generate the blocks without plain state because it's not supported in blockgen.GenerateChain
 	return blockgen.GenerateChain(config, parent, engine, db, 13, func(i int, block *blockgen.BlockGen) {
@@ -288,7 +287,7 @@ func generateChain(
 			break
 		case 11:
 			// Mint to address so it has a known balance to drain in the next block
-			tokenContract2Address, txn, tokenContract2, err = contracts.DeployToken(transactOpts, contractBackend, address)
+			_, txn, tokenContract2, err = contracts.DeployToken(transactOpts, contractBackend, address)
 			if err != nil {
 				panic(err)
 			}
@@ -298,21 +297,13 @@ func generateChain(
 				panic(err)
 			}
 			txs = append(txs, txn)
-			tokenContract2AddrHash := crypto.Keccak256(tokenContract2Address[:])
 			balanceStorageKeyPath := computeMappingStorageKey(address1, 1) // balance in slot 1
 			// The trie path for storage is keccak256(address) + keccak256(storage_slot)
 			hashedBalanceKey := crypto.Keccak256(balanceStorageKeyPath[:])
-			fullPath := make([]byte, 64)
-			copy(fullPath[:32], tokenContract2AddrHash)
-			copy(fullPath[32:], hashedBalanceKey)
 
 			sameStoragePrefixAddresses = findAddressesWithMatchingStorageKeyPrefix(balanceStorageKeyPath, 1, 1, 1)
 			sameStorageKeyPath := computeMappingStorageKey(sameStoragePrefixAddresses[0], 1)
 			hashedSiblingKey := crypto.Keccak256(sameStorageKeyPath[:])
-
-			fullPathSibling := make([]byte, 64)
-			copy(fullPathSibling[:32], tokenContract2AddrHash)
-			copy(fullPathSibling[32:], hashedSiblingKey)
 
 			// Assert first nibble of the hashed storage key is the same (trie path)
 			if (hashedSiblingKey[0] >> 4) != (hashedBalanceKey[0] >> 4) {
