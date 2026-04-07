@@ -1023,7 +1023,7 @@ func convertGrpcStatusToEngineStatus(status execmodule.ExecutionStatus) engine_t
 	case execmodule.ExecutionStatusBusy:
 		return engine_types.SyncingStatus
 	}
-	panic("giulio u stupid.")
+	panic(fmt.Sprintf("unhandled execution status: %d", status))
 }
 
 // assembledBlockToPayloadResponse converts a native assembled block to an engine-API payload response.

@@ -65,6 +65,8 @@ func (r *RecentReceipts) NotifyLogs(n ChainEventNotifier, from, to uint64, isUnw
 	for bn, receipts := range r.receipts {
 		if bn+r.limit < from { // evict old
 			delete(r.receipts, bn)
+			delete(r.txs, bn)
+			delete(r.headers, bn)
 			continue
 		}
 		if bn < from || bn >= to {

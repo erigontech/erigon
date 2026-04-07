@@ -84,7 +84,7 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 			// Parent's total difficulty — reads from overlay first, then base RO tx.
 			parentTd, err = rawdb.ReadTd(blockOverlay, header.ParentHash, height-1)
 			if err != nil || parentTd == nil {
-				return ExecutionStatusSuccess, fmt.Errorf("parent's total difficulty not found with hash %x and height %d: %v", header.ParentHash, height-1, err)
+				return 0, fmt.Errorf("parent's total difficulty not found with hash %x and height %d: %v", header.ParentHash, height-1, err)
 			}
 		} else {
 			parentTd = big.NewInt(0)

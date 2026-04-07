@@ -193,8 +193,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	}
 	defer func() { roTx.Rollback() }() // closure: CommitCycle may reassign roTx
 
-	closeOnReturn := true
-
 	// Check if InsertBlocks already created a block overlay with data
 	// (headers, bodies, TDs, canonical hashes).
 	var hasOverlay bool
@@ -218,7 +216,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	}
 
 	defer func() {
-		if closeOnReturn && currentContext != nil {
+		if currentContext != nil {
 			// Clear the published overlay before closing the SD, so concurrent
 			// readers (e.g. a second FCU calling GetHeaderByHash) don't access
 			// a closed SharedDomains via Events.LatestSD().
@@ -611,11 +609,18 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		var commitTimings []any
 		if e.fcuBackgroundCommit {
 			shouldReleaseSema = false
-			closeOnReturn = false
+			// Transfer roTx ownership to the goroutine so the outer defer
+			// (roTx.Rollback) becomes a no-op on nil.
+			bgRoTx := roTx
+			roTx = nil
+			bgSD := currentContext
+			currentContext = nil
 			dispatcher := e.pipelineExecutor.Dispatcher()
 			go func() {
 				defer e.semaphore.Release(1)
-				err := e.runPostForkchoice(currentContext, finishProgressBefore, isSynced, initialCycle)
+				defer bgSD.Close()
+				defer bgRoTx.Rollback()
+				err := e.runPostForkchoice(bgSD, finishProgressBefore, isSynced, initialCycle)
 				if err != nil && !errors.Is(err, context.Canceled) {
 					e.logger.Error("Error running background post forkchoice", "err", err)
 				}

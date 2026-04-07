@@ -17,6 +17,8 @@
 package notifications
 
 import (
+	"fmt"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -116,7 +118,7 @@ func actionToProto(a Action) remoteproto.Action {
 	case ActionRemove:
 		return remoteproto.Action_REMOVE
 	default:
-		return remoteproto.Action_STORAGE
+		panic(fmt.Sprintf("unknown action: %d", a))
 	}
 }
 
