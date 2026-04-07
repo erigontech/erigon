@@ -26,6 +26,11 @@ func cleanupAndPruning(ctx context.Context, logger log.Logger, cfg *Cfg, args Ar
 		return err
 	}
 	cfg.blobStore.Prune()
-	cfg.peerDas.Prune(cfg.caplinConfig.ColumnKeepSlots)
+	columnKeepSlots := cfg.caplinConfig.ColumnKeepSlots
+	if columnKeepSlots == 0 {
+		// Default: MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS * SLOTS_PER_EPOCH
+		columnKeepSlots = cfg.beaconCfg.MinEpochsForDataColumnSidecarsRequests * cfg.beaconCfg.SlotsPerEpoch
+	}
+	cfg.peerDas.Prune(columnKeepSlots)
 	return nil
 }
