@@ -146,6 +146,12 @@ func (sdc *SharedDomainsCommitmentContext) SetDeferCommitmentUpdates(defer_ bool
 	sdc.deferCommitmentUpdates = defer_
 }
 
+// SetConcurrentCommitment forces parallel mode on the updates collector.
+// Used by tests to exercise ParallelHashSort regardless of topology check.
+func (sdc *SharedDomainsCommitmentContext) SetConcurrentCommitment(v bool) {
+	sdc.updates.SetConcurrentCommitment(v)
+}
+
 // TakePendingUpdate returns the pending update and clears the field.
 // Caller takes ownership of the returned value.
 func (sdc *SharedDomainsCommitmentContext) TakePendingUpdate() *commitment.PendingCommitmentUpdate {
