@@ -872,7 +872,7 @@ func (h *History) dataWriter(ctx context.Context, f *seg.Compressor) *seg.PagedW
 	if !strings.Contains(f.FileName(), ".v") {
 		panic("assert: miss-use " + f.FileName())
 	}
-	return seg.NewPagedWriter(ctx, seg.NewWriter(f, h.Compression), f.GetValuesOnCompressedPage() > 0)
+	return seg.NewPagedWriter(ctx, seg.NewWriter(f, h.Compression), f.GetValuesOnCompressedPage() > 0, h.CompressorCfg.Workers)
 }
 func (ht *HistoryRoTx) dataReader(f *seg.Decompressor) *seg.Reader { return ht.h.dataReader(f) }
 func (ht *HistoryRoTx) dataWriter(ctx context.Context, f *seg.Compressor) *seg.PagedWriter {
@@ -1443,6 +1443,10 @@ func (ht *HistoryRoTx) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By
 	if rangeIsInFiles {
 		return stream.EmptyKV, nil
 	}
+	dbFrom := fromTxNum
+	if len(ht.iit.files) > 0 {
+		dbFrom = max(fromTxNum, int(ht.iit.files.EndTxNum()))
+	}
 	s := &HistoryChangesIterDB{
 		endTxNum:    toTxNum,
 		roTx:        roTx,
@@ -1450,8 +1454,8 @@ func (ht *HistoryRoTx) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By
 		valsTable:   ht.h.ValuesTable,
 		limit:       limit,
 	}
-	if fromTxNum >= 0 {
-		binary.BigEndian.PutUint64(s.startTxKey[:], uint64(fromTxNum))
+	if dbFrom >= 0 {
+		binary.BigEndian.PutUint64(s.startTxKey[:], uint64(dbFrom))
 	}
 	if err := s.advance(); err != nil {
 		s.Close() //it's responsibility of constructor (our) to close resource on error

@@ -634,7 +634,7 @@ func CreateTestExecModuleForTracesCollision(t *testing.T) *execmoduletester.Exec
 		byte(vm.CREATE2),
 	}...)
 
-	initHash := accounts.InternCodeHash(crypto.Keccak256Hash(initCode))
+	initHash := accounts.InternCodeHash(crypto.HashData(initCode))
 	aa := types.CreateAddress2(bb, [32]byte{}, initHash)
 	t.Logf("Destination address: %x\n", aa)
 
