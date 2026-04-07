@@ -502,7 +502,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			// MDBX from recycling freed pages and causing MDBX_MAP_FULL under
 			// heavy pruning (issue #20080).
 			roTx.Rollback()
-			newRoTx, refreshErr := e.db.BeginTemporalRo(ctx)
+			newRoTx, refreshErr := e.db.BeginTemporalRo(ctx) //nolint:gocritic
 			if refreshErr != nil {
 				return fmt.Errorf("updateForkChoice: refresh roTx: %w", refreshErr)
 			}
@@ -528,7 +528,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}
 			// Recreate RO tx + block overlay on the fresh committed state.
 			roTx.Rollback()
-			newRoTx, err := e.db.BeginTemporalRo(ctx)
+			newRoTx, err := e.db.BeginTemporalRo(ctx) //nolint:gocritic
 			if err != nil {
 				return nil, fmt.Errorf("updateForkChoice: begin ro after hasMore: %w", err)
 			}
