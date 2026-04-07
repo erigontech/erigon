@@ -59,6 +59,7 @@ type BlockGen struct {
 	versionMap  *state.VersionMap
 	blockIO     *state.VersionedIO
 	gasPool     *protocol.GasPool
+	gasUsed     *protocol.GasUsed // EIP-8037: cumulative per-dimension gas across txns
 	txs         []types.Transaction
 	receipts    types.Receipts
 	uncles      []*types.Header
@@ -138,9 +139,11 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 	}
 	txVersion := state.Version{BlockNum: b.header.Number.Uint64(), TxIndex: len(b.txs)}
 	b.ibs.SetTxContext(txVersion.BlockNum, txVersion.TxIndex)
-	gasUsed := protocol.NewGasUsed(b.header, b.receipts.CumulativeGasUsed())
-	receipt, err := protocol.ApplyTransaction(b.config, protocol.GetHashFn(b.header, getHeader), engine, accounts.InternAddress(b.header.Coinbase), b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, gasUsed, vm.Config{})
-	protocol.SetGasUsed(b.header, gasUsed)
+	if b.gasUsed == nil {
+		b.gasUsed = new(protocol.GasUsed)
+	}
+	receipt, err := protocol.ApplyTransaction(b.config, protocol.GetHashFn(b.header, getHeader), engine, accounts.InternAddress(b.header.Coinbase), b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, b.gasUsed, vm.Config{})
+	protocol.SetGasUsed(b.header, b.gasUsed)
 	if err != nil {
 		panic(err)
 	}
@@ -168,9 +171,11 @@ func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number 
 		b.SetCoinbase(common.Address{})
 	}
 	b.ibs.SetTxContext(b.header.Number.Uint64(), len(b.txs))
-	gasUsed := protocol.NewGasUsed(b.header, b.receipts.CumulativeGasUsed())
-	receipt, err := protocol.ApplyTransaction(b.config, protocol.GetHashFn(b.header, getHeader), engine, accounts.InternAddress(b.header.Coinbase), b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, gasUsed, vm.Config{})
-	protocol.SetGasUsed(b.header, gasUsed)
+	if b.gasUsed == nil {
+		b.gasUsed = new(protocol.GasUsed)
+	}
+	receipt, err := protocol.ApplyTransaction(b.config, protocol.GetHashFn(b.header, getHeader), engine, accounts.InternAddress(b.header.Coinbase), b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, b.gasUsed, vm.Config{})
+	protocol.SetGasUsed(b.header, b.gasUsed)
 	_ = err // accept failed transactions
 	b.txs = append(b.txs, txn)
 	b.receipts = append(b.receipts, receipt)
@@ -473,15 +478,40 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		b.header = makeHeader(chainreader, parent, ibs, b.engine)
 		// Mutate the state and block according to any hard-fork specs
 		if daoBlock := config.DAOForkBlock; daoBlock != nil {
-			limit := new(big.Int).Add(daoBlock, misc.DAOForkExtraRange)
-			if b.header.Number.CmpBig(daoBlock) >= 0 && b.header.Number.CmpBig(limit) < 0 {
+			if b.header.Number.Uint64() >= *daoBlock && b.header.Number.Uint64() < *daoBlock+misc.DAOForkExtraRange {
 				b.header.Extra = common.Copy(misc.DAOForkBlockExtra)
 			}
 		}
+		// Set ParentBeaconBlockRoot for Cancun+ blocks before InitializeBlockExecution
+		// so that EIP-4788 can store it during initialization.
+		if config.IsCancun(b.header.Time) {
+			var beaconBlockRoot common.Hash
+			if _, err := rand.Read(beaconBlockRoot[:]); err != nil {
+				return nil, nil, nil, fmt.Errorf("can't create beacon block root: %w", err)
+			}
+			b.header.ParentBeaconBlockRoot = &beaconBlockRoot
+		}
 		if b.engine != nil {
+			// Set tx context for system init call (txIndex -1)
+			if ibs.IsVersioned() {
+				ibs.ResetVersionedIO()
+				ibs.SetTxContext(b.header.Number.Uint64(), -1)
+			}
 			err := protocol.InitializeBlockExecution(b.engine, chainreader, b.header, config, ibs, nil, logger, nil)
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("call to InitializeBlockExecution: %w", err)
+			}
+			// Record system call I/O into blockIO for BAL computation
+			if ibs.IsVersioned() && b.blockIO != nil {
+				initVersion := state.Version{BlockNum: b.header.Number.Uint64(), TxIndex: -1}
+				writes := ibs.VersionedWrites(false)
+				b.blockIO.RecordReads(initVersion, ibs.VersionedReads())
+				b.blockIO.RecordAccesses(initVersion, ibs.AccessedAddresses())
+				b.blockIO.RecordWrites(initVersion, writes)
+				if b.versionMap != nil {
+					b.versionMap.FlushVersionedWrites(writes, true, "")
+				}
+				ibs.ResetVersionedIO()
 			}
 		}
 		// Execute any user modifications to the block
@@ -498,6 +528,10 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			if b.versionMap != nil {
 				b.ibs.SetTxContext(b.header.Number.Uint64(), len(b.txs))
 			}
+			// Reset versioned I/O before finalize to capture system call I/O cleanly
+			if ibs.IsVersioned() {
+				ibs.ResetVersionedIO()
+			}
 			// Finalize and seal the block
 			syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 				return protocol.SysCallContract(contract, data, config, ibs, b.header, b.engine, false /* constCall */, vm.Config{})
@@ -507,6 +541,18 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
 			}
+			// Record finalize system call I/O into blockIO for BAL computation
+			if ibs.IsVersioned() && b.blockIO != nil {
+				finalizeVersion := state.Version{BlockNum: b.header.Number.Uint64(), TxIndex: len(b.txs)}
+				writes := ibs.VersionedWrites(false)
+				b.blockIO.RecordReads(finalizeVersion, ibs.VersionedReads())
+				b.blockIO.RecordAccesses(finalizeVersion, ibs.AccessedAddresses())
+				b.blockIO.RecordWrites(finalizeVersion, writes)
+				if b.versionMap != nil {
+					b.versionMap.FlushVersionedWrites(writes, true, "")
+				}
+				ibs.ResetVersionedIO()
+			}
 
 			// Write state changes to db
 			blockContext := protocol.NewEVMBlockContext(b.header, protocol.GetHashFn(b.header, nil), b.engine, accounts.NilAddress, config)
@@ -514,13 +560,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 				return nil, nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
 			}
 
-			if config.IsCancun(b.header.Time) {
-				var beaconBlockRoot common.Hash
-				if _, err := rand.Read(beaconBlockRoot[:]); err != nil {
-					return nil, nil, nil, fmt.Errorf("can't create beacon block root: %w", err)
-				}
-				b.header.ParentBeaconBlockRoot = &beaconBlockRoot
-			}
 			if config.IsPrague(b.header.Time) {
 				b.header.RequestsHash = requests.Hash()
 			}

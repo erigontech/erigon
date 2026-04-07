@@ -71,6 +71,9 @@ type History struct {
 	// _visibleFiles - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
 	_visibleFiles []visibleFile
+
+	// _testBuildVIHook - test-only: called with the recsplit before the build loop in buildVI
+	_testBuildVIHook func(rs *recsplit.RecSplit)
 }
 
 func NewHistory(cfg statecfg.HistCfg, stepSize, stepsInFrozenFile uint64, dirs datadir.Dirs, logger log.Logger) (*History, error) {
@@ -114,12 +117,6 @@ func (h *History) vAccessorNewFilePath(fromStep, toStep kv.Step) string {
 
 func (h *History) vFileNameMask(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("*-%s.%d-%d.v", h.FilenameBase, fromStep, toStep)
-}
-func (h *History) vFilePathMask(fromStep, toStep kv.Step) string {
-	return filepath.Join(h.dirs.SnapHistory, h.vFileNameMask(fromStep, toStep))
-}
-func (h *History) vAccessorFilePathMask(fromStep, toStep kv.Step) string {
-	return filepath.Join(h.dirs.SnapAccessors, h.vAccessorFileNameMask(fromStep, toStep))
 }
 func (h *History) vAccessorFileNameMask(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("*-%s.%d-%d.vi", h.FilenameBase, fromStep, toStep)
@@ -269,21 +266,26 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		IndexFile:  historyIdxPath,
 		Salt:       h.salt.Load(),
 		NoFsync:    h.noFsync,
+		Workers:    h.BuildAccessorsWorkers,
 	}, h.logger)
 	if err != nil {
 		return fmt.Errorf("create recsplit: %w", err)
 	}
 	defer rs.Close()
 	rs.LogLvl(log.LvlTrace)
+	if h._testBuildVIHook != nil {
+		h._testBuildVIHook(rs)
+	}
 
 	seq := &multiencseq.SequenceReader{}
 	it := &multiencseq.SequenceIterator{}
 
-	i := 0
 	for {
 		histReader.Reset(0)
 		iiReader.Reset(0)
 		rs.SetProgress(p)
+
+		i := 0
 
 		valOffset = 0
 		for iiReader.HasNext() {
@@ -547,7 +549,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 	if h.noFsync {
 		_histComp.DisableFsync()
 	}
-	historyWriter := h.dataWriter(_histComp)
+	historyWriter := h.dataWriter(ctx, _histComp)
 
 	_efComp, err = seg.NewCompressor(ctx, "collate idx "+h.FilenameBase, efHistoryPath, h.dirs.Tmp, h.CompressorCfg, log.LvlTrace, h.logger)
 	if err != nil {
@@ -866,15 +868,15 @@ func (h *History) dataReader(f *seg.Decompressor) *seg.Reader {
 	}
 	return seg.NewReader(f.MakeGetter(), h.Compression)
 }
-func (h *History) dataWriter(f *seg.Compressor) *seg.PagedWriter {
+func (h *History) dataWriter(ctx context.Context, f *seg.Compressor) *seg.PagedWriter {
 	if !strings.Contains(f.FileName(), ".v") {
 		panic("assert: miss-use " + f.FileName())
 	}
-	return seg.NewPagedWriter(seg.NewWriter(f, h.Compression), f.GetValuesOnCompressedPage() > 0)
+	return seg.NewPagedWriter(ctx, seg.NewWriter(f, h.Compression), f.GetValuesOnCompressedPage() > 0, h.CompressorCfg.Workers)
 }
 func (ht *HistoryRoTx) dataReader(f *seg.Decompressor) *seg.Reader { return ht.h.dataReader(f) }
-func (ht *HistoryRoTx) dataWriter(f *seg.Compressor) *seg.PagedWriter {
-	return ht.h.dataWriter(f)
+func (ht *HistoryRoTx) dataWriter(ctx context.Context, f *seg.Compressor) *seg.PagedWriter {
+	return ht.h.dataWriter(ctx, f)
 }
 
 func (h *History) isEmpty(tx kv.Tx) (bool, error) {
@@ -1099,7 +1101,7 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 		case *mdbx2.MdbxDupSortCursor:
 			valsCP = valsC.(*mdbx2.MdbxDupSortCursor)
 		default:
-			return nil, fmt.Errorf("unexpected cursor type %T for table %s", valsC, ht.h.ValuesTable)
+			valsCP = &kv.RwCursorPseudoDupSort{RwCursor: c}
 		}
 	}
 
@@ -1164,7 +1166,7 @@ func (ht *HistoryRoTx) oldPrune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 		case *mdbx2.MdbxDupSortCursor:
 			valsCP = valsC.(*mdbx2.MdbxDupSortCursor)
 		default:
-			return nil, fmt.Errorf("unexpected cursor type %T for table %s", valsC, ht.h.ValuesTable)
+			valsCP = &kv.RwCursorPseudoDupSort{RwCursor: c}
 		}
 	}
 
@@ -1202,14 +1204,6 @@ func (ht *HistoryRoTx) Close() {
 	ht.iit.Close()
 }
 
-func (ht *HistoryRoTx) getFileDeprecated(from, to uint64) (it visibleFile, ok bool) {
-	for i := 0; i < len(ht.files); i++ {
-		if ht.files[i].startTxNum == from && ht.files[i].endTxNum == to {
-			return ht.files[i], true
-		}
-	}
-	return it, false
-}
 func (ht *HistoryRoTx) getFile(txNum uint64) (it visibleFile, ok bool) {
 	for i := 0; i < len(ht.files); i++ {
 		if ht.files[i].startTxNum <= txNum && ht.files[i].endTxNum > txNum {
@@ -1418,14 +1412,20 @@ func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By
 		}
 		g := ht.iit.dataReader(item.src.decompressor)
 		g.Reset(0)
-		wrapper := NewSegReaderWrapper(g)
-		if wrapper.HasNext() {
-			key, val, err := wrapper.Next()
-			if err != nil {
-				s.Close()
-				return nil, err
+		if g.HasNext() {
+			key, _ := g.Next(nil)
+			var val []byte
+			if g.HasNext() {
+				val, _ = g.Next(nil)
 			}
-			heap.Push(&s.h, &ReconItem{g: wrapper, key: key, val: val, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum})
+			histFileIdx := -1
+			for j := range ht.files {
+				if ht.files[j].startTxNum == item.startTxNum && ht.files[j].endTxNum == item.endTxNum {
+					histFileIdx = j
+					break
+				}
+			}
+			heap.Push(&s.h, &ReconItem{g: g, key: key, val: val, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum, histFileIdx: histFileIdx})
 		}
 	}
 	if err := s.advance(); err != nil {
@@ -1443,6 +1443,10 @@ func (ht *HistoryRoTx) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By
 	if rangeIsInFiles {
 		return stream.EmptyKV, nil
 	}
+	dbFrom := fromTxNum
+	if len(ht.iit.files) > 0 {
+		dbFrom = max(fromTxNum, int(ht.iit.files.EndTxNum()))
+	}
 	s := &HistoryChangesIterDB{
 		endTxNum:    toTxNum,
 		roTx:        roTx,
@@ -1450,8 +1454,8 @@ func (ht *HistoryRoTx) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By
 		valsTable:   ht.h.ValuesTable,
 		limit:       limit,
 	}
-	if fromTxNum >= 0 {
-		binary.BigEndian.PutUint64(s.startTxKey[:], uint64(fromTxNum))
+	if dbFrom >= 0 {
+		binary.BigEndian.PutUint64(s.startTxKey[:], uint64(dbFrom))
 	}
 	if err := s.advance(); err != nil {
 		s.Close() //it's responsibility of constructor (our) to close resource on error

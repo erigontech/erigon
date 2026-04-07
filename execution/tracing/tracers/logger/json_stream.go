@@ -45,9 +45,6 @@ type JsonStreamLogger struct {
 
 	locations common.Hashes // For sorting
 	storage   map[accounts.Address]Storage
-	logs      []StructLog
-	output    []byte //nolint
-	err       error  //nolint
 	env       *tracing.VMContext
 }
 
@@ -99,10 +96,6 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 	case <-l.ctx.Done():
 		return
 	default:
-	}
-	// check if already accumulated the specified number of logs
-	if l.cfg.Limit != 0 && l.cfg.Limit <= len(l.logs) {
-		return
 	}
 	if !l.firstCapture {
 		l.stream.WriteMore()
@@ -157,10 +150,10 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 	l.stream.WriteObjectField("depth")
 	l.stream.WriteInt(depth)
 	refund := l.env.IntraBlockState.GetRefund()
-	if refund != 0 {
+	if refund.Total() != 0 {
 		l.stream.WriteMore()
 		l.stream.WriteObjectField("refund")
-		l.stream.WriteUint64(l.env.IntraBlockState.GetRefund())
+		l.stream.WriteUint64(l.env.IntraBlockState.GetRefund().Total())
 	}
 
 	if err != nil {

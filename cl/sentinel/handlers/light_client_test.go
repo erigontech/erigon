@@ -409,7 +409,7 @@ func BenchmarkLightClientPrefixConstruction(b *testing.B) {
 
 	b.Run("Optimized", func(b *testing.B) {
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			var prefix [5]byte
 			prefix[0] = SuccessfulResponsePrefix
 			copy(prefix[1:], forkDigest[:])
@@ -419,7 +419,7 @@ func BenchmarkLightClientPrefixConstruction(b *testing.B) {
 
 	b.Run("Old", func(b *testing.B) {
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			prefix := append([]byte{SuccessfulResponsePrefix}, forkDigest[:]...)
 			_ = prefix
 		}

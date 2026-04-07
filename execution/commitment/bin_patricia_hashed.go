@@ -478,7 +478,7 @@ package commitment
 //func (bph *BinPatriciaHashed) completeLeafHash(buf, keyPrefix []byte, kp, kl, compactLen int, key []byte, compact0 byte, ni int, val rlp.RlpSerializable, singleton bool) ([]byte, error) {
 //	totalLen := kp + kl + val.DoubleRLPLen()
 //	var lenPrefix [4]byte
-//	pt := rlp.GenerateStructLen(lenPrefix[:], totalLen)
+//	pt := rlp.EncodeListPrefixToBuf(totalLen, lenPrefix[:])
 //	embedded := !singleton && totalLen+pt < length.Hash
 //	var writer io.Writer
 //	if embedded {
@@ -616,7 +616,7 @@ package commitment
 //	}
 //	totalLen := kp + kl + 33
 //	var lenPrefix [4]byte
-//	pt := rlp.GenerateStructLen(lenPrefix[:], totalLen)
+//	pt := rlp.EncodeListPrefixToBuf(totalLen, lenPrefix[:])
 //	bph.keccak.Reset()
 //	if _, err := bph.keccak.Write(lenPrefix[:pt]); err != nil {
 //		return hashBuf, err
@@ -664,7 +664,7 @@ package commitment
 //		val := rlp.RlpSerializableBytes(cell.Storage[:cell.StorageLen])
 //		totalLen := kp + kl + val.DoubleRLPLen()
 //		var lenPrefix [4]byte
-//		pt := rlp.GenerateStructLen(lenPrefix[:], totalLen)
+//		pt := rlp.EncodeListPrefixToBuf(totalLen, lenPrefix[:])
 //		if totalLen+pt < length.Hash {
 //			return totalLen + pt
 //		}
@@ -1098,7 +1098,7 @@ package commitment
 //		}
 //
 //		bph.keccak2.Reset()
-//		pt := rlp.GenerateStructLen(bph.hashAuxBuffer[:], totalBranchLen)
+//		pt := rlp.EncodeListPrefixToBuf(totalBranchLen, bph.hashAuxBuffer[:])
 //		if _, err := bph.keccak2.Write(bph.hashAuxBuffer[:pt]); err != nil {
 //			return err
 //		}

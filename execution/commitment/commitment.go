@@ -111,7 +111,8 @@ type Trie interface {
 	ResetContext(ctx PatriciaContext)
 
 	// Process updates. If warmup.Enabled is true, pre-warms MDBX page cache in parallel.
-	Process(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress, warmup WarmupConfig) (rootHash []byte, err error)
+	// onProgress (optional) is called periodically with commitment progress info.
+	Process(ctx context.Context, updates *Updates, logPrefix string, onProgress func(*CommitProgress), warmup WarmupConfig) (rootHash []byte, err error)
 
 	// Release returns the trie to a pool for reuse. After calling Release,
 	// the caller must not use the trie.
@@ -563,6 +564,9 @@ func (be *BranchEncoder) CollectUpdate(
 
 	if be.cache != nil {
 		prev, foundInCache = be.cache.GetAndEvictBranch(prefix)
+		if foundInCache && be.metrics != nil {
+			be.metrics.cacheBranch.Add(1)
+		}
 	}
 	if !foundInCache {
 		prev, _, err = ctx.Branch(prefix)
@@ -641,6 +645,9 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 
 	if be.cache != nil {
 		prev, foundInCache = be.cache.GetAndEvictBranch(prefix)
+		if foundInCache && be.metrics != nil {
+			be.metrics.cacheBranch.Add(1)
+		}
 	}
 	if !foundInCache {
 		prev, _, err = ctx.Branch(prefix)
@@ -871,7 +878,11 @@ func (branchData BranchData) String() string {
 	return sb.String()
 }
 
-// if fn returns nil, the original key will be copied from branchData
+// if fn returns nil, the original key will be kept from branchData.
+// Uses span-based lazy copy: unchanged regions of branchData are copied in bulk
+// only when a key actually changes. When no keys change, returns branchData as-is
+// with zero copies. When the caller passes nil or an undersized buffer, newData
+// is auto-sized to len(branchData) on first use.
 func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte, isStorage bool) (newKey []byte, err error)) (BranchData, error) {
 	if len(branchData) < 4 {
 		return branchData, nil
@@ -883,12 +894,13 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 	if touchMap&afterMap == 0 {
 		return branchData, nil
 	}
+
 	pos := 4
-	newData = append(newData[:0], branchData[:4]...)
+	anyChanged := false
+	spanStart := 0 // start of current unchanged span in branchData
 	for bitset, j := touchMap&afterMap, 0; bitset != 0; j++ {
 		bit := bitset & -bitset
 		fields := cellFields(branchData[pos])
-		newData = append(newData, byte(fields))
 		pos++
 		if fields&fieldExtension != 0 {
 			l, n := binary.Uvarint(branchData[pos:])
@@ -897,17 +909,16 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 			} else if n < 0 {
 				return nil, errors.New("replacePlainKeys value overflow for hashedKey len")
 			}
-			newData = append(newData, branchData[pos:pos+n]...)
 			pos += n
 			if len(branchData) < pos+int(l) {
 				return nil, fmt.Errorf("replacePlainKeys buffer too small for hashedKey: expected %d got %d", pos+int(l), len(branchData))
 			}
 			if l > 0 {
-				newData = append(newData, branchData[pos:pos+int(l)]...)
 				pos += int(l)
 			}
 		}
 		if fields&fieldAccountAddr != 0 {
+			keyFieldStart := pos
 			l, n := binary.Uvarint(branchData[pos:])
 			if n == 0 {
 				return nil, errors.New("replacePlainKeys buffer too small for accountAddr len")
@@ -925,17 +936,24 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 			if err != nil {
 				return nil, err
 			}
-			if newKey == nil {
-				// invariant: fn returns nil (keep original) only for plain addr keys (length.Addr bytes)
-				newData = append(newData, branchData[pos-int(l)-n:pos]...)
-			} else {
-				// invariant: newKey is a short reference (≤8 bytes) or full plain addr (length.Addr bytes)
+			if newKey != nil {
+				if !anyChanged {
+					if cap(newData) < len(branchData) {
+						newData = make([]byte, 0, len(branchData))
+					} else {
+						newData = newData[:0]
+					}
+					anyChanged = true
+				}
+				newData = append(newData, branchData[spanStart:keyFieldStart]...)
 				n = binary.PutUvarint(numBuf[:], uint64(len(newKey)))
 				newData = append(newData, numBuf[:n]...)
 				newData = append(newData, newKey...)
+				spanStart = pos
 			}
 		}
 		if fields&fieldStorageAddr != 0 {
+			keyFieldStart := pos
 			l, n := binary.Uvarint(branchData[pos:])
 			if n == 0 {
 				return nil, errors.New("replacePlainKeys buffer too small for storageAddr len")
@@ -953,14 +971,20 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 			if err != nil {
 				return nil, err
 			}
-			if newKey == nil {
-				// invariant: fn returns nil (keep original) only for plain storage keys (length.Addr+length.Hash bytes)
-				newData = append(newData, branchData[pos-int(l)-n:pos]...) // -n to include length
-			} else {
-				// invariant: newKey is a short reference (≤8 bytes) or full plain storage key (length.Addr+length.Hash bytes)
+			if newKey != nil {
+				if !anyChanged {
+					if cap(newData) < len(branchData) {
+						newData = make([]byte, 0, len(branchData))
+					} else {
+						newData = newData[:0]
+					}
+					anyChanged = true
+				}
+				newData = append(newData, branchData[spanStart:keyFieldStart]...)
 				n = binary.PutUvarint(numBuf[:], uint64(len(newKey)))
 				newData = append(newData, numBuf[:n]...)
 				newData = append(newData, newKey...)
+				spanStart = pos
 			}
 		}
 		if fields&fieldHash != 0 {
@@ -970,13 +994,11 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 			} else if n < 0 {
 				return nil, errors.New("replacePlainKeys value overflow for hash len")
 			}
-			newData = append(newData, branchData[pos:pos+n]...)
 			pos += n
 			if len(branchData) < pos+int(l) {
 				return nil, fmt.Errorf("replacePlainKeys buffer too small for hash: expected %d got %d", pos+int(l), len(branchData))
 			}
 			if l > 0 {
-				newData = append(newData, branchData[pos:pos+int(l)]...)
 				pos += int(l)
 			}
 		}
@@ -987,13 +1009,11 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 			} else if n < 0 {
 				return nil, errors.New("replacePlainKeys value overflow for acLeafhash len")
 			}
-			newData = append(newData, branchData[pos:pos+n]...)
 			pos += n
 			if len(branchData) < pos+int(l) {
 				return nil, fmt.Errorf("replacePlainKeys buffer too small for LeafHash: expected %d got %d", pos+int(l), len(branchData))
 			}
 			if l > 0 {
-				newData = append(newData, branchData[pos:pos+int(l)]...)
 				pos += int(l)
 			}
 		}
@@ -1001,6 +1021,11 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 		bitset ^= bit
 	}
 
+	if !anyChanged {
+		return branchData, nil
+	}
+	// Flush remaining unchanged span
+	newData = append(newData, branchData[spanStart:]...)
 	return newData, nil
 }
 
@@ -1499,6 +1524,39 @@ type Updates struct {
 
 	sortPerNibble bool // if true, use nibbles collectors instead of etl (all-in-one)
 	nibbles       [16]*etl.Collector
+
+	batchSlab []KeyUpdate // grow-only slab for HashSort batch (avoids per-key heap allocs)
+	byteArena []byte      // grow-only byte arena for HashSort key copies
+}
+
+// arenaAlloc appends b to the byte arena and returns the sub-slice.
+// The returned slice is valid until the arena is reset.
+// The arena must have sufficient capacity (via arenaEnsureCap) before
+// accumulating a batch; if capacity is exceeded, arenaAlloc falls back
+// to an independent heap allocation to keep previously returned
+// sub-slices valid.
+func (t *Updates) arenaAlloc(b []byte) []byte {
+	off := len(t.byteArena)
+	needed := off + len(b)
+	if needed > cap(t.byteArena) {
+		// Arena capacity exceeded — fall back to an independent allocation.
+		// This keeps previously returned sub-slices valid while avoiding a
+		// panic that would crash a production node.
+		result := make([]byte, len(b))
+		copy(result, b)
+		return result
+	}
+	t.byteArena = t.byteArena[:needed]
+	copy(t.byteArena[off:], b)
+	return t.byteArena[off:needed]
+}
+
+// arenaEnsureCap ensures the byte arena has at least cap bytes of capacity.
+// Must be called before each batch to prevent mid-batch reallocation.
+func (t *Updates) arenaEnsureCap(c int) {
+	if cap(t.byteArena) < c {
+		t.byteArena = make([]byte, 0, c)
+	}
 }
 
 // Should be called right after updates initialisation. Otherwise could lost some data
@@ -1570,6 +1628,19 @@ func (t *Updates) initCollector() {
 
 func (t *Updates) Mode() Mode { return t.mode }
 
+// PlainKeys returns a copy of the set of plain keys that have been touched.
+// Only meaningful in ModeDirect; returns nil otherwise.
+func (t *Updates) PlainKeys() map[string]struct{} {
+	if t.mode != ModeDirect || t.keys == nil {
+		return nil
+	}
+	cp := make(map[string]struct{}, len(t.keys))
+	for k := range t.keys {
+		cp[k] = struct{}{}
+	}
+	return cp
+}
+
 func (t *Updates) Size() (updates uint64) {
 	switch t.mode {
 	case ModeDirect:
@@ -1596,13 +1667,13 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 			return false
 		})
 		if !updated {
-			pivot.hashedKey = t.hasher(toBytesZeroCopy(pivot.plainKey))
+			pivot.hashedKey = t.hasher(common.ToBytesZeroCopy(pivot.plainKey))
 			fn(pivot, val)
 			t.tree.ReplaceOrInsert(pivot)
 		}
 	case ModeDirect:
 		if _, ok := t.keys[key]; !ok {
-			keyBytes := toBytesZeroCopy(key)
+			keyBytes := common.ToBytesZeroCopy(key)
 			hashedKey := t.hasher(keyBytes)
 
 			var err error
@@ -1616,6 +1687,34 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 			}
 			t.keys[key] = struct{}{}
 		}
+	default:
+	}
+}
+
+func (t *Updates) TouchHashedKey(hashedKey []byte) {
+	switch t.mode {
+	case ModeDirect:
+		if len(hashedKey) == 0 {
+			return
+		}
+		// string(hashedKey) copies the bytes, so dedupKey is safe even if the caller reuses the slice.
+		// No extra copy needed before etl.Collect: see Collector.Collect — it copies k and v internally.
+		dedupKey := string(hashedKey)
+		if _, ok := t.keys[dedupKey]; !ok {
+			var err error
+			if !t.sortPerNibble {
+				err = t.etl.Collect(hashedKey, []byte{})
+			} else {
+				err = t.nibbles[hashedKey[0]].Collect(hashedKey, []byte{})
+			}
+			if err != nil {
+				log.Warn("failed to collect hashed key", "hashedKey", fmt.Sprintf("%x", hashedKey), "err", err)
+			}
+			t.keys[dedupKey] = struct{}{}
+		}
+	case ModeUpdate:
+		pivot := &KeyUpdate{hashedKey: common.Copy(hashedKey), update: new(Update)}
+		t.tree.ReplaceOrInsert(pivot)
 	default:
 	}
 }
@@ -1657,6 +1756,7 @@ func (t *Updates) TouchStorage(c *KeyUpdate, val []byte) {
 	if len(val) == 0 {
 		c.update.Flags = DeleteUpdate
 	} else {
+		c.update.Flags &^= DeleteUpdate
 		c.update.Flags |= StorageUpdate
 		copy(c.update.Storage[:], val)
 	}
@@ -1671,7 +1771,7 @@ func (t *Updates) TouchCode(c *KeyUpdate, code []byte) {
 		c.update.CodeHash = empty.CodeHash
 		return
 	}
-	copy(c.update.CodeHash[:], crypto.Keccak256(code))
+	c.update.CodeHash = crypto.HashData(code)
 }
 
 func (t *Updates) Close() {
@@ -1700,22 +1800,30 @@ const hashSortBatchSize = 10_000
 // Keys are processed in batches of 10k to control memory usage.
 // If warmuper is non-nil, keys are submitted for parallel warming before processing.
 // Caller is responsible for calling warmuper.Wait() after processing completes.
+// IMPORTANT: fn must not retain hk or pk slices after returning; they are backed by
+// reusable arena memory that is invalidated between batches.
 func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, pk []byte, update *Update) error) error {
 	switch t.mode {
 	case ModeDirect:
 		clear(t.keys)
 
-		batch := make([]*KeyUpdate, 0, hashSortBatchSize)
+		t.batchSlab = t.batchSlab[:0]
+		// Pre-allocate arena to avoid mid-batch reallocation that would
+		// invalidate previously returned sub-slices (hk/pk in batchSlab).
+		// Worst case: storage keys produce 128-byte nibblized hashed keys +
+		// 52-byte plain keys = 180 bytes/key. Use 192 with headroom.
+		t.arenaEnsureCap(hashSortBatchSize * 192)
+		t.byteArena = t.byteArena[:0]
 		var prevKey []byte
 
 		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			if warmuper != nil && warmuper.Cache() != nil {
 				warmuper.Cache().EvictPlainKey(v)
 			}
-			// Make copies since ETL may reuse buffers
-			hk := common.Copy(k)
-			pk := common.Copy(v)
-			batch = append(batch, &KeyUpdate{hashedKey: hk, plainKey: string(pk)})
+			// Copy into arena since ETL may reuse buffers
+			hk := t.arenaAlloc(k)
+			pk := t.arenaAlloc(v)
+			t.batchSlab = append(t.batchSlab, KeyUpdate{hashedKey: hk, plainKey: unsafe.String(unsafe.SliceData(pk), len(pk))})
 
 			// Submit to warmuper with start depth based on divergence from previous key
 			if warmuper != nil {
@@ -1728,25 +1836,26 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 					}
 				}
 				warmuper.WarmKey(hk, startDepth)
-				prevKey = hk
+				prevKey = append(prevKey[:0], hk...)
 			}
 
 			// Process batch when full
-			if len(batch) >= hashSortBatchSize {
-				for _, p := range batch {
+			if len(t.batchSlab) >= hashSortBatchSize {
+				for i := range t.batchSlab {
 					select {
 					case <-ctx.Done():
 						return ctx.Err()
 					default:
 					}
-					if err := fn(p.hashedKey, toBytesZeroCopy(p.plainKey), nil); err != nil {
+					if err := fn(t.batchSlab[i].hashedKey, common.ToBytesZeroCopy(t.batchSlab[i].plainKey), nil); err != nil {
 						return err
 					}
 				}
 				if warmuper != nil {
 					warmuper.DrainPending()
 				}
-				batch = batch[:0]
+				t.batchSlab = t.batchSlab[:0]
+				t.byteArena = t.byteArena[:0]
 			}
 			return nil
 		}, etl.TransformArgs{Quit: ctx.Done()})
@@ -1755,13 +1864,13 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		}
 
 		// Process remaining keys in final batch
-		for _, p := range batch {
+		for i := range t.batchSlab {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			default:
 			}
-			if err := fn(p.hashedKey, toBytesZeroCopy(p.plainKey), nil); err != nil {
+			if err := fn(t.batchSlab[i].hashedKey, common.ToBytesZeroCopy(t.batchSlab[i].plainKey), nil); err != nil {
 				return err
 			}
 		}
@@ -1769,7 +1878,13 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		t.initCollector()
 
 	case ModeUpdate:
-		batch := make([]*KeyUpdate, 0, hashSortBatchSize)
+		t.batchSlab = t.batchSlab[:0]
+		// Pre-allocate arena to avoid mid-batch reallocation that would
+		// invalidate previously returned sub-slices (hk in batchSlab).
+		// ModeUpdate only arenas hashedKey: up to 128 bytes for nibblized
+		// storage key hashes. Use 144 with headroom.
+		t.arenaEnsureCap(hashSortBatchSize * 144)
+		t.byteArena = t.byteArena[:0]
 		var prevKey []byte
 		var processErr error
 
@@ -1781,10 +1896,9 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 			default:
 			}
 
-			// Make copies
-			hk := make([]byte, len(item.hashedKey))
-			copy(hk, item.hashedKey)
-			batch = append(batch, &KeyUpdate{hashedKey: hk, plainKey: item.plainKey, update: item.update})
+			// Copy hashedKey into arena; plainKey references tree item directly
+			hk := t.arenaAlloc(item.hashedKey)
+			t.batchSlab = append(t.batchSlab, KeyUpdate{hashedKey: hk, plainKey: item.plainKey, update: item.update})
 
 			// Submit to warmuper with start depth based on divergence from previous key
 			if warmuper != nil {
@@ -1797,19 +1911,19 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 					}
 				}
 				warmuper.WarmKey(hk, startDepth)
-				prevKey = hk
+				prevKey = append(prevKey[:0], hk...)
 			}
 
 			// Process batch when full
-			if len(batch) >= hashSortBatchSize {
-				for _, p := range batch {
+			if len(t.batchSlab) >= hashSortBatchSize {
+				for i := range t.batchSlab {
 					select {
 					case <-ctx.Done():
 						processErr = ctx.Err()
 						return false
 					default:
 					}
-					if err := fn(p.hashedKey, toBytesZeroCopy(p.plainKey), p.update); err != nil {
+					if err := fn(t.batchSlab[i].hashedKey, common.ToBytesZeroCopy(t.batchSlab[i].plainKey), t.batchSlab[i].update); err != nil {
 						processErr = err
 						return false
 					}
@@ -1817,7 +1931,8 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 				if warmuper != nil {
 					warmuper.DrainPending()
 				}
-				batch = batch[:0]
+				t.batchSlab = t.batchSlab[:0]
+				t.byteArena = t.byteArena[:0]
 			}
 			return true
 		})
@@ -1827,13 +1942,13 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		}
 
 		// Process remaining keys in final batch
-		for _, p := range batch {
+		for i := range t.batchSlab {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			default:
 			}
-			if err := fn(p.hashedKey, toBytesZeroCopy(p.plainKey), p.update); err != nil {
+			if err := fn(t.batchSlab[i].hashedKey, common.ToBytesZeroCopy(t.batchSlab[i].plainKey), t.batchSlab[i].update); err != nil {
 				return err
 			}
 		}
@@ -1849,13 +1964,18 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 func (t *Updates) Reset() {
 	switch t.mode {
 	case ModeDirect:
-		t.keys = nil
-		t.keys = make(map[string]struct{})
+		if t.keys == nil {
+			t.keys = make(map[string]struct{})
+		} else {
+			clear(t.keys)
+		}
 		t.initCollector()
 	case ModeUpdate:
 		t.tree.Clear(true)
 	default:
 	}
+	t.batchSlab = t.batchSlab[:0]
+	t.byteArena = t.byteArena[:0]
 }
 
 type KeyUpdate struct {
@@ -1935,6 +2055,9 @@ func (u *Update) Merge(b *Update) {
 	if b.Flags == DeleteUpdate {
 		u.Flags = DeleteUpdate
 		return
+	}
+	if b.Flags&(BalanceUpdate|NonceUpdate|CodeUpdate|StorageUpdate) != 0 {
+		u.Flags &^= DeleteUpdate
 	}
 	if b.Flags&BalanceUpdate != 0 {
 		u.Flags |= BalanceUpdate
@@ -2059,6 +2182,3 @@ func (u *Update) String() string {
 	}
 	return sb.String()
 }
-
-func toStringZeroCopy(v []byte) string { return unsafe.String(&v[0], len(v)) } //nolint
-func toBytesZeroCopy(s string) []byte  { return unsafe.Slice(unsafe.StringData(s), len(s)) }

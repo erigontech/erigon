@@ -219,9 +219,9 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	chainConfig := genesis.Config
 	chainConfig.ChainName = "shutter-devnet"
 	chainConfig.TerminalTotalDifficulty = big.NewInt(0)
-	chainConfig.ShanghaiTime = big.NewInt(0)
-	chainConfig.CancunTime = big.NewInt(0)
-	chainConfig.PragueTime = big.NewInt(0)
+	chainConfig.ShanghaiTime = common.NewUint64(0)
+	chainConfig.CancunTime = common.NewUint64(0)
+	chainConfig.PragueTime = common.NewUint64(0)
 	genesis.Timestamp = uint64(time.Now().Unix() - 1)
 	// 1_000 ETH in wei in the bank
 	bank := testhelpers.NewBank(new(big.Int).Exp(big.NewInt(10), big.NewInt(21), nil))
