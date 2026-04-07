@@ -343,9 +343,8 @@ func testClientCancelSynctest(t *testing.T, logger log.Logger) {
 		}
 
 		client, hs := memHTTPTestClient(server, fl)
-		defer server.Stop()
 		defer hs.Close()
-		defer client.Close()
+		defer server.Stop()
 
 		runCancelCallers(t, client, 300*time.Millisecond)
 	})
