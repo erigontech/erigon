@@ -395,6 +395,23 @@ func BlockPostValidation(blockGasUsed, blobGasUsed uint64, checkReceipts bool, r
 		logger.Warn("gas used mismatch", "block", h.Number.Uint64(), "header", h.GasUsed, "execution", blockGasUsed,
 			"diff", int64(blockGasUsed)-int64(h.GasUsed), "txCount", len(txns), "receiptCount", len(receipts))
 		// Dump per-tx gas for debugging
+		// On-chain per-tx gasUsed for block 24809877 (fetched from publicnode.com)
+		onChainGas24809877 := []uint64{
+			628517, 142497, 113533, 57460, 63209, 21000, 3339989, 21000, 168995, 62260,
+			65606, 170897, 40360, 46097, 21000, 21000, 41309, 21000, 46097, 46097,
+			46109, 2019250, 46742, 399322, 46899, 362416, 21000, 21000, 651371, 39567,
+			21000, 21000, 63209, 556761, 21000, 43386, 21000, 21000, 376652, 34618,
+			228295, 99121, 95059, 52131, 46109, 73075, 32662, 221209, 62248, 271085,
+			49020, 45148, 39555, 144769, 21000, 101180, 21000, 21000, 21000, 21000,
+			21000, 189170, 13794755, 66118, 130620, 94428, 30170, 39943, 51674, 53361,
+			21000, 62224, 454543, 21000, 40118, 21000, 21000, 21000, 21000, 21000,
+			21000, 21000, 442056, 21000, 21000, 21000, 21000, 21000, 21000, 21000,
+			21000, 21000, 21000, 21000, 21000, 21000, 21000, 21000, 21000, 21000,
+			21000, 21000, 21000, 21000, 21000, 21000, 21000, 21000, 21000, 21000,
+			21000, 21000, 83522, 101478, 81053, 63209, 62248, 56630, 55884, 21000,
+			21000, 46109, 41309, 21000, 21000, 21000, 21000, 21000, 21000, 21000,
+			21000, 21000, 21000, 21000, 21000, 21000, 27329, 27329, 27378,
+		}
 		var cumGas uint64
 		for i, r := range receipts {
 			txGas := r.GasUsed
@@ -403,8 +420,16 @@ func BlockPostValidation(blockGasUsed, blobGasUsed uint64, checkReceipts bool, r
 			if i < len(txns) {
 				txHash = txns[i].Hash().Hex()[:18]
 			}
+			var diffStr string
+			if h.Number.Uint64() == 24809877 && i < len(onChainGas24809877) {
+				expected := onChainGas24809877[i]
+				diff := int64(txGas) - int64(expected)
+				if diff != 0 {
+					diffStr = fmt.Sprintf("MISMATCH expected=%d diff=%d", expected, diff)
+				}
+			}
 			logger.Warn("  tx gas detail", "block", h.Number.Uint64(), "txIdx", i, "txHash", txHash,
-				"gasUsed", txGas, "cumGasUsed", r.CumulativeGasUsed, "computedCumGas", cumGas, "status", r.Status)
+				"gasUsed", txGas, "cumGasUsed", r.CumulativeGasUsed, "computedCumGas", cumGas, "status", r.Status, "onchain", diffStr)
 		}
 		return fmt.Errorf("gas used by execution: %d, in header: %d, headerNum=%d, %x",
 			blockGasUsed, h.GasUsed, h.Number.Uint64(), h.Hash())
