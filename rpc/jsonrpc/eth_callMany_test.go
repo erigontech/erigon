@@ -55,7 +55,7 @@ func TestCallMany(t *testing.T) {
 		address1 = crypto.PubkeyToAddress(key1.PublicKey)
 		address2 = crypto.PubkeyToAddress(key2.PublicKey)
 		gspec    = &types.Genesis{
-			Config: chain.AllProtocolChanges,
+			Config: chain.TestChainBerlinConfig,
 			Alloc: types.GenesisAlloc{
 				address:  {Balance: big.NewInt(9000000000000000000)},
 				address1: {Balance: big.NewInt(200000000000000000)},
@@ -83,7 +83,7 @@ func TestCallMany(t *testing.T) {
 	transactOpts1, _ := bind.NewKeyedTransactorWithChainID(key1, chainID)
 	transactOpts2, _ := bind.NewKeyedTransactorWithChainID(key2, chainID)
 
-	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
+	contractBackend := backends.NewSimulatedBackend(t, gspec.Alloc, gspec.GasLimit)
 	defer contractBackend.Close()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	tokenAddr, _, tokenContract, _ := contracts.DeployToken(transactOpts, contractBackend, address1)
