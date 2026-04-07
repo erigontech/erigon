@@ -151,7 +151,6 @@ These flags manage network connectivity, peer discovery, and traffic control.
   * Default: `true`
 * `--discovery.v5`: Enables/disables DISCV5 topic discovery. Aliases: `--discv5`, `--v5disc`.
   * Default: `true`
-* `--whitelist value`: Comma-separated `block_number=block_hash` pairs enforced as checkpoints. Peers that do not agree on these blocks are disconnected. Useful for enforcing a canonical chain after a contentious fork.
 * `--aa`: Enables Account Abstraction (EIP-4337) transaction support in the mempool.
   * Default: `false`
 
@@ -282,7 +281,6 @@ Flags for controlling logging and performance profiling.
   * Default: `info`
 * `--log.delays`: Enables block delay logging.
   * Default: `false`
-* `--vmodule value`: Per-module verbosity overrides, format: `pattern=level` (e.g. `--vmodule=eth/*=5,p2p=4`). Overrides `--verbosity` for matching packages. See [Logs](logs.md) for details.
 * `--pprof`: Enables the pprof HTTP server.
   * Default: `false`
 * `--pprof.addr value`: The pprof HTTP server listening interface.
@@ -317,8 +315,6 @@ Flags related to consensus mechanisms and network forks.
   * Default: `20`
 * `--gpo.percentile value`: The percentile of recent transaction gas prices to use for a suggested gas price.
   * Default: `60`
-* `--gpo.maxprice value`: Maximum gas price cap returned by the oracle (in wei). Protects clients from unreasonably high suggestions during fee spikes.
-  * Default: `500000000000` (500 Gwei)
 * `--proposer.disable`: Disables the PoS proposer.
   * Default: `false`
 * `--bor.heimdall value`: The URL of the Heimdall service.
@@ -466,8 +462,6 @@ Silkworm integration requires `libsilkworm_capi.so` to be present alongside the 
 * `--silkworm.verbosity value`: Log level for the Silkworm console output.
   * Default: `info`
 * `--silkworm.contexts value`: Number of I/O contexts for Silkworm RPC/Sentry. `0` lets Silkworm choose automatically.
-  * Default: `0`
-* `--silkworm.workers value`: Worker threads for the embedded Silkworm RPC. `0` lets Silkworm choose automatically.
   * Default: `0`
 * `--silkworm.rpc.compatibility`: Enables JSON-RPC compatibility mode for embedded Silkworm RPC.
   * Default: `true`
