@@ -971,16 +971,14 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 	logTicker := time.NewTicker(logInterval)
 	defer logTicker.Stop()
 	go func() {
-		var prevChecked uint64
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-logTicker.C:
 				done := checked.Load()
-				rate := float64(done-prevChecked) / logInterval.Seconds()
-				prevChecked = done
-				logger.Info("[integrity] "+string(StateRootVerifyByHistory), "blks/s", rate, "checked", common.PrettyCounter(done), "blockNum", common.PrettyCounter(lastBlockNum.Load()))
+				blkRate := float64(done) / time.Since(start).Seconds()
+				logger.Info("[integrity] "+string(StateRootVerifyByHistory), "blks/s", fmt.Sprintf("%.1f", blkRate), "checked", common.PrettyCounter(done), "blockNum", common.PrettyCounter(lastBlockNum.Load()))
 			}
 		}
 	}()
