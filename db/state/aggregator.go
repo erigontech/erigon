@@ -85,6 +85,11 @@ type Aggregator struct {
 	ctx       context.Context
 	ctxCancel context.CancelFunc
 
+	// maxCollationTxNum caps BuildFiles to not extend past available block files.
+	// Set by the caller (exec3.go) based on the block reader's max txNum.
+	// 0 means no cap.
+	maxCollationTxNum atomic.Uint64
+
 	wg sync.WaitGroup // goroutines spawned by Aggregator, to ensure all of them are finish at agg.Close
 
 	onFilesChange kv.OnFilesChange
@@ -938,6 +943,9 @@ func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastB
 }
 
 func (a *Aggregator) BuildFiles(toTxNum uint64) (err error) {
+	if cap := a.maxCollationTxNum.Load(); cap > 0 && toTxNum > cap {
+		toTxNum = cap
+	}
 	finished := a.buildFilesInBackground(toTxNum, true)
 	if !(a.buildingFiles.Load() || a.mergingFiles.Load()) {
 		return nil
@@ -1470,6 +1478,12 @@ func (a *Aggregator) stepsInDB(ctx context.Context, db kv.RoDB) (float64, error)
 // separate transaction so MDBX GC can reclaim freed pages.
 // This prevents step accumulation during initial sync when background
 // collate can't keep up with execution throughput.
+// SetMaxCollationTxNum caps all collation (BuildFiles, CollateAndPruneIfNeeded)
+// to not extend past the given txNum. Use this when block snapshot files don't
+// cover all txNums (e.g. --no-downloader or lagging block file builder).
+// Set to 0 to remove the cap.
+func (a *Aggregator) SetMaxCollationTxNum(txNum uint64) { a.maxCollationTxNum.Store(txNum) }
+
 func (a *Aggregator) CollateAndPruneIfNeeded(ctx context.Context, db kv.TemporalRwDB, pruneFn func(tx kv.TemporalRwTx) error, logger log.Logger) error {
 	stepsInDB, err := a.stepsInDB(ctx, db)
 	if err != nil {
@@ -1477,7 +1491,11 @@ func (a *Aggregator) CollateAndPruneIfNeeded(ctx context.Context, db kv.Temporal
 	}
 	for stepsInDB > 1.5 {
 		logger.Info("[aggregator] steps accumulated, running synchronous collate+prune", "stepsInDB", stepsInDB)
-		if err := a.BuildFiles(a.EndTxNumMinimax() + a.StepSize()); err != nil {
+		toTxNum := a.EndTxNumMinimax() + a.StepSize()
+		if cap := a.maxCollationTxNum.Load(); cap > 0 && toTxNum > cap {
+			toTxNum = cap
+		}
+		if err := a.BuildFiles(toTxNum); err != nil {
 			return err
 		}
 		// Prune after each collate so stepsInDB actually decreases.
@@ -1882,6 +1900,14 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 		if !hasData {
 			close(fin)
 			return
+		}
+
+		// Cap to maxCollationTxNum if set (prevents domain files extending past block files).
+		if cap := a.maxCollationTxNum.Load(); cap > 0 {
+			maxStep := kv.Step(cap / a.StepSize())
+			if lastInDB > maxStep {
+				lastInDB = maxStep
+			}
 		}
 
 		// trying to create as much small-step-files as possible:

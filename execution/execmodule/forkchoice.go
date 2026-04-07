@@ -512,6 +512,9 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				return sendError("updateForkChoice: flush sd after hasMore", err)
 			}
 			currentContext.ClearRam(true)
+			// Close the RO tx BEFORE commit so MDBX GC can reclaim
+			// freed pages (gcLoops > 0 requires openTxs=1 at commit).
+			roTx.Rollback()
 			if err = commitRwTx.Commit(); err != nil {
 				return sendError("updateForkChoice: tx commit after hasMore", err)
 			}
@@ -525,7 +528,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				}
 			}
 			// Recreate RO tx + block overlay on the fresh committed state.
-			roTx.Rollback()
 			roTx, err = e.db.BeginTemporalRo(ctx) //nolint:gocritic
 			if err != nil {
 				return sendError("updateForkChoice: begin ro after hasMore", err)

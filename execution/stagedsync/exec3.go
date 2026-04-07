@@ -147,15 +147,12 @@ func ExecV3(ctx context.Context,
 
 	if execStage.SyncMode() == stages.ModeApplyingBlocks {
 		// Cap collation to the max txNum covered by block files.
-		// Without this, background collation creates domain files past
-		// the block file boundary, causing "behind commitment" errors
-		// when the node restarts or the next batch starts.
-		maxTxNum, err := cfg.blockReader.TxnumReader().Max(ctx, rwTx, maxBlockNum)
-		if err == nil && maxTxNum > 0 && maxTxNum < initialTxNum {
-			agg.BuildFilesInBackground(maxTxNum)
-		} else {
-			agg.BuildFilesInBackground(initialTxNum)
+		// Without this, collation creates domain files past the block
+		// file boundary, causing "behind commitment" errors.
+		if maxTxNum, err := cfg.blockReader.TxnumReader().Max(ctx, rwTx, maxBlockNum); err == nil && maxTxNum > 0 {
+			agg.SetMaxCollationTxNum(maxTxNum)
 		}
+		agg.BuildFilesInBackground(initialTxNum)
 	}
 
 	var (
