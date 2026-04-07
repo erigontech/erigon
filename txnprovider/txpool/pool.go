@@ -762,7 +762,6 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 			if blobCount*params.GasPerBlob > availableGas.Blob {
 				continue
 			}
-			availableGas.Blob -= blobCount * params.GasPerBlob
 		}
 
 		// make sure we have enough gas in the caller to add this transaction.
@@ -800,6 +799,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 		}
 		availableGas.Regular -= intrinsicRegularGas
 		availableGas.State -= intrinsicGasResult.StateGas
+		availableGas.Blob -= blobCount * params.GasPerBlob
 		availableRlpSpace -= len(rlpTxn)
 		txns.Txns[count] = rlpTxn
 		// For blob transactions, slot.Txn is the inner BlobTx without the

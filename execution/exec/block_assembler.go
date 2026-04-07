@@ -232,7 +232,12 @@ func (ba *BlockAssembler) AddTransactions(
 				return nil, err
 			}
 
-			header.GasUsed += aaGasUsed
+			// EIP-8037: AA txns don't go through protocol.ApplyTransaction, so
+			// update cumulative gas manually. We attribute aaGasUsed entirely to
+			// regular gas (AA has no state-gas dimension yet).
+			gasUsed.BlockRegular += aaGasUsed
+			gasUsed.Blob += txn.GetBlobGas()
+			protocol.SetGasUsed(header, gasUsed)
 			logs := ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), header.Number.Uint64(), header.Hash())
 			receipt := aa.CreateAAReceipt(txn.Hash(), status, aaGasUsed, header.GasUsed, header.Number.Uint64(), uint64(ibs.TxnIndex()), logs)
 
