@@ -94,15 +94,17 @@ jobs:
           password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
 
       - name: Pin execution-apis ref in rpc-compat simulator
+        if: matrix.sim == 'rpc' && matrix.sim-limit == 'compat'
         run: |
           EXEC_APIS_REF="${{ steps.hive-version.outputs.execution_apis_ref }}"
           SIM_DIR="hive/simulators/ethereum/rpc-compat"
-          if [ "$EXEC_APIS_REF" != "main" ] && [ -d "$SIM_DIR" ]; then
+          if [ "$EXEC_APIS_REF" != "main" ]; then
             echo "Pinning execution-apis to $EXEC_APIS_REF"
             git clone https://github.com/ethereum/execution-apis.git /tmp/execution-apis
-            cd /tmp/execution-apis && git checkout "$EXEC_APIS_REF" && cd -
+            (cd /tmp/execution-apis && git checkout "$EXEC_APIS_REF")
             cp -r /tmp/execution-apis/tests "$SIM_DIR/tests"
-            # Replace the git clone in Dockerfile with a local COPY
+            rm -rf /tmp/execution-apis
+            # Use the Dockerfile's built-in local-tests support instead of git clone
             sed -i '/^RUN git init/,/checkout FETCH_HEAD/d' "$SIM_DIR/Dockerfile"
             sed -i '/^# uncomment the line below/d; s|^# ADD tests|ADD tests|' "$SIM_DIR/Dockerfile"
           fi
