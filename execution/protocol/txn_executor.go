@@ -158,7 +158,7 @@ func applyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailou
 		blockContext := evm.Context
 		blockContext.Coinbase = params.SystemAddress
 		syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-			ret, err := SysCallContractWithBlockContext(contract, data, evm.ChainConfig(), evm.IntraBlockState(), blockContext, true, evm.Config())
+			ret, _, err := SysCallContractWithBlockContext(contract, data, evm.ChainConfig(), evm.IntraBlockState(), blockContext, true, evm.Config())
 			return ret, err
 		}
 		msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
@@ -622,15 +622,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			st.txnGasUsedB4Refunds = mdGasUsed.Regular
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Regular)
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
-			if rules.IsOsaka {
-				// EIP-7778: Block gas accounting without refunds (activated with Osaka on mainnet).
-				// Receipt gasUsed (txnGasUsed) still reflects what the user pays (after refunds + EIP-7623 floor).
-				// Block gasUsed uses actual pre-refund gas consumed: SSTORE refunds don't free up block capacity,
-				// and EIP-7623 floor applies only to the user's ETH payment, not to block gas.
-				st.blockRegularGasUsed = st.txnGasUsedB4Refunds
-			} else {
-				st.blockRegularGasUsed = st.txnGasUsed
-			}
+			st.blockRegularGasUsed = st.txnGasUsed
 		} else {
 			st.txnGasUsedB4Refunds = mdGasUsed.Regular
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Regular)

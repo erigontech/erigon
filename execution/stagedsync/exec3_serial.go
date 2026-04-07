@@ -373,11 +373,13 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				ibs := state.New(state.NewReaderV3(se.rs.Domains().AsGetter(se.applyTx)))
 				defer ibs.Release(true)
 				ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
+				var sysCallGasUsed uint64
 				syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-					ret, err := protocol.SysCallContract(contract, data, se.cfg.chainConfig, ibs, txTask.Header, se.cfg.engine, false /* constCall */, *se.cfg.vmConfig)
+					ret, gas, err := protocol.SysCallContract(contract, data, se.cfg.chainConfig, ibs, txTask.Header, se.cfg.engine, false /* constCall */, *se.cfg.vmConfig)
 					if err != nil {
 						return nil, err
 					}
+					sysCallGasUsed += gas
 					result.Logs = append(result.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
 					return ret, err
 				}
@@ -391,6 +393,9 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				if err != nil {
 					return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err)
 				}
+
+				// Include gas consumed by EIP-7002/EIP-7251 system calls (counted in header.GasUsed).
+				se.blockGasUsed += sysCallGasUsed
 
 				if startTxIndex == 0 && !isInitialCycle {
 					se.cfg.notifications.RecentReceipts.Add(blockReceipts, txTask.Txs, txTask.Header)

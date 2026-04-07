@@ -689,6 +689,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 
 					finalTask := blockExecutor.tasks[len(blockExecutor.tasks)-1].Task
 					finalVersion := finalTask.Version()
+					var sysCallGasUsed uint64
 					applyWrites, err := func() (state.VersionedWrites, error) {
 						pe.RLock()
 						defer pe.RUnlock()
@@ -712,10 +713,11 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						}
 
 						syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-							ret, err := protocol.SysCallContract(contract, data, pe.cfg.chainConfig, ibs, txTask.Header, pe.cfg.engine, false, *pe.cfg.vmConfig)
+							ret, gas, err := protocol.SysCallContract(contract, data, pe.cfg.chainConfig, ibs, txTask.Header, pe.cfg.engine, false, *pe.cfg.vmConfig)
 							if err != nil {
 								return nil, err
 							}
+							sysCallGasUsed += gas
 							result.Logs = append(result.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
 							return ret, err
 						}
@@ -751,6 +753,9 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					if err != nil {
 						return err
 					}
+
+					// Include gas consumed by EIP-7002/EIP-7251 system calls (counted in header.GasUsed).
+					blockExecutor.blockRegularGasUsed += sysCallGasUsed
 
 					blockResult.ApplyCount += len(applyWrites)
 					if dbg.TraceApply && dbg.TraceBlock(blockResult.BlockNum) {

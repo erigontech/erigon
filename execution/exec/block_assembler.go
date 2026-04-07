@@ -355,7 +355,7 @@ func (ba *BlockAssembler) AssembleBlock(stateReader state.StateReader, ibs *stat
 		ibs.SetTxContext(ba.Header.Number.Uint64(), len(ba.Txns))
 		ibs.ResetVersionedIO()
 	}
-	block, ba.Requests, err = protocol.FinalizeBlockExecution(ba.cfg.Engine, stateReader, ba.Header, ba.Txns, ba.Uncles,
+	block, ba.Requests, _, err = protocol.FinalizeBlockExecution(ba.cfg.Engine, stateReader, ba.Header, ba.Txns, ba.Uncles,
 		ba.writer(), ba.cfg.ChainConfig, ibs, ba.Receipts, ba.Withdrawals, chainReader, true, logger, nil)
 
 	if err != nil {

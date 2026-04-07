@@ -543,7 +543,8 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	}
 	chainReader := consensuschain.NewReader(chainConfig, tx, api._blockReader, log.Root())
 	systemCallCustom := func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, hdr *types.Header, constCall bool) ([]byte, error) {
-		return protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, fullEngine, constCall, vm.Config{})
+		ret, _, err := protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, fullEngine, constCall, vm.Config{})
+		return ret, err
 	}
 	if err = fullEngine.Initialize(chainConfig, chainReader, header, ibs, systemCallCustom, log.Root(), nil); err != nil {
 		return nil, fmt.Errorf("failed to initialize block: %w", err)
@@ -576,7 +577,8 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	}
 
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-		return protocol.SysCallContract(contract, data, chainConfig, ibs, header, fullEngine, false /* constCall */, vm.Config{})
+		ret, _, err := protocol.SysCallContract(contract, data, chainConfig, ibs, header, fullEngine, false /* constCall */, vm.Config{})
+		return ret, err
 	}
 
 	// Collect logs accumulated during transaction execution into a synthetic receipt
@@ -1622,7 +1624,8 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 
 	// Run block initialization (e.g. EIP-2935 blockhash contract, EIP-4788 beacon root)
 	systemCallCustom := func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, hdr *types.Header, constCall bool) ([]byte, error) {
-		return protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, engine, constCall, vm.Config{})
+		ret, _, err := protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, engine, constCall, vm.Config{})
+		return ret, err
 	}
 	if err = engine.Initialize(chainConfig, nil /* chainReader */, header, ibs, systemCallCustom, log.Root(), nil); err != nil {
 		return common.Hash{}, stateless, fmt.Errorf("verification: failed to initialize block: %w", err)
@@ -1657,7 +1660,8 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	}
 
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-		return protocol.SysCallContract(contract, data, chainConfig, ibs, header, engine, false /* constCall */, vm.Config{})
+		ret, _, err := protocol.SysCallContract(contract, data, chainConfig, ibs, header, engine, false /* constCall */, vm.Config{})
+		return ret, err
 	}
 	// Collect logs accumulated during transaction execution into a synthetic receipt
 	// so that Finalize can parse EIP-6110 deposit requests from them.

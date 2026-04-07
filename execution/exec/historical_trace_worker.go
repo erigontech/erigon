@@ -189,7 +189,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		syscall := func(contract accounts.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-			ret, err := protocol.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, constCall /* constCall */, *rw.vmCfg)
+			ret, _, err := protocol.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, constCall /* constCall */, *rw.vmCfg)
 			return ret, err
 		}
 		result.Err = rw.execArgs.Engine.Initialize(cc, rw.chain, header, ibs, syscall, rw.logger, hooks)
@@ -490,7 +490,7 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 				defer ibs.Release(false)
 				ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 				syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-					ret, err := protocol.SysCallContract(contract, data, cfg.ChainConfig, ibs, txTask.Header, txTask.Engine, false /* constCall */, vm.Config{
+					ret, _, err := protocol.SysCallContract(contract, data, cfg.ChainConfig, ibs, txTask.Header, txTask.Engine, false /* constCall */, vm.Config{
 						Tracer: result.TracingHooks(),
 					})
 					result.Logs = append(result.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
