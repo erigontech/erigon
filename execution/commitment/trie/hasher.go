@@ -26,8 +26,8 @@ import (
 	keccak "github.com/erigontech/fastkeccak"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 

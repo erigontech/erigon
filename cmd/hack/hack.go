@@ -672,7 +672,6 @@ func chainConfig(name string) error {
 	return nil
 }
 
-
 func iterate(filename string, prefix string) error {
 	pBytes := common.FromHex(prefix)
 	efFilename := filename + ".ef"

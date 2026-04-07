@@ -20,9 +20,9 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 

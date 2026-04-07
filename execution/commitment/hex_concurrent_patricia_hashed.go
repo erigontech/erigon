@@ -10,9 +10,9 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 // if nibble set is -1 then subtrie is not mounted to the nibble, but limited by depth: eg do not fold mounted trie above depth 63

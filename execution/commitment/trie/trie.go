@@ -28,8 +28,8 @@ import (
 	"reflect"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )

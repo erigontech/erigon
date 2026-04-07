@@ -26,8 +26,8 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 // TrieContextFactory creates new PatriciaContext instances for parallel warmup.
