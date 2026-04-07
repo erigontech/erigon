@@ -373,24 +373,11 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				ibs := state.New(state.NewReaderV3(se.rs.Domains().AsGetter(se.applyTx)))
 				defer ibs.Release(true)
 				ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
-				var sysCallGasUsed uint64
 				syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-					codeHash, _ := ibs.GetCodeHash(contract)
-					codeSize, _ := ibs.GetCodeSize(contract)
-					se.logger.Debug("[finalize code]", "block", txTask.BlockNumber(), "contract", contract, "codeHash", codeHash, "codeSize", codeSize)
-					for slotIdx := 0; slotIdx < 4; slotIdx++ {
-						var slotHash common.Hash
-						slotHash[31] = byte(slotIdx)
-						slotKey := accounts.InternKey(slotHash)
-						val, _ := ibs.GetState(contract, slotKey)
-						se.logger.Debug("[finalize slot]", "block", txTask.BlockNumber(), "contract", contract, "slot", slotIdx, "value", val.Hex())
-					}
-					ret, gas, err := protocol.SysCallContract(contract, data, se.cfg.chainConfig, ibs, txTask.Header, se.cfg.engine, false /* constCall */, *se.cfg.vmConfig)
-					se.logger.Debug("[finalize syscall]", "block", txTask.BlockNumber(), "contract", contract, "gas", gas, "err", err)
+					ret, _, err := protocol.SysCallContract(contract, data, se.cfg.chainConfig, ibs, txTask.Header, se.cfg.engine, false /* constCall */, *se.cfg.vmConfig)
 					if err != nil {
 						return nil, err
 					}
-					sysCallGasUsed += gas
 					result.Logs = append(result.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
 					return ret, err
 				}
@@ -404,9 +391,6 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				if err != nil {
 					return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err)
 				}
-
-				// Include gas consumed by EIP-7002/EIP-7251 system calls (counted in header.GasUsed).
-				se.blockGasUsed += sysCallGasUsed
 
 				if startTxIndex == 0 && !isInitialCycle {
 					se.cfg.notifications.RecentReceipts.Add(blockReceipts, txTask.Txs, txTask.Header)
