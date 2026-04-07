@@ -225,13 +225,13 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 		return fmt.Errorf("unexpected sd block number: %d != %d", latestBlockNum, expected)
 	}
 	if expected := fromTxNum - 1; latestTxNum != expected {
-		return fmt.Errorf("unexpected sd tx number: %d != %d", latestTxNum, maxTxNum)
+		return fmt.Errorf("unexpected sd tx number: %d != %d", latestTxNum, expected)
 	}
 	for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
 		domainIdx := idx[d]
 		offsets := domainIdx.Offsets(block)
 		for _, off := range offsets {
-			sd.GetCommitmentContext().TouchKey(d, domainIdx.Key(off), nil)
+			sd.GetCommitmentCtx().TouchKey(d, domainIdx.Key(off), nil)
 		}
 		bt.logger.Info("replayed changes", "domain", d, "changes", len(offsets))
 	}
