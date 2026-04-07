@@ -525,6 +525,23 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
+	if st.evm.Context.BlockNumber == 24809877 {
+		txIdx := st.state.TxIndex()
+		if txIdx == 63 || txIdx == 72 {
+			log.Debug("[intrinsic debug] intrinsic gas breakdown",
+				"block", st.evm.Context.BlockNumber,
+				"txIdx", txIdx,
+				"regularGas", intrinsicGasResult.RegularGas,
+				"stateGas", intrinsicGasResult.StateGas,
+				"floorGas", intrinsicGasResult.FloorGasCost,
+				"accessListLen", len(accessTuples),
+				"storageKeysLen", accessTuples.StorageKeys(),
+				"authsLen", len(auths),
+				"dataLen", len(st.data),
+				"gasLimit", st.msg.Gas(),
+			)
+		}
+	}
 
 	// Check clauses 2-6, buy gas if everything is correct
 	if err := st.preCheck(gasBailout, intrinsicGasResult); err != nil {
