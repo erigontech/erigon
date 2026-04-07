@@ -48,6 +48,7 @@ type Options struct {
 // App is the top-level TUI application.
 type App struct {
 	tview          *tview.Application
+	beacon         *datasource.BeaconClient
 	dp             *datasource.DownloaderPinger
 	dlTracker      *datasource.DownloaderTracker
 	sysColl        *datasource.SystemCollector
@@ -94,6 +95,7 @@ func New(datadir string, opts Options) *App {
 	return &App{
 		datadir:        datadir,
 		tview:          tview.NewApplication(),
+		beacon:         datasource.NewBeaconClient(datadir),
 		dp:             datasource.NewDownloaderPinger(diagURL),
 		dlTracker:      datasource.NewDownloaderTracker(),
 		sysColl:        datasource.NewSystemCollector(datadir),
@@ -107,15 +109,6 @@ func New(datadir string, opts Options) *App {
 		forceAnalytics: opts.ForceAnalytics,
 	}
 }
-
-// Page name constants.
-const (
-	pageStart    = "start"
-	pageNodeInfo = "nodeInfo"
-	pageLogs     = "logs"
-	pageConfig   = "config"
-	pageWizard   = "wizard"
-)
 
 // Run starts the TUI event loop. It blocks until the user quits or the parent
 // context is cancelled (e.g. by an OS signal).
@@ -137,24 +130,37 @@ func (a *App) Run(parent context.Context, infoCh <-chan *commands.StagesInfo, er
 	pages := tview.NewPages()
 
 	nodeInfoBody, nodeView := widgets.NewNodeInfoPage(a.datadir)
+	validatorView := widgets.NewValidatorPage()
 	footer := widgets.Footer(isStandalone)
 
 	startPageBody, _ := widgets.NewStartPage(nodeView.Clock, a.datadir)
+	startHeader := widgets.Header(modeLabel)
+	nodeInfoHeader := widgets.Header(modeLabel)
+	validatorHeader := widgets.Header(modeLabel)
+	logsHeader := widgets.Header(modeLabel)
+	headers := []*widgets.HeaderView{startHeader, nodeInfoHeader, validatorHeader, logsHeader}
 
 	startPage := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(widgets.Header(modeLabel), 1, 1, false).
+		AddItem(startHeader, 1, 1, false).
 		AddItem(startPageBody, 0, 5, false).
 		AddItem(footer, 2, 1, false)
 	nodeInfoPage := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(widgets.Header(modeLabel), 1, 1, false).
+		AddItem(nodeInfoHeader, 1, 1, false).
 		AddItem(nodeInfoBody, 0, 5, false).
+		AddItem(footer, 2, 1, false)
+	validatorPage := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(validatorHeader, 1, 1, false).
+		AddItem(validatorView.Root, 0, 5, false).
 		AddItem(footer, 2, 1, false)
 
 	// All navigable pages, including the full-screen log viewer.
 	// ◄ ► cycles through them; F2/L jumps directly to logs.
-	dashPages := []string{pageStart, pageNodeInfo, pageLogs}
+	dashPages := []string{pageStart, pageNodeInfo, pageValidator, pageLogs}
 	currentPage := 0
-	const logsPageIdx = 2 // index of pageLogs in dashPages
+	const (
+		validatorPageIdx = 2
+		logsPageIdx      = 3
+	)
 
 	// Declare logViewer before closures that reference it.
 	var logViewer *widgets.LogViewerPage
@@ -176,7 +182,7 @@ func (a *App) Run(parent context.Context, infoCh <-chan *commands.StagesInfo, er
 	}
 	logViewer = widgets.NewLogViewerPage(switchToDashboard)
 	logsPage := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(widgets.Header(modeLabel), 1, 1, false).
+		AddItem(logsHeader, 1, 1, false).
 		AddItem(logViewer.Root, 0, 1, true)
 
 	// Seed the log tailer so the viewer has content immediately.
@@ -192,9 +198,11 @@ func (a *App) Run(parent context.Context, infoCh <-chan *commands.StagesInfo, er
 	go a.safeGo("pollLogTail", errCh, func() { a.pollLogTail(ctx, nodeView.LogTail) })
 	go a.safeGo("pollLogViewer", errCh, func() { a.pollLogViewer(ctx, logViewer) })
 	go a.safeGo("pollNodeStatus", errCh, func() { a.pollNodeStatus(ctx, nodeView.NodeControl) })
+	go a.safeGo("pollValidatorPage", errCh, func() { a.pollValidatorPage(ctx, validatorView, headers) })
 
 	pages.AddPage(pageStart, startPage, true, true)
 	pages.AddPage(pageNodeInfo, nodeInfoPage, true, false)
+	pages.AddPage(pageValidator, validatorPage, true, false)
 	pages.AddPage(pageLogs, logsPage, true, false)
 
 	// Track whether a modal overlay (config/wizard) is showing.
@@ -322,6 +330,9 @@ func (a *App) Run(parent context.Context, infoCh <-chan *commands.StagesInfo, er
 			// Quick jump to logs page.
 			case event.Key() == tcell.KeyF2 || event.Rune() == 'L':
 				navigateToPage(logsPageIdx)
+				return nil
+			case event.Key() == tcell.KeyF4:
+				navigateToPage(validatorPageIdx)
 				return nil
 
 			// Open configuration modal.
