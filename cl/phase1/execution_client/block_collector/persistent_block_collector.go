@@ -17,6 +17,7 @@
 package block_collector
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -133,60 +134,88 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 		return fmt.Errorf("database not initialized")
 	}
 
-	blocksBatch := []*types.Block{}
 	inserted := uint64(0)
 
 	minInsertableBlockNumber := p.engine.FrozenBlocks(ctx)
 	var prevBlockNum uint64
-	if err := p.db.View(ctx, func(tx kv.Tx) error {
-		cursor, err := tx.Cursor(kv.Headers)
-		if err != nil {
-			return err
-		}
-		defer cursor.Close()
+	var lastKey []byte // resume cursor position across short-lived read transactions
 
-		for k, v, err := cursor.First(); k != nil; k, v, err = cursor.Next() {
+	for {
+		blocksBatch := make([]*types.Block, 0, batchSize)
+		endOfData := false
+		gapDetected := false
+
+		if err := p.db.View(ctx, func(tx kv.Tx) error {
+			cursor, err := tx.Cursor(kv.Headers)
+			if err != nil {
+				return err
+			}
+			defer cursor.Close()
+
+			// Position cursor: start from beginning or resume after lastKey
+			var k, v []byte
+			if lastKey == nil {
+				k, v, err = cursor.First()
+			} else {
+				k, v, err = cursor.Seek(lastKey)
+				if err != nil {
+					return err
+				}
+				if k != nil && bytes.Equal(k, lastKey) {
+					k, v, err = cursor.Next()
+				}
+			}
 			if err != nil {
 				return err
 			}
 
-			block, err := p.decodeBlock(v)
-			if err != nil {
-				p.logger.Warn("[BlockCollector] Failed to decode block", "key", common.Bytes2Hex(k), "err", err)
-				continue
-			}
-			if block == nil {
-				continue
-			}
-			if block.NumberU64() < minInsertableBlockNumber {
-				continue
-			}
-
-			if prevBlockNum > 0 && block.NumberU64() != prevBlockNum+1 {
-				p.logger.Warn("[BlockCollector] Gap detected in collected blocks, will re-download missing range",
-					"lastBlock", prevBlockNum, "nextBlock", block.NumberU64(),
-					"gap", block.NumberU64()-prevBlockNum-1)
-				break
-			}
-			prevBlockNum = block.NumberU64()
-			blocksBatch = append(blocksBatch, block)
-
-			if len(blocksBatch) >= batchSize {
-				if err := p.insertBatch(ctx, blocksBatch, &inserted); err != nil {
+			for ; k != nil; k, v, err = cursor.Next() {
+				if err != nil {
 					return err
 				}
-				blocksBatch = []*types.Block{}
+
+				lastKey = append([]byte{}, k...)
+
+				block, err := p.decodeBlock(v)
+				if err != nil {
+					p.logger.Warn("[BlockCollector] Failed to decode block", "key", common.Bytes2Hex(k), "err", err)
+					continue
+				}
+				if block == nil {
+					continue
+				}
+				if block.NumberU64() < minInsertableBlockNumber {
+					continue
+				}
+
+				if prevBlockNum > 0 && block.NumberU64() != prevBlockNum+1 {
+					p.logger.Warn("[BlockCollector] Gap detected in collected blocks, will re-download missing range",
+						"lastBlock", prevBlockNum, "nextBlock", block.NumberU64(),
+						"gap", block.NumberU64()-prevBlockNum-1)
+					gapDetected = true
+					return nil
+				}
+				prevBlockNum = block.NumberU64()
+				blocksBatch = append(blocksBatch, block)
+
+				if len(blocksBatch) >= batchSize {
+					return nil
+				}
+			}
+			endOfData = true
+			return nil
+		}); err != nil {
+			return fmt.Errorf("failed to flush blocks from database: %w", err)
+		}
+
+		if len(blocksBatch) > 0 {
+			if err := p.insertBatch(ctx, blocksBatch, &inserted); err != nil {
+				return err
 			}
 		}
-		return nil
-	}); err != nil {
-		return fmt.Errorf("failed to flush blocks from database: %w", err)
-	}
 
-	// Insert remaining blocks
-	if len(blocksBatch) > 0 {
-		if err := p.insertBatch(ctx, blocksBatch, &inserted); err != nil {
-			return err
+		if endOfData || gapDetected || len(blocksBatch) == 0 {
+			break
 		}
 	}
 
