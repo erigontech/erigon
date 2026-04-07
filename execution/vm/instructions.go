@@ -994,18 +994,15 @@ func opCreate(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		input  = scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
 	)
 
-	// EIP-7954: check initcode size after regular gas is charged (by the
-	// dynamic gas function) but before execution.
 	if evm.ChainRules().IsAmsterdam {
+		// EIP-7954: check initcode size after regular gas is charged (by the
+		// dynamic gas function) but before execution.
 		if err := CheckMaxInitCodeSize(uint64(len(input)), evm.ChainRules().IsShanghai, evm.ChainRules().IsAmsterdam); err != nil {
 			return pc, nil, err
 		}
-	}
-
-	// EIP-8037: charge state gas for account creation after the static-context
-	// and initcode-size checks so that it is not consumed on early failures
-	// where no state is created (per execution-specs#2608).
-	if evm.ChainRules().IsAmsterdam {
+		// EIP-8037: charge state gas for account creation after the static-context
+		// and initcode-size checks so that it is not consumed on early failures
+		// where no state is created (per execution-specs#2608).
 		stateGas := uint64(params.StateBytesNewAccount) * evm.Context.CostPerStateByte
 		if !scope.useMdGas(evm, stateGas, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeIgnored) {
 			return pc, nil, ErrOutOfGas
@@ -1071,18 +1068,15 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 		input        = scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
 	)
 
-	// EIP-7954: check initcode size after regular gas is charged (by the
-	// dynamic gas function) but before execution.
 	if evm.ChainRules().IsAmsterdam {
+		// EIP-7954: check initcode size after regular gas is charged (by the
+		// dynamic gas function) but before execution.
 		if err := CheckMaxInitCodeSize(uint64(len(input)), evm.ChainRules().IsShanghai, evm.ChainRules().IsAmsterdam); err != nil {
 			return pc, nil, err
 		}
-	}
-
-	// EIP-8037: charge state gas for account creation after the static-context
-	// and initcode-size checks so that it is not consumed on early failures
-	// where no state is created (per execution-specs#2608).
-	if evm.ChainRules().IsAmsterdam {
+		// EIP-8037: charge state gas for account creation after the static-context
+		// and initcode-size checks so that it is not consumed on early failures
+		// where no state is created (per execution-specs#2608).
 		stateGas := uint64(params.StateBytesNewAccount) * evm.Context.CostPerStateByte
 		if !scope.useMdGas(evm, stateGas, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeIgnored) {
 			return pc, nil, ErrOutOfGas
