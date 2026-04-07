@@ -1060,6 +1060,7 @@ func applyMinimalPreset(cfg *BeaconChainConfig) {
 	cfg.PresetBase = "minimal"
 
 	// Phase0 preset differences
+	cfg.SecondsPerSlot = 6
 	cfg.TargetCommitteeSize = 4
 	cfg.MaxCommitteesPerSlot = 4
 	cfg.ShuffleRoundCount = 10
