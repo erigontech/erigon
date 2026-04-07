@@ -61,7 +61,7 @@ jobs:
         id: hive-version
         run: |
           echo "ref=$(jq -r .hive_ref erigon-src/.github/workflows/hive-versions.json)" >> "$GITHUB_OUTPUT"
-          echo "execution_apis_ref=$(jq -r '.execution_apis_ref // "main"' erigon-src/.github/workflows/hive-versions.json)" >> "$GITHUB_OUTPUT"
+          echo "execution_apis_ref=$(jq -r '.execution_apis_ref // empty' erigon-src/.github/workflows/hive-versions.json)" >> "$GITHUB_OUTPUT"
 
       - name: Checkout Hive
         uses: actions/checkout@v6
@@ -93,32 +93,6 @@ jobs:
           username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
           password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
 
-      - name: Pin execution-apis ref in rpc-compat simulator
-        if: matrix.sim == 'rpc' && matrix.sim-limit == 'compat'
-        run: |
-          EXEC_APIS_REF="${{ steps.hive-version.outputs.execution_apis_ref }}"
-          SIM_DIR="hive/simulators/ethereum/rpc-compat"
-          if [ "$EXEC_APIS_REF" != "main" ]; then
-            echo "Pinning execution-apis to $EXEC_APIS_REF"
-            rm -rf /tmp/execution-apis
-            git clone --single-branch https://github.com/ethereum/execution-apis.git /tmp/execution-apis
-            (cd /tmp/execution-apis && git checkout "$EXEC_APIS_REF")
-            cp -r /tmp/execution-apis/tests "$SIM_DIR/tests"
-            rm -rf /tmp/execution-apis
-            # Use the Dockerfile's built-in local-tests support instead of git clone
-            sed -i '/^RUN git init/,/checkout FETCH_HEAD/d' "$SIM_DIR/Dockerfile"
-            sed -i '/^# uncomment the line below/d; s|^# ADD tests|ADD tests|' "$SIM_DIR/Dockerfile"
-            # Verify the patch applied correctly
-            if grep -Eq '^RUN git init|checkout FETCH_HEAD|^# ADD tests' "$SIM_DIR/Dockerfile"; then
-              echo "Failed to patch $SIM_DIR/Dockerfile: clone block not fully removed" >&2
-              exit 1
-            fi
-            if ! grep -q '^ADD tests' "$SIM_DIR/Dockerfile"; then
-              echo "Failed to patch $SIM_DIR/Dockerfile: ADD tests not enabled" >&2
-              exit 1
-            fi
-          fi
-
       # Targeting the clients/erigon/Dockerfile.git in the Hive directory -
       # this builds the container from github and uses it for tests
       - name: Get dependencies and build hive
@@ -136,6 +110,13 @@ jobs:
           go_version=$(go mod edit -json ../erigon-src/go.mod | jq -r .Go)
           echo "Patching builder Go version to ${go_version}"
           sed -i "s|golang:[0-9.]*-|golang:${go_version}-|" clients/erigon/Dockerfile
+          # Pin the execution-apis ref used by the rpc-compat simulator so that
+          # upstream test additions don't break CI unexpectedly.
+          execution_apis_ref="${{ steps.hive-version.outputs.execution_apis_ref }}"
+          if [ -n "$execution_apis_ref" ]; then
+            echo "Pinning rpc-compat execution-apis ref to ${execution_apis_ref}"
+            sed -i "s/^ARG branch=main$/ARG branch=${execution_apis_ref}/" simulators/ethereum/rpc-compat/Dockerfile
+          fi
           go build . >> buildlogs.log
       # Depends on the last line of hive output that prints the number of suites, tests and failed
       # Currently, we fail even if suites and tests are too few, indicating the tests did not run
