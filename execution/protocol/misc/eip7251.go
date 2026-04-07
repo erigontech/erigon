@@ -32,7 +32,7 @@ func DequeueConsolidationRequests7251(syscall rules.SystemCall, state *state.Int
 		return nil, err
 	}
 	if codeSize == 0 {
-		return nil, nil
+		return nil, fmt.Errorf("[EIP-7251] Syscall failure: Empty Code at ConsolidationRequestAddress=%x", consolidationRequestAddress)
 	}
 
 	res, err := syscall(consolidationRequestAddress, nil)
