@@ -1766,7 +1766,7 @@ func (t *Updates) TouchCode(c *KeyUpdate, code []byte) {
 		c.update.CodeHash = empty.CodeHash
 		return
 	}
-	copy(c.update.CodeHash[:], crypto.Keccak256(code))
+	c.update.CodeHash = crypto.HashData(code)
 }
 
 func (t *Updates) Close() {
