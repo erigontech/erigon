@@ -13,7 +13,7 @@ FILELIST=$(mktemp /tmp/rclone_256step_XXXXXX.txt)
 trap "rm -f $FILELIST" EXIT
 
 echo "Listing remote files from: $REMOTE"
-rclone lsf -R "$REMOTE" | grep -E '\.[0-9]+-[0-9]+\.' | while IFS= read -r f; do
+rclone lsf -R "$REMOTE" | grep -E '\.[0-9]+-[0-9]+\.' | grep -v '^domain/' | while IFS= read -r f; do
     # Extract step range: something.FROM-TO.ext
     if [[ "$f" =~ \.([0-9]+)-([0-9]+)\.[a-z] ]]; then
         from="${BASH_REMATCH[1]}"
@@ -35,7 +35,7 @@ if [ "$count" -eq 0 ]; then
 fi
 
 echo "Preview (first 20):"
-head -20 "$FILELIST"
+head -100 "$FILELIST"
 echo ""
 
 #read -p "Proceed with rclone copy? [y/N] " confirm
