@@ -565,6 +565,13 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 		}
 	}()
 	defer func() {
+		// Close the exec loop's own RO tx — prevents leak across batches.
+		if pe.applyTx != nil {
+			pe.applyTx.Rollback()
+			pe.applyTx = nil
+		}
+	}()
+	defer func() {
 		if rec := recover(); rec != nil {
 			pe.logger.Warn("["+pe.logPrefix+"] exec loop panic", "rec", rec, "stack", dbg.Stack())
 		} else if err != nil && !errors.Is(err, context.Canceled) {
