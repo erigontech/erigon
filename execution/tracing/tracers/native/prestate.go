@@ -199,7 +199,7 @@ func (t *prestateTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scop
 			t.Stop(fmt.Errorf("failed to copy CREATE2 in prestate tracer input err: %s", err))
 			return
 		}
-		inithash := accounts.InternCodeHash(common.Hash(crypto.Keccak256(init)))
+		inithash := accounts.InternCodeHash(crypto.HashData(init))
 		salt := stackData[stackLen-4]
 		addr := accounts.InternAddress(types.CreateAddress2(caller.Value(), salt.Bytes32(), inithash))
 		t.lookupAccount(addr)
@@ -280,7 +280,7 @@ func (t *prestateTracer) processDiffState() {
 		newCode, _ := t.env.IntraBlockState.GetCode(addr)
 		newCodeHash := common.Hash{}
 		if len(newCode) > 0 {
-			newCodeHash = crypto.Keccak256Hash(newCode)
+			newCodeHash = crypto.HashData(newCode)
 		}
 
 		if newBalance.ToBig().Cmp(t.pre[addr].Balance) != 0 {
@@ -380,7 +380,7 @@ func (t *prestateTracer) lookupAccount(addr accounts.Address) {
 		Nonce:   nonce,
 	}
 	if len(code) > 0 {
-		codeHash := crypto.Keccak256Hash(code)
+		codeHash := crypto.HashData(code)
 		t.pre[addr].CodeHash = &codeHash
 	} else {
 		t.pre[addr].CodeHash = nil

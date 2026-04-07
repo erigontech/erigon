@@ -39,7 +39,7 @@ var (
 	EmptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 
 	// emptyState is the known hash of an empty state trie entry.
-	emptyState = crypto.Keccak256Hash(nil)
+	emptyState = crypto.HashData(nil)
 )
 
 // Trie is a Merkle Patricia Trie.
@@ -543,9 +543,8 @@ func (t *Trie) UpdateAccountCode(key []byte, code CodeNode) error {
 		return fmt.Errorf("account not found with key: %x", key)
 	}
 
-	actualCodeHash := crypto.Keccak256(code)
-	codeHashValue := accNode.CodeHash.Value()
-	if !bytes.Equal(codeHashValue[:], actualCodeHash) {
+	actualCodeHash := crypto.HashData(code)
+	if accNode.CodeHash.Value() != actualCodeHash {
 		return fmt.Errorf("inserted code mismatch account hash (acc.CodeHash=%x codeHash=%x)", accNode.CodeHash, actualCodeHash)
 	}
 
