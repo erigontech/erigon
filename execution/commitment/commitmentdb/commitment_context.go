@@ -615,7 +615,12 @@ func (sdc *SharedDomainsCommitmentContext) enableConcurrentCommitmentIfPossible(
 		if err != nil {
 			return err
 		}
-		sdc.updates.SetConcurrentCommitment(nextConcurrent)
+		// Only call SetConcurrentCommitment when enabling concurrent mode.
+		// SetConcurrentCommitment calls initCollector() which reinitializes
+		// ETL collectors — avoid this when the mode isn't changing.
+		if nextConcurrent {
+			sdc.updates.SetConcurrentCommitment(true)
+		}
 	}
 	return nil
 }

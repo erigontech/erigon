@@ -445,15 +445,7 @@ func (p *ConcurrentPatriciaHashed) CanDoConcurrentNext() (bool, error) {
 	// optimization in DomainPut or a visibility issue in the history writers.
 	//
 	// The topology check is correct; re-enable when the DB interaction is fixed.
-	if p.root.root.extLen == 0 {
-		zeroPrefixBranch, _, err := p.root.ctx.Branch(HexNibblesToCompactBytes([]byte{0}))
-		if err != nil {
-			return false, fmt.Errorf("checking shortest prefix branch failed: %w", err)
-		}
-		if len(zeroPrefixBranch) > 4 {
-			return true, nil
-		}
-	}
+	// Disabled: see comment above.
 	return false, nil
 }
 
