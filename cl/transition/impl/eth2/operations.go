@@ -143,31 +143,6 @@ func (I *impl) ProcessAttesterSlashing(
 	return nil
 }
 
-func isValidDepositSignature(depositData *cltypes.DepositData, cfg *clparams.BeaconChainConfig) (bool, error) {
-	// Agnostic domain.
-	domain, err := fork.ComputeDomain(
-		cfg.DomainDeposit[:],
-		utils.Uint32ToBytes4(uint32(cfg.GenesisForkVersion)),
-		[32]byte{},
-	)
-	if err != nil {
-		return false, err
-	}
-	depositMessageRoot, err := depositData.MessageHash()
-	if err != nil {
-		return false, err
-	}
-	signedRoot := utils.Sha256(depositMessageRoot[:], domain)
-	// Perform BLS verification and if successful noice.
-	valid, err := bls.Verify(depositData.Signature[:], signedRoot[:], depositData.PubKey[:])
-	if err != nil || !valid {
-		// ignore err here
-		log.Debug("Validator BLS verification failed", "valid", valid, "err", err)
-		return false, nil
-	}
-	return true, nil
-}
-
 func (I *impl) ProcessDeposit(s abstract.BeaconState, deposit *cltypes.Deposit) error {
 	if deposit == nil {
 		return nil

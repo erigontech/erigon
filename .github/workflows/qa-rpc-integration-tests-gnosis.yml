@@ -73,7 +73,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ runner.workspace }}/rpc-tests
-          key: rpc-tests-${{ runner.os }}-${{ runner.arch }}-v1.121.0
+          key: rpc-tests-${{ runner.os }}-${{ runner.arch }}-v2.4.0
 
       - name: Run RPC Integration Tests
         id: test_step
@@ -151,7 +151,16 @@ jobs:
             db_version="no-version"
           fi
           
-          python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py --repo erigon --commit $(git rev-parse HEAD) --branch ${{ github.ref_name }} --test_name rpc-integration-tests --chain $CHAIN --runner ${{ runner.name }} --db_version $db_version --outcome $TEST_RESULT #--result_file ${{ github.workspace }}/result-$CHAIN.json
+          python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
+            --repo erigon \
+            --commit $(git rev-parse HEAD) \
+            --branch ${{ github.ref_name }} \
+            --test_name rpc-integration-tests \
+            --chain $CHAIN \
+            --runner ${{ runner.name }} \
+            --db_version $db_version \
+            --outcome $TEST_RESULT \
+            --result_file $TEST_RESULT_DIR/results/test_report.json
 
       - name: Action to check failure condition
         if: failure()

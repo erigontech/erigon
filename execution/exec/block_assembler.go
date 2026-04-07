@@ -107,22 +107,16 @@ type BlockAssembler struct {
 
 func (ba *BlockAssembler) CumulativeGasUsed() protocol.GasUsed { return ba.gasUsed }
 
-func NewBlockAssembler(cfg AssemblerCfg, payloadId, parentTime uint64, header *types.Header, uncles []*types.Header, withdrawals []*types.Withdrawal) *BlockAssembler {
+func NewBlockAssembler(cfg AssemblerCfg, block *AssembledBlock) *BlockAssembler {
 	var balIO *state.VersionedIO
 
-	if cfg.ChainConfig.IsAmsterdam(header.Time) || cfg.ExperimentalBAL {
+	if cfg.ChainConfig.IsAmsterdam(block.Header.Time) || cfg.ExperimentalBAL {
 		balIO = &state.VersionedIO{}
 	}
 	return &BlockAssembler{
-		AssembledBlock: &AssembledBlock{
-			PayloadId:        payloadId,
-			ParentHeaderTime: parentTime,
-			Header:           header,
-			Uncles:           uncles,
-			Withdrawals:      withdrawals,
-		},
-		cfg:   cfg,
-		balIO: balIO,
+		AssembledBlock: block,
+		cfg:            cfg,
+		balIO:          balIO,
 	}
 }
 

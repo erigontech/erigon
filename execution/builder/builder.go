@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -106,14 +107,14 @@ func (b *Builder) Build(param *Parameters, interrupt *atomic.Bool) (result *type
 		}
 	}()
 
-	// Per-build state: fresh BuiltBlock and result channel, shared pendingBlockCh.
+	// Per-build state: fresh AssembledBlock and result channel, shared pendingBlockCh.
 	perBuildCfg := *b.builderCfg
 	perBuildCfg.Etherbase = param.SuggestedFeeRecipient
 	state := BuilderState{
 		BuilderConfig:   &perBuildCfg,
 		PendingResultCh: b.pendingBlockCh,
 		BuilderResultCh: make(chan *types.BlockWithReceipts, 1),
-		BuiltBlock:      &BuiltBlock{},
+		BuiltBlock:      &exec.AssembledBlock{},
 	}
 
 	tx, err := b.db.BeginTemporalRo(b.ctx)

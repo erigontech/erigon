@@ -236,6 +236,9 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
 	}
+	if currentContext != nil {
+		currentContext.SetInMemHistoryReads(inMemHistoryReads)
+	}
 
 	defer func() {
 		if closeOnReturn && currentContext != nil {
