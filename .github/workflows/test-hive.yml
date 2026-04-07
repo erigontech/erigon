@@ -100,10 +100,8 @@ jobs:
           SIM_DIR="hive/simulators/ethereum/rpc-compat"
           if [ "$EXEC_APIS_REF" != "main" ]; then
             echo "Pinning execution-apis to $EXEC_APIS_REF"
-            git init /tmp/execution-apis
-            git -C /tmp/execution-apis remote add origin https://github.com/ethereum/execution-apis.git
-            git -C /tmp/execution-apis fetch --depth 1 origin "$EXEC_APIS_REF"
-            git -C /tmp/execution-apis checkout --detach FETCH_HEAD
+            git clone --single-branch https://github.com/ethereum/execution-apis.git /tmp/execution-apis
+            (cd /tmp/execution-apis && git checkout "$EXEC_APIS_REF")
             cp -r /tmp/execution-apis/tests "$SIM_DIR/tests"
             rm -rf /tmp/execution-apis
             # Use the Dockerfile's built-in local-tests support instead of git clone
