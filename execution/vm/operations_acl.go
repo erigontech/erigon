@@ -56,6 +56,12 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		// If the caller cannot afford the cost, this change will be rolled back
 		if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(callContext.Address(), slot); slotMod {
 			cost = params.ColdSloadCostEIP2929
+			if evm.Context.BlockNumber == 24809877 {
+				txIdx := evm.IntraBlockState().TxIndex()
+				if txIdx == 63 || txIdx == 72 {
+					log.Debug("[sstore debug] cold SSTORE (first access via SSTORE)", "block", evm.Context.BlockNumber, "txIdx", txIdx, "contract", callContext.Address(), "slot", fmt.Sprintf("%x", slot), "coldCost", cost)
+				}
+			}
 			// Abort gas evaluation if there isn’t enough gas left,
 			// ensuring no state access happens afterward.
 			if callContext.gas < cost {
@@ -68,6 +74,12 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		if current.Eq(&value) { // noop (1)
 			// EIP 2200 original clause:
 			//		return params.SloadGasEIP2200, nil
+			if evm.Context.BlockNumber == 24809877 {
+				txIdx := evm.IntraBlockState().TxIndex()
+				if txIdx == 63 || txIdx == 72 {
+					log.Debug("[sstore debug] noop (1)", "block", evm.Context.BlockNumber, "txIdx", txIdx, "contract", callContext.Address(), "slot", fmt.Sprintf("%x", slot), "cost", cost, "total", cost+params.WarmStorageReadCostEIP2929)
+				}
+			}
 			return mdgas.MdGas{Regular: cost + params.WarmStorageReadCostEIP2929}, nil // SLOAD_GAS
 		}
 
@@ -75,6 +87,12 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		var original, _ = evm.IntraBlockState().GetCommittedState(callContext.Address(), slotCommited)
 		if original.Eq(&current) {
 			if original.IsZero() { // create slot (2.1.1)
+				if evm.Context.BlockNumber == 24809877 {
+					txIdx := evm.IntraBlockState().TxIndex()
+					if txIdx == 63 || txIdx == 72 {
+						log.Debug("[sstore debug] create slot (2.1.1)", "block", evm.Context.BlockNumber, "txIdx", txIdx, "contract", callContext.Address(), "slot", fmt.Sprintf("%x", slot), "cost", cost)
+					}
+				}
 				if rules.IsAmsterdam {
 					return mdgas.MdGas{Regular: cost + params.SstoreSetGasEIP8037, State: 32 * evm.Context.CostPerStateByte}, nil
 				} else {
@@ -85,6 +103,12 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 				evm.IntraBlockState().AddRefund(clearingRefund)
 				if evm.Context.BlockNumber == 24809877 {
 					log.Debug("[sstore refund debug] delete slot (2.1.2b)", "block", evm.Context.BlockNumber, "txIdx", evm.IntraBlockState().TxIndex(), "amount", clearingRefund, "totalRefund", evm.IntraBlockState().GetRefund().Regular)
+				}
+			}
+			if evm.Context.BlockNumber == 24809877 {
+				txIdx := evm.IntraBlockState().TxIndex()
+				if txIdx == 63 || txIdx == 72 {
+					log.Debug("[sstore debug] write existing (2.1.2)", "block", evm.Context.BlockNumber, "txIdx", txIdx, "contract", callContext.Address(), "slot", fmt.Sprintf("%x", slot), "cost", cost, "total", cost+(params.SstoreResetGasEIP2200-params.ColdSloadCostEIP2929))
 				}
 			}
 			// EIP-2200 original clause:
@@ -130,6 +154,12 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 				if evm.Context.BlockNumber == 24809877 {
 					log.Debug("[sstore refund debug] reset to existing (2.2.2.2)", "block", evm.Context.BlockNumber, "txIdx", evm.IntraBlockState().TxIndex(), "amount", (params.SstoreResetGasEIP2200-params.ColdSloadCostEIP2929)-params.WarmStorageReadCostEIP2929, "totalRefund", evm.IntraBlockState().GetRefund().Regular, "contract", callContext.Address(), "slot", slot, "current", &current, "original", &original, "newValue", &value)
 				}
+			}
+		}
+		if evm.Context.BlockNumber == 24809877 {
+			txIdx := evm.IntraBlockState().TxIndex()
+			if txIdx == 63 || txIdx == 72 {
+				log.Debug("[sstore debug] dirty update (2.2)", "block", evm.Context.BlockNumber, "txIdx", txIdx, "contract", callContext.Address(), "slot", fmt.Sprintf("%x", slot), "cost", cost, "total", cost+params.WarmStorageReadCostEIP2929)
 			}
 		}
 		// EIP-2200 original clause:
