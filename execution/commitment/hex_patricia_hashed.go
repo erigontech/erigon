@@ -1450,7 +1450,9 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 		currentNode = &trie.ShortNode{Key: extKey, Val: &trie.FullNode{}}
 		rootNode = currentNode             // use root node as the current node
 		keyPos = hph.root.hashedExtLen - 1 // start from the end of the root extension
-		fmt.Printf("[witness] root node %s, pos %d\n", hph.root.FullString(), keyPos)
+		if hph.trace {
+			log.Debug("[witness] root node", "node", hph.root.FullString(), "pos", keyPos)
+		}
 	}
 
 	var nextNode trie.Node
@@ -2634,7 +2636,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 					return fmt.Errorf("account with plainkey=%x not found: %w", plainKey, err)
 				}
 				if hph.trace {
-					addrHash := crypto.Keccak256(plainKey)
+					addrHash := crypto.HashData(plainKey)
 					fmt.Printf("account with plainKey=%x, addrHash=%x found=%v\n", plainKey, addrHash, update)
 				}
 			} else {
@@ -2770,7 +2772,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		warmup.EnableWarmupCache = hph.enableWarmupCache
 		warmuper = NewWarmuper(ctx, warmup)
 		warmuper.Start()
-		defer warmuper.WaitAndClose()
+		defer warmuper.CloseAndWait()
 		// Set cache on trie if warmup cache is enabled
 		if warmup.EnableWarmupCache {
 			hph.cache = warmuper.Cache()
