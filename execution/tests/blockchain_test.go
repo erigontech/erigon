@@ -463,7 +463,7 @@ func TestChainTxReorgs(t *testing.T) {
 		addr2   = crypto.PubkeyToAddress(key2.PublicKey)
 		addr3   = crypto.PubkeyToAddress(key3.PublicKey)
 		gspec   = &types.Genesis{
-			Config:   libchain.AllProtocolChanges,
+			Config:   libchain.TestChainBerlinConfig,
 			GasLimit: 3141592,
 			Alloc: types.GenesisAlloc{
 				addr1: {Balance: big.NewInt(1000000)},
