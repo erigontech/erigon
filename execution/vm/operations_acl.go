@@ -26,6 +26,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -82,6 +83,9 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 			}
 			if value.IsZero() { // delete slot (2.1.2b)
 				evm.IntraBlockState().AddRefund(clearingRefund)
+				if evm.Context.BlockNumber == 24809877 {
+					log.Debug("[sstore refund debug] delete slot (2.1.2b)", "block", evm.Context.BlockNumber, "txIdx", evm.IntraBlockState().TxIndex(), "amount", clearingRefund, "totalRefund", evm.IntraBlockState().GetRefund().Regular)
+				}
 			}
 			// EIP-2200 original clause:
 			//		return params.SstoreResetGasEIP2200, nil // write existing slot (2.1.2)
@@ -90,8 +94,14 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		if !original.IsZero() {
 			if current.IsZero() { // recreate slot (2.2.1.1)
 				evm.IntraBlockState().SubRefund(clearingRefund)
+				if evm.Context.BlockNumber == 24809877 {
+					log.Debug("[sstore refund debug] recreate slot (2.2.1.1) SubRefund", "block", evm.Context.BlockNumber, "txIdx", evm.IntraBlockState().TxIndex(), "amount", clearingRefund, "totalRefund", evm.IntraBlockState().GetRefund().Regular)
+				}
 			} else if value.IsZero() { // delete slot (2.2.1.2)
 				evm.IntraBlockState().AddRefund(clearingRefund)
+				if evm.Context.BlockNumber == 24809877 {
+					log.Debug("[sstore refund debug] delete slot (2.2.1.2)", "block", evm.Context.BlockNumber, "txIdx", evm.IntraBlockState().TxIndex(), "amount", clearingRefund, "totalRefund", evm.IntraBlockState().GetRefund().Regular)
+				}
 			}
 		}
 		if original.Eq(&value) {
@@ -101,8 +111,14 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 				if rules.IsAmsterdam {
 					evm.IntraBlockState().AddRefund(params.SstoreSetGasEIP8037 - params.WarmStorageReadCostEIP2929)
 					evm.IntraBlockState().AddStateRefund(32 * evm.Context.CostPerStateByte)
+					if evm.Context.BlockNumber == 24809877 {
+						log.Debug("[sstore refund debug] reset to inexistent (2.2.2.1) Amsterdam", "block", evm.Context.BlockNumber, "txIdx", evm.IntraBlockState().TxIndex(), "amount", params.SstoreSetGasEIP8037-params.WarmStorageReadCostEIP2929, "totalRefund", evm.IntraBlockState().GetRefund().Regular)
+					}
 				} else {
 					evm.IntraBlockState().AddRefund(params.SstoreSetGasEIP2200 - params.WarmStorageReadCostEIP2929)
+					if evm.Context.BlockNumber == 24809877 {
+						log.Debug("[sstore refund debug] reset to inexistent (2.2.2.1)", "block", evm.Context.BlockNumber, "txIdx", evm.IntraBlockState().TxIndex(), "amount", params.SstoreSetGasEIP2200-params.WarmStorageReadCostEIP2929, "totalRefund", evm.IntraBlockState().GetRefund().Regular)
+					}
 				}
 			} else { // reset to original existing slot (2.2.2.2)
 				// EIP 2200 Original clause:
@@ -111,6 +127,9 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 				// - SLOAD_GAS redefined as WARM_STORAGE_READ_COST
 				// Final: (5000 - COLD_SLOAD_COST) - WARM_STORAGE_READ_COST
 				evm.IntraBlockState().AddRefund((params.SstoreResetGasEIP2200 - params.ColdSloadCostEIP2929) - params.WarmStorageReadCostEIP2929)
+				if evm.Context.BlockNumber == 24809877 {
+					log.Debug("[sstore refund debug] reset to existing (2.2.2.2)", "block", evm.Context.BlockNumber, "txIdx", evm.IntraBlockState().TxIndex(), "amount", (params.SstoreResetGasEIP2200-params.ColdSloadCostEIP2929)-params.WarmStorageReadCostEIP2929, "totalRefund", evm.IntraBlockState().GetRefund().Regular)
+				}
 			}
 		}
 		// EIP-2200 original clause:

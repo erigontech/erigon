@@ -623,15 +623,17 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Regular)
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
 			st.blockRegularGasUsed = st.txnGasUsed
-			log.Debug("[gas debug] prague tx gas",
-				"block", st.evm.Context.BlockNumber,
-				"txIdx", st.state.TxIndex(),
-				"preRefund", st.txnGasUsedB4Refunds,
-				"refund", refund,
-				"stateRefund", st.state.GetRefund().Regular,
-				"postRefund", st.txnGasUsed,
-				"floor", intrinsicGasResult.FloorGasCost,
-			)
+			if st.evm.Context.BlockNumber == 24809877 {
+				log.Debug("[gas debug] prague tx gas",
+					"block", st.evm.Context.BlockNumber,
+					"txIdx", st.state.TxIndex(),
+					"preRefund", st.txnGasUsedB4Refunds,
+					"refund", refund,
+					"stateRefund", st.state.GetRefund().Regular,
+					"postRefund", st.txnGasUsed,
+					"floor", intrinsicGasResult.FloorGasCost,
+				)
+			}
 		} else {
 			st.txnGasUsedB4Refunds = mdGasUsed.Regular
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Regular)
@@ -801,7 +803,12 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 					stateIgasRefund += stateIgasRefundInc
 				} else {
 					st.state.AddRefund(params.PerEmptyAccountCost - params.PerAuthBaseCost)
+					if st.evm.Context.BlockNumber == 24809877 {
+						log.Debug("[7702 refund debug] authority exists refund", "block", st.evm.Context.BlockNumber, "txIdx", st.state.TxIndex(), "authIdx", i, "authority", authority, "amount", params.PerEmptyAccountCost-params.PerAuthBaseCost, "totalRefund", st.state.GetRefund().Regular)
+					}
 				}
+			} else if st.evm.Context.BlockNumber == 24809877 {
+				log.Debug("[7702 refund debug] authority does NOT exist (no refund)", "block", st.evm.Context.BlockNumber, "txIdx", st.state.TxIndex(), "authIdx", i, "authority", authority)
 			}
 
 			// 7. set authority code
