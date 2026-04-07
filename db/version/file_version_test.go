@@ -55,6 +55,7 @@ func TestParseVersion(t *testing.T) {
 		{"trailing_dot", args{v: "v1."}, Version{}, true},
 		{"bad_major", args{v: "vX.0"}, Version{}, true},
 		{"bad_minor", args{v: "v1.X"}, Version{}, true},
+		{"multiple_dots", args{v: "v1.2.3"}, Version{}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
