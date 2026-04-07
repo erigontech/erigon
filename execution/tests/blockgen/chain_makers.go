@@ -448,7 +448,11 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		txNumIncrement()
 
 		var versionMap *state.VersionMap
-		if dbg.Exec3Parallel {
+		// Create versionMap when parallel exec is on OR when Amsterdam is active.
+		// Amsterdam blocks need a versionMap for BAL access tracking even during
+		// serial block generation.
+		needsVersionMap := dbg.Exec3Parallel || config.AmsterdamTime != nil
+		if needsVersionMap {
 			versionMap = state.NewVersionMap(nil)
 			ibs.SetVersionMap(versionMap)
 		}
