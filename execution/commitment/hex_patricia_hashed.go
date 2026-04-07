@@ -35,6 +35,7 @@ import (
 	keccak "github.com/erigontech/fastkeccak"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
@@ -1716,7 +1717,7 @@ func (hph *HexPatriciaHashed) readBranchAndCheckForFlushing(prefix []byte) ([]by
 
 // unfoldBranchNode returns true if unfolding has been done
 func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bool) error {
-	key := HexNibblesToCompactBytes(hph.currentKey[:hph.currentKeyLen])
+	key := nibbles.HexToCompact(hph.currentKey[:hph.currentKeyLen])
 	hph.metrics.BranchLoad(hph.currentKey[:hph.currentKeyLen])
 
 	branchData, err := hph.readBranchAndCheckForFlushing(key)
@@ -2251,7 +2252,7 @@ func (hph *HexPatriciaHashed) fold() error {
 
 	depth := hph.depths[row]
 
-	updateKey := HexNibblesToCompactBytes(hph.currentKey[:updateKeyLen])
+	updateKey := nibbles.HexToCompact(hph.currentKey[:updateKeyLen])
 	defer func() { hph.depthsToTxNum[depth] = 0 }()
 
 	if hph.trace {

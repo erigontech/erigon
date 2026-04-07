@@ -35,6 +35,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
@@ -1172,7 +1173,7 @@ func validateAfterMap(afterMap uint16, row [16]*cell) error {
 }
 
 func validatePlainKeys(branchKey []byte, row [16]*cell, keccak keccak.KeccakState) error {
-	uncompactedBranchKey := uncompactNibbles(branchKey)
+	uncompactedBranchKey := nibbles.CompactToHex(branchKey)
 	if HasTerm(uncompactedBranchKey) {
 		uncompactedBranchKey = uncompactedBranchKey[:len(uncompactedBranchKey)-1]
 	}
