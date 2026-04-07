@@ -138,22 +138,8 @@ func ParseVersion(v string) (Version, error) {
 		return Version{}, ErrInvalidVersion
 	}
 
-	// find end of version part (before first '-')
-	end := strings.IndexByte(v, '-')
-	if end < 0 {
-		end = len(v)
-	}
-	// v[1:end] is e.g. "1" or "1.0"
-	verStr := v[1:end]
-
-	dot := strings.IndexByte(verStr, '.')
-	var majorStr, minorStr string
-	if dot < 0 {
-		majorStr = verStr
-	} else {
-		majorStr = verStr[:dot]
-		minorStr = verStr[dot+1:]
-	}
+	verStr, _, _ := strings.Cut(v[1:], "-")
+	majorStr, minorStr, _ := strings.Cut(verStr, ".")
 
 	major, err := strconv.ParseUint(majorStr, 10, 8)
 	if err != nil {
