@@ -93,7 +93,17 @@ jobs:
           username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
           password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
 
-      # Targetting the clients/erigon/Dockerfile.git in the Hive director - 
+      - name: Pin execution-apis ref in rpc-compat simulator
+        run: |
+          EXEC_APIS_REF="${{ steps.hive-version.outputs.execution_apis_ref }}"
+          DOCKERFILE="hive/simulators/ethereum/rpc-compat/Dockerfile"
+          if [ "$EXEC_APIS_REF" != "main" ] && [ -f "$DOCKERFILE" ]; then
+            echo "Pinning execution-apis to $EXEC_APIS_REF"
+            sed -i "s|ARG branch=main|ARG branch=$EXEC_APIS_REF|" "$DOCKERFILE"
+            sed -i "s|git fetch --depth 1 origin|git fetch origin|" "$DOCKERFILE"
+          fi
+
+      # Targetting the clients/erigon/Dockerfile.git in the Hive director -
       # this builds the container from github and uses it for tests
       - name: Get dependencies and build hive
         env:
@@ -127,7 +137,7 @@ jobs:
             echo -e "\n\n============================================================"
             echo "Running test: ${1}-${2}"
             echo -e "\n"
-            ./hive -docker.auth --sim ethereum/"${1}" --sim.limit="${2}" --sim.parallelism=8 --client erigon --sim.buildarg branch=${{ steps.hive-version.outputs.execution_apis_ref }} 2>&1 | tee output.log || {
+            ./hive -docker.auth --sim ethereum/"${1}" --sim.limit="${2}" --sim.parallelism=8 --client erigon 2>&1 | tee output.log || {
               if [ $? -gt 0 ]; then
                 echo "Exitcode gt 0"
               fi
