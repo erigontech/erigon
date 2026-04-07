@@ -97,6 +97,7 @@ func (dt *DomainRoTx) IntegrityKey(k []byte) error {
 			continue
 		}
 		accessor := item.index
+		needClose := false
 		if accessor == nil {
 			fPath, _, _, err := version.FindFilesWithVersionsByPattern(dt.d.efAccessorFilePathMask(item.StepRange(dt.stepSize)))
 			if err != nil {
@@ -117,20 +118,28 @@ func (dt *DomainRoTx) IntegrityKey(k []byte) error {
 					dt.d.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
 					continue
 				}
-				defer accessor.Close()
 			} else {
 				continue
 			}
+			needClose = true
 		}
 
-		offset, ok := accessor.GetReaderFromPool().Lookup(k)
+		reader := accessor.GetReaderFromPool()
+		offset, ok := reader.Lookup(k)
+		reader.Close()
 		if !ok {
+			if needClose {
+				accessor.Close()
+			}
 			continue
 		}
 		g := item.decompressor.MakeGetter()
 		g.Reset(offset)
 		key, _ := g.NextUncompressed()
 		if !bytes.Equal(k, key) {
+			if needClose {
+				accessor.Close()
+			}
 			continue
 		}
 		eliasVal, _ := g.NextUncompressed()
@@ -140,6 +149,9 @@ func (dt *DomainRoTx) IntegrityKey(k []byte) error {
 			last2 = r.Get(r.Count() - 2)
 		}
 		log.Warn(fmt.Sprintf("[dbg] see1: %s, min=%d,max=%d, before_max=%d, all: %d", item.decompressor.FileName(), r.Min(), r.Max(), last2, stream.ToArrU64Must(r.Iterator(0))))
+		if needClose {
+			accessor.Close()
+		}
 	}
 	return nil
 }
