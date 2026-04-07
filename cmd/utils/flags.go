@@ -118,7 +118,7 @@ var (
 	}
 	DevSlotTimeFlag = cli.IntFlag{
 		Name:  "dev.slot-time",
-		Usage: "Slot duration in seconds for PoS dev mode (default: 6)",
+		Usage: "Slot duration in seconds for PoS dev mode (minimum: 2)",
 		Value: 6,
 	}
 	ChainFlag = cli.StringFlag{
@@ -2035,9 +2035,10 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		beaconCfg.CapellaForkEpoch = 0
 		beaconCfg.DenebForkEpoch = 0
 		slotTime := uint64(ctx.Int(DevSlotTimeFlag.Name))
-		if slotTime > 0 {
-			beaconCfg.SecondsPerSlot = slotTime
+		if slotTime < 2 {
+			slotTime = 2
 		}
+		beaconCfg.SecondsPerSlot = slotTime
 		beaconCfg.InitializeForkSchedule()
 		genesisTime := uint64(time.Now().Unix())
 		// Compute the EL genesis block hash so the beacon state's Eth1Data
