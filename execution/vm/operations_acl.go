@@ -117,7 +117,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 				} else {
 					evm.IntraBlockState().AddRefund(params.SstoreSetGasEIP2200 - params.WarmStorageReadCostEIP2929)
 					if evm.Context.BlockNumber == 24809877 {
-						log.Debug("[sstore refund debug] reset to inexistent (2.2.2.1)", "block", evm.Context.BlockNumber, "txIdx", evm.IntraBlockState().TxIndex(), "amount", params.SstoreSetGasEIP2200-params.WarmStorageReadCostEIP2929, "totalRefund", evm.IntraBlockState().GetRefund().Regular)
+						log.Debug("[sstore refund debug] reset to inexistent (2.2.2.1)", "block", evm.Context.BlockNumber, "txIdx", evm.IntraBlockState().TxIndex(), "amount", params.SstoreSetGasEIP2200-params.WarmStorageReadCostEIP2929, "totalRefund", evm.IntraBlockState().GetRefund().Regular, "contract", callContext.Address(), "slot", slot, "current", &current, "original", &original, "newValue", &value)
 					}
 				}
 			} else { // reset to original existing slot (2.2.2.2)
@@ -128,7 +128,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 				// Final: (5000 - COLD_SLOAD_COST) - WARM_STORAGE_READ_COST
 				evm.IntraBlockState().AddRefund((params.SstoreResetGasEIP2200 - params.ColdSloadCostEIP2929) - params.WarmStorageReadCostEIP2929)
 				if evm.Context.BlockNumber == 24809877 {
-					log.Debug("[sstore refund debug] reset to existing (2.2.2.2)", "block", evm.Context.BlockNumber, "txIdx", evm.IntraBlockState().TxIndex(), "amount", (params.SstoreResetGasEIP2200-params.ColdSloadCostEIP2929)-params.WarmStorageReadCostEIP2929, "totalRefund", evm.IntraBlockState().GetRefund().Regular)
+					log.Debug("[sstore refund debug] reset to existing (2.2.2.2)", "block", evm.Context.BlockNumber, "txIdx", evm.IntraBlockState().TxIndex(), "amount", (params.SstoreResetGasEIP2200-params.ColdSloadCostEIP2929)-params.WarmStorageReadCostEIP2929, "totalRefund", evm.IntraBlockState().GetRefund().Regular, "contract", callContext.Address(), "slot", slot, "current", &current, "original", &original, "newValue", &value)
 				}
 			}
 		}
