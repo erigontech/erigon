@@ -958,8 +958,6 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 	}
 	start := time.Now()
 	var checked atomic.Uint64
-	var windowsDone atomic.Uint64
-	totalWindows := (to - from + checkCommitmentHistWindowSize - 1) / checkCommitmentHistWindowSize
 	expectedBlks := sc.NewSampler().ExpectedN(to - from)
 
 	const logInterval = 20 * time.Second
@@ -972,52 +970,31 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 				return
 			case <-logTicker.C:
 				done := checked.Load()
-				wDone := windowsDone.Load()
 				blkRate := float64(done) / time.Since(start).Seconds()
 				logger.Info("[integrity] "+string(StateRootVerifyByHistory),
 					"blks/s", fmt.Sprintf("%.1f", blkRate),
 					"checked", fmt.Sprintf("%s/%s", common.PrettyCounter(done), common.PrettyCounter(expectedBlks)),
-					"windows", fmt.Sprintf("%d/%d", wDone, totalWindows),
 					"blkRange", fmt.Sprintf("%s-%s", common.PrettyCounter(from), common.PrettyCounter(to)),
 				)
 			}
 		}
 	}()
 
-	// Each worker owns a window: builds its own ChangedKeysPerBlockIdx then checks
-	// its own sampled blocks — index building and block checking both run in parallel.
+	// One goroutine per sampled block — each does a narrow single-block index build
+	// and commitment check independently. All run in parallel up to GOMAXPROCS.
 	g, wCtx := errgroup.WithContext(ctx)
-	g.SetLimit(runtime.GOMAXPROCS(-1)) // all cpus, because no producer-worker
-	for windowStart := from; windowStart < to; windowStart += checkCommitmentHistWindowSize {
-		windowStart := windowStart
-		windowEnd := min(windowStart+checkCommitmentHistWindowSize, to)
+	g.SetLimit(runtime.GOMAXPROCS(-1))
+	sampler := sc.NewSampler()
+	for blockNum := range sampler.BlockNums(from, to) {
+		blockNum := blockNum
 		g.Go(func() error {
 			if wCtx.Err() != nil {
 				return wCtx.Err()
 			}
-			tx, err := db.BeginTemporalRo(wCtx)
-			if err != nil {
-				return err
+			if err := CheckCommitmentHistAtBlk(wCtx, db, br, blockNum, log.LvlTrace, logger); err != nil {
+				return fmt.Errorf("checkCommitmentHistAtBlk: %d, %w", blockNum, err)
 			}
-			defer tx.Rollback()
-			sd, err := execctx.NewSharedDomains(wCtx, tx, logger)
-			if err != nil {
-				return err
-			}
-			defer sd.Close()
-			idx, err := NewChangedKeysPerBlockIdx(wCtx, tx, br, windowStart, windowEnd, logger)
-			if err != nil {
-				return fmt.Errorf("CheckCommitmentHistAtBlkRange: build index window=[%d,%d): %w", windowStart, windowEnd, err)
-			}
-			// Each goroutine needs its own Sampler — the RNG is not goroutine-safe.
-			sampler := sc.NewSampler()
-			for blockNum := range sampler.BlockNums(windowStart, windowEnd) {
-				if err := checkCommitmentHistAtBlkWithIdx(wCtx, tx, sd, db, br, blockNum, idx, log.LvlTrace, logger); err != nil {
-					return fmt.Errorf("checkCommitmentHistAtBlk: %d, %w", blockNum, err)
-				}
-				checked.Add(1)
-			}
-			windowsDone.Add(1)
+			checked.Add(1)
 			return nil
 		})
 	}
