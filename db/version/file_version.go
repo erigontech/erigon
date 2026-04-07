@@ -47,6 +47,7 @@ type Version struct {
 }
 
 var ErrVersionIsNotSupported error = errors.New("this version is not supported")
+var ErrInvalidVersion = errors.New("invalid version")
 
 var (
 	ZeroVersion                  = Version{}
@@ -133,34 +134,40 @@ func (v Version) IsSearch() bool {
 }
 
 func ParseVersion(v string) (Version, error) {
-	if strings.HasPrefix(v, "v") {
-		versionString := strings.Split(v, "-")[0]
-		strVersions := strings.Split(versionString[1:], ".")
-		major, err := strconv.ParseUint(strVersions[0], 10, 8)
+	if len(v) == 0 || v[0] != 'v' {
+		return Version{}, ErrInvalidVersion
+	}
+
+	// find end of version part (before first '-')
+	end := strings.IndexByte(v, '-')
+	if end < 0 {
+		end = len(v)
+	}
+	// v[1:end] is e.g. "1" or "1.0"
+	verStr := v[1:end]
+
+	dot := strings.IndexByte(verStr, '.')
+	var majorStr, minorStr string
+	if dot < 0 {
+		majorStr = verStr
+	} else {
+		majorStr = verStr[:dot]
+		minorStr = verStr[dot+1:]
+	}
+
+	major, err := strconv.ParseUint(majorStr, 10, 8)
+	if err != nil {
+		return Version{}, ErrInvalidVersion
+	}
+	var minor uint64
+	if len(minorStr) > 0 {
+		minor, err = strconv.ParseUint(minorStr, 10, 8)
 		if err != nil {
-			return Version{}, fmt.Errorf("invalid version: %w", err)
+			return Version{}, ErrInvalidVersion
 		}
-		var minor uint64
-		if len(strVersions) > 1 {
-			minor, err = strconv.ParseUint(strVersions[1], 10, 8)
-			if err != nil {
-				return Version{}, fmt.Errorf("invalid version: %w", err)
-			}
-		} else {
-			minor = 0
-		}
-
-		return Version{
-			Major: major,
-			Minor: minor,
-		}, nil
 	}
 
-	if len(v) == 0 {
-		return Version{}, errors.New("invalid version: no prefix")
-	}
-
-	return Version{}, fmt.Errorf("invalid version prefix: %s", v[0:1])
+	return Version{Major: major, Minor: minor}, nil
 }
 
 func (v Version) String() string {
