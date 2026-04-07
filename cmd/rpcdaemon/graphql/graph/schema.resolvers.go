@@ -249,5 +249,40 @@ func (r *Resolver) Mutation() MutationResolver { return &mutationResolver{r} }
 // Query returns QueryResolver implementation.
 func (r *Resolver) Query() QueryResolver { return &queryResolver{r} }
 
+// Block returns BlockResolver implementation.
+func (r *Resolver) Block() BlockResolver { return &blockResolver{r} }
+
+// Account returns AccountResolver implementation.
+func (r *Resolver) Account() AccountResolver { return &accountResolver{r} }
+
 type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
+type blockResolver struct{ *Resolver }
+type accountResolver struct{ *Resolver }
+
+// Account is the resolver for the account field on Block.
+func (r *blockResolver) Account(ctx context.Context, obj *model.Block, address string) (*model.Account, error) {
+	addr := common.HexToAddress(address)
+	blockNumber := rpc.BlockNumber(obj.Number)
+
+	balance, nonce, code, err := r.GraphQLAPI.GetAccountInfo(ctx, addr, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	return &model.Account{
+		Address:          strings.ToLower(address),
+		Balance:          balance,
+		TransactionCount: nonce,
+		Code:             code,
+		BlockNum:         obj.Number,
+	}, nil
+}
+
+// Storage is the resolver for the storage field on Account.
+func (r *accountResolver) Storage(ctx context.Context, obj *model.Account, slot string) (string, error) {
+	addr := common.HexToAddress(obj.Address)
+	blockNumber := rpc.BlockNumber(obj.BlockNum)
+
+	return r.GraphQLAPI.GetAccountStorage(ctx, addr, slot, blockNumber)
+}

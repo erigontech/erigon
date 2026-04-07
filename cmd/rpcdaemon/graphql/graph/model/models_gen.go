@@ -13,6 +13,9 @@ type Account struct {
 	TransactionCount uint64 `json:"transactionCount"`
 	Code             string `json:"code"`
 	Storage          string `json:"storage"`
+	// BlockNum is an internal field used by the storage resolver to know which block to query.
+	// It is not part of the GraphQL schema and must be preserved when regenerating this file.
+	BlockNum uint64 `json:"-"`
 }
 
 type Block struct {
