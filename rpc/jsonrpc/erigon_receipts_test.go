@@ -233,7 +233,11 @@ func TestGetLogs_RangeLimitExceeded(t *testing.T) {
 		ToBlock:   big.NewInt(10),
 	})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), errExceedBlockRange)
+
+	var rpcErr rpc.Error
+	require.ErrorAs(t, err, &rpcErr)
+	assert.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+	assert.Equal(t, errExceedBlockRange+": 5", rpcErr.Error())
 }
 
 // TestGetLogs_RangeLimitOk verifies that eth_getLogs succeeds when the requested block
