@@ -81,7 +81,7 @@ require (
 	github.com/mark3labs/mcp-go v0.43.2
 	github.com/mattn/go-colorable v0.1.14
 	github.com/mattn/go-isatty v0.0.20
-	github.com/miekg/dns v1.1.66
+	github.com/miekg/dns v1.1.72
 	github.com/multiformats/go-multiaddr v0.16.0
 	github.com/nyaosorg/go-windows-shortcut v0.0.0-20220529122037-8b0c89bca4c4
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
