@@ -536,17 +536,23 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	require.Equal(t, maxWrite, binary.BigEndian.Uint64(v))
 }
 
-// TestGenerateCommitmentRebuildData generates a large-scale dataset (3M accounts,
-// 59 steps, ~10M keys) with valid commitment roots. The resulting datadir can be
-// used for manual testing of `integration commitment rebuild`.
+// TestGenerateCommitmentRebuildData generates a dataset with valid commitment roots.
+// The resulting datadir can be used for manual testing of
+// `integration commitment rebuild`.
 //
-// Skipped under `-short` since the full-scale generation requires a long timeout.
+// Skipped under `-short`. In the default (non-short) run it uses a small
+// CI-safe dataset (1K accounts, 3 steps). To generate the full-scale dataset
+// (3M accounts, 59 steps, ~10M keys) for manual integration testing, set
+// TEST_DATADIR to a persistent output directory — that both switches the
+// parameters to full scale and writes the files to a reusable location.
 //
 // Environment variables:
-//   - TEST_DATADIR: optional persistent output directory (uses t.TempDir() if empty)
+//   - TEST_DATADIR: optional persistent output directory. When set, switches
+//     to full-scale parameters and requires a long timeout. Unset (default):
+//     small CI-safe parameters, writes to t.TempDir().
 func TestGenerateCommitmentRebuildData(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping large data generation in short mode")
+		t.Skip("skipping data generation in short mode")
 	}
 
 	persistentDir := dbg.EnvString("TEST_DATADIR", "")
@@ -562,13 +568,24 @@ func TestGenerateCommitmentRebuildData(t *testing.T) {
 		}
 	}
 
+	// Default: small CI-safe parameters.
 	var (
-		stepSize        uint64 = 100
-		totalSteps      uint64 = 59
-		numAccounts     uint64 = 3_000_000
+		stepSize        uint64 = 10
+		totalSteps      uint64 = 3
+		numAccounts     uint64 = 1000
 		slotsPerAcct    uint64 = 2
-		numCodeAccounts uint64 = 1_000_000
+		numCodeAccounts uint64 = 300
 	)
+
+	// Scale up only when a persistent output directory is provided — this is
+	// the manual integration-testing path.
+	if persistentDir != "" {
+		stepSize = 100
+		totalSteps = 59
+		numAccounts = 3_000_000
+		slotsPerAcct = 2
+		numCodeAccounts = 1_000_000
+	}
 
 	totalTxs := stepSize * totalSteps
 	totalStorage := numAccounts * slotsPerAcct
