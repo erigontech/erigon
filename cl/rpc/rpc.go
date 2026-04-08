@@ -387,7 +387,7 @@ func (b *BeaconRpcP2P) parseResponseData(message *sentinelproto.ResponseData) ([
 
 		version, err := b.ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(respForkDigest))
 		if err != nil {
-			return nil, message.Peer.Pid, err
+			return nil, message.Peer.Pid, fmt.Errorf("unknown fork digest %x: %w", respForkDigest, err)
 		}
 		responsePacket = append(responsePacket, responseData{
 			version: version,

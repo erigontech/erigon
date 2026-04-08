@@ -404,7 +404,7 @@ func (t *attestationTestSuite) TestGloasAttestationIndexValidation() {
 			},
 			args: args{
 				ctx:    context.Background(),
-				subnet: uint64Ptr(1),
+				subnet: common.NewUint64(1),
 				msg: &solid.SingleAttestation{
 					CommitteeIndex: 0,
 					AttesterIndex:  0,
@@ -435,7 +435,7 @@ func (t *attestationTestSuite) TestGloasAttestationIndexValidation() {
 			},
 			args: args{
 				ctx:    context.Background(),
-				subnet: uint64Ptr(1),
+				subnet: common.NewUint64(1),
 				msg: &solid.SingleAttestation{
 					CommitteeIndex: 0,
 					AttesterIndex:  0,
@@ -467,7 +467,7 @@ func (t *attestationTestSuite) TestGloasAttestationIndexValidation() {
 			},
 			args: args{
 				ctx:    context.Background(),
-				subnet: uint64Ptr(1),
+				subnet: common.NewUint64(1),
 				msg: &solid.SingleAttestation{
 					CommitteeIndex: 0,
 					AttesterIndex:  0,
@@ -527,3 +527,4 @@ func TestAttestation(t *testing.T) {
 
 	suite.Run(t, &attestationTestSuite{})
 }
+

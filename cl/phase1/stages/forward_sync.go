@@ -323,6 +323,13 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 			return initialHighestSlotProcessed, err
 		}
 		currentSlot.Store(highestSlotProcessed)
+		// Update advertised status so peers don't disconnect us for being too far behind.
+		if highestSlotProcessed > initialHighestSlotProcessed {
+			fc := cfg.forkChoice.FinalizedCheckpoint()
+			if err2 := cfg.rpc.SetStatus(fc.Root, fc.Epoch, fc.Root, highestSlotProcessed); err2 != nil {
+				logger.Debug("Could not update status during forward sync", "err", err2)
+			}
+		}
 		return highestSlotProcessed, nil
 	})
 
@@ -349,6 +356,9 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 			logger.Info("[Caplin] Forward sync: no progress, handing off to ChainTipSync",
 				"progress", currentSlot.Load(), "targetSlot", chainTipSlot,
 				"stale", time.Since(lastProgressTime).Round(time.Second))
+			// Before handing off to ChainTipSync, try to set the head state so that
+			// gossip beacon_block messages won't be ignored (Syncing() becomes false).
+			setHeadStateFromForkChoice(cfg, logger)
 			return ErrForwardSyncStale
 		}
 
@@ -375,6 +385,25 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 	}
 
 	return nil
+}
+
+// setHeadStateFromForkChoice retrieves the current head state from the fork choice store
+// and sets it on syncedData. This clears the Syncing() flag so gossip beacon_block messages
+// are accepted by ChainTipSync instead of being ignored.
+func setHeadStateFromForkChoice(cfg *Cfg, logger log.Logger) {
+	headRoot, headSlot, err := cfg.forkChoice.GetHead(nil)
+	if err != nil {
+		return
+	}
+	headState, err := cfg.forkChoice.GetStateAtBlockRoot(headRoot, false)
+	if err != nil || headState == nil {
+		return
+	}
+	if err := cfg.syncedData.OnHeadState(headState); err != nil {
+		logger.Debug("Could not set head state from fork choice", "err", err)
+		return
+	}
+	logger.Info("[Caplin] Head state set from forward sync", "slot", headSlot, "root", headRoot)
 }
 
 // ensureAnchorEnvelopeOnce proactively fetches the anchor block's execution payload
