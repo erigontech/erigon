@@ -119,7 +119,7 @@ func (s *testService) ReturnError() error {
 	return testError{}
 }
 
-func (s *testService) ReturnNull() interface{} {
+func (s *testService) ReturnNull() any {
 	return nil
 }
 
