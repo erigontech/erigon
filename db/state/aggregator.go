@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -30,8 +31,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"math/rand"
 
 	"github.com/erigontech/erigon/db/kv/prune"
 
@@ -1814,7 +1813,8 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 				close(fin)
 				return
 			case <-timer.C:
-}
+			}
+		}
 
 		// check if db has enough data (maybe we didn't commit them yet or all keys are unique so history is empty)
 		hasData := lastInDB > step // `step` must be fully-written - means `step+1` records must be visible
