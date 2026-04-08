@@ -110,7 +110,7 @@ require (
 	github.com/vektah/gqlparser/v2 v2.5.32
 	github.com/xsleonard/go-merkle v1.1.0
 	go.uber.org/mock v0.6.0
-	go.uber.org/zap v1.27.0
+	go.uber.org/zap v1.27.1
 	golang.org/x/crypto v0.49.0
 	golang.org/x/net v0.52.0
 	golang.org/x/sync v0.20.0
