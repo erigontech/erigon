@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 )
 
@@ -106,7 +105,7 @@ func TestCaplinBlockProductionWithWithdrawalRequest(t *testing.T) {
 
 	chainRW := chainreader.NewChainReaderEth1(
 		m.ChainConfig,
-		direct.NewExecutionClientDirect(m.ExecModule),
+		m.ExecModule,
 		time.Hour,
 	)
 	engine, err := execution_client.NewExecutionClientDirect(chainRW, nil)
@@ -204,7 +203,7 @@ func TestCaplinBlockProductionGlamsterdamSlotNumber(t *testing.T) {
 
 	chainRW := chainreader.NewChainReaderEth1(
 		m.ChainConfig,
-		direct.NewExecutionClientDirect(m.ExecModule),
+		m.ExecModule,
 		time.Hour,
 	)
 	engine, err := execution_client.NewExecutionClientDirect(chainRW, nil)

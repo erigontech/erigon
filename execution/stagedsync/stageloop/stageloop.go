@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/metrics"
 	execp2p "github.com/erigontech/erigon/execution/p2p"
-	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/headerdownload"
@@ -212,18 +211,20 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 
 	doms.ClearRam(true)
 
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-
+	// Send notifications before commit. All notification consumers use the
+	// payload data directly and never read back from the DB, so this is safe.
+	// The tx has all pipeline writes and satisfies kv.Tx for reads.
+	// See #19623 for the broader move toward SD as the authoritative read layer.
 	if hook != nil {
 		if err := db.View(ctx, func(tx kv.Tx) error {
 			headersProgress, _, _, err := stagesHeadersAndFinish(tx)
 			if err != nil {
 				return err
 			}
-			err = hook.AfterRun(tx, finishStageBeforeSync, false)
-			if err != nil {
+			if err = hook.SendNotifications(tx, finishStageBeforeSync); err != nil {
+				return err
+			}
+			if err = hook.UpdateHead(tx, finishStageBeforeSync, false); err != nil {
 				return err
 			}
 			hook.LastNewBlockSeen(headersProgress)
@@ -231,6 +232,10 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		}); err != nil {
 			return err
 		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
 	}
 	return nil
 }
@@ -284,7 +289,10 @@ func stageLoopIteration(ctx context.Context, sd *execctx.SharedDomains, tx kv.Te
 	}
 	logCtx := sync.PrintTimings()
 	// -- send notifications START
-	if err = hook.AfterRun(tx, finishProgressBefore, isSynced); err != nil {
+	if err = hook.SendNotifications(tx, finishProgressBefore); err != nil {
+		return false, err
+	}
+	if err = hook.UpdateHead(tx, finishProgressBefore, isSynced); err != nil {
 		return false, err
 	}
 	var m runtime.MemStats
@@ -335,12 +343,20 @@ func stagesHeadersAndFinish(tx kv.Tx) (head, fin uint64, gasUsed uint64, err err
 	return head, fin, gasUsed, nil
 }
 
+// NotificationSender abstracts notification dispatch so Hook can delegate to
+// an implementation defined in another package (e.g. execmodule.Dispatcher)
+// without creating a circular import.
+type NotificationSender interface {
+	Dispatch(ctx context.Context, tx kv.Tx, accumulator *shards.Accumulator, recentReceipts *shards.RecentReceipts, finishProgressBefore, finishProgressAfter uint64, prevUnwindPoint *uint64) error
+}
+
 type Hook struct {
 	ctx                                 context.Context
 	notifications                       *shards.Notifications
 	sync                                *stagedsync.Sync
 	chainConfig                         *chain.Config
 	logger                              log.Logger
+	dispatcher                          NotificationSender
 	updateHead                          func(ctx context.Context)
 	statusDataGetter                    sentry_multi_client.StatusGetter
 	blockRangePublisher                 *execp2p.Publisher
@@ -354,6 +370,7 @@ func NewHook(
 	sync *stagedsync.Sync,
 	chainConfig *chain.Config,
 	logger log.Logger,
+	dispatcher NotificationSender,
 	updateHead func(ctx context.Context),
 	statusDataGetter sentry_multi_client.StatusGetter,
 	blockRangePublisher *execp2p.Publisher,
@@ -364,6 +381,7 @@ func NewHook(
 		sync:                sync,
 		chainConfig:         chainConfig,
 		logger:              logger,
+		dispatcher:          dispatcher,
 		updateHead:          updateHead,
 		statusDataGetter:    statusDataGetter,
 		blockRangePublisher: blockRangePublisher,
@@ -396,15 +414,41 @@ func (h *Hook) BeforeRun(tx kv.Tx, inSync bool) error {
 	return h.beforeRun(tx, inSync)
 }
 
-func (h *Hook) AfterRun(tx kv.Tx, finishProgressBefore uint64, isSynced bool) error {
+// SendNotifications dispatches all pending notifications (state changes,
+// headers, logs, receipts) via the Dispatcher. The tx is the data source —
+// either the SD's blockOverlay (pre-commit) or a committed DB tx.
+//
+// All call sites follow the same pattern:
+//
+//	hook.SendNotifications(tx, finishProgressBefore)
+//	hook.UpdateHead(tx, finishProgressBefore, isSynced)
+func (h *Hook) SendNotifications(tx kv.Tx, finishProgressBefore uint64) error {
 	if h == nil {
 		return nil
 	}
-	return h.afterRun(tx, finishProgressBefore, isSynced)
+	if h.notifications == nil || h.dispatcher == nil {
+		return nil
+	}
+	finishStageAfterSync, err := stages.GetStageProgress(tx, stages.Finish)
+	if err != nil {
+		return err
+	}
+	return h.dispatcher.Dispatch(
+		h.ctx, tx,
+		h.notifications.Accumulator,
+		h.notifications.RecentReceipts,
+		finishProgressBefore,
+		finishStageAfterSync,
+		h.sync.PrevUnwindPoint(),
+	)
 }
 
-func (h *Hook) afterRun(tx kv.Tx, finishProgressBefore uint64, isSynced bool) error {
-	// Update sentry status for peers to see our sync status
+// UpdateHead updates the sentry head status and announces the block range
+// to P2P peers. Called after SendNotifications.
+func (h *Hook) UpdateHead(tx kv.Tx, finishProgressBefore uint64, isSynced bool) error {
+	if h == nil {
+		return nil
+	}
 	if h.updateHead != nil {
 		h.updateHead(h.ctx)
 	}
@@ -412,77 +456,7 @@ func (h *Hook) afterRun(tx kv.Tx, finishProgressBefore uint64, isSynced bool) er
 	if err != nil {
 		return err
 	}
-
 	h.maybeAnnounceBlockRange(finishProgressBefore, finishStageAfterSync, isSynced)
-	return h.sendNotifications(tx, finishProgressBefore, finishStageAfterSync)
-}
-
-func (h *Hook) sendNotifications(tx kv.Tx, finishStageBeforeSync, finishStageAfterSync uint64) error {
-	if h.notifications == nil {
-		return nil
-	}
-
-	var err error
-
-	// update the accumulator with a new plain state version so the cache can be notified that
-	// state has moved on
-	if h.notifications.Accumulator != nil {
-		plainStateVersion, err := rawdb.GetStateVersion(tx)
-		if err != nil {
-			return err
-		}
-
-		h.notifications.Accumulator.SetStateID(plainStateVersion)
-	}
-
-	if h.notifications.Events != nil {
-		unwindTo := h.sync.PrevUnwindPoint()
-
-		var notifyFrom uint64
-		var isUnwind bool
-		if unwindTo != nil && *unwindTo != 0 && (*unwindTo) < finishStageBeforeSync {
-			notifyFrom = *unwindTo
-			isUnwind = true
-		} else {
-			heightSpan := min(finishStageAfterSync-finishStageBeforeSync, 1024)
-			notifyFrom = finishStageAfterSync - heightSpan
-		}
-		notifyFrom++
-		notifyTo := finishStageAfterSync + 1 //[from, to)
-
-		if err = stagedsync.NotifyNewHeaders(h.ctx, notifyFrom, notifyTo, h.notifications.Events, tx, h.logger); err != nil {
-			return nil
-		}
-		h.notifications.RecentReceipts.NotifyReceipts(h.notifications.Events, notifyFrom, notifyTo, isUnwind)
-		h.notifications.RecentReceipts.NotifyLogs(h.notifications.Events, notifyFrom, notifyTo, isUnwind)
-	}
-
-	currentHeader := rawdb.ReadCurrentHeader(tx)
-	if h.notifications.Accumulator != nil && currentHeader != nil {
-		if changes := h.notifications.Accumulator.Changes(); len(changes) == 0 || changes[len(changes)-1].BlockHeight < currentHeader.Number.Uint64() {
-			h.notifications.Accumulator.StartChange(currentHeader, nil, false)
-		}
-
-		pendingBaseFee := misc.CalcBaseFee(h.chainConfig, currentHeader)
-		pendingBlobFee := h.chainConfig.GetMinBlobGasPrice()
-		if currentHeader.ExcessBlobGas != nil {
-			nextBlockTime := currentHeader.Time + h.chainConfig.SecondsPerSlot()
-			excessBlobGas := misc.CalcExcessBlobGas(h.chainConfig, currentHeader, nextBlockTime)
-			f, err := misc.GetBlobGasPrice(h.chainConfig, excessBlobGas, nextBlockTime)
-			if err != nil {
-				return err
-			}
-			pendingBlobFee = f.Uint64()
-		}
-
-		var finalizedBlock uint64
-		if fb := rawdb.ReadHeaderNumber(tx, rawdb.ReadForkchoiceFinalized(tx)); fb != nil {
-			finalizedBlock = *fb
-		}
-
-		//h.logger.Debug("[hook] Sending state changes", "currentBlock", currentHeader.Number.Uint64(), "finalizedBlock", finalizedBlock)
-		h.notifications.Accumulator.SendAndReset(h.ctx, h.notifications.StateChangesConsumer, pendingBaseFee.Uint64(), pendingBlobFee, currentHeader.GasLimit, finalizedBlock)
-	}
 	return nil
 }
 
