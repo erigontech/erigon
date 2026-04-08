@@ -666,6 +666,31 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			st.txnGasUsedB4Refunds = mdGasUsed.Total() + st.evm.RevertedSpillGas()
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Total())
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
+			if st.evm.Context.BlockNumber == 24809877 {
+				txIdx := st.state.TxIndex()
+				if txIdx == 63 || txIdx == 72 {
+					log.Debug("[gas detail] amsterdam tx gas",
+						"block", st.evm.Context.BlockNumber,
+						"txIdx", txIdx,
+						"imdRegular", imdGas.Regular,
+						"imdState", imdGas.State,
+						"evmRegularConsumed", st.evm.RegularGasConsumed(),
+						"evmStateConsumed", st.evm.StateGasConsumed(),
+						"mdUsedRegular", mdGasUsed.Regular,
+						"mdUsedState", mdGasUsed.State,
+						"mdUsedTotal", mdGasUsed.Total(),
+						"spillGas", st.evm.RevertedSpillGas(),
+						"b4Refunds", st.txnGasUsedB4Refunds,
+						"refundPool", st.state.GetRefund().Total(),
+						"refund", refund,
+						"blockRegular", blockRegular,
+						"blockState", blockState,
+						"blockRegularGasUsed", st.blockRegularGasUsed,
+						"txnGasUsed", st.txnGasUsed,
+						"floor", intrinsicGasResult.FloorGasCost,
+					)
+				}
+			}
 		} else if rules.IsPrague {
 			st.txnGasUsedB4Refunds = mdGasUsed.Regular
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Regular)
