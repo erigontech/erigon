@@ -18,6 +18,8 @@ type NodeInfoView struct {
 	Alerts       *AlertsView
 	LogTail      *LogTailView
 	NodeControl  *NodeControlView
+	middlePanel  *tview.Flex
+	domainShown  bool
 }
 
 // NewNodeInfoPage builds the node-info page layout and returns it with its backing view.
@@ -55,8 +57,8 @@ func NewNodeInfoPage(datadir string) (*tview.Flex, *NodeInfoView) {
 
 	// Middle: Stages | Domain/II
 	middlePanel := tview.NewFlex().
-		AddItem(view.Stages, 0, 1, false).
-		AddItem(view.DomainII, 0, 1, false)
+		AddItem(view.Stages, 0, 1, false)
+	view.middlePanel = middlePanel
 
 	// Bottom: SystemHealth | Alerts (side by side)
 	bottomPanel := tview.NewFlex().
@@ -71,4 +73,17 @@ func NewNodeInfoPage(datadir string) (*tview.Flex, *NodeInfoView) {
 		AddItem(view.LogTail.TextView, 4, 0, false)
 	flex.Box.SetBorder(true)
 	return flex, view
+}
+
+// SetDomainIIVisible collapses or restores the secondary Domain/II panel.
+func (v *NodeInfoView) SetDomainIIVisible(visible bool) {
+	if v.middlePanel == nil || v.domainShown == visible {
+		return
+	}
+	if visible {
+		v.middlePanel.AddItem(v.DomainII, 0, 1, false)
+	} else {
+		v.middlePanel.RemoveItem(v.DomainII)
+	}
+	v.domainShown = visible
 }

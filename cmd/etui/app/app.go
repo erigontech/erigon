@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -65,6 +66,14 @@ type App struct {
 	forceAnalytics bool
 	initialPage    string
 	overlayActive  atomic.Bool
+	stagesSeen     atomic.Bool
+	downloaderMu   sync.RWMutex
+	downloaderUI   downloaderDisplayState
+}
+
+type downloaderDisplayState struct {
+	active bool
+	stage  string
 }
 
 // New creates an App that reads from the given datadir.
@@ -198,7 +207,7 @@ func (a *App) Run(parent context.Context, infoCh <-chan *datasource.StagesInfo, 
 	go a.safeGo("fillStagesInfo", errCh, func() { a.fillStagesInfo(ctx, nodeView, infoCh) })
 	go a.safeGo("runClock", errCh, func() { a.runClock(ctx, nodeView.Clock) })
 	go a.handleErrors(ctx, errCh, footer) // not wrapped — it drains errCh itself
-	go a.safeGo("pollDownloader", errCh, func() { a.pollDownloader(ctx, nodeView.Downloader, errCh) })
+	go a.safeGo("pollDownloader", errCh, func() { a.pollDownloader(ctx, nodeView, errCh) })
 	go a.safeGo("pollSystemHealth", errCh, func() { a.pollSystemHealth(ctx, nodeView.SystemHealth) })
 	go a.safeGo("pollAlerts", errCh, func() { a.pollAlerts(ctx, nodeView.Alerts) })
 	go a.safeGo("pollLogTail", errCh, func() { a.pollLogTail(ctx, nodeView.LogTail) })
@@ -408,18 +417,34 @@ func (a *App) fillStagesInfo(ctx context.Context, view *widgets.NodeInfoView, in
 			if !ok {
 				return
 			}
+			a.stagesSeen.Store(true)
 			metrics := a.syncTracker.Update(info)
+			metrics, currentStage := a.decorateSyncStatus(metrics, info)
 			a.alertMgr.CheckSyncMetrics(metrics)
-			currentStage := leadingStageName(info)
+			showDomainII := len(info.DomainIIProgress) > 0
 			a.queueDashboardUpdate(func() {
 				view.SyncStatus.UpdateSyncStatus(metrics, currentStage)
 				view.Stages.Clear()
 				view.Stages.SetText(info.Stages())
-				view.DomainII.Clear()
-				view.DomainII.SetText(info.DomainII())
+				view.SetDomainIIVisible(showDomainII)
+				if showDomainII {
+					view.DomainII.Clear()
+					view.DomainII.SetText(info.DomainII())
+				}
 			})
 		}
 	}
+}
+
+func (a *App) decorateSyncStatus(metrics datasource.SyncMetrics, info *datasource.StagesInfo) (datasource.SyncMetrics, string) {
+	currentStage := leadingStageName(info)
+	downloaderState := a.getDownloaderDisplayState()
+	if !downloaderState.active {
+		return metrics, currentStage
+	}
+
+	metrics.Status = datasource.StatusSyncing
+	return metrics, downloaderState.stage
 }
 
 // leadingStageName returns the last stage in pipeline order that has non-zero
@@ -436,6 +461,41 @@ func leadingStageName(info *datasource.StagesInfo) string {
 		}
 	}
 	return last
+}
+
+func normalizeDownloaderStage(phase string) string {
+	switch strings.ToLower(strings.TrimSpace(phase)) {
+	case "", "snapshots", "remaining snapshots":
+		return "Downloading snapshots"
+	case "header-chain":
+		return "Header-chain"
+	default:
+		return strings.TrimSpace(phase)
+	}
+}
+
+func (a *App) setDownloaderDisplayState(stats datasource.DownloaderStats) {
+	state := downloaderDisplayState{}
+	if stats.Total > 0 && stats.Complete < stats.Total {
+		state.active = true
+		state.stage = normalizeDownloaderStage(stats.Phase)
+	}
+
+	a.downloaderMu.Lock()
+	a.downloaderUI = state
+	a.downloaderMu.Unlock()
+}
+
+func (a *App) clearDownloaderDisplayState() {
+	a.downloaderMu.Lock()
+	a.downloaderUI = downloaderDisplayState{}
+	a.downloaderMu.Unlock()
+}
+
+func (a *App) getDownloaderDisplayState() downloaderDisplayState {
+	a.downloaderMu.RLock()
+	defer a.downloaderMu.RUnlock()
+	return a.downloaderUI
 }
 
 // runClock updates the clock widget every second.
@@ -481,7 +541,7 @@ func (a *App) handleErrors(ctx context.Context, errCh <-chan error, view *tview.
 // pollDownloader polls the downloader API and renders progress with speed/ETA.
 // Transient HTTP errors trigger exponential backoff (up to 30s) rather than
 // a permanent exit, so the widget recovers once the downloader service starts.
-func (a *App) pollDownloader(ctx context.Context, view *widgets.DownloaderView, errCh chan error) {
+func (a *App) pollDownloader(ctx context.Context, view *widgets.NodeInfoView, errCh chan error) {
 	const (
 		maxBackoff = 30 * time.Second
 		minBackoff = 500 * time.Millisecond
@@ -501,10 +561,11 @@ func (a *App) pollDownloader(ctx context.Context, view *widgets.DownloaderView, 
 			if ctx.Err() != nil {
 				return // shutting down
 			}
+			a.clearDownloaderDisplayState()
 			a.alertMgr.CheckDownloaderError(err)
 			errMsg := err.Error()
 			a.queueDashboardUpdate(func() {
-				view.SetError(errMsg)
+				view.Downloader.SetError(errMsg)
 			})
 			select {
 			case <-ctx.Done():
@@ -523,8 +584,14 @@ func (a *App) pollDownloader(ctx context.Context, view *widgets.DownloaderView, 
 		a.alertMgr.CheckDownloaderError(nil)
 
 		stats := a.dlTracker.Update(res)
+		a.setDownloaderDisplayState(stats)
 		a.queueDashboardUpdate(func() {
-			view.UpdateDownloader(stats)
+			view.Downloader.UpdateDownloader(stats)
+			if !a.stagesSeen.Load() && stats.Total > 0 && stats.Complete < stats.Total {
+				view.SyncStatus.UpdateSyncStatus(datasource.SyncMetrics{
+					Status: datasource.StatusSyncing,
+				}, normalizeDownloaderStage(stats.Phase))
+			}
 		})
 
 		select {
