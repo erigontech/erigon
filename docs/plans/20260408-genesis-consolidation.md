@@ -231,18 +231,18 @@ Scope is **medium** (scope B from brainstorm). Explicit non-goals: BorJSON asymm
 **Files:**
 - Modify: `execution/state/genesiswrite/genesis_write.go`
 
-- [ ] ⚠️ before deleting: `grep -rn "genesiswrite\\.\\(CommitGenesisBlock\\|CommitGenesisBlockWithOverride\\|WriteGenesisBlock\\|MustCommitGenesis\\|WriteGenesisBesideState\\)" /home/agent/erigon` — confirm only migrated callers exist (or none). If hidden callers surface, migrate them in this task before deletion.
-- [ ] delete `CommitGenesisBlock`
-- [ ] delete `CommitGenesisBlockWithOverride`
-- [ ] delete `WriteGenesisBlock`
-- [ ] delete `MustCommitGenesis`
-- [ ] delete private `write()` helper (inlined into the fresh-DB branch of `CommitGenesisTx` in Task 2, so already orphaned)
-- [ ] rename `WriteGenesisBesideState` → `writeBundleToTx` and unexport it. It is now called only internally by `CommitGenesisTx` / `CommitGenesisTxWithPrecomputedBlock`. If it turns out the internal paths no longer need it (because Task 2 composed directly from `writeFreshGenesisDB`), delete it entirely.
-- [ ] re-verify nothing else imports `WriteGenesisBesideState`: `grep -rn "WriteGenesisBesideState" /home/agent/erigon` should return nothing after rename
-- [ ] confirm `WriteGenesisState`, `GenesisToBlock`, `GenesisWithoutStateToBlock`, `ComputeGenesisCommitment` remain exported — those are used elsewhere
-- [ ] run `go build ./...` — full repo must compile
-- [ ] run `go test ./execution/state/genesiswrite/...` — all tests must still pass
-- [ ] run `make lint` — multiple times until clean
+- [x] ⚠️ before deleting: `grep -rn "genesiswrite\\.\\(CommitGenesisBlock\\|CommitGenesisBlockWithOverride\\|WriteGenesisBlock\\|MustCommitGenesis\\|WriteGenesisBesideState\\)" /home/agent/erigon` — confirm only migrated callers exist (or none). If hidden callers surface, migrate them in this task before deletion. (only remaining references are comments in the plan file, a comment in `genesistest/genesistest.go`, and historical references in test files — no live callers)
+- [x] delete `CommitGenesisBlock`
+- [x] delete `CommitGenesisBlockWithOverride`
+- [x] delete `WriteGenesisBlock`
+- [x] delete `MustCommitGenesis`
+- [x] delete private `write()` helper (inlined into the fresh-DB branch of `CommitGenesisTx` in Task 2, so already orphaned)
+- [x] delete `WriteGenesisBesideState` entirely — the new `writeFreshGenesisDB` composes `rawdb.WriteGenesisBundle` directly, so no internal path needs it. (Chosen over "unexport to `writeBundleToTx`" because there are no internal callers left.)
+- [x] re-verify nothing else imports `WriteGenesisBesideState`: `grep -rn "WriteGenesisBesideState" /home/agent/erigon` returns zero matches outside the plan file
+- [x] confirm `WriteGenesisState`, `GenesisToBlock`, `GenesisWithoutStateToBlock`, `ComputeGenesisCommitment` remain exported — those are used elsewhere
+- [x] run `go build ./...` — full repo must compile
+- [x] run `go test ./execution/state/genesiswrite/...` — all tests must still pass
+- [x] run `make lint` — multiple times until clean (ran twice, 0 issues both runs)
 
 ### Task 11: Verify acceptance criteria
 
