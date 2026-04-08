@@ -338,7 +338,7 @@ func mockWithGenerator(t *testing.T, blocks int, generator func(int, *blockgen.B
 	m := execmoduletester.New(
 		t,
 		execmoduletester.WithGenesisSpec(&types.Genesis{
-			Config: chain.TestChainConfig,
+			Config: chain.TestChainBerlinConfig,
 			Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
 		}),
 		execmoduletester.WithKey(testKey),
