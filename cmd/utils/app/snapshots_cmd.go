@@ -2893,7 +2893,6 @@ func doUnmerge(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	if err := br.BuildMissedIndicesIfNeed(ctx, "indexing", nil); err != nil {
 		return err
 	}
-
 	return nil
 }
 
