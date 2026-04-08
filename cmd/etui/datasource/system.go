@@ -1,14 +1,15 @@
 package datasource
 
 import (
-	"bufio"
 	"fmt"
-	"os"
+	"math"
 	"runtime"
-	"strconv"
 	"strings"
-	"syscall"
 	"time"
+
+	pscpu "github.com/shirou/gopsutil/v4/cpu"
+	psdisk "github.com/shirou/gopsutil/v4/disk"
+	psmem "github.com/shirou/gopsutil/v4/mem"
 )
 
 // SystemStats holds a point-in-time snapshot of system resource usage.
@@ -25,175 +26,102 @@ type SystemStats struct {
 	DiskIOPS_W uint64 // completed write I/Os since boot (absolute counter)
 }
 
-// cpuTimes holds cumulative CPU jiffies from /proc/stat.
-type cpuTimes struct {
-	idle  uint64
-	total uint64
-}
-
-// SystemCollector gathers system metrics. It keeps the previous /proc/stat
-// CPU sample so it can compute a percentage delta between calls.
+// SystemCollector gathers system metrics for the local host.
 type SystemCollector struct {
 	datadir string
-	prevCPU cpuTimes
 }
 
 // SystemPollInterval is how often system stats are refreshed.
 const SystemPollInterval = 5 * time.Second
 
-// NewSystemCollector creates a collector. datadir is used for disk usage via Statfs.
+// NewSystemCollector creates a collector. datadir is used for filesystem usage.
 func NewSystemCollector(datadir string) *SystemCollector {
-	c := &SystemCollector{datadir: datadir}
-	c.prevCPU = readCPUTimes() // prime the first sample
-	return c
+	return &SystemCollector{datadir: datadir}
 }
 
 // CollectSystemStats gathers CPU, memory, disk, and Go heap metrics.
-// Reads /proc/stat and /proc/meminfo (Linux); on other platforms the
-// CPU and host-memory fields will be zero.
+// Host metrics are collected via gopsutil so the widget works on Linux, macOS,
+// and Windows.
 func (c *SystemCollector) CollectSystemStats() SystemStats {
 	stats := SystemStats{
 		NumCPU: runtime.NumCPU(),
 	}
 
-	// CPU from /proc/stat delta
-	cur := readCPUTimes()
-	totalDelta := cur.total - c.prevCPU.total
-	idleDelta := cur.idle - c.prevCPU.idle
-	if totalDelta > 0 {
-		stats.CPUPercent = (totalDelta - idleDelta) * 100 / totalDelta
+	if cpuPercent, err := pscpu.Percent(0, false); err == nil && len(cpuPercent) > 0 {
+		stats.CPUPercent = clampPercent(cpuPercent[0])
 	}
-	c.prevCPU = cur
 
 	// Go heap
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	stats.GoHeap = m.HeapInuse
 
-	// RAM from /proc/meminfo
-	memTotalKB, memAvailKB := readMemInfo()
-	stats.MemTotal = memTotalKB * 1024
-	if memTotalKB > memAvailKB {
-		stats.MemUsed = (memTotalKB - memAvailKB) * 1024
-	}
-
-	// Disk usage via syscall.Statfs
-	var sfs syscall.Statfs_t
-	if err := syscall.Statfs(c.datadir, &sfs); err == nil {
-		bsize := uint64(sfs.Bsize)
-		stats.DiskTotal = sfs.Blocks * bsize
-		free := sfs.Bavail * bsize // available to non-root
-		if stats.DiskTotal > free {
-			stats.DiskUsed = stats.DiskTotal - free
+	if vm, err := psmem.VirtualMemory(); err == nil {
+		stats.MemTotal = vm.Total
+		if vm.Available <= vm.Total {
+			stats.MemUsed = vm.Total - vm.Available
+		} else {
+			stats.MemUsed = vm.Used
 		}
 	}
 
-	// Disk I/O counters from /proc/diskstats
+	if usage, err := psdisk.Usage(c.datadir); err == nil {
+		stats.DiskTotal = usage.Total
+		stats.DiskUsed = usage.Used
+	}
+
 	stats.DiskIOPS_R, stats.DiskIOPS_W = readDiskIO()
 
 	return stats
 }
 
-// readCPUTimes parses the aggregate "cpu" line from /proc/stat.
-func readCPUTimes() cpuTimes {
-	f, err := os.Open("/proc/stat")
-	if err != nil {
-		return cpuTimes{}
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "cpu ") {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) < 5 {
-			return cpuTimes{}
-		}
-		// fields: cpu user nice system idle iowait irq softirq steal guest guest_nice
-		var vals [10]uint64
-		var total uint64
-		for i := 1; i < len(fields) && i <= 10; i++ {
-			v, _ := strconv.ParseUint(fields[i], 10, 64)
-			vals[i-1] = v
-			total += v
-		}
-		return cpuTimes{idle: vals[3], total: total}
-	}
-	return cpuTimes{}
-}
-
-// readMemInfo returns (MemTotal, MemAvailable) in kB from /proc/meminfo.
-func readMemInfo() (total, avail uint64) {
-	f, err := os.Open("/proc/meminfo")
-	if err != nil {
-		return 0, 0
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := scanner.Text()
-		switch {
-		case strings.HasPrefix(line, "MemTotal:"):
-			total = parseMemInfoValue(line)
-		case strings.HasPrefix(line, "MemAvailable:"):
-			avail = parseMemInfoValue(line)
-		}
-		if total > 0 && avail > 0 {
-			break
-		}
-	}
-	return total, avail
-}
-
-func parseMemInfoValue(line string) uint64 {
-	// Format: "MemTotal:       8024028 kB"
-	fields := strings.Fields(line)
-	if len(fields) < 2 {
-		return 0
-	}
-	v, _ := strconv.ParseUint(fields[1], 10, 64)
-	return v
-}
-
-// readDiskIO reads /proc/diskstats and sums completed reads (field 4) and
-// writes (field 8) across whole-disk devices. These are absolute counters
-// since boot.
+// readDiskIO sums absolute read/write operation counters across visible
+// physical disks.
 func readDiskIO() (reads, writes uint64) {
-	f, err := os.Open("/proc/diskstats")
+	counters, err := psdisk.IOCounters()
 	if err != nil {
 		return 0, 0
 	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		fields := strings.Fields(scanner.Text())
-		if len(fields) < 11 {
+	for name, counter := range counters {
+		if !shouldCountDisk(name) {
 			continue
 		}
-		name := fields[2]
-		if isPartition(name) {
-			continue
-		}
-		r, _ := strconv.ParseUint(fields[3], 10, 64)
-		w, _ := strconv.ParseUint(fields[7], 10, 64)
-		reads += r
-		writes += w
+		reads += counter.ReadCount
+		writes += counter.WriteCount
 	}
 	return reads, writes
 }
 
-// isPartition returns true if the device name looks like a partition (sda1, nvme0n1p1)
-// rather than a whole disk (sda, nvme0n1).
-func isPartition(name string) bool {
+func clampPercent(v float64) uint64 {
+	switch {
+	case math.IsNaN(v), v < 0:
+		return 0
+	case v > 100:
+		return 100
+	default:
+		return uint64(v + 0.5)
+	}
+}
+
+func shouldCountDisk(name string) bool {
+	switch runtime.GOOS {
+	case "linux":
+		return !isLinuxPartition(name)
+	case "darwin":
+		return !isDarwinPartition(name)
+	case "windows":
+		return isWindowsFixedDrive(name)
+	default:
+		return name != ""
+	}
+}
+
+// isLinuxPartition returns true if the device name looks like a partition
+// (sda1, nvme0n1p1) rather than a whole disk (sda, nvme0n1).
+func isLinuxPartition(name string) bool {
 	if len(name) == 0 {
 		return false
 	}
-	// nvme partitions: nvme0n1p1 — contains "p" after "n<digit>"
 	if strings.HasPrefix(name, "nvme") {
 		idx := strings.LastIndex(name, "n")
 		if idx >= 0 {
@@ -204,9 +132,20 @@ func isPartition(name string) bool {
 		}
 		return false
 	}
-	// Traditional: sda is disk, sda1 is partition; skip loop/ram/dm
 	last := name[len(name)-1]
 	return last >= '0' && last <= '9'
+}
+
+func isDarwinPartition(name string) bool {
+	if !strings.HasPrefix(name, "disk") {
+		return false
+	}
+	suffix := strings.TrimPrefix(name, "disk")
+	return strings.Contains(suffix, "s")
+}
+
+func isWindowsFixedDrive(name string) bool {
+	return len(name) == 2 && name[1] == ':'
 }
 
 // DiskIOPS holds computed per-second I/O rates.

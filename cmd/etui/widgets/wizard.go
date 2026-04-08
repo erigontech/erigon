@@ -29,8 +29,9 @@ type InstallWizard struct {
 	pages    []*tview.Flex
 	step     WizardStep
 	cfg      config.TUIConfig
-	onFinish func(config.TUIConfig) // called when the wizard completes
-	onCancel func()                 // called when the user cancels
+	onFinish func(config.TUIConfig) error // called when the wizard completes
+	onCancel func()                       // called when the user cancels
+	lastErr  string
 
 	// Widgets that need to be read back.
 	networkList  *tview.List
@@ -42,14 +43,41 @@ type InstallWizard struct {
 
 // NewInstallWizard creates the 4-step install wizard.
 // onFinish is called with the final config. onCancel is called if the user aborts.
-func NewInstallWizard(defaultDatadir string, onFinish func(config.TUIConfig), onCancel func()) *InstallWizard {
+func NewInstallWizard(defaultDatadir string, onFinish func(config.TUIConfig) error, onCancel func()) *InstallWizard {
+	initial := config.Defaults()
+	initial.DataDir = defaultDatadir
+	return NewInstallWizardWithConfig(initial, onFinish, onCancel)
+}
+
+// NewInstallWizardWithConfig creates the 4-step install wizard pre-populated
+// with the provided config.
+func NewInstallWizardWithConfig(initial config.TUIConfig, onFinish func(config.TUIConfig) error, onCancel func()) *InstallWizard {
+	defaults := config.Defaults()
+	if initial.DataDir == "" {
+		initial.DataDir = config.DefaultDatadir()
+	}
+	if initial.Chain == "" {
+		initial.Chain = defaults.Chain
+	}
+	if initial.PruneMode == "" {
+		initial.PruneMode = defaults.PruneMode
+	}
+	if initial.RPCPort == 0 {
+		initial.RPCPort = defaults.RPCPort
+	}
+	if initial.PrivateAPIAddr == "" {
+		initial.PrivateAPIAddr = defaults.PrivateAPIAddr
+	}
+	if initial.DiagnosticsURL == "" {
+		initial.DiagnosticsURL = defaults.DiagnosticsURL
+	}
+
 	w := &InstallWizard{
 		Root:     tview.NewPages(),
-		cfg:      config.Defaults(),
+		cfg:      initial,
 		onFinish: onFinish,
 		onCancel: onCancel,
 	}
-	w.cfg.DataDir = defaultDatadir
 
 	w.buildNetworkStep()
 	w.buildDatadirStep()
@@ -104,6 +132,7 @@ func (w *InstallWizard) navigate(delta int) {
 
 func (w *InstallWizard) buildNetworkStep() {
 	w.networkList = tview.NewList()
+	selectedIdx := 0
 	for _, chain := range config.ValidChains() {
 		desc := config.ChainDescription(chain)
 		if desc == "" {
@@ -111,8 +140,14 @@ func (w *InstallWizard) buildNetworkStep() {
 		}
 		w.networkList.AddItem(chain, desc, 0, nil)
 	}
+	for i, chain := range config.ValidChains() {
+		if chain == w.cfg.Chain {
+			selectedIdx = i
+			break
+		}
+	}
 	w.networkList.SetBorder(true).SetTitle(" Select Network ")
-	w.networkList.SetCurrentItem(0)
+	w.networkList.SetCurrentItem(selectedIdx)
 
 	// Select on Enter.
 	w.networkList.SetSelectedFunc(func(_ int, mainText string, _ string, _ rune) {
@@ -222,7 +257,14 @@ func (w *InstallWizard) buildNodeTypeStep() {
 		AddItem("archive", "Full archive — all history (~3TB+)", 'a', nil).
 		AddItem("minimal", "Minimal pruning — smallest storage (~800GB)", 'm', nil)
 	w.nodeTypeList.SetBorder(true).SetTitle(" Select Node Type ")
-	w.nodeTypeList.SetCurrentItem(0)
+	modeIdx := 0
+	for i, mode := range config.ValidPruneModes() {
+		if mode == w.cfg.PruneMode {
+			modeIdx = i
+			break
+		}
+	}
+	w.nodeTypeList.SetCurrentItem(modeIdx)
 
 	w.nodeTypeList.SetSelectedFunc(func(_ int, mainText string, _ string, _ rune) {
 		w.cfg.PruneMode = mainText
@@ -258,7 +300,11 @@ func (w *InstallWizard) buildConfirmStep() {
 			w.navigate(-1)
 			return nil
 		case tcell.KeyEnter:
-			w.onFinish(w.cfg)
+			w.lastErr = ""
+			if err := w.onFinish(w.cfg); err != nil {
+				w.lastErr = err.Error()
+				w.refreshSummary()
+			}
 			return nil
 		}
 		return event
@@ -268,6 +314,10 @@ func (w *InstallWizard) buildConfirmStep() {
 }
 
 func (w *InstallWizard) refreshSummary() {
+	errorBlock := ""
+	if w.lastErr != "" {
+		errorBlock = fmt.Sprintf("\n\n  [red::b]Start failed:[-] %s", w.lastErr)
+	}
 	text := fmt.Sprintf(
 		`[green::b]Configuration Summary[-]
 
@@ -280,7 +330,7 @@ func (w *InstallWizard) refreshSummary() {
 
   Config will be saved to: [cyan]%s[-]
 
-  [green]Press Enter to save and start, or Esc to go back.[-]`,
+  [green]Press Enter to save and start, or Esc to go back.[-]%s`,
 		w.cfg.Chain,
 		w.cfg.DataDir,
 		w.cfg.PruneMode, config.PruneModeDescription(w.cfg.PruneMode),
@@ -288,6 +338,7 @@ func (w *InstallWizard) refreshSummary() {
 		w.cfg.PrivateAPIAddr,
 		w.cfg.DiagnosticsURL,
 		config.ConfigPath(w.cfg.DataDir),
+		errorBlock,
 	)
 	w.summaryText.SetText(text)
 }
@@ -302,6 +353,11 @@ func boolToEnabled(b bool) string {
 // wizardFrame wraps a content primitive with the standard wizard chrome:
 // header, step title, content, and a help bar.
 func (w *InstallWizard) wizardFrame(title string, content tview.Primitive, helpText string) *tview.Flex {
+	header := tview.NewTextView().
+		SetDynamicColors(true).
+		SetTextAlign(tview.AlignCenter).
+		SetText(fmt.Sprintf("Erigon TUI v%s", config.Version))
+
 	titleView := tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignCenter).
 		SetText(fmt.Sprintf("[::b]Erigon Setup Wizard — %s[-]", title))
 
@@ -309,7 +365,7 @@ func (w *InstallWizard) wizardFrame(title string, content tview.Primitive, helpT
 		SetText(helpText)
 
 	return tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(Header(""), 1, 0, false).
+		AddItem(header, 1, 0, false).
 		AddItem(titleView, 1, 0, false).
 		AddItem(tview.NewBox(), 1, 0, false).
 		AddItem(content, 0, 1, true).

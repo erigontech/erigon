@@ -2,6 +2,7 @@ package widgets
 
 import (
 	"path/filepath"
+	"runtime"
 
 	"github.com/rivo/tview"
 )
@@ -23,11 +24,17 @@ type NodeInfoView struct {
 // datadir is used to derive the default log path (datadir/logs/erigon.log).
 func NewNodeInfoPage(datadir string) (*tview.Flex, *NodeInfoView) {
 	logPath := filepath.Join(datadir, "logs", "erigon.log")
+	stagesPlaceholder := "[::d]waiting for chaindata initialization...[-]"
+	domainPlaceholder := "[::d]stage database is not available yet[-]"
+	if runtime.GOOS == "windows" {
+		stagesPlaceholder = "[::d]stage progress is unavailable in Windows builds[-]"
+		domainPlaceholder = "[::d]domain/index progress is unavailable in Windows builds[-]"
+	}
 
 	view := &NodeInfoView{
 		SyncStatus:  NewSyncStatusView(),
-		Stages:      tview.NewTextView().SetDynamicColors(true),
-		DomainII:    tview.NewTextView().SetDynamicColors(true),
+		Stages:      tview.NewTextView().SetDynamicColors(true).SetText(stagesPlaceholder),
+		DomainII:    tview.NewTextView().SetDynamicColors(true).SetText(domainPlaceholder),
 		Clock:       tview.NewTextView().SetTextAlign(tview.AlignRight).SetDynamicColors(true),
 		Downloader:  NewDownloaderView(),
 		Alerts:      NewAlertsView(),

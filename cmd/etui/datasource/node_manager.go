@@ -141,12 +141,16 @@ func (nm *NodeManager) Detect() {
 	// both involve I/O and we must not stall other goroutines.
 	locked := isLockHeld(nm.lockPath)
 	pid := 0
+	pidStartTime := time.Time{}
 	if locked {
 		pid = findLockHolderPID(nm.lockPath)
 		// Fallback: read etui.pid if /proc/locks didn't find PID.
 		if pid == 0 {
 			pid = nm.readPID()
 		}
+	} else if info, err := os.Stat(nm.pidPath); err == nil {
+		pid = nm.readPID()
+		pidStartTime = info.ModTime()
 	}
 
 	nm.mu.Lock()
@@ -176,6 +180,18 @@ func (nm *NodeManager) Detect() {
 			nm.version++
 		}
 
+	case !locked && nm.state == NodeStopped && pid > 0:
+		// A managed node was spawned by etui and is still acquiring the LOCK.
+		nm.state = NodeStarting
+		nm.pid = pid
+		nm.exitErr = ""
+		if !pidStartTime.IsZero() {
+			nm.startTime = pidStartTime
+		} else {
+			nm.startTime = time.Now()
+		}
+		nm.version++
+
 	case !locked && nm.state == NodeRunning:
 		// Node stopped (externally or crashed).
 		nm.state = NodeStopped
@@ -200,6 +216,7 @@ func (nm *NodeManager) Detect() {
 			nm.state = NodeStopped
 			nm.pid = 0
 			nm.exitErr = "node failed to start (LOCK not acquired within 10s)"
+			nm.removePID()
 			nm.version++
 		}
 		// Otherwise still waiting — do nothing.
@@ -355,6 +372,7 @@ func (nm *NodeManager) Start() error {
 
 	args := []string{
 		"--datadir", nm.datadir,
+		"--pprof",
 	}
 	if nm.chain != "" {
 		args = append(args, "--chain", nm.chain)

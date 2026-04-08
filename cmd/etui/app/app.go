@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -15,7 +16,6 @@ import (
 	"github.com/erigontech/erigon/cmd/etui/config"
 	"github.com/erigontech/erigon/cmd/etui/datasource"
 	"github.com/erigontech/erigon/cmd/etui/widgets"
-	"github.com/erigontech/erigon/cmd/integration/commands"
 )
 
 // AppMode represents the operating mode of the TUI.
@@ -43,6 +43,7 @@ type Options struct {
 	ForceAnalytics bool   // --analytics flag
 	DiagnosticsURL string // --diagnostics-url override
 	Chain          string // --chain override
+	InitialPage    string // dashboard page to show first
 }
 
 // App is the top-level TUI application.
@@ -62,6 +63,8 @@ type App struct {
 	datadir        string
 	mode           AppMode
 	forceAnalytics bool
+	initialPage    string
+	overlayActive  atomic.Bool
 }
 
 // New creates an App that reads from the given datadir.
@@ -107,12 +110,13 @@ func New(datadir string, opts Options) *App {
 		log:            tuiLog,
 		tuiCfg:         tuiCfg,
 		forceAnalytics: opts.ForceAnalytics,
+		initialPage:    opts.InitialPage,
 	}
 }
 
 // Run starts the TUI event loop. It blocks until the user quits or the parent
 // context is cancelled (e.g. by an OS signal).
-func (a *App) Run(parent context.Context, infoCh <-chan *commands.StagesInfo, errCh chan error) error {
+func (a *App) Run(parent context.Context, infoCh <-chan *datasource.StagesInfo, errCh chan error) error {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	defer a.log.Close()
@@ -133,17 +137,10 @@ func (a *App) Run(parent context.Context, infoCh <-chan *commands.StagesInfo, er
 	validatorView := widgets.NewValidatorPage()
 	footer := widgets.Footer(isStandalone)
 
-	startPageBody, _ := widgets.NewStartPage(nodeView.Clock, a.datadir)
-	startHeader := widgets.Header(modeLabel)
 	nodeInfoHeader := widgets.Header(modeLabel)
 	validatorHeader := widgets.Header(modeLabel)
 	logsHeader := widgets.Header(modeLabel)
-	headers := []*widgets.HeaderView{startHeader, nodeInfoHeader, validatorHeader, logsHeader}
-
-	startPage := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(startHeader, 1, 1, false).
-		AddItem(startPageBody, 0, 5, false).
-		AddItem(footer, 2, 1, false)
+	headers := []*widgets.HeaderView{nodeInfoHeader, validatorHeader, logsHeader}
 	nodeInfoPage := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(nodeInfoHeader, 1, 1, false).
 		AddItem(nodeInfoBody, 0, 5, false).
@@ -155,12 +152,21 @@ func (a *App) Run(parent context.Context, infoCh <-chan *commands.StagesInfo, er
 
 	// All navigable pages, including the full-screen log viewer.
 	// ◄ ► cycles through them; F2/L jumps directly to logs.
-	dashPages := []string{pageStart, pageNodeInfo, pageValidator, pageLogs}
+	dashPages := []string{pageNodeInfo, pageValidator, pageLogs}
 	currentPage := 0
 	const (
-		validatorPageIdx = 2
-		logsPageIdx      = 3
+		nodeInfoPageIdx  = 0
+		validatorPageIdx = 1
+		logsPageIdx      = 2
 	)
+	switch a.initialPage {
+	case pageNodeInfo:
+		currentPage = nodeInfoPageIdx
+	case pageValidator:
+		currentPage = validatorPageIdx
+	case pageLogs:
+		currentPage = logsPageIdx
+	}
 
 	// Declare logViewer before closures that reference it.
 	var logViewer *widgets.LogViewerPage
@@ -178,7 +184,7 @@ func (a *App) Run(parent context.Context, infoCh <-chan *commands.StagesInfo, er
 	}
 
 	switchToDashboard := func() {
-		navigateToPage(1) // nodeInfo
+		navigateToPage(nodeInfoPageIdx)
 	}
 	logViewer = widgets.NewLogViewerPage(switchToDashboard)
 	logsPage := tview.NewFlex().SetDirection(tview.FlexRow).
@@ -200,12 +206,11 @@ func (a *App) Run(parent context.Context, infoCh <-chan *commands.StagesInfo, er
 	go a.safeGo("pollNodeStatus", errCh, func() { a.pollNodeStatus(ctx, nodeView.NodeControl) })
 	go a.safeGo("pollValidatorPage", errCh, func() { a.pollValidatorPage(ctx, validatorView, headers) })
 
-	pages.AddPage(pageStart, startPage, true, true)
-	pages.AddPage(pageNodeInfo, nodeInfoPage, true, false)
-	pages.AddPage(pageValidator, validatorPage, true, false)
-	pages.AddPage(pageLogs, logsPage, true, false)
+	pages.AddPage(pageNodeInfo, nodeInfoPage, true, currentPage == nodeInfoPageIdx)
+	pages.AddPage(pageValidator, validatorPage, true, currentPage == validatorPageIdx)
+	pages.AddPage(pageLogs, logsPage, true, currentPage == logsPageIdx)
 
-	// Track whether a modal overlay (config/wizard) is showing.
+	// Track whether the config modal overlay is showing.
 	// When true, global keybindings are suppressed to avoid conflicts with form input.
 	modalActive := false
 
@@ -215,6 +220,7 @@ func (a *App) Run(parent context.Context, infoCh <-chan *commands.StagesInfo, er
 			return
 		}
 		modalActive = true
+		a.overlayActive.Store(true)
 		a.log.Info("opening config modal")
 		configModal := widgets.NewConfigureModal(a.tuiCfg,
 			func(newCfg config.TUIConfig) {
@@ -234,6 +240,7 @@ func (a *App) Run(parent context.Context, infoCh <-chan *commands.StagesInfo, er
 				pages.SwitchToPage(dashPages[currentPage])
 				a.tview.SetFocus(pages)
 				modalActive = false
+				a.overlayActive.Store(false)
 			},
 			func() {
 				// Cancel callback.
@@ -241,44 +248,11 @@ func (a *App) Run(parent context.Context, infoCh <-chan *commands.StagesInfo, er
 				pages.SwitchToPage(dashPages[currentPage])
 				a.tview.SetFocus(pages)
 				modalActive = false
+				a.overlayActive.Store(false)
 			},
 		)
-		pages.AddPage(pageConfig, configModal.Root, true, true)
+		pages.AddAndSwitchToPage(pageConfig, configModal.Root, true)
 		a.tview.SetFocus(configModal.Form())
-	}
-
-	// Check for first-run: if no etui.toml exists, show the install wizard.
-	if _, err := os.Stat(config.ConfigPath(a.datadir)); os.IsNotExist(err) {
-		modalActive = true
-		a.log.Info("first run detected — launching install wizard")
-		wizard := widgets.NewInstallWizard(a.datadir,
-			func(newCfg config.TUIConfig) {
-				// Wizard complete — save both per-node and global config.
-				if err := newCfg.SaveAll(); err != nil {
-					a.log.Error("wizard config save: %v", err)
-				} else {
-					a.log.Info("wizard config saved to %s", config.ConfigPath(newCfg.DataDir))
-					a.tuiCfg = newCfg
-				}
-				pages.RemovePage(pageWizard)
-				pages.SwitchToPage(pageStart)
-				a.tview.SetFocus(pages)
-				modalActive = false
-			},
-			func() {
-				// Wizard cancelled — proceed with defaults.
-				a.log.Info("wizard cancelled, using defaults")
-				pages.RemovePage(pageWizard)
-				pages.SwitchToPage(pageStart)
-				a.tview.SetFocus(pages)
-				modalActive = false
-			},
-		)
-		pages.AddPage(pageWizard, wizard.Root, true, true)
-		// SetFocus for the wizard must happen after SetRoot, handled below.
-		defer func() {
-			a.tview.SetFocus(wizard.Focusable())
-		}()
 	}
 
 	if err := a.tview.SetRoot(pages, true).EnableMouse(true).SetInputCapture(
@@ -286,7 +260,7 @@ func (a *App) Run(parent context.Context, infoCh <-chan *commands.StagesInfo, er
 			currentFront, _ := pages.GetFrontPage()
 
 			// --- Modal overlay active: only allow Ctrl+C/q to quit ---
-			// Config and wizard pages handle their own Escape/Enter/Tab internally.
+			// The config page handles its own Escape/Enter/Tab internally.
 			if modalActive {
 				if event.Key() == tcell.KeyCtrlC {
 					cancel()
@@ -389,6 +363,13 @@ func (a *App) detectMode(status datasource.NodeStatus) {
 	}
 }
 
+func (a *App) queueDashboardUpdate(fn func()) {
+	if a.overlayActive.Load() {
+		return
+	}
+	a.tview.QueueUpdateDraw(fn)
+}
+
 // safeGo wraps a function with panic recovery, logging the stack to etui-crash.log
 // and sending the error to errCh for display in the TUI footer.
 func (a *App) safeGo(name string, errCh chan error, fn func()) {
@@ -418,7 +399,7 @@ func (a *App) writeCrashLog(msg string) {
 }
 
 // fillStagesInfo reads StagesInfo from the channel and updates the node-info view.
-func (a *App) fillStagesInfo(ctx context.Context, view *widgets.NodeInfoView, infoCh <-chan *commands.StagesInfo) {
+func (a *App) fillStagesInfo(ctx context.Context, view *widgets.NodeInfoView, infoCh <-chan *datasource.StagesInfo) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -430,7 +411,7 @@ func (a *App) fillStagesInfo(ctx context.Context, view *widgets.NodeInfoView, in
 			metrics := a.syncTracker.Update(info)
 			a.alertMgr.CheckSyncMetrics(metrics)
 			currentStage := leadingStageName(info)
-			a.tview.QueueUpdateDraw(func() {
+			a.queueDashboardUpdate(func() {
 				view.SyncStatus.UpdateSyncStatus(metrics, currentStage)
 				view.Stages.Clear()
 				view.Stages.SetText(info.Stages())
@@ -444,7 +425,7 @@ func (a *App) fillStagesInfo(ctx context.Context, view *widgets.NodeInfoView, in
 // leadingStageName returns the last stage in pipeline order that has non-zero
 // progress. This is the furthest stage the sync has reached, giving a reliable
 // indicator of current sync position regardless of early-sync zero values.
-func leadingStageName(info *commands.StagesInfo) string {
+func leadingStageName(info *datasource.StagesInfo) string {
 	if len(info.StagesProgress) == 0 {
 		return "—"
 	}
@@ -467,7 +448,7 @@ func (a *App) runClock(ctx context.Context, clock *tview.TextView) {
 			return
 		case tick := <-ticker.C:
 			now := tick.Format("15:04:05")
-			a.tview.QueueUpdateDraw(func() {
+			a.queueDashboardUpdate(func() {
 				clock.SetText(now)
 			})
 		}
@@ -486,7 +467,7 @@ func (a *App) handleErrors(ctx context.Context, errCh <-chan error, view *tview.
 			}
 			if err != nil {
 				a.log.Error("errCh: %v", err)
-				a.tview.QueueUpdateDraw(func() {
+				a.queueDashboardUpdate(func() {
 					view.SetDynamicColors(true)
 					view.SetText(
 						"[red::b]ERROR:[-] " + err.Error() + "   [::d](press q or Ctrl+C to quit)[-]",
@@ -522,7 +503,7 @@ func (a *App) pollDownloader(ctx context.Context, view *widgets.DownloaderView, 
 			}
 			a.alertMgr.CheckDownloaderError(err)
 			errMsg := err.Error()
-			a.tview.QueueUpdateDraw(func() {
+			a.queueDashboardUpdate(func() {
 				view.SetError(errMsg)
 			})
 			select {
@@ -542,7 +523,7 @@ func (a *App) pollDownloader(ctx context.Context, view *widgets.DownloaderView, 
 		a.alertMgr.CheckDownloaderError(nil)
 
 		stats := a.dlTracker.Update(res)
-		a.tview.QueueUpdateDraw(func() {
+		a.queueDashboardUpdate(func() {
 			view.UpdateDownloader(stats)
 		})
 
@@ -563,7 +544,7 @@ func (a *App) pollSystemHealth(ctx context.Context, view *widgets.SystemHealthVi
 	stats := a.sysColl.CollectSystemStats()
 	iops := a.iopsTrack.Update(stats.DiskIOPS_R, stats.DiskIOPS_W)
 	a.alertMgr.CheckSystemStats(stats)
-	a.tview.QueueUpdateDraw(func() {
+	a.queueDashboardUpdate(func() {
 		view.UpdateSystemHealth(stats, iops)
 	})
 
@@ -575,7 +556,7 @@ func (a *App) pollSystemHealth(ctx context.Context, view *widgets.SystemHealthVi
 			stats := a.sysColl.CollectSystemStats()
 			iops := a.iopsTrack.Update(stats.DiskIOPS_R, stats.DiskIOPS_W)
 			a.alertMgr.CheckSystemStats(stats)
-			a.tview.QueueUpdateDraw(func() {
+			a.queueDashboardUpdate(func() {
 				view.UpdateSystemHealth(stats, iops)
 			})
 		}
@@ -601,7 +582,7 @@ func (a *App) pollAlerts(ctx context.Context, view *widgets.AlertsView) {
 			lastVersion = v
 			// The alerts panel is 5 rows with a border → 3 visible content lines.
 			alerts := a.alertMgr.Recent(3)
-			a.tview.QueueUpdateDraw(func() {
+			a.queueDashboardUpdate(func() {
 				view.UpdateAlerts(alerts)
 			})
 		}
@@ -618,7 +599,7 @@ func (a *App) pollLogTail(ctx context.Context, view *widgets.LogTailView) {
 
 	// Read once immediately.
 	text := view.ReadLogTail()
-	a.tview.QueueUpdateDraw(func() {
+	a.queueDashboardUpdate(func() {
 		view.SetText(text)
 		view.ScrollToEnd()
 	})
@@ -629,7 +610,7 @@ func (a *App) pollLogTail(ctx context.Context, view *widgets.LogTailView) {
 			return
 		case <-ticker.C:
 			text := view.ReadLogTail()
-			a.tview.QueueUpdateDraw(func() {
+			a.queueDashboardUpdate(func() {
 				view.SetText(text)
 				view.ScrollToEnd()
 			})
@@ -648,7 +629,7 @@ func (a *App) pollLogViewer(ctx context.Context, viewer *widgets.LogViewerPage) 
 
 	// Initial render from seeded data.
 	lines := a.logTailer.Recent(logRingSize, viewer.FilterLevel())
-	a.tview.QueueUpdateDraw(func() {
+	a.queueDashboardUpdate(func() {
 		viewer.UpdateContent(lines)
 	})
 	lastVersion = a.logTailer.Version()
@@ -668,7 +649,7 @@ func (a *App) pollLogViewer(ctx context.Context, viewer *widgets.LogViewerPage) 
 			lastVersion = v
 
 			lines := a.logTailer.Recent(logRingSize, viewer.FilterLevel())
-			a.tview.QueueUpdateDraw(func() {
+			a.queueDashboardUpdate(func() {
 				viewer.UpdateContent(lines)
 			})
 		}
@@ -687,7 +668,7 @@ func (a *App) pollNodeStatus(ctx context.Context, view *widgets.NodeControlView)
 	// Initial render.
 	a.nodeMgr.Detect()
 	status := a.nodeMgr.Status()
-	a.tview.QueueUpdateDraw(func() {
+	a.queueDashboardUpdate(func() {
 		view.UpdateNodeStatus(status, isStandalone)
 	})
 	lastVersion = a.nodeMgr.Version()
@@ -706,7 +687,7 @@ func (a *App) pollNodeStatus(ctx context.Context, view *widgets.NodeControlView)
 			lastVersion = v
 
 			status := a.nodeMgr.Status()
-			a.tview.QueueUpdateDraw(func() {
+			a.queueDashboardUpdate(func() {
 				view.UpdateNodeStatus(status, isStandalone)
 			})
 		}

@@ -4,7 +4,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon/cmd/integration/commands"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
 
@@ -71,7 +70,7 @@ func NewSyncTracker() *SyncTracker {
 }
 
 // Update computes sync metrics from the latest StagesInfo.
-func (t *SyncTracker) Update(info *commands.StagesInfo) SyncMetrics {
+func (t *SyncTracker) Update(info *StagesInfo) SyncMetrics {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 

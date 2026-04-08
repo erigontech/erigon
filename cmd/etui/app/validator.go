@@ -20,7 +20,7 @@ func (a *App) pollValidatorPage(ctx context.Context, view *widgets.ValidatorPage
 			role = "Validator"
 		}
 
-		a.tview.QueueUpdateDraw(func() {
+		a.queueDashboardUpdate(func() {
 			for _, header := range headers {
 				header.SetRole(role)
 			}

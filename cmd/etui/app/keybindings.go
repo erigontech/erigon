@@ -57,7 +57,7 @@ func (a *App) handleNodeToggle(
 			if err := nodeMgr.Start(); err != nil {
 				a.log.Error("node start failed: %v", err)
 				// From a goroutine, QueueUpdateDraw is correct and required.
-				a.tview.QueueUpdateDraw(func() {
+				a.queueDashboardUpdate(func() {
 					nodeView.SetText("[red]●[-] [red]Start failed:[-] " + err.Error())
 				})
 			}
