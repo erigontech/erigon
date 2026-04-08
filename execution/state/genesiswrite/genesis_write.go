@@ -76,6 +76,28 @@ func (e *GenesisMismatchError) Error() string {
 	return fmt.Sprintf("database contains genesis (have %x, new %x)", e.Stored, e.New) + advice
 }
 
+// Options groups the inputs to CommitGenesis / CommitGenesisTx. The shape replaces
+// the previous CommitGenesisBlock / CommitGenesisBlockWithOverride / WriteGenesisBlock
+// / MustCommitGenesis quartet, folding their overlapping parameters into one struct.
+//
+// Fresh-vs-existing branching is driven by what is already in the DB:
+//   - Fresh DB (no canonical hash at height 0): Genesis is taken from opts (or the
+//     built-in mainnet genesis when nil), its block is computed, and the full bundle
+//     (genesis JSON, chain config, block, TD, canonical hash, head pointers, chain
+//     config, TxNums[0]) is persisted.
+//   - Existing DB: the stored block is preserved and the chain config is upgraded.
+//     A Genesis passed in opts only participates as a hash-match check; a mismatch
+//     returns *GenesisMismatchError.
+type Options struct {
+	Genesis               *types.Genesis
+	ChainName             string
+	OverrideOsakaTime     *uint64
+	OverrideAmsterdamTime *uint64
+	KeepStoredChainConfig bool
+	Dirs                  datadir.Dirs
+	Logger                log.Logger
+}
+
 // CommitGenesisBlock writes or updates the genesis block in db.
 // The block that will be used is:
 //
@@ -108,6 +130,208 @@ func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, chainNam
 		return c, b, err
 	}
 	return c, b, nil
+}
+
+// CommitGenesis is the policy-layer entry point that persists a genesis block and
+// its chain config into a fresh database, or upgrades the chain config of an
+// existing one. It opens a RW transaction, calls CommitGenesisTx, and commits on
+// success (or rolls back via the deferred call on error).
+func CommitGenesis(ctx context.Context, db kv.RwDB, opts Options) (*chain.Config, *types.Block, error) {
+	tx, err := db.BeginRw(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer tx.Rollback()
+	c, b, err := CommitGenesisTx(tx, opts)
+	if err != nil {
+		return c, b, err
+	}
+	if err := tx.Commit(); err != nil {
+		return c, b, err
+	}
+	return c, b, nil
+}
+
+// applyOverridesTo copies any fork-time overrides from opts onto cfg.
+func applyOverridesTo(cfg *chain.Config, opts Options) {
+	if opts.OverrideOsakaTime != nil {
+		cfg.OsakaTime = opts.OverrideOsakaTime
+	}
+	if opts.OverrideAmsterdamTime != nil {
+		cfg.AmsterdamTime = opts.OverrideAmsterdamTime
+	}
+}
+
+// writeFreshGenesisDB is the single fresh-DB write path used by every CommitGenesis*
+// entry point. Centralizing the rawdb.WriteGenesisBundle + rawdbv3.TxNums.Append
+// sequence here guarantees TxNums[0] is never forgotten regardless of which
+// CommitGenesis* the caller picks.
+func writeFreshGenesisDB(tx kv.RwTx, b *rawdb.GenesisBundle) error {
+	if err := rawdb.WriteGenesisBundle(tx, b, rawdb.WriteGenesisBundleOpts{FreshDB: true}); err != nil {
+		return err
+	}
+	return rawdbv3.TxNums.Append(tx, 0, uint64(b.Block.Transactions().Len()+1))
+}
+
+// CommitGenesisTx implements CommitGenesis without owning the transaction.
+// See Options for the fresh-vs-existing semantics.
+func CommitGenesisTx(tx kv.RwTx, opts Options) (*chain.Config, *types.Block, error) {
+	logger := opts.Logger
+	if logger == nil {
+		logger = log.New()
+	}
+
+	stored, err := rawdb.ReadGenesisBundle(tx)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Fresh DB path: no canonical block at height 0.
+	if stored.Block == nil {
+		g := opts.Genesis
+		custom := true
+		if g == nil {
+			logger.Info("Writing main-net genesis block")
+			g = chainspec.MainnetGenesisBlock()
+			custom = false
+		}
+		// Validate BEFORE persisting anything (fixes the ordering bug where the
+		// old WriteGenesisBlock stored genesis JSON before this check).
+		if g.Config == nil {
+			return chain.AllProtocolChanges, nil, types.ErrGenesisNoConfig
+		}
+		localOpts := opts
+		localOpts.Genesis = g
+		applyOverridesTo(g.Config, localOpts)
+		if err := g.Config.CheckConfigForkOrder(); err != nil {
+			return g.Config, nil, err
+		}
+		block, _, err := GenesisToBlock(nil, g, opts.Dirs, logger)
+		if err != nil {
+			return g.Config, nil, err
+		}
+		if err := writeFreshGenesisDB(tx, &rawdb.GenesisBundle{
+			Genesis: g,
+			Config:  g.Config,
+			Block:   block,
+			TD:      g.Difficulty.ToBig(),
+		}); err != nil {
+			return g.Config, nil, err
+		}
+		if custom {
+			logger.Info("Writing custom genesis block", "hash", block.Hash().String())
+		}
+		return g.Config, block, nil
+	}
+
+	// Existing DB path: the stored block stays; only chain config may change.
+	storedBlock := stored.Block
+	storedHash := storedBlock.Hash()
+
+	// If an explicit genesis was supplied, its computed block hash must match
+	// what is stored; a mismatch indicates the caller asked for the wrong chain.
+	if opts.Genesis != nil {
+		block, _, err := GenesisToBlock(nil, opts.Genesis, opts.Dirs, logger)
+		if err != nil {
+			return opts.Genesis.Config, nil, err
+		}
+		if h := block.Hash(); h != storedHash {
+			return opts.Genesis.Config, block, &GenesisMismatchError{Stored: storedHash, New: h}
+		}
+	}
+
+	newCfg := configOrDefault(opts.Genesis, opts.ChainName, storedHash)
+	applyOverridesTo(newCfg, opts)
+	if err := newCfg.CheckConfigForkOrder(); err != nil {
+		return newCfg, nil, err
+	}
+
+	storedCfg := stored.Config
+	// Repair branch: block present but chain config missing. This is the bug
+	// that motivated the refactor — MustCommitGenesis paths could create DBs in
+	// this state. CommitGenesis now patches the config forward on next open.
+	if storedCfg == nil {
+		logger.Warn("Found genesis block without chain config")
+		if err := rawdb.WriteGenesisBundle(tx, &rawdb.GenesisBundle{
+			Block:  storedBlock,
+			Config: newCfg,
+		}, rawdb.WriteGenesisBundleOpts{FreshDB: false}); err != nil {
+			return newCfg, nil, err
+		}
+		return newCfg, storedBlock, nil
+	}
+
+	// Special case: don't change the existing config of a private chain if no
+	// new config is supplied. This preserves DB config created by `erigon init`.
+	// In that case, only apply the overrides.
+	if opts.Genesis == nil {
+		keep := opts.KeepStoredChainConfig
+		if !keep {
+			spec, specErr := chainspec.ChainSpecByName(opts.ChainName)
+			keep = specErr != nil || spec.GenesisHash != storedHash
+		}
+		if keep {
+			newCfg = storedCfg
+			applyOverridesTo(newCfg, opts)
+		}
+	}
+
+	// Check config compatibility against the head height and return any
+	// incompatibility error to the caller unless we are still at block zero.
+	headHash := rawdb.ReadHeadHeaderHash(tx)
+	if height := rawdb.ReadHeaderNumber(tx, headHash); height != nil {
+		compatErr := storedCfg.CheckCompatible(newCfg, *height)
+		if compatErr != nil && *height != 0 && compatErr.RewindTo != 0 {
+			return newCfg, storedBlock, compatErr
+		}
+	}
+
+	if err := rawdb.WriteGenesisBundle(tx, &rawdb.GenesisBundle{
+		Block:  storedBlock,
+		Config: newCfg,
+	}, rawdb.WriteGenesisBundleOpts{FreshDB: false}); err != nil {
+		return newCfg, nil, err
+	}
+	return newCfg, storedBlock, nil
+}
+
+// CommitGenesisTxWithPrecomputedBlock is the fresh-DB path only, using a
+// caller-provided block instead of invoking GenesisToBlock internally. Used by
+// aura_test.go where the block is computed outside this package so its
+// IntraBlockState can be wired into the real temporal domains (running
+// GenesisToBlock here would create a disposable temporal DB and defeat that).
+//
+// The caller is responsible for passing a block that matches opts.Genesis and
+// whose state root was computed against the intended domains.
+func CommitGenesisTxWithPrecomputedBlock(tx kv.RwTx, opts Options, block *types.Block) (*chain.Config, *types.Block, error) {
+	logger := opts.Logger
+	if logger == nil {
+		logger = log.New()
+	}
+	g := opts.Genesis
+	if g == nil {
+		return nil, nil, errors.New("CommitGenesisTxWithPrecomputedBlock: opts.Genesis must not be nil")
+	}
+	if block == nil {
+		return nil, nil, errors.New("CommitGenesisTxWithPrecomputedBlock: block must not be nil")
+	}
+	if g.Config == nil {
+		return chain.AllProtocolChanges, nil, types.ErrGenesisNoConfig
+	}
+	applyOverridesTo(g.Config, opts)
+	if err := g.Config.CheckConfigForkOrder(); err != nil {
+		return g.Config, nil, err
+	}
+	if err := writeFreshGenesisDB(tx, &rawdb.GenesisBundle{
+		Genesis: g,
+		Config:  g.Config,
+		Block:   block,
+		TD:      g.Difficulty.ToBig(),
+	}); err != nil {
+		return g.Config, nil, err
+	}
+	logger.Info("Writing custom genesis block (precomputed)", "hash", block.Hash().String())
+	return g.Config, block, nil
 }
 
 func configOrDefault(g *types.Genesis, chainName string, genesisHash common.Hash) *chain.Config {

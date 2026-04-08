@@ -93,10 +93,10 @@ Scope is **medium** (scope B from brainstorm). Explicit non-goals: BorJSON asymm
 - Modify: `execution/state/genesiswrite/genesis_write.go`
 - Create: `execution/state/genesiswrite/commit_genesis_test.go`
 
-- [ ] add `Options` struct with fields: `Genesis *types.Genesis`, `ChainName string`, `OverrideOsakaTime *uint64`, `OverrideAmsterdamTime *uint64`, `KeepStoredChainConfig bool`, `Dirs datadir.Dirs`, `Logger log.Logger`
-- [ ] add unexported helper `writeFreshGenesisDB(tx kv.RwTx, b *rawdb.GenesisBundle) error`:
+- [x] add `Options` struct with fields: `Genesis *types.Genesis`, `ChainName string`, `OverrideOsakaTime *uint64`, `OverrideAmsterdamTime *uint64`, `KeepStoredChainConfig bool`, `Dirs datadir.Dirs`, `Logger log.Logger`
+- [x] add unexported helper `writeFreshGenesisDB(tx kv.RwTx, b *rawdb.GenesisBundle) error`:
       calls `rawdb.WriteGenesisBundle(tx, b, rawdb.WriteGenesisBundleOpts{FreshDB: true})` then `rawdbv3.TxNums.Append(tx, 0, uint64(b.Block.Transactions().Len()+1))`. This is the ONLY path CommitGenesis* uses for fresh-DB writes so TxNums can't be forgotten.
-- [ ] implement `CommitGenesisTx(tx kv.RwTx, opts Options) (*chain.Config, *types.Block, error)`:
+- [x] implement `CommitGenesisTx(tx kv.RwTx, opts Options) (*chain.Config, *types.Block, error)`:
       1. `stored, err := rawdb.ReadGenesisBundle(tx)` (reuse Task 1 primitive)
       2. if `stored.Block == nil` (fresh DB):
          - pick `g := opts.Genesis`; if nil, `g = chainspec.MainnetGenesisBlock()` and log "Writing main-net genesis block"
@@ -117,16 +117,16 @@ Scope is **medium** (scope B from brainstorm). Explicit non-goals: BorJSON asymm
          - compat check against head height (same logic as today lines 220-226); if incompatible error, return it with `stored.Block`
          - `rawdb.WriteGenesisBundle(tx, &rawdb.GenesisBundle{Block: stored.Block, Config: newCfg}, {FreshDB: false})`
          - return `newCfg, stored.Block, nil`
-- [ ] implement `CommitGenesis(ctx context.Context, db kv.RwDB, opts Options) (*chain.Config, *types.Block, error)` as trivial wrapper: `BeginRw` → `CommitGenesisTx` → `Commit` (or `Rollback` on error)
-- [ ] implement `CommitGenesisTxWithPrecomputedBlock(tx kv.RwTx, opts Options, block *types.Block) (*chain.Config, *types.Block, error)`:
+- [x] implement `CommitGenesis(ctx context.Context, db kv.RwDB, opts Options) (*chain.Config, *types.Block, error)` as trivial wrapper: `BeginRw` → `CommitGenesisTx` → `Commit` (or `Rollback` on error)
+- [x] implement `CommitGenesisTxWithPrecomputedBlock(tx kv.RwTx, opts Options, block *types.Block) (*chain.Config, *types.Block, error)`:
       same as `CommitGenesisTx` fresh-DB branch, but skip `GenesisToBlock` and use the caller-provided block. Config must come from `opts.Genesis.Config`. Used only by `aura_test.go` where the block is computed separately so its IBS can be wired into the real temporal domains.
-- [ ] create `execution/state/genesiswrite/commit_genesis_test.go` with:
+- [x] create `execution/state/genesiswrite/commit_genesis_test.go` with:
       (a) **fresh-DB key-presence regression test** (THE regression net): after `CommitGenesis` on empty DB, assert every required KV entry exists: `ConfigTable[GenesisKey]`, `ConfigTable[blockHash]` (chain config), `Headers[blockHash]`, `BlockBody[blockHash]`, `HeaderTD[blockHash]`, `HeaderCanonical[0]`, `HeadBlockHash`, `HeadHeaderHash`, `TxNums[0]`. Each missing key is a distinct subtest failure.
       (b) **repair path test**: seed DB with block but no chain config (simulate stored_cfg == nil branch), call `CommitGenesis`, assert `ReadChainConfig` now returns non-nil.
       (c) **ordering bug fix test**: pass `Options{Genesis: &types.Genesis{Config: nil}}`, assert returns `ErrGenesisNoConfig` AND asserts `ReadGenesis(tx)` returns nil (the genesis JSON was NOT persisted — old behavior would have persisted it before validating).
       (d) **mismatch test**: seed DB with mainnet, call `CommitGenesis` with sepolia spec, assert `*GenesisMismatchError`.
-- [ ] run `go test ./execution/state/genesiswrite/...` — must pass before task 3
-- [ ] run `make lint` — fix any issues
+- [x] run `go test ./execution/state/genesiswrite/...` — must pass before task 3
+- [x] run `make lint` — fix any issues
 
 ### Task 3: Add `genesistest` test helper package with `MustCommitGenesis`
 
