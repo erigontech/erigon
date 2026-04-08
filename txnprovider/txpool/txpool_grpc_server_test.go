@@ -50,7 +50,7 @@ type addMockTxPool struct {
 }
 
 func (m *addMockTxPool) ValidateSerializedTxn(serializedTxn []byte) error { return nil }
-func (m *addMockTxPool) PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availableGas, availableBlobGas uint64, availableRlpSpace int) (bool, error) {
+func (m *addMockTxPool) PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64) (bool, error) {
 	return false, nil
 }
 func (m *addMockTxPool) GetRlp(tx kv.Tx, hash []byte) ([]byte, error) { return nil, nil }
