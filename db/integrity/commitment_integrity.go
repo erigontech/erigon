@@ -978,7 +978,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 			case <-logTicker.C:
 				done := checked.Load()
 				blkRate := float64(done) / time.Since(start).Seconds()
-				logger.Info("[integrity] "+string(StateRootVerifyByHistory), "blks/s", fmt.Sprintf("%.1f", blkRate), "checked", common.PrettyCounter(done), "blockNum", common.PrettyCounter(lastBlockNum.Load()))
+				logger.Info("[integrity] "+string(StateRootVerifyByHistory), "blks/s", float64(int64(blkRate*10+0.5))/10, "checked", common.PrettyCounter(done), "blockNum", common.PrettyCounter(lastBlockNum.Load()))
 			}
 		}
 	}()
