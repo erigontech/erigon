@@ -71,10 +71,11 @@ type Filters struct {
 	pendingTxsStores   *concurrent.SyncMap[PendingTxsSubID, [][]types.Transaction]
 	logger             log.Logger
 
-	// latestSD holds the most recent SharedDomains published via Events.
-	// Used by in-process RPC handlers to read uncommitted block/state data.
+	// latestSD is the local fallback for the most recent SharedDomains.
 	// When events is non-nil (embedded mode), LatestSD() reads directly from
 	// Events.LatestSD() which is updated synchronously in PublishOverlay.
+	// When events is nil (remote mode), latestSD is not populated and
+	// LatestSD() returns nil — remote rpcdaemons do not use the overlay.
 	latestSD atomic.Pointer[execctx.SharedDomains]
 	events   *shards.Events
 
