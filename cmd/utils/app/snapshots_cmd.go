@@ -1182,7 +1182,7 @@ func doDebugKey(cliCtx *cli.Context) error {
 	if err := view.IntegrityKey(domain, key); err != nil {
 		return err
 	}
-	if err := view.IntegirtyInvertedIndexKey(domain, key); err != nil {
+	if err := view.IntegrityInvertedIndexKey(domain, key); err != nil {
 		return err
 	}
 	return nil

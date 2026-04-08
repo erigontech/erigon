@@ -47,6 +47,11 @@ type CaplinConfig struct {
 	ImmediateBlobsBackfilling bool
 	BlobPruningDisabled       bool
 	SnapshotGenerationEnabled bool
+	// ColumnKeepSlots is the number of slots to keep PeerDAS data column sidecars.
+	// Default: MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS * SLOTS_PER_EPOCH (4096 * 32 = 131072, ~18 days).
+	// Increase for DA oracle nodes or rollups that need longer history; decrease only if disk is constrained
+	// and spec compliance for column serving is not required.
+	ColumnKeepSlots uint64
 	// Network related config
 	NetworkId NetworkType
 	// DisableCheckpointSync is optional and is used to disable checkpoint sync used by default in the node
