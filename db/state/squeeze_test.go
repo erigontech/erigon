@@ -18,6 +18,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
@@ -535,21 +536,20 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	require.Equal(t, maxWrite, binary.BigEndian.Uint64(v))
 }
 
-// TestGenerateCommitmentRebuildData generates a large-scale dataset with valid commitment roots.
-// The resulting datadir can be used for manual testing of `integration commitment rebuild`.
+// TestGenerateCommitmentRebuildData generates a large-scale dataset (3M accounts,
+// 59 steps, ~10M keys) with valid commitment roots. The resulting datadir can be
+// used for manual testing of `integration commitment rebuild`.
 //
-// By default, runs with small parameters (1K accounts, 3 steps) as a smoke test.
-// Set TEST_LARGE=true for full-scale generation (3M accounts, 59 steps, ~10M keys).
+// Skipped under `-short` since the full-scale generation requires a long timeout.
 //
 // Environment variables:
-//   - TEST_DATADIR: persistent output directory (uses t.TempDir() if empty)
-//   - TEST_LARGE: when set to "true", uses full-scale parameters (requires long timeout)
+//   - TEST_DATADIR: optional persistent output directory (uses t.TempDir() if empty)
 func TestGenerateCommitmentRebuildData(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping large data generation in short mode")
 	}
 
-	persistentDir := os.Getenv("TEST_DATADIR")
+	persistentDir := dbg.EnvString("TEST_DATADIR", "")
 
 	// Fail early if persistent directory already contains data (avoids mixing old+new state).
 	// Check chaindata and all snapshot subdirectories that OpenFolder/scanDirs will read.
@@ -562,22 +562,13 @@ func TestGenerateCommitmentRebuildData(t *testing.T) {
 		}
 	}
 
-	// Default: small parameters for smoke testing
 	var (
-		stepSize        uint64 = 10
-		totalSteps      uint64 = 3
-		numAccounts     uint64 = 1000
+		stepSize        uint64 = 100
+		totalSteps      uint64 = 59
+		numAccounts     uint64 = 3_000_000
 		slotsPerAcct    uint64 = 2
-		numCodeAccounts uint64 = 300
+		numCodeAccounts uint64 = 1_000_000
 	)
-
-	if os.Getenv("TEST_LARGE") == "true" || persistentDir != "" {
-		stepSize = 100
-		totalSteps = 59
-		numAccounts = 3_000_000
-		slotsPerAcct = 2
-		numCodeAccounts = 1_000_000
-	}
 
 	totalTxs := stepSize * totalSteps
 	totalStorage := numAccounts * slotsPerAcct
