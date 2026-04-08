@@ -325,8 +325,8 @@ github.com/erigontech/erigon-snapshot v1.3.1-0.20260402120223-7bb412bc89cd h1:wS
 github.com/erigontech/erigon-snapshot v1.3.1-0.20260402120223-7bb412bc89cd/go.mod h1:ooHlCl+eEYzebiPu+FP6Q6SpPUeMADn8Jxabv3IKb9M=
 github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116 h1:KCFa2uXEfZoBjV4buzjWmCmoqVLXiGCq0ZmQ2OjeRvQ=
 github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116/go.mod h1:8vQ+VjvLu2gkPs8EwdPrOTAAo++WuLuBi54N7NuAF0I=
-github.com/erigontech/fastkeccak v0.1.1-0.20260314092403-84387234991f h1:0xBDhewgMjVGqRp+ghKtH51pdyKkZoqefECz4gt3cpE=
-github.com/erigontech/fastkeccak v0.1.1-0.20260314092403-84387234991f/go.mod h1:CwJFJVKFVWpQyKSfRrQyY56IqV16sR5xnQoFThGHiZA=
+github.com/erigontech/fastkeccak v0.1.1-0.20260408010752-08e7b6602268 h1:NHl4+DjblLuHBJradIg9KriKmtByjRvLqLhkVODibac=
+github.com/erigontech/fastkeccak v0.1.1-0.20260408010752-08e7b6602268/go.mod h1:CwJFJVKFVWpQyKSfRrQyY56IqV16sR5xnQoFThGHiZA=
 github.com/erigontech/mdbx-go v0.39.17 h1:+FQMaCuH/IB+t9HEXVDxTJaV5jvZTwC/6YgDHHKDDMo=
 github.com/erigontech/mdbx-go v0.39.17/go.mod h1:VTGwYzepS9Wg38jVfreOsSVlh73OBGPZluu7kHo6X6g=
 github.com/erigontech/secp256k1 v1.2.1-0.20260218182123-377cc1bd6410 h1:5YD7JJ5PaqOdjKA84lTDtQby9nbI4podqrkUhyIyFDw=
