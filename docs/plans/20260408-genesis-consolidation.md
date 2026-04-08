@@ -217,14 +217,14 @@ Scope is **medium** (scope B from brainstorm). Explicit non-goals: BorJSON asymm
 **Files:**
 - Modify: `execution/state/genesiswrite/genesis_test.go`
 
-- [ ] this is the biggest mechanical diff — ~10 call sites
-- [ ] replace each `genesiswrite.WriteGenesisBlock(tx, spec.Genesis, network, nil, nil, false, ...)` with `genesiswrite.CommitGenesisTx(tx, genesiswrite.Options{Genesis: spec.Genesis, ChainName: network, Dirs: ..., Logger: logger})`
-- [ ] replace each `genesiswrite.CommitGenesisBlock(db, genesis, chainName, dirs, logger)` with `genesiswrite.CommitGenesis(context.Background(), db, genesiswrite.Options{Genesis: genesis, ChainName: chainName, Dirs: dirs, Logger: logger})`
-- [ ] replace each `genesiswrite.MustCommitGenesis(&customg, db, ..., logger)` with `genesistest.MustCommitGenesis(t, &customg, db, ..., logger)`
-- [ ] verify each test still exercises the same semantic case it did before (double-pass, mismatch, config compat, repair, etc.)
-- [ ] add any missing test coverage revealed during the rewrite
-- [ ] run `go test ./execution/state/genesiswrite/...` — must pass before task 10
-- [ ] run `make lint`
+- [x] this is the biggest mechanical diff — ~10 call sites
+- [x] replace each `genesiswrite.WriteGenesisBlock(tx, spec.Genesis, network, nil, nil, false, ...)` with `genesiswrite.CommitGenesisTx(tx, genesiswrite.Options{Genesis: spec.Genesis, ChainName: network, Dirs: ..., Logger: logger})`
+- [x] replace each `genesiswrite.CommitGenesisBlock(db, genesis, chainName, dirs, logger)` with `genesiswrite.CommitGenesis(context.Background(), db, genesiswrite.Options{Genesis: genesis, ChainName: chainName, Dirs: dirs, Logger: logger})`
+- [x] replace each `genesiswrite.MustCommitGenesis(&customg, db, ..., logger)` with `genesistest.MustCommitGenesis(t, &customg, db, ..., logger)`
+- [x] verify each test still exercises the same semantic case it did before (double-pass, mismatch, config compat, repair, etc.)
+- [x] add any missing test coverage revealed during the rewrite — set explicit `GasLimit` / `Difficulty` on `customg` (matching the defaults `GenesisWithoutStateToBlock` would fill in, so `customghash` is unchanged) because `CommitGenesis` now persists the Genesis JSON via `WriteGenesisIfNotExist` and the `types.Genesis` JSON decoder rejects missing `gasLimit` / `difficulty`. Without this the seeded DB would be unreadable on the second call. This surfaces a fresh invariant that the old `MustCommitGenesis` hid by skipping the JSON persist.
+- [x] run `go test ./execution/state/genesiswrite/...` — must pass before task 10
+- [x] run `make lint`
 
 ### Task 10: Delete dead code and unexport `WriteGenesisBesideState`
 
