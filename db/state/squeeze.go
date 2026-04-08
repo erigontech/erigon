@@ -196,15 +196,15 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 	defer logEvery.Stop()
 
 	for ri, r := range ranges {
-		af, err := accounts.rawLookupFileByRange(r.from, r.to)
+		af, err := accounts.lookupVisibleFileByRange(r.from, r.to)
 		if err != nil {
 			return err
 		}
-		sf, err := storage.rawLookupFileByRange(r.from, r.to)
+		sf, err := storage.lookupVisibleFileByRange(r.from, r.to)
 		if err != nil {
 			return err
 		}
-		cf, err := commitment.rawLookupFileByRange(r.from, r.to)
+		cf, err := commitment.lookupVisibleFileByRange(r.from, r.to)
 		if err != nil {
 			return err
 		}
