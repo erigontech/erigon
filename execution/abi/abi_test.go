@@ -1169,3 +1169,20 @@ func TestCustomErrors(t *testing.T) {
 	}
 	check("MyError", "MyError(uint256)")
 }
+
+// TestCrashers contains some ABI definitions which previously caused the codec to panic.
+func TestCrashers(t *testing.T) {
+	cases := []string{
+		`[{"inputs":[{"type":"tuple[]","components":[{"type":"bool","name":"_1"}]}]}]`,
+		`[{"inputs":[{"type":"tuple[]","components":[{"type":"bool","name":"&"}]}]}]`,
+		`[{"inputs":[{"type":"tuple[]","components":[{"type":"bool","name":"----"}]}]}]`,
+		`[{"inputs":[{"type":"tuple[]","components":[{"type":"bool","name":"foo.Bar"}]}]}]`,
+	}
+	for i, input := range cases {
+		if _, err := JSON(strings.NewReader(input)); err == nil {
+			// Some of these may parse successfully (e.g. _1 becomes a valid camel-cased name).
+			// The important thing is that none of them panic.
+			_ = i
+		}
+	}
+}
