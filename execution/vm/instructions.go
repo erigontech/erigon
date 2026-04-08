@@ -1021,18 +1021,6 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 	return execCreate(pc, evm, scope, endowment, input, &salt)
 }
 
-func stCreate2(_ uint64, scope *CallContext) string {
-	stack := &scope.Stack
-	var (
-		endowment    = stack.data[len(stack.data)-1]
-		offset, size = stack.data[len(stack.data)-2], stack.data[len(stack.data)-3]
-		salt         = stack.data[len(stack.data)-4]
-		input        = scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
-	)
-
-	return fmt.Sprintf("%s %d %d %x %d", CREATE2.String(), &endowment, &salt, input, &scope.gas)
-}
-
 // execCreate is the shared implementation for opCreate (salt == nil) and opCreate2 (salt != nil).
 func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, input []byte, salt *uint256.Int) (uint64, []byte, error) {
 	if evm.ChainRules().IsAmsterdam {
@@ -1093,6 +1081,18 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	}
 	evm.returnData = nil // clear dirty return data buffer
 	return pc, nil, nil
+}
+
+func stCreate2(_ uint64, scope *CallContext) string {
+	stack := &scope.Stack
+	var (
+		endowment    = stack.data[len(stack.data)-1]
+		offset, size = stack.data[len(stack.data)-2], stack.data[len(stack.data)-3]
+		salt         = stack.data[len(stack.data)-4]
+		input        = scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
+	)
+
+	return fmt.Sprintf("%s %d %d %x %d", CREATE2.String(), &endowment, &salt, input, &scope.gas)
 }
 
 func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
