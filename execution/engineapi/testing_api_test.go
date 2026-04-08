@@ -21,11 +21,6 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/holiman/uint256"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/types/known/emptypb"
-
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -36,6 +31,9 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // ---------------------------------------------------------------------------
@@ -125,13 +123,6 @@ func (s *stubExecutionModule) GetTD(_ context.Context, _ *common.Hash, _ *uint64
 func (s *stubExecutionModule) Ready(_ context.Context) (bool, error) { return true, nil }
 func (s *stubExecutionModule) FrozenBlocks(_ context.Context) (uint64, bool, error) {
 	return 0, false, nil
-}
-
-func (s *stubExecutionServer) GetForkChoice(ctx context.Context, in *emptypb.Empty) (*executionproto.ForkChoice, error) {
-	if s.getForkChoiceFunc != nil {
-		return s.getForkChoiceFunc(ctx, in)
-	}
-	return &executionproto.ForkChoice{}, nil
 }
 
 // ---------------------------------------------------------------------------
