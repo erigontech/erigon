@@ -165,7 +165,7 @@ func TestEmptySystemAccountCreation(t *testing.T) {
 	require.NoError(err)
 
 	// Write block headers so ChainReader can look up the genesis header.
-	err = genesiswrite.WriteGenesisBesideState(genesisBlock, tx, genesis)
+	_, _, err = genesiswrite.CommitGenesisTxWithPrecomputedBlock(tx, genesiswrite.Options{Genesis: genesis, Dirs: dirs, Logger: logger}, genesisBlock)
 	require.NoError(err)
 
 	config := genesis.Config

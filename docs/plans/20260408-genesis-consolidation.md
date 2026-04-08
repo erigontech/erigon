@@ -191,16 +191,16 @@ Scope is **medium** (scope B from brainstorm). Explicit non-goals: BorJSON asymm
 **Files:**
 - Modify: `execution/protocol/rules/aura/aura_test.go`
 
-- [ ] locate the `WriteGenesisBesideState` call at line 168
-- [ ] the test keeps its manual `GenesisToBlock` call (line 161) and `MakeWriteSet` to domains (lines 163-165) unchanged — the point is that the block's IBS goes into the real temporal domains, not the disposable one
-- [ ] replace `genesiswrite.WriteGenesisBesideState(genesisBlock, tx, genesis)` with:
+- [x] locate the `WriteGenesisBesideState` call at line 168
+- [x] the test keeps its manual `GenesisToBlock` call (line 161) and `MakeWriteSet` to domains (lines 163-165) unchanged — the point is that the block's IBS goes into the real temporal domains, not the disposable one
+- [x] replace `genesiswrite.WriteGenesisBesideState(genesisBlock, tx, genesis)` with:
       ```go
       _, _, err = genesiswrite.CommitGenesisTxWithPrecomputedBlock(tx, genesiswrite.Options{Genesis: genesis, Dirs: dirs, Logger: logger}, genesisBlock)
       require.NoError(err)
       ```
-- [ ] ⚠️ verify: `CommitGenesisTxWithPrecomputedBlock` must NOT call `GenesisToBlock` internally (that would create a fresh disposable temporal DB and defeat the purpose of pre-computing). Re-read Task 2 implementation.
-- [ ] run `go test ./execution/protocol/rules/aura/...` — must pass before task 8
-- [ ] run `make lint`
+- [x] ⚠️ verify: `CommitGenesisTxWithPrecomputedBlock` must NOT call `GenesisToBlock` internally (that would create a fresh disposable temporal DB and defeat the purpose of pre-computing). Re-read Task 2 implementation. (verified at `execution/state/genesiswrite/genesis_write.go:310` — uses caller-provided block only)
+- [x] run `go test ./execution/protocol/rules/aura/...` — must pass before task 8
+- [x] run `make lint`
 
 ### Task 8: Migrate `p2p/sentry` tests to `genesistest.MustCommitGenesis`
 
