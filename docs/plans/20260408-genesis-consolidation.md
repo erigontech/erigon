@@ -75,17 +75,17 @@ Scope is **medium** (scope B from brainstorm). Explicit non-goals: BorJSON asymm
 - Modify: `db/rawdb/accessors_metadata.go`
 - Create: `db/rawdb/genesis_bundle_test.go`
 
-- [ ] add `GenesisBundle` struct type (fields: `Genesis *types.Genesis`, `Config *chain.Config`, `Block *types.Block`, `TD *big.Int`) to `accessors_metadata.go`
-- [ ] add `WriteGenesisBundleOpts` struct with `FreshDB bool`
-- [ ] implement `WriteGenesisBundle(tx kv.RwTx, b *GenesisBundle, opts WriteGenesisBundleOpts) error`:
+- [x] add `GenesisBundle` struct type (fields: `Genesis *types.Genesis`, `Config *chain.Config`, `Block *types.Block`, `TD *big.Int`) to `accessors_metadata.go`
+- [x] add `WriteGenesisBundleOpts` struct with `FreshDB bool`
+- [x] implement `WriteGenesisBundle(tx kv.RwTx, b *GenesisBundle, opts WriteGenesisBundleOpts) error`:
       Fresh-DB path (opts.FreshDB == true): `WriteGenesisIfNotExist(tx, b.Genesis)` → `WriteBlock(tx, b.Block)` → `WriteTd(tx, hash, 0, b.TD)` → `WriteCanonicalHash(tx, hash, 0)` → `WriteHeadBlockHash(tx, hash)` → `WriteHeadHeaderHash(tx, hash)` → `WriteChainConfig(tx, hash, b.Config)`. Fail-fast on any error; caller's tx handles rollback.
       Config-only path (opts.FreshDB == false): only `WriteChainConfig(tx, b.Block.Hash(), b.Config)`.
-- [ ] implement `ReadGenesisBundle(tx kv.Getter) (*GenesisBundle, error)`:
+- [x] implement `ReadGenesisBundle(tx kv.Getter) (*GenesisBundle, error)`:
       returns a bundle where any field may be nil if not persisted. Logic: read `ReadGenesis(tx)` → `ReadCanonicalHash(tx, 0)` → if canonical hash present, `ReadBlockWithSenders(tx, hash, 0)`, `ReadTd(tx, hash, 0)`, `ReadChainConfig(tx, hash)`.
-- [ ] create `db/rawdb/genesis_bundle_test.go` with a bundle round-trip test: build a minimal `GenesisBundle`, `WriteGenesisBundle(tx, b, {FreshDB: true})`, `ReadGenesisBundle(tx)`, assert all 4 fields equal byte-for-byte (use `reflect.DeepEqual` or per-field checks for pointers)
-- [ ] write a second test for the `FreshDB: false` path: seed bundle via fresh write, then rewrite with `FreshDB: false` using a different chain config, read back, assert only the config changed
-- [ ] run `go test ./db/rawdb/...` — must pass before task 2
-- [ ] run `make lint` — fix any issues
+- [x] create `db/rawdb/genesis_bundle_test.go` with a bundle round-trip test: build a minimal `GenesisBundle`, `WriteGenesisBundle(tx, b, {FreshDB: true})`, `ReadGenesisBundle(tx)`, assert all 4 fields equal byte-for-byte (use `reflect.DeepEqual` or per-field checks for pointers)
+- [x] write a second test for the `FreshDB: false` path: seed bundle via fresh write, then rewrite with `FreshDB: false` using a different chain config, read back, assert only the config changed
+- [x] run `go test ./db/rawdb/...` — must pass before task 2
+- [x] run `make lint` — fix any issues
 
 ### Task 2: Add `genesiswrite.CommitGenesis` / `CommitGenesisTx` with `Options`
 

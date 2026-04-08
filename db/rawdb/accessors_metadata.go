@@ -24,6 +24,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/big"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
@@ -113,6 +114,118 @@ func ReadGenesis(db kv.Getter) (*types.Genesis, error) {
 		return nil, err
 	}
 	return &g, nil
+}
+
+// GenesisBundle is the set of keys that collectively make a chain DB valid at block 0.
+// It is the persistence-layer contract for "a written genesis": the raw genesis JSON,
+// the resolved chain config, the block, and its total difficulty. Layer-2 policy
+// (genesiswrite) is responsible for computing Block via GenesisToBlock and for deciding
+// which Config to store; this layer only moves bytes.
+//
+// Deliberately excluded from the bundle (owned by other subsystems):
+//   - rawdbv3.TxNums[0] — appended by the genesiswrite layer alongside WriteGenesisBundle
+//   - DatabaseInfo version stamping
+//   - stages progress seeding
+//   - snapshot download marker
+//
+// Every field may be nil when returned by ReadGenesisBundle, in which case that
+// particular key was not present in the DB.
+type GenesisBundle struct {
+	Genesis *types.Genesis
+	Config  *chain.Config
+	Block   *types.Block
+	TD      *big.Int
+}
+
+// WriteGenesisBundleOpts selects between the two write modes of WriteGenesisBundle.
+// FreshDB == true writes every field of the bundle (used when initializing an empty DB).
+// FreshDB == false only rewrites the chain config for an existing stored block — used
+// by the policy layer for the config-upgrade and "repair missing chain config" paths.
+type WriteGenesisBundleOpts struct {
+	FreshDB bool
+}
+
+// WriteGenesisBundle persists a GenesisBundle to the given transaction. See
+// WriteGenesisBundleOpts for the two modes. The caller's transaction is expected
+// to handle rollback on error — this function is fail-fast on the first error.
+func WriteGenesisBundle(tx kv.RwTx, b *GenesisBundle, opts WriteGenesisBundleOpts) error {
+	if b == nil {
+		return fmt.Errorf("WriteGenesisBundle: nil bundle")
+	}
+	if b.Block == nil {
+		return fmt.Errorf("WriteGenesisBundle: bundle.Block is nil")
+	}
+	if b.Config == nil {
+		return fmt.Errorf("WriteGenesisBundle: bundle.Config is nil")
+	}
+	hash := b.Block.Hash()
+	if !opts.FreshDB {
+		return WriteChainConfig(tx, hash, b.Config)
+	}
+	if b.Genesis == nil {
+		return fmt.Errorf("WriteGenesisBundle: bundle.Genesis is nil in fresh-DB mode")
+	}
+	if b.TD == nil {
+		return fmt.Errorf("WriteGenesisBundle: bundle.TD is nil in fresh-DB mode")
+	}
+	if err := WriteGenesisIfNotExist(tx, b.Genesis); err != nil {
+		return err
+	}
+	if err := WriteBlock(tx, b.Block); err != nil {
+		return err
+	}
+	if err := WriteTd(tx, hash, b.Block.NumberU64(), b.TD); err != nil {
+		return err
+	}
+	if err := WriteCanonicalHash(tx, hash, b.Block.NumberU64()); err != nil {
+		return err
+	}
+	WriteHeadBlockHash(tx, hash)
+	if err := WriteHeadHeaderHash(tx, hash); err != nil {
+		return err
+	}
+	return WriteChainConfig(tx, hash, b.Config)
+}
+
+// ReadGenesisBundle reads back a GenesisBundle. Any field may be nil if the
+// corresponding key is not present in the DB — for example, on a freshly
+// initialized chaindata directory every field is nil.
+func ReadGenesisBundle(tx kv.Getter) (*GenesisBundle, error) {
+	b := &GenesisBundle{}
+
+	g, err := ReadGenesis(tx)
+	if err != nil {
+		return nil, err
+	}
+	b.Genesis = g
+
+	hash, err := ReadCanonicalHash(tx, 0)
+	if err != nil {
+		return nil, err
+	}
+	if hash == (common.Hash{}) {
+		return b, nil
+	}
+
+	block, _, err := ReadBlockWithSenders(tx, hash, 0)
+	if err != nil {
+		return nil, err
+	}
+	b.Block = block
+
+	td, err := ReadTd(tx, hash, 0)
+	if err != nil {
+		return nil, err
+	}
+	b.TD = td
+
+	cfg, err := ReadChainConfig(tx, hash)
+	if err != nil {
+		return nil, err
+	}
+	b.Config = cfg
+
+	return b, nil
 }
 
 func AllSegmentsDownloadComplete(tx kv.Getter) (allSegmentsDownloadComplete bool, err error) {
