@@ -46,8 +46,7 @@ jobs:
             max-allowed-failures: 0
           - sim: rpc
             sim-limit: compat
-            # 4 known pre-existing failures (also present on main)
-            max-allowed-failures: 4
+            max-allowed-failures: 0
     steps:
       - name: Checkout Erigon meta
         uses: actions/checkout@v6
