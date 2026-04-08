@@ -21,6 +21,7 @@ package shutter
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -174,6 +175,12 @@ func (et *KsmEonTracker) handleBlockEvent(blockEvent BlockEvent) error {
 	blockNum := blockEvent.LatestBlockNum
 	eon, ok, err := et.readEonAtNewBlockEvent(blockNum)
 	if err != nil {
+		// "block not found" is transient: the block event arrives from state changes
+		// before the block is visible to eth_call. Retry on the next block event.
+		if strings.Contains(err.Error(), "block not found") {
+			et.logger.Warn("block not yet available for eon read, will retry on next block event", "blockNum", blockNum)
+			return nil
+		}
 		return fmt.Errorf("read eon at block event (blockNum=%d): %w", blockNum, err)
 	}
 	if !ok {
