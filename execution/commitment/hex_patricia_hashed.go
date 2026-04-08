@@ -1837,7 +1837,7 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int16) error {
 	}
 
 	cell := &hph.grid[row][nibble]
-	cell.fillFromUpperCell(upCell, depth, min(unfolding, upCell.hashedExtLen))
+	cell.fillFromUpperCell(upCell, depth, lowest)
 	if hph.trace {
 		fmt.Printf("unfolded cell (%d, %x, depth=%d) %s\n", row, nibble, depth, cell.FullString())
 	}
