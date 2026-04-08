@@ -18,6 +18,7 @@ package eth_clock
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math"
 	"slices"
 	"sort"
@@ -244,7 +245,7 @@ func (t *ethereumClockImpl) StateVersionByForkDigest(digest common.Bytes4) (clpa
 		return stateVersion, nil
 	}
 
-	return clparams.FuluVersion, nil
+	return 0, fmt.Errorf("unknown fork digest: %x", digest)
 }
 
 func (t *ethereumClockImpl) computeForkDigestForVersion(currentVersion common.Bytes4) (digest common.Bytes4, err error) {

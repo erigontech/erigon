@@ -133,7 +133,13 @@ func (c *ConsensusHandlers) statusV2Handler(s network.Stream) error {
 		return err
 	}
 	copy(status.ForkDigest[:], forkDigest[:])
-	//log.Debug("statusV2Handler", "forkDigest", hex.EncodeToString(status.ForkDigest[:]), "finalizedRoot", hex.EncodeToString(status.FinalizedRoot[:]),
-	//	"finalizedEpoch", status.FinalizedEpoch, "headSlot", status.HeadSlot, "headRoot", hex.EncodeToString(status.HeadRoot[:]), "earliestAvailableSlot", c.peerdasStateReader.GetEarliestAvailableSlot())
+	// StatusV2 requires EarliestAvailableSlot (92 bytes total).
+	// Without it, peers like Prysm reject the 84-byte response as malformed.
+	if status.EarliestAvailableSlot == nil {
+		eas := c.peerdasStateReader.GetEarliestAvailableSlot()
+		status.EarliestAvailableSlot = &eas
+	}
+	log.Trace("statusV2Handler", "forkDigest", hex.EncodeToString(status.ForkDigest[:]), "finalizedRoot", hex.EncodeToString(status.FinalizedRoot[:]),
+		"finalizedEpoch", status.FinalizedEpoch, "headSlot", status.HeadSlot, "headRoot", hex.EncodeToString(status.HeadRoot[:]), "earliestAvailableSlot", *status.EarliestAvailableSlot)
 	return ssz_snappy.EncodeAndWrite(s, status, SuccessfulResponsePrefix)
 }

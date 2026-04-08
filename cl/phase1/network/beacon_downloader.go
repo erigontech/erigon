@@ -90,6 +90,10 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 	var consecutiveFailures atomic.Int32
 	reqInterval := time.NewTicker(baseInterval)
 	defer reqInterval.Stop()
+	// Timeout: if no blocks received within this duration, return to let the caller
+	// run stale detection and potentially switch to ChainTipSync.
+	requestTimeout := time.NewTimer(30 * time.Second)
+	defer requestTimeout.Stop()
 
 Loop:
 	for {
@@ -141,9 +145,16 @@ Loop:
 					return
 				}
 				if len(responses) == 0 {
-					// Empty response: peer has no blocks for this range.
-					// Do NOT ban — this can happen legitimately (peer is still syncing).
-					log.Trace("Peer returned empty block range response", "peer", peerId, "slot", reqSlot, "reqCount", reqCount)
+					// Empty response: no blocks in this slot range.
+					// Advance past the requested range so we don't get stuck requesting the same empty range.
+					f.mu.Lock()
+					newSlot := reqSlot + reqCount
+					if newSlot > f.highestSlotProcessed {
+						log.Debug("Empty block range response, advancing past gap", "from", f.highestSlotProcessed, "to", newSlot, "peer", peerId)
+						f.highestSlotProcessed = newSlot
+						f.highestSlotUpdateTime = time.Now()
+					}
+					f.mu.Unlock()
 					return
 				}
 				// Success: reset backoff
@@ -155,6 +166,9 @@ Loop:
 				atomicResp.Store(peerAndBlocks{peerId, responses})
 			}()
 		case <-ctx.Done():
+			return
+		case <-requestTimeout.C:
+			// No blocks received in time — return to let stale detection run.
 			return
 		default:
 			if len(atomicResp.Load().(peerAndBlocks).blocks) > 0 {
@@ -184,9 +198,10 @@ Loop:
 	// For GLOAS blocks, determine which are FULL and request their envelopes before locking.
 	var envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
 	if anyGloasBlock(processBlocks) {
-		if fullRoots := determineFullGloasRoots(processBlocks, extraBlock); len(fullRoots) > 0 {
+		fullBlocks, fullRoots := determineFullGloasBlocks(processBlocks, extraBlock)
+		if len(fullRoots) > 0 {
 			var envErr error
-			envelopes, envErr = RequestEnvelopesFrantically(ctx, f.rpc, fullRoots)
+			envelopes, envErr = RequestEnvelopesFrantically(ctx, f.rpc, fullRoots, fullBlocks...)
 			if envErr != nil {
 				log.Debug("[ForwardBeaconDownloader] failed to get envelopes", "err", envErr)
 			}
@@ -248,11 +263,13 @@ func anyGloasBlock(blocks []*cltypes.SignedBeaconBlock) bool {
 	return false
 }
 
-// determineFullGloasRoots uses the count+1 trick to identify which GLOAS blocks are FULL.
+// determineFullGloasBlocks uses the count+1 trick to identify which GLOAS blocks are FULL.
 // A block is FULL if the next block's bid.ParentBlockHash == this block's bid.BlockHash,
 // meaning the EL chain continued from this block's payload.
 // extraBlock is the (count+1)-th block used as a lookahead for the last block in the batch.
-func determineFullGloasRoots(blocks []*cltypes.SignedBeaconBlock, extraBlock *cltypes.SignedBeaconBlock) [][32]byte {
+// Returns both the FULL blocks (for by-range fallback) and their roots (for by-root requests).
+func determineFullGloasBlocks(blocks []*cltypes.SignedBeaconBlock, extraBlock *cltypes.SignedBeaconBlock) ([]*cltypes.SignedBeaconBlock, [][32]byte) {
+	var fullBlocks []*cltypes.SignedBeaconBlock
 	var fullRoots [][32]byte
 	for i, block := range blocks {
 		if block.Version() < clparams.GloasVersion {
@@ -273,6 +290,7 @@ func determineFullGloasRoots(blocks []*cltypes.SignedBeaconBlock, extraBlock *cl
 			// No lookahead: optimistically request the envelope; timeout means EMPTY.
 			root, err := block.Block.HashSSZ()
 			if err == nil {
+				fullBlocks = append(fullBlocks, block)
 				fullRoots = append(fullRoots, root)
 			}
 			continue
@@ -281,11 +299,12 @@ func determineFullGloasRoots(blocks []*cltypes.SignedBeaconBlock, extraBlock *cl
 		if nextBid != nil && nextBid.Message != nil && nextBid.Message.ParentBlockHash == bid.Message.BlockHash {
 			root, err := block.Block.HashSSZ()
 			if err == nil {
+				fullBlocks = append(fullBlocks, block)
 				fullRoots = append(fullRoots, root)
 			}
 		}
 	}
-	return fullRoots
+	return fullBlocks, fullRoots
 }
 
 // trimAtMissingEnvelope trims the block list at the first FULL GLOAS block whose envelope

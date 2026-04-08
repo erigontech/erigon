@@ -250,6 +250,7 @@ func ConsensusClStages(ctx context.Context,
 			if currentEpoch := cfg.ethClock.GetCurrentEpoch(); currentEpoch > 0 {
 				args.targetEpoch = currentEpoch - 1
 			}
+			refreshStatusFromForkChoice(cfg)
 			return
 		},
 		Stages: map[string]clstages.Stage[*Cfg, Args]{
@@ -392,14 +393,6 @@ func ConsensusClStages(ctx context.Context,
 }
 
 // writeGenesisBeaconBlock writes a synthetic genesis beacon block to the DB.
-// This allows block production to find the parent block when starting from genesis (slot 0).
-// The genesis beacon block body is reconstructed from the genesis state:
-//   - All lists are empty (no deposits, attestations, etc.)
-//   - ExecutionPayload is reconstructed from the genesis state's LatestExecutionPayloadHeader
-//   - SyncAggregate is all-zero (for Altair+)
-//
-// This works because for genesis the execution payload has empty transactions/withdrawals,
-// so Eth1Block.HashSSZ() == Eth1Header.HashSSZ() and body_root matches exactly.
 func writeGenesisBeaconBlock(ctx context.Context, cfg *Cfg) error {
 	if cfg.state == nil {
 		return nil
@@ -411,8 +404,6 @@ func writeGenesisBeaconBlock(ctx context.Context, cfg *Cfg) error {
 	blk.Slot = header.Slot
 	blk.ProposerIndex = header.ProposerIndex
 	blk.ParentRoot = header.ParentRoot
-	// header.Root (LatestBlockHeader.StateRoot) is zeroed during state transitions.
-	// We must fill in the actual state root so the block root matches syncedData.HeadRoot().
 	stateRoot, err := cfg.state.HashSSZ()
 	if err != nil {
 		return fmt.Errorf("failed to compute genesis state root: %w", err)
@@ -423,18 +414,33 @@ func writeGenesisBeaconBlock(ctx context.Context, cfg *Cfg) error {
 	// SyncAggregate needs preset-aware bitvector sizing; ExecutionPayload sub-fields
 	// must be initialized (non-nil) for SSZ encoding.
 	body := blk.Body
+	body.Eth1Data = cfg.state.Eth1Data()
 	if version >= clparams.AltairVersion {
 		body.SyncAggregate = cltypes.NewSyncAggregateWithSize(int(cfg.beaconCfg.SyncCommitteeSize) / 8)
 	}
 	if version >= clparams.BellatrixVersion {
-		body.ExecutionPayload.Extra = solid.NewExtraData()
-		body.ExecutionPayload.Transactions = &solid.TransactionsSSZ{}
-		if version >= clparams.CapellaVersion {
-			body.ExecutionPayload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.beaconCfg.MaxWithdrawalsPerPayload), 44)
-		}
+		execHeader := cfg.state.LatestExecutionPayloadHeader()
+		body.ExecutionPayload = cltypes.NewEth1BlockFromExecutionHeader(execHeader, version, cfg.beaconCfg)
+	}
+
+	bodyRoot, err := body.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("genesis body HashSSZ failed: %w", err)
+	}
+	if bodyRoot != header.BodyRoot {
+		return fmt.Errorf("genesis body root mismatch: computed %x, expected %x", bodyRoot, header.BodyRoot)
 	}
 
 	return cfg.indiciesDB.Update(ctx, func(tx kv.RwTx) error {
 		return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, genesisBlock, true)
 	})
+}
+
+// refreshStatusFromForkChoice updates the advertised P2P status using local forkchoice state.
+func refreshStatusFromForkChoice(cfg *Cfg) {
+	fc := cfg.forkChoice.FinalizedCheckpoint()
+	headSlot := cfg.ethClock.GetCurrentSlot()
+	if err := cfg.rpc.SetStatus(fc.Root, fc.Epoch, fc.Root, headSlot); err != nil {
+		log.Trace("Could not refresh status", "err", err)
+	}
 }
