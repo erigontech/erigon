@@ -281,6 +281,17 @@ func LogDirOnENOSPC(err error, dirPath string) {
 		log.Warn("[ENOSPC] file", "name", e.Name(), "size", byteCount(info.Size()), "isDir", e.IsDir())
 	}
 	log.Warn("[ENOSPC] dir summary", "dir", dirPath, "files", fileCount, "totalSize", byteCount(int64(totalSize)))
+
+	var stat syscall.Statfs_t
+	if statErr := syscall.Statfs(dirPath, &stat); statErr == nil {
+		totalBlocks := stat.Blocks * uint64(stat.Bsize)
+		availBlocks := stat.Bavail * uint64(stat.Bsize)
+		totalInodes := stat.Files
+		freeInodes := stat.Ffree
+		log.Warn("[ENOSPC] filesystem", "dir", dirPath,
+			"diskTotal", byteCount(int64(totalBlocks)), "diskAvail", byteCount(int64(availBlocks)),
+			"inodesTotal", totalInodes, "inodesFree", freeInodes)
+	}
 }
 
 func byteCount(b int64) string {

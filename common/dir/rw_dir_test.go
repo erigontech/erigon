@@ -17,8 +17,11 @@
 package dir
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -39,6 +42,33 @@ func Test_CreateTemp(t *testing.T) {
 	base1 := filepath.Base(tmpfile.Name())
 	base2 := filepath.Base(ogfile)
 	require.True(t, strings.HasPrefix(base1, base2))
+}
+
+func Test_LogDirOnENOSPC(t *testing.T) {
+	dir := t.TempDir()
+
+	// create some temp files with known sizes
+	for i := 0; i < 3; i++ {
+		f, err := os.CreateTemp(dir, "erigon-sortable-buf-")
+		require.NoError(t, err)
+		_, err = f.Write(make([]byte, (i+1)*1024))
+		require.NoError(t, err)
+		require.NoError(t, f.Close())
+	}
+
+	// non-ENOSPC error: should not panic or log anything
+	LogDirOnENOSPC(fmt.Errorf("some other error"), dir)
+
+	// ENOSPC error: should log file listing and filesystem info
+	enospc := fmt.Errorf("write failed: %w", syscall.ENOSPC)
+	LogDirOnENOSPC(enospc, dir)
+
+	// wrapped ENOSPC
+	wrapped := fmt.Errorf("outer: %w", fmt.Errorf("inner: %w", syscall.ENOSPC))
+	LogDirOnENOSPC(wrapped, dir)
+
+	// bad directory: should log warning, not panic
+	LogDirOnENOSPC(enospc, filepath.Join(dir, "nonexistent"))
 }
 
 func Test_CreateTempWithExt(t *testing.T) {
