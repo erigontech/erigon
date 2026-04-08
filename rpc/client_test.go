@@ -194,6 +194,14 @@ func TestClientBatchRequest_len(t *testing.T) {
 	})
 
 	t.Run("too-many", func(t *testing.T) {
+		// Fresh client so the first request gets ID 1, matching the server's
+		// hardcoded response IDs.
+		c2, err := Dial(s.URL, logger)
+		if err != nil {
+			t.Fatal("failed to dial test server:", err)
+		}
+		defer c2.Close()
+
 		batch := []BatchElem{
 			{Method: "foo", Result: new(json.RawMessage)},
 		}
@@ -201,8 +209,11 @@ func TestClientBatchRequest_len(t *testing.T) {
 		defer cancelFn()
 		// Server returns 2 responses for 1 request; the extra response is
 		// silently ignored and the call completes without hanging.
-		if err := client.BatchCallContext(ctx, batch); err != nil {
+		if err := c2.BatchCallContext(ctx, batch); err != nil {
 			t.Errorf("expected nil batch error but got: %v", err)
+		}
+		if batch[0].Error != nil {
+			t.Errorf("expected nil element error but got: %v", batch[0].Error)
 		}
 	})
 
