@@ -254,7 +254,7 @@ func NewBlindedBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparam
 		SyncAggregate:      NewSyncAggregateWithSize(int(beaconCfg.SyncCommitteeSize) / 8),
 		ExecutionPayload:   NewEth1Header(version),
 		ExecutionChanges:   solid.NewStaticListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172),
-		BlobKzgCommitments: solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48),
+		BlobKzgCommitments: solid.NewStaticListSSZ[*KZGCommitment](int(beaconCfg.MaxBlobCommittmentsPerBlock), 48),
 		ExecutionRequests:  executionRequests,
 		Version:            0,
 		beaconCfg:          beaconCfg,
@@ -312,7 +312,11 @@ func (b *BlindedBeaconBody) ensureNilFields() {
 		b.ExecutionChanges = solid.NewStaticListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172)
 	}
 	if b.BlobKzgCommitments == nil {
-		b.BlobKzgCommitments = solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48)
+		maxBlobCommitments := MaxBlobsCommittmentsPerBlock
+		if b.beaconCfg != nil && b.beaconCfg.MaxBlobCommittmentsPerBlock > 0 {
+			maxBlobCommitments = int(b.beaconCfg.MaxBlobCommittmentsPerBlock)
+		}
+		b.BlobKzgCommitments = solid.NewStaticListSSZ[*KZGCommitment](maxBlobCommitments, 48)
 	}
 }
 

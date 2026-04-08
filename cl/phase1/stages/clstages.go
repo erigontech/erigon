@@ -152,13 +152,9 @@ func MetaCatchingUp(args Args) StageName {
 	if !args.hasDownloaded {
 		return DownloadHistoricalBlocks
 	}
-	// If we have no peers and are behind, sleep until the next slot rather than
-	// entering sync stages that will fail. However, if we're already at the
-	// target (solo validator / genesis start), proceed to ForkChoice so the head
-	// advances and attestations can be processed.
 	// If we have no peers, skip sync stages and go directly to ForkChoice.
 	// Sync stages (ForwardSync, ChainTipSync) require peers to download blocks
-	// and will just timeout. ForkChoice still needs to run to advance the head
+	// and will just timeout. ForkChoice still needs to run so the head advances
 	// from blocks received via the beacon API (solo validator / single node).
 	if args.peers == 0 {
 		return ""

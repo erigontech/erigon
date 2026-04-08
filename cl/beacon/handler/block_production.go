@@ -1373,6 +1373,7 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	// during block production (especially on minimal preset with rapid epoch
 	// boundaries), causing VerifyBlockSignature to fail.
 	// TODO: fix the root cause in state replay so fullValidation can be re-enabled.
+	log.Warn("Skipping full validation for locally-produced block", "slot", block.Block.Slot, "proposer", block.Block.ProposerIndex)
 	if err := a.forkchoiceStore.OnBlock(ctx, block, true, false, false); err != nil {
 		return err
 	}

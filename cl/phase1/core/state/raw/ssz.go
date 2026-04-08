@@ -187,14 +187,9 @@ func (b *BeaconState) EncodingSizeSSZ() (size int) {
 	size += b.historicalSummaries.EncodingSizeSSZ()
 
 	if b.version >= clparams.ElectraVersion {
-		// 6 uint64 fields
-		size += 6 * 8
 		size += b.pendingDeposits.EncodingSizeSSZ()
 		size += b.pendingPartialWithdrawals.EncodingSizeSSZ()
 		size += b.pendingConsolidations.EncodingSizeSSZ()
-	}
-	if b.version >= clparams.FuluVersion {
-		size += b.proposerLookahead.EncodingSizeSSZ()
 	}
 	return
 }
