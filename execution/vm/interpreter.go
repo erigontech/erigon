@@ -495,6 +495,16 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			fmt.Printf("%d (%d.%d) %5d %5d %s\n", blockNum, txIndex, txIncarnation, pc, traceGas(op, callGas, cost), opstr)
 		}
 
+		// debug: log expensive opcodes for target block/tx
+		if evm.Context.BlockNumber == 24809877 {
+			txIdx := evm.intraBlockState.TxIndex()
+			if txIdx == 63 || txIdx == 72 {
+				if cost > 100 {
+					log.Debug("[op debug] opcode gas", "block", evm.Context.BlockNumber, "txIdx", txIdx, "contract", callContext.Address(), "pc", pc, "op", op, "cost", cost)
+				}
+			}
+		}
+
 		// execute the operation
 		pc, res, err = operation.execute(pc, evm, callContext)
 

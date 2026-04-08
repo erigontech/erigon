@@ -234,10 +234,16 @@ func gasEip2929AccountCheck(evm *EVM, callContext *CallContext, scopeGas mdgas.M
 		if evm.Context.BlockNumber == 24809877 {
 			txIdx := evm.IntraBlockState().TxIndex()
 			if txIdx == 63 || txIdx == 72 {
-				log.Debug("[acct debug] cold account check (EXT*)", "block", evm.Context.BlockNumber, "txIdx", txIdx, "caller", callContext.Address(), "addr", addr, "gas", params.ColdAccountAccessCostEIP2929-params.WarmStorageReadCostEIP2929)
+				log.Debug("[acct debug] cold EXT*/BALANCE", "block", evm.Context.BlockNumber, "txIdx", txIdx, "caller", callContext.Address(), "addr", addr, "extra", params.ColdAccountAccessCostEIP2929-params.WarmStorageReadCostEIP2929)
 			}
 		}
 		return mdgas.MdGas{Regular: params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929}, nil
+	}
+	if evm.Context.BlockNumber == 24809877 {
+		txIdx := evm.IntraBlockState().TxIndex()
+		if txIdx == 63 || txIdx == 72 {
+			log.Debug("[acct debug] warm EXT*/BALANCE", "block", evm.Context.BlockNumber, "txIdx", txIdx, "caller", callContext.Address(), "addr", addr, "extra", 0)
+		}
 	}
 	return mdgas.MdGas{}, nil
 }
