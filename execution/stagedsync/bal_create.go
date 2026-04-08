@@ -79,8 +79,9 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, ams
 	// BAL data may not be stored for blocks downloaded via backward
 	// block downloader (p2p sync) since it does not carry BAL sidecars.
 	// Remove after eth/71 has been implemented.
+	var dbBAL types.BlockAccessList
 	if dbBALBytes != nil {
-		dbBAL, err := types.DecodeBlockAccessListBytes(dbBALBytes)
+		dbBAL, err = types.DecodeBlockAccessListBytes(dbBALBytes)
 		if err != nil {
 			return fmt.Errorf("block %d: read stored block access list: %w", blockNum, err)
 		}
@@ -100,12 +101,10 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, ams
 	// execution can produce slightly different storage reads than sequential
 	// execution, so when the stored BAL matches the header, trust it.
 	if headerBALHash != bal.Hash() {
-		if dbBALBytes != nil {
-			if dbBAL2, decErr := types.DecodeBlockAccessListBytes(dbBALBytes); decErr == nil && dbBAL2 != nil && dbBAL2.Hash() == headerBALHash {
-				log.Debug("BAL: computed BAL differs from stored/header, trusting stored BAL",
-					"block", blockNum, "computedHash", bal.Hash(), "headerHash", headerBALHash)
-				return nil
-			}
+		if dbBAL != nil && dbBAL.Hash() == headerBALHash {
+			log.Debug("BAL: computed BAL differs from stored/header, trusting stored BAL",
+				"block", blockNum, "computedHash", bal.Hash(), "headerHash", headerBALHash)
+			return nil
 		}
 		if dataDir != "" {
 			balDir := filepath.Join(dataDir, "bal")
@@ -116,12 +115,9 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, ams
 				if err := os.WriteFile(computedPath, []byte(bal.DebugString()), 0o644); err != nil {
 					log.Warn("failed to write computed BAL debug file", "path", computedPath, "err", err)
 				}
-				dbBAL2, err := types.DecodeBlockAccessListBytes(dbBALBytes)
-				if err != nil {
-					log.Warn("failed to decode stored BAL for debug dump", "err", err)
-				} else if dbBAL2 != nil {
+				if dbBAL != nil {
 					storedPath := filepath.Join(balDir, fmt.Sprintf("stored_bal_%d.txt", blockNum))
-					if err := os.WriteFile(storedPath, []byte(dbBAL2.DebugString()), 0o644); err != nil {
+					if err := os.WriteFile(storedPath, []byte(dbBAL.DebugString()), 0o644); err != nil {
 						log.Warn("failed to write stored BAL debug file", "path", storedPath, "err", err)
 					}
 				}

@@ -1146,6 +1146,7 @@ func (result *execResult) finalizeSystemTx(
 	if err := ibs.ApplyVersionedWrites(result.TxOut); err != nil {
 		return nil, nil, nil, err
 	}
+	ibs.ResetVersionedReads() // Clear spurious reads from ApplyVersionedWrites
 	ibs.SetTrace(txTask.Trace)
 
 	if err := ibs.FinalizeTx(rules, stateWriter); err != nil {
