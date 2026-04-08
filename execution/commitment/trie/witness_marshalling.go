@@ -165,7 +165,13 @@ func (w *OperatorMarshaller) GetStats() *BlockWitnessStats {
 // wire format for the OperatorMarshaller CBOR stream, originally derived
 // from polygon zkevm. It is NOT the Ethereum yellow-paper compact encoding.
 //
-// Bit layout of the first byte:
+// Legacy corner case: inputs of length < 2 (empty or a single nibble) are
+// returned as-is with no header byte prepended. In that case the bit layout
+// described below does not apply, and the round-trip via witnessKeyBytesToNibbles
+// mirrors the same short-circuit. This behavior is preserved for wire-format
+// compatibility with existing witnesses.
+//
+// Bit layout of the first byte (only for inputs of length >= 2):
 //
 //	bit 0: parity (1 if the nibble count is odd)
 //	bit 1: terminator flag
