@@ -1034,7 +1034,7 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	}
 
 	gas := scope.Gas()
-	if salt != nil || evm.ChainRules().IsTangerineWhistle {
+	if evm.ChainRules().IsTangerineWhistle {
 		gas.Regular -= gas.Regular / 64
 	}
 
@@ -1053,7 +1053,7 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	// ignore this error and pretend the operation was successful.
 	var result uint256.Int
 	if suberr != nil {
-		if salt == nil && !evm.ChainRules().IsHomestead && suberr == ErrCodeStoreOutOfGas {
+		if !evm.ChainRules().IsHomestead && suberr == ErrCodeStoreOutOfGas {
 			addrVal := addr.Value()
 			result.SetBytes(addrVal[:])
 		}
