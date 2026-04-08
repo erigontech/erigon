@@ -2963,12 +2963,19 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
+	logger.Info("Prune before state snapshots building")
+	if err := db.Update(ctx, func(tx kv.RwTx) error {
+		_, err = tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, 30*time.Second)
+		return err
+	}); err != nil {
+		return err
+	}
 	logger.Info("Build state history snapshots")
 	if err = agg.BuildFiles(lastTxNum); err != nil {
 		return err
 	}
 
-	logger.Info("Prune state history")
+	logger.Info("Prune after state snapshots building")
 	for hasMoreToPrune := true; hasMoreToPrune; {
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
 			hasMoreToPrune, err = tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, 30*time.Second)
