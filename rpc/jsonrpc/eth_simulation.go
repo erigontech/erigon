@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"math"
 	"math/big"
-	"sync/atomic"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -758,18 +757,8 @@ func (s *simulator) simulateCall(
 	// It is possible to override precompiles with EVM bytecode or move them to another address.
 	evm.SetPrecompiles(precompiles)
 
-	done := make(chan struct{})
-	defer close(done)
-
-	var timedOut atomic.Bool
-	go func() {
-		select {
-		case <-ctx.Done():
-			timedOut.Store(true)
-			evm.Cancel()
-		case <-done:
-		}
-	}()
+	stop := context.AfterFunc(ctx, evm.Cancel)
+	defer stop()
 
 	s.gasPool.AddBlobGas(msg.BlobGas())
 	result, err := protocol.ApplyMessage(evm, msg, s.gasPool, true, false, s.engine)
@@ -777,8 +766,7 @@ func (s *simulator) simulateCall(
 		return nil, nil, nil, txValidationError(err)
 	}
 
-	// If the timer caused an abort, return an appropriate error message
-	if timedOut.Load() {
+	if evm.Cancelled() {
 		return nil, nil, nil, fmt.Errorf("execution aborted (timeout = %v)", s.evmCallTimeout)
 	}
 	*cumulativeGasUsed += result.ReceiptGasUsed
