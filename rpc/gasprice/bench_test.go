@@ -54,7 +54,7 @@ func newTestBackendN(tb testing.TB, n int) *execmoduletester.ExecModuleTester {
 	// Use MaxInt64 × 100 to cover the largest benchmark (200 blocks).
 	balance := new(big.Int).Mul(big.NewInt(math.MaxInt64), big.NewInt(100))
 	gspec := &types.Genesis{
-		Config: chain.TestChainConfig,
+		Config: chain.AllProtocolChanges,
 		Alloc:  types.GenesisAlloc{addr: {Balance: balance}},
 	}
 	signer := types.LatestSigner(gspec.Config)
