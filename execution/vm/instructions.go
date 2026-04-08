@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -991,19 +992,21 @@ func opCreate(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		offset = scope.Stack.pop()
 		size   = scope.Stack.peek()
 		input  = scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
-		gas    = scope.Gas()
 	)
-	if evm.ChainRules().IsTangerineWhistle {
-		gas.Regular -= gas.Regular / 64
+
+	if evm.ChainRules().IsAmsterdam {
+		// EIP-8037: charge state gas for account creation after the static-context
+		// check so that it is not consumed on early failures where no state is
+		// created (per execution-specs#2608).
+		stateGas := uint64(params.StateBytesNewAccount) * evm.Context.CostPerStateByte
+		if !scope.useMdGas(evm, stateGas, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeIgnored) {
+			return pc, nil, ErrOutOfGas
+		}
 	}
 
-	// EIP-7954: check initcode size after gas is charged (by the dynamic gas
-	// function) but before execution. This ensures GAS_CREATE state gas is
-	// always consumed while oversized initcode aborts the caller's frame.
-	if evm.ChainRules().IsAmsterdam {
-		if err := CheckMaxInitCodeSize(uint64(len(input)), evm.ChainRules().IsShanghai, evm.ChainRules().IsAmsterdam); err != nil {
-			return pc, nil, err
-		}
+	gas := scope.Gas()
+	if evm.ChainRules().IsTangerineWhistle {
+		gas.Regular -= gas.Regular / 64
 	}
 
 	// reuse size int for stackvalue
@@ -1058,20 +1061,21 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 		offset, size = scope.Stack.pop(), scope.Stack.pop()
 		salt         = scope.Stack.pop()
 		input        = scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
-		gas          = scope.Gas()
 	)
 
-	// Apply EIP150
-	gas.Regular -= gas.Regular / 64
-
-	// EIP-7954: check initcode size after gas is charged (by the dynamic gas
-	// function) but before execution. This ensures GAS_CREATE state gas is
-	// always consumed while oversized initcode aborts the caller's frame.
 	if evm.ChainRules().IsAmsterdam {
-		if err := CheckMaxInitCodeSize(uint64(len(input)), evm.ChainRules().IsShanghai, evm.ChainRules().IsAmsterdam); err != nil {
-			return pc, nil, err
+		// EIP-8037: charge state gas for account creation after the static-context
+		// check so that it is not consumed on early failures where no state is
+		// created (per execution-specs#2608).
+		stateGas := uint64(params.StateBytesNewAccount) * evm.Context.CostPerStateByte
+		if !scope.useMdGas(evm, stateGas, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeIgnored) {
+			return pc, nil, ErrOutOfGas
 		}
 	}
+
+	gas := scope.Gas()
+	// Apply EIP150
+	gas.Regular -= gas.Regular / 64
 
 	scope.useGas(gas.Regular, evm.Config().Tracer, tracing.GasChangeCallContractCreation2)
 	// reuse size int for stackvalue
