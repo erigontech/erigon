@@ -17,10 +17,14 @@
 package cltypes
 
 import (
+	"encoding/hex"
+	"encoding/json"
+
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 /*
@@ -76,17 +80,40 @@ func (a *SignedAggregateAndProof) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(a.Message, a.Signature[:])
 }
 
+// Default mainnet sync committee bits size in bytes (512 / 8).
+const defaultSyncCommitteeBitsSize = 64
+
 /*
  * SyncAggregate, Determines successful committee, bits shows active participants,
  * and signature is the aggregate BLS signature of the committee.
+ * The bits length equals SYNC_COMMITTEE_SIZE / 8 (64 bytes for mainnet, 4 bytes for minimal).
+ *
+ * IMPORTANT: Always construct via NewSyncAggregate() or NewSyncAggregateWithSize().
+ * Zero-value (&SyncAggregate{}) is not valid — SSZ methods require initialized bits.
  */
 type SyncAggregate struct {
-	SyncCommiteeBits      common.Bytes64 `json:"sync_committee_bits"`
-	SyncCommiteeSignature common.Bytes96 `json:"sync_committee_signature"`
+	SyncCommiteeBits      []byte         `json:"-"`
+	SyncCommiteeSignature common.Bytes96 `json:"-"`
 }
 
 func NewSyncAggregate() *SyncAggregate {
-	return &SyncAggregate{}
+	return NewSyncAggregateWithSize(defaultSyncCommitteeBitsSize)
+}
+
+// NewSyncAggregateWithSize creates a SyncAggregate with the given bits size in bytes.
+func NewSyncAggregateWithSize(bitsSize int) *SyncAggregate {
+	return &SyncAggregate{
+		SyncCommiteeBits: make([]byte, bitsSize),
+	}
+}
+
+// assertBitsInitialized panics if SyncCommiteeBits has not been initialized.
+// All SyncAggregate instances must be created via NewSyncAggregate() or
+// NewSyncAggregateWithSize(), never as bare &SyncAggregate{} literals.
+func (agg *SyncAggregate) assertBitsInitialized() {
+	if len(agg.SyncCommiteeBits) == 0 {
+		panic("SyncAggregate: SyncCommiteeBits not initialized — use NewSyncAggregate() or NewSyncAggregateWithSize()")
+	}
 }
 
 // return sum of the committee bits
@@ -103,14 +130,15 @@ func (agg *SyncAggregate) Sum() int {
 }
 
 func (agg *SyncAggregate) IsSet(idx uint64) bool {
-	if idx >= 2048 {
+	if idx/8 >= uint64(len(agg.SyncCommiteeBits)) {
 		return false
 	}
 	return agg.SyncCommiteeBits[idx/8]&(1<<(idx%8)) > 0
 }
 
 func (agg *SyncAggregate) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:])
+	agg.assertBitsInitialized()
+	return ssz2.MarshalSSZ(buf, agg.SyncCommiteeBits, agg.SyncCommiteeSignature[:])
 }
 
 func (*SyncAggregate) Static() bool {
@@ -118,14 +146,55 @@ func (*SyncAggregate) Static() bool {
 }
 
 func (agg *SyncAggregate) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:])
+	agg.assertBitsInitialized()
+	bitsSize := len(agg.SyncCommiteeBits)
+	if len(buf) < bitsSize+96 {
+		return ssz.ErrLowBufferSize
+	}
+	agg.SyncCommiteeBits = make([]byte, bitsSize)
+	copy(agg.SyncCommiteeBits, buf[:bitsSize])
+	copy(agg.SyncCommiteeSignature[:], buf[bitsSize:bitsSize+96])
+	return nil
 }
 
 func (agg *SyncAggregate) EncodingSizeSSZ() int {
-	return 160
+	agg.assertBitsInitialized()
+	return len(agg.SyncCommiteeBits) + 96
 }
 
 func (agg *SyncAggregate) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:])
+	agg.assertBitsInitialized()
+	return merkle_tree.HashTreeRoot(agg.SyncCommiteeBits, agg.SyncCommiteeSignature[:])
+}
 
+func (agg *SyncAggregate) MarshalJSON() ([]byte, error) {
+	agg.assertBitsInitialized()
+	return json.Marshal(struct {
+		SyncCommiteeBits      string         `json:"sync_committee_bits"`
+		SyncCommiteeSignature common.Bytes96 `json:"sync_committee_signature"`
+	}{
+		SyncCommiteeBits:      "0x" + hex.EncodeToString(agg.SyncCommiteeBits),
+		SyncCommiteeSignature: agg.SyncCommiteeSignature,
+	})
+}
+
+func (agg *SyncAggregate) UnmarshalJSON(input []byte) error {
+	var tmp struct {
+		SyncCommiteeBits      string         `json:"sync_committee_bits"`
+		SyncCommiteeSignature common.Bytes96 `json:"sync_committee_signature"`
+	}
+	if err := json.Unmarshal(input, &tmp); err != nil {
+		return err
+	}
+	s := tmp.SyncCommiteeBits
+	if len(s) >= 2 && s[:2] == "0x" {
+		s = s[2:]
+	}
+	bits, err := hex.DecodeString(s)
+	if err != nil {
+		return err
+	}
+	agg.SyncCommiteeBits = bits
+	agg.SyncCommiteeSignature = tmp.SyncCommiteeSignature
+	return nil
 }
