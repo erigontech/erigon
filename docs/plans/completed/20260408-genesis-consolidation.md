@@ -257,10 +257,10 @@ Scope is **medium** (scope B from brainstorm). Explicit non-goals: BorJSON asymm
 
 ### Task 12: Final — documentation & close-out
 
-- [ ] no README or CLAUDE.md update needed (this is an internal refactor with no user-visible API change)
-- [ ] add a brief comment on `rawdb.GenesisBundle` explaining the "bundle" contract and what is deliberately excluded (TxNums, DatabaseInfo, stages progress)
-- [ ] add a brief comment on `genesiswrite.Options` explaining the fresh-vs-existing branching
-- [ ] move this plan to `docs/plans/completed/`
+- [x] no README or CLAUDE.md update needed (this is an internal refactor with no user-visible API change)
+- [x] add a brief comment on `rawdb.GenesisBundle` explaining the "bundle" contract and what is deliberately excluded (TxNums, DatabaseInfo, stages progress) — already present at `db/rawdb/accessors_metadata.go:119-132`
+- [x] add a brief comment on `genesiswrite.Options` explaining the fresh-vs-existing branching — already present at `execution/state/genesiswrite/genesis_write.go:79-90`
+- [x] move this plan to `docs/plans/completed/`
 
 ## Technical Details
 
