@@ -174,7 +174,7 @@ func (et *KsmEonTracker) handleBlockEvent(blockEvent BlockEvent) error {
 	blockNum := blockEvent.LatestBlockNum
 	eon, ok, err := et.readEonAtNewBlockEvent(blockNum)
 	if err != nil {
-		return fmt.Errorf("read eon at new block event: %w", err)
+		return fmt.Errorf("read eon at block event (blockNum=%d): %w", blockNum, err)
 	}
 	if !ok {
 		et.logger.Warn("no eon at", "blockNum", blockNum)
@@ -370,15 +370,17 @@ func (et *KsmEonTracker) handleKeyperSetAddedEvent(event *contracts.KeyperSetMan
 		return nil
 	}
 
+	// eth_call is overlay-aware, so contract reads see uncommitted block
+	// data via the overlay. Process the event directly.
 	eon, ok, err := et.readEonAtKeyperSetAddedEvent(event)
 	if err != nil {
-		return fmt.Errorf("read eon at keyper set added event: %w", err)
+		et.logger.Warn("failed to read eon at keyper set added event", "eon", event.Eon, "err", err)
+		return nil
 	}
 	if !ok {
 		et.logger.Warn("no eon at keyper set added event", "eon", event.Eon)
 		return nil
 	}
-
 	et.recentEons.ReplaceOrInsert(eon)
 	return nil
 }

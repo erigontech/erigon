@@ -636,16 +636,33 @@ func (iit *InvertedIndexRoTx) recentIterateRange(key []byte, startTxNum, endTxNu
 		}
 	}
 
+	// Adjust DB query bounds to exclude the range already covered by files.
+	// RangeDupSort semantics: asc=[from,to), desc=(to,from].
+	// Files cover [0, filesEndTxNum).
+	// Asc:  DB should cover [filesEndTxNum, endTxNum) — adjust inclusive lower bound.
+	// Desc: DB should cover (filesEndTxNum-1, startTxNum] — adjust exclusive lower bound.
+	//       filesEndTxNum-1 because `to` is exclusive, so value > (filesEndTxNum-1) ≡ value >= filesEndTxNum.
+	dbStartTxNum := startTxNum
+	dbEndTxNum := endTxNum
+	if len(iit.files) > 0 {
+		filesEndTxNum := int(iit.files.EndTxNum())
+		if asc {
+			dbStartTxNum = max(dbStartTxNum, filesEndTxNum)
+		} else {
+			dbEndTxNum = max(dbEndTxNum, filesEndTxNum-1)
+		}
+	}
+
 	var from []byte
-	if startTxNum >= 0 {
+	if dbStartTxNum >= 0 {
 		from = make([]byte, 8)
-		binary.BigEndian.PutUint64(from, uint64(startTxNum))
+		binary.BigEndian.PutUint64(from, uint64(dbStartTxNum))
 	}
 
 	var to []byte
-	if endTxNum >= 0 {
+	if dbEndTxNum >= 0 {
 		to = make([]byte, 8)
-		binary.BigEndian.PutUint64(to, uint64(endTxNum))
+		binary.BigEndian.PutUint64(to, uint64(dbEndTxNum))
 	}
 	it, err := roTx.RangeDupSort(iit.ii.ValuesTable, key, from, to, asc, limit)
 	if err != nil {
