@@ -181,10 +181,10 @@ Scope is **medium** (scope B from brainstorm). Explicit non-goals: BorJSON asymm
 - Modify: `execution/engineapi/engineapitester/engine_api_tester.go`
 - Modify: `execution/execmodule/execmoduletester/exec_module_tester.go`
 
-- [ ] `engine_api_tester.go:204`: replace `genesiswrite.CommitGenesisBlock(chainDB, genesis, networkname.Mainnet, ethNode.Config().Dirs, logger)` with `genesiswrite.CommitGenesis(ctx, chainDB, genesiswrite.Options{Genesis: genesis, ChainName: networkname.Mainnet, Dirs: ethNode.Config().Dirs, Logger: logger})`
-- [ ] `exec_module_tester.go:485`: replace `genesiswrite.CommitGenesisBlock(mock.DB, gspec, "", datadir.New(tmpdir), mock.Log)` with `genesiswrite.CommitGenesis(context.Background(), mock.DB, genesiswrite.Options{Genesis: gspec, Dirs: datadir.New(tmpdir), Logger: mock.Log})`
-- [ ] run the downstream tests that use these harnesses: `go test ./execution/engineapi/...` and `go test ./execution/execmodule/...` — must pass before task 7
-- [ ] run `make lint`
+- [x] `engine_api_tester.go:204`: replace `genesiswrite.CommitGenesisBlock(chainDB, genesis, networkname.Mainnet, ethNode.Config().Dirs, logger)` with `genesiswrite.CommitGenesis(ctx, chainDB, genesiswrite.Options{Genesis: genesis, ChainName: networkname.Mainnet, Dirs: ethNode.Config().Dirs, Logger: logger})`
+- [x] `exec_module_tester.go:485`: replace `genesiswrite.CommitGenesisBlock(mock.DB, gspec, "", datadir.New(tmpdir), mock.Log)` with `genesiswrite.CommitGenesis(context.Background(), mock.DB, genesiswrite.Options{Genesis: gspec, Dirs: datadir.New(tmpdir), Logger: mock.Log})` (used local `ctx` in scope instead of `context.Background()`)
+- [x] run the downstream tests that use these harnesses: `go test ./execution/engineapi/...` and `go test ./execution/execmodule/...` — must pass before task 7 (required a related fix in `CommitGenesisTx`: derive TD from `block.Difficulty()` rather than `g.Difficulty.ToBig()`, so callers with nil `g.Difficulty` don't trip the new strict nil check in `WriteGenesisBundle`. `CommitGenesisTxWithPrecomputedBlock` received the same fix for consistency.)
+- [x] run `make lint`
 
 ### Task 7: Migrate `aura_test.go` to `CommitGenesisTxWithPrecomputedBlock`
 

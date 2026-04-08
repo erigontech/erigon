@@ -210,11 +210,15 @@ func CommitGenesisTx(tx kv.RwTx, opts Options) (*chain.Config, *types.Block, err
 		if err != nil {
 			return g.Config, nil, err
 		}
+		// Derive TD from the block header, not g.Difficulty: GenesisWithoutStateToBlock
+		// defaults the header difficulty from params.GenesisDifficulty when g.Difficulty
+		// is nil, so block.Difficulty is always valid while g.Difficulty.ToBig() may be nil.
+		blockDifficulty := block.Difficulty()
 		if err := writeFreshGenesisDB(tx, &rawdb.GenesisBundle{
 			Genesis: g,
 			Config:  g.Config,
 			Block:   block,
-			TD:      g.Difficulty.ToBig(),
+			TD:      blockDifficulty.ToBig(),
 		}); err != nil {
 			return g.Config, nil, err
 		}
@@ -322,11 +326,12 @@ func CommitGenesisTxWithPrecomputedBlock(tx kv.RwTx, opts Options, block *types.
 	if err := g.Config.CheckConfigForkOrder(); err != nil {
 		return g.Config, nil, err
 	}
+	blockDifficulty := block.Difficulty()
 	if err := writeFreshGenesisDB(tx, &rawdb.GenesisBundle{
 		Genesis: g,
 		Config:  g.Config,
 		Block:   block,
-		TD:      g.Difficulty.ToBig(),
+		TD:      blockDifficulty.ToBig(),
 	}); err != nil {
 		return g.Config, nil, err
 	}

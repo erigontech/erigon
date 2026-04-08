@@ -201,7 +201,12 @@ func InitialiseEngineApiTester(t testing.TB, args EngineApiTesterInitArgs) Engin
 	chainDB, err := node.OpenDatabase(ctx, ethNode.Config(), dbcfg.ChainDB, "", false, logger)
 	require.NoError(t, err)
 	t.Cleanup(chainDB.Close)
-	_, genesisBlock, err := genesiswrite.CommitGenesisBlock(chainDB, genesis, networkname.Mainnet, ethNode.Config().Dirs, logger)
+	_, genesisBlock, err := genesiswrite.CommitGenesis(ctx, chainDB, genesiswrite.Options{
+		Genesis:   genesis,
+		ChainName: networkname.Mainnet,
+		Dirs:      ethNode.Config().Dirs,
+		Logger:    logger,
+	})
 	require.NoError(t, err)
 	chainDB.Close()
 
