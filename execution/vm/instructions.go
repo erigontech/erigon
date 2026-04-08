@@ -1045,17 +1045,7 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	scope.useGas(gas.Regular, evm.Config().Tracer, gasChangeReason)
 	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
 
-	var (
-		res       []byte
-		addr      accounts.Address
-		returnGas mdgas.MdGas
-		suberr    error
-	)
-	if salt != nil {
-		res, addr, returnGas, suberr = evm.Create2(scope.Contract.Address(), input, gas, value, salt, false)
-	} else {
-		res, addr, returnGas, suberr = evm.Create(scope.Contract.Address(), input, gas, value, false)
-	}
+	res, addr, returnGas, suberr := evm.Create(scope.Contract.Address(), input, gas, value, salt, false)
 
 	// Push item on the stack based on the returned error. If the ruleset is
 	// homestead we must check for CodeStoreOutOfGasError (homestead only
