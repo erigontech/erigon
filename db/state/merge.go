@@ -1105,3 +1105,12 @@ func (r Ranges) any() bool {
 	}
 	return false
 }
+
+func (r Ranges) anyDomainValues() bool {
+	for _, d := range &r.domain {
+		if d.values.needMerge {
+			return true
+		}
+	}
+	return false
+}
