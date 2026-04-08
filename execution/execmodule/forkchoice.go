@@ -516,10 +516,11 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				return nil, fmt.Errorf("updateForkChoice: tx commit after hasMore: %w", err)
 			}
 			// Recreate RO tx + block overlay on the fresh committed state.
-			roTx, err = e.db.BeginTemporalRo(ctx) //nolint:gocritic
+			newRoTx, err := e.db.BeginTemporalRo(ctx) //nolint:gocritic
 			if err != nil {
 				return nil, fmt.Errorf("updateForkChoice: begin ro after hasMore: %w", err)
 			}
+			roTx = newRoTx
 			if err := sd.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
 				roTx.Rollback()
 				return nil, fmt.Errorf("updateForkChoice: init overlay after hasMore: %w", err)
