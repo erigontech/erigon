@@ -22,7 +22,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/state/genesiswrite"
+	"github.com/erigontech/erigon/execution/state/genesiswrite/genesistest"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -599,8 +599,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 		gspecNoFork  = &types.Genesis{Config: configNoFork}
 		gspecProFork = &types.Genesis{Config: configProFork}
 
-		genesisNoFork  = genesiswrite.MustCommitGenesis(gspecNoFork, dbNoFork, datadir.New(t.TempDir()), log.Root())
-		genesisProFork = genesiswrite.MustCommitGenesis(gspecProFork, dbProFork, datadir.New(t.TempDir()), log.Root())
+		genesisNoFork  = genesistest.MustCommitGenesis(t, gspecNoFork, dbNoFork, datadir.New(t.TempDir()), log.Root())
+		genesisProFork = genesistest.MustCommitGenesis(t, gspecProFork, dbProFork, datadir.New(t.TempDir()), log.Root())
 	)
 
 	var s1, s2 *GrpcServer
@@ -688,7 +688,7 @@ func TestSentryServerImpl_SetStatusInitPanic(t *testing.T) {
 	configNoFork := &chain.Config{HomesteadBlock: common.NewUint64(1), ChainID: big.NewInt(1)}
 	dbNoFork := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	gspecNoFork := &types.Genesis{Config: configNoFork}
-	genesisNoFork := genesiswrite.MustCommitGenesis(gspecNoFork, dbNoFork, datadir.New(t.TempDir()), log.Root())
+	genesisNoFork := genesistest.MustCommitGenesis(t, gspecNoFork, dbNoFork, datadir.New(t.TempDir()), log.Root())
 	ss := &GrpcServer{p2p: &p2p.Config{}}
 
 	_, err := ss.SetStatus(context.Background(), &sentryproto.StatusData{

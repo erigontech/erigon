@@ -207,10 +207,10 @@ Scope is **medium** (scope B from brainstorm). Explicit non-goals: BorJSON asymm
 **Files:**
 - Modify: `p2p/sentry/sentry_grpc_server_test.go`
 
-- [ ] replace the 3 occurrences of `genesiswrite.MustCommitGenesis(gspec, db, datadir.New(t.TempDir()), log.Root())` at lines 602, 603, 691 with `genesistest.MustCommitGenesis(t, gspec, db, datadir.New(t.TempDir()), log.Root())`
-- [ ] add import for the new `genesistest` package
-- [ ] run `go test ./p2p/sentry/...` — must pass before task 9
-- [ ] run `make lint`
+- [x] replace the 3 occurrences of `genesiswrite.MustCommitGenesis(gspec, db, datadir.New(t.TempDir()), log.Root())` at lines 602, 603, 691 with `genesistest.MustCommitGenesis(t, gspec, db, datadir.New(t.TempDir()), log.Root())`
+- [x] add import for the new `genesistest` package (replaced the now-unused `genesiswrite` import)
+- [x] run `go test ./p2p/sentry/...` — must pass before task 9
+- [x] run `make lint`
 
 ### Task 9: Rewrite `execution/state/genesiswrite/genesis_test.go`
 
