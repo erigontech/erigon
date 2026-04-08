@@ -98,7 +98,7 @@ func genTestChainOnce(t *testing.T) {
 	testChainOnce.Do(func() {
 		addresses := makeTestAddresses()
 		gspec := &types.Genesis{
-			Config: chain.TestChainConfig,
+			Config: chain.TestChainBerlinConfig,
 			Alloc: types.GenesisAlloc{
 				addresses.address:  {Balance: big.NewInt(9000000000000000000)},
 				addresses.address1: {Balance: big.NewInt(200000000000000000)},
@@ -129,7 +129,7 @@ func CreateTestExecModule(t *testing.T) (*execmoduletester.ExecModuleTester, *bl
 
 	addresses := makeTestAddresses()
 	gspec := &types.Genesis{
-		Config: chain.TestChainConfig,
+		Config: chain.TestChainBerlinConfig,
 		Alloc: types.GenesisAlloc{
 			addresses.address:  {Balance: big.NewInt(9000000000000000000)},
 			addresses.address1: {Balance: big.NewInt(200000000000000000)},
@@ -472,7 +472,7 @@ func CreateTestExecModuleForTraces(t *testing.T) *execmoduletester.ExecModuleTes
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
-			Config: chain.TestChainConfig,
+			Config: chain.TestChainBerlinConfig,
 			Alloc: types.GenesisAlloc{
 				address: {Balance: funds},
 				// The address 0x00ff
@@ -630,7 +630,7 @@ func CreateTestExecModuleForTracesCollision(t *testing.T) *execmoduletester.Exec
 	t.Logf("Destination address: %x\n", aa)
 
 	gspec := &types.Genesis{
-		Config: chain.TestChainConfig,
+		Config: chain.TestChainBerlinConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
