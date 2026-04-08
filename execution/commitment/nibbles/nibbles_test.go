@@ -23,6 +23,8 @@ import (
 	"bytes"
 	"math/rand"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestHexToCompact(t *testing.T) {
@@ -101,6 +103,50 @@ func TestHexCompactRoundtrip(t *testing.T) {
 		if !bytes.Equal(got, hex) {
 			t.Fatalf("roundtrip failed: input=%x compact=%x got=%x", hex, compact, got)
 		}
+	}
+}
+
+func TestCommonPrefixLen(t *testing.T) {
+	tests := []struct {
+		name string
+		a, b []byte
+		want int
+	}{
+		{name: "both empty", a: []byte{}, b: []byte{}, want: 0},
+		{name: "a empty, b non-empty", a: []byte{}, b: []byte{1, 2, 3}, want: 0},
+		{name: "a non-empty, b empty", a: []byte{1, 2, 3}, b: []byte{}, want: 0},
+		{name: "equal slices", a: []byte{1, 2, 3, 4}, b: []byte{1, 2, 3, 4}, want: 4},
+		{name: "no common prefix", a: []byte{1, 2, 3}, b: []byte{4, 5, 6}, want: 0},
+		{name: "partial prefix", a: []byte{1, 2, 3, 4}, b: []byte{1, 2, 9, 9}, want: 2},
+		{name: "a is prefix of b", a: []byte{1, 2, 3}, b: []byte{1, 2, 3, 4, 5}, want: 3},
+		{name: "b is prefix of a", a: []byte{1, 2, 3, 4, 5}, b: []byte{1, 2, 3}, want: 3},
+		{name: "single byte equal", a: []byte{7}, b: []byte{7}, want: 1},
+		{name: "single byte differing", a: []byte{7}, b: []byte{8}, want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, CommonPrefixLen(tt.a, tt.b))
+		})
+	}
+}
+
+func TestHasTerm(t *testing.T) {
+	tests := []struct {
+		name string
+		in   []byte
+		want bool
+	}{
+		{name: "empty", in: []byte{}, want: false},
+		{name: "ends with terminator", in: []byte{1, 2, 3, Terminator}, want: true},
+		{name: "ends with 0x0f", in: []byte{1, 2, 3, 0x0f}, want: false},
+		{name: "ends with 0x00", in: []byte{1, 2, 3, 0x00}, want: false},
+		{name: "single terminator", in: []byte{Terminator}, want: true},
+		{name: "single non-terminator", in: []byte{0x05}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, HasTerm(tt.in))
+		})
 	}
 }
 
