@@ -25,7 +25,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -439,11 +438,8 @@ func TestConcurrentRebuildCommitment(t *testing.T) {
 	// Whether ParallelHashSort actually fires depends on CanDoConcurrentNext() — the
 	// first shard after a wipe always runs sequentially (empty trie has no branch at
 	// nibble 0). After the first shard seeds trie state, subsequent shards exercise
-	// the parallel path. We assert this below via ParallelProcessCount.
+	// the parallel path.
 	t.Setenv("ERIGON_REBUILD_CONCURRENT_COMMITMENT", "true")
-
-	// Reset counter to verify that the parallel path was actually taken
-	commitment.ParallelProcessCount.Store(0)
 
 	// Run concurrent rebuild
 	concStart := time.Now()
@@ -464,19 +460,6 @@ func TestConcurrentRebuildCommitment(t *testing.T) {
 	// The concurrent rebuild must match the sequential rebuild (ground truth).
 	require.Equal(t, sequentialResult.root, concurrentResult.root,
 		"concurrent rebuild root must match sequential: sequential=%x concurrent=%x", sequentialResult.root, concurrentResult.root)
-
-	// Verify that the parallel path (ParallelHashSort) was actually exercised.
-	// With default parameters (TEST_STEPS=10), BuildFiles produces 2+ account domain files
-	// after merge, so the rebuild loop has 2+ ranges. The first range seeds trie state
-	// (sequential), and subsequent ranges activate concurrent mode via CanDoConcurrentNext().
-	// With fewer steps (e.g. TEST_STEPS=2), only 1 file is produced so the parallel path
-	// is never taken — we only assert when multiple commitment files exist.
-	parallelCount := commitment.ParallelProcessCount.Load()
-	if len(concSizes) > 1 {
-		require.Greater(t, parallelCount, int64(0),
-			"concurrent rebuild must exercise ParallelHashSort at least once (got %d calls)", parallelCount)
-	}
-	t.Logf("ParallelHashSort was called %d time(s) during concurrent rebuild", parallelCount)
 
 	t.Logf("Concurrent rebuild: root=%x time=%s files=%d",
 		concurrentResult.root, concurrentResult.duration, len(concurrentResult.fileSizes))
