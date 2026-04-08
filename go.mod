@@ -6,7 +6,6 @@ replace github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilte
 
 require (
 	github.com/erigontech/erigon-snapshot v1.3.1-0.20260402120223-7bb412bc89cd
-	github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116
 	github.com/erigontech/mdbx-go v0.39.12
 	github.com/erigontech/secp256k1 v1.2.1-0.20260218182123-377cc1bd6410
 )
@@ -59,7 +58,7 @@ require (
 	github.com/google/gofuzz v1.2.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
-	github.com/grafana/pyroscope-go v1.2.7
+	github.com/grafana/pyroscope-go v1.2.8
 	github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.3.3
 	github.com/hashicorp/go-retryablehttp v0.7.8
 	github.com/hashicorp/golang-lru/arc/v2 v2.0.7
