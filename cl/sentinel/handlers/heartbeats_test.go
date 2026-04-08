@@ -341,7 +341,6 @@ func TestStatus(t *testing.T) {
 
 	// Create a simple HTTP handler for the handshake
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Simple handler that returns success
 		w.WriteHeader(http.StatusOK)
 	})
 

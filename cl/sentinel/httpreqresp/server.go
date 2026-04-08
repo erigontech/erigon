@@ -96,8 +96,9 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		defer stream.Close()
 		// this write deadline is not part of the eth p2p spec, but we are implying it.
 		stream.SetWriteDeadline(time.Now().Add(5 * time.Second))
+		var bytesWritten int64
 		if r.Body != nil && r.ContentLength > 0 {
-			_, err := io.Copy(stream, r.Body)
+			bytesWritten, err = io.Copy(stream, r.Body)
 			if err != nil {
 				http.Error(w, "processing Stream: "+err.Error(), http.StatusBadRequest)
 				return
@@ -113,7 +114,7 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		stream.SetReadDeadline(time.Now().Add(5 * time.Second))
 		n, err := io.ReadFull(stream, code)
 		if err != nil {
-			http.Error(w, "Read Code: "+err.Error()+", readBytes="+strconv.Itoa(n), http.StatusBadRequest)
+			http.Error(w, "Read Code: "+err.Error()+", readBytes="+strconv.Itoa(n)+", bytesWritten="+strconv.FormatInt(bytesWritten, 10)+", contentLength="+strconv.FormatInt(r.ContentLength, 10)+", topic="+topic+", peer="+peerIdBase58, http.StatusBadRequest)
 			return
 		}
 		// this is not necessary, but seems like the right thing to do
