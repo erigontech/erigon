@@ -59,6 +59,7 @@ type Generator struct {
 	engine      rules.EngineReader
 
 	commitmentReplay *rpchelper.CommitmentReplay
+	filters          *rpchelper.Filters
 }
 
 type ReceiptEnv struct {
@@ -76,7 +77,7 @@ var (
 	receiptsExecConcurrency = dbg.EnvInt("R_EXEC_CONCURRENCY", max(1, runtime.GOMAXPROCS(0)/2))
 )
 
-func NewGenerator(dirs datadir.Dirs, blockReader services.FullBlockReader, engine rules.EngineReader, stateCache kvcache.Cache, evmTimeout time.Duration) *Generator {
+func NewGenerator(dirs datadir.Dirs, blockReader services.FullBlockReader, engine rules.EngineReader, stateCache kvcache.Cache, evmTimeout time.Duration, filters ...*rpchelper.Filters) *Generator {
 	receiptsCache, err := lru.New[common.Hash, types.Receipts](receiptsCacheLimit) //TODO: is handling both of them a good idea though...?
 	if err != nil {
 		panic(err)
@@ -88,6 +89,11 @@ func NewGenerator(dirs datadir.Dirs, blockReader services.FullBlockReader, engin
 	}
 
 	txNumReader := blockReader.TxnumReader()
+
+	var f *rpchelper.Filters
+	if len(filters) > 0 {
+		f = filters[0]
+	}
 
 	return &Generator{
 		stateCache:         stateCache,
@@ -105,6 +111,7 @@ func NewGenerator(dirs datadir.Dirs, blockReader services.FullBlockReader, engin
 		execSem:        make(chan struct{}, receiptsExecConcurrency),
 
 		commitmentReplay: rpchelper.NewCommitmentReplay(dirs, txNumReader, log.Root()),
+		filters:          f,
 	}
 }
 
@@ -241,7 +248,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	var evm *vm.EVM
 	var genEnv *ReceiptEnv
 
-	err = rpchelper.CheckBlockExecuted(tx, blockNum)
+	err = rpchelper.CheckBlockExecuted(g.filters.WithOverlay(tx), blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -444,7 +451,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		return nil, ctx.Err()
 	}
 
-	err = rpchelper.CheckBlockExecuted(tx, blockNum)
+	err = rpchelper.CheckBlockExecuted(g.filters.WithOverlay(tx), blockNum)
 	if err != nil {
 		return nil, err
 	}

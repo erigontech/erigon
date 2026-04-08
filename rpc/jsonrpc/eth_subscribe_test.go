@@ -60,7 +60,7 @@ func TestEthSubscribe(t *testing.T) {
 	onNewSnapshot := func() {
 		subscriptionReadyWg.Done()
 	}
-	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, backend, nil, nil, onNewSnapshot, m.Log)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, backend, nil, nil, onNewSnapshot, m.Log, nil)
 	subscriptionReadyWg.Wait() // This is needed *before* inserting the blocks, which sends NEW_HEADER events
 	newHeads, id := ff.SubscribeNewHeads(16)
 	defer ff.UnsubscribeHeads(id)
@@ -92,7 +92,7 @@ func TestEthSubscribeReceipts(t *testing.T) {
 	onNewSnapshot := func() {
 		subscriptionReadyWg.Done()
 	}
-	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, backend, nil, nil, onNewSnapshot, m.Log)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, backend, nil, nil, onNewSnapshot, m.Log, nil)
 	subscriptionReadyWg.Wait()
 	newReceipts, id := ff.SubscribeReceipts(16, filters.ReceiptsFilterCriteria{
 		TransactionHashes: []common.Hash{},

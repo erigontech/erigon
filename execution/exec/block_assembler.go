@@ -105,6 +105,8 @@ type BlockAssembler struct {
 	gasUsed     protocol.GasUsed  // EIP-8037: cumulative per-dimension gas across AddTransactions calls
 }
 
+func (ba *BlockAssembler) CumulativeGasUsed() protocol.GasUsed { return ba.gasUsed }
+
 func NewBlockAssembler(cfg AssemblerCfg, block *AssembledBlock) *BlockAssembler {
 	var balIO *state.VersionedIO
 
@@ -172,7 +174,12 @@ func (ba *BlockAssembler) AddTransactions(
 
 	txnIdx := ibs.TxnIndex() + 1
 	header := ba.AssembledBlock.Header
-	gasPool := new(protocol.GasPool).AddGas(header.GasLimit - header.GasUsed)
+	// EIP-8037: initialize the pool from cumulative regular gas, not the
+	// bottleneck (max of regular, state) stored in header.GasUsed. This
+	// gives compute-heavy transactions access to the full regular gas
+	// budget even when state gas dominates the bottleneck. State gas is
+	// enforced in applyTransaction before FinalizeTx.
+	gasPool := new(protocol.GasPool).AddGas(header.GasLimit - ba.gasUsed.BlockRegular)
 	if header.BlobGasUsed != nil {
 		gasPool.AddBlobGas(ba.cfg.ChainConfig.GetMaxBlobGasPerBlock(header.Time) - *header.BlobGasUsed)
 	}
@@ -225,7 +232,12 @@ func (ba *BlockAssembler) AddTransactions(
 				return nil, err
 			}
 
-			header.GasUsed += aaGasUsed
+			// EIP-8037: AA txns don't go through protocol.ApplyTransaction, so
+			// update cumulative gas manually. We attribute aaGasUsed entirely to
+			// regular gas (AA has no state-gas dimension yet).
+			gasUsed.BlockRegular += aaGasUsed
+			gasUsed.Blob += txn.GetBlobGas()
+			protocol.SetGasUsed(header, gasUsed)
 			logs := ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), header.Number.Uint64(), header.Hash())
 			receipt := aa.CreateAAReceipt(txn.Hash(), status, aaGasUsed, header.GasUsed, header.Number.Uint64(), uint64(ibs.TxnIndex()), logs)
 
@@ -283,7 +295,7 @@ LOOP:
 			// ensure we run for at least 500ms after the request to stop comes in from GetPayload
 			stopped = time.NewTicker(500 * time.Millisecond)
 		}
-		// If we don't have enough gas for any further transactions then we're done
+		// If we don't have enough gas for any further transactions then we're done.
 		if gasPool.Gas() < params.TxGas {
 			logger.Debug(fmt.Sprintf("[%s] Not enough gas for further transactions", logPrefix), "have", gasPool, "want", params.TxGas)
 			done = true
