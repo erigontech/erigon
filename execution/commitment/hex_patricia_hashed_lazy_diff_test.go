@@ -210,6 +210,7 @@ func FuzzHexPatriciaHashed_LazyVsEager(f *testing.F) {
 			t.Skip("empty seed")
 		}
 		s := int64(crc32.ChecksumIEEE(seed))
-		runDifferentialFromSeed(t, s, 64, false, 3, nil)
+		withStorage := len(seed) > 1 && seed[0]%2 == 0
+		runDifferentialFromSeed(t, s, 64, withStorage, 3, nil)
 	})
 }

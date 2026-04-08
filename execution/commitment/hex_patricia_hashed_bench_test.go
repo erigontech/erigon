@@ -72,7 +72,6 @@ func Benchmark_HexPatriciaHashed_Process_Batch(b *testing.B) {
 	const keysCount = 100_000
 
 	for _, batchSize := range []int{100, 500} {
-		batchSize := batchSize
 		b.Run(fmt.Sprintf("batch=%d", batchSize), func(b *testing.B) {
 			b.SetParallelism(1)
 			rnd := rand.New(rand.NewSource(133777))
