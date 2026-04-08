@@ -278,6 +278,20 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		}
 	}
 
+	// EIP-7907: Charge code chunk access gas on first (cold) access to a contract's code
+	// within a transaction. Cost = ceil(len(code)/32) * WarmStorageReadCostEIP2929.
+	if evm.chainRules.IsOsaka && !isPrecompile && len(code) > 0 {
+		if !evm.intraBlockState.CodeInAccessList(addr) {
+			evm.intraBlockState.AddCodeToAccessList(addr)
+			codeChunks := (uint64(len(code)) + 31) / 32
+			codeChunkGas := codeChunks * params.WarmStorageReadCostEIP2929
+			if gas.Regular < codeChunkGas {
+				return nil, mdgas.MdGas{}, ErrOutOfGas
+			}
+			gas.Regular -= codeChunkGas
+		}
+	}
+
 	// Invoke tracer hooks that signal entering/exiting a call frame
 	if evm.Config().Tracer != nil {
 		evm.captureBegin(depth, typ, caller, addr, isPrecompile, input, gas, value, code)

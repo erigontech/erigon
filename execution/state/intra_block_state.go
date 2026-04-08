@@ -171,6 +171,10 @@ type IntraBlockState struct {
 	// Per-transaction access list
 	accessList accessList
 
+	// Per-transaction code access list (EIP-7907): tracks which contract codes have
+	// been accessed; unlike the address access list this is NOT reverted by call reverts.
+	codeAccessList map[accounts.Address]struct{}
+
 	// Transient storage
 	transientStorage transientStorage
 
@@ -210,6 +214,7 @@ func New(stateReader StateReader) *IntraBlockState {
 		logs:              []types.Logs{},
 		journal:           newJournal(),
 		accessList:        accessList{addresses: make(map[accounts.Address]int)},
+		codeAccessList:    make(map[accounts.Address]struct{}),
 		transientStorage:  newTransientStorage(),
 		balanceInc:        map[accounts.Address]*BalanceIncrease{},
 		addressAccess:     nil,
@@ -2122,6 +2127,8 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 	if rules.IsBerlin {
 		// Clear out any leftover from previous executions
 		sdb.accessList.Reset()
+		// Reset code access list (EIP-7907)
+		clear(sdb.codeAccessList)
 		al := &sdb.accessList
 
 		al.AddAddress(sender)
@@ -2200,6 +2207,18 @@ func (sdb *IntraBlockState) AddressInAccessList(addr accounts.Address) bool {
 
 func (sdb *IntraBlockState) SlotInAccessList(addr accounts.Address, slot accounts.StorageKey) (addressPresent bool, slotPresent bool) {
 	return sdb.accessList.Contains(addr, slot)
+}
+
+// CodeInAccessList returns true if the code for addr has been accessed in this transaction (EIP-7907).
+func (sdb *IntraBlockState) CodeInAccessList(addr accounts.Address) bool {
+	_, ok := sdb.codeAccessList[addr]
+	return ok
+}
+
+// AddCodeToAccessList marks the code for addr as accessed in this transaction (EIP-7907).
+// Unlike the address access list, code access is NOT reverted on call reverts.
+func (sdb *IntraBlockState) AddCodeToAccessList(addr accounts.Address) {
+	sdb.codeAccessList[addr] = struct{}{}
 }
 
 func (sdb *IntraBlockState) MarkAddressAccess(addr accounts.Address, revertable bool) {
