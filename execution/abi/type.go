@@ -180,7 +180,7 @@ func NewType(t string, internalType string, components []ArgumentMarshaling) (ty
 				return Type{}, err
 			}
 			if !isValidFieldName(fieldName) {
-				return Type{}, fmt.Errorf("abi: field %d has invalid name", idx)
+				return Type{}, fmt.Errorf("abi: field %d has invalid name: abi name %q normalized to go field %q", idx, c.Name, fieldName)
 			}
 			overloadedNames[fieldName] = fieldName
 			fields = append(fields, reflect.StructField{

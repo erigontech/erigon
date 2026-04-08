@@ -1178,11 +1178,10 @@ func TestCrashers(t *testing.T) {
 		`[{"inputs":[{"type":"tuple[]","components":[{"type":"bool","name":"----"}]}]}]`,
 		`[{"inputs":[{"type":"tuple[]","components":[{"type":"bool","name":"foo.Bar"}]}]}]`,
 	}
-	for i, input := range cases {
+	for _, input := range cases {
 		if _, err := JSON(strings.NewReader(input)); err == nil {
-			// Some of these may parse successfully (e.g. _1 becomes a valid camel-cased name).
+			// Some malformed names may still parse successfully after normalization.
 			// The important thing is that none of them panic.
-			_ = i
 		}
 	}
 }
