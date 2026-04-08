@@ -183,6 +183,7 @@ func (s *Sentinel) Start() (*enode.LocalNode, error) {
 		ConnectedF: s.onConnection,
 		DisconnectedF: func(n network.Network, c network.Conn) {
 			peerId := c.RemotePeer()
+			log.Trace("[Sentinel] Peer disconnected", "peer", peerId, "direction", c.Stat().Direction, "addr", c.RemoteMultiaddr())
 			s.peers.RemovePeer(peerId)
 		},
 	})
