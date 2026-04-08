@@ -282,6 +282,51 @@ func LogDirOnENOSPC(err error, dirPath string) {
 	}
 	log.Warn("[ENOSPC] dir summary", "dir", dirPath, "files", fileCount, "totalSize", byteCount(int64(totalSize)))
 	logFilesystemStats(dirPath)
+
+	// Also log snapshots dir summary — merge output files there are often the
+	// largest disk consumers during ENOSPC events.
+	snapshotsDir := filepath.Join(filepath.Dir(dirPath), "snapshots")
+	logSubdirSummary(snapshotsDir)
+}
+
+// logSubdirSummary logs a per-subdirectory summary (file count + total size)
+// for the given directory. Useful for large directories where logging every
+// file would be too noisy.
+func logSubdirSummary(dirPath string) {
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return
+	}
+	var grandTotal uint64
+	for _, e := range entries {
+		childPath := filepath.Join(dirPath, e.Name())
+		if !e.IsDir() {
+			info, infoErr := e.Info()
+			if infoErr != nil {
+				continue
+			}
+			grandTotal += uint64(info.Size())
+			log.Warn("[ENOSPC] snapshot file", "name", e.Name(), "size", byteCount(info.Size()))
+			continue
+		}
+		children, readErr := os.ReadDir(childPath)
+		if readErr != nil {
+			continue
+		}
+		var dirSize uint64
+		var fileCount int
+		for _, c := range children {
+			info, infoErr := c.Info()
+			if infoErr != nil {
+				continue
+			}
+			fileCount++
+			dirSize += uint64(info.Size())
+		}
+		grandTotal += dirSize
+		log.Warn("[ENOSPC] snapshot subdir", "name", e.Name(), "files", fileCount, "totalSize", byteCount(int64(dirSize)))
+	}
+	log.Warn("[ENOSPC] snapshots summary", "dir", dirPath, "totalSize", byteCount(int64(grandTotal)))
 }
 
 func byteCount(b int64) string {
