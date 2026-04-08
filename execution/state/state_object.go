@@ -410,6 +410,18 @@ func (so *stateObject) Code() ([]byte, error) {
 		return nil, nil
 	}
 
+	// When a versionMap is present (parallel execution), check for CodePath
+	// entries from prior TXs (e.g. EIP-7702 SetCode). The versionMap has the
+	// synthetic code but the domain/stateReader does not.
+	if so.db.versionMap != nil {
+		rr := so.db.versionMap.Read(so.address, CodePath, accounts.NilKey, so.db.txIndex)
+		if rr.Status() == MVReadResultDone {
+			if code, ok := rr.Value().([]byte); ok {
+				so.code = code
+				return code, nil
+			}
+		}
+	}
 	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (so.db.trace || dbg.TraceAccount(so.address.Handle()))) {
 		so.db.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", so.db.blockNum, so.db.txIndex, so.db.version))
 	}

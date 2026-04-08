@@ -388,7 +388,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 								return err
 							}
 
-							if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) {
+							if (pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) || pe.cfg.experimentalBAL) && !applyResult.isPartial {
 								err = ProcessBAL(rwTx, lastHeader, applyResult.TxIO, pe.cfg.dirs.DataDir)
 								if err != nil {
 									return err
@@ -1268,6 +1268,7 @@ func (result *execResult) finalizeWithIBS(
 // collector writes without reconstructing the full IBS. This avoids the
 // expensive ApplyVersionedWrites → IBS stateObject creation for ALL TX writes.
 // Only the fee-calc accounts (coinbase, burnt contract) are touched.
+// finalizeTx is retained for testing and potential fallback. Production always uses finalizeWithIBS.
 func (result *execResult) finalizeTx(
 	task *taskVersion,
 	txTask *exec.TxTask,
@@ -1921,8 +1922,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				collector := state.NewVersionedWriteCollector(pe.rs)
 
-				// Use finalizeWithIBS for Amsterdam blocks where BAL
-				// is consensus-critical.
+				// finalize always uses IBS-based finalization for correctness of all forks
 				_, addReads, addWrites, err := txResult.finalize(prevReceipt, pe.cfg.engine, be.versionMap, stateReader, collector)
 
 				if err != nil {
