@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
-	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 type OpType int
@@ -524,7 +523,7 @@ func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, met
 				db:          db,
 			},
 			doms:   domains,
-			rs:     state.NewStateV3Buffered(state.NewStateV3(domains, ethconfig.Sync{}, logger)),
+			rs:     state.NewStateV3Buffered(state.NewStateV3(domains, false, logger)),
 			logger: logger,
 		},
 		workerCount:  runtime.NumCPU() - 1,
@@ -648,7 +647,7 @@ func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propert
 				db:          db,
 			},
 			doms:   domains,
-			rs:     state.NewStateV3Buffered(state.NewStateV3(domains, ethconfig.Sync{}, logger)),
+			rs:     state.NewStateV3Buffered(state.NewStateV3(domains, false, logger)),
 			logger: logger,
 		},
 		workerCount:  runtime.NumCPU() - 1,
@@ -706,7 +705,7 @@ func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyC
 			txExecutor: txExecutor{
 				cfg:    ExecuteBlockCfg{chainConfig: chainSpec.Config, db: db},
 				doms:   domains,
-				rs:     state.NewStateV3Buffered(state.NewStateV3(domains, ethconfig.Sync{}, logger)),
+				rs:     state.NewStateV3Buffered(state.NewStateV3(domains, false, logger)),
 				logger: logger,
 			},
 			workerCount: runtime.NumCPU() - 1,

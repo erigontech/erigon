@@ -37,23 +37,22 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/shards"
 )
 
 type StateV3 struct {
-	domains *execctx.SharedDomains
-	logger  log.Logger
-	syncCfg ethconfig.Sync
-	txNum   uint64
-	trace   bool
+	domains                *execctx.SharedDomains
+	logger                 log.Logger
+	persistReceiptsCacheV2 bool
+	txNum                  uint64
+	trace                  bool
 }
 
-func NewStateV3(domains *execctx.SharedDomains, syncCfg ethconfig.Sync, logger log.Logger) *StateV3 {
+func NewStateV3(domains *execctx.SharedDomains, persistReceiptsCacheV2 bool, logger log.Logger) *StateV3 {
 	return &StateV3{
-		domains: domains,
-		logger:  logger,
-		syncCfg: syncCfg,
+		domains:                domains,
+		logger:                 logger,
+		persistReceiptsCacheV2: persistReceiptsCacheV2,
 		//trace: true,
 	}
 }
@@ -343,7 +342,7 @@ func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *
 		}
 	}
 
-	if rs.syncCfg.PersistReceiptsCacheV2 {
+	if rs.persistReceiptsCacheV2 {
 		if err := rawdb.WriteReceiptCacheV2(rs.domains.AsPutDel(tx), receipt, txNum); err != nil {
 			return err
 		}
@@ -404,7 +403,7 @@ func NewStateV3Buffered(state *StateV3) *StateV3Buffered {
 
 func (s *StateV3Buffered) WithDomains(domains *execctx.SharedDomains) *StateV3Buffered {
 	return &StateV3Buffered{
-		StateV3:       NewStateV3(domains, s.syncCfg, s.logger),
+		StateV3:       NewStateV3(domains, s.persistReceiptsCacheV2, s.logger),
 		accounts:      s.accounts,
 		accountsMutex: s.accountsMutex,
 	}
