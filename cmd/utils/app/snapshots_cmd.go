@@ -43,7 +43,6 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
-	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -58,6 +57,7 @@ import (
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/webseeds"
 	"github.com/erigontech/erigon/db/etl"
+	"github.com/erigontech/erigon/db/fromdb"
 	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
