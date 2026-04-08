@@ -62,7 +62,7 @@ func TestQueryAllWithoutPanicUnknown(t *testing.T) {
 	poolDB := memdb.NewTestPoolDB(t)
 	cfg := txpoolcfg.DefaultConfig
 	cache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, newTxns, poolDB, chainDB, cfg, cache, chain.TestChainConfig, nil, nil, func() {}, nil, nil, log.New())
+	pool, err := New(ctx, newTxns, poolDB, chainDB, cfg, cache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New())
 	if err != nil {
 		t.Fatalf("new pool: %v", err)
 	}
