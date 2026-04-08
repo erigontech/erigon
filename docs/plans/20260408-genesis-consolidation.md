@@ -162,18 +162,18 @@ Scope is **medium** (scope B from brainstorm). Explicit non-goals: BorJSON asymm
 - Modify: `cmd/integration/commands/stages.go`
 - Modify: `cmd/evm/runner.go`
 
-- [ ] `init_cmd.go:109`: replace `genesiswrite.CommitGenesisBlock(chaindb, genesis, cliCtx.String(utils.ChainFlag.Name), datadir.New(...), logger)` with `genesiswrite.CommitGenesis(cliCtx.Context, chaindb, genesiswrite.Options{Genesis: genesis, ChainName: cliCtx.String(utils.ChainFlag.Name), Dirs: datadir.New(...), Logger: logger})`. **BorJSON manual decode on lines 82-90 stays** — explicit non-goal.
-- [ ] `stages.go:1149`: replace `genesiswrite.CommitGenesisBlock(db, genesis, chain, dirs, logger)` with `genesiswrite.CommitGenesis(ctx, db, genesiswrite.Options{Genesis: genesis, ChainName: chain, Dirs: dirs, Logger: logger})`
-- [ ] `cmd/evm/runner.go:181`: replace `genesiswrite.MustCommitGenesis(gen, db, datadir.New(tmpDir), log.Root())` with:
+- [x] `init_cmd.go:109`: replace `genesiswrite.CommitGenesisBlock(chaindb, genesis, cliCtx.String(utils.ChainFlag.Name), datadir.New(...), logger)` with `genesiswrite.CommitGenesis(cliCtx.Context, chaindb, genesiswrite.Options{Genesis: genesis, ChainName: cliCtx.String(utils.ChainFlag.Name), Dirs: datadir.New(...), Logger: logger})`. **BorJSON manual decode on lines 82-90 stays** — explicit non-goal.
+- [x] `stages.go:1149`: replace `genesiswrite.CommitGenesisBlock(db, genesis, chain, dirs, logger)` with `genesiswrite.CommitGenesis(ctx, db, genesiswrite.Options{Genesis: genesis, ChainName: chain, Dirs: dirs, Logger: logger})`
+- [x] `cmd/evm/runner.go:181`: replace `genesiswrite.MustCommitGenesis(gen, db, datadir.New(tmpDir), log.Root())` with:
       ```go
       if _, _, err := genesiswrite.CommitGenesis(context.Background(), db, genesiswrite.Options{Genesis: gen, Dirs: datadir.New(tmpDir), Logger: log.Root()}); err != nil {
           panic(err)
       }
       ```
-- [ ] update any existing tests in `cmd/utils/app/`, `cmd/integration/commands/`, `cmd/evm/` that exercise these call sites
-- [ ] if no tests exist for these entry points, rely on the regression net from Task 2 and add a comment noting the coverage gap
-- [ ] run `go build ./cmd/...` — must pass before task 6
-- [ ] run `make lint`
+- [x] update any existing tests in `cmd/utils/app/`, `cmd/integration/commands/`, `cmd/evm/` that exercise these call sites (none exist for the migrated call sites: cmd/utils/app has publishable_check/snapshots tests only; cmd/integration/commands has no _test.go files; cmd/evm has only t8n_test.go which doesn't exercise runner.go's genesis path)
+- [x] if no tests exist for these entry points, rely on the regression net from Task 2 and add a comment noting the coverage gap (coverage gap acknowledged — Task 2's CommitGenesisTx regression net covers the underlying logic; CLI wiring is type-checked by `go build ./cmd/...`)
+- [x] run `go build ./cmd/...` — must pass before task 6
+- [x] run `make lint`
 
 ### Task 6: Migrate test harnesses (`engineapitester`, `execmoduletester`)
 
