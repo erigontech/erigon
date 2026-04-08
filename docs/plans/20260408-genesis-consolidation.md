@@ -133,12 +133,12 @@ Scope is **medium** (scope B from brainstorm). Explicit non-goals: BorJSON asymm
 **Files:**
 - Create: `execution/state/genesiswrite/genesistest/genesistest.go`
 
-- [ ] create package `genesistest` in `execution/state/genesiswrite/genesistest/`
-- [ ] implement `MustCommitGenesis(tb testing.TB, g *types.Genesis, db kv.RwDB, dirs datadir.Dirs, logger log.Logger) *types.Block`:
+- [x] create package `genesistest` in `execution/state/genesiswrite/genesistest/`
+- [x] implement `MustCommitGenesis(tb testing.TB, g *types.Genesis, db kv.RwDB, dirs datadir.Dirs, logger log.Logger) *types.Block`:
       wraps `genesiswrite.CommitGenesis(context.Background(), db, genesiswrite.Options{Genesis: g, Dirs: dirs, Logger: logger})`, calls `tb.Fatal(err)` on error, returns the block. `tb` may be nil for non-test callers (cmd/evm/runner-style) — in that case, panic on error.
-- [ ] no separate test file needed — this is a thin wrapper; coverage comes from the tests in downstream tasks that use it
-- [ ] run `go build ./...` — must compile before task 4
-- [ ] run `make lint` — fix any issues
+- [x] no separate test file needed — this is a thin wrapper; coverage comes from the tests in downstream tasks that use it
+- [x] run `go build ./...` — must compile before task 4
+- [x] run `make lint` — fix any issues
 
 ### Task 4: Migrate `node/eth/backend.go` to `CommitGenesisTx`
 
