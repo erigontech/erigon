@@ -152,12 +152,12 @@ func (a *App) Run(parent context.Context, infoCh <-chan *datasource.StagesInfo, 
 
 	// All navigable pages, including the full-screen log viewer.
 	// ◄ ► cycles through them; F2/L jumps directly to logs.
-	dashPages := []string{pageNodeInfo, pageValidator, pageLogs}
+	dashPages := []string{pageNodeInfo, pageLogs, pageValidator}
 	currentPage := 0
 	const (
 		nodeInfoPageIdx  = 0
-		validatorPageIdx = 1
-		logsPageIdx      = 2
+		logsPageIdx      = 1
+		validatorPageIdx = 2
 	)
 	switch a.initialPage {
 	case pageNodeInfo:

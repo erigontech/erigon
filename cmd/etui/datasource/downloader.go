@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
+	"sync"
 	"time"
 )
 
@@ -30,6 +33,10 @@ type DownloaderStats struct {
 type DownloaderPinger struct {
 	BaseURL string
 	Client  *http.Client
+
+	mu         sync.Mutex
+	activeURL  string
+	candidates []string
 }
 
 // DownloaderTracker tracks download progress over time and computes speed/ETA.
@@ -46,9 +53,12 @@ type sample struct {
 
 // NewDownloaderPinger creates a DownloaderPinger targeting the given base URL.
 func NewDownloaderPinger(baseURL string) *DownloaderPinger {
+	candidates := downloaderCandidates(baseURL)
 	return &DownloaderPinger{
-		BaseURL: baseURL,
-		Client:  &http.Client{Timeout: 10 * time.Second},
+		BaseURL:    baseURL,
+		Client:     &http.Client{Timeout: 10 * time.Second},
+		activeURL:  baseURL,
+		candidates: candidates,
 	}
 }
 
@@ -59,11 +69,42 @@ func NewDownloaderTracker() *DownloaderTracker {
 
 // GetTorrentsInfo fetches current torrent download progress.
 func (d *DownloaderPinger) GetTorrentsInfo(ctx context.Context) (*TorrentsInfo, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, d.BaseURL+"/downloader/torrentsInfo", nil)
+	candidates := d.tryOrder()
+	var saw404 bool
+	var sawConnect bool
+	var lastErr error
+	for _, baseURL := range candidates {
+		info, err := d.getTorrentsInfoFrom(ctx, baseURL)
+		if err == nil {
+			d.setActiveURL(baseURL)
+			return info, nil
+		}
+		lastErr = err
+		msg := err.Error()
+		if strings.Contains(msg, "404 Not Found") {
+			saw404 = true
+		}
+		if strings.Contains(msg, "connect: connection refused") {
+			sawConnect = true
+		}
+	}
+	switch {
+	case saw404:
+		return nil, fmt.Errorf("downloader progress endpoint is not exposed by this node")
+	case sawConnect:
+		return nil, fmt.Errorf("downloader HTTP endpoint is unreachable")
+	case lastErr != nil:
+		return nil, fmt.Errorf("downloader progress probe failed: %v", lastErr)
+	default:
+		return nil, fmt.Errorf("downloader progress probe failed")
+	}
+}
+
+func (d *DownloaderPinger) getTorrentsInfoFrom(ctx context.Context, baseURL string) (*TorrentsInfo, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/downloader/torrentsInfo", nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request error: %w", err)
 	}
-
 	resp, err := d.Client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("http do error: %w", err)
@@ -80,6 +121,76 @@ func (d *DownloaderPinger) GetTorrentsInfo(ctx context.Context) (*TorrentsInfo, 
 	}
 
 	return &info, nil
+}
+
+func (d *DownloaderPinger) tryOrder() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if len(d.candidates) == 0 {
+		return nil
+	}
+
+	out := make([]string, 0, len(d.candidates))
+	seen := make(map[string]struct{}, len(d.candidates))
+	if d.activeURL != "" {
+		out = append(out, d.activeURL)
+		seen[d.activeURL] = struct{}{}
+	}
+	for _, candidate := range d.candidates {
+		if _, ok := seen[candidate]; ok {
+			continue
+		}
+		out = append(out, candidate)
+		seen[candidate] = struct{}{}
+	}
+	return out
+}
+
+func (d *DownloaderPinger) setActiveURL(baseURL string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.activeURL = baseURL
+}
+
+func downloaderCandidates(baseURL string) []string {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if baseURL == "" {
+		return []string{"http://127.0.0.1:6060"}
+	}
+
+	candidates := []string{baseURL}
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return candidates
+	}
+
+	host := strings.ToLower(u.Hostname())
+	port := u.Port()
+	if !isLoopbackHost(host) {
+		return candidates
+	}
+
+	for _, altHost := range []string{"127.0.0.1", "localhost"} {
+		for _, altPort := range []string{"6060", "6061"} {
+			if host == altHost && port == altPort {
+				continue
+			}
+			candidate := *u
+			candidate.Host = altHost + ":" + altPort
+			candidates = append(candidates, strings.TrimRight(candidate.String(), "/"))
+		}
+	}
+	return candidates
+}
+
+func isLoopbackHost(host string) bool {
+	switch host {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	default:
+		return false
+	}
 }
 
 // Update records a new data point and returns computed stats.
