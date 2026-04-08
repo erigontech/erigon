@@ -49,7 +49,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 			y, x    = callContext.Stack.Back(1), callContext.Stack.peek()
 			slot    = accounts.InternKey(x.Bytes32())
 			current uint256.Int
-			cost    = uint64(0)
+			cost    = params.WarmStorageReadCostEIP2929
 		)
 
 		current, _ = evm.IntraBlockState().GetState(callContext.Address(), slot)

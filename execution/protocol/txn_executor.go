@@ -624,6 +624,13 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 
 	st.evm.ResetGasConsumed()
 
+	if st.evm.Context.BlockNumber == 24809877 {
+		txIdx := st.state.TxIndex()
+		if txIdx == 63 || txIdx == 72 {
+			log.Debug("[gas trace] before evm.Call", "block", st.evm.Context.BlockNumber, "txIdx", txIdx, "gasRemaining", st.gasRemaining.Regular, "to", st.to())
+		}
+	}
+
 	if contractCreation {
 		// The reason why we don't increment nonce here is that we need the original
 		// nonce to calculate the address of the contract that is being created
@@ -632,6 +639,13 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		ret, _, st.gasRemaining, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, bailout)
 	} else {
 		ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
+	}
+
+	if st.evm.Context.BlockNumber == 24809877 {
+		txIdx := st.state.TxIndex()
+		if txIdx == 63 || txIdx == 72 {
+			log.Debug("[gas trace] after evm.Call", "block", st.evm.Context.BlockNumber, "txIdx", txIdx, "gasRemaining", st.gasRemaining.Regular, "vmerr", vmerr, "executionGas", st.initialGas.Regular-st.gasRemaining.Regular-intrinsicGasResult.RegularGas)
+		}
 	}
 
 	if refunds && !gasBailout {
