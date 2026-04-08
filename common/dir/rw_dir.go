@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -254,4 +255,43 @@ func CreateTempWithExtension(file string, extension string) (*os.File, error) {
 		return nil, fmt.Errorf("extension must end with .tmp, erigon cleans these up at restart. pattern: %s", pattern)
 	}
 	return os.CreateTemp(directory, pattern)
+}
+
+// LogDirOnENOSPC checks whether err wraps syscall.ENOSPC and, if so, logs every
+// file in dirPath together with its size. Intended for post-mortem diagnostics
+// when a write fails due to a full disk.
+func LogDirOnENOSPC(err error, dirPath string) {
+	if !errors.Is(err, syscall.ENOSPC) {
+		return
+	}
+	entries, readErr := os.ReadDir(dirPath)
+	if readErr != nil {
+		log.Warn("[ENOSPC] failed to read dir", "dir", dirPath, "err", readErr)
+		return
+	}
+	var totalSize uint64
+	var fileCount int
+	for _, e := range entries {
+		info, infoErr := e.Info()
+		if infoErr != nil {
+			continue
+		}
+		fileCount++
+		totalSize += uint64(info.Size())
+		log.Warn("[ENOSPC] file", "name", e.Name(), "size", byteCount(info.Size()), "isDir", e.IsDir())
+	}
+	log.Warn("[ENOSPC] dir summary", "dir", dirPath, "files", fileCount, "totalSize", byteCount(int64(totalSize)))
+}
+
+func byteCount(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%dB", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f%cB", float64(b)/float64(div), "KMGTPE"[exp])
 }

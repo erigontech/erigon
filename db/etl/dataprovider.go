@@ -134,9 +134,11 @@ func sortAndFlush(b Buffer, tmpdir string) (*os.File, error) {
 	defer putBufioWriter(w)
 
 	if err = b.Write(w); err != nil {
+		dir.LogDirOnENOSPC(err, tmpdir)
 		return bufferFile, fmt.Errorf("error writing entries to disk: %w", err)
 	}
 	if err = w.Flush(); err != nil {
+		dir.LogDirOnENOSPC(err, tmpdir)
 		return bufferFile, fmt.Errorf("error flushing buffer to disk: %w", err)
 	}
 	return bufferFile, nil
