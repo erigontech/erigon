@@ -356,7 +356,7 @@ func applyOptions(opts []Option) options {
 		key:             defaultKey,
 		pruneMode:       &defaultPruneMode,
 		blockBufferSize: 128,
-		chainConfig:     chain.TestChainConfig,
+		chainConfig:     chain.TestChainBerlinConfig,
 		experimentalBAL: false,
 	}
 	for _, o := range opts {
@@ -387,7 +387,7 @@ func applyOptions(opts []Option) options {
 }
 
 // New creates an ExecModuleTester. When called with no options, it uses
-// sensible defaults (TestChainConfig, 1 Ether alloc, ethash.NewFaker, etc.).
+// sensible defaults (TestChainBerlinConfig, 1 Ether alloc, ethash.NewFaker, etc.).
 // Use With* options to customise.
 func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	opt := applyOptions(opts)
