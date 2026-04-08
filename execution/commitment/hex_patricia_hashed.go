@@ -218,6 +218,8 @@ func (hph *HexPatriciaHashed) resetForReuse() {
 	// flags
 	hph.memoizationOff = false
 	hph.leaveDeferredForCaller = false
+	hph.forceEagerDerive = false
+	hph.cellsDeferred = 0
 
 	// auxiliary buffer
 	hph.auxBuffer.Reset()
@@ -1335,6 +1337,9 @@ func (hph *HexPatriciaHashed) needUnfolding(hashedKey []byte) (int16, error) {
 		}
 		cell = &hph.root
 	} else {
+		if hph.currentKeyLen >= int16(len(hashedKey)) {
+			return 0, nil // key fully consumed, nothing to unfold
+		}
 		nibble := int(hashedKey[hph.currentKeyLen])
 		cell = &hph.grid[hph.activeRows-1][nibble]
 		depth = hph.depths[hph.activeRows-1]
@@ -2426,6 +2431,14 @@ func (hph *HexPatriciaHashed) detectCollapseBeforeDelete(hashedKey []byte) {
 
 	siblingCell := &hph.grid[parentRow][siblingNibble]
 
+	// Lazy derivation: ensure hashed keys are derived before reading hashedExtension
+	if err := hph.ensureDerivedHashedKeys(siblingCell); err != nil {
+		if hph.trace {
+			fmt.Printf("[collapse] ensureDerivedHashedKeys failed for sibling (%d, %x): %v\n", parentRow, siblingNibble, err)
+		}
+		return
+	}
+
 	// Build the sibling's full hashed key path
 	siblingPath := make([]byte, int(depth)+1+int(siblingCell.hashedExtLen))
 	copy(siblingPath, hph.currentKey[:depth])
@@ -2449,6 +2462,14 @@ func (hph *HexPatriciaHashed) detectCascadingCollapseAtRow(row int) {
 	depth := hph.depths[row] - 1
 	survivingNibble := bits.TrailingZeros16(hph.afterMap[row])
 	survivingCell := &hph.grid[row][survivingNibble]
+
+	// Lazy derivation: ensure hashed keys are derived before reading hashedExtension
+	if err := hph.ensureDerivedHashedKeys(survivingCell); err != nil {
+		if hph.trace {
+			fmt.Printf("[cascade-collapse] ensureDerivedHashedKeys failed for surviving (%d, %x): %v\n", row, survivingNibble, err)
+		}
+		return
+	}
 
 	// Build the surviving child's full hashed key path
 	siblingPath := make([]byte, int(depth)+1+int(survivingCell.hashedExtLen))
