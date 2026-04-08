@@ -232,6 +232,8 @@ func TestCaplinBlockProductionGlamsterdamSlotNumber(t *testing.T) {
 	elHeader.Time = elHead.Time
 	elHeader.BaseFeePerGas = common.BigToHash(elHead.BaseFee.ToBig())
 	postState.SetLatestExecutionPayloadHeader(elHeader)
+	// GLOAS uses GetLatestBlockHash() instead of LatestExecutionPayloadHeader().BlockHash
+	postState.SetLatestBlockHash(elHead.Hash())
 
 	elHeadHash := elHead.Hash()
 	fcu.Eth1Hashes[postState.FinalizedCheckpoint().Root] = elHeadHash
