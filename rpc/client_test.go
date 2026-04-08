@@ -183,8 +183,13 @@ func TestClientBatchRequest_len(t *testing.T) {
 		}
 		ctx, cancelFn := context.WithTimeout(context.Background(), time.Second)
 		defer cancelFn()
-		if err := client.BatchCallContext(ctx, batch); !errors.Is(err, ErrBadResult) {
-			t.Errorf("expected %q but got: %v", ErrBadResult, err)
+		if err := client.BatchCallContext(ctx, batch); err != nil {
+			t.Errorf("expected nil batch error but got: %v", err)
+		}
+		// The third element should have ErrMissingBatchResponse since the
+		// server only returned 2 responses for 3 requests.
+		if !errors.Is(batch[2].Error, ErrMissingBatchResponse) {
+			t.Errorf("expected ErrMissingBatchResponse for missing element but got: %v", batch[2].Error)
 		}
 	})
 
@@ -194,8 +199,18 @@ func TestClientBatchRequest_len(t *testing.T) {
 		}
 		ctx, cancelFn := context.WithTimeout(context.Background(), time.Second)
 		defer cancelFn()
-		if err := client.BatchCallContext(ctx, batch); !errors.Is(err, ErrBadResult) {
-			t.Errorf("expected %q but got: %v", ErrBadResult, err)
+		// Server returns 2 responses for 1 request; the extra response is
+		// silently ignored and the call completes without hanging.
+		if err := client.BatchCallContext(ctx, batch); err != nil {
+			t.Errorf("expected nil batch error but got: %v", err)
+		}
+	})
+
+	t.Run("empty", func(t *testing.T) {
+		ctx, cancelFn := context.WithTimeout(context.Background(), time.Second)
+		defer cancelFn()
+		if err := client.BatchCallContext(ctx, nil); err != nil {
+			t.Errorf("expected nil error for empty batch but got: %v", err)
 		}
 	})
 }
