@@ -174,7 +174,13 @@ func (et *KsmEonTracker) handleBlockEvent(blockEvent BlockEvent) error {
 	blockNum := blockEvent.LatestBlockNum
 	eon, ok, err := et.readEonAtNewBlockEvent(blockNum)
 	if err != nil {
-		return fmt.Errorf("read eon at block event (blockNum=%d): %w", blockNum, err)
+		// Block events may arrive before the block is committed to the DB
+		// (pre-commit dispatch via overlay). Contract reads at a specific
+		// block number can transiently fail with "block not found" when the
+		// RPC overlay hasn't propagated yet. Log and retry on the next block
+		// event rather than crashing the entire shutter pool.
+		et.logger.Warn("read eon at block event failed (will retry on next block)", "blockNum", blockNum, "err", err)
+		return nil
 	}
 	if !ok {
 		et.logger.Warn("no eon at", "blockNum", blockNum)
