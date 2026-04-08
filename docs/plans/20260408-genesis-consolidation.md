@@ -145,15 +145,15 @@ Scope is **medium** (scope B from brainstorm). Explicit non-goals: BorJSON asymm
 **Files:**
 - Modify: `node/eth/backend.go`
 
-- [ ] locate the genesis-writing block at `node/eth/backend.go:342-373`
-- [ ] delete the manual `rawdb.ReadGenesis` + `rawdb.ReadCanonicalHash` + "pass nil if canonical exists" dance
-- [ ] replace with: `bundle, err := rawdb.ReadGenesisBundle(tx); if err != nil { return err }; if bundle.Genesis != nil { config.Genesis = bundle.Genesis }`
-- [ ] then call `chainConfig, genesis, genesisErr = genesiswrite.CommitGenesisTx(tx, genesiswrite.Options{Genesis: config.Genesis, ChainName: config.Snapshot.ChainName, OverrideOsakaTime: config.OverrideOsakaTime, OverrideAmsterdamTime: config.OverrideAmsterdamTime, KeepStoredChainConfig: config.KeepStoredChainConfig, Dirs: dirs, Logger: logger})`
-- [ ] keep the existing `*chain.ConfigCompatError` check unchanged
-- [ ] ⚠️ verify nothing downstream relies on the old timing of `config.Genesis` being rewritten — grep `config.Genesis` in backend.go and callsites
-- [ ] add/update unit tests for backend.go genesis-init path if existing tests exist (check `node/eth/*_test.go`); if no tests, document this as a gap without adding new — the regression net from Task 2 covers the underlying CommitGenesisTx logic
-- [ ] run `go build ./node/eth/...` and `go test ./node/eth/...` — must pass before task 5
-- [ ] run `make lint`
+- [x] locate the genesis-writing block at `node/eth/backend.go:342-373`
+- [x] delete the manual `rawdb.ReadGenesis` + `rawdb.ReadCanonicalHash` + "pass nil if canonical exists" dance
+- [x] replace with: `bundle, err := rawdb.ReadGenesisBundle(tx); if err != nil { return err }; if bundle.Genesis != nil { config.Genesis = bundle.Genesis }`
+- [x] then call `chainConfig, genesis, genesisErr = genesiswrite.CommitGenesisTx(tx, genesiswrite.Options{Genesis: config.Genesis, ChainName: config.Snapshot.ChainName, OverrideOsakaTime: config.OverrideOsakaTime, OverrideAmsterdamTime: config.OverrideAmsterdamTime, KeepStoredChainConfig: config.KeepStoredChainConfig, Dirs: dirs, Logger: logger})`
+- [x] keep the existing `*chain.ConfigCompatError` check unchanged
+- [x] ⚠️ verify nothing downstream relies on the old timing of `config.Genesis` being rewritten — grep `config.Genesis` in backend.go and callsites (only downstream use at ~line 842 passes config.Genesis into block builder; still populated from bundle.Genesis before that)
+- [x] add/update unit tests for backend.go genesis-init path if existing tests exist (check `node/eth/*_test.go`); if no tests, document this as a gap without adding new — the regression net from Task 2 covers the underlying CommitGenesisTx logic (backend_test.go only tests RemoveContents — no genesis-init coverage gap documented here, covered by Task 2's regression net)
+- [x] run `go build ./node/eth/...` and `go test ./node/eth/...` — must pass before task 5
+- [x] run `make lint`
 
 ### Task 5: Migrate `cmd/` callers
 

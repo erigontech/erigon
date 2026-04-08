@@ -342,30 +342,31 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	var chainConfig *chain.Config
 	var genesis *types.Block
 	if err := rawChainDB.Update(context.Background(), func(tx kv.RwTx) error {
-
-		genesisConfig, err := rawdb.ReadGenesis(tx)
+		bundle, err := rawdb.ReadGenesisBundle(tx)
 		if err != nil {
 			return err
 		}
-
-		if genesisConfig != nil {
-			config.Genesis = genesisConfig
+		// If the DB already has a stored genesis JSON, prefer it over whatever
+		// was loaded from flags: the stored spec is authoritative for the
+		// downstream config.Genesis consumers (mining/builder at line ~842).
+		if bundle.Genesis != nil {
+			config.Genesis = bundle.Genesis
 		}
 
 		if tracer != nil && tracer.Hooks != nil && tracer.Hooks.OnBlockchainInit != nil {
 			tracer.Hooks.OnBlockchainInit(config.Genesis.Config)
 		}
 
-		h, err := rawdb.ReadCanonicalHash(tx, 0)
-		if err != nil {
-			panic(err)
-		}
-		genesisSpec := config.Genesis
-		if h != (common.Hash{}) { // fallback to db content
-			genesisSpec = nil
-		}
 		var genesisErr error
-		chainConfig, genesis, genesisErr = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.Snapshot.ChainName, config.OverrideOsakaTime, config.OverrideAmsterdamTime, config.KeepStoredChainConfig, dirs, logger)
+		chainConfig, genesis, genesisErr = genesiswrite.CommitGenesisTx(tx, genesiswrite.Options{
+			Genesis:               config.Genesis,
+			ChainName:             config.Snapshot.ChainName,
+			OverrideOsakaTime:     config.OverrideOsakaTime,
+			OverrideAmsterdamTime: config.OverrideAmsterdamTime,
+			KeepStoredChainConfig: config.KeepStoredChainConfig,
+			Dirs:                  dirs,
+			Logger:                logger,
+		})
 		if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
 			return genesisErr
 		}
