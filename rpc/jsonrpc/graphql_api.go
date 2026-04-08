@@ -169,11 +169,12 @@ func (api *GraphQLAPIImpl) GetAccountInfo(ctx context.Context, address common.Ad
 		return "", 0, "", err
 	}
 
-	if err = rpchelper.CheckBlockExecuted(tx, blockNum); err != nil {
+	stateTx := api.filters.WithTemporalOverlay(tx)
+	if err = rpchelper.CheckBlockExecuted(stateTx, blockNum); err != nil {
 		return "", 0, "", err
 	}
 
-	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNum, latest, 0, api.stateCache, api._txNumReader)
+	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, stateTx, blockNum, latest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return "", 0, "", err
 	}
@@ -200,6 +201,14 @@ func (api *GraphQLAPIImpl) GetAccountInfo(ctx context.Context, address common.Ad
 
 // GetAccountStorage returns the value of the given storage slot for an account at the given block.
 func (api *GraphQLAPIImpl) GetAccountStorage(ctx context.Context, address common.Address, slot string, blockNumber rpc.BlockNumber) (string, error) {
+	slotBytes, decErr := hexutil.FromHexWithValidation(slot)
+	if decErr != nil {
+		return zeroStorageHash, &rpc.InvalidParamsError{Message: "unable to decode storage slot: " + hexutil.ErrHexStringInvalid.Error()}
+	}
+	if len(slotBytes) > 32 {
+		return zeroStorageHash, &rpc.InvalidParamsError{Message: hexutil.ErrTooBigHexString.Error()}
+	}
+
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return "", err
@@ -216,11 +225,12 @@ func (api *GraphQLAPIImpl) GetAccountStorage(ctx context.Context, address common
 		return zeroStorageHash, err
 	}
 
-	if err = rpchelper.CheckBlockExecuted(tx, blockNum); err != nil {
+	stateTx := api.filters.WithTemporalOverlay(tx)
+	if err = rpchelper.CheckBlockExecuted(stateTx, blockNum); err != nil {
 		return zeroStorageHash, err
 	}
 
-	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNum, latest, 0, api.stateCache, api._txNumReader)
+	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, stateTx, blockNum, latest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return zeroStorageHash, err
 	}
@@ -231,7 +241,7 @@ func (api *GraphQLAPIImpl) GetAccountStorage(ctx context.Context, address common
 		return zeroStorageHash, err
 	}
 
-	location := accounts.InternKey(common.HexToHash(slot))
+	location := accounts.InternKey(common.BytesToHash(slotBytes))
 	res, _, err := reader.ReadAccountStorage(addr, location)
 	if err != nil {
 		return zeroStorageHash, err

@@ -94,6 +94,7 @@ func (r *queryResolver) Block(ctx context.Context, number *string, hash *string)
 			block.Nonce = *blockNonce
 		}
 		block.Number = *convertDataToUint64P(blk, "number")
+		block.Miner.BlockNum = block.Number
 		block.Parent = &model.Block{}
 		block.Parent.Hash = *convertDataToStringP(blk, "parentHash")
 		block.ReceiptsRoot = *convertDataToStringP(blk, "receiptsRoot")
@@ -142,7 +143,7 @@ func (r *queryResolver) Block(ctx context.Context, number *string, hash *string)
 					Index: int(rlog.Index),
 					Data:  "0x" + hex.EncodeToString(rlog.Data),
 				}
-				tlog.Account = &model.Account{}
+				tlog.Account = model.NewAccountAtBlock(block.Number)
 				tlog.Account.Address = strings.ToLower(rlog.Address.String())
 
 				for _, rtopic := range rlog.Topics {
@@ -152,10 +153,10 @@ func (r *queryResolver) Block(ctx context.Context, number *string, hash *string)
 				trans.Logs = append(trans.Logs, &tlog)
 			}
 
-			trans.From = &model.Account{}
+			trans.From = model.NewAccountAtBlock(block.Number)
 			trans.From.Address = strings.ToLower(*convertDataToStringP(transReceipt, "from"))
 
-			trans.To = &model.Account{}
+			trans.To = model.NewAccountAtBlock(block.Number)
 			address := convertDataToStringP(transReceipt, "to")
 			// To address could be nil in case of contract creation
 			if address != nil {
@@ -262,6 +263,9 @@ type accountResolver struct{ *Resolver }
 
 // Account is the resolver for the account field on Block.
 func (r *blockResolver) Account(ctx context.Context, obj *model.Block, address string) (*model.Account, error) {
+	if !common.IsHexAddress(address) {
+		return nil, fmt.Errorf("invalid address %q", address)
+	}
 	addr := common.HexToAddress(address)
 	blockNumber := rpc.BlockNumber(obj.Number)
 
@@ -280,6 +284,9 @@ func (r *blockResolver) Account(ctx context.Context, obj *model.Block, address s
 }
 
 // Storage is the resolver for the storage field on Account.
+// TODO: each storage(slot) call opens a new DB transaction and rebuilds the state reader,
+// causing an N+1 pattern when a query resolves multiple slots. Fix by caching the state
+// reader in the request context so all slots for the same account/block share one tx.
 func (r *accountResolver) Storage(ctx context.Context, obj *model.Account, slot string) (string, error) {
 	addr := common.HexToAddress(obj.Address)
 	blockNumber := rpc.BlockNumber(obj.BlockNum)
