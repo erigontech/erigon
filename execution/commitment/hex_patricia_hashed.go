@@ -2972,12 +2972,12 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	return rootHash, nil
 }
 
-func (hph *HexPatriciaHashed) SetTrace(trace bool)           { hph.trace = trace }
-func (hph *HexPatriciaHashed) SetTraceDomain(trace bool)     { hph.traceDomain = trace }
+func (hph *HexPatriciaHashed) SetTrace(trace bool)       { hph.trace = trace }
+func (hph *HexPatriciaHashed) SetTraceDomain(trace bool) { hph.traceDomain = trace }
 
 // SetForceEagerDerive enables eager derivation for ALL siblings during
 // unfoldBranchNode, matching the pre-PR-19899 behaviour. Test-only.
-func (hph *HexPatriciaHashed) SetForceEagerDerive(b bool) { hph.forceEagerDerive = b }
+func (hph *HexPatriciaHashed) SetForceEagerDerive(b bool)    { hph.forceEagerDerive = b }
 func (hph *HexPatriciaHashed) EnableWarmupCache(enable bool) { hph.enableWarmupCache = enable }
 
 func (hph *HexPatriciaHashed) GetCapture(truncate bool) []string {
