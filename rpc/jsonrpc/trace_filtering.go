@@ -832,7 +832,7 @@ func (api *TraceAPIImpl) callBlock(
 		RequireCanonical: true,
 	}
 
-	err := rpchelper.CheckBlockExecuted(dbtx, blockNumber)
+	err := rpchelper.CheckBlockExecuted(api.filters.WithOverlay(dbtx), blockNumber)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1135,7 +1135,7 @@ func (api *TraceAPIImpl) callTransaction(
 		RequireCanonical: true,
 	}
 
-	err := rpchelper.CheckBlockExecuted(dbtx, blockNumber)
+	err := rpchelper.CheckBlockExecuted(api.filters.WithOverlay(dbtx), blockNumber)
 	if err != nil {
 		return nil, err
 	}

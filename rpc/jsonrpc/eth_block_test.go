@@ -85,7 +85,7 @@ func TestGetBlockByNumberWithPendingTag(t *testing.T) {
 
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 	txPool := txpoolproto.NewTxpoolClient(conn)
-	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, m.Log)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, m.Log, nil)
 
 	expected := 1
 	header := &types.Header{
