@@ -81,6 +81,7 @@ import (
 	"github.com/erigontech/erigon/node/logging"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/node/paths"
+	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bridge"
@@ -314,22 +315,19 @@ func EmbeddedServices(ctx context.Context,
 	rpcFiltersConfig rpchelper.FiltersConfig,
 	blockReader services.FullBlockReader, ethBackendServer remoteproto.ETHBACKENDServer, txPoolServer txpoolproto.TxpoolServer,
 	miningServer txpoolproto.MiningServer, stateDiffClient StateChangesClient,
-	logger log.Logger,
+	logger log.Logger, events *shards.Events,
 ) (eth rpchelper.ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient, stateCache kvcache.Cache, ff *rpchelper.Filters) {
-	if stateCacheCfg.CacheSize > 0 {
-		// notification about new blocks (state stream) doesn't work now inside erigon - because
-		// erigon does send this stream to privateAPI (erigon with enabled rpc, still have enabled privateAPI).
-		// without this state stream kvcache can't work and only slow-down things
-		// ... adding back in place to see about the above statement
+	if stateCacheCfg.LocalCache != nil {
+		// In-process: read state directly from SharedDomains overlay.
+		// This replaces the coherent cache (kvcache) for embedded mode —
+		// the overlay is always current, has zero memory overhead, and
+		// doesn't need the StateChanges gRPC stream to stay coherent.
+		stateCache = stateCacheCfg.LocalCache
+	} else if stateCacheCfg.CacheSize > 0 {
+		// Remote RPCDaemon: use coherent cache fed by StateChanges stream.
 		stateCache = kvcache.New(stateCacheCfg)
 	} else {
-		if stateCacheCfg.LocalCache != nil {
-			// this attaches the rpc layer to the local
-			// execution caches if they are availible
-			stateCache = stateCacheCfg.LocalCache
-		} else {
-			stateCache = kvcache.NewDummy()
-		}
+		stateCache = kvcache.NewDummy()
 	}
 
 	subscribeToStateChangesLoop(ctx, stateDiffClient, stateCache)
@@ -340,7 +338,7 @@ func EmbeddedServices(ctx context.Context,
 
 	txPool = direct.NewTxPoolClient(txPoolServer)
 	mining = direct.NewMiningClient(miningServer)
-	ff = rpchelper.New(ctx, rpcFiltersConfig, eth, txPool, mining, func() {}, logger)
+	ff = rpchelper.New(ctx, rpcFiltersConfig, eth, txPool, mining, func() {}, logger, events)
 
 	return
 }
@@ -650,7 +648,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		}
 	}()
 
-	ff = rpchelper.New(ctx, cfg.RpcFiltersConfig, eth, txPool, mining, onNewSnapshot, logger)
+	ff = rpchelper.New(ctx, cfg.RpcFiltersConfig, eth, txPool, mining, onNewSnapshot, logger, nil)
 	return db, eth, txPool, mining, stateCache, blockReader, engine, ff, bridgeReader, heimdallReader, err
 }
 
