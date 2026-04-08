@@ -79,28 +79,40 @@ jobs:
     secrets: inherit
 
   ci-gate:
-    if: always()
-    needs:
-      - lint
-      - tests
-      - race-tests
-      - hive
-      - hive-eest
-      - caplin
-      - large-files
-      - bench
-      - kurtosis
-      - repro
-      - sonar
     runs-on: ubuntu-latest
     steps:
-      - name: Check all required jobs
+      - name: Wait for all jobs (fail-fast)
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          echo '${{ toJSON(needs) }}' > needs.json
-          failed=$(jq -r 'to_entries[] | select(.value.result == "failure" or .value.result == "cancelled") | .key' needs.json)
-          if [ -n "$failed" ]; then
-            echo "The following jobs failed or were cancelled:"
-            echo "$failed"
-            exit 1
-          fi
-          echo "All required jobs passed or were skipped."
+          repo='${{ github.repository }}'
+          run_id='${{ github.run_id }}'
+
+          while true; do
+            if ! raw=$(gh api "repos/${repo}/actions/runs/${run_id}/jobs" --paginate \
+              --jq '.jobs[] | select(.name != "ci-gate") | {name, status, conclusion}'); then
+              echo "::warning::API error, retrying in 30s"
+              sleep 30
+              continue
+            fi
+            jobs=$(echo "$raw" | jq -s '.')
+
+            # Fail fast: exit as soon as any sibling job fails or is cancelled
+            failed=$(echo "$jobs" | jq -r '.[] | select(.conclusion == "failure" or .conclusion == "cancelled") | .name')
+            if [ -n "$failed" ]; then
+              echo "::error::The following jobs failed or were cancelled:"
+              echo "$failed"
+              exit 1
+            fi
+
+            total=$(echo "$jobs" | jq 'length')
+            pending=$(echo "$jobs" | jq '[.[] | select(.status != "completed")] | length')
+
+            if [ "$total" -gt 0 ] && [ "$pending" -eq 0 ]; then
+              echo "All ${total} jobs passed."
+              exit 0
+            fi
+
+            echo "$(date -u +%T) Waiting: $((total - pending))/${total} jobs complete"
+            sleep 30
+          done
