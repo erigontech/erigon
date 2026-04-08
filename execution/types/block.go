@@ -701,6 +701,9 @@ type BodyForStorage struct {
 type RawBlock struct {
 	Header *Header
 	Body   *RawBody
+	// BlockAccessList holds the RLP-encoded block access list for Amsterdam+
+	// blocks.  Nil for pre-Amsterdam blocks.
+	BlockAccessList []byte
 }
 
 func (r RawBlock) EncodingSize() int {

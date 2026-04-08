@@ -43,7 +43,7 @@ func prepareLoremDictOnPagedWriter(t *testing.T, pageSize int, pageCompression b
 	require.NoError(err)
 	defer c.Close()
 
-	p := NewPagedWriter(t.Context(), NewWriter(c, CompressNone), pageCompression)
+	p := NewPagedWriter(t.Context(), NewWriter(c, CompressNone), pageCompression, 1)
 	for k, w := range loremStrings {
 		key := fmt.Sprintf("key %d", k)
 		val := fmt.Sprintf("%s %d", w, k)
@@ -118,7 +118,7 @@ func (w *multyBytesWriter) GetValuesOnCompressedPage() int { return w.pageSize }
 func TestPage(t *testing.T) {
 	sampling := 2
 	buf, require := &multyBytesWriter{pageSize: sampling}, require.New(t)
-	w := NewPagedWriter(t.Context(), buf, false)
+	w := NewPagedWriter(t.Context(), buf, false, 1)
 	for i := 0; i < sampling+1; i++ {
 		k, v := fmt.Sprintf("k %d", i), fmt.Sprintf("v %d", i)
 		require.NoError(w.Add([]byte(k), []byte(v)))
@@ -175,7 +175,7 @@ func TestPagedReaderWithCompression(t *testing.T) {
 func TestPagedWriterCRC32Sequential(t *testing.T) {
 	// Test that we can compute CRC32 of written pages
 	mock := &multyBytesWriter{pageSize: 4}
-	pw := NewPagedWriter(t.Context(), mock, true)
+	pw := NewPagedWriter(t.Context(), mock, true, 1)
 
 	// Add test data
 	testData := []struct{ k, v string }{
@@ -210,7 +210,7 @@ func TestPagedWriterCRC32Sequential(t *testing.T) {
 
 	// Now test parallel compression produces same CRC32
 	mock2 := &multyBytesWriter{pageSize: 4}
-	pw2 := NewPagedWriterWithWorkers(t.Context(), mock2, true, 4)
+	pw2 := NewPagedWriter(t.Context(), mock2, true, 4)
 
 	for _, kv := range testData {
 		if err := pw2.Add([]byte(kv.k), []byte(kv.v)); err != nil {
@@ -245,7 +245,7 @@ func TestHeaderToMatchesSync(t *testing.T) {
 
 	// Build page via sync path
 	mock1 := &multyBytesWriter{pageSize: pageSize}
-	pw1 := NewPagedWriter(t.Context(), mock1, false)
+	pw1 := NewPagedWriter(t.Context(), mock1, false, 1)
 	for i := range testKeys {
 		require.NoError(pw1.Add([]byte(testKeys[i]), []byte(testVals[i])))
 	}
@@ -254,7 +254,7 @@ func TestHeaderToMatchesSync(t *testing.T) {
 
 	// Build page via async path (headerTo + concatenation, same as worker does)
 	mock2 := &multyBytesWriter{pageSize: pageSize}
-	pw2 := NewPagedWriter(t.Context(), mock2, false)
+	pw2 := NewPagedWriter(t.Context(), mock2, false, 1)
 	for i := range testKeys {
 		require.NoError(pw2.Add([]byte(testKeys[i]), []byte(testVals[i])))
 	}
@@ -293,7 +293,7 @@ func TestDecompressorEmptyWordsInvariant(t *testing.T) {
 func TestPageLayoutConsistency(t *testing.T) {
 	const pageSize = 4
 	mock := &multyBytesWriter{pageSize: pageSize}
-	pw := NewPagedWriter(t.Context(), mock, false)
+	pw := NewPagedWriter(t.Context(), mock, false, 1)
 
 	testPairs := []struct{ k, v string }{
 		{"alpha", "one"}, {"beta", "two"}, {"gamma", "three"},
@@ -350,9 +350,9 @@ func TestPagedWriterRoundTripParallel(t *testing.T) {
 		mock := &multyBytesWriter{pageSize: 3}
 		var pw *PagedWriter
 		if workers == 1 {
-			pw = NewPagedWriter(t.Context(), mock, true)
+			pw = NewPagedWriter(t.Context(), mock, true, 1)
 		} else {
-			pw = NewPagedWriterWithWorkers(t.Context(), mock, true, workers)
+			pw = NewPagedWriter(t.Context(), mock, true, workers)
 		}
 		for _, kv := range testPairs {
 			require.NoError(pw.Add(kv.k, kv.v))
@@ -392,7 +392,7 @@ func TestPagedReaderSortedKeyOrder(t *testing.T) {
 	require.NoError(err)
 	defer c.Close()
 
-	pw := NewPagedWriter(t.Context(), NewWriter(c, CompressNone), false)
+	pw := NewPagedWriter(t.Context(), NewWriter(c, CompressNone), false, 1)
 	for _, kv := range sortedPairs {
 		require.NoError(pw.Add([]byte(kv.k), []byte(kv.v)))
 	}
@@ -444,7 +444,7 @@ func BenchmarkPagedWriterAdd(b *testing.B) {
 	for _, tc := range cases {
 		b.Run(tc.name, func(b *testing.B) {
 			buf := &multyBytesWriter{pageSize: pageSize}
-			w := NewPagedWriterWithWorkers(b.Context(), buf, tc.compress, tc.numWorkers)
+			w := NewPagedWriter(b.Context(), buf, tc.compress, tc.numWorkers)
 			b.ResetTimer()
 			for b.Loop() {
 				w.Add(key, val) //nolint:errcheck
@@ -456,7 +456,7 @@ func BenchmarkPagedWriterAdd(b *testing.B) {
 
 func BenchmarkName(b *testing.B) {
 	buf := &multyBytesWriter{pageSize: 16}
-	w := NewPagedWriter(b.Context(), buf, false)
+	w := NewPagedWriter(b.Context(), buf, false, 1)
 	for i := 0; i < 16; i++ {
 		w.Add([]byte{byte(i)}, []byte{10 + byte(i)})
 	}

@@ -86,6 +86,41 @@ type BlobsBundle struct {
 	Blobs       []hexutil.Bytes `json:"blobs"       gencodec:"required"`
 }
 
+// BlobsBundleFromTransactions builds a BlobsBundle by extracting blobs,
+// commitments, and proofs from blob transactions in the given list.
+func BlobsBundleFromTransactions(txs types.Transactions) (*BlobsBundle, error) {
+	bundle := &BlobsBundle{
+		Commitments: make([]hexutil.Bytes, 0),
+		Proofs:      make([]hexutil.Bytes, 0),
+		Blobs:       make([]hexutil.Bytes, 0),
+	}
+	for i, txn := range txs {
+		if txn.Type() != types.BlobTxType {
+			continue
+		}
+		blobTx, ok := txn.(*types.BlobTxWrapper)
+		if !ok {
+			return nil, fmt.Errorf("expected BlobTxWrapper for tx %d, got %T", i, txn)
+		}
+		for _, c := range blobTx.Commitments {
+			cp := make([]byte, len(c))
+			copy(cp, c[:])
+			bundle.Commitments = append(bundle.Commitments, cp)
+		}
+		for _, p := range blobTx.Proofs {
+			pp := make([]byte, len(p))
+			copy(pp, p[:])
+			bundle.Proofs = append(bundle.Proofs, pp)
+		}
+		for _, b := range blobTx.Blobs {
+			bp := make([]byte, len(b))
+			copy(bp, b[:])
+			bundle.Blobs = append(bundle.Blobs, bp)
+		}
+	}
+	return bundle, nil
+}
+
 // BlobAndProofV1 holds one item for engine_getBlobsV1
 type BlobAndProofV1 struct {
 	Blob  hexutil.Bytes `json:"blob" gencodec:"required"`
