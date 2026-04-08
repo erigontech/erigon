@@ -77,10 +77,10 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 			if evm.Context.BlockNumber == 24809877 {
 				txIdx := evm.IntraBlockState().TxIndex()
 				if txIdx == 63 || txIdx == 72 {
-					log.Debug("[sstore debug] noop (1)", "block", evm.Context.BlockNumber, "txIdx", txIdx, "contract", callContext.Address(), "slot", fmt.Sprintf("%x", slot), "cost", cost, "total", cost+params.WarmStorageReadCostEIP2929)
+					log.Debug("[sstore debug] noop (1)", "block", evm.Context.BlockNumber, "txIdx", txIdx, "contract", callContext.Address(), "slot", fmt.Sprintf("%x", slot), "cost", cost, "total", cost)
 				}
 			}
-			return mdgas.MdGas{Regular: cost + params.WarmStorageReadCostEIP2929}, nil // SLOAD_GAS
+			return mdgas.MdGas{Regular: cost}, nil // SLOAD_GAS
 		}
 
 		slotCommited := accounts.InternKey(x.Bytes32())
@@ -159,12 +159,12 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		if evm.Context.BlockNumber == 24809877 {
 			txIdx := evm.IntraBlockState().TxIndex()
 			if txIdx == 63 || txIdx == 72 {
-				log.Debug("[sstore debug] dirty update (2.2)", "block", evm.Context.BlockNumber, "txIdx", txIdx, "contract", callContext.Address(), "slot", fmt.Sprintf("%x", slot), "cost", cost, "total", cost+params.WarmStorageReadCostEIP2929)
+				log.Debug("[sstore debug] dirty update (2.2)", "block", evm.Context.BlockNumber, "txIdx", txIdx, "contract", callContext.Address(), "slot", fmt.Sprintf("%x", slot), "cost", cost, "total", cost)
 			}
 		}
 		// EIP-2200 original clause:
 		//return params.SloadGasEIP2200, nil // dirty update (2.2)
-		return mdgas.MdGas{Regular: cost + params.WarmStorageReadCostEIP2929}, nil // dirty update (2.2)
+		return mdgas.MdGas{Regular: cost}, nil // dirty update (2.2)
 	}
 }
 
