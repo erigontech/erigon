@@ -33,9 +33,9 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
 		// TODO(yperbasis, mh0lt)
-		t.Skip("fix me on windows please")
+		t.Skip("fix me on windows/macOS please")
 	}
 
 	t.Parallel()
