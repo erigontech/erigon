@@ -66,22 +66,24 @@ func (api *ErigonImpl) BlockNumber(ctx context.Context, rpcBlockNumPtr *rpc.Bloc
 		rpcBlockNum = *rpcBlockNumPtr
 	}
 
+	overlayTx := api.filters.WithOverlay(tx)
+
 	var blockNum uint64
 	switch rpcBlockNum {
 	case rpc.LatestBlockNumber:
-		blockNum, err = rpchelper.GetLatestBlockNumber(tx)
+		blockNum, err = rpchelper.GetLatestBlockNumber(overlayTx)
 		if err != nil {
 			return 0, err
 		}
 	case rpc.EarliestBlockNumber:
 		blockNum = 0
 	case rpc.SafeBlockNumber:
-		blockNum, err = rpchelper.GetSafeBlockNumber(tx)
+		blockNum, err = rpchelper.GetSafeBlockNumber(overlayTx)
 		if err != nil {
 			return 0, err
 		}
 	case rpc.FinalizedBlockNumber:
-		blockNum, err = rpchelper.GetFinalizedBlockNumber(tx)
+		blockNum, err = rpchelper.GetFinalizedBlockNumber(overlayTx)
 		if err != nil {
 			return 0, err
 		}

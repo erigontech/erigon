@@ -137,7 +137,7 @@ func ChiadoGenesisBlock() *types.Genesis {
 }
 
 func TestGenesisBlock() *types.Genesis {
-	return &types.Genesis{Config: chain.TestChainConfig}
+	return &types.Genesis{Config: chain.TestChainBerlinConfig}
 }
 
 // DeveloperGenesisBlock returns the 'geth --dev' genesis block.
