@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"fmt"
 	"sync"
 	"testing"
 
@@ -12,6 +13,13 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/length"
 )
+
+// maxAddrSearchIters bounds the brute-force address search helpers below so a
+// broken search space (e.g. hash function change) produces a descriptive panic
+// instead of an infinite hang. 1M iterations is well above the expected work:
+// a single-nibble hit averages ~16 iters; a 16-bit shared-prefix hit averages
+// ~65k, both comfortably under the cap.
+const maxAddrSearchIters = 1 << 20
 
 // nibbleSeedKey is the composite cache key for findAddressForNibble.
 type nibbleSeedKey struct{ nibble, seed int }
@@ -43,7 +51,7 @@ func findAddressForNibble(targetNibble int, seed int) []byte {
 	var addr [20]byte
 	// Use seed * large prime to separate search spaces for different seeds.
 	counter := uint64(seed) * 1_000_003
-	for {
+	for iter := 0; iter < maxAddrSearchIters; iter++ {
 		binary.BigEndian.PutUint64(addr[:8], counter)
 		h := crypto.Keccak256(addr[:])
 		if int(h[0]>>4) == targetNibble {
@@ -57,6 +65,7 @@ func findAddressForNibble(targetNibble int, seed int) []byte {
 		}
 		counter++
 	}
+	panic(fmt.Sprintf("findAddressForNibble(nibble=%d, seed=%d): exceeded %d iterations", targetNibble, seed, maxAddrSearchIters))
 }
 
 // mockTrieCtxFactory returns a TrieContextFactory that always returns the
@@ -784,7 +793,12 @@ func findAddressesWithSharedPrefix(sharedNibbles int, count int) [][]byte {
 
 	var addr [20]byte
 	counter := uint64(0)
+	iter := 0
 	for len(results) < count {
+		if iter >= maxAddrSearchIters {
+			panic(fmt.Sprintf("findAddressesWithSharedPrefix(sharedNibbles=%d, count=%d): exceeded %d iterations after collecting %d", sharedNibbles, count, maxAddrSearchIters, len(results)))
+		}
+		iter++
 		binary.BigEndian.PutUint64(addr[:8], counter)
 		// Use second 8 bytes too for more entropy
 		binary.BigEndian.PutUint64(addr[10:18], counter*7+3)
