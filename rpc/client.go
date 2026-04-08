@@ -135,7 +135,7 @@ type readOp struct {
 type requestOp struct {
 	ids         []json.RawMessage
 	err         error
-	resp        chan []*jsonrpcMessage // receives up to len(ids) responses
+	resp        chan []*jsonrpcMessage // batch response channel
 	sub         *ClientSubscription    // only set for EthSubscribe requests
 	hadResponse bool                   // true when the request was responded to
 }
