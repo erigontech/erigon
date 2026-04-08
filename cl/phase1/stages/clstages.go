@@ -303,7 +303,7 @@ func ConsensusClStages(ctx context.Context,
 					if x := MetaCatchingUp(args); x != "" {
 						return x
 					}
-					return SleepForSlot
+					return CleanupAndPruning
 				},
 				ActionFunc: doForkchoiceRoutine,
 			},
