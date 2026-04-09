@@ -151,9 +151,8 @@ type ExecModuleTester struct {
 	ephemeralOverlay  *membatchwithdb.MemoryMutation
 	ephemeralRoTx     kv.TemporalTx
 	ephemeralTxNum    uint64
-	ephemeralHeaders  map[common.Hash]*types.Header
-	ephemeralTDs      map[common.Hash]*big.Int
 	ephemeralBlocks   map[common.Hash]*types.Block
+	ephemeralTDs      map[common.Hash]*big.Int
 	ephemeralLastHash common.Hash
 }
 

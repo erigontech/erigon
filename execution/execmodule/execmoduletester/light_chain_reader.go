@@ -31,14 +31,13 @@ import (
 var _ rulesif.ChainReader = (*LightChainReader)(nil)
 
 // LightChainReader implements rules.ChainReader with in-memory maps
-// for headers, total difficulties, and blocks, falling back to rawdb
-// reads on the provided tx for genesis data.
+// for blocks and total difficulties, falling back to rawdb reads on
+// the provided tx for genesis data.
 type LightChainReader struct {
 	Config_ *chain.Config
-	Headers map[common.Hash]*types.Header // hash -> header
-	TDs     map[common.Hash]*big.Int      // hash -> td
-	Blocks  map[common.Hash]*types.Block  // hash -> block (for uncle verification)
-	Tx      kv.Tx                         // fallback for genesis reads
+	Blocks  map[common.Hash]*types.Block // hash -> block
+	TDs     map[common.Hash]*big.Int     // hash -> td
+	Tx      kv.Tx                        // fallback for genesis reads
 }
 
 func (cr *LightChainReader) Config() *chain.Config                 { return cr.Config_ }
@@ -49,8 +48,8 @@ func (cr *LightChainReader) FrozenBlocks() uint64                  { return 0 }
 func (cr *LightChainReader) FrozenBorBlocks(bool) uint64           { return 0 }
 
 func (cr *LightChainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
-	if h, ok := cr.Headers[hash]; ok {
-		return h
+	if b, ok := cr.Blocks[hash]; ok {
+		return b.Header()
 	}
 	return rawdb.ReadHeader(cr.Tx, hash, number)
 }
@@ -64,8 +63,8 @@ func (cr *LightChainReader) GetHeaderByNumber(number uint64) *types.Header {
 }
 
 func (cr *LightChainReader) GetHeaderByHash(hash common.Hash) *types.Header {
-	if h, ok := cr.Headers[hash]; ok {
-		return h
+	if b, ok := cr.Blocks[hash]; ok {
+		return b.Header()
 	}
 	num := rawdb.ReadHeaderNumber(cr.Tx, hash)
 	if num == nil {

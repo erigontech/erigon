@@ -59,12 +59,11 @@ func (emt *ExecModuleTester) initEphemeral() error {
 	emt.ephemeralRoTx = roTx
 	emt.ephemeralOverlay = overlay
 	emt.ephemeralTxNum = txNum + 1 // next available
-	emt.ephemeralHeaders = make(map[common.Hash]*types.Header)
-	emt.ephemeralTDs = make(map[common.Hash]*big.Int)
 	emt.ephemeralBlocks = make(map[common.Hash]*types.Block)
+	emt.ephemeralTDs = make(map[common.Hash]*big.Int)
 
 	// Seed with genesis.
-	emt.ephemeralHeaders[emt.Genesis.Hash()] = emt.Genesis.Header()
+	emt.ephemeralBlocks[emt.Genesis.Hash()] = emt.Genesis
 	genTd, _ := rawdb.ReadTd(roTx, emt.Genesis.Hash(), 0)
 	if genTd != nil {
 		emt.ephemeralTDs[emt.Genesis.Hash()] = genTd
@@ -89,9 +88,8 @@ func (emt *ExecModuleTester) closeEphemeral() {
 func (emt *ExecModuleTester) ephemeralChainReader() *LightChainReader {
 	return &LightChainReader{
 		Config_: emt.ChainConfig,
-		Headers: emt.ephemeralHeaders,
-		TDs:     emt.ephemeralTDs,
 		Blocks:  emt.ephemeralBlocks,
+		TDs:     emt.ephemeralTDs,
 		Tx:      emt.ephemeralOverlay,
 	}
 }
@@ -195,9 +193,8 @@ func (emt *ExecModuleTester) insertChainEphemeral(cp *blockgen.ChainPack) error 
 		emt.ephemeralTxNum += uint64(block.Transactions().Len())
 		emt.ephemeralTxNum++
 
-		// Record header, block, and total difficulty.
+		// Record block and total difficulty.
 		header := block.Header()
-		emt.ephemeralHeaders[block.Hash()] = header
 		emt.ephemeralBlocks[block.Hash()] = block
 		parentTd := emt.ephemeralTDs[header.ParentHash]
 		if parentTd == nil {
@@ -250,11 +247,11 @@ func (emt *ExecModuleTester) DryRunBlock(block *types.Block) error {
 	return nil
 }
 
-// RecordEphemeralHeader records a block header in the ephemeral chain reader's
-// in-memory maps without executing the block. Used for side-chain blocks whose
+// RecordEphemeralBlock records a block in the ephemeral chain reader's
+// in-memory map without executing it. Used for side-chain blocks whose
 // headers are needed for uncle verification.
-func (emt *ExecModuleTester) RecordEphemeralHeader(header *types.Header) {
-	emt.ephemeralHeaders[header.Hash()] = header
+func (emt *ExecModuleTester) RecordEphemeralBlock(block *types.Block) {
+	emt.ephemeralBlocks[block.Hash()] = block
 }
 
 // EphemeralOverlay returns the MemoryMutation overlay for state reads.
