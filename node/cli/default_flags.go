@@ -84,6 +84,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.RpcBatchConcurrencyFlag,
 	&utils.RpcStreamingDisableFlag,
 	&utils.DBReadConcurrencyFlag,
+	&utils.RpcMaxConcurrentRequestsFlag,
 	&utils.RpcAccessListFlag,
 	&utils.RpcTraceCompatFlag,
 	&utils.RpcGethCompatFlag,
@@ -220,6 +221,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.CaplinImmediateBlobBackfillFlag,
 
 	&utils.CaplinDisableBlobPruningFlag,
+	&utils.CaplinColumnKeepSlotsFlag,
 	&utils.CaplinDisableCheckpointSyncFlag,
 	&utils.CaplinEnableSnapshotGeneration,
 	&utils.CaplinMevRelayUrl,

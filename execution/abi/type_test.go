@@ -268,6 +268,10 @@ func TestTypeCheck(t *testing.T) {
 		{"bytes32[]]", nil, "", "invalid arg type in abi"},
 		{"invalidType", nil, "", "unsupported arg type: invalidType"},
 		{"invalidSlice[]", nil, "", "unsupported arg type: invalidSlice"},
+		// fixed bytes outside the valid ABI range 0 < M <= 32 should be rejected
+		{"bytes0", nil, "", "unsupported arg type: bytes0"},
+		{"bytes33", nil, "", "unsupported arg type: bytes33"},
+		{"bytes64", nil, "", "unsupported arg type: bytes64"},
 		// simple tuple
 		{"tuple", []ArgumentMarshaling{{Name: "a", Type: "uint256"}, {Name: "b", Type: "uint256"}}, struct {
 			A *big.Int

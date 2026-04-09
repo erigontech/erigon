@@ -136,8 +136,6 @@ type PatriciaContext interface {
 	Account(plainKey []byte) (*Update, error)
 	// fetch storage with given plain key
 	Storage(plainKey []byte) (*Update, error)
-	// TxNum returns the current transaction number
-	TxNum() uint64
 }
 
 type TrieVariant string
@@ -1691,6 +1689,34 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 	}
 }
 
+func (t *Updates) TouchHashedKey(hashedKey []byte) {
+	switch t.mode {
+	case ModeDirect:
+		if len(hashedKey) == 0 {
+			return
+		}
+		// string(hashedKey) copies the bytes, so dedupKey is safe even if the caller reuses the slice.
+		// No extra copy needed before etl.Collect: see Collector.Collect — it copies k and v internally.
+		dedupKey := string(hashedKey)
+		if _, ok := t.keys[dedupKey]; !ok {
+			var err error
+			if !t.sortPerNibble {
+				err = t.etl.Collect(hashedKey, []byte{})
+			} else {
+				err = t.nibbles[hashedKey[0]].Collect(hashedKey, []byte{})
+			}
+			if err != nil {
+				log.Warn("failed to collect hashed key", "hashedKey", fmt.Sprintf("%x", hashedKey), "err", err)
+			}
+			t.keys[dedupKey] = struct{}{}
+		}
+	case ModeUpdate:
+		pivot := &KeyUpdate{hashedKey: common.Copy(hashedKey), update: new(Update)}
+		t.tree.ReplaceOrInsert(pivot)
+	default:
+	}
+}
+
 func (t *Updates) TouchAccount(c *KeyUpdate, val []byte) {
 	if len(val) == 0 {
 		c.update.Flags = DeleteUpdate
@@ -1728,6 +1754,7 @@ func (t *Updates) TouchStorage(c *KeyUpdate, val []byte) {
 	if len(val) == 0 {
 		c.update.Flags = DeleteUpdate
 	} else {
+		c.update.Flags &^= DeleteUpdate
 		c.update.Flags |= StorageUpdate
 		copy(c.update.Storage[:], val)
 	}
@@ -1742,7 +1769,7 @@ func (t *Updates) TouchCode(c *KeyUpdate, code []byte) {
 		c.update.CodeHash = empty.CodeHash
 		return
 	}
-	copy(c.update.CodeHash[:], crypto.Keccak256(code))
+	c.update.CodeHash = crypto.HashData(code)
 }
 
 func (t *Updates) Close() {
@@ -1935,8 +1962,11 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 func (t *Updates) Reset() {
 	switch t.mode {
 	case ModeDirect:
-		t.keys = nil
-		t.keys = make(map[string]struct{})
+		if t.keys == nil {
+			t.keys = make(map[string]struct{})
+		} else {
+			clear(t.keys)
+		}
 		t.initCollector()
 	case ModeUpdate:
 		t.tree.Clear(true)
@@ -2023,6 +2053,9 @@ func (u *Update) Merge(b *Update) {
 	if b.Flags == DeleteUpdate {
 		u.Flags = DeleteUpdate
 		return
+	}
+	if b.Flags&(BalanceUpdate|NonceUpdate|CodeUpdate|StorageUpdate) != 0 {
+		u.Flags &^= DeleteUpdate
 	}
 	if b.Flags&BalanceUpdate != 0 {
 		u.Flags |= BalanceUpdate

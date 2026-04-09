@@ -244,6 +244,9 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	if eth1Getter != nil {
 		eth1Getter.SetBeaconChainConfig(beaconConfig)
 	}
+	if engineWithCfg, ok := engine.(*execution_client.ExecutionClientEngine); ok {
+		engineWithCfg.SetBeaconChainConfig(beaconConfig)
+	}
 
 	ctx, cn := context.WithCancel(ctx)
 	defer cn()
@@ -366,6 +369,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 
 	peerDasState.SetLocalNodeID(localNode)
 	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, ethClock, state)
+	gossipManager.SetPeerBanner(beaconRpc)
 	peerDas := das.NewPeerDas(ctx, beaconRpc, beaconConfig, &config, columnStorage, blobStorage, sentinel, localNode.ID(), ethClock, peerDasState, gossipManager)
 	forkChoice.InitPeerDas(peerDas) // hack init
 	committeeSub := committee_subscription.NewCommitteeSubscribeManagement(ctx, beaconConfig, networkConfig, ethClock, aggregationPool, syncedDataManager, gossipManager)

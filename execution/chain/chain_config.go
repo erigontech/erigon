@@ -150,9 +150,6 @@ var (
 		Ethash:                new(EthashConfig),
 	}
 
-	// TestChainConfig is an alias for TestChainBerlinConfig for backward compatibility.
-	TestChainConfig = TestChainBerlinConfig
-
 	TestChainOsakaConfig = &Config{
 		ChainID:                       big.NewInt(1337),
 		Rules:                         EtHashRules,

@@ -210,14 +210,6 @@ func (evm *EVM) handleFrameRevert(gas *mdgas.MdGas, err error, depth int,
 		evm.stateGasConsumed = savedStateGasConsumed
 	}
 
-	// Compute spill: state gas that was charged from gas_left (regular)
-	// because the reservoir was insufficient.
-	reservoirUsed := initialChildState - gas.State
-	var spill uint64
-	if childStateConsumed > reservoirUsed {
-		spill = childStateConsumed - reservoirUsed
-	}
-
 	// EIP-8037: "On child revert or exceptional halt, all state gas
 	// consumed by the child, both from the reservoir and any that spilled
 	// into gas_left, is restored to the parent's reservoir."
@@ -225,6 +217,16 @@ func (evm *EVM) handleFrameRevert(gas *mdgas.MdGas, err error, depth int,
 		if err == ErrExecutionReverted {
 			// Top-level REVERT: restore spill to gas_left for refund
 			// accounting; track it for receipt gas calculation.
+			// Spill = state gas that was charged from gas_left (regular)
+			// because the reservoir was insufficient. When gas.State >
+			// initialChildState the reservoir grew via sub-child reverts —
+			// no reservoir was consumed net, so all childStateConsumed
+			// was spilled.
+			var reservoirUsed uint64
+			if initialChildState > gas.State {
+				reservoirUsed = initialChildState - gas.State
+			}
+			spill := childStateConsumed - reservoirUsed
 			gas.Regular += spill
 			evm.revertedSpillGas += spill
 		}
@@ -232,8 +234,9 @@ func (evm *EVM) handleFrameRevert(gas *mdgas.MdGas, err error, depth int,
 		// reservoir stays as-is for block gas accounting.
 	} else {
 		// Child frame (depth > 0): restore all consumed state gas
-		// (reservoir-sourced + spill) to the reservoir.
-		gas.State = initialChildState + spill
+		// (reservoir-sourced + spill) to the reservoir, preserving any
+		// sub-child restorations already in the reservoir.
+		gas.State += childStateConsumed
 		// Regular gas: REVERT preserves it (step 2 doesn't apply);
 		// exceptional halt burns it (step 2 zeroed gas.Regular).
 	}
@@ -447,7 +450,7 @@ func NewCodeAndHash(code []byte) *codeAndHash {
 
 func (c *codeAndHash) Hash() accounts.CodeHash {
 	if c.hash.IsZero() {
-		c.hash = accounts.InternCodeHash(crypto.Keccak256Hash(c.code))
+		c.hash = accounts.InternCodeHash(crypto.HashData(c.code))
 	}
 	return c.hash
 }
@@ -535,7 +538,7 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 		// EIP-8037: At depth > 0, track collision-burned gas in regularGasConsumed
 		// so 2D block gas accounting reflects the gas consumed on EIP-684 collision.
 		// At depth 0 (CREATE transaction), the burned gas is accounted for through
-		// the zero-gas return in state_transition.go (regular_gas_used=0 per spec).
+		// the zero-gas return in txn_executor.go (regular_gas_used=0 per spec).
 		if evm.chainRules.IsAmsterdam && depth > 0 {
 			evm.regularGasConsumed += gasRemaining.Regular
 		}

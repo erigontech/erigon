@@ -27,11 +27,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
@@ -40,7 +42,7 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
-func NewEngineXTestRunner(t *testing.T, logger log.Logger, preAllocsDir string) (*EngineXTestRunner, error) {
+func NewEngineXTestRunner(t testing.TB, logger log.Logger, preAllocsDir string) (*EngineXTestRunner, error) {
 	preAllocs := make(map[PreAllocHash]*PreAlloc)
 	err := filepath.WalkDir(preAllocsDir, func(path string, info os.DirEntry, err error) error {
 		if info.IsDir() {
@@ -71,7 +73,7 @@ func NewEngineXTestRunner(t *testing.T, logger log.Logger, preAllocsDir string) 
 }
 
 type EngineXTestRunner struct {
-	t         *testing.T
+	t         testing.TB
 	logger    log.Logger
 	preAllocs map[PreAllocHash]*PreAlloc
 	mu        sync.Mutex
@@ -84,21 +86,29 @@ func (extr *EngineXTestRunner) Run(ctx context.Context, test EngineXTestDefiniti
 	if err != nil {
 		return err
 	}
-	if len(test.NewPayloads) > 0 {
-		// make sure each test begins at genesis
-		// TODO actually this should be a call to debug_setHead once we implement it
-		//      because a FCU to an older canonical hash does NOT have to do an unwind as per spec
-		//      (in fact it is in our interest NOT to unwind, and currently this is a no-op)
-		//      hence debug_setHead will be the right way to do this once
-		//      https://github.com/erigontech/erigon/issues/18922 is ready
-		//err = processFcu(ctx, tester, tester.GenesisBlock.Hash(), test.NewPayloads[0].FcuVersion)
-		//if err != nil {
-		//	return err
-		//}
+	return extr.execute(ctx, tester, test)
+}
+
+// EnsureTester pre-creates the tester for the given test's fork+preAllocHash.
+// Call before benchmark timing to exclude setup costs.
+func (extr *EngineXTestRunner) EnsureTester(test EngineXTestDefinition) error {
+	_, err := extr.getOrCreateTester(test.Fork, test.PreAllocHash)
+	return err
+}
+
+// Execute runs the payload execution for a test (NewPayload + FCU)
+// without any tester setup. The tester must already exist.
+func (extr *EngineXTestRunner) Execute(ctx context.Context, test EngineXTestDefinition) error {
+	tester, err := extr.getOrCreateTester(test.Fork, test.PreAllocHash)
+	if err != nil {
+		return err
 	}
+	return extr.execute(ctx, tester, test)
+}
+
+func (extr *EngineXTestRunner) execute(ctx context.Context, tester engineapitester.EngineApiTester, test EngineXTestDefinition) error {
 	for _, newPayload := range test.NewPayloads {
-		err = processNewPayload(ctx, tester, newPayload)
-		if err != nil {
+		if err := processNewPayload(ctx, tester, newPayload); err != nil {
 			return err
 		}
 	}
@@ -133,9 +143,36 @@ func (extr *EngineXTestRunner) getOrCreateTester(fork Fork, preAllocHash PreAllo
 		return engineapitester.EngineApiTester{}, err
 	}
 	forkConfig = &forkConfigCopy
-	genesis := alloc.Genesis
-	genesis.Alloc = alloc.Alloc
-	genesis.Config = forkConfig
+	var genesis types.Genesis
+	if alloc.Environment.GasLimit != 0 {
+		// New format: build genesis from environment fields
+		env := alloc.Environment
+		genesis = types.Genesis{
+			Config:     forkConfig,
+			Alloc:      alloc.Alloc,
+			ExtraData:  []byte{0},
+			Coinbase:   env.Coinbase,
+			GasLimit:   uint64(env.GasLimit),
+			Difficulty: uint256.NewInt(uint64(env.Difficulty)),
+			Timestamp:  uint64(env.Timestamp),
+		}
+		if env.BaseFee != nil {
+			genesis.BaseFee = uint256.NewInt(uint64(*env.BaseFee))
+		}
+		if env.ExcessBlobGas != nil {
+			v := uint64(*env.ExcessBlobGas)
+			genesis.ExcessBlobGas = &v
+		}
+		if env.BlobGasUsed != nil {
+			v := uint64(*env.BlobGasUsed)
+			genesis.BlobGasUsed = &v
+		}
+	} else {
+		// Old format: genesis parsed directly from JSON
+		genesis = alloc.Genesis
+		genesis.Alloc = alloc.Alloc
+		genesis.Config = forkConfig
+	}
 	engineApiClientTimeout := 10 * time.Minute
 	tester := engineapitester.InitialiseEngineApiTester(extr.t, engineapitester.EngineApiTesterInitArgs{
 		Logger:                 extr.logger,
@@ -269,8 +306,20 @@ type EngineXTestNewPayload struct {
 type PreAllocHash string
 
 type PreAlloc struct {
-	Genesis types.Genesis      `json:"genesis"`
-	Alloc   types.GenesisAlloc `json:"pre"`
+	Environment EngineXEnvironment `json:"environment"`
+	Genesis     types.Genesis      `json:"genesis"`
+	Alloc       types.GenesisAlloc `json:"pre"`
+}
+
+// EngineXEnvironment maps the "environment" field from engine-x pre-alloc JSON files.
+type EngineXEnvironment struct {
+	Coinbase      common.Address       `json:"currentCoinbase"`
+	GasLimit      math.HexOrDecimal64  `json:"currentGasLimit"`
+	Timestamp     math.HexOrDecimal64  `json:"currentTimestamp"`
+	Difficulty    math.HexOrDecimal64  `json:"currentDifficulty"`
+	BaseFee       *math.HexOrDecimal64 `json:"currentBaseFee"`
+	ExcessBlobGas *math.HexOrDecimal64 `json:"currentExcessBlobGas"`
+	BlobGasUsed   *math.HexOrDecimal64 `json:"currentBlobGasUsed"`
 }
 
 type Fork string

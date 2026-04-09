@@ -274,6 +274,10 @@ func (rs *StateV3) ApplyStateWrites(ctx context.Context,
 }
 
 // ApplyTxIndexes writes trace indices, log indices, and receipts.
+// When skipReceiptCache is true, the receipt-cache domain write is skipped.
+// This is needed for the parallel executor's block-finalize txResult which
+// shares the system-tx-end txNum; a second DomainPut at the same txNum would
+// overwrite the history entry that preserves the last regular tx's receipt.
 func (rs *StateV3) ApplyTxIndexes(
 	roTx kv.TemporalTx,
 	txNum uint64,
@@ -282,8 +286,10 @@ func (rs *StateV3) ApplyTxIndexes(
 	logs []*types.Log,
 	traceFroms map[accounts.Address]struct{},
 	traceTos map[accounts.Address]struct{},
+	skipReceiptCache ...bool,
 ) error {
-	if err := rs.applyLogsAndTraces4(roTx, txNum, receipt, cummulativeBlobGas, logs, traceFroms, traceTos, false); err != nil {
+	skip := len(skipReceiptCache) > 0 && skipReceiptCache[0]
+	if err := rs.applyLogsAndTraces4(roTx, txNum, receipt, cummulativeBlobGas, logs, traceFroms, traceTos, false, skip); err != nil {
 		return fmt.Errorf("StateV3.ApplyTxIndexes: %w", err)
 	}
 	return nil
@@ -304,7 +310,7 @@ func (rs *StateV3) CommitStepBoundary(ctx context.Context, roTx kv.TemporalTx, b
 	return nil
 }
 
-func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *types.Receipt, cummulativeBlobGas uint64, logs []*types.Log, traceFroms map[accounts.Address]struct{}, traceTos map[accounts.Address]struct{}, historyExecution bool) error {
+func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *types.Receipt, cummulativeBlobGas uint64, logs []*types.Log, traceFroms map[accounts.Address]struct{}, traceTos map[accounts.Address]struct{}, historyExecution bool, skipReceiptCache bool) error {
 	domains := rs.domains
 	for addr := range traceFroms {
 		addrValue := addr.Value()
@@ -343,7 +349,7 @@ func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *
 		}
 	}
 
-	if rs.syncCfg.PersistReceiptsCacheV2 {
+	if rs.syncCfg.PersistReceiptsCacheV2 && !skipReceiptCache {
 		if err := rawdb.WriteReceiptCacheV2(rs.domains.AsPutDel(tx), receipt, txNum); err != nil {
 			return err
 		}

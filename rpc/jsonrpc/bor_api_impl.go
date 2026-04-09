@@ -62,7 +62,7 @@ func (api *BorImpl) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
 	if number == nil || *number == rpc.LatestBlockNumber {
 		header = rawdb.ReadCurrentHeader(tx)
 	} else {
-		header, _ = getHeaderByNumber(ctx, *number, api, tx)
+		header, _ = api.headerByNumber(ctx, *number, tx)
 	}
 	// Ensure we have an actually valid block
 	if header == nil {
@@ -138,7 +138,7 @@ func (api *BorImpl) GetSnapshotAtHash(hash common.Hash) (*Snapshot, error) {
 	defer tx.Rollback()
 
 	// Retreive the header
-	header, err := getHeaderByHash(ctx, api, tx, hash)
+	header, err := api.headerByHash(ctx, hash, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +176,7 @@ func (api *BorImpl) GetSigners(number *rpc.BlockNumber) ([]common.Address, error
 	if number == nil || *number == rpc.LatestBlockNumber {
 		header = rawdb.ReadCurrentHeader(tx)
 	} else {
-		header, _ = getHeaderByNumber(ctx, *number, api, tx)
+		header, _ = api.headerByNumber(ctx, *number, tx)
 	}
 	// Ensure we have an actually valid block
 	if header == nil {
@@ -201,7 +201,7 @@ func (api *BorImpl) GetSignersAtHash(hash common.Hash) ([]common.Address, error)
 	defer tx.Rollback()
 
 	// Retrieve the header
-	header, _ := getHeaderByHash(ctx, api, tx, hash)
+	header, _ := api.headerByHash(ctx, hash, tx)
 
 	// Ensure we have an actually valid block
 	if header == nil {
@@ -320,11 +320,11 @@ func (api *BorImpl) GetSnapshotProposer(blockNrOrHash *rpc.BlockNumberOrHash) (c
 			if blockNr == rpc.LatestBlockNumber {
 				header = rawdb.ReadCurrentHeader(tx)
 			} else {
-				header, err = getHeaderByNumber(ctx, blockNr, api, tx)
+				header, err = api.headerByNumber(ctx, blockNr, tx)
 			}
 		} else {
 			if blockHash, ok := blockNrOrHash.Hash(); ok {
-				header, err = getHeaderByHash(ctx, api, tx, blockHash)
+				header, err = api.headerByHash(ctx, blockHash, tx)
 			}
 		}
 	}
@@ -358,11 +358,11 @@ func (api *BorImpl) GetSnapshotProposerSequence(blockNrOrHash *rpc.BlockNumberOr
 			if blockNr == rpc.LatestBlockNumber {
 				header = rawdb.ReadCurrentHeader(tx)
 			} else {
-				header, err = getHeaderByNumber(ctx, blockNr, api, tx)
+				header, err = api.headerByNumber(ctx, blockNr, tx)
 			}
 		} else {
 			if blockHash, ok := blockNrOrHash.Hash(); ok {
-				header, err = getHeaderByHash(ctx, api, tx, blockHash)
+				header, err = api.headerByHash(ctx, blockHash, tx)
 			}
 		}
 	}

@@ -43,7 +43,6 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
-	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -58,6 +57,7 @@ import (
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/webseeds"
 	"github.com/erigontech/erigon/db/etl"
+	"github.com/erigontech/erigon/db/fromdb"
 	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -451,7 +451,7 @@ var snapshotCommand = cli.Command{
 			Description: "verify block state roots against commitment history snapshots for a given [from,to) block range (no block re-execution)",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
-				&cli.Uint64Flag{Name: "from", Usage: "block number from which to start verifying", Required: true},
+				&cli.Uint64Flag{Name: "from", Usage: "block number from which to start verifying (default: 0)"},
 				&cli.Uint64Flag{Name: "to", Usage: "block number up to which to verify (exclusive); defaults to latest block with state"},
 				&cli.Int64Flag{Name: "seed", Usage: "random seed for block sampling (auto-generated if not set)"},
 				&cli.Float64Flag{Name: "sample", Usage: "fraction of blocks to check via pseudo-random sampling (0.0-1.0)", Value: 1.0},
@@ -639,7 +639,7 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, err err
 
 		_, found := rd.Lookup([]byte(stateKey))
 		if found {
-			fmt.Printf("found state key with kvi %s\n", filePath)
+			fmt.Printf("  %s  Unwindable\n", filepath.Base(filePath))
 			return true, false, nil
 		} else {
 			fmt.Printf("skipping file because it doesn't have state key %s\n", fileName)
@@ -677,7 +677,7 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, err err
 	defer c.Close()
 
 	if bytes.Equal(c.Key(), []byte(stateKey)) {
-		fmt.Printf("found state key using bt %s\n", filePath)
+		fmt.Printf("  %s  Not Unwindable (*)\n", filepath.Base(filePath))
 		return true, false, nil
 	}
 	return false, false, nil
@@ -756,12 +756,17 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 
 	// Step 2: Process each candidate file (already parsed)
 	doesRmCommitment := len(domainNames) == 0 || slices.Contains(domainNames, kv.CommitmentDomain.String())
+	snapDirPrinted := false
 	for _, candidate := range candidateFiles {
 		res := candidate.fileInfo
 
 		// check that commitment file has state in it
 		// When domains are "compacted", we want to keep latest commitment file with state key in it
 		if doesRmCommitment && strings.Contains(filepath.Base(res.Path), "commitment") && strings.HasSuffix(res.Path, ".kv") {
+			if !snapDirPrinted {
+				fmt.Printf("Snapshot dir: %s\n\n", filepath.Dir(res.Path))
+				snapDirPrinted = true
+			}
 			hasState, broken, err := checkCommitmentFileHasRoot(res.Path)
 			if err != nil {
 				return err
@@ -870,16 +875,29 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 
 		} else { // prevent all commitment files with trie state from deletion for "compacted" domains case
 			hasStateTrie := 0
+			fmt.Println()
+			var totalSize uint64
 			for _, file := range commitmentFilesWithState {
+				var sizeStr string
+				if info, err := os.Stat(file.Path); err == nil {
+					sz := uint64(info.Size())
+					totalSize += sz
+					sizeStr = common.ByteCount(sz)
+				} else {
+					sizeStr = "unknown"
+				}
 				if file.To <= minS {
 					hasStateTrie++
-					fmt.Println("KEEP   " + file.Path)
+					fmt.Printf("  KEEP   %s  (%s)\n", filepath.Base(file.Path), sizeStr)
 				} else {
-					fmt.Println("REMOVE " + file.Path)
+					fmt.Printf("  REMOVE %s  (%s)\n", filepath.Base(file.Path), sizeStr)
 				}
 			}
+			if len(commitmentFilesWithState) > 0 {
+				fmt.Printf("  Total: %s\n", common.ByteCount(totalSize))
+			}
 			if hasStateTrie == 0 && len(commitmentFilesWithState) > 0 {
-				fmt.Printf("this will remove ALL commitment files with state trie\n")
+				fmt.Printf("\nthis will remove ALL commitment files with state trie\n")
 				q := "Do that anyway?\n\t1) RemoveFile\n\t4) NONONO (Exit)\n (pick number): "
 				if promptExit(q) {
 					os.Exit(0)
@@ -901,24 +919,22 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 		// file (e.g., accounts.192-208 is a subset of accounts.192-224).
 		// Cross-domain matching is prevented so that, e.g., removing commitment.192-224
 		// does not cascade to accounts.192-208 which may be the only copy of that data.
-		for {
-			added := false
-			for _, res := range files {
-				if _, alreadyMarked := toRemove[res.Path]; alreadyMarked {
-					continue
-				}
-				for _, marked := range toRemove {
-					if res.TypeString == marked.TypeString &&
-						res.From >= marked.From && res.To <= marked.To &&
-						(res.From != marked.From || res.To != marked.To) {
-						toRemove[res.Path] = res
-						added = true
-						break
-					}
-				}
+		//
+		// A single pass suffices because interval subset containment is transitive:
+		// if C ⊂ B and B ⊂ A, then C ⊂ A. Since A (the originally-marked file) is
+		// already in toRemove, C will match against A directly without needing B as
+		// an intermediate step.
+		for _, res := range files {
+			if _, alreadyMarked := toRemove[res.Path]; alreadyMarked {
+				continue
 			}
-			if !added {
-				break
+			for _, marked := range toRemove {
+				if res.TypeString == marked.TypeString &&
+					res.From >= marked.From && res.To <= marked.To &&
+					(res.From != marked.From || res.To != marked.To) {
+					toRemove[res.Path] = res
+					break
+				}
 			}
 		}
 	} else {
@@ -1166,7 +1182,7 @@ func doDebugKey(cliCtx *cli.Context) error {
 	if err := view.IntegrityKey(domain, key); err != nil {
 		return err
 	}
-	if err := view.IntegirtyInvertedIndexKey(domain, key); err != nil {
+	if err := view.IntegrityInvertedIndexKey(domain, key); err != nil {
 		return err
 	}
 	return nil
@@ -1284,8 +1300,10 @@ func doIntegrity(cliCtx *cli.Context) error {
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(1)
 	for _, chk := range requestedChecks {
-		chk := chk
 		g.Go(func() error {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			logger.Info("[integrity] starting", "check", chk)
 			if err := func() error {
 				switch chk {
@@ -1373,7 +1391,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 					}
 					scCopy := sc
 					scCopy.SampleRatio /= 100 // it's very slow check
-					if err := integrity.CheckCommitmentHistAtBlkRange(ctx, scCopy, db, blockReader, 1, to+1, failFast, logger); err != nil {
+					if err := integrity.CheckCommitmentHistAtBlkRange(ctx, scCopy, db, blockReader, 1, to+1, logger); err != nil {
 						return err
 					}
 				case integrity.StateVerify:
@@ -1394,13 +1412,15 @@ func doIntegrity(cliCtx *cli.Context) error {
 	return g.Wait()
 }
 
-// stateProgress returns the latest block number covered by state snapshots,
-// derived from the aggregator's EndTxNumMinimax. This may differ from the block
-// files progress — block snapshots and state snapshots advance independently.
+// stateProgress returns the latest block number for which state history is available.
+// It considers both snapshot files (EndTxNumMinimax) and MDBX data (Execution stage progress).
 // Use this as the upper bound for state-history integrity commands.
 func stateProgress(ctx context.Context, db kv.TemporalRoDB, txNumsReader rawdbv3.TxNumsReader) (uint64, error) {
 	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
 	aggMax := agg.EndTxNumMinimax()
+	if aggMax == 0 {
+		return 0, nil
+	}
 	roTx, err := db.BeginRo(ctx)
 	if err != nil {
 		return 0, err
@@ -1409,6 +1429,17 @@ func stateProgress(ctx context.Context, db kv.TemporalRoDB, txNumsReader rawdbv3
 	blockNum, _, err := txNumsReader.FindBlockNum(ctx, roTx, aggMax)
 	if err != nil {
 		return 0, err
+	}
+	if blockNum > 0 {
+		blockNum-- // FindBlockNum returns the block *containing* aggMax, but the per-block check needs the entire block covered
+	}
+	// Also check execution stage progress — MDBX may have state beyond snapshots
+	execProgress, err := stages.GetStageProgress(roTx, stages.Execution)
+	if err != nil {
+		return blockNum, nil // fall back to snapshot-only progress
+	}
+	if execProgress > blockNum {
+		blockNum = execProgress
 	}
 	return blockNum, nil
 }
@@ -1482,7 +1513,7 @@ func doCheckStateRootByHistory(cliCtx *cli.Context, logger log.Logger) error {
 		return err
 	}
 	logger.Info("[check-commitment-hist-at-blk-range] sampling config", "seed", sc.Seed, "sampleRatio", sc.SampleRatio)
-	return integrity.CheckCommitmentHistAtBlkRange(ctx, sc, db, blockReader, from, to, true /*failFast*/, logger)
+	return integrity.CheckCommitmentHistAtBlkRange(ctx, sc, db, blockReader, from, to, logger)
 }
 
 func doVerifyState(cliCtx *cli.Context, logger log.Logger) error {
