@@ -528,20 +528,16 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 // If ahead, remove the highest state files (all domains), de-register them
 // from the downloader, strip from preverified.toml, reopen, and repeat.
 func alignStateToBlockSnapshots(ctx context.Context, tx kv.RwTx, agg *state.Aggregator, cfg SnapshotsCfg, logPrefix string, logger log.Logger) error {
-	// Only align on fresh start — if chaindata already has execution
-	// progress, the node previously processed past any misalignment.
-	// Re-running alignment on restart would remove snapshot files that
-	// the downloader re-downloaded, cascading until all state is gone.
-	progress, err := stages.GetStageProgress(tx, stages.Execution)
-	if err != nil {
-		return nil
-	}
-	if progress > 0 {
+	frozenBlocks := cfg.blockReader.FrozenBlocks()
+	if frozenBlocks == 0 {
 		return nil
 	}
 
-	frozenBlocks := cfg.blockReader.FrozenBlocks()
-	if frozenBlocks == 0 {
+	// Only align on fresh start. If the TxNums index already covers all
+	// frozen blocks, the node previously processed past any misalignment.
+	// Re-running alignment on restart would remove snapshot files that
+	// the downloader re-downloaded, cascading until all state is gone.
+	if maxTxNum, err := rawdbv3.TxNums.Max(ctx, tx, frozenBlocks); err == nil && maxTxNum > 0 {
 		return nil
 	}
 

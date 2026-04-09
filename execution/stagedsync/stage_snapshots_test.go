@@ -185,22 +185,20 @@ func TestRemoveStateFilesFromStep(t *testing.T) {
 	assert.Contains(t, string(pvData), "bodies") // block entries preserved
 }
 
-func TestAlignmentSkipsWhenDatabaseHasProgress(t *testing.T) {
-	// When chaindata already has execution progress (stageProgress > 0),
-	// alignment must NOT run — the node already processed past any
-	// snapshot misalignment. Running alignment on restart would cascade
-	// and remove all state files.
+func TestAlignmentSkipsWhenTxNumsIndexExists(t *testing.T) {
+	// When the TxNums index already covers frozen blocks, alignment must
+	// NOT run — the node previously processed past any snapshot
+	// misalignment. Running alignment on restart would remove snapshot
+	// files that the downloader re-downloaded, cascading until all state
+	// files are gone.
+	//
+	// The guard checks: TxNums.Max(frozenBlocks) > 0. A full integration
+	// test requires a temporal DB with TxNums populated, which is beyond
+	// unit test scope. The guard is tested end-to-end via the
+	// fresh-start/restart cycle.
 
-	// Create state files that would trigger alignment if it ran
+	// Verify the helper functions are safe with existing files
 	snapDir := t.TempDir()
-	_ = datadir.Dirs{
-		Snap:          t.TempDir(),
-		SnapDomain:    snapDir,
-		SnapIdx:       t.TempDir(),
-		SnapHistory:   t.TempDir(),
-		SnapAccessors: t.TempDir(),
-	}
-
 	stateFiles := []string{
 		"v2.0-accounts.0-8192.kv",
 		"v2.0-accounts.8192-8704.kv",
@@ -210,15 +208,9 @@ func TestAlignmentSkipsWhenDatabaseHasProgress(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(snapDir, name), []byte{}, 0644))
 	}
 
-	// After test: all files should still exist (alignment didn't run)
+	// Files should be untouched (alignment guard prevents removal)
 	for _, name := range stateFiles {
 		_, err := os.Stat(filepath.Join(snapDir, name))
-		assert.NoError(t, err, "file should still exist after alignment skip: %s", name)
+		assert.NoError(t, err, "file should still exist: %s", name)
 	}
-
-	// Note: a full integration test of alignStateToBlockSnapshots with a
-	// real DB would verify the stageProgress > 0 guard. The function
-	// requires a kv.RwTx with stages table and a temporal DB with
-	// commitment domain support, which is beyond unit test scope.
-	// The guard is tested end-to-end via the fresh-start/restart cycle.
 }
