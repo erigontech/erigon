@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -615,8 +616,8 @@ func findHighestFileStartStep(dirs datadir.Dirs) kv.Step {
 func removeStateFilesFromStep(dirs datadir.Dirs, fromStep kv.Step, logger log.Logger, logPrefix string) int {
 	removed := 0
 
-	for _, dir := range []string{dirs.SnapDomain, dirs.SnapIdx, dirs.SnapHistory, dirs.SnapAccessors} {
-		entries, err := os.ReadDir(dir)
+	for _, snapDir := range []string{dirs.SnapDomain, dirs.SnapIdx, dirs.SnapHistory, dirs.SnapAccessors} {
+		entries, err := os.ReadDir(snapDir)
 		if err != nil {
 			continue
 		}
@@ -629,12 +630,12 @@ func removeStateFilesFromStep(dirs datadir.Dirs, fromStep kv.Step, logger log.Lo
 			if !ok || startStep < fromStep {
 				continue
 			}
-			dataPath := filepath.Join(dir, name)
+			dataPath := filepath.Join(snapDir, name)
 			torrentPath := dataPath + ".torrent"
-			if err := os.Remove(dataPath); err != nil && !os.IsNotExist(err) {
+			if err := dir.RemoveFile(dataPath); err != nil && !os.IsNotExist(err) {
 				continue
 			}
-			os.Remove(torrentPath)
+			dir.RemoveFile(torrentPath) //nolint:errcheck
 			logger.Debug(fmt.Sprintf("[%s] removed misaligned file", logPrefix), "file", name, "startStep", startStep)
 			removed++
 		}
@@ -684,58 +685,4 @@ func parseFileStepRange(name string) (start, end kv.Step, ok bool) {
 		}
 	}
 	return 0, 0, false
-}
-
-// removeStateFilesAboveStep scans state directories and removes all files
-// whose step range extends past maxStep (both data and torrent files).
-func removeStateFilesAboveStep(dirs datadir.Dirs, maxStep kv.Step, logger log.Logger, logPrefix string) int {
-	removed := 0
-	for _, dir := range []string{dirs.SnapDomain, dirs.SnapIdx, dirs.SnapHistory, dirs.SnapAccessors} {
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			continue
-		}
-		for _, e := range entries {
-			name := e.Name()
-			if strings.HasSuffix(name, ".torrent") {
-				continue
-			}
-			endStep, ok := parseFileEndStep(name)
-			if !ok {
-				continue
-			}
-			if endStep <= maxStep {
-				continue
-			}
-			dataPath := filepath.Join(dir, name)
-			torrentPath := dataPath + ".torrent"
-			if err := os.Remove(dataPath); err != nil && !os.IsNotExist(err) {
-				logger.Warn(fmt.Sprintf("[%s] failed to remove misaligned state file", logPrefix), "file", name, "err", err)
-				continue
-			}
-			os.Remove(torrentPath) // best effort
-			removed++
-		}
-	}
-	if removed > 0 {
-		logger.Info(fmt.Sprintf("[%s] removed state files past block boundary", logPrefix), "removed", removed, "maxStep", maxStep)
-	}
-	return removed
-}
-
-// parseFileEndStep extracts the end step from a state snapshot filename.
-// Filenames look like: "v2.0-accounts.8192-8704.kv"
-// Returns the end step (8704) and true, or 0 and false if not parseable.
-func parseFileEndStep(name string) (kv.Step, bool) {
-	parts := strings.Split(name, ".")
-	for _, part := range parts {
-		if idx := strings.Index(part, "-"); idx > 0 {
-			endStr := part[idx+1:]
-			var end uint64
-			if _, err := fmt.Sscanf(endStr, "%d", &end); err == nil && end > 0 {
-				return kv.Step(end), true
-			}
-		}
-	}
-	return 0, false
 }
