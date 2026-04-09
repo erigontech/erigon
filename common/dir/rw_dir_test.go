@@ -59,15 +59,15 @@ func Test_LogDirOnENOSPC(t *testing.T) {
 	// non-ENOSPC error: should not panic or log anything
 	LogDirOnENOSPC(fmt.Errorf("some other error"), dir)
 
-	// ENOSPC error: should log file listing and filesystem info
+	// ENOSPC error: should log file listing, filesystem info, then panic
 	enospc := fmt.Errorf("write failed: %w", syscall.ENOSPC)
-	LogDirOnENOSPC(enospc, dir)
+	require.Panics(t, func() { LogDirOnENOSPC(enospc, dir) })
 
-	// wrapped ENOSPC
+	// wrapped ENOSPC: should also panic
 	wrapped := fmt.Errorf("outer: %w", fmt.Errorf("inner: %w", syscall.ENOSPC))
-	LogDirOnENOSPC(wrapped, dir)
+	require.Panics(t, func() { LogDirOnENOSPC(wrapped, dir) })
 
-	// bad directory: should log warning, not panic
+	// bad directory: should log warning, not panic (returns early before panic)
 	LogDirOnENOSPC(enospc, filepath.Join(dir, "nonexistent"))
 }
 

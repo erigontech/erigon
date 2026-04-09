@@ -283,10 +283,13 @@ func LogDirOnENOSPC(err error, dirPath string) {
 	log.Warn("[ENOSPC] dir summary", "dir", dirPath, "files", fileCount, "totalSize", byteCount(int64(totalSize)))
 	logFilesystemStats(dirPath)
 
-	// Also log snapshots dir summary — merge output files there are often the
-	// largest disk consumers during ENOSPC events.
-	snapshotsDir := filepath.Join(filepath.Dir(dirPath), "snapshots")
-	logSubdirSummary(snapshotsDir)
+	// Also log snapshots and chaindata dir summaries.
+	datadir := filepath.Dir(dirPath)
+	logSubdirSummary(filepath.Join(datadir, "snapshots"))
+	logChaindataSize(filepath.Join(datadir, "chaindata"))
+	logDeletedOpenFiles()
+
+	panic(fmt.Sprintf("[ENOSPC] fatal: no space left on device (dir=%s)", dirPath))
 }
 
 // logSubdirSummary logs a per-subdirectory summary (file count + total size)
@@ -327,6 +330,54 @@ func logSubdirSummary(dirPath string) {
 		log.Warn("[ENOSPC] snapshot subdir", "name", e.Name(), "files", fileCount, "totalSize", byteCount(int64(dirSize)))
 	}
 	log.Warn("[ENOSPC] snapshots summary", "dir", dirPath, "totalSize", byteCount(int64(grandTotal)))
+}
+
+func logChaindataSize(chaindataDir string) {
+	entries, err := os.ReadDir(chaindataDir)
+	if err != nil {
+		return
+	}
+	var totalSize uint64
+	for _, e := range entries {
+		info, infoErr := e.Info()
+		if infoErr != nil {
+			continue
+		}
+		totalSize += uint64(info.Size())
+	}
+	log.Warn("[ENOSPC] chaindata", "dir", chaindataDir, "totalSize", byteCount(int64(totalSize)))
+}
+
+// logDeletedOpenFiles reads /proc/self/fd to find deleted files still held open
+// by this process. These consume disk space that du won't report but df will.
+func logDeletedOpenFiles() {
+	fdDir := "/proc/self/fd"
+	entries, err := os.ReadDir(fdDir)
+	if err != nil {
+		return // not on Linux or no procfs
+	}
+	var deletedCount int
+	var deletedSize uint64
+	for _, e := range entries {
+		link, err := os.Readlink(filepath.Join(fdDir, e.Name()))
+		if err != nil {
+			continue
+		}
+		if !strings.HasSuffix(link, " (deleted)") {
+			continue
+		}
+		info, err := os.Stat(filepath.Join(fdDir, e.Name()))
+		if err != nil {
+			continue
+		}
+		size := uint64(info.Size())
+		deletedCount++
+		deletedSize += size
+		if size > 100*1024*1024 { // only log files > 100MB
+			log.Warn("[ENOSPC] deleted-but-open", "fd", e.Name(), "path", link, "size", byteCount(int64(size)))
+		}
+	}
+	log.Warn("[ENOSPC] deleted-but-open summary", "files", deletedCount, "totalSize", byteCount(int64(deletedSize)))
 }
 
 func byteCount(b int64) string {
