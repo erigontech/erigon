@@ -59,6 +59,10 @@ type wsConfig struct {
 	Origins []string
 	Modules []string
 	prefix  string // path prefix on which to mount ws handler
+	// WsConnectionLimit is the maximum number of concurrent WebSocket connections.
+	// New connections beyond this limit receive an immediate 503 before the upgrade.
+	// 0 means unlimited.
+	WsConnectionLimit int64
 }
 
 type rpcHandler struct {
@@ -81,8 +85,9 @@ type httpServer struct {
 	httpHandler atomic.Value // *rpcHandler
 
 	// WebSocket handler things.
-	wsConfig  wsConfig
-	wsHandler atomic.Value // *rpcHandler
+	wsConfig    wsConfig
+	wsHandler   atomic.Value // *rpcHandler
+	wsConnCount atomic.Int64 // live WebSocket connections
 
 	// These are set by setListenAddr.
 	endpoint string
@@ -200,13 +205,21 @@ func (h *httpServer) start() error {
 func (h *httpServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// check if ws request and serve if ws enabled
 	// Note: WebSocket connections bypass rpcAdmissionHandler intentionally.
-	// HTTP admission control limits inflight requests per connection, but WebSocket
-	// is a persistent long-lived connection where the relevant limit is the number
-	// of concurrent connections, not inflight requests. A dedicated WebSocket
-	// connection limiter will be addressed in a separate PR.
+	// HTTP admission control limits inflight requests, but WebSocket is a
+	// persistent long-lived connection where the relevant limit is the number
+	// of concurrent open connections. WsConnectionLimit enforces that here.
 	ws := h.wsHandler.Load().(*rpcHandler)
 	if ws != nil && isWebsocket(r) {
 		if checkPath(r, h.wsConfig.prefix) {
+			if h.wsConfig.WsConnectionLimit > 0 {
+				if h.wsConnCount.Add(1) > h.wsConfig.WsConnectionLimit {
+					h.wsConnCount.Add(-1)
+					wsConnectionRejected.Inc()
+					rpc.WriteOverloadedResponse(w)
+					return
+				}
+				defer h.wsConnCount.Add(-1)
+			}
 			ws.ServeHTTP(w, r)
 		}
 		return
@@ -381,6 +394,7 @@ type rpcAdmissionHandler struct {
 }
 
 var rpcAdmissionRejected = metrics.GetOrCreateCounter(`rpc_admission_rejected_total`)
+var wsConnectionRejected = metrics.GetOrCreateCounter(`ws_connection_rejected_total`)
 
 func newRPCAdmissionHandler(limit int64, next http.Handler) http.Handler {
 	return &rpcAdmissionHandler{limit: limit, next: next}
@@ -401,6 +415,33 @@ func (h *rpcAdmissionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		ctx = kv.WithNonBlockingAcquire(ctx)
 	}
 	h.next.ServeHTTP(w, r.WithContext(ctx))
+}
+
+// NewWSConnectionLimiter wraps next so that at most limit concurrent WebSocket
+// connections are served. Connections beyond the limit receive HTTP 503. If
+// limit is 0, next is returned unwrapped.
+func NewWSConnectionLimiter(limit int64, next http.Handler) http.Handler {
+	if limit <= 0 {
+		return next
+	}
+	return &wsConnectionLimiter{limit: limit, next: next}
+}
+
+type wsConnectionLimiter struct {
+	count atomic.Int64
+	limit int64
+	next  http.Handler
+}
+
+func (h *wsConnectionLimiter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if h.count.Add(1) > h.limit {
+		h.count.Add(-1)
+		wsConnectionRejected.Inc()
+		rpc.WriteOverloadedResponse(w)
+		return
+	}
+	defer h.count.Add(-1)
+	h.next.ServeHTTP(w, r)
 }
 
 func newCorsHandler(srv http.Handler, allowedOrigins []string) http.Handler {

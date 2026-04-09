@@ -34,6 +34,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 const (
@@ -68,7 +69,10 @@ func (s *Server) WebsocketHandler(allowedOrigins []string, jwtSecret []byte, com
 			return
 		}
 		codec := NewWebsocketCodec(conn, r.Host, r.Header)
-		s.ServeCodec(codec, 0)
+		// Tag the connection context so BeginRo fails fast (ErrReadTxLimitExceeded)
+		// instead of blocking indefinitely when the DB semaphore is full.
+		ctx := kv.WithNonBlockingAcquire(r.Context())
+		s.ServeCodecWithContext(ctx, codec, 0)
 	})
 }
 
