@@ -911,13 +911,16 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 
 		ts := topBlock.Header().Time + 1
 		require.Less(t, ts, amsterdamTime) // still pre-Amsterdam
-		payloadId, err := assembleBlock(ctx, exec, &executionproto.AssembleBlockRequest{
-			ParentHash:            gointerfaces.ConvertHashToH256(topBlock.Hash()),
+		var prevRandao, beaconRoot common.Hash
+		_, _ = rand.Read(prevRandao[:])
+		_, _ = rand.Read(beaconRoot[:])
+		payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
+			ParentHash:            topBlock.Hash(),
 			Timestamp:             ts,
-			PrevRandao:            gointerfaces.ConvertHashToH256(randomHash()),
-			SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(common.Address{1}),
-			Withdrawals:           make([]*typesproto.Withdrawal, 0),
-			ParentBeaconBlockRoot: gointerfaces.ConvertHashToH256(randomHash()),
+			PrevRandao:            prevRandao,
+			SuggestedFeeRecipient: common.Address{1},
+			Withdrawals:           make([]*types.Withdrawal, 0),
+			ParentBeaconBlockRoot: &beaconRoot,
 		})
 		require.NoError(t, err)
 
@@ -961,13 +964,16 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 
 	// Now assemble the first Amsterdam block (timestamp = amsterdamTime).
 	slotNumber := uint64(8) // mimics Kurtosis: epoch 1 slot 8 with minimal preset
-	payloadId, err := assembleBlock(ctx, exec, &executionproto.AssembleBlockRequest{
-		ParentHash:            gointerfaces.ConvertHashToH256(topBlock.Hash()),
+	var amsPrevRandao, amsBeaconRoot common.Hash
+	_, _ = rand.Read(amsPrevRandao[:])
+	_, _ = rand.Read(amsBeaconRoot[:])
+	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
+		ParentHash:            topBlock.Hash(),
 		Timestamp:             amsterdamTime,
-		PrevRandao:            gointerfaces.ConvertHashToH256(randomHash()),
-		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(common.Address{1}),
-		Withdrawals:           make([]*typesproto.Withdrawal, 0),
-		ParentBeaconBlockRoot: gointerfaces.ConvertHashToH256(randomHash()),
+		PrevRandao:            amsPrevRandao,
+		SuggestedFeeRecipient: common.Address{1},
+		Withdrawals:           make([]*types.Withdrawal, 0),
+		ParentBeaconBlockRoot: &amsBeaconRoot,
 		SlotNumber:            &slotNumber,
 	})
 	require.NoError(t, err)
