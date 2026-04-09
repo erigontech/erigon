@@ -448,7 +448,10 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		txNumIncrement()
 
 		var versionMap *state.VersionMap
-		if dbg.Exec3Parallel {
+		// Create versionMap when Amsterdam is configured (config-based check, applies
+		// to pre-Amsterdam blocks too on chains where the fork is scheduled).
+		needsVersionMap := dbg.Exec3Parallel || config.AmsterdamTime != nil
+		if needsVersionMap {
 			versionMap = state.NewVersionMap(nil)
 			ibs.SetVersionMap(versionMap)
 		}

@@ -305,6 +305,16 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if err := checkAndSetCommitmentHistoryFlag(tx, logger, dirs, config); err != nil {
 			return err
 		}
+
+		// Apply config-driven global state for the commitment and trie subsystems.
+		// These globals are read by 80+ call sites; the config fields are the source of truth.
+		if config.KeepExecutionProofs {
+			statecfg.EnableHistoricalCommitment()
+		}
+		if config.ExperimentalConcurrentCommitment {
+			statecfg.ExperimentalConcurrentCommitment = true
+		}
+
 		if err = stages.UpdateMetrics(tx); err != nil {
 			return err
 		}

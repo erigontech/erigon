@@ -214,7 +214,6 @@ func TableScanningPrune(
 		throttling = v.(*time.Duration)
 	}
 
-	var keyCursorPosition, valCursorPosition = &StartPos{}, &StartPos{}
 	// invalidate progress if new params here
 	if !(prevStat.TxFrom == txFrom && prevStat.TxTo == txTo) {
 		prevStat.ValueProgress = First
@@ -222,12 +221,8 @@ func TableScanningPrune(
 			prevStat.KeyProgress = First
 		}
 	}
-	if prevStat.ValueProgress == InProgress {
-		valCursorPosition.StartVal, valCursorPosition.StartKey, err = valDelCursor.Seek(prevStat.LastPrunedValue)
-	} else if prevStat.ValueProgress == First {
-		valCursorPosition.StartVal, valCursorPosition.StartKey, err = valDelCursor.First()
-	}
 
+	var keyCursorPosition = &StartPos{}
 	if keysCursor != nil {
 		if prevStat.KeyProgress == InProgress {
 			keyCursorPosition.StartKey, keyCursorPosition.StartVal, err = keysCursor.Seek(prevStat.LastPrunedKey) //nolint:govet
@@ -272,8 +267,6 @@ func TableScanningPrune(
 
 	// Invariant: if some `txNum=N` pruned - it's pruned Fully
 	// Means: can use DeleteCurrentDuplicates all values of given `txNum`
-	txNumBytes, val := common.Copy(valCursorPosition.StartKey), common.Copy(valCursorPosition.StartVal)
-
 	txNumGetter := func(key, val []byte) uint64 { // key == valCursor key, val – usually txnum
 		switch mode {
 		case KeyStorageMode:
@@ -292,23 +285,63 @@ func TableScanningPrune(
 			return 0
 		}
 	}
+
+	lastVal, err := tableScanningPrune(ctx, stat, filenameBase, txFrom, txTo, txNumGetter, valDelCursor, keysCursor, asserts, throttling, logEvery, logger, prevStat.ValueProgress, prevStat.LastPrunedValue)
+	if err != nil {
+		return nil, err
+	}
+	if lastVal != nil {
+		stat.LastPrunedValue = lastVal
+		stat.ValueProgress = InProgress
+	} else {
+		stat.LastPrunedValue = nil
+		stat.ValueProgress = Done
+	}
+	return stat, nil
+}
+
+// tableScanningPrune scans values and deletes those in [txFrom, txTo).
+// Returns the last cursor position (non-nil) if interrupted by ctx, or nil if completed.
+func tableScanningPrune(
+	ctx context.Context,
+	stat *Stat,
+	filenameBase string,
+	txFrom, txTo uint64,
+	txNumGetter func(key, val []byte) uint64,
+	valDelCursor kv.PseudoDupSortRwCursor,
+	keysCursor kv.RwCursorDupSort,
+	asserts bool,
+	throttling *time.Duration,
+	logEvery *time.Ticker,
+	logger log.Logger,
+	valueProgress Progress,
+	lastPrunedValue []byte,
+) (interrupted []byte, err error) {
+	var val, txNumBytes []byte
+	switch valueProgress {
+	case InProgress:
+		val, txNumBytes, err = valDelCursor.Seek(lastPrunedValue)
+	case First:
+		val, txNumBytes, err = valDelCursor.First()
+	default: // Done or unknown — nothing to scan
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("cursor position %s: %w", filenameBase, err)
+	}
 	for ; val != nil; val, txNumBytes, err = valDelCursor.NextNoDup() {
 		if err != nil {
 			return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
+		}
+
+		if ctx.Err() != nil {
+			return common.Copy(val), nil
 		}
 
 		txNum := txNumGetter(val, txNumBytes)
 		// Early skip: avoid LastDup/FirstDup/CountDuplicates cursor ops for out-of-range entries
 		if txNum >= txTo {
 			continue
-		}
-
-		select {
-		case <-ctx.Done():
-			stat.LastPrunedValue = common.Copy(val)
-			stat.ValueProgress = InProgress
-			return stat, nil
-		default:
 		}
 
 		if asserts && txNum < txFrom {
@@ -361,12 +394,8 @@ func TableScanningPrune(
 				if throttling != nil {
 					time.Sleep(*throttling)
 				}
-				select {
-				case <-ctx.Done():
-					stat.LastPrunedValue = common.Copy(val)
-					stat.ValueProgress = InProgress
-					return stat, nil
-				default:
+				if ctx.Err() != nil {
+					return common.Copy(val), nil
 				}
 
 				stat.MinTxNum = min(stat.MinTxNum, txNumDup)
@@ -388,17 +417,7 @@ func TableScanningPrune(
 			logger.Info("[snapshots] prune index", args...)
 		default:
 		}
-
-		select {
-		case <-ctx.Done():
-			stat.LastPrunedValue = common.Copy(val)
-			stat.ValueProgress = InProgress
-			return stat, nil
-		default:
-		}
 	}
 
-	stat.LastPrunedValue = nil
-	stat.ValueProgress = Done
-	return stat, err
+	return nil, nil
 }

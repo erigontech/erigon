@@ -1003,10 +1003,6 @@ func (ht *HistoryRoTx) canHashPruneUntil(tx kv.Tx, untilTx uint64) (can bool, tx
 
 func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo uint64) {
 	minIdxTx, maxIdxTx := ht.iit.ii.minTxNumInDB(tx), ht.iit.ii.maxTxNumInDB(tx)
-	//defer func() {
-	//	fmt.Printf("CanPrune[%s]Until(%d) noFiles=%t txTo %d idxTx [%d-%d] keepRecentTxInDB=%d; result %t\n",
-	//		ht.h.filenameBase, untilTx, ht.h.dontProduceHistoryFiles, txTo, minIdxTx, maxIdxTx, ht.h.keepRecentTxInDB, minIdxTx < txTo)
-	//}()
 
 	stat, err := GetPruneValProgress(tx, []byte(ht.h.ValuesTable))
 	if err != nil {
@@ -1043,7 +1039,7 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 	case "commitment":
 		mxPrunableHComm.Set(delta)
 	}
-	//println("in history", ht.h.FilenameBase, stat.KeyProgress.String(), stat.ValueProgress.String(), stat.TxTo, txTo, minTxDB)
+
 	return minIdxTx < txTo || pruneInProgress, txTo
 }
 
@@ -1363,17 +1359,18 @@ func (ht *HistoryRoTx) RangeAsOf(ctx context.Context, startTxNum uint64, from, t
 		return nil, err
 	}
 
+	dbStartTxNum := max(startTxNum, ht.iit.files.EndTxNum())
 	dbit := &HistoryRangeAsOfDB{
 		largeValues: ht.h.HistoryLargeValues,
 		roTx:        roTx,
 		valsTable:   ht.h.ValuesTable,
 		from:        from, toPrefix: to, limit: kv.Unlim, orderAscend: asc,
 
-		startTxNum: startTxNum,
+		startTxNum: dbStartTxNum,
 
 		ctx: ctx, logger: ht.h.logger,
 	}
-	binary.BigEndian.PutUint64(dbit.startTxKey[:], startTxNum)
+	binary.BigEndian.PutUint64(dbit.startTxKey[:], dbStartTxNum)
 	if err := dbit.advance(); err != nil {
 		dbit.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
