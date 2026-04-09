@@ -1221,15 +1221,21 @@ func TestEIP7708BurnLogWhenCoinbaseSelfDestructs(t *testing.T) {
 	require.Greater(t, receipt.GasUsed, uint64(0))
 
 	var burnLog *types.Log
+	var burnCount, transferCount int
 	for _, log := range receipt.Logs {
-		if log.Address == params.SystemAddress.Value() &&
-			len(log.Topics) >= 2 &&
-			log.Topics[0] == misc.EthBurnLogEvent {
+		if log.Address != params.SystemAddress.Value() || len(log.Topics) < 2 {
+			continue
+		}
+		switch log.Topics[0] {
+		case misc.EthBurnLogEvent:
 			burnLog = log
-			break
+			burnCount++
+		case misc.EthTransferLogEvent:
+			transferCount++
 		}
 	}
-	require.NotNil(t, burnLog, "expected EIP-7708 Burn log for selfdestructed coinbase")
+	require.Equal(t, 1, burnCount, "expected exactly one EIP-7708 Burn log")
+	require.Equal(t, 0, transferCount, "no Transfer log expected for zero-value CREATE")
 	require.Equal(t, coinbaseAddr.Hash(), burnLog.Topics[1],
 		"burn log should reference the coinbase address")
 
