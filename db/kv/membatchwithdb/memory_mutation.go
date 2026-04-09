@@ -1095,10 +1095,10 @@ func (m *MemoryMutation) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum 
 		if err != nil {
 			return fmt.Errorf("DomainDelPrefix: RangeLatest: %w", err)
 		}
+		defer it.Close()
 		for it.HasNext() {
 			k, _, err := it.Next()
 			if err != nil {
-				it.Close()
 				return fmt.Errorf("DomainDelPrefix: iterator: %w", err)
 			}
 			extraKeys = append(extraKeys, string(k))

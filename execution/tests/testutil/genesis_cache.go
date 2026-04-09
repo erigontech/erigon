@@ -143,16 +143,19 @@ func createGenesisDB(gspec *types.Genesis) (kv.TemporalRwDB, *types.Block, strin
 	dirs := datadir.New(dir)
 	db := temporaltest.NewTestDB(nil, dirs)
 
+	// Declared before the defer so cleanup covers both dir and genesisDirs.
+	genesisDirs := datadir.New(dir + "-genesis-tmp")
+
 	success := false
 	defer func() {
 		if !success {
 			db.Close()
 			dirutil.RemoveAll(dir)
+			dirutil.RemoveAll(genesisDirs.DataDir)
 		}
 	}()
 
 	// Step 1: CommitGenesisBlock writes headers, TDs, config to KV tables.
-	genesisDirs := datadir.New(dir + "-genesis-tmp")
 	if err := os.MkdirAll(genesisDirs.Tmp, 0755); err != nil {
 		return nil, nil, "", fmt.Errorf("genesis cache: mkdir %s: %w", genesisDirs.Tmp, err)
 	}
