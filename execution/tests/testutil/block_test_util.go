@@ -345,9 +345,13 @@ func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) error {
 			}
 			continue
 		}
-		// Side-chain blocks: record header for uncle verification, skip execution.
+		// Side-chain blocks: record header for uncle verification, validate
+		// RLP decoding, skip execution.
 		if !mainChainBlocks[cb.Hash()] {
 			m.RecordEphemeralHeader(cb.Header())
+			if err = validateHeader(b.BlockHeader, cb.HeaderNoCopy()); err != nil {
+				return fmt.Errorf("side-chain block header validation failed: %w", err)
+			}
 			continue
 		}
 

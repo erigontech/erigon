@@ -31,12 +31,13 @@ import (
 var _ rulesif.ChainReader = (*LightChainReader)(nil)
 
 // LightChainReader implements rules.ChainReader with in-memory maps
-// for headers and total difficulties, falling back to rawdb reads on
-// the provided tx for genesis data.
+// for headers, total difficulties, and blocks, falling back to rawdb
+// reads on the provided tx for genesis data.
 type LightChainReader struct {
 	Config_ *chain.Config
 	Headers map[common.Hash]*types.Header // hash -> header
 	TDs     map[common.Hash]*big.Int      // hash -> td
+	Blocks  map[common.Hash]*types.Block  // hash -> block (for uncle verification)
 	Tx      kv.Tx                         // fallback for genesis reads
 }
 
@@ -82,9 +83,15 @@ func (cr *LightChainReader) GetTd(hash common.Hash, number uint64) *big.Int {
 }
 
 func (cr *LightChainReader) GetBlock(hash common.Hash, number uint64) *types.Block {
+	if b, ok := cr.Blocks[hash]; ok {
+		return b
+	}
 	return rawdb.ReadBlock(cr.Tx, hash, number)
 }
 
 func (cr *LightChainReader) HasBlock(hash common.Hash, number uint64) bool {
+	if _, ok := cr.Blocks[hash]; ok {
+		return true
+	}
 	return rawdb.ReadHeader(cr.Tx, hash, number) != nil
 }

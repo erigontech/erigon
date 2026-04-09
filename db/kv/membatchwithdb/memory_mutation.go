@@ -1036,7 +1036,11 @@ func (m *MemoryMutation) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum 
 			break
 		}
 	}
-	it, err := m.db.Debug().RangeLatest(domain, prefix, to, -1)
+	debugTx := m.db.Debug()
+	if debugTx == nil {
+		return nil // backing tx has no debug/range support; overlay-only delete is sufficient
+	}
+	it, err := debugTx.RangeLatest(domain, prefix, to, -1)
 	if err != nil {
 		return fmt.Errorf("DomainDelPrefix: RangeLatest: %w", err)
 	}

@@ -204,6 +204,11 @@ func ExecuteBlockEphemerally(
 		}
 	}
 	blockLogs := ibs.Logs()
+	if newBlock == nil {
+		// ReadOnly mode: FinalizeBlockExecution was skipped. Use the
+		// original header root so callers still get a valid result.
+		newBlock = block
+	}
 	newRoot := newBlock.Root()
 	execRs := &EphemeralExecResult{
 		StateRoot:   newRoot,

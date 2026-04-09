@@ -207,6 +207,12 @@ func createGenesisDB(gspec *types.Genesis) (kv.TemporalRwDB, *types.Block, []str
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("genesis cache: temp dir: %w", err)
 	}
+	success := false
+	defer func() {
+		if !success {
+			dirutil.RemoveAll(dir)
+		}
+	}()
 	dirs := datadir.New(dir)
 	db := temporaltest.NewTestDB(nil, dirs)
 
@@ -281,6 +287,7 @@ func createGenesisDB(gspec *types.Genesis) (kv.TemporalRwDB, *types.Block, []str
 		}
 	}
 
+	success = true
 	return db, genesis, []string{dir}, nil
 }
 

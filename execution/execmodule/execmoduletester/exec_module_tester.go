@@ -153,6 +153,7 @@ type ExecModuleTester struct {
 	ephemeralTxNum    uint64
 	ephemeralHeaders  map[common.Hash]*types.Header
 	ephemeralTDs      map[common.Hash]*big.Int
+	ephemeralBlocks   map[common.Hash]*types.Block
 	ephemeralLastHash common.Hash
 }
 
