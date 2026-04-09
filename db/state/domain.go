@@ -669,7 +669,7 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *
 		if d.LargeValues {
 			kvs = append(kvs, struct {
 				k, v []byte
-			}{bytes.Clone(k[:len(k)-8]), bytes.Clone(v)})
+			}{k[:len(k)-8], v})
 		} else {
 
 			if vt != nil {
