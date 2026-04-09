@@ -29,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -298,7 +299,7 @@ func (t *Trie) Get(key []byte) (value []byte, gotValue bool) {
 		return nil, true
 	}
 
-	hex := keybytesToHex(key)
+	hex := nibbles.KeybytesToHex(key)
 	return t.get(t.RootNode, hex, 0)
 }
 
@@ -307,7 +308,7 @@ func (t *Trie) FindPath(key []byte) (value []byte, parents [][]byte, gotValue bo
 		return nil, nil, true
 	}
 
-	hex := keybytesToHex(key)
+	hex := nibbles.KeybytesToHex(key)
 	return t.getPath(t.RootNode, nil, hex, 0)
 }
 
@@ -316,7 +317,7 @@ func (t *Trie) GetAccount(key []byte) (value *accounts.Account, gotValue bool) {
 		return nil, true
 	}
 
-	hex := keybytesToHex(key)
+	hex := nibbles.KeybytesToHex(key)
 
 	accNode, gotValue := t.getAccount(t.RootNode, hex, 0)
 	if accNode != nil {
@@ -332,7 +333,7 @@ func (t *Trie) GetAccountCode(key []byte) (value []byte, gotValue bool) {
 		return nil, false
 	}
 
-	hex := keybytesToHex(key)
+	hex := nibbles.KeybytesToHex(key)
 
 	accNode, gotValue := t.getAccount(t.RootNode, hex, 0)
 	if accNode != nil {
@@ -354,7 +355,7 @@ func (t *Trie) GetAccountCodeSize(key []byte) (value int, gotValue bool) {
 		return 0, false
 	}
 
-	hex := keybytesToHex(key)
+	hex := nibbles.KeybytesToHex(key)
 
 	accNode, gotValue := t.getAccount(t.RootNode, hex, 0)
 	if accNode != nil {
@@ -376,7 +377,7 @@ func (t *Trie) getAccount(origNode Node, key []byte, pos int) (value *AccountNod
 	case nil:
 		return nil, true
 	case *ShortNode:
-		matchlen := prefixLen(key[pos:], n.Key)
+		matchlen := nibbles.CommonPrefixLen(key[pos:], n.Key)
 		if matchlen == len(n.Key) {
 			if v, ok := n.Val.(*AccountNode); ok {
 				return v, true
@@ -418,7 +419,7 @@ func (t *Trie) get(origNode Node, key []byte, pos int) (value []byte, gotValue b
 	case *AccountNode:
 		return t.get(n.Storage, key, pos)
 	case *ShortNode:
-		matchlen := prefixLen(key[pos:], n.Key)
+		matchlen := nibbles.CommonPrefixLen(key[pos:], n.Key)
 		if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
 			value, gotValue = t.get(n.Val, key, pos+matchlen)
 		} else {
@@ -459,7 +460,7 @@ func (t *Trie) getPath(origNode Node, parents [][]byte, key []byte, pos int) ([]
 	case *AccountNode:
 		return t.getPath(n.Storage, append(parents, n.reference()), key, pos)
 	case *ShortNode:
-		matchlen := prefixLen(key[pos:], n.Key)
+		matchlen := nibbles.CommonPrefixLen(key[pos:], n.Key)
 		if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
 			return t.getPath(n.Val, append(parents, n.reference()), key, pos+matchlen)
 		} else {
@@ -498,7 +499,7 @@ func (t *Trie) getPath(origNode Node, parents [][]byte, key []byte, pos int) ([]
 // stored in the trie.
 // DESCRIBED: docs/programmers_guide/guide.md#root
 func (t *Trie) Update(key, value []byte) {
-	hex := keybytesToHex(key)
+	hex := nibbles.KeybytesToHex(key)
 
 	newnode := ValueNode(value)
 
@@ -514,7 +515,7 @@ func (t *Trie) UpdateAccount(key []byte, acc *accounts.Account) {
 	value := new(accounts.Account)
 	value.Copy(acc)
 
-	hex := keybytesToHex(key)
+	hex := nibbles.KeybytesToHex(key)
 
 	var newnode *AccountNode
 	if value.Root == EmptyRoot || value.Root == (common.Hash{}) {
@@ -536,7 +537,7 @@ func (t *Trie) UpdateAccountCode(key []byte, code CodeNode) error {
 		return nil
 	}
 
-	hex := keybytesToHex(key)
+	hex := nibbles.KeybytesToHex(key)
 
 	accNode, gotValue := t.getAccount(t.RootNode, hex, 0)
 	if accNode == nil || !gotValue {
@@ -562,7 +563,7 @@ func (t *Trie) UpdateAccountCodeSize(key []byte, codeSize int) error {
 		return nil
 	}
 
-	hex := keybytesToHex(key)
+	hex := nibbles.KeybytesToHex(key)
 
 	accNode, gotValue := t.getAccount(t.RootNode, hex, 0)
 	if accNode == nil || !gotValue {
@@ -784,7 +785,7 @@ func (t *Trie) insertRecursive(origNode Node, key []byte, pos int, value Node) (
 		}
 		return updated, n
 	case *ShortNode:
-		matchlen := prefixLen(key[pos:], n.Key)
+		matchlen := nibbles.CommonPrefixLen(key[pos:], n.Key)
 		// If the whole key matches, keep this short node as is
 		// and only update the value.
 		if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
@@ -902,7 +903,7 @@ func (t *Trie) getNode(hex []byte, doTouch bool) (Node, Node, bool, uint64) {
 		case nil:
 			return nil, nil, false, incarnation
 		case *ShortNode:
-			matchlen := prefixLen(hex[pos:], n.Key)
+			matchlen := nibbles.CommonPrefixLen(hex[pos:], n.Key)
 			if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
 				parent = n
 				nd = n.Val
@@ -1043,7 +1044,7 @@ func (t *Trie) touchAll(n Node, hex []byte, del bool, incarnation uint64) {
 // Delete removes any existing value for key from the trie.
 // DESCRIBED: docs/programmers_guide/guide.md#root
 func (t *Trie) Delete(key []byte) {
-	hex := keybytesToHex(key)
+	hex := nibbles.KeybytesToHex(key)
 	_, t.RootNode = t.delete(t.RootNode, hex, false)
 }
 
@@ -1081,7 +1082,7 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 	var nn Node
 	switch n := origNode.(type) {
 	case *ShortNode:
-		matchlen := prefixLen(key[keyStart:], n.Key)
+		matchlen := nibbles.CommonPrefixLen(key[keyStart:], n.Key)
 		if matchlen == min(len(n.Key), len(key[keyStart:])) || n.Key[matchlen] == 16 || key[keyStart+matchlen] == 16 {
 			fullMatch := matchlen == len(key)-keyStart
 			removeNodeEntirely := fullMatch
@@ -1270,7 +1271,7 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 // The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
 // wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
 func (t *Trie) DeleteSubtree(keyPrefix []byte) {
-	hexPrefix := keybytesToHex(keyPrefix)
+	hexPrefix := nibbles.KeybytesToHex(keyPrefix)
 
 	_, t.RootNode = t.delete(t.RootNode, hexPrefix, true)
 
@@ -1319,7 +1320,7 @@ func (t *Trie) getHasher() *hasher {
 // key prefix is removed from the key.
 // First returned value is `true` if the node with the specified prefix is found.
 func (t *Trie) DeepHash(keyPrefix []byte) (bool, common.Hash) {
-	hexPrefix := keybytesToHex(keyPrefix)
+	hexPrefix := nibbles.KeybytesToHex(keyPrefix)
 	accNode, gotValue := t.getAccount(t.RootNode, hexPrefix, 0)
 	if !gotValue {
 		return false, common.Hash{}
