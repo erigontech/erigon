@@ -2154,12 +2154,12 @@ func TestRangeAsOf_ValuesMatchHistorySeek(t *testing.T) {
 	})
 }
 
-// TestRangeAsOf_DBIteratorSkipsFileRange verifies that the DB iterator in
-// RangeAsOf does not read entries within the file range. After collating files,
-// we insert a fake DB-only key with a txNum inside the file range. Without the
-// fix (DB iterator starting from startTxNum), this phantom key would appear in
-// results. With the fix (DB iterator clamped to files.EndTxNum()), it is skipped.
-func TestRangeAsOf_DBIteratorSkipsFileRange(t *testing.T) {
+// TestRangeAsOf_DBIteratorReturnsEntriesInFileRange verifies that the DB
+// iterator in RangeAsOf returns entries even within the file range. After
+// collating files, we insert a DB-only key with a txNum inside the file range.
+// The DB iterator must still return it — skipping DB entries within the file
+// range is unsafe because files may not cover all keys.
+func TestRangeAsOf_DBIteratorReturnsEntriesInFileRange(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
@@ -2183,9 +2183,10 @@ func TestRangeAsOf_DBIteratorSkipsFileRange(t *testing.T) {
 
 		startTxNum := endTxNum / 2
 
-		// Insert a phantom key that exists ONLY in DB, at a txNum inside the
-		// file range. This key (0x02...) is outside the normal test data range
-		// (keys use 0x01 prefix) so it has no file entry.
+		// Insert a DB-only key at a txNum inside the file range.
+		// The DB iterator must still return it — skipping DB entries
+		// within the file range is unsafe because files may not cover
+		// all keys (e.g. during segment merges or partial rebuilds).
 		phantomKey := []byte{0x02, 0, 0, 0, 0, 0, 0, 0x01}
 		phantomVal := []byte("PHANTOM")
 		rwTx, err := db.BeginRw(ctx)
@@ -2212,16 +2213,19 @@ func TestRangeAsOf_DBIteratorSkipsFileRange(t *testing.T) {
 		require.NoError(err)
 		defer it.Close()
 
-		// The phantom key must NOT appear — the DB iterator should start from
-		// files.EndTxNum(), skipping the phantom entry whose txNum < endTxNum.
+		// The DB-only key must appear — the DB iterator must not skip
+		// entries within the file range to ensure correctness when files
+		// are incomplete.
+		found := false
 		for it.HasNext() {
 			k, _, err := it.Next()
 			require.NoError(err)
-			require.False(
-				bytes.Equal(phantomKey, k),
-				"DB iterator leaked phantom key from within the file range",
-			)
+			if bytes.Equal(phantomKey, k) {
+				found = true
+				break
+			}
 		}
+		require.True(found, "DB iterator must return entries within the file range")
 	}
 
 	t.Run("large_values", func(t *testing.T) { test(t, true) })
