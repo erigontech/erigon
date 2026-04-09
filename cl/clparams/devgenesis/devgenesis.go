@@ -56,11 +56,11 @@ func DeriveSignerKey(seed string) (*ecdsa.PrivateKey, common.Address) {
 
 // DevConfig holds all the pieces needed to start a dev node.
 type DevConfig struct {
-	BeaconState    *state.CachingBeaconState
-	ValidatorKeys  []*bls.PrivateKey
-	SignerKey      *ecdsa.PrivateKey
-	SignerAddress  common.Address
-	BeaconConfig   *clparams.BeaconChainConfig
+	BeaconState   *state.CachingBeaconState
+	ValidatorKeys []*bls.PrivateKey
+	SignerKey     *ecdsa.PrivateKey
+	SignerAddress common.Address
+	BeaconConfig  *clparams.BeaconChainConfig
 }
 
 // BuildGenesisState creates a valid beacon genesis state for dev mode.
@@ -139,11 +139,11 @@ func BuildGenesisState(
 			pubkeyBytes,
 			withdrawalCreds,
 			maxEffectiveBalance,
-			false,                  // not slashed
-			0,                      // activation eligibility epoch
-			0,                      // activation epoch (active from genesis)
-			math.MaxUint64,         // exit epoch (far future)
-			math.MaxUint64,         // withdrawable epoch (far future)
+			false,          // not slashed
+			0,              // activation eligibility epoch
+			0,              // activation epoch (active from genesis)
+			math.MaxUint64, // exit epoch (far future)
+			math.MaxUint64, // withdrawable epoch (far future)
 		)
 
 		beaconState.AddValidator(validator, maxEffectiveBalance)

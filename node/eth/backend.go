@@ -1064,12 +1064,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 					validatorCount = 64
 				}
 				// Load the beacon config from the custom config path.
-			beaconCfg, _, err := clparams.CustomConfig(config.CaplinConfig.CustomConfigPath)
-			if err != nil {
-				logger.Error("[dev-validator] failed to load beacon config", "err", err)
-				return
-			}
-			svc, err := devvalidator.NewService(beaconURL, config.CaplinConfig.DevValidatorSeed, validatorCount, &beaconCfg, logger)
+				beaconCfg, _, err := clparams.CustomConfig(config.CaplinConfig.CustomConfigPath)
+				if err != nil {
+					logger.Error("[dev-validator] failed to load beacon config", "err", err)
+					return
+				}
+				svc, err := devvalidator.NewService(beaconURL, config.CaplinConfig.DevValidatorSeed, validatorCount, &beaconCfg, logger)
 				if err != nil {
 					logger.Error("[dev-validator] failed to create service", "err", err)
 					return

@@ -315,8 +315,8 @@ func (s *Service) proposeBlock(ctx context.Context, slot uint64, key *ValidatorK
 	if version >= clparams.DenebVersion {
 		submitBody = &cltypes.DenebSignedBeaconBlock{
 			SignedBlock: block,
-			KZGProofs:  solid.NewStaticListSSZ[*cltypes.KZGProof](cltypes.MaxBlobsCommittmentsPerBlock*int(s.cfg.NumberOfColumns), cltypes.BYTES_KZG_PROOF),
-			Blobs:      solid.NewStaticListSSZ[*cltypes.Blob](cltypes.MaxBlobsCommittmentsPerBlock, int(cltypes.BYTES_PER_BLOB)),
+			KZGProofs:   solid.NewStaticListSSZ[*cltypes.KZGProof](cltypes.MaxBlobsCommittmentsPerBlock*int(s.cfg.NumberOfColumns), cltypes.BYTES_KZG_PROOF),
+			Blobs:       solid.NewStaticListSSZ[*cltypes.Blob](cltypes.MaxBlobsCommittmentsPerBlock, int(cltypes.BYTES_PER_BLOB)),
 		}
 	}
 	if err := s.client.postJSON(ctx, "/eth/v2/beacon/blocks", submitBody, versionStr); err != nil {
