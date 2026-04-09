@@ -20,6 +20,8 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -231,6 +233,11 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}
 		if err := agg.OpenFolder(); err != nil {
 			return err
+		}
+
+		// After opening files: check for state/block snapshot misalignment.
+		if err := alignStateToBlockSnapshots(ctx, tx, agg, cfg, s.LogPrefix(), logger); err != nil {
+			return fmt.Errorf("align state to block snapshots: %w", err)
 		}
 
 		if err := firstNonGenesisCheck(tx, cfg.blockReader.Snapshots(), s.LogPrefix(), cfg.dirs); err != nil {
@@ -506,4 +513,229 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 		filesDeleted = true
 	}
 	return filesDeleted, nil
+}
+
+// alignStateToBlockSnapshots detects when state domain files extend past the
+// block file boundary (a preverified snapshot publication issue) and removes
+// the offending files. Without this, SeekCommitment returns a block number
+// past what TxNums covers, causing "behind commitment" errors.
+//
+// Algorithm: compute maxStep from the block file boundary. Remove all state
+// files whose end step > maxStep. If a merged file (e.g. 0-8704) spans past
+// the boundary, it gets removed too — the next lower file will be used.
+// Repeat with progressively lower maxStep until no files remain above it.
+func alignStateToBlockSnapshots(ctx context.Context, tx kv.RwTx, agg *state.Aggregator, cfg SnapshotsCfg, logPrefix string, logger log.Logger) error {
+	frozenBlocks := cfg.blockReader.FrozenBlocks()
+	if frozenBlocks == 0 {
+		return nil
+	}
+
+	dirs := cfg.dirs
+	totalRemoved := 0
+
+	// Iteratively: read commitment block from the already-open aggregator,
+	// if past frozen blocks, remove the highest state files and reopen.
+	for iter := 0; iter < 10; iter++ {
+		commitBlock := readCommitmentBlockFromFiles(ctx, cfg.db, logger)
+		if commitBlock == 0 || commitBlock <= frozenBlocks {
+			if totalRemoved > 0 {
+				logger.Info(fmt.Sprintf("[%s] state/block snapshot alignment complete", logPrefix),
+					"commitBlock", commitBlock, "frozenBlocks", frozenBlocks, "filesRemoved", totalRemoved)
+			}
+			return nil
+		}
+
+		// Commitment past block boundary. Remove the highest state files.
+		highestStart := findHighestFileStartStep(dirs)
+		if highestStart == 0 {
+			logger.Warn(fmt.Sprintf("[%s] state files misaligned but no removable files found", logPrefix),
+				"commitBlock", commitBlock, "frozenBlocks", frozenBlocks)
+			return nil
+		}
+
+		removed := removeStateFilesFromStep(dirs, highestStart, logger, logPrefix)
+		totalRemoved += removed
+		if removed == 0 {
+			return nil
+		}
+
+		// Reopen aggregator files with the reduced set.
+		if err := agg.OpenFolder(); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// readCommitmentBlockFromFiles opens a temp RO tx and reads the commitment
+// domain's "state" key to extract the committed block number.
+func readCommitmentBlockFromFiles(ctx context.Context, db kv.TemporalRwDB, logger log.Logger) uint64 {
+	roTx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return 0
+	}
+	defer roTx.Rollback()
+
+	// The commitment "state" key stores: txNum(8 bytes) + blockNum(8 bytes) + trie state
+	v, _, err := roTx.GetLatest(kv.CommitmentDomain, []byte("state"))
+	if err != nil || len(v) < 16 {
+		return 0
+	}
+	blockNum := binary.BigEndian.Uint64(v[8:16])
+	return blockNum
+}
+
+// findHighestFileStartStep finds the start step of the highest state file.
+func findHighestFileStartStep(dirs datadir.Dirs) kv.Step {
+	var highest kv.Step
+	entries, err := os.ReadDir(dirs.SnapDomain)
+	if err != nil {
+		return 0
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if strings.HasSuffix(name, ".torrent") {
+			continue
+		}
+		startStep, _, ok := parseFileStepRange(name)
+		if !ok {
+			continue
+		}
+		if startStep > highest {
+			highest = startStep
+		}
+	}
+	return highest
+}
+
+// removeStateFilesFromStep removes all state files whose start step >= fromStep
+// and strips matching entries from preverified.toml so the downloader doesn't
+// re-download them.
+func removeStateFilesFromStep(dirs datadir.Dirs, fromStep kv.Step, logger log.Logger, logPrefix string) int {
+	removed := 0
+
+	for _, dir := range []string{dirs.SnapDomain, dirs.SnapIdx, dirs.SnapHistory, dirs.SnapAccessors} {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			name := e.Name()
+			if strings.HasSuffix(name, ".torrent") {
+				continue
+			}
+			startStep, _, ok := parseFileStepRange(name)
+			if !ok || startStep < fromStep {
+				continue
+			}
+			dataPath := filepath.Join(dir, name)
+			torrentPath := dataPath + ".torrent"
+			if err := os.Remove(dataPath); err != nil && !os.IsNotExist(err) {
+				continue
+			}
+			os.Remove(torrentPath)
+			logger.Debug(fmt.Sprintf("[%s] removed misaligned file", logPrefix), "file", name, "startStep", startStep)
+			removed++
+		}
+	}
+
+	// Strip removed step ranges from preverified.toml so the downloader
+	// doesn't re-fetch them on next startup. Match any line containing a
+	// step range where the start step >= fromStep.
+	pvPath := filepath.Join(dirs.Snap, "preverified.toml")
+	if data, err := os.ReadFile(pvPath); err == nil {
+		lines := strings.Split(string(data), "\n")
+		var kept []string
+		stripped := 0
+		for _, line := range lines {
+			// Check if this line references a file with step >= fromStep.
+			_, _, ok := parseFileStepRange(line)
+			startStep, _, _ := parseFileStepRange(line)
+			if ok && startStep >= fromStep {
+				stripped++
+				continue
+			}
+			kept = append(kept, line)
+		}
+		if stripped > 0 {
+			os.Chmod(pvPath, 0644) // ensure writable
+			os.WriteFile(pvPath, []byte(strings.Join(kept, "\n")), 0644)
+			logger.Info(fmt.Sprintf("[%s] stripped %d entries from preverified.toml", logPrefix, stripped))
+		}
+	}
+
+	if removed > 0 {
+		logger.Info(fmt.Sprintf("[%s] removed state files from step %d", logPrefix, fromStep), "removed", removed)
+	}
+	return removed
+}
+
+// parseFileStepRange extracts start and end steps from a state snapshot filename.
+// Filenames: "v2.0-accounts.8192-8704.kv" → start=8192, end=8704
+func parseFileStepRange(name string) (start, end kv.Step, ok bool) {
+	parts := strings.Split(name, ".")
+	for _, part := range parts {
+		if idx := strings.Index(part, "-"); idx > 0 {
+			var s, e uint64
+			if _, err := fmt.Sscanf(part, "%d-%d", &s, &e); err == nil && e > s {
+				return kv.Step(s), kv.Step(e), true
+			}
+		}
+	}
+	return 0, 0, false
+}
+
+// removeStateFilesAboveStep scans state directories and removes all files
+// whose step range extends past maxStep (both data and torrent files).
+func removeStateFilesAboveStep(dirs datadir.Dirs, maxStep kv.Step, logger log.Logger, logPrefix string) int {
+	removed := 0
+	for _, dir := range []string{dirs.SnapDomain, dirs.SnapIdx, dirs.SnapHistory, dirs.SnapAccessors} {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			name := e.Name()
+			if strings.HasSuffix(name, ".torrent") {
+				continue
+			}
+			endStep, ok := parseFileEndStep(name)
+			if !ok {
+				continue
+			}
+			if endStep <= maxStep {
+				continue
+			}
+			dataPath := filepath.Join(dir, name)
+			torrentPath := dataPath + ".torrent"
+			if err := os.Remove(dataPath); err != nil && !os.IsNotExist(err) {
+				logger.Warn(fmt.Sprintf("[%s] failed to remove misaligned state file", logPrefix), "file", name, "err", err)
+				continue
+			}
+			os.Remove(torrentPath) // best effort
+			removed++
+		}
+	}
+	if removed > 0 {
+		logger.Info(fmt.Sprintf("[%s] removed state files past block boundary", logPrefix), "removed", removed, "maxStep", maxStep)
+	}
+	return removed
+}
+
+// parseFileEndStep extracts the end step from a state snapshot filename.
+// Filenames look like: "v2.0-accounts.8192-8704.kv"
+// Returns the end step (8704) and true, or 0 and false if not parseable.
+func parseFileEndStep(name string) (kv.Step, bool) {
+	parts := strings.Split(name, ".")
+	for _, part := range parts {
+		if idx := strings.Index(part, "-"); idx > 0 {
+			endStr := part[idx+1:]
+			var end uint64
+			if _, err := fmt.Sscanf(endStr, "%d", &end); err == nil && end > 0 {
+				return kv.Step(end), true
+			}
+		}
+	}
+	return 0, false
 }
