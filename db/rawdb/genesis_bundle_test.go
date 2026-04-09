@@ -156,6 +156,25 @@ func TestGenesisBundle_ReadEmptyDB(t *testing.T) {
 	require.Nil(t, got.TD, "empty DB: no TD")
 }
 
+// TestGenesisBundle_ReadPartialDBError regression-nets the corrupt-DB guard:
+// when the canonical hash at height 0 is set but no block body exists,
+// ReadGenesisBundle must return an explicit error rather than a bundle with
+// Block == nil. Otherwise CommitGenesisTx would treat the partially-corrupt
+// DB as fresh and silently overwrite the remaining block-zero metadata.
+func TestGenesisBundle_ReadPartialDBError(t *testing.T) {
+	t.Parallel()
+
+	_, tx := memdb.NewTestTx(t)
+	defer tx.Rollback()
+
+	hash := common.HexToHash("0x00000000000000000000000000000000000000000000000000000000deadbeef")
+	require.NoError(t, rawdb.WriteCanonicalHash(tx, hash, 0))
+
+	_, err := rawdb.ReadGenesisBundle(tx)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "block body is missing")
+}
+
 func TestGenesisBundle_WriteNilRejects(t *testing.T) {
 	t.Parallel()
 
