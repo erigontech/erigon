@@ -22,7 +22,9 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
 	"runtime"
+	runtimedebug "runtime/debug"
 	"sync/atomic"
 	"time"
 
@@ -44,6 +46,28 @@ import (
 var (
 	mxFlushTook = metrics.GetOrCreateSummary("domain_flush_took")
 )
+
+// Stale-value reproduction tracing for Sepolia block 10619150 tx #27 gas mismatch.
+// Target storage slot that Erigon's DB resurrects from ~27 blocks earlier
+// (0x45d26f183dd0b6e596) instead of following the canonical transitions.
+// All DomainPut / DomainDel / GetLatest hits on this (addr, slot) pair are logged
+// with a full stack trace so we can identify who writes/reads the stale value.
+var (
+	traceTargetAddr = []byte{0x77, 0xef, 0x08, 0x70, 0x24, 0xf8, 0x79, 0x76, 0xaa, 0xda, 0x0a, 0xa7, 0xf7, 0x3b, 0xb8, 0xea, 0xe6, 0xe9, 0xdd, 0xa1}
+	traceTargetSlot = []byte{0x38, 0x07, 0xf2, 0xfa, 0x1b, 0x2d, 0xb4, 0x6c, 0xc2, 0x8d, 0xd1, 0x52, 0x30, 0xc6, 0x66, 0x66, 0x3a, 0xa8, 0x3e, 0xa2, 0x97, 0x58, 0x0c, 0xa8, 0x3f, 0x72, 0x16, 0xf0, 0x51, 0x76, 0x92, 0xe6}
+)
+
+func isTraceTargetKey(domain kv.Domain, k []byte) bool {
+	if domain != kv.StorageDomain || len(k) != 52 {
+		return false
+	}
+	return bytes.Equal(k[:20], traceTargetAddr) && bytes.Equal(k[20:], traceTargetSlot)
+}
+
+func traceTarget(event string, txNum uint64, v, prev []byte) {
+	fmt.Fprintf(os.Stderr, "TRACE_TARGET_SLOT %s txNum=%d v=%x prev=%x\n%s\n",
+		event, txNum, v, prev, runtimedebug.Stack())
+}
 
 // KvList sort.Interface to sort write list by keys
 type KvList struct {
@@ -526,6 +550,11 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		sd.stateCache.Put(domain, k, v)
 	}
 
+	if isTraceTargetKey(domain, k) {
+		fmt.Fprintf(os.Stderr, "TRACE_TARGET_SLOT GetLatest source=db v=%x step=%d sd.txNum=%d\n",
+			v, step, sd.txNum)
+	}
+
 	return v, step, nil
 }
 
@@ -601,6 +630,9 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 	if v == nil {
 		return fmt.Errorf("DomainPut: %s, trying to put nil value. not allowed", domain)
 	}
+	if isTraceTargetKey(domain, k) {
+		traceTarget("DomainPut", txNum, v, prevVal)
+	}
 	ks := string(k)
 	sd.sdCtx.TouchKey(domain, ks, v)
 
@@ -638,6 +670,9 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 //   - user can append k2 into k1, then underlying methods will not preform append
 //   - if `val == nil` it will call DomainDel
 func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte, txNum uint64, prevVal []byte) error {
+	if isTraceTargetKey(domain, k) {
+		traceTarget("DomainDel", txNum, nil, prevVal)
+	}
 	ks := string(k)
 	sd.sdCtx.TouchKey(domain, ks, nil)
 
