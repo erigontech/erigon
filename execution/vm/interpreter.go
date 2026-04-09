@@ -391,9 +391,9 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		cost = operation.constantGas // For tracing
 
 		// EIP-7907: Charge WarmStorageReadCostEIP2929 (100) for each 32-byte code chunk
-		// accessed for the first time within this block. Chunks are tracked at block level
-		// (not per-transaction), so a chunk warmed in an earlier tx is free in later txs.
-		// For PUSH instructions the immediate data may span an additional chunk boundary.
+		// accessed for the first time within this transaction. Chunks are tracked per-transaction
+		// (access list resets each tx, like SLOAD warm/cold). For PUSH instructions the
+		// immediate data may span an additional chunk boundary.
 		if evm.chainRules.IsOsaka {
 			startChunk := uint32(pc >> 5)
 			endChunk := startChunk
