@@ -624,25 +624,6 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 
 	st.evm.ResetGasConsumed()
 
-	// EIP-7907: Charge code chunk access gas for the top-level call target.
-	// Cost = ceil(len(code)/32) * WarmStorageReadCostEIP2929, charged once per transaction.
-	// Deducted from gasRemaining before evm.Call() so that execution gas accounting is correct.
-	if rules.IsOsaka && !contractCreation {
-		toAddr := st.to()
-		if !st.state.CodeInAccessList(toAddr) {
-			if toCode, codeErr := st.state.GetCode(toAddr); codeErr == nil && len(toCode) > 0 {
-				st.state.AddCodeToAccessList(toAddr)
-				codeChunks := (uint64(len(toCode)) + 31) / 32
-				codeChunkGas := codeChunks * params.WarmStorageReadCostEIP2929
-				if st.gasRemaining.Regular >= codeChunkGas {
-					st.gasRemaining.Regular -= codeChunkGas
-				} else {
-					st.gasRemaining.Regular = 0
-				}
-			}
-		}
-	}
-
 	if st.evm.Context.BlockNumber == 24809877 {
 		txIdx := st.state.TxIndex()
 		if txIdx == 63 || txIdx == 72 {

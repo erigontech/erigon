@@ -98,6 +98,17 @@ type EVM struct {
 	stateGasConsumed   uint64 // total state gas charged during tx execution (restored on depth>0 revert, kept on depth-0)
 	regularGasConsumed uint64 // total regular gas charged during tx execution (for block-level accounting)
 	revertedSpillGas   uint64 // state gas that spilled to regular and was restored on depth-0 revert
+
+	// blockCodeChunkAccessed tracks (codeHash, chunkIndex) pairs accessed within the block.
+	// EIP-7907: first access to each 32-byte code chunk costs WarmStorageReadCostEIP2929 gas.
+	// Block-level (not reset per-transaction): a chunk warmed by tx N is free in tx N+1.
+	blockCodeChunkAccessed map[codeChunkKey]struct{}
+}
+
+// codeChunkKey identifies a 32-byte code chunk within a specific code hash.
+type codeChunkKey struct {
+	hash  accounts.CodeHash
+	chunk uint32
 }
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
@@ -109,12 +120,13 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state
 		}
 	}
 	evm := &EVM{
-		Context:         blockCtx,
-		TxContext:       txCtx,
-		intraBlockState: ibs,
-		config:          vmConfig,
-		chainConfig:     chainConfig,
-		chainRules:      blockCtx.Rules(chainConfig),
+		Context:                blockCtx,
+		TxContext:              txCtx,
+		intraBlockState:        ibs,
+		config:                 vmConfig,
+		chainConfig:            chainConfig,
+		chainRules:             blockCtx.Rules(chainConfig),
+		blockCodeChunkAccessed: make(map[codeChunkKey]struct{}),
 	}
 	evm.jt = jumpTable(evm.chainRules, vmConfig)
 
