@@ -1649,11 +1649,15 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 		return v, foundStep, true, nil
 	}
 
-	// Deletion entries (len(v)==0) must be returned as found even when the step is older than
-	// files.EndTxNum(). Without this, getLatest falls through to getLatestFromFiles which scans
-	// snapshot files from newest to oldest and returns a stale pre-deletion value from an older
-	// file — because deletions are represented as absent keys in snapshot files (no tombstone).
-	// The DB only keeps the most-recent entry per key, so a deletion here is authoritative.
+	// Deletion entries (len(v)==0) must be returned as found even when foundStep is older than
+	// files.EndTxNum(). Context: executed blocks are periodically frozen into immutable key-value
+	// snapshot files (*.kv), one file per step range (e.g. v2.0-storage.8760-8762.kv). Once
+	// frozen, old MDBX entries are pruned. A deletion is stored in MDBX as an 8-byte inverted-step
+	// record with no value bytes. If such a deletion survives pruning (its step is inside the
+	// frozen range, which can happen transiently), it must win over any value found in the snapshot
+	// files — snapshot files represent absent keys as simply missing entries, not as tombstones, so
+	// getLatestFromFiles would silently return a stale non-zero value from an earlier file for the
+	// same key. The MDBX entry is authoritative: it is the most-recent write for this key.
 	if len(v) == 0 {
 		return nil, foundStep, true, nil
 	}
