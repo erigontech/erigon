@@ -162,9 +162,9 @@ func TestVerifyBranchHashes_Singleton(t *testing.T) {
 	touchMap := uint16(1 << nibble)
 	afterMap := touchMap
 
-	var cellData2 [16]cellEncodeData
-	cellData2[nibble] = cellEncodeDataFromCell(c)
-	branchData, err := encoder.EncodeBranch(touchMap, afterMap, touchMap, &cellData2)
+	var cellData [16]cellEncodeData
+	cellData[nibble] = cellEncodeDataFromCell(c)
+	branchData, err := encoder.EncodeBranch(touchMap, afterMap, touchMap, &cellData)
 	require.NoError(t, err)
 
 	// branchKey for depth=2: depth-1 = 1 nibble of the hashed account key path
@@ -248,9 +248,9 @@ func TestVerifyBranchHashes_SingletonDepth1(t *testing.T) {
 	touchMap := uint16(1 << nibble)
 	afterMap := touchMap
 
-	var cellData3 [16]cellEncodeData
-	cellData3[nibble] = cellEncodeDataFromCell(c)
-	branchData, err := encoder.EncodeBranch(touchMap, afterMap, touchMap, &cellData3)
+	var cellData [16]cellEncodeData
+	cellData[nibble] = cellEncodeDataFromCell(c)
+	branchData, err := encoder.EncodeBranch(touchMap, afterMap, touchMap, &cellData)
 	require.NoError(t, err)
 
 	// branchKey for root branch: empty path (0 nibbles → depth = 0 + 1 = 1)
@@ -311,9 +311,9 @@ func TestVerifyBranchHashes_Storage(t *testing.T) {
 	touchMap := uint16(1 << nibble)
 	afterMap := touchMap
 
-	var cellData4 [16]cellEncodeData
-	cellData4[nibble] = cellEncodeDataFromCell(c)
-	branchData, err := encoder.EncodeBranch(touchMap, afterMap, touchMap, &cellData4)
+	var cellData [16]cellEncodeData
+	cellData[nibble] = cellEncodeDataFromCell(c)
+	branchData, err := encoder.EncodeBranch(touchMap, afterMap, touchMap, &cellData)
 	require.NoError(t, err)
 
 	// Build branchKey for depth=65: depth-1 = 64 nibbles (hash of account address).
