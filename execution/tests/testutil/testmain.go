@@ -29,5 +29,7 @@ func RunTestMain(m *testing.M) {
 	if dir := os.Getenv("ERIGON_EXECUTION_TESTS_TMPDIR"); dir != "" {
 		setTestTmpDir(dir)
 	}
-	os.Exit(m.Run())
+	code := m.Run()
+	CleanupGenesisCache()
+	os.Exit(code)
 }

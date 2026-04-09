@@ -83,6 +83,7 @@ var (
 	genesisDBMu    sync.Mutex // protects all fields below
 	genesisDBCond  = sync.NewCond(&genesisDBMu)
 	genesisDBCache = make(map[string]*genesisCacheEntry)
+	evictionWg     sync.WaitGroup // tracks background eviction goroutines
 )
 
 // genesisSpecHash produces a deterministic hash of the genesis spec for cache keying.
@@ -173,7 +174,9 @@ func evictLRU() bool {
 	}
 	// Remove from map under lock, then do expensive IO outside the lock.
 	delete(genesisDBCache, victimKey)
+	evictionWg.Add(1)
 	go func() {
+		defer evictionWg.Done()
 		if victimEntry.db != nil {
 			victimEntry.db.Close()
 		}
@@ -337,4 +340,29 @@ func getOrCreateGenesisDB(fork string, gspec *types.Genesis) (kv.TemporalRwDB, *
 	close(entry.ready)
 	genesisDBMu.Unlock()
 	return db, genesis, func() { releaseGenesisDB(key) }, nil
+}
+
+// CleanupGenesisCache closes all cached genesis databases and removes their
+// temp directories. Should be called from RunTestMain after m.Run() returns.
+func CleanupGenesisCache() {
+	// Wait for any in-flight eviction goroutines to finish first.
+	evictionWg.Wait()
+
+	genesisDBMu.Lock()
+	entries := make(map[string]*genesisCacheEntry, len(genesisDBCache))
+	for k, e := range genesisDBCache {
+		entries[k] = e
+		delete(genesisDBCache, k)
+	}
+	genesisDBMu.Unlock()
+
+	for _, e := range entries {
+		<-e.ready // wait for creation to finish
+		if e.db != nil {
+			e.db.Close()
+		}
+		for _, d := range e.dirs {
+			dirutil.RemoveAll(d)
+		}
+	}
 }

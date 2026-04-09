@@ -422,8 +422,8 @@ type options struct {
 	engine              rules.Engine
 	pruneMode           *prune.Mode
 	blockBufferSize     int
-	withTxPool      bool
-	enableDomains   []kv.Domain
+	withTxPool          bool
+	enableDomains       []kv.Domain
 	cachedDB            kv.TemporalRwDB // pre-existing DB from genesis cache
 	cachedGenesis       *types.Block    // genesis block from genesis cache
 	fcuBackgroundCommit bool

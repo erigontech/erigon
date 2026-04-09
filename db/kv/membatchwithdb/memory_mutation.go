@@ -910,7 +910,20 @@ func (m *MemoryMutation) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byt
 	if m.db == nil {
 		return nil, nil, false, nil
 	}
-	return m.db.HasPrefix(name, prefix)
+	k, v, ok, err := m.db.HasPrefix(name, prefix)
+	if !ok || err != nil {
+		return k, v, ok, err
+	}
+	// Verify the backing DB result wasn't deleted in the overlay.
+	m.mu.RLock()
+	if tbl := m.domainOverlay[name]; tbl != nil {
+		if e, found := tbl[string(k)]; found && e.deleted {
+			m.mu.RUnlock()
+			return nil, nil, false, nil
+		}
+	}
+	m.mu.RUnlock()
+	return k, v, ok, nil
 }
 
 func (m *MemoryMutation) StepsInFiles(entitySet ...kv.Domain) kv.Step {
