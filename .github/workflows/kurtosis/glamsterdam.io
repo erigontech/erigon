@@ -4,6 +4,7 @@ participants:
     el_type: erigon
     el_image: test/erigon:current
     el_log_level: "debug"
+    el_extra_params: ["--experimental.bal"]
     supernode: true
     count: 3
 global_log_level: 'debug'
