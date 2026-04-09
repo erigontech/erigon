@@ -97,6 +97,17 @@ type HexPatriciaHashed struct {
 	mountedNib int  // if 0 <= nib <= 15 means mounted to some root. If -1, means it's a storage subtrie so must not be folded above depth 63
 
 	memoizationOff bool // if true, do not rely on memoized hashes
+
+	// forceEagerDerive (test-only): if true, unfoldBranchNode derives hashed
+	// keys eagerly for ALL siblings instead of only the target nibble. Used by
+	// hex_patricia_hashed_lazy_diff_test.go to verify that lazy derivation
+	// produces identical roots and persisted branch bytes.
+	forceEagerDerive bool
+	// cellsDeferred (test-only): counts cells left in a deferred-derivation
+	// state by unfoldBranchNode. Used by the differential test to assert that
+	// the lazy code path is actually exercised when forceEagerDerive=false.
+	cellsDeferred uint64
+
 	//temp buffers
 	accValBuf rlp.RlpEncodedBytes
 
@@ -207,6 +218,8 @@ func (hph *HexPatriciaHashed) resetForReuse() {
 	// flags
 	hph.memoizationOff = false
 	hph.leaveDeferredForCaller = false
+	hph.forceEagerDerive = false
+	hph.cellsDeferred = 0
 
 	// auxiliary buffer
 	hph.auxBuffer.Reset()
@@ -1324,6 +1337,9 @@ func (hph *HexPatriciaHashed) needUnfolding(hashedKey []byte) (int16, error) {
 		}
 		cell = &hph.root
 	} else {
+		if hph.currentKeyLen >= int16(len(hashedKey)) {
+			return 0, nil // key fully consumed, nothing to unfold
+		}
 		nibble := int(hashedKey[hph.currentKeyLen])
 		cell = &hph.grid[hph.activeRows-1][nibble]
 		depth = hph.depths[hph.activeRows-1]
@@ -1792,12 +1808,14 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted boo
 
 		// Derive hashed keys eagerly only for the target child we're descending
 		// into; defer siblings until they are actually needed (lazy derivation).
-		if nibble == targetNibble {
+		// forceEagerDerive (test-only) restores eager derivation for all siblings.
+		if nibble == targetNibble || hph.forceEagerDerive {
 			if err = cell.deriveHashedKeys(depth, hph.keccak, hph.accountKeyLen, hph.cellHashBuf[:]); err != nil {
 				return err
 			}
 		} else {
 			cell.hashDeriveDepth = depth
+			hph.cellsDeferred++
 		}
 		bitset ^= bit
 	}
@@ -2413,6 +2431,14 @@ func (hph *HexPatriciaHashed) detectCollapseBeforeDelete(hashedKey []byte) {
 
 	siblingCell := &hph.grid[parentRow][siblingNibble]
 
+	// Lazy derivation: ensure hashed keys are derived before reading hashedExtension
+	if err := hph.ensureDerivedHashedKeys(siblingCell); err != nil {
+		if hph.trace {
+			fmt.Printf("[collapse] ensureDerivedHashedKeys failed for sibling (%d, %x): %v\n", parentRow, siblingNibble, err)
+		}
+		return
+	}
+
 	// Build the sibling's full hashed key path
 	siblingPath := make([]byte, int(depth)+1+int(siblingCell.hashedExtLen))
 	copy(siblingPath, hph.currentKey[:depth])
@@ -2436,6 +2462,14 @@ func (hph *HexPatriciaHashed) detectCascadingCollapseAtRow(row int) {
 	depth := hph.depths[row] - 1
 	survivingNibble := bits.TrailingZeros16(hph.afterMap[row])
 	survivingCell := &hph.grid[row][survivingNibble]
+
+	// Lazy derivation: ensure hashed keys are derived before reading hashedExtension
+	if err := hph.ensureDerivedHashedKeys(survivingCell); err != nil {
+		if hph.trace {
+			fmt.Printf("[cascade-collapse] ensureDerivedHashedKeys failed for surviving (%d, %x): %v\n", row, survivingNibble, err)
+		}
+		return
+	}
 
 	// Build the surviving child's full hashed key path
 	siblingPath := make([]byte, int(depth)+1+int(survivingCell.hashedExtLen))
@@ -2959,8 +2993,12 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	return rootHash, nil
 }
 
-func (hph *HexPatriciaHashed) SetTrace(trace bool)           { hph.trace = trace }
-func (hph *HexPatriciaHashed) SetTraceDomain(trace bool)     { hph.traceDomain = trace }
+func (hph *HexPatriciaHashed) SetTrace(trace bool)       { hph.trace = trace }
+func (hph *HexPatriciaHashed) SetTraceDomain(trace bool) { hph.traceDomain = trace }
+
+// SetForceEagerDerive enables eager derivation for ALL siblings during
+// unfoldBranchNode, matching the pre-PR-19899 behaviour. Test-only.
+func (hph *HexPatriciaHashed) SetForceEagerDerive(b bool)    { hph.forceEagerDerive = b }
 func (hph *HexPatriciaHashed) EnableWarmupCache(enable bool) { hph.enableWarmupCache = enable }
 
 func (hph *HexPatriciaHashed) GetCapture(truncate bool) []string {

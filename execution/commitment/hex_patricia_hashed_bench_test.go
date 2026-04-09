@@ -72,7 +72,6 @@ func Benchmark_HexPatriciaHashed_Process_Batch(b *testing.B) {
 	const keysCount = 100_000
 
 	for _, batchSize := range []int{100, 500} {
-		batchSize := batchSize
 		b.Run(fmt.Sprintf("batch=%d", batchSize), func(b *testing.B) {
 			b.SetParallelism(1)
 			rnd := rand.New(rand.NewSource(133777))
@@ -116,6 +115,13 @@ func Benchmark_HexPatriciaHashed_Process_Batch(b *testing.B) {
 // across iterations, here every iteration starts cold: root → unfoldBranchNode
 // at every trie level → leaf. The trie has 100k keys so sibling cells at each
 // branch carry plain-key references, which is exactly what lazy derivation skips.
+//
+// Sub-benchmarks "lazy" and "eager" toggle forceEagerDerive so the same
+// dataset measures both modes in a single run. Use:
+//
+//	go test -bench=Benchmark_HexPatriciaHashed_Unfold_Isolated \
+//	    -benchmem -count=10 -benchtime=2s -run=^$ ./execution/commitment/ \
+//	  | benchstat -col /mode -
 func Benchmark_HexPatriciaHashed_Unfold_Isolated(b *testing.B) {
 	const keysCount = 100_000
 	b.SetParallelism(1)
@@ -131,29 +137,48 @@ func Benchmark_HexPatriciaHashed_Unfold_Isolated(b *testing.B) {
 	ms := NewMockState(b)
 	require.NoError(b, ms.applyPlainUpdates(pk, updates))
 
-	// Prime the MockState branch cache with a full commit pass.
-	hph := NewHexPatriciaHashed(length.Addr, ms)
 	upds := WrapKeyUpdates(b, ModeDirect, KeyToHexNibbleHash, nil, nil)
 	defer upds.Close()
 	ctx := context.Background()
-	WrapKeyUpdatesInto(b, upds, pk, updates)
-	_, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
-	require.NoError(b, err)
 
-	b.ResetTimer()
-	idx := 0
-	for b.Loop() {
-		// SetState(nil) fully clears grid, depths, touchMap, afterMap and root
-		// so next Process unfolds from scratch exactly as a cold trie would.
-		if err := hph.SetState(nil); err != nil {
-			b.Fatal(err)
-		}
-		WrapKeyUpdatesInto(b, upds, pk[idx:idx+1], updates[idx:idx+1])
-		_, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
+	// Prime the MockState branch cache with a single warmup pass. The
+	// differential test (hex_patricia_hashed_lazy_diff_test.go) verifies that
+	// lazy and eager produce byte-identical persisted branches, so the warmup
+	// mode does not bias either sub-benchmark.
+	{
+		warmHph := NewHexPatriciaHashed(length.Addr, ms)
+		WrapKeyUpdatesInto(b, upds, pk, updates)
+		_, err := warmHph.Process(ctx, upds, "", nil, WarmupConfig{})
 		require.NoError(b, err)
-		idx++
-		if idx >= len(pk) {
-			idx = 0
-		}
+	}
+
+	for _, mode := range []struct {
+		name  string
+		eager bool
+	}{
+		{"lazy", false},
+		{"eager", true},
+	} {
+		b.Run("mode="+mode.name, func(b *testing.B) {
+			hph := NewHexPatriciaHashed(length.Addr, ms)
+			hph.SetForceEagerDerive(mode.eager)
+
+			b.ResetTimer()
+			idx := 0
+			for b.Loop() {
+				// SetState(nil) fully clears grid, depths, touchMap, afterMap and root
+				// so next Process unfolds from scratch exactly as a cold trie would.
+				if err := hph.SetState(nil); err != nil {
+					b.Fatal(err)
+				}
+				WrapKeyUpdatesInto(b, upds, pk[idx:idx+1], updates[idx:idx+1])
+				_, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
+				require.NoError(b, err)
+				idx++
+				if idx >= len(pk) {
+					idx = 0
+				}
+			}
+		})
 	}
 }

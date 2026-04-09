@@ -123,6 +123,9 @@ func (p *ConcurrentPatriciaHashed) unfoldRoot(ctx context.Context, ctxFactory Tr
 		if unfolding <= 0 {
 			break
 		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err := p.root.unfold(zero, unfolding); err != nil {
 			return fmt.Errorf("unfold: %w", err)
 		}
