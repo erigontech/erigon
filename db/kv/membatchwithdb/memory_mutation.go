@@ -697,30 +697,6 @@ func (m *MemoryMutation) Flush(ctx context.Context, tx kv.RwTx) error {
 	return nil
 }
 
-// FlushDomains copies domain overlay entries from this mutation to another.
-// This is used when a nested MemoryMutation is merged into a parent overlay.
-func (m *MemoryMutation) FlushDomains(target kv.TemporalPutDel) error {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	for domain := range kv.DomainLen {
-		tbl := m.domainOverlay[domain]
-		if tbl == nil {
-			continue
-		}
-		for k, e := range tbl {
-			if e.deleted {
-				if err := target.DomainDel(domain, []byte(k), 0, nil); err != nil {
-					return err
-				}
-			} else {
-				if err := target.DomainPut(domain, []byte(k), e.value, 0, nil); err != nil {
-					return err
-				}
-			}
-		}
-	}
-	return nil
-}
 
 func (m *MemoryMutation) Diff() (*MemoryDiff, error) {
 	memDiff := &MemoryDiff{

@@ -89,10 +89,4 @@ func TestDomainOverlay(t *testing.T) {
 	got6, _, err := parent.GetLatest(kv.AccountsDomain, key)
 	require.NoError(t, err)
 	require.Equal(t, val, got6, "parent should still have value after child DomainDel")
-
-	// FlushDomains — merge child into parent.
-	require.NoError(t, child.FlushDomains(parent))
-	got7, _, err := parent.GetLatest(kv.AccountsDomain, key)
-	require.NoError(t, err)
-	require.Nil(t, got7, "after FlushDomains, parent should see child's delete")
 }
