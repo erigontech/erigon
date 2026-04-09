@@ -2154,6 +2154,80 @@ func TestRangeAsOf_ValuesMatchHistorySeek(t *testing.T) {
 	})
 }
 
+// TestRangeAsOf_DBIteratorSkipsFileRange verifies that the DB iterator in
+// RangeAsOf does not read entries within the file range. After collating files,
+// we insert a fake DB-only key with a txNum inside the file range. Without the
+// fix (DB iterator starting from startTxNum), this phantom key would appear in
+// results. With the fix (DB iterator clamped to files.EndTxNum()), it is skipped.
+func TestRangeAsOf_DBIteratorSkipsFileRange(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	logger := log.New()
+	ctx := context.Background()
+
+	test := func(t *testing.T, largeValues bool) {
+		t.Helper()
+		require := require.New(t)
+
+		db, h, txs := filledHistory(t, largeValues, logger)
+		collateAndMergeHistory(t, db, h, txs, false)
+
+		hc := h.BeginFilesRo()
+		defer hc.Close()
+
+		endTxNum := hc.iit.files.EndTxNum()
+		require.Greater(endTxNum, uint64(0), "files should cover a non-empty range")
+
+		startTxNum := endTxNum / 2
+
+		// Insert a phantom key that exists ONLY in DB, at a txNum inside the
+		// file range. This key (0x02...) is outside the normal test data range
+		// (keys use 0x01 prefix) so it has no file entry.
+		phantomKey := []byte{0x02, 0, 0, 0, 0, 0, 0, 0x01}
+		phantomVal := []byte("PHANTOM")
+		rwTx, err := db.BeginRw(ctx)
+		require.NoError(err)
+		defer rwTx.Rollback()
+		if largeValues {
+			dbKey := make([]byte, len(phantomKey)+8)
+			copy(dbKey, phantomKey)
+			binary.BigEndian.PutUint64(dbKey[len(phantomKey):], startTxNum)
+			require.NoError(rwTx.Put(h.ValuesTable, dbKey, phantomVal))
+		} else {
+			var txBuf [8]byte
+			binary.BigEndian.PutUint64(txBuf[:], startTxNum)
+			require.NoError(rwTx.Put(h.ValuesTable, phantomKey, append(txBuf[:], phantomVal...)))
+		}
+		require.NoError(rwTx.Commit())
+
+		// Query the range that includes phantomKey.
+		roTx, err := db.BeginRo(ctx)
+		require.NoError(err)
+		defer roTx.Rollback()
+
+		it, err := hc.RangeAsOf(ctx, startTxNum, phantomKey, nil, order.Asc, -1, roTx)
+		require.NoError(err)
+		defer it.Close()
+
+		// The phantom key must NOT appear — the DB iterator should start from
+		// files.EndTxNum(), skipping the phantom entry whose txNum < endTxNum.
+		for it.HasNext() {
+			k, _, err := it.Next()
+			require.NoError(err)
+			require.False(
+				bytes.Equal(phantomKey, k),
+				"DB iterator leaked phantom key from within the file range",
+			)
+		}
+	}
+
+	t.Run("large_values", func(t *testing.T) { test(t, true) })
+	t.Run("small_values", func(t *testing.T) { test(t, false) })
+}
+
 // TestHistoryRange_EmptyRange verifies that degenerate ranges (empty, inverted,
 // or beyond the data horizon) produce no results without error.
 func TestHistoryRange_EmptyRange(t *testing.T) {

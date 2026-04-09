@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clstages"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/das"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
@@ -151,12 +152,12 @@ func MetaCatchingUp(args Args) StageName {
 	if !args.hasDownloaded {
 		return DownloadHistoricalBlocks
 	}
-	// If we have no peers, sleep until the next slot rather than entering sync
-	// stages that will fail. This avoids CPU-burning retry loops when peer
-	// discovery has not completed yet (common on Gnosis with 5-second slots).
+	// If we have no peers, skip sync stages and go directly to ForkChoice.
+	// Sync stages (ForwardSync, ChainTipSync) require peers to download blocks
+	// and will just timeout. ForkChoice still needs to run so the head advances
+	// from blocks received via the beacon API (solo validator / single node).
 	if args.peers == 0 {
-		log.Debug("[Caplin] no peers available, waiting for peer discovery before syncing")
-		return WaitForPeers
+		return ""
 	}
 	if args.seenEpoch < args.targetEpoch {
 		return ForwardSync
@@ -275,6 +276,8 @@ func ConsensusClStages(ctx context.Context,
 						if err := cfg.syncedData.OnHeadState(cfg.state); err != nil {
 							return fmt.Errorf("failed to set genesis head state: %w", err)
 						}
+						// Mark forkchoice as synced so OnAttestation processes attestations.
+						cfg.forkChoice.SetSynced(true)
 						// Write genesis beacon block to DB so block production can find the parent block.
 						if err := writeGenesisBeaconBlock(ctx, cfg); err != nil {
 							return fmt.Errorf("failed to write genesis beacon block: %w", err)
@@ -400,24 +403,19 @@ func writeGenesisBeaconBlock(ctx context.Context, cfg *Cfg) error {
 	}
 	blk.StateRoot = stateRoot
 
+	// The genesis block body is BeaconBlockBody() with all default/empty values per the spec.
+	// SyncAggregate needs preset-aware bitvector sizing; ExecutionPayload sub-fields
+	// must be initialized (non-nil) for SSZ encoding.
 	body := blk.Body
-	// Set eth1_data from genesis state so body.HashSSZ() matches state.LatestBlockHeader().BodyRoot.
-	body.Eth1Data = cfg.state.Eth1Data()
 	if version >= clparams.AltairVersion {
-		body.SyncAggregate = cltypes.NewSyncAggregate()
+		body.SyncAggregate = cltypes.NewSyncAggregateWithSize(int(cfg.beaconCfg.SyncCommitteeSize) / 8)
 	}
 	if version >= clparams.BellatrixVersion {
-		execHeader := cfg.state.LatestExecutionPayloadHeader()
-		body.ExecutionPayload = cltypes.NewEth1BlockFromExecutionHeader(execHeader, version, cfg.beaconCfg)
-	}
-
-	// Verify body root matches state's LatestBlockHeader — catches non-standard genesis issues.
-	bodyRoot, err := body.HashSSZ()
-	if err != nil {
-		return fmt.Errorf("genesis body HashSSZ failed: %w", err)
-	}
-	if bodyRoot != header.BodyRoot {
-		return fmt.Errorf("genesis body root mismatch: computed %x, expected %x", bodyRoot, header.BodyRoot)
+		body.ExecutionPayload.Extra = solid.NewExtraData()
+		body.ExecutionPayload.Transactions = &solid.TransactionsSSZ{}
+		if version >= clparams.CapellaVersion {
+			body.ExecutionPayload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.beaconCfg.MaxWithdrawalsPerPayload), 44)
+		}
 	}
 
 	return cfg.indiciesDB.Update(ctx, func(tx kv.RwTx) error {

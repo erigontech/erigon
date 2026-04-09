@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/math"
 )
 
 // MakeTopics converts a filter query argument list into a filter topic set.
@@ -45,8 +46,7 @@ func MakeTopics(query ...[]any) ([][]common.Hash, error) {
 			case common.Address:
 				copy(topic[length.Hash-length.Addr:], rule[:])
 			case *big.Int:
-				blob := rule.Bytes()
-				copy(topic[length.Hash-len(blob):], blob)
+				copy(topic[:], math.U256Bytes(new(big.Int).Set(rule)))
 			case bool:
 				if rule {
 					topic[length.Hash-1] = 1

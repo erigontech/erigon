@@ -274,6 +274,15 @@ func WithExperimentalBAL() Option {
 	}
 }
 
+// WithoutExperimentalBAL disables experimental BAL (and the parallel executor
+// it forces) for tests that exercise patterns the parallel executor doesn't
+// yet handle correctly (e.g. intra-block SELFDESTRUCT + CREATE2 reincarnation).
+func WithoutExperimentalBAL() Option {
+	return func(opts *options) {
+		opts.experimentalBAL = false
+	}
+}
+
 func WithGenesisSpec(gspec *types.Genesis) Option {
 	return func(opts *options) {
 		opts.genesis = gspec

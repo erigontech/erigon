@@ -117,6 +117,17 @@ type SharedDomains struct {
 }
 
 func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
+	tv := commitment.VariantHexPatriciaTrie
+	if statecfg.ExperimentalConcurrentCommitment {
+		tv = commitment.VariantConcurrentHexPatricia
+	}
+	return NewSharedDomainsWithTrieVariant(ctx, tx, logger, tv)
+}
+
+// NewSharedDomainsWithTrieVariant is like NewSharedDomains but accepts an
+// explicit trie variant instead of reading the global statecfg flag. Use this
+// when the caller needs a specific variant without mutating process-wide state.
+func NewSharedDomainsWithTrieVariant(ctx context.Context, tx kv.TemporalTx, logger log.Logger, tv commitment.TrieVariant) (*SharedDomains, error) {
 	sd := &SharedDomains{
 		logger: logger,
 		//trace:   true,
@@ -125,12 +136,6 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) 
 	}
 
 	sd.mem = tx.Debug().NewMemBatch(&sd.metrics)
-
-	tv := commitment.VariantHexPatriciaTrie
-	if statecfg.ExperimentalConcurrentCommitment {
-		tv = commitment.VariantConcurrentHexPatricia
-	}
-
 	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv, tx.Debug().Dirs().Tmp)
 
 	if _, _, err := sd.SeekCommitment(ctx, tx); err != nil {

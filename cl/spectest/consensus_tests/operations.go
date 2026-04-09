@@ -235,7 +235,7 @@ func operationSyncAggregateHandler(t *testing.T, root fs.FS, c spectest.TestCase
 	if err != nil && !expectedError {
 		return err
 	}
-	agg := &cltypes.SyncAggregate{}
+	agg := cltypes.NewSyncAggregate()
 	if err := spectest.ReadSszOld(root, agg, c.Version(), syncAggregateFileName); err != nil {
 		return err
 	}
