@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 type Opt func(bt *Backtester)
@@ -320,15 +321,15 @@ func (bt Backtester) processResults(fromBlock uint64, toBlock uint64, runOutputD
 				heap.Push(&topNSlowest, mv)
 			}
 			for branchKey, branchStats := range mVals[0].Branches {
-				nibbles, err := hex.DecodeString(branchKey)
+				nibs, err := hex.DecodeString(branchKey)
 				if err != nil {
 					return "", err
 				}
-				if commitment.HasTerm(nibbles) {
-					nibbles = nibbles[:len(nibbles)-1]
+				if nibbles.HasTerm(nibs) {
+					nibs = nibs[:len(nibs)-1]
 				}
-				lastNibble := nibbles[len(nibbles)-1]
-				depth := len(nibbles) - 1
+				lastNibble := nibs[len(nibs)-1]
+				depth := len(nibs) - 1
 				branchJumpdestCounts[depth][lastNibble] += branchStats.LoadBranch
 				branchKeyLenCounts[depth]++
 			}
