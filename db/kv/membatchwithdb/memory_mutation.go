@@ -913,21 +913,13 @@ func (m *MemoryMutation) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byt
 	// deleted in any overlay. Uses RangeLatest to iterate past deleted keys
 	// (a single-shot HasPrefix can't recover when its first match is masked).
 	debugTx := m.db.Debug()
-	if debugTx != nil {
-		return m.hasPrefixViaRange(debugTx, name, prefix)
+	if debugTx == nil {
+		// Debug() is nil only for non-temporal backing transactions, which
+		// should never be used with domain overlays. Panic rather than
+		// silently returning a potentially incorrect result.
+		panic("MemoryMutation.HasPrefix: backing tx has no Debug() — domain overlay requires a temporal backing tx")
 	}
-
-	// Fallback without RangeLatest: single-shot check.
-	// If the first match is deleted in the overlay and other matching keys
-	// exist in the backing DB, this incorrectly returns false.
-	k, v, ok, err := m.db.HasPrefix(name, prefix)
-	if !ok || err != nil {
-		return k, v, ok, err
-	}
-	if m.isDeletedInOverlayChain(name, string(k)) {
-		return nil, nil, false, nil
-	}
-	return k, v, ok, nil
+	return m.hasPrefixViaRange(debugTx, name, prefix)
 }
 
 // isDeletedInOverlayChain checks whether a key is marked deleted in this
