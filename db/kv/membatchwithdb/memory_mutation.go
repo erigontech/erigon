@@ -919,10 +919,7 @@ func (m *MemoryMutation) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byt
 	if m.db != nil {
 		debugTx := m.db.Debug()
 		if debugTx == nil {
-			// Debug() is nil only for non-temporal backing transactions, which
-			// should never be used with domain overlays. Panic rather than
-			// silently returning a potentially incorrect result.
-			panic("MemoryMutation.HasPrefix: backing tx has no Debug() — domain overlay requires a temporal backing tx")
+			return nil, nil, false, fmt.Errorf("MemoryMutation.HasPrefix: backing tx has no Debug() — domain overlay requires a temporal backing tx")
 		}
 		dbKey, dbVal, dbFound, err := m.hasPrefixViaRange(debugTx, name, prefix)
 		if err != nil {

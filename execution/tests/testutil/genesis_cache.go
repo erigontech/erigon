@@ -126,6 +126,9 @@ func releaseGenesisDB(key string) {
 	genesisDBMu.Lock()
 	defer genesisDBMu.Unlock()
 	if e, ok := genesisDBCache[key]; ok {
+		if e.refs <= 0 {
+			panic(fmt.Sprintf("genesis cache: release called with non-positive refs for %q: %d", key, e.refs))
+		}
 		e.refs--
 		genesisDBCond.Signal()
 	}
