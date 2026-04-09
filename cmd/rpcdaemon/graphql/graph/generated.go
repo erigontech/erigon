@@ -28,8 +28,18 @@ func NewExecutableSchema(cfg Config) graphql.ExecutableSchema {
 type Config = graphql.Config[ResolverRoot, DirectiveRoot, ComplexityRoot]
 
 type ResolverRoot interface {
+	Account() AccountResolver
+	Block() BlockResolver
 	Mutation() MutationResolver
 	Query() QueryResolver
+}
+
+type AccountResolver interface {
+	Storage(ctx context.Context, obj *model.Account, slot string) (string, error)
+}
+
+type BlockResolver interface {
+	Account(ctx context.Context, obj *model.Block, address string) (*model.Account, error)
 }
 
 type DirectiveRoot struct {
@@ -1448,7 +1458,8 @@ func (ec *executionContext) _Account_storage(ctx context.Context, field graphql.
 		field,
 		ec.fieldContext_Account_storage,
 		func(ctx context.Context) (any, error) {
-			return obj.Storage, nil
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Account().Storage(ctx, obj, fc.Args["slot"].(string))
 		},
 		nil,
 		ec.marshalNBytes322string,
@@ -1461,8 +1472,8 @@ func (ec *executionContext) fieldContext_Account_storage(ctx context.Context, fi
 	fc = &graphql.FieldContext{
 		Object:     "Account",
 		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
+		IsMethod:   true,
+		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return nil, errors.New("field of type Bytes32 does not have child fields")
 		},
@@ -2581,7 +2592,8 @@ func (ec *executionContext) _Block_account(ctx context.Context, field graphql.Co
 		field,
 		ec.fieldContext_Block_account,
 		func(ctx context.Context) (any, error) {
-			return obj.Account, nil
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Block().Account(ctx, obj, fc.Args["address"].(string))
 		},
 		nil,
 		ec.marshalNAccount2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount,
@@ -2594,8 +2606,8 @@ func (ec *executionContext) fieldContext_Block_account(ctx context.Context, fiel
 	fc = &graphql.FieldContext{
 		Object:     "Block",
 		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
+		IsMethod:   true,
+		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			switch field.Name {
 			case "address":

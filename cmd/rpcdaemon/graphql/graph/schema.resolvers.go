@@ -94,6 +94,7 @@ func (r *queryResolver) Block(ctx context.Context, number *string, hash *string)
 			block.Nonce = *blockNonce
 		}
 		block.Number = *convertDataToUint64P(blk, "number")
+		block.Miner.BlockNum = block.Number
 		block.Parent = &model.Block{}
 		block.Parent.Hash = *convertDataToStringP(blk, "parentHash")
 		block.ReceiptsRoot = *convertDataToStringP(blk, "receiptsRoot")
@@ -142,7 +143,7 @@ func (r *queryResolver) Block(ctx context.Context, number *string, hash *string)
 					Index: int(rlog.Index),
 					Data:  "0x" + hex.EncodeToString(rlog.Data),
 				}
-				tlog.Account = &model.Account{}
+				tlog.Account = model.NewAccountAtBlock(block.Number)
 				tlog.Account.Address = strings.ToLower(rlog.Address.String())
 
 				for _, rtopic := range rlog.Topics {
@@ -152,10 +153,10 @@ func (r *queryResolver) Block(ctx context.Context, number *string, hash *string)
 				trans.Logs = append(trans.Logs, &tlog)
 			}
 
-			trans.From = &model.Account{}
+			trans.From = model.NewAccountAtBlock(block.Number)
 			trans.From.Address = strings.ToLower(*convertDataToStringP(transReceipt, "from"))
 
-			trans.To = &model.Account{}
+			trans.To = model.NewAccountAtBlock(block.Number)
 			address := convertDataToStringP(transReceipt, "to")
 			// To address could be nil in case of contract creation
 			if address != nil {
@@ -249,5 +250,46 @@ func (r *Resolver) Mutation() MutationResolver { return &mutationResolver{r} }
 // Query returns QueryResolver implementation.
 func (r *Resolver) Query() QueryResolver { return &queryResolver{r} }
 
+// Block returns BlockResolver implementation.
+func (r *Resolver) Block() BlockResolver { return &blockResolver{r} }
+
+// Account returns AccountResolver implementation.
+func (r *Resolver) Account() AccountResolver { return &accountResolver{r} }
+
 type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
+type blockResolver struct{ *Resolver }
+type accountResolver struct{ *Resolver }
+
+// Account is the resolver for the account field on Block.
+func (r *blockResolver) Account(ctx context.Context, obj *model.Block, address string) (*model.Account, error) {
+	if !common.IsHexAddress(address) {
+		return nil, fmt.Errorf("invalid address %q", address)
+	}
+	addr := common.HexToAddress(address)
+	blockNumber := rpc.BlockNumber(obj.Number)
+
+	balance, nonce, code, err := r.GraphQLAPI.GetAccountInfo(ctx, addr, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	return &model.Account{
+		Address:          strings.ToLower(address),
+		Balance:          balance,
+		TransactionCount: nonce,
+		Code:             code,
+		BlockNum:         obj.Number,
+	}, nil
+}
+
+// Storage is the resolver for the storage field on Account.
+// TODO: each storage(slot) call opens a new DB transaction and rebuilds the state reader,
+// causing an N+1 pattern when a query resolves multiple slots. Fix by caching the state
+// reader in the request context so all slots for the same account/block share one tx.
+func (r *accountResolver) Storage(ctx context.Context, obj *model.Account, slot string) (string, error) {
+	addr := common.HexToAddress(obj.Address)
+	blockNumber := rpc.BlockNumber(obj.BlockNum)
+
+	return r.GraphQLAPI.GetAccountStorage(ctx, addr, slot, blockNumber)
+}
