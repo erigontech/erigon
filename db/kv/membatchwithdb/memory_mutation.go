@@ -897,6 +897,7 @@ func (m *MemoryMutation) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte,
 }
 
 func (m *MemoryMutation) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
+	// Check overlay first for any non-deleted match.
 	m.mu.RLock()
 	if tbl := m.domainOverlay[name]; tbl != nil {
 		for k, e := range tbl {
@@ -910,20 +911,64 @@ func (m *MemoryMutation) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byt
 	if m.db == nil {
 		return nil, nil, false, nil
 	}
+
+	// Scan the backing DB for a key with this prefix that hasn't been
+	// deleted in the overlay. Uses RangeLatest to iterate past deleted keys
+	// (a single-shot HasPrefix can't recover when its first match is masked).
+	debugTx := m.db.Debug()
+	if debugTx != nil {
+		return m.hasPrefixViaRange(debugTx, name, prefix)
+	}
+
+	// Fallback without RangeLatest: single-shot check.
+	// If the first match is deleted in the overlay and other matching keys
+	// exist in the backing DB, this incorrectly returns false.
 	k, v, ok, err := m.db.HasPrefix(name, prefix)
 	if !ok || err != nil {
 		return k, v, ok, err
 	}
-	// Verify the backing DB result wasn't deleted in the overlay.
 	m.mu.RLock()
+	deleted := false
 	if tbl := m.domainOverlay[name]; tbl != nil {
 		if e, found := tbl[string(k)]; found && e.deleted {
-			m.mu.RUnlock()
-			return nil, nil, false, nil
+			deleted = true
 		}
 	}
 	m.mu.RUnlock()
+	if deleted {
+		return nil, nil, false, nil
+	}
 	return k, v, ok, nil
+}
+
+// hasPrefixViaRange scans the backing DB via RangeLatest, skipping keys
+// that are deleted in the overlay. This handles the case where the first
+// matching key was deleted but other matching keys still exist.
+func (m *MemoryMutation) hasPrefixViaRange(debugTx kv.TemporalDebugTx, name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
+	to := prefixUpperBound(prefix)
+	it, err := debugTx.RangeLatest(name, prefix, to, -1)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	defer it.Close()
+	for it.HasNext() {
+		k, v, err := it.Next()
+		if err != nil {
+			return nil, nil, false, err
+		}
+		m.mu.RLock()
+		deleted := false
+		if tbl := m.domainOverlay[name]; tbl != nil {
+			if e, found := tbl[string(k)]; found && e.deleted {
+				deleted = true
+			}
+		}
+		m.mu.RUnlock()
+		if !deleted {
+			return common.Copy(k), common.Copy(v), true, nil
+		}
+	}
+	return nil, nil, false, nil
 }
 
 func (m *MemoryMutation) StepsInFiles(entitySet ...kv.Domain) kv.Step {
@@ -1026,16 +1071,7 @@ func (m *MemoryMutation) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum 
 	// Scan the underlying DB for keys with this prefix and mark them deleted
 	// in the overlay. This is needed for contract re-creation (CREATE2) where
 	// old storage must be fully cleared.
-	// Compute an exclusive upper bound for the prefix range.
-	// nil means unbounded (scan to end of domain).
-	var to []byte
-	for i := len(prefix) - 1; i >= 0; i-- {
-		if prefix[i] < 0xff {
-			to = common.Copy(prefix[:i+1])
-			to[i]++
-			break
-		}
-	}
+	to := prefixUpperBound(prefix)
 	debugTx := m.db.Debug()
 	if debugTx == nil {
 		return nil // backing tx has no debug/range support; overlay-only delete is sufficient
@@ -1062,7 +1098,58 @@ func (m *MemoryMutation) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum 
 	if iterErr != nil {
 		return fmt.Errorf("DomainDelPrefix: iterator: %w", iterErr)
 	}
+
+	// When the backing tx is itself a MemoryMutation (nested overlays, e.g.
+	// DryRunBlock's throwaway on top of the main overlay), Debug().RangeLatest()
+	// only sees the root DB — keys written into intermediate overlay(s) are missed.
+	// Walk up the parent chain and mark those overlay keys deleted too.
+	parentKeys := collectParentOverlayKeys(m.db, domain, prefix)
+	if len(parentKeys) > 0 {
+		m.mu.Lock()
+		for _, k := range parentKeys {
+			if _, already := tbl[k]; !already {
+				tbl[k] = domainEntry{deleted: true}
+			}
+		}
+		m.mu.Unlock()
+	}
+
 	return nil
+}
+
+// prefixUpperBound returns the exclusive upper bound for a prefix range scan.
+// Returns nil if the prefix is all 0xff bytes (unbounded — scan to end of domain).
+func prefixUpperBound(prefix []byte) []byte {
+	for i := len(prefix) - 1; i >= 0; i-- {
+		if prefix[i] < 0xff {
+			to := common.Copy(prefix[:i+1])
+			to[i]++
+			return to
+		}
+	}
+	return nil
+}
+
+// collectParentOverlayKeys returns non-deleted keys from parent MemoryMutation
+// overlay(s) matching the given prefix. Walks up the chain of nested overlays.
+func collectParentOverlayKeys(backing kv.TemporalTx, domain kv.Domain, prefix []byte) []string {
+	parent, ok := backing.(*MemoryMutation)
+	if !ok {
+		return nil
+	}
+	var keys []string
+	parent.mu.RLock()
+	if tbl := parent.domainOverlay[domain]; tbl != nil {
+		for k, e := range tbl {
+			if !e.deleted && len(k) >= len(prefix) && k[:len(prefix)] == string(prefix) {
+				keys = append(keys, k)
+			}
+		}
+	}
+	parent.mu.RUnlock()
+	// Recurse for deeper nesting.
+	keys = append(keys, collectParentOverlayKeys(parent.db, domain, prefix)...)
+	return keys
 }
 
 func (m *MemoryMutation) UnmarkedRw(id kv.ForkableId) kv.UnmarkedRwTx {
