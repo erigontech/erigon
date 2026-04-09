@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -50,6 +52,7 @@ type SharedDomainsCommitmentContext struct {
 	stateReader   StateReader
 	paraTrieDB    kv.TemporalRoDB // DB used for para trie and/or parallel trie warmup
 	trieWarmup    bool            // toggle for parallel trie warmup of MDBX page cache during commitment
+	tmpDir        string          // temp directory for ETL collectors
 
 	// deferCommitmentUpdates when true, deferred branch updates are stored as a pending update
 	// instead of being applied inline after Process(). Used during fork validation.
@@ -169,6 +172,7 @@ func (sdc *SharedDomainsCommitmentContext) EnableCsvMetrics(filePathPrefix strin
 func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, trieVariant commitment.TrieVariant, tmpDir string) *SharedDomainsCommitmentContext {
 	ctx := &SharedDomainsCommitmentContext{
 		sharedDomains: sd,
+		tmpDir:        tmpDir,
 	}
 	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(trieVariant, mode, tmpDir)
 	return ctx
@@ -373,14 +377,17 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	}
 
 	var warmupConfig commitment.WarmupConfig
+	var drainCollectors func() []*etl.Collector
 	if sdc.paraTrieDB != nil {
-		warmupConfig = commitment.WarmupConfig{
-			Enabled:    sdc.trieWarmup,
-			CtxFactory: sdc.trieContextFactory(ctx, sdc.paraTrieDB, txNum),
-			NumWorkers: 16,
-			MaxDepth:   commitment.WarmupMaxDepth,
-			LogPrefix:  logPrefix,
+		if _, ok := sdc.patriciaTrie.(*commitment.ConcurrentPatriciaHashed); ok && sdc.updates.IsConcurrentCommitment() {
+			warmupConfig.CtxFactory, drainCollectors = sdc.concurrentTrieContextFactory(ctx, sdc.paraTrieDB, txNum)
+		} else {
+			warmupConfig.CtxFactory = sdc.trieContextFactory(ctx, sdc.paraTrieDB, txNum)
 		}
+		warmupConfig.Enabled = sdc.trieWarmup
+		warmupConfig.NumWorkers = 16
+		warmupConfig.MaxDepth = commitment.WarmupMaxDepth
+		warmupConfig.LogPrefix = logPrefix
 	}
 
 	// Note: pending deferred updates are flushed by SharedDomains.ComputeCommitment
@@ -395,8 +402,32 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	}
 
 	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, onProgress, warmupConfig)
+
 	if err != nil {
+		if drainCollectors != nil {
+			for _, c := range drainCollectors() {
+				c.Close()
+			}
+		}
 		return nil, err
+	}
+	// Merge per-goroutine ETL collectors into the main writer via PutBranch.
+	// This ensures all callers (rebuild, exec3, RPC, etc.) get the data merged
+	// automatically without needing to drain externally.
+	if drainCollectors != nil {
+		collectors := drainCollectors()
+		defer func() {
+			for _, c := range collectors {
+				c.Close()
+			}
+		}()
+		for _, c := range collectors {
+			if loadErr := c.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+				return trieContext.PutBranch(k, v, nil)
+			}, etl.TransformArgs{}); loadErr != nil {
+				return nil, loadErr
+			}
+		}
 	}
 
 	// Handle deferred branch updates left by Process() on the branch encoder.
@@ -428,7 +459,7 @@ func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Contex
 	return func() (commitment.PatriciaContext, func()) {
 		roTx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
 		if err != nil {
-			return &errorTrieContext{err: err}, nil
+			return &errorTrieContext{err: err}, func() {}
 		}
 		warmupCtx := &TrieContext{
 			getter:   sdc.sharedDomains.AsGetter(roTx),
@@ -446,6 +477,55 @@ func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Contex
 		}
 		return warmupCtx, cleanup
 	}
+}
+
+// concurrentTrieContextFactory is like trieContextFactory but also creates a per-goroutine
+// etl.Collector for each context so that PutBranch writes are isolated (no shared writer race).
+// Returns the factory and a drain function that collects all created collectors.
+func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(ctx context.Context, db kv.TemporalRoDB, txNum uint64) (commitment.TrieContextFactory, func() []*etl.Collector) {
+	stepSize := sdc.sharedDomains.StepSize()
+	var mu sync.Mutex
+	var collectors []*etl.Collector
+
+	factory := func() (commitment.PatriciaContext, func()) {
+		roTx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
+		if err != nil {
+			return &errorTrieContext{err: err}, func() {}
+		}
+
+		collector := etl.NewCollector("[concurrent_branch]", sdc.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize/16), log.Root()) //nolint:gocritic
+
+		mu.Lock()
+		collectors = append(collectors, collector)
+		mu.Unlock()
+
+		warmupCtx := &TrieContext{
+			getter:         sdc.sharedDomains.AsGetter(roTx),
+			putter:         sdc.sharedDomains.AsPutDel(roTx),
+			stepSize:       stepSize,
+			txNum:          txNum,
+			localCollector: collector,
+		}
+		if sdc.stateReader != nil {
+			warmupCtx.stateReader = sdc.stateReader.Clone(roTx)
+		} else {
+			warmupCtx.stateReader = NewLatestStateReader(roTx, sdc.sharedDomains)
+		}
+		cleanup := func() {
+			roTx.Rollback()
+		}
+		return warmupCtx, cleanup
+	}
+
+	drain := func() []*etl.Collector {
+		mu.Lock()
+		defer mu.Unlock()
+		c := collectors
+		collectors = nil
+		return c
+	}
+
+	return factory, drain
 }
 
 // errorTrieContext is a PatriciaContext that always returns an error.
@@ -677,9 +757,10 @@ type TrieContext struct {
 	txNum    uint64
 	blockNum uint64
 
-	stepSize    uint64
-	trace       bool
-	stateReader StateReader
+	stepSize       uint64
+	trace          bool
+	stateReader    StateReader
+	localCollector *etl.Collector // per-goroutine collector for concurrent PutBranch
 }
 
 func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
@@ -693,11 +774,9 @@ func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) e
 	if sdc.trace {
 		fmt.Printf("[SDC] PutBranch: %x: %x\n", prefix, data)
 	}
-	//if sdc.patriciaTrie.Variant() == commitment.VariantConcurrentHexPatricia {
-	//	sdc.mu.Lock()
-	//	defer sdc.mu.Unlock()
-	//}
-
+	if sdc.localCollector != nil {
+		return sdc.localCollector.Collect(prefix, data)
+	}
 	return sdc.putter.DomainPut(kv.CommitmentDomain, prefix, data, sdc.txNum, prevData)
 }
 

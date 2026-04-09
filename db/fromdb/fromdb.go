@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -18,19 +18,28 @@ package fromdb
 
 import (
 	"context"
+	"fmt"
 
-	"github.com/erigontech/erigon/cmd/hack/tool"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 )
 
 func ChainConfig(db kv.RoDB) (cc *chain.Config) {
 	err := db.View(context.Background(), func(tx kv.Tx) error {
-		cc = tool.ChainConfig(tx)
-		return nil
+		genesisBlockHash, err := rawdb.ReadCanonicalHash(tx, 0)
+		if err != nil {
+			return err
+		}
+		cc, err = rawdb.ReadChainConfig(tx, genesisBlockHash)
+		return err
 	})
-	tool.Check(err)
+
+	if err != nil {
+		panic(fmt.Errorf("failed to read chain config: %w", err))
+	}
+
 	if cc == nil {
 		panic("database is not initialized")
 	}
