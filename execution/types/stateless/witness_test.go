@@ -6,6 +6,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -255,5 +256,22 @@ func TestValidateWitnessPreState_MultipleHeaders(t *testing.T) {
 	err := ValidateWitnessPreState(witness, mockReader)
 	if err != nil {
 		t.Errorf("Expected validation to succeed with multiple headers, but got error: %v", err)
+	}
+}
+
+func TestWitnessDecodeRLPRequiresHeader(t *testing.T) {
+	var witness Witness
+	payload, err := rlp.EncodeToBytes(&extWitness{
+		Context: &types.Header{},
+		Headers: []*types.Header{},
+		State:   [][]byte{},
+	})
+	if err != nil {
+		t.Fatalf("EncodeToBytes: %v", err)
+	}
+
+	err = rlp.DecodeBytes(payload, &witness)
+	if err == nil || err.Error() != "witness must contain at least one header" {
+		t.Fatalf("expected missing-header error, got %v", err)
 	}
 }
