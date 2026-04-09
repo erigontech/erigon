@@ -464,14 +464,12 @@ func TestOeTracer(t *testing.T) {
 	}
 }
 
-func TestRawTransaction(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
-
-	// Read a transaction from block 6 and re-encode it as raw bytes.
-	var encodedTx []byte
+// rawTxFromBlock reads the first transaction from the given block number and
+// returns its binary encoding together with the sender and recipient addresses.
+func rawTxFromBlock(t *testing.T, m *execmoduletester.ExecModuleTester, blockNum uint64) (encoded []byte, from, to accounts.Address) {
+	t.Helper()
 	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
-		b, err := m.BlockReader.BlockByNumber(m.Ctx, tx, 6)
+		b, err := m.BlockReader.BlockByNumber(m.Ctx, tx, blockNum)
 		if err != nil {
 			return err
 		}
@@ -480,14 +478,91 @@ func TestRawTransaction(t *testing.T) {
 		if err = txn.MarshalBinary(&buf); err != nil {
 			return err
 		}
-		encodedTx = buf.Bytes()
+		encoded = buf.Bytes()
+		signer := types.MakeSigner(m.ChainConfig, b.NumberU64(), b.Time())
+		from, err = txn.Sender(*signer)
+		if err != nil {
+			return err
+		}
+		to = accounts.InternAddress(*txn.GetTo())
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
+	return
+}
 
-	result, err := api.RawTransaction(context.Background(), encodedTx, []string{"trace"})
+func TestRawTransaction(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+
+	encoded, _, _ := rawTxFromBlock(t, m, 6)
+	result, err := api.RawTransaction(context.Background(), encoded, []string{"trace"})
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.NotEmpty(t, result.Trace)
+}
+
+func TestRawTransactionStateDiff(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+
+	encoded, from, to := rawTxFromBlock(t, m, 6)
+
+	result, err := api.RawTransaction(context.Background(), encoded, []string{"stateDiff"})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	require.Empty(t, result.Trace)
+	require.Nil(t, result.VmTrace)
+
+	require.NotNil(t, result.StateDiff, "StateDiff must be populated")
+	require.NotEmpty(t, result.StateDiff, "StateDiff must contain at least one entry")
+
+	_, senderInDiff := result.StateDiff[from]
+	require.True(t, senderInDiff, "sender must appear in StateDiff")
+
+	_, receiverInDiff := result.StateDiff[to]
+	require.True(t, receiverInDiff, "receiver must appear in StateDiff")
+}
+
+func TestRawTransactionVmTrace(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+
+	encoded, _, _ := rawTxFromBlock(t, m, 6)
+
+	result, err := api.RawTransaction(context.Background(), encoded, []string{"vmTrace"})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	require.NotNil(t, result.VmTrace, "VmTrace must be initialised when requested")
+	require.Empty(t, result.Trace, "Trace must be empty when not requested")
+	require.Nil(t, result.StateDiff, "StateDiff must be nil when not requested")
+}
+
+func TestRawTransactionAllTraceTypes(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+
+	encoded, _, _ := rawTxFromBlock(t, m, 6)
+
+	result, err := api.RawTransaction(context.Background(), encoded, []string{"trace", "stateDiff", "vmTrace"})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	require.NotEmpty(t, result.Trace, "Trace must be populated")
+	require.NotNil(t, result.StateDiff, "StateDiff must be populated")
+	require.NotNil(t, result.VmTrace, "VmTrace must be initialised")
+}
+
+func TestRawTransactionInvalidType(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+
+	encoded, _, _ := rawTxFromBlock(t, m, 6)
+
+	_, err := api.RawTransaction(context.Background(), encoded, []string{"unknown"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unrecognized trace type")
 }

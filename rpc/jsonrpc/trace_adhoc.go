@@ -1797,7 +1797,9 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 		return nil, err
 	}
 
-	ibs := state.New(stateReader)
+	// Local cache enables Clone() before execution so CompareStates has a stable pre-execution snapshot.
+	localCache := shards.NewStateCache(32, 0 /* no limit */)
+	cachedReader := state.NewCachedReader(stateReader, localCache)
 
 	var cancel context.CancelFunc
 	if api.evmCallTimeout > 0 {
@@ -1824,6 +1826,18 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	if traceTypeVmTrace {
 		traceResult.VmTrace = &VmTrace{Ops: []*VmTraceOp{}}
 	}
+
+	var cloneReader state.StateReader
+	var sd *StateDiff
+	if traceTypeStateDiff {
+		cloneCache := localCache.Clone()
+		cloneReader = state.NewCachedReader(stateReader, cloneCache)
+		sdMap := make(map[accounts.Address]*StateDiffAccount)
+		traceResult.StateDiff = sdMap
+		sd = &StateDiff{sdMap: sdMap}
+	}
+
+	ibs := state.New(cachedReader)
 
 	var ot OeTracer
 	ot.config, err = parseOeTracerConfig(nil)
@@ -1878,15 +1892,22 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	}
 
 	traceResult.Output = common.Copy(execResult.ReturnData)
+
+	var finalizeTxWriter state.StateWriter
 	if traceTypeStateDiff {
-		sdMap := make(map[accounts.Address]*StateDiffAccount)
-		traceResult.StateDiff = sdMap
-		sd := &StateDiff{sdMap: sdMap}
-		if err = ibs.FinalizeTx(evm.ChainRules(), sd); err != nil {
+		finalizeTxWriter = sd
+	} else {
+		finalizeTxWriter = state.NewNoopWriter()
+	}
+	if err = ibs.FinalizeTx(evm.ChainRules(), finalizeTxWriter); err != nil {
+		return nil, err
+	}
+
+	if traceTypeStateDiff {
+		initialIbs := state.New(cloneReader)
+		if err = sd.CompareStates(initialIbs, ibs); err != nil {
 			return nil, err
 		}
-		initialIbs := state.New(stateReader)
-		sd.CompareStates(initialIbs, ibs)
 	}
 
 	if evm.Cancelled() {
