@@ -872,16 +872,21 @@ func (m *MemoryMutation) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte,
 }
 
 func (m *MemoryMutation) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
-	// Check this overlay first for any non-deleted match.
-	// Note: map iteration is non-deterministic, so the returned key is arbitrary
-	// among matches — not necessarily the lexicographically first. Current callers
-	// only use the boolean, so this is acceptable.
+	// Find the lexicographically smallest non-deleted matching key across
+	// this overlay, parent overlays, and the root DB. This preserves the
+	// interface contract that HasPrefix returns the first matching key.
+
+	// Candidate from this overlay (smallest non-deleted match).
+	var bestKey string
+	var bestVal []byte
 	m.mu.RLock()
 	if tbl := m.domainOverlay[name]; tbl != nil {
 		for k, e := range tbl {
 			if !e.deleted && stringHasPrefix(k, prefix) {
-				m.mu.RUnlock()
-				return []byte(k), common.Copy(e.value), true, nil
+				if bestVal == nil || k < bestKey {
+					bestKey = k
+					bestVal = common.Copy(e.value)
+				}
 			}
 		}
 	}
@@ -896,30 +901,43 @@ func (m *MemoryMutation) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byt
 			// layer, but an intermediate overlay higher up may shadow them.
 			// Check the full chain from this overlay down.
 			if !m.isDeletedInOverlayChain(name, k) {
-				v, _, err := m.db.GetLatest(name, []byte(k))
-				if err != nil {
-					return nil, nil, false, err
+				if bestVal == nil || k < bestKey {
+					v, _, err := m.db.GetLatest(name, []byte(k))
+					if err != nil {
+						return nil, nil, false, err
+					}
+					bestKey = k
+					bestVal = v
 				}
-				return []byte(k), v, true, nil
 			}
 		}
-	}
-
-	if m.db == nil {
-		return nil, nil, false, nil
 	}
 
 	// Scan the root DB for a key with this prefix that hasn't been
 	// deleted in any overlay. Uses RangeLatest to iterate past deleted keys
 	// (a single-shot HasPrefix can't recover when its first match is masked).
-	debugTx := m.db.Debug()
-	if debugTx == nil {
-		// Debug() is nil only for non-temporal backing transactions, which
-		// should never be used with domain overlays. Panic rather than
-		// silently returning a potentially incorrect result.
-		panic("MemoryMutation.HasPrefix: backing tx has no Debug() — domain overlay requires a temporal backing tx")
+	if m.db != nil {
+		debugTx := m.db.Debug()
+		if debugTx == nil {
+			// Debug() is nil only for non-temporal backing transactions, which
+			// should never be used with domain overlays. Panic rather than
+			// silently returning a potentially incorrect result.
+			panic("MemoryMutation.HasPrefix: backing tx has no Debug() — domain overlay requires a temporal backing tx")
+		}
+		dbKey, dbVal, dbFound, err := m.hasPrefixViaRange(debugTx, name, prefix)
+		if err != nil {
+			return nil, nil, false, err
+		}
+		if dbFound && (bestVal == nil || string(dbKey) < bestKey) {
+			bestKey = string(dbKey)
+			bestVal = dbVal
+		}
 	}
-	return m.hasPrefixViaRange(debugTx, name, prefix)
+
+	if bestVal == nil {
+		return nil, nil, false, nil
+	}
+	return []byte(bestKey), bestVal, true, nil
 }
 
 // isDeletedInOverlayChain checks whether a key is marked deleted in this
@@ -1050,10 +1068,9 @@ func (m *MemoryMutation) DomainDel(domain kv.Domain, k []byte, txNum uint64, pre
 
 func (m *MemoryMutation) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uint64) error {
 	// Phase 1: Mark all this overlay's matching keys as deleted.
-	// The gap between phases is safe because overlay execution is single-threaded
-	// (one writer per overlay at a time). A concurrent DomainPut between Phase 1
-	// and Phase 3 could add a key that escapes deletion, but that cannot happen
-	// under the current execution model.
+	// The gaps between phases (especially Phase 2→3 where the lock is released
+	// for the root-DB scan) are safe because overlay execution is single-threaded
+	// (one writer per overlay at a time).
 	m.mu.Lock()
 	tbl := m.domainTable(domain)
 	for k := range tbl {

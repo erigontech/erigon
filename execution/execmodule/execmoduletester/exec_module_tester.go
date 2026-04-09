@@ -143,7 +143,8 @@ type ExecModuleTester struct {
 	posStagedSync  *stagedsync.Sync
 	bgComponentsEg errgroup.Group
 
-	ownsDB bool // true when DB was created by New(); false when shared from genesis cache
+	ownsDB        bool   // true when DB was created by New(); false when shared from genesis cache
+	cacheReleaseF func() // if non-nil, called from Close() to release genesis cache entry
 
 	// Ephemeral mode: overlay-based block execution.
 	// When non-nil, blocks after genesis are executed via ExecuteBlockEphemerally
@@ -173,6 +174,13 @@ func (emt *ExecModuleTester) Close() {
 	if emt.DB != nil && emt.ownsDB {
 		emt.DB.Close()
 	}
+	// Release genesis cache entry after all DB usage is done.
+	// Must happen after closeEphemeral (which closes the overlay/RO tx)
+	// to prevent the cache from evicting the DB while it's still in use.
+	if emt.cacheReleaseF != nil {
+		emt.cacheReleaseF()
+		emt.cacheReleaseF = nil
+	}
 }
 
 // newCachedEphemeral creates an ExecModuleTester that reuses a pre-existing
@@ -180,6 +188,10 @@ func (emt *ExecModuleTester) Close() {
 // commit, staged-sync pipeline, sentry) and goes straight to ephemeral overlay
 // initialization. The caller retains ownership of the DB.
 func newCachedEphemeral(tb testing.TB, opt options) *ExecModuleTester {
+	if opt.cachedDB == nil || opt.cachedGenesis == nil {
+		panic("newCachedEphemeral: both cachedDB and cachedGenesis must be non-nil")
+	}
+
 	logLvl := log.LvlError
 	if lvl, ok := os.LookupEnv("MOCK_SENTRY_LOG_LEVEL"); ok {
 		logLvl, _ = log.LvlFromString(lvl)
@@ -190,16 +202,17 @@ func newCachedEphemeral(tb testing.TB, opt options) *ExecModuleTester {
 	ctx, ctxCancel := context.WithCancel(context.Background())
 
 	mock := &ExecModuleTester{
-		Ctx:         ctx,
-		cancel:      ctxCancel,
-		tb:          tb,
-		Log:         logger,
-		DB:          opt.cachedDB,
-		Engine:      opt.engine,
-		ChainConfig: opt.genesis.Config,
-		Genesis:     opt.cachedGenesis,
-		Key:         opt.key,
-		Address:     crypto.PubkeyToAddress(opt.key.PublicKey),
+		Ctx:           ctx,
+		cancel:        ctxCancel,
+		tb:            tb,
+		Log:           logger,
+		DB:            opt.cachedDB,
+		Engine:        opt.engine,
+		ChainConfig:   opt.genesis.Config,
+		Genesis:       opt.cachedGenesis,
+		Key:           opt.key,
+		Address:       crypto.PubkeyToAddress(opt.key.PublicKey),
+		cacheReleaseF: opt.cacheRelease,
 		// ownsDB is false (zero value) — DB is shared from genesis cache
 	}
 
@@ -394,10 +407,13 @@ func WithChainConfig(cfg *chain.Config) Option {
 // New() skips all expensive setup (DB creation, genesis commit, staged-sync
 // pipeline, sentry) and goes straight to ephemeral overlay initialization.
 // The caller retains ownership of the DB and must not close it.
-func WithCachedDB(db kv.TemporalRwDB, genesis *types.Block) Option {
+// The release function (if non-nil) is called from Close() after all DB usage
+// is done, to safely decrement the cache reference count.
+func WithCachedDB(db kv.TemporalRwDB, genesis *types.Block, release func()) Option {
 	return func(opts *options) {
 		opts.cachedDB = db
 		opts.cachedGenesis = genesis
+		opts.cacheRelease = release
 	}
 }
 
@@ -426,6 +442,7 @@ type options struct {
 	enableDomains       []kv.Domain
 	cachedDB            kv.TemporalRwDB // pre-existing DB from genesis cache
 	cachedGenesis       *types.Block    // genesis block from genesis cache
+	cacheRelease        func()          // called from Close() to release genesis cache entry
 	fcuBackgroundCommit bool
 	fcuBackgroundPrune  bool
 }

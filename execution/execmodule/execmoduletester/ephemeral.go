@@ -19,6 +19,7 @@ package execmoduletester
 import (
 	"fmt"
 	"math/big"
+	"runtime/debug"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
@@ -145,7 +146,7 @@ func (emt *ExecModuleTester) executeBlock(cr *LightChainReader, block *types.Blo
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
-				execErr = fmt.Errorf("panic during block execution: %v", r)
+				execErr = fmt.Errorf("panic during block execution: %v\n%s", r, debug.Stack())
 			}
 		}()
 		_, execErr = protocol.ExecuteBlockEphemerally(

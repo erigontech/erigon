@@ -215,15 +215,14 @@ func (bt *BlockTest) Run(t *testing.T) error {
 	}
 
 	gspec := bt.genesis(config)
-	db, genesis, release, err := getOrCreateGenesisDB(bt.json.Network, gspec)
+	db, genesis, release, err := getOrCreateGenesisDB(bt.json.Network, bt.json.Genesis.Hash, gspec)
 	if err != nil {
 		return fmt.Errorf("genesis cache: %w", err)
 	}
-	defer release()
 
 	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
 	mOpts := []execmoduletester.Option{
-		execmoduletester.WithCachedDB(db, genesis),
+		execmoduletester.WithCachedDB(db, genesis, release),
 		execmoduletester.WithGenesisSpec(gspec),
 		execmoduletester.WithEngine(engine),
 	}

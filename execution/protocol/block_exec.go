@@ -200,7 +200,11 @@ func ExecuteBlockEphemerally(
 	if !vmConfig.StatelessExec && !vmConfig.ReadOnly && header.RequestsHash != nil {
 		computedHash := requests.Hash()
 		if computedHash == nil || *computedHash != *header.RequestsHash {
-			return nil, fmt.Errorf("invalid requests hash: computed %v, header %x", computedHash, *header.RequestsHash)
+			computedStr := "<nil>"
+			if computedHash != nil {
+				computedStr = fmt.Sprintf("%x", *computedHash)
+			}
+			return nil, fmt.Errorf("invalid requests hash: computed %s, header %x", computedStr, *header.RequestsHash)
 		}
 	}
 	blockLogs := ibs.Logs()

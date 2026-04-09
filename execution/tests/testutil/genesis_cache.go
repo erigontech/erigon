@@ -17,13 +17,9 @@
 package testutil
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/binary"
 	"fmt"
 	"os"
-	"sort"
 	"sync"
 	"time"
 
@@ -86,72 +82,11 @@ var (
 	evictionWg     sync.WaitGroup // tracks background eviction goroutines
 )
 
-// genesisSpecHash produces a deterministic hash of the genesis spec for cache keying.
-// It includes alloc addresses+nonces and header fields that affect the genesis hash.
-func genesisSpecHash(g *types.Genesis) string {
-	h := sha256.New()
-
-	// Hash the alloc (sorted by address for determinism).
-	addrs := make([]common.Address, 0, len(g.Alloc))
-	for addr := range g.Alloc {
-		addrs = append(addrs, addr)
-	}
-	sort.Slice(addrs, func(i, j int) bool { return addrs[i].Cmp(addrs[j]) < 0 })
-	for _, addr := range addrs {
-		h.Write(addr[:])
-		acct := g.Alloc[addr]
-		var buf [8]byte
-		binary.LittleEndian.PutUint64(buf[:], acct.Nonce)
-		h.Write(buf[:])
-		if acct.Balance != nil {
-			h.Write(acct.Balance.Bytes())
-		}
-		h.Write(acct.Code)
-		// Hash storage keys and values (sorted by key for determinism).
-		if len(acct.Storage) > 0 {
-			storageKeys := make([]common.Hash, 0, len(acct.Storage))
-			for k := range acct.Storage {
-				storageKeys = append(storageKeys, k)
-			}
-			sort.Slice(storageKeys, func(i, j int) bool {
-				return bytes.Compare(storageKeys[i][:], storageKeys[j][:]) < 0
-			})
-			for _, k := range storageKeys {
-				h.Write(k[:])
-				h.Write(acct.Storage[k].Bytes())
-			}
-		}
-	}
-
-	// Hash header fields that affect the genesis block hash.
-	var buf [8]byte
-	binary.LittleEndian.PutUint64(buf[:], g.GasLimit)
-	h.Write(buf[:])
-	binary.LittleEndian.PutUint64(buf[:], g.Timestamp)
-	h.Write(buf[:])
-	binary.LittleEndian.PutUint64(buf[:], g.Nonce)
-	h.Write(buf[:])
-	h.Write(g.ExtraData)
-	h.Write(g.Coinbase[:])
-	h.Write(g.Mixhash[:])
-	h.Write(g.ParentHash[:])
-	if g.Difficulty != nil {
-		h.Write(g.Difficulty.Bytes())
-	}
-	if g.BaseFee != nil {
-		h.Write(g.BaseFee.Bytes())
-	}
-	if g.ExcessBlobGas != nil {
-		binary.LittleEndian.PutUint64(buf[:], *g.ExcessBlobGas)
-		h.Write(buf[:])
-	}
-	if g.BlobGasUsed != nil {
-		binary.LittleEndian.PutUint64(buf[:], *g.BlobGasUsed)
-		h.Write(buf[:])
-	}
-
-	return fmt.Sprintf("%x", h.Sum(nil)[:16])
-}
+// No genesisSpecHash needed — the genesis block hash from the test fixture
+// is used as the cache key. It incorporates the state root (which depends on
+// the full alloc) and all header fields, so it uniquely identifies the genesis
+// state. The fork prefix differentiates chain configs (e.g. Prague system
+// contract deployment happens post-genesis and isn't reflected in the block hash).
 
 // evictLRU finds the least-recently-used entry with refs==0, removes it from
 // the cache, and performs expensive cleanup (DB close, dir removal) after
@@ -281,12 +216,16 @@ func createGenesisDB(gspec *types.Genesis) (kv.TemporalRwDB, *types.Block, strin
 	return db, genesis, dir, nil
 }
 
-// getOrCreateGenesisDB returns a cached genesis DB for the given fork+alloc,
+// getOrCreateGenesisDB returns a cached genesis DB for the given fork+genesis,
 // creating it if necessary. The returned release function must be called when
-// the caller is done with the DB (typically via defer). The DB has both KV
-// state (headers, TDs) and domain state (accounts, code, storage) fully committed.
-func getOrCreateGenesisDB(fork string, gspec *types.Genesis) (kv.TemporalRwDB, *types.Block, func(), error) {
-	key := fork + "/" + genesisSpecHash(gspec)
+// the caller is done with the DB. The DB has both KV state (headers, TDs) and
+// domain state (accounts, code, storage) fully committed.
+//
+// The cache key is fork + genesisHash. The genesis block hash uniquely
+// identifies the alloc and header fields; the fork prefix differentiates
+// chain configs (e.g. Prague system contracts are deployed post-genesis).
+func getOrCreateGenesisDB(fork string, genesisHash common.Hash, gspec *types.Genesis) (kv.TemporalRwDB, *types.Block, func(), error) {
+	key := fork + "/" + genesisHash.Hex()
 	now := time.Now().UnixNano()
 
 	genesisDBMu.Lock()
