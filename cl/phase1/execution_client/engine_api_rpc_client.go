@@ -88,6 +88,14 @@ func (c *EngineAPIRPCClient) NewPayloadV4(ctx context.Context, payload *engine_t
 	return result, nil
 }
 
+func (c *EngineAPIRPCClient) NewPayloadV5(ctx context.Context, payload *engine_types.ExecutionPayload, expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes) (*engine_types.PayloadStatus, error) {
+	result := &engine_types.PayloadStatus{}
+	if err := c.client.CallContext(ctx, result, rpc_helper.EngineNewPayloadV5, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func (c *EngineAPIRPCClient) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
 	result := &engine_types.ForkChoiceUpdatedResponse{}
 	if err := c.client.CallContext(ctx, result, rpc_helper.ForkChoiceUpdatedV1, forkChoiceState, payloadAttributes); err != nil {
@@ -155,6 +163,14 @@ func (c *EngineAPIRPCClient) GetPayloadV4(ctx context.Context, payloadID hexutil
 func (c *EngineAPIRPCClient) GetPayloadV5(ctx context.Context, payloadID hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
 	result := &engine_types.GetPayloadResponse{}
 	if err := c.client.CallContext(ctx, result, rpc_helper.EngineGetPayloadV5, payloadID); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (c *EngineAPIRPCClient) GetPayloadV6(ctx context.Context, payloadID hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
+	result := &engine_types.GetPayloadResponse{}
+	if err := c.client.CallContext(ctx, result, rpc_helper.EngineGetPayloadV6, payloadID); err != nil {
 		return nil, err
 	}
 	return result, nil
