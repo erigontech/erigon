@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
@@ -1158,5 +1159,98 @@ func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 		"gas_used (max of regular, state) must not exceed gas_limit")
 
 	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
+	require.NoError(t, err)
+}
+
+func TestEIP7708BurnLogWhenCoinbaseSelfDestructs(t *testing.T) {
+	// Regression test for https://github.com/erigontech/erigon/issues/19951
+	//
+	// When the coinbase is a contract that self-destructs during execution,
+	// EIP-7708 requires a Burn log for the residual balance (priority fee)
+	// credited after the SELFDESTRUCT. Post-EIP-6780 SELFDESTRUCT only
+	// deletes contracts created in the same transaction, so we CREATE a
+	// contract at the pre-computed coinbase address whose init code
+	// immediately SELFDESTRUCTs to the caller.
+	ctx := t.Context()
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+
+	genesis := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc: types.GenesisAlloc{
+			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		},
+	}
+	m := execmoduletester.New(t,
+		execmoduletester.WithGenesisSpec(genesis),
+		execmoduletester.WithKey(privKey),
+	)
+
+	baseFee := m.Genesis.BaseFee().Uint64()
+	gasPrice := baseFee * 2 // non-zero priority fee
+	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+
+	// Init code: CALLER (0x33) SELFDESTRUCT (0xFF).
+	// Creates a contract that immediately self-destructs, sending any
+	// balance to the transaction sender. Post-EIP-6780 this deletes the
+	// contract because it was created in the same transaction.
+	initCode := []byte{0x33, 0xFF}
+
+	var coinbaseAddr common.Address
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
+		nonce := gen.TxNonce(senderAddr)
+		// Pre-compute the CREATE address — the contract will be deployed here.
+		coinbaseAddr = types.CreateAddress(senderAddr, nonce)
+		gen.SetCoinbase(coinbaseAddr)
+
+		tx, txErr := types.SignTx(
+			types.NewContractCreation(nonce, uint256.NewInt(0), 200_000, uint256.NewInt(gasPrice), initCode),
+			*signer,
+			privKey,
+		)
+		require.NoError(t, txErr)
+		gen.AddTx(tx)
+	})
+	require.NoError(t, err)
+
+	// Verify the receipt contains an EIP-7708 Burn log.
+	require.Len(t, chainPack.Receipts[0], 1)
+	receipt := chainPack.Receipts[0][0]
+	require.Equal(t, types.ReceiptStatusSuccessful, receipt.Status)
+	require.Greater(t, receipt.GasUsed, uint64(0))
+
+	var burnLog *types.Log
+	var burnCount, transferCount int
+	for _, log := range receipt.Logs {
+		if log.Address != params.SystemAddress.Value() || len(log.Topics) < 2 {
+			continue
+		}
+		switch log.Topics[0] {
+		case misc.EthBurnLogEvent:
+			burnLog = log
+			burnCount++
+		case misc.EthTransferLogEvent:
+			transferCount++
+		}
+	}
+	require.Equal(t, 1, burnCount, "expected exactly one EIP-7708 Burn log")
+	require.Equal(t, 0, transferCount, "no Transfer log expected for zero-value CREATE")
+	require.Equal(t, coinbaseAddr.Hash(), burnLog.Topics[1],
+		"burn log should reference the coinbase address")
+
+	// Burnt amount = priority fee = gasUsed × effectiveTip.
+	// Use the actual block baseFee (EIP-1559 adjusts it from genesis).
+	blockBaseFee := chainPack.Headers[0].BaseFee.Uint64()
+	expectedBurn := new(uint256.Int).Mul(
+		uint256.NewInt(receipt.GasUsed),
+		uint256.NewInt(gasPrice-blockBaseFee),
+	)
+	burnBytes := expectedBurn.Bytes32()
+	require.Equal(t, burnBytes[:], burnLog.Data,
+		"burn amount should equal the priority fee credited to coinbase")
+
+	// Insert + validate + FCU proves the state root is computed correctly.
+	err = insertValidateAndUfc1By1(ctx, m.ExecModule, chainPack.Blocks)
 	require.NoError(t, err)
 }
