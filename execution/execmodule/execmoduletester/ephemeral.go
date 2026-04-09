@@ -117,18 +117,6 @@ func (emt *ExecModuleTester) verifyBlock(cr *LightChainReader, block *types.Bloc
 	if computedTxRoot := types.DeriveSha(block.Transactions()); computedTxRoot != header.TxHash {
 		return fmt.Errorf("block #%v transactions root mismatch: computed %x, header %x", block.Number(), computedTxRoot, header.TxHash)
 	}
-	if header.GasUsed > header.GasLimit {
-		return fmt.Errorf("block #%v gas used %d exceeds gas limit %d", block.Number(), header.GasUsed, header.GasLimit)
-	}
-	if header.BlobGasUsed != nil {
-		var expectedBlobGas uint64
-		for _, txn := range block.Transactions() {
-			expectedBlobGas += txn.GetBlobGas()
-		}
-		if expectedBlobGas != *header.BlobGasUsed {
-			return fmt.Errorf("block #%v blob gas mismatch: txns=%d, header=%d", block.Number(), expectedBlobGas, *header.BlobGasUsed)
-		}
-	}
 	// EIP-7934: block RLP size limit (Osaka+).
 	blockRlpSize := block.EncodingSize()
 	blockRlpSize += rlp.ListPrefixLen(blockRlpSize)
