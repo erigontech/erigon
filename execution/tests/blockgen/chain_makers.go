@@ -410,7 +410,7 @@ func InitPraguePreDeploys(db kv.TemporalRwDB, logger log.Logger) error {
 // a similar non-validating proof of work implementation.
 func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engine, db kv.TemporalRoDB, n int, gen func(int, *BlockGen)) (*ChainPack, error) {
 	if config == nil {
-		config = chain.TestChainConfig
+		config = chain.AllProtocolChanges
 	}
 	headers, blocks, receipts := make([]*types.Header, n), make(types.Blocks, n), make([]types.Receipts, n)
 	chainreader := &FakeChainReader{Cfg: config, current: parent}
@@ -448,7 +448,10 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		txNumIncrement()
 
 		var versionMap *state.VersionMap
-		if dbg.Exec3Parallel {
+		// Create versionMap when Amsterdam is configured (config-based check, applies
+		// to pre-Amsterdam blocks too on chains where the fork is scheduled).
+		needsVersionMap := dbg.Exec3Parallel || config.AmsterdamTime != nil
+		if needsVersionMap {
 			versionMap = state.NewVersionMap(nil)
 			ibs.SetVersionMap(versionMap)
 		}

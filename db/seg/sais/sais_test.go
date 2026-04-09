@@ -134,7 +134,6 @@ func TestExpand8_32BStrictlyDecreasing(t *testing.T) {
 	}
 
 	for _, tc := range inputs {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			text := tc.data
 			n := len(text)

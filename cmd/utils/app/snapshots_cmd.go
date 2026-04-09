@@ -43,7 +43,6 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
-	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -58,6 +57,7 @@ import (
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/webseeds"
 	"github.com/erigontech/erigon/db/etl"
+	"github.com/erigontech/erigon/db/fromdb"
 	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -451,7 +451,7 @@ var snapshotCommand = cli.Command{
 			Description: "verify block state roots against commitment history snapshots for a given [from,to) block range (no block re-execution)",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
-				&cli.Uint64Flag{Name: "from", Usage: "block number from which to start verifying", Required: true},
+				&cli.Uint64Flag{Name: "from", Usage: "block number from which to start verifying (default: 0)"},
 				&cli.Uint64Flag{Name: "to", Usage: "block number up to which to verify (exclusive); defaults to latest block with state"},
 				&cli.Int64Flag{Name: "seed", Usage: "random seed for block sampling (auto-generated if not set)"},
 				&cli.Float64Flag{Name: "sample", Usage: "fraction of blocks to check via pseudo-random sampling (0.0-1.0)", Value: 1.0},
@@ -1182,7 +1182,7 @@ func doDebugKey(cliCtx *cli.Context) error {
 	if err := view.IntegrityKey(domain, key); err != nil {
 		return err
 	}
-	if err := view.IntegirtyInvertedIndexKey(domain, key); err != nil {
+	if err := view.IntegrityInvertedIndexKey(domain, key); err != nil {
 		return err
 	}
 	return nil
@@ -1300,7 +1300,6 @@ func doIntegrity(cliCtx *cli.Context) error {
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(1)
 	for _, chk := range requestedChecks {
-		chk := chk
 		g.Go(func() error {
 			if ctx.Err() != nil {
 				return ctx.Err()
