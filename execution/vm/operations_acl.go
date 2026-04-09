@@ -85,6 +85,12 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 
 		slotCommited := accounts.InternKey(x.Bytes32())
 		var original, _ = evm.IntraBlockState().GetCommittedState(callContext.Address(), slotCommited)
+		if evm.Context.BlockNumber == 24809877 {
+			txIdx := evm.IntraBlockState().TxIndex()
+			if txIdx == 63 || txIdx == 72 {
+				log.Debug("[sstore debug] state values", "block", evm.Context.BlockNumber, "txIdx", txIdx, "contract", callContext.Address(), "slot", fmt.Sprintf("%x", slot), "current", current.Hex(), "original", original.Hex(), "newValue", value.Hex())
+			}
+		}
 		if original.Eq(&current) {
 			if original.IsZero() { // create slot (2.1.1)
 				if evm.Context.BlockNumber == 24809877 {
@@ -108,7 +114,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 			if evm.Context.BlockNumber == 24809877 {
 				txIdx := evm.IntraBlockState().TxIndex()
 				if txIdx == 63 || txIdx == 72 {
-					log.Debug("[sstore debug] write existing (2.1.2)", "block", evm.Context.BlockNumber, "txIdx", txIdx, "contract", callContext.Address(), "slot", fmt.Sprintf("%x", slot), "cost", cost, "total", cost+(params.SstoreResetGasEIP2200-params.ColdSloadCostEIP2929))
+					log.Debug("[sstore debug] write existing (2.1.2)", "block", evm.Context.BlockNumber, "txIdx", txIdx, "contract", callContext.Address(), "slot", fmt.Sprintf("%x", slot), "current", current.Hex(), "original", original.Hex(), "cost", cost, "total", cost+(params.SstoreResetGasEIP2200-params.ColdSloadCostEIP2929))
 				}
 			}
 			// EIP-2200 original clause:
