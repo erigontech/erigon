@@ -47,7 +47,10 @@ func writeBALToFile(bal types.BlockAccessList, blockNum uint64, dataDir string) 
 	bal.DebugPrint(file)
 }
 
-func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, dataDir string) error {
+func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, amsterdam bool, experimental bool, dataDir string) error {
+	if !amsterdam && !experimental {
+		return nil
+	}
 	if h == nil {
 		return nil
 	}
@@ -62,6 +65,9 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, dat
 		return fmt.Errorf("%w, block %d: %w", rules.ErrInvalidBlock, blockNum, err)
 	}
 	log.Debug("bal", "blockNum", blockNum, "hash", bal.Hash())
+	if !amsterdam {
+		return nil
+	}
 	if h.BlockAccessListHash == nil {
 		return fmt.Errorf("block %d: missing block access list hash", blockNum)
 	}
