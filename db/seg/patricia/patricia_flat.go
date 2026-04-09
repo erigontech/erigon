@@ -32,6 +32,9 @@ type flatNode struct {
 
 // FlatTree is a patricia tree stored as a flat arena of nodes.
 // Built by flattening a pointer-based PatriciaTree after all inserts.
+// Note: values is []any because Match.Val is any throughout the patricia API.
+// The slice is small (one entry per dictionary pattern, not per node) so GC
+// overhead from scanning interface headers is negligible in practice.
 type FlatTree struct {
 	nodes  []flatNode
 	values []any
@@ -141,6 +144,9 @@ func (mf *MatchFinder3) unfold(b byte) uint32 {
 				return b32 | uint32(bitsLeft)
 			}
 		}
+		// Reachable from carry-over state: previous unfold returned at the bottom
+		// child==0 path (line ~193) with tailLen=0, side=0|1. Handles the case
+		// where the current node has no child on this side.
 		if tailLen == 0 {
 			child := nodes[topIdx].n[side]
 			if child == 0 {
