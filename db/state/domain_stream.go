@@ -399,8 +399,9 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 		return err
 	}
 	if len(k) > 0 && bytes.HasPrefix(k, prefix) {
+		step := kv.Step(^binary.BigEndian.Uint64(v[:8]))
 		val := v[8:]
-		heap.Push(cpPtr, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(val), cDup: valsCursor, endTxNum: math.MaxUint64, reverse: true})
+		heap.Push(cpPtr, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(val), cDup: valsCursor, endTxNum: step.ToTxNum(dt.stepSize), reverse: true})
 	}
 
 	for i, item := range dt.files {
