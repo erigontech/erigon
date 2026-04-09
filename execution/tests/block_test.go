@@ -21,7 +21,6 @@ package executiontests
 
 import (
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -36,9 +35,6 @@ func TestLegacyBlockchain(t *testing.T) {
 
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
-	if runtime.GOOS == "windows" {
-		t.Skip("fix me on win please") // after remove ChainReader from rules engine - this test can be changed to create less databases, then can enable on win. now timeout after 20min
-	}
 
 	bt := new(testutil.TestMatcher)
 	dir := filepath.Join(legacyDir, "BlockchainTests")

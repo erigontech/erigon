@@ -21,7 +21,6 @@ package eest_devnet_test
 
 import (
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -33,12 +32,8 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
-		// TODO(yperbasis, mh0lt)
-		t.Skip("fix me on windows/macOS please")
-	}
-
 	t.Parallel()
+
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 	dir := filepath.Join("..", "execution-spec-tests", "blockchain_tests_devnet")
