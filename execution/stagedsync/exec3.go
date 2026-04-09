@@ -672,17 +672,10 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 					exhausted = &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
 				}
 			}
-			// Don't pre-populate the version map with the stored BAL.
-			// Pre-population makes HasBAL-aware read validation lenient
-			// (versionmap.go:356), which can accept stale storage reads
-			// that should trigger re-execution. This causes the computed
-			// BAL to have extra storage reads vs the block assembler's
-			// BAL (which uses NewVersionMap(nil)). Passing nil ensures
-			// both paths use the same empty version map.
 			select {
 			case te.execRequests <- &execRequest{b.NumberU64(), b.Hash(),
 				protocol.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time())),
-				nil, txTasks, applyResults, false, exhausted}:
+				dbBAL, txTasks, applyResults, false, exhausted}:
 			case <-ctx.Done():
 				break
 			}

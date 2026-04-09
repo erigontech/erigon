@@ -389,15 +389,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							}
 
 							if (pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) || pe.cfg.experimentalBAL) && !applyResult.isPartial {
-								// Use the blockResult's own header to ensure the BAL is
-								// validated against the correct block. When multiple
-								// proposals arrive for the same block number, lastHeader
-								// may still point to a previous proposal's header.
-								balHeader := applyResult.Header
-								if balHeader == nil {
-									balHeader = lastHeader
-								}
-								err = ProcessBAL(rwTx, balHeader, applyResult.TxIO, pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime), pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir)
+								err = ProcessBAL(rwTx, lastHeader, applyResult.TxIO, pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime), pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir)
 								if err != nil {
 									return err
 								}
