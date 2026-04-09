@@ -130,13 +130,10 @@ func (emt *ExecModuleTester) verifyBlock(cr *LightChainReader, block *types.Bloc
 		}
 	}
 	// EIP-7934: block RLP size limit (Osaka+).
-	maxRlpSize := emt.ChainConfig.GetMaxRlpBlockSize(header.Time)
-	if maxRlpSize < int(^uint(0)>>1) { // not math.MaxInt — limit is active
-		blockRlpSize := block.EncodingSize()
-		blockRlpSize += rlp.ListPrefixLen(blockRlpSize)
-		if blockRlpSize > maxRlpSize {
-			return fmt.Errorf("block #%v exceeds max RLP size: %d > %d", block.Number(), blockRlpSize, maxRlpSize)
-		}
+	blockRlpSize := block.EncodingSize()
+	blockRlpSize += rlp.ListPrefixLen(blockRlpSize)
+	if blockRlpSize > emt.ChainConfig.GetMaxRlpBlockSize(header.Time) {
+		return fmt.Errorf("block #%v exceeds max RLP size: %d > %d", block.Number(), blockRlpSize, emt.ChainConfig.GetMaxRlpBlockSize(header.Time))
 	}
 	return nil
 }

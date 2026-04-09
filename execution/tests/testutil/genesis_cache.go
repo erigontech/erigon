@@ -65,9 +65,9 @@ var originalTmpDir = os.TempDir()
 type genesisCacheEntry struct {
 	db      kv.TemporalRwDB
 	genesis *types.Block
-	dirs    []string // temp directories to remove on cleanup
-	refs    int      // number of active users; protected by genesisDBMu
-	lastUse int64    // UnixNano timestamp of last acquire; protected by genesisDBMu
+	dir     string // temp directory to remove on cleanup
+	refs    int    // number of active users; protected by genesisDBMu
+	lastUse int64  // UnixNano timestamp of last acquire; protected by genesisDBMu
 	ready   chan struct{}
 	err     error // set once, before closing ready
 }
@@ -180,9 +180,7 @@ func evictLRU() bool {
 		if victimEntry.db != nil {
 			victimEntry.db.Close()
 		}
-		for _, d := range victimEntry.dirs {
-			dirutil.RemoveAll(d)
-		}
+		dirutil.RemoveAll(victimEntry.dir)
 	}()
 	return true
 }
@@ -199,13 +197,13 @@ func releaseGenesisDB(key string) {
 }
 
 // createGenesisDB creates a new genesis DB on disk. Called without holding genesisDBMu.
-func createGenesisDB(gspec *types.Genesis) (kv.TemporalRwDB, *types.Block, []string, error) {
+func createGenesisDB(gspec *types.Genesis) (kv.TemporalRwDB, *types.Block, string, error) {
 	logger := log.New()
 	logger.SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
 	dir, err := os.MkdirTemp(originalTmpDir, "erigon-genesis-")
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("genesis cache: temp dir: %w", err)
+		return nil, nil, "", fmt.Errorf("genesis cache: temp dir: %w", err)
 	}
 	success := false
 	defer func() {
@@ -220,11 +218,11 @@ func createGenesisDB(gspec *types.Genesis) (kv.TemporalRwDB, *types.Block, []str
 	genesisDirs := datadir.New(dir + "-genesis-tmp")
 	if err := os.MkdirAll(genesisDirs.Tmp, 0755); err != nil {
 		db.Close()
-		return nil, nil, nil, fmt.Errorf("genesis cache: mkdir %s: %w", genesisDirs.Tmp, err)
+		return nil, nil, "", fmt.Errorf("genesis cache: mkdir %s: %w", genesisDirs.Tmp, err)
 	}
 	if err := os.MkdirAll(genesisDirs.SnapDomain, 0755); err != nil {
 		db.Close()
-		return nil, nil, nil, fmt.Errorf("genesis cache: mkdir %s: %w", genesisDirs.SnapDomain, err)
+		return nil, nil, "", fmt.Errorf("genesis cache: mkdir %s: %w", genesisDirs.SnapDomain, err)
 	}
 	var genesis *types.Block
 	err = func() (gerr error) {
@@ -239,7 +237,7 @@ func createGenesisDB(gspec *types.Genesis) (kv.TemporalRwDB, *types.Block, []str
 	dirutil.RemoveAll(genesisDirs.DataDir)
 	if err != nil {
 		db.Close()
-		return nil, nil, nil, fmt.Errorf("genesis cache: CommitGenesisBlock: %w", err)
+		return nil, nil, "", fmt.Errorf("genesis cache: CommitGenesisBlock: %w", err)
 	}
 
 	ctx := context.Background()
@@ -248,34 +246,34 @@ func createGenesisDB(gspec *types.Genesis) (kv.TemporalRwDB, *types.Block, []str
 	rwTx, err := db.BeginTemporalRw(ctx)
 	if err != nil {
 		db.Close()
-		return nil, nil, nil, fmt.Errorf("genesis cache: BeginTemporalRw: %w", err)
+		return nil, nil, "", fmt.Errorf("genesis cache: BeginTemporalRw: %w", err)
 	}
 	defer rwTx.Rollback() //nolint:gocritic
 
 	sd, err := execctx.NewSharedDomains(ctx, rwTx, logger)
 	if err != nil {
 		db.Close()
-		return nil, nil, nil, fmt.Errorf("genesis cache: NewSharedDomains: %w", err)
+		return nil, nil, "", fmt.Errorf("genesis cache: NewSharedDomains: %w", err)
 	}
 
 	_, _, err = genesiswrite.ComputeGenesisCommitment(ctx, gspec, rwTx, sd, genesis.Header())
 	if err != nil {
 		sd.Close()
 		db.Close()
-		return nil, nil, nil, fmt.Errorf("genesis cache: ComputeGenesisCommitment: %w", err)
+		return nil, nil, "", fmt.Errorf("genesis cache: ComputeGenesisCommitment: %w", err)
 	}
 
 	err = sd.Flush(ctx, rwTx)
 	sd.Close()
 	if err != nil {
 		db.Close()
-		return nil, nil, nil, fmt.Errorf("genesis cache: sd.Flush: %w", err)
+		return nil, nil, "", fmt.Errorf("genesis cache: sd.Flush: %w", err)
 	}
 
 	err = rwTx.Commit()
 	if err != nil {
 		db.Close()
-		return nil, nil, nil, fmt.Errorf("genesis cache: tx.Commit: %w", err)
+		return nil, nil, "", fmt.Errorf("genesis cache: tx.Commit: %w", err)
 	}
 
 	// Step 3: Deploy Prague system contracts only if the genesis alloc
@@ -283,12 +281,12 @@ func createGenesisDB(gspec *types.Genesis) (kv.TemporalRwDB, *types.Block, []str
 	if gspec.Config.IsPrague(0) && !allocHasSystemContracts(gspec) {
 		if err := blockgen.InitPraguePreDeploys(db, logger); err != nil {
 			db.Close()
-			return nil, nil, nil, fmt.Errorf("genesis cache: InitPraguePreDeploys: %w", err)
+			return nil, nil, "", fmt.Errorf("genesis cache: InitPraguePreDeploys: %w", err)
 		}
 	}
 
 	success = true
-	return db, genesis, []string{dir}, nil
+	return db, genesis, dir, nil
 }
 
 // getOrCreateGenesisDB returns a cached genesis DB for the given fork+alloc,
@@ -330,7 +328,7 @@ func getOrCreateGenesisDB(fork string, gspec *types.Genesis) (kv.TemporalRwDB, *
 	genesisDBMu.Unlock()
 
 	// Create the DB without holding the lock — allows other keys to proceed.
-	db, genesis, dirs, err := createGenesisDB(gspec)
+	db, genesis, dir, err := createGenesisDB(gspec)
 
 	genesisDBMu.Lock()
 	if err != nil {
@@ -343,7 +341,7 @@ func getOrCreateGenesisDB(fork string, gspec *types.Genesis) (kv.TemporalRwDB, *
 	}
 	entry.db = db
 	entry.genesis = genesis
-	entry.dirs = dirs
+	entry.dir = dir
 	close(entry.ready)
 	genesisDBMu.Unlock()
 	return db, genesis, func() { releaseGenesisDB(key) }, nil
@@ -368,8 +366,6 @@ func CleanupGenesisCache() {
 		if e.db != nil {
 			e.db.Close()
 		}
-		for _, d := range e.dirs {
-			dirutil.RemoveAll(d)
-		}
+		dirutil.RemoveAll(e.dir)
 	}
 }
