@@ -147,12 +147,22 @@ func CommitGenesisTx(tx kv.RwTx, opts Options) (*chain.Config, *types.Block, err
 		logger = log.New()
 	}
 
+	// Validate BEFORE persisting anything (fixes the ordering bug where the
+	// old WriteGenesisBlock stored genesis JSON before this check). The check
+	// lives above the fresh-vs-existing branch so it also protects callers
+	// that hand a Config-less Genesis on an existing DB.
+	if opts.Genesis != nil && opts.Genesis.Config == nil {
+		return chain.AllProtocolChanges, nil, types.ErrGenesisNoConfig
+	}
+
 	stored, err := rawdb.ReadGenesisBundle(tx)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	// Fresh DB path: no canonical block at height 0.
+	// Fresh DB path: no canonical block at height 0. ReadGenesisBundle returns
+	// an error when the canonical hash is set but the block body is missing,
+	// so stored.Block == nil here implies the DB is genuinely empty.
 	if stored.Block == nil {
 		g := opts.Genesis
 		custom := true
@@ -161,14 +171,7 @@ func CommitGenesisTx(tx kv.RwTx, opts Options) (*chain.Config, *types.Block, err
 			g = chainspec.MainnetGenesisBlock()
 			custom = false
 		}
-		// Validate BEFORE persisting anything (fixes the ordering bug where the
-		// old WriteGenesisBlock stored genesis JSON before this check).
-		if g.Config == nil {
-			return chain.AllProtocolChanges, nil, types.ErrGenesisNoConfig
-		}
-		localOpts := opts
-		localOpts.Genesis = g
-		applyOverridesTo(g.Config, localOpts)
+		applyOverridesTo(g.Config, opts)
 		if err := g.Config.CheckConfigForkOrder(); err != nil {
 			return g.Config, nil, err
 		}

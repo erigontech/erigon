@@ -357,9 +357,19 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			tracer.Hooks.OnBlockchainInit(config.Genesis.Config)
 		}
 
+		// On an existing DB, pass opts.Genesis = nil so CommitGenesisTx
+		// (a) skips the expensive GenesisToBlock hash recomputation on every
+		// restart, and (b) takes the "preserve stored config" branch that
+		// protects `erigon init`-style private chain configs from being
+		// overwritten by the flag-provided spec.
+		genesisSpec := config.Genesis
+		if bundle.Block != nil {
+			genesisSpec = nil
+		}
+
 		var genesisErr error
 		chainConfig, genesis, genesisErr = genesiswrite.CommitGenesisTx(tx, genesiswrite.Options{
-			Genesis:               config.Genesis,
+			Genesis:               genesisSpec,
 			ChainName:             config.Snapshot.ChainName,
 			OverrideOsakaTime:     config.OverrideOsakaTime,
 			OverrideAmsterdamTime: config.OverrideAmsterdamTime,

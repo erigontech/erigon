@@ -33,24 +33,17 @@ import (
 )
 
 // MustCommitGenesis commits g to db via genesiswrite.CommitGenesis and returns
-// the resulting block. On error it calls tb.Fatal when tb is non-nil, or
-// panics otherwise. The nil-tb branch exists for non-test callers such as
-// cmd/evm/runner that want the same fail-fast semantics without a testing.TB.
+// the resulting block. On error it calls tb.Fatal; tb must not be nil.
 func MustCommitGenesis(tb testing.TB, g *types.Genesis, db kv.RwDB, dirs datadir.Dirs, logger log.Logger) *types.Block {
-	if tb != nil {
-		tb.Helper()
-	}
+	tb.Helper()
 	_, block, err := genesiswrite.CommitGenesis(context.Background(), db, genesiswrite.Options{
 		Genesis: g,
 		Dirs:    dirs,
 		Logger:  logger,
 	})
 	if err != nil {
-		if tb != nil {
-			tb.Fatal(err)
-			return nil
-		}
-		panic(err)
+		tb.Fatal(err)
+		return nil
 	}
 	return block
 }

@@ -189,7 +189,11 @@ func WriteGenesisBundle(tx kv.RwTx, b *GenesisBundle, opts WriteGenesisBundleOpt
 
 // ReadGenesisBundle reads back a GenesisBundle. Any field may be nil if the
 // corresponding key is not present in the DB — for example, on a freshly
-// initialized chaindata directory every field is nil.
+// initialized chaindata directory every field is nil. If the canonical hash
+// at height 0 is set but the block body is missing, the function returns an
+// explicit error rather than a bundle with Block == nil; this prevents the
+// policy layer from silently treating a partially-corrupt DB as fresh and
+// overwriting the remaining block-zero metadata.
 func ReadGenesisBundle(tx kv.Getter) (*GenesisBundle, error) {
 	b := &GenesisBundle{}
 
@@ -210,6 +214,9 @@ func ReadGenesisBundle(tx kv.Getter) (*GenesisBundle, error) {
 	block, _, err := ReadBlockWithSenders(tx, hash, 0)
 	if err != nil {
 		return nil, err
+	}
+	if block == nil {
+		return nil, fmt.Errorf("ReadGenesisBundle: canonical hash %x is set at height 0 but block body is missing", hash)
 	}
 	b.Block = block
 

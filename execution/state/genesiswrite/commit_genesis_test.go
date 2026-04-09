@@ -84,6 +84,7 @@ func TestCommitGenesis_FreshDBKeyPresence(t *testing.T) {
 			{"ConfigTable[GenesisKey]", kv.ConfigTable, kv.GenesisKey},
 			{"ConfigTable[blockHash]", kv.ConfigTable, hash[:]},
 			{"HeaderCanonical[0]", kv.HeaderCanonical, encodeU64(0)},
+			{"HeaderNumber[hash]", kv.HeaderNumber, hash[:]},
 			{"Headers[0|hash]", kv.Headers, headerKey(0, hash)},
 			{"BlockBody[0|hash]", kv.BlockBody, headerKey(0, hash)},
 			{"HeaderTD[0|hash]", kv.HeaderTD, headerKey(0, hash)},

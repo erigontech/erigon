@@ -162,9 +162,35 @@ func TestGenesisBundle_WriteNilRejects(t *testing.T) {
 	_, tx := memdb.NewTestTx(t)
 	defer tx.Rollback()
 
-	err := rawdb.WriteGenesisBundle(tx, nil, rawdb.WriteGenesisBundleOpts{FreshDB: true})
-	require.Error(t, err)
+	// Build valid pieces so each sub-assertion can drop exactly one.
+	base := newTestGenesisBundle(t, chain.AllProtocolChanges)
 
-	err = rawdb.WriteGenesisBundle(tx, &rawdb.GenesisBundle{}, rawdb.WriteGenesisBundleOpts{FreshDB: true})
-	require.Error(t, err, "bundle without Block must be rejected")
+	err := rawdb.WriteGenesisBundle(tx, nil, rawdb.WriteGenesisBundleOpts{FreshDB: true})
+	require.ErrorContains(t, err, "nil bundle")
+
+	err = rawdb.WriteGenesisBundle(tx, &rawdb.GenesisBundle{
+		Genesis: base.Genesis, Config: base.Config, TD: base.TD,
+	}, rawdb.WriteGenesisBundleOpts{FreshDB: true})
+	require.ErrorContains(t, err, "Block is nil")
+
+	err = rawdb.WriteGenesisBundle(tx, &rawdb.GenesisBundle{
+		Genesis: base.Genesis, Block: base.Block, TD: base.TD,
+	}, rawdb.WriteGenesisBundleOpts{FreshDB: true})
+	require.ErrorContains(t, err, "Config is nil")
+
+	err = rawdb.WriteGenesisBundle(tx, &rawdb.GenesisBundle{
+		Config: base.Config, Block: base.Block, TD: base.TD,
+	}, rawdb.WriteGenesisBundleOpts{FreshDB: true})
+	require.ErrorContains(t, err, "Genesis is nil")
+
+	err = rawdb.WriteGenesisBundle(tx, &rawdb.GenesisBundle{
+		Genesis: base.Genesis, Config: base.Config, Block: base.Block,
+	}, rawdb.WriteGenesisBundleOpts{FreshDB: true})
+	require.ErrorContains(t, err, "TD is nil")
+
+	// FreshDB=false only requires Block + Config; nil Genesis / nil TD are OK.
+	err = rawdb.WriteGenesisBundle(tx, &rawdb.GenesisBundle{
+		Block: base.Block, Config: base.Config,
+	}, rawdb.WriteGenesisBundleOpts{FreshDB: false})
+	require.NoError(t, err)
 }
