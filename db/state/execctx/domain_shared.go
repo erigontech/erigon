@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math"
 	"runtime"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -101,13 +102,32 @@ type SharedDomains struct {
 	// canonical hashes, TD, stage progress, forkchoice markers). It allows execution to
 	// operate without holding an RwTx — writes accumulate here and are flushed atomically
 	// alongside domain state via Flush().
-	blockOverlay *membatchwithdb.MemoryMutation
+	// Atomic because concurrent readers (RPC via LatestSD) may call BlockOverlay()
+	// while Close() nils the pointer.
+	blockOverlay atomic.Pointer[membatchwithdb.MemoryMutation]
+
+	// parent is an optional parent SD for read-through chaining. When set,
+	// domain reads that miss in the local mem batch fall through to the parent's
+	// mem batch before consulting the underlying tx. Used by the block builder
+	// to read from the FCU's published SD without writing to it.
+	parent *SharedDomains
 
 	// stateCache is an optional cache for state data (accounts, storage, code)
 	stateCache *cache.StateCache
 }
 
 func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
+	tv := commitment.VariantHexPatriciaTrie
+	if statecfg.ExperimentalConcurrentCommitment {
+		tv = commitment.VariantConcurrentHexPatricia
+	}
+	return NewSharedDomainsWithTrieVariant(ctx, tx, logger, tv)
+}
+
+// NewSharedDomainsWithTrieVariant is like NewSharedDomains but accepts an
+// explicit trie variant instead of reading the global statecfg flag. Use this
+// when the caller needs a specific variant without mutating process-wide state.
+func NewSharedDomainsWithTrieVariant(ctx context.Context, tx kv.TemporalTx, logger log.Logger, tv commitment.TrieVariant) (*SharedDomains, error) {
 	sd := &SharedDomains{
 		logger: logger,
 		//trace:   true,
@@ -116,12 +136,6 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) 
 	}
 
 	sd.mem = tx.Debug().NewMemBatch(&sd.metrics)
-
-	tv := commitment.VariantHexPatriciaTrie
-	if statecfg.ExperimentalConcurrentCommitment {
-		tv = commitment.VariantConcurrentHexPatricia
-	}
-
 	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv, tx.Debug().Dirs().Tmp)
 
 	if _, _, err := sd.SeekCommitment(ctx, tx); err != nil {
@@ -173,8 +187,8 @@ func (sd *SharedDomains) Merge(ctx context.Context, sdTxNum uint64, other *Share
 
 	// Merge block-level metadata from other's overlay into ours by flushing
 	// other's overlay writes directly into our overlay (which implements kv.RwTx).
-	if other.blockOverlay != nil && sd.blockOverlay != nil {
-		if err := other.blockOverlay.Flush(ctx, sd.blockOverlay); err != nil {
+	if otherOverlay, sdOverlay := other.blockOverlay.Load(), sd.blockOverlay.Load(); otherOverlay != nil && sdOverlay != nil {
+		if err := otherOverlay.Flush(ctx, sdOverlay); err != nil {
 			return fmt.Errorf("blockOverlay merge: %w", err)
 		}
 	}
@@ -300,24 +314,40 @@ func (sd *SharedDomains) CommitmentCapture() bool {
 func (sd *SharedDomains) GetMemBatch() kv.TemporalMemBatch { return sd.mem }
 func (sd *SharedDomains) SetInMemHistoryReads(v bool)      { sd.mem.SetInMemHistoryReads(v) }
 
+// SetParent sets a parent SD for read-through domain chaining. Domain reads
+// that miss in the local mem batch will check the parent's mem batch before
+// falling through to the underlying tx/aggregator.
+func (sd *SharedDomains) SetParent(parent *SharedDomains) { sd.parent = parent }
+
 // BlockOverlay returns the in-memory overlay for block-level metadata (headers, bodies,
 // canonical hashes, TD, stage progress, forkchoice markers). Callers can use this
 // as a kv.RwTx to route rawdb writes through the overlay instead of a real RwTx.
 // Returns nil if no overlay has been initialized via InitBlockOverlay.
-func (sd *SharedDomains) BlockOverlay() *membatchwithdb.MemoryMutation { return sd.blockOverlay }
+func (sd *SharedDomains) BlockOverlay() *membatchwithdb.MemoryMutation { return sd.blockOverlay.Load() }
+
+// BlockOverlayTemporalTx returns a read-only temporal view of the block overlay.
+// This allows consumers (RPC, shutter) to read uncommitted block data with
+// temporal (state history) support. Returns nil if no overlay is active.
+func (sd *SharedDomains) BlockOverlayTemporalTx(roTx kv.TemporalTx) kv.TemporalTx {
+	overlay := sd.blockOverlay.Load()
+	if overlay == nil {
+		return nil
+	}
+	return overlay.NewTemporalReadView(roTx)
+}
 
 // InitBlockOverlay creates (or replaces) the block-level metadata overlay backed by
 // the given base transaction. Writes to the overlay are visible to subsequent reads
 // and are flushed atomically alongside domain state via Flush().
 func (sd *SharedDomains) InitBlockOverlay(tx kv.TemporalTx, tmpDir string) error {
-	if sd.blockOverlay != nil {
-		sd.blockOverlay.Close()
+	if old := sd.blockOverlay.Load(); old != nil {
+		old.Close()
 	}
-	var err error
-	sd.blockOverlay, err = membatchwithdb.NewMemoryBatch(tx, tmpDir, sd.logger)
+	overlay, err := membatchwithdb.NewMemoryBatch(tx, tmpDir, sd.logger)
 	if err != nil {
 		return fmt.Errorf("init block overlay: %w", err)
 	}
+	sd.blockOverlay.Store(overlay)
 	return nil
 }
 func (sd *SharedDomains) GetCommitmentCtx() *commitmentdb.SharedDomainsCommitmentContext {
@@ -391,9 +421,8 @@ func (sd *SharedDomains) Close() {
 
 	sd.mem.Close()
 
-	if sd.blockOverlay != nil {
-		sd.blockOverlay.Close()
-		sd.blockOverlay = nil
+	if overlay := sd.blockOverlay.Swap(nil); overlay != nil {
+		overlay.Close()
 	}
 
 	sd.sdCtx.Close()
@@ -409,8 +438,8 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 			}
 		}
 	}
-	if sd.blockOverlay != nil {
-		if err := sd.blockOverlay.Flush(ctx, tx); err != nil {
+	if overlay := sd.blockOverlay.Load(); overlay != nil {
+		if err := overlay.Flush(ctx, tx); err != nil {
 			return err
 		}
 	}
@@ -442,19 +471,45 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		}
 	}
 
-	// stateCache holds in-flight values from previous transactions in the same batch
-	// that haven't been flushed to DB yet. Early return keeps correctness AND performance.
-	// We return step=0 (unknown) because the cache doesn't store the step at which a key
-	// was last written — and prevStep has been removed from DomainPut (see #19240), so
-	// callers no longer require an accurate step from this path.
-	if sd.stateCache != nil {
-		if v, ok := sd.stateCache.Get(domain, k); ok {
-			return v, 0, nil
+	// Check parent's mem batch (read-through chaining for child SDs)
+	if sd.parent != nil {
+		if v, step, ok := sd.parent.mem.GetLatest(domain, k); ok {
+			if dbg.KVReadLevelledMetrics {
+				sd.metrics.UpdateCacheReads(domain, start)
+			}
+			return v, step, nil
+		} else {
+			if step > 0 && step < maxStep {
+				maxStep = step
+			}
 		}
 	}
 
 	type MeteredGetter interface {
 		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
+	}
+
+	// stateCache holds in-flight values from previous transactions in the same batch
+	// that haven't been flushed to DB yet. Early return keeps correctness AND performance.
+	if sd.stateCache != nil {
+		if v, ok := sd.stateCache.Get(domain, k); ok {
+			if dbg.AssertStateCache {
+				// Fetch authoritative value from the backing tx and panic on any divergence.
+				// sd.mem and sd.parent.mem were already checked above and missed, so the
+				// backing tx is the single source of truth for this key at this point.
+				var vDB []byte
+				if aggTx, okAgg := tx.AggTx().(MeteredGetter); okAgg {
+					vDB, _, _, _ = aggTx.MeteredGetLatest(domain, k, tx, maxStep, &sd.metrics, start)
+				} else {
+					vDB, _, _ = tx.GetLatest(domain, k)
+				}
+				if !bytes.Equal(v, vDB) {
+					panic(fmt.Sprintf("stateCache divergence: domain=%v key=%x cached=%x db=%x txNum=%d",
+						domain, k, v, vDB, sd.txNum))
+				}
+			}
+			return v, 0, nil
+		}
 	}
 
 	if aggTx, ok := tx.AggTx().(MeteredGetter); ok {

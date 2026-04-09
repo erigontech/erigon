@@ -37,6 +37,10 @@ import (
 	"github.com/erigontech/erigon/txnprovider"
 )
 
+// SDProvider returns the latest published SharedDomains from FCU, or nil if none.
+// Used by the builder to read uncommitted state during background commits.
+type SDProvider func() *execctx.SharedDomains
+
 // Builder runs the three block-building steps (createBlock, execBlock, finishBlock) directly
 // without staged-sync machinery. Its Build method satisfies BlockBuilderFunc and can
 // be passed directly to ExecModule.
@@ -55,6 +59,7 @@ type Builder struct {
 	txnProvider           txnprovider.TxnProvider
 	sealCancel            chan struct{}
 	latestBlockBuiltStore *LatestBlockBuiltStore
+	sdProvider            SDProvider
 	logger                log.Logger
 }
 
@@ -72,6 +77,7 @@ func NewBuilder(
 	txnProvider txnprovider.TxnProvider,
 	sealCancel chan struct{},
 	latestBlockBuiltStore *LatestBlockBuiltStore,
+	sdProvider SDProvider,
 	logger log.Logger,
 ) *Builder {
 	return &Builder{
@@ -89,6 +95,7 @@ func NewBuilder(
 		txnProvider:           txnProvider,
 		sealCancel:            sealCancel,
 		latestBlockBuiltStore: latestBlockBuiltStore,
+		sdProvider:            sdProvider,
 		logger:                logger,
 	}
 }
@@ -123,13 +130,32 @@ func (b *Builder) Build(param *Parameters, interrupt *atomic.Bool) (result *type
 	}
 	defer tx.Rollback()
 
-	sd, err := execctx.NewSharedDomains(b.ctx, tx, b.logger)
+	// When a published SD is available (background commit in progress), create
+	// a child SD that reads domain state from the parent's mem batch and table
+	// data from the parent's overlay. The child's own writes are local and
+	// discarded after block construction.
+	var compositeTx kv.TemporalTx = tx
+	var parentSD *execctx.SharedDomains
+	if b.sdProvider != nil {
+		parentSD = b.sdProvider()
+	}
+	if parentSD != nil {
+		if overlay := parentSD.BlockOverlay(); overlay != nil {
+			compositeTx = overlay.NewReadView(tx)
+		}
+	}
+
+	sd, err := execctx.NewSharedDomains(b.ctx, compositeTx, b.logger)
 	if err != nil {
 		return nil, err
 	}
 	defer sd.Close()
 
-	executionAt, err := stages.GetStageProgress(tx, stages.Execution)
+	if parentSD != nil {
+		sd.SetParent(parentSD)
+	}
+
+	executionAt, err := stages.GetStageProgress(compositeTx, stages.Execution)
 	if err != nil {
 		return nil, err
 	}
@@ -137,13 +163,13 @@ func (b *Builder) Build(param *Parameters, interrupt *atomic.Bool) (result *type
 	execCfg := StageBuilderExecCfg(state, b.notifier, b.chainConfig, b.engine, b.vmConfig, b.tmpdir, interrupt, param.PayloadId, b.txnProvider, b.blockReader)
 	finishCfg := StageBuilderFinishCfg(b.chainConfig, b.engine, state, b.sealCancel, b.blockReader, b.latestBlockBuiltStore)
 
-	if err := createBlock(b.ctx, sd, tx, executionAt, createCfg, b.logger); err != nil {
+	if err := createBlock(b.ctx, sd, compositeTx, executionAt, createCfg, b.logger); err != nil {
 		return nil, err
 	}
-	if err := execBlock(b.ctx, sd, tx, executionAt, execCfg, b.executeBlockCfg, b.logger); err != nil {
+	if err := execBlock(b.ctx, sd, compositeTx, executionAt, execCfg, b.executeBlockCfg, b.logger); err != nil {
 		return nil, err
 	}
-	if err := finishBlock(tx, finishCfg, b.logger); err != nil {
+	if err := finishBlock(compositeTx, finishCfg, b.logger); err != nil {
 		return nil, err
 	}
 
