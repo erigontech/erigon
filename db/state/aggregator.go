@@ -960,6 +960,7 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step, 
 				if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
 					panic(err)
 				}
+				dir.LogOnENOSPC(err, a.dirs.DataDir)
 				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
 				panic(err)
 			}
@@ -1649,6 +1650,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 		closeFiles = false
 		at.a.logger.Debug("[snapshots] state merge done "+r.String(), "in", time.Since(t))
 	} else if !errors.Is(err, context.Canceled) {
+		dir.LogOnENOSPC(err, at.a.dirs.DataDir)
 		at.a.logger.Warn(fmt.Sprintf("[snapshots] state merge failed err=%v %s", err, r.String()))
 	}
 	return mf, err
@@ -1822,6 +1824,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 					close(fin)
 					return
 				}
+				dir.LogOnENOSPC(err, a.dirs.DataDir)
 				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
 				break
 			}
@@ -1836,6 +1839,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 				if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
 					return
 				}
+				dir.LogOnENOSPC(err, a.dirs.DataDir)
 				a.logger.Warn("[snapshots] merge", "err", err)
 			}
 		}()

@@ -57,18 +57,15 @@ func Test_LogDirOnENOSPC(t *testing.T) {
 	}
 
 	// non-ENOSPC error: should not panic or log anything
-	LogDirOnENOSPC(fmt.Errorf("some other error"), dir)
+	LogOnENOSPC(fmt.Errorf("some other error"), dir)
 
-	// ENOSPC error: should log file listing, filesystem info, then panic
+	// ENOSPC error: should log diagnostics then panic
 	enospc := fmt.Errorf("write failed: %w", syscall.ENOSPC)
-	require.Panics(t, func() { LogDirOnENOSPC(enospc, dir) })
+	require.Panics(t, func() { LogOnENOSPC(enospc, dir) })
 
 	// wrapped ENOSPC: should also panic
 	wrapped := fmt.Errorf("outer: %w", fmt.Errorf("inner: %w", syscall.ENOSPC))
-	require.Panics(t, func() { LogDirOnENOSPC(wrapped, dir) })
-
-	// bad directory: should log warning, not panic (returns early before panic)
-	LogDirOnENOSPC(enospc, filepath.Join(dir, "nonexistent"))
+	require.Panics(t, func() { LogOnENOSPC(wrapped, dir) })
 }
 
 func Test_CreateTempWithExt(t *testing.T) {

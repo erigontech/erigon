@@ -257,16 +257,33 @@ func CreateTempWithExtension(file string, extension string) (*os.File, error) {
 	return os.CreateTemp(directory, pattern)
 }
 
-// LogDirOnENOSPC checks whether err wraps syscall.ENOSPC and, if so, logs every
-// file in dirPath together with its size. Intended for post-mortem diagnostics
-// when a write fails due to a full disk.
-func LogDirOnENOSPC(err error, dirPath string) {
+// LogOnENOSPC checks whether err wraps syscall.ENOSPC and, if so, logs
+// diagnostic information about disk usage. Summaries are logged first (most
+// valuable), individual file listings last (can be truncated if disk is full).
+// datadir is the erigon data directory (parent of temp/, snapshots/, chaindata/).
+// After logging, it panics to stop the process immediately.
+func LogOnENOSPC(err error, datadir string) {
 	if !errors.Is(err, syscall.ENOSPC) {
 		return
 	}
-	entries, readErr := os.ReadDir(dirPath)
-	if readErr != nil {
-		log.Warn("[ENOSPC] failed to read dir", "dir", dirPath, "err", readErr)
+
+	// Log summaries first — these are the most important and least likely
+	// to be truncated by a full disk.
+	logFilesystemStats(datadir)
+	logDeletedOpenFiles()
+	logChaindataSize(filepath.Join(datadir, "chaindata"))
+	logSubdirSummary(filepath.Join(datadir, "snapshots"))
+	logDirSummary(filepath.Join(datadir, "temp"))
+
+	// Now log individual file listings (may be truncated on very full disks).
+	logDirFiles(filepath.Join(datadir, "temp"))
+
+	panic(fmt.Sprintf("[ENOSPC] fatal: no space left on device (datadir=%s)", datadir))
+}
+
+func logDirSummary(dirPath string) {
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
 		return
 	}
 	var totalSize uint64
@@ -278,18 +295,23 @@ func LogDirOnENOSPC(err error, dirPath string) {
 		}
 		fileCount++
 		totalSize += uint64(info.Size())
-		log.Warn("[ENOSPC] file", "name", e.Name(), "size", byteCount(info.Size()), "isDir", e.IsDir())
 	}
 	log.Warn("[ENOSPC] dir summary", "dir", dirPath, "files", fileCount, "totalSize", byteCount(int64(totalSize)))
-	logFilesystemStats(dirPath)
+}
 
-	// Also log snapshots and chaindata dir summaries.
-	datadir := filepath.Dir(dirPath)
-	logSubdirSummary(filepath.Join(datadir, "snapshots"))
-	logChaindataSize(filepath.Join(datadir, "chaindata"))
-	logDeletedOpenFiles()
-
-	panic(fmt.Sprintf("[ENOSPC] fatal: no space left on device (dir=%s)", dirPath))
+func logDirFiles(dirPath string) {
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		log.Warn("[ENOSPC] failed to read dir", "dir", dirPath, "err", err)
+		return
+	}
+	for _, e := range entries {
+		info, infoErr := e.Info()
+		if infoErr != nil {
+			continue
+		}
+		log.Warn("[ENOSPC] file", "dir", dirPath, "name", e.Name(), "size", byteCount(info.Size()), "isDir", e.IsDir())
+	}
 }
 
 // logSubdirSummary logs a per-subdirectory summary (file count + total size)
