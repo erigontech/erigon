@@ -2,10 +2,13 @@ package state_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
+	"fmt"
 	"math"
 	randOld "math/rand"
 	"math/rand/v2"
+	"os"
 	"strings"
 	"testing"
 
@@ -14,6 +17,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
@@ -82,6 +87,43 @@ func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byt
 		values[i] = common.Copy(bv[:n])
 	}
 	return keys, values
+}
+
+// testDbAndAggregatorForLargeData creates a temporal DB + aggregator sized for large datasets (10M+ keys).
+// When persistentDir is non-empty, creates an on-disk MDBX at that path (for integration binary compatibility).
+// When persistentDir is empty, uses t.TempDir() with InMem MDBX.
+// Returns dirs so the caller knows the output path.
+func testDbAndAggregatorForLargeData(tb testing.TB, aggStep uint64, persistentDir string) (kv.TemporalRwDB, *state.Aggregator, datadir.Dirs) {
+	tb.Helper()
+	logger := log.New()
+
+	var dirs datadir.Dirs
+	var db kv.RwDB
+
+	if persistentDir != "" {
+		dirs = datadir.New(persistentDir)
+		db = mdbx.New(dbcfg.ChainDB, logger).
+			Path(dirs.Chaindata).
+			GrowthStep(64 * datasize.MB).
+			MapSize(16 * datasize.GB).
+			MustOpen()
+	} else {
+		dirs = datadir.New(tb.TempDir())
+		db = mdbx.New(dbcfg.ChainDB, logger).
+			InMem(tb, dirs.Chaindata).
+			GrowthStep(64 * datasize.MB).
+			MapSize(16 * datasize.GB).
+			MustOpen()
+	}
+	tb.Cleanup(db.Close)
+
+	agg := testAgg(tb, db, dirs, aggStep, logger)
+	err := agg.OpenFolder()
+	require.NoError(tb, err)
+	tdb, err := temporal.New(db, agg)
+	require.NoError(tb, err)
+	tb.Cleanup(tdb.Close)
+	return tdb, agg, dirs
 }
 
 func testDbAndAggregatorv3(tb testing.TB, aggStep uint64) (kv.TemporalRwDB, *state.Aggregator) {
@@ -300,6 +342,59 @@ func composite(k, k2 []byte) []byte {
 	return append(common.Copy(k), k2...)
 }
 
+// makeAccountAddr generates a deterministic 20-byte account address with uniform
+// first-nibble distribution using sha256(0xAC || idx).
+func makeAccountAddr(idx uint64) []byte {
+	var buf [9]byte
+	buf[0] = 0xAC
+	binary.BigEndian.PutUint64(buf[1:], idx)
+	h := sha256.Sum256(buf[:])
+	return h[:length.Addr]
+}
+
+// makeStorageKey generates a deterministic 52-byte composite storage key
+// (20-byte addr + 32-byte slot) using sha256(0x57 || addrIdx*maxSlots+slotIdx).
+func makeStorageKey(addrIdx, slotIdx uint64, maxSlots uint64) []byte {
+	addr := makeAccountAddr(addrIdx)
+	var buf [9]byte
+	buf[0] = 0x57
+	binary.BigEndian.PutUint64(buf[1:], addrIdx*maxSlots+slotIdx)
+	h := sha256.Sum256(buf[:])
+	return composite(addr, h[:length.Hash])
+}
+
+// makeCodeValue generates deterministic bytecode of 32-256 bytes.
+// Size is derived from idx for full reproducibility independent of call order.
+func makeCodeValue(idx uint64) []byte {
+	size := 32 + int(idx%225) // 32..256 bytes
+	code := make([]byte, size)
+	// Use sha256 of index as repeatable seed data
+	var buf [9]byte
+	buf[0] = 0xCD
+	binary.BigEndian.PutUint64(buf[1:], idx)
+	h := sha256.Sum256(buf[:])
+	// Fill code with hash-derived bytes, repeating as needed
+	for i := 0; i < size; i++ {
+		code[i] = h[i%len(h)]
+	}
+	return code
+}
+
+func TestMakeAccountAddr_NibbleDistribution(t *testing.T) {
+	nibbles := make(map[byte]int, 16)
+	const count = 1000
+	for i := uint64(0); i < count; i++ {
+		addr := makeAccountAddr(i)
+		firstNibble := addr[0] >> 4
+		nibbles[firstNibble]++
+	}
+	// All 16 nibble values must be present
+	for n := byte(0); n < 16; n++ {
+		require.Positive(t, nibbles[n], "missing first nibble %x in %d generated keys", n, count)
+	}
+	t.Logf("nibble distribution over %d keys: %v", count, nibbles)
+}
+
 func TestAggregatorV3_RestartOnDatadir(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -439,6 +534,196 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	v, _, err := roTx.GetLatest(kv.CommitmentDomain, someKey)
 	require.NoError(t, err)
 	require.Equal(t, maxWrite, binary.BigEndian.Uint64(v))
+}
+
+// TestGenerateCommitmentRebuildData generates a dataset with valid commitment roots.
+// The resulting datadir can be used for manual testing of
+// `integration commitment rebuild`.
+//
+// Skipped under `-short`. In the default (non-short) run it uses a small
+// CI-safe dataset (1K accounts, 3 steps). To generate the full-scale dataset
+// (3M accounts, 59 steps, ~10M keys) for manual integration testing, set
+// TEST_DATADIR to a persistent output directory — that both switches the
+// parameters to full scale and writes the files to a reusable location.
+//
+// Environment variables:
+//   - TEST_DATADIR: optional persistent output directory. When set, switches
+//     to full-scale parameters and requires a long timeout. Unset (default):
+//     small CI-safe parameters, writes to t.TempDir().
+func TestGenerateCommitmentRebuildData(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping data generation in short mode")
+	}
+
+	persistentDir := dbg.EnvString("TEST_DATADIR", "")
+
+	// Fail early if persistent directory already contains data (avoids mixing old+new state).
+	// Check chaindata and all snapshot subdirectories that OpenFolder/scanDirs will read.
+	if persistentDir != "" {
+		dirs := datadir.New(persistentDir)
+		for _, sub := range []string{dirs.Chaindata, dirs.SnapDomain, dirs.SnapHistory, dirs.SnapIdx, dirs.SnapAccessors} {
+			if entries, err := os.ReadDir(sub); err == nil && len(entries) > 0 {
+				t.Fatalf("TEST_DATADIR %q already contains data in %s; use an empty directory or remove the existing data first", persistentDir, sub)
+			}
+		}
+	}
+
+	// Default: small CI-safe parameters.
+	var (
+		stepSize        uint64 = 10
+		totalSteps      uint64 = 3
+		numAccounts     uint64 = 1000
+		slotsPerAcct    uint64 = 2
+		numCodeAccounts uint64 = 300
+	)
+
+	// Scale up only when a persistent output directory is provided — this is
+	// the manual integration-testing path.
+	if persistentDir != "" {
+		stepSize = 100
+		totalSteps = 59
+		numAccounts = 3_000_000
+		slotsPerAcct = 2
+		numCodeAccounts = 1_000_000
+	}
+
+	totalTxs := stepSize * totalSteps
+	totalStorage := numAccounts * slotsPerAcct
+	totalCode := numCodeAccounts
+	totalKeys := numAccounts + totalStorage + totalCode
+
+	t.Logf("Parameters: stepSize=%d totalSteps=%d totalTxs=%d", stepSize, totalSteps, totalTxs)
+	t.Logf("Keys: accounts=%d storage=%d code=%d total=%d", numAccounts, totalStorage, totalCode, totalKeys)
+
+	db, agg, dirs := testDbAndAggregatorForLargeData(t, stepSize, persistentDir)
+	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)
+
+	ctx := context.Background()
+
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	// Calculate per-tx batch sizes (ceiling division to ensure all keys are written)
+	accPerTx := (numAccounts + totalTxs - 1) / totalTxs
+	storPerTx := (totalStorage + totalTxs - 1) / totalTxs
+	codePerTx := (totalCode + totalTxs - 1) / totalTxs
+	if accPerTx == 0 {
+		accPerTx = 1
+	}
+	if storPerTx == 0 {
+		storPerTx = 1
+	}
+	if codePerTx == 0 {
+		codePerTx = 1
+	}
+
+	t.Logf("Per-tx batch: accounts=%d storage=%d code=%d", accPerTx, storPerTx, codePerTx)
+
+	var (
+		blockNum    uint64
+		accIdx      uint64
+		storAccIdx  uint64
+		storSlotIdx uint64
+		codeIdx     uint64
+		lastRoot    []byte
+	)
+
+	for txNum := uint64(0); txNum < totalTxs; txNum++ {
+		// Write accounts batch
+		for i := uint64(0); i < accPerTx && accIdx < numAccounts; i++ {
+			addr := makeAccountAddr(accIdx)
+			acc := accounts.Account{
+				Nonce:       txNum,
+				Balance:     *uint256.NewInt(txNum * 1000),
+				CodeHash:    accounts.EmptyCodeHash,
+				Incarnation: 0,
+			}
+			buf := accounts.SerialiseV3(&acc)
+			err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, buf, txNum, nil)
+			require.NoError(t, err)
+			accIdx++
+		}
+
+		// Write storage batch
+		for i := uint64(0); i < storPerTx && (storAccIdx*slotsPerAcct+storSlotIdx) < totalStorage; i++ {
+			skey := makeStorageKey(storAccIdx, storSlotIdx, slotsPerAcct)
+			var val [32]byte
+			binary.BigEndian.PutUint64(val[24:], txNum)
+			err = domains.DomainPut(kv.StorageDomain, rwTx, skey, val[:], txNum, nil)
+			require.NoError(t, err)
+
+			storSlotIdx++
+			if storSlotIdx >= slotsPerAcct {
+				storSlotIdx = 0
+				storAccIdx++
+			}
+		}
+
+		// Write code batch
+		for i := uint64(0); i < codePerTx && codeIdx < numCodeAccounts; i++ {
+			addr := makeAccountAddr(codeIdx)
+			code := makeCodeValue(codeIdx)
+			err = domains.DomainPut(kv.CodeDomain, rwTx, addr, code, txNum, nil)
+			require.NoError(t, err)
+
+			// Update account with real code hash
+			codeHash := accounts.InternCodeHash(common.BytesToHash(crypto.Keccak256(code)))
+			acc := accounts.Account{
+				Nonce:       txNum,
+				Balance:     *uint256.NewInt(txNum * 1000),
+				CodeHash:    codeHash,
+				Incarnation: 0,
+			}
+			buf := accounts.SerialiseV3(&acc)
+			err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, buf, txNum, nil)
+			require.NoError(t, err)
+			codeIdx++
+		}
+
+		// At step boundary: compute commitment, flush, and record block→txNum mapping
+		if (txNum+1)%stepSize == 0 {
+			step := (txNum + 1) / stepSize
+			rh, err := domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
+			require.NoError(t, err)
+			require.NotEmpty(t, rh)
+			lastRoot = rh
+			t.Logf("Step %d/%d (txNum=%d): root=%x", step, totalSteps, txNum, rh)
+
+			err = domains.Flush(ctx, rwTx)
+			require.NoError(t, err)
+
+			// Populate MaxTxNum table so `integration commitment rebuild` passes TxNums check
+			err = rawdbv3.TxNums.Append(rwTx, blockNum, txNum)
+			require.NoError(t, err)
+			blockNum++
+		}
+	}
+
+	// Final flush and commit
+	err = domains.Flush(ctx, rwTx)
+	require.NoError(t, err)
+	domains.Close()
+	require.NoError(t, rwTx.Commit())
+
+	// Build files
+	t.Logf("Building files for %d txs...", totalTxs)
+	err = agg.BuildFiles(totalTxs)
+	require.NoError(t, err)
+
+	// Validate
+	require.NotEmpty(t, lastRoot, "final root must be non-empty")
+	require.NotEqual(t, empty.RootHash.Bytes(), lastRoot, "final root must differ from empty trie root")
+
+	t.Logf("Done. Final root: %x", lastRoot)
+	t.Logf("Output datadir: %s", dirs.DataDir)
+	if persistentDir != "" {
+		fmt.Fprintf(os.Stderr, "\n=== DATADIR: %s ===\n", dirs.DataDir)
+	}
 }
 
 func TestAggregatorV3_SharedDomains(t *testing.T) {

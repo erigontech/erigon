@@ -1824,17 +1824,10 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int16) error {
 		return hph.unfoldBranchNode(row, depth, touched && !present)
 	}
 
-	var nibble uint8
-	var copyLen int16
-	if upCell.hashedExtLen >= unfolding {
-		depth = upDepth + unfolding
-		nibble = upCell.hashedExtension[unfolding-1]
-		copyLen = unfolding - 1
-	} else {
-		depth = upDepth + upCell.hashedExtLen
-		nibble = upCell.hashedExtension[upCell.hashedExtLen-1]
-		copyLen = upCell.hashedExtLen - 1
-	}
+	lowest := min(unfolding, upCell.hashedExtLen)
+	depth = upDepth + lowest
+	copyLen := lowest - 1
+	nibble := upCell.hashedExtension[copyLen]
 
 	if touched {
 		hph.touchMap[row] = uint16(1) << nibble
@@ -1844,7 +1837,7 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int16) error {
 	}
 
 	cell := &hph.grid[row][nibble]
-	cell.fillFromUpperCell(upCell, depth, min(unfolding, upCell.hashedExtLen))
+	cell.fillFromUpperCell(upCell, depth, lowest)
 	if hph.trace {
 		fmt.Printf("unfolded cell (%d, %x, depth=%d) %s\n", row, nibble, depth, cell.FullString())
 	}

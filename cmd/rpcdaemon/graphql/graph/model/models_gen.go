@@ -7,13 +7,6 @@ type AccessTuple struct {
 	StorageKeys []string `json:"storageKeys"`
 }
 
-type Account struct {
-	Address          string `json:"address"`
-	Balance          string `json:"balance"`
-	TransactionCount uint64 `json:"transactionCount"`
-	Code             string `json:"code"`
-	Storage          string `json:"storage"`
-}
 
 type Block struct {
 	Number            uint64         `json:"number"`
