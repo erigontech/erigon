@@ -329,7 +329,6 @@ func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, cache *Inte
 	var successFps [][]fileFingerprint
 	var branchKeys, referencedAccounts, plainAccounts, referencedStorages, plainStorages atomic.Uint64
 	for _, w := range works {
-		w := w
 		eg.Go(func() error {
 			counts, err := checkCommitmentKvDeref(ctx, w.file, stepSize, failFast, logger)
 			if err == nil {
