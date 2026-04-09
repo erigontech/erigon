@@ -747,10 +747,6 @@ func (h *captureHandler) snapshot() []Record {
 func TestAsyncHandlerDropReportIsRateLimited(t *testing.T) {
 	t.Parallel()
 
-	orig := asyncDropReportInterval
-	asyncDropReportInterval = 20 * time.Millisecond
-	defer func() { asyncDropReportInterval = orig }()
-
 	capture := &captureHandler{}
 	blocked := make(chan struct{})
 	base := funcHandler(func(r *Record) error {
@@ -761,7 +757,7 @@ func TestAsyncHandlerDropReportIsRateLimited(t *testing.T) {
 	})
 
 	l := New()
-	l.SetHandler(AsyncHandler(1, base))
+	l.SetHandler(asyncHandlerWithInterval(1, 20*time.Millisecond, base))
 
 	l.Info("block")
 	for range 50 {

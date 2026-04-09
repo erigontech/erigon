@@ -445,7 +445,7 @@ func (h bufferedHandler) Enabled(ctx context.Context, lvl Lvl) bool {
 // any records are dropped under sustained overload.
 const asyncDefaultBufSize = 4096
 
-var asyncDropReportInterval = 5 * time.Second
+const asyncDropReportInterval = 5 * time.Second
 
 // AsyncHandler is a non-blocking variant of BufferedHandler.
 //
@@ -460,6 +460,10 @@ var asyncDropReportInterval = 5 * time.Second
 // Use AsyncStreamHandler to get a ready-to-use terminal handler with the
 // correct lazy-evaluation order (see below).
 func AsyncHandler(bufSize int, h Handler) Handler {
+	return asyncHandlerWithInterval(bufSize, asyncDropReportInterval, h)
+}
+
+func asyncHandlerWithInterval(bufSize int, reportInterval time.Duration, h Handler) Handler {
 	if bufSize <= 0 {
 		bufSize = asyncDefaultBufSize
 	}
@@ -469,7 +473,7 @@ func AsyncHandler(bufSize int, h Handler) Handler {
 		lastReport := time.Now()
 		for m := range recs {
 			_ = h.Log(m)
-			if time.Since(lastReport) < asyncDropReportInterval {
+			if time.Since(lastReport) < reportInterval {
 				continue
 			}
 			if n := dropped.Swap(0); n > 0 {
