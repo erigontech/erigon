@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
-	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -389,31 +388,6 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		op = contract.GetOp(pc)
 		operation := evm.jt[op]
 		cost = operation.constantGas // For tracing
-
-		// EIP-7907: Charge WarmStorageReadCostEIP2929 (100) for each 32-byte code chunk
-		// accessed for the first time within this transaction. Chunks are tracked per-transaction
-		// (access list resets each tx, like SLOAD warm/cold). For PUSH instructions the
-		// immediate data may span an additional chunk boundary.
-		if evm.chainRules.IsOsaka {
-			startChunk := uint32(pc >> 5)
-			endChunk := startChunk
-			if op >= PUSH1 && op <= PUSH32 {
-				endChunk = uint32((pc + uint64(op-PUSH1+1)) >> 5)
-			}
-			for chunk := startChunk; chunk <= endChunk; chunk++ {
-				key := codeChunkKey{contract.CodeHash, chunk}
-				if _, seen := evm.blockCodeChunkAccessed[key]; !seen {
-					if callContext.gas < params.WarmStorageReadCostEIP2929 {
-						return nil, callContext.Gas(), ErrOutOfGas
-					}
-					callContext.gas -= params.WarmStorageReadCostEIP2929
-					if isAmsterdam {
-						evm.regularGasConsumed += params.WarmStorageReadCostEIP2929
-					}
-					evm.blockCodeChunkAccessed[key] = struct{}{}
-				}
-			}
-		}
 
 		// Validate stack
 		if sLen := callContext.Stack.len(); sLen < operation.numPop {

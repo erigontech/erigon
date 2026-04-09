@@ -99,17 +99,6 @@ type EVM struct {
 	regularGasConsumed uint64 // total regular gas charged during tx execution (for block-level accounting)
 	revertedSpillGas   uint64 // state gas that spilled to regular and was restored on depth-0 revert
 
-	// blockCodeChunkAccessed tracks (codeHash, chunkIndex) pairs accessed within the transaction.
-	// EIP-7907: first access to each 32-byte code chunk costs WarmStorageReadCostEIP2929 gas.
-	// Resets per-transaction (see ResetGasConsumed).
-	// Block-level (not reset per-transaction): a chunk warmed by tx N is free in tx N+1.
-	blockCodeChunkAccessed map[codeChunkKey]struct{}
-}
-
-// codeChunkKey identifies a 32-byte code chunk within a specific code hash.
-type codeChunkKey struct {
-	hash  accounts.CodeHash
-	chunk uint32
 }
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
@@ -126,8 +115,7 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state
 		intraBlockState:        ibs,
 		config:                 vmConfig,
 		chainConfig:            chainConfig,
-		chainRules:             blockCtx.Rules(chainConfig),
-		blockCodeChunkAccessed: make(map[codeChunkKey]struct{}),
+		chainRules: blockCtx.Rules(chainConfig),
 	}
 	evm.jt = jumpTable(evm.chainRules, vmConfig)
 
@@ -183,14 +171,10 @@ func (evm *EVM) RegularGasConsumed() uint64 { return evm.regularGasConsumed }
 func (evm *EVM) RevertedSpillGas() uint64 { return evm.revertedSpillGas }
 
 // ResetGasConsumed resets the gas consumed counters for a new transaction.
-// Code chunk access tracking is also per-transaction (EIP-7907).
 func (evm *EVM) ResetGasConsumed() {
 	evm.stateGasConsumed = 0
 	evm.regularGasConsumed = 0
 	evm.revertedSpillGas = 0
-	if evm.chainRules.IsOsaka {
-		evm.blockCodeChunkAccessed = make(map[codeChunkKey]struct{})
-	}
 }
 
 // handleFrameRevert handles the full error path for a call or create frame:
