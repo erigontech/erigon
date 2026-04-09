@@ -182,8 +182,8 @@ func (cc *ExecutionClientEngine) NewPayload(
 		payloadStatus, err = cc.engine.NewPayloadV3(ctx, request, versionedHashes, beaconParentRoot)
 	case clparams.ElectraVersion, clparams.FuluVersion:
 		payloadStatus, err = cc.engine.NewPayloadV4(ctx, request, versionedHashes, beaconParentRoot, executionRequestsList)
-	default:
-		return PayloadStatusNone, fmt.Errorf("unsupported payload version: %d", payload.Version())
+	default: // Gloas+ (Amsterdam)
+		payloadStatus, err = cc.engine.NewPayloadV5(ctx, request, versionedHashes, beaconParentRoot, executionRequestsList)
 	}
 	if err != nil {
 		return PayloadStatusNone, fmt.Errorf("engine NewPayload failed: %w", err)
@@ -362,6 +362,8 @@ func (cc *ExecutionClientEngine) GetAssembledBlock(ctx context.Context, id []byt
 
 	// Select Engine API version based on CL state version.
 	switch {
+	case version >= clparams.GloasVersion:
+		return cc.getAssembledBlockV6(ctx, id, version)
 	case version >= clparams.FuluVersion:
 		return cc.getAssembledBlockV5(ctx, id, version)
 	case version >= clparams.ElectraVersion:
@@ -440,6 +442,14 @@ func (cc *ExecutionClientEngine) getAssembledBlockV5(ctx context.Context, id []b
 	resp, err := cc.engine.GetPayloadV5(ctx, hexutil.Bytes(id))
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("engine GetPayloadV5 failed: %w", err)
+	}
+	return cc.getAssembledBlockFromResponse(resp, version)
+}
+
+func (cc *ExecutionClientEngine) getAssembledBlockV6(ctx context.Context, id []byte, version clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+	resp, err := cc.engine.GetPayloadV6(ctx, hexutil.Bytes(id))
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("engine GetPayloadV6 failed: %w", err)
 	}
 	return cc.getAssembledBlockFromResponse(resp, version)
 }
