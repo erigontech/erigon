@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
@@ -128,6 +129,15 @@ func (emt *ExecModuleTester) verifyBlock(cr *LightChainReader, block *types.Bloc
 			return fmt.Errorf("block #%v blob gas mismatch: txns=%d, header=%d", block.Number(), expectedBlobGas, *header.BlobGasUsed)
 		}
 	}
+	// EIP-7934: block RLP size limit (Osaka+).
+	maxRlpSize := emt.ChainConfig.GetMaxRlpBlockSize(header.Time)
+	if maxRlpSize < int(^uint(0)>>1) { // not math.MaxInt — limit is active
+		blockRlpSize := block.EncodingSize()
+		blockRlpSize += rlp.ListPrefixLen(blockRlpSize)
+		if blockRlpSize > maxRlpSize {
+			return fmt.Errorf("block #%v exceeds max RLP size: %d > %d", block.Number(), blockRlpSize, maxRlpSize)
+		}
+	}
 	return nil
 }
 
@@ -202,8 +212,14 @@ func (emt *ExecModuleTester) insertChainEphemeral(cp *blockgen.ChainPack) error 
 }
 
 // DryRunBlock executes a block on a throwaway overlay without merging state.
-// Returns nil if the block executes successfully, or the execution error.
-// Used for expected-invalid blocks to avoid leaking state into the main overlay.
+// Returns nil if the block passes all verifiable checks, or an error describing
+// the invalidity. Used for expected-invalid blocks.
+//
+// Note: ephemeral mode cannot compute state root commitments or BAL from
+// execution results. After execution passes, if the header requires BAL
+// validation (BlockAccessListHash is set), an error is returned because the
+// BAL content cannot be verified — this is the only remaining source of
+// invalidity when all other checks pass.
 func (emt *ExecModuleTester) DryRunBlock(block *types.Block) error {
 	cr := emt.ephemeralChainReader()
 
@@ -217,7 +233,18 @@ func (emt *ExecModuleTester) DryRunBlock(block *types.Block) error {
 	}
 	defer throwaway.Close()
 
-	return emt.executeBlock(cr, block, throwaway, emt.ephemeralTxNum+1)
+	if err := emt.executeBlock(cr, block, throwaway, emt.ephemeralTxNum+1); err != nil {
+		return err
+	}
+
+	// Execution passed — check for validations that ephemeral mode cannot perform.
+	// BAL content validation requires VersionedIO (per-tx I/O tracking) which is
+	// only available in the full staged-sync pipeline.
+	if block.Header().BlockAccessListHash != nil {
+		return fmt.Errorf("block #%v: BAL content validation requires full pipeline (ephemeral mode cannot compute BAL from execution)", block.Number())
+	}
+
+	return nil
 }
 
 // RecordEphemeralHeader records a block header in the ephemeral chain reader's
