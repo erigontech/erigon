@@ -146,9 +146,8 @@ type ExecModuleTester struct {
 	ownsDB bool // true when DB was created by New(); false when shared from genesis cache
 
 	// Ephemeral mode: overlay-based block execution.
-	// When enabled, blocks after genesis are executed via ExecuteBlockEphemerally
+	// When non-nil, blocks after genesis are executed via ExecuteBlockEphemerally
 	// on a MemoryMutation overlay instead of the full staged-sync pipeline.
-	ephemeral         bool
 	ephemeralOverlay  *membatchwithdb.MemoryMutation
 	ephemeralRoTx     kv.TemporalTx
 	ephemeralTxNum    uint64
@@ -201,7 +200,6 @@ func newCachedEphemeral(tb testing.TB, opt options) *ExecModuleTester {
 		Genesis:     opt.cachedGenesis,
 		Key:         opt.key,
 		Address:     crypto.PubkeyToAddress(opt.key.PublicKey),
-		ephemeral:   true,
 		// ownsDB is false (zero value) — DB is shared from genesis cache
 	}
 
@@ -392,15 +390,9 @@ func WithChainConfig(cfg *chain.Config) Option {
 	}
 }
 
-func WithEphemeral() Option {
-	return func(opts *options) {
-		opts.ephemeral = true
-	}
-}
-
 // WithCachedDB provides a pre-existing genesis database from an external cache.
-// When combined with WithEphemeral(), New() skips all expensive setup (DB creation,
-// genesis commit, staged-sync pipeline, sentry) and goes straight to overlay init.
+// New() skips all expensive setup (DB creation, genesis commit, staged-sync
+// pipeline, sentry) and goes straight to ephemeral overlay initialization.
 // The caller retains ownership of the DB and must not close it.
 func WithCachedDB(db kv.TemporalRwDB, genesis *types.Block) Option {
 	return func(opts *options) {
@@ -430,9 +422,8 @@ type options struct {
 	engine              rules.Engine
 	pruneMode           *prune.Mode
 	blockBufferSize     int
-	withTxPool          bool
-	ephemeral           bool
-	enableDomains       []kv.Domain
+	withTxPool      bool
+	enableDomains   []kv.Domain
 	cachedDB            kv.TemporalRwDB // pre-existing DB from genesis cache
 	cachedGenesis       *types.Block    // genesis block from genesis cache
 	fcuBackgroundCommit bool
@@ -482,8 +473,8 @@ func applyOptions(opts []Option) options {
 func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	opt := applyOptions(opts)
 
-	// Fast path: cached genesis DB + ephemeral mode — skip all expensive setup.
-	if opt.cachedDB != nil && opt.ephemeral {
+	// Fast path: cached genesis DB — skip all expensive setup, use ephemeral overlay.
+	if opt.cachedDB != nil {
 		return newCachedEphemeral(tb, opt)
 	}
 
@@ -860,18 +851,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		tb.Fatal(err)
 	}
 
-	// Switch to ephemeral mode after genesis is committed to MDBX.
-	if opt.ephemeral {
-		mock.ephemeral = true
-		if err := mock.initEphemeral(); err != nil {
-			if tb != nil {
-				tb.Fatal(err)
-			} else {
-				panic(err)
-			}
-		}
-	}
-
 	return mock
 }
 
@@ -968,7 +947,7 @@ func (emt *ExecModuleTester) insertPoSBlocks(chain *blockgen.ChainPack) error {
 }
 
 func (emt *ExecModuleTester) InsertChain(chain *blockgen.ChainPack) error {
-	if emt.ephemeral {
+	if emt.ephemeralOverlay != nil {
 		return emt.insertChainEphemeral(chain)
 	}
 	if err := emt.insertPoSBlocks(chain); err != nil {

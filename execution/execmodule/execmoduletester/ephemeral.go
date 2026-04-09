@@ -38,10 +38,8 @@ func (emt *ExecModuleTester) initEphemeral() error {
 	if err != nil {
 		return fmt.Errorf("ephemeral: BeginTemporalRo: %w", err)
 	}
-	emt.ephemeralRoTx = roTx // owned by closeEphemeral; not deferred here
 	defer func() {
 		if emt.ephemeralOverlay == nil { // setup failed — clean up
-			emt.ephemeralRoTx = nil
 			roTx.Rollback()
 		}
 	}()
@@ -54,7 +52,6 @@ func (emt *ExecModuleTester) initEphemeral() error {
 	txNum, err := rawdbv3.TxNums.Max(emt.Ctx, roTx, 0)
 	if err != nil {
 		overlay.Close()
-		roTx.Rollback()
 		return fmt.Errorf("ephemeral: TxNums.Max: %w", err)
 	}
 
@@ -229,9 +226,6 @@ func (emt *ExecModuleTester) DryRunBlock(block *types.Block) error {
 func (emt *ExecModuleTester) RecordEphemeralHeader(header *types.Header) {
 	emt.ephemeralHeaders[header.Hash()] = header
 }
-
-// IsEphemeral returns true if the tester is in ephemeral (overlay) mode.
-func (emt *ExecModuleTester) IsEphemeral() bool { return emt.ephemeral }
 
 // EphemeralOverlay returns the MemoryMutation overlay for state reads.
 func (emt *ExecModuleTester) EphemeralOverlay() *membatchwithdb.MemoryMutation {

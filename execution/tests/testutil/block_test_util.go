@@ -225,7 +225,6 @@ func (bt *BlockTest) Run(t *testing.T) error {
 		execmoduletester.WithCachedDB(db, genesis),
 		execmoduletester.WithGenesisSpec(gspec),
 		execmoduletester.WithEngine(engine),
-		execmoduletester.WithEphemeral(),
 	}
 	if bt.ExperimentalBAL {
 		mOpts = append(mOpts, execmoduletester.WithExperimentalBAL())
