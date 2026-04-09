@@ -1300,7 +1300,6 @@ func doIntegrity(cliCtx *cli.Context) error {
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(1)
 	for _, chk := range requestedChecks {
-		chk := chk
 		g.Go(func() error {
 			if ctx.Err() != nil {
 				return ctx.Err()
