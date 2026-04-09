@@ -1869,71 +1869,6 @@ type skipStat struct {
 	accLoaded, accSkipped, accReset, storReset, storLoaded, storSkipped uint64
 }
 
-func (hph *HexPatriciaHashed) createCellGetter(b []byte, updateKey []byte, row int, depth int16) func(nibble int, skip bool) (*cell, error) {
-	hashBefore := make([]byte, 32) // buffer reused between calls
-	return func(nibble int, skip bool) (*cell, error) {
-		if skip {
-			if _, err := hph.keccak2.Write(b); err != nil {
-				return nil, fmt.Errorf("failed to write empty nibble to hash: %w", err)
-			}
-			if hph.trace {
-				fmt.Printf("  %x: empty(%d, %x, depth=%d)\n", nibble, row, nibble, depth)
-			}
-			return nil, nil
-		}
-		cell := &hph.grid[row][nibble]
-		if cell.accountAddrLen > 0 && cell.stateHashLen == 0 && !cell.loaded.account() && !cell.Deleted() {
-			//panic("account not loaded" + fmt.Sprintf("%x", cell.accountAddr[:cell.accountAddrLen]))
-			log.Warn("account not loaded", "pref", updateKey, "c", fmt.Sprintf("(%d, %x, depth=%d", row, nibble, depth), "cell", cell.String())
-		}
-		if cell.storageAddrLen > 0 && cell.stateHashLen == 0 && !cell.loaded.storage() && !cell.Deleted() {
-			//panic("storage not loaded" + fmt.Sprintf("%x", cell.storageAddr[:cell.storageAddrLen]))
-			log.Warn("storage not loaded", "pref", updateKey, "c", fmt.Sprintf("(%d, %x, depth=%d", row, nibble, depth), "cell", cell.String())
-		}
-
-		loadedBefore := cell.loaded
-		copy(hashBefore, cell.stateHash[:cell.stateHashLen])
-		hashBefore = hashBefore[:cell.stateHashLen]
-
-		cellHash, err := hph.computeCellHash(cell, depth, hph.hashAuxBuffer[:0])
-		if err != nil {
-			return nil, err
-		}
-		if hph.trace {
-			fmt.Printf("  %x: computeCellHash(%d, %x, depth=%d)=[%x]\n", nibble, row, nibble, depth, cellHash)
-		}
-
-		if dbg.KVReadLevelledMetrics && hashBefore != nil && (cell.accountAddrLen > 0 || cell.storageAddrLen > 0) {
-			counters := hph.hadToLoadL[hph.depthsToTxNum[depth]]
-			if !bytes.Equal(hashBefore, cell.stateHash[:cell.stateHashLen]) {
-				if cell.accountAddrLen > 0 {
-					counters.accReset++
-					counters.accLoaded++
-				}
-				if cell.storageAddrLen > 0 {
-					counters.storReset++
-					counters.storLoaded++
-				}
-			} else {
-				if cell.accountAddrLen > 0 && (!loadedBefore.account() && !cell.loaded.account()) {
-					counters.accSkipped++
-				}
-				if cell.storageAddrLen > 0 && (!loadedBefore.storage() && !cell.loaded.storage()) {
-					counters.storSkipped++
-
-				}
-
-				hph.hadToLoadL[hph.depthsToTxNum[depth]] = counters
-			}
-		}
-		if _, err := hph.keccak2.Write(cellHash); err != nil {
-			return nil, err
-		}
-
-		return cell, nil
-	}
-}
-
 const terminatorHexByte = 16 // max nibble value +1. Defines end of nibble line in the trie or splits address and storage space in trie.
 
 // updateKind is a type of update that is being applied to the trie structure.
@@ -2003,31 +1938,19 @@ func (hph *HexPatriciaHashed) foldBranch(row int, nibble, upDepth, depth int16, 
 		return err
 	}
 
-	b := [...]byte{0x80}
+	// Single pass: feed keccak2 + extract cellEncodeData
+	cellData, err := hph.hashRow(row, depth)
+	if err != nil {
+		return err
+	}
 
 	if hph.branchEncoder.DeferUpdatesEnabled() {
-		// Deferred path: compute cell hashes and feed keccak2, but defer EncodeBranch
-		if err := hph.feedBranchHashesToKeccak(row, depth, b[:]); err != nil {
-			return err
-		}
-		// Defer the branch encoding
-		if err := hph.branchEncoder.CollectDeferredUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], &hph.grid[row], depth); err != nil {
+		if err := hph.branchEncoder.CollectDeferredUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], &cellData); err != nil {
 			return fmt.Errorf("failed to collect deferred branch update: %w", err)
 		}
 	} else {
-		// Normal path: EncodeBranch with cellGetter that feeds keccak2
-		cellGetter := hph.createCellGetter(b[:], updateKey, row, depth)
-		lastNibble, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], cellGetter)
-		if err != nil {
+		if err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], &cellData); err != nil {
 			return fmt.Errorf("failed to encode branch update: %w", err)
-		}
-		for i := lastNibble; i < 17; i++ {
-			if _, err := hph.keccak2.Write(b[:]); err != nil {
-				return err
-			}
-			if hph.trace {
-				fmt.Printf("  %x: empty(%d, %x, depth=%d)\n", i, row, i, depth)
-			}
 		}
 	}
 	upCell.extLen = depth - upDepth - 1
@@ -2085,6 +2008,99 @@ func (hph *HexPatriciaHashed) feedBranchHashesToKeccak(row int, depth int16, emp
 		bitset ^= bit
 	}
 	return nil
+}
+
+// hashRow performs a single pass over all 17 branch slots (16 nibbles + terminator),
+// feeding cell hashes to keccak2 for present cells (per afterMap) and writing 0x80
+// for empty slots. It simultaneously extracts cellEncodeData for each present cell.
+// This replaces the separate feedBranchHashesToKeccak + cellEncodeData extraction loop.
+func (hph *HexPatriciaHashed) hashRow(row int, depth int16) ([16]cellEncodeData, error) {
+	var cellData [16]cellEncodeData
+	b := [...]byte{0x80}
+
+	for bitset, lastNib := hph.afterMap[row], 0; ; {
+		if bitset == 0 {
+			// Write remaining empty cells to keccak2 (up to slot 16 inclusive = terminator)
+			for i := lastNib; i < 17; i++ {
+				if _, err := hph.keccak2.Write(b[:]); err != nil {
+					return cellData, err
+				}
+			}
+			break
+		}
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+
+		// Write empty cells before this nibble
+		for i := lastNib; i < nibble; i++ {
+			if _, err := hph.keccak2.Write(b[:]); err != nil {
+				return cellData, err
+			}
+			if hph.trace {
+				fmt.Printf("  %x: empty(%d, %x, depth=%d)\n", i, row, i, depth)
+			}
+		}
+		lastNib = nibble + 1
+
+		cell := &hph.grid[row][nibble]
+
+		// Warn about unloaded state
+		if cell.accountAddrLen > 0 && cell.stateHashLen == 0 && !cell.loaded.account() && !cell.Deleted() {
+			log.Warn("account not loaded", "row", row, "nibble", fmt.Sprintf("%x", nibble), "depth", depth, "cell", cell.String())
+		}
+		if cell.storageAddrLen > 0 && cell.stateHashLen == 0 && !cell.loaded.storage() && !cell.Deleted() {
+			log.Warn("storage not loaded", "row", row, "nibble", fmt.Sprintf("%x", nibble), "depth", depth, "cell", cell.String())
+		}
+
+		// Save hash before compute for metrics
+		var hashBefore []byte
+		if dbg.KVReadLevelledMetrics && (cell.accountAddrLen > 0 || cell.storageAddrLen > 0) {
+			hashBefore = make([]byte, cell.stateHashLen)
+			copy(hashBefore, cell.stateHash[:cell.stateHashLen])
+		}
+		loadedBefore := cell.loaded
+
+		cellHash, err := hph.computeCellHash(cell, depth, hph.hashAuxBuffer[:0])
+		if err != nil {
+			return cellData, err
+		}
+		if hph.trace {
+			fmt.Printf("  %x: computeCellHash(%d, %x, depth=%d)=[%x]\n", nibble, row, nibble, depth, cellHash)
+		}
+
+		// Collect metrics on hash recomputation vs skip
+		if dbg.KVReadLevelledMetrics && hashBefore != nil {
+			counters := hph.hadToLoadL[hph.depthsToTxNum[depth]]
+			if !bytes.Equal(hashBefore, cell.stateHash[:cell.stateHashLen]) {
+				if cell.accountAddrLen > 0 {
+					counters.accReset++
+					counters.accLoaded++
+				}
+				if cell.storageAddrLen > 0 {
+					counters.storReset++
+					counters.storLoaded++
+				}
+			} else {
+				if cell.accountAddrLen > 0 && !loadedBefore.account() && !cell.loaded.account() {
+					counters.accSkipped++
+				}
+				if cell.storageAddrLen > 0 && !loadedBefore.storage() && !cell.loaded.storage() {
+					counters.storSkipped++
+				}
+			}
+			hph.hadToLoadL[hph.depthsToTxNum[depth]] = counters
+		}
+
+		if _, err := hph.keccak2.Write(cellHash); err != nil {
+			return cellData, err
+		}
+
+		// Extract encoding data
+		cellData[nibble] = cellEncodeDataFromCell(cell)
+
+		bitset ^= bit
+	}
+	return cellData, nil
 }
 
 // prepareBranchCells iterates afterMap cells, drops stale memoized hashes,
@@ -2201,8 +2217,7 @@ func (hph *HexPatriciaHashed) foldDelete(row int, nibble, upDepth int16, upCell 
 // If evictCache is true, it also evicts the branch from the cache.
 func (hph *HexPatriciaHashed) collectDeleteUpdate(updateKey []byte, row int, evictCache bool) error {
 	if hph.branchBefore[row] {
-		_, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, RetrieveCellNoop)
-		if err != nil {
+		if err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, nil); err != nil {
 			return fmt.Errorf("failed to encode leaf node update: %w", err)
 		}
 		if evictCache && hph.cache != nil {
