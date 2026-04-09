@@ -1649,6 +1649,15 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 		return v, foundStep, true, nil
 	}
 
+	// Deletion entries (len(v)==0) must be returned as found even when the step is older than
+	// files.EndTxNum(). Without this, getLatest falls through to getLatestFromFiles which scans
+	// snapshot files from newest to oldest and returns a stale pre-deletion value from an older
+	// file — because deletions are represented as absent keys in snapshot files (no tombstone).
+	// The DB only keeps the most-recent entry per key, so a deletion here is authoritative.
+	if len(v) == 0 {
+		return nil, foundStep, true, nil
+	}
+
 	return nil, 0, false, err
 }
 
