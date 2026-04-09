@@ -110,7 +110,7 @@ func (ba *BlockAssembler) CumulativeGasUsed() protocol.GasUsed { return ba.gasUs
 func NewBlockAssembler(cfg AssemblerCfg, block *AssembledBlock) *BlockAssembler {
 	var balIO *state.VersionedIO
 
-	if cfg.ChainConfig.IsAmsterdam(block.Header.Time) {
+	if cfg.ChainConfig.IsAmsterdam(block.Header.Time) || cfg.ExperimentalBAL {
 		balIO = &state.VersionedIO{}
 	}
 	return &BlockAssembler{
