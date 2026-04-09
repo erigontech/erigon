@@ -259,6 +259,13 @@ func TestValidateWitnessPreState_MultipleHeaders(t *testing.T) {
 	}
 }
 
+func TestNewWitnessRequiresHeaderReader(t *testing.T) {
+	_, err := NewWitness(&types.Header{Number: *uint256.NewInt(1)}, nil)
+	if err == nil || err.Error() != "header reader is required" {
+		t.Fatalf("expected missing header reader error, got %v", err)
+	}
+}
+
 func TestWitnessDecodeRLPRequiresHeader(t *testing.T) {
 	var witness Witness
 	payload, err := rlp.EncodeToBytes(&extWitness{
