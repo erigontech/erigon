@@ -977,11 +977,11 @@ func TestDomain_DeletedKeyNotResurrectedByFiles(t *testing.T) {
 	require.Greater(domainRoTx.files.EndTxNum(), lastTxNumOfStep(1, d.stepSize),
 		"files must advance past the deletion step for this test to be meaningful")
 
-	// The key was deleted — GetLatest must return nil, not the stale "value1".
+	// The key was deleted — GetLatest must return empty, not the stale "value1".
 	v, _, found, err := domainRoTx.GetLatest(key, tx)
 	require.NoError(err)
 	require.True(found, "deletion entry should be found")
-	require.Nil(v, "deleted key must return nil, got %q", v)
+	require.Empty(v, "deleted key must return empty value, got %q", v)
 }
 
 func TestNewSegStreamReader(t *testing.T) {

@@ -1652,7 +1652,7 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 	// The DB keeps only the most-recent entry per key (inverted-step ordering),
 	// so a deletion here means no newer write exists.
 	if len(v) == 0 {
-		return nil, foundStep, true, nil
+		return v, foundStep, true, nil
 	}
 
 	if lastTxNumOfStep(foundStep, dt.stepSize) >= dt.files.EndTxNum() {
