@@ -2373,6 +2373,11 @@ func (sdb *IntraBlockState) ResetVersionedIO() {
 	sdb.addressAccess = nil
 }
 
+// ResetVersionedReads clears tracked versioned reads without affecting writes.
+func (sdb *IntraBlockState) ResetVersionedReads() {
+	sdb.versionedReads = nil
+}
+
 // VersionedWrites returns the current versioned write set if this block
 // checkDirty - is mainly for testing, for block processing this is called
 // after the block execution is completed and non dirty writes (due to reversions)

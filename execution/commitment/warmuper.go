@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 // TrieContextFactory creates new PatriciaContext instances for parallel warmup.
@@ -194,7 +195,7 @@ func (w *Warmuper) Start() {
 func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDepth int) {
 	depth := startDepth
 	for depth <= len(hashedKey) && depth <= w.maxDepth {
-		prefix := HexNibblesToCompactBytes(hashedKey[:depth])
+		prefix := nibbles.HexToCompact(hashedKey[:depth])
 
 		// Check cache first, then fall back to DB
 		branchData, err := w.branchFromCacheOrDB(trieCtx, prefix)

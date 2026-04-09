@@ -63,6 +63,12 @@ func TestMakeTopics(t *testing.T) {
 			false,
 		},
 		{
+			"support negative *big.Int types in topics",
+			args{[][]any{{big.NewInt(-1)}}},
+			[][]common.Hash{{common.HexToHash("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")}},
+			false,
+		},
+		{
 			"support boolean types in topics",
 			args{[][]any{
 				{true},
