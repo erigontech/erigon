@@ -485,6 +485,7 @@ func TestReuseCollectorAfterLoad(t *testing.T) {
 	}, TransformArgs{})
 	require.NoError(t, err)
 	require.Equal(t, 1, see)
+	c.Close()
 
 	// buffers are not lost
 	require.Empty(t, buf.data)
@@ -500,6 +501,7 @@ func TestReuseCollectorAfterLoad(t *testing.T) {
 	}, TransformArgs{})
 	require.NoError(t, err)
 	require.Equal(t, 0, see)
+	c.Close()
 
 	// reuse
 	see = 0
@@ -509,6 +511,7 @@ func TestReuseCollectorAfterLoad(t *testing.T) {
 	}, TransformArgs{})
 	require.NoError(t, err)
 	require.Equal(t, 0, see)
+	c.Close()
 
 	err = c.Collect([]byte{3}, []byte{4})
 	require.NoError(t, err)
@@ -708,8 +711,8 @@ func TestSortable(t *testing.T) {
 
 	keys, vals := [][]byte{}, [][]byte{}
 	require.NoError(collector.Load(nil, "", func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error {
-		keys = append(keys, bytes.Clone(k))
-		vals = append(vals, bytes.Clone(v))
+		keys = append(keys, k)
+		vals = append(vals, v)
 		return nil
 	}, TransformArgs{}))
 
