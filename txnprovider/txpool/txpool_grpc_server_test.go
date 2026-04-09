@@ -26,8 +26,10 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
@@ -39,6 +41,71 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
+
+type addMockTxPool struct {
+	knownByCall      []bool
+	idHashKnownCalls int
+	addReasons       []txpoolcfg.DiscardReason
+	addLocalSlotsLen int
+}
+
+func (m *addMockTxPool) ValidateSerializedTxn(serializedTxn []byte) error { return nil }
+func (m *addMockTxPool) PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64) (bool, error) {
+	return false, nil
+}
+func (m *addMockTxPool) GetRlp(tx kv.Tx, hash []byte) ([]byte, error) { return nil, nil }
+func (m *addMockTxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error) {
+	m.addLocalSlotsLen = len(newTxns.Txns)
+	return m.addReasons, nil
+}
+func (m *addMockTxPool) deprecatedForEach(f func(rlp []byte, sender common.Address, t SubPoolType), tx kv.Tx) {
+}
+func (m *addMockTxPool) CountContent() (int, int, int) { return 0, 0, 0 }
+func (m *addMockTxPool) IdHashKnown(tx kv.Tx, hash []byte) (bool, error) {
+	i := m.idHashKnownCalls
+	m.idHashKnownCalls++
+	if i < len(m.knownByCall) {
+		return m.knownByCall[i], nil
+	}
+	return false, nil
+}
+func (m *addMockTxPool) NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool)       { return 0, false }
+func (m *addMockTxPool) GetBlobs(blobhashes []common.Hash) (blobBundles []PoolBlobBundle) { return nil }
+
+func TestGrpcServerAddDiscardReasonIndexAlignment(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	chainID := *uint256.NewInt(1)
+
+	mockPool := &addMockTxPool{
+		knownByCall: []bool{true, false}, // first tx treated as already-known, second goes to AddLocalTxns
+		addReasons:  []txpoolcfg.DiscardReason{txpoolcfg.Success},
+	}
+
+	s := NewGrpcServer(ctx, mockPool, memdb.NewTestPoolDB(t), nil, chainID, log.New())
+	validRlp := hexutil.MustDecodeHex(TxnParseMainnetTests[0].PayloadStr)
+
+	reply, err := s.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{validRlp, validRlp}})
+	if err != nil {
+		t.Fatalf("Add returned error: %v", err)
+	}
+
+	if got := mockPool.addLocalSlotsLen; got != 1 {
+		t.Fatalf("expected 1 slot sent to AddLocalTxns, got %d", got)
+	}
+
+	if len(reply.Imported) != 2 || len(reply.Errors) != 2 {
+		t.Fatalf("unexpected reply lengths: imported=%d errors=%d", len(reply.Imported), len(reply.Errors))
+	}
+
+	if reply.Imported[0] != txpoolproto.ImportResult_ALREADY_EXISTS || reply.Errors[0] != txpoolcfg.AlreadyKnown.String() {
+		t.Fatalf("unexpected first tx result: imported=%v error=%q", reply.Imported[0], reply.Errors[0])
+	}
+	if reply.Imported[1] != txpoolproto.ImportResult_SUCCESS || reply.Errors[1] != txpoolcfg.Success.String() {
+		t.Fatalf("unexpected second tx result: imported=%v error=%q", reply.Imported[1], reply.Errors[1])
+	}
+}
 
 // TestQueryAllWithoutPanicUnknown tries to reproduce https://github.com/erigontech/erigon/issues/18076 relying on
 // the TOCTOU between the deprecatedForEach locking window and the conversion of currentSubPool in GrpcServer.All().

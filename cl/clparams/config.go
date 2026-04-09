@@ -714,6 +714,12 @@ func (b *BeaconChainConfig) SyncCommitteePeriod(slot uint64) uint64 {
 	return slot / (b.SlotsPerEpoch * b.EpochsPerSyncCommitteePeriod)
 }
 
+// SyncCommitteeAggregationBitsSize returns the byte length of the aggregation bits
+// in a sync committee Contribution: SyncCommitteeSize / SyncCommitteeSubnetCount / 8.
+func (b *BeaconChainConfig) SyncCommitteeAggregationBitsSize() int {
+	return int(b.SyncCommitteeSize) / int(b.SyncCommitteeSubnetCount) / 8
+}
+
 func (b *BeaconChainConfig) RoundSlotToVotePeriod(slot uint64) uint64 {
 	p := b.SlotsPerEpoch * b.EpochsPerEth1VotingPeriod
 	return slot - (slot % p)
@@ -1026,6 +1032,18 @@ func CustomConfig(configFile string) (BeaconChainConfig, NetworkConfig, error) {
 		return BeaconChainConfig{}, NetworkConfig{}, err
 	}
 
+	// Detect PRESET_BASE to use the correct base config.
+	// The minimal preset has different SSZ vector sizes, committee sizes, etc.
+	var presetProbe struct {
+		PresetBase string `yaml:"PRESET_BASE"`
+	}
+	if err := yaml.Unmarshal(b, &presetProbe); err != nil {
+		return BeaconChainConfig{}, NetworkConfig{}, err
+	}
+	if presetProbe.PresetBase == "minimal" {
+		applyMinimalPreset(beaconCfg)
+	}
+
 	// setup beacon chain config
 	if err := yaml.Unmarshal(b, &beaconCfg); err != nil {
 		return BeaconChainConfig{}, NetworkConfig{}, err
@@ -1037,6 +1055,39 @@ func CustomConfig(configFile string) (BeaconChainConfig, NetworkConfig, error) {
 		return BeaconChainConfig{}, NetworkConfig{}, err
 	}
 	return *beaconCfg, *networkConfig, nil
+}
+
+// applyMinimalPreset overrides the mainnet base config with values from the
+// Ethereum consensus-specs "minimal" preset. Only fields that differ from
+// mainnet are changed. Reference:
+// https://github.com/ethereum/consensus-specs/tree/dev/presets/minimal
+func applyMinimalPreset(cfg *BeaconChainConfig) {
+	cfg.PresetBase = "minimal"
+
+	// Phase0 preset differences
+	cfg.SecondsPerSlot = 6
+	cfg.TargetCommitteeSize = 4
+	cfg.MaxCommitteesPerSlot = 4
+	cfg.ShuffleRoundCount = 10
+	cfg.MinGenesisActiveValidatorCount = 64
+	cfg.Eth1FollowDistance = 16
+	cfg.SlotsPerEpoch = 8
+	cfg.SlotsPerHistoricalRoot = 64
+	cfg.EpochsPerHistoricalVector = 64
+	cfg.EpochsPerSlashingsVector = 64
+	cfg.EpochsPerEth1VotingPeriod = 4
+	cfg.GenesisDelay = 300
+
+	// Altair preset differences
+	cfg.SyncCommitteeSize = 32
+	cfg.EpochsPerSyncCommitteePeriod = 8
+
+	// Capella preset differences
+	cfg.MaxWithdrawalsPerPayload = 4
+	cfg.MaxValidatorsPerWithdrawalsSweep = 16
+
+	// Deneb preset differences
+	cfg.MaxBlobCommittmentsPerBlock = 16
 }
 
 func sepoliaConfig() BeaconChainConfig {

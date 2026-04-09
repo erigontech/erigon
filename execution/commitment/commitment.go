@@ -136,8 +136,6 @@ type PatriciaContext interface {
 	Account(plainKey []byte) (*Update, error)
 	// fetch storage with given plain key
 	Storage(plainKey []byte) (*Update, error)
-	// TxNum returns the current transaction number
-	TxNum() uint64
 }
 
 type TrieVariant string
