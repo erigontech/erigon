@@ -1624,11 +1624,23 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 	}
 	var v, foundInvStep []byte
 
+	// Debug: trace the two problematic USDT slots in block 24809877
+	debugSlots := dt.name == kv.StorageDomain && len(key) == 52 &&
+		bytes.Equal(key[:20], common.FromHex("dac17f958d2ee523a2206206994597c13d831ec7")) &&
+		(bytes.Equal(key[20:], common.FromHex("bc9643b29a0dd9b2604dd7ebfbdede6d5c8ae9a833280c4a428abf6a9a7d5a15")) ||
+			bytes.Equal(key[20:], common.FromHex("1dc617510221c8423c86f4a81e3d514481776d20a89da84730215818cbcc714e")))
+	if debugSlots {
+		fmt.Printf("[storage debug] getLatestFromDb: key=%x LargeValues=%v filesEndTxNum=%d\n", key, dt.d.LargeValues, dt.files.EndTxNum())
+	}
+
 	if dt.d.LargeValues {
 		var fullkey []byte
 		fullkey, v, err = valsC.Seek(key)
 		if err != nil {
 			return nil, 0, false, fmt.Errorf("valsCursor.Seek: %w", err)
+		}
+		if debugSlots {
+			fmt.Printf("[storage debug] getLatestFromDb: Seek result fullkey=%x v=%x len(fullkey)=%d\n", fullkey, v, len(fullkey))
 		}
 		if len(fullkey) == 0 {
 			return nil, 0, false, nil // This key is not in DB
@@ -1659,6 +1671,12 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 	}
 
 	foundStep := kv.Step(^binary.BigEndian.Uint64(foundInvStep))
+
+	if debugSlots {
+		lastTx := lastTxNumOfStep(foundStep, dt.stepSize)
+		fmt.Printf("[storage debug] getLatestFromDb: foundStep=%d lastTxNum=%d filesEndTxNum=%d v=%x len(v)=%d\n",
+			foundStep, lastTx, dt.files.EndTxNum(), v, len(v))
+	}
 
 	if lastTxNumOfStep(foundStep, dt.stepSize) >= dt.files.EndTxNum() {
 		return v, foundStep, true, nil
