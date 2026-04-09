@@ -89,7 +89,7 @@ func NewWitness(context *types.Header, chain HeaderReader) (*Witness, error) {
 	}
 	// When building witnesses, retrieve the parent header, which will *always*
 	// be included to act as a trustless pre-root hash container
-	var headers []*types.Header
+	headers := make([]*types.Header, 0, 1)
 	parent := chain.GetHeader(context.ParentHash, context.Number.Uint64()-1)
 	if parent == nil {
 		return nil, errors.New("failed to retrieve parent header")
