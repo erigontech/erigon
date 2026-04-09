@@ -1641,6 +1641,20 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 		}
 		if debugSlots {
 			fmt.Printf("[storage debug] getLatestFromDb: Seek result fullkey=%x v=%x len(fullkey)=%d\n", fullkey, v, len(fullkey))
+			// Scan all MDBX entries with this key prefix to see every step present
+			scanC, scanErr := roTx.Cursor(dt.d.ValuesTable)
+			if scanErr == nil {
+				defer scanC.Close()
+				sk, sv, _ := scanC.Seek(key)
+				for sk != nil && len(sk) >= len(key) && bytes.Equal(sk[:len(key)], key) {
+					scanStep := kv.Step(^binary.BigEndian.Uint64(sk[len(sk)-8:]))
+					fmt.Printf("[storage debug] getLatestFromDb: MDBX entry step=%d invStep=%x v=%x\n", scanStep, sk[len(sk)-8:], sv)
+					sk, sv, _ = scanC.Next()
+				}
+				if !bytes.Equal(fullkey[:min(len(fullkey), len(key))], key) || len(fullkey) == 0 {
+					fmt.Printf("[storage debug] getLatestFromDb: no MDBX entries found for this key\n")
+				}
+			}
 		}
 		if len(fullkey) == 0 {
 			return nil, 0, false, nil // This key is not in DB
