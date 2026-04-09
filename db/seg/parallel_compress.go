@@ -256,6 +256,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	})
 	dictBuilder.Close()
 	ft := pt.Flatten()
+	pt = patricia.PatriciaTree{} // release heap nodes for GC
 	if lvl < log.LvlTrace {
 		logger.Log(lvl, fmt.Sprintf("[%s] dictionary file parsed", logPrefix), "entries", len(code2pattern))
 	}
