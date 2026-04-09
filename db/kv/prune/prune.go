@@ -185,6 +185,11 @@ type StartPos struct {
 	StartVal []byte
 }
 
+// IsDeletionEntry is a callback that returns true if a (key, dupValue) pair
+// represents a deletion marker that must be preserved during pruning.
+// When non-nil, matching entries are skipped instead of deleted.
+type IsDeletionEntry func(key, dupValue []byte) bool
+
 func TableScanningPrune(
 	ctx context.Context,
 	name, filenameBase string,
@@ -195,6 +200,7 @@ func TableScanningPrune(
 	asserts bool,
 	prevStat *Stat,
 	mode StorageMode,
+	isDeletion IsDeletionEntry,
 ) (stat *Stat, err error) {
 	stat = &Stat{MinTxNum: math.MaxUint64}
 	start := time.Now()
@@ -286,7 +292,7 @@ func TableScanningPrune(
 		}
 	}
 
-	lastVal, err := tableScanningPrune(ctx, stat, filenameBase, txFrom, txTo, txNumGetter, valDelCursor, keysCursor, asserts, throttling, logEvery, logger, prevStat.ValueProgress, prevStat.LastPrunedValue)
+	lastVal, err := tableScanningPrune(ctx, stat, filenameBase, txFrom, txTo, txNumGetter, valDelCursor, keysCursor, asserts, throttling, logEvery, logger, prevStat.ValueProgress, prevStat.LastPrunedValue, isDeletion)
 	if err != nil {
 		return nil, err
 	}
@@ -316,6 +322,7 @@ func tableScanningPrune(
 	logger log.Logger,
 	valueProgress Progress,
 	lastPrunedValue []byte,
+	isDeletion IsDeletionEntry,
 ) (interrupted []byte, err error) {
 	var val, txNumBytes []byte
 	switch valueProgress {
@@ -358,7 +365,7 @@ func tableScanningPrune(
 		stat.MaxTxNum = max(stat.MaxTxNum, txNum)
 
 		// All dups in prune range: bulk delete without repositioning cursor
-		if lastDupTxNum < txTo && txNum >= txFrom {
+		if lastDupTxNum < txTo && txNum >= txFrom && isDeletion == nil {
 			if throttling != nil {
 				time.Sleep(*throttling)
 			}
@@ -390,6 +397,11 @@ func tableScanningPrune(
 				}
 				if txNumDup >= txTo {
 					break
+				}
+				// Preserve deletion entries: they are authoritative markers
+				// that a key was deleted and must survive pruning.
+				if isDeletion != nil && isDeletion(val, txNumBytes) {
+					continue
 				}
 				if throttling != nil {
 					time.Sleep(*throttling)
