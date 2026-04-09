@@ -716,3 +716,83 @@ func TestCallStack(t *testing.T) {
 		})
 	}
 }
+
+type funcHandler func(*Record) error
+
+func (h funcHandler) Log(r *Record) error                   { return h(r) }
+func (h funcHandler) Enabled(_ context.Context, _ Lvl) bool { return true }
+
+type captureHandler struct {
+	mu   sync.Mutex
+	recs []Record
+}
+
+func (h *captureHandler) Log(r *Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.recs = append(h.recs, *r)
+	return nil
+}
+
+func (h *captureHandler) Enabled(_ context.Context, _ Lvl) bool { return true }
+
+func (h *captureHandler) snapshot() []Record {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make([]Record, len(h.recs))
+	copy(out, h.recs)
+	return out
+}
+
+func TestAsyncHandlerDropReportIsRateLimited(t *testing.T) {
+	t.Parallel()
+
+	orig := asyncDropReportInterval
+	asyncDropReportInterval = 20 * time.Millisecond
+	defer func() { asyncDropReportInterval = orig }()
+
+	capture := &captureHandler{}
+	blocked := make(chan struct{})
+	base := funcHandler(func(r *Record) error {
+		if r.Msg == "block" {
+			<-blocked
+		}
+		return capture.Log(r)
+	})
+
+	l := New()
+	l.SetHandler(AsyncHandler(1, base))
+
+	l.Info("block")
+	for range 50 {
+		l.Info("dropped")
+	}
+
+	time.Sleep(asyncDropReportInterval + 10*time.Millisecond)
+	close(blocked)
+	l.Info("resume-1")
+	l.Info("resume-2")
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		recs := capture.snapshot()
+		warns := 0
+		for _, r := range recs {
+			if r.Msg == "log records dropped due to slow writer" {
+				warns++
+				if r.Ctx[1].(int64) <= 0 {
+					t.Fatalf("expected positive drop count, got %v", r.Ctx[1])
+				}
+			}
+		}
+		if warns > 0 {
+			if warns != 1 {
+				t.Fatalf("expected exactly 1 aggregated drop warning, got %d (%v)", warns, recs)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatal("timed out waiting for aggregated drop warning")
+}

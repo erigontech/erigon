@@ -445,14 +445,17 @@ func (h bufferedHandler) Enabled(ctx context.Context, lvl Lvl) bool {
 // any records are dropped under sustained overload.
 const asyncDefaultBufSize = 4096
 
+var asyncDropReportInterval = 5 * time.Second
+
 // AsyncHandler is a non-blocking variant of BufferedHandler.
 //
 // Callers enqueue records into a buffered channel and return immediately;
 // a single drain goroutine processes entries sequentially, so the wrapped
 // handler never faces concurrent calls and needs no mutex of its own.
 // When the channel is full the record is silently dropped and a drop
-// counter is incremented; the drain goroutine emits a Warn-level entry
-// reporting the count after each batch so drops are always visible.
+// counter is incremented. The drain goroutine rate-limits Warn-level
+// summaries of the accumulated drop count while it continues processing
+// queued records.
 //
 // Use AsyncStreamHandler to get a ready-to-use terminal handler with the
 // correct lazy-evaluation order (see below).
@@ -463,8 +466,12 @@ func AsyncHandler(bufSize int, h Handler) Handler {
 	recs := make(chan *Record, bufSize)
 	dropped := new(atomic.Int64)
 	go func() {
+		lastReport := time.Now()
 		for m := range recs {
 			_ = h.Log(m)
+			if time.Since(lastReport) < asyncDropReportInterval {
+				continue
+			}
 			if n := dropped.Swap(0); n > 0 {
 				_ = h.Log(&Record{
 					Time: time.Now(),
@@ -477,6 +484,7 @@ func AsyncHandler(bufSize int, h Handler) Handler {
 						Lvl:  lvlKey,
 					},
 				})
+				lastReport = time.Now()
 			}
 		}
 	}()

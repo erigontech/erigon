@@ -10,10 +10,11 @@ import (
 // Predefined handlers.
 //
 // StdoutHandler and StderrHandler use AsyncStreamHandler so that goroutines
-// writing log records are never blocked by a mutex.  Under high concurrency
+// writing log records are never blocked by a mutex. Under high concurrency
 // (e.g. thousands of Caplin validator goroutines) the synchronous SyncHandler
 // inside the plain StreamHandler caused complete process freezes because every
-// goroutine serialised on the same mutex for every log write.
+// goroutine serialised on the same mutex for every log write. This trades
+// strict shutdown-time durability for non-blocking progress on hot paths.
 var (
 	root          *logger
 	StdoutHandler = AsyncStreamHandler(os.Stdout, TerminalFormatNoColor())
