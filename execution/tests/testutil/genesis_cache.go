@@ -152,8 +152,9 @@ func genesisSpecHash(g *types.Genesis) string {
 	return fmt.Sprintf("%x", h.Sum(nil)[:16])
 }
 
-// evictLRU finds the least-recently-used entry with refs==0, closes it, and
-// removes it from the cache. Returns true if an entry was evicted.
+// evictLRU finds the least-recently-used entry with refs==0, removes it from
+// the cache, and performs expensive cleanup (DB close, dir removal) after
+// releasing the lock. Returns true if an entry was evicted.
 // Caller must hold genesisDBMu.
 func evictLRU() bool {
 	var victimKey string
@@ -170,13 +171,16 @@ func evictLRU() bool {
 	if victimEntry == nil {
 		return false // all entries in use
 	}
-	if victimEntry.db != nil {
-		victimEntry.db.Close()
-	}
-	for _, d := range victimEntry.dirs {
-		dirutil.RemoveAll(d)
-	}
+	// Remove from map under lock, then do expensive IO outside the lock.
 	delete(genesisDBCache, victimKey)
+	go func() {
+		if victimEntry.db != nil {
+			victimEntry.db.Close()
+		}
+		for _, d := range victimEntry.dirs {
+			dirutil.RemoveAll(d)
+		}
+	}()
 	return true
 }
 
@@ -205,8 +209,14 @@ func createGenesisDB(gspec *types.Genesis) (kv.TemporalRwDB, *types.Block, []str
 
 	// Step 1: CommitGenesisBlock writes headers, TDs, config to KV tables.
 	genesisDirs := datadir.New(dir + "-genesis-tmp")
-	_ = os.MkdirAll(genesisDirs.Tmp, 0755)
-	_ = os.MkdirAll(genesisDirs.SnapDomain, 0755)
+	if err := os.MkdirAll(genesisDirs.Tmp, 0755); err != nil {
+		db.Close()
+		return nil, nil, nil, fmt.Errorf("genesis cache: mkdir %s: %w", genesisDirs.Tmp, err)
+	}
+	if err := os.MkdirAll(genesisDirs.SnapDomain, 0755); err != nil {
+		db.Close()
+		return nil, nil, nil, fmt.Errorf("genesis cache: mkdir %s: %w", genesisDirs.SnapDomain, err)
+	}
 	var genesis *types.Block
 	err = func() (gerr error) {
 		defer func() {

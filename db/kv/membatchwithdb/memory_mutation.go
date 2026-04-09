@@ -1006,6 +1006,10 @@ func (m *MemoryMutation) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum 
 	}
 	m.mu.Unlock()
 
+	if m.db == nil {
+		return nil
+	}
+
 	// Scan the underlying DB for keys with this prefix and mark them deleted
 	// in the overlay. This is needed for contract re-creation (CREATE2) where
 	// old storage must be fully cleared.

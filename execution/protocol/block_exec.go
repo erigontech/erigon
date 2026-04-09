@@ -199,8 +199,8 @@ func ExecuteBlockEphemerally(
 	// ReadOnly is never used with requests-bearing blocks.
 	if !vmConfig.StatelessExec && !vmConfig.ReadOnly && header.RequestsHash != nil {
 		computedHash := requests.Hash()
-		if *computedHash != *header.RequestsHash {
-			return nil, fmt.Errorf("invalid requests hash: computed %x, header %x", *computedHash, *header.RequestsHash)
+		if computedHash == nil || *computedHash != *header.RequestsHash {
+			return nil, fmt.Errorf("invalid requests hash: computed %v, header %x", computedHash, *header.RequestsHash)
 		}
 	}
 	blockLogs := ibs.Logs()

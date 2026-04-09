@@ -310,11 +310,12 @@ func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) error {
 		}
 		decoded[cb.Hash()] = cb
 	}
-	for h := common.Hash(bt.json.BestBlock); h != m.Genesis.Hash(); {
+	bestHash := common.Hash(bt.json.BestBlock)
+	for h := bestHash; h != m.Genesis.Hash(); {
 		mainChainBlocks[h] = true
 		cb, ok := decoded[h]
 		if !ok {
-			break
+			return fmt.Errorf("cannot trace main chain from best block %x back to genesis: missing ancestor %x", bestHash, h)
 		}
 		h = cb.ParentHash()
 	}
@@ -331,7 +332,9 @@ func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) error {
 
 		// Expected-invalid blocks: dry-run on a throwaway overlay.
 		if b.BlockHeader == nil {
-			_ = m.DryRunBlock(cb)
+			if err := m.DryRunBlock(cb); err == nil {
+				return fmt.Errorf("block #%v expected to be invalid (%s), but executed successfully", cb.Number(), b.ExpectException)
+			}
 			continue
 		}
 		// Side-chain blocks: record header for uncle verification, skip execution.
