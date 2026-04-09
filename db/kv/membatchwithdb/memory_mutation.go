@@ -702,7 +702,7 @@ func (m *MemoryMutation) Flush(ctx context.Context, tx kv.RwTx) error {
 func (m *MemoryMutation) FlushDomains(target kv.TemporalPutDel) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	for domain := kv.Domain(0); domain < kv.DomainLen; domain++ {
+	for domain := range kv.DomainLen {
 		tbl := m.domainOverlay[domain]
 		if tbl == nil {
 			continue

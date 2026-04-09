@@ -162,9 +162,7 @@ func (emt *ExecModuleTester) executeBlock(cr *LightChainReader, block *types.Blo
 func (emt *ExecModuleTester) insertChainEphemeral(cp *blockgen.ChainPack) error {
 	cr := emt.ephemeralChainReader()
 
-	for i := 0; i < cp.Length(); i++ {
-		block := cp.Blocks[i]
-
+	for _, block := range cp.Blocks {
 		if err := emt.verifyBlock(cr, block); err != nil {
 			return err
 		}

@@ -205,23 +205,23 @@ func createGenesisDB(gspec *types.Genesis) (kv.TemporalRwDB, *types.Block, strin
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("genesis cache: temp dir: %w", err)
 	}
+	dirs := datadir.New(dir)
+	db := temporaltest.NewTestDB(nil, dirs)
+
 	success := false
 	defer func() {
 		if !success {
+			db.Close()
 			dirutil.RemoveAll(dir)
 		}
 	}()
-	dirs := datadir.New(dir)
-	db := temporaltest.NewTestDB(nil, dirs)
 
 	// Step 1: CommitGenesisBlock writes headers, TDs, config to KV tables.
 	genesisDirs := datadir.New(dir + "-genesis-tmp")
 	if err := os.MkdirAll(genesisDirs.Tmp, 0755); err != nil {
-		db.Close()
 		return nil, nil, "", fmt.Errorf("genesis cache: mkdir %s: %w", genesisDirs.Tmp, err)
 	}
 	if err := os.MkdirAll(genesisDirs.SnapDomain, 0755); err != nil {
-		db.Close()
 		return nil, nil, "", fmt.Errorf("genesis cache: mkdir %s: %w", genesisDirs.SnapDomain, err)
 	}
 	var genesis *types.Block
@@ -236,7 +236,6 @@ func createGenesisDB(gspec *types.Genesis) (kv.TemporalRwDB, *types.Block, strin
 	}()
 	dirutil.RemoveAll(genesisDirs.DataDir)
 	if err != nil {
-		db.Close()
 		return nil, nil, "", fmt.Errorf("genesis cache: CommitGenesisBlock: %w", err)
 	}
 
@@ -245,34 +244,28 @@ func createGenesisDB(gspec *types.Genesis) (kv.TemporalRwDB, *types.Block, strin
 	// Step 2: Write domain state via SharedDomains + ComputeGenesisCommitment.
 	rwTx, err := db.BeginTemporalRw(ctx)
 	if err != nil {
-		db.Close()
 		return nil, nil, "", fmt.Errorf("genesis cache: BeginTemporalRw: %w", err)
 	}
 	defer rwTx.Rollback() //nolint:gocritic
 
 	sd, err := execctx.NewSharedDomains(ctx, rwTx, logger)
 	if err != nil {
-		db.Close()
 		return nil, nil, "", fmt.Errorf("genesis cache: NewSharedDomains: %w", err)
 	}
 
 	_, _, err = genesiswrite.ComputeGenesisCommitment(ctx, gspec, rwTx, sd, genesis.Header())
 	if err != nil {
 		sd.Close()
-		db.Close()
 		return nil, nil, "", fmt.Errorf("genesis cache: ComputeGenesisCommitment: %w", err)
 	}
 
 	err = sd.Flush(ctx, rwTx)
 	sd.Close()
 	if err != nil {
-		db.Close()
 		return nil, nil, "", fmt.Errorf("genesis cache: sd.Flush: %w", err)
 	}
 
-	err = rwTx.Commit()
-	if err != nil {
-		db.Close()
+	if err = rwTx.Commit(); err != nil {
 		return nil, nil, "", fmt.Errorf("genesis cache: tx.Commit: %w", err)
 	}
 
@@ -280,7 +273,6 @@ func createGenesisDB(gspec *types.Genesis) (kv.TemporalRwDB, *types.Block, strin
 	// doesn't already include them (test fixtures provide their own bytecode).
 	if gspec.Config.IsPrague(0) && !allocHasSystemContracts(gspec) {
 		if err := blockgen.InitPraguePreDeploys(db, logger); err != nil {
-			db.Close()
 			return nil, nil, "", fmt.Errorf("genesis cache: InitPraguePreDeploys: %w", err)
 		}
 	}

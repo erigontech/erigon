@@ -299,22 +299,27 @@ See https://github.com/ethereum/tests/wiki/Blockchain-Tests-II
 	post state.
 */
 func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) error {
+	// Decode all blocks once. We need the full decoded set for the main-chain
+	// trace and then again for processing; storing them avoids double-decoding.
+	decodedBlocks := make([]*types.Block, len(bt.json.Blocks))
+	byHash := make(map[common.Hash]*types.Block, len(bt.json.Blocks))
+	for i, b := range bt.json.Blocks {
+		cb, err := b.decode()
+		if err != nil {
+			continue // leave decodedBlocks[i] nil
+		}
+		decodedBlocks[i] = cb
+		byHash[cb.Hash()] = cb
+	}
+
 	// Pre-trace the main chain from BestBlock back to genesis.
 	// Tests with uncle/side-chain blocks have interleaved blocks from different
 	// forks; only main-chain blocks should be executed on the overlay.
 	mainChainBlocks := make(map[common.Hash]bool)
-	decoded := make(map[common.Hash]*types.Block)
-	for _, b := range bt.json.Blocks {
-		cb, err := b.decode()
-		if err != nil {
-			continue
-		}
-		decoded[cb.Hash()] = cb
-	}
 	bestHash := common.Hash(bt.json.BestBlock)
 	for h := bestHash; h != m.Genesis.Hash(); {
 		mainChainBlocks[h] = true
-		cb, ok := decoded[h]
+		cb, ok := byHash[h]
 		if !ok {
 			return fmt.Errorf("cannot trace main chain from best block %x back to genesis: missing ancestor %x", bestHash, h)
 		}
@@ -322,12 +327,14 @@ func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) error {
 	}
 
 	// insert the test blocks, which will execute all transactions
-	for _, b := range bt.json.Blocks {
-		cb, err := b.decode()
-		if err != nil {
+	for i, b := range bt.json.Blocks {
+		cb := decodedBlocks[i]
+		if cb == nil {
 			if b.BlockHeader == nil {
 				continue // OK - block is supposed to be invalid, continue with next block
 			}
+			// Re-decode to get the error for the failure message.
+			_, err := b.decode()
 			return fmt.Errorf("block RLP decoding failed when expected to succeed: %w", err)
 		}
 
@@ -350,7 +357,7 @@ func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) error {
 		// RLP decoding, skip execution.
 		if !mainChainBlocks[cb.Hash()] {
 			m.RecordEphemeralBlock(cb)
-			if err = validateHeader(b.BlockHeader, cb.HeaderNoCopy()); err != nil {
+			if err := validateHeader(b.BlockHeader, cb.HeaderNoCopy()); err != nil {
 				return fmt.Errorf("side-chain block header validation failed: %w", err)
 			}
 			continue
@@ -359,6 +366,7 @@ func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) error {
 		var balBytes []byte
 		if len(b.BlockAccessList) > 0 {
 			bal := b.BlockAccessList.toBAL()
+			var err error
 			balBytes, err = types.EncodeBlockAccessListBytes(bal)
 			if err != nil {
 				return fmt.Errorf("block #%v encode block access list: %w", cb.Number(), err)
@@ -371,7 +379,7 @@ func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) error {
 			return fmt.Errorf("block #%v insertion into chain failed: %w", cb.Number(), err)
 		}
 		// validate RLP decoding by checking all values against test file JSON
-		if err = validateHeader(b.BlockHeader, cb.HeaderNoCopy()); err != nil {
+		if err := validateHeader(b.BlockHeader, cb.HeaderNoCopy()); err != nil {
 			return fmt.Errorf("deserialised block header validation failed: %w", err)
 		}
 	}
