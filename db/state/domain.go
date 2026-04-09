@@ -1676,6 +1676,31 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 		if err != nil {
 			return nil, 0, false, fmt.Errorf("valsCursor.SeekExact: %w", err)
 		}
+		if debugSlots {
+			fmt.Printf("[storage debug] getLatestFromDb DupSort: SeekExact returned len(stepWithVal)=%d stepWithVal=%x\n", len(stepWithVal), stepWithVal)
+			// Scan ALL dup values for this key using a DupSort cursor
+			dupC, dupErr := roTx.CursorDupSort(dt.d.ValuesTable)
+			if dupErr == nil {
+				defer dupC.Close()
+				firstDup, firstErr := dupC.SeekBothRange(key, nil)
+				if firstErr != nil {
+					fmt.Printf("[storage debug] getLatestFromDb DupSort: SeekBothRange err=%v\n", firstErr)
+				} else if firstDup == nil {
+					fmt.Printf("[storage debug] getLatestFromDb DupSort: no dup entries found for this key\n")
+				} else {
+					dupStep := kv.Step(^binary.BigEndian.Uint64(firstDup[:8]))
+					fmt.Printf("[storage debug] getLatestFromDb DupSort: dup entry step=%d val=%x (full=%x)\n", dupStep, firstDup[8:], firstDup)
+					for {
+						_, next, nextErr := dupC.NextDup()
+						if nextErr != nil || next == nil {
+							break
+						}
+						nextStep := kv.Step(^binary.BigEndian.Uint64(next[:8]))
+						fmt.Printf("[storage debug] getLatestFromDb DupSort: dup entry step=%d val=%x (full=%x)\n", nextStep, next[8:], next)
+					}
+				}
+			}
+		}
 		if len(stepWithVal) == 0 {
 			return nil, 0, false, nil
 		}
