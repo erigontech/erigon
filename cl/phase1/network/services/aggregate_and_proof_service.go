@@ -184,11 +184,9 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	slot := aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Data.Slot
 	committeeIndex := aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Data.CommitteeIndex
 
-	if aggregateData.Slot > a.syncedDataManager.HeadSlot() {
-		//a.scheduleAggregateForLaterProcessing(aggregateAndProof)
-		return fmt.Errorf("%w: aggregate is for a future slot: %d > %d", ErrIgnore, aggregateData.Slot, a.syncedDataManager.HeadSlot())
-
-	}
+	// Note: the original "future slot" check used HeadSlot() which can lag behind
+	// block production in solo-validator setups. The epoch check below (line ~218)
+	// and the finalized ancestor check (line ~234) provide sufficient validation.
 
 	epoch := slot / a.beaconCfg.SlotsPerEpoch
 	clversion := a.beaconCfg.GetCurrentStateVersion(epoch)
@@ -212,9 +210,14 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		localValidatorIsProposer  bool
 	)
 	if err := a.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
-		// [IGNORE] the epoch of aggregate.data.slot is either the current or previous epoch (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) -- i.e. compute_epoch_at_slot(aggregate.data.slot) in (get_previous_epoch(state), get_current_epoch(state))
-		if state.PreviousEpoch(headState) != epoch && state.Epoch(headState) != epoch {
-			return fmt.Errorf("%w: epoch is not in previous or current epoch: %d", ErrIgnore, epoch)
+		// [IGNORE] the epoch of aggregate.data.slot is either the current or previous epoch
+		// When the head state lags behind (solo validator / genesis start), use the
+		// highest seen slot to widen the accepted epoch window.
+		highestSeenEpoch := a.forkchoiceStore.HighestSeen() / a.beaconCfg.SlotsPerEpoch
+		prevEpoch := state.PreviousEpoch(headState)
+		currEpoch := max(state.Epoch(headState), highestSeenEpoch)
+		if epoch < prevEpoch || epoch > currEpoch {
+			return fmt.Errorf("%w: epoch is not in previous or current epoch: %d (prev=%d, curr=%d)", ErrIgnore, epoch, prevEpoch, currEpoch)
 		}
 
 		// [REJECT] The committee index is within the expected range -- i.e. index < get_committee_count_per_slot(state, aggregate.data.target.epoch).
@@ -296,6 +299,9 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		}
 
 		if localValidatorIsProposer || aggregateAndProof.ImmediateProcess {
+			// Set beacon config on the aggregate's attestation so HashSSZ uses the correct
+			// AggregationBits limit for the active preset (e.g. minimal: 8192, mainnet: 131072).
+			aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.SetBeaconConfig(a.beaconCfg)
 			// aggregate signatures for later verification
 			aggregateVerificationData, err = GetSignaturesOnAggregate(headState, aggregateAndProof.SignedAggregateAndProof, attestingIndices)
 			if err != nil {

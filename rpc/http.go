@@ -238,6 +238,33 @@ func (t *httpServerConn) RemoteAddr() string {
 // SetWriteDeadline does nothing and always returns nil.
 func (t *httpServerConn) SetWriteDeadline(time.Time) error { return nil }
 
+// httpOverloadedKey signals that the inner DB gate (kv.ErrReadTxLimitExceeded) rejected this request.
+// ServeHTTP injects the *bool; runMethod sets it so the correct HTTP 503 status is written before flush.
+type httpOverloadedKey struct{}
+
+func withOverloadedFlag(ctx context.Context) (context.Context, *bool) {
+	flag := new(bool)
+	return context.WithValue(ctx, httpOverloadedKey{}, flag), flag
+}
+
+// SetOverloadedFlag marks the current HTTP request as DB-overloaded.
+func SetOverloadedFlag(ctx context.Context) {
+	if flag, _ := ctx.Value(httpOverloadedKey{}).(*bool); flag != nil {
+		*flag = true
+	}
+}
+
+// overloadedBody is precomputed; id is null because the request has not been parsed yet.
+var overloadedBody = []byte(`{"jsonrpc":"2.0","id":null,"error":{"code":-32005,"message":"` + ErrMsgServerOverloaded + `"}}` + "\n")
+
+// WriteOverloadedResponse writes HTTP 503 + JSON-RPC -32005 for the outer admission gate.
+func WriteOverloadedResponse(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Retry-After", "1")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	_, _ = w.Write(overloadedBody)
+}
+
 // ServeHTTP serves JSON-RPC requests over HTTP.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Permit dumb empty requests for remote health-checks (AWS)
@@ -264,6 +291,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	connInfo.HTTP.UserAgent = r.Header.Get("User-Agent")
 	ctx := r.Context()
 	ctx = context.WithValue(ctx, peerInfoContextKey{}, connInfo)
+	ctx, overloaded := withOverloadedFlag(ctx)
 
 	// All checks passed, create a codec that reads directly from the request body
 	// until EOF, writes the response to w, and orders the server to process a
@@ -295,9 +323,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if errorMsg != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		codec.WriteJSON(ctx, errorMsg)
+		return
 	}
 
 	if !s.disableStreaming {
+		// If the inner DB gate rejected the request, the JSON-RPC error body is already
+		// buffered in the stream. Set 503 before flushing so the status is correct.
+		if *overloaded {
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
 		stream.Flush()
 	}
 }

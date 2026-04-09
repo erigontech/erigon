@@ -284,17 +284,6 @@ func unwindExec3State(ctx context.Context,
 	defer stateChanges.Close()
 	stateChanges.SortAndFlushInBackground(true)
 
-	// Invalidate state cache entries affected by the unwind.
-	// Pass the hash of the last executed block so RevertWithDiffset can detect
-	// if the cache was modified by a rolled-back tx (e.g. ValidatePayload).
-	if stateCache := sd.GetStateCache(); stateCache != nil {
-		unwindToHash, err := rawdb.ReadCanonicalHash(tx, blockUnwindTo)
-		if err != nil {
-			logger.Warn("failed to read canonical hash for cache update", "block", blockUnwindTo, "err", err)
-			unwindToHash = common.Hash{}
-		}
-		stateCache.RevertWithDiffset(changeset, lastExecutedBlockHash, unwindToHash)
-	}
 	if changeset != nil {
 		accountDiffs := changeset[kv.AccountsDomain]
 		for _, entry := range accountDiffs {

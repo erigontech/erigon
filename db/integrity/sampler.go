@@ -70,6 +70,11 @@ func validateSampleRatio(sampleRatio float64) error {
 // ValidateSampleRatio is the exported form for CLI validation.
 func ValidateSampleRatio(sampleRatio float64) error { return validateSampleRatio(sampleRatio) }
 
+// ExpectedN returns the expected number of sampled items from a population of n.
+func (s *Sampler) ExpectedN(n uint64) uint64 {
+	return uint64(math.Round(float64(n) * s.SampleRatio))
+}
+
 // NewSampler creates a Sampler with the given seed and sampleRatio (0.0–1.0].
 // Prefer SamplerCfg.NewSampler when the config is shared across calls.
 func NewSampler(seed int64, sampleRatio float64) *Sampler {
