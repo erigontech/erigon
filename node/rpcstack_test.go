@@ -24,9 +24,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/gorilla/websocket"
@@ -245,6 +247,11 @@ func Test_checkPath(t *testing.T) {
 func createAndStartServer(t *testing.T, conf *httpConfig, ws bool, wsConf *wsConfig) *httpServer {
 	t.Helper()
 
+	// Ensure RpcConcurrencyLimit is always set so admission control wiring is exercised.
+	// A high value avoids interfering with existing tests while still activating the path.
+	if conf.RpcConcurrencyLimit == 0 {
+		conf.RpcConcurrencyLimit = 1000
+	}
 	srv := newHTTPServer(testlog.Logger(t, log.LvlError), rpccfg.DefaultHTTPTimeouts)
 	require.NoError(t, srv.enableRPC(nil, *conf, nil))
 	if ws {
@@ -374,4 +381,64 @@ func TestHTTP2H2C(t *testing.T) {
 	result, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 	assert.Contains(t, string(result), "jsonrpc", "expected JSON-RPC response")
+}
+
+// TestRPCAdmissionHandler verifies that rpcAdmissionHandler correctly limits
+// concurrent requests and returns HTTP 503 when the limit is exceeded.
+func TestRPCAdmissionHandler(t *testing.T) {
+	okHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	t.Run("disabled when limit is zero", func(t *testing.T) {
+		h := newRPCAdmissionHandler(0, okHandler)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", nil))
+		assert.Equal(t, http.StatusOK, rec.Code)
+	})
+
+	t.Run("allows requests under the limit", func(t *testing.T) {
+		h := newRPCAdmissionHandler(5, okHandler)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", nil))
+		assert.Equal(t, http.StatusOK, rec.Code)
+	})
+
+	t.Run("returns 503 when limit is exceeded", func(t *testing.T) {
+		// Use a gate channel to hold inflight requests open long enough to
+		// trigger the limit.
+		gate := make(chan struct{})
+		blockingHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			<-gate
+			w.WriteHeader(http.StatusOK)
+		})
+
+		const limit = 2
+		h := newRPCAdmissionHandler(limit, blockingHandler)
+
+		var wg sync.WaitGroup
+		for i := 0; i < limit; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/", nil))
+			}()
+		}
+
+		// Give goroutines time to enter the handler and increment the counter.
+		// We busy-wait on the inflight counter rather than sleeping.
+		admission := h.(*rpcAdmissionHandler)
+		for admission.inflight.Load() < limit {
+			// spin
+		}
+
+		// Now the limit is reached — next request must be rejected.
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", nil))
+		assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+
+		// Release the held requests.
+		close(gate)
+		wg.Wait()
+	})
 }

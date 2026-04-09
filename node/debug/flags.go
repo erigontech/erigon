@@ -29,7 +29,7 @@ import (
 	"strings"
 
 	"github.com/felixge/fgprof"
-	"github.com/pelletier/go-toml"
+	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
 	"github.com/urfave/cli/v2"
 	"gopkg.in/yaml.v2"

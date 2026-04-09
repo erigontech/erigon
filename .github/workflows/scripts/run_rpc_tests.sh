@@ -71,7 +71,7 @@ fi
 cd "$WORKSPACE/rpc-tests"
 
 # Create and activate Python virtual environment, reusing existing one if already set up for this version
-VENV_MARKER=".venv/.installed-${RPC_VERSION}"
+VENV_MARKER=".venv/.installed-${RPC_VERSION//\//_}"
 if [ -f ".venv/bin/activate" ] && [ -f "$VENV_MARKER" ]; then
   echo "Using cached Python virtual environment"
   source .venv/bin/activate
@@ -110,9 +110,14 @@ fi
 # Run the RPC integration tests
 set +e # Disable exit on error for test run
 
+
+# Move to home dir of rpc-tests
+cd ..
+make rpc_int
+
 retries=0
 while true; do
-   python3 ./run_tests.py --blockchain "$CHAIN" --port 8545 --engine-port 8545 --continue --display-only-fail --json-diff --verbose 1 $OPTIONAL_FLAGS --exclude-api-list "$DISABLED_TESTS" | tee "$LOG_FILE"
+   ./build/bin/rpc_int --blockchain "$CHAIN" --port 8545 --engine-port 8545 --continue --display-only-fail --verbose 1 $OPTIONAL_FLAGS --exclude-api-list "$DISABLED_TESTS" | tee "$LOG_FILE"
    RUN_TESTS_EXIT_CODE=${PIPESTATUS[0]}
 
    if [ "$RUN_TESTS_EXIT_CODE" -eq 0 ]; then

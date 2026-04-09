@@ -415,6 +415,111 @@ func Test_DeleteLatestStateSnaps_NoCrossDomainSubsetRemoval(t *testing.T) {
 	confirmDoesntExist(t, file)
 }
 
+// Test_DeleteStateSnaps_StepRange_OverlappingNonSubsetPreserved verifies that files whose
+// step range overlaps a removed file but is NOT a strict subset are preserved.
+// Uses --step mode to precisely control which range is targeted, avoiding the
+// _maxFrom/_maxTo heuristics of --latest mode.
+func Test_DeleteStateSnaps_StepRange_OverlappingNonSubsetPreserved(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	b := bundle{}
+	dc := statecfg.Schema.ReceiptDomain
+	b.domain, b.history, b.ii = state.SnapSchemaFromDomainCfg(dc, dirs, 1)
+
+	// Create files:
+	// 0-64: base file (outside target range)
+	// 64-192: merged file targeted for removal via --step 64-192
+	// 32-128: overlaps 64-192 but starts before it — NOT a subset
+	// 128-256: overlaps 64-192 but extends beyond it — NOT a subset
+	// 96-160: strict subset of 64-192 — SHOULD be removed
+	// 64-128: strict subset of 64-192 — SHOULD be removed
+	ranges := [][2]int{
+		{0, 64},
+		{64, 192},
+		{32, 128},
+		{128, 256},
+		{96, 160},
+		{64, 128},
+	}
+	for _, r := range ranges {
+		createFiles(t, dirs, r[0], r[1], &b)
+	}
+
+	// Use --step 64-192 to precisely target the merged file
+	err := DeleteStateSnapshots(DeleteStateSnapshotsArgs{Dirs: dirs, StepRange: "64-192", DomainNames: []string{"receipt"}})
+	require.NoError(t, err)
+
+	// 64-192 and its strict subsets 96-160, 64-128 should be gone
+	for _, r := range [][2]int{{64, 192}, {96, 160}, {64, 128}} {
+		file, _ := b.domain.DataFile(version.V1_0, RootNum(r[0]), RootNum(r[1]))
+		confirmDoesntExist(t, file)
+	}
+
+	// Overlapping-but-non-subset files should still exist
+	file, _ := b.domain.DataFile(version.V1_0, RootNum(32), RootNum(128))
+	confirmExist(t, file)
+	file, _ = b.domain.DataFile(version.V1_0, RootNum(128), RootNum(256))
+	confirmExist(t, file)
+
+	// Base file should still exist
+	file, _ = b.domain.DataFile(version.V1_0, RootNum(0), RootNum(64))
+	confirmExist(t, file)
+}
+
+// Test_DeleteLatestStateSnaps_DryRunPreservesSubsetFiles verifies that dry-run mode
+// does not actually delete subset files — they should appear in output but remain on disk.
+func Test_DeleteLatestStateSnaps_DryRunPreservesSubsetFiles(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	b := bundle{}
+	dc := statecfg.Schema.ReceiptDomain
+	b.domain, b.history, b.ii = state.SnapSchemaFromDomainCfg(dc, dirs, 1)
+
+	// Create files:
+	// 0-128: base merged file
+	// 128-256: merged file (latest, will be targeted for removal)
+	// 128-192, 192-224: sub-ranges of 128-256
+	// 256-257: tip file
+	ranges := [][2]int{
+		{0, 128},
+		{128, 256},
+		{128, 192}, {192, 224},
+		{256, 257},
+	}
+	for _, r := range ranges {
+		createFiles(t, dirs, r[0], r[1], &b)
+	}
+
+	// First dry-run call: targets tip 256-257 — should NOT delete anything
+	err := DeleteStateSnapshots(DeleteStateSnapshotsArgs{Dirs: dirs, RemoveLatest: true, DryRun: true, DomainNames: []string{"receipt"}})
+	require.NoError(t, err)
+
+	// ALL files should still exist after dry-run
+	for _, r := range [][2]int{{0, 128}, {128, 256}, {128, 192}, {192, 224}, {256, 257}} {
+		file, _ := b.domain.DataFile(version.V1_0, RootNum(r[0]), RootNum(r[1]))
+		confirmExist(t, file)
+	}
+
+	// Now actually remove the tip so the next call targets 128-256
+	err = DeleteStateSnapshots(DeleteStateSnapshotsArgs{Dirs: dirs, RemoveLatest: true, DomainNames: []string{"receipt"}})
+	require.NoError(t, err)
+
+	file, _ := b.domain.DataFile(version.V1_0, RootNum(256), RootNum(257))
+	confirmDoesntExist(t, file)
+
+	// Dry-run targeting 128-256 and its subsets — should NOT delete anything
+	err = DeleteStateSnapshots(DeleteStateSnapshotsArgs{Dirs: dirs, RemoveLatest: true, DryRun: true, DomainNames: []string{"receipt"}})
+	require.NoError(t, err)
+
+	// 128-256 and all sub-ranges should STILL exist (dry-run)
+	for _, r := range [][2]int{{128, 256}, {128, 192}, {192, 224}} {
+		file, _ := b.domain.DataFile(version.V1_0, RootNum(r[0]), RootNum(r[1]))
+		confirmExist(t, file)
+	}
+
+	// Base file should still exist
+	file, _ = b.domain.DataFile(version.V1_0, RootNum(0), RootNum(128))
+	confirmExist(t, file)
+}
+
 // ── du tests ────────────────────────────────────────────────────────────
 
 func TestDUClassifyFile(t *testing.T) {
