@@ -516,12 +516,6 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 	return filesDeleted, nil
 }
 
-// alignStateToBlockSnapshots detects when state domain files extend past the
-// block file boundary (a preverified snapshot publication issue) and removes
-// the offending files. Without this, SeekCommitment returns a block number
-// past what TxNums covers, causing "behind commitment" errors.
-//
-// Algorithm: compute maxStep from the block file boundary. Remove all state
 // alignStateToBlockSnapshots detects when state domain files imply a
 // commitment block past the current frozen block snapshots (for example due to
 // a preverified snapshot publication mismatch) and removes the highest state
@@ -534,6 +528,18 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 // If ahead, remove the highest state files (all domains), de-register them
 // from the downloader, strip from preverified.toml, reopen, and repeat.
 func alignStateToBlockSnapshots(ctx context.Context, tx kv.RwTx, agg *state.Aggregator, cfg SnapshotsCfg, logPrefix string, logger log.Logger) error {
+	// Only align on fresh start — if chaindata already has execution
+	// progress, the node previously processed past any misalignment.
+	// Re-running alignment on restart would remove snapshot files that
+	// the downloader re-downloaded, cascading until all state is gone.
+	progress, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return nil
+	}
+	if progress > 0 {
+		return nil
+	}
+
 	frozenBlocks := cfg.blockReader.FrozenBlocks()
 	if frozenBlocks == 0 {
 		return nil
@@ -544,6 +550,9 @@ func alignStateToBlockSnapshots(ctx context.Context, tx kv.RwTx, agg *state.Aggr
 
 	for {
 		commitBlock := readCommitmentBlockFromTx(ctx, tx)
+		logger.Debug(fmt.Sprintf("[%s] alignment check", logPrefix),
+			"commitBlock", commitBlock, "frozenBlocks", frozenBlocks, "totalRemoved", totalRemoved)
+
 		if commitBlock == 0 || commitBlock <= frozenBlocks {
 			if totalRemoved > 0 {
 				logger.Info(fmt.Sprintf("[%s] state/block snapshot alignment complete", logPrefix),
@@ -559,6 +568,9 @@ func alignStateToBlockSnapshots(ctx context.Context, tx kv.RwTx, agg *state.Aggr
 				"commitBlock", commitBlock, "frozenBlocks", frozenBlocks)
 			return nil
 		}
+
+		logger.Info(fmt.Sprintf("[%s] state/block misalignment detected, removing step %d", logPrefix, highestStart),
+			"commitBlock", commitBlock, "frozenBlocks", frozenBlocks)
 
 		removedFiles := removeStateFilesFromStep(dirs, highestStart, logger, logPrefix)
 		totalRemoved += removedFiles.count
