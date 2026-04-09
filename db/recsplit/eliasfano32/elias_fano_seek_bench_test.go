@@ -50,7 +50,6 @@ func BenchmarkGet(b *testing.B) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		ef := buildEF(count, tc.stride)
 
 		// precompute random permutation of indices so the access pattern is random
@@ -95,7 +94,6 @@ func BenchmarkSeek(b *testing.B) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		ef := buildEF(count, tc.stride)
 		maxOffset := (count - 1) * tc.stride
 
@@ -129,7 +127,6 @@ func BenchmarkAddOffset(b *testing.B) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		b.Run(tc.name, func(b *testing.B) {
 			b.ReportAllocs()
 			maxOffset := (count - 1) * tc.stride
