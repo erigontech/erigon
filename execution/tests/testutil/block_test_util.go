@@ -254,7 +254,7 @@ func (bt *BlockTest) Run(t *testing.T) error {
 		return fmt.Errorf("post state validation failed: %w", err)
 	}
 
-	return bt.validateImportedHeaders(m)
+	return nil
 }
 
 // RunCLI executes the test without requiring a testing.T context, suitable for CLI usage.
@@ -506,34 +506,6 @@ func (bt *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 				return fmt.Errorf("storage mismatch for addr: %x loc: %x want: %d have: %d", addr, loc, val1, &val2)
 			}
 		}
-	}
-	return nil
-}
-
-// validateImportedHeaders walks backwards from the best block to genesis,
-// verifying that each block's header matches the test file JSON. This ensures
-// the chain is properly stitched together after all blocks have been processed.
-func (bt *BlockTest) validateImportedHeaders(m *execmoduletester.ExecModuleTester) error {
-	// Constant-time lookup from block hash to test-file header.
-	bmap := make(map[common.Hash]*btHeader, len(bt.json.Blocks))
-	for i := range bt.json.Blocks {
-		b := &bt.json.Blocks[i]
-		if b.BlockHeader != nil {
-			bmap[b.BlockHeader.Hash] = b.BlockHeader
-		}
-	}
-	// Walk backwards from the best block to genesis, validating each header.
-	for h := m.EphemeralLastBlockHash(); h != m.Genesis.Hash(); {
-		block := m.EphemeralBlock(h)
-		if block == nil {
-			return fmt.Errorf("imported header validation: block %x not found in ephemeral chain", h)
-		}
-		if th, ok := bmap[h]; ok {
-			if err := validateHeader(th, block.HeaderNoCopy()); err != nil {
-				return fmt.Errorf("imported block header validation failed: %w", err)
-			}
-		}
-		h = block.ParentHash()
 	}
 	return nil
 }

@@ -247,7 +247,3 @@ func (emt *ExecModuleTester) EphemeralLastBlockHash() common.Hash {
 	return emt.ephemeralLastHash
 }
 
-// EphemeralBlock returns a block from the ephemeral in-memory map, or nil.
-func (emt *ExecModuleTester) EphemeralBlock(hash common.Hash) *types.Block {
-	return emt.ephemeralBlocks[hash]
-}
