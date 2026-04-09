@@ -708,8 +708,8 @@ func TestSortable(t *testing.T) {
 
 	keys, vals := [][]byte{}, [][]byte{}
 	require.NoError(collector.Load(nil, "", func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error {
-		keys = append(keys, k)
-		vals = append(vals, v)
+		keys = append(keys, bytes.Clone(k))
+		vals = append(vals, bytes.Clone(v))
 		return nil
 	}, TransformArgs{}))
 
