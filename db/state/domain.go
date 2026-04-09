@@ -1369,6 +1369,18 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 		}
 	}
 
+	// Debug: trace the two problematic USDT slots in block 24809877
+	debugSlots := dt.name == kv.StorageDomain && len(k) == 52 &&
+		bytes.Equal(k[:20], common.FromHex("dac17f958d2ee523a2206206994597c13d831ec7")) &&
+		(bytes.Equal(k[20:], common.FromHex("bc9643b29a0dd9b2604dd7ebfbdede6d5c8ae9a833280c4a428abf6a9a7d5a15")) ||
+			bytes.Equal(k[20:], common.FromHex("1dc617510221c8423c86f4a81e3d514481776d20a89da84730215818cbcc714e")))
+	if debugSlots {
+		fmt.Printf("[storage debug] getLatestFromFiles: key=%x numFiles=%d\n", k, len(dt.files))
+		for i2, f := range dt.files {
+			fmt.Printf("[storage debug]   file[%d]: start=%d end=%d name=%s\n", i2, f.startTxNum, f.endTxNum, f.src.decompressor.FileName())
+		}
+	}
+
 	for i := len(dt.files) - 1; i >= 0; i-- {
 		if maxTxNum != math.MaxUint64 && (dt.files[i].startTxNum > maxTxNum || maxTxNum > dt.files[i].endTxNum) { // (maxTxNum > dt.files[i].endTxNum || dt.files[i].startTxNum > maxTxNum) { // skip partially matched files
 			//fmt.Printf("getLatestFromFiles: skipping file %d %s, maxTxNum=%d, startTxNum=%d, endTxNum=%d\n", i, dt.files[i].src.decompressor.FileName(), maxTxNum, dt.files[i].startTxNum, dt.files[i].endTxNum)
@@ -1397,6 +1409,9 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 		v, found, _, err = dt.getLatestFromFile(i, k, hi, lo)
 		if err != nil {
 			return nil, false, 0, 0, err
+		}
+		if debugSlots {
+			fmt.Printf("[storage debug]   file[%d] %s: found=%v val=%x\n", i, dt.files[i].src.decompressor.FileName(), found, v)
 		}
 		if !found {
 			if traceGetLatest == dt.name {
