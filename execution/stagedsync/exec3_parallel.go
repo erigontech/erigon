@@ -397,7 +397,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 								if balHeader == nil {
 									balHeader = lastHeader
 								}
-								err = ProcessBAL(rwTx, balHeader, applyResult.TxIO, pe.cfg.dirs.DataDir)
+								err = ProcessBAL(rwTx, balHeader, applyResult.TxIO, pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime), pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir)
 								if err != nil {
 									return err
 								}
