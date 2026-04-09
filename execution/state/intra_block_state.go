@@ -1226,7 +1226,7 @@ func (sdb *IntraBlockState) SetCode(addr accounts.Address, code []byte) error {
 	if err != nil {
 		return err
 	}
-	codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
+	codeHash := accounts.InternCodeHash(crypto.HashData(code))
 	written, err := stateObject.SetCode(codeHash, code, !sdb.hasWrite(addr, CodePath, accounts.NilKey))
 	if err != nil {
 		return err
@@ -1460,6 +1460,33 @@ func (sdb *IntraBlockState) stateObjectForAccount(addr accounts.Address, account
 
 func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead bool) (*stateObject, error) {
 	if so, ok := sdb.stateObjects[addr]; ok {
+		if sdb.versionMap != nil {
+			// Refresh cached stateObject fields from the versionMap.
+			// The stateObject caches the full account (record-level) but the
+			// versionMap tracks individual fields (BalancePath, NoncePath, etc.).
+			// A prior TX's re-execution may have updated field-level entries
+			// since this stateObject was loaded.
+			// Use UnknownVersion so any versionMap entry is considered newer
+			// than the cached stateObject.
+			refreshed, _, _, err := sdb.refreshVersionedAccount(addr, &so.data, StorageRead, UnknownVersion)
+			if err != nil {
+				return nil, err
+			}
+			if refreshed != &so.data {
+				so.data = *refreshed
+			}
+			// Check if code changed (e.g. EIP-7702 authorization set/cleared
+			// the delegation prefix). Clear the cached code so the next
+			// Code() call reads fresh from the stateReader.
+			codeHash, _, chVersion, err := versionedRead(sdb, addr, CodeHashPath, accounts.NilKey, false, so.data.CodeHash, nil, nil)
+			if err != nil {
+				return nil, err
+			}
+			if chVersion.TxIndex > UnknownVersion.TxIndex && codeHash != so.data.CodeHash {
+				so.data.CodeHash = codeHash
+				so.code = nil // force re-read
+			}
+		}
 		return so, nil
 	}
 
@@ -1584,7 +1611,7 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 		// optimisation in SetCode to incorrectly delete code writes when
 		// clearing a delegation that was set by a prior transaction in the
 		// same block.
-		codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
+		codeHash := accounts.InternCodeHash(crypto.HashData(code))
 		if codeHash != obj.data.CodeHash {
 			obj.data.CodeHash = codeHash
 			obj.original.CodeHash = codeHash
@@ -2461,7 +2488,7 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 				if err != nil {
 					return err
 				}
-				codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
+				codeHash := accounts.InternCodeHash(crypto.HashData(code))
 				// Force-set code bypassing stateObject.SetCode's equality check.
 				// The finalize IBS uses a VersionedStateReader whose ReadSet may
 				// contain the post-write code value (when the worker read the code

@@ -78,6 +78,7 @@ import (
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/engineapi"
 	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	execp2p "github.com/erigontech/erigon/execution/p2p"
@@ -306,6 +307,16 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if err := checkAndSetCommitmentHistoryFlag(tx, logger, dirs, config); err != nil {
 			return err
 		}
+
+		// Apply config-driven global state for the commitment and trie subsystems.
+		// These globals are read by 80+ call sites; the config fields are the source of truth.
+		if config.KeepExecutionProofs {
+			statecfg.EnableHistoricalCommitment()
+		}
+		if config.ExperimentalConcurrentCommitment {
+			statecfg.ExperimentalConcurrentCommitment = true
+		}
+
 		if err = stages.UpdateMetrics(tx); err != nil {
 			return err
 		}
@@ -736,6 +747,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	execmoduleCache := &execmodule.Cache{}
+	execmoduleCache.SetPublishedSD(backend.notifications.Events.LatestSD)
 	httpRpcCfg := stack.Config().Http
 	httpRpcCfg.StateCache.LocalCache = execmoduleCache
 	ethRpcClient, txPoolRpcClient, miningRpcClient, rpcDaemonStateCache, rpcFilters := rpcdaemoncli.EmbeddedServices(
@@ -749,6 +761,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.miningRPC,
 		backend.stateDiffClient,
 		logger,
+		backend.notifications.Events,
 	)
 	backend.ethRpcClient = ethRpcClient
 	backend.txPoolRpcClient = txPoolRpcClient
@@ -861,6 +874,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		txnProvider,
 		backend.miningSealingQuit,
 		latestBlockBuiltStore,
+		backend.notifications.Events.LatestSD,
 		logger,
 	)
 	backend.pendingBlocks = blkBuilder.PendingBlockCh()
@@ -958,18 +972,23 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	backend.stagedSync = stagedsync.New(config.Sync, backend.syncStages, backend.syncUnwindOrder, backend.syncPruneOrder, logger, stages.ModeApplyingBlocks)
 
-	hook := stageloop.NewHook(backend.sentryCtx, backend.notifications, backend.stagedSync, backend.chainConfig, backend.logger, backend.sentriesClient.SetStatus, statusDataProvider, executionPublisher)
-
 	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, tracer, afterSnapshotDownload)
 	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 
 	validationNotifications := shards.NewNotifications(nil)
 	validationSync := stageloop.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentriesClient,
 		validationNotifications, blockReader, blockWriter, logger)
-	pipelineExecutor := execmodule.NewPipelineExecutor(backend.pipelineStagedSync, backend.chainDB, blockReader, chainConfig, backend.engine, validationSync, validationNotifications, logger)
+	dispatcher := execmodule.NewDispatcher(chainConfig, backend.notifications.Events, backend.notifications.StateChangesConsumer, logger)
+	pipelineExecutor := execmodule.NewPipelineExecutor(backend.pipelineStagedSync, backend.chainDB, blockReader, chainConfig, backend.engine, validationSync, validationNotifications, dispatcher, logger)
+
+	hook := stageloop.NewHook(backend.sentryCtx, backend.notifications, backend.stagedSync, backend.chainConfig, backend.logger, dispatcher, backend.sentriesClient.SetStatus, statusDataProvider, executionPublisher)
 
 	// for polygon, we only need to download snapshots on start so that all driver components are correctly initialised before any block execution begins
 	onlySnapDownloadOnStart := chainConfig.Bor != nil
+	accum := &execmodule.Accumulation{
+		Accumulator:    backend.notifications.Accumulator,
+		RecentReceipts: backend.notifications.RecentReceipts,
+	}
 	backend.execModule = execmodule.NewExecModule(
 		ctx,
 		blockReader,
@@ -979,10 +998,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		chainConfig,
 		blkBuilder.Build,
 		hook,
-		backend.notifications.Accumulator,
-		backend.notifications.RecentReceipts,
+		accum,
 		execmoduleCache,
-		backend.notifications.StateChangesConsumer,
 		logger,
 		backend.engine,
 		config.Sync,
@@ -991,11 +1008,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		onlySnapDownloadOnStart,
 		backend.stopNode,
 	)
-	executionRpc := direct.NewExecutionClientDirect(backend.execModule)
+	backend.execModule.SetPublishedSD(backend.notifications.Events.LatestSD)
 
 	var executionEngine executionclient.ExecutionEngine
 
-	executionEngine, err = executionclient.NewExecutionClientDirect(chainreader.NewChainReaderEth1(chainConfig, executionRpc, config.FcuTimeout), txPoolRpcClient)
+	executionEngine, err = executionclient.NewExecutionClientDirect(chainreader.NewChainReaderEth1(chainConfig, backend.execModule, config.FcuTimeout), txPoolRpcClient)
 	if err != nil {
 		return nil, err
 	}
@@ -1003,11 +1020,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	engineBackendRPC := engineapi.NewEngineServer(
 		logger,
 		chainConfig,
-		executionRpc,
+		backend.execModule,
 		engine_block_downloader.NewEngineBlockDownloader(
 			ctx,
 			logger,
-			executionRpc,
+			backend.execModule,
 			blockReader,
 			backend.chainDB,
 			chainConfig,
@@ -1030,7 +1047,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if config.CaplinConfig.EnableEngineAPI {
 			executionEngine, err = executionclient.NewExecutionClientEngineLocal(
 				engineBackendRPC,
-				chainreader.NewChainReaderEth1(chainConfig, executionRpc, config.FcuTimeout),
+				chainreader.NewChainReaderEth1(chainConfig, backend.execModule, config.FcuTimeout),
 				txPoolRpcClient,
 				nil, // beaconCfg: local mode uses chainRW which returns properly versioned blocks
 			)
@@ -1056,7 +1073,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			sentryMux(sentries),
 			p2pConfig.MaxPeers,
 			statusDataProvider,
-			executionRpc,
+			backend.execModule,
 			config.LoopBlockLimit,
 			polygonBridge,
 			heimdallService,
@@ -1143,7 +1160,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	if chainConfig.Bor == nil || config.PolygonPosSingleSlotFinality {
 		s.bgComponentsEg.Go(func() error {
 			defer s.logger.Debug("[EngineServer] goroutine terminated")
-			err := s.engineBackendRPC.Start(ctx, &httpRpcCfg, s.chainDB, s.blockReader, s.rpcFilters, s.rpcDaemonStateCache, s.engine, s.ethRpcClient, s.miningRpcClient)
+			err := s.engineBackendRPC.Start(ctx, &httpRpcCfg, s.chainDB, s.blockReader, s.rpcFilters, s.rpcDaemonStateCache, s.engine, s.ethRpcClient, s.miningRpcClient, s.notifications.Events)
 			if err != nil && !errors.Is(err, context.Canceled) {
 				s.logger.Error("[EngineServer] background goroutine failed", "err", err)
 			}
@@ -1465,7 +1482,8 @@ func (s *Ethereum) Start() error {
 		})
 	}
 
-	hook := stageloop.NewHook(s.sentryCtx, s.notifications, s.stagedSync, s.chainConfig, s.logger, s.sentriesClient.SetStatus, s.statusDataProvider, s.executionP2PPublisher)
+	stageLoopDispatcher := execmodule.NewDispatcher(s.chainConfig, s.notifications.Events, s.notifications.StateChangesConsumer, s.logger)
+	hook := stageloop.NewHook(s.sentryCtx, s.notifications, s.stagedSync, s.chainConfig, s.logger, stageLoopDispatcher, s.sentriesClient.SetStatus, s.statusDataProvider, s.executionP2PPublisher)
 
 	currentTDProvider := func() *big.Int {
 		currentTD, err := readCurrentTotalDifficulty(s.sentryCtx, s.chainDB, s.blockReader)
@@ -1564,11 +1582,33 @@ func (s *Ethereum) Stop() error {
 	for _, sentryServer := range s.sentryServers {
 		sentryServer.Close()
 	}
-	s.chainDB.Close()
 
+	// Wait for background goroutines to release DB transactions before closing DB.
+	// Background components (txpool, sentry loops, p2p) hold read transactions that
+	// must be rolled back before chainDB.Close() can complete.
 	if err := s.bgComponentsEg.Wait(); err != nil && !errors.Is(err, context.Canceled) {
 		s.logger.Error("background component error", "err", err)
 	}
+
+	// Wait for any in-flight updateForkChoice goroutine to finish. These are
+	// fire-and-forget goroutines that hold DB read transactions; without this
+	// wait, chainDB.Close() can hang in waitTxsAllDoneOnClose.
+	if s.execModule != nil {
+		waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		s.execModule.WaitIdle(waitCtx)
+		waitCancel()
+	}
+
+	// Wait for any in-flight read-ahead warmup goroutines that hold DB read
+	// transactions. The global read-aheader spawns fire-and-forget goroutines
+	// via AddHeaderAndBodyToGlobalReadAheader during ValidateChain.
+	{
+		warmCtx, warmCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		exec.WaitForWarmup(warmCtx)
+		warmCancel()
+	}
+
+	s.chainDB.Close()
 
 	if s.config.Downloader != nil {
 		_ = s.config.Downloader.CloseTorrentLogFile()

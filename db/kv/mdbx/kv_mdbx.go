@@ -589,7 +589,7 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		if !db.roTxsLimiter.TryAcquire(1) {
 			db.trackTxEnd()
 			dbRoTxOverloaded.Inc()
-			return nil, kv.ErrServerOverloaded
+			return nil, kv.ErrReadTxLimitExceeded
 		}
 	} else if semErr := db.roTxsLimiter.Acquire(ctx, 1); semErr != nil {
 		db.trackTxEnd()

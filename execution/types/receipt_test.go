@@ -22,7 +22,6 @@ package types
 import (
 	"bytes"
 	"errors"
-	"math"
 	"reflect"
 	"testing"
 
@@ -159,45 +158,6 @@ func TestTypedReceiptEncodingDecoding(t *testing.T) {
 		}
 		check(bundle)
 	}
-}
-
-func clearComputedFieldsOnReceipts(t *testing.T, receipts Receipts) {
-	t.Helper()
-
-	for _, receipt := range receipts {
-		clearComputedFieldsOnReceipt(t, receipt)
-	}
-}
-
-func clearComputedFieldsOnReceipt(t *testing.T, receipt *Receipt) {
-	t.Helper()
-
-	receipt.TxHash = common.Hash{}
-	receipt.BlockHash = common.Hash{}
-	receipt.BlockNumber = uint256.NewInt(math.MaxUint32)
-	receipt.TransactionIndex = math.MaxUint32
-	receipt.ContractAddress = common.Address{}
-	receipt.GasUsed = 0
-
-	clearComputedFieldsOnLogs(t, receipt.Logs)
-}
-
-func clearComputedFieldsOnLogs(t *testing.T, logs []*Log) {
-	t.Helper()
-
-	for _, log := range logs {
-		clearComputedFieldsOnLog(t, log)
-	}
-}
-
-func clearComputedFieldsOnLog(t *testing.T, log *Log) {
-	t.Helper()
-
-	log.BlockNumber = math.MaxUint32
-	log.BlockHash = common.Hash{}
-	log.TxHash = common.Hash{}
-	log.TxIndex = math.MaxUint32
-	log.Index = math.MaxUint32
 }
 
 func TestReceiptUnmarshalBinary(t *testing.T) {

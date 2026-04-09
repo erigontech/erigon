@@ -160,9 +160,6 @@ Flags for configuring various RPC servers and their behavior.
   * Default: `127.0.0.1:9090`
 * `--private.api.ratelimit value`: Limits the number of simultaneous internal API requests.
   * Default: `31872`
-* `--ipcdisable`: Disables the IPC-RPC server.
-  * Default: `false`
-* `--ipcpath value`: Filename for the IPC socket/pipe within the datadir (explicit paths escape it).
 * `--http`: Enables the JSON-RPC HTTP server.
   * Default: `true`
 * `--http.enabled`: An alternative flag to enable the HTTP server.
@@ -189,12 +186,8 @@ Flags for configuring various RPC servers and their behavior.
   * Default: `eth,erigon,engine`
 * `--ws`: Enables the WS-RPC server.
   * Default: `false`
-* `--ws.addr value`: The WS-RPC server listening interface.
-  * Default: `localhost`
 * `--ws.port value`: The WS-RPC server listening port.
   * Default: `8546`
-* `--ws.api value`: The APIs offered over the WS-RPC interface.
-* `--ws.origins value`: Origins from which to accept WebSocket requests.
 * `--ws.compression`: Enables compression over WebSocket.
   * Default: `true`
 * `--rpc.gethcompat`: Enables Geth-compatible storage iteration order for `debug_storageRangeAt` (sorted by keccak256 hash). Disabled by default for performance.
@@ -205,6 +198,9 @@ Flags for configuring various RPC servers and their behavior.
   * Default: `1m0s`
 * `--rpc.batch.concurrency value`: Limits the number of goroutines for batch requests.
   * Default: `2`
+* `--rpc.max.concurrency value`: Maximum number of concurrent HTTP RPC requests (HTTP admission control).
+  * Default: `0` (inherits value from `--db.read.concurrency`)
+  * Set to `-1` to disable admission control (unlimited)
 * `--rpc.streaming.disable`: Disables JSON streaming for heavy endpoints.
   * Default: `false`
 * `--rpc.accessList value`: Specifies a granular API allowlist.
@@ -321,8 +317,6 @@ Flags related to consensus mechanisms and network forks.
   * Default: `20`
 * `--gpo.percentile value`: The percentile of recent transaction gas prices to use for a suggested gas price.
   * Default: `60`
-* `--gpo.maxprice value`: The maximum gas price recommended by the gas price oracle.
-  * Default: `500000000000` (500 GWei)
 * `--proposer.disable`: Disables the PoS proposer.
   * Default: `false`
 * `--builder.maxblobs value`: Cap the number of blob transactions included in a built block.
@@ -672,6 +666,7 @@ GLOBAL OPTIONS:
    --rpc.batch.concurrency value                                                                                           Does limit amount of goroutines to process 1 batch request. Means 1 bach request can't overload server. 1 batch still can have unlimited amount of request (default: 2)
    --rpc.streaming.disable                                                                                                 Erigon has enabled json streaming for some heavy endpoints (like trace_*). It's a trade-off: greatly reduce amount of RAM (in some cases from 30GB to 30mb), but it produce invalid json format if error happened in the middle of streaming (because json is not streaming-friendly format) (default: false)
    --db.read.concurrency value                                                                                             Does limit amount of parallel db reads. Default: equal to GOMAXPROCS (or number of CPU) (default: 1408)
+   --rpc.max.concurrency value                                                                                             Maximum number of concurrent HTTP RPC requests (HTTP admission control). 0 = use db.read.concurrency, -1 = unlimited (no admission control) (default: 0)
    --rpc.accessList value                                                                                                  Specify granular (method-by-method) API allowlist
    --trace.compat                                                                                                          Bug for bug compatibility with OE for trace_ routines (default: false)
    --rpc.gascap value                                                                                                      Sets a cap on gas that can be used in eth_call/estimateGas (default: 50000000)
@@ -807,7 +802,7 @@ GLOBAL OPTIONS:
    --beacon.api.read.timeout value                                                                                         Sets the seconds for a read time out in the beacon api (default: 5)
    --beacon.api.write.timeout value                                                                                        Sets the seconds for a write time out in the beacon api (default: 31536000)
    --beacon.api.protocol value                                                                                             Protocol for beacon API (default: "tcp")
-   --beacon.api.ide.timeout value                                                                                          Sets the seconds for a write time out in the beacon api (default: 25)
+   --beacon.api.idle.timeout value                                                                                          Sets the seconds for a write time out in the beacon api (default: 25)
    --caplin.blocks-archive                                                                                                 sets whether backfilling is enabled for caplin (default: false)
    --caplin.blobs-archive                                                                                                  sets whether backfilling is enabled for caplin (default: false)
    --caplin.states-archive                                                                                                 enables archival node for historical states in caplin (it will enable block archival as well) (default: false)

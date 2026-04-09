@@ -603,6 +603,47 @@ func TestStateCache_Delete(t *testing.T) {
 	assert.False(t, ok)
 }
 
+// Regression test for https://github.com/erigontech/erigon/issues/20169
+//
+// SharedDomains.GetLatest caches deleted keys via Put(key, nil).
+// Previously, Put treated nil/empty values as Delete (removing the key from
+// cache), and Get treated empty cached values as "not found". This caused
+// subsequent reads to miss the cache and fall through to the DB, returning
+// stale pre-delete values.
+func TestStateCache_PutEmpty_ThenGet_IsCacheHit(t *testing.T) {
+	c := NewStateCache(100, 100, 100, 100, 100)
+
+	key := make([]byte, 52) // addr(20) + slot(32)
+	key[0] = 0x1d
+	key[51] = 0xa2
+
+	// Simulate the SharedDomains pattern: a DomainDel causes GetLatest
+	// to cache the deletion via Put(key, nil).
+	c.Put(kv.StorageDomain, key, nil)
+
+	// Get must return (_, true) — a cache HIT with empty value.
+	// If it returns (_, false), the caller falls through to DB and
+	// reads the stale pre-delete value.
+	v, ok := c.Get(kv.StorageDomain, key)
+	assert.True(t, ok, "Get after Put(nil) must be a cache hit, not a miss")
+	assert.Empty(t, v, "cached value for a deleted key must be empty")
+}
+
+// Same test for []byte{} (zero-length but non-nil).
+func TestStateCache_PutEmptySlice_ThenGet_IsCacheHit(t *testing.T) {
+	c := NewStateCache(100, 100, 100, 100, 100)
+
+	key := make([]byte, 52)
+	key[0] = 0x1d
+	key[51] = 0xa2
+
+	c.Put(kv.StorageDomain, key, []byte{})
+
+	v, ok := c.Get(kv.StorageDomain, key)
+	assert.True(t, ok, "Get after Put([]byte{}) must be a cache hit")
+	assert.Empty(t, v)
+}
+
 func TestStateCache_Delete_UnsupportedDomain(t *testing.T) {
 	c := NewStateCache(100, 100, 100, 100, 100)
 
