@@ -1369,18 +1369,6 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 		}
 	}
 
-	// Debug: trace the two problematic USDT slots in block 24809877
-	debugSlots := dt.name == kv.StorageDomain && len(k) == 52 &&
-		bytes.Equal(k[:20], common.FromHex("dac17f958d2ee523a2206206994597c13d831ec7")) &&
-		(bytes.Equal(k[20:], common.FromHex("bc9643b29a0dd9b2604dd7ebfbdede6d5c8ae9a833280c4a428abf6a9a7d5a15")) ||
-			bytes.Equal(k[20:], common.FromHex("1dc617510221c8423c86f4a81e3d514481776d20a89da84730215818cbcc714e")))
-	if debugSlots {
-		fmt.Printf("[storage debug] getLatestFromFiles: key=%x numFiles=%d\n", k, len(dt.files))
-		for i2, f := range dt.files {
-			fmt.Printf("[storage debug]   file[%d]: start=%d end=%d name=%s\n", i2, f.startTxNum, f.endTxNum, f.src.decompressor.FileName())
-		}
-	}
-
 	for i := len(dt.files) - 1; i >= 0; i-- {
 		if maxTxNum != math.MaxUint64 && (dt.files[i].startTxNum > maxTxNum || maxTxNum > dt.files[i].endTxNum) { // (maxTxNum > dt.files[i].endTxNum || dt.files[i].startTxNum > maxTxNum) { // skip partially matched files
 			//fmt.Printf("getLatestFromFiles: skipping file %d %s, maxTxNum=%d, startTxNum=%d, endTxNum=%d\n", i, dt.files[i].src.decompressor.FileName(), maxTxNum, dt.files[i].startTxNum, dt.files[i].endTxNum)
@@ -1409,9 +1397,6 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 		v, found, _, err = dt.getLatestFromFile(i, k, hi, lo)
 		if err != nil {
 			return nil, false, 0, 0, err
-		}
-		if debugSlots {
-			fmt.Printf("[storage debug]   file[%d] %s: found=%v val=%x\n", i, dt.files[i].src.decompressor.FileName(), found, v)
 		}
 		if !found {
 			if traceGetLatest == dt.name {
@@ -1624,37 +1609,11 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 	}
 	var v, foundInvStep []byte
 
-	// Debug: trace the two problematic USDT slots in block 24809877
-	debugSlots := dt.name == kv.StorageDomain && len(key) == 52 &&
-		bytes.Equal(key[:20], common.FromHex("dac17f958d2ee523a2206206994597c13d831ec7")) &&
-		(bytes.Equal(key[20:], common.FromHex("bc9643b29a0dd9b2604dd7ebfbdede6d5c8ae9a833280c4a428abf6a9a7d5a15")) ||
-			bytes.Equal(key[20:], common.FromHex("1dc617510221c8423c86f4a81e3d514481776d20a89da84730215818cbcc714e")))
-	if debugSlots {
-		fmt.Printf("[storage debug] getLatestFromDb: key=%x LargeValues=%v filesEndTxNum=%d\n", key, dt.d.LargeValues, dt.files.EndTxNum())
-	}
-
 	if dt.d.LargeValues {
 		var fullkey []byte
 		fullkey, v, err = valsC.Seek(key)
 		if err != nil {
 			return nil, 0, false, fmt.Errorf("valsCursor.Seek: %w", err)
-		}
-		if debugSlots {
-			fmt.Printf("[storage debug] getLatestFromDb: Seek result fullkey=%x v=%x len(fullkey)=%d\n", fullkey, v, len(fullkey))
-			// Scan all MDBX entries with this key prefix to see every step present
-			scanC, scanErr := roTx.Cursor(dt.d.ValuesTable)
-			if scanErr == nil {
-				defer scanC.Close()
-				sk, sv, _ := scanC.Seek(key)
-				for sk != nil && len(sk) >= len(key) && bytes.Equal(sk[:len(key)], key) {
-					scanStep := kv.Step(^binary.BigEndian.Uint64(sk[len(sk)-8:]))
-					fmt.Printf("[storage debug] getLatestFromDb: MDBX entry step=%d invStep=%x v=%x\n", scanStep, sk[len(sk)-8:], sv)
-					sk, sv, _ = scanC.Next()
-				}
-				if !bytes.Equal(fullkey[:min(len(fullkey), len(key))], key) || len(fullkey) == 0 {
-					fmt.Printf("[storage debug] getLatestFromDb: no MDBX entries found for this key\n")
-				}
-			}
 		}
 		if len(fullkey) == 0 {
 			return nil, 0, false, nil // This key is not in DB
@@ -1676,31 +1635,6 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 		if err != nil {
 			return nil, 0, false, fmt.Errorf("valsCursor.SeekExact: %w", err)
 		}
-		if debugSlots {
-			fmt.Printf("[storage debug] getLatestFromDb DupSort: SeekExact returned len(stepWithVal)=%d stepWithVal=%x\n", len(stepWithVal), stepWithVal)
-			// Scan ALL dup values for this key using a DupSort cursor
-			dupC, dupErr := roTx.CursorDupSort(dt.d.ValuesTable)
-			if dupErr == nil {
-				defer dupC.Close()
-				firstDup, firstErr := dupC.SeekBothRange(key, nil)
-				if firstErr != nil {
-					fmt.Printf("[storage debug] getLatestFromDb DupSort: SeekBothRange err=%v\n", firstErr)
-				} else if firstDup == nil {
-					fmt.Printf("[storage debug] getLatestFromDb DupSort: no dup entries found for this key\n")
-				} else {
-					dupStep := kv.Step(^binary.BigEndian.Uint64(firstDup[:8]))
-					fmt.Printf("[storage debug] getLatestFromDb DupSort: dup entry step=%d val=%x (full=%x)\n", dupStep, firstDup[8:], firstDup)
-					for {
-						_, next, nextErr := dupC.NextDup()
-						if nextErr != nil || next == nil {
-							break
-						}
-						nextStep := kv.Step(^binary.BigEndian.Uint64(next[:8]))
-						fmt.Printf("[storage debug] getLatestFromDb DupSort: dup entry step=%d val=%x (full=%x)\n", nextStep, next[8:], next)
-					}
-				}
-			}
-		}
 		if len(stepWithVal) == 0 {
 			return nil, 0, false, nil
 		}
@@ -1710,12 +1644,6 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 	}
 
 	foundStep := kv.Step(^binary.BigEndian.Uint64(foundInvStep))
-
-	if debugSlots {
-		lastTx := lastTxNumOfStep(foundStep, dt.stepSize)
-		fmt.Printf("[storage debug] getLatestFromDb: foundStep=%d lastTxNum=%d filesEndTxNum=%d v=%x len(v)=%d\n",
-			foundStep, lastTx, dt.files.EndTxNum(), v, len(v))
-	}
 
 	if lastTxNumOfStep(foundStep, dt.stepSize) >= dt.files.EndTxNum() {
 		return v, foundStep, true, nil

@@ -388,23 +388,6 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
-	if st.evm.Context.BlockNumber == 24809877 {
-		txIdx := st.state.TxIndex()
-		if txIdx == 63 || txIdx == 72 {
-			log.Debug("[intrinsic debug] intrinsic gas breakdown",
-				"block", st.evm.Context.BlockNumber,
-				"txIdx", txIdx,
-				"regularGas", intrinsicGasResult.RegularGas,
-				"stateGas", intrinsicGasResult.StateGas,
-				"floorGas", intrinsicGasResult.FloorGasCost,
-				"accessListLen", len(accessTuples),
-				"storageKeysLen", accessTuples.StorageKeys(),
-				"authsLen", len(auths),
-				"dataLen", len(st.data),
-				"gasLimit", st.msg.Gas(),
-			)
-		}
-	}
 	intrinsicGas, overflow := math.SafeAdd(intrinsicGasResult.RegularGas, intrinsicGasResult.StateGas)
 	if overflow {
 		return nil, ErrGasUintOverflow
@@ -525,24 +508,6 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
-	if st.evm.Context.BlockNumber == 24809877 {
-		txIdx := st.state.TxIndex()
-		if txIdx == 63 || txIdx == 72 {
-			log.Debug("[intrinsic debug] intrinsic gas breakdown",
-				"block", st.evm.Context.BlockNumber,
-				"txIdx", txIdx,
-				"regularGas", intrinsicGasResult.RegularGas,
-				"stateGas", intrinsicGasResult.StateGas,
-				"floorGas", intrinsicGasResult.FloorGasCost,
-				"accessListLen", len(accessTuples),
-				"storageKeysLen", accessTuples.StorageKeys(),
-				"authsLen", len(auths),
-				"dataLen", len(st.data),
-				"gasLimit", st.msg.Gas(),
-			)
-		}
-	}
-
 	// Check clauses 2-6, buy gas if everything is correct
 	if err := st.preCheck(gasBailout, intrinsicGasResult); err != nil {
 		return nil, err
@@ -624,13 +589,6 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 
 	st.evm.ResetGasConsumed()
 
-	if st.evm.Context.BlockNumber == 24809877 {
-		txIdx := st.state.TxIndex()
-		if txIdx == 63 || txIdx == 72 {
-			log.Debug("[gas trace] before evm.Call", "block", st.evm.Context.BlockNumber, "txIdx", txIdx, "gasRemaining", st.gasRemaining.Regular, "to", st.to())
-		}
-	}
-
 	if contractCreation {
 		// The reason why we don't increment nonce here is that we need the original
 		// nonce to calculate the address of the contract that is being created
@@ -639,13 +597,6 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		ret, _, st.gasRemaining, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, bailout)
 	} else {
 		ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
-	}
-
-	if st.evm.Context.BlockNumber == 24809877 {
-		txIdx := st.state.TxIndex()
-		if txIdx == 63 || txIdx == 72 {
-			log.Debug("[gas trace] after evm.Call", "block", st.evm.Context.BlockNumber, "txIdx", txIdx, "gasRemaining", st.gasRemaining.Regular, "vmerr", vmerr, "executionGas", st.initialGas.Regular-st.gasRemaining.Regular-intrinsicGasResult.RegularGas)
-		}
 	}
 
 	if refunds && !gasBailout {
@@ -666,47 +617,11 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			st.txnGasUsedB4Refunds = mdGasUsed.Total() + st.evm.RevertedSpillGas()
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Total())
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
-			if st.evm.Context.BlockNumber == 24809877 {
-				txIdx := st.state.TxIndex()
-				if txIdx == 63 || txIdx == 72 {
-					log.Debug("[gas detail] amsterdam tx gas",
-						"block", st.evm.Context.BlockNumber,
-						"txIdx", txIdx,
-						"imdRegular", imdGas.Regular,
-						"imdState", imdGas.State,
-						"evmRegularConsumed", st.evm.RegularGasConsumed(),
-						"evmStateConsumed", st.evm.StateGasConsumed(),
-						"mdUsedRegular", mdGasUsed.Regular,
-						"mdUsedState", mdGasUsed.State,
-						"mdUsedTotal", mdGasUsed.Total(),
-						"spillGas", st.evm.RevertedSpillGas(),
-						"b4Refunds", st.txnGasUsedB4Refunds,
-						"refundPool", st.state.GetRefund().Total(),
-						"refund", refund,
-						"blockRegular", blockRegular,
-						"blockState", blockState,
-						"blockRegularGasUsed", st.blockRegularGasUsed,
-						"txnGasUsed", st.txnGasUsed,
-						"floor", intrinsicGasResult.FloorGasCost,
-					)
-				}
-			}
 		} else if rules.IsPrague {
 			st.txnGasUsedB4Refunds = mdGasUsed.Regular
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Regular)
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
 			st.blockRegularGasUsed = st.txnGasUsed
-			if st.evm.Context.BlockNumber == 24809877 {
-				log.Debug("[gas debug] prague tx gas",
-					"block", st.evm.Context.BlockNumber,
-					"txIdx", st.state.TxIndex(),
-					"preRefund", st.txnGasUsedB4Refunds,
-					"refund", refund,
-					"stateRefund", st.state.GetRefund().Regular,
-					"postRefund", st.txnGasUsed,
-					"floor", intrinsicGasResult.FloorGasCost,
-				)
-			}
 		} else {
 			st.txnGasUsedB4Refunds = mdGasUsed.Regular
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Regular)
@@ -876,12 +791,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 					stateIgasRefund += stateIgasRefundInc
 				} else {
 					st.state.AddRefund(params.PerEmptyAccountCost - params.PerAuthBaseCost)
-					if st.evm.Context.BlockNumber == 24809877 {
-						log.Debug("[7702 refund debug] authority exists refund", "block", st.evm.Context.BlockNumber, "txIdx", st.state.TxIndex(), "authIdx", i, "authority", authority, "amount", params.PerEmptyAccountCost-params.PerAuthBaseCost, "totalRefund", st.state.GetRefund().Regular)
-					}
 				}
-			} else if st.evm.Context.BlockNumber == 24809877 {
-				log.Debug("[7702 refund debug] authority does NOT exist (no refund)", "block", st.evm.Context.BlockNumber, "txIdx", st.state.TxIndex(), "authIdx", i, "authority", authority)
 			}
 
 			// 7. set authority code
