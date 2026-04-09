@@ -629,7 +629,7 @@ func chainWithDeployedContract(t *testing.T) (*execmoduletester.ExecModuleTester
 		bankFunds       = big.NewInt(1e9)
 		contract        = hexutil.MustDecode(contractHexString)
 		gspec           = &types.Genesis{
-			Config: chain.TestChainConfig,
+			Config: chain.TestChainBerlinConfig,
 			Alloc:  types.GenesisAlloc{bankAddress: {Balance: bankFunds}},
 			//Alloc:  types.GenesisAlloc{bankAddress: {Balance: bankFunds, Storage: map[common.Hash]common.Hash{crypto.Keccak256Hash([]byte{0x1}): crypto.Keccak256Hash([]byte{0xf})}}}, // TODO (antonis19)
 		}

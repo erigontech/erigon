@@ -71,9 +71,13 @@ type Filters struct {
 	pendingTxsStores   *concurrent.SyncMap[PendingTxsSubID, [][]types.Transaction]
 	logger             log.Logger
 
-	// latestSD holds the most recent SharedDomains published via Events.
-	// Used by in-process RPC handlers to read uncommitted block/state data.
+	// latestSD is the local fallback for the most recent SharedDomains.
+	// When events is non-nil (embedded mode), LatestSD() reads directly from
+	// Events.LatestSD() which is updated synchronously in PublishOverlay.
+	// When events is nil (remote mode), latestSD is not populated and
+	// LatestSD() returns nil — remote rpcdaemons do not use the overlay.
 	latestSD atomic.Pointer[execctx.SharedDomains]
+	events   *shards.Events
 
 	config FiltersConfig
 }
@@ -97,26 +101,7 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 		pendingTxsStores:   concurrent.NewSyncMap[PendingTxsSubID, [][]types.Transaction](),
 		logger:             logger,
 		config:             config,
-	}
-
-	// Subscribe to block overlays directly from Events (in-process path).
-	// This bypasses the gRPC indirection used by remote rpcdaemons.
-	if events != nil {
-		overlayCh, unsubOverlay := events.AddOverlaySubscription()
-		go func() {
-			defer unsubOverlay()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case sd, ok := <-overlayCh:
-					if !ok {
-						return
-					}
-					ff.latestSD.Store(sd)
-				}
-			}
-		}()
+		events:             events,
 	}
 
 	go func() {
@@ -896,7 +881,12 @@ func (ff *Filters) ReadPendingTxs(id PendingTxsSubID) ([][]types.Transaction, bo
 // LatestSD returns the most recent SharedDomains published via Events,
 // or nil if none is available (either no background commit in progress
 // or the commit has completed).
+// In embedded mode, reads directly from Events.LatestSD() which is updated
+// synchronously in PublishOverlay — no channel delay.
 func (ff *Filters) LatestSD() *execctx.SharedDomains {
+	if ff.events != nil {
+		return ff.events.LatestSD()
+	}
 	return ff.latestSD.Load()
 }
 
@@ -909,7 +899,7 @@ func (ff *Filters) WithOverlay(tx kv.Tx) kv.Tx {
 	if ff == nil {
 		return tx
 	}
-	sd := ff.latestSD.Load()
+	sd := ff.LatestSD()
 	if sd == nil {
 		return tx
 	}
@@ -925,7 +915,7 @@ func (ff *Filters) WithTemporalOverlay(tx kv.TemporalTx) kv.TemporalTx {
 	if ff == nil {
 		return tx
 	}
-	sd := ff.latestSD.Load()
+	sd := ff.LatestSD()
 	if sd == nil {
 		return tx
 	}

@@ -289,9 +289,7 @@ func (tab *Table) refresh() <-chan struct{} {
 // This is used by the FINDNODE/v4 handler.
 //
 // The preferLive parameter says whether the caller wants liveness-checked results. If
-// preferLive is true and the table contains any verified nodes, the result will not
-// contain unverified nodes. However, if there are no verified nodes at all, the result
-// will contain unverified nodes.
+// preferLive is true, only nodes that have passed a liveness check are included.
 func (tab *Table) findnodeByID(target enode.ID, nresults int, preferLive bool) *nodesByDistance {
 	tab.mutex.Lock()
 	defer tab.mutex.Unlock()
@@ -300,18 +298,13 @@ func (tab *Table) findnodeByID(target enode.ID, nresults int, preferLive bool) *
 	// buckets, so this solution should be fine. The worst-case complexity of this loop
 	// is O(tab.len() * nresults).
 	nodes := &nodesByDistance{target: target}
-	liveNodes := &nodesByDistance{target: target}
 	for _, b := range &tab.buckets {
 		for _, n := range b.entries {
-			nodes.push(n.Node, nresults)
-			if preferLive && n.isValidatedLive {
-				liveNodes.push(n.Node, nresults)
+			if preferLive && !n.isValidatedLive {
+				continue
 			}
+			nodes.push(n.Node, nresults)
 		}
-	}
-
-	if preferLive && len(liveNodes.entries) > 0 {
-		return liveNodes
 	}
 	return nodes
 }

@@ -274,6 +274,15 @@ func WithExperimentalBAL() Option {
 	}
 }
 
+// WithoutExperimentalBAL disables experimental BAL (and the parallel executor
+// it forces) for tests that exercise patterns the parallel executor doesn't
+// yet handle correctly (e.g. intra-block SELFDESTRUCT + CREATE2 reincarnation).
+func WithoutExperimentalBAL() Option {
+	return func(opts *options) {
+		opts.experimentalBAL = false
+	}
+}
+
 func WithGenesisSpec(gspec *types.Genesis) Option {
 	return func(opts *options) {
 		opts.genesis = gspec
@@ -356,7 +365,7 @@ func applyOptions(opts []Option) options {
 		key:             defaultKey,
 		pruneMode:       &defaultPruneMode,
 		blockBufferSize: 128,
-		chainConfig:     chain.TestChainConfig,
+		chainConfig:     chain.TestChainBerlinConfig,
 		experimentalBAL: false,
 	}
 	for _, o := range opts {
@@ -387,7 +396,7 @@ func applyOptions(opts []Option) options {
 }
 
 // New creates an ExecModuleTester. When called with no options, it uses
-// sensible defaults (TestChainConfig, 1 Ether alloc, ethash.NewFaker, etc.).
+// sensible defaults (TestChainBerlinConfig, 1 Ether alloc, ethash.NewFaker, etc.).
 // Use With* options to customise.
 func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	opt := applyOptions(opts)
