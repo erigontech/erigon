@@ -237,7 +237,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}
 
 		// After opening files: check for state/block snapshot misalignment.
-		if err := alignStateToBlockSnapshots(ctx, tx, agg, cfg, s.LogPrefix(), logger); err != nil {
+		if err := alignStateToBlockSnapshots(ctx, agg, cfg, s.LogPrefix(), logger); err != nil {
 			return fmt.Errorf("align state to block snapshots: %w", err)
 		}
 
@@ -527,25 +527,37 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 // already-open aggregator) and compare with cfg.blockReader.FrozenBlocks().
 // If ahead, remove the highest state files (all domains), de-register them
 // from the downloader, strip from preverified.toml, reopen, and repeat.
-func alignStateToBlockSnapshots(ctx context.Context, tx kv.RwTx, agg *state.Aggregator, cfg SnapshotsCfg, logPrefix string, logger log.Logger) error {
+func alignStateToBlockSnapshots(ctx context.Context, agg *state.Aggregator, cfg SnapshotsCfg, logPrefix string, logger log.Logger) error {
 	frozenBlocks := cfg.blockReader.FrozenBlocks()
 	if frozenBlocks == 0 {
 		return nil
 	}
 
-	// Only align on fresh start. If the TxNums index already covers all
-	// frozen blocks, the node previously processed past any misalignment.
+	// Only align on fresh start. If MDBX already has commitment data
+	// (written by execution, not by OtterSync indexing), the node
+	// previously executed past any snapshot misalignment.
 	// Re-running alignment on restart would remove snapshot files that
 	// the downloader re-downloaded, cascading until all state is gone.
-	if maxTxNum, err := rawdbv3.TxNums.Max(ctx, tx, frozenBlocks); err == nil && maxTxNum > 0 {
-		return nil
+	if roTx, err := cfg.db.BeginRo(ctx); err == nil {
+		// Check if the commitment domain values table has any entries.
+		// This table is only populated by execution, not by OtterSync.
+		if cursor, cErr := roTx.Cursor(kv.TblCommitmentVals); cErr == nil {
+			k, _, _ := cursor.First()
+			cursor.Close()
+			roTx.Rollback()
+			if k != nil {
+				return nil // execution has run — skip alignment
+			}
+		} else {
+			roTx.Rollback()
+		}
 	}
 
 	dirs := cfg.dirs
 	totalRemoved := 0
 
 	for {
-		commitBlock := readCommitmentBlockFromTx(ctx, tx)
+		commitBlock := readCommitmentBlockFromDB(ctx, cfg.db)
 		logger.Debug(fmt.Sprintf("[%s] alignment check", logPrefix),
 			"commitBlock", commitBlock, "frozenBlocks", frozenBlocks, "totalRemoved", totalRemoved)
 
@@ -590,15 +602,17 @@ func alignStateToBlockSnapshots(ctx context.Context, tx kv.RwTx, agg *state.Aggr
 	}
 }
 
-// readCommitmentBlockFromTx reads the commitment domain's "state" key using
-// the provided transaction (avoids opening a nested tx).
+// readCommitmentBlockFromDB reads the commitment domain's "state" key via a
+// temporary RO tx. The RwTx from the snapshot stage is not temporal, so we
+// need a separate temporal RO tx to read domain data from snapshot files.
 // The value format: txNum(8 bytes) + blockNum(8 bytes) + trie state.
-func readCommitmentBlockFromTx(ctx context.Context, tx kv.RwTx) uint64 {
-	ttx, ok := tx.(kv.TemporalTx)
-	if !ok {
+func readCommitmentBlockFromDB(ctx context.Context, db kv.TemporalRwDB) uint64 {
+	roTx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
 		return 0
 	}
-	v, _, err := ttx.GetLatest(kv.CommitmentDomain, []byte("state"))
+	defer roTx.Rollback()
+	v, _, err := roTx.GetLatest(kv.CommitmentDomain, []byte("state"))
 	if err != nil || len(v) < 16 {
 		return 0
 	}
