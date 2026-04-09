@@ -889,6 +889,7 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 	m := execmoduletester.New(t,
 		execmoduletester.WithTxPool(),
 		execmoduletester.WithChainConfig(cfg),
+		execmoduletester.WithExperimentalBAL(),
 	)
 	exec := m.ExecModule
 	txpool := m.TxPoolGrpcServer
