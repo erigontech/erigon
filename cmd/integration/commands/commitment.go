@@ -57,6 +57,7 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -230,7 +231,7 @@ Examples:
 func readBranch(stateReader commitmentdb.StateReader, prefix []byte, stepSize uint64, logger interface {
 	Info(msg string, ctx ...any)
 }) error {
-	compactKey := commitment.HexNibblesToCompactBytes(prefix)
+	compactKey := nibbles.HexToCompact(prefix)
 	val, step, err := stateReader.Read(kv.CommitmentDomain, compactKey, stepSize)
 	if err != nil {
 		return fmt.Errorf("failed to get branch for prefix %x: %w", prefix, err)
@@ -677,7 +678,7 @@ func benchHistoryLookup(ctx context.Context, logger log.Logger) error {
 	}
 
 	// Convert hex nibbles to compact bytes for commitment lookup
-	compactKey := commitment.HexNibblesToCompactBytes(prefix)
+	compactKey := nibbles.HexToCompact(prefix)
 
 	seed := benchHistorySeed
 	if seed == 0 {
