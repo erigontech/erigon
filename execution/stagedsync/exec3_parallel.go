@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/receipts"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -722,9 +723,32 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 
 						chainReader := consensuschain.NewReader(pe.cfg.chainConfig, applyTx, pe.cfg.blockReader, pe.logger)
 
+						// For partial blocks, reconstruct prior receipts. See #20452.
+						finalizeReceipts := blockReceipts
+						if blockResult.isPartial && len(txTask.Txs) > 0 {
+							firstTxIndex := blockExecutor.tasks[0].Version().TxIndex
+							if firstTxIndex > 0 {
+								blockStartTxNum := txTask.TxNum - uint64(txTask.TxIndex)
+								priorReader := state.NewHistoryReaderV3(applyTx, blockStartTxNum)
+								priorIbs := state.New(priorReader)
+								defer priorIbs.Release(true)
+								priorGp := protocol.NewGasPool(txTask.Header.GasLimit, pe.cfg.chainConfig.GetMaxBlobGasPerBlock(txTask.Header.Time))
+								getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
+									return pe.cfg.blockReader.Header(ctx, applyTx, hash, number)
+								}
+								priorReceipts, priorErr := receipts.DerivePriorReceipts(ctx, pe.cfg.chainConfig, pe.cfg.engine, txTask.Header, txTask.Txs, firstTxIndex, priorIbs, priorGp, getHeader)
+								if priorErr != nil {
+									pe.logger.Warn("[parallel] failed to reconstruct prior receipts for partial block",
+										"block", blockResult.BlockNum, "startTxIndex", firstTxIndex, "err", priorErr)
+								} else {
+									finalizeReceipts = append(priorReceipts, blockReceipts...)
+								}
+							}
+						}
+
 						_, err =
 							pe.cfg.engine.Finalize(
-								pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles, blockReceipts,
+								pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles, finalizeReceipts,
 								txTask.Withdrawals, chainReader, syscall, false, pe.logger)
 
 						if err != nil {
