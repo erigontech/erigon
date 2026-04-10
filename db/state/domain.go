@@ -1664,8 +1664,9 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 	return nil, 0, false, err
 }
 
-// GetLatest returns value, step in which the value last changed, and bool value which is true if the value
-// is present, and false if it is not present (not set or deleted)
+// GetLatest returns value, step in which the value last changed, and a bool indicating
+// whether an authoritative answer was found. found=true with len(v)==0 means the key
+// was explicitly deleted (tombstone); found=false means no record exists.
 func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, kv.Step, bool, error) {
 	return dt.getLatest(key, roTx, math.MaxInt64, nil, time.Time{})
 }
