@@ -1287,8 +1287,9 @@ func TestScanStaticFilesD(t *testing.T) {
 	}
 	d.scanDirtyFiles(files)
 	require.Equal(t, 6, d.dirtyFiles.Len())
-	d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
-	require.Equal(t, 0, len(d._visible.files))
+	dc := d.beginWithRecalcForTests()
+	require.Equal(t, 0, len(dc.files))
+	dc.Close()
 }
 
 func TestDomain_CollationBuildInMem(t *testing.T) {
