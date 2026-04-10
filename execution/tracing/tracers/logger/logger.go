@@ -88,7 +88,7 @@ type structLogMarshaling struct {
 	GasCost     math.HexOrDecimal64
 	Memory      hexutil.Bytes
 	ReturnData  hexutil.Bytes
-	OpName      string `json:"opName"` // adds call to OpName() in MarshalJSON
+	OpName      string `json:"opName"`          // adds call to OpName() in MarshalJSON
 	ErrorString string `json:"error,omitempty"` // adds call to ErrorString() in MarshalJSON
 }
 

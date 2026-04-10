@@ -41,14 +41,14 @@ type mockOpContext struct {
 	address accounts.Address
 }
 
-func (m *mockOpContext) MemoryData() []byte            { return m.memory }
-func (m *mockOpContext) StackData() []uint256.Int       { return m.stack }
-func (m *mockOpContext) Caller() accounts.Address      { return m.address }
-func (m *mockOpContext) Address() accounts.Address     { return m.address }
-func (m *mockOpContext) CallValue() uint256.Int         { return uint256.Int{} }
-func (m *mockOpContext) CallInput() []byte              { return nil }
-func (m *mockOpContext) Code() []byte                   { return nil }
-func (m *mockOpContext) CodeHash() accounts.CodeHash   { return accounts.CodeHash{} }
+func (m *mockOpContext) MemoryData() []byte          { return m.memory }
+func (m *mockOpContext) StackData() []uint256.Int    { return m.stack }
+func (m *mockOpContext) Caller() accounts.Address    { return m.address }
+func (m *mockOpContext) Address() accounts.Address   { return m.address }
+func (m *mockOpContext) CallValue() uint256.Int      { return uint256.Int{} }
+func (m *mockOpContext) CallInput() []byte           { return nil }
+func (m *mockOpContext) Code() []byte                { return nil }
+func (m *mockOpContext) CodeHash() accounts.CodeHash { return accounts.CodeHash{} }
 
 // mockIBS implements tracing.IntraBlockState for tests.
 type mockIBS struct{}
