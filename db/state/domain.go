@@ -588,12 +588,10 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte, hi, lo uint64) (v
 
 }
 
-// beginWithRecalcForTests opens a DomainRoTx against the current _visible
-// snapshots held on Domain/History/InvertedIndex. It is NOT safe for concurrent
-// use with an Aggregator (which publishes snapshots via a lock-free bundle
-// and expects nothing else to mutate or read the per-entity _visible fields).
-// Tests and standalone debug tools that construct a bare Domain should use
-// this; production code goes through Aggregator.BeginFilesRo.
+// beginWithRecalcForTests reads from the per-entity _visible fields directly.
+// Unsafe to mix with an Aggregator, which publishes snapshots via a lock-free
+// bundle and assumes nothing else touches those fields. Production code goes
+// through Aggregator.BeginFilesRo.
 func (d *Domain) beginWithRecalcForTests() *DomainRoTx {
 	return d.beginFilesRo(d._visible, d.History._visibleFiles, d.History.InvertedIndex._visible)
 }
