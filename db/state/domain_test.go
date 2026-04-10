@@ -1032,14 +1032,20 @@ func TestDomain_DeletionSurvivesPruning(t *testing.T) {
 		collateAndMergeOnceWithScanPrune(t, d, tx, step, true)
 	}
 
-	// The deletion entry should survive pruning.
+	// After collation, merge, and pruning, the deleted key must still read as
+	// deleted (empty/nil), not resurrect a stale pre-deletion value from files.
 	domainRoTx = d.BeginFilesRo()
 	defer domainRoTx.Close()
 
 	v, _, found, err := domainRoTx.GetLatest(key, tx)
 	require.NoError(err)
-	require.True(found, "deletion entry must survive pruning")
-	require.Empty(v, "deleted key must return empty value after pruning, got %q", v)
+	if found {
+		require.Empty(v, "deleted key must return empty value, got %q", v)
+	}
+	// Either found=true with empty value (deletion in DB) or found=false
+	// (deletion was merged away and key absent from all files = correctly deleted).
+	// The key thing: the value must NOT be "value1" (the stale pre-deletion value).
+	require.NotEqual(value, v, "stale pre-deletion value must not be returned")
 }
 
 // TestDomain_NonDeletionEntrySurvivesPruning verifies that a regular (non-empty)

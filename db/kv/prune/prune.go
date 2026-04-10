@@ -364,8 +364,14 @@ func tableScanningPrune(
 		stat.MinTxNum = min(stat.MinTxNum, txNum)
 		stat.MaxTxNum = max(stat.MaxTxNum, txNum)
 
+		// When the newest dup for this key is a deletion marker, skip
+		// the entire key to preserve the deletion evidence. See #20169.
+		if isDeletion != nil && isDeletion(val, lastDupTxNumB) {
+			continue
+		}
+
 		// All dups in prune range: bulk delete without repositioning cursor
-		if lastDupTxNum < txTo && txNum >= txFrom && isDeletion == nil {
+		if lastDupTxNum < txTo && txNum >= txFrom {
 			if throttling != nil {
 				time.Sleep(*throttling)
 			}
@@ -382,7 +388,7 @@ func tableScanningPrune(
 			}
 			stat.PruneCountValues += dups
 		} else {
-			// Selective per-dup deletion: reposition to first dup for iteration
+			// Selective per-dup deletion: reposition to first dup for iteration.
 			_, err = valDelCursor.FirstDup()
 			if err != nil {
 				return nil, fmt.Errorf("FirstDup iterate over %s index keys: %w", filenameBase, err)
@@ -398,11 +404,7 @@ func tableScanningPrune(
 				if txNumDup >= txTo {
 					break
 				}
-				// Preserve deletion entries: they are authoritative markers
-				// that a key was deleted and must survive pruning.
-				if isDeletion != nil && isDeletion(val, txNumBytes) {
-					continue
-				}
+
 				if throttling != nil {
 					time.Sleep(*throttling)
 				}
