@@ -24,6 +24,8 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -124,9 +126,13 @@ func DeriveBlockReceipts(
 	return DeriveForRange(ctx, cfg, engine, header, txns, 0, len(txns), ibs, gp, getHeader)
 }
 
-// DerivePriorReceipts replays transactions 0..startTxIndex-1 and returns their
-// receipts. Used when execution resumes mid-block from a snapshot boundary and
-// Finalize needs the full receipt set for requests hash computation.
+// DerivePriorReceipts returns receipts for transactions 0..startTxIndex-1.
+// It first tries to read them from RCacheV2 (persistent receipt cache). If all
+// prior receipts are cached, no replay is needed. Otherwise falls back to
+// replaying via DeriveForRange.
+//
+// Used when execution resumes mid-block from a snapshot boundary and Finalize
+// needs the full receipt set for requests hash computation.
 func DerivePriorReceipts(
 	ctx context.Context,
 	cfg *chain.Config,
@@ -134,9 +140,41 @@ func DerivePriorReceipts(
 	header *types.Header,
 	txns types.Transactions,
 	startTxIndex int,
+	blockStartTxNum uint64,
+	tx kv.TemporalTx,
 	ibs *state.IntraBlockState,
 	gp *protocol.GasPool,
 	getHeader GetHeaderFunc,
 ) (types.Receipts, error) {
+	if startTxIndex <= 0 {
+		return nil, nil
+	}
+
+	// Try RCacheV2 first — read each prior receipt from the persistent cache.
+	blockHash := header.Hash()
+	blockNum := header.Number.Uint64()
+	cached := make(types.Receipts, 0, startTxIndex)
+	allCached := true
+	for i := 0; i < startTxIndex && i < len(txns); i++ {
+		// txNum for user tx i is blockStartTxNum + 1 (system tx) + i
+		txNum := blockStartTxNum + 1 + uint64(i)
+		receipt, ok, err := rawdb.ReadReceiptCacheV2(tx, rawdb.RCacheV2Query{
+			BlockNum:      blockNum,
+			BlockHash:     blockHash,
+			TxnHash:       txns[i].Hash(),
+			TxNum:         txNum,
+			DontCalcBloom: true,
+		})
+		if err != nil || !ok {
+			allCached = false
+			break
+		}
+		cached = append(cached, receipt)
+	}
+	if allCached && len(cached) == startTxIndex {
+		return cached, nil
+	}
+
+	// Fall back to replay.
 	return DeriveForRange(ctx, cfg, engine, header, txns, 0, startTxIndex, ibs, gp, getHeader)
 }

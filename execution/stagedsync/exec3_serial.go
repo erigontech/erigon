@@ -399,7 +399,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
 						return se.cfg.blockReader.Header(ctx, se.applyTx, hash, number)
 					}
-					priorReceipts, priorErr := receipts.DerivePriorReceipts(ctx, se.cfg.chainConfig, se.cfg.engine, txTask.Header, txTask.Txs, startTxIndex, priorIbs, priorGp, getHeader)
+					priorReceipts, priorErr := receipts.DerivePriorReceipts(ctx, se.cfg.chainConfig, se.cfg.engine, txTask.Header, txTask.Txs, startTxIndex, blockStartTxNum, se.applyTx, priorIbs, priorGp, getHeader)
 					if priorErr != nil {
 						se.logger.Warn(fmt.Sprintf("[%s] failed to reconstruct prior receipts for partial block", se.logPrefix),
 							"block", txTask.BlockNumber(), "startTxIndex", startTxIndex, "err", priorErr)
