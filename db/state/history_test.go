@@ -1950,10 +1950,12 @@ func TestHistory_OpenFolder(t *testing.T) {
 	db, h, txs := filledHistory(t, true, logger)
 	collateAndMergeHistory(t, db, h, txs, true)
 
-	list := h._visibleFiles
+	hc := h.beginWithRecalcForTests()
+	list := hc.files
 	require.NotEmpty(t, list)
 	ff := list[len(list)-1]
 	fn := ff.src.decompressor.FilePath()
+	hc.Close()
 	h.Close()
 
 	err := dir.RemoveFile(fn)

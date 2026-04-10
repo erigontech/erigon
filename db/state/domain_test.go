@@ -1173,20 +1173,23 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 
 	require.NoError(t, err)
 
+	histRoTx := dom.History.beginWithRecalcForTests()
+	histVisible := histRoTx.files
 	run1Doms, run1Hist := make([]string, 0), make([]string, 0)
 	for i := 0; i < len(dom._visible.files); i++ {
 		run1Doms = append(run1Doms, dom._visible.files[i].src.decompressor.FileName())
 		// should be equal length
-		run1Hist = append(run1Hist, dom.History._visibleFiles[i].src.decompressor.FileName())
+		run1Hist = append(run1Hist, histVisible[i].src.decompressor.FileName())
 	}
 
 	removedHist := make(map[string]struct{})
-	for i := len(dom.History._visibleFiles) - 1; i > 3; i-- {
-		removedHist[dom.History._visibleFiles[i].src.decompressor.FileName()] = struct{}{}
-		t.Logf("rm hist: %s\n", dom.History._visibleFiles[i].src.decompressor.FileName())
+	for i := len(histVisible) - 1; i > 3; i-- {
+		removedHist[histVisible[i].src.decompressor.FileName()] = struct{}{}
+		t.Logf("rm hist: %s\n", histVisible[i].src.decompressor.FileName())
 
-		dom.History._visibleFiles[i].src.closeFilesAndRemove()
+		histVisible[i].src.closeFilesAndRemove()
 	}
+	histRoTx.Close()
 	dom.Close()
 
 	scanDirsRes, err := scanDirs(dom.dirs)
@@ -1196,14 +1199,17 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 
 	require.NoError(t, err)
 
+	histRoTx = dom.History.beginWithRecalcForTests()
+	defer histRoTx.Close()
+	histVisible = histRoTx.files
 	// domain files for same range should not be available so lengths should match
 	require.Len(t, dom._visible.files, len(run1Doms)-len(removedHist))
-	require.Len(t, dom.History._visibleFiles, len(dom._visible.files))
-	require.Len(t, dom.History._visibleFiles, len(run1Hist)-len(removedHist))
+	require.Len(t, histVisible, len(dom._visible.files))
+	require.Len(t, histVisible, len(run1Hist)-len(removedHist))
 
 	for i := 0; i < len(dom._visible.files); i++ {
 		require.Equalf(t, run1Doms[i], dom._visible.files[i].src.decompressor.FileName(), "kv i=%d", i)
-		require.Equalf(t, run1Hist[i], dom.History._visibleFiles[i].src.decompressor.FileName(), " v i=%d", i)
+		require.Equalf(t, run1Hist[i], histVisible[i].src.decompressor.FileName(), " v i=%d", i)
 	}
 
 	danglingDomains := make(map[string]bool, len(removedHist))
