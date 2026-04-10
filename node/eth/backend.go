@@ -1441,6 +1441,17 @@ func (s *Ethereum) Start() error {
 	s.sentriesClient.StartStreamLoops(s.sentryCtx)
 	time.Sleep(10 * time.Millisecond) // just to reduce logs order confusion
 
+	// Subscribe to new-header events so StatusDataProvider can invalidate
+	// its cache when the chain head advances — zero DB reads on the hot path.
+	headersCh, unsubHeaders := s.notifications.Events.AddHeaderSubscription()
+	snapshotsCh, unsubSnapshots := s.notifications.Events.AddNewSnapshotSubscription()
+	s.bgComponentsEg.Go(func() error {
+		defer unsubHeaders()
+		defer unsubSnapshots()
+		s.statusDataProvider.Run(s.sentryCtx, headersCh, snapshotsCh)
+		return nil
+	})
+
 	if s.executionP2PMessageListener != nil && s.executionP2PPeerTracker != nil && s.executionP2PPublisher != nil {
 		s.bgComponentsEg.Go(func() error {
 			defer s.logger.Info("[p2p] MessageListener goroutine terminated")

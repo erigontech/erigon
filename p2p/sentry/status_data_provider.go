@@ -21,8 +21,8 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/holiman/uint256"
 
@@ -38,8 +38,6 @@ import (
 	"github.com/erigontech/erigon/p2p/forkid"
 )
 
-const statusDataCacheTTL = 2 * time.Second
-
 var (
 	ErrNoHead      = errors.New("ReadChainHead: ReadCurrentHeader error")
 	ErrNoSnapshots = errors.New("ReadChainHeadFromSnapshots: no snapshot data available")
@@ -51,14 +49,6 @@ type ChainHead struct {
 	HeadHash      common.Hash
 	MinimumHeight uint64
 	HeadTd        *uint256.Int
-}
-
-// cachedChainHead holds a cached ChainHead with its fetch time.
-// We cache ChainHead (not the protobuf) so that makeStatusData builds a fresh
-// *sentryproto.StatusData per call, avoiding shared-mutable-protobuf issues.
-type cachedChainHead struct {
-	head      ChainHead
-	fetchedAt time.Time
 }
 
 type StatusDataProvider struct {
@@ -73,12 +63,14 @@ type StatusDataProvider struct {
 
 	logger log.Logger
 
-	// Cache: double-checked locking to coalesce concurrent DB reads.
-	// refreshSem is a capacity-1 channel used as a context-aware mutex:
-	// sending acquires; receiving releases. This lets waiters honour ctx
-	// cancellation instead of blocking unconditionally on sync.Mutex.
-	cache      atomic.Pointer[cachedChainHead]
-	refreshSem chan struct{}
+	// cache holds the latest ChainHead, invalidated by new-header
+	// notifications from the execution pipeline (via Run).
+	// Protected by cacheMu for concurrent fetch coalescing.
+	// cacheVer is bumped on each invalidation so that a fetch in
+	// progress doesn't store stale data after a concurrent invalidation.
+	cache    atomic.Pointer[ChainHead]
+	cacheMu  sync.Mutex
+	cacheVer atomic.Uint64
 }
 
 func NewStatusDataProvider(
@@ -96,7 +88,6 @@ func NewStatusDataProvider(
 		genesisHash: genesis.Hash(),
 		genesisHead: makeGenesisChainHead(genesis),
 		logger:      logger,
-		refreshSem:  make(chan struct{}, 1),
 	}
 
 	s.heightForks, s.timeForks = forkid.GatherForks(chainConfig, genesis.Time())
@@ -144,48 +135,56 @@ func (s *StatusDataProvider) makeStatusData(head ChainHead) *sentryproto.StatusD
 	}
 }
 
+// Run listens for new-header notifications and invalidates the cached
+// ChainHead so the next GetStatusData call fetches fresh data from the DB.
+// Blocks until ctx is cancelled.
+func (s *StatusDataProvider) Run(ctx context.Context, headersCh <-chan [][]byte, snapshotsCh <-chan struct{}) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-headersCh:
+			s.cacheVer.Add(1)
+			s.cache.Store(nil)
+		case <-snapshotsCh:
+			s.cacheVer.Add(1)
+			s.cache.Store(nil)
+		}
+	}
+}
+
 // GetStatusData returns the current StatusData.
 //
-// The ChainHead is cached for statusDataCacheTTL (2s). A fresh
-// *sentryproto.StatusData is built per call so callers may safely mutate
-// the returned protobuf without corrupting a shared object.
-//
-// Concurrent callers share a single DB read via double-checked locking:
-// the first goroutine to find an expired cache acquires refreshSem and
-// refreshes; others wait in a ctx-aware select and reuse the refreshed
-// value. Callers whose context is cancelled while waiting get ctx.Err()
-// instead of blocking indefinitely.
-//
-// The two former db.View() calls (MinimumBlockAvailable + ReadChainHead)
-// are merged into a single read transaction to halve MDBX reader pressure.
+// The ChainHead is cached and invalidated by new-header notifications from
+// the execution pipeline (via Run). Concurrent callers share a single DB
+// fetch through cacheMu. This eliminates repeated MDBX read transactions
+// that previously blocked GC page reclamation.
 //
 // Falls back to snapshot data when the DB head is unavailable.
 func (s *StatusDataProvider) GetStatusData(ctx context.Context) (*sentryproto.StatusData, error) {
-	// Fast path: serve from cache if fresh (lock-free).
-	if c := s.cache.Load(); c != nil && time.Since(c.fetchedAt) < statusDataCacheTTL {
-		return s.makeStatusData(c.head), nil
+	if head := s.cache.Load(); head != nil {
+		return s.makeStatusData(*head), nil
 	}
 
-	// Slow path: acquire refresh semaphore, respecting ctx cancellation.
-	select {
-	case s.refreshSem <- struct{}{}:
-		// We are the refresher.
-		defer func() { <-s.refreshSem }()
-	case <-ctx.Done():
-		return nil, ctx.Err()
+	// Cache miss — fetch from DB, coalescing concurrent callers.
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+
+	// Double-check after acquiring lock.
+	if head := s.cache.Load(); head != nil {
+		return s.makeStatusData(*head), nil
 	}
 
-	// Double-check: another goroutine may have refreshed while we waited.
-	if c := s.cache.Load(); c != nil && time.Since(c.fetchedAt) < statusDataCacheTTL {
-		return s.makeStatusData(c.head), nil
-	}
-
+	ver := s.cacheVer.Load()
 	head, err := s.fetchChainHead(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	s.cache.Store(&cachedChainHead{head: head, fetchedAt: time.Now()})
+	// Only store if no invalidation happened during the fetch.
+	if s.cacheVer.Load() == ver {
+		s.cache.Store(&head)
+	}
 	return s.makeStatusData(head), nil
 }
 

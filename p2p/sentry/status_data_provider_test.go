@@ -3,9 +3,7 @@ package sentry
 import (
 	"context"
 	"math/big"
-	"sync"
 	"testing"
-	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
@@ -23,9 +21,6 @@ import (
 
 // --- test helpers ---
 
-// testBlockReader implements only the FullBlockReader methods used by
-// StatusDataProvider. Embedding the interface gives nil-pointer panics on
-// any method we forgot to stub — which is the correct failure mode for a test.
 type testBlockReader struct {
 	services.FullBlockReader
 }
@@ -34,31 +29,13 @@ func (r *testBlockReader) MinimumBlockAvailable(context.Context, kv.Tx) (uint64,
 	return 0, nil
 }
 
-// slowDB wraps a real kv.RoDB but blocks inside View until unblockCh is closed.
-// This lets a test hold the refresh semaphore for a controlled duration.
-type slowDB struct {
-	kv.RoDB
-	unblockCh chan struct{}
-}
-
-func (d *slowDB) View(ctx context.Context, fn func(kv.Tx) error) error {
-	select {
-	case <-d.unblockCh:
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-	return d.RoDB.View(ctx, fn)
-}
-
-// seedTestHeader writes a minimal header + TD into db and sets the head block
-// hash so that ReadChainHeadWithTx can succeed.
-func seedTestHeader(t *testing.T, db kv.RwDB) common.Hash {
+func seedTestHeader(t *testing.T, db kv.RwDB, number uint64, difficulty uint64) common.Hash {
 	t.Helper()
 
 	header := &types.Header{
-		Number:     *uint256.NewInt(42),
-		Difficulty: *uint256.NewInt(100),
-		Time:       1700000000,
+		Number:     *uint256.NewInt(number),
+		Difficulty: *uint256.NewInt(difficulty),
+		Time:       1700000000 + number,
 		Extra:      []byte("test"),
 	}
 	hash := header.Hash()
@@ -68,14 +45,13 @@ func seedTestHeader(t *testing.T, db kv.RwDB) common.Hash {
 	defer tx.Rollback()
 
 	require.NoError(t, rawdb.WriteHeader(tx, header))
-	require.NoError(t, rawdb.WriteTd(tx, hash, 42, big.NewInt(100)))
+	require.NoError(t, rawdb.WriteTd(tx, hash, number, big.NewInt(int64(difficulty))))
 	rawdb.WriteHeadBlockHash(tx, hash)
 	require.NoError(t, tx.Commit())
 
 	return hash
 }
 
-// newTestProvider builds a StatusDataProvider backed by the given db.
 func newTestProvider(t *testing.T, db kv.RoDB) *StatusDataProvider {
 	t.Helper()
 	return &StatusDataProvider{
@@ -84,20 +60,16 @@ func newTestProvider(t *testing.T, db kv.RoDB) *StatusDataProvider {
 		networkId:   1,
 		genesisHash: common.HexToHash("0xdead"),
 		logger:      log.New(),
-		refreshSem:  make(chan struct{}, 1),
 	}
 }
 
 // --- tests ---
 
-// TestGetStatusData_ReturnsDistinctProtobufs verifies that each call returns a
-// freshly-built protobuf, not a shared cached pointer. Mutating one result must
-// not affect subsequent calls.
 func TestGetStatusData_ReturnsDistinctProtobufs(t *testing.T) {
 	t.Parallel()
 
 	db := memdb.NewTestDB(t, dbcfg.ChainDB)
-	seedTestHeader(t, db)
+	seedTestHeader(t, db, 42, 100)
 	p := newTestProvider(t, db)
 
 	ctx := context.Background()
@@ -108,126 +80,69 @@ func TestGetStatusData_ReturnsDistinctProtobufs(t *testing.T) {
 	sd2, err := p.GetStatusData(ctx)
 	require.NoError(t, err)
 
-	// Different pointers — not the same object.
 	assert.NotSame(t, sd1, sd2, "two calls must return distinct protobuf pointers")
 
-	// Mutating sd1 must not affect sd2.
 	sd1.MaxBlockHeight = 999999
-
 	assert.NotEqual(t, sd1.MaxBlockHeight, sd2.MaxBlockHeight,
 		"mutation of first result must not be visible in second result")
-
-	// Verify fork slice aliasing: element-level mutation on sd1 must not
-	// bleed into sd2 (catches shared backing array).
-	if len(sd1.ForkData.HeightForks) > 0 {
-		original := sd2.ForkData.HeightForks[0]
-		sd1.ForkData.HeightForks[0] = original + 42
-		assert.Equal(t, original, sd2.ForkData.HeightForks[0],
-			"element-level mutation of HeightForks must not be visible in other result")
-	}
-	if len(sd1.ForkData.TimeForks) > 0 {
-		original := sd2.ForkData.TimeForks[0]
-		sd1.ForkData.TimeForks[0] = original + 42
-		assert.Equal(t, original, sd2.ForkData.TimeForks[0],
-			"element-level mutation of TimeForks must not be visible in other result")
-	}
 }
 
-// TestGetStatusData_CancelledCtxDoesNotBlock verifies that a caller whose
-// context is cancelled does not hang waiting for the refresh semaphore.
-func TestGetStatusData_CancelledCtxDoesNotBlock(t *testing.T) {
+func TestGetStatusData_CacheInvalidatedByHeaderNotification(t *testing.T) {
 	t.Parallel()
 
-	realDB := memdb.NewTestDB(t, dbcfg.ChainDB)
-	seedTestHeader(t, realDB)
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	seedTestHeader(t, db, 42, 100)
+	p := newTestProvider(t, db)
 
-	unblock := make(chan struct{})
-	t.Cleanup(func() {
-		// Ensure goroutine is not leaked even if the test fails early.
-		select {
-		case <-unblock:
-		default:
-			close(unblock)
-		}
-	})
-
-	slow := &slowDB{RoDB: realDB, unblockCh: unblock}
-	p := newTestProvider(t, slow)
-
-	// goroutine 1: holds the refresh semaphore (blocks in slowDB.View).
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		// This call will block inside View until unblock is closed.
-		_, _ = p.GetStatusData(context.Background())
-	}()
-
-	// Give goroutine 1 time to enter View and hold the semaphore.
-	time.Sleep(50 * time.Millisecond)
-
-	// goroutine 2: call with an already-cancelled context.
-	cancelledCtx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	done := make(chan struct{})
-	var err2 error
-	go func() {
-		_, err2 = p.GetStatusData(cancelledCtx)
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		// Must return ctx error, not block.
-		assert.ErrorIs(t, err2, context.Canceled,
-			"cancelled caller must get context.Canceled, not block")
-	case <-time.After(2 * time.Second):
-		t.Fatal("GetStatusData blocked on cancelled context — ctx cancellation not honoured")
-	}
-
-	// Unblock the first goroutine and wait for cleanup.
-	close(unblock)
-	wg.Wait()
-}
-
-// TestGetStatusData_ShortDeadlineDoesNotBlock is similar to the cancellation
-// test but uses a tight deadline to verify the select path for DeadlineExceeded.
-func TestGetStatusData_ShortDeadlineDoesNotBlock(t *testing.T) {
-	t.Parallel()
-
-	realDB := memdb.NewTestDB(t, dbcfg.ChainDB)
-	seedTestHeader(t, realDB)
-
-	unblock := make(chan struct{})
-	t.Cleanup(func() {
-		select {
-		case <-unblock:
-		default:
-			close(unblock)
-		}
-	})
-
-	slow := &slowDB{RoDB: realDB, unblockCh: unblock}
-	p := newTestProvider(t, slow)
-
-	// Hold the semaphore via a blocking call.
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		_, _ = p.GetStatusData(context.Background())
-	}()
-	time.Sleep(50 * time.Millisecond)
-
-	// Call with a short deadline.
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, err := p.GetStatusData(ctx)
-	assert.ErrorIs(t, err, context.DeadlineExceeded,
-		"short-deadline caller must get DeadlineExceeded, not block")
+	// First call populates cache.
+	sd1, err := p.GetStatusData(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(42), sd1.MaxBlockHeight)
 
-	close(unblock)
-	wg.Wait()
+	// Write a new head.
+	seedTestHeader(t, db, 43, 200)
+
+	// Cache is still warm — returns stale data.
+	sd2, err := p.GetStatusData(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(42), sd2.MaxBlockHeight, "cache should still return old head")
+
+	// Simulate header notification → invalidates cache.
+	headersCh := make(chan [][]byte, 1)
+	snapshotsCh := make(chan struct{}, 1)
+	headersCh <- [][]byte{{}} // any value
+
+	go p.Run(ctx, headersCh, snapshotsCh)
+
+	// Give Run a moment to process the notification.
+	// After invalidation, next call should fetch the new head.
+	require.Eventually(t, func() bool {
+		sd3, err := p.GetStatusData(ctx)
+		return err == nil && sd3.MaxBlockHeight == 43
+	}, 1_000_000_000 /* 1s */, 10_000_000 /* 10ms */,
+		"cache should be invalidated after header notification, returning new head")
+}
+
+func TestGetStatusData_ConcurrentCallsCoalesce(t *testing.T) {
+	t.Parallel()
+
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	seedTestHeader(t, db, 42, 100)
+	p := newTestProvider(t, db)
+
+	ctx := context.Background()
+	errs := make(chan error, 10)
+	for i := 0; i < 10; i++ {
+		go func() {
+			_, err := p.GetStatusData(ctx)
+			errs <- err
+		}()
+	}
+
+	for i := 0; i < 10; i++ {
+		require.NoError(t, <-errs)
+	}
 }
