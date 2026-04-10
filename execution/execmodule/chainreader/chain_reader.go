@@ -38,6 +38,10 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
+// ErrExecutionBusy is returned when the execution module's semaphore is held
+// by another operation (e.g. fork choice processing) and cannot serve the request.
+var ErrExecutionBusy = errors.New("execution data is still syncing")
+
 type ChainReaderWriterEth1 struct {
 	cfg             *chain.Config
 	executionModule execmodule.ExecutionModule
@@ -341,7 +345,7 @@ func (c ChainReaderWriterEth1) AssembleBlock(baseHash common.Hash, attributes *e
 		return 0, err
 	}
 	if result.Busy {
-		return 0, errors.New("execution data is still syncing")
+		return 0, ErrExecutionBusy
 	}
 	return result.PayloadID, nil
 }
@@ -352,7 +356,7 @@ func (c ChainReaderWriterEth1) GetAssembledBlock(id uint64) (*cltypes.Eth1Block,
 		return nil, nil, nil, nil, err
 	}
 	if result.Busy {
-		return nil, nil, nil, nil, errors.New("execution data is still syncing")
+		return nil, nil, nil, nil, ErrExecutionBusy
 	}
 	if result.Block == nil {
 		return nil, nil, nil, nil, nil

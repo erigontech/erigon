@@ -7,6 +7,7 @@ package devvalidator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -258,8 +259,9 @@ func (s *Service) proposeBlock(ctx context.Context, slot uint64, key *ValidatorK
 		return fmt.Errorf("randao reveal: %w", err)
 	}
 
-	// Get block template (unsigned BeaconBlock). Retry a few times if the EL
-	// is busy with fork choice (semaphore contention in AssembleBlock).
+	// Get block template (unsigned BeaconBlock). Retry on transient server
+	// errors (5xx) which typically indicate EL semaphore contention. Client
+	// errors (4xx) and context cancellation are returned immediately.
 	path := fmt.Sprintf("/eth/v3/validator/blocks/%d?randao_reveal=%s",
 		slot, hexutil.Encode(randaoReveal[:]))
 
@@ -270,7 +272,15 @@ func (s *Service) proposeBlock(ctx context.Context, slot uint64, key *ValidatorK
 		if getErr == nil {
 			break
 		}
-		time.Sleep(500 * time.Millisecond)
+		var apiErr *BeaconAPIError
+		if !errors.As(getErr, &apiErr) || !apiErr.IsTransient() {
+			return fmt.Errorf("get block template: %w", getErr)
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("get block template: %w", ctx.Err())
+		case <-time.After(500 * time.Millisecond):
+		}
 	}
 	if getErr != nil {
 		return fmt.Errorf("get block template: %w", getErr)

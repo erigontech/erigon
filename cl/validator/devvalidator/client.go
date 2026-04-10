@@ -10,6 +10,22 @@ import (
 	"time"
 )
 
+// BeaconAPIError is returned when the Beacon API responds with a non-success status code.
+type BeaconAPIError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *BeaconAPIError) Error() string {
+	return fmt.Sprintf("status %d: %s", e.StatusCode, e.Body)
+}
+
+// IsTransient reports whether the error is a server-side failure that may
+// resolve on retry (5xx). Client errors (4xx) are never transient.
+func (e *BeaconAPIError) IsTransient() bool {
+	return e.StatusCode >= 500
+}
+
 // BeaconClient is a minimal HTTP client for the Beacon API.
 // It talks to the same endpoints that Lighthouse/Teku use.
 type BeaconClient struct {
@@ -49,7 +65,7 @@ func (c *BeaconClient) get(ctx context.Context, path string, dst interface{}) er
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("beacon GET %s: status %d: %s", path, resp.StatusCode, string(body))
+		return fmt.Errorf("beacon GET %s: %w", path, &BeaconAPIError{StatusCode: resp.StatusCode, Body: string(body)})
 	}
 
 	var wrapper beaconResponse
