@@ -91,7 +91,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node"
-	downloadercomp "github.com/erigontech/erigon/node/components/downloader"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/ethstats"
@@ -101,6 +100,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/node/nodebuilder"
 	privateapi2 "github.com/erigontech/erigon/node/privateapi"
 	"github.com/erigontech/erigon/node/rulesconfig"
 	"github.com/erigontech/erigon/node/shards"
@@ -199,7 +199,7 @@ type Ethereum struct {
 	txPoolRpcClient           txpoolproto.TxpoolClient
 	shutterPool               *shutter.Pool
 	blockBuilderNotifyNewTxns chan struct{}
-	downloaderProvider        *downloadercomp.Provider
+	components                *nodebuilder.Builder
 
 	blockSnapshots *freezeblocks.RoSnapshots
 	blockReader    services.FullBlockReader
@@ -407,13 +407,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.blockSnapshots, backend.blockReader, backend.blockWriter = allSnapshots, blockReader, blockWriter
 	backend.chainDB = temporalDb
 
-	// Initialize the downloader component (local in-process or remote via gRPC).
-	backend.downloaderProvider = &downloadercomp.Provider{}
-	backend.downloaderProvider.Configure(config.Downloader, config.Snapshot, config.Dirs, logger, stack.Config().DebugMux)
-	if err := backend.downloaderProvider.Initialize(ctx); err != nil {
+	// Initialize extracted components.
+	backend.components = nodebuilder.New()
+	if err := backend.components.BuildDownloader(ctx, config.Downloader, config.Snapshot, config.Dirs, logger, stack.Config().DebugMux); err != nil {
 		return nil, err
 	}
-	backend.downloaderClient = backend.downloaderProvider.Client
+	backend.downloaderClient = backend.components.Downloader.Client
 
 	// Register file-change callbacks so completed snapshots are seeded and
 	// deleted snapshots are removed from the swarm. These stay here because
@@ -963,9 +962,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	// snapshots not in that set could cause issues. That's an unsolved issue and probably requires
 	// always resetting before resuming/starting a sync.
 	var afterSnapshotDownload func(ctx context.Context) error
-	if backend.downloaderProvider != nil && backend.downloaderProvider.Downloader != nil {
+	if backend.components.Downloader != nil && backend.components.Downloader.Downloader != nil {
 		afterSnapshotDownload = func(ctx context.Context) (err error) {
-			incomplete, err := backend.downloaderProvider.Downloader.AddTorrentsFromDisk(ctx)
+			incomplete, err := backend.components.Downloader.Downloader.AddTorrentsFromDisk(ctx)
 			if err != nil {
 				err = fmt.Errorf("adding torrents from disk: %w", err)
 				return
@@ -1537,8 +1536,8 @@ func (s *Ethereum) Stop() error {
 	if s.unsubscribeEthstat != nil {
 		s.unsubscribeEthstat()
 	}
-	if s.downloaderProvider != nil {
-		s.downloaderProvider.Close()
+	if s.components.Downloader != nil {
+		s.components.Downloader.Close()
 	}
 	if s.privateAPI != nil {
 		shutdownDone := make(chan bool)
