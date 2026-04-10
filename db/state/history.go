@@ -358,7 +358,7 @@ func (h *History) Scan(toTxNum uint64) error {
 		return err
 	}
 
-	//h.reCalcVisibleFiles(toTxNum)
+	//h.reCalcVisibleFiles(toTxNum) // TODO: what need here?
 
 	salt, err := GetStateIndicesSalt(h.dirs, false, h.logger)
 	if err != nil {
