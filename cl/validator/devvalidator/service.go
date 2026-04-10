@@ -349,12 +349,10 @@ func (s *Service) maybeAttest(ctx context.Context, slot uint64) {
 
 	var duties []attesterDuty
 	path := fmt.Sprintf("/eth/v1/validator/duties/attester/%d", epoch)
-	if err := s.client.post(ctx, path, indices); err != nil {
-		// Fall back to getting attestation data without duties.
-		return
-	}
-	// Re-fetch as GET with response.
-	if err := s.client.get(ctx, path, &duties); err != nil {
+	// Attester duties is POST-only per the Beacon API spec (the request body
+	// carries the validator index list). Use postAndDecode to send the indices
+	// and parse the response in a single round-trip.
+	if err := s.client.postAndDecode(ctx, path, indices, &duties); err != nil {
 		return
 	}
 

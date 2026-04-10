@@ -2054,10 +2054,17 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		}
 		// Write beacon config and genesis state to temp files.
 		tmpDir := filepath.Join(cfg.Dirs.DataDir, "dev-beacon")
-		os.MkdirAll(tmpDir, 0755)
-		stateSSZ, _ := beaconState.EncodeSSZ(nil)
+		if err := os.MkdirAll(tmpDir, 0755); err != nil {
+			Fatalf("Failed to create dev beacon dir: %v", err)
+		}
+		stateSSZ, err := beaconState.EncodeSSZ(nil)
+		if err != nil {
+			Fatalf("Failed to encode dev genesis state: %v", err)
+		}
 		genesisStatePath := filepath.Join(tmpDir, "genesis.ssz")
-		os.WriteFile(genesisStatePath, stateSSZ, 0644)
+		if err := os.WriteFile(genesisStatePath, stateSSZ, 0644); err != nil {
+			Fatalf("Failed to write dev genesis state: %v", err)
+		}
 
 		// Write beacon config YAML with all forks enabled from genesis.
 		configPath := filepath.Join(tmpDir, "config.yaml")
@@ -2071,7 +2078,9 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 				"DENEB_FORK_EPOCH: 0\n"+
 				"TERMINAL_TOTAL_DIFFICULTY: 0\n",
 			genesisTime, beaconCfg.SecondsPerSlot)
-		os.WriteFile(configPath, []byte(configYAML), 0644)
+		if err := os.WriteFile(configPath, []byte(configYAML), 0644); err != nil {
+			Fatalf("Failed to write dev beacon config: %v", err)
+		}
 
 		cfg.CaplinConfig.CustomConfigPath = configPath
 		cfg.CaplinConfig.CustomGenesisStatePath = genesisStatePath
