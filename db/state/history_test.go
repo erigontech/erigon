@@ -706,36 +706,6 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 		require.EqualValues(t, nonPruned, binary.BigEndian.Uint64(k))
 	}
 
-	t.Run("hash_prune", func(t *testing.T) {
-		h, rwTx, logEvery := setup(t)
-		hc := h.BeginFilesRo()
-		defer hc.Close()
-
-		canHist, txTo := hc.canHashPruneUntil(rwTx, math.MaxUint64)
-		t.Logf("canPrune=%t [%s] to=%d", canHist, hc.h.KeysTable, txTo)
-
-		stat, err := hc.OldPrune(context.Background(), rwTx, 0, txTo, 50, false, logEvery)
-		require.NoError(t, err)
-		require.NotNil(t, stat)
-		t.Logf("stat=%v", stat)
-
-		stat, err = hc.OldPrune(context.Background(), rwTx, 0, 600, 500, false, logEvery)
-		require.NoError(t, err)
-		require.NotNil(t, stat)
-		t.Logf("stat=%v", stat)
-
-		stat, err = hc.OldPrune(context.Background(), rwTx, 0, 600, 10, true, logEvery)
-		require.NoError(t, err)
-		t.Logf("stat=%v", stat)
-
-		stat, err = hc.OldPrune(context.Background(), rwTx, 0, 600, 10, false, logEvery)
-		require.NoError(t, err)
-		t.Logf("stat=%v", stat)
-
-		assertResults(t, h, rwTx, hc)
-		checkHistoryDBCleanliness(t, h, hc, rwTx, nonPruned)
-	})
-
 	t.Run("scan_prune", func(t *testing.T) {
 		t.Skip("TODO: figure out pretty way to do this check")
 		h, rwTx, logEvery := setup(t)
@@ -810,40 +780,6 @@ func TestHistoryPruneCorrectness(t *testing.T) {
 
 		return h, rwTx, logEvery
 	}
-
-	t.Run("hash_prune", func(t *testing.T) {
-		t.Parallel()
-		h, rwTx, logEvery := setup(t)
-
-		hc := h.BeginFilesRo()
-		defer hc.Close()
-
-		// should not prune anything: forced=false but no files built
-		stat, err := hc.OldPrune(context.Background(), rwTx, 0, 10, pruneLimit, false, logEvery)
-		require.NoError(t, err)
-		require.Nil(t, stat)
-
-		// should prune tx=0: range [0,1) forced=true
-		stat, err = hc.OldPrune(context.Background(), rwTx, 0, 1, pruneLimit, true, logEvery)
-		require.NoError(t, err)
-		require.EqualValues(t, 1, stat.PruneCountValues)
-		require.EqualValues(t, 1, stat.PruneCountTx)
-
-		// prune exactly pruneLimit*pruneIters transactions
-		for i := 0; i < pruneIters; i++ {
-			stat, err = hc.OldPrune(context.Background(), rwTx, 0, 1000, pruneLimit, true, logEvery)
-			require.NoError(t, err)
-			t.Logf("[%d] stats: %v", i, stat)
-		}
-
-		icc, err := rwTx.CursorDupSort(h.ValuesTable)
-		require.NoError(t, err)
-		defer icc.Close()
-		key, _, err := icc.First()
-		require.NoError(t, err)
-		require.NotNil(t, key)
-		require.EqualValues(t, pruneIters*int(pruneLimit), binary.BigEndian.Uint64(key[len(key)-8:])-1)
-	})
 
 	t.Run("scan_prune", func(t *testing.T) {
 		t.Parallel()

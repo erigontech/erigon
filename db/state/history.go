@@ -1113,63 +1113,7 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 //   - E.g. Unwind can't use progress, because it's not linear
 //     and will wrongly update progress of steps cleaning and could end up with inconsistent history.
 func (ht *HistoryRoTx) OldPrune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
-	if !forced {
-		if ht.files.EndTxNum() > 0 {
-			txTo = min(txTo, ht.files.EndTxNum())
-		}
-		var can bool
-		can, txTo = ht.canHashPruneUntil(tx, txTo)
-		if !can {
-			return nil, nil
-		}
-	}
-	return ht.oldPrune(ctx, tx, txFrom, txTo, limit, forced, logEvery)
-}
-
-func (ht *HistoryRoTx) oldPrune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
-	//fmt.Printf(" pruneH[%s] %t, %d-%d\n", ht.h.filenameBase, ht.CanPruneUntil(rwTx), txFrom, txTo)
-	defer func(t time.Time) { mxPruneTookHistory.ObserveDuration(t) }(time.Now())
-
-	var (
-		//	seek     = make([]byte, 8, 256)
-		valsCDup kv.RwCursorDupSort
-		valsC    kv.RwCursor
-		valsCP   kv.PseudoDupSortRwCursor
-		err      error
-		mode     prune.StorageMode
-	)
-
-	if !ht.h.HistoryLargeValues {
-		valsCDup, err = rwTx.RwCursorDupSort(ht.h.ValuesTable)
-		if err != nil {
-			return nil, err
-		}
-		defer valsCDup.Close()
-		valsCP = valsCDup
-		mode = prune.PrefixValStorageMode
-	} else {
-		valsC, err = rwTx.RwCursor(ht.h.ValuesTable)
-		if err != nil {
-			return nil, err
-		}
-		defer valsC.Close()
-		mode = prune.KeyStorageMode
-
-		switch c := valsC.(type) {
-		case *mdbx2.MdbxCursor:
-			valsCP = &mdbx2.MdbxCursorPseudoDupSort{MdbxCursor: c}
-		case *mdbx2.MdbxDupSortCursor:
-			valsCP = valsC.(*mdbx2.MdbxDupSortCursor)
-		default:
-			return nil, fmt.Errorf("unexpected cursor type %T for table %s", valsC, ht.h.ValuesTable)
-		}
-	}
-
-	if !forced && ht.h.SnapshotsDisabled {
-		forced = true // or index.CanPrune will return false cuz no snapshots made
-	}
-
-	return ht.iit.HashSeekingPrune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, valsCP, mxPruneSizeHistory, mode)
+	return ht.Prune(ctx, tx, txFrom, txTo, limit, forced, logEvery)
 }
 
 func (ht *HistoryRoTx) Close() {
