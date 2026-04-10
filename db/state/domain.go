@@ -587,11 +587,11 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte, hi, lo uint64) (v
 
 }
 
-// beginWithRecalcForTests reads from the per-entity _visible fields directly.
+// beginForTests reads from the per-entity _visible fields directly.
 // Unsafe to mix with an Aggregator, which publishes snapshots via a lock-free
 // bundle and assumes nothing else touches those fields. Production code goes
 // through Aggregator.BeginFilesRo.
-func (d *Domain) beginWithRecalcForTests() *DomainRoTx {
+func (d *Domain) beginForTests() *DomainRoTx {
 	dv, hv, iv := d.calcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 	d._visible = dv
 	d.History._visibleFiles = hv

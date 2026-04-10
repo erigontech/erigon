@@ -773,7 +773,7 @@ func TestCommitmentValTransformDomainPanicsWithNeedMergeFalse(t *testing.T) {
 	// Fix: (1) guard the call with values.needMerge in aggregator.go;
 	//      (2) this panic assert catches future callers that violate the contract.
 	d := emptyTestDomain(t, 1)
-	dc := d.beginWithRecalcForTests()
+	dc := d.beginForTests()
 	defer dc.Close()
 
 	require.Panics(t, func() {
@@ -792,7 +792,7 @@ func TestMergeFiles(t *testing.T) {
 	defer db.Close()
 	defer d.Close()
 
-	dc := d.beginWithRecalcForTests()
+	dc := d.beginForTests()
 	defer dc.Close()
 
 	txs := d.stepSize * 8
@@ -829,7 +829,7 @@ func TestMergeFiles(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	dc = d.beginWithRecalcForTests()
+	dc = d.beginForTests()
 	defer dc.Close()
 }
 
@@ -903,7 +903,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 			assert.Equal(t, 2, int(files[0].endTxNum))
 		}
 
-		ac, sc, cc := account.beginWithRecalcForTests(), storage.beginWithRecalcForTests(), commitment.beginWithRecalcForTests()
+		ac, sc, cc := account.beginForTests(), storage.beginForTests(), commitment.beginForTests()
 		defer ac.Close()
 		defer sc.Close()
 		defer cc.Close()
@@ -931,7 +931,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 			assert.Equal(t, 2, int(files[1].endTxNum))
 		}
 
-		ac, sc, cc := account.beginWithRecalcForTests(), storage.beginWithRecalcForTests(), commitment.beginWithRecalcForTests()
+		ac, sc, cc := account.beginForTests(), storage.beginForTests(), commitment.beginForTests()
 		defer ac.Close()
 		defer sc.Close()
 		defer cc.Close()
@@ -961,7 +961,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 			assert.Len(t, dtx.garbage(mergedF), garbageCount)
 		}
 
-		ac, sc, cc := account.beginWithRecalcForTests(), storage.beginWithRecalcForTests(), commitment.beginWithRecalcForTests()
+		ac, sc, cc := account.beginForTests(), storage.beginForTests(), commitment.beginForTests()
 		defer ac.Close()
 		defer sc.Close()
 		defer cc.Close()
@@ -979,7 +979,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		sc.Close()
 		cc.Close()
 
-		ac, sc, cc = account.beginWithRecalcForTests(), storage.beginWithRecalcForTests(), commitment.beginWithRecalcForTests()
+		ac, sc, cc = account.beginForTests(), storage.beginForTests(), commitment.beginForTests()
 		defer ac.Close()
 		defer sc.Close()
 		defer cc.Close()
@@ -1003,7 +1003,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 			assert.Len(t, dtx.garbage(nil), garbageCount)
 		}
 
-		ac, sc, cc := account.beginWithRecalcForTests(), storage.beginWithRecalcForTests(), commitment.beginWithRecalcForTests()
+		ac, sc, cc := account.beginForTests(), storage.beginForTests(), commitment.beginForTests()
 		defer ac.Close()
 		defer sc.Close()
 		defer cc.Close()
@@ -1021,7 +1021,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		sc.Close()
 		cc.Close()
 
-		ac, sc, cc = account.beginWithRecalcForTests(), storage.beginWithRecalcForTests(), commitment.beginWithRecalcForTests()
+		ac, sc, cc = account.beginForTests(), storage.beginForTests(), commitment.beginForTests()
 		defer ac.Close()
 		defer sc.Close()
 		defer cc.Close()
@@ -1051,7 +1051,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 			assert.Len(t, dtx.garbage(mergedF), 0)
 		}
 
-		ac, sc, cc := account.beginWithRecalcForTests(), storage.beginWithRecalcForTests(), commitment.beginWithRecalcForTests()
+		ac, sc, cc := account.beginForTests(), storage.beginForTests(), commitment.beginForTests()
 		defer ac.Close()
 		defer sc.Close()
 		defer cc.Close()
@@ -1075,7 +1075,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 			assert.Len(t, dtx.garbage(nil), 0)
 		}
 
-		ac, sc, cc := account.beginWithRecalcForTests(), storage.beginWithRecalcForTests(), commitment.beginWithRecalcForTests()
+		ac, sc, cc := account.beginForTests(), storage.beginForTests(), commitment.beginForTests()
 		defer ac.Close()
 		defer sc.Close()
 		defer cc.Close()
