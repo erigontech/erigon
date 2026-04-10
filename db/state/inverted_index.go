@@ -77,10 +77,7 @@ type InvertedIndex struct {
 	// BeginRo() using _visible in zero-copy way
 	dirtyFiles *btree2.BTreeG[*FilesItem]
 
-	// `_visible.files` - underscore in name means: don't use this field directly, use BeginFilesRo()
-	// underlying array is immutable - means it's ready for zero-copy use
-	_visible *iiVisible
-	logger   log.Logger
+	logger log.Logger
 
 	checker *DependencyIntegrityChecker
 }
