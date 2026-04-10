@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
@@ -43,14 +44,6 @@ const (
 	RAM_CURSOR
 )
 
-// fileCursor abstracts btindex.Cursor for testability.
-type fileCursor interface {
-	Next() bool
-	Key() []byte
-	Value() []byte
-	Close()
-}
-
 // CursorItem is the item in the priority queue used to do merge interation
 // over storage of a given account
 type CursorItem struct {
@@ -60,7 +53,7 @@ type CursorItem struct {
 	iter         btree2.MapIter[string, []dataWithTxNum]
 	kvReader     *seg.Reader
 	hist         *seg.PagedReader
-	btCursor     fileCursor
+	btCursor     *btindex.Cursor
 	key          []byte
 	val          []byte
 	startTxNum   uint64
@@ -384,6 +377,14 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 	var cp CursorHeap
 	cpPtr := &cp
 	heap.Init(cpPtr)
+	defer func() {
+		for cp.Len() > 0 {
+			ci := heap.Pop(cpPtr).(*CursorItem)
+			if ci.btCursor != nil {
+				ci.btCursor.Close()
+			}
+		}
+	}()
 	var k, v []byte
 	var err error
 
