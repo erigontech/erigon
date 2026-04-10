@@ -423,7 +423,6 @@ func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *InvertedIn
 	return w
 }
 
-// beginWithRecalcForTests — see Domain.beginWithRecalcForTests for semantics.
 func (ii *InvertedIndex) beginWithRecalcForTests() *InvertedIndexRoTx {
 	return ii.beginFilesRo(ii._visible)
 }
