@@ -4,6 +4,7 @@ import (
 	"context"
 	"math/big"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
@@ -122,7 +123,7 @@ func TestGetStatusData_CacheInvalidatedByHeaderNotification(t *testing.T) {
 	require.Eventually(t, func() bool {
 		sd3, err := p.GetStatusData(ctx)
 		return err == nil && sd3.MaxBlockHeight == 43
-	}, 1_000_000_000 /* 1s */, 10_000_000 /* 10ms */,
+	}, time.Second, 10*time.Millisecond,
 		"cache should be invalidated after header notification, returning new head")
 }
 
