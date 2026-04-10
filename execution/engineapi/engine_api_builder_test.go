@@ -176,7 +176,8 @@ func TestEngineApiBuiltBlockReorgRecovery(t *testing.T) {
 
 func TestEngineApiBlockGasOverflowSpillsToNextBlock(t *testing.T) {
 	genesis, coinbaseKey := engineapitester.DefaultEngineApiTesterGenesis(t)
-	genesis.GasLimit = 150_000 // ~7 simple transfers at 21K gas each
+	// ~7 simple transfers (21K each) + EIP-7002/7251 finalize syscall gas (~18K).
+	genesis.GasLimit = 180_000
 	eat := engineapitester.InitialiseEngineApiTester(t, engineapitester.EngineApiTesterInitArgs{
 		Logger:      testlog.Logger(t, log.LvlDebug),
 		DataDir:     t.TempDir(),
@@ -307,7 +308,9 @@ func TestEngineApiMultipleSendersInBlock(t *testing.T) {
 
 func TestEngineApiHighGasContractsFillBlock(t *testing.T) {
 	genesis, coinbaseKey := engineapitester.DefaultEngineApiTesterGenesis(t)
-	genesis.GasLimit = 200_000 // tight budget for contracts + transfers
+	// Tight budget: 2 deploys + 2 transfers + EIP-7002/7251 finalize syscall
+	// gas (~18K). Need headroom so syscall gas doesn't push the block over limit.
+	genesis.GasLimit = 260_000
 	eat := engineapitester.InitialiseEngineApiTester(t, engineapitester.EngineApiTesterInitArgs{
 		Logger:      testlog.Logger(t, log.LvlDebug),
 		DataDir:     t.TempDir(),
