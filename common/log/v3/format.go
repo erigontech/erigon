@@ -46,6 +46,7 @@ func (f formatFunc) Format(r *Record) []byte {
 //
 //	[May 16 20:58:45] [DBUG] remove route ns=haproxy addr=127.0.0.1:50002
 func TerminalFormat() Format {
+	logNoTimestamps := logEnvBool("ERIGON_LOG_NO_TIMESTAMPS", false)
 	return FormatFunc(func(r *Record) []byte {
 		var color = 0
 		switch r.Lvl {
@@ -62,8 +63,7 @@ func TerminalFormat() Format {
 		}
 
 		b := &bytes.Buffer{}
-		lvl := strings.ToUpper(r.Lvl.String())
-		logNoTimestamps := logEnvBool("ERIGON_LOG_NO_TIMESTAMPS", false)
+		lvl := r.Lvl.UpperString()
 		if logNoTimestamps {
 			if color > 0 {
 				fmt.Fprintf(b, "\x1b[%dm%s\x1b[0m %s ", color, lvl, r.Msg)
@@ -92,7 +92,7 @@ func TerminalFormat() Format {
 func TerminalFormatNoColor() Format {
 	return FormatFunc(func(r *Record) []byte {
 		b := &bytes.Buffer{}
-		lvl := strings.ToUpper(r.Lvl.String())
+		lvl := r.Lvl.UpperString()
 		fmt.Fprintf(b, "[%s] [%s] %s ", lvl, r.Time.Format(termTimeFormat), r.Msg)
 
 		// try to justify the log output for short messages
