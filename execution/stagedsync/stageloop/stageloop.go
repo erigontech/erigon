@@ -111,8 +111,26 @@ func StageLoop(
 			time.Sleep(500 * time.Millisecond) // just to avoid too many similar error logs
 			continue
 		}
-		if time.Since(t) < 5*time.Minute {
-			initialCycle = false
+		if initialCycle {
+			// Switch out of initialCycle when we're within reorgBlockDepth of the
+			// chain tip OR when the iteration was fast (< 5 min). The reorg-depth
+			// check ensures the last reorgBlockDepth blocks always have changesets,
+			// which the node needs to service reorg requests.
+			chainTip := hd.Progress()
+			reorgDepth := dbg.MaxReorgDepth
+			if err := db.View(ctx, func(tx kv.Tx) error {
+				execBlock, _ := stages.GetStageProgress(tx, stages.Execution)
+				if chainTip > 0 && execBlock+reorgDepth >= chainTip {
+					initialCycle = false
+				}
+				return nil
+			}); err != nil {
+				// non-fatal — fall back to the time-based check
+				logger.Warn("initialCycle reorg-depth check failed", "err", err)
+			}
+			if time.Since(t) < 5*time.Minute {
+				initialCycle = false
+			}
 		}
 		if !initialCycle {
 			hd.AfterInitialCycle()

@@ -83,6 +83,11 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 	stateCache := se.doms.GetStateCache()
 
 	for ; blockNum <= maxBlockNum; blockNum++ {
+		// Switch out of initialCycle mid-batch when approaching the tip,
+		// so changesets are generated for at least the last reorgBlockDepth blocks.
+		if initialCycle && maxBlockNum > 0 && blockNum+se.cfg.syncCfg.MaxReorgDepth >= maxBlockNum {
+			initialCycle = false
+		}
 		shouldGenerateChangesets := shouldGenerateChangeSets(se.cfg, blockNum, maxBlockNum, initialCycle)
 		changeSet := &changeset.StateChangeSet{}
 		if shouldGenerateChangesets && blockNum > 0 {
