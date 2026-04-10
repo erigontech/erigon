@@ -825,37 +825,38 @@ func DecodeSender(enc []byte) (nonce uint64, balance uint256.Int, err error) {
 
 // AccountArena is a slab-backed bump allocator for Account objects.
 // The first slab is inlined so the common case (≤16 accounts per txn) is zero-alloc.
-// Overflow slabs are appended on demand and never moved, so pointers returned from
-// Alloc() remain valid until Reset().
+// Overflow slabs are appended on demand and never moved, so *Account values returned
+// from Alloc() remain valid until Reset(). Callers must fully initialize the returned
+// Account (Reset() does not zero), which DeserialiseV3 already does.
 type AccountArena struct {
-	first  [accountArenaSlabSize]Account
-	spill  []*[accountArenaSlabSize]Account
-	idx    int // position within the current slab
-	slabNo int // 0 = first (inlined), >0 = spill[slabNo-1]
+	first [accountArenaSlabSize]Account
+	spill []*[accountArenaSlabSize]Account
+	cur   *[accountArenaSlabSize]Account
+	idx   int
+	slab  int
 }
 
 const accountArenaSlabSize = 16
 
 func (aa *AccountArena) Alloc() *Account {
+	if aa.cur == nil {
+		aa.cur = &aa.first
+	}
 	if aa.idx >= accountArenaSlabSize {
-		aa.slabNo++
+		aa.slab++
 		aa.idx = 0
-		if aa.slabNo-1 >= len(aa.spill) {
+		if aa.slab-1 >= len(aa.spill) {
 			aa.spill = append(aa.spill, new([accountArenaSlabSize]Account))
 		}
+		aa.cur = aa.spill[aa.slab-1]
 	}
-	var acc *Account
-	if aa.slabNo == 0 {
-		acc = &aa.first[aa.idx]
-	} else {
-		acc = &aa.spill[aa.slabNo-1][aa.idx]
-	}
+	acc := &aa.cur[aa.idx]
 	aa.idx++
 	return acc
 }
 
-// Reset rewinds the arena to its first slab. Overflow slabs are retained for reuse.
 func (aa *AccountArena) Reset() {
 	aa.idx = 0
-	aa.slabNo = 0
+	aa.slab = 0
+	aa.cur = &aa.first
 }
