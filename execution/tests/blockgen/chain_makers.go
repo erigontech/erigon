@@ -529,11 +529,14 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 				ibs.ResetVersionedIO()
 			}
 			// Finalize and seal the block
+			var sysCallGas uint64
 			syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-				ret, _, err := protocol.SysCallContract(contract, data, config, ibs, b.header, b.engine, false /* constCall */, vm.Config{})
+				ret, gasUsed, err := protocol.SysCallContract(contract, data, config, ibs, b.header, b.engine, false /* constCall */, vm.Config{})
+				sysCallGas += gasUsed
 				return ret, err
 			}
 			_, requests, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil, chainreader, syscall, nil, logger)
+			b.header.GasUsed += sysCallGas
 
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)

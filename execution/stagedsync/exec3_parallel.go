@@ -649,6 +649,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 							return state.StateUpdates{}, fmt.Errorf("can't finalize block %d: %w", blockResult.BlockNum, err)
 						}
 						blockExecutor.blockGasUsed += sysCallGas
+						blockResult.BlockGasUsed += sysCallGas
 
 						blockExecutor.blockIO.RecordReads(finalVersion, ibs.VersionedReads())
 						blockExecutor.blockIO.RecordAccesses(finalVersion, ibs.AccessedAddresses())

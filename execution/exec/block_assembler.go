@@ -324,7 +324,8 @@ func (ba *BlockAssembler) AssembleBlock(stateReader state.StateReader, ibs *stat
 	if ba.HasBAL() {
 		ibs.ResetVersionedIO()
 	}
-	block, ba.Requests, _, err = protocol.FinalizeBlockExecution(ba.cfg.Engine, stateReader, ba.Header, ba.Txns, ba.Uncles,
+	var sysCallGas uint64
+	block, ba.Requests, sysCallGas, err = protocol.FinalizeBlockExecution(ba.cfg.Engine, stateReader, ba.Header, ba.Txns, ba.Uncles,
 		&state.NoopWriter{}, ba.cfg.ChainConfig, ibs, ba.Receipts, ba.Withdrawals, chainReader, true, logger, nil)
 
 	if err != nil {
@@ -334,6 +335,9 @@ func (ba *BlockAssembler) AssembleBlock(stateReader state.StateReader, ibs *stat
 	// Note: NewBlock (called by FinalizeBlockExecution) copies the header,
 	// so we must modify the block's header directly, not ba.Header.
 	header := block.HeaderNoCopy()
+	// EIP-7002/7251 finalize system calls consume gas that must be counted in
+	// header.GasUsed per Ethereum spec.
+	header.GasUsed += sysCallGas
 	if ba.HasBAL() {
 		// Record finalize system call I/O (EIP-7002, EIP-7251, etc.)
 		ba.balIO = ba.balIO.Merge(ibs.TxIO())
