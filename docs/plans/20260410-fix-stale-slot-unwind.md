@@ -56,8 +56,8 @@ Two cooperating bugs in the domain state layer, both rooted in df770fadfe (Feb 2
 
 ### Task 4: Verify full suite and lint
 
-- [ ] Run `go test ./db/state/...` — full package tests pass
-- [ ] Run `make lint` — clean (run multiple times per CLAUDE.md)
+- [x] Run `go test ./db/state/...` — full package tests pass
+- [x] Run `make lint` — clean (run multiple times per CLAUDE.md)
 
 ### Task 5: Remove tracing code from this branch
 
