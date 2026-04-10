@@ -21,6 +21,9 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/holiman/uint256"
 
@@ -36,6 +39,8 @@ import (
 	"github.com/erigontech/erigon/p2p/forkid"
 )
 
+const statusDataCacheTTL = 2 * time.Second
+
 var (
 	ErrNoHead      = errors.New("ReadChainHead: ReadCurrentHeader error")
 	ErrNoSnapshots = errors.New("ReadChainHeadFromSnapshots: no snapshot data available")
@@ -49,6 +54,12 @@ type ChainHead struct {
 	HeadTd        *uint256.Int
 }
 
+// cachedStatusData holds a cached StatusData result with its fetch time.
+type cachedStatusData struct {
+	data      *sentryproto.StatusData
+	fetchedAt time.Time
+}
+
 type StatusDataProvider struct {
 	db          kv.RoDB
 	blockReader services.FullBlockReader
@@ -60,6 +71,11 @@ type StatusDataProvider struct {
 	timeForks   []uint64
 
 	logger log.Logger
+
+	// Cache: double-checked locking to coalesce concurrent DB reads.
+	// Only one goroutine refreshes; others wait and reuse the result.
+	cache   atomic.Pointer[cachedStatusData]
+	cacheMu sync.Mutex
 }
 
 func NewStatusDataProvider(
@@ -125,23 +141,69 @@ func (s *StatusDataProvider) makeStatusData(head ChainHead) *sentryproto.StatusD
 }
 
 // GetStatusData returns the current StatusData.
-// Uses DB head, falls back to snapshot data when unavailable
+//
+// Results are cached for statusDataCacheTTL (2s). Concurrent callers share a
+// single DB read via double-checked locking: the first goroutine to find an
+// expired cache acquires cacheMu and refreshes; others wait and reuse the
+// refreshed value.
+//
+// The two former db.View() calls (MinimumBlockAvailable + ReadChainHead) are
+// merged into a single read transaction to halve MDBX reader pressure.
+//
+// Falls back to snapshot data when the DB head is unavailable.
 func (s *StatusDataProvider) GetStatusData(ctx context.Context) (*sentryproto.StatusData, error) {
-	var minimumBlock uint64
+	// Fast path: serve from cache if fresh (lock-free).
+	if c := s.cache.Load(); c != nil && time.Since(c.fetchedAt) < statusDataCacheTTL {
+		return c.data, nil
+	}
+
+	// Slow path: acquire mutex so only one goroutine refreshes.
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+
+	// Double-check: another goroutine may have refreshed while we waited.
+	if c := s.cache.Load(); c != nil && time.Since(c.fetchedAt) < statusDataCacheTTL {
+		return c.data, nil
+	}
+
+	result, err := s.fetchStatusData(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	s.cache.Store(&cachedStatusData{
+		data:      result,
+		fetchedAt: time.Now(),
+	})
+	return result, nil
+}
+
+// fetchStatusData reads MinimumBlockAvailable and ChainHead in a single DB
+// read transaction. Falls back to snapshot data when the DB head is missing.
+func (s *StatusDataProvider) fetchStatusData(ctx context.Context) (*sentryproto.StatusData, error) {
+	var (
+		chainHead    ChainHead
+		minimumBlock uint64
+		headErr      error
+	)
+
 	if err := s.db.View(ctx, func(tx kv.Tx) error {
 		var err error
 		minimumBlock, err = s.blockReader.MinimumBlockAvailable(ctx, tx)
-		return err
+		if err != nil {
+			return fmt.Errorf("MinimumBlockAvailable: %w", err)
+		}
+		chainHead, headErr = ReadChainHeadWithTx(tx, minimumBlock)
+		return nil // headErr handled below (ErrNoHead → snapshot fallback)
 	}); err != nil {
-		return nil, fmt.Errorf("GetStatusData: minimumBlock error: %w", err)
+		return nil, fmt.Errorf("GetStatusData: %w", err)
 	}
 
-	chainHead, err := ReadChainHead(ctx, s.db, minimumBlock)
-	if err == nil {
+	if headErr == nil {
 		return s.makeStatusData(chainHead), nil
 	}
-	if !errors.Is(err, ErrNoHead) {
-		return nil, err
+	if !errors.Is(headErr, ErrNoHead) {
+		return nil, headErr
 	}
 
 	s.logger.Warn("sentry.StatusDataProvider: The canonical chain current header not found in the database. Check the database consistency. Using latest available snapshot data.")
