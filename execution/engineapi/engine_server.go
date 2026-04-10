@@ -167,14 +167,9 @@ func (e *EngineServer) Start(
 			Version:   "1.0",
 		}}
 
-	if httpConfig.TestingEnabled {
-		e.logger.Warn("[EngineServer] testing_ RPC namespace is ENABLED — do not use on production networks")
-		apiList = append(apiList, rpc.API{
-			Namespace: "testing",
-			Public:    false,
-			Service:   TestingAPI(NewTestingImpl(e, true)),
-			Version:   "1.0",
-		})
+	if slices.Contains(httpConfig.API, "testing") {
+		e.logger.Warn("[EngineServer] testing_ RPC namespace is ENABLED on engine port — do not use on production networks")
+		apiList = append(apiList, NewTestingRPCEntry(e))
 	}
 
 	eg.Go(func() error {
