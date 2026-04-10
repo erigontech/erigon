@@ -20,17 +20,52 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/bits"
+
+	keccak "github.com/erigontech/fastkeccak"
+
+	"github.com/erigontech/erigon/common/length"
 )
 
 // TrieReader navigates the Patricia trie by hashed key without any mutable grid
 // state. Each Lookup call starts from the root and descends independently.
 type TrieReader struct {
-	ctx PatriciaContext
+	ctx           PatriciaContext
+	accountKeyLen int16
+	keccak        keccak.KeccakState
+	hashBuf       [length.Hash]byte
 }
 
+// Cell accessor methods for external callers.
+
+// AccountAddrLen returns the length of the account plain key.
+func (c *cell) AccountAddrLen() int { return int(c.accountAddrLen) }
+
+// StorageAddrLen returns the length of the storage plain key.
+func (c *cell) StorageAddrLen() int { return int(c.storageAddrLen) }
+
+// HashLen returns the length of the cell hash.
+func (c *cell) HashLen() int { return int(c.hashLen) }
+
+// AccountAddr returns the account plain key bytes (up to accountAddrLen).
+func (c *cell) GetAccountAddr() []byte { return c.accountAddr[:c.accountAddrLen] }
+
+// StorageAddr returns the storage plain key bytes (up to storageAddrLen).
+func (c *cell) GetStorageAddr() []byte { return c.storageAddr[:c.storageAddrLen] }
+
+// CellHash returns the cell hash bytes (up to hashLen).
+func (c *cell) CellHash() []byte { return c.hash[:c.hashLen] }
+
+// Extension returns the extension nibbles (up to hashedExtLen).
+func (c *cell) Extension() []byte { return c.hashedExtension[:c.hashedExtLen] }
+
 // NewTrieReader creates a TrieReader that uses ctx for branch lookups.
-func NewTrieReader(ctx PatriciaContext) *TrieReader {
-	return &TrieReader{ctx: ctx}
+// accountKeyLen is the length of plain account keys (typically length.Addr = 20).
+func NewTrieReader(ctx PatriciaContext, accountKeyLen int) *TrieReader {
+	return &TrieReader{
+		ctx:           ctx,
+		accountKeyLen: int16(accountKeyLen),
+		keccak:        keccak.NewFastKeccak(),
+	}
 }
 
 // parseCellAt parses exactly one cell from branch cell data at position nibble.
@@ -100,16 +135,30 @@ func (tr *TrieReader) Lookup(hashedKey []byte) (c cell, found bool, err error) {
 
 		c, err = parseCellAt(cellData, afterMap, nibble)
 		if err != nil {
-			return c, false, err
+			return c, false, fmt.Errorf("parseCellAt depth %d nibble %x: %w", depth, nibble, err)
 		}
 
 		// Advance past the nibble we matched in the bitmap.
 		depth++
 
+		// Branch data may not include the full hashed extension for leaf cells.
+		// Derive it from the plain key (accountAddr/storageAddr), just like
+		// HexPatriciaHashed.unfoldBranchNode calls deriveHashedKeys.
+		if (c.accountAddrLen > 0 || c.storageAddrLen > 0) && c.hashedExtLen == 0 {
+			if err = c.deriveHashedKeys(int16(depth), tr.keccak, tr.accountKeyLen, tr.hashBuf[:]); err != nil {
+				return c, false, fmt.Errorf("deriveHashedKeys at depth %d: %w", depth, err)
+			}
+		}
+
 		// If the cell has an extension, verify it matches and advance depth.
 		if c.hashedExtLen > 0 {
 			extEnd := depth + int(c.hashedExtLen)
 			if extEnd > len(hashedKey) {
+				// Extension goes past the key — if the cell is a leaf, it's a match
+				// for the key prefix (account found during storage-length lookup).
+				if c.accountAddrLen > 0 || c.storageAddrLen > 0 {
+					return c, true, nil
+				}
 				return c, false, nil
 			}
 			for i := int16(0); i < c.hashedExtLen; i++ {
@@ -120,9 +169,15 @@ func (tr *TrieReader) Lookup(hashedKey []byte) (c cell, found bool, err error) {
 			depth = extEnd
 		}
 
-		// Leaf: account or storage address present.
+		// Leaf: account or storage address present and key fully consumed
+		// or no deeper branching possible.
 		if c.accountAddrLen > 0 || c.storageAddrLen > 0 {
-			return c, true, nil
+			if c.hashLen == 0 || depth >= len(hashedKey) {
+				return c, true, nil
+			}
+			// Cell has both an address and a hash with more key to consume:
+			// this is an account node with a storage sub-trie. Continue.
+			continue
 		}
 
 		// Branch hash: the cell references a deeper subtree, continue.

@@ -664,6 +664,12 @@ type TrieContext struct {
 	stateReader StateReader
 }
 
+// NewTrieContextRo creates a read-only TrieContext suitable for TrieReader lookups.
+// Only Branch() is functional; PutBranch/Account/Storage will return errors or nil.
+func NewTrieContextRo(reader StateReader, stepSize uint64) *TrieContext {
+	return &TrieContext{stateReader: reader, stepSize: stepSize}
+}
+
 func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 	return sdc.readDomain(kv.CommitmentDomain, pref)
 }

@@ -18,11 +18,13 @@ package commitment
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -135,20 +137,17 @@ func dummyHash() []byte {
 func TestTrieReader_AccountLookupHit(t *testing.T) {
 	t.Parallel()
 
-	// Build a simple single-level trie:
-	// Root branch has nibble 0xa pointing to an account leaf.
+	// Build a single-level trie: root branch has the account leaf at the
+	// nibble determined by the actual keccak hash of the address.
 	ctx := newTrieReaderTestCtx()
 	addr := bytes.Repeat([]byte{0xAB}, 20)
+	hashedKey := KeyToHexNibbleHash(addr)
 
 	var rootCells [16]*cell
-	rootCells[0xa] = makeAccountCell(addr, dummyHash())
-	ctx.putBranch(nil, rootCells) // root = empty nibble prefix
+	rootCells[hashedKey[0]] = makeAccountCell(addr, dummyHash())
+	ctx.putBranch(nil, rootCells)
 
-	// hashedKey: nibble 0xa followed by 63 zero nibbles (64 total)
-	hashedKey := make([]byte, 64)
-	hashedKey[0] = 0xa
-
-	tr := NewTrieReader(ctx)
+	tr := NewTrieReader(ctx, length.Addr)
 	c, found, err := tr.Lookup(hashedKey)
 	require.NoError(t, err)
 	require.True(t, found, "expected account to be found")
@@ -159,17 +158,19 @@ func TestTrieReader_AccountLookupHit(t *testing.T) {
 func TestTrieReader_Miss(t *testing.T) {
 	t.Parallel()
 
-	// Root branch has nibble 0x5 but we query nibble 0x3.
+	// Root branch has one nibble but we query a different nibble.
 	ctx := newTrieReaderTestCtx()
+	addr := bytes.Repeat([]byte{0xCC}, 20)
+	hashedAddr := KeyToHexNibbleHash(addr)
 	var rootCells [16]*cell
-	rootCells[0x5] = makeAccountCell(bytes.Repeat([]byte{0xCC}, 20), dummyHash())
+	rootCells[hashedAddr[0]] = makeAccountCell(addr, dummyHash())
 	ctx.putBranch(nil, rootCells)
 
-	hashedKey := make([]byte, 64)
-	hashedKey[0] = 0x3
-
-	tr := NewTrieReader(ctx)
-	_, found, err := tr.Lookup(hashedKey)
+	// Query a key whose first nibble differs.
+	missKey := make([]byte, 64)
+	missKey[0] = (hashedAddr[0] + 1) % 16 // guaranteed different nibble
+	tr := NewTrieReader(ctx, length.Addr)
+	_, found, err := tr.Lookup(missKey)
 	require.NoError(t, err)
 	require.False(t, found, "expected key not found")
 }
@@ -182,7 +183,7 @@ func TestTrieReader_MissEmptyTrie(t *testing.T) {
 	hashedKey := make([]byte, 64)
 	hashedKey[0] = 0x1
 
-	tr := NewTrieReader(ctx)
+	tr := NewTrieReader(ctx, length.Addr)
 	_, found, err := tr.Lookup(hashedKey)
 	require.NoError(t, err)
 	require.False(t, found, "expected not found in empty trie")
@@ -191,30 +192,23 @@ func TestTrieReader_MissEmptyTrie(t *testing.T) {
 func TestTrieReader_ExtensionTraversal(t *testing.T) {
 	t.Parallel()
 
-	// Build a trie with an extension node:
-	// Root: nibble 0x3 → extension [0x7, 0x2] → Branch at depth 3
-	// Branch at prefix [3,7,2]: nibble 0x1 → account leaf
+	// Build a trie with a pure extension+hash node (no account) at the root,
+	// leading to a deeper branch with a hash-consistent account leaf.
 	ctx := newTrieReaderTestCtx()
+	addr := bytes.Repeat([]byte{0xDD}, 20)
+	hashedKey := KeyToHexNibbleHash(addr)
 
-	// Root level: nibble 3 points to an extension+hash cell
+	// Root: nibble hashedKey[0] → extension [hashedKey[1], hashedKey[2]] → branch at depth 3
 	var rootCells [16]*cell
-	rootCells[0x3] = makeExtensionCell([]byte{0x7, 0x2}, dummyHash())
+	rootCells[hashedKey[0]] = makeExtensionCell(hashedKey[1:3], dummyHash())
 	ctx.putBranch(nil, rootCells)
 
-	// Branch at [3, 7, 2]: nibble 1 points to an account leaf
+	// Branch at prefix [hk[0], hk[1], hk[2]]: nibble hk[3] → account leaf
 	var deepCells [16]*cell
-	addr := bytes.Repeat([]byte{0xDD}, 20)
-	deepCells[0x1] = makeAccountCell(addr, dummyHash())
-	ctx.putBranch([]byte{0x3, 0x7, 0x2}, deepCells)
+	deepCells[hashedKey[3]] = makeAccountCell(addr, dummyHash())
+	ctx.putBranch(hashedKey[:3], deepCells)
 
-	// hashedKey: [3, 7, 2, 1, 0, 0, ...] (64 nibbles)
-	hashedKey := make([]byte, 64)
-	hashedKey[0] = 0x3
-	hashedKey[1] = 0x7
-	hashedKey[2] = 0x2
-	hashedKey[3] = 0x1
-
-	tr := NewTrieReader(ctx)
+	tr := NewTrieReader(ctx, length.Addr)
 	c, found, err := tr.Lookup(hashedKey)
 	require.NoError(t, err)
 	require.True(t, found, "expected account found after extension traversal")
@@ -225,7 +219,7 @@ func TestTrieReader_ExtensionTraversal(t *testing.T) {
 func TestTrieReader_ExtensionMismatch(t *testing.T) {
 	t.Parallel()
 
-	// Extension expects [7, 2] but key has [7, 9].
+	// Extension expects [7, 2] but key has a different second nibble.
 	ctx := newTrieReaderTestCtx()
 	var rootCells [16]*cell
 	rootCells[0x3] = makeExtensionCell([]byte{0x7, 0x2}, dummyHash())
@@ -234,9 +228,9 @@ func TestTrieReader_ExtensionMismatch(t *testing.T) {
 	hashedKey := make([]byte, 64)
 	hashedKey[0] = 0x3
 	hashedKey[1] = 0x7
-	hashedKey[2] = 0x9 // mismatch
+	hashedKey[2] = 0x9 // mismatch with extension [7, 2]
 
-	tr := NewTrieReader(ctx)
+	tr := NewTrieReader(ctx, length.Addr)
 	_, found, err := tr.Lookup(hashedKey)
 	require.NoError(t, err)
 	require.False(t, found, "expected miss on extension mismatch")
@@ -245,32 +239,26 @@ func TestTrieReader_ExtensionMismatch(t *testing.T) {
 func TestTrieReader_MultiLevelDescent(t *testing.T) {
 	t.Parallel()
 
-	// Build a trie with 12 levels of branch-hash nodes, then an account leaf.
-	// Path: nibbles [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0xa, 0xb] then account at nibble 0xc.
+	// Build a trie with multiple levels of branch-hash nodes, then an account leaf.
+	// Use a real address so the hashed key is consistent.
 	ctx := newTrieReaderTestCtx()
+	addr := bytes.Repeat([]byte{0xEE}, 20)
+	hashedKey := KeyToHexNibbleHash(addr)
 	depth := 12
 
-	nibbles := []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0xa, 0xb}
-
-	// Create branch-hash cells at each level.
+	// Create branch-hash cells following the actual hashed key path.
 	for d := 0; d < depth; d++ {
 		var cells [16]*cell
-		cells[nibbles[d]] = makeBranchCell(dummyHash())
-		ctx.putBranch(nibbles[:d], cells)
+		cells[hashedKey[d]] = makeBranchCell(dummyHash())
+		ctx.putBranch(hashedKey[:d], cells)
 	}
 
-	// At the final level, put an account leaf at nibble 0xc.
+	// At the final level, put an account leaf.
 	var leafCells [16]*cell
-	addr := bytes.Repeat([]byte{0xEE}, 20)
-	leafCells[0xc] = makeAccountCell(addr, dummyHash())
-	ctx.putBranch(nibbles[:depth], leafCells)
+	leafCells[hashedKey[depth]] = makeAccountCell(addr, dummyHash())
+	ctx.putBranch(hashedKey[:depth], leafCells)
 
-	// hashedKey: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, a, b, c, 0, 0, ...] (64 nibbles)
-	hashedKey := make([]byte, 64)
-	copy(hashedKey, nibbles)
-	hashedKey[depth] = 0xc
-
-	tr := NewTrieReader(ctx)
+	tr := NewTrieReader(ctx, length.Addr)
 	c, found, err := tr.Lookup(hashedKey)
 	require.NoError(t, err)
 	require.True(t, found, "expected account found after multi-level descent (depth > 9)")
@@ -281,18 +269,29 @@ func TestTrieReader_MultiLevelDescent(t *testing.T) {
 func TestTrieReader_StorageLookup(t *testing.T) {
 	t.Parallel()
 
-	// Single-level trie with a storage leaf.
+	// Storage lookups are best tested via HPH round-trip (see TestTrieReader_RoundTripWithHPH).
+	// This mock test verifies the basic mechanics using a cell at depth >= 64
+	// where only the storage slot hash matters.
 	ctx := newTrieReaderTestCtx()
-	storAddr := bytes.Repeat([]byte{0xFF}, 52) // 20 addr + 32 hash
+	storAddr := bytes.Repeat([]byte{0xFF}, 52) // 20 addr + 32 slot
+	hashedKey := KeyToHexNibbleHash(storAddr)  // 128 nibbles
+	require.Equal(t, 128, len(hashedKey), "storage hashed key must be 128 nibbles")
 
-	var rootCells [16]*cell
-	rootCells[0x7] = makeStorageCell(storAddr, dummyHash())
-	ctx.putBranch(nil, rootCells)
+	// Place a branch at depth 64 (the account/storage boundary).
+	var storageCells [16]*cell
+	storageCells[hashedKey[64]] = makeStorageCell(storAddr, dummyHash())
+	ctx.putBranch(hashedKey[:64], storageCells)
 
-	hashedKey := make([]byte, 64)
-	hashedKey[0] = 0x7
+	// To reach depth 64, we need branch-hash cells along the account path.
+	// For simplicity, create a single branch at root pointing to depth 64
+	// via chain of hash cells at key depths.
+	for d := 0; d < 64; d++ {
+		var cells [16]*cell
+		cells[hashedKey[d]] = makeBranchCell(dummyHash())
+		ctx.putBranch(hashedKey[:d], cells)
+	}
 
-	tr := NewTrieReader(ctx)
+	tr := NewTrieReader(ctx, length.Addr)
 	c, found, err := tr.Lookup(hashedKey)
 	require.NoError(t, err)
 	require.True(t, found, "expected storage leaf found")
@@ -302,49 +301,44 @@ func TestTrieReader_StorageLookup(t *testing.T) {
 func TestTrieReader_MultipleChildrenInBranch(t *testing.T) {
 	t.Parallel()
 
-	// Root has cells at nibbles 0x2, 0x5, 0xb — verify we parse the correct one.
+	// Root has multiple account cells — verify we parse the correct one.
+	// Pick addresses that hash to different first nibbles.
 	ctx := newTrieReaderTestCtx()
-	addr2 := bytes.Repeat([]byte{0x22}, 20)
-	addr5 := bytes.Repeat([]byte{0x55}, 20)
-	addrB := bytes.Repeat([]byte{0xBB}, 20)
+	addrs := [][]byte{
+		bytes.Repeat([]byte{0x22}, 20),
+		bytes.Repeat([]byte{0x55}, 20),
+		bytes.Repeat([]byte{0xBB}, 20),
+	}
 
 	var rootCells [16]*cell
-	rootCells[0x2] = makeAccountCell(addr2, dummyHash())
-	rootCells[0x5] = makeAccountCell(addr5, dummyHash())
-	rootCells[0xb] = makeAccountCell(addrB, dummyHash())
+	hashedKeys := make([][]byte, len(addrs))
+	for i, addr := range addrs {
+		hk := KeyToHexNibbleHash(addr)
+		hashedKeys[i] = hk
+		rootCells[hk[0]] = makeAccountCell(addr, dummyHash())
+	}
+
 	ctx.putBranch(nil, rootCells)
+	tr := NewTrieReader(ctx, length.Addr)
 
-	tr := NewTrieReader(ctx)
-
-	for _, tc := range []struct {
-		nibble byte
-		addr   []byte
-	}{
-		{0x2, addr2},
-		{0x5, addr5},
-		{0xb, addrB},
-	} {
-		hashedKey := make([]byte, 64)
-		hashedKey[0] = tc.nibble
-
-		c, found, err := tr.Lookup(hashedKey)
+	for i, addr := range addrs {
+		c, found, err := tr.Lookup(hashedKeys[i])
 		require.NoError(t, err)
-		require.True(t, found, "expected hit for nibble %x", tc.nibble)
-		require.Equal(t, tc.addr, c.accountAddr[:c.accountAddrLen])
+		require.True(t, found, "expected hit for addr %x", addr)
+		require.Equal(t, addr, c.accountAddr[:c.accountAddrLen])
 	}
 }
 
 func TestTrieReader_BranchError(t *testing.T) {
 	t.Parallel()
 
-	// Root branch has nibble 0x5 pointing to a hash cell, so Lookup descends.
+	// Root branch has a hash cell, so Lookup descends.
 	// The second Branch() call (at depth 1) returns an error.
 	inner := newTrieReaderTestCtx()
 	var rootCells [16]*cell
 	rootCells[0x5] = makeBranchCell(dummyHash())
 	inner.putBranch(nil, rootCells)
 
-	// Make the second-level Branch() fail.
 	hashedKey := make([]byte, 64)
 	hashedKey[0] = 0x5
 	secondPrefix := HexNibblesToCompactBytes(hashedKey[:1])
@@ -354,7 +348,7 @@ func TestTrieReader_BranchError(t *testing.T) {
 		errPrefix:         string(secondPrefix),
 	}
 
-	tr := NewTrieReader(ctx)
+	tr := NewTrieReader(ctx, length.Addr)
 	_, _, err := tr.Lookup(hashedKey)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "disk I/O error")
@@ -365,11 +359,13 @@ func TestTrieReader_EmptyKey(t *testing.T) {
 	t.Parallel()
 
 	ctx := newTrieReaderTestCtx()
+	addr := bytes.Repeat([]byte{0xAA}, 20)
+	hk := KeyToHexNibbleHash(addr)
 	var rootCells [16]*cell
-	rootCells[0x0] = makeAccountCell(bytes.Repeat([]byte{0xAA}, 20), dummyHash())
+	rootCells[hk[0]] = makeAccountCell(addr, dummyHash())
 	ctx.putBranch(nil, rootCells)
 
-	tr := NewTrieReader(ctx)
+	tr := NewTrieReader(ctx, length.Addr)
 
 	// Empty key should return not-found without error.
 	_, found, err := tr.Lookup([]byte{})
@@ -380,4 +376,137 @@ func TestTrieReader_EmptyKey(t *testing.T) {
 	_, found, err = tr.Lookup(nil)
 	require.NoError(t, err)
 	require.False(t, found)
+}
+
+// TestTrieReader_RoundTripWithHPH verifies that TrieReader can look up keys
+// from branch data produced by a real HexPatriciaHashed Process cycle.
+func TestTrieReader_RoundTripWithHPH(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	ms := NewMockState(t)
+
+	// Use real 20-byte account addresses (accountKeyLen = length.Addr).
+	hph := NewHexPatriciaHashed(int16(length.Addr), ms)
+	hph.SetTrace(false)
+
+	// Build updates: several accounts with balance/nonce, plus storage.
+	plainKeys, updates := NewUpdateBuilder().
+		Balance("f000000000000000000000000000000000000001", 100).
+		Nonce("f000000000000000000000000000000000000001", 1).
+		Balance("f000000000000000000000000000000000000002", 200).
+		Balance("f000000000000000000000000000000000000003", 300).
+		Balance("a000000000000000000000000000000000000004", 400).
+		Balance("b000000000000000000000000000000000000005", 500).
+		Balance("c000000000000000000000000000000000000006", 600).
+		Balance("d000000000000000000000000000000000000007", 700).
+		Storage("f000000000000000000000000000000000000001",
+			"0000000000000000000000000000000000000000000000000000000000000001", "01").
+		Storage("f000000000000000000000000000000000000001",
+			"0000000000000000000000000000000000000000000000000000000000000002", "02").
+		Storage("a000000000000000000000000000000000000004",
+			"0000000000000000000000000000000000000000000000000000000000000003", "ff").
+		Build()
+
+	upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+	defer upds.Close()
+
+	err := ms.applyPlainUpdates(plainKeys, updates)
+	require.NoError(t, err)
+
+	rootHash, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	require.NotEmpty(t, rootHash)
+
+	t.Logf("rootHash: %x, branches stored: %d", rootHash, len(ms.cm))
+	require.True(t, len(ms.cm) > 0, "expected at least one branch stored")
+
+	// Now use TrieReader with the same MockState to look up each key.
+	reader := NewTrieReader(ms, length.Addr)
+
+	// Track which keys are accounts vs storage so we check the right field.
+	for i, pk := range plainKeys {
+		if updates[i].Flags&DeleteUpdate != 0 {
+			continue
+		}
+
+		hashedKey := KeyToHexNibbleHash(pk)
+		c, found, err := reader.Lookup(hashedKey)
+		require.NoError(t, err, "Lookup failed for plainKey %x (hashed %x)", pk, hashedKey)
+
+		isStorage := len(pk) > length.Addr
+		if isStorage {
+			require.True(t, found, "storage key %x not found (hashed %x)", pk, hashedKey)
+			require.True(t, c.storageAddrLen > 0,
+				"storage key %x: found but storageAddrLen=0", pk)
+			require.Equal(t, pk, c.storageAddr[:c.storageAddrLen],
+				"storage key %x: plain key mismatch", pk)
+		} else {
+			require.True(t, found, "account key %x not found (hashed %x)", pk, hashedKey)
+			require.True(t, c.accountAddrLen > 0,
+				"account key %x: found but accountAddrLen=0", pk)
+			require.Equal(t, pk, c.accountAddr[:c.accountAddrLen],
+				"account key %x: plain key mismatch", pk)
+		}
+	}
+
+	// Verify miss: an unwritten key should not be found.
+	missKey := make([]byte, length.Addr)
+	missKey[0] = 0xEE
+	missKey[1] = 0xEE
+	hashedMiss := KeyToHexNibbleHash(missKey)
+	_, found, err := reader.Lookup(hashedMiss)
+	require.NoError(t, err)
+	require.False(t, found, "unwritten key should not be found")
+}
+
+// TestTrieReader_RoundTripWithHPH_ManyAccounts uses a larger account set to
+// exercise deeper trie structures and extension nodes.
+func TestTrieReader_RoundTripWithHPH_ManyAccounts(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	ms := NewMockState(t)
+
+	hph := NewHexPatriciaHashed(int16(length.Addr), ms)
+	hph.SetTrace(false)
+
+	// Generate 100 accounts with distinct addresses.
+	ub := NewUpdateBuilder()
+	for i := 0; i < 100; i++ {
+		addr := fmt.Sprintf("%040x", i+1) // 20-byte hex addresses
+		ub.Balance(addr, uint64(1000+i))
+		ub.Nonce(addr, uint64(i))
+	}
+
+	plainKeys, updates := ub.Build()
+	upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+	defer upds.Close()
+
+	err := ms.applyPlainUpdates(plainKeys, updates)
+	require.NoError(t, err)
+
+	rootHash, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	require.NotEmpty(t, rootHash)
+
+	t.Logf("rootHash: %x, branches: %d, accounts: %d", rootHash, len(ms.cm), len(plainKeys))
+
+	reader := NewTrieReader(ms, length.Addr)
+
+	foundCount := 0
+	for i, pk := range plainKeys {
+		if updates[i].Flags&DeleteUpdate != 0 {
+			continue
+		}
+		hashedKey := KeyToHexNibbleHash(pk)
+		c, found, err := reader.Lookup(hashedKey)
+		require.NoError(t, err, "Lookup error for key %x", pk)
+		if found && c.accountAddrLen > 0 {
+			require.Equal(t, pk, c.accountAddr[:c.accountAddrLen])
+			foundCount++
+		}
+	}
+	t.Logf("Found %d/%d accounts via TrieReader", foundCount, len(plainKeys))
+	require.Equal(t, len(plainKeys), foundCount, "expected all accounts to be found")
 }
