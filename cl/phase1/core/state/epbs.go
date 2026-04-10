@@ -43,6 +43,9 @@ func IsActiveBuilder(state abstract.BeaconState, builderIndex uint64) bool {
 		log.Warn("builders is nil")
 		return false
 	}
+	if int(builderIndex) >= builders.Len() {
+		return false
+	}
 	builder := builders.Get(int(builderIndex))
 	if builder == nil {
 		log.Warn("builder is nil", "builderIndex", builderIndex)
@@ -125,6 +128,9 @@ func CanBuilderCoverBid(s abstract.BeaconState, builderIndex uint64, bidAmount u
 	builders := s.GetBuilders()
 	if builders == nil {
 		log.Warn("builders is nil")
+		return false
+	}
+	if int(builderIndex) >= builders.Len() {
 		return false
 	}
 	builder := builders.Get(int(builderIndex))

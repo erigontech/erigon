@@ -171,6 +171,10 @@ func (b *CachingBeaconState) InitiateBuilderExit(builderIndex uint64) {
 		log.Warn("builders is nil")
 		return
 	}
+	if int(builderIndex) >= builders.Len() {
+		log.Warn("builder index out of range", "builderIndex", builderIndex, "len", builders.Len())
+		return
+	}
 	builder := builders.Get(int(builderIndex))
 	if builder == nil {
 		log.Warn("builder is nil", "builderIndex", builderIndex)
