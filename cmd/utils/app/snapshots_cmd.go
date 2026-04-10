@@ -1326,6 +1326,10 @@ func doIntegrity(cliCtx *cli.Context) error {
 					if err := integrity.CheckRCacheNoDups(ctx, sc, db, blockReader, failFast); err != nil {
 						return err
 					}
+				case integrity.StateProgress:
+					if err := integrity.CheckStateProgress(ctx, db, blockReader, failFast); err != nil {
+						return err
+					}
 				case integrity.Publishable:
 					if err := doPublishable(cliCtx, chainDB); err != nil {
 						return err

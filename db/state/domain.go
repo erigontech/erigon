@@ -613,10 +613,10 @@ func (d *Domain) dumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo kv.St
 	if err != nil {
 		return err
 	}
-	wal.Close()
 
 	ps := background.NewProgressSet()
 	static, err := d.buildFileRange(ctx, stepFrom, stepTo, coll, ps)
+	wal.Close() // munmap ETL temp files after buildFileRange consumed the zero-copy data
 	if err != nil {
 		return err
 	}
