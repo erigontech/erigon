@@ -83,7 +83,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 	stateCache := se.doms.GetStateCache()
 
 	for ; blockNum <= maxBlockNum; blockNum++ {
-		shouldGenerateChangesets := shouldGenerateChangeSets(se.cfg, blockNum, maxBlockNum, initialCycle)
+		shouldGenerateChangesets := shouldGenerateChangeSets(se.cfg, blockNum, maxBlockNum)
 		changeSet := &changeset.StateChangeSet{}
 		if shouldGenerateChangesets && blockNum > 0 {
 			se.doms.SetChangesetAccumulator(changeSet)
