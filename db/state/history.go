@@ -915,15 +915,13 @@ type HistoryRoTx struct {
 	snappyReadBuffer []byte
 }
 
-// beginWithRecalcForTests — see Domain.beginWithRecalcForTests for semantics.
 func (h *History) beginWithRecalcForTests() *HistoryRoTx {
 	return h.beginFilesRo(h._visibleFiles, h.InvertedIndex._visible)
 }
 
-// BeginFilesRoForDebug is a thin exported wrapper around the test/debug-only
-// begin path. It exists for standalone debug tools (cmd/integration) that open
-// a bare History without an Aggregator. Production code MUST go through
-// Aggregator.BeginFilesRo instead, which publishes a lock-free snapshot bundle.
+// BeginFilesRoForDebug is the exported entry point for standalone debug tools
+// (cmd/integration) that open a bare History without an Aggregator. Production
+// code must go through Aggregator.BeginFilesRo — see Domain.beginWithRecalcForTests.
 func (h *History) BeginFilesRoForDebug() *HistoryRoTx {
 	return h.beginWithRecalcForTests()
 }
