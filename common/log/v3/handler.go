@@ -37,9 +37,10 @@ type Handler interface {
 // outputs.
 //
 // StreamHandler wraps itself with LazyHandler to evaluate Lazy objects.
-// Concurrent safety relies on each Format call using its own buffer
-// (via sync.Pool) and io.Writer.Write being a single syscall for
-// os.File (stdout/stderr). No mutex is needed.
+// StreamHandler does not add any synchronization of its own, so
+// concurrent use is only safe when the provided Format allocates
+// per-call buffers (all built-in formats do) and the underlying
+// io.Writer supports concurrent Write calls (e.g. *os.File).
 func StreamHandler(wr io.Writer, fmtr Format) Handler {
 	return LazyHandler(streamHandler{wr: wr, fmtr: fmtr})
 }
@@ -131,6 +132,8 @@ func (r *rotatingWriter) Write(p []byte) (n int, err error) {
 }
 
 func (r *rotatingWriter) Close() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	return r.file.Close()
 }
 

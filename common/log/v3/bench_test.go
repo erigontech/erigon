@@ -147,6 +147,10 @@ func (w *slowWriter) Write(p []byte) (int, error) {
 }
 
 func TestStreamHandlerNoContention(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping wall-clock contention test in short mode")
+	}
+
 	const (
 		goroutines = 5000
 		writeDelay = 1 * time.Millisecond
@@ -168,9 +172,11 @@ func TestStreamHandlerNoContention(t *testing.T) {
 	wg.Wait()
 	elapsed := time.Since(start)
 
-	// Without mutex: ~1ms (parallel writes).
-	// With SyncHandler mutex: ~50ms (serialized writes).
-	// Use 15ms as threshold — well above parallel, well below serialized.
+	// Without a global write mutex, total time should stay much closer to a
+	// single writeDelay (~1ms) than to the fully serialized case of
+	// goroutines*writeDelay (~5s with the constants above).
+	// Use goroutines/3 * writeDelay as the threshold (~1.6s here): well above
+	// the parallel case, but still comfortably below a serialized path.
 	limit := time.Duration(goroutines/3) * writeDelay
 	if elapsed > limit {
 		t.Fatalf("logging took %v with %d goroutines (limit %v) — likely mutex contention", elapsed, goroutines, limit)
@@ -188,10 +194,14 @@ func TestStreamHandlerZeroAllocs(t *testing.T) {
 	allocs := testing.AllocsPerRun(100, func() {
 		lg.Info("test message", "key", "value")
 	})
-	// Formatting allocates (bytes.Buffer, fmt.Fprintf, etc.) but there
-	// must be no mutex/sync overhead allocations. The exact number may
-	// shift with Go versions; the important thing is that it stays
-	// constant and doesn't grow with concurrency.
+	// Formatting allocates (bytes.Buffer, fmt.Fprintf, etc.), so this
+	// is not expected to be literally zero. Keep a generous upper bound
+	// so the test remains stable across Go versions while still catching
+	// meaningful regressions in per-call allocation behavior.
+	const maxAllocsPerOp = 16
+	if allocs > maxAllocsPerOp {
+		t.Fatalf("StreamHandler allocs/op too high: got %.0f, want <= %d", allocs, maxAllocsPerOp)
+	}
 	t.Logf("StreamHandler allocs/op: %.0f", allocs)
 }
 
