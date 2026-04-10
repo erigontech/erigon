@@ -928,6 +928,13 @@ func (h *History) beginWithRecalcForTests() *HistoryRoTx {
 	return h.beginFilesRo(hv, hvi)
 }
 
+// beginFilesRoForTests opens an RoTx using the current `_visibleFiles` snapshot
+// without recalculating it. Tests use this to verify that newly scanned/integrated
+// dirty files are NOT visible until reCalcVisibleFiles is called.
+func (h *History) beginFilesRoForTests() *HistoryRoTx {
+	return h.beginFilesRo(h._visibleFiles, h.InvertedIndex._visible)
+}
+
 // BeginFilesRoForDebug is the exported entry point for standalone debug tools
 // (cmd/integration) that open a bare History without an Aggregator. Production
 // code must go through Aggregator.BeginFilesRo — see Domain.beginWithRecalcForTests.
