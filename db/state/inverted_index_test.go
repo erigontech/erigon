@@ -323,7 +323,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 			txFrom, txTo := firstTxNumOfStep(0, ii.stepSize), firstTxNumOfStep(1, ii.stepSize)
 
 			// without `reCalcVisibleFiles` must be nothing to prune - because files are not visible yet.
-			ic := ii.beginForTests()
+			ic := ii.beginForTestsNoRecalc()
 			defer ic.Close()
 			ii.integrateDirtyFiles(sf, txFrom, txTo)
 
