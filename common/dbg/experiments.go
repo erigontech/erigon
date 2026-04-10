@@ -85,6 +85,8 @@ var (
 	MergeWorkers         = EnvInt("MERGE_WORKERS", 1)
 	CollateWorkers       = EnvInt("COLLATE_WORKERS", 2)
 
+	AggregationDelayMs = EnvInt("AGGREGATION_DELAY_MS", 0)
+
 	TraceAccounts         = EnvStrings("TRACE_ACCOUNTS", ",", nil)
 	TraceStateKeys        = EnvStrings("TRACE_STATE_KEYS", ",", nil)
 	TraceInstructions     = EnvBool("TRACE_INSTRUCTIONS", false)
