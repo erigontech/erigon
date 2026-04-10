@@ -643,7 +643,6 @@ func (d *Domain) collateBuildIntegrate(ctx context.Context, step kv.Step, tx kv.
 		return err
 	}
 	d.integrateDirtyFiles(sf, txFrom, txTo)
-	d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 	return nil
 }
 
@@ -680,7 +679,6 @@ func collateAndMerge(t *testing.T, tx kv.RwTx, d *Domain, txs uint64) {
 			//fmt.Printf("merge: %s\n", valuesIn.decompressor.FileName())
 			//}
 			d.integrateMergedDirtyFiles(valuesIn, indexIn, historyIn)
-			d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 			return false
 		}(); stop {
 			break
@@ -718,7 +716,6 @@ func collateAndMergeOnceWithScanPrune(t *testing.T, d *Domain, tx kv.RwTx, step 
 			require.NoError(t, err)
 
 			d.integrateMergedDirtyFiles(valuesIn, indexIn, historyIn)
-			d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 			return false
 		}(); stop {
 			break
@@ -756,7 +753,6 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step kv.Step, prun
 		require.NoError(t, err)
 
 		d.integrateMergedDirtyFiles(valuesIn, indexIn, historyIn)
-		d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 		domainRoTx.Close()
 	}
 }
@@ -801,7 +797,6 @@ func TestDomain_ScanFiles(t *testing.T) {
 	scanDirsRes, err := scanDirs(d.dirs)
 	require.NoError(t, err)
 	require.NoError(t, d.openFolder(scanDirsRes))
-	d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 
 	// Check the history
 	checkHistory(t, db, d, txs)
@@ -1198,7 +1193,6 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 	scanDirsRes, err := scanDirs(dom.dirs)
 	require.NoError(t, err)
 	err = dom.openFolder(scanDirsRes)
-	dom.reCalcVisibleFiles(dom.dirtyFilesEndTxNumMinimax())
 
 	require.NoError(t, err)
 
@@ -1464,7 +1458,6 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 		require.NoError(t, err)
 
 		d.integrateMergedDirtyFiles(dv, di, dh)
-		d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 
 		logEvery.Stop()
 	}
@@ -2776,7 +2769,6 @@ func TestDomain_PruneSimple(t *testing.T) {
 		require.NoError(t, err)
 		c.Close()
 		d.integrateDirtyFiles(sf, pruneFrom, pruneTo)
-		d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 		rotx.Rollback()
 
 		domainRoTx = d.beginForTests()
@@ -3446,7 +3438,6 @@ func collateAndMergeWithCollisionRetry(t *testing.T, tx kv.RwTx, d *Domain, txs 
 		valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, background.NewProgressSet())
 		require.NoError(t, err)
 		d.integrateMergedDirtyFiles(valuesIn, indexIn, historyIn)
-		d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 	}
 }
 

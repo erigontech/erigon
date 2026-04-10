@@ -90,10 +90,6 @@ type Domain struct {
 	// BeginRo() using _visible in zero-copy way
 	dirtyFiles *btree2.BTreeG[*FilesItem]
 
-	// _visible - underscore in name means: don't use this field directly, use BeginFilesRo()
-	// underlying array is immutable - means it's ready for zero-copy use
-	_visible *domainVisible
-
 	checker *DependencyIntegrityChecker
 
 	// _testBuildAccessorHook - test-only: called with the recsplit before the build loop in buildHashMapAccessor
@@ -117,7 +113,6 @@ func NewDomain(cfg statecfg.DomainCfg, stepSize, stepsInFrozenFile uint64, dirs 
 	d := &Domain{
 		DomainCfg:  cfg,
 		dirtyFiles: btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		_visible:   newDomainVisible(cfg.Name, []visibleFile{}),
 	}
 
 	var err error
@@ -323,9 +318,7 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 // this. The Aggregator path goes through calcVisibleFiles + bundle instead, so
 // the mutating writes don't race with concurrent Aggregator-backed readers.
 func (d *Domain) reCalcVisibleFiles(toTxNum uint64) {
-	dv, hv, hiv := d.calcVisibleFiles(toTxNum)
-	d._visible = dv
-	d.History._visibleFiles = hv
+	_, _, hiv := d.calcVisibleFiles(toTxNum)
 	d.History.InvertedIndex._visible = hiv
 }
 
@@ -593,8 +586,6 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte, hi, lo uint64) (v
 // through Aggregator.BeginFilesRo.
 func (d *Domain) beginForTests() *DomainRoTx {
 	dv, hv, iv := d.calcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
-	d._visible = dv
-	d.History._visibleFiles = hv
 	d.History.InvertedIndex._visible = iv
 	return d.beginFilesRo(dv, hv, iv)
 }
