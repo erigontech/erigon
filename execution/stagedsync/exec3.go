@@ -141,6 +141,9 @@ func ExecV3(ctx context.Context,
 	}
 
 	if execStage.SyncMode() == stages.ModeApplyingBlocks {
+		// Seed lastCommittedTxNum so the background file builder knows which
+		// steps were committed before execution began (from snapshot state).
+		agg.SetLastCommittedTxNum(initialTxNum)
 		agg.BuildFilesInBackground(initialTxNum)
 	}
 

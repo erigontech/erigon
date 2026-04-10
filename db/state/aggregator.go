@@ -70,6 +70,13 @@ type Aggregator struct {
 	visibleFilesMinimaxTxNum atomic.Uint64
 	snapshotBuildSema        *semaphore.Weighted
 
+	// lastCommittedTxNum is set by the execution layer after each CommitCycle
+	// flush+commit. The background file builder uses it to determine which steps
+	// are safe to collate: only steps where firstTxNum(step+1) <= lastCommittedTxNum.
+	// This prevents a race where collation snapshots the DB before the execution
+	// commits all data for a step, producing files that silently miss entries.
+	lastCommittedTxNum atomic.Uint64
+
 	disableHistory         bool
 	collateAndBuildWorkers int  // minimize amount of background workers by default
 	mergeWorkers           int  // usually 1
@@ -1754,6 +1761,15 @@ func (a *Aggregator) SetSnapshotBuildSema(semaphore *semaphore.Weighted) {
 func (a *Aggregator) SetProduceMod(produce bool) {
 	a.produce = produce
 }
+
+// SetLastCommittedTxNum is called by the execution layer after each CommitCycle
+// flush+commit to publish the highest txNum that is durably committed to the DB.
+// The background file builder uses this to avoid collating steps that may have
+// uncommitted data.
+func (a *Aggregator) SetLastCommittedTxNum(txNum uint64) {
+	a.lastCommittedTxNum.Store(txNum)
+}
+
 func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 	return a.buildFilesInBackground(txNum, true)
 }
@@ -1813,6 +1829,17 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 		// - to remove old data from db as early as possible
 		// - during files build, may happen commit of new data. on each loop step getting latest id in db
 		for ; step < lastInDB; step++ { //`step` must be fully-written - means `step+1` records must be visible
+			// Guard against collation/pruning race: only collate step S when the
+			// execution layer has committed ALL data through the end of step S.
+			// Without this, the collation's read-transaction may snapshot the DB
+			// before a CommitCycle flushes step S's writes, producing a file that
+			// misses entries. Pruning then removes those entries from the DB,
+			// and the values are lost. See #20169.
+			committedTxNum := a.lastCommittedTxNum.Load()
+			stepEndTxNum := a.FirstTxNumOfStep(step + 1)
+			if committedTxNum < stepEndTxNum {
+				break // step not fully committed yet — wait for execution to catch up
+			}
 			if err := a.buildFiles(a.ctx, step); err != nil {
 				if errors.Is(err, errStepNotReady) {
 					break
