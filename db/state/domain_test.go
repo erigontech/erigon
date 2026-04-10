@@ -1175,11 +1175,12 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 
 	require.NoError(t, err)
 
-	histRoTx := dom.History.beginWithRecalcForTests()
-	histVisible := histRoTx.files
+	domRoTx := dom.beginWithRecalcForTests()
+	domVisible := domRoTx.files
+	histVisible := domRoTx.ht.files
 	run1Doms, run1Hist := make([]string, 0), make([]string, 0)
-	for i := 0; i < len(dom._visible.files); i++ {
-		run1Doms = append(run1Doms, dom._visible.files[i].src.decompressor.FileName())
+	for i := 0; i < len(domVisible); i++ {
+		run1Doms = append(run1Doms, domVisible[i].src.decompressor.FileName())
 		// should be equal length
 		run1Hist = append(run1Hist, histVisible[i].src.decompressor.FileName())
 	}
@@ -1191,7 +1192,7 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 
 		histVisible[i].src.closeFilesAndRemove()
 	}
-	histRoTx.Close()
+	domRoTx.Close()
 	dom.Close()
 
 	scanDirsRes, err := scanDirs(dom.dirs)
