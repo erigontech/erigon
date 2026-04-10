@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCursorHeapPriority_RAMOverDBOverFILE(t *testing.T) {
@@ -118,4 +119,66 @@ func TestCursorHeapMergeLoop_RAMOverridesDB(t *testing.T) {
 	// key2: RAM value 0xAA must win over DB value 0xBB
 	assert.Equal(t, key2, results[1].key)
 	assert.Equal(t, []byte{0xAA}, results[1].val, "RAM value must override DB for key2")
+}
+
+// mockBtCursor is a fake fileCursor that iterates through a fixed list of keys
+// and tracks whether Close was called.
+type mockBtCursor struct {
+	keys   [][]byte
+	vals   [][]byte
+	pos    int
+	closed bool
+}
+
+func (m *mockBtCursor) Next() bool {
+	m.pos++
+	return m.pos < len(m.keys)
+}
+func (m *mockBtCursor) Key() []byte   { return m.keys[m.pos] }
+func (m *mockBtCursor) Value() []byte { return m.vals[m.pos] }
+func (m *mockBtCursor) Close()        { m.closed = true }
+
+// TestFileCursorClosedWhenKeyLeavesPrefix verifies that a FILE_CURSOR's
+// btCursor is closed when Next() advances past the prefix boundary.
+// Before the fix, the cursor was dropped without Close(), leaking it.
+func TestFileCursorClosedWhenKeyLeavesPrefix(t *testing.T) {
+	prefix := []byte("aa")
+
+	// Cursor has one in-prefix key, then advances to an out-of-prefix key.
+	cursor := &mockBtCursor{
+		keys: [][]byte{[]byte("aa01"), []byte("bb01")},
+		vals: [][]byte{[]byte("v1"), []byte("v2")},
+	}
+
+	var h CursorHeap
+	heap.Init(&h)
+	heap.Push(&h, &CursorItem{
+		t: FILE_CURSOR, key: cursor.Key(), val: cursor.Value(),
+		btCursor: cursor, endTxNum: 100, reverse: true,
+	})
+
+	// Run the same merge loop as debugIteratePrefixLatest
+	for h.Len() > 0 {
+		lastKey := make([]byte, len(h[0].key))
+		copy(lastKey, h[0].key)
+
+		for h.Len() > 0 && bytes.Equal(h[0].key, lastKey) {
+			ci := heap.Pop(&h).(*CursorItem)
+			if ci.btCursor != nil {
+				if ci.btCursor.Next() {
+					ci.key = ci.btCursor.Key()
+					if ci.key != nil && bytes.HasPrefix(ci.key, prefix) {
+						ci.val = ci.btCursor.Value()
+						heap.Push(&h, ci)
+					} else {
+						ci.btCursor.Close()
+					}
+				} else {
+					ci.btCursor.Close()
+				}
+			}
+		}
+	}
+
+	require.True(t, cursor.closed, "btCursor must be closed when key leaves prefix")
 }
