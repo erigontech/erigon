@@ -135,7 +135,7 @@ type readOp struct {
 type requestOp struct {
 	ids         []json.RawMessage
 	err         error
-	resp        chan []*jsonrpcMessage // receives up to len(ids) responses
+	resp        chan []*jsonrpcMessage // batch response channel
 	sub         *ClientSubscription    // only set for EthSubscribe requests
 	hadResponse bool                   // true when the request was responded to
 }
@@ -365,7 +365,7 @@ func (c *Client) BatchCallContext(ctx context.Context, b []BatchElem) error {
 	)
 	op := &requestOp{
 		ids:  make([]json.RawMessage, len(b)),
-		resp: make(chan []*jsonrpcMessage, len(b)),
+		resp: make(chan []*jsonrpcMessage, 1),
 	}
 	for i, elem := range b {
 		msg, err := c.newMessage(elem.Method, elem.Args...)
