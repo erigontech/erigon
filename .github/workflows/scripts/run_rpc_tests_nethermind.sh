@@ -14,6 +14,21 @@ DISABLED_TEST_LIST=(
   ots_
   # Engine API runs on authenticated port 8551, not 8545
   engine_
+  # debug APIs have different results
+  debug_
+  # eth_ APIs whose result format differs between clients
+  eth_callBundle
+  eth_callMany
+  eth_getRawTransactionByBlockHashAndIndex
+  eth_getRawTransactionByHash
+  parity_listStorageKeys
+  # trace_ APIs whose result format differs between clients
+  trace_block
+  trace_filter
+  trace_get
+  trace_replayBlockTransactions
+  trace_replayTransaction
+  trace_transaction
   # Admin info format differs between clients
   admin_nodeInfo/test_01.json
   admin_peers/test_01.json
@@ -32,4 +47,4 @@ DISABLED_TESTS=$(IFS=,; echo "${DISABLED_TEST_LIST[*]}")
 
 # Call the main test runner script with the required and optional parameters
 # Use do-not-compare-error-message since Nethermind error messages differ from Erigon
-"$(dirname "$0")/run_rpc_tests.sh" mainnet v2.2.0 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR" "" "" "do-not-compare-error-message"
+"$(dirname "$0")/run_rpc_tests.sh" mainnet v2.4.0 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR" "" "" "do-not-compare-error-message"
