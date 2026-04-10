@@ -8,3 +8,5 @@ Pick PR's from git branch `A` to `B`. Create separated PR's on github. Don't put
 commits. Don't need much description - just refer original PR.
 
 For example: from `release/3.4` to `main`
+
+Git branch naming - add username to branch. Example: `alex/hello_34`

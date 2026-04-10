@@ -313,7 +313,7 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 		// --no-history explicitly requested: skip history regeneration entirely
 		withHistory = false
 	} else if commitmentHistoryEnabled {
-		if clearCommitment || resume {
+		if clearCommitment || resume || yes {
 			withHistory = true
 		} else {
 			fmt.Print("commitment history is enabled. Rebuild with history? (yes/no): ")
