@@ -158,7 +158,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 			ii.integrateDirtyFiles(sf, txFrom, txTo)
 
 			// without `reCalcVisibleFiles` must be nothing to prune - because files are not visible yet.
-			ic := ii.beginWithRecalcForTests()
+			ic := ii.beginFilesRoForTests()
 			defer ic.Close()
 			stat, err := ic.HashSeekingPrune(context.Background(), tx, 0, 10, pruneLimit, logEvery, false, nil, nil, prune.DefaultStorageMode)
 			require.NoError(t, err)
@@ -291,7 +291,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 			ii.integrateDirtyFiles(sf, txFrom, txTo)
 
 			// without `reCalcVisibleFiles` must be nothing to prune - because files are not visible yet.
-			ic := ii.beginWithRecalcForTests()
+			ic := ii.beginFilesRoForTests()
 			defer ic.Close()
 			st := &prune.Stat{
 				MinTxNum:         0,
@@ -322,7 +322,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 			ii.integrateDirtyFiles(sf, txFrom, txTo)
 
 			// without `reCalcVisibleFiles` must be nothing to prune - because files are not visible yet.
-			ic := ii.beginWithRecalcForTests()
+			ic := ii.beginFilesRoForTests()
 			defer ic.Close()
 			st := &prune.Stat{
 				MinTxNum:         0,
