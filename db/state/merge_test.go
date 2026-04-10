@@ -165,7 +165,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			return true
 		})
 
-		ic := ii.beginWithRecalcForTests()
+		ic := ii.beginForTests()
 		defer ic.Close()
 
 		mr := ic.findMergeRange(4, 32)
@@ -488,7 +488,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		ic := ii.beginWithRecalcForTests()
+		ic := ii.beginForTests()
 		defer ic.Close()
 		mr := ic.findMergeRange(4, 32)
 		assert.True(t, mr.needMerge)

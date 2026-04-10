@@ -423,16 +423,16 @@ func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *InvertedIn
 	return w
 }
 
-func (ii *InvertedIndex) beginWithRecalcForTests() *InvertedIndexRoTx {
+func (ii *InvertedIndex) beginForTests() *InvertedIndexRoTx {
 	iv := ii.calcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 	ii._visible = iv
 	return ii.beginFilesRo(iv)
 }
 
-// beginFilesRoForTests opens an RoTx using the current `_visible` snapshot,
+// beginForTestsNoRecalc opens an RoTx using the current `_visible` snapshot,
 // without recalculating it. Tests use this to verify that newly integrated
 // dirty files are NOT visible until reCalcVisibleFiles is called.
-func (ii *InvertedIndex) beginFilesRoForTests() *InvertedIndexRoTx {
+func (ii *InvertedIndex) beginForTestsNoRecalc() *InvertedIndexRoTx {
 	return ii.beginFilesRo(ii._visible)
 }
 

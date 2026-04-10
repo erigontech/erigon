@@ -65,7 +65,7 @@ func benchmarkIIMergeFiles(b *testing.B, numFiles int) {
 	}
 
 	// Determine the merge range covering all files.
-	ic := ii.beginWithRecalcForTests()
+	ic := ii.beginForTests()
 	defer ic.Close()
 
 	maxEndTxNum := ii.dirtyFilesEndTxNumMinimax()
