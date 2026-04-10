@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -30,8 +31,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"math/rand"
 
 	"github.com/erigontech/erigon/db/kv/prune"
 
@@ -1176,9 +1175,8 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 			return false, err
 		}
 		if stat == nil || stat.PrunedNothing() {
-			at.a.logger.Debug("[snapshots] PruneSmallBatches nilled or nothing")
 			if !fullStat.PrunedNothing() {
-				at.a.logger.Info("[snapshots] PruneSmallBatches finished", "took", time.Since(started).String(), "stat", fullStat.String())
+				at.a.logger.Debug("[snapshots] PruneSmallBatches finished", "took", time.Since(started).String(), "stat", fullStat.String())
 			}
 			return false, nil
 		}
@@ -1343,9 +1341,6 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 		logEvery = time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
 	}
-	//at.a.logger.Info("aggregator prune", "step", step,
-	//	"txn_range", fmt.Sprintf("[%d,%d)", txFrom, txTo), "limit", limit,
-	//	/*"stepsLimit", limit/at.a.stepSize,*/ "stepsRangeInDB", at.a.stepsRangeInDBAsStr(tx))
 	aggStat := newAggregatorPruneStat()
 	for id, d := range at.d {
 		//if _, ok := invalidateOnce[fmt.Sprintf("domain%s", d.d.ValuesTable)]; !ok {
@@ -1552,6 +1547,11 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 		}
 	}
 
+	if r.anyDomainValues() { // Prioritize domain value merges: if any domain has pending value merges, skip standalone II merges this round.
+		r.invertedIndex = nil
+		return r
+	}
+
 	for id, ii := range at.iis {
 		if ii.ii.Disable {
 			continue
@@ -1582,7 +1582,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 
 	t := time.Now()
 
-	at.a.logger.Info("[snapshots] merge state " + r.String())
+	at.a.logger.Debug("[snapshots] merge state " + r.String())
 	commitmentUseReferencedBranches := at.a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues
 
 	accStorageMerged := new(sync.WaitGroup)
@@ -1645,7 +1645,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 	err = g.Wait()
 	if err == nil {
 		closeFiles = false
-		at.a.logger.Info("[snapshots] state merge done "+r.String(), "in", time.Since(t))
+		at.a.logger.Debug("[snapshots] state merge done "+r.String(), "in", time.Since(t))
 	} else if !errors.Is(err, context.Canceled) {
 		at.a.logger.Warn(fmt.Sprintf("[snapshots] state merge failed err=%v %s", err, r.String()))
 	}
@@ -1799,6 +1799,27 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 			lastIdInDB(a.db, a.d[kv.StorageDomain]),
 			lastIdInDB(a.db, a.d[kv.CommitmentDomain]))
 		a.logger.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB)
+
+		// Stagger aggregation across fleet nodes to prevent synchronized I/O stalls.
+		// Set different values per node via AGGREGATION_DELAY_MS env var.
+		if dbg.AggregationDelayMs > 0 {
+			a.logger.Info("[snapshots] aggregation delay before build", "delay_ms", dbg.AggregationDelayMs)
+			timer := time.NewTimer(time.Duration(dbg.AggregationDelayMs) * time.Millisecond)
+			defer func() {
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+			}()
+			select {
+			case <-a.ctx.Done():
+				close(fin)
+				return
+			case <-timer.C:
+			}
+		}
 
 		// check if db has enough data (maybe we didn't commit them yet or all keys are unique so history is empty)
 		hasData := lastInDB > step // `step` must be fully-written - means `step+1` records must be visible

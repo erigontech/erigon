@@ -71,7 +71,7 @@ func defaultHarnessOpts(c harnessConfig) []beacontest.HarnessOption {
 	if c.v >= clparams.AltairVersion {
 		fcu.LightClientBootstraps[lastBlockRoot], err = lightclient_utils.CreateLightClientBootstrap(postState, blocks[len(blocks)-1])
 		require.NoError(c.t, err)
-		fcu.NewestLCUpdate = cltypes.NewLightClientUpdate(postState.Version())
+		fcu.NewestLCUpdate = cltypes.NewLightClientUpdate(postState.Version(), postState.BeaconConfig())
 		fcu.NewestLCUpdate.NextSyncCommittee = postState.NextSyncCommittee()
 		fcu.NewestLCUpdate.SignatureSlot = 1234
 		fcu.NewestLCUpdate.SyncAggregate = blocks[len(blocks)-1].Block.Body.SyncAggregate

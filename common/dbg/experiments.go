@@ -85,6 +85,8 @@ var (
 	MergeWorkers         = EnvInt("MERGE_WORKERS", 1)
 	CollateWorkers       = EnvInt("COLLATE_WORKERS", 2)
 
+	AggregationDelayMs = EnvInt("AGGREGATION_DELAY_MS", 0)
+
 	TraceAccounts         = EnvStrings("TRACE_ACCOUNTS", ",", nil)
 	TraceStateKeys        = EnvStrings("TRACE_STATE_KEYS", ",", nil)
 	TraceInstructions     = EnvBool("TRACE_INSTRUCTIONS", false)
@@ -106,6 +108,7 @@ var (
 	CaplinEfficientReorg  = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 	UseTxDependencies     = EnvBool("USE_TX_DEPENDENCIES", false)
 	UseStateCache         = EnvBool("USE_STATE_CACHE", true)
+	AssertStateCache      = EnvBool("ASSERT_STATE_CACHE", false)
 
 	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
 	TraceDeletion         = EnvBool("TRACE_DELETION", false)

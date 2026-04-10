@@ -157,19 +157,6 @@ func (d *Domain) kvBtAccessorNewFilePath(fromStep, toStep kv.Step) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.bt", d.FileVersion.AccessorBT.String(), d.FilenameBase, fromStep, toStep))
 }
 
-func (d *Domain) kvFilePathMask(fromStep, toStep kv.Step) string {
-	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("*-%s.%d-%d.kv", d.FilenameBase, fromStep, toStep))
-}
-func (d *Domain) kviAccessorFilePathMask(fromStep, toStep kv.Step) string {
-	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("*-%s.%d-%d.kvi", d.FilenameBase, fromStep, toStep))
-}
-func (d *Domain) kvExistenceIdxFilePathMask(fromStep, toStep kv.Step) string {
-	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("*-%s.%d-%d.kvei", d.FilenameBase, fromStep, toStep))
-}
-func (d *Domain) kvBtAccessorFilePathMask(fromStep, toStep kv.Step) string {
-	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("*-%s.%d-%d.bt", d.FilenameBase, fromStep, toStep))
-}
-
 func (d *Domain) kvFileNameMask(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("*-%s.%d-%d.kv", d.FilenameBase, fromStep, toStep)
 }
@@ -534,7 +521,6 @@ type DomainRoTx struct {
 	btReaders   []*btindex.BtIndex
 	mapReaders  []*recsplit.IndexReader
 
-	comBuf        []byte
 	lookupFullKey []byte // scratch buffer for lookupByShortenedKey
 
 	valsC      kv.Cursor
@@ -1510,6 +1496,10 @@ func (dt *DomainRoTx) Close() {
 			src.closeFilesAndRemove()
 		}
 	}
+	for _, r := range dt.mapReaders {
+		r.Close()
+	}
+	dt.mapReaders = nil
 	dt.ht.Close()
 
 	dt.visible.returnGetFromFileCache(dt.getFromFileCache)

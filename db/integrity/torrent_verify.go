@@ -93,7 +93,6 @@ func VerifyTorrentFiles(ctx context.Context, dir string, failFast bool, logger l
 	}()
 
 	for _, torrentFile := range toVerify {
-		torrentFile := torrentFile
 		g.Go(func() error {
 			defer completedFiles.Add(1)
 			err := verifyFileFromTorrent(ctx, torrentFile, &completedBytes)
