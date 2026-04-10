@@ -131,6 +131,47 @@ func BenchmarkDescendant8(b *testing.B) {
 	}
 }
 
+// slowWriter simulates a slow I/O destination (e.g. network, overloaded disk).
+// With SyncHandler all goroutines serialize on the mutex and total time ≈ N × delay.
+// Without it goroutines write in parallel and total time ≈ delay.
+type slowWriter struct{ delay time.Duration }
+
+func (w slowWriter) Write(p []byte) (int, error) {
+	time.Sleep(w.delay)
+	return len(p), nil
+}
+
+func TestStreamHandlerNoContention(t *testing.T) {
+	const (
+		goroutines = 50
+		writeDelay = 1 * time.Millisecond
+	)
+
+	lg := New()
+	lg.SetHandler(StreamHandler(slowWriter{delay: writeDelay}, TerminalFormatNoColor()))
+
+	start := time.Now()
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			lg.Info("msg")
+		}()
+	}
+	wg.Wait()
+	elapsed := time.Since(start)
+
+	// Without mutex: ~1ms (parallel writes).
+	// With SyncHandler mutex: ~50ms (serialized writes).
+	// Use 15ms as threshold — well above parallel, well below serialized.
+	limit := time.Duration(goroutines/3) * writeDelay
+	if elapsed > limit {
+		t.Fatalf("logging took %v with %d goroutines (limit %v) — likely mutex contention", elapsed, goroutines, limit)
+	}
+	t.Logf("elapsed=%v (limit=%v)", elapsed, limit)
+}
+
 func TestStreamHandlerZeroAllocs(t *testing.T) {
 	lg := New()
 	lg.SetHandler(StreamHandler(io.Discard, TerminalFormatNoColor()))

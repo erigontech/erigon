@@ -76,7 +76,7 @@ jobs:
           repository: ethereum/hive
           ref: ${{ steps.hive-version.outputs.ref }}
           path: hive
-
+    
       - name: Conditional Docker Login
         # Only login if we can. Workflow works without it but we want to avoid
         # rate limiting by Docker Hub when possible. External repos don't
@@ -92,7 +92,7 @@ jobs:
         with:
           username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
           password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
-
+    
       - name: Setup go env and cache
         uses: actions/setup-go@v6
         with:
