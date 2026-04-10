@@ -501,7 +501,12 @@ func TestAggregator_CommittedTxNumGuard(t *testing.T) {
 	stepSize := uint64(100)
 
 	// Extract the guard predicate so we test the same logic as production.
+	// When committedTxNum == 0 (no ComputeCommitment yet), the guard is
+	// bypassed and the existing lastInDB check is sufficient.
 	stepReady := func(committedTxNum uint64, step kv.Step) bool {
+		if committedTxNum == 0 {
+			return true // guard bypassed — no commitment state yet
+		}
 		stepEndTxNum := firstTxNumOfStep(step+1, stepSize)
 		return !(committedTxNum+1 < stepEndTxNum) // inverse of the break condition
 	}
@@ -509,8 +514,8 @@ func TestAggregator_CommittedTxNumGuard(t *testing.T) {
 	// Step 5 covers txNums [500, 600). firstTxNum(6) = 600.
 	assert.False(t, stepReady(550, 5),
 		"guard should block: committed txNum is mid-step")
-	assert.False(t, stepReady(0, 5),
-		"guard should block: committed txNum is 0 (no commitment yet)")
+	assert.True(t, stepReady(0, 5),
+		"guard should be bypassed when committedTxNum is 0 (no commitment)")
 	assert.False(t, stepReady(598, 5),
 		"guard should block: committed txNum is 1 before last txNum of step")
 

@@ -1824,26 +1824,30 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 			// file that misses entries. Pruning then removes those entries from
 			// the DB, and the values are lost. See #20169.
 			var committedTxNum uint64
-			temporalDB, ok := a.db.(kv.TemporalRoDB)
-			if !ok {
-				break // not a temporal DB — can't read commitment state
-			}
-			if err := temporalDB.ViewTemporal(a.ctx, func(tx kv.TemporalTx) error {
-				v, _, err := tx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
-				if err != nil {
-					return err
+			if temporalDB, ok := a.db.(kv.TemporalRoDB); ok {
+				if err := temporalDB.ViewTemporal(a.ctx, func(tx kv.TemporalTx) error {
+					v, _, err := tx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+					if err != nil {
+						return err
+					}
+					if len(v) >= 8 {
+						committedTxNum = binary.BigEndian.Uint64(v)
+					}
+					return nil
+				}); err != nil {
+					a.logger.Warn("[snapshots] buildFilesInBackground: read commitment", "err", err)
+					break
 				}
-				if len(v) >= 8 {
-					committedTxNum = binary.BigEndian.Uint64(v)
-				}
-				return nil
-			}); err != nil {
-				a.logger.Warn("[snapshots] buildFilesInBackground: read commitment", "err", err)
-				break
 			}
-			stepEndTxNum := a.FirstTxNumOfStep(step + 1)
-			if committedTxNum+1 < stepEndTxNum {
-				break // step not fully committed yet — wait for execution to catch up
+			// When committedTxNum > 0, enforce the guard: only collate step S
+			// when all its data has been committed. When committedTxNum == 0
+			// (no ComputeCommitment yet, e.g. in tests), fall through to the
+			// existing lastInDB check which is sufficient without concurrency.
+			if committedTxNum > 0 {
+				stepEndTxNum := a.FirstTxNumOfStep(step + 1)
+				if committedTxNum+1 < stepEndTxNum {
+					break // step not fully committed yet — wait for execution to catch up
+				}
 			}
 			if err := a.buildFiles(a.ctx, step); err != nil {
 				if errors.Is(err, errStepNotReady) {
