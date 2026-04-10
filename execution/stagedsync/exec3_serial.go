@@ -390,9 +390,6 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				// hash computation (deposit extraction from logs). See #20452.
 				finalizeReceipts := blockReceipts
 				if startTxIndex > 0 && len(txTask.Txs) > 0 {
-					// Use the first executed user tx task (not the block-end task) to
-					// derive blockStartTxNum, since the block-end task's TxIndex is
-					// len(txs) which would compute the wrong range.
 					firstTask := tasks[0].(*exec.TxTask)
 					blockStartTxNum := firstTask.TxNum - uint64(firstTask.TxIndex)
 					reader := state.NewHistoryReaderV3(se.applyTx, blockStartTxNum)
