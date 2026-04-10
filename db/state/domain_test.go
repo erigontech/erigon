@@ -130,10 +130,12 @@ func TestDomain_OpenFolder(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	list := d._visible.files
+	dc := d.beginWithRecalcForTests()
+	list := dc.files
 	require.NotEmpty(t, list)
 	ff := list[len(list)-1]
 	fn := ff.src.decompressor.FilePath()
+	dc.Close()
 	d.Close()
 
 	err = dir.RemoveFile(fn)
@@ -653,9 +655,9 @@ func collateAndMerge(t *testing.T, tx kv.RwTx, d *Domain, txs uint64) {
 	// Leave the last 2 aggregation steps un-collated
 	for step := kv.Step(0); step < kv.Step(txs/d.stepSize)-1; step++ {
 		require.NoError(t, d.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
-		require.Greater(t, len(d._visible.files), 0, d.dirtyFilesEndTxNumMinimax())
 
 		domainRoTx := d.beginWithRecalcForTests()
+		require.Greater(t, len(domainRoTx.files), 0, d.dirtyFilesEndTxNumMinimax())
 		_, err := domainRoTx.Prune(ctx, tx, step, uint64(step)*d.stepSize, uint64(step+1)*d.stepSize, math.MaxUint64, logEvery)
 		domainRoTx.Close()
 		require.NoError(t, err)
