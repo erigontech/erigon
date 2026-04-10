@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -97,7 +98,13 @@ func (s *Service) waitForReady(ctx context.Context) {
 			GenesisValidatorsRoot string `json:"genesis_validators_root"`
 		}
 		if err := s.client.get(ctx, "/eth/v1/beacon/genesis", &genesis); err == nil {
-			fmt.Sscanf(genesis.GenesisTime, "%d", &s.genesisTime)
+			gt, parseErr := strconv.ParseUint(genesis.GenesisTime, 10, 64)
+			if parseErr != nil {
+				s.logger.Warn("[dev-validator] invalid genesis_time", "value", genesis.GenesisTime, "err", parseErr)
+				time.Sleep(time.Second)
+				continue
+			}
+			s.genesisTime = gt
 			root, err := hexutil.Decode(genesis.GenesisValidatorsRoot)
 			if err == nil && len(root) == 32 {
 				copy(s.genesisValidatorsRoot[:], root)
@@ -135,8 +142,10 @@ func (s *Service) resolveIndices(ctx context.Context) error {
 		var pub common.Bytes48
 		copy(pub[:], pubBytes)
 		if key, ok := s.keysByPub[pub]; ok {
-			idx := uint64(0)
-			fmt.Sscanf(v.Index, "%d", &idx)
+			idx, parseErr := strconv.ParseUint(v.Index, 10, 64)
+			if parseErr != nil {
+				continue
+			}
 			key.ValidatorIndex = idx
 			resolved++
 		}
@@ -213,8 +222,10 @@ func (s *Service) maybePropose(ctx context.Context, slot uint64) {
 	}
 
 	for _, duty := range duties {
-		dutySlot := uint64(0)
-		fmt.Sscanf(duty.Slot, "%d", &dutySlot)
+		dutySlot, parseErr := strconv.ParseUint(duty.Slot, 10, 64)
+		if parseErr != nil {
+			continue
+		}
 		if dutySlot != slot || slot == 0 {
 			continue // skip genesis slot
 		}
@@ -358,8 +369,10 @@ func (s *Service) maybeAttest(ctx context.Context, slot uint64) {
 
 	attested := 0
 	for _, duty := range duties {
-		dutySlot := uint64(0)
-		fmt.Sscanf(duty.Slot, "%d", &dutySlot)
+		dutySlot, parseErr := strconv.ParseUint(duty.Slot, 10, 64)
+		if parseErr != nil {
+			continue
+		}
 		if dutySlot != slot {
 			continue
 		}
@@ -375,8 +388,10 @@ func (s *Service) maybeAttest(ctx context.Context, slot uint64) {
 			continue
 		}
 
-		committeeIndex := uint64(0)
-		fmt.Sscanf(duty.CommitteeIndex, "%d", &committeeIndex)
+		committeeIndex, parseErr := strconv.ParseUint(duty.CommitteeIndex, 10, 64)
+		if parseErr != nil {
+			continue
+		}
 
 		// Get attestation data for this slot + committee.
 		attPath := fmt.Sprintf("/eth/v1/validator/attestation_data?slot=%d&committee_index=%d",
@@ -395,10 +410,14 @@ func (s *Service) maybeAttest(ctx context.Context, slot uint64) {
 		}
 
 		// Build aggregation bits — set our bit position.
-		committeeLength := uint64(0)
-		validatorPosition := uint64(0)
-		fmt.Sscanf(duty.CommitteeLength, "%d", &committeeLength)
-		fmt.Sscanf(duty.ValidatorCommitteeIndex, "%d", &validatorPosition)
+		committeeLength, parseErr := strconv.ParseUint(duty.CommitteeLength, 10, 64)
+		if parseErr != nil {
+			continue
+		}
+		validatorPosition, parseErr := strconv.ParseUint(duty.ValidatorCommitteeIndex, 10, 64)
+		if parseErr != nil {
+			continue
+		}
 
 		aggBitsLen := (committeeLength + 7) / 8
 		aggBits := make([]byte, aggBitsLen)

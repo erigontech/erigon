@@ -1996,7 +1996,10 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		}
 
 		// Derive the signer key for the dev account.
-		signerKey, signerAddr := devgenesis.DeriveSignerKey(seed)
+		signerKey, signerAddr, err := devgenesis.DeriveSignerKey(seed)
+		if err != nil {
+			Fatalf("Failed to derive dev signer key: %v", err)
+		}
 		_ = signerKey // available for future use (e.g., auto-funding txs)
 		logger.Info("Using PoS dev mode",
 			"seed", seed,
@@ -2034,6 +2037,8 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		beaconCfg.BellatrixForkEpoch = 0
 		beaconCfg.CapellaForkEpoch = 0
 		beaconCfg.DenebForkEpoch = 0
+		beaconCfg.ElectraForkEpoch = 0
+		beaconCfg.FuluForkEpoch = 0
 		slotTime := uint64(ctx.Int(DevSlotTimeFlag.Name))
 		if slotTime < 2 {
 			slotTime = 2
@@ -2067,6 +2072,9 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		}
 
 		// Write beacon config YAML with all forks enabled from genesis.
+		// All known fork epochs are listed explicitly so that Caplin's
+		// CustomConfig (which falls back to minimal preset defaults for
+		// missing fields) activates every fork at epoch 0.
 		configPath := filepath.Join(tmpDir, "config.yaml")
 		configYAML := fmt.Sprintf(
 			"PRESET_BASE: minimal\n"+
@@ -2076,6 +2084,8 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 				"BELLATRIX_FORK_EPOCH: 0\n"+
 				"CAPELLA_FORK_EPOCH: 0\n"+
 				"DENEB_FORK_EPOCH: 0\n"+
+				"ELECTRA_FORK_EPOCH: 0\n"+
+				"FULU_FORK_EPOCH: 0\n"+
 				"TERMINAL_TOTAL_DIFFICULTY: 0\n",
 			genesisTime, beaconCfg.SecondsPerSlot)
 		if err := os.WriteFile(configPath, []byte(configYAML), 0644); err != nil {

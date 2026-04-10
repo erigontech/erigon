@@ -47,11 +47,14 @@ func DeriveKeys(seed string, count int) ([]*bls.PrivateKey, error) {
 // DeriveSignerKey derives a deterministic secp256k1 private key from the seed.
 // This is the EL transaction signing key — the corresponding address is pre-funded
 // in the dev genesis. Not for production.
-func DeriveSignerKey(seed string) (*ecdsa.PrivateKey, common.Address) {
+func DeriveSignerKey(seed string) (*ecdsa.PrivateKey, common.Address, error) {
 	h := sha256.Sum256(append([]byte("signer:"), []byte(seed)...))
-	key, _ := crypto.ToECDSA(h[:])
+	key, err := crypto.ToECDSA(h[:])
+	if err != nil {
+		return nil, common.Address{}, fmt.Errorf("derive signer key: %w", err)
+	}
 	addr := crypto.PubkeyToAddress(key.PublicKey)
-	return key, addr
+	return key, addr, nil
 }
 
 // DevConfig holds all the pieces needed to start a dev node.
