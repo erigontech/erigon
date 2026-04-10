@@ -38,7 +38,7 @@ State is stored across 4 domains (Accounts, Storage, Code, Commitment). Each dom
 
 **Write path**: `SharedDomains.DomainPut/DomainDel` → `TemporalMemBatch` → `DomainBufferedWriter.PutWithPrev/DeleteWithPrev` → `addValue` (ETL collector) + `DomainDiff.DomainUpdate` (changeset for unwind). Deletions are stored as 8-byte step-only entries (no value content).
 
-**Unwind path**: Changesets (`ChangeSets3` table) are collected backwards per block, merged via `MergeDiffSets`, then applied by `DomainRoTx.unwind()` which deletes the current-step entry and restores the previous value.
+**Unwind path**: Changesets (`ChangeSets3` table) are collected backwards per block, merged via `MergeDiffSets`, then applied by `DomainRoTx.unwind()` which deletes the current-step entry and restores the previous value. In changeset entries, `nil` value means the key belongs to a different step (skip restore), while `[]byte{}` means the key was deleted at that point (restore an empty tombstone to prevent fallthrough to stale file data). The `unwind()` function distinguishes these via `value != nil` rather than `len(value) > 0`.
 
 **Frozen files lack tombstones**: deleted keys are simply absent from frozen/snapshot files. If a deletion entry in MDBX is discarded or missing, `getLatestFromFiles` falls through to older files and returns stale pre-deletion data. This is the root cause of stale-value bugs where `gas used mismatch` diffs equal exactly `SSTORE_SET - SSTORE_RESET = 17100`.
 

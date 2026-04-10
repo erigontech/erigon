@@ -3498,58 +3498,71 @@ func TestDomain_DeletedKeyNotResurrectedByFiles(t *testing.T) {
 
 	t.Parallel()
 
-	logger := log.New()
-	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, logger)
-	ctx := context.Background()
-	require := require.New(t)
+	// Cover both DupSort (LargeValues=false) and non-DupSort (LargeValues=true) paths.
+	for _, tc := range []struct {
+		name      string
+		domainCfg statecfg.DomainCfg
+	}{
+		{"DupSort", statecfg.Schema.AccountsDomain},
+		{"LargeValues", statecfg.Schema.CodeDomain},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	tx, err := db.BeginRw(ctx)
-	require.NoError(err)
-	defer tx.Rollback()
+			logger := log.New()
+			db, d := testDbAndDomainOfStep(t, tc.domainCfg, 16, logger)
+			ctx := context.Background()
+			require := require.New(t)
 
-	domainRoTx := d.BeginFilesRo()
-	defer domainRoTx.Close()
-	writer := domainRoTx.NewWriter()
-	defer writer.Close()
+			tx, err := db.BeginRw(ctx)
+			require.NoError(err)
+			defer tx.Rollback()
 
-	key := []byte("key1")
-	value := []byte("value1")
+			domainRoTx := d.BeginFilesRo()
+			defer domainRoTx.Close()
+			writer := domainRoTx.NewWriter()
+			defer writer.Close()
 
-	// Step 0 (txNum 2): write key1=value1
-	err = writer.PutWithPrev(key, value, 2, nil)
-	require.NoError(err)
+			key := []byte("key1")
+			value := []byte("value1")
 
-	// Step 1 (txNum 18): delete key1
-	err = writer.DeleteWithPrev(key, 18, value)
-	require.NoError(err)
+			// Step 0 (txNum 2): write key1=value1
+			err = writer.PutWithPrev(key, value, 2, nil)
+			require.NoError(err)
 
-	err = writer.Flush(ctx, tx)
-	require.NoError(err)
-	domainRoTx.Close()
+			// Step 1 (txNum 18): delete key1
+			err = writer.DeleteWithPrev(key, 18, value)
+			require.NoError(err)
 
-	// Build files covering steps 0 and 1 without pruning DB entries.
-	// After this, files.EndTxNum() = 32 so the step-age guard considers
-	// step 1 "already covered by files" and would discard the deletion entry.
-	require.NoError(d.collateBuildIntegrate(ctx, 0, tx, background.NewProgressSet()))
-	require.NoError(d.collateBuildIntegrate(ctx, 1, tx, background.NewProgressSet()))
+			err = writer.Flush(ctx, tx)
+			require.NoError(err)
+			domainRoTx.Close()
 
-	require.NoError(tx.Commit())
+			// Build files covering steps 0 and 1 without pruning DB entries.
+			// After this, files.EndTxNum() = 32 so the step-age guard considers
+			// step 1 "already covered by files" and would discard the deletion entry.
+			require.NoError(d.collateBuildIntegrate(ctx, 0, tx, background.NewProgressSet()))
+			require.NoError(d.collateBuildIntegrate(ctx, 1, tx, background.NewProgressSet()))
 
-	roTx, err := db.BeginRo(ctx)
-	require.NoError(err)
-	defer roTx.Rollback()
+			require.NoError(tx.Commit())
 
-	domainRoTx = d.BeginFilesRo()
-	defer domainRoTx.Close()
+			roTx, err := db.BeginRo(ctx)
+			require.NoError(err)
+			defer roTx.Rollback()
 
-	v, _, found, err := domainRoTx.GetLatest(key, roTx)
-	require.NoError(err)
-	// The key was deleted at step 1. The deletion entry in DB must be
-	// authoritative even though step 1 is covered by frozen files.
-	// Without the fix, getLatestFromDb discards the deletion entry and
-	// getLatestFromFiles returns stale "value1" from the step 0 file.
-	require.True(found, "deletion entry should be found in DB")
-	require.Empty(v, "deleted key should have empty value, got %q", v)
+			domainRoTx = d.BeginFilesRo()
+			defer domainRoTx.Close()
+
+			v, _, found, err := domainRoTx.GetLatest(key, roTx)
+			require.NoError(err)
+			// The key was deleted at step 1. The deletion entry in DB must be
+			// authoritative even though step 1 is covered by frozen files.
+			// Without the fix, getLatestFromDb discards the deletion entry and
+			// getLatestFromFiles returns stale "value1" from the step 0 file.
+			require.True(found, "deletion entry should be found in DB")
+			require.Empty(v, "deleted key should have empty value, got %q", v)
+		})
+	}
 }
 
 // TestDomain_UnwindRestoresDeletionMarker is a regression test for the bug
@@ -3564,84 +3577,99 @@ func TestDomain_UnwindRestoresDeletionMarker(t *testing.T) {
 
 	t.Parallel()
 
-	logger := log.New()
-	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, logger)
-	ctx := context.Background()
-	require := require.New(t)
+	// Cover both DupSort (LargeValues=false) and non-DupSort (LargeValues=true) paths.
+	for _, tc := range []struct {
+		name      string
+		domainCfg statecfg.DomainCfg
+	}{
+		{"DupSort", statecfg.Schema.AccountsDomain},
+		{"LargeValues", statecfg.Schema.CodeDomain},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	// Phase 1: Write key1 through three states within step 0 and record diffs.
-	tx, err := db.BeginRw(ctx)
-	require.NoError(err)
-	defer tx.Rollback()
+			logger := log.New()
+			db, d := testDbAndDomainOfStep(t, tc.domainCfg, 16, logger)
+			ctx := context.Background()
+			require := require.New(t)
 
-	domainRoTx := d.BeginFilesRo()
-	defer domainRoTx.Close()
-	writer := domainRoTx.NewWriter()
-	defer writer.Close()
+			// Phase 1: Write key1 through three states within step 0 and record diffs.
+			tx, err := db.BeginRw(ctx)
+			require.NoError(err)
+			defer tx.Rollback()
 
-	key := []byte("key1")
-	value1 := []byte("value1")
-	value2 := []byte("value2")
+			domainRoTx := d.BeginFilesRo()
+			defer domainRoTx.Close()
+			writer := domainRoTx.NewWriter()
+			defer writer.Close()
 
-	diffSetMap := make(map[uint64][]kv.DomainEntryDiff)
+			key := []byte("key1")
+			value1 := []byte("value1")
+			value2 := []byte("value2")
 
-	// txNum 0: write key1=value1 (new key, prev=nil)
-	writer.diff = &kv.DomainDiff{}
-	err = writer.PutWithPrev(key, value1, 0, nil)
-	require.NoError(err)
-	diffSetMap[0] = writer.diff.GetDiffSet()
+			// txNum 0: write key1=value1 (new key, prev=nil)
+			writer.diff = &kv.DomainDiff{}
+			err = writer.PutWithPrev(key, value1, 0, nil)
+			require.NoError(err)
 
-	// txNum 1: delete key1 (prev=value1)
-	writer.diff = &kv.DomainDiff{}
-	err = writer.DeleteWithPrev(key, 1, value1)
-	require.NoError(err)
-	diffSetMap[1] = writer.diff.GetDiffSet()
+			// txNum 1: delete key1 (prev=value1)
+			writer.diff = &kv.DomainDiff{}
+			err = writer.DeleteWithPrev(key, 1, value1)
+			require.NoError(err)
 
-	// txNum 2: re-write key1=value2 (prev=nil, key was deleted)
-	writer.diff = &kv.DomainDiff{}
-	err = writer.PutWithPrev(key, value2, 2, nil)
-	require.NoError(err)
-	diffSetMap[2] = writer.diff.GetDiffSet()
+			// txNum 2: re-write key1=value2 (prev=nil, key was deleted)
+			// Only this diff is needed for the unwind — it captures the previous
+			// state (deleted → Value=[]byte{}) that unwind must restore.
+			writer.diff = &kv.DomainDiff{}
+			err = writer.PutWithPrev(key, value2, 2, nil)
+			require.NoError(err)
+			txNum2Diff := writer.diff.GetDiffSet()
 
-	err = writer.Flush(ctx, tx)
-	require.NoError(err)
-	domainRoTx.Close()
+			// Verify the nil-vs-empty distinction survives serialization round-trip.
+			// Production diffs go through SerializeDiffSet/DeserializeDiffSet when
+			// stored in ChangeSets3; this ensures the []byte{} tombstone is preserved.
+			txNum2Diff = changeset.DeserializeDiffSet(changeset.SerializeDiffSet(txNum2Diff, nil))
 
-	// Phase 2: Build files for step 0. The file will contain key1=value2
-	// (the latest value within step 0).
-	require.NoError(d.collateBuildIntegrate(ctx, 0, tx, background.NewProgressSet()))
-	require.NoError(tx.Commit())
+			err = writer.Flush(ctx, tx)
+			require.NoError(err)
+			domainRoTx.Close()
 
-	// Phase 3: Unwind to revert txNum 2 (keep txNums 0 and 1).
-	tx, err = db.BeginRw(ctx)
-	require.NoError(err)
-	defer tx.Rollback()
+			// Phase 2: Build files for step 0. The file will contain key1=value2
+			// (the latest value within step 0).
+			require.NoError(d.collateBuildIntegrate(ctx, 0, tx, background.NewProgressSet()))
+			require.NoError(tx.Commit())
 
-	domainRoTx = d.BeginFilesRo()
-	defer domainRoTx.Close()
+			// Phase 3: Unwind to revert txNum 2 (keep txNums 0 and 1).
+			tx, err = db.BeginRw(ctx)
+			require.NoError(err)
+			defer tx.Rollback()
 
-	// diff for txNum 2: prev was empty (key was deleted) → Value=[]byte{}
-	totalDiff := diffSetMap[2]
-	err = domainRoTx.unwind(ctx, tx, 0, 2, totalDiff)
-	require.NoError(err)
-	domainRoTx.Close()
-	require.NoError(tx.Commit())
+			domainRoTx = d.BeginFilesRo()
+			defer domainRoTx.Close()
 
-	// Phase 4: Verify GetLatest returns empty (deletion marker restored).
-	roTx, err := db.BeginRo(ctx)
-	require.NoError(err)
-	defer roTx.Rollback()
+			// diff for txNum 2: prev was empty (key was deleted) → Value=[]byte{}
+			err = domainRoTx.unwind(ctx, tx, 0, 2, txNum2Diff)
+			require.NoError(err)
+			domainRoTx.Close()
+			require.NoError(tx.Commit())
 
-	domainRoTx = d.BeginFilesRo()
-	defer domainRoTx.Close()
+			// Phase 4: Verify GetLatest returns empty (deletion marker restored).
+			roTx, err := db.BeginRo(ctx)
+			require.NoError(err)
+			defer roTx.Rollback()
 
-	v, _, found, err := domainRoTx.GetLatest(key, roTx)
-	require.NoError(err)
-	// After unwinding txNum 2, the state should reflect txNums 0-1.
-	// At txNum 1, key1 was deleted. The unwind must restore the deletion
-	// marker (empty tombstone) in DB. Without the fix, `if len(value) > 0`
-	// skips restoring the empty tombstone, and getLatestFromFiles returns
-	// stale "value2" from the step 0 file.
-	require.True(found, "deletion marker should be found after unwind")
-	require.Empty(v, "deleted key should have empty value after unwind, got %q", v)
+			domainRoTx = d.BeginFilesRo()
+			defer domainRoTx.Close()
+
+			v, _, found, err := domainRoTx.GetLatest(key, roTx)
+			require.NoError(err)
+			// After unwinding txNum 2, the state should reflect txNums 0-1.
+			// At txNum 1, key1 was deleted. The unwind must restore the deletion
+			// marker (empty tombstone) in DB. Without the fix, `if len(value) > 0`
+			// skips restoring the empty tombstone, and getLatestFromFiles returns
+			// stale "value2" from the step 0 file.
+			require.True(found, "deletion marker should be found after unwind")
+			require.Empty(v, "deleted key should have empty value after unwind, got %q", v)
+		})
+	}
 }
