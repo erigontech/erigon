@@ -921,17 +921,17 @@ type HistoryRoTx struct {
 	snappyReadBuffer []byte
 }
 
-func (h *History) beginWithRecalcForTests() *HistoryRoTx {
+func (h *History) beginForTests() *HistoryRoTx {
 	hv, hvi := h.calcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 	h._visibleFiles = hv
 	h.InvertedIndex._visible = hvi
 	return h.beginFilesRo(hv, hvi)
 }
 
-// beginFilesRoForTests opens an RoTx using the current `_visibleFiles` snapshot
+// beginFilesRoForTestsNoRecalc opens an RoTx using the current `_visibleFiles` snapshot
 // without recalculating it. Tests use this to verify that newly scanned/integrated
 // dirty files are NOT visible until reCalcVisibleFiles is called.
-func (h *History) beginFilesRoForTests() *HistoryRoTx {
+func (h *History) beginFilesRoForTestsNoRecalc() *HistoryRoTx {
 	return h.beginFilesRo(h._visibleFiles, h.InvertedIndex._visible)
 }
 
@@ -939,7 +939,7 @@ func (h *History) beginFilesRoForTests() *HistoryRoTx {
 // (cmd/integration) that open a bare History without an Aggregator. Production
 // code must go through Aggregator.BeginFilesRo — see Domain.beginWithRecalcForTests.
 func (h *History) BeginFilesRoForDebug() *HistoryRoTx {
-	return h.beginWithRecalcForTests()
+	return h.beginForTests()
 }
 
 func (h *History) beginFilesRo(files visibleFiles, iv *iiVisible) *HistoryRoTx {

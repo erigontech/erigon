@@ -201,7 +201,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			return true
 		})
 
-		hc := h.beginWithRecalcForTests()
+		hc := h.beginForTests()
 		defer hc.Close()
 		r := hc.findMergeRange(4, 32)
 		assert.True(t, r.history.needMerge)
@@ -230,7 +230,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			return true
 		})
 
-		hc := h.beginWithRecalcForTests()
+		hc := h.beginForTests()
 		defer hc.Close()
 
 		r := hc.findMergeRange(4, 32)
@@ -261,7 +261,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			return true
 		})
 
-		hc := h.beginWithRecalcForTests()
+		hc := h.beginForTests()
 		defer hc.Close()
 
 		r := hc.findMergeRange(4, 32)
@@ -295,7 +295,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			return true
 		})
 
-		hc := h.beginWithRecalcForTests()
+		hc := h.beginForTests()
 		defer hc.Close()
 
 		r := hc.findMergeRange(4, 32)
@@ -328,7 +328,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			return true
 		})
 
-		hc := h.beginWithRecalcForTests()
+		hc := h.beginForTests()
 		defer hc.Close()
 
 		r := hc.findMergeRange(4, 32)
@@ -361,7 +361,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			return true
 		})
 
-		hc := h.beginWithRecalcForTests()
+		hc := h.beginForTests()
 		defer hc.Close()
 
 		r := hc.findMergeRange(4, 32)
@@ -399,7 +399,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			return true
 		})
 
-		hc := h.beginWithRecalcForTests()
+		hc := h.beginForTests()
 		defer hc.Close()
 
 		r := hc.findMergeRange(4, 32)
@@ -434,7 +434,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			return true
 		})
 
-		hc := h.beginWithRecalcForTests()
+		hc := h.beginForTests()
 		defer hc.Close()
 
 		r := hc.findMergeRange(4, 32)
@@ -469,7 +469,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			return true
 		})
 
-		hc := h.beginWithRecalcForTests()
+		hc := h.beginForTests()
 		defer hc.Close()
 		r := hc.findMergeRange(4, 32)
 		assert.False(t, r.index.needMerge)
@@ -1149,7 +1149,7 @@ func TestHistoryAndIIAlignment(t *testing.T) {
 		})
 	})
 
-	roTx := h.beginWithRecalcForTests()
+	roTx := h.beginForTests()
 	defer roTx.Close()
 
 	for i, f := range roTx.files {
