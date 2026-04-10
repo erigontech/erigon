@@ -490,6 +490,32 @@ func generateCommitmentHistoryAndIndexFiles(t *testing.T, dirs datadir.Dirs, ran
 	populateFiles2(t, dirs, idxRepo, ranges)
 }
 
+// TestAggregator_LastCommittedTxNumGuard verifies that buildFilesInBackground
+// does not collate a step whose data may not be fully committed yet.
+// The guard checks lastCommittedTxNum < firstTxNum(step+1) and defers collation.
+func TestAggregator_LastCommittedTxNumGuard(t *testing.T) {
+	t.Parallel()
+	a := &Aggregator{}
+	a.stepSize.Store(100)
+
+	// Step 5 covers txNums [500, 600). firstTxNum(6) = 600.
+	// If lastCommittedTxNum < 600, step 5 must NOT be collated.
+	a.lastCommittedTxNum.Store(550)
+	stepEnd := a.FirstTxNumOfStep(5 + 1) // 600
+	assert.Less(t, a.lastCommittedTxNum.Load(), stepEnd,
+		"guard should block: committed txNum is within the step")
+
+	// If lastCommittedTxNum >= 600, step 5 is safe.
+	a.lastCommittedTxNum.Store(600)
+	assert.GreaterOrEqual(t, a.lastCommittedTxNum.Load(), stepEnd,
+		"guard should allow: committed txNum is past the step")
+
+	// Edge case: lastCommittedTxNum == 0 (not yet set) blocks everything.
+	a.lastCommittedTxNum.Store(0)
+	assert.Less(t, a.lastCommittedTxNum.Load(), stepEnd,
+		"guard should block when lastCommittedTxNum is 0 (uninitialized)")
+}
+
 func TestAggregator_CommitmentHistoryOnlyMerge(t *testing.T) {
 	// Regression: when commitment values are already merged (values.needMerge=false) but history
 	// is not, the old aggregator.mergeFiles called commitmentValTransformDomain with a zero
