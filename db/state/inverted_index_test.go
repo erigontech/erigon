@@ -315,6 +315,8 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		})
 
 		t.Run("prune was done", func(t *testing.T) {
+			ii, tx, logEvery, _, _ := setup(t)
+
 			collation, err := ii.collate(context.Background(), 0, tx)
 			require.NoError(t, err)
 			defer collation.Close()
@@ -323,27 +325,24 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 			txFrom, txTo := firstTxNumOfStep(0, ii.stepSize), firstTxNumOfStep(1, ii.stepSize)
 
 			// without `reCalcVisibleFiles` must be nothing to prune - because files are not visible yet.
-			ic := ii.beginForTestsNoRecalc()
+			ic := ii.beginForTests()
 			defer ic.Close()
 			ii.integrateDirtyFiles(sf, txFrom, txTo)
 
+			// Drain step 0 from the db so minTxNumInDB >= files.EndTxNum; otherwise
+			// CanPrune's files-based clause would return true regardless of progress state.
+			_, err = ic.TableScanningPrune(ctx, tx, txFrom, txTo, math.MaxUint64, logEvery, true, nil, nil, mxPruneSizeIndex, prune.DefaultStorageMode)
+			require.NoError(t, err)
+
 			st := &prune.Stat{
-				MinTxNum:         0,
-				MaxTxNum:         0,
-				PruneCountTx:     0,
-				PruneCountValues: 0,
-				DupsDeleted:      0,
-				LastPrunedValue:  nil,
-				LastPrunedKey:    nil,
-				KeyProgress:      prune.Done,
-				ValueProgress:    prune.Done,
-				TxFrom:           0,
-				TxTo:             10,
+				KeyProgress:   prune.Done,
+				ValueProgress: prune.Done,
+				TxFrom:        0,
+				TxTo:          10,
 			}
 			err = SavePruneValProgress(tx, ic.ii.ValuesTable, st)
 			require.NoError(t, err)
-			can := ic.CanPrune(tx, 10)
-			require.False(t, can)
+			require.False(t, ic.CanPrune(tx, 10))
 		})
 
 		t.Run("retire_one_step_no_force", func(t *testing.T) {

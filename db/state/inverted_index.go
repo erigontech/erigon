@@ -429,11 +429,6 @@ func (ii *InvertedIndex) beginForTests() *InvertedIndexRoTx {
 	return ii.beginFilesRo(iv)
 }
 
-// dirty files are NOT visible until reCalcVisibleFiles is called.
-func (ii *InvertedIndex) beginForTestsNoRecalc() *InvertedIndexRoTx {
-	return ii.beginFilesRo(ii._visible)
-}
-
 func (ii *InvertedIndex) beginFilesRo(iv *iiVisible) *InvertedIndexRoTx {
 	iv.files.refcntIncrement()
 	return &InvertedIndexRoTx{
