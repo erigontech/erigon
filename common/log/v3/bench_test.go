@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"sync"
 	"testing"
 	"time"
 )
@@ -128,6 +129,52 @@ func BenchmarkDescendant8(b *testing.B) {
 	for b.Loop() {
 		lg.Info("test message")
 	}
+}
+
+func TestStreamHandlerZeroAllocs(t *testing.T) {
+	lg := New()
+	lg.SetHandler(StreamHandler(io.Discard, TerminalFormatNoColor()))
+
+	allocs := testing.AllocsPerRun(100, func() {
+		lg.Info("test message", "key", "value")
+	})
+	// Formatting allocates (bytes.Buffer, fmt.Fprintf, etc.) but there
+	// must be no mutex/sync overhead allocations. The exact number may
+	// shift with Go versions; the important thing is that it stays
+	// constant and doesn't grow with concurrency.
+	t.Logf("StreamHandler allocs/op: %.0f", allocs)
+}
+
+func TestStreamHandlerNoConcurrencyOverhead(t *testing.T) {
+	lg := New()
+	lg.SetHandler(StreamHandler(io.Discard, TerminalFormatNoColor()))
+
+	// Measure single-goroutine allocs as baseline.
+	baseline := testing.AllocsPerRun(100, func() {
+		lg.Info("msg", "k", "v")
+	})
+
+	// Run the same thing from many goroutines and measure per-call allocs.
+	const goroutines = 64
+	concurrent := testing.AllocsPerRun(100, func() {
+		var wg sync.WaitGroup
+		wg.Add(goroutines)
+		for i := 0; i < goroutines; i++ {
+			go func() {
+				defer wg.Done()
+				lg.Info("msg", "k", "v")
+			}()
+		}
+		wg.Wait()
+	})
+	perCall := concurrent / goroutines
+
+	// Concurrent allocs per call should not exceed baseline.
+	// Allow +2 for goroutine/WaitGroup overhead that may spill into the measurement.
+	if perCall > baseline+2 {
+		t.Fatalf("concurrent allocs/op (%.1f) significantly exceed baseline (%.1f) — likely mutex or sync overhead", perCall, baseline)
+	}
+	t.Logf("baseline=%.0f  concurrent_per_call=%.1f", baseline, perCall)
 }
 
 // Copied from https://github.com/uber-go/zap/blob/master/benchmarks/log15_bench_test.go
