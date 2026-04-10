@@ -25,6 +25,19 @@ import (
 	"github.com/erigontech/erigon/db/services"
 )
 
+// finalizeSysCallGasReserve returns the amount of gas to reserve from the
+// user txn gas pool to leave room for EIP-7002 (withdrawal requests) and
+// EIP-7251 (consolidation requests) finalize system calls. Conservative bound
+// covering observed mainnet gas plus headroom; the actual gas used is added
+// to header.GasUsed in AssembleBlock.
+func finalizeSysCallGasReserve(cc *chain.Config, time uint64) uint64 {
+	if !cc.IsPrague(time) {
+		return 0
+	}
+	// EIP-7002 (~9K) + EIP-7251 (~9K) ≈ 18K observed; round up for safety.
+	return 25_000
+}
+
 type AssemblerCfg struct {
 	ChainConfig     *chain.Config
 	Engine          rules.Engine
@@ -155,7 +168,14 @@ func (ba *BlockAssembler) AddTransactions(
 
 	txnIdx := ibs.TxnIndex() + 1
 	header := ba.AssembledBlock.Header
-	gasPool := new(protocol.GasPool).AddGas(header.GasLimit - header.GasUsed)
+	// Reserve gas for the EIP-7002/7251 finalize system calls so user txns
+	// don't fill the block over the gas limit. The actual reserve is added to
+	// header.GasUsed at finalize time in AssembleBlock.
+	userGasBudget := header.GasLimit - header.GasUsed
+	if reserve := finalizeSysCallGasReserve(ba.cfg.ChainConfig, header.Time); reserve < userGasBudget {
+		userGasBudget -= reserve
+	}
+	gasPool := new(protocol.GasPool).AddGas(userGasBudget)
 	if header.BlobGasUsed != nil {
 		gasPool.AddBlobGas(ba.cfg.ChainConfig.GetMaxBlobGasPerBlock(header.Time) - *header.BlobGasUsed)
 	}
