@@ -68,10 +68,6 @@ type History struct {
 	// BeginRo() using _visibleFiles in zero-copy way
 	dirtyFiles *btree2.BTreeG[*FilesItem]
 
-	// _visibleFiles - underscore in name means: don't use this field directly, use BeginFilesRo()
-	// underlying array is immutable - means it's ready for zero-copy use
-	_visibleFiles []visibleFile
-
 	// _testBuildVIHook - test-only: called with the recsplit before the build loop in buildVI
 	_testBuildVIHook func(rs *recsplit.RecSplit)
 }
@@ -83,9 +79,8 @@ func NewHistory(cfg statecfg.HistCfg, stepSize, stepsInFrozenFile uint64, dirs d
 	}
 
 	h := History{
-		HistCfg:       cfg,
-		dirtyFiles:    btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		_visibleFiles: []visibleFile{},
+		HistCfg:    cfg,
+		dirtyFiles: btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 	}
 
 	var err error
@@ -744,7 +739,6 @@ func (sf HistoryFiles) CleanupOnError() {
 	}
 }
 func (h *History) reCalcVisibleFiles(toTxNum uint64) {
-	h._visibleFiles = calcVisibleFiles(h.dirtyFiles, h.Accessors, nil, false, toTxNum)
 	h.InvertedIndex.reCalcVisibleFiles(toTxNum)
 }
 
@@ -923,7 +917,6 @@ type HistoryRoTx struct {
 
 func (h *History) beginForTests() *HistoryRoTx {
 	hv, hvi := h.calcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
-	h._visibleFiles = hv
 	h.InvertedIndex._visible = hvi
 	return h.beginFilesRo(hv, hvi)
 }
