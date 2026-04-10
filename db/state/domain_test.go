@@ -3673,3 +3673,81 @@ func TestDomain_UnwindRestoresDeletionMarker(t *testing.T) {
 		})
 	}
 }
+
+// TestDomain_LargeValuesInterruptedPruneDoesNotResurrectTombstone is a
+// regression test for a LargeValues=true specific issue: the pseudo-dup
+// cursor iterates rows newest-first, so an interrupted prune can delete the
+// newest DB row for a key while leaving an older tombstone. getLatest must
+// cross-check files to avoid returning the stale tombstone as authoritative.
+func TestDomain_LargeValuesInterruptedPruneDoesNotResurrectTombstone(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	t.Parallel()
+
+	logger := log.New()
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.CodeDomain, 16, logger)
+	ctx := context.Background()
+	require := require.New(t)
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+
+	domainRoTx := d.BeginFilesRo()
+	defer domainRoTx.Close()
+	writer := domainRoTx.NewWriter()
+	defer writer.Close()
+
+	key := []byte("key1")
+	value1 := []byte("value1")
+	value2 := []byte("value2")
+
+	// Step 0 (txNum 2): write key1=value1
+	err = writer.PutWithPrev(key, value1, 2, nil)
+	require.NoError(err)
+
+	// Step 1 (txNum 18): delete key1
+	err = writer.DeleteWithPrev(key, 18, value1)
+	require.NoError(err)
+
+	// Step 2 (txNum 34): re-write key1=value2
+	err = writer.PutWithPrev(key, value2, 34, nil)
+	require.NoError(err)
+
+	err = writer.Flush(ctx, tx)
+	require.NoError(err)
+	domainRoTx.Close()
+
+	// Build files covering steps 0, 1, 2 without pruning DB entries.
+	require.NoError(d.collateBuildIntegrate(ctx, 0, tx, background.NewProgressSet()))
+	require.NoError(d.collateBuildIntegrate(ctx, 1, tx, background.NewProgressSet()))
+	require.NoError(d.collateBuildIntegrate(ctx, 2, tx, background.NewProgressSet()))
+
+	// Simulate interrupted prune for LargeValues=true: delete only the newest
+	// DB row (step 2) as if prune processed it first (smallest ^step) and then
+	// timed out before reaching the older tombstone at step 1.
+	var invStepBytes [8]byte
+	binary.BigEndian.PutUint64(invStepBytes[:], ^uint64(2))
+	fullKey := append(append([]byte{}, key...), invStepBytes[:]...)
+	err = tx.Delete(d.ValuesTable, fullKey)
+	require.NoError(err)
+
+	require.NoError(tx.Commit())
+
+	roTx, err := db.BeginRo(ctx)
+	require.NoError(err)
+	defer roTx.Rollback()
+
+	domainRoTx = d.BeginFilesRo()
+	defer domainRoTx.Close()
+
+	v, _, found, err := domainRoTx.GetLatest(key, roTx)
+	require.NoError(err)
+	// The key was re-written at step 2 (value2). The step-2 DB row was pruned
+	// into files, but the older tombstone at step 1 survived (interrupted prune).
+	// getLatest must cross-check files and return value2, not the stale tombstone.
+	require.True(found, "key should be found via file cross-check")
+	require.Equal(value2, v, "should return file value, not stale tombstone")
+}
