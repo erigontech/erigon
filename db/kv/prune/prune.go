@@ -185,11 +185,6 @@ type StartPos struct {
 	StartVal []byte
 }
 
-// IsDeletionEntry is a callback that returns true if a (key, dupValue) pair
-// represents a deletion marker that must be preserved during pruning.
-// When non-nil, matching entries are skipped instead of deleted.
-type IsDeletionEntry func(key, dupValue []byte) bool
-
 func TableScanningPrune(
 	ctx context.Context,
 	name, filenameBase string,
@@ -200,7 +195,6 @@ func TableScanningPrune(
 	asserts bool,
 	prevStat *Stat,
 	mode StorageMode,
-	isDeletion IsDeletionEntry,
 ) (stat *Stat, err error) {
 	stat = &Stat{MinTxNum: math.MaxUint64}
 	start := time.Now()
@@ -292,7 +286,7 @@ func TableScanningPrune(
 		}
 	}
 
-	lastVal, err := tableScanningPrune(ctx, stat, filenameBase, txFrom, txTo, txNumGetter, valDelCursor, keysCursor, asserts, throttling, logEvery, logger, prevStat.ValueProgress, prevStat.LastPrunedValue, isDeletion)
+	lastVal, err := tableScanningPrune(ctx, stat, filenameBase, txFrom, txTo, txNumGetter, valDelCursor, keysCursor, asserts, throttling, logEvery, logger, prevStat.ValueProgress, prevStat.LastPrunedValue)
 	if err != nil {
 		return nil, err
 	}
@@ -322,7 +316,6 @@ func tableScanningPrune(
 	logger log.Logger,
 	valueProgress Progress,
 	lastPrunedValue []byte,
-	isDeletion IsDeletionEntry,
 ) (interrupted []byte, err error) {
 	var val, txNumBytes []byte
 	switch valueProgress {
@@ -364,12 +357,6 @@ func tableScanningPrune(
 		stat.MinTxNum = min(stat.MinTxNum, txNum)
 		stat.MaxTxNum = max(stat.MaxTxNum, txNum)
 
-		// When the newest dup for this key is a deletion marker, skip
-		// the entire key to preserve the deletion evidence. See #20169.
-		if isDeletion != nil && isDeletion(val, lastDupTxNumB) {
-			continue
-		}
-
 		// All dups in prune range: bulk delete without repositioning cursor
 		if lastDupTxNum < txTo && txNum >= txFrom {
 			if throttling != nil {
@@ -388,7 +375,7 @@ func tableScanningPrune(
 			}
 			stat.PruneCountValues += dups
 		} else {
-			// Selective per-dup deletion: reposition to first dup for iteration.
+			// Selective per-dup deletion: reposition to first dup for iteration
 			_, err = valDelCursor.FirstDup()
 			if err != nil {
 				return nil, fmt.Errorf("FirstDup iterate over %s index keys: %w", filenameBase, err)
@@ -404,7 +391,6 @@ func tableScanningPrune(
 				if txNumDup >= txTo {
 					break
 				}
-
 				if throttling != nil {
 					time.Sleep(*throttling)
 				}

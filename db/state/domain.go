@@ -1965,18 +1965,8 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 
 	prg.KeyProgress = prune.Done // domains don't have key tables
 
-	// Preserve deletion entries (empty values) during pruning.
-	// Background file collation can race with execution commits, producing files
-	// that miss a deletion entry. The DB copy is then the only evidence the key
-	// was deleted; removing it causes stale reads from older files.
-	isDeletion := prune.IsDeletionEntry(func(key, dupValue []byte) bool {
-		if dt.d.LargeValues {
-			return len(dupValue) == 0
-		}
-		return len(dupValue) == 8 // 8-byte inverted step only, no value bytes
-	})
 	pruneStat, err := prune.TableScanningPrune(ctx, "domain "+dt.name.String(), dt.d.FilenameBase, txFrom, txTo, limit, dt.stepSize,
-		logEvery, dt.d.logger, nil, valsCursor, asserts, prg, mode, isDeletion)
+		logEvery, dt.d.logger, nil, valsCursor, asserts, prg, mode)
 	if err != nil {
 		return stat, err
 	}
