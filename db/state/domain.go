@@ -1288,8 +1288,10 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	defer valsCursor.Close()
 	// Revert keys using diff entries.
 	// Always: delete current entry at the write step, restore prevValue at unwind target step.
-	// value == nil means different step (entry remains at its own step position, skip restore).
-	// value == []byte{} means key was deleted (write empty tombstone to prevent fallthrough to stale file data).
+	// value == nil means different step (skip restore; entry remains at its own step position).
+	//   Only appears from legacy V0 changesets where valueLen==0 deserializes as nil.
+	// value == []byte{} means no previous value existed (key was new or was already deleted);
+	//   write an empty tombstone to restore absence and prevent fallthrough to stale file data.
 	unwindStepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(unwindStepBytes, ^uint64(step))
 
@@ -1301,7 +1303,7 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			if err := rwTx.Delete(d.ValuesTable, key); err != nil {
 				return err
 			}
-			// Restore previous value at unwind step (nil = different step, skip; []byte{} = deleted, write tombstone)
+			// Restore previous value at unwind step (nil = different step/V0 legacy, skip; []byte{} = absent, write tombstone)
 			if value != nil {
 				fullKey := key[:len(key)-8]
 				if err := rwTx.Put(d.ValuesTable, append(fullKey, unwindStepBytes...), value); err != nil {
@@ -1326,7 +1328,7 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			}
 		}
 
-		// Restore previous value at unwind step (nil = different step, skip; []byte{} = deleted, write tombstone)
+		// Restore previous value at unwind step (nil = different step/V0 legacy, skip; []byte{} = absent, write tombstone)
 		if value != nil {
 			if err := valsCursor.Put(fullKey, append(unwindStepBytes, value...)); err != nil {
 				return err
