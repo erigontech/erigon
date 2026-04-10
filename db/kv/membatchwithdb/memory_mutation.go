@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -882,7 +883,7 @@ func (m *MemoryMutation) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byt
 	m.mu.RLock()
 	if tbl := m.domainOverlay[name]; tbl != nil {
 		for k, e := range tbl {
-			if !e.deleted && stringHasPrefix(k, prefix) {
+			if !e.deleted && strings.HasPrefix(k, string(prefix)) {
 				if bestVal == nil || k < bestKey {
 					bestKey = k
 					bestVal = common.Copy(e.value)
@@ -1071,7 +1072,7 @@ func (m *MemoryMutation) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum 
 	m.mu.Lock()
 	tbl := m.domainTable(domain)
 	for k := range tbl {
-		if stringHasPrefix(k, prefix) {
+		if strings.HasPrefix(k, string(prefix)) {
 			tbl[k] = domainEntry{deleted: true}
 		}
 	}
@@ -1118,11 +1119,6 @@ func (m *MemoryMutation) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum 
 	return nil
 }
 
-// stringHasPrefix reports whether s begins with prefix.
-func stringHasPrefix(s string, prefix []byte) bool {
-	return len(s) >= len(prefix) && s[:len(prefix)] == string(prefix)
-}
-
 // prefixUpperBound returns the exclusive upper bound for a prefix range scan.
 // Returns nil if the prefix is all 0xff bytes (unbounded — scan to end of domain).
 func prefixUpperBound(prefix []byte) []byte {
@@ -1147,7 +1143,7 @@ func collectParentOverlayKeys(backing kv.TemporalTx, domain kv.Domain, prefix []
 	parent.mu.RLock()
 	if tbl := parent.domainOverlay[domain]; tbl != nil {
 		for k, e := range tbl {
-			if !e.deleted && stringHasPrefix(k, prefix) {
+			if !e.deleted && strings.HasPrefix(k, string(prefix)) {
 				keys = append(keys, k)
 			}
 		}
