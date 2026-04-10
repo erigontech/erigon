@@ -1202,16 +1202,17 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 
 	require.NoError(t, err)
 
-	histRoTx = dom.History.beginWithRecalcForTests()
-	defer histRoTx.Close()
-	histVisible = histRoTx.files
+	domRoTx = dom.beginWithRecalcForTests()
+	defer domRoTx.Close()
+	domVisible = domRoTx.files
+	histVisible = domRoTx.ht.files
 	// domain files for same range should not be available so lengths should match
-	require.Len(t, dom._visible.files, len(run1Doms)-len(removedHist))
-	require.Len(t, histVisible, len(dom._visible.files))
+	require.Len(t, domVisible, len(run1Doms)-len(removedHist))
+	require.Len(t, histVisible, len(domVisible))
 	require.Len(t, histVisible, len(run1Hist)-len(removedHist))
 
-	for i := 0; i < len(dom._visible.files); i++ {
-		require.Equalf(t, run1Doms[i], dom._visible.files[i].src.decompressor.FileName(), "kv i=%d", i)
+	for i := 0; i < len(domVisible); i++ {
+		require.Equalf(t, run1Doms[i], domVisible[i].src.decompressor.FileName(), "kv i=%d", i)
 		require.Equalf(t, run1Hist[i], histVisible[i].src.decompressor.FileName(), " v i=%d", i)
 	}
 
