@@ -2081,19 +2081,6 @@ func (dt *DomainRoTx) oldPrune(ctx context.Context, rwTx kv.RwTx, step kv.Step, 
 		if is > step {
 			continue
 		}
-
-		// Never prune deletion entries (empty values). They are authoritative
-		// markers that a key was deleted. If the background file collation raced
-		// with the execution commit and the file missed the deletion, this DB
-		// entry is the only evidence that the key no longer exists. Pruning it
-		// causes getLatestFromDb to return found=false, and getLatestFromFiles
-		// falls through to an older file that still has the pre-deletion value.
-		// See getLatestFromDb's len(v)==0 check which returns found=true for these.
-		isDeletion := (dt.d.LargeValues && len(v) == 0) || (!dt.d.LargeValues && len(v) == 8) // 8 = step bytes only, no value
-		if isDeletion {
-			continue
-		}
-
 		if limit == 0 {
 			err = delFunc(k, v)
 			if err != nil {
