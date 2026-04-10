@@ -313,15 +313,6 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 	closeWhatNotInList(d.dirtyFiles, fNames)
 }
 
-// reCalcVisibleFiles mutates per-entity _visible fields. Only direct callers
-// (tests that construct a standalone Domain without an Aggregator) should use
-// this. The Aggregator path goes through calcVisibleFiles + bundle instead, so
-// the mutating writes don't race with concurrent Aggregator-backed readers.
-func (d *Domain) reCalcVisibleFiles(toTxNum uint64) {
-	_, _, hiv := d.calcVisibleFiles(toTxNum)
-	d.History.InvertedIndex._visible = hiv
-}
-
 // calcVisibleFiles is pure — it does not mutate d, d.History, or d.History.InvertedIndex.
 // Aggregator.recalcVisibleFiles uses it to assemble a cross-entity consistent
 // snapshot that is published via a single atomic store.
