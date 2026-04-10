@@ -443,10 +443,13 @@ func (a *ApiHandler) produceBlock(
 		ParentRoot:    baseBlockRoot,
 		Cfg:           a.beaconChainCfg,
 	}
-	if !a.routerCfg.Builder || builderErr != nil {
+	stateVersion := a.beaconChainCfg.GetCurrentStateVersion(targetSlot / a.beaconChainCfg.SlotsPerEpoch)
+	if !a.routerCfg.Builder || builderErr != nil || stateVersion.AfterOrEqual(clparams.GloasVersion) {
 		// directly return the block if:
 		// 1. builder is not enabled
 		// 2. failed to get builder payload
+		// 3. GLOAS: MEV-Boost blinded blocks not supported; builders use ePBS gossip bids
+		// TODO(GLOAS): select highest bid from epbsPool instead of always self-building
 		block.BeaconBody = beaconBody
 		block.Blobs = blobs
 		block.KzgProofs = kzgProofs
@@ -738,16 +741,22 @@ func (a *ApiHandler) produceBeaconBody(
 						})
 					}
 
-					// Assemble the KZG commitments list (pre-GLOAS only; GLOAS commitments live in the bid)
+					// Assemble the KZG commitments list
 					if stateVersion.Before(clparams.GloasVersion) {
+						// Pre-GLOAS: commitments in BeaconBody
 						var c cltypes.KZGCommitment
 						copy(c[:], bundles.Commitments[i])
 						beaconBody.BlobKzgCommitments.Append(&c)
+					} else {
+						// GLOAS: commitments in the bid
+						var c cltypes.KZGCommitment
+						copy(c[:], bundles.Commitments[i])
+						beaconBody.SignedExecutionPayloadBid.Message.BlobKzgCommitments.Append(&c)
 					}
 				}
 
-				// Add the requests bundle
-				if requestsBundle != nil && requestsBundle.GetRequests() != nil {
+				// Add the requests bundle (pre-GLOAS only; in GLOAS, ExecutionRequests live in the envelope)
+				if stateVersion.Before(clparams.GloasVersion) && requestsBundle != nil && requestsBundle.GetRequests() != nil {
 					if len(requestsBundle.GetRequests()) > 0 {
 						log.Info("BlockProduction: Received requests bundle", "len", len(requestsBundle.GetRequests()))
 					}
@@ -859,6 +868,29 @@ func (a *ApiHandler) produceBeaconBody(
 	if executionPayload == nil {
 		return nil, 0, errors.New("failed to produce execution payload")
 	}
+
+	if stateVersion.AfterOrEqual(clparams.GloasVersion) {
+		// GLOAS self-build: populate the bid with payload metadata.
+		// TODO(GLOAS): the executionPayload built here is discarded — it must be
+		// packaged into a SignedExecutionPayloadEnvelope and broadcast on the
+		// execution_payload gossip topic for the block to reach FULL status.
+		// This requires the proposer's BLS signature (beacon-APIs V4, PR #580).
+		bid := beaconBody.SignedExecutionPayloadBid.Message
+		bid.Slot = targetSlot
+		bid.ParentBlockRoot = baseBlockRoot
+		bid.ParentBlockHash = executionPayload.ParentHash
+		bid.BlockHash = executionPayload.BlockHash
+		bid.PrevRandao = executionPayload.PrevRandao
+		bid.FeeRecipient = executionPayload.FeeRecipient
+		bid.GasLimit = executionPayload.GasLimit
+		bid.BuilderIndex = clparams.BuilderIndexSelfBuild
+		bid.Value = 0
+		bid.ExecutionPayment = 0
+		// BlobKzgCommitments are already populated during bundle processing above
+		beaconBody.SignedExecutionPayloadBid.Signature = common.Bytes96(bls.InfiniteSignature)
+		return beaconBody, executionValue, nil
+	}
+
 	beaconBody.ExecutionPayload = executionPayload
 	return beaconBody, executionValue, nil
 }
