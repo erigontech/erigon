@@ -592,7 +592,8 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte, hi, lo uint64) (v
 // bundle and assumes nothing else touches those fields. Production code goes
 // through Aggregator.BeginFilesRo.
 func (d *Domain) beginWithRecalcForTests() *DomainRoTx {
-	return d.beginFilesRo(d._visible, d.History._visibleFiles, d.History.InvertedIndex._visible)
+	dv, hv, iv := d.calcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
+	return d.beginFilesRo(dv, hv, iv)
 }
 
 // beginFilesRo lets Aggregator.BeginFilesRo pass a snapshot pinned to a single
