@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -54,9 +53,11 @@ type ChainHead struct {
 	HeadTd        *uint256.Int
 }
 
-// cachedStatusData holds a cached StatusData result with its fetch time.
-type cachedStatusData struct {
-	data      *sentryproto.StatusData
+// cachedChainHead holds a cached ChainHead with its fetch time.
+// We cache ChainHead (not the protobuf) so that makeStatusData builds a fresh
+// *sentryproto.StatusData per call, avoiding shared-mutable-protobuf issues.
+type cachedChainHead struct {
+	head      ChainHead
 	fetchedAt time.Time
 }
 
@@ -73,9 +74,11 @@ type StatusDataProvider struct {
 	logger log.Logger
 
 	// Cache: double-checked locking to coalesce concurrent DB reads.
-	// Only one goroutine refreshes; others wait and reuse the result.
-	cache   atomic.Pointer[cachedStatusData]
-	cacheMu sync.Mutex
+	// refreshSem is a capacity-1 channel used as a context-aware mutex:
+	// sending acquires; receiving releases. This lets waiters honour ctx
+	// cancellation instead of blocking unconditionally on sync.Mutex.
+	cache      atomic.Pointer[cachedChainHead]
+	refreshSem chan struct{}
 }
 
 func NewStatusDataProvider(
@@ -93,6 +96,7 @@ func NewStatusDataProvider(
 		genesisHash: genesis.Hash(),
 		genesisHead: makeGenesisChainHead(genesis),
 		logger:      logger,
+		refreshSem:  make(chan struct{}, 1),
 	}
 
 	s.heightForks, s.timeForks = forkid.GatherForks(chainConfig, genesis.Time())
@@ -142,45 +146,52 @@ func (s *StatusDataProvider) makeStatusData(head ChainHead) *sentryproto.StatusD
 
 // GetStatusData returns the current StatusData.
 //
-// Results are cached for statusDataCacheTTL (2s). Concurrent callers share a
-// single DB read via double-checked locking: the first goroutine to find an
-// expired cache acquires cacheMu and refreshes; others wait and reuse the
-// refreshed value.
+// The ChainHead is cached for statusDataCacheTTL (2s). A fresh
+// *sentryproto.StatusData is built per call so callers may safely mutate
+// the returned protobuf without corrupting a shared object.
 //
-// The two former db.View() calls (MinimumBlockAvailable + ReadChainHead) are
-// merged into a single read transaction to halve MDBX reader pressure.
+// Concurrent callers share a single DB read via double-checked locking:
+// the first goroutine to find an expired cache acquires refreshSem and
+// refreshes; others wait in a ctx-aware select and reuse the refreshed
+// value. Callers whose context is cancelled while waiting get ctx.Err()
+// instead of blocking indefinitely.
+//
+// The two former db.View() calls (MinimumBlockAvailable + ReadChainHead)
+// are merged into a single read transaction to halve MDBX reader pressure.
 //
 // Falls back to snapshot data when the DB head is unavailable.
 func (s *StatusDataProvider) GetStatusData(ctx context.Context) (*sentryproto.StatusData, error) {
 	// Fast path: serve from cache if fresh (lock-free).
 	if c := s.cache.Load(); c != nil && time.Since(c.fetchedAt) < statusDataCacheTTL {
-		return c.data, nil
+		return s.makeStatusData(c.head), nil
 	}
 
-	// Slow path: acquire mutex so only one goroutine refreshes.
-	s.cacheMu.Lock()
-	defer s.cacheMu.Unlock()
+	// Slow path: acquire refresh semaphore, respecting ctx cancellation.
+	select {
+	case s.refreshSem <- struct{}{}:
+		// We are the refresher.
+		defer func() { <-s.refreshSem }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 
 	// Double-check: another goroutine may have refreshed while we waited.
 	if c := s.cache.Load(); c != nil && time.Since(c.fetchedAt) < statusDataCacheTTL {
-		return c.data, nil
+		return s.makeStatusData(c.head), nil
 	}
 
-	result, err := s.fetchStatusData(ctx)
+	head, err := s.fetchChainHead(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	s.cache.Store(&cachedStatusData{
-		data:      result,
-		fetchedAt: time.Now(),
-	})
-	return result, nil
+	s.cache.Store(&cachedChainHead{head: head, fetchedAt: time.Now()})
+	return s.makeStatusData(head), nil
 }
 
-// fetchStatusData reads MinimumBlockAvailable and ChainHead in a single DB
+// fetchChainHead reads MinimumBlockAvailable and ChainHead in a single DB
 // read transaction. Falls back to snapshot data when the DB head is missing.
-func (s *StatusDataProvider) fetchStatusData(ctx context.Context) (*sentryproto.StatusData, error) {
+func (s *StatusDataProvider) fetchChainHead(ctx context.Context) (ChainHead, error) {
 	var (
 		chainHead    ChainHead
 		minimumBlock uint64
@@ -196,23 +207,23 @@ func (s *StatusDataProvider) fetchStatusData(ctx context.Context) (*sentryproto.
 		chainHead, headErr = ReadChainHeadWithTx(tx, minimumBlock)
 		return nil // headErr handled below (ErrNoHead → snapshot fallback)
 	}); err != nil {
-		return nil, fmt.Errorf("GetStatusData: %w", err)
+		return ChainHead{}, fmt.Errorf("GetStatusData: %w", err)
 	}
 
 	if headErr == nil {
-		return s.makeStatusData(chainHead), nil
+		return chainHead, nil
 	}
 	if !errors.Is(headErr, ErrNoHead) {
-		return nil, headErr
+		return ChainHead{}, headErr
 	}
 
 	s.logger.Warn("sentry.StatusDataProvider: The canonical chain current header not found in the database. Check the database consistency. Using latest available snapshot data.")
 
 	snapHead, err := s.ReadChainHeadFromSnapshots(ctx, minimumBlock)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read chain head from snapshots: %w", err)
+		return ChainHead{}, fmt.Errorf("failed to read chain head from snapshots: %w", err)
 	}
-	return s.makeStatusData(snapHead), nil
+	return snapHead, nil
 }
 
 // ReadChainHeadWithTx reads chain head in DB
