@@ -40,10 +40,10 @@ Two cooperating bugs in the domain state layer, both rooted in df770fadfe (Feb 2
 **Files:**
 - Modify: `db/state/domain.go`
 
-- [ ] Line 1304 (LargeValues path): change `if len(value) > 0` to `if value != nil`
-- [ ] Line 1329 (DupSort path): change `if len(value) > 0` to `if value != nil`
-- [ ] Update comments at lines 1291, 1303, 1328 to reflect new nil-vs-empty semantics: nil = different step (entry remains at its own step position), non-nil including empty = restore at unwind step (tombstone prevents fallthrough to stale file data)
-- [ ] Run `go test ./db/state/... -run TestDomain_Unwind` — existing test must pass
+- [x] Line 1304 (LargeValues path): change `if len(value) > 0` to `if value != nil`
+- [x] Line 1329 (DupSort path): change `if len(value) > 0` to `if value != nil`
+- [x] Update comments at lines 1291, 1303, 1328 to reflect new nil-vs-empty semantics: nil = different step (entry remains at its own step position), non-nil including empty = restore at unwind step (tombstone prevents fallthrough to stale file data)
+- [x] Run `go test ./db/state/... -run TestDomain_Unwind` — existing test must pass
 
 ### Task 3: Add regression tests
 
