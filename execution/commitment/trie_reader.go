@@ -116,6 +116,11 @@ func (tr *TrieReader) Lookup(hashedKey []byte) (c cell, found bool, err error) {
 			return c, false, nil
 		}
 
+		nibble := int(hashedKey[depth])
+		if nibble > 0x0f {
+			return c, false, fmt.Errorf("invalid nibble %d at depth %d", nibble, depth)
+		}
+
 		prefix := nibbles.HexToCompact(hashedKey[:depth])
 		branchData, _, err := tr.ctx.Branch(prefix)
 		if err != nil {
@@ -128,7 +133,6 @@ func (tr *TrieReader) Lookup(hashedKey []byte) (c cell, found bool, err error) {
 
 		afterMap := binary.BigEndian.Uint16(branchData[2:4])
 		cellData := branchData[4:]
-		nibble := int(hashedKey[depth])
 
 		if afterMap&(uint16(1)<<nibble) == 0 {
 			return c, false, nil
