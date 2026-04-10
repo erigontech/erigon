@@ -152,42 +152,60 @@ func TestStreamHandlerNoContention(t *testing.T) {
 	}
 
 	const (
-		goroutines = 5000
-		writeDelay = 1 * time.Millisecond
+		goroutines = 100
+		writeDelay = 2 * time.Millisecond
 	)
 
-	wr := &slowWriter{delay: writeDelay}
-	lg := New()
-	lg.SetHandler(StreamHandler(wr, TerminalFormatNoColor()))
+	run := func(handler Handler, wr *slowWriter) (time.Duration, int64) {
+		lg := New()
+		lg.SetHandler(handler)
 
-	start := time.Now()
-	var wg sync.WaitGroup
-	wg.Add(goroutines)
-	for i := 0; i < goroutines; i++ {
-		go func() {
-			defer wg.Done()
-			lg.Info("msg")
-		}()
-	}
-	wg.Wait()
-	elapsed := time.Since(start)
+		start := time.Now()
+		var wg sync.WaitGroup
+		wg.Add(goroutines)
+		for i := 0; i < goroutines; i++ {
+			go func() {
+				defer wg.Done()
+				lg.Info("msg")
+			}()
+		}
+		wg.Wait()
 
-	// Without a global write mutex, total time should stay much closer to a
-	// single writeDelay (~1ms) than to the fully serialized case of
-	// goroutines*writeDelay (~5s with the constants above).
-	// Use goroutines/3 * writeDelay as the threshold (~1.6s here): well above
-	// the parallel case, but still comfortably below a serialized path.
-	limit := time.Duration(goroutines/3) * writeDelay
-	if elapsed > limit {
-		t.Fatalf("logging took %v with %d goroutines (limit %v) — likely mutex contention", elapsed, goroutines, limit)
+		return time.Since(start), wr.lines.Load()
 	}
-	if lines := wr.lines.Load(); lines != goroutines {
-		t.Fatalf("expected %d log lines, got %d — messages lost", goroutines, lines)
+
+	parallelWr := &slowWriter{delay: writeDelay}
+	parallelElapsed, parallelLines := run(
+		StreamHandler(parallelWr, TerminalFormatNoColor()),
+		parallelWr,
+	)
+	if parallelLines != goroutines {
+		t.Fatalf("parallel StreamHandler run: expected %d log lines, got %d", goroutines, parallelLines)
 	}
-	t.Logf("elapsed=%v (limit=%v) lines=%d", elapsed, limit, wr.lines.Load())
+
+	serialWr := &slowWriter{delay: writeDelay}
+	serialElapsed, serialLines := run(
+		SyncHandler(StreamHandler(serialWr, TerminalFormatNoColor())),
+		serialWr,
+	)
+	if serialLines != goroutines {
+		t.Fatalf("sync-wrapped StreamHandler run: expected %d log lines, got %d", goroutines, serialLines)
+	}
+
+	// Compare relative behavior within the same test run instead of asserting a
+	// fixed wall-clock threshold. The sync-wrapped handler should be
+	// meaningfully slower because it serializes all writes through one mutex.
+	if serialElapsed <= parallelElapsed {
+		t.Fatalf("expected SyncHandler(StreamHandler(...)) to be slower than StreamHandler(...): parallel=%v serial=%v", parallelElapsed, serialElapsed)
+	}
+	if serialElapsed < 2*parallelElapsed {
+		t.Fatalf("expected SyncHandler(StreamHandler(...)) to be at least 2x slower: parallel=%v serial=%v", parallelElapsed, serialElapsed)
+	}
+
+	t.Logf("parallel=%v serial=%v lines=%d", parallelElapsed, serialElapsed, parallelLines)
 }
 
-func TestStreamHandlerZeroAllocs(t *testing.T) {
+func TestStreamHandlerAllocsUpperBound(t *testing.T) {
 	lg := New()
 	lg.SetHandler(StreamHandler(io.Discard, TerminalFormatNoColor()))
 
@@ -214,25 +232,41 @@ func TestStreamHandlerNoConcurrencyOverhead(t *testing.T) {
 		lg.Info("msg", "k", "v")
 	})
 
-	// Run the same thing from many goroutines and measure per-call allocs.
+	// Pre-spawn workers so AllocsPerRun measures logging under concurrency
+	// rather than goroutine creation/teardown or per-run WaitGroup setup.
 	const goroutines = 64
-	concurrent := testing.AllocsPerRun(100, func() {
-		var wg sync.WaitGroup
-		wg.Add(goroutines)
-		for i := 0; i < goroutines; i++ {
-			go func() {
-				defer wg.Done()
+	start := make(chan struct{})
+	done := make(chan struct{}, goroutines)
+
+	var workers sync.WaitGroup
+	workers.Add(goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer workers.Done()
+			for range start {
 				lg.Info("msg", "k", "v")
-			}()
+				done <- struct{}{}
+			}
+		}()
+	}
+
+	concurrent := testing.AllocsPerRun(100, func() {
+		for i := 0; i < goroutines; i++ {
+			start <- struct{}{}
 		}
-		wg.Wait()
+		for i := 0; i < goroutines; i++ {
+			<-done
+		}
 	})
+
+	close(start)
+	workers.Wait()
+
 	perCall := concurrent / goroutines
 
 	// Concurrent allocs per call should not exceed baseline.
-	// Allow +2 for goroutine/WaitGroup overhead that may spill into the measurement.
-	if perCall > baseline+2 {
-		t.Fatalf("concurrent allocs/op (%.1f) significantly exceed baseline (%.1f) — likely mutex or sync overhead", perCall, baseline)
+	if perCall > baseline {
+		t.Fatalf("concurrent allocs/op (%.1f) exceed baseline (%.1f) — likely mutex or sync overhead", perCall, baseline)
 	}
 	t.Logf("baseline=%.0f  concurrent_per_call=%.1f", baseline, perCall)
 }
