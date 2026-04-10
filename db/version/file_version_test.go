@@ -1,6 +1,7 @@
 package version
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -48,12 +49,23 @@ func TestParseVersion(t *testing.T) {
 			V2_0,
 			false,
 		},
+		{"empty", args{v: ""}, Version{}, true},
+		{"no_prefix", args{v: "1.0"}, Version{}, true},
+		{"bare_v", args{v: "v"}, Version{}, true},
+		{"trailing_dot", args{v: "v1."}, Version{}, true},
+		{"bad_major", args{v: "vX.0"}, Version{}, true},
+		{"bad_minor", args{v: "v1.X"}, Version{}, true},
+		{"multiple_dots", args{v: "v1.2.3"}, Version{}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := ParseVersion(tt.args.v)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseVersion() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr && !errors.Is(err, ErrInvalidVersion) {
+				t.Errorf("ParseVersion() error = %v, want ErrInvalidVersion", err)
 				return
 			}
 			if !reflect.DeepEqual(got, tt.want) {
