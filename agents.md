@@ -45,7 +45,7 @@ Erigon is a high-performance Ethereum execution client with embedded consensus l
 
 ```bash
 ./build/bin/erigon --datadir=./data --chain=mainnet
-./build/bin/erigon --datadir=dev --chain=dev --mine  # Development
+./build/bin/erigon --datadir=dev --chain=dev --beacon.api=beacon,validator,node,config  # PoS dev mode
 ```
 
 ## Conventions

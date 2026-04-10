@@ -119,6 +119,10 @@ func (s *testService) ReturnError() error {
 	return testError{}
 }
 
+func (s *testService) ReturnNull() any {
+	return nil
+}
+
 func (s *testService) CallMeBack(ctx context.Context, method string, args []any) (any, error) {
 	c, ok := ClientFromContext(ctx, log.New())
 	if !ok {
