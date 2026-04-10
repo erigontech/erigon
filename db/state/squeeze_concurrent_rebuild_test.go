@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -195,6 +196,10 @@ func TestConcurrentRebuildCommitment(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping concurrent rebuild integration test in short mode")
 	}
+
+	// Save and restore the global concurrent commitment flag.
+	origConcurrent := statecfg.ExperimentalConcurrentCommitment
+	t.Cleanup(func() { statecfg.ExperimentalConcurrentCommitment = origConcurrent })
 
 	// --- Read env parameters ---
 	// Default TEST_STEPS=10 ensures that after BuildFiles + merge the account domain
@@ -391,8 +396,8 @@ func TestConcurrentRebuildCommitment(t *testing.T) {
 	// the rebuild root is authoritative for comparing sequential vs concurrent.
 	t.Logf("=== Phase 2: Sequential Rebuild ===")
 
-	// Ensure sequential mode even if the env var is pre-set in the environment.
-	t.Setenv("ERIGON_REBUILD_CONCURRENT_COMMITMENT", "false")
+	// Ensure sequential mode.
+	statecfg.ExperimentalConcurrentCommitment = false
 
 	// Close aggregator, reopen with fresh state
 	db, agg = reopenAggregator(t, db, agg, stepSize)
@@ -433,13 +438,13 @@ func TestConcurrentRebuildCommitment(t *testing.T) {
 	// Wipe all commitment state
 	wipeCommitment(t, db, agg, dirs)
 
-	// Enable concurrent mode via env var (t.Setenv auto-restores on cleanup).
+	// Enable concurrent mode via the global flag.
 	// This creates a ConcurrentPatriciaHashed trie and enables EnableParaTrieDB.
 	// Whether ParallelHashSort actually fires depends on CanDoConcurrentNext() — the
 	// first shard after a wipe always runs sequentially (empty trie has no branch at
 	// nibble 0). After the first shard seeds trie state, subsequent shards exercise
 	// the parallel path.
-	t.Setenv("ERIGON_REBUILD_CONCURRENT_COMMITMENT", "true")
+	statecfg.ExperimentalConcurrentCommitment = true
 
 	// Run concurrent rebuild
 	concStart := time.Now()
