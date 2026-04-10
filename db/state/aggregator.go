@@ -1933,7 +1933,7 @@ func (at *AggregatorRoTx) KeyCountInFiles(d kv.Domain, start, end uint64) (total
 		return 0
 	}
 
-	for _, f := range at.d[d].visible.files {
+	for _, f := range at.d[d].files {
 		if f.startTxNum >= start && f.endTxNum <= end {
 			totalKeys += uint64(f.src.decompressor.Count() / 2)
 		}
