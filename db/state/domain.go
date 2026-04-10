@@ -318,6 +318,10 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 	closeWhatNotInList(d.dirtyFiles, fNames)
 }
 
+// reCalcVisibleFiles mutates per-entity _visible fields. Only direct callers
+// (tests that construct a standalone Domain without an Aggregator) should use
+// this. The Aggregator path goes through calcVisibleFiles + bundle instead, so
+// the mutating writes don't race with concurrent Aggregator-backed readers.
 func (d *Domain) reCalcVisibleFiles(toTxNum uint64) {
 	dv, hv, hiv := d.calcVisibleFiles(toTxNum)
 	d._visible = dv
@@ -325,10 +329,9 @@ func (d *Domain) reCalcVisibleFiles(toTxNum uint64) {
 	d.History.InvertedIndex._visible = hiv
 }
 
-// calcVisibleFiles computes a fresh *domainVisible for this domain, the matching
-// history visibleFile slice, and the nested History.InvertedIndex *iiVisible.
-// It is pure — does not mutate d, d.History, or the inner II — so the caller
-// can assemble a cross-entity consistent snapshot before publishing it.
+// calcVisibleFiles is pure — it does not mutate d, d.History, or d.History.InvertedIndex.
+// Aggregator.recalcVisibleFiles uses it to assemble a cross-entity consistent
+// snapshot that is published via a single atomic store.
 func (d *Domain) calcVisibleFiles(toTxNum uint64) (*domainVisible, visibleFiles, *iiVisible) {
 	var checker func(startTxNum, endTxNum uint64) bool
 	if d.checker != nil {
@@ -338,7 +341,7 @@ func (d *Domain) calcVisibleFiles(toTxNum uint64) (*domainVisible, visibleFiles,
 		}
 	}
 	dv := newDomainVisible(d.Name, calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum))
-	hv := d.History.calcVisibleFiles(toTxNum)
+	hv := calcVisibleFiles(d.History.dirtyFiles, d.History.Accessors, nil, false, toTxNum)
 	hiv := d.History.InvertedIndex.calcVisibleFiles(toTxNum)
 	return dv, hv, hiv
 }
@@ -589,16 +592,10 @@ func (d *Domain) BeginFilesRo() *DomainRoTx {
 	return d.beginFilesRoFromVisible(d._visible, d.History._visibleFiles, d.History.InvertedIndex._visible)
 }
 
-// beginFilesRoFromVisible builds a DomainRoTx over the exact *domainVisible,
-// history visibleFile slice and inner-II *iiVisible passed in, rather than
-// reading fields directly. Aggregator.BeginFilesRo uses this to guarantee every
-// entity in an AggregatorRoTx comes from the same aggregatorVisible generation.
+// beginFilesRoFromVisible lets Aggregator.BeginFilesRo pass a snapshot pinned
+// to a single aggregatorVisible generation, avoiding a torn cross-entity read.
 func (d *Domain) beginFilesRoFromVisible(dv *domainVisible, hf visibleFiles, hiv *iiVisible) *DomainRoTx {
-	for i := 0; i < len(dv.files); i++ {
-		if !dv.files[i].src.frozen {
-			dv.files[i].src.refcount.Add(1)
-		}
-	}
+	visibleFiles(dv.files).bumpRefcount()
 
 	return &DomainRoTx{
 		name:              d.Name,

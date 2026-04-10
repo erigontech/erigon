@@ -229,12 +229,15 @@ func (ii *InvertedIndex) SetChecker(checker *DependencyIntegrityChecker) {
 	ii.checker = checker
 }
 
+// reCalcVisibleFiles mutates ii._visible. Only direct callers (tests that
+// construct a standalone InvertedIndex without an Aggregator) should use this.
+// The Aggregator path uses calcVisibleFiles + bundle.
 func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
 	ii._visible = ii.calcVisibleFiles(toTxNum)
 }
 
-// calcVisibleFiles computes a fresh *iiVisible for this inverted index. Pure —
-// does not mutate ii. Used by Aggregator.recalcVisibleFiles.
+// calcVisibleFiles is pure — it does not mutate ii. Used by the Aggregator to
+// assemble a cross-entity snapshot published atomically as aggregatorVisible.
 func (ii *InvertedIndex) calcVisibleFiles(toTxNum uint64) *iiVisible {
 	var checker func(startTxNum, endTxNum uint64) bool
 	c := ii.checker
@@ -424,16 +427,9 @@ func (ii *InvertedIndex) BeginFilesRo() *InvertedIndexRoTx {
 	return ii.beginFilesRoFromVisible(ii._visible)
 }
 
-// beginFilesRoFromVisible builds an InvertedIndexRoTx over the exact *iiVisible
-// passed in, so readers using a published aggregatorVisible observe a single
-// cross-entity generation.
 func (ii *InvertedIndex) beginFilesRoFromVisible(iv *iiVisible) *InvertedIndexRoTx {
-	files := iv.files
-	for i := 0; i < len(files); i++ {
-		if !files[i].src.frozen {
-			files[i].src.refcount.Add(1)
-		}
-	}
+	files := visibleFiles(iv.files)
+	files.bumpRefcount()
 	return &InvertedIndexRoTx{
 		ii:                ii,
 		visible:           iv,

@@ -739,6 +739,16 @@ func checkForVisibility(item *FilesItem, l statecfg.Accessors, trace bool) (canB
 // visibleFiles have no garbage (overlaps, unindexed, etc...)
 type visibleFiles []visibleFile
 
+// bumpRefcount pins every non-frozen file by incrementing its refcount.
+// Callers must pair this with a matching decrement in RoTx.Close.
+func (files visibleFiles) bumpRefcount() {
+	for i := range files {
+		if !files[i].src.frozen {
+			files[i].src.refcount.Add(1)
+		}
+	}
+}
+
 // EndTxNum return txNum which not included in file - it will be first txNum in future file
 func (files visibleFiles) EndTxNum() uint64 {
 	if len(files) == 0 {
