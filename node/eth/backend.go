@@ -91,6 +91,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node"
+	storagecomp "github.com/erigontech/erigon/node/components/storage"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/ethstats"
@@ -414,37 +415,32 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 	backend.downloaderClient = backend.components.Downloader.Client
 
-	// Register file-change callbacks so completed snapshots are seeded and
-	// deleted snapshots are removed from the swarm. These stay here because
-	// they need chainDB and notifications (set below).
-	backend.chainDB.OnFilesChange(func(frozenFileNames []string) {
-		backend.logger.Debug("files changed...sending notification")
-		events := backend.notifications.Events
-		events.OnNewSnapshot()
-		if config.Downloader != nil && config.Downloader.ChainName == "" {
-			return
-		}
-		if backend.config.Snapshot.NoDownloader || backend.downloaderClient == nil || len(frozenFileNames) == 0 {
-			return
-		}
-		if err := backend.downloaderClient.Seed(ctx, frozenFileNames); err != nil {
-			backend.logger.Warn("[snapshots] downloader.Seed", "err", err)
-		}
-	}, func(deletedFiles []string) {
-		if config.Downloader != nil && config.Downloader.ChainName == "" {
-			return
-		}
-		if backend.config.Snapshot.NoDownloader || backend.downloaderClient == nil || len(deletedFiles) == 0 {
-			return
-		}
-		if err := backend.downloaderClient.Delete(ctx, deletedFiles); err != nil {
-			backend.logger.Warn("[snapshots] downloader.Delete", "err", err)
-		}
-	})
-
-	kvRPC := remotedbserver.NewKvServer(ctx, backend.chainDB, allSnapshots, allBorSnapshots, temporalDb.Debug(), logger)
+	// KV RPC + Notifications stay in backend.go — Notifications is an
+	// execution-layer concern that will move to the execution component.
+	kvRPC := remotedbserver.NewKvServer(ctx, temporalDb, allSnapshots, allBorSnapshots, temporalDb.Debug(), logger)
 	backend.notifications = shards.NewNotifications(kvRPC)
 	backend.kvRPC = kvRPC
+
+	// Storage component: owns DB references, file-change callbacks, block retire.
+	if err := backend.components.BuildStorage(storagecomp.Deps{
+		Ctx:                  ctx,
+		ChainDB:              temporalDb,
+		BlockReader:          blockReader,
+		BlockWriter:          blockWriter,
+		AllSnapshots:         allSnapshots,
+		AllBorSnapshots:      allBorSnapshots,
+		BridgeStore:          bridgeStore,
+		HeimdallStore:        heimdallStore,
+		ChainConfig:          chainConfig,
+		Genesis:              genesis,
+		Config:               config,
+		DBEventNotifier:      backend.notifications.Events,
+		DownloaderClient:     backend.downloaderClient,
+		SegmentsBuildLimiter: segmentsBuildLimiter,
+		Logger:               logger,
+	}); err != nil {
+		return nil, err
+	}
 
 	p2pConfig := stack.Config().P2P
 	var sentries []sentryproto.SentryClient
@@ -729,7 +725,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		chainConfig,
 	)
 
-	backend.stateDiffClient = direct.NewStateDiffClientDirect(kvRPC)
+	backend.stateDiffClient = direct.NewStateDiffClientDirect(backend.kvRPC)
 	var txnProvider txnprovider.TxnProvider
 	if config.TxPool.Disable {
 		backend.txPoolGrpcServer = &txpool.GrpcDisabled{}
@@ -892,7 +888,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	)
 	backend.pendingBlocks = blkBuilder.PendingBlockCh()
 
-	blockRetire := freezeblocks.NewBlockRetire(1, dirs, blockReader, blockWriter, backend.chainDB, heimdallStore, bridgeStore, backend.chainConfig, config, backend.notifications.Events, segmentsBuildLimiter, logger)
+	blockRetire := backend.components.Storage.BlockRetire
 	var creds credentials.TransportCredentials
 	if stack.Config().PrivateApiAddr != "" {
 		if stack.Config().TLSConnection {
@@ -902,7 +898,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			}
 		}
 		backend.privateAPI, err = privateapi2.StartGrpc(
-			kvRPC,
+			backend.kvRPC,
 			backend.ethBackendRPC,
 			backend.txPoolGrpcServer,
 			backend.miningRPC,

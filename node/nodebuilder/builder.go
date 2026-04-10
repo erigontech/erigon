@@ -31,27 +31,28 @@ package nodebuilder
 
 import (
 	"context"
+	"net/http"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	downloadercomp "github.com/erigontech/erigon/node/components/downloader"
-	"github.com/erigontech/erigon/node/ethconfig"
-
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
-
-	"net/http"
+	downloadercomp "github.com/erigontech/erigon/node/components/downloader"
+	storagecomp "github.com/erigontech/erigon/node/components/storage"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 // Builder holds all extracted node component providers.
 // Fields are added here as components graduate from backend.go.
 type Builder struct {
 	Downloader *downloadercomp.Provider
+	Storage    *storagecomp.Provider
 }
 
 // New allocates a Builder with all providers pre-initialized.
 func New() *Builder {
 	return &Builder{
 		Downloader: &downloadercomp.Provider{},
+		Storage:    &storagecomp.Provider{},
 	}
 }
 
@@ -59,4 +60,11 @@ func New() *Builder {
 func (b *Builder) BuildDownloader(ctx context.Context, dlCfg *downloadercfg.Cfg, snapCfg ethconfig.BlocksFreezing, dirs datadir.Dirs, logger log.Logger, debugMux *http.ServeMux) error {
 	b.Downloader.Configure(dlCfg, snapCfg, dirs, logger, debugMux)
 	return b.Downloader.Initialize(ctx)
+}
+
+// BuildStorage initializes the storage component.
+// Must be called after BuildDownloader (needs DownloaderClient for file-change callbacks)
+// and after SetUpBlockReader (needs ChainDB, BlockReader, etc.).
+func (b *Builder) BuildStorage(deps storagecomp.Deps) error {
+	return b.Storage.Initialize(deps)
 }
