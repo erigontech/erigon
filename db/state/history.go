@@ -923,6 +923,8 @@ type HistoryRoTx struct {
 
 func (h *History) beginWithRecalcForTests() *HistoryRoTx {
 	hv, hvi := h.calcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
+	h._visibleFiles = hv
+	h.InvertedIndex._visible = hvi
 	return h.beginFilesRo(hv, hvi)
 }
 

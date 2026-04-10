@@ -429,6 +429,13 @@ func (ii *InvertedIndex) beginWithRecalcForTests() *InvertedIndexRoTx {
 	return ii.beginFilesRo(iv)
 }
 
+// beginFilesRoForTests opens an RoTx using the current `_visible` snapshot,
+// without recalculating it. Tests use this to verify that newly integrated
+// dirty files are NOT visible until reCalcVisibleFiles is called.
+func (ii *InvertedIndex) beginFilesRoForTests() *InvertedIndexRoTx {
+	return ii.beginFilesRo(ii._visible)
+}
+
 func (ii *InvertedIndex) beginFilesRo(iv *iiVisible) *InvertedIndexRoTx {
 	iv.files.refcntIncrement()
 	return &InvertedIndexRoTx{
