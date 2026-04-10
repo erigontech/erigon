@@ -50,9 +50,9 @@ Two cooperating bugs in the domain state layer, both rooted in df770fadfe (Feb 2
 **Files:**
 - Modify: `db/state/domain_test.go`
 
-- [ ] Add `TestDomain_DeletedKeyNotResurrectedByFiles` — Bug 1 regression test: write value at step 0, delete at step 1, build files covering both steps without pruning DB, verify GetLatest returns empty (not stale pre-deletion value from files)
-- [ ] Add `TestDomain_UnwindRestoresDeletionMarker` — Bug 2 regression test: write value at txNum 0, delete at txNum 1 (same step), re-write at txNum 2 (same step), build files for that step, call unwind() to revert txNum 2, verify GetLatest returns empty (not stale value from files)
-- [ ] Run `go test ./db/state/... -run "TestDomain_Deleted|TestDomain_UnwindRestores"` — both new tests pass
+- [x] Add `TestDomain_DeletedKeyNotResurrectedByFiles` — Bug 1 regression test: write value at step 0, delete at step 1, build files covering both steps without pruning DB, verify GetLatest returns empty (not stale pre-deletion value from files)
+- [x] Add `TestDomain_UnwindRestoresDeletionMarker` — Bug 2 regression test: write value at txNum 0, delete at txNum 1 (same step), re-write at txNum 2 (same step), build files for that step, call unwind() to revert txNum 2, verify GetLatest returns empty (not stale value from files)
+- [x] Run `go test ./db/state/... -run "TestDomain_Deleted|TestDomain_UnwindRestores"` — both new tests pass
 
 ### Task 4: Verify full suite and lint
 
