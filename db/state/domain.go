@@ -341,7 +341,10 @@ func (d *Domain) calcVisibleFiles(toTxNum uint64) (*domainVisible, visibleFiles,
 		}
 	}
 	dv := newDomainVisible(d.Name, calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum))
+	d._visibleFiles = dv.files
 	hv, hiv := d.History.calcVisibleFiles(toTxNum)
+	d.History._visibleFiles = hv
+	d.History.InvertedIndex._visible = hiv
 	return dv, hv, hiv
 }
 
@@ -593,6 +596,7 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte, hi, lo uint64) (v
 // through Aggregator.BeginFilesRo.
 func (d *Domain) beginWithRecalcForTests() *DomainRoTx {
 	dv, hv, iv := d.calcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
+	d._visible = dv
 	return d.beginFilesRo(dv, hv, iv)
 }
 
