@@ -621,8 +621,10 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 							return state.StateUpdates{}, nil
 						}
 
+						var sysCallGas uint64
 						syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-							ret, err := protocol.SysCallContract(contract, data, pe.cfg.chainConfig, ibs, txTask.Header, pe.cfg.engine, false, *pe.cfg.vmConfig)
+							ret, gasUsed, err := protocol.SysCallContract(contract, data, pe.cfg.chainConfig, ibs, txTask.Header, pe.cfg.engine, false, *pe.cfg.vmConfig)
+							sysCallGas += gasUsed
 							if err != nil {
 								return nil, err
 							}
@@ -646,6 +648,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						if err != nil {
 							return state.StateUpdates{}, fmt.Errorf("can't finalize block %d: %w", blockResult.BlockNum, err)
 						}
+						blockExecutor.blockGasUsed += sysCallGas
 
 						blockExecutor.blockIO.RecordReads(finalVersion, ibs.VersionedReads())
 						blockExecutor.blockIO.RecordAccesses(finalVersion, ibs.AccessedAddresses())

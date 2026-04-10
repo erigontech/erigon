@@ -858,7 +858,7 @@ func (api *TraceAPIImpl) callBlock(
 	}
 
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-		ret, err := protocol.SysCallContract(contract, data, cfg, ibs, header, engine, false /* constCall */, vm.Config{})
+		ret, _, err := protocol.SysCallContract(contract, data, cfg, ibs, header, engine, false /* constCall */, vm.Config{})
 		return ret, err
 	}
 
