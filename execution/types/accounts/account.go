@@ -823,27 +823,39 @@ func DecodeSender(enc []byte) (nonce uint64, balance uint256.Int, err error) {
 	return
 }
 
-// AccountArena is a slab allocator for Account objects.
-// Avoids allocations in tight account-read loops by reusing a pre-allocated pool.
-// Typical transaction accesses 3-6 accounts; 16 slots covers >99% of real workloads.
-// Accounts are valid until Reset() is called.
+// AccountArena is a slab-backed bump allocator for Account objects.
+// The first slab is inlined so the common case (≤16 accounts per txn) is zero-alloc.
+// Overflow slabs are appended on demand and never moved, so pointers returned from
+// Alloc() remain valid until Reset().
 type AccountArena struct {
-	accounts [16]Account // Slab of 16 accounts per transaction
-	idx      int         // Current allocation position
+	first  [accountArenaSlabSize]Account
+	spill  []*[accountArenaSlabSize]Account
+	idx    int // position within the current slab
+	slabNo int // 0 = first (inlined), >0 = spill[slabNo-1]
 }
 
-// Alloc returns the next Account from the arena and advances the position.
-// Panics if arena is exhausted. Caller must call Reset() between transactions.
+const accountArenaSlabSize = 16
+
 func (aa *AccountArena) Alloc() *Account {
-	if aa.idx >= len(aa.accounts) {
-		panic("AccountArena exhausted: >16 accounts per transaction")
+	if aa.idx >= accountArenaSlabSize {
+		aa.slabNo++
+		aa.idx = 0
+		if aa.slabNo-1 >= len(aa.spill) {
+			aa.spill = append(aa.spill, new([accountArenaSlabSize]Account))
+		}
 	}
-	acc := &aa.accounts[aa.idx]
+	var acc *Account
+	if aa.slabNo == 0 {
+		acc = &aa.first[aa.idx]
+	} else {
+		acc = &aa.spill[aa.slabNo-1][aa.idx]
+	}
 	aa.idx++
 	return acc
 }
 
-// Reset clears the arena for the next transaction.
+// Reset rewinds the arena to its first slab. Overflow slabs are retained for reuse.
 func (aa *AccountArena) Reset() {
 	aa.idx = 0
+	aa.slabNo = 0
 }
