@@ -159,7 +159,6 @@ func TestDomainGCReadAfterRemoveFile(t *testing.T) {
 			deleteMergeFile(h.dirtyFiles, []*FilesItem{lastOnFs}, "", h.logger)
 
 			require.NotNil(lastOnFs.decompressor)
-			h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 			lastInView := hc.files[len(hc.files)-1]
 			g := lastInView.src.decompressor.MakeGetter()
@@ -199,7 +198,6 @@ func TestDomainGCReadAfterRemoveFile(t *testing.T) {
 			lastOnFs, _ := h.dirtyFiles.Max()
 			require.False(lastOnFs.frozen) // prepared dataset must have some non-frozen files. or it's bad dataset.
 			deleteMergeFile(h.dirtyFiles, []*FilesItem{lastOnFs}, "", h.logger)
-			h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 			require.NotNil(lastOnFs.decompressor)
 			hc.Close()

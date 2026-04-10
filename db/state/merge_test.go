@@ -893,10 +893,6 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		setupFiles(storage, false)
 		setupFiles(commitment, false)
 
-		account.reCalcVisibleFiles(account.dirtyFilesEndTxNumMinimax())
-		storage.reCalcVisibleFiles(storage.dirtyFilesEndTxNumMinimax())
-		commitment.reCalcVisibleFiles(commitment.dirtyFilesEndTxNumMinimax())
-
 		checkFn := func(files visibleFiles) {
 			assert.Equal(t, 1, len(files))
 			assert.Equal(t, 0, int(files[0].startTxNum))
@@ -918,10 +914,6 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		setupFiles(account, false)
 		setupFiles(storage, false)
 		setupFiles(commitment, true)
-
-		account.reCalcVisibleFiles(account.dirtyFilesEndTxNumMinimax())
-		storage.reCalcVisibleFiles(storage.dirtyFilesEndTxNumMinimax())
-		commitment.reCalcVisibleFiles(commitment.dirtyFilesEndTxNumMinimax())
 
 		checkFn := func(files visibleFiles) {
 			assert.Equal(t, 2, len(files))
@@ -946,10 +938,6 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		setupFiles(account, false)
 		setupFiles(storage, false)
 		setupFiles(commitment, false)
-
-		account.reCalcVisibleFiles(account.dirtyFilesEndTxNumMinimax())
-		storage.reCalcVisibleFiles(storage.dirtyFilesEndTxNumMinimax())
-		commitment.reCalcVisibleFiles(commitment.dirtyFilesEndTxNumMinimax())
 
 		checkFn := func(dtx *DomainRoTx, garbageCount int) {
 			var mergedF *FilesItem
@@ -995,10 +983,6 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		setupFiles(storage, false)
 		setupFiles(commitment, false)
 
-		account.reCalcVisibleFiles(account.dirtyFilesEndTxNumMinimax())
-		storage.reCalcVisibleFiles(storage.dirtyFilesEndTxNumMinimax())
-		commitment.reCalcVisibleFiles(commitment.dirtyFilesEndTxNumMinimax())
-
 		checkFn := func(dtx *DomainRoTx, garbageCount int) {
 			assert.Len(t, dtx.garbage(nil), garbageCount)
 		}
@@ -1037,10 +1021,6 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		setupFiles(storage, false)
 		setupFiles(commitment, true)
 
-		account.reCalcVisibleFiles(account.dirtyFilesEndTxNumMinimax())
-		storage.reCalcVisibleFiles(storage.dirtyFilesEndTxNumMinimax())
-		commitment.reCalcVisibleFiles(commitment.dirtyFilesEndTxNumMinimax())
-
 		checkFn := func(dtx *DomainRoTx) {
 			var mergedF *FilesItem
 			items := dtx.d.dirtyFiles.Items()
@@ -1066,10 +1046,6 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		setupFiles(account, false)
 		setupFiles(storage, false)
 		setupFiles(commitment, true)
-
-		account.reCalcVisibleFiles(account.dirtyFilesEndTxNumMinimax())
-		storage.reCalcVisibleFiles(storage.dirtyFilesEndTxNumMinimax())
-		commitment.reCalcVisibleFiles(commitment.dirtyFilesEndTxNumMinimax())
 
 		checkFn := func(dtx *DomainRoTx) {
 			assert.Len(t, dtx.garbage(nil), 0)
