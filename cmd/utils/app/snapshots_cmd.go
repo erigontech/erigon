@@ -1300,7 +1300,6 @@ func doIntegrity(cliCtx *cli.Context) error {
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(1)
 	for _, chk := range requestedChecks {
-		chk := chk
 		g.Go(func() error {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -1359,6 +1358,10 @@ func doIntegrity(cliCtx *cli.Context) error {
 					}
 				case integrity.RCacheNoDups:
 					if err := integrity.CheckRCacheNoDups(ctx, sc, db, blockReader, failFast); err != nil {
+						return err
+					}
+				case integrity.StateProgress:
+					if err := integrity.CheckStateProgress(ctx, db, blockReader, failFast); err != nil {
 						return err
 					}
 				case integrity.Publishable:
