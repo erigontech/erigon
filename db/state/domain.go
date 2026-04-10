@@ -577,7 +577,6 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte, hi, lo uint64) (v
 // through Aggregator.BeginFilesRo.
 func (d *Domain) beginForTests() *DomainRoTx {
 	dv, hv, iv := d.calcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
-	d.History.InvertedIndex._visible = iv
 	return d.beginFilesRo(dv, hv, iv)
 }
 
