@@ -98,11 +98,17 @@ func BuildGenesisState(
 	beaconState.SetGenesisTime(genesisTime)
 	beaconState.SetSlot(0)
 
-	// Set fork parameters for genesis.
-	forkVersion := clutils.Uint32ToBytes4(uint32(cfg.GenesisForkVersion))
+	// Set fork parameters for genesis. When multiple forks activate at
+	// epoch 0 (typical in dev mode), CurrentVersion must reflect the
+	// latest active fork, not GenesisForkVersion. This matches the spec's
+	// fork transition logic and ensures domain computations are consistent
+	// between the beacon state and the dev validator's signing code.
+	genesisVersion := clutils.Uint32ToBytes4(uint32(cfg.GenesisForkVersion))
+	currentStateVersion := cfg.GetCurrentStateVersion(0)
+	currentVersion := clutils.Uint32ToBytes4(cfg.GetForkVersionByVersion(currentStateVersion))
 	beaconState.SetFork(&cltypes.Fork{
-		PreviousVersion: forkVersion,
-		CurrentVersion:  forkVersion,
+		PreviousVersion: genesisVersion,
+		CurrentVersion:  currentVersion,
 		Epoch:           0,
 	})
 

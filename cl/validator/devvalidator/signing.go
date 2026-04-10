@@ -13,6 +13,14 @@ import (
 // signing provides BLS signing helpers using the correct domain separation
 // as defined by the Ethereum consensus spec.
 
+// forkVersionForEpoch returns the fork version active at the given epoch,
+// per the beacon chain config's fork schedule. This mirrors the spec's
+// get_domain logic: find the latest fork whose epoch <= the target epoch.
+func forkVersionForEpoch(epoch uint64, cfg *clparams.BeaconChainConfig) common.Bytes4 {
+	stateVersion := cfg.GetCurrentStateVersion(epoch)
+	return utils.Uint32ToBytes4(cfg.GetForkVersionByVersion(stateVersion))
+}
+
 // signObject signs an SSZ-hashable object with the given domain type.
 func signObject(
 	key *ValidatorKey,
@@ -22,7 +30,7 @@ func signObject(
 	cfg *clparams.BeaconChainConfig,
 	genesisValidatorsRoot common.Hash,
 ) (common.Bytes96, error) {
-	forkVersion := utils.Uint32ToBytes4(uint32(cfg.GenesisForkVersion))
+	forkVersion := forkVersionForEpoch(epoch, cfg)
 	domain, err := fork.ComputeDomain(domainType[:], forkVersion, genesisValidatorsRoot)
 	if err != nil {
 		return common.Bytes96{}, err
