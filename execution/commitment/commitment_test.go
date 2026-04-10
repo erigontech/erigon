@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"math/bits"
 	"math/rand"
 	"sort"
 	"testing"
@@ -80,14 +81,28 @@ func generateCellRow(tb testing.TB, size int) (row []*cell, bitmap uint16) {
 	return row, bm
 }
 
+// generateCellEncodeDataRow converts a cell row (from generateCellRow) into a [16]cellEncodeData array.
+func generateCellEncodeDataRow(tb testing.TB, row []*cell, bm uint16) [16]cellEncodeData {
+	tb.Helper()
+	var data [16]cellEncodeData
+	for bitset := bm; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		if nibble < len(row) && row[nibble] != nil {
+			data[nibble] = cellEncodeDataFromCell(row[nibble])
+		}
+		bitset ^= bit
+	}
+	return data
+}
+
 func TestBranchData_MergeHexBranches2(t *testing.T) {
 	t.Parallel()
 	row, bm := generateCellRow(t, 16)
 
 	be := NewBranchEncoder(1024)
-	enc, _, err := be.EncodeBranch(bm, bm, bm, func(i int, skip bool) (*cell, error) {
-		return row[i], nil
-	})
+	cellData := generateCellEncodeDataRow(t, row, bm)
+	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
 
 	require.NoError(t, err)
 	require.NotEmpty(t, enc)
@@ -169,9 +184,8 @@ func TestDecodeBranchWithLeafHashes(t *testing.T) {
 	}
 
 	be := NewBranchEncoder(1024)
-	enc, _, err := be.EncodeBranch(bm, bm, bm, func(i int, skip bool) (*cell, error) {
-		return row[i], nil
-	})
+	cellData := generateCellEncodeDataRow(t, row, bm)
+	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
 	require.NoError(t, err)
 
 	fmt.Printf("%s\n", enc.String())
@@ -225,12 +239,9 @@ func TestBranchData_ReplacePlainKeys(t *testing.T) {
 	_ = cells
 	_ = am
 
-	cg := func(nibble int, skip bool) (*cell, error) {
-		return row[nibble], nil
-	}
-
 	be := NewBranchEncoder(1024)
-	enc, _, err := be.EncodeBranch(bm, bm, bm, cg)
+	cellData := generateCellEncodeDataRow(t, row, bm)
+	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
 	require.NoError(t, err)
 
 	original := common.Copy(enc)
@@ -274,12 +285,9 @@ func TestBranchData_ReplacePlainKeys_WithEmpty(t *testing.T) {
 
 	row, bm := generateCellRow(t, 16)
 
-	cg := func(nibble int, skip bool) (*cell, error) {
-		return row[nibble], nil
-	}
-
 	be := NewBranchEncoder(1024)
-	enc, _, err := be.EncodeBranch(bm, bm, bm, cg)
+	cellData := generateCellEncodeDataRow(t, row, bm)
+	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
 	require.NoError(t, err)
 
 	original := common.Copy(enc)
@@ -325,9 +333,8 @@ func TestBranchData_ReplacePlainKeys_PartialChange(t *testing.T) {
 
 	row, bm := generateCellRow(t, 16)
 	be := NewBranchEncoder(1024)
-	enc, _, err := be.EncodeBranch(bm, bm, bm, func(i int, skip bool) (*cell, error) {
-		return row[i], nil
-	})
+	cellData := generateCellEncodeDataRow(t, row, bm)
+	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
 	require.NoError(t, err)
 
 	original := common.Copy(enc)
