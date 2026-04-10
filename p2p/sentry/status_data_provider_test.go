@@ -113,12 +113,24 @@ func TestGetStatusData_ReturnsDistinctProtobufs(t *testing.T) {
 
 	// Mutating sd1 must not affect sd2.
 	sd1.MaxBlockHeight = 999999
-	sd1.ForkData.HeightForks = []uint64{1, 2, 3}
 
 	assert.NotEqual(t, sd1.MaxBlockHeight, sd2.MaxBlockHeight,
 		"mutation of first result must not be visible in second result")
-	assert.NotEqual(t, sd1.ForkData.HeightForks, sd2.ForkData.HeightForks,
-		"mutation of nested ForkData must not be visible in second result")
+
+	// Verify fork slice aliasing: element-level mutation on sd1 must not
+	// bleed into sd2 (catches shared backing array).
+	if len(sd1.ForkData.HeightForks) > 0 {
+		original := sd2.ForkData.HeightForks[0]
+		sd1.ForkData.HeightForks[0] = original + 42
+		assert.Equal(t, original, sd2.ForkData.HeightForks[0],
+			"element-level mutation of HeightForks must not be visible in other result")
+	}
+	if len(sd1.ForkData.TimeForks) > 0 {
+		original := sd2.ForkData.TimeForks[0]
+		sd1.ForkData.TimeForks[0] = original + 42
+		assert.Equal(t, original, sd2.ForkData.TimeForks[0],
+			"element-level mutation of TimeForks must not be visible in other result")
+	}
 }
 
 // TestGetStatusData_CancelledCtxDoesNotBlock verifies that a caller whose
