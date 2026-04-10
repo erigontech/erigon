@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -134,10 +135,14 @@ func BenchmarkDescendant8(b *testing.B) {
 // slowWriter simulates a slow I/O destination (e.g. network, overloaded disk).
 // With SyncHandler all goroutines serialize on the mutex and total time ≈ N × delay.
 // Without it goroutines write in parallel and total time ≈ delay.
-type slowWriter struct{ delay time.Duration }
+type slowWriter struct {
+	delay time.Duration
+	lines atomic.Int64
+}
 
-func (w slowWriter) Write(p []byte) (int, error) {
+func (w *slowWriter) Write(p []byte) (int, error) {
 	time.Sleep(w.delay)
+	w.lines.Add(int64(bytes.Count(p, []byte{'\n'})))
 	return len(p), nil
 }
 
@@ -147,8 +152,9 @@ func TestStreamHandlerNoContention(t *testing.T) {
 		writeDelay = 1 * time.Millisecond
 	)
 
+	wr := &slowWriter{delay: writeDelay}
 	lg := New()
-	lg.SetHandler(StreamHandler(slowWriter{delay: writeDelay}, TerminalFormatNoColor()))
+	lg.SetHandler(StreamHandler(wr, TerminalFormatNoColor()))
 
 	start := time.Now()
 	var wg sync.WaitGroup
@@ -169,7 +175,10 @@ func TestStreamHandlerNoContention(t *testing.T) {
 	if elapsed > limit {
 		t.Fatalf("logging took %v with %d goroutines (limit %v) — likely mutex contention", elapsed, goroutines, limit)
 	}
-	t.Logf("elapsed=%v (limit=%v)", elapsed, limit)
+	if lines := wr.lines.Load(); lines != goroutines {
+		t.Fatalf("expected %d log lines, got %d — messages lost", goroutines, lines)
+	}
+	t.Logf("elapsed=%v (limit=%v) lines=%d", elapsed, limit, wr.lines.Load())
 }
 
 func TestStreamHandlerZeroAllocs(t *testing.T) {
