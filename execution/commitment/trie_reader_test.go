@@ -26,6 +26,7 @@ import (
 
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 // errTrieReaderTestCtx is a mock PatriciaContext that returns an error for a specific prefix.
@@ -62,22 +63,19 @@ func (tc *trieReaderTestCtx) TxNum() uint64                                 { re
 // putBranch stores branch data for the given nibble prefix using the BranchEncoder.
 func (tc *trieReaderTestCtx) putBranch(nibblePrefix []byte, cells [16]*cell) {
 	var afterMap uint16
+	var encData [16]cellEncodeData
 	for i := 0; i < 16; i++ {
 		if cells[i] != nil {
 			afterMap |= uint16(1) << i
+			encData[i] = cellEncodeDataFromCell(cells[i])
 		}
 	}
 	be := NewBranchEncoder(1024)
-	data, _, err := be.EncodeBranch(afterMap, afterMap, afterMap, func(nibble int, skip bool) (*cell, error) {
-		if cells[nibble] != nil {
-			return cells[nibble], nil
-		}
-		return &cell{}, nil
-	})
+	data, err := be.EncodeBranch(afterMap, afterMap, afterMap, &encData)
 	if err != nil {
 		panic(err)
 	}
-	key := HexNibblesToCompactBytes(nibblePrefix)
+	key := nibbles.HexToCompact(nibblePrefix)
 	tc.branches[string(key)] = bytes.Clone(data)
 }
 
@@ -341,7 +339,7 @@ func TestTrieReader_BranchError(t *testing.T) {
 
 	hashedKey := make([]byte, 64)
 	hashedKey[0] = 0x5
-	secondPrefix := HexNibblesToCompactBytes(hashedKey[:1])
+	secondPrefix := nibbles.HexToCompact(hashedKey[:1])
 
 	ctx := &errTrieReaderTestCtx{
 		trieReaderTestCtx: *inner,

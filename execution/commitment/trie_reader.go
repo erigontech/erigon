@@ -24,6 +24,7 @@ import (
 	keccak "github.com/erigontech/fastkeccak"
 
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 // TrieReader navigates the Patricia trie by hashed key without any mutable grid
@@ -115,7 +116,7 @@ func (tr *TrieReader) Lookup(hashedKey []byte) (c cell, found bool, err error) {
 			return c, false, nil
 		}
 
-		prefix := HexNibblesToCompactBytes(hashedKey[:depth])
+		prefix := nibbles.HexToCompact(hashedKey[:depth])
 		branchData, _, err := tr.ctx.Branch(prefix)
 		if err != nil {
 			return c, false, fmt.Errorf("Branch at depth %d: %w", depth, err)
