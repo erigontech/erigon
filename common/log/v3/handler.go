@@ -470,26 +470,30 @@ func asyncHandlerWithInterval(bufSize int, reportInterval time.Duration, h Handl
 	recs := make(chan *Record, bufSize)
 	dropped := new(atomic.Int64)
 	go func() {
-		lastReport := time.Now()
+		nextReport := time.Now().Add(reportInterval)
 		for m := range recs {
 			_ = h.Log(m)
-			if time.Since(lastReport) < reportInterval {
+			now := time.Now()
+			if now.Before(nextReport) {
 				continue
 			}
-			if n := dropped.Swap(0); n > 0 {
-				_ = h.Log(&Record{
-					Time: time.Now(),
-					Lvl:  LvlWarn,
-					Msg:  "log records dropped due to slow writer",
-					Ctx:  []any{"count", n},
-					KeyNames: RecordKeyNames{
-						Time: timeKey,
-						Msg:  msgKey,
-						Lvl:  lvlKey,
-					},
-				})
-				lastReport = time.Now()
+			if n := dropped.Load(); n > 0 {
+				n = dropped.Swap(0)
+				if n > 0 {
+					_ = h.Log(&Record{
+						Time: now,
+						Lvl:  LvlWarn,
+						Msg:  "log records dropped due to slow writer",
+						Ctx:  []any{"count", n},
+						KeyNames: RecordKeyNames{
+							Time: timeKey,
+							Msg:  msgKey,
+							Lvl:  lvlKey,
+						},
+					})
+				}
 			}
+			nextReport = now.Add(reportInterval)
 		}
 	}()
 	return &asyncHandler{baseHandler: h, recs: recs, dropped: dropped}
