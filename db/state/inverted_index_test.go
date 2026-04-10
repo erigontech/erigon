@@ -997,7 +997,9 @@ func TestScanStaticFiles(t *testing.T) {
 	}
 	ii.scanDirtyFiles(files)
 	require.Equal(t, 6, ii.dirtyFiles.Len())
-	require.Equal(t, 0, len(ii._visible.files))
+	ic := ii.beginWithRecalcForTests()
+	require.Equal(t, 0, len(ic.files))
+	ic.Close()
 }
 
 func TestCtxFiles(t *testing.T) {
@@ -1084,10 +1086,12 @@ func TestInvIndex_OpenFolder(t *testing.T) {
 
 	mergeInverted(t, db, ii, txs)
 
-	list := ii._visible.files
+	ic := ii.beginWithRecalcForTests()
+	list := ic.files
 	require.NotEmpty(t, list)
 	ff := list[len(list)-1]
 	fn := ff.src.decompressor.FilePath()
+	ic.Close()
 	ii.Close()
 
 	err := dir.RemoveFile(fn)
