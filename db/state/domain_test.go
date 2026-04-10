@@ -735,7 +735,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step kv.Step, prun
 		txFrom, txTo := step.ToTxNum(d.stepSize), (step + 1).ToTxNum(d.stepSize)
 		domainRoTx := d.BeginFilesRo()
 		defer domainRoTx.Close()
-		stat, err := domainRoTx.OldPrune(ctx, tx, step, txFrom, txTo, math.MaxUint64, logEvery)
+		stat, err := domainRoTx.Prune(ctx, tx, step, txFrom, txTo, math.MaxUint64, logEvery)
 		t.Logf("prune stat: %s  (%d-%d)", stat, txFrom, txTo)
 		require.NoError(t, err)
 	}
