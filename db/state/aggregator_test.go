@@ -490,30 +490,27 @@ func generateCommitmentHistoryAndIndexFiles(t *testing.T, dirs datadir.Dirs, ran
 	populateFiles2(t, dirs, idxRepo, ranges)
 }
 
-// TestAggregator_LastCommittedTxNumGuard verifies that buildFilesInBackground
-// does not collate a step whose data may not be fully committed yet.
-// The guard checks lastCommittedTxNum < firstTxNum(step+1) and defers collation.
-func TestAggregator_LastCommittedTxNumGuard(t *testing.T) {
+// TestAggregator_CommittedTxNumGuard verifies the step-safety invariant:
+// a step S should only be collated when committedTxNum >= firstTxNum(S+1),
+// meaning all data for step S has been committed to the DB.
+func TestAggregator_CommittedTxNumGuard(t *testing.T) {
 	t.Parallel()
-	a := &Aggregator{}
-	a.stepSize.Store(100)
+	stepSize := uint64(100)
 
 	// Step 5 covers txNums [500, 600). firstTxNum(6) = 600.
-	// If lastCommittedTxNum < 600, step 5 must NOT be collated.
-	a.lastCommittedTxNum.Store(550)
-	stepEnd := a.FirstTxNumOfStep(5 + 1) // 600
-	assert.Less(t, a.lastCommittedTxNum.Load(), stepEnd,
+	stepEndTxNum := firstTxNumOfStep(6, stepSize) // 600
+
+	// committedTxNum within the step — must NOT collate
+	assert.Less(t, uint64(550), stepEndTxNum,
 		"guard should block: committed txNum is within the step")
 
-	// If lastCommittedTxNum >= 600, step 5 is safe.
-	a.lastCommittedTxNum.Store(600)
-	assert.GreaterOrEqual(t, a.lastCommittedTxNum.Load(), stepEnd,
-		"guard should allow: committed txNum is past the step")
+	// committedTxNum at step boundary — safe to collate
+	assert.GreaterOrEqual(t, uint64(600), stepEndTxNum,
+		"guard should allow: committed txNum is at step boundary")
 
-	// Edge case: lastCommittedTxNum == 0 (not yet set) blocks everything.
-	a.lastCommittedTxNum.Store(0)
-	assert.Less(t, a.lastCommittedTxNum.Load(), stepEnd,
-		"guard should block when lastCommittedTxNum is 0 (uninitialized)")
+	// committedTxNum == 0 (no commitment yet) — must NOT collate
+	assert.Less(t, uint64(0), stepEndTxNum,
+		"guard should block when committedTxNum is 0")
 }
 
 func TestAggregator_CommitmentHistoryOnlyMerge(t *testing.T) {

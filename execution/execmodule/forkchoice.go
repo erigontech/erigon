@@ -489,13 +489,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			if err = commitRwTx.Commit(); err != nil {
 				return nil, fmt.Errorf("updateForkChoice: tx commit after hasMore: %w", err)
 			}
-			// Publish committed txNum so the background file builder knows
-			// which steps are safe to collate. See Aggregator.SetLastCommittedTxNum.
-			if agg := e.db.(interface{ Agg() interface{} }).Agg(); agg != nil {
-				if a, ok := agg.(interface{ SetLastCommittedTxNum(uint64) }); ok {
-					a.SetLastCommittedTxNum(sd.TxNum())
-				}
-			}
 			// Recreate RO tx + block overlay on the fresh committed state.
 			roTx.Rollback()
 			roTx, err = e.db.BeginTemporalRo(ctx) //nolint:gocritic

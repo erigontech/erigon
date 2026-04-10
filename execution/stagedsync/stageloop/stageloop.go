@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/services"
-	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/metrics"
@@ -222,10 +221,6 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		doms.ClearRam(true)
 		if err := tx.Commit(); err != nil {
 			return err
-		}
-		// Publish committed txNum for background file builder. See #20169.
-		if agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator); agg != nil {
-			agg.SetLastCommittedTxNum(doms.TxNum())
 		}
 		if tx, err = db.BeginTemporalRw(ctx); err != nil {
 			return err
