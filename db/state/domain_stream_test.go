@@ -130,14 +130,12 @@ func TestCursorHeapMergeLoop_RAMOverridesDB(t *testing.T) {
 }
 
 // TestDomain_IteratePrefix_PrefersFilesOverDB verifies that debugIteratePrefixLatest
-// returns file values instead of stale DB entries when the DB entry's step is
-// within the file range.
+// skips DB entries whose step falls within the file range, so file values are
+// returned instead of stale DB data.
 //
 // After a partial (lexicographic) prune, the DB may retain stale entries with
-// steps already covered by files. Before the fix (#20355), the initial DB
-// cursor push used endTxNum=math.MaxUint64, which always beat file entries
-// in the priority heap. With the fix, endTxNum=step*stepSize correctly loses
-// to file entries whose endTxNum is file.endTxNum-1.
+// steps already covered by files. The fix (#20355) skips DB entries where
+// step.ToTxNum < files.EndTxNum(), so they are never pushed into the heap.
 func TestDomain_IteratePrefix_PrefersFilesOverDB(t *testing.T) {
 	if testing.Short() {
 		t.Skip()

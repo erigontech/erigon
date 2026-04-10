@@ -379,6 +379,7 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 	heap.Init(cpPtr)
 	var k, v []byte
 	var err error
+	filesEndTxNum := dt.files.EndTxNum()
 
 	if ramIter.Seek(string(prefix)) {
 		k := common.ToBytesZeroCopy(ramIter.Key())
@@ -398,10 +399,17 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 	if k, v, err = valsCursor.Seek(prefix); err != nil {
 		return err
 	}
-	if len(k) > 0 && bytes.HasPrefix(k, prefix) {
+	// Skip DB entries whose step falls within the file range — files are authoritative there.
+	for len(k) > 0 && bytes.HasPrefix(k, prefix) {
 		step := kv.Step(^binary.BigEndian.Uint64(v[:8]))
-		val := v[8:]
-		heap.Push(cpPtr, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(val), cDup: valsCursor, endTxNum: step.ToTxNum(dt.stepSize), reverse: true})
+		if step.ToTxNum(dt.stepSize) >= filesEndTxNum {
+			val := v[8:]
+			heap.Push(cpPtr, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(val), cDup: valsCursor, endTxNum: step.ToTxNum(dt.stepSize), reverse: true})
+			break
+		}
+		if k, v, err = valsCursor.NextNoDup(); err != nil {
+			return err
+		}
 	}
 
 	for i, item := range dt.files {
@@ -465,18 +473,26 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 					}
 				}
 			case DB_CURSOR:
-				k, v, err := ci1.cDup.NextNoDup()
-				if err != nil {
-					return err
-				}
-
-				if len(k) > 0 && bytes.HasPrefix(k, prefix) {
-					ci1.key = common.Copy(k)
+				var pushed bool
+				for {
+					k, v, err := ci1.cDup.NextNoDup()
+					if err != nil {
+						return err
+					}
+					if len(k) == 0 || !bytes.HasPrefix(k, prefix) {
+						break
+					}
 					step := kv.Step(^binary.BigEndian.Uint64(v[:8]))
-					ci1.endTxNum = step.ToTxNum(dt.stepSize) // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
-					ci1.val = common.Copy(v[8:])
-					heap.Push(cpPtr, ci1)
-				} else {
+					if step.ToTxNum(dt.stepSize) >= filesEndTxNum {
+						ci1.key = common.Copy(k)
+						ci1.endTxNum = step.ToTxNum(dt.stepSize)
+						ci1.val = common.Copy(v[8:])
+						heap.Push(cpPtr, ci1)
+						pushed = true
+						break
+					}
+				}
+				if !pushed {
 					ci1.cDup.Close()
 				}
 			}
