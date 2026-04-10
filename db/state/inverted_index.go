@@ -429,8 +429,6 @@ func (ii *InvertedIndex) beginForTests() *InvertedIndexRoTx {
 	return ii.beginFilesRo(iv)
 }
 
-// beginForTestsNoRecalc opens an RoTx using the current `_visible` snapshot,
-// without recalculating it. Tests use this to verify that newly integrated
 // dirty files are NOT visible until reCalcVisibleFiles is called.
 func (ii *InvertedIndex) beginForTestsNoRecalc() *InvertedIndexRoTx {
 	return ii.beginFilesRo(ii._visible)

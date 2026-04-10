@@ -155,11 +155,12 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 			sf, _ := ii.buildFiles(context.Background(), 0, collation, background.NewProgressSet())
 			collation.Close()
 			txFrom, txTo := firstTxNumOfStep(0, ii.stepSize), firstTxNumOfStep(1, ii.stepSize)
-			ii.integrateDirtyFiles(sf, txFrom, txTo)
 
 			// without `reCalcVisibleFiles` must be nothing to prune - because files are not visible yet.
-			ic := ii.beginForTestsNoRecalc()
+			ic := ii.beginForTests()
 			defer ic.Close()
+
+			ii.integrateDirtyFiles(sf, txFrom, txTo)
 			stat, err := ic.HashSeekingPrune(context.Background(), tx, 0, 10, pruneLimit, logEvery, false, nil, nil, prune.DefaultStorageMode)
 			require.NoError(t, err)
 			require.Zero(t, stat.PruneCountTx)
@@ -288,11 +289,12 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 			sf, _ := ii.buildFiles(context.Background(), 0, collation, background.NewProgressSet())
 			defer sf.CleanupOnError()
 			txFrom, txTo := firstTxNumOfStep(0, ii.stepSize), firstTxNumOfStep(1, ii.stepSize)
-			ii.integrateDirtyFiles(sf, txFrom, txTo)
 
 			// without `reCalcVisibleFiles` must be nothing to prune - because files are not visible yet.
-			ic := ii.beginForTestsNoRecalc()
+			ic := ii.beginForTests()
 			defer ic.Close()
+
+			ii.integrateDirtyFiles(sf, txFrom, txTo)
 			st := &prune.Stat{
 				MinTxNum:         0,
 				MaxTxNum:         0,
@@ -319,11 +321,12 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 			sf, _ := ii.buildFiles(context.Background(), 0, collation, background.NewProgressSet())
 			defer sf.CleanupOnError()
 			txFrom, txTo := firstTxNumOfStep(0, ii.stepSize), firstTxNumOfStep(1, ii.stepSize)
-			ii.integrateDirtyFiles(sf, txFrom, txTo)
 
 			// without `reCalcVisibleFiles` must be nothing to prune - because files are not visible yet.
-			ic := ii.beginForTestsNoRecalc()
+			ic := ii.beginForTests()
 			defer ic.Close()
+			ii.integrateDirtyFiles(sf, txFrom, txTo)
+
 			st := &prune.Stat{
 				MinTxNum:         0,
 				MaxTxNum:         0,
