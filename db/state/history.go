@@ -744,8 +744,15 @@ func (sf HistoryFiles) CleanupOnError() {
 	}
 }
 func (h *History) reCalcVisibleFiles(toTxNum uint64) {
-	h._visibleFiles = calcVisibleFiles(h.dirtyFiles, h.Accessors, nil, false, toTxNum)
+	h._visibleFiles = h.calcVisibleFiles(toTxNum)
 	h.InvertedIndex.reCalcVisibleFiles(toTxNum)
+}
+
+// calcVisibleFiles computes the history's visible file slice. Pure — it does
+// not touch h._visibleFiles or h.InvertedIndex. Used by Domain.calcVisibleFiles
+// while assembling a consistent cross-entity snapshot.
+func (h *History) calcVisibleFiles(toTxNum uint64) visibleFiles {
+	return calcVisibleFiles(h.dirtyFiles, h.Accessors, nil, false, toTxNum)
 }
 
 // buildFiles performs potentially resource intensive operations of creating
@@ -916,7 +923,14 @@ type HistoryRoTx struct {
 }
 
 func (h *History) BeginFilesRo() *HistoryRoTx {
-	files := h._visibleFiles
+	return h.beginFilesRoFromVisible(h._visibleFiles, h.InvertedIndex._visible)
+}
+
+// beginFilesRoFromVisible constructs a HistoryRoTx over the explicit history
+// visible file slice and nested InvertedIndex *iiVisible. This lets callers
+// working against a published aggregatorVisible build the RoTx without racing
+// with writers that swap h._visibleFiles / h.InvertedIndex._visible.
+func (h *History) beginFilesRoFromVisible(files visibleFiles, iv *iiVisible) *HistoryRoTx {
 	for i := 0; i < len(files); i++ {
 		if !files[i].src.frozen {
 			files[i].src.refcount.Add(1)
@@ -925,7 +939,7 @@ func (h *History) BeginFilesRo() *HistoryRoTx {
 
 	return &HistoryRoTx{
 		h:                 h,
-		iit:               h.InvertedIndex.BeginFilesRo(),
+		iit:               h.InvertedIndex.beginFilesRoFromVisible(iv),
 		files:             files,
 		stepSize:          h.stepSize,
 		stepsInFrozenFile: h.stepsInFrozenFile,

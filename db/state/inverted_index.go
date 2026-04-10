@@ -230,6 +230,12 @@ func (ii *InvertedIndex) SetChecker(checker *DependencyIntegrityChecker) {
 }
 
 func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
+	ii._visible = ii.calcVisibleFiles(toTxNum)
+}
+
+// calcVisibleFiles computes a fresh *iiVisible for this inverted index. Pure —
+// does not mutate ii. Used by Aggregator.recalcVisibleFiles.
+func (ii *InvertedIndex) calcVisibleFiles(toTxNum uint64) *iiVisible {
 	var checker func(startTxNum, endTxNum uint64) bool
 	c := ii.checker
 	if c != nil {
@@ -238,7 +244,7 @@ func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
 			return c.CheckDependentPresent(ue, All, startTxNum, endTxNum)
 		}
 	}
-	ii._visible = newIIVisible(ii.FilenameBase, calcVisibleFiles(ii.dirtyFiles, ii.Accessors, checker, false, toTxNum))
+	return newIIVisible(ii.FilenameBase, calcVisibleFiles(ii.dirtyFiles, ii.Accessors, checker, false, toTxNum))
 }
 
 func (ii *InvertedIndex) MissedMapAccessors() (l []*FilesItem) {
@@ -415,7 +421,14 @@ func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *InvertedIn
 }
 
 func (ii *InvertedIndex) BeginFilesRo() *InvertedIndexRoTx {
-	files := ii._visible.files
+	return ii.beginFilesRoFromVisible(ii._visible)
+}
+
+// beginFilesRoFromVisible builds an InvertedIndexRoTx over the exact *iiVisible
+// passed in, so readers using a published aggregatorVisible observe a single
+// cross-entity generation.
+func (ii *InvertedIndex) beginFilesRoFromVisible(iv *iiVisible) *InvertedIndexRoTx {
+	files := iv.files
 	for i := 0; i < len(files); i++ {
 		if !files[i].src.frozen {
 			files[i].src.refcount.Add(1)
@@ -423,7 +436,7 @@ func (ii *InvertedIndex) BeginFilesRo() *InvertedIndexRoTx {
 	}
 	return &InvertedIndexRoTx{
 		ii:                ii,
-		visible:           ii._visible,
+		visible:           iv,
 		files:             files,
 		stepSize:          ii.stepSize,
 		stepsInFrozenFile: ii.stepsInFrozenFile,

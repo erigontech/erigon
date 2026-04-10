@@ -319,6 +319,17 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 }
 
 func (d *Domain) reCalcVisibleFiles(toTxNum uint64) {
+	dv, hv, hiv := d.calcVisibleFiles(toTxNum)
+	d._visible = dv
+	d.History._visibleFiles = hv
+	d.History.InvertedIndex._visible = hiv
+}
+
+// calcVisibleFiles computes a fresh *domainVisible for this domain, the matching
+// history visibleFile slice, and the nested History.InvertedIndex *iiVisible.
+// It is pure — does not mutate d, d.History, or the inner II — so the caller
+// can assemble a cross-entity consistent snapshot before publishing it.
+func (d *Domain) calcVisibleFiles(toTxNum uint64) (*domainVisible, visibleFiles, *iiVisible) {
 	var checker func(startTxNum, endTxNum uint64) bool
 	if d.checker != nil {
 		ue := FromDomain(d.Name)
@@ -326,8 +337,10 @@ func (d *Domain) reCalcVisibleFiles(toTxNum uint64) {
 			return d.checker.CheckDependentPresent(ue, All, startTxNum, endTxNum)
 		}
 	}
-	d._visible = newDomainVisible(d.Name, calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum))
-	d.History.reCalcVisibleFiles(toTxNum)
+	dv := newDomainVisible(d.Name, calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum))
+	hv := d.History.calcVisibleFiles(toTxNum)
+	hiv := d.History.InvertedIndex.calcVisibleFiles(toTxNum)
+	return dv, hv, hiv
 }
 
 func (d *Domain) Tables() []string { return append(d.History.Tables(), d.ValuesTable) }
@@ -573,9 +586,17 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte, hi, lo uint64) (v
 }
 
 func (d *Domain) BeginFilesRo() *DomainRoTx {
-	for i := 0; i < len(d._visible.files); i++ {
-		if !d._visible.files[i].src.frozen {
-			d._visible.files[i].src.refcount.Add(1)
+	return d.beginFilesRoFromVisible(d._visible, d.History._visibleFiles, d.History.InvertedIndex._visible)
+}
+
+// beginFilesRoFromVisible builds a DomainRoTx over the exact *domainVisible,
+// history visibleFile slice and inner-II *iiVisible passed in, rather than
+// reading fields directly. Aggregator.BeginFilesRo uses this to guarantee every
+// entity in an AggregatorRoTx comes from the same aggregatorVisible generation.
+func (d *Domain) beginFilesRoFromVisible(dv *domainVisible, hf visibleFiles, hiv *iiVisible) *DomainRoTx {
+	for i := 0; i < len(dv.files); i++ {
+		if !dv.files[i].src.frozen {
+			dv.files[i].src.refcount.Add(1)
 		}
 	}
 
@@ -584,9 +605,9 @@ func (d *Domain) BeginFilesRo() *DomainRoTx {
 		stepSize:          d.stepSize,
 		stepsInFrozenFile: d.stepsInFrozenFile,
 		d:                 d,
-		ht:                d.History.BeginFilesRo(),
-		visible:           d._visible,
-		files:             d._visible.files,
+		ht:                d.History.beginFilesRoFromVisible(hf, hiv),
+		visible:           dv,
+		files:             dv.files,
 		salt:              d.salt.Load(),
 	}
 }
