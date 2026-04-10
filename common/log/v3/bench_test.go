@@ -219,7 +219,7 @@ func (w *slowWriter) Write(p []byte) (int, error) {
 
 func TestStreamHandlerNoContention(t *testing.T) {
 	const (
-		goroutines = 500
+		goroutines = 5000
 		writeDelay = 1 * time.Nanosecond
 	)
 
