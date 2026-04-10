@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -202,4 +204,50 @@ func BenchmarkLog15WithoutFields(b *testing.B) {
 			logger.Info("Go fast.")
 		}
 	})
+}
+
+type slowWriter struct {
+	delay time.Duration
+	lines atomic.Int64
+}
+
+func (w *slowWriter) Write(p []byte) (int, error) {
+	time.Sleep(w.delay)
+	w.lines.Add(int64(bytes.Count(p, []byte{'\n'})))
+	return len(p), nil
+}
+
+func TestStreamHandlerNoContention(t *testing.T) {
+	const (
+		goroutines = 50
+		writeDelay = 1 * time.Millisecond
+	)
+
+	wr := &slowWriter{delay: writeDelay}
+	lg := New()
+	lg.SetHandler(AsyncStreamHandler(wr, TerminalFormatNoColor()))
+
+	start := time.Now()
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			lg.Info("msg")
+		}()
+	}
+	wg.Wait()
+	elapsed := time.Since(start)
+
+	// Without mutex: ~1ms (parallel writes).
+	// With SyncHandler mutex: ~50ms (serialized writes).
+	// Use 15ms as threshold — well above parallel, well below serialized.
+	limit := time.Duration(goroutines/3) * writeDelay
+	if elapsed > limit {
+		t.Fatalf("logging took %v with %d goroutines (limit %v) — likely mutex contention", elapsed, goroutines, limit)
+	}
+	if lines := wr.lines.Load(); lines != goroutines {
+		t.Fatalf("expected %d log lines, got %d — messages lost", goroutines, lines)
+	}
+	t.Logf("elapsed=%v (limit=%v) lines=%d", elapsed, limit, wr.lines.Load())
 }
