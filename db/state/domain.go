@@ -1645,6 +1645,13 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 
 	foundStep := kv.Step(^binary.BigEndian.Uint64(foundInvStep))
 
+	// Deletion entries (empty value) are authoritative regardless of step age:
+	// frozen files have no tombstones, so discarding a deletion marker causes
+	// fallthrough to getLatestFromFiles which returns stale pre-deletion data.
+	if len(v) == 0 {
+		return v, foundStep, true, nil
+	}
+
 	if lastTxNumOfStep(foundStep, dt.stepSize) >= dt.files.EndTxNum() {
 		return v, foundStep, true, nil
 	}
