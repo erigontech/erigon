@@ -86,7 +86,7 @@ type InvertedIndex struct {
 }
 
 type iiVisible struct {
-	files  []visibleFile
+	files  visibleFiles
 	name   string
 	caches *sync.Pool
 }
@@ -423,17 +423,17 @@ func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *InvertedIn
 	return w
 }
 
-func (ii *InvertedIndex) BeginFilesRo() *InvertedIndexRoTx {
-	return ii.beginFilesRoFromVisible(ii._visible)
+// beginWithRecalcForTests — see Domain.beginWithRecalcForTests for semantics.
+func (ii *InvertedIndex) beginWithRecalcForTests() *InvertedIndexRoTx {
+	return ii.beginFilesRo(ii._visible)
 }
 
-func (ii *InvertedIndex) beginFilesRoFromVisible(iv *iiVisible) *InvertedIndexRoTx {
-	files := visibleFiles(iv.files)
-	files.bumpRefcount()
+func (ii *InvertedIndex) beginFilesRo(iv *iiVisible) *InvertedIndexRoTx {
+	iv.files.bumpRefcount()
 	return &InvertedIndexRoTx{
 		ii:                ii,
 		visible:           iv,
-		files:             files,
+		files:             iv.files,
 		stepSize:          ii.stepSize,
 		stepsInFrozenFile: ii.stepsInFrozenFile,
 		name:              ii.Name,

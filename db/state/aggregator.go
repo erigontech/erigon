@@ -1983,13 +1983,13 @@ func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 		if iv == nil {
 			continue
 		}
-		ac.iis[id] = a.iis[id].beginFilesRoFromVisible(iv)
+		ac.iis[id] = a.iis[id].beginFilesRo(iv)
 	}
 	for id, dv := range v.d {
 		if dv == nil {
 			continue
 		}
-		ac.d[id] = a.d[id].beginFilesRoFromVisible(dv, v.dh[id], v.dhii[id])
+		ac.d[id] = a.d[id].beginFilesRo(dv, v.dh[id], v.dhii[id])
 	}
 	return ac
 }

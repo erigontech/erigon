@@ -53,7 +53,7 @@ func TestGCReadAfterRemoveFile(t *testing.T) {
 			// - close view
 			// - open new view
 			// - make sure there is no canDelete file
-			hc := h.BeginFilesRo()
+			hc := h.beginWithRecalcForTests()
 
 			lastOnFs, _ := h.dirtyFiles.Max()
 			require.False(lastOnFs.frozen) // prepared dataset must have some non-frozen files. or it's bad dataset.
@@ -88,7 +88,7 @@ func TestGCReadAfterRemoveFile(t *testing.T) {
 			require.False(nonDeletedOnFs.frozen)
 			require.NotNil(nonDeletedOnFs.decompressor) // non-canDelete files are not closed
 
-			hc = h.BeginFilesRo()
+			hc = h.beginWithRecalcForTests()
 			newLastInView := hc.files[len(hc.files)-1]
 			require.False(lastOnFs.frozen)
 			require.False(lastInView.startTxNum == newLastInView.startTxNum && lastInView.endTxNum == newLastInView.endTxNum)
@@ -103,7 +103,7 @@ func TestGCReadAfterRemoveFile(t *testing.T) {
 
 			// - del cold file
 			// - new reader must not see canDelete file
-			hc := h.BeginFilesRo()
+			hc := h.beginWithRecalcForTests()
 			lastOnFs, _ := h.dirtyFiles.Max()
 			require.False(lastOnFs.frozen) // prepared dataset must have some non-frozen files. or it's bad dataset.
 			deleteMergeFile(h.dirtyFiles, []*FilesItem{lastOnFs}, "", h.logger)
@@ -152,7 +152,7 @@ func TestDomainGCReadAfterRemoveFile(t *testing.T) {
 			// - close view
 			// - open new view
 			// - make sure there is no canDelete file
-			hc := h.BeginFilesRo()
+			hc := h.beginWithRecalcForTests()
 			_ = hc
 			lastOnFs, _ := h.dirtyFiles.Max()
 			require.False(lastOnFs.frozen) // prepared dataset must have some non-frozen files. or it's bad dataset.
@@ -181,7 +181,7 @@ func TestDomainGCReadAfterRemoveFile(t *testing.T) {
 			require.False(nonDeletedOnFs.frozen)
 			require.NotNil(nonDeletedOnFs.decompressor) // non-canDelete files are not closed
 
-			hc = h.BeginFilesRo()
+			hc = h.beginWithRecalcForTests()
 			newLastInView := hc.files[len(hc.files)-1]
 			require.False(lastOnFs.frozen)
 			require.False(lastInView.startTxNum == newLastInView.startTxNum && lastInView.endTxNum == newLastInView.endTxNum)
@@ -196,7 +196,7 @@ func TestDomainGCReadAfterRemoveFile(t *testing.T) {
 
 			// - del cold file
 			// - new reader must not see canDelete file
-			hc := h.BeginFilesRo()
+			hc := h.beginWithRecalcForTests()
 			lastOnFs, _ := h.dirtyFiles.Max()
 			require.False(lastOnFs.frozen) // prepared dataset must have some non-frozen files. or it's bad dataset.
 			deleteMergeFile(h.dirtyFiles, []*FilesItem{lastOnFs}, "", h.logger)

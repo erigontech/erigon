@@ -101,7 +101,7 @@ type Domain struct {
 }
 
 type domainVisible struct {
-	files  []visibleFile
+	files  visibleFiles
 	name   kv.Domain
 	caches *sync.Pool
 }
@@ -588,21 +588,27 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte, hi, lo uint64) (v
 
 }
 
-func (d *Domain) BeginFilesRo() *DomainRoTx {
-	return d.beginFilesRoFromVisible(d._visible, d.History._visibleFiles, d.History.InvertedIndex._visible)
+// beginWithRecalcForTests opens a DomainRoTx against the current _visible
+// snapshots held on Domain/History/InvertedIndex. It is NOT safe for concurrent
+// use with an Aggregator (which publishes snapshots via a lock-free bundle
+// and expects nothing else to mutate or read the per-entity _visible fields).
+// Tests and standalone debug tools that construct a bare Domain should use
+// this; production code goes through Aggregator.BeginFilesRo.
+func (d *Domain) beginWithRecalcForTests() *DomainRoTx {
+	return d.beginFilesRo(d._visible, d.History._visibleFiles, d.History.InvertedIndex._visible)
 }
 
-// beginFilesRoFromVisible lets Aggregator.BeginFilesRo pass a snapshot pinned
-// to a single aggregatorVisible generation, avoiding a torn cross-entity read.
-func (d *Domain) beginFilesRoFromVisible(dv *domainVisible, hf visibleFiles, hiv *iiVisible) *DomainRoTx {
-	visibleFiles(dv.files).bumpRefcount()
+// beginFilesRo lets Aggregator.BeginFilesRo pass a snapshot pinned to a single
+// aggregatorVisible generation, avoiding a torn cross-entity read.
+func (d *Domain) beginFilesRo(dv *domainVisible, hf visibleFiles, hiv *iiVisible) *DomainRoTx {
+	dv.files.bumpRefcount()
 
 	return &DomainRoTx{
 		name:              d.Name,
 		stepSize:          d.stepSize,
 		stepsInFrozenFile: d.stepsInFrozenFile,
 		d:                 d,
-		ht:                d.History.beginFilesRoFromVisible(hf, hiv),
+		ht:                d.History.beginFilesRo(hf, hiv),
 		visible:           dv,
 		files:             dv.files,
 		salt:              d.salt.Load(),
