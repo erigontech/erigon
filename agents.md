@@ -30,6 +30,22 @@ Erigon is a high-performance Ethereum execution client with embedded consensus l
 - **Staged synchronization** (ordered pipeline, independent unwind)
 - **Modular services** (sentry, txpool, downloader can run separately)
 
+### Domain State Layer
+
+State is stored across 4 domains (Accounts, Storage, Code, Commitment). Each domain has a values table in MDBX (chaindata) and frozen snapshot files.
+
+**Read path**: `SharedDomains.GetLatest` → in-memory batch → parent batch → state cache → `DomainRoTx.getLatestFromDb` (MDBX) → `getLatestFromFiles` (frozen snapshots, newest-first scan). Steps are encoded as inverted uint64 (`^uint64(step)`) for DupSort ordering.
+
+**Write path**: `SharedDomains.DomainPut/DomainDel` → `TemporalMemBatch` → `DomainBufferedWriter.PutWithPrev/DeleteWithPrev` → `addValue` (ETL collector) + `DomainDiff.DomainUpdate` (changeset for unwind). Deletions are stored as 8-byte step-only entries (no value content).
+
+**Unwind path**: Changesets (`ChangeSets3` table) are collected backwards per block, merged via `MergeDiffSets`, then applied by `DomainRoTx.unwind()` which deletes the current-step entry and restores the previous value.
+
+**Frozen files lack tombstones**: deleted keys are simply absent from frozen/snapshot files. If a deletion entry in MDBX is discarded or missing, `getLatestFromFiles` falls through to older files and returns stale pre-deletion data. This is the root cause of stale-value bugs where `gas used mismatch` diffs equal exactly `SSTORE_SET - SSTORE_RESET = 17100`.
+
+**Domain config** (`db/state/statecfg/state_schema.go`): StorageDomain and AccountsDomain use `LargeValues=false` (DupSort); CodeDomain and RCacheDomain use `LargeValues=true`.
+
+**Changeset formats**: V0 (legacy, dictionary-based with prevStep) and V1 (post-df770fadfe, hasValue flag + value). `DeserializeDiffSet` auto-detects via first two bytes. V1 distinguishes nil (hasValue=0, different step) from `[]byte{}` (hasValue=1 + valLen=0, new key or was-deleted).
+
 ## Directory Structure
 
 | Directory | Purpose | Component Docs |

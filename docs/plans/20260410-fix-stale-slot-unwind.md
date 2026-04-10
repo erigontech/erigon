@@ -64,9 +64,9 @@ Two cooperating bugs in the domain state layer, both rooted in df770fadfe (Feb 2
 **Files:**
 - Modify: `db/state/execctx/domain_shared.go` (remove isTraceTargetKey / traceTarget instrumentation added in ac9b21d89b)
 
-- [ ] Remove trace instrumentation added for the investigation (the `TRACE_TARGET_SLOT` code from commit ac9b21d89b)
-- [ ] Run `go test ./db/state/...` — still passes
-- [ ] Run `make lint` — clean
+- [x] Remove trace instrumentation added for the investigation (the `TRACE_TARGET_SLOT` code from commit ac9b21d89b)
+- [x] Run `go test ./db/state/...` — still passes
+- [x] Run `make lint` — clean
 
 ## Post-Completion
 
