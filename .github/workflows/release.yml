@@ -140,6 +140,26 @@ jobs:
           echo "short_commit_id=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
           echo "parsed_version=$(echo ${RELEASE_VERSION} | sed -e 's/^v//g')" >> $GITHUB_OUTPUT
 
+      - name: Filter BINARIES to those available in the checked-out branch's Makefile
+        run: |
+          cd erigon
+          # Collect all targets available via COMMANDS in the Makefile, plus 'erigon' which is always present
+          AVAILABLE_TARGETS=$(grep '^COMMANDS +=' Makefile | awk '{print $3}' | tr '\n' ' ')
+          AVAILABLE_TARGETS="erigon $AVAILABLE_TARGETS"
+          echo "Makefile targets available: $AVAILABLE_TARGETS"
+
+          FILTERED=""
+          for bin in $BINARIES; do
+            if echo " $AVAILABLE_TARGETS " | grep -qw "$bin"; then
+              FILTERED="$FILTERED $bin"
+            else
+              echo "Skipping '$bin': no Makefile target in this branch"
+            fi
+          done
+          FILTERED="${FILTERED# }"
+          echo "Filtered BINARIES: $FILTERED"
+          echo "BINARIES=$FILTERED" >> $GITHUB_ENV
+
       - name: Validate release version against db/version/app.go
         if: ${{ ! inputs.disable_version_check }}
         env:
@@ -679,16 +699,6 @@ jobs:
         fi
 
 
-  sync-gitbook:
-    name: Sync Gitbook docs branch and create variant if needed
-    permissions:
-      contents: write  # reusable workflow (gitbook-release.yml) pushes branches
-    needs: [publish-release]
-    if: ${{ inputs.perform_release }}
-    uses: ./.github/workflows/gitbook-release.yml
-    with:
-      release_version: ${{ inputs.release_version }}
-    secrets: inherit
 
   In-case-of-failure:
     name: "In case of failure: remove remote git tag pointing to the new version."
