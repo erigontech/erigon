@@ -106,7 +106,6 @@ func NewInvertedIndex(cfg statecfg.InvIdxCfg, stepSize, stepsInFrozenFile uint64
 		dirs:       dirs,
 		salt:       &atomic.Pointer[uint32]{},
 		dirtyFiles: btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		_visible:   newIIVisible(cfg.FilenameBase, []visibleFile{}),
 		logger:     logger,
 
 		stepSize:          stepSize,
@@ -224,13 +223,6 @@ func (ii *InvertedIndex) scanDirtyFiles(fileNames []string) {
 
 func (ii *InvertedIndex) SetChecker(checker *DependencyIntegrityChecker) {
 	ii.checker = checker
-}
-
-// reCalcVisibleFiles mutates ii._visible. Only direct callers (tests that
-// construct a standalone InvertedIndex without an Aggregator) should use this.
-// The Aggregator path uses calcVisibleFiles + bundle.
-func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
-	ii._visible = ii.calcVisibleFiles(toTxNum)
 }
 
 // calcVisibleFiles is pure — it does not mutate ii. Used by the Aggregator to
@@ -422,7 +414,6 @@ func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *InvertedIn
 
 func (ii *InvertedIndex) beginForTests() *InvertedIndexRoTx {
 	iv := ii.calcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
-	ii._visible = iv
 	return ii.beginFilesRo(iv)
 }
 

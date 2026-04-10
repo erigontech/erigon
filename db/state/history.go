@@ -358,7 +358,7 @@ func (h *History) Scan(toTxNum uint64) error {
 		return err
 	}
 
-	h.reCalcVisibleFiles(toTxNum)
+	//h.reCalcVisibleFiles(toTxNum)
 
 	salt, err := GetStateIndicesSalt(h.dirs, false, h.logger)
 	if err != nil {
@@ -738,9 +738,6 @@ func (sf HistoryFiles) CleanupOnError() {
 		sf.efExistence.Close()
 	}
 }
-func (h *History) reCalcVisibleFiles(toTxNum uint64) {
-	h.InvertedIndex.reCalcVisibleFiles(toTxNum)
-}
 
 func (h *History) calcVisibleFiles(toTxNum uint64) (visibleFiles, *iiVisible) {
 	hv := calcVisibleFiles(h.dirtyFiles, h.Accessors, nil, false, toTxNum)
@@ -917,7 +914,6 @@ type HistoryRoTx struct {
 
 func (h *History) beginForTests() *HistoryRoTx {
 	hv, hvi := h.calcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
-	h.InvertedIndex._visible = hvi
 	return h.beginFilesRo(hv, hvi)
 }
 
