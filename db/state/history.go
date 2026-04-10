@@ -60,12 +60,10 @@ type History struct {
 	// dirtyFiles - list of ALL files - including: un-indexed-yet, garbage, merged-into-bigger-one, ...
 	// thread-safe, but maybe need 1 RWLock for all trees in Aggregator
 	//
-	// _visibleFiles derivative from field `file`, but without garbage:
-	//  - no files with `canDelete=true`
-	//  - no overlaps
-	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
-	//
-	// BeginRo() using _visibleFiles in zero-copy way
+	// The visible view (derivative of dirtyFiles, without garbage: no `canDelete=true`,
+	// no overlaps, no un-indexed files) is computed by Aggregator into an immutable
+	// snapshot and published atomically via Aggregator.visible. BeginFilesRo opens
+	// readers against that snapshot in zero-copy way.
 	dirtyFiles *btree2.BTreeG[*FilesItem]
 
 	// _testBuildVIHook - test-only: called with the recsplit before the build loop in buildVI
@@ -919,7 +917,8 @@ func (h *History) beginForTests() *HistoryRoTx {
 
 // BeginFilesRoForDebug is the exported entry point for standalone debug tools
 // (cmd/integration) that open a bare History without an Aggregator. Production
-// code must go through Aggregator.BeginFilesRo — see Domain.beginWithRecalcForTests.
+// code must go through Aggregator.BeginFilesRo so reads are opened from the
+// Aggregator-managed snapshot rather than directly from a standalone History.
 func (h *History) BeginFilesRoForDebug() *HistoryRoTx {
 	return h.beginForTests()
 }

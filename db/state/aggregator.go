@@ -1479,10 +1479,11 @@ type aggregatorVisible struct {
 }
 
 // recalcVisibleFiles must be called with dirtyFilesLock held (writers are
-// serialized by it; readers take no lock and instead load a.visible). It uses
-// pure per-entity calcVisibleFiles helpers — it does NOT mutate d._visible /
-// h._visibleFiles / ii._visible, which would race with any concurrent reader
-// going through the legacy per-entity BeginFilesRo path.
+// serialized by it; readers take no lock and instead load a.visible). It builds
+// a fresh immutable aggregatorVisible bundle via the per-entity calcVisibleFiles
+// helpers, then publishes the completed snapshot with a.visible.Store(next).
+// Per-entity visibility is not mutated; readers atomically observe one
+// cross-entity-consistent generation.
 func (a *Aggregator) recalcVisibleFiles(toTxNum uint64) {
 	next := &aggregatorVisible{iis: make([]*iiVisible, len(a.iis))}
 	for id, d := range a.d {

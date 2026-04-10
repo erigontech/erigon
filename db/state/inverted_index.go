@@ -69,12 +69,10 @@ type InvertedIndex struct {
 	// dirtyFiles - list of ALL files - including: un-indexed-yet, garbage, merged-into-bigger-one, ...
 	// thread-safe, but maybe need 1 RWLock for all trees in Aggregator
 	//
-	// _visible derivative from field `file`, but without garbage:
-	//  - no files with `canDelete=true`
-	//  - no overlaps
-	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
-	//
-	// BeginRo() using _visible in zero-copy way
+	// The visible view (derivative of dirtyFiles, without garbage: no `canDelete=true`,
+	// no overlaps, no un-indexed files) is computed by Aggregator into an immutable
+	// iiVisible snapshot and published atomically via Aggregator.visible. BeginFilesRo
+	// opens readers against that snapshot in zero-copy way.
 	dirtyFiles *btree2.BTreeG[*FilesItem]
 
 	logger log.Logger

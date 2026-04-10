@@ -82,12 +82,10 @@ type Domain struct {
 	// dirtyFiles - list of ALL files - including: un-indexed-yet, garbage, merged-into-bigger-one, ...
 	// thread-safe, but maybe need 1 RWLock for all trees in Aggregator
 	//
-	// `_visible.files` derivative from field `file`, but without garbage:
-	//  - no files with `canDelete=true`
-	//  - no overlaps
-	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
-	//
-	// BeginRo() using _visible in zero-copy way
+	// The visible view (derivative of dirtyFiles, without garbage: no `canDelete=true`,
+	// no overlaps, no un-indexed files) is computed by Aggregator into an immutable
+	// domainVisible snapshot and published atomically via Aggregator.visible.
+	// BeginFilesRo opens readers against that snapshot in zero-copy way.
 	dirtyFiles *btree2.BTreeG[*FilesItem]
 
 	checker *DependencyIntegrityChecker
@@ -571,10 +569,10 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte, hi, lo uint64) (v
 
 }
 
-// beginForTests reads from the per-entity _visible fields directly.
-// Unsafe to mix with an Aggregator, which publishes snapshots via a lock-free
-// bundle and assumes nothing else touches those fields. Production code goes
-// through Aggregator.BeginFilesRo.
+// beginForTests recomputes visible files from dirtyFiles directly instead of
+// using Aggregator's published snapshot. Unsafe to mix with an Aggregator,
+// because it can observe an unsynchronized/torn view of dirtyFiles across
+// entities. Production code goes through Aggregator.BeginFilesRo.
 func (d *Domain) beginForTests() *DomainRoTx {
 	dv, hv, iv := d.calcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 	return d.beginFilesRo(dv, hv, iv)
