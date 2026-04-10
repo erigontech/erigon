@@ -1007,7 +1007,11 @@ func awaitDeactivationChannels() {
 }
 
 func (c *component) deactivate(ctx context.Context, onActivity onActivity) error {
-	if c.state.IsDeactivated() {
+	c.RLock()
+	alreadyDeactivated := c.state.IsDeactivated()
+	c.RUnlock()
+
+	if alreadyDeactivated {
 		onActivity(ctx, c, nil)
 		return nil
 	}
