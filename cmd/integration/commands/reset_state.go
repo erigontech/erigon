@@ -154,9 +154,8 @@ func printStages(tx kv.TemporalTx, snapshots *freezeblocks.RoSnapshots, borSn *h
 	}
 
 	_lb, _lt, _ := rawdbv3.TxNums.Last(tx)
+	stepSize := tx.Debug().StepSize()
 
-	dbg := tx.Debug()
-	stepSize := dbg.StepSize()
 	fmt.Fprintf(w, "state.history: idx steps: %.02f, TxNums_Index(%d,%d)\n", rawdbhelpers.IdxStepsCountV3(tx, stepSize), _lb, _lt)
 	for i := 0; i < int(kv.DomainLen); i++ {
 		d := kv.Domain(i)
@@ -208,6 +207,7 @@ func printStages(tx kv.TemporalTx, snapshots *freezeblocks.RoSnapshots, borSn *h
 	fmt.Fprintf(w, "domain and ii progress\n\n")
 	fmt.Fprint(w, "\n \t\t historyStartFrom \t\t progress(txnum) \t\t progress(step)\n")
 
+	dbg := tx.Debug()
 	for i := 0; i < int(kv.DomainLen); i++ {
 		d := kv.Domain(i)
 		txNum := dbg.DomainProgress(d)
