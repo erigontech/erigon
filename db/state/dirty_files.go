@@ -639,8 +639,8 @@ func (i visibleFile) EndRootNum() uint64 {
 	return i.endTxNum
 }
 
-func calcVisibleFiles(files *btree2.BTreeG[*FilesItem], l statecfg.Accessors, checker func(startTxNum, endTxNum uint64) bool, trace bool, toTxNum uint64) (roItems []visibleFile) {
-	newVisibleFiles := make([]visibleFile, 0, files.Len())
+func calcVisibleFiles(files *btree2.BTreeG[*FilesItem], l statecfg.Accessors, checker func(startTxNum, endTxNum uint64) bool, trace bool, toTxNum uint64) (roItems visibleFiles) {
+	newVisibleFiles := make(visibleFiles, 0, files.Len())
 	// trace = true
 	if trace {
 		log.Warn("[dbg] calcVisibleFiles", "amount", files.Len(), "toTxNum", toTxNum)
@@ -682,7 +682,7 @@ func calcVisibleFiles(files *btree2.BTreeG[*FilesItem], l statecfg.Accessors, ch
 		return true
 	})
 	if newVisibleFiles == nil {
-		newVisibleFiles = []visibleFile{}
+		newVisibleFiles = visibleFiles{}
 	}
 
 	// Check for gaps in visible files and warn if found
