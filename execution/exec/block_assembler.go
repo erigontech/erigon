@@ -333,11 +333,13 @@ func (ba *BlockAssembler) AssembleBlock(stateReader state.StateReader, ibs *stat
 	}
 
 	// Note: NewBlock (called by FinalizeBlockExecution) copies the header,
-	// so we must modify the block's header directly, not ba.Header.
+	// so we must modify both the block's header and ba.Header. ba.Header is
+	// what the builder stage propagates to GetPayload via current.Header.
 	header := block.HeaderNoCopy()
 	// EIP-7002/7251 finalize system calls consume gas that must be counted in
 	// header.GasUsed per Ethereum spec.
 	header.GasUsed += sysCallGas
+	ba.Header.GasUsed += sysCallGas
 	if ba.HasBAL() {
 		// Record finalize system call I/O (EIP-7002, EIP-7251, etc.)
 		ba.balIO = ba.balIO.Merge(ibs.TxIO())
