@@ -194,12 +194,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 			}
 		}()
 
-		// Switch out of initialCycle when approaching the tip so changesets
-		// are generated for at least the last reorgBlockDepth blocks.
-		if initialCycle && maxBlockNum > 0 && startBlockNum+pe.cfg.syncCfg.MaxReorgDepth >= maxBlockNum {
-			initialCycle = false
-		}
-		shouldGenerateChangesets := shouldGenerateChangeSets(pe.cfg, startBlockNum, maxBlockNum, initialCycle)
+		shouldGenerateChangesets := shouldGenerateChangeSets(pe.cfg, startBlockNum, maxBlockNum)
 		changeSet := &changeset.StateChangeSet{}
 		if shouldGenerateChangesets && startBlockNum > 0 {
 			pe.domains().SetChangesetAccumulator(changeSet)
