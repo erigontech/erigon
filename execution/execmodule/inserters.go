@@ -18,13 +18,11 @@ package execmodule
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/big"
 
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/metrics"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -51,16 +49,7 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 	if sd == nil {
 		sd, err = execctx.NewSharedDomains(ctx, roTx, e.logger)
 		if err != nil {
-			// ErrBehindCommitment means the commitment domain is ahead of the
-			// TxNums index (e.g. after downloading state snapshots that extend
-			// past the block snapshots boundary). InsertBlocks only accumulates
-			// block data (headers, bodies, TDs) in the overlay — it does not
-			// need a valid commitment state. Proceed so the ForkChoice stage
-			// can run execution and heal the TxNums gap.
-			if !errors.Is(err, commitmentdb.ErrBehindCommitment) {
-				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not create shared domains: %s", err)
-			}
-			e.logger.Warn("ethereumExecutionModule.InsertBlocks: domain ahead of blocks, proceeding with block insertion", "err", err)
+			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not create shared domains: %s", err)
 		}
 		e.lock.Lock()
 		e.currentContext = sd
