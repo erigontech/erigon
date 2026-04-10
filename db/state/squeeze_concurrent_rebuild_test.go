@@ -200,6 +200,7 @@ func TestConcurrentRebuildCommitment(t *testing.T) {
 	// Save and restore the global concurrent commitment flag.
 	origConcurrent := statecfg.ExperimentalConcurrentCommitment
 	t.Cleanup(func() { statecfg.ExperimentalConcurrentCommitment = origConcurrent })
+	statecfg.ExperimentalConcurrentCommitment = false
 
 	// --- Read env parameters ---
 	// Default TEST_STEPS=10 ensures that after BuildFiles + merge the account domain

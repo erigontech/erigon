@@ -939,8 +939,9 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		}
 		roTx.Rollback()
 
+		concurrent := statecfg.ExperimentalConcurrentCommitment
 		trieVariant := commitment.VariantHexPatriciaTrie
-		if statecfg.ExperimentalConcurrentCommitment {
+		if concurrent {
 			trieVariant = commitment.VariantConcurrentHexPatricia
 		}
 
@@ -975,7 +976,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			domains.SetTxNum(lastTxnumInShard - 1)
 			currentTxNum := lastTxnumInShard - 1
 			domains.GetCommitmentCtx().SetLimitedHistoryStateReader(rwTx, lastTxnumInShard) // this helps to read state from correct file during commitment
-			if statecfg.ExperimentalConcurrentCommitment {
+			if concurrent {
 				domains.EnableParaTrieDB(rwDb)
 			}
 
