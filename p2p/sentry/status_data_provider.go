@@ -118,8 +118,8 @@ func (s *StatusDataProvider) makeStatusData(head ChainHead) *sentryproto.StatusD
 		MinimumBlockHeight: head.MinimumHeight,
 		ForkData: &sentryproto.Forks{
 			Genesis:     gointerfaces.ConvertHashToH256(s.genesisHash),
-			HeightForks: s.heightForks,
-			TimeForks:   s.timeForks,
+			HeightForks: append([]uint64(nil), s.heightForks...),
+			TimeForks:   append([]uint64(nil), s.timeForks...),
 		},
 	}
 }
