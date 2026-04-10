@@ -165,9 +165,6 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 			require.Zero(t, stat.PruneCountTx)
 			require.Zero(t, stat.PruneCountValues)
 
-			// after reCalcVisibleFiles must be able to prune step 0. but not more
-			ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
-
 			ic = ii.beginWithRecalcForTests()
 			defer ic.Close()
 			stat, err = ic.HashSeekingPrune(context.Background(), tx, 0, 10, pruneLimit, logEvery, false, nil, nil, prune.DefaultStorageMode)
@@ -377,9 +374,6 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 			require.NoError(t, err)
 			require.Zero(t, stat.PruneCountTx)
 			require.Zero(t, stat.PruneCountValues)
-
-			// after reCalcVisibleFiles must be able to prune step 0. but not more
-			ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 			ic = ii.beginWithRecalcForTests()
 			defer ic.Close()
@@ -868,7 +862,6 @@ func (ii *InvertedIndex) collateBuildIntegrate(ctx context.Context, step kv.Step
 		return err
 	}
 	ii.integrateDirtyFiles(sf, step.ToTxNum(ii.stepSize), (step + 1).ToTxNum(ii.stepSize))
-	ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 	return nil
 }
 
@@ -908,7 +901,6 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 					in, err := ic.mergeFiles(ctx, outs, startTxNum, endTxNum, background.NewProgressSet())
 					require.NoError(tb, err)
 					ii.integrateMergedDirtyFiles(in)
-					ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 					return false
 				}(); stop {
 					break
@@ -1005,7 +997,6 @@ func TestScanStaticFiles(t *testing.T) {
 	}
 	ii.scanDirtyFiles(files)
 	require.Equal(t, 6, ii.dirtyFiles.Len())
-	ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 	require.Equal(t, 0, len(ii._visible.files))
 }
 

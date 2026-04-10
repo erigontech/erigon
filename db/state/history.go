@@ -748,6 +748,12 @@ func (h *History) reCalcVisibleFiles(toTxNum uint64) {
 	h.InvertedIndex.reCalcVisibleFiles(toTxNum)
 }
 
+func (h *History) calcVisibleFiles(toTxNum uint64) (visibleFiles, *iiVisible) {
+	hv := calcVisibleFiles(h.dirtyFiles, h.Accessors, nil, false, toTxNum)
+	hiv := h.InvertedIndex.calcVisibleFiles(toTxNum)
+	return hv, hiv
+}
+
 // buildFiles performs potentially resource intensive operations of creating
 // static files and their indices
 func (h *History) buildFiles(ctx context.Context, step kv.Step, collation HistoryCollation, ps *background.ProgressSet) (HistoryFiles, error) {
@@ -916,7 +922,8 @@ type HistoryRoTx struct {
 }
 
 func (h *History) beginWithRecalcForTests() *HistoryRoTx {
-	return h.beginFilesRo(h._visibleFiles, h.InvertedIndex._visible)
+	hv, hvi := h.calcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
+	return h.beginFilesRo(hv, hvi)
 }
 
 // BeginFilesRoForDebug is the exported entry point for standalone debug tools

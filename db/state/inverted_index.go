@@ -424,7 +424,7 @@ func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *InvertedIn
 }
 
 func (ii *InvertedIndex) beginWithRecalcForTests() *InvertedIndexRoTx {
-	return ii.beginFilesRo(ii._visible)
+	return ii.beginFilesRo(ii.calcVisibleFiles(ii.dirtyFilesEndTxNumMinimax()))
 }
 
 func (ii *InvertedIndex) beginFilesRo(iv *iiVisible) *InvertedIndexRoTx {

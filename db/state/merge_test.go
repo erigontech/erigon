@@ -164,7 +164,6 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		ic := ii.beginWithRecalcForTests()
 		defer ic.Close()
@@ -190,7 +189,6 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h.scanDirtyFiles([]string{
 			"v1.0-accounts.0-1.v",
@@ -202,7 +200,6 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 		hc := h.beginWithRecalcForTests()
 		defer hc.Close()
@@ -223,7 +220,6 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h.scanDirtyFiles([]string{
 			"v1.0-accounts.0-1.v",
@@ -233,7 +229,6 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 		hc := h.beginWithRecalcForTests()
 		defer hc.Close()
@@ -256,7 +251,6 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h.scanDirtyFiles([]string{
 			"v1.0-accounts.0-1.v",
@@ -266,7 +260,6 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 		hc := h.beginWithRecalcForTests()
 		defer hc.Close()
@@ -290,7 +283,6 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h.scanDirtyFiles([]string{
 			"v1.0-accounts.0-1.v",
@@ -302,7 +294,6 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 		hc := h.beginWithRecalcForTests()
 		defer hc.Close()
@@ -325,7 +316,6 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h.scanDirtyFiles([]string{
 			"v1.0-accounts.0-1.v",
@@ -337,7 +327,6 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 		hc := h.beginWithRecalcForTests()
 		defer hc.Close()
@@ -360,7 +349,6 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		// `kill -9` may leave small garbage files, but if big one already exists we assume it's good(fsynced) and no reason to merge again
 		h.scanDirtyFiles([]string{
@@ -372,7 +360,6 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 		hc := h.beginWithRecalcForTests()
 		defer hc.Close()
@@ -399,7 +386,6 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h.scanDirtyFiles([]string{
 			"v1.0-accounts.0-1.v",
@@ -412,7 +398,6 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 		hc := h.beginWithRecalcForTests()
 		defer hc.Close()
@@ -438,7 +423,6 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h.scanDirtyFiles([]string{
 			"v1.0-accounts.0-1.v",
@@ -449,7 +433,6 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 		hc := h.beginWithRecalcForTests()
 		defer hc.Close()
@@ -474,7 +457,6 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h.scanDirtyFiles([]string{
 			"v1.0-accounts.0-1.v",
@@ -486,7 +468,6 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 		hc := h.beginWithRecalcForTests()
 		defer hc.Close()
@@ -507,7 +488,6 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 		ic := ii.beginWithRecalcForTests()
 		defer ic.Close()
 		mr := ic.findMergeRange(4, 32)
@@ -1168,7 +1148,6 @@ func TestHistoryAndIIAlignment(t *testing.T) {
 			return true
 		})
 	})
-	h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 	roTx := h.beginWithRecalcForTests()
 	defer roTx.Close()

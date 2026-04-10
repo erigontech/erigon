@@ -59,7 +59,6 @@ func TestGCReadAfterRemoveFile(t *testing.T) {
 			require.False(lastOnFs.frozen) // prepared dataset must have some non-frozen files. or it's bad dataset.
 			deleteMergeFile(h.dirtyFiles, []*FilesItem{lastOnFs}, "", h.logger)
 			require.NotNil(lastOnFs.decompressor)
-			h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 			lastInView := hc.files[len(hc.files)-1]
 

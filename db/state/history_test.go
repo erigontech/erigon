@@ -161,7 +161,6 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 				require.True(t, slices.IsSorted(seenKeys))
 			}
 			h.integrateDirtyFiles(sf, i, i+h.stepSize)
-			h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 			lastAggergatedTx = i + h.stepSize
 		}
 
@@ -1235,7 +1234,6 @@ func (h *History) collateBuildIntegrate(ctx context.Context, step kv.Step, tx kv
 		return err
 	}
 	h.integrateDirtyFiles(sf, txFrom, txTo)
-	h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 	return nil
 }
 
@@ -1278,7 +1276,6 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 			indexIn, historyIn, err := hc.mergeFiles(ctx, indexOuts, historyOuts, r, background.NewProgressSet())
 			require.NoError(err)
 			h.integrateMergedDirtyFiles(indexIn, historyIn)
-			h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 			return false
 		}(); stop {
 			break
@@ -1335,7 +1332,6 @@ func collateAndMergeHistoryWithCollisionRetry(tb testing.TB, db kv.RwDB, h *Hist
 			indexIn, historyIn, err := hc.mergeFiles(ctx, indexOuts, historyOuts, r, background.NewProgressSet())
 			require.NoError(err)
 			h.integrateMergedDirtyFiles(indexIn, historyIn)
-			h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 			return false
 		}(); stop {
 			break
@@ -1817,7 +1813,6 @@ func TestScanStaticFilesH(t *testing.T) {
 	}
 	h.scanDirtyFiles(files)
 	require.Equal(t, 6, h.dirtyFiles.Len())
-	h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 	require.Equal(t, 0, len(h._visible.files))
 }
 

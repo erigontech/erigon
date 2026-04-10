@@ -341,8 +341,7 @@ func (d *Domain) calcVisibleFiles(toTxNum uint64) (*domainVisible, visibleFiles,
 		}
 	}
 	dv := newDomainVisible(d.Name, calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum))
-	hv := calcVisibleFiles(d.History.dirtyFiles, d.History.Accessors, nil, false, toTxNum)
-	hiv := d.History.InvertedIndex.calcVisibleFiles(toTxNum)
+	hv, hiv := d.History.calcVisibleFiles(toTxNum)
 	return dv, hv, hiv
 }
 
