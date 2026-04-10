@@ -613,10 +613,10 @@ func (d *Domain) dumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo kv.St
 	if err != nil {
 		return err
 	}
-	wal.Close()
 
 	ps := background.NewProgressSet()
 	static, err := d.buildFileRange(ctx, stepFrom, stepTo, coll, ps)
+	wal.Close() // munmap ETL temp files after buildFileRange consumed the zero-copy data
 	if err != nil {
 		return err
 	}
@@ -1479,6 +1479,10 @@ func (dt *DomainRoTx) Close() {
 			src.closeFilesAndRemove()
 		}
 	}
+	for _, r := range dt.mapReaders {
+		r.Close()
+	}
+	dt.mapReaders = nil
 	dt.ht.Close()
 
 	dt.visible.returnGetFromFileCache(dt.getFromFileCache)
