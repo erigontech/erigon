@@ -219,8 +219,8 @@ func (w *slowWriter) Write(p []byte) (int, error) {
 
 func TestStreamHandlerNoContention(t *testing.T) {
 	const (
-		goroutines = 50
-		writeDelay = 1 * time.Millisecond
+		goroutines = 500
+		writeDelay = 1 * time.Nanosecond
 	)
 
 	wr := &slowWriter{delay: writeDelay}
@@ -242,12 +242,12 @@ func TestStreamHandlerNoContention(t *testing.T) {
 	// Without mutex: ~1ms (parallel writes).
 	// With SyncHandler mutex: ~50ms (serialized writes).
 	// Use 15ms as threshold — well above parallel, well below serialized.
+	if lines := wr.lines.Load(); lines != goroutines {
+		t.Fatalf("expected %d log lines, got %d — messages lost", goroutines, lines)
+	}
 	limit := time.Duration(goroutines/3) * writeDelay
 	if elapsed > limit {
 		t.Fatalf("logging took %v with %d goroutines (limit %v) — likely mutex contention", elapsed, goroutines, limit)
-	}
-	if lines := wr.lines.Load(); lines != goroutines {
-		t.Fatalf("expected %d log lines, got %d — messages lost", goroutines, lines)
 	}
 	t.Logf("elapsed=%v (limit=%v) lines=%d", elapsed, limit, wr.lines.Load())
 }
