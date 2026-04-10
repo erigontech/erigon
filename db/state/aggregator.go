@@ -1824,8 +1824,12 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 			// file that misses entries. Pruning then removes those entries from
 			// the DB, and the values are lost. See #20169.
 			var committedTxNum uint64
-			if err := a.db.View(a.ctx, func(tx kv.Tx) error {
-				v, _, err := tx.(kv.TemporalGetter).GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+			temporalDB, ok := a.db.(kv.TemporalRoDB)
+			if !ok {
+				break // not a temporal DB — can't read commitment state
+			}
+			if err := temporalDB.ViewTemporal(a.ctx, func(tx kv.TemporalTx) error {
+				v, _, err := tx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
 				if err != nil {
 					return err
 				}
@@ -1838,7 +1842,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 				break
 			}
 			stepEndTxNum := a.FirstTxNumOfStep(step + 1)
-			if committedTxNum < stepEndTxNum {
+			if committedTxNum+1 < stepEndTxNum {
 				break // step not fully committed yet — wait for execution to catch up
 			}
 			if err := a.buildFiles(a.ctx, step); err != nil {

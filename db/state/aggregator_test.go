@@ -490,27 +490,38 @@ func generateCommitmentHistoryAndIndexFiles(t *testing.T, dirs datadir.Dirs, ran
 	populateFiles2(t, dirs, idxRepo, ranges)
 }
 
-// TestAggregator_CommittedTxNumGuard verifies the step-safety invariant:
-// a step S should only be collated when committedTxNum >= firstTxNum(S+1),
-// meaning all data for step S has been committed to the DB.
+// TestAggregator_CommittedTxNumGuard verifies the step-safety predicate used
+// by buildFilesInBackground: a step S should only be collated when
+// committedTxNum+1 >= firstTxNum(S+1), meaning all txNums in step S have been
+// committed to the DB. ComputeCommitment writes the last txNum of the block
+// (e.g. firstTxNum(S+1)-1 when the step boundary aligns with a block), so
+// the +1 avoids an off-by-one that would delay collation unnecessarily.
 func TestAggregator_CommittedTxNumGuard(t *testing.T) {
 	t.Parallel()
 	stepSize := uint64(100)
 
+	// Extract the guard predicate so we test the same logic as production.
+	stepReady := func(committedTxNum uint64, step kv.Step) bool {
+		stepEndTxNum := firstTxNumOfStep(step+1, stepSize)
+		return !(committedTxNum+1 < stepEndTxNum) // inverse of the break condition
+	}
+
 	// Step 5 covers txNums [500, 600). firstTxNum(6) = 600.
-	stepEndTxNum := firstTxNumOfStep(6, stepSize) // 600
+	assert.False(t, stepReady(550, 5),
+		"guard should block: committed txNum is mid-step")
+	assert.False(t, stepReady(0, 5),
+		"guard should block: committed txNum is 0 (no commitment yet)")
+	assert.False(t, stepReady(598, 5),
+		"guard should block: committed txNum is 1 before last txNum of step")
 
-	// committedTxNum within the step — must NOT collate
-	assert.Less(t, uint64(550), stepEndTxNum,
-		"guard should block: committed txNum is within the step")
-
-	// committedTxNum at step boundary — safe to collate
-	assert.GreaterOrEqual(t, uint64(600), stepEndTxNum,
-		"guard should allow: committed txNum is at step boundary")
-
-	// committedTxNum == 0 (no commitment yet) — must NOT collate
-	assert.Less(t, uint64(0), stepEndTxNum,
-		"guard should block when committedTxNum is 0")
+	// committedTxNum = 599 = lastTxNumOfStep(5) = firstTxNum(6)-1
+	// This is the value ComputeCommitment writes at the step boundary.
+	assert.True(t, stepReady(599, 5),
+		"guard should allow: committed txNum is last txNum of the step")
+	assert.True(t, stepReady(600, 5),
+		"guard should allow: committed txNum is past the step")
+	assert.True(t, stepReady(1000, 5),
+		"guard should allow: committed txNum is well past the step")
 }
 
 func TestAggregator_CommitmentHistoryOnlyMerge(t *testing.T) {
