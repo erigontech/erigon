@@ -599,7 +599,7 @@ func (d *Domain) beginWithRecalcForTests() *DomainRoTx {
 // beginFilesRo lets Aggregator.BeginFilesRo pass a snapshot pinned to a single
 // aggregatorVisible generation, avoiding a torn cross-entity read.
 func (d *Domain) beginFilesRo(dv *domainVisible, hf visibleFiles, hiv *iiVisible) *DomainRoTx {
-	dv.files.bumpRefcount()
+	dv.files.refcntIncrement()
 
 	return &DomainRoTx{
 		name:              d.Name,

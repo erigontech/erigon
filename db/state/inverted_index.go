@@ -428,7 +428,7 @@ func (ii *InvertedIndex) beginWithRecalcForTests() *InvertedIndexRoTx {
 }
 
 func (ii *InvertedIndex) beginFilesRo(iv *iiVisible) *InvertedIndexRoTx {
-	iv.files.bumpRefcount()
+	iv.files.refcntIncrement()
 	return &InvertedIndexRoTx{
 		ii:                ii,
 		visible:           iv,

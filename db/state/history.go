@@ -927,7 +927,7 @@ func (h *History) BeginFilesRoForDebug() *HistoryRoTx {
 }
 
 func (h *History) beginFilesRo(files visibleFiles, iv *iiVisible) *HistoryRoTx {
-	files.bumpRefcount()
+	files.refcntIncrement()
 
 	return &HistoryRoTx{
 		h:                 h,
