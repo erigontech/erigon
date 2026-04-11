@@ -843,3 +843,83 @@ func TestCalculateVisibleSegmentsWhenGapsInIdx(t *testing.T) {
 	require.Len(s.visible.Load().segments[snaptype2.Enums.Headers], 1)
 	require.Equal(3, s.dirty[snaptype2.Enums.Headers].Len())
 }
+
+func TestSegmentsMaxDerivedFromVisible(t *testing.T) {
+	logger := testlog.Logger(t, log.LvlCrit)
+	dir, require := t.TempDir(), require.New(t)
+	createFile := func(from, to uint64, name snaptype.Type) {
+		createTestSegmentFile(t, from, to, name.Enum(), dir, version.V1_0, logger)
+	}
+
+	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
+
+	// Empty datadir -> SegmentsMax is 0.
+	s := NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	require.NoError(s.OpenFolder())
+	require.Equal(uint64(0), s.SegmentsMax())
+	s.Close()
+
+	// Three aligned steps across all types -> SegmentsMax is last.to - 1.
+	for i := uint64(0); i < 3; i++ {
+		createFile(i*500_000, (i+1)*500_000, snaptype2.Headers)
+		createFile(i*500_000, (i+1)*500_000, snaptype2.Bodies)
+		createFile(i*500_000, (i+1)*500_000, snaptype2.Transactions)
+	}
+	s = NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	require.NoError(s.OpenFolder())
+	require.Equal(uint64(1_500_000-1), s.SegmentsMax())
+
+	// Unindexed trailing Headers seg: dirty has it, but visible must not,
+	// so SegmentsMax (derived from visible) stays at the previous step.
+	// Body/Txs at the higher range would promote segmentsMax past the gap,
+	// so only create an unindexed Headers file.
+	createFile(1_500_000, 2_000_000, snaptype2.Headers)
+	missingIdx := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 1_500_000, 2_000_000, snaptype2.Headers.Name()))
+	require.NoError(dir2.RemoveFile(missingIdx))
+
+	require.NoError(s.OpenFolder())
+	require.Equal(uint64(1_500_000-1), s.SegmentsMax(),
+		"unindexed trailing seg must not advance SegmentsMax (it is derived from visible)")
+	s.Close()
+}
+
+func TestSnapshotVisibleLockFreeReads(t *testing.T) {
+	logger := testlog.Logger(t, log.LvlCrit)
+	dir, require := t.TempDir(), require.New(t)
+	createFile := func(from, to uint64, name snaptype.Type) {
+		createTestSegmentFile(t, from, to, name.Enum(), dir, version.V1_0, logger)
+	}
+	for i := uint64(0); i < 2; i++ {
+		createFile(i*500_000, (i+1)*500_000, snaptype2.Headers)
+		createFile(i*500_000, (i+1)*500_000, snaptype2.Bodies)
+		createFile(i*500_000, (i+1)*500_000, snaptype2.Transactions)
+	}
+
+	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
+	s := NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	defer s.Close()
+	require.NoError(s.OpenFolder())
+
+	// A View pins a generation; a concurrent recalc must not mutate that pin.
+	v := s.View()
+	defer v.Close()
+	pinned := v.Segments(snaptype2.Headers)
+	require.Len(pinned, 2)
+
+	// Drop the last dirty Headers file and republish. The pinned view still
+	// points at the pre-recalc generation and must retain 2 segments.
+	s.dirtyLock.Lock()
+	s.dirty[snaptype2.Enums.Headers].Walk(func(segs []*DirtySegment) bool {
+		for _, seg := range segs {
+			if seg.from == 500_000 {
+				s.dirty[snaptype2.Enums.Headers].Delete(seg)
+			}
+		}
+		return true
+	})
+	s.dirtyLock.Unlock()
+	s.recalcVisibleFiles(s.alignMin)
+
+	require.Len(pinned, 2, "pinned View must not observe post-recalc mutations")
+	require.Len(s.visible.Load().segments[snaptype2.Enums.Headers], 1)
+}
