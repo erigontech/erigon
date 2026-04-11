@@ -569,7 +569,7 @@ type RoSnapshots struct {
 
 type snapshotVisible struct {
 	segments    []VisibleSegments // ordered map `type.Enum()` -> VisibleSegments
-	segmentsMax uint64            // all types of .seg files are available - up to this number
+	segmentsMax uint64            // max visible (indexed, non-subsumed, gap-free) segment height across all types
 }
 
 // NewRoSnapshots - opens all snapshots. But to simplify everything:
