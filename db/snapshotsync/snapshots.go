@@ -894,24 +894,18 @@ func (s *RoSnapshots) recalcVisibleFiles(alignMin bool) {
 		}
 	}
 
-	for _, t := range s.enums {
-		minBlock := uint64(math.MaxUint64)
-		if len(visible[t]) > 0 {
-			minBlock = visible[t][0].from
-		}
-		if u, ok := s.segmentsMinByType[t]; ok {
-			u.Store(minBlock)
-		}
-	}
-
 	var segmentsMax uint64
 	for _, t := range s.enums {
 		segs := visible[t]
-		if len(segs) == 0 {
-			continue
+		minBlock := uint64(math.MaxUint64)
+		if len(segs) > 0 {
+			minBlock = segs[0].from
+			if to := segs[len(segs)-1].to; to > 0 && to-1 > segmentsMax {
+				segmentsMax = to - 1
+			}
 		}
-		if to := segs[len(segs)-1].to; to > 0 && to-1 > segmentsMax {
-			segmentsMax = to - 1
+		if u, ok := s.segmentsMinByType[t]; ok {
+			u.Store(minBlock)
 		}
 	}
 
