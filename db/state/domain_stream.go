@@ -377,6 +377,14 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 	var cp CursorHeap
 	cpPtr := &cp
 	heap.Init(cpPtr)
+	defer func() {
+		for cp.Len() > 0 {
+			ci := heap.Pop(cpPtr).(*CursorItem)
+			if ci.btCursor != nil {
+				ci.btCursor.Close()
+			}
+		}
+	}()
 	var k, v []byte
 	var err error
 
@@ -444,6 +452,8 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 						if ci1.key != nil && bytes.HasPrefix(ci1.key, prefix) {
 							ci1.val = ci1.btCursor.Value()
 							heap.Push(cpPtr, ci1)
+						} else {
+							ci1.btCursor.Close()
 						}
 					} else {
 						ci1.btCursor.Close()

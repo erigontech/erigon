@@ -23,18 +23,23 @@ jobs:
           - chain: mainnet   # Chain name as specified on the erigon command line
             tracking_time_seconds: 7200
             total_time_seconds: 82800  # 23 hours (1h buffer before job timeout)
+            rpc_tests_supported: true
           - chain: gnosis
             tracking_time_seconds: 7200
             total_time_seconds: 64800  # 18 hours
+            rpc_tests_supported: true
           - chain: sepolia
             tracking_time_seconds: 7200
             total_time_seconds: 36000  # 10 hours
+            rpc_tests_supported: false
           - chain: hoodi
             tracking_time_seconds: 7200
             total_time_seconds: 21600  # 6 hours
+            rpc_tests_supported: false
           - chain: chiado
             tracking_time_seconds: 7200
             total_time_seconds: 18000  # 5 hours
+            rpc_tests_supported: false
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
@@ -54,7 +59,7 @@ jobs:
 
     - name: Build Erigon
       run: |
-        make erigon
+        make erigon rpcdaemon integration
       working-directory: ${{ github.workspace }}
 
     - name: Pause the Erigon instance dedicated to db maintenance
@@ -132,6 +137,64 @@ jobs:
       with:
         name: fd-leak-analysis-${{ env.CHAIN }}
         path: ${{ github.workspace }}/fd-leak-analysis-${{ env.CHAIN }}.md
+
+    - name: Restore rpc-tests cache
+      if: ${{ matrix.rpc_tests_supported }}
+      uses: actions/cache@v4
+      with:
+        path: ${{ runner.workspace }}/rpc-tests
+        key: rpc-tests-${{ runner.os }}-${{ runner.arch }}-v2.4.0
+
+    - name: Run RPC Integration Tests
+      id: rpc_test_step
+      if: ${{ matrix.rpc_tests_supported && steps.test_step.outputs.TEST_RESULT == 'success' }}
+      run: |
+        commit=$(git rev-parse --short HEAD)
+        RPC_TEST_RESULT_DIR="${{ github.workspace }}/rpc-test-results/${CHAIN}_$(date +%Y%m%d_%H%M%S)_post_sync_${commit}"
+        echo "RPC_TEST_RESULT_DIR=$RPC_TEST_RESULT_DIR" >> $GITHUB_ENV
+
+        set +e
+        ${{ github.workspace }}/.github/workflows/scripts/run_rpc_tests_local.sh \
+          --datadir "$ERIGON_DATA_DIR" \
+          --chain "$CHAIN" \
+          --workspace "${{ runner.workspace }}" \
+          --result-dir "$RPC_TEST_RESULT_DIR" \
+          --skip-backup
+        rpc_exit_status=$?
+        set -e
+
+        echo "rpc_test_executed=true" >> $GITHUB_OUTPUT
+
+        if [ $rpc_exit_status -eq 0 ]; then
+          echo "RPC tests completed successfully"
+          echo "RPC_TEST_RESULT=success" >> $GITHUB_OUTPUT
+        else
+          echo "::error::RPC tests failed, check the artifacts for details"
+          echo "RPC_TEST_RESULT=failure" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+
+    - name: Upload RPC test results
+      if: ${{ always() && steps.rpc_test_step.outputs.rpc_test_executed == 'true' }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: rpc-test-results-${{ env.CHAIN }}
+        path: ${{ env.RPC_TEST_RESULT_DIR }}
+
+    - name: Save RPC test results
+      if: ${{ always() && steps.rpc_test_step.outputs.rpc_test_executed == 'true' }}
+      env:
+        RPC_TEST_RESULT: ${{ steps.rpc_test_step.outputs.RPC_TEST_RESULT }}
+      run: |
+        python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
+          --repo erigon \
+          --commit $(git rev-parse HEAD) \
+          --branch ${{ github.ref_name }} \
+          --test_name rpc-integration-tests \
+          --chain $CHAIN \
+          --runner ${{ runner.name }} \
+          --outcome $RPC_TEST_RESULT \
+          --result_file ${{ env.RPC_TEST_RESULT_DIR }}/results/test_report.json
 
     - name: Clean up Erigon data directory
       if: always()
