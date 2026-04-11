@@ -10,9 +10,10 @@ import (
 )
 
 func TestSais(t *testing.T) {
+	var buf []int32
 	data := []byte{4, 5, 6, 4, 5, 6, 4, 5, 6}
 	sa := make([]int32, len(data))
-	err := Sais(data, sa)
+	err := Sais(data, sa, &buf)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -20,9 +21,10 @@ func TestSais(t *testing.T) {
 }
 
 func TestSaisText(t *testing.T) {
+	var buf []int32
 	data := []byte("abracadabra")
 	sa := make([]int32, len(data))
-	require.NoError(t, Sais(data, sa))
+	require.NoError(t, Sais(data, sa, &buf))
 	// Verify suffix array is sorted
 	for i := 1; i < len(sa); i++ {
 		a := string(data[sa[i-1]:])
@@ -34,12 +36,13 @@ func TestSaisText(t *testing.T) {
 }
 
 func TestSaisRandom(t *testing.T) {
+	var buf []int32
 	rng := rand.New(rand.NewSource(42))
 	for _, n := range []int{2, 3, 10, 100, 1000, 10000} {
 		data := make([]byte, n)
 		rng.Read(data)
 		sa := make([]int32, n)
-		require.NoError(t, Sais(data, sa))
+		require.NoError(t, Sais(data, sa, &buf))
 
 		// Verify: sa is a permutation and suffixes are sorted
 		seen := make([]bool, n)
@@ -58,18 +61,19 @@ func TestSaisRandom(t *testing.T) {
 }
 
 func TestSaisEdgeCases(t *testing.T) {
+	var buf []int32
 	// Empty
-	require.NoError(t, Sais(nil, nil))
+	require.NoError(t, Sais(nil, nil, &buf))
 
 	// Single byte
 	sa := make([]int32, 1)
-	require.NoError(t, Sais([]byte{42}, sa))
+	require.NoError(t, Sais([]byte{42}, sa, &buf))
 	assert.Equal(t, []int32{0}, sa)
 
 	// All same bytes
 	data := make([]byte, 100)
 	sa = make([]int32, 100)
-	require.NoError(t, Sais(data, sa))
+	require.NoError(t, Sais(data, sa, &buf))
 	expected := make([]int32, 100)
 	for i := range expected {
 		expected[i] = int32(99 - i)
@@ -98,6 +102,7 @@ func makeLoremData(size int) []byte {
 }
 
 func BenchmarkSais(b *testing.B) {
+	var buf []int32
 	for _, size := range []int{16 * 1024 * 1024} {
 		b.Run(fmt.Sprintf("%d", size), func(b *testing.B) {
 			data := makeLoremData(size)
@@ -106,7 +111,7 @@ func BenchmarkSais(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for b.Loop() {
-				if err := Sais(data, sa); err != nil {
+				if err := Sais(data, sa, &buf); err != nil {
 					b.Fatal(err)
 				}
 			}
