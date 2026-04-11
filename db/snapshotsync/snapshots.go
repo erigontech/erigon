@@ -550,16 +550,12 @@ type RoSnapshots struct {
 	types []snaptype.Type //immutable
 	enums []snaptype.Enum //immutable
 
-	dirtyLock sync.RWMutex                   // guards `dirty` field
-	dirty     []*btree.BTreeG[*DirtySegment] // ordered map `type.Enum()` -> DirtySegments
-	// visible is published via atomic.Store by recalcVisibleFiles; readers
-	// load it lock-free. Writers are serialized by recalcLock so two concurrent
-	// publishes cannot interleave their computed bundles.
+	dirtyLock  sync.RWMutex                   // guards `dirty` field
+	dirty      []*btree.BTreeG[*DirtySegment] // ordered map `type.Enum()` -> DirtySegments
 	visible    atomic.Pointer[snapshotVisible]
-	recalcLock sync.Mutex
+	recalcLock sync.Mutex // serializes recalcVisibleFiles publishers
 
 	dir               string
-	segmentsMax       atomic.Uint64                    // all types of .seg files are available - up to this number
 	segmentsMinByType map[snaptype.Enum]*atomic.Uint64 // min block number per segment type
 	idxMax            atomic.Uint64                    // all types of .idx files are available - up to this number
 	cfg               ethconfig.BlocksFreezing
@@ -571,11 +567,9 @@ type RoSnapshots struct {
 	alignMin  bool // do we want to align all visible segments to the minimum available
 }
 
-// snapshotVisible is the immutable per-type snapshot read by every View /
-// ViewType / ViewSingleFile. A single atomic load pins one generation across
-// all segment types — readers never observe a torn view between types.
 type snapshotVisible struct {
-	segments []VisibleSegments // ordered map `type.Enum()` -> VisibleSegments
+	segments    []VisibleSegments // ordered map `type.Enum()` -> VisibleSegments
+	segmentsMax uint64            // all types of .seg files are available - up to this number
 }
 
 // NewRoSnapshots - opens all snapshots. But to simplify everything:
@@ -606,8 +600,6 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 	for _, snapType := range types {
 		s.dirty[snapType.Enum()] = btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
 	}
-	// Publish an empty bundle so readers never observe a nil pointer —
-	// recalcVisibleFiles below will overwrite it.
 	s.visible.Store(&snapshotVisible{segments: make([]VisibleSegments, snaptype.MaxEnum)})
 
 	for _, t := range s.enums {
@@ -625,7 +617,7 @@ func (s *RoSnapshots) Dir() string                   { return s.dir }
 func (s *RoSnapshots) DownloadReady() bool           { return s.downloadReady.Load() }
 func (s *RoSnapshots) SegmentsReady() bool           { return s.segmentsReady.Load() }
 func (s *RoSnapshots) IndicesMax() uint64            { return s.idxMax.Load() }
-func (s *RoSnapshots) SegmentsMax() uint64           { return s.segmentsMax.Load() }
+func (s *RoSnapshots) SegmentsMax() uint64           { return s.visible.Load().segmentsMax }
 func (s *RoSnapshots) SegmentsMinByType(t snaptype.Enum) (min uint64, ok bool) {
 	if s == nil {
 		return 0, false
@@ -863,8 +855,6 @@ func (s *RoSnapshots) recalcVisibleFiles(alignMin bool) {
 		s.idxMax.Store(s.idxAvailability())
 	}()
 
-	// recalcLock serializes publishers so two concurrent recalcs cannot race
-	// on atomic.Store (which readers load without any lock).
 	s.recalcLock.Lock()
 	defer s.recalcLock.Unlock()
 
@@ -904,17 +894,22 @@ func (s *RoSnapshots) recalcVisibleFiles(alignMin bool) {
 		}
 	}
 
+	var segmentsMax uint64
 	for _, t := range s.enums {
+		segs := visible[t]
 		minBlock := uint64(math.MaxUint64)
-		if len(visible[t]) > 0 {
-			minBlock = visible[t][0].from
+		if len(segs) > 0 {
+			minBlock = segs[0].from
+			if to := segs[len(segs)-1].to; to > 0 && to-1 > segmentsMax {
+				segmentsMax = to - 1
+			}
 		}
 		if u, ok := s.segmentsMinByType[t]; ok {
 			u.Store(minBlock)
 		}
 	}
 
-	s.visible.Store(&snapshotVisible{segments: visible})
+	s.visible.Store(&snapshotVisible{segments: visible, segmentsMax: segmentsMax})
 }
 
 // minimax of existing indices
@@ -1095,9 +1090,6 @@ func TypedSegments(dir string, types []snaptype.Type, allowGaps bool) (res []sna
 }
 
 func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic bool) error {
-	var segmentsMax uint64
-	var segmentsMaxSet bool
-
 	wg := &errgroup.Group{}
 	wg.SetLimit(estimate.HalfCPUs())
 	//fmt.Println("RS", s)
@@ -1185,15 +1177,6 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 			})
 		}
 
-		if f.To > 0 {
-			segmentsMax = f.To - 1
-		} else {
-			segmentsMax = 0
-		}
-		segmentsMaxSet = true
-	}
-	if segmentsMaxSet {
-		s.segmentsMax.Store(segmentsMax)
 	}
 
 	if err := wg.Wait(); err != nil {

@@ -843,3 +843,67 @@ func TestCalculateVisibleSegmentsWhenGapsInIdx(t *testing.T) {
 	require.Len(s.visible.Load().segments[snaptype2.Enums.Headers], 1)
 	require.Equal(3, s.dirty[snaptype2.Enums.Headers].Len())
 }
+
+func TestSegmentsMaxDerivedFromVisible(t *testing.T) {
+	logger := testlog.Logger(t, log.LvlCrit)
+	dir, require := t.TempDir(), require.New(t)
+	createFile := func(from, to uint64, name snaptype.Type) {
+		createTestSegmentFile(t, from, to, name.Enum(), dir, version.V1_0, logger)
+	}
+	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
+
+	s := NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	require.NoError(s.OpenFolder())
+	require.Equal(uint64(0), s.SegmentsMax())
+	s.Close()
+
+	for i := uint64(0); i < 3; i++ {
+		createFile(i*500_000, (i+1)*500_000, snaptype2.Headers)
+		createFile(i*500_000, (i+1)*500_000, snaptype2.Bodies)
+		createFile(i*500_000, (i+1)*500_000, snaptype2.Transactions)
+	}
+	s = NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	require.NoError(s.OpenFolder())
+	require.Equal(uint64(1_500_000-1), s.SegmentsMax())
+
+	// Regression: an unindexed trailing .seg would previously advance
+	// segmentsMax because it was set from dirty files in openSegments.
+	// Now it must not, because it never becomes visible.
+	createFile(1_500_000, 2_000_000, snaptype2.Headers)
+	missingIdx := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 1_500_000, 2_000_000, snaptype2.Headers.Name()))
+	require.NoError(dir2.RemoveFile(missingIdx))
+
+	require.NoError(s.OpenFolder())
+	require.Equal(uint64(1_500_000-1), s.SegmentsMax())
+	s.Close()
+}
+
+func TestViewPinsGeneration(t *testing.T) {
+	logger := testlog.Logger(t, log.LvlCrit)
+	dir, require := t.TempDir(), require.New(t)
+	createFile := func(from, to uint64, name snaptype.Type) {
+		createTestSegmentFile(t, from, to, name.Enum(), dir, version.V1_0, logger)
+	}
+	for i := uint64(0); i < 2; i++ {
+		createFile(i*500_000, (i+1)*500_000, snaptype2.Headers)
+		createFile(i*500_000, (i+1)*500_000, snaptype2.Bodies)
+		createFile(i*500_000, (i+1)*500_000, snaptype2.Transactions)
+	}
+
+	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
+	s := NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	defer s.Close()
+	require.NoError(s.OpenFolder())
+
+	v := s.View()
+	defer v.Close()
+	pinned := v.Segments(snaptype2.Headers)
+	require.Len(pinned, 2)
+	beforeMax := s.SegmentsMax()
+
+	require.NoError(dir2.RemoveFile(filepath.Join(dir, snaptype.SegmentFileName(version.V1_0, 500_000, 1_000_000, snaptype2.Headers.Enum()))))
+	require.NoError(s.OpenFolder())
+
+	require.Len(pinned, 2)
+	require.Less(s.SegmentsMax(), beforeMax)
+}
