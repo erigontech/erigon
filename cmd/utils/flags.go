@@ -713,6 +713,10 @@ var (
 		Usage:   "Download snapshots up to the given block number (exclusive). Disabled by default. Useful for testing and shadow forks.",
 		Aliases: []string{"shadow.fork.block"},
 	}
+	SnapStateToBlockFlag = cli.Uint64Flag{
+		Name:  "snap.state.to.block",
+		Usage: "Download state snapshots only up to the given block (exclusive). Block snapshots are not affected. Useful when published state snapshots are corrupt beyond a certain point.",
+	}
 	TorrentVerbosityFlag = cli.IntFlag{
 		Name:  "torrent.verbosity",
 		Value: 1,

@@ -318,6 +318,17 @@ func SyncSnapshots(
 	} else {
 		toBlock := syncCfg.SnapshotDownloadToBlock // exclusive [0, toBlock)
 		toStep := uint64(math.MaxUint64)           // exclusive [0, toStep)
+		if !headerchain && syncCfg.SnapshotStateToBlock > 0 {
+			stateToTxNum, err := blockReader.TxnumReader().Min(ctx, tx, syncCfg.SnapshotStateToBlock)
+			if err != nil {
+				return err
+			}
+			stateToStep := stateToTxNum / stepSize
+			if stateToStep < toStep {
+				toStep = stateToStep
+				log.Info(fmt.Sprintf("[%s] limiting state snapshots", logPrefix), "stateToBlock", syncCfg.SnapshotStateToBlock, "stateToStep", stateToStep)
+			}
+		}
 		if !headerchain && toBlock > 0 {
 			toTxNum, err := blockReader.TxnumReader().Min(ctx, tx, syncCfg.SnapshotDownloadToBlock)
 			if err != nil {
@@ -477,8 +488,8 @@ func SyncSnapshots(
 }
 
 func filterToBlock(name string, toBlock uint64, toStep uint64, headerchain bool) bool {
-	if toBlock == 0 {
-		return false // toBlock filtering is not enabled
+	if toBlock == 0 && toStep == math.MaxUint64 {
+		return false // no filtering enabled
 	}
 	fileInfo, stateFile, ok := snaptype.ParseFileName("", name)
 	if !ok {
@@ -492,6 +503,9 @@ func filterToBlock(name string, toBlock uint64, toStep uint64, headerchain bool)
 	}
 	if stateFile {
 		return fileInfo.To > toStep
+	}
+	if toBlock == 0 {
+		return false // only state filtering active — don't filter block files
 	}
 	if headerchain {
 		// if we are downloading the header chain, we want to download the seg file which contains our toBlock

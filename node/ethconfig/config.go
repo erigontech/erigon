@@ -287,4 +287,5 @@ type Sync struct {
 	ExperimentalConcurrentCommitment bool
 	PersistReceiptsCacheV2           bool
 	SnapshotDownloadToBlock          uint64 // exclusive [0,toBlock)
+	SnapshotStateToBlock             uint64 // exclusive [0,toBlock) — limits state snapshots only
 }
