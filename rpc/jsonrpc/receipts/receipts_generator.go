@@ -491,6 +491,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 
 	if !calculatePostState {
 		// Fast path (post-Byzantium): use the shared derivation package.
+		// DeriveBlockReceipts sets BlockHash and FirstLogIndexWithinBlock.
 		receipts, err = sharedreceipts.DeriveBlockReceipts(ctx, cfg, g.engine, block.HeaderNoCopy(), block.Transactions(), genEnv.ibs, genEnv.gp, genEnv.getHeader)
 		if err != nil {
 			return nil, err
