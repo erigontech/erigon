@@ -550,10 +550,13 @@ type RoSnapshots struct {
 	types []snaptype.Type //immutable
 	enums []snaptype.Enum //immutable
 
-	dirtyLock   sync.RWMutex                   // guards `dirty` field
-	dirty       []*btree.BTreeG[*DirtySegment] // ordered map `type.Enum()` -> DirtySegments
-	visibleLock sync.RWMutex                   // guards  `visible` field
-	visible     []VisibleSegments              // ordered map `type.Enum()` -> VisbileSegments
+	dirtyLock sync.RWMutex                   // guards `dirty` field
+	dirty     []*btree.BTreeG[*DirtySegment] // ordered map `type.Enum()` -> DirtySegments
+	// visible is published via atomic.Store by recalcVisibleFiles; readers
+	// load it lock-free. Writers are serialized by recalcLock so two concurrent
+	// publishes cannot interleave their computed bundles.
+	visible    atomic.Pointer[snapshotVisible]
+	recalcLock sync.Mutex
 
 	dir               string
 	segmentsMax       atomic.Uint64                    // all types of .seg files are available - up to this number
@@ -566,6 +569,13 @@ type RoSnapshots struct {
 	ready     ready
 	operators map[snaptype.Enum]*retireOperators
 	alignMin  bool // do we want to align all visible segments to the minimum available
+}
+
+// snapshotVisible is the immutable per-type snapshot read by every View /
+// ViewType / ViewSingleFile. A single atomic load pins one generation across
+// all segment types — readers never observe a torn view between types.
+type snapshotVisible struct {
+	segments []VisibleSegments // ordered map `type.Enum()` -> VisibleSegments
 }
 
 // NewRoSnapshots - opens all snapshots. But to simplify everything:
@@ -596,6 +606,9 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 	for _, snapType := range types {
 		s.dirty[snapType.Enum()] = btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
 	}
+	// Publish an empty bundle so readers never observe a nil pointer —
+	// recalcVisibleFiles below will overwrite it.
+	s.visible.Store(&snapshotVisible{segments: make([]VisibleSegments, snaptype.MaxEnum)})
 
 	for _, t := range s.enums {
 		u := &atomic.Uint64{}
@@ -850,8 +863,10 @@ func (s *RoSnapshots) recalcVisibleFiles(alignMin bool) {
 		s.idxMax.Store(s.idxAvailability())
 	}()
 
-	s.visibleLock.Lock()
-	defer s.visibleLock.Unlock()
+	// recalcLock serializes publishers so two concurrent recalcs cannot race
+	// on atomic.Store (which readers load without any lock).
+	s.recalcLock.Lock()
+	defer s.recalcLock.Unlock()
 
 	s.dirtyLock.RLock()
 	defer s.dirtyLock.RUnlock()
@@ -899,7 +914,7 @@ func (s *RoSnapshots) recalcVisibleFiles(alignMin bool) {
 		}
 	}
 
-	s.visible = visible
+	s.visible.Store(&snapshotVisible{segments: visible})
 }
 
 // minimax of existing indices
@@ -916,7 +931,7 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 	}
 
 	var maxIdx uint64
-	visible := s.visible[s.enums[0]]
+	visible := s.visible.Load().segments[s.enums[0]]
 	if len(visible) > 0 {
 		maxIdx = visible[len(visible)-1].to - 1
 	}
@@ -952,10 +967,7 @@ func (s *RoSnapshots) dirtyIdxAvailability(segtype snaptype.Enum) uint64 {
 }
 
 func (s *RoSnapshots) visibleIdxAvailability(segtype snaptype.Enum) (maxVisibleIdx uint64) {
-	s.visibleLock.RLock()
-	defer s.visibleLock.RUnlock()
-
-	visibleFiles := s.visible[segtype]
+	visibleFiles := s.visible.Load().segments[segtype]
 	if len(visibleFiles) > 0 {
 		maxVisibleIdx = visibleFiles[len(visibleFiles)-1].to - 1
 	}
@@ -968,7 +980,7 @@ func (s *RoSnapshots) Ls() {
 	defer view.Close()
 
 	for _, t := range s.enums {
-		for _, seg := range s.visible[t] {
+		for _, seg := range view.segments[t].Segments {
 			if seg.src == nil || seg.src.Decompressor == nil {
 				continue
 			}
@@ -1574,11 +1586,10 @@ type View struct {
 }
 
 func (s *RoSnapshots) View() *View {
-	s.visibleLock.RLock()
-	defer s.visibleLock.RUnlock()
+	v := s.visible.Load()
 	sgs := make([]*RoTx, snaptype.MaxEnum)
 	for _, t := range s.enums {
-		sgs[t] = s.visible[t].BeginRo()
+		sgs[t] = v.segments[t].BeginRo()
 	}
 	return &View{s: s, segments: sgs, baseSegType: snaptype2.Transactions} // Transactions is the last segment to be processed, so it's the most reliable.
 }
@@ -1602,16 +1613,11 @@ func (s *View) WithBaseSegType(t snaptype.Type) *View {
 var noop = func() {}
 
 func (s *RoSnapshots) ViewType(t snaptype.Type) *RoTx {
-	s.visibleLock.RLock()
-	defer s.visibleLock.RUnlock()
-	return s.visible[t.Enum()].BeginRo()
+	return s.visible.Load().segments[t.Enum()].BeginRo()
 }
 
 func (s *RoSnapshots) ViewSingleFile(t snaptype.Type, blockNum uint64) (segment *VisibleSegment, ok bool, close func()) {
-	s.visibleLock.RLock()
-	defer s.visibleLock.RUnlock()
-
-	segmentRotx := s.visible[t.Enum()].BeginRo()
+	segmentRotx := s.visible.Load().segments[t.Enum()].BeginRo()
 
 	for _, seg := range segmentRotx.Segments {
 		if !(blockNum >= seg.from && blockNum < seg.to) {
@@ -1628,7 +1634,7 @@ func (v *View) Segments(t snaptype.Type) []*VisibleSegment {
 }
 
 func (v *View) Segment(t snaptype.Type, blockNum uint64) (*VisibleSegment, bool) {
-	for _, seg := range v.s.visible[t.Enum()] {
+	for _, seg := range v.segments[t.Enum()].Segments {
 		if !(blockNum >= seg.from && blockNum < seg.to) {
 			continue
 		}
