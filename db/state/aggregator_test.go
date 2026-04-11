@@ -490,8 +490,8 @@ func generateCommitmentHistoryAndIndexFiles(t *testing.T, dirs datadir.Dirs, ran
 	populateFiles2(t, dirs, idxRepo, ranges)
 }
 
-// TestAggregator_CommittedTxNumGuard verifies the step-safety predicate used
-// by buildFilesInBackground: a step S should only be collated when
+// TestAggregator_CommittedTxNumGuard verifies the stepFullyCommitted predicate
+// used by buildFilesInBackground: a step S should only be collated when
 // committedTxNum+1 >= firstTxNum(S+1), meaning all txNums in step S have been
 // committed to the DB. ComputeCommitment writes the last txNum of the block
 // (e.g. firstTxNum(S+1)-1 when the step boundary aligns with a block), so
@@ -500,32 +500,21 @@ func TestAggregator_CommittedTxNumGuard(t *testing.T) {
 	t.Parallel()
 	stepSize := uint64(100)
 
-	// Extract the guard predicate so we test the same logic as production.
-	// When committedTxNum == 0 (no ComputeCommitment yet), the guard is
-	// bypassed and the existing lastInDB check is sufficient.
-	stepReady := func(committedTxNum uint64, step kv.Step) bool {
-		if committedTxNum == 0 {
-			return true // guard bypassed — no commitment state yet
-		}
-		stepEndTxNum := firstTxNumOfStep(step+1, stepSize)
-		return !(committedTxNum+1 < stepEndTxNum) // inverse of the break condition
-	}
-
 	// Step 5 covers txNums [500, 600). firstTxNum(6) = 600.
-	assert.False(t, stepReady(550, 5),
+	assert.False(t, stepFullyCommitted(550, 5, stepSize),
 		"guard should block: committed txNum is mid-step")
-	assert.True(t, stepReady(0, 5),
+	assert.True(t, stepFullyCommitted(0, 5, stepSize),
 		"guard should be bypassed when committedTxNum is 0 (no commitment)")
-	assert.False(t, stepReady(598, 5),
+	assert.False(t, stepFullyCommitted(598, 5, stepSize),
 		"guard should block: committed txNum is 1 before last txNum of step")
 
 	// committedTxNum = 599 = lastTxNumOfStep(5) = firstTxNum(6)-1
 	// This is the value ComputeCommitment writes at the step boundary.
-	assert.True(t, stepReady(599, 5),
+	assert.True(t, stepFullyCommitted(599, 5, stepSize),
 		"guard should allow: committed txNum is last txNum of the step")
-	assert.True(t, stepReady(600, 5),
+	assert.True(t, stepFullyCommitted(600, 5, stepSize),
 		"guard should allow: committed txNum is past the step")
-	assert.True(t, stepReady(1000, 5),
+	assert.True(t, stepFullyCommitted(1000, 5, stepSize),
 		"guard should allow: committed txNum is well past the step")
 }
 
