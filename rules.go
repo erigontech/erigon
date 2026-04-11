@@ -39,20 +39,17 @@ func txDeferRollback(m dsl.Matcher) {
 	//	}
 
 	m.Match(
-		`$tx, $err := $db.BeginRw($ctx); $chk; $rollback`,
-		`$tx, $err = $db.BeginRw($ctx); $chk; $rollback`,
-		`$tx, $err := $db.Begin($ctx); $chk; $rollback`,
-		`$tx, $err = $db.Begin($ctx); $chk; $rollback`,
-		`$tx, $err := $db.BeginRo($ctx); $chk; $rollback`,
-		`$tx, $err = $db.BeginRo($ctx); $chk; $rollback`,
-		`$tx, $err = $db.BeginTemporalRw($ctx); $chk; $rollback`,
-		`$tx, $err := $db.BeginTemporalRw($ctx); $chk; $rollback`,
-		`$tx, $err = $db.BeginTemporalRo($ctx); $chk; $rollback`,
-		`$tx, $err := $db.BeginTemporalRo($ctx); $chk; $rollback`,
-		`$tx, $err := $db.BeginRwNosync($ctx); $chk; $rollback`,
-		`$tx, $err = $db.BeginRwNosync($ctx); $chk; $rollback`,
+		`$tx, $err := $db.$begin($ctx); $chk; $rollback`,
+		`$tx, $err = $db.$begin($ctx); $chk; $rollback`,
 	).
-		Where(!m["rollback"].Text.Matches(`defer .*\.Rollback()`) && !m["rollback"].Text.Matches(`t\.Cleanup\(.*\.Rollback\)`)).
+		Where((m["begin"].Text == "Begin" ||
+			m["begin"].Text == "BeginRw" ||
+			m["begin"].Text == "BeginRo" ||
+			m["begin"].Text == "BeginRwNosync" ||
+			m["begin"].Text == "BeginTemporalRw" ||
+			m["begin"].Text == "BeginTemporalRo") &&
+			!m["rollback"].Text.Matches(`\.Rollback\(\)`) &&
+			!m["rollback"].Text.Matches(`t\.Cleanup\(.*\.Rollback\)`)).
 		//At(m["rollback"]).
 		Report(`Add "defer $tx.Rollback()" or "t.Cleanup($tx.Rollback)" right after transaction creation error check. 
 			If you are in the loop - consider using "$db.View" or "$db.Update" or extract whole transaction to function.
@@ -63,46 +60,44 @@ func txDeferRollback(m dsl.Matcher) {
 
 func cursorDeferClose(m dsl.Matcher) {
 	m.Match(
-		`$c, $err = $db.Cursor($table); $chk; $close`,
-		`$c, $err := $db.Cursor($table); $chk; $close`,
-		`$c, $err = $db.RwCursor($table); $chk; $close`,
-		`$c, $err := $db.RwCursor($table); $chk; $close`,
-		`$c, $err = $db.CursorDupSort($table); $chk; $close`,
-		`$c, $err := $db.CursorDupSort($table); $chk; $close`,
-		`$c, $err = $db.RwCursorDupSort($table); $chk; $close`,
-		`$c, $err := $db.RwCursorDupSort($table); $chk; $close`,
+		`$c, $err := $db.$cur($table); $chk; $close`,
+		`$c, $err = $db.$cur($table); $chk; $close`,
 	).
-		Where(!m["close"].Text.Matches(`defer .*\.Close()`) && !m["close"].Text.Matches(`t\.Cleanup\(.*\.Close\)`)).
+		Where((m["cur"].Text == "Cursor" ||
+			m["cur"].Text == "RwCursor" ||
+			m["cur"].Text == "CursorDupSort" ||
+			m["cur"].Text == "RwCursorDupSort") &&
+			!m["close"].Text.Matches(`\.Close\(\)`) &&
+			!m["close"].Text.Matches(`t\.Cleanup\(.*\.Close\)`)).
 		//At(m["close"]).
 		Report(`Add "defer $c.Close()" or "t.Cleanup($c.Close)" right after cursor creation error check`)
 }
 
 func streamDeferClose(m dsl.Matcher) {
 	m.Match(
-		`$c, $err = $db.Range($params); $chk; $close`,
-		`$c, $err := $db.Range($params); $chk; $close`,
-		`$c, $err = $db.RangeDupSort($params); $chk; $close`,
-		`$c, $err := $db.RangeDupSort($params); $chk; $close`,
-		`$c, $err = $db.Prefix($params); $chk; $close`,
-		`$c, $err := $db.Prefix($params); $chk; $close`,
+		`$c, $err := $db.$stream($params); $chk; $close`,
+		`$c, $err = $db.$stream($params); $chk; $close`,
 	).
-		Where(!m["close"].Text.Matches(`defer .*\.Close()`) && !m["close"].Text.Matches(`t\.Cleanup\(.*\.Close\)`)).
+		Where((m["stream"].Text == "Range" ||
+			m["stream"].Text == "RangeDupSort" ||
+			m["stream"].Text == "Prefix") &&
+			!m["close"].Text.Matches(`\.Close\(\)`) &&
+			!m["close"].Text.Matches(`t\.Cleanup\(.*\.Close\)`)).
 		//At(m["close"]).
 		Report(`Add "defer $c.Close()" or "t.Cleanup($c.Close)" right after cursor creation error check`)
 }
 
 func closeCollector(m dsl.Matcher) {
-	m.Match(
-		`$c := etl.NewCollector($*_); $close`,
-		`$c := etl.NewCollectorWithAllocator($*_); $close`,
-	).
-		Where(!m["close"].Text.Matches(`defer .*\.Close()`)).
+	m.Match(`$c := etl.$newCol($*_); $close`).
+		Where((m["newCol"].Text == "NewCollector" ||
+			m["newCol"].Text == "NewCollectorWithAllocator") &&
+			!m["close"].Text.Matches(`\.Close\(\)`)).
 		Report(`Add "defer $c.Close()" right after collector creation`)
 }
 
 func closeLockedDir(m dsl.Matcher) {
 	m.Match(`$c := dir.OpenRw($*_); $close`).
-		Where(!m["close"].Text.Matches(`defer .*\.Close()`)).
+		Where(!m["close"].Text.Matches(`\.Close\(\)`)).
 		Report(`Add "defer $c.Close()" after locked.OpenDir`)
 }
 
@@ -135,10 +130,8 @@ func mismatchingUnlock(m dsl.Matcher) {
 }
 
 func forbidOsRemove(m dsl.Matcher) {
-	m.Match(
-		`os.Remove($*_)`,
-		`os.RemoveAll($*_)`,
-	).
+	m.Match(`os.$rm($*_)`).
+		Where(m["rm"].Text == "Remove" || m["rm"].Text == "RemoveAll").
 		Report(`Don't call os.Remove/RemoveAll directly; use dir.RemoveFile/RemoveAll instead (erigon/common/dir)`)
 }
 
@@ -148,16 +141,10 @@ func filepathWalkToCheckToSkipNonExistingFiles(m dsl.Matcher) {
 
 func osCreateBlankAssign(m dsl.Matcher) {
 	m.Match(
-		`_, $err := os.Create($path)`,
-		`_, $err = os.Create($path)`,
-		`_, _ = os.Create($path)`,
-		`_, $err := os.CreateTemp($dir, $pattern)`,
-		`_, $err = os.CreateTemp($dir, $pattern)`,
-		`_, _ = os.CreateTemp($dir, $pattern)`,
-		`_, $err := os.OpenFile($path, $flag, $perm)`,
-		`_, $err = os.OpenFile($path, $flag, $perm)`,
-		`_, _ = os.OpenFile($path, $flag, $perm)`,
+		`_, $_ := os.$fn($*_)`,
+		`_, $_ = os.$fn($*_)`,
 	).
+		Where(m["fn"].Text == "Create" || m["fn"].Text == "CreateTemp" || m["fn"].Text == "OpenFile").
 		Report(`os.Create/OpenFile result assigned to _ leaks a file descriptor. Assign to a variable and close it.
 			Rules are in ./rules.go file.`)
 }
