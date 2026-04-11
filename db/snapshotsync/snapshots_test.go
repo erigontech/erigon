@@ -899,11 +899,23 @@ func TestViewPinsGeneration(t *testing.T) {
 	defer v.Close()
 	pinned := v.Segments(snaptype2.Headers)
 	require.Len(pinned, 2)
-	beforeMax := s.SegmentsMax()
+	oldSrc0, oldSrc1 := pinned[0].src, pinned[1].src
 
-	require.NoError(dir2.RemoveFile(filepath.Join(dir, snaptype.SegmentFileName(version.V1_0, 500_000, 1_000_000, snaptype2.Headers.Enum()))))
+	// Drop the [500k-1m) segment from visible by introducing a larger [0-1m)
+	// that subsumes it (the recalc pass removes subsumed entries). The view
+	// captured before this change must still reference the old generation.
+	createFile(0, 1_000_000, snaptype2.Headers)
+	createFile(0, 1_000_000, snaptype2.Bodies)
+	createFile(0, 1_000_000, snaptype2.Transactions)
 	require.NoError(s.OpenFolder())
 
+	// New view sees the subsumed generation: a single [0-1m) segment.
+	v2 := s.View()
+	defer v2.Close()
+	require.Len(v2.Segments(snaptype2.Headers), 1)
+
+	// Old view still pins the pre-recalc generation.
 	require.Len(pinned, 2)
-	require.Less(s.SegmentsMax(), beforeMax)
+	require.Same(oldSrc0, pinned[0].src)
+	require.Same(oldSrc1, pinned[1].src)
 }
