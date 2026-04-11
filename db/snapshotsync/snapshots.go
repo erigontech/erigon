@@ -556,7 +556,6 @@ type RoSnapshots struct {
 	recalcLock sync.Mutex // serializes recalcVisibleFiles publishers
 
 	dir               string
-	segmentsMax       atomic.Uint64                    // all types of .seg files are available - up to this number
 	segmentsMinByType map[snaptype.Enum]*atomic.Uint64 // min block number per segment type
 	idxMax            atomic.Uint64                    // all types of .idx files are available - up to this number
 	cfg               ethconfig.BlocksFreezing
@@ -569,7 +568,8 @@ type RoSnapshots struct {
 }
 
 type snapshotVisible struct {
-	segments []VisibleSegments // ordered map `type.Enum()` -> VisibleSegments
+	segments    []VisibleSegments // ordered map `type.Enum()` -> VisibleSegments
+	segmentsMax uint64            // all types of .seg files are available - up to this number
 }
 
 // NewRoSnapshots - opens all snapshots. But to simplify everything:
@@ -617,7 +617,7 @@ func (s *RoSnapshots) Dir() string                   { return s.dir }
 func (s *RoSnapshots) DownloadReady() bool           { return s.downloadReady.Load() }
 func (s *RoSnapshots) SegmentsReady() bool           { return s.segmentsReady.Load() }
 func (s *RoSnapshots) IndicesMax() uint64            { return s.idxMax.Load() }
-func (s *RoSnapshots) SegmentsMax() uint64           { return s.segmentsMax.Load() }
+func (s *RoSnapshots) SegmentsMax() uint64           { return s.visible.Load().segmentsMax }
 func (s *RoSnapshots) SegmentsMinByType(t snaptype.Enum) (min uint64, ok bool) {
 	if s == nil {
 		return 0, false
@@ -904,7 +904,18 @@ func (s *RoSnapshots) recalcVisibleFiles(alignMin bool) {
 		}
 	}
 
-	s.visible.Store(&snapshotVisible{segments: visible})
+	var segmentsMax uint64
+	for _, t := range s.enums {
+		segs := visible[t]
+		if len(segs) == 0 {
+			continue
+		}
+		if to := segs[len(segs)-1].to; to > 0 && to-1 > segmentsMax {
+			segmentsMax = to - 1
+		}
+	}
+
+	s.visible.Store(&snapshotVisible{segments: visible, segmentsMax: segmentsMax})
 }
 
 // minimax of existing indices
@@ -1085,9 +1096,6 @@ func TypedSegments(dir string, types []snaptype.Type, allowGaps bool) (res []sna
 }
 
 func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic bool) error {
-	var segmentsMax uint64
-	var segmentsMaxSet bool
-
 	wg := &errgroup.Group{}
 	wg.SetLimit(estimate.HalfCPUs())
 	//fmt.Println("RS", s)
@@ -1175,15 +1183,6 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 			})
 		}
 
-		if f.To > 0 {
-			segmentsMax = f.To - 1
-		} else {
-			segmentsMax = 0
-		}
-		segmentsMaxSet = true
-	}
-	if segmentsMaxSet {
-		s.segmentsMax.Store(segmentsMax)
 	}
 
 	if err := wg.Wait(); err != nil {
