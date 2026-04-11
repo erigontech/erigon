@@ -1652,12 +1652,14 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 
 	foundStep := kv.Step(^binary.BigEndian.Uint64(foundInvStep))
 
-	// Deletion entries (empty value) are authoritative regardless of step age:
-	// frozen files have no tombstones, so discarding a deletion marker causes
-	// fallthrough to getLatestFromFiles which returns stale pre-deletion data.
-	// Note: for LargeValues=true, an old-step tombstone may be stale from an
-	// interrupted prune (see cross-check in getLatest). We still return it as
-	// found here; getLatest handles the file cross-check when needed.
+	// Deletion entries (len(v)==0) are authoritative regardless of step age.
+	// Although snapshot files do store empty values for deleted keys, the
+	// background file collation can race with execution commits — if the
+	// collation snapshots the DB before a deletion is committed, the file
+	// misses the entry. After pruning removes the DB entry, the deletion
+	// evidence would be lost and getLatestFromFiles would return a stale
+	// pre-deletion value from an older file. Treating DB deletion entries
+	// as authoritative here prevents that. See #20169.
 	if len(v) == 0 {
 		return v, foundStep, true, nil
 	}
