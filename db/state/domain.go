@@ -1271,7 +1271,10 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	defer valsCursor.Close()
 	// Revert keys using diff entries.
 	// Always: delete current entry at the write step, restore prevValue at unwind target step.
-	// value == []byte{} means key was new (no previous value to restore).
+	// value == nil means different step (skip restore; entry remains at its own step position).
+	//   Only appears from legacy V0 changesets where valueLen==0 deserializes as nil.
+	// value == []byte{} means no previous value existed (key was new or was already deleted);
+	//   write an empty tombstone to restore absence and prevent fallthrough to stale file data.
 	unwindStepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(unwindStepBytes, ^uint64(step))
 
@@ -1283,8 +1286,8 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			if err := rwTx.Delete(d.ValuesTable, key); err != nil {
 				return err
 			}
-			// Restore previous value at unwind step ([]byte{} = key was new, nothing to restore)
-			if len(value) > 0 {
+			// Restore previous value at unwind step (nil = different step/V0 legacy, skip; []byte{} = absent, write tombstone)
+			if value != nil {
 				fullKey := key[:len(key)-8]
 				if err := rwTx.Put(d.ValuesTable, append(fullKey, unwindStepBytes...), value); err != nil {
 					return err
@@ -1308,8 +1311,8 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			}
 		}
 
-		// Restore previous value at unwind step ([]byte{} = key was new, nothing to restore)
-		if len(value) > 0 {
+		// Restore previous value at unwind step (nil = different step/V0 legacy, skip; []byte{} = absent, write tombstone)
+		if value != nil {
 			if err := valsCursor.Put(fullKey, append(unwindStepBytes, value...)); err != nil {
 				return err
 			}
@@ -1632,6 +1635,16 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 
 	foundStep := kv.Step(^binary.BigEndian.Uint64(foundInvStep))
 
+	// Deletion entries (empty value) are authoritative regardless of step age:
+	// frozen files have no tombstones, so discarding a deletion marker causes
+	// fallthrough to getLatestFromFiles which returns stale pre-deletion data.
+	// Note: for LargeValues=true, an old-step tombstone may be stale from an
+	// interrupted prune (see cross-check in getLatest). We still return it as
+	// found here; getLatest handles the file cross-check when needed.
+	if len(v) == 0 {
+		return v, foundStep, true, nil
+	}
+
 	if lastTxNumOfStep(foundStep, dt.stepSize) >= dt.files.EndTxNum() {
 		return v, foundStep, true, nil
 	}
@@ -1667,6 +1680,46 @@ func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, maxStep kv.Step, metrics
 		return nil, 0, false, fmt.Errorf("getLatestFromDb: %w", err)
 	}
 	if found && foundStep <= maxStep {
+		// For LargeValues=true (per-row storage), an old-step DB tombstone may
+		// be stale from an interrupted prune: the pseudo-dup cursor iterates
+		// rows newest-first, so a timeout-driven PruneSmallBatches can delete
+		// the newest row for a key while an older tombstone survives. Cross-check
+		// files for a newer entry before trusting such a tombstone.
+		// Not needed for LargeValues=false (DupSort) because prune deletes all
+		// dups atomically via DeleteCurrentDuplicates on the real DupSort cursor.
+		//
+		// Limitation: frozen files encode deletions as absence, so this cross-check
+		// cannot distinguish "key was deleted in a newer step" from "key was not
+		// modified in a newer step". A delete->write->delete cycle across steps
+		// with interrupted prune could theoretically return the intermediate write
+		// instead of the final deletion. This is acceptable because:
+		// - LargeValues=true applies only to CodeDomain and RCacheDomain
+		// - Post-EIP-6780, SELFDESTRUCT only works same-tx as CREATE, making
+		//   cross-step delete->write->delete cycles effectively impossible
+		//
+		// The cross-check is skipped when maxStep constrains the read horizon
+		// (e.g. during unwind) to avoid leaking file data beyond the caller's
+		// allowed step range.
+		if dt.d.LargeValues && len(v) == 0 && (foundStep+1).ToTxNum(dt.stepSize) < dt.files.EndTxNum() {
+			// Derive maxStep's txNum boundary, guarding against overflow.
+			var maxStepEndTxNum uint64 // 0 = unconstrained
+			if maxStep < kv.Step(math.MaxUint64/dt.stepSize) {
+				maxStepEndTxNum = (maxStep + 1).ToTxNum(dt.stepSize)
+			}
+			// Only cross-check when maxStep doesn't constrain file access.
+			if maxStepEndTxNum == 0 || maxStepEndTxNum >= dt.files.EndTxNum() {
+				fileV, foundInFile, _, endTxNum, fileErr := dt.getLatestFromFiles(key, 0)
+				if fileErr != nil {
+					return nil, 0, false, fmt.Errorf("getLatestFromFiles (tombstone cross-check): %w", fileErr)
+				}
+				if foundInFile && endTxNum > (foundStep+1).ToTxNum(dt.stepSize) {
+					if metrics != nil && dbg.KVReadLevelledMetrics {
+						metrics.UpdateFileReads(dt.name, start)
+					}
+					return fileV, kv.Step(endTxNum / dt.stepSize), true, nil
+				}
+			}
+		}
 		if metrics != nil && dbg.KVReadLevelledMetrics {
 			metrics.UpdateDbReads(dt.name, start)
 		}
