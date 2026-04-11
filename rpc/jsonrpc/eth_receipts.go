@@ -288,9 +288,8 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 
 	// Treat range-limit violations as invalid filter input to match eth_getLogs parameter validation.
 	if rangeLimit != 0 && (end-begin) > uint64(rangeLimit) {
-		return nil, &rpc.CustomError{
+		return nil, &rpc.InvalidParamsError{
 			Message: fmt.Sprintf("%s: %d", errExceedBlockRange, rangeLimit),
-			Code:    rpc.ErrCodeInvalidParams,
 		}
 	}
 
