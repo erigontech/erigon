@@ -701,14 +701,23 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 							reader = state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx))
 						}
 						ibs := state.New(state.NewBufferedReader(pe.rs, reader))
+						defer ibs.Release(true)
 						ibs.SetVersion(finalVersion.Incarnation)
 						localVersionMap := state.NewVersionMap(nil)
 						ibs.SetVersionMap(localVersionMap)
 						ibs.SetTxContext(finalVersion.BlockNum, finalVersion.TxIndex)
 
-						txTask, ok := result.Task.(*taskVersion).Task.(*exec.TxTask)
+						var txTask *exec.TxTask
+						switch t := result.Task.(type) {
+						case *taskVersion:
+							if tt, ok := t.Task.(*exec.TxTask); ok {
+								txTask = tt
+							}
+						case *exec.TxTask:
+							txTask = t
+						}
 
-						if !ok {
+						if txTask == nil {
 							return nil, nil
 						}
 
