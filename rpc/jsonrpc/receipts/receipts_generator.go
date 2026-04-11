@@ -495,16 +495,12 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		if err != nil {
 			return nil, err
 		}
-		// Fixup block hash and log indices.
-		for i, receipt := range receipts {
-			receipt.BlockHash = blockHash
-			if len(receipt.Logs) > 0 {
-				receipt.FirstLogIndexWithinBlock = uint32(receipt.Logs[0].Index)
-			} else if i > 0 {
-				receipt.FirstLogIndexWithinBlock = receipts[i-1].FirstLogIndexWithinBlock + uint32(len(receipts[i-1].Logs))
-			}
-			if dbg.AssertEnabled && receiptsFromDB != nil && i < len(receiptsFromDB) {
-				g.assertEqualReceipts(receipt, receiptsFromDB[i])
+		sharedreceipts.DeriveFields(receipts, blockHash)
+		if dbg.AssertEnabled && receiptsFromDB != nil {
+			for i, receipt := range receipts {
+				if i < len(receiptsFromDB) {
+					g.assertEqualReceipts(receipt, receiptsFromDB[i])
+				}
 			}
 		}
 	} else {
@@ -549,6 +545,10 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 			}
 
 			evm := protocol.CreateEVM(cfg, hashFn, g.engine, accounts.NilAddress, genEnv.ibs, genEnv.header, vmCfg)
+			// txDone is a cancellation bridge: a goroutine watches for context
+			// cancellation (e.g. RPC timeout) and calls evm.Cancel() to abort the
+			// EVM mid-execution. Closing txDone signals that the transaction
+			// completed normally, so the goroutine can exit without cancelling.
 			txDone := make(chan struct{})
 			go func() {
 				select {
@@ -592,17 +592,14 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 				}
 			}
 			receipt.PostState = stateRoot
-
-			receipt.BlockHash = blockHash
-			if len(receipt.Logs) > 0 {
-				receipt.FirstLogIndexWithinBlock = uint32(receipt.Logs[0].Index)
-			} else if i > 0 {
-				receipt.FirstLogIndexWithinBlock = receipts[i-1].FirstLogIndexWithinBlock + uint32(len(receipts[i-1].Logs))
-			}
 			receipts[i] = receipt
-
-			if dbg.AssertEnabled && receiptsFromDB != nil && i < len(receiptsFromDB) {
-				g.assertEqualReceipts(receipt, receiptsFromDB[i])
+		}
+		sharedreceipts.DeriveFields(receipts, blockHash)
+		if dbg.AssertEnabled && receiptsFromDB != nil {
+			for i, receipt := range receipts {
+				if i < len(receiptsFromDB) {
+					g.assertEqualReceipts(receipt, receiptsFromDB[i])
+				}
 			}
 		}
 	}

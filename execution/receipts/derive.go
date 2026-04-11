@@ -126,6 +126,20 @@ func DeriveBlockReceipts(
 	return DeriveForRange(ctx, cfg, engine, header, txns, 0, len(txns), ibs, gp, getHeader)
 }
 
+// DeriveFields populates BlockHash and FirstLogIndexWithinBlock on each receipt.
+// ApplyTransactionWithEVM sets most receipt fields, but BlockHash and the
+// per-receipt first-log-index need a second pass once all receipts are known.
+func DeriveFields(receipts types.Receipts, blockHash common.Hash) {
+	for i, receipt := range receipts {
+		receipt.BlockHash = blockHash
+		if len(receipt.Logs) > 0 {
+			receipt.FirstLogIndexWithinBlock = uint32(receipt.Logs[0].Index)
+		} else if i > 0 {
+			receipt.FirstLogIndexWithinBlock = receipts[i-1].FirstLogIndexWithinBlock + uint32(len(receipts[i-1].Logs))
+		}
+	}
+}
+
 // DerivePriorReceipts returns receipts for transactions 0..startTxIndex-1.
 // It first tries to read them from RCacheV2 (persistent receipt cache). If all
 // prior receipts are cached, no replay is needed. Otherwise falls back to
