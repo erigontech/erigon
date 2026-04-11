@@ -550,13 +550,10 @@ type RoSnapshots struct {
 	types []snaptype.Type //immutable
 	enums []snaptype.Enum //immutable
 
-	dirtyLock sync.RWMutex                   // guards `dirty` field
-	dirty     []*btree.BTreeG[*DirtySegment] // ordered map `type.Enum()` -> DirtySegments
-	// visible is published via atomic.Store by recalcVisibleFiles; readers
-	// load it lock-free. Writers are serialized by recalcLock so two concurrent
-	// publishes cannot interleave their computed bundles.
+	dirtyLock  sync.RWMutex                   // guards `dirty` field
+	dirty      []*btree.BTreeG[*DirtySegment] // ordered map `type.Enum()` -> DirtySegments
 	visible    atomic.Pointer[snapshotVisible]
-	recalcLock sync.Mutex
+	recalcLock sync.Mutex // serializes recalcVisibleFiles publishers
 
 	dir               string
 	segmentsMax       atomic.Uint64                    // all types of .seg files are available - up to this number
@@ -571,9 +568,6 @@ type RoSnapshots struct {
 	alignMin  bool // do we want to align all visible segments to the minimum available
 }
 
-// snapshotVisible is the immutable per-type snapshot read by every View /
-// ViewType / ViewSingleFile. A single atomic load pins one generation across
-// all segment types — readers never observe a torn view between types.
 type snapshotVisible struct {
 	segments []VisibleSegments // ordered map `type.Enum()` -> VisibleSegments
 }
@@ -606,8 +600,6 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 	for _, snapType := range types {
 		s.dirty[snapType.Enum()] = btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
 	}
-	// Publish an empty bundle so readers never observe a nil pointer —
-	// recalcVisibleFiles below will overwrite it.
 	s.visible.Store(&snapshotVisible{segments: make([]VisibleSegments, snaptype.MaxEnum)})
 
 	for _, t := range s.enums {
@@ -863,8 +855,6 @@ func (s *RoSnapshots) recalcVisibleFiles(alignMin bool) {
 		s.idxMax.Store(s.idxAvailability())
 	}()
 
-	// recalcLock serializes publishers so two concurrent recalcs cannot race
-	// on atomic.Store (which readers load without any lock).
 	s.recalcLock.Lock()
 	defer s.recalcLock.Unlock()
 
