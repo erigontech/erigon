@@ -116,7 +116,7 @@ var printCmd = &cobra.Command{
 		}
 		stepSize := settings.StepSize
 
-		roTx := history.BeginFilesRo()
+		roTx := history.BeginFilesRoForDebug()
 		defer roTx.Close()
 
 		var keyToDump *[]byte
@@ -160,7 +160,7 @@ var distributionCmd = &cobra.Command{
 		}
 		stepSize := settings.StepSize
 
-		roTx := history.BeginFilesRo()
+		roTx := history.BeginFilesRoForDebug()
 		defer roTx.Close()
 
 		keysEntries := make(map[string]int)
@@ -249,7 +249,7 @@ var rebuildCmd = &cobra.Command{
 		stepSize := settings.StepSize
 		stepsInFrozenFile := settings.StepsInFrozenFile
 
-		roTx := history.BeginFilesRo()
+		roTx := history.BeginFilesRoForDebug()
 		defer roTx.Close()
 
 		for i := uint64(0); i < roTx.FirstStepNotInFiles().ToTxNum(stepSize); {
