@@ -45,8 +45,10 @@ linters:
       min-len: 2
       min-occurrences: 2
     gocritic:
-      enabled-checks:
-        - ruleguard
+      # ruleguard runs as a separate `go vet -vettool` step; see
+      # tools/ruleguard/main.go and tools/golangci_lint.sh. Running it via
+      # gocritic re-creates a ruleguard engine per package, costing ~50s on
+      # this repo.
       disabled-checks:
         - unnecessaryDefer
         - appendAssign
@@ -83,8 +85,6 @@ linters:
         rangeExprCopy:
           sizeThreshold: 512
           skipTestFuncs: true
-        ruleguard:
-          rules: rules.go
         underef:
           skipRecvDeref: true
     govet:

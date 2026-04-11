@@ -97,6 +97,7 @@ require (
 	github.com/prysmaticlabs/go-bitfield v0.0.0-20240618144021-706c95b2dd15
 	github.com/prysmaticlabs/gohashtree v0.0.4-beta
 	github.com/puzpuzpuz/xsync/v4 v4.4.0
+	github.com/quasilyte/go-ruleguard v0.4.5
 	github.com/quasilyte/go-ruleguard/dsl v0.3.23
 	github.com/quic-go/quic-go v0.59.0
 	github.com/rs/cors v1.11.1
@@ -380,7 +381,6 @@ require (
 	github.com/prometheus/common v0.66.1 // indirect
 	github.com/prometheus/procfs v0.16.1 // indirect
 	github.com/protolambda/ctxlock v0.1.0 // indirect
-	github.com/quasilyte/go-ruleguard v0.4.5 // indirect
 	github.com/quasilyte/gogrep v0.5.0 // indirect
 	github.com/quasilyte/regex/syntax v0.0.0-20210819130434-b3f0c404a727 // indirect
 	github.com/quasilyte/stdinfo v0.0.0-20220114132959-f7386bf02567 // indirect
