@@ -23,6 +23,7 @@ import (
 	"math"
 	mathrand "math/rand"
 	"os"
+	"slices"
 	"sort"
 	"time"
 
@@ -691,8 +692,7 @@ type BeaconChainConfig struct {
 // GetBlobParameters returns the blob parameters at a given epoch
 func (b *BeaconChainConfig) GetBlobParameters(epoch uint64) BlobParameters {
 	// Iterate through schedule in desc order
-	for i := len(b.BlobSchedule) - 1; i >= 0; i-- {
-		entry := b.BlobSchedule[i]
+	for _, entry := range slices.Backward(b.BlobSchedule) {
 		if epoch >= entry.Epoch {
 			return entry
 		}
