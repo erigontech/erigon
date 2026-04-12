@@ -167,11 +167,6 @@ func (e *EngineServer) Start(
 			Version:   "1.0",
 		}}
 
-	if slices.Contains(httpConfig.API, "testing") {
-		e.logger.Warn("[EngineServer] testing_ RPC namespace is ENABLED on engine port — do not use on production networks")
-		apiList = append(apiList, NewTestingRPCEntry(e))
-	}
-
 	eg.Go(func() error {
 		defer e.logger.Debug("[EngineServer] engine rpc server goroutine terminated")
 		err := cli.StartRpcServerWithJwtAuthentication(ctx, httpConfig, apiList, e.logger)
