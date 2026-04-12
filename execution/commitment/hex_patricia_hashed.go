@@ -63,8 +63,7 @@ type trieDebugRecorder struct {
 func newTrieDebugRecorder(capture []string) *trieDebugRecorder {
 	recorder := &trieDebugRecorder{}
 	if capture != nil {
-		recorder.lines = make([]string, len(capture))
-		copy(recorder.lines, capture)
+		recorder.lines = append([]string{}, capture...)
 	}
 	return recorder
 }

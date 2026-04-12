@@ -180,11 +180,8 @@ func (p *ConcurrentPatriciaHashed) GetCapture(truncate bool) []string {
 }
 
 func (p *ConcurrentPatriciaHashed) SetCapture(capture []string) {
-	var recorder *trieDebugRecorder
-	if capture != nil {
-		recorder = newTrieDebugRecorder(capture)
-	}
-	p.root.setCaptureRecorder(recorder)
+	p.root.SetCapture(capture)
+	recorder := p.root.capture
 	for i := range p.mounts {
 		p.mounts[i].setCaptureRecorder(recorder)
 	}
