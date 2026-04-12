@@ -73,7 +73,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ runner.workspace }}/rpc-tests
-          key: rpc-tests-${{ runner.os }}-${{ runner.arch }}-v2.4.0
+          key: rpc-tests-${{ runner.os }}-${{ runner.arch }}-v2.6.0
 
       - name: Run RPC Integration Tests
         id: test_step
