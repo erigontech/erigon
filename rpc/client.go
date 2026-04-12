@@ -333,7 +333,10 @@ func (c *Client) CallContext(ctx context.Context, result any, method string, arg
 	case len(resp.Result) == 0:
 		return ErrNoResult
 	default:
-		return json.Unmarshal(resp.Result, &result)
+		if result == nil {
+			return nil
+		}
+		return json.Unmarshal(resp.Result, result)
 	}
 }
 
