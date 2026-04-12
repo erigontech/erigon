@@ -346,6 +346,14 @@ func TableScanningPrune(
 			}
 			stat.PruneCountValues += dups
 		} else {
+			// Selective per-dup deletion: delete all in-range dups for this key
+			// atomically (no ctx/throttle checks between dups). This prevents
+			// the DB from transiently holding stale data if the prune were
+			// interrupted between deleting a newer and older dup.
+			_, err = valDelCursor.FirstDup()
+			if err != nil {
+				return nil, fmt.Errorf("FirstDup iterate over %s index keys: %w", filenameBase, err)
+			}
 			for ; txNumBytes != nil; _, txNumBytes, err = valDelCursor.NextDup() {
 				if err != nil {
 					return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
@@ -358,18 +366,6 @@ func TableScanningPrune(
 				if txNumDup >= txTo {
 					break
 				}
-				if throttling != nil {
-					time.Sleep(*throttling)
-				}
-				select {
-				case <-ctx.Done():
-					stat.LastPrunedValue = common.Copy(val)
-					stat.ValueProgress = InProgress
-					return stat, nil
-				default:
-				}
-				//println("txnum passed checks loop", txNumDup)
-
 				stat.MinTxNum = min(stat.MinTxNum, txNumDup)
 				stat.MaxTxNum = max(stat.MaxTxNum, txNumDup)
 				//println("deleted loop", hex.EncodeToString(val))
@@ -377,6 +373,15 @@ func TableScanningPrune(
 					return nil, err
 				}
 				stat.PruneCountValues++
+			}
+			// Check throttle/ctx only AFTER all in-range dups for this key are deleted
+			if throttling != nil {
+				time.Sleep(*throttling)
+			}
+			if ctx.Err() != nil {
+				stat.LastPrunedValue = common.Copy(val)
+				stat.ValueProgress = InProgress
+				return stat, nil
 			}
 		}
 

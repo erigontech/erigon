@@ -56,10 +56,11 @@ import (
 )
 
 var (
-	asserts          = dbg.EnvBool("AGG_ASSERTS", false)
-	traceFileLife    = dbg.EnvString("AGG_TRACE_FILE_LIFE", "")
-	traceGetAsOf     = dbg.EnvString("AGG_TRACE_GET_AS_OF", "")
-	tracePutWithPrev = dbg.EnvString("AGG_TRACE_PUT_WITH_PREV", "")
+	asserts                        = dbg.EnvBool("AGG_ASSERTS", false)
+	assertPruneConsistencyEnabled  = dbg.EnvBool("AGG_ASSERT_PRUNE", false)
+	traceFileLife                  = dbg.EnvString("AGG_TRACE_FILE_LIFE", "")
+	traceGetAsOf                   = dbg.EnvString("AGG_TRACE_GET_AS_OF", "")
+	tracePutWithPrev               = dbg.EnvString("AGG_TRACE_PUT_WITH_PREV", "")
 )
 var traceGetLatest, _ = kv.String2Domain(dbg.EnvString("AGG_TRACE_GET_LATEST", ""))
 
@@ -1658,6 +1659,14 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 
 	foundStep := kv.Step(^binary.BigEndian.Uint64(foundInvStep))
 
+	// Deletion entries (empty value) are authoritative regardless of step age:
+	// frozen files have no tombstones, so discarding a deletion marker causes
+	// fallthrough to getLatestFromFiles which returns stale pre-deletion data.
+	if len(v) == 0 {
+		return v, foundStep, true, nil
+	}
+
+
 	if lastTxNumOfStep(foundStep, dt.stepSize) >= dt.files.EndTxNum() {
 		return v, foundStep, true, nil
 	}
@@ -1693,6 +1702,43 @@ func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, maxStep kv.Step, metrics
 		return nil, 0, false, fmt.Errorf("getLatestFromDb: %w", err)
 	}
 	if found && foundStep <= maxStep {
+		// For LargeValues=true (per-row storage), an old-step DB tombstone may
+		// be stale from an interrupted prune: the pseudo-dup cursor iterates
+		// rows newest-first, so a timeout-driven PruneSmallBatches can delete
+		// the newest row for a key while an older tombstone survives. Cross-check
+		// files for a newer entry before trusting such a tombstone.
+		if dt.d.LargeValues && len(v) == 0 && (foundStep+1).ToTxNum(dt.stepSize) < dt.files.EndTxNum() {
+			var maxStepEndTxNum uint64
+			if maxStep < kv.Step(math.MaxUint64/dt.stepSize) {
+				maxStepEndTxNum = (maxStep + 1).ToTxNum(dt.stepSize)
+			}
+			if maxStepEndTxNum == 0 || maxStepEndTxNum >= dt.files.EndTxNum() {
+				fileV, foundInFile, _, endTxNum, fileErr := dt.getLatestFromFiles(key, 0)
+				if fileErr != nil {
+					return nil, 0, false, fmt.Errorf("getLatestFromFiles (tombstone cross-check): %w", fileErr)
+				}
+				if foundInFile && endTxNum > (foundStep+1).ToTxNum(dt.stepSize) {
+					if metrics != nil && dbg.KVReadLevelledMetrics {
+						metrics.UpdateFileReads(dt.name, start)
+					}
+					return fileV, kv.Step(endTxNum / dt.stepSize), true, nil
+				}
+			}
+		}
+		// Assert: when DB has a value and files also cover this step,
+		// the file should have the same value (or a newer-step value from merge).
+		// A mismatch where file has an older value indicates lost write.
+		if assertPruneConsistencyEnabled && dt.files.Len() > 0 &&
+			lastTxNumOfStep(foundStep, dt.stepSize) < dt.files.EndTxNum() {
+			fileV, foundInFile, _, _, fileErr := dt.getLatestFromFiles(key, 0)
+			if fileErr == nil && foundInFile && !bytes.Equal(v, fileV) {
+				dt.d.logger.Warn("getLatest: DB/file value mismatch",
+					"domain", dt.name, "key", fmt.Sprintf("%x", key),
+					"dbVal", fmt.Sprintf("%x", v), "fileVal", fmt.Sprintf("%x", fileV),
+					"dbStep", foundStep, "filesEnd", dt.files.EndTxNum()/dt.stepSize)
+			}
+		}
+
 		if metrics != nil && dbg.KVReadLevelledMetrics {
 			metrics.UpdateDbReads(dt.name, start)
 		}
@@ -1956,6 +2002,16 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 
 	prg.KeyProgress = prune.Done // domains don't have key tables
 
+	// Verify file/DB consistency before pruning. If a DB entry has a value
+	// that differs from the file, pruning would lose the correct DB value
+	// and the stale file value becomes authoritative — silent state corruption.
+	// Enabled via AGG_ASSERT_PRUNE=true env var.
+	if assertPruneConsistencyEnabled && dt.files.Len() > 0 {
+		if err := dt.assertPruneConsistency(rwTx, txFrom, txTo); err != nil {
+			return stat, err
+		}
+	}
+
 	pruneStat, err := prune.TableScanningPrune(ctx, "domain "+dt.name.String(), dt.d.FilenameBase, txFrom, txTo, limit, dt.stepSize,
 		logEvery, dt.d.logger, nil, valsCursor, asserts, prg, mode)
 	if err != nil {
@@ -1981,6 +2037,115 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	stat.Progress = pruneStat.ValueProgress
 
 	return stat, err
+}
+
+// assertPruneConsistency checks that the file's latest value for each key matches
+// the DB's latest (highest-step) value. Only the highest-step DB entry per key is
+// checked, since older entries are expected to differ from the merged file value.
+// A mismatch at the highest step means the collation captured stale data.
+func (dt *DomainRoTx) assertPruneConsistency(roTx kv.Tx, txFrom, txTo uint64) (retErr error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			dt.d.logger.Warn("assertPruneConsistency recovered from panic", "domain", dt.name, "panic", rec)
+			retErr = nil
+		}
+	}()
+
+	stepFrom := kv.Step(txFrom / dt.stepSize)
+	stepTo := kv.Step(txTo / dt.stepSize)
+
+	if dt.d.LargeValues {
+		// For LargeValues, each row is a separate key with step suffix.
+		// The highest step for a key is the first row found by Seek.
+		cursor, err := roTx.Cursor(dt.d.ValuesTable)
+		if err != nil {
+			return nil
+		}
+		defer cursor.Close()
+
+		var prevKey []byte
+		checked := 0
+		for k, v, err := cursor.First(); k != nil; k, v, err = cursor.Next() {
+			if err != nil {
+				return nil
+			}
+			if len(k) < 8 {
+				continue
+			}
+			dbKey := k[:len(k)-8]
+			dbStep := kv.Step(^binary.BigEndian.Uint64(k[len(k)-8:]))
+
+			// Skip older entries for the same key (only check highest step)
+			if bytes.Equal(dbKey, prevKey) {
+				continue
+			}
+			prevKey = append(prevKey[:0], dbKey...)
+
+			if dbStep < stepFrom || dbStep >= stepTo {
+				continue
+			}
+
+			fileVal, foundInFile, _, _, ferr := dt.getLatestFromFiles(dbKey, 0)
+			if ferr != nil {
+				continue
+			}
+			if !foundInFile && len(v) > 0 {
+				return fmt.Errorf("prune assertion failed: domain=%s key=%x dbVal=%x dbStep=%d — file has no entry",
+					dt.name, dbKey, v, dbStep)
+			}
+			if foundInFile && !bytes.Equal(fileVal, v) {
+				return fmt.Errorf("prune assertion failed: domain=%s key=%x dbVal=%x fileVal=%x dbStep=%d — file/DB mismatch at highest step",
+					dt.name, dbKey, v, fileVal, dbStep)
+			}
+			checked++
+		}
+		if checked > 0 {
+			dt.d.logger.Debug("prune consistency check passed", "domain", dt.name, "checked", checked)
+		}
+		return nil
+	}
+
+	// For DupSort: use SeekExact per key to get the first (highest-step) dup.
+	// Iterate keys via NextNoDup.
+	cursor, err := roTx.CursorDupSort(dt.d.ValuesTable)
+	if err != nil {
+		return nil
+	}
+	defer cursor.Close()
+
+	checked := 0
+	for k, v, err := cursor.First(); k != nil; k, v, err = cursor.(kv.CursorDupSort).NextNoDup() {
+		if err != nil {
+			return nil
+		}
+		if len(v) < 8 {
+			continue
+		}
+		dbStep := kv.Step(^binary.BigEndian.Uint64(v[:8]))
+		dbVal := v[8:]
+
+		if dbStep < stepFrom || dbStep >= stepTo {
+			continue
+		}
+
+		fileVal, foundInFile, _, _, ferr := dt.getLatestFromFiles(k, 0)
+		if ferr != nil {
+			continue
+		}
+		if !foundInFile && len(dbVal) > 0 {
+			return fmt.Errorf("prune assertion failed: domain=%s key=%x dbVal=%x dbStep=%d — file has no entry",
+				dt.name, k, dbVal, dbStep)
+		}
+		if foundInFile && !bytes.Equal(fileVal, dbVal) {
+			return fmt.Errorf("prune assertion failed: domain=%s key=%x dbVal=%x fileVal=%x dbStep=%d — file/DB mismatch at highest step",
+				dt.name, k, dbVal, fileVal, dbStep)
+		}
+		checked++
+	}
+	if checked > 0 {
+		dt.d.logger.Debug("prune consistency check passed", "domain", dt.name, "checked", checked)
+	}
+	return nil
 }
 
 func (dt *DomainRoTx) oldPrune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
