@@ -79,6 +79,25 @@ func (l *JsonStreamLogger) OnTxStart(env *tracing.VMContext, tx types.Transactio
 	l.env = env
 }
 
+// hexWithPrefix encodes b as a 0x-prefixed hex string using the internal buffer.
+func (l *JsonStreamLogger) hexWithPrefix(b []byte) string {
+	l.hexEncodeBuf[0] = '0'
+	l.hexEncodeBuf[1] = 'x'
+	n := hex.Encode(l.hexEncodeBuf[2:], b)
+	return string(l.hexEncodeBuf[:2+n])
+}
+
+// formatMemoryWord encodes a memory chunk as a 0x-prefixed 64-char hex string,
+// padding the last word to 32 bytes if needed.
+func (l *JsonStreamLogger) formatMemoryWord(chunk []byte) string {
+	if len(chunk) == 32 {
+		return l.hexWithPrefix(chunk)
+	}
+	var word [32]byte
+	copy(word[:], chunk)
+	return l.hexWithPrefix(word[:])
+}
+
 func (l *JsonStreamLogger) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
 	// no log entry are producer
 	if l.firstCapture {
@@ -185,11 +204,15 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 		l.stream.WriteMore()
 		l.stream.WriteObjectField("memory")
 		l.stream.WriteArrayStart()
-		for i := 0; i+32 <= len(memData); i += 32 {
+		for i := 0; i < len(memData); i += 32 {
+			end := i + 32
+			if end > len(memData) {
+				end = len(memData)
+			}
 			if i > 0 {
 				l.stream.WriteMore()
 			}
-			l.stream.WriteString(string(l.hexEncodeBuf[0:hex.Encode(l.hexEncodeBuf[:], memData[i:i+32])]))
+			l.stream.WriteString(l.formatMemoryWord(memData[i:end]))
 		}
 		l.stream.WriteArrayEnd()
 	}
@@ -214,8 +237,8 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 			} else {
 				l.stream.WriteMore()
 			}
-			l.stream.WriteObjectField(string(l.hexEncodeBuf[0:hex.Encode(l.hexEncodeBuf[:], loc[:])]))
-			l.stream.WriteString(string(l.hexEncodeBuf[0:hex.Encode(l.hexEncodeBuf[:], value[:])]))
+			l.stream.WriteObjectField(l.hexWithPrefix(loc[:]))
+			l.stream.WriteString(l.hexWithPrefix(value[:]))
 		}
 		l.stream.WriteObjectEnd()
 	}
