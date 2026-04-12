@@ -3,6 +3,11 @@ name: SonarCloud
 on:
   workflow_dispatch:
   workflow_call:
+    inputs:
+      cache-warming-only:
+        description: "Compile test binaries only; skip test execution (for cache warming runs)"
+        type: boolean
+        default: false
 
 defaults:
   run:
@@ -31,11 +36,17 @@ jobs:
           ramdisk: true
 
       - name: Run tests with coverage
+        if: '!inputs.cache-warming-only'
         env:
           SKIP_FLAKY_TESTS: 'true'
         run: make test-sonar-coverage
 
+      - name: Build test binaries (cache warming)
+        if: inputs.cache-warming-only
+        run: go test -run=^$ -cover ./...
+
       - name: SonarCloud scan
+        if: '!inputs.cache-warming-only'
         uses: SonarSource/sonarqube-scan-action@v7
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
