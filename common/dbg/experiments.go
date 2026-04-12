@@ -87,6 +87,8 @@ var (
 
 	AggregationDelayMs = EnvInt("AGGREGATION_DELAY_MS", 0)
 
+	MergeThrottleMs = EnvInt("ERIGON_MERGE_THROTTLE_MS", 0)
+
 	TraceAccounts         = EnvStrings("TRACE_ACCOUNTS", ",", nil)
 	TraceStateKeys        = EnvStrings("TRACE_STATE_KEYS", ",", nil)
 	TraceInstructions     = EnvBool("TRACE_INSTRUCTIONS", false)

@@ -939,7 +939,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		}
 		roTx.Rollback()
 
-		concurrent := dbg.EnvBool("ERIGON_REBUILD_CONCURRENT_COMMITMENT", false)
+		concurrent := statecfg.ExperimentalConcurrentCommitment
 		trieVariant := commitment.VariantHexPatriciaTrie
 		if concurrent {
 			trieVariant = commitment.VariantConcurrentHexPatricia
