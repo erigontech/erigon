@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -30,8 +31,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"math/rand"
 
 	"github.com/erigontech/erigon/db/kv/prune"
 
@@ -1028,6 +1027,11 @@ func (a *Aggregator) MergeLoop(ctx context.Context) (err error) {
 	defer a.wg.Done()
 	defer a.mergingFiles.Store(false)
 
+	mergeThrottleMs := dbg.MergeThrottleMs
+	if mergeThrottleMs > 0 {
+		a.logger.Info("[snapshots] MergeLoop throttle enabled", "delay_ms", mergeThrottleMs)
+	}
+
 	for {
 		somethingMerged, err := a.mergeLoopStep(ctx, a.visibleFilesMinimaxTxNum.Load())
 		if err != nil {
@@ -1035,6 +1039,16 @@ func (a *Aggregator) MergeLoop(ctx context.Context) (err error) {
 		}
 		if !somethingMerged {
 			return nil
+		}
+
+		// Throttle between merge steps to reduce disk I/O pressure
+		// and allow block execution to proceed.
+		if mergeThrottleMs > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Duration(mergeThrottleMs) * time.Millisecond):
+			}
 		}
 	}
 }
@@ -1800,6 +1814,27 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 			lastIdInDB(a.db, a.d[kv.StorageDomain]),
 			lastIdInDB(a.db, a.d[kv.CommitmentDomain]))
 		a.logger.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB)
+
+		// Stagger aggregation across fleet nodes to prevent synchronized I/O stalls.
+		// Set different values per node via AGGREGATION_DELAY_MS env var.
+		if dbg.AggregationDelayMs > 0 {
+			a.logger.Info("[snapshots] aggregation delay before build", "delay_ms", dbg.AggregationDelayMs)
+			timer := time.NewTimer(time.Duration(dbg.AggregationDelayMs) * time.Millisecond)
+			defer func() {
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+			}()
+			select {
+			case <-a.ctx.Done():
+				close(fin)
+				return
+			case <-timer.C:
+			}
+		}
 
 		// check if db has enough data (maybe we didn't commit them yet or all keys are unique so history is empty)
 		hasData := lastInDB > step // `step` must be fully-written - means `step+1` records must be visible

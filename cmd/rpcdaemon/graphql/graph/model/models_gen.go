@@ -7,7 +7,6 @@ type AccessTuple struct {
 	StorageKeys []string `json:"storageKeys"`
 }
 
-
 type Block struct {
 	Number            uint64         `json:"number"`
 	Hash              string         `json:"hash"`

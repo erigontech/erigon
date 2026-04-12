@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -195,6 +196,11 @@ func TestConcurrentRebuildCommitment(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping concurrent rebuild integration test in short mode")
 	}
+
+	// Save and restore the global concurrent commitment flag.
+	origConcurrent := statecfg.ExperimentalConcurrentCommitment
+	t.Cleanup(func() { statecfg.ExperimentalConcurrentCommitment = origConcurrent })
+	statecfg.ExperimentalConcurrentCommitment = false
 
 	// --- Read env parameters ---
 	// Default TEST_STEPS=10 ensures that after BuildFiles + merge the account domain
@@ -391,8 +397,8 @@ func TestConcurrentRebuildCommitment(t *testing.T) {
 	// the rebuild root is authoritative for comparing sequential vs concurrent.
 	t.Logf("=== Phase 2: Sequential Rebuild ===")
 
-	// Ensure sequential mode even if the env var is pre-set in the environment.
-	t.Setenv("ERIGON_REBUILD_CONCURRENT_COMMITMENT", "false")
+	// Ensure sequential mode.
+	statecfg.ExperimentalConcurrentCommitment = false
 
 	// Close aggregator, reopen with fresh state
 	db, agg = reopenAggregator(t, db, agg, stepSize)
@@ -433,13 +439,13 @@ func TestConcurrentRebuildCommitment(t *testing.T) {
 	// Wipe all commitment state
 	wipeCommitment(t, db, agg, dirs)
 
-	// Enable concurrent mode via env var (t.Setenv auto-restores on cleanup).
+	// Enable concurrent mode via the global flag.
 	// This creates a ConcurrentPatriciaHashed trie and enables EnableParaTrieDB.
 	// Whether ParallelHashSort actually fires depends on CanDoConcurrentNext() — the
 	// first shard after a wipe always runs sequentially (empty trie has no branch at
 	// nibble 0). After the first shard seeds trie state, subsequent shards exercise
 	// the parallel path.
-	t.Setenv("ERIGON_REBUILD_CONCURRENT_COMMITMENT", "true")
+	statecfg.ExperimentalConcurrentCommitment = true
 
 	// Run concurrent rebuild
 	concStart := time.Now()
@@ -470,4 +476,142 @@ func TestConcurrentRebuildCommitment(t *testing.T) {
 	// ========== Phase 4: Comparison Report ==========
 	t.Logf("=== Phase 4: Comparison Report ===")
 	logComparison(t, generationResult, sequentialResult, concurrentResult, originalSizes)
+}
+
+// TestConcurrentRebuildCommitmentNoSqueeze verifies that rebuilding commitment files
+// with squeeze=false produces the same root for both sequential and concurrent modes.
+func TestConcurrentRebuildCommitmentNoSqueeze(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping concurrent rebuild integration test in short mode")
+	}
+
+	origConcurrent := statecfg.ExperimentalConcurrentCommitment
+	t.Cleanup(func() { statecfg.ExperimentalConcurrentCommitment = origConcurrent })
+	statecfg.ExperimentalConcurrentCommitment = false
+
+	const (
+		numAccounts     = 5000
+		totalSteps      = 6
+		slotsPerAcct    = 2
+		numCodeAccounts = 1000
+		stepSize        = 10
+	)
+	totalTxs := uint64(stepSize * totalSteps)
+
+	t.Logf("Parameters: stepSize=%d totalSteps=%d totalTxs=%d accounts=%d storage=%d code=%d",
+		stepSize, totalSteps, totalTxs, numAccounts, numAccounts*slotsPerAcct, numCodeAccounts)
+
+	// --- Phase 1: Data generation ---
+	db, agg, dirs := testDbAndAggregatorForLargeData(t, stepSize, "")
+	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)
+
+	ctx := context.Background()
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	accPerTx := max((numAccounts+totalTxs-1)/totalTxs, 1)
+	storPerTx := max((numAccounts*slotsPerAcct+totalTxs-1)/totalTxs, 1)
+	codePerTx := max((numCodeAccounts+totalTxs-1)/totalTxs, 1)
+
+	var (
+		blockNum    uint64
+		accIdx      uint64
+		storAccIdx  uint64
+		storSlotIdx uint64
+		codeIdx     uint64
+		lastRoot    []byte
+	)
+
+	for txNum := uint64(0); txNum < totalTxs; txNum++ {
+		for i := uint64(0); i < accPerTx && accIdx < numAccounts; i++ {
+			addr := makeAccountAddr(accIdx)
+			acc := accounts.Account{
+				Nonce:    txNum,
+				Balance:  *uint256.NewInt(txNum * 1000),
+				CodeHash: accounts.EmptyCodeHash,
+			}
+			buf := accounts.SerialiseV3(&acc)
+			require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, addr, buf, txNum, nil))
+			accIdx++
+		}
+
+		for i := uint64(0); i < storPerTx && (storAccIdx*slotsPerAcct+storSlotIdx) < numAccounts*slotsPerAcct; i++ {
+			skey := makeStorageKey(storAccIdx, storSlotIdx, slotsPerAcct)
+			var val [32]byte
+			binary.BigEndian.PutUint64(val[24:], txNum)
+			require.NoError(t, domains.DomainPut(kv.StorageDomain, rwTx, skey, val[:], txNum, nil))
+			storSlotIdx++
+			if storSlotIdx >= slotsPerAcct {
+				storSlotIdx = 0
+				storAccIdx++
+			}
+		}
+
+		for i := uint64(0); i < codePerTx && codeIdx < numCodeAccounts; i++ {
+			addr := makeAccountAddr(codeIdx)
+			code := makeCodeValue(codeIdx)
+			require.NoError(t, domains.DomainPut(kv.CodeDomain, rwTx, addr, code, txNum, nil))
+			codeHash := accounts.InternCodeHash(common.BytesToHash(crypto.Keccak256(code)))
+			acc := accounts.Account{
+				Nonce:    txNum,
+				Balance:  *uint256.NewInt(txNum * 1000),
+				CodeHash: codeHash,
+			}
+			buf := accounts.SerialiseV3(&acc)
+			require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, addr, buf, txNum, nil))
+			codeIdx++
+		}
+
+		if (txNum+1)%stepSize == 0 {
+			rh, err := domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
+			require.NoError(t, err)
+			lastRoot = rh
+			require.NoError(t, domains.Flush(ctx, rwTx))
+			require.NoError(t, rawdbv3.TxNums.Append(rwTx, blockNum, txNum))
+			blockNum++
+		}
+	}
+
+	require.NoError(t, domains.Flush(ctx, rwTx))
+	domains.Close()
+	require.NoError(t, rwTx.Commit())
+
+	require.NoError(t, agg.BuildFiles(totalTxs))
+	require.NotEmpty(t, lastRoot)
+
+	// --- Phase 2: Sequential rebuild (squeeze=false) ---
+	t.Logf("=== Sequential Rebuild (no squeeze) ===")
+	statecfg.ExperimentalConcurrentCommitment = false
+	db, agg = reopenAggregator(t, db, agg, stepSize)
+	wipeCommitment(t, db, agg, dirs)
+
+	seqRoot, err := state.RebuildCommitmentFiles(ctx, db, &rawdbv3.TxNums, log.New(), false)
+	require.NoError(t, err)
+	require.NotEmpty(t, seqRoot)
+	require.NotEqual(t, empty.RootHash.Bytes(), seqRoot)
+	seqSizes := collectCommitmentFiles(t, dirs)
+	require.NotEmpty(t, seqSizes, "sequential rebuild must produce commitment files")
+	t.Logf("Sequential: root=%x files=%d", seqRoot, len(seqSizes))
+
+	// --- Phase 3: Concurrent rebuild (squeeze=false) ---
+	t.Logf("=== Concurrent Rebuild (no squeeze) ===")
+	statecfg.ExperimentalConcurrentCommitment = true
+	db, agg = reopenAggregator(t, db, agg, stepSize)
+	wipeCommitment(t, db, agg, dirs)
+
+	concRoot, err := state.RebuildCommitmentFiles(ctx, db, &rawdbv3.TxNums, log.New(), false)
+	require.NoError(t, err)
+	require.NotEmpty(t, concRoot)
+	concSizes := collectCommitmentFiles(t, dirs)
+	require.NotEmpty(t, concSizes, "concurrent rebuild must produce commitment files")
+	t.Logf("Concurrent: root=%x files=%d", concRoot, len(concSizes))
+
+	// Roots must match between sequential and concurrent
+	require.Equal(t, seqRoot, concRoot,
+		"no-squeeze roots must match: sequential=%x concurrent=%x", seqRoot, concRoot)
 }
