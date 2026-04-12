@@ -183,8 +183,8 @@ func (s *testFinalizeScenario) runFinalizeTx(t *testing.T) (state.ReadSet, state
 	result.TxOut = txOut
 	txOut, burntDelta, burntDeltaIncrease, hasBurntDelta := result.TxOut.StripBalanceWrite(result.ExecutionResult.BurntContractAddress, result.TxIn)
 	result.TxOut = txOut
-	delete(result.TxIn, result.Coinbase)
-	delete(result.TxIn, result.ExecutionResult.BurntContractAddress)
+	result.TxIn.Delete(result.Coinbase, state.AccountKey{Path: state.BalancePath})
+	result.TxIn.Delete(result.ExecutionResult.BurntContractAddress, state.AccountKey{Path: state.BalancePath})
 
 	task := result.Task.(*taskVersion)
 	txTask := task.Task.(*exec.TxTask)
