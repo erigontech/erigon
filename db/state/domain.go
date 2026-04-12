@@ -56,10 +56,11 @@ import (
 )
 
 var (
-	asserts          = dbg.EnvBool("AGG_ASSERTS", false)
-	traceFileLife    = dbg.EnvString("AGG_TRACE_FILE_LIFE", "")
-	traceGetAsOf     = dbg.EnvString("AGG_TRACE_GET_AS_OF", "")
-	tracePutWithPrev = dbg.EnvString("AGG_TRACE_PUT_WITH_PREV", "")
+	asserts                        = dbg.EnvBool("AGG_ASSERTS", false)
+	assertPruneConsistencyEnabled  = dbg.EnvBool("AGG_ASSERT_PRUNE", false)
+	traceFileLife                  = dbg.EnvString("AGG_TRACE_FILE_LIFE", "")
+	traceGetAsOf                   = dbg.EnvString("AGG_TRACE_GET_AS_OF", "")
+	tracePutWithPrev               = dbg.EnvString("AGG_TRACE_PUT_WITH_PREV", "")
 )
 var traceGetLatest, _ = kv.String2Domain(dbg.EnvString("AGG_TRACE_GET_LATEST", ""))
 
@@ -1737,6 +1738,20 @@ func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, maxStep kv.Step, metrics
 				}
 			}
 		}
+		// Assert: when DB has a value and files also cover this step,
+		// the file should have the same value (or a newer-step value from merge).
+		// A mismatch where file has an older value indicates lost write.
+		if assertPruneConsistencyEnabled && dt.files.Len() > 0 &&
+			lastTxNumOfStep(foundStep, dt.stepSize) < dt.files.EndTxNum() {
+			fileV, foundInFile, _, _, fileErr := dt.getLatestFromFiles(key, 0)
+			if fileErr == nil && foundInFile && !bytes.Equal(v, fileV) {
+				dt.d.logger.Warn("getLatest: DB/file value mismatch",
+					"domain", dt.name, "key", fmt.Sprintf("%x", key),
+					"dbVal", fmt.Sprintf("%x", v), "fileVal", fmt.Sprintf("%x", fileV),
+					"dbStep", foundStep, "filesEnd", dt.files.EndTxNum()/dt.stepSize)
+			}
+		}
+
 		if metrics != nil && dbg.KVReadLevelledMetrics {
 			metrics.UpdateDbReads(dt.name, start)
 		}
@@ -2012,6 +2027,13 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 
 	prg.KeyProgress = prune.Done // domains don't have key tables
 
+	// Snapshot DB entries before prune for post-prune verification.
+	// Records keys+steps that should be deleted by prune.
+	var prePruneEntries map[string][]kv.Step
+	if assertPruneConsistencyEnabled && dt.files.Len() > 0 {
+		prePruneEntries = dt.snapshotDBEntries(rwTx, txFrom, txTo)
+	}
+
 	pruneStat, err := prune.TableScanningPrune(ctx, "domain "+dt.name.String(), dt.d.FilenameBase, txFrom, txTo, limit, dt.stepSize,
 		logEvery, dt.d.logger, nil, valsCursor, asserts, prg, mode)
 	if err != nil {
@@ -2036,7 +2058,273 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	stat.Dups = pruneStat.DupsDeleted
 	stat.Progress = pruneStat.ValueProgress
 
+	// Post-prune verification: check that all entries recorded before prune
+	// have been deleted. Surviving entries indicate non-atomic prune.
+	if prePruneEntries != nil {
+		if err := dt.verifyPruneComplete(rwTx, prePruneEntries, txFrom, txTo); err != nil {
+			return stat, err
+		}
+	}
+
 	return stat, err
+}
+
+// assertPruneConsistency checks DB entries against file values before pruning.
+// For each DB entry at step S:
+//   - If a per-step file [S, S+1) exists: DB value must match file value.
+//     A mismatch means collation captured wrong data.
+//   - If a merged file [A, B) covers step S: the file has the latest-step value.
+//     If S is the highest step for this key in the DB, it must match the file.
+//     If S is an older step (key has a higher-step entry), the mismatch is expected
+//     because the merge took the newer value — log as info, not error.
+func (dt *DomainRoTx) assertPruneConsistency(roTx kv.Tx, txFrom, txTo uint64) (retErr error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			dt.d.logger.Warn("assertPruneConsistency recovered from panic", "domain", dt.name, "panic", rec)
+			retErr = nil
+		}
+	}()
+
+	stepFrom := kv.Step(txFrom / dt.stepSize)
+	stepTo := kv.Step(txTo / dt.stepSize)
+
+	// DupSort path (non-LargeValues). Iterate ALL entries, not just highest-step.
+	if !dt.d.LargeValues {
+		cursor, err := roTx.CursorDupSort(dt.d.ValuesTable)
+		if err != nil {
+			return nil
+		}
+		defer cursor.Close()
+
+		checked, mismatches := 0, 0
+		for k, v, err := cursor.First(); k != nil; k, v, err = cursor.Next() {
+			if err != nil {
+				return nil
+			}
+			if len(v) < 8 {
+				continue
+			}
+			dbStep := kv.Step(^binary.BigEndian.Uint64(v[:8]))
+			dbVal := v[8:]
+
+			if dbStep < stepFrom || dbStep >= stepTo {
+				continue
+			}
+
+			fileVal, foundInFile, fileStartTxNum, fileEndTxNum, ferr := dt.getLatestFromFiles(k, 0)
+			if ferr != nil {
+				continue
+			}
+
+			fileStepFrom := kv.Step(fileStartTxNum / dt.stepSize)
+			fileStepTo := kv.Step(fileEndTxNum / dt.stepSize)
+			isPerStepFile := (fileStepTo - fileStepFrom) == 1
+
+			if !foundInFile && len(dbVal) > 0 {
+				return fmt.Errorf("prune assertion failed: domain=%s key=%x dbStep=%d — file has no entry for non-empty DB value",
+					dt.name, k, dbStep)
+			}
+
+			if foundInFile && !bytes.Equal(fileVal, dbVal) {
+				if isPerStepFile && fileStepFrom == dbStep {
+					// Per-step file at the same step: must match. This is a collation error.
+					return fmt.Errorf("prune assertion failed: domain=%s key=%x dbStep=%d fileRange=[%d-%d) PER-STEP MISMATCH dbValLen=%d fileValLen=%d",
+						dt.name, k, dbStep, fileStepFrom, fileStepTo, len(dbVal), len(fileVal))
+				}
+				// Merged file: mismatch expected for non-latest steps. Log for analysis.
+				mismatches++
+				if mismatches <= 3 {
+					dt.d.logger.Info("prune consistency: merged file mismatch (expected for older steps)",
+						"domain", dt.name, "key", fmt.Sprintf("%x", k),
+						"dbStep", dbStep, "fileRange", fmt.Sprintf("[%d-%d)", fileStepFrom, fileStepTo))
+				}
+			}
+			checked++
+		}
+		if checked > 0 {
+			dt.d.logger.Debug("prune consistency check done", "domain", dt.name, "checked", checked, "mergedMismatches", mismatches)
+		}
+		return nil
+	}
+
+	// LargeValues path
+	cursor, err := roTx.Cursor(dt.d.ValuesTable)
+	if err != nil {
+		return nil
+	}
+	defer cursor.Close()
+
+	checked, mismatches := 0, 0
+	for k, v, err := cursor.First(); k != nil; k, v, err = cursor.Next() {
+		if err != nil {
+			return nil
+		}
+		if len(k) < 8 {
+			continue
+		}
+		dbKey := k[:len(k)-8]
+		dbStep := kv.Step(^binary.BigEndian.Uint64(k[len(k)-8:]))
+
+		if dbStep < stepFrom || dbStep >= stepTo {
+			continue
+		}
+
+		fileVal, foundInFile, fileStartTxNum, fileEndTxNum, ferr := dt.getLatestFromFiles(dbKey, 0)
+		if ferr != nil {
+			continue
+		}
+
+		fileStepFrom := kv.Step(fileStartTxNum / dt.stepSize)
+		fileStepTo := kv.Step(fileEndTxNum / dt.stepSize)
+		isPerStepFile := (fileStepTo - fileStepFrom) == 1
+
+		if !foundInFile && len(v) > 0 {
+			return fmt.Errorf("prune assertion failed: domain=%s key=%x dbStep=%d — file has no entry for non-empty DB value",
+				dt.name, dbKey, dbStep)
+		}
+
+		if foundInFile && !bytes.Equal(fileVal, v) {
+			if isPerStepFile && fileStepFrom == dbStep {
+				return fmt.Errorf("prune assertion failed: domain=%s key=%x dbStep=%d fileRange=[%d-%d) PER-STEP MISMATCH dbValLen=%d fileValLen=%d",
+					dt.name, dbKey, dbStep, fileStepFrom, fileStepTo, len(v), len(fileVal))
+			}
+			mismatches++
+			dt.d.logger.Info("prune consistency: merged file mismatch",
+				"domain", dt.name, "key", fmt.Sprintf("%x", dbKey),
+				"dbStep", dbStep, "fileRange", fmt.Sprintf("[%d-%d)", fileStepFrom, fileStepTo),
+				"dbValLen", len(v), "fileValLen", len(fileVal))
+		}
+		checked++
+	}
+	if checked > 0 {
+		dt.d.logger.Debug("prune consistency check done", "domain", dt.name, "checked", checked, "mergedMismatches", mismatches)
+	}
+	return nil
+}
+
+// snapshotDBEntries records all keys and their steps in the prune range [txFrom, txTo).
+// Used before prune to later verify all entries were deleted.
+func (dt *DomainRoTx) snapshotDBEntries(roTx kv.Tx, txFrom, txTo uint64) map[string][]kv.Step {
+	stepFrom := kv.Step(txFrom / dt.stepSize)
+	stepTo := kv.Step(txTo / dt.stepSize)
+	entries := make(map[string][]kv.Step)
+
+	if dt.d.LargeValues {
+		cursor, err := roTx.Cursor(dt.d.ValuesTable)
+		if err != nil {
+			return nil
+		}
+		defer cursor.Close()
+		for k, _, err := cursor.First(); k != nil; k, _, err = cursor.Next() {
+			if err != nil {
+				return nil
+			}
+			if len(k) < 8 {
+				continue
+			}
+			dbStep := kv.Step(^binary.BigEndian.Uint64(k[len(k)-8:]))
+			if dbStep < stepFrom || dbStep >= stepTo {
+				continue
+			}
+			dbKey := string(k[:len(k)-8])
+			entries[dbKey] = append(entries[dbKey], dbStep)
+		}
+	} else {
+		cursor, err := roTx.CursorDupSort(dt.d.ValuesTable)
+		if err != nil {
+			return nil
+		}
+		defer cursor.Close()
+		for k, v, err := cursor.First(); k != nil; k, v, err = cursor.Next() {
+			if err != nil {
+				return nil
+			}
+			if len(v) < 8 {
+				continue
+			}
+			dbStep := kv.Step(^binary.BigEndian.Uint64(v[:8]))
+			if dbStep < stepFrom || dbStep >= stepTo {
+				continue
+			}
+			entries[string(k)] = append(entries[string(k)], dbStep)
+		}
+	}
+	return entries
+}
+
+// verifyPruneComplete checks that all entries recorded before prune have been deleted.
+// Surviving entries indicate non-atomic prune or prune failure.
+func (dt *DomainRoTx) verifyPruneComplete(roTx kv.Tx, prePruneEntries map[string][]kv.Step, txFrom, txTo uint64) error {
+	stepFrom := kv.Step(txFrom / dt.stepSize)
+	stepTo := kv.Step(txTo / dt.stepSize)
+	surviving := 0
+
+	if dt.d.LargeValues {
+		cursor, err := roTx.Cursor(dt.d.ValuesTable)
+		if err != nil {
+			return nil
+		}
+		defer cursor.Close()
+		for k, _, err := cursor.First(); k != nil; k, _, err = cursor.Next() {
+			if err != nil {
+				return nil
+			}
+			if len(k) < 8 {
+				continue
+			}
+			dbStep := kv.Step(^binary.BigEndian.Uint64(k[len(k)-8:]))
+			if dbStep < stepFrom || dbStep >= stepTo {
+				continue
+			}
+			dbKey := string(k[:len(k)-8])
+			if steps, ok := prePruneEntries[dbKey]; ok {
+				for _, s := range steps {
+					if s == dbStep {
+						surviving++
+						dt.d.logger.Warn("prune incomplete: entry survived",
+							"domain", dt.name, "key", fmt.Sprintf("%x", k[:len(k)-8]),
+							"step", dbStep, "pruneRange", fmt.Sprintf("[%d-%d)", stepFrom, stepTo))
+						break
+					}
+				}
+			}
+		}
+	} else {
+		cursor, err := roTx.CursorDupSort(dt.d.ValuesTable)
+		if err != nil {
+			return nil
+		}
+		defer cursor.Close()
+		for k, v, err := cursor.First(); k != nil; k, v, err = cursor.Next() {
+			if err != nil {
+				return nil
+			}
+			if len(v) < 8 {
+				continue
+			}
+			dbStep := kv.Step(^binary.BigEndian.Uint64(v[:8]))
+			if dbStep < stepFrom || dbStep >= stepTo {
+				continue
+			}
+			if steps, ok := prePruneEntries[string(k)]; ok {
+				for _, s := range steps {
+					if s == dbStep {
+						surviving++
+						dt.d.logger.Warn("prune incomplete: entry survived",
+							"domain", dt.name, "key", fmt.Sprintf("%x", k),
+							"step", dbStep, "pruneRange", fmt.Sprintf("[%d-%d)", stepFrom, stepTo))
+						break
+					}
+				}
+			}
+		}
+	}
+
+	if surviving > 0 {
+		return fmt.Errorf("prune verification failed: domain=%s surviving=%d in range [%d-%d)",
+			dt.name, surviving, stepFrom, stepTo)
+	}
+	return nil
 }
 
 func (dt *DomainRoTx) oldPrune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {

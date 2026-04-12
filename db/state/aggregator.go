@@ -1813,7 +1813,16 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 			lastIdInDB(a.db, a.d[kv.CodeDomain]),
 			lastIdInDB(a.db, a.d[kv.StorageDomain]),
 			lastIdInDB(a.db, a.d[kv.CommitmentDomain]))
-		a.logger.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB)
+		// Don't collate the step that execution is currently writing to.
+		// ComputeCommitment writes branch nodes to sd.mem at the current
+		// step; these are only flushed to DB on the next batch commit.
+		// A collation View opened before that flush would capture stale
+		// commitment branch data.
+		execStep := kv.Step(txNum / a.StepSize())
+		if lastInDB > execStep {
+			lastInDB = execStep
+		}
+		a.logger.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB, "execStep", execStep)
 
 		// Stagger aggregation across fleet nodes to prevent synchronized I/O stalls.
 		// Set different values per node via AGGREGATION_DELAY_MS env var.
