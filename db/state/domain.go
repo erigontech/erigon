@@ -56,10 +56,11 @@ import (
 )
 
 var (
-	asserts          = dbg.EnvBool("AGG_ASSERTS", false)
-	traceFileLife    = dbg.EnvString("AGG_TRACE_FILE_LIFE", "")
-	traceGetAsOf     = dbg.EnvString("AGG_TRACE_GET_AS_OF", "")
-	tracePutWithPrev = dbg.EnvString("AGG_TRACE_PUT_WITH_PREV", "")
+	asserts                        = dbg.EnvBool("AGG_ASSERTS", false)
+	assertPruneConsistencyEnabled  = dbg.EnvBool("AGG_ASSERT_PRUNE", false)
+	traceFileLife                  = dbg.EnvString("AGG_TRACE_FILE_LIFE", "")
+	traceGetAsOf                   = dbg.EnvString("AGG_TRACE_GET_AS_OF", "")
+	tracePutWithPrev               = dbg.EnvString("AGG_TRACE_PUT_WITH_PREV", "")
 )
 var traceGetLatest, _ = kv.String2Domain(dbg.EnvString("AGG_TRACE_GET_LATEST", ""))
 
@@ -1955,6 +1956,16 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 
 	prg.KeyProgress = prune.Done // domains don't have key tables
 
+	// Verify file/DB consistency before pruning. If a DB entry has a value
+	// that differs from the file, pruning would lose the correct DB value
+	// and the stale file value becomes authoritative — silent state corruption.
+	// Enabled via AGG_ASSERT_PRUNE=true env var.
+	if assertPruneConsistencyEnabled && dt.files.Len() > 0 {
+		if err := dt.assertPruneConsistency(rwTx, txFrom, txTo); err != nil {
+			return stat, err
+		}
+	}
+
 	pruneStat, err := prune.TableScanningPrune(ctx, "domain "+dt.name.String(), dt.d.FilenameBase, txFrom, txTo, limit, dt.stepSize,
 		logEvery, dt.d.logger, nil, valsCursor, asserts, prg, mode)
 	if err != nil {
@@ -1980,6 +1991,86 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	stat.Progress = pruneStat.ValueProgress
 
 	return stat, err
+}
+
+// assertPruneConsistency scans DB entries in the prune range [txFrom, txTo) and verifies
+// that the file has the same value for each key. A mismatch means the collation or merge
+// lost an update; pruning would silently make the stale file value authoritative.
+func (dt *DomainRoTx) assertPruneConsistency(roTx kv.Tx, txFrom, txTo uint64) (retErr error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			dt.d.logger.Warn("assertPruneConsistency recovered from panic", "domain", dt.name, "panic", rec)
+			retErr = nil
+		}
+	}()
+
+	stepFrom := kv.Step(txFrom / dt.stepSize)
+	stepTo := kv.Step(txTo / dt.stepSize)
+
+	var valsCursor kv.Cursor
+	var err error
+	if dt.d.LargeValues {
+		valsCursor, err = roTx.Cursor(dt.d.ValuesTable)
+	} else {
+		valsCursor, err = roTx.CursorDupSort(dt.d.ValuesTable)
+	}
+	if err != nil {
+		return nil
+	}
+	defer valsCursor.Close()
+
+	checked := 0
+	for k, v, err := valsCursor.First(); k != nil; k, v, err = valsCursor.Next() {
+		if err != nil {
+			return nil
+		}
+
+		var dbKey, dbVal []byte
+		var dbStep kv.Step
+		if dt.d.LargeValues {
+			if len(k) < 8 {
+				continue
+			}
+			dbStep = kv.Step(^binary.BigEndian.Uint64(k[len(k)-8:]))
+			dbKey = k[:len(k)-8]
+			dbVal = v
+		} else {
+			if len(v) < 8 {
+				continue
+			}
+			dbStep = kv.Step(^binary.BigEndian.Uint64(v[:8]))
+			dbKey = k
+			dbVal = v[8:]
+		}
+
+		if dbStep < stepFrom || dbStep >= stepTo {
+			continue
+		}
+
+		fileVal, foundInFile, _, _, err := dt.getLatestFromFiles(dbKey, 0)
+		if err != nil {
+			continue
+		}
+
+		if !foundInFile {
+			if len(dbVal) > 0 {
+				return fmt.Errorf("prune assertion failed: domain=%s key=%x dbVal=%x dbStep=%d — file has no entry (collation/merge lost a write)",
+					dt.name, dbKey, dbVal, dbStep)
+			}
+			continue
+		}
+
+		if !bytes.Equal(fileVal, dbVal) {
+			return fmt.Errorf("prune assertion failed: domain=%s key=%x dbVal=%x fileVal=%x dbStep=%d — file has stale value (collation/merge lost an update)",
+				dt.name, dbKey, dbVal, fileVal, dbStep)
+		}
+		checked++
+	}
+
+	if checked > 0 {
+		dt.d.logger.Debug("prune consistency check passed", "domain", dt.name, "checked", checked, "txFrom", txFrom, "txTo", txTo)
+	}
+	return nil
 }
 
 func (dt *DomainRoTx) oldPrune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
