@@ -185,7 +185,6 @@ COMMANDS += pics
 COMMANDS += rpcdaemon
 COMMANDS += rpctest
 COMMANDS += sentry
-COMMANDS += state
 COMMANDS += txpool
 COMMANDS += evm
 COMMANDS += caplin
