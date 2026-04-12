@@ -2355,4 +2355,3 @@ func TestEIP1559Transition(t *testing.T) {
 	})
 	require.NoError(t, err)
 }
-
