@@ -98,6 +98,13 @@ func compareWitness(t *testing.T, blockNum uint64, expected *testutil.ExpectedWi
 	compareByteSlices(t, blockNum, "State", expected.State, actual.State)
 	compareByteSlices(t, blockNum, "Codes", expected.Codes, actual.Codes)
 	compareByteSlices(t, blockNum, "Headers", expected.Headers, actual.Headers)
+
+	// Additional diagnostic: check if mismatches are ordering-only
+	if t.Failed() {
+		reportSetDiff(t, blockNum, "State", expected.State, actual.State)
+		reportSetDiff(t, blockNum, "Codes", expected.Codes, actual.Codes)
+		reportSetDiff(t, blockNum, "Headers", expected.Headers, actual.Headers)
+	}
 }
 
 // compareByteSlices compares two slices of hexutil.Bytes element-by-element.
@@ -124,6 +131,38 @@ func compareByteSlices(t *testing.T, blockNum uint64, field string, expected, ac
 				truncHex(expected[i], 64),
 				truncHex(actual[i], 64))
 		}
+	}
+}
+
+// reportSetDiff compares two slices as unordered sets and reports only elements
+// present in one but not the other. Helps distinguish ordering-only mismatches
+// from genuine content differences.
+func reportSetDiff(t *testing.T, blockNum uint64, field string, expected, actual []hexutil.Bytes) {
+	t.Helper()
+	expectedSet := make(map[string]int)
+	actualSet := make(map[string]int)
+	for _, e := range expected {
+		expectedSet[hex.EncodeToString(e)]++
+	}
+	for _, a := range actual {
+		actualSet[hex.EncodeToString(a)]++
+	}
+	var onlyInExpected, onlyInActual int
+	for k, cnt := range expectedSet {
+		if actualSet[k] < cnt {
+			onlyInExpected += cnt - actualSet[k]
+		}
+	}
+	for k, cnt := range actualSet {
+		if expectedSet[k] < cnt {
+			onlyInActual += cnt - expectedSet[k]
+		}
+	}
+	if onlyInExpected == 0 && onlyInActual == 0 {
+		t.Logf("block %d %s: SET-EQUAL (same %d elements, different order only)", blockNum, field, len(expected))
+	} else {
+		t.Logf("block %d %s: SET-DIFF (expected has %d unique elements not in actual, actual has %d unique elements not in expected)",
+			blockNum, field, onlyInExpected, onlyInActual)
 	}
 }
 

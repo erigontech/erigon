@@ -127,15 +127,26 @@ This is the main test file. After `BlockTest.Run()` inserts blocks and validates
 
 ### Task 5: Initial test run and failure triage
 
-- [ ] Initialize submodule: `git submodule update --init execution/tests/execution-spec-tests`
-- [ ] Run: `go test -v -run TestExecutionSpecWitness -count=1 ./execution/tests/eest_zkevm_witness/... 2>&1 | tee /tmp/witness-test-results.log`
-- [ ] Categorize failures:
-  - **Parse errors**: JSON unmarshaling issues → fix `WitnessBlockTest` types
-  - **Block insertion errors**: fork config or execution issues → check Amsterdam fork support
-  - **Witness mismatches**: our generated witness differs from expected → investigate field-by-field
-  - **Missing witness**: `ExecutionWitness()` returns error → check historical commitment setup
-- [ ] For each failure category, create a plan amendment or fix
-- [ ] Re-run until baseline results are stable (all pass or known failures documented)
+- [x] Initialize submodule: `git submodule update --init execution/tests/execution-spec-tests`
+- [x] Run: `go test -v -run TestExecutionSpecWitness -count=1 ./execution/tests/eest_zkevm_witness/... 2>&1 | tee /tmp/witness-test-results.log`
+- [x] Categorize failures:
+  - **Parse errors**: ✅ none — JSON unmarshaling works correctly
+  - **Block insertion errors**: ✅ none — Amsterdam fork support works, all blocks insert and validate
+  - **Witness mismatches**: all 93 tests fail with witness comparison mismatches (details below)
+  - **Missing witness**: ✅ none — `ExecutionWitness()` succeeds for all tests
+- [x] For each failure category, create a plan amendment or fix
+- [x] Re-run until baseline results are stable (all pass or known failures documented)
+
+**⚠️ Triage results (all 93 tests fail, 0 pass):**
+
+Three root causes identified via set-comparison diagnostics:
+
+1. **State node ordering** (52% of state comparisons): Same trie nodes produced, different traversal order. Our `witnessTrie.RLPEncode()` returns nodes in a different order than the EIP-8025 reference implementation.
+2. **State extra nodes** (48% of state comparisons): Our actual output is a superset of expected — we include 1 extra trie node per block that the reference doesn't include.
+3. **Codes ordering** (99% of codes comparisons): Same bytecodes, different sort order. We sort by `keccak256(code)`, fixtures expect order-of-first-access during execution.
+4. **Missing headers** (99% of headers comparisons): Parent block header not included. We only track BLOCKHASH opcode accesses, but the spec requires the parent header unconditionally.
+
+➕ These are witness generation implementation issues in `rpc/jsonrpc/debug_execution_witness.go`, not test infrastructure issues. Fixes will be tracked separately.
 
 ### Task 6: Handle known failure patterns
 
