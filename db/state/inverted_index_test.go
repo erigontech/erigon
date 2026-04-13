@@ -1131,7 +1131,7 @@ func TestInvertedIndex_IdxRange_SkipsFileRange(t *testing.T) {
 	txNums := []uint64{2, 5, 10, 18, 25, 30, 35, 42}
 
 	err := db.Update(ctx, func(tx kv.RwTx) error {
-		ic := ii.beginForTests()
+		ic := ii.BeginFilesRo()
 		defer ic.Close()
 		writer := ic.NewWriter()
 		defer writer.close()
@@ -1154,7 +1154,7 @@ func TestInvertedIndex_IdxRange_SkipsFileRange(t *testing.T) {
 	}
 
 	// Prune DB entries that are now covered by files (txNums 0..31).
-	ic := ii.beginForTests()
+	ic := ii.BeginFilesRo()
 	_, err = ic.TableScanningPrune(ctx, tx, 0, aggStep*2, math.MaxUint64, logEvery, false, nil, nil, mxPruneSizeIndex, prune.DefaultStorageMode)
 	require.NoError(err)
 	ic.Close()
@@ -1166,7 +1166,7 @@ func TestInvertedIndex_IdxRange_SkipsFileRange(t *testing.T) {
 	require.NoError(err)
 	defer roTx.Rollback()
 
-	ic = ii.beginForTests()
+	ic = ii.BeginFilesRo()
 	defer ic.Close()
 
 	// Ascending: full range [0, 48) should return all txNums.
@@ -1217,7 +1217,7 @@ func TestInvertedIndex_IdxRange_IgnoresDBInFileRange(t *testing.T) {
 	txNums := []uint64{2, 5, 10, 18, 25, 30, 35, 42}
 
 	err := db.Update(ctx, func(tx kv.RwTx) error {
-		ic := ii.beginForTests()
+		ic := ii.BeginFilesRo()
 		defer ic.Close()
 		writer := ic.NewWriter()
 		defer writer.close()
@@ -1250,7 +1250,7 @@ func TestInvertedIndex_IdxRange_IgnoresDBInFileRange(t *testing.T) {
 	require.NoError(err)
 	defer roTx.Rollback()
 
-	ic := ii.beginForTests()
+	ic := ii.BeginFilesRo()
 	defer ic.Close()
 
 	// Ascending: rogue txNum 7 must not appear.
