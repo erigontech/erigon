@@ -3520,7 +3520,7 @@ func TestDomain_DeletedKeyNotResurrectedByFiles(t *testing.T) {
 			require.NoError(err)
 			defer tx.Rollback()
 
-			domainRoTx := d.BeginFilesRo()
+			domainRoTx := d.beginForTests()
 			defer domainRoTx.Close()
 			writer := domainRoTx.NewWriter()
 			defer writer.Close()
@@ -3552,7 +3552,7 @@ func TestDomain_DeletedKeyNotResurrectedByFiles(t *testing.T) {
 			require.NoError(err)
 			defer roTx.Rollback()
 
-			domainRoTx = d.BeginFilesRo()
+			domainRoTx = d.beginForTests()
 			defer domainRoTx.Close()
 
 			v, _, found, err := domainRoTx.GetLatest(key, roTx)
@@ -3600,7 +3600,7 @@ func TestDomain_UnwindRestoresDeletionMarker(t *testing.T) {
 			require.NoError(err)
 			defer tx.Rollback()
 
-			domainRoTx := d.BeginFilesRo()
+			domainRoTx := d.beginForTests()
 			defer domainRoTx.Close()
 			writer := domainRoTx.NewWriter()
 			defer writer.Close()
@@ -3646,7 +3646,7 @@ func TestDomain_UnwindRestoresDeletionMarker(t *testing.T) {
 			require.NoError(err)
 			defer tx.Rollback()
 
-			domainRoTx = d.BeginFilesRo()
+			domainRoTx = d.beginForTests()
 			defer domainRoTx.Close()
 
 			// diff for txNum 2: prev was empty (key was deleted) → Value=[]byte{}
@@ -3660,7 +3660,7 @@ func TestDomain_UnwindRestoresDeletionMarker(t *testing.T) {
 			require.NoError(err)
 			defer roTx.Rollback()
 
-			domainRoTx = d.BeginFilesRo()
+			domainRoTx = d.beginForTests()
 			defer domainRoTx.Close()
 
 			v, _, found, err := domainRoTx.GetLatest(key, roTx)
@@ -3697,7 +3697,7 @@ func TestDomain_LargeValuesInterruptedPruneDoesNotResurrectTombstone(t *testing.
 	require.NoError(err)
 	defer tx.Rollback()
 
-	domainRoTx := d.BeginFilesRo()
+	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
 	writer := domainRoTx.NewWriter()
 	defer writer.Close()
@@ -3742,7 +3742,7 @@ func TestDomain_LargeValuesInterruptedPruneDoesNotResurrectTombstone(t *testing.
 	require.NoError(err)
 	defer roTx.Rollback()
 
-	domainRoTx = d.BeginFilesRo()
+	domainRoTx = d.beginForTests()
 	defer domainRoTx.Close()
 
 	v, _, found, err := domainRoTx.GetLatest(key, roTx)
