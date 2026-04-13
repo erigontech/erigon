@@ -720,7 +720,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			ctx,
 			config.TxPool,
 			backend.chainDB,
-			kvcache.NewDummy(),
+			kvcache.NewSimple(),
 			sentries,
 			backend.stateDiffClient,
 			blockBuilderNotifyNewTxns,
