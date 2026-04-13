@@ -21,6 +21,7 @@ package rpc
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"net"
