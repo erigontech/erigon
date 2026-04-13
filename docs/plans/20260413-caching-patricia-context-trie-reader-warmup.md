@@ -144,13 +144,13 @@ two-layer design:
 - Modify: `execution/commitment/hex_patricia_hashed.go` (cleanup remaining references)
 - Modify: `execution/commitment/commitment.go` (cleanup `extractBranchCellAddresses` if no longer used)
 
-- [ ] Delete `warmup_cache.go` and `warmup_cache_test.go`
-- [ ] Remove `extractBranchCellAddresses()` from `hex_patricia_hashed.go` (replaced by TrieReader cell parsing)
-- [ ] Remove `enableWarmupCache` field from `HexPatriciaHashed`
-- [ ] Remove `EnableWarmupCache()` method from `HexPatriciaHashed`
-- [ ] Clean up any remaining imports or references to deleted types
-- [ ] Run `make lint` — fix all issues
-- [ ] Run `go test ./execution/commitment/...` — must pass
+- [x] Delete `warmup_cache.go` and `warmup_cache_test.go`
+- [x] Remove `extractBranchCellAddresses()` from `hex_patricia_hashed.go` (replaced by TrieReader cell parsing)
+- [x] Remove `enableWarmupCache` field from `HexPatriciaHashed`
+- [x] Remove `EnableWarmupCache()` method from `HexPatriciaHashed`
+- [x] Clean up any remaining imports or references to deleted types
+- [x] Run `make lint` — fix all issues
+- [x] Run `go test ./execution/commitment/...` — must pass
 
 ### Task 6: Benchmarks and observability
 

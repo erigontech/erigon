@@ -99,8 +99,6 @@ type Trie interface {
 	SetCapture(capture []string)
 	GetCapture(truncate bool) []string
 	EnableCsvMetrics(filePathPrefix string)
-	// EnableWarmupCache enables/disables warmup cache during Process (false by default)
-	EnableWarmupCache(bool)
 
 	// Variant returns commitment trie variant
 	Variant() TrieVariant
@@ -336,7 +334,6 @@ type BranchEncoder struct {
 	deferUpdates    bool
 	deferred        []*DeferredBranchUpdate
 	pendingPrefixes *maphash.NonConcurrentMap[struct{}] // tracks pending prefixes to detect duplicates
-	cache           *WarmupCache
 }
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
@@ -543,31 +540,15 @@ func (be *BranchEncoder) setMetrics(metrics *Metrics) {
 	be.metrics = metrics
 }
 
-func (be *BranchEncoder) SetCache(cache *WarmupCache) {
-	be.cache = cache
-}
-
 func (be *BranchEncoder) CollectUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
 	bitmap, touchMap, afterMap uint16,
 	cells *[16]cellEncodeData,
 ) error {
-	var prev []byte
-	var foundInCache bool
-	var err error
-
-	if be.cache != nil {
-		prev, foundInCache = be.cache.GetAndEvictBranch(prefix)
-		if foundInCache && be.metrics != nil {
-			be.metrics.cacheBranch.Add(1)
-		}
-	}
-	if !foundInCache {
-		prev, _, err = ctx.Branch(prefix)
-		if err != nil {
-			return err
-		}
+	prev, _, err := ctx.Branch(prefix)
+	if err != nil {
+		return err
 	}
 
 	update, err := be.EncodeBranch(bitmap, touchMap, afterMap, cells)
@@ -589,9 +570,6 @@ func (be *BranchEncoder) CollectUpdate(
 	updateCopy := common.Copy(update)
 	if err = ctx.PutBranch(prefixCopy, updateCopy, prev); err != nil {
 		return err
-	}
-	if be.cache != nil {
-		be.cache.PutBranch(prefixCopy, updateCopy)
 	}
 	if be.metrics != nil {
 		be.metrics.updateBranch.Add(1)
@@ -626,22 +604,8 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 		be.ClearDeferred()
 	}
 
-	// try to get previous data from cache
-	var (
-		prev         []byte
-		foundInCache bool
-		err          error
-	)
-
-	if be.cache != nil {
-		prev, foundInCache = be.cache.GetAndEvictBranch(prefix)
-		if foundInCache && be.metrics != nil {
-			be.metrics.cacheBranch.Add(1)
-		}
-	}
-	if !foundInCache {
-		prev, _, err = ctx.Branch(prefix)
-	}
+	// Read previous branch data via ctx (which may be a cached view).
+	prev, _, err := ctx.Branch(prefix)
 	if err != nil {
 		return err
 	}

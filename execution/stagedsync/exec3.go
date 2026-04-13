@@ -199,7 +199,6 @@ func ExecV3(ctx context.Context,
 
 	doms.EnableParaTrieDB(cfg.db)
 	doms.EnableTrieWarmup(true)
-	doms.EnableWarmupCache(true)
 	postValidator := newBlockPostExecutionValidator()
 	doms.SetDeferCommitmentUpdates(false)
 	if !isApplyingBlocks {

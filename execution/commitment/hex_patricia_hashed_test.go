@@ -3304,3 +3304,153 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 			[]bool{true, false})
 	})
 }
+
+// Test_HexPatriciaHashed_ProcessWithCachingContext verifies that wrapping
+// hph.ctx with CachingPatriciaContext produces the same root hash as direct
+// context access (no caching). This validates Task 4 of the caching warmup plan.
+func Test_HexPatriciaHashed_ProcessWithCachingContext(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	msNoCaching := NewMockState(t)
+	msCaching := NewMockState(t)
+
+	plainKeys, updates := NewUpdateBuilder().
+		Balance("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", 4).
+		Balance("18f4dcf2d94402019d5b00f71d5f9d02e4f70e40", 900234).
+		Balance("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", 1233).
+		Storage("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", "24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed", "0401").
+		Balance("27456647f49ba65e220e86cba9abfc4fc1587b81", 065606).
+		Balance("b13363d527cdc18173c54ac5d4a54af05dbec22e", 4*1e17).
+		Balance("d995768ab23a0a333eb9584df006da740e66f0aa", 5).
+		Balance("eabf041afbb6c6059fbd25eab0d3202db84e842d", 6).
+		Balance("93fe03620e4d70ea39ab6e8c0e04dd0d83e041f2", 7).
+		Balance("ba7a3b7b095d3370c022ca655c790f0c0ead66f5", 5*1e17).
+		Storage("ba7a3b7b095d3370c022ca655c790f0c0ead66f5", "0fa41642c48ecf8f2059c275353ce4fee173b3a8ce5480f040c4d2901603d14e", "050505").
+		Balance("a8f8d73af90eee32dc9729ce8d5bb762f30d21a4", 9*1e16).
+		Storage("93fe03620e4d70ea39ab6e8c0e04dd0d83e041f2", "de3fea338c95ca16954e80eb603cd81a261ed6e2b10a03d0c86cf953fe8769a4", "060606").
+		Balance("14c4d3bba7f5009599257d3701785d34c7f2aa27", 6*1e18).
+		Nonce("18f4dcf2d94402019d5b00f71d5f9d02e4f70e40", 169356).
+		Storage("a8f8d73af90eee32dc9729ce8d5bb762f30d21a4", "9f49fdd48601f00df18ebc29b1264e27d09cf7cbd514fe8af173e534db038033", "8989").
+		Storage("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", "d1664244ae1a8a05f8f1d41e45548fbb7aa54609b985d6439ee5fd9bb0da619f", "9898").
+		Build()
+
+	trieNoCaching := NewHexPatriciaHashed(length.Addr, msNoCaching)
+	trieCaching := NewHexPatriciaHashed(length.Addr, msCaching)
+
+	plainKeys, updates = sortUpdatesByHashIncrease(t, trieNoCaching, plainKeys, updates)
+
+	// 1. Process without caching (no warmup configured).
+	var rootNoCaching []byte
+	{
+		err := msNoCaching.applyPlainUpdates(plainKeys, updates)
+		require.NoError(t, err)
+
+		upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+		defer upds.Close()
+
+		rh, err := trieNoCaching.Process(ctx, upds, "", nil, WarmupConfig{})
+		require.NoError(t, err)
+		rootNoCaching = common.Copy(rh)
+		t.Logf("root (no caching): %x", rootNoCaching)
+	}
+
+	// 2. Process with CachingPatriciaContext wrapping hph.ctx.
+	var rootWithCaching []byte
+	{
+		err := msCaching.applyPlainUpdates(plainKeys, updates)
+		require.NoError(t, err)
+
+		cache := NewCachingPatriciaContext()
+		// Wrap the mock state with the caching layer.
+		trieCaching.ctx = cache.Wrap(msCaching)
+
+		upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+		defer upds.Close()
+
+		rh, err := trieCaching.Process(ctx, upds, "", nil, WarmupConfig{})
+		require.NoError(t, err)
+		rootWithCaching = common.Copy(rh)
+		t.Logf("root (with caching): %x", rootWithCaching)
+
+		cache.Reset()
+	}
+
+	require.Equal(t, rootNoCaching, rootWithCaching,
+		"Process with CachingPatriciaContext must produce the same root hash as without")
+}
+
+// Test_HexPatriciaHashed_ProcessWithWarmupAndCaching verifies that Process()
+// with warmup enabled produces the same root hash as without warmup. This
+// tests the full integration path where the warmuper's SharedCache wraps
+// hph.ctx during Process.
+func Test_HexPatriciaHashed_ProcessWithWarmupAndCaching(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	msBase := NewMockState(t)
+	msWarmup := NewMockState(t)
+
+	plainKeys, updates := NewUpdateBuilder().
+		Balance("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", 4).
+		Balance("18f4dcf2d94402019d5b00f71d5f9d02e4f70e40", 900234).
+		Balance("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", 1233).
+		Storage("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", "24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed", "0401").
+		Balance("27456647f49ba65e220e86cba9abfc4fc1587b81", 065606).
+		Balance("b13363d527cdc18173c54ac5d4a54af05dbec22e", 4*1e17).
+		Storage("ba7a3b7b095d3370c022ca655c790f0c0ead66f5", "0fa41642c48ecf8f2059c275353ce4fee173b3a8ce5480f040c4d2901603d14e", "050505").
+		Balance("a8f8d73af90eee32dc9729ce8d5bb762f30d21a4", 9*1e16).
+		Storage("93fe03620e4d70ea39ab6e8c0e04dd0d83e041f2", "de3fea338c95ca16954e80eb603cd81a261ed6e2b10a03d0c86cf953fe8769a4", "060606").
+		Build()
+
+	trieBase := NewHexPatriciaHashed(length.Addr, msBase)
+	trieWarmup := NewHexPatriciaHashed(length.Addr, msWarmup)
+
+	plainKeys, updates = sortUpdatesByHashIncrease(t, trieBase, plainKeys, updates)
+
+	// 1. Process without warmup.
+	var rootBase []byte
+	{
+		err := msBase.applyPlainUpdates(plainKeys, updates)
+		require.NoError(t, err)
+
+		upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+		defer upds.Close()
+
+		rh, err := trieBase.Process(ctx, upds, "", nil, WarmupConfig{})
+		require.NoError(t, err)
+		rootBase = common.Copy(rh)
+		t.Logf("root (no warmup): %x", rootBase)
+	}
+
+	// 2. Process with warmup enabled. The warmup workers use a shared
+	// CachingPatriciaContext; Process wraps hph.ctx with it so reads
+	// also hit the warmed cache.
+	var rootWarmup []byte
+	{
+		err := msWarmup.applyPlainUpdates(plainKeys, updates)
+		require.NoError(t, err)
+
+		msWarmup.SetConcurrentCommitment(true)
+
+		upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+		defer upds.Close()
+
+		warmupCfg := WarmupConfig{
+			Enabled:    true,
+			NumWorkers: 4,
+			CtxFactory: func() (PatriciaContext, func()) {
+				return msWarmup, nil
+			},
+			LogPrefix: "test",
+		}
+
+		rh, err := trieWarmup.Process(ctx, upds, "", nil, warmupCfg)
+		require.NoError(t, err)
+		rootWarmup = common.Copy(rh)
+		t.Logf("root (with warmup): %x", rootWarmup)
+	}
+
+	require.Equal(t, rootBase, rootWarmup,
+		"Process with warmup + CachingPatriciaContext must produce the same root hash")
+}
