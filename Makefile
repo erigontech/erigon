@@ -356,7 +356,7 @@ lint:
 	@./tools/mod_tidy_check.sh
 
 ## ruleguard:                          run ruleguard linter
-ruleguard:
+lint-ruleguard:
 	go tool golangci-lint run --config ./.golangci-ruleguard.yml
 
 ## tidy:                              `go mod tidy`
