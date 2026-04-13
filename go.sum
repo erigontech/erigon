@@ -339,8 +339,8 @@ github.com/emirpasic/gods v1.18.1 h1:FXtiHYKDGKCW2KzwZKx0iC0PQmdlorYgdFG9jPXJ1Bc
 github.com/emirpasic/gods v1.18.1/go.mod h1:8tpGGwCnJ5H4r6BWwaV6OrWmMoPhUl5jm/FMNAnJvWQ=
 github.com/erigontech/erigon-snapshot v1.3.1-0.20260402120223-7bb412bc89cd h1:wSSc83NNfqBlDArQ1ph/rFAFp6E27N2Z8WO5VIBdbC4=
 github.com/erigontech/erigon-snapshot v1.3.1-0.20260402120223-7bb412bc89cd/go.mod h1:ooHlCl+eEYzebiPu+FP6Q6SpPUeMADn8Jxabv3IKb9M=
-github.com/erigontech/fastkeccak v0.1.1-0.20260314101201-2b20530d819d h1:uOWUcvi6Lzji2kxOfhBmeOpAsaWVgX1pWJHMyA56Ox0=
-github.com/erigontech/fastkeccak v0.1.1-0.20260314101201-2b20530d819d/go.mod h1:CwJFJVKFVWpQyKSfRrQyY56IqV16sR5xnQoFThGHiZA=
+github.com/erigontech/fastkeccak v0.1.1-0.20260408010752-08e7b6602268 h1:NHl4+DjblLuHBJradIg9KriKmtByjRvLqLhkVODibac=
+github.com/erigontech/fastkeccak v0.1.1-0.20260408010752-08e7b6602268/go.mod h1:CwJFJVKFVWpQyKSfRrQyY56IqV16sR5xnQoFThGHiZA=
 github.com/erigontech/go-eth-kzg v0.0.0-20260401161010-070339460d07 h1:0VpFIthaJzGs3iwyrKCj67wptrNq7KKiLhilDCRPqwk=
 github.com/erigontech/go-eth-kzg v0.0.0-20260401161010-070339460d07/go.mod h1:J9/u5sWfznSObptgfa92Jq8rTswn6ahQWEuiLHOjCUI=
 github.com/erigontech/mdbx-go v0.39.12 h1:WjvPzloxXOYfRamIxt8NOB7i3/M8cSCSfWQHvMNANrE=
