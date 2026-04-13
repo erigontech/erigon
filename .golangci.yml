@@ -45,8 +45,6 @@ linters:
       min-len: 2
       min-occurrences: 2
     gocritic:
-      enabled-checks:
-        - ruleguard
       disabled-checks:
         - unnecessaryDefer
         - appendAssign
@@ -83,8 +81,6 @@ linters:
         rangeExprCopy:
           sizeThreshold: 512
           skipTestFuncs: true
-        ruleguard:
-          rules: rules.go
         underef:
           skipRecvDeref: true
     govet:

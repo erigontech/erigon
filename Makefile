@@ -351,9 +351,13 @@ lintci:
 	@CGO_CXXFLAGS="$(CGO_CXXFLAGS)" ./tools/golangci_lint.sh
 
 ## lint:                              run all linters
-lint: 
+lint:
 	@./tools/golangci_lint.sh
 	@./tools/mod_tidy_check.sh
+
+## ruleguard:                          run ruleguard linter
+ruleguard:
+	go tool golangci-lint run --config ./.golangci-ruleguard.yml
 
 ## tidy:                              `go mod tidy`
 tidy:

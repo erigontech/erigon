@@ -49,3 +49,4 @@ jobs:
           go-version: '1.25'
 
       - run: make lint
+      - run: make ruleguard
