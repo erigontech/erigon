@@ -283,7 +283,7 @@ jobs:
           echo "=== All artifacts verified OK ==="
 
       - name: Upload artifact -- linux/arm64
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  ## v7.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  ## v7.0.1
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar
           path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar
@@ -292,7 +292,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload artifact -- linux/amd64
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  ## v7.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  ## v7.0.1
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar
           path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar
@@ -301,7 +301,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload artifact -- linux/amd64/v2
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  ## v7.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  ## v7.0.1
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
           path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
@@ -505,7 +505,7 @@ jobs:
           echo "=== All debian packages verified OK ==="
 
       - name: Upload artifact amd64.deb
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  ## v7.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  ## v7.0.1
         with:
           name: ${{ env.APPLICATION }}_${{ needs.build-release.outputs.parsed-version }}_amd64.deb
           path: ./deb-pkg/${{ env.APPLICATION }}_${{ needs.build-release.outputs.parsed-version }}_amd64.deb
@@ -514,7 +514,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload artifact arm64.deb
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  ## v7.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  ## v7.0.1
         with:
           name: ${{ env.APPLICATION }}_${{ needs.build-release.outputs.parsed-version }}_arm64.deb
           path: ./deb-pkg/${{ env.APPLICATION }}_${{ needs.build-release.outputs.parsed-version }}_arm64.deb
