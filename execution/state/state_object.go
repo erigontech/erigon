@@ -429,18 +429,6 @@ func (so *stateObject) Code() ([]byte, error) {
 	if dbg.KVReadLevelledMetrics {
 		readStart = time.Now()
 	}
-	// When a versionMap is present (parallel execution), check for CodePath
-	// entries from prior TXs (e.g. EIP-7702 SetCode). The versionMap has the
-	// synthetic code but the domain/stateReader does not.
-	if so.db.versionMap != nil {
-		rr := so.db.versionMap.Read(so.address, CodePath, accounts.NilKey, so.db.txIndex)
-		if rr.Status() == MVReadResultDone {
-			if code, ok := rr.Value().([]byte); ok {
-				so.code = code
-				return code, nil
-			}
-		}
-	}
 	code, err := so.db.stateReader.ReadAccountCode(so.Address())
 	if dbg.KVReadLevelledMetrics {
 		so.db.codeReadDuration += time.Since(readStart)
