@@ -455,7 +455,6 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 		Enabled:    true,
 		CtxFactory: noopCtxFactory,
 		NumWorkers: 2,
-		MaxDepth:   64,
 		LogPrefix:  "test",
 	}
 	warmuper := NewWarmuper(ctx, cfg)
@@ -480,7 +479,6 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 		Enabled:    true,
 		CtxFactory: noopCtxFactory,
 		NumWorkers: 2,
-		MaxDepth:   64,
 		LogPrefix:  "test",
 	}
 	warmuper2 := NewWarmuper(ctx, cfg2)

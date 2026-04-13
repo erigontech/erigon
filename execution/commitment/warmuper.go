@@ -18,16 +18,13 @@ package commitment
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 // TrieContextFactory creates new PatriciaContext instances for parallel warmup.
@@ -36,15 +33,12 @@ type TrieContextFactory func() (PatriciaContext, func())
 // WarmupConfig contains configuration for pre-warming MDBX page cache
 // during commitment processing.
 type WarmupConfig struct {
-	Enabled           bool
-	EnableWarmupCache bool // If true, cache warmed data for use during trie processing
-	CtxFactory        TrieContextFactory
-	NumWorkers        int
-	MaxDepth          int
-	LogPrefix         string
+	Enabled       bool
+	CtxFactory    TrieContextFactory
+	NumWorkers    int
+	AccountKeyLen int // plain account key length for TrieReader (typically length.Addr = 20)
+	LogPrefix     string
 }
-
-const WarmupMaxDepth = 128 // covers full key paths for both account keys (64 nibbles) and storage keys (128 nibbles)
 
 // WarmupStats contains statistics about the warmup phase.
 type WarmupStats struct {
@@ -52,22 +46,21 @@ type WarmupStats struct {
 	Duration      time.Duration
 }
 
-// Warmuper manages parallel warmup of MDBX page cache by pre-reading trie data.
+// Warmuper manages parallel warmup of MDBX page cache by pre-reading trie data
+// using TrieReader-based traversal with a shared CachingPatriciaContext.
 type Warmuper struct {
-	ctx        context.Context
-	cancel     context.CancelFunc
-	ctxFactory TrieContextFactory
-	maxDepth   int
-	numWorkers int
-	logPrefix  string
+	ctx           context.Context
+	cancel        context.CancelFunc
+	ctxFactory    TrieContextFactory
+	cache         *CachingPatriciaContext
+	numWorkers    int
+	accountKeyLen int
+	logPrefix     string
 
 	// Work channel for incoming keys
-	work chan warmupWorkItem
+	work chan []byte
 	// Worker group
 	g *errgroup.Group
-
-	// Cache for storing warmed data to be used during trie processing
-	cache *WarmupCache
 
 	// Stats
 	keysProcessed atomic.Uint64
@@ -78,82 +71,25 @@ type Warmuper struct {
 	closed  atomic.Bool
 }
 
-type warmupWorkItem struct {
-	hashedKey  []byte
-	startDepth int
-}
-
 // NewWarmuper creates a new Warmuper instance.
 func NewWarmuper(ctx context.Context, cfg WarmupConfig) *Warmuper {
 	ctx, cancel := context.WithCancel(ctx)
 	w := &Warmuper{
-		ctx:        ctx,
-		cancel:     cancel,
-		ctxFactory: cfg.CtxFactory,
-		maxDepth:   cfg.MaxDepth,
-		numWorkers: cfg.NumWorkers,
-		logPrefix:  cfg.LogPrefix,
-	}
-	if cfg.EnableWarmupCache {
-		w.cache = NewWarmupCache()
+		ctx:           ctx,
+		cancel:        cancel,
+		ctxFactory:    cfg.CtxFactory,
+		cache:         NewCachingPatriciaContext(),
+		numWorkers:    cfg.NumWorkers,
+		accountKeyLen: cfg.AccountKeyLen,
+		logPrefix:     cfg.LogPrefix,
 	}
 	return w
 }
 
-// Cache returns the warmup cache, or nil if caching is disabled.
-func (w *Warmuper) Cache() *WarmupCache {
+// SharedCache returns the CachingPatriciaContext used by warmup workers.
+// The cache is populated during warmup and can be shared with Process().
+func (w *Warmuper) SharedCache() *CachingPatriciaContext {
 	return w.cache
-}
-
-// branchFromCacheOrDB reads branch data from cache if available, otherwise from DB and caches it.
-func (w *Warmuper) branchFromCacheOrDB(trieCtx PatriciaContext, prefix []byte) ([]byte, error) {
-	if w.cache != nil {
-		if data, found := w.cache.GetBranch(prefix); found {
-			return data, nil
-		}
-	}
-	branchData, _, err := trieCtx.Branch(prefix)
-	if err != nil {
-		return nil, err
-	}
-	if w.cache != nil && len(branchData) > 0 {
-		w.cache.PutBranch(prefix, branchData)
-	}
-	return branchData, nil
-}
-
-// accountFromCacheOrDB reads account data from cache if available, otherwise from DB and caches it.
-func (w *Warmuper) accountFromCacheOrDB(trieCtx PatriciaContext, plainKey []byte) (*Update, error) {
-	if w.cache != nil {
-		if update, found := w.cache.GetAccount(plainKey); found {
-			return update, nil
-		}
-	}
-	update, err := trieCtx.Account(plainKey)
-	if err != nil {
-		return nil, err
-	}
-	if w.cache != nil {
-		w.cache.PutAccount(plainKey, update)
-	}
-	return update, nil
-}
-
-// storageFromCacheOrDB reads storage data from cache if available, otherwise from DB and caches it.
-func (w *Warmuper) storageFromCacheOrDB(trieCtx PatriciaContext, plainKey []byte) (*Update, error) {
-	if w.cache != nil {
-		if update, found := w.cache.GetStorage(plainKey); found {
-			return update, nil
-		}
-	}
-	update, err := trieCtx.Storage(plainKey)
-	if err != nil {
-		return nil, err
-	}
-	if w.cache != nil {
-		w.cache.PutStorage(plainKey, update)
-	}
-	return update, nil
 }
 
 // Start initializes and starts the warmup workers.
@@ -165,7 +101,7 @@ func (w *Warmuper) Start() {
 		return
 	}
 
-	w.work = make(chan warmupWorkItem, w.numWorkers*64)
+	w.work = make(chan []byte, w.numWorkers*64)
 	w.g, w.ctx = errgroup.WithContext(w.ctx)
 
 	for i := 0; i < w.numWorkers; i++ {
@@ -175,14 +111,34 @@ func (w *Warmuper) Start() {
 				defer cleanup()
 			}
 
-			for item := range w.work {
+			// Wrap the worker context with the shared cache so all reads
+			// are cached and visible to other workers and later to Process().
+			view := w.cache.Wrap(trieCtx)
+			reader := NewTrieReader(view, w.accountKeyLen)
+
+			// Visitor prefetches account/storage data encountered along
+			// the trie path, populating the shared cache.
+			visitor := func(_ int, c *cell) error {
+				if c.accountAddrLen > 0 {
+					_, _ = view.Account(c.GetAccountAddr())
+				}
+				if c.storageAddrLen > 0 {
+					_, _ = view.Storage(c.GetStorageAddr())
+				}
+				return nil
+			}
+
+			for hashedKey := range w.work {
 				select {
 				case <-w.ctx.Done():
 					return w.ctx.Err()
 				default:
 				}
 
-				w.warmupKey(trieCtx, item.hashedKey, item.startDepth)
+				if _, _, err := reader.LookupWithVisitor(hashedKey, visitor); err != nil {
+					log.Debug(fmt.Sprintf("[%s][warmup] lookup failed", w.logPrefix),
+						"error", err)
+				}
 				w.keysProcessed.Add(1)
 			}
 			return nil
@@ -190,102 +146,32 @@ func (w *Warmuper) Start() {
 	}
 }
 
-// warmupKey performs the actual warmup for a single key by reading data to warm MDBX page cache.
-// If cache is enabled, the data is also stored in the cache for later use.
-func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDepth int) {
-	depth := startDepth
-	for depth <= len(hashedKey) && depth <= w.maxDepth {
-		prefix := nibbles.HexToCompact(hashedKey[:depth])
-
-		// Check cache first, then fall back to DB
-		branchData, err := w.branchFromCacheOrDB(trieCtx, prefix)
-		if err != nil {
-			log.Debug(fmt.Sprintf("[%s][warmup] failed to get branch", w.logPrefix),
-				"prefix", common.Bytes2Hex(prefix), "error", err)
-		}
-
-		// Branch data format: 2-byte touch map + 2-byte bitmap + per-child data
-		if len(branchData) < 4 {
-			break
-		}
-
-		if depth >= len(hashedKey) {
-			break
-		}
-		nextNibble := int(hashedKey[depth])
-
-		// Extract and prefetch account/storage addresses to warm page cache
-		cellAccounts, cellStorages := extractBranchCellAddresses(branchData, nextNibble)
-		for _, addr := range cellAccounts {
-			_, _ = w.accountFromCacheOrDB(trieCtx, addr)
-		}
-		for _, addr := range cellStorages {
-			_, _ = w.storageFromCacheOrDB(trieCtx, addr)
-		}
-
-		branchData = branchData[2:] // skip touch map
-
-		bitmap := binary.BigEndian.Uint16(branchData[0:2])
-		childBit := uint16(1) << nextNibble
-
-		if bitmap&childBit == 0 {
-			break
-		}
-
-		// Find position of our child's data
-		pos := 2
-		for n := 0; n < nextNibble; n++ {
-			if bitmap&(uint16(1)<<n) != 0 {
-				if pos >= len(branchData) {
-					break
-				}
-				fieldBits := branchData[pos]
-				pos++
-				pos = skipCellFields(branchData, pos, fieldBits)
-			}
-		}
-
-		if pos >= len(branchData) {
-			break
-		}
-
-		fieldBits := branchData[pos]
-		pos++
-
-		// Check if child has extension
-		hasExtension := (fieldBits & 1) != 0
-		if hasExtension && pos < len(branchData) {
-			extLen, n := binary.Uvarint(branchData[pos:])
-			if n > 0 && extLen > 0 {
-				depth += int(extLen)
-				continue
-			}
-		}
-
-		depth++
-	}
-}
-
 // WarmKey submits a hashed key for warming. Call Start() first.
-// startDepth indicates the depth from which to start warming (based on divergence from previous key).
-func (w *Warmuper) WarmKey(hashedKey []byte, startDepth int) {
+func (w *Warmuper) WarmKey(hashedKey []byte) {
 	if !w.started.Load() || w.numWorkers <= 0 || w.closed.Load() {
 		return
 	}
 	select {
-	case w.work <- warmupWorkItem{hashedKey: hashedKey, startDepth: startDepth}:
+	case w.work <- hashedKey:
 	case <-w.ctx.Done():
 	default: // non-blocking
 	}
 }
 
-// Wait waits for all warmup work to complete.
+// Wait closes the work channel so workers drain remaining items, then waits for
+// all workers to finish. Unlike Close(), it does not cancel the context, allowing
+// workers to process any queued keys before exiting.
 func (w *Warmuper) Wait() error {
 	if !w.started.Load() || w.numWorkers <= 0 {
 		return nil
 	}
-	w.Close()
-	w.g.Wait()
+	if !w.closed.Swap(true) && w.work != nil {
+		close(w.work)
+	}
+	if w.g != nil {
+		_ = w.g.Wait()
+	}
+	w.cancel()
 	return nil
 }
 
@@ -324,6 +210,8 @@ func (w *Warmuper) CloseAndWait() {
 }
 
 // Close cancels all warmup work and releases resources.
+// Use CloseAndWait() to cancel and wait for workers.
+// Use Wait() to let workers finish processing remaining items.
 func (w *Warmuper) Close() {
 	if w.closed.Swap(true) {
 		return // Already closed
@@ -332,4 +220,9 @@ func (w *Warmuper) Close() {
 	if w.work != nil {
 		close(w.work)
 	}
+}
+
+// Closed returns true if the warmuper has been closed.
+func (w *Warmuper) Closed() bool {
+	return w.closed.Load()
 }

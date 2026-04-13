@@ -384,7 +384,6 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		}
 		warmupConfig.Enabled = sdc.trieWarmup
 		warmupConfig.NumWorkers = 16
-		warmupConfig.MaxDepth = commitment.WarmupMaxDepth
 		warmupConfig.LogPrefix = logPrefix
 	}
 

@@ -107,17 +107,17 @@ two-layer design:
 - Modify: `execution/commitment/warmuper.go`
 - Modify: `execution/commitment/warmuper_test.go` (if exists)
 
-- [ ] Replace `warmupKey()` body with `TrieReader.LookupWithVisitor()` call
-- [ ] Implement warmup visitor: for each cell with `accountAddrLen > 0`, call `ctx.Account()`; for `storageAddrLen > 0`, call `ctx.Storage()` — reads go through `cachedView` so results are cached
-- [ ] Remove `branchFromCacheOrDB`, `accountFromCacheOrDB`, `storageFromCacheOrDB` methods from Warmuper
-- [ ] Remove `extractBranchCellAddresses` usage from warmuper (TrieReader's `parseCellAt` replaces it)
-- [ ] Each worker creates a `TrieReader` with `cache.Wrap(workerCtx)` instead of raw `PatriciaContext`
-- [ ] Remove `startDepth` from `WarmKey()` signature — no longer needed (cache handles repeated prefix reads)
-- [ ] Update `WarmupConfig`: remove `MaxDepth` (TrieReader traverses to leaf), remove `EnableWarmupCache` (always cached)
-- [ ] Update `HashSort()` call sites that pass `startDepth` — simplify to just `warmuper.WarmKey(hk)`
-- [ ] Write tests: warmup with TrieReader produces same cache state as old implementation
-- [ ] Write tests: 16 concurrent warmup workers with shared cache (race detector)
-- [ ] Run tests — must pass before task 4
+- [x] Replace `warmupKey()` body with `TrieReader.LookupWithVisitor()` call
+- [x] Implement warmup visitor: for each cell with `accountAddrLen > 0`, call `ctx.Account()`; for `storageAddrLen > 0`, call `ctx.Storage()` — reads go through `cachedView` so results are cached
+- [x] Remove `branchFromCacheOrDB`, `accountFromCacheOrDB`, `storageFromCacheOrDB` methods from Warmuper
+- [x] Remove `extractBranchCellAddresses` usage from warmuper (TrieReader's `parseCellAt` replaces it)
+- [x] Each worker creates a `TrieReader` with `cache.Wrap(workerCtx)` instead of raw `PatriciaContext`
+- [x] Remove `startDepth` from `WarmKey()` signature — no longer needed (cache handles repeated prefix reads)
+- [x] Update `WarmupConfig`: remove `MaxDepth` (TrieReader traverses to leaf), remove `EnableWarmupCache` (always cached)
+- [x] Update `HashSort()` call sites that pass `startDepth` — simplify to just `warmuper.WarmKey(hk)`
+- [x] Write tests: warmup with TrieReader produces same cache state as old implementation
+- [x] Write tests: 16 concurrent warmup workers with shared cache (race detector)
+- [x] Run tests — must pass before task 4
 
 ### Task 4: Integrate CachingPatriciaContext into Process()
 

@@ -1723,29 +1723,15 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		// 52-byte plain keys = 180 bytes/key. Use 192 with headroom.
 		t.arenaEnsureCap(hashSortBatchSize * 192)
 		t.byteArena = t.byteArena[:0]
-		var prevKey []byte
 
 		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			if warmuper != nil && warmuper.Cache() != nil {
-				warmuper.Cache().EvictPlainKey(v)
-			}
 			// Copy into arena since ETL may reuse buffers
 			hk := t.arenaAlloc(k)
 			pk := t.arenaAlloc(v)
 			t.batchSlab = append(t.batchSlab, KeyUpdate{hashedKey: hk, plainKey: unsafe.String(unsafe.SliceData(pk), len(pk))})
 
-			// Submit to warmuper with start depth based on divergence from previous key
 			if warmuper != nil {
-				startDepth := 0
-				if prevKey != nil {
-					// Find common prefix length
-					minLen := min(len(prevKey), len(hk))
-					for startDepth < minLen && prevKey[startDepth] == hk[startDepth] {
-						startDepth++
-					}
-				}
-				warmuper.WarmKey(hk, startDepth)
-				prevKey = append(prevKey[:0], hk...)
+				warmuper.WarmKey(hk)
 			}
 
 			// Process batch when full
@@ -1794,7 +1780,6 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		// storage key hashes. Use 144 with headroom.
 		t.arenaEnsureCap(hashSortBatchSize * 144)
 		t.byteArena = t.byteArena[:0]
-		var prevKey []byte
 		var processErr error
 
 		t.tree.Ascend(func(item *KeyUpdate) bool {
@@ -1809,18 +1794,8 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 			hk := t.arenaAlloc(item.hashedKey)
 			t.batchSlab = append(t.batchSlab, KeyUpdate{hashedKey: hk, plainKey: item.plainKey, update: item.update})
 
-			// Submit to warmuper with start depth based on divergence from previous key
 			if warmuper != nil {
-				startDepth := 0
-				if prevKey != nil {
-					// Find common prefix length
-					minLen := min(len(prevKey), len(hk))
-					for startDepth < minLen && prevKey[startDepth] == hk[startDepth] {
-						startDepth++
-					}
-				}
-				warmuper.WarmKey(hk, startDepth)
-				prevKey = append(prevKey[:0], hk...)
+				warmuper.WarmKey(hk)
 			}
 
 			// Process batch when full

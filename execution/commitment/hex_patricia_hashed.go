@@ -2778,22 +2778,10 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	// Setup warmup if configured
 	var warmuper *Warmuper
 	if warmup.Enabled {
-		warmup.EnableWarmupCache = hph.enableWarmupCache
+		warmup.AccountKeyLen = int(hph.accountKeyLen)
 		warmuper = NewWarmuper(ctx, warmup)
 		warmuper.Start()
 		defer warmuper.CloseAndWait()
-		// Set cache on trie if warmup cache is enabled
-		if warmup.EnableWarmupCache {
-			hph.cache = warmuper.Cache()
-			hph.branchEncoder.SetCache(hph.cache)
-			defer func() {
-				hph.cache = nil
-				hph.branchEncoder.SetCache(nil)
-			}()
-		} else {
-			hph.cache = nil
-			hph.branchEncoder.SetCache(nil)
-		}
 	}
 
 	err = updates.HashSort(ctx, warmuper, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
