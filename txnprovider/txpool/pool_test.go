@@ -2030,7 +2030,7 @@ func TestStalePendingEvictionViaMineNonce(t *testing.T) {
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	cfg := txpoolcfg.DefaultConfig
 
-	// SimpleCache reads directly from the DB — avoids coherence-version coupling.
+	// SimpleCache — avoids coherence-version coupling.
 	pool, err := New(ctx, ch, nil, coreDB, cfg, kvcache.NewSimple(), chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
 	req.NoError(err)
 	req.NotNil(pool)
@@ -2040,7 +2040,7 @@ func TestStalePendingEvictionViaMineNonce(t *testing.T) {
 	h0 := gointerfaces.ConvertHashToH256([32]byte{})
 
 	// writeAccount writes addr1 to coreDB at the given nonce so that senders.info
-	// (which reads from the DB when using SimpleCache) returns the expected value.
+	// (which reads from cache if present, otherwise from the DB) returns the expected value.
 	writeAccount := func(nonce, txNum uint64) {
 		tx, werr := coreDB.BeginTemporalRw(ctx)
 		req.NoError(werr)

@@ -71,7 +71,11 @@ func (c *SimpleCache) OnNewBlock(sc *remoteproto.StateChangeBatch) {
 	}
 }
 func (c *SimpleCache) Evict() int { return 0 }
-func (c *SimpleCache) Len() int   { return 0 }
+func (c *SimpleCache) Len() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return len(c.accounts)
+}
 func (c *SimpleCache) Get(k []byte, tx kv.TemporalTx, id uint64) ([]byte, error) {
 	// Check the in-memory account cache first (populated by OnNewBlock).
 	if len(k) == 20 {
