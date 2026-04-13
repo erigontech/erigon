@@ -610,7 +610,7 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 	} else {
 		input = input[:0]
 	}
-
+	// Retrieve the operands and execute the exponentiation
 	base := getData(input, 0, baseLen)
 	exp := getData(input, baseLen, expLen)
 	mod := getData(input, baseLen+expLen, modLen)
