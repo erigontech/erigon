@@ -492,6 +492,7 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(ctx cont
 		}
 
 		collector := etl.NewCollector("[concurrent_branch]", sdc.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize/16), log.Root()) //nolint:gocritic
+		collector.LogLvl(log.LvlDebug)
 
 		mu.Lock()
 		collectors = append(collectors, collector)
@@ -755,6 +756,12 @@ type TrieContext struct {
 	trace          bool
 	stateReader    StateReader
 	localCollector *etl.Collector // per-goroutine collector for concurrent PutBranch
+}
+
+// NewTrieContextRo creates a read-only TrieContext suitable for TrieReader lookups.
+// Only Branch() is functional; PutBranch/Account/Storage will return errors or nil.
+func NewTrieContextRo(reader StateReader, stepSize uint64) *TrieContext {
+	return &TrieContext{stateReader: reader, stepSize: stepSize}
 }
 
 func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {

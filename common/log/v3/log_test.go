@@ -180,6 +180,29 @@ func TestLogfmt(t *testing.T) {
 	}
 }
 
+func TestTerminalFormatNoColor(t *testing.T) {
+	t.Parallel()
+
+	l, buf := testFormatter(TerminalFormatNoColor())
+	l.Info("some message", "x", 1, "y", "foo")
+
+	// skip the "[INFO] [timestamp] " prefix: "[INFO] " is 7 chars, timestamp
+	// "[01-02|15:04:05.000] " is 21 chars, total 28.
+	const prefixLen = 7 + 21
+	if buf.Len() < prefixLen {
+		t.Fatalf("output too short: %q", buf.String())
+	}
+	if got, want := string(buf.Bytes()[:7]), "[INFO] "; got != want {
+		t.Fatalf("level prefix: got %q, want %q", got, want)
+	}
+	got := buf.Bytes()[prefixLen:]
+	// short messages are right-padded to termMsgJust (40) chars
+	expected := []byte("some message                             x=1 y=foo\n")
+	if !bytes.Equal(got, expected) {
+		t.Fatalf("Got %q, expected %q", got, expected)
+	}
+}
+
 func TestMultiHandler(t *testing.T) {
 	t.Parallel()
 
