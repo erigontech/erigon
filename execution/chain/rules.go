@@ -21,6 +21,5 @@ type RulesName string
 const (
 	AuRaRules   RulesName = "aura"
 	EtHashRules RulesName = "ethash"
-	CliqueRules RulesName = "clique"
 	BorRules    RulesName = "bor"
 )
