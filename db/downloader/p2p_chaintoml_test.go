@@ -51,7 +51,7 @@ func TestDiscoverChainToml_NoPeersWithEntry(t *testing.T) {
 func TestDiscoverChainToml_SinglePeer(t *testing.T) {
 	key, _ := crypto.GenerateKey()
 	ct := &enr.ChainToml{
-		KnownTx: 100,
+		KnownTx:  100,
 		InfoHash: [20]byte{1, 2, 3},
 	}
 	src := &mockNodeSource{
