@@ -109,21 +109,21 @@ The witness test needs access to the `ExecModuleTester` (DB, BlockReader, Engine
 
 This is the main test file. After `BlockTest.Run()` inserts blocks and validates post-state, it sets up the debug API and compares our generated witness against the fixture's expected witness.
 
-- [ ] Create package `eest_zkevm_witness_test` with `TestExecutionSpecWitness(t *testing.T)`
-- [ ] Enable historical commitment at test start: save `statecfg.Schema`, call `statecfg.EnableHistoricalCommitment()`, restore in `t.Cleanup`
-- [ ] Set up `TestMatcher`, walk `filepath.Join("..", "execution-spec-tests", "blockchain_tests_zkevm")` with callback `func(t *testing.T, name string, test *testutil.WitnessBlockTest)`
-- [ ] In the callback:
+- [x] Create package `eest_zkevm_witness_test` with `TestExecutionSpecWitness(t *testing.T)`
+- [x] Enable historical commitment at test start: save `statecfg.Schema`, call `statecfg.EnableHistoricalCommitment()`, restore in `t.Cleanup`
+- [x] Set up `TestMatcher`, walk `filepath.Join("..", "execution-spec-tests", "blockchain_tests_zkevm")` with callback `func(t *testing.T, name string, test *testutil.WitnessBlockTest)`
+- [x] In the callback:
   - Call `test.Run(t)` to insert blocks and validate post-state (skip on error)
   - Create debug API: `base := jsonrpc.NewBaseApi(nil, test.M.StateCache, test.M.BlockReader, false, rpccfg.DefaultEvmCallTimeout, test.M.Engine, test.M.Dirs, nil, 0, 0)` then `api := jsonrpc.NewPrivateDebugAPI(base, test.M.DB, nil, 0, false)`
   - For each block index 0..test.NumBlocks()-1: if `test.ExpectedWitnessForBlock(i) != nil`, call `api.ExecutionWitness(ctx, blockNumberOrHash)` and compare
-- [ ] Implement `compareWitness(t *testing.T, blockNum uint64, expected *testutil.ExpectedWitness, actual *jsonrpc.ExecutionWitnessResult)`:
+- [x] Implement `compareWitness(t *testing.T, blockNum uint64, expected *testutil.ExpectedWitness, actual *jsonrpc.ExecutionWitnessResult)`:
   - Exact ordered comparison of `State` arrays (element-by-element byte equality)
   - Exact ordered comparison of `Codes` arrays
   - Exact ordered comparison of `Headers` arrays
   - On mismatch: report block number, field name, index, expected vs actual (truncated hex)
-- [ ] Add `testing.Short()` skip guard
-- [ ] Set `test.ExperimentalBAL = true` if Amsterdam fixtures require it (check first test run)
-- [ ] Verify: `make lint` passes
+- [x] Add `testing.Short()` skip guard
+- [x] Set `test.ExperimentalBAL = true` if Amsterdam fixtures require it (check first test run)
+- [x] Verify: `make lint` passes
 
 ### Task 5: Initial test run and failure triage
 
