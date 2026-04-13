@@ -125,13 +125,6 @@ func (s *stubExecutionModule) FrozenBlocks(_ context.Context) (uint64, bool, err
 	return 0, false, nil
 }
 
-func (s *stubExecutionServer) GetForkChoice(ctx context.Context, in *emptypb.Empty) (*executionproto.ForkChoice, error) {
-	if s.getForkChoiceFunc != nil {
-		return s.getForkChoiceFunc(ctx, in)
-	}
-	return &executionproto.ForkChoice{}, nil
-}
-
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
