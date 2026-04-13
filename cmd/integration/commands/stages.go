@@ -269,7 +269,6 @@ var cmdRunMigrations = &cobra.Command{
 		consensus := strings.Replace(chaindata, "chaindata", "aura", 1)
 		if exists, err := dir.Exist(consensus); err == nil && exists {
 			migrateDB(dbcfg.ConsensusDB, consensus)
-		} else {
 		}
 		// Migrations must be applied also to the Bor heimdall and polygon-bridge DBs.
 		heimdall := strings.Replace(chaindata, "chaindata", "heimdall", 1)
