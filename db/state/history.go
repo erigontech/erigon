@@ -60,17 +60,11 @@ type History struct {
 	// dirtyFiles - list of ALL files - including: un-indexed-yet, garbage, merged-into-bigger-one, ...
 	// thread-safe, but maybe need 1 RWLock for all trees in Aggregator
 	//
-	// _visibleFiles derivative from field `file`, but without garbage:
-	//  - no files with `canDelete=true`
-	//  - no overlaps
-	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
-	//
-	// BeginRo() using _visibleFiles in zero-copy way
+	// The visible view (derivative of dirtyFiles, without garbage: no `canDelete=true`,
+	// no overlaps, no un-indexed files) is computed by Aggregator into an immutable
+	// snapshot and published atomically via Aggregator.visible. BeginFilesRo opens
+	// readers against that snapshot in zero-copy way.
 	dirtyFiles *btree2.BTreeG[*FilesItem]
-
-	// _visibleFiles - underscore in name means: don't use this field directly, use BeginFilesRo()
-	// underlying array is immutable - means it's ready for zero-copy use
-	_visibleFiles []visibleFile
 
 	// _testBuildVIHook - test-only: called with the recsplit before the build loop in buildVI
 	_testBuildVIHook func(rs *recsplit.RecSplit)
@@ -83,9 +77,8 @@ func NewHistory(cfg statecfg.HistCfg, stepSize, stepsInFrozenFile uint64, dirs d
 	}
 
 	h := History{
-		HistCfg:       cfg,
-		dirtyFiles:    btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		_visibleFiles: []visibleFile{},
+		HistCfg:    cfg,
+		dirtyFiles: btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 	}
 
 	var err error
@@ -363,7 +356,7 @@ func (h *History) Scan(toTxNum uint64) error {
 		return err
 	}
 
-	h.reCalcVisibleFiles(toTxNum)
+	//h.reCalcVisibleFiles(toTxNum) // TODO: what need here?
 
 	salt, err := GetStateIndicesSalt(h.dirs, false, h.logger)
 	if err != nil {
@@ -743,9 +736,11 @@ func (sf HistoryFiles) CleanupOnError() {
 		sf.efExistence.Close()
 	}
 }
-func (h *History) reCalcVisibleFiles(toTxNum uint64) {
-	h._visibleFiles = calcVisibleFiles(h.dirtyFiles, h.Accessors, nil, false, toTxNum)
-	h.InvertedIndex.reCalcVisibleFiles(toTxNum)
+
+func (h *History) calcVisibleFiles(toTxNum uint64) (visibleFiles, *iiVisible) {
+	hv := calcVisibleFiles(h.dirtyFiles, h.Accessors, nil, false, toTxNum)
+	hiv := h.InvertedIndex.calcVisibleFiles(toTxNum)
+	return hv, hiv
 }
 
 // buildFiles performs potentially resource intensive operations of creating
@@ -915,17 +910,25 @@ type HistoryRoTx struct {
 	snappyReadBuffer []byte
 }
 
-func (h *History) BeginFilesRo() *HistoryRoTx {
-	files := h._visibleFiles
-	for i := 0; i < len(files); i++ {
-		if !files[i].src.frozen {
-			files[i].src.refcount.Add(1)
-		}
-	}
+func (h *History) beginForTests() *HistoryRoTx {
+	hv, hvi := h.calcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
+	return h.beginFilesRo(hv, hvi)
+}
+
+// BeginFilesRoForDebug is the exported entry point for standalone debug tools
+// (cmd/integration) that open a bare History without an Aggregator. Production
+// code must go through Aggregator.BeginFilesRo so reads are opened from the
+// Aggregator-managed snapshot rather than directly from a standalone History.
+func (h *History) BeginFilesRoForDebug() *HistoryRoTx {
+	return h.beginForTests()
+}
+
+func (h *History) beginFilesRo(files visibleFiles, iv *iiVisible) *HistoryRoTx {
+	files.refcntIncrement()
 
 	return &HistoryRoTx{
 		h:                 h,
-		iit:               h.InvertedIndex.BeginFilesRo(),
+		iit:               h.InvertedIndex.beginFilesRo(iv),
 		files:             files,
 		stepSize:          h.stepSize,
 		stepsInFrozenFile: h.stepsInFrozenFile,

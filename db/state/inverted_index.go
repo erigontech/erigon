@@ -69,24 +69,19 @@ type InvertedIndex struct {
 	// dirtyFiles - list of ALL files - including: un-indexed-yet, garbage, merged-into-bigger-one, ...
 	// thread-safe, but maybe need 1 RWLock for all trees in Aggregator
 	//
-	// _visible derivative from field `file`, but without garbage:
-	//  - no files with `canDelete=true`
-	//  - no overlaps
-	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
-	//
-	// BeginRo() using _visible in zero-copy way
+	// The visible view (derivative of dirtyFiles, without garbage: no `canDelete=true`,
+	// no overlaps, no un-indexed files) is computed by Aggregator into an immutable
+	// iiVisible snapshot and published atomically via Aggregator.visible. BeginFilesRo
+	// opens readers against that snapshot in zero-copy way.
 	dirtyFiles *btree2.BTreeG[*FilesItem]
 
-	// `_visible.files` - underscore in name means: don't use this field directly, use BeginFilesRo()
-	// underlying array is immutable - means it's ready for zero-copy use
-	_visible *iiVisible
-	logger   log.Logger
+	logger log.Logger
 
 	checker *DependencyIntegrityChecker
 }
 
 type iiVisible struct {
-	files  []visibleFile
+	files  visibleFiles
 	name   string
 	caches *sync.Pool
 }
@@ -109,7 +104,6 @@ func NewInvertedIndex(cfg statecfg.InvIdxCfg, stepSize, stepsInFrozenFile uint64
 		dirs:       dirs,
 		salt:       &atomic.Pointer[uint32]{},
 		dirtyFiles: btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		_visible:   newIIVisible(cfg.FilenameBase, []visibleFile{}),
 		logger:     logger,
 
 		stepSize:          stepSize,
@@ -229,7 +223,9 @@ func (ii *InvertedIndex) SetChecker(checker *DependencyIntegrityChecker) {
 	ii.checker = checker
 }
 
-func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
+// calcVisibleFiles is pure — it does not mutate ii. Used by the Aggregator to
+// assemble a cross-entity snapshot published atomically as aggregatorVisible.
+func (ii *InvertedIndex) calcVisibleFiles(toTxNum uint64) *iiVisible {
 	var checker func(startTxNum, endTxNum uint64) bool
 	c := ii.checker
 	if c != nil {
@@ -238,7 +234,7 @@ func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
 			return c.CheckDependentPresent(ue, All, startTxNum, endTxNum)
 		}
 	}
-	ii._visible = newIIVisible(ii.FilenameBase, calcVisibleFiles(ii.dirtyFiles, ii.Accessors, checker, false, toTxNum))
+	return newIIVisible(ii.FilenameBase, calcVisibleFiles(ii.dirtyFiles, ii.Accessors, checker, false, toTxNum))
 }
 
 func (ii *InvertedIndex) MissedMapAccessors() (l []*FilesItem) {
@@ -414,17 +410,17 @@ func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *InvertedIn
 	return w
 }
 
-func (ii *InvertedIndex) BeginFilesRo() *InvertedIndexRoTx {
-	files := ii._visible.files
-	for i := 0; i < len(files); i++ {
-		if !files[i].src.frozen {
-			files[i].src.refcount.Add(1)
-		}
-	}
+func (ii *InvertedIndex) beginForTests() *InvertedIndexRoTx {
+	iv := ii.calcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
+	return ii.beginFilesRo(iv)
+}
+
+func (ii *InvertedIndex) beginFilesRo(iv *iiVisible) *InvertedIndexRoTx {
+	iv.files.refcntIncrement()
 	return &InvertedIndexRoTx{
 		ii:                ii,
-		visible:           ii._visible,
-		files:             files,
+		visible:           iv,
+		files:             iv.files,
 		stepSize:          ii.stepSize,
 		stepsInFrozenFile: ii.stepsInFrozenFile,
 		name:              ii.Name,

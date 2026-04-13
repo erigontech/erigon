@@ -64,10 +64,10 @@ type Aggregator struct {
 	stepsInFrozenFile atomic.Uint64
 	reorgBlockDepth   uint64
 
-	dirtyFilesLock           sync.Mutex
-	visibleFilesLock         sync.RWMutex
-	visibleFilesMinimaxTxNum atomic.Uint64
-	snapshotBuildSema        *semaphore.Weighted
+	dirtyFilesLock sync.Mutex
+	// visible is published via atomic.Store under dirtyFilesLock; readers take no lock.
+	visible           atomic.Pointer[aggregatorVisible]
+	snapshotBuildSema *semaphore.Weighted
 
 	disableHistory         bool
 	collateAndBuildWorkers int  // minimize amount of background workers by default
@@ -106,7 +106,7 @@ type Aggregator struct {
 
 func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
 	ctx, ctxCancel := context.WithCancel(ctx)
-	return &Aggregator{
+	a := &Aggregator{
 		ctx:                    ctx,
 		ctxCancel:              ctxCancel,
 		onFilesChange:          func(frozenFileNames []string) {},
@@ -121,7 +121,11 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint6
 		mergeWorkers:           1,
 
 		produce: true,
-	}, nil
+	}
+	// Publish an empty bundle so BeginFilesRo / EndTxNumMinimax never observe a
+	// nil pointer — recalcVisibleFiles will overwrite it during ConfigureDomains.
+	a.visible.Store(&aggregatorVisible{})
+	return a, nil
 }
 
 type HasAgg interface {
@@ -800,8 +804,6 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(a.collateAndBuildWorkers)
 
-	// Use agg.BeginFilesRo() to safely snapshot visible files under visibleFilesLock,
-	// instead of calling individual domain/ii BeginFilesRo() without synchronization.
 	ac := a.BeginFilesRo()
 	for id, d := range a.d {
 		if d.Disable {
@@ -1033,7 +1035,7 @@ func (a *Aggregator) MergeLoop(ctx context.Context) (err error) {
 	}
 
 	for {
-		somethingMerged, err := a.mergeLoopStep(ctx, a.visibleFilesMinimaxTxNum.Load())
+		somethingMerged, err := a.mergeLoopStep(ctx, a.EndTxNumMinimax())
 		if err != nil {
 			return err
 		}
@@ -1342,7 +1344,7 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 
 	var txFrom uint64 // txFrom is always 0 to avoid dangling keys in indices/hist
 	var step kv.Step
-	txTo := at.a.visibleFilesMinimaxTxNum.Load()
+	txTo := at.a.EndTxNumMinimax()
 	if txTo > 0 {
 		// txTo is first txNum in next step, has to go 1 tx behind to get correct step number
 		step = kv.Step((txTo - 1) / at.StepSize())
@@ -1431,7 +1433,7 @@ func (at *AggregatorRoTx) MinStepInDb(tx kv.Tx, domain kv.Domain) (lstInDb uint6
 	return at.d[domain].d.minStepInDB(tx)
 }
 
-func (a *Aggregator) EndTxNumMinimax() uint64 { return a.visibleFilesMinimaxTxNum.Load() }
+func (a *Aggregator) EndTxNumMinimax() uint64 { return a.visible.Load().minimaxTxNum }
 func (a *Aggregator) FilesAmount() (res []int) {
 	for _, d := range a.d {
 		res = append(res, d.dirtyFiles.Len())
@@ -1479,29 +1481,60 @@ func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
 	return m
 }
 
-func (a *Aggregator) recalcVisibleFiles(toTxNum uint64) {
-	defer a.recalcVisibleFilesMinimaxTxNum()
+// aggregatorVisible is the immutable per-entity snapshot read by every
+// AggregatorRoTx. The bundle is what makes BeginFilesRo lock-free and
+// cross-entity consistent: a single atomic load pins one generation for all
+// domains, histories, inverted indexes and the state minimax.
+type aggregatorVisible struct {
+	d            [kv.DomainLen]*domainVisible
+	dh           [kv.DomainLen]visibleFiles // per-domain History visible files
+	dhii         [kv.DomainLen]*iiVisible   // per-domain History.InvertedIndex visible
+	iis          []*iiVisible               // top-level inverted indexes (aligned with a.iis)
+	minimaxTxNum uint64                     // min of domain file EndTxNum across kv.StateDomains
+}
 
-	a.visibleFilesLock.Lock()
-	defer a.visibleFilesLock.Unlock()
-	for _, d := range a.d {
+// recalcVisibleFiles must be called with dirtyFilesLock held (writers are
+// serialized by it; readers take no lock and instead load a.visible). It builds
+// a fresh immutable aggregatorVisible bundle via the per-entity calcVisibleFiles
+// helpers, then publishes the completed snapshot with a.visible.Store(next).
+// Per-entity visibility is not mutated; readers atomically observe one
+// cross-entity-consistent generation.
+func (a *Aggregator) recalcVisibleFiles(toTxNum uint64) {
+	next := &aggregatorVisible{iis: make([]*iiVisible, len(a.iis))}
+	for id, d := range a.d {
 		if d == nil {
 			continue
 		}
-		d.reCalcVisibleFiles(toTxNum)
+		next.d[id], next.dh[id], next.dhii[id] = d.calcVisibleFiles(toTxNum)
 	}
-	for _, ii := range a.iis {
+	for id, ii := range a.iis {
 		if ii == nil {
 			continue
 		}
-		ii.reCalcVisibleFiles(toTxNum)
+		next.iis[id] = ii.calcVisibleFiles(toTxNum)
 	}
+	next.minimaxTxNum = next.stateMinimaxTxNum()
+	a.visible.Store(next)
 }
 
-func (a *Aggregator) recalcVisibleFilesMinimaxTxNum() {
-	aggTx := a.BeginFilesRo()
-	defer aggTx.Close()
-	a.visibleFilesMinimaxTxNum.Store(aggTx.TxNumsInFiles(kv.StateDomains...))
+// stateMinimaxTxNum returns min(EndTxNum) across kv.StateDomains. Mirrors
+// AggregatorRoTx.TxNumsInFiles but operates directly on the bundle so the
+// writer can compute it without spinning up a throwaway RoTx.
+func (v *aggregatorVisible) stateMinimaxTxNum() uint64 {
+	minTxNum := uint64(math.MaxUint64)
+	for _, d := range kv.StateDomains {
+		dv := v.d[d]
+		if dv == nil {
+			continue
+		}
+		if end := visibleFiles(dv.files).EndTxNum(); end < minTxNum {
+			minTxNum = end
+		}
+	}
+	if minTxNum == math.MaxUint64 {
+		return 0
+	}
+	return minTxNum
 }
 
 func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFile uint64) *Ranges {
@@ -1781,7 +1814,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 		return fin
 	}
 
-	if (txNum + 1) <= a.visibleFilesMinimaxTxNum.Load()+a.stepSize.Load() {
+	if (txNum + 1) <= a.EndTxNumMinimax()+a.stepSize.Load() {
 		close(fin)
 		return fin
 	}
@@ -1791,7 +1824,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 		return fin
 	}
 
-	step := kv.Step(a.visibleFilesMinimaxTxNum.Load() / a.StepSize())
+	step := kv.Step(a.EndTxNumMinimax() / a.StepSize())
 
 	a.wg.Add(1)
 	go func() {
@@ -1916,7 +1949,7 @@ func (at *AggregatorRoTx) KeyCountInFiles(d kv.Domain, start, end uint64) (total
 		return 0
 	}
 
-	for _, f := range at.d[d].visible.files {
+	for _, f := range at.d[d].files {
 		if f.startTxNum >= start && f.endTxNum <= end {
 			totalKeys += uint64(f.src.decompressor.Count() / 2)
 		}
@@ -1956,23 +1989,24 @@ type AggregatorRoTx struct {
 }
 
 func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
+	v := a.visible.Load()
 	ac := &AggregatorRoTx{
 		a:       a,
 		_leakID: a.leakDetector.Add(),
-		iis:     make([]*InvertedIndexRoTx, len(a.iis)),
+		iis:     make([]*InvertedIndexRoTx, len(v.iis)),
 	}
-
-	a.visibleFilesLock.RLock()
-	for id, ii := range a.iis {
-		ac.iis[id] = ii.BeginFilesRo()
-	}
-	for id, d := range a.d {
-		if d != nil {
-			ac.d[id] = d.BeginFilesRo()
+	for id, iv := range v.iis {
+		if iv == nil {
+			continue
 		}
+		ac.iis[id] = a.iis[id].beginFilesRo(iv)
 	}
-	a.visibleFilesLock.RUnlock()
-
+	for id, dv := range v.d {
+		if dv == nil {
+			continue
+		}
+		ac.d[id] = a.d[id].beginFilesRo(dv, v.dh[id], v.dhii[id])
+	}
 	return ac
 }
 

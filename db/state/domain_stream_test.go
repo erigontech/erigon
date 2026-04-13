@@ -163,7 +163,7 @@ func TestDomain_IteratePrefix_PrefersFilesOverDB(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 
-	dt := d.BeginFilesRo()
+	dt := d.beginForTests()
 	writer := dt.NewWriter()
 
 	require.NoError(writer.PutWithPrev(key[:], v0[:], 1, nil))
@@ -185,7 +185,7 @@ func TestDomain_IteratePrefix_PrefersFilesOverDB(t *testing.T) {
 	require.NoError(tx.Commit())
 
 	// Files now cover the key with latest value V1.
-	dt = d.BeginFilesRo()
+	dt = d.beginForTests()
 	require.Greater(dt.files.EndTxNum(), uint64(0), "files should exist")
 	dt.Close()
 
@@ -210,7 +210,7 @@ func TestDomain_IteratePrefix_PrefersFilesOverDB(t *testing.T) {
 	require.NoError(err)
 	defer roTx.Rollback()
 
-	dt = d.BeginFilesRo()
+	dt = d.beginForTests()
 	defer dt.Close()
 
 	var gotVal []byte
