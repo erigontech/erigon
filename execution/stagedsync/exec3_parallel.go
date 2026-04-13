@@ -1088,10 +1088,14 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 	txOut, burntDelta, burntDeltaIncrease, hasBurntDelta := result.TxOut.StripBalanceWrite(result.ExecutionResult.BurntContractAddress, result.TxIn)
 	result.TxOut = txOut
 
-	// Force a re-read of the coinbase & burnt contract address
+	// Force a re-read of the coinbase & burnt contract balance
 	// so the VersionedStateReader provides the correct base values.
-	delete(result.TxIn, result.Coinbase)
-	delete(result.TxIn, result.ExecutionResult.BurntContractAddress)
+	// Only remove the BalancePath read — not the entire address —
+	// because result.TxIn is shared with blockIO and deleting the
+	// full address also drops storage/code/nonce reads needed for
+	// the BAL (e.g. when coinbase == transaction target).
+	result.TxIn.Delete(result.Coinbase, state.AccountKey{Path: state.BalancePath})
+	result.TxIn.Delete(result.ExecutionResult.BurntContractAddress, state.AccountKey{Path: state.BalancePath})
 
 	txTask, ok := task.Task.(*exec.TxTask)
 
