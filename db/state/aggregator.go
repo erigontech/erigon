@@ -34,6 +34,7 @@ import (
 	rand2 "golang.org/x/exp/rand"
 
 	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 
 	"github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
@@ -1814,6 +1815,40 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 		// - to remove old data from db as early as possible
 		// - during files build, may happen commit of new data. on each loop step getting latest id in db
 		for ; step < lastInDB; step++ { //`step` must be fully-written - means `step+1` records must be visible
+			// Guard against collation/pruning race: only collate step S when the
+			// execution layer has committed ALL data through the end of step S.
+			// Read the latest committed txNum from the commitment domain state
+			// (written by SharedDomains.ComputeCommitment after each flush+commit).
+			// Without this check, the collation's read-transaction may snapshot
+			// the DB before a CommitCycle flushes step S's writes, producing a
+			// file that misses entries. Pruning then removes those entries from
+			// the DB, and the values are lost. See #20169.
+			var committedTxNum uint64
+			if temporalDB, ok := a.db.(kv.TemporalRoDB); ok {
+				if err := temporalDB.ViewTemporal(a.ctx, func(tx kv.TemporalTx) error {
+					v, _, err := tx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+					if err != nil {
+						return err
+					}
+					if len(v) >= 8 {
+						committedTxNum = binary.BigEndian.Uint64(v)
+					}
+					return nil
+				}); err != nil {
+					a.logger.Warn("[snapshots] buildFilesInBackground: read commitment", "err", err)
+					break
+				}
+			}
+			// When committedTxNum > 0, enforce the guard: only collate step S
+			// when all its data has been committed. When committedTxNum == 0
+			// (no ComputeCommitment yet, e.g. in tests), fall through to the
+			// existing lastInDB check which is sufficient without concurrency.
+			if committedTxNum > 0 {
+				stepEndTxNum := a.FirstTxNumOfStep(step + 1)
+				if committedTxNum+1 < stepEndTxNum {
+					break // step not fully committed yet — wait for execution to catch up
+				}
+			}
 			if err := a.buildFiles(a.ctx, step); err != nil {
 				if errors.Is(err, errStepNotReady) {
 					break
