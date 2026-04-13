@@ -96,11 +96,11 @@ This type handles JSON parsing and provides access to expected witness data per 
 
 The witness test needs access to the `ExecModuleTester` (DB, BlockReader, Engine, etc.) after `BlockTest.Run()` completes, in order to set up the debug API for witness generation.
 
-- [ ] Add exported field `M *execmoduletester.ExecModuleTester` to `BlockTest` struct
-- [ ] In `BlockTest.Run()`, after `m := execmoduletester.New(t, mOpts...)`, add `bt.M = m`
-- [ ] In `BlockTest.RunCLI()`, same: add `bt.M = m`
-- [ ] Verify: existing tests still pass — `go test -run TestExecutionSpecBlockchain -count=1 ./execution/tests/eest_blockchain/... -short` (or check it compiles)
-- [ ] Verify: `make lint` passes
+- [x] Add exported field `M *execmoduletester.ExecModuleTester` to `BlockTest` struct
+- [x] In `BlockTest.Run()`, after `m := execmoduletester.New(t, mOpts...)`, add `bt.M = m`
+- [x] In `BlockTest.RunCLI()`, same: add `bt.M = m`
+- [x] Verify: existing tests still pass — `go test -run TestExecutionSpecBlockchain -count=1 ./execution/tests/eest_blockchain/... -short` (or check it compiles)
+- [x] Verify: `make lint` passes
 
 ### Task 4: Create witness test package and runner
 
