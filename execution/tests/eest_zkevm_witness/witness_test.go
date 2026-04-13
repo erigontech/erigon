@@ -24,6 +24,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -94,8 +95,11 @@ func TestExecutionSpecWitness(t *testing.T) {
 		ctx := context.Background()
 
 		// Compare witness for each block that has expected witness data.
-		// Collect the first mismatch as an error for CheckFailure.
-		var witnessErr error
+		// RPC infrastructure errors (endpoint failure, nil result) are fatal —
+		// they indicate a regression in the RPC layer, not a known witness mismatch.
+		// Comparison mismatches are collected across all blocks and routed through
+		// CheckFailure so bt.Fails patterns can mark known issues as expected.
+		var witnessErrs []error
 		for i := 0; i < test.NumBlocks(); i++ {
 			expected := test.ExpectedWitnessForBlock(i)
 			if expected == nil {
@@ -106,47 +110,45 @@ func TestExecutionSpecWitness(t *testing.T) {
 			bn := rpc.BlockNumber(blockNum)
 			result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn})
 			if err != nil {
-				witnessErr = fmt.Errorf("ExecutionWitness failed for block %d: %w", blockNum, err)
-				break
+				t.Fatalf("ExecutionWitness RPC failed for block %d: %v", blockNum, err)
 			}
 			if result == nil {
-				witnessErr = fmt.Errorf("ExecutionWitness returned nil for block %d", blockNum)
-				break
+				t.Fatalf("ExecutionWitness returned nil for block %d", blockNum)
 			}
 
 			if err := compareWitness(t, blockNum, expected, result); err != nil {
-				witnessErr = err
-				break
+				witnessErrs = append(witnessErrs, err)
 			}
 		}
 
 		// Route witness comparison result through CheckFailure so bt.Fails
 		// patterns can mark known mismatches as expected.
-		if err := bt.CheckFailure(t, witnessErr); err != nil {
+		if err := bt.CheckFailure(t, errors.Join(witnessErrs...)); err != nil {
 			t.Error(err)
 		}
 	})
 }
 
 // compareWitness performs exact ordered comparison of witness arrays.
-// Returns an error describing the first mismatch, or nil if all match.
+// Returns a joined error describing all field mismatches, or nil if all match.
 // Logs set-diff diagnostics on mismatch to help distinguish ordering vs content issues.
 func compareWitness(t *testing.T, blockNum uint64, expected *testutil.ExpectedWitness, actual *jsonrpc.ExecutionWitnessResult) error {
 	t.Helper()
 
+	var fieldErrs []error
 	if err := compareByteSlices(blockNum, "State", expected.State, actual.State); err != nil {
 		reportSetDiff(t, blockNum, "State", expected.State, actual.State)
-		return err
+		fieldErrs = append(fieldErrs, err)
 	}
 	if err := compareByteSlices(blockNum, "Codes", expected.Codes, actual.Codes); err != nil {
 		reportSetDiff(t, blockNum, "Codes", expected.Codes, actual.Codes)
-		return err
+		fieldErrs = append(fieldErrs, err)
 	}
 	if err := compareByteSlices(blockNum, "Headers", expected.Headers, actual.Headers); err != nil {
 		reportSetDiff(t, blockNum, "Headers", expected.Headers, actual.Headers)
-		return err
+		fieldErrs = append(fieldErrs, err)
 	}
-	return nil
+	return errors.Join(fieldErrs...)
 }
 
 // compareByteSlices compares two slices of hexutil.Bytes element-by-element.
