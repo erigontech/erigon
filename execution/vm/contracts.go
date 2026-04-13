@@ -617,11 +617,11 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 
 	result := make([]byte, modLen)
 	switch {
+	case !bitutil.TestBytes(mod[:len(mod)-1]) && mod[len(mod)-1] <= 1:
+		// Leave the result as zero for mod 0 (undefined) and 1
 	case len(base) > 0 && !bitutil.TestBytes(base[:len(base)-1]) && base[len(base)-1] == 1:
 		// If base == 1 (and mod > 1), then the result is 1
-		if bitutil.TestBytes(mod[:len(mod)-1]) || mod[len(mod)-1] > 1 {
-			result[modLen-1] = 1
-		}
+		result[modLen-1] = 1
 	case modLen > 32 && len(exp) > 0 && !bitutil.TestBytes(exp[:len(exp)-1]):
 		// For small exponents (≤255) with large moduli (>256 bits), use Go's math/big
 		// directly. evmone uses Montgomery multiplication whose O(n²) setup (converting
