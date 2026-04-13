@@ -56,7 +56,6 @@ type CursorItem struct {
 	btCursor     *btindex.Cursor
 	key          []byte
 	val          []byte
-	step         kv.Step
 	startTxNum   uint64
 	endTxNum     uint64
 	latestOffset uint64     // offset of the latest value in the file
@@ -365,7 +364,7 @@ func (hi *DomainLatestIterFile) Next() ([]byte, []byte, error) {
 // debugIteratePrefix iterates over key-value pairs of the storage domain that start with given prefix
 //
 // k and v lifetime is bounded by the lifetime of the iterator
-func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.MapIter[string, []dataWithTxNum], it func(k []byte, v []byte, step kv.Step) (cont bool, err error), roTx kv.Tx) error {
+func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.MapIter[string, []dataWithTxNum], it func(k []byte, v []byte) (cont bool, err error), roTx kv.Tx) error {
 	// Implementation:
 	//     File endTxNum  = last txNum of file step
 	//     DB endTxNum    = first txNum of step in db
@@ -388,6 +387,7 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 	}()
 	var k, v []byte
 	var err error
+	filesEndTxNum := dt.files.EndTxNum()
 
 	if ramIter.Seek(string(prefix)) {
 		k := toBytesZeroCopy(ramIter.Key())
@@ -395,7 +395,7 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 		v = ramIter.Value()[len(ramIter.Value())-1].data
 
 		if len(k) > 0 && bytes.HasPrefix(k, prefix) {
-			heap.Push(cpPtr, &CursorItem{t: RAM_CURSOR, key: common.Copy(k), val: common.Copy(v), step: 0, iter: ramIter, endTxNum: math.MaxUint64, reverse: true})
+			heap.Push(cpPtr, &CursorItem{t: RAM_CURSOR, key: common.Copy(k), val: common.Copy(v), iter: ramIter, endTxNum: math.MaxUint64, reverse: true})
 		}
 	}
 
@@ -407,15 +407,17 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 	if k, v, err = valsCursor.Seek(prefix); err != nil {
 		return err
 	}
-	if len(k) > 0 && bytes.HasPrefix(k, prefix) {
+	// Skip DB entries whose step falls within the file range — files are authoritative there.
+	for len(k) > 0 && bytes.HasPrefix(k, prefix) {
 		step := kv.Step(^binary.BigEndian.Uint64(v[:8]))
-		val := v[8:]
-		//endTxNum := step * stepSize // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
-		//if haveRamUpdates && endTxNum >= txNum {
-		//	return fmt.Errorf("probably you didn't set SharedDomains.SetTxNum(). ram must be ahead of db: %d, %d", txNum, endTxNum)
-		//}
-
-		heap.Push(cpPtr, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(val), step: step, cDup: valsCursor, endTxNum: math.MaxUint64, reverse: true})
+		if step.ToTxNum(dt.stepSize) >= filesEndTxNum {
+			val := v[8:]
+			heap.Push(cpPtr, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(val), cDup: valsCursor, endTxNum: step.ToTxNum(dt.stepSize), reverse: true})
+			break
+		}
+		if k, v, err = valsCursor.NextNoDup(); err != nil {
+			return err
+		}
 	}
 
 	for i, item := range dt.files {
@@ -431,14 +433,13 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 		if key != nil && bytes.HasPrefix(key, prefix) {
 			val := cursor.Value()
 			txNum := item.endTxNum - 1 // !important: .kv files have semantic [from, t)
-			heap.Push(cpPtr, &CursorItem{t: FILE_CURSOR, key: key, val: val, step: 0, btCursor: cursor, endTxNum: txNum, reverse: true})
+			heap.Push(cpPtr, &CursorItem{t: FILE_CURSOR, key: key, val: val, btCursor: cursor, endTxNum: txNum, reverse: true})
 		}
 	}
 
 	for cp.Len() > 0 {
 		lastKey := common.Copy(cp[0].key)
 		lastVal := common.Copy(cp[0].val)
-		lastStep := cp[0].step
 		// Advance all the items that have this key (including the top)
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
 			ci1 := heap.Pop(cpPtr).(*CursorItem)
@@ -482,26 +483,32 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 					}
 				}
 			case DB_CURSOR:
-				k, v, err := ci1.cDup.NextNoDup()
-				if err != nil {
-					return err
-				}
-
-				if len(k) > 0 && bytes.HasPrefix(k, prefix) {
-					ci1.key = common.Copy(k)
+				var pushed bool
+				for {
+					k, v, err := ci1.cDup.NextNoDup()
+					if err != nil {
+						return err
+					}
+					if len(k) == 0 || !bytes.HasPrefix(k, prefix) {
+						break
+					}
 					step := kv.Step(^binary.BigEndian.Uint64(v[:8]))
-					endTxNum := step.ToTxNum(dt.stepSize) // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
-					ci1.endTxNum = endTxNum
-					ci1.val = common.Copy(v[8:])
-					ci1.step = step
-					heap.Push(cpPtr, ci1)
-				} else {
+					if step.ToTxNum(dt.stepSize) >= filesEndTxNum {
+						ci1.key = common.Copy(k)
+						ci1.endTxNum = step.ToTxNum(dt.stepSize)
+						ci1.val = common.Copy(v[8:])
+						heap.Push(cpPtr, ci1)
+						pushed = true
+						break
+					}
+				}
+				if !pushed {
 					ci1.cDup.Close()
 				}
 			}
 		}
 		if len(lastVal) > 0 {
-			cont, err := it(lastKey, lastVal, lastStep)
+			cont, err := it(lastKey, lastVal)
 			if err != nil {
 				return err
 			}
