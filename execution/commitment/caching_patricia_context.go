@@ -17,6 +17,9 @@
 package commitment
 
 import (
+	"fmt"
+	"sync/atomic"
+
 	"github.com/erigontech/erigon/common/maphash"
 	"github.com/erigontech/erigon/db/kv"
 )
@@ -38,6 +41,44 @@ type CachingPatriciaContext struct {
 	branches *maphash.Map[branchCacheEntry]
 	accounts *maphash.Map[*Update]
 	storage  *maphash.Map[*Update]
+
+	// Hit/miss counters for observability (atomic for concurrent access).
+	branchHits    atomic.Uint64
+	branchMisses  atomic.Uint64
+	accountHits   atomic.Uint64
+	accountMisses atomic.Uint64
+	storageHits   atomic.Uint64
+	storageMisses atomic.Uint64
+}
+
+// CacheStats holds cache hit/miss statistics for a CachingPatriciaContext.
+type CacheStats struct {
+	BranchHits    uint64
+	BranchMisses  uint64
+	AccountHits   uint64
+	AccountMisses uint64
+	StorageHits   uint64
+	StorageMisses uint64
+}
+
+// HitRate returns the overall hit rate across all three cache types (0.0 to 1.0).
+// Returns 0 if no lookups have been performed.
+func (s CacheStats) HitRate() float64 {
+	hits := s.BranchHits + s.AccountHits + s.StorageHits
+	total := hits + s.BranchMisses + s.AccountMisses + s.StorageMisses
+	if total == 0 {
+		return 0
+	}
+	return float64(hits) / float64(total)
+}
+
+// String returns a human-readable summary of the cache statistics.
+func (s CacheStats) String() string {
+	return fmt.Sprintf("branches(hit=%d miss=%d) accounts(hit=%d miss=%d) storage(hit=%d miss=%d) overall=%.1f%%",
+		s.BranchHits, s.BranchMisses,
+		s.AccountHits, s.AccountMisses,
+		s.StorageHits, s.StorageMisses,
+		s.HitRate()*100)
 }
 
 // NewCachingPatriciaContext creates a new CachingPatriciaContext with
@@ -50,11 +91,29 @@ func NewCachingPatriciaContext() *CachingPatriciaContext {
 	}
 }
 
-// Reset clears all cached entries from all three maps.
+// Stats returns a snapshot of the cache hit/miss counters.
+func (c *CachingPatriciaContext) Stats() CacheStats {
+	return CacheStats{
+		BranchHits:    c.branchHits.Load(),
+		BranchMisses:  c.branchMisses.Load(),
+		AccountHits:   c.accountHits.Load(),
+		AccountMisses: c.accountMisses.Load(),
+		StorageHits:   c.storageHits.Load(),
+		StorageMisses: c.storageMisses.Load(),
+	}
+}
+
+// Reset clears all cached entries from all three maps and resets counters.
 func (c *CachingPatriciaContext) Reset() {
 	c.branches.Clear()
 	c.accounts.Clear()
 	c.storage.Clear()
+	c.branchHits.Store(0)
+	c.branchMisses.Store(0)
+	c.accountHits.Store(0)
+	c.accountMisses.Store(0)
+	c.storageHits.Store(0)
+	c.storageMisses.Store(0)
 }
 
 // Wrap returns a cachedView that implements PatriciaContext. Reads check
@@ -77,8 +136,10 @@ type cachedView struct {
 
 func (v *cachedView) Branch(prefix []byte) ([]byte, kv.Step, error) {
 	if entry, ok := v.cache.branches.Get(prefix); ok {
+		v.cache.branchHits.Add(1)
 		return entry.data, entry.step, nil
 	}
+	v.cache.branchMisses.Add(1)
 
 	data, step, err := v.underlying.Branch(prefix)
 	if err != nil {
@@ -103,8 +164,10 @@ func (v *cachedView) PutBranch(prefix []byte, data []byte, prevData []byte) erro
 
 func (v *cachedView) Account(plainKey []byte) (*Update, error) {
 	if update, ok := v.cache.accounts.Get(plainKey); ok {
+		v.cache.accountHits.Add(1)
 		return update, nil
 	}
+	v.cache.accountMisses.Add(1)
 
 	update, err := v.underlying.Account(plainKey)
 	if err != nil {
@@ -119,8 +182,10 @@ func (v *cachedView) Account(plainKey []byte) (*Update, error) {
 
 func (v *cachedView) Storage(plainKey []byte) (*Update, error) {
 	if update, ok := v.cache.storage.Get(plainKey); ok {
+		v.cache.storageHits.Add(1)
 		return update, nil
 	}
+	v.cache.storageMisses.Add(1)
 
 	update, err := v.underlying.Storage(plainKey)
 	if err != nil {

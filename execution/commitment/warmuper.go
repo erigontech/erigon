@@ -135,9 +135,14 @@ func (w *Warmuper) Start() {
 				default:
 				}
 
-				if _, _, err := reader.LookupWithVisitor(hashedKey, visitor); err != nil {
+				keyStart := time.Now()
+				_, found, err := reader.LookupWithVisitor(hashedKey, visitor)
+				if err != nil {
 					log.Debug(fmt.Sprintf("[%s][warmup] lookup failed", w.logPrefix),
 						"error", err)
+				} else {
+					log.Trace(fmt.Sprintf("[%s][warmup] key warmed", w.logPrefix),
+						"found", found, "elapsed", time.Since(keyStart))
 				}
 				w.keysProcessed.Add(1)
 			}

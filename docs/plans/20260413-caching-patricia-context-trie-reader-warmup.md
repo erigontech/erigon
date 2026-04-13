@@ -158,14 +158,14 @@ two-layer design:
 - Create: `execution/commitment/caching_patricia_context_bench_test.go`
 - Modify: `execution/commitment/warmuper.go` (metrics/logging)
 
-- [ ] Add cache hit/miss counters to `CachingPatriciaContext` (atomic uint64 per map: branchHits, branchMisses, accountHits, accountMisses, storageHits, storageMisses)
-- [ ] Add `Stats()` method returning hit rates — logged after `Process()` completes
-- [ ] Add per-key warmup completion logging: when `LookupWithVisitor` returns, the key is warmed — log timing if debug-level
-- [ ] Write `BenchmarkCachingPatriciaContext_ReadThrough` — measure read-through overhead vs direct
-- [ ] Write `BenchmarkCachingPatriciaContext_CacheHit` — measure cache hit latency
-- [ ] Write `BenchmarkWarmuper_TrieReader` — compare new warmup vs baseline (no warmup) on synthetic trie
-- [ ] Run before/after `Benchmark_HexPatriciaHashed_Process` comparison and document results
-- [ ] Run tests — must pass
+- [x] Add cache hit/miss counters to `CachingPatriciaContext` (atomic uint64 per map: branchHits, branchMisses, accountHits, accountMisses, storageHits, storageMisses)
+- [x] Add `Stats()` method returning hit rates — logged after `Process()` completes
+- [x] Add per-key warmup completion logging: when `LookupWithVisitor` returns, the key is warmed — log timing if debug-level
+- [x] Write `BenchmarkCachingPatriciaContext_ReadThrough` — measure read-through overhead vs direct
+- [x] Write `BenchmarkCachingPatriciaContext_CacheHit` — measure cache hit latency
+- [x] Write `BenchmarkWarmuper_TrieReader` — compare new warmup vs baseline (no warmup) on synthetic trie
+- [x] Run before/after `Benchmark_HexPatriciaHashed_Process` comparison and document results
+- [x] Run tests — must pass
 
 ### Task 7: Verify acceptance criteria
 

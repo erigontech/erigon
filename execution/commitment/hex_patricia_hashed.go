@@ -2756,6 +2756,14 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	}
 	if warmuper != nil {
 		warmuper.DrainPending()
+		cache := warmuper.SharedCache()
+		stats := cache.Stats()
+		log.Debug(fmt.Sprintf("[%s] commitment cache stats", logPrefix),
+			"branches.hit", stats.BranchHits, "branches.miss", stats.BranchMisses,
+			"accounts.hit", stats.AccountHits, "accounts.miss", stats.AccountMisses,
+			"storage.hit", stats.StorageHits, "storage.miss", stats.StorageMisses,
+			"hitRate", fmt.Sprintf("%.1f%%", stats.HitRate()*100),
+		)
 	}
 
 	if hph.branchEncoder.DeferUpdatesEnabled() && !hph.leaveDeferredForCaller {
