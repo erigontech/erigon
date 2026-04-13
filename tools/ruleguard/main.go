@@ -96,7 +96,7 @@ func isExcludedPackage(pkgPath string) bool {
 
 func isExcludedFile(filename string) bool {
 	base := filepath.Base(filename)
-	if base == "hack.go" || base == "sample.go" && strings.Contains(filename, "/metrics/") {
+	if base == "hack.go" || (base == "sample.go" && strings.Contains(filename, "/metrics/")) {
 		return true
 	}
 	return false
