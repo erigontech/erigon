@@ -45,6 +45,14 @@ func (m *Map[V]) Set(key []byte, value V) {
 	m.m.Store(h, value)
 }
 
+// LoadOrStore returns the existing value for the key if present.
+// Otherwise, it stores and returns the given value.
+// The loaded result is true if the value was loaded, false if stored.
+func (m *Map[V]) LoadOrStore(key []byte, value V) (actual V, loaded bool) {
+	h := Hash(key)
+	return m.m.LoadOrStore(h, value)
+}
+
 // Delete removes a key from the map.
 func (m *Map[V]) Delete(key []byte) {
 	h := Hash(key)

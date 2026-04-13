@@ -175,11 +175,12 @@ func (w *Warmuper) Wait() error {
 	if !w.closed.Swap(true) && w.work != nil {
 		close(w.work)
 	}
+	var err error
 	if w.g != nil {
-		_ = w.g.Wait()
+		err = w.g.Wait()
 	}
 	w.cancel()
-	return nil
+	return err
 }
 
 // Stats returns statistics about the warmup.

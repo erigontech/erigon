@@ -146,14 +146,17 @@ func (v *cachedView) Branch(prefix []byte) ([]byte, kv.Step, error) {
 		return nil, 0, err
 	}
 
-	// Cache the result. Copy data to avoid issues with buffer reuse.
+	// Copy data to avoid issues with buffer reuse.
 	var dataCopy []byte
 	if data != nil {
 		dataCopy = make([]byte, len(data))
 		copy(dataCopy, data)
 	}
-	v.cache.branches.Set(prefix, branchCacheEntry{data: dataCopy, step: step})
-	return dataCopy, step, nil
+	// Use LoadOrStore so that a concurrent PutBranch (which uses Set) is
+	// never overwritten by a slower warmup worker that read stale data
+	// from its read-only DB snapshot.
+	entry, _ := v.cache.branches.LoadOrStore(prefix, branchCacheEntry{data: dataCopy, step: step})
+	return entry.data, entry.step, nil
 }
 
 func (v *cachedView) PutBranch(prefix []byte, data []byte, prevData []byte) error {
