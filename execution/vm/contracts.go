@@ -32,7 +32,7 @@ import (
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fp"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	"github.com/consensys/gnark-crypto/ecc/bn254"
-	"github.com/erigontech/evmone_precompiles"
+	evmone "github.com/erigontech/evmone_precompiles"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -615,6 +615,7 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 	exp := getData(input, baseLen, expLen)
 	mod := getData(input, baseLen+expLen, modLen)
 
+	// Allocate the result buffer once, zero-filled.
 	result := make([]byte, modLen)
 	switch {
 	case !bitutil.TestBytes(mod[:len(mod)-1]) && mod[len(mod)-1] <= 1:
