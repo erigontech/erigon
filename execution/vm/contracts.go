@@ -629,9 +629,7 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 		baseBig := new(big.Int).SetBytes(base)
 		expBig := new(big.Int).SetBytes(exp)
 		modBig := new(big.Int).SetBytes(mod)
-		if modBig.Sign() > 0 {
-			baseBig.Exp(baseBig, expBig, modBig).FillBytes(result)
-		}
+		baseBig.Exp(baseBig, expBig, modBig).FillBytes(result)
 	default:
 		evmone.ModExp(result, base, exp, mod)
 	}
