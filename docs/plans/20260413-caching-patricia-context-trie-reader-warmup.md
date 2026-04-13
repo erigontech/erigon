@@ -125,16 +125,16 @@ two-layer design:
 - Modify: `execution/commitment/hex_patricia_hashed.go`
 - Modify: `execution/commitment/commitmentdb/commitment_context.go`
 
-- [ ] In `ComputeCommitment()`: create `CachingPatriciaContext`, pass to `Process()` via `WarmupConfig` or new field
-- [ ] In `Process()`: wrap the main `PatriciaContext` with `cache.Wrap(hph.ctx)` so Process reads also hit the shared cache
-- [ ] Remove `branchFromCacheOrDB`, `accountFromCacheOrDB`, `storageFromCacheOrDB` from `HexPatriciaHashed` — direct `hph.ctx.Branch/Account/Storage` calls now go through cached view
-- [ ] Remove `hph.cache *WarmupCache` field and all `SetCache`/`hph.cache` references
-- [ ] Remove `BranchEncoder.SetCache()` and its cache-or-DB pattern in `CollectUpdate()`
-- [ ] Call `cache.Reset()` after `Process()` returns (in `ComputeCommitment` defer)
-- [ ] Handle recording mode: when `recorder != nil`, skip cache (or wrap recorder's context without caching) to preserve trace completeness
-- [ ] Write tests: `Process()` with CachingPatriciaContext produces identical root hash as before
-- [ ] Run existing `Benchmark_HexPatriciaHashed_Process` to verify no regression
-- [ ] Run tests — must pass before task 5
+- [x] In `ComputeCommitment()`: create `CachingPatriciaContext`, pass to `Process()` via `WarmupConfig` or new field
+- [x] In `Process()`: wrap the main `PatriciaContext` with `cache.Wrap(hph.ctx)` so Process reads also hit the shared cache
+- [x] Remove `branchFromCacheOrDB`, `accountFromCacheOrDB`, `storageFromCacheOrDB` from `HexPatriciaHashed` — direct `hph.ctx.Branch/Account/Storage` calls now go through cached view
+- [x] Remove `hph.cache *WarmupCache` field and all `SetCache`/`hph.cache` references
+- [x] Remove `BranchEncoder.SetCache()` and its cache-or-DB pattern in `CollectUpdate()`
+- [x] Call `cache.Reset()` after `Process()` returns (in `ComputeCommitment` defer)
+- [x] Handle recording mode: when `recorder != nil`, skip cache (or wrap recorder's context without caching) to preserve trace completeness
+- [x] Write tests: `Process()` with CachingPatriciaContext produces identical root hash as before
+- [x] Run existing `Benchmark_HexPatriciaHashed_Process` to verify no regression
+- [x] Run tests — must pass before task 5
 
 ### Task 5: Remove old WarmupCache
 
