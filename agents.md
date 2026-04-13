@@ -20,7 +20,7 @@ Verify changes before committing: `make lint && make erigon integration`
 - Erigon is an Ethereum execution client
 - Data flow: `db -> snapshots`
 - `snapshots` are immutable
-- `Unwind` beyond data in snapshots are not allowed
+- `Unwind` beyond data in snapshots not allowed
 
 ## Key Directories
 
