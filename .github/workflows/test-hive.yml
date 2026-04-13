@@ -109,7 +109,7 @@ jobs:
           sed -i "s/^ARG tag=main$/ARG tag=${branch_name}/" clients/erigon/Dockerfile
           go_version=$(go mod edit -json ../erigon-src/go.mod | jq -r .Go)
           echo "Patching builder Go version to ${go_version}"
-          sed -i "s|golang:[0-9.]*-alpine|golang:${go_version}-alpine|" clients/erigon/Dockerfile
+          sed -i "s|golang:[0-9.]*-|golang:${go_version}-|" clients/erigon/Dockerfile
           # Pin the execution-apis ref used by the rpc-compat simulator so that
           # upstream test additions don't break CI unexpectedly.
           execution_apis_ref="${{ steps.hive-version.outputs.execution_apis_ref }}"
