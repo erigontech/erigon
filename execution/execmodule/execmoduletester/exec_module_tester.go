@@ -366,7 +366,7 @@ func applyOptions(opts []Option) options {
 		pruneMode:       &defaultPruneMode,
 		blockBufferSize: 128,
 		chainConfig:     chain.TestChainBerlinConfig,
-		experimentalBAL: true,
+		experimentalBAL: false,
 	}
 	for _, o := range opts {
 		o(&opt)
