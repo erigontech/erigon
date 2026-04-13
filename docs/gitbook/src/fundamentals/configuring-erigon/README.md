@@ -304,13 +304,6 @@ Flags for controlling logging and performance profiling.
 
 Flags related to consensus mechanisms and network forks.
 
-* `--clique.checkpoint value`: The number of blocks after which to save the vote snapshot.
-  * Default: `10`
-* `--clique.snapshots value`: The number of recent vote snapshots to keep in memory.
-  * Default: `1024`
-* `--clique.signatures value`: The number of recent block signatures to keep in memory.
-  * Default: `16384`
-* `--clique.datadir value`: The path to the clique database folder.
 * `--fakepow`: Disables proof-of-work verification.
   * Default: `false`
 * `--gpo.blocks value`: The number of recent blocks to check for gas prices.
@@ -741,10 +734,6 @@ GLOBAL OPTIONS:
    --gpo.percentile value                                                                                                  Suggested gas price is the given percentile of a set of recent transaction gas prices (default: 60)
    --allow-insecure-unlock                                                                                                 Allow insecure account unlocking when account-related RPCs are exposed by http (default: false)
    --identity value                                                                                                        Custom node name
-   --clique.checkpoint value                                                                                               Number of blocks after which to save the vote snapshot to the database (default: 10)
-   --clique.snapshots value                                                                                                Number of recent vote snapshots to keep in memory (default: 1024)
-   --clique.signatures value                                                                                               Number of recent block signatures to keep in memory (default: 16384)
-   --clique.datadir value                                                                                                  Path to clique db folder
    --proposer.disable                                                                                                      Disables PoS proposer (default: false)
    --miner.gaslimit value                                                                                                  Target gas limit for mined blocks (default: 0)
    --miner.etherbase value                                                                                                 Public address for block mining rewards (default: "0")
