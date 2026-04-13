@@ -169,13 +169,13 @@ two-layer design:
 
 ### Task 7: Verify acceptance criteria
 
-- [ ] Verify identical state root for all test cases (unit + integration)
-- [ ] Verify warmup cache hit rates are reported in logs
-- [ ] Verify per-key "warmed" signal works (LookupWithVisitor returns found=true for existing keys)
-- [ ] Verify no data races under `-race` flag with 16 workers
-- [ ] Run full test suite: `go test ./execution/commitment/...`
-- [ ] Run `make lint`
-- [ ] Run `make erigon` — binary builds cleanly
+- [x] Verify identical state root for all test cases (unit + integration)
+- [x] Verify warmup cache hit rates are reported in logs
+- [x] Verify per-key "warmed" signal works (LookupWithVisitor returns found=true for existing keys)
+- [x] Verify no data races under `-race` flag with 16 workers
+- [x] Run full test suite: `go test ./execution/commitment/...`
+- [x] Run `make lint`
+- [x] Run `make erigon` — binary builds cleanly
 
 ### Task 8: [Final] Update documentation
 
