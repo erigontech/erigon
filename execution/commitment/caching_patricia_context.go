@@ -157,9 +157,18 @@ func (v *cachedView) Branch(prefix []byte) ([]byte, kv.Step, error) {
 }
 
 func (v *cachedView) PutBranch(prefix []byte, data []byte, prevData []byte) error {
-	// Invalidate the cache entry so the next read sees fresh data.
-	v.cache.branches.Delete(prefix)
-	return v.underlying.PutBranch(prefix, data, prevData)
+	err := v.underlying.PutBranch(prefix, data, prevData)
+	if err != nil {
+		return err
+	}
+	// Update the cache with the new data so the next Branch() read is a hit.
+	var dataCopy []byte
+	if data != nil {
+		dataCopy = make([]byte, len(data))
+		copy(dataCopy, data)
+	}
+	v.cache.branches.Set(prefix, branchCacheEntry{data: dataCopy, step: 0})
+	return nil
 }
 
 func (v *cachedView) Account(plainKey []byte) (*Update, error) {

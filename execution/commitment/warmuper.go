@@ -100,6 +100,7 @@ func (w *Warmuper) Start() {
 	if w.numWorkers <= 0 {
 		return
 	}
+	w.startTime = time.Now()
 
 	w.work = make(chan []byte, w.numWorkers*64)
 	w.g, w.ctx = errgroup.WithContext(w.ctx)
@@ -135,14 +136,10 @@ func (w *Warmuper) Start() {
 				default:
 				}
 
-				keyStart := time.Now()
-				_, found, err := reader.LookupWithVisitor(hashedKey, visitor)
+				_, _, err := reader.LookupWithVisitor(hashedKey, visitor)
 				if err != nil {
 					log.Debug(fmt.Sprintf("[%s][warmup] lookup failed", w.logPrefix),
 						"error", err)
-				} else {
-					log.Trace(fmt.Sprintf("[%s][warmup] key warmed", w.logPrefix),
-						"found", found, "elapsed", time.Since(keyStart))
 				}
 				w.keysProcessed.Add(1)
 			}
@@ -152,12 +149,17 @@ func (w *Warmuper) Start() {
 }
 
 // WarmKey submits a hashed key for warming. Call Start() first.
+// The key is copied internally so the caller may reuse/overwrite the slice.
 func (w *Warmuper) WarmKey(hashedKey []byte) {
 	if !w.started.Load() || w.numWorkers <= 0 || w.closed.Load() {
 		return
 	}
+	// Copy the key because callers (HashSort) may reuse the underlying
+	// arena-backed buffer before the worker reads the key.
+	keyCopy := make([]byte, len(hashedKey))
+	copy(keyCopy, hashedKey)
 	select {
-	case w.work <- hashedKey:
+	case w.work <- keyCopy:
 	case <-w.ctx.Done():
 	default: // non-blocking
 	}

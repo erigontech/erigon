@@ -2657,17 +2657,20 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		warmup.AccountKeyLen = int(hph.accountKeyLen)
 		warmuper = NewWarmuper(ctx, warmup)
 		warmuper.Start()
-		defer warmuper.CloseAndWait()
 
 		// Wrap hph.ctx with the warmuper's shared CachingPatriciaContext so
 		// Process reads also hit the warmed cache.
 		origCtx := hph.ctx
 		cache := warmuper.SharedCache()
 		hph.ctx = cache.Wrap(origCtx)
+		// LIFO order: cache cleanup registered first (runs second),
+		// CloseAndWait registered second (runs first) — ensures workers
+		// finish before the cache is cleared.
 		defer func() {
 			hph.ctx = origCtx
 			cache.Reset()
 		}()
+		defer warmuper.CloseAndWait()
 	}
 
 	err = updates.HashSort(ctx, warmuper, func(hashedKey, plainKey []byte, stateUpdate *Update) error {

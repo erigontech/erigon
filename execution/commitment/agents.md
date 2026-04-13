@@ -53,7 +53,7 @@ type PatriciaContext interface {
     Branch(prefix []byte) ([]byte, kv.Step, error)
     Account(plainKey []byte) (*Update, error)
     Storage(plainKey []byte) (*Update, error)
-    PutBranch(prefix []byte, data []byte, prevData []byte, prevStep kv.Step) error
+    PutBranch(prefix []byte, data []byte, prevData []byte) error
 }
 
 // BranchVisitor is called at each branch node during TrieReader traversal

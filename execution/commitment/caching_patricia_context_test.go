@@ -186,12 +186,12 @@ func TestCachingPatriciaContext_PutBranchInvalidates(t *testing.T) {
 		t.Fatal("expected 1 call")
 	}
 
-	// PutBranch invalidates.
+	// PutBranch updates cache with new data.
 	if err := view.PutBranch([]byte("pfx"), []byte("new"), []byte("old")); err != nil {
 		t.Fatal(err)
 	}
 
-	// Next read should miss cache and go to underlying (which now has "new").
+	// Next read should be a cache hit returning the new data.
 	data2, _, err := view.Branch([]byte("pfx"))
 	if err != nil {
 		t.Fatal(err)
@@ -199,8 +199,10 @@ func TestCachingPatriciaContext_PutBranchInvalidates(t *testing.T) {
 	if !bytes.Equal(data2, []byte("new")) {
 		t.Fatalf("expected new data after PutBranch, got %x", data2)
 	}
-	if mock.branchCalls.Load() != 2 {
-		t.Fatalf("expected 2 underlying calls after invalidation, got %d", mock.branchCalls.Load())
+	// Only 1 underlying Branch call (the initial miss) — PutBranch updated
+	// the cache so the second Branch was a hit.
+	if mock.branchCalls.Load() != 1 {
+		t.Fatalf("expected 1 underlying call (cache hit after PutBranch), got %d", mock.branchCalls.Load())
 	}
 }
 
