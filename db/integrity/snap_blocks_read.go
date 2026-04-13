@@ -35,7 +35,7 @@ func SnapBlocksRead(ctx context.Context, db kv.TemporalRoDB, blockReader service
 	maxBlockNum := blockReader.Snapshots().SegmentsMax()
 
 	if to != 0 && maxBlockNum > to {
-		maxBlockNum = 2
+		maxBlockNum = to
 	}
 
 	for i := from; i < maxBlockNum; i += 10_000 {
