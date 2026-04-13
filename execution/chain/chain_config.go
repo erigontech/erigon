@@ -43,7 +43,7 @@ type Config struct {
 	ChainName string   `json:"chainName"` // chain name, eg: mainnet, sepolia, bor-mainnet
 	ChainID   *big.Int `json:"chainId"`   // chainId identifies the current chain and is used for replay protection
 
-	Rules RulesName `json:"consensus,omitempty"` // aura or ethash
+	Rules RulesName `json:"consensus,omitempty"` // aura, bor, or ethash
 
 	// *Block fields activate the corresponding hard fork at a certain block number,
 	// while *Time fields do so based on the block's time stamp.
