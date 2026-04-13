@@ -116,7 +116,7 @@ func TestConfigDefaults(t *testing.T) {
 	require.Equal(t, uint64(1), snap.NetworkID, "default network should be mainnet")
 	require.True(t, snap.StateStream, "state stream should be enabled by default")
 	require.True(t, snap.InternalCL, "internal CL (Caplin) is on by default")
-	require.False(t, snap.ExperimentalBAL, "experimental BAL should be off by default")
+	require.True(t, snap.ExperimentalBAL, "experimental BAL should be on by default on bal-devnet branches")
 	require.False(t, snap.KeepExecutionProofs, "keep execution proofs should be off by default")
 
 	// Snapshot defaults
@@ -210,6 +210,6 @@ func TestConfigSnapshotStability(t *testing.T) {
 	require.True(t, snap.StateStream)
 	require.True(t, snap.SnapProduceE2)
 	require.True(t, snap.SnapProduceE3)
-	require.False(t, snap.ExperimentalBAL)
+	require.True(t, snap.ExperimentalBAL)
 	require.False(t, snap.NoDownloader)
 }
