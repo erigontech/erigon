@@ -356,9 +356,7 @@ func (i *beaconStatesCollector) collectInactivityScores(slot uint64, inactivityS
 }
 
 func (i *beaconStatesCollector) flush(ctx context.Context, tx kv.RwTx) error {
-	loadfunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		return next(k, k, v)
-	}
+	loadfunc := etl.IdentityLoadFunc
 
 	if err := i.effectiveBalanceCollector.Load(tx, kv.ValidatorEffectiveBalance, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err

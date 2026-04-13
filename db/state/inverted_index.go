@@ -1054,6 +1054,10 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 			return fmt.Errorf("add %s efi index val: %w", ii.FilenameBase, err)
 		}
 
+		if k == nil { // sentinel flush: no next group to start
+			return nil
+		}
+
 		prevKey = append(prevKey[:0], k...)
 		txNum = binary.BigEndian.Uint64(v)
 		offsets = append(offsets[:0], uint32(txNum-baseTxNum))

@@ -686,6 +686,10 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 			return fmt.Errorf("add %s ef history val: %w", h.FilenameBase, err)
 		}
 
+		if k == nil { // sentinel flush: no next group to start
+			return nil
+		}
+
 		prevKey = append(prevKey[:0], k...)
 		txNum = binary.BigEndian.Uint64(v)
 		offsets = append(offsets[:0], uint32(txNum-baseTxNum))

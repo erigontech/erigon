@@ -436,9 +436,6 @@ func (ch codeChange) revert(s *IntraBlockState) error {
 			if _, ok := s.versionedWrites[ch.account][AccountKey{Path: CodeSizePath}]; ok {
 				s.versionedWrites.UpdateVal(ch.account, AccountKey{Path: CodeSizePath}, len(ch.prevcode))
 			}
-			if v, ok := s.versionedWrites[ch.account][AccountKey{Path: CodeSizePath}]; ok {
-				v.Val = len(ch.prevcode)
-			}
 		}
 	}
 	return nil
