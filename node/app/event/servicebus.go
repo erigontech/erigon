@@ -62,8 +62,8 @@ func (bus *ServiceBus) Deactivate() { /*
 
 func (bus *ServiceBus) Register(object interface{}, fns ...interface{}) (err error) {
 	objectPtr := reflect.ValueOf(object).Pointer()
-	//fmt.Printf("Register: %v\n", objectPtr)
 	bus.registrationLock.Lock()
+	defer bus.registrationLock.Unlock()
 	for _, fn := range fns {
 		if reflect.TypeOf(fn).Kind() != reflect.Func {
 			return fmt.Errorf("invalid type: %T should be func", fn)
@@ -74,28 +74,28 @@ func (bus *ServiceBus) Register(object interface{}, fns ...interface{}) (err err
 			break
 		}
 	}
-	bus.registrationLock.Unlock()
 
 	return err
 }
 
 func (bus *ServiceBus) UnregisterAll(object interface{}) error {
-
 	objectPtr := reflect.ValueOf(object).Pointer()
-	//fmt.Printf("Unregister: %v\n", objectPtr)
 
 	bus.registrationLock.Lock()
+	defer bus.registrationLock.Unlock()
+
 	fns := bus.registrations[objectPtr]
-
+	var errs []error
 	for _, fn := range fns {
-		err := bus.eventBus.Unsubscribe(fn)
-
-		if err != nil {
-			return err
+		if err := bus.eventBus.Unsubscribe(fn); err != nil {
+			errs = append(errs, err)
 		}
 	}
 	delete(bus.registrations, objectPtr)
-	bus.registrationLock.Unlock()
+
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
 	return nil
 }
 

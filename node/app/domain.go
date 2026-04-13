@@ -117,7 +117,7 @@ func WithInfo[T comparable](info map[any]any) domainFeature {
 				d.info = make(map[interface{}]interface{})
 			}
 			for key, value := range info {
-				info[key] = value
+				d.info[key] = value
 			}
 		}
 	})
@@ -276,8 +276,7 @@ func (d *domain[T]) RootId() DomainId {
 	if d.root != nil {
 		return d.root.Id()
 	}
-
-	return DomainId{}
+	return d.id
 }
 
 func (d *domain[T]) Incarnation() Incarnation {

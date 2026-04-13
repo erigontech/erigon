@@ -91,8 +91,6 @@ func (bus *ManagedEventBus) Post(args ...interface{}) int {
 	return bus.eventBus.Publish(args...)
 }
 
-var zero = reflect.Value{}
-
 func removeRegistration(registrations map[uintptr][]interface{}, objectPtr uintptr, idx int) {
 	if _, ok := registrations[objectPtr]; !ok || idx < 0 {
 		return
@@ -100,7 +98,7 @@ func removeRegistration(registrations map[uintptr][]interface{}, objectPtr uintp
 	l := len(registrations[objectPtr])
 
 	copy(registrations[objectPtr][idx:], registrations[objectPtr][idx+1:])
-	registrations[objectPtr][l-1] = zero
+	registrations[objectPtr][l-1] = nil
 	registrations[objectPtr] = registrations[objectPtr][:l-1]
 }
 

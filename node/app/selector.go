@@ -70,7 +70,14 @@ type KeyedSelector interface {
 // SelectorComparator provides a basic comparison on selectors by comparing
 // the values of the selectors keys
 func SelectorComparator(a, b interface{}) int {
-	return util.CompoundCompare(a.(KeyedSelector).Keys(), b.(KeyedSelector).Keys())
+	aKeys := a.(KeyedSelector).Keys()
+	bKeys := b.(KeyedSelector).Keys()
+	aArray, aOk := aKeys.(KeyArray)
+	bArray, bOk := bKeys.(KeyArray)
+	if aOk && bOk {
+		return util.CompoundCompare([]interface{}(aArray), []interface{}(bArray))
+	}
+	return util.CompoundCompare(aKeys, bKeys)
 }
 
 type RangeSelector interface {

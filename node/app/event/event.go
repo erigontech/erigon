@@ -117,7 +117,7 @@ func (event *BaseEvent[E]) WithContext(eventContext context.Context) E {
 	withContext := event.event.(E)
 
 	if event.context != eventContext {
-		withContext := event.event.(Event[E]).Clone()
+		withContext = event.event.(Event[E]).Clone()
 		withContext.setContext(eventContext)
 	}
 

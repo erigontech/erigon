@@ -18,6 +18,7 @@ package util
 
 import (
 	"bytes"
+	"fmt"
 	"reflect"
 )
 
@@ -103,17 +104,36 @@ func Compare(a, b interface{}) int {
 		}
 	}
 
-	pa := reflect.ValueOf(a).Pointer()
-	pb := reflect.ValueOf(b).Pointer()
+	va := reflect.ValueOf(a)
+	vb := reflect.ValueOf(b)
 
-	if pa-pb != 0 {
-		if (pa - pb) > 0 {
-			return 1
+	// For types that support Pointer() (ptr, chan, map, func, slice, unsafe.Pointer)
+	if va.IsValid() && vb.IsValid() {
+		ka := va.Kind()
+		kb := vb.Kind()
+		if (ka == reflect.Ptr || ka == reflect.Chan || ka == reflect.Map || ka == reflect.Func || ka == reflect.Slice || ka == reflect.UnsafePointer) &&
+			(kb == reflect.Ptr || kb == reflect.Chan || kb == reflect.Map || kb == reflect.Func || kb == reflect.Slice || kb == reflect.UnsafePointer) {
+			pa := va.Pointer()
+			pb := vb.Pointer()
+			if pa < pb {
+				return -1
+			}
+			if pa > pb {
+				return 1
+			}
+			return 0
 		}
-
-		return -1
 	}
 
+	// Fallback: compare by string representation.
+	sa := fmt.Sprint(a)
+	sb := fmt.Sprint(b)
+	if sa < sb {
+		return -1
+	}
+	if sa > sb {
+		return 1
+	}
 	return 0
 }
 

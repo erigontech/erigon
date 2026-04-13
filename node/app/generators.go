@@ -83,7 +83,7 @@ func (generator *randomGenerator[T]) GenerateId(generationContext context.Contex
 		return ((interface{})(random.RandomString(generator.len))).(T), nil
 	case reflect.Slice:
 		switch t.Elem().Kind() {
-		case reflect.Int8:
+		case reflect.Uint8:
 			return ((interface{})(random.RandomBytes(generator.len))).(T), nil
 		}
 	}

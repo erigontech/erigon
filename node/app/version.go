@@ -81,6 +81,9 @@ func NewVersion(major interface{}, minor ...uint64) Version {
 		patch = minor[1]
 	}
 
+	if len(minor) == 0 {
+		return &SemanticVersion{*pmajor, 0, patch, nil, nil}
+	}
 	return &SemanticVersion{*pmajor, minor[0], patch, nil, nil}
 }
 
@@ -92,7 +95,7 @@ func NewPreReleaseVersion(major, minor, patch uint64, preReleaseInfo, buildInfo 
 	preReleaseValues := []PreReleaseValue{}
 	for _, prvalstr := range preReleaseInfo {
 		prval, err := newPreReleaseValue(prvalstr)
-		if err != nil {
+		if err == nil {
 			preReleaseValues = append(preReleaseValues, prval)
 		}
 	}

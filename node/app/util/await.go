@@ -27,6 +27,9 @@ func IsNil[T any](t T) bool {
 	v := reflect.ValueOf(t)
 	kind := v.Kind()
 	// Must be one of these types to be nillable
+	if !v.IsValid() {
+		return true
+	}
 	return (kind == reflect.Ptr ||
 		kind == reflect.Interface ||
 		kind == reflect.Slice ||

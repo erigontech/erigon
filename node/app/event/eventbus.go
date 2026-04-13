@@ -68,6 +68,49 @@ type handlerMap struct {
 	handlers          []*eventHandler
 }
 
+func (hmap *handlerMap) clone() *handlerMap {
+	if hmap == nil {
+		return nil
+	}
+	cloned := &handlerMap{
+		nextArgInterfaces: make(map[reflect.Type]int, len(hmap.nextArgInterfaces)),
+		nextArgMap:        make(map[reflect.Type]*handlerMap, len(hmap.nextArgMap)),
+	}
+	for k, v := range hmap.nextArgInterfaces {
+		cloned.nextArgInterfaces[k] = v
+	}
+	if len(hmap.handlers) > 0 {
+		cloned.handlers = make([]*eventHandler, len(hmap.handlers))
+		copy(cloned.handlers, hmap.handlers)
+	}
+	for argType, nextMap := range hmap.nextArgMap {
+		cloned.nextArgMap[argType] = nextMap.clone()
+	}
+	return cloned
+}
+
+func (hmap *handlerMap) collectOnceHandlers() []*eventHandler {
+	var result []*eventHandler
+	for _, h := range hmap.handlers {
+		if h.flagOnce {
+			result = append(result, h)
+		}
+	}
+	for _, nextMap := range hmap.nextArgMap {
+		result = append(result, nextMap.collectOnceHandlers()...)
+	}
+	return result
+}
+
+func (hmap *handlerMap) removeOnceHandler(callback reflect.Value) {
+	if idx, _ := hmap.findHandlerIdx(callback); idx >= 0 {
+		hmap.removeHandler(idx)
+	}
+	for _, nextMap := range hmap.nextArgMap {
+		nextMap.removeOnceHandler(callback)
+	}
+}
+
 func (hmap *handlerMap) publish(bus *eventBus, args []interface{}, argIndex int) int {
 	var pubcount int = 0
 
@@ -92,11 +135,8 @@ func (hmap *handlerMap) publish(bus *eventBus, args []interface{}, argIndex int)
 			copyHandlers := make([]*eventHandler, 0, len(handlers))
 			copyHandlers = append(copyHandlers, handlers...)
 
-			for i, handler := range copyHandlers {
+			for _, handler := range copyHandlers {
 				pubcount++
-				if handler.flagOnce {
-					hmap.removeHandler(i)
-				}
 
 				logEnabled := log.TraceEnabled()
 
@@ -379,10 +419,26 @@ func (bus *eventBus) Unsubscribe(fn interface{}) error {
 }
 
 // Publish executes callback defined for a topic. Any additional argument will be transferred to the callback.
+// Handlers are snapshotted under lock, then executed without holding the lock to avoid deadlocks
+// if a handler calls Publish, Subscribe, or Unsubscribe. Once-handlers are removed from the
+// original map under lock after execution completes.
 func (bus *eventBus) Publish(args ...interface{}) int {
 	bus.lock.Lock()
-	defer bus.lock.Unlock()
-	return bus.handlerMap.publish(bus, args, 0)
+	snapshot := bus.handlerMap.clone()
+	bus.lock.Unlock()
+
+	count := snapshot.publish(bus, args, 0)
+
+	// Remove once-handlers from the real map under lock.
+	if onceHandlers := snapshot.collectOnceHandlers(); len(onceHandlers) > 0 {
+		bus.lock.Lock()
+		for _, h := range onceHandlers {
+			bus.handlerMap.removeOnceHandler(h.callBack)
+		}
+		bus.lock.Unlock()
+	}
+
+	return count
 }
 
 // WaitAsync waits for all async callbacks to complete

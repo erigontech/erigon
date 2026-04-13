@@ -1040,7 +1040,7 @@ DEPENDENCIES:
 			if _, isDomain := dependent.provider.(*componentDomain); isDomain {
 				continue
 			}
-			if !dependent.state.IsDeactivated() {
+			if !dependent.State().IsDeactivated() {
 				continue DEPENDENCIES
 			}
 		}
@@ -1096,7 +1096,7 @@ DEPENDENCIES:
 		err := wg.Wait()
 
 		if err != nil {
-			onActivity(ctx, c, fmt.Errorf("deactivate dependencys failed: %w", err))
+			onActivity(ctx, c, fmt.Errorf("deactivate dependencies failed: %w", err))
 		} else {
 			c.onDependenciesDeactivated(ctx)
 			onActivity(ctx, c, nil)

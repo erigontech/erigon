@@ -39,8 +39,15 @@ func CallerPackageName(skip ...int) string {
 		skipDepth = skip[0]
 	}
 
-	pc, _, _, _ := runtime.Caller(1 + skipDepth)
-	parts := strings.Split(runtime.FuncForPC(pc).Name(), ".")
+	pc, _, _, ok := runtime.Caller(1 + skipDepth)
+	if !ok {
+		return ""
+	}
+	fn := runtime.FuncForPC(pc)
+	if fn == nil {
+		return ""
+	}
+	parts := strings.Split(fn.Name(), ".")
 	pl := len(parts)
 	packageName := ""
 
