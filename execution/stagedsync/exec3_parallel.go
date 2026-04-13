@@ -164,7 +164,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 			}
 		}()
 
-		shouldGenerateChangesets := shouldGenerateChangeSets(pe.cfg, startBlockNum, maxBlockNum, initialCycle)
+		shouldGenerateChangesets := shouldGenerateChangeSets(pe.cfg, startBlockNum, maxBlockNum)
 		changeSet := &changeset.StateChangeSet{}
 		if shouldGenerateChangesets && startBlockNum > 0 {
 			pe.domains().SetChangesetAccumulator(changeSet)
