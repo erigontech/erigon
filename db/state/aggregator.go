@@ -1877,8 +1877,8 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 					if err != nil {
 						return err
 					}
-					if len(v) >= 8 {
-						committedTxNum = binary.BigEndian.Uint64(v)
+					if len(v) >= 16 {
+						committedTxNum, _ = commitmentdb.DecodeTxBlockNums(v)
 					}
 					return nil
 				}); err != nil {

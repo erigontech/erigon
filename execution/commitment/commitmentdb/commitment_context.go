@@ -556,7 +556,7 @@ var KeyCommitmentState = []byte(keyCommitmentStateS)
 
 var ErrBehindCommitment = errors.New("behind commitment")
 
-func _decodeTxBlockNums(v []byte) (txNum, blockNum uint64) {
+func DecodeTxBlockNums(v []byte) (txNum, blockNum uint64) {
 	return binary.BigEndian.Uint64(v), binary.BigEndian.Uint64(v[8:16])
 }
 
@@ -581,7 +581,7 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *Tr
 		return 0, 0, nil, nil
 	}
 
-	txNum, blockNum = _decodeTxBlockNums(state)
+	txNum, blockNum = DecodeTxBlockNums(state)
 	return blockNum, txNum, state, nil
 }
 
@@ -909,6 +909,6 @@ func LatestBlockNumWithCommitment(tx kv.TemporalGetter) (uint64, error) {
 	if len(stateVal) == 0 {
 		return 0, nil
 	}
-	_, minUnwindale := _decodeTxBlockNums(stateVal)
+	_, minUnwindale := DecodeTxBlockNums(stateVal)
 	return minUnwindale, nil
 }
