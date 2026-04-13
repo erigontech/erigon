@@ -79,15 +79,15 @@
 
 This type handles JSON parsing and provides access to expected witness data per block. It embeds `BlockTest` for standard blockchain test execution.
 
-- [ ] Define `WitnessBlockTest` struct that embeds `BlockTest` and adds `witnessData witnessTestJSON`
-- [ ] Define JSON types:
+- [x] Define `WitnessBlockTest` struct that embeds `BlockTest` and adds `witnessData witnessTestJSON`
+- [x] Define JSON types:
   - `witnessTestJSON` with `Blocks []witnessTestBlock`
   - `witnessTestBlock` with `ExecutionWitness *ExpectedWitness`
   - `ExpectedWitness` with `State []hexutil.Bytes`, `Codes []hexutil.Bytes`, `Headers []hexutil.Bytes`
-- [ ] Implement `UnmarshalJSON(in []byte) error` — unmarshal into both the embedded `BlockTest` (via `bt.BlockTest.UnmarshalJSON`) and the witness-specific `witnessData`
-- [ ] Add method `ExpectedWitnessForBlock(blockIndex int) *ExpectedWitness` returning the expected witness for a given block index (nil if none)
-- [ ] Add method `NumBlocks() int` returning total number of blocks in the test
-- [ ] Verify: `make lint` passes
+- [x] Implement `UnmarshalJSON(in []byte) error` — unmarshal into both the embedded `BlockTest` (via `bt.BlockTest.UnmarshalJSON`) and the witness-specific `witnessData`
+- [x] Add method `ExpectedWitnessForBlock(blockIndex int) *ExpectedWitness` returning the expected witness for a given block index (nil if none)
+- [x] Add method `NumBlocks() int` returning total number of blocks in the test
+- [x] Verify: `make lint` passes
 
 ### Task 3: Expose ExecModuleTester from BlockTest
 
