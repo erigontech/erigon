@@ -162,7 +162,6 @@ func (a *LogsFilterAggregator) distributeLogs(logs []*notifications.LogNotificat
 	defer a.logsFilterLock.Unlock()
 
 	filtersToDelete := make(map[uint64]*LogsFilter)
-outerLoop:
 	for _, lg := range logs {
 		// Use aggregate filter first — native types, no conversion needed
 		if a.aggLogsFilter.allAddrs == 0 {
@@ -194,7 +193,7 @@ outerLoop:
 			}
 			if err := filter.sender.Send(proto); err != nil {
 				filtersToDelete[filterId] = filter
-				continue outerLoop
+				continue
 			}
 		}
 	}

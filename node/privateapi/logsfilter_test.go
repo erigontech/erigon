@@ -18,6 +18,7 @@ package privateapi
 
 import (
 	"context"
+	"errors"
 	"io"
 	"testing"
 
@@ -54,6 +55,10 @@ type testServer struct {
 	grpc.ServerStream
 }
 
+type failingTestServer struct {
+	*testServer
+}
+
 func newTestServer(ctx context.Context) *testServer {
 	ts := &testServer{
 		received:         make(chan *remoteproto.LogsFilterRequest, 256),
@@ -69,9 +74,17 @@ func newTestServer(ctx context.Context) *testServer {
 	return ts
 }
 
+func newFailingTestServer(ctx context.Context) *failingTestServer {
+	return &failingTestServer{testServer: newTestServer(ctx)}
+}
+
 func (ts *testServer) Send(m *remoteproto.SubscribeLogsReply) error {
 	ts.sent = append(ts.sent, m)
 	return nil
+}
+
+func (ts *failingTestServer) Send(*remoteproto.SubscribeLogsReply) error {
+	return errors.New("send failed")
 }
 
 func (ts *testServer) Recv() (*remoteproto.LogsFilterRequest, error) {
@@ -256,5 +269,62 @@ func TestLogsFilter_AddressFilter_OnlyAllowsThatAddressThrough(t *testing.T) {
 	_ = agg.distributeLogs([]*notifications.LogNotification{lg})
 	if len(srv.sent) != 1 {
 		t.Error("expected the log to be distributed as the address matched")
+	}
+}
+
+func TestLogsFilter_SendFailure_DoesNotSkipHealthySubscribers(t *testing.T) {
+	events := shards.NewEvents()
+	agg := NewLogsFilterAggregator(events)
+
+	ctx := t.Context()
+
+	const badSubscribers = 8
+	badServers := make([]*failingTestServer, 0, badSubscribers)
+	req := &remoteproto.LogsFilterRequest{
+		AllAddresses: true,
+		AllTopics:    true,
+	}
+
+	for range badSubscribers {
+		srv := newFailingTestServer(ctx)
+		srv.received <- req
+		badServers = append(badServers, srv)
+		go func(server *failingTestServer) {
+			err := agg.subscribeLogs(server)
+			if err != nil {
+				t.Error(err)
+			}
+		}(srv)
+	}
+
+	healthySrv := newTestServer(ctx)
+	healthySrv.received <- req
+	go func() {
+		err := agg.subscribeLogs(healthySrv)
+		if err != nil {
+			t.Error(err)
+		}
+	}()
+
+	for _, srv := range badServers {
+		<-srv.receiveCompleted
+	}
+	<-healthySrv.receiveCompleted
+
+	const logsToSend = 32
+	logs := make([]*notifications.LogNotification, 0, logsToSend)
+	for i := range logsToSend {
+		lg := createLog()
+		lg.Index = uint(i)
+		logs = append(logs, lg)
+	}
+
+	_ = agg.distributeLogs(logs)
+
+	if got, want := len(healthySrv.sent), logsToSend; got != want {
+		t.Fatalf("expected healthy subscriber to receive %d logs, got %d", want, got)
+	}
+	if got := len(agg.logsFilters); got != 1 {
+		t.Fatalf("expected only healthy subscriber to remain, got %d", got)
 	}
 }
