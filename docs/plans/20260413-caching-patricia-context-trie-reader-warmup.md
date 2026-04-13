@@ -68,21 +68,21 @@ two-layer design:
 - Create: `execution/commitment/caching_patricia_context.go`
 - Create: `execution/commitment/caching_patricia_context_test.go`
 
-- [ ] Define `CachingPatriciaContext` struct with three `maphash.Map` fields (branches, accounts, storage)
-- [ ] Define `branchCacheEntry` struct holding `(data []byte, step kv.Step)`
-- [ ] Implement `NewCachingPatriciaContext()` constructor
-- [ ] Implement `Reset()` — calls `Clear()` on all three maps
-- [ ] Implement `Wrap(underlying PatriciaContext) PatriciaContext` — returns a `cachedView`
-- [ ] Define `cachedView` struct with `cache *CachingPatriciaContext` and `underlying PatriciaContext`
-- [ ] Implement `cachedView.Branch(prefix)` — cache check via `Get`, miss → `underlying.Branch()` → `Set` → return
-- [ ] Implement `cachedView.Account(plainKey)` — same read-through pattern
-- [ ] Implement `cachedView.Storage(plainKey)` — same read-through pattern
-- [ ] Implement `cachedView.PutBranch(prefix, data, prevData)` — pass-through to underlying + invalidate cache entry for prefix
-- [ ] Write tests: cache miss → populates cache → subsequent read is cache hit
-- [ ] Write tests: `PutBranch` invalidates cached branch entry
-- [ ] Write tests: `Reset()` clears all entries
-- [ ] Write tests: concurrent reads from multiple goroutines (race detector)
-- [ ] Run tests — must pass before task 2
+- [x] Define `CachingPatriciaContext` struct with three `maphash.Map` fields (branches, accounts, storage)
+- [x] Define `branchCacheEntry` struct holding `(data []byte, step kv.Step)`
+- [x] Implement `NewCachingPatriciaContext()` constructor
+- [x] Implement `Reset()` — calls `Clear()` on all three maps
+- [x] Implement `Wrap(underlying PatriciaContext) PatriciaContext` — returns a `cachedView`
+- [x] Define `cachedView` struct with `cache *CachingPatriciaContext` and `underlying PatriciaContext`
+- [x] Implement `cachedView.Branch(prefix)` — cache check via `Get`, miss → `underlying.Branch()` → `Set` → return
+- [x] Implement `cachedView.Account(plainKey)` — same read-through pattern
+- [x] Implement `cachedView.Storage(plainKey)` — same read-through pattern
+- [x] Implement `cachedView.PutBranch(prefix, data, prevData)` — pass-through to underlying + invalidate cache entry for prefix
+- [x] Write tests: cache miss → populates cache → subsequent read is cache hit
+- [x] Write tests: `PutBranch` invalidates cached branch entry
+- [x] Write tests: `Reset()` clears all entries
+- [x] Write tests: concurrent reads from multiple goroutines (race detector)
+- [x] Run tests — must pass before task 2
 
 ### Task 2: TrieReader visitor callback
 
