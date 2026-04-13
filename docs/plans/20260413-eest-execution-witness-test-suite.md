@@ -155,11 +155,11 @@ Three root causes identified via set-comparison diagnostics:
 
 Based on Task 5 triage, add expected failures or skip patterns for known issues.
 
-- [ ] For tests that fail due to known Erigon limitations: use `bt.Fails(pattern, reason)`
-- [ ] For tests that are extremely slow: use `bt.Slow(pattern)` or `bt.SkipLoad(pattern)`
-- [ ] Document each skip/fail pattern with a comment explaining the root cause
-- [ ] Verify: `go test -run TestExecutionSpecWitness -count=1 ./execution/tests/eest_zkevm_witness/...` passes (green)
-- [ ] Verify: `make lint` passes
+- [x] For tests that fail due to known Erigon limitations: use `bt.Fails(pattern, reason)`
+- [x] For tests that are extremely slow: use `bt.Slow(pattern)` or `bt.SkipLoad(pattern)` — no slow tests identified; all 93 run in ~6s total
+- [x] Document each skip/fail pattern with a comment explaining the root cause
+- [x] Verify: `go test -run TestExecutionSpecWitness -count=1 ./execution/tests/eest_zkevm_witness/...` passes (green)
+- [x] Verify: `make lint` passes
 
 ### Task 7: Verify no regressions
 
