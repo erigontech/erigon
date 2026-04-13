@@ -171,10 +171,10 @@ Based on Task 5 triage, add expected failures or skip patterns for known issues.
 
 ### Task 8: Final cleanup and documentation
 
-- [ ] Review all new code for clarity, remove debug prints
-- [ ] Add file-level doc comment to `witness_block_test_util.go` explaining the type's purpose
-- [ ] Add file-level doc comment to `witness_test.go` explaining the test suite
-- [ ] Move this plan to `docs/plans/completed/`
+- [x] Review all new code for clarity, remove debug prints
+- [x] Add file-level doc comment to `witness_block_test_util.go` explaining the type's purpose
+- [x] Add file-level doc comment to `witness_test.go` explaining the test suite
+- [x] Move this plan to `docs/plans/completed/`
 
 ## Technical Details
 
