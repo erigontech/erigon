@@ -179,8 +179,8 @@ two-layer design:
 
 ### Task 8: [Final] Update documentation
 
-- [ ] Update `execution/commitment/agents.md` if it exists (or CLAUDE.md) with new caching architecture
-- [ ] Move this plan to `docs/plans/completed/`
+- [x] Update `execution/commitment/agents.md` if it exists (or CLAUDE.md) with new caching architecture
+- [x] Move this plan to `docs/plans/completed/`
 
 ## Technical Details
 
