@@ -327,6 +327,182 @@ func TestTrieReader_MultipleChildrenInBranch(t *testing.T) {
 	}
 }
 
+func TestTrieReader_VisitorCalledAtEachDepth(t *testing.T) {
+	t.Parallel()
+
+	// Build a multi-level trie (depth 0..4 are branch-hash cells, depth 5 is an account leaf).
+	ctx := newTrieReaderTestCtx()
+	addr := bytes.Repeat([]byte{0xEE}, 20)
+	hashedKey := KeyToHexNibbleHash(addr)
+	maxDepth := 5
+
+	for d := 0; d < maxDepth; d++ {
+		var cells [16]*cell
+		cells[hashedKey[d]] = makeBranchCell(dummyHash())
+		ctx.putBranch(hashedKey[:d], cells)
+	}
+	var leafCells [16]*cell
+	leafCells[hashedKey[maxDepth]] = makeAccountCell(addr, dummyHash())
+	ctx.putBranch(hashedKey[:maxDepth], leafCells)
+
+	tr := NewTrieReader(ctx, length.Addr)
+
+	var visitedDepths []int
+	visitor := func(depth int, c *cell) error {
+		visitedDepths = append(visitedDepths, depth)
+		return nil
+	}
+
+	c, found, err := tr.LookupWithVisitor(hashedKey, visitor)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, int16(20), c.accountAddrLen)
+
+	// Should have visited every depth from 0 to maxDepth (inclusive).
+	expected := make([]int, maxDepth+1)
+	for i := range expected {
+		expected[i] = i
+	}
+	require.Equal(t, expected, visitedDepths)
+}
+
+func TestTrieReader_VisitorReceivesCorrectCellData(t *testing.T) {
+	t.Parallel()
+
+	// Single-level trie: root has an account leaf. Visitor should see the account address.
+	ctx := newTrieReaderTestCtx()
+	addr := bytes.Repeat([]byte{0xAB}, 20)
+	hashedKey := KeyToHexNibbleHash(addr)
+
+	var rootCells [16]*cell
+	rootCells[hashedKey[0]] = makeAccountCell(addr, dummyHash())
+	ctx.putBranch(nil, rootCells)
+
+	tr := NewTrieReader(ctx, length.Addr)
+
+	var visitedCells []*cell
+	visitor := func(depth int, c *cell) error {
+		// Make a copy since the cell is reused.
+		cp := *c
+		visitedCells = append(visitedCells, &cp)
+		return nil
+	}
+
+	_, found, err := tr.LookupWithVisitor(hashedKey, visitor)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Len(t, visitedCells, 1)
+
+	// The visited cell should have the account address.
+	require.Equal(t, int16(20), visitedCells[0].accountAddrLen)
+	require.Equal(t, addr, visitedCells[0].accountAddr[:visitedCells[0].accountAddrLen])
+}
+
+func TestTrieReader_VisitorErrorPropagates(t *testing.T) {
+	t.Parallel()
+
+	// Build a single-level trie.
+	ctx := newTrieReaderTestCtx()
+	addr := bytes.Repeat([]byte{0xCC}, 20)
+	hashedKey := KeyToHexNibbleHash(addr)
+
+	var rootCells [16]*cell
+	rootCells[hashedKey[0]] = makeAccountCell(addr, dummyHash())
+	ctx.putBranch(nil, rootCells)
+
+	tr := NewTrieReader(ctx, length.Addr)
+
+	visitor := func(depth int, c *cell) error {
+		return fmt.Errorf("visitor error at depth %d", depth)
+	}
+
+	_, _, err := tr.LookupWithVisitor(hashedKey, visitor)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "visitor error at depth 0")
+	require.Contains(t, err.Error(), "visitor at depth 0")
+}
+
+func TestTrieReader_NilVisitorIdenticalToLookup(t *testing.T) {
+	t.Parallel()
+
+	// Build a multi-level trie and verify that LookupWithVisitor(key, nil)
+	// returns the same result as Lookup(key).
+	ctx := newTrieReaderTestCtx()
+	addr := bytes.Repeat([]byte{0xDD}, 20)
+	hashedKey := KeyToHexNibbleHash(addr)
+
+	var rootCells [16]*cell
+	rootCells[hashedKey[0]] = makeExtensionCell(hashedKey[1:3], dummyHash())
+	ctx.putBranch(nil, rootCells)
+
+	var deepCells [16]*cell
+	deepCells[hashedKey[3]] = makeAccountCell(addr, dummyHash())
+	ctx.putBranch(hashedKey[:3], deepCells)
+
+	tr := NewTrieReader(ctx, length.Addr)
+
+	c1, found1, err1 := tr.Lookup(hashedKey)
+	require.NoError(t, err1)
+
+	c2, found2, err2 := tr.LookupWithVisitor(hashedKey, nil)
+	require.NoError(t, err2)
+
+	require.Equal(t, found1, found2)
+	require.Equal(t, c1.accountAddrLen, c2.accountAddrLen)
+	require.Equal(t, c1.accountAddr, c2.accountAddr)
+	require.Equal(t, c1.hashLen, c2.hashLen)
+	require.Equal(t, c1.hash, c2.hash)
+	require.Equal(t, c1.storageAddrLen, c2.storageAddrLen)
+
+	// Also verify miss case.
+	missKey := make([]byte, 64)
+	missKey[0] = (hashedKey[0] + 1) % 16
+
+	_, mFound1, mErr1 := tr.Lookup(missKey)
+	_, mFound2, mErr2 := tr.LookupWithVisitor(missKey, nil)
+	require.NoError(t, mErr1)
+	require.NoError(t, mErr2)
+	require.Equal(t, mFound1, mFound2)
+}
+
+func TestTrieReader_VisitorWithStorageCells(t *testing.T) {
+	t.Parallel()
+
+	// Build a storage-depth trie and verify visitor sees storage cells.
+	ctx := newTrieReaderTestCtx()
+	storAddr := bytes.Repeat([]byte{0xFF}, 52) // 20 addr + 32 slot
+	hashedKey := KeyToHexNibbleHash(storAddr)  // 128 nibbles
+
+	// Chain of branch-hash cells for account prefix (depth 0..63).
+	for d := 0; d < 64; d++ {
+		var cells [16]*cell
+		cells[hashedKey[d]] = makeBranchCell(dummyHash())
+		ctx.putBranch(hashedKey[:d], cells)
+	}
+
+	// Storage leaf at depth 64.
+	var storageCells [16]*cell
+	storageCells[hashedKey[64]] = makeStorageCell(storAddr, dummyHash())
+	ctx.putBranch(hashedKey[:64], storageCells)
+
+	tr := NewTrieReader(ctx, length.Addr)
+
+	var storageVisited bool
+	visitor := func(depth int, c *cell) error {
+		if c.StorageAddrLen() > 0 {
+			storageVisited = true
+			require.Equal(t, storAddr, c.GetStorageAddr())
+		}
+		return nil
+	}
+
+	c, found, err := tr.LookupWithVisitor(hashedKey, visitor)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, int16(52), c.storageAddrLen)
+	require.True(t, storageVisited, "visitor should have seen the storage cell")
+}
+
 func TestTrieReader_BranchError(t *testing.T) {
 	t.Parallel()
 

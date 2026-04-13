@@ -90,16 +90,16 @@ two-layer design:
 - Modify: `execution/commitment/trie_reader.go`
 - Modify: `execution/commitment/trie_reader_test.go`
 
-- [ ] Define `BranchVisitor func(depth int, cell *cell) error` callback type
-- [ ] Add `LookupWithVisitor(hashedKey []byte, visitor BranchVisitor) (cell, bool, error)` method
-- [ ] At each branch node after `parseCellAt()`, invoke `visitor(depth, &parsedCell)` if visitor is non-nil
-- [ ] Visitor receives the parsed cell which contains `accountAddr`/`storageAddr` — caller can issue prefetch reads
-- [ ] Ensure existing `Lookup()` still works unchanged (calls `LookupWithVisitor` with nil visitor, or stays separate)
-- [ ] Write tests: visitor is called at each depth during traversal
-- [ ] Write tests: visitor receives correct cell data (account/storage addresses match expected)
-- [ ] Write tests: visitor error propagates as Lookup error
-- [ ] Write tests: nil visitor behaves identically to plain Lookup
-- [ ] Run tests — must pass before task 3
+- [x] Define `BranchVisitor func(depth int, cell *cell) error` callback type
+- [x] Add `LookupWithVisitor(hashedKey []byte, visitor BranchVisitor) (cell, bool, error)` method
+- [x] At each branch node after `parseCellAt()`, invoke `visitor(depth, &parsedCell)` if visitor is non-nil
+- [x] Visitor receives the parsed cell which contains `accountAddr`/`storageAddr` — caller can issue prefetch reads
+- [x] Ensure existing `Lookup()` still works unchanged (calls `LookupWithVisitor` with nil visitor, or stays separate)
+- [x] Write tests: visitor is called at each depth during traversal
+- [x] Write tests: visitor receives correct cell data (account/storage addresses match expected)
+- [x] Write tests: visitor error propagates as Lookup error
+- [x] Write tests: nil visitor behaves identically to plain Lookup
+- [x] Run tests — must pass before task 3
 
 ### Task 3: TrieReader-based Warmuper replacement
 
