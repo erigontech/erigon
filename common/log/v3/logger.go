@@ -47,6 +47,25 @@ func (l Lvl) String() string {
 	}
 }
 
+func (l Lvl) UpperString() string {
+	switch l {
+	case LvlTrace:
+		return "TRACE"
+	case LvlDebug:
+		return "DBUG"
+	case LvlInfo:
+		return "INFO"
+	case LvlWarn:
+		return "WARN"
+	case LvlError:
+		return "EROR"
+	case LvlCrit:
+		return "CRIT"
+	default:
+		panic("bad level")
+	}
+}
+
 // LvlFromString returns the appropriate Lvl from a string name.
 // Useful for parsing command line args and configuration files.
 func LvlFromString(lvlString string) (Lvl, error) {

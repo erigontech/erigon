@@ -233,7 +233,11 @@ func TestGetLogs_RangeLimitExceeded(t *testing.T) {
 		ToBlock:   big.NewInt(10),
 	})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), errExceedBlockRange)
+
+	var rpcErr rpc.Error
+	require.ErrorAs(t, err, &rpcErr)
+	assert.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+	assert.Equal(t, errExceedBlockRange+": 5", rpcErr.Error())
 }
 
 // TestGetLogs_RangeLimitOk verifies that eth_getLogs succeeds when the requested block
@@ -260,6 +264,24 @@ func TestGetLogs_MaxResultsOk(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.NotEmpty(t, logs)
+}
+
+// TestGetLogs_MaxResultsExceeded verifies that eth_getLogs returns invalid params
+// when the matching log count exceeds maxResults.
+func TestGetLogs_MaxResultsExceeded(t *testing.T) {
+	m, _, contractAddr, _ := chainWithDeployedContract(t)
+	ethApi := newEthApiForTest(newBaseApiWithLimits(m, 0, 1), m.DB, nil, nil)
+	_, err := ethApi.GetLogs(context.Background(), filters.FilterCriteria{
+		FromBlock: big.NewInt(0),
+		ToBlock:   big.NewInt(rpc.LatestBlockNumber.Int64()),
+		Addresses: common.Addresses{contractAddr},
+	})
+	require.Error(t, err)
+
+	var rpcErr rpc.Error
+	require.ErrorAs(t, err, &rpcErr)
+	assert.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+	assert.Equal(t, errExceedLogResults+": 1", rpcErr.Error())
 }
 
 // TestGetLatestLogs_LogCountExceedsMaxResults verifies that erigon_getLatestLogs

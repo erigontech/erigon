@@ -286,8 +286,11 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria, rangeLimit int, maxResults int) ([]*types.ErigonLog, error) {
 	logs := []*types.ErigonLog{} //nolint
 
+	// Treat range-limit violations as invalid filter input to match eth_getLogs parameter validation.
 	if rangeLimit != 0 && (end-begin) > uint64(rangeLimit) {
-		return nil, fmt.Errorf("%s: %d", errExceedBlockRange, rangeLimit)
+		return nil, &rpc.InvalidParamsError{
+			Message: fmt.Sprintf("%s: %d", errExceedBlockRange, rangeLimit),
+		}
 	}
 
 	addrMap := make(map[common.Address]struct{}, len(crit.Addresses))
@@ -358,7 +361,9 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 
 				for _, filteredLog := range borLogs {
 					if maxResults != 0 && len(logs) >= maxResults {
-						return nil, fmt.Errorf("%s: %d", errExceedLogResults, maxResults)
+						return nil, &rpc.InvalidParamsError{
+							Message: fmt.Sprintf("%s: %d", errExceedLogResults, maxResults),
+						}
 					}
 					logs = append(logs, &types.ErigonLog{
 						Log:       *filteredLog,
@@ -390,7 +395,9 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 
 		for _, filteredLog := range filtered {
 			if maxResults != 0 && len(logs) >= maxResults {
-				return nil, fmt.Errorf("%s: %d", errExceedLogResults, maxResults)
+				return nil, &rpc.InvalidParamsError{
+					Message: fmt.Sprintf("%s: %d", errExceedLogResults, maxResults),
+				}
 			}
 			logs = append(logs, &types.ErigonLog{
 				Log:       *filteredLog,
