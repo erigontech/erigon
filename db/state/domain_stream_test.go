@@ -3,9 +3,18 @@ package state
 import (
 	"bytes"
 	"container/heap"
+	"context"
+	"encoding/binary"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	btree2 "github.com/tidwall/btree"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 func TestCursorHeapPriority_RAMOverDBOverFILE(t *testing.T) {
@@ -118,4 +127,102 @@ func TestCursorHeapMergeLoop_RAMOverridesDB(t *testing.T) {
 	// key2: RAM value 0xAA must win over DB value 0xBB
 	assert.Equal(t, key2, results[1].key)
 	assert.Equal(t, []byte{0xAA}, results[1].val, "RAM value must override DB for key2")
+}
+
+// TestDomain_IteratePrefix_PrefersFilesOverDB verifies that debugIteratePrefixLatest
+// skips DB entries whose step falls within the file range, so file values are
+// returned instead of stale DB data.
+//
+// After a partial (lexicographic) prune, the DB may retain stale entries with
+// steps already covered by files. The fix (#20355) skips DB entries where
+// step.ToTxNum < files.EndTxNum(), so they are never pushed into the heap.
+func TestDomain_IteratePrefix_PrefersFilesOverDB(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	logger := log.New()
+	ctx := context.Background()
+	require := require.New(t)
+
+	stepSize := uint64(16)
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, stepSize, logger)
+
+	// Write a key at step 0 (txNum=1) with V0, then at step 1 (txNum=17) with V1.
+	var key [8]byte
+	key[0] = 0x01
+	key[7] = 0x01
+	prefix := key[:4]
+
+	var v0, v1 [8]byte
+	v0[7] = 0xAA
+	v1[7] = 0xBB
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+
+	dt := d.BeginFilesRo()
+	writer := dt.NewWriter()
+
+	require.NoError(writer.PutWithPrev(key[:], v0[:], 1, nil))
+	require.NoError(writer.Flush(ctx, tx))
+
+	require.NoError(writer.PutWithPrev(key[:], v1[:], 17, v0[:]))
+	require.NoError(writer.Flush(ctx, tx))
+
+	writer.Close()
+	dt.Close()
+	require.NoError(tx.Commit())
+
+	// Build files for steps 0 and 1 without pruning.
+	tx, err = db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+	collateAndMergeOnce(t, d, tx, kv.Step(0), false)
+	collateAndMergeOnce(t, d, tx, kv.Step(1), false)
+	require.NoError(tx.Commit())
+
+	// Files now cover the key with latest value V1.
+	dt = d.BeginFilesRo()
+	require.Greater(dt.files.EndTxNum(), uint64(0), "files should exist")
+	dt.Close()
+
+	// Delete step 1 dup from DB, leaving only the stale step 0 entry (V0).
+	// This simulates the state after a partial lexicographic prune where the
+	// latest dup was removed but a stale older dup remained.
+	tx, err = db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+	c, err := tx.RwCursorDupSort(d.ValuesTable)
+	require.NoError(err)
+	defer c.Close()       //nolint:gocritic
+	var step1Dup [16]byte // [^step1 (8 bytes) | V1 (8 bytes)]
+	binary.BigEndian.PutUint64(step1Dup[:8], ^uint64(1))
+	copy(step1Dup[8:], v1[:])
+	require.NoError(c.DeleteExact(key[:], step1Dup[:]))
+	require.NoError(tx.Commit())
+
+	// debugIteratePrefixLatest should return V1 (from files),
+	// not V0 (from the stale DB entry at step 0).
+	roTx, err := db.BeginRo(ctx)
+	require.NoError(err)
+	defer roTx.Rollback()
+
+	dt = d.BeginFilesRo()
+	defer dt.Close()
+
+	var gotVal []byte
+	var ramIter btree2.MapIter[string, []dataWithTxNum]
+	err = dt.debugIteratePrefixLatest(prefix, ramIter, func(k, v []byte) (bool, error) {
+		if bytes.Equal(k, key[:]) {
+			gotVal = common.Copy(v)
+		}
+		return true, nil
+	}, roTx)
+	require.NoError(err)
+
+	require.Equal(v1[:], gotVal,
+		"file value (V1) must win over stale DB value (V0) when DB step is within file range")
 }
