@@ -27,10 +27,11 @@ import (
 )
 
 // SimpleCache is a minimal cache for in-process use. It does not track versions
-// or evict entries — it simply remembers the latest account data delivered via
-// OnNewBlock so that callers (e.g. the txpool) see the correct nonce/balance
-// even when their read-only DB transaction was opened before the data was
-// committed to the database.
+// — it simply remembers account data from the most recent OnNewBlock batch so
+// that callers (e.g. the txpool) see the correct nonce/balance even when their
+// read-only DB transaction was opened before the data was committed to the
+// database. The map is replaced on every OnNewBlock call, so memory stays
+// proportional to one batch (~400 addresses per 60 M-gas block).
 type SimpleCache struct {
 	mu       sync.RWMutex
 	accounts map[common.Address][]byte // address → latest serialised account
@@ -49,6 +50,10 @@ func (c *SimpleCache) OnNewBlock(sc *remoteproto.StateChangeBatch) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	// Replace the map — only the latest batch's data is needed.
+	// By the time the next batch arrives, the DB commit for the
+	// previous batch should be visible to new RO transactions.
+	c.accounts = nil
 	for _, change := range sc.ChangeBatch {
 		for i := range change.Changes {
 			switch change.Changes[i].Action {
