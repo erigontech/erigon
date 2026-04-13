@@ -163,11 +163,11 @@ Based on Task 5 triage, add expected failures or skip patterns for known issues.
 
 ### Task 7: Verify no regressions
 
-- [ ] Run existing EEST blockchain tests: `go test -run TestExecutionSpecBlockchain -count=1 ./execution/tests/eest_blockchain/... -short`
-- [ ] Run existing devnet tests: `go test -run TestExecutionSpecBlockchainDevnet -count=1 ./execution/tests/eest_devnet/... -short`
-- [ ] Run existing execution witness RPC test: `go test -run TestExecutionWitness -count=1 ./rpc/jsonrpc/...`
-- [ ] Run: `make lint`
-- [ ] Run: `make erigon` (build check)
+- [x] Run existing EEST blockchain tests: `go test -run TestExecutionSpecBlockchain -count=1 ./execution/tests/eest_blockchain/... -short`
+- [x] Run existing devnet tests: `go test -run TestExecutionSpecBlockchainDevnet -count=1 ./execution/tests/eest_devnet/... -short`
+- [x] Run existing execution witness RPC test: `go test -run TestExecutionWitness -count=1 ./rpc/jsonrpc/...`
+- [x] Run: `make lint`
+- [x] Run: `make erigon` (build check)
 
 ### Task 8: Final cleanup and documentation
 
