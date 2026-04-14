@@ -1919,12 +1919,7 @@ func (hph *HexPatriciaHashed) foldBranch(row int, nibble, upDepth, depth int16, 
 			hph.touchMap[row-1] |= uint16(1) << nibble
 		}
 	}
-	bitmap := hph.touchMap[row] & hph.afterMap[row]
-	if !hph.branchBefore[row] {
-		// There was no branch node before, so we need to touch even the singular child that existed
-		hph.touchMap[row] |= hph.afterMap[row]
-		bitmap |= hph.afterMap[row]
-	}
+	bitmap := hph.afterMap[row]
 
 	// Calculate total length of all hashes
 	nibblesLeftAfterUpdate := bits.OnesCount16(hph.afterMap[row])
@@ -1946,11 +1941,11 @@ func (hph *HexPatriciaHashed) foldBranch(row int, nibble, upDepth, depth int16, 
 	}
 
 	if hph.branchEncoder.DeferUpdatesEnabled() {
-		if err := hph.branchEncoder.CollectDeferredUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], &cellData); err != nil {
+		if err := hph.branchEncoder.CollectDeferredUpdate(hph.ctx, updateKey, bitmap, hph.afterMap[row], hph.afterMap[row], &cellData); err != nil {
 			return fmt.Errorf("failed to collect deferred branch update: %w", err)
 		}
 	} else {
-		if err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], &cellData); err != nil {
+		if err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, bitmap, hph.afterMap[row], hph.afterMap[row], &cellData); err != nil {
 			return fmt.Errorf("failed to encode branch update: %w", err)
 		}
 	}
