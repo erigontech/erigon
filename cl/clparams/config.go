@@ -1575,10 +1575,5 @@ func EmbeddedSupported(networkId uint64) bool {
 }
 
 func SupportBackfilling(networkId uint64) bool {
-	return networkId == chainspec.MainnetChainID ||
-		networkId == chainspec.SepoliaChainID ||
-		networkId == chainspec.GnosisChainID ||
-		networkId == chainspec.ChiadoChainID ||
-		networkId == chainspec.HoodiChainID ||
-		networkId == chainspec.BloatnetNetworkID
+	return EmbeddedSupported(networkId)
 }

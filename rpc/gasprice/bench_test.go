@@ -94,7 +94,7 @@ func BenchmarkSuggestTipCap(b *testing.B) {
 	m := newTestBackendN(b, numBlocks)
 	defer m.Close()
 
-	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewDummy(), m.BlockReader, false,
+	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewSimple(), m.BlockReader, false,
 		rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
 
 	tx, err := m.DB.BeginTemporalRo(m.Ctx)
@@ -159,7 +159,7 @@ func BenchmarkFeeHistory(b *testing.B) {
 	m := newTestBackendN(b, numBlocks)
 	defer m.Close()
 
-	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewDummy(), m.BlockReader, false,
+	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewSimple(), m.BlockReader, false,
 		rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
 
 	// Single read-only tx used only by the main goroutine (GetLatestBlockNumber,
