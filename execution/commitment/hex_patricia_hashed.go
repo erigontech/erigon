@@ -2621,41 +2621,42 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 	var tries []*trie.Trie = make([]*trie.Trie, 0, len(updates.keys)) // slice of tries, i.e the witness for each key, these will be all merged into single trie
 
 	err = updates.HashSort(ctx, nil, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
-		select {
-		case <-logEvery.C:
-			dbg.ReadMemStats(&m)
-			log.Info(fmt.Sprintf("[%s][agg] computing trie", logPrefix),
-				"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(ki), common.PrettyCounter(updatesCount)),
-				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-		default:
+		if ki%1024 == 0 {
+			select {
+			case <-logEvery.C:
+				dbg.ReadMemStats(&m)
+				log.Info(fmt.Sprintf("[%s][agg] computing trie", logPrefix),
+					"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(ki), common.PrettyCounter(updatesCount)),
+					"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+
+			default:
+			}
 		}
 
-		var tr *trie.Trie
 		if hph.trace {
 			// de-nibblize for better printing
 			printableHashedKey, _ := CompactKey(hashedKey)
 			fmt.Printf("\n%d/%d) witnessing [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, printableHashedKey, hph.currentKey[:hph.currentKeyLen])
 		}
 
-		if len(plainKey) > 0 {
-			var update *Update
-			if int16(len(plainKey)) == hph.accountKeyLen { // account
-				update, err = hph.accountFromCacheOrDB(plainKey)
-				if err != nil {
-					return fmt.Errorf("account with plainkey=%x not found: %w", plainKey, err)
-				}
-				if hph.trace {
-					addrHash := crypto.HashData(plainKey)
-					fmt.Printf("account with plainKey=%x, addrHash=%x found=%v\n", plainKey, addrHash, update)
-				}
-			} else {
-				update, err = hph.storageFromCacheOrDB(plainKey)
-				if err != nil {
-					return fmt.Errorf("storage with plainkey=%x not found: %w", plainKey, err)
-				}
-				if hph.trace {
-					fmt.Printf("storage found = %v\n", update.Storage[:update.StorageLen])
-				}
+		var tr *trie.Trie
+		var update *Update
+		if int16(len(plainKey)) == hph.accountKeyLen { // account
+			update, err = hph.ctx.Account(plainKey)
+			if err != nil {
+				return fmt.Errorf("account with plainkey=%x not found: %w", plainKey, err)
+			}
+			if hph.trace {
+				addrHash := crypto.Keccak256(plainKey)
+				fmt.Printf("account with plainKey=%x, addrHash=%x FOUND = %v\n", plainKey, addrHash, update)
+			}
+		} else {
+			update, err = hph.ctx.Storage(plainKey)
+			if err != nil {
+				return fmt.Errorf("storage with plainkey=%x not found: %w", plainKey, err)
+			}
+			if hph.trace {
+				fmt.Printf("storage found = %v\n", update.Storage[:update.StorageLen])
 			}
 		}
 
