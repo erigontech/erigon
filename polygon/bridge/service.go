@@ -71,40 +71,7 @@ type Service struct {
 	lastFetchedEventTime   atomic.Uint64
 	lastProcessedBlockInfo atomic.Pointer[ProcessedBlockInfo]
 	unwindMu               sync.Mutex
-	ready                  ready
-}
-
-type ready struct {
-	mu     sync.Mutex
-	on     chan struct{}
-	state  bool
-	inited bool
-}
-
-func (r *ready) On() <-chan struct{} {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.init()
-	return r.on
-}
-
-func (r *ready) init() {
-	if r.inited {
-		return
-	}
-	r.on = make(chan struct{})
-	r.inited = true
-}
-
-func (r *ready) set() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.init()
-	if r.state {
-		return
-	}
-	r.state = true
-	close(r.on)
+	ready                  common.Ready
 }
 
 func (s *Service) Ready(ctx context.Context) <-chan error {
@@ -166,7 +133,7 @@ func (s *Service) Run(ctx context.Context) error {
 		"lastProcessedBlockTime", lastProcessedBlockInfo.BlockTime,
 	)
 
-	s.ready.set()
+	s.ready.Set()
 
 	logTicker := time.NewTicker(30 * time.Second)
 	defer logTicker.Stop()

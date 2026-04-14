@@ -205,8 +205,6 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 	}
 	p.db = db
 
-	p.logger.Info("[BlockCollector] Flush complete", "blocksInserted", inserted)
-
 	return nil
 }
 

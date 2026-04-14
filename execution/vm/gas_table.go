@@ -361,7 +361,7 @@ func gasCreate2Eip3860(evm *EVM, callContext *CallContext, availableGas mdgas.Md
 }
 
 // gasCreateEip8037 is the dynamic gas function for CREATE under EIP-8037.
-// State gas is charged in opCreate after the static-context check (per execution-specs#2608).
+// State gas is charged in execCreate after the static-context check (per execution-specs#2608).
 func gasCreateEip8037(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (gas mdgas.MdGas, err error) {
 	gas.Regular, err = memoryGasCost(callContext, memorySize)
 	if err != nil {
@@ -385,7 +385,7 @@ func gasCreateEip8037(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 }
 
 // gasCreate2Eip8037 is the dynamic gas function for CREATE2 under EIP-8037.
-// State gas is charged in opCreate2 after the static-context check (per execution-specs#2608).
+// State gas is charged in execCreate after the static-context check (per execution-specs#2608).
 func gasCreate2Eip8037(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (gas mdgas.MdGas, err error) {
 	gas.Regular, err = memoryGasCost(callContext, memorySize)
 	if err != nil {
