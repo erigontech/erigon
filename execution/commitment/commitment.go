@@ -329,7 +329,6 @@ func (p *PendingCommitmentUpdate) Clear() {
 type BranchEncoder struct {
 	buf       *bytes.Buffer
 	bitmapBuf [binary.MaxVarintLen64]byte
-	merger    *BranchMerger
 	metrics   *Metrics
 
 	// Deferred updates support
@@ -341,8 +340,7 @@ type BranchEncoder struct {
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
 	return &BranchEncoder{
-		buf:    bytes.NewBuffer(make([]byte, sz)),
-		merger: NewHexBranchMerger(sz / 2),
+		buf: bytes.NewBuffer(make([]byte, sz)),
 	}
 }
 
@@ -386,12 +384,11 @@ func (be *BranchEncoder) ClearDeferred() {
 	ResetDeferredUpdateMetrics()
 }
 
-// encodeDeferredUpdate encodes a branch update using the provided encoder and merger.
+// encodeDeferredUpdate encodes a branch update using the provided encoder.
 // Cell hashes are already computed during fold() before cells were copied.
 func encodeDeferredUpdate(
 	upd *DeferredBranchUpdate,
 	encoder *BranchEncoder,
-	merger *BranchMerger,
 ) error {
 	update, err := encoder.EncodeBranch(upd.bitmap, upd.touchMap, upd.afterMap, &upd.cells)
 	if err != nil {
@@ -402,10 +399,6 @@ func encodeDeferredUpdate(
 		if bytes.Equal(upd.prev, update) {
 			upd.encoded = nil // skip unchanged
 			return nil
-		}
-		update, err = merger.Merge(upd.prev, update)
-		if err != nil {
-			return err
 		}
 	}
 
@@ -428,11 +421,8 @@ func (be *BranchEncoder) ApplyDeferredUpdates(
 	return nil
 }
 
-// Pools for worker encoders/mergers to avoid per-call allocations.
-var (
-	workerEncoderPool = sync.Pool{New: func() any { return NewBranchEncoder(1024) }}
-	workerMergerPool  = sync.Pool{New: func() any { return NewHexBranchMerger(512) }}
-)
+// Pool for worker encoders to avoid per-call allocations.
+var workerEncoderPool = sync.Pool{New: func() any { return NewBranchEncoder(1024) }}
 
 // ApplyDeferredBranchUpdates encodes deferred branch updates concurrently and writes them.
 // Returns the number of updates successfully written.
@@ -451,13 +441,11 @@ func ApplyDeferredBranchUpdates(
 	// Sequential fast path: avoids goroutine and channel overhead for small batches.
 	if numWorkers == 1 || len(deferred) <= numWorkers {
 		encoder := workerEncoderPool.Get().(*BranchEncoder)
-		merger := workerMergerPool.Get().(*BranchMerger)
 		defer workerEncoderPool.Put(encoder)
-		defer workerMergerPool.Put(merger)
 
 		var written int
 		for _, upd := range deferred {
-			if err := encodeDeferredUpdate(upd, encoder, merger); err != nil {
+			if err := encodeDeferredUpdate(upd, encoder); err != nil {
 				return written, err
 			}
 			if upd.encoded == nil {
@@ -481,19 +469,17 @@ func ApplyDeferredBranchUpdates(
 	resultCh := make(chan result, len(deferred))
 	workCh := make(chan *DeferredBranchUpdate, len(deferred))
 
-	// Start workers with pooled encoders/mergers.
+	// Start workers with pooled encoders.
 	var wg sync.WaitGroup
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			encoder := workerEncoderPool.Get().(*BranchEncoder)
-			merger := workerMergerPool.Get().(*BranchMerger)
 			defer workerEncoderPool.Put(encoder)
-			defer workerMergerPool.Put(merger)
 
 			for upd := range workCh {
-				err := encodeDeferredUpdate(upd, encoder, merger)
+				err := encodeDeferredUpdate(upd, encoder)
 				resultCh <- result{upd: upd, err: err}
 			}
 		}()
@@ -578,10 +564,6 @@ func (be *BranchEncoder) CollectUpdate(
 	if len(prev) > 0 {
 		if bytes.Equal(prev, update) {
 			return nil // do not write the same data for prefix
-		}
-		update, err = be.merger.Merge(prev, update)
-		if err != nil {
-			return err
 		}
 	}
 
