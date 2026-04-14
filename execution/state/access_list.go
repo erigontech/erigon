@@ -20,6 +20,8 @@
 package state
 
 import (
+	"maps"
+
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -98,11 +100,7 @@ func (al *accessList) Copy() *accessList {
 		if len(m) == 0 {
 			continue // keep nil for address-only entries
 		}
-		mc := make(map[accounts.StorageKey]struct{}, len(m))
-		for k, v := range m {
-			mc[k] = v
-		}
-		cp.slots[i] = mc
+		cp.slots[i] = maps.Clone(m)
 	}
 	return cp
 }
@@ -139,32 +137,32 @@ func (al *accessList) AddAddress(address accounts.Address) bool {
 // - address added
 // - slot added
 // For any 'true' value returned, a corresponding journal entry must be made.
+// ensureSlotMap returns the slot map at index i, allocating one if nil.
+func (al *accessList) ensureSlotMap(i int) map[accounts.StorageKey]struct{} {
+	m := al.slots[i]
+	if m == nil {
+		m = make(map[accounts.StorageKey]struct{}, 4)
+		al.slots[i] = m
+	}
+	return m
+}
+
 func (al *accessList) AddSlot(address accounts.Address, slot accounts.StorageKey) (addrChange bool, slotChange bool) {
 	for i, a := range al.addrs {
 		if a != address {
 			continue
 		}
-		m := al.slots[i]
-		if m != nil {
+		if m := al.slots[i]; m != nil {
 			if _, ok := m[slot]; ok {
 				return false, false
 			}
-		} else {
-			m = make(map[accounts.StorageKey]struct{}, 4)
-			al.slots[i] = m
 		}
-		m[slot] = struct{}{}
+		al.ensureSlotMap(i)[slot] = struct{}{}
 		return false, true
 	}
 	// address not present — add it together with the slot
 	al.appendAddr(address)
-	n := len(al.addrs) - 1
-	m := al.slots[n]
-	if m == nil {
-		m = make(map[accounts.StorageKey]struct{}, 4)
-		al.slots[n] = m
-	}
-	m[slot] = struct{}{}
+	al.ensureSlotMap(len(al.addrs) - 1)[slot] = struct{}{}
 	return true, true
 }
 
