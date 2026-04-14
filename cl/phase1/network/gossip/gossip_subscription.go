@@ -59,7 +59,7 @@ func (t *TopicSubscriptions) Get(topic string) *TopicSubscription {
 }
 
 func (t *TopicSubscriptions) Add(topic string, topicHandle *pubsub.Topic, validator pubsub.ValidatorEx) error {
-	deferredExpiry, ok, err := t.addLocked(topic, topicHandle, validator)
+	deferredExpiry, ok, err := t.addInternal(topic, topicHandle, validator)
 	if err != nil {
 		return err
 	}
@@ -69,7 +69,7 @@ func (t *TopicSubscriptions) Add(topic string, topicHandle *pubsub.Topic, valida
 	return nil
 }
 
-func (t *TopicSubscriptions) addLocked(topic string, topicHandle *pubsub.Topic, validator pubsub.ValidatorEx) (deferredExpiry time.Time, hasDeferredExpiry bool, err error) {
+func (t *TopicSubscriptions) addInternal(topic string, topicHandle *pubsub.Topic, validator pubsub.ValidatorEx) (deferredExpiry time.Time, hasDeferredExpiry bool, err error) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 

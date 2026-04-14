@@ -111,14 +111,16 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	var versionedHashes []common.Hash
 	if newPayload && f.engine != nil && block.Version() >= clparams.DenebVersion {
 		versionedHashes = []common.Hash{}
-		solid.RangeErr[*cltypes.KZGCommitment](block.Block.Body.BlobKzgCommitments, func(i1 int, k *cltypes.KZGCommitment, i2 int) error {
+		if err := solid.RangeErr[*cltypes.KZGCommitment](block.Block.Body.BlobKzgCommitments, func(i1 int, k *cltypes.KZGCommitment, i2 int) error {
 			versionedHash, err := utils.KzgCommitmentToVersionedHash(common.Bytes48(*k))
 			if err != nil {
 				return err
 			}
 			versionedHashes = append(versionedHashes, versionedHash)
 			return nil
-		})
+		}); err != nil {
+			return err
+		}
 	}
 
 	elHasBlobs := false
