@@ -107,7 +107,10 @@ Loop:
 				if f.highestSlotProcessed > 2 {
 					reqSlot = f.highestSlotProcessed - 2
 				}
-				reqCount := count
+				// Request one extra block beyond the batch for GLOAS lookahead:
+				// the extra block lets determineFullGloasRoots check whether the
+				// last batch block is FULL or EMPTY, instead of guessing FULL.
+				reqCount := count + 1
 
 				// leave a warning if we are stuck for more than 90 seconds
 				if time.Since(f.highestSlotUpdateTime) > 90*time.Second {
@@ -138,7 +141,7 @@ Loop:
 					// Empty response: no blocks in this slot range.
 					// Advance past the requested range so we don't get stuck requesting the same empty range.
 					f.mu.Lock()
-					newSlot := reqSlot + reqCount
+					newSlot := reqSlot + count
 					if newSlot > f.highestSlotProcessed {
 						log.Debug("Empty block range response, advancing past gap", "from", f.highestSlotProcessed, "to", newSlot, "peer", peerId)
 						f.highestSlotProcessed = newSlot
@@ -176,31 +179,36 @@ Loop:
 		return processBlocks[i].Block.Slot < processBlocks[j].Block.Slot
 	})
 
-	// For GLOAS blocks, fetch envelopes for EL validation and insertion.
+	// For GLOAS blocks, fetch envelopes only for FULL blocks (whose payload was delivered).
+	// EMPTY blocks never have envelopes on the network, so requesting them causes a 30s stall.
+	// We determine FULL/EMPTY by comparing consecutive blocks' bids:
+	// block[i+1].bid.ParentBlockHash == block[i].bid.BlockHash → block[i] is FULL.
+	//
+	// We requested count+1 blocks so the extra lookahead block lets us determine the
+	// last batch block's FULL/EMPTY status accurately. Use all blocks for determination,
+	// then trim to `count` before processing.
 	var envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
 	if anyGloasBlock(processBlocks) {
-		var gloasRoots [][32]byte
-		for _, block := range processBlocks {
-			if block.Version() < clparams.GloasVersion {
-				continue
-			}
-			root, err := block.Block.HashSSZ()
-			if err == nil {
-				gloasRoots = append(gloasRoots, root)
-			}
+		fullRoots := determineFullGloasRoots(processBlocks, int(count))
+		// Trim the lookahead block before envelope fetch and processing.
+		if uint64(len(processBlocks)) > count {
+			processBlocks = processBlocks[:count]
 		}
-		if len(gloasRoots) > 0 {
+		if len(fullRoots) > 0 {
 			var envErr error
-			envelopes, envErr = RequestEnvelopesFrantically(ctx, f.rpc, gloasRoots, processBlocks...)
+			envelopes, envErr = RequestEnvelopesFrantically(ctx, f.rpc, fullRoots, processBlocks...)
 			if envErr != nil {
 				log.Debug("[ForwardBeaconDownloader] failed to get envelopes", "err", envErr)
 			}
 			log.Debug("[ForwardBeaconDownloader] envelope fetch result",
-				"requested", len(gloasRoots), "received", len(envelopes),
+				"fullRoots", len(fullRoots), "received", len(envelopes),
 				"batchBlocks", len(processBlocks),
 				"firstSlot", processBlocks[0].Block.Slot,
 				"lastSlot", processBlocks[len(processBlocks)-1].Block.Slot)
 		}
+	} else if uint64(len(processBlocks)) > count {
+		// Non-GLOAS: still trim the extra lookahead block.
+		processBlocks = processBlocks[:count]
 	}
 
 	f.mu.Lock()
@@ -226,6 +234,47 @@ func anyGloasBlock(blocks []*cltypes.SignedBeaconBlock) bool {
 		}
 	}
 	return false
+}
+
+// determineFullGloasRoots uses consecutive blocks in a sorted batch to determine which
+// GLOAS blocks are FULL (payload was delivered). A block[i] is FULL when:
+//
+//	block[i+1].bid.ParentBlockHash == block[i].bid.BlockHash
+//
+// processCount is the number of blocks to return roots for. blocks may contain one extra
+// lookahead block beyond processCount to determine the last batch block's FULL/EMPTY status.
+// Only roots for blocks[:processCount] are returned; the lookahead block's root is never included.
+func determineFullGloasRoots(blocks []*cltypes.SignedBeaconBlock, processCount int) [][32]byte {
+	var roots [][32]byte
+	for i := 0; i < processCount && i < len(blocks); i++ {
+		block := blocks[i]
+		if block.Version() < clparams.GloasVersion {
+			continue
+		}
+		bid := block.Block.Body.GetSignedExecutionPayloadBid()
+		if bid == nil || bid.Message == nil {
+			continue
+		}
+
+		isFull := false
+		if i+1 < len(blocks) {
+			nextBlock := blocks[i+1]
+			if nextBlock.Version() >= clparams.GloasVersion {
+				nextBid := nextBlock.Block.Body.GetSignedExecutionPayloadBid()
+				if nextBid != nil && nextBid.Message != nil {
+					isFull = nextBid.Message.ParentBlockHash == bid.Message.BlockHash
+				}
+			}
+		}
+
+		if isFull {
+			root, err := block.Block.HashSSZ()
+			if err == nil {
+				roots = append(roots, root)
+			}
+		}
+	}
+	return roots
 }
 
 // GetHighestProcessedSlot retrieve the highest processed slot we accumulated.

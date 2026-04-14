@@ -234,6 +234,12 @@ func TestCaplinBlockProductionGlamsterdamSlotNumber(t *testing.T) {
 	postState.SetLatestExecutionPayloadHeader(elHeader)
 	// GLOAS uses GetLatestBlockHash() instead of LatestExecutionPayloadHeader().BlockHash
 	postState.SetLatestBlockHash(elHead.Hash())
+	// GLOAS deferred payload: set LatestExecutionPayloadBid so that ShouldExtendPayload
+	// (which returns true in the mock) selects bid.BlockHash as the EL head.
+	postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
+		BlockHash:       elHead.Hash(),
+		ParentBlockHash: elHead.Hash(),
+	})
 
 	elHeadHash := elHead.Hash()
 	fcu.Eth1Hashes[postState.FinalizedCheckpoint().Root] = elHeadHash

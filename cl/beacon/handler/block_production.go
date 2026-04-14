@@ -582,9 +582,21 @@ func (a *ApiHandler) produceBeaconBody(
 	// Build execution payload
 	latestExecutionPayload := baseState.LatestExecutionPayloadHeader()
 	head := latestExecutionPayload.BlockHash
-	// [GLOAS] LatestExecutionPayloadHeader is not updated in GLOAS; use GetLatestBlockHash instead
+	// [GLOAS] In deferred payload processing, the EL head depends on whether the head block
+	// was FULL (payload delivered) or EMPTY (payload missing). Use ShouldExtendPayload to decide:
+	// - FULL: build on the committed block hash (bid.BlockHash)
+	// - EMPTY: build on the parent block hash (bid.ParentBlockHash)
 	if stateVersion >= clparams.GloasVersion {
-		head = baseState.GetLatestBlockHash()
+		parentBid := baseState.GetLatestExecutionPayloadBid()
+		if parentBid != nil {
+			if a.forkchoiceStore.ShouldExtendPayload(baseBlockRoot) {
+				head = parentBid.BlockHash
+			} else {
+				head = parentBid.ParentBlockHash
+			}
+		} else {
+			head = baseState.GetLatestBlockHash()
+		}
 	}
 	finalizedHash := a.forkchoiceStore.GetEth1Hash(baseState.FinalizedCheckpoint().Root)
 	if finalizedHash == (common.Hash{}) {

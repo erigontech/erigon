@@ -414,6 +414,11 @@ func (f *ForkChoiceStorageMock) IsBlobDataAvailable(slot uint64, blockRoot commo
 	return true
 }
 
+func (f *ForkChoiceStorageMock) ShouldExtendPayload(root common.Hash) bool {
+	// Default: extend payload (FULL head). Tests can override by embedding a custom mock.
+	return true
+}
+
 func (f *ForkChoiceStorageMock) GetBalances(blockRoot common.Hash) (solid.Uint64ListSSZ, error) {
 	panic("implement me")
 }
