@@ -2213,7 +2213,7 @@ func (sdb *IntraBlockState) AddSlotToAccessList(addr accounts.Address, slot acco
 		sdb.journal.append(accessListAddAccountChange{})
 	}
 	if slotMod {
-		sdb.journal.append(accessListAddSlotChange{address: addr})
+		sdb.journal.append(accessListAddSlotChange{address: addr, slot: slot})
 	}
 	return addrMod, slotMod
 }

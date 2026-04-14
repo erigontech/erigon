@@ -33,13 +33,17 @@ import (
 // is a single pointer comparison.  For the typical 12-20 warm addresses per
 // transaction a linear scan over addrs is faster than map hashing.
 //
+// Slot sets use maps for O(1) lookup. accounts.StorageKey is also a
+// unique.Handle (8-byte pointer), so map hash/compare is cheap.
+//
 // PopAddress / PopSlot exploit the LIFO journal invariant for O(1) removal.
 //
-// Reset reuses the backing arrays of both addrs and slots (including the inner
-// slot slices), so steady-state allocations per transaction are zero.
+// Reset reuses the backing arrays of addrs and slots, and uses clear() on each
+// map to preserve bucket arrays, so steady-state allocations per transaction
+// are zero.
 type accessList struct {
-	addrs []accounts.Address      // parallel to slots
-	slots [][]accounts.StorageKey // slots[i] is the slot set for addrs[i]; nil or empty = warm, no slots
+	addrs []accounts.Address                 // parallel to slots
+	slots []map[accounts.StorageKey]struct{} // slots[i] is the slot set for addrs[i]; nil = warm, no slots
 }
 
 // ContainsAddress returns true if the address is in the access list.
@@ -59,12 +63,10 @@ func (al *accessList) Contains(address accounts.Address, slot accounts.StorageKe
 		if a != address {
 			continue
 		}
-		for _, s := range al.slots[i] {
-			if s == slot {
-				return true, true
-			}
+		if al.slots[i] != nil {
+			_, slotPresent = al.slots[i][slot]
 		}
-		return true, false
+		return true, slotPresent
 	}
 	return false, false
 }
@@ -75,11 +77,11 @@ func newAccessList() *accessList {
 }
 
 // Reset clears the access list for reuse across transactions.
-// It keeps both backing arrays and all inner slot-slice backing arrays alive
-// so that subsequent transactions repopulate them without allocating.
+// It keeps both backing arrays and uses clear() on each map to preserve
+// bucket arrays, so that subsequent transactions repopulate without allocating.
 func (al *accessList) Reset() {
-	for i := range al.slots {
-		al.slots[i] = al.slots[i][:0] // keep slot-slice backing array
+	for _, m := range al.slots {
+		clear(m) // preserve bucket array
 	}
 	al.addrs = al.addrs[:0]
 	al.slots = al.slots[:0]
@@ -89,22 +91,24 @@ func (al *accessList) Reset() {
 func (al *accessList) Copy() *accessList {
 	cp := &accessList{
 		addrs: make([]accounts.Address, len(al.addrs)),
-		slots: make([][]accounts.StorageKey, len(al.slots)),
+		slots: make([]map[accounts.StorageKey]struct{}, len(al.slots)),
 	}
 	copy(cp.addrs, al.addrs)
-	for i, s := range al.slots {
-		if len(s) == 0 {
+	for i, m := range al.slots {
+		if len(m) == 0 {
 			continue // keep nil for address-only entries
 		}
-		sc := make([]accounts.StorageKey, len(s))
-		copy(sc, s)
-		cp.slots[i] = sc
+		mc := make(map[accounts.StorageKey]struct{}, len(m))
+		for k, v := range m {
+			mc[k] = v
+		}
+		cp.slots[i] = mc
 	}
 	return cp
 }
 
-// appendAddr appends a new entry to both parallel slices, reusing the slot-slice
-// backing array when available (left by a prior Reset).
+// appendAddr appends a new entry to both parallel slices, reusing the cleared
+// map from the backing array when available (left by a prior Reset).
 //
 // addrs grows via append (may reallocate), while slots is resliced when possible.
 // Both slices' lengths are kept in lockstep; their capacities are independent.
@@ -112,7 +116,7 @@ func (al *accessList) appendAddr(address accounts.Address) {
 	n := len(al.addrs)
 	al.addrs = append(al.addrs, address)
 	if n < cap(al.slots) {
-		al.slots = al.slots[:n+1] // reuse cleared slot slice from backing array
+		al.slots = al.slots[:n+1] // reuse cleared map from backing array
 	} else {
 		al.slots = append(al.slots, nil)
 	}
@@ -140,24 +144,33 @@ func (al *accessList) AddSlot(address accounts.Address, slot accounts.StorageKey
 		if a != address {
 			continue
 		}
-		for _, s := range al.slots[i] {
-			if s == slot {
+		m := al.slots[i]
+		if m != nil {
+			if _, ok := m[slot]; ok {
 				return false, false
 			}
+		} else {
+			m = make(map[accounts.StorageKey]struct{}, 4)
+			al.slots[i] = m
 		}
-		al.slots[i] = append(al.slots[i], slot)
+		m[slot] = struct{}{}
 		return false, true
 	}
 	// address not present — add it together with the slot
 	al.appendAddr(address)
 	n := len(al.addrs) - 1
-	al.slots[n] = append(al.slots[n], slot)
+	m := al.slots[n]
+	if m == nil {
+		m = make(map[accounts.StorageKey]struct{}, 4)
+		al.slots[n] = m
+	}
+	m[slot] = struct{}{}
 	return true, true
 }
 
-// PopSlot removes the last slot added to address, relying on the LIFO journal
-// invariant. O(1) after finding the address.
-func (al *accessList) PopSlot(address accounts.Address) {
+// PopSlot removes a specific slot from address, used by journal revert.
+// O(1) map delete after finding the address.
+func (al *accessList) PopSlot(address accounts.Address, slot accounts.StorageKey) {
 	for i, a := range al.addrs {
 		if a != address {
 			continue
@@ -165,7 +178,7 @@ func (al *accessList) PopSlot(address accounts.Address) {
 		if len(al.slots[i]) == 0 {
 			panic("reverting slot change, address has no slots in access list")
 		}
-		al.slots[i] = al.slots[i][:len(al.slots[i])-1]
+		delete(al.slots[i], slot)
 		return
 	}
 	panic("reverting slot change, address not present in list")
@@ -181,7 +194,7 @@ func (al *accessList) PopAddress() {
 	if len(al.slots[n-1]) != 0 {
 		panic("reverting address change, address still has warm slots")
 	}
-	al.slots[n-1] = nil // release slot slice references for GC
+	al.slots[n-1] = nil // release map for GC
 	al.addrs = al.addrs[:n-1]
 	al.slots = al.slots[:n-1]
 }

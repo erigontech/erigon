@@ -176,6 +176,7 @@ type (
 	accessListAddAccountChange struct{}
 	accessListAddSlotChange    struct {
 		address accounts.Address
+		slot    accounts.StorageKey
 	}
 
 	transientStorageChange struct {
@@ -546,7 +547,7 @@ func (ch accessListAddAccountChange) dirtied() (accounts.Address, bool) {
 }
 
 func (ch accessListAddSlotChange) revert(s *IntraBlockState) error {
-	s.accessList.PopSlot(ch.address)
+	s.accessList.PopSlot(ch.address, ch.slot)
 	return nil
 }
 
