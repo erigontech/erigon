@@ -245,8 +245,8 @@ These are tracked by #20442 and are separate from the parent-header fix.
 
 ### Task 6: Final — commit and cleanup
 
-- [ ] update `agents.md` only if a new pattern was introduced (none expected — this is a localized fix)
-- [ ] move this plan to `docs/plans/completed/`
+- [x] update `agents.md` only if a new pattern was introduced (none expected — this is a localized fix) — confirmed no update needed
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 
