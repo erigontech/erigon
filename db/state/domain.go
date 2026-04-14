@@ -1292,10 +1292,7 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	defer valsCursor.Close()
 	// Revert keys using diff entries.
 	// Always: delete current entry at the write step, restore prevValue at unwind target step.
-	// value == nil means different step (skip restore; entry remains at its own step position).
-	//   Only appears from legacy V0 changesets where valueLen==0 deserializes as nil.
-	// value == []byte{} means no previous value existed (key was new or was already deleted);
-	//   write an empty tombstone to restore absence and prevent fallthrough to stale file data.
+	// value == []byte{} means key was new (no previous value to restore).
 	unwindStepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(unwindStepBytes, ^uint64(step))
 
@@ -1307,8 +1304,8 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			if err := rwTx.Delete(d.ValuesTable, key); err != nil {
 				return err
 			}
-			// Restore previous value at unwind step (nil = different step/V0 legacy, skip; []byte{} = absent, write tombstone)
-			if value != nil {
+			// Restore previous value at unwind step ([]byte{} = key was new, nothing to restore)
+			if len(value) > 0 {
 				fullKey := key[:len(key)-8]
 				if err := rwTx.Put(d.ValuesTable, append(fullKey, unwindStepBytes...), value); err != nil {
 					return err
@@ -1332,8 +1329,8 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			}
 		}
 
-		// Restore previous value at unwind step (nil = different step/V0 legacy, skip; []byte{} = absent, write tombstone)
-		if value != nil {
+		// Restore previous value at unwind step ([]byte{} = key was new, nothing to restore)
+		if len(value) > 0 {
 			if err := valsCursor.Put(fullKey, append(unwindStepBytes, value...)); err != nil {
 				return err
 			}
@@ -1656,16 +1653,6 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 
 	foundStep := kv.Step(^binary.BigEndian.Uint64(foundInvStep))
 
-	// Deletion entries (empty value) are authoritative regardless of step age:
-	// frozen files have no tombstones, so discarding a deletion marker causes
-	// fallthrough to getLatestFromFiles which returns stale pre-deletion data.
-	// Note: for LargeValues=true, an old-step tombstone may be stale from an
-	// interrupted prune (see cross-check in getLatest). We still return it as
-	// found here; getLatest handles the file cross-check when needed.
-	if len(v) == 0 {
-		return v, foundStep, true, nil
-	}
-
 	if lastTxNumOfStep(foundStep, dt.stepSize) >= dt.files.EndTxNum() {
 		return v, foundStep, true, nil
 	}
@@ -1701,46 +1688,6 @@ func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, maxStep kv.Step, metrics
 		return nil, 0, false, fmt.Errorf("getLatestFromDb: %w", err)
 	}
 	if found && foundStep <= maxStep {
-		// For LargeValues=true (per-row storage), an old-step DB tombstone may
-		// be stale from an interrupted prune: the pseudo-dup cursor iterates
-		// rows newest-first, so a timeout-driven PruneSmallBatches can delete
-		// the newest row for a key while an older tombstone survives. Cross-check
-		// files for a newer entry before trusting such a tombstone.
-		// Not needed for LargeValues=false (DupSort) because prune deletes all
-		// dups atomically via DeleteCurrentDuplicates on the real DupSort cursor.
-		//
-		// Limitation: frozen files encode deletions as absence, so this cross-check
-		// cannot distinguish "key was deleted in a newer step" from "key was not
-		// modified in a newer step". A delete->write->delete cycle across steps
-		// with interrupted prune could theoretically return the intermediate write
-		// instead of the final deletion. This is acceptable because:
-		// - LargeValues=true applies only to CodeDomain and RCacheDomain
-		// - Post-EIP-6780, SELFDESTRUCT only works same-tx as CREATE, making
-		//   cross-step delete->write->delete cycles effectively impossible
-		//
-		// The cross-check is skipped when maxStep constrains the read horizon
-		// (e.g. during unwind) to avoid leaking file data beyond the caller's
-		// allowed step range.
-		if dt.d.LargeValues && len(v) == 0 && (foundStep+1).ToTxNum(dt.stepSize) < dt.files.EndTxNum() {
-			// Derive maxStep's txNum boundary, guarding against overflow.
-			var maxStepEndTxNum uint64 // 0 = unconstrained
-			if maxStep < kv.Step(math.MaxUint64/dt.stepSize) {
-				maxStepEndTxNum = (maxStep + 1).ToTxNum(dt.stepSize)
-			}
-			// Only cross-check when maxStep doesn't constrain file access.
-			if maxStepEndTxNum == 0 || maxStepEndTxNum >= dt.files.EndTxNum() {
-				fileV, foundInFile, _, endTxNum, fileErr := dt.getLatestFromFiles(key, 0)
-				if fileErr != nil {
-					return nil, 0, false, fmt.Errorf("getLatestFromFiles (tombstone cross-check): %w", fileErr)
-				}
-				if foundInFile && endTxNum > (foundStep+1).ToTxNum(dt.stepSize) {
-					if metrics != nil && dbg.KVReadLevelledMetrics {
-						metrics.UpdateFileReads(dt.name, start)
-					}
-					return fileV, kv.Step(endTxNum / dt.stepSize), true, nil
-				}
-			}
-		}
 		if metrics != nil && dbg.KVReadLevelledMetrics {
 			metrics.UpdateDbReads(dt.name, start)
 		}
@@ -1932,18 +1879,7 @@ func (dt *DomainRoTx) OldPrune(ctx context.Context, rwTx kv.RwTx, step kv.Step, 
 	if dt.files.EndTxNum() > 0 {
 		txTo = min(txTo, dt.files.EndTxNum())
 	}
-	err = SavePruneValProgress(rwTx, dt.d.ValuesTable, &prune.Stat{
-		LastPrunedValue: nil,
-		LastPrunedKey:   nil,
-		KeyProgress:     prune.Done,
-		ValueProgress:   prune.Done,
-		TxFrom:          txFrom,
-		TxTo:            txTo,
-	})
-	if err != nil {
-		dt.d.logger.Error("prune val progress", "name", dt.name, "err", err)
-	}
-	return dt.oldPrune(ctx, rwTx, step, txFrom, txTo, limit, logEvery)
+	return dt.prune(ctx, rwTx, step, txFrom, txTo, limit, logEvery)
 }
 
 func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
@@ -2041,130 +1977,6 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	stat.Progress = pruneStat.ValueProgress
 
 	return stat, err
-}
-
-func (dt *DomainRoTx) oldPrune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
-	if limit == 0 {
-		limit = math.MaxUint64
-	}
-	st := time.Now()
-
-	stat = &DomainPruneStat{MinStep: math.MaxUint64}
-	defer func() {
-		dt.d.logger.Debug("scan domain pruning res", "name", dt.name, "txFrom", txFrom, "txTo", txTo, "limit", limit, "vals", stat.Values, "spent ms", time.Since(st).Milliseconds())
-	}()
-	if stat.History, err = dt.ht.Prune(ctx, rwTx, txFrom, txTo, limit, false, logEvery); err != nil {
-		return nil, fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
-	}
-	canPrune, maxPrunableStep := dt.canPruneDomainTables(rwTx, txTo)
-	if !canPrune {
-		return stat, nil
-	}
-	if step > maxPrunableStep {
-		step = maxPrunableStep
-	}
-
-	mxPruneInProgress.Inc()
-	defer mxPruneInProgress.Dec()
-
-	var valsCursor kv.RwCursor
-
-	//ancientDomainValsCollector := etl.NewCollectorWithAllocator(dt.name.String()+".domain.collate", dt.d.dirs.Tmp, etl.SmallSortableBuffers, dt.d.logger).LogLvl(log.LvlTrace)
-	//defer ancientDomainValsCollector.Close()
-
-	if dt.d.LargeValues {
-		valsCursor, err = rwTx.RwCursor(dt.d.ValuesTable)
-		if err != nil {
-			return stat, fmt.Errorf("create %s domain values cursor: %w", dt.name.String(), err)
-		}
-	} else {
-		valsCursor, err = rwTx.RwCursorDupSort(dt.d.ValuesTable)
-		if err != nil {
-			return stat, fmt.Errorf("create %s domain values cursor: %w", dt.name.String(), err)
-		}
-	}
-	defer valsCursor.Close()
-
-	delFunc := func(k, v []byte) error {
-		if dt.d.LargeValues {
-			return valsCursor.Delete(k)
-		}
-		return valsCursor.(kv.RwCursorDupSort).DeleteExact(k, v)
-	}
-
-	prunedKey, err := GetExecV3PruneProgress(rwTx, dt.d.ValuesTable)
-	if err != nil {
-		dt.d.logger.Error("get domain pruning progress", "name", dt.name.String(), "error", err)
-	}
-
-	var k, v []byte
-	if prunedKey != nil && limit < 100_000 {
-		k, v, err = valsCursor.Seek(prunedKey)
-	} else {
-		k, v, err = valsCursor.First()
-	}
-	if err != nil {
-		return nil, err
-	}
-	var stepBytes []byte
-	for ; k != nil; k, v, err = valsCursor.Next() {
-		if err != nil {
-			return stat, fmt.Errorf("iterate over %s domain keys: %w", dt.name.String(), err)
-		}
-
-		if dt.d.LargeValues {
-			stepBytes = k[len(k)-8:]
-		} else {
-			stepBytes = v[:8]
-		}
-
-		is := kv.Step(^binary.BigEndian.Uint64(stepBytes))
-		if is > step {
-			continue
-		}
-		if limit == 0 {
-			err = delFunc(k, v)
-			if err != nil {
-				return stat, err
-			}
-			if err := SaveExecV3PruneProgress(rwTx, dt.d.ValuesTable, k); err != nil {
-				return stat, fmt.Errorf("save domain pruning progress: %s, %w", dt.name.String(), err)
-			}
-			return stat, nil
-		}
-		limit--
-		stat.Values++
-		err = delFunc(k, v)
-		if err != nil {
-			return stat, err
-		}
-		stat.MinStep = min(stat.MinStep, is)
-		stat.MaxStep = max(stat.MaxStep, is)
-		select {
-		case <-ctx.Done():
-			// consider ctx exiting as incorrect outcome, error is returned
-			return stat, ctx.Err()
-		case <-logEvery.C:
-			dt.d.logger.Info("[snapshots] prune domain", "name", dt.name.String(),
-				"pruned keys", stat.Values,
-				"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(dt.stepSize), float64(txTo)/float64(dt.stepSize)))
-		default:
-		}
-	}
-	mxPruneSizeDomain.AddUint64(stat.Values)
-	//if err := ancientDomainValsCollector.Load(rwTx, dt.d.ValuesTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-	//	return stat, fmt.Errorf("load domain values: %w", err)
-	//}
-
-	if err := SaveExecV3PruneProgress(rwTx, dt.d.ValuesTable, nil); err != nil {
-		return stat, fmt.Errorf("save domain pruning progress: %s, %w", dt.d.FilenameBase, err)
-	}
-
-	if err := SaveExecV3PrunableProgress(rwTx, []byte(dt.d.ValuesTable), step+1); err != nil {
-		return stat, err
-	}
-	mxPruneTookDomain.ObserveDuration(st)
-	return stat, nil
 }
 
 func (dt *DomainRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {

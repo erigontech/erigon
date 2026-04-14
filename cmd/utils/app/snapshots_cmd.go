@@ -605,7 +605,7 @@ var (
 )
 
 // checkCommitmentFileHasRoot checks if a commitment file contains state root key
-func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, err error) {
+func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, label string, err error) {
 	const stateKey = "state"
 	_, fileName := filepath.Split(filePath)
 
@@ -613,20 +613,20 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, err err
 	derivedKvi := strings.Replace(filePath, ".kv", ".kvi", 1)
 	fPathMask, err := version.ReplaceVersionWithMask(derivedKvi)
 	if err != nil {
-		return false, false, err
+		return false, false, "", err
 	}
 	kvi, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
 	if err != nil {
-		return false, false, err
+		return false, false, "", err
 	}
 	if ok {
 		_, err := os.Stat(kvi)
 		if err != nil {
-			return false, false, err
+			return false, false, "", err
 		}
 		idx, err := recsplit.OpenIndex(kvi)
 		if err != nil {
-			return false, false, err
+			return false, false, "", err
 		}
 		defer idx.Close()
 
@@ -634,16 +634,15 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, err err
 		defer rd.Close()
 		if rd.Empty() {
 			log.Warn("[dbg] allow files deletion because accessor broken", "accessor", idx.FileName())
-			return false, true, nil
+			return false, true, "", nil
 		}
 
 		_, found := rd.Lookup([]byte(stateKey))
 		if found {
-			fmt.Printf("  %s  Unwindable\n", filepath.Base(filePath))
-			return true, false, nil
+			return true, false, "Unwindable", nil
 		} else {
-			fmt.Printf("skipping file because it doesn't have state key %s\n", fileName)
-			return true, false, nil
+			_ = fileName // was: "skipping file because it doesn't have state key"
+			return true, false, "", nil
 		}
 	} else {
 		log.Warn("[dbg] not found files for", "pattern", fPathMask)
@@ -653,18 +652,18 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, err err
 	derivedBt := strings.Replace(filePath, ".kv", ".bt", 1)
 	fPathMask, err = version.ReplaceVersionWithMask(derivedBt)
 	if err != nil {
-		return true, false, nil
+		return true, false, "", nil
 	}
 	bt, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
 	if err != nil {
-		return true, false, nil
+		return true, false, "", nil
 	}
 	if !ok {
-		return false, false, fmt.Errorf("can't find accessor for %s", filePath)
+		return false, false, "", fmt.Errorf("can't find accessor for %s", filePath)
 	}
 	rd, bti, err := btindex.OpenBtreeIndexAndDataFile(bt, filePath, btindex.DefaultBtreeM, statecfg.Schema.CommitmentDomain.Compression, false)
 	if err != nil {
-		return false, false, err
+		return false, false, "", err
 	}
 	defer rd.Close()
 	defer bti.Close()
@@ -672,15 +671,14 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, err err
 	getter := seg.NewReader(rd.MakeGetter(), statecfg.Schema.CommitmentDomain.Compression)
 	c, err := bti.Seek(getter, []byte(stateKey))
 	if err != nil {
-		return false, false, err
+		return false, false, "", err
 	}
 	defer c.Close()
 
 	if bytes.Equal(c.Key(), []byte(stateKey)) {
-		fmt.Printf("  %s  Not Unwindable (*)\n", filepath.Base(filePath))
-		return true, false, nil
+		return true, false, "Not Unwindable (*)", nil
 	}
-	return false, false, nil
+	return false, false, "", nil
 }
 
 type DeleteStateSnapshotsArgs struct {
@@ -704,7 +702,10 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 	_maxFrom := uint64(0)
 	_maxTo := uint64(0)
 	files := make([]snaptype.FileInfo, 0)
-	commitmentFilesWithState := make([]snaptype.FileInfo, 0)
+	commitmentFilesWithState := make([]struct {
+		file  snaptype.FileInfo
+		label string
+	}, 0)
 
 	// Step 1: Collect and parse all candidate state files
 	candidateFiles := make([]struct {
@@ -756,26 +757,25 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 
 	// Step 2: Process each candidate file (already parsed)
 	doesRmCommitment := len(domainNames) == 0 || slices.Contains(domainNames, kv.CommitmentDomain.String())
-	snapDirPrinted := false
+	var snapDir string
 	for _, candidate := range candidateFiles {
 		res := candidate.fileInfo
 
 		// check that commitment file has state in it
 		// When domains are "compacted", we want to keep latest commitment file with state key in it
 		if doesRmCommitment && strings.Contains(filepath.Base(res.Path), "commitment") && strings.HasSuffix(res.Path, ".kv") {
-			if !snapDirPrinted {
-				fmt.Printf("Snapshot dir: %s\n\n", filepath.Dir(res.Path))
-				snapDirPrinted = true
+			if snapDir == "" {
+				snapDir = dirs.DataDir
 			}
-			hasState, broken, err := checkCommitmentFileHasRoot(res.Path)
+			hasState, broken, label, err := checkCommitmentFileHasRoot(res.Path)
 			if err != nil {
 				return err
 			}
-			if hasState {
-				commitmentFilesWithState = append(commitmentFilesWithState, res)
-			}
-			if broken {
-				commitmentFilesWithState = append(commitmentFilesWithState, res)
+			if hasState || broken {
+				commitmentFilesWithState = append(commitmentFilesWithState, struct {
+					file  snaptype.FileInfo
+					label string
+				}{res, label})
 			}
 		}
 
@@ -858,53 +858,20 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 		}
 
 		if removeLatest {
-			// domain files have higher merge limit, so latest domain may have From < stepFrom but To == stepTo
-			q := fmt.Sprintf("remove latest snapshot files (stepFrom>=%d) and files ending at stepTo=%d?\n1) RemoveFile\n4) Exit\n (pick number): ", _maxFrom, _maxTo)
-			if promptExit(q) {
-				os.Exit(0)
-			}
 			minS, maxS = _maxFrom, math.MaxUint64
 		}
 
+		removeAll := false
 		if minS == maxS {
 			q := "remove ALL snapshot files?\n\t1) RemoveFile\n\t4) NONONO (Exit)\n (pick number): "
 			if promptExit(q) {
 				os.Exit(0)
 			}
 			minS, maxS = 0, math.MaxUint64
-
-		} else { // prevent all commitment files with trie state from deletion for "compacted" domains case
-			hasStateTrie := 0
-			fmt.Println()
-			var totalSize uint64
-			for _, file := range commitmentFilesWithState {
-				var sizeStr string
-				if info, err := os.Stat(file.Path); err == nil {
-					sz := uint64(info.Size())
-					totalSize += sz
-					sizeStr = common.ByteCount(sz)
-				} else {
-					sizeStr = "unknown"
-				}
-				if file.To <= minS {
-					hasStateTrie++
-					fmt.Printf("  KEEP   %s  (%s)\n", filepath.Base(file.Path), sizeStr)
-				} else {
-					fmt.Printf("  REMOVE %s  (%s)\n", filepath.Base(file.Path), sizeStr)
-				}
-			}
-			if len(commitmentFilesWithState) > 0 {
-				fmt.Printf("  Total: %s\n", common.ByteCount(totalSize))
-			}
-			if hasStateTrie == 0 && len(commitmentFilesWithState) > 0 {
-				fmt.Printf("\nthis will remove ALL commitment files with state trie\n")
-				q := "Do that anyway?\n\t1) RemoveFile\n\t4) NONONO (Exit)\n (pick number): "
-				if promptExit(q) {
-					os.Exit(0)
-				}
-			}
+			removeAll = true
 		}
 
+		// Pre-compute files to remove
 		for _, res := range files {
 			if res.From >= minS && res.To <= maxS {
 				toRemove[res.Path] = res
@@ -935,6 +902,65 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 					toRemove[res.Path] = res
 					break
 				}
+			}
+		}
+
+		// Estimate total deletion size via noop stat pass
+		var removeSize uint64
+		for _, res := range toRemove {
+			if info, err := os.Stat(res.Path); err == nil {
+				removeSize += uint64(info.Size())
+			}
+		}
+
+		if !removeAll {
+			// Print header with datadir and step range
+			if snapDir != "" {
+				fmt.Printf("\nDatadir: %s\n", snapDir)
+			}
+			if removeLatest {
+				fmt.Printf("Step range: latest (stepFrom>=%d)\n", _maxFrom)
+			} else {
+				fmt.Printf("Step range: [%d, %d)\n", minS, maxS)
+			}
+
+			// Display commitment files with KEEP/REMOVE markers, sizes, and labels
+			hasStateTrie := 0
+			fmt.Println()
+			for _, cf := range commitmentFilesWithState {
+				var sizeStr string
+				if info, err := os.Stat(cf.file.Path); err == nil {
+					sizeStr = common.ByteCount(uint64(info.Size()))
+				} else {
+					sizeStr = "unknown"
+				}
+
+				_, isRemoved := toRemove[cf.file.Path]
+				action := "KEEP  "
+				if isRemoved {
+					action = "REMOVE"
+				} else {
+					hasStateTrie++
+				}
+				labelStr := ""
+				if cf.label != "" {
+					labelStr = "  " + cf.label
+				}
+				fmt.Printf("  %s %s  (%s)%s\n", action, filepath.Base(cf.file.Path), sizeStr, labelStr)
+			}
+			if hasStateTrie == 0 && len(commitmentFilesWithState) > 0 {
+				fmt.Printf("\nthis will remove ALL commitment files with state trie\n")
+				q := "Do that anyway?\n\t1) RemoveFile\n\t4) NONONO (Exit)\n (pick number): "
+				if promptExit(q) {
+					os.Exit(0)
+				}
+			}
+
+			// Prompt with file count and estimated deletion size
+			q := fmt.Sprintf("\nremove %d files (~%s)?\n1) RemoveFile\n4) Exit\n (pick number): ",
+				len(toRemove), common.ByteCount(removeSize))
+			if promptExit(q) {
+				os.Exit(0)
 			}
 		}
 	} else {
