@@ -27,6 +27,8 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
+	"github.com/erigontech/erigon/db/recsplit/efcommon"
+
 	"github.com/erigontech/erigon/common/bitutil"
 	"github.com/erigontech/erigon/db/kv/stream"
 )
@@ -666,37 +668,17 @@ type DoubleEliasFano struct {
 }
 
 func (ef *DoubleEliasFano) deriveFields() (int, int) {
-	if ef.uPosition/(ef.numBuckets+1) == 0 {
-		ef.lPosition = 0
-	} else {
-		ef.lPosition = 63 ^ uint64(bits.LeadingZeros64(ef.uPosition/(ef.numBuckets+1)))
-	}
-	if ef.uCumKeys/(ef.numBuckets+1) == 0 {
-		ef.lCumKeys = 0
-	} else {
-		ef.lCumKeys = 63 ^ uint64(bits.LeadingZeros64(ef.uCumKeys/(ef.numBuckets+1)))
-	}
-	//fmt.Printf("uPosition = %d, lPosition = %d, uCumKeys = %d, lCumKeys = %d\n", ef.uPosition, ef.lPosition, ef.uCumKeys, ef.lCumKeys)
-	if ef.lCumKeys*2+ef.lPosition > 56 {
-		panic(fmt.Sprintf("ef.lCumKeys (%d) * 2 + ef.lPosition (%d) > 56", ef.lCumKeys, ef.lPosition))
-	}
-	ef.lowerBitsMaskCumKeys = (uint64(1) << ef.lCumKeys) - 1
-	ef.lowerBitsMaskPosition = (uint64(1) << ef.lPosition) - 1
-	wordsLowerBits := int(((ef.numBuckets+1)*(ef.lCumKeys+ef.lPosition)+63)/64 + 1)
-	wordsCumKeys := int((ef.numBuckets + 1 + (ef.uCumKeys >> ef.lCumKeys) + 63) / 64)
-	wordsPosition := int((ef.numBuckets + 1 + (ef.uPosition >> ef.lPosition) + 63) / 64)
-	jumpWords := ef.jumpSizeWords()
-	totalWords := wordsLowerBits + wordsCumKeys + wordsPosition + jumpWords
-	if ef.data == nil {
-		ef.data = make([]uint64, totalWords)
-	} else {
-		ef.data = ef.data[:totalWords]
-	}
-	ef.lowerBits = ef.data[:wordsLowerBits]
-	ef.upperBitsCumKeys = ef.data[wordsLowerBits : wordsLowerBits+wordsCumKeys]
-	ef.upperBitsPosition = ef.data[wordsLowerBits+wordsCumKeys : wordsLowerBits+wordsCumKeys+wordsPosition]
-	ef.jump = ef.data[wordsLowerBits+wordsCumKeys+wordsPosition:]
-	return wordsCumKeys, wordsPosition
+	r := efcommon.DeriveDoubleEFFields(ef.numBuckets, ef.uCumKeys, ef.uPosition, ef.data, ef.jumpSizeWords())
+	ef.lPosition = r.LPosition
+	ef.lCumKeys = r.LCumKeys
+	ef.lowerBitsMaskCumKeys = r.LowerBitsMaskCumKeys
+	ef.lowerBitsMaskPosition = r.LowerBitsMaskPosition
+	ef.data = r.Data
+	ef.lowerBits = r.LowerBits
+	ef.upperBitsCumKeys = r.UpperBitsCumKeys
+	ef.upperBitsPosition = r.UpperBitsPosition
+	ef.jump = r.Jump
+	return r.WordsCumKeys, r.WordsPosition
 }
 
 // Build construct double Elias Fano index for two given sequences
