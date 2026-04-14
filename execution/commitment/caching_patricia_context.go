@@ -185,10 +185,17 @@ func (v *cachedView) Account(plainKey []byte) (*Update, error) {
 	if err != nil {
 		return nil, err
 	}
+	if update == nil {
+		v.cache.accounts.LoadOrStore(plainKey, nil)
+		return nil, nil
+	}
 
 	// Cache a copy to avoid aliasing with caller buffers.
 	cached := update.Copy()
-	v.cache.accounts.Set(plainKey, cached)
+	actual, loaded := v.cache.accounts.LoadOrStore(plainKey, cached)
+	if loaded {
+		return actual, nil
+	}
 	return cached, nil
 }
 
@@ -203,8 +210,15 @@ func (v *cachedView) Storage(plainKey []byte) (*Update, error) {
 	if err != nil {
 		return nil, err
 	}
+	if update == nil {
+		v.cache.storage.LoadOrStore(plainKey, nil)
+		return nil, nil
+	}
 
 	cached := update.Copy()
-	v.cache.storage.Set(plainKey, cached)
+	actual, loaded := v.cache.storage.LoadOrStore(plainKey, cached)
+	if loaded {
+		return actual, nil
+	}
 	return cached, nil
 }
