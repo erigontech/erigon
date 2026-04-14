@@ -236,12 +236,12 @@ These are tracked by #20442 and are separate from the parent-header fix.
 
 ### Task 5: Verify acceptance criteria
 
-- [ ] verify `result.Headers` always contains the parent header for `blockNum > 0`
-- [ ] verify ordering is strictly ascending in every response
-- [ ] run full unit-test slice for the package: `go test ./rpc/jsonrpc/...`
-- [ ] run full EEST witness suite: `go test -v -run TestExecutionSpecWitness -count=1 ./execution/tests/eest_zkevm_witness/...`
-- [ ] run `make lint` — clean
-- [ ] run `make erigon integration` — builds
+- [x] verify `result.Headers` always contains the parent header for `blockNum > 0`
+- [x] verify ordering is strictly ascending in every response
+- [x] run full unit-test slice for the package: `go test ./rpc/jsonrpc/...`
+- [x] run full EEST witness suite: `go test -v -run TestExecutionSpecWitness -count=1 ./execution/tests/eest_zkevm_witness/...`
+- [x] run `make lint` — clean
+- [x] run `make erigon integration` — builds
 
 ### Task 6: Final — commit and cleanup
 
