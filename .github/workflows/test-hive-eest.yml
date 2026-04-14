@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
 
 env:
-  EEST_VERSION: 'v5.3.0'
+  EEST_VERSION: 'v5.4.0'
 
 concurrency:
   # Dynamic group to fill all available runners
