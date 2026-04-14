@@ -161,7 +161,7 @@ func Benchmark_HexPatriciaHashed_Unfold_Isolated(b *testing.B) {
 	} {
 		b.Run("mode="+mode.name, func(b *testing.B) {
 			hph := NewHexPatriciaHashed(length.Addr, ms)
-			hph.SetForceEagerDerive(mode.eager)
+			hph.setForceEagerDerive(mode.eager)
 
 			b.ResetTimer()
 			idx := 0

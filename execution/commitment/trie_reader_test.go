@@ -58,7 +58,6 @@ func (tc *trieReaderTestCtx) Branch(prefix []byte) ([]byte, kv.Step, error) {
 func (tc *trieReaderTestCtx) PutBranch(prefix, data, prevData []byte) error { return nil }
 func (tc *trieReaderTestCtx) Account(plainKey []byte) (*Update, error)      { return nil, nil }
 func (tc *trieReaderTestCtx) Storage(plainKey []byte) (*Update, error)      { return nil, nil }
-func (tc *trieReaderTestCtx) TxNum() uint64                                 { return 0 }
 
 // putBranch stores branch data for the given nibble prefix using the BranchEncoder.
 func (tc *trieReaderTestCtx) putBranch(nibblePrefix []byte, cells [16]*cell) {

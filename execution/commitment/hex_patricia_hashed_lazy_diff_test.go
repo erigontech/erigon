@@ -87,7 +87,7 @@ func runDifferentialFromSeed(t *testing.T, seed int64, nKeys int, withStorage bo
 	msE := NewMockState(t)
 	trieL := NewHexPatriciaHashed(length.Addr, msL)
 	trieE := NewHexPatriciaHashed(length.Addr, msE)
-	trieE.SetForceEagerDerive(true)
+	trieE.setForceEagerDerive(true)
 
 	updsL := newEmptyUpdates(t)
 	defer updsL.Close()

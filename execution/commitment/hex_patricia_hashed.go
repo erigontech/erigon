@@ -104,9 +104,10 @@ type HexPatriciaHashed struct {
 	// hex_patricia_hashed_lazy_diff_test.go to verify that lazy derivation
 	// produces identical roots and persisted branch bytes.
 	forceEagerDerive bool
-	// cellsDeferred (test-only): counts cells left in a deferred-derivation
-	// state by unfoldBranchNode. Used by the differential test to assert that
-	// the lazy code path is actually exercised when forceEagerDerive=false.
+	// cellsDeferred (test-only): cumulative count of cells placed into a
+	// deferred-derivation state by unfoldBranchNode. Used by the differential
+	// test to assert that the lazy code path is actually exercised when
+	// forceEagerDerive=false.
 	cellsDeferred uint64
 
 	//temp buffers
@@ -1752,7 +1753,7 @@ func (hph *HexPatriciaHashed) readBranchAndCheckForFlushing(prefix []byte) ([]by
 // targetNibble is the child we are descending into; only that child gets
 // immediate deriveHashedKeys, siblings are deferred (lazy).
 func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bool, targetNibble int) error {
-	key := HexNibblesToCompactBytes(hph.currentKey[:hph.currentKeyLen])
+	key := nibbles.HexToCompact(hph.currentKey[:hph.currentKeyLen])
 	hph.metrics.BranchLoad(hph.currentKey[:hph.currentKeyLen])
 
 	branchData, err := hph.readBranchAndCheckForFlushing(key)
@@ -2445,7 +2446,7 @@ func (hph *HexPatriciaHashed) detectCollapseBeforeDelete(hashedKey []byte) {
 		if hph.trace {
 			fmt.Printf("[collapse] ensureDerivedHashedKeys failed for sibling (%d, %x): %v\n", parentRow, siblingNibble, err)
 		}
-		return
+		panic(fmt.Errorf("detectCollapseBeforeDelete: ensureDerivedHashedKeys failed for sibling (parentRow=%d, siblingNibble=%x): %w", parentRow, siblingNibble, err))
 	}
 
 	// Build the sibling's full hashed key path
@@ -2477,7 +2478,7 @@ func (hph *HexPatriciaHashed) detectCascadingCollapseAtRow(row int) {
 		if hph.trace {
 			fmt.Printf("[cascade-collapse] ensureDerivedHashedKeys failed for surviving (%d, %x): %v\n", row, survivingNibble, err)
 		}
-		return
+		panic(fmt.Sprintf("detectCascadingCollapseAtRow: ensureDerivedHashedKeys failed for row=%d survivingNibble=%x: %v", row, survivingNibble, err))
 	}
 
 	// Build the surviving child's full hashed key path
@@ -3005,9 +3006,9 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 func (hph *HexPatriciaHashed) SetTrace(trace bool)       { hph.trace = trace }
 func (hph *HexPatriciaHashed) SetTraceDomain(trace bool) { hph.traceDomain = trace }
 
-// SetForceEagerDerive enables eager derivation for ALL siblings during
+// setForceEagerDerive enables eager derivation for ALL siblings during
 // unfoldBranchNode, matching the pre-PR-19899 behaviour. Test-only.
-func (hph *HexPatriciaHashed) SetForceEagerDerive(b bool)    { hph.forceEagerDerive = b }
+func (hph *HexPatriciaHashed) setForceEagerDerive(b bool)    { hph.forceEagerDerive = b }
 func (hph *HexPatriciaHashed) EnableWarmupCache(enable bool) { hph.enableWarmupCache = enable }
 
 func (hph *HexPatriciaHashed) GetCapture(truncate bool) []string {
