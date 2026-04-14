@@ -1846,7 +1846,15 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 			lastIdInDB(a.db, a.d[kv.CodeDomain]),
 			lastIdInDB(a.db, a.d[kv.StorageDomain]),
 			lastIdInDB(a.db, a.d[kv.CommitmentDomain]))
-		a.logger.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB)
+		// Sanity check: the DB should not have data at steps beyond where
+		// execution is currently at. If it does, collating those steps
+		// would capture intermediate state. This invariant should always
+		// hold — even unwinds should remove DB entries at unwound steps.
+		execStep := kv.Step(txNum / a.StepSize())
+		if lastInDB > execStep {
+			a.logger.Warn("BuildFilesInBackground: lastInDB beyond execStep", "lastInDB", lastInDB, "execStep", execStep, "txNum", txNum)
+		}
+		a.logger.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB, "execStep", execStep)
 
 		// Stagger aggregation across fleet nodes to prevent synchronized I/O stalls.
 		// Set different values per node via AGGREGATION_DELAY_MS env var.
