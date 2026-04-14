@@ -104,6 +104,16 @@ var (
 			strings.Join(vm.ActivateableEips(), ", ")),
 		Value: "Merge",
 	}
+	RewardFlag = cli.Int64Flag{
+		Name:  "state.reward",
+		Usage: "Mining reward. Set to -1 to disable",
+		Value: 0,
+	}
+	OpcodeCountFlag = cli.StringFlag{
+		Name:  "opcode.count",
+		Usage: "If set, opcode execution counts will be written to this file (relative to output.basedir).",
+		Value: "",
+	}
 	VerbosityFlag = cli.IntFlag{
 		Name:  "verbosity",
 		Usage: "Deprecated. Use --log.console.verbosity, --log.dir.verbosity, --torrent.verbosity, --database.verbosity",

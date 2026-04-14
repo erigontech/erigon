@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -30,39 +31,47 @@ import (
 	"github.com/erigontech/erigon/common/testlog"
 )
 
+var engineXDir = filepath.Join(eestDir, "benchmark", "blockchain_tests_engine_x")
+
+var eestPreAllocDir = filepath.Join(engineXDir, "pre_alloc")
+
 // BenchmarkEngineXInstruction measures payload execution time per instruction category,
 // excluding one-time setup (genesis write, node startup, DB init).
 // Usage: BENCH_ENGINE_X_MANUAL_ALLOW=true go test -run='^$' -bench BenchmarkEngineXInstruction -benchtime=1x -timeout 60m ./execution/tests/
 func BenchmarkEngineXInstruction(b *testing.B) {
-	benchmarkEngineX(b, "instruction")
+	benchmarkEngineX(b, eestPreAllocDir, filepath.Join(engineXDir, "benchmark", "compute", "instruction"))
 }
 
 func BenchmarkEngineXPrecompile(b *testing.B) {
-	benchmarkEngineX(b, "precompile")
+	benchmarkEngineX(b, eestPreAllocDir, filepath.Join(engineXDir, "benchmark", "compute", "precompile"))
 }
 
 func BenchmarkEngineXScenario(b *testing.B) {
-	benchmarkEngineX(b, "scenario")
+	benchmarkEngineX(b, eestPreAllocDir, filepath.Join(engineXDir, "benchmark", "compute", "scenario"))
 }
 
-func benchmarkEngineX(b *testing.B, category string) {
+// BenchmarkEngineXExtraFixtures runs locally stored fixtures from benchmark-fixtures/.
+// Usage: BENCH_ENGINE_X_MANUAL_ALLOW=true go test -run='^$' -bench BenchmarkEngineXExtraFixtures -benchtime=1x -timeout 60m ./execution/tests/
+func BenchmarkEngineXExtraFixtures(b *testing.B) {
+	benchmarkEngineX(b, filepath.Join("benchmark-fixtures", "pre_alloc"), filepath.Join("benchmark-fixtures", "benchmark"))
+}
+
+type testEntry struct {
+	name string
+	def  EngineXTestDefinition
+}
+
+// benchmarkEngineX walks the given directories for engine-x JSON fixtures,
+// groups them by first-level subdirectory into sub-benchmarks, and executes them.
+func benchmarkEngineX(b *testing.B, preAllocDir, testsDir string) {
 	if !dbg.EnvBool("BENCH_ENGINE_X_MANUAL_ALLOW", false) {
 		b.Skip("benchmark engine x tests are for manual use; enable via BENCH_ENGINE_X_MANUAL_ALLOW=true")
 	}
 
 	logger := testlog.Logger(b, log.LvlDebug)
-	engineXDir := filepath.Join(eestDir, "benchmark", "blockchain_tests_engine_x")
-	testsDir := filepath.Join(engineXDir, "benchmark", "compute", category)
-	preAllocDir := filepath.Join(engineXDir, "pre_alloc")
-
 	runner, err := NewEngineXTestRunner(b, logger, preAllocDir)
 	require.NoError(b, err)
 
-	// Parse all test files, group by subcategory.
-	type testEntry struct {
-		name string
-		def  EngineXTestDefinition
-	}
 	subcategories := make(map[string][]testEntry)
 	err = filepath.WalkDir(testsDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() || filepath.Ext(path) != ".json" {
@@ -100,11 +109,30 @@ func benchmarkEngineX(b *testing.B, category string) {
 	b.ResetTimer()
 	for subcat, entries := range subcategories {
 		entries := entries
+		var totalGas uint64
+		for _, e := range entries {
+			totalGas += e.def.GasUsed()
+		}
 		b.Run(subcat, func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
-				for _, e := range entries {
-					require.NoError(b, runner.Execute(b.Context(), e.def), "%s/%s", subcat, e.name)
-				}
+			for _, e := range entries {
+				e := e
+				gasUsed := e.def.GasUsed()
+				b.Run(e.name, func(b *testing.B) {
+					start := time.Now()
+					b.ResetTimer()
+					for i := 0; i < b.N; i++ {
+						require.NoError(b, runner.Execute(b.Context(), e.def), e.name)
+					}
+					b.StopTimer()
+					elapsed := uint64(time.Since(start))
+					if elapsed > 0 && gasUsed > 0 {
+						mgasps := (100 * 1000 * gasUsed * uint64(b.N)) / elapsed
+						b.ReportMetric(float64(mgasps)/100, "Mgas/s")
+					}
+				})
+			}
+			if totalGas > 0 {
+				b.ReportMetric(float64(totalGas)/float64(b.Elapsed().Nanoseconds())*1e3, "Mgas/s")
 			}
 		})
 	}
