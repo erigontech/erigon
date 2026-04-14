@@ -45,8 +45,8 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		}
 		// Gas sentry honoured, do the actual gas calculation based on the stored value
 		var (
-			y, x    = callContext.Stack.Back(1), callContext.Stack.peek()
-			slot    = accounts.InternKey(x.Bytes32())
+			y       = callContext.Stack.Back(1)
+			slot    = callContext.PeekStorageKey()
 			current uint256.Int
 			cost    = uint64(0)
 		)
@@ -70,8 +70,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 			return mdgas.MdGas{Regular: cost + params.WarmStorageReadCostEIP2929}, nil // SLOAD_GAS
 		}
 
-		slotCommited := accounts.InternKey(x.Bytes32())
-		var original, _ = evm.IntraBlockState().GetCommittedState(callContext.Address(), slotCommited)
+		var original, _ = evm.IntraBlockState().GetCommittedState(callContext.Address(), slot)
 		if original.Eq(&current) {
 			if original.IsZero() { // create slot (2.1.1)
 				if rules.IsAmsterdam {
@@ -125,10 +124,9 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 // charge 2100 gas and add the pair to accessed_storage_keys.
 // If the pair is already in accessed_storage_keys, charge 100 gas.
 func gasSLoadEIP2929(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
-	loc := callContext.Stack.peek()
 	// If the caller cannot afford the cost, this change will be rolled back
 	// If he does afford it, we can skip checking the same thing later on, during execution
-	if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(callContext.Address(), accounts.InternKey(loc.Bytes32())); slotMod {
+	if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(callContext.Address(), callContext.PeekStorageKey()); slotMod {
 		return mdgas.MdGas{Regular: params.ColdSloadCostEIP2929}, nil
 	}
 	return mdgas.MdGas{Regular: params.WarmStorageReadCostEIP2929}, nil
@@ -145,7 +143,7 @@ func gasExtCodeCopyEIP2929(evm *EVM, callContext *CallContext, scopeGas mdgas.Md
 	if err != nil {
 		return mdgas.MdGas{}, err
 	}
-	addr := accounts.InternAddress(callContext.Stack.peek().Bytes20())
+	addr := callContext.PeekAddress()
 	// Check slot presence in the access list
 	if evm.IntraBlockState().AddAddressToAccessList(addr) {
 		var overflow bool
@@ -166,7 +164,7 @@ func gasExtCodeCopyEIP2929(evm *EVM, callContext *CallContext, scopeGas mdgas.Md
 // - extcodesize,
 // - (ext) balance
 func gasEip2929AccountCheck(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
-	addr := accounts.InternAddress(callContext.Stack.peek().Bytes20())
+	addr := callContext.PeekAddress()
 	// If the caller cannot afford the cost, this change will be rolled back
 	if evm.IntraBlockState().AddAddressToAccessList(addr) {
 		// The warm storage read cost is already charged as constantGas
@@ -243,7 +241,7 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 	gasFunc := func(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
 		var (
 			gas     mdgas.MdGas
-			address = accounts.InternAddress(callContext.Stack.peek().Bytes20())
+			address = callContext.PeekAddress()
 		)
 		if evm.readOnly {
 			return mdgas.MdGas{}, ErrWriteProtection

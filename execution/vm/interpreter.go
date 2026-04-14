@@ -63,6 +63,38 @@ type CallContext struct {
 	Memory   Memory
 	Stack    Stack
 	Contract Contract
+
+	// Cached interned values — avoids double-interning the same raw value
+	// between dynamicGas and execute within a single opcode dispatch.
+	cachedKeyRaw  [32]byte
+	cachedKey     accounts.StorageKey
+	cachedAddrRaw [20]byte
+	cachedAddr    accounts.Address
+}
+
+// PeekStorageKey returns the top-of-stack value as an interned StorageKey.
+// The result is cached so that repeated calls with the same raw value
+// (e.g. gas calculation then opcode execution) skip unique.Make.
+func (ctx *CallContext) PeekStorageKey() accounts.StorageKey {
+	raw := ctx.Stack.peek().Bytes32()
+	if raw == ctx.cachedKeyRaw {
+		return ctx.cachedKey
+	}
+	ctx.cachedKeyRaw = raw
+	ctx.cachedKey = accounts.InternKey(raw)
+	return ctx.cachedKey
+}
+
+// PeekAddress returns the top-of-stack value as an interned Address.
+// Cached like PeekStorageKey.
+func (ctx *CallContext) PeekAddress() accounts.Address {
+	raw := ctx.Stack.peek().Bytes20()
+	if raw == ctx.cachedAddrRaw {
+		return ctx.cachedAddr
+	}
+	ctx.cachedAddrRaw = raw
+	ctx.cachedAddr = accounts.InternAddress(raw)
+	return ctx.cachedAddr
 }
 
 var contextPool = sync.Pool{
