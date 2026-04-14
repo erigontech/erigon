@@ -1208,3 +1208,142 @@ func TestDUAcceptanceCriteria(t *testing.T) {
 	require.GreaterOrEqual(t, decoded.Estimates[0].TotalBytes, decoded.Estimates[1].TotalBytes)
 	require.GreaterOrEqual(t, decoded.Estimates[1].TotalBytes, decoded.Estimates[2].TotalBytes)
 }
+
+// touchBlockSnap creates an empty file at <dirs.Snap>/<name>, ensuring the snap
+// directory exists. Used by the rm-blocks tests below.
+func touchBlockSnap(t *testing.T, dirs datadir.Dirs, name string) string {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(dirs.Snap, 0755))
+	full := filepath.Join(dirs.Snap, name)
+	f, err := os.OpenFile(full, os.O_RDONLY|os.O_CREATE, 0644)
+	require.NoError(t, err)
+	f.Close()
+	return full
+}
+
+// Test_DeleteBlockSnaps_RemovesLatestRange covers the happy path: with two
+// block ranges present (including a transactions-to-block.idx accessor at the
+// latest range), only the latest range is removed and older files survive.
+func Test_DeleteBlockSnaps_RemovesLatestRange(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+
+	keep := []string{
+		"v1.0-000000-000500-headers.seg",
+		"v1.0-000000-000500-headers.idx",
+		"v1.0-000000-000500-bodies.seg",
+		"v1.0-000000-000500-transactions.seg",
+		"v1.0-000000-000500-transactions.idx",
+		"v1.0-000000-000500-transactions-to-block.idx",
+	}
+	rm := []string{
+		"v1.0-000500-001000-headers.seg",
+		"v1.0-000500-001000-headers.idx",
+		"v1.0-000500-001000-bodies.seg",
+		"v1.0-000500-001000-transactions.seg",
+		"v1.0-000500-001000-transactions.idx",
+		"v1.0-000500-001000-transactions-to-block.idx",
+	}
+	var keepPaths, rmPaths []string
+	for _, n := range keep {
+		keepPaths = append(keepPaths, touchBlockSnap(t, dirs, n))
+	}
+	for _, n := range rm {
+		rmPaths = append(rmPaths, touchBlockSnap(t, dirs, n))
+	}
+
+	err := DeleteBlockSnapshots(DeleteBlockSnapshotsArgs{Dirs: dirs})
+	require.NoError(t, err)
+
+	for _, p := range keepPaths {
+		confirmExist(t, p)
+	}
+	for _, p := range rmPaths {
+		confirmDoesntExist(t, p)
+	}
+}
+
+// Test_DeleteBlockSnaps_DryRunKeepsFiles verifies that DryRun does not modify
+// the filesystem.
+func Test_DeleteBlockSnaps_DryRunKeepsFiles(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	files := []string{
+		"v1.0-000000-000500-headers.seg",
+		"v1.0-000500-001000-headers.seg",
+		"v1.0-000500-001000-transactions-to-block.idx",
+	}
+	var paths []string
+	for _, n := range files {
+		paths = append(paths, touchBlockSnap(t, dirs, n))
+	}
+
+	err := DeleteBlockSnapshots(DeleteBlockSnapshotsArgs{Dirs: dirs, DryRun: true})
+	require.NoError(t, err)
+
+	for _, p := range paths {
+		confirmExist(t, p)
+	}
+}
+
+// Test_DeleteBlockSnaps_NoFiles is a graceful no-op when dirs.Snap is empty.
+func Test_DeleteBlockSnaps_NoFiles(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	require.NoError(t, os.MkdirAll(dirs.Snap, 0755))
+	err := DeleteBlockSnapshots(DeleteBlockSnapshotsArgs{Dirs: dirs})
+	require.NoError(t, err)
+}
+
+// Test_DeleteBlockSnaps_RemovesTorrentArtifacts verifies that .torrent and
+// partial .torrent<suffix> companions of the removed range are also cleaned up.
+func Test_DeleteBlockSnaps_RemovesTorrentArtifacts(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+
+	// Older range — should be kept along with its torrent companion.
+	keepSeg := touchBlockSnap(t, dirs, "v1.0-000000-000500-headers.seg")
+	keepTorrent := touchBlockSnap(t, dirs, "v1.0-000000-000500-headers.seg.torrent")
+
+	// Latest range with a full torrent and a partial torrent artifact.
+	rmSeg := touchBlockSnap(t, dirs, "v1.0-000500-001000-headers.seg")
+	rmTorrent := touchBlockSnap(t, dirs, "v1.0-000500-001000-headers.seg.torrent")
+	rmTorrentPartial := touchBlockSnap(t, dirs, "v1.0-000500-001000-headers.seg.torrent.bolt")
+
+	err := DeleteBlockSnapshots(DeleteBlockSnapshotsArgs{Dirs: dirs})
+	require.NoError(t, err)
+
+	confirmExist(t, keepSeg)
+	confirmExist(t, keepTorrent)
+	confirmDoesntExist(t, rmSeg)
+	confirmDoesntExist(t, rmTorrent)
+	confirmDoesntExist(t, rmTorrentPartial)
+}
+
+// Test_DeleteBlockSnaps_SweepsTmpArtifacts verifies that .tmp files in dirs.Snap
+// are unconditionally cleaned, mirroring DeleteStateSnapshots' behavior, while
+// older ranges that aren't being removed survive.
+func Test_DeleteBlockSnaps_SweepsTmpArtifacts(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+
+	keepSeg := touchBlockSnap(t, dirs, "v1.0-000000-000500-headers.seg")
+	rmSeg := touchBlockSnap(t, dirs, "v1.0-000500-001000-headers.seg")
+	tmp1 := touchBlockSnap(t, dirs, "v1.1-headers.0-500.seg.123456.tmp")
+	tmp2 := touchBlockSnap(t, dirs, "v1.0-000500-001000-bodies.seg.999.tmp")
+
+	err := DeleteBlockSnapshots(DeleteBlockSnapshotsArgs{Dirs: dirs})
+	require.NoError(t, err)
+
+	confirmExist(t, keepSeg)
+	confirmDoesntExist(t, rmSeg)
+	confirmDoesntExist(t, tmp1)
+	confirmDoesntExist(t, tmp2)
+}
+
+// Test_DeleteBlockSnaps_NoFilesSweepsTmp verifies the empty-snap-dir branch
+// still cleans .tmp leftovers.
+func Test_DeleteBlockSnaps_NoFilesSweepsTmp(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	tmp := touchBlockSnap(t, dirs, "v1.1-headers.0-500.seg.123456.tmp")
+
+	err := DeleteBlockSnapshots(DeleteBlockSnapshotsArgs{Dirs: dirs})
+	require.NoError(t, err)
+
+	confirmDoesntExist(t, tmp)
+}
