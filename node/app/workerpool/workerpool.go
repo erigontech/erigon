@@ -131,10 +131,18 @@ func (p *WorkerPool) Stopped() bool {
 // closure. Any return values should be returned over a channel that is
 // captured in the task function closure.
 //
-// Submit will not block regardless of the number of tasks submitted. Each task
-// is immediately given to an available worker or to a newly started worker. If
-// there are no available workers, and the maximum number of workers are
-// already created, then the task is put onto a waiting queue.
+// Submit does not block on a bounded queue — the internal waiting queue is
+// unbounded, so the number of already-submitted tasks does not cause Submit
+// to block. However, Submit does synchronously hand off to the dispatcher
+// goroutine via an unbuffered channel, so it can momentarily block while the
+// dispatcher processes the previous task (spawns a worker, appends to the
+// waiting queue, etc.). Under concurrent submitters, submissions serialize
+// through this handoff. In practice the block is brief; if true non-blocking
+// semantics are required, wrap in a goroutine at the call site.
+//
+// Each task is immediately given to an available worker or to a newly started
+// worker. If there are no available workers, and the maximum number of
+// workers are already created, then the task is put onto a waiting queue.
 //
 // When there are tasks on the waiting queue, any additional new tasks are put
 // on the waiting queue. Tasks are removed from the waiting queue as workers
