@@ -49,6 +49,7 @@ type BlockHeaderProcessor interface {
 	ProcessWithdrawals(s abstract.BeaconState, withdrawals *solid.ListSSZ[*cltypes.Withdrawal]) error
 	ProcessExecutionPayload(s abstract.BeaconState, body cltypes.GenericBeaconBody) error
 	ProcessExecutionPayloadBid(s abstract.BeaconState, block cltypes.GenericBeaconBlock) error
+	ProcessParentExecutionPayload(s abstract.BeaconState, block cltypes.GenericBeaconBlock) error
 	ProcessRandao(s abstract.BeaconState, randao [96]byte, proposerIndex uint64) error
 	ProcessEth1Data(state abstract.BeaconState, eth1Data *cltypes.Eth1Data) error
 	ProcessSyncAggregate(s abstract.BeaconState, sync *cltypes.SyncAggregate) error

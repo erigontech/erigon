@@ -331,8 +331,10 @@ func (I *impl) ProcessWithdrawals(
 // processWithdrawalsGloas implements the Gloas version of process_withdrawals.
 // The payload parameter is removed; withdrawals are computed internally.
 func (I *impl) processWithdrawalsGloas(s abstract.BeaconState) error {
-	// [New in Gloas:EIP7732] Return early if the parent block is empty
-	if !state.IsParentBlockFull(s) {
+	// [Modified in Gloas:EIP7732] Return early if the parent block is empty.
+	// The parent is full when latest_block_hash matches the committed bid's block_hash.
+	bid := s.GetLatestExecutionPayloadBid()
+	if bid == nil || s.GetLatestBlockHash() != bid.BlockHash {
 		return nil
 	}
 
@@ -580,6 +582,117 @@ func (I *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltypes.
 	return nil
 }
 
+// ProcessParentExecutionPayload processes the previous slot's execution payload effects.
+// If the parent was full (payload delivered), it verifies the execution requests match
+// the committed bid and processes deposits, withdrawals, consolidations, builder payment,
+// and updates latest_block_hash. If the parent was empty, it asserts no requests.
+// [New in Gloas:EIP7732]
+func (I *impl) ProcessParentExecutionPayload(s abstract.BeaconState, block cltypes.GenericBeaconBlock) error {
+	if s.Version() < clparams.GloasVersion {
+		return nil
+	}
+
+	body := block.GetBody()
+	signedBid := body.GetSignedExecutionPayloadBid()
+	if signedBid == nil || signedBid.Message == nil {
+		return errors.New("ProcessParentExecutionPayload: block has no signed execution payload bid")
+	}
+	bid := signedBid.Message
+	parentBid := s.GetLatestExecutionPayloadBid()
+	if parentBid == nil {
+		return errors.New("ProcessParentExecutionPayload: state has no latest execution payload bid")
+	}
+	parentExecutionRequests := body.GetParentExecutionRequests()
+
+	// Determine if the parent block was full
+	isParentFull := bid.ParentBlockHash == parentBid.BlockHash
+
+	if !isParentFull {
+		// Parent was EMPTY: assert no requests
+		if parentExecutionRequests != nil {
+			if (parentExecutionRequests.Deposits != nil && parentExecutionRequests.Deposits.Len() > 0) ||
+				(parentExecutionRequests.Withdrawals != nil && parentExecutionRequests.Withdrawals.Len() > 0) ||
+				(parentExecutionRequests.Consolidations != nil && parentExecutionRequests.Consolidations.Len() > 0) {
+				return errors.New("ProcessParentExecutionPayload: parent was empty but parent_execution_requests is not empty")
+			}
+		}
+		return nil
+	}
+
+	// Parent was FULL: verify requests match commitment
+	if parentExecutionRequests == nil {
+		return errors.New("ProcessParentExecutionPayload: parent was full but parent_execution_requests is nil")
+	}
+	requestsRoot, err := parentExecutionRequests.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("ProcessParentExecutionPayload: failed to hash parent_execution_requests: %w", err)
+	}
+	if requestsRoot != parentBid.ExecutionRequestsRoot {
+		return fmt.Errorf("ProcessParentExecutionPayload: parent_execution_requests root %v does not match committed bid execution_requests_root %v", requestsRoot, parentBid.ExecutionRequestsRoot)
+	}
+
+	// Process execution requests (deposits, withdrawals, consolidations)
+	if parentExecutionRequests.Deposits != nil {
+		if err := solid.RangeErr[*solid.DepositRequest](parentExecutionRequests.Deposits, func(_ int, req *solid.DepositRequest, _ int) error {
+			return I.ProcessDepositRequest(s, req)
+		}); err != nil {
+			return fmt.Errorf("ProcessParentExecutionPayload: ProcessDepositRequest: %w", err)
+		}
+	}
+	if parentExecutionRequests.Withdrawals != nil {
+		if err := solid.RangeErr[*solid.WithdrawalRequest](parentExecutionRequests.Withdrawals, func(_ int, req *solid.WithdrawalRequest, _ int) error {
+			return I.ProcessWithdrawalRequest(s, req)
+		}); err != nil {
+			return fmt.Errorf("ProcessParentExecutionPayload: ProcessWithdrawalRequest: %w", err)
+		}
+	}
+	if parentExecutionRequests.Consolidations != nil {
+		if err := solid.RangeErr[*solid.ConsolidationRequest](parentExecutionRequests.Consolidations, func(_ int, req *solid.ConsolidationRequest, _ int) error {
+			return I.ProcessConsolidationRequest(s, req)
+		}); err != nil {
+			return fmt.Errorf("ProcessParentExecutionPayload: ProcessConsolidationRequest: %w", err)
+		}
+	}
+
+	// Queue the builder payment using parent_slot (epoch-aware indexing per spec)
+	beaconConfig := s.BeaconConfig()
+	parentSlot := s.LatestBlockHeader().Slot // spec: state.latest_block_header.slot
+	slotsPerEpoch := beaconConfig.SlotsPerEpoch
+	parentEpoch := parentSlot / slotsPerEpoch
+	currentEpoch := state.Epoch(s)
+
+	var paymentIndex int
+	if parentEpoch == currentEpoch {
+		paymentIndex = int(slotsPerEpoch + parentSlot%slotsPerEpoch)
+	} else if parentEpoch+1 == currentEpoch {
+		// previous epoch
+		paymentIndex = int(parentSlot % slotsPerEpoch)
+	} else {
+		// Parent is from an older epoch — payment window expired, skip
+		paymentIndex = -1
+	}
+
+	if paymentIndex >= 0 {
+		payments := s.GetBuilderPendingPayments()
+		payment := payments.Get(paymentIndex)
+		if payment != nil && payment.Withdrawal != nil && payment.Withdrawal.Amount > 0 {
+			withdrawals := s.GetBuilderPendingWithdrawals()
+			withdrawals.Append(payment.Withdrawal)
+			s.SetBuilderPendingWithdrawals(withdrawals)
+		}
+		payments.Set(paymentIndex, &cltypes.BuilderPendingPayment{
+			Withdrawal: &cltypes.BuilderPendingWithdrawal{},
+		})
+		s.SetBuilderPendingPayments(payments)
+	}
+
+	// Update state
+	s.SetExecutionPayloadAvailability(parentSlot, true)
+	s.SetLatestBlockHash(parentBid.BlockHash)
+
+	return nil
+}
+
 // verifyExecutionPayloadBidSignature verifies the BLS signature of a signed execution payload bid.
 // [New in Gloas:EIP7732]
 func verifyExecutionPayloadBidSignature(s abstract.BeaconState, signedBid *cltypes.SignedExecutionPayloadBid) (bool, error) {
@@ -605,7 +718,6 @@ func verifyExecutionPayloadBidSignature(s abstract.BeaconState, signedBid *cltyp
 func (I *impl) ProcessExecutionPayloadEnvelope(s abstract.BeaconState, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
 	envelope := signedEnvelope.Message
 	payload := envelope.Payload
-	beaconConfig := s.BeaconConfig()
 
 	// Verify signature
 	if I.FullValidation {
@@ -618,22 +730,16 @@ func (I *impl) ProcessExecutionPayloadEnvelope(s abstract.BeaconState, signedEnv
 		}
 	}
 
-	// Backfill the deferred state_root in LatestBlockHeader before the envelope mutates
-	// the state. This locks the block root to the post-block / pre-envelope state, matching
-	// the spec's process_execution_payload. Without this, any later call to BlockRoot()
-	// would recompute HashSSZ() on a post-envelope state and produce the wrong block root.
-	previousStateRoot, err := s.HashSSZ()
-	if err != nil {
-		return fmt.Errorf("ProcessExecutionPayloadEnvelope: failed to compute state root: %w", err)
-	}
+	// Compute the block root locally without mutating state.
+	// Per spec: header = copy(state.latest_block_header); header.state_root = hash_tree_root(state)
 	latestBlockHeader := s.LatestBlockHeader()
 	if latestBlockHeader.Root == [32]byte{} {
-		latestBlockHeader.Root = previousStateRoot
-		s.SetLatestBlockHeader(&latestBlockHeader)
+		stateRoot, err := s.HashSSZ()
+		if err != nil {
+			return fmt.Errorf("ProcessExecutionPayloadEnvelope: failed to compute state root: %w", err)
+		}
+		latestBlockHeader.Root = stateRoot
 	}
-
-	// Verify consistency with the beacon block
-	latestBlockHeader = s.LatestBlockHeader()
 	headerRoot, err := latestBlockHeader.HashSSZ()
 	if err != nil {
 		return fmt.Errorf("ProcessExecutionPayloadEnvelope: failed to hash block header: %w", err)
@@ -656,6 +762,19 @@ func (I *impl) ProcessExecutionPayloadEnvelope(s abstract.BeaconState, signedEnv
 	}
 	if committedBid.PrevRandao != payloadHeader.PrevRandao {
 		return errors.New("ProcessExecutionPayloadEnvelope: prev_randao mismatch with committed bid")
+	}
+
+	// Verify execution requests root matches committed bid
+	requests := envelope.ExecutionRequests
+	if requests == nil {
+		return errors.New("ProcessExecutionPayloadEnvelope: envelope has nil execution_requests")
+	}
+	requestsRoot, err := requests.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("ProcessExecutionPayloadEnvelope: failed to hash execution_requests: %w", err)
+	}
+	if requestsRoot != committedBid.ExecutionRequestsRoot {
+		return fmt.Errorf("ProcessExecutionPayloadEnvelope: execution_requests root %v does not match committed bid execution_requests_root %v", requestsRoot, committedBid.ExecutionRequestsRoot)
 	}
 
 	// Verify consistency with expected withdrawals
@@ -691,66 +810,6 @@ func (I *impl) ProcessExecutionPayloadEnvelope(s abstract.BeaconState, signedEnv
 	}
 
 	// NOTE: execution_engine.verify_and_notify_new_payload is handled outside state transition
-
-	// Process execution requests
-	requests := envelope.ExecutionRequests
-	if requests != nil {
-		if requests.Deposits != nil {
-			if err := solid.RangeErr[*solid.DepositRequest](requests.Deposits, func(_ int, req *solid.DepositRequest, _ int) error {
-				return I.ProcessDepositRequest(s, req)
-			}); err != nil {
-				return fmt.Errorf("ProcessExecutionPayloadEnvelope: ProcessDepositRequest: %w", err)
-			}
-		}
-		if requests.Withdrawals != nil {
-			if err := solid.RangeErr[*solid.WithdrawalRequest](requests.Withdrawals, func(_ int, req *solid.WithdrawalRequest, _ int) error {
-				return I.ProcessWithdrawalRequest(s, req)
-			}); err != nil {
-				return fmt.Errorf("ProcessExecutionPayloadEnvelope: ProcessWithdrawalRequest: %w", err)
-			}
-		}
-		if requests.Consolidations != nil {
-			if err := solid.RangeErr[*solid.ConsolidationRequest](requests.Consolidations, func(_ int, req *solid.ConsolidationRequest, _ int) error {
-				return I.ProcessConsolidationRequest(s, req)
-			}); err != nil {
-				return fmt.Errorf("ProcessExecutionPayloadEnvelope: ProcessConsolidationRequest: %w", err)
-			}
-		}
-	}
-
-	// Queue the builder payment
-	slotsPerEpoch := beaconConfig.SlotsPerEpoch
-	paymentIndex := int(slotsPerEpoch + s.Slot()%slotsPerEpoch)
-	payments := s.GetBuilderPendingPayments()
-	payment := payments.Get(paymentIndex)
-	if payment != nil && payment.Withdrawal != nil && payment.Withdrawal.Amount > 0 {
-		withdrawals := s.GetBuilderPendingWithdrawals()
-		withdrawals.Append(payment.Withdrawal)
-		s.SetBuilderPendingWithdrawals(withdrawals)
-	}
-	payments.Set(paymentIndex, &cltypes.BuilderPendingPayment{
-		Withdrawal: &cltypes.BuilderPendingWithdrawal{},
-	})
-	s.SetBuilderPendingPayments(payments)
-
-	// Cache the execution payload hash
-	s.SetExecutionPayloadAvailability(s.Slot(), true)
-	s.SetLatestBlockHash(payloadHeader.BlockHash)
-
-	// Clear previousStateRoot cache so that the next transitionSlot() recomputes it
-	// from the post-envelope state (not the stale post-block state root).
-	s.SetPreviousStateRoot(common.Hash{})
-
-	// Verify the state root
-	if I.FullValidation {
-		stateRoot, err := s.HashSSZ()
-		if err != nil {
-			return fmt.Errorf("ProcessExecutionPayloadEnvelope: failed to compute final state root: %w", err)
-		}
-		if envelope.StateRoot != stateRoot {
-			return fmt.Errorf("ProcessExecutionPayloadEnvelope: state_root mismatch: expected %v, got %v", envelope.StateRoot, stateRoot)
-		}
-	}
 
 	return nil
 }
