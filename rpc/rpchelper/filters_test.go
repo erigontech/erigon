@@ -47,6 +47,20 @@ func createLog() *remoteproto.SubscribeLogsReply {
 	}
 }
 
+func appliedLogsReply() *remoteproto.SubscribeLogsReply {
+	return &remoteproto.SubscribeLogsReply{
+		BlockNumber: math.MaxUint64,
+		LogIndex:    math.MaxUint64,
+	}
+}
+
+func appliedReceiptsReply() *remoteproto.SubscribeReceiptsReply {
+	return &remoteproto.SubscribeReceiptsReply{
+		BlockNumber:      math.MaxUint64,
+		TransactionIndex: math.MaxUint64,
+	}
+}
+
 var (
 	address1     = common.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7")
 	address1H160 = gointerfaces.ConvertAddressToH160(address1)
@@ -255,14 +269,18 @@ func TestFilters_ThreeSubscriptionsWithDifferentCriteria(t *testing.T) {
 
 func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 	t.Parallel()
-	var lastFilterRequest *remoteproto.LogsFilterRequest
+	var (
+		f                 *Filters
+		lastFilterRequest *remoteproto.LogsFilterRequest
+	)
 	loadRequester := func(r *remoteproto.LogsFilterRequest) error {
 		lastFilterRequest = r
+		f.OnNewLogs(appliedLogsReply())
 		return nil
 	}
 
 	config := FiltersConfig{}
-	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New(), nil)
+	f = New(context.TODO(), config, nil, nil, nil, func() {}, log.New(), nil)
 	f.logsRequestor.Store(loadRequester)
 
 	// first request has no filters
@@ -698,14 +716,18 @@ func TestFilters_ThreeReceiptsSubscriptionsWithDifferentCriteria(t *testing.T) {
 
 func TestFilters_SubscribeReceiptsGeneratesCorrectReceiptsFilterRequest(t *testing.T) {
 	t.Parallel()
-	var lastFilterRequest *remoteproto.ReceiptsFilterRequest
+	var (
+		f                 *Filters
+		lastFilterRequest *remoteproto.ReceiptsFilterRequest
+	)
 	loadRequester := func(r *remoteproto.ReceiptsFilterRequest) error {
 		lastFilterRequest = r
+		f.OnReceipts(appliedReceiptsReply())
 		return nil
 	}
 
 	config := FiltersConfig{}
-	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New(), nil)
+	f = New(context.TODO(), config, nil, nil, nil, func() {}, log.New(), nil)
 	f.receiptsRequestor.Store(loadRequester)
 
 	// First request: subscribe to all receipts
@@ -784,8 +806,10 @@ func TestFilters_FilterUpdateWaitsForAppliedAck(t *testing.T) {
 
 	config := FiltersConfig{}
 	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New(), nil)
+	requestorCalled := make(chan struct{}, 1)
 
 	f.receiptsRequestor.Store(func(_ *remoteproto.ReceiptsFilterRequest) error {
+		requestorCalled <- struct{}{}
 		return nil
 	})
 
@@ -795,15 +819,18 @@ func TestFilters_FilterUpdateWaitsForAppliedAck(t *testing.T) {
 	}()
 
 	select {
-	case err := <-done:
-		t.Fatalf("filter update returned before applied ack: %v", err)
-	case <-time.After(50 * time.Millisecond):
+	case <-requestorCalled:
+	case <-time.After(time.Second):
+		t.Fatal("expected receipts filter update to be sent")
 	}
 
-	f.OnReceipts(&remoteproto.SubscribeReceiptsReply{
-		BlockNumber:      math.MaxUint64,
-		TransactionIndex: math.MaxUint64,
-	})
+	select {
+	case err := <-done:
+		t.Fatalf("filter update returned before applied ack: %v", err)
+	default:
+	}
+
+	f.OnReceipts(appliedReceiptsReply())
 
 	select {
 	case err := <-done:
