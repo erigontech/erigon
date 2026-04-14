@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
 	executionclient "github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/validator/devvalidator"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	rpcdaemoncli "github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/common"
@@ -305,6 +306,16 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if err := checkAndSetCommitmentHistoryFlag(tx, logger, dirs, config); err != nil {
 			return err
 		}
+
+		// Apply config-driven global state for the commitment and trie subsystems.
+		// These globals are read by 80+ call sites; the config fields are the source of truth.
+		if config.KeepExecutionProofs {
+			statecfg.EnableHistoricalCommitment()
+		}
+		if config.ExperimentalConcurrentCommitment {
+			statecfg.ExperimentalConcurrentCommitment = true
+		}
+
 		if err = stages.UpdateMetrics(tx); err != nil {
 			return err
 		}
@@ -1040,6 +1051,32 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			}
 			ctxCancel()
 		}()
+		// Start embedded dev validator if configured.
+		if config.CaplinConfig.DevValidatorSeed != "" {
+			go func() {
+				beaconAddr := config.CaplinConfig.BeaconAPIRouter.Address
+				if beaconAddr == "" {
+					beaconAddr = "127.0.0.1:5555"
+				}
+				beaconURL := fmt.Sprintf("http://%s", beaconAddr)
+				validatorCount := config.CaplinConfig.DevValidatorCount
+				if validatorCount == 0 {
+					validatorCount = 64
+				}
+				// Load the beacon config from the custom config path.
+				beaconCfg, _, err := clparams.CustomConfig(config.CaplinConfig.CustomConfigPath)
+				if err != nil {
+					logger.Error("[dev-validator] failed to load beacon config", "err", err)
+					return
+				}
+				svc, err := devvalidator.NewService(beaconURL, config.CaplinConfig.DevValidatorSeed, validatorCount, &beaconCfg, logger)
+				if err != nil {
+					logger.Error("[dev-validator] failed to create service", "err", err)
+					return
+				}
+				svc.Start(ctx)
+			}()
+		}
 	}
 
 	if chainConfig.Bor != nil {
@@ -1125,6 +1162,11 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	}
 
 	s.apiList = jsonrpc.APIList(chainKv, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &httpRpcCfg, s.engine, s.logger, s.polygonBridge, s.heimdallService)
+
+	if slices.Contains(httpRpcCfg.API, "testing") {
+		s.logger.Warn("[HTTP API] testing_ RPC namespace is ENABLED — do not use on production networks")
+		s.apiList = append(s.apiList, engineapi.NewTestingRPCEntry(s.engineBackendRPC))
+	}
 
 	s.bgComponentsEg.Go(func() error {
 		err := rpcdaemoncli.StartRpcServer(ctx, &httpRpcCfg, s.apiList, s.logger)

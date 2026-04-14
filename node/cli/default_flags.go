@@ -150,6 +150,9 @@ var DefaultFlags = []cli.Flag{
 	&utils.MaxPendingPeersFlag,
 	&utils.ChainFlag,
 	&utils.DeveloperPeriodFlag,
+	&utils.DevValidatorSeedFlag,
+	&utils.DevValidatorCountFlag,
+	&utils.DevSlotTimeFlag,
 	&utils.VMEnableDebugFlag,
 	&utils.NetworkIdFlag,
 	&utils.PersistReceiptsV2Flag,
@@ -221,6 +224,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.CaplinImmediateBlobBackfillFlag,
 
 	&utils.CaplinDisableBlobPruningFlag,
+	&utils.CaplinColumnKeepSlotsFlag,
 	&utils.CaplinDisableCheckpointSyncFlag,
 	&utils.CaplinEnableSnapshotGeneration,
 	&utils.CaplinMevRelayUrl,
