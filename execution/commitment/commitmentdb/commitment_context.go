@@ -167,12 +167,12 @@ func (sdc *SharedDomainsCommitmentContext) EnableCsvMetrics(filePathPrefix strin
 	sdc.patriciaTrie.EnableCsvMetrics(filePathPrefix)
 }
 
-func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, trieVariant commitment.TrieVariant, tmpDir string) *SharedDomainsCommitmentContext {
+func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, trieVariant commitment.TrieVariant, tmpDir string, cfg commitment.TrieConfig) *SharedDomainsCommitmentContext {
 	ctx := &SharedDomainsCommitmentContext{
 		sharedDomains: sd,
 		tmpDir:        tmpDir,
 	}
-	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(trieVariant, mode, tmpDir)
+	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(trieVariant, mode, tmpDir, cfg)
 	return ctx
 }
 

@@ -114,6 +114,8 @@ type HexPatriciaHashed struct {
 	// Used by witness generation to capture paths that need resolution.
 	collapseTracer CollapseTracer
 
+	cfg TrieConfig // static config, set at construction
+
 	//processing metrics
 	metrics       *Metrics
 	depthsToTxNum [129]uint64 // endTxNum of file with branch data for that depth
@@ -122,10 +124,11 @@ type HexPatriciaHashed struct {
 
 // Clones current trie state to allow concurrent processing.
 func (hph *HexPatriciaHashed) SpawnSubTrie(ctx PatriciaContext, forNibble int) *HexPatriciaHashed {
-	subTrie := NewHexPatriciaHashed(hph.accountKeyLen, ctx)
-	// Disable deferred updates for sub-tries since they fold directly
-	// and their deferred updates would never be applied
-	subTrie.branchEncoder.SetDeferUpdates(false)
+	// Sub-tries inherit parent config but with DeferBranchUpdates forced to false
+	// since they fold directly and their deferred updates would never be applied
+	subCfg := hph.cfg
+	subCfg.DeferBranchUpdates = false
+	subTrie := NewHexPatriciaHashed(hph.accountKeyLen, ctx, subCfg)
 
 	subTrie.mountTo(hph, forNibble)
 	return subTrie
@@ -133,7 +136,7 @@ func (hph *HexPatriciaHashed) SpawnSubTrie(ctx PatriciaContext, forNibble int) *
 
 var hphPool sync.Pool
 
-func NewHexPatriciaHashed(accountKeyLen int16, ctx PatriciaContext) *HexPatriciaHashed {
+func NewHexPatriciaHashed(accountKeyLen int16, ctx PatriciaContext, cfg TrieConfig) *HexPatriciaHashed {
 	hph, ok := hphPool.Get().(*HexPatriciaHashed)
 	if !ok {
 		hph = newHexPatriciaHashed()
@@ -142,7 +145,21 @@ func NewHexPatriciaHashed(accountKeyLen int16, ctx PatriciaContext) *HexPatricia
 	// and newHexPatriciaHashed() produces a zero-state struct.
 	hph.accountKeyLen = accountKeyLen
 	hph.ctx = ctx
+	hph.applyConfig(cfg)
 	return hph
+}
+
+// applyConfig stores the config and applies its fields to the trie.
+func (hph *HexPatriciaHashed) applyConfig(cfg TrieConfig) {
+	hph.cfg = cfg
+	hph.branchEncoder.SetDeferUpdates(cfg.DeferBranchUpdates)
+	hph.branchEncoder.maxDeferredUpdates = cfg.maxDeferredUpdatesOrDefault()
+	hph.leaveDeferredForCaller = cfg.LeaveDeferredForCaller
+	hph.enableWarmupCache = cfg.EnableWarmupCache
+	hph.memoizationOff = cfg.MemoizationOff
+	if cfg.CsvMetricsFilePrefix != "" {
+		hph.metrics.EnableCsvMetrics(cfg.CsvMetricsFilePrefix)
+	}
 }
 
 func newHexPatriciaHashed() *HexPatriciaHashed {
@@ -152,12 +169,11 @@ func newHexPatriciaHashed() *HexPatriciaHashed {
 		auxBuffer:     bytes.NewBuffer(make([]byte, 8192)),
 		hadToLoadL:    make(map[uint64]skipStat),
 		accValBuf:     make(rlp.RlpEncodedBytes, 128),
-		metrics:       NewMetrics(),
+		metrics:       NewMetrics(""),
 		branchEncoder: NewBranchEncoder(1024),
 	}
 
 	hph.branchEncoder.setMetrics(hph.metrics)
-	hph.branchEncoder.SetDeferUpdates(true) // Enable deferred branch updates by default
 	return hph
 }
 
@@ -205,18 +221,21 @@ func (hph *HexPatriciaHashed) resetForReuse() {
 	hph.trace = false
 	hph.traceDomain = false
 
-	// flags
+	// flags — reset to zero values; applyConfig will restore from stored cfg
 	hph.memoizationOff = false
 	hph.leaveDeferredForCaller = false
 
 	// auxiliary buffer
 	hph.auxBuffer.Reset()
 
-	// branch encoder: clear deferred updates, reset buffer, nil cache, re-enable deferred
+	// branch encoder: clear deferred updates, reset buffer, nil cache
 	hph.branchEncoder.ClearDeferred()
 	hph.branchEncoder.buf.Reset()
 	hph.branchEncoder.cache = nil
-	hph.branchEncoder.SetDeferUpdates(true)
+	hph.branchEncoder.SetDeferUpdates(false) // will be re-set by applyConfig
+
+	// reset config to zero — caller sets via applyConfig after pool get
+	hph.cfg = TrieConfig{}
 
 	// depth-to-txnum mapping
 	clear(hph.depthsToTxNum[:])

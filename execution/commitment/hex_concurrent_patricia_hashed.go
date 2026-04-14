@@ -167,8 +167,10 @@ func (p *ConcurrentPatriciaHashed) SetTraceDomain(b bool) {
 }
 func (p *ConcurrentPatriciaHashed) EnableWarmupCache(b bool) {
 	p.root.EnableWarmupCache(b)
+	p.root.cfg.EnableWarmupCache = b
 	for i := range p.mounts {
 		p.mounts[i].EnableWarmupCache(b)
+		p.mounts[i].cfg.EnableWarmupCache = b
 	}
 }
 func (p *ConcurrentPatriciaHashed) GetCapture(truncate bool) []string {
@@ -190,8 +192,10 @@ func (p *ConcurrentPatriciaHashed) SetCapture(capture []string) {
 
 func (p *ConcurrentPatriciaHashed) EnableCsvMetrics(filePathPrefix string) {
 	p.root.EnableCsvMetrics(filePathPrefix)
+	p.root.cfg.CsvMetricsFilePrefix = filePathPrefix
 	for i := range p.mounts {
 		p.mounts[i].EnableCsvMetrics(filePathPrefix)
+		p.mounts[i].cfg.CsvMetricsFilePrefix = filePathPrefix
 		p.mounts[i].metrics = p.root.metrics
 	}
 }

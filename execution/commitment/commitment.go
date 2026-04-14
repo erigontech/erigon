@@ -149,10 +149,10 @@ const (
 	VariantConcurrentHexPatricia TrieVariant = "hex-concurrent-patricia-hashed"
 )
 
-func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *Updates) {
+func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string, cfg TrieConfig) (Trie, *Updates) {
 	switch tv {
 	case VariantConcurrentHexPatricia:
-		root := NewHexPatriciaHashed(length.Addr, nil)
+		root := NewHexPatriciaHashed(length.Addr, nil, cfg)
 		trie := NewConcurrentPatriciaHashed(root, nil)
 		tree := NewUpdates(mode, tmpdir, KeyToHexNibbleHash)
 		// tree.SetConcurrentCommitment(true) // first run always sequential
@@ -167,7 +167,7 @@ func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *
 		fallthrough
 	default:
 
-		trie := NewHexPatriciaHashed(length.Addr, nil)
+		trie := NewHexPatriciaHashed(length.Addr, nil, cfg)
 		tree := NewUpdates(mode, tmpdir, KeyToHexNibbleHash)
 		return trie, tree
 	}
@@ -333,10 +333,11 @@ type BranchEncoder struct {
 	metrics   *Metrics
 
 	// Deferred updates support
-	deferUpdates    bool
-	deferred        []*DeferredBranchUpdate
-	pendingPrefixes *maphash.NonConcurrentMap[struct{}] // tracks pending prefixes to detect duplicates
-	cache           *WarmupCache
+	deferUpdates       bool
+	maxDeferredUpdates int // flush threshold; 0 = use defaultMaxDeferredUpdates from config
+	deferred           []*DeferredBranchUpdate
+	pendingPrefixes    *maphash.NonConcurrentMap[struct{}] // tracks pending prefixes to detect duplicates
+	cache              *WarmupCache
 }
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
@@ -600,8 +601,6 @@ func (be *BranchEncoder) CollectUpdate(
 	return nil
 }
 
-const maxDeferredUpdates = 50_000
-
 // CollectDeferredUpdate stores a branch update job for later parallel processing.
 // Unlike CollectUpdate, this does NOT call EncodeBranch immediately - it copies the cellEncodeData
 // and defers encoding for parallel execution later.
@@ -614,7 +613,11 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	cells *[16]cellEncodeData,
 ) error {
 	// Flush if duplicate prefix or too many deferred updates
-	needsFlush := len(be.deferred) >= maxDeferredUpdates
+	limit := be.maxDeferredUpdates
+	if limit == 0 {
+		limit = defaultMaxDeferredUpdates
+	}
+	needsFlush := len(be.deferred) >= limit
 	if !needsFlush {
 		_, needsFlush = be.pendingPrefixes.Get(prefix)
 	}

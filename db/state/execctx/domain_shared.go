@@ -139,7 +139,7 @@ func NewSharedDomainsWithTrieVariant(ctx context.Context, tx kv.TemporalTx, logg
 	}
 
 	sd.mem = tx.Debug().NewMemBatch(&sd.metrics)
-	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv, tx.Debug().Dirs().Tmp)
+	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv, tx.Debug().Dirs().Tmp, commitment.DefaultTrieConfig())
 
 	_, blockNum, err := sd.SeekCommitment(ctx, tx)
 	if err != nil {

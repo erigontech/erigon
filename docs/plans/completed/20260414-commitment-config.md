@@ -116,31 +116,31 @@ directly, deferred updates would never be applied).
 - Create: `execution/commitment/config.go`
 - Create: `execution/commitment/config_test.go`
 
-- [ ] Create `execution/commitment/config.go` with `TrieConfig` struct containing 6 fields: `DeferBranchUpdates`, `LeaveDeferredForCaller`, `MaxDeferredUpdates`, `EnableWarmupCache`, `CsvMetricsFilePrefix`, `MemoizationOff`
-- [ ] Add `DefaultTrieConfig()` returning production defaults (`DeferBranchUpdates: true`)
-- [ ] Add `func (c TrieConfig) maxDeferredUpdatesOrDefault() int` helper (returns 50,000 when 0)
-- [ ] Write tests: `TestDefaultTrieConfig` verifies defaults match production values
-- [ ] Write tests: `TestTrieConfig_maxDeferredUpdatesOrDefault` verifies zero->50000 fallback and custom value
-- [ ] Run `go test ./execution/commitment/... -count=1 -run TestDefaultTrieConfig` - must pass
+- [x] Create `execution/commitment/config.go` with `TrieConfig` struct containing 6 fields: `DeferBranchUpdates`, `LeaveDeferredForCaller`, `MaxDeferredUpdates`, `EnableWarmupCache`, `CsvMetricsFilePrefix`, `MemoizationOff`
+- [x] Add `DefaultTrieConfig()` returning production defaults (`DeferBranchUpdates: true`)
+- [x] Add `func (c TrieConfig) maxDeferredUpdatesOrDefault() int` helper (returns 50,000 when 0)
+- [x] Write tests: `TestDefaultTrieConfig` verifies defaults match production values
+- [x] Write tests: `TestTrieConfig_maxDeferredUpdatesOrDefault` verifies zero->50000 fallback and custom value
+- [x] Run `go test ./execution/commitment/... -count=1 -run TestDefaultTrieConfig` - must pass
 
 ### Task 2: Wire TrieConfig into HexPatriciaHashed constructor
 
 **Files:**
 - Modify: `execution/commitment/hex_patricia_hashed.go`
 
-- [ ] Add `cfg TrieConfig` field to `HexPatriciaHashed` struct (after `collapseTracer`)
-- [ ] Change `NewHexPatriciaHashed(accountKeyLen int16, ctx PatriciaContext)` to `NewHexPatriciaHashed(accountKeyLen int16, ctx PatriciaContext, cfg TrieConfig)`
-- [ ] In `NewHexPatriciaHashed`: apply `cfg.DeferBranchUpdates` via `branchEncoder.SetDeferUpdates(cfg.DeferBranchUpdates)` (replacing hardcoded `true` in `newHexPatriciaHashed`)
-- [ ] Apply `cfg.LeaveDeferredForCaller` -> `hph.leaveDeferredForCaller`
-- [ ] Apply `cfg.EnableWarmupCache` -> `hph.enableWarmupCache`
-- [ ] Apply `cfg.MemoizationOff` -> `hph.memoizationOff`
-- [ ] Apply `cfg.CsvMetricsFilePrefix` -> call `hph.metrics.EnableCsvMetrics(cfg.CsvMetricsFilePrefix)` when non-empty
-- [ ] Store `cfg` as `hph.cfg = cfg`
-- [ ] In `SpawnSubTrie`: pass parent's `hph.cfg` with `DeferBranchUpdates` forced to `false`
-- [ ] In `resetForReuse`: reset config fields from stored `hph.cfg` (not hardcoded values)
-- [ ] Update all internal callers in `commitment.go`: `InitializeTrieAndUpdates` lines 155, 170 - add `cfg TrieConfig` param and pass through
-- [ ] Update internal caller in `verify.go:120` - pass `DefaultTrieConfig()`
-- [ ] Verify build: `go build ./execution/commitment/...`
+- [x] Add `cfg TrieConfig` field to `HexPatriciaHashed` struct (after `collapseTracer`)
+- [x] Change `NewHexPatriciaHashed(accountKeyLen int16, ctx PatriciaContext)` to `NewHexPatriciaHashed(accountKeyLen int16, ctx PatriciaContext, cfg TrieConfig)`
+- [x] In `NewHexPatriciaHashed`: apply `cfg.DeferBranchUpdates` via `branchEncoder.SetDeferUpdates(cfg.DeferBranchUpdates)` (replacing hardcoded `true` in `newHexPatriciaHashed`)
+- [x] Apply `cfg.LeaveDeferredForCaller` -> `hph.leaveDeferredForCaller`
+- [x] Apply `cfg.EnableWarmupCache` -> `hph.enableWarmupCache`
+- [x] Apply `cfg.MemoizationOff` -> `hph.memoizationOff`
+- [x] Apply `cfg.CsvMetricsFilePrefix` -> call `hph.metrics.EnableCsvMetrics(cfg.CsvMetricsFilePrefix)` when non-empty
+- [x] Store `cfg` as `hph.cfg = cfg`
+- [x] In `SpawnSubTrie`: pass parent's `hph.cfg` with `DeferBranchUpdates` forced to `false`
+- [x] In `resetForReuse`: reset config fields from stored `hph.cfg` (not hardcoded values)
+- [x] Update all internal callers in `commitment.go`: `InitializeTrieAndUpdates` lines 155, 170 - add `cfg TrieConfig` param and pass through
+- [x] Update internal caller in `verify.go:120` - pass `DefaultTrieConfig()`
+- [x] Verify build: `go build ./execution/commitment/...`
 
 ### Task 3: Update all test files calling NewHexPatriciaHashed
 
@@ -156,30 +156,30 @@ directly, deferred updates would never be applied).
 - Modify: `execution/commitment/config_test.go`
 - Modify: `db/test/aggregator_ext_test.go`
 
-- [ ] Add `DefaultTrieConfig()` as third arg to all `NewHexPatriciaHashed` calls in `hex_patricia_hashed_test.go` (~30 call sites)
-- [ ] Add `DefaultTrieConfig()` as third arg in `hex_patricia_hashed_fuzz_test.go` (~4 call sites)
-- [ ] Add `DefaultTrieConfig()` as third arg in `hex_patricia_hashed_bench_test.go` (~1 call site)
-- [ ] Add `DefaultTrieConfig()` as third arg in `hex_concurrent_patricia_hashed_test.go` (~2 call sites)
-- [ ] Add `DefaultTrieConfig()` as third arg in `commitment_bench_test.go` (~1 call site)
-- [ ] Add `DefaultTrieConfig()` as third arg in `trie_trace_test.go` (~18 call sites)
-- [ ] Add `DefaultTrieConfig()` as third arg in `trie_reader_test.go` (~2 call sites)
-- [ ] Add `DefaultTrieConfig()` as third arg in `verify_test.go` (~4 call sites)
-- [ ] Add `commitment.DefaultTrieConfig()` as third arg in `db/test/aggregator_ext_test.go:82`
-- [ ] Add config propagation test to `config_test.go`: create HPH with custom config, verify fields applied
-- [ ] Run `go test ./execution/commitment/... -count=1` - must pass
-- [ ] Run `go test ./db/test/... -count=1 -run TestAggregator` - must pass
+- [x] Add `DefaultTrieConfig()` as third arg to all `NewHexPatriciaHashed` calls in `hex_patricia_hashed_test.go` (~30 call sites)
+- [x] Add `DefaultTrieConfig()` as third arg in `hex_patricia_hashed_fuzz_test.go` (~4 call sites)
+- [x] Add `DefaultTrieConfig()` as third arg in `hex_patricia_hashed_bench_test.go` (~1 call site)
+- [x] Add `DefaultTrieConfig()` as third arg in `hex_concurrent_patricia_hashed_test.go` (~2 call sites)
+- [x] Add `DefaultTrieConfig()` as third arg in `commitment_bench_test.go` (~1 call site)
+- [x] Add `DefaultTrieConfig()` as third arg in `trie_trace_test.go` (~18 call sites)
+- [x] Add `DefaultTrieConfig()` as third arg in `trie_reader_test.go` (~2 call sites)
+- [x] Add `DefaultTrieConfig()` as third arg in `verify_test.go` (~4 call sites)
+- [x] Add `commitment.DefaultTrieConfig()` as third arg in `db/test/aggregator_ext_test.go:82`
+- [x] Add config propagation test to `config_test.go`: create HPH with custom config, verify fields applied
+- [x] Run `go test ./execution/commitment/... -count=1` - must pass
+- [x] Run `go test ./db/test/... -count=1 -run TestAggregator` - must pass
 
 ### Task 4: Wire TrieConfig into ConcurrentPatriciaHashed
 
 **Files:**
 - Modify: `execution/commitment/hex_concurrent_patricia_hashed.go`
 
-- [ ] Verify `NewConcurrentPatriciaHashed` receives config via `root *HexPatriciaHashed` (which now carries `cfg`)
-- [ ] Verify `SpawnSubTrie` in HPH propagates config to sub-tries (done in Task 2)
-- [ ] Add config propagation for `EnableWarmupCache`: when `ConcurrentPatriciaHashed.EnableWarmupCache(b)` is called, also update stored config
-- [ ] Add config propagation for `EnableCsvMetrics`: when called, propagate to root and mounts
-- [ ] Add test in `config_test.go`: create ConcurrentPatriciaHashed, verify config propagates to sub-tries via SpawnSubTrie
-- [ ] Run `go test ./execution/commitment/... -count=1` - must pass
+- [x] Verify `NewConcurrentPatriciaHashed` receives config via `root *HexPatriciaHashed` (which now carries `cfg`)
+- [x] Verify `SpawnSubTrie` in HPH propagates config to sub-tries (done in Task 2)
+- [x] Add config propagation for `EnableWarmupCache`: when `ConcurrentPatriciaHashed.EnableWarmupCache(b)` is called, also update stored config
+- [x] Add config propagation for `EnableCsvMetrics`: when called, propagate to root and mounts
+- [x] Add test in `config_test.go`: create ConcurrentPatriciaHashed, verify config propagates to sub-tries via SpawnSubTrie
+- [x] Run `go test ./execution/commitment/... -count=1` - must pass
 
 ### Task 5: Wire TrieConfig into InitializeTrieAndUpdates and NewSharedDomainsCommitmentContext
 
@@ -187,22 +187,22 @@ directly, deferred updates would never be applied).
 - Modify: `execution/commitment/commitment.go`
 - Modify: `execution/commitment/commitmentdb/commitment_context.go`
 
-- [ ] Update `InitializeTrieAndUpdates` signature: add `cfg TrieConfig` parameter
-- [ ] Pass `cfg` to `NewHexPatriciaHashed` calls in both `VariantConcurrentHexPatricia` and default branches
-- [ ] Update `NewSharedDomainsCommitmentContext` signature: add `cfg commitment.TrieConfig` parameter
-- [ ] Pass `cfg` through to `InitializeTrieAndUpdates`
-- [ ] Keep `SetDeferBranchUpdates` setter on SharedDomainsCommitmentContext as shim (overrides config value at runtime)
-- [ ] Verify build: `go build ./execution/commitment/...`
+- [x] Update `InitializeTrieAndUpdates` signature: add `cfg TrieConfig` parameter
+- [x] Pass `cfg` to `NewHexPatriciaHashed` calls in both `VariantConcurrentHexPatricia` and default branches
+- [x] Update `NewSharedDomainsCommitmentContext` signature: add `cfg commitment.TrieConfig` parameter
+- [x] Pass `cfg` through to `InitializeTrieAndUpdates`
+- [x] Keep `SetDeferBranchUpdates` setter on SharedDomainsCommitmentContext as shim (overrides config value at runtime)
+- [x] Verify build: `go build ./execution/commitment/...`
 
 ### Task 6: Wire TrieConfig into NewMetrics for CsvMetricsFilePrefix
 
 **Files:**
 - Modify: `execution/commitment/metrics.go`
 
-- [ ] Add `csvPrefix string` parameter to `NewMetrics` (or have it accept from TrieConfig)
-- [ ] In `NewMetrics`: if `csvPrefix` is non-empty, use it; else fall back to env var `ERIGON_COMMITMENT_CSV_METRICS_FILE_PATH_PREFIX`
-- [ ] Update `newHexPatriciaHashed` to pass `cfg.CsvMetricsFilePrefix` to `NewMetrics`
-- [ ] Run `go test ./execution/commitment/... -count=1` - must pass
+- [x] Add `csvPrefix string` parameter to `NewMetrics` (or have it accept from TrieConfig)
+- [x] In `NewMetrics`: if `csvPrefix` is non-empty, use it; else fall back to env var `ERIGON_COMMITMENT_CSV_METRICS_FILE_PATH_PREFIX`
+- [x] Update `newHexPatriciaHashed` to pass `cfg.CsvMetricsFilePrefix` to `NewMetrics`
+- [x] Run `go test ./execution/commitment/... -count=1` - must pass
 
 ### Task 7: Make maxDeferredUpdates configurable
 
@@ -210,12 +210,12 @@ directly, deferred updates would never be applied).
 - Modify: `execution/commitment/commitment.go`
 - Modify: `execution/commitment/hex_patricia_hashed.go`
 
-- [ ] Remove `const maxDeferredUpdates = 50_000` from `commitment.go`
-- [ ] Add `maxDeferredUpdates int` field to `BranchEncoder` struct
-- [ ] Set `maxDeferredUpdates` from `cfg.maxDeferredUpdatesOrDefault()` during HPH construction (pass to branchEncoder)
-- [ ] Update the flush check in `BranchEncoder` to use the field instead of the const
-- [ ] Add test: verify custom `MaxDeferredUpdates` value is respected
-- [ ] Run `go test ./execution/commitment/... -count=1` - must pass
+- [x] Remove `const maxDeferredUpdates = 50_000` from `commitment.go`
+- [x] Add `maxDeferredUpdates int` field to `BranchEncoder` struct
+- [x] Set `maxDeferredUpdates` from `cfg.maxDeferredUpdatesOrDefault()` during HPH construction (pass to branchEncoder)
+- [x] Update the flush check in `BranchEncoder` to use the field instead of the const
+- [x] Add test: verify custom `MaxDeferredUpdates` value is respected
+- [x] Run `go test ./execution/commitment/... -count=1` - must pass
 
 ### Task 8: Update external callers
 
@@ -228,32 +228,32 @@ directly, deferred updates would never be applied).
 - Modify: `rpc/jsonrpc/receipts/receipts_generator.go`
 - Modify: `db/integrity/commitment_integrity.go`
 
-- [ ] `domain_shared.go:139`: pass `commitment.DefaultTrieConfig()` to `NewSharedDomainsCommitmentContext`
-- [ ] `exec3.go`: verify `SetTrace` calls remain (runtime toggle, not config) - no changes needed beyond constructor arg
-- [ ] `squeeze.go`: pass `commitment.DefaultTrieConfig()` at commitment context creation sites
-- [ ] `rpc/rpchelper/commitment.go`: verify `SetDeferBranchUpdates(false)` still works as shim (no change needed - shim kept in Task 5)
-- [ ] `rpc/jsonrpc/eth_simulation.go`: verify `SetDeferCommitmentUpdates` still works (SDC-level, not trie-level - no change)
-- [ ] `rpc/jsonrpc/receipts/receipts_generator.go`: verify `SetDeferCommitmentUpdates` and `SetHistoryStateReader` still work (no change)
-- [ ] `db/integrity/commitment_integrity.go`: verify `SetTrace` and `SetLimitedHistoryStateReader` still work (no change)
-- [ ] Build verification: `make erigon integration`
-- [ ] Run `go test ./db/state/... -count=1 -short`
+- [x] `domain_shared.go:139`: pass `commitment.DefaultTrieConfig()` to `NewSharedDomainsCommitmentContext`
+- [x] `exec3.go`: verify `SetTrace` calls remain (runtime toggle, not config) - no changes needed beyond constructor arg
+- [x] `squeeze.go`: pass `commitment.DefaultTrieConfig()` at commitment context creation sites
+- [x] `rpc/rpchelper/commitment.go`: verify `SetDeferBranchUpdates(false)` still works as shim (no change needed - shim kept in Task 5)
+- [x] `rpc/jsonrpc/eth_simulation.go`: verify `SetDeferCommitmentUpdates` still works (SDC-level, not trie-level - no change)
+- [x] `rpc/jsonrpc/receipts/receipts_generator.go`: verify `SetDeferCommitmentUpdates` and `SetHistoryStateReader` still work (no change)
+- [x] `db/integrity/commitment_integrity.go`: verify `SetTrace` and `SetLimitedHistoryStateReader` still work (no change)
+- [x] Build verification: `make erigon integration`
+- [x] Run `go test ./db/state/... -count=1 -short`
 
 ### Task 9: Verify acceptance criteria
 
-- [ ] Verify all config fields from TrieConfig are applied in HexPatriciaHashed
-- [ ] Verify config propagates through ConcurrentPatriciaHashed to sub-tries
-- [ ] Verify SetDeferBranchUpdates shim on SDC still works for RPC callers
-- [ ] Verify CsvMetricsFilePrefix falls back to env var when empty
-- [ ] Verify MemoizationOff is respected in computeCellHash
-- [ ] Run full commitment test suite: `go test ./execution/commitment/... -count=1`
-- [ ] Run affected package tests: `go test ./db/state/... -count=1 -short && go test ./db/test/... -count=1 -short`
-- [ ] Run lint: `make lint` (repeat until clean)
-- [ ] Build: `make erigon integration`
+- [x] Verify all config fields from TrieConfig are applied in HexPatriciaHashed
+- [x] Verify config propagates through ConcurrentPatriciaHashed to sub-tries
+- [x] Verify SetDeferBranchUpdates shim on SDC still works for RPC callers
+- [x] Verify CsvMetricsFilePrefix falls back to env var when empty
+- [x] Verify MemoizationOff is respected in computeCellHash
+- [x] Run full commitment test suite: `go test ./execution/commitment/... -count=1`
+- [x] Run affected package tests: `go test ./db/state/... -count=1 -short && go test ./db/test/... -count=1 -short`
+- [x] Run lint: `make lint` (repeat until clean)
+- [x] Build: `make erigon integration`
 
 ### Task 10: [Final] Cleanup and move plan
 
-- [ ] Update CLAUDE.md if new patterns discovered
-- [ ] Move this plan to `docs/plans/completed/`
+- [x] Update CLAUDE.md if new patterns discovered
+- [x] Move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 
