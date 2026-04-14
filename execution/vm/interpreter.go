@@ -66,34 +66,38 @@ type CallContext struct {
 
 	// Cached interned values — avoids double-interning the same raw value
 	// between dynamicGas and execute within a single opcode dispatch.
-	cachedKeyRaw  [32]byte
+	cachedKeyInt  uint256.Int
 	cachedKey     accounts.StorageKey
+	cachedKeyOk   bool
 	cachedAddrRaw [20]byte
 	cachedAddr    accounts.Address
+	cachedAddrOk  bool
 }
 
-// PeekStorageKey returns the top-of-stack value as an interned StorageKey.
+// peekStorageKey returns the top-of-stack value as an interned StorageKey.
 // The result is cached so that repeated calls with the same raw value
 // (e.g. gas calculation then opcode execution) skip unique.Make.
-func (ctx *CallContext) PeekStorageKey() accounts.StorageKey {
-	raw := ctx.Stack.peek().Bytes32()
-	if raw == ctx.cachedKeyRaw {
+func (ctx *CallContext) peekStorageKey() accounts.StorageKey {
+	v := ctx.Stack.peek()
+	if ctx.cachedKeyOk && *v == ctx.cachedKeyInt {
 		return ctx.cachedKey
 	}
-	ctx.cachedKeyRaw = raw
-	ctx.cachedKey = accounts.InternKey(raw)
+	ctx.cachedKeyInt = *v
+	ctx.cachedKey = accounts.InternKey(v.Bytes32())
+	ctx.cachedKeyOk = true
 	return ctx.cachedKey
 }
 
-// PeekAddress returns the top-of-stack value as an interned Address.
-// Cached like PeekStorageKey.
-func (ctx *CallContext) PeekAddress() accounts.Address {
+// peekAddress returns the top-of-stack value as an interned Address.
+// Cached like peekStorageKey.
+func (ctx *CallContext) peekAddress() accounts.Address {
 	raw := ctx.Stack.peek().Bytes20()
-	if raw == ctx.cachedAddrRaw {
+	if ctx.cachedAddrOk && raw == ctx.cachedAddrRaw {
 		return ctx.cachedAddr
 	}
 	ctx.cachedAddrRaw = raw
 	ctx.cachedAddr = accounts.InternAddress(raw)
+	ctx.cachedAddrOk = true
 	return ctx.cachedAddr
 }
 
@@ -119,6 +123,8 @@ func getCallContext(contract Contract, input []byte, gas mdgas.MdGas) *CallConte
 func (c *CallContext) put() {
 	c.Memory.reset()
 	c.Stack.Reset()
+	c.cachedKeyOk = false
+	c.cachedAddrOk = false
 	contextPool.Put(c)
 }
 

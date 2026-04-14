@@ -46,7 +46,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		// Gas sentry honoured, do the actual gas calculation based on the stored value
 		var (
 			y       = callContext.Stack.Back(1)
-			slot    = callContext.PeekStorageKey()
+			slot    = callContext.peekStorageKey()
 			current uint256.Int
 			cost    = uint64(0)
 		)
@@ -126,7 +126,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 func gasSLoadEIP2929(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
 	// If the caller cannot afford the cost, this change will be rolled back
 	// If he does afford it, we can skip checking the same thing later on, during execution
-	if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(callContext.Address(), callContext.PeekStorageKey()); slotMod {
+	if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(callContext.Address(), callContext.peekStorageKey()); slotMod {
 		return mdgas.MdGas{Regular: params.ColdSloadCostEIP2929}, nil
 	}
 	return mdgas.MdGas{Regular: params.WarmStorageReadCostEIP2929}, nil
@@ -143,7 +143,7 @@ func gasExtCodeCopyEIP2929(evm *EVM, callContext *CallContext, scopeGas mdgas.Md
 	if err != nil {
 		return mdgas.MdGas{}, err
 	}
-	addr := callContext.PeekAddress()
+	addr := callContext.peekAddress()
 	// Check slot presence in the access list
 	if evm.IntraBlockState().AddAddressToAccessList(addr) {
 		var overflow bool
@@ -164,7 +164,7 @@ func gasExtCodeCopyEIP2929(evm *EVM, callContext *CallContext, scopeGas mdgas.Md
 // - extcodesize,
 // - (ext) balance
 func gasEip2929AccountCheck(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
-	addr := callContext.PeekAddress()
+	addr := callContext.peekAddress()
 	// If the caller cannot afford the cost, this change will be rolled back
 	if evm.IntraBlockState().AddAddressToAccessList(addr) {
 		// The warm storage read cost is already charged as constantGas
@@ -241,7 +241,7 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 	gasFunc := func(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
 		var (
 			gas     mdgas.MdGas
-			address = callContext.PeekAddress()
+			address = callContext.peekAddress()
 		)
 		if evm.readOnly {
 			return mdgas.MdGas{}, ErrWriteProtection
