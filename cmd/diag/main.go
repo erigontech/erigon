@@ -20,9 +20,7 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/signal"
 	"path/filepath"
-	"syscall"
 
 	"github.com/urfave/cli/v2"
 
@@ -104,16 +102,4 @@ func setupLogger(ctx *cli.Context) (log.Logger, error) {
 	return logger, nil
 }
 
-func handleTerminationSignals(stopFunc func(), logger log.Logger) {
-	signalCh := make(chan os.Signal, 1)
-	signal.Notify(signalCh, syscall.SIGTERM, syscall.SIGINT)
-
-	switch s := <-signalCh; s {
-	case syscall.SIGTERM:
-		logger.Info("Stopping")
-		stopFunc()
-	case syscall.SIGINT:
-		logger.Info("Terminating")
-		os.Exit(-int(syscall.SIGINT))
-	}
-}
+var handleTerminationSignals = utils.HandleTerminationSignals

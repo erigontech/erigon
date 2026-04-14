@@ -547,7 +547,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			ctx,
 			poolCfg,
 			mock.DB,
-			kvcache.NewDummy(),
+			kvcache.NewSimple(),
 			sentries,
 			stateChangesClient,
 			func() {}, /* builderNotifyNewTxns */

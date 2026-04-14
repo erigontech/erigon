@@ -110,5 +110,4 @@ Using PoS dev mode  seed=devnet validators=64 signer=0x78eF752367584ee389aCB8824
   in consensus testing.
 - P2P networking is disabled (`--nodiscover` is set automatically).
 - Data is ephemeral by default — each run starts from a fresh genesis.
-- The `--mine` and `--dev.period` flags from the old Clique-based dev mode are no
-  longer used.
+- The `--mine` flag from the old dev mode is no longer used. The `--dev.period` flag has been removed.

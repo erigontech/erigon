@@ -17,20 +17,14 @@ make gen                 # Generate all auto-generated code (mocks, grpc, etc.)
 
 Before committing, always verify changes with: `make lint && make erigon integration`
 
-Run specific tests:
-```bash
-go test ./execution/stagedsync/...
-go test -run TestName ./path/to/package/...
-```
-
 ## Architecture Overview
 
-Erigon is a high-performance Ethereum execution client with embedded consensus layer. Key design principles:
-- **Flat KV storage** instead of tries (reduces write amplification)
-- **Staged synchronization** (ordered pipeline, independent unwind)
-- **Modular services** (sentry, txpool, downloader can run separately)
+- Erigon is an Ethereum execution client
+- Data flow: `db -> snapshots`
+- `snapshots` are immutable
+- `Unwind` beyond data in snapshots not allowed
 
-## Directory Structure
+## Key Directories
 
 | Directory | Purpose | Component Docs |
 |-----------|---------|----------------|
@@ -52,7 +46,7 @@ Erigon is a high-performance Ethereum execution client with embedded consensus l
 
 Commit messages: prefix with package(s) modified, e.g., `eth, rpc: make trace configs optional`
 
-Cherry-pick PRs: when opening a PR that cherry-picks a commit to a `release/X.Y` branch, prepend the PR title with `[rX.Y]`, e.g., a cherry-pick to `release/3.4` → `[r3.4] eth, rpc: make trace configs optional`
+Run `make lint` before every push. The linter is non-deterministic — run it repeatedly until clean.
 
 **Important**: Always run `make lint` after making code changes and before committing. Fix any linter errors before proceeding. PRs must pass `make lint` before being opened or updated.
 

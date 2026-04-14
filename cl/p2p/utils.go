@@ -14,7 +14,7 @@ import (
 	"github.com/multiformats/go-multiaddr"
 )
 
-func convertToInterfacePubkey(pubkey *ecdsa.PublicKey) (crypto.PubKey, error) {
+func ConvertToInterfacePubkey(pubkey *ecdsa.PublicKey) (crypto.PubKey, error) {
 	xVal, yVal := new(secp256k1.FieldVal), new(secp256k1.FieldVal)
 	overflows := xVal.SetByteSlice(pubkey.X.Bytes())
 	if overflows {
@@ -31,8 +31,8 @@ func convertToInterfacePubkey(pubkey *ecdsa.PublicKey) (crypto.PubKey, error) {
 	return newKey, nil
 }
 
-func convertToAddrInfo(node *enode.Node) (*peer.AddrInfo, multiaddr.Multiaddr, error) {
-	multiAddr, err := convertToSingleMultiAddr(node)
+func ConvertToAddrInfo(node *enode.Node) (*peer.AddrInfo, multiaddr.Multiaddr, error) {
+	multiAddr, err := ConvertToSingleMultiAddr(node)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -43,9 +43,9 @@ func convertToAddrInfo(node *enode.Node) (*peer.AddrInfo, multiaddr.Multiaddr, e
 	return info, multiAddr, nil
 }
 
-func convertToSingleMultiAddr(node *enode.Node) (multiaddr.Multiaddr, error) {
+func ConvertToSingleMultiAddr(node *enode.Node) (multiaddr.Multiaddr, error) {
 	pubkey := node.Pubkey()
-	assertedKey, err := convertToInterfacePubkey(pubkey)
+	assertedKey, err := ConvertToInterfacePubkey(pubkey)
 	if err != nil {
 		return nil, fmt.Errorf("could not get pubkey: %w", err)
 	}
@@ -53,10 +53,10 @@ func convertToSingleMultiAddr(node *enode.Node) (multiaddr.Multiaddr, error) {
 	if err != nil {
 		return nil, fmt.Errorf("could not get peer id: %w", err)
 	}
-	return multiAddressBuilderWithID(node.IP().String(), "tcp", uint(node.TCP()), id)
+	return MultiAddressBuilderWithID(node.IP().String(), "tcp", uint(node.TCP()), id)
 }
 
-func multiAddressBuilderWithID(ipAddr, protocol string, port uint, id peer.ID) (multiaddr.Multiaddr, error) {
+func MultiAddressBuilderWithID(ipAddr, protocol string, port uint, id peer.ID) (multiaddr.Multiaddr, error) {
 	parsedIP := net.ParseIP(ipAddr)
 	if parsedIP.To4() == nil && parsedIP.To16() == nil {
 		return nil, fmt.Errorf("invalid ip address provided: %s", ipAddr)
@@ -70,14 +70,14 @@ func multiAddressBuilderWithID(ipAddr, protocol string, port uint, id peer.ID) (
 	return multiaddr.NewMultiaddr(fmt.Sprintf("/ip6/%s/%s/%d/p2p/%s", ipAddr, protocol, port, id.String()))
 }
 
-func convertToMultiAddr(nodes []*enode.Node) []multiaddr.Multiaddr {
+func ConvertToMultiAddr(nodes []*enode.Node) []multiaddr.Multiaddr {
 	multiAddrs := []multiaddr.Multiaddr{}
 	for _, node := range nodes {
 		// ignore nodes with no ip address stored
 		if node.IP() == nil {
 			continue
 		}
-		multiAddr, err := convertToSingleMultiAddr(node)
+		multiAddr, err := ConvertToSingleMultiAddr(node)
 		if err != nil {
 			log.Debug("[Sentinel] Could not convert to multiAddr", "err", err)
 			continue
