@@ -838,36 +838,31 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		result.State = append(result.State, common.Copy(node))
 	}
 
-	// Always include the parent header (required for EIP-8025 stateless
-	// verification), then add any BLOCKHASH-accessed ancestors.
-	// Emit in ascending block-number order, deduped.
-	headerNums := make(map[uint64]struct{})
+	// EIP-8025: include a contiguous ancestor chain from the deepest
+	// BLOCKHASH access up to the parent (blockNum-1). When no BLOCKHASH
+	// was executed, only the parent header is included.
 	if blockNum > 0 {
-		headerNums[blockNum-1] = struct{}{}
-	}
-	for _, bn := range accessedBlockHashes {
-		headerNums[bn] = struct{}{}
-	}
-	sorted := make([]uint64, 0, len(headerNums))
-	for bn := range headerNums {
-		sorted = append(sorted, bn)
-	}
-	slices.Sort(sorted)
+		lowestHeader := blockNum - 1
+		for _, bn := range accessedBlockHashes {
+			if bn < lowestHeader {
+				lowestHeader = bn
+			}
+		}
+		for bn := lowestHeader; bn < blockNum; bn++ {
+			blockHeader, err := api._blockReader.HeaderByNumber(ctx, tx, bn)
+			if err != nil {
+				return nil, fmt.Errorf("failed to load header for block number %d: %w", bn, err)
+			}
+			if blockHeader == nil {
+				return nil, fmt.Errorf("missing header for block number %d", bn)
+			}
 
-	for _, bn := range sorted {
-		blockHeader, err := api._blockReader.HeaderByNumber(ctx, tx, bn)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load header for block number %d: %w", bn, err)
+			headerRLP, err := rlp.EncodeToBytes(blockHeader)
+			if err != nil {
+				return nil, fmt.Errorf("failed to encode header for block number %d: %w", bn, err)
+			}
+			result.Headers = append(result.Headers, headerRLP)
 		}
-		if blockHeader == nil {
-			return nil, fmt.Errorf("missing header for block number %d", bn)
-		}
-
-		headerRLP, err := rlp.EncodeToBytes(blockHeader)
-		if err != nil {
-			return nil, fmt.Errorf("failed to encode header for block number %d: %w", bn, err)
-		}
-		result.Headers = append(result.Headers, headerRLP)
 	}
 
 	// Optionally verify the witness by re-executing the block statelessly.
