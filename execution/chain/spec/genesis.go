@@ -140,7 +140,7 @@ func TestGenesisBlock() *types.Genesis {
 	return &types.Genesis{Config: chain.TestChainBerlinConfig}
 }
 
-// DeveloperGenesisBlock returns the 'geth --dev' genesis block.
+// DeveloperGenesisBlock returns the development genesis block (PoS-from-genesis).
 func DeveloperGenesisBlock() *types.Genesis {
 	return &types.Genesis{
 		Config: &chain.Config{
@@ -156,6 +156,7 @@ func DeveloperGenesisBlock() *types.Genesis {
 			BerlinBlock:           common.NewUint64(0),
 			LondonBlock:           common.NewUint64(0),
 			Ethash:                new(chain.EthashConfig),
+			Rules:                 chain.EtHashRules,
 		},
 		ExtraData:  make([]byte, 32),
 		GasLimit:   11500000,

@@ -102,10 +102,6 @@ var (
 		Usage:   "Download historical Receipts. If disabled: using state-history to re-exec transactions and generate Receipts - all RPC: eth_getLogs, eth_getBlockReceipts will work (just higher latency)",
 		Value:   ethconfig.Defaults.PersistReceiptsCacheV2,
 	}
-	DeveloperPeriodFlag = cli.IntFlag{
-		Name:  "dev.period",
-		Usage: "Block period to use in developer mode (0 = mine only if transaction pending)",
-	}
 	DevValidatorSeedFlag = cli.StringFlag{
 		Name:  "dev-validator-seed",
 		Usage: "Deterministic BLS key seed for embedded dev validator (enables PoS dev mode)",
@@ -1976,6 +1972,15 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 		// Build PoS EL genesis (TTD=0, post-merge from genesis).
 		cfg.Genesis = chainspec.DeveloperGenesisBlock()
+		// Ensure the derived signer address is pre-funded.
+		if cfg.Genesis.Alloc == nil {
+			cfg.Genesis.Alloc = make(types.GenesisAlloc)
+		}
+		if _, ok := cfg.Genesis.Alloc[signerAddr]; !ok {
+			cfg.Genesis.Alloc[signerAddr] = types.GenesisAccount{
+				Balance: big.NewInt(0).Mul(big.NewInt(1000), big.NewInt(common.Ether)),
+			}
+		}
 		cfg.Genesis.Config.TerminalTotalDifficulty = big.NewInt(0)
 		cfg.Genesis.Config.TerminalTotalDifficultyPassed = true
 		zero := uint64(0)

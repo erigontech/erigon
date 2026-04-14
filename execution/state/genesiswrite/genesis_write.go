@@ -132,6 +132,11 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 	if genesis != nil && genesis.Config == nil {
 		return chain.AllProtocolChanges, nil, types.ErrGenesisNoConfig
 	}
+	if genesis != nil && genesis.Config != nil {
+		if err := genesis.Config.Rules.Validate(); err != nil {
+			return nil, nil, err
+		}
+	}
 	// Just commit the new block if there is no stored genesis block.
 	storedHash, storedErr := rawdb.ReadCanonicalHash(tx, 0)
 	if storedErr != nil {

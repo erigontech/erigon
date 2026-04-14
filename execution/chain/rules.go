@@ -16,6 +16,8 @@
 
 package chain
 
+import "fmt"
+
 type RulesName string
 
 const (
@@ -23,3 +25,19 @@ const (
 	EtHashRules RulesName = "ethash"
 	BorRules    RulesName = "bor"
 )
+
+// ValidRulesNames is the set of recognised consensus engine names.
+var ValidRulesNames = map[RulesName]struct{}{
+	AuRaRules:   {},
+	EtHashRules: {},
+	BorRules:    {},
+	"":          {}, // empty is valid (defaults to ethash)
+}
+
+// Validate returns an error if the RulesName is not a recognised consensus engine.
+func (r RulesName) Validate() error {
+	if _, ok := ValidRulesNames[r]; !ok {
+		return fmt.Errorf("unsupported consensus engine %q (supported: aura, bor, ethash)", r)
+	}
+	return nil
+}
