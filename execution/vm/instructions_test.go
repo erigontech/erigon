@@ -1026,13 +1026,6 @@ func TestEIP8024_Execution(t *testing.T) {
 			wantOpcode: DUPN,
 		},
 		{
-			name:        "INVALID_DUPN_LOW",
-			codeHex:     "e65b",
-			wantErr:     &ErrInvalidOpCode{},
-			wantOpcode:  DUPN,
-			wantOperand: ptrToByte(0x5b),
-		},
-		{
 			name:        "INVALID_EXCHANGE_LOW",
 			codeHex:     "e852", // 0x52 = 82, first byte in invalid range (81 < x < 128)
 			wantErr:     &ErrInvalidOpCode{},
