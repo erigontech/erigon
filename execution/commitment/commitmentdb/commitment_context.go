@@ -611,15 +611,6 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 		if err != nil {
 			return 0, 0, err
 		}
-		if blockNum > 0 {
-			lastBn, _, err := rawdbv3.TxNums.Last(tx)
-			if err != nil {
-				return 0, 0, err
-			}
-			if lastBn < blockNum {
-				return 0, 0, fmt.Errorf("%w: TxNums index is at block %d and behind commitment %d", ErrBehindCommitment, lastBn, blockNum)
-			}
-		}
 		if err = sdc.enableConcurrentCommitmentIfPossible(); err != nil {
 			return 0, 0, err
 		}
