@@ -65,7 +65,9 @@ type CallContext struct {
 	Contract Contract
 
 	// Cached interned values — avoids double-interning the same raw value
-	// between dynamicGas and execute within a single opcode dispatch.
+	// between dynamicGas and execute for the same opcode. The cache is
+	// not cleared between opcodes; it auto-invalidates by comparing the
+	// raw value on each call.
 	cachedKeyInt  uint256.Int
 	cachedKey     accounts.StorageKey
 	cachedKeyOk   bool
