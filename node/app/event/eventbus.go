@@ -21,9 +21,9 @@ import (
 	"reflect"
 	"sync"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/node/app"
 	"github.com/erigontech/erigon/node/app/util"
-	"github.com/pkg/errors"
 )
 
 // BusSubscriber defines subscription-related bus behavior
@@ -247,9 +247,9 @@ func (handler *eventHandler) doPublish(bus *eventBus, logEnabled bool, args ...i
 		var err error
 		if r := recover(); r != nil {
 			if e, ok := r.(error); ok {
-				err = errors.WithStack(e)
+				err = fmt.Errorf("%w, stack: %s", e, dbg.Stack())
 			} else {
-				err = errors.WithStack(fmt.Errorf("Panic: %v\n", r))
+				err = fmt.Errorf("panic: %v, stack: %s", r, dbg.Stack())
 			}
 
 			log.Error("Handler panicked",

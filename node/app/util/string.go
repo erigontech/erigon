@@ -49,6 +49,9 @@ func CallerPackageName(skip ...int) string {
 	}
 	parts := strings.Split(fn.Name(), ".")
 	pl := len(parts)
+	if pl < 2 {
+		return fn.Name()
+	}
 	packageName := ""
 
 	if parts[pl-2][0] == '(' || parts[pl-2] == "init" {

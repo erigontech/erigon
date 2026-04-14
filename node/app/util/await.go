@@ -214,7 +214,12 @@ WAIT:
 			var gotResult, done bool
 
 			if chosen != 0 {
-				for _, r := range mux.pendingRemove {
+				// Snapshot pendingRemove under lock — concurrent Remove()
+				// appends to it.
+				mux.mutex.Lock()
+				pendingRemove := mux.pendingRemove
+				mux.mutex.Unlock()
+				for _, r := range pendingRemove {
 					if mux.active[chosen].Chan == r {
 						continue WAIT
 					}

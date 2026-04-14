@@ -25,11 +25,11 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/erigontech/erigon/common/dbg"
 	liblog "github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/app"
 	"github.com/erigontech/erigon/node/app/event"
 	"github.com/erigontech/erigon/node/app/util"
-	pkg_errors "github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
 )
@@ -663,9 +663,9 @@ func (c *component) configure(ctx context.Context, force bool, activationLocked 
 								if r := recover(); r != nil {
 									var ok bool
 									if err, ok = r.(error); ok {
-										err = pkg_errors.WithStack(fmt.Errorf("%T configure panicked with error: %s", dependency, err))
+										err = fmt.Errorf("%T configure panicked with error: %s, stack: %s", dependency, err, dbg.Stack())
 									} else {
-										err = pkg_errors.WithStack(fmt.Errorf("%T configure panicked: %v", dependency, r))
+										err = fmt.Errorf("%T configure panicked: %v, stack: %s", dependency, r, dbg.Stack())
 									}
 								}
 							}()
@@ -751,9 +751,9 @@ func (c *component) initialize(ctx context.Context, activationLocked bool, onAct
 								if r := recover(); r != nil {
 									var ok bool
 									if err, ok = r.(error); ok {
-										err = pkg_errors.WithStack(fmt.Errorf("%T configure panicked with error: %s", dependency, err))
+										err = fmt.Errorf("%T initialize panicked with error: %s, stack: %s", dependency, err, dbg.Stack())
 									} else {
-										err = pkg_errors.WithStack(fmt.Errorf("%T configure panicked: %v", dependency, r))
+										err = fmt.Errorf("%T initialize panicked: %v, stack: %s", dependency, r, dbg.Stack())
 									}
 								}
 							}()
@@ -877,9 +877,9 @@ func (c *component) activateDependencies(ctx context.Context, activationList []*
 				defer func() {
 					if r := recover(); r != nil {
 						if rerr, ok := r.(error); ok {
-							err = pkg_errors.WithStack(fmt.Errorf("%T Panicked with error: %w", dependency, rerr))
+							err = fmt.Errorf("%T Panicked with error: %w, stack: %s", dependency, rerr, dbg.Stack())
 						} else {
-							pkg_errors.WithStack(fmt.Errorf("%T Panicked: %v", dependency, r))
+							err = fmt.Errorf("%T Panicked: %v, stack: %s", dependency, r, dbg.Stack())
 						}
 					}
 				}()
@@ -1061,9 +1061,9 @@ DEPENDENCIES:
 				defer func() {
 					if r := recover(); r != nil {
 						if rerr, ok := r.(error); ok {
-							err = pkg_errors.WithStack(fmt.Errorf("%T Panicked with error: %w", dependency, rerr))
+							err = fmt.Errorf("%T Panicked with error: %w, stack: %s", dependency, rerr, dbg.Stack())
 						} else {
-							err = pkg_errors.WithStack(fmt.Errorf("%T Panicked: %v", dependency, r))
+							err = fmt.Errorf("%T Panicked: %v, stack: %s", dependency, r, dbg.Stack())
 						}
 					}
 				}()
@@ -1225,11 +1225,17 @@ func (c *component) addDependent(dependent *component, parentLocked bool) error 
 	if c.state != dependent.state {
 		switch {
 		case dependent.state.IsActivated():
-			c.activate(c.context, noopHanlder)
+			if err := c.activate(c.context, noopHanlder); err != nil {
+				return err
+			}
 		case dependent.state.IsInitialized():
-			c.initialize(c.context, false, noopHanlder)
+			if err := c.initialize(c.context, false, noopHanlder); err != nil {
+				return err
+			}
 		case dependent.state.IsConfigured():
-			c.initialize(c.context, false, noopHanlder)
+			if err := c.configure(c.context, false, false, noopHanlder); err != nil {
+				return err
+			}
 		}
 	}
 
