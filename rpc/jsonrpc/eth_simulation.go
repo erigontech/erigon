@@ -515,10 +515,14 @@ func (s *simulator) simulateBlock(
 
 	// Override the state before block execution.
 	stateOverrides := bsc.StateOverrides
+	var overrideDirtyAccounts map[accounts.Address]struct{}
 	if stateOverrides != nil {
 		if err := stateOverrides.Override(intraBlockState, activePrecompiles, rules); err != nil {
 			return nil, nil, err
 		}
+		// Snapshot and clear dirty set so CommitBlock won't apply EIP-161 to
+		// override-only accounts (they were not "touched" by any transaction).
+		overrideDirtyAccounts = intraBlockState.ExtractAndClearDirty()
 	}
 
 	vmConfig := vm.Config{NoBaseFee: !s.validation}
@@ -582,6 +586,12 @@ func (s *simulator) simulateBlock(
 
 	if err := intraBlockState.CommitBlock(rules, stateWriter); err != nil {
 		return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
+	}
+	// Write override-only accounts that CommitBlock skipped (EIP-161 disabled for these).
+	if len(overrideDirtyAccounts) > 0 {
+		if err := intraBlockState.CommitOverrideDirtyAccounts(rules, stateWriter, overrideDirtyAccounts); err != nil {
+			return nil, nil, fmt.Errorf("committing override accounts: %w", err)
+		}
 	}
 
 	if err := s.computeSimulatedStateRoot(ctx, tx, sharedDomains, bsc, block, parent, minTxNum, firstMinTxNum, stateWriter.touchedKeys, ancestors, latest); err != nil {
@@ -1031,13 +1041,14 @@ func (r *simulationIntraBlockStateReader) ReadAccountStorage(address accounts.Ad
 }
 
 func (r *simulationIntraBlockStateReader) HasStorage(address accounts.Address) (bool, error) {
-	// The mem batch doesn't support prefix scans, so we check the canonical base-parent state.
-	// TODO: this gives a wrong answer when a prior simulated block deployed a brand-new contract
-	// (i.e. added storage to a previously storage-less account): the mem batch contains that
-	// storage but we never scan it, so HasStorage returns false for the new contract in
-	// subsequent simulation blocks. Fix: iterate r.sd.GetMemBatch() storage keys for the
-	// address as a prefix-scan fallback before (or instead of) the RangeAsOf call.
 	addressValue := address.Value()
+
+	// Check the RAM batch first: storage written by prior simulated blocks lives only in the
+	// in-memory btree and is not yet visible via RangeAsOf(firstMinTxNum).
+	if r.sd.GetMemBatch().HasPrefixInRAM(kv.StorageDomain, addressValue[:]) {
+		return true, nil
+	}
+
 	to, ok := kv.NextSubtree(addressValue[:])
 	if !ok {
 		to = nil

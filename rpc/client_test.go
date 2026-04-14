@@ -21,6 +21,7 @@ package rpc
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"net"
@@ -52,6 +53,22 @@ func TestClientRequest(t *testing.T) {
 	}
 	if !reflect.DeepEqual(resp, echoResult{"hello", 10, &echoArgs{"world"}}) {
 		t.Errorf("incorrect result %#v", resp)
+	}
+}
+
+func TestNullResponse(t *testing.T) {
+	logger := log.New()
+	server := newTestServer(logger)
+	defer server.Stop()
+	client := DialInProc(server, logger)
+	defer client.Close()
+
+	var result json.RawMessage
+	if err := client.Call(&result, "test_returnNull"); err != nil {
+		t.Fatal(err)
+	}
+	if string(result) != "null" {
+		t.Errorf("expected null, got %s", result)
 	}
 }
 
