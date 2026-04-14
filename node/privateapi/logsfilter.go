@@ -19,6 +19,7 @@ package privateapi
 import (
 	"fmt"
 	"io"
+	"math"
 	"sync"
 
 	"github.com/erigontech/erigon/common"
@@ -48,6 +49,13 @@ type LogsFilter struct {
 	allTopics int
 	topics    map[common.Hash]int
 	sender    remoteproto.ETHBACKEND_SubscribeLogsServer // nil for aggregate subscriber, for appropriate stream server otherwise
+}
+
+func logsFilterAppliedReply() *remoteproto.SubscribeLogsReply {
+	return &remoteproto.SubscribeLogsReply{
+		BlockNumber: math.MaxUint64,
+		LogIndex:    math.MaxUint64,
+	}
 }
 
 func NewLogsFilterAggregator(events *shards.Events) *LogsFilterAggregator {
@@ -148,6 +156,9 @@ func (a *LogsFilterAggregator) subscribeLogs(server remoteproto.ETHBACKEND_Subsc
 	var recvErr error
 	for filterReq, recvErr = server.Recv(); recvErr == nil; filterReq, recvErr = server.Recv() {
 		a.updateLogsFilter(filter, filterReq)
+		if err := server.Send(logsFilterAppliedReply()); err != nil {
+			return fmt.Errorf("sending log filter applied ack: %w", err)
+		}
 	}
 	if recvErr != io.EOF { // termination
 		return fmt.Errorf("receiving log filter request: %w", recvErr)

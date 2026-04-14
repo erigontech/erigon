@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -53,18 +54,25 @@ import (
 type Filters struct {
 	mu sync.RWMutex
 
+	ctx              context.Context
+	logsUpdateMu     sync.Mutex
+	receiptsUpdateMu sync.Mutex
+
 	pendingBlock *types.Block
 
-	headsSubs             *concurrent.SyncMap[HeadsSubID, Sub[*types.Header]]
-	pendingLogsSubs       *concurrent.SyncMap[PendingLogsSubID, Sub[types.Logs]]
-	pendingBlockSubs      *concurrent.SyncMap[PendingBlockSubID, Sub[*types.Block]]
-	pendingTxsSubs        *concurrent.SyncMap[PendingTxsSubID, Sub[[]types.Transaction]]
-	logsSubs              *LogsFilterAggregator
-	logsRequestor         atomic.Value
-	receiptsSubs          *ReceiptsFilterAggregator
-	receiptsRequestor     atomic.Value
-	pendingReceiptsUpdate atomic.Bool
-	onNewSnapshot         func()
+	headsSubs                *concurrent.SyncMap[HeadsSubID, Sub[*types.Header]]
+	pendingLogsSubs          *concurrent.SyncMap[PendingLogsSubID, Sub[types.Logs]]
+	pendingBlockSubs         *concurrent.SyncMap[PendingBlockSubID, Sub[*types.Block]]
+	pendingTxsSubs           *concurrent.SyncMap[PendingTxsSubID, Sub[[]types.Transaction]]
+	logsSubs                 *LogsFilterAggregator
+	logsRequestor            atomic.Value
+	logsFilterAppliedAck     chan struct{}
+	pendingLogsUpdate        atomic.Bool
+	receiptsSubs             *ReceiptsFilterAggregator
+	receiptsRequestor        atomic.Value
+	receiptsFilterAppliedAck chan struct{}
+	pendingReceiptsUpdate    atomic.Bool
+	onNewSnapshot            func()
 
 	logsStores         *concurrent.SyncMap[LogsSubID, []*types.Log]
 	pendingHeadsStores *concurrent.SyncMap[HeadsSubID, []*types.Header]
@@ -82,6 +90,10 @@ type Filters struct {
 	config FiltersConfig
 }
 
+type logsReadySubscriber interface {
+	SubscribeLogsOnReady(context.Context, func(*remoteproto.SubscribeLogsReply), func(func(*remoteproto.LogsFilterRequest) error)) error
+}
+
 // New creates a new Filters instance, initializes it, and starts subscription goroutines for Ethereum events.
 // It requires a context, Ethereum backend, transaction pool client, mining client, snapshot callback function,
 // and a logger for logging events.
@@ -89,19 +101,22 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 	logger.Info("rpc filters: subscribing to Erigon events")
 
 	ff := &Filters{
-		headsSubs:          concurrent.NewSyncMap[HeadsSubID, Sub[*types.Header]](),
-		pendingTxsSubs:     concurrent.NewSyncMap[PendingTxsSubID, Sub[[]types.Transaction]](),
-		pendingLogsSubs:    concurrent.NewSyncMap[PendingLogsSubID, Sub[types.Logs]](),
-		pendingBlockSubs:   concurrent.NewSyncMap[PendingBlockSubID, Sub[*types.Block]](),
-		receiptsSubs:       NewReceiptsFilterAggregator(),
-		logsSubs:           NewLogsFilterAggregator(),
-		onNewSnapshot:      onNewSnapshot,
-		logsStores:         concurrent.NewSyncMap[LogsSubID, []*types.Log](),
-		pendingHeadsStores: concurrent.NewSyncMap[HeadsSubID, []*types.Header](),
-		pendingTxsStores:   concurrent.NewSyncMap[PendingTxsSubID, [][]types.Transaction](),
-		logger:             logger,
-		config:             config,
-		events:             events,
+		ctx:                      ctx,
+		headsSubs:                concurrent.NewSyncMap[HeadsSubID, Sub[*types.Header]](),
+		pendingTxsSubs:           concurrent.NewSyncMap[PendingTxsSubID, Sub[[]types.Transaction]](),
+		pendingLogsSubs:          concurrent.NewSyncMap[PendingLogsSubID, Sub[types.Logs]](),
+		pendingBlockSubs:         concurrent.NewSyncMap[PendingBlockSubID, Sub[*types.Block]](),
+		receiptsSubs:             NewReceiptsFilterAggregator(),
+		logsSubs:                 NewLogsFilterAggregator(),
+		logsFilterAppliedAck:     make(chan struct{}, 1),
+		receiptsFilterAppliedAck: make(chan struct{}, 1),
+		onNewSnapshot:            onNewSnapshot,
+		logsStores:               concurrent.NewSyncMap[LogsSubID, []*types.Log](),
+		pendingHeadsStores:       concurrent.NewSyncMap[HeadsSubID, []*types.Header](),
+		pendingTxsStores:         concurrent.NewSyncMap[PendingTxsSubID, [][]types.Transaction](),
+		logger:                   logger,
+		config:                   config,
+		events:                   events,
 	}
 
 	go func() {
@@ -145,7 +160,22 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 				return
 			default:
 			}
-			if err := ethBackend.SubscribeLogs(ctx, ff.OnNewLogs, &ff.logsRequestor); err != nil {
+			var err error
+			if readyBackend, ok := ethBackend.(logsReadySubscriber); ok {
+				err = readyBackend.SubscribeLogsOnReady(ctx, ff.OnNewLogs, func(send func(*remoteproto.LogsFilterRequest) error) {
+					ff.mu.Lock()
+					ff.logsRequestor.Store(send)
+					ff.mu.Unlock()
+					if ff.pendingLogsUpdate.CompareAndSwap(true, false) {
+						if err := ff.sendLogsFilterUpdate(); err != nil {
+							logger.Warn("rpc filters: error sending pending logs filter update", "err", err)
+						}
+					}
+				})
+			} else {
+				err = ethBackend.SubscribeLogs(ctx, ff.OnNewLogs, &ff.logsRequestor)
+			}
+			if err != nil {
 				select {
 				case <-ctx.Done():
 					activeSubscriptionsLogsClientGauge.With(prometheus.Labels{clientLabelName: "ethBackend_Logs"}).Dec()
@@ -529,8 +559,11 @@ func (ff *Filters) sendReceiptsFilterUpdate() error {
 		ff.mu.Unlock()
 		return nil
 	}
+	send := loaded.(func(*remoteproto.ReceiptsFilterRequest) error)
 	ff.mu.Unlock()
-	return loaded.(func(*remoteproto.ReceiptsFilterRequest) error)(rfr)
+	return ff.waitForFilterUpdateApplied("receipts", ff.receiptsFilterAppliedAck, &ff.receiptsUpdateMu, func() error {
+		return send(rfr)
+	})
 }
 
 // SubscribeLogs subscribes to logs using the specified filter criteria and returns a channel to receive the logs
@@ -589,7 +622,15 @@ func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria) (<-c
 	// Add the filter to the list of log filters
 	ff.logsSubs.addLogsFilters(f)
 
-	// Create a filter request based on the aggregated filters
+	if err := ff.sendLogsFilterUpdate(); err != nil {
+		ff.logger.Warn("Could not update remote logs filter", "err", err)
+		ff.logsSubs.removeLogsFilter(id)
+	}
+
+	return sub.ch, id
+}
+
+func (ff *Filters) createLogsFilterRequest() *remoteproto.LogsFilterRequest {
 	lfr := ff.logsSubs.createFilterRequest()
 	addresses, topics := ff.logsSubs.getAggMaps()
 	for addr := range addresses {
@@ -598,23 +639,23 @@ func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria) (<-c
 	for topic := range topics {
 		lfr.Topics = append(lfr.Topics, gointerfaces.ConvertHashToH256(topic))
 	}
-
-	loaded := ff.loadLogsRequester()
-	if loaded != nil {
-		if err := loaded.(func(*remoteproto.LogsFilterRequest) error)(lfr); err != nil {
-			ff.logger.Warn("Could not update remote logs filter", "err", err)
-			ff.logsSubs.removeLogsFilter(id)
-		}
-	}
-
-	return sub.ch, id
+	return lfr
 }
 
-// loadLogsRequester loads the current logs requester and returns it.
-func (ff *Filters) loadLogsRequester() any {
+func (ff *Filters) sendLogsFilterUpdate() error {
+	lfr := ff.createLogsFilterRequest()
 	ff.mu.Lock()
-	defer ff.mu.Unlock()
-	return ff.logsRequestor.Load()
+	loaded := ff.logsRequestor.Load()
+	if loaded == nil {
+		ff.pendingLogsUpdate.Store(true)
+		ff.mu.Unlock()
+		return nil
+	}
+	send := loaded.(func(*remoteproto.LogsFilterRequest) error)
+	ff.mu.Unlock()
+	return ff.waitForFilterUpdateApplied("logs", ff.logsFilterAppliedAck, &ff.logsUpdateMu, func() error {
+		return send(lfr)
+	})
 }
 
 func (ff *Filters) HasSubscription(id LogsSubID) bool {
@@ -637,24 +678,10 @@ func (ff *Filters) HasPendingTxsSubscription(id PendingTxsSubID) bool {
 // It returns true if the unsubscription was successful, otherwise false.
 func (ff *Filters) UnsubscribeLogs(id LogsSubID) bool {
 	isDeleted := ff.logsSubs.removeLogsFilter(id)
-	// if any filters in the aggregate need all addresses or all topics then the request to the central
-	// log subscription needs to honour this
-	lfr := ff.logsSubs.createFilterRequest()
-
-	addresses, topics := ff.logsSubs.getAggMaps()
-
-	for addr := range addresses {
-		lfr.Addresses = append(lfr.Addresses, gointerfaces.ConvertAddressToH160(addr))
-	}
-	for topic := range topics {
-		lfr.Topics = append(lfr.Topics, gointerfaces.ConvertHashToH256(topic))
-	}
-	loaded := ff.loadLogsRequester()
-	if loaded != nil {
-		if err := loaded.(func(*remoteproto.LogsFilterRequest) error)(lfr); err != nil {
-			ff.logger.Warn("Could not update remote logs filter", "err", err)
-			return isDeleted || ff.logsSubs.removeLogsFilter(id)
-		}
+	if err := ff.sendLogsFilterUpdate(); err != nil {
+		ff.logger.Warn("Could not update remote logs filter", "err", err)
+		ff.deleteLogStore(id)
+		return isDeleted
 	}
 
 	ff.deleteLogStore(id)
@@ -746,6 +773,10 @@ func (ff *Filters) onNewHeader(event *remoteproto.SubscribeReply) error {
 
 // OnReceipts handles a new receipt event from the remote and processes it.
 func (ff *Filters) OnReceipts(reply *remoteproto.SubscribeReceiptsReply) {
+	if isReceiptsFilterAppliedReply(reply) {
+		ff.signalFilterApplied(ff.receiptsFilterAppliedAck)
+		return
+	}
 	ff.receiptsSubs.distributeReceipt(reply)
 }
 
@@ -772,7 +803,66 @@ func (ff *Filters) OnNewTx(reply *txpoolproto.OnAddReply) {
 
 // OnNewLogs handles a new log event from the remote and processes it.
 func (ff *Filters) OnNewLogs(reply *remoteproto.SubscribeLogsReply) {
+	if isLogsFilterAppliedReply(reply) {
+		ff.signalFilterApplied(ff.logsFilterAppliedAck)
+		return
+	}
 	ff.logsSubs.distributeLog(reply)
+}
+
+const filterUpdateAckTimeout = 5 * time.Second
+
+func (ff *Filters) waitForFilterUpdateApplied(kind string, ackCh chan struct{}, updateMu *sync.Mutex, send func() error) error {
+	updateMu.Lock()
+	defer updateMu.Unlock()
+
+	drainFilterAppliedAck(ackCh)
+	if err := send(); err != nil {
+		return err
+	}
+
+	timer := time.NewTimer(filterUpdateAckTimeout)
+	defer timer.Stop()
+
+	select {
+	case <-ackCh:
+		return nil
+	case <-timer.C:
+		return fmt.Errorf("timed out waiting for %s filter update to apply", kind)
+	case <-ff.ctx.Done():
+		return ff.ctx.Err()
+	}
+}
+
+func drainFilterAppliedAck(ackCh chan struct{}) {
+	for {
+		select {
+		case <-ackCh:
+		default:
+			return
+		}
+	}
+}
+
+func (ff *Filters) signalFilterApplied(ackCh chan struct{}) {
+	select {
+	case ackCh <- struct{}{}:
+	default:
+	}
+}
+
+func isLogsFilterAppliedReply(reply *remoteproto.SubscribeLogsReply) bool {
+	return reply.GetBlockNumber() == math.MaxUint64 &&
+		reply.GetLogIndex() == math.MaxUint64 &&
+		reply.GetAddress() == nil &&
+		reply.GetTransactionHash() == nil
+}
+
+func isReceiptsFilterAppliedReply(reply *remoteproto.SubscribeReceiptsReply) bool {
+	return reply.GetBlockNumber() == math.MaxUint64 &&
+		reply.GetTransactionIndex() == math.MaxUint64 &&
+		reply.GetBlockHash() == nil &&
+		reply.GetTransactionHash() == nil
 }
 
 // AddLogs adds logs to the store associated with the given subscription ID.

@@ -18,7 +18,9 @@ package rpchelper
 
 import (
 	"context"
+	"math"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 
@@ -774,5 +776,41 @@ func TestFilters_SubscribeReceiptsGeneratesCorrectReceiptsFilterRequest(t *testi
 	// Request should be nil (no active subscriptions)
 	if lastFilterRequest.TransactionHashes != nil {
 		t.Error("6: expected transaction hashes to be nil with no subscriptions")
+	}
+}
+
+func TestFilters_FilterUpdateWaitsForAppliedAck(t *testing.T) {
+	t.Parallel()
+
+	config := FiltersConfig{}
+	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New(), nil)
+
+	f.receiptsRequestor.Store(func(_ *remoteproto.ReceiptsFilterRequest) error {
+		return nil
+	})
+
+	done := make(chan error, 1)
+	go func() {
+		done <- f.sendReceiptsFilterUpdate()
+	}()
+
+	select {
+	case err := <-done:
+		t.Fatalf("filter update returned before applied ack: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	f.OnReceipts(&remoteproto.SubscribeReceiptsReply{
+		BlockNumber:      math.MaxUint64,
+		TransactionIndex: math.MaxUint64,
+	})
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("expected successful filter update after applied ack, got %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected filter update to finish after applied ack")
 	}
 }

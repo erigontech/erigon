@@ -19,6 +19,7 @@ package privateapi
 import (
 	"context"
 	"io"
+	"math"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -48,6 +49,7 @@ func init() {
 type testReceiptsServer struct {
 	received         chan *remoteproto.ReceiptsFilterRequest
 	receiveCompleted chan struct{}
+	acks             int
 	sent             []*remoteproto.SubscribeReceiptsReply
 	ctx              context.Context
 	grpc.ServerStream
@@ -69,6 +71,10 @@ func newTestReceiptsServer(ctx context.Context) *testReceiptsServer {
 }
 
 func (ts *testReceiptsServer) Send(m *remoteproto.SubscribeReceiptsReply) error {
+	if m.GetBlockNumber() == math.MaxUint64 && m.GetTransactionIndex() == math.MaxUint64 {
+		ts.acks++
+		return nil
+	}
 	ts.sent = append(ts.sent, m)
 	return nil
 }
@@ -299,5 +305,29 @@ func TestReceiptsFilter_UpdateFilter_ChangesWhatIsAllowed(t *testing.T) {
 	_ = agg.distributeReceipts([]*notifications.ReceiptNotification{receipt2})
 	if len(srv.sent) != 2 {
 		t.Error("expected txHash2 to be allowed after filter update")
+	}
+}
+
+func TestReceiptsFilter_UpdateSignalsApplied(t *testing.T) {
+	events := shards.NewEvents()
+	agg := NewReceiptsFilterAggregator(events)
+
+	ctx := t.Context()
+	srv := newTestReceiptsServer(ctx)
+	srv.received <- &remoteproto.ReceiptsFilterRequest{
+		TransactionHashes: []*typesproto.H256{},
+	}
+
+	go func() {
+		err := agg.subscribeReceipts(srv)
+		if err != nil {
+			t.Error(err)
+		}
+	}()
+
+	<-srv.receiveCompleted
+
+	if srv.acks != 1 {
+		t.Fatalf("expected 1 receipts filter applied ack, got %d", srv.acks)
 	}
 }
