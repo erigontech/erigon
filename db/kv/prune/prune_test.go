@@ -32,13 +32,17 @@ import (
 )
 
 const testTxLookupTable = "TestTxLookup"
+const testDupSortTable = "TestDupSort"
 
 func openTestDB(tb testing.TB) kv.RwDB {
 	tb.Helper()
 	return mdbx2.New(dbcfg.ChainDB, log.New()).
 		InMem(tb, tb.TempDir()).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
-			return kv.TableCfg{testTxLookupTable: {}}
+			return kv.TableCfg{
+				testTxLookupTable: {},
+				testDupSortTable:  {Flags: kv.DupSort},
+			}
 		}).MustOpen()
 }
 
@@ -65,6 +69,40 @@ func insertEntries(tb testing.TB, tx kv.RwTx, count int, txNumBase uint64) {
 	}
 }
 
+func makeTxNumValue(txNum uint64) []byte {
+	v := make([]byte, 8)
+	binary.BigEndian.PutUint64(v, txNum)
+	return v
+}
+
+func insertDupSortEntries(tb testing.TB, tx kv.RwTx, key string, txNums ...uint64) {
+	tb.Helper()
+	cur, err := tx.RwCursorDupSort(testDupSortTable)
+	require.NoError(tb, err)
+	defer cur.Close()
+
+	for _, txNum := range txNums {
+		require.NoError(tb, cur.AppendDup([]byte(key), makeTxNumValue(txNum)))
+	}
+}
+
+func makeStepValue(step uint64) []byte {
+	v := make([]byte, 8)
+	binary.BigEndian.PutUint64(v, ^step)
+	return v
+}
+
+func insertStepValueEntries(tb testing.TB, tx kv.RwTx, key string, steps ...uint64) {
+	tb.Helper()
+	cur, err := tx.RwCursorDupSort(testDupSortTable)
+	require.NoError(tb, err)
+	defer cur.Close()
+
+	for _, step := range steps {
+		require.NoError(tb, cur.AppendDup([]byte(key), makeStepValue(step)))
+	}
+}
+
 func countTable(tb testing.TB, tx kv.Tx) int {
 	tb.Helper()
 	c, err := tx.Cursor(testTxLookupTable)
@@ -85,6 +123,35 @@ func openPseudoCursor(tb testing.TB, tx kv.RwTx) kv.PseudoDupSortRwCursor {
 	c, ok := raw.(*mdbx2.MdbxCursor)
 	require.True(tb, ok)
 	return &mdbx2.MdbxCursorPseudoDupSort{MdbxCursor: c}
+}
+
+func dumpDupSortTable(tb testing.TB, tx kv.Tx) map[string][]uint64 {
+	tb.Helper()
+	cur, err := tx.CursorDupSort(testDupSortTable)
+	require.NoError(tb, err)
+	defer cur.Close()
+
+	out := make(map[string][]uint64)
+	for k, v, err := cur.First(); k != nil; k, v, err = cur.Next() {
+		require.NoError(tb, err)
+		out[string(k)] = append(out[string(k)], binary.BigEndian.Uint64(v))
+	}
+	return out
+}
+
+func dumpStepValueTable(tb testing.TB, tx kv.Tx, stepSize uint64) map[string][]uint64 {
+	tb.Helper()
+	cur, err := tx.CursorDupSort(testDupSortTable)
+	require.NoError(tb, err)
+	defer cur.Close()
+
+	out := make(map[string][]uint64)
+	for k, v, err := cur.First(); k != nil; k, v, err = cur.Next() {
+		require.NoError(tb, err)
+		step := kv.Step(^binary.BigEndian.Uint64(v))
+		out[string(k)] = append(out[string(k)], step.ToTxNum(stepSize))
+	}
+	return out
 }
 
 // TestTableScanningPrune_Basic: single pass deletes exactly txNums in [txFrom, txTo).
@@ -233,6 +300,78 @@ func TestTableScanningPrune_CtxCancelOnOutOfRange(t *testing.T) {
 		"interrupted scan must save cursor position for resume")
 	require.EqualValues(t, 0, stat.PruneCountValues,
 		"no entries should be deleted — all are out of range")
+}
+
+func TestTableScanningPrune_DupSortRangeDel(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	insertDupSortEntries(t, tx, "a", 1, 3)
+	insertDupSortEntries(t, tx, "b", 2, 6)
+	insertDupSortEntries(t, tx, "c", 7)
+
+	logEvery := time.NewTicker(time.Hour)
+	defer logEvery.Stop()
+
+	cur, err := tx.RwCursorDupSort(testDupSortTable)
+	require.NoError(t, err)
+	defer cur.Close()
+
+	stat, err := prune.TableScanningPrune(
+		context.Background(), "test", "dupsort",
+		0, 4, 0, 1, logEvery, log.New(),
+		nil, cur, false, &prune.Stat{}, prune.DefaultStorageMode,
+	)
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, stat.ValueProgress)
+	require.EqualValues(t, 3, stat.PruneCountValues)
+	require.EqualValues(t, 2, stat.DupsDeleted)
+	require.Equal(t, map[string][]uint64{
+		"b": []uint64{6},
+		"c": []uint64{7},
+	}, dumpDupSortTable(t, tx))
+}
+
+func TestTableScanningPrune_StepValueRangeDel(t *testing.T) {
+	const stepSize = uint64(16)
+
+	db := openTestDB(t)
+	defer db.Close()
+
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	// Stored order is descending by txNum because the dup values are encoded as ^step.
+	// txFrom=32 means anything below that should already be pruned, so the remaining
+	// pruneable suffix for key "a" is exactly 48,32.
+	insertStepValueEntries(t, tx, "a", 4, 3, 2)
+	insertStepValueEntries(t, tx, "b", 5)
+
+	logEvery := time.NewTicker(time.Hour)
+	defer logEvery.Stop()
+
+	cur, err := tx.RwCursorDupSort(testDupSortTable)
+	require.NoError(t, err)
+	defer cur.Close()
+
+	stat, err := prune.TableScanningPrune(
+		context.Background(), "test", "step-values",
+		32, 64, 0, stepSize, logEvery, log.New(),
+		nil, cur, false, &prune.Stat{}, prune.StepValueStorageMode,
+	)
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, stat.ValueProgress)
+	require.EqualValues(t, 2, stat.PruneCountValues)
+	require.EqualValues(t, 2, stat.DupsDeleted)
+	require.Equal(t, map[string][]uint64{
+		"a": []uint64{64},
+		"b": []uint64{80},
+	}, dumpStepValueTable(t, tx, stepSize))
 }
 
 func BenchmarkTableScanningPrune(b *testing.B) {

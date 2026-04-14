@@ -252,6 +252,7 @@ type RwCursor interface {
 	// Both MDB_NEXT and MDB_GET_CURRENT will return the same record after
 	// this operation.
 	DeleteCurrent() error
+	RangeDel(mode uint) (uint64, error) // RangeDel - deletes a cursor-relative range, see MDBX range-delete modes
 }
 
 /*

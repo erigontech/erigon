@@ -25,6 +25,7 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/mdbx-go/mdbx"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
@@ -721,7 +722,36 @@ func (c *memStoreCursor) LastDup() ([]byte, error) {
 
 func (c *memStoreCursor) PrevDup() ([]byte, []byte, error)   { panic("PrevDup not implemented") }
 func (c *memStoreCursor) PrevNoDup() ([]byte, []byte, error) { panic("PrevNoDup not implemented") }
-func (c *memStoreCursor) CountDuplicates() (uint64, error)   { panic("CountDuplicates not implemented") }
+func (c *memStoreCursor) CountDuplicates() (uint64, error) {
+	if !c.valid {
+		return 0, nil
+	}
+	if !c.table.dupSort {
+		return 1, nil
+	}
+
+	c.store.mu.RLock()
+	defer c.store.mu.RUnlock()
+
+	iter := c.table.tree.Iter()
+	defer iter.Release()
+	if !iter.Seek(memEntry{k: c.current.k}) {
+		return 0, nil
+	}
+
+	var count uint64
+	for {
+		item := iter.Item()
+		if !bytes.Equal(item.k, c.current.k) {
+			break
+		}
+		count++
+		if !iter.Next() {
+			break
+		}
+	}
+	return count, nil
+}
 
 // Write methods — acquire write lock.
 
@@ -752,6 +782,143 @@ func (c *memStoreCursor) DeleteCurrentDuplicates() error {
 		return nil
 	}
 	return c.store.Delete(c.bucket, c.current.k)
+}
+
+func memEntryCompare(dupSort bool, a, b memEntry) int {
+	if cmp := bytes.Compare(a.k, b.k); cmp != 0 {
+		return cmp
+	}
+	if !dupSort {
+		return 0
+	}
+	return bytes.Compare(a.v, b.v)
+}
+
+func (c *memStoreCursor) RangeDel(mode uint) (uint64, error) {
+	if !c.valid {
+		return 0, nil
+	}
+
+	oldCurrent := c.current
+
+	c.store.mu.Lock()
+	defer c.store.mu.Unlock()
+
+	var toDelete []memEntry
+	switch mode {
+	case mdbx.DeleteCurrentValue:
+		toDelete = append(toDelete, oldCurrent)
+	case mdbx.DeleteCurrentValueMultiValAll:
+		if !c.table.dupSort {
+			toDelete = append(toDelete, oldCurrent)
+			break
+		}
+		iter := c.table.tree.Iter()
+		defer iter.Release()
+		if iter.Seek(memEntry{k: oldCurrent.k}) {
+			for {
+				item := iter.Item()
+				if !bytes.Equal(item.k, oldCurrent.k) {
+					break
+				}
+				toDelete = append(toDelete, item)
+				if !iter.Next() {
+					break
+				}
+			}
+		}
+	case mdbx.DeleteCurrentMultiValBeforeIncluding, mdbx.DeleteCurrentMultiValBeforeExcluding,
+		mdbx.DeleteCurrentMultiValAfterIncluding, mdbx.DeleteCurrentMultiValAfterExcluding:
+		if !c.table.dupSort {
+			switch mode {
+			case mdbx.DeleteCurrentMultiValBeforeIncluding, mdbx.DeleteCurrentMultiValAfterIncluding:
+				toDelete = append(toDelete, oldCurrent)
+			}
+			break
+		}
+		iter := c.table.tree.Iter()
+		defer iter.Release()
+		if iter.Seek(memEntry{k: oldCurrent.k}) {
+			for {
+				item := iter.Item()
+				if !bytes.Equal(item.k, oldCurrent.k) {
+					break
+				}
+				cmp := bytes.Compare(item.v, oldCurrent.v)
+				switch mode {
+				case mdbx.DeleteCurrentMultiValBeforeIncluding:
+					if cmp <= 0 {
+						toDelete = append(toDelete, item)
+					}
+				case mdbx.DeleteCurrentMultiValBeforeExcluding:
+					if cmp < 0 {
+						toDelete = append(toDelete, item)
+					}
+				case mdbx.DeleteCurrentMultiValAfterIncluding:
+					if cmp >= 0 {
+						toDelete = append(toDelete, item)
+					}
+				case mdbx.DeleteCurrentMultiValAfterExcluding:
+					if cmp > 0 {
+						toDelete = append(toDelete, item)
+					}
+				}
+				if !iter.Next() {
+					break
+				}
+			}
+		}
+	case mdbx.DeleteBeforeIncluding, mdbx.DeleteBeforeExcluding,
+		mdbx.DeleteAfterIncluding, mdbx.DeleteAfterExcluding, mdbx.DeleteWhole:
+		iter := c.table.tree.Iter()
+		defer iter.Release()
+		for ok := iter.First(); ok; ok = iter.Next() {
+			item := iter.Item()
+			cmp := memEntryCompare(c.table.dupSort, item, oldCurrent)
+			switch mode {
+			case mdbx.DeleteBeforeIncluding:
+				if cmp <= 0 {
+					toDelete = append(toDelete, item)
+				}
+			case mdbx.DeleteBeforeExcluding:
+				if cmp < 0 {
+					toDelete = append(toDelete, item)
+				}
+			case mdbx.DeleteAfterIncluding:
+				if cmp >= 0 {
+					toDelete = append(toDelete, item)
+				}
+			case mdbx.DeleteAfterExcluding:
+				if cmp > 0 {
+					toDelete = append(toDelete, item)
+				}
+			case mdbx.DeleteWhole:
+				toDelete = append(toDelete, item)
+			}
+		}
+	default:
+		return 0, nil
+	}
+
+	for _, item := range toDelete {
+		c.table.tree.Delete(item)
+	}
+
+	iter := c.table.tree.Iter()
+	defer iter.Release()
+	if iter.Seek(oldCurrent) {
+		c.valid = true
+		c.current = iter.Item()
+		return uint64(len(toDelete)), nil
+	}
+	if iter.Last() {
+		c.valid = true
+		c.current = iter.Item()
+		return uint64(len(toDelete)), nil
+	}
+	c.valid = false
+	c.current = memEntry{}
+	return uint64(len(toDelete)), nil
 }
 
 func (c *memStoreCursor) PutNoDupData(key, value []byte) error { panic("PutNoDupData not implemented") }

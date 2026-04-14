@@ -1374,7 +1374,14 @@ func (c *MdbxCursor) Delete(k []byte) error {
 // can still be used on it.
 // Both MDB_NEXT and MDB_GET_CURRENT will return the same record after
 // this operation.
-func (c *MdbxCursor) DeleteCurrent() error             { return c.c.Del(mdbx.Current) }
+func (c *MdbxCursor) DeleteCurrent() error { return c.c.Del(mdbx.Current) }
+func (c *MdbxCursor) RangeDel(mode uint) (uint64, error) {
+	affected, err := c.c.RangeDel(mode)
+	if err != nil {
+		return 0, fmt.Errorf("label: %s, table: %s, in RangeDel: %w", c.label, c.bucketName, err)
+	}
+	return affected, nil
+}
 func (c *MdbxCursor) PutNoOverwrite(k, v []byte) error { return c.c.Put(k, v, mdbx.NoOverwrite) }
 
 func (c *MdbxCursor) Put(key []byte, value []byte) error {

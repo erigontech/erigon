@@ -8,6 +8,8 @@ import (
 	"math"
 	"time"
 
+	"github.com/erigontech/mdbx-go/mdbx"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
@@ -185,6 +187,92 @@ type StartPos struct {
 	StartVal []byte
 }
 
+type txNumOrder int
+
+const (
+	txNumOrderSingle txNumOrder = iota
+	txNumOrderAscending
+	txNumOrderDescending
+)
+
+func storageModeTxNumOrder(mode StorageMode) txNumOrder {
+	switch mode {
+	case DefaultStorageMode, PrefixValStorageMode:
+		return txNumOrderAscending
+	case StepValueStorageMode:
+		return txNumOrderDescending
+	default:
+		return txNumOrderSingle
+	}
+}
+
+func storageModeTxToSeek(mode StorageMode, txTo, stepSize uint64) ([]byte, bool) {
+	b := make([]byte, 8)
+	switch mode {
+	case DefaultStorageMode, PrefixValStorageMode:
+		binary.BigEndian.PutUint64(b, txTo)
+		return b, true
+	case StepValueStorageMode:
+		if txTo == 0 {
+			return nil, false
+		}
+		lastIncludedStep := (txTo - 1) / stepSize
+		binary.BigEndian.PutUint64(b, ^lastIncludedStep)
+		return b, true
+	default:
+		return nil, false
+	}
+}
+
+func rangeDeleteCurrentKeyToTxTo(
+	mode StorageMode,
+	txTo, stepSize uint64,
+	key []byte,
+	valDelCursor kv.PseudoDupSortRwCursor,
+) (affected uint64, used bool, err error) {
+	dupCursor, ok := valDelCursor.(kv.RwCursorDupSort)
+	if !ok {
+		return 0, false, nil
+	}
+
+	seek, ok := storageModeTxToSeek(mode, txTo, stepSize)
+	if !ok {
+		return 0, false, nil
+	}
+
+	switch storageModeTxNumOrder(mode) {
+	case txNumOrderAscending:
+		foundVal, err := dupCursor.SeekBothRange(key, seek)
+		if err != nil {
+			return 0, false, err
+		}
+		if foundVal == nil {
+			return 0, true, nil
+		}
+		_, prevVal, err := dupCursor.PrevDup()
+		if err != nil {
+			return 0, false, err
+		}
+		if prevVal == nil {
+			return 0, true, nil
+		}
+		affected, err = dupCursor.RangeDel(mdbx.DeleteCurrentMultiValBeforeIncluding)
+		return affected, true, err
+	case txNumOrderDescending:
+		foundVal, err := dupCursor.SeekBothRange(key, seek)
+		if err != nil {
+			return 0, false, err
+		}
+		if foundVal == nil {
+			return 0, true, nil
+		}
+		affected, err = dupCursor.RangeDel(mdbx.DeleteCurrentMultiValAfterIncluding)
+		return affected, true, err
+	default:
+		return 0, false, nil
+	}
+}
+
 func TableScanningPrune(
 	ctx context.Context,
 	name, filenameBase string,
@@ -256,7 +344,7 @@ func TableScanningPrune(
 				time.Sleep(*throttling)
 			}
 			//println("key", hex.EncodeToString(txnb), "value", hex.EncodeToString(val))
-			if err = keysCursor.DeleteCurrentDuplicates(); err != nil {
+			if _, err = keysCursor.RangeDel(mdbx.DeleteCurrentValueMultiValAll); err != nil {
 				return nil, err
 			}
 		}
@@ -286,7 +374,7 @@ func TableScanningPrune(
 		}
 	}
 
-	lastVal, err := tableScanningPrune(ctx, stat, filenameBase, txFrom, txTo, txNumGetter, valDelCursor, keysCursor, asserts, throttling, logEvery, logger, prevStat.ValueProgress, prevStat.LastPrunedValue)
+	lastVal, err := tableScanningPrune(ctx, stat, filenameBase, txFrom, txTo, stepSize, mode, txNumGetter, valDelCursor, keysCursor, asserts, throttling, logEvery, logger, prevStat.ValueProgress, prevStat.LastPrunedValue)
 	if err != nil {
 		return nil, err
 	}
@@ -306,7 +394,8 @@ func tableScanningPrune(
 	ctx context.Context,
 	stat *Stat,
 	filenameBase string,
-	txFrom, txTo uint64,
+	txFrom, txTo, stepSize uint64,
+	mode StorageMode,
 	txNumGetter func(key, val []byte) uint64,
 	valDelCursor kv.PseudoDupSortRwCursor,
 	keysCursor kv.RwCursorDupSort,
@@ -339,43 +428,69 @@ func tableScanningPrune(
 		}
 
 		txNum := txNumGetter(val, txNumBytes)
-		// Early skip: avoid LastDup/FirstDup/CountDuplicates cursor ops for out-of-range entries
-		if txNum >= txTo {
-			continue
-		}
-
-		if asserts && txNum < txFrom {
-			panic(fmt.Errorf("assert: index pruning txn=%d [%d-%d)", txNum, txFrom, txTo))
-		}
-
 		lastDupTxNumB, err := valDelCursor.LastDup()
 		if err != nil {
 			return nil, fmt.Errorf("LastDup iterate over %s index keys: %w", filenameBase, err)
 		}
 		lastDupTxNum := txNumGetter(val, lastDupTxNumB)
+		order := storageModeTxNumOrder(mode)
+		lowestTxNum, highestTxNum := txNum, lastDupTxNum
+		if order == txNumOrderDescending {
+			lowestTxNum, highestTxNum = lastDupTxNum, txNum
+		}
 
-		stat.MinTxNum = min(stat.MinTxNum, txNum)
-		stat.MaxTxNum = max(stat.MaxTxNum, txNum)
+		if highestTxNum < txFrom {
+			if asserts {
+				panic(fmt.Errorf("assert: index pruning txn=%d [%d-%d)", highestTxNum, txFrom, txTo))
+			}
+			continue
+		}
+		if lowestTxNum >= txTo {
+			continue
+		}
 
-		// All dups in prune range: bulk delete without repositioning cursor
-		if lastDupTxNum < txTo && txNum >= txFrom {
+		stat.MinTxNum = min(stat.MinTxNum, lowestTxNum)
+		stat.MaxTxNum = max(stat.MaxTxNum, highestTxNum)
+
+		usedFastPath := false
+
+		// Fast path: due to monotonic prune progress, values below txFrom are already gone.
+		// That lets us use one RangeDel per key to remove everything newly prunable before txTo.
+		if highestTxNum < txTo && lowestTxNum >= txFrom {
 			if throttling != nil {
 				time.Sleep(*throttling)
 			}
-			dups, err := valDelCursor.CountDuplicates()
-			if err != nil {
-				return nil, fmt.Errorf("count dups %s: %w", filenameBase, err)
-			}
-			err = valDelCursor.DeleteCurrentDuplicates()
+			affected, err := valDelCursor.RangeDel(mdbx.DeleteCurrentValueMultiValAll)
 			if err != nil {
 				return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
 			}
-			if dups > 1 {
-				stat.DupsDeleted += dups
+			if affected > 1 {
+				stat.DupsDeleted += affected
 			}
-			stat.PruneCountValues += dups
-		} else {
-			// Selective per-dup deletion: reposition to first dup for iteration
+			stat.PruneCountValues += affected
+			usedFastPath = true
+		}
+
+		if !usedFastPath && lowestTxNum >= txFrom {
+			if throttling != nil {
+				time.Sleep(*throttling)
+			}
+			affected, usedRangeDel, err := rangeDeleteCurrentKeyToTxTo(mode, txTo, stepSize, val, valDelCursor)
+			if err != nil {
+				return nil, fmt.Errorf("range delete %s: %w", filenameBase, err)
+			}
+			if usedRangeDel {
+				if affected > 1 {
+					stat.DupsDeleted += affected
+				}
+				stat.PruneCountValues += affected
+				usedFastPath = true
+			}
+		}
+
+		if !usedFastPath {
+			// Fallback when the key still contains txNums below txFrom.
+			// This should be rare and indicates the monotonic prune invariant is not yet satisfied.
 			_, err = valDelCursor.FirstDup()
 			if err != nil {
 				return nil, fmt.Errorf("FirstDup iterate over %s index keys: %w", filenameBase, err)
@@ -385,11 +500,17 @@ func tableScanningPrune(
 					return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
 				}
 				txNumDup := txNumGetter(val, txNumBytes)
-				if txNumDup < txFrom {
+				if txNumDup >= txTo {
+					if order != txNumOrderDescending {
+						break
+					}
 					continue
 				}
-				if txNumDup >= txTo {
-					break
+				if txNumDup < txFrom {
+					if order == txNumOrderDescending {
+						break
+					}
+					continue
 				}
 				if throttling != nil {
 					time.Sleep(*throttling)
@@ -400,10 +521,11 @@ func tableScanningPrune(
 
 				stat.MinTxNum = min(stat.MinTxNum, txNumDup)
 				stat.MaxTxNum = max(stat.MaxTxNum, txNumDup)
-				if err = valDelCursor.DeleteCurrent(); err != nil {
+				affected, err := valDelCursor.RangeDel(mdbx.DeleteCurrentValue)
+				if err != nil {
 					return nil, err
 				}
-				stat.PruneCountValues++
+				stat.PruneCountValues += affected
 			}
 		}
 

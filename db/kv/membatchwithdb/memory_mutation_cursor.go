@@ -20,6 +20,8 @@ import (
 	"bytes"
 	"errors"
 
+	"github.com/erigontech/mdbx-go/mdbx"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 )
@@ -323,6 +325,142 @@ func (m *memoryMutationCursor) DeleteCurrentDuplicates() error {
 		return m.Delete(k)
 	}
 	return nil
+}
+
+func compareCursorEntry(dupSort bool, a, b cursorEntry) int {
+	if cmp := bytes.Compare(a.key, b.key); cmp != 0 {
+		return cmp
+	}
+	if !dupSort {
+		return 0
+	}
+	return bytes.Compare(a.value, b.value)
+}
+
+func (m *memoryMutationCursor) snapshotEntries(current cursorEntry) ([]cursorEntry, int, error) {
+	k, v, err := m.First()
+	if err != nil {
+		return nil, -1, err
+	}
+
+	entries := make([]cursorEntry, 0)
+	currentIndex := -1
+	for ; k != nil; k, v, err = m.Next() {
+		if err != nil {
+			return nil, -1, err
+		}
+
+		entry := cursorEntry{key: common.Copy(k), value: common.Copy(v)}
+		if currentIndex == -1 && bytes.Equal(entry.key, current.key) && bytes.Equal(entry.value, current.value) {
+			currentIndex = len(entries)
+		}
+		entries = append(entries, entry)
+	}
+	return entries, currentIndex, nil
+}
+
+func (m *memoryMutationCursor) RangeDel(mode uint) (uint64, error) {
+	currentKey, currentValue, err := m.Current()
+	if err != nil {
+		return 0, err
+	}
+	if currentKey == nil {
+		return 0, nil
+	}
+	if m.isTableCleared() {
+		return m.memCursor.RangeDel(mode)
+	}
+
+	current := cursorEntry{key: common.Copy(currentKey), value: common.Copy(currentValue)}
+	entries, currentIndex, err := m.snapshotEntries(current)
+	if err != nil {
+		return 0, err
+	}
+	if currentIndex < 0 {
+		return 0, nil
+	}
+
+	shouldDelete := func(idx int, entry cursorEntry) bool {
+		cmp := compareCursorEntry(m.pureDupSort, entry, current)
+		switch mode {
+		case mdbx.DeleteCurrentValue:
+			return idx == currentIndex
+		case mdbx.DeleteCurrentValueMultiValAll:
+			return bytes.Equal(entry.key, current.key)
+		case mdbx.DeleteCurrentMultiValBeforeIncluding:
+			if !bytes.Equal(entry.key, current.key) {
+				return false
+			}
+			return bytes.Compare(entry.value, current.value) <= 0
+		case mdbx.DeleteCurrentMultiValBeforeExcluding:
+			if !bytes.Equal(entry.key, current.key) {
+				return false
+			}
+			return bytes.Compare(entry.value, current.value) < 0
+		case mdbx.DeleteCurrentMultiValAfterIncluding:
+			if !bytes.Equal(entry.key, current.key) {
+				return false
+			}
+			return bytes.Compare(entry.value, current.value) >= 0
+		case mdbx.DeleteCurrentMultiValAfterExcluding:
+			if !bytes.Equal(entry.key, current.key) {
+				return false
+			}
+			return bytes.Compare(entry.value, current.value) > 0
+		case mdbx.DeleteBeforeIncluding:
+			return cmp <= 0
+		case mdbx.DeleteBeforeExcluding:
+			return cmp < 0
+		case mdbx.DeleteAfterIncluding:
+			return cmp >= 0
+		case mdbx.DeleteAfterExcluding:
+			return cmp > 0
+		case mdbx.DeleteWhole:
+			return true
+		default:
+			return false
+		}
+	}
+
+	var affected uint64
+	for idx, entry := range entries {
+		if !shouldDelete(idx, entry) {
+			continue
+		}
+		if m.pureDupSort {
+			if mode == mdbx.DeleteCurrentValueMultiValAll && bytes.Equal(entry.key, current.key) {
+				if err := m.Delete(entry.key); err != nil {
+					return affected, err
+				}
+				affected++
+				for j := idx + 1; j < len(entries) && bytes.Equal(entries[j].key, current.key); j++ {
+					affected++
+				}
+				break
+			}
+			if err := m.DeleteExact(entry.key, entry.value); err != nil {
+				return affected, err
+			}
+		} else {
+			if err := m.Delete(entry.key); err != nil {
+				return affected, err
+			}
+		}
+		affected++
+	}
+
+	switch {
+	case m.pureDupSort:
+		if _, seekErr := m.SeekBothRange(current.key, current.value); seekErr != nil {
+			return affected, seekErr
+		}
+	default:
+		if _, _, seekErr := m.Seek(current.key); seekErr != nil {
+			return affected, seekErr
+		}
+	}
+
+	return affected, nil
 }
 
 // Seek move pointer to a key at a certain position.
