@@ -137,8 +137,19 @@ func (p *WorkerPool) Stopped() bool {
 // goroutine via an unbuffered channel, so it can momentarily block while the
 // dispatcher processes the previous task (spawns a worker, appends to the
 // waiting queue, etc.). Under concurrent submitters, submissions serialize
-// through this handoff. In practice the block is brief; if true non-blocking
-// semantics are required, wrap in a goroutine at the call site.
+// through this handoff.
+//
+// This serialization through a single dispatcher is a design feature, not
+// a bug. It is what gives the pool a stable submission order: tasks reach
+// the waiting queue (and subsequently workers) in the order they were
+// submitted. Consumers that rely on ordering — notably the event bus
+// built on this pool — depend on this invariant. "Fixing" the handoff
+// by buffering or bypassing the dispatcher would break ordering.
+//
+// If submission throughput is the bottleneck, the pool is being used for
+// high-throughput data flow rather than coordination. That is a design
+// mismatch — use a channel or explicit pipeline for data, and reserve the
+// worker pool for coordinated task dispatch.
 //
 // Each task is immediately given to an available worker or to a newly started
 // worker. If there are no available workers, and the maximum number of
