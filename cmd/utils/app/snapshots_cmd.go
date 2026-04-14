@@ -327,6 +327,16 @@ var snapshotCommand = cli.Command{
 			),
 		},
 		{
+			Name:    "rm-blocks",
+			Aliases: []string{"rm-block-snapshots", "rm-block-segments"},
+			Usage:   "Remove the latest block snapshot files (headers/bodies/transactions and their indexes) from <datadir>/snapshots",
+			Action:  doRmBlockSnapshots,
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.BoolFlag{Name: "dry-run"},
+			}),
+		},
+		{
 			Name: "rollback-snapshots-to-block",
 			Description: "Rollback the node back to a given block by deleting chaindata and all corresponding " +
 				"snapshots that contain data related to the given block and blocks after it. It deletes block " +
@@ -1031,6 +1041,212 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 		DryRun:                 dryRun,
 		StepRange:              stepRange,
 		DomainNames:            domainNames,
+	})
+}
+
+type DeleteBlockSnapshotsArgs struct {
+	Dirs                   datadir.Dirs
+	PromptUserBeforeDelete bool
+	DryRun                 bool
+}
+
+// blockFileInfo is a lightweight descriptor for a single block snapshot file
+// (headers/bodies/transactions/transactions-to-block, etc.) in dirs.Snap.
+type blockFileInfo struct {
+	Path string
+	Name string
+	From uint64 // raw value from filename (scaled by 1_000 to get block number)
+	To   uint64
+	Type string
+}
+
+// parseBlockFileName parses a block-snapshot filename of the form
+// "v<ver>-<from>-<to>-<type>.<ext>". Returns false for anything else
+// (state files, salt files, malformed names).
+//
+// Unlike snaptype.ParseFileName, this accepts composite type strings like
+// "transactions-to-block" by treating everything after the second dash as the
+// type — those accessor index files live next to the block segments and must
+// be removed together with them.
+func parseBlockFileName(name string) (blockFileInfo, bool) {
+	ext := filepath.Ext(name)
+	if ext != ".seg" && ext != ".idx" {
+		return blockFileInfo{}, false
+	}
+	base := strings.TrimSuffix(name, ext)
+	// Strip version prefix: "v1.1-" or "v2.0-" etc.
+	dash := strings.Index(base, "-")
+	if dash <= 0 || !strings.HasPrefix(base, "v") {
+		return blockFileInfo{}, false
+	}
+	if _, err := version.ParseVersion(base); err != nil {
+		return blockFileInfo{}, false
+	}
+	rest := base[dash+1:] // "<from>-<to>-<type>"
+	firstDash := strings.Index(rest, "-")
+	if firstDash <= 0 {
+		return blockFileInfo{}, false
+	}
+	secondDash := strings.Index(rest[firstDash+1:], "-")
+	if secondDash < 0 {
+		return blockFileInfo{}, false
+	}
+	secondDash += firstDash + 1
+	fromStr := rest[:firstDash]
+	toStr := rest[firstDash+1 : secondDash]
+	typeStr := rest[secondDash+1:]
+	if typeStr == "" {
+		return blockFileInfo{}, false
+	}
+	from, err := strconv.ParseUint(fromStr, 10, 64)
+	if err != nil {
+		return blockFileInfo{}, false
+	}
+	to, err := strconv.ParseUint(toStr, 10, 64)
+	if err != nil {
+		return blockFileInfo{}, false
+	}
+	return blockFileInfo{Name: name, From: from, To: to, Type: typeStr}, true
+}
+
+func DeleteBlockSnapshots(args DeleteBlockSnapshotsArgs) error {
+	dirs := args.Dirs
+
+	filePaths, err := dir2.ListFiles(dirs.Snap)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			fmt.Printf("snapshot directory does not exist: %s\n", dirs.Snap)
+			return nil
+		}
+		return err
+	}
+
+	allFiles := make([]blockFileInfo, 0, len(filePaths))
+	var maxFrom uint64
+	for _, p := range filePaths {
+		_, name := filepath.Split(p)
+		bf, ok := parseBlockFileName(name)
+		if !ok {
+			continue
+		}
+		bf.Path = p
+		allFiles = append(allFiles, bf)
+		if bf.From > maxFrom {
+			maxFrom = bf.From
+		}
+	}
+
+	if len(allFiles) == 0 {
+		fmt.Printf("no block snapshot files found in %s\n", dirs.Snap)
+		return nil
+	}
+
+	toRemove := make([]blockFileInfo, 0)
+	rmSet := make(map[string]bool)
+	var removeSize uint64
+	for _, f := range allFiles {
+		if f.From == maxFrom {
+			toRemove = append(toRemove, f)
+			rmSet[f.Path] = true
+			if info, err := os.Stat(f.Path); err == nil {
+				removeSize += uint64(info.Size())
+			}
+		}
+	}
+
+	// Sort by (From desc, type asc) for display: newest ranges first.
+	sort.Slice(allFiles, func(i, j int) bool {
+		if allFiles[i].From != allFiles[j].From {
+			return allFiles[i].From > allFiles[j].From
+		}
+		if allFiles[i].To != allFiles[j].To {
+			return allFiles[i].To > allFiles[j].To
+		}
+		return allFiles[i].Name < allFiles[j].Name
+	})
+
+	fmt.Printf("\nDatadir: %s\n", dirs.DataDir)
+	fmt.Printf("Latest block range: [%d, -) (step in thousands of blocks)\n\n", maxFrom)
+
+	// Show files at the latest From plus a bit of older context for orientation.
+	shown := 0
+	const contextLines = 12
+	for _, f := range allFiles {
+		if !rmSet[f.Path] && shown >= contextLines {
+			break
+		}
+		var sizeStr string
+		if info, err := os.Stat(f.Path); err == nil {
+			sizeStr = common.ByteCount(uint64(info.Size()))
+		} else {
+			sizeStr = "unknown"
+		}
+		action := "KEEP  "
+		if rmSet[f.Path] {
+			action = "REMOVE"
+		}
+		fmt.Printf("  %s %s  (%s)\n", action, f.Name, sizeStr)
+		shown++
+	}
+
+	if args.PromptUserBeforeDelete {
+		promptExit := func(s string) (exitNow bool) {
+		AllowPruneSteps:
+			fmt.Printf("\n%s", s)
+			var ans uint8
+			_, err := fmt.Scanf("%d\n", &ans)
+			if err != nil {
+				fmt.Printf("err: %v\n", err)
+				return true
+			}
+			switch ans {
+			case 1:
+				return false
+			case 4:
+				return true
+			default:
+				fmt.Printf("invalid input: %d; Just a number 1 or 4 expected.\n", ans)
+				goto AllowPruneSteps
+			}
+		}
+
+		q := fmt.Sprintf("remove %d files (~%s)?\n1) RemoveFile\n4) Exit\n (pick number): ",
+			len(toRemove), common.ByteCount(removeSize))
+		if promptExit(q) {
+			os.Exit(0)
+		}
+	}
+
+	var removed uint64
+	for _, f := range toRemove {
+		if args.DryRun {
+			fmt.Printf("[dry-run] rm %s\n", f.Path)
+			fmt.Printf("[dry-run] rm %s\n", f.Path+".torrent")
+			continue
+		}
+		dir2.RemoveFile(f.Path)
+		dir2.RemoveFile(f.Path + ".torrent")
+		removed++
+	}
+	if args.DryRun {
+		fmt.Printf("[dry-run] would remove %d block snapshot files (~%s)\n", len(toRemove), common.ByteCount(removeSize))
+	} else {
+		fmt.Printf("removed %d block snapshot files\n", removed)
+	}
+	return nil
+}
+
+func doRmBlockSnapshots(cliCtx *cli.Context) error {
+	dirs, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
+	if err != nil {
+		return err
+	}
+	defer l.Unlock()
+
+	return DeleteBlockSnapshots(DeleteBlockSnapshotsArgs{
+		Dirs:                   dirs,
+		PromptUserBeforeDelete: true,
+		DryRun:                 cliCtx.Bool("dry-run"),
 	})
 }
 
