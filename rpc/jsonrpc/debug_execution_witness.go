@@ -841,26 +841,34 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		result.State = append(result.State, common.Copy(node))
 	}
 
-	// Collect headers for BLOCKHASH opcode support
-	// Include headers from accessed block numbers
-	seenBlockNums := make(map[uint64]struct{})
+	// Always include the parent header (required for EIP-8025 stateless
+	// verification), then add any BLOCKHASH-accessed ancestors.
+	// Emit in ascending block-number order, deduped.
+	headerNums := make(map[uint64]struct{})
+	if blockNum > 0 {
+		headerNums[blockNum-1] = struct{}{}
+	}
 	for _, bn := range accessedBlockHashes {
-		if _, seen := seenBlockNums[bn]; seen {
-			continue
-		}
-		seenBlockNums[bn] = struct{}{}
+		headerNums[bn] = struct{}{}
+	}
+	sorted := make([]uint64, 0, len(headerNums))
+	for bn := range headerNums {
+		sorted = append(sorted, bn)
+	}
+	slices.Sort(sorted)
 
+	for _, bn := range sorted {
 		blockHeader, err := api._blockReader.HeaderByNumber(ctx, tx, bn)
 		if err != nil {
-			return nil, fmt.Errorf("failed to load header for accessed block number %d: %w", bn, err)
+			return nil, fmt.Errorf("failed to load header for block number %d: %w", bn, err)
 		}
 		if blockHeader == nil {
-			return nil, fmt.Errorf("missing header for accessed block number %d", bn)
+			return nil, fmt.Errorf("missing header for block number %d", bn)
 		}
 
 		headerRLP, err := rlp.EncodeToBytes(blockHeader)
 		if err != nil {
-			return nil, fmt.Errorf("failed to encode header for accessed block number %d: %w", bn, err)
+			return nil, fmt.Errorf("failed to encode header for block number %d: %w", bn, err)
 		}
 		result.Headers = append(result.Headers, headerRLP)
 	}

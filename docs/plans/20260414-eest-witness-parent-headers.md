@@ -153,12 +153,12 @@ for _, bn := range sorted {
 **Files:**
 - Modify: `rpc/jsonrpc/debug_execution_witness.go`
 
-- [ ] confirm `slices` is in the import block (already at line 7) — no new imports needed
-- [ ] replace the loop body at lines 844-866 with the union+sort logic per Technical Details target shape
-- [ ] update error message wording: `"failed to load header for block number %d"`, `"missing header for block number %d"`, `"failed to encode header for block number %d"` (drop the word "accessed" — see Technical Details rationale)
-- [ ] re-run `go test -run TestExecutionWitness ./rpc/jsonrpc/...` — Task 1's new subtest must now PASS
-- [ ] re-run sibling subtests (`genesis block`, `by block number`, `by block hash`, `multiple blocks`, `latest block`, `non-existent block`) — must remain PASS
-- [ ] run `make lint` — must be clean (re-run if non-deterministic per CLAUDE.md)
+- [x] confirm `slices` is in the import block (already at line 7) — no new imports needed
+- [x] replace the loop body at lines 844-866 with the union+sort logic per Technical Details target shape
+- [x] update error message wording: `"failed to load header for block number %d"`, `"missing header for block number %d"`, `"failed to encode header for block number %d"` (drop the word "accessed" — see Technical Details rationale)
+- [x] re-run `go test -run TestExecutionWitness ./rpc/jsonrpc/...` — Task 1's new subtest must now PASS
+- [x] re-run sibling subtests (`genesis block`, `by block number`, `by block hash`, `multiple blocks`, `latest block`, `non-existent block`) — must remain PASS
+- [x] run `make lint` — must be clean (re-run if non-deterministic per CLAUDE.md)
 - [ ] commit with prefix `rpc/jsonrpc:` per Erigon convention, e.g. `rpc/jsonrpc: include parent header in debug_executionWitness, sort ascending`
 
 ### Task 3: Remove broad `bt.Fails(".")` from EEST witness suite
