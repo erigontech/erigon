@@ -317,11 +317,14 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	}
 	defer coreTx.Rollback()
 
-	poolTx, err := p.poolDB.BeginRo(ctx)
-	if err != nil {
-		return err
+	var poolTx kv.Tx
+	if p.poolDB != nil {
+		poolTx, err = p.poolDB.BeginRo(ctx)
+		if err != nil {
+			return err
+		}
+		defer poolTx.Rollback()
 	}
-	defer poolTx.Rollback()
 
 	block := stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockHeight
 	baseFee := stateChanges.PendingBlockBaseFee
@@ -400,6 +403,9 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 
 	for i, txn := range unwindBlobTxns.Txns {
 		if txn.TxType() == BlobTxnType {
+			if poolTx == nil {
+				continue
+			}
 			knownBlobTxn, err := p.getCachedBlobTxnLocked(poolTx, txn.IDHash[:])
 			if err != nil {
 				return err
