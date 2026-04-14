@@ -484,7 +484,9 @@ func rawTxFromBlock(t *testing.T, m *execmoduletester.ExecModuleTester, blockNum
 		if err != nil {
 			return err
 		}
-		to = accounts.InternAddress(*txn.GetTo())
+		if toAddr := txn.GetTo(); toAddr != nil {
+			to = accounts.InternAddress(*toAddr)
+		}
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -519,11 +521,41 @@ func TestRawTransactionStateDiff(t *testing.T) {
 	require.NotNil(t, result.StateDiff, "StateDiff must be populated")
 	require.NotEmpty(t, result.StateDiff, "StateDiff must contain at least one entry")
 
-	_, senderInDiff := result.StateDiff[from]
+	senderDiff, senderInDiff := result.StateDiff[from]
 	require.True(t, senderInDiff, "sender must appear in StateDiff")
 
-	_, receiverInDiff := result.StateDiff[to]
+	receiverDiff, receiverInDiff := result.StateDiff[to]
 	require.True(t, receiverInDiff, "receiver must appear in StateDiff")
+
+	// Sender nonce must increment by exactly 1.
+	nonceDiff, ok := senderDiff.Nonce.(map[string]*StateDiffNonce)
+	require.True(t, ok, "sender nonce must be a change map")
+	n := nonceDiff["*"]
+	require.NotNil(t, n, "sender nonce change must be present")
+	require.Equal(t, uint64(n.From)+1, uint64(n.To), "sender nonce must increment by 1")
+
+	// Sender balance must decrease (is a change, not "=").
+	_, balanceEqual := senderDiff.Balance.(string)
+	require.False(t, balanceEqual, "sender balance must change")
+	balanceDiff, ok := senderDiff.Balance.(map[string]*StateDiffBalance)
+	require.True(t, ok, "sender balance must be a change map")
+	bd := balanceDiff["*"]
+	require.NotNil(t, bd, "sender balance change entry must be present")
+	require.Negative(t, bd.To.ToInt().Cmp(bd.From.ToInt()), "sender balance must decrease")
+
+	// Receiver balance must increase: either a new account ("+") or a change ("*" with To > From).
+	switch v := receiverDiff.Balance.(type) {
+	case map[string]*hexutil.Big:
+		val, exists := v["+"]
+		require.True(t, exists, "new receiver account balance must use '+' key")
+		require.Positive(t, val.ToInt().Sign(), "receiver initial balance must be positive")
+	case map[string]*StateDiffBalance:
+		bd2 := v["*"]
+		require.NotNil(t, bd2, "receiver balance change entry must be present")
+		require.Positive(t, bd2.To.ToInt().Cmp(bd2.From.ToInt()), "receiver balance must increase")
+	default:
+		t.Fatalf("unexpected receiver balance diff type: %T", receiverDiff.Balance)
+	}
 }
 
 func TestRawTransactionVmTrace(t *testing.T) {
