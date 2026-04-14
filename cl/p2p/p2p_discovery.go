@@ -22,7 +22,7 @@ func (p *p2pManager) connectToBootnodes(ctx context.Context, discoverConfig disc
 			continue
 		}
 	}
-	multiAddresses := convertToMultiAddr(discoverConfig.Bootnodes)
+	multiAddresses := ConvertToMultiAddr(discoverConfig.Bootnodes)
 	addrInfos, err := peer.AddrInfosFromP2pAddrs(multiAddresses...)
 	if err != nil {
 		return err

@@ -90,17 +90,7 @@ func memoryDelegateCall(callContext *CallContext) (uint64, bool) {
 	return max(x, y), false
 }
 
-func memoryStaticCall(callContext *CallContext) (uint64, bool) {
-	x, overflow := calcMemSize64(callContext.Stack.Back(4), callContext.Stack.Back(5))
-	if overflow {
-		return 0, true
-	}
-	y, overflow := calcMemSize64(callContext.Stack.Back(2), callContext.Stack.Back(3))
-	if overflow {
-		return 0, true
-	}
-	return max(x, y), false
-}
+var memoryStaticCall = memoryDelegateCall
 
 func memoryReturn(callContext *CallContext) (uint64, bool) {
 	return calcMemSize64(callContext.Stack.Back(0), callContext.Stack.Back(1))
