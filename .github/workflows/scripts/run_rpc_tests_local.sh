@@ -4,7 +4,7 @@
 # then restores chaindata on exit. Used by both CI and local developers.
 #
 # Usage:
-#   run_rpc_tests_local.sh [--datadir DIR] [--chain CHAIN] [--workspace DIR] [--result-dir DIR] [--backup-dir DIR]
+#   run_rpc_tests_local.sh [--datadir DIR] [--chain CHAIN] [--workspace DIR] [--result-dir DIR] [--backup-dir DIR] [--skip-backup]
 #
 # Options:
 #   --datadir DIR      Path to synced Erigon datadir (or set ERIGON_REFERENCE_DATA_DIR)
@@ -12,6 +12,7 @@
 #   --workspace DIR    Directory for rpc-tests clone (default: auto temp dir, deleted on exit)
 #   --result-dir DIR   Directory to save test results (default: auto temp dir, kept on failure)
 #   --backup-dir DIR   Directory for chaindata backup (default: auto temp dir, deleted on exit)
+#   --skip-backup      Skip chaindata backup/restore (use when datadir is ephemeral/disposable)
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,15 +24,17 @@ DATADIR="${ERIGON_REFERENCE_DATA_DIR:-}"
 WORKSPACE=""
 RESULT_DIR=""
 BACKUP_DIR_OPT=""
+SKIP_BACKUP=false
 
 usage() {
-  echo "Usage: $0 [--datadir DIR] [--chain CHAIN] [--workspace DIR] [--result-dir DIR] [--backup-dir DIR]"
+  echo "Usage: $0 [--datadir DIR] [--chain CHAIN] [--workspace DIR] [--result-dir DIR] [--backup-dir DIR] [--skip-backup]"
   echo
   echo "  --datadir DIR      Path to synced Erigon datadir (or set ERIGON_REFERENCE_DATA_DIR)"
   echo "  --chain CHAIN      mainnet (default) or gnosis"
   echo "  --workspace DIR    Directory for rpc-tests clone (default: auto temp dir)"
   echo "  --result-dir DIR   Directory to save test results (default: auto temp dir)"
   echo "  --backup-dir DIR   Directory for chaindata backup (default: auto temp dir)"
+  echo "  --skip-backup      Skip chaindata backup/restore (use when datadir is ephemeral/disposable)"
   exit 1
 }
 
@@ -42,6 +45,7 @@ while [[ $# -gt 0 ]]; do
     --workspace)   WORKSPACE="$2";    shift 2 ;;
     --result-dir)  RESULT_DIR="$2";   shift 2 ;;
     --backup-dir)  BACKUP_DIR_OPT="$2"; shift 2 ;;
+    --skip-backup) SKIP_BACKUP=true;  shift ;;
     *) echo "Unknown argument: $1"; usage ;;
   esac
 done
@@ -116,9 +120,11 @@ if [ -z "$RESULT_DIR" ]; then
   OWN_RESULT_DIR=true
 fi
 
-echo "Backing up chaindata..."
-cp -r "$DATADIR/chaindata" "$BACKUP_DIR/chaindata"
-BACKUP_NEEDED=true
+if ! $SKIP_BACKUP; then
+  echo "Backing up chaindata..."
+  cp -r "$DATADIR/chaindata" "$BACKUP_DIR/chaindata"
+  BACKUP_NEEDED=true
+fi
 
 echo "Running migrations..."
 "$BUILD_BIN/integration" run_migrations --datadir "$DATADIR" --chain "$CHAIN"

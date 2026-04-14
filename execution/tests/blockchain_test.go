@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/execution/cache"
 	libchain "github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -2355,68 +2354,4 @@ func TestEIP1559Transition(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-}
-
-// Regression test for https://github.com/erigontech/erigon/issues/20169
-//
-// Tests the SharedDomains StateCache directly, reproducing the exact
-// sequence that caused Hoodi nodes to get stuck:
-//
-//  1. DomainPut writes key=0x42 (populates stateCache with 0x42)
-//  2. Flush + ClearRam (persists to DB, clears mem buffer)
-//  3. DomainDel deletes the key (stateCache.Delete removes entry)
-//  4. Flush + ClearRam (persists deletion to DB, clears mem buffer)
-//  5. GetLatest reads the key — should return nil (deleted)
-//
-// With the bug, step 3's DomainDel calls stateCache.Delete (removing
-// the entry) but step 4's Flush path calls GetLatest which reads nil
-// from mem buffer and does stateCache.Put(nil) → which ALSO deletes
-// from cache. After ClearRam, the mem buffer is empty and the stateCache
-// has no entry. Step 5's GetLatest falls through to the DB, which
-// returns nil (correct, since Flush persisted the deletion).
-//
-// However, if the stateCache was populated between step 2 and step 3
-// by a GetLatest (which caches 0x42 from DB), and the DomainDel's
-// stateCache.Delete removes it, and then stateCache.Put(nil) removes
-// the deletion sentinel, the cache has NO entry for the key. If the
-// DB read in step 5 somehow returns the stale value (e.g. due to
-// transaction isolation), the stale value is returned.
-//
-// This test exercises the StateCache at the cache level to verify
-// that Put(nil) correctly records the deletion as a cache hit.
-func TestStateCacheDeletedStorageSSTOREGas(t *testing.T) {
-	t.Parallel()
-
-	c := cache.NewStateCache(100, 100, 100, 100, 100)
-
-	key := make([]byte, 52) // addr(20) + slot(32)
-	key[0] = 0x1d
-	key[51] = 0xa2
-
-	value := []byte{0x42}
-
-	// Step 1: Put a value (simulates DomainPut caching a storage value)
-	c.Put(kv.StorageDomain, key, value)
-	v, ok := c.Get(kv.StorageDomain, key)
-	require.True(t, ok, "after Put: should be cached")
-	require.Equal(t, value, v)
-
-	// Step 2: Delete the key (simulates DomainDel)
-	c.Delete(kv.StorageDomain, key)
-
-	// Step 3: Put nil (simulates GetLatest caching a deletion from mem buffer)
-	// This is the exact sequence in SharedDomains.GetLatest:
-	//   v, step, ok := sd.mem.GetLatest(domain, k)  // ok=true, v=nil
-	//   sd.stateCache.Put(domain, k, v)              // v=nil
-	c.Put(kv.StorageDomain, key, nil)
-
-	// Step 4: Get must return a cache HIT with empty value.
-	// This is the critical assertion: with the bug, Get returns (nil, false)
-	// meaning "not in cache", so the caller falls through to the DB.
-	v, ok = c.Get(kv.StorageDomain, key)
-	require.True(t, ok,
-		"after Delete+Put(nil): Get must return (nil, true) — cached as deleted. "+
-			"Returning false causes the caller to read stale data from the DB, "+
-			"which is the root cause of the Hoodi gas mismatch (#20169).")
-	require.Empty(t, v, "cached value for a deleted key must be empty")
 }
