@@ -24,6 +24,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"unsafe"
 
 	"github.com/erigontech/erigon/common/dbg"
 	liblog "github.com/erigontech/erigon/common/log/v3"
@@ -127,8 +128,22 @@ var deactivatoinWaiters = struct {
 
 type relations []relation
 
+// relationPtr returns the underlying pointer of a relation as a uintptr.
+// Avoids reflect.ValueOf(x).Pointer() which allocates a reflect.Value per call.
+// *component is currently the only implementation.
+func relationPtr(r relation) uintptr {
+	if c, ok := r.(*component); ok {
+		return uintptr(unsafe.Pointer(c))
+	}
+	return 0
+}
+
 func cmp(p0 relation, p1 relation) bool {
-	return reflect.ValueOf(p0).Pointer() < reflect.ValueOf(p1).Pointer()
+	return relationPtr(p0) < relationPtr(p1)
+}
+
+func samePtr(p0 relation, p1 relation) bool {
+	return relationPtr(p0) == relationPtr(p1)
 }
 
 func (c relations) Add(component relation) relations {
@@ -147,7 +162,7 @@ func (c relations) Add(component relation) relations {
 	}
 
 	if i == l { // not found = new value is the smallest
-		if reflect.ValueOf(c[0]).Pointer() == reflect.ValueOf(component).Pointer() {
+		if samePtr(c[0], component) {
 			return c
 		}
 		return append(relations{component}, c...)
@@ -157,7 +172,7 @@ func (c relations) Add(component relation) relations {
 		return append(c[0:l], component)
 	}
 
-	if reflect.ValueOf(c[i+1]).Pointer() == reflect.ValueOf(component).Pointer() {
+	if samePtr(c[i+1], component) {
 		return c
 	}
 
@@ -183,7 +198,7 @@ func (c relations) Remove(component relation) relations {
 	}
 
 	if i == l {
-		if reflect.ValueOf(c[0]).Pointer() != reflect.ValueOf(component).Pointer() {
+		if !samePtr(c[0], component) {
 			return c
 		}
 		return c[1:]
@@ -193,7 +208,7 @@ func (c relations) Remove(component relation) relations {
 		return c
 	}
 
-	if reflect.ValueOf(c[i+1]).Pointer() != reflect.ValueOf(component).Pointer() {
+	if !samePtr(c[i+1], component) {
 		return c
 	}
 
@@ -220,9 +235,9 @@ func (c relations) Contains(component relation) bool {
 	}
 
 	if i == l {
-		return reflect.ValueOf(c[0]).Pointer() == reflect.ValueOf(component).Pointer()
+		return samePtr(c[0], component)
 	}
-	return reflect.ValueOf(c[i]).Pointer() == reflect.ValueOf(component).Pointer()
+	return samePtr(c[i], component)
 }
 
 func (c relations) String() string {
