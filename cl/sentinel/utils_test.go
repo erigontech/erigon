@@ -20,6 +20,7 @@ import (
 	"encoding/hex"
 	"testing"
 
+	"github.com/erigontech/erigon/cl/p2p"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
@@ -63,7 +64,7 @@ func TestMultiAddressBuilderWithID(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		multiAddr, err := multiAddressBuilderWithID(testCase.ipAddr, testCase.protocol, testCase.port, testCase.id)
+		multiAddr, err := p2p.MultiAddressBuilderWithID(testCase.ipAddr, testCase.protocol, testCase.port, testCase.id)
 		if testCase.shouldError {
 			if err == nil {
 				t.Errorf("expected error, got nil")
