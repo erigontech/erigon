@@ -138,15 +138,15 @@ for _, bn := range sorted {
 
 **Coverage note:** `CreateTestExecModule`'s test chain does NOT exercise the `BLOCKHASH` opcode (verified — no references in `cmd/rpcdaemon/rpcdaemontest/test_util.go`). So at the unit level the ascending-order and dedup invariants will be vacuously true (every block expected to yield exactly one header — the parent). The full ordering/dedup behavior is covered by the EEST integration suite in Task 3. Document this gap in a code comment on the new subtest.
 
-- [ ] add a new subtest `t.Run("headers always include parent", ...)` inside `TestExecutionWitness`
-- [ ] for each block in `1..latestBlockNum`: call `api.ExecutionWitness(...)`, decode every `result.Headers[i]` into `*types.Header` via `rlp.DecodeBytes`, collect their `Number.Uint64()` values
-- [ ] assert `len(blockNums) >= 1` — parent is always present
-- [ ] assert `blockNums[len(blockNums)-1] == blockNum - 1` — parent is the *last* element (ascending sort places it last because all BLOCKHASH-reachable block numbers are `< blockNum`, so `blockNum-1` is the maximum)
-- [ ] assert strictly ascending order: `for i := 1; i < len(blockNums); i++ { require.Less(t, blockNums[i-1], blockNums[i]) }` — vacuous in this test chain but documents the invariant
-- [ ] assert content correctness: fetch the canonical header via `m.BlockReader.HeaderByNumber(ctx, tx, blockNum-1)`, compare `decodedParent.Hash() == canonicalParent.Hash()` to verify the RLP encode/decode path is correct
-- [ ] add a code comment in the subtest body referencing the BLOCKHASH-coverage gap and pointing at the EEST suite
-- [ ] run `go test -run TestExecutionWitness ./rpc/jsonrpc/...` — Task 1's subtest must FAIL with current code (parent missing); other subtests must still PASS
-- [ ] mark this task completed only after confirming the failing-as-expected behavior
+- [x] add a new subtest `t.Run("headers always include parent", ...)` inside `TestExecutionWitness`
+- [x] for each block in `1..latestBlockNum`: call `api.ExecutionWitness(...)`, decode every `result.Headers[i]` into `*types.Header` via `rlp.DecodeBytes`, collect their `Number.Uint64()` values
+- [x] assert `len(blockNums) >= 1` — parent is always present
+- [x] assert `blockNums[len(blockNums)-1] == blockNum - 1` — parent is the *last* element (ascending sort places it last because all BLOCKHASH-reachable block numbers are `< blockNum`, so `blockNum-1` is the maximum)
+- [x] assert strictly ascending order: `for i := 1; i < len(blockNums); i++ { require.Less(t, blockNums[i-1], blockNums[i]) }` — vacuous in this test chain but documents the invariant
+- [x] assert content correctness: fetch the canonical header via `m.BlockReader.HeaderByNumber(ctx, tx, blockNum-1)`, compare `decodedParent.Hash() == canonicalParent.Hash()` to verify the RLP encode/decode path is correct
+- [x] add a code comment in the subtest body referencing the BLOCKHASH-coverage gap and pointing at the EEST suite
+- [x] run `go test -run TestExecutionWitness ./rpc/jsonrpc/...` — Task 1's subtest must FAIL with current code (parent missing); other subtests must still PASS
+- [x] mark this task completed only after confirming the failing-as-expected behavior
 
 ### Task 2: Implement the fix in ExecutionWitness handler
 

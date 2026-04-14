@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -829,6 +830,52 @@ func TestExecutionWitness(t *testing.T) {
 		blockNum := rpc.BlockNumber(999999999)
 		_, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum})
 		require.Error(t, err, "should error for non-existent block")
+	})
+
+	// EIP-8025: parent header always included, ascending order.
+	// This test chain has no BLOCKHASH opcodes, so each block's Headers
+	// should contain exactly the parent header. The BLOCKHASH dedup/sort
+	// path is exercised by the EEST integration suite instead.
+	t.Run("headers always include parent", func(t *testing.T) {
+		for blockNum := uint64(1); blockNum <= latestBlockNum; blockNum++ {
+			bn := rpc.BlockNumber(blockNum)
+			result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn})
+			require.NoError(t, err, "ExecutionWitness failed for block %d", blockNum)
+			require.NotNil(t, result, "result nil for block %d", blockNum)
+
+			require.GreaterOrEqual(t, len(result.Headers), 1,
+				"block %d: must have at least the parent header", blockNum)
+
+			headerNums := make([]uint64, 0, len(result.Headers))
+			for i, raw := range result.Headers {
+				var h types.Header
+				err := rlp.DecodeBytes(raw, &h)
+				require.NoError(t, err, "block %d: failed to decode header %d", blockNum, i)
+				headerNums = append(headerNums, h.Number.Uint64())
+			}
+
+			for i := 1; i < len(headerNums); i++ {
+				require.Less(t, headerNums[i-1], headerNums[i],
+					"block %d: headers not in ascending order at index %d", blockNum, i)
+			}
+
+			require.Equal(t, blockNum-1, headerNums[len(headerNums)-1],
+				"block %d: last header should be the parent (blockNum-1)", blockNum)
+
+			err = m.DB.View(ctx, func(tx kv.Tx) error {
+				canonicalParent, e := m.BlockReader.HeaderByNumber(ctx, tx, blockNum-1)
+				require.NoError(t, e, "block %d: failed to fetch canonical parent", blockNum)
+				require.NotNil(t, canonicalParent, "block %d: canonical parent nil", blockNum)
+
+				var decoded types.Header
+				e = rlp.DecodeBytes(result.Headers[len(result.Headers)-1], &decoded)
+				require.NoError(t, e)
+				require.Equal(t, canonicalParent.Hash(), decoded.Hash(),
+					"block %d: parent header hash mismatch", blockNum)
+				return nil
+			})
+			require.NoError(t, err)
+		}
 	})
 }
 
