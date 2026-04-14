@@ -15,30 +15,10 @@ import "bytes"
 // because Go's stdlib doesn't provide enough low-level api to call necessary funcs
 // also for Erigon - it's important to keep control on files reproducibility
 
-// Sais computes the suffix array of data into sa.
-// The caller must provide sa with len(sa) == len(data).
-func Sais(data []byte, sa []int32) error {
-	n := len(data)
-	if n != len(sa) {
-		panic("sais: len(data) != len(sa)")
-	}
-	if n <= 1 {
-		if n == 1 {
-			sa[0] = 0
-		}
-		return nil
-	}
-	clear(sa)
-
-	var tmp [512]int32
-	sais_8_32(data, 256, sa, tmp[:])
-	return nil
-}
-
-// SaisWithBuf computes the suffix array of data into sa, using *buf as reusable scratch space.
+// Sais computes the suffix array of data into sa, using *buf as reusable scratch space.
 // buf is grown as needed. Callers should preserve *buf across calls to amortize allocations:
 // without it, recurse_32 allocates ~len(data)/4 ints on every call.
-func SaisWithBuf(data []byte, sa []int32, buf *[]int32) error {
+func Sais(data []byte, sa []int32, buf *[]int32) error {
 	n := len(data)
 	if n != len(sa) {
 		panic("sais: len(data) != len(sa)")

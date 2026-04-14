@@ -23,6 +23,8 @@ package utils
 import (
 	"crypto/ecdsa"
 	"fmt"
+	"math/big"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -39,6 +41,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/clparams/devgenesis"
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/common"
@@ -47,7 +50,6 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/snapcfg"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
@@ -55,6 +57,7 @@ import (
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash/ethashcfg"
+	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -99,9 +102,20 @@ var (
 		Usage:   "Download historical Receipts. If disabled: using state-history to re-exec transactions and generate Receipts - all RPC: eth_getLogs, eth_getBlockReceipts will work (just higher latency)",
 		Value:   ethconfig.Defaults.PersistReceiptsCacheV2,
 	}
-	DeveloperPeriodFlag = cli.IntFlag{
-		Name:  "dev.period",
-		Usage: "Block period to use in developer mode (0 = mine only if transaction pending)",
+	DevValidatorSeedFlag = cli.StringFlag{
+		Name:  "dev-validator-seed",
+		Usage: "Deterministic BLS key seed for embedded dev validator (enables PoS dev mode)",
+		Value: "devnet",
+	}
+	DevValidatorCountFlag = cli.IntFlag{
+		Name:  "dev-validator-count",
+		Usage: "Number of validators for PoS dev mode",
+		Value: 64,
+	}
+	DevSlotTimeFlag = cli.IntFlag{
+		Name:  "dev.slot-time",
+		Usage: "Slot duration in seconds for PoS dev mode (minimum: 2)",
+		Value: 6,
 	}
 	ChainFlag = cli.StringFlag{
 		Name:  "chain",
@@ -671,27 +685,6 @@ var (
 		Value: metrics.DefaultConfig.Port,
 	}
 
-	CliqueSnapshotCheckpointIntervalFlag = cli.UintFlag{
-		Name:  "clique.checkpoint",
-		Usage: "Number of blocks after which to save the vote snapshot to the database",
-		Value: 10,
-	}
-	CliqueSnapshotInmemorySnapshotsFlag = cli.IntFlag{
-		Name:  "clique.snapshots",
-		Usage: "Number of recent vote snapshots to keep in memory",
-		Value: 1024,
-	}
-	CliqueSnapshotInmemorySignaturesFlag = cli.IntFlag{
-		Name:  "clique.signatures",
-		Usage: "Number of recent block signatures to keep in memory",
-		Value: 16384,
-	}
-	CliqueDataDirFlag = flags.DirectoryFlag{
-		Name:  "clique.datadir",
-		Usage: "Path to clique db folder",
-		Value: "",
-	}
-
 	SnapKeepBlocksFlag = cli.BoolFlag{
 		Name:  ethconfig.FlagSnapKeepBlocks,
 		Usage: "Keep ancient blocks in db (useful for debug)",
@@ -1022,6 +1015,11 @@ var (
 		Name:  "caplin.blobs-no-pruning",
 		Usage: "disable blob pruning in caplin",
 		Value: false,
+	}
+	CaplinColumnKeepSlotsFlag = cli.Uint64Flag{
+		Name:  "caplin.columns-keep-slots",
+		Usage: "number of slots to retain PeerDAS data column sidecars (default: MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS * SLOTS_PER_EPOCH = 131072, ~18 days); increase for DA oracle or rollup nodes that need longer column history",
+		Value: 131072,
 	}
 	CaplinDisableCheckpointSyncFlag = cli.BoolFlag{
 		Name:  "caplin.checkpoint-sync.disable",
@@ -1647,17 +1645,6 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *buildercfg.BuilderConfig) {
 	cfg.Etherbase = common.HexToAddress(etherbase)
 }
 
-func setClique(ctx *cli.Context, cfg *chainspec.ConsensusSnapshotConfig, datadir string) {
-	cfg.CheckpointInterval = ctx.Uint64(CliqueSnapshotCheckpointIntervalFlag.Name)
-	cfg.InmemorySnapshots = ctx.Int(CliqueSnapshotInmemorySnapshotsFlag.Name)
-	cfg.InmemorySignatures = ctx.Int(CliqueSnapshotInmemorySignaturesFlag.Name)
-	if ctx.IsSet(CliqueDataDirFlag.Name) {
-		cfg.DBPath = filepath.Join(ctx.String(CliqueDataDirFlag.Name), "clique", "db")
-	} else {
-		cfg.DBPath = filepath.Join(datadir, "clique", "db")
-	}
-}
-
 func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config, nodeConfig *nodecfg.Config, logger log.Logger) {
 	cfg.HeimdallURL = ctx.String(HeimdallURLFlag.Name)
 	cfg.WithoutHeimdall = ctx.Bool(WithoutHeimdallFlag.Name)
@@ -1778,6 +1765,7 @@ func setCaplin(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.CaplinConfig.ImmediateBlobsBackfilling = ctx.Bool(CaplinImmediateBlobBackfillFlag.Name)
 	cfg.CaplinConfig.SnapshotGenerationEnabled = ctx.Bool(CaplinEnableSnapshotGeneration.Name)
 	cfg.CaplinConfig.DisabledCheckpointSync = ctx.Bool(CaplinDisableCheckpointSyncFlag.Name)
+	cfg.CaplinConfig.ColumnKeepSlots = ctx.Uint64(CaplinColumnKeepSlotsFlag.Name)
 	// bunch of extra stuff
 	cfg.CaplinConfig.MevRelayUrl = ctx.String(CaplinMevRelayUrl.Name)
 	cfg.CaplinConfig.EnableValidatorMonitor = ctx.Bool(CaplinValidatorMonitorFlag.Name)
@@ -1840,7 +1828,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.CaplinConfig.CaplinDiscoveryTCPPort = ctx.Uint64(CaplinDiscoveryTCPPortFlag.Name)
 	if ctx.Bool(KeepExecutionProofsFlag.Name) {
 		cfg.KeepExecutionProofs = true
-		statecfg.EnableHistoricalCommitment()
 	}
 
 	if ctx.IsSet(AlwaysGenerateChangesetsFlag.Name) {
@@ -1879,7 +1866,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 			}
 
 		}
-	} else {
+	} else if chain != networkname.Dev && chain != networkname.BorDevnet {
 		spec, err := chainspec.ChainSpecByName(chain)
 		if err != nil {
 			Fatalf("chain name is not recognized: %s", chain)
@@ -1910,7 +1897,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	setShutter(ctx, chain, nodeConfig, cfg)
 
 	setEthash(ctx, nodeConfig.Dirs.DataDir, cfg)
-	setClique(ctx, &cfg.Clique, nodeConfig.Dirs.DataDir)
 	setBuilder(ctx, &cfg.Builder)
 	setWhitelist(ctx, cfg)
 	setBorConfig(ctx, cfg, nodeConfig, logger)
@@ -1923,8 +1909,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
 
 	if ctx.Bool(ExperimentalConcurrentCommitmentFlag.Name) {
-		// cfg.ExperimentalConcurrentCommitment = true
-		statecfg.ExperimentalConcurrentCommitment = true
+		cfg.ExperimentalConcurrentCommitment = true
 	}
 
 	cfg.FcuTimeout = ctx.Duration(FcuTimeoutFlag.Name)
@@ -1967,16 +1952,117 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 			SetDNSDiscoveryDefaults(cfg, chainspec.Mainnet)
 		}
 	case networkname.Dev:
-		// Create new developer account or reuse existing one
-		developer := cfg.Builder.Etherbase
-		if developer == (common.Address{}) {
-			Fatalf("Please specify developer account address using --miner.etherbase")
+		seed := ctx.String(DevValidatorSeedFlag.Name)
+		validatorCount := ctx.Int(DevValidatorCountFlag.Name)
+		if validatorCount == 0 {
+			validatorCount = 64
 		}
-		logger.Info("Using developer account", "address", developer)
 
-		// Create a new developer genesis block or reuse existing one
-		cfg.Genesis = chainspec.DeveloperGenesisBlock(uint64(ctx.Int(DeveloperPeriodFlag.Name)), developer)
-		logger.Info("Using custom developer period", "seconds", cfg.Genesis.Config.Clique.Period)
+		// Derive the signer key for the dev account.
+		signerKey, signerAddr, err := devgenesis.DeriveSignerKey(seed)
+		if err != nil {
+			Fatalf("Failed to derive dev signer key: %v", err)
+		}
+		_ = signerKey // available for future use (e.g., auto-funding txs)
+		logger.Info("Using PoS dev mode",
+			"seed", seed,
+			"validators", validatorCount,
+			"signer", signerAddr.Hex(),
+		)
+
+		// Build PoS EL genesis (TTD=0, post-merge from genesis).
+		cfg.Genesis = chainspec.DeveloperGenesisBlock()
+		// Ensure the derived signer address is pre-funded.
+		if cfg.Genesis.Alloc == nil {
+			cfg.Genesis.Alloc = make(types.GenesisAlloc)
+		}
+		if _, ok := cfg.Genesis.Alloc[signerAddr]; !ok {
+			cfg.Genesis.Alloc[signerAddr] = types.GenesisAccount{
+				Balance: big.NewInt(0).Mul(big.NewInt(1000), big.NewInt(common.Ether)),
+			}
+		}
+		cfg.Genesis.Config.TerminalTotalDifficulty = big.NewInt(0)
+		cfg.Genesis.Config.TerminalTotalDifficultyPassed = true
+		zero := uint64(0)
+		cfg.Genesis.Config.ShanghaiTime = &zero
+		cfg.Genesis.Config.CancunTime = &zero
+		cfg.Genesis.Config.PragueTime = nil // Prague may need more config; leave disabled
+
+		// Configure embedded Caplin + dev validator.
+		cfg.InternalCL = true
+		cfg.CaplinConfig.DevValidatorSeed = seed
+		cfg.CaplinConfig.DevValidatorCount = validatorCount
+		// Enable Beacon API for dev mode.
+		cfg.CaplinConfig.BeaconAPIRouter.Active = true
+		if cfg.CaplinConfig.BeaconAPIRouter.Address == "" {
+			cfg.CaplinConfig.BeaconAPIRouter.Address = "127.0.0.1:5555"
+		}
+
+		// Build beacon genesis state and write to temp file for Caplin.
+		beaconCfg := clparams.MainnetBeaconConfig
+		clparams.ApplyMinimalPreset(&beaconCfg)
+		// Enable all forks from genesis (PoS from block 0).
+		beaconCfg.AltairForkEpoch = 0
+		beaconCfg.BellatrixForkEpoch = 0
+		beaconCfg.CapellaForkEpoch = 0
+		beaconCfg.DenebForkEpoch = 0
+		beaconCfg.ElectraForkEpoch = 0
+		beaconCfg.FuluForkEpoch = 0
+		slotTime := uint64(ctx.Int(DevSlotTimeFlag.Name))
+		if slotTime < 2 {
+			slotTime = 2
+		}
+		beaconCfg.SecondsPerSlot = slotTime
+		beaconCfg.InitializeForkSchedule()
+		genesisTime := uint64(time.Now().Unix())
+		// Compute the EL genesis block hash so the beacon state's Eth1Data
+		// matches the actual chain genesis.
+		elGenesisBlock, _, err := genesiswrite.GenesisToBlock(nil, cfg.Genesis, cfg.Dirs, logger)
+		if err != nil {
+			Fatalf("Failed to compute dev EL genesis hash: %v", err)
+		}
+		elGenesisHash := elGenesisBlock.Hash()
+		beaconState, _, err := devgenesis.BuildGenesisState(seed, validatorCount, &beaconCfg, genesisTime, elGenesisHash)
+		if err != nil {
+			Fatalf("Failed to build dev beacon genesis: %v", err)
+		}
+		// Write beacon config and genesis state to temp files.
+		tmpDir := filepath.Join(cfg.Dirs.DataDir, "dev-beacon")
+		if err := os.MkdirAll(tmpDir, 0755); err != nil {
+			Fatalf("Failed to create dev beacon dir: %v", err)
+		}
+		stateSSZ, err := beaconState.EncodeSSZ(nil)
+		if err != nil {
+			Fatalf("Failed to encode dev genesis state: %v", err)
+		}
+		genesisStatePath := filepath.Join(tmpDir, "genesis.ssz")
+		if err := os.WriteFile(genesisStatePath, stateSSZ, 0644); err != nil {
+			Fatalf("Failed to write dev genesis state: %v", err)
+		}
+
+		// Write beacon config YAML with all forks enabled from genesis.
+		// All known fork epochs are listed explicitly so that Caplin's
+		// CustomConfig (which falls back to minimal preset defaults for
+		// missing fields) activates every fork at epoch 0.
+		configPath := filepath.Join(tmpDir, "config.yaml")
+		configYAML := fmt.Sprintf(
+			"PRESET_BASE: minimal\n"+
+				"MIN_GENESIS_TIME: %d\n"+
+				"SECONDS_PER_SLOT: %d\n"+
+				"ALTAIR_FORK_EPOCH: 0\n"+
+				"BELLATRIX_FORK_EPOCH: 0\n"+
+				"CAPELLA_FORK_EPOCH: 0\n"+
+				"DENEB_FORK_EPOCH: 0\n"+
+				"ELECTRA_FORK_EPOCH: 0\n"+
+				"FULU_FORK_EPOCH: 0\n"+
+				"TERMINAL_TOTAL_DIFFICULTY: 0\n",
+			genesisTime, beaconCfg.SecondsPerSlot)
+		if err := os.WriteFile(configPath, []byte(configYAML), 0644); err != nil {
+			Fatalf("Failed to write dev beacon config: %v", err)
+		}
+
+		cfg.CaplinConfig.CustomConfigPath = configPath
+		cfg.CaplinConfig.CustomGenesisStatePath = genesisStatePath
 	}
 
 	if ctx.IsSet(OverrideOsakaFlag.Name) {

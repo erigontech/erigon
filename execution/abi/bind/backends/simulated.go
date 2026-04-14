@@ -128,7 +128,7 @@ func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, confi
 
 // NewSimulatedBackend A simulated backend always uses chainID 1337.
 func NewSimulatedBackend(t *testing.T, alloc types.GenesisAlloc, gasLimit uint64) *SimulatedBackend {
-	b := NewSimulatedBackendWithConfig(t, alloc, chain.TestChainConfig, gasLimit)
+	b := NewSimulatedBackendWithConfig(t, alloc, chain.TestChainBerlinConfig, gasLimit)
 	return b
 }
 

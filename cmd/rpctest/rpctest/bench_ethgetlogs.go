@@ -17,12 +17,10 @@
 package rpctest
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"maps"
 	"math/rand"
-	"os"
 	"slices"
 	"sort"
 	"sync"
@@ -47,26 +45,11 @@ import (
 func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) error {
 	setRoutes(erigonURL, gethURL)
 
-	var rec *bufio.Writer
-	if recordFile != "" {
-		f, err := os.Create(recordFile)
-		if err != nil {
-			return fmt.Errorf("Cannot create file %s for recording: %v\n", recordFile, err)
-		}
-		defer f.Close()
-		rec = bufio.NewWriter(f)
-		defer rec.Flush()
+	rec, errs, cleanup, err := openWriters(recordFile, errorFile)
+	if err != nil {
+		return err
 	}
-	var errs *bufio.Writer
-	if errorFile != "" {
-		ferr, err := os.Create(errorFile)
-		if err != nil {
-			return fmt.Errorf("Cannot create file %s for error output: %v\n", errorFile, err)
-		}
-		defer ferr.Close()
-		errs = bufio.NewWriter(ferr)
-		defer errs.Flush()
-	}
+	defer cleanup()
 
 	var resultsCh chan CallResult = nil
 	if !needCompare {

@@ -56,7 +56,7 @@ func (c *DomainGetFromFileCache) LogStats(dt kv.Domain) {
 	log.Warn("[dbg] DomainGetFromFileCache", "a", dt.String(), "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)), "hit", m.Hits, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", c.limit)
 }
 
-func newDomainVisible(name kv.Domain, files []visibleFile) *domainVisible {
+func newDomainVisible(name kv.Domain, files visibleFiles) *domainVisible {
 	d := &domainVisible{
 		name:  name,
 		files: files,
@@ -121,7 +121,7 @@ func (c *IISeekInFilesCache) LogStats(fileBaseName string) {
 	log.Warn("[dbg] II_LRU", "a", fileBaseName, "ratio", fmt.Sprintf("%.2f", float64(c.hit)/float64(c.total)), "hit", c.hit, "collisions", m.Collisions, "evictions", m.Evictions, "inserts", m.Inserts, "removals", m.Removals, "limit", iiGetFromFileCacheLimit)
 }
 
-func newIIVisible(name string, files []visibleFile) *iiVisible {
+func newIIVisible(name string, files visibleFiles) *iiVisible {
 	if iiGetFromFileCacheLimit == 0 {
 		iiGetFromFileCacheEnabled = false
 	}

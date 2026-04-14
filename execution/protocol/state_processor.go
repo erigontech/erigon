@@ -92,6 +92,13 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 	if err != nil {
 		return nil, err
 	}
+	// EIP-8037: check the block-level gas invariant before finalizing.
+	// After FinalizeTx the journal is cleared, making the transaction
+	// impossible to revert, so the check must happen here.
+	if max(gasUsed.BlockRegular+result.BlockRegularGasUsed,
+		gasUsed.BlockState+result.BlockStateGasUsed) > header.GasLimit {
+		return nil, ErrGasLimitReached
+	}
 	// Update the state with pending changes
 	if err = ibs.FinalizeTx(rules, stateWriter); err != nil {
 		return nil, err
