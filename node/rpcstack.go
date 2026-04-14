@@ -85,9 +85,9 @@ type httpServer struct {
 	httpHandler atomic.Value // *rpcHandler
 
 	// WebSocket handler things.
-	wsConfig    wsConfig
-	wsHandler   atomic.Value // *rpcHandler
-	wsConnCount atomic.Int64 // live WebSocket connections
+	wsConfig  wsConfig
+	wsHandler atomic.Value         // *rpcHandler
+	wsLimiter *wsConnectionLimiter // non-nil when WsConnectionLimit > 0
 
 	// These are set by setListenAddr.
 	endpoint string
@@ -207,19 +207,11 @@ func (h *httpServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Note: WebSocket connections bypass rpcAdmissionHandler intentionally.
 	// HTTP admission control limits inflight requests, but WebSocket is a
 	// persistent long-lived connection where the relevant limit is the number
-	// of concurrent open connections. WsConnectionLimit enforces that here.
+	// of concurrent open connections. Connection limiting is enforced by the
+	// wsConnectionLimiter that wraps the handler when WsConnectionLimit > 0.
 	ws := h.wsHandler.Load().(*rpcHandler)
 	if ws != nil && isWebsocket(r) {
 		if checkPath(r, h.wsConfig.prefix) {
-			if h.wsConfig.WsConnectionLimit > 0 {
-				if h.wsConnCount.Add(1) > h.wsConfig.WsConnectionLimit {
-					h.wsConnCount.Add(-1)
-					wsConnectionRejected.Inc()
-					rpc.WriteOverloadedResponse(w)
-					return
-				}
-				defer h.wsConnCount.Add(-1)
-			}
 			ws.ServeHTTP(w, r)
 		}
 		return
@@ -336,8 +328,14 @@ func (h *httpServer) enableWS(apis []rpc.API, config wsConfig, allowList rpc.All
 		return err
 	}
 	h.wsConfig = config
+	var wsHandler http.Handler = srv.WebsocketHandler(config.Origins, nil, false, h.logger)
+	if config.WsConnectionLimit > 0 {
+		lim := &wsConnectionLimiter{limit: config.WsConnectionLimit, next: wsHandler}
+		h.wsLimiter = lim
+		wsHandler = lim
+	}
 	h.wsHandler.Store(&rpcHandler{
-		Handler: srv.WebsocketHandler(config.Origins, nil, false, h.logger),
+		Handler: wsHandler,
 		server:  srv,
 	})
 	return nil
@@ -349,6 +347,7 @@ func (h *httpServer) disableWS() bool {
 	if ws != nil {
 		h.wsHandler.Store((*rpcHandler)(nil))
 		ws.server.Stop()
+		h.wsLimiter = nil
 	}
 	return ws != nil
 }

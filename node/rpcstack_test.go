@@ -463,8 +463,8 @@ func TestWsConnectionLimit(t *testing.T) {
 	require.NoError(t, err, "first connection should succeed")
 
 	// Wait until the server increments its counter.
-	require.Eventually(t, func() bool { return srv.wsConnCount.Load() == 1 },
-		5*time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return srv.wsLimiter.count.Load() == 1 },
+		5*time.Second, 5*time.Millisecond)
 
 	// While first connection is open the second must be rejected.
 	_, resp, err2 := websocket.DefaultDialer.Dial(url, nil)
@@ -476,8 +476,8 @@ func TestWsConnectionLimit(t *testing.T) {
 
 	// Close first connection and wait for the counter to drop.
 	conn1.Close()
-	require.Eventually(t, func() bool { return srv.wsConnCount.Load() == 0 },
-		5*time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return srv.wsLimiter.count.Load() == 0 },
+		5*time.Second, 5*time.Millisecond)
 
 	// A new connection should now succeed.
 	conn3, resp3, err := websocket.DefaultDialer.Dial(url, nil)
