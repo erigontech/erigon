@@ -19,6 +19,101 @@ import (
 	"github.com/erigontech/erigon/rpc"
 )
 
+func accountBlockNumber(block *uint64, fallback uint64) uint64 {
+	if block != nil {
+		return *block
+	}
+	return fallback
+}
+
+func normalizeHex(value string) string {
+	return strings.ToLower(value)
+}
+
+func (r *Resolver) accountAtBlock(ctx context.Context, address string, blockNum uint64) (*model.Account, error) {
+	if !common.IsHexAddress(address) {
+		return nil, fmt.Errorf("invalid address %q", address)
+	}
+
+	addr := common.HexToAddress(address)
+	balance, nonce, code, err := r.GraphQLAPI.GetAccountInfo(ctx, addr, rpc.BlockNumber(blockNum))
+	if err != nil {
+		return nil, err
+	}
+
+	return &model.Account{
+		Address:          normalizeHex(address),
+		Balance:          balance,
+		TransactionCount: nonce,
+		Code:             code,
+		BlockNum:         blockNum,
+	}, nil
+}
+
+func (r *Resolver) resolveAccountAtRequestedBlock(ctx context.Context, account *model.Account, block *uint64) (*model.Account, error) {
+	if account == nil || account.Address == "" {
+		return nil, nil
+	}
+	return r.accountAtBlock(ctx, account.Address, accountBlockNumber(block, account.BlockNum))
+}
+
+func flattenBlockLogs(transactions []*model.Transaction) []*model.Log {
+	var logs []*model.Log
+	for _, tx := range transactions {
+		if tx == nil {
+			continue
+		}
+		logs = append(logs, tx.Logs...)
+	}
+	return logs
+}
+
+func blockLogMatchesFilter(log *model.Log, filter model.BlockFilterCriteria) bool {
+	if log == nil {
+		return false
+	}
+
+	if len(filter.Addresses) > 0 {
+		if log.Account == nil || log.Account.Address == "" {
+			return false
+		}
+
+		match := false
+		for _, address := range filter.Addresses {
+			if normalizeHex(address) == normalizeHex(log.Account.Address) {
+				match = true
+				break
+			}
+		}
+		if !match {
+			return false
+		}
+	}
+
+	if len(filter.Topics) > len(log.Topics) {
+		return false
+	}
+
+	for i, alternatives := range filter.Topics {
+		if len(alternatives) == 0 {
+			continue
+		}
+
+		match := false
+		for _, topic := range alternatives {
+			if normalizeHex(topic) == normalizeHex(log.Topics[i]) {
+				match = true
+				break
+			}
+		}
+		if !match {
+			return false
+		}
+	}
+
+	return true
+}
+
 // SendRawTransaction is the resolver for the sendRawTransaction field.
 func (r *mutationResolver) SendRawTransaction(ctx context.Context, data string) (string, error) {
 	panic("not implemented: SendRawTransaction - sendRawTransaction")
@@ -80,7 +175,7 @@ func (r *queryResolver) Block(ctx context.Context, number *string, hash *string)
 		block.GasLimit = uint64(*convertDataToUint64P(blk, "gasLimit"))
 		block.GasUsed = *convertDataToUint64P(blk, "gasUsed")
 		block.Hash = *convertDataToStringP(blk, "hash")
-		block.Miner = &model.Account{}
+		block.Miner = model.NewAccountAtBlock(block.Number)
 		address := convertDataToStringP(blk, "miner")
 		if address != nil {
 			block.Miner.Address = strings.ToLower(*address)
@@ -104,6 +199,7 @@ func (r *queryResolver) Block(ctx context.Context, number *string, hash *string)
 		block.TransactionsRoot = *convertDataToStringP(blk, "transactionsRoot")
 		block.BaseFeePerGas = convertDataToStringP(blk, "baseFeePerGas")
 		block.Transactions = []*model.Transaction{}
+		block.Logs = []*model.Log{}
 
 		block.LogsBloom = "0x" + *convertDataToStringP(blk, "logsBloom")
 		block.OmmerHash = *convertDataToStringP(blk, "sha3Uncles")
@@ -122,6 +218,7 @@ func (r *queryResolver) Block(ctx context.Context, number *string, hash *string)
 		rcp := absRcp.([]map[string]any)
 		for _, transReceipt := range rcp {
 			trans := &model.Transaction{}
+			trans.Block = block
 			trans.CumulativeGasUsed = convertDataToUint64P(transReceipt, "cumulativeGasUsed")
 			trans.InputData = *convertDataToStringP(transReceipt, "data")
 			trans.EffectiveGasPrice = convertDataToStringP(transReceipt, "effectiveGasPrice")
@@ -145,22 +242,30 @@ func (r *queryResolver) Block(ctx context.Context, number *string, hash *string)
 				}
 				tlog.Account = model.NewAccountAtBlock(block.Number)
 				tlog.Account.Address = strings.ToLower(rlog.Address.String())
+				tlog.Transaction = trans
 
 				for _, rtopic := range rlog.Topics {
 					tlog.Topics = append(tlog.Topics, rtopic.String())
 				}
 
 				trans.Logs = append(trans.Logs, &tlog)
+				block.Logs = append(block.Logs, &tlog)
 			}
 
 			trans.From = model.NewAccountAtBlock(block.Number)
 			trans.From.Address = strings.ToLower(*convertDataToStringP(transReceipt, "from"))
 
-			trans.To = model.NewAccountAtBlock(block.Number)
 			address := convertDataToStringP(transReceipt, "to")
 			// To address could be nil in case of contract creation
 			if address != nil {
-				trans.To.Address = strings.ToLower(*convertDataToStringP(transReceipt, "to"))
+				trans.To = model.NewAccountAtBlock(block.Number)
+				trans.To.Address = strings.ToLower(*address)
+			}
+
+			contractAddress := convertDataToStringP(transReceipt, "contractAddress")
+			if contractAddress != nil {
+				trans.CreatedContract = model.NewAccountAtBlock(block.Number)
+				trans.CreatedContract.Address = strings.ToLower(*contractAddress)
 			}
 
 			block.Transactions = append(block.Transactions, trans)
@@ -256,31 +361,78 @@ func (r *Resolver) Block() BlockResolver { return &blockResolver{r} }
 // Account returns AccountResolver implementation.
 func (r *Resolver) Account() AccountResolver { return &accountResolver{r} }
 
+// Log returns LogResolver implementation.
+func (r *Resolver) Log() LogResolver { return &logResolver{r} }
+
+// Transaction returns TransactionResolver implementation.
+func (r *Resolver) Transaction() TransactionResolver { return &transactionResolver{r} }
+
 type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
 type blockResolver struct{ *Resolver }
 type accountResolver struct{ *Resolver }
+type logResolver struct{ *Resolver }
+type transactionResolver struct{ *Resolver }
 
 // Account is the resolver for the account field on Block.
 func (r *blockResolver) Account(ctx context.Context, obj *model.Block, address string) (*model.Account, error) {
-	if !common.IsHexAddress(address) {
-		return nil, fmt.Errorf("invalid address %q", address)
-	}
-	addr := common.HexToAddress(address)
-	blockNumber := rpc.BlockNumber(obj.Number)
+	return r.accountAtBlock(ctx, address, obj.Number)
+}
 
-	balance, nonce, code, err := r.GraphQLAPI.GetAccountInfo(ctx, addr, blockNumber)
-	if err != nil {
-		return nil, err
+// Miner is the resolver for the miner field on Block.
+func (r *blockResolver) Miner(ctx context.Context, obj *model.Block, block *uint64) (*model.Account, error) {
+	account, err := r.resolveAccountAtRequestedBlock(ctx, obj.Miner, block)
+	if account != nil || err != nil {
+		return account, err
+	}
+	return nil, fmt.Errorf("block miner is unavailable")
+}
+
+// Logs is the resolver for the logs field on Block.
+func (r *blockResolver) Logs(ctx context.Context, obj *model.Block, filter model.BlockFilterCriteria) ([]*model.Log, error) {
+	logs := obj.Logs
+	if logs == nil {
+		logs = flattenBlockLogs(obj.Transactions)
+	}
+	if len(logs) == 0 {
+		return []*model.Log{}, nil
 	}
 
-	return &model.Account{
-		Address:          strings.ToLower(address),
-		Balance:          balance,
-		TransactionCount: nonce,
-		Code:             code,
-		BlockNum:         obj.Number,
-	}, nil
+	filtered := make([]*model.Log, 0, len(logs))
+	for _, log := range logs {
+		if blockLogMatchesFilter(log, filter) {
+			filtered = append(filtered, log)
+		}
+	}
+	return filtered, ctx.Err()
+}
+
+// Account is the resolver for the account field on Log.
+func (r *logResolver) Account(ctx context.Context, obj *model.Log, block *uint64) (*model.Account, error) {
+	account, err := r.resolveAccountAtRequestedBlock(ctx, obj.Account, block)
+	if account != nil || err != nil {
+		return account, err
+	}
+	return nil, fmt.Errorf("log account is unavailable")
+}
+
+// From is the resolver for the from field on Transaction.
+func (r *transactionResolver) From(ctx context.Context, obj *model.Transaction, block *uint64) (*model.Account, error) {
+	account, err := r.resolveAccountAtRequestedBlock(ctx, obj.From, block)
+	if account != nil || err != nil {
+		return account, err
+	}
+	return nil, fmt.Errorf("transaction sender is unavailable")
+}
+
+// To is the resolver for the to field on Transaction.
+func (r *transactionResolver) To(ctx context.Context, obj *model.Transaction, block *uint64) (*model.Account, error) {
+	return r.resolveAccountAtRequestedBlock(ctx, obj.To, block)
+}
+
+// CreatedContract is the resolver for the createdContract field on Transaction.
+func (r *transactionResolver) CreatedContract(ctx context.Context, obj *model.Transaction, block *uint64) (*model.Account, error) {
+	return r.resolveAccountAtRequestedBlock(ctx, obj.CreatedContract, block)
 }
 
 // Storage is the resolver for the storage field on Account.

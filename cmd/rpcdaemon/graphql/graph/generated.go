@@ -30,8 +30,10 @@ type Config = graphql.Config[ResolverRoot, DirectiveRoot, ComplexityRoot]
 type ResolverRoot interface {
 	Account() AccountResolver
 	Block() BlockResolver
+	Log() LogResolver
 	Mutation() MutationResolver
 	Query() QueryResolver
+	Transaction() TransactionResolver
 }
 
 type AccountResolver interface {
@@ -40,6 +42,18 @@ type AccountResolver interface {
 
 type BlockResolver interface {
 	Account(ctx context.Context, obj *model.Block, address string) (*model.Account, error)
+	Logs(ctx context.Context, obj *model.Block, filter model.BlockFilterCriteria) ([]*model.Log, error)
+	Miner(ctx context.Context, obj *model.Block, block *uint64) (*model.Account, error)
+}
+
+type LogResolver interface {
+	Account(ctx context.Context, obj *model.Log, block *uint64) (*model.Account, error)
+}
+
+type TransactionResolver interface {
+	CreatedContract(ctx context.Context, obj *model.Transaction, block *uint64) (*model.Account, error)
+	From(ctx context.Context, obj *model.Transaction, block *uint64) (*model.Account, error)
+	To(ctx context.Context, obj *model.Transaction, block *uint64) (*model.Account, error)
 }
 
 type DirectiveRoot struct {
@@ -1795,7 +1809,8 @@ func (ec *executionContext) _Block_miner(ctx context.Context, field graphql.Coll
 		field,
 		ec.fieldContext_Block_miner,
 		func(ctx context.Context) (any, error) {
-			return obj.Miner, nil
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Block().Miner(ctx, obj, fc.Args["block"].(*uint64))
 		},
 		nil,
 		ec.marshalNAccount2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount,
@@ -1808,8 +1823,8 @@ func (ec *executionContext) fieldContext_Block_miner(ctx context.Context, field 
 	fc = &graphql.FieldContext{
 		Object:     "Block",
 		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
+		IsMethod:   true,
+		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			switch field.Name {
 			case "address":
@@ -2540,7 +2555,8 @@ func (ec *executionContext) _Block_logs(ctx context.Context, field graphql.Colle
 		field,
 		ec.fieldContext_Block_logs,
 		func(ctx context.Context) (any, error) {
-			return obj.Logs, nil
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Block().Logs(ctx, obj, fc.Args["filter"].(model.BlockFilterCriteria))
 		},
 		nil,
 		ec.marshalNLog2ᚕᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐLogᚄ,
@@ -2553,8 +2569,8 @@ func (ec *executionContext) fieldContext_Block_logs(ctx context.Context, field g
 	fc = &graphql.FieldContext{
 		Object:     "Block",
 		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
+		IsMethod:   true,
+		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			switch field.Name {
 			case "index":
@@ -2946,7 +2962,8 @@ func (ec *executionContext) _Log_account(ctx context.Context, field graphql.Coll
 		field,
 		ec.fieldContext_Log_account,
 		func(ctx context.Context) (any, error) {
-			return obj.Account, nil
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Log().Account(ctx, obj, fc.Args["block"].(*uint64))
 		},
 		nil,
 		ec.marshalNAccount2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount,
@@ -2959,8 +2976,8 @@ func (ec *executionContext) fieldContext_Log_account(ctx context.Context, field 
 	fc = &graphql.FieldContext{
 		Object:     "Log",
 		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
+		IsMethod:   true,
+		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			switch field.Name {
 			case "address":
@@ -4237,7 +4254,8 @@ func (ec *executionContext) _Transaction_from(ctx context.Context, field graphql
 		field,
 		ec.fieldContext_Transaction_from,
 		func(ctx context.Context) (any, error) {
-			return obj.From, nil
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Transaction().From(ctx, obj, fc.Args["block"].(*uint64))
 		},
 		nil,
 		ec.marshalNAccount2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount,
@@ -4250,8 +4268,8 @@ func (ec *executionContext) fieldContext_Transaction_from(ctx context.Context, f
 	fc = &graphql.FieldContext{
 		Object:     "Transaction",
 		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
+		IsMethod:   true,
+		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			switch field.Name {
 			case "address":
@@ -4289,7 +4307,8 @@ func (ec *executionContext) _Transaction_to(ctx context.Context, field graphql.C
 		field,
 		ec.fieldContext_Transaction_to,
 		func(ctx context.Context) (any, error) {
-			return obj.To, nil
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Transaction().To(ctx, obj, fc.Args["block"].(*uint64))
 		},
 		nil,
 		ec.marshalOAccount2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount,
@@ -4302,8 +4321,8 @@ func (ec *executionContext) fieldContext_Transaction_to(ctx context.Context, fie
 	fc = &graphql.FieldContext{
 		Object:     "Transaction",
 		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
+		IsMethod:   true,
+		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			switch field.Name {
 			case "address":
@@ -4753,7 +4772,8 @@ func (ec *executionContext) _Transaction_createdContract(ctx context.Context, fi
 		field,
 		ec.fieldContext_Transaction_createdContract,
 		func(ctx context.Context) (any, error) {
-			return obj.CreatedContract, nil
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Transaction().CreatedContract(ctx, obj, fc.Args["block"].(*uint64))
 		},
 		nil,
 		ec.marshalOAccount2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount,
@@ -4766,8 +4786,8 @@ func (ec *executionContext) fieldContext_Transaction_createdContract(ctx context
 	fc = &graphql.FieldContext{
 		Object:     "Transaction",
 		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
+		IsMethod:   true,
+		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			switch field.Name {
 			case "address":
