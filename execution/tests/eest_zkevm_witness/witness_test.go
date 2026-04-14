@@ -57,14 +57,6 @@ func TestExecutionSpecWitness(t *testing.T) {
 	dir := filepath.Join("..", "execution-spec-tests", "blockchain_tests_zkevm")
 	bt := new(testutil.TestMatcher)
 
-	// All 93 witness tests currently fail due to known limitations in Erigon's
-	// witness generation (debug_execution_witness.go). Root causes (Task 5 triage):
-	//   1. State node ordering differs from reference implementation (52% of tests)
-	//   2. Extra state nodes included — superset of expected (48% of tests)
-	//   3. Codes ordering differs — keccak256 sort vs access-order (99% of tests)
-	//   4. Missing parent block headers (99% of tests)
-	// Tracked by: https://github.com/erigontech/erigon/issues/20442
-	bt.Fails(".", "witness generation mismatch (#20442): state ordering/extra nodes, codes ordering, missing headers")
 
 	bt.Walk(t, dir, func(t *testing.T, name string, test *testutil.WitnessBlockTest) {
 		// Amsterdam fixtures require experimental block access list support.

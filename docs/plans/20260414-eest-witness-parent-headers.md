@@ -159,19 +159,62 @@ for _, bn := range sorted {
 - [x] re-run `go test -run TestExecutionWitness ./rpc/jsonrpc/...` — Task 1's new subtest must now PASS
 - [x] re-run sibling subtests (`genesis block`, `by block number`, `by block hash`, `multiple blocks`, `latest block`, `non-existent block`) — must remain PASS
 - [x] run `make lint` — must be clean (re-run if non-deterministic per CLAUDE.md)
-- [ ] commit with prefix `rpc/jsonrpc:` per Erigon convention, e.g. `rpc/jsonrpc: include parent header in debug_executionWitness, sort ascending`
+- [x] commit with prefix `rpc/jsonrpc:` per Erigon convention, e.g. `rpc/jsonrpc: include parent header in debug_executionWitness, sort ascending`
 
 ### Task 3: Remove broad `bt.Fails(".")` from EEST witness suite
 
 **Files:**
 - Modify: `execution/tests/eest_zkevm_witness/witness_test.go`
 
-- [ ] delete the entire `bt.Fails(".", "witness generation mismatch (#20442): ...")` statement (currently around line 67) — removing the call, not just one line
-- [ ] run the suite, captured to a log: `go test -v -run TestExecutionSpecWitness -count=1 ./execution/tests/eest_zkevm_witness/... 2>&1 | tee /tmp/eest_witness_task3.log`
-- [ ] count outcomes: `grep -c '^    --- PASS' /tmp/eest_witness_task3.log` and `grep -c '^    --- FAIL' /tmp/eest_witness_task3.log`
-- [ ] enumerate failing fixtures by category: `grep '^--- FAIL' /tmp/eest_witness_task3.log | sed 's,/.*,,' | sort -u`
-- [ ] document the pass/fail breakdown in this plan file under a new section "Task 3 results" (categories that newly pass vs. still fail, with rough counts per category)
-- [ ] tests do NOT need to all pass — full green is not required for this task
+- [x] delete the entire `bt.Fails(".", "witness generation mismatch (#20442): ...")` statement (currently around line 67) — removing the call, not just one line
+- [x] run the suite, captured to a log: `go test -v -run TestExecutionSpecWitness -count=1 ./execution/tests/eest_zkevm_witness/... 2>&1 | tee /tmp/eest_witness_task3.log`
+- [x] count outcomes: `grep -c '^    --- PASS' /tmp/eest_witness_task3.log` and `grep -c '^    --- FAIL' /tmp/eest_witness_task3.log`
+- [x] enumerate failing fixtures by category: `grep '^--- FAIL' /tmp/eest_witness_task3.log | sed 's,/.*,,' | sort -u`
+- [x] document the pass/fail breakdown in this plan file under a new section "Task 3 results" (categories that newly pass vs. still fail, with rough counts per category)
+- [x] tests do NOT need to all pass — full green is not required for this task
+
+#### Task 3 Results
+
+**Outcome:** 0 PASS, 93 FAIL (all 93 json-file-level fixtures still fail)
+
+**Root cause:** The parent-header fix (Tasks 1-2) eliminated the Headers field mismatch for ~85 of 93 fixtures. However, every single fixture also fails on State and/or Codes mismatches, so no fixture achieves full-pass status. Only 8 fixtures still show a Headers mismatch (multi-block BLOCKHASH tests with range issues beyond parent inclusion).
+
+**Failure field breakdown across 93 fixtures:**
+- State + Codes only (no Headers issue): 85 fixtures
+- State + Codes + Headers: 8 fixtures (multi-block BLOCKHASH range tests)
+- 0 fixtures fail on Headers alone
+
+**Failure category breakdown (json-file level):**
+
+| Category | Count | Dominant failure mode |
+|---|---|---|
+| witness_7702 | 11 | State+Codes ordering |
+| witness_validation_codes | 11 | State+Codes ordering |
+| witness_bytecodes_contract_creation | 10 | State+Codes ordering |
+| witness_headers | 9 | State+Codes ordering (Headers fixed for most blocks) |
+| witness_validation_state | 8 | State+Codes ordering |
+| witness_bytecodes_extcode | 8 | State+Codes ordering (some Headers range) |
+| witness_bytecodes_selfdestruct | 6 | State+Codes ordering + extra state nodes |
+| witness_bytecodes_call_variants | 5 | State+Codes ordering |
+| witness_state_deletes | 5 | State+Codes ordering |
+| witness_state_reads | 5 | State+Codes ordering |
+| witness_validation_headers | 5 | State+Codes ordering |
+| witness_state_writes | 4 | State+Codes ordering |
+| witness_bytecodes_eoa_precompiles | 2 | State+Codes ordering |
+| witness_state_replay_order | 2 | State+Codes ordering |
+| witness_state_invariants | 1 | State+Codes ordering |
+| witness_bytecodes_system_contracts | 1 | State+Codes ordering |
+
+**State mismatch types (diagnostic SET-DIFF/SET-EQUAL analysis):**
+- ~60% are SET-EQUAL (same elements, wrong order — ordering-only)
+- ~40% are SET-DIFF (actual has 1 extra element — extra state nodes)
+
+**Codes mismatch type:**
+- Nearly 100% are SET-EQUAL (same codes, different order — keccak256 sort vs access-order)
+
+**Conclusion:** All 93 fixtures need bt.Fails coverage in Task 4 since none pass.
+The remaining root causes are: (1) State node ordering, (2) extra state nodes, (3) Codes ordering.
+These are tracked by #20442 and are separate from the parent-header fix.
 
 ### Task 4: Re-narrow `bt.Fails` to remaining-broken categories so suite stays green
 
