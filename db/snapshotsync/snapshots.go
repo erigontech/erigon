@@ -650,7 +650,7 @@ func (s *RoSnapshots) DownloadComplete() {
 	wasReady := s.downloadReady.Swap(true)
 	if !wasReady {
 		if s.SegmentsReady() {
-			s.ready.set()
+			s.ready.Set()
 		}
 	}
 }
@@ -705,38 +705,8 @@ func (s *RoSnapshots) HasType(in snaptype.Type) bool {
 	return slices.Contains(s.enums, in.Enum())
 }
 
-type ready struct {
-	mu     sync.Mutex
-	on     chan struct{}
-	state  bool
-	inited bool
-}
-
-func (r *ready) On() <-chan struct{} {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.init()
-	return r.on
-}
-
-func (r *ready) init() {
-	if r.inited {
-		return
-	}
-	r.on = make(chan struct{})
-	r.inited = true
-}
-
-func (r *ready) set() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.init()
-	if r.state {
-		return
-	}
-	r.state = true
-	close(r.on)
-}
+// ready is an alias for the shared common.Ready type.
+type ready = common.Ready
 
 func (s *RoSnapshots) Ready(ctx context.Context) <-chan error {
 	errc := make(chan error)
@@ -1039,7 +1009,7 @@ func (s *RoSnapshots) InitSegments(fileNames []string) error {
 	wasReady := s.segmentsReady.Swap(true)
 	if !wasReady {
 		if s.downloadReady.Load() {
-			s.ready.set()
+			s.ready.Set()
 		}
 	}
 
@@ -1223,7 +1193,7 @@ func (s *RoSnapshots) OpenFolder() error {
 	wasReady := s.segmentsReady.Swap(true)
 	if !wasReady {
 		if s.downloadReady.Load() {
-			s.ready.set()
+			s.ready.Set()
 		}
 	}
 	return nil

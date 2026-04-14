@@ -46,9 +46,9 @@
 
 ### Removed
 
-- PoW mining was removed in #17813, which resulted in `--chain=dev` not being able to produce new blocks. Going forward
-  we'll either sunset `--chain=dev` or switch it to mock CL (see #14753). If you need `--chain=dev`, please use Erigon
-  3.2
+- PoW mining was removed in #17813. The `--chain=dev` mode now uses an embedded PoS
+  consensus layer (Caplin) with deterministic validators instead of Clique. See
+  `docs/DEV_CHAIN.md` for usage.
 - Holesky network support removed (#17685)
 - eth/67 protocol support removed (#17318)
 - SkipAnalysis VM optimization removed (#17217)

@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
 	executionclient "github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/validator/devvalidator"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	rpcdaemoncli "github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/common"
@@ -1050,6 +1051,32 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			}
 			ctxCancel()
 		}()
+		// Start embedded dev validator if configured.
+		if config.CaplinConfig.DevValidatorSeed != "" {
+			go func() {
+				beaconAddr := config.CaplinConfig.BeaconAPIRouter.Address
+				if beaconAddr == "" {
+					beaconAddr = "127.0.0.1:5555"
+				}
+				beaconURL := fmt.Sprintf("http://%s", beaconAddr)
+				validatorCount := config.CaplinConfig.DevValidatorCount
+				if validatorCount == 0 {
+					validatorCount = 64
+				}
+				// Load the beacon config from the custom config path.
+				beaconCfg, _, err := clparams.CustomConfig(config.CaplinConfig.CustomConfigPath)
+				if err != nil {
+					logger.Error("[dev-validator] failed to load beacon config", "err", err)
+					return
+				}
+				svc, err := devvalidator.NewService(beaconURL, config.CaplinConfig.DevValidatorSeed, validatorCount, &beaconCfg, logger)
+				if err != nil {
+					logger.Error("[dev-validator] failed to create service", "err", err)
+					return
+				}
+				svc.Start(ctx)
+			}()
+		}
 	}
 
 	if chainConfig.Bor != nil {
@@ -1135,6 +1162,11 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	}
 
 	s.apiList = jsonrpc.APIList(chainKv, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &httpRpcCfg, s.engine, s.logger, s.polygonBridge, s.heimdallService)
+
+	if slices.Contains(httpRpcCfg.API, "testing") {
+		s.logger.Warn("[HTTP API] testing_ RPC namespace is ENABLED — do not use on production networks")
+		s.apiList = append(s.apiList, engineapi.NewTestingRPCEntry(s.engineBackendRPC))
+	}
 
 	s.bgComponentsEg.Go(func() error {
 		err := rpcdaemoncli.StartRpcServer(ctx, &httpRpcCfg, s.apiList, s.logger)
@@ -1440,6 +1472,17 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 func (s *Ethereum) Start() error {
 	s.sentriesClient.StartStreamLoops(s.sentryCtx)
 	time.Sleep(10 * time.Millisecond) // just to reduce logs order confusion
+
+	// Subscribe to new-header events so StatusDataProvider can invalidate
+	// its cache when the chain head advances — zero DB reads on the hot path.
+	headersCh, unsubHeaders := s.notifications.Events.AddHeaderSubscription()
+	snapshotsCh, unsubSnapshots := s.notifications.Events.AddNewSnapshotSubscription()
+	s.bgComponentsEg.Go(func() error {
+		defer unsubHeaders()
+		defer unsubSnapshots()
+		s.statusDataProvider.Run(s.sentryCtx, headersCh, snapshotsCh)
+		return nil
+	})
 
 	if s.executionP2PMessageListener != nil && s.executionP2PPeerTracker != nil && s.executionP2PPublisher != nil {
 		s.bgComponentsEg.Go(func() error {
