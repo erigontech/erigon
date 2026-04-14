@@ -775,6 +775,7 @@ func TestExecutionWitness(t *testing.T) {
 		require.NotNil(t, result.State, "State should not be nil")
 		require.NotNil(t, result.Keys, "Keys should not be nil")
 		require.NotNil(t, result.Codes, "Codes should not be nil")
+		require.Empty(t, result.Headers, "genesis block should have no headers")
 
 		t.Logf("Genesis: %d state nodes, %d codes, %d keys",
 			len(result.State), len(result.Codes), len(result.Keys))
