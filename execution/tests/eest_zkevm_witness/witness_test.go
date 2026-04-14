@@ -57,6 +57,14 @@ func TestExecutionSpecWitness(t *testing.T) {
 	dir := filepath.Join("..", "execution-spec-tests", "blockchain_tests_zkevm")
 	bt := new(testutil.TestMatcher)
 
+	// All 93 fixtures fail on State node ordering and/or Codes ordering mismatches
+	// (tracked by #20442). Headers field was fixed by including the parent header
+	// and sorting ascending (#20534), but no fixture passes yet because every one
+	// also has State/Codes issues. The three remaining root causes are:
+	//   1. State MPT nodes emitted in wrong order (~60% ordering-only, ~40% extra nodes)
+	//   2. Bytecodes emitted in wrong order (nearly 100% ordering-only)
+	//   3. 8 multi-block BLOCKHASH fixtures still have Headers range mismatches
+	bt.Fails(".", "witness State/Codes ordering mismatch (#20442, #20534): state nodes and bytecodes emitted in wrong order")
 
 	bt.Walk(t, dir, func(t *testing.T, name string, test *testutil.WitnessBlockTest) {
 		// Amsterdam fixtures require experimental block access list support.

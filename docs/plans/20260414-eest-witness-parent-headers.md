@@ -221,10 +221,18 @@ These are tracked by #20442 and are separate from the parent-header fix.
 **Files:**
 - Modify: `execution/tests/eest_zkevm_witness/witness_test.go`
 
-- [ ] using the Task 3 results, identify fixture path patterns that still fail (state ordering, codes ordering, extra state nodes)
-- [ ] add one or more `bt.Fails("<regex>", "<reason linking #20534 / #20442>")` calls scoped to those patterns only — leave headers-only fixtures unguarded
-- [ ] re-run the EEST suite — all subtests should report PASS (newly-fixed are real PASS, still-broken are expected-failure PASS)
-- [ ] update Task 3 results section with the final regex(es) chosen and rationale
+- [x] using the Task 3 results, identify fixture path patterns that still fail (state ordering, codes ordering, extra state nodes)
+- [x] add one or more `bt.Fails("<regex>", "<reason linking #20534 / #20442>")` calls scoped to those patterns only — leave headers-only fixtures unguarded
+- [x] re-run the EEST suite — all subtests should report PASS (newly-fixed are real PASS, still-broken are expected-failure PASS)
+- [x] update Task 3 results section with the final regex(es) chosen and rationale
+
+#### Task 4 Results
+
+**Regex chosen:** `bt.Fails(".", "witness State/Codes ordering mismatch (#20442, #20534): state nodes and bytecodes emitted in wrong order")`
+
+**Rationale:** All 93 JSON-file-level fixtures (176 subtests) fail on State and/or Codes ordering mismatches. Zero fixtures fail exclusively on Headers, so there are no "headers-only" fixtures to leave unguarded. A single broad `"."` pattern is the narrowest accurate choice since every fixture shares the same root causes. The reason string documents the specific remaining issues (State/Codes ordering, not the old generic "witness generation mismatch") and links both tracking issues.
+
+**Verification:** 176 PASS, 0 FAIL — suite is fully green with expected-failure annotations.
 
 ### Task 5: Verify acceptance criteria
 
