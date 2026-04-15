@@ -102,10 +102,6 @@ var (
 		Usage:   "Download historical Receipts. If disabled: using state-history to re-exec transactions and generate Receipts - all RPC: eth_getLogs, eth_getBlockReceipts will work (just higher latency)",
 		Value:   ethconfig.Defaults.PersistReceiptsCacheV2,
 	}
-	DeveloperPeriodFlag = cli.IntFlag{
-		Name:  "dev.period",
-		Usage: "Block period to use in developer mode (0 = mine only if transaction pending)",
-	}
 	DevValidatorSeedFlag = cli.StringFlag{
 		Name:  "dev-validator-seed",
 		Usage: "Deterministic BLS key seed for embedded dev validator (enables PoS dev mode)",
@@ -687,27 +683,6 @@ var (
 		Name:  "metrics.port",
 		Usage: "Metrics HTTP server listening port",
 		Value: metrics.DefaultConfig.Port,
-	}
-
-	CliqueSnapshotCheckpointIntervalFlag = cli.UintFlag{
-		Name:  "clique.checkpoint",
-		Usage: "Number of blocks after which to save the vote snapshot to the database",
-		Value: 10,
-	}
-	CliqueSnapshotInmemorySnapshotsFlag = cli.IntFlag{
-		Name:  "clique.snapshots",
-		Usage: "Number of recent vote snapshots to keep in memory",
-		Value: 1024,
-	}
-	CliqueSnapshotInmemorySignaturesFlag = cli.IntFlag{
-		Name:  "clique.signatures",
-		Usage: "Number of recent block signatures to keep in memory",
-		Value: 16384,
-	}
-	CliqueDataDirFlag = flags.DirectoryFlag{
-		Name:  "clique.datadir",
-		Usage: "Path to clique db folder",
-		Value: "",
 	}
 
 	SnapKeepBlocksFlag = cli.BoolFlag{
@@ -1670,17 +1645,6 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *buildercfg.BuilderConfig) {
 	cfg.Etherbase = common.HexToAddress(etherbase)
 }
 
-func setClique(ctx *cli.Context, cfg *chainspec.ConsensusSnapshotConfig, datadir string) {
-	cfg.CheckpointInterval = ctx.Uint64(CliqueSnapshotCheckpointIntervalFlag.Name)
-	cfg.InmemorySnapshots = ctx.Int(CliqueSnapshotInmemorySnapshotsFlag.Name)
-	cfg.InmemorySignatures = ctx.Int(CliqueSnapshotInmemorySignaturesFlag.Name)
-	if ctx.IsSet(CliqueDataDirFlag.Name) {
-		cfg.DBPath = filepath.Join(ctx.String(CliqueDataDirFlag.Name), "clique", "db")
-	} else {
-		cfg.DBPath = filepath.Join(datadir, "clique", "db")
-	}
-}
-
 func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config, nodeConfig *nodecfg.Config, logger log.Logger) {
 	cfg.HeimdallURL = ctx.String(HeimdallURLFlag.Name)
 	cfg.WithoutHeimdall = ctx.Bool(WithoutHeimdallFlag.Name)
@@ -1933,7 +1897,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	setShutter(ctx, chain, nodeConfig, cfg)
 
 	setEthash(ctx, nodeConfig.Dirs.DataDir, cfg)
-	setClique(ctx, &cfg.Clique, nodeConfig.Dirs.DataDir)
 	setBuilder(ctx, &cfg.Builder)
 	setWhitelist(ctx, cfg)
 	setBorConfig(ctx, cfg, nodeConfig, logger)
@@ -2008,12 +1971,18 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		)
 
 		// Build PoS EL genesis (TTD=0, post-merge from genesis).
-		cfg.Genesis = chainspec.DeveloperGenesisBlock(0, signerAddr)
-		// Override: remove Clique, set TTD=0, enable all forks from genesis.
-		cfg.Genesis.Config.Clique = nil
+		cfg.Genesis = chainspec.DeveloperGenesisBlock()
+		// Ensure the derived signer address is pre-funded.
+		if cfg.Genesis.Alloc == nil {
+			cfg.Genesis.Alloc = make(types.GenesisAlloc)
+		}
+		if _, ok := cfg.Genesis.Alloc[signerAddr]; !ok {
+			cfg.Genesis.Alloc[signerAddr] = types.GenesisAccount{
+				Balance: big.NewInt(0).Mul(big.NewInt(1000), big.NewInt(common.Ether)),
+			}
+		}
 		cfg.Genesis.Config.TerminalTotalDifficulty = big.NewInt(0)
 		cfg.Genesis.Config.TerminalTotalDifficultyPassed = true
-		cfg.Genesis.ExtraData = make([]byte, 32) // no Clique signer in extra data
 		zero := uint64(0)
 		cfg.Genesis.Config.ShanghaiTime = &zero
 		cfg.Genesis.Config.CancunTime = &zero

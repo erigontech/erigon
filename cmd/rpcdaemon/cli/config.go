@@ -1055,8 +1055,6 @@ func (e *remoteRulesEngine) init(db kv.RoDB, blockReader services.FullBlockReade
 		}
 	} else if cc.Bor != nil {
 		eng = bor.NewRo(cc, blockReader, logger)
-	} else if cc.Clique != nil {
-		return errors.New("clique remoteRulesEngine is not supported")
 	} else {
 		eng = ethash.NewFaker()
 	}
