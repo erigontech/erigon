@@ -126,6 +126,8 @@ func (c *CallContext) put() {
 	c.Memory.reset()
 	c.Stack.Reset()
 	c.cacheGen = 0
+	c.cachedKeyGen = 0
+	c.cachedAddrGen = 0
 	contextPool.Put(c)
 }
 
