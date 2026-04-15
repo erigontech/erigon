@@ -663,8 +663,7 @@ func CheckCommitmentHistVal(ctx context.Context, sc SamplerCfg, db kv.TemporalRo
 			continue
 		}
 		filesChecked++
-		// XOR file index into seed so bucket selection is reproducible per file.
-		sampler := NewSampler(sc.Seed^int64(i), sc.SampleRatio)
+		sampler := sc.NewWindowSampler(uint64(i))
 		for bucket := range sampler.Buckets(0, numBuckets) {
 			totalBuckets++
 			eg.Go(func() error {
@@ -1009,8 +1008,8 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 			if err != nil {
 				return fmt.Errorf("CheckCommitmentHistAtBlkRange: build index window=[%d,%d): %w", windowStart, windowEnd, err)
 			}
-			// Each goroutine needs its own Sampler — the RNG is not goroutine-safe.
-			sampler := sc.NewSampler()
+			// Each goroutine needs its own Sampler
+			sampler := sc.NewWindowSampler(windowStart)
 			for blockNum := range sampler.BlockNums(windowStart, windowEnd) {
 				if err := checkCommitmentHistAtBlkWithIdx(wCtx, tx, sd, db, br, blockNum, idx, log.LvlTrace, logger); err != nil {
 					return fmt.Errorf("checkCommitmentHistAtBlk: %d, %w", blockNum, err)
