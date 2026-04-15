@@ -811,7 +811,6 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	if err != nil {
 		return fmt.Errorf("open collation tx: %w", err)
 	}
-	defer collationTx.Rollback()
 
 	type domainCollResult struct {
 		d         *Domain
@@ -854,6 +853,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		}
 		iiColls = append(iiColls, iiCollResult{ii: ii, iikey: iikey, collation: collation})
 	}
+	collationTx.Rollback() // release the read-tx before Phase 2 (no DB access needed)
 	closeCollations = false
 
 	// Phase 2: build files from collations in parallel (no DB access needed).

@@ -862,10 +862,11 @@ func TestDomainRoTx_CursorParentCheck(t *testing.T) {
 //
 // The collation/pruning race occurs when BuildFilesInBackground's collation
 // read-transaction sees step S+1 values that overwrite step S entries. The
-// fix pre-opens read-txs synchronously before spawning collation goroutines.
-// While the exact race (stale MDBX snapshot) is timing-dependent and hard to
-// reproduce in a unit test, this test verifies the invariant: step S collation
-// must produce a file with step S values regardless of later step data in the DB.
+// fix uses a single read-tx for all collations in buildFiles, ensuring they
+// all see the same MDBX snapshot. While the exact race is timing-dependent
+// and hard to reproduce in a unit test, this test verifies the invariant:
+// step S collation must produce a file with step S values regardless of
+// later step data in the DB.
 func TestDomain_CollationIsolatedFromLaterSteps(t *testing.T) {
 	logger := log.New()
 	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, 16, logger)
