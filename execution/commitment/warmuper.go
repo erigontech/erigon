@@ -18,6 +18,7 @@ package commitment
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"sync/atomic"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 // TrieContextFactory creates new PatriciaContext instances for parallel warmup.
@@ -33,12 +35,11 @@ type TrieContextFactory func() (PatriciaContext, func())
 // WarmupConfig contains configuration for pre-warming MDBX page cache
 // during commitment processing.
 type WarmupConfig struct {
-	Enabled       bool
-	CtxFactory    TrieContextFactory
-	NumWorkers    int
-	AccountKeyLen int // plain account key length for TrieReader (typically length.Addr = 20)
-	MaxDepth      int // caps walk depth per key; 0 means default (128)
-	LogPrefix     string
+	Enabled    bool
+	CtxFactory TrieContextFactory
+	NumWorkers int
+	MaxDepth   int // caps walk depth per key; 0 means default (128)
+	LogPrefix  string
 }
 
 type warmupWorkItem struct {
@@ -53,16 +54,15 @@ type WarmupStats struct {
 }
 
 // Warmuper manages parallel warmup of MDBX page cache by pre-reading trie data
-// using TrieReader-based traversal with a shared CachingPatriciaContext.
+// using a bespoke depth-walk with a shared CachingPatriciaContext.
 type Warmuper struct {
-	ctx           context.Context
-	cancel        context.CancelFunc
-	ctxFactory    TrieContextFactory
-	cache         *CachingPatriciaContext
-	numWorkers    int
-	accountKeyLen int
-	maxDepth      int
-	logPrefix     string
+	ctx        context.Context
+	cancel     context.CancelFunc
+	ctxFactory TrieContextFactory
+	cache      *CachingPatriciaContext
+	numWorkers int
+	maxDepth   int
+	logPrefix  string
 
 	// Work channel for incoming keys
 	work chan warmupWorkItem
@@ -86,14 +86,13 @@ func NewWarmuper(ctx context.Context, cfg WarmupConfig) *Warmuper {
 		maxDepth = 128
 	}
 	w := &Warmuper{
-		ctx:           ctx,
-		cancel:        cancel,
-		ctxFactory:    cfg.CtxFactory,
-		cache:         NewCachingPatriciaContext(),
-		numWorkers:    cfg.NumWorkers,
-		accountKeyLen: cfg.AccountKeyLen,
-		maxDepth:      maxDepth,
-		logPrefix:     cfg.LogPrefix,
+		ctx:        ctx,
+		cancel:     cancel,
+		ctxFactory: cfg.CtxFactory,
+		cache:      NewCachingPatriciaContext(),
+		numWorkers: cfg.NumWorkers,
+		maxDepth:   maxDepth,
+		logPrefix:  cfg.LogPrefix,
 	}
 	return w
 }
@@ -124,22 +123,7 @@ func (w *Warmuper) Start() {
 				defer cleanup()
 			}
 
-			// Wrap the worker context with the shared cache so all reads
-			// are cached and visible to other workers and later to Process().
 			view := w.cache.Wrap(trieCtx)
-			reader := NewTrieReader(view, w.accountKeyLen)
-
-			// Visitor prefetches account/storage data encountered along
-			// the trie path, populating the shared cache.
-			visitor := func(_ int, c *cell) error {
-				if c.accountAddrLen > 0 {
-					_, _ = view.Account(c.GetAccountAddr())
-				}
-				if c.storageAddrLen > 0 {
-					_, _ = view.Storage(c.GetStorageAddr())
-				}
-				return nil
-			}
 
 			for item := range w.work {
 				select {
@@ -148,11 +132,7 @@ func (w *Warmuper) Start() {
 				default:
 				}
 
-				_, _, err := reader.LookupWithVisitor(item.hashedKey, visitor)
-				if err != nil {
-					log.Debug(fmt.Sprintf("[%s][warmup] lookup failed", w.logPrefix),
-						"error", err)
-				}
+				w.warmupKey(view, item.hashedKey, item.startDepth)
 				w.keysProcessed.Add(1)
 			}
 			return nil
@@ -245,4 +225,64 @@ func (w *Warmuper) Close() {
 // Closed returns true if the warmuper has been closed.
 func (w *Warmuper) Closed() bool {
 	return w.closed.Load()
+}
+
+// warmupKey performs a bespoke depth-walk for a single hashed key, reading
+// branch/account/storage data through the cached view. Much cheaper than
+// TrieReader.LookupWithVisitor: no keccak, no full cell parse.
+func (w *Warmuper) warmupKey(view PatriciaContext, hashedKey []byte, startDepth int) {
+	for depth := startDepth; depth < len(hashedKey) && depth < w.maxDepth; {
+		prefix := nibbles.HexToCompact(hashedKey[:depth])
+		branchData, _, err := view.Branch(prefix)
+		if err != nil {
+			log.Debug(fmt.Sprintf("[%s][warmup] branch read failed", w.logPrefix),
+				"depth", depth, "error", err)
+			return
+		}
+		if len(branchData) < 4 {
+			return
+		}
+
+		nextNibble := int(hashedKey[depth])
+
+		cellAccounts, cellStorages := extractBranchCellAddresses(branchData, nextNibble)
+		for _, a := range cellAccounts {
+			_, _ = view.Account(a)
+		}
+		for _, s := range cellStorages {
+			_, _ = view.Storage(s)
+		}
+
+		bitmap := binary.BigEndian.Uint16(branchData[2:4])
+		childBit := uint16(1) << nextNibble
+		if bitmap&childBit == 0 {
+			return
+		}
+
+		// Skip sibling cells before the target nibble to find its fieldBits.
+		pos := 4
+		for n := 0; n < nextNibble; n++ {
+			if bitmap&(1<<n) != 0 {
+				if pos >= len(branchData) {
+					return
+				}
+				fieldBits := branchData[pos]
+				pos = skipCellFields(branchData, pos+1, fieldBits)
+			}
+		}
+		if pos >= len(branchData) {
+			return
+		}
+		fieldBits := branchData[pos]
+		pos++
+
+		// Extension handling: advance depth by extension length if present.
+		if fieldBits&1 != 0 {
+			if extLen, n := binary.Uvarint(branchData[pos:]); n > 0 && extLen > 0 {
+				depth += int(extLen)
+				continue
+			}
+		}
+		depth++
+	}
 }

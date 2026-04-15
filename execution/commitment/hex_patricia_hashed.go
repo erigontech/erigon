@@ -575,6 +575,113 @@ func skipCellFields(data []byte, pos int, fieldBits byte) int {
 	return pos
 }
 
+// extractBranchCellAddresses parses branch data and returns account and storage
+// plain-key addresses found in cells. For the cell on pathNibble, addresses are
+// always extracted. For sibling cells, addresses are extracted only when the cell
+// lacks a memoized stateHash (bit 4), since those need re-computation anyway.
+func extractBranchCellAddresses(branchData []byte, pathNibble int) (accountAddrs [][]byte, storageAddrs [][]byte) {
+	if len(branchData) < 4 {
+		return nil, nil
+	}
+	// Skip touch map (first 2 bytes)
+	branchData = branchData[2:]
+	bitmap := binary.BigEndian.Uint16(branchData[0:2])
+	pos := 2
+
+	for bitset := bitmap; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		bitset ^= bit
+
+		if pos >= len(branchData) {
+			break
+		}
+		fieldBits := branchData[pos]
+		pos++
+
+		isOnPath := nibble == pathNibble
+		hasMemoizedHash := fieldBits&16 != 0
+		shouldExtract := isOnPath || !hasMemoizedHash
+
+		// extension (bit 0)
+		if fieldBits&1 != 0 {
+			if pos >= len(branchData) {
+				break
+			}
+			l, n := binary.Uvarint(branchData[pos:])
+			if n <= 0 {
+				break
+			}
+			pos += n + int(l)
+		}
+
+		// accountAddr (bit 1)
+		if fieldBits&2 != 0 {
+			if pos >= len(branchData) {
+				break
+			}
+			l, n := binary.Uvarint(branchData[pos:])
+			if n <= 0 {
+				break
+			}
+			pos += n
+			if l > 0 && pos+int(l) <= len(branchData) {
+				if shouldExtract {
+					addr := make([]byte, l)
+					copy(addr, branchData[pos:pos+int(l)])
+					accountAddrs = append(accountAddrs, addr)
+				}
+				pos += int(l)
+			}
+		}
+
+		// storageAddr (bit 2)
+		if fieldBits&4 != 0 {
+			if pos >= len(branchData) {
+				break
+			}
+			l, n := binary.Uvarint(branchData[pos:])
+			if n <= 0 {
+				break
+			}
+			pos += n
+			if l > 0 && pos+int(l) <= len(branchData) {
+				if shouldExtract {
+					addr := make([]byte, l)
+					copy(addr, branchData[pos:pos+int(l)])
+					storageAddrs = append(storageAddrs, addr)
+				}
+				pos += int(l)
+			}
+		}
+
+		// hash (bit 3)
+		if fieldBits&8 != 0 {
+			if pos >= len(branchData) {
+				break
+			}
+			l, n := binary.Uvarint(branchData[pos:])
+			if n <= 0 {
+				break
+			}
+			pos += n + int(l)
+		}
+
+		// stateHash (bit 4)
+		if fieldBits&16 != 0 {
+			if pos >= len(branchData) {
+				break
+			}
+			l, n := binary.Uvarint(branchData[pos:])
+			if n <= 0 {
+				break
+			}
+			pos += n + int(l)
+		}
+	}
+	return accountAddrs, storageAddrs
+}
+
 func (cell *cell) accountForHashing(buffer []byte, storageRootHash common.Hash) int {
 	balanceBytes := 0
 	if !cell.Balance.LtUint64(128) {
@@ -2654,7 +2761,6 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	// Setup warmup if configured
 	var warmuper *Warmuper
 	if warmup.Enabled {
-		warmup.AccountKeyLen = int(hph.accountKeyLen)
 		warmuper = NewWarmuper(ctx, warmup)
 		warmuper.Start()
 

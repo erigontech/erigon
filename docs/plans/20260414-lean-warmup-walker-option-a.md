@@ -175,13 +175,13 @@ Promote `Process()`'s existing `log.Debug("commitment cache stats", ...)` to `lo
 - Modify: `execution/commitment/warmuper.go`
 - Modify: `execution/commitment/hex_patricia_hashed.go`
 
-- [ ] re-introduce `extractBranchCellAddresses` helper in `hex_patricia_hashed.go` by porting the definition from `origin/main:execution/commitment/hex_patricia_hashed.go` (starting ~line 587). It was removed from this branch when the PR switched to `TrieReader`; we need it again for the bespoke walk. Place it near `skipCellFields`. Include its unit tests if main has any.
-- [ ] add private `warmupKey(view PatriciaContext, hashedKey []byte, startDepth int)` method implementing the bespoke walk (see Technical Details); reuse `extractBranchCellAddresses` / `skipCellFields` from `hex_patricia_hashed.go`, import `nibbles` and `encoding/binary`
-- [ ] replace worker-goroutine body: remove `NewTrieReader` / `visitor` / `LookupWithVisitor`; call `w.warmupKey(view, item.hashedKey, item.startDepth)` instead
-- [ ] drop `AccountKeyLen` field from `WarmupConfig` and `Warmuper` (and caller in `Process()` setup); remove `accountKeyLen` parameter uses
-- [ ] update `warmuper_test.go`: add tests asserting the walk populates `CachingPatriciaContext` branches/accounts/storage for representative trees; test depth bound via `MaxDepth`; test early termination when bitmap lacks child bit
-- [ ] test error path: underlying `Branch()` returns error — walk returns without crashing
-- [ ] run `go test ./execution/commitment/...` — must pass before next task
+- [x] re-introduce `extractBranchCellAddresses` helper in `hex_patricia_hashed.go` by porting the definition from `origin/main:execution/commitment/hex_patricia_hashed.go` (starting ~line 587). It was removed from this branch when the PR switched to `TrieReader`; we need it again for the bespoke walk. Place it near `skipCellFields`. Include its unit tests if main has any.
+- [x] add private `warmupKey(view PatriciaContext, hashedKey []byte, startDepth int)` method implementing the bespoke walk (see Technical Details); reuse `extractBranchCellAddresses` / `skipCellFields` from `hex_patricia_hashed.go`, import `nibbles` and `encoding/binary`
+- [x] replace worker-goroutine body: remove `NewTrieReader` / `visitor` / `LookupWithVisitor`; call `w.warmupKey(view, item.hashedKey, item.startDepth)` instead
+- [x] drop `AccountKeyLen` field from `WarmupConfig` and `Warmuper` (and caller in `Process()` setup); remove `accountKeyLen` parameter uses
+- [x] update `warmuper_test.go`: add tests asserting the walk populates `CachingPatriciaContext` branches/accounts/storage for representative trees; test depth bound via `MaxDepth`; test early termination when bitmap lacks child bit
+- [x] test error path: underlying `Branch()` returns error — walk returns without crashing
+- [x] run `go test ./execution/commitment/...` — must pass before next task
 
 ### Task 3: Plumb `startDepth` through `HashSort`
 

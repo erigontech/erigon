@@ -19,12 +19,13 @@ package commitment
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 // warmupTestCtx extends trieReaderTestCtx with account/storage data and call tracking.
@@ -63,10 +64,10 @@ func (tc *warmupTestCtx) Storage(plainKey []byte) (*Update, error) {
 	return u, nil
 }
 
-// TestWarmuper_TrieReaderWarmup verifies that the new TrieReader-based warmuper
-// traverses the trie and populates the shared CachingPatriciaContext with branch,
-// account, and storage data from the visitor callback.
-func TestWarmuper_TrieReaderWarmup(t *testing.T) {
+// TestWarmuper_BespokeWalk verifies that the bespoke depth-walk warmuper
+// traverses the trie and populates the shared CachingPatriciaContext with branch
+// and account data via extractBranchCellAddresses.
+func TestWarmuper_BespokeWalk(t *testing.T) {
 	t.Parallel()
 
 	ctx := newWarmupTestCtx()
@@ -82,11 +83,11 @@ func TestWarmuper_TrieReaderWarmup(t *testing.T) {
 	ctx.putBranch(nil, rootCells)
 
 	cfg := WarmupConfig{
-		Enabled:       true,
-		CtxFactory:    func() (PatriciaContext, func()) { return ctx, nil },
-		NumWorkers:    1,
-		AccountKeyLen: length.Addr,
-		LogPrefix:     "test",
+		Enabled:    true,
+		CtxFactory: func() (PatriciaContext, func()) { return ctx, nil },
+		NumWorkers: 1,
+
+		LogPrefix: "test",
 	}
 
 	warmuper := NewWarmuper(context.Background(), cfg)
@@ -116,8 +117,8 @@ func TestWarmuper_TrieReaderWarmup(t *testing.T) {
 	require.Equal(t, uint64(1), stats.KeysProcessed)
 }
 
-// TestWarmuper_TrieReaderWarmup_StorageKey verifies that warmup also prefetches storage.
-func TestWarmuper_TrieReaderWarmup_StorageKey(t *testing.T) {
+// TestWarmuper_BespokeWalk_StorageKey verifies that warmup also prefetches storage.
+func TestWarmuper_BespokeWalk_StorageKey(t *testing.T) {
 	t.Parallel()
 
 	ctx := newWarmupTestCtx()
@@ -134,11 +135,11 @@ func TestWarmuper_TrieReaderWarmup_StorageKey(t *testing.T) {
 	ctx.putBranch(nil, rootCells)
 
 	cfg := WarmupConfig{
-		Enabled:       true,
-		CtxFactory:    func() (PatriciaContext, func()) { return ctx, nil },
-		NumWorkers:    1,
-		AccountKeyLen: length.Addr,
-		LogPrefix:     "test",
+		Enabled:    true,
+		CtxFactory: func() (PatriciaContext, func()) { return ctx, nil },
+		NumWorkers: 1,
+
+		LogPrefix: "test",
 	}
 
 	warmuper := NewWarmuper(context.Background(), cfg)
@@ -184,9 +185,9 @@ func TestWarmuper_ConcurrentWorkers_RaceDetector(t *testing.T) {
 		CtxFactory: func() (PatriciaContext, func()) {
 			return ctx, nil
 		},
-		NumWorkers:    16,
-		AccountKeyLen: length.Addr,
-		LogPrefix:     "test-concurrent",
+		NumWorkers: 16,
+
+		LogPrefix: "test-concurrent",
 	}
 
 	warmuper := NewWarmuper(context.Background(), cfg)
@@ -211,11 +212,11 @@ func TestWarmuper_EmptyTrie(t *testing.T) {
 	ctx := newWarmupTestCtx()
 
 	cfg := WarmupConfig{
-		Enabled:       true,
-		CtxFactory:    func() (PatriciaContext, func()) { return ctx, nil },
-		NumWorkers:    2,
-		AccountKeyLen: length.Addr,
-		LogPrefix:     "test",
+		Enabled:    true,
+		CtxFactory: func() (PatriciaContext, func()) { return ctx, nil },
+		NumWorkers: 2,
+
+		LogPrefix: "test",
 	}
 
 	warmuper := NewWarmuper(context.Background(), cfg)
@@ -248,11 +249,11 @@ func TestWarmuper_SharedCachePopulated(t *testing.T) {
 	mock.putBranch(nil, rootCells)
 
 	cfg := WarmupConfig{
-		Enabled:       true,
-		CtxFactory:    func() (PatriciaContext, func()) { return mock, nil },
-		NumWorkers:    1,
-		AccountKeyLen: length.Addr,
-		LogPrefix:     "test",
+		Enabled:    true,
+		CtxFactory: func() (PatriciaContext, func()) { return mock, nil },
+		NumWorkers: 1,
+
+		LogPrefix: "test",
 	}
 
 	warmuper := NewWarmuper(context.Background(), cfg)
@@ -271,6 +272,119 @@ func TestWarmuper_SharedCachePopulated(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, acc, "account should be in cache from warmup visitor")
 	require.Equal(t, BalanceUpdate, acc.Flags)
+}
+
+// TestWarmuper_DepthBound verifies that MaxDepth limits how deep the walk goes.
+func TestWarmuper_DepthBound(t *testing.T) {
+	t.Parallel()
+
+	ctx := newWarmupTestCtx()
+
+	addr := bytes.Repeat([]byte{0x11}, 20)
+	hashedKey := KeyToHexNibbleHash(addr)
+	ctx.accounts[string(addr)] = &Update{Flags: BalanceUpdate}
+
+	// Build a root branch and a second-level branch so the walk could
+	// go at least 2 levels deep.
+	var rootCells [16]*cell
+	rootCells[hashedKey[0]] = makeBranchCell(dummyHash())
+	ctx.putBranch(nil, rootCells)
+
+	var level1Cells [16]*cell
+	level1Cells[hashedKey[1]] = makeAccountCell(addr, dummyHash())
+	ctx.putBranch(hashedKey[:1], level1Cells)
+
+	cfg := WarmupConfig{
+		Enabled:    true,
+		CtxFactory: func() (PatriciaContext, func()) { return ctx, nil },
+		NumWorkers: 1,
+		MaxDepth:   1, // limit to depth 1, so level-1 branch should not be visited
+		LogPrefix:  "test",
+	}
+
+	warmuper := NewWarmuper(context.Background(), cfg)
+	warmuper.Start()
+	warmuper.WarmKey(hashedKey, 0)
+	require.NoError(t, warmuper.Wait())
+
+	// With MaxDepth=1 the walk reads root branch (depth=0) but stops before
+	// depth=1, so the account at level 1 should NOT have been fetched.
+	require.Equal(t, int64(0), ctx.accountCalls.Load(),
+		"MaxDepth=1 should prevent walk from reaching level-1 account")
+}
+
+// TestWarmuper_BitmapMissingChild verifies early termination when the bitmap
+// does not contain the child nibble.
+func TestWarmuper_BitmapMissingChild(t *testing.T) {
+	t.Parallel()
+
+	ctx := newWarmupTestCtx()
+
+	addr := bytes.Repeat([]byte{0x22}, 20)
+	hashedKey := KeyToHexNibbleHash(addr)
+	ctx.accounts[string(addr)] = &Update{Flags: BalanceUpdate}
+
+	// Build a root branch with a cell at a DIFFERENT nibble than hashedKey[0].
+	var rootCells [16]*cell
+	differentNibble := (hashedKey[0] + 1) % 16
+	rootCells[differentNibble] = makeAccountCell(addr, dummyHash())
+	ctx.putBranch(nil, rootCells)
+
+	cfg := WarmupConfig{
+		Enabled:    true,
+		CtxFactory: func() (PatriciaContext, func()) { return ctx, nil },
+		NumWorkers: 1,
+		LogPrefix:  "test",
+	}
+
+	warmuper := NewWarmuper(context.Background(), cfg)
+	warmuper.Start()
+	warmuper.WarmKey(hashedKey, 0)
+	require.NoError(t, warmuper.Wait())
+
+	// The walk should have terminated at the root because the child nibble
+	// is not in the bitmap. The account address IS extracted by
+	// extractBranchCellAddresses (sibling without stateHash), so Account()
+	// may be called, but the walk should NOT descend further.
+	require.Equal(t, uint64(1), warmuper.Stats().KeysProcessed)
+}
+
+// errorPatriciaContext returns an error from Branch to test error handling.
+type errorPatriciaContext struct {
+	noopPatriciaContext
+	branchErr error
+}
+
+func (e *errorPatriciaContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
+	return nil, 0, e.branchErr
+}
+
+// TestWarmuper_BranchError verifies that a Branch() error doesn't crash
+// the worker and the key is still counted.
+func TestWarmuper_BranchError(t *testing.T) {
+	t.Parallel()
+
+	errCtx := &errorPatriciaContext{
+		branchErr: fmt.Errorf("simulated branch error"),
+	}
+
+	cfg := WarmupConfig{
+		Enabled:    true,
+		CtxFactory: func() (PatriciaContext, func()) { return errCtx, nil },
+		NumWorkers: 1,
+		LogPrefix:  "test",
+	}
+
+	warmuper := NewWarmuper(context.Background(), cfg)
+	warmuper.Start()
+
+	hashedKey := make([]byte, 64)
+	hashedKey[0] = 0x5
+	warmuper.WarmKey(hashedKey, 0)
+
+	err := warmuper.Wait()
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), warmuper.Stats().KeysProcessed)
 }
 
 // noopPatriciaContext is defined in commitment_test.go
