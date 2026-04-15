@@ -992,7 +992,7 @@ func TestDomain_UnwindRestoredEntryVisibility(t *testing.T) {
 
 	// Unwind to txNum 5 (between the V1 write at 2 and V2 write at 10, still in step 0).
 	dt = d.beginForTests()
-	err = dt.unwind(ctx, tx, 0, 5, diffs)
+	err = dt.unwind(ctx, tx, 0, 5, uint64(dt.FirstStepNotInFiles()), diffs)
 	dt.Close()
 	require.NoError(t, err)
 
@@ -2524,7 +2524,7 @@ func TestDomain_Unwind(t *testing.T) {
 			}
 		}
 
-		err = domainRoTx.unwind(ctx, tx, unwindTo/d.stepSize, unwindTo, totalDiff)
+		err = domainRoTx.unwind(ctx, tx, unwindTo/d.stepSize, unwindTo, uint64(domainRoTx.FirstStepNotInFiles()), totalDiff)
 		currTx = unwindTo
 		require.NoError(t, err)
 		domainRoTx.Close()
