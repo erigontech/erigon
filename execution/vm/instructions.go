@@ -578,13 +578,11 @@ func opCodeCopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 
 func opExtCodeCopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	addr := scope.peekAddress()
-	var (
-		stack      = &scope.Stack
-		_          = stack.pop() // addr already interned above
-		memOffset  = stack.pop()
-		codeOffset = stack.pop()
-		length     = stack.pop()
-	)
+	stack := &scope.Stack
+	stack.pop() // consume addr
+	memOffset := stack.pop()
+	codeOffset := stack.pop()
+	length := stack.pop()
 	// BAL: EXTCODECOPY is a real state access per EIP-7928.
 	evm.IntraBlockState().MarkAddressAccess(addr, false)
 	len64 := length.Uint64()
