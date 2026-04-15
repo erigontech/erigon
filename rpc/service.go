@@ -20,7 +20,9 @@
 package rpc
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -42,9 +44,63 @@ var (
 	stringType       = reflect.TypeFor[string]()
 )
 
+// invoker is the interface implemented by typed, generic-registered RPC methods.
+// It replaces the reflection-based callback on the hot dispatch path.
+type invoker interface {
+	invoke(ctx context.Context, params json.RawMessage) (any, error)
+}
+
+// Method is a typed RPC handler that avoids reflection on every call.
+// Register it with [RegisterMethod] on a [Server].
+type Method[Params any, Result any] struct {
+	fn func(ctx context.Context, params Params) (Result, error)
+}
+
+// invoke implements [invoker]. It unmarshals params into the typed Params
+// value (skipping unmarshal for empty/null/[] params), calls fn, and returns
+// the result as any for the caller to marshal.
+//
+// JSON-RPC 2.0 params may be either a named object {"field":val} or a
+// positional array [val, ...]. For struct Params types the positional array
+// form is treated as a single-element array containing the struct, which is
+// the convention used by go-ethereum's client when calling with one arg.
+func (m Method[Params, Result]) invoke(ctx context.Context, raw json.RawMessage) (any, error) {
+	var p Params
+	if len(raw) > 0 && !bytes.Equal(raw, []byte("null")) && !bytes.Equal(raw, []byte("[]")) {
+		inner := raw
+		// Unwrap positional array: [obj] → obj
+		if len(inner) > 0 && inner[0] == '[' {
+			var arr []json.RawMessage
+			if err := json.Unmarshal(inner, &arr); err != nil {
+				return nil, &InvalidParamsError{err.Error()}
+			}
+			switch len(arr) {
+			case 0:
+				// no-arg call, leave p at zero value
+				inner = nil
+			case 1:
+				inner = arr[0]
+			default:
+				return nil, &InvalidParamsError{fmt.Sprintf("expected 1 argument, got %d", len(arr))}
+			}
+		}
+		if len(inner) > 0 {
+			if err := json.Unmarshal(inner, &p); err != nil {
+				return nil, &InvalidParamsError{err.Error()}
+			}
+		}
+	}
+	result, err := m.fn(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 type serviceRegistry struct {
 	mu       sync.Mutex
 	services map[string]service
+	typed    map[string]invoker // typed generic handlers, checked before reflection-based ones
 	logger   log.Logger
 }
 
@@ -118,6 +174,24 @@ func (r *serviceRegistry) callback(method string) *callback {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.services[svc].callbacks[name]
+}
+
+// registerTyped registers a typed generic handler for the given full method name
+// (e.g. "eth_blockNumber"). Typed handlers take priority over reflection-based ones.
+func (r *serviceRegistry) registerTyped(name string, inv invoker) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.typed == nil {
+		r.typed = make(map[string]invoker)
+	}
+	r.typed[name] = inv
+}
+
+// invokerFor returns the typed invoker registered for method, or nil if none.
+func (r *serviceRegistry) invokerFor(method string) invoker {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.typed[method]
 }
 
 // subscription returns a subscription callback in the given service.

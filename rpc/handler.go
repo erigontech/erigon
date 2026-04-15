@@ -555,6 +555,24 @@ func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage, stream jsonstrea
 	if msg.isSubscribe() {
 		return h.handleSubscribe(cp, msg, stream)
 	}
+
+	// Fast path: typed generic handler registered via RegisterMethod — no reflection.
+	if !msg.isUnsubscribe() && h.isMethodAllowedByGranularControl(msg.Method) {
+		if inv := h.reg.invokerFor(msg.Method); inv != nil {
+			start := time.Now()
+			answer := h.runTypedMethod(cp.ctx, msg, inv)
+			rpcRequestGauge.Inc()
+			if answer != nil && answer.Error != nil {
+				failedReqeustGauge.Inc()
+				newRPCServingTimerMS(msg.Method, false).ObserveDuration(start)
+			} else {
+				newRPCServingTimerMS(msg.Method, true).ObserveDuration(start)
+			}
+			return answer
+		}
+	}
+
+	// Slow path: reflection-based handler.
 	var callb *callback
 	if msg.isUnsubscribe() {
 		callb = h.unsubscribeCb
@@ -583,6 +601,17 @@ func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage, stream jsonstrea
 		}
 	}
 	return answer
+}
+
+// runTypedMethod calls a typed [invoker] and wraps its result in a JSON-RPC response.
+// Unlike the reflection path there is no parsePositionalArguments, no reflect.Value.Call,
+// and no []reflect.Value allocation per request.
+func (h *handler) runTypedMethod(ctx context.Context, msg *jsonrpcMessage, inv invoker) *jsonrpcMessage {
+	result, err := inv.invoke(ctx, msg.Params)
+	if err != nil {
+		return msg.errorResponse(remapDBOverload(ctx, err))
+	}
+	return msg.response(result)
 }
 
 // handleSubscribe processes *_subscribe method calls.

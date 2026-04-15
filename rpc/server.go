@@ -93,6 +93,13 @@ func (s *Server) RegisterName(name string, receiver any) error {
 	return s.services.registerName(name, receiver)
 }
 
+// RegisterMethod registers a strongly-typed RPC method, bypassing reflection on every call.
+// The name must use "namespace_method" form (e.g. "eth_blockNumber").
+// Typed methods take priority over reflection-based methods registered via [Server.RegisterName].
+func RegisterMethod[Params any, Result any](s *Server, name string, fn func(ctx context.Context, params Params) (Result, error)) {
+	s.services.registerTyped(name, Method[Params, Result]{fn: fn})
+}
+
 // ServeCodec reads incoming requests from codec, calls the appropriate callback and writes
 // the response back using the given codec. It will block until the codec is closed or the
 // server is stopped. In either case the codec is closed.
