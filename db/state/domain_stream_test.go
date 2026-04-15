@@ -141,10 +141,10 @@ func TestCursorHeapMergeLoop_RAMOverridesDB(t *testing.T) {
 // steps already covered by files. The fix (#20355) skips DB entries where
 // step.ToTxNum < files.EndTxNum(), so they are never pushed into the heap.
 func TestDomain_IteratePrefix_PrefersFilesOverDB(t *testing.T) {
-	t.Parallel()
 	if testing.Short() {
 		t.Skip()
 	}
+	t.Parallel()
 
 	logger := log.New()
 	ctx := context.Background()
