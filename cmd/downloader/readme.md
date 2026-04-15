@@ -86,7 +86,10 @@ erigon snapshots retire --datadir=<your_datadir>
 downloader torrent_create --datadir=<your_datadir>
 
 # output format is compatible with https://github.com/erigontech/erigon-snapshot
-downloader torrent_hashes --datadir=<your_datadir>
+downloader torrent_hashes --datadir=<your_datadir> --chain=<chain>
+
+# show diff between local hashes and the currently released .toml from erigon-snapshot (GitHub)
+downloader torrent_hashes --datadir=<your_datadir> --chain=<chain> --diff
 
 # Start downloader (read all .torrent files, and download/seed data)
 downloader --downloader.api.addr=127.0.0.1:9093 --datadir=<your_datadir>
