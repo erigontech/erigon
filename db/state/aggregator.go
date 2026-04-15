@@ -825,6 +825,14 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	}
 	var domainColls []domainCollResult
 	var iiColls []iiCollResult
+	defer func() {
+		if !closeCollations {
+			return
+		}
+		for _, ic := range iiColls {
+			ic.collation.Close()
+		}
+	}()
 
 	for id, d := range a.d {
 		if d.Disable {
