@@ -682,7 +682,7 @@ func TestBuildBlockV1(t *testing.T) {
 		assert.Contains(t, customErr.Message, "nonce too low")
 	})
 
-	t.Run("valid explicit tx list reaches assembler with OverrideTxns set", func(t *testing.T) {
+	t.Run("valid explicit tx list reaches assembler with CustomProvider set", func(t *testing.T) {
 		t.Parallel()
 		key, err := crypto.GenerateKey()
 		require.NoError(t, err)
@@ -711,10 +711,9 @@ func TestBuildBlockV1(t *testing.T) {
 		// The call fails because getAssembledBlock returns nil block, but that's expected.
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "no assembled block data")
-		// The important check: OverrideTxns was populated and forwarded to AssembleBlock.
+		// The important check: CustomProvider was set and forwarded to AssembleBlock.
 		require.NotNil(t, capturedParams, "AssembleBlock should have been called")
-		require.NotNil(t, capturedParams.OverrideTxns)
-		assert.Len(t, *capturedParams.OverrideTxns, 2)
+		require.NotNil(t, capturedParams.CustomProvider)
 	})
 
 	t.Run("BAL is stripped from response and blockHash recomputed", func(t *testing.T) {

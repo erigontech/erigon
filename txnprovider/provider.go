@@ -19,7 +19,6 @@ package txnprovider
 import (
 	"context"
 	"math"
-	"sync/atomic"
 
 	mapset "github.com/deckarep/golang-set/v2"
 
@@ -98,21 +97,4 @@ var defaultProvideOptions = ProvideOptions{
 	GasTarget:         mdgas.NewFullMdGas(math.MaxUint64, math.MaxUint64, math.MaxUint64),
 	TxnIdsFilter:      nil,         // no filter by default
 	AvailableRlpSpace: math.MaxInt, // unlimited by default
-}
-
-type staticTxnProvider struct {
-	txns []types.Transaction
-	done atomic.Bool
-}
-
-func (s *staticTxnProvider) ProvideTxns(_ context.Context, _ ...ProvideOption) ([]types.Transaction, error) {
-	if !s.done.CompareAndSwap(false, true) {
-		return nil, nil
-	}
-	return s.txns, nil
-}
-
-// NewStaticTxnProvider returns a TxnProvider that yields txns exactly once then returns nil.
-func NewStaticTxnProvider(txns []types.Transaction) TxnProvider {
-	return &staticTxnProvider{txns: txns}
 }

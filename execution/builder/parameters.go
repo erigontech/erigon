@@ -19,6 +19,7 @@ package builder
 import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/txnprovider"
 )
 
 // Parameters for PoS block building
@@ -32,9 +33,7 @@ type Parameters struct {
 	Withdrawals           []*types.Withdrawal // added in Shapella (EIP-4895)
 	ParentBeaconBlockRoot *common.Hash        // added in Dencun (EIP-4788)
 	SlotNumber            *uint64             // added in Amsterdam (EIP-7843)
-	// OverrideTxns overrides the block's transaction source when non-nil.
-	// nil   → use the injected TxnProvider (normal mempool path)
-	// &[]   → build an empty block (no transactions)
-	// &[..] → include exactly these transactions (senders must be pre-set)
-	OverrideTxns *[]types.Transaction
+	// CustomProvider overrides the block's transaction source when non-nil.
+	// nil → use the injected TxnProvider (normal mempool path)
+	CustomProvider txnprovider.TxnProvider
 }

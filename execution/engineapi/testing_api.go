@@ -24,6 +24,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -35,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/txnprovider"
 )
 
 // TestingAPI is the interface for the testing_ RPC namespace.
@@ -132,7 +134,7 @@ func (t *testingImpl) BuildBlockV1(
 		return nil, &rpc.InvalidParamsError{Message: "parentBeaconBlockRoot not supported before Cancun"}
 	}
 
-	var overrideTxns *[]types.Transaction
+	var customProvider txnprovider.TxnProvider
 	if transactions != nil {
 		decoded := make([]types.Transaction, 0, len(*transactions))
 		if len(*transactions) > 0 {
@@ -178,7 +180,7 @@ func (t *testingImpl) BuildBlockV1(
 				decoded = append(decoded, tx)
 			}
 		}
-		overrideTxns = &decoded
+		customProvider = &staticTxnProvider{txns: decoded}
 	}
 
 	// Build the AssembleBlock parameters (mirrors forkchoiceUpdated logic).
@@ -188,7 +190,7 @@ func (t *testingImpl) BuildBlockV1(
 		PrevRandao:            payloadAttributes.PrevRandao,
 		SuggestedFeeRecipient: payloadAttributes.SuggestedFeeRecipient,
 		SlotNumber:            (*uint64)(payloadAttributes.SlotNumber),
-		OverrideTxns:          overrideTxns,
+		CustomProvider:        customProvider,
 	}
 	if version >= clparams.CapellaVersion {
 		assembleParams.Withdrawals = payloadAttributes.Withdrawals
@@ -276,4 +278,18 @@ func (t *testingImpl) BuildBlockV1(
 	}
 
 	return response, nil
+}
+
+// staticTxnProvider is a TxnProvider that yields a fixed transaction list exactly once,
+// then returns nil on every subsequent call. Used only by the testing_ namespace.
+type staticTxnProvider struct {
+	txns []types.Transaction
+	done atomic.Bool
+}
+
+func (s *staticTxnProvider) ProvideTxns(_ context.Context, _ ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	if !s.done.CompareAndSwap(false, true) {
+		return nil, nil
+	}
+	return s.txns, nil
 }

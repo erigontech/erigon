@@ -161,8 +161,8 @@ func (b *Builder) Build(param *Parameters, interrupt *atomic.Bool) (result *type
 	}
 	createCfg := StageBuilderCreateBlockCfg(state, b.chainConfig, b.engine, param, b.blockReader)
 	txnProvider := b.txnProvider
-	if param.OverrideTxns != nil {
-		txnProvider = txnprovider.NewStaticTxnProvider(*param.OverrideTxns)
+	if param.CustomProvider != nil {
+		txnProvider = param.CustomProvider
 	}
 	execCfg := StageBuilderExecCfg(state, b.notifier, b.chainConfig, b.engine, b.vmConfig, b.tmpdir, interrupt, param.PayloadId, txnProvider, b.blockReader)
 	finishCfg := StageBuilderFinishCfg(b.chainConfig, b.engine, state, b.sealCancel, b.blockReader, b.latestBlockBuiltStore)
