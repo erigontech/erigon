@@ -63,12 +63,12 @@ type Method[Params any, Result any] struct {
 // and calls fn, returning the result as any.
 //
 // Supported params forms:
-//   - omitted / null / [] → zero-value Params (no-arg methods)
+//   - omitted / null / [] → zero-value Params; handlers must validate required fields
 //   - {"field":val, ...}  → named-object form, unmarshalled directly into Params
-//   - [obj]               → single-element positional array; the element is unwrapped
-//     and unmarshalled into Params (go-ethereum client convention for one struct arg)
-//   - [a, b, ...]         → multi-element positional array; unmarshalled directly into
-//     Params (works when Params is a slice or array type)
+//   - [obj]               → single-element positional array unwrapped to obj
+//     (go-ethereum client convention when calling with one struct arg)
+//   - [a, b, ...]         → multi-element positional array unmarshalled directly
+//     into Params (works when Params is a slice or array type)
 //
 // Leading JSON whitespace is trimmed before these checks so whitespace-padded
 // payloads are handled identically to the reflection-based path.
@@ -76,24 +76,27 @@ func (m Method[Params, Result]) invoke(ctx context.Context, raw json.RawMessage)
 	var p Params
 	raw = bytes.TrimSpace(raw)
 	if len(raw) > 0 && !bytes.Equal(raw, jsonNull) && !bytes.Equal(raw, jsonEmptyArray) {
-		if raw[0] == '[' {
-			// Positional array: unwrap single-element [obj] → obj so struct Params
-			// types work naturally. Multi-element arrays are passed through as-is,
-			// which works when Params is a slice/array type.
-			var arr []json.RawMessage
-			if err := json.Unmarshal(raw, &arr); err != nil {
+		// Try direct unmarshal first (object or multi-element array params).
+		// Fall back to single-element array unwrap only if direct unmarshal fails
+		// and params is an array — this avoids the extra []json.RawMessage allocation
+		// on the common object-params hot path.
+		if err := json.Unmarshal(raw, &p); err != nil {
+			if raw[0] != '[' {
 				return nil, &InvalidParamsError{err.Error()}
+			}
+			// Single-element positional array: [obj] → obj.
+			var arr []json.RawMessage
+			if arrErr := json.Unmarshal(raw, &arr); arrErr != nil {
+				return nil, &InvalidParamsError{arrErr.Error()}
 			}
 			switch len(arr) {
 			case 0:
-				raw = nil
+				// leave p at zero value
 			case 1:
-				raw = arr[0]
-				// default: leave raw unchanged; json.Unmarshal below handles it
-			}
-		}
-		if len(raw) > 0 {
-			if err := json.Unmarshal(raw, &p); err != nil {
+				if err := json.Unmarshal(arr[0], &p); err != nil {
+					return nil, &InvalidParamsError{err.Error()}
+				}
+			default:
 				return nil, &InvalidParamsError{err.Error()}
 			}
 		}

@@ -598,6 +598,10 @@ func (h *handler) runTypedMethod(ctx context.Context, msg *jsonrpcMessage, inv i
 	return msg.response(result)
 }
 
+// recordRPCMetrics records request count and latency for a completed RPC call.
+// Note: streamable reflection callbacks return nil answer even on error (the error
+// is written directly to the stream), so those failures are counted as successes here.
+// This is a pre-existing behaviour shared with the old per-callback metrics block.
 func recordRPCMetrics(answer *jsonrpcMessage, start time.Time, timerSuccess, timerFailure metrics.Summary) {
 	rpcRequestGauge.Inc()
 	if answer != nil && answer.Error != nil {

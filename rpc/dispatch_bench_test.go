@@ -63,7 +63,9 @@ func BenchmarkDispatch_Reflect_NoParams(b *testing.B) {
 	logger := log.New()
 	s := NewServer(50, false, false, true, logger, time.Duration(0))
 	defer s.Stop()
-	s.RegisterName("bench", benchNoParamService{}) //nolint:errcheck
+	if err := s.RegisterName("bench", benchNoParamService{}); err != nil {
+		b.Fatal(err)
+	}
 	ts := httptest.NewServer(s)
 	defer ts.Close()
 
@@ -121,7 +123,9 @@ func BenchmarkDispatch_Reflect_WithParams(b *testing.B) {
 	logger := log.New()
 	s := NewServer(50, false, false, true, logger, time.Duration(0))
 	defer s.Stop()
-	s.RegisterName("bench", benchGetBalanceService{}) //nolint:errcheck
+	if err := s.RegisterName("bench", benchGetBalanceService{}); err != nil {
+		b.Fatal(err)
+	}
 	ts := httptest.NewServer(s)
 	defer ts.Close()
 
@@ -161,7 +165,7 @@ func BenchmarkDispatch_Typed_WithParams(b *testing.B) {
 	defer c.Close()
 
 	var result uint64
-	// The typed path uses JSON object params, not positional array.
+	// c.Call marshals this as a positional single-element params array: [{"address":...}].
 	params := benchGetBalanceParams{Address: "0xdeadbeef", Block: "latest"}
 	b.ResetTimer()
 	b.ReportAllocs()
