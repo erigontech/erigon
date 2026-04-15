@@ -979,14 +979,6 @@ func TestDomain_UnwindRestoredEntryVisibility(t *testing.T) {
 	dt.Close()
 	require.NoError(t, err)
 
-	// Step 1: write k1=V3 at txNum 20.
-	dt = d.beginForTests()
-	w = dt.NewWriter()
-	require.NoError(t, w.PutWithPrev(k1, []byte("V3"), 20, []byte("V2")))
-	require.NoError(t, w.Flush(ctx, tx))
-	w.Close()
-	dt.Close()
-
 	// Now simulate an unwind that restores k1=V1 (reverting the V1→V2 write at txNum 10).
 	// The changeset entry has: key="key1" + step0_bytes, value=V1.
 	step0Bytes := make([]byte, 8)
