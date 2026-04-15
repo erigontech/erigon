@@ -222,11 +222,6 @@ func (w *Warmuper) Close() {
 	}
 }
 
-// Closed returns true if the warmuper has been closed.
-func (w *Warmuper) Closed() bool {
-	return w.closed.Load()
-}
-
 // warmupKey performs a bespoke depth-walk for a single hashed key, reading
 // branch/account/storage data through the cached view. Much cheaper than
 // a full TrieReader.Lookup: no keccak, no full cell parse.

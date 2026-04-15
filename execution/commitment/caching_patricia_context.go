@@ -17,7 +17,6 @@
 package commitment
 
 import (
-	"fmt"
 	"sync/atomic"
 
 	"github.com/erigontech/erigon/common/maphash"
@@ -70,15 +69,6 @@ func (s CacheStats) HitRate() float64 {
 		return 0
 	}
 	return float64(hits) / float64(total)
-}
-
-// String returns a human-readable summary of the cache statistics.
-func (s CacheStats) String() string {
-	return fmt.Sprintf("branches(hit=%d miss=%d) accounts(hit=%d miss=%d) storage(hit=%d miss=%d) overall=%.1f%%",
-		s.BranchHits, s.BranchMisses,
-		s.AccountHits, s.AccountMisses,
-		s.StorageHits, s.StorageMisses,
-		s.HitRate()*100)
 }
 
 // NewCachingPatriciaContext creates a new CachingPatriciaContext with

@@ -120,7 +120,11 @@ func BenchmarkCachingPatriciaContext_CacheHit(b *testing.B) {
 
 	// Report stats at the end.
 	stats := cache.Stats()
-	b.Logf("cache stats after benchmarks: %s", stats)
+	b.Logf("cache stats: hit%%=%.1f%% branches=%d/%d accounts=%d/%d storage=%d/%d",
+		stats.HitRate()*100,
+		stats.BranchHits, stats.BranchHits+stats.BranchMisses,
+		stats.AccountHits, stats.AccountHits+stats.AccountMisses,
+		stats.StorageHits, stats.StorageHits+stats.StorageMisses)
 }
 
 // BenchmarkWarmuper_TrieReader benchmarks the TrieReader-based warmuper

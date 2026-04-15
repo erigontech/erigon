@@ -441,8 +441,8 @@ func TestWarmuper_StatsPopulatedAfterCycle(t *testing.T) {
 	cStats := cache.Stats()
 	require.Greater(t, cStats.BranchHits+cStats.BranchMisses, uint64(0),
 		"branch lookups should have occurred")
-	require.Greater(t, cStats.HitRate()+0.01, 0.0,
-		"hit rate should be computable (non-NaN)")
+	require.Greater(t, cStats.HitRate(), 0.0,
+		"hit rate should be positive after warmup")
 }
 
 // noopPatriciaContext is defined in commitment_test.go

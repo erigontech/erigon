@@ -2760,6 +2760,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 	// Setup warmup if configured
 	var warmuper *Warmuper
+	var cache *CachingPatriciaContext
 	if warmup.Enabled {
 		warmuper = NewWarmuper(ctx, warmup)
 		warmuper.Start()
@@ -2767,7 +2768,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		// Wrap hph.ctx with the warmuper's shared CachingPatriciaContext so
 		// Process reads also hit the warmed cache.
 		origCtx := hph.ctx
-		cache := warmuper.SharedCache()
+		cache = warmuper.SharedCache()
 		hph.ctx = cache.Wrap(origCtx)
 		// LIFO order: cache cleanup registered first (runs second),
 		// CloseAndWait registered second (runs first) — ensures workers
@@ -2778,10 +2779,23 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		}()
 		defer warmuper.CloseAndWait()
 	}
+	bridgeCacheStats := func() {
+		if cache == nil {
+			return
+		}
+		cStats := cache.Stats()
+		hph.metrics.cacheBranch.Store(cStats.BranchHits)
+		hph.metrics.cacheAccount.Store(cStats.AccountHits)
+		hph.metrics.cacheStorage.Store(cStats.StorageHits)
+		hph.metrics.missBranch.Store(cStats.BranchMisses)
+		hph.metrics.missAccount.Store(cStats.AccountMisses)
+		hph.metrics.missStorage.Store(cStats.StorageMisses)
+	}
 
 	err = updates.HashSort(ctx, warmuper, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
 		select {
 		case <-logEvery.C:
+			bridgeCacheStats()
 			if onProgress != nil {
 				onProgress(&CommitProgress{
 					KeyIndex:    ki,
@@ -2830,6 +2844,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		}
 		ki++
 		if onProgress != nil && ki == updatesCount {
+			bridgeCacheStats()
 			onProgress(&CommitProgress{
 				KeyIndex:    ki,
 				UpdateCount: updatesCount,
