@@ -200,7 +200,7 @@ func TestNewSharedDomains_StateAheadOfBlocks(t *testing.T) {
 		require.NoError(rawdbv3.TxNums.Append(rwTx, blockNum, maxTxNum))
 	}
 
-	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), commitment.DefaultTrieConfig())
 	require.NoError(err)
 
 	addr := make([]byte, length.Addr)
@@ -230,7 +230,7 @@ func TestNewSharedDomains_StateAheadOfBlocks(t *testing.T) {
 	require.Less(lastBn, lastBlock, "TxNums must be behind commitment block for the test to be meaningful")
 
 	// Phase 3: NewSharedDomains must return ErrBehindCommitment AND a fully-initialized SD.
-	doms, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
+	doms, err = execctx.NewSharedDomains(ctx, rwTx, log.New(), commitment.DefaultTrieConfig())
 	require.ErrorIs(err, commitmentdb.ErrBehindCommitment, "expected ErrBehindCommitment signal")
 	require.NotNil(doms, "SD must be returned alongside the signal error")
 	defer doms.Close()
