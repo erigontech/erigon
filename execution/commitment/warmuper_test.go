@@ -92,7 +92,7 @@ func TestWarmuper_TrieReaderWarmup(t *testing.T) {
 	warmuper := NewWarmuper(context.Background(), cfg)
 	warmuper.Start()
 
-	warmuper.WarmKey(hashedKey)
+	warmuper.WarmKey(hashedKey, 0)
 
 	err := warmuper.Wait()
 	require.NoError(t, err)
@@ -144,7 +144,7 @@ func TestWarmuper_TrieReaderWarmup_StorageKey(t *testing.T) {
 	warmuper := NewWarmuper(context.Background(), cfg)
 	warmuper.Start()
 
-	warmuper.WarmKey(hashedKey)
+	warmuper.WarmKey(hashedKey, 0)
 
 	err := warmuper.Wait()
 	require.NoError(t, err)
@@ -194,7 +194,7 @@ func TestWarmuper_ConcurrentWorkers_RaceDetector(t *testing.T) {
 
 	// Submit all keys.
 	for _, hk := range hashedKeys {
-		warmuper.WarmKey(hk)
+		warmuper.WarmKey(hk, 0)
 	}
 
 	err := warmuper.Wait()
@@ -223,7 +223,7 @@ func TestWarmuper_EmptyTrie(t *testing.T) {
 
 	hashedKey := make([]byte, 64)
 	hashedKey[0] = 0x5
-	warmuper.WarmKey(hashedKey)
+	warmuper.WarmKey(hashedKey, 0)
 
 	err := warmuper.Wait()
 	require.NoError(t, err)
@@ -257,7 +257,7 @@ func TestWarmuper_SharedCachePopulated(t *testing.T) {
 
 	warmuper := NewWarmuper(context.Background(), cfg)
 	warmuper.Start()
-	warmuper.WarmKey(hashedKey)
+	warmuper.WarmKey(hashedKey, 0)
 	require.NoError(t, warmuper.Wait())
 
 	// Use a separate noop context to prove reads come from cache, not DB.

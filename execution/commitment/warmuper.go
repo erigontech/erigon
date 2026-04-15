@@ -37,7 +37,13 @@ type WarmupConfig struct {
 	CtxFactory    TrieContextFactory
 	NumWorkers    int
 	AccountKeyLen int // plain account key length for TrieReader (typically length.Addr = 20)
+	MaxDepth      int // caps walk depth per key; 0 means default (128)
 	LogPrefix     string
+}
+
+type warmupWorkItem struct {
+	hashedKey  []byte
+	startDepth int
 }
 
 // WarmupStats contains statistics about the warmup phase.
@@ -55,10 +61,11 @@ type Warmuper struct {
 	cache         *CachingPatriciaContext
 	numWorkers    int
 	accountKeyLen int
+	maxDepth      int
 	logPrefix     string
 
 	// Work channel for incoming keys
-	work chan []byte
+	work chan warmupWorkItem
 	// Worker group
 	g *errgroup.Group
 
@@ -74,6 +81,10 @@ type Warmuper struct {
 // NewWarmuper creates a new Warmuper instance.
 func NewWarmuper(ctx context.Context, cfg WarmupConfig) *Warmuper {
 	ctx, cancel := context.WithCancel(ctx)
+	maxDepth := cfg.MaxDepth
+	if maxDepth <= 0 {
+		maxDepth = 128
+	}
 	w := &Warmuper{
 		ctx:           ctx,
 		cancel:        cancel,
@@ -81,6 +92,7 @@ func NewWarmuper(ctx context.Context, cfg WarmupConfig) *Warmuper {
 		cache:         NewCachingPatriciaContext(),
 		numWorkers:    cfg.NumWorkers,
 		accountKeyLen: cfg.AccountKeyLen,
+		maxDepth:      maxDepth,
 		logPrefix:     cfg.LogPrefix,
 	}
 	return w
@@ -102,7 +114,7 @@ func (w *Warmuper) Start() {
 	}
 	w.startTime = time.Now()
 
-	w.work = make(chan []byte, w.numWorkers*64)
+	w.work = make(chan warmupWorkItem, w.numWorkers*64)
 	w.g, w.ctx = errgroup.WithContext(w.ctx)
 
 	for i := 0; i < w.numWorkers; i++ {
@@ -129,14 +141,14 @@ func (w *Warmuper) Start() {
 				return nil
 			}
 
-			for hashedKey := range w.work {
+			for item := range w.work {
 				select {
 				case <-w.ctx.Done():
 					return w.ctx.Err()
 				default:
 				}
 
-				_, _, err := reader.LookupWithVisitor(hashedKey, visitor)
+				_, _, err := reader.LookupWithVisitor(item.hashedKey, visitor)
 				if err != nil {
 					log.Debug(fmt.Sprintf("[%s][warmup] lookup failed", w.logPrefix),
 						"error", err)
@@ -150,16 +162,16 @@ func (w *Warmuper) Start() {
 
 // WarmKey submits a hashed key for warming. Call Start() first.
 // The key is copied internally so the caller may reuse/overwrite the slice.
-func (w *Warmuper) WarmKey(hashedKey []byte) {
+// startDepth indicates how many leading nibbles are already warm (from a
+// previous key sharing a common prefix); the worker walk begins there.
+func (w *Warmuper) WarmKey(hashedKey []byte, startDepth int) {
 	if !w.started.Load() || w.numWorkers <= 0 || w.closed.Load() {
 		return
 	}
-	// Copy the key because callers (HashSort) may reuse the underlying
-	// arena-backed buffer before the worker reads the key.
 	keyCopy := make([]byte, len(hashedKey))
 	copy(keyCopy, hashedKey)
 	select {
-	case w.work <- keyCopy:
+	case w.work <- warmupWorkItem{hashedKey: keyCopy, startDepth: startDepth}:
 	case <-w.ctx.Done():
 	default: // non-blocking
 	}

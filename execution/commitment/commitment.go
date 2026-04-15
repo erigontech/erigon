@@ -1695,7 +1695,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 			t.batchSlab = append(t.batchSlab, KeyUpdate{hashedKey: hk, plainKey: unsafe.String(unsafe.SliceData(pk), len(pk))})
 
 			if warmuper != nil {
-				warmuper.WarmKey(hk)
+				warmuper.WarmKey(hk, 0)
 			}
 
 			// Process batch when full
@@ -1759,7 +1759,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 			t.batchSlab = append(t.batchSlab, KeyUpdate{hashedKey: hk, plainKey: item.plainKey, update: item.update})
 
 			if warmuper != nil {
-				warmuper.WarmKey(hk)
+				warmuper.WarmKey(hk, 0)
 			}
 
 			// Process batch when full
