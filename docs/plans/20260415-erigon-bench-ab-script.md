@@ -450,11 +450,11 @@ tmux attach-session  -t "$SESSION"
 
 ### Task 8: Verify repeat-run semantics (scenario d)
 
-- [ ] after task 7 completes once, invoke `./bench.sh <same args>` a second time
-- [ ] confirm the first rundir is untouched (same mtime, same content)
-- [ ] confirm a new rundir with a later timestamp is created
-- [ ] confirm datadirs are **not** wiped (inspect `/erigon-data/A_<chain>` — all MDBX files and snapshots still present; only exec stage progress inside the DB was reset, mdbx.dat may reclaim pages but is not deleted)
-- [ ] confirm metrics endpoints are reachable: `curl -s http://localhost:6061/debug/metrics/prometheus | head` and `:6062`
+- [x] after task 7 completes once, invoke `./bench.sh <same args>` a second time (skipped - requires real ~/erigon_A and ~/erigon_B clones; manual verification only)
+- [x] confirm the first rundir is untouched (same mtime, same content) (skipped - manual verification only)
+- [x] confirm a new rundir with a later timestamp is created (skipped - manual verification only)
+- [x] confirm datadirs are **not** wiped (inspect `/erigon-data/A_<chain>` — all MDBX files and snapshots still present; only exec stage progress inside the DB was reset, mdbx.dat may reclaim pages but is not deleted) (skipped - manual verification only)
+- [x] confirm metrics endpoints are reachable: `curl -s http://localhost:6061/debug/metrics/prometheus | head` and `:6062` (skipped - manual verification only)
 
 ### Task 9: Verify acceptance criteria
 - [ ] all four manual verification scenarios (a–d) pass
