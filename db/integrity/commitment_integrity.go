@@ -969,7 +969,13 @@ func checkCommitmentHistAtBlkWithIdx(ctx context.Context, tx kv.TemporalTx, sd *
 	// limit which blocks can be verified.
 	aggTx := state.AggTx(tx)
 	if aggMax := aggTx.EndTxNumNoCommitment(); maxTxNum+1 > aggMax {
-		blockNumOfState, _, _ := txNumsReader.FindBlockNum(ctx, tx, aggMax)
+		blockNumOfState, ok, err := txNumsReader.FindBlockNum(ctx, tx, aggMax)
+		if err != nil {
+			return fmt.Errorf("block %d is beyond state coverage and FindBlockNum failed: %w", blockNum, err)
+		}
+		if !ok {
+			return fmt.Errorf("block %d is beyond state coverage (aggMax txNum=%d)", blockNum, aggMax)
+		}
 		return fmt.Errorf("block %d is beyond latest block with state %d", blockNum, blockNumOfState)
 	}
 	toTxNum := maxTxNum + 1
@@ -1082,10 +1088,12 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 	const logInterval = 20 * time.Second
 	logTicker := time.NewTicker(logInterval)
 	defer logTicker.Stop()
+	progressCtx, cancelProgress := context.WithCancel(ctx)
+	defer cancelProgress()
 	go func() {
 		for {
 			select {
-			case <-ctx.Done():
+			case <-progressCtx.Done():
 				return
 			case <-logTicker.C:
 				done := checked.Load()
