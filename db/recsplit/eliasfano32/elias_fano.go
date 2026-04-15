@@ -372,7 +372,7 @@ func (ef *EliasFano) searchUpperReverse(hi uint64) uint64 {
 	}
 	n := int(hiIdx - lo)
 	if n <= 0 {
-		return lo
+		return lo + 1
 	}
 	i := sort.Search(n+1, func(i int) bool {
 		return ef.upper(ef.count-lo-uint64(i)) <= hi
