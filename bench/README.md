@@ -57,6 +57,8 @@ Each run creates:
   metadata.md      # Branch SHAs, datadirs, config paths, metrics URLs
   config_A.toml    # Frozen copy of A-side config
   config_B.toml    # Frozen copy of B-side config
+  run_A.sh         # Launcher script for A (stage_exec reset + erigon)
+  run_B.sh         # Launcher script for B (stage_exec reset + erigon)
   A.log            # Combined stdout+stderr from A's reset + erigon
   B.log            # Combined stdout+stderr from B's reset + erigon
 ```

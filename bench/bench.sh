@@ -16,9 +16,14 @@ BRANCH_A=$1
 BRANCH_B=$2
 CHAIN=$3
 
-for arg in "$BRANCH_A" "$BRANCH_B" "$CHAIN"; do
-  [[ "$arg" =~ ^[a-zA-Z0-9_./-]+$ ]] || { echo "ERROR: invalid argument: $arg"; exit 1; }
+for arg in "$BRANCH_A" "$BRANCH_B"; do
+  [[ "$arg" != -* ]] || { echo "ERROR: branch name must not start with a dash: $arg"; exit 1; }
+  [[ "$arg" != +* ]] || { echo "ERROR: branch name must not start with '+' (refspec syntax): $arg"; exit 1; }
+  [[ "$arg" != HEAD && "$arg" != "@" ]] || { echo "ERROR: '$arg' is a special git ref, not a branch name"; exit 1; }
+  git check-ref-format "refs/heads/$arg" 2>/dev/null || { echo "ERROR: invalid branch name: $arg"; exit 1; }
+  [[ "$arg" != *'$'* && "$arg" != *'`'* && "$arg" != *'"'* ]] || { echo "ERROR: branch name contains shell-unsafe characters: $arg"; exit 1; }
 done
+[[ "$CHAIN" =~ ^[a-zA-Z0-9_.-]+$ ]] || { echo "ERROR: invalid chain name (no slashes): $CHAIN"; exit 1; }
 
 # --- Precondition validation ---
 for d in "$ERIGON_A" "$ERIGON_B"; do
@@ -52,7 +57,7 @@ prepare_branch() {
   local dir=$1 branch=$2
   echo "Preparing $dir on branch $branch..."
   git -C "$dir" fetch origin "$branch"
-  git -C "$dir" switch "$branch"
+  git -C "$dir" switch -- "$branch"
   git -C "$dir" pull --ff-only origin "$branch"
 }
 prepare_branch "$ERIGON_A" "$BRANCH_A"
@@ -76,9 +81,9 @@ echo "Build complete. All four binaries verified."
 
 # --- SHAs ---
 sha_a=$(git -C "$ERIGON_A" rev-parse --short HEAD)
-subj_a=$(git -C "$ERIGON_A" log -1 --pretty=%s | sed 's/[\\`$]/\\&/g')
+subj_a=$(git -C "$ERIGON_A" log -1 --pretty=format:%s)
 sha_b=$(git -C "$ERIGON_B" rev-parse --short HEAD)
-subj_b=$(git -C "$ERIGON_B" log -1 --pretty=%s | sed 's/[\\`$]/\\&/g')
+subj_b=$(git -C "$ERIGON_B" log -1 --pretty=format:%s)
 
 # --- Paths ---
 TS=$(date -u +%Y%m%d-%H%M%S)
@@ -127,23 +132,27 @@ echo "Starting tmux session erigon-bench-$TS..."
 
 # --- Tmux launch ---
 SESSION="erigon-bench-$TS"
-make_cmd() {
+write_pane_script() {
   local side=$1 dir=$2 datadir=$3
-  cat <<EOS
-set -o pipefail; cd "$dir" && { echo "=== stage_exec --reset ==="; \
-  ./build/bin/integration stage_exec --datadir="$datadir" --chain="$CHAIN" --reset && \
-  echo "=== erigon ===" && \
-  ./build/bin/erigon --config="$RUNDIR/config_$side.toml" --datadir="$datadir" --chain="$CHAIN"; \
+  cat > "$RUNDIR/run_$side.sh" <<EOS
+#!/usr/bin/env bash
+set -o pipefail
+cd "$dir" && {
+  echo "=== stage_exec --reset ==="
+  ./build/bin/integration stage_exec --datadir="$datadir" --chain="$CHAIN" --reset &&
+  echo "=== erigon ===" &&
+  ./build/bin/erigon --config="$RUNDIR/config_$side.toml" --datadir="$datadir" --chain="$CHAIN"
 } 2>&1 | tee "$RUNDIR/$side.log"
 EOS
+  chmod +x "$RUNDIR/run_$side.sh"
 }
-CMD_A=$(make_cmd A "$ERIGON_A" "$DATADIR_A")
-CMD_B=$(make_cmd B "$ERIGON_B" "$DATADIR_B")
+write_pane_script A "$ERIGON_A" "$DATADIR_A"
+write_pane_script B "$ERIGON_B" "$DATADIR_B"
 
-tmux new-session     -d -s "$SESSION" -n bench "$CMD_A"
+tmux new-session     -d -s "$SESSION" -n bench "$RUNDIR/run_A.sh"
 tmux set-window-option -t "$SESSION:bench" pane-base-index 0
 tmux set-window-option -t "$SESSION:bench" pane-border-status top
-tmux split-window    -v -t "$SESSION:bench" "$CMD_B"
+tmux split-window    -v -t "$SESSION:bench" "$RUNDIR/run_B.sh"
 tmux select-pane     -t "$SESSION:bench.0" -T "A: $BRANCH_A"
 tmux select-pane     -t "$SESSION:bench.1" -T "B: $BRANCH_B"
 tmux select-pane     -t "$SESSION:bench.0"
