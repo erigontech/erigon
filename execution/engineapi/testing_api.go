@@ -95,6 +95,52 @@ func (t *testingImpl) getAccountNonce(ctx context.Context, address common.Addres
 	return acc.Nonce, nil
 }
 
+// decodeTxnProvider decodes raw transactions into a TxnProvider.
+// Returns nil if transactions is nil (mempool path).
+func (t *testingImpl) decodeTxnProvider(ctx context.Context, transactions *[]hexutil.Bytes, blockNumber, timestamp uint64) (txnprovider.TxnProvider, error) {
+	if transactions == nil {
+		return nil, nil
+	}
+	decoded := make([]types.Transaction, 0, len(*transactions))
+	signer := types.MakeSigner(t.server.config, blockNumber, timestamp)
+	expectedNonce := make(map[accounts.Address]uint64, len(*transactions))
+	for i, rawTx := range *transactions {
+		tx, err := types.DecodeTransaction(rawTx)
+		if err != nil {
+			return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("transaction %d: decode error: %v", i, err)}
+		}
+		sender, err := signer.Sender(tx)
+		if err != nil {
+			return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("transaction %d: cannot recover sender: %v", i, err)}
+		}
+		tx.SetSender(sender)
+		if _, seen := expectedNonce[sender]; !seen {
+			stateNonce, err := t.getAccountNonce(ctx, sender.Value())
+			if err != nil {
+				return nil, err
+			}
+			expectedNonce[sender] = stateNonce
+		}
+		want := expectedNonce[sender]
+		got := tx.GetNonce()
+		if got > want {
+			return nil, &rpc.CustomError{
+				Code:    rpc.ErrCodeDefault,
+				Message: fmt.Sprintf("nonce too high: address %v, tx: %d state: %d", sender.Value(), got, want),
+			}
+		}
+		if got < want {
+			return nil, &rpc.CustomError{
+				Code:    rpc.ErrCodeDefault,
+				Message: fmt.Sprintf("nonce too low: address %v, tx: %d state: %d", sender.Value(), got, want),
+			}
+		}
+		expectedNonce[sender]++
+		decoded = append(decoded, tx)
+	}
+	return &staticTxnProvider{txns: decoded}, nil
+}
+
 // NewTestingRPCEntry returns the rpc.API descriptor for the testing_ namespace.
 func NewTestingRPCEntry(server *EngineServer, logger log.Logger, db kv.TemporalRoDB) rpc.API {
 	return rpc.API{
@@ -158,50 +204,9 @@ func (t *testingImpl) BuildBlockV1(
 		return nil, &rpc.InvalidParamsError{Message: "parentBeaconBlockRoot not supported before Cancun"}
 	}
 
-	var customProvider txnprovider.TxnProvider
-	if transactions != nil {
-		decoded := make([]types.Transaction, 0, len(*transactions))
-		if len(*transactions) > 0 {
-			signer := types.MakeSigner(t.server.config, parentHeader.Number.Uint64()+1, timestamp)
-			// Track expected next nonce per sender to support sequential multi-tx lists.
-			expectedNonce := make(map[accounts.Address]uint64, len(*transactions))
-			for i, rawTx := range *transactions {
-				tx, err := types.DecodeTransaction(rawTx)
-				if err != nil {
-					return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("transaction %d: decode error: %v", i, err)}
-				}
-				sender, err := signer.Sender(tx)
-				if err != nil {
-					return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("transaction %d: cannot recover sender: %v", i, err)}
-				}
-				tx.SetSender(sender)
-
-				if _, seen := expectedNonce[sender]; !seen {
-					stateNonce, err := t.getAccountNonce(ctx, sender.Value())
-					if err != nil {
-						return nil, err
-					}
-					expectedNonce[sender] = stateNonce
-				}
-				want := expectedNonce[sender]
-				got := tx.GetNonce()
-				if got > want {
-					return nil, &rpc.CustomError{
-						Code:    rpc.ErrCodeDefault,
-						Message: fmt.Sprintf("nonce too high: address %v, tx: %d state: %d", sender.Value(), got, want),
-					}
-				}
-				if got < want {
-					return nil, &rpc.CustomError{
-						Code:    rpc.ErrCodeDefault,
-						Message: fmt.Sprintf("nonce too low: address %v, tx: %d state: %d", sender.Value(), got, want),
-					}
-				}
-				expectedNonce[sender]++
-				decoded = append(decoded, tx)
-			}
-		}
-		customProvider = &staticTxnProvider{txns: decoded}
+	customProvider, err := t.decodeTxnProvider(ctx, transactions, parentHeader.Number.Uint64()+1, timestamp)
+	if err != nil {
+		return nil, err
 	}
 
 	// Build the AssembleBlock parameters (mirrors forkchoiceUpdated logic).
@@ -282,20 +287,11 @@ func (t *testingImpl) BuildBlockV1(
 	response.ShouldOverrideBuilder = false
 	// Return blockValue=0, matching Geth's BuildTestingPayload behaviour.
 	response.BlockValue = new(hexutil.Big)
-	// Strip BAL (EIP-7928, Amsterdam+) and/or override extraData, recomputing blockHash.
-	// BAL is an Erigon-specific field unknown to Geth: if present it is excluded from the
-	// payload so the blockHash matches what a Geth-compatible client would compute.
-	// The nil-check is implicitly fork-gated: the builder only populates BlockAccessList
-	// for Amsterdam+ blocks, so it is nil for all earlier forks.
-	if response.ExecutionPayload.BlockAccessList != nil || extraData != nil {
+	if extraData != nil {
 		h := types.CopyHeader(assembled.Block.Block.Header())
-		h.BlockAccessListHash = nil
-		if extraData != nil {
-			h.Extra = *extraData
-			response.ExecutionPayload.ExtraData = *extraData
-		}
+		h.Extra = *extraData
+		response.ExecutionPayload.ExtraData = *extraData
 		response.ExecutionPayload.BlockHash = h.Hash()
-		response.ExecutionPayload.BlockAccessList = nil
 	}
 
 	return response, nil
@@ -312,5 +308,7 @@ func (s *staticTxnProvider) ProvideTxns(_ context.Context, _ ...txnprovider.Prov
 	if !s.done.CompareAndSwap(false, true) {
 		return nil, nil
 	}
-	return s.txns, nil
+	txns := s.txns
+	s.txns = nil // release for GC after handing off
+	return txns, nil
 }
