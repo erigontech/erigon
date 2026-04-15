@@ -814,16 +814,16 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	// This prevents the collation/pruning race where a fresh read-transaction
 	// opened later could see step S+1 values for keys modified in step S. See #20169.
 	type domainWork struct {
-		d                 *Domain
-		id                int
+		d                   *Domain
+		id                  int
 		firstStepNotInFiles kv.Step
-		collationTx       kv.Tx
+		collationTx         kv.Tx
 	}
 	type iiWork struct {
-		ii                *InvertedIndex
-		iikey             int
+		ii                  *InvertedIndex
+		iikey               int
 		firstStepNotInFiles kv.Step
-		collationTx       kv.Tx
+		collationTx         kv.Tx
 	}
 	var domainWorks []domainWork
 	var iiWorks []iiWork
@@ -835,7 +835,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		if step < firstStepNotInFiles {
 			continue
 		}
-		tx, txErr := a.db.BeginRo(ctx)
+		tx, txErr := a.db.BeginRo(ctx) //nolint:gocritic
 		if txErr != nil {
 			// Rollback any already-opened transactions
 			for _, w := range domainWorks {
@@ -853,7 +853,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		if step < firstStepNotInFiles {
 			continue
 		}
-		tx, txErr := a.db.BeginRo(ctx)
+		tx, txErr := a.db.BeginRo(ctx) //nolint:gocritic
 		if txErr != nil {
 			for _, w := range domainWorks {
 				w.collationTx.Rollback()

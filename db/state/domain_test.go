@@ -881,6 +881,7 @@ func TestDomain_CollationIsolatedFromLaterSteps(t *testing.T) {
 	// Write both keys in step 0, then k1 again in step 1, all in one transaction.
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
+	defer tx.Rollback() //nolint:gocritic
 	dt := d.beginForTests()
 	w := dt.NewWriter()
 
