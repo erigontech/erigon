@@ -59,20 +59,27 @@ type Method[Params any, Result any] struct {
 	fn func(ctx context.Context, params Params) (Result, error)
 }
 
-// invoke implements [invoker]. It unmarshals params into the typed Params
-// value (skipping unmarshal for empty/null/[] params), calls fn, and returns
-// the result as any for the caller to marshal.
+// invoke implements [invoker]. It unmarshals params into the typed Params value
+// and calls fn, returning the result as any.
 //
-// JSON-RPC 2.0 params may be either a named object {"field":val} or a
-// positional array [val, ...]. For struct Params types the positional array
-// form is treated as a single-element array containing the struct, which is
-// the convention used by go-ethereum's client when calling with one arg.
+// Supported params forms:
+//   - omitted / null / [] → zero-value Params (no-arg methods)
+//   - {"field":val, ...}  → named-object form, unmarshalled directly into Params
+//   - [obj]               → single-element positional array; the element is unwrapped
+//     and unmarshalled into Params (go-ethereum client convention for one struct arg)
+//   - [a, b, ...]         → multi-element positional array; unmarshalled directly into
+//     Params (works when Params is a slice or array type)
+//
+// Leading JSON whitespace is trimmed before these checks so whitespace-padded
+// payloads are handled identically to the reflection-based path.
 func (m Method[Params, Result]) invoke(ctx context.Context, raw json.RawMessage) (any, error) {
 	var p Params
+	raw = bytes.TrimSpace(raw)
 	if len(raw) > 0 && !bytes.Equal(raw, jsonNull) && !bytes.Equal(raw, jsonEmptyArray) {
-		// Unwrap positional single-element array [obj] → obj, which is the form
-		// used by go-ethereum's client when calling a method with one struct arg.
 		if raw[0] == '[' {
+			// Positional array: unwrap single-element [obj] → obj so struct Params
+			// types work naturally. Multi-element arrays are passed through as-is,
+			// which works when Params is a slice/array type.
 			var arr []json.RawMessage
 			if err := json.Unmarshal(raw, &arr); err != nil {
 				return nil, &InvalidParamsError{err.Error()}
@@ -82,8 +89,7 @@ func (m Method[Params, Result]) invoke(ctx context.Context, raw json.RawMessage)
 				raw = nil
 			case 1:
 				raw = arr[0]
-			default:
-				return nil, &InvalidParamsError{fmt.Sprintf("expected 1 argument, got %d", len(arr))}
+				// default: leave raw unchanged; json.Unmarshal below handles it
 			}
 		}
 		if len(raw) > 0 {

@@ -26,7 +26,6 @@ package rpc
 //   - parsePositionalArguments (json.NewDecoder + reflect.New per arg)
 //   - make([]reflect.Value, ...) per call
 //   - reflect.Value.Call for the handler function
-//   - json.Marshal of the result via *jsonrpcMessage intermediary
 
 import (
 	"context"
@@ -64,8 +63,6 @@ func BenchmarkDispatch_Reflect_NoParams(b *testing.B) {
 	logger := log.New()
 	s := NewServer(50, false, false, true, logger, time.Duration(0))
 	defer s.Stop()
-	// Registered via the legacy reflection path.
-	type svc struct{}
 	s.RegisterName("bench", benchNoParamService{}) //nolint:errcheck
 	ts := httptest.NewServer(s)
 	defer ts.Close()
@@ -93,9 +90,11 @@ func BenchmarkDispatch_Typed_NoParams(b *testing.B) {
 	logger := log.New()
 	s := NewServer(50, false, false, true, logger, time.Duration(0))
 	defer s.Stop()
-	RegisterMethod(s, "bench_blockNumber", func(ctx context.Context, _ struct{}) (uint64, error) {
+	if err := RegisterMethod(s, "bench_blockNumber", func(ctx context.Context, _ struct{}) (uint64, error) {
 		return benchEthBlockNumber(ctx)
-	})
+	}); err != nil {
+		b.Fatal(err)
+	}
 	ts := httptest.NewServer(s)
 	defer ts.Close()
 
@@ -149,7 +148,9 @@ func BenchmarkDispatch_Typed_WithParams(b *testing.B) {
 	logger := log.New()
 	s := NewServer(50, false, false, true, logger, time.Duration(0))
 	defer s.Stop()
-	RegisterMethod(s, "bench_getBalance", benchEthGetBalance)
+	if err := RegisterMethod(s, "bench_getBalance", benchEthGetBalance); err != nil {
+		b.Fatal(err)
+	}
 	ts := httptest.NewServer(s)
 	defer ts.Close()
 
