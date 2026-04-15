@@ -6,10 +6,11 @@ import (
 	"sync"
 	"time"
 
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
+
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/p2p"
 	"github.com/erigontech/erigon/common/log/v3"
-	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
 
 var (
@@ -58,9 +59,22 @@ func (t *TopicSubscriptions) Get(topic string) *TopicSubscription {
 }
 
 func (t *TopicSubscriptions) Add(topic string, topicHandle *pubsub.Topic, validator pubsub.ValidatorEx) error {
+	deferredExpiry, ok, err := t.addInternal(topic, topicHandle, validator)
+	if err != nil {
+		return err
+	}
+	if ok {
+		return t.SubscribeWithExpiry(topic, deferredExpiry)
+	}
+	return nil
+}
+
+func (t *TopicSubscriptions) addInternal(topic string, topicHandle *pubsub.Topic, validator pubsub.ValidatorEx) (deferredExpiry time.Time, hasDeferredExpiry bool, err error) {
 	t.mutex.Lock()
+	defer t.mutex.Unlock()
+
 	if _, ok := t.subs[topic]; ok {
-		return errors.New("topic already exists")
+		return time.Time{}, false, errors.New("topic already exists")
 	}
 	t.subs[topic] = &TopicSubscription{
 		topic:     topicHandle,
@@ -70,11 +84,9 @@ func (t *TopicSubscriptions) Add(topic string, topicHandle *pubsub.Topic, valida
 	}
 	if expiry, ok := t.toSubscribes[topic]; ok {
 		delete(t.toSubscribes, topic)
-		t.mutex.Unlock()
-		return t.SubscribeWithExpiry(topic, expiry)
+		return expiry, true, nil
 	}
-	t.mutex.Unlock()
-	return nil
+	return time.Time{}, false, nil
 }
 
 func (t *TopicSubscriptions) Remove(topic string) error {

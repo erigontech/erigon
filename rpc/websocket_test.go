@@ -26,12 +26,14 @@ import (
 	"net/http/httptest"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 func TestWebsocketClientHeaders(t *testing.T) {
@@ -310,5 +312,63 @@ func wsPingTestHandler(t *testing.T, conn *websocket.Conn, shutdown, sendPing <-
 			conn.Close()
 			return
 		}
+	}
+}
+
+// dbOverloadSvc simulates a service whose method returns ErrReadTxLimitExceeded.
+// It also records whether the handler context had kv.NonBlockingAcquire set.
+type dbOverloadSvc struct {
+	sawNonBlocking atomic.Bool
+}
+
+func (s *dbOverloadSvc) Overload(ctx context.Context) error {
+	s.sawNonBlocking.Store(kv.IsNonBlockingAcquire(ctx))
+	return kv.ErrReadTxLimitExceeded
+}
+
+// TestWebsocketNonBlockingAcquire verifies two things about the WS handler:
+//  1. The context passed to method handlers has kv.WithNonBlockingAcquire tagged,
+//     so a real BeginRo would use TryAcquire instead of blocking.
+//  2. When a handler returns kv.ErrReadTxLimitExceeded, remapDBOverload converts it
+//     to JSON-RPC -32005 and the client receives that error code (no HTTP 503 is
+//     possible on an already-upgraded WebSocket connection).
+func TestWebsocketNonBlockingAcquire(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+
+	svc := &dbOverloadSvc{}
+	srv := NewServer(50, false, false, true, logger, 100)
+	if err := srv.RegisterName("db", svc); err != nil {
+		t.Fatal(err)
+	}
+	httpsrv := httptest.NewServer(srv.WebsocketHandler([]string{"*"}, nil, false, logger))
+	defer srv.Stop()
+	defer httpsrv.Close()
+
+	wsURL := "ws:" + strings.TrimPrefix(httpsrv.URL, "http:")
+	client, err := DialWebsocket(context.Background(), wsURL, "", logger)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer client.Close()
+
+	var result any
+	callErr := client.Call(&result, "db_overload")
+
+	// The handler context must have NonBlockingAcquire set.
+	if !svc.sawNonBlocking.Load() {
+		t.Error("handler context did not have kv.NonBlockingAcquire tagged")
+	}
+
+	// The client must receive a JSON-RPC -32005 (not a nil error, not a generic error).
+	if callErr == nil {
+		t.Fatal("expected -32005 error but Call succeeded")
+	}
+	rpcErr, ok := callErr.(Error)
+	if !ok {
+		t.Fatalf("expected rpc.Error, got %T: %v", callErr, callErr)
+	}
+	if rpcErr.ErrorCode() != ErrCodeServerOverloaded {
+		t.Errorf("expected error code %d (server overloaded), got %d", ErrCodeServerOverloaded, rpcErr.ErrorCode())
 	}
 }
