@@ -52,14 +52,11 @@ func (sf *SelectedStaticFiles) Close() {
 	clist = append(clist, sf.ii...)
 	for _, group := range clist {
 		for _, item := range group {
-			if item != nil {
-				if item.decompressor != nil {
-					item.decompressor.Close()
-				}
-				if item.index != nil {
-					item.index.Close()
-				}
+			if item == nil {
+				continue
 			}
+			item.decompressor.Close()
+			item.index.Close()
 		}
 	}
 }
@@ -134,14 +131,11 @@ func (mf *MergedFilesV3) Close() {
 	}
 	clist = append(clist, mf.iis...)
 	for _, item := range clist {
-		if item != nil {
-			if item.decompressor != nil {
-				item.decompressor.Close()
-			}
-			if item.index != nil {
-				item.index.Close()
-			}
+		if item == nil {
+			continue
 		}
+		item.decompressor.Close()
+		item.index.Close()
 	}
 }
 
@@ -161,17 +155,12 @@ func (mf MergedFiles) FillV3(m *MergedFilesV3) MergedFiles {
 func (mf MergedFiles) Close() {
 	for id := range mf.d {
 		for _, item := range []*FilesItem{mf.d[id], mf.dHist[id], mf.dIdx[id]} {
-			if item != nil {
-				if item.decompressor != nil {
-					item.decompressor.Close()
-				}
-				if item.decompressor != nil {
-					item.index.Close()
-				}
-				if item.bindex != nil {
-					item.bindex.Close()
-				}
+			if item == nil {
+				continue
 			}
+			item.decompressor.Close()
+			item.index.Close()
+			item.bindex.Close()
 		}
 	}
 }

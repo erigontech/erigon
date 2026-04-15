@@ -1128,9 +1128,7 @@ func TestHistoryAndIIAlignment(t *testing.T) {
 	})
 	t.Cleanup(func() {
 		h.dirtyFiles.Scan(func(item *FilesItem) bool {
-			if item.decompressor != nil {
-				item.decompressor.Close()
-			}
+			item.decompressor.Close()
 			return true
 		})
 	})
@@ -1148,9 +1146,7 @@ func TestHistoryAndIIAlignment(t *testing.T) {
 	})
 	t.Cleanup(func() {
 		ii.dirtyFiles.Scan(func(item *FilesItem) bool {
-			if item.decompressor != nil {
-				item.decompressor.Close()
-			}
+			item.decompressor.Close()
 			return true
 		})
 	})
