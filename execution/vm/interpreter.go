@@ -61,45 +61,45 @@ type CallContext struct {
 	stateGas uint64
 	input    []byte
 	Memory   Memory
-	Stack    Stack
-	Contract Contract
 
-	// Cached interned values — avoids double-interning the same raw value
-	// between dynamicGas and execute for the same opcode. The cache is
-	// not cleared between opcodes; it auto-invalidates by comparing the
-	// raw value on each call.
-	cachedKeyRaw  uint256.Int
-	cachedAddrRaw [20]byte
-	cachedKeyOk   bool
-	cachedAddrOk  bool
+	// Opcode-scoped key/address intern cache. cacheGen is incremented once per
+	// opcode dispatch in the interpreter loop; cachedKeyGen/cachedAddrGen hold
+	// the generation at which the entry was populated. An entry is valid only
+	// when its gen equals cacheGen, giving the gas phase and execute phase of
+	// the same opcode a shared interned value without a second unique.Make call.
+	// Placed before Stack so these fields stay in L1D rather than being pushed
+	// out by Stack.data (32 KB).
+	cacheGen      uint64
+	cachedKeyGen  uint64
+	cachedAddrGen uint64
 	cachedKey     accounts.StorageKey
 	cachedAddr    accounts.Address
+
+	Stack    Stack
+	Contract Contract
 }
 
 // peekStorageKey returns the top-of-stack value as an interned StorageKey.
-// The result is cached so that repeated calls with the same raw value
-// (e.g. gas calculation then opcode execution) skip unique.Make.
+// The result is cached for the lifetime of one opcode dispatch (gas phase +
+// execute phase share the same cacheGen), so unique.Make is called at most
+// once per opcode.
 func (ctx *CallContext) peekStorageKey() accounts.StorageKey {
-	v := ctx.Stack.peek()
-	if ctx.cachedKeyOk && *v == ctx.cachedKeyRaw {
+	if ctx.cachedKeyGen == ctx.cacheGen {
 		return ctx.cachedKey
 	}
-	ctx.cachedKeyRaw = *v
-	ctx.cachedKey = accounts.InternKey(v.Bytes32())
-	ctx.cachedKeyOk = true
+	ctx.cachedKey = accounts.InternKey(ctx.Stack.peek().Bytes32())
+	ctx.cachedKeyGen = ctx.cacheGen
 	return ctx.cachedKey
 }
 
 // peekAddress returns the top-of-stack value as an interned Address.
 // Cached like peekStorageKey.
 func (ctx *CallContext) peekAddress() accounts.Address {
-	raw := ctx.Stack.peek().Bytes20()
-	if ctx.cachedAddrOk && raw == ctx.cachedAddrRaw {
+	if ctx.cachedAddrGen == ctx.cacheGen {
 		return ctx.cachedAddr
 	}
-	ctx.cachedAddrRaw = raw
-	ctx.cachedAddr = accounts.InternAddress(raw)
-	ctx.cachedAddrOk = true
+	ctx.cachedAddr = accounts.InternAddress(ctx.Stack.peek().Bytes20())
+	ctx.cachedAddrGen = ctx.cacheGen
 	return ctx.cachedAddr
 }
 
@@ -125,8 +125,7 @@ func getCallContext(contract Contract, input []byte, gas mdgas.MdGas) *CallConte
 func (c *CallContext) put() {
 	c.Memory.reset()
 	c.Stack.Reset()
-	c.cachedKeyOk = false
-	c.cachedAddrOk = false
+	c.cacheGen = 0
 	contextPool.Put(c)
 }
 
@@ -418,6 +417,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 	anyTrace := dbg.TraceDynamicGas || debug || trace
 
 	for {
+		callContext.cacheGen++
 		if anyTrace {
 			// Capture pre-execution values for tracing.
 			logged, pcCopy, gasCopy = false, pc, callContext.gas
