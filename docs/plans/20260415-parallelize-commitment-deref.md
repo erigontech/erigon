@@ -99,11 +99,11 @@
 **Files:**
 - Modify: `db/integrity/commitment_integrity.go` (lint fixes only)
 
-- [ ] run `make lint` — fix any issues, run repeatedly until clean
-- [ ] run `go test ./db/integrity/... -count=1` to verify existing tests pass
-- [ ] run `make test-short` for broader verification
-- [ ] verify `CHECK_COMMITMENT_KVS_DEREF_WORKERS=1` produces same behavior as sequential (logical correctness)
-- [ ] verify `CHECK_COMMITMENT_KVS_DEREF_SEQUENTIAL=true` still works at the outer level (env var in `CheckCommitmentKvDeref`)
+- [x] run `make lint` — fix any issues, run repeatedly until clean
+- [x] run `go test ./db/integrity/... -count=1` to verify existing tests pass
+- [x] run `make test-short` for broader verification
+- [x] verify `CHECK_COMMITMENT_KVS_DEREF_WORKERS=1` produces same behavior as sequential (logical correctness)
+- [x] verify `CHECK_COMMITMENT_KVS_DEREF_SEQUENTIAL=true` still works at the outer level (env var in `CheckCommitmentKvDeref`)
 
 ### Task 4: Final verification
 
