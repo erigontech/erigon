@@ -230,9 +230,19 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 		return nil, err
 	}
 	defer tx.Rollback()
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, number.Uint64())
-	if err != nil {
-		return nil, err
+
+	if number != rpc.PendingBlockNumber {
+		blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
+		if err != nil {
+			if errors.As(err, &rpc.BlockNotFoundErr{}) {
+				return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
+			}
+			return nil, err
+		}
+		err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	b, err := api.blockByNumber(ctx, number, tx)
