@@ -802,15 +802,17 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	}()
 
 	ac := a.BeginFilesRo()
+	defer ac.Close()
 
 	// Phase 1: collate all domains and indices using a SINGLE read-transaction.
 	// This guarantees all collations see the exact same MDBX snapshot, eliminating
 	// the collation/pruning race where execution overwrites step S values with
 	// step S+1 data between collation reads. See #20169.
-	collationTx, err := a.db.BeginRo(ctx) //nolint:gocritic
+	collationTx, err := a.db.BeginRo(ctx)
 	if err != nil {
 		return fmt.Errorf("open collation tx: %w", err)
 	}
+	defer collationTx.Rollback()
 
 	type domainCollResult struct {
 		d         *Domain
