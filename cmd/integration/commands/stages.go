@@ -885,9 +885,43 @@ func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 		return fmt.Errorf("init qmtree tracker: %w", err)
 	}
 
+	// Pre-load the tracker on the main goroutine with a read-only tx so we
+	// know where to resume from. The actual write tx is opened lazily inside
+	// the consumer (MDBX write txs are thread-bound).
+	{
+		preloadTx, err := db.BeginRo(ctx)
+		if err != nil {
+			return fmt.Errorf("begin ro tx for qmtree preload: %w", err)
+		}
+		if err := tracker.LoadFromDB(preloadTx); err != nil {
+			logger.Warn("[stage_exec_replay] LoadFromDB failed, starting fresh", "err", err)
+		}
+		preloadTx.Rollback()
+	}
+
+	// Compute the first block we need to replay from, based on what the
+	// tracker has already processed. If NextTxNum is N, we resume at the
+	// block whose min txNum >= N.
+	fromBlock := uint64(0)
+	if tracker.NextTxNum > 0 {
+		txNumsReader := blockReader.TxnumReader()
+		if err := db.View(ctx, func(roTx kv.Tx) error {
+			resumeBlock, ok, err := txNumsReader.FindBlockNum(ctx, roTx, tracker.NextTxNum)
+			if err != nil {
+				return err
+			}
+			if ok {
+				fromBlock = resumeBlock
+			}
+			return nil
+		}); err != nil {
+			return fmt.Errorf("resolve resume block from txNum=%d: %w", tracker.NextTxNum, err)
+		}
+	}
+
 	logger.Info("[stage_exec_replay] starting conflict-free parallel replay with qmtree",
-		"from", 0, "to", toBlock, "workers", execArgs.Workers,
-		"qmtree_dir", dirs.Snap)
+		"from", fromBlock, "to", toBlock, "workers", execArgs.Workers,
+		"qmtree_dir", dirs.Snap, "resumeTxNum", tracker.NextTxNum)
 
 	startTime := time.Now()
 	// The consumer callback runs on a worker pool goroutine — MDBX write
@@ -897,7 +931,8 @@ func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 	qmTxInitDone := false
 
 	// ensureQmTx opens the MDBX write tx on first call (from the consumer
-	// goroutine) and loads existing state. Subsequent calls are no-ops.
+	// goroutine). The tracker has already been loaded above, so we only
+	// attach the write tx here — no re-load.
 	ensureQmTx := func() error {
 		if qmTxInitDone {
 			return nil
@@ -908,9 +943,6 @@ func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 			return fmt.Errorf("begin rw tx for qmtree: %w", err)
 		}
 		tracker.SetTx(qmRwTx)
-		if err := tracker.LoadFromDB(qmRwTx); err != nil {
-			logger.Warn("[stage_exec_replay] LoadFromDB failed, starting fresh", "err", err)
-		}
 		qmTxInitDone = true
 		return nil
 	}
@@ -988,7 +1020,7 @@ func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 	}
 	defer txRo.Rollback()
 
-	if err := exec.CustomTraceMapReduce(ctx, 0, toBlock, consumer, txRo, execArgs, logger); err != nil {
+	if err := exec.CustomTraceMapReduce(ctx, fromBlock, toBlock, consumer, txRo, execArgs, logger); err != nil {
 		return err
 	}
 

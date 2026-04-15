@@ -213,7 +213,17 @@ func rebuildUpperTreeFromTwigRoots(hasher Hasher, twigRoots map[uint64]common.Ha
 		return tree
 	}
 
-	youngestTwigId := (nextTxNum - 1) / LEAF_COUNT_IN_TWIG
+	// After a clean resume from fully-frozen state, nextTxNum is aligned to
+	// LEAF_COUNT_IN_TWIG (e.g. 1778125000 = 868225 * 2048). The youngest twig
+	// is then the NEXT (currently empty) one at nextTxNum / LEAF_COUNT_IN_TWIG.
+	// When nextTxNum is not aligned, the youngest twig is the partially-filled
+	// one at (nextTxNum - 1) / LEAF_COUNT_IN_TWIG.
+	var youngestTwigId uint64
+	if nextTxNum%LEAF_COUNT_IN_TWIG == 0 {
+		youngestTwigId = nextTxNum / LEAF_COUNT_IN_TWIG
+	} else {
+		youngestTwigId = (nextTxNum - 1) / LEAF_COUNT_IN_TWIG
+	}
 
 	// Set twig roots in the upper tree at twigRoot_LEVEL.
 	for twigId, root := range twigRoots {
@@ -222,11 +232,20 @@ func rebuildUpperTreeFromTwigRoots(hasher Hasher, twigRoots map[uint64]common.Ha
 	}
 	tree.youngestTwigId = youngestTwigId
 
-	// Build a null twig for the youngest (possibly incomplete) twig.
+	// Build a null twig for the youngest (possibly incomplete) twig and register
+	// it in both the upper tree's active shards AND newTwigMap. The latter is
+	// required so that SyncAndRoot / syncMtForYoungestTwig can find the live
+	// youngest twig after a clean resume (NewTree leaves only newTwigMap[0]).
 	nullMt := hasher.nullMtForTwig()
 	nullTwigVal := nullTwig(nullMt[1])
 	shardIdx, key := GetShardIdxAndKey(youngestTwigId)
 	tree.upperTree.activeTwigShards[shardIdx][key] = &nullTwigVal
+
+	// Replace the default newTwigMap[0] with an entry for the actual youngest twig.
+	// Without this, syncMtForYoungestTwig dereferences a nil *Twig (panic).
+	delete(tree.newTwigMap, 0)
+	liveYoungestTwig := hasher.nullTwig().Clone()
+	tree.newTwigMap[youngestTwigId] = liveYoungestTwig
 
 	// Sync upper nodes to compute the root.
 	var nList []uint64
