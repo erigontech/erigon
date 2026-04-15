@@ -189,12 +189,15 @@ func (w *Warmuper) Stats() WarmupStats {
 
 // DrainPending drains all pending work items from the work channel without processing them.
 func (w *Warmuper) DrainPending() {
-	if !w.started.Load() || w.numWorkers <= 0 {
+	if !w.started.Load() || w.numWorkers <= 0 || w.closed.Load() {
 		return
 	}
 	for {
 		select {
-		case <-w.work:
+		case _, ok := <-w.work:
+			if !ok {
+				return
+			}
 		default:
 			return
 		}
