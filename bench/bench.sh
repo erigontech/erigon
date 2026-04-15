@@ -115,3 +115,27 @@ EOF
 cat "$RUNDIR/metadata.md"
 echo
 echo "Starting tmux session erigon-bench-$TS..."
+
+# --- Tmux launch ---
+SESSION="erigon-bench-$TS"
+make_cmd() {
+  local side=$1 dir=$2 datadir=$3
+  cat <<EOS
+cd "$dir" && { echo "=== stage_exec --reset ==="; \
+  ./build/bin/integration stage_exec --datadir="$datadir" --chain="$CHAIN" --reset && \
+  echo "=== erigon ===" && \
+  ./build/bin/erigon --config="$RUNDIR/config_$side.toml" --datadir="$datadir" --chain="$CHAIN"; \
+} 2>&1 | tee "$RUNDIR/$side.log"
+EOS
+}
+CMD_A=$(make_cmd A "$ERIGON_A" "$DATADIR_A")
+CMD_B=$(make_cmd B "$ERIGON_B" "$DATADIR_B")
+
+tmux new-session     -d -s "$SESSION" -n bench "$CMD_A"
+tmux set-option      -t "$SESSION" pane-base-index 0
+tmux set-window-option -t "$SESSION:bench" pane-border-status top
+tmux split-window    -v -t "$SESSION:bench" "$CMD_B"
+tmux select-pane     -t "$SESSION:bench.0" -T "A: $BRANCH_A"
+tmux select-pane     -t "$SESSION:bench.1" -T "B: $BRANCH_B"
+tmux select-pane     -t "$SESSION:bench.0"
+tmux attach-session  -t "$SESSION"

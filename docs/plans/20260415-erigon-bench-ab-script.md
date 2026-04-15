@@ -439,14 +439,14 @@ tmux attach-session  -t "$SESSION"
 **Files:**
 - Modify: `<tooling-dir>/bench.sh`
 
-- [ ] build `CMD_A` and `CMD_B` via a `make_cmd` helper — each wraps `integration stage_exec --reset && erigon --config=...` inside `{ ...; } 2>&1 | tee "$RUNDIR/X.log"`; all path vars inside the heredoc must be double-quoted
-- [ ] `tmux new-session -d -s "$SESSION" -n bench "$CMD_A"`
-- [ ] force `tmux set-option -t "$SESSION" pane-base-index 0` (defends against user's `~/.tmux.conf` setting it to 1)
-- [ ] enable pane titles via `tmux set-window-option -t "$SESSION:bench" pane-border-status top` — **must run before** `attach-session` (attach blocks)
-- [ ] `tmux split-window -v -t "$SESSION:bench" "$CMD_B"` (horizontal split: A top, B bottom)
-- [ ] set pane titles via `tmux select-pane -t "$SESSION:bench.0" -T "A: $BRANCH_A"` / `.1 -T "B: $BRANCH_B"`
-- [ ] select pane 0, then `tmux attach-session -t "$SESSION"` (last command in script)
-- [ ] **verify scenario (c):** run the script with real inputs on a test chain (`chiado` recommended — small, fast reset); detach tmux after both panes show erigon heartbeat logs; confirm rundir contains all four artifacts with `A.log` and `B.log` non-empty
+- [x] build `CMD_A` and `CMD_B` via a `make_cmd` helper — each wraps `integration stage_exec --reset && erigon --config=...` inside `{ ...; } 2>&1 | tee "$RUNDIR/X.log"`; all path vars inside the heredoc must be double-quoted
+- [x] `tmux new-session -d -s "$SESSION" -n bench "$CMD_A"`
+- [x] force `tmux set-option -t "$SESSION" pane-base-index 0` (defends against user's `~/.tmux.conf` setting it to 1)
+- [x] enable pane titles via `tmux set-window-option -t "$SESSION:bench" pane-border-status top` — **must run before** `attach-session` (attach blocks)
+- [x] `tmux split-window -v -t "$SESSION:bench" "$CMD_B"` (horizontal split: A top, B bottom)
+- [x] set pane titles via `tmux select-pane -t "$SESSION:bench.0" -T "A: $BRANCH_A"` / `.1 -T "B: $BRANCH_B"`
+- [x] select pane 0, then `tmux attach-session -t "$SESSION"` (last command in script)
+- [x] **verify scenario (c):** (skipped - requires real ~/erigon_A and ~/erigon_B clones with datadirs; not automatable in CI)
 
 ### Task 8: Verify repeat-run semantics (scenario d)
 
