@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,24 +14,31 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package clique
+package app_test
 
 import (
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/db/kv/dbutils"
+	"strconv"
+	"testing"
+
+	"github.com/erigontech/erigon/node/app"
+	"github.com/stretchr/testify/require"
 )
 
-// SnapshotFullKey = SnapshotBucket + num (uint64 big endian) + hash
-func SnapshotFullKey(number uint64, hash common.Hash) []byte {
-	return append(dbutils.EncodeBlockNumber(number), hash.Bytes()...)
-}
+func TestCreateDomains(t *testing.T) {
+	for i := 0; i < 10; i++ {
+		d, err := app.NewDomain[int]()
+		require.NoError(t, err)
+		require.NotNil(t, d)
+		require.Equal(t, d.Id().String(), strconv.Itoa(i))
+	}
 
-// SnapshotKey = SnapshotBucket + num (uint64 big endian)
-func SnapshotKey(number uint64) []byte {
-	return dbutils.EncodeBlockNumber(number)
-}
-
-// SnapshotKey = SnapshotBucket + '0'
-func LastSnapshotKey() []byte {
-	return []byte{0}
+	d, err := app.NewNamedDomain[int]("test")
+	require.NoError(t, err)
+	require.NotNil(t, d)
+	require.Equal(t, d.Id().String(), "test")
+	d1, err := app.NewNamedDomain[int]("test")
+	require.NoError(t, err)
+	require.NotNil(t, d1)
+	require.Equal(t, d.Id().String(), "test")
+	require.True(t, d == d1)
 }
