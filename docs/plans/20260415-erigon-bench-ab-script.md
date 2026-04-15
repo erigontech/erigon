@@ -426,13 +426,13 @@ tmux attach-session  -t "$SESSION"
 **Files:**
 - Modify: `<tooling-dir>/bench.sh`
 
-- [ ] resolve `sha_a`/`subj_a`/`sha_b`/`subj_b` via `git -C <dir> rev-parse --short HEAD` and `git log -1 --pretty=%s`
-- [ ] compute `TS` as `date -u +%Y%m%d-%H%M%S`; compute branch slugs (`tr '/' '-'`)
-- [ ] `mkdir -p` the rundir (`~/bench-runs/$TS-<A-slug>-vs-<B-slug>`), `$DATADIR_A`, `$DATADIR_B`
-- [ ] copy `./config_A.toml` and `./config_B.toml` into rundir (plain `cp`, not symlinks)
-- [ ] write `$RUNDIR/metadata.md` via heredoc matching the template verbatim
-- [ ] echo `metadata.md` contents to stdout, then "Starting tmux session $SESSION..."
-- [ ] **verify:** run script up to this point (comment out tmux launch temporarily); inspect the rundir for the four expected artifacts (`metadata.md`, `config_A.toml`, `config_B.toml`, no logs yet)
+- [x] resolve `sha_a`/`subj_a`/`sha_b`/`subj_b` via `git -C <dir> rev-parse --short HEAD` and `git log -1 --pretty=%s`
+- [x] compute `TS` as `date -u +%Y%m%d-%H%M%S`; compute branch slugs (`tr '/' '-'`)
+- [x] `mkdir -p` the rundir (`~/bench-runs/$TS-<A-slug>-vs-<B-slug>`), `$DATADIR_A`, `$DATADIR_B`
+- [x] copy `./config_A.toml` and `./config_B.toml` into rundir (plain `cp`, not symlinks)
+- [x] write `$RUNDIR/metadata.md` via heredoc matching the template verbatim
+- [x] echo `metadata.md` contents to stdout, then "Starting tmux session $SESSION..."
+- [x] **verify:** (skipped - requires real ~/erigon_A and ~/erigon_B clones; not automatable in CI)
 
 ### Task 7: Add tmux session launch (split, pane commands, attach)
 

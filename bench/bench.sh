@@ -63,3 +63,55 @@ for d in "$ERIGON_A" "$ERIGON_B"; do
   done
 done
 echo "Build complete. All four binaries verified."
+
+# --- SHAs ---
+sanitize() { printf '%s' "$1" | sed 's/[`$\\]/\\&/g'; }
+sha_a=$(git -C "$ERIGON_A" rev-parse --short HEAD)
+subj_a=$(sanitize "$(git -C "$ERIGON_A" log -1 --pretty=%s)")
+sha_b=$(git -C "$ERIGON_B" rev-parse --short HEAD)
+subj_b=$(sanitize "$(git -C "$ERIGON_B" log -1 --pretty=%s)")
+
+# --- Paths ---
+TS=$(date -u +%Y%m%d-%H%M%S)
+slug() { printf '%s' "$1" | tr '/' '-'; }
+RUNDIR="$RUNS_BASE/$TS-$(slug "$BRANCH_A")-vs-$(slug "$BRANCH_B")"
+DATADIR_A="$DATADIR_BASE/A_$CHAIN"
+DATADIR_B="$DATADIR_BASE/B_$CHAIN"
+
+mkdir -p "$RUNDIR" "$DATADIR_A" "$DATADIR_B"
+cp "$SCRIPT_DIR/config_A.toml" "$RUNDIR/config_A.toml"
+cp "$SCRIPT_DIR/config_B.toml" "$RUNDIR/config_B.toml"
+
+# --- Journal (metadata.md) ---
+cat > "$RUNDIR/metadata.md" <<EOF
+# Erigon A/B bench — $TS UTC
+
+## A
+- branch: \`$BRANCH_A\`
+- commit: \`$sha_a\` ($subj_a)
+- datadir: \`$DATADIR_A\`
+- config: ./config_A.toml (frozen copy in this dir)
+- metrics: http://localhost:6061/debug/metrics/prometheus
+
+## B
+- branch: \`$BRANCH_B\`
+- commit: \`$sha_b\` ($subj_b)
+- datadir: \`$DATADIR_B\`
+- config: ./config_B.toml (frozen copy in this dir)
+- metrics: http://localhost:6062/debug/metrics/prometheus
+
+## Chain
+$CHAIN
+
+## Prep (runs in each pane before erigon)
+- exec-stage: reset via \`integration stage_exec --reset\`
+
+## Launch
+- tmux session: erigon-bench-$TS
+- logs: A.log, B.log (tee'd live)
+EOF
+
+# --- Echo summary ---
+cat "$RUNDIR/metadata.md"
+echo
+echo "Starting tmux session erigon-bench-$TS..."
