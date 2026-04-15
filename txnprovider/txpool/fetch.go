@@ -362,6 +362,15 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 			sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
 			return nil
 		}
+
+		const maxHashesPerMsg = 4096 // See https://github.com/ethereum/devp2p/blob/master/caps/eth.md#newpooledtransactionhashes-0x08
+		if hashCount := len(hashes) / 32; hashCount > maxHashesPerMsg {
+			f.logger.Warn("Oversized hash announcement",
+				"peer", req.PeerId, "count", hashCount)
+			sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
+			return nil
+		}
+
 		unknownHashes, err := f.pool.FilterKnownIdHashes(tx, hashes)
 		if err != nil {
 			return err
