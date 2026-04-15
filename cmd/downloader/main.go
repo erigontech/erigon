@@ -710,6 +710,7 @@ type hashChange struct{ name, released, local string }
 
 func doDiffTorrentHashes(ctx context.Context, local map[string]string) error {
 	branch := version.DefaultSnapshotGitBranch
+	url := snapcfg.ChainTomlGitHubURL(branch, chain)
 	body, err := snapcfg.FetchChainToml(ctx, snapshothashes.Github, branch, chain)
 	if err != nil {
 		return fmt.Errorf("diff: %w", err)
@@ -737,9 +738,8 @@ func doDiffTorrentHashes(ctx context.Context, local map[string]string) error {
 
 	slices.Sort(added)
 	slices.Sort(removed)
-	slices.SortFunc(changed, func(a, b hashChange) int { return strings.Compare(a.name, b.name) })
+	slices.SortFunc(changed, func(a, b hashChange) int { return cmp.Compare(a.name, b.name) })
 
-	url := snapcfg.ChainTomlGitHubURL(branch, chain)
 	fmt.Printf("released branch: %s  url: %s\n", branch, url)
 	fmt.Printf("released: %d entries, local: %d entries, changed: %d, added: %d, removed: %d\n", len(released), len(local), len(changed), len(added), len(removed))
 
