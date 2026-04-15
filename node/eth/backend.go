@@ -556,9 +556,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	logger.Info("Initialising Ethereum protocol", "network", config.NetworkID)
 	var rulesConfig any
 
-	if chainConfig.Clique != nil {
-		rulesConfig = &config.Clique
-	} else if chainConfig.Aura != nil {
+	if chainConfig.Aura != nil {
 		rulesConfig = &config.Aura
 	} else if chainConfig.Bor != nil {
 		rulesConfig = chainConfig.Bor
@@ -720,7 +718,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			ctx,
 			config.TxPool,
 			backend.chainDB,
-			kvcache.NewDummy(),
+			kvcache.NewSimple(),
 			sentries,
 			backend.stateDiffClient,
 			blockBuilderNotifyNewTxns,
@@ -1472,6 +1470,17 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 func (s *Ethereum) Start() error {
 	s.sentriesClient.StartStreamLoops(s.sentryCtx)
 	time.Sleep(10 * time.Millisecond) // just to reduce logs order confusion
+
+	// Subscribe to new-header events so StatusDataProvider can invalidate
+	// its cache when the chain head advances — zero DB reads on the hot path.
+	headersCh, unsubHeaders := s.notifications.Events.AddHeaderSubscription()
+	snapshotsCh, unsubSnapshots := s.notifications.Events.AddNewSnapshotSubscription()
+	s.bgComponentsEg.Go(func() error {
+		defer unsubHeaders()
+		defer unsubSnapshots()
+		s.statusDataProvider.Run(s.sentryCtx, headersCh, snapshotsCh)
+		return nil
+	})
 
 	if s.executionP2PMessageListener != nil && s.executionP2PPeerTracker != nil && s.executionP2PPublisher != nil {
 		s.bgComponentsEg.Go(func() error {
