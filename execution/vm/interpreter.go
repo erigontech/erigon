@@ -69,11 +69,11 @@ type CallContext struct {
 	// not cleared between opcodes; it auto-invalidates by comparing the
 	// raw value on each call.
 	cachedKeyRaw  uint256.Int
-	cachedAddrRaw uint256.Int
-	cachedKey     accounts.StorageKey
-	cachedAddr    accounts.Address
+	cachedAddrRaw [20]byte
 	cachedKeyOk   bool
 	cachedAddrOk  bool
+	cachedKey     accounts.StorageKey
+	cachedAddr    accounts.Address
 }
 
 // peekStorageKey returns the top-of-stack value as an interned StorageKey.
@@ -93,12 +93,12 @@ func (ctx *CallContext) peekStorageKey() accounts.StorageKey {
 // peekAddress returns the top-of-stack value as an interned Address.
 // Cached like peekStorageKey.
 func (ctx *CallContext) peekAddress() accounts.Address {
-	v := ctx.Stack.peek()
-	if ctx.cachedAddrOk && *v == ctx.cachedAddrRaw {
+	raw := ctx.Stack.peek().Bytes20()
+	if ctx.cachedAddrOk && raw == ctx.cachedAddrRaw {
 		return ctx.cachedAddr
 	}
-	ctx.cachedAddrRaw = *v
-	ctx.cachedAddr = accounts.InternAddress(v.Bytes20())
+	ctx.cachedAddrRaw = raw
+	ctx.cachedAddr = accounts.InternAddress(raw)
 	ctx.cachedAddrOk = true
 	return ctx.cachedAddr
 }
