@@ -23,6 +23,7 @@ package engineapi
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -31,6 +32,8 @@ import (
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -43,22 +46,27 @@ type TestingAPI interface {
 	//
 	// transactions: nil  → draw from mempool (normal builder behaviour)
 	//               []   → build an empty block (mempool bypassed, no txs)
-	//               [...] → TODO: explicit tx list not yet supported; returns error
-	//
-	// NOTE: overriding extraData post-assembly means the BlockHash in the returned payload
-	// will NOT match a block header that includes that extraData. Callers should treat the
-	// result as a template when extraData is overridden.
+	//               [...] → build a block containing exactly these transactions (strict nonce check)
 	BuildBlockV1(ctx context.Context, parentHash common.Hash, payloadAttributes *engine_types.PayloadAttributes, transactions *[]hexutil.Bytes, extraData *hexutil.Bytes) (*engine_types.GetPayloadResponse, error)
+}
+
+// accountNonceGetter is a narrow interface for looking up the current state nonce of an address.
+// It is intentionally separate from ExecutionModule to avoid forcing every stub/mock to carry
+// a method that is only used by the testing_ namespace.
+type accountNonceGetter interface {
+	GetAccountNonce(ctx context.Context, address common.Address) (uint64, error)
 }
 
 // testingImpl is the concrete implementation of TestingAPI.
 type testingImpl struct {
-	server *EngineServer
+	server      *EngineServer
+	nonceGetter accountNonceGetter // nil if executionService does not implement accountNonceGetter
 }
 
 // NewTestingImpl returns a new TestingAPI implementation wrapping the given EngineServer.
 func NewTestingImpl(server *EngineServer) TestingAPI {
-	return &testingImpl{server: server}
+	ng, _ := server.executionService.(accountNonceGetter)
+	return &testingImpl{server: server, nonceGetter: ng}
 }
 
 // NewTestingRPCEntry returns the rpc.API descriptor for the testing_ namespace.
@@ -81,12 +89,6 @@ func (t *testingImpl) BuildBlockV1(
 ) (*engine_types.GetPayloadResponse, error) {
 	if payloadAttributes == nil {
 		return nil, &rpc.InvalidParamsError{Message: "payloadAttributes must not be null"}
-	}
-
-	// Explicit transaction list is not yet supported (requires proto extension).
-	// TODO: implement forced_transactions via AssembleBlockRequest proto extension.
-	if transactions != nil && len(*transactions) > 0 {
-		return nil, &rpc.InvalidParamsError{Message: "explicit transaction list not yet supported in testing_buildBlockV1; use null for mempool or [] for empty block"}
 	}
 
 	// Validate parent block exists.
@@ -130,6 +132,55 @@ func (t *testingImpl) BuildBlockV1(
 		return nil, &rpc.InvalidParamsError{Message: "parentBeaconBlockRoot not supported before Cancun"}
 	}
 
+	var overrideTxns *[]types.Transaction
+	if transactions != nil {
+		decoded := make([]types.Transaction, 0, len(*transactions))
+		if len(*transactions) > 0 {
+			signer := types.MakeSigner(t.server.config, parentHeader.Number.Uint64()+1, timestamp)
+			// Track expected next nonce per sender to support sequential multi-tx lists.
+			expectedNonce := make(map[accounts.Address]uint64, len(*transactions))
+			for i, rawTx := range *transactions {
+				tx, err := types.DecodeTransaction(rawTx)
+				if err != nil {
+					return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("transaction %d: decode error: %v", i, err)}
+				}
+				sender, err := signer.Sender(tx)
+				if err != nil {
+					return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("transaction %d: cannot recover sender: %v", i, err)}
+				}
+				tx.SetSender(sender)
+
+				if _, seen := expectedNonce[sender]; !seen {
+					var stateNonce uint64
+					if t.nonceGetter != nil {
+						stateNonce, err = t.nonceGetter.GetAccountNonce(ctx, sender.Value())
+						if err != nil {
+							return nil, err
+						}
+					}
+					expectedNonce[sender] = stateNonce
+				}
+				want := expectedNonce[sender]
+				got := tx.GetNonce()
+				if got > want {
+					return nil, &rpc.CustomError{
+						Code:    rpc.ErrCodeDefault,
+						Message: fmt.Sprintf("nonce too high: address %v, tx: %d state: %d", sender.Value(), got, want),
+					}
+				}
+				if got < want {
+					return nil, &rpc.CustomError{
+						Code:    rpc.ErrCodeDefault,
+						Message: fmt.Sprintf("nonce too low: address %v, tx: %d state: %d", sender.Value(), got, want),
+					}
+				}
+				expectedNonce[sender]++
+				decoded = append(decoded, tx)
+			}
+		}
+		overrideTxns = &decoded
+	}
+
 	// Build the AssembleBlock parameters (mirrors forkchoiceUpdated logic).
 	assembleParams := &builder.Parameters{
 		ParentHash:            parentHash,
@@ -137,6 +188,7 @@ func (t *testingImpl) BuildBlockV1(
 		PrevRandao:            payloadAttributes.PrevRandao,
 		SuggestedFeeRecipient: payloadAttributes.SuggestedFeeRecipient,
 		SlotNumber:            (*uint64)(payloadAttributes.SlotNumber),
+		OverrideTxns:          overrideTxns,
 	}
 	if version >= clparams.CapellaVersion {
 		assembleParams.Withdrawals = payloadAttributes.Withdrawals
@@ -151,7 +203,6 @@ func (t *testingImpl) BuildBlockV1(
 	// where ForkChoiceUpdated and GetPayload are separate RPC calls.
 	deadline := time.Now().Add(time.Duration(t.server.config.SecondsPerSlot()) * time.Second)
 
-	// Step 1: AssembleBlock (locked scope).
 	var payloadID uint64
 	execBusy, err := func() (bool, error) {
 		t.server.lock.Lock()
@@ -176,7 +227,6 @@ func (t *testingImpl) BuildBlockV1(
 		return nil, errors.New("execution service is busy, cannot build block")
 	}
 
-	// Step 2: GetAssembledBlock (separate locked scope).
 	var assembled execmodule.AssembledBlockResult
 	execBusy, err = func() (bool, error) {
 		t.server.lock.Lock()
@@ -207,11 +257,22 @@ func (t *testingImpl) BuildBlockV1(
 		return nil, err
 	}
 	response.ShouldOverrideBuilder = false
-
-	// Override extra data if provided. Note: the BlockHash in ExecutionPayload reflects the
-	// originally built block; overriding ExtraData here means BlockHash will NOT match.
-	if extraData != nil {
-		response.ExecutionPayload.ExtraData = *extraData
+	// Return blockValue=0, matching Geth's BuildTestingPayload behaviour.
+	response.BlockValue = new(hexutil.Big)
+	// Strip BAL (EIP-7928, Amsterdam+) and/or override extraData, recomputing blockHash.
+	// BAL is an Erigon-specific field unknown to Geth: if present it is excluded from the
+	// payload so the blockHash matches what a Geth-compatible client would compute.
+	// The nil-check is implicitly fork-gated: the builder only populates BlockAccessList
+	// for Amsterdam+ blocks, so it is nil for all earlier forks.
+	if response.ExecutionPayload.BlockAccessList != nil || extraData != nil {
+		h := types.CopyHeader(assembled.Block.Block.Header())
+		h.BlockAccessListHash = nil
+		if extraData != nil {
+			h.Extra = *extraData
+			response.ExecutionPayload.ExtraData = *extraData
+		}
+		response.ExecutionPayload.BlockHash = h.Hash()
+		response.ExecutionPayload.BlockAccessList = nil
 	}
 
 	return response, nil

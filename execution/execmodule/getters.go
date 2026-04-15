@@ -26,7 +26,10 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	execctx "github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // bodyToRawBody converts a parsed Body to a RawBody using MarshalBinary
@@ -461,4 +464,28 @@ func (e *ExecModule) FrozenBlocks(ctx context.Context) (frozenBlocks uint64, has
 		gap = e.blockReader.Snapshots().SegmentsMax()+1 < firstNonGenesisBlockNumber
 	}
 	return e.blockReader.FrozenBlocks(), gap, nil
+}
+
+func (e *ExecModule) GetAccountNonce(ctx context.Context, address common.Address) (uint64, error) {
+	tx, err := e.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("ethereumExecutionModule.GetAccountNonce: could not begin temporal transaction %w", err)
+	}
+	defer tx.Rollback()
+
+	sd, err := execctx.NewSharedDomains(ctx, tx, e.logger)
+	if err != nil {
+		return 0, fmt.Errorf("ethereumExecutionModule.GetAccountNonce: NewSharedDomains error %w", err)
+	}
+	defer sd.Close()
+
+	reader := state.NewReaderV3(sd.AsGetter(tx))
+	acc, err := reader.ReadAccountData(accounts.InternAddress(address))
+	if err != nil {
+		return 0, fmt.Errorf("ethereumExecutionModule.GetAccountNonce: ReadAccountData error %w", err)
+	}
+	if acc == nil {
+		return 0, nil
+	}
+	return acc.Nonce, nil
 }

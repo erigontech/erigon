@@ -365,7 +365,7 @@ func (t PoolTest) Run(testCase func(ctx context.Context, t *testing.T, pool *shu
 		config := shuttercfg.ConfigByChainName(networkname.Chiado)
 		config.ReorgDepthAwareness = 3
 		config.BeaconChainGenesisTimestamp = uint64(time.Now().Unix())
-		baseTxnProvider := EmptyTxnProvider{}
+		baseTxnProvider := txnprovider.NewStaticTxnProvider(nil)
 		ctrl := gomock.NewController(t)
 		contractBackend := NewMockContractBackend(ctrl, logger)
 		stateChangesClient := NewMockStateChangesClient(ctrl, logger)
@@ -516,12 +516,6 @@ func (h *PoolTestHandle) SimulateDecryptionKeys(
 	slot := h.slotCalculator.CalcCurrentSlot()
 	err := h.keySender.SimulateDecryptionKeys(ctx, ekg, slot, baseTxnIndex, ips, h.config.InstanceId)
 	require.NoError(t, err)
-}
-
-type EmptyTxnProvider struct{}
-
-func (p EmptyTxnProvider) ProvideTxns(_ context.Context, _ ...txnprovider.ProvideOption) ([]types.Transaction, error) {
-	return nil, nil
 }
 
 func NewMockContractBackend(ctrl *gomock.Controller, logger log.Logger) *MockContractBackend {

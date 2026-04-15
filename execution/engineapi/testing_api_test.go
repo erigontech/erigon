@@ -17,12 +17,15 @@
 package engineapi
 
 import (
+	"bytes"
 	"context"
+	"crypto/ecdsa"
 	"math/big"
 	"testing"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/builder"
@@ -48,6 +51,7 @@ type stubExecutionModule struct {
 	assembleBlockFunc     func(ctx context.Context, params *builder.Parameters) (execmodule.AssembleBlockResult, error)
 	getAssembledBlockFunc func(ctx context.Context, payloadID uint64) (execmodule.AssembledBlockResult, error)
 	getForkChoiceFunc     func(ctx context.Context) (execmodule.ForkChoiceState, error)
+	getNonceFunc          func(ctx context.Context, addr common.Address) (uint64, error)
 }
 
 var _ execmodule.ExecutionModule = (*stubExecutionModule)(nil)
@@ -123,6 +127,12 @@ func (s *stubExecutionModule) GetTD(_ context.Context, _ *common.Hash, _ *uint64
 func (s *stubExecutionModule) Ready(_ context.Context) (bool, error) { return true, nil }
 func (s *stubExecutionModule) FrozenBlocks(_ context.Context) (uint64, bool, error) {
 	return 0, false, nil
+}
+func (s *stubExecutionModule) GetAccountNonce(ctx context.Context, addr common.Address) (uint64, error) {
+	if s.getNonceFunc != nil {
+		return s.getNonceFunc(ctx, addr)
+	}
+	return 0, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -273,6 +283,50 @@ func makeAssembledBlock(blockHash, parentHash, stateRoot common.Hash, blockNumbe
 	}
 }
 
+// makeSignedRawTx builds, signs, and RLP-encodes a legacy transaction.
+// The result is the raw bytes suitable for passing to BuildBlockV1 as a tx entry.
+func makeSignedRawTx(t *testing.T, key *ecdsa.PrivateKey, cfg *chain.Config, nonce, blockNumber, timestamp uint64) hexutil.Bytes {
+	t.Helper()
+	to := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	tx := types.NewTransaction(nonce, to, uint256.NewInt(0), 21_000, uint256.NewInt(1_000_000_000), nil)
+	signer := types.MakeSigner(cfg, blockNumber, timestamp)
+	signed, err := types.SignTx(tx, *signer, key)
+	require.NoError(t, err)
+	var buf bytes.Buffer
+	require.NoError(t, signed.MarshalBinary(&buf))
+	return buf.Bytes()
+}
+
+// makeAssembledBlockWithBAL creates an assembled block whose header carries a
+// non-nil BlockAccessListHash and whose BlockWithReceipts carries a non-nil
+// (but empty) BlockAccessList.  This causes assembledBlockToPayloadResponse to
+// populate ExecutionPayload.BlockAccessList, exercising the BAL-strip path in
+// BuildBlockV1.
+func makeAssembledBlockWithBAL(arbitraryStoredHash, parentHash common.Hash, blockNumber, timestamp uint64) *types.BlockWithReceipts {
+	h := &types.Header{
+		ParentHash: parentHash,
+		Time:       timestamp,
+		Extra:      []byte("bal-test"),
+		GasLimit:   30_000_000,
+	}
+	h.Number.SetUint64(blockNumber)
+	h.Difficulty.SetUint64(0)
+	h.BaseFee = uint256.NewInt(1_000_000_000)
+	blobGasUsed := uint64(0)
+	excessBlobGas := uint64(0)
+	h.BlobGasUsed = &blobGasUsed
+	h.ExcessBlobGas = &excessBlobGas
+	balHash := common.Hash{0xba, 0x1}
+	h.BlockAccessListHash = &balHash
+
+	blk := types.NewBlockFromStorage(arbitraryStoredHash, h, nil, nil, []*types.Withdrawal{})
+	return &types.BlockWithReceipts{
+		Block:           blk,
+		Requests:        make(types.FlatRequests, 0),
+		BlockAccessList: types.BlockAccessList{}, // empty but non-nil → encodes to 0xc0
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -299,17 +353,20 @@ func TestBuildBlockV1(t *testing.T) {
 		assert.Contains(t, rpcErr.Message, "payloadAttributes must not be null")
 	})
 
-	t.Run("explicit non-empty transaction list", func(t *testing.T) {
+	t.Run("explicit non-empty transaction list with invalid tx bytes", func(t *testing.T) {
 		t.Parallel()
-		stub := &stubExecutionModule{}
+		stub := &stubExecutionModule{
+			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
+		}
 		api := newTestingAPI(allForksChainConfig(), stub)
+		// Invalid raw bytes that cannot be decoded as a transaction.
 		txs := []hexutil.Bytes{{0x01, 0x02}}
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), &txs, nil)
 		require.Nil(t, resp)
 		require.Error(t, err)
 		var rpcErr *rpc.InvalidParamsError
 		require.ErrorAs(t, err, &rpcErr)
-		assert.Contains(t, rpcErr.Message, "explicit transaction list not yet supported")
+		assert.Contains(t, rpcErr.Message, "decode error")
 	})
 
 	t.Run("empty transaction list is allowed", func(t *testing.T) {
@@ -506,9 +563,9 @@ func TestBuildBlockV1(t *testing.T) {
 		assert.Equal(t, hexutil.Bytes("test"), resp.ExecutionPayload.ExtraData)
 		assert.Equal(t, false, resp.ShouldOverrideBuilder)
 
-		// Block value should match.
+		// blockValue is always 0 (matching Geth's BuildTestingPayload behaviour).
 		require.NotNil(t, resp.BlockValue)
-		assert.Equal(t, blockValue.ToBig().String(), resp.BlockValue.ToInt().String())
+		assert.Equal(t, "0", resp.BlockValue.ToInt().String())
 	})
 
 	t.Run("happy path with extraData override", func(t *testing.T) {
@@ -578,6 +635,119 @@ func TestBuildBlockV1(t *testing.T) {
 		var rpcErr *rpc.InvalidParamsError
 		require.ErrorAs(t, err, &rpcErr)
 		assert.Contains(t, rpcErr.Message, "withdrawals before Shanghai")
+	})
+
+	t.Run("nonce too high", func(t *testing.T) {
+		t.Parallel()
+		key, err := crypto.GenerateKey()
+		require.NoError(t, err)
+		// State nonce is 0 (default stub), but tx nonce is 1 → too high.
+		rawTx := makeSignedRawTx(t, key, allForksChainConfig(), 1, 101, parentTimestamp+1)
+		stub := &stubExecutionModule{
+			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
+		}
+		api := newTestingAPI(allForksChainConfig(), stub)
+		txs := []hexutil.Bytes{rawTx}
+		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), &txs, nil)
+		require.Nil(t, resp)
+		require.Error(t, err)
+		var customErr *rpc.CustomError
+		require.ErrorAs(t, err, &customErr)
+		assert.Contains(t, customErr.Message, "nonce too high")
+	})
+
+	t.Run("nonce too low", func(t *testing.T) {
+		t.Parallel()
+		key, err := crypto.GenerateKey()
+		require.NoError(t, err)
+		senderAddr := crypto.PubkeyToAddress(key.PublicKey)
+		// State nonce is 1, tx nonce is 0 → too low.
+		rawTx := makeSignedRawTx(t, key, allForksChainConfig(), 0, 101, parentTimestamp+1)
+		stub := &stubExecutionModule{
+			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
+			getNonceFunc: func(_ context.Context, addr common.Address) (uint64, error) {
+				if addr == senderAddr {
+					return 1, nil
+				}
+				return 0, nil
+			},
+		}
+		api := newTestingAPI(allForksChainConfig(), stub)
+		txs := []hexutil.Bytes{rawTx}
+		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), &txs, nil)
+		require.Nil(t, resp)
+		require.Error(t, err)
+		var customErr *rpc.CustomError
+		require.ErrorAs(t, err, &customErr)
+		assert.Contains(t, customErr.Message, "nonce too low")
+	})
+
+	t.Run("valid explicit tx list reaches assembler with OverrideTxns set", func(t *testing.T) {
+		t.Parallel()
+		key, err := crypto.GenerateKey()
+		require.NoError(t, err)
+		cfg := allForksChainConfig()
+		// Two sequential txs from the same sender: nonces 0 and 1.
+		rawTx0 := makeSignedRawTx(t, key, cfg, 0, 101, parentTimestamp+1)
+		rawTx1 := makeSignedRawTx(t, key, cfg, 1, 101, parentTimestamp+1)
+
+		var capturedParams *builder.Parameters
+		stub := &stubExecutionModule{
+			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
+			assembleBlockFunc: func(_ context.Context, params *builder.Parameters) (execmodule.AssembleBlockResult, error) {
+				capturedParams = params
+				// Return busy=false with payloadID=1 so execution proceeds to GetAssembledBlock.
+				return execmodule.AssembleBlockResult{PayloadID: 1, Busy: false}, nil
+			},
+			getAssembledBlockFunc: func(_ context.Context, _ uint64) (execmodule.AssembledBlockResult, error) {
+				// Returning nil block triggers "no assembled block data available" error,
+				// which is fine — we only care that AssembleBlock was reached.
+				return execmodule.AssembledBlockResult{Block: nil, Busy: false}, nil
+			},
+		}
+		api := newTestingAPI(cfg, stub)
+		txs := []hexutil.Bytes{rawTx0, rawTx1}
+		_, err = api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), &txs, nil)
+		// The call fails because getAssembledBlock returns nil block, but that's expected.
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no assembled block data")
+		// The important check: OverrideTxns was populated and forwarded to AssembleBlock.
+		require.NotNil(t, capturedParams, "AssembleBlock should have been called")
+		require.NotNil(t, capturedParams.OverrideTxns)
+		assert.Len(t, *capturedParams.OverrideTxns, 2)
+	})
+
+	t.Run("BAL is stripped from response and blockHash recomputed", func(t *testing.T) {
+		t.Parallel()
+		arbitraryStoredHash := common.Hash{0xde, 0xad}
+		blkWithBAL := makeAssembledBlockWithBAL(arbitraryStoredHash, parentHash, 101, parentTimestamp+1)
+
+		// Independently compute the expected post-strip hash: copy the header,
+		// clear BlockAccessListHash, and hash.
+		expectedHeader := types.CopyHeader(blkWithBAL.Block.Header())
+		expectedHeader.BlockAccessListHash = nil
+		expectedHash := expectedHeader.Hash()
+
+		stub := &stubExecutionModule{
+			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
+			assembleBlockFunc: func(_ context.Context, _ *builder.Parameters) (execmodule.AssembleBlockResult, error) {
+				return execmodule.AssembleBlockResult{PayloadID: 7, Busy: false}, nil
+			},
+			getAssembledBlockFunc: func(_ context.Context, _ uint64) (execmodule.AssembledBlockResult, error) {
+				return execmodule.AssembledBlockResult{Block: blkWithBAL, BlockValue: uint256.NewInt(0), Busy: false}, nil
+			},
+		}
+		api := newTestingAPI(allForksChainConfig(), stub)
+		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), nil, nil)
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+
+		// BAL must be absent from the payload.
+		assert.Nil(t, resp.ExecutionPayload.BlockAccessList, "BlockAccessList should be stripped")
+		// BlockHash must be the one recomputed without the BAL hash.
+		assert.Equal(t, expectedHash, resp.ExecutionPayload.BlockHash, "BlockHash should be recomputed without BAL")
+		// It must differ from the arbitraryStoredHash used as the block's original hash.
+		assert.NotEqual(t, arbitraryStoredHash, resp.ExecutionPayload.BlockHash)
 	})
 }
 
