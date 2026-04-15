@@ -107,10 +107,10 @@
 
 ### Task 4: Final verification
 
-- [ ] verify all requirements from Overview are implemented
-- [ ] verify edge cases: empty files, files below min steps threshold, single-key files
-- [ ] run full test suite: `make test-short`
-- [ ] run `make lint` one final time
+- [x] verify all requirements from Overview are implemented
+- [x] verify edge cases: empty files, files below min steps threshold, single-key files
+- [x] run full test suite: `make test-short`
+- [x] run `make lint` one final time
 
 ## Post-Completion
 
