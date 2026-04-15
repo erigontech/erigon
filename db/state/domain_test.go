@@ -938,6 +938,81 @@ func TestDomain_CollationIsolatedFromLaterSteps(t *testing.T) {
 		"step 1 collation must contain only step 1 values")
 }
 
+// TestDomain_UnwindRestoredEntryVisibility verifies that after an unwind, restored
+// domain entries are visible to GetLatest even when the entry's natural step has
+// been filed by BuildFilesInBackground. See #20169.
+//
+// The bug: unwind tags restored entries with the step of the unwind-target txNum.
+// If that step is covered by domain files, getLatestFromDb discards the entry and
+// falls through to getLatestFromFiles, returning the stale end-of-step value from
+// the file instead of the changeset-restored value.
+func TestDomain_UnwindRestoredEntryVisibility(t *testing.T) {
+	logger := log.New()
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, 16, logger)
+	ctx := context.Background()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
+	k1 := []byte("key1")
+
+	// Step 0: write k1 twice — first V1 at txNum 2, then V2 at txNum 10.
+	// The file for step 0 will have k1=V2 (latest value in the step).
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback() //nolint:gocritic
+
+	dt := d.beginForTests()
+	w := dt.NewWriter()
+	require.NoError(t, w.PutWithPrev(k1, []byte("V1"), 2, nil))
+	require.NoError(t, w.PutWithPrev(k1, []byte("V2"), 10, []byte("V1")))
+	require.NoError(t, w.Flush(ctx, tx))
+	w.Close()
+	dt.Close()
+
+	// Build files for step 0 → file has k1=V2.
+	require.NoError(t, d.collateBuildIntegrate(ctx, 0, tx, background.NewProgressSet()))
+
+	// Prune step 0 from DB — entries now only in files.
+	dt = d.beginForTests()
+	_, err = dt.Prune(ctx, tx, 0, 0, 16, math.MaxUint64, logEvery)
+	dt.Close()
+	require.NoError(t, err)
+
+	// Step 1: write k1=V3 at txNum 20.
+	dt = d.beginForTests()
+	w = dt.NewWriter()
+	require.NoError(t, w.PutWithPrev(k1, []byte("V3"), 20, []byte("V2")))
+	require.NoError(t, w.Flush(ctx, tx))
+	w.Close()
+	dt.Close()
+
+	// Now simulate an unwind that restores k1=V1 (reverting the V1→V2 write at txNum 10).
+	// The changeset entry has: key="key1" + step0_bytes, value=V1.
+	step0Bytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(step0Bytes, ^uint64(0))
+	diffs := []kv.DomainEntryDiff{
+		{
+			Key:   string(k1) + string(step0Bytes),
+			Value: []byte("V1"),
+		},
+	}
+
+	// Unwind to txNum 5 (between the V1 write at 2 and V2 write at 10, still in step 0).
+	dt = d.beginForTests()
+	err = dt.unwind(ctx, tx, 0, 5, diffs)
+	dt.Close()
+	require.NoError(t, err)
+
+	// GetLatest must return V1 (the changeset-restored value), NOT V2 (the file value).
+	dt = d.beginForTests()
+	defer dt.Close()
+	v, _, found, err := dt.GetLatest(k1, tx)
+	require.NoError(t, err)
+	require.True(t, found, "key should be found after unwind")
+	require.Equal(t, "V1", string(v),
+		"GetLatest must return the unwind-restored value V1, not the file value V2")
+}
+
 func TestDomain_Delete(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
