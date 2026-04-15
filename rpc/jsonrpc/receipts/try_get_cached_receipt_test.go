@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
@@ -15,13 +16,9 @@ import (
 func newTestGenerator(t *testing.T) *Generator {
 	t.Helper()
 	rc, err := lru.New[uint64, *types.Receipt](256)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	rsc, err := lru.New[common.Hash, types.Receipts](256)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	return &Generator{receiptCache: rc, receiptsCache: rsc}
 }
 
@@ -34,40 +31,41 @@ func TestTryGetCachedReceipt(t *testing.T) {
 	const txIndex = 1
 
 	t.Run("hit receiptCache matching blockHash", func(t *testing.T) {
+		t.Parallel()
 		g := newTestGenerator(t)
 		want := &types.Receipt{BlockHash: blockHash}
 		g.receiptCache.Add(txNum, want)
 
 		got, ok := g.TryGetCachedReceipt(blockHash, txNum, txIndex)
-		if !ok || got != want {
-			t.Fatalf("expected cache hit, got ok=%v receipt=%v", ok, got)
-		}
+		require.True(t, ok)
+		require.Same(t, want, got)
 	})
 
 	t.Run("stale blockHash in receiptCache not returned", func(t *testing.T) {
+		t.Parallel()
 		g := newTestGenerator(t)
 		// txNum is cached but for a different block (e.g. after a reorg).
 		g.receiptCache.Add(txNum, &types.Receipt{BlockHash: otherHash})
 
 		got, ok := g.TryGetCachedReceipt(blockHash, txNum, txIndex)
-		if ok || got != nil {
-			t.Fatalf("expected cache miss on stale blockHash, got ok=%v receipt=%v", ok, got)
-		}
+		require.False(t, ok)
+		require.Nil(t, got)
 	})
 
 	t.Run("postState mismatch in receiptCache not returned", func(t *testing.T) {
+		t.Parallel()
 		g := newTestGenerator(t)
 		// receipt has postState set (pre-Byzantium); TryGetCachedReceipt must skip it
 		// because callers pass calculatePostState=false and would get wrong data.
 		g.receiptCache.Add(txNum, &types.Receipt{BlockHash: blockHash, PostState: []byte{0x01}})
 
 		got, ok := g.TryGetCachedReceipt(blockHash, txNum, txIndex)
-		if ok || got != nil {
-			t.Fatalf("expected cache miss on postState mismatch, got ok=%v receipt=%v", ok, got)
-		}
+		require.False(t, ok)
+		require.Nil(t, got)
 	})
 
 	t.Run("fallback to receiptsCache by txIndex", func(t *testing.T) {
+		t.Parallel()
 		g := newTestGenerator(t)
 		// receiptCache empty; receiptsCache has the block receipts.
 		want := &types.Receipt{BlockHash: blockHash}
@@ -77,28 +75,27 @@ func TestTryGetCachedReceipt(t *testing.T) {
 		})
 
 		got, ok := g.TryGetCachedReceipt(blockHash, txNum, txIndex)
-		if !ok || got != want {
-			t.Fatalf("expected receiptsCache fallback hit, got ok=%v receipt=%v", ok, got)
-		}
+		require.True(t, ok)
+		require.Same(t, want, got)
 	})
 
 	t.Run("txIndex -1 skips receiptsCache", func(t *testing.T) {
+		t.Parallel()
 		g := newTestGenerator(t)
 		g.receiptsCache.Add(blockHash, types.Receipts{{BlockHash: blockHash}})
 
 		got, ok := g.TryGetCachedReceipt(blockHash, txNum, -1)
-		if ok || got != nil {
-			t.Fatalf("expected miss when txIndex<0, got ok=%v receipt=%v", ok, got)
-		}
+		require.False(t, ok)
+		require.Nil(t, got)
 	})
 
 	t.Run("txIndex out of bounds in receiptsCache", func(t *testing.T) {
+		t.Parallel()
 		g := newTestGenerator(t)
 		g.receiptsCache.Add(blockHash, types.Receipts{{BlockHash: blockHash}}) // only 1 entry
 
 		got, ok := g.TryGetCachedReceipt(blockHash, txNum, 5) // txIndex=5 > len
-		if ok || got != nil {
-			t.Fatalf("expected miss on out-of-bounds txIndex, got ok=%v receipt=%v", ok, got)
-		}
+		require.False(t, ok)
+		require.Nil(t, got)
 	})
 }
