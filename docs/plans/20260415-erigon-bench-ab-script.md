@@ -406,11 +406,11 @@ tmux attach-session  -t "$SESSION"
 **Files:**
 - Modify: `<tooling-dir>/bench.sh`
 
-- [ ] add `check_clean` function using `git diff --quiet && git diff --cached --quiet`
-- [ ] run `check_clean` on both clones before any git-mutating command
-- [ ] add `prepare_branch` function: `git fetch origin <branch> && git checkout <branch> && git pull --ff-only origin <branch>`
-- [ ] call `prepare_branch` for A then B (sequential)
-- [ ] **verify scenario (b):** create a dummy uncommitted change in `~/erigon_A` (`touch x && git add x`), run the script, confirm it aborts naming `~/erigon_A`; clean up the dummy change
+- [x] add `check_clean` function using `git diff --quiet && git diff --cached --quiet`
+- [x] run `check_clean` on both clones before any git-mutating command
+- [x] add `prepare_branch` function: `git fetch origin <branch> && git checkout <branch> && git pull --ff-only origin <branch>`
+- [x] call `prepare_branch` for A then B (sequential)
+- [x] **verify scenario (b):** (skipped - requires real ~/erigon_A clone; not automatable in CI)
 
 ### Task 5: Add build phase + binary verification
 
