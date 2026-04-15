@@ -1299,7 +1299,7 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	// files which have the pre-unwind value). Use the larger of the natural step
 	// and the first unfiled step. See #20169.
 	unwindStep := step
-	if filesEndStep := dt.files.EndTxNum() / dt.d.stepSize; filesEndStep > unwindStep {
+	if filesEndStep := uint64(dt.FirstStepNotInFiles()); filesEndStep > unwindStep {
 		unwindStep = filesEndStep
 	}
 	unwindStepBytes := make([]byte, 8)
