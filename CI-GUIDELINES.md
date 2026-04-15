@@ -33,7 +33,7 @@ Jobs in ci-gate that must survive cancellation (e.g. long external calls) should
 
 ## Where to place a job
 
-`push` triggers below assume the protected branches: `main`, `release/**`, and `performance`.
+`push` triggers below assume the protected branches: `main`, `release/**`, `performance`, and `performance-stable`.
 
 | CI gate | Trigger | Typical duration | When to use |
 |---|---|---|---|
