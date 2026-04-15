@@ -47,7 +47,7 @@ func writeBALToFile(bal types.BlockAccessList, blockNum uint64, dataDir string) 
 	bal.DebugPrint(file)
 }
 
-func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, amsterdam bool, experimental bool, dataDir string) error {
+func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, amsterdam bool, experimental bool, isForkValidation bool, dataDir string) error {
 	if !amsterdam && !experimental {
 		return nil
 	}
@@ -96,14 +96,13 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, ams
 			return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", blockNum, dbBAL.Hash(), headerBALHash)
 		}
 	}
-	// Validate computed BAL against header. The parallel executor's speculative
-	// execution can produce slightly different storage reads than sequential
-	// execution (the block assembler), so when the stored BAL (from the proposer's
-	// sequential block assembler) matches the header, trust it even if the
-	// computed BAL differs. The state root check (commitment verification) still
-	// guarantees execution correctness.
+	// Validate computed BAL against header. During fork validation (engine API
+	// newPayload) the stored BAL comes from the untrusted payload and trivially
+	// matches the header hash. Trusting it would bypass semantic validation
+	// (EIP-7928). For re-execution of already-validated blocks, the parallel
+	// executor can still diverge in edge cases, so fall back to the stored BAL.
 	if headerBALHash != bal.Hash() {
-		if dbBALBytes != nil {
+		if dbBALBytes != nil && !isForkValidation {
 			if dbBAL2, decErr := types.DecodeBlockAccessListBytes(dbBALBytes); decErr == nil && dbBAL2 != nil && dbBAL2.Hash() == headerBALHash {
 				log.Debug("BAL: computed BAL differs from stored/header, trusting stored BAL",
 					"block", blockNum, "computedHash", bal.Hash(), "headerHash", headerBALHash)
