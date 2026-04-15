@@ -262,3 +262,9 @@ func warmupVisitor(ctx PatriciaContext) BranchVisitor {
 **Performance validation:**
 - If cache hit rates are below ~60% for branches, investigate whether key ordering in HashSort provides sufficient locality
 - If memory usage increases significantly, consider adding a size limit to the cache maps with LRU eviction
+
+## Follow-up
+
+Live verification on arb-dev1 (Sepolia tip) revealed a 23-35% execution-time regression compared to the baseline: median 107 ms vs 87 ms, p95 178 ms vs ~135 ms. Root cause: LookupWithVisitor performs parseCellAt + fillFromFields + deriveHashedKeys (keccak256) + extension match at every trie level, whereas the old bespoke warmupKey only did bitmap arithmetic + extractBranchCellAddresses. Warmup workers fall behind on heavy blocks, causing cache misses that force Process to pay full DB+parse cost.
+
+Addressed by: `20260414-lean-warmup-walker-option-a.md` — reverts the worker loop to a bespoke depth-walk (ported from main) that routes reads through the CachingPatriciaContext view, keeping the architectural win (transparent cache + LoadOrStore semantics) while restoring the lean per-key cost. Also re-introduces startDepth plumbing through HashSort and removes the now-dead LookupWithVisitor/BranchVisitor code.

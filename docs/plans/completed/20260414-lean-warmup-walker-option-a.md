@@ -234,9 +234,9 @@ Promote `Process()`'s existing `log.Debug("commitment cache stats", ...)` to `lo
 - Modify: `docs/plans/completed/20260413-caching-patricia-context-trie-reader-warmup.md`
 - Move: `docs/plans/20260414-lean-warmup-walker-option-a.md` → `docs/plans/completed/`
 
-- [ ] append to the `20260413-...md` plan a "Follow-up" section referencing this plan's filename and the observed 23–35% regression it addresses
-- [ ] move this plan to `docs/plans/completed/`
-- [ ] commit: `docs: move lean warmup walker plan to completed`
+- [x] append to the `20260413-...md` plan a "Follow-up" section referencing this plan's filename and the observed 23–35% regression it addresses
+- [x] move this plan to `docs/plans/completed/`
+- [x] commit: `docs: move lean warmup walker plan to completed`
 
 ## Post-Completion
 
