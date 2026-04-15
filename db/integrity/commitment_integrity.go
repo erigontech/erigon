@@ -549,7 +549,21 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 	}
 	ch := make(chan derefWorkItem, workers*16)
 
-	// Producer: single goroutine iterating commitment keys sequentially
+	// Workers — set up errgroup before producer so producer can use its context
+	var countsMu sync.Mutex
+	var counts derefCounts
+	var integrityErr error
+
+	var eg *errgroup.Group
+	if failFast {
+		eg, ctx = errgroup.WithContext(ctx)
+	} else {
+		eg = &errgroup.Group{}
+	}
+
+	// Producer: single goroutine iterating commitment keys sequentially.
+	// producerErr is written before return, which triggers defer close(ch).
+	// Workers drain ch before eg.Wait() returns, so the read after eg.Wait() is safe.
 	var producerErr error
 	go func() {
 		defer close(ch)
@@ -559,13 +573,14 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 		for commReader.HasNext() {
 			branchKey, _ := commReader.Next(branchKeyBuf[:0])
 			if !commReader.HasNext() {
-				pErr := errors.New("invalid key/value pair during decompression")
+				pErr := fmt.Errorf("%w: %w", ErrIntegrity, errors.New("invalid key/value pair during decompression"))
 				if failFast {
 					producerErr = pErr
 					return
 				}
+				producerErr = pErr
 				logger.Warn(pErr.Error())
-				continue
+				return
 			}
 			branchValue, _ := commReader.Next(branchValueBuf[:0])
 			if bytes.Equal(branchKey, commitmentdb.KeyCommitmentState) {
@@ -599,7 +614,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 			case <-logTicker.C:
 				p := processed.Load()
 				elapsed := time.Since(start).Seconds()
-				if elapsed > 0 && totalKeys > 0 {
+				if elapsed > 0 && totalKeys > 0 && p > 0 {
 					rate := float64(p) / elapsed
 					eta := time.Duration(float64(totalKeys-p)/rate) * time.Second
 					logger.Info(
@@ -615,17 +630,6 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 		}
 	}()
 
-	// Workers
-	var countsMu sync.Mutex
-	var counts derefCounts
-	var integrityErr error
-
-	var eg *errgroup.Group
-	if failFast {
-		eg, ctx = errgroup.WithContext(ctx)
-	} else {
-		eg = &errgroup.Group{}
-	}
 	for range workers {
 		eg.Go(func() error {
 			workerAccReader := seg.NewReader(accDecomp.MakeGetter(), accCompression)
@@ -637,17 +641,15 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 			for item := range ch {
 				localCounts.branchKeys++
 				dc, _, err := checkDerefBranch(item.branchKey, item.branchValue, newBranchValueBuf, plainKeyBuf, workerAccReader, workerStorageReader, fileName, trace, logger)
-				localCounts.add(derefCounts{
-					referencedAccounts: dc.referencedAccounts,
-					plainAccounts:      dc.plainAccounts,
-					referencedStorages: dc.referencedStorages,
-					plainStorages:      dc.plainStorages,
-				})
+				localCounts.referencedAccounts += dc.referencedAccounts
+				localCounts.plainAccounts += dc.plainAccounts
+				localCounts.referencedStorages += dc.referencedStorages
+				localCounts.plainStorages += dc.plainStorages
 				if err != nil {
 					if errors.Is(err, ErrIntegrity) {
 						localIntegrityErr = err
-					} else if failFast {
-						return err
+					} else {
+						return err // non-integrity errors are always fatal
 					}
 				}
 				processed.Add(1)
@@ -666,7 +668,12 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 	cancelProgress()
 
 	if producerErr != nil {
-		return derefCounts{}, producerErr
+		// In non-failFast mode, producerErr is an integrity error — merge it
+		if !failFast && errors.Is(producerErr, ErrIntegrity) {
+			integrityErr = producerErr
+		} else {
+			return derefCounts{}, producerErr
+		}
 	}
 	if err != nil {
 		return derefCounts{}, err
