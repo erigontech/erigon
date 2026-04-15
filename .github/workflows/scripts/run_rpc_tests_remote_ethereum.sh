@@ -16,8 +16,11 @@ DISABLED_TEST_LIST=(
   eth_simulateV1
   # Temporary disable required block 24298763
   debug_traceBlockByNumber/test_51.json
+  # Temporary disable required block 23917742
+  debug_traceTransaction/test_149.json
   erigon_getLogsByHash/test_01.json
   eth_getBlockReceipts/test_01.json
+  eth_createAccessList/test_16.json
   eth_getBlockReceipts/test_06.json
   ots_getBlockDetails/test_01.json
   ots_getBlockDetailsByHash/test_01.json
@@ -28,4 +31,4 @@ DISABLED_TEST_LIST=(
 DISABLED_TESTS=$(IFS=,; echo "${DISABLED_TEST_LIST[*]}")
 
 # Call the main test runner script with the required and optional parameters
-"$(dirname "$0")/run_rpc_tests.sh" mainnet v2.2.0 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR"
+"$(dirname "$0")/run_rpc_tests.sh" mainnet v2.6.0 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR"

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pelletier/go-toml"
+	"github.com/pelletier/go-toml/v2"
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon/common/dir"
@@ -35,6 +35,11 @@ func stepRebase(cliCtx *cli.Context) error {
 	currentStepSize := settings.StepSize
 	newStepSize := cliCtx.Uint64("new-step-size")
 	logger.Info("Rebasing step size", "current", currentStepSize, "new", newStepSize)
+
+	if newStepSize == 0 {
+		logger.Crit("Invalid step size", "new-step-size", newStepSize)
+		return fmt.Errorf("new step size must be greater than 0")
+	}
 
 	if newStepSize == currentStepSize {
 		logger.Info("Step size is already at the desired value; exiting", "new-step-size", newStepSize)

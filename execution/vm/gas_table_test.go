@@ -136,8 +136,8 @@ func TestEIP2200(t *testing.T) {
 					return nil
 				},
 			}
-			_ = s.CommitBlock(vmctx.Rules(chain.AllProtocolChanges), w)
-			vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.AllProtocolChanges, vm.Config{ExtraEips: []int{2200}})
+			_ = s.CommitBlock(vmctx.Rules(chain.TestChainBerlinConfig), w)
+			vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.TestChainBerlinConfig, vm.Config{ExtraEips: []int{2200}})
 			mdGas := mdgas.MdGas{
 				Regular: tt.gaspool,
 			}
@@ -199,13 +199,13 @@ func TestCreateGas(t *testing.T) {
 		//
 		// TODO revis BlockContext and add test for eip8037?
 		//
-		_ = s.CommitBlock(vmctx.Rules(chain.TestChainConfig), stateWriter)
+		_ = s.CommitBlock(vmctx.Rules(chain.TestChainBerlinConfig), stateWriter)
 		config := vm.Config{}
 		if tt.eip3860 {
 			config.ExtraEips = []int{3860}
 		}
 
-		vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.TestChainConfig, config)
+		vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.TestChainBerlinConfig, config)
 		startGas := mdgas.MdGas{
 			Regular: math.MaxUint64,
 		}

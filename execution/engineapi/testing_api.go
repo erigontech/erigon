@@ -17,7 +17,8 @@
 package engineapi
 
 // testing_api.go implements the testing_ RPC namespace, specifically testing_buildBlockV1.
-// This namespace MUST NOT be enabled on production networks. Gate it with --rpc.testing.
+// Enable via --http.api=...,testing (e.g. --http.api eth,erigon,testing).
+// This namespace MUST NOT be enabled on production networks.
 
 import (
 	"context"
@@ -27,9 +28,9 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
-	"github.com/erigontech/erigon/node/gointerfaces"
-	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -52,13 +53,22 @@ type TestingAPI interface {
 
 // testingImpl is the concrete implementation of TestingAPI.
 type testingImpl struct {
-	server  *EngineServer
-	enabled bool
+	server *EngineServer
 }
 
 // NewTestingImpl returns a new TestingAPI implementation wrapping the given EngineServer.
-func NewTestingImpl(server *EngineServer, enabled bool) TestingAPI {
-	return &testingImpl{server: server, enabled: enabled}
+func NewTestingImpl(server *EngineServer) TestingAPI {
+	return &testingImpl{server: server}
+}
+
+// NewTestingRPCEntry returns the rpc.API descriptor for the testing_ namespace.
+func NewTestingRPCEntry(server *EngineServer) rpc.API {
+	return rpc.API{
+		Namespace: "testing",
+		Public:    false,
+		Service:   TestingAPI(NewTestingImpl(server)),
+		Version:   "1.0",
+	}
 }
 
 // BuildBlockV1 implements TestingAPI.
@@ -69,10 +79,6 @@ func (t *testingImpl) BuildBlockV1(
 	transactions *[]hexutil.Bytes,
 	extraData *hexutil.Bytes,
 ) (*engine_types.GetPayloadResponse, error) {
-	if !t.enabled {
-		return nil, &rpc.InvalidParamsError{Message: "testing namespace is disabled; start erigon with --rpc.testing (WARNING: not for production use)"}
-	}
-
 	if payloadAttributes == nil {
 		return nil, &rpc.InvalidParamsError{Message: "payloadAttributes must not be null"}
 	}
@@ -124,19 +130,19 @@ func (t *testingImpl) BuildBlockV1(
 		return nil, &rpc.InvalidParamsError{Message: "parentBeaconBlockRoot not supported before Cancun"}
 	}
 
-	// Build the AssembleBlock request (mirrors forkchoiceUpdated logic).
-	req := &executionproto.AssembleBlockRequest{
-		ParentHash:            gointerfaces.ConvertHashToH256(parentHash),
+	// Build the AssembleBlock parameters (mirrors forkchoiceUpdated logic).
+	assembleParams := &builder.Parameters{
+		ParentHash:            parentHash,
 		Timestamp:             timestamp,
-		PrevRandao:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
-		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
+		PrevRandao:            payloadAttributes.PrevRandao,
+		SuggestedFeeRecipient: payloadAttributes.SuggestedFeeRecipient,
 		SlotNumber:            (*uint64)(payloadAttributes.SlotNumber),
 	}
 	if version >= clparams.CapellaVersion {
-		req.Withdrawals = engine_types.ConvertWithdrawalsToRpc(payloadAttributes.Withdrawals)
+		assembleParams.Withdrawals = payloadAttributes.Withdrawals
 	}
 	if version >= clparams.DenebVersion {
-		req.ParentBeaconBlockRoot = gointerfaces.ConvertHashToH256(*payloadAttributes.ParentBeaconBlockRoot)
+		assembleParams.ParentBeaconBlockRoot = payloadAttributes.ParentBeaconBlockRoot
 	}
 
 	// Both steps share a single slot-duration budget so the total wall-clock
@@ -146,20 +152,22 @@ func (t *testingImpl) BuildBlockV1(
 	deadline := time.Now().Add(time.Duration(t.server.config.SecondsPerSlot()) * time.Second)
 
 	// Step 1: AssembleBlock (locked scope).
-	assembleResp, execBusy, err := func() (*executionproto.AssembleBlockResponse, bool, error) {
+	var payloadID uint64
+	execBusy, err := func() (bool, error) {
 		t.server.lock.Lock()
 		defer t.server.lock.Unlock()
 
-		var resp *executionproto.AssembleBlockResponse
+		var assembled execmodule.AssembleBlockResult
 		var err error
 		busy, err := waitForResponse(time.Until(deadline), func() (bool, error) {
-			resp, err = t.server.executionService.AssembleBlock(ctx, req)
+			assembled, err = t.server.executionService.AssembleBlock(ctx, assembleParams)
 			if err != nil {
 				return false, err
 			}
-			return resp.Busy, nil
+			return assembled.Busy, nil
 		})
-		return resp, busy, err
+		payloadID = assembled.PayloadID
+		return busy, err
 	}()
 	if err != nil {
 		return nil, err
@@ -168,25 +176,21 @@ func (t *testingImpl) BuildBlockV1(
 		return nil, errors.New("execution service is busy, cannot build block")
 	}
 
-	payloadID := assembleResp.Id
-
 	// Step 2: GetAssembledBlock (separate locked scope).
-	getResp, execBusy, err := func() (*executionproto.GetAssembledBlockResponse, bool, error) {
+	var assembled execmodule.AssembledBlockResult
+	execBusy, err = func() (bool, error) {
 		t.server.lock.Lock()
 		defer t.server.lock.Unlock()
 
-		var resp *executionproto.GetAssembledBlockResponse
 		var err error
 		busy, err := waitForResponse(time.Until(deadline), func() (bool, error) {
-			resp, err = t.server.executionService.GetAssembledBlock(ctx, &executionproto.GetAssembledBlockRequest{
-				Id: payloadID,
-			})
+			assembled, err = t.server.executionService.GetAssembledBlock(ctx, payloadID)
 			if err != nil {
 				return false, err
 			}
-			return resp.Busy, nil
+			return assembled.Busy, nil
 		})
-		return resp, busy, err
+		return busy, err
 	}()
 	if err != nil {
 		return nil, err
@@ -194,31 +198,15 @@ func (t *testingImpl) BuildBlockV1(
 	if execBusy {
 		return nil, errors.New("execution service is busy retrieving assembled block")
 	}
-	if getResp.Data == nil {
+	if assembled.Block == nil {
 		return nil, errors.New("no assembled block data available for payload ID")
 	}
 
-	data := getResp.Data
-
-	// Build execution requests for Prague+.
-	var executionRequests []hexutil.Bytes
-	if version >= clparams.ElectraVersion {
-		executionRequests = make([]hexutil.Bytes, 0)
-		if data.Requests != nil {
-			for _, r := range data.Requests.Requests {
-				executionRequests = append(executionRequests, r)
-			}
-		}
+	response, err := assembledBlockToPayloadResponse(assembled.Block, assembled.BlockValue, version)
+	if err != nil {
+		return nil, err
 	}
-
-	response := &engine_types.GetPayloadResponse{
-		ExecutionPayload:  engine_types.ConvertPayloadFromRpc(data.ExecutionPayload),
-		BlockValue:        (*hexutil.Big)(gointerfaces.ConvertH256ToUint256Int(data.BlockValue).ToBig()),
-		BlobsBundle:       engine_types.ConvertBlobsFromRpc(data.BlobsBundle),
-		ExecutionRequests: executionRequests,
-		// ShouldOverrideBuilder is always false for the testing namespace (no MEV-boost context).
-		ShouldOverrideBuilder: false,
-	}
+	response.ShouldOverrideBuilder = false
 
 	// Override extra data if provided. Note: the BlockHash in ExecutionPayload reflects the
 	// originally built block; overriding ExtraData here means BlockHash will NOT match.

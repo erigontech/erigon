@@ -107,7 +107,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 	}
 	engine := api.engine()
 
-	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
+	err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), blockNumber)
 	if err != nil {
 		return err
 	}
@@ -264,19 +264,16 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 
 	if !ok {
 		if chainConfig.Bor == nil {
-			stream.WriteNil()
-			return nil
+			return fmt.Errorf("transaction not found")
 		}
 
 		// otherwise this may be a bor state sync transaction - check
 		blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, hash)
 		if err != nil {
-			stream.WriteNil()
 			return err
 		}
 		if !ok {
-			stream.WriteNil()
-			return nil
+			return fmt.Errorf("transaction not found")
 		}
 		if config == nil || config.BorTraceEnabled == nil || !*config.BorTraceEnabled {
 			stream.WriteEmptyArray() // matches maticnetwork/bor API behaviour for consistency
@@ -406,7 +403,7 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 		return err
 	}
 
-	err = rpchelper.CheckBlockExecuted(dbtx, blockNumber)
+	err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(dbtx), blockNumber)
 	if err != nil {
 		return err
 	}
@@ -547,7 +544,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 
 	var stateReader state.StateReader
 
-	err = rpchelper.CheckBlockExecuted(tx, blockNum)
+	err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), blockNum)
 	if err != nil {
 		return err
 	}

@@ -1,5 +1,6 @@
 version: "2"
 run:
+  allow-parallel-runners: true
 linters:
   enable:
     - asasalint

@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -33,6 +34,8 @@ import (
 type GraphQLAPI interface {
 	GetBlockDetails(ctx context.Context, number rpc.BlockNumber) (map[string]any, error)
 	GetChainID(ctx context.Context) (*big.Int, error)
+	GetAccountInfo(ctx context.Context, address common.Address, blockNumber rpc.BlockNumber) (balance string, nonce uint64, code string, err error)
+	GetAccountStorage(ctx context.Context, address common.Address, slot string, blockNumber rpc.BlockNumber) (string, error)
 }
 
 type GraphQLAPIImpl struct {
@@ -143,6 +146,107 @@ func (api *GraphQLAPIImpl) getBlockWithSenders(ctx context.Context, number rpc.B
 		return nil, nil, nil
 	}
 	return block, block.Body().SendersFromTxs(), nil
+}
+
+// zeroStorageHash is the zero-value storage slot result: 32 zero bytes hex-encoded.
+const zeroStorageHash = "0x0000000000000000000000000000000000000000000000000000000000000000"
+
+// GetAccountInfo returns the balance (hex), nonce, and bytecode for an account at the given block.
+func (api *GraphQLAPIImpl) GetAccountInfo(ctx context.Context, address common.Address, blockNumber rpc.BlockNumber) (balance string, nonce uint64, code string, err error) {
+	tx, err := api.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return "", 0, "", err
+	}
+	defer tx.Rollback()
+
+	blockNrOrHash := rpc.BlockNumberOrHashWithNumber(blockNumber)
+	blockNum, _, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	if err != nil {
+		return "", 0, "", err
+	}
+
+	if err = api.checkPruneHistory(ctx, tx, blockNum); err != nil {
+		return "", 0, "", err
+	}
+
+	stateTx := api.filters.WithTemporalOverlay(tx)
+	if err = rpchelper.CheckBlockExecuted(stateTx, blockNum); err != nil {
+		return "", 0, "", err
+	}
+
+	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, stateTx, blockNum, latest, 0, api.stateCache, api._txNumReader)
+	if err != nil {
+		return "", 0, "", err
+	}
+
+	addr := accounts.InternAddress(address)
+	acc, err := reader.ReadAccountData(addr)
+	if err != nil {
+		return "", 0, "", err
+	}
+	if acc == nil {
+		return "0x0", 0, "0x", nil
+	}
+
+	balStr := acc.Balance.Hex()
+	codeStr := "0x"
+	if !acc.IsEmptyCodeHash() {
+		if codeBytes, codeErr := reader.ReadAccountCode(addr); codeErr == nil && codeBytes != nil {
+			codeStr = hexutil.Encode(codeBytes)
+		}
+	}
+
+	return balStr, acc.Nonce, codeStr, nil
+}
+
+// GetAccountStorage returns the value of the given storage slot for an account at the given block.
+func (api *GraphQLAPIImpl) GetAccountStorage(ctx context.Context, address common.Address, slot string, blockNumber rpc.BlockNumber) (string, error) {
+	slotBytes, decErr := hexutil.FromHexWithValidation(slot)
+	if decErr != nil {
+		return zeroStorageHash, &rpc.InvalidParamsError{Message: "unable to decode storage slot: " + hexutil.ErrHexStringInvalid.Error()}
+	}
+	if len(slotBytes) > 32 {
+		return zeroStorageHash, &rpc.InvalidParamsError{Message: hexutil.ErrTooBigHexString.Error()}
+	}
+
+	tx, err := api.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+
+	blockNrOrHash := rpc.BlockNumberOrHashWithNumber(blockNumber)
+	blockNum, _, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	if err != nil {
+		return zeroStorageHash, err
+	}
+
+	if err = api.checkPruneHistory(ctx, tx, blockNum); err != nil {
+		return zeroStorageHash, err
+	}
+
+	stateTx := api.filters.WithTemporalOverlay(tx)
+	if err = rpchelper.CheckBlockExecuted(stateTx, blockNum); err != nil {
+		return zeroStorageHash, err
+	}
+
+	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, stateTx, blockNum, latest, 0, api.stateCache, api._txNumReader)
+	if err != nil {
+		return zeroStorageHash, err
+	}
+
+	addr := accounts.InternAddress(address)
+	acc, err := reader.ReadAccountData(addr)
+	if acc == nil || err != nil {
+		return zeroStorageHash, err
+	}
+
+	location := accounts.InternKey(common.BytesToHash(slotBytes))
+	res, _, err := reader.ReadAccountStorage(addr, location)
+	if err != nil {
+		return zeroStorageHash, err
+	}
+	return hexutil.Encode(res.PaddedBytes(32)), nil
 }
 
 func (api *GraphQLAPIImpl) delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, inclTx bool) (map[string]any, error) {
