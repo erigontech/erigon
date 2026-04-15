@@ -161,8 +161,8 @@ type IntraBlockState struct {
 
 	nilAccounts map[accounts.Address]struct{} // Remember non-existent account to avoid reading them again
 
-	// Per-block intern caches: memoize unique.Make results so the global
-	// concurrent intern table is hit at most once per unique key/address per block.
+	// Per-transaction intern caches: memoize unique.Make results so the global
+	// concurrent intern table is hit at most once per unique key/address per transaction.
 	keyCache  map[common.Hash]accounts.StorageKey
 	addrCache map[common.Address]accounts.Address
 
@@ -2200,10 +2200,10 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 			al.AddAddress(addr)
 		}
 		for _, el := range list {
-			address := accounts.InternAddress(el.Address)
+			address := sdb.InternAddress(el.Address)
 			al.AddAddress(address)
 			for _, key := range el.StorageKeys {
-				al.AddSlot(address, accounts.InternKey(key))
+				al.AddSlot(address, sdb.InternKey(key))
 			}
 		}
 		if rules.IsShanghai { // EIP-3651: warm coinbase
@@ -2233,7 +2233,7 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 }
 
 // InternKey returns a cached accounts.StorageKey for k, calling the global intern
-// at most once per unique key per block.
+// at most once per unique key per transaction.
 func (sdb *IntraBlockState) InternKey(k common.Hash) accounts.StorageKey {
 	if h, ok := sdb.keyCache[k]; ok {
 		return h
@@ -2244,7 +2244,7 @@ func (sdb *IntraBlockState) InternKey(k common.Hash) accounts.StorageKey {
 }
 
 // InternAddress returns a cached accounts.Address for a, calling the global intern
-// at most once per unique address per block.
+// at most once per unique address per transaction.
 func (sdb *IntraBlockState) InternAddress(a common.Address) accounts.Address {
 	if h, ok := sdb.addrCache[a]; ok {
 		return h
