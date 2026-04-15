@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/metrics"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -114,7 +115,6 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 		return err
 	}
 	sd.SetTxNum(txNum)
-	sd.GetCommitmentContext().SetDeferBranchUpdates(false)
 
 	stateWriter := state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 	stateReader := state.NewReaderV3(sd.AsGetter(tx))
@@ -129,7 +129,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 		return err
 	}
 	defer filterMb.Close()
-	filterSd, err := execctx.NewSharedDomains(ctx, filterMb, logger)
+	filterSd, err := execctx.NewSharedDomains(ctx, filterMb, logger, commitment.TrieConfig{DeferBranchUpdates: false})
 	if err != nil {
 		return err
 	}

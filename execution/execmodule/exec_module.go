@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -468,7 +469,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		}
 	}
 
-	doms, err := execctx.NewSharedDomains(ctx, tx, e.logger)
+	doms, err := execctx.NewSharedDomains(ctx, tx, e.logger, commitment.DefaultTrieConfig())
 	if err != nil {
 		return ValidationResult{}, err
 	}

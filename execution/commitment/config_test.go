@@ -9,6 +9,9 @@ import (
 func TestDefaultTrieConfig(t *testing.T) {
 	cfg := DefaultTrieConfig()
 
+	if cfg.Variant != VariantHexPatriciaTrie {
+		t.Errorf("Variant should default to VariantHexPatriciaTrie, got %v", cfg.Variant)
+	}
 	if !cfg.DeferBranchUpdates {
 		t.Error("DeferBranchUpdates should default to true")
 	}
@@ -18,14 +21,20 @@ func TestDefaultTrieConfig(t *testing.T) {
 	if cfg.MaxDeferredUpdates != 0 {
 		t.Errorf("MaxDeferredUpdates should default to 0 (use default), got %d", cfg.MaxDeferredUpdates)
 	}
-	if cfg.EnableWarmupCache {
-		t.Error("EnableWarmupCache should default to false")
+	if !cfg.EnableWarmupCache {
+		t.Error("EnableWarmupCache should default to true")
+	}
+	if !cfg.EnableTrieWarmup {
+		t.Error("EnableTrieWarmup should default to true")
 	}
 	if cfg.CsvMetricsFilePrefix != "" {
 		t.Errorf("CsvMetricsFilePrefix should default to empty, got %q", cfg.CsvMetricsFilePrefix)
 	}
 	if cfg.MemoizationOff {
 		t.Error("MemoizationOff should default to false")
+	}
+	if cfg.SubtrieConfig != nil {
+		t.Error("SubtrieConfig should default to nil")
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -57,7 +58,7 @@ func TestSimulationIntraBlockHasStorageRAMBatch(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	sd, err := execctx.NewSharedDomains(ctx, rwTx, logger)
+	sd, err := execctx.NewSharedDomains(ctx, rwTx, logger, commitment.DefaultTrieConfig())
 	require.NoError(t, err)
 	defer sd.Close()
 

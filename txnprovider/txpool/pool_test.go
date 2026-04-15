@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/testforks"
@@ -878,7 +879,7 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			tx, err := coreDB.BeginTemporalRw(ctx)
 			asrt.NoError(err)
 			defer tx.Rollback()
-			sd, err := execctx.NewSharedDomains(ctx, tx, logger)
+			sd, err := execctx.NewSharedDomains(ctx, tx, logger, commitment.DefaultTrieConfig())
 			asrt.NoError(err)
 			defer sd.Close()
 			cache := kvcache.NewSimple()
@@ -1005,7 +1006,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	tx, err := coreDB.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	sd, err := execctx.NewSharedDomains(ctx, tx.(kv.TemporalTx), logger)
+	sd, err := execctx.NewSharedDomains(ctx, tx.(kv.TemporalTx), logger, commitment.DefaultTrieConfig())
 	require.NoError(t, err)
 	defer sd.Close()
 
@@ -2045,7 +2046,7 @@ func TestStalePendingEvictionViaMineNonce(t *testing.T) {
 		tx, werr := coreDB.BeginTemporalRw(ctx)
 		req.NoError(werr)
 		defer tx.Rollback()
-		sd, werr := execctx.NewSharedDomains(ctx, tx, logger)
+		sd, werr := execctx.NewSharedDomains(ctx, tx, logger, commitment.DefaultTrieConfig())
 		req.NoError(werr)
 		a := accounts3.Account{
 			Nonce: nonce, Balance: *uint256.NewInt(1 * common.Ether),

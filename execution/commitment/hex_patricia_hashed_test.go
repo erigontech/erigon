@@ -823,7 +823,9 @@ func Test_HexPatriciaHashed_DeferredBranchUpdates(t *testing.T) {
 		Build()
 
 	trieNormal := NewHexPatriciaHashed(length.Addr, stateNormal, DefaultTrieConfig())
-	trieDeferred := NewHexPatriciaHashed(length.Addr, stateDeferred, DefaultTrieConfig())
+	deferredCfg := DefaultTrieConfig()
+	deferredCfg.DeferBranchUpdates = true
+	trieDeferred := NewHexPatriciaHashed(length.Addr, stateDeferred, deferredCfg)
 
 	plainKeys, updates = sortUpdatesByHashIncrease(t, trieNormal, plainKeys, updates)
 
@@ -840,7 +842,6 @@ func Test_HexPatriciaHashed_DeferredBranchUpdates(t *testing.T) {
 	updsNormal.Close()
 
 	// Process with deferred mode
-	trieDeferred.SetDeferBranchUpdates(true)
 	updsDeferred := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 	rootDeferred, err := trieDeferred.Process(ctx, updsDeferred, "", nil, WarmupConfig{})
 	require.NoError(t, err)

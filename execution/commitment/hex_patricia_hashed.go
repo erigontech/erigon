@@ -124,10 +124,16 @@ type HexPatriciaHashed struct {
 
 // Clones current trie state to allow concurrent processing.
 func (hph *HexPatriciaHashed) SpawnSubTrie(ctx PatriciaContext, forNibble int) *HexPatriciaHashed {
-	// Sub-tries inherit parent config but must never defer branch updates:
-	// they fold directly into the parent and their deferred updates would never be applied.
-	subCfg := hph.cfg
-	subCfg.DeferBranchUpdates = false
+	var subCfg TrieConfig
+	if hph.cfg.SubtrieConfig != nil {
+		subCfg = *hph.cfg.SubtrieConfig
+	} else {
+		// Sub-tries inherit parent config but must never defer branch updates:
+		// they fold directly into the parent and their deferred updates would never be applied.
+		subCfg = hph.cfg
+		subCfg.DeferBranchUpdates = false
+	}
+	subCfg.SubtrieConfig = nil // no further nesting
 	subTrie := NewHexPatriciaHashed(hph.accountKeyLen, ctx, subCfg)
 
 	subTrie.mountTo(hph, forNibble)
@@ -152,7 +158,7 @@ func NewHexPatriciaHashed(accountKeyLen int16, ctx PatriciaContext, cfg TrieConf
 // applyConfig stores the config and applies its fields to the trie.
 func (hph *HexPatriciaHashed) applyConfig(cfg TrieConfig) {
 	hph.cfg = cfg
-	hph.branchEncoder.SetDeferUpdates(cfg.DeferBranchUpdates)
+	hph.branchEncoder.setDeferUpdates(cfg.DeferBranchUpdates)
 	hph.branchEncoder.maxDeferredUpdates = cfg.maxDeferredUpdatesOrDefault()
 	hph.leaveDeferredForCaller = cfg.LeaveDeferredForCaller
 	hph.enableWarmupCache = cfg.EnableWarmupCache
@@ -232,7 +238,7 @@ func (hph *HexPatriciaHashed) resetForReuse() {
 	hph.branchEncoder.ClearDeferred()
 	hph.branchEncoder.buf.Reset()
 	hph.branchEncoder.cache = nil
-	hph.branchEncoder.SetDeferUpdates(false) // will be re-set by applyConfig
+	hph.branchEncoder.setDeferUpdates(false) // will be re-set by applyConfig
 
 	// reset config to zero — caller sets via applyConfig after pool get
 	hph.cfg = TrieConfig{}
@@ -2965,12 +2971,6 @@ func (hph *HexPatriciaHashed) EnableCsvMetrics(filePathPrefix string) {
 }
 
 func (hph *HexPatriciaHashed) Variant() TrieVariant { return VariantHexPatriciaTrie }
-
-// SetDeferBranchUpdates enables or disables deferred branch update collection.
-// When enabled, branch updates are collected during fold() and applied at the end of Process().
-func (hph *HexPatriciaHashed) SetDeferBranchUpdates(defer_ bool) {
-	hph.branchEncoder.SetDeferUpdates(defer_)
-}
 
 // TakeDeferredUpdates returns the current deferred updates from the branch encoder
 // and gives it a fresh empty slice. Caller takes ownership of the returned slice.

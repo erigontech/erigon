@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -509,7 +510,7 @@ func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, met
 	assert.NoError(tb, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New(), commitment.DefaultTrieConfig())
 	assert.NoError(tb, err)
 	defer domains.Close()
 
@@ -635,7 +636,7 @@ func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propert
 	assert.NoError(tb, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New(), commitment.DefaultTrieConfig())
 	assert.NoError(tb, err)
 	defer domains.Close()
 
@@ -699,7 +700,7 @@ func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyC
 	newExecutor := func() (*parallelExecutor, context.Context, context.CancelFunc, func()) {
 		tx, err := db.BeginTemporalRo(context.Background()) //nolint:gocritic
 		assert.NoError(tb, err)
-		domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+		domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New(), commitment.DefaultTrieConfig())
 		assert.NoError(tb, err)
 
 		pe := &parallelExecutor{

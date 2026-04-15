@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -369,7 +370,7 @@ func InitPraguePreDeploys(db kv.TemporalRwDB, config *chain.Config, logger log.L
 	withdrawalAddr := config.GetWithdrawalRequestContract()
 	consolidationAddr := config.GetConsolidationRequestContract()
 	return db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-		domains, err := execctx.NewSharedDomains(ctx, tx, logger)
+		domains, err := execctx.NewSharedDomains(ctx, tx, logger, commitment.DefaultTrieConfig())
 		if err != nil {
 			return err
 		}
@@ -423,7 +424,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 	defer tx.Rollback()
 	logger := log.New("generate-chain", config.ChainName)
 
-	domains, err := execctx.NewSharedDomains(ctx, tx, logger)
+	domains, err := execctx.NewSharedDomains(ctx, tx, logger, commitment.DefaultTrieConfig())
 	if err != nil {
 		return nil, err
 	}

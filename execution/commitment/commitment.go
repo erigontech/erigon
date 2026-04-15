@@ -149,8 +149,8 @@ const (
 	VariantConcurrentHexPatricia TrieVariant = "hex-concurrent-patricia-hashed"
 )
 
-func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string, cfg TrieConfig) (Trie, *Updates) {
-	switch tv {
+func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *Updates) {
+	switch cfg.Variant {
 	case VariantConcurrentHexPatricia:
 		root := NewHexPatriciaHashed(length.Addr, nil, cfg)
 		trie := NewConcurrentPatriciaHashed(root, nil)
@@ -347,9 +347,9 @@ func NewBranchEncoder(sz uint64) *BranchEncoder {
 	}
 }
 
-// SetDeferUpdates enables or disables deferred update collection.
+// setDeferUpdates enables or disables deferred update collection.
 // When enabled, CollectUpdate will store updates in a cache instead of applying them immediately.
-func (be *BranchEncoder) SetDeferUpdates(defer_ bool) {
+func (be *BranchEncoder) setDeferUpdates(defer_ bool) {
 	be.deferUpdates = defer_
 	if defer_ {
 		if be.deferred == nil {

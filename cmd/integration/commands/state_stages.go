@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
@@ -164,7 +165,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig
 	}
 	defer tx.Rollback()
 
-	sd, err := execctx.NewSharedDomains(ctx, tx, logger1)
+	sd, err := execctx.NewSharedDomains(ctx, tx, logger1, commitment.DefaultTrieConfig())
 	if err != nil {
 		return err
 	}
@@ -376,7 +377,7 @@ func loopExec(db kv.TemporalRwDB, ctx context.Context, unwind uint64, logger log
 		default:
 		}
 
-		sd, err := execctx.NewSharedDomains(ctx, tx, logger)
+		sd, err := execctx.NewSharedDomains(ctx, tx, logger, commitment.DefaultTrieConfig())
 		if err != nil {
 			return err
 		}

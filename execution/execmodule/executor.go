@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
@@ -208,7 +209,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		return tx.Commit()
 	}
 
-	doms, err := execctx.NewSharedDomains(ctx, tx, pe.logger)
+	doms, err := execctx.NewSharedDomains(ctx, tx, pe.logger, commitment.DefaultTrieConfig())
 	if err != nil {
 		return err
 	}

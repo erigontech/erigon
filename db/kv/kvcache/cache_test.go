@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
@@ -236,7 +237,7 @@ func TestAPI(t *testing.T) {
 		var txID uint64
 		err := db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
 			txID = tx.ViewID()
-			d, err := execctx.NewSharedDomains(ctx, tx, log.New())
+			d, err := execctx.NewSharedDomains(ctx, tx, log.New(), commitment.DefaultTrieConfig())
 			if err != nil {
 				return err
 			}

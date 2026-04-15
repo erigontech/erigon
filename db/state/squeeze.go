@@ -328,7 +328,7 @@ func CheckCommitmentForPrint(ctx context.Context, rwDb kv.TemporalRwDB) (string,
 	}
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), commitment.DefaultTrieConfig())
 	if err != nil {
 		return "", err
 	}
@@ -476,7 +476,11 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, logger)
+	useWarmupCache := !dbg.EnvBool("ERIGON_REBUILD_NO_WARMUP_CACHE", false)
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, logger, commitment.TrieConfig{
+		EnableTrieWarmup:  true,
+		EnableWarmupCache: useWarmupCache,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -486,9 +490,6 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	domains.DiscardWrites(kv.CodeDomain)
 	domains.SetInMemHistoryReads(false)
 	domains.EnableParaTrieDB(rwDb)
-	domains.EnableTrieWarmup(true)
-	useWarmupCache := !dbg.EnvBool("ERIGON_REBUILD_NO_WARMUP_CACHE", false)
-	domains.EnableWarmupCache(useWarmupCache)
 
 	_, seekBlockNum, err := domains.SeekCommitment(ctx, rwTx)
 	if err != nil {
@@ -583,7 +584,10 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		if err != nil {
 			return err
 		}
-		domains, err = execctx.NewSharedDomains(ctx, rwTx, logger)
+		domains, err = execctx.NewSharedDomains(ctx, rwTx, logger, commitment.TrieConfig{
+			EnableTrieWarmup:  true,
+			EnableWarmupCache: useWarmupCache,
+		})
 		if err != nil {
 			return err
 		}
@@ -598,8 +602,6 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		domains.DiscardWrites(kv.CodeDomain)
 		domains.SetInMemHistoryReads(false)
 		domains.EnableParaTrieDB(rwDb)
-		domains.EnableTrieWarmup(true)
-		domains.EnableWarmupCache(useWarmupCache)
 		return nil
 	}
 
@@ -968,7 +970,9 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			}
 			defer rwTx.Rollback()
 
-			domains, err := execctx.NewSharedDomainsWithTrieVariant(ctx, rwTx, log.New(), trieVariant)
+			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), commitment.TrieConfig{
+				Variant: trieVariant,
+			})
 			if err != nil {
 				return nil, err
 			}
