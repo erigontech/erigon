@@ -561,11 +561,18 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 		eg = &errgroup.Group{}
 	}
 
+	// producerCtx lets us unblock the producer after eg.Wait() returns,
+	// even in non-failFast mode where the errgroup has no context.
+	producerCtx, cancelProducer := context.WithCancel(ctx)
+
 	// Producer: single goroutine iterating commitment keys sequentially.
 	// producerErr is written before return, which triggers defer close(ch).
-	// Workers drain ch before eg.Wait() returns, so the read after eg.Wait() is safe.
+	// We wait on producerWg before closing decompressors to avoid use-after-close.
 	var producerErr error
+	var producerWg sync.WaitGroup
+	producerWg.Add(1)
 	go func() {
+		defer producerWg.Done()
 		defer close(ch)
 		commReader := seg.NewReader(commDecomp.MakeGetter(), commCompression)
 		branchKeyBuf := make([]byte, 0, 128)
@@ -594,7 +601,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 			}
 			select {
 			case ch <- item:
-			case <-ctx.Done():
+			case <-producerCtx.Done():
 				return
 			}
 		}
@@ -614,7 +621,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 			case <-logTicker.C:
 				p := processed.Load()
 				elapsed := time.Since(start).Seconds()
-				if elapsed > 0 && totalKeys > 0 && p > 0 {
+				if elapsed > 0 && totalKeys > 0 && p > 0 && p < totalKeys {
 					rate := float64(p) / elapsed
 					eta := time.Duration(float64(totalKeys-p)/rate) * time.Second
 					logger.Info(
@@ -666,7 +673,16 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 
 	err = eg.Wait()
 	cancelProgress()
+	// Unblock the producer if it's stuck on channel send (e.g. all workers
+	// returned early with non-integrity errors in non-failFast mode).
+	cancelProducer()
+	// Wait for producer to exit before closing decompressors it may reference.
+	producerWg.Wait()
 
+	// Check worker errors first — they are more informative than producer errors.
+	if err != nil {
+		return derefCounts{}, err
+	}
 	if producerErr != nil {
 		// In non-failFast mode, producerErr is an integrity error — merge it
 		if !failFast && errors.Is(producerErr, ErrIntegrity) {
@@ -674,9 +690,6 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 		} else {
 			return derefCounts{}, producerErr
 		}
-	}
-	if err != nil {
-		return derefCounts{}, err
 	}
 
 	logger.Info(
