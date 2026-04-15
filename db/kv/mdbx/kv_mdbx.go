@@ -173,7 +173,11 @@ func (opts MdbxOpts) InMem(tb testing.TB, tmpDir string) MdbxOpts {
 	opts.autoRemove = tb == nil
 	opts.flags = mdbx.UtterlyNoSync | mdbx.NoMetaSync | mdbx.NoMemInit
 	opts.growthStep = 2 * datasize.MB
-	opts.mapSize = 16 * datasize.GB
+	if runtime.GOOS == "windows" {
+		opts.mapSize = 2 * datasize.GB
+	} else {
+		opts.mapSize = 16 * datasize.GB
+	}
 	opts.dirtySpace = uint64(16 * datasize.MB)
 	if tb != nil {
 		opts.dirtySpace = uint64(2 * datasize.MB)
