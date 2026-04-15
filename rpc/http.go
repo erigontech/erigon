@@ -242,6 +242,10 @@ func (t *httpServerConn) SetWriteDeadline(time.Time) error { return nil }
 // ServeHTTP injects the *bool; runMethod sets it so the correct HTTP 503 status is written before flush.
 type httpOverloadedKey struct{}
 
+// httpFlusherContextKey carries the http.Flusher (as a func()) for the current request.
+// runMethod calls it for streamable methods to activate gzip streaming mode before writing.
+type httpFlusherContextKey struct{}
+
 func withOverloadedFlag(ctx context.Context) (context.Context, *bool) {
 	flag := new(bool)
 	return context.WithValue(ctx, httpOverloadedKey{}, flag), flag
@@ -292,6 +296,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	ctx = context.WithValue(ctx, peerInfoContextKey{}, connInfo)
 	ctx, overloaded := withOverloadedFlag(ctx)
+	if f, ok := w.(http.Flusher); ok {
+		ctx = context.WithValue(ctx, httpFlusherContextKey{}, f.Flush)
+	}
 
 	// All checks passed, create a codec that reads directly from the request body
 	// until EOF, writes the response to w, and orders the server to process a
@@ -333,6 +340,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Retry-After", "1")
 			w.WriteHeader(http.StatusServiceUnavailable)
 		}
+		// Flush any remaining buffered bytes to the underlying writer.
+		// For streaming methods, grw.Flush() was already called from runMethod
+		// before writing started, so data went directly to the gzip writer.
+		// For non-streaming methods, this is a no-op (stream.buf is empty).
 		stream.Flush()
 	}
 }
