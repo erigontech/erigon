@@ -1,0 +1,24 @@
+# Erigon A-side benchmarking config (defaults).
+# Metrics exposed on :6061 — paired with B on :6062 for Grafana.
+
+metrics = true
+"metrics.addr" = "0.0.0.0"
+"metrics.port" = 6061
+
+pprof = true
+"pprof.port" = 6060
+
+port = 30303
+"p2p.allowed-ports" = "30303,30304,30305,30306,30307"
+"torrent.port" = 42069
+
+"private.api.addr" = "127.0.0.1:9090"
+"http.port" = 8545
+"ws.port" = 8546
+"authrpc.port" = 8551
+"mcp.port" = 8553
+
+"caplin.discovery.port" = 4000
+"caplin.discovery.tcpport" = 4001
+"sentinel.port" = 7777
+"beacon.api.port" = 5555

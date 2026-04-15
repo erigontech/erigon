@@ -378,9 +378,9 @@ tmux attach-session  -t "$SESSION"
 **Files:**
 - Create: `<tooling-dir>/config_A.toml`
 
-- [ ] create `config_A.toml` with full A-side port map per the "Technical Details / config_A.toml" section above
-- [ ] verify every port flag from the port map table is present (visual diff against the table)
-- [ ] real TOML parse is deferred to scenario (c) in Task 7 — erigon itself will reject bad config on startup, which is the only parser that matters
+- [x] create `config_A.toml` with full A-side port map per the "Technical Details / config_A.toml" section above
+- [x] verify every port flag from the port map table is present (visual diff against the table)
+- [x] real TOML parse is deferred to scenario (c) in Task 7 — erigon itself will reject bad config on startup, which is the only parser that matters
 
 ### Task 2: Create config_B.toml with B-side port map
 
