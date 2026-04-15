@@ -69,30 +69,30 @@
 **Files:**
 - Modify: `db/integrity/commitment_integrity.go`
 
-- [ ] read worker count from env: `dbg.EnvInt("CHECK_COMMITMENT_KVS_DEREF_WORKERS", 4)`
-- [ ] replace single `accReader`/`storageReader` setup with opening `accDecomp`/`storageDecomp` via `deriveDecompForOtherDomain`
-- [ ] define `type workItem struct { branchKey, branchValue []byte }` (local to function)
-- [ ] create buffered channel: `ch := make(chan workItem, workers*16)`
-- [ ] implement producer goroutine:
+- [x] read worker count from env: `dbg.EnvInt("CHECK_COMMITMENT_KVS_DEREF_WORKERS", 4)`
+- [x] replace single `accReader`/`storageReader` setup with opening `accDecomp`/`storageDecomp` via `deriveDecompForOtherDomain`
+- [x] define `type workItem struct { branchKey, branchValue []byte }` (local to function)
+- [x] create buffered channel: `ch := make(chan workItem, workers*16)`
+- [x] implement producer goroutine:
   - iterate `commReader.HasNext()` / `.Next()` as before
   - skip `commitmentdb.KeyCommitmentState` keys
   - copy key/value with `append([]byte{}, ...)` before sending on channel
   - handle invalid key/value pairs (odd count) — send error or log depending on failFast
   - close channel when done or on context cancellation
-- [ ] implement progress reporter goroutine:
+- [x] implement progress reporter goroutine:
   - `var processed atomic.Uint64` shared with workers
   - 30s ticker, logs rate/ETA/percentage using `processed.Load()` and `totalKeys`
   - exits when done channel or context is cancelled
-- [ ] implement N worker goroutines via `errgroup.Group`:
+- [x] implement N worker goroutines via `errgroup.Group`:
   - each creates own `accReader` and `storageReader` from shared decompressors via `MakeGetter()`
   - each allocates own scratch buffers (`newBranchValueBuf`, `plainKeyBuf`)
   - `for item := range ch` loop calling `checkDerefBranch` unchanged
   - accumulate local `derefCounts`, increment `processed` atomically per key
   - merge local counts under mutex after loop
   - handle failFast vs non-failFast error accumulation
-- [ ] after `eg.Wait()`: stop progress reporter, close decompressors, return merged counts + integrity error
-- [ ] handle producer error: if producer encounters fatal error, propagate via separate error channel or shared variable
-- [ ] verify build: `make erigon integration`
+- [x] after `eg.Wait()`: stop progress reporter, close decompressors, return merged counts + integrity error
+- [x] handle producer error: if producer encounters fatal error, propagate via separate error channel or shared variable
+- [x] verify build: `make erigon integration`
 
 ### Task 3: Verify correctness and lint
 
