@@ -1825,13 +1825,6 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 		traceResult.VmTrace = &VmTrace{Ops: []*VmTraceOp{}}
 	}
 
-	var sd *StateDiff
-	if traceTypeStateDiff {
-		sdMap := make(map[accounts.Address]*StateDiffAccount)
-		traceResult.StateDiff = sdMap
-		sd = &StateDiff{sdMap: sdMap}
-	}
-
 	ibs := state.New(stateReader)
 
 	var ot OeTracer
@@ -1889,6 +1882,9 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	traceResult.Output = common.Copy(execResult.ReturnData)
 
 	if traceTypeStateDiff {
+		sdMap := make(map[accounts.Address]*StateDiffAccount)
+		traceResult.StateDiff = sdMap
+		sd := &StateDiff{sdMap: sdMap}
 		if err = ibs.FinalizeTx(evm.ChainRules(), sd); err != nil {
 			return nil, err
 		}
