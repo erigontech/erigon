@@ -1667,6 +1667,16 @@ func (t *Updates) Close() {
 	}
 }
 
+func commonPrefixNibbles(a, b []byte) int {
+	n := min(len(a), len(b))
+	for i := 0; i < n; i++ {
+		if a[i] != b[i] {
+			return i
+		}
+	}
+	return n
+}
+
 const hashSortBatchSize = 10_000
 
 // HashSort sorts and applies fn to each key-value pair in the order of hashed keys.
@@ -1688,6 +1698,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		t.arenaEnsureCap(hashSortBatchSize * 192)
 		t.byteArena = t.byteArena[:0]
 
+		var prevHK []byte
 		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			// Copy into arena since ETL may reuse buffers
 			hk := t.arenaAlloc(k)
@@ -1695,8 +1706,10 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 			t.batchSlab = append(t.batchSlab, KeyUpdate{hashedKey: hk, plainKey: unsafe.String(unsafe.SliceData(pk), len(pk))})
 
 			if warmuper != nil {
-				warmuper.WarmKey(hk, 0)
+				startDepth := commonPrefixNibbles(prevHK, hk)
+				warmuper.WarmKey(hk, startDepth)
 			}
+			prevHK = hk
 
 			// Process batch when full
 			if len(t.batchSlab) >= hashSortBatchSize {
@@ -1745,6 +1758,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		t.arenaEnsureCap(hashSortBatchSize * 144)
 		t.byteArena = t.byteArena[:0]
 		var processErr error
+		var prevHK []byte
 
 		t.tree.Ascend(func(item *KeyUpdate) bool {
 			select {
@@ -1759,8 +1773,10 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 			t.batchSlab = append(t.batchSlab, KeyUpdate{hashedKey: hk, plainKey: item.plainKey, update: item.update})
 
 			if warmuper != nil {
-				warmuper.WarmKey(hk, 0)
+				startDepth := commonPrefixNibbles(prevHK, hk)
+				warmuper.WarmKey(hk, startDepth)
 			}
+			prevHK = hk
 
 			// Process batch when full
 			if len(t.batchSlab) >= hashSortBatchSize {

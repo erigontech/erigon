@@ -521,3 +521,86 @@ func TestUpdates_TouchStorageClearsDeleteOnRewrite(t *testing.T) {
 	require.Equal(t, int8(len("value")), got.StorageLen)
 	require.Equal(t, []byte("value"), got.Storage[:got.StorageLen])
 }
+
+func TestCommonPrefixNibbles(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		a, b []byte
+		want int
+	}{
+		{"nil prev", nil, []byte{1, 2, 3}, 0},
+		{"both nil", nil, nil, 0},
+		{"identical", []byte{1, 2, 3}, []byte{1, 2, 3}, 3},
+		{"diverge at 0", []byte{1, 2, 3}, []byte{4, 5, 6}, 0},
+		{"diverge midway", []byte{1, 2, 3, 4}, []byte{1, 2, 5, 6}, 2},
+		{"b shorter", []byte{1, 2, 3, 4}, []byte{1, 2}, 2},
+		{"a shorter", []byte{1, 2}, []byte{1, 2, 3, 4}, 2},
+		{"empty a", []byte{}, []byte{1, 2, 3}, 0},
+		{"empty b", []byte{1, 2, 3}, []byte{}, 0},
+		{"both empty", []byte{}, []byte{}, 0},
+		{"single match", []byte{7}, []byte{7}, 1},
+		{"single mismatch", []byte{7}, []byte{8}, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := commonPrefixNibbles(tc.a, tc.b)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// recordingPatriciaContext records Branch prefix arguments for verifying warmup depth.
+type recordingPatriciaContext struct {
+	noopPatriciaContext
+	branchPrefixes [][]byte
+}
+
+func (r *recordingPatriciaContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
+	cp := make([]byte, len(prefix))
+	copy(cp, prefix)
+	r.branchPrefixes = append(r.branchPrefixes, cp)
+	return nil, 0, nil
+}
+
+func TestHashSort_WarmKey_StartDepth(t *testing.T) {
+	t.Parallel()
+
+	for _, mode := range []Mode{ModeUpdate, ModeDirect} {
+		t.Run(mode.String(), func(t *testing.T) {
+			ut := NewUpdates(mode, t.TempDir(), keyHasherNoop)
+
+			ut.TouchPlainKey(string([]byte{0x01, 0x02, 0x03, 0xAA}), []byte("v1"), ut.TouchStorage)
+			ut.TouchPlainKey(string([]byte{0x01, 0x02, 0x03, 0xBB}), []byte("v2"), ut.TouchStorage)
+			ut.TouchPlainKey(string([]byte{0x01, 0x02, 0x04, 0xCC}), []byte("v3"), ut.TouchStorage)
+			ut.TouchPlainKey(string([]byte{0xFF, 0x00}), []byte("v4"), ut.TouchStorage)
+
+			rec := &recordingPatriciaContext{}
+			ctxFactory := func() (PatriciaContext, func()) { return rec, nil }
+
+			ctx := context.Background()
+			cfg := WarmupConfig{
+				Enabled:    true,
+				CtxFactory: ctxFactory,
+				NumWorkers: 1,
+				LogPrefix:  "test",
+			}
+			warmuper := NewWarmuper(ctx, cfg)
+			warmuper.Start()
+
+			var keys [][]byte
+			err := ut.HashSort(ctx, warmuper, func(hk, pk []byte, _ *Update) error {
+				keys = append(keys, append([]byte(nil), hk...))
+				return nil
+			})
+			require.NoError(t, err)
+			err = warmuper.Wait()
+			require.NoError(t, err)
+
+			require.GreaterOrEqual(t, len(keys), 4)
+			require.Equal(t, 3, commonPrefixNibbles(keys[0], keys[1]),
+				"first two keys share 3-byte prefix, so second WarmKey call should get startDepth=3")
+		})
+	}
+}

@@ -188,11 +188,11 @@ Promote `Process()`'s existing `log.Debug("commitment cache stats", ...)` to `lo
 **Files:**
 - Modify: `execution/commitment/commitment.go`
 
-- [ ] add helper `commonPrefixNibbles(a, b []byte) int` (internal, file-local)
-- [ ] in `HashSort` both `ModeDirect` and `ModeUpdate` branches: track `prevHK []byte`; compute `startDepth := commonPrefixNibbles(prevHK, hk)`; pass to `warmuper.WarmKey(hk, startDepth)`; update `prevHK = hk` after enqueue
-- [ ] write unit test for `commonPrefixNibbles` covering: nil prev, identical, diverging-at-0, diverging-midway, differing lengths
-- [ ] write/update integration test confirming `HashSort` drives `Warmuper.WarmKey` with non-zero `startDepth` when consecutive keys share a prefix (use a fake warmuper or verify via mock)
-- [ ] run `go test ./execution/commitment/...` — must pass before next task
+- [x] add helper `commonPrefixNibbles(a, b []byte) int` (internal, file-local)
+- [x] in `HashSort` both `ModeDirect` and `ModeUpdate` branches: track `prevHK []byte`; compute `startDepth := commonPrefixNibbles(prevHK, hk)`; pass to `warmuper.WarmKey(hk, startDepth)`; update `prevHK = hk` after enqueue
+- [x] write unit test for `commonPrefixNibbles` covering: nil prev, identical, diverging-at-0, diverging-midway, differing lengths
+- [x] write/update integration test confirming `HashSort` drives `Warmuper.WarmKey` with non-zero `startDepth` when consecutive keys share a prefix (use a fake warmuper or verify via mock)
+- [x] run `go test ./execution/commitment/...` — must pass before next task
 
 ### Task 4: Remove dead `LookupWithVisitor` / `BranchVisitor`
 
