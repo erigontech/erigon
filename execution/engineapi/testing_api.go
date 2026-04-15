@@ -190,7 +190,7 @@ func (t *testingImpl) BuildBlockV1(
 		PrevRandao:            payloadAttributes.PrevRandao,
 		SuggestedFeeRecipient: payloadAttributes.SuggestedFeeRecipient,
 		SlotNumber:            (*uint64)(payloadAttributes.SlotNumber),
-		CustomProvider:        customProvider,
+		CustomTxnProvider:        customProvider,
 	}
 	if version >= clparams.CapellaVersion {
 		assembleParams.Withdrawals = payloadAttributes.Withdrawals
