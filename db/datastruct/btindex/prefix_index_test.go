@@ -51,7 +51,7 @@ func buildTestPrefixIndex(t testing.TB, kvPath string, compressFlags seg.FileCom
 
 	ir := NewMockIndexReader(efi)
 
-	pi := NewPrefixIndex(g, efi, ir.dataLookup, ir.keyCmp)
+	pi := NewPrefixIndex(g, efi, ir.dataLookup)
 	pi.cursorGetter = ir.newCursor
 
 	return decomp, pi, efi, g
@@ -102,7 +102,7 @@ func buildTestPrefixIndexWithNodes(t testing.TB, kvPath string, compressFlags se
 		}
 	}
 
-	pi := NewPrefixIndexWithNodes(g, efi, ir.dataLookup, ir.keyCmp, nodes)
+	pi := NewPrefixIndexWithNodes(g, efi, ir.dataLookup, nodes)
 	pi.cursorGetter = ir.newCursor
 
 	return decomp, pi, efi, g
@@ -756,7 +756,7 @@ func TestPrefixIndexWithNodesNodeKeysStable(t *testing.T) {
 	require.NotEmpty(t, nodes)
 
 	// Build PrefixIndex with pre-built nodes.
-	pi := NewPrefixIndexWithNodes(g, efi, ir.dataLookup, ir.keyCmp, nodes)
+	pi := NewPrefixIndexWithNodes(g, efi, ir.dataLookup, nodes)
 	pi.cursorGetter = ir.newCursor
 	defer pi.Close()
 
@@ -1809,7 +1809,7 @@ func TestPrefixIndex_NodeKeyStability(t *testing.T) {
 	}
 
 	// Build PrefixIndex with these nodes.
-	pi := NewPrefixIndexWithNodes(g, efi, ir.dataLookup, ir.keyCmp, nodes)
+	pi := NewPrefixIndexWithNodes(g, efi, ir.dataLookup, nodes)
 	pi.cursorGetter = ir.newCursor
 	require.NotNil(t, pi)
 	defer pi.Close()
@@ -1946,7 +1946,7 @@ func TestPrefixIndex_CompareWithBpsTree(t *testing.T) {
 	defer decomp2.Close()
 	g2 := seg.NewReader(decomp2.MakeGetter(), compressFlags)
 	ir2 := NewMockIndexReader(efi)
-	bp := NewBpsTree(g2, efi, DefaultBtreeM, ir2.dataLookup, ir2.keyCmp)
+	bp := NewBpsTree(g2, efi, DefaultBtreeM, ir2.dataLookup)
 	bp.cursorGetter = ir2.newCursor
 
 	keys, err := pivotKeysFromKV(kvPath)

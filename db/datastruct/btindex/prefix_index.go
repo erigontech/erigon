@@ -46,7 +46,6 @@ type PrefixIndex struct {
 	offt *eliasfano32.EliasFano // offset index (from .bt file)
 
 	dataLookupFunc dataLookupFunc
-	keyCmpFunc     keyCmpFunc
 	cursorGetter   cursorGetter
 
 	trace bool
@@ -178,6 +177,18 @@ func (p *PrefixIndex) initBuckets() {
 	}
 }
 
+// compareKey resets g to the offset of item di and compares key against the file key.
+// Returns Compare(key, fileKey): 0 on match, <0 if key < fileKey, >0 if key > fileKey.
+// On match, g is advanced past the key (ready to read value). On mismatch, g position is reset.
+// Panics if di >= offt.Count().
+func (p *PrefixIndex) compareKey(g *seg.Reader, key []byte, di uint64) int {
+	if di >= p.offt.Count() {
+		panic(fmt.Errorf("compareKey: di=%d >= count=%d, file: %s", di, p.offt.Count(), g.FileName()))
+	}
+	g.Reset(p.offt.Get(di))
+	return g.MatchCmp(key)
+}
+
 // scanBucketRanges performs a sequential scan over the kv file to record per-prefix
 // bucket ranges (firstDI, endDI) and optionally count keys per prefix.
 // If counts is non-nil, it will be populated with key counts per prefix.
@@ -198,11 +209,10 @@ func (p *PrefixIndex) scanBucketRanges(kv *seg.Reader, counts []uint32) {
 // NewPrefixIndex builds a PrefixIndex by scanning the .kv file twice:
 // Pass 1: count keys per prefix and record bucket ranges.
 // Pass 2: select evenly-spaced nodes per prefix bucket.
-func NewPrefixIndex(kv *seg.Reader, offt *eliasfano32.EliasFano, dataLookup dataLookupFunc, keyCmp keyCmpFunc) *PrefixIndex {
+func NewPrefixIndex(kv *seg.Reader, offt *eliasfano32.EliasFano, dataLookup dataLookupFunc) *PrefixIndex {
 	p := &PrefixIndex{
 		offt:           offt,
 		dataLookupFunc: dataLookup,
-		keyCmpFunc:     keyCmp,
 	}
 	p.initBuckets()
 
@@ -278,11 +288,10 @@ func NewPrefixIndex(kv *seg.Reader, offt *eliasfano32.EliasFano, dataLookup data
 
 // NewPrefixIndexWithNodes builds a PrefixIndex using pre-built nodes from a .bt file.
 // It still scans .kv to establish bucket ranges, then distributes existing nodes into buckets.
-func NewPrefixIndexWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, dataLookup dataLookupFunc, keyCmp keyCmpFunc, nodes []Node) *PrefixIndex {
+func NewPrefixIndexWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, dataLookup dataLookupFunc, nodes []Node) *PrefixIndex {
 	p := &PrefixIndex{
 		offt:           offt,
 		dataLookupFunc: dataLookup,
-		keyCmpFunc:     keyCmp,
 	}
 	p.initBuckets()
 
@@ -383,7 +392,6 @@ func (p *PrefixIndex) Seek(g *seg.Reader, seekKey []byte) (*Cursor, error) {
 
 	var m uint64
 	var cmp int
-	var err error
 
 	for l < r {
 		m = (l + r) >> 1
@@ -406,15 +414,11 @@ func (p *PrefixIndex) Seek(g *seg.Reader, seekKey []byte) (*Cursor, error) {
 			return cur, nil
 		}
 
-		cmp, cur.key, err = p.keyCmpFunc(seekKey, m, g, cur.key[:0])
-		if err != nil {
-			cur.Close()
-			return nil, err
-		}
+		cmp = p.compareKey(g, seekKey, m)
 
 		if cmp == 0 {
 			break
-		} else if cmp > 0 {
+		} else if cmp < 0 {
 			r = m
 		} else {
 			l = m + 1
@@ -425,7 +429,7 @@ func (p *PrefixIndex) Seek(g *seg.Reader, seekKey []byte) (*Cursor, error) {
 		m = l
 	}
 
-	err = cur.Reset(m, g)
+	err := cur.Reset(m, g)
 	if err != nil {
 		cur.Close()
 		if errors.Is(err, ErrBtIndexLookupBounds) {
@@ -504,13 +508,7 @@ func (p *PrefixIndex) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset 
 			return v, true, offset, nil
 		}
 
-		cmp, g.Buf, err = p.keyCmpFunc(key, m, g, g.Buf[:0])
-		if err != nil {
-			if errors.Is(err, ErrBtIndexLookupBounds) {
-				return nil, false, 0, nil
-			}
-			return nil, false, 0, err
-		}
+		cmp = p.compareKey(g, key, m)
 		if cmp == 0 {
 			offset = p.offt.Get(m)
 			if !g.HasNext() {
@@ -518,7 +516,7 @@ func (p *PrefixIndex) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset 
 			}
 			v, _ = g.Next(nil)
 			return v, true, offset, nil
-		} else if cmp > 0 {
+		} else if cmp < 0 {
 			r = m
 		} else {
 			l = m + 1
@@ -528,13 +526,7 @@ func (p *PrefixIndex) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset 
 	if l >= count {
 		return nil, false, 0, nil
 	}
-	cmp, g.Buf, err = p.keyCmpFunc(key, l, g, g.Buf[:0])
-	if err != nil {
-		if errors.Is(err, ErrBtIndexLookupBounds) {
-			return nil, false, 0, nil
-		}
-		return nil, false, 0, err
-	}
+	cmp = p.compareKey(g, key, l)
 	if cmp != 0 {
 		return nil, false, 0, nil
 	}

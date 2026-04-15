@@ -510,7 +510,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 		idx.bplus = NewBpsTree(kvGetter, idx.ef, M, idx.dataLookup)
 		idx.bplus.cursorGetter = idx.newCursor
 		if dbg.UsePrefixIndex {
-			idx.search = NewPrefixIndex(kvGetter, idx.ef, idx.dataLookup, idx.keyCmp)
+			idx.search = NewPrefixIndex(kvGetter, idx.ef, idx.dataLookup)
 			idx.search.cursorGetter = idx.newCursor
 		}
 	} else {
@@ -521,7 +521,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 		idx.bplus = NewBpsTreeWithNodes(kvGetter, idx.ef, M, idx.dataLookup, nodes)
 		idx.bplus.cursorGetter = idx.newCursor
 		if dbg.UsePrefixIndex {
-			idx.search = NewPrefixIndexWithNodes(kvGetter, idx.ef, idx.dataLookup, idx.keyCmp, nodes)
+			idx.search = NewPrefixIndexWithNodes(kvGetter, idx.ef, idx.dataLookup, nodes)
 			idx.search.cursorGetter = idx.newCursor
 		}
 	}
