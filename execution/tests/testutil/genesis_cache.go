@@ -213,7 +213,7 @@ func createGenesisDB(gspec *types.Genesis) (kv.TemporalRwDB, *types.Block, strin
 	// Step 3: Deploy Prague system contracts only if the genesis alloc
 	// doesn't already include them (test fixtures provide their own bytecode).
 	if gspec.Config.IsPrague(0) && !allocHasSystemContracts(gspec) {
-		if err := blockgen.InitPraguePreDeploys(db, logger); err != nil {
+		if err := blockgen.InitPraguePreDeploys(db, gspec.Config, logger); err != nil {
 			return nil, nil, "", fmt.Errorf("genesis cache: InitPraguePreDeploys: %w", err)
 		}
 	}

@@ -460,7 +460,7 @@ func (f *SnapshotRepo) loadDirtyFiles(aps []string) {
 	}
 }
 
-func (f *SnapshotRepo) calcVisibleFiles(to RootNum) (roItems []visibleFile) {
+func (f *SnapshotRepo) calcVisibleFiles(to RootNum) (roItems visibleFiles) {
 	checker := f.integrity
 	var cchecker func(startTxNum, endTxNum uint64) bool
 	if checker != nil {

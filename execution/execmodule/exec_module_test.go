@@ -849,6 +849,147 @@ func TestAssembleBlockWithWithdrawalRequest(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestAssembleBlockAmsterdamForkTransition builds pre-Amsterdam blocks via the
+// builder, then assembles the first Amsterdam block. This reproduces the
+// Kurtosis failure from erigontech/erigon#20243 where the chain stalls at
+// the Glamsterdam fork boundary.
+func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+
+	// Amsterdam activates at timestamp 5 — blocks at t<5 are pre-Amsterdam,
+	// the block at t=5 is the first Amsterdam block.
+	amsterdamTime := uint64(5)
+	cfg := &chain.Config{
+		ChainID:                       big.NewInt(1337),
+		Rules:                         chain.EtHashRules,
+		HomesteadBlock:                common.NewUint64(0),
+		TangerineWhistleBlock:         common.NewUint64(0),
+		SpuriousDragonBlock:           common.NewUint64(0),
+		ByzantiumBlock:                common.NewUint64(0),
+		ConstantinopleBlock:           common.NewUint64(0),
+		PetersburgBlock:               common.NewUint64(0),
+		IstanbulBlock:                 common.NewUint64(0),
+		MuirGlacierBlock:              common.NewUint64(0),
+		BerlinBlock:                   common.NewUint64(0),
+		LondonBlock:                   common.NewUint64(0),
+		ArrowGlacierBlock:             common.NewUint64(0),
+		GrayGlacierBlock:              common.NewUint64(0),
+		TerminalTotalDifficulty:       big.NewInt(0),
+		TerminalTotalDifficultyPassed: true,
+		ShanghaiTime:                  common.NewUint64(0),
+		CancunTime:                    common.NewUint64(0),
+		PragueTime:                    common.NewUint64(0),
+		OsakaTime:                     common.NewUint64(0),
+		AmsterdamTime:                 &amsterdamTime,
+		DepositContract:               common.HexToAddress("0x00000000219ab540356cBB839Cbe05303d7705Fa"),
+		Ethash:                        new(chain.EthashConfig),
+	}
+
+	m := execmoduletester.New(t,
+		execmoduletester.WithTxPool(),
+		execmoduletester.WithChainConfig(cfg),
+		execmoduletester.WithExperimentalBAL(),
+	)
+	exec := m.ExecModule
+	txpool := m.TxPoolGrpcServer
+
+	// Build 3 pre-Amsterdam blocks via the builder (timestamps 1, 2, 3).
+	topBlock := m.Genesis
+	baseFee := topBlock.BaseFee().Uint64()
+	for i := 0; i < 3; i++ {
+		nonce := uint64(i)
+		tx, txErr := types.SignTx(
+			types.NewTransaction(nonce, common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(baseFee), nil),
+			*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key,
+		)
+		require.NoError(t, txErr)
+		var buf bytes.Buffer
+		require.NoError(t, tx.EncodeRLP(&buf))
+		r, addErr := txpool.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{buf.Bytes()}})
+		require.NoError(t, addErr)
+		require.Equal(t, "success", r.Errors[0])
+
+		ts := topBlock.Header().Time + 1
+		require.Less(t, ts, amsterdamTime) // still pre-Amsterdam
+		var prevRandao, beaconRoot common.Hash
+		_, _ = rand.Read(prevRandao[:])
+		_, _ = rand.Read(beaconRoot[:])
+		payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
+			ParentHash:            topBlock.Hash(),
+			Timestamp:             ts,
+			PrevRandao:            prevRandao,
+			SuggestedFeeRecipient: common.Address{1},
+			Withdrawals:           make([]*types.Withdrawal, 0),
+			ParentBeaconBlockRoot: &beaconRoot,
+		})
+		require.NoError(t, err)
+
+		block, err := getAssembledBlock(ctx, exec, payloadId)
+		require.NoError(t, err)
+		require.Equal(t, uint64(i+1), block.NumberU64())
+
+		err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
+		require.NoError(t, err)
+		topBlock = block
+		baseFee = block.BaseFee().Uint64()
+	}
+
+	require.Less(t, topBlock.Header().Time, amsterdamTime, "pre-Amsterdam blocks should have timestamp < amsterdamTime")
+
+	// Add a contract deployment tx to the pool — exercises state gas (EIP-8037)
+	// more than simple EOA transfers.
+	deployCode := []byte{0x60, 0x00} // PUSH1 0x00 — minimal contract
+	deployTx, err := types.SignTx(
+		types.NewContractCreation(3, uint256.NewInt(0), 1_000_000, uint256.NewInt(baseFee), deployCode),
+		*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key,
+	)
+	require.NoError(t, err)
+	var deployBuf bytes.Buffer
+	require.NoError(t, deployTx.EncodeRLP(&deployBuf))
+	addResp, err := txpool.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{deployBuf.Bytes()}})
+	require.NoError(t, err)
+	require.Equal(t, "success", addResp.Errors[0])
+
+	// Also add a simple transfer.
+	simpleTx, err := types.SignTx(
+		types.NewTransaction(4, common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(baseFee), nil),
+		*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key,
+	)
+	require.NoError(t, err)
+	var simpleBuf bytes.Buffer
+	require.NoError(t, simpleTx.EncodeRLP(&simpleBuf))
+	addResp2, err := txpool.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{simpleBuf.Bytes()}})
+	require.NoError(t, err)
+	require.Equal(t, "success", addResp2.Errors[0])
+
+	// Now assemble the first Amsterdam block (timestamp = amsterdamTime).
+	slotNumber := uint64(8) // mimics Kurtosis: epoch 1 slot 8 with minimal preset
+	var amsPrevRandao, amsBeaconRoot common.Hash
+	_, _ = rand.Read(amsPrevRandao[:])
+	_, _ = rand.Read(amsBeaconRoot[:])
+	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
+		ParentHash:            topBlock.Hash(),
+		Timestamp:             amsterdamTime,
+		PrevRandao:            amsPrevRandao,
+		SuggestedFeeRecipient: common.Address{1},
+		Withdrawals:           make([]*types.Withdrawal, 0),
+		ParentBeaconBlockRoot: &amsBeaconRoot,
+		SlotNumber:            &slotNumber,
+	})
+	require.NoError(t, err)
+
+	block, err := getAssembledBlock(ctx, exec, payloadId)
+	require.NoError(t, err)
+	require.NotNil(t, block, "first Amsterdam block should be built successfully")
+	require.True(t, cfg.IsAmsterdam(block.Header().Time), "block should be an Amsterdam block")
+	require.GreaterOrEqual(t, len(block.Transactions()), 1, "block should contain txpool txns")
+
+	// Insert, validate, and update fork choice.
+	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
+	require.NoError(t, err)
+}
+
 // TestNotificationDispatchForegroundCommit verifies that after FCU returns
 // Success with the default foreground commit path:
 // 1. Header notifications have been dispatched (subscribers receive them)

@@ -30,7 +30,6 @@ import (
 	"strings"
 	"testing"
 
-	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
 
@@ -47,7 +46,6 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/misc"
-	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tests/testforks"
@@ -367,14 +365,7 @@ func (t *StateTest) genesis(config *chain.Config) *types.Genesis {
 	}
 }
 
-func rlpHash(x any) (h common.Hash) {
-	hw := keccak.NewFastKeccak()
-	if err := rlp.Encode(hw, x); err != nil {
-		panic(err)
-	}
-	hw.Sum(h[:0])
-	return h
-}
+var rlpHash = types.RlpHash
 
 func vmTestBlockHash(n uint64) (common.Hash, error) {
 	return common.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String()))), nil

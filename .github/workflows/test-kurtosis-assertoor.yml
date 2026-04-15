@@ -34,6 +34,9 @@ jobs:
           - suite: pectra
             package_args: .github/workflows/kurtosis/pectra.io
             ethereum_package_branch: "5.0.1"
+          - suite: glamsterdam
+            package_args: .github/workflows/kurtosis/glamsterdam.io
+            ethereum_package_branch: "main"
           - suite: caplin-minimal
             package_args: .github/workflows/kurtosis/caplin-minimal-assertoor.io
             ethereum_package_url: "github.com/erigontech/ethereum-package"
