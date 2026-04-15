@@ -17,7 +17,7 @@ flowchart TD
     E -->|Yes| F{Easily reproducible\nlocally?}
 
     F -->|No — quick job| PR_CG
-    F -->|No — slow job| MQ_CG[Merge queue via ci-gate]
+    F -->|No — slow job| PR_CG
     F -->|Yes| MQ_CG
 
     PR_SA --> G{Needs cache warming\non push to main/release?}
