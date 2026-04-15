@@ -538,13 +538,24 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	// Wire chain.toml ENR updater and P2P discovery after sentry servers are created.
 	if backend.downloader != nil && len(backend.sentryServers) > 0 {
-		btPort := enr.BT(backend.downloader.TorrentPort())
 		backend.downloader.SetENRUpdater(func(ct enr.ChainToml) {
+			// Resolve the torrent port at update time rather than capture-time:
+			// the torrent client may not be listening yet when the updater
+			// closure is built. Only set the "bt" ENR key if we have a valid
+			// port in [1..65535]; otherwise peers would dial an unusable port.
+			torrentPort := backend.downloader.TorrentPort()
+			validPort := torrentPort > 0 && torrentPort <= 65535
+
 			for _, srv := range backend.sentryServers {
 				if p2p := srv.GetP2PServer(); p2p != nil {
 					p2p.LocalNode().Set(ct)
-					p2p.LocalNode().Set(btPort)
+					if validPort {
+						p2p.LocalNode().Set(enr.BT(torrentPort))
+					}
 				}
+			}
+			if !validPort {
+				logger.Debug("[chaintoml] skipping bt ENR entry (no valid torrent port yet)", "torrentPort", torrentPort)
 			}
 		})
 

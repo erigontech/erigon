@@ -61,7 +61,7 @@ func TestBTPeerDiscovery_AddPeersFromENR(t *testing.T) {
 	// Build a fake ENR for the seeder with chain-toml + bt entries.
 	seederKey, _ := crypto.GenerateKey()
 	seederNode := makeNodeWithBT(t, seederKey, net.IPv4(127, 0, 0, 1),
-		&enr.ChainToml{KnownTx: 100, InfoHash: [20]byte(infoHash)},
+		&enr.ChainToml{KnownBlocks: 100, InfoHash: [20]byte(infoHash)},
 		enr.BT(uint16(seeder.LocalPort())))
 
 	// Simulate discovery: leecher finds the seeder's ENR.
@@ -112,7 +112,7 @@ func TestBTPeerDiscovery_AddPeersFromENR(t *testing.T) {
 // a BT port, addTorrentPeerFromENR is a no-op (no panic, no peers added).
 func TestBTPeerDiscovery_NoBTPort(t *testing.T) {
 	key, _ := crypto.GenerateKey()
-	ct := &enr.ChainToml{KnownTx: 50, InfoHash: [20]byte{1}}
+	ct := &enr.ChainToml{KnownBlocks: 50, InfoHash: [20]byte{1}}
 	node := makeTestNode(t, key, ct)
 
 	peer := &ChainTomlPeer{ChainToml: *ct, Node: node}

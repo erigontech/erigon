@@ -9,9 +9,9 @@ import (
 
 func TestGetSetChainToml(t *testing.T) {
 	ct := ChainToml{
-		AuthoritativeTx: 123456789,
-		KnownTx:         234567890,
-		InfoHash:        [20]byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14},
+		AuthoritativeBlocks: 123456789,
+		KnownBlocks:         234567890,
+		InfoHash:            [20]byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14},
 	}
 
 	var r Record
@@ -19,8 +19,8 @@ func TestGetSetChainToml(t *testing.T) {
 
 	var ct2 ChainToml
 	require.NoError(t, r.Load(&ct2))
-	assert.Equal(t, ct.AuthoritativeTx, ct2.AuthoritativeTx)
-	assert.Equal(t, ct.KnownTx, ct2.KnownTx)
+	assert.Equal(t, ct.AuthoritativeBlocks, ct2.AuthoritativeBlocks)
+	assert.Equal(t, ct.KnownBlocks, ct2.KnownBlocks)
 	assert.Equal(t, ct.InfoHash, ct2.InfoHash)
 }
 
@@ -36,8 +36,8 @@ func TestChainTomlZeroValue(t *testing.T) {
 
 	var ct2 ChainToml
 	require.NoError(t, r.Load(&ct2))
-	assert.Equal(t, uint64(0), ct2.AuthoritativeTx)
-	assert.Equal(t, uint64(0), ct2.KnownTx)
+	assert.Equal(t, uint64(0), ct2.AuthoritativeBlocks)
+	assert.Equal(t, uint64(0), ct2.KnownBlocks)
 	assert.Equal(t, [20]byte{}, ct2.InfoHash)
 }
 
@@ -58,9 +58,9 @@ func TestChainTomlFitsInENR(t *testing.T) {
 	r.Set(UDP(30303))
 	r.Set(TCP(30303))
 	r.Set(ChainToml{
-		AuthoritativeTx: ^uint64(0), // worst case: max uint64
-		KnownTx:         ^uint64(0),
-		InfoHash:        [20]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
+		AuthoritativeBlocks: ^uint64(0), // worst case: max uint64
+		KnownBlocks:         ^uint64(0),
+		InfoHash:            [20]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
 	})
 
 	// The record should still be under the size limit.

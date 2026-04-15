@@ -86,10 +86,13 @@ type ChainTomlPeer struct {
 }
 
 // DiscoverChainToml queries all known peers for their "chain-toml" ENR entry
-// and returns the one with the highest KnownTx. This represents the most
+// and returns the one with the highest KnownBlocks. This represents the most
 // advanced snapshot set available on the network.
 //
-// Returns nil if no peers have the chain-toml entry.
+// Entries with a zero InfoHash or with KnownBlocks < AuthoritativeBlocks are skipped
+// as malformed — their peer advertisement is not trustworthy.
+//
+// Returns nil if no peers have a valid chain-toml entry.
 func DiscoverChainToml(nodes NodeSource) *ChainTomlPeer {
 	var best *ChainTomlPeer
 
@@ -99,7 +102,15 @@ func DiscoverChainToml(nodes NodeSource) *ChainTomlPeer {
 			continue // peer doesn't have chain-toml entry
 		}
 
-		if best == nil || ct.KnownTx > best.ChainToml.KnownTx {
+		// Sanity checks: reject entries we can't act on.
+		if ct.InfoHash == ([20]byte{}) {
+			continue // no info-hash means nothing to download
+		}
+		if ct.KnownBlocks < ct.AuthoritativeBlocks {
+			continue // invariant violation: Known ⊇ Authoritative
+		}
+
+		if best == nil || ct.KnownBlocks > best.ChainToml.KnownBlocks {
 			best = &ChainTomlPeer{ChainToml: ct, Node: node}
 		}
 	}

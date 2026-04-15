@@ -411,7 +411,7 @@ func (d *Downloader) SetENRUpdater(fn func(enr.ChainToml)) {
 }
 
 // PublishLocalChainToml generates chain.toml from local torrents + preverified registry,
-// builds its .torrent, and advertises the info-hash via ENR with AuthoritativeTx/KnownTx
+// builds its .torrent, and advertises the info-hash via ENR with AuthoritativeBlocks/KnownBlocks
 // derived from the preverified registry's ExpectBlocks.
 // It also adds the chain.toml torrent to the client for seeding so other nodes can download it.
 func (d *Downloader) PublishLocalChainToml() error {

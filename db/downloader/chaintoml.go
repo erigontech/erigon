@@ -44,6 +44,15 @@ func GenerateChainToml(snapDir string) ([]byte, error) {
 			continue
 		}
 
+		// Exclude chain.toml's own torrent from the manifest — otherwise the
+		// manifest becomes self-referential: regenerating chain.toml changes
+		// the torrent hash, which changes chain.toml, which changes the hash…
+		// Consumers should discover chain.toml's info-hash via the ENR entry,
+		// not through the manifest itself.
+		if e.Name() == ChainTomlFileName+".torrent" {
+			continue
+		}
+
 		fPath := filepath.Join(torrentDir, e.Name())
 		mi, err := metainfo.LoadFromFile(fPath)
 		if err != nil {
@@ -141,7 +150,7 @@ func PublishChainToml(snapDir string, torrentFS *AtomicTorrentFS, chainName stri
 	}
 
 	// Merge in preverified entries from the registry (covers files without .torrent files).
-	// Also compute AuthoritativeTx from the registry's ExpectBlocks.
+	// Also compute AuthoritativeBlocks from the registry's ExpectBlocks.
 	var authoritativeTx uint64
 	if chainName != "" {
 		localMap, _ := ParseChainToml(tomlBytes)
@@ -166,13 +175,13 @@ func PublishChainToml(snapDir string, torrentFS *AtomicTorrentFS, chainName stri
 	}
 
 	if enrUpdater != nil {
-		// For the initial implementation, AuthoritativeTx == KnownTx.
-		// When a node re-publishes peer-discovered entries, KnownTx will
-		// be derived from the peer's ENR values and may exceed AuthoritativeTx.
+		// For the initial implementation, AuthoritativeBlocks == KnownBlocks.
+		// When a node re-publishes peer-discovered entries, KnownBlocks will
+		// be derived from the peer's ENR values and may exceed AuthoritativeBlocks.
 		enrUpdater(enr.ChainToml{
-			AuthoritativeTx: authoritativeTx,
-			KnownTx:         authoritativeTx,
-			InfoHash:        infoHash,
+			AuthoritativeBlocks: authoritativeTx,
+			KnownBlocks:         authoritativeTx,
+			InfoHash:            infoHash,
 		})
 	}
 

@@ -14,7 +14,10 @@ import (
 )
 
 func TestChainTomlPath(t *testing.T) {
-	assert.Equal(t, "/data/snapshots/chain.toml", ChainTomlPath("/data/snapshots"))
+	// Use filepath.Join for the input too so the test is portable across OSes —
+	// ChainTomlPath uses filepath.Join internally, which emits platform separators.
+	dir := filepath.Join("data", "snapshots")
+	assert.Equal(t, filepath.Join(dir, "chain.toml"), ChainTomlPath(dir))
 }
 
 func TestGenerateChainToml_EmptyDir(t *testing.T) {
@@ -169,9 +172,9 @@ func TestPublishChainToml(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEmpty(t, loaded)
 
-	// Verify ENR updater was called (no chainName → AuthoritativeTx/KnownTx = 0).
-	assert.Equal(t, uint64(0), receivedENR.AuthoritativeTx)
-	assert.Equal(t, uint64(0), receivedENR.KnownTx)
+	// Verify ENR updater was called (no chainName → AuthoritativeBlocks/KnownBlocks = 0).
+	assert.Equal(t, uint64(0), receivedENR.AuthoritativeBlocks)
+	assert.Equal(t, uint64(0), receivedENR.KnownBlocks)
 	assert.NotEqual(t, [20]byte{}, receivedENR.InfoHash)
 }
 

@@ -107,6 +107,21 @@ func DownloadChainTomlByInfoHash(ctx context.Context, client *torrent.Client, in
 		return nil, fmt.Errorf("waiting for chain.toml torrent info: %w", dlCtx.Err())
 	}
 
+	// Validate the torrent's metainfo — a malicious peer could advertise an
+	// info-hash whose torrent is a multi-file bundle or names a file other
+	// than chain.toml. Reject both: consumers should only download manifests
+	// that match the expected single-file shape.
+	info := t.Info()
+	if info == nil {
+		return nil, fmt.Errorf("chain.toml torrent info missing")
+	}
+	if len(info.Files) != 0 {
+		return nil, fmt.Errorf("chain.toml torrent is multi-file (%d files), expected single file", len(info.Files))
+	}
+	if info.Name != ChainTomlFileName {
+		return nil, fmt.Errorf("chain.toml torrent names %q, expected %q", info.Name, ChainTomlFileName)
+	}
+
 	t.DownloadAll()
 
 	select {
@@ -115,7 +130,8 @@ func DownloadChainTomlByInfoHash(ctx context.Context, client *torrent.Client, in
 		return nil, fmt.Errorf("downloading chain.toml torrent: %w", dlCtx.Err())
 	}
 
-	// Read the downloaded chain.toml file
+	// Read the downloaded chain.toml file. The validation above guarantees
+	// the torrent wrote to this path.
 	filePath := ChainTomlPath(snapDir)
 	data, err := os.ReadFile(filePath)
 	if err != nil {
@@ -154,7 +170,7 @@ type ipPortAddr struct {
 	Port int
 }
 
-func (a ipPortAddr) Network() string { return "" }
+func (a ipPortAddr) Network() string { return "tcp" }
 func (a ipPortAddr) String() string {
 	return net.JoinHostPort(a.IP.String(), fmt.Sprintf("%d", a.Port))
 }
@@ -257,7 +273,7 @@ func (d *Downloader) acquireChainToml(ctx context.Context, networkName string, n
 		var ct enr.ChainToml
 		if err := node.Record().Load(&ct); err == nil {
 			withChainToml++
-			d.logger.Debug("[chaintoml] found chain-toml entry", "node", node.ID().TerminalString(), "authoritativeTx", ct.AuthoritativeTx, "knownTx", ct.KnownTx)
+			d.logger.Debug("[chaintoml] found chain-toml entry", "node", node.ID().TerminalString(), "authoritativeTx", ct.AuthoritativeBlocks, "knownTx", ct.KnownBlocks)
 		}
 	}
 	d.logger.Info("[chaintoml] scanning peers for chain-toml ENR entry", "peers", len(allNodes), "withChainToml", withChainToml)
@@ -269,8 +285,8 @@ func (d *Downloader) acquireChainToml(ctx context.Context, networkName string, n
 	}
 
 	d.logger.Info("[chaintoml] discovered peer chain.toml",
-		"authoritativeTx", best.ChainToml.AuthoritativeTx,
-		"knownTx", best.ChainToml.KnownTx,
+		"authoritativeTx", best.ChainToml.AuthoritativeBlocks,
+		"knownTx", best.ChainToml.KnownBlocks,
 		"infoHash", hex.EncodeToString(best.ChainToml.InfoHash[:]))
 
 	tomlBytes, err := DownloadChainTomlByInfoHash(ctx, d.torrentClient, best.ChainToml.InfoHash, d.snapDir(), best)
@@ -287,17 +303,22 @@ func (d *Downloader) acquireChainToml(ctx context.Context, networkName string, n
 
 	if newCount > 0 {
 		d.logger.Info("[chaintoml] applied discovered entries", "new", newCount)
-		// Signal that the P2P manifest is ready so the snapshot stage can proceed.
-		if d.manifestReady != nil {
-			select {
-			case <-d.manifestReady:
-				// already closed
-			default:
-				close(d.manifestReady)
-			}
-		}
 	} else {
 		d.logger.Debug("[chaintoml] no new entries from peer")
+	}
+
+	// Signal that the P2P manifest is ready so the snapshot stage can proceed.
+	// Readiness depends on a successful discovery+download+apply cycle, even if it
+	// added zero new entries (e.g. the manifest was empty or already fully merged).
+	// Otherwise --snap.p2p-manifest nodes can hang forever when peers' manifests
+	// don't add anything new.
+	if d.manifestReady != nil {
+		select {
+		case <-d.manifestReady:
+			// already closed
+		default:
+			close(d.manifestReady)
+		}
 	}
 }
 

@@ -162,11 +162,18 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	// If P2P manifest mode is enabled, wait for chain.toml discovery before
 	// building download requests. Without this, the preverified registry is
 	// empty and OtterSync would complete instantly with nothing to download.
+	//
+	// Bounded wait: if discovery never succeeds (no peers with chain-toml ENR,
+	// unreachable info-hash, etc.) we fall through to the centralized preverified
+	// registry rather than stalling the sync indefinitely.
+	const manifestReadyTimeout = 5 * time.Minute
 	if cfg.manifestReady != nil {
-		log.Info(fmt.Sprintf("[%s] Waiting for P2P manifest discovery...", s.LogPrefix()))
+		log.Info(fmt.Sprintf("[%s] Waiting for P2P manifest discovery (timeout %s)...", s.LogPrefix(), manifestReadyTimeout))
 		select {
 		case <-cfg.manifestReady:
 			log.Info(fmt.Sprintf("[%s] P2P manifest ready, proceeding with download", s.LogPrefix()))
+		case <-time.After(manifestReadyTimeout):
+			log.Warn(fmt.Sprintf("[%s] P2P manifest discovery timed out after %s — falling back to preverified registry", s.LogPrefix(), manifestReadyTimeout))
 		case <-ctx.Done():
 			return ctx.Err()
 		}

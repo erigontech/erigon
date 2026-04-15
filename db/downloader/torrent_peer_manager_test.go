@@ -30,8 +30,8 @@ func TestTorrentPeerManager_AddAndRemove(t *testing.T) {
 	key2, _ := crypto.GenerateKey()
 
 	peerWithBT := makeNodeWithBT(t, key1, []byte{127, 0, 0, 1},
-		&enr.ChainToml{KnownTx: 100}, enr.BT(42069))
-	peerWithoutBT := makeTestNode(t, key2, &enr.ChainToml{KnownTx: 50})
+		&enr.ChainToml{KnownBlocks: 100}, enr.BT(42069))
+	peerWithoutBT := makeTestNode(t, key2, &enr.ChainToml{KnownBlocks: 50})
 
 	source := &mockNodeSource{nodes: []*enode.Node{peerWithBT, peerWithoutBT}}
 
