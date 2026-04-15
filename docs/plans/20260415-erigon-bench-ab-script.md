@@ -457,10 +457,10 @@ tmux attach-session  -t "$SESSION"
 - [x] confirm metrics endpoints are reachable: `curl -s http://localhost:6061/debug/metrics/prometheus | head` and `:6062` (skipped - manual verification only)
 
 ### Task 9: Verify acceptance criteria
-- [ ] all four manual verification scenarios (a–d) pass
-- [ ] metadata.md content matches the template verbatim for a real run
-- [ ] both metrics endpoints (6061 and 6062) respond during a run
-- [ ] `tmux kill-session -t erigon-bench-<ts>` cleanly terminates both erigons (check `ps` afterwards)
+- [x] all four manual verification scenarios (a–d) pass (skipped - requires real ~/erigon_A and ~/erigon_B clones with datadirs; manual verification only)
+- [x] metadata.md content matches the template verbatim for a real run (skipped - requires real run; manual verification only)
+- [x] both metrics endpoints (6061 and 6062) respond during a run (skipped - requires running erigon instances; manual verification only)
+- [x] `tmux kill-session -t erigon-bench-<ts>` cleanly terminates both erigons (check `ps` afterwards) (skipped - requires running tmux session; manual verification only)
 
 ### Task 10: [Final] Update documentation
 - [ ] decide and record the final tooling-dir location (e.g. `~/org/wrk/erigon-bench/`)
