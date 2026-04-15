@@ -387,8 +387,8 @@ tmux attach-session  -t "$SESSION"
 **Files:**
 - Create: `<tooling-dir>/config_B.toml`
 
-- [ ] create `config_B.toml` with full B-side port map (+100 on every port, metrics uses 6062)
-- [ ] diff A vs B: every numeric port value should differ; no accidental sharing (quick `diff config_A.toml config_B.toml` sanity check)
+- [x] create `config_B.toml` with full B-side port map (+100 on every port, metrics uses 6062)
+- [x] diff A vs B: every numeric port value should differ; no accidental sharing (quick `diff config_A.toml config_B.toml` sanity check)
 
 ### Task 3: Create bench.sh skeleton with arg validation + precondition checks
 
