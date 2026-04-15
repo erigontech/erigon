@@ -45,7 +45,7 @@ Jobs in ci-gate that must survive cancellation (e.g. long external calls) should
 | no | `schedule` | 1–4+ hours | Very long-running suites, flaky test discovery by repetition, QA regression runs. Not feasible on every commit. |
 | no | `workflow_dispatch` | > 1h | Rare, or long-running jobs triggered manually for specific cases. |
 
-When a workflow appears in both ci-gate rows and standalone rows, the ci-gate path handles `pull_request`/`merge_group` via `workflow_call` and the standalone triggers (`push`/`schedule`) live in the workflow's own file — both share one job definition.
+When a workflow appears in both ci-gate rows and standalone rows, the ci-gate path handles `pull_request`/`merge_group` via `workflow_call`. Standalone triggers such as `push`/`schedule` may live either in that workflow's own file or in a separate top-level workflow that calls the reusable workflow (for example, centralized cache warming) — both patterns share one job definition.
 
 ## CI gate
 
