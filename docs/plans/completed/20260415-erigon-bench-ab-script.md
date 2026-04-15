@@ -463,9 +463,9 @@ tmux attach-session  -t "$SESSION"
 - [x] `tmux kill-session -t erigon-bench-<ts>` cleanly terminates both erigons (check `ps` afterwards) (skipped - requires running tmux session; manual verification only)
 
 ### Task 10: [Final] Update documentation
-- [ ] decide and record the final tooling-dir location (e.g. `~/org/wrk/erigon-bench/`)
-- [ ] add a short `README.md` alongside the three files describing invocation, preconditions, and where artifacts land
-- [ ] move this plan to `docs/plans/completed/` (create dir if needed)
+- [x] decide and record the final tooling-dir location (e.g. `~/org/wrk/erigon-bench/`) — final location: `bench/` within the erigon repo on the `awskii/bench-ab` branch
+- [x] add a short `README.md` alongside the three files describing invocation, preconditions, and where artifacts land
+- [x] move this plan to `docs/plans/completed/` (create dir if needed)
 
 ## Post-Completion
 
