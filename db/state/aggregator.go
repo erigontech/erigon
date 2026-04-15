@@ -790,7 +790,6 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 
 		static          = &AggV3StaticFiles{ivfs: make([]InvertedFiles, len(a.iis))}
 		closeCollations = true
-		collListMu      = sync.Mutex{}
 		collations      = make([]Collation, 0)
 	)
 	defer func() {
@@ -802,31 +801,30 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		}
 	}()
 
-	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(a.collateAndBuildWorkers)
-
 	ac := a.BeginFilesRo()
 
-	// Pre-open one read-transaction per collation worker BEFORE spawning goroutines.
-	// All transactions are opened at essentially the same MDBX snapshot, ensuring
-	// collation sees the DB state right after the committed txNum guard passed —
-	// before execution can overwrite values in subsequent steps.
-	// This prevents the collation/pruning race where a fresh read-transaction
-	// opened later could see step S+1 values for keys modified in step S. See #20169.
-	type domainWork struct {
-		d                   *Domain
-		id                  int
-		firstStepNotInFiles kv.Step
-		collationTx         kv.Tx
+	// Phase 1: collate all domains and indices using a SINGLE read-transaction.
+	// This guarantees all collations see the exact same MDBX snapshot, eliminating
+	// the collation/pruning race where execution overwrites step S values with
+	// step S+1 data between collation reads. See #20169.
+	collationTx, err := a.db.BeginRo(ctx) //nolint:gocritic
+	if err != nil {
+		return fmt.Errorf("open collation tx: %w", err)
 	}
-	type iiWork struct {
-		ii                  *InvertedIndex
-		iikey               int
-		firstStepNotInFiles kv.Step
-		collationTx         kv.Tx
+	defer collationTx.Rollback()
+
+	type domainCollResult struct {
+		d         *Domain
+		collation Collation
 	}
-	var domainWorks []domainWork
-	var iiWorks []iiWork
+	type iiCollResult struct {
+		ii        *InvertedIndex
+		iikey     int
+		collation InvertedIndexCollation
+	}
+	var domainColls []domainCollResult
+	var iiColls []iiCollResult
+
 	for id, d := range a.d {
 		if d.Disable {
 			continue
@@ -835,15 +833,12 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		if step < firstStepNotInFiles {
 			continue
 		}
-		tx, txErr := a.db.BeginRo(ctx) //nolint:gocritic
-		if txErr != nil {
-			// Rollback any already-opened transactions
-			for _, w := range domainWorks {
-				w.collationTx.Rollback()
-			}
-			return fmt.Errorf("open collation tx for domain %q: %w", d.FilenameBase, txErr)
+		collation, err := d.collate(ctx, step, txFrom, txTo, collationTx)
+		if err != nil {
+			return fmt.Errorf("domain collation %q has failed: %w", d.FilenameBase, err)
 		}
-		domainWorks = append(domainWorks, domainWork{d: d, id: id, firstStepNotInFiles: firstStepNotInFiles, collationTx: tx})
+		collations = append(collations, collation)
+		domainColls = append(domainColls, domainCollResult{d: d, collation: collation})
 	}
 	for iikey, ii := range a.iis {
 		if ii.Disable {
@@ -853,42 +848,32 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		if step < firstStepNotInFiles {
 			continue
 		}
-		tx, txErr := a.db.BeginRo(ctx) //nolint:gocritic
-		if txErr != nil {
-			for _, w := range domainWorks {
-				w.collationTx.Rollback()
-			}
-			for _, w := range iiWorks {
-				w.collationTx.Rollback()
-			}
-			return fmt.Errorf("open collation tx for index %q: %w", ii.FilenameBase, txErr)
+		collation, err := ii.collate(ctx, step, collationTx)
+		if err != nil {
+			return fmt.Errorf("index collation %q has failed: %w", ii.FilenameBase, err)
 		}
-		iiWorks = append(iiWorks, iiWork{ii: ii, iikey: iikey, firstStepNotInFiles: firstStepNotInFiles, collationTx: tx})
+		iiColls = append(iiColls, iiCollResult{ii: ii, iikey: iikey, collation: collation})
 	}
+	closeCollations = false
 
-	for _, w := range domainWorks {
-		w := w
+	// Phase 2: build files from collations in parallel (no DB access needed).
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(a.collateAndBuildWorkers)
+
+	for _, dc := range domainColls {
+		dc := dc
 		a.wg.Add(1)
 		g.Go(func() error {
 			defer a.wg.Done()
-			defer w.collationTx.Rollback()
 
-			collation, err := w.d.collate(ctx, step, txFrom, txTo, w.collationTx)
-			if err != nil {
-				return fmt.Errorf("domain collation %q has failed: %w", w.d.FilenameBase, err)
-			}
-			collListMu.Lock()
-			collations = append(collations, collation)
-			collListMu.Unlock()
-
-			sf, err := w.d.buildFiles(ctx, step, collation, a.ps)
-			collation.Close()
+			sf, err := dc.d.buildFiles(ctx, step, dc.collation, a.ps)
+			dc.collation.Close()
 			if err != nil {
 				sf.CleanupOnError()
 				return err
 			}
 
-			dd, err := kv.String2Domain(w.d.FilenameBase)
+			dd, err := kv.String2Domain(dc.d.FilenameBase)
 			if err != nil {
 				return err
 			}
@@ -896,27 +881,19 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 			return nil
 		})
 	}
-	closeCollations = false
-
-	// indices are built concurrently
-	for _, w := range iiWorks {
-		w := w
+	for _, ic := range iiColls {
+		ic := ic
 		a.wg.Add(1)
 		g.Go(func() error {
 			defer a.wg.Done()
-			defer w.collationTx.Rollback()
 
-			collation, err := w.ii.collate(ctx, step, w.collationTx)
-			if err != nil {
-				return fmt.Errorf("index collation %q has failed: %w", w.ii.FilenameBase, err)
-			}
-			sf, err := w.ii.buildFiles(ctx, step, collation, a.ps)
+			sf, err := ic.ii.buildFiles(ctx, step, ic.collation, a.ps)
 			if err != nil {
 				sf.CleanupOnError()
 				return err
 			}
 
-			static.ivfs[w.iikey] = sf
+			static.ivfs[ic.iikey] = sf
 			return nil
 		})
 	}

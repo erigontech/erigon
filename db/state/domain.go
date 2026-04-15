@@ -1653,18 +1653,6 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 
 	foundStep := kv.Step(^binary.BigEndian.Uint64(foundInvStep))
 
-	// Deletion entries (len(v)==0) are authoritative regardless of step age.
-	// Snapshot files do store empty values for deleted keys, but some
-	// published snapshot files were built by nodes with a collation/pruning
-	// race (#20169) and may be missing deletion entries. Without this
-	// guard, getLatestFromDb would discard the DB deletion (step too old)
-	// and fall through to getLatestFromFiles, which returns a stale
-	// pre-deletion value from the corrupt file. Treating DB deletions as
-	// authoritative prevents that.
-	if len(v) == 0 {
-		return v, foundStep, true, nil
-	}
-
 	if lastTxNumOfStep(foundStep, dt.stepSize) >= dt.files.EndTxNum() {
 		return v, foundStep, true, nil
 	}
@@ -1672,9 +1660,8 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 	return nil, 0, false, err
 }
 
-// GetLatest returns value, step in which the value last changed, and a bool indicating
-// whether an authoritative answer was found. found=true with len(v)==0 means the key
-// was explicitly deleted (tombstone); found=false means no record exists.
+// GetLatest returns value, step in which the value last changed, and bool value which is true if the value
+// is present, and false if it is not present (not set or deleted)
 func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, kv.Step, bool, error) {
 	return dt.getLatest(key, roTx, math.MaxInt64, nil, time.Time{})
 }
