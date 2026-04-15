@@ -131,7 +131,7 @@ def build_scenarios(tip, ranges):
                 "filter":    cfg["filter"],
                 "n_blocks":  n,
                 "desc":      f"{cfg['desc']}, {n} block{'s' if n > 1 else ''}{warn}",
-                "from":      end - n,
+                "from":      end - n + 1,
                 "to":        end,
                 "addresses": cfg["addresses"],
                 "topics":    cfg["topics"],

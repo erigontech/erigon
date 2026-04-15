@@ -114,6 +114,9 @@ func ToRPCTransactionLog(log *Log, header *Header, txHash common.Hash, txIndex u
 func BuildTopicMap(topics [][]common.Hash) []map[common.Hash]struct{} {
 	topicMap := make([]map[common.Hash]struct{}, len(topics))
 	for idx, v := range topics {
+		if len(v) == 0 {
+			continue // nil entry = wildcard; FilterWithTopicMap treats len(nil)==0 as match-all
+		}
 		topicMap[idx] = make(map[common.Hash]struct{}, len(v))
 		for _, h := range v {
 			topicMap[idx][h] = struct{}{}
