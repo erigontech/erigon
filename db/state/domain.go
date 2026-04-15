@@ -1293,8 +1293,17 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	// Revert keys using diff entries.
 	// Always: delete current entry at the write step, restore prevValue at unwind target step.
 	// value == []byte{} means key was new (no previous value to restore).
+	//
+	// The step tag for restored entries must be BEYOND the filed range, otherwise
+	// getLatestFromDb will discard them (step covered by files → fall through to
+	// files which have the pre-unwind value). Use the larger of the natural step
+	// and the first unfiled step. See #20169.
+	unwindStep := step
+	if filesEndStep := dt.files.EndTxNum() / dt.d.stepSize; filesEndStep > unwindStep {
+		unwindStep = filesEndStep
+	}
 	unwindStepBytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(unwindStepBytes, ^uint64(step))
+	binary.BigEndian.PutUint64(unwindStepBytes, ^uint64(unwindStep))
 
 	for i := range domainDiffs {
 		keyStr, value := domainDiffs[i].Key, domainDiffs[i].Value
