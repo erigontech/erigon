@@ -615,7 +615,7 @@ func (a *Aggregator) PresetOfflineMerge() {
 // PresetOfflineExecution configures workers for offline execution (e.g. integration tool):
 // uses RAM/CPU estimates to maximise collate/build and compression throughput.
 func (a *Aggregator) PresetOfflineExecution() {
-	a.SetCollateAndBuildWorkers(min(4, estimate.StateV3Collate.Workers()))
+	a.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
 	a.SetCompressWorkers(estimate.CompressSnapshot.WorkersHalf())
 	a.SetBuildAccessorsWorkers(estimate.IndexSnapshot.WorkersHalf())
 	a.SetMergeWorkers(dbg.MergeWorkers) // compression and accessors: support parallel-building means we don't need multiple `merge_workers` usually
