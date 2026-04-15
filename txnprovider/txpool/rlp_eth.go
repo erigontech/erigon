@@ -153,7 +153,11 @@ func parseAnnouncements(payload []byte, pos int) ([]byte, []uint32, []byte, int,
 	if pos+hashesLen > len(payload) {
 		return nil, nil, nil, pos, fmt.Errorf("parse announcement payload: hashesLen %d is beyond the end of payload", hashesLen)
 	}
-	hashes := make([]byte, 32*(hashesLen/33))
+	hashCount := hashesLen / 33
+	if hashCount != typesLen {
+		return nil, nil, nil, pos, fmt.Errorf("parse announcement payload: hash count %d does not match types count %d", hashCount, typesLen)
+	}
+	hashes := make([]byte, 32*hashCount)
 	for i := 0; i < len(hashes); i += 32 {
 		if pos, err = parseRLPHash(payload, pos, hashes[i:]); err != nil {
 			return nil, nil, nil, pos, err
