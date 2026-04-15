@@ -607,14 +607,14 @@ func BenchmarkBuild(b *testing.B) {
 	}
 }
 
-// TestSearchUpperReverseBelowMin checks that a reverse-seek with a target below
-// the sequence minimum correctly yields no result.  This exercises the n<=0
-// branch in searchUpperReverse where the interpolation guess equals ef.count
-// (the guaranteed-miss case), and verifies the caller loop is skipped rather
-// than probing the minimum element unnecessarily.
-func TestSearchUpperReverseBelowMin(t *testing.T) {
-	// Large values ensure the interpolation guess rounds to ef.count when
-	// hi≈0, triggering the n<=0 corner case in searchUpperReverse.
+// TestSearchUpperReverseNoSolution checks the n<=0 corner case in
+// searchUpperReverse: when the interpolation guess equals ef.count (target
+// below all upper-bit groups), the function must return ef.count+1 so the
+// caller's loop is skipped entirely, not ef.count which would probe idx=0.
+func TestSearchUpperReverseNoSolution(t *testing.T) {
+	// Large values (stride 1000) give ef.l≈9, so hi=v>>9.
+	// With vals=[1000,2000,3000]: maxUpper=3000>>9=5, ef.count=2.
+	// For hi=0 (v<512): rem=5, guess=5*2/5=2=ef.count → n=0 corner case.
 	vals := []uint64{1000, 2000, 3000}
 	ef := NewEliasFano(uint64(len(vals)), vals[len(vals)-1])
 	for _, v := range vals {
@@ -622,23 +622,13 @@ func TestSearchUpperReverseBelowMin(t *testing.T) {
 	}
 	ef.Build()
 
-	// Seek below minimum: no value ≤ 1 exists in [1000, 2000, 3000].
-	it := ef.ReverseIterator()
-	it.Seek(1)
-	require.False(t, it.HasNext(), "reverse seek below min should yield no result")
-
-	// Seek with v=0 is a special-cased fast path; confirm it also returns nothing.
-	it = ef.ReverseIterator()
-	it.Seek(0)
-	require.False(t, it.HasNext(), "reverse seek of 0 below min should yield no result")
-
-	// Sanity: the minimum itself is reachable.
-	it = ef.ReverseIterator()
-	it.Seek(1000)
-	require.True(t, it.HasNext())
-	v, err := it.Next()
-	require.NoError(t, err)
-	require.Equal(t, uint64(1000), v)
+	// hi=0 (v=1 → 1>>9=0): no element has upper bits ≤ 0 (min upper=1000>>9=1).
+	// searchUpperReverse must return ef.count+1 (sentinel for no solution),
+	// NOT ef.count (which would cause the caller to probe idx=0 unnecessarily).
+	hi := uint64(0)
+	got := ef.SearchUpperReverse(hi)
+	// ef.count (the internal field) == ef.Count()-1, so the sentinel is ef.count+1 == ef.Count().
+	require.Equal(t, ef.Count(), got, "no-solution case must return count+1, not count")
 }
 
 func naiveReverseIterator(ef *EliasFano) *stream.ArrStream[uint64] {
