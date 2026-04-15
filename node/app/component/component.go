@@ -126,27 +126,25 @@ var deactivatoinWaiters = struct {
 	cmap: map[interface{}]*component{},
 }
 
-type relations []relation
+// relations is stored as []*component (not []relation) so pointer identity
+// can be compared directly without interface-header allocation or reflect.
+// The relation interface is still used as the public parameter type for
+// Add/Remove/Contains — callers pass any relation and we unwrap to *component.
+type relations []*component
 
-// relationPtr returns the underlying pointer of a relation as a uintptr.
-// Avoids reflect.ValueOf(x).Pointer() which allocates a reflect.Value per call.
-// *component is currently the only implementation.
-func relationPtr(r relation) uintptr {
-	if c, ok := r.(*component); ok {
-		return uintptr(unsafe.Pointer(c))
+func cmp(p0 *component, p1 *component) bool {
+	return uintptr(unsafe.Pointer(p0)) < uintptr(unsafe.Pointer(p1))
+}
+
+func samePtr(p0 *component, p1 *component) bool {
+	return p0 == p1
+}
+
+func (c relations) Add(r relation) relations {
+	component := asComponent(r)
+	if component == nil {
+		return c
 	}
-	return 0
-}
-
-func cmp(p0 relation, p1 relation) bool {
-	return relationPtr(p0) < relationPtr(p1)
-}
-
-func samePtr(p0 relation, p1 relation) bool {
-	return relationPtr(p0) == relationPtr(p1)
-}
-
-func (c relations) Add(component relation) relations {
 	l := len(c)
 
 	if l == 0 {
@@ -183,7 +181,11 @@ func (c relations) Add(component relation) relations {
 	return c
 }
 
-func (c relations) Remove(component relation) relations {
+func (c relations) Remove(r relation) relations {
+	component := asComponent(r)
+	if component == nil {
+		return c
+	}
 	l := len(c)
 
 	if l == 0 {
@@ -219,7 +221,11 @@ func (c relations) Remove(component relation) relations {
 	return c[:l-1]
 }
 
-func (c relations) Contains(component relation) bool {
+func (c relations) Contains(r relation) bool {
+	component := asComponent(r)
+	if component == nil {
+		return false
+	}
 	l := len(c)
 
 	if l == 0 {
@@ -367,7 +373,11 @@ func WithId(id string) app.Option {
 func WithDependencies(dependencies ...relation) app.Option {
 	return app.WithOption[componentOptions](
 		func(c *componentOptions) bool {
-			c.dependencies = append(c.dependencies, dependencies...)
+			for _, d := range dependencies {
+				if unwrapped := asComponent(d); unwrapped != nil {
+					c.dependencies = append(c.dependencies, unwrapped)
+				}
+			}
 			return true
 		})
 }
@@ -375,7 +385,9 @@ func WithDependencies(dependencies ...relation) app.Option {
 func WithDependent(dependent relation) app.Option {
 	return app.WithOption[componentOptions](
 		func(c *componentOptions) bool {
-			c.dependents = append(c.dependents, dependent)
+			if unwrapped := asComponent(dependent); unwrapped != nil {
+				c.dependents = append(c.dependents, unwrapped)
+			}
 			return true
 		})
 }
