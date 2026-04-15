@@ -747,6 +747,13 @@ func doDiffTorrentHashes(ctx context.Context, local map[string]string) error {
 		fmt.Println("no diff")
 		return nil
 	}
+	if len(changed) > 0 {
+		fmt.Printf("~~~ hash changed (%d):\n", len(changed))
+		for _, c := range changed {
+			fmt.Printf("  %s\n    released: %s\n    local:    %s\n", c.name, c.released, c.local)
+		}
+		fmt.Println()
+	}
 	if len(added) > 0 {
 		fmt.Printf("+++ in local, not in released (%d):\n", len(added))
 		for _, name := range added {
@@ -758,13 +765,6 @@ func doDiffTorrentHashes(ctx context.Context, local map[string]string) error {
 		fmt.Printf("--- in released, not in local (%d):\n", len(removed))
 		for _, name := range removed {
 			fmt.Printf("  - %s = %q\n", name, released[name])
-		}
-		fmt.Println()
-	}
-	if len(changed) > 0 {
-		fmt.Printf("~~~ hash changed (%d):\n", len(changed))
-		for _, c := range changed {
-			fmt.Printf("  %s\n    released: %s\n    local:    %s\n", c.name, c.released, c.local)
 		}
 		fmt.Println()
 	}
