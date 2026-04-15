@@ -37,10 +37,10 @@ Jobs in ci-gate that must survive cancellation (e.g. long external calls) should
 
 | CI gate | Trigger | Typical duration | When to use |
 |---|---|---|---|
-| yes | `pull_request` | < 15 min | Default for most PR checks. Lint, cross-platform builds, flaky tests for author visibility. |
+| yes | `pull_request` | < 15 min | Default for most PR checks. Lint, cross-platform builds. |
 | yes | `merge_group` | 15–30 min | Default correctness gate. Full test suite, race tests. Must be deterministic — no flaky tests. |
 | yes | `push` | N/A | CI gate workflow is required for PR and merge queue. It should not run on push. |
-| no | `pull_request` | < 1h | Non-blocking feedback useful during review — e.g. deployment previews, or jobs that must not be restarted on every push. If it's very long, make it dispatch instead. |
+| no | `pull_request` | < 1h | Non-blocking feedback useful during review — e.g. deployment previews, flaky tests for author visibility, or jobs that must not be restarted on every push. If it's very long, make it dispatch instead. |
 | no | `push` | varies | Cache warming for PRs and merge queues. Actions that occur only on the finalized commit, like deploying docs, publishing artifacts, triggering downstream pipelines. |
 | no | `schedule` | 1–4+ hours | Very long-running suites, flaky test discovery by repetition, QA regression runs. Not feasible on every commit. |
 | no | `dispatch` | > 1h | Rare, or long-running jobs triggered manually for specific cases. |
