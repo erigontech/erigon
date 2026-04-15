@@ -100,6 +100,21 @@ func encodeAnnouncements(types []byte, sizes []uint32, hashes []byte, encodeBuf 
 	return pos
 }
 
+// peekAnnouncementCount returns the number of items in an ETH/68 announcement
+// by reading only the types-string length, without allocating or decoding the
+// full payload.
+func peekAnnouncementCount(payload []byte) (int, error) {
+	pos, _, err := rlp.ParseList(payload, 0)
+	if err != nil {
+		return 0, err
+	}
+	_, typesLen, err := rlp.ParseString(payload, pos)
+	if err != nil {
+		return 0, err
+	}
+	return typesLen, nil
+}
+
 // parseAnnouncements decodes an ETH/68 (EIP-5793) transaction announcement.
 func parseAnnouncements(payload []byte, pos int) ([]byte, []uint32, []byte, int, error) {
 	pos, totalLen, err := rlp.ParseList(payload, pos)
