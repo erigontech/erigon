@@ -828,7 +828,7 @@ func (bal BlockAccessList) Hash() common.Hash {
 	if len(bal) == 0 {
 		return empty.BlockAccessListHash
 	}
-	return rlpHash(bal)
+	return RlpHash(bal)
 }
 
 func (bal BlockAccessList) Validate() error {

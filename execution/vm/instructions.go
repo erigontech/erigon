@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -989,52 +990,10 @@ func opCreate(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	var (
 		value  = scope.Stack.pop()
 		offset = scope.Stack.pop()
-		size   = scope.Stack.peek()
+		size   = scope.Stack.pop()
 		input  = scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
-		gas    = scope.Gas()
 	)
-	if evm.ChainRules().IsTangerineWhistle {
-		gas.Regular -= gas.Regular / 64
-	}
-
-	// EIP-7954: check initcode size after gas is charged (by the dynamic gas
-	// function) but before execution. This ensures GAS_CREATE state gas is
-	// always consumed while oversized initcode aborts the caller's frame.
-	if evm.ChainRules().IsAmsterdam {
-		if err := CheckMaxInitCodeSize(uint64(len(input)), evm.ChainRules().IsShanghai, evm.ChainRules().IsAmsterdam); err != nil {
-			return pc, nil, err
-		}
-	}
-
-	// reuse size int for stackvalue
-	stackvalue := size
-
-	scope.useGas(gas.Regular, evm.Config().Tracer, tracing.GasChangeCallContractCreation)
-	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
-
-	res, addr, returnGas, suberr := evm.Create(scope.Contract.Address(), input, gas, value, false)
-
-	// Push item on the stack based on the returned error. If the ruleset is
-	// homestead we must check for CodeStoreOutOfGasError (homestead only
-	// rule) and treat as an error, if the ruleset is frontier we must
-	// ignore this error and pretend the operation was successful.
-	if evm.ChainRules().IsHomestead && suberr == ErrCodeStoreOutOfGas {
-		stackvalue.Clear()
-	} else if suberr != nil && suberr != ErrCodeStoreOutOfGas {
-		stackvalue.Clear()
-	} else {
-		addrVal := addr.Value()
-		stackvalue.SetBytes(addrVal[:])
-	}
-
-	scope.restoreChildGas(returnGas, evm.config.Tracer)
-
-	if suberr == ErrExecutionReverted {
-		evm.returnData = res // set REVERT data to return data buffer
-		return pc, res, nil
-	}
-	evm.returnData = nil // clear dirty return data buffer
-	return pc, nil, nil
+	return execCreate(pc, evm, scope, value, input, nil)
 }
 
 func stCreate(_ uint64, scope *CallContext) string {
@@ -1058,37 +1017,52 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 		offset, size = scope.Stack.pop(), scope.Stack.pop()
 		salt         = scope.Stack.pop()
 		input        = scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
-		gas          = scope.Gas()
 	)
+	return execCreate(pc, evm, scope, endowment, input, &salt)
+}
 
-	// Apply EIP150
-	gas.Regular -= gas.Regular / 64
-
-	// EIP-7954: check initcode size after gas is charged (by the dynamic gas
-	// function) but before execution. This ensures GAS_CREATE state gas is
-	// always consumed while oversized initcode aborts the caller's frame.
+// execCreate is the shared implementation for opCreate (salt == nil) and opCreate2 (salt != nil).
+func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, input []byte, salt *uint256.Int) (uint64, []byte, error) {
 	if evm.ChainRules().IsAmsterdam {
-		if err := CheckMaxInitCodeSize(uint64(len(input)), evm.ChainRules().IsShanghai, evm.ChainRules().IsAmsterdam); err != nil {
-			return pc, nil, err
+		// EIP-8037: charge state gas for account creation after the static-context
+		// check so that it is not consumed on early failures where no state is
+		// created (per execution-specs#2608).
+		stateGas := uint64(params.StateBytesNewAccount) * evm.Context.CostPerStateByte
+		if !scope.useMdGas(evm, stateGas, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeIgnored) {
+			return pc, nil, ErrOutOfGas
 		}
 	}
 
-	scope.useGas(gas.Regular, evm.Config().Tracer, tracing.GasChangeCallContractCreation2)
-	// reuse size int for stackvalue
-	stackValue := size
-	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
-
-	res, addr, returnGas, suberr := evm.Create2(scope.Contract.Address(), input, gas, endowment, &salt, false)
-
-	// Push item on the stack based on the returned error.
-	if suberr != nil {
-		stackValue.Clear()
-	} else {
-		addrVal := addr.Value()
-		stackValue.SetBytes(addrVal[:])
+	gas := scope.Gas()
+	if evm.ChainRules().IsTangerineWhistle {
+		gas.Regular -= gas.Regular / 64
 	}
 
-	scope.Stack.push(stackValue)
+	gasChangeReason := tracing.GasChangeCallContractCreation
+	if salt != nil {
+		gasChangeReason = tracing.GasChangeCallContractCreation2
+	}
+	scope.useGas(gas.Regular, evm.Config().Tracer, gasChangeReason)
+	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
+
+	res, addr, returnGas, suberr := evm.Create(scope.Contract.Address(), input, gas, value, salt, false)
+
+	// Push item on the stack based on the returned error. If the ruleset is
+	// homestead we must check for CodeStoreOutOfGasError (homestead only
+	// rule) and treat as an error, if the ruleset is frontier we must
+	// ignore this error and pretend the operation was successful.
+	var result uint256.Int
+	if suberr != nil {
+		if !evm.ChainRules().IsHomestead && suberr == ErrCodeStoreOutOfGas {
+			addrVal := addr.Value()
+			result.SetBytes(addrVal[:])
+		}
+	} else {
+		addrVal := addr.Value()
+		result.SetBytes(addrVal[:])
+	}
+	scope.Stack.push(result)
+
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
 
 	if suberr == ErrExecutionReverted {

@@ -23,7 +23,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/protocol/rules"
-	"github.com/erigontech/erigon/execution/protocol/rules/clique"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/rpc"
@@ -186,8 +185,6 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 				Service:   InternalAPI(internalImpl),
 				Version:   "1.0",
 			})
-		case "clique":
-			list = append(list, clique.NewCliqueAPI(db, engine, blockReader))
 		case "overlay":
 			list = append(list, rpc.API{
 				Namespace: "overlay",
