@@ -741,32 +741,20 @@ func doDiffTorrentHashes(ctx context.Context, local map[string]string) error {
 
 	url := snapcfg.ChainTomlGitHubURL(branch, chain)
 	fmt.Printf("released branch: %s  url: %s\n", branch, url)
-	fmt.Printf("released: %d entries, local: %d entries\n\n", len(released), len(local))
+	fmt.Printf("released: %d entries, local: %d entries, changed: %d, added: %d, removed: %d\n", len(released), len(local), len(changed), len(added), len(removed))
 
 	if len(added) == 0 && len(removed) == 0 && len(changed) == 0 {
 		fmt.Println("no diff")
 		return nil
 	}
-	if len(changed) > 0 {
-		fmt.Printf("~~~ hash changed (%d):\n", len(changed))
-		for _, c := range changed {
-			fmt.Printf("  %s\n    released: %s\n    local:    %s\n", c.name, c.released, c.local)
-		}
-		fmt.Println()
+	for _, c := range changed {
+		fmt.Printf("CHANGED %s released=%s local=%s\n", c.name, c.released, c.local)
 	}
-	if len(added) > 0 {
-		fmt.Printf("+++ in local, not in released (%d):\n", len(added))
-		for _, name := range added {
-			fmt.Printf("  + %s = %q\n", name, local[name])
-		}
-		fmt.Println()
+	for _, name := range added {
+		fmt.Printf("ADDED   %s %s\n", name, local[name])
 	}
-	if len(removed) > 0 {
-		fmt.Printf("--- in released, not in local (%d):\n", len(removed))
-		for _, name := range removed {
-			fmt.Printf("  - %s = %q\n", name, released[name])
-		}
-		fmt.Println()
+	for _, name := range removed {
+		fmt.Printf("REMOVED %s %s\n", name, released[name])
 	}
 	return nil
 }
