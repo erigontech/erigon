@@ -42,6 +42,9 @@ var (
 	errorType        = reflect.TypeFor[error]()
 	subscriptionType = reflect.TypeFor[Subscription]()
 	stringType       = reflect.TypeFor[string]()
+
+	jsonNull       = []byte("null")
+	jsonEmptyArray = []byte("[]")
 )
 
 // invoker is the interface implemented by typed, generic-registered RPC methods.
@@ -66,26 +69,25 @@ type Method[Params any, Result any] struct {
 // the convention used by go-ethereum's client when calling with one arg.
 func (m Method[Params, Result]) invoke(ctx context.Context, raw json.RawMessage) (any, error) {
 	var p Params
-	if len(raw) > 0 && !bytes.Equal(raw, []byte("null")) && !bytes.Equal(raw, []byte("[]")) {
-		inner := raw
-		// Unwrap positional array: [obj] → obj
-		if len(inner) > 0 && inner[0] == '[' {
+	if len(raw) > 0 && !bytes.Equal(raw, jsonNull) && !bytes.Equal(raw, jsonEmptyArray) {
+		// Unwrap positional single-element array [obj] → obj, which is the form
+		// used by go-ethereum's client when calling a method with one struct arg.
+		if raw[0] == '[' {
 			var arr []json.RawMessage
-			if err := json.Unmarshal(inner, &arr); err != nil {
+			if err := json.Unmarshal(raw, &arr); err != nil {
 				return nil, &InvalidParamsError{err.Error()}
 			}
 			switch len(arr) {
 			case 0:
-				// no-arg call, leave p at zero value
-				inner = nil
+				raw = nil
 			case 1:
-				inner = arr[0]
+				raw = arr[0]
 			default:
 				return nil, &InvalidParamsError{fmt.Sprintf("expected 1 argument, got %d", len(arr))}
 			}
 		}
-		if len(inner) > 0 {
-			if err := json.Unmarshal(inner, &p); err != nil {
+		if len(raw) > 0 {
+			if err := json.Unmarshal(raw, &p); err != nil {
 				return nil, &InvalidParamsError{err.Error()}
 			}
 		}
@@ -97,10 +99,18 @@ func (m Method[Params, Result]) invoke(ctx context.Context, raw json.RawMessage)
 	return result, nil
 }
 
+// typedEntry holds a registered typed handler alongside its pre-cached metrics timers,
+// matching the timer-caching pattern used by [callback].
+type typedEntry struct {
+	inv          invoker
+	timerSuccess metrics.Summary
+	timerFailure metrics.Summary
+}
+
 type serviceRegistry struct {
-	mu       sync.Mutex
+	mu       sync.RWMutex
 	services map[string]service
-	typed    map[string]invoker // typed generic handlers, checked before reflection-based ones
+	typed    map[string]typedEntry // typed generic handlers, checked before reflection-based ones
 	logger   log.Logger
 }
 
@@ -171,8 +181,8 @@ func (r *serviceRegistry) callback(method string) *callback {
 	if !ok {
 		return nil
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	return r.services[svc].callbacks[name]
 }
 
@@ -182,22 +192,27 @@ func (r *serviceRegistry) registerTyped(name string, inv invoker) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.typed == nil {
-		r.typed = make(map[string]invoker)
+		r.typed = make(map[string]typedEntry)
 	}
-	r.typed[name] = inv
+	r.typed[name] = typedEntry{
+		inv:          inv,
+		timerSuccess: newRPCServingTimerMS(name, true),
+		timerFailure: newRPCServingTimerMS(name, false),
+	}
 }
 
-// invokerFor returns the typed invoker registered for method, or nil if none.
-func (r *serviceRegistry) invokerFor(method string) invoker {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.typed[method]
+// invokerFor returns the typed entry registered for method, or zero value if none.
+func (r *serviceRegistry) invokerFor(method string) (typedEntry, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	e, ok := r.typed[method]
+	return e, ok
 }
 
 // subscription returns a subscription callback in the given service.
 func (r *serviceRegistry) subscription(service, name string) *callback {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	return r.services[service].subscriptions[name]
 }
 
