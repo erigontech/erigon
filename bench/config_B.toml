@@ -6,6 +6,7 @@ metrics = true
 "metrics.port" = 6062
 
 pprof = true
+"pprof.addr" = "127.0.0.1"
 "pprof.port" = 6160
 
 port = 30403

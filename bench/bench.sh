@@ -76,9 +76,9 @@ echo "Build complete. All four binaries verified."
 
 # --- SHAs ---
 sha_a=$(git -C "$ERIGON_A" rev-parse --short HEAD)
-subj_a=$(git -C "$ERIGON_A" log -1 --pretty=%s)
+subj_a=$(git -C "$ERIGON_A" log -1 --pretty=%s | sed 's/[\\`$]/\\&/g')
 sha_b=$(git -C "$ERIGON_B" rev-parse --short HEAD)
-subj_b=$(git -C "$ERIGON_B" log -1 --pretty=%s)
+subj_b=$(git -C "$ERIGON_B" log -1 --pretty=%s | sed 's/[\\`$]/\\&/g')
 
 # --- Paths ---
 TS=$(date -u +%Y%m%d-%H%M%S)
