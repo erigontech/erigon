@@ -36,7 +36,14 @@ jobs:
             ethereum_package_branch: "5.0.1"
           - suite: glamsterdam
             package_args: .github/workflows/kurtosis/glamsterdam.io
-            ethereum_package_branch: "main"
+            # Pinned to the last-known-good commit before upstream
+            # ethpandaops/ethereum-package@main introduced an undefined
+            # GpuConfig reference in zkboost_launcher.star (commit 835dd9b,
+            # 2026-04-15). Unpinned "main" tracking was causing every Erigon
+            # PR to fail glamsterdam regardless of what the PR changed.
+            # Revisit once upstream stabilises (or a newer tag supports
+            # gloas_fork_epoch / fulu_fork_epoch used by our config).
+            ethereum_package_branch: "e07503d16b292a4a0d0dde267b461c22eb394852"
           - suite: caplin-minimal
             package_args: .github/workflows/kurtosis/caplin-minimal-assertoor.io
             ethereum_package_url: "github.com/erigontech/ethereum-package"
