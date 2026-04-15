@@ -2,7 +2,7 @@
 # Metrics exposed on :6061 — paired with B on :6062 for Grafana.
 
 metrics = true
-"metrics.addr" = "0.0.0.0"
+"metrics.addr" = "127.0.0.1"
 "metrics.port" = 6061
 
 pprof = true

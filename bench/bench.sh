@@ -16,6 +16,10 @@ BRANCH_A=$1
 BRANCH_B=$2
 CHAIN=$3
 
+for arg in "$BRANCH_A" "$BRANCH_B" "$CHAIN"; do
+  [[ "$arg" =~ ^[a-zA-Z0-9_./-]+$ ]] || { echo "ERROR: invalid argument: $arg"; exit 1; }
+done
+
 # --- Precondition validation ---
 for d in "$ERIGON_A" "$ERIGON_B"; do
   [[ -d "$d/.git" ]] || { echo "ERROR: $d is not a git clone"; exit 1; }
@@ -27,6 +31,12 @@ for f in "$SCRIPT_DIR/config_A.toml" "$SCRIPT_DIR/config_B.toml"; do
 done
 
 command -v tmux >/dev/null || { echo "ERROR: tmux not in PATH"; exit 1; }
+
+[[ -d "$DATADIR_BASE" && -w "$DATADIR_BASE" ]] || {
+  echo "ERROR: $DATADIR_BASE does not exist or is not writable"
+  echo "  Fix: sudo mkdir -p $DATADIR_BASE && sudo chown \$USER $DATADIR_BASE"
+  exit 1
+}
 
 # --- Worktree cleanliness (no silent stash) ---
 check_clean() {
@@ -42,7 +52,7 @@ prepare_branch() {
   local dir=$1 branch=$2
   echo "Preparing $dir on branch $branch..."
   git -C "$dir" fetch origin "$branch"
-  git -C "$dir" checkout "$branch"
+  git -C "$dir" switch "$branch"
   git -C "$dir" pull --ff-only origin "$branch"
 }
 prepare_branch "$ERIGON_A" "$BRANCH_A"
@@ -120,7 +130,7 @@ SESSION="erigon-bench-$TS"
 make_cmd() {
   local side=$1 dir=$2 datadir=$3
   cat <<EOS
-cd "$dir" && { echo "=== stage_exec --reset ==="; \
+set -o pipefail; cd "$dir" && { echo "=== stage_exec --reset ==="; \
   ./build/bin/integration stage_exec --datadir="$datadir" --chain="$CHAIN" --reset && \
   echo "=== erigon ===" && \
   ./build/bin/erigon --config="$RUNDIR/config_$side.toml" --datadir="$datadir" --chain="$CHAIN"; \
