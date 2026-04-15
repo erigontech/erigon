@@ -49,7 +49,7 @@ When a workflow appears in both ci-gate rows and standalone rows, the ci-gate pa
 
 ## CI gate
 
-CI gate (`ci-gate`) is the workflow required to pass for merging PRS. It is required for passing pull request and merge groups.
+CI gate (`ci-gate`) is the workflow required to pass for merging PRs. It is required for passing pull requests and merge groups.
 
 ## Draft PRs
 
