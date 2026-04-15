@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -266,7 +267,11 @@ Loop:
 		if !ok {
 			return errors.New("tx is not a temporal tx")
 		}
-		doms, err := execctx.NewSharedDomains(ctx, temporalTx, logger, commitment.DefaultTrieConfig()) //TODO: if remove this line TestBlockchainHeaderchainReorgConsistency failing
+		trieCfg := commitment.DefaultTrieConfig()
+		if statecfg.ExperimentalConcurrentCommitment {
+			trieCfg.Variant = commitment.VariantConcurrentHexPatricia
+		}
+		doms, err := execctx.NewSharedDomains(ctx, temporalTx, logger, trieCfg) //TODO: if remove this line TestBlockchainHeaderchainReorgConsistency failing
 		if err != nil {
 			return err
 		}

@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/metrics"
@@ -50,7 +51,11 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 	// Ensure currentContext has a block overlay for accumulating writes.
 	sd := e.currentContext
 	if sd == nil {
-		sd, err = execctx.NewSharedDomains(ctx, roTx, e.logger, commitment.DefaultTrieConfig())
+		trieCfg := commitment.DefaultTrieConfig()
+		if statecfg.ExperimentalConcurrentCommitment {
+			trieCfg.Variant = commitment.VariantConcurrentHexPatricia
+		}
+		sd, err = execctx.NewSharedDomains(ctx, roTx, e.logger, trieCfg)
 		// ErrBehindCommitment is tolerated: sd is usable, catch-up drives txNums forward.
 		if err != nil {
 			if !errors.Is(err, commitmentdb.ErrBehindCommitment) {

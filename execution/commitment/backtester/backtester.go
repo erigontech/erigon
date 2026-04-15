@@ -200,6 +200,7 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 	if bt.paraTrie {
 		cfg.Variant = commitment.VariantConcurrentHexPatricia
 	}
+	cfg.EnableTrieWarmup = bt.trieWarmup
 	cfg.CsvMetricsFilePrefix = deriveBlockMetricsFilePrefix(blockOutputDir)
 	sd, err := execctx.NewSharedDomains(ctx, tx, bt.logger, cfg)
 	if err != nil {

@@ -477,10 +477,9 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	defer logEvery.Stop()
 
 	useWarmupCache := !dbg.EnvBool("ERIGON_REBUILD_NO_WARMUP_CACHE", false)
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, logger, commitment.TrieConfig{
-		EnableTrieWarmup:  true,
-		EnableWarmupCache: useWarmupCache,
-	})
+	rebuildCfg := commitment.DefaultTrieConfig()
+	rebuildCfg.EnableWarmupCache = useWarmupCache
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, logger, rebuildCfg)
 	if err != nil {
 		return nil, err
 	}
@@ -584,10 +583,9 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		if err != nil {
 			return err
 		}
-		domains, err = execctx.NewSharedDomains(ctx, rwTx, logger, commitment.TrieConfig{
-			EnableTrieWarmup:  true,
-			EnableWarmupCache: useWarmupCache,
-		})
+		flushCfg := commitment.DefaultTrieConfig()
+		flushCfg.EnableWarmupCache = useWarmupCache
+		domains, err = execctx.NewSharedDomains(ctx, rwTx, logger, flushCfg)
 		if err != nil {
 			return err
 		}
@@ -970,9 +968,9 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			}
 			defer rwTx.Rollback()
 
-			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), commitment.TrieConfig{
-				Variant: trieVariant,
-			})
+			rebuildTrieCfg := commitment.DefaultTrieConfig()
+			rebuildTrieCfg.Variant = trieVariant
+			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), rebuildTrieCfg)
 			if err != nil {
 				return nil, err
 			}

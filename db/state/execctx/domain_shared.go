@@ -39,6 +39,8 @@ import (
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 var (
@@ -75,7 +77,11 @@ type accHolder interface {
 }
 
 func IsDomainAheadOfBlocks(ctx context.Context, tx kv.TemporalRwTx, logger log.Logger) bool {
-	doms, err := NewSharedDomains(ctx, tx, logger, commitment.DefaultTrieConfig())
+	cfg := commitment.DefaultTrieConfig()
+	if statecfg.ExperimentalConcurrentCommitment {
+		cfg.Variant = commitment.VariantConcurrentHexPatricia
+	}
+	doms, err := NewSharedDomains(ctx, tx, logger, cfg)
 	if doms != nil {
 		defer doms.Close()
 	}

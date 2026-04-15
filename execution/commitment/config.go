@@ -9,7 +9,7 @@ type TrieConfig struct {
 	DeferBranchUpdates     bool        // collect branch updates and apply them at the end of Process (default: true)
 	LeaveDeferredForCaller bool        // leave deferred updates for caller to handle via TakeDeferredUpdates (default: false)
 	MaxDeferredUpdates     int         // flush threshold; 0 = use default (50,000)
-	EnableWarmupCache      bool        // enable warmup cache during Process (default: false)
+	EnableWarmupCache      bool        // enable warmup cache during Process (default: true)
 	EnableTrieWarmup       bool        // enable parallel MDBX page-cache warmup during commitment (default: true)
 	CsvMetricsFilePrefix   string      // CSV metrics output prefix; empty = check env var
 	MemoizationOff         bool        // disable memoized hashes in computeCellHash (default: false)

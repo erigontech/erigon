@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -98,7 +99,11 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	}
 
 	// Create SharedDomains context for the unwind
-	sd, err := execctx.NewSharedDomains(ctx, tx, e.logger, commitment.DefaultTrieConfig())
+	trieCfg := commitment.DefaultTrieConfig()
+	if statecfg.ExperimentalConcurrentCommitment {
+		trieCfg.Variant = commitment.VariantConcurrentHexPatricia
+	}
+	sd, err := execctx.NewSharedDomains(ctx, tx, e.logger, trieCfg)
 	if err != nil {
 		return fmt.Errorf("failed to create shared domains: %w", err)
 	}

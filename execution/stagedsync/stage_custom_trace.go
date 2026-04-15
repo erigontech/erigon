@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
@@ -228,7 +229,11 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.Exe
 		}
 		defer tx.Rollback()
 
-		doms, err := execctx.NewSharedDomains(ctx, tx, logger, commitment.DefaultTrieConfig())
+		trieCfg := commitment.DefaultTrieConfig()
+		if statecfg.ExperimentalConcurrentCommitment {
+			trieCfg.Variant = commitment.VariantConcurrentHexPatricia
+		}
+		doms, err := execctx.NewSharedDomains(ctx, tx, logger, trieCfg)
 		if err != nil {
 			return err
 		}

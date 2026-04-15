@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/metrics"
@@ -152,7 +153,11 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		return tx.Commit()
 	}
 
-	doms, err := execctx.NewSharedDomains(ctx, tx, logger, commitment.DefaultTrieConfig())
+	cfg := commitment.DefaultTrieConfig()
+	if statecfg.ExperimentalConcurrentCommitment {
+		cfg.Variant = commitment.VariantConcurrentHexPatricia
+	}
+	doms, err := execctx.NewSharedDomains(ctx, tx, logger, cfg)
 	if err != nil {
 		return err
 	}
@@ -246,8 +251,12 @@ func StageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sync *stagedsyn
 	defer dbg.RecoverPanicIntoError(logger, &err)
 	hasMore := true
 	for hasMore {
+		cfg := commitment.DefaultTrieConfig()
+		if statecfg.ExperimentalConcurrentCommitment {
+			cfg.Variant = commitment.VariantConcurrentHexPatricia
+		}
 		err = db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-			sd, err := execctx.NewSharedDomains(ctx, tx, logger, commitment.DefaultTrieConfig())
+			sd, err := execctx.NewSharedDomains(ctx, tx, logger, cfg)
 			if err != nil {
 				return err
 			}
