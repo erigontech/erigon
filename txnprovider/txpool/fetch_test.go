@@ -462,7 +462,7 @@ func TestOversizedHashAnnouncement(t *testing.T) {
 	types68 := make([]byte, oversizedCount)
 	sizes68 := make([]uint32, oversizedCount)
 	for i := range oversizedCount {
-		types68[i] = 2  // EIP-1559
+		types68[i] = 2   // EIP-1559
 		sizes68[i] = 100 // arbitrary size
 	}
 	encodeBuf := make([]byte, announcementsLen(types68, sizes68, hashes))
