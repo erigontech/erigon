@@ -900,6 +900,6 @@ func LatestBlockNumWithCommitment(tx kv.TemporalGetter) (uint64, error) {
 	if len(stateVal) == 0 {
 		return 0, nil
 	}
-	_, minUnwindale := DecodeTxBlockNums(stateVal)
-	return minUnwindale, nil
+	_, minUnwindable := DecodeTxBlockNums(stateVal)
+	return minUnwindable, nil
 }
