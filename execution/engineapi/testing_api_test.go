@@ -51,7 +51,6 @@ type stubExecutionModule struct {
 	assembleBlockFunc     func(ctx context.Context, params *builder.Parameters) (execmodule.AssembleBlockResult, error)
 	getAssembledBlockFunc func(ctx context.Context, payloadID uint64) (execmodule.AssembledBlockResult, error)
 	getForkChoiceFunc     func(ctx context.Context) (execmodule.ForkChoiceState, error)
-	getNonceFunc          func(ctx context.Context, addr common.Address) (uint64, error)
 }
 
 var _ execmodule.ExecutionModule = (*stubExecutionModule)(nil)
@@ -127,12 +126,6 @@ func (s *stubExecutionModule) GetTD(_ context.Context, _ *common.Hash, _ *uint64
 func (s *stubExecutionModule) Ready(_ context.Context) (bool, error) { return true, nil }
 func (s *stubExecutionModule) FrozenBlocks(_ context.Context) (uint64, bool, error) {
 	return 0, false, nil
-}
-func (s *stubExecutionModule) GetAccountNonce(ctx context.Context, addr common.Address) (uint64, error) {
-	if s.getNonceFunc != nil {
-		return s.getNonceFunc(ctx, addr)
-	}
-	return 0, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -252,7 +245,7 @@ func newTestingAPI(cfg *chain.Config, stub *stubExecutionModule) TestingAPI {
 		0,     // fcuTimeout
 		0,     // maxReorgDepth
 	)
-	return NewTestingImpl(srv)
+	return NewTestingImpl(srv, log.New(), nil)
 }
 
 // makeAssembledBlock builds a minimal BlockWithReceipts for use in stub
@@ -660,20 +653,16 @@ func TestBuildBlockV1(t *testing.T) {
 		t.Parallel()
 		key, err := crypto.GenerateKey()
 		require.NoError(t, err)
-		senderAddr := crypto.PubkeyToAddress(key.PublicKey)
-		// State nonce is 1, tx nonce is 0 → too low.
-		rawTx := makeSignedRawTx(t, key, allForksChainConfig(), 0, 101, parentTimestamp+1)
+		cfg := allForksChainConfig()
+		// Two txs from the same sender with the same nonce (0, 0).
+		// After the first tx is accepted (expectedNonce→1), the second nonce=0 is too low.
+		rawTx0 := makeSignedRawTx(t, key, cfg, 0, 101, parentTimestamp+1)
+		rawTx1 := makeSignedRawTx(t, key, cfg, 0, 101, parentTimestamp+1)
 		stub := &stubExecutionModule{
 			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
-			getNonceFunc: func(_ context.Context, addr common.Address) (uint64, error) {
-				if addr == senderAddr {
-					return 1, nil
-				}
-				return 0, nil
-			},
 		}
-		api := newTestingAPI(allForksChainConfig(), stub)
-		txs := []hexutil.Bytes{rawTx}
+		api := newTestingAPI(cfg, stub)
+		txs := []hexutil.Bytes{rawTx0, rawTx1}
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), &txs, nil)
 		require.Nil(t, resp)
 		require.Error(t, err)

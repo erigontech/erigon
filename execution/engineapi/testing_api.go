@@ -30,9 +30,13 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	execctx "github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc"
@@ -52,31 +56,51 @@ type TestingAPI interface {
 	BuildBlockV1(ctx context.Context, parentHash common.Hash, payloadAttributes *engine_types.PayloadAttributes, transactions *[]hexutil.Bytes, extraData *hexutil.Bytes) (*engine_types.GetPayloadResponse, error)
 }
 
-// accountNonceGetter is a narrow interface for looking up the current state nonce of an address.
-// It is intentionally separate from ExecutionModule to avoid forcing every stub/mock to carry
-// a method that is only used by the testing_ namespace.
-type accountNonceGetter interface {
-	GetAccountNonce(ctx context.Context, address common.Address) (uint64, error)
-}
-
 // testingImpl is the concrete implementation of TestingAPI.
 type testingImpl struct {
-	server      *EngineServer
-	nonceGetter accountNonceGetter // nil if executionService does not implement accountNonceGetter
+	server *EngineServer
+	logger log.Logger
+	db     kv.TemporalRoDB
 }
 
 // NewTestingImpl returns a new TestingAPI implementation wrapping the given EngineServer.
-func NewTestingImpl(server *EngineServer) TestingAPI {
-	ng, _ := server.executionService.(accountNonceGetter)
-	return &testingImpl{server: server, nonceGetter: ng}
+func NewTestingImpl(server *EngineServer, logger log.Logger, db kv.TemporalRoDB) TestingAPI {
+	return &testingImpl{server: server, logger: logger, db: db}
+}
+
+// getAccountNonce returns the current state nonce for address.
+// Returns 0 if db is nil (test/no-db scenarios).
+func (t *testingImpl) getAccountNonce(ctx context.Context, address common.Address) (uint64, error) {
+	if t.db == nil {
+		return 0, nil
+	}
+	tx, err := t.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("testing_buildBlockV1: could not begin temporal transaction: %w", err)
+	}
+	defer tx.Rollback()
+	sd, err := execctx.NewSharedDomains(ctx, tx, t.logger)
+	if err != nil {
+		return 0, fmt.Errorf("testing_buildBlockV1: NewSharedDomains error: %w", err)
+	}
+	defer sd.Close()
+	reader := state.NewReaderV3(sd.AsGetter(tx))
+	acc, err := reader.ReadAccountData(accounts.InternAddress(address))
+	if err != nil {
+		return 0, fmt.Errorf("testing_buildBlockV1: ReadAccountData error: %w", err)
+	}
+	if acc == nil {
+		return 0, nil
+	}
+	return acc.Nonce, nil
 }
 
 // NewTestingRPCEntry returns the rpc.API descriptor for the testing_ namespace.
-func NewTestingRPCEntry(server *EngineServer) rpc.API {
+func NewTestingRPCEntry(server *EngineServer, logger log.Logger, db kv.TemporalRoDB) rpc.API {
 	return rpc.API{
 		Namespace: "testing",
 		Public:    false,
-		Service:   TestingAPI(NewTestingImpl(server)),
+		Service:   TestingAPI(NewTestingImpl(server, logger, db)),
 		Version:   "1.0",
 	}
 }
@@ -153,12 +177,9 @@ func (t *testingImpl) BuildBlockV1(
 				tx.SetSender(sender)
 
 				if _, seen := expectedNonce[sender]; !seen {
-					var stateNonce uint64
-					if t.nonceGetter != nil {
-						stateNonce, err = t.nonceGetter.GetAccountNonce(ctx, sender.Value())
-						if err != nil {
-							return nil, err
-						}
+					stateNonce, err := t.getAccountNonce(ctx, sender.Value())
+					if err != nil {
+						return nil, err
 					}
 					expectedNonce[sender] = stateNonce
 				}
@@ -190,7 +211,7 @@ func (t *testingImpl) BuildBlockV1(
 		PrevRandao:            payloadAttributes.PrevRandao,
 		SuggestedFeeRecipient: payloadAttributes.SuggestedFeeRecipient,
 		SlotNumber:            (*uint64)(payloadAttributes.SlotNumber),
-		CustomTxnProvider:        customProvider,
+		CustomTxnProvider:     customProvider,
 	}
 	if version >= clparams.CapellaVersion {
 		assembleParams.Withdrawals = payloadAttributes.Withdrawals
