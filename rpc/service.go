@@ -62,9 +62,8 @@ type Method[Params any, Result any] struct {
 // invoke implements [invoker]. It unmarshals params into the typed Params value
 // and calls fn, returning the result as any.
 //
-// Supported params forms:
+// Supported params forms, matching the reflection-based path:
 //   - omitted / null / [] → zero-value Params; handlers must validate required fields
-//   - {"field":val, ...}  → named-object form, unmarshalled directly into Params
 //   - [obj]               → single-element positional array unwrapped to obj
 //     (go-ethereum client convention when calling with one struct arg)
 //   - [a, b, ...]         → multi-element positional array unmarshalled directly
@@ -76,27 +75,28 @@ func (m Method[Params, Result]) invoke(ctx context.Context, raw json.RawMessage)
 	var p Params
 	raw = bytes.TrimSpace(raw)
 	if len(raw) > 0 && !bytes.Equal(raw, jsonNull) && !bytes.Equal(raw, jsonEmptyArray) {
-		// Try direct unmarshal first (object or multi-element array params).
-		// Fall back to single-element array unwrap only if direct unmarshal fails
-		// and params is an array — this avoids the extra []json.RawMessage allocation
-		// on the common object-params hot path.
-		if err := json.Unmarshal(raw, &p); err != nil {
-			if raw[0] != '[' {
+		// Params must be a JSON array, matching the JSON-RPC 2.0 positional-args convention
+		// used by the reflection-based path.
+		if raw[0] != '[' {
+			return nil, &InvalidParamsError{"non-array args"}
+		}
+		var arr []json.RawMessage
+		if err := json.Unmarshal(raw, &arr); err != nil {
+			return nil, &InvalidParamsError{err.Error()}
+		}
+		switch len(arr) {
+		case 0:
+			// leave p at zero value
+		case 1:
+			// Single-element positional array: [obj] → obj.
+			// go-ethereum client wraps single struct args in an array.
+			if err := json.Unmarshal(arr[0], &p); err != nil {
 				return nil, &InvalidParamsError{err.Error()}
 			}
-			// Single-element positional array: [obj] → obj.
-			var arr []json.RawMessage
-			if arrErr := json.Unmarshal(raw, &arr); arrErr != nil {
-				return nil, &InvalidParamsError{arrErr.Error()}
-			}
-			switch len(arr) {
-			case 0:
-				// leave p at zero value
-			case 1:
-				if err := json.Unmarshal(arr[0], &p); err != nil {
-					return nil, &InvalidParamsError{err.Error()}
-				}
-			default:
+		default:
+			// Multi-element array: unmarshal the whole array into Params directly.
+			// Works when Params is a slice or array type.
+			if err := json.Unmarshal(raw, &p); err != nil {
 				return nil, &InvalidParamsError{err.Error()}
 			}
 		}
@@ -197,7 +197,10 @@ func (r *serviceRegistry) callback(method string) *callback {
 
 // registerTyped registers a typed generic handler for the given full method name
 // (e.g. "eth_blockNumber"). Typed handlers take priority over reflection-based ones.
+// It also ensures the namespace appears in services so that RPCService.Modules()
+// includes typed-only namespaces.
 func (r *serviceRegistry) registerTyped(name string, inv invoker) {
+	ns, _, _ := strings.Cut(name, serviceMethodSeparator)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.typed == nil {
@@ -207,6 +210,17 @@ func (r *serviceRegistry) registerTyped(name string, inv invoker) {
 		inv:          inv,
 		timerSuccess: newRPCServingTimerMS(name, true),
 		timerFailure: newRPCServingTimerMS(name, false),
+	}
+	// Ensure the namespace is visible in services so RPCService.Modules() lists it.
+	if r.services == nil {
+		r.services = make(map[string]service)
+	}
+	if _, ok := r.services[ns]; !ok {
+		r.services[ns] = service{
+			name:          ns,
+			callbacks:     make(map[string]*callback),
+			subscriptions: make(map[string]*callback),
+		}
 	}
 }
 

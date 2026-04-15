@@ -212,6 +212,23 @@ func TestTypedDispatch_TakesPriorityOverReflect(t *testing.T) {
 	assert.Equal(t, "typed", result)
 }
 
+func TestTypedDispatch_NamespaceVisibleInModules(t *testing.T) {
+	logger := log.New()
+	s := NewServer(1, false, false, true, logger, 0)
+	defer s.Stop()
+	// Register a typed-only namespace with no reflection-based counterpart.
+	require.NoError(t, RegisterMethod(s, "myns_method", func(_ context.Context, _ struct{}) (int, error) { return 1, nil }))
+	ts := httptest.NewServer(s)
+	defer ts.Close()
+	c, err := DialHTTP(ts.URL, logger)
+	require.NoError(t, err)
+	defer c.Close()
+
+	var modules map[string]string
+	require.NoError(t, c.Call(&modules, "rpc_modules"))
+	assert.Contains(t, modules, "myns")
+}
+
 // --- Method.invoke params handling ---
 
 func TestMethodInvoke_Params(t *testing.T) {
@@ -220,7 +237,7 @@ func TestMethodInvoke_Params(t *testing.T) {
 	}
 	inv := Method[params, int]{fn: func(_ context.Context, p params) (int, error) { return p.X, nil }}
 
-	cases := []struct {
+	okCases := []struct {
 		name string
 		raw  string
 		want int
@@ -228,16 +245,25 @@ func TestMethodInvoke_Params(t *testing.T) {
 		{"nil", ``, 0},
 		{"null", `null`, 0},
 		{"empty array", `[]`, 0},
-		{"named object", `{"x":42}`, 42},
 		{"single-element array", `[{"x":7}]`, 7},
 		{"whitespace-padded null", "  null  ", 0},
-		{"whitespace-padded object", `  {"x":5}  `, 5},
 	}
-	for _, tc := range cases {
+	for _, tc := range okCases {
 		t.Run(tc.name, func(t *testing.T) {
 			result, err := inv.invoke(t.Context(), json.RawMessage(tc.raw))
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, result)
+		})
+	}
+
+	// Object-form params are rejected to match the reflection-based path behaviour.
+	errCases := []string{`{"x":42}`, `  {"x":5}  `}
+	for _, raw := range errCases {
+		t.Run("object-form rejected: "+raw, func(t *testing.T) {
+			_, err := inv.invoke(t.Context(), json.RawMessage(raw))
+			require.Error(t, err)
+			var ipErr *InvalidParamsError
+			assert.True(t, errors.As(err, &ipErr))
 		})
 	}
 }
