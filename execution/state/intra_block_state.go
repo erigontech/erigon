@@ -2203,7 +2203,7 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 			address := sdb.InternAddress(el.Address)
 			al.AddAddress(address)
 			for _, key := range el.StorageKeys {
-				al.AddSlot(address, sdb.InternKey(key))
+				al.AddSlot(address, sdb.InternStorage(key))
 			}
 		}
 		if rules.IsShanghai { // EIP-3651: warm coinbase
@@ -2232,9 +2232,9 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 	return nil
 }
 
-// InternKey returns a cached accounts.StorageKey for k, calling the global intern
+// InternStorage returns a cached accounts.StorageKey for k, calling the global intern
 // at most once per unique key per transaction.
-func (sdb *IntraBlockState) InternKey(k common.Hash) accounts.StorageKey {
+func (sdb *IntraBlockState) InternStorage(k common.Hash) accounts.StorageKey {
 	if h, ok := sdb.keyCache[k]; ok {
 		return h
 	}

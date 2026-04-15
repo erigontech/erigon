@@ -106,7 +106,7 @@ func gasSStore(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, mem
 		return mdgas.MdGas{}, ErrWriteProtection
 	}
 	value, x := callContext.Stack.Back(1), callContext.Stack.Back(0)
-	key := evm.IntraBlockState().InternKey(x.Bytes32())
+	key := evm.IntraBlockState().InternStorage(x.Bytes32())
 	current, _ := evm.IntraBlockState().GetState(callContext.Address(), key)
 	// The legacy gas metering only takes into consideration the current state
 	// Legacy rules should be applied if we are in Petersburg (removal of EIP-1283)
@@ -195,7 +195,7 @@ func gasSStoreEIP2200(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 	}
 	// Gas sentry honoured, do the actual gas calculation based on the stored value
 	value, x := callContext.Stack.Back(1), callContext.Stack.Back(0)
-	key := evm.IntraBlockState().InternKey(x.Bytes32())
+	key := evm.IntraBlockState().InternStorage(x.Bytes32())
 	current, _ := evm.IntraBlockState().GetState(callContext.Address(), key)
 
 	if current.Eq(value) { // noop (1)
