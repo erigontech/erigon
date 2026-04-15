@@ -582,10 +582,77 @@ func (I *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltypes.
 	return nil
 }
 
-// ProcessParentExecutionPayload processes the previous slot's execution payload effects.
+// ApplyParentExecutionPayload applies the effects of a full parent execution payload to state.
+// It processes execution requests (deposits, withdrawals, consolidations), queues the builder
+// payment, and updates latest_block_hash. This is the spec's apply_parent_execution_payload.
+// [New in Gloas:EIP7732]
+func (I *impl) ApplyParentExecutionPayload(s abstract.BeaconState, parentBid *cltypes.ExecutionPayloadBid, requests *cltypes.ExecutionRequests) error {
+	// Process execution requests (deposits, withdrawals, consolidations)
+	if requests.Deposits != nil {
+		if err := solid.RangeErr[*solid.DepositRequest](requests.Deposits, func(_ int, req *solid.DepositRequest, _ int) error {
+			return I.ProcessDepositRequest(s, req)
+		}); err != nil {
+			return fmt.Errorf("ApplyParentExecutionPayload: ProcessDepositRequest: %w", err)
+		}
+	}
+	if requests.Withdrawals != nil {
+		if err := solid.RangeErr[*solid.WithdrawalRequest](requests.Withdrawals, func(_ int, req *solid.WithdrawalRequest, _ int) error {
+			return I.ProcessWithdrawalRequest(s, req)
+		}); err != nil {
+			return fmt.Errorf("ApplyParentExecutionPayload: ProcessWithdrawalRequest: %w", err)
+		}
+	}
+	if requests.Consolidations != nil {
+		if err := solid.RangeErr[*solid.ConsolidationRequest](requests.Consolidations, func(_ int, req *solid.ConsolidationRequest, _ int) error {
+			return I.ProcessConsolidationRequest(s, req)
+		}); err != nil {
+			return fmt.Errorf("ApplyParentExecutionPayload: ProcessConsolidationRequest: %w", err)
+		}
+	}
+
+	// Queue the builder payment using parent_slot (epoch-aware indexing per spec)
+	beaconConfig := s.BeaconConfig()
+	parentSlot := s.LatestBlockHeader().Slot // spec: state.latest_block_header.slot
+	slotsPerEpoch := beaconConfig.SlotsPerEpoch
+	parentEpoch := parentSlot / slotsPerEpoch
+	currentEpoch := state.Epoch(s)
+
+	var paymentIndex int
+	if parentEpoch == currentEpoch {
+		paymentIndex = int(slotsPerEpoch + parentSlot%slotsPerEpoch)
+	} else if parentEpoch+1 == currentEpoch {
+		// previous epoch
+		paymentIndex = int(parentSlot % slotsPerEpoch)
+	} else {
+		// Parent is from an older epoch — payment window expired, skip
+		paymentIndex = -1
+	}
+
+	if paymentIndex >= 0 {
+		payments := s.GetBuilderPendingPayments()
+		payment := payments.Get(paymentIndex)
+		if payment != nil && payment.Withdrawal != nil && payment.Withdrawal.Amount > 0 {
+			withdrawals := s.GetBuilderPendingWithdrawals()
+			withdrawals.Append(payment.Withdrawal)
+			s.SetBuilderPendingWithdrawals(withdrawals)
+		}
+		payments.Set(paymentIndex, &cltypes.BuilderPendingPayment{
+			Withdrawal: &cltypes.BuilderPendingWithdrawal{},
+		})
+		s.SetBuilderPendingPayments(payments)
+	}
+
+	// Update state
+	s.SetExecutionPayloadAvailability(parentSlot, true)
+	s.SetLatestBlockHash(parentBid.BlockHash)
+
+	return nil
+}
+
+// ProcessParentExecutionPayload verifies and applies the previous slot's execution payload effects.
 // If the parent was full (payload delivered), it verifies the execution requests match
-// the committed bid and processes deposits, withdrawals, consolidations, builder payment,
-// and updates latest_block_hash. If the parent was empty, it asserts no requests.
+// the committed bid and calls ApplyParentExecutionPayload. If the parent was empty, it
+// asserts no requests.
 // [New in Gloas:EIP7732]
 func (I *impl) ProcessParentExecutionPayload(s abstract.BeaconState, block cltypes.GenericBeaconBlock) error {
 	if s.Version() < clparams.GloasVersion {
@@ -631,66 +698,7 @@ func (I *impl) ProcessParentExecutionPayload(s abstract.BeaconState, block cltyp
 		return fmt.Errorf("ProcessParentExecutionPayload: parent_execution_requests root %v does not match committed bid execution_requests_root %v", requestsRoot, parentBid.ExecutionRequestsRoot)
 	}
 
-	// Process execution requests (deposits, withdrawals, consolidations)
-	if parentExecutionRequests.Deposits != nil {
-		if err := solid.RangeErr[*solid.DepositRequest](parentExecutionRequests.Deposits, func(_ int, req *solid.DepositRequest, _ int) error {
-			return I.ProcessDepositRequest(s, req)
-		}); err != nil {
-			return fmt.Errorf("ProcessParentExecutionPayload: ProcessDepositRequest: %w", err)
-		}
-	}
-	if parentExecutionRequests.Withdrawals != nil {
-		if err := solid.RangeErr[*solid.WithdrawalRequest](parentExecutionRequests.Withdrawals, func(_ int, req *solid.WithdrawalRequest, _ int) error {
-			return I.ProcessWithdrawalRequest(s, req)
-		}); err != nil {
-			return fmt.Errorf("ProcessParentExecutionPayload: ProcessWithdrawalRequest: %w", err)
-		}
-	}
-	if parentExecutionRequests.Consolidations != nil {
-		if err := solid.RangeErr[*solid.ConsolidationRequest](parentExecutionRequests.Consolidations, func(_ int, req *solid.ConsolidationRequest, _ int) error {
-			return I.ProcessConsolidationRequest(s, req)
-		}); err != nil {
-			return fmt.Errorf("ProcessParentExecutionPayload: ProcessConsolidationRequest: %w", err)
-		}
-	}
-
-	// Queue the builder payment using parent_slot (epoch-aware indexing per spec)
-	beaconConfig := s.BeaconConfig()
-	parentSlot := s.LatestBlockHeader().Slot // spec: state.latest_block_header.slot
-	slotsPerEpoch := beaconConfig.SlotsPerEpoch
-	parentEpoch := parentSlot / slotsPerEpoch
-	currentEpoch := state.Epoch(s)
-
-	var paymentIndex int
-	if parentEpoch == currentEpoch {
-		paymentIndex = int(slotsPerEpoch + parentSlot%slotsPerEpoch)
-	} else if parentEpoch+1 == currentEpoch {
-		// previous epoch
-		paymentIndex = int(parentSlot % slotsPerEpoch)
-	} else {
-		// Parent is from an older epoch — payment window expired, skip
-		paymentIndex = -1
-	}
-
-	if paymentIndex >= 0 {
-		payments := s.GetBuilderPendingPayments()
-		payment := payments.Get(paymentIndex)
-		if payment != nil && payment.Withdrawal != nil && payment.Withdrawal.Amount > 0 {
-			withdrawals := s.GetBuilderPendingWithdrawals()
-			withdrawals.Append(payment.Withdrawal)
-			s.SetBuilderPendingWithdrawals(withdrawals)
-		}
-		payments.Set(paymentIndex, &cltypes.BuilderPendingPayment{
-			Withdrawal: &cltypes.BuilderPendingWithdrawal{},
-		})
-		s.SetBuilderPendingPayments(payments)
-	}
-
-	// Update state
-	s.SetExecutionPayloadAvailability(parentSlot, true)
-	s.SetLatestBlockHash(parentBid.BlockHash)
-
-	return nil
+	return I.ApplyParentExecutionPayload(s, parentBid, parentExecutionRequests)
 }
 
 // verifyExecutionPayloadBidSignature verifies the BLS signature of a signed execution payload bid.

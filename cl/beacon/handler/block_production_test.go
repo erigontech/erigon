@@ -234,8 +234,8 @@ func TestCaplinBlockProductionGlamsterdamSlotNumber(t *testing.T) {
 	postState.SetLatestExecutionPayloadHeader(elHeader)
 	// GLOAS uses GetLatestBlockHash() instead of LatestExecutionPayloadHeader().BlockHash
 	postState.SetLatestBlockHash(elHead.Hash())
-	// GLOAS deferred payload: set LatestExecutionPayloadBid so that ShouldExtendPayload
-	// (which returns true in the mock) selects bid.BlockHash as the EL head.
+	// GLOAS deferred payload: set LatestExecutionPayloadBid so that GetHeadPayloadStatus
+	// (which returns FULL in the mock) selects bid.BlockHash as the EL head.
 	postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
 		BlockHash:       elHead.Hash(),
 		ParentBlockHash: elHead.Hash(),
@@ -251,6 +251,14 @@ func TestCaplinBlockProductionGlamsterdamSlotNumber(t *testing.T) {
 	targetSlot := baseBlock.Slot + 1
 	baseBlockRoot, err := baseBlock.HashSSZ()
 	require.NoError(t, err)
+
+	// GLOAS deferred payload: the mock returns HeadPayloadStatus=FULL, so block production
+	// expects an envelope on disk. Provide one with empty ExecutionRequests.
+	fcu.Envelopes[baseBlockRoot] = &cltypes.SignedExecutionPayloadEnvelope{
+		Message: &cltypes.ExecutionPayloadEnvelope{
+			ExecutionRequests: &cltypes.ExecutionRequests{},
+		},
+	}
 
 	beaconBody, _, err := h.produceBeaconBody(
 		ctx, 3, baseBlock.Slot, baseBlockRoot, postState, targetSlot,

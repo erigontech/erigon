@@ -93,6 +93,7 @@ type ForkChoiceStore struct {
 	proposerBoostRoot        atomic.Value
 	headHash                 common.Hash
 	headSlot                 uint64
+	headPayloadStatus        cltypes.PayloadStatus
 	genesisTime              uint64
 	genesisValidatorsRoot    common.Hash
 	weights                  map[common.Hash]uint64

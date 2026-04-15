@@ -284,11 +284,6 @@ func (f *ForkChoiceStore) shouldExtendPayload(root common.Hash) bool {
 	return f.isParentNodeFull(proposerBlock.Block)
 }
 
-// ShouldExtendPayload is the exported version of shouldExtendPayload for the ForkChoiceStorageReader interface.
-func (f *ForkChoiceStore) ShouldExtendPayload(root common.Hash) bool {
-	return f.shouldExtendPayload(root)
-}
-
 // getPayloadStatusTiebreaker returns a tiebreaker value for fork choice comparison.
 // Used to decide between chains with different payload statuses.
 // [New in Gloas:EIP7732]

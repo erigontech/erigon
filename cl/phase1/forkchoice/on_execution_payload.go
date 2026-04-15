@@ -394,6 +394,11 @@ func (f *ForkChoiceStore) applyEnvelope(ctx context.Context, signedEnvelope *clt
 		return false, fmt.Errorf("OnExecutionPayload: failed to dump envelope: %w", err)
 	}
 
+	// Invalidate head cache — payload status may have changed from PENDING to FULL.
+	// This forces GetHead to recompute on next call so GetHeadPayloadStatus is fresh.
+	f.headHash = common.Hash{}
+	f.headPayloadStatus = cltypes.PayloadStatusPending
+
 	// If EL was behind, queue the block+envelope for later EL insertion.
 	if elBehind {
 		f.addPendingELPayload(block, signedEnvelope)

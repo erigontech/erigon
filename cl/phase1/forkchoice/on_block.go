@@ -95,6 +95,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		}
 	}()
 	f.headHash = common.Hash{}
+	f.headPayloadStatus = cltypes.PayloadStatusPending
 	start := time.Now()
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {

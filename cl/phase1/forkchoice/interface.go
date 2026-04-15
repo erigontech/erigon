@@ -82,10 +82,9 @@ type ForkChoiceStorageReader interface {
 	// (b) PeerDAS confirms all custody columns are locally available.
 	// Returns false if the envelope does not exist or blob data is missing.
 	IsBlobDataAvailable(slot uint64, blockRoot common.Hash) bool
-	// [New in Gloas:EIP7732] ShouldExtendPayload returns whether the proposer should build
-	// on top of the committed payload (FULL) or the parent payload (EMPTY) for the given root.
-	// Used in prepare_execution_payload to determine the correct EL head hash.
-	ShouldExtendPayload(root common.Hash) bool
+	// [New in Gloas:EIP7732] GetHeadPayloadStatus returns the payload status of the current
+	// head node (FULL, EMPTY, or PENDING). Must be called after GetHead.
+	GetHeadPayloadStatus() cltypes.PayloadStatus
 
 	GetBalances(blockRoot common.Hash) (solid.Uint64ListSSZ, error)
 	GetInactivitiesScores(blockRoot common.Hash) (solid.Uint64ListSSZ, error)

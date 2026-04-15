@@ -20,6 +20,7 @@ import (
 	"errors"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/common"
@@ -41,6 +42,7 @@ func (f *ForkChoiceStore) OnAttestation(
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.headHash = common.Hash{} // reset current head hash to force recomputation on next GetHead
+	f.headPayloadStatus = cltypes.PayloadStatusPending
 	data := attestation.Data
 	if err := f.ValidateOnAttestation(attestation); err != nil {
 		return err

@@ -47,6 +47,7 @@ type ForkChoiceStorageMock struct {
 	FinalizedSlotVal       uint64
 	HeadVal                common.Hash
 	HeadSlotVal            uint64
+	HeadPayloadStatusVal   cltypes.PayloadStatus
 	HighestSeenVal         uint64
 	JustifiedCheckpointVal solid.Checkpoint
 	JustifiedSlotVal       uint64
@@ -186,6 +187,7 @@ func NewForkChoiceStorageMock(t *testing.T) *ForkChoiceStorageMock {
 		FinalizedCheckpointVal:    solid.Checkpoint{},
 		FinalizedSlotVal:          0,
 		HeadVal:                   common.Hash{},
+		HeadPayloadStatusVal:      cltypes.PayloadStatusFull,
 		HighestSeenVal:            0,
 		JustifiedCheckpointVal:    solid.Checkpoint{},
 		JustifiedSlotVal:          0,
@@ -414,9 +416,8 @@ func (f *ForkChoiceStorageMock) IsBlobDataAvailable(slot uint64, blockRoot commo
 	return true
 }
 
-func (f *ForkChoiceStorageMock) ShouldExtendPayload(root common.Hash) bool {
-	// Default: extend payload (FULL head). Tests can override by embedding a custom mock.
-	return true
+func (f *ForkChoiceStorageMock) GetHeadPayloadStatus() cltypes.PayloadStatus {
+	return f.HeadPayloadStatusVal
 }
 
 func (f *ForkChoiceStorageMock) GetBalances(blockRoot common.Hash) (solid.Uint64ListSSZ, error) {
