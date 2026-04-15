@@ -104,7 +104,7 @@ re-queued.
 
 ## Cache warming
 
-Due to github cache branch protection, caches for use in PR and merge queue jobs should be made available from the base branch. This means running parts of jobs that allow caches to be generated on a push trigger to those branches.
+Due to GitHub Actions cache scoping by branch, caches for use in PR and merge queue jobs should be made available from the base branch. This means running parts of jobs that allow caches to be generated on a push trigger to those branches.
 
 ## Scheduled
 
