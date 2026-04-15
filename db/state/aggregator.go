@@ -607,18 +607,18 @@ func (a *Aggregator) PresetNonChainTipConcurrency() {
 // uses RAM/CPU estimates to maximise merge and compression throughput.
 func (a *Aggregator) PresetOfflineMerge() {
 	a.SetCollateAndBuildWorkers(estimate.StateV3Collate.Workers())
-	a.SetMergeWorkers(min(4, estimate.StateV3Collate.Workers()))
 	a.SetCompressWorkers(estimate.CompressSnapshot.Workers())
-	a.SetBuildAccessorsWorkers(estimate.CompressSnapshot.Workers())
+	a.SetBuildAccessorsWorkers(estimate.IndexSnapshot.Workers())
+	a.SetMergeWorkers(dbg.MergeWorkers) // compression and accessors: support parallel-building means we don't need multiple `merge_workers` usually
 }
 
 // PresetOfflineExecution configures workers for offline execution (e.g. integration tool):
 // uses RAM/CPU estimates to maximise collate/build and compression throughput.
 func (a *Aggregator) PresetOfflineExecution() {
 	a.SetCollateAndBuildWorkers(min(4, estimate.StateV3Collate.Workers()))
-	a.SetMergeWorkers(min(2, estimate.StateV3Collate.Workers()))
 	a.SetCompressWorkers(estimate.CompressSnapshot.WorkersHalf())
-	a.SetBuildAccessorsWorkers(estimate.CompressSnapshot.WorkersHalf())
+	a.SetBuildAccessorsWorkers(estimate.IndexSnapshot.WorkersHalf())
+	a.SetMergeWorkers(dbg.MergeWorkers) // compression and accessors: support parallel-building means we don't need multiple `merge_workers` usually
 }
 
 func (a *Aggregator) LockWorkersEditing()   { a.lockWorkersEditing = true }
