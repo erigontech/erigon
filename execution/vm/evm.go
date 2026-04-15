@@ -655,14 +655,14 @@ func (evm *EVM) Create(caller accounts.Address, code []byte, gasRemaining mdgas.
 	op := CREATE
 	if salt != nil {
 		op = CREATE2
-		contractAddr = accounts.InternAddress(types.CreateAddress2(caller.Value(), salt.Bytes32(), ch.Hash()))
+		contractAddr = evm.intraBlockState.InternAddress(types.CreateAddress2(caller.Value(), salt.Bytes32(), ch.Hash()))
 	} else {
 		var nonce uint64
 		nonce, err = evm.intraBlockState.GetNonce(caller)
 		if err != nil {
 			return nil, accounts.NilAddress, mdgas.MdGas{}, err
 		}
-		contractAddr = accounts.InternAddress(types.CreateAddress(caller.Value(), nonce))
+		contractAddr = evm.intraBlockState.InternAddress(types.CreateAddress(caller.Value(), nonce))
 	}
 	return evm.create(caller, ch, gasRemaining, endowment, contractAddr, op, true /* incrementNonce */, bailout)
 }

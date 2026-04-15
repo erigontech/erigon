@@ -161,6 +161,11 @@ type IntraBlockState struct {
 
 	nilAccounts map[accounts.Address]struct{} // Remember non-existent account to avoid reading them again
 
+	// Per-block intern caches: memoize unique.Make results so the global
+	// concurrent intern table is hit at most once per unique key/address per block.
+	keyCache  map[common.Hash]accounts.StorageKey
+	addrCache map[common.Address]accounts.Address
+
 	// The refund counter, also used by state transitioning.
 	refund mdgas.MdGas
 
@@ -208,6 +213,8 @@ func New(stateReader StateReader) *IntraBlockState {
 		stateObjects:      map[accounts.Address]*stateObject{},
 		stateObjectsDirty: map[accounts.Address]struct{}{},
 		nilAccounts:       map[accounts.Address]struct{}{},
+		keyCache:          make(map[common.Hash]accounts.StorageKey),
+		addrCache:         make(map[common.Address]accounts.Address),
 		logs:              []types.Logs{},
 		journal:           newJournal(),
 		accessList:        accessList{addresses: make(map[accounts.Address]int)},
@@ -379,6 +386,8 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.codeReadDuration = 0
 	sdb.codeReadCount = 0
 	sdb.dep = UnknownDep
+	clear(sdb.keyCache)
+	clear(sdb.addrCache)
 }
 
 // Release returns pooled resources (like journal, stateObjects) back to their pools.
@@ -2221,6 +2230,28 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 	sdb.addressAccess = make(map[accounts.Address]*accessOptions)
 	sdb.recordAccess = true
 	return nil
+}
+
+// InternKey returns a cached accounts.StorageKey for k, calling the global intern
+// at most once per unique key per block.
+func (sdb *IntraBlockState) InternKey(k common.Hash) accounts.StorageKey {
+	if h, ok := sdb.keyCache[k]; ok {
+		return h
+	}
+	h := accounts.InternKey(k)
+	sdb.keyCache[k] = h
+	return h
+}
+
+// InternAddress returns a cached accounts.Address for a, calling the global intern
+// at most once per unique address per block.
+func (sdb *IntraBlockState) InternAddress(a common.Address) accounts.Address {
+	if h, ok := sdb.addrCache[a]; ok {
+		return h
+	}
+	h := accounts.InternAddress(a)
+	sdb.addrCache[a] = h
+	return h
 }
 
 // AddAddressToAccessList adds the given address to the access list

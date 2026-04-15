@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // memoryGasCost calculates the quadratic gas for memory expansion. It does so
@@ -107,7 +106,7 @@ func gasSStore(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, mem
 		return mdgas.MdGas{}, ErrWriteProtection
 	}
 	value, x := callContext.Stack.Back(1), callContext.Stack.Back(0)
-	key := accounts.InternKey(x.Bytes32())
+	key := evm.IntraBlockState().InternKey(x.Bytes32())
 	current, _ := evm.IntraBlockState().GetState(callContext.Address(), key)
 	// The legacy gas metering only takes into consideration the current state
 	// Legacy rules should be applied if we are in Petersburg (removal of EIP-1283)
@@ -196,7 +195,7 @@ func gasSStoreEIP2200(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 	}
 	// Gas sentry honoured, do the actual gas calculation based on the stored value
 	value, x := callContext.Stack.Back(1), callContext.Stack.Back(0)
-	key := accounts.InternKey(x.Bytes32())
+	key := evm.IntraBlockState().InternKey(x.Bytes32())
 	current, _ := evm.IntraBlockState().GetState(callContext.Address(), key)
 
 	if current.Eq(value) { // noop (1)
@@ -499,7 +498,7 @@ func statelessGasCall(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 
 func statefulGasCall(evm *EVM, callContext *CallContext, gas mdgas.MdGas, availableGas mdgas.MdGas, transfersValue bool) (mdgas.MdGas, error) {
 	var accountGas, stateGas uint64
-	var address = accounts.InternAddress(callContext.Stack.Back(1).Bytes20())
+	var address = evm.IntraBlockState().InternAddress(callContext.Stack.Back(1).Bytes20())
 	rules := evm.ChainRules()
 	if rules.IsSpuriousDragon {
 		empty, err := evm.IntraBlockState().Empty(address)
@@ -716,7 +715,7 @@ func gasSelfdestruct(evm *EVM, callContext *CallContext, availableGas mdgas.MdGa
 	// TangerineWhistle (EIP150) gas reprice fork:
 	if evm.ChainRules().IsTangerineWhistle {
 		gas.Regular = params.SelfdestructGasEIP150
-		var address = accounts.InternAddress(callContext.Stack.Back(0).Bytes20())
+		var address = evm.IntraBlockState().InternAddress(callContext.Stack.Back(0).Bytes20())
 
 		if evm.ChainRules().IsSpuriousDragon {
 			// if empty and transfers value
