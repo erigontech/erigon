@@ -200,11 +200,11 @@ Promote `Process()`'s existing `log.Debug("commitment cache stats", ...)` to `lo
 - Modify: `execution/commitment/trie_reader.go`
 - Modify: `execution/commitment/trie_reader_test.go`
 
-- [ ] confirm no non-test callers exist: `git grep -n "LookupWithVisitor\|BranchVisitor"` has only `trie_reader.go` itself (plus this file's tests) after Task 2
-- [ ] delete `BranchVisitor` type and `LookupWithVisitor` method; make `Lookup` free-standing (inline what it needs from the old `LookupWithVisitor` body, since it was just a `LookupWithVisitor(..., nil)` wrapper)
-- [ ] if `TrieReader` has no remaining callers after this, mark `TrieReader` and `parseCellAt` as deletion candidates — remove if nothing else depends on them; if there are still test-only callers (Lookup), keep them for now
-- [ ] drop tests for the visitor path in `trie_reader_test.go`; keep `Lookup` tests if `Lookup` survives
-- [ ] run `go test ./execution/commitment/...` — must pass before next task
+- [x] confirm no non-test callers exist: `git grep -n "LookupWithVisitor\|BranchVisitor"` has only `trie_reader.go` itself (plus this file's tests) after Task 2
+- [x] delete `BranchVisitor` type and `LookupWithVisitor` method; make `Lookup` free-standing (inline what it needs from the old `LookupWithVisitor` body, since it was just a `LookupWithVisitor(..., nil)` wrapper)
+- [x] if `TrieReader` has no remaining callers after this, mark `TrieReader` and `parseCellAt` as deletion candidates — remove if nothing else depends on them; if there are still test-only callers (Lookup), keep them for now
+- [x] drop tests for the visitor path in `trie_reader_test.go`; keep `Lookup` tests if `Lookup` survives
+- [x] run `go test ./execution/commitment/...` — must pass before next task
 
 ### Task 5: Promote cache-stats emit to Info level
 

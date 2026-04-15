@@ -229,7 +229,7 @@ func (w *Warmuper) Closed() bool {
 
 // warmupKey performs a bespoke depth-walk for a single hashed key, reading
 // branch/account/storage data through the cached view. Much cheaper than
-// TrieReader.LookupWithVisitor: no keccak, no full cell parse.
+// a full TrieReader.Lookup: no keccak, no full cell parse.
 func (w *Warmuper) warmupKey(view PatriciaContext, hashedKey []byte, startDepth int) {
 	for depth := startDepth; depth < len(hashedKey) && depth < w.maxDepth; {
 		prefix := nibbles.HexToCompact(hashedKey[:depth])

@@ -106,23 +106,10 @@ func parseCellAt(data []byte, bitmap uint16, nibble int) (c cell, err error) {
 	return c, fmt.Errorf("nibble %d not reached in bitmap iteration", nibble)
 }
 
-// BranchVisitor is a callback invoked at each branch node during trie traversal.
-// depth is the current trie depth (number of nibbles consumed so far) and c is the
-// parsed cell at that branch position. Returning a non-nil error aborts the traversal.
-type BranchVisitor func(depth int, c *cell) error
-
 // Lookup descends the trie for hashedKey and returns the leaf cell if found.
 // hashedKey is a slice of nibbles (one nibble per byte, values 0-15).
 // Returns (cell, true, nil) on hit, (zero cell, false, nil) on miss, or an error.
 func (tr *TrieReader) Lookup(hashedKey []byte) (c cell, found bool, err error) {
-	return tr.LookupWithVisitor(hashedKey, nil)
-}
-
-// LookupWithVisitor descends the trie for hashedKey, invoking visitor at each
-// branch node after parsing the cell. This allows the caller to observe (and
-// prefetch) account/storage data encountered along the traversal path.
-// If visitor is nil, this behaves identically to Lookup.
-func (tr *TrieReader) LookupWithVisitor(hashedKey []byte, visitor BranchVisitor) (c cell, found bool, err error) {
 	depth := 0
 	for {
 		if depth >= len(hashedKey) {
@@ -165,13 +152,6 @@ func (tr *TrieReader) LookupWithVisitor(hashedKey []byte, visitor BranchVisitor)
 		if (c.accountAddrLen > 0 || c.storageAddrLen > 0) && c.hashedExtLen == 0 {
 			if err = c.deriveHashedKeys(int16(depth), tr.keccak, tr.accountKeyLen, tr.hashBuf[:]); err != nil {
 				return c, false, fmt.Errorf("deriveHashedKeys at depth %d: %w", depth, err)
-			}
-		}
-
-		// Invoke visitor after the cell is fully parsed (including derived keys).
-		if visitor != nil {
-			if err = visitor(depth-1, &c); err != nil {
-				return c, false, fmt.Errorf("visitor at depth %d: %w", depth-1, err)
 			}
 		}
 
