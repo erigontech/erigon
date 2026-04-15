@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -494,6 +495,25 @@ var snapshotCommand = cli.Command{
 				&cli.Uint64Flag{Name: "from-step", Value: 0, Usage: "skip files before given step"},
 				&cli.BoolFlag{Name: "failFast", Value: true, Usage: "stop after first problem or print WARN and continue"},
 				&cli.IntFlag{Name: "workers", Value: 0, Usage: "number of parallel workers (0 = NumCPU/2)"},
+			}),
+		},
+		{
+			Name:        "verify-domain-values",
+			Description: "compare domain .kv file entries against historical values (GetAsOf) to find stale entries",
+			Action: func(cliCtx *cli.Context) error {
+				logger := log.Root()
+				if err := doVerifyDomainValues(cliCtx, logger); err != nil {
+					log.Error("[verify-domain-values] failure", "err", err)
+					return err
+				}
+				log.Info("[verify-domain-values] done")
+				return nil
+			},
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.Uint64Flag{Name: "from-step", Value: 8192, Usage: "check files starting from this step"},
+				&cli.StringFlag{Name: "domain", Value: "storage", Usage: "domain: storage, accounts, code"},
+				&cli.IntFlag{Name: "max", Value: 100, Usage: "max mismatches to report"},
 			}),
 		},
 		{
@@ -3750,5 +3770,144 @@ func doDU(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return duFormatJSON(os.Stdout, result)
 	}
 	duFormatHuman(os.Stdout, result, verbose)
+	return nil
+}
+
+func doVerifyDomainValues(cliCtx *cli.Context, logger log.Logger) error {
+	ctx := cliCtx.Context
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+	chainConfig := fromdb.ChainConfig(chainDB)
+	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
+	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	if err != nil {
+		return err
+	}
+	defer clean()
+
+	agg := res.Aggregator
+	db, err := temporal.New(chainDB, agg)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	fromStep := cliCtx.Uint64("from-step")
+	maxMismatches := cliCtx.Int("max")
+	domainStr := cliCtx.String("domain")
+
+	var domainID kv.Domain
+	switch domainStr {
+	case "storage":
+		domainID = kv.StorageDomain
+	case "accounts":
+		domainID = kv.AccountsDomain
+	case "code":
+		domainID = kv.CodeDomain
+	default:
+		return fmt.Errorf("unknown domain: %s", domainStr)
+	}
+
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	aggTx := state.AggTx(tx)
+	files := aggTx.Files(domainID)
+	stepSize := aggTx.StepSize()
+	domainCfg := statecfg.Schema.GetDomainCfg(domainID)
+
+	type mismatchInfo struct {
+		file, key, fileVal, histVal string
+	}
+	var mismatches []mismatchInfo
+	totalChecked := 0
+
+	for _, file := range files {
+		if !strings.HasSuffix(file.Fullpath(), ".kv") {
+			continue
+		}
+		fileStep := file.StartRootNum() / stepSize
+		if fileStep < fromStep {
+			continue
+		}
+		endTxNum := file.EndRootNum()
+		fileName := filepath.Base(file.Fullpath())
+
+		decomp, err := seg.NewDecompressor(file.Fullpath())
+		if err != nil {
+			return fmt.Errorf("open %s: %w", fileName, err)
+		}
+
+		reader := seg.NewReader(decomp.MakeGetter(), domainCfg.Compression)
+		reader.Reset(0)
+
+		fileChecked := 0
+		fileMismatches := 0
+		for reader.HasNext() {
+			key, _ := reader.Next(nil)
+			if !reader.HasNext() {
+				break
+			}
+			fileVal, _ := reader.Next(nil)
+			fileChecked++
+			totalChecked++
+
+			histVal, _, err := tx.GetAsOf(domainID, key, endTxNum)
+			if err != nil {
+				continue
+			}
+
+			if !bytes.Equal(fileVal, histVal) {
+				fileMismatches++
+				mismatches = append(mismatches, mismatchInfo{
+					file:    fileName,
+					key:     hex.EncodeToString(key),
+					fileVal: hex.EncodeToString(fileVal),
+					histVal: hex.EncodeToString(histVal),
+				})
+				if len(mismatches) >= maxMismatches {
+					break
+				}
+			}
+		}
+		decomp.Close()
+
+		logger.Info("[verify-domain-values] checked file", "file", fileName,
+			"entries", fileChecked, "mismatches", fileMismatches)
+
+		if len(mismatches) >= maxMismatches {
+			logger.Warn("[verify-domain-values] reached max mismatches", "max", maxMismatches)
+			break
+		}
+	}
+
+	fmt.Printf("\nTotal entries checked: %d\n", totalChecked)
+	fmt.Printf("Total mismatches: %d\n\n", len(mismatches))
+
+	byFile := map[string]int{}
+	for _, m := range mismatches {
+		byFile[m.file]++
+	}
+	for f, c := range byFile {
+		fmt.Printf("  %s: %d mismatches\n", f, c)
+	}
+	fmt.Println()
+
+	for _, m := range mismatches {
+		addr := m.key[:40]
+		slot := ""
+		if len(m.key) > 40 {
+			slot = m.key[40:]
+		}
+		fmt.Printf("file=%s addr=0x%s", m.file, addr)
+		if slot != "" {
+			fmt.Printf(" slot=0x%s", slot)
+		}
+		fmt.Printf("\n  file_val=0x%s\n  hist_val=0x%s\n", m.fileVal, m.histVal)
+	}
 	return nil
 }
