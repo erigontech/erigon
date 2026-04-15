@@ -806,40 +806,89 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	g.SetLimit(a.collateAndBuildWorkers)
 
 	ac := a.BeginFilesRo()
+
+	// Pre-open one read-transaction per collation worker BEFORE spawning goroutines.
+	// All transactions are opened at essentially the same MDBX snapshot, ensuring
+	// collation sees the DB state right after the committed txNum guard passed —
+	// before execution can overwrite values in subsequent steps.
+	// This prevents the collation/pruning race where a fresh read-transaction
+	// opened later could see step S+1 values for keys modified in step S. See #20169.
+	type domainWork struct {
+		d                 *Domain
+		id                int
+		firstStepNotInFiles kv.Step
+		collationTx       kv.Tx
+	}
+	type iiWork struct {
+		ii                *InvertedIndex
+		iikey             int
+		firstStepNotInFiles kv.Step
+		collationTx       kv.Tx
+	}
+	var domainWorks []domainWork
+	var iiWorks []iiWork
 	for id, d := range a.d {
 		if d.Disable {
 			continue
 		}
-
-		d := d
 		firstStepNotInFiles := ac.d[id].FirstStepNotInFiles()
 		if step < firstStepNotInFiles {
 			continue
 		}
+		tx, txErr := a.db.BeginRo(ctx)
+		if txErr != nil {
+			// Rollback any already-opened transactions
+			for _, w := range domainWorks {
+				w.collationTx.Rollback()
+			}
+			return fmt.Errorf("open collation tx for domain %q: %w", d.FilenameBase, txErr)
+		}
+		domainWorks = append(domainWorks, domainWork{d: d, id: id, firstStepNotInFiles: firstStepNotInFiles, collationTx: tx})
+	}
+	for iikey, ii := range a.iis {
+		if ii.Disable {
+			continue
+		}
+		firstStepNotInFiles := ac.iis[iikey].FirstStepNotInFiles()
+		if step < firstStepNotInFiles {
+			continue
+		}
+		tx, txErr := a.db.BeginRo(ctx)
+		if txErr != nil {
+			for _, w := range domainWorks {
+				w.collationTx.Rollback()
+			}
+			for _, w := range iiWorks {
+				w.collationTx.Rollback()
+			}
+			return fmt.Errorf("open collation tx for index %q: %w", ii.FilenameBase, txErr)
+		}
+		iiWorks = append(iiWorks, iiWork{ii: ii, iikey: iikey, firstStepNotInFiles: firstStepNotInFiles, collationTx: tx})
+	}
 
+	for _, w := range domainWorks {
+		w := w
 		a.wg.Add(1)
 		g.Go(func() error {
 			defer a.wg.Done()
+			defer w.collationTx.Rollback()
 
-			var collation Collation
-			if err := a.db.View(ctx, func(tx kv.Tx) (err error) {
-				collation, err = d.collate(ctx, step, txFrom, txTo, tx)
-				return err
-			}); err != nil {
-				return fmt.Errorf("domain collation %q has failed: %w", d.FilenameBase, err)
+			collation, err := w.d.collate(ctx, step, txFrom, txTo, w.collationTx)
+			if err != nil {
+				return fmt.Errorf("domain collation %q has failed: %w", w.d.FilenameBase, err)
 			}
 			collListMu.Lock()
 			collations = append(collations, collation)
 			collListMu.Unlock()
 
-			sf, err := d.buildFiles(ctx, step, collation, a.ps)
+			sf, err := w.d.buildFiles(ctx, step, collation, a.ps)
 			collation.Close()
 			if err != nil {
 				sf.CleanupOnError()
 				return err
 			}
 
-			dd, err := kv.String2Domain(d.FilenameBase)
+			dd, err := kv.String2Domain(w.d.FilenameBase)
 			if err != nil {
 				return err
 			}
@@ -850,36 +899,24 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	closeCollations = false
 
 	// indices are built concurrently
-	for iikey, ii := range a.iis {
-		if ii.Disable {
-			continue
-		}
-
-		ii := ii
-		firstStepNotInFiles := ac.iis[iikey].FirstStepNotInFiles()
-		if step < firstStepNotInFiles {
-			continue
-		}
-
+	for _, w := range iiWorks {
+		w := w
 		a.wg.Add(1)
 		g.Go(func() error {
 			defer a.wg.Done()
+			defer w.collationTx.Rollback()
 
-			var collation InvertedIndexCollation
-			err := a.db.View(ctx, func(tx kv.Tx) (err error) {
-				collation, err = ii.collate(ctx, step, tx)
-				return err
-			})
+			collation, err := w.ii.collate(ctx, step, w.collationTx)
 			if err != nil {
-				return fmt.Errorf("index collation %q has failed: %w", ii.FilenameBase, err)
+				return fmt.Errorf("index collation %q has failed: %w", w.ii.FilenameBase, err)
 			}
-			sf, err := ii.buildFiles(ctx, step, collation, a.ps)
+			sf, err := w.ii.buildFiles(ctx, step, collation, a.ps)
 			if err != nil {
 				sf.CleanupOnError()
 				return err
 			}
 
-			static.ivfs[iikey] = sf
+			static.ivfs[w.iikey] = sf
 			return nil
 		})
 	}
