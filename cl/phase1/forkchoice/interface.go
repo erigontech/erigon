@@ -85,6 +85,9 @@ type ForkChoiceStorageReader interface {
 	// [New in Gloas:EIP7732] GetHeadPayloadStatus returns the payload status of the current
 	// head node (FULL, EMPTY, or PENDING). Must be called after GetHead.
 	GetHeadPayloadStatus() cltypes.PayloadStatus
+	// [New in Gloas:EIP7732] ShouldExtendPayload returns whether the payload for the given
+	// root should be extended. Used by prepare_execution_payload to decide FULL vs EMPTY path.
+	ShouldExtendPayload(root common.Hash) bool
 
 	GetBalances(blockRoot common.Hash) (solid.Uint64ListSSZ, error)
 	GetInactivitiesScores(blockRoot common.Hash) (solid.Uint64ListSSZ, error)

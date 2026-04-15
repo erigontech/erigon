@@ -590,8 +590,7 @@ func (a *ApiHandler) produceBeaconBody(
 	if stateVersion >= clparams.GloasVersion {
 		parentBid := baseState.GetLatestExecutionPayloadBid()
 		if parentBid != nil {
-			headPayloadStatus := a.forkchoiceStore.GetHeadPayloadStatus()
-			if headPayloadStatus == cltypes.PayloadStatusFull {
+			if a.forkchoiceStore.HasEnvelope(baseBlockRoot) && a.forkchoiceStore.ShouldExtendPayload(baseBlockRoot) {
 				head = parentBid.BlockHash
 				// Copy state and apply parent execution payload to compute correct withdrawals
 				stateCopy, err := baseState.Copy()

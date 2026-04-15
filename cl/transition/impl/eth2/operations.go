@@ -741,13 +741,11 @@ func (I *impl) ProcessExecutionPayloadEnvelope(s abstract.BeaconState, signedEnv
 	// Compute the block root locally without mutating state.
 	// Per spec: header = copy(state.latest_block_header); header.state_root = hash_tree_root(state)
 	latestBlockHeader := s.LatestBlockHeader()
-	if latestBlockHeader.Root == [32]byte{} {
-		stateRoot, err := s.HashSSZ()
-		if err != nil {
-			return fmt.Errorf("ProcessExecutionPayloadEnvelope: failed to compute state root: %w", err)
-		}
-		latestBlockHeader.Root = stateRoot
+	stateRoot, err := s.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("ProcessExecutionPayloadEnvelope: failed to compute state root: %w", err)
 	}
+	latestBlockHeader.Root = stateRoot
 	headerRoot, err := latestBlockHeader.HashSSZ()
 	if err != nil {
 		return fmt.Errorf("ProcessExecutionPayloadEnvelope: failed to hash block header: %w", err)
@@ -771,6 +769,12 @@ func (I *impl) ProcessExecutionPayloadEnvelope(s abstract.BeaconState, signedEnv
 	if committedBid.PrevRandao != payloadHeader.PrevRandao {
 		return errors.New("ProcessExecutionPayloadEnvelope: prev_randao mismatch with committed bid")
 	}
+	if committedBid.GasLimit != payloadHeader.GasLimit {
+		return fmt.Errorf("ProcessExecutionPayloadEnvelope: gas_limit %d != committed bid gas_limit %d", payloadHeader.GasLimit, committedBid.GasLimit)
+	}
+	if committedBid.BlockHash != payloadHeader.BlockHash {
+		return errors.New("ProcessExecutionPayloadEnvelope: block_hash mismatch with committed bid")
+	}
 
 	// Verify execution requests root matches committed bid
 	requests := envelope.ExecutionRequests
@@ -783,6 +787,15 @@ func (I *impl) ProcessExecutionPayloadEnvelope(s abstract.BeaconState, signedEnv
 	}
 	if requestsRoot != committedBid.ExecutionRequestsRoot {
 		return fmt.Errorf("ProcessExecutionPayloadEnvelope: execution_requests root %v does not match committed bid execution_requests_root %v", requestsRoot, committedBid.ExecutionRequestsRoot)
+	}
+
+	// Verify consistency of the parent hash with respect to the previous execution payload
+	if payloadHeader.ParentHash != s.GetLatestBlockHash() {
+		return errors.New("ProcessExecutionPayloadEnvelope: parent_hash mismatch with latest block hash")
+	}
+	// Verify timestamp
+	if payloadHeader.Time != state.ComputeTimestampAtSlot(s, s.Slot()) {
+		return errors.New("ProcessExecutionPayloadEnvelope: invalid timestamp")
 	}
 
 	// Verify consistency with expected withdrawals
@@ -798,23 +811,6 @@ func (I *impl) ProcessExecutionPayloadEnvelope(s abstract.BeaconState, signedEnv
 	}
 	if payloadWithdrawalsRoot != expectedWithdrawalsRoot {
 		return errors.New("ProcessExecutionPayloadEnvelope: withdrawals root mismatch with expected")
-	}
-
-	// Verify the gas_limit
-	if committedBid.GasLimit != payloadHeader.GasLimit {
-		return fmt.Errorf("ProcessExecutionPayloadEnvelope: gas_limit %d != committed bid gas_limit %d", payloadHeader.GasLimit, committedBid.GasLimit)
-	}
-	// Verify the block hash
-	if committedBid.BlockHash != payloadHeader.BlockHash {
-		return errors.New("ProcessExecutionPayloadEnvelope: block_hash mismatch with committed bid")
-	}
-	// Verify consistency of the parent hash with respect to the previous execution payload
-	if payloadHeader.ParentHash != s.GetLatestBlockHash() {
-		return errors.New("ProcessExecutionPayloadEnvelope: parent_hash mismatch with latest block hash")
-	}
-	// Verify timestamp
-	if payloadHeader.Time != state.ComputeTimestampAtSlot(s, s.Slot()) {
-		return errors.New("ProcessExecutionPayloadEnvelope: invalid timestamp")
 	}
 
 	// NOTE: execution_engine.verify_and_notify_new_payload is handled outside state transition

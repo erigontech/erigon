@@ -78,6 +78,8 @@ type ForkChoiceStorageMock struct {
 	// Mock for PeerDas
 	MockPeerDas *mock_services.MockPeerDas
 
+	ShouldExtendPayloadVal bool
+
 	// [New in Gloas:EIP7732] Execution payload status by execution block hash
 	ExecutionPayloadStatusMap map[common.Hash]execution_client.PayloadStatus
 }
@@ -205,6 +207,7 @@ func NewForkChoiceStorageMock(t *testing.T) *ForkChoiceStorageMock {
 		Envelopes:                 make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope),
 		GetBeaconCommitteeMock:    nil,
 		Eth1Hashes:                make(map[common.Hash]common.Hash),
+		ShouldExtendPayloadVal:    true,
 		SyncContributionPool:      makeSyncContributionPoolMock(t),
 		MockPeerDas:               mockPeerDas,
 		ExecutionPayloadStatusMap: make(map[common.Hash]execution_client.PayloadStatus),
@@ -418,6 +421,10 @@ func (f *ForkChoiceStorageMock) IsBlobDataAvailable(slot uint64, blockRoot commo
 
 func (f *ForkChoiceStorageMock) GetHeadPayloadStatus() cltypes.PayloadStatus {
 	return f.HeadPayloadStatusVal
+}
+
+func (f *ForkChoiceStorageMock) ShouldExtendPayload(root common.Hash) bool {
+	return f.ShouldExtendPayloadVal
 }
 
 func (f *ForkChoiceStorageMock) GetBalances(blockRoot common.Hash) (solid.Uint64ListSSZ, error) {
