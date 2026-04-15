@@ -395,11 +395,11 @@ tmux attach-session  -t "$SESSION"
 **Files:**
 - Create: `<tooling-dir>/bench.sh`
 
-- [ ] add shebang `#!/usr/bin/env bash` and `set -euo pipefail`
-- [ ] parse three positional args (branchA, branchB, chain); print usage and exit 1 on wrong count
-- [ ] validate `~/erigon_A/.git`, `~/erigon_B/.git`, `./config_A.toml`, `./config_B.toml`, and `tmux` binary
-- [ ] make executable: `chmod +x bench.sh`
-- [ ] **verify scenario (a):** move `~/erigon_A` aside temporarily and run the script — must abort with a clear error pointing at `~/erigon_A` before touching anything else
+- [x] add shebang `#!/usr/bin/env bash` and `set -euo pipefail`
+- [x] parse three positional args (branchA, branchB, chain); print usage and exit 1 on wrong count
+- [x] validate `~/erigon_A/.git`, `~/erigon_B/.git`, `./config_A.toml`, `./config_B.toml`, and `tmux` binary
+- [x] make executable: `chmod +x bench.sh`
+- [x] **verify scenario (a):** move `~/erigon_A` aside temporarily and run the script — must abort with a clear error pointing at `~/erigon_A` before touching anything else
 
 ### Task 4: Add worktree-clean check + git fetch/checkout/pull
 
