@@ -19,11 +19,12 @@ package state
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"maps"
 	"sort"
+	"strings"
 	"sync"
-	"unsafe"
 
 	btree2 "github.com/tidwall/btree"
 
@@ -52,6 +53,12 @@ type TemporalMemBatch struct {
 
 	getCacheSize int
 
+	// inMemHistoryReads: accumulate all writes with txNums so GetAsOf can answer time-travel
+	// queries from in-flight state (needed for RPC reads during live chain-tip execution).
+	// Distinct from DomainBufferedWriter which also holds history in mem but only for writing.
+	// Disable for offline commands (stage_exec etc.) — history reads come from disk anyway.
+	inMemHistoryReads bool
+
 	latestStateLock sync.RWMutex
 	domains         [kv.DomainLen]map[string][]dataWithTxNum
 	storage         *btree2.Map[string, []dataWithTxNum] // TODO: replace hardcoded domain name to per-config configuration of available Guarantees/AccessMethods (range vs get)
@@ -75,8 +82,9 @@ type TemporalMemBatch struct {
 
 func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics any) *TemporalMemBatch {
 	sd := &TemporalMemBatch{
-		storage: btree2.NewMap[string, []dataWithTxNum](128),
-		metrics: ioMetrics.(*changeset.DomainMetrics),
+		storage:           btree2.NewMap[string, []dataWithTxNum](128),
+		metrics:           ioMetrics.(*changeset.DomainMetrics),
+		inMemHistoryReads: true,
 	}
 	aggTx := AggTx(tx)
 	sd.stepSize = aggTx.StepSize()
@@ -100,14 +108,16 @@ func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics any) *TemporalMemBatch {
 	return sd
 }
 
+func (sd *TemporalMemBatch) SetInMemHistoryReads(v bool) { sd.inMemHistoryReads = v }
+
 func (sd *TemporalMemBatch) DomainPut(domain kv.Domain, k string, v []byte, txNum uint64, preval []byte) error {
 	sd.putLatest(domain, k, v, txNum)
-	return sd.putHistory(domain, toBytesZeroCopy(k), v, txNum, preval)
+	return sd.putHistory(domain, common.ToBytesZeroCopy(k), v, txNum, preval)
 }
 
 func (sd *TemporalMemBatch) DomainDel(domain kv.Domain, k string, txNum uint64, preval []byte) error {
 	sd.putLatest(domain, k, nil, txNum)
-	return sd.putHistory(domain, toBytesZeroCopy(k), nil, txNum, preval)
+	return sd.putHistory(domain, common.ToBytesZeroCopy(k), nil, txNum, preval)
 }
 
 func (sd *TemporalMemBatch) putHistory(domain kv.Domain, k, v []byte, txNum uint64, preval []byte) error {
@@ -148,8 +158,14 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 	putValueSize := 0
 	if domain == kv.StorageDomain {
 		if old, ok := sd.storage.Get(key); ok {
-			sd.storage.Set(key, append(old, valWithStep))
-			putValueSize += len(val)
+			if sd.inMemHistoryReads {
+				sd.storage.Set(key, append(old, valWithStep))
+				putValueSize += len(val)
+			} else {
+				putValueSize += len(val) - len(old[len(old)-1].data)
+				old[0] = valWithStep
+				sd.storage.Set(key, old[:1])
+			}
 		} else {
 			sd.storage.Set(key, []dataWithTxNum{valWithStep})
 			putKeySize += len(key)
@@ -161,8 +177,14 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 	}
 
 	if old, ok := sd.domains[domain][key]; ok {
-		putValueSize += len(val)
-		sd.domains[domain][key] = append(old, valWithStep)
+		if sd.inMemHistoryReads {
+			sd.domains[domain][key] = append(old, valWithStep)
+			putValueSize += len(val)
+		} else {
+			putValueSize += len(val) - len(old[len(old)-1].data)
+			old[0] = valWithStep
+			sd.domains[domain][key] = old[:1]
+		}
 	} else {
 		sd.domains[domain][key] = []dataWithTxNum{valWithStep}
 		putKeySize += len(key)
@@ -201,7 +223,7 @@ func (sd *TemporalMemBatch) getLatest(domain kv.Domain, key []byte) (v []byte, s
 		return nil, 0, false
 	}
 
-	keyS := toStringZeroCopy(key)
+	keyS := common.ToStringZeroCopy(key)
 	var dataWithTxNums []dataWithTxNum
 	if domain == kv.StorageDomain {
 		dataWithTxNums, ok = sd.storage.Get(keyS)
@@ -222,10 +244,13 @@ func (sd *TemporalMemBatch) getLatest(domain kv.Domain, key []byte) (v []byte, s
 }
 
 func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
+	if !sd.inMemHistoryReads {
+		return nil, false, errors.New("GetAsOf called on TemporalMemBatch with inMemHistoryReads disabled")
+	}
 	sd.latestStateLock.RLock()
 	defer sd.latestStateLock.RUnlock()
 
-	keyS := toStringZeroCopy(key)
+	keyS := common.ToStringZeroCopy(key)
 	var dataWithTxNums []dataWithTxNum
 	if domain == kv.StorageDomain {
 		dataWithTxNums, ok = sd.storage.Get(keyS)
@@ -283,7 +308,7 @@ func (sd *TemporalMemBatch) ClearRam() {
 	}
 }
 
-func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte, step kv.Step) (cont bool, err error)) error {
+func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte) (cont bool, err error)) error {
 	sd.latestStateLock.RLock()
 	defer sd.latestStateLock.RUnlock()
 	var ramIter btree2.MapIter[string, []dataWithTxNum]
@@ -297,7 +322,7 @@ func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx 
 func (sd *TemporalMemBatch) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) ([]byte, []byte, bool, error) {
 	var firstKey, firstVal []byte
 	var hasPrefix bool
-	err := sd.IteratePrefix(domain, prefix, roTx, func(k []byte, v []byte, step kv.Step) (bool, error) {
+	err := sd.IteratePrefix(domain, prefix, roTx, func(k []byte, v []byte) (bool, error) {
 		if lv, _, ok := sd.getLatest(domain, k); ok {
 			v = lv
 		}
@@ -310,6 +335,41 @@ func (sd *TemporalMemBatch) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.T
 		return true, nil
 	})
 	return firstKey, firstVal, hasPrefix, err
+}
+
+// HasPrefixInRAM reports whether the RAM batch contains any non-deleted entry
+// for the given domain whose key starts with prefix.  It never touches disk or
+// segment files — only the in-memory btree (StorageDomain) or the domain map.
+func (sd *TemporalMemBatch) HasPrefixInRAM(domain kv.Domain, prefix []byte) bool {
+	sd.latestStateLock.RLock()
+	defer sd.latestStateLock.RUnlock()
+
+	if domain == kv.StorageDomain {
+		prefixStr := common.ToStringZeroCopy(prefix)
+		iter := sd.storage.Iter()
+		for ok := iter.Seek(prefixStr); ok; ok = iter.Next() {
+			if !strings.HasPrefix(iter.Key(), prefixStr) {
+				break
+			}
+			vals := iter.Value()
+			if len(vals) > 0 && len(vals[len(vals)-1].data) > 0 {
+				return true
+			}
+		}
+		return false
+	}
+
+	prefixStr := common.ToStringZeroCopy(prefix)
+	for k, vals := range sd.domains[domain] {
+		if strings.HasPrefix(k, prefixStr) && len(vals) > 0 && len(vals[len(vals)-1].data) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (sd *TemporalMemBatch) GetChangesetAccumulator() *changeset.StateChangeSet {
+	return sd.currentChangesAccumulator
 }
 
 func (sd *TemporalMemBatch) SetChangesetAccumulator(acc *changeset.StateChangeSet) {
@@ -329,13 +389,13 @@ func (sd *TemporalMemBatch) SavePastChangesetAccumulator(blockHash common.Hash, 
 	key := make([]byte, 40)
 	binary.BigEndian.PutUint64(key[:8], blockNumber)
 	copy(key[8:], blockHash[:])
-	sd.pastChangesAccumulator[toStringZeroCopy(key)] = acc
+	sd.pastChangesAccumulator[common.ToStringZeroCopy(key)] = acc
 }
 
 // GetChangesetByBlockNum returns the changeset for a given block number and its block hash.
 func (sd *TemporalMemBatch) GetChangesetByBlockNum(blockNumber uint64) (common.Hash, *changeset.StateChangeSet) {
 	for key, cs := range sd.pastChangesAccumulator {
-		keyBytes := toBytesZeroCopy(key)
+		keyBytes := common.ToBytesZeroCopy(key)
 		if binary.BigEndian.Uint64(keyBytes[:8]) == blockNumber {
 			blockHash := common.BytesToHash(keyBytes[8:])
 			return blockHash, cs
@@ -348,7 +408,7 @@ func (sd *TemporalMemBatch) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockN
 	var key [40]byte
 	binary.BigEndian.PutUint64(key[:8], blockNumber)
 	copy(key[8:], blockHash[:])
-	if changeset, ok := sd.pastChangesAccumulator[toStringZeroCopy(key[:])]; ok {
+	if changeset, ok := sd.pastChangesAccumulator[common.ToStringZeroCopy(key[:])]; ok {
 		return [kv.DomainLen][]kv.DomainEntryDiff{
 			changeset.Diffs[kv.AccountsDomain].GetDiffSet(),
 			changeset.Diffs[kv.StorageDomain].GetDiffSet(),
@@ -537,8 +597,8 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
 
 func (sd *TemporalMemBatch) flushDiffSet(_ context.Context, tx kv.RwTx) error {
 	for key, changeSet := range sd.pastChangesAccumulator {
-		blockNum := binary.BigEndian.Uint64(toBytesZeroCopy(key[:8]))
-		blockHash := common.BytesToHash(toBytesZeroCopy(key[8:]))
+		blockNum := binary.BigEndian.Uint64(common.ToBytesZeroCopy(key[:8]))
+		blockHash := common.BytesToHash(common.ToBytesZeroCopy(key[8:]))
 		if err := changeset.WriteDiffSet(tx, blockNum, blockHash, changeSet); err != nil {
 			return err
 		}
@@ -619,12 +679,3 @@ func AggTx(tx kv.Tx) *AggregatorRoTx {
 
 	return nil
 }
-
-func toStringZeroCopy(v []byte) string {
-	if len(v) == 0 {
-		return ""
-	}
-	return unsafe.String(&v[0], len(v))
-}
-
-func toBytesZeroCopy(s string) []byte { return unsafe.Slice(unsafe.StringData(s), len(s)) }

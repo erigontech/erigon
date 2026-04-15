@@ -64,19 +64,23 @@ type Log struct {
 type Logs []*Log
 
 type ErigonLog struct {
-	Address     common.Address `json:"address" gencodec:"required" codec:"1"`
-	Topics      []common.Hash  `json:"topics" gencodec:"required" codec:"2"`
-	Data        []byte         `json:"data" gencodec:"required" codec:"3"`
-	BlockNumber uint64         `json:"blockNumber" codec:"-"`
-	TxHash      common.Hash    `json:"transactionHash" gencodec:"required" codec:"-"`
-	TxIndex     uint           `json:"transactionIndex" codec:"-"`
-	BlockHash   common.Hash    `json:"blockHash" codec:"-"`
-	Index       uint           `json:"logIndex" codec:"-"`
-	Removed     bool           `json:"removed" codec:"-"`
-	Timestamp   uint64         `json:"timestamp" codec:"-"`
+	Log
+	Timestamp uint64 `json:"timestamp" codec:"-"`
 }
 
 type ErigonLogs []*ErigonLog
+
+// ToErigonLogs converts Logs to ErigonLogs, adding a timestamp to each entry.
+func (logs Logs) ToErigonLogs(timestamp uint64) ErigonLogs {
+	result := make(ErigonLogs, len(logs))
+	for i, l := range logs {
+		result[i] = &ErigonLog{
+			Log:       *l,
+			Timestamp: timestamp,
+		}
+	}
+	return result
+}
 
 // RPCLog Extends `types.Log` and add BlockTimestamp field
 type RPCLog struct {

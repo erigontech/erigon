@@ -289,7 +289,6 @@ func BenchmarkMapSet(b *testing.B) {
 	m := NewMap[int]()
 	key := []byte("benchmark-key")
 
-	b.ResetTimer()
 	for b.Loop() {
 		m.Set(key, 123)
 	}
@@ -301,7 +300,6 @@ func BenchmarkMapGet(b *testing.B) {
 	key := []byte("benchmark-key")
 	m.Set(key, 123)
 
-	b.ResetTimer()
 	for b.Loop() {
 		m.Get(key)
 	}
@@ -503,7 +501,6 @@ func BenchmarkLRUSet(b *testing.B) {
 	l, _ := NewLRU[int](10000)
 	key := []byte("benchmark-key")
 
-	b.ResetTimer()
 	for b.Loop() {
 		l.Set(key, 123)
 	}
@@ -515,7 +512,6 @@ func BenchmarkLRUGet(b *testing.B) {
 	key := []byte("benchmark-key")
 	l.Set(key, 123)
 
-	b.ResetTimer()
 	for b.Loop() {
 		l.Get(key)
 	}
@@ -553,7 +549,6 @@ func BenchmarkMaphashMapSet(b *testing.B) {
 	m := NewMap[int]()
 	key := []byte("benchmark-key-that-is-48-bytes-long-like-pubkey!")
 
-	b.ResetTimer()
 	for b.Loop() {
 		m.Set(key, 123)
 	}
@@ -563,7 +558,6 @@ func BenchmarkStringMapSet(b *testing.B) {
 	m := NewStringMap[int]()
 	key := []byte("benchmark-key-that-is-48-bytes-long-like-pubkey!")
 
-	b.ResetTimer()
 	for b.Loop() {
 		m.Set(key, 123)
 	}
@@ -577,7 +571,6 @@ func BenchmarkMaphashMapGet(b *testing.B) {
 	key := []byte("benchmark-key-that-is-48-bytes-long-like-pubkey!")
 	m.Set(key, 123)
 
-	b.ResetTimer()
 	for b.Loop() {
 		m.Get(key)
 	}
@@ -588,7 +581,6 @@ func BenchmarkStringMapGet(b *testing.B) {
 	key := []byte("benchmark-key-that-is-48-bytes-long-like-pubkey!")
 	m.Set(key, 123)
 
-	b.ResetTimer()
 	for b.Loop() {
 		m.Get(key)
 	}
@@ -609,7 +601,6 @@ func BenchmarkMaphashMapSetManyKeys(b *testing.B) {
 		keys[i][3] = byte(i)
 	}
 
-	b.ResetTimer()
 	i := 0
 	for b.Loop() {
 		m := NewMap[int]()
@@ -631,7 +622,6 @@ func BenchmarkStringMapSetManyKeys(b *testing.B) {
 		keys[i][3] = byte(i)
 	}
 
-	b.ResetTimer()
 	i := 0
 	for b.Loop() {
 		m := NewStringMap[int]()
@@ -653,7 +643,6 @@ func BenchmarkUniqueHandleMapSetManyKeys(b *testing.B) {
 		keys[i][3] = byte(i)
 	}
 
-	b.ResetTimer()
 	i := 0
 	for b.Loop() {
 		m := NewUniqueHandleMap[int]()
@@ -681,7 +670,6 @@ func BenchmarkMaphashMapGetManyKeys(b *testing.B) {
 		m.Set(keys[i], i)
 	}
 
-	b.ResetTimer()
 	i := 0
 	for b.Loop() {
 		m.Get(keys[i%len(keys)])
@@ -703,7 +691,6 @@ func BenchmarkStringMapGetManyKeys(b *testing.B) {
 		m.Set(keys[i], i)
 	}
 
-	b.ResetTimer()
 	i := 0
 	for b.Loop() {
 		m.Get(keys[i%len(keys)])
@@ -769,7 +756,6 @@ func BenchmarkUniqueHandleMapSet(b *testing.B) {
 	m := NewUniqueHandleMap[int]()
 	key := []byte("benchmark-key-that-is-48-bytes-long-like-pubkey!")
 
-	b.ResetTimer()
 	for b.Loop() {
 		m.Set(key, 123)
 	}
@@ -780,7 +766,6 @@ func BenchmarkUniqueHandleMapGet(b *testing.B) {
 	key := []byte("benchmark-key-that-is-48-bytes-long-like-pubkey!")
 	m.Set(key, 123)
 
-	b.ResetTimer()
 	for b.Loop() {
 		m.Get(key)
 	}
@@ -800,7 +785,6 @@ func BenchmarkUniqueHandleMapGetManyKeys(b *testing.B) {
 		m.Set(keys[i], i)
 	}
 
-	b.ResetTimer()
 	i := 0
 	for b.Loop() {
 		m.Get(keys[i%len(keys)])

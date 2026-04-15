@@ -17,8 +17,13 @@
 package gointerfaces
 
 import (
+	"context"
 	"fmt"
 
+	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/emptypb"
+
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
@@ -43,4 +48,27 @@ func EnsureVersion(local Version, remote *typesproto.VersionReply) bool {
 
 func (v Version) String() string {
 	return fmt.Sprintf("%d.%d.%d", v.Major, v.Minor, v.Patch)
+}
+
+// VersionClient is implemented by any gRPC client that exposes a Version RPC.
+type VersionClient interface {
+	Version(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*typesproto.VersionReply, error)
+}
+
+// EnsureVersionCompatibility calls Version on the client, checks compatibility,
+// and logs the result. Returns true if versions are compatible.
+func EnsureVersionCompatibility(client VersionClient, expected Version, logger log.Logger) bool {
+	versionReply, err := client.Version(context.Background(), &emptypb.Empty{}, grpc.WaitForReady(true))
+	if err != nil {
+		logger.Error("getting Version", "err", err)
+		return false
+	}
+	if !EnsureVersion(expected, versionReply) {
+		logger.Error("incompatible interface versions", "client", expected.String(),
+			"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
+		return false
+	}
+	logger.Info("interfaces compatible", "client", expected.String(),
+		"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
+	return true
 }

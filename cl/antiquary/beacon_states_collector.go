@@ -160,12 +160,12 @@ func (i *beaconStatesCollector) addGenesisState(ctx context.Context, state *stat
 		}
 		committeeSlot := i.beaconCfg.RoundSlotToSyncCommitteePeriod(slot)
 		committee := *state.CurrentSyncCommittee()
-		if err := i.currentSyncCommitteeCollector.Collect(base_encoding.Encode64ToBytes4(committeeSlot), committee[:]); err != nil {
+		if err := i.currentSyncCommitteeCollector.Collect(base_encoding.Encode64ToBytes4(committeeSlot), committee.Bytes()); err != nil {
 			return err
 		}
 
 		committee = *state.NextSyncCommittee()
-		if err := i.nextSyncCommitteeCollector.Collect(base_encoding.Encode64ToBytes4(committeeSlot), committee[:]); err != nil {
+		if err := i.nextSyncCommitteeCollector.Collect(base_encoding.Encode64ToBytes4(committeeSlot), committee.Bytes()); err != nil {
 			return err
 		}
 	}
@@ -317,12 +317,12 @@ func (i *beaconStatesCollector) collectActiveIndices(epoch uint64, activeIndices
 
 func (i *beaconStatesCollector) collectCurrentSyncCommittee(slot uint64, committee *solid.SyncCommittee) error {
 	roundedSlot := i.beaconCfg.RoundSlotToSyncCommitteePeriod(slot)
-	return i.currentSyncCommitteeCollector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), committee[:])
+	return i.currentSyncCommitteeCollector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), committee.Bytes())
 }
 
 func (i *beaconStatesCollector) collectNextSyncCommittee(slot uint64, committee *solid.SyncCommittee) error {
 	roundedSlot := i.beaconCfg.RoundSlotToSyncCommitteePeriod(slot)
-	return i.nextSyncCommitteeCollector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), committee[:])
+	return i.nextSyncCommitteeCollector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), committee.Bytes())
 }
 
 func (i *beaconStatesCollector) collectEth1DataVote(slot uint64, eth1Data *cltypes.Eth1Data) error {
@@ -356,9 +356,7 @@ func (i *beaconStatesCollector) collectInactivityScores(slot uint64, inactivityS
 }
 
 func (i *beaconStatesCollector) flush(ctx context.Context, tx kv.RwTx) error {
-	loadfunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		return next(k, k, v)
-	}
+	loadfunc := etl.IdentityLoadFunc
 
 	if err := i.effectiveBalanceCollector.Load(tx, kv.ValidatorEffectiveBalance, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err

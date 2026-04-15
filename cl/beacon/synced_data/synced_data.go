@@ -37,8 +37,6 @@ var (
 
 var _ SyncedData = (*SyncedDataManager)(nil)
 
-func EmptyCancel() {}
-
 type SyncedDataManager struct {
 	enabled bool
 	cfg     *clparams.BeaconChainConfig
@@ -164,6 +162,11 @@ func (s *SyncedDataManager) HeadRoot() common.Hash {
 }
 
 func (s *SyncedDataManager) CommitteeCount(epoch uint64) uint64 {
+	s.accessLock.RLock()
+	defer s.accessLock.RUnlock()
+	if s.headState == nil {
+		return 0
+	}
 	return s.headState.CommitteeCount(epoch)
 }
 

@@ -50,9 +50,12 @@ func TestGasPrice(t *testing.T) {
 		expectedPrice *big.Int
 	}{
 		{
-			description:   "standard settings 60 blocks",
-			chainSize:     60,
-			expectedPrice: big.NewInt(common.GWei * int64(36)),
+			description: "standard settings 60 blocks",
+			chainSize:   60,
+			// New two-phase oracle: phase1 fetches last checkBlocks=20 (blocks 41-60, prices 41-60 GWei),
+			// phase2 extends by sparseCount=20 more (blocks 21-40, prices 21-40 GWei).
+			// Total 40 prices [21-60], percentile 60 → index 23 → 44 GWei.
+			expectedPrice: big.NewInt(common.GWei * int64(44)),
 		},
 		{
 			description:   "standard settings 30 blocks",
@@ -213,7 +216,7 @@ func createGasPriceTestKV(t *testing.T, chainSize int) *execmoduletester.ExecMod
 		key, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr   = crypto.PubkeyToAddress(key.PublicKey)
 		gspec  = &types.Genesis{
-			Config: chain.TestChainConfig,
+			Config: chain.TestChainBerlinConfig,
 			Alloc:  types.GenesisAlloc{addr: {Balance: big.NewInt(math.MaxInt64)}},
 		}
 		signer = types.LatestSigner(gspec.Config)

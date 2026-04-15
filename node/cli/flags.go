@@ -118,6 +118,7 @@ var (
 	ExperimentalBALFlag = cli.BoolFlag{
 		Name:  "experimental.bal",
 		Usage: "generate block access list",
+		Value: false,
 	}
 
 	// Throttling Flags
@@ -233,7 +234,23 @@ var (
 	}
 )
 
+// BuildEthConfig applies all CLI flags to the ethconfig.Config. This is the single
+// entry point for flag-to-config mapping — it calls utils.SetEthConfig internally
+// and then applies the remaining flags defined in this package.
+//
+// After this function returns, the config is fully populated from CLI flags.
+func BuildEthConfig(ctx *cli.Context, nodeCfg *nodecfg.Config, cfg *ethconfig.Config, logger log.Logger) {
+	utils.SetEthConfig(ctx, nodeCfg, cfg, logger)
+	applyRemainingEthFlags(ctx, cfg, logger)
+}
+
+// ApplyFlagsForEthConfig is kept for backward compatibility. New code should use BuildEthConfig.
+// Deprecated: use BuildEthConfig instead.
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.Logger) {
+	applyRemainingEthFlags(ctx, cfg, logger)
+}
+
+func applyRemainingEthFlags(ctx *cli.Context, cfg *ethconfig.Config, logger log.Logger) {
 	chainId := cfg.NetworkID
 	if cfg.Genesis != nil {
 		chainId = cfg.Genesis.Config.ChainID.Uint64()
@@ -446,6 +463,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		RpcBatchConcurrency:       ctx.Uint(utils.RpcBatchConcurrencyFlag.Name),
 		RpcStreamingDisable:       ctx.Bool(utils.RpcStreamingDisableFlag.Name),
 		DBReadConcurrency:         ctx.Int(utils.DBReadConcurrencyFlag.Name),
+		RpcMaxConcurrentRequests:  ctx.Int(utils.RpcMaxConcurrentRequestsFlag.Name),
 		RpcAllowListFilePath:      ctx.String(utils.RpcAccessListFlag.Name),
 		RpcFiltersConfig: rpchelper.FiltersConfig{
 			RpcSubscriptionFiltersMaxLogs:      ctx.Int(RpcSubscriptionFiltersMaxLogsFlag.Name),
@@ -455,7 +473,8 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 			RpcSubscriptionFiltersMaxTopics:    ctx.Int(RpcSubscriptionFiltersMaxTopicsFlag.Name),
 		},
 		Gascap:              ctx.Uint64(utils.RpcGasCapFlag.Name),
-		RangeLimit:          ctx.Int(utils.RpcBlockRangeLimit.Name),
+		BlockRangeLimit:     ctx.Int(utils.RpcBlockRangeLimit.Name),
+		GetLogsMaxResults:   ctx.Int(utils.RpcGetLogsMaxResults.Name),
 		Feecap:              ctx.Float64(utils.RPCGlobalTxFeeCapFlag.Name),
 		MaxTraces:           ctx.Uint64(utils.TraceMaxtracesFlag.Name),
 		TraceCompatibility:  ctx.Bool(utils.RpcTraceCompatFlag.Name),

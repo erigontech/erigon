@@ -23,7 +23,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/protocol/rules"
-	"github.com/erigontech/erigon/execution/protocol/rules/clique"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/rpc"
@@ -49,12 +48,12 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 	blockReader services.FullBlockReader, cfg *httpcfg.HttpCfg, engine rules.EngineReader,
 	logger log.Logger, bridgeReader bridgeReader, spanProducersReader spanProducersReader,
 ) (list []rpc.API) {
-	base := NewBaseApi(filters, stateCache, blockReader, cfg.WithDatadir, cfg.EvmCallTimeout, engine, cfg.Dirs, bridgeReader, cfg.RangeLimit)
+	base := NewBaseApi(filters, stateCache, blockReader, cfg.WithDatadir, cfg.EvmCallTimeout, engine, cfg.Dirs, bridgeReader, cfg.BlockRangeLimit, cfg.GetLogsMaxResults)
 	ethImpl := NewEthAPI(base, db, eth, txPool, mining, NewEthApiConfig(cfg), logger)
 	erigonImpl := NewErigonAPI(base, db, eth)
 	txpoolImpl := NewTxPoolAPI(base, db, txPool)
 	netImpl := NewNetAPIImpl(eth)
-	debugImpl := NewPrivateDebugAPI(base, db, cfg.Gascap, cfg.GethCompatibility)
+	debugImpl := NewPrivateDebugAPI(base, db, eth, cfg.Gascap, cfg.GethCompatibility)
 	traceImpl := NewTraceAPI(base, db, cfg)
 	web3Impl := NewWeb3APIImpl(eth)
 	adminImpl := NewAdminAPI(eth)
@@ -186,8 +185,6 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 				Service:   InternalAPI(internalImpl),
 				Version:   "1.0",
 			})
-		case "clique":
-			list = append(list, clique.NewCliqueAPI(db, engine, blockReader))
 		case "overlay":
 			list = append(list, rpc.API{
 				Namespace: "overlay",

@@ -152,7 +152,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 
 	replayTransactions = block.Transactions()[:transactionIndex]
 
-	err = rpchelper.CheckBlockExecuted(tx, blockNum)
+	err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -296,6 +296,10 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 		return nil, err
 	}
 
+	if api.blockRangeLimit != 0 && (end-begin) > uint64(api.blockRangeLimit) {
+		return nil, fmt.Errorf("%s: %d", errExceedBlockRange, api.blockRangeLimit)
+	}
+
 	numBlocks := end - begin + 1
 	var (
 		results = make([]*blockReplayResult, numBlocks)
@@ -405,7 +409,12 @@ blockLoop:
 		if res == nil {
 			continue
 		}
-		logs = append(logs, res.Logs...)
+		for _, l := range res.Logs {
+			if api.getLogsMaxResults != 0 && len(logs) >= api.getLogsMaxResults {
+				return nil, fmt.Errorf("%s: %d", errExceedLogResults, api.getLogsMaxResults)
+			}
+			logs = append(logs, l)
+		}
 	}
 	return logs, nil
 }
@@ -481,18 +490,14 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	// this makes sure resources are cleaned up.
 	defer cancel()
 
-	// Wait for the context to be done and cancel the evm. Even if the
-	// EVM has finished, cancelling may be done (repeatedly)
-	go func() {
-		<-ctx.Done()
-		evm.Cancel()
-	}()
-
 	// Setup the gas pool (also for unmetered requests)
 	// and apply the message.
 	gp := new(protocol.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
 	vmConfig := vm.Config{}
 	evm = vm.NewEVM(blockCtx, evmtypes.TxContext{}, statedb, chainConfig, vmConfig)
+
+	stop := context.AfterFunc(ctx, evm.Cancel)
+	defer stop()
 	receipts, err := api.getReceipts(ctx, tx, block)
 	if err != nil {
 		return nil, err
@@ -550,7 +555,6 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 			return nil, err
 		}
 
-		// If the timer caused an abort, return an appropriate error message
 		if evm.Cancelled() {
 			log.Error("EVM cancelled")
 			return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)

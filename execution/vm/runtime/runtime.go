@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -66,23 +67,23 @@ func setDefaults(cfg *Config) {
 	if cfg.ChainConfig == nil {
 		cfg.ChainConfig = &chain.Config{
 			ChainID:               big.NewInt(1),
-			HomesteadBlock:        new(big.Int),
-			TangerineWhistleBlock: new(big.Int),
-			SpuriousDragonBlock:   new(big.Int),
-			ByzantiumBlock:        new(big.Int),
-			ConstantinopleBlock:   new(big.Int),
-			PetersburgBlock:       new(big.Int),
-			IstanbulBlock:         new(big.Int),
-			MuirGlacierBlock:      new(big.Int),
-			BerlinBlock:           new(big.Int),
-			LondonBlock:           new(big.Int),
-			ArrowGlacierBlock:     new(big.Int),
-			GrayGlacierBlock:      new(big.Int),
-			ShanghaiTime:          new(big.Int),
-			CancunTime:            new(big.Int),
-			PragueTime:            new(big.Int),
-			OsakaTime:             new(big.Int),
-			AmsterdamTime:         new(big.Int),
+			HomesteadBlock:        new(uint64),
+			TangerineWhistleBlock: new(uint64),
+			SpuriousDragonBlock:   new(uint64),
+			ByzantiumBlock:        new(uint64),
+			ConstantinopleBlock:   new(uint64),
+			PetersburgBlock:       new(uint64),
+			IstanbulBlock:         new(uint64),
+			MuirGlacierBlock:      new(uint64),
+			BerlinBlock:           new(uint64),
+			LondonBlock:           new(uint64),
+			ArrowGlacierBlock:     new(uint64),
+			GrayGlacierBlock:      new(uint64),
+			ShanghaiTime:          new(uint64),
+			CancunTime:            new(uint64),
+			PragueTime:            new(uint64),
+			OsakaTime:             new(uint64),
+			AmsterdamTime:         new(uint64),
 		}
 	}
 
@@ -113,8 +114,8 @@ var contractAsAddress = accounts.InternAddress(common.BytesToAddress([]byte("con
 func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.IntraBlockState, error) {
 	if cfg == nil {
 		cfg = new(Config)
-		setDefaults(cfg)
 	}
+	setDefaults(cfg)
 
 	externalState := cfg.State != nil
 	if !externalState {
@@ -153,7 +154,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 		sender,
 		contractAsAddress,
 		input,
-		cfg.GasLimit,
+		mdgas.SplitTxnGasLimit(cfg.GasLimit, mdgas.MdGas{}, rules),
 		cfg.Value,
 		false, /* bailout */
 	)
@@ -165,7 +166,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 }
 
 // Create executes the code using the EVM create method
-func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, uint64, error) {
+func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, mdgas.MdGas, error) {
 	if cfg == nil {
 		cfg = new(Config)
 	}
@@ -175,7 +176,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 	if !externalState {
 		tmp, err := os.MkdirTemp("", "erigon-create-vm-*")
 		if err != nil {
-			return nil, [20]byte{}, 0, err
+			return nil, [20]byte{}, mdgas.MdGas{}, err
 		}
 		defer dir.RemoveAll(tmp)
 
@@ -184,12 +185,12 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 		defer db.Close()
 		tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 		if err != nil {
-			return nil, [20]byte{}, 0, err
+			return nil, [20]byte{}, mdgas.MdGas{}, err
 		}
 		defer tx.Rollback()
 		sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 		if err != nil {
-			return nil, [20]byte{}, 0, err
+			return nil, [20]byte{}, mdgas.MdGas{}, err
 		}
 		defer sd.Close()
 		//cfg.w = state.NewWriter(sd, nil)
@@ -206,8 +207,9 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 	code, address, leftOverGas, err := vmenv.Create(
 		sender,
 		input,
-		cfg.GasLimit,
+		mdgas.SplitTxnGasLimit(cfg.GasLimit, mdgas.MdGas{}, rules),
 		cfg.Value,
+		nil,
 		false,
 	)
 	return code, address.Value(), leftOverGas, err
@@ -218,14 +220,14 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 //
 // Call, unlike Execute, requires a config and also requires the State field to
 // be set.
-func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, uint64, error) {
+func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, mdgas.MdGas, error) {
 	setDefaults(cfg)
 
 	vmenv := NewEnv(cfg)
 
 	sender, err := cfg.State.GetOrNewStateObject(cfg.Origin)
 	if err != nil {
-		return nil, 0, err
+		return nil, mdgas.MdGas{}, err
 	}
 	statedb := cfg.State
 	rules := vmenv.ChainRules()
@@ -240,13 +242,13 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, uint64, 
 		sender.Address(),
 		address,
 		input,
-		cfg.GasLimit,
+		mdgas.SplitTxnGasLimit(cfg.GasLimit, mdgas.MdGas{}, rules),
 		cfg.Value,
 		false, /* bailout */
 	)
 
 	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxEnd != nil {
-		cfg.EVMConfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: cfg.GasLimit - leftOverGas}, err)
+		cfg.EVMConfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: cfg.GasLimit - leftOverGas.Total()}, err)
 	}
 
 	return ret, leftOverGas, err

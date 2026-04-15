@@ -26,7 +26,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unsafe"
 
 	"github.com/erigontech/erigon/common/hexutil"
 
@@ -283,7 +282,7 @@ func (d *DomainDiff) DomainUpdate(k []byte, step Step, prevValue []byte) {
 
 	d.keyBuf = append(append(d.keyBuf[:0], k...), d.currentStepBuf...)
 
-	valsKey := toStringZeroCopy(d.keyBuf)
+	valsKey := common.ToStringZeroCopy(d.keyBuf)
 	if _, ok := d.prevValues[valsKey]; !ok {
 		valsKeySCopy := strings.Clone(valsKey)
 		if prevValue == nil {
@@ -310,10 +309,4 @@ func (d *DomainDiff) GetDiffSet() (keysToValue []DomainEntryDiff) {
 		return d.prevValsSlice[i].Key < d.prevValsSlice[j].Key
 	})
 	return d.prevValsSlice
-}
-func toStringZeroCopy(v []byte) string {
-	if len(v) == 0 {
-		return ""
-	}
-	return unsafe.String(&v[0], len(v))
 }

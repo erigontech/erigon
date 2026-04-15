@@ -88,8 +88,8 @@ type structLogMarshaling struct {
 	GasCost     math.HexOrDecimal64
 	Memory      hexutil.Bytes
 	ReturnData  hexutil.Bytes
-	OpName      string `json:"opName"` // adds call to OpName() in MarshalJSON
-	ErrorString string `json:"error"`  // adds call to ErrorString() in MarshalJSON
+	OpName      string `json:"opName"`          // adds call to OpName() in MarshalJSON
+	ErrorString string `json:"error,omitempty"` // adds call to ErrorString() in MarshalJSON
 }
 
 // OpName formats the operand name in a human-readable format.
@@ -241,7 +241,7 @@ func (l *StructLogger) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scope 
 		copy(rdata, rData)
 	}
 	// create a new snapshot of the EVM.
-	log := StructLog{pc, op, gas, cost, mem, len(memory), stck, rdata, storage, depth, l.env.IntraBlockState.GetRefund(), err}
+	log := StructLog{pc, op, gas, cost, mem, len(memory), stck, rdata, storage, depth, l.env.IntraBlockState.GetRefund().Total(), err}
 	l.logs = append(l.logs, log)
 }
 

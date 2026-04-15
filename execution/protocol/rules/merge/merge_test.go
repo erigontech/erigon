@@ -122,7 +122,7 @@ func TestNullParentBeaconBlockRootDoesNotPanic(t *testing.T) {
 	chainConfig := chainspec.Mainnet.Config
 	header := &types.Header{ // fake PoS header *after* Cancun fork
 		Difficulty: *ProofOfStakeDifficulty,
-		Time:       chainConfig.CancunTime.Uint64() + 1,
+		Time:       *chainConfig.CancunTime + 1,
 	}
 	logger := log.New()
 	chainReader := consensuschain.NewReader(chainConfig, nil, nil, logger) // tx and blockReader don't care

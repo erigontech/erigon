@@ -41,3 +41,7 @@ var (
 	Num32  = uint256.NewInt(32)
 	Num35  = uint256.NewInt(35)
 )
+
+// NewUint64 returns a pointer to v. Useful for initialising *uint64 fields
+// in struct literals (e.g. chain.Config fork-activation fields).
+func NewUint64(v uint64) *uint64 { return &v }

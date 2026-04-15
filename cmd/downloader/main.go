@@ -49,7 +49,6 @@ import (
 	"github.com/erigontech/erigon/db/downloader/webseeds"
 
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
-	"github.com/erigontech/erigon/cmd/hack/tool"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -59,6 +58,7 @@ import (
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
+	"github.com/erigontech/erigon/db/fromdb"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snapcfg"
@@ -272,7 +272,7 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 	version := "erigon: " + version.VersionWithCommit(version.GitCommit)
 
 	webseedsList := common.CliString2Array(cobraFlagValues.webseeds)
-	if known, ok := snapcfg.KnownWebseeds[chain]; ok {
+	if known, ok := snapcfg.GetEmbeddedWebseeds(chain); ok {
 		webseedsList = append(webseedsList, known...)
 	}
 	if seedbox {
@@ -540,7 +540,7 @@ var torrentMagnet = &cobra.Command{
 func manifestVerify(ctx context.Context, logger log.Logger) error {
 	webseedsList := common.CliString2Array(cobraFlagValues.webseeds)
 	if len(webseedsList) == 0 { // fallback to default if exact list not passed
-		if known, ok := snapcfg.KnownWebseeds[chain]; ok {
+		if known, ok := snapcfg.GetEmbeddedWebseeds(chain); ok {
 			for _, s := range known {
 				//TODO: enable validation of this buckets also. skipping to make CI useful.
 				if strings.Contains(s, "erigon2-v2") {
@@ -771,7 +771,7 @@ func checkChainName(ctx context.Context, dirs datadir.Dirs, chainName string) er
 	}
 	defer db.Close()
 
-	if cc := tool.ChainConfigFromDB(db); cc != nil {
+	if cc := fromdb.ChainConfig(db); cc != nil {
 		spc, err := chainspec.ChainSpecByName(chainName)
 		if err != nil {
 			return fmt.Errorf("unknown chain: %s", chainName)

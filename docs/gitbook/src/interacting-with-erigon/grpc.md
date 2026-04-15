@@ -9,7 +9,7 @@ metaLinks:
 
 Erigon provides gRPC APIs that allow users to access blockchain data and services directly through protocol buffer interfaces. These APIs offer high-performance, strongly-typed access to Erigon's internal services and are particularly useful for applications requiring efficient data access or integration with other gRPC-based systems.
 
-The gRPC server must be explicitly enabled using the `--grpc` flag when starting the RPC daemon, and can be configured with custom listening addresses, ports, and TLS settings.
+The gRPC server can be explicitly enabled using the `--grpc` flag when running the **standalone `rpcdaemon`** binary. This flag is **not available** on the main `erigon` binary — internal gRPC services for components like txpool, downloader, and sentry start automatically on the `--private.api.addr` endpoint and do not require any additional flag.
 
 ### Performance Considerations
 
@@ -33,7 +33,7 @@ Erigon provides Go, Rust, and C++ implementations of the RoKV (read-only key-val
 
 ### Availability
 
-* gRPC services are available when enabled with the `--grpc` flag
+* gRPC services are available when enabled with the `--grpc` flag on the **standalone `rpcdaemon`** binary
 * Default listening address is configurable via `--grpc.addr` and `--grpc.port`
 * Services require the main Erigon node to be running and accessible
 
