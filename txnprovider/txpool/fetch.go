@@ -312,6 +312,8 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		return nil
 	}
 
+	const maxHashesPerMsg = 4096 // See https://github.com/ethereum/devp2p/blob/master/caps/eth.md#newpooledtransactionhashes-0x08
+
 	switch req.Id {
 	case sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_66:
 		hashCount, pos, err := ParseHashesCount(req.Data, 0)
@@ -321,7 +323,6 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 			return nil
 		}
 
-		const maxHashesPerMsg = 4096 // See https://github.com/ethereum/devp2p/blob/master/caps/eth.md#newpooledtransactionhashes-0x08
 		if hashCount > maxHashesPerMsg {
 			f.logger.Warn("Oversized hash announcement",
 				"peer", req.PeerId, "count", hashCount)
@@ -363,7 +364,6 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 			return nil
 		}
 
-		const maxHashesPerMsg = 4096 // See https://github.com/ethereum/devp2p/blob/master/caps/eth.md#newpooledtransactionhashes-0x08
 		if hashCount := len(hashes) / 32; hashCount > maxHashesPerMsg {
 			f.logger.Warn("Oversized hash announcement",
 				"peer", req.PeerId, "count", hashCount)
