@@ -413,6 +413,11 @@ var (
 		Usage: "Maximum number of concurrent HTTP RPC requests (HTTP admission control). 0 = use db.read.concurrency, -1 = unlimited (no admission control)",
 		Value: 0,
 	}
+	WsMaxConnectionsFlag = cli.IntFlag{
+		Name:  "ws.max.connections",
+		Usage: "Maximum number of concurrent WebSocket connections. 0 = unlimited",
+		Value: 0,
+	}
 	RpcAccessListFlag = cli.StringFlag{
 		Name:  "rpc.accessList",
 		Usage: "Specify granular (method-by-method) API allowlist",
