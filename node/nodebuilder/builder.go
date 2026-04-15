@@ -23,7 +23,7 @@
 //
 // Build ordering:
 //  1. BuildDownloader — torrent client, gRPC proxy
-//  2. (future) BuildStorage — DB, snapshots, blockReader, notifications
+//  2. BuildStorage — DB references, file-change callbacks, block retirement
 //
 // Components are configured and initialized in backend.go (deps differ per component),
 // but the builder owns allocation and provides a single access point.

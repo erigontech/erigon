@@ -33,6 +33,7 @@ import (
 
 	"golang.org/x/sync/semaphore"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/kv"
@@ -60,7 +61,7 @@ type Provider struct {
 	HeimdallStore        heimdall.Store        // nil if not Bor
 	ChainConfig          *chain.Config
 	Genesis              *types.Block
-	GenesisHash          [32]byte
+	GenesisHash          common.Hash
 	CurrentBlockNumber   uint64
 	SegmentsBuildLimiter *semaphore.Weighted
 	BlockRetire          services.BlockRetire
@@ -122,12 +123,13 @@ func (p *Provider) Initialize(deps Deps) error {
 	p.GenesisHash = deps.Genesis.Hash()
 	p.SegmentsBuildLimiter = deps.SegmentsBuildLimiter
 
-	// Read current block number.
+	// Read current block number. Use deps.Ctx so cancellation/shutdown
+	// propagates into this lookup instead of masking it with Background.
 	var currentBlock *types.Block
-	var err error
-	if err := p.ChainDB.View(context.Background(), func(tx kv.Tx) error {
-		currentBlock, err = p.BlockReader.CurrentBlock(tx)
-		return err
+	if err := p.ChainDB.View(ctx, func(tx kv.Tx) error {
+		var viewErr error
+		currentBlock, viewErr = p.BlockReader.CurrentBlock(tx)
+		return viewErr
 	}); err != nil {
 		return fmt.Errorf("storage: read current block: %w", err)
 	}

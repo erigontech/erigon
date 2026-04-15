@@ -1532,7 +1532,7 @@ func (s *Ethereum) Stop() error {
 	if s.unsubscribeEthstat != nil {
 		s.unsubscribeEthstat()
 	}
-	if s.components.Downloader != nil {
+	if s.components != nil && s.components.Downloader != nil {
 		s.components.Downloader.Close()
 	}
 	if s.privateAPI != nil {
