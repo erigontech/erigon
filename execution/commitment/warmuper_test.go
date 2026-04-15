@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -385,6 +386,63 @@ func TestWarmuper_BranchError(t *testing.T) {
 	err := warmuper.Wait()
 	require.NoError(t, err)
 	require.Equal(t, uint64(1), warmuper.Stats().KeysProcessed)
+}
+
+// TestWarmuper_StatsPopulatedAfterCycle verifies that both WarmupStats and
+// CacheStats are populated after a complete warmup cycle (start, warm keys, wait).
+func TestWarmuper_StatsPopulatedAfterCycle(t *testing.T) {
+	t.Parallel()
+
+	ctx := newWarmupTestCtx()
+
+	// Build a trie with several account leaves.
+	const numKeys = 4
+	hashedKeys := make([][]byte, numKeys)
+	var rootCells [16]*cell
+
+	for i := range numKeys {
+		addr := make([]byte, 20)
+		for j := range addr {
+			addr[j] = byte(i*31 + j)
+		}
+		hashedKey := KeyToHexNibbleHash(addr)
+		hashedKeys[i] = hashedKey
+		ctx.accounts[string(addr)] = &Update{Flags: BalanceUpdate}
+		rootCells[hashedKey[0]] = makeAccountCell(addr, dummyHash())
+	}
+	ctx.putBranch(nil, rootCells)
+
+	cfg := WarmupConfig{
+		Enabled:    true,
+		CtxFactory: func() (PatriciaContext, func()) { return ctx, nil },
+		NumWorkers: 2,
+		LogPrefix:  "test-stats",
+	}
+
+	warmuper := NewWarmuper(context.Background(), cfg)
+	warmuper.Start()
+
+	for _, hk := range hashedKeys {
+		warmuper.WarmKey(hk, 0)
+	}
+
+	require.NoError(t, warmuper.Wait())
+
+	// Verify WarmupStats.
+	wStats := warmuper.Stats()
+	require.Equal(t, uint64(numKeys), wStats.KeysProcessed,
+		"all submitted keys should be processed")
+	require.Greater(t, wStats.Duration, time.Duration(0),
+		"duration should be positive after a cycle")
+
+	// Verify CacheStats — at minimum, branch misses should be non-zero since
+	// every key triggers at least one Branch() call that populates the cache.
+	cache := warmuper.SharedCache()
+	cStats := cache.Stats()
+	require.Greater(t, cStats.BranchHits+cStats.BranchMisses, uint64(0),
+		"branch lookups should have occurred")
+	require.Greater(t, cStats.HitRate()+0.01, 0.0,
+		"hit rate should be computable (non-NaN)")
 }
 
 // noopPatriciaContext is defined in commitment_test.go

@@ -2865,14 +2865,19 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	}
 	if warmuper != nil {
 		warmuper.DrainPending()
-		cache := warmuper.SharedCache()
-		stats := cache.Stats()
-		log.Debug(fmt.Sprintf("[%s] commitment cache stats", logPrefix),
-			"branches.hit", stats.BranchHits, "branches.miss", stats.BranchMisses,
-			"accounts.hit", stats.AccountHits, "accounts.miss", stats.AccountMisses,
-			"storage.hit", stats.StorageHits, "storage.miss", stats.StorageMisses,
-			"hitRate", fmt.Sprintf("%.1f%%", stats.HitRate()*100),
-		)
+		wStats := warmuper.Stats()
+		if wStats.KeysProcessed > 0 {
+			cache := warmuper.SharedCache()
+			cStats := cache.Stats()
+			log.Info(fmt.Sprintf("[%s] commitment cache stats", logPrefix),
+				"hit%", fmt.Sprintf("%.1f%%", cStats.HitRate()*100),
+				"cb", fmt.Sprintf("%d/%d", cStats.BranchHits, cStats.BranchHits+cStats.BranchMisses),
+				"ca", fmt.Sprintf("%d/%d", cStats.AccountHits, cStats.AccountHits+cStats.AccountMisses),
+				"cs", fmt.Sprintf("%d/%d", cStats.StorageHits, cStats.StorageHits+cStats.StorageMisses),
+				"keys", wStats.KeysProcessed,
+				"warmup", wStats.Duration.Round(time.Millisecond),
+			)
+		}
 	}
 
 	if hph.branchEncoder.DeferUpdatesEnabled() && !hph.leaveDeferredForCaller {

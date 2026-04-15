@@ -211,11 +211,11 @@ Promote `Process()`'s existing `log.Debug("commitment cache stats", ...)` to `lo
 **Files:**
 - Modify: `execution/commitment/hex_patricia_hashed.go`
 
-- [ ] in `Process()` after `warmuper.DrainPending()`, add `log.Info` with warmup cache stats (hit/miss counts, hit-rate percentage, keys processed, warmup duration) — gated on `warmuper != nil` and `KeysProcessed > 0` to avoid spam on empty cycles
-- [ ] reset cache hit counters in `Metrics.Reset()` so hit% is accurate per cycle, not cumulative
-- [ ] format uses structured log fields with hit-rate percentage (hit%, cb, ca, cs counters)
-- [ ] add `TestWarmuper_StatsPopulatedAfterCycle` in `warmuper_test.go` asserting `Stats()` is populated after a warmup cycle
-- [ ] run `go test ./execution/commitment/...` — must pass before next task
+- [x] in `Process()` after `warmuper.DrainPending()`, add `log.Info` with warmup cache stats (hit/miss counts, hit-rate percentage, keys processed, warmup duration) — gated on `warmuper != nil` and `KeysProcessed > 0` to avoid spam on empty cycles
+- [x] reset cache hit counters in `Metrics.Reset()` so hit% is accurate per cycle, not cumulative
+- [x] format uses structured log fields with hit-rate percentage (hit%, cb, ca, cs counters)
+- [x] add `TestWarmuper_StatsPopulatedAfterCycle` in `warmuper_test.go` asserting `Stats()` is populated after a warmup cycle
+- [x] run `go test ./execution/commitment/...` — must pass before next task
 
 ### Task 6: Verify acceptance criteria
 
