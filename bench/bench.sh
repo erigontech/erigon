@@ -65,11 +65,10 @@ done
 echo "Build complete. All four binaries verified."
 
 # --- SHAs ---
-sanitize() { printf '%s' "$1" | sed 's/[`$\\]/\\&/g'; }
 sha_a=$(git -C "$ERIGON_A" rev-parse --short HEAD)
-subj_a=$(sanitize "$(git -C "$ERIGON_A" log -1 --pretty=%s)")
+subj_a=$(git -C "$ERIGON_A" log -1 --pretty=%s)
 sha_b=$(git -C "$ERIGON_B" rev-parse --short HEAD)
-subj_b=$(sanitize "$(git -C "$ERIGON_B" log -1 --pretty=%s)")
+subj_b=$(git -C "$ERIGON_B" log -1 --pretty=%s)
 
 # --- Paths ---
 TS=$(date -u +%Y%m%d-%H%M%S)
@@ -132,7 +131,7 @@ CMD_A=$(make_cmd A "$ERIGON_A" "$DATADIR_A")
 CMD_B=$(make_cmd B "$ERIGON_B" "$DATADIR_B")
 
 tmux new-session     -d -s "$SESSION" -n bench "$CMD_A"
-tmux set-option      -t "$SESSION" pane-base-index 0
+tmux set-window-option -t "$SESSION:bench" pane-base-index 0
 tmux set-window-option -t "$SESSION:bench" pane-border-status top
 tmux split-window    -v -t "$SESSION:bench" "$CMD_B"
 tmux select-pane     -t "$SESSION:bench.0" -T "A: $BRANCH_A"

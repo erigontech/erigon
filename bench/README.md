@@ -9,6 +9,9 @@ metrics on adjacent ports (6061 / 6062) for Prometheus/Grafana comparison.
 - Two independent Erigon clones at `~/erigon_A/` and `~/erigon_B/` (real
   clones, not git worktrees).
 - Both clones must have clean worktrees (no uncommitted changes).
+- `/erigon-data/` must exist and be writable (create with
+  `sudo mkdir -p /erigon-data && sudo chown $USER /erigon-data`, or adjust
+  `DATADIR_BASE` in `bench.sh`).
 - `tmux` must be installed and on `PATH`.
 - Go 1.25+, GCC 10+ or Clang (for `make erigon integration`).
 
