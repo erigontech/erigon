@@ -846,3 +846,156 @@ func TestBlockContinuity_Reorg(t *testing.T) {
 	valid := c.ValidateAndPrepare(block1, block2prime)
 	assert.False(t, valid) // Should detect mismatch
 }
+
+// =============================================================================
+// RevertWithDiffset Tests
+// =============================================================================
+
+// makeDiffKey creates a domain entry key with an 8-byte step suffix, matching
+// the format used by DomainEntryDiff (full key = base key + inverted step).
+func makeDiffKey(baseKey []byte, step uint64) string {
+	k := make([]byte, len(baseKey)+8)
+	copy(k, baseKey)
+	// Store inverted step in the suffix (same encoding as domain tables).
+	k[len(k)-8] = byte(^step >> 56)
+	k[len(k)-7] = byte(^step >> 48)
+	k[len(k)-6] = byte(^step >> 40)
+	k[len(k)-5] = byte(^step >> 32)
+	k[len(k)-4] = byte(^step >> 24)
+	k[len(k)-3] = byte(^step >> 16)
+	k[len(k)-2] = byte(^step >> 8)
+	k[len(k)-1] = byte(^step)
+	return string(k)
+}
+
+func TestRevertWithDiffset_SurgicalEviction(t *testing.T) {
+	c := NewStateCache(1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB)
+
+	blockTip := makeHash(3)
+	blockTarget := makeHash(1)
+
+	// Simulate cache state at the tip block.
+	c.ClearWithHash(blockTip)
+	c.Put(kv.AccountsDomain, makeAddr(1), makeValue(1)) // touched by unwind
+	c.Put(kv.AccountsDomain, makeAddr(2), makeValue(2)) // untouched
+	c.Put(kv.StorageDomain, makeAddr(3), makeValue(3))  // touched by unwind
+	c.Put(kv.StorageDomain, makeAddr(4), makeValue(4))  // untouched
+
+	// Build diffset: addr(1) changed in accounts, addr(3) changed in storage.
+	var diffset [kv.DomainLen][]kv.DomainEntryDiff
+	diffset[kv.AccountsDomain] = []kv.DomainEntryDiff{
+		{Key: makeDiffKey(makeAddr(1), 0), Value: makeValue(10)},
+	}
+	diffset[kv.StorageDomain] = []kv.DomainEntryDiff{
+		{Key: makeDiffKey(makeAddr(3), 0), Value: makeValue(30)},
+	}
+
+	c.RevertWithDiffset(&diffset, blockTip, blockTarget)
+
+	// Touched keys should be evicted (cache miss).
+	_, ok := c.Get(kv.AccountsDomain, makeAddr(1))
+	assert.False(t, ok, "touched account key should be evicted")
+	_, ok = c.Get(kv.StorageDomain, makeAddr(3))
+	assert.False(t, ok, "touched storage key should be evicted")
+
+	// Untouched keys should be preserved.
+	v, ok := c.Get(kv.AccountsDomain, makeAddr(2))
+	assert.True(t, ok, "untouched account key should be preserved")
+	assert.Equal(t, makeValue(2), v)
+	v, ok = c.Get(kv.StorageDomain, makeAddr(4))
+	assert.True(t, ok, "untouched storage key should be preserved")
+	assert.Equal(t, makeValue(4), v)
+
+	// Block hash should be updated to the unwind target.
+	assert.Equal(t, blockTarget, c.GetCache(kv.AccountsDomain).GetBlockHash())
+	assert.Equal(t, blockTarget, c.GetCache(kv.StorageDomain).GetBlockHash())
+}
+
+func TestRevertWithDiffset_HashMismatch_ClearsAll(t *testing.T) {
+	c := NewStateCache(1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB)
+
+	blockTip := makeHash(3)
+	blockStale := makeHash(99) // doesn't match any cache
+	blockTarget := makeHash(1)
+
+	c.ClearWithHash(blockTip)
+	c.Put(kv.AccountsDomain, makeAddr(1), makeValue(1))
+	c.Put(kv.StorageDomain, makeAddr(2), makeValue(2))
+
+	var diffset [kv.DomainLen][]kv.DomainEntryDiff
+
+	// revertFromHash doesn't match the cache's block hash — full clear.
+	c.RevertWithDiffset(&diffset, blockStale, blockTarget)
+
+	_, ok := c.Get(kv.AccountsDomain, makeAddr(1))
+	assert.False(t, ok, "all keys should be cleared on hash mismatch")
+	_, ok = c.Get(kv.StorageDomain, makeAddr(2))
+	assert.False(t, ok, "all keys should be cleared on hash mismatch")
+
+	assert.Equal(t, blockTarget, c.GetCache(kv.AccountsDomain).GetBlockHash())
+}
+
+func TestRevertWithDiffset_AccountChange_EvictsCode(t *testing.T) {
+	c := NewStateCache(1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB)
+
+	blockTip := makeHash(5)
+	blockTarget := makeHash(3)
+
+	c.ClearWithHash(blockTip)
+	c.Put(kv.AccountsDomain, makeAddr(1), makeValue(1))
+	c.Put(kv.CodeDomain, makeAddr(1), makeCode(1))
+	c.Put(kv.CodeDomain, makeAddr(2), makeCode(2)) // untouched
+
+	var diffset [kv.DomainLen][]kv.DomainEntryDiff
+	diffset[kv.AccountsDomain] = []kv.DomainEntryDiff{
+		{Key: makeDiffKey(makeAddr(1), 0), Value: makeValue(10)},
+	}
+
+	c.RevertWithDiffset(&diffset, blockTip, blockTarget)
+
+	// Account change evicts both the account and its code.
+	_, ok := c.Get(kv.AccountsDomain, makeAddr(1))
+	assert.False(t, ok, "touched account should be evicted")
+	_, ok = c.Get(kv.CodeDomain, makeAddr(1))
+	assert.False(t, ok, "code for touched account should be evicted")
+
+	// Unrelated code entry preserved.
+	v, ok := c.Get(kv.CodeDomain, makeAddr(2))
+	assert.True(t, ok, "untouched code should be preserved")
+	assert.Equal(t, makeCode(2), v)
+}
+
+func TestRevertWithDiffset_ThenValidateAndPrepare_Continuity(t *testing.T) {
+	c := NewStateCache(1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB)
+
+	block1 := makeHash(1)
+	block2 := makeHash(2)
+	block3 := makeHash(3)
+	block2new := makeHash(22) // new block 2 after re-execution
+
+	// Execute blocks 1, 2, 3.
+	c.ValidateAndPrepare(common.Hash{}, block1)
+	c.Put(kv.AccountsDomain, makeAddr(1), makeValue(1))
+	c.ValidateAndPrepare(block1, block2)
+	c.Put(kv.AccountsDomain, makeAddr(2), makeValue(2))
+	c.ValidateAndPrepare(block2, block3)
+	c.Put(kv.AccountsDomain, makeAddr(3), makeValue(3))
+
+	// Unwind to block 1: revert blocks 2-3.
+	var diffset [kv.DomainLen][]kv.DomainEntryDiff
+	diffset[kv.AccountsDomain] = []kv.DomainEntryDiff{
+		{Key: makeDiffKey(makeAddr(2), 0), Value: nil},
+		{Key: makeDiffKey(makeAddr(3), 0), Value: nil},
+	}
+	c.RevertWithDiffset(&diffset, block3, block1)
+
+	// Cache should now have blockHash = block1.
+	// Executing a new block 2 with parent=block1 should preserve surviving cache data.
+	valid := c.ValidateAndPrepare(block1, block2new)
+	assert.True(t, valid, "ValidateAndPrepare should succeed after surgical unwind")
+
+	// addr(1) was not in the diffset — should survive both the revert and ValidateAndPrepare.
+	v, ok := c.Get(kv.AccountsDomain, makeAddr(1))
+	assert.True(t, ok, "untouched key should survive revert + ValidateAndPrepare")
+	assert.Equal(t, makeValue(1), v)
+}
