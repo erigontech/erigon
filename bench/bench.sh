@@ -49,3 +49,17 @@ prepare_branch "$ERIGON_A" "$BRANCH_A"
 prepare_branch "$ERIGON_B" "$BRANCH_B"
 
 echo "All preconditions passed. Branches checked out and up to date."
+
+# --- Build (sequential; make uses -jN internally) ---
+echo "Building A ($BRANCH_A)..."
+( cd "$ERIGON_A" && make erigon integration )
+echo "Building B ($BRANCH_B)..."
+( cd "$ERIGON_B" && make erigon integration )
+
+# --- Verify binaries exist ---
+for d in "$ERIGON_A" "$ERIGON_B"; do
+  for b in erigon integration; do
+    [[ -x "$d/build/bin/$b" ]] || { echo "ERROR: missing $d/build/bin/$b"; exit 1; }
+  done
+done
+echo "Build complete. All four binaries verified."

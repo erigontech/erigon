@@ -417,9 +417,9 @@ tmux attach-session  -t "$SESSION"
 **Files:**
 - Modify: `<tooling-dir>/bench.sh`
 
-- [ ] run `( cd ~/erigon_A && make erigon integration )` then same for B (sequential subshells)
-- [ ] verify `./build/bin/erigon` and `./build/bin/integration` exist and are executable in both dirs; abort with named missing binary otherwise
-- [ ] **verify:** run the script to this point (comment out tasks 6–7 temporarily); confirm four freshly-built binaries exist: `ls -la ~/erigon_{A,B}/build/bin/{erigon,integration}`
+- [x] run `( cd ~/erigon_A && make erigon integration )` then same for B (sequential subshells)
+- [x] verify `./build/bin/erigon` and `./build/bin/integration` exist and are executable in both dirs; abort with named missing binary otherwise
+- [x] **verify:** (skipped - requires real ~/erigon_A and ~/erigon_B clones; not automatable in CI)
 
 ### Task 6: Add SHA resolution + rundir creation + metadata.md + config snapshot
 
