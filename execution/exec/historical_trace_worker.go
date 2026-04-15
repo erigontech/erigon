@@ -91,6 +91,16 @@ type TraceConsumer interface {
 	Reduce(br *BlockResult, task *TxResult, tx kv.TemporalTx) error
 }
 
+// TraceConsumerCloser is an optional interface. If a consumer implements it,
+// the reduce worker will invoke Close before exiting — on success, error, or
+// panic. This lets consumers release resources (e.g. MDBX write transactions)
+// that must be closed on the goroutine that holds them. Rollback is true when
+// the reduce worker is exiting due to an error or context cancellation; the
+// consumer should abandon any in-flight state in that case.
+type TraceConsumerCloser interface {
+	Close(rollback bool) error
+}
+
 type TraceConsumerFunc func(br *BlockResult, task *TxResult, tx kv.TemporalTx) error
 
 func (f TraceConsumerFunc) Reduce(br *BlockResult, task *TxResult, tx kv.TemporalTx) error {
@@ -436,12 +446,24 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 	return g
 }
 
-func doHistoryReduce(ctx context.Context, consumer TraceConsumer, cfg *ExecArgs, toTxNum uint64, outputTxNum *atomic.Uint64, out *ResultsQueue, logger log.Logger) error {
+func doHistoryReduce(ctx context.Context, consumer TraceConsumer, cfg *ExecArgs, toTxNum uint64, outputTxNum *atomic.Uint64, out *ResultsQueue, logger log.Logger) (err error) {
 	tx, err := cfg.ChainDB.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+
+	// If the consumer owns resources tied to this goroutine (e.g. an MDBX
+	// write transaction opened inside the consumer callback), give it a
+	// chance to clean up before we exit. `rollback` is true on any error
+	// or panic path so the consumer knows to abandon in-flight state.
+	if closer, ok := consumer.(TraceConsumerCloser); ok {
+		defer func() {
+			if cerr := closer.Close(err != nil); cerr != nil && err == nil {
+				err = cerr
+			}
+		}()
+	}
 
 	var resultProcessor historicalResultProcessor
 

@@ -924,9 +924,9 @@ func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 		"qmtree_dir", dirs.Snap, "resumeTxNum", tracker.NextTxNum)
 
 	startTime := time.Now()
-	// The consumer callback runs on a worker pool goroutine — MDBX write
-	// transactions are thread-bound, so we open/commit them inside the
-	// consumer itself (same goroutine) rather than on the main goroutine.
+	// The consumer callback runs on the reduce worker goroutine — MDBX write
+	// transactions are thread-bound, so qmRwTx is opened, committed, and
+	// closed on that same goroutine (via the TraceConsumerCloser hook).
 	var qmRwTx kv.RwTx
 	qmTxInitDone := false
 
@@ -966,8 +966,13 @@ func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
-	consumer := exec.TraceConsumerFunc(
-		func(br *exec.BlockResult, result *exec.TxResult, tx kv.TemporalTx) error {
+	// qmtreeConsumer implements both exec.TraceConsumer and
+	// exec.TraceConsumerCloser. Close is invoked by the reduce worker's
+	// defer, on the same goroutine that opened qmRwTx — so the thread-bound
+	// MDBX tx can be committed (success) or rolled back (error/cancel)
+	// without leaking the locked OS thread.
+	qmtreeConsumer := &qmtreeReplayConsumer{
+		reduce: func(br *exec.BlockResult, result *exec.TxResult, tx kv.TemporalTx) error {
 			if result.Err != nil {
 				return result.Err
 			}
@@ -1012,7 +1017,26 @@ func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 			}
 
 			return nil
-		})
+		},
+		close: func(rollback bool) error {
+			if qmRwTx == nil {
+				return nil
+			}
+			if rollback {
+				qmRwTx.Rollback()
+				qmRwTx = nil
+				return nil
+			}
+			// Success path: flush pending state and commit.
+			tracker.Flush()
+			err := qmRwTx.Commit()
+			qmRwTx = nil
+			if err != nil {
+				return fmt.Errorf("final commit qmtree tx: %w", err)
+			}
+			return nil
+		},
+	}
 
 	txRo, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -1020,18 +1044,13 @@ func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 	}
 	defer txRo.Rollback()
 
-	if err := exec.CustomTraceMapReduce(ctx, fromBlock, toBlock, consumer, txRo, execArgs, logger); err != nil {
+	if err := exec.CustomTraceMapReduce(ctx, fromBlock, toBlock, qmtreeConsumer, txRo, execArgs, logger); err != nil {
 		return err
 	}
 
-	// Final commit (consumer and this code run on the same goroutine
-	// after CustomTraceMapReduce returns).
-	if qmRwTx != nil {
-		tracker.Flush()
-		if err := qmRwTx.Commit(); err != nil {
-			return fmt.Errorf("final commit qmtree tx: %w", err)
-		}
-	}
+	// Note: qmRwTx was committed (or rolled back) inside the consumer's
+	// Close hook, which runs on the reduce worker goroutine before it exits.
+	// By the time we get here, qmRwTx is nil.
 	elapsed := time.Since(startTime)
 	blkPerSec := float64(lastBlockNum) / elapsed.Seconds()
 	finalRoot := tracker.SyncRoot()
@@ -1041,6 +1060,23 @@ func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 		"qmtree_leaves", tracker.NextTxNum, "qmtree_root", finalRoot)
 
 	return nil
+}
+
+// qmtreeReplayConsumer adapts the stage_exec_replay callback pair into a
+// TraceConsumer + TraceConsumerCloser. The reduce worker invokes Close in
+// its defer — same goroutine as the Reduce calls — so thread-bound MDBX
+// resources can be released safely.
+type qmtreeReplayConsumer struct {
+	reduce func(br *exec.BlockResult, task *exec.TxResult, tx kv.TemporalTx) error
+	close  func(rollback bool) error
+}
+
+func (c *qmtreeReplayConsumer) Reduce(br *exec.BlockResult, task *exec.TxResult, tx kv.TemporalTx) error {
+	return c.reduce(br, task, tx)
+}
+
+func (c *qmtreeReplayConsumer) Close(rollback bool) error {
+	return c.close(rollback)
 }
 
 func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
