@@ -51,7 +51,7 @@ When a workflow appears in both ci-gate rows and standalone rows, the ci-gate pa
 
 CI gate (`ci-gate`) is the workflow required to pass for merging PRs. It is required for passing pull requests and merge groups.
 
-## Draft PRs
+### Draft PRs
 
 If a job uses `if: ${{ !github.event.pull_request.draft }}` to skip on draft PRs, the
 workflow **must** include `ready_for_review` in its `pull_request` event types:
