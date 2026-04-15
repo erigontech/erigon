@@ -28,13 +28,19 @@ type BorGenerator struct {
 	blockReader  services.FullBlockReader
 	engine       rules.EngineReader
 	stateCache   kvcache.Cache
+	filters      *rpchelper.Filters
 }
 
 func NewBorGenerator(blockReader services.FullBlockReader,
-	engine rules.EngineReader, stateCache kvcache.Cache) *BorGenerator {
+	engine rules.EngineReader, stateCache kvcache.Cache, filters ...*rpchelper.Filters) *BorGenerator {
 	receiptCache, err := lru.New[common.Hash, *types.Receipt](receiptsCacheLimit)
 	if err != nil {
 		panic(err)
+	}
+
+	var f *rpchelper.Filters
+	if len(filters) > 0 {
+		f = filters[0]
 	}
 
 	return &BorGenerator{
@@ -42,6 +48,7 @@ func NewBorGenerator(blockReader services.FullBlockReader,
 		blockReader:  blockReader,
 		engine:       engine,
 		stateCache:   stateCache,
+		filters:      f,
 	}
 }
 
@@ -52,7 +59,7 @@ func (g *BorGenerator) GenerateBorReceipt(ctx context.Context, tx kv.TemporalTx,
 		return receipt, nil
 	}
 
-	err := rpchelper.CheckBlockExecuted(tx, block.NumberU64())
+	err := rpchelper.CheckBlockExecuted(g.filters.WithOverlay(tx), block.NumberU64())
 	if err != nil {
 		return nil, err
 	}

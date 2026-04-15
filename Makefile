@@ -180,13 +180,11 @@ erigon: go-version erigon.cmd
 
 COMMANDS += capcli
 COMMANDS += downloader
-COMMANDS += hack
 COMMANDS += integration
 COMMANDS += pics
 COMMANDS += rpcdaemon
 COMMANDS += rpctest
 COMMANDS += sentry
-COMMANDS += state
 COMMANDS += txpool
 COMMANDS += evm
 COMMANDS += caplin
