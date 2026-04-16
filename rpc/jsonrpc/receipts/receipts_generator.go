@@ -550,6 +550,11 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 			// cancellation (e.g. RPC timeout) and calls evm.Cancel() to abort the
 			// EVM mid-execution. Closing txDone signals that the transaction
 			// completed normally, so the goroutine can exit without cancelling.
+			// txDone signals the cancel-watcher goroutine to exit once the
+			// transaction finishes normally. Without it, the goroutine would
+			// leak (blocked on ctx.Done) for every successfully executed tx.
+			// On context cancellation, evm.Cancel() aborts the EVM mid-opcode
+			// so even gas-heavy transactions respond to RPC timeouts promptly.
 			txDone := make(chan struct{})
 			go func() {
 				select {

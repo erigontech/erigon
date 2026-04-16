@@ -101,9 +101,26 @@ func DeriveForRange(
 		}
 		ibs.SetTxContext(blockNum, i)
 		evm := protocol.CreateEVM(cfg, hashFn, engine, accounts.NilAddress, ibs, header, vmCfg)
+
+		// Cancel watcher: abort mid-opcode if the context is cancelled
+		// (e.g. RPC timeout). Without this, a gas-heavy transaction would
+		// run to completion even after the caller has given up.
+		txDone := make(chan struct{})
+		go func() {
+			select {
+			case <-ctx.Done():
+				evm.Cancel()
+			case <-txDone:
+			}
+		}()
+
 		receipt, err := protocol.ApplyTransactionWithEVM(cfg, engine, gp, ibs, noopWriter, header, txns[i], gasUsed, vmCfg, evm)
+		close(txDone)
 		if err != nil {
 			return nil, fmt.Errorf("receipts.DeriveForRange: replay tx %d: %w", i, err)
+		}
+		if evm.Cancelled() {
+			return nil, fmt.Errorf("receipts.DeriveForRange: execution aborted (context cancelled)")
 		}
 		receipts = append(receipts, receipt)
 	}
@@ -170,8 +187,9 @@ func DerivePriorReceipts(
 	cached := make(types.Receipts, 0, startTxIndex)
 	allCached := true
 	for i := 0; i < startTxIndex && i < len(txns); i++ {
-		// txNum for user tx i is blockStartTxNum + 1 (system tx) + i
-		txNum := blockStartTxNum + 1 + uint64(i)
+		// blockStartTxNum = firstTask.TxNum - firstTask.TxIndex, which is
+		// already the first user tx's txNum (system tx has TxIndex=-1).
+		txNum := blockStartTxNum + uint64(i)
 		receipt, ok, err := rawdb.ReadReceiptCacheV2(tx, rawdb.RCacheV2Query{
 			BlockNum:      blockNum,
 			BlockHash:     blockHash,
