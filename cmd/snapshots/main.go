@@ -22,8 +22,9 @@ import (
 	"os"
 	"path/filepath"
 
-	cli2 "github.com/erigontech/erigon/node/cli"
 	"github.com/urfave/cli/v2"
+
+	cli2 "github.com/erigontech/erigon/node/cli"
 
 	"github.com/erigontech/erigon/cmd/snapshots/genfromrpc"
 	"github.com/erigontech/erigon/cmd/utils"
