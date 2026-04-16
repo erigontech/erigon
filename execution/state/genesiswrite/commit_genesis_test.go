@@ -42,7 +42,7 @@ import (
 func newTestOptions(t *testing.T) genesiswrite.Options {
 	t.Helper()
 	g := &types.Genesis{
-		Config:     chain.TestChainConfig,
+		Config:     chain.AllProtocolChanges,
 		Nonce:      66,
 		Timestamp:  0,
 		GasLimit:   5_000_000,
