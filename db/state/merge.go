@@ -652,12 +652,6 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 		}
 	}
 
-	// In the loop below, the pair `keyBuf=>valBuf` is always 1 item behind `lastKey=>lastVal`.
-	// `lastKey` and `lastVal` are taken from the top of the multi-way merge (assisted by the CursorHeap cp), but not processed right away
-	// instead, the pair from the previous iteration is processed first - `keyBuf=>valBuf`. After that, `keyBuf` and `valBuf` are assigned
-	// to `lastKey` and `lastVal` correspondingly, and the next step of multi-way merge happens. Therefore, after the multi-way merge loop
-	// (when CursorHeap cp is empty), there is a need to process the last pair `keyBuf=>valBuf`, because it was one step behind
-	var keyBuf, valBuf []byte
 	var lastKey, lastVal []byte
 	var seqReader multiencseq.SequenceReader
 	var builder multiencseq.SequenceBuilder
@@ -692,6 +686,16 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 		}
 		lastVal = builder.AppendBytes(lastVal[:0])
 
+		// Write immediately: avoids holding a second large EF val in memory alongside lastVal.
+		// fmt.Printf("put %x->%x\n", lastKey, lastVal)
+		if _, err = write.Write(lastKey); err != nil {
+			return nil, err
+		}
+		if _, err = write.Write(lastVal); err != nil {
+			return nil, err
+		}
+		lastVal = lastVal[:0]
+
 		// Advance each item's reader and return non-exhausted ones to the heap.
 		for _, ci := range sameKeyItems {
 			if ci.kvReader.HasNext() {
@@ -703,29 +707,6 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 		}
 		if i%1024 == 0 {
 			p.Processed.Store(i)
-		}
-		if keyBuf != nil {
-			// fmt.Printf("pput %x->%x\n", keyBuf, valBuf)
-			if _, err = write.Write(keyBuf); err != nil {
-				return nil, err
-			}
-			if _, err = write.Write(valBuf); err != nil {
-				return nil, err
-			}
-		}
-		keyBuf = append(keyBuf[:0], lastKey...)
-		if keyBuf == nil {
-			keyBuf = []byte{}
-		}
-		valBuf = append(valBuf[:0], lastVal...)
-	}
-	if keyBuf != nil { //nolint:govet
-		// fmt.Printf("Put %x->%x\n", keyBuf, valBuf)
-		if _, err = write.Write(keyBuf); err != nil {
-			return nil, err
-		}
-		if _, err = write.Write(valBuf); err != nil {
-			return nil, err
 		}
 	}
 	if err = write.Compress(); err != nil {
