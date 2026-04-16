@@ -684,6 +684,9 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 		if err := builder.MergeSorted(&seqReader, startTxNum, mergeBaseNums, mergeSeqs); err != nil {
 			return nil, err
 		}
+		for i := range mergeSeqs { // allow for GC
+			mergeSeqs[i] = nil
+		}
 		lastVal = builder.AppendBytes(lastVal[:0])
 
 		if _, err = write.Write(lastKey); err != nil {
