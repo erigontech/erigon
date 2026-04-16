@@ -834,8 +834,8 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		// to `lastKey` and `lastVal` correspondingly, and the next step of multi-way merge happens. Therefore, after the multi-way merge loop
 		// (when CursorHeap cp is empty), there is a need to process the last pair `keyBuf=>valBuf`, because it was one step behind
 		var lastKey, valBuf, histKeyBuf []byte
-		seq := &multiencseq.SequenceReader{}
-		ss := &multiencseq.SequenceIterator{}
+		var seq multiencseq.SequenceReader
+		var ss multiencseq.SequenceIterator
 		for cp.Len() > 0 {
 			lastKey = append(lastKey[:0], cp[0].key...)
 			// Advance all the items that have this key (including the top)
@@ -843,7 +843,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				ci1 := heap.Pop(&cp).(*CursorItem)
 
 				seq.Reset(ci1.startTxNum, ci1.val)
-				ss.Reset(seq, 0)
+				ss.Reset(&seq, 0)
 
 				for ss.HasNext() {
 					txNum, err := ss.Next()
