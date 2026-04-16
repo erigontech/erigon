@@ -170,6 +170,79 @@ Loop:
 	goto Loop
 }
 
+// TestNewSharedDomains_StateAheadOfBlocks verifies that when the persisted
+// commitment state is ahead of the TxNums index (catch-up scenario),
+// NewSharedDomains returns ErrBehindCommitment but the SharedDomains itself
+// is fully initialized (txNum set, patricia trie restored). Catch-up handlers
+// like ExecModule.InsertBlocks and forkchoice rely on receiving a usable SD
+// alongside the signal error.
+func TestNewSharedDomains_StateAheadOfBlocks(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	stepSize := uint64(8)
+	require := require.New(t)
+	db := newTestDb(t, stepSize)
+
+	ctx := context.Background()
+
+	// Phase 1: write some accounts, compute commitment, flush, and append TxNums up to block N.
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(err)
+	defer rwTx.Rollback()
+
+	const lastBlock = uint64(10)
+	for blockNum := uint64(0); blockNum <= lastBlock; blockNum++ {
+		maxTxNum := blockNum*2 + 1
+		require.NoError(rawdbv3.TxNums.Append(rwTx, blockNum, maxTxNum))
+	}
+
+	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(err)
+
+	addr := make([]byte, length.Addr)
+	for i := uint64(0); i < 4; i++ {
+		addr[0] = byte(i)
+		acc := accounts.Account{
+			Nonce:   i,
+			Balance: *uint256.NewInt(i + 1),
+		}
+		require.NoError(doms.DomainPut(kv.AccountsDomain, rwTx, addr, accounts3.SerialiseV3(&acc), uint64(i), nil))
+	}
+	commitTxNum := lastBlock*2 + 1
+	_, err = doms.ComputeCommitment(ctx, rwTx, true, lastBlock, commitTxNum, "", nil)
+	require.NoError(err)
+	require.NoError(doms.Flush(ctx, rwTx))
+	doms.Close()
+	require.NoError(rwTx.Commit())
+
+	// Phase 2: truncate TxNums so that lastBn < commitment block — this is the
+	// "state ahead of blocks" condition.
+	rwTx, err = db.BeginTemporalRw(ctx)
+	require.NoError(err)
+	defer rwTx.Rollback()
+	require.NoError(rawdbv3.TxNums.Truncate(rwTx, lastBlock-3))
+	lastBn, _, err := rawdbv3.TxNums.Last(rwTx)
+	require.NoError(err)
+	require.Less(lastBn, lastBlock, "TxNums must be behind commitment block for the test to be meaningful")
+
+	// Phase 3: NewSharedDomains must return ErrBehindCommitment AND a fully-initialized SD.
+	doms, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.ErrorIs(err, commitmentdb.ErrBehindCommitment, "expected ErrBehindCommitment signal")
+	require.NotNil(doms, "SD must be returned alongside the signal error")
+	defer doms.Close()
+
+	// SD is fully initialized: txNum set to commitment-state's txNum.
+	require.Equal(commitTxNum, doms.TxNum(), "SD txNum must be set to the commitment state's txNum (full restore)")
+
+	// Basic domain reads work — no panic, no nil deref.
+	addr[0] = 0
+	_, _, err = doms.GetLatest(kv.AccountsDomain, rwTx, addr)
+	require.NoError(err)
+}
+
 func TestSharedDomain_StorageIter(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
