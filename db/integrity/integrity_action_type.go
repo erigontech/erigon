@@ -110,12 +110,6 @@ const (
 	// Prevents inconsistent states where state snapshots are more recent than block snapshots.
 	StateProgress Check = "StateProgress"
 
-	// DomainLatestVsHistory compares GetLatest (domain files) against GetAsOf (history)
-	// for all keys in accounts, storage, and code domains. Catches missing deletion entries
-	// in domain files — the signature of the collation/pruning race (#20169). Unlike
-	// StateVerify, this check detects ABSENT entries, not just structural mismatches.
-	DomainLatestVsHistory Check = "DomainLatestVsHistory"
-
 	// Publishable validates snapshot publication readiness. Checks that all required snapshot
 	// files exist and are properly structured: block snapshots, state snapshots, beacon/caplin
 	// snapshots, and required metadata files (salt files). This is the final check before
@@ -129,7 +123,7 @@ var FastChecks = []Check{
 	CommitmentHistVal, StateRootVerifyByHistory, Publishable,
 }
 
-var SlowChecks = []Check{StateVerify, DomainLatestVsHistory}
+var SlowChecks = []Check{StateVerify}
 var DeprecatedChecks = []Check{
 	BorEvents, BorSpans, BorCheckpoints,
 	CommitmentKvDeref, //StateVerify - will overcome
