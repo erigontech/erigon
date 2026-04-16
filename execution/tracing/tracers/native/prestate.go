@@ -278,7 +278,10 @@ func (t *prestateTracer) processDiffState() {
 			continue
 		}
 		modified := false
-		postAccount := &account{Storage: make(map[common.Hash]common.Hash)}
+		postAccount := &account{
+			Storage: make(map[common.Hash]common.Hash),
+		}
+
 		newBalance, _ := t.env.IntraBlockState.GetBalance(addr)
 		newNonce, _ := t.env.IntraBlockState.GetNonce(addr)
 		newCode, _ := t.env.IntraBlockState.GetCode(addr)
@@ -296,8 +299,6 @@ func (t *prestateTracer) processDiffState() {
 			postAccount.Nonce = newNonce
 		}
 
-		// Empty code hashes are excluded from the prestate, so default
-		// to EmptyCodeHash to match what GetCodeHash returns for codeless accounts.
 		prevCodeHash := empty.CodeHash
 		if t.pre[addr].CodeHash != nil {
 			prevCodeHash = *t.pre[addr].CodeHash
@@ -309,7 +310,6 @@ func (t *prestateTracer) processDiffState() {
 		}
 
 		if !t.config.DisableCode {
-			newCode, _ := t.env.IntraBlockState.GetCode(addr)
 			var prevCode []byte
 			if t.pre[addr].Code != nil {
 				prevCode = *t.pre[addr].Code
@@ -330,7 +330,7 @@ func (t *prestateTracer) processDiffState() {
 					delete(t.pre[addr].Storage, key)
 				}
 
-				var newVal, _ = t.env.IntraBlockState.GetState(addr, accounts.InternKey(key))
+				newVal, _ := t.env.IntraBlockState.GetState(addr, accounts.InternKey(key))
 				if new(uint256.Int).SetBytes(val[:]).Eq(&newVal) {
 					// Omit unchanged slots
 					delete(t.pre[addr].Storage, key)
@@ -388,23 +388,31 @@ func (t *prestateTracer) lookupAccount(addr accounts.Address) {
 	nonce, _ := t.env.IntraBlockState.GetNonce(addr)
 	code, _ := t.env.IntraBlockState.GetCode(addr)
 
-	t.pre[addr] = &account{
+	acc := &account{
 		Balance: balance.ToBig(),
 		Nonce:   nonce,
 	}
+
 	if len(code) > 0 {
+		acc.Code = &code
 		codeHash := crypto.HashData(code)
-		t.pre[addr].CodeHash = &codeHash
-	} else {
-		t.pre[addr].CodeHash = nil
+		acc.CodeHash = &codeHash
 	}
 
-	if !t.config.DisableCode && (!t.config.DiffMode || len(code) > 0) {
-		t.pre[addr].Code = &code
+	if !acc.exists() {
+		acc.empty = true
 	}
+
+	// code fetched before emptiness check, then stripped if disabled
+	if t.config.DisableCode {
+		acc.Code = nil
+	}
+
 	if !t.config.DisableStorage {
-		t.pre[addr].Storage = make(map[common.Hash]common.Hash)
+		acc.Storage = make(map[common.Hash]common.Hash)
 	}
+
+	t.pre[addr] = acc
 }
 
 // lookupStorage fetches the requested storage slot and adds
