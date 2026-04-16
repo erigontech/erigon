@@ -134,8 +134,8 @@ func (c *CallContext) put() {
 	c.cachedAddrGen = ^uint64(0)
 	// Zero the handles to release their canonMap pins while the context is
 	// idle in the pool; unique.Handle values keep interned entries alive.
-	c.cachedKey = accounts.StorageKey{}
-	c.cachedAddr = accounts.Address{}
+	c.cachedKey = accounts.NilKey
+	c.cachedAddr = accounts.NilAddress
 	contextPool.Put(c)
 }
 
