@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+import "types/types.proto";
+
+package remote;
+
+option go_package = "./remote;remoteproto";
+
+service BridgeBackend {
+  // Version returns the service version number
+  rpc Version(google.protobuf.Empty) returns (types.VersionReply);
+
+  rpc BorTxnLookup(BorTxnLookupRequest) returns (BorTxnLookupReply);
+
+  rpc BorEvents(BorEventsRequest) returns (BorEventsReply);
+}
+
+service HeimdallBackend {
+  // Version returns the service version number
+  rpc Version(google.protobuf.Empty) returns (types.VersionReply);
+
+  rpc Producers(BorProducersRequest) returns (BorProducersResponse);
+}
+
+message BorTxnLookupRequest {
+  types.H256 bor_tx_hash = 1;
+}
+
+message BorTxnLookupReply {
+  bool present = 1;
+  uint64 block_number = 2;
+}
+
+message BorEventsRequest {
+  uint64 block_num = 1;
+  types.H256 block_hash = 2;
+}
+
+message BorEventsReply {
+  string state_receiver_contract_address = 1;
+  repeated bytes event_rlps = 2;
+}
+
+message BorProducersRequest {
+  uint64 block_num = 1;
+}
+
+message BorProducersResponse {
+  Validator proposer = 1;
+  repeated Validator validators = 2;
+}
+
+message Validator {
+  uint64 id = 1;
+  types.H160 address = 2;
+  int64 voting_power = 3;
+  int64 proposer_priority = 4;
+}

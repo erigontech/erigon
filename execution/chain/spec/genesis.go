@@ -25,11 +25,11 @@ import (
 	"fmt"
 	"io/fs"
 
+	"math/big"
+
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
@@ -140,17 +140,25 @@ func TestGenesisBlock() *types.Genesis {
 	return &types.Genesis{Config: chain.TestChainBerlinConfig}
 }
 
-// DeveloperGenesisBlock returns the 'geth --dev' genesis block.
-func DeveloperGenesisBlock(period uint64, faucet common.Address) *types.Genesis {
-	// Override the default period to the user requested one
-	var config chain.Config
-	copier.Copy(&config, AllCliqueProtocolChanges)
-	config.Clique.Period = period
-
-	// Assemble and return the genesis with the precompiles and faucet pre-funded
+// DeveloperGenesisBlock returns the development genesis block (PoS-from-genesis).
+func DeveloperGenesisBlock() *types.Genesis {
 	return &types.Genesis{
-		Config:     &config,
-		ExtraData:  append(append(make([]byte, 32), faucet[:]...), make([]byte, crypto.SignatureLength)...),
+		Config: &chain.Config{
+			ChainID:               big.NewInt(1337),
+			HomesteadBlock:        common.NewUint64(0),
+			TangerineWhistleBlock: common.NewUint64(0),
+			SpuriousDragonBlock:   common.NewUint64(0),
+			ByzantiumBlock:        common.NewUint64(0),
+			ConstantinopleBlock:   common.NewUint64(0),
+			PetersburgBlock:       common.NewUint64(0),
+			IstanbulBlock:         common.NewUint64(0),
+			MuirGlacierBlock:      common.NewUint64(0),
+			BerlinBlock:           common.NewUint64(0),
+			LondonBlock:           common.NewUint64(0),
+			Ethash:                new(chain.EthashConfig),
+			Rules:                 chain.EtHashRules,
+		},
+		ExtraData:  make([]byte, 32),
 		GasLimit:   11500000,
 		Difficulty: uint256.NewInt(1),
 		Alloc:      ReadPrealloc(allocs, "allocs/dev.json"),
