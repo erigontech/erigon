@@ -188,7 +188,20 @@ func (m ArgMap) Len() int {
 	return len(m)
 }
 
-var LocalTypeDomain Domain = nil //TODO domain.Wrap(domain.MustDecodeId(encodertype.Base62, cri.EncodedSchemeapp.LocalTypeDomain, "0", nil, nil))
+// LocalTypeDomain is the domain used to build type IDs for Go types via
+// TypeIdOf / newIdFor. It is initialized at package init to a local named
+// domain so TypeIds always have a non-nil domain and a stable string
+// representation.
+var LocalTypeDomain Domain = func() Domain {
+	d, err := NewNamedDomain[string]("local.type")
+	if err != nil {
+		// This only fails if domain construction itself is broken, in which
+		// case the whole package would be unusable. Panic here so the
+		// problem surfaces during init rather than later as a nil deref.
+		panic(fmt.Sprintf("failed to init LocalTypeDomain: %v", err))
+	}
+	return d
+}()
 var Trace = false
 
 var typeids = map[reflect.Type]TypeId{}
