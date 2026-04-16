@@ -36,6 +36,7 @@ type IntrinsicGasCalcArgs struct {
 	IsEIP2028          bool
 	IsEIP3860          bool
 	IsEIP7623          bool
+	IsEIP7976          bool
 	IsEIP8037          bool
 	IsAATxn            bool
 }
@@ -125,8 +126,23 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 		}
 
 		if args.IsEIP7623 {
-			tokenLen := dataLen + 3*nz
-			dataGas, overflow := math.SafeMul(tokenLen, params.TxTotalCostFloorPerToken)
+			var tokenLen uint64
+			var costPerToken uint64
+			var overflow bool
+			if args.IsEIP7976 {
+				// EIP-7976: floor_tokens = total_bytes * 4, cost_per_token = 16
+				// => 64 gas per byte (both zero and non-zero)
+				tokenLen, overflow = math.SafeMul(dataLen, 4)
+				if overflow {
+					return IntrinsicGasCalcResult{}, true
+				}
+				costPerToken = params.TxTotalCostFloorPerTokenEIP7976
+			} else {
+				// EIP-7623: tokens = zero_bytes + 4*nonzero_bytes = dataLen + 3*nz
+				tokenLen = dataLen + 3*nz
+				costPerToken = params.TxTotalCostFloorPerToken
+			}
+			dataGas, overflow := math.SafeMul(tokenLen, costPerToken)
 			if overflow {
 				return IntrinsicGasCalcResult{}, true
 			}

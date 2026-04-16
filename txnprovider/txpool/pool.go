@@ -793,6 +793,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 			IsEIP2028:          true,
 			IsEIP3860:          isEIP3860,
 			IsEIP7623:          isEIP7623,
+			IsEIP7976:          p.isAmsterdam(),
 			IsEIP8037:          p.isAmsterdam(),
 			IsAATxn:            isAATxn,
 		})
@@ -982,6 +983,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		IsEIP2028:          true,
 		IsEIP3860:          isEIP3860,
 		IsEIP7623:          isPrague,
+		IsEIP7976:          p.isAmsterdam(),
 		IsEIP8037:          p.isAmsterdam(),
 		IsAATxn:            isAATxn,
 	})
