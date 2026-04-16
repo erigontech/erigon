@@ -4,13 +4,14 @@ import (
 	"context"
 	"time"
 
+	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"golang.org/x/sync/semaphore"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/p2p/discover"
 	"github.com/erigontech/erigon/p2p/enr"
-	"github.com/libp2p/go-libp2p/core/network"
-	"github.com/libp2p/go-libp2p/core/peer"
-	"golang.org/x/sync/semaphore"
 )
 
 func (p *p2pManager) connectToBootnodes(ctx context.Context, discoverConfig discover.Config) error {
