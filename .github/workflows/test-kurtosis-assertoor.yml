@@ -36,7 +36,10 @@ jobs:
             ethereum_package_branch: "5.0.1"
           - suite: glamsterdam
             package_args: .github/workflows/kurtosis/glamsterdam.io
-            ethereum_package_branch: "main"
+            # Pinned to 6.1.0 rather than main: commit 835dd9b on main introduced GpuConfig,
+            # a Starlark built-in that requires Kurtosis CLI >=1.18.1, breaking Starlark eval.
+            # Unpin to main once CI is upgraded to Kurtosis 1.18.1.
+            ethereum_package_branch: "6.1.0"
           - suite: caplin-minimal
             package_args: .github/workflows/kurtosis/caplin-minimal-assertoor.io
             ethereum_package_url: "github.com/erigontech/ethereum-package"
