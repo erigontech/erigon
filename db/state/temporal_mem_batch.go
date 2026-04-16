@@ -224,11 +224,23 @@ func (sd *TemporalMemBatch) getLatest(domain kv.Domain, key []byte) (v []byte, s
 	}
 
 	keyS := common.ToStringZeroCopy(key)
+
+	// When an unwind changeset is active, it takes priority over the in-memory
+	// map. The in-memory map may contain values from re-execution of blocks
+	// AFTER the unwind target, which are not yet committed. The changeset has
+	// the authoritative pre-unwind values. See #20169.
+	if sd.unwindChangeset != nil {
+		v, step, ok := unwoundLatest(domain, keyS)
+		if ok {
+			return v, step, ok
+		}
+	}
+
 	var dataWithTxNums []dataWithTxNum
 	if domain == kv.StorageDomain {
 		dataWithTxNums, ok = sd.storage.Get(keyS)
 		if !ok {
-			return unwoundLatest(domain, keyS)
+			return nil, 0, false
 		}
 		dataWithTxNum := dataWithTxNums[len(dataWithTxNums)-1]
 		return dataWithTxNum.data, kv.Step(dataWithTxNum.txNum / sd.stepSize), ok
@@ -237,7 +249,7 @@ func (sd *TemporalMemBatch) getLatest(domain kv.Domain, key []byte) (v []byte, s
 
 	dataWithTxNums, ok = sd.domains[domain][keyS]
 	if !ok {
-		return unwoundLatest(domain, keyS)
+		return nil, 0, false
 	}
 	dataWithTxNum := dataWithTxNums[len(dataWithTxNums)-1]
 	return dataWithTxNum.data, kv.Step(dataWithTxNum.txNum / sd.stepSize), ok
