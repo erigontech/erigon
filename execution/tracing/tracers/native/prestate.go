@@ -30,6 +30,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
@@ -47,20 +48,23 @@ func init() {
 type state = map[accounts.Address]*account
 
 type account struct {
-	Balance  *big.Int                    `json:"balance,omitempty"`
-	Code     []byte                      `json:"code,omitempty"`
+	Balance *big.Int `json:"balance,omitempty"`
+	// Code is a pointer so omitempty can omit unchanged code (nil) while
+	// still emitting "0x" when code is cleared (e.g. EIP-7702 deauth).
+	Code     *[]byte                     `json:"code,omitempty"`
 	CodeHash *common.Hash                `json:"codeHash,omitempty"`
 	Nonce    uint64                      `json:"nonce,omitempty"`
 	Storage  map[common.Hash]common.Hash `json:"storage,omitempty"`
+	empty    bool
 }
 
 func (a *account) exists() bool {
-	return a.Nonce > 0 || len(a.Code) > 0 || len(a.Storage) > 0 || (a.Balance != nil && a.Balance.Sign() != 0)
+	return a.Nonce > 0 || (a.Code != nil && len(*a.Code) > 0) || len(a.Storage) > 0 || (a.Balance != nil && a.Balance.Sign() != 0)
 }
 
 type accountMarshaling struct {
 	Balance *hexutil.Big
-	Code    hexutil.Bytes
+	Code    *hexutil.Bytes
 }
 
 type prestateTracer struct {
@@ -278,7 +282,7 @@ func (t *prestateTracer) processDiffState() {
 		newBalance, _ := t.env.IntraBlockState.GetBalance(addr)
 		newNonce, _ := t.env.IntraBlockState.GetNonce(addr)
 		newCode, _ := t.env.IntraBlockState.GetCode(addr)
-		newCodeHash := common.Hash{}
+		newCodeHash := empty.CodeHash
 		if len(newCode) > 0 {
 			newCodeHash = crypto.HashData(newCode)
 		}
@@ -292,7 +296,9 @@ func (t *prestateTracer) processDiffState() {
 			postAccount.Nonce = newNonce
 		}
 
-		prevCodeHash := common.Hash{}
+		// Empty code hashes are excluded from the prestate, so default
+		// to EmptyCodeHash to match what GetCodeHash returns for codeless accounts.
+		prevCodeHash := empty.CodeHash
 		if t.pre[addr].CodeHash != nil {
 			prevCodeHash = *t.pre[addr].CodeHash
 		}
@@ -304,9 +310,16 @@ func (t *prestateTracer) processDiffState() {
 
 		if !t.config.DisableCode {
 			newCode, _ := t.env.IntraBlockState.GetCode(addr)
-			if !bytes.Equal(newCode, t.pre[addr].Code) {
+			var prevCode []byte
+			if t.pre[addr].Code != nil {
+				prevCode = *t.pre[addr].Code
+			}
+			if !bytes.Equal(newCode, prevCode) {
 				modified = true
-				postAccount.Code = newCode
+				if newCode == nil {
+					newCode = []byte{}
+				}
+				postAccount.Code = &newCode
 			}
 		}
 
@@ -386,8 +399,8 @@ func (t *prestateTracer) lookupAccount(addr accounts.Address) {
 		t.pre[addr].CodeHash = nil
 	}
 
-	if !t.config.DisableCode {
-		t.pre[addr].Code = code
+	if !t.config.DisableCode && (!t.config.DiffMode || len(code) > 0) {
+		t.pre[addr].Code = &code
 	}
 	if !t.config.DisableStorage {
 		t.pre[addr].Storage = make(map[common.Hash]common.Hash)
