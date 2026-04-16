@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/holiman/uint256"
 	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/execution/types"
@@ -328,6 +329,7 @@ const (
 )
 
 func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path AccountPath, key accounts.StorageKey, source ReadSource, version Version,
+	readVal any,
 	checkVersion func(readVersion, writeVersion Version) VersionValidity,
 	traceInvalid bool, tracePrefix string) VersionValidity {
 
@@ -352,7 +354,15 @@ func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path Acco
 			isBALPrePopulatedPath := path == BalancePath || path == NoncePath ||
 				path == CodePath || path == StoragePath
 			if !vm.HasBAL || !isBALPrePopulatedPath {
-				valid = VersionInvalid
+				// Value tiebreaker: if the StorageRead value matches the
+				// versionMap Done value, the read is still valid despite
+				// the source mismatch. This avoids unnecessary invalidation
+				// when a prior TX wrote the same value that was in storage.
+				if readVal != nil && rr.Value() != nil && valuesEqual(path, readVal, rr.Value()) {
+					// Values match — read is valid
+				} else {
+					valid = VersionInvalid
+				}
 			}
 		} else {
 			valid = checkVersion(version, rr.Version())
@@ -370,16 +380,16 @@ func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path Acco
 				// any property (code, storage slots, balance, nonce, etc.).
 				if path != AddressPath && path != SelfDestructPath {
 					if valid = vm.validateRead(txIndex, addr, AddressPath, accounts.StorageKey{}, source,
-						version, checkVersion, traceInvalid, tracePrefix); valid == VersionValid {
+						version, nil, checkVersion, traceInvalid, tracePrefix); valid == VersionValid {
 						valid = vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
-							version, checkVersion, traceInvalid, tracePrefix)
+							version, nil, checkVersion, traceInvalid, tracePrefix)
 					} else {
 						vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
-							version, checkVersion, traceInvalid, tracePrefix)
+							version, nil, checkVersion, traceInvalid, tracePrefix)
 					}
 				} else if path == AddressPath {
 					valid = vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
-						version, checkVersion, traceInvalid, tracePrefix)
+						version, nil, checkVersion, traceInvalid, tracePrefix)
 
 					// If a prior tx created this account, BalancePath will
 					// have an entry at a lower txIndex (from BAL pre-population
@@ -428,12 +438,50 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 	if readSet := lastIO.ReadSet(txIdx); readSet != nil {
 		readSet.Scan(func(vr *VersionedRead) bool {
 			valid = vm.validateRead(txIdx, vr.Address, vr.Path, vr.Key, vr.Source, vr.Version,
-				checkVersion, traceInvalid, tracePrefix)
+				vr.Val, checkVersion, traceInvalid, tracePrefix)
 			return valid == VersionValid
 		})
 	}
 
 	return
+}
+
+// valuesEqual compares a read value with a versionMap write value for the
+// same path. Used as a tiebreaker: when the version/source check would
+// invalidate but the actual values match, the read is still valid.
+func valuesEqual(path AccountPath, readVal, writeVal any) bool {
+	if readVal == nil || writeVal == nil {
+		return readVal == nil && writeVal == nil
+	}
+	switch path {
+	case BalancePath:
+		rv, ok1 := readVal.(uint256.Int)
+		wv, ok2 := writeVal.(uint256.Int)
+		return ok1 && ok2 && rv.Eq(&wv)
+	case NoncePath:
+		rv, ok1 := readVal.(uint64)
+		wv, ok2 := writeVal.(uint64)
+		return ok1 && ok2 && rv == wv
+	case IncarnationPath:
+		rv, ok1 := readVal.(uint64)
+		wv, ok2 := writeVal.(uint64)
+		return ok1 && ok2 && rv == wv
+	case CodeHashPath:
+		rv, ok1 := readVal.(accounts.CodeHash)
+		wv, ok2 := writeVal.(accounts.CodeHash)
+		return ok1 && ok2 && rv == wv
+	case AddressPath:
+		// Record-level comparison — both should be *accounts.Account
+		rv, ok1 := readVal.(*accounts.Account)
+		wv, ok2 := writeVal.(*accounts.Account)
+		if !ok1 || !ok2 || rv == nil || wv == nil {
+			return false
+		}
+		return rv.Balance.Eq(&wv.Balance) && rv.Nonce == wv.Nonce &&
+			rv.Incarnation == wv.Incarnation && rv.CodeHash == wv.CodeHash
+	default:
+		return false
+	}
 }
 
 type WriteCell struct {

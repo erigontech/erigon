@@ -210,14 +210,6 @@ func (evm *EVM) handleFrameRevert(gas *mdgas.MdGas, err error, depth int,
 		evm.stateGasConsumed = savedStateGasConsumed
 	}
 
-	// Compute spill: state gas that was charged from gas_left (regular)
-	// because the reservoir was insufficient.
-	reservoirUsed := initialChildState - gas.State
-	var spill uint64
-	if childStateConsumed > reservoirUsed {
-		spill = childStateConsumed - reservoirUsed
-	}
-
 	// EIP-8037: "On child revert or exceptional halt, all state gas
 	// consumed by the child, both from the reservoir and any that spilled
 	// into gas_left, is restored to the parent's reservoir."
@@ -225,6 +217,16 @@ func (evm *EVM) handleFrameRevert(gas *mdgas.MdGas, err error, depth int,
 		if err == ErrExecutionReverted {
 			// Top-level REVERT: restore spill to gas_left for refund
 			// accounting; track it for receipt gas calculation.
+			// Spill = state gas that was charged from gas_left (regular)
+			// because the reservoir was insufficient. When gas.State >
+			// initialChildState the reservoir grew via sub-child reverts —
+			// no reservoir was consumed net, so all childStateConsumed
+			// was spilled.
+			var reservoirUsed uint64
+			if initialChildState > gas.State {
+				reservoirUsed = initialChildState - gas.State
+			}
+			spill := childStateConsumed - reservoirUsed
 			gas.Regular += spill
 			evm.revertedSpillGas += spill
 		}
@@ -232,8 +234,9 @@ func (evm *EVM) handleFrameRevert(gas *mdgas.MdGas, err error, depth int,
 		// reservoir stays as-is for block gas accounting.
 	} else {
 		// Child frame (depth > 0): restore all consumed state gas
-		// (reservoir-sourced + spill) to the reservoir.
-		gas.State = initialChildState + spill
+		// (reservoir-sourced + spill) to the reservoir, preserving any
+		// sub-child restorations already in the reservoir.
+		gas.State += childStateConsumed
 		// Regular gas: REVERT preserves it (step 2 doesn't apply);
 		// exceptional halt burns it (step 2 zeroed gas.Regular).
 	}
@@ -644,25 +647,24 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 }
 
 // Create creates a new contract using code as deployment code.
+// If salt is non-nil, CREATE2 addressing is used (keccak256(0xff ++ msg.sender ++ salt ++ keccak256(init_code))[12:]);
+// otherwise the usual sender-and-nonce-hash is used (CREATE).
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
-func (evm *EVM) Create(caller accounts.Address, code []byte, gasRemaining mdgas.MdGas, endowment uint256.Int, bailout bool) (ret []byte, contractAddr accounts.Address, leftOverGas mdgas.MdGas, err error) {
-	nonce, err := evm.intraBlockState.GetNonce(caller)
-	if err != nil {
-		return nil, accounts.NilAddress, mdgas.MdGas{}, err
+func (evm *EVM) Create(caller accounts.Address, code []byte, gasRemaining mdgas.MdGas, endowment uint256.Int, salt *uint256.Int, bailout bool) (ret []byte, contractAddr accounts.Address, leftOverGas mdgas.MdGas, err error) {
+	ch := &codeAndHash{code: code}
+	op := CREATE
+	if salt != nil {
+		op = CREATE2
+		contractAddr = accounts.InternAddress(types.CreateAddress2(caller.Value(), salt.Bytes32(), ch.Hash()))
+	} else {
+		var nonce uint64
+		nonce, err = evm.intraBlockState.GetNonce(caller)
+		if err != nil {
+			return nil, accounts.NilAddress, mdgas.MdGas{}, err
+		}
+		contractAddr = accounts.InternAddress(types.CreateAddress(caller.Value(), nonce))
 	}
-	contractAddr = accounts.InternAddress(types.CreateAddress(caller.Value(), nonce))
-	return evm.create(caller, &codeAndHash{code: code}, gasRemaining, endowment, contractAddr, CREATE, true /* incrementNonce */, bailout)
-}
-
-// Create2 creates a new contract using code as deployment code.
-//
-// The different between Create2 with Create is Create2 uses keccak256(0xff ++ msg.sender ++ salt ++ keccak256(init_code))[12:]
-// instead of the usual sender-and-nonce-hash as the address where the contract is initialized at.
-// DESCRIBED: docs/programmers_guide/guide.md#nonce
-func (evm *EVM) Create2(caller accounts.Address, code []byte, gasRemaining mdgas.MdGas, endowment uint256.Int, salt *uint256.Int, bailout bool) (ret []byte, contractAddr accounts.Address, leftOverGas mdgas.MdGas, err error) {
-	codeAndHash := &codeAndHash{code: code}
-	contractAddr = accounts.InternAddress(types.CreateAddress2(caller.Value(), salt.Bytes32(), codeAndHash.Hash()))
-	return evm.create(caller, codeAndHash, gasRemaining, endowment, contractAddr, CREATE2, true /* incrementNonce */, bailout)
+	return evm.create(caller, ch, gasRemaining, endowment, contractAddr, op, true /* incrementNonce */, bailout)
 }
 
 // SysCreate is a special (system) contract creation methods for genesis constructors.

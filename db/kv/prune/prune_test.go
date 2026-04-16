@@ -188,6 +188,53 @@ func TestTableScanningPrune_RollingCursor(t *testing.T) {
 	require.Equal(t, 0, countTable(t, tx), "table empty")
 }
 
+// TestTableScanningPrune_CtxCancelOnOutOfRange verifies that context
+// cancellation is respected while scanning out-of-range entries (txNum >= txTo).
+//
+// Regression test: PR #19898 introduced an early-skip `continue` for
+// out-of-range entries that bypassed ctx.Done() checks, causing the loop
+// to scan the entire remaining table without honouring timeouts.
+func TestTableScanningPrune_CtxCancelOnOutOfRange(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	// 20 entries with txNums 100..119 — ALL out of range for txTo=5.
+	// The scan visits every entry, each hitting "txNum >= txTo → continue".
+	insertEntries(t, tx, 20, 100)
+
+	logEvery := time.NewTicker(time.Hour)
+	defer logEvery.Stop()
+
+	// Pre-cancel the context so ctx.Done() is immediately readable.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	cur := openPseudoCursor(t, tx)
+	defer cur.Close()
+
+	stat, err := prune.TableScanningPrune(
+		ctx, "test", "txlookup",
+		0, 5, 0, 1, logEvery, log.New(),
+		nil, cur, false, &prune.Stat{}, prune.ValueOffset8StorageMode,
+	)
+	require.NoError(t, err)
+
+	// With the fix: the first out-of-range entry checks ctx.Done(),
+	// sees cancellation, returns InProgress immediately.
+	// Without the fix: the `continue` skips ctx.Done(), the loop
+	// scans all 20 entries, returns Done with 0 deletions.
+	require.Equal(t, prune.InProgress, stat.ValueProgress,
+		"scan must be interrupted by context cancellation on out-of-range entries")
+	require.NotNil(t, stat.LastPrunedValue,
+		"interrupted scan must save cursor position for resume")
+	require.EqualValues(t, 0, stat.PruneCountValues,
+		"no entries should be deleted — all are out of range")
+}
+
 func BenchmarkTableScanningPrune(b *testing.B) {
 	db := openTestDB(b)
 	defer db.Close()

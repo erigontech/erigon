@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -49,11 +50,11 @@ func VerifyBranchHashes(
 	// The branch node identified by N nibbles was folded at depth = N + 1,
 	// because the branch stores children one level deeper than its prefix path.
 	// E.g., root branch (0 nibbles) → depth=1; branch at "3a" (2 nibbles) → depth=3.
-	nibbles := uncompactNibbles(branchKey)
-	if HasTerm(nibbles) {
-		nibbles = nibbles[:len(nibbles)-1]
+	nib := nibbles.CompactToHex(branchKey)
+	if nibbles.HasTerm(nib) {
+		nib = nib[:len(nib)-1]
 	}
-	depth := int16(len(nibbles)) + 1
+	depth := int16(len(nib)) + 1
 
 	var mismatches []string
 

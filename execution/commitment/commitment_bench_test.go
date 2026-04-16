@@ -99,9 +99,8 @@ func BenchmarkBranchMerger_Merge(b *testing.B) {
 	row, bm := generateCellRow(b, 16)
 
 	be := NewBranchEncoder(1024)
-	enc, _, err := be.EncodeBranch(bm, bm, bm, func(i int, skip bool) (*cell, error) {
-		return row[i], nil
-	})
+	cellData := generateCellEncodeDataRow(b, row, bm)
+	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
 	require.NoError(b, err)
 
 	var copies [16][]byte
@@ -111,9 +110,8 @@ func BenchmarkBranchMerger_Merge(b *testing.B) {
 	for i := 15; i >= 0; i-- {
 		row[i] = nil
 		tm, bm, am = uint16(1<<i), bm>>1, am>>1
-		enc1, _, err := be.EncodeBranch(bm, tm, am, func(i int, skip bool) (*cell, error) {
-			return row[i], nil
-		})
+		cellData = generateCellEncodeDataRow(b, row, am)
+		enc1, err := be.EncodeBranch(bm, tm, am, &cellData)
 		require.NoError(b, err)
 
 		copies[i] = common.Copy(enc1)
@@ -152,9 +150,8 @@ func encodeSyntheticBranch(b *testing.B, nCells int) (BranchData, uint16) {
 	b.Helper()
 	row, bm := generateCellRow(b, nCells)
 	be := NewBranchEncoder(1024)
-	enc, _, err := be.EncodeBranch(bm, bm, bm, func(i int, skip bool) (*cell, error) {
-		return row[i], nil
-	})
+	cellData := generateCellEncodeDataRow(b, row, bm)
+	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -263,8 +260,8 @@ func BenchmarkBranchData_ReplacePlainKeys(b *testing.B) {
 }
 
 func BenchmarkGetDeferredUpdate(b *testing.B) {
-	// Create a cell grid similar to what fold() would produce
-	var cells [16]cell
+	// Create cellEncodeData grid similar to what fold() would produce
+	var cells [16]cellEncodeData
 	var bitmap uint16
 
 	// Fill cells with realistic data
@@ -303,20 +300,19 @@ func BenchmarkGetDeferredUpdate(b *testing.B) {
 	afterMap := bitmap
 	prefix := []byte{0x01, 0x02, 0x03}
 	prev := []byte{0x04, 0x05, 0x06}
-	// prevStep removed
 
 	b.ResetTimer()
 	b.ReportAllocs()
 
 	for b.Loop() {
-		upd := getDeferredUpdate(prefix, bitmap, touchMap, afterMap, &cells, 5, prev)
+		upd := getDeferredUpdate(prefix, bitmap, touchMap, afterMap, &cells, prev)
 		putDeferredUpdate(upd)
 	}
 }
 
 func BenchmarkGetDeferredUpdate_FewCells(b *testing.B) {
 	// Benchmark with only 2 cells set (more realistic for sparse updates)
-	var cells [16]cell
+	var cells [16]cellEncodeData
 	var bitmap uint16
 
 	// Only set cells 0 and 5
@@ -337,13 +333,12 @@ func BenchmarkGetDeferredUpdate_FewCells(b *testing.B) {
 	afterMap := bitmap
 	prefix := []byte{0x01, 0x02, 0x03}
 	prev := []byte{0x04, 0x05, 0x06}
-	// prevStep removed
 
 	b.ResetTimer()
 	b.ReportAllocs()
 
 	for b.Loop() {
-		upd := getDeferredUpdate(prefix, bitmap, touchMap, afterMap, &cells, 5, prev)
+		upd := getDeferredUpdate(prefix, bitmap, touchMap, afterMap, &cells, prev)
 		putDeferredUpdate(upd)
 	}
 }
