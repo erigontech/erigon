@@ -73,6 +73,7 @@ type HttpCfg struct {
 	RpcFiltersConfig                  rpchelper.FiltersConfig
 	DBReadConcurrency                 int
 	RpcMaxConcurrentRequests          int  // HTTP admission control limit; -1 = unlimited
+	WsMaxConnections                  int  // WebSocket connection limit; 0 = unlimited
 	TraceCompatibility                bool // Bug for bug compatibility for trace_ routines with OpenEthereum
 	GethCompatibility                 bool // Geth-compatible storage iteration order for debug_storageRangeAt
 	TxPoolApiAddr                     string
@@ -113,7 +114,4 @@ type HttpCfg struct {
 
 	RpcTxSyncDefaultTimeout time.Duration // Default timeout for eth_sendRawTransactionSync
 	RpcTxSyncMaxTimeout     time.Duration // Maximum timeout for eth_sendRawTransactionSync
-
-	// TestingEnabled enables the testing_ RPC namespace. Should only be used in test/dev environments.
-	TestingEnabled bool
 }

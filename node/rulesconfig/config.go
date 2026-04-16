@@ -18,7 +18,6 @@ package rulesconfig
 
 import (
 	"context"
-	"path/filepath"
 
 	"github.com/davecgh/go-spew/spew"
 
@@ -27,10 +26,8 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
-	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/aura"
-	"github.com/erigontech/erigon/execution/protocol/rules/clique"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash/ethashcfg"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
@@ -71,31 +68,6 @@ func CreateRulesEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainCon
 				DatasetsLockMmap: consensusCfg.DatasetsLockMmap,
 			}, noVerify)
 		}
-	case *chainspec.ConsensusSnapshotConfig:
-		if chainConfig.Clique != nil {
-			if consensusCfg.InMemory {
-				nodeConfig.Dirs.DataDir = ""
-			} else {
-				if consensusCfg.DBPath != "" {
-					if filepath.Base(consensusCfg.DBPath) == "clique" {
-						nodeConfig.Dirs.DataDir = filepath.Dir(consensusCfg.DBPath)
-					} else {
-						nodeConfig.Dirs.DataDir = consensusCfg.DBPath
-					}
-				}
-			}
-
-			var err error
-			var db kv.RwDB
-
-			db, err = node.OpenDatabase(ctx, nodeConfig, dbcfg.ConsensusDB, "clique", readonly, logger)
-
-			if err != nil {
-				panic(err)
-			}
-
-			eng = clique.New(chainConfig, consensusCfg, db, logger)
-		}
 	case *chain.AuRaConfig:
 		if chainConfig.Aura != nil {
 			var err error
@@ -115,7 +87,7 @@ func CreateRulesEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainCon
 	case *borcfg.BorConfig:
 		// If Matic bor consensus is requested, set it up
 		// In order to pass the ethereum transaction tests, we need to set the burn contract which is in the bor config
-		// Then, bor != nil will also be enabled for ethash and clique. Only enable Bor for real if there is a validator contract present.
+		// Then, bor != nil will also be enabled for ethash. Only enable Bor for real if there is a validator contract present.
 		if chainConfig.Bor != nil && consensusCfg.ValidatorContract != "" {
 			stateReceiver := bor.NewStateReceiver(consensusCfg.StateReceiverContractAddress())
 			spanner := bor.NewChainSpanner(borabi.ValidatorSetContractABI(), chainConfig, withoutHeimdall, logger)
@@ -137,9 +109,7 @@ func CreateRulesEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainCon
 func CreateRulesEngineBareBones(ctx context.Context, chainConfig *chain.Config, logger log.Logger) rules.Engine {
 	var consensusConfig any
 
-	if chainConfig.Clique != nil {
-		consensusConfig = chainspec.CliqueSnapshot
-	} else if chainConfig.Aura != nil {
+	if chainConfig.Aura != nil {
 		consensusConfig = chainConfig.Aura
 	} else if chainConfig.Bor != nil {
 		consensusConfig = chainConfig.Bor

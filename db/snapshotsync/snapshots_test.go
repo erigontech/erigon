@@ -508,15 +508,15 @@ func TestOpenAllSnapshot(t *testing.T) {
 		defer s.Close()
 		err := s.OpenFolder()
 		require.NoError(err)
-		require.NotNil(s.visible[snaptype2.Enums.Headers])
-		require.Empty(s.visible[snaptype2.Enums.Headers])
+		require.NotNil(s.visible.Load().segments[snaptype2.Enums.Headers])
+		require.Empty(s.visible.Load().segments[snaptype2.Enums.Headers])
 		s.Close()
 
 		createFile(step, step*2, snaptype2.Bodies)
 		s = NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
 		defer s.Close()
-		require.NotNil(s.visible[snaptype2.Enums.Bodies])
-		require.Empty(s.visible[snaptype2.Enums.Bodies])
+		require.NotNil(s.visible.Load().segments[snaptype2.Enums.Bodies])
+		require.Empty(s.visible.Load().segments[snaptype2.Enums.Bodies])
 		s.Close()
 
 		createFile(step, step*2, snaptype2.Headers)
@@ -524,7 +524,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 		s = NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
 		err = s.OpenFolder()
 		require.NoError(err)
-		require.NotNil(s.visible[snaptype2.Enums.Headers])
+		require.NotNil(s.visible.Load().segments[snaptype2.Enums.Headers])
 		s.OpenSegments(snaptype2.BlockSnapshotTypes, false, true)
 		// require.Equal(1, len(getSegs(snaptype2.Enums.Headers]))
 		s.Close()
@@ -537,8 +537,8 @@ func TestOpenAllSnapshot(t *testing.T) {
 
 		err = s.OpenFolder()
 		require.NoError(err)
-		require.NotNil(s.visible[snaptype2.Enums.Headers])
-		require.Len(s.visible[snaptype2.Enums.Headers], 2)
+		require.NotNil(s.visible.Load().segments[snaptype2.Enums.Headers])
+		require.Len(s.visible.Load().segments[snaptype2.Enums.Headers], 2)
 
 		view := s.View()
 		defer view.Close()
@@ -561,8 +561,8 @@ func TestOpenAllSnapshot(t *testing.T) {
 		err = s.OpenFolder()
 		require.NoError(err)
 		defer s.Close()
-		require.NotNil(s.visible[snaptype2.Enums.Headers])
-		require.Len(s.visible[snaptype2.Enums.Headers], 2)
+		require.NotNil(s.visible.Load().segments[snaptype2.Enums.Headers])
+		require.Len(s.visible.Load().segments[snaptype2.Enums.Headers], 2)
 
 		createFile(step, step*2-step/5, snaptype2.Headers)
 		createFile(step, step*2-step/5, snaptype2.Bodies)
@@ -771,9 +771,9 @@ func TestCalculateVisibleSegments(t *testing.T) {
 		idx := s.idxAvailability()
 		require.Equal(2_500_000-1, int(idx))
 
-		require.Len(s.visible[snaptype2.Enums.Headers], 5)
-		require.Len(s.visible[snaptype2.Enums.Bodies], 5)
-		require.Len(s.visible[snaptype2.Enums.Transactions], 5)
+		require.Len(s.visible.Load().segments[snaptype2.Enums.Headers], 5)
+		require.Len(s.visible.Load().segments[snaptype2.Enums.Bodies], 5)
+		require.Len(s.visible.Load().segments[snaptype2.Enums.Transactions], 5)
 
 		require.Equal(7, s.dirty[snaptype2.Enums.Headers].Len())
 		require.Equal(6, s.dirty[snaptype2.Enums.Bodies].Len())
@@ -788,9 +788,9 @@ func TestCalculateVisibleSegments(t *testing.T) {
 		idx := s.idxAvailability()
 		require.Equal(2_500_000-1, int(idx))
 
-		require.Len(s.visible[snaptype2.Enums.Headers], 5)
-		require.Len(s.visible[snaptype2.Enums.Bodies], 5)
-		require.Len(s.visible[snaptype2.Enums.Transactions], 5)
+		require.Len(s.visible.Load().segments[snaptype2.Enums.Headers], 5)
+		require.Len(s.visible.Load().segments[snaptype2.Enums.Bodies], 5)
+		require.Len(s.visible.Load().segments[snaptype2.Enums.Transactions], 5)
 
 		require.Equal(7, s.dirty[snaptype2.Enums.Headers].Len())
 		require.Equal(6, s.dirty[snaptype2.Enums.Bodies].Len())
@@ -805,9 +805,9 @@ func TestCalculateVisibleSegments(t *testing.T) {
 		idx := s.idxAvailability()
 		require.Equal(2_500_000-1, int(idx))
 
-		require.Len(s.visible[snaptype2.Enums.Headers], 5)
-		require.Len(s.visible[snaptype2.Enums.Bodies], 5)
-		require.Len(s.visible[snaptype2.Enums.Transactions], 5)
+		require.Len(s.visible.Load().segments[snaptype2.Enums.Headers], 5)
+		require.Len(s.visible.Load().segments[snaptype2.Enums.Bodies], 5)
+		require.Len(s.visible.Load().segments[snaptype2.Enums.Transactions], 5)
 
 		require.Equal(7, s.dirty[snaptype2.Enums.Headers].Len())
 		require.Equal(6, s.dirty[snaptype2.Enums.Bodies].Len())
@@ -840,6 +840,82 @@ func TestCalculateVisibleSegmentsWhenGapsInIdx(t *testing.T) {
 	idx := s.idxAvailability()
 	require.Equal(500_000-1, int(idx))
 
-	require.Len(s.visible[snaptype2.Enums.Headers], 1)
+	require.Len(s.visible.Load().segments[snaptype2.Enums.Headers], 1)
 	require.Equal(3, s.dirty[snaptype2.Enums.Headers].Len())
+}
+
+func TestSegmentsMaxDerivedFromVisible(t *testing.T) {
+	logger := testlog.Logger(t, log.LvlCrit)
+	dir, require := t.TempDir(), require.New(t)
+	createFile := func(from, to uint64, name snaptype.Type) {
+		createTestSegmentFile(t, from, to, name.Enum(), dir, version.V1_0, logger)
+	}
+	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
+
+	s := NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	require.NoError(s.OpenFolder())
+	require.Equal(uint64(0), s.SegmentsMax())
+	s.Close()
+
+	for i := uint64(0); i < 3; i++ {
+		createFile(i*500_000, (i+1)*500_000, snaptype2.Headers)
+		createFile(i*500_000, (i+1)*500_000, snaptype2.Bodies)
+		createFile(i*500_000, (i+1)*500_000, snaptype2.Transactions)
+	}
+	s = NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	require.NoError(s.OpenFolder())
+	require.Equal(uint64(1_500_000-1), s.SegmentsMax())
+
+	// Regression: an unindexed trailing .seg would previously advance
+	// segmentsMax because it was set from dirty files in openSegments.
+	// Now it must not, because it never becomes visible.
+	createFile(1_500_000, 2_000_000, snaptype2.Headers)
+	missingIdx := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 1_500_000, 2_000_000, snaptype2.Headers.Name()))
+	require.NoError(dir2.RemoveFile(missingIdx))
+
+	require.NoError(s.OpenFolder())
+	require.Equal(uint64(1_500_000-1), s.SegmentsMax())
+	s.Close()
+}
+
+func TestViewPinsGeneration(t *testing.T) {
+	logger := testlog.Logger(t, log.LvlCrit)
+	dir, require := t.TempDir(), require.New(t)
+	createFile := func(from, to uint64, name snaptype.Type) {
+		createTestSegmentFile(t, from, to, name.Enum(), dir, version.V1_0, logger)
+	}
+	for i := uint64(0); i < 2; i++ {
+		createFile(i*500_000, (i+1)*500_000, snaptype2.Headers)
+		createFile(i*500_000, (i+1)*500_000, snaptype2.Bodies)
+		createFile(i*500_000, (i+1)*500_000, snaptype2.Transactions)
+	}
+
+	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
+	s := NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	defer s.Close()
+	require.NoError(s.OpenFolder())
+
+	v := s.View()
+	defer v.Close()
+	pinned := v.Segments(snaptype2.Headers)
+	require.Len(pinned, 2)
+	oldSrc0, oldSrc1 := pinned[0].src, pinned[1].src
+
+	// Drop the [500k-1m) segment from visible by introducing a larger [0-1m)
+	// that subsumes it (the recalc pass removes subsumed entries). The view
+	// captured before this change must still reference the old generation.
+	createFile(0, 1_000_000, snaptype2.Headers)
+	createFile(0, 1_000_000, snaptype2.Bodies)
+	createFile(0, 1_000_000, snaptype2.Transactions)
+	require.NoError(s.OpenFolder())
+
+	// New view sees the subsumed generation: a single [0-1m) segment.
+	v2 := s.View()
+	defer v2.Close()
+	require.Len(v2.Segments(snaptype2.Headers), 1)
+
+	// Old view still pins the pre-recalc generation.
+	require.Len(pinned, 2)
+	require.Same(oldSrc0, pinned[0].src)
+	require.Same(oldSrc1, pinned[1].src)
 }
