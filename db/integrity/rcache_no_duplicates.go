@@ -38,12 +38,16 @@ func CheckRCacheNoDups(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, b
 
 	log.Info("[integrity] RCacheNoDups starting", "fromBlock", fromBlock, "toBlock", toBlock)
 
-	return parallelChunkCheck(ctx, sc.NewSampler(), fromBlock, toBlock, db, blockReader, failFast, string(RCacheNoDups), RCacheNoDupsRange)
+	// parallelChunkCheck slices [fromBlock, toBlock), so convert the latest covered block to an exclusive upper bound.
+	return parallelChunkCheck(ctx, sc.NewSampler(), fromBlock, toBlock+1, db, blockReader, failFast, string(RCacheNoDups), RCacheNoDupsRange)
 }
 
 func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
 	if fromBlock > toBlock {
 		panic(fmt.Sprintf("fromBlock(%d) > toBlock(%d)", fromBlock, toBlock))
+	}
+	if fromBlock == toBlock {
+		return nil
 	}
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -55,11 +59,8 @@ func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.Tem
 	if err != nil {
 		return err
 	}
-	if toBlock > 0 {
-		toBlock-- // [fromBlock,toBlock)
-	}
 
-	toTxNum, err := txNumsReader.Max(ctx, tx, toBlock)
+	toTxNum, err := txNumsReader.Max(ctx, tx, toBlock-1)
 	if err != nil {
 		return err
 	}
@@ -129,10 +130,14 @@ func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.Tem
 	return nil
 }
 
+// chunkFn expects a half-open block range [fromBlock, toBlock).
 type chunkFn func(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) error
 
 func parallelChunkCheck(ctx context.Context, sampler *Sampler, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool, prefix string, fn chunkFn) (err error) {
-	blockRange := toBlock - fromBlock + 1
+	if fromBlock > toBlock {
+		panic(fmt.Sprintf("fromBlock(%d) > toBlock(%d)", fromBlock, toBlock))
+	}
+	blockRange := toBlock - fromBlock
 	if blockRange == 0 {
 		return nil
 	}
@@ -162,11 +167,11 @@ func parallelChunkCheck(ctx context.Context, sampler *Sampler, fromBlock, toBloc
 		}
 	}()
 
-	for start := fromBlock; start <= toBlock; start += chunkSize {
+	for start := fromBlock; start < toBlock; start += chunkSize {
 		if sampler.CanSkip() {
 			continue
 		}
-		end := min(start+chunkSize-1, toBlock)
+		end := min(start+chunkSize, toBlock)
 		chunkStart := start
 		chunkEnd := end
 		g.Go(func() error {
