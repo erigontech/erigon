@@ -36,7 +36,11 @@ jobs:
             ethereum_package_branch: "5.0.1"
           - suite: glamsterdam
             package_args: .github/workflows/kurtosis/glamsterdam.io
-            ethereum_package_branch: "main"
+            # Pinned to the commit before 835dd9b (feat: support gpu ere prover in zkboost #1353)
+            # which introduced GpuConfig — a Starlark built-in that requires Kurtosis CLI ≥1.18.1.
+            # CI currently installs an older Kurtosis version so the run fails at Starlark eval.
+            # Unpin once the CI runner is upgraded to Kurtosis 1.18.1.
+            ethereum_package_branch: "e07503d16b29"
           - suite: caplin-minimal
             package_args: .github/workflows/kurtosis/caplin-minimal-assertoor.io
             ethereum_package_url: "github.com/erigontech/ethereum-package"
