@@ -103,6 +103,7 @@ func TestReceiptRootValidationAfterReorg(t *testing.T) {
 		require.NoError(t, err)
 		chainA[1] = block3A
 	})
+	eatA.Close(t) // free MDBX resources before creating the next tester
 
 	// ==============================================================================================================
 	// Chain B: Deploy Changer + ETH transfer in block 2 (no Change() call), ETH transfer in block 3
@@ -145,6 +146,7 @@ func TestReceiptRootValidationAfterReorg(t *testing.T) {
 		require.NoError(t, err)
 		chainB[1] = block3B
 	})
+	eatB.Close(t) // free MDBX resources before creating the next tester
 
 	// ==============================================================================================================
 	// Sync tester: process chain A, then re-org to chain B, then query receipts for orphaned block 3(A)

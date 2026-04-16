@@ -1,0 +1,297 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+import "types/types.proto";
+import "remote/bor.proto";
+
+package remote;
+
+option go_package = "./remote;remoteproto";
+
+service ETHBACKEND {
+  rpc Etherbase(EtherbaseRequest) returns (EtherbaseReply);
+
+  rpc NetVersion(NetVersionRequest) returns (NetVersionReply);
+
+  rpc NetPeerCount(NetPeerCountRequest) returns (NetPeerCountReply);
+
+  // Version returns the service version number
+  rpc Version(google.protobuf.Empty) returns (types.VersionReply);
+
+  // Syncing returns a data object detailing the status of the sync process
+  rpc Syncing(google.protobuf.Empty) returns (SyncingReply);
+
+  // ProtocolVersion returns the Ethereum protocol version number (e.g. 66 for ETH66).
+  rpc ProtocolVersion(ProtocolVersionRequest) returns (ProtocolVersionReply);
+
+  // ClientVersion returns the Ethereum client version string using node name convention (e.g. TurboGeth/v2021.03.2-alpha/Linux).
+  rpc ClientVersion(ClientVersionRequest) returns (ClientVersionReply);
+
+  rpc Subscribe(SubscribeRequest) returns (stream SubscribeReply);
+
+  // Only one subscription is needed to serve all the users, LogsFilterRequest allows to dynamically modifying the subscription
+  rpc SubscribeLogs(stream LogsFilterRequest) returns (stream SubscribeLogsReply);
+
+  // Only one subscription is needed to serve all the users, ReceiptsFilterRequest allows to dynamically modifying the subscription
+  rpc SubscribeReceipts(stream ReceiptsFilterRequest) returns (stream SubscribeReceiptsReply);
+
+  // High-level method - can read block from db, snapshots or apply any other logic
+  // it doesn't provide consistency
+  // Request fields are optional - it's ok to request block only by hash or only by number
+  rpc Block(BlockRequest) returns (BlockReply);
+
+  // High-level method - can read block body (only storage metadata) from db, snapshots or apply any other logic
+  rpc CanonicalBodyForStorage(CanonicalBodyForStorageRequest) returns (CanonicalBodyForStorageReply);
+
+  // High-level method - can find block hash by block number
+  rpc CanonicalHash(CanonicalHashRequest) returns (CanonicalHashReply);
+
+  // High-level method - can find block number by block hash
+  rpc HeaderNumber(HeaderNumberRequest) returns (HeaderNumberReply);
+
+  // High-level method - can find block number by txn hash
+  // it doesn't provide consistency
+  rpc TxnLookup(TxnLookupRequest) returns (TxnLookupReply);
+
+  // NodeInfo collects and returns NodeInfo from all running sentry instances.
+  rpc NodeInfo(NodesInfoRequest) returns (NodesInfoReply);
+
+  // Peers collects and returns peers information from all running sentry instances.
+  rpc Peers(google.protobuf.Empty) returns (PeersReply);
+
+  rpc AddPeer(AddPeerRequest) returns (AddPeerReply);
+
+  rpc RemovePeer(RemovePeerRequest) returns (RemovePeerReply);
+
+  rpc AddTrustedPeer(AddPeerRequest) returns (AddPeerReply);
+
+  rpc RemoveTrustedPeer(RemovePeerRequest) returns (RemovePeerReply);
+
+  // PendingBlock returns latest built block.
+  rpc PendingBlock(google.protobuf.Empty) returns (PendingBlockReply);
+
+  rpc BorTxnLookup(BorTxnLookupRequest) returns (BorTxnLookupReply);
+
+  rpc BorEvents(BorEventsRequest) returns (BorEventsReply);
+
+  rpc AAValidation(AAValidationRequest) returns (AAValidationReply);
+
+  rpc BlockForTxNum(BlockForTxNumRequest) returns(BlockForTxNumResponse);
+
+  rpc MinimumBlockAvailable(google.protobuf.Empty) returns (MinimumBlockAvailableReply);
+
+  rpc SetHead(SetHeadRequest) returns (SetHeadReply);
+}
+
+enum Event {
+  HEADER = 0;
+  PENDING_LOGS = 1;
+  PENDING_BLOCK = 2;
+  // NEW_SNAPSHOT - one or many new snapshots (of snapshot sync) were created,
+  // client need to close old file descriptors and open new (on new segments),
+  // then server can remove old files
+  NEW_SNAPSHOT = 3;
+}
+
+
+message EtherbaseRequest {}
+
+message EtherbaseReply {types.H160 address = 1;}
+
+message NetVersionRequest {}
+
+message NetVersionReply {uint64 id = 1;}
+
+message SyncingReply {
+  uint64 last_new_block_seen = 1;
+  uint64 frozen_blocks = 2;
+  uint64 current_block = 3;
+  bool syncing = 4;
+
+  message StageProgress {
+    string stage_name = 1;
+    uint64 block_number = 2;
+  }
+  repeated StageProgress stages = 5;
+  
+}
+
+message NetPeerCountRequest {}
+
+message NetPeerCountReply {uint64 count = 1;}
+
+message ProtocolVersionRequest {}
+
+message ProtocolVersionReply {uint64 id = 1;}
+
+message ClientVersionRequest {}
+
+message ClientVersionReply {string node_name = 1;}
+
+message CanonicalHashRequest {
+  uint64 block_number = 1;
+}
+
+message CanonicalHashReply {
+  types.H256 hash = 1;
+}
+
+message HeaderNumberRequest {
+  types.H256 hash = 1;
+}
+
+message HeaderNumberReply {
+  optional uint64 number = 1;
+}
+
+message CanonicalBodyForStorageRequest {
+  uint64 blockNumber = 1;
+}
+
+message CanonicalBodyForStorageReply {
+  bytes body = 1;
+}
+
+message SubscribeRequest {
+  Event type = 1;
+}
+
+message SubscribeReply {
+  Event type = 1;
+  bytes data = 2;  //  serialized data
+}
+
+message LogsFilterRequest {
+  bool all_addresses = 1;
+  repeated types.H160 addresses = 2;
+  bool all_topics = 3;
+  repeated types.H256 topics = 4;
+}
+
+message SubscribeLogsReply {
+  types.H160 address = 1;
+  types.H256 block_hash = 2;
+  uint64 block_number = 3;
+  bytes data = 4;
+  uint64 log_index = 5;
+  repeated types.H256 topics = 6;
+  types.H256 transaction_hash = 7;
+  uint64 transaction_index = 8;
+  bool removed = 9;
+}
+
+message ReceiptsFilterRequest {
+  bool all_transactions = 1;
+  repeated types.H256 transaction_hashes = 2;
+}
+
+message SubscribeReceiptsReply {
+  types.H256 block_hash = 1;
+  uint64 block_number = 2;
+  types.H256 transaction_hash = 3;
+  uint64 transaction_index = 4;
+  uint32 type = 5;
+  uint64 status = 6;
+  uint64 cumulative_gas_used = 7;
+  uint64 gas_used = 8;
+  types.H160 contract_address = 9;
+  bytes logs_bloom = 10;
+  repeated SubscribeLogsReply logs = 11;
+  types.H160 from = 12;
+  types.H160 to = 13;
+  uint32 tx_type = 14;
+  types.H256 base_fee = 15;
+  uint64 block_time = 16;
+  uint64 excess_blob_gas = 17;
+  uint64 blob_gas_used = 18;
+  types.H256 blob_gas_price = 19;
+}
+
+message BlockRequest {
+  uint64 block_height = 2;
+  types.H256 block_hash = 3;
+}
+
+message BlockReply {
+  bytes block_rlp = 1;
+  bytes senders = 2;
+}
+
+message TxnLookupRequest {
+  types.H256 txn_hash = 1;
+}
+
+message TxnLookupReply {
+  uint64 block_number = 1;
+  uint64 tx_number = 2;
+}
+
+message NodesInfoRequest {
+  uint32 limit = 1;
+}
+
+message AddPeerRequest {
+  string url = 1;
+}
+
+message RemovePeerRequest {
+  string url = 1;
+}
+
+message NodesInfoReply {
+  repeated types.NodeInfoReply nodes_info = 1;
+}
+
+message PeersReply {
+  repeated types.PeerInfo peers = 1;
+}
+
+message AddPeerReply {
+  bool success = 1;
+}
+
+message RemovePeerReply {
+  bool success = 1;
+}
+
+message PendingBlockReply {
+  bytes block_rlp = 1;
+}
+
+message EngineGetPayloadBodiesByHashV1Request {
+  repeated types.H256 hashes = 1;
+}
+
+message EngineGetPayloadBodiesByRangeV1Request {
+  uint64 start = 1;
+  uint64 count = 2;
+} 
+
+message AAValidationRequest {
+  types.AccountAbstractionTransaction tx = 1;
+}
+
+message AAValidationReply {
+  bool valid = 1;
+}
+
+message BlockForTxNumRequest {
+  uint64 txnum = 1;
+}
+
+message BlockForTxNumResponse {
+  uint64 block_number = 1;
+  bool present = 2;
+}
+
+message MinimumBlockAvailableReply {
+  uint64 block_num = 1;
+}
+
+message SetHeadRequest {
+  uint64 block_number = 1;
+}
+
+message SetHeadReply {
+  bool success = 1;
+}

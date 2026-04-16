@@ -121,8 +121,8 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	}
 
 	tracer.OnTxStart(evm.GetVMContext(), txn, msg.From())
-	st := protocol.NewStateTransition(evm, msg, new(protocol.GasPool).AddGas(txn.GetGasLimit()).AddBlobGas(txn.GetBlobGas()))
-	exeRes, err := st.TransitionDb(false, false)
+	st := protocol.NewTxnExecutor(evm, msg, new(protocol.GasPool).AddGas(txn.GetGasLimit()).AddBlobGas(txn.GetBlobGas()))
+	exeRes, err := st.Execute(false, false)
 	if err != nil {
 		t.Fatalf("failed to execute transaction: %v", err)
 	}

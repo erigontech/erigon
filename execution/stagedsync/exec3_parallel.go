@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -30,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/receipts"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -115,10 +117,19 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 		temporalTx := applyTx.AsyncClone(mdbx.NewAsyncRwTx(applyTx.RwTx, 1000))
 		asyncTxChan = temporalTx.ApplyChan()
 		asyncTx = temporalTx
-	case kv.TemporalTx:
-		// MemoryMutation overlay — pure Go, no thread affinity.
-		// No asyncTx needed; exec goroutine reads directly from the overlay.
-		asyncTx = applyTx
+	case *membatchwithdb.MemoryMutation:
+		// MemoryMutation overlay — pure Go, no thread affinity for the in-memory
+		// layer. However, cursor operations on the underlying MdbxTx are NOT
+		// thread-safe. Create an OverlayTemporalReadView with its own independent
+		// RO tx for the executor goroutine, so it doesn't share MDBX cursors
+		// with the apply goroutine. The overlay's in-memory data is still shared
+		// (protected by MemoryMutation's RWMutex).
+		execRoTx, err := pe.cfg.db.BeginTemporalRo(ctx)
+		if err != nil {
+			return nil, rwTx, fmt.Errorf("open RO tx for executor overlay: %w", err)
+		}
+		defer execRoTx.Rollback()
+		asyncTx = applyTx.NewTemporalReadView(execRoTx)
 	default:
 		return nil, rwTx, fmt.Errorf("expected *temporal.RwTx: got %T", rwTx)
 	}
@@ -184,7 +195,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 			}
 		}()
 
-		shouldGenerateChangesets := shouldGenerateChangeSets(pe.cfg, startBlockNum, maxBlockNum, initialCycle)
+		shouldGenerateChangesets := shouldGenerateChangeSets(pe.cfg, startBlockNum, maxBlockNum)
 		changeSet := &changeset.StateChangeSet{}
 		if shouldGenerateChangesets && startBlockNum > 0 {
 			pe.domains().SetChangesetAccumulator(changeSet)
@@ -220,7 +231,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						nil, applyResult.rules)
 					if err == nil {
 						err = pe.rs.ApplyTxIndexes(rwTx, applyResult.txNum, applyResult.receipt, applyResult.blobGasUsed,
-							applyResult.logs, applyResult.traceFroms, applyResult.traceTos)
+							applyResult.logs, applyResult.traceFroms, applyResult.traceTos, applyResult.blockFinalize)
 					}
 					if err == nil {
 						err = pe.rs.CommitStepBoundary(ctx, rwTx, applyResult.blockNum, applyResult.txNum)
@@ -378,7 +389,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 								return err
 							}
 
-							if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) || pe.cfg.experimentalBAL {
+							if (pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) || pe.cfg.experimentalBAL) && !applyResult.isPartial {
 								err = ProcessBAL(rwTx, lastHeader, applyResult.TxIO, pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime), pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir)
 								if err != nil {
 									return err
@@ -690,14 +701,23 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 							reader = state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx))
 						}
 						ibs := state.New(state.NewBufferedReader(pe.rs, reader))
+						defer ibs.Release(true)
 						ibs.SetVersion(finalVersion.Incarnation)
 						localVersionMap := state.NewVersionMap(nil)
 						ibs.SetVersionMap(localVersionMap)
 						ibs.SetTxContext(finalVersion.BlockNum, finalVersion.TxIndex)
 
-						txTask, ok := result.Task.(*taskVersion).Task.(*exec.TxTask)
+						var txTask *exec.TxTask
+						switch t := result.Task.(type) {
+						case *taskVersion:
+							if tt, ok := t.Task.(*exec.TxTask); ok {
+								txTask = tt
+							}
+						case *exec.TxTask:
+							txTask = t
+						}
 
-						if !ok {
+						if txTask == nil {
 							return nil, nil
 						}
 
@@ -712,9 +732,32 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 
 						chainReader := consensuschain.NewReader(pe.cfg.chainConfig, applyTx, pe.cfg.blockReader, pe.logger)
 
+						// For partial blocks, reconstruct prior receipts. See #20452.
+						finalizeReceipts := blockReceipts
+						if blockResult.isPartial && len(txTask.Txs) > 0 {
+							firstTxIndex := blockExecutor.tasks[0].Version().TxIndex
+							if firstTxIndex > 0 {
+								blockStartTxNum := txTask.TxNum - uint64(txTask.TxIndex)
+								priorReader := state.NewHistoryReaderV3(applyTx, blockStartTxNum)
+								priorIbs := state.New(priorReader)
+								defer priorIbs.Release(true)
+								priorGp := protocol.NewGasPool(txTask.Header.GasLimit, pe.cfg.chainConfig.GetMaxBlobGasPerBlock(txTask.Header.Time))
+								getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
+									return pe.cfg.blockReader.Header(ctx, applyTx, hash, number)
+								}
+								priorReceipts, priorErr := receipts.DerivePriorReceipts(ctx, pe.cfg.chainConfig, pe.cfg.engine, txTask.Header, txTask.Txs, firstTxIndex, priorIbs, priorGp, getHeader)
+								if priorErr != nil {
+									pe.logger.Warn("[parallel] failed to reconstruct prior receipts for partial block",
+										"block", blockResult.BlockNum, "startTxIndex", firstTxIndex, "err", priorErr)
+								} else {
+									finalizeReceipts = append(priorReceipts, blockReceipts...)
+								}
+							}
+						}
+
 						_, err =
 							pe.cfg.engine.Finalize(
-								pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles, blockReceipts,
+								pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles, finalizeReceipts,
 								txTask.Withdrawals, chainReader, syscall, false, pe.logger)
 
 						if err != nil {
@@ -757,6 +800,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						traceFroms:            result.TraceFroms,
 						traceTos:              result.TraceTos,
 						cumulativeBlobGasUsed: blockExecutor.blobGasUsed,
+						blockFinalize:         true,
 					}:
 					case <-ctx.Done():
 						return ctx.Err()
@@ -803,15 +847,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *execRequest) (err error) {
 	// Validate state cache before processing block - ensures cache is cleared after reorgs
 	// This matches the behavior in serial execution (exec3_serial.go)
-	if len(execRequest.tasks) > 0 {
-		if txTask, ok := execRequest.tasks[0].(*exec.TxTask); ok && txTask.Header != nil {
-			parentHash := txTask.Header.ParentHash
-			blockHash := execRequest.blockHash
-			if stateCache := pe.doms.GetStateCache(); stateCache != nil {
-				stateCache.ValidateAndPrepare(parentHash, blockHash)
-			}
-		}
-	}
+	// stateCache removed: SD overlay is the cache with persistent SharedDomains
 
 	prevSenderTx := map[accounts.Address]int{}
 	var scheduleable *blockExecutor
@@ -1038,6 +1074,7 @@ type txResult struct {
 	traceTos              map[accounts.Address]struct{}
 	writes                state.VersionedWrites
 	rules                 *chain.Rules
+	blockFinalize         bool // block-finalize txResult shares the system-tx-end txNum; skip receipt cache to avoid double-write
 }
 
 type execTask struct {
@@ -1051,7 +1088,7 @@ type execResult struct {
 	writes state.VersionedWrites
 }
 
-func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engine, vm *state.VersionMap, stateReader state.StateReader, stateWriter state.StateWriter, balActive bool) (*types.Receipt, state.ReadSet, state.VersionedWrites, error) {
+func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engine, vm *state.VersionMap, stateReader state.StateReader, stateWriter state.StateWriter) (*types.Receipt, state.ReadSet, state.VersionedWrites, error) {
 	task, ok := result.Task.(*taskVersion)
 
 	if !ok {
@@ -1084,10 +1121,14 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 	txOut, burntDelta, burntDeltaIncrease, hasBurntDelta := result.TxOut.StripBalanceWrite(result.ExecutionResult.BurntContractAddress, result.TxIn)
 	result.TxOut = txOut
 
-	// Force a re-read of the coinbase & burnt contract address
+	// Force a re-read of the coinbase & burnt contract balance
 	// so the VersionedStateReader provides the correct base values.
-	delete(result.TxIn, result.Coinbase)
-	delete(result.TxIn, result.ExecutionResult.BurntContractAddress)
+	// Only remove the BalancePath read — not the entire address —
+	// because result.TxIn is shared with blockIO and deleting the
+	// full address also drops storage/code/nonce reads needed for
+	// the BAL (e.g. when coinbase == transaction target).
+	result.TxIn.Delete(result.Coinbase, state.AccountKey{Path: state.BalancePath})
+	result.TxIn.Delete(result.ExecutionResult.BurntContractAddress, state.AccountKey{Path: state.BalancePath})
 
 	txTask, ok := task.Task.(*exec.TxTask)
 
@@ -1101,19 +1142,12 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 		return result.finalizeSystemTx(task, txTask, rules, vm, stateReader, stateWriter)
 	}
 
-	// When BAL is active, use the IBS-based finalize path which produces
-	// correct BAL reads/writes via full IntraBlockState reconstruction.
-	// The direct finalizeTx path computes fee-adjusted balances arithmetically
-	// which doesn't generate the BAL-compatible read/write sets.
-	if balActive {
-		result.CollectorWrites = nil
-		return result.finalizeWithIBS(task, txTask, prevReceipt, engine, vm, stateReader, stateWriter,
-			coinbaseDelta, coinbaseDeltaIncrease, hasCoinbaseDelta,
-			burntDelta, burntDeltaIncrease, hasBurntDelta,
-			rules, txTrace, tracePrefix)
-	}
-
-	return result.finalizeTx(task, txTask, prevReceipt, engine, vm, stateReader,
+	// Always use the IBS-based finalize path. The direct finalizeTx path
+	// computes fee-adjusted balances arithmetically but produces incorrect
+	// state roots for non-Amsterdam blocks. finalizeWithIBS uses full
+	// IntraBlockState reconstruction which is correct for all forks.
+	result.CollectorWrites = nil
+	return result.finalizeWithIBS(task, txTask, prevReceipt, engine, vm, stateReader, stateWriter,
 		coinbaseDelta, coinbaseDeltaIncrease, hasCoinbaseDelta,
 		burntDelta, burntDeltaIncrease, hasBurntDelta,
 		rules, txTrace, tracePrefix)
@@ -1177,6 +1211,13 @@ func (result *execResult) finalizeWithIBS(
 	if err := ibs.ApplyVersionedWrites(result.TxOut); err != nil {
 		return nil, nil, nil, err
 	}
+	// Clear reads generated by ApplyVersionedWrites. The setState calls
+	// inside ApplyVersionedWrites trigger versionedRead to fetch previous
+	// storage values, recording extra StoragePath reads that don't exist
+	// in the block assembler's BAL. The execution reads (result.TxIn)
+	// already capture the correct set of storage accesses; only the
+	// fee-distribution reads generated below should be in addReads.
+	ibs.ResetVersionedReads()
 	ibs.SetTrace(txTask.Trace)
 
 	// Apply the TX's net balance effect on burnt contract (re-based on correct base)
@@ -1271,6 +1312,7 @@ func (result *execResult) finalizeWithIBS(
 // collector writes without reconstructing the full IBS. This avoids the
 // expensive ApplyVersionedWrites → IBS stateObject creation for ALL TX writes.
 // Only the fee-calc accounts (coinbase, burnt contract) are touched.
+// finalizeTx is retained for testing and potential fallback. Production always uses finalizeWithIBS.
 func (result *execResult) finalizeTx(
 	task *taskVersion,
 	txTask *exec.TxTask,
@@ -1370,6 +1412,7 @@ func (result *execResult) finalizeTx(
 			Address: result.Coinbase,
 			Path:    state.BalancePath,
 			Val:     newCoinbaseBalance,
+			Version: task.Version(),
 			Reason:  tracing.BalanceIncreaseRewardTransactionFee,
 		})
 	}
@@ -1383,6 +1426,7 @@ func (result *execResult) finalizeTx(
 				Address: burntAddr,
 				Path:    state.BalancePath,
 				Val:     newBurntBalance,
+				Version: task.Version(),
 				Reason:  tracing.BalanceDecreaseGasBuy,
 			})
 		}
@@ -1894,11 +1938,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				txResult := be.results[tx]
 
-				// Per-tx gas pool deduction uses max(regular, state).
-				// Pre-Amsterdam: blockStateGasUsed is 0, so this equals blockRegularGasUsed.
-				// The exact block-level Bottleneck is computed from accumulated totals at end of block.
-				txBlockGas := max(txResult.ExecutionResult.BlockRegularGasUsed, txResult.ExecutionResult.BlockStateGasUsed)
-				if err := be.gasPool.SubGas(txBlockGas); err != nil {
+				// EIP-8037: The net per-tx pool deduction must be BlockRegularGasUsed,
+				// not max(regular, state). Per-tx max gives Σ max(r_i, s_i) ≥
+				// max(Σ r_i, Σ s_i), rejecting valid blocks. State gas is validated
+				// at block end via max(Σ regular, Σ state). Pre-Amsterdam: no change.
+				if err := be.gasPool.SubGas(txResult.ExecutionResult.BlockRegularGasUsed); err != nil {
 					return nil, fmt.Errorf("%w, block=%d: block gas used overflow", rules.ErrInvalidBlock, be.blockNum)
 				}
 
@@ -1922,8 +1966,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				collector := state.NewVersionedWriteCollector(pe.rs)
 
-				balActive := pe.cfg.experimentalBAL || pe.cfg.chainConfig.IsAmsterdam(txTask.BlockTime())
-				_, addReads, addWrites, err := txResult.finalize(prevReceipt, pe.cfg.engine, be.versionMap, stateReader, collector, balActive)
+				// finalize always uses IBS-based finalization for correctness of all forks
+				_, addReads, addWrites, err := txResult.finalize(prevReceipt, pe.cfg.engine, be.versionMap, stateReader, collector)
 
 				if err != nil {
 					return nil, err
@@ -2009,7 +2053,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			if result.Receipt != nil {
 				be.blockRegularGasUsed += result.ExecutionResult.BlockRegularGasUsed
 				be.blockStateGasUsed += result.ExecutionResult.BlockStateGasUsed
-				// For commit heuristics, use per-tx gas contribution: max(regular, state).
+				// EIP-8037: per-tx max(regular, state) overestimates vs the true block gas
+				// (max of sums, not sum of maxes), but is a safe upper bound for commit heuristics.
 				applyResult.blockGasUsed = int64(max(result.ExecutionResult.BlockRegularGasUsed, result.ExecutionResult.BlockStateGasUsed))
 				receipt := *result.Receipt
 				applyResult.receipt = &receipt

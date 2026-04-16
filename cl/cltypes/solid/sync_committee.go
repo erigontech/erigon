@@ -17,6 +17,7 @@
 package solid
 
 import (
+	"bytes"
 	"encoding/json"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -25,84 +26,147 @@ import (
 	"github.com/erigontech/erigon/common/ssz"
 )
 
-// Whole committee(512) public key and the aggregate public key.
-const syncCommitteeSize = 48 * 513
+// Default committee size for mainnet preset. Used when no config is available.
+const defaultSyncCommitteeSize = 512
 
-type SyncCommittee [syncCommitteeSize]byte
+// SyncCommittee holds N validator public keys (48 bytes each) plus one
+// aggregate public key. The size is determined by SYNC_COMMITTEE_SIZE from
+// the beacon chain config (512 for mainnet, 32 for minimal).
+type SyncCommittee struct {
+	data          []byte // (committeeSize + 1) * 48 bytes
+	committeeSize int    // number of validators (not including aggregate key)
+}
+
+// NewSyncCommittee creates a SyncCommittee with the default mainnet size.
+func NewSyncCommittee() *SyncCommittee {
+	return NewSyncCommitteeWithSize(defaultSyncCommitteeSize)
+}
+
+// NewSyncCommitteeWithSize creates a SyncCommittee for the given committee size.
+func NewSyncCommitteeWithSize(committeeSize int) *SyncCommittee {
+	return &SyncCommittee{
+		data:          make([]byte, (committeeSize+1)*48),
+		committeeSize: committeeSize,
+	}
+}
 
 func NewSyncCommitteeFromParameters(
 	committee []common.Bytes48,
 	aggregatePublicKey common.Bytes48,
 ) *SyncCommittee {
-	s := &SyncCommittee{}
+	s := NewSyncCommitteeWithSize(len(committee))
 	s.SetAggregatePublicKey(aggregatePublicKey)
 	s.SetCommittee(committee)
 	return s
 }
 
+// Bytes returns the raw backing data. Replaces the old s[:] slice syntax.
+func (s *SyncCommittee) Bytes() []byte {
+	s.ensureData()
+	return s.data
+}
+
+func (s *SyncCommittee) CommitteeSize() int {
+	if s.committeeSize == 0 && len(s.data) > 0 {
+		// Backwards compat: infer from data length
+		s.committeeSize = len(s.data)/48 - 1
+	}
+	if s.committeeSize == 0 {
+		return defaultSyncCommitteeSize
+	}
+	return s.committeeSize
+}
+
+func (s *SyncCommittee) ensureData() {
+	if len(s.data) == 0 {
+		s.data = make([]byte, (s.CommitteeSize()+1)*48)
+	}
+}
+
 func (s *SyncCommittee) GetCommittee() []common.Bytes48 {
-	committee := make([]common.Bytes48, 512)
+	s.ensureData()
+	size := s.CommitteeSize()
+	committee := make([]common.Bytes48, size)
 	for i := range committee {
-		copy(committee[i][:], s[i*48:])
+		copy(committee[i][:], s.data[i*48:])
 	}
 	return committee
 }
 
 func (s *SyncCommittee) AggregatePublicKey() (out common.Bytes48) {
-	copy(out[:], s[syncCommitteeSize-48:])
+	s.ensureData()
+	copy(out[:], s.data[len(s.data)-48:])
 	return
 }
 
 func (s *SyncCommittee) SetCommittee(committee []common.Bytes48) {
+	s.ensureData()
 	for i := range committee {
-		copy(s[i*48:], committee[i][:])
+		if i*48 >= len(s.data)-48 {
+			break
+		}
+		copy(s.data[i*48:], committee[i][:])
 	}
 }
 
 func (s *SyncCommittee) SetAggregatePublicKey(k common.Bytes48) {
-	copy(s[syncCommitteeSize-48:], k[:])
+	s.ensureData()
+	copy(s.data[len(s.data)-48:], k[:])
 }
 
 func (s *SyncCommittee) EncodingSizeSSZ() int {
-	return syncCommitteeSize
+	s.ensureData()
+	return len(s.data)
 }
 
 func (s *SyncCommittee) DecodeSSZ(buf []byte, _ int) error {
-	if len(buf) < s.EncodingSizeSSZ() {
+	size := s.EncodingSizeSSZ()
+	if len(buf) < size {
 		return ssz.ErrLowBufferSize
 	}
-	copy(s[:], buf)
+	s.committeeSize = size/48 - 1
+	s.data = make([]byte, size)
+	copy(s.data, buf[:size])
 	return nil
 }
 
 func (s *SyncCommittee) EncodeSSZ(dst []byte) ([]byte, error) {
-	return append(dst, s[:]...), nil
+	s.ensureData()
+	return append(dst, s.data...), nil
 }
 
 func (s *SyncCommittee) Clone() clonable.Clonable {
-	return &SyncCommittee{}
+	return NewSyncCommitteeWithSize(s.CommitteeSize())
 }
 
 func (s *SyncCommittee) Copy() *SyncCommittee {
-	t := &SyncCommittee{}
-	copy(t[:], s[:])
+	t := NewSyncCommitteeWithSize(s.CommitteeSize())
+	copy(t.data, s.data)
 	return t
 }
 
 func (s *SyncCommittee) Equal(o *SyncCommittee) bool {
-	return *s == *o
+	if s == o {
+		return true
+	}
+	if s == nil || o == nil {
+		return false
+	}
+	return bytes.Equal(s.data, o.data)
 }
 
 func (s *SyncCommittee) HashSSZ() ([32]byte, error) {
-	syncCommitteeLayer := make([]byte, 512*32)
-	for i := 0; i < 512; i++ {
-		root, err := merkle_tree.BytesRoot(s[i*48 : (i*48)+48])
+	s.ensureData()
+	size := s.CommitteeSize()
+	syncCommitteeLayer := make([]byte, size*32)
+	for i := 0; i < size; i++ {
+		root, err := merkle_tree.BytesRoot(s.data[i*48 : (i*48)+48])
 		if err != nil {
 			return [32]byte{}, err
 		}
 		copy(syncCommitteeLayer[i*32:], root[:])
 	}
-	return merkle_tree.HashTreeRoot(syncCommitteeLayer, s[syncCommitteeSize-48:])
+	return merkle_tree.HashTreeRoot(syncCommitteeLayer, s.data[len(s.data)-48:])
 }
 
 func (s *SyncCommittee) Static() bool {
@@ -120,14 +184,15 @@ func (s *SyncCommittee) MarshalJSON() ([]byte, error) {
 }
 
 func (s *SyncCommittee) UnmarshalJSON(input []byte) error {
-	var err error
 	var tmp struct {
 		Committee          []common.Bytes48 `json:"pubkeys"`
 		AggregatePublicKey common.Bytes48   `json:"aggregate_pubkey"`
 	}
-	if err = json.Unmarshal(input, &tmp); err != nil {
+	if err := json.Unmarshal(input, &tmp); err != nil {
 		return err
 	}
+	s.committeeSize = len(tmp.Committee)
+	s.data = make([]byte, (s.committeeSize+1)*48)
 	s.SetAggregatePublicKey(tmp.AggregatePublicKey)
 	s.SetCommittee(tmp.Committee)
 	return nil

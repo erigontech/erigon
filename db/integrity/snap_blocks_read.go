@@ -35,14 +35,18 @@ func SnapBlocksRead(ctx context.Context, db kv.TemporalRoDB, blockReader service
 	maxBlockNum := blockReader.Snapshots().SegmentsMax()
 
 	if to != 0 && maxBlockNum > to {
-		maxBlockNum = 2
+		maxBlockNum = to
 	}
 
 	for i := from; i < maxBlockNum; i += 10_000 {
 		if err := db.View(ctx, func(tx kv.Tx) error {
 			b, err := blockReader.BlockByNumber(ctx, tx, i)
 			if err != nil {
-				return err
+				if failFast {
+					return err
+				}
+				log.Error("[integrity] Blocks", "err", err)
+				return nil
 			}
 			if b == nil {
 				err := fmt.Errorf("[integrity] block not found in snapshots: %d", i)

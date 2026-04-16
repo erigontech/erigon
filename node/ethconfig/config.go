@@ -40,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
-	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash/ethashcfg"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/gasprice/gaspricecfg"
@@ -216,8 +215,7 @@ type Config struct {
 	// Ethash options
 	Ethash ethashcfg.Config
 
-	Clique chainspec.ConsensusSnapshotConfig
-	Aura   chain.AuRaConfig
+	Aura chain.AuRaConfig
 
 	// Transaction pool options
 	TxPool  txpoolcfg.Config
@@ -280,10 +278,11 @@ type Sync struct {
 	LoopBlockLimit             uint
 	ParallelStateFlushing      bool
 
-	ChaosMonkey              bool
-	AlwaysGenerateChangesets bool
-	MaxReorgDepth            uint64
-	KeepExecutionProofs      bool
-	PersistReceiptsCacheV2   bool
-	SnapshotDownloadToBlock  uint64 // exclusive [0,toBlock)
+	ChaosMonkey                      bool
+	AlwaysGenerateChangesets         bool
+	MaxReorgDepth                    uint64
+	KeepExecutionProofs              bool
+	ExperimentalConcurrentCommitment bool
+	PersistReceiptsCacheV2           bool
+	SnapshotDownloadToBlock          uint64 // exclusive [0,toBlock)
 }
