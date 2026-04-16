@@ -686,8 +686,6 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 		}
 		lastVal = builder.AppendBytes(lastVal[:0])
 
-		// Write immediately: avoids holding a second large EF val in memory alongside lastVal.
-		// fmt.Printf("put %x->%x\n", lastKey, lastVal)
 		if _, err = write.Write(lastKey); err != nil {
 			return nil, err
 		}
