@@ -202,6 +202,8 @@ func (inv *Inventory) FilesForRange(domain Domain, from, to uint64) []*FileEntry
 }
 
 // LocalFiles returns all files that exist on disk for a domain.
+// The returned slice is a copy, but entries are shared pointers.
+// Callers MUST NOT mutate entries — use SetTorrentHash for hash updates.
 func (inv *Inventory) LocalFiles(domain Domain) []*FileEntry {
 	inv.mu.RLock()
 	defer inv.mu.RUnlock()
@@ -216,6 +218,8 @@ func (inv *Inventory) LocalFiles(domain Domain) []*FileEntry {
 }
 
 // AllDomainFiles returns all files for a domain regardless of local/remote status.
+// The returned slice is a copy, but entries are shared pointers.
+// Callers MUST NOT mutate entries — use SetTorrentHash for hash updates.
 func (inv *Inventory) AllDomainFiles(domain Domain) []*FileEntry {
 	inv.mu.RLock()
 	defer inv.mu.RUnlock()

@@ -97,18 +97,11 @@ func GenerateV2(inv *snapshotinv.Inventory) *ChainTomlV2 {
 		}
 		layout = layout.Normalize()
 
-		// Compute total coverage.
-		var coverageFrom, coverageTo uint64
-		if len(layout) > 0 {
-			coverageFrom = layout[0].From
-			coverageTo = layout[len(layout)-1].To
-		}
+		dm := &DomainManifest{}
 
-		dm := &DomainManifest{
-			Coverage: [2]uint64{coverageFrom, coverageTo},
-		}
-
-		// Only include files at canonical boundaries.
+		// Only include files at canonical boundaries with a torrent hash.
+		// Coverage is computed from what's actually listed, not from all
+		// local files — avoids advertising coverage for uncanonical/unhashed files.
 		for _, f := range files {
 			r := f.Range()
 			if !isCanonicalFile(r) {
@@ -130,7 +123,12 @@ func GenerateV2(inv *snapshotinv.Inventory) *ChainTomlV2 {
 			return dm.Files[i].Range[0] < dm.Files[j].Range[0]
 		})
 
+		// Compute coverage from the published file list (not all local files).
 		if len(dm.Files) > 0 {
+			dm.Coverage = [2]uint64{
+				dm.Files[0].Range[0],
+				dm.Files[len(dm.Files)-1].Range[1],
+			}
 			manifest.Domains[string(domain)] = dm
 		}
 	}

@@ -122,6 +122,10 @@ func (li *LiveInventory) Refresh() error {
 
 // Snapshot returns the current inventory. The returned value is safe to read
 // concurrently — it won't be modified (a new Inventory is created on each Refresh).
+// Snapshot returns the current pinned inventory. The returned Inventory is
+// shared — callers MUST NOT modify its entries directly. SetTorrentHash is
+// the only sanctioned mutation path (it updates entries in place because
+// torrent hashing is async and the inventory is rebuilt on each refresh).
 func (li *LiveInventory) Snapshot() *Inventory {
 	li.mu.RLock()
 	defer li.mu.RUnlock()
