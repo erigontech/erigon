@@ -37,6 +37,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/spaolacci/murmur3"
 	"github.com/stretchr/testify/require"
+	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
@@ -1006,80 +1007,99 @@ func TestDomain_UnwindRestoredEntryVisibility(t *testing.T) {
 		"GetLatest must return the unwind-restored value V1, not the file value V2")
 }
 
-// TestDomain_UnwindFlushBeforeReExecution verifies that after an unwind, the
-// changeset must be flushed to DB and in-memory maps cleared before
-// re-execution starts. Without this, re-execution writes to the in-memory
-// maps override the pending changeset, causing getLatest to return stale
-// pre-unwind values for keys in both the map and the changeset. See #20169.
-func TestDomain_UnwindFlushBeforeReExecution(t *testing.T) {
-	logger := log.New()
-	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, 16, logger)
-	ctx := context.Background()
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
+// newTestTemporalMemBatch creates a minimal TemporalMemBatch for unit testing
+// the in-memory map vs. unwind-changeset priority logic. No DB or files needed.
+func newTestTemporalMemBatch(stepSize uint64) *TemporalMemBatch {
+	sd := &TemporalMemBatch{
+		storage:  btree2.NewMap[string, []dataWithTxNum](128),
+		metrics:  &changeset.DomainMetrics{Domains: make(map[kv.Domain]*changeset.DomainIOMetrics)},
+		stepSize: stepSize,
+	}
+	for i := range sd.domains {
+		sd.domains[i] = map[string][]dataWithTxNum{}
+	}
+	return sd
+}
 
-	k1 := []byte("key1")
+// TestTemporalMemBatch_UnwindMaskedByInMemMap verifies the post-reorg bug where
+// the in-memory map from forward execution masks the unwind changeset.
+//
+// TemporalMemBatch.getLatest checks the in-memory map BEFORE the changeset.
+// After an unwind, the changeset records the correct restored values, but the
+// map still holds stale pre-unwind values. For keys not overwritten by
+// re-execution, getLatest returns the stale value — causing gas mismatches.
+//
+// The fix in stage_execute.go calls Flush (writes changeset to DB) + ClearRam
+// (clears both the map and changeset) after Unwind, before re-execution starts.
+// See #20169.
+func TestTemporalMemBatch_UnwindMaskedByInMemMap(t *testing.T) {
+	k1 := []byte("account1")
+	k2 := []byte("account2")
 
-	// Step 0: write k1=V1 at txNum 5, build and prune.
-	tx, err := db.BeginRw(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback() //nolint:gocritic
-
-	dt := d.beginForTests()
-	w := dt.NewWriter()
-	require.NoError(t, w.PutWithPrev(k1, []byte("V1"), 5, nil))
-	require.NoError(t, w.Flush(ctx, tx))
-	w.Close()
-	dt.Close()
-
-	require.NoError(t, d.collateBuildIntegrate(ctx, 0, tx, background.NewProgressSet()))
-
-	dt = d.beginForTests()
-	_, err = dt.Prune(ctx, tx, 0, 0, 16, math.MaxUint64, logEvery)
-	dt.Close()
-	require.NoError(t, err)
-
-	// Step 1: simulate forward execution writing k1=V2 at txNum 20.
-	dt = d.beginForTests()
-	w = dt.NewWriter()
-	require.NoError(t, w.PutWithPrev(k1, []byte("V2"), 20, []byte("V1")))
-	require.NoError(t, w.Flush(ctx, tx))
-	w.Close()
-	dt.Close()
-
-	// Now simulate an unwind back to txNum 16 (start of step 1).
-	// The changeset says: k1 had previous value V1 at step 0.
-	step0Bytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(step0Bytes, ^uint64(1)) // step 1 (where V2 was written)
-	diffs := []kv.DomainEntryDiff{
-		{
-			Key:   string(k1) + string(step0Bytes),
-			Value: []byte("V1"),
-		},
+	// Build an unwind changeset that restores k1→V1 and k2→Vrestored.
+	step1Tag := make([]byte, 8)
+	binary.BigEndian.PutUint64(step1Tag, ^uint64(1)) // step 1
+	unwindChangeset := &[kv.DomainLen][]kv.DomainEntryDiff{}
+	unwindChangeset[kv.AccountsDomain] = []kv.DomainEntryDiff{
+		{Key: string(k1) + string(step1Tag), Value: []byte("V1")},
+		{Key: string(k2) + string(step1Tag), Value: []byte("Vrestored")},
 	}
 
-	dt = d.beginForTests()
-	err = dt.unwind(ctx, tx, 1, 16, uint64(dt.FirstStepNotInFiles()), diffs)
-	dt.Close()
-	require.NoError(t, err)
+	t.Run("bug_without_ClearRam", func(t *testing.T) {
+		sd := newTestTemporalMemBatch(16)
 
-	// Simulate re-execution writing k1=V3 at txNum 22 (after the unwind target).
-	// This is what happens when the execution stage re-runs blocks after the unwind.
-	dt = d.beginForTests()
-	w = dt.NewWriter()
-	require.NoError(t, w.PutWithPrev(k1, []byte("V3"), 22, []byte("V1")))
-	require.NoError(t, w.Flush(ctx, tx))
-	w.Close()
-	dt.Close()
+		// Forward execution writes k1=V2, k2=Vold into the in-memory map.
+		sd.putLatest(kv.AccountsDomain, string(k1), []byte("V2"), 20)
+		sd.putLatest(kv.AccountsDomain, string(k2), []byte("Vold"), 20)
 
-	// GetLatest must return V3 (the re-execution value), NOT V2 (stale pre-unwind).
-	dt = d.beginForTests()
-	defer dt.Close()
-	v, _, found, err := dt.GetLatest(k1, tx)
-	require.NoError(t, err)
-	require.True(t, found)
-	require.Equal(t, "V3", string(v),
-		"after unwind+flush+re-execution, GetLatest must return the re-execution value V3")
+		// Unwind stores the changeset but does NOT clear the map.
+		sd.Unwind(16, unwindChangeset)
+
+		// Re-execution on the new fork: only k1 is modified.
+		sd.putLatest(kv.AccountsDomain, string(k1), []byte("V3"), 22)
+
+		// k1 happens to be correct — re-execution overwrote the map entry.
+		v, _, ok := sd.GetLatest(kv.AccountsDomain, k1)
+		require.True(t, ok)
+		require.Equal(t, "V3", string(v))
+
+		// k2 is WRONG: the map still has the stale pre-unwind "Vold",
+		// masking the changeset "Vrestored". This is the bug.
+		v, _, ok = sd.GetLatest(kv.AccountsDomain, k2)
+		require.True(t, ok)
+		require.Equal(t, "Vold", string(v),
+			"documents the bug: map masks the changeset for keys not re-written")
+	})
+
+	t.Run("fix_with_ClearRam", func(t *testing.T) {
+		sd := newTestTemporalMemBatch(16)
+
+		// Forward execution writes k1=V2, k2=Vold into the in-memory map.
+		sd.putLatest(kv.AccountsDomain, string(k1), []byte("V2"), 20)
+		sd.putLatest(kv.AccountsDomain, string(k2), []byte("Vold"), 20)
+
+		// Unwind stores the changeset.
+		sd.Unwind(16, unwindChangeset)
+
+		// THE FIX: clear in-memory state after unwind.
+		// In production, Flush() writes the changeset to DB first.
+		sd.ClearRam()
+
+		// Re-execution on the new fork: only k1 is modified.
+		sd.putLatest(kv.AccountsDomain, string(k1), []byte("V3"), 22)
+
+		// k1 returns the re-execution value.
+		v, _, ok := sd.GetLatest(kv.AccountsDomain, k1)
+		require.True(t, ok)
+		require.Equal(t, "V3", string(v))
+
+		// k2 is NOT in the map — ClearRam removed the stale entry.
+		// In production, the caller falls through to DB where Flush
+		// already wrote "Vrestored".
+		_, _, ok = sd.GetLatest(kv.AccountsDomain, k2)
+		require.False(t, ok,
+			"after ClearRam, k2 must not be in RAM — stale pre-unwind value must be gone")
+	})
 }
 
 func TestDomain_Delete(t *testing.T) {
