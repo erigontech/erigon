@@ -26,13 +26,14 @@ import (
 	"sync"
 	"unsafe"
 
+	"github.com/urfave/cli/v2"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/erigontech/erigon/common/dbg"
 	liblog "github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/app"
 	"github.com/erigontech/erigon/node/app/event"
 	"github.com/erigontech/erigon/node/app/util"
-	"github.com/urfave/cli/v2"
-	"golang.org/x/sync/errgroup"
 )
 
 type relation interface {
