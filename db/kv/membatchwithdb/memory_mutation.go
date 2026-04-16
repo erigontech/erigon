@@ -815,7 +815,7 @@ func (m *MemoryMutation) ApplyRw(_ context.Context, f func(tx kv.RwTx) error) er
 }
 
 func (m *MemoryMutation) ViewID() uint64 {
-	panic("ViewID Not implemented")
+	return m.db.ViewID()
 }
 
 func (m *MemoryMutation) CHandle() unsafe.Pointer {

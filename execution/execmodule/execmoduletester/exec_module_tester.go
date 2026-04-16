@@ -517,7 +517,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	// These are required for the Merge engine's FinalizeAndAssemble to process
 	// withdrawal and consolidation requests.
 	if gspec.Config.IsPrague(0) {
-		if err := blockgen.InitPraguePreDeploys(mock.DB, mock.Log); err != nil {
+		if err := blockgen.InitPraguePreDeploys(mock.DB, gspec.Config, mock.Log); err != nil {
 			if tb != nil {
 				tb.Fatal(err)
 			} else {
