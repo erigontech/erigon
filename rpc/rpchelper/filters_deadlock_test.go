@@ -30,7 +30,7 @@ func TestFiltersDeadlock(t *testing.T) {
 	t.Parallel()
 	logger := log.New()
 	config := FiltersConfig{}
-	f := New(context.TODO(), config, nil, nil, nil, func() {}, logger)
+	f := New(context.TODO(), config, nil, nil, nil, func() {}, logger, nil)
 	crit := filters.FilterCriteria{
 		Addresses: nil,
 		Topics:    [][]common.Hash{},

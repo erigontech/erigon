@@ -520,8 +520,9 @@ type TemporalMemBatch interface {
 	Merge(other TemporalMemBatch) error
 	ClearRam()
 	IndexAdd(table InvertedIdx, key []byte, txNum uint64) (err error)
-	IteratePrefix(domain Domain, prefix []byte, roTx Tx, it func(k []byte, v []byte, step Step) (cont bool, err error)) error
+	IteratePrefix(domain Domain, prefix []byte, roTx Tx, it func(k []byte, v []byte) (cont bool, err error)) error
 	HasPrefix(domain Domain, prefix []byte, roTx Tx) ([]byte, []byte, bool, error)
+	HasPrefixInRAM(domain Domain, prefix []byte) bool
 	SizeEstimate() uint64
 	Flush(ctx context.Context, tx RwTx) error
 	Close()
@@ -726,13 +727,14 @@ var (
 	//DbGcSelfPnlMergeCalls  = metrics.NewCounter(`db_gc_pnl{phase="slef_merge_calls"}`)                //nolint
 )
 
-// ErrServerOverloaded is returned by BeginRo when the DB semaphore is full and the caller is an RPC handler.
-var ErrServerOverloaded = errors.New("server overloaded, retry later")
+// ErrReadTxLimitExceeded is returned by BeginRo when the read-tx semaphore is full and no slot is
+// available for a new concurrent read transaction. The RPC layer remaps this to HTTP 503 / JSON-RPC -32005.
+var ErrReadTxLimitExceeded = errors.New("read-tx limit exceeded: too many concurrent read transactions")
 
 type nonBlockingAcquireKey struct{}
 
 // WithNonBlockingAcquire tags ctx to request fail-fast semaphore acquisition in BeginRo.
-// When set, BeginRo uses TryAcquire and returns ErrServerOverloaded immediately if the
+// When set, BeginRo uses TryAcquire and returns ErrReadTxLimitExceeded immediately if the
 // read-tx semaphore is full, instead of blocking until a slot is available.
 func WithNonBlockingAcquire(ctx context.Context) context.Context {
 	return context.WithValue(ctx, nonBlockingAcquireKey{}, struct{}{})
