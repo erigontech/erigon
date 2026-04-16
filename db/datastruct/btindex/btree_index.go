@@ -348,6 +348,7 @@ type BtIndex struct {
 	ef       *eliasfano32.EliasFano
 	file     *os.File
 	bplus    *BpsTree
+	search   *PrefixIndex
 	size     int64
 	modTime  time.Time
 	filePath string
@@ -508,7 +509,10 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 	if len(idx.data[pos:]) == 0 {
 		idx.bplus = NewBpsTree(kvGetter, idx.ef, M, idx.dataLookup)
 		idx.bplus.cursorGetter = idx.newCursor
-		// fallback for files without nodes encoded
+		if dbg.UsePrefixIndex {
+			idx.search = NewPrefixIndex(kvGetter, idx.ef, idx.dataLookup)
+			idx.search.cursorGetter = idx.newCursor
+		}
 	} else {
 		nodes, err := decodeListNodes(idx.data[pos:])
 		if err != nil {
@@ -516,6 +520,10 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 		}
 		idx.bplus = NewBpsTreeWithNodes(kvGetter, idx.ef, M, idx.dataLookup, nodes)
 		idx.bplus.cursorGetter = idx.newCursor
+		if dbg.UsePrefixIndex {
+			idx.search = NewPrefixIndexWithNodes(kvGetter, idx.ef, idx.dataLookup, nodes)
+			idx.search.cursorGetter = idx.newCursor
+		}
 	}
 
 	validationPassed = true
@@ -593,6 +601,10 @@ func (b *BtIndex) Close() {
 		}
 		b.file = nil
 	}
+	if b.search != nil {
+		b.search.Close()
+		b.search = nil
+	}
 	if b.bplus != nil {
 		b.bplus.Close()
 		b.bplus = nil
@@ -613,13 +625,13 @@ func (b *BtIndex) Get(lookup []byte, gr *seg.Reader) (k, v []byte, offsetInFile 
 	// defer func() {
 	// 	fmt.Printf("[Bindex][%s] Get (%t) '%x' -> '%x' di=%d err %v\n", b.FileName(), found, lookup, v, index, err)
 	// }()
-	if b.bplus == nil {
-		panic(fmt.Errorf("Get: `b.bplus` is nil: %s", gr.FileName()))
+	if b.search != nil {
+		v, found, offsetInFile, err = b.search.Get(gr, lookup)
+	} else if b.bplus != nil {
+		v, found, offsetInFile, err = b.bplus.Get(gr, lookup)
+	} else {
+		panic(fmt.Errorf("Get: no search engine available: %s", gr.FileName()))
 	}
-	// weak assumption that k will be ignored and used lookup instead.
-	// since fetching k and v from data file is required to use Getter.
-	// Why to do Getter.Reset twice when we can get kv right there.
-	v, found, offsetInFile, err = b.bplus.Get(gr, lookup)
 	if err != nil {
 		if errors.Is(err, ErrBtIndexLookupBounds) {
 			return k, v, offsetInFile, false, nil
@@ -639,7 +651,13 @@ func (b *BtIndex) Seek(g *seg.Reader, x []byte) (*Cursor, error) {
 	if b.Empty() {
 		return nil, nil
 	}
-	c, err := b.bplus.Seek(g, x)
+	var c *Cursor
+	var err error
+	if b.search != nil {
+		c, err = b.search.Seek(g, x)
+	} else {
+		c, err = b.bplus.Seek(g, x)
+	}
 	if err != nil || c == nil {
 		if errors.Is(err, ErrBtIndexLookupBounds) {
 			return nil, nil
@@ -658,5 +676,15 @@ func (b *BtIndex) OrdinalLookup(getter *seg.Reader, i uint64) *Cursor {
 	return b.newCursor(k, v, i, getter)
 }
 
-func (b *BtIndex) Offsets() *eliasfano32.EliasFano { return b.bplus.Offsets() }
-func (b *BtIndex) Distances() (map[int]int, error) { return b.bplus.Distances() }
+func (b *BtIndex) Offsets() *eliasfano32.EliasFano {
+	if b.search != nil {
+		return b.search.Offsets()
+	}
+	return b.bplus.Offsets()
+}
+func (b *BtIndex) Distances() (map[int]int, error) {
+	if b.search != nil {
+		return b.search.Distances()
+	}
+	return b.bplus.Distances()
+}
