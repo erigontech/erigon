@@ -556,9 +556,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	logger.Info("Initialising Ethereum protocol", "network", config.NetworkID)
 	var rulesConfig any
 
-	if chainConfig.Clique != nil {
-		rulesConfig = &config.Clique
-	} else if chainConfig.Aura != nil {
+	if chainConfig.Aura != nil {
 		rulesConfig = &config.Aura
 	} else if chainConfig.Bor != nil {
 		rulesConfig = chainConfig.Bor
