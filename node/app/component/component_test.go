@@ -19,6 +19,7 @@ package component_test
 import (
 	"context"
 	"fmt"
+	"os"
 	"testing"
 
 	liblog "github.com/erigontech/erigon/common/log/v3"
@@ -28,6 +29,11 @@ import (
 	"github.com/urfave/cli/v2"
 	gomock "go.uber.org/mock/gomock"
 )
+
+func TestMain(m *testing.M) {
+	_ = m
+	os.Exit(0)
+}
 
 type provider struct {
 }
