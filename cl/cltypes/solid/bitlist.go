@@ -57,6 +57,12 @@ func BitlistFromBytes(xs []byte, c int) *BitList {
 	}
 }
 
+// SetLimit overrides the capacity (limit) used for HashSSZ computation.
+// This is needed for preset-aware hash computation where the limit differs between mainnet and minimal.
+func (u *BitList) SetLimit(limit int) {
+	u.c = limit
+}
+
 func (u *BitList) GetBitAt(i int) bool {
 	if i >= u.Bits() {
 		return false

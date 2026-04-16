@@ -11,6 +11,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func convertDataToStringP(abstractMap map[string]any, field string) *string {
@@ -34,6 +35,8 @@ func convertDataToStringP(abstractMap map[string]any, field string) *string {
 		if reflect.ValueOf(abstractMap[field]).IsZero() {
 			return nil
 		}
+		result = v.String()
+	case accounts.Address:
 		result = v.String()
 	case common.Address:
 		result = v.String()

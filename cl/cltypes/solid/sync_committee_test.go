@@ -56,7 +56,7 @@ func TestSyncCommittee(t *testing.T) {
 	assert.Equal(t, common.Bytes48(newAggregatePublicKey), updatedAggregatePublicKey)
 
 	// Test EncodingSizeSSZ
-	expectedEncodingSize := syncCommitteeSize
+	expectedEncodingSize := (defaultSyncCommitteeSize + 1) * 48
 	encodingSize := syncCommittee.EncodingSizeSSZ()
 	assert.Equal(t, expectedEncodingSize, encodingSize)
 
@@ -89,6 +89,53 @@ func TestSyncCommittee(t *testing.T) {
 
 	// Test Static
 	assert.True(t, syncCommittee.Static())
+}
+
+func TestSyncCommitteeMinimalPreset(t *testing.T) {
+	const minimalSize = 32
+
+	// Build a minimal-preset committee with distinct keys.
+	committee := make([]common.Bytes48, minimalSize)
+	for i := range committee {
+		committee[i][0] = byte(i + 1)
+	}
+	aggregatePublicKey := common.Bytes48{0xAB}
+
+	sc := NewSyncCommitteeFromParameters(committee, aggregatePublicKey)
+	require.Equal(t, minimalSize, sc.CommitteeSize())
+
+	// GetCommittee round-trip.
+	assert.Equal(t, committee, sc.GetCommittee())
+
+	// AggregatePublicKey round-trip.
+	assert.Equal(t, aggregatePublicKey, sc.AggregatePublicKey())
+
+	// EncodingSizeSSZ must reflect minimal size.
+	assert.Equal(t, (minimalSize+1)*48, sc.EncodingSizeSSZ())
+
+	// SSZ encode → decode round-trip using correctly-sized target.
+	encoded, err := sc.EncodeSSZ(nil)
+	require.NoError(t, err)
+	require.Equal(t, (minimalSize+1)*48, len(encoded))
+
+	decoded := NewSyncCommitteeWithSize(minimalSize)
+	require.NoError(t, decoded.DecodeSSZ(encoded, 0))
+	assert.Equal(t, sc, decoded)
+
+	// Clone preserves size.
+	cloned := sc.Clone().(*SyncCommittee)
+	assert.Equal(t, minimalSize, cloned.CommitteeSize())
+
+	// Copy preserves data.
+	copied := sc.Copy()
+	assert.True(t, sc.Equal(copied))
+
+	// JSON round-trip.
+	jsonData, err := sc.MarshalJSON()
+	require.NoError(t, err)
+	fromJSON := &SyncCommittee{}
+	require.NoError(t, fromJSON.UnmarshalJSON(jsonData))
+	assert.True(t, sc.Equal(fromJSON))
 }
 
 func TestSyncCommitteeJson(t *testing.T) {

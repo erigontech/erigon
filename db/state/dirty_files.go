@@ -165,22 +165,14 @@ func (i *FilesItem) closeFiles() {
 	if i == nil {
 		return
 	}
-	if i.decompressor != nil {
-		i.decompressor.Close()
-		i.decompressor = nil
-	}
-	if i.index != nil {
-		i.index.Close()
-		i.index = nil
-	}
-	if i.bindex != nil {
-		i.bindex.Close()
-		i.bindex = nil
-	}
-	if i.existence != nil {
-		i.existence.Close()
-		i.existence = nil
-	}
+	i.decompressor.Close()
+	i.decompressor = nil
+	i.index.Close()
+	i.index = nil
+	i.bindex.Close()
+	i.bindex = nil
+	i.existence.Close()
+	i.existence = nil
 }
 
 func (i *FilesItem) FilePaths(basePath string) (relativePaths []string) {
@@ -639,8 +631,8 @@ func (i visibleFile) EndRootNum() uint64 {
 	return i.endTxNum
 }
 
-func calcVisibleFiles(files *btree2.BTreeG[*FilesItem], l statecfg.Accessors, checker func(startTxNum, endTxNum uint64) bool, trace bool, toTxNum uint64) (roItems []visibleFile) {
-	newVisibleFiles := make([]visibleFile, 0, files.Len())
+func calcVisibleFiles(files *btree2.BTreeG[*FilesItem], l statecfg.Accessors, checker func(startTxNum, endTxNum uint64) bool, trace bool, toTxNum uint64) (roItems visibleFiles) {
+	newVisibleFiles := make(visibleFiles, 0, files.Len())
 	// trace = true
 	if trace {
 		log.Warn("[dbg] calcVisibleFiles", "amount", files.Len(), "toTxNum", toTxNum)
@@ -682,7 +674,7 @@ func calcVisibleFiles(files *btree2.BTreeG[*FilesItem], l statecfg.Accessors, ch
 		return true
 	})
 	if newVisibleFiles == nil {
-		newVisibleFiles = []visibleFile{}
+		newVisibleFiles = visibleFiles{}
 	}
 
 	// Check for gaps in visible files and warn if found
@@ -738,6 +730,16 @@ func checkForVisibility(item *FilesItem, l statecfg.Accessors, trace bool) (canB
 
 // visibleFiles have no garbage (overlaps, unindexed, etc...)
 type visibleFiles []visibleFile
+
+// refcntIncrement pins every non-frozen file by incrementing its refcount.
+// Callers must pair this with a matching decrement in RoTx.Close.
+func (files visibleFiles) refcntIncrement() {
+	for i := range files {
+		if !files[i].src.frozen {
+			files[i].src.refcount.Add(1)
+		}
+	}
+}
 
 // EndTxNum return txNum which not included in file - it will be first txNum in future file
 func (files visibleFiles) EndTxNum() uint64 {

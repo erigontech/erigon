@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 
 	datadir2 "github.com/erigontech/erigon/db/datadir"
@@ -32,7 +32,7 @@ var renameCmd = &cobra.Command{
 		if datadir == "" {
 			return fmt.Errorf("--datadir flag is required")
 		}
-		p := tea.NewProgram(NewSelectorModel(includeDomains, includeExts, excludeDomains, excludeExts), tea.WithAltScreen())
+		p := tea.NewProgram(NewSelectorModel(includeDomains, includeExts, excludeDomains, excludeExts))
 		finalModel, err := p.Run()
 		if err != nil {
 			return err
