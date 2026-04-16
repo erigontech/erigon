@@ -1428,6 +1428,18 @@ func doIntegrity(cliCtx *cli.Context) error {
 					if err := integrity.CheckStateVerify(ctx, db, failFast, fromStep, logger); err != nil {
 						return err
 					}
+				case integrity.DomainLatestVsHistory:
+					tx, err := db.BeginTemporalRo(ctx)
+					if err != nil {
+						return err
+					}
+					defer tx.Rollback()
+					maxTxNum := agg.EndTxNumMinimax()
+					for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+						if err := integrity.CheckDomainLatestVsHistory(ctx, domain, tx, maxTxNum, failFast, logger); err != nil {
+							return err
+						}
+					}
 				default:
 					return fmt.Errorf("unknown check: %s", chk)
 				}
