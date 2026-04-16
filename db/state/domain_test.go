@@ -858,6 +858,111 @@ func TestDomainRoTx_CursorParentCheck(t *testing.T) {
 	require.NoError(err)
 }
 
+// TestDomain_UnwindOverBumpedStepMasksNewWrites proves that using
+// at.a.EndTxNumMinimax()/StepSize() as currentFilesEndStep is wrong when
+// BuildFilesInBackground has filed new steps AFTER the AggregatorRoTx was opened.
+//
+// The bug: if EndTxNumMinimax advanced (e.g. from step 1 to step 2) between the
+// time the AggregatorRoTx was opened and the Unwind call, restored entries are
+// placed at step 2. Post-reorg writes at step 1 then DO NOT replace the step 2
+// entry (because the step encoding differs). getLatestFromDb returns the stale
+// step-2 restored value instead of the correct post-reorg step-1 value.
+//
+// The correct fix is to use at.d[idx].FirstStepNotInFiles() (per-domain snapshot
+// value) rather than the global current EndTxNumMinimax.
+//
+// This test FAILS with the current implementation.
+func TestDomain_UnwindOverBumpedStepMasksNewWrites(t *testing.T) {
+	logger := log.New()
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, 16, logger)
+	ctx := context.Background()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
+	k1 := []byte("key1")
+
+	// Write k1: V1 at txNum=2 and V2 at txNum=10 (both step 0).
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback() //nolint:gocritic
+
+	dt := d.BeginFilesRo()
+	w := dt.NewWriter()
+	require.NoError(t, w.PutWithPrev(k1, []byte("V1"), 2, nil))
+	require.NoError(t, w.PutWithPrev(k1, []byte("V2"), 10, []byte("V1")))
+	require.NoError(t, w.Flush(ctx, tx))
+	w.Close()
+	dt.Close()
+
+	// Build step 0 file (contains k1=V2). Prune step 0 from DB.
+	require.NoError(t, d.collateBuildIntegrate(ctx, 0, tx, background.NewProgressSet()))
+	dt = d.BeginFilesRo()
+	_, err = dt.Prune(ctx, tx, 0, 0, 16, math.MaxUint64, logEvery)
+	dt.Close()
+	require.NoError(t, err)
+
+	// Write key2 at step 1 so we can build step 1 file, simulating EndTxNumMinimax
+	// advancing to step 2 AFTER an AggregatorRoTx was opened at step 1.
+	dt = d.BeginFilesRo()
+	w = dt.NewWriter()
+	require.NoError(t, w.PutWithPrev([]byte("key2"), []byte("X"), 20, nil))
+	require.NoError(t, w.Flush(ctx, tx))
+	w.Close()
+	dt.Close()
+
+	require.NoError(t, d.collateBuildIntegrate(ctx, 1, tx, background.NewProgressSet()))
+	dt = d.BeginFilesRo()
+	_, err = dt.Prune(ctx, tx, 1, 16, 32, math.MaxUint64, logEvery)
+	dt.Close()
+	require.NoError(t, err)
+
+	// At this point: files cover steps 0 and 1. FirstStepNotInFiles() == 2.
+	//
+	// Simulate the production AggregatorRoTx.Unwind bug:
+	// The AggregatorRoTx was opened when only step 0 was filed (snapshot EndTxNum=16,
+	// FirstStepNotInFiles()=1). Then step 1 was filed (EndTxNumMinimax advanced to 32).
+	// Production code uses EndTxNumMinimax/StepSize = 2 as currentFilesEndStep.
+	// Correct code would use the snapshot's FirstStepNotInFiles() = 1.
+	//
+	// We unwind to txNum=5: restore k1=V1. With the over-bumped step (2), the
+	// restored entry lands at step 2 instead of step 1.
+	step0Bytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(step0Bytes, ^uint64(0))
+	diffs := []kv.DomainEntryDiff{
+		{Key: string(k1) + string(step0Bytes), Value: []byte("V1")},
+	}
+
+	overBumpedFilesEndStep := uint64(2) // what production Unwind would compute
+	dt = d.BeginFilesRo()
+	err = dt.unwind(ctx, tx, 0, 5, overBumpedFilesEndStep, diffs)
+	dt.Close()
+	require.NoError(t, err)
+
+	// Post-reorg: execution writes k1=V3 at txNum=20 (step 1).
+	// In the post-reorg chain, this is the new authoritative value for k1.
+	dt = d.BeginFilesRo()
+	w = dt.NewWriter()
+	require.NoError(t, w.PutWithPrev(k1, []byte("V3"), 20, []byte("V1")))
+	require.NoError(t, w.Flush(ctx, tx))
+	w.Close()
+	dt.Close()
+
+	// GetLatest should return V3 (the post-reorg write at step 1).
+	// BUG: The over-bumped unwind placed k1=V1 at step 2 (^uint64(2)).
+	// The post-reorg write placed k1=V3 at step 1 (^uint64(1)).
+	// In DupSort ordering, step 2 (^uint64(2) = 0xFFFD...) sorts BEFORE
+	// step 1 (^uint64(1) = 0xFFFE...), so getLatestFromDb returns the
+	// step-2 restored value V1 instead of the correct post-reorg V3.
+	dt = d.BeginFilesRo()
+	defer dt.Close()
+	v, _, found, err := dt.GetLatest(k1, tx)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equalf(t, "V3", string(v),
+		"post-reorg write V3 (step 1) should be visible; "+
+			"got %q because over-bumped unwind step (2) masks the step-1 write", string(v))
+}
+
 // TestDomain_CollationIsolatedFromLaterSteps verifies that collation for step S
 // produces correct results even when step S+1 data is present in the DB.
 // This is a correctness test for the collation/pruning race fix (#20169).
