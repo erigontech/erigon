@@ -46,7 +46,7 @@ jobs:
             sim-limit: ".*(8024|7708|7778|7843|7928|7954|8037).*"
             shard: glamsterdam-devnet
             fixtures-url: "https://github.com/ethereum/execution-spec-tests/releases/download/bal@v5.6.1/fixtures_bal.tar.gz"
-            extra-hive-flags: "--sim.buildarg branch=devnets/bal/3 --sim.limit.exact=false --sim.loglevel=3 --client.checktimelimit=300s"
+            extra-hive-flags: "--sim.buildarg branch=devnets/bal/3 --sim.loglevel=3 --client.checktimelimit=300s"
             erigon-extra-flags: "--experimental.bal"
     steps:
       - name: Clean docker system
@@ -144,7 +144,7 @@ jobs:
             echo -e "\n\n============================================================"
             echo "Running test: ${1}"
             echo -e "\n"
-            ./hive -docker.output -docker.auth --sim ethereum/eels/"${1}" --sim.limit="${2}" --sim.parallelism=12 --client erigon --docker.nocache=true --sim.buildarg fixtures="${fixtures_url}" ${{ matrix.extra-hive-flags }} 2>&1 | tee output.log || {
+            ./hive -docker.output -docker.auth --sim ethereum/eels/"${1}" --sim.limit="${2}" --sim.parallelism=12 --client erigon --docker.nocache=true --sim.limit.exact=false --sim.buildarg fixtures="${fixtures_url}" ${{ matrix.extra-hive-flags }} 2>&1 | tee output.log || {
               if [ $? -gt 0 ]; then
                 echo "Exitcode gt 0"
               fi
