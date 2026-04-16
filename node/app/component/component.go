@@ -1126,7 +1126,6 @@ func (c *component) deactivateProvider(ctx context.Context, onActivity onActivit
 
 	if isActive {
 		c.setState(Deactivating, false)
-		onActivity(ctx, c, nil)
 
 		//fmt.Printf("%T:%p Deactivating: %v\n", component, component, component.State())
 
@@ -1322,11 +1321,11 @@ func (c *component) onComponentStateChanged(event *ComponentStateChanged) {
 						for _, dependency := range c.dependencies {
 							dependency := asComponent(dependency)
 							for _, dependent := range dependency.dependents {
-								if !asComponent(dependent).state.IsDeactivated() {
+								if !asComponent(dependent).State().IsDeactivated() {
 									continue DEPENDENCIES
 								}
 							}
-							if dependency.state != Deactivated {
+							if dependency.State() != Deactivated {
 								allDependenciesDeactivated = false
 								break
 							}
