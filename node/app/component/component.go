@@ -26,13 +26,14 @@ import (
 	"sync"
 	"unsafe"
 
+	"github.com/urfave/cli/v2"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/erigontech/erigon/common/dbg"
 	liblog "github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/app"
 	"github.com/erigontech/erigon/node/app/event"
 	"github.com/erigontech/erigon/node/app/util"
-	"github.com/urfave/cli/v2"
-	"golang.org/x/sync/errgroup"
 )
 
 type relation interface {
@@ -1126,6 +1127,7 @@ func (c *component) deactivateProvider(ctx context.Context, onActivity onActivit
 
 	if isActive {
 		c.setState(Deactivating, false)
+		onActivity(ctx, c, nil)
 
 		//fmt.Printf("%T:%p Deactivating: %v\n", component, component, component.State())
 
@@ -1321,11 +1323,11 @@ func (c *component) onComponentStateChanged(event *ComponentStateChanged) {
 						for _, dependency := range c.dependencies {
 							dependency := asComponent(dependency)
 							for _, dependent := range dependency.dependents {
-								if !asComponent(dependent).State().IsDeactivated() {
+								if !asComponent(dependent).state.IsDeactivated() {
 									continue DEPENDENCIES
 								}
 							}
-							if dependency.State() != Deactivated {
+							if dependency.state != Deactivated {
 								allDependenciesDeactivated = false
 								break
 							}
