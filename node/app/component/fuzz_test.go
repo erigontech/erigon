@@ -49,7 +49,7 @@ func (p *fuzzProvider) String() string { return fmt.Sprintf("fuzz-%d", p.id) }
 //
 // Run with: go test -race -run TestFuzzLifecycleConcurrent -count=10 ./node/app/component/
 func TestFuzzLifecycleConcurrent(t *testing.T) {
-	t.Skip("Known deadlock: activate/deactivate lock ordering issue — see fuzz_test.go header comment")
+	// Previously deadlocked — fixed by actor model serialization.
 	const (
 		numComponents = 8
 		numOps        = 300
@@ -157,7 +157,7 @@ func TestFuzzLifecycleConcurrent(t *testing.T) {
 // ordering issue manifests even in serial because activate/deactivate spawn
 // background goroutines that contend with the next operation.
 func TestFuzzLifecycleSerial(t *testing.T) {
-	t.Skip("Known deadlock: activate/deactivate lock ordering issue — see fuzz_test.go header comment")
+	// Previously deadlocked — fixed by actor model serialization.
 	const (
 		numComponents = 6
 		numOps        = 500
@@ -219,9 +219,11 @@ func TestFuzzLifecycleSerial(t *testing.T) {
 // RemoveDependency paths under concurrent activate/deactivate. Uses a flat
 // pool (no initial wiring) to avoid cycles from random adds.
 //
-// KNOWN ISSUE: same deadlock as above.
+// KNOWN ISSUE: AddDependency not yet routed through actor — can still deadlock
+// when combined with concurrent activate/deactivate. Will be fixed when
+// addDependency/removeDependency are converted to actor messages.
 func TestFuzzAddRemoveConcurrent(t *testing.T) {
-	t.Skip("Known deadlock: activate/deactivate lock ordering issue — see fuzz_test.go header comment")
+	t.Skip("AddDependency not yet routed through actor — see fuzz_test.go")
 	const (
 		numComponents = 6
 		numOps        = 200
