@@ -1209,7 +1209,9 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		}
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
 		initialIbs := state.New(stateReader)
-		sd.CompareStates(initialIbs, ibs)
+		if err = sd.CompareStates(initialIbs, ibs); err != nil {
+			return nil, err
+		}
 	}
 
 	if evm.Cancelled() {
@@ -1797,8 +1799,6 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 		return nil, err
 	}
 
-	ibs := state.New(stateReader)
-
 	var cancel context.CancelFunc
 	if api.evmCallTimeout > 0 {
 		ctx, cancel = context.WithTimeout(ctx, api.evmCallTimeout)
@@ -1824,6 +1824,8 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	if traceTypeVmTrace {
 		traceResult.VmTrace = &VmTrace{Ops: []*VmTraceOp{}}
 	}
+
+	ibs := state.New(stateReader)
 
 	var ot OeTracer
 	ot.config, err = parseOeTracerConfig(nil)
@@ -1878,6 +1880,7 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	}
 
 	traceResult.Output = common.Copy(execResult.ReturnData)
+
 	if traceTypeStateDiff {
 		sdMap := make(map[accounts.Address]*StateDiffAccount)
 		traceResult.StateDiff = sdMap
@@ -1886,7 +1889,9 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 			return nil, err
 		}
 		initialIbs := state.New(stateReader)
-		sd.CompareStates(initialIbs, ibs)
+		if err = sd.CompareStates(initialIbs, ibs); err != nil {
+			return nil, err
+		}
 	}
 
 	if evm.Cancelled() {
