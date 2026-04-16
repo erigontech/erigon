@@ -1237,17 +1237,18 @@ func (c *component) addDependent(dependent *component, parentLocked bool) error 
 		}
 	}
 
-	if c.state != dependent.state {
+	depState := dependent.State() // thread-safe read via RLock
+	if c.state != depState {
 		switch {
-		case dependent.state.IsActivated():
+		case depState.IsActivated():
 			if err := c.activate(c.context, noopHanlder); err != nil {
 				return err
 			}
-		case dependent.state.IsInitialized():
+		case depState.IsInitialized():
 			if err := c.initialize(c.context, false, noopHanlder); err != nil {
 				return err
 			}
-		case dependent.state.IsConfigured():
+		case depState.IsConfigured():
 			if err := c.configure(c.context, false, false, noopHanlder); err != nil {
 				return err
 			}
@@ -1322,11 +1323,11 @@ func (c *component) onComponentStateChanged(event *ComponentStateChanged) {
 						for _, dependency := range c.dependencies {
 							dependency := asComponent(dependency)
 							for _, dependent := range dependency.dependents {
-								if !asComponent(dependent).state.IsDeactivated() {
+								if !asComponent(dependent).State().IsDeactivated() {
 									continue DEPENDENCIES
 								}
 							}
-							if dependency.state != Deactivated {
+							if dependency.State() != Deactivated {
 								allDependenciesDeactivated = false
 								break
 							}
