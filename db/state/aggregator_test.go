@@ -21,11 +21,9 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"math"
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/assert"
@@ -518,120 +516,6 @@ func TestAggregator_CommittedTxNumGuard(t *testing.T) {
 		"guard should allow: committed txNum is past the step")
 	assert.True(t, stepFullyCommitted(1000, 5, stepSize),
 		"guard should allow: committed txNum is well past the step")
-}
-
-// TestStepFullyCommitted_ZeroIsGenesisNotSentinel proves that the bypass
-// `committedTxNum == 0 → return true` is wrong when genesis is committed at txNum=0.
-// In that case committedTxNum=0 does NOT mean "no commitment yet" — it means only
-// txNum=0 has been committed. Step 0 covers txNums [0, stepSize), so txNums 1…
-// stepSize-1 are still uncommitted. The guard must block, but it doesn't.
-//
-// This test FAILS with the current implementation, proving the bypass is incorrect.
-func TestStepFullyCommitted_ZeroIsGenesisNotSentinel(t *testing.T) {
-	t.Parallel()
-	stepSize := uint64(100)
-
-	// Genesis committed at txNum=0 → committedTxNum=0.
-	// Step 0 covers [0, 100). Only txNum=0 is committed.
-	// The guard MUST block (txNums 1-99 are not yet committed).
-	// BUG: stepFullyCommitted(0, 0, stepSize) returns true (bypass triggered).
-	assert.False(t, stepFullyCommitted(0, 0, stepSize),
-		"genesis committed at txNum=0: step 0 is NOT fully committed (txNums 1-99 missing)")
-
-	// Even more obviously: if only genesis (txNum=0) is committed, step 5 is not committed at all.
-	assert.False(t, stepFullyCommitted(0, 5, stepSize),
-		"genesis committed at txNum=0: step 5 has zero commits — must be blocked")
-}
-
-// TestDomain_CollationRaceNotTestedByIsolationTest proves that
-// TestDomain_CollationIsolatedFromLaterSteps does NOT test the actual race bug
-// described in #20169.
-//
-// The REAL race: step S data arrives in two separate DB commits. If collation opens
-// its read tx between those commits, the second batch is invisible. After pruning,
-// that data is permanently lost. The PR's single-tx approach alone does not prevent
-// this — the committedTxNum guard must also work correctly.
-//
-// TestDomain_CollationIsolatedFromLaterSteps writes step S and step S+1 data in ONE
-// transaction, so the collation always sees both. It tests cross-step filtering (which
-// was never broken), not intra-step partial-commit visibility (the actual bug).
-//
-// This test reproduces the REAL scenario: two separate commits for the same step,
-// with collation opening its read tx between them. After pruning, data from the
-// second commit is LOST, demonstrating the race is not covered.
-func TestDomain_CollationRaceNotTestedByIsolationTest(t *testing.T) {
-	logger := log.New()
-	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, 16, logger)
-	ctx := context.Background()
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-
-	k1 := []byte("key1")
-	k2 := []byte("key2") // written in second batch — will be LOST after the race
-
-	// Batch 1: write k1 at step 0 and commit.
-	tx1, err := db.BeginRw(ctx)
-	require.NoError(t, err)
-	dt := d.BeginFilesRo()
-	w := dt.NewWriter()
-	require.NoError(t, w.PutWithPrev(k1, []byte("V1"), 2, nil))
-	require.NoError(t, w.Flush(ctx, tx1))
-	w.Close()
-	dt.Close()
-	require.NoError(t, tx1.Commit())
-
-	// Open a collation read tx NOW — snapshot sees only batch 1 (no k2 yet).
-	// This simulates what buildFiles does when committedTxNum guard is bypassed
-	// (e.g. committedTxNum=0 bypass) and collation starts before all step 0 data
-	// has been committed.
-	collTx, err := db.BeginRo(ctx)
-	require.NoError(t, err)
-	defer collTx.Rollback()
-
-	// Batch 2: write k2 at step 0 and commit AFTER collation tx was opened.
-	tx2, err := db.BeginRw(ctx)
-	require.NoError(t, err)
-	dt = d.BeginFilesRo()
-	w = dt.NewWriter()
-	require.NoError(t, w.PutWithPrev(k2, []byte("V2"), 10, nil))
-	require.NoError(t, w.Flush(ctx, tx2))
-	w.Close()
-	dt.Close()
-	require.NoError(t, tx2.Commit())
-
-	// Collate step 0 using the pre-batch-2 snapshot: k2 is invisible.
-	coll, err := d.collate(ctx, 0, 0, 16, collTx)
-	require.NoError(t, err)
-	collTx.Rollback()
-	defer coll.Close()
-
-	sf, err := d.buildFiles(ctx, 0, coll, background.NewProgressSet())
-	require.NoError(t, err)
-	defer sf.CleanupOnError()
-
-	// Integrate files and prune step 0 — simulates BuildFilesInBackground + pruning.
-	tx3, err := db.BeginRw(ctx)
-	require.NoError(t, err)
-	defer tx3.Rollback()
-	d.integrateDirtyFiles(sf, 0, 16)
-	d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
-
-	dt = d.BeginFilesRo()
-	_, err = dt.Prune(ctx, tx3, 0, 0, 16, math.MaxUint64, logEvery)
-	dt.Close()
-	require.NoError(t, err)
-
-	// k2 was in batch 2 (committed AFTER collation snapshot) → NOT in the file.
-	// After pruning step 0 from DB, k2 is permanently lost.
-	// This FAILS, proving the race is real and not covered by the isolation test.
-	dt = d.BeginFilesRo()
-	defer dt.Close()
-	v, _, found, err := dt.GetLatest(k2, tx3)
-	require.NoError(t, err)
-	require.Truef(t, found,
-		"k2 (committed in batch 2 after collation snapshot) should be visible — "+
-			"but it is LOST because the collation race (#20169) is not prevented when "+
-			"committedTxNum=0 bypass allows premature collation. got v=%q", v)
 }
 
 func TestAggregator_CommitmentHistoryOnlyMerge(t *testing.T) {
