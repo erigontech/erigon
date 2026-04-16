@@ -128,7 +128,7 @@ jobs:
           if [ -n "$erigon_extra_flags" ]; then
             echo "Patching erigon.sh with extra flags: $erigon_extra_flags"
             sed -i '/^echo "Running erigon/i\FLAGS="$FLAGS '"$erigon_extra_flags"'"' clients/erigon/erigon.sh
-            if ! grep -q "$erigon_extra_flags" clients/erigon/erigon.sh; then
+            if ! grep -qF -- "$erigon_extra_flags" clients/erigon/erigon.sh; then
               echo "ERROR: failed to patch erigon.sh with extra flags" >&2
               exit 1
             fi
