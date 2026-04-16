@@ -1348,12 +1348,14 @@ func (account *accountState) updateWrite(vw *VersionedWrite, accessIndex uint16)
 		if account.selfDestructed && accessIndex == account.selfDestructedAt && !val.IsZero() {
 			return
 		}
-		// If we haven't seen a balance and the first write is zero, treat it as a touch only.
-		if account.balanceValue == nil && val.IsZero() {
-			if account.initialBalanceValue == nil {
-				v := val
-				account.initialBalanceValue = &v
-			}
+		// If we haven't seen a balance and the first write is zero, treat it
+		// as a touch only — but ONLY when a prior read confirmed the initial
+		// balance was already zero. Without a read we cannot prove the write
+		// is a no-op (e.g. a sender whose balance was depleted to zero by gas
+		// may have no BalancePath read in blockIO due to the parallel
+		// executor's finalize-path read stripping).
+		if account.balanceValue == nil && val.IsZero() &&
+			account.initialBalanceValue != nil && account.initialBalanceValue.IsZero() {
 			account.setBalanceValue(val)
 			return
 		}
