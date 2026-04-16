@@ -880,7 +880,6 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	g.SetLimit(a.collateAndBuildWorkers)
 
 	for _, dc := range domainColls {
-		dc := dc
 		a.wg.Add(1)
 		g.Go(func() error {
 			defer a.wg.Done()
@@ -901,12 +900,12 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		})
 	}
 	for _, ic := range iiColls {
-		ic := ic
 		a.wg.Add(1)
 		g.Go(func() error {
 			defer a.wg.Done()
 
 			sf, err := ic.ii.buildFiles(ctx, step, ic.collation, a.ps)
+			ic.collation.Close()
 			if err != nil {
 				sf.CleanupOnError()
 				return err
