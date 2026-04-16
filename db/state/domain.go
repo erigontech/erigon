@@ -1959,7 +1959,7 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	mxDupsPruneSizeIndex.AddUint64(pruneStat.DupsDeleted)
 
 	stat.MinStep = kv.Step(pruneStat.MinTxNum / dt.stepSize)
-	stat.MaxStep = kv.Step(pruneStat.MinTxNum / dt.stepSize)
+	stat.MaxStep = kv.Step(pruneStat.MaxTxNum / dt.stepSize)
 	stat.Values = pruneStat.PruneCountValues
 	stat.Dups = pruneStat.DupsDeleted
 	stat.Progress = pruneStat.ValueProgress
