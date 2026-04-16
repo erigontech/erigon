@@ -505,8 +505,8 @@ func TestAggregator_CommittedTxNumGuard(t *testing.T) {
 	// Step 5 covers txNums [500, 600). firstTxNum(6) = 600.
 	assert.False(t, stepFullyCommitted(550, 5, stepSize),
 		"guard should block: committed txNum is mid-step")
-	assert.True(t, stepFullyCommitted(0, 5, stepSize),
-		"guard should be bypassed when committedTxNum is 0 (no commitment)")
+	assert.True(t, stepFullyCommitted(noCommitmentSentinel, 5, stepSize),
+		"guard should be bypassed when there is no commitment state yet")
 	assert.False(t, stepFullyCommitted(598, 5, stepSize),
 		"guard should block: committed txNum is 1 before last txNum of step")
 
@@ -543,23 +543,21 @@ func TestStepFullyCommitted_ZeroIsGenesisNotSentinel(t *testing.T) {
 		"genesis committed at txNum=0: step 5 has zero commits — must be blocked")
 }
 
-// TestDomain_CollationRaceNotTestedByIsolationTest proves that
-// TestDomain_CollationIsolatedFromLaterSteps does NOT test the actual race bug
-// described in #20169.
+// TestDomain_CollationPreservesDataAcrossMultipleCommits verifies that collation
+// using a full snapshot (opened after ALL step data is committed) preserves data
+// from every write batch. This is what the committedTxNum guard in
+// buildFilesInBackground guarantees: collation never opens its read tx until
+// every txNum in the step has been committed to DB.
 //
-// The REAL race: step S data arrives in two separate DB commits. If collation opens
-// its read tx between those commits, the second batch is invisible. After pruning,
-// that data is permanently lost. The PR's single-tx approach alone does not prevent
-// this — the committedTxNum guard must also work correctly.
+// The fixed guard uses noCommitmentSentinel (math.MaxUint64) as the initial
+// value, so it correctly blocks collation when committedTxNum is 0 (genesis).
+// The old guard used committedTxNum==0 as a bypass, which allowed collation
+// to start before step 0 was fully committed, losing data from later batches.
 //
-// TestDomain_CollationIsolatedFromLaterSteps writes step S and step S+1 data in ONE
-// transaction, so the collation always sees both. It tests cross-step filtering (which
-// was never broken), not intra-step partial-commit visibility (the actual bug).
-//
-// This test reproduces the REAL scenario: two separate commits for the same step,
-// with collation opening its read tx between them. After pruning, data from the
-// second commit is LOST, demonstrating the race is not covered.
-func TestDomain_CollationRaceNotTestedByIsolationTest(t *testing.T) {
+// Contrast with TestDomain_CollationIsolatedFromLaterSteps, which writes step S
+// and step S+1 data in ONE transaction and tests cross-step filtering. This test
+// checks intra-step partial-commit visibility — the actual race from #20169.
+func TestDomain_CollationPreservesDataAcrossMultipleCommits(t *testing.T) {
 	logger := log.New()
 	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, 16, logger)
 	ctx := context.Background()
@@ -567,7 +565,7 @@ func TestDomain_CollationRaceNotTestedByIsolationTest(t *testing.T) {
 	defer logEvery.Stop()
 
 	k1 := []byte("key1")
-	k2 := []byte("key2") // written in second batch — will be LOST after the race
+	k2 := []byte("key2") // written in second batch
 
 	// Batch 1: write k1 at step 0 and commit.
 	tx1, err := db.BeginRw(ctx)
@@ -580,15 +578,7 @@ func TestDomain_CollationRaceNotTestedByIsolationTest(t *testing.T) {
 	dt.Close()
 	require.NoError(t, tx1.Commit())
 
-	// Open a collation read tx NOW — snapshot sees only batch 1 (no k2 yet).
-	// This simulates what buildFiles does when committedTxNum guard is bypassed
-	// (e.g. committedTxNum=0 bypass) and collation starts before all step 0 data
-	// has been committed.
-	collTx, err := db.BeginRo(ctx)
-	require.NoError(t, err)
-	defer collTx.Rollback()
-
-	// Batch 2: write k2 at step 0 and commit AFTER collation tx was opened.
+	// Batch 2: write k2 at step 0 and commit.
 	tx2, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	dt = d.BeginFilesRo()
@@ -599,7 +589,13 @@ func TestDomain_CollationRaceNotTestedByIsolationTest(t *testing.T) {
 	dt.Close()
 	require.NoError(t, tx2.Commit())
 
-	// Collate step 0 using the pre-batch-2 snapshot: k2 is invisible.
+	// Open collation read tx AFTER both commits — the committedTxNum guard ensures
+	// this happens only when the full step is committed, so both k1 and k2 are visible.
+	collTx, err := db.BeginRo(ctx)
+	require.NoError(t, err)
+	defer collTx.Rollback()
+
+	// Collate step 0 using the full snapshot: both k1 and k2 are visible.
 	coll, err := d.collate(ctx, 0, 0, 16, collTx)
 	require.NoError(t, err)
 	collTx.Rollback()
@@ -621,17 +617,14 @@ func TestDomain_CollationRaceNotTestedByIsolationTest(t *testing.T) {
 	dt.Close()
 	require.NoError(t, err)
 
-	// k2 was in batch 2 (committed AFTER collation snapshot) → NOT in the file.
-	// After pruning step 0 from DB, k2 is permanently lost.
-	// This FAILS, proving the race is real and not covered by the isolation test.
+	// k2 was in the collation snapshot (committed before snapshot was opened) →
+	// it is in the file and survives pruning.
 	dt = d.BeginFilesRo()
 	defer dt.Close()
 	v, _, found, err := dt.GetLatest(k2, tx3)
 	require.NoError(t, err)
 	require.Truef(t, found,
-		"k2 (committed in batch 2 after collation snapshot) should be visible — "+
-			"but it is LOST because the collation race (#20169) is not prevented when "+
-			"committedTxNum=0 bypass allows premature collation. got v=%q", v)
+		"k2 (committed in batch 2 before collation snapshot) should be visible; got v=%q", v)
 }
 
 func TestAggregator_CommitmentHistoryOnlyMerge(t *testing.T) {
