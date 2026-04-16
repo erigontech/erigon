@@ -1471,13 +1471,17 @@ func lastTxNumOfStep(step kv.Step, stepSize uint64) uint64 {
 	return firstTxNumOfStep(step+1, stepSize) - 1
 }
 
+// noCommitmentSentinel is passed to stepFullyCommitted when the commitment
+// domain has no state entry yet (len(v) < 16). It must not be a valid txNum.
+const noCommitmentSentinel = math.MaxUint64
+
 // stepFullyCommitted reports whether all txNums in `step` have been committed
 // to the DB, based on the committedTxNum stored by ComputeCommitment.
-// When committedTxNum == 0 (no ComputeCommitment yet, e.g. in tests), the
-// guard is bypassed and the caller should fall through to the lastInDB check.
+// Pass noCommitmentSentinel when there is no commitment state yet (e.g. fresh
+// sync or tests that skip ComputeCommitment); the guard is bypassed in that case.
 func stepFullyCommitted(committedTxNum uint64, step kv.Step, stepSize uint64) bool {
-	if committedTxNum == 0 {
-		return true // guard bypassed — no commitment state yet
+	if committedTxNum == noCommitmentSentinel {
+		return true // no commitment state yet — bypass guard
 	}
 	stepEndTxNum := firstTxNumOfStep(step+1, stepSize)
 	return committedTxNum+1 >= stepEndTxNum
@@ -1868,7 +1872,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 			// the DB before a CommitCycle flushes step S's writes, producing a
 			// file that misses entries. Pruning then removes those entries from
 			// the DB, and the values are lost. See #20169.
-			var committedTxNum uint64
+			committedTxNum := uint64(noCommitmentSentinel)
 			if temporalDB, ok := a.db.(kv.TemporalRoDB); ok {
 				if err := temporalDB.ViewTemporal(a.ctx, func(tx kv.TemporalTx) error {
 					v, _, err := tx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
@@ -2113,13 +2117,16 @@ func (at *AggregatorRoTx) Unwind(ctx context.Context, tx kv.RwTx, txNumUnwindTo 
 	defer logEvery.Stop()
 
 	step := txNumUnwindTo / at.StepSize()
-	// Use the CURRENT (atomically published) file boundary, not the stale
-	// tx-scoped snapshot. BuildFilesInBackground may have filed new steps
-	// since this AggregatorRoTx was opened, and getLatestFromDb will use
-	// the current view — so the unwind must tag entries beyond it.
-	currentFilesEndStep := at.a.EndTxNumMinimax() / at.StepSize()
+	// Use the per-domain snapshot file boundary (FirstStepNotInFiles from the
+	// AggregatorRoTx snapshot) as the unwind step tag floor. Using the current
+	// global EndTxNumMinimax() would over-bump the tag when BuildFilesInBackground
+	// has filed new steps since this AggregatorRoTx was opened. An over-bumped
+	// tag lands the restored entry at a step higher than any subsequent post-reorg
+	// write; getLatestFromDb then returns the stale restored value instead of the
+	// correct post-reorg write (the DupSort ordering prefers the higher step).
 	for idx, d := range at.d {
-		if err := d.unwind(ctx, tx, step, txNumUnwindTo, currentFilesEndStep, changeset[idx]); err != nil {
+		domainFilesEndStep := uint64(at.d[idx].FirstStepNotInFiles())
+		if err := d.unwind(ctx, tx, step, txNumUnwindTo, domainFilesEndStep, changeset[idx]); err != nil {
 			return err
 		}
 	}
