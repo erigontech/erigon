@@ -25,6 +25,7 @@ import (
 type Verifier struct {
 	signers  []Signer
 	resolver TokenResolver
+	store    Store // optional — if set, revoked tokens are rejected during verification
 }
 
 // Signer verifies signatures for a specific DID method.
@@ -45,10 +46,12 @@ type TokenResolver interface {
 }
 
 // NewVerifier creates a verifier with the given signers and token resolver.
-func NewVerifier(resolver TokenResolver, signers ...Signer) *Verifier {
+// If store is non-nil, revoked tokens are rejected during verification.
+func NewVerifier(resolver TokenResolver, store Store, signers ...Signer) *Verifier {
 	return &Verifier{
 		signers:  signers,
 		resolver: resolver,
+		store:    store,
 	}
 }
 
@@ -65,7 +68,7 @@ func (v *Verifier) Verify(ctx context.Context, token *Token, required Capability
 const maxChainDepth = 64
 
 func (v *Verifier) verifyToken(ctx context.Context, token *Token, required Capability, depth int) error {
-	if depth > maxChainDepth {
+	if depth >= maxChainDepth {
 		return fmt.Errorf("delegation chain too deep (max %d)", maxChainDepth)
 	}
 
@@ -85,6 +88,18 @@ func (v *Verifier) verifyToken(ctx context.Context, token *Token, required Capab
 	// 3. Signature
 	if err := v.verifySignature(ctx, token); err != nil {
 		return fmt.Errorf("signature verification failed: %w", err)
+	}
+
+	// 3b. Revocation check — if a store is configured, reject revoked tokens.
+	if v.store != nil {
+		cid := token.ComputeCID()
+		revoked, err := v.store.IsRevoked(ctx, cid, token.Issuer, token.Iat)
+		if err != nil {
+			return fmt.Errorf("revocation check failed: %w", err)
+		}
+		if revoked {
+			return fmt.Errorf("token %x has been revoked", cid)
+		}
 	}
 
 	// 4. Capability check — does this token authorize the required capability?

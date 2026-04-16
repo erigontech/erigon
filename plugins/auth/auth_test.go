@@ -114,6 +114,7 @@ func TestTokenStructureValidation(t *testing.T) {
 		Audience:  "did:pkh:eip155:1:0x1234567890abcdef1234567890abcdef12345678",
 		Command:   "/storage/read",
 		Nonce:     nonce,
+		Iat:       uint64(time.Now().Unix()),
 		Signature: []byte{0x01}, // placeholder
 	}
 	require.NoError(t, valid.ValidateStructure())
@@ -157,12 +158,14 @@ func TestTokenCID(t *testing.T) {
 		Audience: "did:pkh:eip155:1:0x1234567890abcdef1234567890abcdef12345678",
 		Command:  "/storage/read",
 		Nonce:    nonce,
+		Iat:      uint64(time.Now().Unix()),
 	}
 	t2 := &Token{
 		Issuer:   "did:pkh:eip155:1:0xab5801a7d398351b8be11c439e05c5b3259aec9b",
 		Audience: "did:pkh:eip155:1:0x1234567890abcdef1234567890abcdef12345678",
 		Command:  "/storage/read",
 		Nonce:    nonce,
+		Iat:      uint64(time.Now().Unix()),
 	}
 
 	// Same content → same CID
@@ -192,12 +195,13 @@ func TestVerifyRootToken(t *testing.T) {
 		Audience:  "did:pkh:eip155:1:0x1234567890abcdef1234567890abcdef12345678",
 		Command:   "/storage/*",
 		Nonce:     nonce,
+		Iat:       uint64(time.Now().Unix()),
 		Exp:       uint64(time.Now().Add(1 * time.Hour).Unix()),
 		Signature: []byte{0x01},
 	}
 
 	store := NewMemoryStore()
-	verifier := NewVerifier(NewStoreResolver(store), &mockSigner{})
+	verifier := NewVerifier(NewStoreResolver(store), store, &mockSigner{})
 
 	// Root token with wildcard covers /storage/read
 	err := verifier.Verify(context.Background(), token, Capability{Command: "/storage/read"})
@@ -222,6 +226,7 @@ func TestVerifyDelegationChain(t *testing.T) {
 		Audience:  bob,
 		Command:   "/storage/*",
 		Nonce:     nonce,
+		Iat:       uint64(time.Now().Unix()),
 		Exp:       uint64(time.Now().Add(1 * time.Hour).Unix()),
 		Signature: []byte{0x01},
 	}
@@ -233,6 +238,7 @@ func TestVerifyDelegationChain(t *testing.T) {
 		Audience:  carol,
 		Command:   "/storage/read",
 		Nonce:     nonce,
+		Iat:       uint64(time.Now().Unix()),
 		Exp:       uint64(time.Now().Add(1 * time.Hour).Unix()),
 		Proofs:    []CID{aliceToBobCID},
 		Signature: []byte{0x02},
@@ -241,7 +247,7 @@ func TestVerifyDelegationChain(t *testing.T) {
 	store := NewMemoryStore()
 	store.PutToken(context.Background(), aliceToBobCID, aliceToBob)
 
-	verifier := NewVerifier(NewStoreResolver(store), &mockSigner{})
+	verifier := NewVerifier(NewStoreResolver(store), store, &mockSigner{})
 
 	// Carol's token authorizes /storage/read
 	err := verifier.Verify(context.Background(), bobToCarol, Capability{Command: "/storage/read"})
@@ -262,13 +268,14 @@ func TestVerifyBrokenChain(t *testing.T) {
 		Audience:  "did:pkh:eip155:1:0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 		Command:   "/storage/read",
 		Nonce:     nonce,
+		Iat:       uint64(time.Now().Unix()),
 		Exp:       uint64(time.Now().Add(1 * time.Hour).Unix()),
 		Proofs:    []CID{common.Hash{0xff}}, // non-existent
 		Signature: []byte{0x01},
 	}
 
 	store := NewMemoryStore()
-	verifier := NewVerifier(NewStoreResolver(store), &mockSigner{})
+	verifier := NewVerifier(NewStoreResolver(store), store, &mockSigner{})
 
 	err := verifier.Verify(context.Background(), token, Capability{Command: "/storage/read"})
 	require.Error(t, err)
@@ -284,12 +291,13 @@ func TestVerifyExpiredToken(t *testing.T) {
 		Audience:  "did:pkh:eip155:1:0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 		Command:   "/storage/read",
 		Nonce:     nonce,
+		Iat:       uint64(time.Now().Unix()),
 		Exp:       uint64(time.Now().Add(-1 * time.Hour).Unix()), // expired
 		Signature: []byte{0x01},
 	}
 
 	store := NewMemoryStore()
-	verifier := NewVerifier(NewStoreResolver(store), &mockSigner{})
+	verifier := NewVerifier(NewStoreResolver(store), store, &mockSigner{})
 
 	err := verifier.Verify(context.Background(), token, Capability{Command: "/storage/read"})
 	require.Error(t, err)

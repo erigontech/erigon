@@ -44,9 +44,41 @@ type Policy struct {
 // Covers returns true if this capability authorizes the required capability.
 // A capability covers another if:
 //  1. The command is equal or a parent wildcard (e.g. /storage/* covers /storage/read)
-//  2. All policies on this capability are satisfied by the required capability's context
+//  2. All policies on this capability are satisfied by the required capability
+//
+// Policy evaluation: each policy on this (granting) capability must be matched
+// by a corresponding policy on the required capability with the same key and
+// a value that satisfies the operator. This is a simple equality check for v1;
+// range/comparison operators are a future extension.
 func (c Capability) Covers(required Capability) bool {
-	return commandCovers(c.Command, required.Command)
+	if !commandCovers(c.Command, required.Command) {
+		return false
+	}
+	// Every policy on the granting capability must be satisfied.
+	for _, grantPol := range c.Policy {
+		matched := false
+		for _, reqPol := range required.Policy {
+			if grantPol.Field == reqPol.Field && policyValueSatisfies(grantPol, reqPol.Value) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	return true
+}
+
+// policyValueSatisfies checks if the required value satisfies the granting policy.
+// For v1, only equality ("eq") is supported.
+func policyValueSatisfies(grant Policy, requiredValue any) bool {
+	switch grant.Operator {
+	case "eq", "":
+		return fmt.Sprintf("%v", grant.Value) == fmt.Sprintf("%v", requiredValue)
+	default:
+		return false
+	}
 }
 
 // commandCovers checks if the granting command covers the required command.

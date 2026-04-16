@@ -112,6 +112,7 @@ func TestFullDelegationChainWithRealSignatures(t *testing.T) {
 		Audience: bobDID.String(),
 		Command:  "/storage/*",
 		Nonce:    nonce,
+		Iat:      uint64(time.Now().Unix()),
 		Exp:      uint64(time.Now().Add(1 * time.Hour).Unix()),
 	}
 	aliceToBobPayload, err := aliceToBob.PayloadBytes()
@@ -131,6 +132,7 @@ func TestFullDelegationChainWithRealSignatures(t *testing.T) {
 		Audience: carolDID.String(),
 		Command:  "/storage/read",
 		Nonce:    nonce2,
+		Iat:      uint64(time.Now().Unix()),
 		Exp:      uint64(time.Now().Add(1 * time.Hour).Unix()),
 		Proofs:   []CID{aliceToBobCID},
 	}
@@ -140,7 +142,7 @@ func TestFullDelegationChainWithRealSignatures(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify the chain with real signature verification
-	verifier := NewVerifier(NewStoreResolver(store), signer)
+	verifier := NewVerifier(NewStoreResolver(store), store, signer)
 
 	// Carol's token authorizes /storage/read through the chain
 	err = verifier.Verify(ctx, bobToCarol, Capability{Command: "/storage/read"})

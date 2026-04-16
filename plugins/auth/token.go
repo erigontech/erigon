@@ -38,6 +38,7 @@ type Token struct {
 	Command   string   `json:"cmd"`           // capability command path
 	Policy    []Policy `json:"pol,omitempty"` // capability constraints
 	Nonce     []byte   `json:"nonce"`         // replay protection
+	Iat       uint64   `json:"iat"`           // issued-at (unix timestamp, mandatory)
 	Exp       uint64   `json:"exp,omitempty"` // expiry (unix timestamp, 0 = no expiry)
 	Nbf       uint64   `json:"nbf,omitempty"` // not-before (unix timestamp, 0 = immediate)
 	Proofs    []CID    `json:"prf,omitempty"` // CIDs of proof tokens (delegation chain)
@@ -85,11 +86,15 @@ func (t *Token) ComputeCID() CID {
 		Command:  t.Command,
 		Policy:   t.Policy,
 		Nonce:    t.Nonce,
+		Iat:      t.Iat,
 		Exp:      t.Exp,
 		Nbf:      t.Nbf,
 		Proofs:   t.Proofs,
 	}
-	data, _ := json.Marshal(payload)
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return [32]byte{}
+	}
 	return sha256.Sum256(data)
 }
 
@@ -101,6 +106,7 @@ type tokenPayload struct {
 	Command  string   `json:"cmd"`
 	Policy   []Policy `json:"pol,omitempty"`
 	Nonce    []byte   `json:"nonce"`
+	Iat      uint64   `json:"iat"`
 	Exp      uint64   `json:"exp,omitempty"`
 	Nbf      uint64   `json:"nbf,omitempty"`
 	Proofs   []CID    `json:"prf,omitempty"`
@@ -115,6 +121,7 @@ func (t *Token) PayloadBytes() ([]byte, error) {
 		Command:  t.Command,
 		Policy:   t.Policy,
 		Nonce:    t.Nonce,
+		Iat:      t.Iat,
 		Exp:      t.Exp,
 		Nbf:      t.Nbf,
 		Proofs:   t.Proofs,
@@ -136,6 +143,9 @@ func (t *Token) ValidateStructure() error {
 	}
 	if len(t.Nonce) == 0 {
 		return errors.New("token missing nonce")
+	}
+	if t.Iat == 0 {
+		return errors.New("token missing issued-at timestamp (iat)")
 	}
 	if len(t.Signature) == 0 {
 		return errors.New("token missing signature (sig)")
