@@ -858,6 +858,156 @@ func TestDomainRoTx_CursorParentCheck(t *testing.T) {
 	require.NoError(err)
 }
 
+// TestDomain_CollationIsolatedFromLaterSteps verifies that collation for step S
+// produces correct results even when step S+1 data is present in the DB.
+// This is a correctness test for the collation/pruning race fix (#20169).
+//
+// The collation/pruning race occurs when BuildFilesInBackground's collation
+// read-transaction sees step S+1 values that overwrite step S entries. The
+// fix uses a single read-tx for all collations in buildFiles, ensuring they
+// all see the same MDBX snapshot. While the exact race is timing-dependent
+// and hard to reproduce in a unit test, this test verifies the invariant:
+// step S collation must produce a file with step S values regardless of
+// later step data in the DB.
+func TestDomain_CollationIsolatedFromLaterSteps(t *testing.T) {
+	logger := log.New()
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, 16, logger)
+	ctx := context.Background()
+
+	k1 := []byte("key1")
+	k2 := []byte("key2")
+	v1s0 := []byte("value1_step0")
+	v2s0 := []byte("value2_step0")
+	v1s1 := []byte("value1_step1") // k1 modified again in step 1
+	// k2 is NOT modified in step 1
+
+	// Write both keys in step 0, then k1 again in step 1, all in one transaction.
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback() //nolint:gocritic
+	domainRoTx := d.BeginFilesRo()
+	w := domainRoTx.NewWriter()
+
+	// Step 0 writes (txNums 0-15)
+	require.NoError(t, w.PutWithPrev(k1, v1s0, 5, nil))
+	require.NoError(t, w.PutWithPrev(k2, v2s0, 7, nil))
+
+	// Step 1 write (txNums 16-31) — overwrites k1 only
+	require.NoError(t, w.PutWithPrev(k1, v1s1, 20, v1s0))
+
+	require.NoError(t, w.Flush(ctx, tx))
+	require.NoError(t, tx.Commit())
+	w.Close()
+	domainRoTx.Close()
+
+	// Collate step 0 — should get k1=v1s0 and k2=v2s0, NOT k1=v1s1.
+	roTx, err := db.BeginRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	coll, err := d.collate(ctx, 0, 0, 16, roTx)
+	require.NoError(t, err)
+	defer coll.Close()
+	sf, err := d.buildFiles(ctx, 0, coll, background.NewProgressSet())
+	require.NoError(t, err)
+	defer sf.CleanupOnError()
+
+	g := d.dataReader(sf.valuesDecomp)
+	g.Reset(0)
+	var words []string
+	for g.HasNext() {
+		w, _ := g.Next(nil)
+		words = append(words, string(w))
+	}
+	require.Equal(t, []string{"key1", "value1_step0", "key2", "value2_step0"}, words,
+		"step 0 collation must contain step 0 values, not step 1 overwrites")
+
+	// Collate step 1 — should get k1=v1s1 only (k2 was not modified in step 1).
+	coll1, err := d.collate(ctx, 1, 16, 32, roTx)
+	require.NoError(t, err)
+	defer coll1.Close()
+	sf1, err := d.buildFiles(ctx, 1, coll1, background.NewProgressSet())
+	require.NoError(t, err)
+	defer sf1.CleanupOnError()
+
+	g = d.dataReader(sf1.valuesDecomp)
+	g.Reset(0)
+	var words1 []string
+	for g.HasNext() {
+		w, _ := g.Next(nil)
+		words1 = append(words1, string(w))
+	}
+	require.Equal(t, []string{"key1", "value1_step1"}, words1,
+		"step 1 collation must contain only step 1 values")
+}
+
+// TestDomain_UnwindRestoredEntryVisibility verifies that after an unwind, restored
+// domain entries are visible to GetLatest even when the entry's natural step has
+// been filed by BuildFilesInBackground. See #20169.
+//
+// The bug: unwind tags restored entries with the step of the unwind-target txNum.
+// If that step is covered by domain files, getLatestFromDb discards the entry and
+// falls through to getLatestFromFiles, returning the stale end-of-step value from
+// the file instead of the changeset-restored value.
+func TestDomain_UnwindRestoredEntryVisibility(t *testing.T) {
+	logger := log.New()
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, 16, logger)
+	ctx := context.Background()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
+	k1 := []byte("key1")
+
+	// Step 0: write k1 twice — first V1 at txNum 2, then V2 at txNum 10.
+	// The file for step 0 will have k1=V2 (latest value in the step).
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback() //nolint:gocritic
+
+	domainRoTx := d.BeginFilesRo()
+	w := domainRoTx.NewWriter()
+	require.NoError(t, w.PutWithPrev(k1, []byte("V1"), 2, nil))
+	require.NoError(t, w.PutWithPrev(k1, []byte("V2"), 10, []byte("V1")))
+	require.NoError(t, w.Flush(ctx, tx))
+	w.Close()
+	domainRoTx.Close()
+
+	// Build files for step 0 → file has k1=V2.
+	require.NoError(t, d.collateBuildIntegrate(ctx, 0, tx, background.NewProgressSet()))
+
+	// Prune step 0 from DB — entries now only in files.
+	domainRoTx = d.BeginFilesRo()
+	_, err = domainRoTx.Prune(ctx, tx, 0, 0, 16, math.MaxUint64, logEvery)
+	domainRoTx.Close()
+	require.NoError(t, err)
+
+	// Now simulate an unwind that restores k1=V1 (reverting the V1→V2 write at txNum 10).
+	// The changeset entry has: key="key1" + step0_bytes, value=V1.
+	step0Bytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(step0Bytes, ^uint64(0))
+	diffs := []kv.DomainEntryDiff{
+		{
+			Key:   string(k1) + string(step0Bytes),
+			Value: []byte("V1"),
+		},
+	}
+
+	// Unwind to txNum 5 (between the V1 write at 2 and V2 write at 10, still in step 0).
+	domainRoTx = d.BeginFilesRo()
+	err = domainRoTx.unwind(ctx, tx, 0, 5, uint64(domainRoTx.FirstStepNotInFiles()), diffs)
+	domainRoTx.Close()
+	require.NoError(t, err)
+
+	// GetLatest must return V1 (the changeset-restored value), NOT V2 (the file value).
+	domainRoTx = d.BeginFilesRo()
+	defer domainRoTx.Close()
+	v, _, found, err := domainRoTx.GetLatest(k1, tx)
+	require.NoError(t, err)
+	require.True(t, found, "key should be found after unwind")
+	require.Equal(t, "V1", string(v),
+		"GetLatest must return the unwind-restored value V1, not the file value V2")
+}
+
 func TestDomain_Delete(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -2369,7 +2519,7 @@ func TestDomain_Unwind(t *testing.T) {
 			}
 		}
 
-		err = domainRoTx.unwind(ctx, tx, unwindTo/d.stepSize, unwindTo, totalDiff)
+		err = domainRoTx.unwind(ctx, tx, unwindTo/d.stepSize, unwindTo, uint64(domainRoTx.FirstStepNotInFiles()), totalDiff)
 		currTx = unwindTo
 		require.NoError(t, err)
 		domainRoTx.Close()
