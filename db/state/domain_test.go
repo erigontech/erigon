@@ -1006,6 +1006,82 @@ func TestDomain_UnwindRestoredEntryVisibility(t *testing.T) {
 		"GetLatest must return the unwind-restored value V1, not the file value V2")
 }
 
+// TestDomain_UnwindFlushBeforeReExecution verifies that after an unwind, the
+// changeset must be flushed to DB and in-memory maps cleared before
+// re-execution starts. Without this, re-execution writes to the in-memory
+// maps override the pending changeset, causing getLatest to return stale
+// pre-unwind values for keys in both the map and the changeset. See #20169.
+func TestDomain_UnwindFlushBeforeReExecution(t *testing.T) {
+	logger := log.New()
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, 16, logger)
+	ctx := context.Background()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
+	k1 := []byte("key1")
+
+	// Step 0: write k1=V1 at txNum 5, build and prune.
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback() //nolint:gocritic
+
+	dt := d.beginForTests()
+	w := dt.NewWriter()
+	require.NoError(t, w.PutWithPrev(k1, []byte("V1"), 5, nil))
+	require.NoError(t, w.Flush(ctx, tx))
+	w.Close()
+	dt.Close()
+
+	require.NoError(t, d.collateBuildIntegrate(ctx, 0, tx, background.NewProgressSet()))
+
+	dt = d.beginForTests()
+	_, err = dt.Prune(ctx, tx, 0, 0, 16, math.MaxUint64, logEvery)
+	dt.Close()
+	require.NoError(t, err)
+
+	// Step 1: simulate forward execution writing k1=V2 at txNum 20.
+	dt = d.beginForTests()
+	w = dt.NewWriter()
+	require.NoError(t, w.PutWithPrev(k1, []byte("V2"), 20, []byte("V1")))
+	require.NoError(t, w.Flush(ctx, tx))
+	w.Close()
+	dt.Close()
+
+	// Now simulate an unwind back to txNum 16 (start of step 1).
+	// The changeset says: k1 had previous value V1 at step 0.
+	step0Bytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(step0Bytes, ^uint64(1)) // step 1 (where V2 was written)
+	diffs := []kv.DomainEntryDiff{
+		{
+			Key:   string(k1) + string(step0Bytes),
+			Value: []byte("V1"),
+		},
+	}
+
+	dt = d.beginForTests()
+	err = dt.unwind(ctx, tx, 1, 16, uint64(dt.FirstStepNotInFiles()), diffs)
+	dt.Close()
+	require.NoError(t, err)
+
+	// Simulate re-execution writing k1=V3 at txNum 22 (after the unwind target).
+	// This is what happens when the execution stage re-runs blocks after the unwind.
+	dt = d.beginForTests()
+	w = dt.NewWriter()
+	require.NoError(t, w.PutWithPrev(k1, []byte("V3"), 22, []byte("V1")))
+	require.NoError(t, w.Flush(ctx, tx))
+	w.Close()
+	dt.Close()
+
+	// GetLatest must return V3 (the re-execution value), NOT V2 (stale pre-unwind).
+	dt = d.beginForTests()
+	defer dt.Close()
+	v, _, found, err := dt.GetLatest(k1, tx)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, "V3", string(v),
+		"after unwind+flush+re-execution, GetLatest must return the re-execution value V3")
+}
+
 func TestDomain_Delete(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
