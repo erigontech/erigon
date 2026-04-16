@@ -82,7 +82,9 @@ type CallContext struct {
 // peekStorageKey returns the top-of-stack value as an interned StorageKey.
 // The result is cached for the lifetime of one opcode dispatch (gas phase +
 // execute phase share the same cacheGen), so unique.Make is called at most
-// once per opcode.
+// once per opcode. Callers must invoke this before any stack mutation
+// (pop/push/swap) within the same dispatch — the cache is keyed by generation
+// only and will not detect a changed stack top within the same opcode.
 func (ctx *CallContext) peekStorageKey() accounts.StorageKey {
 	if ctx.cachedKeyGen == ctx.cacheGen {
 		return ctx.cachedKey
@@ -93,7 +95,7 @@ func (ctx *CallContext) peekStorageKey() accounts.StorageKey {
 }
 
 // peekAddress returns the top-of-stack value as an interned Address.
-// Cached like peekStorageKey.
+// Cached like peekStorageKey; same constraint: call before any stack mutation.
 func (ctx *CallContext) peekAddress() accounts.Address {
 	if ctx.cachedAddrGen == ctx.cacheGen {
 		return ctx.cachedAddr
@@ -126,8 +128,14 @@ func (c *CallContext) put() {
 	c.Memory.reset()
 	c.Stack.Reset()
 	c.cacheGen = 0
-	c.cachedKeyGen = 0
-	c.cachedAddrGen = 0
+	// Use sentinel values so that a peek call before the first cacheGen++ is
+	// always a miss rather than returning a stale handle from a prior use.
+	c.cachedKeyGen = ^uint64(0)
+	c.cachedAddrGen = ^uint64(0)
+	// Zero the handles to release their canonMap pins while the context is
+	// idle in the pool; unique.Handle values keep interned entries alive.
+	c.cachedKey = accounts.StorageKey{}
+	c.cachedAddr = accounts.Address{}
 	contextPool.Put(c)
 }
 
