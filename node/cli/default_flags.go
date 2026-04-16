@@ -85,6 +85,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.RpcStreamingDisableFlag,
 	&utils.DBReadConcurrencyFlag,
 	&utils.RpcMaxConcurrentRequestsFlag,
+	&utils.WsMaxConnectionsFlag,
 	&utils.RpcAccessListFlag,
 	&utils.RpcTraceCompatFlag,
 	&utils.RpcGethCompatFlag,

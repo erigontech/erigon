@@ -30,6 +30,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
@@ -441,4 +442,91 @@ func TestRPCAdmissionHandler(t *testing.T) {
 		close(gate)
 		wg.Wait()
 	})
+}
+
+// TestWsConnectionLimit verifies that WsConnectionLimit rejects excess WebSocket
+// connections with HTTP 503 and allows new ones once a slot is freed.
+func TestWsConnectionLimit(t *testing.T) {
+	const limit = 1
+	srv := createAndStartServer(t, &httpConfig{}, true, &wsConfig{
+		Origins:           []string{"*"},
+		WsConnectionLimit: limit,
+	})
+	defer srv.stop()
+	url := fmt.Sprintf("ws://%v", srv.listenAddr())
+
+	// First connection should succeed.
+	conn1, resp1, err := websocket.DefaultDialer.Dial(url, nil)
+	if resp1 != nil {
+		resp1.Body.Close()
+	}
+	require.NoError(t, err, "first connection should succeed")
+
+	// Wait until the server increments its counter.
+	require.Eventually(t, func() bool { return srv.wsLimiter.count.Load() == 1 },
+		5*time.Second, 5*time.Millisecond)
+
+	// While first connection is open the second must be rejected.
+	_, resp, err2 := websocket.DefaultDialer.Dial(url, nil)
+	require.Error(t, err2, "second connection should be rejected")
+	if resp != nil {
+		assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+		resp.Body.Close()
+	}
+
+	// Close first connection and wait for the counter to drop.
+	conn1.Close()
+	require.Eventually(t, func() bool { return srv.wsLimiter.count.Load() == 0 },
+		5*time.Second, 5*time.Millisecond)
+
+	// A new connection should now succeed.
+	conn3, resp3, err := websocket.DefaultDialer.Dial(url, nil)
+	if resp3 != nil {
+		resp3.Body.Close()
+	}
+	require.NoError(t, err, "connection after limit released should succeed")
+	conn3.Close()
+}
+
+// TestNewWSConnectionLimiter tests the standalone NewWSConnectionLimiter handler.
+func TestNewWSConnectionLimiter(t *testing.T) {
+	// limit=0: handler passes through without restriction.
+	passthrough := NewWSConnectionLimiter(0, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	rr0 := httptest.NewRecorder()
+	passthrough.ServeHTTP(rr0, httptest.NewRequest(http.MethodGet, "/", nil))
+	assert.Equal(t, http.StatusOK, rr0.Code)
+
+	// Build a limiter with limit=1.
+	// Use a channel to keep "connections" open until the test releases them.
+	hold := make(chan struct{})
+	slow := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-hold
+		w.WriteHeader(http.StatusOK)
+	})
+	limiter := NewWSConnectionLimiter(1, slow)
+
+	// First request: should be accepted (blocks on hold).
+	go func() {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		limiter.ServeHTTP(httptest.NewRecorder(), req)
+	}()
+
+	// Give the goroutine time to increment the counter.
+	require.Eventually(t, func() bool {
+		return limiter.(*wsConnectionLimiter).count.Load() == 1
+	}, 2*time.Second, time.Millisecond)
+
+	// Second request: should be rejected with 503.
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	limiter.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusServiceUnavailable, rr.Code)
+
+	// Release the first "connection".
+	close(hold)
+	require.Eventually(t, func() bool {
+		return limiter.(*wsConnectionLimiter).count.Load() == 0
+	}, 2*time.Second, time.Millisecond)
 }
