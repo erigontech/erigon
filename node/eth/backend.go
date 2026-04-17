@@ -105,7 +105,6 @@ import (
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
-	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
@@ -168,16 +167,13 @@ type Ethereum struct {
 	minedBlocks         chan *types.Block
 	minedBlockObservers *event.Observers[*types.Block]
 
-	sentryCtx      context.Context
-	sentryCancel   context.CancelFunc
-	sentriesClient *sentry_multi_client.MultiClient
-	sentryServers  []*sentry.GrpcServer
+	sentryCtx    context.Context
+	sentryCancel context.CancelFunc
+	// sentryProvider owns the full P2P stack: sentry servers, multi-sentry
+	// client, status-data provider, and the execution-P2P layer. Read
+	// directly via sentryProvider.{Servers, Client, StatusDataProvider,
+	// ExecutionP2P*} rather than via cached fields on Ethereum.
 	sentryProvider *sentrycomp.Provider
-
-	statusDataProvider          *sentry.StatusDataProvider
-	executionP2PMessageListener *execp2p.MessageListener
-	executionP2PPeerTracker     *execp2p.PeerTracker
-	executionP2PPublisher       *execp2p.Publisher
 
 	stagedSync         *stagedsync.Sync
 	pipelineStagedSync *stagedsync.Sync
@@ -468,14 +464,13 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	if err := backend.sentryProvider.Initialize(ctx); err != nil {
 		return nil, err
 	}
-	backend.sentryServers = backend.sentryProvider.Servers
 
 	// Wire chain.toml ENR updater and P2P discovery after sentry servers are created.
 	// Only applies in local downloader mode; remote-downloader mode has nil backend.downloaderProvider.Downloader.
 	// Gated behind --snap.p2p-manifest so default syncs stay on the pre-v2 path and
 	// avoid the torrent-name collision between a locally-seeded chain.toml and the
 	// downloaded chain.toml.torrent in AddTorrentsFromDisk (see #20615).
-	if backend.downloaderProvider != nil && backend.downloaderProvider.Downloader != nil && len(backend.sentryServers) > 0 && backend.config.Snapshot.P2PManifest {
+	if backend.downloaderProvider != nil && backend.downloaderProvider.Downloader != nil && len(backend.sentryProvider.Servers) > 0 && backend.config.Snapshot.P2PManifest {
 		dl := backend.downloaderProvider.Downloader
 		dl.SetENRUpdater(func(ct enr.ChainToml) {
 			// Resolve the torrent port at update time rather than capture-time:
@@ -485,7 +480,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			torrentPort := dl.TorrentPort()
 			validPort := torrentPort > 0 && torrentPort <= 65535
 
-			for _, srv := range backend.sentryServers {
+			for _, srv := range backend.sentryProvider.Servers {
 				if p2p := srv.GetP2PServer(); p2p != nil {
 					p2p.LocalNode().Set(ct)
 					if validPort {
@@ -498,7 +493,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			}
 		})
 
-		sentryServers := backend.sentryServers
+		sentryServers := backend.sentryProvider.Servers
 		dl.SetNodeSourceFn(func() downloader.NodeSource {
 			var sources []downloader.NodeSource
 			for _, srv := range sentryServers {
@@ -646,13 +641,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	// StatusDataProvider, sentry multiplexer, and the execution-P2P layer
 	// (message listener, peer tracker, publisher) are built inside the
-	// sentry Provider's Initialize. Consumers pull them off the Provider.
+	// sentry Provider's Initialize. Consumers read directly off the Provider.
 	statusDataProvider := backend.sentryProvider.StatusDataProvider
-	backend.statusDataProvider = statusDataProvider
-
-	backend.executionP2PMessageListener = backend.sentryProvider.ExecutionP2PMessageListener
-	backend.executionP2PPeerTracker = backend.sentryProvider.ExecutionP2PPeerTracker
-	backend.executionP2PPublisher = backend.sentryProvider.ExecutionP2PPublisher
 
 	// The BackwardBlockDownloader is an execution-side consumer of the
 	// execution-P2P layer, not part of it — it stays in backend.go because
@@ -697,7 +687,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}); err != nil {
 		return nil, err
 	}
-	backend.sentriesClient = backend.sentryProvider.Client
 
 	var ethashApi *ethash.API
 	if casted, ok := backend.engine.(*ethash.Ethash); ok {
@@ -722,7 +711,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	if config.TxPool.Disable {
 		backend.txPoolGrpcServer = &txpool.GrpcDisabled{}
 	} else {
-		sentries := backend.sentriesClient.Sentries()
+		sentries := backend.sentryProvider.Client.Sentries()
 		blockBuilderNotifyNewTxns := func() {
 			select {
 			case backend.blockBuilderNotifyNewTxns <- struct{}{}:
@@ -864,7 +853,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			false, /*badBlockHalt*/
 			dirs,
 			blockReader,
-			backend.sentriesClient.Hd,
+			backend.sentryProvider.Client.Hd,
 			config.Genesis,
 			config.Sync,
 			config.ExperimentalBAL,
@@ -920,16 +909,16 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 					// will trigger the staged sync which will require headers and blocks to be available
 					// in their respective cache in the download stage. If not found, it would cause a
 					// liveness issue for the chain.
-					if err := backend.sentriesClient.Hd.AddMinedHeader(b.Header()); err != nil {
+					if err := backend.sentryProvider.Client.Hd.AddMinedHeader(b.Header()); err != nil {
 						logger.Error("add mined block to header downloader", "err", err)
 					}
-					backend.sentriesClient.Bd.AddToPrefetch(b.Header(), b.RawBody())
+					backend.sentryProvider.Client.Bd.AddToPrefetch(b.Header(), b.RawBody())
 				}
 
 				backend.minedBlockObservers.Notify(b)
 
 				//p2p
-				//backend.sentriesClient.BroadcastNewBlock(context.Background(), b, b.Difficulty())
+				//backend.sentryProvider.Client.BroadcastNewBlock(context.Background(), b, b.Difficulty())
 				//rpcdaemon
 				if err := backend.miningRPC.BroadcastMinedBlock(b); err != nil {
 					logger.Error("txpool rpc mined block broadcast", "err", err)
@@ -939,7 +928,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				if err := backend.miningRPC.BroadcastPendingBlock(b); err != nil {
 					logger.Error("txpool rpc pending block broadcast", "err", err)
 				}
-			case <-backend.sentriesClient.Hd.QuitPoWMining:
+			case <-backend.sentryProvider.Client.Hd.QuitPoWMining:
 				return
 			}
 		}
@@ -966,23 +955,23 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}
 
-	backend.syncStages = stageloop.NewDefaultStages(backend.sentryCtx, backend.chainDB, p2pConfig, config, backend.sentriesClient, backend.notifications, backend.downloaderClient,
+	backend.syncStages = stageloop.NewDefaultStages(backend.sentryCtx, backend.chainDB, p2pConfig, config, backend.sentryProvider.Client, backend.notifications, backend.downloaderClient,
 		blockReader, blockRetire, tracer, afterSnapshotDownload)
 	backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder
 	backend.syncPruneOrder = stagedsync.DefaultPruneOrder
 
 	backend.stagedSync = stagedsync.New(config.Sync, backend.syncStages, backend.syncUnwindOrder, backend.syncPruneOrder, logger, stages.ModeApplyingBlocks)
 
-	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, tracer, afterSnapshotDownload)
+	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentryProvider.Client, backend.notifications, backend.downloaderClient, blockReader, blockRetire, tracer, afterSnapshotDownload)
 	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 
 	validationNotifications := shards.NewNotifications(nil)
-	validationSync := stageloop.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentriesClient,
+	validationSync := stageloop.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentryProvider.Client,
 		validationNotifications, blockReader, blockWriter, logger)
 	dispatcher := execmodule.NewDispatcher(chainConfig, backend.notifications.Events, backend.notifications.StateChangesConsumer, logger)
 	pipelineExecutor := execmodule.NewPipelineExecutor(backend.pipelineStagedSync, backend.chainDB, blockReader, chainConfig, backend.engine, validationSync, validationNotifications, dispatcher, logger)
 
-	hook := stageloop.NewHook(backend.sentryCtx, backend.notifications, backend.stagedSync, backend.chainConfig, backend.logger, dispatcher, backend.sentriesClient.SetStatus, statusDataProvider, backend.sentryProvider.ExecutionP2PPublisher)
+	hook := stageloop.NewHook(backend.sentryCtx, backend.notifications, backend.stagedSync, backend.chainConfig, backend.logger, dispatcher, backend.sentryProvider.Client.SetStatus, statusDataProvider, backend.sentryProvider.ExecutionP2PPublisher)
 
 	// for polygon, we only need to download snapshots on start so that all driver components are correctly initialised before any block execution begins
 	onlySnapDownloadOnStart := chainConfig.Bor != nil
@@ -1169,7 +1158,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	if config.Ethstats != "" {
 		var headCh chan [][]byte
 		headCh, s.unsubscribeEthstat = s.notifications.Events.AddHeaderSubscription()
-		if err := ethstats.New(stack, s.sentryServers, chainKv, s.blockReader, config.Ethstats, s.networkID, ctx.Done(), headCh, s.txPoolRpcClient); err != nil {
+		if err := ethstats.New(stack, s.sentryProvider.Servers, chainKv, s.blockReader, config.Ethstats, s.networkID, ctx.Done(), headCh, s.txPoolRpcClient); err != nil {
 			return err
 		}
 	}
@@ -1236,7 +1225,7 @@ func (s *Ethereum) NetPeerCount() (uint64, error) {
 	var sentryPc uint64 = 0
 
 	s.logger.Trace("sentry", "peer count", sentryPc)
-	for _, sc := range s.sentriesClient.Sentries() {
+	for _, sc := range s.sentryProvider.Client.Sentries() {
 		ctx := context.Background()
 		reply, err := sc.PeerCount(ctx, &sentryproto.PeerCountRequest{})
 		if err != nil {
@@ -1250,13 +1239,13 @@ func (s *Ethereum) NetPeerCount() (uint64, error) {
 }
 
 func (s *Ethereum) NodesInfo(limit int) (*remoteproto.NodesInfoReply, error) {
-	if limit == 0 || limit > len(s.sentriesClient.Sentries()) {
-		limit = len(s.sentriesClient.Sentries())
+	if limit == 0 || limit > len(s.sentryProvider.Client.Sentries()) {
+		limit = len(s.sentryProvider.Client.Sentries())
 	}
 
 	nodes := make([]*typesproto.NodeInfoReply, 0, limit)
 	for i := 0; i < limit; i++ {
-		sc := s.sentriesClient.Sentries()[i]
+		sc := s.sentryProvider.Client.Sentries()[i]
 
 		nodeInfo, err := sc.NodeInfo(context.Background(), nil)
 		if err != nil {
@@ -1331,7 +1320,7 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 
 func (s *Ethereum) Peers(ctx context.Context) (*remoteproto.PeersReply, error) {
 	var reply remoteproto.PeersReply
-	for _, sentryClient := range s.sentriesClient.Sentries() {
+	for _, sentryClient := range s.sentryProvider.Client.Sentries() {
 		peers, err := sentryClient.Peers(ctx, &emptypb.Empty{})
 		if err != nil {
 			return nil, fmt.Errorf("ethereum backend MultiClient.Peers error: %w", err)
@@ -1343,7 +1332,7 @@ func (s *Ethereum) Peers(ctx context.Context) (*remoteproto.PeersReply, error) {
 }
 
 func (s *Ethereum) AddPeer(ctx context.Context, req *remoteproto.AddPeerRequest) (*remoteproto.AddPeerReply, error) {
-	for _, sentryClient := range s.sentriesClient.Sentries() {
+	for _, sentryClient := range s.sentryProvider.Client.Sentries() {
 		_, err := sentryClient.AddPeer(ctx, &sentryproto.AddPeerRequest{Url: req.Url})
 		if err != nil {
 			return nil, fmt.Errorf("ethereum backend MultiClient.AddPeers error: %w", err)
@@ -1353,7 +1342,7 @@ func (s *Ethereum) AddPeer(ctx context.Context, req *remoteproto.AddPeerRequest)
 }
 
 func (s *Ethereum) RemovePeer(ctx context.Context, req *remoteproto.RemovePeerRequest) (*remoteproto.RemovePeerReply, error) {
-	for _, sentryClient := range s.sentriesClient.Sentries() {
+	for _, sentryClient := range s.sentryProvider.Client.Sentries() {
 		_, err := sentryClient.RemovePeer(ctx, &sentryproto.RemovePeerRequest{Url: req.Url})
 		if err != nil {
 			return nil, fmt.Errorf("ethereum backend MultiClient.RemovePeers error: %w", err)
@@ -1363,7 +1352,7 @@ func (s *Ethereum) RemovePeer(ctx context.Context, req *remoteproto.RemovePeerRe
 }
 
 func (s *Ethereum) AddTrustedPeer(ctx context.Context, req *remoteproto.AddPeerRequest) (*remoteproto.AddPeerReply, error) {
-	for _, sentryClient := range s.sentriesClient.Sentries() {
+	for _, sentryClient := range s.sentryProvider.Client.Sentries() {
 		_, err := sentryClient.AddTrustedPeer(ctx, &sentryproto.AddPeerRequest{Url: req.Url})
 		if err != nil {
 			return nil, fmt.Errorf("ethereum backend MultiClient.AddTrustedPeer error: %w", err)
@@ -1373,7 +1362,7 @@ func (s *Ethereum) AddTrustedPeer(ctx context.Context, req *remoteproto.AddPeerR
 }
 
 func (s *Ethereum) RemoveTrustedPeer(ctx context.Context, req *remoteproto.RemovePeerRequest) (*remoteproto.RemovePeerReply, error) {
-	for _, sentryClient := range s.sentriesClient.Sentries() {
+	for _, sentryClient := range s.sentryProvider.Client.Sentries() {
 		_, err := sentryClient.RemoveTrustedPeer(ctx, &sentryproto.RemovePeerRequest{Url: req.Url})
 		if err != nil {
 			return nil, fmt.Errorf("ethereum backend MultiClient.RemoveTrustedPeer error: %w", err)
@@ -1389,9 +1378,9 @@ func (s *Ethereum) SetHead(ctx context.Context, targetBlock uint64) error {
 // Protocols returns all the currently configured
 // network protocols to start.
 func (s *Ethereum) Protocols() []p2p.Protocol {
-	protocols := make([]p2p.Protocol, 0, len(s.sentryServers))
-	for i := range s.sentryServers {
-		protocols = append(protocols, s.sentryServers[i].Protocols...)
+	protocols := make([]p2p.Protocol, 0, len(s.sentryProvider.Servers))
+	for i := range s.sentryProvider.Servers {
+		protocols = append(protocols, s.sentryProvider.Servers[i].Protocols...)
 	}
 	return protocols
 }
@@ -1408,7 +1397,7 @@ func (s *Ethereum) Start() error {
 	}
 
 	stageLoopDispatcher := execmodule.NewDispatcher(s.chainConfig, s.notifications.Events, s.notifications.StateChangesConsumer, s.logger)
-	hook := stageloop.NewHook(s.sentryCtx, s.notifications, s.stagedSync, s.chainConfig, s.logger, stageLoopDispatcher, s.sentriesClient.SetStatus, s.statusDataProvider, s.executionP2PPublisher)
+	hook := stageloop.NewHook(s.sentryCtx, s.notifications, s.stagedSync, s.chainConfig, s.logger, stageLoopDispatcher, s.sentryProvider.Client.SetStatus, s.sentryProvider.StatusDataProvider, s.sentryProvider.ExecutionP2PPublisher)
 
 	currentTDProvider := func() *big.Int {
 		currentTD, err := readCurrentTotalDifficulty(s.sentryCtx, s.chainDB, s.blockReader)
@@ -1448,7 +1437,7 @@ func (s *Ethereum) Start() error {
 		})
 	} else {
 		diaglib.Send(diaglib.SyncStageList{StagesList: diaglib.InitStagesFromList(s.stagedSync.StagesIdsList())})
-		go stageloop.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, s.blockReader, hook)
+		go stageloop.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentryProvider.Client.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, s.blockReader, hook)
 	}
 
 	if s.txPool != nil {
@@ -1503,7 +1492,7 @@ func (s *Ethereum) Stop() error {
 		case <-shutdownDone:
 		}
 	}
-	common.SafeClose(s.sentriesClient.Hd.QuitPoWMining)
+	common.SafeClose(s.sentryProvider.Client.Hd.QuitPoWMining)
 	_ = s.engine.Close()
 	if s.waitForStageLoopStop != nil {
 		<-s.waitForStageLoopStop
@@ -1571,7 +1560,7 @@ func (s *Ethereum) SentryCtx() context.Context {
 }
 
 func (s *Ethereum) SentryControlServer() *sentry_multi_client.MultiClient {
-	return s.sentriesClient
+	return s.sentryProvider.Client
 }
 
 func (s *Ethereum) BlockIO() (services.FullBlockReader, *blockio.BlockWriter) {
