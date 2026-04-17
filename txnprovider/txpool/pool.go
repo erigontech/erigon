@@ -716,6 +716,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 
 	isEIP3860 := p.isShanghai() || p.isAgra()
 	isEIP7623 := p.isPrague() || p.isBhilai()
+	isAmsterdam := p.isAmsterdam()
 
 	txns.Resize(uint(min(n, len(best.ms))))
 	var toRemove []*metaTxn
@@ -793,8 +794,8 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 			IsEIP2028:          true,
 			IsEIP3860:          isEIP3860,
 			IsEIP7623:          isEIP7623,
-			IsEIP7976:          p.isAmsterdam(),
-			IsEIP8037:          p.isAmsterdam(),
+			IsEIP7976:          isAmsterdam,
+			IsEIP8037:          isAmsterdam,
 			IsAATxn:            isAATxn,
 		})
 		intrinsicRegularGas := intrinsicGasResult.RegularGas
