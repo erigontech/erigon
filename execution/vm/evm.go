@@ -307,10 +307,11 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 
 	if typ == CALL || typ == CALLCODE {
 		// Fail if we're trying to transfer more than the available balance.
-		// CanTransfer is only relevant for calls that may execute Transfer.
-		// Zero-value calls short-circuit the balance check, and system calls
-		// are excluded because they intentionally bypass Transfer semantics.
-		if !syscall && !value.IsZero() {
+		// Only check when value is non-zero — matching geth's short-circuit
+		// behavior. Calling CanTransfer for zero-value calls (e.g. system
+		// calls) creates spurious balance reads on the caller that pollute
+		// the Block Access List (EIP-7928).
+		if !value.IsZero() {
 			canTransfer, err := evm.Context.CanTransfer(evm.intraBlockState, caller, value)
 			if err != nil {
 				return nil, mdgas.MdGas{}, err
