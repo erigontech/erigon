@@ -26,12 +26,10 @@ import (
 	"fmt"
 	"io/fs"
 	"math/big"
-	"net"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -92,6 +90,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node"
 	downloadercomp "github.com/erigontech/erigon/node/components/downloader"
+	sentrycomp "github.com/erigontech/erigon/node/components/sentry"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/ethstats"
@@ -176,6 +175,7 @@ type Ethereum struct {
 	sentryCancel   context.CancelFunc
 	sentriesClient *sentry_multi_client.MultiClient
 	sentryServers  []*sentry.GrpcServer
+	sentryProvider *sentrycomp.Provider
 
 	statusDataProvider          *sentry.StatusDataProvider
 	executionP2PMessageListener *execp2p.MessageListener
@@ -216,16 +216,6 @@ type Ethereum struct {
 	heimdallService    *heimdall.Service
 	stopNode           func() error
 	bgComponentsEg     errgroup.Group
-}
-
-func splitAddrIntoHostAndPort(addr string) (host string, port int, err error) {
-	idx := strings.LastIndexByte(addr, ':')
-	if idx < 0 {
-		return "", 0, errors.New("invalid address format")
-	}
-	host = addr[:idx]
-	port, err = strconv.Atoi(addr[idx+1:])
-	return
 }
 
 func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, logger log.Logger, dirs datadir.Dirs, cfg *ethconfig.Config) error {
@@ -450,89 +440,36 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.kvRPC = kvRPC
 
 	p2pConfig := stack.Config().P2P
-	var sentries []sentryproto.SentryClient
-	if len(p2pConfig.SentryAddr) > 0 {
-		for _, addr := range p2pConfig.SentryAddr {
-			sentryClient, err := sentry_multi_client.GrpcClient(backend.sentryCtx, addr)
-			if err != nil {
-				return nil, err
-			}
-			sentries = append(sentries, sentryClient)
-		}
-	} else {
-		var readNodeInfo = func() *eth.NodeInfo {
-			var res *eth.NodeInfo
-			_ = backend.chainDB.View(context.Background(), func(tx kv.Tx) error {
-				res = eth.ReadNodeInfo(tx, backend.chainConfig, backend.genesisHash, backend.networkID)
-				return nil
-			})
 
-			return res
-		}
+	// Sentry component: owns the P2P stack (servers, direct sentry clients, or
+	// external gRPC connections per --sentry.api.addr). The Provider's Configure +
+	// Initialize replaces the ~80-line if-external-else-local block that used to
+	// live here; see node/components/sentry/provider.go.
+	backend.sentryProvider = &sentrycomp.Provider{}
+	backend.sentryProvider.Configure(sentrycomp.Config{
+		SentryCtx:         backend.sentryCtx,
+		P2P:               p2pConfig,
+		ChainDB:           backend.chainDB,
+		ChainConfig:       backend.chainConfig,
+		GenesisHash:       backend.genesisHash,
+		NetworkID:         backend.networkID,
+		EthDiscoveryURLs:  backend.config.EthDiscoveryURLs,
+		ChainName:         config.Snapshot.ChainName,
+		NodesDir:          stack.Config().Dirs.Nodes,
+		EnableWitProtocol: stack.Config().P2P.EnableWitProtocol,
+		Logger:            logger,
+	})
+	if err := backend.sentryProvider.Initialize(ctx); err != nil {
+		return nil, err
+	}
+	backend.sentryServers = backend.sentryProvider.Servers
+	sentries := backend.sentryProvider.Sentries
 
-		p2pConfig.DiscoveryDNS = backend.config.EthDiscoveryURLs
-
-		// Resolve chain-specific bootnodes and DNS for sentry servers.
-		// Only use them when the actual genesis hash matches the chain spec to avoid
-		// connecting to mainnet bootnodes when running with a custom genesis (e.g. Hive tests).
-		var chainBootnodes []string
-		var chainDNSNetwork string
-		if spec, err := chainspec.ChainSpecByName(config.Snapshot.ChainName); err == nil && spec.GenesisHash == backend.genesisHash {
-			chainBootnodes = spec.Bootnodes
-			chainDNSNetwork = spec.DNSNetwork
-		}
-
-		listenHost, listenPort, err := splitAddrIntoHostAndPort(p2pConfig.ListenAddr)
-		if err != nil {
-			return nil, err
-		}
-
-		var pi int // points to next port to be picked from refCfg.AllowedPorts
-		for _, protocol := range p2pConfig.ProtocolVersion {
-			cfg := p2pConfig
-			cfg.NodeDatabase = filepath.Join(stack.Config().Dirs.Nodes, eth.ProtocolToString[protocol])
-
-			// pick port from allowed list
-			var picked bool
-			for ; pi < len(cfg.AllowedPorts); pi++ {
-				pc := int(cfg.AllowedPorts[pi])
-				if pc == 0 {
-					// For ephemeral ports probing to see if the port is taken does not
-					// make sense.
-					picked = true
-					break
-				}
-				if !checkPortIsFree(fmt.Sprintf("%s:%d", listenHost, pc)) {
-					logger.Warn("bind protocol to port has failed: port is busy", "protocols", fmt.Sprintf("eth/%d", cfg.ProtocolVersion), "port", pc)
-					continue
-				}
-				if listenPort != pc {
-					listenPort = pc
-				}
-				pi++
-				picked = true
-				break
-			}
-			if !picked {
-				return nil, fmt.Errorf("run out of allowed ports for p2p eth protocols %v. Extend allowed port list via --p2p.allowed-ports", cfg.AllowedPorts)
-			}
-
-			cfg.ListenAddr = fmt.Sprintf("%s:%d", listenHost, listenPort)
-
-			// TODO: Auto-enable WIT protocol for Bor chains if not explicitly set
-			server := sentry.NewGrpcServer(backend.sentryCtx, nil, readNodeInfo, &cfg, protocol, logger, chainBootnodes, chainDNSNetwork)
-			backend.sentryServers = append(backend.sentryServers, server)
-			var sideProtocols []sentryproto.Protocol
-			if stack.Config().P2P.EnableWitProtocol {
-				sideProtocols = append(sideProtocols, sentryproto.Protocol_WIT0)
-			}
-			sentryClient, err := direct.NewSentryClientDirect(protocol, server, sideProtocols)
-			if err != nil {
-				return nil, fmt.Errorf("failed to create sentry client: %w", err)
-			}
-			sentries = append(sentries, sentryClient)
-		}
-
+	// Peer-count logger (local-sentry mode only; in external-sentry mode there
+	// are no local Servers to count peers on). Will move into
+	// sentryProvider.Start() in a later step; stays here for now so this commit
+	// is a clean construction-only move.
+	if len(backend.sentryServers) > 0 {
 		go func() {
 			logEvery := time.NewTicker(90 * time.Second)
 			defer logEvery.Stop()
@@ -1751,15 +1688,6 @@ func RemoveContents(dirname string) error {
 		}
 	}
 	return nil
-}
-
-func checkPortIsFree(addr string) (free bool) {
-	c, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
-	if err != nil {
-		return true
-	}
-	c.Close()
-	return false
 }
 
 func readCurrentTotalDifficulty(ctx context.Context, db kv.RwDB, blockReader services.FullBlockReader) (*big.Int, error) {
