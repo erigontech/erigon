@@ -251,9 +251,9 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 			return transferErr
 		},
 	}
-	_ = s.CommitBlock(vmctx.Rules(chain.TestChainConfig), w)
+	_ = s.CommitBlock(vmctx.Rules(chain.TestChainBerlinConfig), w)
 
-	vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.TestChainConfig, vm.Config{})
+	vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.TestChainBerlinConfig, vm.Config{})
 	_, _, err = vmenv.Call(params.SystemAddress, address, nil, mdgas.MdGas{Regular: math.MaxUint64}, uint256.Int{}, false /* bailout */)
 	require.NoError(t, err)
 	require.False(t, canTransferCalled, "CanTransfer should be skipped for zero-value system calls")
