@@ -369,7 +369,10 @@ func makeP2PServer(
 	bootnodes []string,
 	protocols []p2p.Protocol,
 ) (*p2p.Server, error) {
-	if len(p2pConfig.BootstrapNodes) == 0 && len(bootnodes) > 0 {
+	// Only fall back to chain-default bootnodes when the caller didn't configure
+	// BootstrapNodes at all (nil slice). An empty non-nil slice signals explicit
+	// opt-out (e.g., --bootnodes= on the CLI) and must be preserved.
+	if p2pConfig.BootstrapNodes == nil && len(bootnodes) > 0 {
 		bootstrapNodes, err := enode.ParseNodesFromURLs(bootnodes)
 		if err != nil {
 			return nil, fmt.Errorf("bad bootnodes option: %w", err)
