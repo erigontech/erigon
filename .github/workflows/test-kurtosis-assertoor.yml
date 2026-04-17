@@ -27,23 +27,33 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # test_timeout_minutes is a per-suite wall-clock cap for the Kurtosis+assertoor
+        # step. Observed happy-path durations are roughly:
+        #   glamsterdam / caplin-minimal ~12 min, pectra ~30 min, regular ~34 min.
+        # The caps below give ~1.5–2x of the happy path so real regressions still
+        # pass but pathological hangs (e.g. a node that silently stops proposing)
+        # fail in reasonable time instead of burning hours.
         include:
           - suite: regular
             package_args: .github/workflows/kurtosis/regular-assertoor.io
             ethereum_package_branch: "5.0.1"
+            test_timeout_minutes: 50
           - suite: pectra
             package_args: .github/workflows/kurtosis/pectra.io
             ethereum_package_branch: "5.0.1"
+            test_timeout_minutes: 45
           - suite: glamsterdam
             package_args: .github/workflows/kurtosis/glamsterdam.io
             # Pinned to 6.1.0 rather than main: commit 835dd9b on main introduced GpuConfig,
             # a Starlark built-in that requires Kurtosis CLI >=1.18.1, breaking Starlark eval.
             # Unpin to main once CI is upgraded to Kurtosis 1.18.1.
             ethereum_package_branch: "6.1.0"
+            test_timeout_minutes: 20
           - suite: caplin-minimal
             package_args: .github/workflows/kurtosis/caplin-minimal-assertoor.io
             ethereum_package_url: "github.com/erigontech/ethereum-package"
             ethereum_package_branch: "erigontech/fix-caplin-launcher"
+            test_timeout_minutes: 20
 
     steps:
       - name: Fast checkout git repository
@@ -109,6 +119,11 @@ jobs:
         # solely to warm Docker image and BuildKit caches on main for future PRs
         # and merge queue runs. Skip the actual tests to avoid redundant execution.
         if: '!inputs.cache-warming-only'
+        # Per-suite cap — see matrix.test_timeout_minutes. Turns multi-hour
+        # hangs (e.g. a node that silently stops proposing) into prompt
+        # failures so the next investigation or retry can start sooner
+        # instead of burning runner hours on a dead chain.
+        timeout-minutes: ${{ matrix.test_timeout_minutes }}
         uses: ethpandaops/kurtosis-assertoor-github-action@v1
         with:
             enclave_name: "kurtosis-${{ matrix.suite }}-${{ github.run_id }}"
@@ -117,3 +132,30 @@ jobs:
             ethereum_package_branch: "${{ matrix.ethereum_package_branch }}"
             kurtosis_extra_args: --verbosity detailed --cli-log-level trace
             persistent_logs: "true"
+
+      - name: Dump Kurtosis enclave on failure
+        # Capture per-service logs (el-*, cl-*, vc-*, spamoor, assertoor,
+        # snooper-*) so test hangs can be diagnosed after the fact. GitHub's
+        # log blob storage purges raw CI logs quickly (BlobNotFound within
+        # hours), and the orchestration output alone doesn't tell us what
+        # each container was actually doing.
+        #
+        # NB: `kurtosis enclave dump` refuses if the target directory already
+        # exists — do NOT pre-create it.
+        if: failure() && !inputs.cache-warming-only
+        continue-on-error: true
+        run: |
+          set -eu
+          enclave_name="kurtosis-${{ matrix.suite }}-${{ github.run_id }}"
+          dump_dir="${RUNNER_TEMP}/kurtosis-dump-${{ matrix.suite }}"
+          kurtosis enclave dump "$enclave_name" "$dump_dir" || true
+
+      - name: Upload Kurtosis enclave dump
+        if: failure() && !inputs.cache-warming-only
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: kurtosis-dump-${{ matrix.suite }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/kurtosis-dump-${{ matrix.suite }}
+          retention-days: 7
+          if-no-files-found: warn
