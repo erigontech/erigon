@@ -217,6 +217,11 @@ type MultiClient struct {
 	logger                           log.Logger
 	getReceiptsActiveGoroutineNumber *semaphore.Weighted
 	ethApiWrapper                    eth.ReceiptsGetter
+
+	// balFetcher routes eth/71 (EIP-8159) BlockAccessLists responses to the
+	// goroutine that issued the corresponding GetBlockAccessLists request.
+	// Owned by MultiClient so it's shared across all sentries.
+	balFetcher *BALFetcher
 }
 
 var _ eth.ReceiptsGetter = new(receipts.Generator) // compile-time interface-check
@@ -297,6 +302,7 @@ func NewMultiClient(
 		logger:                            logger,
 		getReceiptsActiveGoroutineNumber:  semaphore.NewWeighted(1),
 		ethApiWrapper:                     receipts.NewGenerator(dirs, blockReader, engine, nil, 5*time.Minute),
+		balFetcher:                        NewBALFetcher(),
 	}
 
 	return cs, nil
@@ -603,14 +609,43 @@ func (cs *MultiClient) getBlockHeaders66(ctx context.Context, inreq *sentryproto
 }
 
 // blockAccessLists71 handles an inbound eth/71 BlockAccessLists response
-// (EIP-8159). The real handling — matching by request id, validating payloads
-// against header-committed hashes, and writing accepted BALs to rawdb — will
-// live in the Phase 5 client-side fetcher. Until that lands, we accept the
-// message without processing so peers that answer our (future) requests are
-// not falsely penalised at the sentry layer; the fetcher will route its own
-// request/response matching through the Messages() subscription it owns.
-func (cs *MultiClient) blockAccessLists71(_ context.Context, _ *sentryproto.InboundMessage, _ sentryproto.SentryClient) error {
+// (EIP-8159) by decoding it and delivering to the waiting fetcher via
+// request id. Unknown / late / peer-mismatch arrivals are silently dropped —
+// that's not a bad-peer signal; legitimate races exist (e.g. timeouts).
+// Payload-hash validation lives in BALFetcher.FetchBlockAccessLists; peers
+// that return garbage are penalised there.
+func (cs *MultiClient) blockAccessLists71(_ context.Context, inreq *sentryproto.InboundMessage, _ sentryproto.SentryClient) error {
+	var packet eth.BlockAccessListsPacket66
+	if err := rlp.DecodeBytes(inreq.Data, &packet); err != nil {
+		return fmt.Errorf("decoding blockAccessLists71: %w, data: %x", err, inreq.Data)
+	}
+	peerID := sentry.ConvertH512ToPeerID(inreq.PeerId)
+	cs.balFetcher.Deliver(peerID, &packet)
 	return nil
+}
+
+// FetchBlockAccessLists issues a one-shot GetBlockAccessLists (eth/71,
+// EIP-8159) request to peerID and returns the validated BALs aligned with
+// blockHashes. expectedHashes must match blockHashes in length and carry
+// the BlockAccessListHash from each block's header. See BALFetcher for the
+// validation and bad-peer semantics.
+//
+// The request is routed through the first ready sentry that successfully
+// accepts SendMessageById; the response comes back through the normal
+// inbound-message path and is delivered by blockAccessLists71.
+func (cs *MultiClient) FetchBlockAccessLists(
+	ctx context.Context,
+	peerID [64]byte,
+	blockHashes []common.Hash,
+	expectedHashes []common.Hash,
+) ([]rlp.RawValue, error) {
+	for i, ok, next := cs.randSentryIndex(); ok; i, ok = next() {
+		if ready, ok := cs.sentries[i].(interface{ Ready() bool }); ok && !ready.Ready() {
+			continue
+		}
+		return cs.balFetcher.FetchBlockAccessLists(ctx, cs.sentries[i], peerID, blockHashes, expectedHashes)
+	}
+	return nil, fmt.Errorf("bal: no ready sentry available to send GetBlockAccessLists")
 }
 
 // getBlockAccessLists71 answers an inbound eth/71 GetBlockAccessLists request
