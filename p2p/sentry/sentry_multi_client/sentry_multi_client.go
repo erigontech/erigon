@@ -89,6 +89,8 @@ func (cs *MultiClient) RecvUploadMessageLoop(
 		eth.ToProto[direct.ETH68][eth.GetReceiptsMsg],
 		eth.ToProto[direct.ETH69][eth.GetReceiptsMsg],
 		eth.ToProto[direct.ETH70][eth.GetReceiptsMsg],
+		// eth/71 (EIP-8159) BAL exchange
+		eth.ToProto[direct.ETH71][eth.GetBlockAccessListsMsg],
 		wit.ToProto[direct.WIT0][wit.GetWitnessMsg],
 	}
 	streamFactory := func(streamCtx context.Context, sentry sentryproto.SentryClient) (grpc.ClientStream, error) {
@@ -597,6 +599,56 @@ func (cs *MultiClient) getBlockHeaders66(ctx context.Context, inreq *sentryproto
 		return fmt.Errorf("send header response 66: %w", err)
 	}
 	//cs.logger.Info(fmt.Sprintf("[%s] GetBlockHeaderMsg{hash=%x, number=%d, amount=%d, skip=%d, reverse=%t, responseLen=%d}", ConvertH512ToPeerID(inreq.PeerId), query.Origin.Hash, query.Origin.Number, query.Amount, query.Skip, query.Reverse, len(b)))
+	return nil
+}
+
+// blockAccessLists71 handles an inbound eth/71 BlockAccessLists response
+// (EIP-8159). The real handling — matching by request id, validating payloads
+// against header-committed hashes, and writing accepted BALs to rawdb — will
+// live in the Phase 5 client-side fetcher. Until that lands, we accept the
+// message without processing so peers that answer our (future) requests are
+// not falsely penalised at the sentry layer; the fetcher will route its own
+// request/response matching through the Messages() subscription it owns.
+func (cs *MultiClient) blockAccessLists71(_ context.Context, _ *sentryproto.InboundMessage, _ sentryproto.SentryClient) error {
+	return nil
+}
+
+// getBlockAccessLists71 answers an inbound eth/71 GetBlockAccessLists request
+// (EIP-8159) by looking up stored BALs from rawdb and replying with a
+// BlockAccessLists response positionally aligned to the request.
+func (cs *MultiClient) getBlockAccessLists71(ctx context.Context, inreq *sentryproto.InboundMessage, sentry sentryproto.SentryClient) error {
+	var query eth.GetBlockAccessListsPacket66
+	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
+		return fmt.Errorf("decoding getBlockAccessLists71: %w, data: %x", err, inreq.Data)
+	}
+	tx, err := cs.db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	response := eth.AnswerGetBlockAccessListsQuery(tx, query.GetBlockAccessListsPacket, cs.blockReader)
+	tx.Rollback()
+	b, err := rlp.EncodeToBytes(&eth.BlockAccessListsPacket66{
+		RequestId:              query.RequestId,
+		BlockAccessListsPacket: response,
+	})
+	if err != nil {
+		return fmt.Errorf("encode BlockAccessLists response: %w", err)
+	}
+	outreq := sentryproto.SendMessageByIdRequest{
+		PeerId: inreq.PeerId,
+		Data: &sentryproto.OutboundMessageData{
+			Id:   sentryproto.MessageId_BLOCK_ACCESS_LISTS_71,
+			Data: b,
+		},
+	}
+	_, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
+	if err != nil {
+		if libsentry.IsPeerNotFoundErr(err) {
+			return nil
+		}
+		return fmt.Errorf("send BlockAccessLists response: %w", err)
+	}
 	return nil
 }
 
@@ -1130,6 +1182,10 @@ func (cs *MultiClient) handleInboundMessage(ctx context.Context, inreq *sentrypr
 		return cs.getReceipts70(ctx, inreq, sentry)
 	case sentryproto.MessageId_RECEIPTS_70:
 		return cs.receipts66(ctx, inreq, sentry) // client-side receipt handling is a no-op
+	case sentryproto.MessageId_GET_BLOCK_ACCESS_LISTS_71:
+		return cs.getBlockAccessLists71(ctx, inreq, sentry)
+	case sentryproto.MessageId_BLOCK_ACCESS_LISTS_71:
+		return cs.blockAccessLists71(ctx, inreq, sentry)
 	case sentryproto.MessageId_BLOCK_RANGE_UPDATE_69:
 		return cs.blockRange69(ctx, inreq, sentry)
 	default:
