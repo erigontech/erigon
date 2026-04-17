@@ -1148,7 +1148,13 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readA
 func (sdb *IntraBlockState) SubBalance(addr accounts.Address, amount uint256.Int, reason tracing.BalanceChangeReason) error {
 	if amount.IsZero() {
 		if addr == params.SystemAddress {
-			// Gnosis keeps an empty system account even after Spurious Dragon.
+			// Gnosis/AuRa keeps an empty system account even after
+			// Spurious Dragon (see PR 5645 and Issue 18276).
+			//
+			// The primary syscall path in evm.call() handles this via
+			// TouchAccount directly; this branch is retained as
+			// defense-in-depth for other callers (AuRa engine,
+			// consensus callbacks).
 			return sdb.TouchAccount(addr)
 		}
 		return nil

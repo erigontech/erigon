@@ -344,8 +344,9 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 				return nil, mdgas.MdGas{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 			}
 		} else {
-			// Calling Transfer is required even for zero-value transfers to
-			// ensure the usual touch/state-clearing behavior is applied.
+			// Normal (non-syscall) calls always go through Transfer —
+			// this handles both value movement and the zero-balance touch
+			// required for state clearing.
 			if err := evm.Context.Transfer(evm.intraBlockState, caller, addr, value, bailout, evm.chainRules); err != nil {
 				return nil, mdgas.MdGas{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 			}
