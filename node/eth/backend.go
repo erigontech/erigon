@@ -538,7 +538,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	// Wire chain.toml ENR updater and P2P discovery after sentry servers are created.
-	if backend.downloader != nil && len(backend.sentryServers) > 0 {
+	// The entire chain.toml v2 publishing / discovery / torrent-peer-manager stack is
+	// gated behind --snap.p2p-manifest so opt-in users get the new flow while default
+	// syncs keep the pre-v2 behaviour (avoids a torrent-name collision between the
+	// locally-seeded chain.toml and the downloaded chain.toml.torrent).
+	if backend.downloader != nil && len(backend.sentryServers) > 0 && backend.config.Snapshot.P2PManifest {
 		backend.downloader.SetENRUpdater(func(ct enr.ChainToml) {
 			// Resolve the torrent port at update time rather than capture-time:
 			// the torrent client may not be listening yet when the updater
@@ -1458,8 +1462,13 @@ func (s *Ethereum) initDownloader(
 	// Generate chain.toml from existing torrents on disk. The ENR updater is wired
 	// later (after this function returns), so the ENR update will be a no-op here.
 	// The background loop will re-publish with the correct frozenTx once P2P is up.
-	if pubErr := s.downloader.PublishLocalChainToml(); pubErr != nil {
-		s.logger.Warn("Failed to publish initial chain.toml", "err", pubErr)
+	// Only publish when P2P manifest mode is opt-in; otherwise a locally-seeded
+	// chain.toml collides with a subsequently-downloaded chain.toml.torrent in
+	// AddTorrentsFromDisk (see getExistingSnapshotTorrent).
+	if s.config.Snapshot.P2PManifest {
+		if pubErr := s.downloader.PublishLocalChainToml(); pubErr != nil {
+			s.logger.Warn("Failed to publish initial chain.toml", "err", pubErr)
+		}
 	}
 
 	bittorrentServer, err := downloader.NewGrpcServer(s.downloader)
