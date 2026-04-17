@@ -703,6 +703,13 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	)
 
 	backend.stateDiffClient = direct.NewStateDiffClientDirect(backend.kvRPC)
+
+	// Start the eth/71 BAL downloader (EIP-8159). Always-on, negotiation-driven:
+	// if no peer advertises eth/71 this is a silent no-op per scan pass. When
+	// eth/71 peers connect, the downloader backfills missing BALs into rawdb
+	// so subsequent stage_exec runs can skip local BAL regeneration.
+	go sentry_multi_client.NewBALDownloader(backend.sentryProvider.Client, backend.chainDB, logger).Run(backend.sentryCtx)
+
 	var txnProvider txnprovider.TxnProvider
 	if config.TxPool.Disable {
 		backend.txPoolGrpcServer = &txpool.GrpcDisabled{}
