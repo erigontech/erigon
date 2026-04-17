@@ -173,7 +173,7 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 
 	if res.Ext == ".torrent" {
 		innerExt := filepath.Ext(croppedFileName)
-		if IsSeedableExtension("x" + innerExt) {
+		if isKnownSnapshotExt(innerExt) {
 			croppedFileName = strings.TrimSuffix(croppedFileName, innerExt)
 		}
 	}
@@ -400,13 +400,31 @@ func AllV3Extensions() []string {
 	return []string{".kv", ".v", ".ef", ".kvei", ".vi", ".efi", ".bt", ".kvi"}
 }
 
+var knownSnapshotExtensions, knownSnapshotExtensionSet = func() ([]string, map[string]struct{}) {
+	v2Exts := AllV2Extensions()
+	v3Exts := AllV3Extensions()
+	exts := make([]string, 0, len(v2Exts)+len(v3Exts))
+	exts = append(exts, v2Exts...)
+	exts = append(exts, v3Exts...)
+	extSet := make(map[string]struct{}, len(exts))
+	for _, ext := range exts {
+		extSet[ext] = struct{}{}
+	}
+	return exts, extSet
+}()
+
 func IsSeedableExtension(name string) bool {
-	for _, ext := range append(AllV2Extensions(), AllV3Extensions()...) {
+	for _, ext := range knownSnapshotExtensions {
 		if strings.HasSuffix(name, ext) {
 			return true
 		}
 	}
 	return false
+}
+
+func isKnownSnapshotExt(ext string) bool {
+	_, ok := knownSnapshotExtensionSet[ext]
+	return ok
 }
 
 const Erigon3SeedableSteps = 64
