@@ -854,6 +854,9 @@ func (sdb *IntraBlockState) GetState(addr accounts.Address, key accounts.Storage
 	if dbg.TraceTransactionIO && (sdb.trace || (dbg.TraceAccount(addr.Handle()) && traceKey(key))) {
 		fmt.Printf("%d (%d.%d) GetState (%s) %x, %x=%x\n", sdb.blockNum, sdb.txIndex, sdb.version, source, addr, key, &versionedValue)
 	}
+	if dbg.TraceSlotMatch(addr.Value(), key.Value()) {
+		fmt.Printf("%d (%d.%d) SLOT GetState (%s) addr=%x key=%x => %x\n", sdb.blockNum, sdb.txIndex, sdb.version, source, addr, key, &versionedValue)
+	}
 
 	return versionedValue, err
 }
@@ -875,6 +878,9 @@ func (sdb *IntraBlockState) GetCommittedState(addr accounts.Address, key account
 
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 		fmt.Printf("%d (%d.%d) GetCommittedState (%s) %x, %x=%x\n", sdb.blockNum, sdb.txIndex, sdb.version, source, addr, key, &versionedValue)
+	}
+	if dbg.TraceSlotMatch(addr.Value(), key.Value()) {
+		fmt.Printf("%d (%d.%d) SLOT GetCommittedState (%s) addr=%x key=%x => %x\n", sdb.blockNum, sdb.txIndex, sdb.version, source, addr, key, &versionedValue)
 	}
 
 	return versionedValue, err

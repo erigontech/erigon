@@ -116,7 +116,33 @@ var (
 	TraceDeletion         = EnvBool("TRACE_DELETION", false)
 
 	RpcDropResponse = EnvBool("RPC_DROP_RESPONSE", false)
+
+	TraceSlotAddr  = EnvString("TRACE_SLOT_ADDR", "")
+	TraceSlotKey   = EnvString("TRACE_SLOT_KEY", "")
+	TraceSlotPanic = EnvBool("TRACE_SLOT_PANIC", false)
 )
+
+var (
+	traceSlotOnce    sync.Once
+	traceSlotAddr    common.Address
+	traceSlotKey     common.Hash
+	traceSlotEnabled bool
+)
+
+func initTraceSlot() {
+	if TraceSlotAddr != "" && TraceSlotKey != "" {
+		traceSlotAddr = common.HexToAddress(TraceSlotAddr)
+		traceSlotKey = common.HexToHash(TraceSlotKey)
+		traceSlotEnabled = true
+	}
+}
+
+// TraceSlotMatch reports whether (addr, key) matches TRACE_SLOT_ADDR+TRACE_SLOT_KEY.
+// Returns false if the env vars are unset.
+func TraceSlotMatch(addr common.Address, key common.Hash) bool {
+	traceSlotOnce.Do(initTraceSlot)
+	return traceSlotEnabled && addr == traceSlotAddr && key == traceSlotKey
+}
 
 func ReadMemStats(m *runtime.MemStats) {
 	if noMemstat {

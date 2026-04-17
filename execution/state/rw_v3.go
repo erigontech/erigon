@@ -801,6 +801,9 @@ func (w *Writer) WriteAccountStorage(address accounts.Address, incarnation uint6
 	if w.trace {
 		fmt.Printf("storage: %x,%x,%x\n", address, key, v)
 	}
+	if dbg.TraceSlotMatch(addressValue, keyValue) {
+		fmt.Printf("SLOT WriteAccountStorage (temporaldb) txNum=%d composite=%x original=%x new=%x\n", w.txNum, composite, &original, &value)
+	}
 	if len(v) == 0 {
 		return w.tx.DomainDel(kv.StorageDomain, composite, w.txNum, nil)
 	}
@@ -922,7 +925,7 @@ func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.Sto
 	}
 	copy(composite[0:20], addressValue[0:20])
 	copy(composite[20:], keyValue[:])
-	enc, _, err := r.getter.GetLatest(kv.StorageDomain, composite[:])
+	enc, step, err := r.getter.GetLatest(kv.StorageDomain, composite[:])
 	if err != nil {
 		return uint256.Int{}, false, err
 	}
@@ -938,6 +941,13 @@ func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.Sto
 			fmt.Printf("%sReadAccountStorage [%x %x] => [empty], txNum: %d, stack: %s\n", r.tracePrefix, address, key, r.txNum, dbg.Stack())
 		} else {
 			fmt.Printf("%sReadAccountStorage [%x %x] => [%x], txNum: %d, stack: %s\n", r.tracePrefix, address, key, &res, r.txNum, dbg.Stack())
+		}
+	}
+
+	if dbg.TraceSlotMatch(addressValue, keyValue) {
+		fmt.Printf("SLOT ReadAccountStorage (temporaldb) txNum=%d composite=%x step=%d enc=%x res=%x\n", r.txNum, composite[:], step, enc, &res)
+		if dbg.TraceSlotPanic {
+			panic(fmt.Sprintf("TRACE_SLOT_PANIC: read of target slot at txNum=%d value=%x", r.txNum, &res))
 		}
 	}
 
