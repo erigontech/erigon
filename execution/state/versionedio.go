@@ -1349,13 +1349,21 @@ func (account *accountState) updateWrite(vw *VersionedWrite, accessIndex uint16)
 			return
 		}
 		// If we haven't seen a balance and the first write is zero, treat it
-		// as a touch only — but ONLY when a prior read confirmed the initial
-		// balance was already zero. Without a read we cannot prove the write
-		// is a no-op (e.g. a sender whose balance was depleted to zero by gas
-		// may have no BalancePath read in blockIO due to the parallel
-		// executor's finalize-path read stripping).
+		// as a touch only when the pre-block balance is (or is implicitly) zero:
+		//   - No prior read: the account wasn't accessed before, so its
+		//     pre-block balance is implicitly zero (e.g. a newly CREATE'd
+		//     contract or a receiver observed only via the post-write finalize
+		//     path). Writing zero is a no-op.
+		//   - Prior read showed zero: write matches initial state, no-op.
+		// If a prior read showed a non-zero pre-block balance, the zero write
+		// is a genuine depletion (e.g. a sender whose funds were consumed by
+		// gas) and must be recorded as a real balance change.
 		if account.balanceValue == nil && val.IsZero() &&
-			account.initialBalanceValue != nil && account.initialBalanceValue.IsZero() {
+			(account.initialBalanceValue == nil || account.initialBalanceValue.IsZero()) {
+			if account.initialBalanceValue == nil {
+				v := val
+				account.initialBalanceValue = &v
+			}
 			account.setBalanceValue(val)
 			return
 		}
@@ -1417,12 +1425,8 @@ func (account *accountState) updateRead(vr *VersionedRead) {
 		case BalancePath:
 			if val, ok := vr.Val.(uint256.Int); ok {
 				// Record the initial (pre-block) balance for net-zero detection.
-				// Only set from the first read AND only before any writes have
-				// been recorded. A read that arrives after a write (e.g. the
-				// block-end finalize in the parallel executor reading from a
-				// fresh IBS) reflects post-write state, not the pre-block
-				// balance, and must not be used for net-zero filtering.
-				if account.initialBalanceValue == nil && account.balanceValue == nil {
+				// Only the first read is the original pre-block value.
+				if account.initialBalanceValue == nil {
 					v := val
 					account.initialBalanceValue = &v
 				}
