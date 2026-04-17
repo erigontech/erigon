@@ -27,13 +27,30 @@ import (
 	"unsafe"
 
 	"github.com/urfave/cli/v2"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common/dbg"
 	liblog "github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/app"
 	"github.com/erigontech/erigon/node/app/event"
 	"github.com/erigontech/erigon/node/app/util"
+)
+
+// actorMsg is a message sent to a component's actor goroutine.
+// All state-mutating operations are serialized through the actor.
+type actorMsg struct {
+	kind       actorMsgKind
+	ctx        context.Context
+	onActivity onActivity
+	event      *ComponentStateChanged
+	reply      chan error // optional: caller blocks on this for synchronous error return
+}
+
+type actorMsgKind int
+
+const (
+	msgActivate actorMsgKind = iota
+	msgDeactivate
+	msgStateChanged
 )
 
 type relation interface {
@@ -287,6 +304,32 @@ type component struct {
 	provider        interface{}
 	log             app.Logger
 	flags           []cli.Flag
+	inbox           chan actorMsg // serializes activate/deactivate/stateChanged — prevents lock-ordering deadlocks
+}
+
+// runActor is the per-component actor goroutine. It processes all
+// state-mutating lifecycle operations serially, eliminating lock-ordering
+// deadlocks between concurrent activate/deactivate/stateChanged paths.
+//
+// The actor runs for the lifetime of the component. Callers send messages
+// to c.inbox; the actor processes them one at a time. External state reads
+// (via State()) still use RLock for now — the actor holds the write lock
+// when mutating state, same as before, but no two lifecycle operations
+// can interleave on the same component.
+func (c *component) runActor() {
+	for msg := range c.inbox {
+		switch msg.kind {
+		case msgActivate:
+			err := c.doActivate(msg.ctx, msg.onActivity)
+			if msg.reply != nil {
+				msg.reply <- err
+			}
+		case msgDeactivate:
+			c.doDeactivate(msg.ctx, msg.onActivity)
+		case msgStateChanged:
+			c.doOnComponentStateChanged(msg.event)
+		}
+	}
 }
 
 func WithFlag[F cli.Flag, T any](flag F, setter func(f F, t *T) bool) app.Option {
@@ -417,7 +460,9 @@ func NewComponent[P any](parentCtx context.Context, options ...app.Option) (Comp
 		contextCancel: cancel,
 		state:         Instantiated,
 		log:           log,
+		inbox:         make(chan actorMsg, 16),
 	}
+	go c.runActor()
 
 	opts := componentOptions{
 		logLvl: -1,
@@ -843,7 +888,19 @@ type onActivity func(ctx context.Context, c *component, err error)
 
 var noopHanlder = func(context.Context, *component, error) {}
 
+// activate sends an activation message to the actor. Blocks until
+// configure/initialize complete (synchronous errors returned to caller).
+// Dependency activation proceeds asynchronously after the reply.
 func (c *component) activate(ctx context.Context, onActivity onActivity) error {
+	reply := make(chan error, 1)
+	c.inbox <- actorMsg{kind: msgActivate, ctx: ctx, onActivity: onActivity, reply: reply}
+	return <-reply
+}
+
+// doActivate is the actual activation logic, run inside the actor goroutine.
+// Returns an error from the synchronous configure/initialize phase.
+// Dependency activation is fire-and-forget (completion via stateChanged events).
+func (c *component) doActivate(ctx context.Context, onActivity onActivity) error {
 	activationList := make([]*component, 0, len(c.dependencies))
 
 	err := func() error {
@@ -878,14 +935,13 @@ func (c *component) activate(ctx context.Context, onActivity onActivity) error {
 		if len(activationList) == 0 {
 			return nil
 		} else {
-			go c.activateDependencies(ctx, activationList, onActivity)
+			c.activateDependencies(ctx, activationList, onActivity)
 		}
 	} else {
 		c.setState(Activating, false)
 		onActivity(ctx, c, err)
-		go c.activateDependencies(ctx, activationList, onActivity)
+		c.activateDependencies(ctx, activationList, onActivity)
 	}
-
 	return nil
 }
 
@@ -896,60 +952,18 @@ func (c *component) activateDependencies(ctx context.Context, activationList []*
 		}
 		c.onDependenciesActive(ctx, onActivity)
 	} else {
-		wg, activationCtx := errgroup.WithContext(ctx)
-
+		// Fire-and-forget: send activate to each dependency's actor.
+		// Don't block this actor waiting for them — completion is signaled
+		// via ComponentStateChanged events which arrive as msgStateChanged
+		// messages in our inbox. doOnComponentStateChanged checks whether
+		// all dependencies are active and calls onDependenciesActive.
 		for _, dependency := range activationList {
-			dependency := dependency
-
-			wg.Go(func() (err error) {
-				defer func() {
-					if r := recover(); r != nil {
-						if rerr, ok := r.(error); ok {
-							err = fmt.Errorf("%T Panicked with error: %w, stack: %s", dependency, rerr, dbg.Stack())
-						} else {
-							err = fmt.Errorf("%T Panicked: %v, stack: %s", dependency, r, dbg.Stack())
-						}
-					}
-				}()
-
-				if c.log.TraceEnabled() {
-					c.log.Trace("Activating",
-						"component", app.LogInstance(c),
-						"dependency", app.LogInstance(dependency))
-				}
-
-				cerr := make(chan error, 1)
-				dependency.activate(activationCtx, func(ctx context.Context, _ *component, err error) {
-					if errors.Is(err, context.Canceled) {
-						err = nil
-					}
-					cerr <- err
-				})
-				return <-cerr
-			})
-		}
-
-		err := wg.Wait()
-		if c.log.TraceEnabled() {
-			c.log.Trace("Activated dependencies",
-				"domain", app.LogInstance(c))
-		}
-		if err != nil {
-			onActivity(ctx, c, fmt.Errorf("component activate failed: %w", err))
-		} else {
-			allDependenciesActivated := true
-			c.RLock()
-			for _, dependent := range c.dependencies {
-				if dependent.State() != Active {
-					allDependenciesActivated = false
-					break
-				}
+			if c.log.TraceEnabled() {
+				c.log.Trace("Activating",
+					"component", app.LogInstance(c),
+					"dependency", app.LogInstance(dependency))
 			}
-			c.RUnlock()
-
-			if allDependenciesActivated {
-				c.onDependenciesActive(ctx, onActivity)
-			}
+			dependency.activate(ctx, noopHanlder)
 		}
 	}
 }
@@ -1034,6 +1048,7 @@ func awaitDeactivationChannels() {
 	}()
 }
 
+// deactivate sends a deactivation message to the actor. Returns immediately.
 func (c *component) deactivate(ctx context.Context, onActivity onActivity) error {
 	c.RLock()
 	alreadyDeactivated := c.state.IsDeactivated()
@@ -1044,13 +1059,15 @@ func (c *component) deactivate(ctx context.Context, onActivity onActivity) error
 		return nil
 	}
 
-	go func() {
-		if err := c.deactivateProvider(ctx, onActivity); err == nil {
-			c.deactivateDependencies(ctx, onActivity)
-		}
-	}()
-
+	c.inbox <- actorMsg{kind: msgDeactivate, ctx: ctx, onActivity: onActivity}
 	return nil
+}
+
+// doDeactivate is the actual deactivation logic, run inside the actor goroutine.
+func (c *component) doDeactivate(ctx context.Context, onActivity onActivity) {
+	if err := c.deactivateProvider(ctx, onActivity); err == nil {
+		c.deactivateDependencies(ctx, onActivity)
+	}
 }
 
 func (c *component) deactivateDependencies(ctx context.Context, onActivity onActivity) {
@@ -1080,54 +1097,24 @@ DEPENDENCIES:
 		c.onDependenciesDeactivated(ctx)
 		onActivity(ctx, c, nil)
 	} else {
-		wg, deactivationCtx := errgroup.WithContext(ctx)
-
+		// Fire-and-forget: send deactivate to each dependency's actor.
+		// Completion is signaled via ComponentStateChanged events which
+		// arrive as msgStateChanged in our inbox. doOnComponentStateChanged
+		// checks whether all dependencies are deactivated.
 		for _, dependency := range deactivationList {
-			dependency := dependency
+			if dependency.State().IsDeactivated() {
+				continue
+			}
 
-			wg.Go(func() (err error) {
-				defer func() {
-					if r := recover(); r != nil {
-						if rerr, ok := r.(error); ok {
-							err = fmt.Errorf("%T Panicked with error: %w, stack: %s", dependency, rerr, dbg.Stack())
-						} else {
-							err = fmt.Errorf("%T Panicked: %v, stack: %s", dependency, r, dbg.Stack())
-						}
-					}
-				}()
+			if dependency.contextCancel != nil {
+				dependency.contextCancel()
+			}
+			deactivatoinWaiters.Lock()
+			delete(deactivatoinWaiters.cmap, dependency.context.Done())
+			deactivatoinWaiters.Unlock()
+			awaitDeactivationChannels()
 
-				if dependency.State().IsDeactivated() {
-					return nil
-				}
-
-				// Cancel the dependency's context and restart the global
-				// deactivation watcher so it doesn't block on stale channels.
-				if dependency.contextCancel != nil {
-					dependency.contextCancel()
-				}
-				deactivatoinWaiters.Lock()
-				delete(deactivatoinWaiters.cmap, dependency.context.Done())
-				deactivatoinWaiters.Unlock()
-				awaitDeactivationChannels()
-
-				cerr := make(chan error, 1)
-				dependency.deactivate(deactivationCtx, func(ctx context.Context, _ *component, err error) {
-					if errors.Is(err, context.Canceled) {
-						err = nil
-					}
-					cerr <- err
-				})
-				return <-cerr
-			})
-		}
-
-		err := wg.Wait()
-
-		if err != nil {
-			onActivity(ctx, c, fmt.Errorf("deactivate dependencies failed: %w", err))
-		} else {
-			c.onDependenciesDeactivated(ctx)
-			onActivity(ctx, c, nil)
+			dependency.deactivate(ctx, noopHanlder)
 		}
 	}
 }
@@ -1250,17 +1237,18 @@ func (c *component) addDependent(dependent *component, parentLocked bool) error 
 		}
 	}
 
-	if c.state != dependent.state {
+	depState := dependent.State() // thread-safe read via RLock
+	if c.state != depState {
 		switch {
-		case dependent.state.IsActivated():
+		case depState.IsActivated():
 			if err := c.activate(c.context, noopHanlder); err != nil {
 				return err
 			}
-		case dependent.state.IsInitialized():
+		case depState.IsInitialized():
 			if err := c.initialize(c.context, false, noopHanlder); err != nil {
 				return err
 			}
-		case dependent.state.IsConfigured():
+		case depState.IsConfigured():
 			if err := c.configure(c.context, false, false, noopHanlder); err != nil {
 				return err
 			}
@@ -1294,8 +1282,14 @@ func (component *component) registerSubscriptions() error {
 	return fmt.Errorf("expected domain (%T) to have non nil service bus", component.Domain())
 }
 
+// onComponentStateChanged routes the event through the actor inbox so it's
+// processed serially with activate/deactivate. This is the event bus callback.
 func (c *component) onComponentStateChanged(event *ComponentStateChanged) {
+	c.inbox <- actorMsg{kind: msgStateChanged, event: event}
+}
 
+// doOnComponentStateChanged is the actual handler, run inside the actor goroutine.
+func (c *component) doOnComponentStateChanged(event *ComponentStateChanged) {
 	sourceComponent, isComponent := event.Source().(relation)
 
 	if !isComponent {
@@ -1335,11 +1329,11 @@ func (c *component) onComponentStateChanged(event *ComponentStateChanged) {
 						for _, dependency := range c.dependencies {
 							dependency := asComponent(dependency)
 							for _, dependent := range dependency.dependents {
-								if !asComponent(dependent).state.IsDeactivated() {
+								if !asComponent(dependent).State().IsDeactivated() {
 									continue DEPENDENCIES
 								}
 							}
-							if dependency.state != Deactivated {
+							if dependency.State() != Deactivated {
 								allDependenciesDeactivated = false
 								break
 							}
