@@ -567,7 +567,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	// Wire chain.toml ENR updater and P2P discovery after sentry servers are created.
 	// Only applies in local downloader mode; remote-downloader mode has nil backend.downloaderProvider.Downloader.
-	if backend.downloaderProvider != nil && backend.downloaderProvider.Downloader != nil && len(backend.sentryServers) > 0 {
+	// Gated behind --snap.p2p-manifest so default syncs stay on the pre-v2 path and
+	// avoid the torrent-name collision between a locally-seeded chain.toml and the
+	// downloaded chain.toml.torrent in AddTorrentsFromDisk (see #20615).
+	if backend.downloaderProvider != nil && backend.downloaderProvider.Downloader != nil && len(backend.sentryServers) > 0 && backend.config.Snapshot.P2PManifest {
 		dl := backend.downloaderProvider.Downloader
 		dl.SetENRUpdater(func(ct enr.ChainToml) {
 			// Resolve the torrent port at update time rather than capture-time:
