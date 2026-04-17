@@ -50,13 +50,6 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	bt.Whitelist(`.*for_amsterdam/.*`)
 	// static — tested in state test format by TestState
 	bt.SkipLoad(`^for_amsterdam/static/state_tests/`)
-	// TODO(yperbasis): these two sub-tests exercise a sender whose balance
-	// is depleted to zero during a reverted CREATE containing a nested
-	// SELFDESTRUCT. The parallel executor's finalize path strips the
-	// sender's BalancePath read, leaving VersionedIO unable to distinguish
-	// a real depletion from a touch-only zero write. Skipped until the
-	// missing read is propagated into blockIO.
-	bt.SkipLoad(`create_oog_from_eoa_refunds\.json/.*-selfdestruct-oog_(code_deposit|invalid_opcode)\]$`)
 
 	bt.Walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root

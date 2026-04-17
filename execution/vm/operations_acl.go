@@ -257,6 +257,12 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 			evm.IntraBlockState().AddAddressToAccessList(address)
 		}
 
+		// Snapshot the beneficiary's existing reads before Empty() — so we can
+		// later mark only the reads newly recorded by the gas calc as internal,
+		// preserving any pre-existing legitimate reads (e.g. the tx sender's
+		// fee-deduction balance read when the sender is the SELFDESTRUCT
+		// beneficiary).
+		beneficiaryReadsBefore := evm.IntraBlockState().SnapshotVersionedReadKeys(address)
 		// if empty and transfers value
 		empty, err := evm.IntraBlockState().Empty(address)
 		if err != nil {
@@ -275,14 +281,14 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 			evm.IntraBlockState().MarkAddressAccess(address, false)
 		}
 		// When balance is zero OR we're in a read-only (STATICCALL) context,
-		// and the beneficiary differs from self, mark the beneficiary's reads
-		// as internal.  In both cases the Empty() call above recorded versioned
-		// reads for the beneficiary purely for gas calculation — no value is
-		// actually transferred (zero balance) or SELFDESTRUCT will be rejected
-		// (read-only).  Skip when beneficiary == self to avoid incorrectly
-		// marking the contract's own legitimate reads.
+		// and the beneficiary differs from self, mark the reads added by the
+		// Empty() gas-calc call as internal.  In both cases those reads
+		// exist purely for gas calculation — no value is actually transferred
+		// (zero balance) or SELFDESTRUCT will be rejected (read-only).
+		// Pre-existing reads are preserved.  Skip when beneficiary == self to
+		// avoid incorrectly marking the contract's own legitimate reads.
 		if (balance.IsZero() || evm.readOnly) && address != callContext.Address() {
-			evm.IntraBlockState().MarkReadsInternal(address)
+			evm.IntraBlockState().MarkNewReadsInternal(address, beneficiaryReadsBefore)
 		}
 		if empty && !balance.IsZero() {
 			if evm.chainRules.IsAmsterdam {
