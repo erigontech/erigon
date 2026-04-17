@@ -256,6 +256,7 @@ type BeaconBody struct {
 	// Gloas
 	SignedExecutionPayloadBid *SignedExecutionPayloadBid          `json:"signed_execution_payload_bid,omitempty"`
 	PayloadAttestations       *solid.ListSSZ[*PayloadAttestation] `json:"payload_attestations,omitempty"`
+	ParentExecutionRequests   *ExecutionRequests                  `json:"parent_execution_requests,omitempty"`
 
 	// The version of the beacon chain
 	Version   clparams.StateVersion       `json:"-"`
@@ -298,6 +299,7 @@ func NewBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparams.State
 			},
 		}
 		body.PayloadAttestations = solid.NewStaticListSSZ[*PayloadAttestation](int(beaconCfg.MaxPayloadAttestations), PayloadAttestationSSZSize)
+		body.ParentExecutionRequests = NewExecutionRequests(beaconCfg)
 	}
 
 	return body
@@ -366,6 +368,9 @@ func (b *BeaconBody) ensureNilFields() {
 		if b.PayloadAttestations == nil {
 			b.PayloadAttestations = solid.NewStaticListSSZ[*PayloadAttestation](int(b.beaconCfg.MaxPayloadAttestations), PayloadAttestationSSZSize)
 		}
+		if b.ParentExecutionRequests == nil {
+			b.ParentExecutionRequests = NewExecutionRequests(b.beaconCfg)
+		}
 	}
 }
 
@@ -399,10 +404,11 @@ func (b *BeaconBody) EncodingSizeSSZ() (size int) {
 			size += b.ExecutionRequests.EncodingSizeSSZ()
 		}
 	}
-	// [New in Gloas:EIP7732] SignedExecutionPayloadBid and PayloadAttestations
+	// [New in Gloas:EIP7732] SignedExecutionPayloadBid, PayloadAttestations, and ParentExecutionRequests
 	if b.Version >= clparams.GloasVersion {
 		size += b.SignedExecutionPayloadBid.EncodingSizeSSZ()
 		size += b.PayloadAttestations.EncodingSizeSSZ()
+		size += b.ParentExecutionRequests.EncodingSizeSSZ()
 	}
 
 	return
@@ -427,6 +433,7 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version int) error {
 			},
 		}
 		b.PayloadAttestations = solid.NewStaticListSSZ[*PayloadAttestation](int(b.beaconCfg.MaxPayloadAttestations), PayloadAttestationSSZSize)
+		b.ParentExecutionRequests = NewExecutionRequests(b.beaconCfg)
 	}
 	err := ssz2.UnmarshalSSZ(buf, version, b.getSchema(false)...)
 	return err
@@ -487,9 +494,9 @@ func (b *BeaconBody) getSchema(storage bool) []any {
 	if b.Version >= clparams.ElectraVersion && b.Version < clparams.GloasVersion {
 		s = append(s, b.ExecutionRequests)
 	}
-	// [New in Gloas:EIP7732] SignedExecutionPayloadBid and PayloadAttestations
+	// [New in Gloas:EIP7732] SignedExecutionPayloadBid, PayloadAttestations, and ParentExecutionRequests
 	if b.Version >= clparams.GloasVersion {
-		s = append(s, b.SignedExecutionPayloadBid, b.PayloadAttestations)
+		s = append(s, b.SignedExecutionPayloadBid, b.PayloadAttestations, b.ParentExecutionRequests)
 	}
 	return s
 }
@@ -556,6 +563,7 @@ func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 		// [New in Gloas:EIP7732]
 		SignedExecutionPayloadBid *SignedExecutionPayloadBid          `json:"signed_execution_payload_bid,omitempty"`
 		PayloadAttestations       *solid.ListSSZ[*PayloadAttestation] `json:"payload_attestations,omitempty"`
+		ParentExecutionRequests   *ExecutionRequests                  `json:"parent_execution_requests,omitempty"`
 	}
 	tmp.ProposerSlashings = solid.NewStaticListSSZ[*ProposerSlashing](MaxProposerSlashings, 416)
 	tmp.AttesterSlashings = solid.NewDynamicListSSZ[*AttesterSlashing](maxAttSlashing)
@@ -581,6 +589,7 @@ func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 			},
 		}
 		tmp.PayloadAttestations = solid.NewStaticListSSZ[*PayloadAttestation](int(b.beaconCfg.MaxPayloadAttestations), PayloadAttestationSSZSize)
+		tmp.ParentExecutionRequests = NewExecutionRequests(b.beaconCfg)
 	}
 
 	if err := json.Unmarshal(buf, &tmp); err != nil {
@@ -615,6 +624,7 @@ func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 	if b.Version >= clparams.GloasVersion {
 		b.SignedExecutionPayloadBid = tmp.SignedExecutionPayloadBid
 		b.PayloadAttestations = tmp.PayloadAttestations
+		b.ParentExecutionRequests = tmp.ParentExecutionRequests
 	}
 	return nil
 }
@@ -684,6 +694,13 @@ func (b *BeaconBody) GetSignedExecutionPayloadBid() *SignedExecutionPayloadBid {
 
 func (b *BeaconBody) GetPayloadAttestations() *solid.ListSSZ[*PayloadAttestation] {
 	return b.PayloadAttestations
+}
+
+func (b *BeaconBody) GetParentExecutionRequests() *ExecutionRequests {
+	if b.Version >= clparams.GloasVersion {
+		return b.ParentExecutionRequests
+	}
+	return nil
 }
 
 func (b *BeaconBody) GetExecutionRequestsList() []hexutil.Bytes {

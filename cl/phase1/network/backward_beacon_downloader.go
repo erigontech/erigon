@@ -239,7 +239,7 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 			log.Trace("Unexpected root", "slot", block.Block.Slot, "version", block.Version(), "got", common.Hash(blockRoot), "expected", b.expectedRoot)
 			continue
 		}
-		log.Info("[DEBUG] Block matched", "slot", block.Block.Slot, "root", common.Hash(blockRoot))
+		log.Debug("Block matched", "slot", block.Block.Slot, "root", common.Hash(blockRoot))
 
 		var envelope *cltypes.SignedExecutionPayloadEnvelope
 		if envelopes != nil {

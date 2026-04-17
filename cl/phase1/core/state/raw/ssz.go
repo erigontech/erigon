@@ -159,9 +159,9 @@ func (b *BeaconState) getSchema() []any {
 	s = append(s, b.previousEpochParticipation, b.currentEpochParticipation, &b.justificationBits, &b.previousJustifiedCheckpoint, &b.currentJustifiedCheckpoint,
 		&b.finalizedCheckpoint, b.inactivityScores, b.currentSyncCommittee, b.nextSyncCommittee)
 	if b.version >= clparams.BellatrixVersion {
-		// Note: latestExecutionPayloadHeader will be removed and replaced by latestExecutionPayloadBid after Gloas fork
+		// Position 24: pre-Gloas holds latestExecutionPayloadHeader; Gloas replaces it with latestBlockHash (consensus-specs #5113)
 		if b.version >= clparams.GloasVersion {
-			s = append(s, b.latestExecutionPayloadBid)
+			s = append(s, b.latestBlockHash[:])
 		} else {
 			s = append(s, b.latestExecutionPayloadHeader)
 		}
@@ -178,7 +178,7 @@ func (b *BeaconState) getSchema() []any {
 		s = append(s, b.proposerLookahead)
 	}
 	if b.version >= clparams.GloasVersion {
-		s = append(s, b.builders, &b.nextWithdrawalBuilderIndex, b.executionPayloadAvailability, b.builderPendingPayments, b.builderPendingWithdrawals, b.latestBlockHash[:], b.payloadExpectedWithdrawals, b.ptcWindow)
+		s = append(s, b.builders, &b.nextWithdrawalBuilderIndex, b.executionPayloadAvailability, b.builderPendingPayments, b.builderPendingWithdrawals, b.latestExecutionPayloadBid, b.payloadExpectedWithdrawals, b.ptcWindow)
 	}
 	return s
 }
@@ -240,16 +240,16 @@ func (b *BeaconState) EncodingSizeSSZ() (size int) {
 		size += b.pendingConsolidations.EncodingSizeSSZ()
 	}
 	if b.version >= clparams.GloasVersion {
-		// replace latestExecutionPayloadHeader with latestExecutionPayloadBid
+		// Position 24: replace latestExecutionPayloadHeader with latestBlockHash (32 bytes)
 		size -= b.latestExecutionPayloadHeader.EncodingSizeSSZ()
-		size += b.latestExecutionPayloadBid.EncodingSizeSSZ()
-		// new fields
+		size += 32 // latestBlockHash
+		// New Gloas fields (positions 38-45)
 		size += b.builders.EncodingSizeSSZ()
-		size += 8
+		size += 8 // nextWithdrawalBuilderIndex
 		size += b.executionPayloadAvailability.EncodingSizeSSZ()
 		size += b.builderPendingPayments.EncodingSizeSSZ()
 		size += b.builderPendingWithdrawals.EncodingSizeSSZ()
-		size += 32
+		size += b.latestExecutionPayloadBid.EncodingSizeSSZ()
 		size += b.payloadExpectedWithdrawals.EncodingSizeSSZ()
 		size += b.ptcWindow.EncodingSizeSSZ()
 	}

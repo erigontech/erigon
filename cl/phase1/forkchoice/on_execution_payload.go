@@ -42,7 +42,7 @@ import (
 
 // errELBehind is returned by validatePayloadWithEL when the EL cannot process
 // the payload because it hasn't caught up yet (e.g. parent block not available).
-// applyEnvelope treats this as non-fatal: it proceeds with CL state transition
+// applyEnvelope treats this as non-fatal: it proceeds with persisting the envelope
 // and queues the execution block for later EL insertion.
 var errELBehind = errors.New("EL behind: payload not processable yet")
 
@@ -85,6 +85,19 @@ func (f *ForkChoiceStore) validateEnvelopeAgainstBlock(
 	if envelope.Payload.BlockHash != bid.Message.BlockHash {
 		return fmt.Errorf("payload block_hash %v != bid block_hash %v",
 			envelope.Payload.BlockHash, bid.Message.BlockHash)
+	}
+
+	// Validate hash_tree_root(envelope.execution_requests) == bid.execution_requests_root
+	if envelope.ExecutionRequests == nil {
+		return errors.New("envelope missing execution_requests")
+	}
+	requestsRoot, err := envelope.ExecutionRequests.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("failed to hash execution_requests: %w", err)
+	}
+	if requestsRoot != bid.Message.ExecutionRequestsRoot {
+		return fmt.Errorf("execution_requests root %v != bid execution_requests_root %v",
+			requestsRoot, bid.Message.ExecutionRequestsRoot)
 	}
 
 	// Verify builder signature
@@ -200,8 +213,7 @@ func (f *ForkChoiceStore) checkDataAvailability(
 }
 
 // validatePayloadWithEL validates the execution payload with the execution layer engine.
-// This is called BEFORE ProcessExecutionPayloadEnvelope to match Pre-GLOAS flow where
-// NewPayload is called before state transition (AddChainSegment).
+// Called before ProcessExecutionPayloadEnvelope verification.
 func (f *ForkChoiceStore) validatePayloadWithEL(
 	ctx context.Context,
 	envelope *cltypes.ExecutionPayloadEnvelope,
@@ -256,8 +268,8 @@ func (f *ForkChoiceStore) validatePayloadWithEL(
 	case execution_client.PayloadStatusNone:
 		// EL could not process the block (e.g. parent not yet available because
 		// EL is still catching up after forward sync).  Return errELBehind so that
-		// applyEnvelope can proceed with CL state transition and save the envelope,
-		// while queuing the execution block for later insertion into EL.
+		// applyEnvelope can persist the envelope and queue the execution block
+		// for later insertion into EL.
 		log.Warn("validatePayloadWithEL: EL could not process payload (EL behind)",
 			"beaconBlockRoot", beaconBlockRoot, "blockHash", executionBlockHash, "err", err)
 		if optErr := f.optimisticStore.AddOptimisticCandidate(block.Block); optErr != nil {
@@ -294,8 +306,10 @@ func (f *ForkChoiceStore) validatePayloadWithEL(
 	return nil
 }
 
-// applyEnvelope processes the envelope under f.mu: validates, runs state transition,
-// and persists the envelope to disk. Returns (true, nil) if the envelope was applied,
+// applyEnvelope processes the envelope under f.mu: validates, verifies with CL and EL,
+// and persists the envelope to disk. No CL state transition is performed — the
+// execution effects are deferred to the next block's ProcessParentExecutionPayload.
+// Returns (true, nil) if the envelope was applied,
 // (false, nil) if it was skipped (already processed or block not yet known),
 // or (false, err) on failure.
 func (f *ForkChoiceStore) applyEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) (bool, error) {
@@ -314,12 +328,14 @@ func (f *ForkChoiceStore) applyEnvelope(ctx context.Context, signedEnvelope *clt
 		return false, nil
 	}
 
-	// The corresponding beacon block root needs to be known
-	blockStateCopy, err := f.forkGraph.GetState(beaconBlockRoot, true)
+	// Get block state for verification (no copy needed — we don't mutate it for state transition).
+	// We use a copy only because ProcessExecutionPayloadEnvelope backfills the header root
+	// as part of verification, but we don't want that to affect the canonical block state.
+	blockState, err := f.forkGraph.GetState(beaconBlockRoot, false)
 	if err != nil {
 		return false, fmt.Errorf("OnExecutionPayload: failed to get block state: %w", err)
 	}
-	if blockStateCopy == nil {
+	if blockState == nil {
 		// Block hasn't arrived yet, queue envelope for later processing
 		f.pendingEnvelopes.Add(beaconBlockRoot, signedEnvelope)
 		log.Debug("OnExecutionPayload: block not found, queuing envelope for later", "beaconBlockRoot", common.Hash(beaconBlockRoot))
@@ -336,7 +352,7 @@ func (f *ForkChoiceStore) applyEnvelope(ctx context.Context, signedEnvelope *clt
 
 	// Validate envelope against block (bid matching + signature verification)
 	if validatePayload {
-		if err := f.validateEnvelopeAgainstBlock(signedEnvelope, block, blockStateCopy); err != nil {
+		if err := f.validateEnvelopeAgainstBlock(signedEnvelope, block, blockState); err != nil {
 			return false, fmt.Errorf("OnExecutionPayload: envelope validation failed: %w", err)
 		}
 	}
@@ -354,9 +370,8 @@ func (f *ForkChoiceStore) applyEnvelope(ctx context.Context, signedEnvelope *clt
 		if err := f.validatePayloadWithEL(ctx, envelope, block, common.Hash(beaconBlockRoot)); err != nil {
 			if errors.Is(err, errELBehind) {
 				// EL is behind (e.g. parent block not yet available after forward sync).
-				// Proceed with CL state transition and persist the envelope so that
-				// getState() replay won't hit missing segments.  The execution block
-				// will be fed to EL via blockCollector on the next Flush().
+				// Proceed with persisting the envelope so HasEnvelope() returns true.
+				// The execution block will be fed to EL via blockCollector on the next Flush().
 				elBehind = true
 			} else {
 				return false, err
@@ -364,9 +379,9 @@ func (f *ForkChoiceStore) applyEnvelope(ctx context.Context, signedEnvelope *clt
 		}
 	}
 
-	// Process the execution payload for state transition
-	if err := transition.DefaultMachine.ProcessExecutionPayloadEnvelope(blockStateCopy, signedEnvelope); err != nil {
-		return false, fmt.Errorf("OnExecutionPayload: failed to process execution payload: %w", err)
+	// Run ProcessExecutionPayloadEnvelope for verification only (no state mutation).
+	if err := transition.DefaultMachine.ProcessExecutionPayloadEnvelope(blockState, signedEnvelope); err != nil {
+		return false, fmt.Errorf("OnExecutionPayload: failed to verify execution payload: %w", err)
 	}
 
 	// Update eth2Roots mapping for FCU
@@ -374,10 +389,15 @@ func (f *ForkChoiceStore) applyEnvelope(ctx context.Context, signedEnvelope *clt
 		f.eth2Roots.Add(beaconBlockRoot, envelope.Payload.BlockHash)
 	}
 
-	// Persist envelope to disk
+	// Persist envelope to disk — this marks the root as "has payload" in store.payloads
 	if err := f.forkGraph.DumpEnvelopeOnDisk(beaconBlockRoot, signedEnvelope); err != nil {
 		return false, fmt.Errorf("OnExecutionPayload: failed to dump envelope: %w", err)
 	}
+
+	// Invalidate head cache — payload status may have changed from PENDING to FULL.
+	// This forces GetHead to recompute on next call so GetHeadPayloadStatus is fresh.
+	f.headHash = common.Hash{}
+	f.headPayloadStatus = cltypes.PayloadStatusPending
 
 	// If EL was behind, queue the block+envelope for later EL insertion.
 	if elBehind {
