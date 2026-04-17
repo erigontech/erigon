@@ -107,23 +107,16 @@ Loop:
 				if f.highestSlotProcessed > 2 {
 					reqSlot = f.highestSlotProcessed - 2
 				}
-				// double the request count every 10 seconds. This is inspired by the mekong network, which has many consecutive missing blocks.
-				reqCount := count
-				// NEED TO COMMENT THIS BC IT CAUSES ISSUES ON MAINNET
-
-				// if !f.highestSlotUpdateTime.IsZero() {
-				// 	multiplier := int(time.Since(f.highestSlotUpdateTime).Seconds()) / 10
-				// 	multiplier = min(multiplier, 6)
-				// 	reqCount *= uint64(1 << uint(multiplier))
-				// }
+				// Request one extra block beyond the batch for GLOAS lookahead:
+				// the extra block lets determineFullGloasRoots check whether the
+				// last batch block is FULL or EMPTY, instead of guessing FULL.
+				reqCount := count + 1
 
 				// leave a warning if we are stuck for more than 90 seconds
 				if time.Since(f.highestSlotUpdateTime) > 90*time.Second {
 					log.Trace("Forward beacon downloader gets stuck", "time", time.Since(f.highestSlotUpdateTime).Seconds(), "highestSlotProcessed", f.highestSlotProcessed)
 				}
-				// Request count+1 blocks: the extra block is used as a lookahead to determine
-				// whether the last block in the batch is GLOAS FULL or EMPTY.
-				responses, peerId, err := f.rpc.SendBeaconBlocksByRangeReq(ctx, reqSlot, reqCount+1)
+				responses, peerId, err := f.rpc.SendBeaconBlocksByRangeReq(ctx, reqSlot, reqCount)
 				if err != nil {
 					if errors.Is(err, peers.ErrNoPeers) {
 						log.Debug("[Caplin] no peers available for beacon blocks by range request", "slot", reqSlot, "reqCount", reqCount)
@@ -148,7 +141,7 @@ Loop:
 					// Empty response: no blocks in this slot range.
 					// Advance past the requested range so we don't get stuck requesting the same empty range.
 					f.mu.Lock()
-					newSlot := reqSlot + reqCount
+					newSlot := reqSlot + count
 					if newSlot > f.highestSlotProcessed {
 						log.Debug("Empty block range response, advancing past gap", "from", f.highestSlotProcessed, "to", newSlot, "peer", peerId)
 						f.highestSlotProcessed = newSlot
@@ -179,63 +172,43 @@ Loop:
 	}
 
 	resp := atomicResp.Load().(peerAndBlocks)
-	blocks := resp.blocks
+	processBlocks := resp.blocks
 	pid := resp.peerId
 
-	// Sort by slot so count+1 lookahead is correct.
-	sort.Slice(blocks, func(i, j int) bool {
-		return blocks[i].Block.Slot < blocks[j].Block.Slot
+	sort.Slice(processBlocks, func(i, j int) bool {
+		return processBlocks[i].Block.Slot < processBlocks[j].Block.Slot
 	})
 
-	// Trim to count; the extra block is only used as a lookahead for FULL/EMPTY detection.
-	processBlocks := blocks
-	var extraBlock *cltypes.SignedBeaconBlock
-	if uint64(len(blocks)) > count {
-		processBlocks = blocks[:count]
-		extraBlock = blocks[count]
-	}
-
-	// For GLOAS blocks, determine which are FULL and request their envelopes before locking.
+	// For GLOAS blocks, fetch envelopes only for FULL blocks (whose payload was delivered).
+	// EMPTY blocks never have envelopes on the network, so requesting them causes a 30s stall.
+	// We determine FULL/EMPTY by comparing consecutive blocks' bids:
+	// block[i+1].bid.ParentBlockHash == block[i].bid.BlockHash → block[i] is FULL.
+	//
+	// We requested count+1 blocks so the extra lookahead block lets us determine the
+	// last batch block's FULL/EMPTY status accurately. Use all blocks for determination,
+	// then trim to `count` before processing.
 	var envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
 	if anyGloasBlock(processBlocks) {
-		fullBlocks, fullRoots := determineFullGloasBlocks(processBlocks, extraBlock)
+		fullRoots := determineFullGloasRoots(processBlocks, int(count))
+		// Trim the lookahead block before envelope fetch and processing.
+		if uint64(len(processBlocks)) > count {
+			processBlocks = processBlocks[:count]
+		}
 		if len(fullRoots) > 0 {
 			var envErr error
-			envelopes, envErr = RequestEnvelopesFrantically(ctx, f.rpc, fullRoots, fullBlocks...)
+			envelopes, envErr = RequestEnvelopesFrantically(ctx, f.rpc, fullRoots, processBlocks...)
 			if envErr != nil {
 				log.Debug("[ForwardBeaconDownloader] failed to get envelopes", "err", envErr)
 			}
 			log.Debug("[ForwardBeaconDownloader] envelope fetch result",
-				"requested", len(fullRoots), "received", len(envelopes),
+				"fullRoots", len(fullRoots), "received", len(envelopes),
 				"batchBlocks", len(processBlocks),
 				"firstSlot", processBlocks[0].Block.Slot,
 				"lastSlot", processBlocks[len(processBlocks)-1].Block.Slot)
-			// Trim batch at the first definitively FULL block whose envelope is missing.
-			// A FULL block's EL payload must be in the DB for subsequent blocks' TD chain;
-			// skipping it would create an unrecoverable gap.
-			processBlocks = trimAtMissingEnvelope(processBlocks, extraBlock, envelopes)
-			if len(processBlocks) == 0 {
-				// All blocks were trimmed due to missing envelopes.
-				// Still advance highestSlotProcessed past the pre-GLOAS blocks
-				// to avoid re-requesting the same slot range indefinitely.
-				f.mu.Lock()
-				lastSlot := blocks[0].Block.Slot
-				for _, b := range blocks {
-					if b.Version() >= clparams.GloasVersion {
-						break
-					}
-					lastSlot = b.Block.Slot
-				}
-				if lastSlot > f.highestSlotProcessed {
-					log.Debug("[ForwardBeaconDownloader] envelope trim produced empty batch, advancing past pre-GLOAS blocks",
-						"from", f.highestSlotProcessed, "to", lastSlot)
-					f.highestSlotProcessed = lastSlot
-					f.highestSlotUpdateTime = time.Now()
-				}
-				f.mu.Unlock()
-				return
-			}
 		}
+	} else if uint64(len(processBlocks)) > count {
+		// Non-GLOAS: still trim the extra lookahead block.
+		processBlocks = processBlocks[:count]
 	}
 
 	f.mu.Lock()
@@ -263,57 +236,18 @@ func anyGloasBlock(blocks []*cltypes.SignedBeaconBlock) bool {
 	return false
 }
 
-// determineFullGloasBlocks uses the count+1 trick to identify which GLOAS blocks are FULL.
-// A block is FULL if the next block's bid.ParentBlockHash == this block's bid.BlockHash,
-// meaning the EL chain continued from this block's payload.
-// extraBlock is the (count+1)-th block used as a lookahead for the last block in the batch.
-// Returns both the FULL blocks (for by-range fallback) and their roots (for by-root requests).
-func determineFullGloasBlocks(blocks []*cltypes.SignedBeaconBlock, extraBlock *cltypes.SignedBeaconBlock) ([]*cltypes.SignedBeaconBlock, [][32]byte) {
-	var fullBlocks []*cltypes.SignedBeaconBlock
-	var fullRoots [][32]byte
-	for i, block := range blocks {
-		if block.Version() < clparams.GloasVersion {
-			continue
-		}
-		bid := block.Block.Body.GetSignedExecutionPayloadBid()
-		if bid == nil || bid.Message == nil {
-			continue
-		}
-		// Get lookahead block
-		var nextBlock *cltypes.SignedBeaconBlock
-		if i+1 < len(blocks) {
-			nextBlock = blocks[i+1]
-		} else {
-			nextBlock = extraBlock
-		}
-		if nextBlock == nil {
-			// No lookahead: optimistically request the envelope; timeout means EMPTY.
-			root, err := block.Block.HashSSZ()
-			if err == nil {
-				fullBlocks = append(fullBlocks, block)
-				fullRoots = append(fullRoots, root)
-			}
-			continue
-		}
-		nextBid := nextBlock.Block.Body.GetSignedExecutionPayloadBid()
-		if nextBid != nil && nextBid.Message != nil && nextBid.Message.ParentBlockHash == bid.Message.BlockHash {
-			root, err := block.Block.HashSSZ()
-			if err == nil {
-				fullBlocks = append(fullBlocks, block)
-				fullRoots = append(fullRoots, root)
-			}
-		}
-	}
-	return fullBlocks, fullRoots
-}
-
-// trimAtMissingEnvelope trims the block list at the first FULL GLOAS block whose envelope
-// was not obtained. A block is definitively FULL when the next block's bid.ParentBlockHash
-// matches this block's bid.BlockHash (confirmed by lookahead). Blocks without a lookahead
-// (last block in batch, no extraBlock) are conservatively trimmed if their envelope is
-// missing, since OnBlock would fail with ErrParentEnvelopePending for the next block anyway.
-func trimAtMissingEnvelope(blocks []*cltypes.SignedBeaconBlock, extraBlock *cltypes.SignedBeaconBlock, envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) []*cltypes.SignedBeaconBlock {
-	for i, block := range blocks {
+// determineFullGloasRoots uses consecutive blocks in a sorted batch to determine which
+// GLOAS blocks are FULL (payload was delivered). A block[i] is FULL when:
+//
+//	block[i+1].bid.ParentBlockHash == block[i].bid.BlockHash
+//
+// processCount is the number of blocks to return roots for. blocks may contain one extra
+// lookahead block beyond processCount to determine the last batch block's FULL/EMPTY status.
+// Only roots for blocks[:processCount] are returned; the lookahead block's root is never included.
+func determineFullGloasRoots(blocks []*cltypes.SignedBeaconBlock, processCount int) [][32]byte {
+	var roots [][32]byte
+	for i := 0; i < processCount && i < len(blocks); i++ {
+		block := blocks[i]
 		if block.Version() < clparams.GloasVersion {
 			continue
 		}
@@ -322,40 +256,25 @@ func trimAtMissingEnvelope(blocks []*cltypes.SignedBeaconBlock, extraBlock *clty
 			continue
 		}
 
-		root, err := block.Block.HashSSZ()
-		if err != nil {
-			continue
-		}
-		_, hasEnvelope := envelopes[common.Hash(root)]
-
-		// Determine if this block is FULL via lookahead
-		var nextBlock *cltypes.SignedBeaconBlock
+		isFull := false
 		if i+1 < len(blocks) {
-			nextBlock = blocks[i+1]
-		} else {
-			nextBlock = extraBlock
-		}
-
-		if nextBlock != nil {
-			nextBid := nextBlock.Block.Body.GetSignedExecutionPayloadBid()
-			if nextBid != nil && nextBid.Message != nil && nextBid.Message.ParentBlockHash == bid.Message.BlockHash {
-				// Definitively FULL — envelope is required
-				if !hasEnvelope {
-					log.Debug("[ForwardBeaconDownloader] FULL block envelope missing, trimming batch",
-						"slot", block.Block.Slot, "blocksBeforeTrim", len(blocks), "trimmedAt", i)
-					return blocks[:i]
+			nextBlock := blocks[i+1]
+			if nextBlock.Version() >= clparams.GloasVersion {
+				nextBid := nextBlock.Block.Body.GetSignedExecutionPayloadBid()
+				if nextBid != nil && nextBid.Message != nil {
+					isFull = nextBid.Message.ParentBlockHash == bid.Message.BlockHash
 				}
 			}
-		} else if !hasEnvelope {
-			// No lookahead: conservatively trim if envelope is missing.
-			// If this block turns out to be FULL, the next batch would fail
-			// in OnBlock. If EMPTY, trimming is harmless — it will be re-fetched.
-			log.Debug("[ForwardBeaconDownloader] last block envelope missing (no lookahead), trimming batch",
-				"slot", block.Block.Slot, "blocksBeforeTrim", len(blocks), "trimmedAt", i)
-			return blocks[:i]
+		}
+
+		if isFull {
+			root, err := block.Block.HashSSZ()
+			if err == nil {
+				roots = append(roots, root)
+			}
 		}
 	}
-	return blocks
+	return roots
 }
 
 // GetHighestProcessedSlot retrieve the highest processed slot we accumulated.

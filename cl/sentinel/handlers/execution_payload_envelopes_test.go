@@ -122,7 +122,6 @@ func TestExecutionPayloadEnvelopesByRangeHandler(t *testing.T) {
 		envelope.Message.Slot = block.Block.Slot
 		envelope.Message.BeaconBlockRoot = blockRoot
 		envelope.Message.BuilderIndex = uint64(i)
-		envelope.Message.StateRoot = common.Hash{byte(i + 1)}
 
 		fcMock.Envelopes[blockRoot] = envelope
 		expEnvelopes = append(expEnvelopes, envelope)
@@ -203,7 +202,6 @@ func TestExecutionPayloadEnvelopesByRangeHandler(t *testing.T) {
 		// Verify fields
 		require.Equal(t, expEnvelopes[i].Message.Slot, envelope.Message.Slot)
 		require.Equal(t, expEnvelopes[i].Message.BuilderIndex, envelope.Message.BuilderIndex)
-		require.Equal(t, expEnvelopes[i].Message.StateRoot, envelope.Message.StateRoot)
 	}
 
 	// Verify stream is exhausted
@@ -279,7 +277,6 @@ func TestExecutionPayloadEnvelopesByRootHandler(t *testing.T) {
 		envelope.Message.Slot = block.Block.Slot
 		envelope.Message.BeaconBlockRoot = blockRoot
 		envelope.Message.BuilderIndex = uint64(i)
-		envelope.Message.StateRoot = common.Hash{byte(i + 1)}
 
 		fcMock.Envelopes[blockRoot] = envelope
 		expEnvelopes = append(expEnvelopes, envelope)
@@ -353,7 +350,6 @@ func TestExecutionPayloadEnvelopesByRootHandler(t *testing.T) {
 
 		require.Equal(t, expEnvelopes[i].Message.Slot, envelope.Message.Slot)
 		require.Equal(t, expEnvelopes[i].Message.BuilderIndex, envelope.Message.BuilderIndex)
-		require.Equal(t, expEnvelopes[i].Message.StateRoot, envelope.Message.StateRoot)
 	}
 
 	_, err = stream.Read(make([]byte, 1))

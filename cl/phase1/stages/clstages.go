@@ -293,7 +293,7 @@ func ConsensusClStages(ctx context.Context,
 					}
 
 					startingSlot := cfg.state.LatestBlockHeader().Slot
-					logger.Info("[DEBUG] Backward sync starting",
+					logger.Debug("Backward sync starting",
 						"slot", startingSlot,
 						"stateVersion", cfg.state.Version(),
 						"stateRoot", stateRoot,

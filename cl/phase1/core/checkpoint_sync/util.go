@@ -80,23 +80,6 @@ func ReadLocalHeadState(dirs datadir.Dirs, beaconCfg *clparams.BeaconChainConfig
 	return bs, nil
 }
 
-// FetchFinalizedBlock fetches the finalized beacon block from the checkpoint sync endpoint.
-func FetchFinalizedBlock(ctx context.Context, beaconCfg *clparams.BeaconChainConfig, caplinConfig clparams.CaplinConfig) *cltypes.SignedBeaconBlock {
-	hasCustomCheckpointURL := len(clparams.ConfigurableCheckpointsURLs) > 0
-	remoteSync := !caplinConfig.DisabledCheckpointSync && (!caplinConfig.IsDevnet() || hasCustomCheckpointURL)
-	if !remoteSync {
-		return nil
-	}
-
-	syncer := NewRemoteCheckpointSync(beaconCfg, caplinConfig.NetworkId).(*RemoteCheckpointSync)
-	block, err := syncer.FetchFinalizedBlock(ctx)
-	if err != nil {
-		log.Warn("[Checkpoint Sync] Could not fetch finalized block (non-fatal)", "err", err)
-		return nil
-	}
-	return block
-}
-
 // FetchFinalizedEnvelope fetches the finalized execution payload envelope from the checkpoint sync endpoint.
 func FetchFinalizedEnvelope(ctx context.Context, beaconCfg *clparams.BeaconChainConfig, caplinConfig clparams.CaplinConfig) *cltypes.SignedExecutionPayloadEnvelope {
 	hasCustomCheckpointURL := len(clparams.ConfigurableCheckpointsURLs) > 0

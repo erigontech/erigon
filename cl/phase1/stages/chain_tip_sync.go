@@ -229,40 +229,6 @@ MainLoop:
 	return nil
 }
 
-// findMissingEnvelopeRoots identifies blocks whose parent was FULL but missing its execution payload envelope.
-// Each block's bid.ParentBlockHash is compared against the parent block's bid.BlockHash to determine FULL status.
-func findMissingEnvelopeRoots(cfg *Cfg, blocks []*cltypes.SignedBeaconBlock) [][32]byte {
-	var missing [][32]byte
-	for _, block := range blocks {
-		epoch := block.Block.Slot / cfg.beaconCfg.SlotsPerEpoch
-		if cfg.beaconCfg.GetCurrentStateVersion(epoch) < clparams.GloasVersion {
-			continue
-		}
-		parentRoot := block.Block.ParentRoot
-		if cfg.forkChoice.HasEnvelope(common.Hash(parentRoot)) {
-			continue
-		}
-		bid := block.Block.Body.GetSignedExecutionPayloadBid()
-		if bid == nil || bid.Message == nil {
-			log.Warn("[chainTipSync] GLOAS block missing bid", "slot", block.Block.Slot)
-			continue
-		}
-		parentBlock, ok := cfg.forkChoice.GetBlock(parentRoot)
-		if !ok {
-			log.Trace("[findMissingEnvelopeRoots] parent block not in fork choice", "slot", block.Block.Slot, "parentRoot", common.Hash(parentRoot))
-			continue
-		}
-		parentBid := parentBlock.Block.Body.GetSignedExecutionPayloadBid()
-		if parentBid == nil || parentBid.Message == nil {
-			continue // normal at GLOAS transition boundary (parent is pre-GLOAS)
-		}
-		if bid.Message.ParentBlockHash == parentBid.Message.BlockHash {
-			missing = append(missing, parentRoot)
-		}
-	}
-	return missing
-}
-
 // fetchAndApplyEnvelopes fetches missing execution payload envelopes from peers and applies them.
 func fetchAndApplyEnvelopes(ctx context.Context, cfg *Cfg, roots [][32]byte) {
 	envelopes, err := network.RequestEnvelopesFrantically(ctx, cfg.rpc, roots)

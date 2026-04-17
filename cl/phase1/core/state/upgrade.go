@@ -296,18 +296,26 @@ func (b *CachingBeaconState) UpgradeToGloas() error {
 
 	// Replace latest_execution_payload_header with latest_execution_payload_bid
 	// The bid contains only the block_hash from the previous header
+	// Compute the execution_requests_root for an empty ExecutionRequests
+	emptyRequests := cltypes.NewExecutionRequests(cfg)
+	emptyRequestsRoot, err := emptyRequests.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("UpgradeToGloas: failed to hash empty execution requests: %w", err)
+	}
+
 	bid := &cltypes.ExecutionPayloadBid{
-		BuilderIndex:       0,
-		Slot:               0,
-		PrevRandao:         common.Hash{},
-		ParentBlockHash:    common.Hash{},
-		ParentBlockRoot:    common.Hash{},
-		BlockHash:          latestBlockHash,
-		FeeRecipient:       common.Address{},
-		GasLimit:           0,
-		Value:              0,
-		ExecutionPayment:   0,
-		BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
+		BuilderIndex:          0,
+		Slot:                  0,
+		PrevRandao:            common.Hash{},
+		ParentBlockHash:       common.Hash{},
+		ParentBlockRoot:       common.Hash{},
+		BlockHash:             latestBlockHash,
+		FeeRecipient:          common.Address{},
+		GasLimit:              0,
+		Value:                 0,
+		ExecutionPayment:      0,
+		BlobKzgCommitments:    *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
+		ExecutionRequestsRoot: emptyRequestsRoot,
 	}
 	b.SetLatestExecutionPayloadBid(bid)
 
