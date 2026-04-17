@@ -58,7 +58,7 @@ type account struct {
 }
 
 func (a *account) exists() bool {
-	return a.Nonce > 0 || (a.Code != nil && len(*a.Code) > 0) || len(a.Storage) > 0 || (a.Balance != nil && a.Balance.Sign() != 0)
+	return a.Nonce > 0 || a.CodeHash != nil || len(a.Storage) > 0 || (a.Balance != nil && a.Balance.Sign() != 0)
 }
 
 type accountMarshaling struct {
@@ -317,9 +317,6 @@ func (t *prestateTracer) processDiffState() {
 			}
 			if !bytes.Equal(newCode, prevCode) {
 				modified = true
-				if newCode == nil {
-					newCode = []byte{}
-				}
 				postAccount.Code = &newCode
 			}
 		}
@@ -399,9 +396,7 @@ func (t *prestateTracer) lookupAccount(addr accounts.Address) {
 		codeHash := crypto.HashData(code)
 		acc.CodeHash = &codeHash
 	}
-
-	// Fetch and use code for the emptiness check before honoring DisableCode.
-	// Account emptiness should not depend on the config flag.
+	// The code must be fetched first for the emptiness check.
 	if t.config.DisableCode {
 		acc.Code = nil
 	}
