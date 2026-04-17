@@ -307,10 +307,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 
 	if typ == CALL || typ == CALLCODE {
 		// Fail if we're trying to transfer more than the available balance.
-		// Only check when value is non-zero — matching geth's short-circuit
-		// behavior. Calling CanTransfer for zero-value calls (e.g. system
-		// calls) creates spurious balance reads on the caller that pollute
-		// the Block Access List (EIP-7928).
+		// Skip the check for zero-value calls, matching geth's short-circuit.
 		if !value.IsZero() {
 			canTransfer, err := evm.Context.CanTransfer(evm.intraBlockState, caller, value)
 			if err != nil {
@@ -336,9 +333,10 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 			}
 			evm.intraBlockState.CreateAccount(addr, false)
 		}
-		// System calls still need the sender-side zero-balance touch so AuRa
-		// keeps the empty system account in the PMT, but they must not execute
-		// the full transfer semantics.
+		// System calls use TouchAccount instead of Transfer to avoid
+		// spurious balance reads on the caller that would pollute the
+		// Block Access List (EIP-7928). The touch is still needed so
+		// AuRa/Gnosis keeps the empty system account in the PMT.
 		if syscall && value.IsZero() {
 			if err := evm.intraBlockState.TouchAccount(caller); err != nil {
 				return nil, mdgas.MdGas{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
