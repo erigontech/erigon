@@ -1576,10 +1576,13 @@ func doFindSlot(cliCtx *cli.Context, logger log.Logger) error {
 	copy(composite[:20], addr[:])
 	copy(composite[20:], key[:])
 
-	pattern := filepath.Join(dirs.SnapDomain, "*storage*.kv")
-	kvFiles, err := filepath.Glob(pattern)
+	kvMask, err := version.ReplaceVersionWithMask(filepath.Join(dirs.SnapDomain, "v1.0-storage.*.kv"))
 	if err != nil {
-		return fmt.Errorf("glob %s: %w", pattern, err)
+		return fmt.Errorf("kv mask: %w", err)
+	}
+	kvFiles, err := filepath.Glob(kvMask)
+	if err != nil {
+		return fmt.Errorf("glob %s: %w", kvMask, err)
 	}
 	if len(kvFiles) == 0 {
 		return fmt.Errorf("no storage .kv files found in %s", dirs.SnapDomain)
@@ -1590,9 +1593,19 @@ func doFindSlot(cliCtx *cli.Context, logger log.Logger) error {
 	fmt.Printf("Searching %d storage .kv files for composite=%x\n\n", len(kvFiles), composite)
 	found := 0
 	for _, kvPath := range kvFiles {
-		btPath := strings.Replace(kvPath, ".kv", ".bt", 1)
-		if _, statErr := os.Stat(btPath); statErr != nil {
-			fmt.Printf("  %-50s  skip (no .bt): %v\n", filepath.Base(kvPath), statErr)
+		derivedBt := strings.Replace(kvPath, ".kv", ".bt", 1)
+		btMask, err := version.ReplaceVersionWithMask(derivedBt)
+		if err != nil {
+			fmt.Printf("  %-50s  bt mask error: %v\n", filepath.Base(kvPath), err)
+			continue
+		}
+		btPath, _, ok, err := version.FindFilesWithVersionsByPattern(btMask)
+		if err != nil {
+			fmt.Printf("  %-50s  bt find error: %v\n", filepath.Base(kvPath), err)
+			continue
+		}
+		if !ok {
+			fmt.Printf("  %-50s  no .bt accessor found (mask=%s)\n", filepath.Base(kvPath), btMask)
 			continue
 		}
 		decomp, bti, err := btindex.OpenBtreeIndexAndDataFile(btPath, kvPath, btindex.DefaultBtreeM, compression, false)
