@@ -55,7 +55,6 @@ type account struct {
 	CodeHash *common.Hash                `json:"codeHash,omitempty"`
 	Nonce    uint64                      `json:"nonce,omitempty"`
 	Storage  map[common.Hash]common.Hash `json:"storage,omitempty"`
-	empty    bool
 }
 
 func (a *account) exists() bool {
@@ -299,6 +298,8 @@ func (t *prestateTracer) processDiffState() {
 			postAccount.Nonce = newNonce
 		}
 
+		// Empty code hashes are excluded from the prestate, so default
+		// to EmptyCodeHash to match what GetCodeHash returns for codeless accounts.
 		prevCodeHash := empty.CodeHash
 		if t.pre[addr].CodeHash != nil {
 			prevCodeHash = *t.pre[addr].CodeHash
@@ -399,11 +400,8 @@ func (t *prestateTracer) lookupAccount(addr accounts.Address) {
 		acc.CodeHash = &codeHash
 	}
 
-	if !acc.exists() {
-		acc.empty = true
-	}
-
-	// code fetched before emptiness check, then stripped if disabled
+	// Fetch and use code for the emptiness check before honoring DisableCode.
+	// Account emptiness should not depend on the config flag.
 	if t.config.DisableCode {
 		acc.Code = nil
 	}
