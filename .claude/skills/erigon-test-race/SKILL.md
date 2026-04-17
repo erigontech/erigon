@@ -7,6 +7,16 @@ description: Run Erigon tests with Go race detector to find data races and concu
 
 Runs the full test suite with Go's `-race` flag. Catches concurrency bugs that normal tests miss. Takes 30–60 minutes.
 
+## Prerequisite: Update Submodules
+
+Before running `make test-all-race`, always sync git submodules:
+
+```bash
+git submodule update --init --recursive --force
+```
+
+Most tests in `execution/tests` load test fixtures from a git submodule (`execution/tests/execution-spec-tests`). Without this step the fixture files are missing or stale and tests will fail or skip silently. The CI workflow clones submodules automatically (`submodules: true` in `test-all-erigon-race.yml`); locally you must do it yourself.
+
 ## Command
 
 ```bash
@@ -57,7 +67,7 @@ Areas historically susceptible to races in Erigon:
 
 - After changes to the parallel executor or concurrent code paths
 - For concurrency-sensitive fixes before merging
-- Race check gate: `make lint && make test-all-race`
+- Race check gate: `git submodule update --init --recursive --force && make lint && make test-all-race`
 
 ## CI Equivalent
 

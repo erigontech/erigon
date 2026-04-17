@@ -7,6 +7,16 @@ description: Run the full Erigon test suite locally using GOGC=80 make test-all.
 
 Runs the complete test suite with 60-minute timeout and coverage output. Takes ~30 minutes.
 
+## Prerequisite: Update Submodules
+
+Before running `make test-all`, always sync git submodules:
+
+```bash
+git submodule update --init --recursive --force
+```
+
+Most tests in `execution/tests` load test fixtures from a git submodule (`execution/tests/execution-spec-tests`). Without this step the fixture files are missing or stale and tests will fail or skip silently. The CI workflow clones submodules automatically (`submodules: true` in `test-all-erigon.yml`); locally you must do it yourself.
+
 ## Command
 
 ```bash
@@ -54,7 +64,7 @@ Tests skipped via `-short` in `test-short` run fully here. If a test passes in `
 
 - Before marking a PR ready for review
 - After significant logic changes to verify no edge cases break
-- Full gate: `make lint && make erigon integration && GOGC=80 make test-all`
+- Full gate: `git submodule update --init --recursive --force && make lint && make erigon integration && GOGC=80 make test-all`
 
 ## CI Equivalent
 
