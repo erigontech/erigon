@@ -125,16 +125,6 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		return blocks[i].Block.Slot < blocks[j].Block.Slot
 	})
 
-	// // [GLOAS] Before processing blocks, fetch missing parent envelopes so that
-	// // latestBlockHash is up-to-date when we validate subsequent bids.
-	// // DISABLED: with trimAtMissingEnvelope in beacon_downloader.go, this path should
-	// // never trigger. It also has a bug: fetchAndApplyEnvelopes only calls
-	// // OnExecutionPayload but not AddGloasBlock, which would create an EL chain gap.
-	// if missingRoots := findMissingEnvelopeRoots(cfg, blocks); len(missingRoots) > 0 {
-	// 	logger.Debug("[Caplin] forward sync: fetching missing parent envelopes", "count", len(missingRoots))
-	// 	fetchAndApplyEnvelopes(ctx, cfg, missingRoots)
-	// }
-
 	var blockRoot common.Hash
 	newHighestBlockProcessed = highestBlockProcessed
 	// Iterate over each block in the sorted list
@@ -201,7 +191,6 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		if block.Version() >= clparams.GloasVersion {
 			if env, ok := envelopes[blockRoot]; ok {
 				// FULL block: update forkchoice with the envelope (updates eth2Roots, persists to disk).
-				// checkBlobData=false and validatePayload=false because we trust the chain during forward sync.
 				if fceErr := cfg.forkChoice.OnExecutionPayload(ctx, env, false, false); fceErr != nil {
 					logger.Warn("[Caplin] forward sync: failed to process GLOAS envelope", "slot", block.Block.Slot, "err", fceErr)
 				} else if shouldInsert {
@@ -210,18 +199,8 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 						return
 					}
 				}
-			} else {
-				bid := block.Block.Body.GetSignedExecutionPayloadBid()
-				if bid != nil && bid.Message != nil {
-					logger.Debug("[Caplin] forward sync: GLOAS block without envelope (treated as EMPTY)", "slot", block.Block.Slot, "bidBlockHash", bid.Message.BlockHash)
-				}
 			}
-			// [Modified in Gloas:EIP7732] Dump state and save head state for restart.
-			// DumpBeaconStateOnDisk uses pre-envelope state (block_state) so that the
-			// filename computed by BlockRoot() is correct.
-			// saveHeadStateOnDiskIfNeeded uses post-envelope state (execution_payload_state)
-			// so that a restart loads the full state with correct LatestBlockHash and
-			// LatestBlockHeader.Root — preventing "parent block hash mismatch" errors.
+			// Dump state periodically for restart checkpoints.
 			if !hasSignedHeaderInDB && block.Block.Slot%(cfg.beaconCfg.SlotsPerEpoch*2) == 0 {
 				var st *state.CachingBeaconState
 				st, err = cfg.forkChoice.GetStateAtBlockRoot(blockRoot, false)
@@ -230,27 +209,16 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 						err = fmt.Errorf("failed to dump state: %w", err)
 						return
 					}
-				}
-				// Use post-envelope state for the restart checkpoint (latest.ssz_snappy).
-				var fullSt *state.CachingBeaconState
-				fullSt, err = cfg.forkChoice.GetFullStateAtBlockRoot(blockRoot)
-				if err != nil || fullSt == nil {
-					// Fallback to pre-envelope state if envelope is not available (EMPTY block).
-					fullSt = st
-					err = nil
-				}
-				if fullSt != nil {
-					if err = saveHeadStateOnDiskIfNeeded(cfg, fullSt); err != nil {
+					if err = saveHeadStateOnDiskIfNeeded(cfg, st); err != nil {
 						err = fmt.Errorf("failed to save head state: %w", err)
 						return
 					}
 				}
 			}
-			// EMPTY block: OnBlock already correctly inherits the parent EL hash in eth2Roots.
 			continue
 		}
 
-		// Pre-GLOAS: dump state after block processing (envelope is part of the beacon block).
+		// Pre-GLOAS: dump state periodically for restart checkpoints.
 		if !hasSignedHeaderInDB && block.Block.Slot%(cfg.beaconCfg.SlotsPerEpoch*2) == 0 {
 			var st *state.CachingBeaconState
 			st, err = cfg.forkChoice.GetStateAtBlockRoot(blockRoot, false)
@@ -270,7 +238,7 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		if block.Version() < clparams.BellatrixVersion || !shouldInsert {
 			continue
 		}
-		// Add the block to the block collector
+		// Add the block to the block collector (pre-GLOAS only)
 		if err = cfg.blockCollector.AddBlock(block.Block); err != nil {
 			// Return an error if adding the block to the collector fails
 			err = fmt.Errorf("failed to add block to collector: %w", err)
@@ -304,7 +272,7 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 	// [New in Gloas:EIP7732] Before starting forward sync, ensure the anchor's envelope
 	// is on disk if the anchor was a FULL block. This must happen before any blocks are
 	// processed (via forward sync OR gossip), because blocks built on a FULL parent need
-	// the execution_payload_state which requires the envelope.
+	// the parent's envelope on disk so ProcessParentExecutionPayload can resolve it.
 	if err := ensureAnchorEnvelopeOnce(ctx, cfg); err != nil {
 		logger.Warn("[Caplin] Failed to fetch anchor envelope (will retry)", "err", err)
 	}
@@ -432,24 +400,23 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 		return nil // Already have it
 	}
 
-	anchorBlock, ok := cfg.forkChoice.GetBlock(anchorRoot)
-	if !ok || anchorBlock == nil {
-		log.Debug("[ensureAnchorEnvelopeOnce] anchor block not in fork graph, skipping")
+	// Optimistically fetch the anchor envelope. If the anchor was EMPTY, the envelope
+	// won't exist on the network and the timeout will expire harmlessly.
+	// We use the state's LatestExecutionPayloadBid (not the block) since the anchor
+	// block is not stored in the fork graph under the single-state model.
+	anchorState, err := cfg.forkChoice.GetStateAtBlockRoot(anchorRoot, true)
+	if err != nil || anchorState == nil {
+		log.Debug("[ensureAnchorEnvelopeOnce] anchor state not available, skipping", "err", err)
 		return nil
 	}
-
-	// The anchor block's bid tells us its BlockHash. We can't know if the NEXT block
-	// expects FULL or EMPTY without seeing it, but we can optimistically fetch the
-	// envelope. If the anchor was actually EMPTY, the envelope won't exist and the
-	// timeout will just expire harmlessly.
-	bid := anchorBlock.Block.Body.GetSignedExecutionPayloadBid()
-	if bid == nil || bid.Message == nil {
+	bid := anchorState.GetLatestExecutionPayloadBid()
+	if bid == nil {
 		return nil
 	}
 
 	log.Info("[Caplin] Proactively fetching anchor envelope for GLOAS checkpoint sync",
 		"anchorSlot", anchorSlot, "anchorRoot", common.Hash(anchorRoot),
-		"bidBlockHash", bid.Message.BlockHash)
+		"bidBlockHash", bid.BlockHash)
 
 	// Try HTTP API first (checkpoint sync endpoint), then fall back to P2P.
 	// HTTP is more reliable on devnets with few peers.

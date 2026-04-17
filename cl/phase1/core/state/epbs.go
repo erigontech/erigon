@@ -111,16 +111,6 @@ func IsValidIndexedPayloadAttestation(s abstract.BeaconState, attestation *cltyp
 	return true, nil
 }
 
-// IsParentBlockFull returns true if the last committed payload bid was fulfilled with a payload,
-// which can only happen when both beacon block and payload were present.
-// Note: This function must be called on a beacon state before processing the execution payload bid in the block.
-func IsParentBlockFull(s abstract.BeaconState) bool {
-	bid := s.GetLatestExecutionPayloadBid()
-	if bid == nil {
-		return false
-	}
-	return bid.BlockHash == s.GetLatestBlockHash()
-}
 
 // CanBuilderCoverBid returns true if the builder has enough balance to cover the bid amount
 // after accounting for the minimum deposit and pending withdrawals.

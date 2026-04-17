@@ -20,6 +20,7 @@ import (
 	"errors"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/common"
@@ -41,6 +42,7 @@ func (f *ForkChoiceStore) OnAttestation(
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.headHash = common.Hash{} // reset current head hash to force recomputation on next GetHead
+	f.headPayloadStatus = cltypes.PayloadStatusPending
 	data := attestation.Data
 	if err := f.ValidateOnAttestation(attestation); err != nil {
 		return err
@@ -278,6 +280,10 @@ func (f *ForkChoiceStore) ValidateOnAttestation(attestation *solid.Attestation) 
 		// if block_slot == attestation_slot, index must be 0
 		if blockHeader.Slot == attestation.Data.Slot && attestation.Data.CommitteeIndex != 0 {
 			return errors.New("attestation index must be 0 when block_slot equals attestation_slot")
+		}
+		// PTC attestation (index 1): payload must be verified
+		if attestation.Data.CommitteeIndex == 1 && !f.forkGraph.HasEnvelope(attestation.Data.BeaconBlockRoot) {
+			return errors.New("PTC attestation requires verified payload envelope")
 		}
 	}
 
