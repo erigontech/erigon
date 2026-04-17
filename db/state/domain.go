@@ -1271,7 +1271,14 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	defer valsCursor.Close()
 	// Revert keys using diff entries.
 	// Always: delete current entry at the write step, restore prevValue at unwind target step.
-	// value == []byte{} means key was new (no previous value to restore).
+	//
+	// DomainEntryDiff.Value semantics:
+	//   - nil            → "different step" — prev value lives at another step, skip the restore
+	//                       (only produced by legacy V0 changesets where valueLen==0 deserializes as nil)
+	//   - []byte{}       → "no previous value" — key was absent before this step, so write an
+	//                       empty tombstone to prevent getLatestFromDb falling through to files
+	//                       (which have no concept of deletions) and returning stale data
+	//   - non-empty      → restore the actual previous value
 	//
 	// The step tag for restored entries must be BEYOND the filed range, otherwise
 	// getLatestFromDb will discard them (step covered by files → fall through to
@@ -1292,8 +1299,8 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			if err := rwTx.Delete(d.ValuesTable, key); err != nil {
 				return err
 			}
-			// Restore previous value at unwind step ([]byte{} = key was new, nothing to restore)
-			if len(value) > 0 {
+			// nil = different step, skip; []byte{} = absent previously, write empty tombstone
+			if value != nil {
 				fullKey := key[:len(key)-8]
 				if err := rwTx.Put(d.ValuesTable, append(fullKey, unwindStepBytes...), value); err != nil {
 					return err
@@ -1317,8 +1324,8 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			}
 		}
 
-		// Restore previous value at unwind step ([]byte{} = key was new, nothing to restore)
-		if len(value) > 0 {
+		// nil = different step, skip; []byte{} = absent previously, write empty tombstone
+		if value != nil {
 			if err := valsCursor.Put(fullKey, append(unwindStepBytes, value...)); err != nil {
 				return err
 			}
