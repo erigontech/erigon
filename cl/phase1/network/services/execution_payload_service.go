@@ -218,6 +218,12 @@ func (s *executionPayloadService) queuePendingEnvelope(blockRoot common.Hash, en
 
 // loop is the background goroutine that processes pending envelopes
 func (s *executionPayloadService) loop(ctx context.Context) {
+	// Wake any blocked Wait() on context cancellation to prevent deadlock.
+	go func() {
+		<-ctx.Done()
+		s.pendingCond.Broadcast()
+	}()
+
 	for {
 		// Wait until there are pending envelopes
 		s.pendingCond.L.Lock()
