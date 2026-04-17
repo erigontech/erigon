@@ -390,9 +390,6 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				// hash computation (deposit extraction from logs). See #20452.
 				finalizeReceipts := blockReceipts
 				if startTxIndex > 0 && len(txTask.Txs) > 0 {
-					// Use the first executed user tx task (not the block-end task) to
-					// derive blockStartTxNum, since the block-end task's TxIndex is
-					// len(txs) which would compute the wrong range.
 					firstTask := tasks[0].(*exec.TxTask)
 					blockStartTxNum := firstTask.TxNum - uint64(firstTask.TxIndex)
 					reader := state.NewHistoryReaderV3(se.applyTx, blockStartTxNum)
@@ -402,7 +399,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
 						return se.cfg.blockReader.Header(ctx, se.applyTx, hash, number)
 					}
-					priorReceipts, priorErr := receipts.DerivePriorReceipts(ctx, se.cfg.chainConfig, se.cfg.engine, txTask.Header, txTask.Txs, startTxIndex, priorIbs, priorGp, getHeader)
+					priorReceipts, priorErr := receipts.DerivePriorReceipts(ctx, se.cfg.chainConfig, se.cfg.engine, txTask.Header, txTask.Txs, startTxIndex, blockStartTxNum, se.applyTx, priorIbs, priorGp, getHeader)
 					if priorErr != nil {
 						se.logger.Warn(fmt.Sprintf("[%s] failed to reconstruct prior receipts for partial block", se.logPrefix),
 							"block", txTask.BlockNumber(), "startTxIndex", startTxIndex, "err", priorErr)
