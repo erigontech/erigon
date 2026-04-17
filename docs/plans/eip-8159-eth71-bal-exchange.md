@@ -119,6 +119,22 @@ This is the substantial, net-new piece. The goal: during sync, fill the `kv.Bloc
 
 Decision point: whether to make BAL fetching a first-class blocking stage or an opportunistic background fetch. Recommend **background**: stage_exec already validates BAL locally via `ProcessBAL`, so missing-peer BALs are self-healing via local regeneration. p2p BAL is an optimisation for nodes that want to skip the recompute cost.
 
+**Validation lives in the p2p layer (not a higher layer callback).** Follow the existing pattern where BlockBodies / Receipts validation runs inside the fetcher against header data it already has in scope. The fetcher pre-loads `header.BlockAccessListHash` for each pending request hash, and on each inbound `BlockAccessLists` response validates `keccak256(payload) == expected_hash` inline — **before** dispatching to the rawdb writer. Non-matching payloads never cross the p2p boundary.
+
+**Empty-RLP ambiguity** (`0xc0` has two meanings on the wire):
+
+- `0xc0` means *"peer does not have this BAL"* when `expected_hash != empty.BlockAccessListHash`.
+- `0xc0` means *"block genuinely has an empty BAL"* when `expected_hash == empty.BlockAccessListHash` (the keccak256 of the empty RLP list, `0x1dcc4de8...`; already exported at [common/empty/empty_hashes.go:49](common/empty/empty_hashes.go#L49)).
+
+The fetcher always disambiguates against the expected hash, never by inspecting the payload alone. Accept `0xc0` only when the hashes match.
+
+**Bad-peer management** — two distinct penalty tracks layered on top of the per-peer request-rate limits:
+
+1. **Garbage / wrong hash.** Any non-`0xc0` payload whose `keccak256` does not equal the expected hash → immediate disconnect via `Sentry.PenalizePeer`. No ambiguity: the peer is corrupt or malicious.
+2. **Silent withholding.** A peer that consistently returns `0xc0` for BAL hashes we know to be non-empty is DoS-ing the stream without sending garbage. Maintain a per-peer score that decrements on each confirmed-withholding reply (expected ≠ empty-list hash but peer returned `0xc0`) and increments on each valid answer; drop and temporarily ban below a threshold (N withholdings in a rolling window, or an absolute ratio — tune against the existing body-fetcher thresholds for parity). Same `Sentry.PenalizePeer` path so the usual peer telemetry and reconnection logic applies.
+
+Unit tests in the fetcher cover: valid full BAL accepted, valid empty BAL accepted (expected hash = empty-list hash), mismatched-hash → disconnect, and repeated-`0xc0`-for-non-empty-expected → ban. Fetcher should emit metrics for each case so the behaviour is observable in production.
+
 ### Phase 6 — Hive / integration tests
 
 - Hive EEST: verify eth/71 handshake negotiation.
