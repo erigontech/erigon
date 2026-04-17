@@ -1994,7 +1994,7 @@ func (sdb *IntraBlockState) GetRemovedAccountsWithBalance() (list []evmtypes.Add
 
 func (sdb *IntraBlockState) SoftFinalise() {
 	for addr := range sdb.journal.dirties {
-		_, exist := sdb.stateObjects[addr]
+		so, exist := sdb.stateObjects[addr]
 		if !exist {
 			// ripeMD is 'touched' at block 1714175, in txn 0x1237f737031e40bcde4a8b7e717b2d15e3ecadfe49bb1bbc71ee9deb09c6fcf2
 			// That txn goes out of gas, and although the notion of 'touched' does not exist there, the
@@ -2004,6 +2004,7 @@ func (sdb *IntraBlockState) SoftFinalise() {
 			// Thus, we can safely ignore it here
 			continue
 		}
+		so.newlyCreated = false
 		sdb.stateObjectsDirty[addr] = struct{}{}
 	}
 	// Invalidate journal because reverting across transactions is not allowed.
