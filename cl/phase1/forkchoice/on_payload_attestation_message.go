@@ -43,8 +43,11 @@ func (f *ForkChoiceStore) OnPayloadAttestationMessage(
 	data := msg.Data
 	blockRoot := data.BeaconBlockRoot
 
-	// PTC attestation must be for a known block
-	blockState, err := f.forkGraph.GetState(blockRoot, false)
+	// PTC attestation must be for a known block.
+	// Use alwaysCopy=true because this function is called from the gossip path
+	// without holding f.mu. Without a copy, concurrent OnBlock/TransitionState
+	// mutations to currentState would race with our reads (GetPTC, Slot, etc.).
+	blockState, err := f.forkGraph.GetState(blockRoot, true)
 	if err != nil {
 		return err
 	}
