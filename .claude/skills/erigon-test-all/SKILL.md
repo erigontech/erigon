@@ -17,10 +17,22 @@ git submodule update --init --recursive --force
 
 Most tests in `execution/tests` load test fixtures from a git submodule (`execution/tests/execution-spec-tests`). Without this step the fixture files are missing or stale and tests will fail or skip silently. The CI workflow clones submodules automatically (`submodules: true` in `test-all-erigon.yml`); locally you must do it yourself.
 
+## Prerequisite: Create RAM Disk
+
+Before running `make test-all`, create a RAM disk and export its path as `ERIGON_EXECUTION_TESTS_TMPDIR`:
+
+```bash
+path=$(bash tools/create-ramdisk)
+```
+
+Then prepend `ERIGON_EXECUTION_TESTS_TMPDIR=$path` to the test command (see below). The `execution/tests` suite does heavy temp-file I/O; backing that with tmpfs avoids disk bottlenecks and matches how CI runs the same workflow (`ramdisk: true` in `test-all-erigon.yml`, which invokes the same `tools/create-ramdisk` script via `setup-erigon`).
+
+The script is cross-platform (Linux tmpfs, macOS hdiutil, Windows ImDisk). Linux requires `sudo` to mount tmpfs at `/mnt/erigon-ramdisk`. Override size with `RAMDISK_SIZE_MB` (default 2048).
+
 ## Command
 
 ```bash
-GOGC=80 make test-all
+ERIGON_EXECUTION_TESTS_TMPDIR=$path GOGC=80 make test-all
 ```
 
 Equivalent to the **"All tests"** GitHub Actions workflow (`test-all-erigon.yml`).
@@ -64,7 +76,7 @@ Tests skipped via `-short` in `test-short` run fully here. If a test passes in `
 
 - Before marking a PR ready for review
 - After significant logic changes to verify no edge cases break
-- Full gate: `git submodule update --init --recursive --force && make lint && make erigon integration && GOGC=80 make test-all`
+- Full gate: `git submodule update --init --recursive --force && path=$(bash tools/create-ramdisk) && make lint && make erigon integration && ERIGON_EXECUTION_TESTS_TMPDIR=$path GOGC=80 make test-all`
 
 ## CI Equivalent
 
