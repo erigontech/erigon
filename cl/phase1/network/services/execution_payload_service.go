@@ -152,7 +152,7 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 		log.Debug("Queued execution payload envelope for later processing",
 			"beaconBlockRoot", beaconBlockRoot,
 			"builderIndex", builderIndex)
-		return nil
+		return ErrIgnore
 	}
 
 	// [IGNORE] The node has not seen another valid SignedExecutionPayloadEnvelope
