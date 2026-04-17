@@ -35,8 +35,13 @@ package sentry
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
+	"strconv"
+	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -51,6 +56,7 @@ import (
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry"
@@ -114,6 +120,14 @@ type Config struct {
 	// clients. Sourced from stack.Config().P2P.EnableWitProtocol.
 	EnableWitProtocol bool
 
+	// Events is the node-level shards.Events instance. Start subscribes to
+	// AddHeaderSubscription + AddNewSnapshotSubscription on it so
+	// StatusDataProvider can refresh on chain head / snapshot changes.
+	//
+	// Optional: if nil, StatusDataProvider.Run is skipped. Useful for
+	// tests or when the node hasn't wired Events yet.
+	Events *shards.Events
+
 	Logger log.Logger
 }
 
@@ -159,8 +173,10 @@ type Provider struct {
 	ExecutionP2PPeerPenalizer   *execp2p.PeerPenalizer
 
 	// Internal
-	cfg    Config
-	logger log.Logger
+	cfg     Config
+	logger  log.Logger
+	started bool           // guards Start from firing twice
+	eg      errgroup.Group // tracks background goroutines launched in Start
 }
 
 // Configure stores the Provider's configuration. Call before Initialize.
@@ -376,14 +392,136 @@ func (p *Provider) BuildMultiClient(deps MultiClientDeps) error {
 // constant; used when MultiClientDeps.BlockBufferSize is zero.
 const defaultBlockBufferSize = 128
 
-// Start kicks off background work. No-op in this commit; subsequent commits
-// migrate the peer-count logger and stream loops here.
+// Start kicks off background work:
+//   - MultiClient stream loops (the sentry→MultiClient gRPC pumps).
+//   - StatusDataProvider.Run, which refreshes its cached status message
+//     when the chain head or snapshot set changes.
+//   - Execution-P2P layer goroutines (MessageListener, PeerTracker,
+//     Publisher).
+//   - Peer-count logger (local-sentry mode only; logs the set of
+//     good-peer counts every 90 seconds).
+//
+// Requires Initialize (and, for stream loops, BuildMultiClient) to have
+// completed successfully. Subsequent calls are a no-op.
+//
+// The ctx passed here should be Config.SentryCtx in practice — it's the
+// context the goroutines honour for shutdown. Caller context cancellation
+// doesn't need to match; the Provider follows the SentryCtx it was
+// configured with.
 func (p *Provider) Start(ctx context.Context) error {
+	if p.started {
+		return nil
+	}
+	p.started = true
+
+	// Stream loops — only meaningful if BuildMultiClient has run.
+	if p.Client != nil {
+		p.Client.StartStreamLoops(p.cfg.SentryCtx)
+		// Small sleep to keep startup-log order readable; identical to the
+		// legacy backend.go behaviour.
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// StatusDataProvider refresh loop, gated on Events being wired.
+	if p.StatusDataProvider != nil && p.cfg.Events != nil {
+		headersCh, unsubHeaders := p.cfg.Events.AddHeaderSubscription()
+		snapshotsCh, unsubSnapshots := p.cfg.Events.AddNewSnapshotSubscription()
+		p.eg.Go(func() error {
+			defer unsubHeaders()
+			defer unsubSnapshots()
+			p.StatusDataProvider.Run(p.cfg.SentryCtx, headersCh, snapshotsCh)
+			return nil
+		})
+	}
+
+	// Execution-P2P layer goroutines. Each Run returns on context cancel;
+	// non-cancel errors are logged but don't propagate (matches legacy
+	// backend.go behaviour — a peer-tracker error shouldn't bring the
+	// whole node down).
+	if p.ExecutionP2PMessageListener != nil && p.ExecutionP2PPeerTracker != nil && p.ExecutionP2PPublisher != nil {
+		p.eg.Go(func() error {
+			defer p.logger.Info("[p2p] MessageListener goroutine terminated")
+			err := p.ExecutionP2PMessageListener.Run(p.cfg.SentryCtx)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				p.logger.Error("[p2p] MessageListener failed", "err", err)
+			}
+			return err
+		})
+		p.eg.Go(func() error {
+			defer p.logger.Info("[p2p] PeerTracker goroutine terminated")
+			err := p.ExecutionP2PPeerTracker.Run(p.cfg.SentryCtx)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				p.logger.Error("[p2p] PeerTracker failed", "err", err)
+			}
+			return err
+		})
+		p.eg.Go(func() error {
+			defer p.logger.Info("[p2p] publisher goroutine terminated")
+			err := p.ExecutionP2PPublisher.Run(p.cfg.SentryCtx)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				p.logger.Error("[p2p] publisher failed", "err", err)
+			}
+			return err
+		})
+	}
+
+	// Peer-count logger — local-sentry mode only (no local Servers in
+	// remote mode, nothing to count). Was an anonymous goroutine in
+	// backend.go right after server construction; moves here as part of
+	// the lifecycle consolidation.
+	if len(p.Servers) > 0 {
+		p.eg.Go(p.runPeerCountLogger)
+	}
+
 	return nil
 }
 
-// Close shuts down sentry servers and cancels background goroutines.
+// runPeerCountLogger periodically emits the sum of "good peers" across all
+// local sentry servers, grouped by protocol version. Exits when SentryCtx
+// is cancelled.
+func (p *Provider) runPeerCountLogger() error {
+	logEvery := time.NewTicker(90 * time.Second)
+	defer logEvery.Stop()
+
+	var logItems []any
+	for {
+		select {
+		case <-p.cfg.SentryCtx.Done():
+			return nil
+		case <-logEvery.C:
+			logItems = logItems[:0]
+			peerCountMap := map[uint]int{}
+			for _, srv := range p.Servers {
+				counts := srv.SimplePeerCount()
+				for protocol, count := range counts {
+					peerCountMap[protocol] += count
+				}
+			}
+			if len(peerCountMap) == 0 {
+				p.logger.Warn("[p2p] No GoodPeers")
+			} else {
+				for protocol, count := range peerCountMap {
+					logItems = append(logItems, eth.ProtocolToString[protocol], strconv.Itoa(count))
+				}
+				p.logger.Info("[p2p] GoodPeers", logItems...)
+			}
+		}
+	}
+}
+
+// Close shuts down the sentry stack:
+//   - Closes each local sentry GrpcServer (no-op in external mode).
+//   - Waits for background goroutines spawned by Start to finish.
+//
+// Background goroutines exit when Config.SentryCtx is cancelled; Close
+// blocks until they drain. Close does NOT cancel SentryCtx itself — the
+// caller owns context lifetime (typically by cancelling backend.sentryCtx
+// during node shutdown).
+//
 // Safe to call multiple times.
 func (p *Provider) Close() error {
-	return nil
+	for _, srv := range p.Servers {
+		srv.Close()
+	}
+	return p.eg.Wait()
 }

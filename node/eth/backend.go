@@ -29,7 +29,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"sync"
 	"time"
 
@@ -106,7 +105,6 @@ import (
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
-	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/erigontech/erigon/polygon/bor"
@@ -464,49 +462,13 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		ChainName:         config.Snapshot.ChainName,
 		NodesDir:          stack.Config().Dirs.Nodes,
 		EnableWitProtocol: stack.Config().P2P.EnableWitProtocol,
+		Events:            backend.notifications.Events,
 		Logger:            logger,
 	})
 	if err := backend.sentryProvider.Initialize(ctx); err != nil {
 		return nil, err
 	}
 	backend.sentryServers = backend.sentryProvider.Servers
-
-	// Peer-count logger (local-sentry mode only; in external-sentry mode there
-	// are no local Servers to count peers on). Will move into
-	// sentryProvider.Start() in a later step; stays here for now so this commit
-	// is a clean construction-only move.
-	if len(backend.sentryServers) > 0 {
-		go func() {
-			logEvery := time.NewTicker(90 * time.Second)
-			defer logEvery.Stop()
-
-			var logItems []any
-
-			for {
-				select {
-				case <-backend.sentryCtx.Done():
-					return
-				case <-logEvery.C:
-					logItems = logItems[:0]
-					peerCountMap := map[uint]int{}
-					for _, srv := range backend.sentryServers {
-						counts := srv.SimplePeerCount()
-						for protocol, count := range counts {
-							peerCountMap[protocol] += count
-						}
-					}
-					if len(peerCountMap) == 0 {
-						logger.Warn("[p2p] No GoodPeers")
-					} else {
-						for protocol, count := range peerCountMap {
-							logItems = append(logItems, eth.ProtocolToString[protocol], strconv.Itoa(count))
-						}
-						logger.Info("[p2p] GoodPeers", logItems...)
-					}
-				}
-			}
-		}()
-	}
 
 	// Wire chain.toml ENR updater and P2P discovery after sentry servers are created.
 	// Only applies in local downloader mode; remote-downloader mode has nil backend.downloaderProvider.Downloader.
@@ -1437,46 +1399,12 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 // Start implements node.Lifecycle, starting all internal goroutines needed by the
 // Ethereum protocol implementation.
 func (s *Ethereum) Start() error {
-	s.sentriesClient.StartStreamLoops(s.sentryCtx)
-	time.Sleep(10 * time.Millisecond) // just to reduce logs order confusion
-
-	// Subscribe to new-header events so StatusDataProvider can invalidate
-	// its cache when the chain head advances — zero DB reads on the hot path.
-	headersCh, unsubHeaders := s.notifications.Events.AddHeaderSubscription()
-	snapshotsCh, unsubSnapshots := s.notifications.Events.AddNewSnapshotSubscription()
-	s.bgComponentsEg.Go(func() error {
-		defer unsubHeaders()
-		defer unsubSnapshots()
-		s.statusDataProvider.Run(s.sentryCtx, headersCh, snapshotsCh)
-		return nil
-	})
-
-	if s.executionP2PMessageListener != nil && s.executionP2PPeerTracker != nil && s.executionP2PPublisher != nil {
-		s.bgComponentsEg.Go(func() error {
-			defer s.logger.Info("[p2p] MessageListener goroutine terminated")
-			err := s.executionP2PMessageListener.Run(s.sentryCtx)
-			if err != nil && !errors.Is(err, context.Canceled) {
-				s.logger.Error("[p2p] MessageListener failed", "err", err)
-			}
-			return err
-		})
-
-		s.bgComponentsEg.Go(func() error {
-			defer s.logger.Info("[p2p] PeerTracker goroutine terminated")
-			err := s.executionP2PPeerTracker.Run(s.sentryCtx)
-			if err != nil && !errors.Is(err, context.Canceled) {
-				s.logger.Error("[p2p] PeerTracker failed", "err", err)
-			}
-			return err
-		})
-		s.bgComponentsEg.Go(func() error {
-			defer s.logger.Info("[p2p] publisher goroutine terminated")
-			err := s.executionP2PPublisher.Run(s.sentryCtx)
-			if err != nil && !errors.Is(err, context.Canceled) {
-				s.logger.Error("[p2p] publisher failed", "err", err)
-			}
-			return err
-		})
+	// Sentry Provider launches all sentry-owned background goroutines:
+	// MultiClient stream loops, StatusDataProvider refresh loop,
+	// execution-P2P layer (message listener, peer tracker, publisher),
+	// and the peer-count logger. See node/components/sentry/provider.go.
+	if err := s.sentryProvider.Start(s.sentryCtx); err != nil {
+		return err
 	}
 
 	stageLoopDispatcher := execmodule.NewDispatcher(s.chainConfig, s.notifications.Events, s.notifications.StateChangesConsumer, s.logger)
@@ -1580,8 +1508,8 @@ func (s *Ethereum) Stop() error {
 	if s.waitForStageLoopStop != nil {
 		<-s.waitForStageLoopStop
 	}
-	for _, sentryServer := range s.sentryServers {
-		sentryServer.Close()
+	if err := s.sentryProvider.Close(); err != nil && !errors.Is(err, context.Canceled) {
+		s.logger.Error("sentry component close", "err", err)
 	}
 
 	// Wait for background goroutines to release DB transactions before closing DB.
