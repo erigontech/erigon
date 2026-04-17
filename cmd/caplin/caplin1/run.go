@@ -294,12 +294,8 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	// create the public keys registry
 	pksRegistry := public_keys_registry.NewHeadViewPublicKeysRegistry(syncedDataManager)
 	validatorParameters := validator_params.NewValidatorParams()
-	// [New in Gloas:EIP7732] Fetch the finalized block from checkpoint sync endpoint so the
-	// fork graph can determine FULL/EMPTY parent status for the first forward-sync block.
-	anchorBlock := checkpoint_sync.FetchFinalizedBlock(ctx, beaconConfig, config)
-
 	forkChoice, err := forkchoice.NewForkChoiceStore(
-		ethClock, state, engine, pool, fork_graph.NewForkGraphDisk(state, syncedDataManager, fcuFs, config.BeaconAPIRouter, emitters, anchorBlock),
+		ethClock, state, engine, pool, fork_graph.NewForkGraphDisk(state, syncedDataManager, fcuFs, config.BeaconAPIRouter, emitters),
 		emitters, syncedDataManager, blobStorage, pksRegistry, validatorParameters, doLMDSampling, indexDB)
 	if err != nil {
 		logger.Error("Could not create forkchoice", "err", err)

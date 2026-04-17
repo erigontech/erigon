@@ -36,8 +36,7 @@ import (
  */
 type ForkGraph interface {
 	// AddChainSegment processes a new block and returns the post-state.
-	// parentFullState: if non-nil, use this as the starting state (for GLOAS when parent is FULL).
-	AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool, parentFullState *state.CachingBeaconState) (*state.CachingBeaconState, ChainSegmentInsertionResult, error)
+	AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool) (*state.CachingBeaconState, ChainSegmentInsertionResult, error)
 	GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHeader, bool)
 	GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool)
 	GetState(blockRoot common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error)
@@ -59,10 +58,11 @@ type ForkGraph interface {
 	GetCurrentParticipationIndicies(epoch uint64) (*solid.ParticipationBitList, error)
 	GetPreviousParticipationIndicies(epoch uint64) (*solid.ParticipationBitList, error)
 	DumpBeaconStateOnDisk(blockRoot common.Hash, state *state.CachingBeaconState, forced bool) error
-	// [New in Gloas:EIP7732] Execution payload envelope persistence and state reconstruction
+	// [New in Gloas:EIP7732] Execution payload envelope persistence.
+	// With deferred payload processing, envelopes are stored for serving by range/root
+	// and for the store.payloads membership check (HasEnvelope), but no separate
+	// execution_payload_state is maintained.
 	DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) error
 	ReadEnvelopeFromDisk(blockRoot common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error)
 	HasEnvelope(blockRoot common.Hash) bool
-	// GetExecutionPayloadState reconstructs the post-execution-payload state by replaying the envelope.
-	GetExecutionPayloadState(blockRoot common.Hash) (*state.CachingBeaconState, error)
 }

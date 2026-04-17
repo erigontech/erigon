@@ -592,9 +592,39 @@ func (a *ApiHandler) produceBeaconBody(
 	// Build execution payload
 	latestExecutionPayload := baseState.LatestExecutionPayloadHeader()
 	head := latestExecutionPayload.BlockHash
-	// [GLOAS] LatestExecutionPayloadHeader is not updated in GLOAS; use GetLatestBlockHash instead
+	// [GLOAS] In deferred payload processing, the EL head and withdrawal source depend on
+	// the head's payload status (FULL vs EMPTY). When FULL, we copy the state, apply the
+	// parent execution payload, and compute withdrawals from the mutated copy. When EMPTY,
+	// we use the cached payload_expected_withdrawals from state.
+	var gloasWithdrawalsState *state.CachingBeaconState // nil means use baseState for withdrawals
 	if stateVersion >= clparams.GloasVersion {
-		head = baseState.GetLatestBlockHash()
+		parentBid := baseState.GetLatestExecutionPayloadBid()
+		if parentBid != nil {
+			if a.forkchoiceStore.HasEnvelope(baseBlockRoot) && a.forkchoiceStore.ShouldExtendPayload(baseBlockRoot) {
+				head = parentBid.BlockHash
+				// Copy state and apply parent execution payload to compute correct withdrawals
+				stateCopy, err := baseState.Copy()
+				if err != nil {
+					return nil, 0, fmt.Errorf("produceBeaconBody: failed to copy state for FULL payload: %w", err)
+				}
+				envelope, err := a.forkchoiceStore.ReadEnvelopeFromDisk(baseBlockRoot)
+				if err != nil {
+					return nil, 0, fmt.Errorf("produceBeaconBody: failed to read envelope for FULL payload: %w", err)
+				}
+				if envelope == nil || envelope.Message == nil || envelope.Message.ExecutionRequests == nil {
+					return nil, 0, fmt.Errorf("produceBeaconBody: head is FULL but envelope/requests missing for root %x", baseBlockRoot)
+				}
+				stfMachine := &eth2.Impl{}
+				if err := stfMachine.ApplyParentExecutionPayload(stateCopy, parentBid, envelope.Message.ExecutionRequests); err != nil {
+					return nil, 0, fmt.Errorf("produceBeaconBody: failed to apply parent execution payload: %w", err)
+				}
+				gloasWithdrawalsState = stateCopy
+			} else {
+				head = parentBid.ParentBlockHash
+			}
+		} else {
+			head = baseState.GetLatestBlockHash()
+		}
 	}
 	finalizedHash := a.forkchoiceStore.GetEth1Hash(baseState.FinalizedCheckpoint().Root)
 	if finalizedHash == (common.Hash{}) {
@@ -626,22 +656,60 @@ func (a *ApiHandler) produceBeaconBody(
 		timeoutForBlockBuilding := 2 * time.Second // keep asking for 2 seconds for block
 		retryTime := 10 * time.Millisecond
 		feeRecipient, _ := a.validatorParams.GetFeeRecipient(proposerIndex)
-		clWithdrawals, err := state.GetExpectedWithdrawals(
-			baseState,
-			targetSlot/a.beaconChainCfg.SlotsPerEpoch,
-		)
-		if err != nil {
-			log.Error("BlockProduction: GetExpectedWithdrawals failed", "err", err)
-			return
-		}
-		withdrawals := make([]*types.Withdrawal, 0, len(clWithdrawals.Withdrawals))
-		for _, w := range clWithdrawals.Withdrawals {
-			withdrawals = append(withdrawals, &types.Withdrawal{
-				Index:     w.Index,
-				Amount:    w.Amount,
-				Validator: w.Validator,
-				Address:   w.Address,
-			})
+		var withdrawals []*types.Withdrawal
+		if gloasWithdrawalsState != nil {
+			// GLOAS FULL: compute withdrawals from the state copy with parent payload applied
+			clWithdrawals, err := state.GetExpectedWithdrawals(
+				gloasWithdrawalsState,
+				targetSlot/a.beaconChainCfg.SlotsPerEpoch,
+			)
+			if err != nil {
+				log.Error("BlockProduction: GetExpectedWithdrawals (FULL) failed", "err", err)
+				return
+			}
+			withdrawals = make([]*types.Withdrawal, 0, len(clWithdrawals.Withdrawals))
+			for _, w := range clWithdrawals.Withdrawals {
+				withdrawals = append(withdrawals, &types.Withdrawal{
+					Index:     w.Index,
+					Amount:    w.Amount,
+					Validator: w.Validator,
+					Address:   w.Address,
+				})
+			}
+		} else if stateVersion >= clparams.GloasVersion && gloasWithdrawalsState == nil {
+			// GLOAS EMPTY: use cached payload_expected_withdrawals from state
+			cachedWithdrawals := baseState.GetPayloadExpectedWithdrawals()
+			if cachedWithdrawals != nil {
+				withdrawals = make([]*types.Withdrawal, 0, cachedWithdrawals.Len())
+				for i := 0; i < cachedWithdrawals.Len(); i++ {
+					w := cachedWithdrawals.Get(i)
+					withdrawals = append(withdrawals, &types.Withdrawal{
+						Index:     w.Index,
+						Amount:    w.Amount,
+						Validator: w.Validator,
+						Address:   w.Address,
+					})
+				}
+			}
+		} else {
+			// Pre-GLOAS: compute withdrawals normally
+			clWithdrawals, err := state.GetExpectedWithdrawals(
+				baseState,
+				targetSlot/a.beaconChainCfg.SlotsPerEpoch,
+			)
+			if err != nil {
+				log.Error("BlockProduction: GetExpectedWithdrawals failed", "err", err)
+				return
+			}
+			withdrawals = make([]*types.Withdrawal, 0, len(clWithdrawals.Withdrawals))
+			for _, w := range clWithdrawals.Withdrawals {
+				withdrawals = append(withdrawals, &types.Withdrawal{
+					Index:     w.Index,
+					Amount:    w.Amount,
+					Validator: w.Validator,
+					Address:   w.Address,
+				})
+			}
 		}
 
 		attrs := &engine_types.PayloadAttributes{

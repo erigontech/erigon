@@ -42,4 +42,5 @@ type GenericBeaconBody interface {
 	GetExecutionRequests() *ExecutionRequests
 	GetSignedExecutionPayloadBid() *SignedExecutionPayloadBid
 	GetPayloadAttestations() *solid.ListSSZ[*PayloadAttestation]
+	GetParentExecutionRequests() *ExecutionRequests
 }

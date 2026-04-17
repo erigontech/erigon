@@ -18,7 +18,8 @@
       "Bash(git add:*)",
       "WebFetch(domain:pypi.org)",
       "Bash(CGO_CFLAGS=-D__BLST_PORTABLE__ go test:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(gh pr:*)"
     ]
   }
 }

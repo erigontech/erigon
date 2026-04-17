@@ -538,3 +538,7 @@ func (b *BlindedBeaconBody) GetSignedExecutionPayloadBid() *SignedExecutionPaylo
 func (b *BlindedBeaconBody) GetPayloadAttestations() *solid.ListSSZ[*PayloadAttestation] {
 	return nil
 }
+
+func (b *BlindedBeaconBody) GetParentExecutionRequests() *ExecutionRequests {
+	return nil
+}

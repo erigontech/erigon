@@ -46,7 +46,7 @@ func RequestEnvelopesFrantically(ctx context.Context, r *rpc.BeaconRpcP2P, roots
 		case <-ctx.Done():
 			return received, ctx.Err()
 		case <-timer.C:
-			log.Debug("RequestEnvelopesFrantically: timeout, some envelopes not received (may be EMPTY blocks)", "missing", len(needed))
+			log.Debug("RequestEnvelopesFrantically: timeout, some envelopes not received", "missing", len(needed))
 			return received, nil
 		default:
 		}
@@ -100,11 +100,11 @@ func requestEnvelopesByRange(ctx context.Context, r *rpc.BeaconRpcP2P, blocks []
 	startSlot := blocks[0].Block.Slot
 	endSlot := blocks[len(blocks)-1].Block.Slot
 	count := endSlot - startSlot + 1
-	log.Debug("RequestEnvelopesFrantically: falling back to by-range", "startSlot", startSlot, "count", count)
+	log.Debug("envelope fetch: falling back to by-range", "startSlot", startSlot, "count", count)
 
 	envelopes, _, err := r.SendExecutionPayloadEnvelopesByRangeReq(ctx, startSlot, count)
 	if err != nil {
-		log.Trace("RequestEnvelopesFrantically: by-range error", "err", err)
+		log.Debug("envelope fetch: by-range error", "err", err)
 		return
 	}
 	for _, env := range envelopes {

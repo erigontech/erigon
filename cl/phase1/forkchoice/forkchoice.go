@@ -93,6 +93,7 @@ type ForkChoiceStore struct {
 	proposerBoostRoot        atomic.Value
 	headHash                 common.Hash
 	headSlot                 uint64
+	headPayloadStatus        cltypes.PayloadStatus
 	genesisTime              uint64
 	genesisValidatorsRoot    common.Hash
 	weights                  map[common.Hash]uint64
@@ -558,18 +559,6 @@ func (f *ForkChoiceStore) GetStateAtBlockRoot(blockRoot common.Hash, alwaysCopy 
 		defer f.mu.RUnlock()
 	}
 	return f.forkGraph.GetState(blockRoot, alwaysCopy)
-}
-
-// GetFullStateAtBlockRoot returns the post-envelope state for GLOAS FULL blocks,
-// or the post-beacon-block state for EMPTY/pre-GLOAS blocks.
-// [New in Gloas:EIP7732]
-func (f *ForkChoiceStore) GetFullStateAtBlockRoot(blockRoot common.Hash) (*state2.CachingBeaconState, error) {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	if f.forkGraph.HasEnvelope(blockRoot) {
-		return f.forkGraph.GetExecutionPayloadState(blockRoot)
-	}
-	return f.forkGraph.GetState(blockRoot, false)
 }
 
 func (f *ForkChoiceStore) PreverifiedValidator(blockRoot common.Hash) uint64 {

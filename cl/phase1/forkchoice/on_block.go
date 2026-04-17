@@ -95,6 +95,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		}
 	}()
 	f.headHash = common.Hash{}
+	f.headPayloadStatus = cltypes.PayloadStatusPending
 	start := time.Now()
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
@@ -248,56 +249,13 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	}
 	startStateProcess := time.Now()
 
-	// [New in Gloas:EIP7732] Determine starting state based on parent payload status.
-	// In GLOAS, beacon block and execution payload have separate state transitions:
-	//   - If parent is FULL: start from execution_payload_states[parent_root]
-	//     (post-execution-payload state, includes execution layer changes)
-	//   - If parent is EMPTY: start from block_states[parent_root]
-	//     (post-beacon-block state, no execution payload was applied)
-	// This ensures the new block builds on the correct canonical state.
-	var parentFullState *state.CachingBeaconState
-	if blockVersion >= clparams.GloasVersion {
-		isParentFull := f.isParentNodeFull(block.Block)
-		hasEnvelope := f.forkGraph.HasEnvelope(block.Block.ParentRoot)
-		_, parentInForkChoice := f.forkGraph.GetBlock(block.Block.ParentRoot)
-		anchorRoot := f.forkGraph.AnchorRoot()
-		log.Trace("[OnBlock] GLOAS parent detection",
-			"slot", block.Block.Slot,
-			"parentRoot", block.Block.ParentRoot,
-			"isParentFull", isParentFull,
-			"hasEnvelope", hasEnvelope,
-			"parentInForkChoice", parentInForkChoice,
-		)
-		if isParentFull {
-			if hasEnvelope {
-				// Reconstruct the execution payload state from disk
-				parentFullState, err = f.forkGraph.GetExecutionPayloadState(block.Block.ParentRoot)
-				if err != nil {
-					log.Warn("OnBlock: FULL parent but GetExecutionPayloadState failed",
-						"slot", block.Block.Slot, "parentRoot", block.Block.ParentRoot, "err", err)
-					parentFullState = nil
-				}
-			} else if parentInForkChoice && block.Block.ParentRoot == anchorRoot {
-				// [New in Gloas:EIP7732] Anchor block from checkpoint sync: the checkpoint
-				// state is already post-envelope (finalized = fully processed), so getState()
-				// returns the correct parent state without needing the envelope on disk.
-				log.Debug("[OnBlock] Parent is anchor block from checkpoint sync, using post-envelope state directly",
-					"slot", block.Block.Slot, "anchorRoot", anchorRoot)
-				parentFullState, err = f.forkGraph.GetState(block.Block.ParentRoot, true)
-				if err != nil {
-					log.Warn("OnBlock: anchor parent GetState failed",
-						"slot", block.Block.Slot, "parentRoot", block.Block.ParentRoot, "err", err)
-					parentFullState = nil
-				}
-			} else if parentInForkChoice {
-				// Parent is FULL but envelope hasn't arrived yet. Defer processing
-				// so the block can be retried once the envelope is available.
-				return ErrParentEnvelopePending
-			}
-		}
-	}
+	// [Modified in Gloas:EIP7732 defer-payload] With deferred payload processing,
+	// there is only one state per block root. The execution effects from the parent's
+	// payload are applied during ProcessParentExecutionPayload (called by TransitionState),
+	// not via a separate execution_payload_state. We still validate that the parent's
+	// payload was received (store.payloads check) via validateParentPayloadPath above.
 
-	lastProcessedState, status, err := f.forkGraph.AddChainSegment(block, fullValidation, parentFullState)
+	lastProcessedState, status, err := f.forkGraph.AddChainSegment(block, fullValidation)
 	if err != nil {
 		return err
 	}

@@ -226,10 +226,9 @@ func (b *BeaconState) computeDirtyLeaves() error {
 	}
 
 	if b.version >= clparams.BellatrixVersion {
-		// Bellatrix fields
+		// Position 24: pre-Gloas holds latestExecutionPayloadHeader; Gloas replaces it with latestBlockHash (consensus-specs #5113)
 		if b.version >= clparams.GloasVersion {
-			// Note: latestExecutionPayloadHeader will be removed and replaced by latestExecutionPayloadBid after Gloas fork
-			beaconStateHasher.add(LatestExecutionPayloadBidLeafIndex, b.latestExecutionPayloadBid)
+			beaconStateHasher.add(LatestBlockHashLeafIndex, b.latestBlockHash)
 		} else {
 			beaconStateHasher.add(LatestExecutionPayloadHeaderLeafIndex, b.latestExecutionPayloadHeader)
 		}
@@ -265,7 +264,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		beaconStateHasher.add(ExecutionPayloadAvailabilityLeafIndex, b.executionPayloadAvailability)
 		beaconStateHasher.add(BuilderPendingPaymentsLeafIndex, b.builderPendingPayments)
 		beaconStateHasher.add(BuilderPendingWithdrawalsLeafIndex, b.builderPendingWithdrawals)
-		beaconStateHasher.add(LatestBlockHashLeafIndex, b.latestBlockHash)
+		beaconStateHasher.add(LatestExecutionPayloadBidLeafIndex, b.latestExecutionPayloadBid)
 		beaconStateHasher.add(PayloadExpectedWithdrawalsLeafIndex, b.payloadExpectedWithdrawals)
 		beaconStateHasher.add(PtcWindowLeafIndex, b.ptcWindow)
 	}

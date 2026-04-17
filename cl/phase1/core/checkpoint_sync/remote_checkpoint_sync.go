@@ -93,67 +93,6 @@ func (r *RemoteCheckpointSync) GetLatestBeaconState(ctx context.Context) (*state
 	return nil, err
 }
 
-// FetchFinalizedBlock fetches the finalized beacon block from the checkpoint sync endpoint.
-// [New in Gloas:EIP7732] The anchor block is needed so that the fork graph can determine
-// whether the first forward-sync block was built on a FULL or EMPTY parent.
-func (r *RemoteCheckpointSync) FetchFinalizedBlock(ctx context.Context) (*cltypes.SignedBeaconBlock, error) {
-	uris := clparams.GetAllCheckpointSyncEndpoints(r.net)
-	for _, uri := range uris {
-		block, err := r.fetchBlock(ctx, uri)
-		if err != nil {
-			log.Debug("[Checkpoint Sync] Failed to fetch finalized block", "uri", uri, "err", err)
-			continue
-		}
-		return block, nil
-	}
-	return nil, nil // Non-fatal: anchor block is best-effort for GLOAS
-}
-
-func (r *RemoteCheckpointSync) fetchBlock(ctx context.Context, stateURI string) (*cltypes.SignedBeaconBlock, error) {
-	// Derive the block URL from the state URL.
-	// State: .../eth/v2/debug/beacon/states/finalized
-	// Block: .../eth/v2/beacon/blocks/finalized
-	idx := strings.Index(stateURI, "/eth/")
-	if idx < 0 {
-		return nil, fmt.Errorf("cannot derive block URL from %s", stateURI)
-	}
-	blockURI := stateURI[:idx] + "/eth/v2/beacon/blocks/finalized"
-
-	ctxWithTimeout, cancel := context.WithTimeout(ctx, r.timeout)
-	defer cancel()
-
-	log.Info("[Checkpoint Sync] Requesting finalized block", "uri", blockURI)
-	req, err := http.NewRequestWithContext(ctxWithTimeout, http.MethodGet, blockURI, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Accept", "application/octet-stream")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("finalized block fetch failed, status %d", resp.StatusCode)
-	}
-
-	marshaled, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("finalized block read failed: %w", err)
-	}
-
-	version := cycleDetectVersion(resp.Header.Get("Eth-Consensus-Version"))
-
-	block := cltypes.NewSignedBeaconBlock(r.beaconConfig, version)
-	if err := block.DecodeSSZ(marshaled, int(version)); err != nil {
-		return nil, fmt.Errorf("finalized block decode failed: %w", err)
-	}
-	log.Info("[Checkpoint Sync] Finalized block retrieved", "slot", block.Block.Slot)
-	return block, nil
-}
-
 // FetchFinalizedEnvelope fetches the finalized execution payload envelope from the checkpoint sync endpoint.
 // [New in Gloas:EIP7732] The anchor envelope is needed so that the fork graph knows whether the
 // finalized block was FULL (had its payload executed) or EMPTY.
