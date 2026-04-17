@@ -696,6 +696,9 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *
 			} else {
 				v = v[8:]
 			}
+			if d.FilenameBase == "storage" && dbg.TraceSlotMatchComposite(k) {
+				fmt.Printf("SLOT DOMAIN_WRITE collateETL path=%s stepRange=[%d,%d) key=%x value=%x\n", coll.valuesPath, stepFrom, stepTo, k, v)
+			}
 			if _, err = comp.Write(k); err != nil {
 				return fmt.Errorf("add %s values key [%x]: %w", d.FilenameBase, k, err)
 			}
@@ -721,6 +724,9 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *
 		}
 		if err != nil {
 			return coll, fmt.Errorf("vt: %w", err)
+		}
+		if d.FilenameBase == "storage" && dbg.TraceSlotMatchComposite(kv.k) {
+			fmt.Printf("SLOT DOMAIN_WRITE collateETL(large) path=%s stepRange=[%d,%d) key=%x value=%x\n", coll.valuesPath, stepFrom, stepTo, kv.k, kv.v)
 		}
 		if _, err = comp.Write(kv.k); err != nil {
 			return coll, fmt.Errorf("add %s values key [%x]: %w", d.FilenameBase, kv.k, err)

@@ -144,6 +144,16 @@ func TraceSlotMatch(addr common.Address, key common.Hash) bool {
 	return traceSlotEnabled && addr == traceSlotAddr && key == traceSlotKey
 }
 
+// TraceSlotMatchComposite reports whether a 52-byte storage composite key
+// (addr[20] || key[32]) matches TRACE_SLOT_ADDR+TRACE_SLOT_KEY.
+func TraceSlotMatchComposite(composite []byte) bool {
+	traceSlotOnce.Do(initTraceSlot)
+	if !traceSlotEnabled || len(composite) < 52 {
+		return false
+	}
+	return common.Address(composite[:20]) == traceSlotAddr && common.Hash(composite[20:52]) == traceSlotKey
+}
+
 func ReadMemStats(m *runtime.MemStats) {
 	if noMemstat {
 		return

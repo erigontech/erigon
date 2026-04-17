@@ -458,6 +458,23 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
+			Name:        "find-slot",
+			Description: "find value of a storage slot (addr, key) across all storage domain .kv files",
+			Action: func(cliCtx *cli.Context) error {
+				logger := log.Root()
+				if err := doFindSlot(cliCtx, logger); err != nil {
+					log.Error("[find-slot] failure", "err", err)
+					return err
+				}
+				return nil
+			},
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.StringFlag{Name: "addr", Required: true, Usage: "contract address (hex, 20 bytes)"},
+				&cli.StringFlag{Name: "key", Required: true, Usage: "storage slot key (hex, 32 bytes)"},
+			}),
+		},
+		{
 			Name:        "verify-state",
 			Description: "verify correspondence between state snapshots (accounts, storage) and commitment snapshots",
 			Action: func(cliCtx *cli.Context) error {
@@ -1544,6 +1561,68 @@ func doCheckStateRootByHistory(cliCtx *cli.Context, logger log.Logger) error {
 	}
 	logger.Info("[check-commitment-hist-at-blk-range] sampling config", "seed", sc.Seed, "sampleRatio", sc.SampleRatio)
 	return integrity.CheckCommitmentHistAtBlkRange(ctx, sc, db, blockReader, from, to, logger)
+}
+
+func doFindSlot(cliCtx *cli.Context, logger log.Logger) error {
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	addrHex := cliCtx.String("addr")
+	keyHex := cliCtx.String("key")
+	if !common.IsHexAddress(addrHex) {
+		return fmt.Errorf("invalid --addr: %s", addrHex)
+	}
+	addr := common.HexToAddress(addrHex)
+	key := common.HexToHash(keyHex)
+	composite := make([]byte, 52)
+	copy(composite[:20], addr[:])
+	copy(composite[20:], key[:])
+
+	pattern := filepath.Join(dirs.SnapDomain, "*storage*.kv")
+	kvFiles, err := filepath.Glob(pattern)
+	if err != nil {
+		return fmt.Errorf("glob %s: %w", pattern, err)
+	}
+	if len(kvFiles) == 0 {
+		return fmt.Errorf("no storage .kv files found in %s", dirs.SnapDomain)
+	}
+	sort.Strings(kvFiles)
+
+	compression := statecfg.Schema.StorageDomain.Compression
+	fmt.Printf("Searching %d storage .kv files for composite=%x\n\n", len(kvFiles), composite)
+	found := 0
+	for _, kvPath := range kvFiles {
+		btPath := strings.Replace(kvPath, ".kv", ".bt", 1)
+		if _, statErr := os.Stat(btPath); statErr != nil {
+			fmt.Printf("  %-50s  skip (no .bt): %v\n", filepath.Base(kvPath), statErr)
+			continue
+		}
+		decomp, bti, err := btindex.OpenBtreeIndexAndDataFile(btPath, kvPath, btindex.DefaultBtreeM, compression, false)
+		if err != nil {
+			fmt.Printf("  %-50s  open error: %v\n", filepath.Base(kvPath), err)
+			continue
+		}
+		getter := seg.NewReader(decomp.MakeGetter(), compression)
+		c, err := bti.Seek(getter, composite)
+		if err != nil {
+			decomp.Close()
+			bti.Close()
+			fmt.Printf("  %-50s  seek error: %v\n", filepath.Base(kvPath), err)
+			continue
+		}
+		if c != nil && bytes.Equal(c.Key(), composite) {
+			fmt.Printf("  %-50s  FOUND value=%x\n", filepath.Base(kvPath), c.Value())
+			found++
+		} else {
+			fmt.Printf("  %-50s  not present\n", filepath.Base(kvPath))
+		}
+		if c != nil {
+			c.Close()
+		}
+		decomp.Close()
+		bti.Close()
+	}
+	fmt.Printf("\nTotal: %d file(s) contain the slot (out of %d scanned)\n", found, len(kvFiles))
+	_ = logger
+	return nil
 }
 
 func doVerifyState(cliCtx *cli.Context, logger log.Logger) error {
