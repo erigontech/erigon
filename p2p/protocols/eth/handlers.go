@@ -169,6 +169,56 @@ func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket, blockReader
 	return bodies
 }
 
+// emptyRLPList is the canonical RLP encoding of an empty list (0xc0). EIP-8159
+// uses this as the positional "not available" sentinel in a BlockAccessLists
+// response. Per the spec the caller disambiguates "unavailable" from "block
+// has a genuinely empty BAL" by comparing keccak256(payload) against the
+// corresponding header.BlockAccessListHash (equal to common/empty.BlockAccessListHash
+// for an empty BAL).
+var emptyRLPList = rlp.RawValue{0xc0}
+
+// AnswerGetBlockAccessListsQuery looks up the RLP-encoded Block Access List
+// for each requested block hash (EIP-7928 / EIP-8159 eth/71). The response is
+// positionally aligned with the request: entry i is the BAL bytes for query[i],
+// or the empty RLP list (0xc0) if the local node does not have a BAL for that
+// hash. BALs are stored in canonical RLP form by rawdb.WriteBlockAccessListBytes,
+// so we hand the bytes through unchanged as rlp.RawValue.
+//
+// Limits mirror AnswerGetBlockBodiesQuery: softResponseLimit caps total reply
+// size, MaxBlockAccessListsServe caps the disk-lookup count. When a limit is
+// reached, the response is truncated (not padded with 0xc0) — the peer sees a
+// shorter array than requested, same convention as the BlockBodies handler.
+func AnswerGetBlockAccessListsQuery(db kv.Tx, query GetBlockAccessListsPacket, blockReader services.HeaderReader) []rlp.RawValue { //nolint:unparam
+	var bytes int
+	bals := make([]rlp.RawValue, 0, len(query))
+
+	for lookups, hash := range query {
+		if bytes >= softResponseLimit || len(bals) >= MaxBlockAccessListsServe ||
+			lookups >= 2*MaxBlockAccessListsServe {
+			break
+		}
+		number, _ := blockReader.HeaderNumber(context.Background(), db, hash)
+		if number == nil {
+			// We don't know the block — peer can retry elsewhere.
+			bals = append(bals, emptyRLPList)
+			bytes += len(emptyRLPList)
+			continue
+		}
+		bal, _ := rawdb.ReadBlockAccessListBytes(db, hash, *number)
+		if len(bal) == 0 {
+			// We have the block but no BAL stored (pre-Amsterdam, or pruned).
+			// Return 0xc0 — caller disambiguates "don't have" from "empty BAL"
+			// via the header.BlockAccessListHash comparison.
+			bals = append(bals, emptyRLPList)
+			bytes += len(emptyRLPList)
+			continue
+		}
+		bals = append(bals, bal)
+		bytes += len(bal)
+	}
+	return bals
+}
+
 type ReceiptsGetter interface {
 	GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block) (types.Receipts, error)
 	GetCachedReceipts(ctx context.Context, blockHash common.Hash) (types.Receipts, bool)
