@@ -171,6 +171,13 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 		return res, false, false
 	}
 
+	if res.Ext == ".torrent" {
+		innerExt := filepath.Ext(croppedFileName)
+		if IsSeedableExtension("x" + innerExt) {
+			croppedFileName = strings.TrimSuffix(croppedFileName, innerExt)
+		}
+	}
+
 	for ext := filepath.Ext(croppedFileName); ext != "" && !strings.Contains(ext, "-"); ext = filepath.Ext(croppedFileName) {
 		croppedFileName = strings.TrimSuffix(croppedFileName, ext)
 		if res.Hash == "" {
