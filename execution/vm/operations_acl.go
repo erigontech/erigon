@@ -72,6 +72,11 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 
 		slotCommited := accounts.InternKey(x.Bytes32())
 		var original, _ = evm.IntraBlockState().GetCommittedState(callContext.Address(), slotCommited)
+		if dbg.TraceDynamicGas && evm.intraBlockState.Trace() {
+			fmt.Printf("%d (%d.%d) SSTORE debug: addr=%s slot=%s original=%s current=%s new=%s\n",
+				evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(),
+				callContext.Address(), slot, &original, &current, &value)
+		}
 		if original.Eq(&current) {
 			if original.IsZero() { // create slot (2.1.1)
 				if rules.IsAmsterdam {
