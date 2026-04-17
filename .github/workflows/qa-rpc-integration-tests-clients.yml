@@ -50,7 +50,7 @@ jobs:
           fi
 
       - name: Restore rpc-tests cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ runner.workspace }}/rpc-tests
           key: rpc-tests-${{ runner.os }}-${{ runner.arch }}-v2.4.0

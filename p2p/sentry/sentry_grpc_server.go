@@ -1395,6 +1395,11 @@ func (ss *GrpcServer) getP2PServer() *p2p.Server {
 	return ss.p2pServer
 }
 
+// GetP2PServer returns the P2P server if it has been started, nil otherwise.
+func (ss *GrpcServer) GetP2PServer() *p2p.Server {
+	return ss.getP2PServer()
+}
+
 func (ss *GrpcServer) SetStatus(ctx context.Context, statusData *sentryproto.StatusData) (*sentryproto.SetStatusReply, error) {
 	genesisHash := gointerfaces.ConvertH256ToHash(statusData.ForkData.Genesis)
 

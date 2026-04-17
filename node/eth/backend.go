@@ -108,6 +108,8 @@ import (
 	"github.com/erigontech/erigon/node/rulesconfig"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/enr"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/p2p/sentry/libsentry"
@@ -533,6 +535,94 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				}
 			}
 		}()
+	}
+
+	// Wire chain.toml ENR updater and P2P discovery after sentry servers are created.
+	if backend.downloader != nil && len(backend.sentryServers) > 0 {
+		backend.downloader.SetENRUpdater(func(ct enr.ChainToml) {
+			// Resolve the torrent port at update time rather than capture-time:
+			// the torrent client may not be listening yet when the updater
+			// closure is built. Only set the "bt" ENR key if we have a valid
+			// port in [1..65535]; otherwise peers would dial an unusable port.
+			torrentPort := backend.downloader.TorrentPort()
+			validPort := torrentPort > 0 && torrentPort <= 65535
+
+			for _, srv := range backend.sentryServers {
+				if p2p := srv.GetP2PServer(); p2p != nil {
+					p2p.LocalNode().Set(ct)
+					if validPort {
+						p2p.LocalNode().Set(enr.BT(torrentPort))
+					}
+				}
+			}
+			if !validPort {
+				logger.Debug("[chaintoml] skipping bt ENR entry (no valid torrent port yet)", "torrentPort", torrentPort)
+			}
+		})
+
+		sentryServers := backend.sentryServers
+		backend.downloader.SetNodeSourceFn(func() downloader.NodeSource {
+			var sources []downloader.NodeSource
+			for _, srv := range sentryServers {
+				p2pSrv := srv.GetP2PServer()
+				if p2pSrv == nil {
+					continue
+				}
+				dv5 := p2pSrv.DiscV5()
+				// Add directly connected devp2p peers FIRST — resolved peers take
+				// priority over discv5 routing table entries which may have stale ENRs.
+				srv := p2pSrv // capture for closure
+				peersFn := func() []*enode.Node {
+					peers := srv.Peers()
+					nodes := make([]*enode.Node, len(peers))
+					for i, p := range peers {
+						nodes[i] = p.Node()
+					}
+					return nodes
+				}
+				if dv5 != nil {
+					sources = append(sources, &downloader.ResolvingPeerNodeSource{
+						PeersFn:  peersFn,
+						Resolver: dv5,
+					})
+				} else {
+					sources = append(sources, &downloader.PeerNodeSource{
+						PeersFn: peersFn,
+					})
+				}
+				// Add discv5 routing table (deduped by CompositeNodeSource).
+				if dv5 != nil {
+					sources = append(sources, dv5)
+				}
+			}
+			if len(sources) == 0 {
+				return nil
+			}
+			return &downloader.CompositeNodeSource{Sources: sources}
+		})
+
+		// Re-publish chain.toml ENR entry after a delay to let P2P servers start.
+		// P2P servers start lazily on SetStatus(), so the ENR updater callback
+		// needs the P2P server to be running before it can set ENR entries.
+		go func() {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(30 * time.Second):
+			}
+			if pubErr := backend.downloader.PublishLocalChainToml(); pubErr != nil {
+				logger.Debug("[chaintoml] no existing chain.toml to re-publish", "err", pubErr)
+			} else {
+				logger.Info("[chaintoml] re-published existing chain.toml ENR entry")
+			}
+		}()
+
+		if backend.config.Snapshot.P2PManifest {
+			backend.downloader.StartChainTomlDiscovery(ctx, backend.config.Snapshot.ChainName)
+		}
+
+		// Start torrent peer manager — keeps torrent peers in sync with DevP2P peers.
+		backend.downloader.StartTorrentPeerManager(ctx)
 	}
 
 	// setup periodic logging and prometheus updates
@@ -1296,8 +1386,15 @@ func (s *Ethereum) setUpSnapDownloader(
 	}
 
 	if downloaderCfg != nil {
-		if err := downloadercfg.LoadSnapshotsHashes(ctx, downloaderCfg.Dirs, downloaderCfg.ChainName); err != nil {
-			return err
+		if s.config.Snapshot.P2PManifest {
+			s.logger.Info("P2P manifest mode: skipping centralized preverified.toml, waiting for P2P discovery")
+			// Clear embedded baseline so the node doesn't download from it.
+			// The discovery loop will populate the registry from P2P peers.
+			snapcfg.SetToml(downloaderCfg.ChainName, []byte{}, false)
+		} else {
+			if err := downloadercfg.LoadSnapshotsHashes(ctx, downloaderCfg.Dirs, downloaderCfg.ChainName); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -1308,6 +1405,14 @@ func (s *Ethereum) setUpSnapDownloader(
 	if client != nil {
 		s.downloaderClient = downloader.NewRpcClient(client, s.config.Dirs.Snap)
 	}
+
+	// Enable P2P manifest mode on the downloader and expose the readiness
+	// channel so the snapshot stage can wait for discovery to complete.
+	if s.config.Snapshot.P2PManifest && s.downloader != nil {
+		s.downloader.EnableP2PManifest()
+		s.config.Snapshot.ManifestReady = s.downloader.ManifestReady()
+	}
+
 	return err
 }
 
@@ -1330,6 +1435,32 @@ func (s *Ethereum) initDownloader(
 		return
 	}
 	s.downloader.HandleTorrentClientStatus(nodeCfg.DebugMux)
+
+	// This adds completed snapshots on disk. Ideally we'd do this after completing sync, so that we
+	// don't unnecessarily report incomplete torrents. But to do that we need access to
+	// Downloader.AddTorrentsFromDisk in the sync stage, which only has the GPRC client. There's
+	// also the issue of having torrents not in the preverified set: If we are performing a sync for
+	// missing snapshots, any snapshots not in that set could cause issues. That's an unsolved issue
+	// and probably requires always resetting before resuming/starting a sync.
+	incomplete, err := s.downloader.AddTorrentsFromDisk(ctx)
+	if err != nil {
+		err = fmt.Errorf("adding torrents from disk: %w", err)
+		return
+	}
+
+	if incomplete != 0 {
+		// This is fine if we're resuming a sync. If not, there are files that will just float
+		// around. See the comment about resetting above. If that is resolved, we could delete or
+		// ignore incomplete torrents as aberrations.
+		s.logger.Warn("Downloader detected incomplete snapshots", "count", incomplete)
+	}
+
+	// Generate chain.toml from existing torrents on disk. The ENR updater is wired
+	// later (after this function returns), so the ENR update will be a no-op here.
+	// The background loop will re-publish with the correct frozenTx once P2P is up.
+	if pubErr := s.downloader.PublishLocalChainToml(); pubErr != nil {
+		s.logger.Warn("Failed to publish initial chain.toml", "err", pubErr)
+	}
 
 	bittorrentServer, err := downloader.NewGrpcServer(s.downloader)
 	if err != nil {
