@@ -45,6 +45,13 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 		return fmt.Errorf("processBlock: wrong state version for block at slot %d. state version %v. block version %v", block.GetSlot(), version, block.Version())
 	}
 
+	// [New in Gloas:EIP7732] process_parent_execution_payload BEFORE process_block_header
+	if version >= clparams.GloasVersion {
+		if err := impl.ProcessParentExecutionPayload(s, block); err != nil {
+			return fmt.Errorf("processBlock: failed to process parent execution payload: %v", err)
+		}
+	}
+
 	// 1. process_block_header
 	bodyRoot, err := body.HashSSZ()
 	if err != nil {

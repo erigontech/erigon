@@ -139,10 +139,7 @@ type forkGraphDisk struct {
 }
 
 // Initialize fork graph with a new state.
-// anchorBlock is optional: when provided (e.g. from checkpoint sync), it is stored so that
-// getParentPayloadStatus can determine FULL/EMPTY status for the first forward-sync block.
-// [New in Gloas:EIP7732]
-func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_data.SyncedData, aferoFs afero.Fs, rcfg beacon_router_configuration.RouterConfiguration, emitter *beaconevents.EventEmitter, anchorBlock ...*cltypes.SignedBeaconBlock) ForkGraph {
+func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_data.SyncedData, aferoFs afero.Fs, rcfg beacon_router_configuration.RouterConfiguration, emitter *beaconevents.EventEmitter) ForkGraph {
 	farthestExtendingPath := make(map[common.Hash]bool)
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
@@ -183,14 +180,6 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_d
 	f.headers.Store(common.Hash(anchorRoot), &anchorHeader)
 	f.sszBuffer = make([]byte, 0, (anchorState.EncodingSizeSSZ()*3)/2)
 
-	// [New in Gloas:EIP7732] Store the anchor block so getParentPayloadStatus can
-	// determine FULL/EMPTY for the first block after checkpoint sync.
-	if len(anchorBlock) > 0 && anchorBlock[0] != nil {
-		f.blocks.Store(common.Hash(anchorRoot), anchorBlock[0])
-		log.Debug("[ForkGraph] Stored anchor block for GLOAS parent detection",
-			"slot", anchorBlock[0].Block.Slot, "root", common.Hash(anchorRoot))
-	}
-
 	f.DumpBeaconStateOnDisk(anchorRoot, anchorState, true)
 	// preallocate buffer
 	return f
@@ -212,9 +201,7 @@ func (f *forkGraphDisk) isBlockRootTheCurrentState(blockRoot common.Hash) bool {
 }
 
 // Add a new node and edge to the graph
-// parentFullState: if non-nil, use this as the starting state instead of looking up from block_states.
-// [Modified in Gloas:EIP7732] Allows passing execution_payload_states when parent is FULL.
-func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool, parentFullState *state.CachingBeaconState) (*state.CachingBeaconState, ChainSegmentInsertionResult, error) {
+func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool) (*state.CachingBeaconState, ChainSegmentInsertionResult, error) {
 	block := signedBlock.Block
 	blockRoot, err := block.HashSSZ()
 	if err != nil {
@@ -233,10 +220,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 
 	isBlockRootTheCurrentState := f.isBlockRootTheCurrentState(blockRoot)
 	var newState *state.CachingBeaconState
-	if parentFullState != nil {
-		// [New in Gloas:EIP7732] Use provided parent state (from execution_payload_states)
-		newState = parentFullState
-	} else if isBlockRootTheCurrentState {
+	if isBlockRootTheCurrentState {
 		newState = f.currentState
 	} else {
 		newState, err = f.getState(block.ParentRoot, false, true)
@@ -260,7 +244,6 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 			"currentStateSlot", currentStateSlot,
 			"lowestAvail", f.lowestAvailableBlock.Load(),
 			"isCurrentState", isBlockRootTheCurrentState,
-			"parentFullState!=nil", parentFullState != nil,
 		)
 		return nil, MissingSegment, nil
 	}
@@ -314,20 +297,6 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	blockRewardsCollector := &eth2.BlockRewardsCollector{}
 
 	if !isBlockRootTheCurrentState {
-		// Debug: log pre-transition state details
-		{
-			preHeader := newState.LatestBlockHeader()
-			preHash, _ := newState.HashSSZ()
-			log.Info("[DEBUG] AddChainSegment: pre-TransitionState",
-				"blockSlot", block.Slot,
-				"stateSlot", newState.Slot(),
-				"latestBlockHash", newState.GetLatestBlockHash(),
-				"headerRoot", preHeader.Root,
-				"headerSlot", preHeader.Slot,
-				"stateHashSSZ", common.Hash(preHash),
-				"previousStateRoot", newState.PreviousStateRoot(),
-			)
-		}
 		// Execute the state
 		if invalidBlockErr := transition.TransitionState(newState, signedBlock, blockRewardsCollector, fullValidation); invalidBlockErr != nil {
 			// Add block to list of invalid blocks
@@ -343,15 +312,12 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	f.currentState = newState
 	f.currentStateBlockRoot = common.Hash(blockRoot)
 
-	// Debug: verify currentState.BlockRoot() matches the actual block root.
-	// If they diverge, it means the state transition used the wrong pre-state
-	// (e.g., block_state instead of execution_payload_state for a FULL parent).
+	// Verify currentState.BlockRoot() matches the actual block root.
 	if computedRoot, cerr := f.currentState.BlockRoot(); cerr == nil && computedRoot != common.Hash(blockRoot) {
 		log.Warn("AddChainSegment: BlockRoot MISMATCH after TransitionState",
 			"slot", block.Slot,
 			"expectedBlockRoot", common.Hash(blockRoot),
 			"computedBlockRoot", computedRoot,
-			"parentFullState!=nil", parentFullState != nil,
 			"parentRoot", block.ParentRoot,
 		)
 	}
@@ -500,17 +466,13 @@ func (f *forkGraphDisk) getState(blockRoot common.Hash, alwaysCopy bool, addChai
 	}
 
 	// collect all blocks between greatest extending node path and block.
-	type replayBlock struct {
-		block          *cltypes.SignedBeaconBlock
-		parentEnvelope *cltypes.SignedExecutionPayloadEnvelope // non-nil if parent was FULL [New in Gloas:EIP7732]
-	}
-	blocksInTheWay := []replayBlock{}
+	blocksInTheWay := []*cltypes.SignedBeaconBlock{}
 	// Use the parent root as a reverse iterator.
 	currentIteratorRoot := blockRoot
 	var copyReferencedState *state.CachingBeaconState
 	var err error
 
-	// try and find the point of recconnection
+	// try and find the point of reconnection
 	for copyReferencedState == nil {
 		block, isSegmentPresent := f.GetBlock(currentIteratorRoot)
 		if !isSegmentPresent {
@@ -537,44 +499,17 @@ func (f *forkGraphDisk) getState(blockRoot common.Hash, alwaysCopy bool, addChai
 			}
 		}
 
-		// [New in Gloas:EIP7732] Check if this block was built on parent's FULL path.
-		// If so, we need to apply parent's envelope before replaying this block.
-		var parentEnvelope *cltypes.SignedExecutionPayloadEnvelope
-		if block.Version() >= clparams.GloasVersion {
-			parentRoot := block.Block.ParentRoot
-			if env, readErr := f.ReadEnvelopeFromDisk(parentRoot); readErr == nil && env != nil {
-				bid := block.Block.Body.GetSignedExecutionPayloadBid()
-				if bid != nil && bid.Message != nil && env.Message != nil && env.Message.Payload != nil {
-					if bid.Message.ParentBlockHash == env.Message.Payload.BlockHash {
-						parentEnvelope = env
-					}
-				}
-			}
-		}
-
-		blocksInTheWay = append(blocksInTheWay, replayBlock{
-			block:          block,
-			parentEnvelope: parentEnvelope,
-		})
+		// [Modified in Gloas:EIP7732 defer-payload] No need to track parent envelopes
+		// during replay. TransitionState calls ProcessParentExecutionPayload internally,
+		// which handles the previous slot's execution effects using data already in the
+		// block body (ParentExecutionRequests) and state (LatestExecutionPayloadBid).
+		blocksInTheWay = append(blocksInTheWay, block)
 		currentIteratorRoot = block.Block.ParentRoot
 	}
 
 	// Traverse the blocks from top to bottom.
 	for i := len(blocksInTheWay) - 1; i >= 0; i-- {
-		rb := blocksInTheWay[i]
-		// [New in Gloas:EIP7732] Apply parent envelope before block if parent was FULL.
-		// Skip if the envelope slot is behind the state slot — this happens during
-		// checkpoint sync where the anchor state already incorporates the envelope.
-		if rb.parentEnvelope != nil && rb.parentEnvelope.Message != nil &&
-			rb.parentEnvelope.Message.Slot >= copyReferencedState.Slot() {
-			if err := transition.DefaultMachine.ProcessExecutionPayloadEnvelope(copyReferencedState, rb.parentEnvelope); err != nil {
-				if addChainSegment {
-					f.currentState = nil
-				}
-				return nil, fmt.Errorf("getState: failed to process parent envelope: %w", err)
-			}
-		}
-		if err := transition.TransitionState(copyReferencedState, rb.block, nil, false); err != nil {
+		if err := transition.TransitionState(copyReferencedState, blocksInTheWay[i], nil, false); err != nil {
 			if addChainSegment {
 				f.currentState = nil // reset the state if it fails here.
 				f.currentStateBlockRoot = common.Hash{}
@@ -608,39 +543,6 @@ func (f *forkGraphDisk) MarkHeaderAsInvalid(blockRoot common.Hash) {
 func (f *forkGraphDisk) hasBeaconState(blockRoot common.Hash) bool {
 	exists, err := afero.Exists(f.fs, getBeaconStateFilename(blockRoot))
 	return err == nil && exists
-}
-
-// GetExecutionPayloadState reconstructs the post-execution-payload state for a given block.
-// It gets the block_state via getState (which handles GLOAS FULL/EMPTY parent paths in replay),
-// then applies the target block's envelope to produce the execution_payload_state.
-// [New in Gloas:EIP7732]
-func (f *forkGraphDisk) GetExecutionPayloadState(blockRoot common.Hash) (*state.CachingBeaconState, error) {
-	// 1. Read target envelope
-	targetEnvelope, err := f.ReadEnvelopeFromDisk(blockRoot)
-	if err != nil {
-		return nil, fmt.Errorf("GetExecutionPayloadState: failed to read envelope: %w", err)
-	}
-
-	// 2. Get block_state (getState now handles GLOAS parent envelopes during replay)
-	blockState, err := f.getState(blockRoot, true, false)
-	if err != nil {
-		return nil, fmt.Errorf("GetExecutionPayloadState: failed to get block state: %w", err)
-	}
-	if blockState == nil {
-		return nil, fmt.Errorf("GetExecutionPayloadState: block state not found for %x", blockRoot)
-	}
-
-	// 3. Apply target envelope to get exec_payload_state.
-	// For checkpoint sync, the anchor state already incorporates the envelope's effects
-	// (state.Slot > envelope.Slot), so skip the replay to avoid the slot mismatch error.
-	if targetEnvelope.Message != nil && targetEnvelope.Message.Slot < blockState.Slot() {
-		return blockState, nil
-	}
-	if err := transition.DefaultMachine.ProcessExecutionPayloadEnvelope(blockState, targetEnvelope); err != nil {
-		return nil, fmt.Errorf("GetExecutionPayloadState: failed to process envelope: %w", err)
-	}
-
-	return blockState, nil
 }
 
 func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {

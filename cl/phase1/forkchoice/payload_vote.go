@@ -248,14 +248,20 @@ func (f *ForkChoiceStore) isSupportingVote(node ForkChoiceNode, message LatestMe
 	}
 }
 
-// shouldExtendPayload returns whether the payload for the given root should be extended.
+// ShouldExtendPayload returns whether the payload for the given root should be extended.
 // Returns true if:
 // - The payload is timely AND blob data is available (received enough PTC votes for both), OR
 // - There's no proposer boost root, OR
 // - The proposer boost root's parent is not this root, OR
 // - The proposer boost root's parent node has FULL payload status
+// Used by prepare_execution_payload to decide FULL vs EMPTY path.
 // [New in Gloas:EIP7732]
-func (f *ForkChoiceStore) shouldExtendPayload(root common.Hash) bool {
+func (f *ForkChoiceStore) ShouldExtendPayload(root common.Hash) bool {
+	// is_payload_verified: the envelope must exist locally
+	if !f.forkGraph.HasEnvelope(root) {
+		return false
+	}
+
 	// Check if payload is timely AND blob data is available
 	if f.isPayloadTimely(root) && f.isPayloadDataAvailable(root) {
 		return true
@@ -305,12 +311,12 @@ func (f *ForkChoiceStore) getPayloadStatusTiebreaker(node ForkChoiceNode) uint8 
 	}
 
 	// To decide on a payload from the previous slot, choose
-	// between FULL and EMPTY based on shouldExtendPayload
+	// between FULL and EMPTY based on ShouldExtendPayload
 	if node.PayloadStatus == cltypes.PayloadStatusEmpty {
 		return 1
 	}
 	// FULL case
-	if f.shouldExtendPayload(node.Root) {
+	if f.ShouldExtendPayload(node.Root) {
 		return 2
 	}
 	return 0 // Treat as PENDING (lower priority)
