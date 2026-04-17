@@ -104,6 +104,12 @@ type Config struct {
 	// See also EIP-6110: Supply validator deposits on chain
 	DepositContract common.Address `json:"depositContractAddress,omitempty"`
 
+	// (Optional) EIP-7002: Execution layer triggerable withdrawals
+	WithdrawalRequestContract *common.Address `json:"withdrawalRequestContractAddress,omitempty"`
+
+	// (Optional) EIP-7251: Increase the MAX_EFFECTIVE_BALANCE
+	ConsolidationRequestContract *common.Address `json:"consolidationRequestContractAddress,omitempty"`
+
 	DefaultBlockGasLimit *uint64 `json:"defaultBlockGasLimit,omitempty"`
 
 	// Various rules engines
@@ -523,12 +529,30 @@ func (c *Config) SystemContracts(time uint64) map[string]accounts.Address {
 		contracts["BEACON_ROOTS_ADDRESS"] = params.BeaconRootsAddress
 	}
 	if c.IsPrague(time) {
-		contracts["CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS"] = params.ConsolidationRequestAddress
+		contracts["CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS"] = c.GetConsolidationRequestContract()
 		contracts["DEPOSIT_CONTRACT_ADDRESS"] = accounts.InternAddress(c.DepositContract)
 		contracts["HISTORY_STORAGE_ADDRESS"] = params.HistoryStorageAddress
-		contracts["WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS"] = params.WithdrawalRequestAddress
+		contracts["WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS"] = c.GetWithdrawalRequestContract()
 	}
 	return contracts
+}
+
+// GetWithdrawalRequestContract returns the configured EIP-7002 withdrawal request contract address,
+// falling back to the default if not set in the chain config.
+func (c *Config) GetWithdrawalRequestContract() accounts.Address {
+	if c.WithdrawalRequestContract != nil {
+		return accounts.InternAddress(*c.WithdrawalRequestContract)
+	}
+	return params.WithdrawalRequestAddress
+}
+
+// GetConsolidationRequestContract returns the configured EIP-7251 consolidation request contract address,
+// falling back to the default if not set in the chain config.
+func (c *Config) GetConsolidationRequestContract() accounts.Address {
+	if c.ConsolidationRequestContract != nil {
+		return accounts.InternAddress(*c.ConsolidationRequestContract)
+	}
+	return params.ConsolidationRequestAddress
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported

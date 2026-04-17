@@ -208,6 +208,10 @@ func newSimulator(
 	evmCallTimeout time.Duration,
 	commitmentHistory bool,
 ) *simulator {
+	// The gas pool is intentionally shared across all simulated blocks as a global gas budget
+	// (similar to eth_call's gas cap). Per-block gas limits are enforced separately via
+	// blockContext.GasLimit in sanitizeCall. This prevents DoS by bounding the total gas
+	// consumed across the entire simulation request.
 	return &simulator{
 		base:              header,
 		chainConfig:       chainConfig,
@@ -339,31 +343,37 @@ func (s *simulator) sanitizeCall(
 		}
 		args.Nonce = (*hexutil.Uint64)(&nonce)
 	}
-	// Let the call run wild unless explicitly specified.
+
+	// Determine the effective per-call gas cap: use globalGasCap if set, otherwise a large safety bound.
+	effectiveCap := globalGasCap
+	if effectiveCap == 0 {
+		effectiveCap = uint64(math.MaxUint64 / 2)
+	}
+
 	if args.Gas == nil {
+		// Default to remaining block gas, but capped by the node's effective gas cap.
 		remaining := blockContext.GasLimit - gasUsed
+		if remaining > effectiveCap {
+			remaining = effectiveCap
+		}
 		args.Gas = (*hexutil.Uint64)(&remaining)
+	} else {
+		// Cap user-specified gas against the node's gas cap.
+		if globalGasCap > 0 && globalGasCap < uint64(*args.Gas) {
+			log.Warn("Caller gas above allowance, capping", "requested", args.Gas, "cap", globalGasCap)
+			args.Gas = (*hexutil.Uint64)(&globalGasCap)
+		}
 	}
 	if gasUsed+uint64(*args.Gas) > blockContext.GasLimit {
 		return blockGasLimitReachedError(fmt.Sprintf("block gas limit reached: %d >= %d", gasUsed, blockContext.GasLimit))
 	}
+
 	if args.ChainID == nil {
-		args.ChainID = (*hexutil.Big)(s.chainConfig.ChainID)
+		// Copy the chain ID to avoid aliasing the live chainConfig pointer.
+		args.ChainID = (*hexutil.Big)(new(big.Int).Set(s.chainConfig.ChainID))
 	} else {
 		if have := (*big.Int)(args.ChainID); have.Cmp(s.chainConfig.ChainID) != 0 {
 			return fmt.Errorf("chainId does not match node's (have=%v, want=%v)", have, s.chainConfig.ChainID)
-		}
-	}
-	if args.Gas == nil {
-		gas := globalGasCap
-		if gas == 0 {
-			gas = uint64(math.MaxUint64 / 2)
-		}
-		args.Gas = (*hexutil.Uint64)(&gas)
-	} else {
-		if globalGasCap > 0 && globalGasCap < uint64(*args.Gas) {
-			log.Warn("Caller gas above allowance, capping", "requested", args.Gas, "cap", globalGasCap)
-			args.Gas = (*hexutil.Uint64)(&globalGasCap)
 		}
 	}
 	if baseFee == nil {
