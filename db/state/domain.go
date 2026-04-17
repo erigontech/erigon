@@ -1309,9 +1309,24 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		keyStr, value := domainDiffs[i].Key, domainDiffs[i].Value
 		key := common.ToBytesZeroCopy(keyStr)
 		if dt.d.LargeValues {
-			// Delete the entry at the write step
-			if err := rwTx.Delete(d.ValuesTable, key); err != nil {
-				return err
+			// Skip delete when the diff's pre-value is absent AND the DB entry
+			// at this step is also absent/empty — both represent "no value at
+			// this step"; deleting would wipe a legitimate deletion marker
+			// written by a block outside the unwound range. See #20169.
+			skipDelete := false
+			if len(value) == 0 {
+				curr, err := rwTx.GetOne(d.ValuesTable, key)
+				if err != nil {
+					return err
+				}
+				if len(curr) == 0 {
+					skipDelete = true
+				}
+			}
+			if !skipDelete {
+				if err := rwTx.Delete(d.ValuesTable, key); err != nil {
+					return err
+				}
 			}
 			// Restore previous value at unwind step ([]byte{} = key was new, nothing to restore)
 			if len(value) > 0 {
@@ -1324,7 +1339,7 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		}
 		stepBytes := key[len(key)-8:]
 		fullKey := key[:len(key)-8]
-		// Delete the current entry at the write step
+		// Delete the current entry at the write step (subject to the deletion-marker guard).
 		valInDB, err := valsCursor.SeekBothRange(fullKey, stepBytes)
 		if err != nil {
 			return err
@@ -1332,8 +1347,18 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		if len(valInDB) > 0 {
 			stepInDB := valInDB[:8]
 			if bytes.Equal(stepInDB, stepBytes) {
-				if err := valsCursor.DeleteCurrent(); err != nil {
-					return err
+				// Skip DeleteCurrent iff the diff says pre-state was absent
+				// AND the DB entry at this step is also a deletion marker
+				// (only the 8-byte step prefix, no value). Both represent
+				// "slot has no value at step-S"; deleting would wipe a
+				// legitimate deletion marker written by a block outside the
+				// unwound range and expose an older non-zero value from an
+				// earlier step. See #20169.
+				sameAbsent := len(value) == 0 && len(valInDB) == 8
+				if !sameAbsent {
+					if err := valsCursor.DeleteCurrent(); err != nil {
+						return err
+					}
 				}
 			}
 		}

@@ -1102,6 +1102,635 @@ func TestTemporalMemBatch_UnwindMaskedByInMemMap(t *testing.T) {
 	})
 }
 
+// TestDomain_WriteThenDeleteWithinSameStep replays the mainnet bug observed on
+// block 24,899,757 tx[89]: a tick slot on a Uniswap V3 pool is modified then
+// zeroed by consecutive txs whose writes all fall in the same step. The SSTORE 0
+// was being lost — getLatest returned the non-zero pre-deletion value instead
+// of the deletion marker.
+//
+// Reproduces the exact sequence at the DomainBufferedWriter level:
+//  1. PutWithPrev(k, non-zero v1, txNum=10, prev=empty)  — tick re-created
+//  2. PutWithPrev(k, non-zero v2, txNum=11, prev=v1)     — modification
+//  3. DeleteWithPrev(k,            txNum=12, prev=v2)    — deletion (SSTORE 0)
+//
+// All three fall in step 0 (stepSize=16). After Flush, getLatestFromDb must
+// return found=true, value=empty — the deletion marker at step 0.
+//
+// This test uses LargeValues=false (DupSort) path, matching StorageDomain.
+func TestDomain_WriteThenDeleteWithinSameStep(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	logger := log.New()
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, 16, logger)
+	require.False(t, d.LargeValues, "test targets DupSort (non-largeVals) path")
+	ctx, require := context.Background(), require.New(t)
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+
+	dt := d.beginForTests()
+	defer dt.Close()
+	writer := dt.NewWriter()
+	defer writer.Close()
+
+	k := []byte("pool-addr-20b-slot-32b-key__________________________") // 52 bytes, storage-shaped
+	require.Len(k, 52)
+	v1 := []byte("value-non-zero-1")
+	v2 := []byte("value-non-zero-2-different-length")
+
+	// All three writes share step 0 (stepSize=16 → txNums 0..15 are step 0).
+	require.NoError(writer.PutWithPrev(k, v1, 10, nil)) // create
+	require.NoError(writer.PutWithPrev(k, v2, 11, v1))  // modify
+	require.NoError(writer.DeleteWithPrev(k, 12, v2))   // SSTORE 0 — the deletion under test
+
+	require.NoError(writer.Flush(ctx, tx))
+
+	// 1. What does getLatestFromDb see?
+	dt2 := d.beginForTests()
+	defer dt2.Close()
+	v, step, found, err := dt2.getLatestFromDb(k, tx)
+	require.NoError(err)
+
+	// Expected: found=true (DB has an entry), step=0 (deletion at step 0),
+	// value=empty (deletion marker). If value is non-empty, the deletion
+	// was lost somewhere in etl ordering or the cursor Put logic.
+	require.True(found, "DB must have an entry for the key (a deletion marker at step 0)")
+	require.Equal(kv.Step(0), step, "step must be 0 (where the deletion happened)")
+	require.Empty(v, "after Put-Put-Delete in same step, latest value must be empty (deletion)")
+
+	// 2. And what does the full GetLatest stack return? (Should agree.)
+	v2Got, _, found2, err := dt2.GetLatest(k, tx)
+	require.NoError(err)
+	require.True(found2 || len(v2Got) == 0, "deletion: either found=false or found=true with empty value")
+	require.Empty(v2Got, "GetLatest must return empty after deletion")
+
+	// 3. Direct DupSort inspection: dump every dup entry for this key so a
+	// failing run shows exactly what landed in StorageVals.
+	c, err := tx.CursorDupSort(d.ValuesTable)
+	require.NoError(err)
+	defer c.Close()
+	k1, stepWithVal, err := c.SeekExact(k)
+	require.NoError(err)
+	t.Logf("DupSort first entry for key: k=%x step+val=%x (len=%d)", k1, stepWithVal, len(stepWithVal))
+	for stepWithVal != nil {
+		var nextStepWithVal []byte
+		_, nextStepWithVal, err = c.NextDup()
+		require.NoError(err)
+		if nextStepWithVal == nil {
+			break
+		}
+		t.Logf("DupSort next dup: step+val=%x (len=%d)", nextStepWithVal, len(nextStepWithVal))
+		stepWithVal = nextStepWithVal
+	}
+}
+
+// TestDomain_UnwindThenWriteAndDeleteInSameStep replays the suspected mainnet
+// bug with the unwind path in the loop. The scenario mirrors what happens
+// after `unwindExec3State` runs a no-op unwind (head already at unwind point,
+// so the merged changeset is empty) followed by re-execution that contains a
+// create → modify → delete sequence in the same step.
+//
+// Sequence:
+//  1. Domain starts empty.
+//  2. An "empty" unwind changeset is set (sd.Unwind with no diffs), simulating
+//     the no-op unwind seen at 15:22:31 in the mainnet log.
+//  3. PutWithPrev(k, v1, txNum=20, prev=nil)   — creation in a later step
+//  4. PutWithPrev(k, v2, txNum=21, prev=v1)    — modification, same step
+//  5. DeleteWithPrev(k, txNum=22, prev=v2)     — the SSTORE 0 under test
+//  6. Flush invokes tx.Unwind(emptyChangeset) followed by flushWriters.
+//
+// Expected: GetLatest returns empty (deletion). If not, the empty-changeset
+// unwind path has a side effect that loses the deletion.
+func TestDomain_UnwindThenWriteAndDeleteInSameStep(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	logger := log.New()
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, 16, logger)
+	require.False(t, d.LargeValues, "test targets DupSort path")
+	ctx, require := context.Background(), require.New(t)
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+
+	// Step 1: simulate the empty-changeset Unwind at DomainRoTx level.
+	// Unwind to txNum=16 (step 1 start) with NO diff entries — this is what
+	// happens when the head is already at the unwind point.
+	dt0 := d.beginForTests()
+	err = dt0.unwind(ctx, tx, 1 /*step*/, 16 /*txNumUnwindTo*/, uint64(dt0.FirstStepNotInFiles()), nil /*no diffs*/)
+	require.NoError(err)
+	dt0.Close()
+
+	// Step 2: write create → modify → delete in step 1 (txNums 16..31).
+	dt := d.beginForTests()
+	defer dt.Close()
+	writer := dt.NewWriter()
+	defer writer.Close()
+
+	k := []byte("pool-addr-20b-slot-32b-key__________________________")
+	require.Len(k, 52)
+	v1 := []byte("value-non-zero-1")
+	v2 := []byte("value-non-zero-2-different-length")
+
+	require.NoError(writer.PutWithPrev(k, v1, 20, nil))
+	require.NoError(writer.PutWithPrev(k, v2, 21, v1))
+	require.NoError(writer.DeleteWithPrev(k, 22, v2))
+
+	require.NoError(writer.Flush(ctx, tx))
+
+	// Step 3: check what persisted.
+	dt2 := d.beginForTests()
+	defer dt2.Close()
+	v, step, found, err := dt2.getLatestFromDb(k, tx)
+	require.NoError(err)
+	t.Logf("after unwind+flush: found=%v step=%d v=%x", found, step, v)
+
+	// Dump all DupSort entries for the key.
+	c, err := tx.CursorDupSort(d.ValuesTable)
+	require.NoError(err)
+	defer c.Close()
+	k1, stepWithVal, err := c.SeekExact(k)
+	require.NoError(err)
+	for stepWithVal != nil {
+		t.Logf("  DupSort entry: k=%x step+val=%x (step=%d val=%x)",
+			k1, stepWithVal, ^binary.BigEndian.Uint64(stepWithVal[:8]), stepWithVal[8:])
+		_, stepWithVal, err = c.NextDup()
+		require.NoError(err)
+	}
+
+	// Expected: deletion is persisted — empty value wins at step 1.
+	require.True(found, "DB should have a deletion marker for the key")
+	require.Equal(kv.Step(1), step, "deletion at step 1")
+	require.Empty(v, "deletion must be persisted as empty value, not lost")
+
+	// And GetLatest must agree.
+	v2Got, _, _, err := dt2.GetLatest(k, tx)
+	require.NoError(err)
+	require.Empty(v2Got, "GetLatest must return empty after deletion")
+}
+
+// TestDomain_DeleteWithPriorStepEntriesInDB reproduces the mainnet smoking gun:
+// a `SSTORE 0` deletion gets lost when the key already has DB entries at prior
+// steps. The live node's DB has step-8841 & step-8842 entries for the affected
+// slot, then a step-8843 deletion was flushed and subsequently disappeared.
+// A sibling slot that was new (no prior entries) kept its step-8843 deletion.
+//
+// Sequence:
+//  1. Pre-populate StorageVals with entries at step 0 and step 1 (simulating
+//     pre-existing snapshot-residue for the key).
+//  2. Writer flushes a step-2 deletion (empty value at txNum in step 2).
+//  3. Assert: DupSort must contain a step-2 deletion marker (8-byte entry).
+//
+// If the step-2 deletion is missing, this test fails and pinpoints the bug.
+func TestDomain_DeleteWithPriorStepEntriesInDB(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	logger := log.New()
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, 16, logger)
+	require.False(t, d.LargeValues, "test targets DupSort path")
+	ctx, require := context.Background(), require.New(t)
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+
+	k := []byte("pool-addr-20b-slot-32b-key__________________________")
+	require.Len(k, 52)
+
+	// Step 1: pre-populate DB entries at step 0 and step 1 directly, simulating
+	// the residue of earlier snapshot ranges that never got pruned.
+	step0Bytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(step0Bytes, ^uint64(0))
+	step1Bytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(step1Bytes, ^uint64(1))
+	v0 := bytes.Repeat([]byte{0xA0}, 32)
+	v1 := bytes.Repeat([]byte{0xA1}, 32)
+	c0, err := tx.RwCursorDupSort(d.ValuesTable)
+	require.NoError(err)
+	defer c0.Close()
+	require.NoError(c0.Put(k, append(append([]byte{}, step1Bytes...), v1...))) // step 1 first
+	require.NoError(c0.Put(k, append(append([]byte{}, step0Bytes...), v0...))) // step 0
+	c0.Close()
+
+	// Sanity: both entries present.
+	c1, err := tx.CursorDupSort(d.ValuesTable)
+	require.NoError(err)
+	defer c1.Close()
+	_, v, err := c1.SeekExact(k)
+	require.NoError(err)
+	require.NotNil(v)
+	var precount int
+	for v != nil {
+		precount++
+		_, v, err = c1.NextDup()
+		require.NoError(err)
+	}
+	c1.Close()
+	require.Equal(2, precount, "pre-populated 2 dup entries")
+
+	// Step 2: writer performs a step-2 deletion.
+	dt := d.beginForTests()
+	defer dt.Close()
+	writer := dt.NewWriter()
+	defer writer.Close()
+	// stepSize=16 → txNum=32 is step 2. prev=v1 reflects real scenario where
+	// prior value existed.
+	require.NoError(writer.DeleteWithPrev(k, 32, v1))
+	require.NoError(writer.Flush(ctx, tx))
+
+	// Dump everything that's there now.
+	c2, err := tx.CursorDupSort(d.ValuesTable)
+	require.NoError(err)
+	defer c2.Close()
+	_, v, err = c2.SeekExact(k)
+	require.NoError(err)
+	var entries []struct {
+		stepInv uint64
+		valLen  int
+		val     []byte
+	}
+	for v != nil {
+		e := struct {
+			stepInv uint64
+			valLen  int
+			val     []byte
+		}{
+			stepInv: binary.BigEndian.Uint64(v[:8]),
+			valLen:  len(v),
+			val:     append([]byte{}, v[8:]...),
+		}
+		entries = append(entries, e)
+		t.Logf("DupSort: step=%d val_len=%d val=%x", ^e.stepInv, e.valLen, e.val)
+		_, v, err = c2.NextDup()
+		require.NoError(err)
+	}
+
+	// The step-2 deletion marker MUST be present.
+	foundDeletion := false
+	for _, e := range entries {
+		if ^e.stepInv == 2 && e.valLen == 8 {
+			foundDeletion = true
+			break
+		}
+	}
+	require.True(foundDeletion, "step-2 deletion marker must be in DB; DupSort entries: %+v", entries)
+
+	// getLatestFromDb must see the deletion.
+	v2Got, step, found, err := dt.getLatestFromDb(k, tx)
+	require.NoError(err)
+	require.True(found, "getLatestFromDb must find the deletion marker")
+	require.Equal(kv.Step(2), step, "deletion at step 2")
+	require.Empty(v2Got, "deletion: empty value")
+}
+
+// TestDomain_PutThenDeleteAtSameStepWithPriorEntries replays the mainnet
+// scenario more closely: the slot already has DB entries at prior steps, then
+// the writer does a non-zero Put AND a deletion at the SAME later step, before
+// flush. On mainnet the deletion disappeared from DB even though the Put
+// landed OK at earlier steps.
+//
+// Sequence:
+//  1. Pre-populate DB with step-0 and step-1 non-zero entries (residue).
+//  2. Writer: PutWithPrev(k, v_new, txNum=32, prev=v_prior) — step 2 modify.
+//  3. Writer: DeleteWithPrev(k, txNum=33, prev=v_new) — step 2 delete.
+//  4. Flush.
+//  5. Assert: final DB has a step-2 deletion marker (8-byte entry).
+func TestDomain_PutThenDeleteAtSameStepWithPriorEntries(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	logger := log.New()
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, 16, logger)
+	require.False(t, d.LargeValues, "test targets DupSort path")
+	ctx, require := context.Background(), require.New(t)
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+
+	k := []byte("pool-addr-20b-slot-32b-key__________________________")
+	require.Len(k, 52)
+
+	// Pre-populate with step-0 and step-1 entries.
+	step0Bytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(step0Bytes, ^uint64(0))
+	step1Bytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(step1Bytes, ^uint64(1))
+	v0 := bytes.Repeat([]byte{0xA0}, 32)
+	v1 := bytes.Repeat([]byte{0xA1}, 32)
+	c0, err := tx.RwCursorDupSort(d.ValuesTable)
+	require.NoError(err)
+	defer c0.Close()
+	require.NoError(c0.Put(k, append(append([]byte{}, step1Bytes...), v1...)))
+	require.NoError(c0.Put(k, append(append([]byte{}, step0Bytes...), v0...)))
+	c0.Close()
+
+	// Writer: Put then Delete at step 2.
+	dt := d.beginForTests()
+	defer dt.Close()
+	writer := dt.NewWriter()
+	defer writer.Close()
+	vNew := bytes.Repeat([]byte{0xB2}, 32)
+	require.NoError(writer.PutWithPrev(k, vNew, 32, v1))
+	require.NoError(writer.DeleteWithPrev(k, 33, vNew))
+	require.NoError(writer.Flush(ctx, tx))
+
+	// Dump.
+	c2, err := tx.CursorDupSort(d.ValuesTable)
+	require.NoError(err)
+	defer c2.Close()
+	_, v, err := c2.SeekExact(k)
+	require.NoError(err)
+	entries := []struct {
+		step   uint64
+		valLen int
+		val    []byte
+	}{}
+	for v != nil {
+		e := struct {
+			step   uint64
+			valLen int
+			val    []byte
+		}{
+			step:   ^binary.BigEndian.Uint64(v[:8]),
+			valLen: len(v),
+			val:    append([]byte{}, v[8:]...),
+		}
+		entries = append(entries, e)
+		t.Logf("DupSort: step=%d val_len=%d val=%x", e.step, e.valLen, e.val)
+		_, v, err = c2.NextDup()
+		require.NoError(err)
+	}
+
+	foundDeletion := false
+	for _, e := range entries {
+		if e.step == 2 && e.valLen == 8 {
+			foundDeletion = true
+			break
+		}
+	}
+	require.True(foundDeletion, "step-2 deletion marker must be in DB after Put+Delete in same step; DupSort entries: %+v", entries)
+
+	v2Got, step, found, err := dt.getLatestFromDb(k, tx)
+	require.NoError(err)
+	require.True(found)
+	require.Equal(kv.Step(2), step)
+	require.Empty(v2Got, "deletion expected, got: %x", v2Got)
+}
+
+// TestDomain_UnwindPreservesDeletionMarker covers the fix for the bug where
+// DomainRoTx.unwind wiped a legitimate step-N deletion marker when the merged
+// unwind diff carried an empty pre-value for that key/step.
+//
+// The mainnet scenario: a slot is modified & deleted multiple times within the
+// same step; MergeDiffSets keeps the oldest block's diff, whose prev-value is
+// empty (pre-state was zero). At flush time, the DB's step-N entry is the
+// accumulated final state — here, a deletion marker from a LATER block written
+// by flushWriters. The old unwind DeleteCurrent'd that marker and didn't
+// restore anything, exposing an older non-zero value from a prior step.
+//
+// The fix (Option 2): when diff.Value is empty AND the DB entry at the
+// matching step is also empty (deletion marker), skip DeleteCurrent — both
+// represent "absent", and leaving the marker preserves the correct
+// shadow-over-earlier-steps semantics.
+//
+// This test exercises the full (diff.Value, DB step-entry) truth table.
+func TestDomain_UnwindPreservesDeletionMarker(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	logger := log.New()
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, 16, logger)
+	require.False(t, d.LargeValues, "DupSort path")
+	ctx, require := context.Background(), require.New(t)
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+
+	k := []byte("pool-addr-20b-slot-32b-key__________________________")
+	require.Len(k, 52)
+
+	step0Bytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(step0Bytes, ^uint64(0))
+	step1Bytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(step1Bytes, ^uint64(1))
+	step2Bytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(step2Bytes, ^uint64(2))
+
+	v0 := bytes.Repeat([]byte{0xA0}, 32)
+	v1 := bytes.Repeat([]byte{0xA1}, 32)
+
+	c0, err := tx.RwCursorDupSort(d.ValuesTable)
+	require.NoError(err)
+	defer c0.Close()
+	require.NoError(c0.Put(k, append(append([]byte{}, step1Bytes...), v1...)))
+	require.NoError(c0.Put(k, append(append([]byte{}, step0Bytes...), v0...)))
+	c0.Close()
+
+	// Persist a step-2 deletion.
+	dt := d.beginForTests()
+	writer := dt.NewWriter()
+	require.NoError(writer.DeleteWithPrev(k, 32, v1))
+	require.NoError(writer.Flush(ctx, tx))
+	writer.Close()
+	dt.Close()
+
+	// Sanity: deletion is in DB.
+	{
+		c, err := tx.CursorDupSort(d.ValuesTable)
+		require.NoError(err)
+		defer c.Close()
+		_, v, _ := c.SeekExact(k)
+		t.Logf("pre-unwind DupSort head for k: val_len=%d", len(v))
+		require.Equal(8, len(v), "step-2 deletion marker must be present before unwind")
+		c.Close()
+	}
+
+	// Run unwind with ONE diff: key has step-2, value=empty.
+	// This represents "pre-state before step 2 was absent" — which is
+	// truthful if step-2 was when the key first appeared again after a
+	// prior deletion. But it's fatal here because the DB's step-2 entry
+	// IS a deletion marker, not a create.
+	dt2 := d.beginForTests()
+	defer dt2.Close()
+	diffs := []kv.DomainEntryDiff{
+		{Key: string(k) + string(step2Bytes), Value: nil}, // empty value
+	}
+	require.NoError(dt2.unwind(ctx, tx, 2 /*step*/, 32 /*txNumUnwindTo*/, uint64(dt2.FirstStepNotInFiles()), diffs))
+
+	// Inspect what's left.
+	c2, err := tx.CursorDupSort(d.ValuesTable)
+	require.NoError(err)
+	defer c2.Close()
+	_, v, err := c2.SeekExact(k)
+	require.NoError(err)
+	sawDeletion := false
+	for v != nil {
+		t.Logf("post-unwind DupSort: step=%d val_len=%d", ^binary.BigEndian.Uint64(v[:8]), len(v))
+		if ^binary.BigEndian.Uint64(v[:8]) == 2 && len(v) == 8 {
+			sawDeletion = true
+		}
+		_, v, err = c2.NextDup()
+		require.NoError(err)
+	}
+
+	// Fix assertion: the deletion marker must survive the unwind (diff.Value
+	// empty + DB step-entry empty → "same absent state" → no-op).
+	require.True(sawDeletion,
+		"step-2 deletion marker must survive unwind with empty-value diff")
+
+	// Verify getLatestFromDb still reports the deletion (not the older step-1
+	// non-zero value) — i.e., the deletion marker continues to shadow.
+	vGot, step, found, err := dt2.getLatestFromDb(k, tx)
+	require.NoError(err)
+	require.True(found, "getLatestFromDb must see the deletion marker")
+	require.Equal(kv.Step(2), step, "step must be 2")
+	require.Empty(vGot, "latest must be empty (deletion), not older non-zero value")
+}
+
+// TestDomain_UnwindTruthTable exercises the remaining three rows of the
+// (diff.Value, DB step-entry) truth table to verify Option 2 only changes
+// behavior for the empty+empty case:
+//
+//	diff | DB entry   | expected
+//	-----+-----------+--------------------------------
+//	""   | <empty>   | keep (NEW — Option 2 no-op)   (covered above)
+//	""   | non-empty | delete (unchanged)
+//	v!=""| <empty>   | delete + Put(unwindStep, v)   (unchanged)
+//	v!=""| non-empty | delete + Put(unwindStep, v)   (unchanged)
+func TestDomain_UnwindTruthTable(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	logger := log.New()
+
+	stepBytesFor := func(s uint64) []byte {
+		b := make([]byte, 8)
+		binary.BigEndian.PutUint64(b, ^s)
+		return b
+	}
+
+	makeKey := func(tag byte) []byte {
+		k := make([]byte, 52)
+		for i := range k {
+			k[i] = tag
+		}
+		return k
+	}
+
+	type tc struct {
+		name          string
+		diffValue     []byte
+		dbStepEntry   []byte // what to pre-populate at (k, stepBytes(2)); nil = don't pre-populate
+		wantStep2     bool
+		wantStep2Len  int    // only checked if wantStep2
+		wantUnwindVal []byte // what should be at unwind step (step 2, since no files here)
+	}
+
+	cases := []tc{
+		{
+			name:          "empty_vs_nonempty_deletes",
+			diffValue:     nil,
+			dbStepEntry:   bytes.Repeat([]byte{0xC2}, 32),
+			wantStep2:     false,
+			wantUnwindVal: nil,
+		},
+		{
+			name:          "nonempty_vs_empty_restores",
+			diffValue:     bytes.Repeat([]byte{0xDD}, 32),
+			dbStepEntry:   nil, // skip pre-populate; writer will create empty marker? Instead set up differently below.
+			wantStep2:     true,
+			wantStep2Len:  8 + 32, // unwind Puts restored value at unwind step = 2
+			wantUnwindVal: bytes.Repeat([]byte{0xDD}, 32),
+		},
+		{
+			name:          "nonempty_vs_nonempty_overwrites",
+			diffValue:     bytes.Repeat([]byte{0xDD}, 32),
+			dbStepEntry:   bytes.Repeat([]byte{0xC2}, 32),
+			wantStep2:     true,
+			wantStep2Len:  8 + 32,
+			wantUnwindVal: bytes.Repeat([]byte{0xDD}, 32),
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, 16, logger)
+			ctx, require := context.Background(), require.New(t)
+
+			tx, err := db.BeginRw(ctx)
+			require.NoError(err)
+			defer tx.Rollback()
+
+			k := makeKey(0xAB)
+
+			// Pre-populate: step 0 (non-zero baseline) + maybe step 2 depending on case.
+			cc, err := tx.RwCursorDupSort(d.ValuesTable)
+			require.NoError(err)
+			defer cc.Close()
+			step0B := stepBytesFor(0)
+			require.NoError(cc.Put(k, append(append([]byte{}, step0B...), bytes.Repeat([]byte{0xA0}, 32)...)))
+			if c.dbStepEntry != nil {
+				step2B := stepBytesFor(2)
+				require.NoError(cc.Put(k, append(append([]byte{}, step2B...), c.dbStepEntry...)))
+			}
+			cc.Close()
+
+			// Run unwind with the case's diff.
+			dt := d.beginForTests()
+			defer dt.Close()
+			step2B := stepBytesFor(2)
+			diffs := []kv.DomainEntryDiff{
+				{Key: string(k) + string(step2B), Value: c.diffValue},
+			}
+			require.NoError(dt.unwind(ctx, tx, 2 /*step*/, 32 /*txNumUnwindTo*/, uint64(dt.FirstStepNotInFiles()), diffs))
+
+			// Inspect step 2 entry.
+			c2, err := tx.CursorDupSort(d.ValuesTable)
+			require.NoError(err)
+			defer c2.Close()
+			_, v, err := c2.SeekExact(k)
+			require.NoError(err)
+			sawStep2 := false
+			var step2Len int
+			var step2Val []byte
+			for v != nil {
+				if ^binary.BigEndian.Uint64(v[:8]) == 2 {
+					sawStep2 = true
+					step2Len = len(v)
+					step2Val = append([]byte{}, v[8:]...)
+				}
+				_, v, err = c2.NextDup()
+				require.NoError(err)
+			}
+			require.Equal(c.wantStep2, sawStep2, "step-2 presence mismatch")
+			if c.wantStep2 {
+				require.Equal(c.wantStep2Len, step2Len, "step-2 entry length")
+				require.Equal(c.wantUnwindVal, step2Val, "step-2 entry value")
+			}
+		})
+	}
+}
+
 func TestDomain_Delete(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
