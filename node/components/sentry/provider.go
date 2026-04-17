@@ -41,13 +41,17 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	execp2p "github.com/erigontech/erigon/execution/p2p"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry"
+	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 )
 
@@ -67,15 +71,25 @@ type Config struct {
 	// the Provider dials these addresses via gRPC instead of building
 	// local servers. All fields below are only consulted in local mode.
 
-	// ChainDB is queried by the readNodeInfo callback during ENR refresh.
+	// ChainDB is queried by the readNodeInfo callback during ENR refresh
+	// and by StatusDataProvider during status-message construction.
 	ChainDB kv.RoDB
 
 	// ChainConfig, GenesisHash, NetworkID are threaded into the
 	// readNodeInfo closure so each sentry server can report up-to-date
-	// node metadata in its ENR record.
+	// node metadata in its ENR record. ChainConfig + Genesis + NetworkID
+	// are also consumed by StatusDataProvider.
 	ChainConfig *chain.Config
 	GenesisHash common.Hash
 	NetworkID   uint64
+
+	// Genesis is the canonical genesis block; required by StatusDataProvider
+	// to compute fork IDs and genesis-hash checks on incoming status messages.
+	Genesis *types.Block
+
+	// BlockReader supplies current header/body access to StatusDataProvider
+	// when refreshing status messages on new-head notifications.
+	BlockReader services.FullBlockReader
 
 	// EthDiscoveryURLs is the DNS-discovery list advertised alongside any
 	// chain-specific bootnodes.
@@ -111,6 +125,26 @@ type Provider struct {
 	// wrappers around local Servers (local mode) or gRPC clients to
 	// external sentry processes (remote mode). Always populated.
 	Sentries []sentryproto.SentryClient
+
+	// Multiplexer is a single SentryClient that fans out calls across all
+	// Sentries. Used by the execution-P2P layer and by polygon sync.
+	Multiplexer sentryproto.SentryClient
+
+	// StatusDataProvider supplies up-to-date peer-handshake status payloads
+	// (genesis hash, fork ID, total difficulty, chain head). Consumed by the
+	// MultiClient, stageloop hook, and execution-P2P layer.
+	StatusDataProvider *sentry.StatusDataProvider
+
+	// ExecutionP2PMessageListener, ExecutionP2PPeerTracker,
+	// ExecutionP2PPublisher together form the execution-side P2P layer
+	// sitting above the sentry multiplexer. The stageloop hook uses the
+	// publisher; the Fetcher/BackwardBlockDownloader (kept outside the
+	// Provider) uses listener + peer tracker.
+	ExecutionP2PMessageListener *execp2p.MessageListener
+	ExecutionP2PPeerTracker     *execp2p.PeerTracker
+	ExecutionP2PPublisher       *execp2p.Publisher
+	ExecutionP2PMessageSender   *execp2p.MessageSender
+	ExecutionP2PPeerPenalizer   *execp2p.PeerPenalizer
 
 	// Internal
 	cfg    Config
@@ -222,7 +256,38 @@ func (p *Provider) Initialize(ctx context.Context) error {
 		p.Sentries = append(p.Sentries, sentryClient)
 	}
 
+	p.buildStatusAndExecutionP2P()
 	return nil
+}
+
+// buildStatusAndExecutionP2P constructs the StatusDataProvider, the shared
+// sentry multiplexer, and the execution-P2P layer built on top of it
+// (MessageListener, PeerTracker, Publisher, plus their penalizer and sender
+// helpers). Called at the end of Initialize once p.Sentries is populated.
+//
+// Both external- and local-sentry modes end up here — the multiplexer and
+// exec-P2P layer work the same way regardless of where Sentries came from.
+func (p *Provider) buildStatusAndExecutionP2P() {
+	p.StatusDataProvider = sentry.NewStatusDataProvider(
+		p.cfg.ChainDB,
+		p.cfg.ChainConfig,
+		p.cfg.Genesis,
+		p.cfg.NetworkID,
+		p.logger,
+		p.cfg.BlockReader,
+	)
+
+	p.Multiplexer = libsentry.NewSentryMultiplexer(p.Sentries)
+
+	p.ExecutionP2PPeerPenalizer = execp2p.NewPeerPenalizer(p.Multiplexer)
+	p.ExecutionP2PMessageListener = execp2p.NewMessageListener(
+		p.logger, p.Multiplexer, p.StatusDataProvider.GetStatusData, p.ExecutionP2PPeerPenalizer,
+	)
+	p.ExecutionP2PPeerTracker = execp2p.NewPeerTracker(p.logger, p.ExecutionP2PMessageListener)
+	p.ExecutionP2PMessageSender = execp2p.NewMessageSender(p.Multiplexer)
+	p.ExecutionP2PPublisher = execp2p.NewPublisher(
+		p.logger, p.ExecutionP2PMessageSender, p.ExecutionP2PPeerTracker,
+	)
 }
 
 // Start kicks off background work. No-op in this commit; subsequent commits

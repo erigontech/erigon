@@ -108,7 +108,6 @@ import (
 	"github.com/erigontech/erigon/p2p/enr"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry"
-	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
@@ -453,6 +452,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		ChainConfig:       backend.chainConfig,
 		GenesisHash:       backend.genesisHash,
 		NetworkID:         backend.networkID,
+		Genesis:           genesis,
+		BlockReader:       blockReader,
 		EthDiscoveryURLs:  backend.config.EthDiscoveryURLs,
 		ChainName:         config.Snapshot.ChainName,
 		NodesDir:          stack.Config().Dirs.Nodes,
@@ -676,32 +677,24 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	// ForkValidator is created later, after pipelineStagedSync and PipelineExecutor are ready.
 
-	statusDataProvider := sentry.NewStatusDataProvider(
-		backend.chainDB,
-		chainConfig,
-		genesis,
-		backend.config.NetworkID,
-		logger,
-		blockReader,
-	)
+	// StatusDataProvider, sentry multiplexer, and the execution-P2P layer
+	// (message listener, peer tracker, publisher) are built inside the
+	// sentry Provider's Initialize. Consumers pull them off the Provider.
+	statusDataProvider := backend.sentryProvider.StatusDataProvider
 	backend.statusDataProvider = statusDataProvider
 
-	executionSentryClient := sentryMux(sentries)
-	executionPeerPenalizer := execp2p.NewPeerPenalizer(executionSentryClient)
-	executionMessageListener := execp2p.NewMessageListener(logger, executionSentryClient, statusDataProvider.GetStatusData, executionPeerPenalizer)
-	executionPeerTracker := execp2p.NewPeerTracker(logger, executionMessageListener)
-	executionMessageSender := execp2p.NewMessageSender(executionSentryClient)
-	executionPublisher := execp2p.NewPublisher(logger, executionMessageSender, executionPeerTracker)
+	backend.executionP2PMessageListener = backend.sentryProvider.ExecutionP2PMessageListener
+	backend.executionP2PPeerTracker = backend.sentryProvider.ExecutionP2PPeerTracker
+	backend.executionP2PPublisher = backend.sentryProvider.ExecutionP2PPublisher
 
-	backend.executionP2PMessageListener = executionMessageListener
-	backend.executionP2PPeerTracker = executionPeerTracker
-	backend.executionP2PPublisher = executionPublisher
-
+	// The BackwardBlockDownloader is an execution-side consumer of the
+	// execution-P2P layer, not part of it — it stays in backend.go because
+	// its lifetime and tmpdir wiring belong to the execution module.
 	var executionFetcher execp2p.Fetcher
-	executionFetcher = execp2p.NewFetcher(logger, executionMessageListener, executionMessageSender)
-	executionFetcher = execp2p.NewPenalizingFetcher(logger, executionFetcher, executionPeerPenalizer)
-	executionFetcher = execp2p.NewTrackingFetcher(executionFetcher, executionPeerTracker)
-	bbd := execp2p.NewBackwardBlockDownloader(logger, executionFetcher, executionPeerPenalizer, executionPeerTracker, tmpdir)
+	executionFetcher = execp2p.NewFetcher(logger, backend.sentryProvider.ExecutionP2PMessageListener, backend.sentryProvider.ExecutionP2PMessageSender)
+	executionFetcher = execp2p.NewPenalizingFetcher(logger, executionFetcher, backend.sentryProvider.ExecutionP2PPeerPenalizer)
+	executionFetcher = execp2p.NewTrackingFetcher(executionFetcher, backend.sentryProvider.ExecutionP2PPeerTracker)
+	bbd := execp2p.NewBackwardBlockDownloader(logger, executionFetcher, backend.sentryProvider.ExecutionP2PPeerPenalizer, backend.sentryProvider.ExecutionP2PPeerTracker, tmpdir)
 
 	// limit "new block" broadcasts to at most 10 random peers at time
 	maxBlockBroadcastPeers := func(header *types.Header) uint { return 10 }
@@ -1027,7 +1020,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	dispatcher := execmodule.NewDispatcher(chainConfig, backend.notifications.Events, backend.notifications.StateChangesConsumer, logger)
 	pipelineExecutor := execmodule.NewPipelineExecutor(backend.pipelineStagedSync, backend.chainDB, blockReader, chainConfig, backend.engine, validationSync, validationNotifications, dispatcher, logger)
 
-	hook := stageloop.NewHook(backend.sentryCtx, backend.notifications, backend.stagedSync, backend.chainConfig, backend.logger, dispatcher, backend.sentriesClient.SetStatus, statusDataProvider, executionPublisher)
+	hook := stageloop.NewHook(backend.sentryCtx, backend.notifications, backend.stagedSync, backend.chainConfig, backend.logger, dispatcher, backend.sentriesClient.SetStatus, statusDataProvider, backend.sentryProvider.ExecutionP2PPublisher)
 
 	// for polygon, we only need to download snapshots on start so that all driver components are correctly initialised before any block execution begins
 	onlySnapDownloadOnStart := chainConfig.Bor != nil
@@ -1142,7 +1135,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			config,
 			logger,
 			chainConfig,
-			sentryMux(sentries),
+			backend.sentryProvider.Multiplexer,
 			p2pConfig.MaxPeers,
 			statusDataProvider,
 			backend.execModule,
@@ -1730,8 +1723,4 @@ func setBorDefaultTxPoolPriceLimit(config *txpoolcfg.Config, chainConfig *chain.
 		config.MinFeeCap = txpoolcfg.BorDefaultTxPoolPriceLimit
 	}
 	_ = config.MinFeeCap
-}
-
-func sentryMux(sentries []sentryproto.SentryClient) sentryproto.SentryClient {
-	return libsentry.NewSentryMultiplexer(sentries)
 }
