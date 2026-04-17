@@ -50,8 +50,9 @@ type Eth1Header struct {
 	BlockHash        common.Hash `json:"block_hash"`
 	TransactionsRoot common.Hash `json:"transactions_root"`
 	WithdrawalsRoot  common.Hash `json:"withdrawals_root"`
-	BlobGasUsed      uint64      `json:"blob_gas_used,string"`
-	ExcessBlobGas    uint64      `json:"excess_blob_gas,string"`
+	BlobGasUsed          uint64      `json:"blob_gas_used,string"`
+	ExcessBlobGas        uint64      `json:"excess_blob_gas,string"`
+	BlockAccessListRoot  common.Hash `json:"block_access_list_root,omitempty"` // [New in Gloas:EIP7928]
 	// internals
 	version clparams.StateVersion
 }
@@ -126,6 +127,9 @@ func (h *Eth1Header) EncodingSizeSSZ() int {
 	if h.version >= clparams.DenebVersion {
 		size += 8 * 2 // BlobGasUsed + ExcessBlobGas
 	}
+	if h.version >= clparams.GloasVersion {
+		size += 32 // BlockAccessListRoot
+	}
 	if h.Extra == nil {
 		h.Extra = solid.NewExtraData()
 	}
@@ -148,6 +152,9 @@ func (h *Eth1Header) getSchema() []any {
 	}
 	if h.version >= clparams.DenebVersion {
 		s = append(s, &h.BlobGasUsed, &h.ExcessBlobGas)
+	}
+	if h.version >= clparams.GloasVersion {
+		s = append(s, h.BlockAccessListRoot[:])
 	}
 	return s
 }
@@ -175,26 +182,28 @@ func (h *Eth1Header) MarshalJSON() ([]byte, error) {
 		BlockHash        common.Hash      `json:"block_hash"`
 		TransactionsRoot common.Hash      `json:"transactions_root"`
 		WithdrawalsRoot  common.Hash      `json:"withdrawals_root"`
-		BlobGasUsed      uint64           `json:"blob_gas_used,string"`
-		ExcessBlobGas    uint64           `json:"excess_blob_gas,string"`
+		BlobGasUsed         uint64           `json:"blob_gas_used,string"`
+		ExcessBlobGas       uint64           `json:"excess_blob_gas,string"`
+		BlockAccessListRoot common.Hash      `json:"block_access_list_root,omitempty"`
 	}{
-		ParentHash:       h.ParentHash,
-		FeeRecipient:     h.FeeRecipient,
-		StateRoot:        h.StateRoot,
-		ReceiptsRoot:     h.ReceiptsRoot,
-		LogsBloom:        h.LogsBloom,
-		PrevRandao:       h.PrevRandao,
-		BlockNumber:      h.BlockNumber,
-		GasLimit:         h.GasLimit,
-		GasUsed:          h.GasUsed,
-		Time:             h.Time,
-		Extra:            h.Extra,
-		BaseFeePerGas:    baseFeePerGas.Dec(),
-		BlockHash:        h.BlockHash,
-		TransactionsRoot: h.TransactionsRoot,
-		WithdrawalsRoot:  h.WithdrawalsRoot,
-		BlobGasUsed:      h.BlobGasUsed,
-		ExcessBlobGas:    h.ExcessBlobGas,
+		ParentHash:          h.ParentHash,
+		FeeRecipient:        h.FeeRecipient,
+		StateRoot:           h.StateRoot,
+		ReceiptsRoot:        h.ReceiptsRoot,
+		LogsBloom:           h.LogsBloom,
+		PrevRandao:          h.PrevRandao,
+		BlockNumber:         h.BlockNumber,
+		GasLimit:            h.GasLimit,
+		GasUsed:             h.GasUsed,
+		Time:                h.Time,
+		Extra:               h.Extra,
+		BaseFeePerGas:       baseFeePerGas.Dec(),
+		BlockHash:           h.BlockHash,
+		TransactionsRoot:    h.TransactionsRoot,
+		WithdrawalsRoot:     h.WithdrawalsRoot,
+		BlobGasUsed:         h.BlobGasUsed,
+		ExcessBlobGas:       h.ExcessBlobGas,
+		BlockAccessListRoot: h.BlockAccessListRoot,
 	})
 }
 
@@ -215,8 +224,9 @@ func (h *Eth1Header) UnmarshalJSON(data []byte) error {
 		BlockHash        common.Hash    `json:"block_hash"`
 		TransactionsRoot common.Hash    `json:"transactions_root"`
 		WithdrawalsRoot  common.Hash    `json:"withdrawals_root"`
-		BlobGasUsed      uint64         `json:"blob_gas_used,string"`
-		ExcessBlobGas    uint64         `json:"excess_blob_gas,string"`
+		BlobGasUsed         uint64         `json:"blob_gas_used,string"`
+		ExcessBlobGas       uint64         `json:"excess_blob_gas,string"`
+		BlockAccessListRoot common.Hash    `json:"block_access_list_root"`
 	}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
@@ -243,6 +253,7 @@ func (h *Eth1Header) UnmarshalJSON(data []byte) error {
 	h.BlockHash = aux.BlockHash
 	h.TransactionsRoot = aux.TransactionsRoot
 	h.WithdrawalsRoot = aux.WithdrawalsRoot
+	h.BlockAccessListRoot = aux.BlockAccessListRoot
 	h.BlobGasUsed = aux.BlobGasUsed
 	h.ExcessBlobGas = aux.ExcessBlobGas
 	return nil
