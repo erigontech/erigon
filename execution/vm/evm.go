@@ -307,10 +307,11 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 
 	if typ == CALL || typ == CALLCODE {
 		// Fail if we're trying to transfer more than the available balance.
-		// Only check when value is non-zero — matching geth's short-circuit
-		// behavior. Calling CanTransfer for zero-value calls (e.g. system
-		// calls) creates spurious balance reads on the caller that pollute
-		// the Block Access List (EIP-7928).
+		// Only check for non-system calls with non-zero value. Skipping
+		// CanTransfer for zero-value calls matches geth's short-circuit
+		// behavior, while skipping system calls avoids spurious balance
+		// reads on the caller that pollute the Block Access List
+		// (EIP-7928).
 		if !syscall && !value.IsZero() {
 			canTransfer, err := evm.Context.CanTransfer(evm.intraBlockState, caller, value)
 			if err != nil {
@@ -346,7 +347,9 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		} else {
 			// Calling Transfer is required even for zero-value transfers to
 			// ensure the usual touch/state-clearing behavior is applied.
-			evm.Context.Transfer(evm.intraBlockState, caller, addr, value, bailout, evm.chainRules)
+			if err := evm.Context.Transfer(evm.intraBlockState, caller, addr, value, bailout, evm.chainRules); err != nil {
+				return nil, mdgas.MdGas{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+			}
 		}
 	} else if typ == STATICCALL {
 		// We do an AddBalance of zero here, just in order to trigger a touch.
@@ -573,7 +576,9 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	if evm.chainRules.IsSpuriousDragon {
 		evm.intraBlockState.SetNonce(address, 1)
 	}
-	evm.Context.Transfer(evm.intraBlockState, caller, address, value, bailout, evm.chainRules)
+	if err := evm.Context.Transfer(evm.intraBlockState, caller, address, value, bailout, evm.chainRules); err != nil {
+		return nil, accounts.NilAddress, mdgas.MdGas{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+	}
 
 	// Initialise a new contract and set the code that is to be used by the EVM.
 	// The contract is a scoped environment for this execution context only.
