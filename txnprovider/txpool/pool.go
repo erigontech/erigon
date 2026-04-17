@@ -929,7 +929,8 @@ func toBlobs(_blobs [][]byte) []*goethkzg.Blob {
 func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.CacheView) txpoolcfg.DiscardReason {
 	isEIP3860 := p.isShanghai() || p.isAgra()
 	isPrague := p.isPrague() || p.isBhilai()
-	isEIP7954 := p.isAmsterdam()
+	isAmsterdam := p.isAmsterdam()
+	isEIP7954 := isAmsterdam
 	if txn.IsCreation() {
 		if err := vm.CheckMaxInitCodeSize(uint64(txn.GetDataLen()), isEIP3860, isEIP7954); err != nil {
 			return txpoolcfg.InitCodeTooLarge
@@ -984,8 +985,8 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		IsEIP2028:          true,
 		IsEIP3860:          isEIP3860,
 		IsEIP7623:          isPrague,
-		IsEIP7976:          p.isAmsterdam(),
-		IsEIP8037:          p.isAmsterdam(),
+		IsEIP7976:          isAmsterdam,
+		IsEIP8037:          isAmsterdam,
 		IsAATxn:            isAATxn,
 	})
 	gas := mdgas.MdGas{
@@ -1021,7 +1022,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 	// EIP-8037 (Amsterdam): TX_MAX_GAS_LIMIT applies to the regular gas dimension only.
 	// Pre-Amsterdam: cap = full tx gas limit.
 	var gasToCap uint64
-	if p.isAmsterdam() {
+	if isAmsterdam {
 		gasToCap = max(intrinsicGasResult.RegularGas, intrinsicGasResult.FloorGasCost)
 	} else {
 		gasToCap = txn.GetGas()
