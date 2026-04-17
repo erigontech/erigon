@@ -230,3 +230,105 @@ func TestEIP7976VsEIP7623Floor(t *testing.T) {
 	assert.Equal(result7623.RegularGas, result7976.RegularGas)
 	assert.Equal(result7623z.RegularGas, result7976z.RegularGas)
 }
+
+func TestEIP7981AccessListIntrinsicGas(t *testing.T) {
+	// EIP-7981: access list data is charged in addition to the base access list charges.
+	// Per address:     20 * 16 * 4 = 1280 gas extra
+	// Per storage key: 32 * 16 * 4 = 2048 gas extra
+	assert := assert.New(t)
+
+	// Base access list charges (no EIP-7981):
+	// 1 address = 2400, 2 storage keys = 2*1900 = 3800
+	baseResult, overflow := CalcIntrinsicGas(IntrinsicGasCalcArgs{
+		Data:           make([]byte, 0),
+		AccessListLen:  1,
+		StorageKeysLen: 2,
+		IsEIP2:         true,
+		IsEIP2028:      true,
+		IsEIP7623:      true,
+	})
+	assert.False(overflow)
+	expectedBase := params.TxGas + params.TxAccessListAddressGas + 2*params.TxAccessListStorageKeyGas
+	assert.Equal(expectedBase, baseResult.RegularGas)
+
+	// With EIP-7981 (Amsterdam): additional charges on top of base
+	result7981, overflow := CalcIntrinsicGas(IntrinsicGasCalcArgs{
+		Data:           make([]byte, 0),
+		AccessListLen:  1,
+		StorageKeysLen: 2,
+		IsEIP2:         true,
+		IsEIP2028:      true,
+		IsEIP7623:      true,
+		IsEIP7976:      true,
+	})
+	assert.False(overflow)
+
+	addrDataCost := uint64(20) * params.TxTotalCostFloorPerTokenEIP7976 * params.TxTokenPerNonZeroByte   // 20*16*4 = 1280
+	keyDataCost := uint64(32) * params.TxTotalCostFloorPerTokenEIP7976 * params.TxTokenPerNonZeroByte    // 32*16*4 = 2048
+	expected7981 := expectedBase + 1*addrDataCost + 2*keyDataCost // base + 1280 + 4096
+	assert.Equal(expected7981, result7981.RegularGas, "EIP-7981 should add data charges on top of base access list gas")
+}
+
+func TestEIP7981AccessListFloorGas(t *testing.T) {
+	// EIP-7981: access list entries contribute tokens to the floor gas.
+	// Tokens per address:     20 * 4 = 80
+	// Tokens per storage key: 32 * 4 = 128
+	assert := assert.New(t)
+
+	// Floor gas with access list only (no calldata):
+	// tokens = 0 (data) + 1*80 (addr) + 2*128 (keys) = 336
+	// floorGas = TxGas + 336 * 16 = 21000 + 5376 = 26376
+	result, overflow := CalcIntrinsicGas(IntrinsicGasCalcArgs{
+		Data:           make([]byte, 0),
+		AccessListLen:  1,
+		StorageKeysLen: 2,
+		IsEIP2:         true,
+		IsEIP2028:      true,
+		IsEIP7623:      true,
+		IsEIP7976:      true,
+	})
+	assert.False(overflow)
+
+	expectedFloor := params.TxGas +
+		(1*uint64(20)*params.TxTokenPerNonZeroByte+2*uint64(32)*params.TxTokenPerNonZeroByte)*params.TxTotalCostFloorPerTokenEIP7976
+	assert.Equal(expectedFloor, result.FloorGasCost, "Floor gas should include access list tokens even with no data")
+
+	// Floor gas with both calldata and access list:
+	// tokens = 10*4 (data) + 1*80 (addr) + 1*128 (key) = 40 + 80 + 128 = 248
+	// floorGas = TxGas + 248 * 16 = 21000 + 3968 = 24968
+	resultBoth, overflow := CalcIntrinsicGas(IntrinsicGasCalcArgs{
+		Data:           make([]byte, 10),
+		DataNonZeroLen: 5,
+		AccessListLen:  1,
+		StorageKeysLen: 1,
+		IsEIP2:         true,
+		IsEIP2028:      true,
+		IsEIP7623:      true,
+		IsEIP7976:      true,
+	})
+	assert.False(overflow)
+
+	expectedFloorBoth := params.TxGas +
+		(10*params.TxTokenPerNonZeroByte+1*uint64(20)*params.TxTokenPerNonZeroByte+1*uint64(32)*params.TxTokenPerNonZeroByte)*params.TxTotalCostFloorPerTokenEIP7976
+	assert.Equal(expectedFloorBoth, resultBoth.FloorGasCost, "Floor gas should include both data and access list tokens")
+}
+
+func TestEIP7981NoEffectPreAmsterdam(t *testing.T) {
+	// Without IsEIP7976, access list should only have base charges, no data charges.
+	assert := assert.New(t)
+
+	result, overflow := CalcIntrinsicGas(IntrinsicGasCalcArgs{
+		Data:           make([]byte, 0),
+		AccessListLen:  2,
+		StorageKeysLen: 3,
+		IsEIP2:         true,
+		IsEIP2028:      true,
+		IsEIP7623:      true,
+		// IsEIP7976 NOT set
+	})
+	assert.False(overflow)
+
+	expectedGas := params.TxGas + 2*params.TxAccessListAddressGas + 3*params.TxAccessListStorageKeyGas
+	assert.Equal(expectedGas, result.RegularGas, "Pre-Amsterdam: no EIP-7981 data charges")
+	assert.Equal(params.TxGas, result.FloorGasCost, "Pre-Amsterdam: floor gas should not include access list tokens when no data")
+}
