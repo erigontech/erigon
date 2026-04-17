@@ -316,7 +316,7 @@ func (e *ExecutionPayloadBid) Copy() *ExecutionPayloadBid {
 		Slot:                  e.Slot,
 		Value:                 e.Value,
 		ExecutionPayment:      e.ExecutionPayment,
-		BlobKzgCommitments:    e.BlobKzgCommitments,
+		BlobKzgCommitments:    *e.BlobKzgCommitments.ShallowCopy(),
 		ExecutionRequestsRoot: e.ExecutionRequestsRoot,
 	}
 }
