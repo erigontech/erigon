@@ -390,6 +390,12 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 	sd.mem.ClearRam()
 }
 
+// ClearLatestCache clears only the in-memory latest-value maps, preserving
+// the unwind changeset and domain writers. See TemporalMemBatch.ClearLatestCache.
+func (sd *SharedDomains) ClearLatestCache() {
+	sd.mem.ClearLatestCache()
+}
+
 func (sd *SharedDomains) Size() uint64 {
 	return sd.mem.SizeEstimate()
 }

@@ -519,6 +519,7 @@ type TemporalMemBatch interface {
 	GetDiffset(tx RwTx, blockHash common.Hash, blockNumber uint64) ([DomainLen][]DomainEntryDiff, bool, error)
 	Merge(other TemporalMemBatch) error
 	ClearRam()
+	ClearLatestCache()
 	IndexAdd(table InvertedIdx, key []byte, txNum uint64) (err error)
 	IteratePrefix(domain Domain, prefix []byte, roTx Tx, it func(k []byte, v []byte) (cont bool, err error)) error
 	HasPrefix(domain Domain, prefix []byte, roTx Tx) ([]byte, []byte, bool, error)

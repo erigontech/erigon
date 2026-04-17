@@ -346,16 +346,14 @@ func unwindExec3State(ctx context.Context,
 	sd.Unwind(txUnwindTo, changeset)
 	sd.SetTxNum(txUnwindTo)
 
-	// Flush the unwind changeset to DB and clear in-memory maps immediately.
-	// Without this, re-execution of blocks after the unwind target populates
-	// the in-memory maps with new values, but stale pre-unwind values remain
-	// for keys not yet overwritten. The deferred Flush (in forkchoice handler)
-	// runs too late — after re-execution has already read stale values.
+	// Clear stale in-memory latest-value maps from forward execution.
+	// After an unwind, the changeset holds the correct restored values,
+	// but the maps still have pre-unwind entries. Without clearing,
+	// getLatest returns stale map values for keys not overwritten by
+	// re-execution. The changeset and domain writers are preserved for
+	// the deferred Flush at the end of the forkchoice cycle.
 	// See #20169.
-	if err := sd.Flush(ctx, tx); err != nil {
-		return fmt.Errorf("flush after unwind: %w", err)
-	}
-	sd.ClearRam(false)
+	sd.ClearLatestCache()
 
 	return nil
 }

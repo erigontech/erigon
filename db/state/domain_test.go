@@ -1029,9 +1029,9 @@ func newTestTemporalMemBatch(stepSize uint64) *TemporalMemBatch {
 // map still holds stale pre-unwind values. For keys not overwritten by
 // re-execution, getLatest returns the stale value — causing gas mismatches.
 //
-// The fix in stage_execute.go calls Flush (writes changeset to DB) + ClearRam
-// (clears both the map and changeset) after Unwind, before re-execution starts.
-// See #20169.
+// The fix in stage_execute.go calls ClearLatestCache after Unwind, emptying
+// the map so getLatest falls through to the changeset for keys not touched
+// by re-execution. See #20169.
 func TestTemporalMemBatch_UnwindMaskedByInMemMap(t *testing.T) {
 	k1 := []byte("account1")
 	k2 := []byte("account2")
@@ -1045,7 +1045,7 @@ func TestTemporalMemBatch_UnwindMaskedByInMemMap(t *testing.T) {
 		{Key: string(k2) + string(step1Tag), Value: []byte("Vrestored")},
 	}
 
-	t.Run("bug_without_ClearRam", func(t *testing.T) {
+	t.Run("bug_without_ClearLatestCache", func(t *testing.T) {
 		sd := newTestTemporalMemBatch(16)
 
 		// Forward execution writes k1=V2, k2=Vold into the in-memory map.
@@ -1071,7 +1071,7 @@ func TestTemporalMemBatch_UnwindMaskedByInMemMap(t *testing.T) {
 			"documents the bug: map masks the changeset for keys not re-written")
 	})
 
-	t.Run("fix_with_ClearRam", func(t *testing.T) {
+	t.Run("fix_with_ClearLatestCache", func(t *testing.T) {
 		sd := newTestTemporalMemBatch(16)
 
 		// Forward execution writes k1=V2, k2=Vold into the in-memory map.
@@ -1081,9 +1081,9 @@ func TestTemporalMemBatch_UnwindMaskedByInMemMap(t *testing.T) {
 		// Unwind stores the changeset.
 		sd.Unwind(16, unwindChangeset)
 
-		// THE FIX: clear in-memory state after unwind.
-		// In production, Flush() writes the changeset to DB first.
-		sd.ClearRam()
+		// THE FIX: clear stale latest-value maps after unwind.
+		// Unlike ClearRam, this preserves the changeset and writers.
+		sd.ClearLatestCache()
 
 		// Re-execution on the new fork: only k1 is modified.
 		sd.putLatest(kv.AccountsDomain, string(k1), []byte("V3"), 22)
@@ -1093,12 +1093,12 @@ func TestTemporalMemBatch_UnwindMaskedByInMemMap(t *testing.T) {
 		require.True(t, ok)
 		require.Equal(t, "V3", string(v))
 
-		// k2 is NOT in the map — ClearRam removed the stale entry.
-		// In production, the caller falls through to DB where Flush
-		// already wrote "Vrestored".
-		_, _, ok = sd.GetLatest(kv.AccountsDomain, k2)
-		require.False(t, ok,
-			"after ClearRam, k2 must not be in RAM — stale pre-unwind value must be gone")
+		// k2 is NOT in the map — ClearLatestCache removed the stale entry.
+		// getLatest falls through to the changeset and returns Vrestored.
+		v, _, ok = sd.GetLatest(kv.AccountsDomain, k2)
+		require.True(t, ok)
+		require.Equal(t, "Vrestored", string(v),
+			"after ClearLatestCache, k2 must return the changeset value, not the stale map value")
 	})
 }
 

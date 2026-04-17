@@ -308,6 +308,19 @@ func (sd *TemporalMemBatch) ClearRam() {
 	}
 }
 
+// ClearLatestCache clears the in-memory latest-value maps (domains and storage)
+// but preserves the unwind changeset and domain writers. Use this after Unwind
+// to prevent stale forward-execution values from masking the changeset in
+// getLatest. See #20169.
+func (sd *TemporalMemBatch) ClearLatestCache() {
+	sd.latestStateLock.Lock()
+	defer sd.latestStateLock.Unlock()
+	for i := range sd.domains {
+		sd.domains[i] = map[string][]dataWithTxNum{}
+	}
+	sd.storage = btree2.NewMap[string, []dataWithTxNum](128)
+}
+
 func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte) (cont bool, err error)) error {
 	sd.latestStateLock.RLock()
 	defer sd.latestStateLock.RUnlock()
