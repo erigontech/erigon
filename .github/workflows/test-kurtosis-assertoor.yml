@@ -139,13 +139,15 @@ jobs:
         # log blob storage purges raw CI logs quickly (BlobNotFound within
         # hours), and the orchestration output alone doesn't tell us what
         # each container was actually doing.
+        #
+        # NB: `kurtosis enclave dump` refuses if the target directory already
+        # exists — do NOT pre-create it.
         if: failure() && !inputs.cache-warming-only
         continue-on-error: true
         run: |
           set -eu
           enclave_name="kurtosis-${{ matrix.suite }}-${{ github.run_id }}"
           dump_dir="${RUNNER_TEMP}/kurtosis-dump-${{ matrix.suite }}"
-          mkdir -p "$dump_dir"
           kurtosis enclave dump "$enclave_name" "$dump_dir" || true
 
       - name: Upload Kurtosis enclave dump
