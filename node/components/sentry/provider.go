@@ -40,13 +40,16 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	execp2p "github.com/erigontech/erigon/execution/p2p"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
@@ -71,9 +74,12 @@ type Config struct {
 	// the Provider dials these addresses via gRPC instead of building
 	// local servers. All fields below are only consulted in local mode.
 
-	// ChainDB is queried by the readNodeInfo callback during ENR refresh
-	// and by StatusDataProvider during status-message construction.
-	ChainDB kv.RoDB
+	// ChainDB is queried by the readNodeInfo callback during ENR refresh,
+	// by StatusDataProvider during status-message construction, and by the
+	// multi-sentry client built via BuildMultiClient. It must satisfy
+	// kv.TemporalRoDB so the MultiClient can open temporal read transactions
+	// for header validation during backward download.
+	ChainDB kv.TemporalRoDB
 
 	// ChainConfig, GenesisHash, NetworkID are threaded into the
 	// readNodeInfo closure so each sentry server can report up-to-date
@@ -129,6 +135,12 @@ type Provider struct {
 	// Multiplexer is a single SentryClient that fans out calls across all
 	// Sentries. Used by the execution-P2P layer and by polygon sync.
 	Multiplexer sentryproto.SentryClient
+
+	// Client is the multi-sentry client — ownership of the header and body
+	// downloaders, peer set broadcasting, and the sentry stream loops.
+	// Populated by BuildMultiClient, which is called after the consensus
+	// engine is ready (engine is an input the MultiClient needs).
+	Client *sentry_multi_client.MultiClient
 
 	// StatusDataProvider supplies up-to-date peer-handshake status payloads
 	// (genesis hash, fork ID, total difficulty, chain head). Consumed by the
@@ -289,6 +301,80 @@ func (p *Provider) buildStatusAndExecutionP2P() {
 		p.logger, p.ExecutionP2PMessageSender, p.ExecutionP2PPeerTracker,
 	)
 }
+
+// MultiClientDeps gathers the late-binding inputs needed to construct the
+// multi-sentry Client. These aren't known at Configure/Initialize time
+// because the consensus engine and the per-chain max-peers callback are
+// built AFTER sentries (polygon heimdall + engine rules come between).
+// Callers run BuildMultiClient once those are ready.
+type MultiClientDeps struct {
+	// Dirs is the datadir root; the MultiClient uses it for per-sentry
+	// peer persistence and any local caches.
+	Dirs datadir.Dirs
+
+	// Engine is the consensus engine (ethash, clique, Bor, Aura, etc).
+	// The MultiClient uses it to validate incoming headers during
+	// anchor-based backward download.
+	Engine rules.Engine
+
+	// SyncCfg carries the staged-sync configuration (batch sizes, etc).
+	SyncCfg ethconfig.Sync
+
+	// BlockBufferSize bounds the number of unseen blocks held while waiting
+	// for headers to catch up. Pass 0 to use the package default (128).
+	BlockBufferSize int
+
+	// LogPeerInfo enables verbose peer-info logging in the MultiClient.
+	LogPeerInfo bool
+
+	// MaxBlockBroadcastPeers decides how many peers a NewBlock
+	// announcement is gossiped to (header-aware so Bor validators can
+	// override the default cap).
+	MaxBlockBroadcastPeers func(*types.Header) uint
+
+	// DisableBlockDownload suppresses the header + body downloaders inside
+	// the MultiClient. Pass true when blocks are supplied via another path
+	// (CL engine, staged sync headers stage).
+	DisableBlockDownload bool
+}
+
+// BuildMultiClient constructs the multi-sentry Client. Must be called after
+// Initialize (which populates Sentries + StatusDataProvider) and once the
+// late-binding deps (engine, max-broadcast-peers callback) are ready.
+//
+// On success, p.Client is ready for consumers.
+func (p *Provider) BuildMultiClient(deps MultiClientDeps) error {
+	bufSize := deps.BlockBufferSize
+	if bufSize == 0 {
+		bufSize = defaultBlockBufferSize
+	}
+
+	client, err := sentry_multi_client.NewMultiClient(
+		deps.Dirs,
+		p.cfg.ChainDB,
+		p.cfg.ChainConfig,
+		deps.Engine,
+		p.Sentries,
+		deps.SyncCfg,
+		p.cfg.BlockReader,
+		bufSize,
+		p.StatusDataProvider,
+		deps.LogPeerInfo,
+		deps.MaxBlockBroadcastPeers,
+		deps.DisableBlockDownload,
+		p.cfg.EnableWitProtocol,
+		p.logger,
+	)
+	if err != nil {
+		return fmt.Errorf("sentry: build multi-client: %w", err)
+	}
+	p.Client = client
+	return nil
+}
+
+// defaultBlockBufferSize mirrors the previous backend.go blockBufferSize
+// constant; used when MultiClientDeps.BlockBufferSize is zero.
+const defaultBlockBufferSize = 128
 
 // Start kicks off background work. No-op in this commit; subsequent commits
 // migrate the peer-count logger and stream loops here.

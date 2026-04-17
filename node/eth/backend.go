@@ -257,6 +257,12 @@ func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, logger log.Logger, dirs datadi
 
 const blockBufferSize = 128
 
+// sentryMcDisableBlockDownload suppresses the MultiClient's internal header +
+// body downloaders. Blocks are fetched via the staged-sync download path
+// (engine API + snapshot-sync) instead. Also guards the mined-block
+// add-to-prefetch goroutine below.
+const sentryMcDisableBlockDownload = true
+
 // New creates a new Ethereum object (including the
 // initialisation of the common Ethereum object)
 func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger log.Logger, tracer *tracers.Tracer) (*Ethereum, error) {
@@ -464,7 +470,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		return nil, err
 	}
 	backend.sentryServers = backend.sentryProvider.Servers
-	sentries := backend.sentryProvider.Sentries
 
 	// Peer-count logger (local-sentry mode only; in external-sentry mode there
 	// are no local Servers to count peers on). Will move into
@@ -716,26 +721,21 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}
 
-	const sentryMcDisableBlockDownload = true
-	backend.sentriesClient, err = sentry_multi_client.NewMultiClient(
-		stack.Config().Dirs,
-		backend.chainDB,
-		chainConfig,
-		backend.engine,
-		sentries,
-		config.Sync,
-		blockReader,
-		blockBufferSize,
-		statusDataProvider,
-		stack.Config().SentryLogPeerInfo,
-		maxBlockBroadcastPeers,
-		sentryMcDisableBlockDownload,
-		stack.Config().P2P.EnableWitProtocol,
-		logger,
-	)
-	if err != nil {
+	// MultiClient is the late-binding half of the Sentry Provider — it needs
+	// the consensus engine and the per-chain max-peers callback which are
+	// only available after polygon + engine construction above.
+	if err := backend.sentryProvider.BuildMultiClient(sentrycomp.MultiClientDeps{
+		Dirs:                   stack.Config().Dirs,
+		Engine:                 backend.engine,
+		SyncCfg:                config.Sync,
+		BlockBufferSize:        blockBufferSize,
+		LogPeerInfo:            stack.Config().SentryLogPeerInfo,
+		MaxBlockBroadcastPeers: maxBlockBroadcastPeers,
+		DisableBlockDownload:   sentryMcDisableBlockDownload,
+	}); err != nil {
 		return nil, err
 	}
+	backend.sentriesClient = backend.sentryProvider.Client
 
 	var ethashApi *ethash.API
 	if casted, ok := backend.engine.(*ethash.Ethash); ok {
