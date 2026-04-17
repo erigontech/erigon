@@ -745,7 +745,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 								getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
 									return pe.cfg.blockReader.Header(ctx, applyTx, hash, number)
 								}
-								priorReceipts, priorErr := receipts.DerivePriorReceipts(ctx, pe.cfg.chainConfig, pe.cfg.engine, txTask.Header, txTask.Txs, firstTxIndex, priorIbs, priorGp, getHeader)
+								priorReceipts, priorErr := receipts.DerivePriorReceipts(ctx, pe.cfg.chainConfig, pe.cfg.engine, txTask.Header, txTask.Txs, firstTxIndex, blockStartTxNum, applyTx, priorIbs, priorGp, getHeader)
 								if priorErr != nil {
 									pe.logger.Warn("[parallel] failed to reconstruct prior receipts for partial block",
 										"block", blockResult.BlockNum, "startTxIndex", firstTxIndex, "err", priorErr)
