@@ -146,7 +146,12 @@ jobs:
             /Major\s*=/{major=$3}
             /Minor\s*=/{minor=$3}
             /Micro\s*=/{micro=$3}
-            END{printf "%s.%s.%s", major, minor, micro}
+            /Modifier\s*=/{gsub(/"/, "", $3); modifier=$3}
+            END{
+              v=sprintf("%s.%s.%s", major, minor, micro)
+              if (modifier != "") v=v "-" modifier
+              printf "%s", v
+            }
           ' db/version/app.go)
           INPUT_VERSION=$(echo "${RELEASE_VERSION}" | sed -e 's/^v//')
 
