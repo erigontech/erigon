@@ -379,14 +379,15 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 	if idx.keyCount == 1 {
 		return 0, true
 	}
-	if idx.dataStructureVersion == 1 && idx.lessFalsePositives {
-		if ok := idx.existenceV1.ContainsHash(bucketHash); !ok {
-			return 0, false
-		}
-	}
-	if idx.dataStructureVersion >= 2 && idx.lessFalsePositives {
-		if ok := idx.existenceV2.ContainsHash(bucketHash); !ok {
-			return 0, false
+	if idx.lessFalsePositives {
+		if idx.dataStructureVersion == 1 {
+			if ok := idx.existenceV1.ContainsHash(bucketHash); !ok {
+				return 0, false
+			}
+		} else if idx.dataStructureVersion >= 2 {
+			if ok := idx.existenceV2.ContainsHash(bucketHash); !ok {
+				return 0, false
+			}
 		}
 	}
 

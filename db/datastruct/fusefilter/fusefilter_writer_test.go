@@ -338,8 +338,7 @@ func TestWriterShardedTruncated(t *testing.T) {
 }
 
 func TestWriterShardedSegmentCountRoundTrip(t *testing.T) {
-	// Verifies that all filter header fields (SegmentCount, SegmentCountLength,
-	// Seed, SegmentLength, SegmentLengthMask) survive serialisation.
+	// Regression: SegmentCount and SegmentCountLength were aliased (both read from offset 8).
 	require := require.New(t)
 	dir := t.TempDir()
 
