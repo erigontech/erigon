@@ -28,15 +28,14 @@ import (
 // serialized output and identical iteration results.
 func TestEliasFanoOffHeapMatchesHeap(t *testing.T) {
 	cases := []struct {
-		name      string
-		count     uint64
-		maxOffset uint64
-		stride    uint64
+		name   string
+		count  uint64
+		stride uint64
 	}{
-		{"tiny", 8, 1024, 64},
-		{"small", 1024, 1 << 20, 1 << 10},
-		{"sparse", 512, 1 << 30, 1 << 21},
-		{"dense", 4096, 4096 * 7, 7},
+		{"tiny", 8, 64},
+		{"small", 1024, 1 << 10},
+		{"sparse", 512, 1 << 21},
+		{"dense", 4096, 7},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

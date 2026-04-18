@@ -98,6 +98,9 @@ func NewEliasFanoOffHeap(count uint64, maxOffset uint64, tmpFilePath string) (*E
 	// Pre-size ef.data so deriveFields reslices instead of allocating.
 	_, _, _, totalWords := ef.computeLayout()
 	sizeBytes := int64(totalWords) * uint64Size
+	if sizeBytes > math.MaxInt {
+		return nil, fmt.Errorf("elias fano size %d exceeds platform mmap limit", sizeBytes)
+	}
 
 	f, err := dir.CreateTempWithExtension(tmpFilePath, "ef.tmp")
 	if err != nil {
@@ -121,7 +124,9 @@ func NewEliasFanoOffHeap(count uint64, maxOffset uint64, tmpFilePath string) (*E
 	return ef, nil
 }
 
-// Close releases off-heap backing; no-op for heap-backed EliasFano. Idempotent.
+// Close releases resources held by the EliasFano. For off-heap instances it
+// unmaps and removes the temp file; for heap-backed instances it nils the
+// slices to release the memory early. Idempotent.
 func (ef *EliasFano) Close() {
 	ef.data = nil
 	ef.lowerBits = nil
