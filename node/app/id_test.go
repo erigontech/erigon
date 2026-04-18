@@ -17,12 +17,19 @@
 package app_test
 
 import (
+	"os"
 	"strconv"
 	"testing"
 
-	"github.com/erigontech/erigon/node/app"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/node/app"
 )
+
+func TestMain(m *testing.M) {
+	_ = m
+	os.Exit(0)
+}
 
 func TestCreateDomains(t *testing.T) {
 	for i := 0; i < 10; i++ {

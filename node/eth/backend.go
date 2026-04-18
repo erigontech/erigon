@@ -106,6 +106,8 @@ import (
 	"github.com/erigontech/erigon/node/rulesconfig"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/enr"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/p2p/sentry/libsentry"
@@ -409,6 +411,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.chainDB = temporalDb
 
 	// Initialize extracted components.
+	//
+	// Downloader is initialized here; OnFilesChange file-change callbacks
+	// are registered inside storage.Provider.Initialize (see BuildStorage
+	// call further below), not in backend.go.
 	backend.components = nodebuilder.New()
 	if err := backend.components.BuildDownloader(ctx, config.Downloader, config.Snapshot, config.Dirs, logger, stack.Config().DebugMux); err != nil {
 		return nil, err
@@ -556,6 +562,99 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				}
 			}
 		}()
+	}
+
+	// Wire chain.toml ENR updater and P2P discovery after sentry servers are created.
+	// Only applies in local downloader mode; remote-downloader mode has nil Downloader.
+	// Gated behind --snap.p2p-manifest so default syncs stay on the pre-v2 path and
+	// avoid the torrent-name collision between a locally-seeded chain.toml and the
+	// downloaded chain.toml.torrent in AddTorrentsFromDisk (see #20615).
+	if backend.components.Downloader.Downloader != nil && len(backend.sentryServers) > 0 && backend.config.Snapshot.P2PManifest {
+		dl := backend.components.Downloader.Downloader
+		dl.SetENRUpdater(func(ct enr.ChainToml) {
+			// Resolve the torrent port at update time rather than capture-time:
+			// the torrent client may not be listening yet when the updater
+			// closure is built. Only set the "bt" ENR key if we have a valid
+			// port in [1..65535]; otherwise peers would dial an unusable port.
+			torrentPort := dl.TorrentPort()
+			validPort := torrentPort > 0 && torrentPort <= 65535
+
+			for _, srv := range backend.sentryServers {
+				if p2p := srv.GetP2PServer(); p2p != nil {
+					p2p.LocalNode().Set(ct)
+					if validPort {
+						p2p.LocalNode().Set(enr.BT(torrentPort))
+					}
+				}
+			}
+			if !validPort {
+				logger.Debug("[chaintoml] skipping bt ENR entry (no valid torrent port yet)", "torrentPort", torrentPort)
+			}
+		})
+
+		sentryServers := backend.sentryServers
+		dl.SetNodeSourceFn(func() downloader.NodeSource {
+			var sources []downloader.NodeSource
+			for _, srv := range sentryServers {
+				p2pSrv := srv.GetP2PServer()
+				if p2pSrv == nil {
+					continue
+				}
+				dv5 := p2pSrv.DiscV5()
+				// Add directly connected devp2p peers FIRST — resolved peers take
+				// priority over discv5 routing table entries which may have stale ENRs.
+				srv := p2pSrv // capture for closure
+				peersFn := func() []*enode.Node {
+					peers := srv.Peers()
+					nodes := make([]*enode.Node, len(peers))
+					for i, p := range peers {
+						nodes[i] = p.Node()
+					}
+					return nodes
+				}
+				if dv5 != nil {
+					sources = append(sources, &downloader.ResolvingPeerNodeSource{
+						PeersFn:  peersFn,
+						Resolver: dv5,
+					})
+				} else {
+					sources = append(sources, &downloader.PeerNodeSource{
+						PeersFn: peersFn,
+					})
+				}
+				// Add discv5 routing table (deduped by CompositeNodeSource).
+				if dv5 != nil {
+					sources = append(sources, dv5)
+				}
+			}
+			if len(sources) == 0 {
+				return nil
+			}
+			return &downloader.CompositeNodeSource{Sources: sources}
+		})
+
+		// Re-publish chain.toml ENR entry after a delay to let P2P servers start.
+		// P2P servers start lazily on SetStatus(), so the ENR updater callback
+		// needs the P2P server to be running before it can set ENR entries.
+		go func() {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(30 * time.Second):
+			}
+			if pubErr := dl.PublishLocalChainToml(); pubErr != nil {
+				logger.Debug("[chaintoml] no existing chain.toml to re-publish", "err", pubErr)
+			} else {
+				logger.Info("[chaintoml] re-published existing chain.toml ENR entry")
+			}
+		}()
+
+		if backend.config.Snapshot.P2PManifest {
+			dl.StartChainTomlDiscovery(ctx, backend.config.Snapshot.ChainName)
+		}
+
+		// Start torrent peer manager — keeps torrent peers in sync with DevP2P peers.
+		dl.StartTorrentPeerManager(ctx)
 	}
 
 	// setup periodic logging and prometheus updates
@@ -1280,8 +1379,6 @@ func (s *Ethereum) NodesInfo(limit int) (*remoteproto.NodesInfoReply, error) {
 
 	return nodesInfo, nil
 }
-
-// sets up blockReader and client downloader
 
 func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig *ethconfig.Config, chainConfig *chain.Config, dbReadConcurrency int, logger log.Logger, blockSnapBuildSema *semaphore.Weighted) (*freezeblocks.BlockReader, *blockio.BlockWriter, *freezeblocks.RoSnapshots, *heimdall.RoSnapshots, bridge.Store, heimdall.Store, kv.TemporalRwDB, error) {
 	snConfig.Snapshot.ChainName = chainConfig.ChainName
