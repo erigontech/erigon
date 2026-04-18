@@ -20,6 +20,7 @@ import (
 	"context"
 	"math/big"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
@@ -416,8 +417,8 @@ func TestBuildBlockV1(t *testing.T) {
 	})
 
 	// These two tests exercise the waitForResponse busy-polling loop.
-	// We use an Aura config (5 s slot) to keep the timeout short while
-	// still validating the busy-path logic.
+	// We use context with a short deadline (100ms) so the busy-retry loop
+	// terminates quickly while still validating the busy-path logic.
 	shortSlotCfg := allForksChainConfig()
 	shortSlotCfg.Aura = &chain.AuRaConfig{} // SecondsPerSlot() == 5
 	shortSlotCfg.Ethash = nil               // Aura and Ethash are mutually exclusive
@@ -431,7 +432,9 @@ func TestBuildBlockV1(t *testing.T) {
 			},
 		}
 		api := newTestingAPI(shortSlotCfg, stub)
-		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), nil, nil)
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+		resp, err := api.BuildBlockV1(ctx, parentHash, validPayloadAttrs(parentTimestamp), nil, nil)
 		require.Nil(t, resp)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "execution service is busy")
@@ -449,7 +452,9 @@ func TestBuildBlockV1(t *testing.T) {
 			},
 		}
 		api := newTestingAPI(shortSlotCfg, stub)
-		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), nil, nil)
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+		resp, err := api.BuildBlockV1(ctx, parentHash, validPayloadAttrs(parentTimestamp), nil, nil)
 		require.Nil(t, resp)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "execution service is busy retrieving assembled block")
