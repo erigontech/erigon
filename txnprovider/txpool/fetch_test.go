@@ -441,6 +441,77 @@ func TestPenalizePeerForMalformedMessages(t *testing.T) {
 	}
 }
 
+// TestOversizedHashAnnouncement verifies that both eth/66 and eth/68 handlers
+// penalize peers that send more than 4096 hashes per NewPooledTransactionHashes
+// message (the devp2p soft limit) and do not issue a GetPooledTransactions request.
+func TestOversizedHashAnnouncement(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+
+	const oversizedCount = 4097
+
+	// Build oversized eth/66 payload: an RLP list of 4097 hashes.
+	hashes := make([]byte, 32*oversizedCount)
+	for i := range oversizedCount {
+		hashes[i*32] = byte(i)
+		hashes[i*32+1] = byte(i >> 8)
+	}
+	payload66 := EncodeHashes(hashes, nil)
+
+	// Build oversized eth/68 payload: announcement with 4097 entries.
+	types68 := make([]byte, oversizedCount)
+	sizes68 := make([]uint32, oversizedCount)
+	for i := range oversizedCount {
+		types68[i] = 2   // EIP-1559
+		sizes68[i] = 100 // arbitrary size
+	}
+	encodeBuf := make([]byte, announcementsLen(types68, sizes68, hashes))
+	n := encodeAnnouncements(types68, sizes68, hashes, encodeBuf)
+	payload68 := make([]byte, n)
+	copy(payload68, encodeBuf[:n])
+
+	tests := []struct {
+		name string
+		id   sentryproto.MessageId
+		data []byte
+	}{
+		{"eth/66", sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_66, payload66},
+		{"eth/68", sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, payload68},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ctrl := gomock.NewController(t)
+			sentryServer := sentryproto.NewMockSentryServer(ctrl)
+			pool := NewMockPool(ctrl)
+			pool.EXPECT().Started().Return(true)
+
+			// Expect peer to be penalized.
+			sentryServer.EXPECT().
+				PenalizePeer(gomock.Any(), gomock.Any()).
+				DoAndReturn(func(_ context.Context, req *sentryproto.PenalizePeerRequest) (*emptypb.Empty, error) {
+					assert.Equal(t, sentryproto.PenaltyKind_Kick, req.Penalty)
+					return &emptypb.Empty{}, nil
+				}).
+				Times(1)
+
+			m := NewMockSentry(ctx, sentryServer)
+			sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
+			require.NoError(t, err)
+
+			fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
+
+			err = fetch.handleInboundMessageWithTx(ctx, nil, &sentryproto.InboundMessage{
+				Id:     tt.id,
+				Data:   tt.data,
+				PeerId: peerID,
+			}, sentryClient)
+			require.NoError(t, err, "oversized announcement should be handled gracefully")
+		})
+	}
+}
+
 // TestNoPenaltyOnInternalDBError verifies that when IdHashKnown returns a DB error
 // during transaction parsing, the peer is NOT penalized (since it's our internal failure,
 // not the peer's fault).

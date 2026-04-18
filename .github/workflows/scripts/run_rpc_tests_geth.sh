@@ -36,4 +36,4 @@ DISABLED_TESTS=$(IFS=,; echo "${DISABLED_TEST_LIST[*]}")
 
 # Call the main test runner script with the required and optional parameters
 # Use do-not-compare-error-message since Geth error messages differ from Erigon
-"$(dirname "$0")/run_rpc_tests.sh" mainnet v2.2.0 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR" "" "" "do-not-compare-error-message"
+"$(dirname "$0")/run_rpc_tests.sh" mainnet v2.4.0 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR" "" "" "do-not-compare-error-message"

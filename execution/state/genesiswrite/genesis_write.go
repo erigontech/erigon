@@ -241,7 +241,11 @@ func CommitGenesisTx(tx kv.RwTx, opts Options) (*chain.Config, *types.Block, err
 		keep := opts.KeepStoredChainConfig
 		if !keep {
 			spec, specErr := chainspec.ChainSpecByName(opts.ChainName)
-			keep = specErr != nil || spec.GenesisHash != storedHash
+			if specErr != nil {
+				keep = true
+			} else if spec.GenesisHash != (common.Hash{}) && spec.GenesisHash != storedHash {
+				keep = true
+			}
 		}
 		if keep {
 			newCfg = storedCfg

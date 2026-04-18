@@ -1,0 +1,109 @@
+syntax = "proto3";
+
+package sentinel;
+
+option go_package = "./sentinel;sentinelproto";
+
+import "types/types.proto";
+
+message EmptyMessage {}
+
+message SubscriptionData {
+    optional string filter = 1;
+}
+
+message Peer {
+    string pid = 1;
+    string state = 2;
+    string direction = 3;
+    string address = 4;
+    string enr = 5;
+    string agent_version = 6;
+    string enode_id = 7;
+}
+
+
+message PeersInfoRequest {
+    optional string direction = 1;
+    optional string state = 2;
+}
+
+message PeersInfoResponse {
+    repeated Peer peers = 1;
+}
+
+message GossipData {
+    bytes data = 1; // SSZ encoded data
+    string name = 2;
+    optional Peer peer = 3;
+    optional uint64 subnet_id = 4;
+}
+
+message Status {
+    uint32 fork_digest = 1; // 4 bytes can be repressented in uint32.
+    types.H256 finalized_root = 2;
+    uint64 finalized_epoch = 3;
+    types.H256 head_root = 4;
+    uint64 head_slot = 5;
+    optional uint64 earliest_available_slot = 6; // fulu EIP:7594
+}
+
+message PeerCount {
+    uint64 active = 1; // Amount of peers that are active.
+    uint64 connected = 2;
+    uint64 disconnected = 3;
+    uint64 connecting = 4;
+    uint64 disconnecting = 5;
+}
+
+message RequestData {
+    bytes data = 1; // SSZ encoded data
+    string topic = 2;
+}
+
+message RequestDataWithPeer {
+    bytes data = 1; // SSZ encoded data
+    string topic = 2;
+    string pid = 3; // Peer to send the request to.
+}
+
+message ResponseData {
+    bytes data = 1; // prefix-stripped SSZ encoded data
+    bool error = 2; // did the peer encounter an error
+    Peer peer = 3;
+}
+
+message Metadata {
+    uint64 seq = 1;
+    string attnets = 2;
+    string syncnets = 3;
+}
+
+message IdentityResponse {
+    string pid = 1;
+    string enr = 2;
+    repeated string p2p_addresses = 3;
+    repeated string discovery_addresses = 4;
+    Metadata metadata = 5;
+}
+
+message RequestSubscribeExpiry {
+    string topic = 1;
+    uint64 expiry_unix_secs = 2;
+}
+
+service Sentinel {
+    rpc SetSubscribeExpiry(RequestSubscribeExpiry) returns(EmptyMessage);
+    rpc SubscribeGossip(SubscriptionData) returns (stream GossipData);
+    rpc SendRequest(RequestData) returns (ResponseData);
+    rpc SetStatus(Status) returns(EmptyMessage); // Set status for peer filtering.
+    rpc GetPeers(EmptyMessage) returns (PeerCount);
+    rpc BanPeer(Peer) returns(EmptyMessage);
+    rpc UnbanPeer(Peer) returns(EmptyMessage);
+    rpc PenalizePeer(Peer) returns(EmptyMessage);
+    rpc RewardPeer(Peer) returns(EmptyMessage);
+    rpc PublishGossip(GossipData) returns(EmptyMessage);
+    rpc Identity(EmptyMessage) returns(IdentityResponse); // Returns the identity of the peer.
+    rpc PeersInfo(PeersInfoRequest) returns(PeersInfoResponse); // Returns the identity of the peer.
+    rpc SendPeerRequest(RequestDataWithPeer) returns (ResponseData);
+}
