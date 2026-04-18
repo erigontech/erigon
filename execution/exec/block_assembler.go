@@ -201,7 +201,10 @@ func (ba *BlockAssembler) AddTransactions(
 	writer := state.NewNoopWriter()
 	recordTxIO := func(balIO *state.VersionedIO) {
 		if balIO != nil {
-			ba.balIO = ba.balIO.Merge(ibs.TxIO())
+			// TEMP BAL-DIAG: dump slot 0x026794 read/write state at merge time.
+			txio := ibs.TxIO()
+			state.LogBalIOForTargetSlot("recordTxIO", ibs.BlockNumber(), ibs.TxnIndex(), txio)
+			ba.balIO = ba.balIO.Merge(txio)
 		}
 		ibs.ResetVersionedIO()
 	}
@@ -209,6 +212,11 @@ func (ba *BlockAssembler) AddTransactions(
 		if balIO == nil {
 			return
 		}
+		// TEMP BAL-DIAG: show clear events — especially if a tx that did the
+		// SSTORE-in-CREATE gets its I/O cleared (which would explain why the
+		// slot read goes missing from balIO).
+		txio := ibs.TxIO()
+		state.LogBalIOForTargetSlot("clearTxIO", ibs.BlockNumber(), ibs.TxnIndex(), txio)
 		ibs.AccessedAddresses()
 		ibs.ResetVersionedIO()
 	}
