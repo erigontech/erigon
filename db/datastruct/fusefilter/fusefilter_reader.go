@@ -89,7 +89,7 @@ func NewReaderOnBytes(m []byte, fName string) (*Reader, int, error) {
 		return nil, 0, err
 	}
 
-	filter.SegmentCount = binary.BigEndian.Uint32(header[4+4:])
+	filter.SegmentCount = binary.BigEndian.Uint32(header[4:])
 	filter.SegmentCountLength = binary.BigEndian.Uint32(header[4+4:])
 	filter.Seed = binary.BigEndian.Uint64(header[4+4+4:])
 	filter.SegmentLength = binary.BigEndian.Uint32(header[4+4+4+8:])
