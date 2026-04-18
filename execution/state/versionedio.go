@@ -1348,8 +1348,18 @@ func (account *accountState) updateWrite(vw *VersionedWrite, accessIndex uint16)
 		if account.selfDestructed && accessIndex == account.selfDestructedAt && !val.IsZero() {
 			return
 		}
-		// If we haven't seen a balance and the first write is zero, treat it as a touch only.
-		if account.balanceValue == nil && val.IsZero() {
+		// If we haven't seen a balance and the first write is zero, treat it
+		// as a touch only when the pre-block balance is (or is implicitly) zero:
+		//   - No prior read: the account wasn't accessed before, so its
+		//     pre-block balance is implicitly zero (e.g. a newly CREATE'd
+		//     contract or a receiver observed only via the post-write finalize
+		//     path). Writing zero is a no-op.
+		//   - Prior read showed zero: write matches initial state, no-op.
+		// If a prior read showed a non-zero pre-block balance, the zero write
+		// is a genuine depletion (e.g. a sender whose funds were consumed by
+		// gas) and must be recorded as a real balance change.
+		if account.balanceValue == nil && val.IsZero() &&
+			(account.initialBalanceValue == nil || account.initialBalanceValue.IsZero()) {
 			if account.initialBalanceValue == nil {
 				v := val
 				account.initialBalanceValue = &v
