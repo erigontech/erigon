@@ -8,13 +8,43 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"unsafe"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
 
 	"github.com/FastFilter/xorfilter"
 	"github.com/edsrzf/mmap-go"
 )
+
+// FUSEFILTER_MEM_LOG=true logs heap memory before/after xorfilter.NewBinaryFuse construction
+// — the peeling algorithm allocates O(n) uint64/uint32 working arrays on Go heap and is the
+// prime suspect for OOM at the tail of large .efi builds. Forces a GC before the "before"
+// reading so Alloc reflects live heap, not garbage.
+var fuseFilterMemLog = dbg.EnvBool("FUSEFILTER_MEM_LOG", false)
+
+func fuseMemCheckpoint(stage, file string, extra ...any) {
+	if !fuseFilterMemLog {
+		return
+	}
+	runtime.GC()
+	var m runtime.MemStats
+	dbg.ReadMemStats(&m)
+	args := []any{
+		"file", file,
+		"stage", stage,
+		"alloc", common.ByteCount(m.Alloc),
+		"heapInuse", common.ByteCount(m.HeapInuse),
+		"heapIdle", common.ByteCount(m.HeapIdle),
+		"sys", common.ByteCount(m.Sys),
+		"numGC", m.NumGC,
+	}
+	args = append(args, extra...)
+	log.Info("[fusefilter][mem]", args...)
+}
 
 // WriterOffHeap does write all keys to temporary mmap file - and using it as a source for `fusefilter` building
 type WriterOffHeap struct {
@@ -66,10 +96,31 @@ func (w *WriterOffHeap) build() (*xorfilter.BinaryFuse[uint8], error) {
 
 	keysHashes := castToArrU64(m[:sz])
 
+	n := uint64(len(keysHashes))
+	// xorfilter.BinaryFuse construction allocates on Go heap:
+	//   reverseOrder []uint64 size=n+1            -> ~8 bytes/key
+	//   alone        []uint32 size=capacity≈1.125*n -> ~4.5 bytes/key
+	//   Fingerprints []uint8  size≈1.125*n         -> ~1.125 bytes/key (kept as output)
+	//   plus Q0/Q1/Q2, sets0/1/2, stack scratch (smaller)
+	// Rough total ~14 bytes/key during construction; for 3.2B keys that's ~45 GB on heap.
+	fuseMemCheckpoint("before_NewBinaryFuse", w.tmpFilePath,
+		"keys", n,
+		"mmap_bytes", common.ByteCount(uint64(sz)),
+		"est_reverseOrder", common.ByteCount((n+1)*8),
+		"est_alone", common.ByteCount(n*1125/1000*4),
+		"est_fingerprints", common.ByteCount(n*1125/1000),
+		"est_total_heap_add", common.ByteCount((n+1)*8+n*1125/1000*4+n*1125/1000),
+	)
 	filter, err := xorfilter.NewBinaryFuse[uint8](keysHashes)
 	if err != nil {
+		fuseMemCheckpoint("after_NewBinaryFuse_ERR", w.tmpFilePath, "err", err)
 		return nil, fmt.Errorf("%s %w", w.tmpFilePath, err)
 	}
+	fuseMemCheckpoint("after_NewBinaryFuse", w.tmpFilePath,
+		"fingerprints_bytes", common.ByteCount(uint64(len(filter.Fingerprints))),
+		"segmentCount", filter.SegmentCount,
+		"segmentLength", filter.SegmentLength,
+	)
 	return filter, nil
 }
 
