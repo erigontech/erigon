@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"unsafe"
@@ -79,9 +80,10 @@ func parseHeaderFeatures(header []byte, fName string) (version uint8, features F
 }
 
 func NewReaderOnBytes(m []byte, fName string) (*Reader, int, error) {
-	filter := &xorfilter.BinaryFuse[uint8]{}
-
 	const headerSize = filterBlobHeaderSize
+	if len(m) < headerSize {
+		return nil, 0, fmt.Errorf("fusefilter %s: too small for header (%d < %d)", fName, len(m), headerSize)
+	}
 	header, data := m[:headerSize], m[headerSize:]
 
 	v, features, err := parseHeaderFeatures(header, fName)
@@ -89,12 +91,17 @@ func NewReaderOnBytes(m []byte, fName string) (*Reader, int, error) {
 		return nil, 0, err
 	}
 
+	filter := &xorfilter.BinaryFuse[uint8]{}
 	filter.SegmentCount = binary.BigEndian.Uint32(header[4:])
 	filter.SegmentCountLength = binary.BigEndian.Uint32(header[4+4:])
 	filter.Seed = binary.BigEndian.Uint64(header[4+4+4:])
 	filter.SegmentLength = binary.BigEndian.Uint32(header[4+4+4+8:])
 	filter.SegmentLengthMask = binary.BigEndian.Uint32(header[4+4+4+8+4:])
-	fingerprintsLen := int(binary.BigEndian.Uint64(header[4+4+4+8+4+4:]))
+	fingerprintsLen64 := binary.BigEndian.Uint64(header[4+4+4+8+4+4:])
+	if fingerprintsLen64 > math.MaxInt || uint64(len(data)) < fingerprintsLen64 {
+		return nil, 0, fmt.Errorf("fusefilter %s: fingerprints length %d exceeds available bytes %d", fName, fingerprintsLen64, len(data))
+	}
+	fingerprintsLen := int(fingerprintsLen64)
 
 	filter.Fingerprints = data[:fingerprintsLen]
 	return &Reader{inner: filter, version: v, features: features, m: m}, headerSize + fingerprintsLen, nil
@@ -159,20 +166,24 @@ func NewReaderShardedOnBytes(m []byte, fName string) (*ReaderSharded, int, error
 		if offset+8 > len(m) {
 			return nil, 0, fmt.Errorf("fusefilter sharded %s: truncated at shard %d", fName, i)
 		}
-		sz := int(binary.BigEndian.Uint64(m[offset:]))
+		sz64 := binary.BigEndian.Uint64(m[offset:])
 		offset += 8
-		if sz == 0 {
+		if sz64 == 0 {
 			continue
 		}
+		if sz64 > math.MaxInt || sz64 > uint64(len(m)-offset) {
+			return nil, 0, fmt.Errorf("fusefilter sharded %s: shard %d blob overflows (offset=%d sz=%d total=%d)", fName, i, offset, sz64, len(m))
+		}
+		sz := int(sz64)
 		if sz < filterBlobHeaderSize {
 			return nil, 0, fmt.Errorf("fusefilter sharded %s: shard %d size %d < header %d", fName, i, sz, filterBlobHeaderSize)
 		}
-		if offset+sz > len(m) {
-			return nil, 0, fmt.Errorf("fusefilter sharded %s: shard %d blob overflows (offset=%d sz=%d total=%d)", fName, i, offset, sz, len(m))
-		}
-		shard, _, err := NewReaderOnBytes(m[offset:offset+sz], fName)
+		shard, consumed, err := NewReaderOnBytes(m[offset:offset+sz], fName)
 		if err != nil {
 			return nil, 0, fmt.Errorf("shard %d of %s: %w", i, fName, err)
+		}
+		if consumed != sz {
+			return nil, 0, fmt.Errorf("fusefilter sharded %s: shard %d consumed %d != declared size %d", fName, i, consumed, sz)
 		}
 		r.shards[i] = *shard
 		offset += sz
