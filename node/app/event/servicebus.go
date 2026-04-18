@@ -60,8 +60,24 @@ func (bus *ServiceBus) Deactivate() { /*
 	*/
 }
 
+// objectPointer returns reflect.Value.Pointer() if object has a kind that
+// supports it (pointer-like). Returns false otherwise so callers can return a
+// descriptive error rather than panic inside reflect.
+func objectPointer(object interface{}) (uintptr, bool) {
+	v := reflect.ValueOf(object)
+	switch v.Kind() {
+	case reflect.Pointer, reflect.Chan, reflect.Map, reflect.Func, reflect.Slice, reflect.UnsafePointer:
+		return v.Pointer(), true
+	default:
+		return 0, false
+	}
+}
+
 func (bus *ServiceBus) Register(object interface{}, fns ...interface{}) (err error) {
-	objectPtr := reflect.ValueOf(object).Pointer()
+	objectPtr, ok := objectPointer(object)
+	if !ok {
+		return fmt.Errorf("ServiceBus.Register: object kind %s is not supported; pass a pointer", reflect.ValueOf(object).Kind())
+	}
 	bus.registrationLock.Lock()
 	defer bus.registrationLock.Unlock()
 	for _, fn := range fns {
@@ -79,7 +95,10 @@ func (bus *ServiceBus) Register(object interface{}, fns ...interface{}) (err err
 }
 
 func (bus *ServiceBus) UnregisterAll(object interface{}) error {
-	objectPtr := reflect.ValueOf(object).Pointer()
+	objectPtr, ok := objectPointer(object)
+	if !ok {
+		return fmt.Errorf("ServiceBus.UnregisterAll: object kind %s is not supported; pass a pointer", reflect.ValueOf(object).Kind())
+	}
 
 	bus.registrationLock.Lock()
 	defer bus.registrationLock.Unlock()
@@ -100,7 +119,10 @@ func (bus *ServiceBus) UnregisterAll(object interface{}) error {
 }
 
 func (bus *ServiceBus) Unregister(object interface{}, fns ...interface{}) error {
-	objectPtr := reflect.ValueOf(object).Pointer()
+	objectPtr, ok := objectPointer(object)
+	if !ok {
+		return fmt.Errorf("ServiceBus.Unregister: object kind %s is not supported; pass a pointer", reflect.ValueOf(object).Kind())
+	}
 	bus.registrationLock.Lock()
 	if registrations, ok := bus.registrations[objectPtr]; ok && len(registrations) > 0 {
 		for _, fn := range fns {
@@ -124,10 +146,20 @@ func (bus *ServiceBus) Unregister(object interface{}, fns ...interface{}) error 
 }
 
 func (bus *ServiceBus) Registrations(object interface{}) []interface{} {
+	objectPtr, ok := objectPointer(object)
+	if !ok {
+		return nil
+	}
 	bus.registrationLock.Lock()
 	defer bus.registrationLock.Unlock()
-	objectPtr := reflect.ValueOf(object).Pointer()
-	return bus.registrations[objectPtr]
+	// Return a copy so callers cannot mutate the internal slice without the lock.
+	src := bus.registrations[objectPtr]
+	if len(src) == 0 {
+		return nil
+	}
+	out := make([]interface{}, len(src))
+	copy(out, src)
+	return out
 }
 
 func (bus *ServiceBus) Post(args ...interface{}) int {

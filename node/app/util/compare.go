@@ -39,7 +39,9 @@ type Comparable interface {
 }
 
 // Equal checks two values are equal via the Equatable or
-// Comparable interfaces available - otherwise falls back to ==
+// Comparable interfaces available. If neither is implemented
+// and both values have a comparable type, falls back to ==.
+// For uncomparable types (slices, maps, funcs) uses reflect.DeepEqual.
 func Equal(a, b interface{}) bool {
 	if ea, ok := a.(Equatable); ok {
 		return ea.Equals(b)
@@ -51,7 +53,13 @@ func Equal(a, b interface{}) bool {
 		return cb.CompareTo(a) == 0
 	}
 
-	return a == b
+	// Guard against panic from comparing slices/maps/funcs with ==.
+	ra := reflect.ValueOf(a)
+	rb := reflect.ValueOf(b)
+	if ra.IsValid() && rb.IsValid() && ra.Type().Comparable() && rb.Type().Comparable() {
+		return a == b
+	}
+	return reflect.DeepEqual(a, b)
 }
 
 type Comparator func(a, b interface{}) int
