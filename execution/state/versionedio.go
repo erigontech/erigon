@@ -877,6 +877,18 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 				var zero T
 				vr.Source = StorageRead
 				vr.Val = zero
+				// Mark this as an internal read: it short-circuits the
+				// StorageDomain read to return zero because a prior tx in
+				// this block wrote IncarnationPath (CreateAccount or
+				// Selfdestruct, which clear all storage). That's correct for
+				// conflict detection, but it is NOT an access the EVM would
+				// have observed in a serial block-assembler execution (the
+				// assembler does not populate versionMap, so this branch
+				// never fires there). Including this zero-read in the BAL
+				// diverges the parallel-executor BAL from the proposer's
+				// assembler BAL — surfaced as a BAL hash mismatch on the
+				// bal-devnet-3 glamsterdam run.
+				vr.internal = true
 
 				if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
 					fmt.Printf("%d (%d.%d) RD (%s) %x %s: zero (IncarnationPath written by tx %d)\n",
@@ -889,14 +901,16 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 				s.versionedReads.Set(vr)
 				// Record dependency on IncarnationPath so that ValidateVersion
 				// detects if the creation/destruction is reverted by a re-execution.
+				// Also internal — IncarnationPath is not a BAL field.
 				incVersion := Version{TxIndex: incRes.DepIdx(), Incarnation: incRes.Incarnation()}
 				s.versionedReads.Set(VersionedRead{
-					Address: addr,
-					Path:    IncarnationPath,
-					Key:     accounts.NilKey,
-					Source:  MapRead,
-					Version: incVersion,
-					Val:     incRes.Value(),
+					Address:  addr,
+					Path:     IncarnationPath,
+					Key:      accounts.NilKey,
+					Source:   MapRead,
+					Version:  incVersion,
+					Val:      incRes.Value(),
+					internal: true,
 				})
 				return zero, StorageRead, UnknownVersion, nil
 			}
