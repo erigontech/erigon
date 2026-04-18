@@ -154,7 +154,7 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 
 	// [IGNORE] The sidecar is the first sidecar for the tuple (block_header.slot, block_header.proposer_index, sidecar.index)
 	if _, ok := s.seenSidecar.Get(seenKey); ok {
-		return nil
+		return ErrIgnore
 	}
 
 	blockRoot, err := blockHeader.HashSSZ()
@@ -263,7 +263,7 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 
 	// [IGNORE] The sidecar is the first sidecar for the tuple (sidecar.beacon_block_root, sidecar.index)
 	if _, ok := s.seenGloasSidecar.Get(seenKey); ok {
-		return nil
+		return ErrIgnore
 	}
 
 	// [IGNORE] The sidecar is not from a future slot (with some tolerance for clock disparity)

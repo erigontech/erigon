@@ -199,7 +199,8 @@ func (i *IndexedPayloadAttestation) DecodeSSZ(buf []byte, version int) error {
 }
 
 func (i *IndexedPayloadAttestation) EncodingSizeSSZ() int {
-	return i.AttestingIndices.EncodingSizeSSZ() + i.Data.EncodingSizeSSZ() + length.Bytes96
+	return 4 + i.AttestingIndices.EncodingSizeSSZ() + // offset for AttestingIndices (variable-length)
+		i.Data.EncodingSizeSSZ() + length.Bytes96
 }
 
 func (i *IndexedPayloadAttestation) HashSSZ() ([32]byte, error) {
@@ -253,6 +254,7 @@ func (e *ExecutionPayloadBid) HashSSZ() ([32]byte, error) {
 
 func (e *ExecutionPayloadBid) EncodingSizeSSZ() int {
 	return length.Hash*4 + length.Addr + 8 + 8 + 8 + 8 + 8 +
+		4 + // offset for BlobKzgCommitments (variable-length field)
 		e.BlobKzgCommitments.EncodingSizeSSZ() +
 		length.Hash
 }
@@ -314,7 +316,7 @@ func (e *ExecutionPayloadBid) Copy() *ExecutionPayloadBid {
 		Slot:                  e.Slot,
 		Value:                 e.Value,
 		ExecutionPayment:      e.ExecutionPayment,
-		BlobKzgCommitments:    e.BlobKzgCommitments,
+		BlobKzgCommitments:    *e.BlobKzgCommitments.ShallowCopy(),
 		ExecutionRequestsRoot: e.ExecutionRequestsRoot,
 	}
 }
@@ -330,7 +332,7 @@ func (s *SignedExecutionPayloadBid) HashSSZ() ([32]byte, error) {
 }
 
 func (s *SignedExecutionPayloadBid) EncodingSizeSSZ() int {
-	return s.Message.EncodingSizeSSZ() + length.Bytes96
+	return 4 + s.Message.EncodingSizeSSZ() + length.Bytes96 // 4 is the offset for Message (variable-length field)
 }
 
 func (s *SignedExecutionPayloadBid) Static() bool {
@@ -360,6 +362,8 @@ type ExecutionPayloadEnvelope struct {
 	BuilderIndex      uint64             `json:"builder_index,string"`
 	BeaconBlockRoot   common.Hash        `json:"beacon_block_root"`
 	Slot              uint64             `json:"slot,string"`
+
+	beaconCfg *clparams.BeaconChainConfig
 }
 
 func NewExecutionPayloadEnvelope(cfg *clparams.BeaconChainConfig) *ExecutionPayloadEnvelope {
@@ -369,6 +373,7 @@ func NewExecutionPayloadEnvelope(cfg *clparams.BeaconChainConfig) *ExecutionPayl
 		BuilderIndex:      0,
 		BeaconBlockRoot:   common.Hash{},
 		Slot:              0,
+		beaconCfg:         cfg,
 	}
 }
 
@@ -397,6 +402,12 @@ func (e *ExecutionPayloadEnvelope) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (e *ExecutionPayloadEnvelope) DecodeSSZ(buf []byte, version int) error {
+	if e.Payload == nil {
+		e.Payload = NewEth1Block(clparams.StateVersion(version), e.beaconCfg)
+	}
+	if e.ExecutionRequests == nil {
+		e.ExecutionRequests = NewExecutionRequests(e.beaconCfg)
+	}
 	return ssz2.UnmarshalSSZ(buf, version,
 		e.Payload,
 		e.ExecutionRequests,
@@ -407,8 +418,8 @@ func (e *ExecutionPayloadEnvelope) DecodeSSZ(buf []byte, version int) error {
 }
 
 func (e *ExecutionPayloadEnvelope) EncodingSizeSSZ() int {
-	return e.Payload.EncodingSizeSSZ() +
-		e.ExecutionRequests.EncodingSizeSSZ() +
+	return 4 + e.Payload.EncodingSizeSSZ() + // offset for Payload (variable-length)
+		4 + e.ExecutionRequests.EncodingSizeSSZ() + // offset for ExecutionRequests (variable-length)
 		8 + length.Hash + 8
 }
 
@@ -419,6 +430,7 @@ func (e *ExecutionPayloadEnvelope) Clone() clonable.Clonable {
 		BuilderIndex:      e.BuilderIndex,
 		BeaconBlockRoot:   e.BeaconBlockRoot,
 		Slot:              e.Slot,
+		beaconCfg:         e.beaconCfg,
 	}
 }
 
@@ -426,6 +438,8 @@ func (e *ExecutionPayloadEnvelope) Clone() clonable.Clonable {
 type SignedExecutionPayloadEnvelope struct {
 	Message   *ExecutionPayloadEnvelope `json:"message"`
 	Signature common.Bytes96            `json:"signature"`
+
+	beaconCfg *clparams.BeaconChainConfig
 }
 
 func (s *SignedExecutionPayloadEnvelope) HashSSZ() ([32]byte, error) {
@@ -441,16 +455,20 @@ func (s *SignedExecutionPayloadEnvelope) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (s *SignedExecutionPayloadEnvelope) DecodeSSZ(buf []byte, version int) error {
+	if s.Message == nil {
+		s.Message = NewExecutionPayloadEnvelope(s.beaconCfg)
+	}
 	return ssz2.UnmarshalSSZ(buf, version, s.Message, s.Signature[:])
 }
 
 func (s *SignedExecutionPayloadEnvelope) EncodingSizeSSZ() int {
-	return s.Message.EncodingSizeSSZ() + length.Bytes96
+	return 4 + s.Message.EncodingSizeSSZ() + length.Bytes96 // 4 is the offset for Message (variable-length)
 }
 
 func (s *SignedExecutionPayloadEnvelope) Clone() clonable.Clonable {
 	return &SignedExecutionPayloadEnvelope{
 		Message:   s.Message.Clone().(*ExecutionPayloadEnvelope),
 		Signature: s.Signature,
+		beaconCfg: s.beaconCfg,
 	}
 }
