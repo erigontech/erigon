@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"runtime"
 	"slices"
 	"sort"
 	"strconv"
@@ -26,10 +27,10 @@ import (
 // TEMP diag for BAL proposer/validator divergence on bal-devnet-3.
 // Prints to stderr whenever a StoragePath read on slot 0x026794 is recorded
 // into versionedReads, annotated with the call site that recorded it.
-// This lets us pinpoint which versionedRead branch generates the synthetic
-// read that shows up in the parallel-executor BAL but not the assembler BAL.
+// Includes block number, tx index, source, value, and a short stack trace
+// so we can pinpoint which versionedRead call ends up in the BAL vs not.
 // Revert once the source is identified.
-func balDiagRecord(site string, addr accounts.Address, path AccountPath, key accounts.StorageKey, internal bool) {
+func balDiagRecord(site string, s *IntraBlockState, addr accounts.Address, path AccountPath, key accounts.StorageKey, internal bool, val any) {
 	if path != StoragePath {
 		return
 	}
@@ -38,7 +39,29 @@ func balDiagRecord(site string, addr accounts.Address, path AccountPath, key acc
 	if !strings.HasSuffix(hk, "026794") {
 		return
 	}
-	fmt.Fprintf(os.Stderr, "[BAL-DIAG] %s addr=%x slot=%s internal=%v\n", site, addr, hk, internal)
+	// Short stack: skip top 2 frames (runtime.Callers + this func), take 6.
+	var frames [6]uintptr
+	n := runtime.Callers(2, frames[:])
+	cf := runtime.CallersFrames(frames[:n])
+	var stack strings.Builder
+	for {
+		frame, more := cf.Next()
+		fn := frame.Function
+		if i := strings.LastIndex(fn, "/"); i >= 0 {
+			fn = fn[i+1:]
+		}
+		stack.WriteString(fn)
+		if !more {
+			break
+		}
+		stack.WriteString("<-")
+	}
+	var bn uint64
+	var ti, inc int
+	if s != nil {
+		bn, ti, inc = s.blockNum, s.txIndex, s.version
+	}
+	fmt.Fprintf(os.Stderr, "[BAL-DIAG] %s bn=%d tx=%d.%d addr=%x slot=%s internal=%v val=%v stack=%s\n", site, bn, ti, inc, addr, hk, internal, val, stack.String())
 }
 
 type ReadSource int
@@ -760,7 +783,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 							s.versionedReads = ReadSet{}
 						}
 						s.versionedReads.Set(vr)
-						balDiagRecord("site=742(write-dep-panic)", addr, path, key, vr.internal)
+						balDiagRecord("site=742(write-dep-panic)", s, addr, path, key, vr.internal, vr.Val)
 						panic(ErrDependency)
 					}
 				}
@@ -801,7 +824,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 			}
 
 			s.versionedReads.Set(vr)
-			balDiagRecord("site=783(map-dep-panic)", addr, path, key, vr.internal)
+			balDiagRecord("site=783(map-dep-panic)", s, addr, path, key, vr.internal, vr.Val)
 
 			panic(ErrDependency)
 		}
@@ -841,7 +864,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 			s.versionedReads = ReadSet{}
 		}
 		s.versionedReads.Set(vr)
-		balDiagRecord("site=823(mvdep-panic)", addr, path, key, vr.internal)
+		balDiagRecord("site=823(mvdep-panic)", s, addr, path, key, vr.internal, vr.Val)
 		panic(ErrDependency)
 
 	case MVReadResultNone:
@@ -898,7 +921,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 				}
 				s.versionedReads.Set(vr)
 				// TEMP diag for BAL mismatch investigation
-				balDiagRecord("site=856(readStorage-nil)", addr, path, key, vr.internal)
+				balDiagRecord("site=856(readStorage-nil)", s, addr, path, key, vr.internal, vr.Val)
 			}
 			return defaultV, UnknownSource, UnknownVersion, nil
 		}
@@ -945,7 +968,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 				}
 				s.versionedReads.Set(vr)
 				// TEMP diag for BAL mismatch investigation
-				balDiagRecord("site=923(incarnation-zero)", addr, path, key, vr.internal)
+				balDiagRecord("site=923(incarnation-zero)", s, addr, path, key, vr.internal, vr.Val)
 				// Record dependency on IncarnationPath so that ValidateVersion
 				// detects if the creation/destruction is reverted by a re-execution.
 				// Also internal — IncarnationPath is not a BAL field.
@@ -1005,7 +1028,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 	}
 	s.versionedReads.Set(vr)
 	// TEMP diag for BAL mismatch investigation
-	balDiagRecord("site=981(final-fallback)", addr, path, key, vr.internal)
+	balDiagRecord("site=981(final-fallback)", s, addr, path, key, vr.internal, vr.Val)
 
 	return v, vr.Source, vr.Version, nil
 }
