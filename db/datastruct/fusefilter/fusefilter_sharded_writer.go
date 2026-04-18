@@ -2,12 +2,14 @@ package fusefilter
 
 import (
 	"bufio"
+	"cmp"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/FastFilter/xorfilter"
 	"github.com/edsrzf/mmap-go"
@@ -132,7 +134,7 @@ func (w *ShardedWriterOffHeap) BuildTo(to io.Writer) (int, error) {
 		keyOffsets[s+1] += keyOffsets[s]
 	}
 
-	sortByLowByte(keys, &keyOffsets)
+	slices.SortFunc(keys, func(a, b uint64) int { return cmp.Compare(byte(a), byte(b)) })
 
 	builder := xorfilter.MakeBinaryFuseBuilder[uint8](max(1, largest))
 
@@ -185,31 +187,6 @@ func (w *ShardedWriterOffHeap) BuildTo(to io.Writer) (int, error) {
 		return 0, err
 	}
 	return headerBytes + int(fingerprintBytes), nil
-}
-
-// sortByLowByte partitions `keys` in place by byte(k) using 8-bit American
-// Flag Sort. offsets must already hold the prefix-sum boundaries
-// (offsets[s] is the first output slot for shard s, offsets[s+1] the first
-// slot past it). offsets is mutated into per-shard write cursors as the sort
-// proceeds.
-func sortByLowByte(keys []uint64, offsets *[shardCount + 1]int) {
-	var cursor [shardCount]int
-	for s := 0; s < shardCount; s++ {
-		cursor[s] = offsets[s]
-	}
-	for s := 0; s < shardCount; s++ {
-		end := offsets[s+1]
-		for cursor[s] < end {
-			k := keys[cursor[s]]
-			dest := int(byte(k))
-			if dest == s {
-				cursor[s]++
-				continue
-			}
-			keys[cursor[s]], keys[cursor[dest]] = keys[cursor[dest]], k
-			cursor[dest]++
-		}
-	}
 }
 
 // ShardedWriter wraps ShardedWriterOffHeap with standalone file creation, for
