@@ -5,10 +5,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"reflect"
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/heimdalr/dag"
 	"github.com/holiman/uint256"
@@ -20,6 +22,24 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+// TEMP diag for BAL proposer/validator divergence on bal-devnet-3.
+// Prints to stderr whenever a StoragePath read on slot 0x026794 is recorded
+// into versionedReads, annotated with the call site that recorded it.
+// This lets us pinpoint which versionedRead branch generates the synthetic
+// read that shows up in the parallel-executor BAL but not the assembler BAL.
+// Revert once the source is identified.
+func balDiagRecord(site string, addr accounts.Address, path AccountPath, key accounts.StorageKey, internal bool) {
+	if path != StoragePath {
+		return
+	}
+	hv := key.Value()
+	hk := hex.EncodeToString(hv[:])
+	if !strings.HasSuffix(hk, "026794") {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "[BAL-DIAG] %s addr=%x slot=%s internal=%v\n", site, addr, hk, internal)
+}
 
 type ReadSource int
 
@@ -720,6 +740,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 							s.versionedReads = ReadSet{}
 						}
 						s.versionedReads.Set(vr)
+						balDiagRecord("site=742(write-dep-panic)", addr, path, key, vr.internal)
 						panic(ErrDependency)
 					}
 				}
@@ -760,6 +781,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 			}
 
 			s.versionedReads.Set(vr)
+			balDiagRecord("site=783(map-dep-panic)", addr, path, key, vr.internal)
 
 			panic(ErrDependency)
 		}
@@ -799,6 +821,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 			s.versionedReads = ReadSet{}
 		}
 		s.versionedReads.Set(vr)
+		balDiagRecord("site=823(mvdep-panic)", addr, path, key, vr.internal)
 		panic(ErrDependency)
 
 	case MVReadResultNone:
@@ -854,6 +877,8 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 					s.versionedReads = ReadSet{}
 				}
 				s.versionedReads.Set(vr)
+				// TEMP diag for BAL mismatch investigation
+				balDiagRecord("site=856(readStorage-nil)", addr, path, key, vr.internal)
 			}
 			return defaultV, UnknownSource, UnknownVersion, nil
 		}
@@ -899,6 +924,8 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 					s.versionedReads = ReadSet{}
 				}
 				s.versionedReads.Set(vr)
+				// TEMP diag for BAL mismatch investigation
+				balDiagRecord("site=923(incarnation-zero)", addr, path, key, vr.internal)
 				// Record dependency on IncarnationPath so that ValidateVersion
 				// detects if the creation/destruction is reverted by a re-execution.
 				// Also internal — IncarnationPath is not a BAL field.
@@ -957,6 +984,8 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 		s.versionedReads = ReadSet{}
 	}
 	s.versionedReads.Set(vr)
+	// TEMP diag for BAL mismatch investigation
+	balDiagRecord("site=981(final-fallback)", addr, path, key, vr.internal)
 
 	return v, vr.Source, vr.Version, nil
 }
