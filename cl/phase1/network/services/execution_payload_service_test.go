@@ -78,9 +78,9 @@ func TestExecutionPayloadServiceBlockNotFound(t *testing.T) {
 	blockRoot := common.HexToHash("0x1234")
 	envelope := newTestSignedEnvelope(100, blockRoot, 1)
 
-	// Block not in forkchoice - should queue and return nil
+	// Block not in forkchoice - should queue and return ErrIgnore
 	err := service.ProcessMessage(context.Background(), nil, envelope)
-	require.NoError(t, err)
+	require.ErrorIs(t, err, ErrIgnore)
 
 	// Verify envelope was queued (check internal state)
 	impl := service.(*executionPayloadService)

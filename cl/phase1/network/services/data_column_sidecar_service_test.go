@@ -204,9 +204,9 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenAlreadySeen_ReturnsE
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
 	t.NoError(err)
 
-	// Second call with same sidecar should return nil (silent ignore)
+	// Second call with same sidecar should return ErrIgnore
 	err = t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
-	t.NoError(err)
+	t.Equal(ErrIgnore, err)
 }
 
 // TestProcessMessage_WhenInvalidDataColumnSidecar_ReturnsError tests validation failure
@@ -518,8 +518,8 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenSyncing_Returns
 	t.Equal(ErrIgnore, err)
 }
 
-// TestGloasProcessMessage_WhenAlreadySeen_ReturnsNil tests GLOAS returns nil for duplicate sidecars
-func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenAlreadySeen_ReturnsNil() {
+// TestGloasProcessMessage_WhenAlreadySeen_ReturnsErrIgnore tests GLOAS returns ErrIgnore for duplicate sidecars
+func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenAlreadySeen_ReturnsErrIgnore() {
 	verifyDataColumnSidecarWithCommitments = t.mockFuncs.VerifyDataColumnSidecarWithCommitments
 	verifyDataColumnSidecarKZGProofsWithCommitments = t.mockFuncs.VerifyDataColumnSidecarKZGProofsWithCommitments
 
@@ -540,9 +540,9 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenAlreadySeen_Ret
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
 	t.NoError(err)
 
-	// Second call with same sidecar should return nil (already seen)
+	// Second call with same sidecar should return ErrIgnore
 	err = t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
-	t.NoError(err)
+	t.Equal(ErrIgnore, err)
 }
 
 // TestGloasProcessMessage_WhenFutureSlot_ReturnsErrIgnore tests GLOAS future slot handling

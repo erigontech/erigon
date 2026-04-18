@@ -207,6 +207,12 @@ func (s *payloadAttestationService) queuePendingAttestation(blockRoot common.Has
 
 // loop is the background goroutine that processes pending attestations.
 func (s *payloadAttestationService) loop(ctx context.Context) {
+	// Wake any blocked Wait() on context cancellation to prevent deadlock.
+	go func() {
+		<-ctx.Done()
+		s.pendingCond.Broadcast()
+	}()
+
 	for {
 		// Wait until there are pending attestations
 		s.pendingCond.L.Lock()
