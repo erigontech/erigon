@@ -104,7 +104,8 @@ func NewReaderOnBytes(m []byte, fName string) (*Reader, int, error) {
 	fingerprintsLen := int(fingerprintsLen64)
 
 	filter.Fingerprints = data[:fingerprintsLen]
-	return &Reader{inner: filter, version: v, features: features, m: m}, headerSize + fingerprintsLen, nil
+	total := headerSize + fingerprintsLen
+	return &Reader{inner: filter, version: v, features: features, m: m[:total]}, total, nil
 }
 
 func (r *Reader) ForceInMem() datasize.ByteSize {
@@ -144,6 +145,7 @@ func (r *Reader) Close() {
 // Only the shard matching keyHash >> 56 is checked on lookup.
 // shards is a value array (not pointer array) so ContainsHash needs only one pointer dereference.
 type ReaderSharded struct {
+	m      mmap.MMap // outer slice spanning header + all shard blobs, used for madvise
 	shards [256]Reader
 }
 
@@ -188,6 +190,7 @@ func NewReaderShardedOnBytes(m []byte, fName string) (*ReaderSharded, int, error
 		r.shards[i] = *shard
 		offset += sz
 	}
+	r.m = m[:offset]
 	return r, offset, nil
 }
 
@@ -209,19 +212,24 @@ func (r *ReaderSharded) ForceInMem() datasize.ByteSize {
 	return total
 }
 
+// MadvWillNeed hints to the OS that all shard blobs will be accessed.
+// One madvise on the outer mmap slice covers all shards in a single syscall,
+// instead of 256 madvise calls on adjacent sub-slices of the same VMA.
 func (r *ReaderSharded) MadvWillNeed() {
-	for i := range r.shards {
-		if r.shards[i].inner != nil {
-			r.shards[i].MadvWillNeed()
-		}
+	if len(r.m) == 0 {
+		return
+	}
+	if err := mm.MadviseWillNeed(r.m); err != nil {
+		panic(err)
 	}
 }
 
 func (r *ReaderSharded) MadvNormal() {
-	for i := range r.shards {
-		if r.shards[i].inner != nil {
-			r.shards[i].MadvNormal()
-		}
+	if len(r.m) == 0 {
+		return
+	}
+	if err := mm.MadviseNormal(r.m); err != nil {
+		panic(err)
 	}
 }
 
