@@ -81,7 +81,7 @@ var (
 	numWorkers           = runtime.NumCPU() / 2
 	Exec3Workers         = EnvInt("EXEC3_WORKERS", numWorkers)
 	ExecTerseLoggerLevel = EnvInt("EXEC_TERSE_LOGGER_LEVEL", int(log.LvlWarn))
-	CompressWorkers      = EnvInt("COMPRESS_WORKERS", 1)
+	CompressWorkers      = EnvInt("COMPRESS_WORKERS", 0) // 0 means "not set": online presets default to 1, offline presets use RAM/CPU estimates
 	MergeWorkers         = EnvInt("MERGE_WORKERS", 1)
 	CollateWorkers       = EnvInt("COLLATE_WORKERS", 2)
 

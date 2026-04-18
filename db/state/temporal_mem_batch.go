@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"maps"
 	"sort"
+	"strings"
 	"sync"
 	"unsafe"
 
@@ -34,17 +35,9 @@ import (
 	"github.com/erigontech/erigon/db/state/changeset"
 )
 
-type iodir int
-
-const (
-	get iodir = iota
-	put
-)
-
 type dataWithTxNum struct {
 	data  []byte
 	txNum uint64
-	dir   iodir
 }
 
 // TemporalMemBatch - temporal read-write interface - which storing updates in RAM. Don't forget to call `.Flush()`
@@ -138,7 +131,7 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 		sd.metrics.CachePutSize += putKeySize + putValueSize
 		sd.metrics.CachePutKeySize += putKeySize
 		sd.metrics.CachePutValueSize += putValueSize
-		if dm, ok := sd.metrics.Domains[domain]; ok {
+		if dm := sd.metrics.Domains[domain]; dm != nil {
 			dm.CachePutCount++
 			dm.CachePutSize += putKeySize + putValueSize
 			dm.CachePutKeySize += putKeySize
@@ -204,43 +197,35 @@ func (sd *TemporalMemBatch) GetLatest(domain kv.Domain, key []byte) (v []byte, s
 // The caller must already hold latestStateLock (either RLock or Lock),
 // e.g. from within an IteratePrefix callback.
 func (sd *TemporalMemBatch) getLatest(domain kv.Domain, key []byte) (v []byte, step kv.Step, ok bool) {
-	var unwoundLatest = func(domain kv.Domain, key string) (v []byte, step kv.Step, ok bool) {
-		if sd.unwindChangeset != nil {
-			if values := sd.unwindChangeset[domain]; values != nil {
-				if value, ok := values[key]; ok {
-					keyStep := kv.Step(^binary.BigEndian.Uint64([]byte(value.Key[len(value.Key)-8:])))
-
-					if value.Value == nil {
-						// Different step: the entry at this step was deleted, key doesn't exist here
-						return nil, keyStep, false
-					}
-					// Same step: restore this value
-					return value.Value, keyStep, true
-				}
-			}
-		}
-
-		return nil, 0, false
-	}
-
 	keyS := toStringZeroCopy(key)
+
 	var dataWithTxNums []dataWithTxNum
 	if domain == kv.StorageDomain {
 		dataWithTxNums, ok = sd.storage.Get(keyS)
-		if !ok {
-			return unwoundLatest(domain, keyS)
+	} else {
+		dataWithTxNums, ok = sd.domains[domain][keyS]
+	}
+	if ok {
+		d := dataWithTxNums[len(dataWithTxNums)-1]
+		return d.data, kv.Step(d.txNum / sd.stepSize), true
+	}
+
+	// Fast path: no unwind in progress (common case)
+	if sd.unwindChangeset == nil {
+		return nil, 0, false
+	}
+	if values := sd.unwindChangeset[domain]; values != nil {
+		if value, ok2 := values[keyS]; ok2 {
+			keyStep := kv.Step(^binary.BigEndian.Uint64([]byte(value.Key[len(value.Key)-8:])))
+			if value.Value == nil {
+				// Different step: the entry at this step was deleted, key doesn't exist here
+				return nil, keyStep, false
+			}
+			// Same step: restore this value
+			return value.Value, keyStep, true
 		}
-		dataWithTxNum := dataWithTxNums[len(dataWithTxNums)-1]
-		return dataWithTxNum.data, kv.Step(dataWithTxNum.txNum / sd.stepSize), ok
-
 	}
-
-	dataWithTxNums, ok = sd.domains[domain][keyS]
-	if !ok {
-		return unwoundLatest(domain, keyS)
-	}
-	dataWithTxNum := dataWithTxNums[len(dataWithTxNums)-1]
-	return dataWithTxNum.data, kv.Step(dataWithTxNum.txNum / sd.stepSize), ok
+	return nil, 0, false
 }
 
 func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
@@ -300,15 +285,10 @@ func (sd *TemporalMemBatch) ClearRam() {
 	sd.metrics.CachePutSize = 0
 	sd.metrics.CachePutKeySize = 0
 	sd.metrics.CachePutValueSize = 0
-	for _, dm := range sd.metrics.Domains {
-		dm.CachePutCount = 0
-		dm.CachePutSize = 0
-		dm.CachePutKeySize = 0
-		dm.CachePutValueSize = 0
-	}
+	sd.metrics.Domains = [kv.DomainLen]*changeset.DomainIOMetrics{}
 }
 
-func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte, step kv.Step) (cont bool, err error)) error {
+func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte) (cont bool, err error)) error {
 	sd.latestStateLock.RLock()
 	defer sd.latestStateLock.RUnlock()
 	var ramIter btree2.MapIter[string, []dataWithTxNum]
@@ -322,7 +302,7 @@ func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx 
 func (sd *TemporalMemBatch) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) ([]byte, []byte, bool, error) {
 	var firstKey, firstVal []byte
 	var hasPrefix bool
-	err := sd.IteratePrefix(domain, prefix, roTx, func(k []byte, v []byte, step kv.Step) (bool, error) {
+	err := sd.IteratePrefix(domain, prefix, roTx, func(k []byte, v []byte) (bool, error) {
 		if lv, _, ok := sd.getLatest(domain, k); ok {
 			v = lv
 		}
@@ -335,6 +315,41 @@ func (sd *TemporalMemBatch) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.T
 		return true, nil
 	})
 	return firstKey, firstVal, hasPrefix, err
+}
+
+// HasPrefixInRAM reports whether the RAM batch contains any non-deleted entry
+// for the given domain whose key starts with prefix.  It never touches disk or
+// segment files — only the in-memory btree (StorageDomain) or the domain map.
+func (sd *TemporalMemBatch) HasPrefixInRAM(domain kv.Domain, prefix []byte) bool {
+	sd.latestStateLock.RLock()
+	defer sd.latestStateLock.RUnlock()
+
+	if domain == kv.StorageDomain {
+		prefixStr := unsafe.String(unsafe.SliceData(prefix), len(prefix))
+		iter := sd.storage.Iter()
+		for ok := iter.Seek(prefixStr); ok; ok = iter.Next() {
+			if !strings.HasPrefix(iter.Key(), prefixStr) {
+				break
+			}
+			vals := iter.Value()
+			if len(vals) > 0 && len(vals[len(vals)-1].data) > 0 {
+				return true
+			}
+		}
+		return false
+	}
+
+	prefixStr := unsafe.String(unsafe.SliceData(prefix), len(prefix))
+	for k, vals := range sd.domains[domain] {
+		if strings.HasPrefix(k, prefixStr) && len(vals) > 0 && len(vals[len(vals)-1].data) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (sd *TemporalMemBatch) GetChangesetAccumulator() *changeset.StateChangeSet {
+	return sd.currentChangesAccumulator
 }
 
 func (sd *TemporalMemBatch) SetChangesetAccumulator(acc *changeset.StateChangeSet) {

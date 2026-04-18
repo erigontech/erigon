@@ -26,6 +26,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common/dir"
@@ -100,7 +101,7 @@ func FlushToDisk(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl) (dataPr
 	return provider, nil
 }
 
-var bufioWriterPool = sync.Pool{New: func() any { return bufio.NewWriterSize(nil, BufIOSize) }}
+var bufioWriterPool = sync.Pool{New: func() any { return bufio.NewWriterSize(nil, int(512*datasize.KB)) }}
 
 func getBufioWriter(w io.Writer) *bufio.Writer {
 	bw := bufioWriterPool.Get().(*bufio.Writer)
@@ -218,15 +219,17 @@ func (p *fileDataProvider) Dispose() {
 
 	p.Wait()
 
+	if p.mmapData != nil {
+		_ = mmap.Munmap(p.mmapData, p.mmapHandle2)
+		p.mmapData = nil
+		p.mmapHandle2 = nil
+		p.mmapReader = nil
+	}
+
 	filePath := p.file.Name()
 	p.file.Close()
 	p.file = nil
 	_ = dir.RemoveFile(filePath)
-
-	// Note: We intentionally do NOT munmap here. The mmap'd memory remains mapped
-	// and valid for zero-copy slices returned to callers. The OS will unmap when
-	// the process exits or memory pressure requires it. This is safe for the ETL
-	// use case where data is consumed immediately before Close() is called.
 }
 
 func (p *fileDataProvider) String() string {

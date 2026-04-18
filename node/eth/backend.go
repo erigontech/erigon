@@ -85,6 +85,7 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi"
 	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	execp2p "github.com/erigontech/erigon/execution/p2p"
@@ -284,8 +285,6 @@ const blockBufferSize = 128
 // New creates a new Ethereum object (including the
 // initialisation of the common Ethereum object)
 func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger log.Logger, tracer *tracers.Tracer) (*Ethereum, error) {
-	go dbg.SaveHeapProfileNearOOMPeriodically(ctx, dbg.SaveHeapWithLogger(&logger))
-
 	dirs := stack.Config().Dirs
 
 	tmpdir := dirs.Tmp
@@ -1669,6 +1668,29 @@ func (s *Ethereum) Stop() error {
 	for _, sentryServer := range s.sentryServers {
 		sentryServer.Close()
 	}
+
+	// Wait for background goroutines to release DB transactions before closing DB.
+	if err := s.bgComponentsEg.Wait(); err != nil && !errors.Is(err, context.Canceled) {
+		s.logger.Error("background component error", "err", err)
+	}
+
+	// Wait for any in-flight updateForkChoice goroutine to finish. These are
+	// fire-and-forget goroutines that hold DB read transactions; without this
+	// wait, chainDB.Close() can hang in waitTxsAllDoneOnClose.
+	if s.execModule != nil {
+		waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		s.execModule.WaitIdle(waitCtx)
+		waitCancel()
+	}
+
+	// Wait for any in-flight read-ahead warmup goroutines that hold DB read
+	// transactions.
+	{
+		warmCtx, warmCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		exec.WaitForWarmup(warmCtx)
+		warmCancel()
+	}
+
 	s.chainDB.Close()
 
 	if s.silkwormRPCDaemonService != nil {
@@ -1685,10 +1707,6 @@ func (s *Ethereum) Stop() error {
 		if err := s.silkworm.Close(); err != nil {
 			s.logger.Error("silkworm.Close error", "err", err)
 		}
-	}
-
-	if err := s.bgComponentsEg.Wait(); err != nil && !errors.Is(err, context.Canceled) {
-		s.logger.Error("background component error", "err", err)
 	}
 
 	if s.config.Downloader != nil {

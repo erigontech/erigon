@@ -178,13 +178,20 @@ func (e *EngineServer) Start(
 }
 
 func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals types.Withdrawals) error {
-	if !s.config.IsShanghai(time) && withdrawals != nil {
+	if s.isWithdrawalsPresenceValid(time, withdrawals) {
+		return nil
+	}
+	if !s.config.IsShanghai(time) {
 		return &rpc.InvalidParamsError{Message: "withdrawals before Shanghai"}
 	}
-	if s.config.IsShanghai(time) && withdrawals == nil {
-		return &rpc.InvalidParamsError{Message: "missing withdrawals list"}
+	return &rpc.InvalidParamsError{Message: "missing withdrawals list"}
+}
+
+func (s *EngineServer) isWithdrawalsPresenceValid(time uint64, withdrawals types.Withdrawals) bool {
+	if !s.config.IsShanghai(time) {
+		return withdrawals == nil
 	}
-	return nil
+	return withdrawals != nil
 }
 
 func (s *EngineServer) checkRequestsPresence(version clparams.StateVersion, executionRequests []hexutil.Bytes) error {
@@ -317,7 +324,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 					ValidationError: engine_types.NewStringifiedErrorFromString(fmt.Sprintf("invalid block access list validate: %v", err)),
 				}, nil
 			}
-			hash := crypto.Keccak256Hash(req.BlockAccessList)
+			hash := crypto.HashData(req.BlockAccessList)
 			header.BlockAccessListHash = &hash
 			blockAccessListBytes = req.BlockAccessList
 		}
@@ -717,6 +724,9 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	}
 	if s.config.IsCancun(timestamp) && version < clparams.DenebVersion { // Not V3 after cancun
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
+	}
+	if version >= clparams.CapellaVersion && !s.isWithdrawalsPresenceValid(timestamp, payloadAttributes.Withdrawals) {
+		return nil, &engine_helpers.InvalidPayloadAttributesErr
 	}
 
 	if !s.proposing {

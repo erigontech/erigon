@@ -85,6 +85,35 @@ func TestMemoryCopy(t *testing.T) {
 	}
 }
 
+func TestSetFromData(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name       string
+		data       []byte
+		dataOffset uint64
+		size       uint64
+		want       []byte
+	}{
+		{"exact copy", []byte{1, 2, 3, 4}, 0, 4, []byte{1, 2, 3, 4}},
+		{"partial with zero-pad", []byte{1, 2}, 0, 4, []byte{1, 2, 0, 0}},
+		{"offset beyond data", []byte{1, 2, 3}, 10, 4, []byte{0, 0, 0, 0}},
+		{"offset into data", []byte{1, 2, 3, 4, 5}, 2, 3, []byte{3, 4, 5}},
+		{"offset with partial pad", []byte{1, 2, 3, 4, 5}, 3, 4, []byte{4, 5, 0, 0}},
+		{"size zero", []byte{1, 2, 3}, 0, 0, []byte{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewMemory()
+			if tc.size > 0 {
+				m.Resize(tc.size)
+				m.SetFromData(0, tc.size, tc.dataOffset, tc.data)
+			}
+			if !bytes.Equal(m.store[:tc.size], tc.want) {
+				t.Errorf("want %x, got %x", tc.want, m.store[:tc.size])
+			}
+		})
+	}
+}
+
 func BenchmarkResize(b *testing.B) {
 	memory := NewMemory()
 	var i uint64

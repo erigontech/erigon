@@ -154,19 +154,6 @@ func (d *Domain) kvBtAccessorNewFilePath(fromStep, toStep kv.Step) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.bt", d.FileVersion.AccessorBT.String(), d.FilenameBase, fromStep, toStep))
 }
 
-func (d *Domain) kvFilePathMask(fromStep, toStep kv.Step) string {
-	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("*-%s.%d-%d.kv", d.FilenameBase, fromStep, toStep))
-}
-func (d *Domain) kviAccessorFilePathMask(fromStep, toStep kv.Step) string {
-	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("*-%s.%d-%d.kvi", d.FilenameBase, fromStep, toStep))
-}
-func (d *Domain) kvExistenceIdxFilePathMask(fromStep, toStep kv.Step) string {
-	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("*-%s.%d-%d.kvei", d.FilenameBase, fromStep, toStep))
-}
-func (d *Domain) kvBtAccessorFilePathMask(fromStep, toStep kv.Step) string {
-	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("*-%s.%d-%d.bt", d.FilenameBase, fromStep, toStep))
-}
-
 func (d *Domain) kvFileNameMask(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("*-%s.%d-%d.kv", d.FilenameBase, fromStep, toStep)
 }
@@ -531,7 +518,6 @@ type DomainRoTx struct {
 	btReaders   []*btindex.BtIndex
 	mapReaders  []*recsplit.IndexReader
 
-	comBuf        []byte
 	lookupFullKey []byte // scratch buffer for lookupByShortenedKey
 
 	valsC      kv.Cursor
@@ -636,10 +622,10 @@ func (d *Domain) dumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo kv.St
 	if err != nil {
 		return err
 	}
-	wal.Close()
 
 	ps := background.NewProgressSet()
 	static, err := d.buildFileRange(ctx, stepFrom, stepTo, coll, ps)
+	wal.Close() // munmap ETL temp files after buildFileRange consumed the zero-copy data
 	if err != nil {
 		return err
 	}
@@ -1222,6 +1208,7 @@ func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, va
 		}
 		g.Reset(0)
 		rs.SetProgress(p)
+
 		for g.HasNext() {
 			word, valPos = g.Next(word[:0])
 			if values {
@@ -1275,7 +1262,7 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 
 // unwind is similar to prune but the difference is that it restores domain values from the history as of txFrom
 // context Flush should be managed by caller.
-func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwindTo uint64, domainDiffs []kv.DomainEntryDiff) error {
+func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwindTo, currentFilesEndStep uint64, domainDiffs []kv.DomainEntryDiff) error {
 	// fmt.Printf("[domain][%s] unwinding domain to txNum=%d, step %d\n", d.filenameBase, txNumUnwindTo, step)
 	d := dt.d
 
@@ -1293,9 +1280,25 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	defer valsCursor.Close()
 	// Revert keys using diff entries.
 	// Always: delete current entry at the write step, restore prevValue at unwind target step.
-	// value == []byte{} means key was new (no previous value to restore).
+	//
+	// DomainEntryDiff.Value semantics:
+	//   - nil            → "different step" — prev value lives at another step, skip the restore
+	//                       (only produced by legacy V0 changesets where valueLen==0 deserializes as nil)
+	//   - []byte{}       → "no previous value" — key was absent before this step, so write an
+	//                       empty tombstone to prevent getLatestFromDb falling through to files
+	//                       (which have no concept of deletions) and returning stale data
+	//   - non-empty      → restore the actual previous value
+	//
+	// The step tag for restored entries must be BEYOND the filed range, otherwise
+	// getLatestFromDb will discard them (step covered by files → fall through to
+	// files which have the pre-unwind value). Use the larger of the natural step
+	// and the first unfiled step. See #20169.
+	unwindStep := step
+	if currentFilesEndStep > unwindStep {
+		unwindStep = currentFilesEndStep
+	}
 	unwindStepBytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(unwindStepBytes, ^uint64(step))
+	binary.BigEndian.PutUint64(unwindStepBytes, ^uint64(unwindStep))
 
 	for i := range domainDiffs {
 		keyStr, value := domainDiffs[i].Key, domainDiffs[i].Value
@@ -1305,8 +1308,8 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			if err := rwTx.Delete(d.ValuesTable, key); err != nil {
 				return err
 			}
-			// Restore previous value at unwind step ([]byte{} = key was new, nothing to restore)
-			if len(value) > 0 {
+			// nil = different step, skip; []byte{} = absent previously, write empty tombstone
+			if value != nil {
 				fullKey := key[:len(key)-8]
 				if err := rwTx.Put(d.ValuesTable, append(fullKey, unwindStepBytes...), value); err != nil {
 					return err
@@ -1330,8 +1333,8 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			}
 		}
 
-		// Restore previous value at unwind step ([]byte{} = key was new, nothing to restore)
-		if len(value) > 0 {
+		// nil = different step, skip; []byte{} = absent previously, write empty tombstone
+		if value != nil {
 			if err := valsCursor.Put(fullKey, append(unwindStepBytes, value...)); err != nil {
 				return err
 			}
@@ -1501,6 +1504,10 @@ func (dt *DomainRoTx) Close() {
 			src.closeFilesAndRemove()
 		}
 	}
+	for _, r := range dt.mapReaders {
+		r.Close()
+	}
+	dt.mapReaders = nil
 	dt.ht.Close()
 
 	dt.visible.returnGetFromFileCache(dt.getFromFileCache)
@@ -1876,18 +1883,7 @@ func (dt *DomainRoTx) OldPrune(ctx context.Context, rwTx kv.RwTx, step kv.Step, 
 	if dt.files.EndTxNum() > 0 {
 		txTo = min(txTo, dt.files.EndTxNum())
 	}
-	err = SavePruneValProgress(rwTx, dt.d.ValuesTable, &prune.Stat{
-		LastPrunedValue: nil,
-		LastPrunedKey:   nil,
-		KeyProgress:     prune.Done,
-		ValueProgress:   prune.Done,
-		TxFrom:          txFrom,
-		TxTo:            txTo,
-	})
-	if err != nil {
-		dt.d.logger.Error("prune val progress", "name", dt.name, "err", err)
-	}
-	return dt.oldPrune(ctx, rwTx, step, txFrom, txTo, limit, logEvery)
+	return dt.prune(ctx, rwTx, step, txFrom, txTo, limit, logEvery)
 }
 
 func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
@@ -1979,136 +1975,12 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	mxDupsPruneSizeIndex.AddUint64(pruneStat.DupsDeleted)
 
 	stat.MinStep = kv.Step(pruneStat.MinTxNum / dt.stepSize)
-	stat.MaxStep = kv.Step(pruneStat.MinTxNum / dt.stepSize)
+	stat.MaxStep = kv.Step(pruneStat.MaxTxNum / dt.stepSize)
 	stat.Values = pruneStat.PruneCountValues
 	stat.Dups = pruneStat.DupsDeleted
 	stat.Progress = pruneStat.ValueProgress
 
 	return stat, err
-}
-
-func (dt *DomainRoTx) oldPrune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
-	if limit == 0 {
-		limit = math.MaxUint64
-	}
-	st := time.Now()
-
-	stat = &DomainPruneStat{MinStep: math.MaxUint64}
-	defer func() {
-		dt.d.logger.Debug("scan domain pruning res", "name", dt.name, "txFrom", txFrom, "txTo", txTo, "limit", limit, "vals", stat.Values, "spent ms", time.Since(st).Milliseconds())
-	}()
-	if stat.History, err = dt.ht.Prune(ctx, rwTx, txFrom, txTo, limit, false, logEvery); err != nil {
-		return nil, fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
-	}
-	canPrune, maxPrunableStep := dt.canPruneDomainTables(rwTx, txTo)
-	if !canPrune {
-		return stat, nil
-	}
-	if step > maxPrunableStep {
-		step = maxPrunableStep
-	}
-
-	mxPruneInProgress.Inc()
-	defer mxPruneInProgress.Dec()
-
-	var valsCursor kv.RwCursor
-
-	//ancientDomainValsCollector := etl.NewCollectorWithAllocator(dt.name.String()+".domain.collate", dt.d.dirs.Tmp, etl.SmallSortableBuffers, dt.d.logger).LogLvl(log.LvlTrace)
-	//defer ancientDomainValsCollector.Close()
-
-	if dt.d.LargeValues {
-		valsCursor, err = rwTx.RwCursor(dt.d.ValuesTable)
-		if err != nil {
-			return stat, fmt.Errorf("create %s domain values cursor: %w", dt.name.String(), err)
-		}
-	} else {
-		valsCursor, err = rwTx.RwCursorDupSort(dt.d.ValuesTable)
-		if err != nil {
-			return stat, fmt.Errorf("create %s domain values cursor: %w", dt.name.String(), err)
-		}
-	}
-	defer valsCursor.Close()
-
-	delFunc := func(k, v []byte) error {
-		if dt.d.LargeValues {
-			return valsCursor.Delete(k)
-		}
-		return valsCursor.(kv.RwCursorDupSort).DeleteExact(k, v)
-	}
-
-	prunedKey, err := GetExecV3PruneProgress(rwTx, dt.d.ValuesTable)
-	if err != nil {
-		dt.d.logger.Error("get domain pruning progress", "name", dt.name.String(), "error", err)
-	}
-
-	var k, v []byte
-	if prunedKey != nil && limit < 100_000 {
-		k, v, err = valsCursor.Seek(prunedKey)
-	} else {
-		k, v, err = valsCursor.First()
-	}
-	if err != nil {
-		return nil, err
-	}
-	var stepBytes []byte
-	for ; k != nil; k, v, err = valsCursor.Next() {
-		if err != nil {
-			return stat, fmt.Errorf("iterate over %s domain keys: %w", dt.name.String(), err)
-		}
-
-		if dt.d.LargeValues {
-			stepBytes = k[len(k)-8:]
-		} else {
-			stepBytes = v[:8]
-		}
-
-		is := kv.Step(^binary.BigEndian.Uint64(stepBytes))
-		if is > step {
-			continue
-		}
-		if limit == 0 {
-			err = delFunc(k, v)
-			if err != nil {
-				return stat, err
-			}
-			if err := SaveExecV3PruneProgress(rwTx, dt.d.ValuesTable, k); err != nil {
-				return stat, fmt.Errorf("save domain pruning progress: %s, %w", dt.name.String(), err)
-			}
-			return stat, nil
-		}
-		limit--
-		stat.Values++
-		err = delFunc(k, v)
-		if err != nil {
-			return stat, err
-		}
-		stat.MinStep = min(stat.MinStep, is)
-		stat.MaxStep = max(stat.MaxStep, is)
-		select {
-		case <-ctx.Done():
-			// consider ctx exiting as incorrect outcome, error is returned
-			return stat, ctx.Err()
-		case <-logEvery.C:
-			dt.d.logger.Info("[snapshots] prune domain", "name", dt.name.String(),
-				"pruned keys", stat.Values,
-				"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(dt.stepSize), float64(txTo)/float64(dt.stepSize)))
-		default:
-		}
-	}
-	mxPruneSizeDomain.AddUint64(stat.Values)
-	//if err := ancientDomainValsCollector.Load(rwTx, dt.d.ValuesTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-	//	return stat, fmt.Errorf("load domain values: %w", err)
-	//}
-
-	if err := SaveExecV3PruneProgress(rwTx, dt.d.ValuesTable, nil); err != nil {
-		return stat, fmt.Errorf("save domain pruning progress: %s, %w", dt.d.FilenameBase, err)
-	}
-
-	if err := SaveExecV3PrunableProgress(rwTx, []byte(dt.d.ValuesTable), step+1); err != nil {
-		return stat, err
-	}
-	mxPruneTookDomain.ObserveDuration(st)
-	return stat, nil
 }
 
 func (dt *DomainRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {

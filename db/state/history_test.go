@@ -706,36 +706,6 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 		require.EqualValues(t, nonPruned, binary.BigEndian.Uint64(k))
 	}
 
-	t.Run("hash_prune", func(t *testing.T) {
-		h, rwTx, logEvery := setup(t)
-		hc := h.BeginFilesRo()
-		defer hc.Close()
-
-		canHist, txTo := hc.canHashPruneUntil(rwTx, math.MaxUint64)
-		t.Logf("canPrune=%t [%s] to=%d", canHist, hc.h.KeysTable, txTo)
-
-		stat, err := hc.OldPrune(context.Background(), rwTx, 0, txTo, 50, false, logEvery)
-		require.NoError(t, err)
-		require.NotNil(t, stat)
-		t.Logf("stat=%v", stat)
-
-		stat, err = hc.OldPrune(context.Background(), rwTx, 0, 600, 500, false, logEvery)
-		require.NoError(t, err)
-		require.NotNil(t, stat)
-		t.Logf("stat=%v", stat)
-
-		stat, err = hc.OldPrune(context.Background(), rwTx, 0, 600, 10, true, logEvery)
-		require.NoError(t, err)
-		t.Logf("stat=%v", stat)
-
-		stat, err = hc.OldPrune(context.Background(), rwTx, 0, 600, 10, false, logEvery)
-		require.NoError(t, err)
-		t.Logf("stat=%v", stat)
-
-		assertResults(t, h, rwTx, hc)
-		checkHistoryDBCleanliness(t, h, hc, rwTx, nonPruned)
-	})
-
 	t.Run("scan_prune", func(t *testing.T) {
 		t.Skip("TODO: figure out pretty way to do this check")
 		h, rwTx, logEvery := setup(t)
@@ -810,40 +780,6 @@ func TestHistoryPruneCorrectness(t *testing.T) {
 
 		return h, rwTx, logEvery
 	}
-
-	t.Run("hash_prune", func(t *testing.T) {
-		t.Parallel()
-		h, rwTx, logEvery := setup(t)
-
-		hc := h.BeginFilesRo()
-		defer hc.Close()
-
-		// should not prune anything: forced=false but no files built
-		stat, err := hc.OldPrune(context.Background(), rwTx, 0, 10, pruneLimit, false, logEvery)
-		require.NoError(t, err)
-		require.Nil(t, stat)
-
-		// should prune tx=0: range [0,1) forced=true
-		stat, err = hc.OldPrune(context.Background(), rwTx, 0, 1, pruneLimit, true, logEvery)
-		require.NoError(t, err)
-		require.EqualValues(t, 1, stat.PruneCountValues)
-		require.EqualValues(t, 1, stat.PruneCountTx)
-
-		// prune exactly pruneLimit*pruneIters transactions
-		for i := 0; i < pruneIters; i++ {
-			stat, err = hc.OldPrune(context.Background(), rwTx, 0, 1000, pruneLimit, true, logEvery)
-			require.NoError(t, err)
-			t.Logf("[%d] stats: %v", i, stat)
-		}
-
-		icc, err := rwTx.CursorDupSort(h.ValuesTable)
-		require.NoError(t, err)
-		defer icc.Close()
-		key, _, err := icc.First()
-		require.NoError(t, err)
-		require.NotNil(t, key)
-		require.EqualValues(t, pruneIters*int(pruneLimit), binary.BigEndian.Uint64(key[len(key)-8:])-1)
-	})
 
 	t.Run("scan_prune", func(t *testing.T) {
 		t.Parallel()
@@ -2154,6 +2090,80 @@ func TestRangeAsOf_ValuesMatchHistorySeek(t *testing.T) {
 	})
 }
 
+// TestRangeAsOf_DBIteratorSkipsFileRange verifies that the DB iterator in
+// RangeAsOf does not read entries within the file range. After collating files,
+// we insert a fake DB-only key with a txNum inside the file range. Without the
+// fix (DB iterator starting from startTxNum), this phantom key would appear in
+// results. With the fix (DB iterator clamped to files.EndTxNum()), it is skipped.
+func TestRangeAsOf_DBIteratorSkipsFileRange(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	logger := log.New()
+	ctx := context.Background()
+
+	test := func(t *testing.T, largeValues bool) {
+		t.Helper()
+		require := require.New(t)
+
+		db, h, txs := filledHistory(t, largeValues, logger)
+		collateAndMergeHistory(t, db, h, txs, false)
+
+		hc := h.BeginFilesRo()
+		defer hc.Close()
+
+		endTxNum := hc.iit.files.EndTxNum()
+		require.Greater(endTxNum, uint64(0), "files should cover a non-empty range")
+
+		startTxNum := endTxNum / 2
+
+		// Insert a phantom key that exists ONLY in DB, at a txNum inside the
+		// file range. This key (0x02...) is outside the normal test data range
+		// (keys use 0x01 prefix) so it has no file entry.
+		phantomKey := []byte{0x02, 0, 0, 0, 0, 0, 0, 0x01}
+		phantomVal := []byte("PHANTOM")
+		rwTx, err := db.BeginRw(ctx)
+		require.NoError(err)
+		defer rwTx.Rollback()
+		if largeValues {
+			dbKey := make([]byte, len(phantomKey)+8)
+			copy(dbKey, phantomKey)
+			binary.BigEndian.PutUint64(dbKey[len(phantomKey):], startTxNum)
+			require.NoError(rwTx.Put(h.ValuesTable, dbKey, phantomVal))
+		} else {
+			var txBuf [8]byte
+			binary.BigEndian.PutUint64(txBuf[:], startTxNum)
+			require.NoError(rwTx.Put(h.ValuesTable, phantomKey, append(txBuf[:], phantomVal...)))
+		}
+		require.NoError(rwTx.Commit())
+
+		// Query the range that includes phantomKey.
+		roTx, err := db.BeginRo(ctx)
+		require.NoError(err)
+		defer roTx.Rollback()
+
+		it, err := hc.RangeAsOf(ctx, startTxNum, phantomKey, nil, order.Asc, -1, roTx)
+		require.NoError(err)
+		defer it.Close()
+
+		// The phantom key must NOT appear — the DB iterator should start from
+		// files.EndTxNum(), skipping the phantom entry whose txNum < endTxNum.
+		for it.HasNext() {
+			k, _, err := it.Next()
+			require.NoError(err)
+			require.False(
+				bytes.Equal(phantomKey, k),
+				"DB iterator leaked phantom key from within the file range",
+			)
+		}
+	}
+
+	t.Run("large_values", func(t *testing.T) { test(t, true) })
+	t.Run("small_values", func(t *testing.T) { test(t, false) })
+}
+
 // TestHistoryRange_EmptyRange verifies that degenerate ranges (empty, inverted,
 // or beyond the data horizon) produce no results without error.
 func TestHistoryRange_EmptyRange(t *testing.T) {
@@ -2207,6 +2217,183 @@ func TestHistoryRange_EmptyRange(t *testing.T) {
 		db, h, txs := filledHistory(t, false, logger)
 		test(t, h, db, txs)
 	})
+}
+
+// TestHistory_IterateChangedRecent_SkipsFileRange verifies that HistoryRange
+// returns correct results when the queried range spans both files and DB,
+// even after DB entries within the file range have been pruned.
+// This tests the fix where iterateChangedRecent adjusts fromTxNum to
+// max(fromTxNum, files.EndTxNum()) so the DB iterator never reads data
+// that belongs to the file range.
+func TestHistory_IterateChangedRecent_SkipsFileRange(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	logger := log.New()
+	ctx := context.Background()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
+	test := func(t *testing.T, largeValues bool) {
+		t.Helper()
+		require := require.New(t)
+
+		// Instance 1: build files, no prune (reference).
+		db1, h1, txs := filledHistory(t, largeValues, logger)
+		collateAndMergeHistory(t, db1, h1, txs, false)
+
+		// Instance 2: build files, then prune DB entries in the file range.
+		db2, h2, _ := filledHistory(t, largeValues, logger)
+		collateAndMergeHistory(t, db2, h2, txs, false)
+
+		var filesEnd int
+		func() {
+			hc2 := h2.BeginFilesRo()
+			defer hc2.Close()
+			filesEnd = int(hc2.iit.files.EndTxNum())
+			require.Greater(filesEnd, 0, "expected files to cover some range")
+		}()
+
+		// Prune DB entries [0, filesEnd) — these are covered by files.
+		rwTx, err := db2.BeginRw(ctx)
+		require.NoError(err)
+		defer rwTx.Rollback()
+		func() {
+			hc2 := h2.BeginFilesRo()
+			defer hc2.Close()
+			_, err = hc2.Prune(ctx, rwTx, 0, uint64(filesEnd), math.MaxUint64, true, logEvery)
+			require.NoError(err)
+		}()
+		require.NoError(rwTx.Commit())
+
+		// Query a range that spans both files and DB.
+		// fromTxNum is well within file range, toTxNum extends past it.
+		fromTxNum := filesEnd / 2
+		toTxNum := -1 // unlimited
+
+		collect := func(db kv.RwDB, h *History) (keys, vals []string) {
+			tx, err := db.BeginRo(ctx)
+			require.NoError(err)
+			defer tx.Rollback()
+
+			hc := h.BeginFilesRo()
+			defer hc.Close()
+
+			it, err := hc.HistoryRange(fromTxNum, toTxNum, order.Asc, -1, tx)
+			require.NoError(err)
+			defer it.Close()
+			for it.HasNext() {
+				k, v, err := it.Next()
+				require.NoError(err)
+				keys = append(keys, fmt.Sprintf("%x", k))
+				vals = append(vals, fmt.Sprintf("%x", v))
+			}
+			return
+		}
+
+		keys1, vals1 := collect(db1, h1)
+		keys2, vals2 := collect(db2, h2)
+
+		require.NotEmpty(keys1, "expected non-empty results")
+		require.Equal(keys1, keys2, "keys mismatch after pruning DB entries in file range")
+		require.Equal(vals1, vals2, "values mismatch after pruning DB entries in file range")
+
+		// Also verify with a bounded toTxNum that still spans the boundary.
+		toTxNum = filesEnd + (int(txs)-filesEnd)/2
+		keys1b, vals1b := collect(db1, h1)
+		keys2b, vals2b := collect(db2, h2)
+		require.Equal(keys1b, keys2b, "bounded range: keys mismatch after prune")
+		require.Equal(vals1b, vals2b, "bounded range: values mismatch after prune")
+	}
+
+	t.Run("large_values", func(t *testing.T) { test(t, true) })
+	t.Run("small_values", func(t *testing.T) { test(t, false) })
+}
+
+// TestHistory_IterateChangedRecent_PhantomDBKey inserts a "phantom" key into
+// the DB at a txNum within the file range — a key that does not exist in
+// segment files. Because iterateChangedRecent now starts the DB iterator at
+// files.EndTxNum(), the phantom is never reached and must not appear in the
+// HistoryRange output. This directly proves the DB iterator skips the file
+// range rather than relying on the union to mask duplicates.
+func TestHistory_IterateChangedRecent_PhantomDBKey(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	logger := log.New()
+	ctx := context.Background()
+
+	test := func(t *testing.T, largeValues bool) {
+		t.Helper()
+		require := require.New(t)
+
+		db, h, txs := filledHistory(t, largeValues, logger)
+		collateAndMergeHistory(t, db, h, txs, false)
+
+		var filesEnd int
+		var valsTable string
+		func() {
+			hc := h.BeginFilesRo()
+			defer hc.Close()
+			filesEnd = int(hc.iit.files.EndTxNum())
+			valsTable = hc.h.ValuesTable
+			require.Greater(filesEnd, 0)
+		}()
+
+		// Pick a txNum well inside the file range.
+		phantomTxNum := uint64(filesEnd / 2)
+		// A key that filledHistory never generates (marker byte 0x02 vs 0x01).
+		var phantomKey [8]byte
+		binary.BigEndian.PutUint64(phantomKey[:], 0x0200000000000099)
+		phantomVal := []byte("phantom")
+
+		// Insert the phantom entry into the DB values table.
+		rwTx, err := db.BeginRw(ctx)
+		require.NoError(err)
+		defer rwTx.Rollback()
+		if largeValues {
+			// Large: key layout is actualKey+txNum -> value.
+			dbKey := make([]byte, len(phantomKey)+8)
+			copy(dbKey, phantomKey[:])
+			binary.BigEndian.PutUint64(dbKey[len(phantomKey):], phantomTxNum)
+			require.NoError(rwTx.Put(valsTable, dbKey, phantomVal))
+		} else {
+			// Small (DupSort): key layout is actualKey, dup is txNum+value.
+			dup := make([]byte, 8+len(phantomVal))
+			binary.BigEndian.PutUint64(dup[:8], phantomTxNum)
+			copy(dup[8:], phantomVal)
+			require.NoError(rwTx.Put(valsTable, phantomKey[:], dup))
+		}
+		require.NoError(rwTx.Commit())
+
+		// Query HistoryRange starting from within the file range.
+		fromTxNum := filesEnd / 4 // well before the phantom
+		roTx, err := db.BeginRo(ctx)
+		require.NoError(err)
+		defer roTx.Rollback()
+
+		hc := h.BeginFilesRo()
+		defer hc.Close()
+
+		it, err := hc.HistoryRange(fromTxNum, -1, order.Asc, -1, roTx)
+		require.NoError(err)
+		defer it.Close()
+
+		phantomKeyHex := fmt.Sprintf("%x", phantomKey[:])
+		for it.HasNext() {
+			k, _, err := it.Next()
+			require.NoError(err)
+			require.NotEqual(phantomKeyHex, fmt.Sprintf("%x", k),
+				"phantom DB key within file range must not appear in HistoryRange output")
+		}
+	}
+
+	t.Run("large_values", func(t *testing.T) { test(t, true) })
+	t.Run("small_values", func(t *testing.T) { test(t, false) })
 }
 
 // BenchmarkHistoryRange benchmarks the hot path: iterating all changed keys

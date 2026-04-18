@@ -144,6 +144,9 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	}
 
 	defer func() {
+		if committeeIndex == nil {
+			return
+		}
 		epoch := *slot / a.beaconChainCfg.SlotsPerEpoch
 		committeesPerSlot := a.syncedData.CommitteeCount(epoch)
 		subnet := subnets.ComputeSubnetForAttestation(

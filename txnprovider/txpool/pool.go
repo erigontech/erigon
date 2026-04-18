@@ -338,6 +338,12 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 
 	defer coreTx.Rollback()
 
+	poolTx, err := p.poolDB.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer poolTx.Rollback()
+
 	block := stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockHeight
 	baseFee := stateChanges.PendingBlockBaseFee
 
@@ -425,7 +431,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 
 	for i, txn := range unwindBlobTxns.Txns {
 		if txn.Type == BlobTxnType {
-			knownBlobTxn, err := p.getCachedBlobTxnLocked(coreTx, txn.IDHash[:])
+			knownBlobTxn, err := p.getCachedBlobTxnLocked(poolTx, txn.IDHash[:])
 			if err != nil {
 				return err
 			}
@@ -756,6 +762,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 
 	txns.Resize(uint(min(n, len(best.ms))))
 	var toRemove []*metaTxn
+	var toDiscard []*metaTxn
 	count := 0
 	i := 0
 
@@ -803,7 +810,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 			if p.isOsaka() {
 				proofs := mt.TxnSlot.Proofs()
 				if len(proofs) != len(mt.TxnSlot.BlobBundles)*int(params.CellsPerExtBlob) { // cell_proofs contains exactly CELLS_PER_EXT_BLOB * len(blobs) cell proofs
-					toRemove = append(toRemove, mt)
+					toDiscard = append(toDiscard, mt)
 					continue
 				}
 			}
@@ -854,6 +861,12 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 	if len(toRemove) > 0 {
 		for _, mt := range toRemove {
 			p.pending.Remove(mt, "best", p.logger)
+		}
+	}
+	if len(toDiscard) > 0 {
+		for _, mt := range toDiscard {
+			p.pending.Remove(mt, "best", p.logger)
+			p.discardLocked(mt, txpoolcfg.UnmatchedBlobTxExt)
 		}
 	}
 

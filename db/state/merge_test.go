@@ -865,7 +865,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 
 	setup := func() (account, storage, commitment *Domain) {
 		account, storage, commitment = newTestDomain(0), newTestDomain(1), newTestDomain(3)
-		checker := NewDependencyIntegrityChecker(account.dirs, log.New())
+		checker := NewDependencyIntegrityChecker(log.New())
 		info := &DependentInfo{
 			entity: FromDomain(commitment.Name),
 			filesGetter: func() *btree2.BTreeG[*FilesItem] {
@@ -1128,9 +1128,7 @@ func TestHistoryAndIIAlignment(t *testing.T) {
 	})
 	t.Cleanup(func() {
 		h.dirtyFiles.Scan(func(item *FilesItem) bool {
-			if item.decompressor != nil {
-				item.decompressor.Close()
-			}
+			item.decompressor.Close()
 			return true
 		})
 	})
@@ -1148,9 +1146,7 @@ func TestHistoryAndIIAlignment(t *testing.T) {
 	})
 	t.Cleanup(func() {
 		ii.dirtyFiles.Scan(func(item *FilesItem) bool {
-			if item.decompressor != nil {
-				item.decompressor.Close()
-			}
+			item.decompressor.Close()
 			return true
 		})
 	})

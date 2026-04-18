@@ -165,22 +165,14 @@ func (i *FilesItem) closeFiles() {
 	if i == nil {
 		return
 	}
-	if i.decompressor != nil {
-		i.decompressor.Close()
-		i.decompressor = nil
-	}
-	if i.index != nil {
-		i.index.Close()
-		i.index = nil
-	}
-	if i.bindex != nil {
-		i.bindex.Close()
-		i.bindex = nil
-	}
-	if i.existence != nil {
-		i.existence.Close()
-		i.existence = nil
-	}
+	i.decompressor.Close()
+	i.decompressor = nil
+	i.index.Close()
+	i.index = nil
+	i.bindex.Close()
+	i.bindex = nil
+	i.existence.Close()
+	i.existence = nil
 }
 
 func (i *FilesItem) FilePaths(basePath string) (relativePaths []string) {

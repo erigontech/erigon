@@ -478,7 +478,18 @@ type DomainIOMetrics struct {
 type DomainMetrics struct {
 	sync.RWMutex
 	DomainIOMetrics
-	Domains map[kv.Domain]*DomainIOMetrics
+	Domains [kv.DomainLen]*DomainIOMetrics
+}
+
+// domainMetrics returns the per-domain metrics entry, initialising it on first access.
+// Caller must hold dm.Lock().
+func (dm *DomainMetrics) domainMetrics(domain kv.Domain) *DomainIOMetrics {
+	if d := dm.Domains[domain]; d != nil {
+		return d
+	}
+	d := &DomainIOMetrics{}
+	dm.Domains[domain] = d
+	return d
 }
 
 func (dm *DomainMetrics) UpdateCacheReads(domain kv.Domain, start time.Time) {
@@ -487,15 +498,9 @@ func (dm *DomainMetrics) UpdateCacheReads(domain kv.Domain, start time.Time) {
 	dm.CacheReadCount++
 	readDuration := time.Since(start)
 	dm.CacheReadDuration += readDuration
-	if d, ok := dm.Domains[domain]; ok {
-		d.CacheReadCount++
-		d.CacheReadDuration += readDuration
-	} else {
-		dm.Domains[domain] = &DomainIOMetrics{
-			CacheReadCount:    1,
-			CacheReadDuration: readDuration,
-		}
-	}
+	d := dm.domainMetrics(domain)
+	d.CacheReadCount++
+	d.CacheReadDuration += readDuration
 }
 
 func (dm *DomainMetrics) UpdateDbReads(domain kv.Domain, start time.Time) {
@@ -504,15 +509,9 @@ func (dm *DomainMetrics) UpdateDbReads(domain kv.Domain, start time.Time) {
 	dm.DbReadCount++
 	readDuration := time.Since(start)
 	dm.DbReadDuration += readDuration
-	if d, ok := dm.Domains[domain]; ok {
-		d.DbReadCount++
-		d.DbReadDuration += readDuration
-	} else {
-		dm.Domains[domain] = &DomainIOMetrics{
-			DbReadCount:    1,
-			DbReadDuration: readDuration,
-		}
-	}
+	d := dm.domainMetrics(domain)
+	d.DbReadCount++
+	d.DbReadDuration += readDuration
 }
 
 func (dm *DomainMetrics) UpdateFileReads(domain kv.Domain, start time.Time) {
@@ -521,13 +520,7 @@ func (dm *DomainMetrics) UpdateFileReads(domain kv.Domain, start time.Time) {
 	dm.FileReadCount++
 	readDuration := time.Since(start)
 	dm.FileReadDuration += readDuration
-	if d, ok := dm.Domains[domain]; ok {
-		d.FileReadCount++
-		d.FileReadDuration += readDuration
-	} else {
-		dm.Domains[domain] = &DomainIOMetrics{
-			FileReadCount:    1,
-			FileReadDuration: readDuration,
-		}
-	}
+	d := dm.domainMetrics(domain)
+	d.FileReadCount++
+	d.FileReadDuration += readDuration
 }

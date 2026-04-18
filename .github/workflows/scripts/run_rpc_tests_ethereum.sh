@@ -21,6 +21,7 @@ DISABLED_TEST_LIST=(
   admin_nodeInfo/test_01.json
   admin_peers/test_01.json
   erigon_nodeInfo/test_1.json
+  debug_accountRange
   eth_coinbase/test_01.json
   eth_createAccessList/test_16.json
   eth_getTransactionByHash/test_02.json
@@ -41,4 +42,4 @@ DISABLED_TEST_LIST=(
 DISABLED_TESTS=$(IFS=,; echo "${DISABLED_TEST_LIST[*]}")
 
 # Call the main test runner script with the required and optional parameters
-"$(dirname "$0")/run_rpc_tests.sh" mainnet v1.121.0 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR"
+"$(dirname "$0")/run_rpc_tests.sh" mainnet v2.1.0 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR"

@@ -246,12 +246,12 @@ func checkCommitmentRootViaRecompute(ctx context.Context, tx kv.TemporalTx, sd *
 			logger.Trace("[integrity] CommitmentRoot", "key", common.Address(k), "blockNum", info.blockNum, "file", filepath.Base(f.Fullpath()))
 		}
 	}
-	touches, err := touchHistoricalKeys(sd, tx, kv.AccountsDomain, info.blockMinTxNum, info.txNum+1, touchLoggingVisitor)
+	touches, err := touchHistoricalKeys(sd, tx, kv.AccountsDomain, info.blockMinTxNum, info.txNum+1, 0, nil /* no pre-built index */, touchLoggingVisitor)
 	if err != nil {
 		return err
 	}
 	logger.Info("[integrity] CommitmentRoot recomputing", "touches", touches, "file", filepath.Base(f.Fullpath()))
-	recomputedBytes, err := sd.ComputeCommitment(ctx, tx, false /* saveStateAfter */, info.blockNum, info.txNum, "integrity", nil /* commitProgress */)
+	recomputedBytes, err := sd.ComputeCommitment(ctx, tx, false /* saveStateAfter */, info.blockNum, info.txNum, "", nil /* commitProgress */)
 	if err != nil {
 		return err
 	}
@@ -654,22 +654,27 @@ func CheckCommitmentHistVal(ctx context.Context, sc SamplerCfg, db kv.TemporalRo
 	// numBuckets controls granularity; sampleRatio controls how many buckets per file to check.
 	// e.g. sampleRatio=0.05 → ~50 out of 1000 buckets → ~5% of each file, as sequential scans.
 	const numBuckets = 10000
+	var completedBuckets atomic.Uint64
 	var totalVals atomic.Uint64
+	var filesChecked int
+	var totalBuckets uint64
 	for i, file := range files {
 		if !strings.HasSuffix(file.Fullpath(), ".v") {
 			continue
 		}
-		// XOR file index into seed so bucket selection is reproducible per file.
-		sampler := NewSampler(sc.Seed^int64(i), sc.SampleRatio)
+		filesChecked++
+		sampler := sc.NewWindowSampler(uint64(i))
 		for bucket := range sampler.Buckets(0, numBuckets) {
+			totalBuckets++
 			eg.Go(func() error {
 				tx, err := db.BeginTemporalRo(ctx)
 				if err != nil {
 					return err
 				}
 				defer tx.Rollback()
-				n, err := checkCommitmentHistValBucket(ctx, tx, br, file, bucket, failFast, logger)
+				n, err := checkCommitmentHistValBucket(ctx, tx, br, file, bucket, failFast, log.LvlDebug, logger)
 				totalVals.Add(n)
+				completedBuckets.Add(1)
 				if err != nil && !failFast {
 					logger.Warn(err.Error())
 				}
@@ -677,18 +682,50 @@ func CheckCommitmentHistVal(ctx context.Context, sc SamplerCfg, db kv.TemporalRo
 			})
 		}
 	}
+	progressCtx, cancelProgress := context.WithCancel(ctx)
+	defer cancelProgress()
+	if totalBuckets > 0 {
+		logTicker := time.NewTicker(20 * time.Second)
+		defer logTicker.Stop()
+		go func() {
+			for {
+				select {
+				case <-progressCtx.Done():
+					return
+				case <-logTicker.C:
+					vals := totalVals.Load()
+					elapsed := time.Since(start).Seconds()
+					rate := 0.0
+					if elapsed > 0 {
+						rate = float64(vals) / elapsed
+					}
+					logger.Info("[integrity] CommitmentHistVal progress",
+						"buckets", fmt.Sprintf("%d/%d", completedBuckets.Load(), totalBuckets),
+						"vals", vals,
+						"vals/s", rate,
+						"seed", sc.Seed,
+						"sampleRatio", sc.SampleRatio,
+					)
+				}
+			}
+		}()
+	}
 	err = eg.Wait()
+	cancelProgress()
 	if err != nil {
 		return err
 	}
 	dur := time.Since(start)
 	total := totalVals.Load()
-	rate := float64(total) / dur.Seconds()
-	logger.Info("[integrity] CommitmentHistVal", "dur", time.Since(start), "files", len(files), "vals", total, "vals/s", rate, "seed", sc.Seed)
+	rate := 0.0
+	if dur.Seconds() > 0 {
+		rate = float64(total) / dur.Seconds()
+	}
+	logger.Info("[integrity] CommitmentHistVal", "dur", dur, "files", filesChecked, "buckets", totalBuckets, "vals", total, "vals/s", rate, "seed", sc.Seed, "sampleRatio", sc.SampleRatio)
 	return nil
 }
 
-func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, file state.VisibleFile, bucket int, failFast bool, logger log.Logger) (uint64, error) {
+func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, file state.VisibleFile, bucket int, failFast bool, lvl log.Lvl, logger log.Logger) (uint64, error) {
 	const numBuckets = 10000
 	start := time.Now()
 	fileName := filepath.Base(file.Fullpath())
@@ -701,7 +738,8 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br serv
 	bucketSize := txCount / numBuckets
 	bucketStart := startTxNum + uint64(bucket)*bucketSize
 	bucketEnd := min(bucketStart+bucketSize, endTxNum)
-	logger.Info(
+	logger.Log(
+		lvl,
 		"[integrity] CommitmentHistVal",
 		"v", fileName,
 		"startTxNum", startTxNum,
@@ -728,7 +766,7 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br serv
 			return 0, ctx.Err()
 		case <-logTicker.C:
 			rate := float64(total) / time.Since(start).Seconds()
-			logger.Info("[integrity] CommitmentHistVal progress", "at", total, "vals/s", rate, "v", fileName)
+			logger.Log(lvl, "[integrity] CommitmentHistVal progress", "at", total, "vals/s", rate, "v", fileName)
 		default:
 			// no-op
 		}
@@ -746,7 +784,7 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br serv
 				return 0, err
 			}
 			if txNum < maxTxNum {
-				logger.Info("[integrity] CommitmentHistVal skipping partial block", "blockNum", blockNum, "txNum", txNum, "maxTxNum", maxTxNum, "v", fileName)
+				logger.Log(lvl, "[integrity] CommitmentHistVal skipping partial block", "blockNum", blockNum, "txNum", txNum, "maxTxNum", maxTxNum, "v", fileName)
 				continue
 			}
 			if txNum != maxTxNum {
@@ -786,18 +824,15 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br serv
 	}
 	dur := time.Since(start)
 	rate := float64(total) / dur.Seconds()
-	logger.Info("[integrity] CommitmentHistVal done", "dur", dur, "vals", total, "vals/s", rate, "v", fileName)
+	logger.Log(lvl, "[integrity] CommitmentHistVal done", "dur", dur, "vals", total, "vals/s", rate, "v", fileName)
 	return total, integrityErr
 }
 
-func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, blockNum uint64, lvl log.Lvl, logger log.Logger) error {
+// checkCommitmentHistAtBlkWithIdx checks commitment for blockNum using the pre-built
+// per-domain key index from ChangedKeysPerBlockIdx.
+func checkCommitmentHistAtBlkWithIdx(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, db kv.TemporalRoDB, br services.FullBlockReader, blockNum uint64, idx *ChangedKeysPerBlockIdx, lvl log.Lvl, logger log.Logger) error {
+	sd.ClearRam(true)
 	logger.Log(lvl, "checking commitment hist at block", "blockNum", blockNum)
-	start := time.Now()
-	tx, err := db.BeginTemporalRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
 	header, err := br.HeaderByNumber(ctx, tx, blockNum)
 	if err != nil {
 		return err
@@ -811,16 +846,26 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	if err != nil {
 		return err
 	}
-	if aggMax := db.(state.HasAgg).Agg().(*state.Aggregator).EndTxNumMinimax(); maxTxNum+1 > aggMax { // don't use .SeekCommitment to check "state progress" - because we are in method which checking "files validity" (can't rely on them here)
+	// Use EndTxNumNoCommitment: this check reconstructs commitment from history
+	// files only (not commitment domain), so commitment domain coverage must not
+	// limit which blocks can be verified.
+	aggTx := state.AggTx(tx)
+	if aggMax := aggTx.EndTxNumNoCommitment(); maxTxNum+1 > aggMax {
 		blockNumOfState, _, _ := txNumsReader.FindBlockNum(ctx, tx, aggMax)
 		return fmt.Errorf("block %d is beyond latest block with state %d", blockNum, blockNumOfState)
 	}
 	toTxNum := maxTxNum + 1
-	sd, err := execctx.NewSharedDomains(ctx, tx, logger)
-	if err != nil {
-		return err
+	// For blockNum==0 there is no prior commitment state (GetAsOf at txNum=0
+	// falls back to latest for the commitment domain). Use commitmentAsOf=toTxNum
+	// so the trie is restored from the committed state at the end of block 0.
+	commitmentAsOf := minTxNum
+	if blockNum == 0 {
+		commitmentAsOf = toTxNum
 	}
-	sd.GetCommitmentCtx().SetHistoryStateReader(tx, toTxNum)
+	// commitment branch data view: as of beginning of the block (or end for block 0)
+	// plain state data view: as of end of the block
+	splitStateReader := commitmentdb.NewSplitHistoryReader(tx, commitmentAsOf, toTxNum, true /* withHistory */)
+	sd.GetCommitmentCtx().SetStateReader(splitStateReader)
 	sd.GetCommitmentCtx().SetTrace(logger.Enabled(ctx, log.LvlTrace))
 	sd.GetCommitmentContext().SetDeferBranchUpdates(false)
 	latestTxNum, latestBlockNum, err := sd.SeekCommitment(ctx, tx) // seek commitment again with new history state reader
@@ -831,27 +876,9 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 		return fmt.Errorf("commitment state blockNum is ahead of blockNum: %d > %d", latestBlockNum, blockNum)
 	}
 	if latestBlockNum < blockNum {
-		// Commitment state is from an earlier block. This is expected when intermediate blocks
-		// had no state changes (empty blocks). Verify the gap is truly empty.
-		if minTxNum > latestTxNum+1 {
-			gapAcc, err := touchHistoricalKeys(sd, tx, kv.AccountsDomain, latestTxNum+1, minTxNum, nil)
-			if err != nil {
-				return err
-			}
-			gapStorage, err := touchHistoricalKeys(sd, tx, kv.StorageDomain, latestTxNum+1, minTxNum, nil)
-			if err != nil {
-				return err
-			}
-			gapCode, err := touchHistoricalKeys(sd, tx, kv.CodeDomain, latestTxNum+1, minTxNum, nil)
-			if err != nil {
-				return err
-			}
-			if gapAcc+gapStorage+gapCode > 0 {
-				return fmt.Errorf("commitment state blockNum doesn't match blockNum: %d != %d (gap has %d acc, %d storage, %d code changes)", latestBlockNum, blockNum, gapAcc, gapStorage, gapCode)
-			}
-		}
-
-		// Verify gap blocks all share the same state root (no state changes confirmed above).
+		// Gap: commitment state is from an earlier block (empty blocks in between).
+		// Verify the gap is truly empty by comparing state roots from block headers —
+		// any state change would produce a different root, so this is sufficient.
 		refHeader, err := br.HeaderByNumber(ctx, tx, latestBlockNum)
 		if err != nil {
 			return err
@@ -881,23 +908,16 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 			logger.Trace("commitment touched key", args...)
 		}
 	}
-	touchStart := time.Now()
-	accTouches, err := touchHistoricalKeys(sd, tx, kv.AccountsDomain, minTxNum, toTxNum, touchLoggingVisitor)
-	if err != nil {
+	if _, err := touchHistoricalKeys(sd, tx, kv.AccountsDomain, minTxNum, toTxNum, blockNum, idx, touchLoggingVisitor); err != nil {
 		return err
 	}
-	storageTouches, err := touchHistoricalKeys(sd, tx, kv.StorageDomain, minTxNum, toTxNum, touchLoggingVisitor)
-	if err != nil {
+	if _, err := touchHistoricalKeys(sd, tx, kv.StorageDomain, minTxNum, toTxNum, blockNum, idx, touchLoggingVisitor); err != nil {
 		return err
 	}
-	codeTouches, err := touchHistoricalKeys(sd, tx, kv.CodeDomain, minTxNum, toTxNum, touchLoggingVisitor)
-	if err != nil {
+	if _, err := touchHistoricalKeys(sd, tx, kv.CodeDomain, minTxNum, toTxNum, blockNum, idx, touchLoggingVisitor); err != nil {
 		return err
 	}
-	touchDur := time.Since(touchStart)
-	logger.Log(lvl, "commitment touched keys", "accTouches", accTouches, "storageTouches", storageTouches, "codeTouches", codeTouches, "touchDur", touchDur)
-	recalcStart := time.Now()
-	root, err := sd.ComputeCommitment(ctx, tx, false /* saveStateAfter */, blockNum, maxTxNum, "integrity", nil /* commitProgress */)
+	root, err := sd.ComputeCommitment(ctx, tx, false /* saveStateAfter */, blockNum, maxTxNum, "", nil /* commitProgress */)
 	if err != nil {
 		return err
 	}
@@ -905,30 +925,44 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	if header.Root != rootHash {
 		return fmt.Errorf("commitment root mismatch: %s != %s (blockNum=%d,txNum=%d)", header.Root, rootHash, blockNum, maxTxNum)
 	}
-	logger.Log(lvl,
-		"commitment root matches",
-		"blockNum", blockNum,
-		"txNum", maxTxNum,
-		"root", rootHash,
-		"totalDur", time.Since(start),
-		"touchDur", touchDur,
-		"recalcDur", time.Since(recalcStart),
-	)
 	return nil
 }
 
-func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, br services.FullBlockReader, from, to uint64, failFast bool, logger log.Logger) error {
+func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, blockNum uint64, lvl log.Lvl, logger log.Logger) error {
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	sd, err := execctx.NewSharedDomains(ctx, tx, logger)
+	if err != nil {
+		return err
+	}
+	defer sd.Close()
+	idx, err := NewChangedKeysPerBlockIdx(ctx, tx, br, blockNum, blockNum+1, logger)
+	if err != nil {
+		return err
+	}
+	return checkCommitmentHistAtBlkWithIdx(ctx, tx, sd, db, br, blockNum, idx, lvl, logger)
+}
+
+// checkCommitmentHistWindowSize is the number of blocks covered by a single
+// pre-built ChangedKeysPerBlockIdx.  Large enough to amortize the index build cost
+// across many sampled blocks; small enough to keep memory bounded (~few hundred MB).
+const checkCommitmentHistWindowSize = 10_000
+
+func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, br services.FullBlockReader, from, to uint64, logger log.Logger) error {
 	if from >= to {
 		return fmt.Errorf("invalid blk range: %d >= %d", from, to)
 	}
-	sampler := sc.NewSampler()
 	start := time.Now()
 	var checked atomic.Uint64
-	var lastBlockNum atomic.Uint64
-	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(runtime.GOMAXPROCS(-1)) // all cpus, because no producer-worker
+	var windowsDone atomic.Uint64
+	totalWindows := (to - from + checkCommitmentHistWindowSize - 1) / checkCommitmentHistWindowSize
+	expectedBlks := sc.NewSampler().ExpectedN(to - from)
 
-	logTicker := time.NewTicker(20 * time.Second)
+	const logInterval = 20 * time.Second
+	logTicker := time.NewTicker(logInterval)
 	defer logTicker.Stop()
 	go func() {
 		for {
@@ -937,43 +971,64 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 				return
 			case <-logTicker.C:
 				done := checked.Load()
-				elapsed := time.Since(start).Seconds()
-				rate := float64(done) / elapsed
-				logger.Info("[integrity] "+string(StateRootVerifyByHistory), "blks/s", rate, "checked", common.PrettyCounter(done), "blockNum", common.PrettyCounter(lastBlockNum.Load()))
+				wDone := windowsDone.Load()
+				blkRate := float64(done) / time.Since(start).Seconds()
+				logger.Info("[integrity] "+string(StateRootVerifyByHistory),
+					"blks/s", fmt.Sprintf("%.1f", blkRate),
+					"checked", fmt.Sprintf("%s/%s", common.PrettyCounter(done), common.PrettyCounter(expectedBlks)),
+					"windows", fmt.Sprintf("%d/%d", wDone, totalWindows),
+					"blkRange", fmt.Sprintf("%s-%s", common.PrettyCounter(from), common.PrettyCounter(to)),
+				)
 			}
 		}
 	}()
 
-	var integrityErr error
-	var blks uint64
-	for blockNum := range sampler.BlockNums(from, to) {
-		blks++
-		blockNum := blockNum
+	// Each worker owns a window: builds its own ChangedKeysPerBlockIdx then checks
+	// its own sampled blocks — index building and block checking both run in parallel.
+	g, wCtx := errgroup.WithContext(ctx)
+	g.SetLimit(runtime.GOMAXPROCS(-1)) // all cpus, because no producer-worker
+	for windowStart := from; windowStart < to; windowStart += checkCommitmentHistWindowSize {
+		windowStart := windowStart
+		windowEnd := min(windowStart+checkCommitmentHistWindowSize, to)
 		g.Go(func() error {
-			if ctx.Err() != nil {
-				return ctx.Err()
+			if wCtx.Err() != nil {
+				return wCtx.Err()
 			}
-			if err := CheckCommitmentHistAtBlk(ctx, db, br, blockNum, log.LvlDebug, logger); err != nil {
-				err = fmt.Errorf("checkCommitmentHistAtBlk: %d, %w", blockNum, err)
-				if failFast {
-					return err
+			tx, err := db.BeginTemporalRo(wCtx)
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
+			sd, err := execctx.NewSharedDomains(wCtx, tx, logger)
+			if err != nil {
+				return err
+			}
+			defer sd.Close()
+			idx, err := NewChangedKeysPerBlockIdx(wCtx, tx, br, windowStart, windowEnd, logger)
+			if err != nil {
+				return fmt.Errorf("CheckCommitmentHistAtBlkRange: build index window=[%d,%d): %w", windowStart, windowEnd, err)
+			}
+			// Each goroutine needs its own Sampler
+			sampler := sc.NewWindowSampler(windowStart)
+			for blockNum := range sampler.BlockNums(windowStart, windowEnd) {
+				if err := checkCommitmentHistAtBlkWithIdx(wCtx, tx, sd, db, br, blockNum, idx, log.LvlTrace, logger); err != nil {
+					return fmt.Errorf("checkCommitmentHistAtBlk: %d, %w", blockNum, err)
 				}
-				logger.Warn(err.Error())
-				integrityErr = err
-				return nil
+				checked.Add(1)
 			}
-			checked.Add(1)
-			lastBlockNum.Store(blockNum)
+			windowsDone.Add(1)
 			return nil
 		})
 	}
 	if err := g.Wait(); err != nil {
 		return err
 	}
+
 	dur := time.Since(start)
-	rate := float64(blks) / dur.Seconds()
-	logger.Info("checked commitment hist at blk range", "dur", dur, "blks", blks, "blks/s", rate, "from", from, "to", to, "seed", sampler.Seed, "sampleRatio", sampler.SampleRatio)
-	return integrityErr
+	n := checked.Load()
+	rate := float64(n) / dur.Seconds()
+	logger.Info("checked commitment hist at blk range", "dur", dur, "blks", n, "blks/s", fmt.Sprintf("%.1f", rate), "from", from, "to", to, "seed", sc.Seed, "sampleRatio", sc.SampleRatio)
+	return nil
 }
 
 func CheckStateVerify(ctx context.Context, db kv.TemporalRoDB, failFast bool, fromStep uint64, logger log.Logger) error {
@@ -2059,16 +2114,27 @@ func deriveDecompAndReaderForOtherDomain(baseFile string, oldDomain, newDomain k
 	return decomp, seg.NewReader(decomp.MakeGetter(), compression), decomp.Close, nil
 }
 
-func touchHistoricalKeys(sd *execctx.SharedDomains, tx kv.TemporalTx, d kv.Domain, fromTxNum uint64, toTxNum uint64, visitor func(k []byte)) (uint64, error) {
-	// toTxNum is exclusive per kv.TemporalTx.HistoryRange contract [from,to)
-	stream, err := tx.HistoryRange(d, int(fromTxNum), int(toTxNum), order.Asc, -1)
+func touchHistoricalKeys(sd *execctx.SharedDomains, tx kv.TemporalTx, d kv.Domain, fromTxNum uint64, toTxNum uint64, blockNum uint64, idx *ChangedKeysPerBlockIdx, visitor func(k []byte)) (uint64, error) {
+	if idx != nil {
+		domainIdx := idx[d]
+		offsets := domainIdx.Offsets(blockNum)
+		for _, off := range offsets {
+			k := domainIdx.Key(off)
+			if visitor != nil {
+				visitor([]byte(k))
+			}
+			sd.GetCommitmentCtx().TouchKey(d, k, nil)
+		}
+		return uint64(len(offsets)), nil
+	}
+	it, err := tx.Debug().HistoryKeyTxNumRange(d, int(fromTxNum), int(toTxNum), order.Asc, -1)
 	if err != nil {
 		return 0, err
 	}
-	defer stream.Close()
+	defer it.Close()
 	var touches uint64
-	for stream.HasNext() {
-		k, _, err := stream.Next()
+	for it.HasNext() {
+		k, _, err := it.Next()
 		if err != nil {
 			return 0, err
 		}

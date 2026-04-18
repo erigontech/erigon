@@ -2560,7 +2560,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 				return fmt.Errorf("account with plainkey=%x not found: %w", plainKey, err)
 			}
 			if hph.trace {
-				addrHash := crypto.Keccak256(plainKey)
+				addrHash := crypto.HashData(plainKey)
 				fmt.Printf("account with plainKey=%x, addrHash=%x FOUND = %v\n", plainKey, addrHash, update)
 			}
 		} else {
@@ -2658,7 +2658,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		warmup.EnableWarmupCache = hph.enableWarmupCache
 		warmuper = NewWarmuper(ctx, warmup)
 		warmuper.Start()
-		defer warmuper.WaitAndClose()
+		defer warmuper.CloseAndWait()
 		// Set cache on trie if warmup cache is enabled
 		if warmup.EnableWarmupCache {
 			hph.cache = warmuper.Cache()
@@ -2872,6 +2872,11 @@ func (hph *HexPatriciaHashed) Reset() {
 
 func (hph *HexPatriciaHashed) ResetContext(ctx PatriciaContext) {
 	hph.ctx = ctx
+}
+
+// Cache returns the active warmup cache, or nil if none is set.
+func (hph *HexPatriciaHashed) Cache() *WarmupCache {
+	return hph.cache
 }
 
 // branchFromCacheOrDB reads branch data from cache if available, otherwise from DB.
