@@ -420,7 +420,60 @@ func (sd *TemporalMemBatch) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockN
 }
 
 func (sd *TemporalMemBatch) Unwind(unwindToTxNum uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
+	sd.latestStateLock.Lock()
+	defer sd.latestStateLock.Unlock()
+
 	sd.unwindToTxNum = unwindToTxNum
+
+	// Drop overlay entries stamped with txNum > unwindToTxNum. Without this,
+	// getLatest returns entries written inside the unwound range because it
+	// picks dataWithTxNums[len-1] without consulting sd.unwindToTxNum — the
+	// unwindChangeset fallback below is only reachable on an overlay miss.
+	// Observed as post-Fusaka gas-used mismatches after forkchoice-driven
+	// unwinds (an SSTORE on a slot first-written inside the unwound range
+	// charges SSTORE_RESET instead of SSTORE_SET — a 17100 gas shortfall
+	// per slot). Keys whose slice empties out are removed so the
+	// unwindChangeset fallback can supply the pre-unwind answer.
+	pruneSlice := func(entries []dataWithTxNum) []dataWithTxNum {
+		kept := entries[:0]
+		for _, e := range entries {
+			if e.txNum <= unwindToTxNum {
+				kept = append(kept, e)
+			}
+		}
+		return kept
+	}
+	for d := range sd.domains {
+		for k, entries := range sd.domains[d] {
+			kept := pruneSlice(entries)
+			if len(kept) == 0 {
+				delete(sd.domains[d], k)
+			} else {
+				sd.domains[d][k] = kept
+			}
+		}
+	}
+	// Collect first, mutate after: btree.Scan doesn't allow Set/Delete during traversal.
+	type storageEdit struct {
+		key  string
+		kept []dataWithTxNum
+	}
+	var edits []storageEdit
+	sd.storage.Scan(func(k string, entries []dataWithTxNum) bool {
+		kept := pruneSlice(entries)
+		if len(kept) != len(entries) {
+			edits = append(edits, storageEdit{k, kept})
+		}
+		return true
+	})
+	for _, e := range edits {
+		if len(e.kept) == 0 {
+			sd.storage.Delete(e.key)
+		} else {
+			sd.storage.Set(e.key, e.kept)
+		}
+	}
+
 	var unwindChangeset *[kv.DomainLen]map[string]kv.DomainEntryDiff
 
 	if changeset != nil {
