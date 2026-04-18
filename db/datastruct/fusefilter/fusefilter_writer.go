@@ -109,10 +109,6 @@ func writeFilter(features Features, filter *xorfilter.BinaryFuse[uint8], fw io.W
 	return headerSize + len(filter.Fingerprints), nil
 }
 
-func (w *WriterOffHeap) write(filter *xorfilter.BinaryFuse[uint8], fw io.Writer) (int, error) {
-	return writeFilter(w.features, filter, fw)
-}
-
 func (w *WriterOffHeap) AddHash(k uint64) error {
 	w.page[w.count%len(w.page)] = k
 	w.count++
@@ -130,7 +126,7 @@ func (w *WriterOffHeap) BuildTo(to io.Writer) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("%s %w", w.tmpFilePath, err)
 	}
-	return w.write(filter, to)
+	return writeFilter(w.features, filter, to)
 }
 
 type Writer struct {

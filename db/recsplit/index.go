@@ -264,6 +264,12 @@ func (idx *Index) init() (err error) {
 		if err != nil {
 			return fmt.Errorf("NewReaderShardedOnBytes: %w, %s", err, idx.fileName)
 		}
+		if fusefilter.MadvWillNeedByDefault {
+			idx.existenceV2.MadvWillNeed()
+		}
+		if fusefilter.MadvNormalByDefault {
+			idx.existenceV2.MadvNormal()
+		}
 		offset += sz
 	}
 
