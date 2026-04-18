@@ -2091,6 +2091,18 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, stateObject, isDirty, sdb.trace, sdb.tracingHooks, true); err != nil {
 			return err
 		}
+		// Match FinalizeTx's behavior: once updateAccount has marked the
+		// account as deleted (selfdestructed or EIP-161 empty-removal),
+		// drop its versioned reads so they don't leak into the BAL. The
+		// block_assembler's serial path (ApplyTransaction → FinalizeTx) does
+		// this at intra_block_state.go:1968; the parallel executor's
+		// txtask.Execute calls SoftFinalise + MakeWriteSet instead and
+		// previously skipped this step, producing BALs with extra
+		// storageReads for destroyed addrs (e.g., CREATE-fails-in-init-code
+		// with SSTORE gas-calc reads on the transient contract).
+		if stateObject.deleted {
+			delete(sdb.versionedReads, addr)
+		}
 	}
 
 	var reverted []accounts.Address
