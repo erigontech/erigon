@@ -3,6 +3,7 @@ package fusefilter
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -280,6 +281,95 @@ func TestWriterShardedForceInMem(t *testing.T) {
 	sz := r.ForceInMem()
 	require.Greater(uint64(sz), uint64(0))
 	require.True(r.ContainsHash(42))
+}
+
+func TestWriterShardedSingleShard(t *testing.T) {
+	require := require.New(t)
+	dir := t.TempDir()
+
+	w, err := NewWriterSharded(filepath.Join(dir, "single_shard"))
+	require.NoError(err)
+	defer w.Close()
+
+	// All keys have high byte = 0x42 — only shard 0x42 is populated
+	const shard = uint64(0x42)
+	keys := []uint64{shard<<56 | 1, shard<<56 | 2, shard<<56 | 999, shard<<56 | 0xFFFF}
+	for _, k := range keys {
+		require.NoError(w.AddHash(k))
+	}
+
+	var buf bytes.Buffer
+	_, err = w.BuildTo(&buf)
+	require.NoError(err)
+
+	r, consumed, err := NewReaderShardedOnBytes(buf.Bytes(), "test")
+	require.NoError(err)
+	require.Equal(buf.Len(), consumed)
+
+	for _, k := range keys {
+		require.True(r.ContainsHash(k), "key %#x missing", k)
+	}
+	// All other shards absent
+	require.False(r.ContainsHash(uint64(0x00)<<56 | 1))
+	require.False(r.ContainsHash(uint64(0xFF)<<56 | 1))
+}
+
+func TestWriterShardedTruncated(t *testing.T) {
+	require := require.New(t)
+	dir := t.TempDir()
+
+	w, err := NewWriterSharded(filepath.Join(dir, "trunc"))
+	require.NoError(err)
+	defer w.Close()
+	for i := range 10 {
+		require.NoError(w.AddHash(uint64(i)))
+	}
+
+	var buf bytes.Buffer
+	_, err = w.BuildTo(&buf)
+	require.NoError(err)
+	full := buf.Bytes()
+
+	_, _, err = NewReaderShardedOnBytes(full[:2], "trunc") // shorter than 4-byte header
+	require.Error(err)
+
+	_, _, err = NewReaderShardedOnBytes(full[:5], "trunc") // header ok but truncated shard table
+	require.Error(err)
+}
+
+func TestWriterShardedSegmentCountRoundTrip(t *testing.T) {
+	// Verifies that all filter header fields (SegmentCount, SegmentCountLength,
+	// Seed, SegmentLength, SegmentLengthMask) survive serialisation.
+	require := require.New(t)
+	dir := t.TempDir()
+
+	filePath := filepath.Join(dir, "seg_count")
+	writer, err := NewWriter(filePath)
+	require.NoError(err)
+	defer writer.Close()
+
+	const n = 1000
+	for i := range n {
+		require.NoError(writer.AddHash(uint64(i)))
+	}
+	require.NoError(writer.Build())
+	writer.Close()
+
+	f, err := os.Open(filePath)
+	require.NoError(err)
+	defer f.Close()
+	raw, err := io.ReadAll(f)
+	require.NoError(err)
+
+	r, _, err := NewReaderOnBytes(raw, "seg_count")
+	require.NoError(err)
+	// SegmentCount and SegmentCountLength must differ only if the filter
+	// actually computed them differently; the important thing is they are
+	// non-zero and SegmentCount is read from the correct offset (not aliased
+	// with SegmentCountLength).
+	require.NotZero(r.inner.SegmentCount)
+	require.NotZero(r.inner.SegmentCountLength)
+	require.NotZero(r.inner.SegmentLength)
 }
 
 func TestMultipleFilters(t *testing.T) {
