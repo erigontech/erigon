@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -50,7 +51,7 @@ func VerifyTorrentFiles(ctx context.Context, dir string, failFast bool, logger l
 	var totalBytes int64
 	toVerify := make([]string, 0, len(torrentFiles))
 	for _, tf := range torrentFiles {
-		dataFile := tf[:len(tf)-8] // strip .torrent
+		dataFile := strings.TrimSuffix(tf, ".torrent")
 		info, err := os.Stat(dataFile)
 		if os.IsNotExist(err) {
 			continue // no data file, skip
@@ -126,7 +127,7 @@ func verifyFileFromTorrent(ctx context.Context, torrentPath string, completedByt
 		return fmt.Errorf("unmarshaling torrent info %s: %w", torrentPath, err)
 	}
 
-	dataPath := torrentPath[:len(torrentPath)-8] // strip .torrent
+	dataPath := strings.TrimSuffix(torrentPath, ".torrent")
 	f, err := os.Open(dataPath)
 	if err != nil {
 		return fmt.Errorf("opening data file %s: %w", dataPath, err)
