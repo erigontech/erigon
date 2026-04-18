@@ -32,6 +32,7 @@ import (
 )
 
 func TestArchiveWriter(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	logger := log.New()
 
@@ -145,6 +146,7 @@ func TestArchiveWriter(t *testing.T) {
 }
 
 func TestPrunableProgress(t *testing.T) {
+	t.Parallel()
 	_, tx := memdb.NewTestTx(t)
 	SaveExecV3PrunableProgress(tx, []byte("test"), 100)
 	s, err := GetExecV3PrunableProgress(tx, []byte("test"))
