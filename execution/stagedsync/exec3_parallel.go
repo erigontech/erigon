@@ -1255,6 +1255,19 @@ func (result *execResult) finalizeWithIBS(
 		return nil, nil, nil, err
 	}
 
+	// Snapshot the fee-distribution reads (the BalancePath reads recorded by
+	// the AddBalance/SubBalance calls above on burnt + coinbase). These are
+	// the only reads the block assembler's serial path contributes from
+	// finalization, so they're the only ones that belong in the returned
+	// addReads. postApplyMessageFunc and FinalizeTx below touch stateObjects
+	// for other accounts (EIP-7708 selfdestruct log emission, stateWriter
+	// storage diffing) which can trigger synthetic versionedRead calls,
+	// particularly via the StoragePath-with-IncarnationPath-in-versionMap
+	// branch at versionedio.go:874 that records zero-valued StoragePath reads.
+	// We restore the snapshot after those ops so their spurious reads don't
+	// leak into the BAL and diverge from the proposer's assembler BAL.
+	feeDistributionReads := ibs.VersionedReads()
+
 	if engine != nil {
 		if postApplyMessageFunc := engine.GetPostApplyMessageFunc(); postApplyMessageFunc != nil {
 			execResult := result.ExecutionResult
@@ -1296,6 +1309,11 @@ func (result *execResult) finalizeWithIBS(
 	if err := ibs.FinalizeTx(chainRules, stateWriter); err != nil {
 		return nil, nil, nil, err
 	}
+
+	// Restore the snapshot captured before postApplyMessageFunc/FinalizeTx —
+	// see comment near feeDistributionReads above. Only the fee-distribution
+	// reads survive, matching the block assembler's serial BAL contribution.
+	ibs.SetVersionedReads(feeDistributionReads)
 
 	receipt, err := result.CreateNextReceipt(prevReceipt)
 	if err != nil {

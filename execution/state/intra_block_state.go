@@ -2444,6 +2444,15 @@ func (sdb *IntraBlockState) ResetVersionedReads() {
 	sdb.versionedReads = nil
 }
 
+// SetVersionedReads replaces the tracked versioned reads. Use with the value
+// returned from a prior VersionedReads() call to implement snapshot/restore
+// semantics around operations that generate synthetic reads the caller does
+// not want in the final BAL (e.g. the parallel executor's finalize-path
+// postApplyMessageFunc / FinalizeTx).
+func (sdb *IntraBlockState) SetVersionedReads(rs ReadSet) {
+	sdb.versionedReads = rs
+}
+
 // VersionedWrites returns the current versioned write set if this block
 // checkDirty - is mainly for testing, for block processing this is called
 // after the block execution is completed and non dirty writes (due to reversions)
