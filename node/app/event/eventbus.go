@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"reflect"
 	"sync"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/node/app"
@@ -54,10 +55,18 @@ type EventBus interface {
 }
 
 // eventBus - box for handlers and callbacks.
+//
+// Concurrency model: the handler map is stored as an atomic.Pointer and
+// updated via copy-on-write. Readers (Publish, HasCallback) load the
+// pointer without any lock. Writers (Subscribe, Unsubscribe) serialize
+// on writerLock to compose the mutation, then clone the current map,
+// apply the mutation, and CAS-swap the new map in. This eliminates the
+// previous read/write mutex and the clone-on-publish copy, and makes
+// re-entrant Publish from inside handlers safe without any locking.
 type eventBus struct {
 	execPool      util.ExecPool
-	handlerMap    *handlerMap
-	lock          sync.RWMutex // a lock for the map
+	handlerMap    atomic.Pointer[handlerMap]
+	writerLock    sync.Mutex // serializes Subscribe/Unsubscribe writers
 	wg            sync.WaitGroup
 	prevQueueSize int
 }
@@ -141,7 +150,7 @@ func (hmap *handlerMap) publish(bus *eventBus, args []interface{}, argIndex int)
 				logEnabled := log.TraceEnabled()
 
 				if !handler.async {
-					handler.doPublish(handler.bus, logEnabled, args...)
+					handler.doPublish(handler.bus.Load(), logEnabled, args...)
 				} else {
 					asyncHandler := handler
 					bus.wg.Add(1)
@@ -149,16 +158,14 @@ func (hmap *handlerMap) publish(bus *eventBus, args []interface{}, argIndex int)
 					if log.TraceEnabled() {
 						log.Trace("Exec handler func",
 							"handler", fmt.Sprint(asyncHandler),
-							"bus", app.LogInstance(asyncHandler.bus),
+							"bus", app.LogInstance(asyncHandler.bus.Load()),
 							"poolSize", bus.execPool.PoolSize(),
 							"queueSize", bus.execPool.QueueSize(),
 							"args", fmt.Sprint(args...))
 					}
 
 					bus.execPool.Exec(func() {
-						bus.lock.RLock()
-						handlerBus := asyncHandler.bus
-						bus.lock.RUnlock()
+						handlerBus := asyncHandler.bus.Load()
 						if handlerBus != nil {
 							asyncHandler.doPublish(handlerBus, logEnabled, args...)
 						} else {
@@ -223,10 +230,16 @@ func (hmap *handlerMap) findHandlerIdx(callback reflect.Value) (int, *eventHandl
 }
 
 type eventHandler struct {
-	bus      *eventBus
+	bus      atomic.Pointer[eventBus] // nil-signal on unsubscribe; loaded lock-free by async callbacks
 	callBack reflect.Value
 	flagOnce bool
 	async    bool
+}
+
+func newEventHandler(bus *eventBus, callBack reflect.Value, flagOnce, async bool) *eventHandler {
+	h := &eventHandler{callBack: callBack, flagOnce: flagOnce, async: async}
+	h.bus.Store(bus)
+	return h
 }
 
 func (handler *eventHandler) doPublish(bus *eventBus, logEnabled bool, args ...interface{}) {
@@ -268,27 +281,27 @@ func (handler *eventHandler) doPublish(bus *eventBus, logEnabled bool, args ...i
 // NewEventBus returns new eventBus with empty handlers.
 func NewEventBus(execPool util.ExecPool) EventBus {
 	b := &eventBus{
-		execPool,
-		&handlerMap{nil, map[reflect.Type]*handlerMap{}, []*eventHandler{}},
-		sync.RWMutex{},
-		sync.WaitGroup{},
-		0,
+		execPool:      execPool,
+		prevQueueSize: 0,
 	}
+	b.handlerMap.Store(&handlerMap{nil, map[reflect.Type]*handlerMap{}, []*eventHandler{}})
 	return b
 }
 
-// doSubscribe handles the subscription logic and is utilized by the public Subscribe functions
+// doSubscribe handles the subscription logic and is utilized by the public Subscribe functions.
+// Uses copy-on-write: clone the current root, mutate the clone, atomically swap it in.
 func (bus *eventBus) doSubscribe(fn interface{}, handler *eventHandler) error {
-	bus.lock.Lock()
-	defer bus.lock.Unlock()
-
 	fnType := reflect.TypeOf(fn)
 	if !(fnType.Kind() == reflect.Func) {
 		return fmt.Errorf("%s is not of type reflect.Func", reflect.TypeOf(fn).Kind())
 	}
 
+	bus.writerLock.Lock()
+	defer bus.writerLock.Unlock()
+
+	root := bus.handlerMap.Load().clone()
 	argCount := fnType.NumIn()
-	currentMap := bus.handlerMap
+	currentMap := root
 
 	for argIndex := 0; argIndex < argCount; argIndex++ {
 		argType := fnType.In(argIndex)
@@ -308,13 +321,14 @@ func (bus *eventBus) doSubscribe(fn interface{}, handler *eventHandler) error {
 
 	currentMap.handlers = append(currentMap.handlers, handler)
 
+	bus.handlerMap.Store(root)
 	return nil
 }
 
 // Subscribe subscribes to a topic.
 // Returns error if `fn` is not a function.
 func (bus *eventBus) Subscribe(fn interface{}) error {
-	return bus.doSubscribe(fn, &eventHandler{bus, reflect.ValueOf(fn), false, false})
+	return bus.doSubscribe(fn, newEventHandler(bus, reflect.ValueOf(fn), false, false))
 }
 
 // SubscribeAsync subscribes to a topic with an asynchronous callback
@@ -322,20 +336,20 @@ func (bus *eventBus) Subscribe(fn interface{}) error {
 // run serially (true) or concurrently (false)
 // Returns error if `fn` is not a function.
 func (bus *eventBus) SubscribeAsync(fn interface{}) error {
-	return bus.doSubscribe(fn, &eventHandler{bus, reflect.ValueOf(fn), false, true})
+	return bus.doSubscribe(fn, newEventHandler(bus, reflect.ValueOf(fn), false, true))
 }
 
 // SubscribeOnce subscribes to a topic once. Handler will be removed after executing.
 // Returns error if `fn` is not a function.
 func (bus *eventBus) SubscribeOnce(fn interface{}) error {
-	return bus.doSubscribe(fn, &eventHandler{bus, reflect.ValueOf(fn), true, false})
+	return bus.doSubscribe(fn, newEventHandler(bus, reflect.ValueOf(fn), true, false))
 }
 
 // SubscribeOnceAsync subscribes to a topic once with an asynchronous callback
 // Handler will be removed after executing.
 // Returns error if `fn` is not a function.
 func (bus *eventBus) SubscribeOnceAsync(fn interface{}) error {
-	return bus.doSubscribe(fn, &eventHandler{bus, reflect.ValueOf(fn), true, true})
+	return bus.doSubscribe(fn, newEventHandler(bus, reflect.ValueOf(fn), true, true))
 }
 
 // HasCallback returns true if any callbacks exist for the passed in types,
@@ -344,11 +358,8 @@ func (bus *eventBus) SubscribeOnceAsync(fn interface{}) error {
 //	used for the lookup, otherwise the types are assumed to be argument
 //	types
 func (bus *eventBus) HasCallback(types ...reflect.Type) bool {
-	bus.lock.Lock()
-	defer bus.lock.Unlock()
-
 	argCount := len(types)
-	currentMap := bus.handlerMap
+	currentMap := bus.handlerMap.Load()
 
 	for argIndex := 0; argIndex < argCount; argIndex++ {
 		argType := types[argIndex]
@@ -377,14 +388,16 @@ func (bus *eventBus) HasCallback(types ...reflect.Type) bool {
 
 // Unsubscribe removes callback defined for a topic.
 // Returns error if there are no callbacks subscribed to the topic.
+// Uses copy-on-write: clone the root, mutate the clone, atomically swap.
 func (bus *eventBus) Unsubscribe(fn interface{}) error {
-	bus.lock.Lock()
-	defer bus.lock.Unlock()
+	bus.writerLock.Lock()
+	defer bus.writerLock.Unlock()
 
 	fnType := reflect.TypeOf(fn)
 
 	argCount := fnType.NumIn()
-	currentMap := bus.handlerMap
+	root := bus.handlerMap.Load().clone()
+	currentMap := root
 	prevMaps := make([]*handlerMap, 0, argCount)
 
 	for argIndex := 0; argIndex < argCount; argIndex++ {
@@ -400,7 +413,7 @@ func (bus *eventBus) Unsubscribe(fn interface{}) error {
 
 	if idx, handler := currentMap.findHandlerIdx(reflect.ValueOf(fn)); idx >= 0 {
 		currentMap.removeHandler(idx)
-		handler.bus = nil
+		handler.bus.Store(nil)
 	} else {
 		return fmt.Errorf("handler %v not subscrbed", fn)
 	}
@@ -415,27 +428,31 @@ func (bus *eventBus) Unsubscribe(fn interface{}) error {
 		}
 	}
 
+	bus.handlerMap.Store(root)
 	return nil
 }
 
 // Publish executes callback defined for a topic. Any additional argument will be transferred to the callback.
-// Handlers are snapshotted under lock, then executed without holding the lock to avoid deadlocks
-// if a handler calls Publish, Subscribe, or Unsubscribe. Once-handlers are removed from the
-// original map under lock after execution completes.
+// Lock-free: the current handler map is loaded atomically and iterated as an immutable snapshot.
+// Re-entrant calls to Publish/Subscribe/Unsubscribe from inside a handler are safe — writers
+// operate on a separate cloned map that is CAS-swapped at the end.
+// Once-handlers are removed via copy-on-write in a compare-and-swap loop after execution.
 func (bus *eventBus) Publish(args ...interface{}) int {
-	bus.lock.Lock()
-	snapshot := bus.handlerMap.clone()
-	bus.lock.Unlock()
-
+	snapshot := bus.handlerMap.Load()
 	count := snapshot.publish(bus, args, 0)
 
-	// Remove once-handlers from the real map under lock.
+	// Remove once-handlers in a CAS loop so concurrent writers are not lost.
 	if onceHandlers := snapshot.collectOnceHandlers(); len(onceHandlers) > 0 {
-		bus.lock.Lock()
-		for _, h := range onceHandlers {
-			bus.handlerMap.removeOnceHandler(h.callBack)
+		for {
+			current := bus.handlerMap.Load()
+			next := current.clone()
+			for _, h := range onceHandlers {
+				next.removeOnceHandler(h.callBack)
+			}
+			if bus.handlerMap.CompareAndSwap(current, next) {
+				break
+			}
 		}
-		bus.lock.Unlock()
 	}
 
 	return count

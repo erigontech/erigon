@@ -170,6 +170,86 @@ Loop:
 	goto Loop
 }
 
+// TestSharedDomain_UnwindDoesNotRestoreOverlayForNewKey reproduces the
+// mainnet block-24898955 gas-used mismatch (diff = -17100 = SSTORE_RESET -
+// SSTORE_SET). After a forkchoice-driven unwind, the TemporalMemBatch overlay
+// still holds storage writes made INSIDE the unwound txNum range, because:
+//
+//   - `Unwind` stores `sd.unwindToTxNum` and `sd.unwindChangeset` but does
+//     NOT remove post-target entries from `sd.storage` / `sd.domains[...]`.
+//   - `getLatest` returns `dataWithTxNums[len(...)-1]` without comparing
+//     its txNum against `sd.unwindToTxNum`.
+//   - The `unwindChangeset` fallback only fires on an overlay miss.
+//
+// So a first-time storage write at `txNum=T_write > T_unwind` remains visible
+// after `Unwind(T_unwind)`, and a re-executed SSTORE on that slot charges
+// SSTORE_RESET (2900) instead of SSTORE_SET (20000) — the observed 17100 diff.
+func TestSharedDomain_UnwindDoesNotRestoreOverlayForNewKey(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	stepSize := uint64(100)
+	db := newTestDb(t, stepSize)
+	ctx := context.Background()
+
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	stateChangeset := &changeset.StateChangeSet{}
+	domains.SetChangesetAccumulator(stateChangeset)
+
+	// Storage key mirrors a USDT balance slot: 20-byte address + 32-byte slot hash.
+	addr := common.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7")
+	slot := common.HexToHash("0x5ac7102aad1a639901bc2657323aaed9e90e40c550747c49170f1c82fd664e4f")
+	key := composite(addr[:], slot[:])
+	value := []byte{0x01, 0x02, 0x03, 0x04}
+
+	const unwindTarget uint64 = 50 // pre-write txNum where slot is absent
+	const writeTxNum uint64 = 100  // txNum inside a block that will be unwound
+
+	// 1. Precondition: slot is absent at the unwind target.
+	domains.SetTxNum(unwindTarget)
+	v, _, err := domains.GetLatest(kv.StorageDomain, rwTx, key)
+	require.NoError(t, err)
+	require.Empty(t, v, "precondition: slot must be absent before any writes")
+
+	// 2. Advance txNum and write the slot for the first time (prevVal = nil).
+	domains.SetTxNum(writeTxNum)
+	require.NoError(t, domains.DomainPut(kv.StorageDomain, rwTx, key, value, writeTxNum, nil))
+
+	// 3. Sanity: write is visible through the overlay.
+	v, _, err = domains.GetLatest(kv.StorageDomain, rwTx, key)
+	require.NoError(t, err)
+	require.Equal(t, value, v, "sanity: write must be visible pre-unwind")
+
+	// 4. Build the domain diff set from the accumulator, then unwind past the write.
+	var diffSet [kv.DomainLen][]kv.DomainEntryDiff
+	for idx, d := range stateChangeset.Diffs {
+		diffSet[idx] = d.GetDiffSet()
+	}
+	domains.Unwind(unwindTarget, &diffSet)
+
+	// 5. Simulate re-execution starting at the unwind target.
+	domains.SetTxNum(unwindTarget)
+
+	// 6. Failing assertion: the slot must be absent again.
+	v, _, err = domains.GetLatest(kv.StorageDomain, rwTx, key)
+	require.NoError(t, err)
+	require.Empty(t, v,
+		"after Unwind(txNum=%d), overlay must not return the write made at txNum=%d (got %x). "+
+			"TemporalMemBatch.getLatest returns the latest entry from sd.storage without "+
+			"consulting sd.unwindToTxNum, and the unwindChangeset fallback is unreachable "+
+			"while the key remains in sd.storage.",
+		unwindTarget, writeTxNum, v)
+}
+
 // TestNewSharedDomains_StateAheadOfBlocks verifies that when the persisted
 // commitment state is ahead of the TxNums index (catch-up scenario),
 // NewSharedDomains returns ErrBehindCommitment but the SharedDomains itself
