@@ -23,207 +23,193 @@ import (
 // On-disk layout written by BuildTo and parsed by ShardedReader:
 //
 //	[0..3]       features (u32 BE, same encoding as monolithic filter)
-//	[4..7171]    256 × 28-byte descriptors
-//	[7172..9227] 257 × 8-byte cumulative fingerprint offsets (u64 BE)
-//	[9228..]     concatenated shard fingerprints (empty shards: 0 bytes)
+//	[4..4099]    256 × 16-byte descriptors: SegmentCount (u32) + SegmentLength
+//	             (u32) + Seed (u64). SegmentCount == 0 signals an empty shard.
+//	             BinaryFuse[uint8]'s SegmentCountLength and SegmentLengthMask
+//	             are derivable (SC×SL and SL-1 — SegmentLength is always a
+//	             power of two) and recomputed at read time.
+//	[4100..6155] 257 × 8-byte cumulative fingerprint offsets (u64 BE)
+//	[6156..]     concatenated shard fingerprints (empty shards: 0 bytes)
 const (
 	shardCount          = 256
 	shardedHeaderSize   = 4
-	shardDescriptorSize = 28
-	shardDescriptorsEnd = shardedHeaderSize + shardCount*shardDescriptorSize // 7172
-	shardOffsetTableEnd = shardDescriptorsEnd + (shardCount+1)*8             // 9228
-	shardedFixedHeader  = shardOffsetTableEnd                                // bytes before fingerprints
+	shardDescriptorSize = 16
+	shardDescriptorsEnd = shardedHeaderSize + shardCount*shardDescriptorSize // 4100
+	shardOffsetTableEnd = shardDescriptorsEnd + (shardCount+1)*8             // 6156
+	shardedFixedHeader  = shardOffsetTableEnd
 )
 
-const (
-	shardFlagEmpty uint32 = 0b1
-)
-
-type shardDescriptor struct {
-	SegmentCount       uint32
-	SegmentCountLength uint32
-	Seed               uint64
-	SegmentLength      uint32
-	SegmentLengthMask  uint32
-	flags              uint32
-}
-
-// ShardedWriterOffHeap buffers keys per-shard in 256 small page buffers and
-// spills each page to a dedicated per-shard temp file. At BuildTo time, each
-// shard's tmp file is mmap'd RDWR and handed directly to
-// xorfilter.BuildBinaryFuse (which may mutate its input to dedup).
-//
-// Requires RLIMIT_NOFILE high enough for 256 concurrent temp files; Erigon
-// already bumps this for MDBX so it is satisfied in all deployments.
+// ShardedWriterOffHeap appends all keys into a single tmp file. At BuildTo
+// the file is mmap'd RDWR and partitioned in place by byte(k) (8-bit
+// American Flag Sort), after which each shard's keys occupy a contiguous
+// byte range and are handed directly to xorfilter.BuildBinaryFuse without a
+// copy. Rewriting the mmap in place trades a couple of passes over the tmp
+// file for determinism, zero-copy to xorfilter, and a single file descriptor.
 type ShardedWriterOffHeap struct {
-	pages     *[shardCount][512]uint64 // heap; 1 MiB
-	counts    [shardCount]uint16       // 0..512 in-flight fill level per shard
-	keyCounts [shardCount]uint64       // total keys routed to each shard
-	tmpFiles  [shardCount]*os.File
-	filePath  string
-	features  Features
+	page     [512]uint64
+	pageFill uint16
+	keyCount uint64
+	tmpFile  *os.File
+	filePath string
+	features Features
 }
 
 func NewShardedWriterOffHeap(filePath string) (*ShardedWriterOffHeap, error) {
+	f, err := dir.CreateTempWithExtension(filePath, "existence.tmp")
+	if err != nil {
+		return nil, err
+	}
 	w := &ShardedWriterOffHeap{
-		pages:    new([shardCount][512]uint64),
+		tmpFile:  f,
 		filePath: filePath,
 	}
 	if IsLittleEndian {
 		w.features |= IsLittleEndianFeature
 	}
-	for s := 0; s < shardCount; s++ {
-		f, err := dir.CreateTempWithExtension(filePath, fmt.Sprintf("existence.shard%03d.tmp", s))
-		if err != nil {
-			w.closeFiles()
-			return nil, err
-		}
-		w.tmpFiles[s] = f
-	}
 	return w, nil
 }
 
-func (w *ShardedWriterOffHeap) closeFiles() {
-	for s := 0; s < shardCount; s++ {
-		if w.tmpFiles[s] == nil {
-			continue
-		}
-		path := w.tmpFiles[s].Name()
-		_ = w.tmpFiles[s].Close()
-		dir.RemoveFile(path)
-		w.tmpFiles[s] = nil
-	}
-}
-
 func (w *ShardedWriterOffHeap) Close() {
-	w.closeFiles()
+	if w.tmpFile == nil {
+		return
+	}
+	path := w.tmpFile.Name()
+	_ = w.tmpFile.Close()
+	dir.RemoveFile(path)
+	w.tmpFile = nil
 }
 
 func (w *ShardedWriterOffHeap) AddHash(k uint64) error {
-	s := byte(k)
-	pc := w.counts[s]
-	w.pages[s][pc] = k
-	w.counts[s] = pc + 1
-	w.keyCounts[s]++
-	if pc+1 == 512 {
-		if _, err := w.tmpFiles[s].Write(castToBytes(w.pages[s][:])); err != nil {
+	w.page[w.pageFill] = k
+	w.pageFill++
+	w.keyCount++
+	if w.pageFill == 512 {
+		if _, err := w.tmpFile.Write(castToBytes(w.page[:])); err != nil {
 			return err
 		}
-		w.counts[s] = 0
+		w.pageFill = 0
 	}
 	return nil
 }
 
-// BuildTo builds 256 independent BinaryFuse[uint8] filters and emits the
-// sharded layout to `to`. Returns the total number of bytes written (including
-// fixed header, descriptors, offset table, and concatenated fingerprints).
+// BuildTo partitions all previously-added keys in place by byte(k), builds
+// 256 independent BinaryFuse[uint8] filters (one per shard), and emits the
+// sharded layout to `to`. Returns the total number of bytes written.
 func (w *ShardedWriterOffHeap) BuildTo(to io.Writer) (int, error) {
-	defer w.closeFiles()
+	defer w.Close()
 
-	// Phase 1: flush partial pages for each shard.
-	for s := 0; s < shardCount; s++ {
-		if pc := w.counts[s]; pc > 0 {
-			if _, err := w.tmpFiles[s].Write(castToBytes(w.pages[s][:pc])); err != nil {
-				return 0, err
-			}
-			w.counts[s] = 0
+	if w.pageFill > 0 {
+		if _, err := w.tmpFile.Write(castToBytes(w.page[:w.pageFill])); err != nil {
+			return 0, err
 		}
+		w.pageFill = 0
 	}
 
-	// Phase 2: find the largest shard to pre-size the shared builder.
-	largest := uint64(0)
-	for s := 0; s < shardCount; s++ {
-		if w.keyCounts[s] > largest {
-			largest = w.keyCounts[s]
-		}
-	}
-	builder := xorfilter.MakeBinaryFuseBuilder[uint8](max(1, int(largest)))
+	var header [shardOffsetTableEnd]byte
+	binary.BigEndian.PutUint32(header[:4], uint32(w.features))
 
-	// Phase 3: per-shard build, stream fingerprints to a scratch file.
+	if w.keyCount == 0 {
+		return to.Write(header[:])
+	}
+
+	total := int(w.keyCount) * 8
+	m, err := mmap.MapRegion(w.tmpFile, total, mmap.RDWR, 0, 0)
+	if err != nil {
+		return 0, fmt.Errorf("mmap: %w", err)
+	}
+	defer m.Unmap()
+	keys := castToArrU64(m[:total])
+
+	var keyOffsets [shardCount + 1]int
+	for _, k := range keys {
+		keyOffsets[int(byte(k))+1]++
+	}
+	largest := 0
+	for s := 0; s < shardCount; s++ {
+		if keyOffsets[s+1] > largest {
+			largest = keyOffsets[s+1]
+		}
+		keyOffsets[s+1] += keyOffsets[s]
+	}
+
+	sortByLowByte(keys, &keyOffsets)
+
+	builder := xorfilter.MakeBinaryFuseBuilder[uint8](max(1, largest))
+
+	// xorfilter returns f.Fingerprints aliased to its builder buffer, so each
+	// shard's fingerprints must be persisted before the next BuildBinaryFuse
+	// reuses that buffer. Reusing the keys mmap isn't safe: for tiny shards
+	// xorfilter's sizeFactor drives fp bytes larger than the shard's 8-bytes-
+	// per-key region and would overwrite later shards' keys. A disposable
+	// scratch file is the simplest safe home for the fingerprints.
 	fpScratch, err := dir.CreateTempWithExtension(w.filePath, "existence.fp.tmp")
 	if err != nil {
 		return 0, err
 	}
 	defer dir.RemoveFile(fpScratch.Name())
-	fpBuf := bufio.NewWriter(fpScratch)
 	defer fpScratch.Close()
 
-	descriptors := make([]shardDescriptor, shardCount)
-	offsets := make([]uint64, shardCount+1)
-	var written uint64
+	var fingerprintBytes uint64
 	for s := 0; s < shardCount; s++ {
-		offsets[s] = written
-		if w.keyCounts[s] == 0 {
-			descriptors[s].flags |= shardFlagEmpty
-			continue
+		binary.BigEndian.PutUint64(header[shardDescriptorsEnd+s*8:], fingerprintBytes)
+		shardKeys := keys[keyOffsets[s]:keyOffsets[s+1]]
+		if len(shardKeys) == 0 {
+			continue // SegmentCount left at 0 signals empty.
 		}
-		sz := int(w.keyCounts[s]) * 8
-		// RDWR: BuildBinaryFuse may mutate `keys` via pruneDuplicates. The tmp
-		// file is disposable and under our control, so in-place mutation is
-		// fine and avoids a per-shard u64 copy.
-		m, err := mmap.MapRegion(w.tmpFiles[s], sz, mmap.RDWR, 0, 0)
+		f, err := xorfilter.BuildBinaryFuse[uint8](&builder, shardKeys)
 		if err != nil {
-			return 0, fmt.Errorf("shard %d mmap: %w", s, err)
-		}
-		keys := castToArrU64(m[:sz])
-		f, err := xorfilter.BuildBinaryFuse[uint8](&builder, keys)
-		if err != nil {
-			_ = m.Unmap()
 			return 0, fmt.Errorf("shard %d build: %w", s, err)
 		}
 		if f.SegmentCount > math.MaxUint32/2 {
-			_ = m.Unmap()
 			return 0, fmt.Errorf("shard %d SegmentCount=%d cannot be greater than u32/2", s, f.SegmentCount)
 		}
-		descriptors[s] = shardDescriptor{
-			SegmentCount:       f.SegmentCount,
-			SegmentCountLength: f.SegmentCountLength,
-			Seed:               f.Seed,
-			SegmentLength:      f.SegmentLength,
-			SegmentLengthMask:  f.SegmentLengthMask,
-		}
-		// f.Fingerprints aliases the builder — write it out now, before the
-		// next BuildBinaryFuse call reuses the builder buffer.
-		if _, err := fpBuf.Write(f.Fingerprints); err != nil {
-			_ = m.Unmap()
+		descOff := shardedHeaderSize + s*shardDescriptorSize
+		binary.BigEndian.PutUint32(header[descOff:], f.SegmentCount)
+		binary.BigEndian.PutUint32(header[descOff+4:], f.SegmentLength)
+		binary.BigEndian.PutUint64(header[descOff+8:], f.Seed)
+		if _, err := fpScratch.Write(f.Fingerprints); err != nil {
 			return 0, err
 		}
-		written += uint64(len(f.Fingerprints))
-		if err := m.Unmap(); err != nil {
-			return 0, err
-		}
+		fingerprintBytes += uint64(len(f.Fingerprints))
 	}
-	offsets[shardCount] = written
-	if err := fpBuf.Flush(); err != nil {
-		return 0, err
-	}
+	binary.BigEndian.PutUint64(header[shardDescriptorsEnd+shardCount*8:], fingerprintBytes)
 	if _, err := fpScratch.Seek(0, io.SeekStart); err != nil {
 		return 0, err
 	}
 
-	// Phase 4: emit header + descriptors + offsets + fingerprints.
-	var header [shardOffsetTableEnd]byte
-	binary.BigEndian.PutUint32(header[:4], uint32(w.features))
-	for s := 0; s < shardCount; s++ {
-		off := shardedHeaderSize + s*shardDescriptorSize
-		d := &descriptors[s]
-		binary.BigEndian.PutUint32(header[off:], d.SegmentCount)
-		binary.BigEndian.PutUint32(header[off+4:], d.SegmentCountLength)
-		binary.BigEndian.PutUint64(header[off+8:], d.Seed)
-		binary.BigEndian.PutUint32(header[off+16:], d.SegmentLength)
-		binary.BigEndian.PutUint32(header[off+20:], d.SegmentLengthMask)
-		binary.BigEndian.PutUint32(header[off+24:], d.flags)
-	}
-	for i := 0; i <= shardCount; i++ {
-		binary.BigEndian.PutUint64(header[shardDescriptorsEnd+i*8:], offsets[i])
-	}
-	if _, err := to.Write(header[:]); err != nil {
+	headerBytes, err := to.Write(header[:])
+	if err != nil {
 		return 0, err
 	}
 	if _, err := io.Copy(to, fpScratch); err != nil {
 		return 0, err
 	}
-	return shardedFixedHeader + int(written), nil
+	return headerBytes + int(fingerprintBytes), nil
+}
+
+// sortByLowByte partitions `keys` in place by byte(k) using 8-bit American
+// Flag Sort. offsets must already hold the prefix-sum boundaries
+// (offsets[s] is the first output slot for shard s, offsets[s+1] the first
+// slot past it). offsets is mutated into per-shard write cursors as the sort
+// proceeds.
+func sortByLowByte(keys []uint64, offsets *[shardCount + 1]int) {
+	var cursor [shardCount]int
+	for s := 0; s < shardCount; s++ {
+		cursor[s] = offsets[s]
+	}
+	for s := 0; s < shardCount; s++ {
+		end := offsets[s+1]
+		for cursor[s] < end {
+			k := keys[cursor[s]]
+			dest := int(byte(k))
+			if dest == s {
+				cursor[s]++
+				continue
+			}
+			keys[cursor[s]], keys[cursor[dest]] = keys[cursor[dest]], k
+			cursor[dest]++
+		}
+	}
 }
 
 // ShardedWriter wraps ShardedWriterOffHeap with standalone file creation, for

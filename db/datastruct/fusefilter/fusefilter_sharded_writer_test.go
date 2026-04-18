@@ -189,10 +189,9 @@ func TestSharded_MmapMutationOnDuplicates(t *testing.T) {
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "sharded_dedup.tmp")
 
+	const unique = 1000
 	w, err := NewShardedWriter(filePath)
 	require.NoError(err)
-	// 1000 unique keys mixed with 100 duplicates, all routed to shard 0.
-	const unique = 1000
 	for i := 0; i < unique; i++ {
 		require.NoError(w.AddHash(uint64(i) << 8))
 	}

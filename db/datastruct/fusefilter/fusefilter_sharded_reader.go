@@ -79,16 +79,17 @@ func NewShardedReaderOnBytes(m []byte, fName string) (*ShardedReader, int, error
 	r := &ShardedReader{features: features, fileName: fName}
 	for s := 0; s < shardCount; s++ {
 		off := shardedHeaderSize + s*shardDescriptorSize
-		flags := binary.BigEndian.Uint32(m[off+24:])
-		if flags&shardFlagEmpty != 0 {
-			continue // leave r.shards[s] zero-valued
+		sc := binary.BigEndian.Uint32(m[off:])
+		if sc == 0 {
+			continue // empty shard; leave r.shards[s] zero-valued
 		}
+		sl := binary.BigEndian.Uint32(m[off+4:])
 		filter := &r.shards[s]
-		filter.SegmentCount = binary.BigEndian.Uint32(m[off:])
-		filter.SegmentCountLength = binary.BigEndian.Uint32(m[off+4:])
+		filter.SegmentCount = sc
+		filter.SegmentLength = sl
+		filter.SegmentCountLength = sc * sl
+		filter.SegmentLengthMask = sl - 1 // SegmentLength is always a power of two
 		filter.Seed = binary.BigEndian.Uint64(m[off+8:])
-		filter.SegmentLength = binary.BigEndian.Uint32(m[off+16:])
-		filter.SegmentLengthMask = binary.BigEndian.Uint32(m[off+20:])
 	}
 	for i := 0; i <= shardCount; i++ {
 		r.fpOffsets[i] = binary.BigEndian.Uint64(m[shardDescriptorsEnd+i*8:])
