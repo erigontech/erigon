@@ -2,13 +2,13 @@ package fusefilter
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"unsafe"
 
 	"github.com/erigontech/erigon/common/dir"
@@ -47,6 +47,7 @@ func (w *WriterOffHeap) Close() {
 	if w.tmpFile != nil {
 		w.tmpFile.Close()
 		dir.RemoveFile(w.tmpFilePath)
+		w.tmpFile = nil
 	}
 }
 
@@ -78,18 +79,20 @@ func (w *WriterOffHeap) build() (*xorfilter.BinaryFuse[uint8], error) {
 	return filter, nil
 }
 
-func (w *WriterOffHeap) write(filter *xorfilter.BinaryFuse[uint8], fw io.Writer) (int, error) {
+// filterBlobHeaderSize is the fixed header size of a serialised BinaryFuse[uint8] blob.
+const filterBlobHeaderSize = 1 + 3 + 4 + 4 + 8 + 4 + 4 + 8
+
+// writeFilter serialises a built BinaryFuse filter as a version-0 fusefilter blob.
+func writeFilter(features Features, filter *xorfilter.BinaryFuse[uint8], fw io.Writer) (int, error) {
 	if filter.SegmentCount > math.MaxUint32/2 {
 		return 0, fmt.Errorf("SegmentCount=%d cannot be greater than u32/2", filter.SegmentCount)
 	}
-	const headerSize = 1 + 3 + 4 + 4 + 8 + 4 + 4 + 8
+	const headerSize = filterBlobHeaderSize
 	const version uint8 = 0
 	var header [headerSize]byte
 
-	// 1 byte - version, 3 bytes `Features`
-	binary.BigEndian.PutUint32(header[:], uint32(w.features)) //nolint:gocritic
+	binary.BigEndian.PutUint32(header[:], uint32(features)) //nolint:gocritic
 	header[0] = version
-
 	binary.BigEndian.PutUint32(header[4:], filter.SegmentCount)
 	binary.BigEndian.PutUint32(header[4+4:], filter.SegmentCountLength)
 	binary.BigEndian.PutUint64(header[4+4+4:], filter.Seed)
@@ -104,6 +107,10 @@ func (w *WriterOffHeap) write(filter *xorfilter.BinaryFuse[uint8], fw io.Writer)
 		return 0, err
 	}
 	return headerSize + len(filter.Fingerprints), nil
+}
+
+func (w *WriterOffHeap) write(filter *xorfilter.BinaryFuse[uint8], fw io.Writer) (int, error) {
+	return writeFilter(w.features, filter, fw)
 }
 
 func (w *WriterOffHeap) AddHash(k uint64) error {
@@ -190,44 +197,49 @@ func (w *Writer) Close() {
 }
 
 // WriterSharded shards keys into 256 sub-filters by first byte of keyHash (keyHash >> 56).
-// Produces fusefilter file version 1. Lookup only checks the one relevant shard.
+// Produces fusefilter file version 1. Lookup checks only the one relevant shard.
+// Embeds WriterOffHeap for the shared page-buffer + temp-file machinery.
 type WriterSharded struct {
-	shards   [256]*WriterOffHeap
-	filePath string
-	features Features
+	WriterOffHeap
 }
 
 func NewWriterSharded(filePath string) (*WriterSharded, error) {
-	return &WriterSharded{filePath: filePath, features: initFeatures()}, nil
-}
-
-func (w *WriterSharded) AddHash(k uint64) error {
-	idx := k >> 56
-	if w.shards[idx] == nil {
-		var err error
-		w.shards[idx], err = NewWriterOffHeap(w.filePath)
-		if err != nil {
-			return err
-		}
+	f, err := dir.CreateTempWithExtension(filePath, "existence-sharded.tmp")
+	if err != nil {
+		return nil, err
 	}
-	return w.shards[idx].AddHash(k)
+	return &WriterSharded{WriterOffHeap{tmpFile: f, tmpFilePath: f.Name(), features: initFeatures()}}, nil
 }
 
 // BuildTo writes sharded fusefilter (file version 1) to fw.
-// Format: [4 bytes header] [256×8 bytes size table] [concatenated shard blobs].
-// size[i] == 0 means shard i is empty/absent.
+// Format: [4 bytes header] then 256 × [8 bytes size | blob] pairs (size==0 means absent).
+// Fully streaming: no intermediate files, one shard's fingerprints in RAM at a time.
 func (w *WriterSharded) BuildTo(fw io.Writer) (int, error) {
-	shardData := make([][]byte, 256)
-	for i, s := range w.shards {
-		if s == nil {
-			continue
+	defer dir.RemoveFile(w.tmpFilePath)
+
+	if rem := w.count % len(w.page); rem != 0 {
+		if _, err := w.tmpFile.Write(castToBytes(w.page[:rem])); err != nil {
+			return 0, err
 		}
-		var buf bytes.Buffer
-		if _, err := s.BuildTo(&buf); err != nil {
-			return 0, fmt.Errorf("shard %d: %w", i, err)
-		}
-		shardData[i] = buf.Bytes()
 	}
+
+	st, err := w.tmpFile.Stat()
+	if err != nil {
+		return 0, err
+	}
+	sz := int(st.Size())
+	if sz == 0 {
+		return 0, fmt.Errorf("WriterSharded: no keys added")
+	}
+
+	m, err := mmap.MapRegion(w.tmpFile, sz, mmap.RDWR, 0, 0)
+	if err != nil {
+		return 0, fmt.Errorf("%s %w", w.tmpFilePath, err)
+	}
+	defer m.Unmap()
+
+	all := castToArrU64(m[:sz])
+	slices.Sort(all) // ascending sort groups hashes by top byte = shard index
 
 	const version1 uint8 = 1
 	var header [4]byte
@@ -238,33 +250,42 @@ func (w *WriterSharded) BuildTo(fw io.Writer) (int, error) {
 	}
 	total := 4
 
+	builder := xorfilter.MakeBinaryFuseBuilder[uint8](len(all) / 256)
 	var sizeBuf [8]byte
-	for _, d := range shardData {
-		binary.BigEndian.PutUint64(sizeBuf[:], uint64(len(d)))
+	i := 0
+	for shard := range 256 {
+		start := i
+		for i < len(all) && all[i]>>56 == uint64(shard) {
+			i++
+		}
+		if start == i {
+			binary.BigEndian.PutUint64(sizeBuf[:], 0)
+			if _, err := fw.Write(sizeBuf[:]); err != nil {
+				return 0, err
+			}
+			total += 8
+			continue
+		}
+		filter, err := xorfilter.BuildBinaryFuse[uint8](&builder, all[start:i])
+		if err != nil {
+			return 0, fmt.Errorf("shard %d: %w", shard, err)
+		}
+		blobSize := filterSize(&filter)
+		binary.BigEndian.PutUint64(sizeBuf[:], uint64(blobSize))
 		if _, err := fw.Write(sizeBuf[:]); err != nil {
 			return 0, err
 		}
-		total += 8
-	}
-	for _, d := range shardData {
-		if len(d) == 0 {
-			continue
+		n, err := writeFilter(w.features, &filter, fw)
+		if err != nil {
+			return 0, fmt.Errorf("shard %d: %w", shard, err)
 		}
-		if _, err := fw.Write(d); err != nil {
-			return 0, err
-		}
-		total += len(d)
+		total += 8 + n
 	}
 	return total, nil
 }
 
-func (w *WriterSharded) Close() {
-	for i, s := range w.shards {
-		if s != nil {
-			s.Close()
-			w.shards[i] = nil
-		}
-	}
+func filterSize(f *xorfilter.BinaryFuse[uint8]) int {
+	return filterBlobHeaderSize + len(f.Fingerprints)
 }
 
 // castToBytes converts []uint64 to []byte without copying data

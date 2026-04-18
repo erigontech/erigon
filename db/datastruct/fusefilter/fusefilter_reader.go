@@ -69,12 +69,9 @@ func NewReader(filePath string) (*Reader, error) {
 	return r, nil
 }
 
-// parseHeaderFeatures reads the 4-byte [version | features] prefix, validates endianness, and returns both.
 func parseHeaderFeatures(header []byte, fName string) (version uint8, features Features, err error) {
 	version = header[0]
-	featuresBytes := bytes.Clone(header[:4])
-	featuresBytes[0] = 0
-	features = Features(binary.BigEndian.Uint32(featuresBytes))
+	features = Features(binary.BigEndian.Uint32(header[:4]) & 0x00FFFFFF)
 	if (features&IsLittleEndianFeature != 0) != IsLittleEndian {
 		return 0, 0, fmt.Errorf("file %s is not compatible with your machine (different Endianness), but you can run `erigon snapshots index`", fName)
 	}
@@ -84,7 +81,7 @@ func parseHeaderFeatures(header []byte, fName string) (version uint8, features F
 func NewReaderOnBytes(m []byte, fName string) (*Reader, int, error) {
 	filter := &xorfilter.BinaryFuse[uint8]{}
 
-	const headerSize = 1 + 3 + 4 + 4 + 8 + 4 + 4 + 8
+	const headerSize = filterBlobHeaderSize
 	header, data := m[:headerSize], m[headerSize:]
 
 	v, features, err := parseHeaderFeatures(header, fName)
@@ -142,12 +139,9 @@ type ReaderSharded struct {
 	shards [256]*Reader
 }
 
-// NewReaderShardedOnBytes parses a sharded fusefilter blob (version 1) from m.
-// Returns the reader and the number of bytes consumed.
 func NewReaderShardedOnBytes(m []byte, fName string) (*ReaderSharded, int, error) {
 	const headerSize = 4
-	const sizeTableSize = 256 * 8
-	if len(m) < headerSize+sizeTableSize {
+	if len(m) < headerSize {
 		return nil, 0, fmt.Errorf("fusefilter sharded %s: too small (%d bytes)", fName, len(m))
 	}
 	if _, _, err := parseHeaderFeatures(m[:4], fName); err != nil {
@@ -155,9 +149,13 @@ func NewReaderShardedOnBytes(m []byte, fName string) (*ReaderSharded, int, error
 	}
 
 	r := &ReaderSharded{}
-	offset := headerSize + sizeTableSize
+	offset := headerSize
 	for i := range 256 {
-		sz := int(binary.BigEndian.Uint64(m[headerSize+i*8:]))
+		if offset+8 > len(m) {
+			return nil, 0, fmt.Errorf("fusefilter sharded %s: truncated at shard %d", fName, i)
+		}
+		sz := int(binary.BigEndian.Uint64(m[offset:]))
+		offset += 8
 		if sz == 0 {
 			continue
 		}
