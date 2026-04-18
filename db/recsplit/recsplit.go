@@ -29,6 +29,7 @@ import (
 	"math/bits"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"time"
 
@@ -38,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/assert"
 	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mmap"
@@ -47,6 +49,30 @@ import (
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
 	"github.com/erigontech/erigon/db/version"
 )
+
+// RECSPLIT_MEM_LOG=true enables per-phase memory checkpoint logging inside RecSplit.Build().
+// Intended for debugging the tail-of-build RAM spike on large .efi files.
+var recSplitMemLog = dbg.EnvBool("RECSPLIT_MEM_LOG", false)
+
+// memCheckpoint logs Go heap Alloc/HeapInuse/Sys plus a stage label and optional extra fields.
+// Callers should pass structural sizes (e.g. len(slice)*8) under descriptive keys so the log
+// makes it obvious which data structure grew between checkpoints.
+func memCheckpoint(logger log.Logger, fileName, stage string, extra ...any) {
+	if !recSplitMemLog {
+		return
+	}
+	var m runtime.MemStats
+	dbg.ReadMemStats(&m)
+	args := []any{
+		"file", fileName,
+		"stage", stage,
+		"alloc", common.ByteCount(m.Alloc),
+		"heapInuse", common.ByteCount(m.HeapInuse),
+		"sys", common.ByteCount(m.Sys),
+	}
+	args = append(args, extra...)
+	logger.Info("[recsplit][mem]", args...)
+}
 
 var ErrCollision = errors.New("duplicate key")
 
@@ -950,14 +976,25 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	if rs.lvl < log.LvlTrace {
 		log.Log(rs.lvl, "[index] write", "file", rs.fileName)
 	}
+	memCheckpoint(rs.logger, rs.fileName, "after_bucket_recsplit",
+		"keys", rs.keysAdded,
+		"buckets", rs.bucketCount,
+		"gr_bits_MB", common.ByteCount(uint64(len(rs.gr.Data()))*8),
+		"bucketSizeAcc_MB", common.ByteCount(uint64(len(rs.bucketSizeAcc))*8),
+		"bucketPosAcc_MB", common.ByteCount(uint64(len(rs.bucketPosAcc))*8),
+	)
 	if rs.enums && rs.keysAdded > 0 {
 		if err := rs.buildOffsetEf(); err != nil {
 			return err
 		}
 	}
+	memCheckpoint(rs.logger, rs.fileName, "after_buildOffsetEf",
+		"offset_mmap_MB", common.ByteCount(rs.keysAdded*8),
+	)
 	rs.gr.appendFixed(1, 1) // Sentinel (avoids checking for parts of size 1)
 	// Construct Elias Fano index
 	rs.ef.Build(rs.bucketSizeAcc, rs.bucketPosAcc)
+	memCheckpoint(rs.logger, rs.fileName, "after_ef_Build_buckets")
 	rs.built = true
 
 	// Write out bucket count, bucketSize, leafSize
@@ -1005,9 +1042,11 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 			return fmt.Errorf("writing elias fano for offsets: %w", err)
 		}
 	}
+	memCheckpoint(rs.logger, rs.fileName, "before_existenceFilter")
 	if err := rs.flushExistenceFilter(); err != nil {
 		return err
 	}
+	memCheckpoint(rs.logger, rs.fileName, "after_existenceFilter")
 	// Write out the size of golomb rice params
 	binary.BigEndian.PutUint16(rs.numBuf[:], uint16(len(rs.scratch.golombRice)))
 	if _, err := rs.indexW.Write(rs.numBuf[:4]); err != nil {
