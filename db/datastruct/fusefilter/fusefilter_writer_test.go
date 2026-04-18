@@ -362,10 +362,6 @@ func TestWriterShardedSegmentCountRoundTrip(t *testing.T) {
 
 	r, _, err := NewReaderOnBytes(raw, "seg_count")
 	require.NoError(err)
-	// SegmentCount and SegmentCountLength must differ only if the filter
-	// actually computed them differently; the important thing is they are
-	// non-zero and SegmentCount is read from the correct offset (not aliased
-	// with SegmentCountLength).
 	require.NotZero(r.inner.SegmentCount)
 	require.NotZero(r.inner.SegmentCountLength)
 	require.NotZero(r.inner.SegmentLength)

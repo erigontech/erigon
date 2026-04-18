@@ -164,6 +164,9 @@ func NewReaderShardedOnBytes(m []byte, fName string) (*ReaderSharded, int, error
 		if sz == 0 {
 			continue
 		}
+		if sz < filterBlobHeaderSize {
+			return nil, 0, fmt.Errorf("fusefilter sharded %s: shard %d size %d < header %d", fName, i, sz, filterBlobHeaderSize)
+		}
 		if offset+sz > len(m) {
 			return nil, 0, fmt.Errorf("fusefilter sharded %s: shard %d blob overflows (offset=%d sz=%d total=%d)", fName, i, offset, sz, len(m))
 		}
@@ -193,6 +196,22 @@ func (r *ReaderSharded) ForceInMem() datasize.ByteSize {
 		}
 	}
 	return total
+}
+
+func (r *ReaderSharded) MadvWillNeed() {
+	for i := range r.shards {
+		if r.shards[i].inner != nil {
+			r.shards[i].MadvWillNeed()
+		}
+	}
+}
+
+func (r *ReaderSharded) MadvNormal() {
+	for i := range r.shards {
+		if r.shards[i].inner != nil {
+			r.shards[i].MadvNormal()
+		}
+	}
 }
 
 var IsLittleEndian = isLittleEndian()
