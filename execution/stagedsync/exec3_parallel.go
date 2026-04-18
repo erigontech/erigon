@@ -1266,7 +1266,10 @@ func (result *execResult) finalizeWithIBS(
 	// branch at versionedio.go:874 that records zero-valued StoragePath reads.
 	// We restore the snapshot after those ops so their spurious reads don't
 	// leak into the BAL and diverge from the proposer's assembler BAL.
-	feeDistributionReads := ibs.VersionedReads()
+	// Clone() is required because ReadSet is a map type — VersionedReads()
+	// returns a reference, so subsequent versionedRead.Set() calls from
+	// postApplyMessageFunc/FinalizeTx would mutate the "snapshot" in place.
+	feeDistributionReads := ibs.VersionedReads().Clone()
 
 	if engine != nil {
 		if postApplyMessageFunc := engine.GetPostApplyMessageFunc(); postApplyMessageFunc != nil {
