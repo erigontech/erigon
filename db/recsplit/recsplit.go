@@ -986,6 +986,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		log.Log(rs.lvl, "[index] calculating", "file", rs.fileName)
 	}
 
+	memCheckpoint(rs.logger, rs.fileName, "Build:before_bucket_load")
 	if rs.workers > 1 {
 		if err := rs.buildWithWorkers(ctx); err != nil {
 			return err
@@ -994,6 +995,11 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		if err := rs.bucketCollector.Load(nil, "", rs.loadFuncBucket, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 			return err
 		}
+		memCheckpoint(rs.logger, rs.fileName, "Build:after_collector_Load",
+			"currentBucket_cap_bytes", common.ByteCount(uint64(cap(rs.currentBucket))*8),
+			"currentBucketOffs_cap_bytes", common.ByteCount(uint64(cap(rs.currentBucketOffs))*8),
+			"gr_bits_bytes", common.ByteCount(uint64(len(rs.gr.Data()))*8),
+		)
 		if len(rs.currentBucket) > 0 {
 			if err := rs.recsplitCurrentBucket(); err != nil {
 				return err
@@ -1015,9 +1021,25 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	memCheckpoint(rs.logger, rs.fileName, "after_bucket_recsplit",
 		"keys", rs.keysAdded,
 		"buckets", rs.bucketCount,
-		"gr_bits_MB", common.ByteCount(uint64(len(rs.gr.Data()))*8),
-		"bucketSizeAcc_MB", common.ByteCount(uint64(len(rs.bucketSizeAcc))*8),
-		"bucketPosAcc_MB", common.ByteCount(uint64(len(rs.bucketPosAcc))*8),
+		"gr_bits", common.ByteCount(uint64(len(rs.gr.Data()))*8),
+		"gr_bits_cap", common.ByteCount(uint64(cap(rs.gr.Data()))*8),
+		"bucketSizeAcc", common.ByteCount(uint64(len(rs.bucketSizeAcc))*8),
+		"bucketSizeAcc_cap", common.ByteCount(uint64(cap(rs.bucketSizeAcc))*8),
+		"bucketPosAcc", common.ByteCount(uint64(len(rs.bucketPosAcc))*8),
+		"bucketPosAcc_cap", common.ByteCount(uint64(cap(rs.bucketPosAcc))*8),
+		"currentBucket_cap", common.ByteCount(uint64(cap(rs.currentBucket))*8),
+		"currentBucketOffs_cap", common.ByteCount(uint64(cap(rs.currentBucketOffs))*8),
+		"scratch_buffer_cap", common.ByteCount(uint64(cap(rs.scratch.buffer))*8),
+		"scratch_offsetBuffer_cap", common.ByteCount(uint64(cap(rs.scratch.offsetBuffer))*8),
+		"scratch_unaryBuf_cap", common.ByteCount(uint64(cap(rs.scratch.unaryBuf))*8),
+		"scratch_golombRice_cap", common.ByteCount(uint64(cap(rs.scratch.golombRice))*4),
+		"known_total", retainedBytes(
+			uint64(len(rs.gr.Data()))*8,
+			uint64(len(rs.bucketSizeAcc))*8,
+			uint64(len(rs.bucketPosAcc))*8,
+			uint64(cap(rs.currentBucket))*8,
+			uint64(cap(rs.currentBucketOffs))*8,
+		),
 	)
 	if rs.enums && rs.keysAdded > 0 {
 		if err := rs.buildOffsetEf(); err != nil {
@@ -1025,12 +1047,14 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		}
 	}
 	memCheckpoint(rs.logger, rs.fileName, "after_buildOffsetEf",
-		"offset_mmap_MB", common.ByteCount(rs.keysAdded*8),
+		"offset_mmap", common.ByteCount(rs.keysAdded*8),
 	)
 	rs.gr.appendFixed(1, 1) // Sentinel (avoids checking for parts of size 1)
 	// Construct Elias Fano index
 	rs.ef.Build(rs.bucketSizeAcc, rs.bucketPosAcc)
-	memCheckpoint(rs.logger, rs.fileName, "after_ef_Build_buckets")
+	memCheckpoint(rs.logger, rs.fileName, "after_ef_Build_buckets",
+		"buckets", rs.bucketCount,
+	)
 	rs.built = true
 
 	// Write out bucket count, bucketSize, leafSize
