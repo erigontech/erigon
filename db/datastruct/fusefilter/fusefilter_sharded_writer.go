@@ -104,7 +104,7 @@ func (w *ShardedWriterOffHeap) AddHash(k uint64) error {
 	pc := w.counts[s]
 	w.pages[s][pc] = k
 	w.counts[s] = pc + 1
-	w.total++
+	w.keyCounts[s]++
 	if pc+1 == 512 {
 		if _, err := w.tmpFiles[s].Write(castToBytes(w.pages[s][:])); err != nil {
 			return err
@@ -131,21 +131,13 @@ func (w *ShardedWriterOffHeap) BuildTo(to io.Writer) (int, error) {
 	}
 
 	// Phase 2: find the largest shard to pre-size the shared builder.
-	sizes := make([]int, shardCount)
-	largest := 0
+	largest := uint64(0)
 	for s := 0; s < shardCount; s++ {
-		st, err := w.tmpFiles[s].Stat()
-		if err != nil {
-			return 0, err
-		}
-		sizes[s] = int(st.Size())
-		if n := sizes[s] / 8; n > largest {
-			largest = n
+		if w.keyCounts[s] > largest {
+			largest = w.keyCounts[s]
 		}
 	}
-	// MakeBinaryFuseBuilder does nothing useful at initialSize==0; pass at
-	// least 1 to avoid edge cases.
-	builder := xorfilter.MakeBinaryFuseBuilder[uint8](max(1, largest))
+	builder := xorfilter.MakeBinaryFuseBuilder[uint8](max(1, int(largest)))
 
 	// Phase 3: per-shard build, stream fingerprints to a scratch file.
 	fpScratch, err := dir.CreateTempWithExtension(w.filePath, "existence.fp.tmp")
@@ -161,11 +153,11 @@ func (w *ShardedWriterOffHeap) BuildTo(to io.Writer) (int, error) {
 	var written uint64
 	for s := 0; s < shardCount; s++ {
 		offsets[s] = written
-		sz := sizes[s]
-		if sz == 0 {
+		if w.keyCounts[s] == 0 {
 			descriptors[s].flags |= shardFlagEmpty
 			continue
 		}
+		sz := int(w.keyCounts[s]) * 8
 		// RDWR: BuildBinaryFuse may mutate `keys` via pruneDuplicates. The tmp
 		// file is disposable and under our control, so in-place mutation is
 		// fine and avoids a per-shard u64 copy.

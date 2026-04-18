@@ -19,8 +19,9 @@ import (
 // points zero-copy into the caller-provided mmap region (or into the cloned
 // region after ForceInMem).
 type ShardedReader struct {
-	shards     [shardCount]xorfilter.BinaryFuse[uint8]
-	shardEmpty [shardCount]bool
+	// Empty shards have SegmentCount == 0 and Fingerprints == nil; ContainsHash
+	// short-circuits on the former before dispatching to xorfilter's Contains.
+	shards [shardCount]xorfilter.BinaryFuse[uint8]
 
 	fpRegion  []byte // slice into mmap covering all shards' fingerprints
 	fpOffsets [shardCount + 1]uint64
@@ -80,8 +81,7 @@ func NewShardedReaderOnBytes(m []byte, fName string) (*ShardedReader, int, error
 		off := shardedHeaderSize + s*shardDescriptorSize
 		flags := binary.BigEndian.Uint32(m[off+24:])
 		if flags&shardFlagEmpty != 0 {
-			r.shardEmpty[s] = true
-			continue
+			continue // leave r.shards[s] zero-valued
 		}
 		filter := &r.shards[s]
 		filter.SegmentCount = binary.BigEndian.Uint32(m[off:])
