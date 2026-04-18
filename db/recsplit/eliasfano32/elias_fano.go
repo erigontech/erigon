@@ -22,14 +22,17 @@ import (
 	"io"
 	"math"
 	"math/bits"
+	"os"
 	"sort"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/edsrzf/mmap-go"
 
 	"github.com/erigontech/erigon/db/recsplit/efcommon"
 
 	"github.com/erigontech/erigon/common/bitutil"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/kv/stream"
 )
 
@@ -61,6 +64,10 @@ type EliasFano struct {
 	maxOffset      uint64
 	i              uint64
 	wordsUpperBits int
+
+	// off-heap backing (set only by NewEliasFanoOffHeap). Close() releases these.
+	backingFile *os.File
+	backingMmap mmap.MMap
 }
 
 func NewEliasFano(count uint64, maxOffset uint64) *EliasFano {
@@ -75,6 +82,79 @@ func NewEliasFano(count uint64, maxOffset uint64) *EliasFano {
 	ef.u = maxOffset + 1
 	ef.wordsUpperBits = ef.deriveFields()
 	return ef
+}
+
+// NewEliasFanoOffHeap constructs an EliasFano whose backing buffer lives in a
+// memory-mapped temporary file instead of the Go heap. Use for sequences
+// large enough that their backing buffer causes memory pressure (multi-GB EFs
+// during snapshot builds). Access patterns are paging-friendly: AddOffset
+// fills lower/upper monotonically, Build sweeps upperBits sequentially and
+// writes jump at monotonic stride, Write/AppendBytes dumps linearly.
+//
+// tmpFilePath is used as the basename for the temp file (same dir is used).
+// Caller MUST call Close() after Write()/AppendBytes() to unmap and delete
+// the temp file.
+func NewEliasFanoOffHeap(count uint64, maxOffset uint64, tmpFilePath string) (*EliasFano, error) {
+	if count == 0 {
+		panic(fmt.Sprintf("too small count: %d", count))
+	}
+	ef := &EliasFano{
+		count:     count - 1,
+		maxOffset: maxOffset,
+	}
+	ef.u = maxOffset + 1
+	// Compute totalWords ahead of mmap (mirrors sizing in deriveFields; once
+	// ef.data is pre-sized, deriveFields reslices instead of reallocating).
+	var l uint64
+	if ef.u/(ef.count+1) == 0 {
+		l = 0
+	} else {
+		l = 63 ^ uint64(bits.LeadingZeros64(ef.u/(ef.count+1)))
+	}
+	wordsLowerBits := int(((ef.count+1)*l+63)/64 + 1)
+	wordsUpperBits := int((ef.count + 1 + (ef.u >> l) + 63) / 64)
+	totalWords := wordsLowerBits + wordsUpperBits + ef.jumpSizeWords()
+	sizeBytes := int64(totalWords) * uint64Size
+
+	f, err := dir.CreateTempWithExtension(tmpFilePath, "ef.tmp")
+	if err != nil {
+		return nil, err
+	}
+	if err := f.Truncate(sizeBytes); err != nil {
+		f.Close()
+		dir.RemoveFile(f.Name())
+		return nil, fmt.Errorf("truncate ef tmp file: %w", err)
+	}
+	m, err := mmap.MapRegion(f, int(sizeBytes), mmap.RDWR, 0, 0)
+	if err != nil {
+		f.Close()
+		dir.RemoveFile(f.Name())
+		return nil, fmt.Errorf("mmap ef tmp file: %w", err)
+	}
+	ef.backingFile = f
+	ef.backingMmap = m
+	ef.data = unsafe.Slice((*uint64)(unsafe.Pointer(&m[0])), totalWords)
+	ef.wordsUpperBits = ef.deriveFields()
+	return ef, nil
+}
+
+// Close releases off-heap backing (mmap + temp file). No-op for heap-backed
+// EliasFano. After Close the EliasFano is unusable.
+func (ef *EliasFano) Close() {
+	ef.data = nil
+	ef.lowerBits = nil
+	ef.upperBits = nil
+	ef.jump = nil
+	if ef.backingMmap != nil {
+		_ = ef.backingMmap.Unmap()
+		ef.backingMmap = nil
+	}
+	if ef.backingFile != nil {
+		name := ef.backingFile.Name()
+		_ = ef.backingFile.Close()
+		dir.RemoveFile(name)
+		ef.backingFile = nil
+	}
 }
 
 func (ef *EliasFano) Size() datasize.ByteSize { return datasize.ByteSize(len(ef.data) * 8) }

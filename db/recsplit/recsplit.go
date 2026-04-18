@@ -382,6 +382,10 @@ func (rs *RecSplit) Close() {
 		putBufioWriter(rs.offsetWriter)
 		rs.offsetWriter = nil
 	}
+	if rs.offsetEf != nil {
+		rs.offsetEf.Close()
+		rs.offsetEf = nil
+	}
 }
 
 func (rs *RecSplit) LogLvl(lvl log.Lvl) { rs.lvl = lvl }
@@ -827,7 +831,14 @@ func (rs *RecSplit) loadFuncBucket(k, v []byte, _ etl.CurrentTableReader, _ etl.
 
 // buildOffsetEf mmaps the offset temp file and builds the Elias-Fano encoding.
 func (rs *RecSplit) buildOffsetEf() error {
-	rs.offsetEf = eliasfano32.NewEliasFano(rs.keysAdded, rs.maxOffset)
+	// Off-heap EF backs its data buffer with a mmapped temp file instead of the
+	// Go heap — avoids multi-GB memory peaks on large files (e.g. bloatnet).
+	// Closed in rs.Close() after Write() dumps the bytes to indexW.
+	var err error
+	rs.offsetEf, err = eliasfano32.NewEliasFanoOffHeap(rs.keysAdded, rs.maxOffset, filepath.Join(rs.tmpDir, rs.fileName))
+	if err != nil {
+		return fmt.Errorf("new offset ef: %w", err)
+	}
 	if err := rs.offsetWriter.Flush(); err != nil {
 		return fmt.Errorf("flush offset writer: %w", err)
 	}
@@ -1004,6 +1015,9 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		if err := rs.offsetEf.Write(rs.indexW); err != nil {
 			return fmt.Errorf("writing elias fano for offsets: %w", err)
 		}
+		// Release off-heap mmap promptly; safe no-op for heap-backed EF.
+		rs.offsetEf.Close()
+		rs.offsetEf = nil
 	}
 	if err := rs.flushExistenceFilter(); err != nil {
 		return err
