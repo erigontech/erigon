@@ -278,9 +278,19 @@ func (t *prestateTracer) processDiffState() {
 		newBalance, _ := t.env.IntraBlockState.GetBalance(addr)
 		newNonce, _ := t.env.IntraBlockState.GetNonce(addr)
 		newCode, _ := t.env.IntraBlockState.GetCode(addr)
-		newCodeHash := common.Hash{}
+		// Determine the effective codeHash after the transaction. For non-existent accounts
+		// (Exist=false) we use NilCodeHash (0x0) to match go-ethereum's GetCodeHash behaviour.
+		// For existing accounts with no code we use EmptyCodeHash, and for accounts with code
+		// we compute the keccak256 of the code.
+		var newCodeHash common.Hash
 		if len(newCode) > 0 {
 			newCodeHash = crypto.HashData(newCode)
+		} else {
+			exists, _ := t.env.IntraBlockState.Exist(addr)
+			if exists {
+				newCodeHash = accounts.EmptyCodeHash.Value()
+			}
+			// else: newCodeHash stays common.Hash{} (NilCodeHash / 0x0) for non-existent accounts
 		}
 
 		if newBalance.ToBig().Cmp(t.pre[addr].Balance) != 0 {
@@ -292,7 +302,11 @@ func (t *prestateTracer) processDiffState() {
 			postAccount.Nonce = newNonce
 		}
 
-		prevCodeHash := common.Hash{}
+		// Default to EmptyCodeHash when no codeHash is stored in the prestate (i.e. the account
+		// had no code before the transaction). This matches go-ethereum behaviour: a touched but
+		// previously non-existent account returns NilCodeHash (0x0) as its post-codeHash, which
+		// differs from EmptyCodeHash, so it correctly appears in the post state with codeHash=0x0.
+		prevCodeHash := accounts.EmptyCodeHash.Value()
 		if t.pre[addr].CodeHash != nil {
 			prevCodeHash = *t.pre[addr].CodeHash
 		}
