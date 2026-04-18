@@ -18,6 +18,7 @@ package engineapi_test
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"math/big"
 	"testing"
 
@@ -27,6 +28,8 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -36,6 +39,70 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonrpc/contracts"
 )
+
+// TestEngineApiBALMultiSenderBlock packs transfers from many independent senders
+// into a single block. Because the senders are independent the parallel executor
+// speculatively executes them concurrently, exercising the coinbase-balance
+// strip→rebase→merge path in finalizeWithIBS. Any divergence between the
+// assembler's BAL (sequential) and the parallel executor's BAL surfaces as a
+// BAL hash mismatch returned by ProcessBAL.
+func TestEngineApiBALMultiSenderBlock(t *testing.T) {
+	if !dbg.Exec3Parallel {
+		t.Skip("requires parallel exec")
+	}
+	const numSenders = 10
+	senderKeys := make([]*ecdsa.PrivateKey, numSenders)
+	for i := range senderKeys {
+		key, err := crypto.GenerateKey()
+		require.NoError(t, err)
+		senderKeys[i] = key
+	}
+
+	genesis, coinbaseKey := engineapitester.DefaultEngineApiTesterGenesis(t)
+	for _, key := range senderKeys {
+		addr := crypto.PubkeyToAddress(key.PublicKey)
+		genesis.Alloc[addr] = types.GenesisAccount{
+			Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil), // 100 ETH each
+		}
+	}
+
+	eat := engineapitester.InitialiseEngineApiTester(t, engineapitester.EngineApiTesterInitArgs{
+		Logger:      testlog.Logger(t, log.LvlDebug),
+		DataDir:     t.TempDir(),
+		Genesis:     genesis,
+		CoinbaseKey: coinbaseKey,
+	})
+
+	receiver := common.HexToAddress("0xaaaa")
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		// Submit one transfer from each independent sender.
+		txHashes := make([]common.Hash, numSenders)
+		for i, key := range senderKeys {
+			txn, err := eat.Transactor.SubmitSimpleTransfer(key, receiver, big.NewInt(1))
+			require.NoError(t, err)
+			txHashes[i] = txn.Hash()
+		}
+
+		// BuildCanonicalBlock assembles (sequential) then validates via
+		// newPayload (parallel executor). A BAL hash mismatch will surface
+		// as an INVALID payload status, which BuildCanonicalBlock returns
+		// as an error.
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, payload.ExecutionPayload, txHashes...)
+		require.NoError(t, err)
+
+		bal := decodeAndValidateBAL(t, payload)
+
+		blockNumber := rpc.BlockNumber(payload.ExecutionPayload.BlockNumber)
+		block, err := eat.RpcApiClient.GetBlockByNumber(ctx, blockNumber, false)
+		require.NoError(t, err)
+		require.NotNil(t, block.BlockAccessListHash)
+		require.Equal(t, bal.Hash(), *block.BlockAccessListHash)
+	})
+}
 
 func TestEngineApiGeneratedPayloadIncludesBlockAccessList(t *testing.T) {
 	if !dbg.Exec3Parallel {

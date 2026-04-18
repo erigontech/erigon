@@ -59,6 +59,12 @@ const (
 	// maxSimulateBlocks is the maximum number of blocks that can be simulated in a single request.
 	maxSimulateBlocks = 256
 
+	// maxSimulateCallsPerBlock is the maximum number of calls allowed in a single simulated block.
+	maxSimulateCallsPerBlock = 5000
+
+	// maxSimulateTotalCalls is the maximum total number of calls allowed across all simulated blocks in a single request.
+	maxSimulateTotalCalls = 10000
+
 	// timestampIncrement is the default increment between block timestamps.
 	timestampIncrement = 12
 )
@@ -98,6 +104,9 @@ type SimulationResult []SimulatedBlockResult
 func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, blockParameter rpc.BlockNumberOrHash) (SimulationResult, error) {
 	if len(req.BlockStateCalls) == 0 {
 		return nil, errors.New("empty input")
+	}
+	if err := validateSimulationRequest(req.BlockStateCalls); err != nil {
+		return nil, err
 	}
 	// Default to the latest block if no block parameter is given.
 	if blockParameter.BlockHash == nil && blockParameter.BlockNumber == nil {
@@ -175,6 +184,24 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 	}
 
 	return simulatedBlockResults, nil
+}
+
+func validateSimulationRequest(blocks []SimulatedBlock) error {
+	// Reject requests that exceed the maximum number of simulated blocks.
+	if len(blocks) > maxSimulateBlocks {
+		return clientLimitExceededError(fmt.Sprintf("too many blocks in request: %d > %d", len(blocks), maxSimulateBlocks))
+	}
+	var totalCalls int
+	for _, block := range blocks {
+		if len(block.Calls) > maxSimulateCallsPerBlock {
+			return clientLimitExceededError(fmt.Sprintf("too many calls in block: %d > %d", len(block.Calls), maxSimulateCallsPerBlock))
+		}
+		totalCalls += len(block.Calls)
+		if totalCalls > maxSimulateTotalCalls {
+			return clientLimitExceededError(fmt.Sprintf("too many calls: %d > %d", totalCalls, maxSimulateTotalCalls))
+		}
+	}
+	return nil
 }
 
 type simulator struct {
