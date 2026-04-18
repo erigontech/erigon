@@ -105,7 +105,7 @@ func NewShardedReaderOnBytes(m []byte, fName string) (*ShardedReader, int, error
 	}
 	r.fpRegion = m[shardedFixedHeader : shardedFixedHeader+int(total)]
 	for s := 0; s < shardCount; s++ {
-		if r.shardEmpty[s] {
+		if r.shards[s].SegmentCount == 0 {
 			continue
 		}
 		r.shards[s].Fingerprints = r.fpRegion[r.fpOffsets[s]:r.fpOffsets[s+1]]
@@ -114,13 +114,14 @@ func NewShardedReaderOnBytes(m []byte, fName string) (*ShardedReader, int, error
 }
 
 // ContainsHash routes the query to the shard identified by the low byte of v
-// and delegates to that shard's BinaryFuse[uint8].Contains.
+// and delegates to that shard's BinaryFuse[uint8].Contains. Empty shards are
+// identified by SegmentCount == 0 (xorfilter would panic on Contains).
 func (r *ShardedReader) ContainsHash(v uint64) bool {
-	s := byte(v)
-	if r.shardEmpty[s] {
+	shard := &r.shards[byte(v)]
+	if shard.SegmentCount == 0 {
 		return false
 	}
-	return r.shards[s].Contains(v)
+	return shard.Contains(v)
 }
 
 // ForceInMem copies the entire fingerprints region out of the mmap into a
@@ -130,7 +131,7 @@ func (r *ShardedReader) ForceInMem() datasize.ByteSize {
 	cloned := bytes.Clone(r.fpRegion)
 	r.fpRegion = cloned
 	for s := 0; s < shardCount; s++ {
-		if r.shardEmpty[s] {
+		if r.shards[s].SegmentCount == 0 {
 			continue
 		}
 		r.shards[s].Fingerprints = cloned[r.fpOffsets[s]:r.fpOffsets[s+1]]
