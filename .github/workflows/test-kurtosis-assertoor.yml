@@ -24,6 +24,10 @@ jobs:
     name: assertoor_${{ matrix.suite }}_test
     if: ${{ !contains(github.event.pull_request.labels.*.name, 'skip-uncaching') }}
     runs-on: ubuntu-latest
+    # Per-suite gating: matrix entries with continue_on_error: true still execute
+    # and report status in the UI, but their failure does not fail the job —
+    # so they don't block ci-gate or PR merges.
+    continue-on-error: ${{ matrix.continue_on_error || false }}
     strategy:
       fail-fast: false
       matrix:
@@ -49,6 +53,9 @@ jobs:
             # Unpin to main once CI is upgraded to Kurtosis 1.18.1.
             ethereum_package_branch: "6.1.0"
             test_timeout_minutes: 20
+            # Glamsterdam (EIP-7928 / Block Access Lists devnet) is still stabilizing
+            # upstream. Run it for visibility but don't let failures block PR merges.
+            continue_on_error: true
           - suite: caplin-minimal
             package_args: .github/workflows/kurtosis/caplin-minimal-assertoor.io
             ethereum_package_url: "github.com/erigontech/ethereum-package"
