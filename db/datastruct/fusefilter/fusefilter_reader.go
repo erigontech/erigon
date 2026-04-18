@@ -129,6 +129,67 @@ func (r *Reader) Close() {
 	r.f = nil
 }
 
+// ReaderSharded reads a sharded fusefilter (file version 1).
+// Only the shard matching keyHash >> 56 is checked on lookup.
+type ReaderSharded struct {
+	shards   [256]*Reader
+	features Features
+}
+
+// NewReaderShardedOnBytes parses a sharded fusefilter blob (version 1) from m.
+// Returns the reader and the number of bytes consumed.
+func NewReaderShardedOnBytes(m []byte, fName string) (*ReaderSharded, int, error) {
+	const headerSize = 4
+	const sizeTableSize = 256 * 8
+	if len(m) < headerSize+sizeTableSize {
+		return nil, 0, fmt.Errorf("fusefilter sharded %s: too small (%d bytes)", fName, len(m))
+	}
+
+	featuresBytes := bytes.Clone(m[:4])
+	featuresBytes[0] = 0
+	features := Features(binary.BigEndian.Uint32(featuresBytes))
+	fileIsLittleEndian := features&IsLittleEndianFeature != 0
+	if fileIsLittleEndian != IsLittleEndian {
+		return nil, 0, fmt.Errorf("file %s is not compatible with your machine (different Endianness)", fName)
+	}
+
+	var sizes [256]uint64
+	for i := range sizes {
+		sizes[i] = binary.BigEndian.Uint64(m[headerSize+i*8:])
+	}
+
+	r := &ReaderSharded{features: features}
+	offset := headerSize + sizeTableSize
+	for i, sz := range sizes {
+		if sz == 0 {
+			continue
+		}
+		shard, _, err := NewReaderOnBytes(m[offset:offset+int(sz)], fName)
+		if err != nil {
+			return nil, 0, fmt.Errorf("shard %d of %s: %w", i, fName, err)
+		}
+		r.shards[i] = shard
+		offset += int(sz)
+	}
+	return r, offset, nil
+}
+
+func (r *ReaderSharded) ContainsHash(v uint64) bool {
+	s := r.shards[v>>56]
+	if s == nil {
+		return false
+	}
+	return s.ContainsHash(v)
+}
+
+func (r *ReaderSharded) ForceInMem() {
+	for _, s := range r.shards {
+		if s != nil {
+			s.ForceInMem()
+		}
+	}
+}
+
 var IsLittleEndian = isLittleEndian()
 
 func isLittleEndian() bool {

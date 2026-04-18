@@ -133,6 +133,9 @@ type RecSplit struct {
 	//v1 fields
 	existenceFV1 *fusefilter.WriterOffHeap
 
+	//v2 fields
+	existenceFV2 *fusefilter.WriterSharded
+
 	offsetFile   *os.File      // Temp file for offsets (already sorted, no need for etl.Collector)
 	offsetWriter *bufio.Writer // Buffered writer for offset file
 
@@ -281,8 +284,14 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 		}
 
 	}
-	if args.KeyCount > 0 && rs.lessFalsePositives && rs.dataStructureVersion >= 1 {
+	if args.KeyCount > 0 && rs.lessFalsePositives && rs.dataStructureVersion == 1 {
 		rs.existenceFV1, err = fusefilter.NewWriterOffHeap(rs.filePath)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if args.KeyCount > 0 && rs.lessFalsePositives && rs.dataStructureVersion >= 2 {
+		rs.existenceFV2, err = fusefilter.NewWriterSharded(rs.filePath)
 		if err != nil {
 			return nil, err
 		}
@@ -369,6 +378,10 @@ func (rs *RecSplit) Close() {
 	if rs.existenceFV1 != nil {
 		rs.existenceFV1.Close()
 		rs.existenceFV1 = nil
+	}
+	if rs.existenceFV2 != nil {
+		rs.existenceFV2.Close()
+		rs.existenceFV2 = nil
 	}
 	if rs.bucketCollector != nil {
 		rs.bucketCollector.Close()

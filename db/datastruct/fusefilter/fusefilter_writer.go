@@ -2,6 +2,7 @@ package fusefilter
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -181,6 +182,88 @@ func (w *Writer) Close() {
 	if w.data != nil {
 		w.data.Close()
 		w.data = nil
+	}
+}
+
+// WriterSharded shards keys into 256 sub-filters by first byte of keyHash (keyHash >> 56).
+// Produces fusefilter file version 1. Lookup only checks the one relevant shard.
+type WriterSharded struct {
+	shards   [256]*WriterOffHeap
+	filePath string
+	features Features
+}
+
+func NewWriterSharded(filePath string) (*WriterSharded, error) {
+	var features Features
+	if IsLittleEndian {
+		features |= IsLittleEndianFeature
+	}
+	return &WriterSharded{filePath: filePath, features: features}, nil
+}
+
+func (w *WriterSharded) AddHash(k uint64) error {
+	idx := k >> 56
+	if w.shards[idx] == nil {
+		var err error
+		w.shards[idx], err = NewWriterOffHeap(w.filePath)
+		if err != nil {
+			return err
+		}
+	}
+	return w.shards[idx].AddHash(k)
+}
+
+// BuildTo writes sharded fusefilter (file version 1) to fw.
+// Format: [4 bytes header] [256×8 bytes size table] [concatenated shard blobs].
+// size[i] == 0 means shard i is empty/absent.
+func (w *WriterSharded) BuildTo(fw io.Writer) (int, error) {
+	shardData := make([][]byte, 256)
+	for i, s := range w.shards {
+		if s == nil {
+			continue
+		}
+		var buf bytes.Buffer
+		if _, err := s.BuildTo(&buf); err != nil {
+			return 0, fmt.Errorf("shard %d: %w", i, err)
+		}
+		shardData[i] = buf.Bytes()
+	}
+
+	const version1 uint8 = 1
+	var header [4]byte
+	binary.BigEndian.PutUint32(header[:], uint32(w.features))
+	header[0] = version1
+	if _, err := fw.Write(header[:]); err != nil {
+		return 0, err
+	}
+	total := 4
+
+	var sizeBuf [8]byte
+	for _, d := range shardData {
+		binary.BigEndian.PutUint64(sizeBuf[:], uint64(len(d)))
+		if _, err := fw.Write(sizeBuf[:]); err != nil {
+			return 0, err
+		}
+		total += 8
+	}
+	for _, d := range shardData {
+		if len(d) == 0 {
+			continue
+		}
+		if _, err := fw.Write(d); err != nil {
+			return 0, err
+		}
+		total += len(d)
+	}
+	return total, nil
+}
+
+func (w *WriterSharded) Close() {
+	for i, s := range w.shards {
+		if s != nil {
+			s.Close()
+			w.shards[i] = nil
+		}
 	}
 }
 
