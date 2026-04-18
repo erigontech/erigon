@@ -252,6 +252,10 @@ func (evm *EVM) SetCallGasTemp(gas uint64) {
 	evm.callGasTemp = gas
 }
 
+func isSystemCall(caller accounts.Address) bool {
+	return caller == params.SystemAddress
+}
+
 // SetPrecompiles sets the precompiles for the EVM
 func (evm *EVM) SetPrecompiles(precompiles PrecompiledContracts) {
 	evm.precompiles = precompiles
@@ -299,12 +303,11 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	if depth > int(params.CallCreateDepth) {
 		return nil, gas, ErrDepth
 	}
+	syscall := isSystemCall(caller)
+
 	if typ == CALL || typ == CALLCODE {
 		// Fail if we're trying to transfer more than the available balance.
-		// Only check when value is non-zero — matching geth's short-circuit
-		// behavior. Calling CanTransfer for zero-value calls (e.g. system
-		// calls) creates spurious balance reads on the caller that pollute
-		// the Block Access List (EIP-7928).
+		// Skip the check for zero-value calls, matching geth's short-circuit.
 		if !value.IsZero() {
 			canTransfer, err := evm.Context.CanTransfer(evm.intraBlockState, caller, value)
 			if err != nil {
@@ -325,12 +328,27 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 			return nil, mdgas.MdGas{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
 		if !exist {
-			if !isPrecompile && evm.chainRules.IsSpuriousDragon && value.IsZero() {
+			if !isPrecompile && evm.chainRules.IsSpuriousDragon && value.IsZero() && !syscall {
 				return nil, gas, nil
 			}
 			evm.intraBlockState.CreateAccount(addr, false)
 		}
-		evm.Context.Transfer(evm.intraBlockState, caller, addr, value, bailout, evm.chainRules)
+		// System calls use TouchAccount instead of Transfer to avoid
+		// spurious balance reads on the caller that would pollute the
+		// Block Access List (EIP-7928). The touch is still needed so
+		// AuRa/Gnosis keeps the empty system account in the PMT.
+		if syscall && value.IsZero() {
+			if err := evm.intraBlockState.TouchAccount(caller); err != nil {
+				return nil, mdgas.MdGas{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+			}
+		} else {
+			// Normal (non-syscall) calls always go through Transfer —
+			// this handles both value movement and the zero-balance touch
+			// required for state clearing.
+			if err := evm.Context.Transfer(evm.intraBlockState, caller, addr, value, bailout, evm.chainRules); err != nil {
+				return nil, mdgas.MdGas{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+			}
+		}
 	} else if typ == STATICCALL {
 		// We do an AddBalance of zero here, just in order to trigger a touch.
 		// This doesn't matter on Mainnet, where all empties are gone at the time of Byzantium,
@@ -556,7 +574,9 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	if evm.chainRules.IsSpuriousDragon {
 		evm.intraBlockState.SetNonce(address, 1)
 	}
-	evm.Context.Transfer(evm.intraBlockState, caller, address, value, bailout, evm.chainRules)
+	if err := evm.Context.Transfer(evm.intraBlockState, caller, address, value, bailout, evm.chainRules); err != nil {
+		return nil, accounts.NilAddress, mdgas.MdGas{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+	}
 
 	// Initialise a new contract and set the code that is to be used by the EVM.
 	// The contract is a scoped environment for this execution context only.

@@ -47,7 +47,7 @@ func writeBALToFile(bal types.BlockAccessList, blockNum uint64, dataDir string) 
 	bal.DebugPrint(file)
 }
 
-func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, amsterdam bool, experimental bool, isForkValidation bool, dataDir string) error {
+func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, amsterdam bool, experimental bool, dataDir string) error {
 	if !amsterdam && !experimental {
 		return nil
 	}
@@ -96,19 +96,11 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, ams
 			return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", blockNum, dbBAL.Hash(), headerBALHash)
 		}
 	}
-	// Validate computed BAL against header. During fork validation (engine API
-	// newPayload) the stored BAL comes from the untrusted payload and trivially
-	// matches the header hash. Trusting it would bypass semantic validation
-	// (EIP-7928). For re-execution of already-validated blocks, the parallel
-	// executor can still diverge in edge cases, so fall back to the stored BAL.
+	// Always validate computed BAL against header. The BalancePath cross-check
+	// in VersionMap.validateRead ensures deterministic parallel execution even
+	// without a stored BAL body (HasBAL=false), so the computed BAL is accurate.
 	if headerBALHash != bal.Hash() {
-		if dbBALBytes != nil && !isForkValidation {
-			if dbBAL2, decErr := types.DecodeBlockAccessListBytes(dbBALBytes); decErr == nil && dbBAL2 != nil && dbBAL2.Hash() == headerBALHash {
-				log.Debug("BAL: computed BAL differs from stored/header, trusting stored BAL",
-					"block", blockNum, "computedHash", bal.Hash(), "headerHash", headerBALHash)
-				return nil
-			}
-		}
+		dumpDir := ""
 		if dataDir != "" {
 			balDir := filepath.Join(dataDir, "bal")
 			if err := os.MkdirAll(balDir, 0o755); err != nil {
@@ -117,6 +109,8 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, ams
 				computedPath := filepath.Join(balDir, fmt.Sprintf("computed_bal_%d.txt", blockNum))
 				if err := os.WriteFile(computedPath, []byte(bal.DebugString()), 0o644); err != nil {
 					log.Warn("failed to write computed BAL debug file", "path", computedPath, "err", err)
+				} else {
+					dumpDir = balDir
 				}
 				dbBAL2, err := types.DecodeBlockAccessListBytes(dbBALBytes)
 				if err != nil {
@@ -129,7 +123,12 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, ams
 				}
 			}
 		}
-		return fmt.Errorf("%w, block=%d: block access list mismatch: got %s expected %s", rules.ErrInvalidBlock, blockNum, bal.Hash(), headerBALHash)
+		if dumpDir != "" {
+			return fmt.Errorf("%w, block=%d (hash=%s): block access list mismatch: got %s expected %s; debug dumps in %s",
+				rules.ErrInvalidBlock, blockNum, blockHash, bal.Hash(), headerBALHash, dumpDir)
+		}
+		return fmt.Errorf("%w, block=%d (hash=%s): block access list mismatch: got %s expected %s",
+			rules.ErrInvalidBlock, blockNum, blockHash, bal.Hash(), headerBALHash)
 	}
 	return nil
 }
