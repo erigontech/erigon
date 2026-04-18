@@ -261,7 +261,7 @@ func (s *Sentinel) proactiveSubnetPeerSearch() {
 			log.Trace("[Sentinel] Subnet coverage after search",
 				"subnetsAtMinPeers", atMin,
 				"minPeersPerSubnet", minimumPeersPerSubnet,
-			)
+				"stillUnderserved", stillUnderserved)
 		}
 	}
 }
