@@ -34,6 +34,7 @@ import (
 	"github.com/urfave/cli/v2"
 	"gopkg.in/yaml.v2"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/disk"
 	"github.com/erigontech/erigon/common/fdlimit"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -319,6 +320,8 @@ func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *tracers.Tracer, *htt
 			panic(err)
 		}
 	}
+
+	go dbg.SaveHeapProfileNearOOMPeriodically(ctx.Context, dbg.SaveHeapWithLogger(&logger))
 
 	return logger, tracer, metricsMux, pprofMux, nil
 }
