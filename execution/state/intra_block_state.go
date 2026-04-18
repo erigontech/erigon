@@ -955,22 +955,7 @@ func (sdb *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int
 	// EIP161: We must check emptiness for the objects such that the account
 	// clearing (0,0,0 objects) can take effect.
 	if amount.IsZero() {
-		stateObject, err := sdb.GetOrNewStateObject(addr)
-		if err != nil {
-			return err
-		}
-
-		if stateObject.data.Empty() {
-			versionWritten(sdb, addr, BalancePath, accounts.NilKey, uint256.Int{})
-			if _, ok := sdb.journal.dirties[addr]; !ok {
-				if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
-					fmt.Printf("%d (%d.%d) Touch %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
-				}
-				sdb.touchAccount(addr)
-			}
-		}
-
-		return nil
+		return sdb.TouchAccount(addr)
 	}
 
 	prev, wasCommited, _ := sdb.getBalance(addr)
@@ -1008,6 +993,27 @@ func (sdb *IntraBlockState) touchAccount(addr accounts.Address) {
 		// flattened journals.
 		sdb.journal.dirty(addr)
 	}
+}
+
+// TouchAccount materializes an empty account and records the zero-balance touch
+// needed for state clearing and trie consistency.
+func (sdb *IntraBlockState) TouchAccount(addr accounts.Address) error {
+	stateObject, err := sdb.GetOrNewStateObject(addr)
+	if err != nil {
+		return err
+	}
+
+	if stateObject.data.Empty() {
+		versionWritten(sdb, addr, BalancePath, accounts.NilKey, uint256.Int{})
+		if _, ok := sdb.journal.dirties[addr]; !ok {
+			if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
+				fmt.Printf("%d (%d.%d) Touch %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
+			}
+			sdb.touchAccount(addr)
+		}
+	}
+
+	return nil
 }
 
 func (sdb *IntraBlockState) getVersionedAccount(addr accounts.Address, readStorage bool) (*accounts.Account, ReadSource, Version, error) {
@@ -1140,10 +1146,17 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readA
 // SubBalance subtracts amount from the account associated with addr.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) SubBalance(addr accounts.Address, amount uint256.Int, reason tracing.BalanceChangeReason) error {
-	if amount.IsZero() && addr != params.SystemAddress {
-		// We skip this early exit if the sender is the system address
-		// because Gnosis has a special logic to create an empty system account
-		// even after Spurious Dragon (see PR 5645 and Issue 18276).
+	if amount.IsZero() {
+		if addr == params.SystemAddress {
+			// Gnosis/AuRa keeps an empty system account even after
+			// Spurious Dragon (see PR 5645 and Issue 18276).
+			//
+			// The primary syscall path in evm.call() handles this via
+			// TouchAccount directly; this branch is retained as
+			// defense-in-depth for other callers (AuRa engine,
+			// consensus callbacks).
+			return sdb.TouchAccount(addr)
+		}
 		return nil
 	}
 
