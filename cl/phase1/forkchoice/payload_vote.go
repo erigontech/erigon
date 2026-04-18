@@ -312,14 +312,15 @@ func (f *ForkChoiceStore) getPayloadStatusTiebreaker(node ForkChoiceNode) uint8 
 
 	// To decide on a payload from the previous slot, choose
 	// between FULL and EMPTY based on ShouldExtendPayload
-	if node.PayloadStatus == cltypes.PayloadStatusEmpty {
-		return 1
-	}
-	// FULL case
 	if f.ShouldExtendPayload(node.Root) {
-		return 2
+		// should_extend: identity — keep status quo
+		return uint8(node.PayloadStatus)
 	}
-	return 0 // Treat as PENDING (lower priority)
+	// !should_extend: swap FULL <-> EMPTY
+	if node.PayloadStatus == cltypes.PayloadStatusFull {
+		return uint8(cltypes.PayloadStatusEmpty)
+	}
+	return uint8(cltypes.PayloadStatusFull)
 }
 
 // getNodeChildren returns the children of a fork choice node.

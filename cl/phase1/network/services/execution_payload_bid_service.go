@@ -298,6 +298,12 @@ func (s *executionPayloadBidService) queuePendingBid(msg *cltypes.SignedExecutio
 
 // loop is the background goroutine that processes pending bids.
 func (s *executionPayloadBidService) loop(ctx context.Context) {
+	// Wake any blocked Wait() on context cancellation to prevent deadlock.
+	go func() {
+		<-ctx.Done()
+		s.pendingCond.Broadcast()
+	}()
+
 	for {
 		// Wait until there are pending bids
 		s.pendingCond.L.Lock()
