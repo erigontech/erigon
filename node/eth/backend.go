@@ -55,8 +55,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader"
-	"github.com/erigontech/erigon/db/downloader/downloadercfg"
-	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/kvcache"
@@ -93,17 +91,16 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node"
+	downloadercomp "github.com/erigontech/erigon/node/components/downloader"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/ethstats"
-	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
-	"github.com/erigontech/erigon/node/nodecfg"
 	privateapi2 "github.com/erigontech/erigon/node/privateapi"
 	"github.com/erigontech/erigon/node/rulesconfig"
 	"github.com/erigontech/erigon/node/shards"
@@ -204,7 +201,7 @@ type Ethereum struct {
 	txPoolRpcClient           txpoolproto.TxpoolClient
 	shutterPool               *shutter.Pool
 	blockBuilderNotifyNewTxns chan struct{}
-	downloader                *downloader.Downloader
+	downloaderProvider        *downloadercomp.Provider
 
 	blockSnapshots *freezeblocks.RoSnapshots
 	blockReader    services.FullBlockReader
@@ -412,10 +409,41 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.blockSnapshots, backend.blockReader, backend.blockWriter = allSnapshots, blockReader, blockWriter
 	backend.chainDB = temporalDb
 
-	// Can happen in some configurations
-	if err := backend.setUpSnapDownloader(ctx, stack.Config(), config.Downloader); err != nil {
+	// Initialize the downloader component (local in-process or remote via gRPC).
+	backend.downloaderProvider = &downloadercomp.Provider{}
+	backend.downloaderProvider.Configure(config.Downloader, config.Snapshot, config.Dirs, logger, stack.Config().DebugMux)
+	if err := backend.downloaderProvider.Initialize(ctx); err != nil {
 		return nil, err
 	}
+	backend.downloaderClient = backend.downloaderProvider.Client
+
+	// Register file-change callbacks so completed snapshots are seeded and
+	// deleted snapshots are removed from the swarm. These stay here because
+	// they need chainDB and notifications (set below).
+	backend.chainDB.OnFilesChange(func(frozenFileNames []string) {
+		backend.logger.Debug("files changed...sending notification")
+		events := backend.notifications.Events
+		events.OnNewSnapshot()
+		if config.Downloader != nil && config.Downloader.ChainName == "" {
+			return
+		}
+		if backend.config.Snapshot.NoDownloader || backend.downloaderClient == nil || len(frozenFileNames) == 0 {
+			return
+		}
+		if err := backend.downloaderClient.Seed(ctx, frozenFileNames); err != nil {
+			backend.logger.Warn("[snapshots] downloader.Seed", "err", err)
+		}
+	}, func(deletedFiles []string) {
+		if config.Downloader != nil && config.Downloader.ChainName == "" {
+			return
+		}
+		if backend.config.Snapshot.NoDownloader || backend.downloaderClient == nil || len(deletedFiles) == 0 {
+			return
+		}
+		if err := backend.downloaderClient.Delete(ctx, deletedFiles); err != nil {
+			backend.logger.Warn("[snapshots] downloader.Delete", "err", err)
+		}
+	})
 
 	kvRPC := remotedbserver.NewKvServer(ctx, backend.chainDB, allSnapshots, allBorSnapshots, temporalDb.Debug(), logger)
 	backend.notifications = shards.NewNotifications(kvRPC)
@@ -538,17 +566,18 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	// Wire chain.toml ENR updater and P2P discovery after sentry servers are created.
-	// The entire chain.toml v2 publishing / discovery / torrent-peer-manager stack is
-	// gated behind --snap.p2p-manifest so opt-in users get the new flow while default
-	// syncs keep the pre-v2 behaviour (avoids a torrent-name collision between the
-	// locally-seeded chain.toml and the downloaded chain.toml.torrent).
-	if backend.downloader != nil && len(backend.sentryServers) > 0 && backend.config.Snapshot.P2PManifest {
-		backend.downloader.SetENRUpdater(func(ct enr.ChainToml) {
+	// Only applies in local downloader mode; remote-downloader mode has nil backend.downloaderProvider.Downloader.
+	// Gated behind --snap.p2p-manifest so default syncs stay on the pre-v2 path and
+	// avoid the torrent-name collision between a locally-seeded chain.toml and the
+	// downloaded chain.toml.torrent in AddTorrentsFromDisk (see #20615).
+	if backend.downloaderProvider != nil && backend.downloaderProvider.Downloader != nil && len(backend.sentryServers) > 0 && backend.config.Snapshot.P2PManifest {
+		dl := backend.downloaderProvider.Downloader
+		dl.SetENRUpdater(func(ct enr.ChainToml) {
 			// Resolve the torrent port at update time rather than capture-time:
 			// the torrent client may not be listening yet when the updater
 			// closure is built. Only set the "bt" ENR key if we have a valid
 			// port in [1..65535]; otherwise peers would dial an unusable port.
-			torrentPort := backend.downloader.TorrentPort()
+			torrentPort := dl.TorrentPort()
 			validPort := torrentPort > 0 && torrentPort <= 65535
 
 			for _, srv := range backend.sentryServers {
@@ -565,7 +594,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		})
 
 		sentryServers := backend.sentryServers
-		backend.downloader.SetNodeSourceFn(func() downloader.NodeSource {
+		dl.SetNodeSourceFn(func() downloader.NodeSource {
 			var sources []downloader.NodeSource
 			for _, srv := range sentryServers {
 				p2pSrv := srv.GetP2PServer()
@@ -614,7 +643,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				return
 			case <-time.After(30 * time.Second):
 			}
-			if pubErr := backend.downloader.PublishLocalChainToml(); pubErr != nil {
+			if pubErr := dl.PublishLocalChainToml(); pubErr != nil {
 				logger.Debug("[chaintoml] no existing chain.toml to re-publish", "err", pubErr)
 			} else {
 				logger.Info("[chaintoml] re-published existing chain.toml ENR entry")
@@ -622,11 +651,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}()
 
 		if backend.config.Snapshot.P2PManifest {
-			backend.downloader.StartChainTomlDiscovery(ctx, backend.config.Snapshot.ChainName)
+			dl.StartChainTomlDiscovery(ctx, backend.config.Snapshot.ChainName)
 		}
 
 		// Start torrent peer manager — keeps torrent peers in sync with DevP2P peers.
-		backend.downloader.StartTorrentPeerManager(ctx)
+		dl.StartTorrentPeerManager(ctx)
 	}
 
 	// setup periodic logging and prometheus updates
@@ -1029,9 +1058,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	// snapshots not in that set could cause issues. That's an unsolved issue and probably requires
 	// always resetting before resuming/starting a sync.
 	var afterSnapshotDownload func(ctx context.Context) error
-	if backend.downloader != nil {
+	if backend.downloaderProvider != nil && backend.downloaderProvider.Downloader != nil {
 		afterSnapshotDownload = func(ctx context.Context) (err error) {
-			incomplete, err := backend.downloader.AddTorrentsFromDisk(ctx)
+			incomplete, err := backend.downloaderProvider.Downloader.AddTorrentsFromDisk(ctx)
 			if err != nil {
 				err = fmt.Errorf("adding torrents from disk: %w", err)
 				return
@@ -1352,136 +1381,6 @@ func (s *Ethereum) NodesInfo(limit int) (*remoteproto.NodesInfoReply, error) {
 	return nodesInfo, nil
 }
 
-// sets up blockReader and client downloader
-func (s *Ethereum) setUpSnapDownloader(
-	ctx context.Context,
-	nodeCfg *nodecfg.Config,
-	downloaderCfg *downloadercfg.Cfg,
-) (err error) {
-	s.chainDB.OnFilesChange(func(frozenFileNames []string) {
-		s.logger.Debug("files changed...sending notification")
-		events := s.notifications.Events
-		events.OnNewSnapshot()
-		if downloaderCfg != nil && downloaderCfg.ChainName == "" {
-			return
-		}
-		if s.config.Snapshot.NoDownloader || s.downloaderClient == nil || len(frozenFileNames) == 0 {
-			return
-		}
-
-		if err := s.downloaderClient.Seed(ctx, frozenFileNames); err != nil {
-			s.logger.Warn("[snapshots] downloader.Seed", "err", err)
-		}
-	}, func(deletedFiles []string) {
-		if downloaderCfg != nil && downloaderCfg.ChainName == "" {
-			return
-		}
-		if s.config.Snapshot.NoDownloader || s.downloaderClient == nil || len(deletedFiles) == 0 {
-			return
-		}
-
-		if err := s.downloaderClient.Delete(ctx, deletedFiles); err != nil {
-			s.logger.Warn("[snapshots] downloader.Delete", "err", err)
-		}
-	})
-
-	if s.config.Snapshot.NoDownloader {
-		return nil
-	}
-
-	if downloaderCfg != nil {
-		if s.config.Snapshot.P2PManifest {
-			s.logger.Info("P2P manifest mode: skipping centralized preverified.toml, waiting for P2P discovery")
-			// Clear embedded baseline so the node doesn't download from it.
-			// The discovery loop will populate the registry from P2P peers.
-			snapcfg.SetToml(downloaderCfg.ChainName, []byte{}, false)
-		} else {
-			if err := downloadercfg.LoadSnapshotsHashes(ctx, downloaderCfg.Dirs, downloaderCfg.ChainName); err != nil {
-				return err
-			}
-		}
-	}
-
-	client, err := s.initDownloader(ctx, nodeCfg, downloaderCfg)
-	if err != nil {
-		return
-	}
-	if client != nil {
-		s.downloaderClient = downloader.NewRpcClient(client, s.config.Dirs.Snap)
-	}
-
-	// Enable P2P manifest mode on the downloader and expose the readiness
-	// channel so the snapshot stage can wait for discovery to complete.
-	if s.config.Snapshot.P2PManifest && s.downloader != nil {
-		s.downloader.EnableP2PManifest()
-		s.config.Snapshot.ManifestReady = s.downloader.ManifestReady()
-	}
-
-	return err
-}
-
-// Init s.downloader, and return suitable client for it.
-func (s *Ethereum) initDownloader(
-	ctx context.Context,
-	nodeCfg *nodecfg.Config,
-	downloaderCfg *downloadercfg.Cfg,
-) (client downloaderproto.DownloaderClient, err error) {
-	if s.config.Snapshot.DownloaderAddr != "" {
-		// connect to external Downloader
-		return downloadergrpc.NewClient(ctx, s.config.Snapshot.DownloaderAddr)
-	}
-	if downloaderCfg == nil || downloaderCfg.ChainName == "" {
-		return
-	}
-
-	s.downloader, err = downloader.New(ctx, downloaderCfg, s.logger)
-	if err != nil {
-		return
-	}
-	s.downloader.HandleTorrentClientStatus(nodeCfg.DebugMux)
-
-	// This adds completed snapshots on disk. Ideally we'd do this after completing sync, so that we
-	// don't unnecessarily report incomplete torrents. But to do that we need access to
-	// Downloader.AddTorrentsFromDisk in the sync stage, which only has the GPRC client. There's
-	// also the issue of having torrents not in the preverified set: If we are performing a sync for
-	// missing snapshots, any snapshots not in that set could cause issues. That's an unsolved issue
-	// and probably requires always resetting before resuming/starting a sync.
-	incomplete, err := s.downloader.AddTorrentsFromDisk(ctx)
-	if err != nil {
-		err = fmt.Errorf("adding torrents from disk: %w", err)
-		return
-	}
-
-	if incomplete != 0 {
-		// This is fine if we're resuming a sync. If not, there are files that will just float
-		// around. See the comment about resetting above. If that is resolved, we could delete or
-		// ignore incomplete torrents as aberrations.
-		s.logger.Warn("Downloader detected incomplete snapshots", "count", incomplete)
-	}
-
-	// Generate chain.toml from existing torrents on disk. The ENR updater is wired
-	// later (after this function returns), so the ENR update will be a no-op here.
-	// The background loop will re-publish with the correct frozenTx once P2P is up.
-	// Only publish when P2P manifest mode is opt-in; otherwise a locally-seeded
-	// chain.toml collides with a subsequently-downloaded chain.toml.torrent in
-	// AddTorrentsFromDisk (see getExistingSnapshotTorrent).
-	if s.config.Snapshot.P2PManifest {
-		if pubErr := s.downloader.PublishLocalChainToml(); pubErr != nil {
-			s.logger.Warn("Failed to publish initial chain.toml", "err", pubErr)
-		}
-	}
-
-	bittorrentServer, err := downloader.NewGrpcServer(s.downloader)
-	if err != nil {
-		err = fmt.Errorf("new server: %w", err)
-		return
-	}
-	s.downloader.InitBackgroundLogger(true)
-
-	client = downloader.DirectGrpcServerClient(bittorrentServer)
-	return
-}
-
 func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig *ethconfig.Config, chainConfig *chain.Config, dbReadConcurrency int, logger log.Logger, blockSnapBuildSema *semaphore.Weighted) (*freezeblocks.BlockReader, *blockio.BlockWriter, *freezeblocks.RoSnapshots, *heimdall.RoSnapshots, bridge.Store, heimdall.Store, kv.TemporalRwDB, error) {
 	snConfig.Snapshot.ChainName = chainConfig.ChainName
 	allSnapshots := freezeblocks.NewRoSnapshots(snConfig.Snapshot, dirs.Snap, logger)
@@ -1731,8 +1630,8 @@ func (s *Ethereum) Stop() error {
 	if s.unsubscribeEthstat != nil {
 		s.unsubscribeEthstat()
 	}
-	if s.downloader != nil {
-		s.downloader.Close()
+	if s.downloaderProvider != nil {
+		s.downloaderProvider.Close()
 	}
 	if s.privateAPI != nil {
 		shutdownDone := make(chan bool)
