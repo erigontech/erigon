@@ -65,7 +65,6 @@ type EliasFano struct {
 	i              uint64
 	wordsUpperBits int
 
-	// off-heap backing (set only by NewEliasFanoOffHeap). Close() releases these.
 	backingFile *os.File
 	backingMmap mmap.MMap
 }
@@ -84,16 +83,9 @@ func NewEliasFano(count uint64, maxOffset uint64) *EliasFano {
 	return ef
 }
 
-// NewEliasFanoOffHeap constructs an EliasFano whose backing buffer lives in a
-// memory-mapped temporary file instead of the Go heap. Use for sequences
-// large enough that their backing buffer causes memory pressure (multi-GB EFs
-// during snapshot builds). Access patterns are paging-friendly: AddOffset
-// fills lower/upper monotonically, Build sweeps upperBits sequentially and
-// writes jump at monotonic stride, Write/AppendBytes dumps linearly.
-//
-// tmpFilePath is used as the basename for the temp file (same dir is used).
-// Caller MUST call Close() after Write()/AppendBytes() to unmap and delete
-// the temp file.
+// NewEliasFanoOffHeap is like NewEliasFano but backs the data buffer with a
+// mmapped temp file. Use when the buffer would be too large for the Go heap
+// (multi-GB EFs during snapshot builds). Caller MUST Close() after Write.
 func NewEliasFanoOffHeap(count uint64, maxOffset uint64, tmpFilePath string) (*EliasFano, error) {
 	if count == 0 {
 		panic(fmt.Sprintf("too small count: %d", count))
@@ -103,8 +95,7 @@ func NewEliasFanoOffHeap(count uint64, maxOffset uint64, tmpFilePath string) (*E
 		maxOffset: maxOffset,
 	}
 	ef.u = maxOffset + 1
-	// Compute totalWords ahead of mmap (mirrors sizing in deriveFields; once
-	// ef.data is pre-sized, deriveFields reslices instead of reallocating).
+	// Pre-size ef.data so deriveFields reslices it instead of allocating.
 	var l uint64
 	if ef.u/(ef.count+1) == 0 {
 		l = 0
@@ -138,8 +129,7 @@ func NewEliasFanoOffHeap(count uint64, maxOffset uint64, tmpFilePath string) (*E
 	return ef, nil
 }
 
-// Close releases off-heap backing (mmap + temp file). No-op for heap-backed
-// EliasFano. After Close the EliasFano is unusable.
+// Close releases off-heap backing; no-op for heap-backed EliasFano. Idempotent.
 func (ef *EliasFano) Close() {
 	ef.data = nil
 	ef.lowerBits = nil
