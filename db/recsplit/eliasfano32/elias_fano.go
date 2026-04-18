@@ -95,16 +95,8 @@ func NewEliasFanoOffHeap(count uint64, maxOffset uint64, tmpFilePath string) (*E
 		maxOffset: maxOffset,
 	}
 	ef.u = maxOffset + 1
-	// Pre-size ef.data so deriveFields reslices it instead of allocating.
-	var l uint64
-	if ef.u/(ef.count+1) == 0 {
-		l = 0
-	} else {
-		l = 63 ^ uint64(bits.LeadingZeros64(ef.u/(ef.count+1)))
-	}
-	wordsLowerBits := int(((ef.count+1)*l+63)/64 + 1)
-	wordsUpperBits := int((ef.count + 1 + (ef.u >> l) + 63) / 64)
-	totalWords := wordsLowerBits + wordsUpperBits + ef.jumpSizeWords()
+	// Pre-size ef.data so deriveFields reslices instead of allocating.
+	_, _, _, totalWords := ef.computeLayout()
 	sizeBytes := int64(totalWords) * uint64Size
 
 	f, err := dir.CreateTempWithExtension(tmpFilePath, "ef.tmp")
@@ -168,17 +160,22 @@ func (ef *EliasFano) jumpSizeWords() int {
 	return int(size)
 }
 
-func (ef *EliasFano) deriveFields() int {
-	if ef.u/(ef.count+1) == 0 {
-		ef.l = 0
-	} else {
-		ef.l = 63 ^ uint64(bits.LeadingZeros64(ef.u/(ef.count+1))) // pos of first non-zero bit
+// computeLayout returns the bit-width l and the word counts that partition ef.data.
+// Shared by deriveFields (heap path) and NewEliasFanoOffHeap (mmap pre-sizing).
+func (ef *EliasFano) computeLayout() (l uint64, wordsLowerBits, wordsUpperBits, totalWords int) {
+	if ef.u/(ef.count+1) != 0 {
+		l = 63 ^ uint64(bits.LeadingZeros64(ef.u/(ef.count+1)))
 	}
+	wordsLowerBits = int(((ef.count+1)*l+63)/64 + 1)
+	wordsUpperBits = int((ef.count + 1 + (ef.u >> l) + 63) / 64)
+	totalWords = wordsLowerBits + wordsUpperBits + ef.jumpSizeWords()
+	return
+}
+
+func (ef *EliasFano) deriveFields() int {
+	l, wordsLowerBits, wordsUpperBits, totalWords := ef.computeLayout()
+	ef.l = l
 	ef.lowerBitsMask = (uint64(1) << ef.l) - 1
-	wordsLowerBits := int(((ef.count+1)*ef.l+63)/64 + 1)
-	wordsUpperBits := int((ef.count + 1 + (ef.u >> ef.l) + 63) / 64)
-	jumpWords := ef.jumpSizeWords()
-	totalWords := wordsLowerBits + wordsUpperBits + jumpWords
 	//fmt.Printf("EF: %d, %d,%d,%d\n", totalWords, wordsLowerBits, wordsUpperBits, jumpWords)
 	if cap(ef.data) < totalWords {
 		alloc := totalWords
