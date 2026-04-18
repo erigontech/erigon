@@ -27,16 +27,20 @@ type WriterOffHeap struct {
 	tmpFilePath string
 }
 
+func initFeatures() Features {
+	var f Features
+	if IsLittleEndian {
+		f |= IsLittleEndianFeature
+	}
+	return f
+}
+
 func NewWriterOffHeap(filePath string) (*WriterOffHeap, error) {
 	f, err := dir.CreateTempWithExtension(filePath, "existence.tmp")
 	if err != nil {
 		return nil, err
 	}
-	var features Features
-	if IsLittleEndian {
-		features |= IsLittleEndianFeature
-	}
-	return &WriterOffHeap{tmpFile: f, features: features, tmpFilePath: f.Name()}, nil
+	return &WriterOffHeap{tmpFile: f, features: initFeatures(), tmpFilePath: f.Name()}, nil
 }
 
 func (w *WriterOffHeap) Close() {
@@ -194,11 +198,7 @@ type WriterSharded struct {
 }
 
 func NewWriterSharded(filePath string) (*WriterSharded, error) {
-	var features Features
-	if IsLittleEndian {
-		features |= IsLittleEndianFeature
-	}
-	return &WriterSharded{filePath: filePath, features: features}, nil
+	return &WriterSharded{filePath: filePath, features: initFeatures()}, nil
 }
 
 func (w *WriterSharded) AddHash(k uint64) error {
