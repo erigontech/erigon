@@ -54,12 +54,19 @@ import (
 // Intended for debugging the tail-of-build RAM spike on large .efi files.
 var recSplitMemLog = dbg.EnvBool("RECSPLIT_MEM_LOG", false)
 
+// RECSPLIT_MEM_LOG_GC=true forces runtime.GC() before each checkpoint so Alloc reflects
+// live objects rather than garbage. Costs one STW per checkpoint — use for diagnosis only.
+var recSplitMemLogGC = dbg.EnvBool("RECSPLIT_MEM_LOG_GC", false)
+
 // memCheckpoint logs Go heap Alloc/HeapInuse/Sys plus a stage label and optional extra fields.
 // Callers should pass structural sizes (e.g. len(slice)*8) under descriptive keys so the log
 // makes it obvious which data structure grew between checkpoints.
 func memCheckpoint(logger log.Logger, fileName, stage string, extra ...any) {
 	if !recSplitMemLog {
 		return
+	}
+	if recSplitMemLogGC {
+		runtime.GC()
 	}
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
@@ -68,10 +75,22 @@ func memCheckpoint(logger log.Logger, fileName, stage string, extra ...any) {
 		"stage", stage,
 		"alloc", common.ByteCount(m.Alloc),
 		"heapInuse", common.ByteCount(m.HeapInuse),
+		"heapIdle", common.ByteCount(m.HeapIdle),
 		"sys", common.ByteCount(m.Sys),
+		"numGC", m.NumGC,
 	}
 	args = append(args, extra...)
 	logger.Info("[recsplit][mem]", args...)
+}
+
+// retainedSlicesBytes sums cap(s)*elemSize across all passed cap values — helps log
+// "retained capacity" of slices that may look small by len but hold large backing arrays.
+func retainedBytes(entries ...uint64) string {
+	var total uint64
+	for _, e := range entries {
+		total += e
+	}
+	return common.ByteCount(total)
 }
 
 var ErrCollision = errors.New("duplicate key")
@@ -853,7 +872,11 @@ func (rs *RecSplit) loadFuncBucket(k, v []byte, _ etl.CurrentTableReader, _ etl.
 
 // buildOffsetEf mmaps the offset temp file and builds the Elias-Fano encoding.
 func (rs *RecSplit) buildOffsetEf() error {
+	memCheckpoint(rs.logger, rs.fileName, "offsetEf:enter",
+		"keys", rs.keysAdded, "maxOffset", rs.maxOffset,
+	)
 	rs.offsetEf = eliasfano32.NewEliasFano(rs.keysAdded, rs.maxOffset)
+	memCheckpoint(rs.logger, rs.fileName, "offsetEf:after_NewEliasFano")
 	if err := rs.offsetWriter.Flush(); err != nil {
 		return fmt.Errorf("flush offset writer: %w", err)
 	}
@@ -864,12 +887,17 @@ func (rs *RecSplit) buildOffsetEf() error {
 		return fmt.Errorf("mmap offset file: %w", err)
 	}
 	defer mmap.Munmap(mmapHandle1, mmapHandle2)
+	memCheckpoint(rs.logger, rs.fileName, "offsetEf:after_mmap",
+		"mmap_bytes", common.ByteCount(uint64(mmapSize)),
+	)
 
 	data := mmapHandle1[:mmapSize]
 	for i := uint64(0); i < rs.keysAdded; i++ {
 		rs.offsetEf.AddOffset(binary.BigEndian.Uint64(data[i*8:]))
 	}
+	memCheckpoint(rs.logger, rs.fileName, "offsetEf:after_fill_loop")
 	rs.offsetEf.Build()
+	memCheckpoint(rs.logger, rs.fileName, "offsetEf:after_Build")
 	return nil
 }
 
@@ -896,6 +924,14 @@ func (rs *RecSplit) SetProgress(p *background.Progress) {
 // Build has to be called after all the keys have been added, and it initiates the process
 // of building the perfect hash function and writing index into a file
 func (rs *RecSplit) Build(ctx context.Context) error {
+	memCheckpoint(rs.logger, rs.fileName, "Build:enter",
+		"keysExpected", rs.keyExpectedCount,
+		"keysAdded", rs.keysAdded,
+		"bucketSize", rs.bucketSize,
+		"workers", rs.workers,
+		"enums", rs.enums,
+		"lessFalsePositives", rs.lessFalsePositives,
+	)
 	if rs.built {
 		return errors.New("already built")
 	}
