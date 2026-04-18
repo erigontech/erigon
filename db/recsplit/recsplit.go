@@ -1102,7 +1102,10 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 			return fmt.Errorf("writing elias fano for offsets: %w", err)
 		}
 	}
-	memCheckpoint(rs.logger, rs.fileName, "before_existenceFilter")
+	memCheckpoint(rs.logger, rs.fileName, "before_existenceFilter",
+		"fuse_expected_fingerprints", common.ByteCount(rs.keysAdded*1125/1000),
+		"fuse_temp_file", common.ByteCount(rs.keysAdded*8),
+	)
 	if err := rs.flushExistenceFilter(); err != nil {
 		return err
 	}
@@ -1137,6 +1140,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	}
 	rs.logger.Debug("[index] created", "file", rs.fileName)
 
+	memCheckpoint(rs.logger, rs.fileName, "Build:exit")
 	return nil
 }
 
