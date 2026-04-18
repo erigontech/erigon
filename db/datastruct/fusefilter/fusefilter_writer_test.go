@@ -1,6 +1,7 @@
 package fusefilter
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -205,6 +206,80 @@ func TestWriterClose(t *testing.T) {
 
 	// Close again (should be safe)
 	writer.Close()
+}
+
+func TestWriterShardedBasic(t *testing.T) {
+	require := require.New(t)
+	dir := t.TempDir()
+
+	w, err := NewWriterSharded(filepath.Join(dir, "sharded"))
+	require.NoError(err)
+	defer w.Close()
+
+	keys := []uint64{1, 2, 3, 0xFF << 56, 0xAB<<56 | 12345, 0x01<<56 | 99}
+	for _, k := range keys {
+		require.NoError(w.AddHash(k))
+	}
+
+	var buf bytes.Buffer
+	_, err = w.BuildTo(&buf)
+	require.NoError(err)
+
+	r, consumed, err := NewReaderShardedOnBytes(buf.Bytes(), "test")
+	require.NoError(err)
+	require.Equal(buf.Len(), consumed)
+
+	for _, k := range keys {
+		require.True(r.ContainsHash(k), "key %d missing", k)
+	}
+	// Keys in different shards are absent.
+	require.False(r.ContainsHash(0xBB<<56 | 99999))
+}
+
+func TestWriterShardedLarge(t *testing.T) {
+	require := require.New(t)
+	dir := t.TempDir()
+
+	w, err := NewWriterSharded(filepath.Join(dir, "sharded_large"))
+	require.NoError(err)
+	defer w.Close()
+
+	const n = 100_000
+	for i := range n {
+		require.NoError(w.AddHash(uint64(i)))
+	}
+
+	var buf bytes.Buffer
+	_, err = w.BuildTo(&buf)
+	require.NoError(err)
+
+	r, _, err := NewReaderShardedOnBytes(buf.Bytes(), "test")
+	require.NoError(err)
+
+	for i := range n {
+		require.True(r.ContainsHash(uint64(i)), "key %d missing", i)
+	}
+}
+
+func TestWriterShardedForceInMem(t *testing.T) {
+	require := require.New(t)
+	dir := t.TempDir()
+
+	w, err := NewWriterSharded(filepath.Join(dir, "sharded_mem"))
+	require.NoError(err)
+	defer w.Close()
+	require.NoError(w.AddHash(42))
+
+	var buf bytes.Buffer
+	_, err = w.BuildTo(&buf)
+	require.NoError(err)
+
+	r, _, err := NewReaderShardedOnBytes(buf.Bytes(), "test")
+	require.NoError(err)
+
+	sz := r.ForceInMem()
+	require.Greater(uint64(sz), uint64(0))
+	require.True(r.ContainsHash(42))
 }
 
 func TestMultipleFilters(t *testing.T) {
