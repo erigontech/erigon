@@ -133,6 +133,9 @@ type RecSplit struct {
 	//v1 fields
 	existenceFV1 *fusefilter.WriterOffHeap
 
+	//v2 fields
+	existenceFV2 *fusefilter.ShardedWriterOffHeap
+
 	offsetFile   *os.File      // Temp file for offsets (already sorted, no need for etl.Collector)
 	offsetWriter *bufio.Writer // Buffered writer for offset file
 
@@ -281,10 +284,18 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 		}
 
 	}
-	if args.KeyCount > 0 && rs.lessFalsePositives && rs.dataStructureVersion >= 1 {
-		rs.existenceFV1, err = fusefilter.NewWriterOffHeap(rs.filePath)
-		if err != nil {
-			return nil, err
+	if args.KeyCount > 0 && rs.lessFalsePositives {
+		switch rs.dataStructureVersion {
+		case 1:
+			rs.existenceFV1, err = fusefilter.NewWriterOffHeap(rs.filePath)
+			if err != nil {
+				return nil, err
+			}
+		case 2:
+			rs.existenceFV2, err = fusefilter.NewShardedWriterOffHeap(rs.filePath)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -369,6 +380,10 @@ func (rs *RecSplit) Close() {
 	if rs.existenceFV1 != nil {
 		rs.existenceFV1.Close()
 		rs.existenceFV1 = nil
+	}
+	if rs.existenceFV2 != nil {
+		rs.existenceFV2.Close()
+		rs.existenceFV2 = nil
 	}
 	if rs.bucketCollector != nil {
 		rs.bucketCollector.Close()
@@ -531,9 +546,16 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 		}
 	}
 
-	if rs.lessFalsePositives && rs.dataStructureVersion >= 1 {
-		if err := rs.existenceFV1.AddHash(hi); err != nil {
-			return err
+	if rs.lessFalsePositives {
+		switch rs.dataStructureVersion {
+		case 1:
+			if err := rs.existenceFV1.AddHash(hi); err != nil {
+				return err
+			}
+		case 2:
+			if err := rs.existenceFV2.AddHash(hi); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -1066,10 +1088,16 @@ func (rs *RecSplit) flushExistenceFilter() error {
 		}
 	}
 
-	if rs.dataStructureVersion >= 1 && rs.keysAdded > 0 && rs.lessFalsePositives {
-		_, err := rs.existenceFV1.BuildTo(rs.indexW)
-		if err != nil {
-			return err
+	if rs.keysAdded > 0 && rs.lessFalsePositives {
+		switch rs.dataStructureVersion {
+		case 1:
+			if _, err := rs.existenceFV1.BuildTo(rs.indexW); err != nil {
+				return err
+			}
+		case 2:
+			if _, err := rs.existenceFV2.BuildTo(rs.indexW); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
