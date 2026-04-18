@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"maps"
 	"sort"
+	"strings"
 	"sync"
 
 	btree2 "github.com/tidwall/btree"
@@ -162,7 +163,8 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 				putValueSize += len(val)
 			} else {
 				putValueSize += len(val) - len(old[len(old)-1].data)
-				sd.storage.Set(key, []dataWithTxNum{valWithStep})
+				old[0] = valWithStep
+				sd.storage.Set(key, old[:1])
 			}
 		} else {
 			sd.storage.Set(key, []dataWithTxNum{valWithStep})
@@ -180,7 +182,8 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 			putValueSize += len(val)
 		} else {
 			putValueSize += len(val) - len(old[len(old)-1].data)
-			sd.domains[domain][key] = []dataWithTxNum{valWithStep}
+			old[0] = valWithStep
+			sd.domains[domain][key] = old[:1]
 		}
 	} else {
 		sd.domains[domain][key] = []dataWithTxNum{valWithStep}
@@ -305,7 +308,7 @@ func (sd *TemporalMemBatch) ClearRam() {
 	}
 }
 
-func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte, step kv.Step) (cont bool, err error)) error {
+func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte) (cont bool, err error)) error {
 	sd.latestStateLock.RLock()
 	defer sd.latestStateLock.RUnlock()
 	var ramIter btree2.MapIter[string, []dataWithTxNum]
@@ -319,7 +322,7 @@ func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx 
 func (sd *TemporalMemBatch) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) ([]byte, []byte, bool, error) {
 	var firstKey, firstVal []byte
 	var hasPrefix bool
-	err := sd.IteratePrefix(domain, prefix, roTx, func(k []byte, v []byte, step kv.Step) (bool, error) {
+	err := sd.IteratePrefix(domain, prefix, roTx, func(k []byte, v []byte) (bool, error) {
 		if lv, _, ok := sd.getLatest(domain, k); ok {
 			v = lv
 		}
@@ -332,6 +335,41 @@ func (sd *TemporalMemBatch) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.T
 		return true, nil
 	})
 	return firstKey, firstVal, hasPrefix, err
+}
+
+// HasPrefixInRAM reports whether the RAM batch contains any non-deleted entry
+// for the given domain whose key starts with prefix.  It never touches disk or
+// segment files — only the in-memory btree (StorageDomain) or the domain map.
+func (sd *TemporalMemBatch) HasPrefixInRAM(domain kv.Domain, prefix []byte) bool {
+	sd.latestStateLock.RLock()
+	defer sd.latestStateLock.RUnlock()
+
+	if domain == kv.StorageDomain {
+		prefixStr := common.ToStringZeroCopy(prefix)
+		iter := sd.storage.Iter()
+		for ok := iter.Seek(prefixStr); ok; ok = iter.Next() {
+			if !strings.HasPrefix(iter.Key(), prefixStr) {
+				break
+			}
+			vals := iter.Value()
+			if len(vals) > 0 && len(vals[len(vals)-1].data) > 0 {
+				return true
+			}
+		}
+		return false
+	}
+
+	prefixStr := common.ToStringZeroCopy(prefix)
+	for k, vals := range sd.domains[domain] {
+		if strings.HasPrefix(k, prefixStr) && len(vals) > 0 && len(vals[len(vals)-1].data) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (sd *TemporalMemBatch) GetChangesetAccumulator() *changeset.StateChangeSet {
+	return sd.currentChangesAccumulator
 }
 
 func (sd *TemporalMemBatch) SetChangesetAccumulator(acc *changeset.StateChangeSet) {
@@ -382,7 +420,60 @@ func (sd *TemporalMemBatch) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockN
 }
 
 func (sd *TemporalMemBatch) Unwind(unwindToTxNum uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
+	sd.latestStateLock.Lock()
+	defer sd.latestStateLock.Unlock()
+
 	sd.unwindToTxNum = unwindToTxNum
+
+	// Drop overlay entries stamped with txNum > unwindToTxNum. Without this,
+	// getLatest returns entries written inside the unwound range because it
+	// picks dataWithTxNums[len-1] without consulting sd.unwindToTxNum — the
+	// unwindChangeset fallback below is only reachable on an overlay miss.
+	// Observed as post-Fusaka gas-used mismatches after forkchoice-driven
+	// unwinds (an SSTORE on a slot first-written inside the unwound range
+	// charges SSTORE_RESET instead of SSTORE_SET — a 17100 gas shortfall
+	// per slot). Keys whose slice empties out are removed so the
+	// unwindChangeset fallback can supply the pre-unwind answer.
+	pruneSlice := func(entries []dataWithTxNum) []dataWithTxNum {
+		kept := entries[:0]
+		for _, e := range entries {
+			if e.txNum <= unwindToTxNum {
+				kept = append(kept, e)
+			}
+		}
+		return kept
+	}
+	for d := range sd.domains {
+		for k, entries := range sd.domains[d] {
+			kept := pruneSlice(entries)
+			if len(kept) == 0 {
+				delete(sd.domains[d], k)
+			} else {
+				sd.domains[d][k] = kept
+			}
+		}
+	}
+	// Collect first, mutate after: btree.Scan doesn't allow Set/Delete during traversal.
+	type storageEdit struct {
+		key  string
+		kept []dataWithTxNum
+	}
+	var edits []storageEdit
+	sd.storage.Scan(func(k string, entries []dataWithTxNum) bool {
+		kept := pruneSlice(entries)
+		if len(kept) != len(entries) {
+			edits = append(edits, storageEdit{k, kept})
+		}
+		return true
+	})
+	for _, e := range edits {
+		if len(e.kept) == 0 {
+			sd.storage.Delete(e.key)
+		} else {
+			sd.storage.Set(e.key, e.kept)
+		}
+	}
+
 	var unwindChangeset *[kv.DomainLen]map[string]kv.DomainEntryDiff
 
 	if changeset != nil {

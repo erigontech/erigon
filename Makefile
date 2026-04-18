@@ -180,13 +180,11 @@ erigon: go-version erigon.cmd
 
 COMMANDS += capcli
 COMMANDS += downloader
-COMMANDS += hack
 COMMANDS += integration
 COMMANDS += pics
 COMMANDS += rpcdaemon
 COMMANDS += rpctest
 COMMANDS += sentry
-COMMANDS += state
 COMMANDS += txpool
 COMMANDS += evm
 COMMANDS += caplin
@@ -217,6 +215,16 @@ else
 endif
 
 test-filtered:
+	@_rd=""; \
+	_cleanup() { [ -n "$$_rd" ] && hdiutil detach -force "$$_rd" >/dev/null 2>&1 || true; }; \
+	trap _cleanup EXIT; \
+	if [ -z "$${ERIGON_EXECUTION_TESTS_TMPDIR:-}" ] && [ "$$(uname -s)" = "Darwin" ]; then \
+		_rd=$$(bash tools/create-ramdisk) || true; \
+		if [ -n "$$_rd" ]; then \
+			export ERIGON_EXECUTION_TESTS_TMPDIR="$$_rd"; \
+			echo "ramdisk: $$_rd"; \
+		fi; \
+	fi; \
 	(set -o pipefail && $(GOTEST) | ./tools/filter-test-output | tee run.log)
 
 test-short: override GO_FLAGS += -short -failfast

@@ -102,24 +102,21 @@ type BlockAssembler struct {
 	cfg         AssemblerCfg
 	balIO       *state.VersionedIO
 	stateWriter state.StateWriter // optional: if set, domain writes go here instead of NoopWriter
+	gasUsed     protocol.GasUsed  // EIP-8037: cumulative per-dimension gas across AddTransactions calls
 }
 
-func NewBlockAssembler(cfg AssemblerCfg, payloadId, parentTime uint64, header *types.Header, uncles []*types.Header, withdrawals []*types.Withdrawal) *BlockAssembler {
+func (ba *BlockAssembler) CumulativeGasUsed() protocol.GasUsed { return ba.gasUsed }
+
+func NewBlockAssembler(cfg AssemblerCfg, block *AssembledBlock) *BlockAssembler {
 	var balIO *state.VersionedIO
 
-	if cfg.ChainConfig.IsAmsterdam(header.Time) || cfg.ExperimentalBAL {
+	if cfg.ChainConfig.IsAmsterdam(block.Header.Time) || cfg.ExperimentalBAL {
 		balIO = &state.VersionedIO{}
 	}
 	return &BlockAssembler{
-		AssembledBlock: &AssembledBlock{
-			PayloadId:        payloadId,
-			ParentHeaderTime: parentTime,
-			Header:           header,
-			Uncles:           uncles,
-			Withdrawals:      withdrawals,
-		},
-		cfg:   cfg,
-		balIO: balIO,
+		AssembledBlock: block,
+		cfg:            cfg,
+		balIO:          balIO,
 	}
 }
 
@@ -175,9 +172,22 @@ func (ba *BlockAssembler) AddTransactions(
 	logPrefix string,
 	logger log.Logger) (types.Logs, bool, error) {
 
-	txnIdx := ibs.TxnIndex() + 1
+	// Use len(ba.Txns) instead of ibs.TxnIndex()+1 to avoid gaps in the
+	// BAL access index sequence. When a batch ends with a failed tx,
+	// ibs.TxnIndex() reflects the failed tx's index (set by SetTxContext
+	// before execution). Since failed txs don't increment txnIdx, the
+	// next batch would start at failedIdx+1, skipping one index. Using
+	// the actual included tx count ensures gap-free numbering that
+	// matches the validator's parallel executor (which assigns txIndex
+	// based on position in the block's transaction list).
+	txnIdx := len(ba.Txns)
 	header := ba.AssembledBlock.Header
-	gasPool := new(protocol.GasPool).AddGas(header.GasLimit - header.GasUsed)
+	// EIP-8037: initialize the pool from cumulative regular gas, not the
+	// bottleneck (max of regular, state) stored in header.GasUsed. This
+	// gives compute-heavy transactions access to the full regular gas
+	// budget even when state gas dominates the bottleneck. State gas is
+	// enforced in applyTransaction before FinalizeTx.
+	gasPool := new(protocol.GasPool).AddGas(header.GasLimit - ba.gasUsed.BlockRegular)
 	if header.BlobGasUsed != nil {
 		gasPool.AddBlobGas(ba.cfg.ChainConfig.GetMaxBlobGasPerBlock(header.Time) - *header.BlobGasUsed)
 	}
@@ -203,6 +213,8 @@ func (ba *BlockAssembler) AddTransactions(
 		ibs.ResetVersionedIO()
 	}
 
+	gasUsed := &ba.gasUsed
+
 	var commitTx = func(txn types.Transaction, coinbase accounts.Address, vmConfig *vm.Config, chainConfig *chain.Config, ibs *state.IntraBlockState, current *AssembledBlock) ([]*types.Log, error) {
 		ibs.SetTxContext(current.Header.Number.Uint64(), txnIdx)
 		gasSnap := gasPool.Gas()
@@ -221,26 +233,35 @@ func (ba *BlockAssembler) AddTransactions(
 				return nil, err
 			}
 
-			status, gasUsed, err := aa.ExecuteAATransaction(aaTxn, paymasterContext, validationGasUsed, gasPool, evm, header, ibs)
+			status, aaGasUsed, err := aa.ExecuteAATransaction(aaTxn, paymasterContext, validationGasUsed, gasPool, evm, header, ibs)
 			if err != nil {
 				ibs.RevertToSnapshot(snap, err)
 				gasPool = new(protocol.GasPool).AddGas(gasSnap).AddBlobGas(blobGasSnap)
 				return nil, err
 			}
 
-			header.GasUsed += gasUsed
+			// EIP-8037: AA txns don't go through protocol.ApplyTransaction, so
+			// update cumulative gas manually. We attribute aaGasUsed entirely to
+			// regular gas (AA has no state-gas dimension yet).
+			gasUsed.BlockRegular += aaGasUsed
+			gasUsed.Blob += txn.GetBlobGas()
+			protocol.SetGasUsed(header, gasUsed)
 			logs := ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), header.Number.Uint64(), header.Hash())
-			receipt := aa.CreateAAReceipt(txn.Hash(), status, gasUsed, header.GasUsed, header.Number.Uint64(), uint64(ibs.TxnIndex()), logs)
+			receipt := aa.CreateAAReceipt(txn.Hash(), status, aaGasUsed, header.GasUsed, header.Number.Uint64(), uint64(ibs.TxnIndex()), logs)
 
 			current.AddTxn(txn)
 			current.Receipts = append(current.Receipts, receipt)
 			return receipt.Logs, nil
 		}
 
-		gasUsed := protocol.NewGasUsed(header, current.Receipts.CumulativeGasUsed())
+		// Snapshot cumulative gas so we can restore on tx failure.
+		gasSnapshot := *gasUsed
+
 		receipt, err := protocol.ApplyTransaction(chainConfig, protocol.GetHashFn(header, getHeader),
 			ba.cfg.Engine, coinbase, gasPool, ibs, writer, header, txn, gasUsed, *vmConfig)
 		if err != nil {
+			// Restore cumulative gas to pre-tx values.
+			*gasUsed = gasSnapshot
 			ibs.RevertToSnapshot(snap, err)
 			gasPool = new(protocol.GasPool).AddGas(gasSnap).AddBlobGas(blobGasSnap)
 			return nil, err
@@ -282,7 +303,7 @@ LOOP:
 			// ensure we run for at least 500ms after the request to stop comes in from GetPayload
 			stopped = time.NewTicker(500 * time.Millisecond)
 		}
-		// If we don't have enough gas for any further transactions then we're done
+		// If we don't have enough gas for any further transactions then we're done.
 		if gasPool.Gas() < params.TxGas {
 			logger.Debug(fmt.Sprintf("[%s] Not enough gas for further transactions", logPrefix), "have", gasPool, "want", params.TxGas)
 			done = true

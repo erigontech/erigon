@@ -77,6 +77,9 @@ type EthAPI interface {
 	GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.RPCLogs, error)
 	GetBlockReceipts(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) ([]map[string]any, error)
 
+	// Block access list related (see ./eth_block_access_list.go)
+	GetBlockAccessList(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) ([]*ethapi.RPCAccountAccess, error)
+
 	// Uncle related (see ./eth_uncles.go)
 	GetUncleByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, index hexutil.Uint) (map[string]any, error)
 	GetUncleByBlockHashAndIndex(ctx context.Context, hash common.Hash, index hexutil.Uint) (map[string]any, error)
@@ -111,6 +114,9 @@ type EthAPI interface {
 	// Sending related (see ./eth_call.go)
 	Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, overrides *ethapi.StateOverrides, blockOverrides *ethapi.BlockOverrides) (hexutil.Bytes, error)
 	EstimateGas(ctx context.Context, argsOrNil *ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, overrides *ethapi.StateOverrides, blockOverrides *ethapi.BlockOverrides) (hexutil.Uint64, error)
+
+	// Simulation related (see ./eth_simulation.go)
+	SimulateV1(ctx context.Context, req SimulationRequest, blockParameter rpc.BlockNumberOrHash) (SimulationResult, error)
 	SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error)
 	SendRawTransactionSync(ctx context.Context, encodedTx hexutil.Bytes, timeoutMs *uint64) (map[string]any, error)
 	SendTransaction(_ context.Context, txObject any) (common.Hash, error)
@@ -175,8 +181,8 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 		_txNumReader:        blockReader.TxnumReader(),
 		evmCallTimeout:      evmCallTimeout,
 		_engine:             engine,
-		receiptsGenerator:   receipts.NewGenerator(dirs, blockReader, engine, stateCache, evmCallTimeout),
-		borReceiptGenerator: receipts.NewBorGenerator(blockReader, engine, stateCache),
+		receiptsGenerator:   receipts.NewGenerator(dirs, blockReader, engine, stateCache, evmCallTimeout, f),
+		borReceiptGenerator: receipts.NewBorGenerator(blockReader, engine, stateCache, f),
 		dirs:                dirs,
 		bridgeReader:        bridgeReader,
 		blockRangeLimit:     rangeLimit,
@@ -224,7 +230,8 @@ func (api *BaseAPI) engine() rules.EngineReader {
 }
 
 func (api *BaseAPI) txnLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash) (blockNum uint64, txNum uint64, ok bool, err error) {
-	return api._txnReader.TxnLookup(ctx, tx, txnHash)
+	overlayTx := api.filters.WithOverlay(tx)
+	return api._txnReader.TxnLookup(ctx, overlayTx, txnHash)
 }
 
 func (api *BaseAPI) blockByNumberWithSenders(ctx context.Context, tx kv.Tx, number uint64) (*types.Block, error) {
@@ -244,7 +251,8 @@ func (api *BaseAPI) blockByHashWithSenders(ctx context.Context, tx kv.Tx, hash c
 			return it, nil
 		}
 	}
-	number, err := api._blockReader.HeaderNumber(ctx, tx, hash)
+	overlayTx := api.filters.WithOverlay(tx)
+	number, err := api._blockReader.HeaderNumber(ctx, overlayTx, hash)
 	if err != nil {
 		return nil, err
 	}
@@ -261,7 +269,8 @@ func (api *BaseAPI) blockWithSenders(ctx context.Context, tx kv.Tx, hash common.
 			return it, nil
 		}
 	}
-	block, _, err := api._blockReader.BlockWithSenders(ctx, tx, hash, number)
+	overlayTx := api.filters.WithOverlay(tx)
+	block, _, err := api._blockReader.BlockWithSenders(ctx, overlayTx, hash, number)
 	if err != nil {
 		return nil, err
 	}
@@ -314,7 +323,8 @@ func (api *BaseAPI) headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrO
 		}
 	}
 
-	header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNum)
+	overlayTx := api.filters.WithOverlay(tx)
+	header, err := api._blockReader.HeaderByNumber(ctx, overlayTx, blockNum)
 	if err != nil {
 		return nil, false, err
 	}
@@ -333,7 +343,8 @@ func (api *BaseAPI) headerByNumber(ctx context.Context, number rpc.BlockNumber, 
 			return it.Header(), nil
 		}
 	}
-	return api._blockReader.Header(ctx, tx, h, n)
+	overlayTx := api.filters.WithOverlay(tx)
+	return api._blockReader.Header(ctx, overlayTx, h, n)
 }
 
 func (api *BaseAPI) headerByHash(ctx context.Context, hash common.Hash, tx kv.Tx) (*types.Header, error) {

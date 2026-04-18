@@ -95,14 +95,14 @@ func DefaultEngineApiTesterGenesis(t *testing.T) (*types.Genesis, *ecdsa.Private
 			coinbaseAddr: {
 				Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(21), nil), // 1_000 ETH
 			},
-			params.ConsolidationRequestAddress.Value(): {
+			chainConfig.GetConsolidationRequestContract().Value(): {
 				Code:    consolidationRequestCode, // can't be empty
 				Storage: make(map[common.Hash]common.Hash),
 				Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil),
 				Nonce:   1,
 			},
-			params.WithdrawalRequestAddress.Value(): {
-				Code:    withdrawalRequestCode, // can't be empty'
+			chainConfig.GetWithdrawalRequestContract().Value(): {
+				Code:    withdrawalRequestCode, // can't be empty
 				Storage: make(map[common.Hash]common.Hash),
 				Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil),
 				Nonce:   1,
@@ -117,7 +117,7 @@ func DefaultEngineApiTesterGenesis(t *testing.T) (*types.Genesis, *ecdsa.Private
 	return genesis, coinbasePrivKey
 }
 
-func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) EngineApiTester {
+func InitialiseEngineApiTester(t testing.TB, args EngineApiTesterInitArgs) EngineApiTester {
 	ctx := t.Context()
 	logger := args.Logger
 	dirs := datadir.New(args.DataDir)
@@ -242,9 +242,9 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 	require.NoError(t, err)
 	var mockCl *MockCl
 	if args.MockClState != nil {
-		mockCl = NewMockCl(ctx, logger, engineApiClient, ethBackend.StateDiffClient(), genesisBlock, WithMockClState(args.MockClState))
+		mockCl = NewMockCl(ctx, logger, engineApiClient, ethBackend.StateDiffClient(), genesisBlock, args.Genesis.Config, WithMockClState(args.MockClState))
 	} else {
-		mockCl = NewMockCl(ctx, logger, engineApiClient, ethBackend.StateDiffClient(), genesisBlock)
+		mockCl = NewMockCl(ctx, logger, engineApiClient, ethBackend.StateDiffClient(), genesisBlock, args.Genesis.Config)
 	}
 	if !args.NoEmptyBlock1 {
 		// build 1 empty block before proceeding to properly initialise everything

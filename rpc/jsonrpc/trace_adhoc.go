@@ -25,7 +25,6 @@ import (
 	"math"
 	"math/big"
 	"strings"
-	"sync/atomic"
 
 	"github.com/holiman/uint256"
 
@@ -1088,7 +1087,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, fmt.Errorf("block %d(%x) not found", blockNumber, hash)
 	}
 
-	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
+	err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -1179,18 +1178,8 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		evm.SetPrecompiles(precompiles)
 	}
 
-	done := make(chan struct{})
-	defer close(done)
-
-	var timedOut atomic.Bool
-	go func() {
-		select {
-		case <-ctx.Done():
-			timedOut.Store(true)
-			evm.Cancel()
-		case <-done:
-		}
-	}()
+	stop := context.AfterFunc(ctx, evm.Cancel)
+	defer stop()
 
 	gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 	var execResult *evmtypes.ExecutionResult
@@ -1220,11 +1209,12 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		}
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
 		initialIbs := state.New(stateReader)
-		sd.CompareStates(initialIbs, ibs)
+		if err = sd.CompareStates(initialIbs, ibs); err != nil {
+			return nil, err
+		}
 	}
 
-	// If the timer caused an abort, return an appropriate error message
-	if timedOut.Load() {
+	if evm.Cancelled() {
 		return nil, fmt.Errorf("execution aborted (timeout = %v)", api.evmCallTimeout)
 	}
 
@@ -1318,7 +1308,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 		}
 	}
 
-	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
+	err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -1799,7 +1789,7 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 		return nil, fmt.Errorf("block %d(%x) not found", blockNumber, hash)
 	}
 
-	err = rpchelper.CheckBlockExecuted(dbtx, blockNumber)
+	err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(dbtx), blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -1808,8 +1798,6 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	if err != nil {
 		return nil, err
 	}
-
-	ibs := state.New(stateReader)
 
 	var cancel context.CancelFunc
 	if api.evmCallTimeout > 0 {
@@ -1836,6 +1824,8 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	if traceTypeVmTrace {
 		traceResult.VmTrace = &VmTrace{Ops: []*VmTraceOp{}}
 	}
+
+	ibs := state.New(stateReader)
 
 	var ot OeTracer
 	ot.config, err = parseOeTracerConfig(nil)
@@ -1867,18 +1857,8 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Tracer: ot.Tracer().Hooks})
 
-	done := make(chan struct{})
-	defer close(done)
-
-	var timedOut atomic.Bool
-	go func() {
-		select {
-		case <-ctx.Done():
-			timedOut.Store(true)
-			evm.Cancel()
-		case <-done:
-		}
-	}()
+	stop := context.AfterFunc(ctx, evm.Cancel)
+	defer stop()
 
 	gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 	var execResult *evmtypes.ExecutionResult
@@ -1900,6 +1880,7 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	}
 
 	traceResult.Output = common.Copy(execResult.ReturnData)
+
 	if traceTypeStateDiff {
 		sdMap := make(map[accounts.Address]*StateDiffAccount)
 		traceResult.StateDiff = sdMap
@@ -1908,10 +1889,12 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 			return nil, err
 		}
 		initialIbs := state.New(stateReader)
-		sd.CompareStates(initialIbs, ibs)
+		if err = sd.CompareStates(initialIbs, ibs); err != nil {
+			return nil, err
+		}
 	}
 
-	if timedOut.Load() {
+	if evm.Cancelled() {
 		return nil, fmt.Errorf("execution aborted (timeout = %v)", api.evmCallTimeout)
 	}
 

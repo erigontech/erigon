@@ -234,6 +234,12 @@ func (d *Dumper) DumpToCollector(ctx context.Context, c DumpCollector, excludeCo
 
 			account.Root = t.Hash().Bytes()
 		}
+		account.Address = &addr
+		seckey, secErr := common.HashData(addr[:])
+		if secErr == nil {
+			seckeyBytes := hexutil.Bytes(seckey[:])
+			account.SecureKey = &seckeyBytes
+		}
 		c.OnAccount(addr, *account)
 	}
 

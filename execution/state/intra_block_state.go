@@ -24,6 +24,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -38,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -160,7 +162,7 @@ type IntraBlockState struct {
 	nilAccounts map[accounts.Address]struct{} // Remember non-existent account to avoid reading them again
 
 	// The refund counter, also used by state transitioning.
-	refund uint64
+	refund mdgas.MdGas
 
 	txIndex  int
 	blockNum uint64
@@ -168,7 +170,7 @@ type IntraBlockState struct {
 	logSize  uint
 
 	// Per-transaction access list
-	accessList *accessList
+	accessList accessList
 
 	// Transient storage
 	transientStorage transientStorage
@@ -208,7 +210,7 @@ func New(stateReader StateReader) *IntraBlockState {
 		nilAccounts:       map[accounts.Address]struct{}{},
 		logs:              []types.Logs{},
 		journal:           newJournal(),
-		accessList:        newAccessList(),
+		accessList:        accessList{addresses: make(map[accounts.Address]int)},
 		transientStorage:  newTransientStorage(),
 		balanceInc:        map[accounts.Address]*BalanceIncrease{},
 		addressAccess:     nil,
@@ -358,9 +360,11 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.balanceInc = map[accounts.Address]*BalanceIncrease{}
 	sdb.journal.Reset()
 	sdb.revisions = sdb.revisions.put()
-	sdb.refund = 0
+	sdb.refund = mdgas.MdGas{}
 	sdb.txIndex = 0
 	sdb.logSize = 0
+	sdb.accessList.Reset()
+	sdb.transientStorage = newTransientStorage()
 	sdb.versionMap = nil
 	// Do not clear the maps in place — result.TxIn / result.TxOut may still
 	// reference them from a prior execution (used by finalize in another
@@ -459,17 +463,31 @@ func (sdb *IntraBlockState) Logs() types.Logs {
 // AddRefund adds gas to the refund counter
 func (sdb *IntraBlockState) AddRefund(gas uint64) {
 	sdb.journal.append(refundChange{prev: sdb.refund})
-	sdb.refund += gas
+	sdb.refund.Regular += gas
 }
 
 // SubRefund removes gas from the refund counter.
 // This method will panic if the refund counter goes below zero
 func (sdb *IntraBlockState) SubRefund(gas uint64) error {
 	sdb.journal.append(refundChange{prev: sdb.refund})
-	if gas > sdb.refund {
+	if gas > sdb.refund.Regular {
 		return errors.New("refund counter below zero")
 	}
-	sdb.refund -= gas
+	sdb.refund.Regular -= gas
+	return nil
+}
+
+func (sdb *IntraBlockState) AddStateRefund(gas uint64) {
+	sdb.journal.append(refundChange{prev: sdb.refund})
+	sdb.refund.State += gas
+}
+
+func (sdb *IntraBlockState) SubStateRefund(gas uint64) error {
+	sdb.journal.append(refundChange{prev: sdb.refund})
+	if gas > sdb.refund.State {
+		return errors.New("state refund counter below zero")
+	}
+	sdb.refund.State -= gas
 	return nil
 }
 
@@ -1209,7 +1227,7 @@ func (sdb *IntraBlockState) SetCode(addr accounts.Address, code []byte) error {
 	if err != nil {
 		return err
 	}
-	codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
+	codeHash := accounts.InternCodeHash(crypto.HashData(code))
 	written, err := stateObject.SetCode(codeHash, code, !sdb.hasWrite(addr, CodePath, accounts.NilKey))
 	if err != nil {
 		return err
@@ -1443,6 +1461,33 @@ func (sdb *IntraBlockState) stateObjectForAccount(addr accounts.Address, account
 
 func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead bool) (*stateObject, error) {
 	if so, ok := sdb.stateObjects[addr]; ok {
+		if sdb.versionMap != nil {
+			// Refresh cached stateObject fields from the versionMap.
+			// The stateObject caches the full account (record-level) but the
+			// versionMap tracks individual fields (BalancePath, NoncePath, etc.).
+			// A prior TX's re-execution may have updated field-level entries
+			// since this stateObject was loaded.
+			// Use UnknownVersion so any versionMap entry is considered newer
+			// than the cached stateObject.
+			refreshed, _, _, err := sdb.refreshVersionedAccount(addr, &so.data, StorageRead, UnknownVersion)
+			if err != nil {
+				return nil, err
+			}
+			if refreshed != &so.data {
+				so.data = *refreshed
+			}
+			// Check if code changed (e.g. EIP-7702 authorization set/cleared
+			// the delegation prefix). Clear the cached code so the next
+			// Code() call reads fresh from the stateReader.
+			codeHash, _, chVersion, err := versionedRead(sdb, addr, CodeHashPath, accounts.NilKey, false, so.data.CodeHash, nil, nil)
+			if err != nil {
+				return nil, err
+			}
+			if chVersion.TxIndex > UnknownVersion.TxIndex && codeHash != so.data.CodeHash {
+				so.data.CodeHash = codeHash
+				so.code = nil // force re-read
+			}
+		}
 		return so, nil
 	}
 
@@ -1567,7 +1612,7 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 		// optimisation in SetCode to incorrectly delete code writes when
 		// clearing a delegation that was set by a prior transaction in the
 		// same block.
-		codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
+		codeHash := accounts.InternCodeHash(crypto.HashData(code))
 		if codeHash != obj.data.CodeHash {
 			obj.data.CodeHash = codeHash
 			obj.original.CodeHash = codeHash
@@ -1827,7 +1872,7 @@ func (sdb *IntraBlockState) RevertToSnapshot(revid int, err error) {
 }
 
 // GetRefund returns the current value of the refund counter.
-func (sdb *IntraBlockState) GetRefund() uint64 {
+func (sdb *IntraBlockState) GetRefund() mdgas.MdGas {
 	return sdb.refund
 }
 
@@ -1976,6 +2021,36 @@ func (sdb *IntraBlockState) CommitBlock(chainRules *chain.Rules, stateWriter Sta
 	return sdb.MakeWriteSet(chainRules, stateWriter)
 }
 
+// ExtractAndClearDirty snapshots the current stateObjectsDirty set and clears it.
+// Used by eth_simulateV1 to separate accounts dirtied by stateOverrides from those
+// dirtied by actual transaction execution, so CommitBlock does not apply EIP-161 to
+// override-only accounts.
+func (sdb *IntraBlockState) ExtractAndClearDirty() map[accounts.Address]struct{} {
+	dirty := maps.Clone(sdb.stateObjectsDirty)
+	clear(sdb.stateObjectsDirty)
+	return dirty
+}
+
+// CommitOverrideDirtyAccounts writes state-override accounts that were not subsequently
+// touched by any transaction (and therefore not handled by CommitBlock).  EIP-161 is
+// intentionally disabled: override accounts are simulation-only mutations and must not
+// be removed simply because they are "empty" by consensus rules.
+func (sdb *IntraBlockState) CommitOverrideDirtyAccounts(chainRules *chain.Rules, stateWriter StateWriter, overrideDirty map[accounts.Address]struct{}) error {
+	for addr := range overrideDirty {
+		if _, alsoTxDirty := sdb.stateObjectsDirty[addr]; alsoTxDirty {
+			continue // CommitBlock already handled this address
+		}
+		so, exists := sdb.stateObjects[addr]
+		if !exists || so.deleted {
+			continue
+		}
+		if err := updateAccount(false, chainRules.IsAura, stateWriter, addr, so, true, sdb.trace, sdb.tracingHooks, true); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (sdb *IntraBlockState) BalanceIncreaseSet() map[accounts.Address]uint256.Int {
 	s := make(map[accounts.Address]uint256.Int, len(sdb.balanceInc))
 	for addr, bi := range sdb.balanceInc {
@@ -2076,7 +2151,7 @@ func (sdb *IntraBlockState) SetTxContext(bn uint64, ti int) {
 func (sdb *IntraBlockState) clearJournalAndRefund() {
 	sdb.journal.Reset()
 	sdb.revisions = sdb.revisions.put()
-	sdb.refund = 0
+	sdb.refund = mdgas.MdGas{}
 }
 
 // Prepare handles the preparatory steps for executing a state transition.
@@ -2104,10 +2179,8 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 	}
 	if rules.IsBerlin {
 		// Clear out any leftover from previous executions
-		al := newAccessList()
-		sdb.accessList = al
-		//sdb.accessList.Reset()
-		//al := sdb.accessList
+		sdb.accessList.Reset()
+		al := &sdb.accessList
 
 		al.AddAddress(sender)
 		if !dst.IsNil() {
@@ -2210,6 +2283,41 @@ func (sdb *IntraBlockState) MarkReadsInternal(addr accounts.Address) {
 		return
 	}
 	for key, vr := range sdb.versionedReads[addr] {
+		vr.internal = true
+		sdb.versionedReads[addr][key] = vr
+	}
+}
+
+// SnapshotVersionedReadKeys returns the current set of read keys for addr.
+// Used with MarkNewReadsInternal to mark only reads added after the snapshot,
+// preserving pre-existing legitimate reads.
+func (sdb *IntraBlockState) SnapshotVersionedReadKeys(addr accounts.Address) map[AccountKey]struct{} {
+	if sdb.versionedReads == nil {
+		return nil
+	}
+	reads := sdb.versionedReads[addr]
+	if len(reads) == 0 {
+		return nil
+	}
+	snapshot := make(map[AccountKey]struct{}, len(reads))
+	for k := range reads {
+		snapshot[k] = struct{}{}
+	}
+	return snapshot
+}
+
+// MarkNewReadsInternal marks as internal only the reads for addr that were
+// added after the given snapshot. Use this when gas-calculation-only reads
+// were recorded on top of earlier legitimate reads — the legitimate ones
+// must remain non-internal so they appear in the block access list.
+func (sdb *IntraBlockState) MarkNewReadsInternal(addr accounts.Address, before map[AccountKey]struct{}) {
+	if sdb.versionedReads == nil {
+		return
+	}
+	for key, vr := range sdb.versionedReads[addr] {
+		if _, existed := before[key]; existed {
+			continue
+		}
 		vr.internal = true
 		sdb.versionedReads[addr][key] = vr
 	}
@@ -2331,6 +2439,11 @@ func (sdb *IntraBlockState) ResetVersionedIO() {
 	sdb.addressAccess = nil
 }
 
+// ResetVersionedReads clears tracked versioned reads without affecting writes.
+func (sdb *IntraBlockState) ResetVersionedReads() {
+	sdb.versionedReads = nil
+}
+
 // VersionedWrites returns the current versioned write set if this block
 // checkDirty - is mainly for testing, for block processing this is called
 // after the block execution is completed and non dirty writes (due to reversions)
@@ -2446,7 +2559,7 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 				if err != nil {
 					return err
 				}
-				codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
+				codeHash := accounts.InternCodeHash(crypto.HashData(code))
 				// Force-set code bypassing stateObject.SetCode's equality check.
 				// The finalize IBS uses a VersionedStateReader whose ReadSet may
 				// contain the post-write code value (when the worker read the code

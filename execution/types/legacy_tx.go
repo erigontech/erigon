@@ -117,20 +117,7 @@ type LegacyTx struct {
 func (tx *LegacyTx) GetTipCap() *uint256.Int { return &tx.GasPrice }
 func (tx *LegacyTx) GetFeeCap() *uint256.Int { return &tx.GasPrice }
 func (tx *LegacyTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
-	if baseFee == nil {
-		return tx.GetTipCap()
-	}
-	gasFeeCap := tx.GetFeeCap()
-	// return 0 because effectiveFee cant be < 0
-	if gasFeeCap.Lt(baseFee) {
-		return uint256.NewInt(0)
-	}
-	effectiveFee := new(uint256.Int).Sub(gasFeeCap, baseFee)
-	if tx.GetTipCap().Lt(effectiveFee) {
-		return tx.GetTipCap()
-	} else {
-		return effectiveFee
-	}
+	return CalcEffectiveGasTip(baseFee, tx.GetTipCap, tx.GetFeeCap)
 }
 
 func (tx *LegacyTx) GetAccessList() AccessList {
@@ -230,8 +217,8 @@ func (tx *LegacyTx) payloadSize() (payloadSize int) {
 
 func (tx *LegacyTx) MarshalBinary(w io.Writer) error {
 	payloadSize := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 	if err := tx.encodePayload(w, b[:], payloadSize); err != nil {
 		return err
 	}
@@ -240,19 +227,19 @@ func (tx *LegacyTx) MarshalBinary(w io.Writer) error {
 
 func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize int) error {
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+	if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(tx.Nonce, w, b); err != nil {
+	if err := rlp.EncodeU64(tx.Nonce, w, b); err != nil {
 		return err
 	}
 	if err := rlp.EncodeUint256(tx.GasPrice, w, b); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(tx.GasLimit, w, b); err != nil {
+	if err := rlp.EncodeU64(tx.GasLimit, w, b); err != nil {
 		return err
 	}
-	if err := rlp.EncodeOptionalAddress(tx.To, w, b); err != nil {
+	if err := EncodeOptionalAddress(tx.To, w, b); err != nil {
 		return err
 	}
 	if err := rlp.EncodeUint256(tx.Value, w, b); err != nil {
@@ -276,8 +263,8 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize int) error 
 
 func (tx *LegacyTx) EncodeRLP(w io.Writer) error {
 	payloadSize := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 	if err := tx.encodePayload(w, b[:], payloadSize); err != nil {
 		return err
 	}
@@ -298,7 +285,7 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream) error {
 	if tx.GasLimit, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read GasLimit: %w", err)
 	}
-	if err = rlp.DecodeOptionalAddress(&tx.To, s); err != nil {
+	if err = DecodeOptionalAddress(&tx.To, s); err != nil {
 		return fmt.Errorf("read To: %w", err)
 	}
 	if err = s.ReadUint256(&tx.Value); err != nil {
@@ -367,7 +354,7 @@ func (tx *LegacyTx) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := rlpHash([]any{
+	hash := RlpHash([]any{
 		tx.Nonce,
 		&tx.GasPrice,
 		tx.GasLimit,
@@ -394,7 +381,7 @@ type legacyTxSigHash struct {
 
 func (tx *LegacyTx) SigningHash(chainID *big.Int) common.Hash {
 	if chainID != nil && chainID.Sign() != 0 {
-		return rlpHash(&legacyTxSigHash{
+		return RlpHash(&legacyTxSigHash{
 			Nonce:    tx.Nonce,
 			GasPrice: &tx.GasPrice,
 			Gas:      tx.GasLimit,
@@ -406,7 +393,7 @@ func (tx *LegacyTx) SigningHash(chainID *big.Int) common.Hash {
 			R:        uint(0),
 		})
 	}
-	return rlpHash([]any{
+	return RlpHash([]any{
 		tx.Nonce,
 		&tx.GasPrice,
 		tx.GasLimit,

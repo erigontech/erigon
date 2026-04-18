@@ -199,21 +199,17 @@ func ExecV3(ctx context.Context,
 
 	doms.EnableParaTrieDB(cfg.db)
 	doms.EnableTrieWarmup(true)
-	// Do it only for chain-tip blocks!
-	doms.EnableWarmupCache(!isApplyingBlocks)
+	doms.EnableWarmupCache(true)
 	postValidator := newBlockPostExecutionValidator()
 	doms.SetDeferCommitmentUpdates(false)
 	if !isApplyingBlocks {
 		postValidator = newParallelBlockPostExecutionValidator()
 	}
-	// Enable deferred commitment updates for fork validation and parallel initial sync.
-	// Deferred updates batch commitment calculations to block boundaries rather than
-	// per-transaction, significantly reducing re-org validation overhead.
-	// For the parallel path during initial sync, Flush() now includes pending updates,
-	// so they are no longer silently discarded between StageLoopIteration cycles.
-	if isForkValidation || (parallel && isApplyingBlocks) {
-		doms.SetDeferCommitmentUpdates(true)
-	}
+	// Enable deferred commitment updates. Deferred updates batch commitment
+	// branch writes to a queue during fold(), avoiding per-write map insertion
+	// overhead. The queue is flushed into the correct block's changeset by
+	// SharedDomains.ComputeCommitment before the next block's commitment runs.
+	doms.SetDeferCommitmentUpdates(true)
 	defer doms.SetDeferCommitmentUpdates(false)
 	// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
 	// can't use OS-level ReadAhead - because Data >> RAM
@@ -598,6 +594,10 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 			}
 			go warmTxsHashes(b)
 
+			if stateCache := te.doms.GetStateCache(); stateCache != nil {
+				stateCache.ValidateAndPrepare(b.ParentHash(), b.Hash())
+			}
+
 			var dbBAL types.BlockAccessList
 			var data []byte
 			// Use a fresh read tx (not tx.Apply) so we can see BAL data
@@ -622,12 +622,18 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 			txs := b.Transactions()
 			header := b.HeaderNoCopy()
 
-			// BLOCKHASH looks back at most 256 blocks — those headers are always
-			// in frozen snapshots. Pass nil tx so blockReader skips MDBX/overlay
-			// and reads directly from snapshots. This is thread-safe without a
-			// mutex and avoids races with fcuOverlay lifecycle.
+			// BLOCKHASH looks back at most 256 blocks. Use a short-lived read
+			// tx (not the apply-tx) to avoid races with fcuOverlay lifecycle.
 			blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
-				return te.cfg.blockReader.Header(ctx, nil, hash, number)
+				var h *types.Header
+				if err := te.cfg.db.View(ctx, func(roTx kv.Tx) error {
+					var err error
+					h, err = te.cfg.blockReader.Header(ctx, roTx, hash, number)
+					return err
+				}); err != nil {
+					return nil, err
+				}
+				return h, nil
 			}), te.cfg.engine, te.cfg.author, te.cfg.chainConfig)
 
 			var txTasks []exec.Task
@@ -830,16 +836,14 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 
 }
 
-func shouldGenerateChangeSets(cfg ExecuteBlockCfg, blockNum, maxBlockNum uint64, initialCycle bool) bool {
+func shouldGenerateChangeSets(cfg ExecuteBlockCfg, blockNum, maxBlockNum uint64) bool {
 	if cfg.syncCfg.AlwaysGenerateChangesets {
 		return true
 	}
 	if blockNum < cfg.blockReader.FrozenBlocks() {
 		return false
 	}
-	if initialCycle {
-		return false
-	}
-	// once past the initial cycle, make sure to generate changesets for the last blocks that fall in the reorg window
+	// Generate changesets for blocks within the reorg window of the batch end,
+	// so the node can handle reorgs at the tip.
 	return blockNum+cfg.syncCfg.MaxReorgDepth >= maxBlockNum
 }

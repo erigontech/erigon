@@ -43,7 +43,7 @@ type Config struct {
 	ChainName string   `json:"chainName"` // chain name, eg: mainnet, sepolia, bor-mainnet
 	ChainID   *big.Int `json:"chainId"`   // chainId identifies the current chain and is used for replay protection
 
-	Rules RulesName `json:"consensus,omitempty"` // aura, ethash or clique
+	Rules RulesName `json:"consensus,omitempty"` // aura, bor, or ethash
 
 	// *Block fields activate the corresponding hard fork at a certain block number,
 	// while *Time fields do so based on the block's time stamp.
@@ -104,11 +104,16 @@ type Config struct {
 	// See also EIP-6110: Supply validator deposits on chain
 	DepositContract common.Address `json:"depositContractAddress,omitempty"`
 
+	// (Optional) EIP-7002: Execution layer triggerable withdrawals
+	WithdrawalRequestContract *common.Address `json:"withdrawalRequestContractAddress,omitempty"`
+
+	// (Optional) EIP-7251: Increase the MAX_EFFECTIVE_BALANCE
+	ConsolidationRequestContract *common.Address `json:"consolidationRequestContractAddress,omitempty"`
+
 	DefaultBlockGasLimit *uint64 `json:"defaultBlockGasLimit,omitempty"`
 
 	// Various rules engines
 	Ethash *EthashConfig `json:"ethash,omitempty"`
-	Clique *CliqueConfig `json:"clique,omitempty"`
 	Aura   *AuRaConfig   `json:"aura,omitempty"`
 
 	Bor     BorConfig       `json:"-"`
@@ -119,21 +124,6 @@ type Config struct {
 }
 
 var (
-	TestChainConfig = &Config{
-		ChainID:               big.NewInt(1337),
-		Rules:                 EtHashRules,
-		HomesteadBlock:        common.NewUint64(0),
-		TangerineWhistleBlock: common.NewUint64(0),
-		SpuriousDragonBlock:   common.NewUint64(0),
-		ByzantiumBlock:        common.NewUint64(0),
-		ConstantinopleBlock:   common.NewUint64(0),
-		PetersburgBlock:       common.NewUint64(0),
-		IstanbulBlock:         common.NewUint64(0),
-		MuirGlacierBlock:      common.NewUint64(0),
-		BerlinBlock:           common.NewUint64(0),
-		Ethash:                new(EthashConfig),
-	}
-
 	TestChainAuraConfig = &Config{
 		ChainID:               big.NewInt(1),
 		Rules:                 AuRaRules,
@@ -148,6 +138,46 @@ var (
 		BerlinBlock:           common.NewUint64(0),
 		LondonBlock:           common.NewUint64(0),
 		Aura:                  &AuRaConfig{},
+	}
+
+	TestChainBerlinConfig = &Config{
+		ChainID:               big.NewInt(1337),
+		Rules:                 EtHashRules,
+		HomesteadBlock:        common.NewUint64(0),
+		TangerineWhistleBlock: common.NewUint64(0),
+		SpuriousDragonBlock:   common.NewUint64(0),
+		ByzantiumBlock:        common.NewUint64(0),
+		ConstantinopleBlock:   common.NewUint64(0),
+		PetersburgBlock:       common.NewUint64(0),
+		IstanbulBlock:         common.NewUint64(0),
+		MuirGlacierBlock:      common.NewUint64(0),
+		BerlinBlock:           common.NewUint64(0),
+		Ethash:                new(EthashConfig),
+	}
+
+	TestChainOsakaConfig = &Config{
+		ChainID:                       big.NewInt(1337),
+		Rules:                         EtHashRules,
+		HomesteadBlock:                common.NewUint64(0),
+		TangerineWhistleBlock:         common.NewUint64(0),
+		SpuriousDragonBlock:           common.NewUint64(0),
+		ByzantiumBlock:                common.NewUint64(0),
+		ConstantinopleBlock:           common.NewUint64(0),
+		PetersburgBlock:               common.NewUint64(0),
+		IstanbulBlock:                 common.NewUint64(0),
+		MuirGlacierBlock:              common.NewUint64(0),
+		BerlinBlock:                   common.NewUint64(0),
+		LondonBlock:                   common.NewUint64(0),
+		ArrowGlacierBlock:             common.NewUint64(0),
+		GrayGlacierBlock:              common.NewUint64(0),
+		TerminalTotalDifficulty:       big.NewInt(0),
+		TerminalTotalDifficultyPassed: true,
+		ShanghaiTime:                  common.NewUint64(0),
+		CancunTime:                    common.NewUint64(0),
+		PragueTime:                    common.NewUint64(0),
+		OsakaTime:                     common.NewUint64(0),
+		DepositContract:               common.HexToAddress("0x00000000219ab540356cBB839Cbe05303d7705Fa"),
+		Ethash:                        new(EthashConfig),
 	}
 
 	// AllProtocolChanges contains every protocol change (EIPs) introduced
@@ -260,8 +290,6 @@ func (c *Config) getEngine() string {
 	switch {
 	case c.Ethash != nil:
 		return c.Ethash.String()
-	case c.Clique != nil:
-		return c.Clique.String()
 	case c.Bor != nil:
 		return c.Bor.String()
 	case c.Aura != nil:
@@ -501,12 +529,30 @@ func (c *Config) SystemContracts(time uint64) map[string]accounts.Address {
 		contracts["BEACON_ROOTS_ADDRESS"] = params.BeaconRootsAddress
 	}
 	if c.IsPrague(time) {
-		contracts["CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS"] = params.ConsolidationRequestAddress
+		contracts["CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS"] = c.GetConsolidationRequestContract()
 		contracts["DEPOSIT_CONTRACT_ADDRESS"] = accounts.InternAddress(c.DepositContract)
 		contracts["HISTORY_STORAGE_ADDRESS"] = params.HistoryStorageAddress
-		contracts["WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS"] = params.WithdrawalRequestAddress
+		contracts["WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS"] = c.GetWithdrawalRequestContract()
 	}
 	return contracts
+}
+
+// GetWithdrawalRequestContract returns the configured EIP-7002 withdrawal request contract address,
+// falling back to the default if not set in the chain config.
+func (c *Config) GetWithdrawalRequestContract() accounts.Address {
+	if c.WithdrawalRequestContract != nil {
+		return accounts.InternAddress(*c.WithdrawalRequestContract)
+	}
+	return params.WithdrawalRequestAddress
+}
+
+// GetConsolidationRequestContract returns the configured EIP-7251 consolidation request contract address,
+// falling back to the default if not set in the chain config.
+func (c *Config) GetConsolidationRequestContract() accounts.Address {
+	if c.ConsolidationRequestContract != nil {
+		return accounts.InternAddress(*c.ConsolidationRequestContract)
+	}
+	return params.ConsolidationRequestAddress
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported
@@ -706,17 +752,6 @@ type EthashConfig struct{}
 // String implements the stringer interface, returning the rules engine details.
 func (c *EthashConfig) String() string {
 	return "ethash"
-}
-
-// CliqueConfig is the rules engine configs for proof-of-authority based sealing.
-type CliqueConfig struct {
-	Period uint64 `json:"period"` // Number of seconds between blocks to enforce
-	Epoch  uint64 `json:"epoch"`  // Epoch length to reset votes and checkpoint
-}
-
-// String implements the stringer interface, returning the rules engine details.
-func (c *CliqueConfig) String() string {
-	return "clique"
 }
 
 // Looks up a config value as of a given block number (or time).

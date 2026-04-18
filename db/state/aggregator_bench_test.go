@@ -471,7 +471,8 @@ func BenchmarkAggregator_BeginFilesRo_Latency(b *testing.B) {
 }
 
 var parallel = flag.Int("bench.parallel", 1, "parallelism value") // runs 1 *maxprocs
-var loopv = flag.Int("bench.loopv", 100000, "loop value")
+var cpuIters = flag.Int("bench.cpu-iters", 1000, "CPU work iterations between BeginFilesRo and Close")
+var sleepMs = flag.Int("bench.sleep-ms", 5, "sleep duration in milliseconds between BeginRo and Rollback")
 
 func BenchmarkAggregator_BeginFilesRo_Throughput(b *testing.B) {
 	// RESULT: deteriorates after 2^21 goroutines
@@ -481,7 +482,7 @@ func BenchmarkAggregator_BeginFilesRo_Throughput(b *testing.B) {
 		cpus=$((1 << $cpu))  # Same as 2^cpu
 		echo -n "($cpus, "
 		echo -n $(go test -benchmem -run=^$ -bench ^BenchmarkAggregator_BeginFilesRo_Throughput$ github.com/erigontech/erigon/db/state  \
-		-bench.parallel=$cpus -bench.loopv=1000 | grep 'BenchmarkAggregator_BeginFilesRo_Throughput' | cut -f3 | xargs|cut -d' ' -f1)
+		-bench.parallel=$cpus -bench.cpu-iters=1000 | grep 'BenchmarkAggregator_BeginFilesRo_Throughput' | cut -f3 | xargs|cut -d' ' -f1)
 		echo -n "), "
 	done
 	**/
@@ -489,7 +490,7 @@ func BenchmarkAggregator_BeginFilesRo_Throughput(b *testing.B) {
 	if !flag.Parsed() {
 		flag.Parse()
 	}
-	//b.Logf("Running with parallel=%d work=%d, #goroutines:%d", *parallel, *loopv, *parallel*runtime.GOMAXPROCS(0))
+	//b.Logf("Running with parallel=%d work=%d, #goroutines:%d", *parallel, *cpuIters, *parallel*runtime.GOMAXPROCS(0))
 
 	aggStep := uint64(100_00)
 	_, agg := testDbAndAggregatorBench(b, aggStep)
@@ -499,7 +500,7 @@ func BenchmarkAggregator_BeginFilesRo_Throughput(b *testing.B) {
 		foo := 0
 		for b.Next() {
 			tx := agg.BeginFilesRo()
-			for i := 0; i < *loopv; i++ {
+			for i := 0; i < *cpuIters; i++ {
 				foo *= 2
 				foo /= 2
 			}
@@ -524,7 +525,7 @@ func BenchmarkDb_BeginFiles_Throughput(b *testing.B) {
 	    cpus=$((1 << $cpu))  # Same as 2^cpu
 	    echo -n "($cpus, "
 	    echo -n $(go test -benchmem -run=^$ -bench ^BenchmarkDb_BeginFiles_Throughput$ github.com/erigontech/erigon/db/state  \
-		-bench.parallel=$cpus -bench.loopv=1000 | grep 'BenchmarkDb_BeginFiles_Throughput' | cut -f3 | xargs|cut -d' ' -f1)
+		-bench.parallel=$cpus -bench.sleep-ms=1000 | grep 'BenchmarkDb_BeginFiles_Throughput' | cut -f3 | xargs|cut -d' ' -f1)
 	    echo -n "), "
 	done
 	**/
@@ -533,7 +534,7 @@ func BenchmarkDb_BeginFiles_Throughput(b *testing.B) {
 	if !flag.Parsed() {
 		flag.Parse()
 	}
-	//b.Logf("Running with parallel=%d work=%d, #goroutines:%d", *parallel, *loopv, *parallel*runtime.GOMAXPROCS(0))
+	//b.Logf("Running with parallel=%d work=%d, #goroutines:%d", *parallel, *sleepMs, *parallel*runtime.GOMAXPROCS(0))
 
 	aggStep := uint64(100_00)
 	db, _ := testDbAndAggregatorBench(b, aggStep)
@@ -547,13 +548,7 @@ func BenchmarkDb_BeginFiles_Throughput(b *testing.B) {
 			if err != nil {
 				b.Fatalf("%v", err)
 			}
-			millis := *loopv * 1000000
-			time.Sleep(time.Duration(int64(millis)))
-
-			// for i := 0; i < *loopv; i++ {
-			// 	foo *= 2
-			// 	foo /= 2
-			// }
+			time.Sleep(time.Duration(*sleepMs) * time.Millisecond)
 			tx.Rollback()
 		}
 	})

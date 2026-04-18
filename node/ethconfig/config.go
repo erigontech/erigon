@@ -40,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
-	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash/ethashcfg"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/gasprice/gaspricecfg"
@@ -151,9 +150,13 @@ type BlocksFreezing struct {
 	ProduceE2         bool // produce new block files
 	ProduceE3         bool // produce new state files
 	NoDownloader      bool // possible to use snapshots without calling Downloader
+	P2PManifest       bool // discover snapshot manifest from P2P peers instead of centralized preverified.toml
 	DisableDownloadE3 bool // disable download state snapshots
 	DownloaderAddr    string
 	ChainName         string
+	// ManifestReady is closed when P2P manifest discovery completes.
+	// Set by the backend when P2PManifest is enabled. Nil otherwise.
+	ManifestReady <-chan struct{}
 }
 
 func (s BlocksFreezing) String() string {
@@ -216,8 +219,7 @@ type Config struct {
 	// Ethash options
 	Ethash ethashcfg.Config
 
-	Clique chainspec.ConsensusSnapshotConfig
-	Aura   chain.AuRaConfig
+	Aura chain.AuRaConfig
 
 	// Transaction pool options
 	TxPool  txpoolcfg.Config
@@ -280,10 +282,11 @@ type Sync struct {
 	LoopBlockLimit             uint
 	ParallelStateFlushing      bool
 
-	ChaosMonkey              bool
-	AlwaysGenerateChangesets bool
-	MaxReorgDepth            uint64
-	KeepExecutionProofs      bool
-	PersistReceiptsCacheV2   bool
-	SnapshotDownloadToBlock  uint64 // exclusive [0,toBlock)
+	ChaosMonkey                      bool
+	AlwaysGenerateChangesets         bool
+	MaxReorgDepth                    uint64
+	KeepExecutionProofs              bool
+	ExperimentalConcurrentCommitment bool
+	PersistReceiptsCacheV2           bool
+	SnapshotDownloadToBlock          uint64 // exclusive [0,toBlock)
 }

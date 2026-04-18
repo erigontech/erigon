@@ -108,13 +108,13 @@ func (r *Record) Size() uint64 {
 }
 
 func computeSize(r *Record) uint64 {
-	size := uint64(rlp.IntSize(r.seq))
-	size += rlp.BytesSize(r.signature)
+	size := rlp.U64Len(r.seq)
+	size += rlp.StringLen(r.signature)
 	for _, p := range r.pairs {
-		size += rlp.StringSize(p.k)
-		size += uint64(len(p.v))
+		size += rlp.StringLen([]byte(p.k))
+		size += len(p.v)
 	}
-	return rlp.ListSize(size)
+	return uint64(rlp.ListLen(size))
 }
 
 // Seq returns the sequence number.

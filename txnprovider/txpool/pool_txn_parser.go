@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
-	"github.com/erigontech/erigon/execution/protocol/fixedgas"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
@@ -491,9 +491,9 @@ func (tx *TxnSlot) GetDataLen() int {
 
 func (tx *TxnSlot) GetDataNonZeroLen() int {
 	if aaTx, ok := tx.Txn.(*types.AccountAbstractionTransaction); ok {
-		return fixedgas.CountNonZeroBytes(aaTx.DeployerData) + fixedgas.CountNonZeroBytes(aaTx.PaymasterData) + fixedgas.CountNonZeroBytes(aaTx.ExecutionData)
+		return mdgas.CountNonZeroBytes(aaTx.DeployerData) + mdgas.CountNonZeroBytes(aaTx.PaymasterData) + mdgas.CountNonZeroBytes(aaTx.ExecutionData)
 	}
-	return fixedgas.CountNonZeroBytes(tx.Txn.GetData())
+	return mdgas.CountNonZeroBytes(tx.Txn.GetData())
 }
 
 func (tx *TxnSlot) GetAccessListAddrCount() int { return len(tx.Txn.GetAccessList()) }
