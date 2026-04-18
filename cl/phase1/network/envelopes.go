@@ -37,6 +37,12 @@ func RequestEnvelopesFrantically(ctx context.Context, r *rpc.BeaconRpcP2P, roots
 	needed := make([][32]byte, len(roots))
 	copy(needed, roots)
 
+	// Build a set of requested roots so we can reject unsolicited envelopes from peers.
+	requestedRoots := make(map[common.Hash]struct{}, len(roots))
+	for _, root := range roots {
+		requestedRoots[common.Hash(root)] = struct{}{}
+	}
+
 	timer := time.NewTimer(requestEnvelopeBatchExpiration)
 	defer timer.Stop()
 
@@ -72,6 +78,12 @@ func RequestEnvelopesFrantically(ctx context.Context, r *rpc.BeaconRpcP2P, roots
 			if env.Message == nil {
 				continue
 			}
+			// Only accept envelopes whose BeaconBlockRoot was actually requested.
+			// A malicious peer could respond with envelopes for arbitrary roots.
+			if _, ok := requestedRoots[env.Message.BeaconBlockRoot]; !ok {
+				log.Debug("RequestEnvelopesFrantically: ignoring unsolicited envelope", "root", env.Message.BeaconBlockRoot)
+				continue
+			}
 			received[env.Message.BeaconBlockRoot] = env
 		}
 		needed = filterReceived(needed, received)
@@ -102,6 +114,16 @@ func requestEnvelopesByRange(ctx context.Context, r *rpc.BeaconRpcP2P, blocks []
 	count := endSlot - startSlot + 1
 	log.Debug("envelope fetch: falling back to by-range", "startSlot", startSlot, "count", count)
 
+	// Build a set of valid block roots from the blocks we actually need envelopes for.
+	validRoots := make(map[common.Hash]struct{}, len(blocks))
+	for _, blk := range blocks {
+		root, err := blk.Block.HashSSZ()
+		if err != nil {
+			continue
+		}
+		validRoots[root] = struct{}{}
+	}
+
 	envelopes, _, err := r.SendExecutionPayloadEnvelopesByRangeReq(ctx, startSlot, count)
 	if err != nil {
 		log.Debug("envelope fetch: by-range error", "err", err)
@@ -109,6 +131,12 @@ func requestEnvelopesByRange(ctx context.Context, r *rpc.BeaconRpcP2P, blocks []
 	}
 	for _, env := range envelopes {
 		if env.Message == nil {
+			continue
+		}
+		// Only accept envelopes whose BeaconBlockRoot matches one of the blocks we requested.
+		// A malicious peer could respond with envelopes for arbitrary roots.
+		if _, ok := validRoots[env.Message.BeaconBlockRoot]; !ok {
+			log.Debug("requestEnvelopesByRange: ignoring unsolicited envelope", "root", env.Message.BeaconBlockRoot)
 			continue
 		}
 		received[env.Message.BeaconBlockRoot] = env
