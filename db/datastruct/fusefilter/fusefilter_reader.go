@@ -84,7 +84,7 @@ func NewReaderOnBytes(m []byte, fName string) (*Reader, int, error) {
 	features := Features(binary.BigEndian.Uint32(featuresBytes))
 	fileIsLittleEndian := features&IsLittleEndianFeature != 0
 	if fileIsLittleEndian != IsLittleEndian {
-		return nil, 0, fmt.Errorf("file %s is not compatible with your machine (different Endianness), but you can run `erigon snapshots index`", fName)
+		return nil, 0, fmt.Errorf("file %s %s", fName, endianMismatchErr)
 	}
 
 	filter.SegmentCount = binary.BigEndian.Uint32(header[4+4:])
@@ -131,7 +131,12 @@ func (r *Reader) Close() {
 	r.f = nil
 }
 
-var IsLittleEndian = isLittleEndian()
+var (
+	IsLittleEndian = isLittleEndian()
+	// endianMismatchErr is returned when a filter file was built on a machine
+	// with a different byte order than the current one.
+	endianMismatchErr = "is not compatible with your machine (different Endianness), but you can run `erigon snapshots index`"
+)
 
 func isLittleEndian() bool {
 	var x uint16 = 0x0102
@@ -200,7 +205,7 @@ func NewShardedReaderOnBytes(m []byte, fName string) (*ShardedReader, int, error
 	features := Features(binary.BigEndian.Uint32(m[:4]))
 	fileIsLittleEndian := features&IsLittleEndianFeature != 0
 	if fileIsLittleEndian != IsLittleEndian {
-		return nil, 0, fmt.Errorf("file %s is not compatible with your machine (different Endianness), but you can run `erigon snapshots index`", fName)
+		return nil, 0, fmt.Errorf("file %s %s", fName, endianMismatchErr)
 	}
 
 	r := &ShardedReader{features: features, fileName: fName, m: m}

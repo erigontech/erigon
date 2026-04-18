@@ -51,8 +51,8 @@ func (w *WriterOffHeap) Close() {
 
 func (w *WriterOffHeap) build() (*xorfilter.BinaryFuse[uint8], error) {
 	defer dir.RemoveFile(w.tmpFilePath)
-	if w.count%len(w.page) != 0 {
-		if _, err := w.tmpFile.Write(castToBytes(w.page[:w.count%len(w.page)])); err != nil {
+	if tail := w.count % len(w.page); tail != 0 {
+		if _, err := w.tmpFile.Write(castToBytes(w.page[:tail])); err != nil {
 			return nil, err
 		}
 	}
@@ -106,11 +106,11 @@ func (w *WriterOffHeap) write(filter *xorfilter.BinaryFuse[uint8], fw io.Writer)
 }
 
 func (w *WriterOffHeap) AddHash(k uint64) error {
-	w.page[w.count%len(w.page)] = k
+	pos := w.count % len(w.page)
+	w.page[pos] = k
 	w.count++
-	if w.count%len(w.page) == 0 {
-		_, err := w.tmpFile.Write(castToBytes(w.page[:]))
-		if err != nil {
+	if pos == len(w.page)-1 {
+		if _, err := w.tmpFile.Write(castToBytes(w.page[:])); err != nil {
 			return err
 		}
 	}
@@ -397,15 +397,13 @@ func buildToFile(filePath string, noFsync bool, build func(io.Writer) (int, erro
 	return os.Rename(f.Name(), filePath)
 }
 
-// castToBytes converts []uint64 to []byte without copying data
 func castToBytes(in []uint64) []byte {
 	if len(in) == 0 {
 		return nil
 	}
-	return unsafe.Slice((*byte)(unsafe.Pointer(&in[0])), len(in)*8) // each uint64 is 8 bytes
+	return unsafe.Slice((*byte)(unsafe.Pointer(&in[0])), len(in)*8)
 }
 
-// castToArrU64 converts []byte to []uint64 without copying data on little endian machines
 func castToArrU64(b []byte) []uint64 {
 	if len(b) == 0 {
 		return nil
