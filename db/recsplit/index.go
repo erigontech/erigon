@@ -105,6 +105,7 @@ type Index struct {
 	lessFalsePositives bool
 	existenceV0        []byte
 	existenceV1        *fusefilter.Reader
+	existenceV2        *fusefilter.ReaderSharded
 
 	readers         *sync.Pool
 	readAheadRefcnt atomic.Int32 // ref-counter: allow enable/disable read-ahead from goroutines. only when refcnt=0 - disable read-ahead once
@@ -243,7 +244,7 @@ func (idx *Index) init() (err error) {
 		offset += int(arrSz)
 	}
 
-	if idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0 {
+	if idx.dataStructureVersion == 1 && idx.lessFalsePositives && idx.keyCount > 0 {
 		var sz int
 		idx.existenceV1, sz, err = fusefilter.NewReaderOnBytes(idx.data[offset:], idx.fileName)
 		if err != nil {
@@ -254,6 +255,14 @@ func (idx *Index) init() (err error) {
 		}
 		if fusefilter.MadvNormalByDefault {
 			idx.existenceV1.MadvNormal()
+		}
+		offset += sz
+	}
+	if idx.dataStructureVersion >= 2 && idx.lessFalsePositives && idx.keyCount > 0 {
+		var sz int
+		idx.existenceV2, sz, err = fusefilter.NewReaderShardedOnBytes(idx.data[offset:], idx.fileName)
+		if err != nil {
+			return fmt.Errorf("NewReaderShardedOnBytes: %w, %s", err, idx.fileName)
 		}
 		offset += sz
 	}
@@ -283,8 +292,11 @@ func (idx *Index) init() (err error) {
 }
 
 func (idx *Index) ForceExistenceFilterInRAM() datasize.ByteSize {
-	if idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0 {
+	if idx.dataStructureVersion == 1 && idx.lessFalsePositives && idx.keyCount > 0 {
 		return idx.existenceV1.ForceInMem()
+	}
+	if idx.dataStructureVersion >= 2 && idx.lessFalsePositives && idx.keyCount > 0 {
+		idx.existenceV2.ForceInMem()
 	}
 	return 0
 }
@@ -369,6 +381,11 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 	}
 	if idx.dataStructureVersion == 1 && idx.lessFalsePositives {
 		if ok := idx.existenceV1.ContainsHash(bucketHash); !ok {
+			return 0, false
+		}
+	}
+	if idx.dataStructureVersion >= 2 && idx.lessFalsePositives {
+		if ok := idx.existenceV2.ContainsHash(bucketHash); !ok {
 			return 0, false
 		}
 	}

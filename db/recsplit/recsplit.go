@@ -544,8 +544,13 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 		}
 	}
 
-	if rs.lessFalsePositives && rs.dataStructureVersion >= 1 {
+	if rs.lessFalsePositives && rs.dataStructureVersion == 1 {
 		if err := rs.existenceFV1.AddHash(hi); err != nil {
+			return err
+		}
+	}
+	if rs.lessFalsePositives && rs.dataStructureVersion >= 2 {
+		if err := rs.existenceFV2.AddHash(hi); err != nil {
 			return err
 		}
 	}
@@ -1079,8 +1084,14 @@ func (rs *RecSplit) flushExistenceFilter() error {
 		}
 	}
 
-	if rs.dataStructureVersion >= 1 && rs.keysAdded > 0 && rs.lessFalsePositives {
+	if rs.dataStructureVersion == 1 && rs.keysAdded > 0 && rs.lessFalsePositives {
 		_, err := rs.existenceFV1.BuildTo(rs.indexW)
+		if err != nil {
+			return err
+		}
+	}
+	if rs.dataStructureVersion >= 2 && rs.keysAdded > 0 && rs.lessFalsePositives {
+		_, err := rs.existenceFV2.BuildTo(rs.indexW)
 		if err != nil {
 			return err
 		}
