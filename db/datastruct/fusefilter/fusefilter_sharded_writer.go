@@ -42,11 +42,11 @@ const (
 )
 
 // ShardedWriterOffHeap appends all keys into a single tmp file. At BuildTo
-// the file is mmap'd RDWR and partitioned in place by byte(k) (8-bit
-// American Flag Sort), after which each shard's keys occupy a contiguous
-// byte range and are handed directly to xorfilter.BuildBinaryFuse without a
-// copy. Rewriting the mmap in place trades a couple of passes over the tmp
-// file for determinism, zero-copy to xorfilter, and a single file descriptor.
+// the file is mmap'd RDWR and sorted in place by byte(k), after which each
+// shard's keys occupy a contiguous byte range and are handed directly to
+// xorfilter.BuildBinaryFuse without a copy. Sorting the mmap in place trades
+// a couple of passes over the tmp file for determinism, zero-copy to
+// xorfilter, and a single file descriptor.
 type ShardedWriterOffHeap struct {
 	page     [512]uint64
 	pageFill uint16

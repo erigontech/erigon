@@ -286,6 +286,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	}
 	if args.KeyCount > 0 && rs.lessFalsePositives {
 		switch rs.dataStructureVersion {
+		case 0: // uses first-bytes byte array, initialized above
 		case 1:
 			rs.existenceFV1, err = fusefilter.NewWriterOffHeap(rs.filePath)
 			if err != nil {
@@ -296,6 +297,8 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 			if err != nil {
 				return nil, err
 			}
+		default:
+			return nil, fmt.Errorf("unsupported dataStructureVersion %d with LessFalsePositives", rs.dataStructureVersion)
 		}
 	}
 

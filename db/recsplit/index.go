@@ -246,6 +246,7 @@ func (idx *Index) init() (err error) {
 
 	if idx.lessFalsePositives && idx.keyCount > 0 {
 		switch idx.dataStructureVersion {
+		case 0: // parsed above
 		case 1:
 			var sz int
 			idx.existenceV1, sz, err = fusefilter.NewReaderOnBytes(idx.data[offset:], idx.fileName)
@@ -272,6 +273,8 @@ func (idx *Index) init() (err error) {
 				idx.existenceV2.MadvNormal()
 			}
 			offset += sz
+		default:
+			return fmt.Errorf("%w. unsupported existence filter version %d", IncompatibleErr, idx.dataStructureVersion)
 		}
 	}
 

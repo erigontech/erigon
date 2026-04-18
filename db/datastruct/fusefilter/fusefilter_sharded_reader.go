@@ -31,7 +31,7 @@ type ShardedReader struct {
 	features  Features
 
 	f *os.File
-	m mmap.MMap // non-nil only when opened via NewShardedReader(filePath)
+	m mmap.MMap // backing byte region for madvise; set by both constructors
 }
 
 func NewShardedReader(filePath string) (*ShardedReader, error) {
@@ -76,7 +76,7 @@ func NewShardedReaderOnBytes(m []byte, fName string) (*ShardedReader, int, error
 		return nil, 0, fmt.Errorf("file %s is not compatible with your machine (different Endianness), but you can run `erigon snapshots index`", fName)
 	}
 
-	r := &ShardedReader{features: features, fileName: fName}
+	r := &ShardedReader{features: features, fileName: fName, m: m}
 	for s := 0; s < shardCount; s++ {
 		off := shardedHeaderSize + s*shardDescriptorSize
 		sc := binary.BigEndian.Uint32(m[off:])
@@ -84,11 +84,14 @@ func NewShardedReaderOnBytes(m []byte, fName string) (*ShardedReader, int, error
 			continue // empty shard; leave r.shards[s] zero-valued
 		}
 		sl := binary.BigEndian.Uint32(m[off+4:])
+		if sl == 0 || sl&(sl-1) != 0 {
+			return nil, 0, fmt.Errorf("file %s: shard %d invalid SegmentLength %d (must be non-zero power of two)", fName, s, sl)
+		}
 		filter := &r.shards[s]
 		filter.SegmentCount = sc
 		filter.SegmentLength = sl
 		filter.SegmentCountLength = sc * sl
-		filter.SegmentLengthMask = sl - 1 // SegmentLength is always a power of two
+		filter.SegmentLengthMask = sl - 1
 		filter.Seed = binary.BigEndian.Uint64(m[off+8:])
 	}
 	for i := 0; i <= shardCount; i++ {
@@ -142,7 +145,7 @@ func (r *ShardedReader) ForceInMem() datasize.ByteSize {
 }
 
 func (r *ShardedReader) MadvWillNeed() {
-	if r == nil || r.m == nil || len(r.m) == 0 || r.keepInMem {
+	if r == nil || len(r.m) == 0 || r.keepInMem {
 		return
 	}
 	if err := mm.MadviseWillNeed(r.m); err != nil {
@@ -151,7 +154,7 @@ func (r *ShardedReader) MadvWillNeed() {
 }
 
 func (r *ShardedReader) MadvNormal() {
-	if r == nil || r.m == nil || len(r.m) == 0 || r.keepInMem {
+	if r == nil || len(r.m) == 0 || r.keepInMem {
 		return
 	}
 	if err := mm.MadviseNormal(r.m); err != nil {
