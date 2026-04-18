@@ -415,7 +415,7 @@ func FormatLogs(logs []logger.StructLog) []StructLogRes {
 		if trace.Storage != nil {
 			storage := make(map[string]string)
 			for i, storageValue := range trace.Storage {
-				storage[fmt.Sprintf("%x", i)] = fmt.Sprintf("%x", storageValue)
+				storage[i.Hex()] = storageValue.Hex()
 			}
 			formatted[index].Storage = &storage
 		}
