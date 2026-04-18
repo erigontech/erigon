@@ -296,7 +296,7 @@ func (idx *Index) ForceExistenceFilterInRAM() datasize.ByteSize {
 		return idx.existenceV1.ForceInMem()
 	}
 	if idx.dataStructureVersion >= 2 && idx.lessFalsePositives && idx.keyCount > 0 {
-		idx.existenceV2.ForceInMem()
+		return idx.existenceV2.ForceInMem()
 	}
 	return 0
 }
