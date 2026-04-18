@@ -219,6 +219,7 @@ func SetupCobra(cmd *cobra.Command, filePrefix string) log.Logger {
 			StartPProf(address, nil)
 		}
 	}
+	go dbg.SaveHeapProfileNearOOMPeriodically(cmd.Context(), dbg.SaveHeapWithLogger(&logger))
 	return logger
 }
 
