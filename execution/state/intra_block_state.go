@@ -2288,6 +2288,41 @@ func (sdb *IntraBlockState) MarkReadsInternal(addr accounts.Address) {
 	}
 }
 
+// SnapshotVersionedReadKeys returns the current set of read keys for addr.
+// Used with MarkNewReadsInternal to mark only reads added after the snapshot,
+// preserving pre-existing legitimate reads.
+func (sdb *IntraBlockState) SnapshotVersionedReadKeys(addr accounts.Address) map[AccountKey]struct{} {
+	if sdb.versionedReads == nil {
+		return nil
+	}
+	reads := sdb.versionedReads[addr]
+	if len(reads) == 0 {
+		return nil
+	}
+	snapshot := make(map[AccountKey]struct{}, len(reads))
+	for k := range reads {
+		snapshot[k] = struct{}{}
+	}
+	return snapshot
+}
+
+// MarkNewReadsInternal marks as internal only the reads for addr that were
+// added after the given snapshot. Use this when gas-calculation-only reads
+// were recorded on top of earlier legitimate reads — the legitimate ones
+// must remain non-internal so they appear in the block access list.
+func (sdb *IntraBlockState) MarkNewReadsInternal(addr accounts.Address, before map[AccountKey]struct{}) {
+	if sdb.versionedReads == nil {
+		return
+	}
+	for key, vr := range sdb.versionedReads[addr] {
+		if _, existed := before[key]; existed {
+			continue
+		}
+		vr.internal = true
+		sdb.versionedReads[addr][key] = vr
+	}
+}
+
 // AccessedAddresses returns and resets the set of addresses touched during the current transaction.
 func (sdb *IntraBlockState) AccessedAddresses() AccessSet {
 	if len(sdb.addressAccess) == 0 {

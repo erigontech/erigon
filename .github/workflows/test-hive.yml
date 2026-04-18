@@ -44,8 +44,8 @@ jobs:
           - sim: engine
             sim-limit: auth
             max-allowed-failures: 0
-          - sim: rpc
-            sim-limit: compat
+          - sim: rpc-compat
+            sim-limit: ".*"
             max-allowed-failures: 0
     steps:
       - name: Checkout Erigon meta
@@ -134,7 +134,7 @@ jobs:
             echo -e "\n\n============================================================"
             echo "Running test: ${1}-${2}"
             echo -e "\n"
-            ./hive -docker.auth --sim ethereum/"${1}" --sim.limit="${2}" --sim.parallelism=8 --sim.timelimit 15m --docker.output --client erigon 2>&1 | tee output.log || {
+            ./hive -docker.auth --sim ethereum/"${1}" --sim.limit="${2}" --sim.limit.exact=false --sim.parallelism=8 --sim.timelimit 15m --docker.output --client erigon 2>&1 | tee output.log || {
               if [ $? -gt 0 ]; then
                 echo "Exitcode gt 0"
               fi
@@ -165,7 +165,7 @@ jobs:
               exit 1
             fi
           }
-          run_suite ${{ matrix.sim }} ${{ matrix.sim-limit }} ${{ matrix.max-allowed-failures }}
+          run_suite "${{ matrix.sim }}" "${{ matrix.sim-limit }}" "${{ matrix.max-allowed-failures }}"
         continue-on-error: true
 
       - name: Upload output log
