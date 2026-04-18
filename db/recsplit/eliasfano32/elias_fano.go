@@ -65,6 +65,10 @@ type EliasFano struct {
 	i              uint64
 	wordsUpperBits int
 
+	// backingFile and backingMmap are non-nil only for off-heap instances
+	// created by NewEliasFanoOffHeap. Off-heap instances must NOT be copied:
+	// copying shares OS resources and calling Close() on any copy causes a
+	// double-unmap / double-close. Always keep off-heap instances behind a pointer.
 	backingFile *os.File
 	backingMmap mmap.MMap
 }
