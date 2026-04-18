@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math/bits"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -68,6 +69,9 @@ func (ms *MockState) PutBranch(prefix []byte, data []byte, prevData []byte) erro
 		ms.mu.Lock()
 		defer ms.mu.Unlock()
 	}
+	if DeEmbedCommitment {
+		return ms.putBranchDeEmbeddedLocked(prefix, data)
+	}
 	ms.cm[string(prefix)] = data
 	return nil
 }
@@ -77,11 +81,87 @@ func (ms *MockState) Branch(prefix []byte) ([]byte, kv.Step, error) {
 		ms.mu.Lock()
 		defer ms.mu.Unlock()
 	}
+	if DeEmbedCommitment {
+		return ms.branchDeEmbeddedLocked(prefix)
+	}
 	if exBytes, ok := ms.cm[string(prefix)]; ok {
 		//fmt.Printf("GetBranch prefix %x, exBytes (%d) %x [%v]\n", prefix, len(exBytes), []byte(exBytes), BranchData(exBytes).String())
 		return exBytes, 0, nil
 	}
 	return nil, 0, nil
+}
+
+// putBranchDeEmbeddedLocked stores a branch by its metadata + per-child
+// key-value pairs rather than a single blob. Caller must hold ms.mu when
+// ms.concurrent is true.
+func (ms *MockState) putBranchDeEmbeddedLocked(prefix []byte, data []byte) error {
+	tNew, aNew, cellsNew, err := SplitBranchDataIntoChildren(data)
+	if err != nil {
+		return fmt.Errorf("mock put de-embed split: %w", err)
+	}
+	metaKey := DeEmbedMetaKey(prefix, nil)
+	var tPrev, aPrev uint16
+	if prevMeta, ok := ms.cm[string(metaKey)]; ok && len(prevMeta) >= 4 {
+		if tPrev, aPrev, err = ParseDeEmbedMetaValue(prevMeta); err != nil {
+			return fmt.Errorf("mock put de-embed parse prev meta: %w", err)
+		}
+	}
+	bitmapNew := tNew & aNew
+	bitmapPrev := tPrev & aPrev
+	mergedT := tPrev | tNew
+	mergedA := aNew
+	mergedBitmap := mergedT & mergedA
+
+	for bitset := bitmapNew; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		bitset ^= bit
+		childKey := DeEmbedChildKey(prefix, byte(nibble), nil)
+		ms.cm[string(childKey)] = slices.Clone(cellsNew[nibble])
+	}
+	for bitset := bitmapPrev &^ mergedBitmap; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		bitset ^= bit
+		childKey := DeEmbedChildKey(prefix, byte(nibble), nil)
+		delete(ms.cm, string(childKey))
+	}
+	if tPrev != mergedT || aPrev != mergedA {
+		ms.cm[string(metaKey)] = BuildDeEmbedMetaValue(mergedT, mergedA, nil)
+	}
+	return nil
+}
+
+// branchDeEmbeddedLocked reconstructs a full branch blob from the per-child
+// entries in ms.cm. Caller must hold ms.mu when ms.concurrent is true.
+func (ms *MockState) branchDeEmbeddedLocked(prefix []byte) ([]byte, kv.Step, error) {
+	metaKey := DeEmbedMetaKey(prefix, nil)
+	metaVal, ok := ms.cm[string(metaKey)]
+	if !ok || len(metaVal) == 0 {
+		return nil, 0, nil
+	}
+	tMap, aMap, err := ParseDeEmbedMetaValue(metaVal)
+	if err != nil {
+		return nil, 0, fmt.Errorf("mock get de-embed parse meta at %x: %w", prefix, err)
+	}
+	var cells [16][]byte
+	bitmap := tMap & aMap
+	for bitset := bitmap; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		bitset ^= bit
+		childKey := DeEmbedChildKey(prefix, byte(nibble), nil)
+		val, ok := ms.cm[string(childKey)]
+		if !ok {
+			return nil, 0, fmt.Errorf("mock get de-embed missing child nibble=%d prefix=%x", nibble, prefix)
+		}
+		cells[nibble] = val
+	}
+	data, err := ReassembleBranchData(tMap, aMap, cells, nil)
+	if err != nil {
+		return nil, 0, fmt.Errorf("mock get de-embed reassemble at %x: %w", prefix, err)
+	}
+	return data, 0, nil
 }
 
 func (ms *MockState) Account(plainKey []byte) (*Update, error) {

@@ -42,13 +42,14 @@ func LoadTrieTraceIntoMockState(t testing.TB, path string) (*MockState, [][]byte
 
 	ms := NewMockState(t)
 
-	// Load branches into ms.cm
+	// Load branches via PutBranch so that the storage representation (embedded
+	// vs de-embedded) matches the current DeEmbedCommitment setting.
 	for hexKey, hexVal := range tt.Branches {
 		key, err := hex.DecodeString(hexKey)
 		require.NoError(t, err)
 		val, err := hex.DecodeString(hexVal)
 		require.NoError(t, err)
-		ms.cm[string(key)] = BranchData(val)
+		require.NoError(t, ms.PutBranch(key, val, nil))
 	}
 
 	// Load accounts into ms.sm

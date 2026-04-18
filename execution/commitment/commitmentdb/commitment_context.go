@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math/bits"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -756,6 +757,9 @@ func NewTrieContextRo(reader StateReader, stepSize uint64) *TrieContext {
 }
 
 func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
+	if commitment.DeEmbedCommitment && !bytes.Equal(pref, KeyCommitmentState) {
+		return sdc.branchDeEmbedded(pref)
+	}
 	return sdc.readDomain(kv.CommitmentDomain, pref)
 }
 
@@ -766,10 +770,112 @@ func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) e
 	if sdc.trace {
 		fmt.Printf("[SDC] PutBranch: %x: %x\n", prefix, data)
 	}
+	// Concurrent goroutines buffer writes as (prefix, fullBlob) in ETL collectors.
+	// The drain path re-enters this method on the main context (localCollector == nil),
+	// where the blob is split into per-child keys under de-embed mode.
 	if sdc.localCollector != nil {
 		return sdc.localCollector.Collect(prefix, data)
 	}
+	if commitment.DeEmbedCommitment && !bytes.Equal(prefix, KeyCommitmentState) {
+		return sdc.putBranchDeEmbedded(prefix, data, prevData)
+	}
 	return sdc.putter.DomainPut(kv.CommitmentDomain, prefix, data, sdc.txNum, prevData)
+}
+
+// branchDeEmbedded reassembles a full branch blob by reading the metadata entry
+// at compact(P) || [0xFF] and then each present child at compact(P) || [nibble].
+// Returns (nil, 0, nil) if the branch is absent.
+func (sdc *TrieContext) branchDeEmbedded(pref []byte) ([]byte, kv.Step, error) {
+	metaKey := commitment.DeEmbedMetaKey(pref, nil)
+	metaVal, step, err := sdc.readDomain(kv.CommitmentDomain, metaKey)
+	if err != nil {
+		return nil, 0, fmt.Errorf("read de-embed meta at %x: %w", pref, err)
+	}
+	if len(metaVal) == 0 {
+		return nil, 0, nil
+	}
+	touchMap, afterMap, err := commitment.ParseDeEmbedMetaValue(metaVal)
+	if err != nil {
+		return nil, 0, fmt.Errorf("parse de-embed meta at %x: %w", pref, err)
+	}
+	var cells [16][]byte
+	bitmap := touchMap & afterMap
+	for bitset := bitmap; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		bitset ^= bit
+		childKey := commitment.DeEmbedChildKey(pref, byte(nibble), nil)
+		childVal, _, err := sdc.readDomain(kv.CommitmentDomain, childKey)
+		if err != nil {
+			return nil, 0, fmt.Errorf("read de-embed child nibble=%d prefix=%x: %w", nibble, pref, err)
+		}
+		if len(childVal) == 0 {
+			return nil, 0, fmt.Errorf("missing de-embed child nibble=%d prefix=%x (touchMap=%04x afterMap=%04x)", nibble, pref, touchMap, afterMap)
+		}
+		cells[nibble] = childVal
+	}
+	data, err := commitment.ReassembleBranchData(touchMap, afterMap, cells, nil)
+	if err != nil {
+		return nil, 0, fmt.Errorf("reassemble de-embed branch at %x: %w", pref, err)
+	}
+	return data, step, nil
+}
+
+// putBranchDeEmbedded splits the incoming merged branch blob into per-child
+// domain writes. The input `data` is the already-merged (via BranchMerger)
+// embedded representation produced by the trie; we diff it against the current
+// on-disk metadata and only write or delete the children that changed.
+func (sdc *TrieContext) putBranchDeEmbedded(prefix []byte, data []byte, _ []byte) error {
+	tNew, aNew, cellsNew, err := commitment.SplitBranchDataIntoChildren(data)
+	if err != nil {
+		return fmt.Errorf("split new branch data at %x: %w", prefix, err)
+	}
+
+	metaKey := commitment.DeEmbedMetaKey(prefix, nil)
+	prevMeta, _, err := sdc.readDomain(kv.CommitmentDomain, metaKey)
+	if err != nil {
+		return fmt.Errorf("read prev de-embed meta at %x: %w", prefix, err)
+	}
+	var tPrev, aPrev uint16
+	if len(prevMeta) >= 4 {
+		if tPrev, aPrev, err = commitment.ParseDeEmbedMetaValue(prevMeta); err != nil {
+			return fmt.Errorf("parse prev de-embed meta at %x: %w", prefix, err)
+		}
+	}
+
+	bitmapNew := tNew & aNew
+	bitmapPrev := tPrev & aPrev
+	mergedT := tPrev | tNew
+	mergedA := aNew
+	mergedBitmap := mergedT & mergedA
+
+	for bitset := bitmapNew; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		bitset ^= bit
+		childKey := commitment.DeEmbedChildKey(prefix, byte(nibble), nil)
+		if err := sdc.putter.DomainPut(kv.CommitmentDomain, childKey, cellsNew[nibble], sdc.txNum, nil); err != nil {
+			return fmt.Errorf("put de-embed child nibble=%d prefix=%x: %w", nibble, prefix, err)
+		}
+	}
+
+	for bitset := bitmapPrev &^ mergedBitmap; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		bitset ^= bit
+		childKey := commitment.DeEmbedChildKey(prefix, byte(nibble), nil)
+		if err := sdc.putter.DomainDel(kv.CommitmentDomain, childKey, sdc.txNum, nil); err != nil {
+			return fmt.Errorf("del de-embed child nibble=%d prefix=%x: %w", nibble, prefix, err)
+		}
+	}
+
+	if tPrev != mergedT || aPrev != mergedA {
+		newMeta := commitment.BuildDeEmbedMetaValue(mergedT, mergedA, nil)
+		if err := sdc.putter.DomainPut(kv.CommitmentDomain, metaKey, newMeta, sdc.txNum, prevMeta); err != nil {
+			return fmt.Errorf("put de-embed meta at %x: %w", prefix, err)
+		}
+	}
+	return nil
 }
 
 // readDomain reads data from domain, dereferences key and returns encoded value and step.
