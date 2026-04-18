@@ -85,7 +85,7 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 		}
 	}
 
-	result, err := branch.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+	replacer := func(key []byte, isStorage bool) ([]byte, error) {
 		if isStorage {
 			if len(key) == length.Addr+length.Hash {
 				return nil, nil // save storage key as is
@@ -119,11 +119,34 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 			return nil, fmt.Errorf("replace back lost account full key: %x", key)
 		}
 		return apkBuf, nil
-	})
+	}
+
+	if commitment.DeEmbedCommitment {
+		return transformDeEmbedValue(branch, replacer)
+	}
+	return branch.ReplacePlainKeys(nil, replacer)
+}
+
+// transformDeEmbedValue applies the plain-key replacer to a value stored under
+// the de-embedded layout. 4-byte metadata entries are returned unchanged; any
+// other value is treated as a single cell fragment (layout:
+// [fieldBits:1][fields...]). Legacy embedded blobs (len>=4 with a valid map
+// header but not the metadata pattern) would not normally coexist with
+// de-embed writes, but if encountered we fall back to the embedded transform.
+func transformDeEmbedValue(val commitment.BranchData, replacer func(key []byte, isStorage bool) ([]byte, error)) (commitment.BranchData, error) {
+	if len(val) == 0 {
+		return val, nil
+	}
+	if len(val) == 4 {
+		// de-embedded metadata entry: [touchMap:2][afterMap:2]
+		return val, nil
+	}
+	// de-embedded cell fragment
+	out, err := commitment.ReplacePlainKeysInCell(val, nil, replacer)
 	if err != nil {
 		return nil, err
 	}
-	return result, nil
+	return commitment.BranchData(out), nil
 }
 
 func DecodeReferenceKey(from []byte) uint64 {
@@ -392,6 +415,9 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 			return shortened, nil
 		}
 
+		if commitment.DeEmbedCommitment {
+			return transformDeEmbedValue(commitment.BranchData(valBuf), replacer)
+		}
 		branchData, err := commitment.BranchData(valBuf).ReplacePlainKeys(nil, replacer)
 		if err != nil {
 			return nil, err

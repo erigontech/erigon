@@ -232,9 +232,13 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	err = state.SqueezeCommitmentFiles(context.Background(), state.AggTx(rwTx), log.New())
 	require.NoError(t, err)
 
-	//agg.recalcVisibleFiles(matgh.MaxUint64)
 	err = rwTx.Commit()
 	require.NoError(t, err)
+
+	// SqueezeCommitmentFiles replaces commitment .kv files in place but the
+	// in-memory visible snapshot still references the removed files. Re-open
+	// the folder so subsequent reads see the rewritten files with fresh indices.
+	require.NoError(t, agg.OpenFolder())
 
 	rwTx, err = db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)

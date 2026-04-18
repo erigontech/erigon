@@ -162,3 +162,111 @@ func advancePastCellFields(data []byte, pos int, fieldBits byte) (int, error) {
 	}
 	return pos, nil
 }
+
+// ReplacePlainKeysInCell applies fn to the accountAddr / storageAddr fields of
+// a single de-embedded cell fragment (layout: [fieldBits:1][fields...]). The
+// extension, hash, and stateHash fields are walked but not transformed.
+// Returns the original cell slice when no replacement happens.
+func ReplacePlainKeysInCell(cell []byte, buf []byte, fn func(key []byte, isStorage bool) ([]byte, error)) ([]byte, error) {
+	if len(cell) == 0 {
+		return cell, nil
+	}
+	var numBuf [binary.MaxVarintLen64]byte
+	fields := cell[0]
+	pos := 1
+	anyChanged := false
+	spanStart := 0
+	out := buf[:0]
+
+	skipField := func(errLabel string) error {
+		if pos >= len(cell) {
+			return fmt.Errorf("replacePlainKeysInCell: truncated before %s len", errLabel)
+		}
+		l, n := binary.Uvarint(cell[pos:])
+		if n == 0 {
+			return fmt.Errorf("replacePlainKeysInCell: buffer too small for %s len", errLabel)
+		}
+		if n < 0 {
+			return fmt.Errorf("replacePlainKeysInCell: value overflow for %s len", errLabel)
+		}
+		pos += n
+		if l > 0 {
+			if len(cell) < pos+int(l) {
+				return fmt.Errorf("replacePlainKeysInCell: buffer too small for %s: expected %d got %d", errLabel, pos+int(l), len(cell))
+			}
+			pos += int(l)
+		}
+		return nil
+	}
+
+	replaceField := func(isStorage bool, errLabel string) error {
+		keyFieldStart := pos
+		if pos >= len(cell) {
+			return fmt.Errorf("replacePlainKeysInCell: truncated before %s len", errLabel)
+		}
+		l, n := binary.Uvarint(cell[pos:])
+		if n == 0 {
+			return fmt.Errorf("replacePlainKeysInCell: buffer too small for %s len", errLabel)
+		}
+		if n < 0 {
+			return fmt.Errorf("replacePlainKeysInCell: value overflow for %s len", errLabel)
+		}
+		pos += n
+		if len(cell) < pos+int(l) {
+			return fmt.Errorf("replacePlainKeysInCell: buffer too small for %s: expected %d got %d", errLabel, pos+int(l), len(cell))
+		}
+		if l > 0 {
+			pos += int(l)
+		}
+		newKey, err := fn(cell[pos-int(l):pos], isStorage)
+		if err != nil {
+			return err
+		}
+		if newKey != nil {
+			if !anyChanged {
+				if cap(out) < len(cell) {
+					out = make([]byte, 0, len(cell))
+				}
+				anyChanged = true
+			}
+			out = append(out, cell[spanStart:keyFieldStart]...)
+			ln := binary.PutUvarint(numBuf[:], uint64(len(newKey)))
+			out = append(out, numBuf[:ln]...)
+			out = append(out, newKey...)
+			spanStart = pos
+		}
+		return nil
+	}
+
+	if fields&byte(fieldExtension) != 0 {
+		if err := skipField("extension"); err != nil {
+			return nil, err
+		}
+	}
+	if fields&byte(fieldAccountAddr) != 0 {
+		if err := replaceField(false, "accountAddr"); err != nil {
+			return nil, err
+		}
+	}
+	if fields&byte(fieldStorageAddr) != 0 {
+		if err := replaceField(true, "storageAddr"); err != nil {
+			return nil, err
+		}
+	}
+	if fields&byte(fieldHash) != 0 {
+		if err := skipField("hash"); err != nil {
+			return nil, err
+		}
+	}
+	if fields&byte(fieldStateHash) != 0 {
+		if err := skipField("stateHash"); err != nil {
+			return nil, err
+		}
+	}
+
+	if !anyChanged {
+		return cell, nil
+	}
+	out = append(out, cell[spanStart:]...)
+	return out, nil
+}
