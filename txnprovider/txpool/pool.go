@@ -1022,7 +1022,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 	// Check nonce and balance
 	senderNonce, senderBalance, err := p.senders.info(stateCache, txn.SenderID)
 	if err != nil {
-		return txpoolcfg.NotSet, fmt.Errorf("validateTx: sender info for idHash=%x senderID=%d: %w", txn.IDHash, txn.SenderID, err)
+		return txpoolcfg.ErrGetSenderInfo, fmt.Errorf("validateTx: sender info for idHash=%x senderID=%d: %w", txn.IDHash, txn.SenderID, err)
 	}
 	if senderNonce > txn.Nonce {
 		if txn.Traced {
@@ -1290,6 +1290,11 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView) (rea
 	for i, txn := range txns.Txns {
 		reason, err := p.validateTx(txn, txns.IsLocal[i], stateCache)
 		if err != nil {
+			if reason == txpoolcfg.ErrGetSenderInfo {
+				p.logger.Warn("[txpool] validateTxns: sender info", "err", err)
+				reasons[i] = reason
+				continue
+			}
 			return reasons, goodTxns, err
 		}
 		if reason == txpoolcfg.Success {
@@ -1370,28 +1375,34 @@ func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcf
 		return nil, err
 	}
 
-	reasons, newTxns, err := p.validateTxns(&newTxns, cacheView)
+	originalTxns := newTxns
+
+	reasons, goodTxns, err := p.validateTxns(&newTxns, cacheView)
 	if err != nil {
 		return nil, err
 	}
 
-	announcements, addReasons, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, p.senders, newTxns,
+	announcements, addReasons, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, p.senders, goodTxns,
 		p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), p.blockGasLimit.Load(), true, p.logger)
 	if err != nil {
 		return nil, err
 	}
-	for i, reason := range addReasons {
-		if reason != txpoolcfg.NotSet {
-			reasons[i] = reason
+	for i, j := 0, 0; i < len(reasons) && j < len(addReasons); i++ {
+		if reasons[i] != txpoolcfg.NotSet {
+			continue
 		}
+		if addReasons[j] != txpoolcfg.NotSet {
+			reasons[i] = addReasons[j]
+		}
+		j++
 	}
 	p.promoted.Reset()
 	p.promoted.AppendOther(announcements)
 
-	reasons = fillDiscardReasons(reasons, newTxns, p.discardReasonsLRU)
+	reasons = fillDiscardReasons(reasons, originalTxns, p.discardReasonsLRU)
 	for i, reason := range reasons {
 		if reason == txpoolcfg.Success {
-			txn := newTxns.Txns[i]
+			txn := originalTxns.Txns[i]
 			if txn.Traced {
 				p.logger.Info(fmt.Sprintf("TX TRACING: AddLocalTxns promotes idHash=%x, senderId=%d", txn.IDHash, txn.SenderID))
 			}
