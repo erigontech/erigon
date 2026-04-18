@@ -45,8 +45,8 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		}
 		// Gas sentry honoured, do the actual gas calculation based on the stored value
 		var (
-			y, x    = callContext.Stack.Back(1), callContext.Stack.peek()
-			slot    = accounts.InternKey(x.Bytes32())
+			y       = callContext.Stack.Back(1)
+			slot    = callContext.peekStorageKey()
 			current uint256.Int
 			cost    = uint64(0)
 		)
@@ -70,8 +70,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 			return mdgas.MdGas{Regular: cost + params.WarmStorageReadCostEIP2929}, nil // SLOAD_GAS
 		}
 
-		slotCommited := accounts.InternKey(x.Bytes32())
-		var original, _ = evm.IntraBlockState().GetCommittedState(callContext.Address(), slotCommited)
+		var original, _ = evm.IntraBlockState().GetCommittedState(callContext.Address(), slot)
 		if original.Eq(&current) {
 			if original.IsZero() { // create slot (2.1.1)
 				if rules.IsAmsterdam {
@@ -125,10 +124,9 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 // charge 2100 gas and add the pair to accessed_storage_keys.
 // If the pair is already in accessed_storage_keys, charge 100 gas.
 func gasSLoadEIP2929(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
-	loc := callContext.Stack.peek()
 	// If the caller cannot afford the cost, this change will be rolled back
 	// If he does afford it, we can skip checking the same thing later on, during execution
-	if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(callContext.Address(), accounts.InternKey(loc.Bytes32())); slotMod {
+	if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(callContext.Address(), callContext.peekStorageKey()); slotMod {
 		return mdgas.MdGas{Regular: params.ColdSloadCostEIP2929}, nil
 	}
 	return mdgas.MdGas{Regular: params.WarmStorageReadCostEIP2929}, nil
@@ -145,7 +143,7 @@ func gasExtCodeCopyEIP2929(evm *EVM, callContext *CallContext, scopeGas mdgas.Md
 	if err != nil {
 		return mdgas.MdGas{}, err
 	}
-	addr := accounts.InternAddress(callContext.Stack.peek().Bytes20())
+	addr := callContext.peekAddress()
 	// Check slot presence in the access list
 	if evm.IntraBlockState().AddAddressToAccessList(addr) {
 		var overflow bool
@@ -166,7 +164,7 @@ func gasExtCodeCopyEIP2929(evm *EVM, callContext *CallContext, scopeGas mdgas.Md
 // - extcodesize,
 // - (ext) balance
 func gasEip2929AccountCheck(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
-	addr := accounts.InternAddress(callContext.Stack.peek().Bytes20())
+	addr := callContext.peekAddress()
 	// If the caller cannot afford the cost, this change will be rolled back
 	if evm.IntraBlockState().AddAddressToAccessList(addr) {
 		// The warm storage read cost is already charged as constantGas
@@ -243,7 +241,7 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 	gasFunc := func(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
 		var (
 			gas     mdgas.MdGas
-			address = accounts.InternAddress(callContext.Stack.peek().Bytes20())
+			address = callContext.peekAddress()
 		)
 		if evm.readOnly {
 			return mdgas.MdGas{}, ErrWriteProtection
@@ -257,6 +255,12 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 			evm.IntraBlockState().AddAddressToAccessList(address)
 		}
 
+		// Snapshot the beneficiary's existing reads before Empty() — so we can
+		// later mark only the reads newly recorded by the gas calc as internal,
+		// preserving any pre-existing legitimate reads (e.g. the tx sender's
+		// fee-deduction balance read when the sender is the SELFDESTRUCT
+		// beneficiary).
+		beneficiaryReadsBefore := evm.IntraBlockState().SnapshotVersionedReadKeys(address)
 		// if empty and transfers value
 		empty, err := evm.IntraBlockState().Empty(address)
 		if err != nil {
@@ -267,22 +271,23 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 			return mdgas.MdGas{}, err
 		}
 		// Record the beneficiary address access for BAL tracking when the
-		// contract has non-zero balance.  A zero-balance selfdestruct does
+		// contract has non-zero balance. A zero-balance SELFDESTRUCT does
 		// not transfer value, so the beneficiary should not appear in the
-		// block access list.  Skip in read-only context (STATICCALL) where
-		// SELFDESTRUCT will be rejected by ErrWriteProtection.
-		if !evm.readOnly && !balance.IsZero() {
+		// block access list on that basis alone.
+		// (The read-only path is unreachable here — see the early-return
+		// above.)
+		if !balance.IsZero() {
 			evm.IntraBlockState().MarkAddressAccess(address, false)
 		}
-		// When balance is zero OR we're in a read-only (STATICCALL) context,
-		// and the beneficiary differs from self, mark the beneficiary's reads
-		// as internal.  In both cases the Empty() call above recorded versioned
-		// reads for the beneficiary purely for gas calculation — no value is
-		// actually transferred (zero balance) or SELFDESTRUCT will be rejected
-		// (read-only).  Skip when beneficiary == self to avoid incorrectly
-		// marking the contract's own legitimate reads.
-		if (balance.IsZero() || evm.readOnly) && address != callContext.Address() {
-			evm.IntraBlockState().MarkReadsInternal(address)
+		// When the destructed contract has zero balance, no value is
+		// transferred to the beneficiary. Mark the reads the Empty() gas-calc
+		// call above added for this beneficiary as internal so the
+		// beneficiary does not appear in the BAL purely because of that
+		// gas-calc access. Pre-existing reads are preserved. Skip when
+		// beneficiary == self so the contract's own legitimate reads are
+		// not affected.
+		if balance.IsZero() && address != callContext.Address() {
+			evm.IntraBlockState().MarkNewReadsInternal(address, beneficiaryReadsBefore)
 		}
 		if empty && !balance.IsZero() {
 			if evm.chainRules.IsAmsterdam {
