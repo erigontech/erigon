@@ -274,9 +274,9 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 				err := spectest.ReadSsz(root, c.Version(), step.GetBlobs()+".ssz_snappy", blobs)
 				require.NoError(t, err, stepstr)
 				if step.GetValid() {
-					require.False(t, len(step.Proofs) != blobs.Len() || len(step.Proofs) != blk.Block.Body.BlobKzgCommitments.Len(), "invalid number of proofs")
+					require.False(t, len(step.Proofs) != blobs.Len() || len(step.Proofs) != blk.Block.Body.GetBlobKzgCommitments().Len(), "invalid number of proofs")
 				} else {
-					if len(step.Proofs) != blobs.Len() || len(step.Proofs) != blk.Block.Body.BlobKzgCommitments.Len() {
+					if len(step.Proofs) != blobs.Len() || len(step.Proofs) != blk.Block.Body.GetBlobKzgCommitments().Len() {
 						continue
 					}
 				}
@@ -291,7 +291,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 						Index:             uint64(index),
 						SignedBlockHeader: blk.SignedBeaconBlockHeader(),
 						Blob:              *value,
-						KzgCommitment:     common.Bytes48(*blk.Block.Body.BlobKzgCommitments.Get(index)),
+						KzgCommitment:     common.Bytes48(*blk.Block.Body.GetBlobKzgCommitments().Get(index)),
 						KzgProof:          proof,
 					})
 					return true

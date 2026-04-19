@@ -111,7 +111,6 @@ func IsValidIndexedPayloadAttestation(s abstract.BeaconState, attestation *cltyp
 	return true, nil
 }
 
-
 // CanBuilderCoverBid returns true if the builder has enough balance to cover the bid amount
 // after accounting for the minimum deposit and pending withdrawals.
 func CanBuilderCoverBid(s abstract.BeaconState, builderIndex uint64, bidAmount uint64) bool {

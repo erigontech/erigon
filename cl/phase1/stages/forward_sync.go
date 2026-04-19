@@ -439,7 +439,7 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 	}
 
 	// Use StoreAnchorEnvelope instead of OnExecutionPayload because the checkpoint
-	// sync state already incorporates the envelope's effects (state.Slot > envelope.Slot).
+	// sync state already incorporates the envelope's effects.
 	// We only need to persist the envelope to disk so forward sync can resolve parent
 	// execution payloads for subsequent blocks.
 	if err := cfg.forkChoice.StoreAnchorEnvelope(anchorRoot, env); err != nil {

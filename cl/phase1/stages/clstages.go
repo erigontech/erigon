@@ -418,7 +418,8 @@ func writeGenesisBeaconBlock(ctx context.Context, cfg *Cfg) error {
 	if version >= clparams.AltairVersion {
 		body.SyncAggregate = cltypes.NewSyncAggregateWithSize(int(cfg.beaconCfg.SyncCommitteeSize) / 8)
 	}
-	if version >= clparams.BellatrixVersion {
+	// [Modified in Gloas:EIP7732] GLOAS blocks do not have ExecutionPayload in the body.
+	if version >= clparams.BellatrixVersion && version < clparams.GloasVersion {
 		execHeader := cfg.state.LatestExecutionPayloadHeader()
 		body.ExecutionPayload = cltypes.NewEth1BlockFromExecutionHeader(execHeader, version, cfg.beaconCfg)
 	}

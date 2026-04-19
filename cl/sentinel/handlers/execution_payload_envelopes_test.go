@@ -119,7 +119,6 @@ func TestExecutionPayloadEnvelopesByRangeHandler(t *testing.T) {
 				ExecutionRequests: cltypes.NewExecutionRequests(beaconCfg),
 			},
 		}
-		envelope.Message.Slot = block.Block.Slot
 		envelope.Message.BeaconBlockRoot = blockRoot
 		envelope.Message.BuilderIndex = uint64(i)
 
@@ -200,7 +199,6 @@ func TestExecutionPayloadEnvelopesByRangeHandler(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify fields
-		require.Equal(t, expEnvelopes[i].Message.Slot, envelope.Message.Slot)
 		require.Equal(t, expEnvelopes[i].Message.BuilderIndex, envelope.Message.BuilderIndex)
 	}
 
@@ -274,7 +272,6 @@ func TestExecutionPayloadEnvelopesByRootHandler(t *testing.T) {
 				ExecutionRequests: cltypes.NewExecutionRequests(beaconCfg),
 			},
 		}
-		envelope.Message.Slot = block.Block.Slot
 		envelope.Message.BeaconBlockRoot = blockRoot
 		envelope.Message.BuilderIndex = uint64(i)
 
@@ -348,7 +345,6 @@ func TestExecutionPayloadEnvelopesByRootHandler(t *testing.T) {
 		err = envelope.DecodeSSZ(raw, int(clparams.GloasVersion))
 		require.NoError(t, err)
 
-		require.Equal(t, expEnvelopes[i].Message.Slot, envelope.Message.Slot)
 		require.Equal(t, expEnvelopes[i].Message.BuilderIndex, envelope.Message.BuilderIndex)
 	}
 
