@@ -90,7 +90,7 @@ jobs:
 
       - name: Generate GitHub App token for git operations
         id: generate_token_build
-        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf  ## v2.2.1
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3  ## v3.1.1
         with:
           client-id: ${{ vars.RELEASE_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
@@ -563,7 +563,7 @@ jobs:
     - name: Generate GitHub App token for release publishing
       id: generate_token
       if: ${{ inputs.perform_release }}
-      uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf  ## v2.2.1
+      uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3  ## v3.1.1
       with:
         client-id: ${{ vars.RELEASE_BOT_APP_ID }}
         private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
@@ -697,7 +697,7 @@ jobs:
     steps:
       - name: Generate GitHub App token for git operations
         id: generate_token_rollback
-        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf  ## v2.2.1
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3  ## v3.1.1
         with:
           client-id: ${{ vars.RELEASE_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
