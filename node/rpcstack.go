@@ -608,10 +608,10 @@ func newGzipHandler(next http.Handler) http.Handler {
 			*dstPtr = (*dstPtr)[:needed]
 		}
 		n, err := c.CompressGzip(*dstPtr, src)
-		if cap(*dstPtr) <= 1<<20 {
-			gzDstPool.Put(dstPtr)
-		}
 		if err != nil {
+			if cap(*dstPtr) <= 1<<20 {
+				gzDstPool.Put(dstPtr)
+			}
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -622,6 +622,9 @@ func newGzipHandler(next http.Handler) http.Handler {
 			w.WriteHeader(grw.status)
 		}
 		w.Write((*dstPtr)[:n]) //nolint:errcheck
+		if cap(*dstPtr) <= 1<<20 {
+			gzDstPool.Put(dstPtr)
+		}
 	})
 }
 
