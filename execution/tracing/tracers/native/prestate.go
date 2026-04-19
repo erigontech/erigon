@@ -278,19 +278,9 @@ func (t *prestateTracer) processDiffState() {
 		newBalance, _ := t.env.IntraBlockState.GetBalance(addr)
 		newNonce, _ := t.env.IntraBlockState.GetNonce(addr)
 		newCode, _ := t.env.IntraBlockState.GetCode(addr)
-		// Determine the effective codeHash after the transaction. For non-existent accounts
-		// (Exist=false) we use NilCodeHash (0x0) to match go-ethereum's GetCodeHash behaviour.
-		// For existing accounts with no code we use EmptyCodeHash, and for accounts with code
-		// we compute the keccak256 of the code.
 		var newCodeHash common.Hash
 		if len(newCode) > 0 {
 			newCodeHash = crypto.HashData(newCode)
-		} else {
-			exists, _ := t.env.IntraBlockState.Exist(addr)
-			if exists {
-				newCodeHash = accounts.EmptyCodeHash.Value()
-			}
-			// else: newCodeHash stays common.Hash{} (NilCodeHash / 0x0) for non-existent accounts
 		}
 
 		if newBalance.ToBig().Cmp(t.pre[addr].Balance) != 0 {
@@ -302,12 +292,7 @@ func (t *prestateTracer) processDiffState() {
 			postAccount.Nonce = newNonce
 		}
 
-		// prevCodeHash is: EmptyCodeHash for existing codeless accounts (set in lookupAccount),
-		// the actual codeHash for accounts with code, or common.Hash{} (0x0 / NilCodeHash) for
-		// accounts that did not exist before the transaction (CodeHash == nil in pre-state).
-		// This means a non-existent pre-tx account that now exists codeless will have
-		// prevCodeHash=0x0 vs newCodeHash=EmptyCodeHash, triggering the correct diff entry.
-		prevCodeHash := common.Hash{}
+		var prevCodeHash common.Hash
 		if t.pre[addr].CodeHash != nil {
 			prevCodeHash = *t.pre[addr].CodeHash
 		}
@@ -397,18 +382,6 @@ func (t *prestateTracer) lookupAccount(addr accounts.Address) {
 	if len(code) > 0 {
 		codeHash := crypto.HashData(code)
 		t.pre[addr].CodeHash = &codeHash
-	} else {
-		// For existing accounts with no code, store EmptyCodeHash explicitly so we
-		// can distinguish "existed with no code" from "did not exist" (nil CodeHash)
-		// in processDiffState. A nil CodeHash means the account was non-existent
-		// before the transaction, which correctly maps to NilCodeHash (0x0).
-		exists, _ := t.env.IntraBlockState.Exist(addr)
-		if exists {
-			emptyHash := accounts.EmptyCodeHash.Value()
-			t.pre[addr].CodeHash = &emptyHash
-		} else {
-			t.pre[addr].CodeHash = nil
-		}
 	}
 
 	if !t.config.DisableCode {
