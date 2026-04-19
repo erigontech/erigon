@@ -601,7 +601,6 @@ func newGzipHandler(next http.Handler) http.Handler {
 
 		src := grw.buf.Bytes()
 		dstPtr := gzDstPool.Get().(*[]byte)
-		defer gzDstPool.Put(dstPtr)
 		needed := c.GzipCompressBound(len(src))
 		if cap(*dstPtr) < needed {
 			*dstPtr = make([]byte, needed)
@@ -609,6 +608,9 @@ func newGzipHandler(next http.Handler) http.Handler {
 			*dstPtr = (*dstPtr)[:needed]
 		}
 		n, err := c.CompressGzip(*dstPtr, src)
+		if cap(*dstPtr) <= 1<<20 {
+			gzDstPool.Put(dstPtr)
+		}
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

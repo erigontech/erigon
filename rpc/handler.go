@@ -677,9 +677,7 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 		return msg.response(result)
 	}
 
-	// Activate streaming compression in the gzip middleware before writing any data.
-	// This switches gzipResponseWriter from buffer mode to live gzip streaming,
-	// so trace data is compressed and sent to the client as it is produced.
+	// Switch gzip middleware to streaming mode before writing any response data.
 	if flush, ok := ctx.Value(httpFlusherContextKey{}).(func()); ok {
 		flush()
 	}

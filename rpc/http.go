@@ -340,10 +340,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Retry-After", "1")
 			w.WriteHeader(http.StatusServiceUnavailable)
 		}
-		// Flush any remaining buffered bytes to the underlying writer.
-		// For streaming methods, grw.Flush() was already called from runMethod
-		// before writing started, so data went directly to the gzip writer.
-		// For non-streaming methods, this is a no-op (stream.buf is empty).
 		stream.Flush()
 	}
 }
