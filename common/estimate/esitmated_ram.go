@@ -42,7 +42,7 @@ func (r EstimatedRamPerWorker) WorkersByRAMOnly() int {
 const (
 	//elias-fano index building is single-threaded
 	// when set it to 3GB - observed OOM-kil at server with 128Gb ram and 32CPU
-	IndexSnapshot = EstimatedRamPerWorker(4 * datasize.GB)
+	IndexSnapshot = EstimatedRamPerWorker(1 * datasize.GB)
 
 	//1-file-compression is multi-threaded
 	CompressSnapshot = EstimatedRamPerWorker(1 * datasize.GB)

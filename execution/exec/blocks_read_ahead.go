@@ -2,6 +2,7 @@ package exec
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -28,6 +29,7 @@ type blockReadAheader struct {
 
 	// this is for warming state
 	warming atomic.Bool // only one warmBody can run at a time
+	warmWg  sync.WaitGroup
 }
 
 func newBlockReadAheader() *blockReadAheader {
@@ -61,7 +63,26 @@ func (bra *blockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, h
 		if !bra.warming.CompareAndSwap(false, true) {
 			return
 		}
-		go bra.warmBody(ctx, db, header, body, 8) // use 8 workers for warming
+		bra.warmWg.Add(1)
+		go func() {
+			defer bra.warmWg.Done()
+			bra.warmBody(ctx, db, header, body, 8) // use 8 workers for warming
+		}()
+	}
+}
+
+// WaitForWarmup blocks until any in-flight warmBody goroutine finishes or
+// the context is cancelled. Call before closing the database to avoid
+// waitTxsAllDoneOnClose hangs.
+func WaitForWarmup(ctx context.Context) {
+	done := make(chan struct{})
+	go func() {
+		globalReadAheader.warmWg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
 	}
 }
 

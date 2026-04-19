@@ -20,74 +20,59 @@
 package vm
 
 import (
-	"sync"
-
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/protocol/params"
 )
 
-var stackPool = sync.Pool{
-	New: func() any {
-		return &Stack{data: make([]uint256.Int, 0, 16)}
-	},
-}
+const stackLimit = params.StackLimit
 
 // Stack is an object for basic stack operations. Items popped to the stack are
 // expected to be changed and modified. stack does not take care of adding newly
 // initialised objects.
 type Stack struct {
-	data []uint256.Int
+	data [stackLimit]uint256.Int
+	top  int
 }
 
-func New() *Stack {
-	stack, ok := stackPool.Get().(*Stack)
-	if !ok {
-		log.Error("Type assertion failure", "err", "cannot get Stack pointer from stackPool")
-	}
-	return stack
-}
 func (st *Stack) push(d uint256.Int) {
-	// NOTE push limit (1024) is checked in baseCheck
-	st.data = append(st.data, d)
+	// NOTE: stack overflow is enforced by the interpreter via operation.maxStack.
+	st.data[st.top] = d
+	st.top++
 }
 
 func (st *Stack) pop() (ret uint256.Int) {
-	ret = st.data[len(st.data)-1]
-	st.data = st.data[:len(st.data)-1]
+	st.top--
+	ret = st.data[st.top]
 	return
 }
 
 func (st *Stack) Cap() int {
-	return cap(st.data)
+	return int(stackLimit)
 }
 
 func (st *Stack) swap(n int) {
-	st.data[st.len()-n-1], st.data[st.len()-1] = st.data[st.len()-1], st.data[st.len()-n-1]
+	st.data[st.top-n-1], st.data[st.top-1] = st.data[st.top-1], st.data[st.top-n-1]
 }
 
 func (st *Stack) dup(n int) {
-	st.data = append(st.data, st.data[len(st.data)-n])
+	st.data[st.top] = st.data[st.top-n]
+	st.top++
 }
 
 func (st *Stack) peek() *uint256.Int {
-	return &st.data[len(st.data)-1]
+	return &st.data[st.top-1]
 }
 
 // Back returns the n'th item in stack
 func (st *Stack) Back(n int) *uint256.Int {
-	return &st.data[len(st.data)-n-1]
+	return &st.data[st.top-n-1]
 }
 
 func (st *Stack) Reset() {
-	st.data = st.data[:0]
+	st.top = 0
 }
 
 func (st *Stack) len() int {
-	return len(st.data)
-}
-
-func ReturnNormalStack(s *Stack) {
-	s.data = s.data[:0]
-	stackPool.Put(s)
+	return st.top
 }

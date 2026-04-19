@@ -366,8 +366,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 
 	peerDasState.SetLocalNodeID(localNode)
 	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, ethClock, state)
-	peerDas := das.NewPeerDas(ctx, beaconRpc, beaconConfig, &config, columnStorage, blobStorage, sentinel, localNode.ID(), ethClock, peerDasState, gossipManager)
-	forkChoice.InitPeerDas(peerDas) // hack init
+	gossipManager.SetPeerBanner(beaconRpc)
 	committeeSub := committee_subscription.NewCommitteeSubscribeManagement(ctx, beaconConfig, networkConfig, ethClock, aggregationPool, syncedDataManager, gossipManager)
 	batchSignatureVerifier := services.NewBatchSignatureVerifier(ctx, sentinel)
 	// Define gossip services
@@ -398,6 +397,10 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		blsToExecutionChangeService,
 		proposerSlashingService,
 	)
+
+	// Create PeerDas after gossip topics are registered so that resubscribeGossip() finds them.
+	peerDas := das.NewPeerDas(ctx, beaconRpc, beaconConfig, &config, columnStorage, blobStorage, sentinel, localNode.ID(), ethClock, peerDasState, gossipManager)
+	forkChoice.InitPeerDas(peerDas) // hack init
 
 	{
 		go batchSignatureVerifier.Start()

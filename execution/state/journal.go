@@ -452,10 +452,9 @@ func (ch storageChange) revert(s *IntraBlockState) error {
 
 	trace := dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(ch.account.Handle()))
 	var tracePrefix string
-	var val uint256.Int
 	if trace {
 		tracePrefix = fmt.Sprintf("%d (%d.%d)", s.blockNum, s.txIndex, s.version)
-		val, _ = obj.GetState(ch.key)
+		val, _ := obj.GetState(ch.key)
 		commited, _ := obj.GetCommittedState(ch.key)
 		fmt.Printf("%s Revert State %x %x: %d, prev: %d, orig: %d, commited: %v\n", tracePrefix, ch.account, ch.key, &val, &ch.prevalue, &commited, ch.wasCommited)
 	}

@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -73,11 +74,13 @@ type accHolder interface {
 
 func IsDomainAheadOfBlocks(ctx context.Context, tx kv.TemporalRwTx, logger log.Logger) bool {
 	doms, err := NewSharedDomains(ctx, tx, logger)
+	if doms != nil {
+		defer doms.Close()
+	}
 	if err != nil {
 		logger.Debug("domain ahead of blocks", "err", err, "stack", dbg.Stack())
 		return errors.Is(err, commitmentdb.ErrBehindCommitment)
 	}
-	defer doms.Close()
 	return false
 }
 
@@ -103,7 +106,7 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) 
 	sd := &SharedDomains{
 		logger: logger,
 		//trace:   true,
-		metrics:  changeset.DomainMetrics{Domains: map[kv.Domain]*changeset.DomainIOMetrics{}},
+		metrics:  changeset.DomainMetrics{},
 		stepSize: tx.Debug().StepSize(),
 	}
 
@@ -116,8 +119,20 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) 
 
 	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv, tx.Debug().Dirs().Tmp)
 
-	if _, _, err := sd.SeekCommitment(ctx, tx); err != nil {
+	_, blockNum, err := sd.SeekCommitment(ctx, tx)
+	if err != nil {
 		return sd, err
+	}
+
+	// ErrBehindCommitment is an environmental signal; sd is fully initialized.
+	if blockNum > 0 {
+		lastBn, _, err := rawdbv3.TxNums.Last(tx)
+		if err != nil {
+			return sd, err
+		}
+		if lastBn < blockNum {
+			return sd, fmt.Errorf("%w: TxNums index is at block %d and behind commitment %d", commitmentdb.ErrBehindCommitment, lastBn, blockNum)
+		}
 	}
 
 	return sd, nil
@@ -285,6 +300,9 @@ func (sd *SharedDomains) Logger() log.Logger { return sd.logger }
 
 // SetStateCache sets the state cache for faster lookups.
 func (sd *SharedDomains) SetStateCache(stateCache *cache.StateCache) {
+	if !dbg.UseStateCache || stateCache == nil {
+		return
+	}
 	sd.stateCache = stateCache
 }
 
@@ -303,8 +321,6 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 func (sd *SharedDomains) Size() uint64 {
 	return sd.mem.SizeEstimate()
 }
-
-const CodeSizeTableFake = "CodeSize"
 
 func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte, txNum uint64) (err error) {
 	return sd.mem.IndexAdd(table, key, txNum)
@@ -331,7 +347,7 @@ func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) 
 	return sd.mem.HasPrefix(domain, prefix, roTx)
 }
 
-func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte, step kv.Step) (cont bool, err error)) error {
+func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte) (cont bool, err error)) error {
 	return sd.mem.IteratePrefix(domain, prefix, roTx, it)
 }
 
@@ -451,7 +467,11 @@ func (sd *SharedDomains) DomainLogMetrics() map[kv.Domain][]any {
 	sd.metrics.RLock()
 	defer sd.metrics.RUnlock()
 
-	for domain, dm := range sd.metrics.Domains {
+	for i, dm := range sd.metrics.Domains {
+		if dm == nil {
+			continue
+		}
+		domain := kv.Domain(i)
 		var metrics []any
 
 		if readCount := dm.CacheReadCount; readCount > 0 {
@@ -575,12 +595,11 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, roTx kv.TemporalTx, p
 
 	type tuple struct {
 		k, v []byte
-		step kv.Step
 	}
 	tombs := make([]tuple, 0, 8)
 
-	if err := sd.IteratePrefix(kv.StorageDomain, prefix, roTx, func(k, v []byte, step kv.Step) (bool, error) {
-		tombs = append(tombs, tuple{k, v, step})
+	if err := sd.IteratePrefix(kv.StorageDomain, prefix, roTx, func(k, v []byte) (bool, error) {
+		tombs = append(tombs, tuple{k, v})
 		return true, nil
 	}); err != nil {
 		return err
@@ -593,7 +612,7 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, roTx kv.TemporalTx, p
 
 	if dbg.AssertEnabled {
 		forgotten := 0
-		if err := sd.IteratePrefix(kv.StorageDomain, prefix, roTx, func(k, v []byte, step kv.Step) (bool, error) {
+		if err := sd.IteratePrefix(kv.StorageDomain, prefix, roTx, func(k, v []byte) (bool, error) {
 			forgotten++
 			return true, nil
 		}); err != nil {

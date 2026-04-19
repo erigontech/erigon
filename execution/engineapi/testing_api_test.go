@@ -24,7 +24,9 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -50,6 +52,7 @@ type stubExecutionServer struct {
 	getHeaderFunc         func(ctx context.Context, in *executionproto.GetSegmentRequest) (*executionproto.GetHeaderResponse, error)
 	assembleBlockFunc     func(ctx context.Context, in *executionproto.AssembleBlockRequest) (*executionproto.AssembleBlockResponse, error)
 	getAssembledBlockFunc func(ctx context.Context, in *executionproto.GetAssembledBlockRequest) (*executionproto.GetAssembledBlockResponse, error)
+	getForkChoiceFunc     func(ctx context.Context, in *emptypb.Empty) (*executionproto.ForkChoice, error)
 }
 
 func (s *stubExecutionServer) GetHeader(ctx context.Context, in *executionproto.GetSegmentRequest) (*executionproto.GetHeaderResponse, error) {
@@ -71,6 +74,13 @@ func (s *stubExecutionServer) GetAssembledBlock(ctx context.Context, in *executi
 		return s.getAssembledBlockFunc(ctx, in)
 	}
 	return &executionproto.GetAssembledBlockResponse{}, nil
+}
+
+func (s *stubExecutionServer) GetForkChoice(ctx context.Context, in *emptypb.Empty) (*executionproto.ForkChoice, error) {
+	if s.getForkChoiceFunc != nil {
+		return s.getForkChoiceFunc(ctx, in)
+	}
+	return &executionproto.ForkChoice{}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -592,6 +602,86 @@ func TestBuildBlockV1(t *testing.T) {
 		var rpcErr *rpc.InvalidParamsError
 		require.ErrorAs(t, err, &rpcErr)
 		assert.Contains(t, rpcErr.Message, "withdrawals before Shanghai")
+	})
+}
+
+func TestForkchoiceUpdatedV2PayloadAttributesWithdrawalsValidation(t *testing.T) {
+	t.Parallel()
+
+	t.Run("missing withdrawals for Shanghai returns invalid payload attributes", func(t *testing.T) {
+		forkchoiceState := &engine_types.ForkChoiceState{
+			HeadHash:           common.Hash{0x1},
+			SafeBlockHash:      common.Hash{0x2},
+			FinalizedBlockHash: common.Hash{0x3},
+		}
+		srv := NewEngineServer(
+			log.New(),
+			preCancunChainConfig(),
+			direct.NewExecutionClientDirect(&stubExecutionServer{
+				getForkChoiceFunc: func(context.Context, *emptypb.Empty) (*executionproto.ForkChoice, error) {
+					return &executionproto.ForkChoice{
+						HeadBlockHash:      gointerfaces.ConvertHashToH256(forkchoiceState.HeadHash),
+						SafeBlockHash:      gointerfaces.ConvertHashToH256(forkchoiceState.SafeBlockHash),
+						FinalizedBlockHash: gointerfaces.ConvertHashToH256(forkchoiceState.FinalizedBlockHash),
+					}, nil
+				},
+			}),
+			nil,
+			false,
+			true,
+			true,
+			nil,
+			0,
+			0,
+		)
+
+		resp, err := srv.forkchoiceUpdated(context.Background(), forkchoiceState, &engine_types.PayloadAttributes{
+			Timestamp:             hexutil.Uint64(1001),
+			PrevRandao:            common.Hash{0xaa},
+			SuggestedFeeRecipient: common.HexToAddress("0x1111111111111111111111111111111111111111"),
+			Withdrawals:           nil,
+		}, clparams.CapellaVersion)
+		require.Nil(t, resp)
+		require.Error(t, err)
+		require.Equal(t, -38003, err.(rpc.Error).ErrorCode())
+	})
+
+	t.Run("withdrawals before Shanghai returns invalid payload attributes", func(t *testing.T) {
+		forkchoiceState := &engine_types.ForkChoiceState{
+			HeadHash:           common.Hash{0x4},
+			SafeBlockHash:      common.Hash{0x5},
+			FinalizedBlockHash: common.Hash{0x6},
+		}
+		srv := NewEngineServer(
+			log.New(),
+			preShanghaiChainConfig(),
+			direct.NewExecutionClientDirect(&stubExecutionServer{
+				getForkChoiceFunc: func(context.Context, *emptypb.Empty) (*executionproto.ForkChoice, error) {
+					return &executionproto.ForkChoice{
+						HeadBlockHash:      gointerfaces.ConvertHashToH256(forkchoiceState.HeadHash),
+						SafeBlockHash:      gointerfaces.ConvertHashToH256(forkchoiceState.SafeBlockHash),
+						FinalizedBlockHash: gointerfaces.ConvertHashToH256(forkchoiceState.FinalizedBlockHash),
+					}, nil
+				},
+			}),
+			nil,
+			false,
+			true,
+			true,
+			nil,
+			0,
+			0,
+		)
+
+		resp, err := srv.forkchoiceUpdated(context.Background(), forkchoiceState, &engine_types.PayloadAttributes{
+			Timestamp:             hexutil.Uint64(1001),
+			PrevRandao:            common.Hash{0xaa},
+			SuggestedFeeRecipient: common.HexToAddress("0x1111111111111111111111111111111111111111"),
+			Withdrawals:           make([]*types.Withdrawal, 0),
+		}, clparams.CapellaVersion)
+		require.Nil(t, resp)
+		require.Error(t, err)
+		require.Equal(t, -38003, err.(rpc.Error).ErrorCode())
 	})
 }
 

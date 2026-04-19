@@ -73,6 +73,9 @@ func (s *Sentinel) findPeersForSubnets(subnets []subnetSearchState) {
 		if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &peerSubnets)); err != nil {
 			return false
 		}
+		if len(peerSubnets) != 8 {
+			return false
+		}
 		// Check if this node covers any subnet we still need
 		for i := range subnets {
 			if subnets[i].found < subnets[i].wanted {
@@ -152,6 +155,9 @@ func (s *Sentinel) findPeersForSubnets(subnets []subnetSearchState) {
 		if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &peerSubnets)); err != nil {
 			continue
 		}
+		if len(peerSubnets) != 8 {
+			continue
+		}
 
 		coveredSubnets := []int{}
 		for i := range subnets {
@@ -227,7 +233,7 @@ func (s *Sentinel) proactiveSubnetPeerSearch() {
 				underservedIdxs[i] = info.idx
 			}
 
-			log.Debug("[Sentinel] Proactive subnet search starting",
+			log.Trace("[Sentinel] Proactive subnet search starting",
 				"underservedCount", len(underserved),
 				"threshold", minimumPeersPerSubnet,
 				"subnets", underservedIdxs)
@@ -252,7 +258,7 @@ func (s *Sentinel) proactiveSubnetPeerSearch() {
 					stillUnderserved = append(stillUnderserved, i)
 				}
 			}
-			log.Debug("[Sentinel] Subnet coverage after search",
+			log.Trace("[Sentinel] Subnet coverage after search",
 				"subnetsAtMinPeers", atMin,
 				"minPeersPerSubnet", minimumPeersPerSubnet,
 				"stillUnderserved", stillUnderserved)
@@ -546,7 +552,7 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 		if nodeVal, ok := s.pidToEnr.Load(peerId); ok {
 			if node, ok := nodeVal.(*enode.Node); ok {
 				var peerSubnets bitfield.Bitvector64
-				if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &peerSubnets)); err == nil {
+				if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &peerSubnets)); err == nil && len(peerSubnets) == 8 {
 					coverage := s.getSubnetCoverage()
 					for i := 0; i < attestationSubnetCount; i++ {
 						if peerSubnets[i/8]&(1<<(i%8)) != 0 && coverage[i] < minimumPeersPerSubnet {

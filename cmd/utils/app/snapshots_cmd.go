@@ -1326,6 +1326,10 @@ func doIntegrity(cliCtx *cli.Context) error {
 					if err := integrity.CheckRCacheNoDups(ctx, sc, db, blockReader, failFast); err != nil {
 						return err
 					}
+				case integrity.StateProgress:
+					if err := integrity.CheckStateProgress(ctx, db, blockReader, failFast); err != nil {
+						return err
+					}
 				case integrity.Publishable:
 					if err := doPublishable(cliCtx, chainDB); err != nil {
 						return err
@@ -1357,7 +1361,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 					}
 					scCopy := sc
 					scCopy.SampleRatio /= 100 // it's very slow check
-					if err := integrity.CheckCommitmentHistAtBlkRange(ctx, scCopy, db, blockReader, 1, to+1, failFast, logger); err != nil {
+					if err := integrity.CheckCommitmentHistAtBlkRange(ctx, scCopy, db, blockReader, 1, to+1, logger); err != nil {
 						return err
 					}
 				case integrity.StateVerify:
@@ -1385,6 +1389,9 @@ func doIntegrity(cliCtx *cli.Context) error {
 func stateProgress(ctx context.Context, db kv.TemporalRoDB, txNumsReader rawdbv3.TxNumsReader) (uint64, error) {
 	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
 	aggMax := agg.EndTxNumMinimax()
+	if aggMax == 0 {
+		return 0, nil
+	}
 	roTx, err := db.BeginRo(ctx)
 	if err != nil {
 		return 0, err
@@ -1393,6 +1400,16 @@ func stateProgress(ctx context.Context, db kv.TemporalRoDB, txNumsReader rawdbv3
 	blockNum, _, err := txNumsReader.FindBlockNum(ctx, roTx, aggMax)
 	if err != nil {
 		return 0, err
+	}
+	// FindBlockNum returns the first block whose maxTxNum >= aggMax, but that
+	// block may not be fully covered by state (maxTxNum+1 > aggMax). Back up
+	// to the last block that is fully covered.
+	maxTxNum, err := txNumsReader.Max(ctx, roTx, blockNum)
+	if err != nil {
+		return 0, err
+	}
+	if maxTxNum+1 > aggMax && blockNum > 0 {
+		blockNum--
 	}
 	return blockNum, nil
 }
@@ -1466,7 +1483,7 @@ func doCheckStateRootByHistory(cliCtx *cli.Context, logger log.Logger) error {
 		return err
 	}
 	logger.Info("[check-commitment-hist-at-blk-range] sampling config", "seed", sc.Seed, "sampleRatio", sc.SampleRatio)
-	return integrity.CheckCommitmentHistAtBlkRange(ctx, sc, db, blockReader, from, to, true /*failFast*/, logger)
+	return integrity.CheckCommitmentHistAtBlkRange(ctx, sc, db, blockReader, from, to, logger)
 }
 
 func doVerifyState(cliCtx *cli.Context, logger log.Logger) error {

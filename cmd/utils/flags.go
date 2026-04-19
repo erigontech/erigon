@@ -389,6 +389,11 @@ var (
 		Usage: "Does limit amount of parallel db reads. Default: equal to GOMAXPROCS (or number of CPU)",
 		Value: min(max(10, runtime.GOMAXPROCS(-1)*64), 9_000),
 	}
+	RpcMaxConcurrentRequestsFlag = cli.IntFlag{
+		Name:  "rpc.max.concurrency",
+		Usage: "Maximum number of concurrent HTTP RPC requests (HTTP admission control). 0 = use db.read.concurrency, -1 = unlimited (no admission control)",
+		Value: 0,
+	}
 	RpcAccessListFlag = cli.StringFlag{
 		Name:  "rpc.accessList",
 		Usage: "Specify granular (method-by-method) API allowlist",
@@ -1060,6 +1065,11 @@ var (
 		Name:  "caplin.blobs-no-pruning",
 		Usage: "disable blob pruning in caplin",
 		Value: false,
+	}
+	CaplinColumnKeepSlotsFlag = cli.Uint64Flag{
+		Name:  "caplin.columns-keep-slots",
+		Usage: "number of slots to retain PeerDAS data column sidecars (default: MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS * SLOTS_PER_EPOCH = 131072, ~18 days); increase for DA oracle or rollup nodes that need longer column history",
+		Value: 131072,
 	}
 	CaplinDisableCheckpointSyncFlag = cli.BoolFlag{
 		Name:  "caplin.checkpoint-sync.disable",
@@ -1811,6 +1821,7 @@ func setCaplin(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.CaplinConfig.ImmediateBlobsBackfilling = ctx.Bool(CaplinImmediateBlobBackfillFlag.Name)
 	cfg.CaplinConfig.SnapshotGenerationEnabled = ctx.Bool(CaplinEnableSnapshotGeneration.Name)
 	cfg.CaplinConfig.DisabledCheckpointSync = ctx.Bool(CaplinDisableCheckpointSyncFlag.Name)
+	cfg.CaplinConfig.ColumnKeepSlots = ctx.Uint64(CaplinColumnKeepSlotsFlag.Name)
 	// bunch of extra stuff
 	cfg.CaplinConfig.MevRelayUrl = ctx.String(CaplinMevRelayUrl.Name)
 	cfg.CaplinConfig.EnableValidatorMonitor = ctx.Bool(CaplinValidatorMonitorFlag.Name)
