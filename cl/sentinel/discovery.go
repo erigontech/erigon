@@ -233,7 +233,7 @@ func (s *Sentinel) proactiveSubnetPeerSearch() {
 				underservedIdxs[i] = info.idx
 			}
 
-			log.Debug("[Sentinel] Proactive subnet search starting",
+			log.Trace("[Sentinel] Proactive subnet search starting",
 				"underservedCount", len(underserved),
 				"threshold", minimumPeersPerSubnet,
 				"subnets", underservedIdxs)
@@ -258,7 +258,7 @@ func (s *Sentinel) proactiveSubnetPeerSearch() {
 			//		stillUnderserved = append(stillUnderserved, i)
 			//	}
 			//}
-			//log.Debug("[Sentinel] Subnet coverage after search",
+			//log.Trace("[Sentinel] Subnet coverage after search",
 			//	"subnetsAtMinPeers", atMin,
 			//	"minPeersPerSubnet", minimumPeersPerSubnet,
 			//	"stillUnderserved", stillUnderserved)
