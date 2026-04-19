@@ -64,13 +64,30 @@ type EliasFano struct {
 	maxOffset      uint64
 	i              uint64
 	wordsUpperBits int
+}
 
-	// backingFile and backingMmap are non-nil only for off-heap instances
-	// created by NewEliasFanoOffHeap. Off-heap instances must NOT be copied:
-	// copying shares OS resources and calling Close() on any copy causes a
-	// double-unmap / double-close. Always keep off-heap instances behind a pointer.
-	backingFile *os.File
+// OffHeapBuilder wraps *EliasFano with a mmapped temp file as the backing
+// buffer. OS resources (file descriptor + mmap) live here rather than on
+// EliasFano so heap-backed EliasFano carries no extra overhead.
+// Call Close() after Write() to release the mmap and delete the temp file.
+// Idempotent.
+type OffHeapBuilder struct {
+	*EliasFano
 	backingMmap mmap.MMap
+	backingFile *os.File
+}
+
+func (b *OffHeapBuilder) Close() {
+	if b.backingMmap != nil {
+		_ = b.backingMmap.Unmap()
+		b.backingMmap = nil
+	}
+	if b.backingFile != nil {
+		name := b.backingFile.Name()
+		_ = b.backingFile.Close()
+		dir.RemoveFile(name)
+		b.backingFile = nil
+	}
 }
 
 func NewEliasFano(count uint64, maxOffset uint64) *EliasFano {
@@ -90,7 +107,7 @@ func NewEliasFano(count uint64, maxOffset uint64) *EliasFano {
 // NewEliasFanoOffHeap is like NewEliasFano but backs the data buffer with a
 // mmapped temp file. Use when the buffer would be too large for the Go heap
 // (multi-GB EFs during snapshot builds). Caller MUST Close() after Write.
-func NewEliasFanoOffHeap(count uint64, maxOffset uint64, tmpFilePath string) (*EliasFano, error) {
+func NewEliasFanoOffHeap(count uint64, maxOffset uint64, tmpFilePath string) (*OffHeapBuilder, error) {
 	if count == 0 {
 		panic(fmt.Sprintf("too small count: %d", count))
 	}
@@ -121,31 +138,9 @@ func NewEliasFanoOffHeap(count uint64, maxOffset uint64, tmpFilePath string) (*E
 		dir.RemoveFile(f.Name())
 		return nil, fmt.Errorf("mmap ef tmp file: %w", err)
 	}
-	ef.backingFile = f
-	ef.backingMmap = m
 	ef.data = unsafe.Slice((*uint64)(unsafe.Pointer(&m[0])), totalWords)
 	ef.wordsUpperBits = ef.deriveFields()
-	return ef, nil
-}
-
-// Close releases resources held by the EliasFano. For off-heap instances it
-// unmaps and removes the temp file; for heap-backed instances it nils the
-// slices to release the memory early. Idempotent.
-func (ef *EliasFano) Close() {
-	ef.data = nil
-	ef.lowerBits = nil
-	ef.upperBits = nil
-	ef.jump = nil
-	if ef.backingMmap != nil {
-		_ = ef.backingMmap.Unmap()
-		ef.backingMmap = nil
-	}
-	if ef.backingFile != nil {
-		name := ef.backingFile.Name()
-		_ = ef.backingFile.Close()
-		dir.RemoveFile(name)
-		ef.backingFile = nil
-	}
+	return &OffHeapBuilder{EliasFano: ef, backingMmap: m, backingFile: f}, nil
 }
 
 func (ef *EliasFano) Size() datasize.ByteSize { return datasize.ByteSize(len(ef.data) * 8) }

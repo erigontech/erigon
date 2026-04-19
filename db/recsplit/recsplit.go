@@ -138,8 +138,8 @@ type RecSplit struct {
 
 	indexW          *bufio.Writer
 	indexF          *os.File
-	offsetEf        *eliasfano32.EliasFano // Elias Fano instance for encoding the offsets
-	bucketCollector *etl.Collector         // Collector that sorts by buckets
+	offsetEf        *eliasfano32.OffHeapBuilder // Elias Fano instance for encoding the offsets
+	bucketCollector *etl.Collector              // Collector that sorts by buckets
 
 	fileName string
 	filePath string
