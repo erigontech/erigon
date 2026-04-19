@@ -19,6 +19,7 @@ func setup(tb testing.TB) datadir.Dirs {
 }
 
 func TestE2SnapSchema(t *testing.T) {
+	t.Parallel()
 	dirs := setup(t)
 	e2version := NewE2SnapSchemaVersion(version.V1_0_standart, version.V1_0_standart)
 	p := NewE2SnapSchema(dirs, "bodies", e2version)
@@ -99,11 +100,13 @@ func TestE2SnapSchema(t *testing.T) {
 }
 
 func TestISSet(t *testing.T) {
+	t.Parallel()
 	require.True(t, DataExtension(".seg").IsSet())
 	require.False(t, DataExtension(".dat").IsSet())
 }
 
 func TestE3SnapSchemaForDomain1(t *testing.T) {
+	t.Parallel()
 	// account domain test
 
 	dirs := setup(t)
@@ -164,6 +167,7 @@ func TestE3SnapSchemaForDomain1(t *testing.T) {
 }
 
 func TestE3SnapSchemaForCommitmentDomain(t *testing.T) {
+	t.Parallel()
 	dirs := setup(t)
 	stepSize := uint64(config3.DefaultStepSize)
 	ver := version.V1_0_standart
@@ -211,6 +215,7 @@ func TestE3SnapSchemaForCommitmentDomain(t *testing.T) {
 }
 
 func TestE3SnapSchemaForHistory(t *testing.T) {
+	t.Parallel()
 	dirs := setup(t)
 	stepSize := uint64(config3.DefaultStepSize)
 	ver := version.V1_0_standart
@@ -261,6 +266,7 @@ func TestE3SnapSchemaForHistory(t *testing.T) {
 }
 
 func TestE3SnapSchemaForII(t *testing.T) {
+	t.Parallel()
 	dirs := setup(t)
 	stepSize := uint64(config3.DefaultStepSize)
 	ver := version.V1_0_standart

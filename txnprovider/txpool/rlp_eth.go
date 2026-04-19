@@ -100,6 +100,21 @@ func encodeAnnouncements(types []byte, sizes []uint32, hashes []byte, encodeBuf 
 	return pos
 }
 
+// peekAnnouncementCount returns the number of items in an ETH/68 announcement
+// by reading only the types-string length, without allocating or decoding the
+// full payload.
+func peekAnnouncementCount(payload []byte) (int, error) {
+	pos, _, err := rlp.ParseList(payload, 0)
+	if err != nil {
+		return 0, err
+	}
+	_, typesLen, err := rlp.ParseString(payload, pos)
+	if err != nil {
+		return 0, err
+	}
+	return typesLen, nil
+}
+
 // parseAnnouncements decodes an ETH/68 (EIP-5793) transaction announcement.
 func parseAnnouncements(payload []byte, pos int) ([]byte, []uint32, []byte, int, error) {
 	pos, totalLen, err := rlp.ParseList(payload, pos)
@@ -138,7 +153,10 @@ func parseAnnouncements(payload []byte, pos int) ([]byte, []uint32, []byte, int,
 	if pos+hashesLen > len(payload) {
 		return nil, nil, nil, pos, fmt.Errorf("parse announcement payload: hashesLen %d is beyond the end of payload", hashesLen)
 	}
-	hashes := make([]byte, 32*(hashesLen/33))
+	if hashesLen != 33*typesLen {
+		return nil, nil, nil, pos, fmt.Errorf("parse announcement payload: hashesLen %d does not match types count %d (expected %d)", hashesLen, typesLen, 33*typesLen)
+	}
+	hashes := make([]byte, 32*typesLen)
 	for i := 0; i < len(hashes); i += 32 {
 		if pos, err = parseRLPHash(payload, pos, hashes[i:]); err != nil {
 			return nil, nil, nil, pos, err

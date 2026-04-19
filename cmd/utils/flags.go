@@ -413,6 +413,11 @@ var (
 		Usage: "Maximum number of concurrent HTTP RPC requests (HTTP admission control). 0 = use db.read.concurrency, -1 = unlimited (no admission control)",
 		Value: 0,
 	}
+	WsMaxConnectionsFlag = cli.IntFlag{
+		Name:  "ws.max.connections",
+		Usage: "Maximum number of concurrent WebSocket connections. 0 = unlimited",
+		Value: 0,
+	}
 	RpcAccessListFlag = cli.StringFlag{
 		Name:  "rpc.accessList",
 		Usage: "Specify granular (method-by-method) API allowlist",
@@ -701,6 +706,10 @@ var (
 		Name:  "snap.skip-state-snapshot-download",
 		Usage: "Skip state download and start from genesis block",
 		Value: false,
+	}
+	SnapP2PManifestFlag = cli.BoolFlag{
+		Name:  "snap.p2p-manifest",
+		Usage: "Discover snapshot manifest (chain.toml) from P2P peers via ENR instead of using centralized preverified.toml",
 	}
 	SnapDownloadToBlockFlag = cli.Uint64Flag{
 		Name:    "snap.download.to.block",
@@ -1174,7 +1183,7 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 		return
 	}
 
-	nodes, err := GetBootnodesFromFlags(ctx.String(BootnodesFlag.Name), ctx.String(ChainFlag.Name))
+	nodes, err := getBootnodesFromContext(ctx)
 	if err != nil {
 		Fatalf("Option %s: %v", BootnodesFlag.Name, err)
 	}
@@ -1188,12 +1197,22 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 		return
 	}
 
-	nodes, err := GetBootnodesFromFlags(ctx.String(BootnodesFlag.Name), ctx.String(ChainFlag.Name))
+	nodes, err := getBootnodesFromContext(ctx)
 	if err != nil {
 		Fatalf("Option %s: %v", BootnodesFlag.Name, err)
 	}
 
 	cfg.BootstrapNodesV5 = nodes
+}
+
+// getBootnodesFromContext resolves bootstrap nodes from the CLI context. An explicitly
+// set --bootnodes flag (even if empty) overrides chain defaults, matching go-ethereum's
+// behavior and allowing callers to run discovery with no bootstrap peers.
+func getBootnodesFromContext(ctx *cli.Context) ([]*enode.Node, error) {
+	if ctx.IsSet(BootnodesFlag.Name) {
+		return enode.ParseNodesFromURLs(common.CliString2Array(ctx.String(BootnodesFlag.Name)))
+	}
+	return GetBootnodesFromFlags("", ctx.String(ChainFlag.Name))
 }
 
 // GetBootnodesFromFlags makes a list of bootnodes from command line flags.
@@ -1886,6 +1905,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.Snapshot.ProduceE3 = !ctx.Bool(SnapStateStopFlag.Name)
 	cfg.Snapshot.DisableDownloadE3 = ctx.Bool(SnapSkipStateSnapshotDownloadFlag.Name)
 	cfg.Snapshot.NoDownloader = ctx.Bool(NoDownloaderFlag.Name)
+	cfg.Snapshot.P2PManifest = ctx.Bool(SnapP2PManifestFlag.Name)
 	cfg.Snapshot.DownloaderAddr = strings.TrimSpace(ctx.String(DownloaderAddrFlag.Name))
 	cfg.Snapshot.ChainName = chain
 	nodeConfig.Http.Snap = cfg.Snapshot
