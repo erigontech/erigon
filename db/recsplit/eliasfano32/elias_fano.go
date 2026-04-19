@@ -128,12 +128,21 @@ func NewEliasFanoOffHeap(count uint64, maxOffset uint64, tmpFilePath string) (*O
 
 	f, err := dir.CreateTempWithExtension(tmpFilePath, "ef.tmp")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create ef tmp file %q: %w", tmpFilePath, err)
 	}
 	if err := f.Truncate(sizeBytes); err != nil {
 		f.Close()
 		dir.RemoveFile(f.Name())
 		return nil, fmt.Errorf("truncate ef tmp file: %w", err)
+	}
+	// Write last byte to force disk-block allocation before mmap. On sparse-file
+	// filesystems (Linux ext4) Truncate alone doesn't allocate blocks; an RDWR
+	// mmap write to an unallocated region raises SIGBUS. The write makes ENOSPC
+	// surface here as a normal error instead.
+	if _, err := f.WriteAt([]byte{0}, sizeBytes-1); err != nil {
+		f.Close()
+		dir.RemoveFile(f.Name())
+		return nil, fmt.Errorf("pre-allocate ef tmp file: %w", err)
 	}
 	m, err := mmap.MapRegion(f, int(sizeBytes), mmap.RDWR, 0, 0)
 	if err != nil {
