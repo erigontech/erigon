@@ -68,39 +68,29 @@ func NewTestingImpl(server *EngineServer, logger log.Logger, db kv.TemporalRoDB)
 	return &testingImpl{server: server, logger: logger, db: db}
 }
 
-// getAccountNonce returns the current state nonce for address.
-// Returns 0 if db is nil (test/no-db scenarios).
-func (t *testingImpl) getAccountNonce(ctx context.Context, address common.Address) (uint64, error) {
-	if t.db == nil {
-		return 0, nil
-	}
-	tx, err := t.db.BeginTemporalRo(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("testing_buildBlockV1: could not begin temporal transaction: %w", err)
-	}
-	defer tx.Rollback()
-	sd, err := execctx.NewSharedDomains(ctx, tx, t.logger)
-	if err != nil {
-		return 0, fmt.Errorf("testing_buildBlockV1: NewSharedDomains error: %w", err)
-	}
-	defer sd.Close()
-	reader := state.NewReaderV3(sd.AsGetter(tx))
-	acc, err := reader.ReadAccountData(accounts.InternAddress(address))
-	if err != nil {
-		return 0, fmt.Errorf("testing_buildBlockV1: ReadAccountData error: %w", err)
-	}
-	if acc == nil {
-		return 0, nil
-	}
-	return acc.Nonce, nil
-}
-
 // decodeTxnProvider decodes raw transactions into a TxnProvider.
 // Returns nil if transactions is nil (mempool path).
+// Opens a single temporal DB transaction for all nonce lookups to avoid per-sender overhead.
 func (t *testingImpl) decodeTxnProvider(ctx context.Context, transactions *[]hexutil.Bytes, blockNumber, timestamp uint64) (txnprovider.TxnProvider, error) {
 	if transactions == nil {
 		return nil, nil
 	}
+
+	var reader *state.ReaderV3
+	if t.db != nil {
+		dbTx, err := t.db.BeginTemporalRo(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("testing_buildBlockV1: could not begin temporal transaction: %w", err)
+		}
+		defer dbTx.Rollback()
+		sd, err := execctx.NewSharedDomains(ctx, dbTx, t.logger)
+		if err != nil {
+			return nil, fmt.Errorf("testing_buildBlockV1: NewSharedDomains error: %w", err)
+		}
+		defer sd.Close()
+		reader = state.NewReaderV3(sd.AsGetter(dbTx))
+	}
+
 	decoded := make([]types.Transaction, 0, len(*transactions))
 	signer := types.MakeSigner(t.server.config, blockNumber, timestamp)
 	expectedNonce := make(map[accounts.Address]uint64, len(*transactions))
@@ -115,25 +105,25 @@ func (t *testingImpl) decodeTxnProvider(ctx context.Context, transactions *[]hex
 		}
 		tx.SetSender(sender)
 		if _, seen := expectedNonce[sender]; !seen {
-			stateNonce, err := t.getAccountNonce(ctx, sender.Value())
-			if err != nil {
-				return nil, err
+			var stateNonce uint64
+			if reader != nil {
+				acc, err := reader.ReadAccountData(accounts.InternAddress(sender.Value()))
+				if err != nil {
+					return nil, fmt.Errorf("testing_buildBlockV1: ReadAccountData error: %w", err)
+				}
+				if acc != nil {
+					stateNonce = acc.Nonce
+				}
 			}
 			expectedNonce[sender] = stateNonce
 		}
 		want := expectedNonce[sender]
 		got := tx.GetNonce()
 		if got > want {
-			return nil, &rpc.CustomError{
-				Code:    rpc.ErrCodeDefault,
-				Message: fmt.Sprintf("nonce too high: address %v, tx: %d state: %d", sender.Value(), got, want),
-			}
+			return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("nonce too high: address %v, tx: %d state: %d", sender.Value(), got, want)}
 		}
 		if got < want {
-			return nil, &rpc.CustomError{
-				Code:    rpc.ErrCodeDefault,
-				Message: fmt.Sprintf("nonce too low: address %v, tx: %d state: %d", sender.Value(), got, want),
-			}
+			return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("nonce too low: address %v, tx: %d state: %d", sender.Value(), got, want)}
 		}
 		expectedNonce[sender]++
 		decoded = append(decoded, tx)

@@ -620,9 +620,9 @@ func TestBuildBlockV1(t *testing.T) {
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), &txs, nil)
 		require.Nil(t, resp)
 		require.Error(t, err)
-		var customErr *rpc.CustomError
-		require.ErrorAs(t, err, &customErr)
-		assert.Contains(t, customErr.Message, "nonce too high")
+		var rpcErr *rpc.InvalidParamsError
+		require.ErrorAs(t, err, &rpcErr)
+		assert.Contains(t, rpcErr.Message, "nonce too high")
 	})
 
 	t.Run("nonce too low", func(t *testing.T) {
@@ -642,9 +642,9 @@ func TestBuildBlockV1(t *testing.T) {
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), &txs, nil)
 		require.Nil(t, resp)
 		require.Error(t, err)
-		var customErr *rpc.CustomError
-		require.ErrorAs(t, err, &customErr)
-		assert.Contains(t, customErr.Message, "nonce too low")
+		var rpcErr *rpc.InvalidParamsError
+		require.ErrorAs(t, err, &rpcErr)
+		assert.Contains(t, rpcErr.Message, "nonce too low")
 	})
 
 	t.Run("valid explicit tx list reaches assembler with CustomTxnProvider set", func(t *testing.T) {
@@ -877,9 +877,9 @@ func TestBuildBlockV1MultipleSendersNonce(t *testing.T) {
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), &txs, nil)
 		require.Nil(t, resp)
 		require.Error(t, err)
-		var customErr *rpc.CustomError
-		require.ErrorAs(t, err, &customErr)
-		assert.Contains(t, customErr.Message, "nonce too high")
+		var rpcErr *rpc.InvalidParamsError
+		require.ErrorAs(t, err, &rpcErr)
+		assert.Contains(t, rpcErr.Message, "nonce too high")
 	})
 }
 
