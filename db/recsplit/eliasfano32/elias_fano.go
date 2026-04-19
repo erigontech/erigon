@@ -108,6 +108,14 @@ func NewEliasFano(count uint64, maxOffset uint64) *EliasFano {
 	return ef
 }
 
+// fallocate extends f to size bytes and forces disk-block allocation. On
+// sparse-file filesystems (Linux ext4) an RDWR mmap write to an unallocated
+// region raises SIGBUS; this write surfaces ENOSPC as a normal error instead.
+func fallocate(f *os.File, size int64) error {
+	_, err := f.WriteAt([]byte{0}, size-1)
+	return err
+}
+
 // NewEliasFanoOffHeap is like NewEliasFano but backs the data buffer with a
 // mmapped temp file. Use when the buffer would be too large for the Go heap
 // (multi-GB EFs during snapshot builds). Caller MUST Close() after Write.
@@ -130,10 +138,7 @@ func NewEliasFanoOffHeap(count uint64, maxOffset uint64, tmpFilePath string) (*O
 	if err != nil {
 		return nil, fmt.Errorf("create ef tmp file %q: %w", tmpFilePath, err)
 	}
-	// WriteAt extends the file to sizeBytes and forces block allocation. On
-	// sparse-file filesystems (Linux ext4) an RDWR mmap write to an unallocated
-	// region raises SIGBUS; doing the write here surfaces ENOSPC as a normal error.
-	if _, err := f.WriteAt([]byte{0}, sizeBytes-1); err != nil {
+	if err := fallocate(f, sizeBytes); err != nil {
 		f.Close()
 		dir.RemoveFile(f.Name())
 		return nil, fmt.Errorf("pre-allocate ef tmp file: %w", err)
