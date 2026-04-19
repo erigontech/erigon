@@ -593,6 +593,12 @@ func (b *BeaconState) SetExecutionPayloadAvailability(slot uint64, available boo
 	b.markLeaf(ExecutionPayloadAvailabilityLeafIndex)
 }
 
+// SetExecutionPayloadAvailabilityRaw replaces the entire bitvector (used by the historical state reader).
+func (b *BeaconState) SetExecutionPayloadAvailabilityRaw(bv *solid.BitVector) {
+	b.executionPayloadAvailability = bv
+	b.markLeaf(ExecutionPayloadAvailabilityLeafIndex)
+}
+
 func (b *BeaconState) SetBuilderPendingPayments(payments *solid.VectorSSZ[*cltypes.BuilderPendingPayment]) {
 	b.builderPendingPayments = payments
 	b.markLeaf(BuilderPendingPaymentsLeafIndex)

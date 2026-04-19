@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"testing"
@@ -44,7 +45,10 @@ func (m mockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 var (
 	mockUrl, _       = url.Parse("https://anywhere.io")
 	mockBeaconConfig = &clparams.BeaconChainConfig{
-		SlotsPerEpoch: 32,
+		SlotsPerEpoch:    32,
+		ElectraForkEpoch: math.MaxUint64,
+		FuluForkEpoch:    math.MaxUint64,
+		GloasForkEpoch:   math.MaxUint64,
 	}
 
 	//go:embed test_data/mock_blinded_block.json
