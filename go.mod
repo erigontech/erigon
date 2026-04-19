@@ -476,3 +476,5 @@ tool (
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc
 	google.golang.org/protobuf/cmd/protoc-gen-go
 )
+
+replace github.com/erigontech/mdbx-go => /home/erigon/mdbx-go-local

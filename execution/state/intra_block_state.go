@@ -1932,13 +1932,6 @@ func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, add
 					stateObject.db.blockNum, stateObject.db.txIndex, stateObject.db.version, stateWriter, addr, &stateObject.data.Balance, stateObject.data.Nonce, stateObject.data.CodeHash)
 			}
 		}
-		// Trace target contract
-		if fmt.Sprintf("%x", addr.Value()) == "1a44076050125825900e736c501f859c50fe728c" {
-			fmt.Printf("TRACE_CONTRACT_SERIAL: block=%d tx=%d inc=%d balance=%d nonce=%d codeHash=%x dirty=%v selfdestructed=%v created=%v writer=%T\n",
-				stateObject.db.blockNum, stateObject.db.txIndex, stateObject.db.version,
-				&stateObject.data.Balance, stateObject.data.Nonce, stateObject.data.CodeHash,
-				isDirty, stateObject.selfdestructed, stateObject.createdContract, stateWriter)
-		}
 		if err := stateWriter.UpdateAccountData(addr, &stateObject.original, &stateObject.data); err != nil {
 			return err
 		}
@@ -2334,12 +2327,6 @@ func versionWritten[T any](sdb *IntraBlockState, addr accounts.Address, path Acc
 		}
 
 		sdb.versionedWrites.Set(vw)
-
-		// Trace target contract for investigation
-		if fmt.Sprintf("%x", addr.Value()) == "1a44076050125825900e736c501f859c50fe728c" {
-			fmt.Printf("TRACE_CONTRACT: block=%d tx=%d inc=%d path=%d val=%v\n",
-				sdb.blockNum, sdb.txIndex, sdb.version, path, val)
-		}
 
 		if dbg.TraceTransactionIO && (sdb.trace || (dbg.TraceAccount(addr.Handle()) && (key == accounts.NilKey || traceKey(key)))) {
 			fmt.Printf("%d (%d.%d) WRT %s\n", sdb.blockNum, sdb.txIndex, sdb.version, vw.String())

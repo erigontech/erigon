@@ -35,10 +35,13 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
@@ -536,16 +539,45 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 		}
 		return
 	}
-	defer e.semaphore.Release(1)
 
-	if err := stageloop.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline, hook, e.onlySnapDownloadOnStart, e.logger); err != nil {
-		if !errors.Is(err, context.Canceled) {
-			e.logger.Error("Could not start execution service", "err", err)
+	// Pre-flight: if TxNums index already exists (not a fresh start), verify
+	// snapshot state is consistent. ErrBehindCommitment means commitment state
+	// files are ahead of block files. Must be resolved before execution.
+	if checkTx, checkErr := e.db.BeginTemporalRo(ctx); checkErr == nil {
+		lastBn, _, _ := rawdbv3.TxNums.Last(checkTx)
+		if lastBn > 0 {
+			// TxNums populated — check SharedDomains can be created.
+			if _, sdErr := execctx.NewSharedDomains(ctx, checkTx, e.logger); sdErr != nil {
+				if errors.Is(sdErr, commitmentdb.ErrBehindCommitment) {
+					frozenBlocks := e.blockReader.FrozenBlocks()
+					var maxSafeStep uint64
+					if a, ok := e.db.(state.HasAgg); ok {
+						stepSize := a.Agg().(*state.Aggregator).StepSize()
+						if maxTxNum, txErr := rawdbv3.TxNums.Max(ctx, checkTx, frozenBlocks); txErr == nil && maxTxNum > 0 && stepSize > 0 {
+							maxSafeStep = maxTxNum / stepSize
+						}
+					}
+					checkTx.Rollback()
+					e.logger.Error("Cannot start: commitment state ahead of block snapshots",
+						"err", sdErr,
+						"frozenBlocks", frozenBlocks,
+						"maxSafeStep", maxSafeStep,
+						"action", fmt.Sprintf("remove state domain files above step %d and restart", maxSafeStep))
+					// Don't release semaphore — Ready() stays false.
+					return
+				}
+			}
 		}
-		// During parallel execution, an invalid block in initial sync (ProcessFrozenBlocks)
-		// is unrecoverable: the parallel executor cannot unwind and retrying will hit the
-		// same block forever, pushing Caplin's backward target further back.
-		// Exit the process so the operator can investigate.
+		checkTx.Rollback()
+	}
+
+	err := stageloop.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline, hook, e.onlySnapDownloadOnStart, e.logger)
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			e.semaphore.Release(1)
+			return
+		}
+		e.logger.Error("Could not start execution service", "err", err)
 		if dbg.Exec3Parallel && errors.Is(err, rules.ErrInvalidBlock) {
 			e.logger.Error("Invalid block during parallel initial sync — halting process")
 			go func() {
@@ -553,9 +585,14 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 					e.logger.Error("Could not stop node on invalid block", "err", stopErr)
 				}
 			}()
-			return
 		}
+		// Don't release semaphore on error — Ready() stays false so
+		// Caplin doesn't attempt InsertBlocks against broken state.
+		return
 	}
+
+	// Release semaphore only on success — signals Ready().
+	e.semaphore.Release(1)
 }
 
 func (e *ExecModule) Ready(ctx context.Context, _ *emptypb.Empty) (*executionproto.ReadyResponse, error) {

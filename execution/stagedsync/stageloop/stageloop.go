@@ -18,6 +18,7 @@ package stageloop
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"runtime"
@@ -133,57 +134,148 @@ func StageLoop(
 
 func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader services.FullBlockReader, sync *stagedsync.Sync, hook *Hook, onlySnapDownload bool, logger log.Logger) error {
 	sawZeroBlocksTimes := 0
-	tx, err := db.BeginTemporalRw(ctx)
+
+	// Snapshot download uses a brief RwTx.
+	{
+		tx, err := db.BeginTemporalRw(ctx)
+		if err != nil {
+			return err
+		}
+		if err := sync.RunSnapshots(nil, tx); err != nil {
+			tx.Rollback()
+			return err
+		}
+		if onlySnapDownload {
+			return nil
+		}
+		if execctx.IsDomainAheadOfBlocks(ctx, tx, logger) {
+			return tx.Commit()
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+
+	// Execution loop: RO tx for reads, brief RwTx for commit.
+	// New SharedDomains after each commit so SeekCommitment picks up
+	// the freshly committed state.
+	roTx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
 
-	// run stages first time - it will download blocks
-	err = sync.RunSnapshots(nil, tx)
+	doms, err := execctx.NewSharedDomains(ctx, roTx, logger)
 	if err != nil {
+		roTx.Rollback()
 		return err
 	}
-	if onlySnapDownload {
-		return nil
-	}
-
-	// after StageSnapshots (files downloading): if domains are ahead of block files, then nothing to execute.
-	if execctx.IsDomainAheadOfBlocks(ctx, tx, logger) {
-		return tx.Commit()
-	}
-
-	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
-	if err != nil {
-		return err
-	}
-	defer doms.Close()
 	doms.SetInMemHistoryReads(false)
 
 	var finishStageBeforeSync uint64
 	if hook != nil {
-		finishStageBeforeSync, err = stages.GetStageProgress(tx, stages.Finish)
+		finishStageBeforeSync, err = stages.GetStageProgress(roTx, stages.Finish)
 		if err != nil {
 			return err
 		}
-		if err = hook.BeforeRun(tx, false); err != nil {
+		if err = hook.BeforeRun(roTx, false); err != nil {
 			return err
 		}
 	}
+
+	if err := doms.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
+		return fmt.Errorf("ProcessFrozenBlocks: init block overlay: %w", err)
+	}
+
 	initialCycle, firstCycle := true, false
 	for more := true; more; {
-		more, err = sync.Run(doms, tx, initialCycle, firstCycle)
+		overlay := doms.BlockOverlay()
+		more, err = sync.Run(doms, overlay, initialCycle, firstCycle)
 		if err != nil {
 			return fmt.Errorf("ProcessFrozenBlocks: %w", err)
 		}
 
-		if err := sync.RunPrune(ctx, tx, initialCycle, 0); err != nil {
-			return fmt.Errorf("ProcessFrozenBlocks: %w", err)
+		// Close RO tx so no reader holds back MDBX GC during prune.
+		roTx.Rollback()
+
+		// Collate+prune OLD data (its own RwTx).
+		if a, ok := db.(state.HasAgg); ok {
+			agg := a.Agg().(*state.Aggregator)
+			if capRoTx, capErr := db.BeginTemporalRo(ctx); capErr == nil {
+				if maxTxNum, e := rawdbv3.TxNums.Max(ctx, capRoTx, blockReader.FrozenBlocks()); e == nil && maxTxNum > 0 {
+					stepSize := agg.StepSize()
+					agg.SetMaxCollationTxNum((maxTxNum / stepSize) * stepSize)
+				}
+				capRoTx.Rollback()
+			}
+			if err := agg.CollateAndPrune(ctx, db, func(pruneTx kv.TemporalRwTx) error {
+				return sync.RunPrune(ctx, pruneTx, initialCycle, 0)
+			}, logger); err != nil {
+				return fmt.Errorf("ProcessFrozenBlocks: collate+prune: %w", err)
+			}
+		}
+
+		// Lock commitGate so background collation RO txs are closed
+		// before we commit — MDBX GC needs openTxs=1 to reclaim pages.
+		if a, ok := db.(state.HasAgg); ok {
+			a.Agg().(*state.Aggregator).LockCollation()
+		}
+
+		// Flush execution state + overlay via brief RwTx, then commit.
+		commitTx, err := db.BeginTemporalRw(ctx)
+		if err != nil {
+			return fmt.Errorf("ProcessFrozenBlocks: begin rw: %w", err)
+		}
+		if err := overlay.Flush(ctx, commitTx); err != nil {
+			commitTx.Rollback()
+			return fmt.Errorf("ProcessFrozenBlocks: flush overlay: %w", err)
+		}
+		if err := doms.Flush(ctx, commitTx); err != nil {
+			commitTx.Rollback()
+			return fmt.Errorf("ProcessFrozenBlocks: flush doms: %w", err)
+		}
+		doms.Close()
+		if err := commitTx.Commit(); err != nil {
+			if a, ok := db.(state.HasAgg); ok {
+				a.Agg().(*state.Aggregator).UnlockCollation()
+			}
+			return err
+		}
+		if a, ok := db.(state.HasAgg); ok {
+			agg := a.Agg().(*state.Aggregator)
+			agg.UnlockCollation()
+		}
+
+		// Read the actual committed txNum from the DB "state" key.
+		// This is the authoritative source for what's been committed —
+		// use it to cap collation so files don't capture uncommitted data.
+		if verifyTx, verifyErr := db.BeginTemporalRo(ctx); verifyErr == nil {
+			v, step, getErr := verifyTx.GetLatest(kv.CommitmentDomain, []byte("state"))
+			if getErr != nil {
+				fmt.Printf("POST_COMMIT_VERIFY: err=%v\n", getErr)
+			} else if len(v) >= 16 {
+				committedTxNum := binary.BigEndian.Uint64(v[:8])
+				committedBlock := binary.BigEndian.Uint64(v[8:16])
+				fmt.Printf("POST_COMMIT_VERIFY: found len=%d step=%d txNum=%d block=%d\n", len(v), step, committedTxNum, committedBlock)
+				if a, ok := db.(state.HasAgg); ok {
+					a.Agg().(*state.Aggregator).SetLastFlushedCommitmentTxNum(committedTxNum)
+				}
+			} else {
+				fmt.Printf("POST_COMMIT_VERIFY: NOT FOUND in MDBX\n")
+			}
+			verifyTx.Rollback()
+		}
+
+		// Reopen RO tx and reinit block overlay on same doms.
+		// Keep doms alive across iterations — it tracks commitment
+		// position in memory and advances past the snapshot value.
+		roTx, err = db.BeginTemporalRo(ctx)
+		if err != nil {
+			return err
 		}
 
 		var finStageProgress uint64
 		if blockReader.FrozenBlocks() > 0 {
-			finStageProgress, err = stages.GetStageProgress(tx, stages.Finish)
+			finStageProgress, err = stages.GetStageProgress(roTx, stages.Finish)
 			if err != nil {
 				return err
 			}
@@ -191,31 +283,26 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 				break
 			}
 		} else {
-			// having 0 frozen blocks - also may mean we didn't download them. so stages. 1 time is enough.
-			// during testing we may have 0 frozen blocks and firstCycle expected to be false
 			sawZeroBlocksTimes++
 			if sawZeroBlocksTimes > 2 {
 				break
 			}
 		}
 
-		if err := doms.Flush(ctx, tx); err != nil {
-			return fmt.Errorf("ProcessFrozenBlocks: %w", err)
-		}
-		doms.ClearRam(true)
-		if err := tx.Commit(); err != nil {
+		// New SharedDomains with fresh RO tx — SeekCommitment reads
+		// the committed state from MDBX.
+		doms, err = execctx.NewSharedDomains(ctx, roTx, logger)
+		if err != nil {
 			return err
 		}
-		if tx, err = db.BeginTemporalRw(ctx); err != nil {
-			return err
+		doms.SetInMemHistoryReads(false)
+		if err := doms.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
+			return fmt.Errorf("ProcessFrozenBlocks: reinit overlay: %w", err)
 		}
 	}
 
-	doms.ClearRam(true)
-
-	if err := tx.Commit(); err != nil {
-		return err
-	}
+	doms.Close()
+	roTx.Rollback()
 
 	if hook != nil {
 		if err := db.View(ctx, func(tx kv.Tx) error {

@@ -147,6 +147,16 @@ func (sdc *SharedDomainsCommitmentContext) SetTrace(trace bool) {
 	sdc.patriciaTrie.SetTrace(trace)
 }
 
+// SetCapture enables/disables trie operation capture for diagnosis.
+func (sdc *SharedDomainsCommitmentContext) SetCapture(capture []string) {
+	sdc.patriciaTrie.SetCapture(capture)
+}
+
+// GetCapture returns captured trie operations. If truncate is true, clears the capture.
+func (sdc *SharedDomainsCommitmentContext) GetCapture(truncate bool) []string {
+	return sdc.patriciaTrie.GetCapture(truncate)
+}
+
 // EnableWarmupCache enables/disables warmup cache during commitment processing.
 func (sdc *SharedDomainsCommitmentContext) EnableWarmupCache(enable bool) {
 	sdc.patriciaTrie.EnableWarmupCache(enable)
@@ -189,10 +199,6 @@ func (sdc *SharedDomainsCommitmentContext) Reset() {
 	if !sdc.justRestored.Load() {
 		sdc.patriciaTrie.Reset()
 	}
-}
-
-func (sdc *SharedDomainsCommitmentContext) GetCapture(truncate bool) []string {
-	return sdc.patriciaTrie.GetCapture(truncate)
 }
 
 func (sdc *SharedDomainsCommitmentContext) ClearRam() {
@@ -428,10 +434,12 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *Tr
 	}
 
 	if len(state) < 16 {
+		fmt.Printf("SEEK_COMMITMENT: state key empty or too short, len=%d step=%d\n", len(state), step)
 		return 0, 0, nil, nil
 	}
 
 	txNum, blockNum = _decodeTxBlockNums(state)
+	fmt.Printf("SEEK_COMMITMENT: blockNum=%d txNum=%d step=%d stateLen=%d\n", blockNum, txNum, step, len(state))
 	return blockNum, txNum, state, nil
 }
 
@@ -455,6 +463,13 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 	_, _, state, err := sdc.LatestCommitmentState(trieContext)
 	if err != nil {
 		return 0, 0, err
+	}
+	// Debug: also check raw GetLatest directly on tx to compare
+	if rawV, rawStep, rawErr := tx.GetLatest(kv.CommitmentDomain, KeyCommitmentState); rawErr == nil && len(rawV) >= 16 {
+		rawTxNum, rawBlockNum := _decodeTxBlockNums(rawV)
+		fmt.Printf("SEEK_RAW_GETLATEST: blockNum=%d txNum=%d step=%d\n", rawBlockNum, rawTxNum, rawStep)
+	} else {
+		fmt.Printf("SEEK_RAW_GETLATEST: not found or err=%v len=%d\n", rawErr, len(rawV))
 	}
 	if state != nil {
 		blockNum, txNum, err = sdc.restorePatriciaState(state)
@@ -501,7 +516,7 @@ func (sdc *SharedDomainsCommitmentContext) encodeAndStoreCommitmentState(trieCon
 	if trieContext == nil {
 		return errors.New("store commitment state: AggregatorContext is not initialized")
 	}
-	encodedState, err := sdc.encodeCommitmentState(blockNum, txNum)
+	encodedState, err := sdc.EncodeCommitmentState(blockNum, txNum)
 	if err != nil {
 		return err
 	}
@@ -512,20 +527,15 @@ func (sdc *SharedDomainsCommitmentContext) encodeAndStoreCommitmentState(trieCon
 	if len(prevState) == 0 && prevState != nil {
 		prevState = nil
 	}
-	// state could be equal but txnum/blocknum could be different.
-	// We do skip only full matches
 	if bytes.Equal(prevState, encodedState) {
-		//fmt.Printf("[commitment] skip store txn %d block %d (prev b=%d t=%d) rh %x\n",/
-		//	binary.BigEndian.Uint64(prevState[8:16]), binary.BigEndian.Uint64(prevState[:8]), dc.ht.iit.txNum, blockNum, rh)
 		return nil
 	}
 
-	fmt.Printf("COMMIT_STATE_WRITE: block=%d txNum=%d prevLen=%d newLen=%d\n", blockNum, txNum, len(prevState), len(encodedState))
 	return trieContext.PutBranch(KeyCommitmentState, encodedState, prevState)
 }
 
-// Encodes current trie state and returns it
-func (sdc *SharedDomainsCommitmentContext) encodeCommitmentState(blockNum, txNum uint64) ([]byte, error) {
+// EncodeCommitmentState encodes current trie state and returns it.
+func (sdc *SharedDomainsCommitmentContext) EncodeCommitmentState(blockNum, txNum uint64) ([]byte, error) {
 	var state []byte
 	var err error
 
@@ -617,6 +627,13 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 }
 
 func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {
+	if bytes.Equal(prefix, KeyCommitmentState) {
+		if sdc.stateReader.WithHistory() {
+			fmt.Printf("PUTBRANCH_STATE: SKIPPED (WithHistory=true) txNum=%d dataLen=%d\n", sdc.txNum, len(data))
+		} else {
+			fmt.Printf("PUTBRANCH_STATE: WRITING txNum=%d dataLen=%d step=%d\n", sdc.txNum, len(data), sdc.txNum/uint64(sdc.stepSize))
+		}
+	}
 	if sdc.stateReader.WithHistory() { // do not store branches if explicitly operate on history
 		return nil
 	}

@@ -209,11 +209,6 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 				if dbg.TraceApply && (rs.trace || dbg.TraceAccount(addr.Handle())) {
 					fmt.Printf("%d apply:put account: %x balance:%d,nonce:%d,codehash:%x\n", blockNum, addr, &acc.Balance, acc.Nonce, acc.CodeHash)
 				}
-				// Trace target address
-				if fmt.Sprintf("%x", addr.Value()) == "000000000004444c5dc75cb358380d2e3de08a90" {
-					fmt.Printf("APPLY_ACCOUNT: block=%d txNum=%d balance=%d nonce=%d hasBal=%v hasNonce=%v hasCode=%v\n",
-						blockNum, txNum, &acc.Balance, acc.Nonce, d.balance != nil, d.nonce != nil, d.codeHash != nil)
-				}
 				enc := accounts.SerialiseV3(&acc)
 				if blockCache != nil {
 					blockCache.WriteAccount(addr, enc)

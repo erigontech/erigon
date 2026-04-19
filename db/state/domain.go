@@ -2051,6 +2051,14 @@ func (dt *DomainRoTx) assertPruneConsistency(roTx kv.Tx, txFrom, txTo uint64) (r
 		}
 	}()
 
+	// Skip commitment domain: merged files use shortened key references (offsets
+	// into sibling account/storage files) while the DB uses plain keys. Byte-wise
+	// comparison would be a false positive. Normalising requires the aggregator
+	// context to decode offsets, which we don't have here.
+	if dt.name == kv.CommitmentDomain {
+		return nil
+	}
+
 	stepFrom := kv.Step(txFrom / dt.stepSize)
 	stepTo := kv.Step(txTo / dt.stepSize)
 

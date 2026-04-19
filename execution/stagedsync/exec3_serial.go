@@ -21,6 +21,7 @@ import (
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/receipts"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/types"
@@ -433,9 +434,31 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 
 				chainReader := consensuschain.NewReader(se.cfg.chainConfig, se.applyTx, se.cfg.blockReader, se.logger)
 
+				// For partial blocks (resuming from snapshot boundary), reconstruct
+				// prior receipts so Finalize receives the full receipt set for requests
+				// hash computation (deposit extraction from logs). See #20452.
+				finalizeReceipts := blockReceipts
+				if startTxIndex > 0 && len(txTask.Txs) > 0 {
+					blockStartTxNum := txTask.TxNum - uint64(txTask.TxIndex)
+					reader := state.NewHistoryReaderV3(se.applyTx, blockStartTxNum)
+					priorIbs := state.New(reader)
+					defer priorIbs.Release(true)
+					priorGp := protocol.NewGasPool(txTask.Header.GasLimit, se.cfg.chainConfig.GetMaxBlobGasPerBlock(txTask.Header.Time))
+					getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
+						return se.cfg.blockReader.Header(ctx, se.applyTx, hash, number)
+					}
+					priorReceipts, priorErr := receipts.DerivePriorReceipts(ctx, se.cfg.chainConfig, se.cfg.engine, txTask.Header, txTask.Txs, startTxIndex, priorIbs, priorGp, getHeader)
+					if priorErr != nil {
+						se.logger.Warn(fmt.Sprintf("[%s] failed to reconstruct prior receipts for partial block", se.logPrefix),
+							"block", txTask.BlockNumber(), "startTxIndex", startTxIndex, "err", priorErr)
+					} else {
+						finalizeReceipts = append(priorReceipts, blockReceipts...)
+					}
+				}
+
 				_, err = se.cfg.engine.Finalize(
 					se.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles,
-					blockReceipts, txTask.Withdrawals, chainReader, syscall, false, se.logger)
+					finalizeReceipts, txTask.Withdrawals, chainReader, syscall, false, se.logger)
 
 				if err != nil {
 					return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err)
@@ -581,6 +604,18 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				return false, err
 			}
 			// CommitStepBoundary is now called inside ApplyStateWrites.
+
+			// Baseline capture: read coinbase balance post-apply.
+			if traceAddr := traceAddrForCalc(); traceAddr != nil {
+				tv := traceAddr.Value()
+				enc, _, gerr := se.doms.GetLatest(kv.AccountsDomain, domainRoTx, tv[:])
+				if gerr == nil && len(enc) > 0 {
+					var acc accounts.Account
+					if derr := accounts.DeserialiseV3(&acc, enc); derr == nil {
+						recordBaselineEntry(txTask.BlockNumber(), int32(txTask.TxIndex), acc.Balance)
+					}
+				}
+			}
 		}
 
 		se.doms.SetTxNum(txTask.TxNum)

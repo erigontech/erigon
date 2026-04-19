@@ -274,7 +274,7 @@ func getDeferredUpdate(
 	getDeferredUpdateCount.Add(1)
 	upd := deferredUpdatePool.Get().(*DeferredBranchUpdate)
 
-	upd.prefix = prefix
+	upd.prefix = common.Copy(prefix)
 	upd.bitmap = bitmap
 	upd.touchMap = touchMap
 	upd.afterMap = afterMap
@@ -303,15 +303,19 @@ func getDeferredUpdate(
 		bitset ^= bit
 	}
 
-	upd.prev = prev
+	upd.prev = common.Copy(prev)
 	upd.encoded = nil
 
 	return upd
 }
 
 // putDeferredUpdate returns a DeferredBranchUpdate to the global pool.
+// Clears slice references so pooled objects don't hold stale memory.
 func putDeferredUpdate(upd *DeferredBranchUpdate) {
 	if upd != nil {
+		upd.prefix = nil
+		upd.prev = nil
+		upd.encoded = nil
 		deferredUpdatePool.Put(upd)
 	}
 }

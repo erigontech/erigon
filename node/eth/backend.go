@@ -642,6 +642,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		logger,
 		blockReader,
 	)
+	// Wire commit gate so sentry db.View() participates in commit exclusion.
+	if a, ok := backend.chainDB.(state.HasAgg); ok {
+		statusDataProvider.SetCommitGate(a.Agg().(*state.Aggregator).CommitGate())
+	}
 	backend.statusDataProvider = statusDataProvider
 
 	executionSentryClient := sentryMux(sentries)

@@ -63,6 +63,11 @@ type StatusDataProvider struct {
 
 	logger log.Logger
 
+	// commitGate is the shared RWMutex from the Aggregator. Background
+	// db.View() calls hold RLock; commit+prune paths hold the write Lock.
+	// May be nil if not set (pre-existing callers).
+	commitGate *sync.RWMutex
+
 	// Cached status data — avoids opening MDBX readers on every
 	// peer status exchange. Valid until the next expected block
 	// (headTime + 12s slot duration).
@@ -91,6 +96,12 @@ func NewStatusDataProvider(
 	s.heightForks, s.timeForks = forkid.GatherForks(chainConfig, genesis.Time())
 
 	return s
+}
+
+// SetCommitGate sets the shared commit gate so db.View() calls participate
+// in the commit exclusion protocol. Call after the Aggregator is available.
+func (s *StatusDataProvider) SetCommitGate(gate *sync.RWMutex) {
+	s.commitGate = gate
 }
 
 func uint256FromBigInt(num *big.Int) (*uint256.Int, error) {
@@ -136,34 +147,55 @@ func (s *StatusDataProvider) makeStatusData(head ChainHead) *sentryproto.StatusD
 // GetStatusData returns the current StatusData.
 // Results are cached until the next expected block (headTime + 12s)
 // to avoid opening MDBX readers on every peer status exchange.
+// The mutex is held for the entire refresh to prevent thundering herd:
+// multiple sentry loops calling simultaneously would all open db.View txs.
 func (s *StatusDataProvider) GetStatusData(ctx context.Context) (*sentryproto.StatusData, error) {
 	s.cacheMu.Lock()
-	if s.cachedStatus != nil && time.Now().Before(s.cacheExpiry) {
-		cached := s.cachedStatus
-		s.cacheMu.Unlock()
-		return cached, nil
-	}
-	s.cacheMu.Unlock()
+	defer s.cacheMu.Unlock()
 
-	var minimumBlock uint64
-	if err := s.db.View(ctx, func(tx kv.Tx) error {
-		var err error
-		minimumBlock, err = s.blockReader.MinimumBlockAvailable(ctx, tx)
-		return err
-	}); err != nil {
-		return nil, fmt.Errorf("GetStatusData: minimumBlock error: %w", err)
+	if s.cachedStatus != nil && time.Now().Before(s.cacheExpiry) {
+		return s.cachedStatus, nil
+	}
+
+	// TryRLock the commit gate — if a commit is in progress, return stale
+	// cached data rather than blocking or opening an RO tx that would
+	// prevent MDBX GC page reclamation.
+	if s.commitGate != nil && !s.commitGate.TryRLock() {
+		if s.cachedStatus != nil {
+			return s.cachedStatus, nil
+		}
+		// No cached data at all — must block to get initial status.
+		s.commitGate.RLock()
+		defer s.commitGate.RUnlock()
+	} else if s.commitGate != nil {
+		defer s.commitGate.RUnlock()
+	}
+
+	// Single db.View to read both minimumBlock and chain head, avoiding
+	// two separate RO transactions.
+	var head ChainHead
+	var headErr error
+	err := s.db.View(ctx, func(tx kv.Tx) error {
+		minimumBlock, err := s.blockReader.MinimumBlockAvailable(ctx, tx)
+		if err != nil {
+			return err
+		}
+		head, headErr = ReadChainHeadWithTx(tx, minimumBlock)
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("GetStatusData: db.View error: %w", err)
 	}
 
 	var result *sentryproto.StatusData
 
-	chainHead, err := ReadChainHead(ctx, s.db, minimumBlock)
-	if err == nil {
-		result = s.makeStatusData(chainHead)
-	} else if !errors.Is(err, ErrNoHead) {
-		return nil, err
+	if headErr == nil {
+		result = s.makeStatusData(head)
+	} else if !errors.Is(headErr, ErrNoHead) {
+		return nil, headErr
 	} else {
 		s.logger.Warn("sentry.StatusDataProvider: The canonical chain current header not found in the database. Check the database consistency. Using latest available snapshot data.")
-		snapHead, err := s.ReadChainHeadFromSnapshots(ctx, minimumBlock)
+		snapHead, err := s.ReadChainHeadFromSnapshots(ctx, 0)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read chain head from snapshots: %w", err)
 		}
@@ -177,10 +209,8 @@ func (s *StatusDataProvider) GetStatusData(ctx context.Context) (*sentryproto.St
 	if result.MaxBlockTime > 0 && time.Since(time.Unix(int64(result.MaxBlockTime), 0)) < 60*time.Second {
 		cacheDuration = 12 * time.Second
 	}
-	s.cacheMu.Lock()
 	s.cachedStatus = result
 	s.cacheExpiry = time.Now().Add(cacheDuration)
-	s.cacheMu.Unlock()
 
 	return result, nil
 }

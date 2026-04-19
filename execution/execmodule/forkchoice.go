@@ -502,8 +502,18 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
 		if hasMore {
-			// Flush SD (block overlay + domain mem) to a brief RwTx to relieve memory pressure.
+			// Close the RO tx BEFORE creating the RW tx so MDBX GC can reclaim
+			// freed pages. Lock the commit gate to drain background RO txs that
+			// reference older snapshots — once the RW tx exists, new RO txs see
+			// the same snapshot and don't block GC.
+			roTx.Rollback()
+			if a, ok := e.db.(state.HasAgg); ok {
+				a.Agg().(*state.Aggregator).LockCollation()
+			}
 			commitRwTx, err := e.db.BeginTemporalRw(ctx) //nolint:gocritic
+			if a, ok := e.db.(state.HasAgg); ok {
+				a.Agg().(*state.Aggregator).UnlockCollation()
+			}
 			if err != nil {
 				return sendError("updateForkChoice: begin rw after hasMore", err)
 			}
@@ -512,17 +522,28 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				return sendError("updateForkChoice: flush sd after hasMore", err)
 			}
 			currentContext.ClearRam(true)
-			// Close the RO tx BEFORE commit so MDBX GC can reclaim
-			// freed pages (gcLoops > 0 requires openTxs=1 at commit).
-			roTx.Rollback()
 			if err = commitRwTx.Commit(); err != nil {
 				return sendError("updateForkChoice: tx commit after hasMore", err)
 			}
-			// Collate (if steps accumulated) + prune in separate transaction.
+			// Build files + prune in separate transaction.
 			if a, ok := e.db.(state.HasAgg); ok {
 				agg := a.Agg().(*state.Aggregator)
-				if colErr := agg.CollateAndPruneIfNeeded(ctx, e.db, func(pruneTx kv.TemporalRwTx) error {
-					return e.executionPipeline.RunPrune(ctx, pruneTx, initialCycle, 500*time.Millisecond)
+				pruneTimeout := 500 * time.Millisecond
+				if initialCycle {
+					pruneTimeout = 12 * time.Hour
+				}
+				if colErr := agg.CollateAndPrune(ctx, e.db, func(pruneTx kv.TemporalRwTx) error {
+					if err := e.executionPipeline.RunPrune(ctx, pruneTx, initialCycle, pruneTimeout); err != nil {
+						return err
+					}
+					// Update collation cap after block retirement. Round down
+					// to step boundary to avoid partial steps.
+					if maxTxNum, capErr := rawdbv3.TxNums.Max(ctx, pruneTx, e.blockReader.FrozenBlocks()); capErr == nil && maxTxNum > 0 {
+						stepSize := agg.StepSize()
+						maxTxNum = (maxTxNum / stepSize) * stepSize
+						agg.SetMaxCollationTxNum(maxTxNum)
+					}
+					return nil
 				}, e.logger); colErr != nil {
 					return sendError("updateForkChoice: collate+prune after hasMore", colErr)
 				}
@@ -616,18 +637,38 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			e.lock.Unlock()
 		}
 
+		// Close the RO tx BEFORE commit so MDBX GC can reclaim freed
+		// pages (requires openTxs=1 at commit). Same pattern as the
+		// hasMore path at line 517.
+		roTx.Rollback()
+
 		if e.fcuBackgroundCommit {
-			// Background commit: open a brief RwTx, flush SD (overlay + domain mem), commit.
+			// Background commit: drain old RO txs, open RwTx, flush, commit.
+			if a, ok := e.db.(state.HasAgg); ok {
+				a.Agg().(*state.Aggregator).LockCollation()
+			}
 			commitRwTx, err := e.db.BeginTemporalRw(ctx)
 			if err != nil {
+				if a, ok := e.db.(state.HasAgg); ok {
+					a.Agg().(*state.Aggregator).UnlockCollation()
+				}
 				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("fcu bg commit: begin rw: %w", err), stateFlushingInParallel)
 			}
 			defer commitRwTx.Rollback()
 			if err := currentContext.Flush(ctx, commitRwTx); err != nil {
+				if a, ok := e.db.(state.HasAgg); ok {
+					a.Agg().(*state.Aggregator).UnlockCollation()
+				}
 				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("fcu bg commit: flush sd: %w", err), stateFlushingInParallel)
 			}
 			if err = commitRwTx.Commit(); err != nil {
+				if a, ok := e.db.(state.HasAgg); ok {
+					a.Agg().(*state.Aggregator).UnlockCollation()
+				}
 				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+			}
+			if a, ok := e.db.(state.HasAgg); ok {
+				a.Agg().(*state.Aggregator).UnlockCollation()
 			}
 			e.lock.Lock()
 			e.currentContext = currentContext
@@ -713,7 +754,16 @@ func (e *ExecModule) runPostForkchoice(sd *execctx.SharedDomains, finishProgress
 // (block overlay + domain mem) into it, and commits atomically.
 func (e *ExecModule) runForkchoiceCommitOverlay(sd *execctx.SharedDomains, finishProgressBefore uint64, isSynced bool) ([]any, error) {
 	var timings []any
+	// Drain background RO txs before creating RW tx so they don't hold
+	// older snapshots that block MDBX GC. Unlock immediately after — new
+	// RO txs opened after this see the same snapshot as the RW tx.
+	if a, ok := e.db.(state.HasAgg); ok {
+		a.Agg().(*state.Aggregator).LockCollation()
+	}
 	rwTx, err := e.db.BeginTemporalRw(e.bacgroundCtx)
+	if a, ok := e.db.(state.HasAgg); ok {
+		a.Agg().(*state.Aggregator).UnlockCollation()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("runForkchoiceCommitOverlay: begin rw: %w", err)
 	}

@@ -18,12 +18,14 @@ package execmodule
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/execmodule/moduleutil"
 	"github.com/erigontech/erigon/execution/metrics"
 	"github.com/erigontech/erigon/execution/types"
@@ -50,11 +52,25 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, req *executionproto.Inser
 	}
 	defer roTx.Rollback()
 
-	// Ensure currentContext has a block overlay for accumulating writes.
+	// During FCU flow, e.currentContext holds the shared SharedDomains where
+	// both block data and execution state are committed together. During
+	// initial sync (ProcessFrozenBlocks), currentContext is nil — blocks come
+	// from snapshot files, not from Caplin.
 	sd := e.currentContext
 	if sd == nil {
 		sd, err = execctx.NewSharedDomains(ctx, roTx, e.logger)
 		if err != nil {
+			if errors.Is(err, commitmentdb.ErrBehindCommitment) {
+				// TxNums/commitment not ready — Start() hasn't finished.
+				// This should not happen: Caplin should check Ready() before
+				// calling InsertBlocks, and Ready() returns false while
+				// Start() holds the semaphore. Log a warning so we can
+				// track if this path is hit.
+				e.logger.Warn("InsertBlocks: ErrBehindCommitment with nil currentContext — startup not complete")
+				return &executionproto.InsertionResult{
+					Result: executionproto.ExecutionStatus_Busy,
+				}, nil
+			}
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not create shared domains: %s", err)
 		}
 		e.lock.Lock()
@@ -153,3 +169,4 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, req *executionproto.Inser
 		Result: executionproto.ExecutionStatus_Success,
 	}, nil
 }
+
