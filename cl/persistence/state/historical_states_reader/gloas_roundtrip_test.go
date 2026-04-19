@@ -125,7 +125,7 @@ func TestReadCompressedSSZ_ExecutionPayloadBid(t *testing.T) {
 	})
 
 	got := new(cltypes.ExecutionPayloadBid)
-	require.NoError(t, readCompressedSSZ(getter, slot, kv.LatestExecutionPayloadBidTable, got))
+	require.NoError(t, readCompressedSSZ(getter, slot, kv.LatestExecutionPayloadBidTable, got, int(clparams.GloasVersion)))
 
 	require.Equal(t, bid.ParentBlockHash, got.ParentBlockHash)
 	require.Equal(t, bid.ParentBlockRoot, got.ParentBlockRoot)
@@ -154,7 +154,7 @@ func TestReadCompressedSSZ_MissingData(t *testing.T) {
 	getter := mockGetValFn(map[string]map[string][]byte{})
 
 	bid := new(cltypes.ExecutionPayloadBid)
-	err := readCompressedSSZ(getter, slot, kv.LatestExecutionPayloadBidTable, bid)
+	err := readCompressedSSZ(getter, slot, kv.LatestExecutionPayloadBidTable, bid, int(clparams.GloasVersion))
 	require.ErrorIs(t, err, ErrMissingGloasData)
 	require.ErrorContains(t, err, kv.LatestExecutionPayloadBidTable)
 	require.ErrorContains(t, err, "500")
@@ -247,7 +247,7 @@ func TestReadCompressedSSZ_BuilderPendingPayments(t *testing.T) {
 	})
 
 	got := solid.NewVectorSSZ[*cltypes.BuilderPendingPayment](int(2 * slotsPerEpoch))
-	require.NoError(t, readCompressedSSZ(getter, slot, kv.BuilderPendingPaymentsTable, got))
+	require.NoError(t, readCompressedSSZ(getter, slot, kv.BuilderPendingPaymentsTable, got, int(clparams.GloasVersion)))
 
 	require.Equal(t, payments.Length(), got.Length())
 	p0 := got.Get(0)
@@ -381,7 +381,7 @@ func TestReadCompressedSSZ_ExecutionPayloadAvailability(t *testing.T) {
 	})
 
 	got := solid.NewBitVector(slotsPerHistoricalRoot)
-	require.NoError(t, readCompressedSSZ(getter, slot, kv.ExecutionPayloadAvailabilityTable, got))
+	require.NoError(t, readCompressedSSZ(getter, slot, kv.ExecutionPayloadAvailabilityTable, got, int(clparams.GloasVersion)))
 
 	require.True(t, got.GetBitAt(0))
 	require.True(t, got.GetBitAt(42))

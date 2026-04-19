@@ -102,6 +102,9 @@ func NewEth1BlockFromExecutionHeader(header *Eth1Header, version clparams.StateV
 		block.ExcessBlobGas = header.ExcessBlobGas
 	}
 	if version >= clparams.GloasVersion {
+		// BlockAccessList is initialized empty because Eth1Header only stores the
+		// BlockAccessListRoot (hash), not the raw bytes. This constructor is used
+		// for genesis block creation where the access list is genuinely empty.
 		block.BlockAccessList = solid.NewByteListSSZ(beaconCfg.MaxBytesPerTransaction)
 		block.SlotNumber = header.SlotNumber
 	}
@@ -149,6 +152,11 @@ func NewEth1BlockFromHeaderAndBody(header *types.Header, body *types.RawBody, be
 	}
 
 	if header.SlotNumber != nil {
+		// BlockAccessList is initialized empty here because types.RawBody does not
+		// carry the block access list bytes (only types.RawBlock does). In production,
+		// GLOAS execution payloads arrive via the Engine API and are populated through
+		// SSZ decoding, not this constructor. This function is currently only called
+		// from test code.
 		block.BlockAccessList = solid.NewByteListSSZ(beaconCfg.MaxBytesPerTransaction)
 		block.SlotNumber = *header.SlotNumber
 		block.version = clparams.GloasVersion
