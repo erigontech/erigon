@@ -131,7 +131,6 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 	builderIndex := envelope.BuilderIndex
 
 	log.Debug("Received execution payload via gossip",
-		"slot", envelope.Slot,
 		"beaconBlockRoot", beaconBlockRoot,
 		"builderIndex", builderIndex)
 
@@ -167,8 +166,8 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 
 	// [IGNORE] The envelope is from a slot greater than or equal to the latest finalized slot
 	finalizedSlot := s.forkchoiceStore.FinalizedSlot()
-	if envelope.Slot < finalizedSlot {
-		return fmt.Errorf("%w: envelope slot %d < finalized slot %d", ErrIgnore, envelope.Slot, finalizedSlot)
+	if block.Block.Slot < finalizedSlot {
+		return fmt.Errorf("%w: envelope slot %d < finalized slot %d", ErrIgnore, block.Block.Slot, finalizedSlot)
 	}
 
 	// Process the execution payload through forkchoice
@@ -185,7 +184,7 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 	s.emitters.Operation().SendExecutionPayloadAvailable(signedEnvelope)
 
 	log.Debug("Processed execution payload via gossip",
-		"slot", envelope.Slot,
+		"slot", block.Block.Slot,
 		"beaconBlockRoot", beaconBlockRoot,
 		"builderIndex", builderIndex)
 

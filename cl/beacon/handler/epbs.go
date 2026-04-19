@@ -271,7 +271,12 @@ func (a *ApiHandler) GetEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrite
 			fmt.Errorf("execution payload envelope not found for block %v", blockRoot))
 	}
 
-	epoch := envelope.Message.Slot / a.beaconChainCfg.SlotsPerEpoch
+	block, ok := a.forkchoiceStore.GetBlock(blockRoot)
+	if !ok || block == nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
+			fmt.Errorf("block not found for block root %v", blockRoot))
+	}
+	epoch := block.Block.Slot / a.beaconChainCfg.SlotsPerEpoch
 	return newBeaconResponse(envelope).WithVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch)), nil
 }
 
