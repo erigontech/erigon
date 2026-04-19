@@ -166,7 +166,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		continueLoop, err := se.executeBlock(ctx, txTasks, execStage.CurrentSyncCycle.IsInitialCycle, false)
 
 		took := time.Since(start)
-		if took > 20*time.Millisecond {
+		if took > 20*time.Millisecond { // prevent logs spamming
 			log.Debug(fmt.Sprintf("[%s] executed block %d in %s", se.logPrefix, blockNum, took))
 		}
 		if err != nil {
