@@ -8,8 +8,8 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -112,33 +112,39 @@ func TerminalFormatNoColor() Format {
 // For more details see: http://godoc.org/github.com/kr/logfmt
 func LogfmtFormat() Format {
 	return FormatFunc(func(r *Record) []byte {
-		common := []any{r.KeyNames.Time, r.Time, r.KeyNames.Lvl, r.Lvl, r.KeyNames.Msg, r.Msg}
+		common := make([]any, 0, 6+len(r.Ctx))
+		common = append(common, r.KeyNames.Time, r.Time, r.KeyNames.Lvl, r.Lvl, r.KeyNames.Msg, r.Msg)
+		common = append(common, r.Ctx...)
 		buf := &bytes.Buffer{}
-		logfmt(buf, append(common, r.Ctx...), 0)
+		logfmt(buf, common, 0)
 		return buf.Bytes()
 	})
 }
 
 func logfmt(buf *bytes.Buffer, ctx []any, color int) {
+	// Stack-allocated scratch for encoding numeric values; avoids
+	// allocating an intermediate string in the value path.
+	var scratch [64]byte
 	for i := 0; i < len(ctx); i += 2 {
 		if i != 0 {
 			buf.WriteByte(' ')
 		}
 
 		k, ok := ctx[i].(string)
-		v := formatLogfmtValue(ctx[i+1])
+		v := ctx[i+1]
 		if !ok {
-			k, v = errorKey, formatLogfmtValue(k)
+			// key is not a string: log errorKey and describe the bad key as value
+			k, v = errorKey, ctx[i]
 		}
 
 		// XXX: we should probably check that all of your key bytes aren't invalid
 		if color > 0 {
-			fmt.Fprintf(buf, "\x1b[%dm%s\x1b[0m=%s", color, k, v)
+			fmt.Fprintf(buf, "\x1b[%dm%s\x1b[0m=", color, k)
 		} else {
 			buf.WriteString(k)
 			buf.WriteByte('=')
-			buf.WriteString(v)
 		}
+		buf.Write(appendLogfmtValue(scratch[:0], v))
 	}
 
 	buf.WriteByte('\n')
@@ -231,80 +237,93 @@ func formatJSONValue(value any) any {
 	}
 }
 
-// formatValue formats a value for serialization
-func formatLogfmtValue(value any) string {
+// appendLogfmtValue appends a value in logfmt format to dst and returns the
+// extended slice. This is the append-style equivalent of the previous
+// formatLogfmtValue+escapeString path: it writes directly into the caller's
+// buffer, avoiding an intermediate string allocation and a sync.Pool round-trip.
+func appendLogfmtValue(dst []byte, value any) []byte {
 	if value == nil {
-		return "nil"
+		return append(dst, "nil"...)
 	}
-
 	if t, ok := value.(time.Time); ok {
-		// Performance optimization: No need for escaping since the provided
-		// timeFormat doesn't have any escape characters, and escaping is
-		// expensive.
-		return t.Format(timeFormat)
+		// Performance optimization: timeFormat has no escape characters, so
+		// we can skip escaping entirely.
+		return t.AppendFormat(dst, timeFormat)
 	}
 	value = formatShared(value)
 	switch v := value.(type) {
 	case bool:
-		return strconv.FormatBool(v)
+		return strconv.AppendBool(dst, v)
 	case float32:
-		return strconv.FormatFloat(float64(v), floatFormat, 3, 64)
+		return strconv.AppendFloat(dst, float64(v), floatFormat, 3, 64)
 	case float64:
-		return strconv.FormatFloat(v, floatFormat, 3, 64)
-	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
-		return fmt.Sprintf("%d", value)
+		return strconv.AppendFloat(dst, v, floatFormat, 3, 64)
+	case int:
+		return strconv.AppendInt(dst, int64(v), 10)
+	case int8:
+		return strconv.AppendInt(dst, int64(v), 10)
+	case int16:
+		return strconv.AppendInt(dst, int64(v), 10)
+	case int32:
+		return strconv.AppendInt(dst, int64(v), 10)
+	case int64:
+		return strconv.AppendInt(dst, v, 10)
+	case uint:
+		return strconv.AppendUint(dst, uint64(v), 10)
+	case uint8:
+		return strconv.AppendUint(dst, uint64(v), 10)
+	case uint16:
+		return strconv.AppendUint(dst, uint64(v), 10)
+	case uint32:
+		return strconv.AppendUint(dst, uint64(v), 10)
+	case uint64:
+		return strconv.AppendUint(dst, v, 10)
 	case string:
-		return escapeString(v)
+		return appendEscaped(dst, v)
 	default:
-		return escapeString(fmt.Sprintf("%+v", value))
+		return appendEscaped(dst, fmt.Sprintf("%+v", value))
 	}
 }
 
-var stringBufPool = sync.Pool{
-	New: func() any { return new(bytes.Buffer) },
-}
-
-func escapeString(s string) string {
+// appendEscaped appends s to dst, quoting and escaping if s contains any
+// character that would require it in logfmt. Zero-alloc in the fast path
+// (s appended verbatim) and one-pass in the slow path.
+func appendEscaped(dst []byte, s string) []byte {
 	needsQuotes := false
 	needsEscape := false
-	for _, r := range s {
-		if r <= ' ' || r == '=' || r == '"' {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c <= ' ' || c == '=' || c == '"' {
 			needsQuotes = true
 		}
-		if r == '\\' || r == '"' || r == '\n' || r == '\r' || r == '\t' {
+		if c == '\\' || c == '"' || c == '\n' || c == '\r' || c == '\t' {
 			needsEscape = true
 		}
 	}
-	if needsEscape == false && needsQuotes == false {
-		return s
+	if !needsEscape && !needsQuotes {
+		return append(dst, s...)
 	}
-	e := stringBufPool.Get().(*bytes.Buffer)
-	e.WriteByte('"')
+	if needsQuotes {
+		dst = append(dst, '"')
+	}
 	for _, r := range s {
 		switch r {
 		case '\\', '"':
-			e.WriteByte('\\')
-			e.WriteByte(byte(r))
+			dst = append(dst, '\\', byte(r))
 		case '\n':
-			e.WriteString("\\n")
+			dst = append(dst, '\\', 'n')
 		case '\r':
-			e.WriteString("\\r")
+			dst = append(dst, '\\', 'r')
 		case '\t':
-			e.WriteString("\\t")
+			dst = append(dst, '\\', 't')
 		default:
-			e.WriteRune(r)
+			dst = utf8.AppendRune(dst, r)
 		}
 	}
-	e.WriteByte('"')
-	var ret string
 	if needsQuotes {
-		ret = e.String()
-	} else {
-		ret = string(e.Bytes()[1 : e.Len()-1])
+		dst = append(dst, '"')
 	}
-	e.Reset()
-	stringBufPool.Put(e)
-	return ret
+	return dst
 }
 
 // EnvBool from dbg uses log many times so don't want to make a cycle.

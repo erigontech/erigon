@@ -487,11 +487,11 @@ func (tab *Table) addIP(b *bucket, ip netip.Addr) bool {
 		return true
 	}
 	if !tab.ips.AddAddr(ip) {
-		tab.log.Debug("[p2p] IP exceeds table limit", "ip", ip)
+		tab.log.Trace("[p2p] IP exceeds table limit", "ip", ip)
 		return false
 	}
 	if !b.ips.AddAddr(ip) {
-		tab.log.Debug("[p2p] IP exceeds bucket limit", "ip", ip)
+		tab.log.Trace("[p2p] IP exceeds bucket limit", "ip", ip)
 		tab.ips.RemoveAddr(ip)
 		return false
 	}
