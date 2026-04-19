@@ -96,7 +96,7 @@ jobs:
         id: generate_token_build
         uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3  ## v3.1.1
         with:
-          app-id: ${{ vars.RELEASE_BOT_APP_ID }}
+          client-id: ${{ vars.RELEASE_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
           repositories: "erigon"
 
@@ -172,13 +172,14 @@ jobs:
             /Micro\s*=/{micro=$3}
             END{printf "%s.%s.%s", major, minor, micro}
           ' db/version/app.go)
-          INPUT_VERSION=$(echo "${RELEASE_VERSION}" | sed -e 's/^v//')
+          # Strip leading 'v' and any pre-release suffix (e.g. -rc1, -alpha1) for comparison
+          INPUT_VERSION=$(echo "${RELEASE_VERSION}" | sed -e 's/^v//' -e 's/-.*//')
 
           echo "Version from db/version/app.go: ${APP_VERSION}"
-          echo "Version from workflow input: ${INPUT_VERSION} (raw: ${RELEASE_VERSION})"
+          echo "Version from workflow input (base): ${INPUT_VERSION} (raw: ${RELEASE_VERSION})"
 
           if [ "${APP_VERSION}" != "${INPUT_VERSION}" ]; then
-            echo "ERROR: release_version (${RELEASE_VERSION}) does not match db/version/app.go version (${APP_VERSION})."
+            echo "ERROR: release_version base (${INPUT_VERSION}) does not match db/version/app.go version (${APP_VERSION})."
             exit 1
           fi
 
@@ -586,7 +587,7 @@ jobs:
       if: ${{ inputs.perform_release }}
       uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3  ## v3.1.1
       with:
-        app-id: ${{ vars.RELEASE_BOT_APP_ID }}
+        client-id: ${{ vars.RELEASE_BOT_APP_ID }}
         private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
         repositories: "erigon"
 
@@ -721,7 +722,7 @@ jobs:
         id: generate_token_rollback
         uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3  ## v3.1.1
         with:
-          app-id: ${{ vars.RELEASE_BOT_APP_ID }}
+          client-id: ${{ vars.RELEASE_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
           repositories: "erigon"
 
