@@ -30,43 +30,6 @@ import (
 // Includes block number, tx index, source, value, and a short stack trace
 // so we can pinpoint which versionedRead call ends up in the BAL vs not.
 // Revert once the source is identified.
-// LogBalIOForTargetSlot is a TEMP diag that prints storage entries on the
-// target slot 0x026794 from a VersionedIO, tagged with a site label and
-// block/tx context. Used by block_assembler's recordTxIO / clearTxIO to
-// check whether the CREATE-inside-tx gas-calc reads on that slot survive
-// the merge into balIO. Revert once the divergence is understood.
-func LogBalIOForTargetSlot(site string, bn uint64, txIndex int, io *VersionedIO) {
-	if io == nil {
-		return
-	}
-	maxTxIndex := io.Len() - 1
-	for i := -1; i <= maxTxIndex; i++ {
-		io.ReadSet(i).Scan(func(vr *VersionedRead) bool {
-			if vr.Path != StoragePath {
-				return true
-			}
-			hv := vr.Key.Value()
-			hk := hex.EncodeToString(hv[:])
-			if !strings.HasSuffix(hk, "026794") {
-				return true
-			}
-			fmt.Fprintf(os.Stderr, "[BAL-IO] %s bn=%d tx=%d entry_tx=%d READ addr=%x slot=%s val=%v internal=%v\n", site, bn, txIndex, i, vr.Address, hk, vr.Val, vr.internal)
-			return true
-		})
-		for _, vw := range io.WriteSet(i) {
-			if vw.Path != StoragePath {
-				continue
-			}
-			hv := vw.Key.Value()
-			hk := hex.EncodeToString(hv[:])
-			if !strings.HasSuffix(hk, "026794") {
-				continue
-			}
-			fmt.Fprintf(os.Stderr, "[BAL-IO] %s bn=%d tx=%d entry_tx=%d WRITE addr=%x slot=%s val=%v\n", site, bn, txIndex, i, vw.Address, hk, vw.Val)
-		}
-	}
-}
-
 func balDiagRecord(site string, s *IntraBlockState, addr accounts.Address, path AccountPath, key accounts.StorageKey, internal bool, val any) {
 	if path != StoragePath {
 		return
