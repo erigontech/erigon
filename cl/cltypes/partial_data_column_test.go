@@ -45,7 +45,7 @@ func testSSZRoundTrip(t *testing.T, testDir string, version clparams.StateVersio
 	// Check hash root
 	hashRoot, err := obj.HashSSZ()
 	require.NoError(t, err)
-	require.Equal(t, expectedRoot, hashRoot, "hash root mismatch")
+	require.Equal(t, expectedRoot, common.Hash(hashRoot), "hash root mismatch")
 
 	// Check encode round-trip
 	reEncoded, err := obj.EncodeSSZ(nil)
