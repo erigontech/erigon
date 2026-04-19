@@ -20,6 +20,11 @@ import (
 	"context"
 	"math/big"
 	"testing"
+	"time"
+
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
@@ -31,9 +36,6 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/holiman/uint256"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // ---------------------------------------------------------------------------
@@ -228,7 +230,7 @@ func validPayloadAttrs(parentTimestamp uint64) *engine_types.PayloadAttributes {
 }
 
 // newTestingAPI creates a testingImpl backed by a stub execution module.
-func newTestingAPI(cfg *chain.Config, stub *stubExecutionModule, enabled bool) TestingAPI {
+func newTestingAPI(cfg *chain.Config, stub *stubExecutionModule) TestingAPI {
 	srv := NewEngineServer(
 		log.New(),
 		cfg,
@@ -242,7 +244,7 @@ func newTestingAPI(cfg *chain.Config, stub *stubExecutionModule, enabled bool) T
 		0,     // fcuTimeout
 		0,     // maxReorgDepth
 	)
-	return NewTestingImpl(srv, enabled)
+	return NewTestingImpl(srv)
 }
 
 // makeAssembledBlock builds a minimal BlockWithReceipts for use in stub
@@ -287,22 +289,10 @@ func TestBuildBlockV1(t *testing.T) {
 	parentHdr := makeParentHeader(parentTimestamp)
 	parentHash := parentHdr.Hash()
 
-	t.Run("disabled gate", func(t *testing.T) {
-		t.Parallel()
-		stub := &stubExecutionModule{}
-		api := newTestingAPI(allForksChainConfig(), stub, false)
-		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), nil, nil)
-		require.Nil(t, resp)
-		require.Error(t, err)
-		var rpcErr *rpc.InvalidParamsError
-		require.ErrorAs(t, err, &rpcErr)
-		assert.Contains(t, rpcErr.Message, "testing namespace is disabled")
-	})
-
 	t.Run("nil payloadAttributes", func(t *testing.T) {
 		t.Parallel()
 		stub := &stubExecutionModule{}
-		api := newTestingAPI(allForksChainConfig(), stub, true)
+		api := newTestingAPI(allForksChainConfig(), stub)
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, nil, nil, nil)
 		require.Nil(t, resp)
 		require.Error(t, err)
@@ -314,7 +304,7 @@ func TestBuildBlockV1(t *testing.T) {
 	t.Run("explicit non-empty transaction list", func(t *testing.T) {
 		t.Parallel()
 		stub := &stubExecutionModule{}
-		api := newTestingAPI(allForksChainConfig(), stub, true)
+		api := newTestingAPI(allForksChainConfig(), stub)
 		txs := []hexutil.Bytes{{0x01, 0x02}}
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), &txs, nil)
 		require.Nil(t, resp)
@@ -334,7 +324,7 @@ func TestBuildBlockV1(t *testing.T) {
 				return nil, nil
 			},
 		}
-		api := newTestingAPI(allForksChainConfig(), stub, true)
+		api := newTestingAPI(allForksChainConfig(), stub)
 		txs := []hexutil.Bytes{} // empty slice, not nil
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), &txs, nil)
 		require.Nil(t, resp)
@@ -352,7 +342,7 @@ func TestBuildBlockV1(t *testing.T) {
 				return nil, nil
 			},
 		}
-		api := newTestingAPI(allForksChainConfig(), stub, true)
+		api := newTestingAPI(allForksChainConfig(), stub)
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), nil, nil)
 		require.Nil(t, resp)
 		require.Error(t, err)
@@ -366,7 +356,7 @@ func TestBuildBlockV1(t *testing.T) {
 		stub := &stubExecutionModule{
 			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
 		}
-		api := newTestingAPI(allForksChainConfig(), stub, true)
+		api := newTestingAPI(allForksChainConfig(), stub)
 		attrs := validPayloadAttrs(parentTimestamp)
 		attrs.Timestamp = hexutil.Uint64(parentTimestamp) // equal, not greater
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, attrs, nil, nil)
@@ -382,7 +372,7 @@ func TestBuildBlockV1(t *testing.T) {
 		stub := &stubExecutionModule{
 			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
 		}
-		api := newTestingAPI(allForksChainConfig(), stub, true)
+		api := newTestingAPI(allForksChainConfig(), stub)
 		attrs := validPayloadAttrs(parentTimestamp)
 		attrs.Timestamp = hexutil.Uint64(parentTimestamp - 1) // less than parent
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, attrs, nil, nil)
@@ -398,7 +388,7 @@ func TestBuildBlockV1(t *testing.T) {
 		stub := &stubExecutionModule{
 			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
 		}
-		api := newTestingAPI(allForksChainConfig(), stub, true)
+		api := newTestingAPI(allForksChainConfig(), stub)
 		attrs := validPayloadAttrs(parentTimestamp)
 		attrs.ParentBeaconBlockRoot = nil // required for Cancun+
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, attrs, nil, nil)
@@ -415,7 +405,7 @@ func TestBuildBlockV1(t *testing.T) {
 			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
 		}
 		// Use a pre-Cancun config (Shanghai only).
-		api := newTestingAPI(preCancunChainConfig(), stub, true)
+		api := newTestingAPI(preCancunChainConfig(), stub)
 		attrs := validPayloadAttrs(parentTimestamp)
 		// attrs already has ParentBeaconBlockRoot set, which is invalid pre-Cancun.
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, attrs, nil, nil)
@@ -427,8 +417,8 @@ func TestBuildBlockV1(t *testing.T) {
 	})
 
 	// These two tests exercise the waitForResponse busy-polling loop.
-	// We use an Aura config (5 s slot) to keep the timeout short while
-	// still validating the busy-path logic.
+	// We use context with a short deadline (100ms) so the busy-retry loop
+	// terminates quickly while still validating the busy-path logic.
 	shortSlotCfg := allForksChainConfig()
 	shortSlotCfg.Aura = &chain.AuRaConfig{} // SecondsPerSlot() == 5
 	shortSlotCfg.Ethash = nil               // Aura and Ethash are mutually exclusive
@@ -441,8 +431,10 @@ func TestBuildBlockV1(t *testing.T) {
 				return execmodule.AssembleBlockResult{Busy: true}, nil
 			},
 		}
-		api := newTestingAPI(shortSlotCfg, stub, true)
-		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), nil, nil)
+		api := newTestingAPI(shortSlotCfg, stub)
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+		resp, err := api.BuildBlockV1(ctx, parentHash, validPayloadAttrs(parentTimestamp), nil, nil)
 		require.Nil(t, resp)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "execution service is busy")
@@ -459,8 +451,10 @@ func TestBuildBlockV1(t *testing.T) {
 				return execmodule.AssembledBlockResult{Busy: true}, nil
 			},
 		}
-		api := newTestingAPI(shortSlotCfg, stub, true)
-		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), nil, nil)
+		api := newTestingAPI(shortSlotCfg, stub)
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+		resp, err := api.BuildBlockV1(ctx, parentHash, validPayloadAttrs(parentTimestamp), nil, nil)
 		require.Nil(t, resp)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "execution service is busy retrieving assembled block")
@@ -477,7 +471,7 @@ func TestBuildBlockV1(t *testing.T) {
 				return execmodule.AssembledBlockResult{Block: nil, Busy: false}, nil
 			},
 		}
-		api := newTestingAPI(allForksChainConfig(), stub, true)
+		api := newTestingAPI(allForksChainConfig(), stub)
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), nil, nil)
 		require.Nil(t, resp)
 		require.Error(t, err)
@@ -505,7 +499,7 @@ func TestBuildBlockV1(t *testing.T) {
 				return execmodule.AssembledBlockResult{Block: blk, BlockValue: blockValue, Busy: false}, nil
 			},
 		}
-		api := newTestingAPI(allForksChainConfig(), stub, true)
+		api := newTestingAPI(allForksChainConfig(), stub)
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), nil, nil)
 		require.NoError(t, err)
 		require.NotNil(t, resp)
@@ -539,7 +533,7 @@ func TestBuildBlockV1(t *testing.T) {
 				}, nil
 			},
 		}
-		api := newTestingAPI(allForksChainConfig(), stub, true)
+		api := newTestingAPI(allForksChainConfig(), stub)
 		overrideData := hexutil.Bytes("overridden-extra")
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), nil, &overrideData)
 		require.NoError(t, err)
@@ -554,7 +548,7 @@ func TestBuildBlockV1(t *testing.T) {
 			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
 		}
 		// Use pre-Cancun (Shanghai-only) config.
-		api := newTestingAPI(preCancunChainConfig(), stub, true)
+		api := newTestingAPI(preCancunChainConfig(), stub)
 		attrs := &engine_types.PayloadAttributes{
 			Timestamp:             hexutil.Uint64(parentTimestamp + 1),
 			PrevRandao:            common.Hash{0xaa},
@@ -576,7 +570,7 @@ func TestBuildBlockV1(t *testing.T) {
 			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
 		}
 		// Use pre-Shanghai config.
-		api := newTestingAPI(preShanghaiChainConfig(), stub, true)
+		api := newTestingAPI(preShanghaiChainConfig(), stub)
 		attrs := &engine_types.PayloadAttributes{
 			Timestamp:             hexutil.Uint64(parentTimestamp + 1),
 			PrevRandao:            common.Hash{0xaa},

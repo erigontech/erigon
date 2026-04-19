@@ -34,10 +34,8 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -88,11 +86,6 @@ func (c Cfg) WithValuesOnCompressedPage(n int) Cfg {
 	c.ValuesOnCompressedPage = n
 	return c
 }
-
-// WorkersLimiter is a caps global active compression workers
-// across all compressor instances in the app. Each worker goroutine acquires 1 from
-// this semaphore before doing CPU-heavy work.
-var WorkersLimiter = semaphore.NewWeighted(int64(dbg.CompressWorkers))
 
 var DefaultCfg = Cfg{
 	MinPatternScore: 1024,
@@ -229,8 +222,8 @@ func (c *Compressor) Count() int { return int(c.wordsCount) }
 // parallel small unit-tests which each create many small files and bufio
 // readers/writers — pooling avoids the allocation pressure in that scenario.
 var (
-	bufioWriterPool = sync.Pool{New: func() any { return bufio.NewWriterSize(nil, int(128*datasize.KB)) }}
-	bufioReaderPool = sync.Pool{New: func() any { return bufio.NewReaderSize(nil, int(128*datasize.KB)) }}
+	bufioWriterPool = sync.Pool{New: func() any { return bufio.NewWriterSize(nil, int(256*datasize.KB)) }}
+	bufioReaderPool = sync.Pool{New: func() any { return bufio.NewReaderSize(nil, int(256*datasize.KB)) }}
 )
 
 func getBufioWriter(w io.Writer) *bufio.Writer {
@@ -309,11 +302,6 @@ func (c *Compressor) AddUncompressedWord(word []byte) error {
 }
 
 func (c *Compressor) Compress() error {
-	if err := WorkersLimiter.Acquire(c.ctx, 1); err != nil {
-		return err
-	}
-	defer WorkersLimiter.Release(1)
-
 	if err := c.uncompressedFile.Flush(); err != nil {
 		return err
 	}

@@ -24,6 +24,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -955,22 +956,7 @@ func (sdb *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int
 	// EIP161: We must check emptiness for the objects such that the account
 	// clearing (0,0,0 objects) can take effect.
 	if amount.IsZero() {
-		stateObject, err := sdb.GetOrNewStateObject(addr)
-		if err != nil {
-			return err
-		}
-
-		if stateObject.data.Empty() {
-			versionWritten(sdb, addr, BalancePath, accounts.NilKey, uint256.Int{})
-			if _, ok := sdb.journal.dirties[addr]; !ok {
-				if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
-					fmt.Printf("%d (%d.%d) Touch %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
-				}
-				sdb.touchAccount(addr)
-			}
-		}
-
-		return nil
+		return sdb.TouchAccount(addr)
 	}
 
 	prev, wasCommited, _ := sdb.getBalance(addr)
@@ -1008,6 +994,27 @@ func (sdb *IntraBlockState) touchAccount(addr accounts.Address) {
 		// flattened journals.
 		sdb.journal.dirty(addr)
 	}
+}
+
+// TouchAccount materializes an empty account and records the zero-balance touch
+// needed for state clearing and trie consistency.
+func (sdb *IntraBlockState) TouchAccount(addr accounts.Address) error {
+	stateObject, err := sdb.GetOrNewStateObject(addr)
+	if err != nil {
+		return err
+	}
+
+	if stateObject.data.Empty() {
+		versionWritten(sdb, addr, BalancePath, accounts.NilKey, uint256.Int{})
+		if _, ok := sdb.journal.dirties[addr]; !ok {
+			if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
+				fmt.Printf("%d (%d.%d) Touch %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
+			}
+			sdb.touchAccount(addr)
+		}
+	}
+
+	return nil
 }
 
 func (sdb *IntraBlockState) getVersionedAccount(addr accounts.Address, readStorage bool) (*accounts.Account, ReadSource, Version, error) {
@@ -1140,10 +1147,17 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readA
 // SubBalance subtracts amount from the account associated with addr.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) SubBalance(addr accounts.Address, amount uint256.Int, reason tracing.BalanceChangeReason) error {
-	if amount.IsZero() && addr != params.SystemAddress {
-		// We skip this early exit if the sender is the system address
-		// because Gnosis has a special logic to create an empty system account
-		// even after Spurious Dragon (see PR 5645 and Issue 18276).
+	if amount.IsZero() {
+		if addr == params.SystemAddress {
+			// Gnosis/AuRa keeps an empty system account even after
+			// Spurious Dragon (see PR 5645 and Issue 18276).
+			//
+			// The primary syscall path in evm.call() handles this via
+			// TouchAccount directly; this branch is retained as
+			// defense-in-depth for other callers (AuRa engine,
+			// consensus callbacks).
+			return sdb.TouchAccount(addr)
+		}
 		return nil
 	}
 
@@ -2021,6 +2035,36 @@ func (sdb *IntraBlockState) CommitBlock(chainRules *chain.Rules, stateWriter Sta
 	return sdb.MakeWriteSet(chainRules, stateWriter)
 }
 
+// ExtractAndClearDirty snapshots the current stateObjectsDirty set and clears it.
+// Used by eth_simulateV1 to separate accounts dirtied by stateOverrides from those
+// dirtied by actual transaction execution, so CommitBlock does not apply EIP-161 to
+// override-only accounts.
+func (sdb *IntraBlockState) ExtractAndClearDirty() map[accounts.Address]struct{} {
+	dirty := maps.Clone(sdb.stateObjectsDirty)
+	clear(sdb.stateObjectsDirty)
+	return dirty
+}
+
+// CommitOverrideDirtyAccounts writes state-override accounts that were not subsequently
+// touched by any transaction (and therefore not handled by CommitBlock).  EIP-161 is
+// intentionally disabled: override accounts are simulation-only mutations and must not
+// be removed simply because they are "empty" by consensus rules.
+func (sdb *IntraBlockState) CommitOverrideDirtyAccounts(chainRules *chain.Rules, stateWriter StateWriter, overrideDirty map[accounts.Address]struct{}) error {
+	for addr := range overrideDirty {
+		if _, alsoTxDirty := sdb.stateObjectsDirty[addr]; alsoTxDirty {
+			continue // CommitBlock already handled this address
+		}
+		so, exists := sdb.stateObjects[addr]
+		if !exists || so.deleted {
+			continue
+		}
+		if err := updateAccount(false, chainRules.IsAura, stateWriter, addr, so, true, sdb.trace, sdb.tracingHooks, true); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (sdb *IntraBlockState) BalanceIncreaseSet() map[accounts.Address]uint256.Int {
 	s := make(map[accounts.Address]uint256.Int, len(sdb.balanceInc))
 	for addr, bi := range sdb.balanceInc {
@@ -2253,6 +2297,41 @@ func (sdb *IntraBlockState) MarkReadsInternal(addr accounts.Address) {
 		return
 	}
 	for key, vr := range sdb.versionedReads[addr] {
+		vr.internal = true
+		sdb.versionedReads[addr][key] = vr
+	}
+}
+
+// SnapshotVersionedReadKeys returns the current set of read keys for addr.
+// Used with MarkNewReadsInternal to mark only reads added after the snapshot,
+// preserving pre-existing legitimate reads.
+func (sdb *IntraBlockState) SnapshotVersionedReadKeys(addr accounts.Address) map[AccountKey]struct{} {
+	if sdb.versionedReads == nil {
+		return nil
+	}
+	reads := sdb.versionedReads[addr]
+	if len(reads) == 0 {
+		return nil
+	}
+	snapshot := make(map[AccountKey]struct{}, len(reads))
+	for k := range reads {
+		snapshot[k] = struct{}{}
+	}
+	return snapshot
+}
+
+// MarkNewReadsInternal marks as internal only the reads for addr that were
+// added after the given snapshot. Use this when gas-calculation-only reads
+// were recorded on top of earlier legitimate reads — the legitimate ones
+// must remain non-internal so they appear in the block access list.
+func (sdb *IntraBlockState) MarkNewReadsInternal(addr accounts.Address, before map[AccountKey]struct{}) {
+	if sdb.versionedReads == nil {
+		return
+	}
+	for key, vr := range sdb.versionedReads[addr] {
+		if _, existed := before[key]; existed {
+			continue
+		}
 		vr.internal = true
 		sdb.versionedReads[addr][key] = vr
 	}

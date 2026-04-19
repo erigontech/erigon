@@ -881,7 +881,7 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			sd, err := execctx.NewSharedDomains(ctx, tx, logger)
 			asrt.NoError(err)
 			defer sd.Close()
-			cache := kvcache.NewDummy()
+			cache := kvcache.NewSimple()
 			pool, err := New(ctx, ch, nil, coreDB, cfg, cache, chainConfig, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
 			asrt.NoError(err)
 
@@ -997,7 +997,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	var chainConfig chain.Config
 	copier.Copy(&chainConfig, testforks.Forks["Prague"])
 	chainConfig.ChainID = maxUint256.ToBig()
-	cache := kvcache.NewDummy()
+	cache := kvcache.NewSimple()
 	logger := log.New()
 	pool, err := New(ctx, ch, nil, coreDB, cfg, cache, &chainConfig, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
 	require.NoError(t, err)
@@ -2030,8 +2030,8 @@ func TestStalePendingEvictionViaMineNonce(t *testing.T) {
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	cfg := txpoolcfg.DefaultConfig
 
-	// DummyCache reads directly from the DB — avoids coherence-version coupling.
-	pool, err := New(ctx, ch, nil, coreDB, cfg, kvcache.NewDummy(), chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
+	// SimpleCache — avoids coherence-version coupling.
+	pool, err := New(ctx, ch, nil, coreDB, cfg, kvcache.NewSimple(), chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
 	req.NoError(err)
 	req.NotNil(pool)
 
@@ -2040,7 +2040,7 @@ func TestStalePendingEvictionViaMineNonce(t *testing.T) {
 	h0 := gointerfaces.ConvertHashToH256([32]byte{})
 
 	// writeAccount writes addr1 to coreDB at the given nonce so that senders.info
-	// (which reads from the DB when using DummyCache) returns the expected value.
+	// (which reads from cache if present, otherwise from the DB) returns the expected value.
 	writeAccount := func(nonce, txNum uint64) {
 		tx, werr := coreDB.BeginTemporalRw(ctx)
 		req.NoError(werr)

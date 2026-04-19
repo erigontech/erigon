@@ -27,6 +27,24 @@ import (
 	"github.com/erigontech/erigon/p2p/protocols/wit"
 )
 
+type mockHeaderReader struct {
+	headers map[common.Hash]*types.Header
+}
+
+func newMockHeaderReader() *mockHeaderReader {
+	return &mockHeaderReader{
+		headers: make(map[common.Hash]*types.Header),
+	}
+}
+
+func (m *mockHeaderReader) GetHeader(hash common.Hash, number uint64) *types.Header {
+	return m.headers[hash]
+}
+
+func (m *mockHeaderReader) addHeader(header *types.Header) {
+	m.headers[header.Hash()] = header
+}
+
 func addTestWitnessData(db kv.TemporalRwDB, hash common.Hash, witnessData []byte, blockNumber uint64) error {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
@@ -72,7 +90,16 @@ func addTestWitnessData(db kv.TemporalRwDB, hash common.Hash, witnessData []byte
 func createTestWitness(t *testing.T, header *types.Header) *stateless.Witness {
 	t.Helper()
 
-	witness, err := stateless.NewWitness(header, nil)
+	parentHeader := &types.Header{
+		Number: *uint256.NewInt(header.Number.Uint64() - 1),
+		Root:   common.HexToHash("0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"),
+	}
+	header.ParentHash = parentHeader.Hash()
+
+	headerReader := newMockHeaderReader()
+	headerReader.addHeader(parentHeader)
+
+	witness, err := stateless.NewWitness(header, headerReader)
 	require.NoError(t, err)
 
 	testState := map[string]struct{}{

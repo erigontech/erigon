@@ -2,6 +2,13 @@
 
 Erigon uses a temporal database architecture separating hot (mutable) from cold (immutable) data.
 
+## Data Flow
+
+1. New state changes → hot MDBX tables
+2. Periodic snapshots freeze old data
+3. Cold data compressed for long-term storage
+4. `Unwind` beyond data in snapshots not allowed
+
 ## Storage Architecture
 
 ```
@@ -59,10 +66,3 @@ Sorts data before database insertion to reduce write amplification:
 - Downloaded via BitTorrent with WebSeed fallback
 - Piece size: 2MB default
 - Verification on download
-
-## Data Flow
-
-1. New state changes → hot MDBX tables
-2. ETL sorts before insertion
-3. Periodic snapshots freeze old data
-4. Cold data compressed for long-term storage

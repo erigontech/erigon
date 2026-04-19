@@ -391,7 +391,7 @@ jobs:
 
       - name: Upload RpcDaemon logs
         if: always() && matrix.client == 'erigon' && steps.rpcdaemon_running_step.outputs.rpc_daemon_started == 'true'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: rpcdaemon-logs
           path: ${{ github.workspace }}/build/bin/erigon.log

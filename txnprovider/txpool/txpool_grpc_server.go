@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"math"
 	"net"
-	"sync"
 	"time"
 
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/recovery"
@@ -39,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
@@ -320,49 +320,7 @@ func (s *GrpcServer) Nonce(ctx context.Context, in *txpoolproto.NonceRequest) (*
 }
 
 // NewSlotsStreams - it's safe to use this class as non-pointer
-type NewSlotsStreams struct {
-	chans map[uint]txpoolproto.Txpool_OnAddServer
-	mu    sync.Mutex
-	id    uint
-}
-
-func (s *NewSlotsStreams) Add(stream txpoolproto.Txpool_OnAddServer) (remove func()) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.chans == nil {
-		s.chans = make(map[uint]txpoolproto.Txpool_OnAddServer)
-	}
-	s.id++
-	id := s.id
-	s.chans[id] = stream
-	return func() { s.remove(id) }
-}
-
-func (s *NewSlotsStreams) Broadcast(reply *txpoolproto.OnAddReply, logger log.Logger) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for id, stream := range s.chans {
-		err := stream.Send(reply)
-		if err != nil {
-			logger.Debug("failed send to mined block stream", "err", err)
-			select {
-			case <-stream.Context().Done():
-				delete(s.chans, id)
-			default:
-			}
-		}
-	}
-}
-
-func (s *NewSlotsStreams) remove(id uint) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_, ok := s.chans[id]
-	if !ok { // double-unsubscribe support
-		return
-	}
-	delete(s.chans, id)
-}
+type NewSlotsStreams = grpcutil.StreamBroadcaster[txpoolproto.OnAddReply]
 
 func StartGrpc(txPoolServer txpoolproto.TxpoolServer, miningServer txpoolproto.MiningServer, addr string, creds *credentials.TransportCredentials, logger log.Logger) (*grpc.Server, error) {
 	lis, err := net.Listen("tcp", addr)

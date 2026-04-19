@@ -304,13 +304,6 @@ Flags for controlling logging and performance profiling.
 
 Flags related to consensus mechanisms and network forks.
 
-* `--clique.checkpoint value`: The number of blocks after which to save the vote snapshot.
-  * Default: `10`
-* `--clique.snapshots value`: The number of recent vote snapshots to keep in memory.
-  * Default: `1024`
-* `--clique.signatures value`: The number of recent block signatures to keep in memory.
-  * Default: `16384`
-* `--clique.datadir value`: The path to the clique database folder.
 * `--fakepow`: Disables proof-of-work verification.
   * Default: `false`
 * `--gpo.blocks value`: The number of recent blocks to check for gas prices.
@@ -732,7 +725,6 @@ GLOBAL OPTIONS:
    --maxpeers value                                                                                                        Maximum number of network peers per protocol version (network disabled if set to 0) (default: 32)
    --maxpendpeers value                                                                                                    Maximum number of TCP connections pending to become connected peers (per protocol version) (default: 1000)
    --chain value                                                                                                           name of the network to join (default: "mainnet")
-   --dev.period value                                                                                                      Block period to use in developer mode (0 = mine only if transaction pending) (default: 0)
    --vmdebug                                                                                                               Record information useful for VM and contract debugging (default: false)
    --networkid value                                                                                                       Explicitly set network id (integer)(For testnets: use --chain <testnet_name> instead) (default: 1)
    --persist.receipts, --experiment.persist.receipts.v2                                                                    Download historical Receipts. If disabled: using state-history to re-exec transactions and generate Receipts - all RPC: eth_getLogs, eth_getBlockReceipts will work (just higher latency) (default: false)
@@ -741,10 +733,6 @@ GLOBAL OPTIONS:
    --gpo.percentile value                                                                                                  Suggested gas price is the given percentile of a set of recent transaction gas prices (default: 60)
    --allow-insecure-unlock                                                                                                 Allow insecure account unlocking when account-related RPCs are exposed by http (default: false)
    --identity value                                                                                                        Custom node name
-   --clique.checkpoint value                                                                                               Number of blocks after which to save the vote snapshot to the database (default: 10)
-   --clique.snapshots value                                                                                                Number of recent vote snapshots to keep in memory (default: 1024)
-   --clique.signatures value                                                                                               Number of recent block signatures to keep in memory (default: 16384)
-   --clique.datadir value                                                                                                  Path to clique db folder
    --proposer.disable                                                                                                      Disables PoS proposer (default: false)
    --miner.gaslimit value                                                                                                  Target gas limit for mined blocks (default: 0)
    --miner.etherbase value                                                                                                 Public address for block mining rewards (default: "0")

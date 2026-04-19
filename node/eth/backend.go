@@ -55,8 +55,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader"
-	"github.com/erigontech/erigon/db/downloader/downloadercfg"
-	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/kvcache"
@@ -93,21 +91,23 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node"
+	storagecomp "github.com/erigontech/erigon/node/components/storage"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/ethstats"
-	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
-	"github.com/erigontech/erigon/node/nodecfg"
+	"github.com/erigontech/erigon/node/nodebuilder"
 	privateapi2 "github.com/erigontech/erigon/node/privateapi"
 	"github.com/erigontech/erigon/node/rulesconfig"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/enr"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/p2p/sentry/libsentry"
@@ -202,7 +202,7 @@ type Ethereum struct {
 	txPoolRpcClient           txpoolproto.TxpoolClient
 	shutterPool               *shutter.Pool
 	blockBuilderNotifyNewTxns chan struct{}
-	downloader                *downloader.Downloader
+	components                *nodebuilder.Builder
 
 	blockSnapshots *freezeblocks.RoSnapshots
 	blockReader    services.FullBlockReader
@@ -410,14 +410,43 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.blockSnapshots, backend.blockReader, backend.blockWriter = allSnapshots, blockReader, blockWriter
 	backend.chainDB = temporalDb
 
-	// Can happen in some configurations
-	if err := backend.setUpSnapDownloader(ctx, stack.Config(), config.Downloader); err != nil {
+	// Initialize extracted components.
+	//
+	// Downloader is initialized here; OnFilesChange file-change callbacks
+	// are registered inside storage.Provider.Initialize (see BuildStorage
+	// call further below), not in backend.go.
+	backend.components = nodebuilder.New()
+	if err := backend.components.BuildDownloader(ctx, config.Downloader, config.Snapshot, config.Dirs, logger, stack.Config().DebugMux); err != nil {
 		return nil, err
 	}
+	backend.downloaderClient = backend.components.Downloader.Client
 
-	kvRPC := remotedbserver.NewKvServer(ctx, backend.chainDB, allSnapshots, allBorSnapshots, temporalDb.Debug(), logger)
+	// KV RPC + Notifications stay in backend.go — Notifications is an
+	// execution-layer concern that will move to the execution component.
+	kvRPC := remotedbserver.NewKvServer(ctx, temporalDb, allSnapshots, allBorSnapshots, temporalDb.Debug(), logger)
 	backend.notifications = shards.NewNotifications(kvRPC)
 	backend.kvRPC = kvRPC
+
+	// Storage component: owns DB references, file-change callbacks, block retire.
+	if err := backend.components.BuildStorage(storagecomp.Deps{
+		Ctx:                  ctx,
+		ChainDB:              temporalDb,
+		BlockReader:          blockReader,
+		BlockWriter:          blockWriter,
+		AllSnapshots:         allSnapshots,
+		AllBorSnapshots:      allBorSnapshots,
+		BridgeStore:          bridgeStore,
+		HeimdallStore:        heimdallStore,
+		ChainConfig:          chainConfig,
+		Genesis:              genesis,
+		Config:               config,
+		DBEventNotifier:      backend.notifications.Events,
+		DownloaderClient:     backend.downloaderClient,
+		SegmentsBuildLimiter: segmentsBuildLimiter,
+		Logger:               logger,
+	}); err != nil {
+		return nil, err
+	}
 
 	p2pConfig := stack.Config().P2P
 	var sentries []sentryproto.SentryClient
@@ -535,6 +564,99 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}()
 	}
 
+	// Wire chain.toml ENR updater and P2P discovery after sentry servers are created.
+	// Only applies in local downloader mode; remote-downloader mode has nil Downloader.
+	// Gated behind --snap.p2p-manifest so default syncs stay on the pre-v2 path and
+	// avoid the torrent-name collision between a locally-seeded chain.toml and the
+	// downloaded chain.toml.torrent in AddTorrentsFromDisk (see #20615).
+	if backend.components.Downloader.Downloader != nil && len(backend.sentryServers) > 0 && backend.config.Snapshot.P2PManifest {
+		dl := backend.components.Downloader.Downloader
+		dl.SetENRUpdater(func(ct enr.ChainToml) {
+			// Resolve the torrent port at update time rather than capture-time:
+			// the torrent client may not be listening yet when the updater
+			// closure is built. Only set the "bt" ENR key if we have a valid
+			// port in [1..65535]; otherwise peers would dial an unusable port.
+			torrentPort := dl.TorrentPort()
+			validPort := torrentPort > 0 && torrentPort <= 65535
+
+			for _, srv := range backend.sentryServers {
+				if p2p := srv.GetP2PServer(); p2p != nil {
+					p2p.LocalNode().Set(ct)
+					if validPort {
+						p2p.LocalNode().Set(enr.BT(torrentPort))
+					}
+				}
+			}
+			if !validPort {
+				logger.Debug("[chaintoml] skipping bt ENR entry (no valid torrent port yet)", "torrentPort", torrentPort)
+			}
+		})
+
+		sentryServers := backend.sentryServers
+		dl.SetNodeSourceFn(func() downloader.NodeSource {
+			var sources []downloader.NodeSource
+			for _, srv := range sentryServers {
+				p2pSrv := srv.GetP2PServer()
+				if p2pSrv == nil {
+					continue
+				}
+				dv5 := p2pSrv.DiscV5()
+				// Add directly connected devp2p peers FIRST — resolved peers take
+				// priority over discv5 routing table entries which may have stale ENRs.
+				srv := p2pSrv // capture for closure
+				peersFn := func() []*enode.Node {
+					peers := srv.Peers()
+					nodes := make([]*enode.Node, len(peers))
+					for i, p := range peers {
+						nodes[i] = p.Node()
+					}
+					return nodes
+				}
+				if dv5 != nil {
+					sources = append(sources, &downloader.ResolvingPeerNodeSource{
+						PeersFn:  peersFn,
+						Resolver: dv5,
+					})
+				} else {
+					sources = append(sources, &downloader.PeerNodeSource{
+						PeersFn: peersFn,
+					})
+				}
+				// Add discv5 routing table (deduped by CompositeNodeSource).
+				if dv5 != nil {
+					sources = append(sources, dv5)
+				}
+			}
+			if len(sources) == 0 {
+				return nil
+			}
+			return &downloader.CompositeNodeSource{Sources: sources}
+		})
+
+		// Re-publish chain.toml ENR entry after a delay to let P2P servers start.
+		// P2P servers start lazily on SetStatus(), so the ENR updater callback
+		// needs the P2P server to be running before it can set ENR entries.
+		go func() {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(30 * time.Second):
+			}
+			if pubErr := dl.PublishLocalChainToml(); pubErr != nil {
+				logger.Debug("[chaintoml] no existing chain.toml to re-publish", "err", pubErr)
+			} else {
+				logger.Info("[chaintoml] re-published existing chain.toml ENR entry")
+			}
+		}()
+
+		if backend.config.Snapshot.P2PManifest {
+			dl.StartChainTomlDiscovery(ctx, backend.config.Snapshot.ChainName)
+		}
+
+		// Start torrent peer manager — keeps torrent peers in sync with DevP2P peers.
+		dl.StartTorrentPeerManager(ctx)
+	}
+
 	// setup periodic logging and prometheus updates
 	go mem.LogMemStats(ctx, logger)
 	go disk.UpdateDiskStats(ctx, logger)
@@ -556,9 +678,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	logger.Info("Initialising Ethereum protocol", "network", config.NetworkID)
 	var rulesConfig any
 
-	if chainConfig.Clique != nil {
-		rulesConfig = &config.Clique
-	} else if chainConfig.Aura != nil {
+	if chainConfig.Aura != nil {
 		rulesConfig = &config.Aura
 	} else if chainConfig.Bor != nil {
 		rulesConfig = chainConfig.Bor
@@ -704,7 +824,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		chainConfig,
 	)
 
-	backend.stateDiffClient = direct.NewStateDiffClientDirect(kvRPC)
+	backend.stateDiffClient = direct.NewStateDiffClientDirect(backend.kvRPC)
 	var txnProvider txnprovider.TxnProvider
 	if config.TxPool.Disable {
 		backend.txPoolGrpcServer = &txpool.GrpcDisabled{}
@@ -720,7 +840,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			ctx,
 			config.TxPool,
 			backend.chainDB,
-			kvcache.NewDummy(),
+			kvcache.NewSimple(),
 			sentries,
 			backend.stateDiffClient,
 			blockBuilderNotifyNewTxns,
@@ -867,7 +987,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	)
 	backend.pendingBlocks = blkBuilder.PendingBlockCh()
 
-	blockRetire := freezeblocks.NewBlockRetire(1, dirs, blockReader, blockWriter, backend.chainDB, heimdallStore, bridgeStore, backend.chainConfig, config, backend.notifications.Events, segmentsBuildLimiter, logger)
+	blockRetire := backend.components.Storage.BlockRetire
 	var creds credentials.TransportCredentials
 	if stack.Config().PrivateApiAddr != "" {
 		if stack.Config().TLSConnection {
@@ -877,7 +997,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			}
 		}
 		backend.privateAPI, err = privateapi2.StartGrpc(
-			kvRPC,
+			backend.kvRPC,
 			backend.ethBackendRPC,
 			backend.txPoolGrpcServer,
 			backend.miningRPC,
@@ -937,9 +1057,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	// snapshots not in that set could cause issues. That's an unsolved issue and probably requires
 	// always resetting before resuming/starting a sync.
 	var afterSnapshotDownload func(ctx context.Context) error
-	if backend.downloader != nil {
+	if backend.components.Downloader != nil && backend.components.Downloader.Downloader != nil {
 		afterSnapshotDownload = func(ctx context.Context) (err error) {
-			incomplete, err := backend.downloader.AddTorrentsFromDisk(ctx)
+			incomplete, err := backend.components.Downloader.Downloader.AddTorrentsFromDisk(ctx)
 			if err != nil {
 				err = fmt.Errorf("adding torrents from disk: %w", err)
 				return
@@ -1163,6 +1283,11 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 
 	s.apiList = jsonrpc.APIList(chainKv, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &httpRpcCfg, s.engine, s.logger, s.polygonBridge, s.heimdallService)
 
+	if slices.Contains(httpRpcCfg.API, "testing") {
+		s.logger.Warn("[HTTP API] testing_ RPC namespace is ENABLED — do not use on production networks")
+		s.apiList = append(s.apiList, engineapi.NewTestingRPCEntry(s.engineBackendRPC))
+	}
+
 	s.bgComponentsEg.Go(func() error {
 		err := rpcdaemoncli.StartRpcServer(ctx, &httpRpcCfg, s.apiList, s.logger)
 		if err != nil && !errors.Is(err, context.Canceled) {
@@ -1253,90 +1378,6 @@ func (s *Ethereum) NodesInfo(limit int) (*remoteproto.NodesInfoReply, error) {
 	slices.SortFunc(nodesInfo.NodesInfo, remoteproto.NodeInfoReplyCmp)
 
 	return nodesInfo, nil
-}
-
-// sets up blockReader and client downloader
-func (s *Ethereum) setUpSnapDownloader(
-	ctx context.Context,
-	nodeCfg *nodecfg.Config,
-	downloaderCfg *downloadercfg.Cfg,
-) (err error) {
-	s.chainDB.OnFilesChange(func(frozenFileNames []string) {
-		s.logger.Debug("files changed...sending notification")
-		events := s.notifications.Events
-		events.OnNewSnapshot()
-		if downloaderCfg != nil && downloaderCfg.ChainName == "" {
-			return
-		}
-		if s.config.Snapshot.NoDownloader || s.downloaderClient == nil || len(frozenFileNames) == 0 {
-			return
-		}
-
-		if err := s.downloaderClient.Seed(ctx, frozenFileNames); err != nil {
-			s.logger.Warn("[snapshots] downloader.Seed", "err", err)
-		}
-	}, func(deletedFiles []string) {
-		if downloaderCfg != nil && downloaderCfg.ChainName == "" {
-			return
-		}
-		if s.config.Snapshot.NoDownloader || s.downloaderClient == nil || len(deletedFiles) == 0 {
-			return
-		}
-
-		if err := s.downloaderClient.Delete(ctx, deletedFiles); err != nil {
-			s.logger.Warn("[snapshots] downloader.Delete", "err", err)
-		}
-	})
-
-	if s.config.Snapshot.NoDownloader {
-		return nil
-	}
-
-	if downloaderCfg != nil {
-		if err := downloadercfg.LoadSnapshotsHashes(ctx, downloaderCfg.Dirs, downloaderCfg.ChainName); err != nil {
-			return err
-		}
-	}
-
-	client, err := s.initDownloader(ctx, nodeCfg, downloaderCfg)
-	if err != nil {
-		return
-	}
-	if client != nil {
-		s.downloaderClient = downloader.NewRpcClient(client, s.config.Dirs.Snap)
-	}
-	return err
-}
-
-// Init s.downloader, and return suitable client for it.
-func (s *Ethereum) initDownloader(
-	ctx context.Context,
-	nodeCfg *nodecfg.Config,
-	downloaderCfg *downloadercfg.Cfg,
-) (client downloaderproto.DownloaderClient, err error) {
-	if s.config.Snapshot.DownloaderAddr != "" {
-		// connect to external Downloader
-		return downloadergrpc.NewClient(ctx, s.config.Snapshot.DownloaderAddr)
-	}
-	if downloaderCfg == nil || downloaderCfg.ChainName == "" {
-		return
-	}
-
-	s.downloader, err = downloader.New(ctx, downloaderCfg, s.logger)
-	if err != nil {
-		return
-	}
-	s.downloader.HandleTorrentClientStatus(nodeCfg.DebugMux)
-
-	bittorrentServer, err := downloader.NewGrpcServer(s.downloader)
-	if err != nil {
-		err = fmt.Errorf("new server: %w", err)
-		return
-	}
-	s.downloader.InitBackgroundLogger(true)
-
-	client = downloader.DirectGrpcServerClient(bittorrentServer)
-	return
 }
 
 func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig *ethconfig.Config, chainConfig *chain.Config, dbReadConcurrency int, logger log.Logger, blockSnapBuildSema *semaphore.Weighted) (*freezeblocks.BlockReader, *blockio.BlockWriter, *freezeblocks.RoSnapshots, *heimdall.RoSnapshots, bridge.Store, heimdall.Store, kv.TemporalRwDB, error) {
@@ -1468,6 +1509,17 @@ func (s *Ethereum) Start() error {
 	s.sentriesClient.StartStreamLoops(s.sentryCtx)
 	time.Sleep(10 * time.Millisecond) // just to reduce logs order confusion
 
+	// Subscribe to new-header events so StatusDataProvider can invalidate
+	// its cache when the chain head advances — zero DB reads on the hot path.
+	headersCh, unsubHeaders := s.notifications.Events.AddHeaderSubscription()
+	snapshotsCh, unsubSnapshots := s.notifications.Events.AddNewSnapshotSubscription()
+	s.bgComponentsEg.Go(func() error {
+		defer unsubHeaders()
+		defer unsubSnapshots()
+		s.statusDataProvider.Run(s.sentryCtx, headersCh, snapshotsCh)
+		return nil
+	})
+
 	if s.executionP2PMessageListener != nil && s.executionP2PPeerTracker != nil && s.executionP2PPublisher != nil {
 		s.bgComponentsEg.Go(func() error {
 			defer s.logger.Info("[p2p] MessageListener goroutine terminated")
@@ -1577,8 +1629,8 @@ func (s *Ethereum) Stop() error {
 	if s.unsubscribeEthstat != nil {
 		s.unsubscribeEthstat()
 	}
-	if s.downloader != nil {
-		s.downloader.Close()
+	if s.components != nil && s.components.Downloader != nil {
+		s.components.Downloader.Close()
 	}
 	if s.privateAPI != nil {
 		shutdownDone := make(chan bool)

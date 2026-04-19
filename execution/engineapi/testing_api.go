@@ -17,7 +17,8 @@
 package engineapi
 
 // testing_api.go implements the testing_ RPC namespace, specifically testing_buildBlockV1.
-// This namespace MUST NOT be enabled on production networks. Gate it with --rpc.testing.
+// Enable via --http.api=...,testing (e.g. --http.api eth,erigon,testing).
+// This namespace MUST NOT be enabled on production networks.
 
 import (
 	"context"
@@ -52,13 +53,22 @@ type TestingAPI interface {
 
 // testingImpl is the concrete implementation of TestingAPI.
 type testingImpl struct {
-	server  *EngineServer
-	enabled bool
+	server *EngineServer
 }
 
 // NewTestingImpl returns a new TestingAPI implementation wrapping the given EngineServer.
-func NewTestingImpl(server *EngineServer, enabled bool) TestingAPI {
-	return &testingImpl{server: server, enabled: enabled}
+func NewTestingImpl(server *EngineServer) TestingAPI {
+	return &testingImpl{server: server}
+}
+
+// NewTestingRPCEntry returns the rpc.API descriptor for the testing_ namespace.
+func NewTestingRPCEntry(server *EngineServer) rpc.API {
+	return rpc.API{
+		Namespace: "testing",
+		Public:    false,
+		Service:   TestingAPI(NewTestingImpl(server)),
+		Version:   "1.0",
+	}
 }
 
 // BuildBlockV1 implements TestingAPI.
@@ -69,10 +79,6 @@ func (t *testingImpl) BuildBlockV1(
 	transactions *[]hexutil.Bytes,
 	extraData *hexutil.Bytes,
 ) (*engine_types.GetPayloadResponse, error) {
-	if !t.enabled {
-		return nil, &rpc.InvalidParamsError{Message: "testing namespace is disabled; start erigon with --rpc.testing (WARNING: not for production use)"}
-	}
-
 	if payloadAttributes == nil {
 		return nil, &rpc.InvalidParamsError{Message: "payloadAttributes must not be null"}
 	}
@@ -143,7 +149,11 @@ func (t *testingImpl) BuildBlockV1(
 	// time of BuildBlockV1 is bounded to one slot (e.g. 12 s), not two.
 	// Each step acquires the lock independently, matching production behaviour
 	// where ForkChoiceUpdated and GetPayload are separate RPC calls.
+	// If the caller already set a context deadline shorter than one slot, honour it.
 	deadline := time.Now().Add(time.Duration(t.server.config.SecondsPerSlot()) * time.Second)
+	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
+		deadline = ctxDeadline
+	}
 
 	// Step 1: AssembleBlock (locked scope).
 	var payloadID uint64

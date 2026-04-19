@@ -60,19 +60,7 @@ func (r *CachedReader3) ReadAccountData(address accounts.Address) (*accounts.Acc
 // ReadAccountDataForDebug - is like ReadAccountData, but without adding key to `readList`.
 // Used to get `prev` account balance
 func (r *CachedReader3) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
-	addressValue := address.Value()
-	enc, err := r.cache.Get(addressValue[:])
-	if err != nil {
-		return nil, err
-	}
-	if len(enc) == 0 {
-		return nil, nil
-	}
-	a := accounts.Account{}
-	if err = accounts.DeserialiseV3(&a, enc); err != nil {
-		return nil, err
-	}
-	return &a, nil
+	return r.ReadAccountData(address)
 }
 
 func (r *CachedReader3) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
