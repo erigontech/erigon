@@ -17,6 +17,7 @@ import (
 )
 
 func TestDependency(t *testing.T) {
+	t.Parallel()
 	// shouldn't pass dependency file not present in dependent
 	// commitment.0-1, 1-2 => 0-1, 1-2
 	// account.0-1, 1-2, 0-2 => 0-1, 1-2
@@ -57,6 +58,7 @@ func TestDependency(t *testing.T) {
 }
 
 func TestDependency_UnindexedMerged(t *testing.T) {
+	t.Parallel()
 	// shouldn't allow to delete file
 	// commitment.0-1, 1-2, 0-2; but 0-2 is unindexed
 	// account.0-1, 1-2, 0-2
@@ -99,6 +101,7 @@ func TestDependency_UnindexedMerged(t *testing.T) {
 }
 
 func TestDependency_DisableInterDomain(t *testing.T) {
+	t.Parallel()
 	// DisableInterDomain should bypass domain→domain (inter-domain) checks
 	// while preserving II→history (intra-domain) checks.
 	//
