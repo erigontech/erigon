@@ -260,6 +260,19 @@ const (
 	PendingConsolidations         = "PendingConsolidations"         // slot => queue_diffs
 	// End Electra
 
+	// GLOAS (EIP-7732)
+	BuildersDump                      = "BuildersDump"                   // slot => dump
+	Builders                          = "Builders"                       // slot => queue_diffs
+	BuilderPendingWithdrawalsDump     = "BuilderPendingWithdrawalsDump"  // slot => dump
+	BuilderPendingWithdrawals         = "BuilderPendingWithdrawals"      // slot => queue_diffs
+	PayloadExpectedWithdrawalsDump    = "PayloadExpectedWithdrawalsDump" // slot => dump
+	PayloadExpectedWithdrawals        = "PayloadExpectedWithdrawals"     // slot => queue_diffs
+	ExecutionPayloadAvailabilityTable = "ExecutionPayloadAvailability"   // slot => bitvector SSZ
+	BuilderPendingPaymentsTable       = "BuilderPendingPayments"         // slot => vector SSZ
+	PtcWindowTable                    = "PtcWindow"                      // slot => ptc window SSZ
+	LatestExecutionPayloadBidTable    = "LatestExecutionPayloadBid"      // slot => compressed SSZ
+	// End GLOAS
+
 	StatesProcessingProgress = "StatesProcessingProgress"
 
 	//Diagnostics tables
@@ -427,6 +440,17 @@ var ChaindataTables = []string{
 	ActiveValidatorIndicies,
 	EffectiveBalancesDump,
 	BalancesDump,
+	// GLOAS (EIP-7732)
+	BuildersDump,
+	Builders,
+	BuilderPendingWithdrawalsDump,
+	BuilderPendingWithdrawals,
+	PayloadExpectedWithdrawalsDump,
+	PayloadExpectedWithdrawals,
+	ExecutionPayloadAvailabilityTable,
+	BuilderPendingPaymentsTable,
+	PtcWindowTable,
+	LatestExecutionPayloadBidTable,
 	AccountChangeSetDeprecated,
 	StorageChangeSetDeprecated,
 	HashedAccountsDeprecated,
