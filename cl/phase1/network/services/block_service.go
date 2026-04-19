@@ -23,6 +23,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/libp2p/go-libp2p/core/peer"
+
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -38,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 var (
@@ -116,7 +117,7 @@ func (b *blockService) DecodeGossipMessage(_ peer.ID, data []byte, version clpar
 
 // ProcessMessage processes a block message according to https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#beacon_block
 func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltypes.SignedBeaconBlock) error {
-	log.Debug("Received block via gossip", "slot", msg.Block.Slot)
+	log.Trace("Received block via gossip", "slot", msg.Block.Slot)
 	blockEpoch := msg.Block.Slot / b.beaconCfg.SlotsPerEpoch
 
 	if b.syncedData.Syncing() {
@@ -213,7 +214,7 @@ func (b *blockService) publishBlockGossipEvent(block *cltypes.SignedBeaconBlock)
 
 // scheduleBlockForLaterProcessing schedules a block for later processing
 func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeaconBlock) {
-	log.Debug("Block scheduled for later processing", "slot", block.Block.Slot, "block", block.Block.Body.ExecutionPayload.BlockNumber)
+	log.Trace("Block scheduled for later processing", "slot", block.Block.Slot, "block", block.Block.Body.ExecutionPayload.BlockNumber)
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
 		log.Debug("Failed to hash block", "block", block, "error", err)
@@ -277,7 +278,7 @@ func (b *blockService) importBlockOperations(block *cltypes.SignedBeaconBlock) {
 		}
 		return true
 	})
-	log.Debug("import operations", "time", time.Since(start))
+	log.Trace("import operations", "time", time.Since(start))
 }
 
 // loop is the main loop of the block service
