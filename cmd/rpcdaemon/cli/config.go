@@ -82,6 +82,7 @@ import (
 	"github.com/erigontech/erigon/node/logging"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/node/paths"
+	"github.com/erigontech/erigon/node/rulesconfig"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
@@ -564,7 +565,8 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 	var remoteHeimdallReader *heimdall.RemoteReader
 
 	if cfg.WithDatadir {
-		if cc != nil && cc.Bor != nil {
+		switch rulesconfig.ActiveRulesName(cc) {
+		case chain.BorRules:
 			stateReceiverContractAddress := cc.Bor.StateReceiverContractAddress()
 
 			bridgeConfig := bridge.ReaderConfig{
@@ -589,7 +591,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			}
 
 			engine = bor.NewRo(cc, blockReader, logger)
-		} else if cc != nil && cc.Aura != nil {
+		case chain.AuRaRules:
 			consensusDB, err := kv2.New(dbcfg.ConsensusDB, logger).Path(filepath.Join(cfg.DataDir, "aura")).Accede(true).Open(ctx)
 			if err != nil {
 				return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
@@ -601,9 +603,9 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			if cc.TerminalTotalDifficulty != nil {
 				engine = merge.New(engine.(rules.Engine)) // the Merge
 			}
-		} else {
+		default:
 			engine = ethash.NewFaker()
-			if cc.TerminalTotalDifficulty != nil {
+			if cc != nil && cc.TerminalTotalDifficulty != nil {
 				engine = merge.New(engine.(rules.Engine)) // the Merge
 			}
 		}
@@ -635,10 +637,10 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			logger.Error("Failed to read remote chain config", "err", err)
 			rootCancel()
 		}
-		if cc.Bor != nil && remoteBridgeReader != nil && !remoteBridgeReader.EnsureVersionCompatibility() {
+		if rulesconfig.ActiveRulesName(cc) == chain.BorRules && remoteBridgeReader != nil && !remoteBridgeReader.EnsureVersionCompatibility() {
 			rootCancel()
 		}
-		if cc.Bor != nil && remoteHeimdallReader != nil && !remoteHeimdallReader.EnsureVersionCompatibility() {
+		if rulesconfig.ActiveRulesName(cc) == chain.BorRules && remoteHeimdallReader != nil && !remoteHeimdallReader.EnsureVersionCompatibility() {
 			rootCancel()
 		}
 		if remoteCE != nil {
@@ -1042,7 +1044,8 @@ func (e *remoteRulesEngine) init(db kv.RoDB, blockReader services.FullBlockReade
 
 	// TODO(yperbasis): try to unify with CreateRulesEngine
 	var eng rules.Engine
-	if cc.Aura != nil {
+	switch rulesconfig.ActiveRulesName(cc) {
+	case chain.AuRaRules:
 		auraKv, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), logger, remoteKV).
 			WithBucketsConfig(kv.AuRaTablesCfg).
 			Open()
@@ -1055,9 +1058,9 @@ func (e *remoteRulesEngine) init(db kv.RoDB, blockReader services.FullBlockReade
 		if err != nil {
 			return err
 		}
-	} else if cc.Bor != nil {
+	case chain.BorRules:
 		eng = bor.NewRo(cc, blockReader, logger)
-	} else {
+	default:
 		eng = ethash.NewFaker()
 	}
 
