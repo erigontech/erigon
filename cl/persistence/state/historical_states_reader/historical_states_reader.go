@@ -270,11 +270,15 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	if ret.Version() < clparams.BellatrixVersion {
 		return ret, nil
 	}
-	payloadHeader, err := block.Block.Body.ExecutionPayload.PayloadHeader()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read payload header: %w", err)
+	// [Modified in Gloas:EIP7732] In GLOAS, ExecutionPayload is nil in the beacon block body;
+	// execution state is tracked via LatestExecutionPayloadBid instead.
+	if ret.Version() < clparams.GloasVersion {
+		payloadHeader, err := block.Block.Body.ExecutionPayload.PayloadHeader()
+		if err != nil {
+			return nil, fmt.Errorf("failed to read payload header: %w", err)
+		}
+		ret.SetLatestExecutionPayloadHeader(payloadHeader)
 	}
-	ret.SetLatestExecutionPayloadHeader(payloadHeader)
 	if ret.Version() < clparams.CapellaVersion {
 		return ret, nil
 	}

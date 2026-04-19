@@ -443,8 +443,12 @@ func (b *BlindedBeaconBody) Full(txs *solid.TransactionsSSZ, withdrawals *solid.
 		PrevRandao:    b.ExecutionPayload.PrevRandao,
 		Transactions:  txs,
 		Withdrawals:   withdrawals,
+		SlotNumber:    b.ExecutionPayload.SlotNumber,
 		version:       b.ExecutionPayload.version,
 		beaconCfg:     b.beaconCfg,
+	}
+	if b.ExecutionPayload.version >= clparams.GloasVersion {
+		executionPayload.BlockAccessList = solid.NewByteListSSZ(b.beaconCfg.MaxBytesPerTransaction)
 	}
 
 	return &BeaconBody{

@@ -48,11 +48,13 @@ type Eth1Block struct {
 	Extra         *solid.ExtraData `json:"extra_data"`
 	BaseFeePerGas common.Hash      `json:"base_fee_per_gas"`
 	// Extra fields
-	BlockHash     common.Hash                 `json:"block_hash"`
-	Transactions  *solid.TransactionsSSZ      `json:"transactions"`
-	Withdrawals   *solid.ListSSZ[*Withdrawal] `json:"withdrawals,omitempty"`
-	BlobGasUsed   uint64                      `json:"blob_gas_used,string"`
-	ExcessBlobGas uint64                      `json:"excess_blob_gas,string"`
+	BlockHash       common.Hash                 `json:"block_hash"`
+	Transactions    *solid.TransactionsSSZ      `json:"transactions"`
+	Withdrawals     *solid.ListSSZ[*Withdrawal] `json:"withdrawals,omitempty"`
+	BlobGasUsed     uint64                      `json:"blob_gas_used,string"`
+	ExcessBlobGas   uint64                      `json:"excess_blob_gas,string"`
+	BlockAccessList *solid.ByteListSSZ          `json:"block_access_list,omitempty"` // [New in Gloas:EIP7928] ByteList[MAX_BYTES_PER_TRANSACTION]
+	SlotNumber      uint64                      `json:"slot_number,string"`          // [New in Gloas:EIP7843]
 	// internals
 	version   clparams.StateVersion
 	beaconCfg *clparams.BeaconChainConfig
@@ -60,10 +62,14 @@ type Eth1Block struct {
 
 // NewEth1Block creates a new Eth1Block.
 func NewEth1Block(version clparams.StateVersion, beaconCfg *clparams.BeaconChainConfig) *Eth1Block {
-	return &Eth1Block{
+	b := &Eth1Block{
 		version:   version,
 		beaconCfg: beaconCfg,
 	}
+	if version >= clparams.GloasVersion {
+		b.BlockAccessList = solid.NewByteListSSZ(beaconCfg.MaxBytesPerTransaction)
+	}
+	return b
 }
 
 // NewEth1BlockFromExecutionHeader creates a genesis-style Eth1Block from an
@@ -94,6 +100,10 @@ func NewEth1BlockFromExecutionHeader(header *Eth1Header, version clparams.StateV
 	if version >= clparams.DenebVersion {
 		block.BlobGasUsed = header.BlobGasUsed
 		block.ExcessBlobGas = header.ExcessBlobGas
+	}
+	if version >= clparams.GloasVersion {
+		block.BlockAccessList = solid.NewByteListSSZ(beaconCfg.MaxBytesPerTransaction)
+		block.SlotNumber = header.SlotNumber
 	}
 	return block
 }
@@ -136,6 +146,12 @@ func NewEth1BlockFromHeaderAndBody(header *types.Header, body *types.RawBody, be
 		block.version = clparams.CapellaVersion
 	} else {
 		block.version = clparams.BellatrixVersion
+	}
+
+	if header.SlotNumber != nil {
+		block.BlockAccessList = solid.NewByteListSSZ(beaconCfg.MaxBytesPerTransaction)
+		block.SlotNumber = *header.SlotNumber
+		block.version = clparams.GloasVersion
 	}
 	return block
 }
@@ -187,6 +203,23 @@ func (b *Eth1Block) MarshalJSON() ([]byte, error) {
 		Transactions:  b.Transactions,
 	}
 
+	if b.version >= clparams.GloasVersion {
+		return json.Marshal(struct {
+			bellatrixPayload
+			Withdrawals     *solid.ListSSZ[*Withdrawal] `json:"withdrawals"`
+			BlobGasUsed     uint64                      `json:"blob_gas_used,string"`
+			ExcessBlobGas   uint64                      `json:"excess_blob_gas,string"`
+			BlockAccessList *solid.ByteListSSZ          `json:"block_access_list"`
+			SlotNumber      uint64                      `json:"slot_number,string"`
+		}{
+			bellatrixPayload: base,
+			Withdrawals:      withdrawals,
+			BlobGasUsed:      b.BlobGasUsed,
+			ExcessBlobGas:    b.ExcessBlobGas,
+			BlockAccessList:  b.BlockAccessList,
+			SlotNumber:       b.SlotNumber,
+		})
+	}
 	if b.version >= clparams.DenebVersion {
 		return json.Marshal(struct {
 			bellatrixPayload
@@ -214,25 +247,30 @@ func (b *Eth1Block) MarshalJSON() ([]byte, error) {
 
 func (b *Eth1Block) UnmarshalJSON(data []byte) error {
 	var aux struct {
-		ParentHash    common.Hash                 `json:"parent_hash"`
-		FeeRecipient  common.Address              `json:"fee_recipient"`
-		StateRoot     common.Hash                 `json:"state_root"`
-		ReceiptsRoot  common.Hash                 `json:"receipts_root"`
-		LogsBloom     types.Bloom                 `json:"logs_bloom"`
-		PrevRandao    common.Hash                 `json:"prev_randao"`
-		BlockNumber   uint64                      `json:"block_number,string"`
-		GasLimit      uint64                      `json:"gas_limit,string"`
-		GasUsed       uint64                      `json:"gas_used,string"`
-		Time          uint64                      `json:"timestamp,string"`
-		Extra         *solid.ExtraData            `json:"extra_data"`
-		BaseFeePerGas string                      `json:"base_fee_per_gas"`
-		BlockHash     common.Hash                 `json:"block_hash"`
-		Transactions  *solid.TransactionsSSZ      `json:"transactions"`
-		Withdrawals   *solid.ListSSZ[*Withdrawal] `json:"withdrawals"`
-		BlobGasUsed   uint64                      `json:"blob_gas_used,string"`
-		ExcessBlobGas uint64                      `json:"excess_blob_gas,string"`
+		ParentHash      common.Hash                 `json:"parent_hash"`
+		FeeRecipient    common.Address              `json:"fee_recipient"`
+		StateRoot       common.Hash                 `json:"state_root"`
+		ReceiptsRoot    common.Hash                 `json:"receipts_root"`
+		LogsBloom       types.Bloom                 `json:"logs_bloom"`
+		PrevRandao      common.Hash                 `json:"prev_randao"`
+		BlockNumber     uint64                      `json:"block_number,string"`
+		GasLimit        uint64                      `json:"gas_limit,string"`
+		GasUsed         uint64                      `json:"gas_used,string"`
+		Time            uint64                      `json:"timestamp,string"`
+		Extra           *solid.ExtraData            `json:"extra_data"`
+		BaseFeePerGas   string                      `json:"base_fee_per_gas"`
+		BlockHash       common.Hash                 `json:"block_hash"`
+		Transactions    *solid.TransactionsSSZ      `json:"transactions"`
+		Withdrawals     *solid.ListSSZ[*Withdrawal] `json:"withdrawals"`
+		BlobGasUsed     uint64                      `json:"blob_gas_used,string"`
+		ExcessBlobGas   uint64                      `json:"excess_blob_gas,string"`
+		BlockAccessList *solid.ByteListSSZ          `json:"block_access_list"`
+		SlotNumber      uint64                      `json:"slot_number,string"`
 	}
 	aux.Withdrawals = solid.NewStaticListSSZ[*Withdrawal](int(b.beaconCfg.MaxWithdrawalsPerPayload), 44)
+	if b.version >= clparams.GloasVersion {
+		aux.BlockAccessList = solid.NewByteListSSZ(b.beaconCfg.MaxBytesPerTransaction)
+	}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
@@ -258,6 +296,10 @@ func (b *Eth1Block) UnmarshalJSON(data []byte) error {
 	b.Withdrawals = aux.Withdrawals
 	b.BlobGasUsed = aux.BlobGasUsed
 	b.ExcessBlobGas = aux.ExcessBlobGas
+	if aux.BlockAccessList != nil {
+		b.BlockAccessList = aux.BlockAccessList
+	}
+	b.SlotNumber = aux.SlotNumber
 	return nil
 }
 
@@ -284,25 +326,39 @@ func (b *Eth1Block) PayloadHeader() (*Eth1Header, error) {
 		excessBlobGas = b.ExcessBlobGas
 	}
 
+	var blockAccessListRoot common.Hash
+	var slotNumber uint64
+	if b.version >= clparams.GloasVersion {
+		if b.BlockAccessList != nil {
+			blockAccessListRoot, err = b.BlockAccessList.HashSSZ()
+			if err != nil {
+				return nil, err
+			}
+		}
+		slotNumber = b.SlotNumber
+	}
+
 	return &Eth1Header{
-		ParentHash:       b.ParentHash,
-		FeeRecipient:     b.FeeRecipient,
-		StateRoot:        b.StateRoot,
-		ReceiptsRoot:     b.ReceiptsRoot,
-		LogsBloom:        b.LogsBloom,
-		PrevRandao:       b.PrevRandao,
-		BlockNumber:      b.BlockNumber,
-		GasLimit:         b.GasLimit,
-		GasUsed:          b.GasUsed,
-		Time:             b.Time,
-		Extra:            b.Extra,
-		BaseFeePerGas:    b.BaseFeePerGas,
-		BlockHash:        b.BlockHash,
-		TransactionsRoot: transactionsRoot,
-		WithdrawalsRoot:  withdrawalsRoot,
-		BlobGasUsed:      blobGasUsed,
-		ExcessBlobGas:    excessBlobGas,
-		version:          b.version,
+		ParentHash:          b.ParentHash,
+		FeeRecipient:        b.FeeRecipient,
+		StateRoot:           b.StateRoot,
+		ReceiptsRoot:        b.ReceiptsRoot,
+		LogsBloom:           b.LogsBloom,
+		PrevRandao:          b.PrevRandao,
+		BlockNumber:         b.BlockNumber,
+		GasLimit:            b.GasLimit,
+		GasUsed:             b.GasUsed,
+		Time:                b.Time,
+		Extra:               b.Extra,
+		BaseFeePerGas:       b.BaseFeePerGas,
+		BlockHash:           b.BlockHash,
+		TransactionsRoot:    transactionsRoot,
+		WithdrawalsRoot:     withdrawalsRoot,
+		BlobGasUsed:         blobGasUsed,
+		ExcessBlobGas:       excessBlobGas,
+		BlockAccessListRoot: blockAccessListRoot,
+		SlotNumber:          slotNumber,
+		version:             b.version,
 	}, nil
 }
 
@@ -328,6 +384,14 @@ func (b *Eth1Block) EncodingSizeSSZ() (size int) {
 		size += 8 * 2 // BlobGasUsed + ExcessBlobGas
 	}
 
+	if b.version >= clparams.GloasVersion {
+		if b.BlockAccessList == nil {
+			b.BlockAccessList = solid.NewByteListSSZ(b.beaconCfg.MaxBytesPerTransaction)
+		}
+		size += b.BlockAccessList.EncodingSizeSSZ() + 4 // BlockAccessList (variable-length, +4 for offset)
+		size += 8                                       // SlotNumber
+	}
+
 	return
 }
 
@@ -337,6 +401,9 @@ func (b *Eth1Block) DecodeSSZ(buf []byte, version int) error {
 	b.Transactions = &solid.TransactionsSSZ{}
 	b.Withdrawals = solid.NewStaticListSSZ[*Withdrawal](int(b.beaconCfg.MaxWithdrawalsPerPayload), 44)
 	b.version = clparams.StateVersion(version)
+	if b.version >= clparams.GloasVersion {
+		b.BlockAccessList = solid.NewByteListSSZ(b.beaconCfg.MaxBytesPerTransaction)
+	}
 	return ssz2.UnmarshalSSZ(buf, version, b.getSchema()...)
 }
 
@@ -358,6 +425,9 @@ func (b *Eth1Block) getSchema() []any {
 	}
 	if b.version >= clparams.DenebVersion {
 		s = append(s, &b.BlobGasUsed, &b.ExcessBlobGas)
+	}
+	if b.version >= clparams.GloasVersion {
+		s = append(s, b.BlockAccessList, &b.SlotNumber)
 	}
 	return s
 }
