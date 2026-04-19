@@ -34,10 +34,20 @@ func newTransientStorage() transientStorage {
 
 // Set sets the transient-storage `value` for `key` at the given `addr`.
 func (t transientStorage) Set(addr accounts.Address, key accounts.StorageKey, value uint256.Int) {
-	if _, ok := t[addr]; !ok {
-		t[addr] = make(Storage)
+	slots, ok := t[addr]
+	if value.IsZero() {
+		if !ok {
+			return
+		}
+		slots[key] = value
+		return
 	}
-	t[addr][key] = value
+
+	if !ok {
+		slots = make(Storage)
+		t[addr] = slots
+	}
+	slots[key] = value
 }
 
 // Get gets the transient storage for `key` at the given `addr`.
