@@ -44,7 +44,6 @@ func setupExecutionPayloadService(t *testing.T) (ExecutionPayloadService, *mock_
 
 func newTestSignedEnvelope(slot uint64, blockRoot common.Hash, builderIndex uint64) *cltypes.SignedExecutionPayloadEnvelope {
 	envelope := cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)
-	envelope.Slot = slot
 	envelope.BeaconBlockRoot = blockRoot
 	envelope.BuilderIndex = builderIndex
 	// Initialize Eth1Block fields needed for HashSSZ

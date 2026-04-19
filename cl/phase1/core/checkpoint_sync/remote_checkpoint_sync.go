@@ -155,7 +155,7 @@ func (r *RemoteCheckpointSync) fetchEnvelope(ctx context.Context, stateURI strin
 	if err := envelope.DecodeSSZ(marshaled, int(clparams.GloasVersion)); err != nil {
 		return nil, fmt.Errorf("finalized envelope decode failed: %w", err)
 	}
-	log.Info("[Checkpoint Sync] Finalized envelope retrieved", "slot", envelope.Message.Slot)
+	log.Info("[Checkpoint Sync] Finalized envelope retrieved", "beaconBlockRoot", envelope.Message.BeaconBlockRoot)
 	return envelope, nil
 }
 
