@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"testing"
@@ -365,6 +366,123 @@ func TestWriterShardedSegmentCountRoundTrip(t *testing.T) {
 	require.NotZero(r.inner.SegmentCount)
 	require.NotZero(r.inner.SegmentCountLength)
 	require.NotZero(r.inner.SegmentLength)
+}
+
+// 200K random keys, then probe 200K fresh randoms. Expects FP rate < 1%.
+func TestWriterShardedUniformDistribution(t *testing.T) {
+	require := require.New(t)
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "sharded_uniform")
+
+	rng := rand.New(rand.NewPCG(1, 2))
+	const keyCount = 200_000
+	keys := make(map[uint64]struct{}, keyCount)
+	for len(keys) < keyCount {
+		keys[rng.Uint64()] = struct{}{}
+	}
+
+	w, err := NewWriterSharded(filePath)
+	require.NoError(err)
+	w.DisableFsync()
+	for k := range keys {
+		require.NoError(w.AddHash(k))
+	}
+	require.NoError(w.Build())
+	w.Close()
+
+	r, err := NewReaderSharded(filePath)
+	require.NoError(err)
+	defer r.Close()
+
+	for k := range keys {
+		require.True(r.ContainsHash(k))
+	}
+
+	falsePositives := 0
+	const probes = 200_000
+	for i := 0; i < probes; i++ {
+		var k uint64
+		for {
+			k = rng.Uint64()
+			if _, ok := keys[k]; !ok {
+				break
+			}
+		}
+		if r.ContainsHash(k) {
+			falsePositives++
+		}
+	}
+	fpRate := float64(falsePositives) / float64(probes)
+	t.Logf("false positive rate: %d/%d = %.4f%%", falsePositives, probes, fpRate*100)
+	require.Less(fpRate, 0.01, "false positive rate unexpectedly high")
+}
+
+// Per-shard fill counts at 511/512/513 stress the page-flush boundary in
+// WriterOffHeap (page = 512 uint64s).
+func TestWriterShardedPageBoundary(t *testing.T) {
+	require := require.New(t)
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "sharded_pageboundary")
+
+	// v2 shards by high byte: pack shard id into the high byte.
+	plan := map[uint64]int{
+		0x01: 511,
+		0x02: 512,
+		0x03: 513,
+		0x04: 500,
+		0x05: 1024,
+		0x07: 100,
+	}
+	var allKeys []uint64
+	for shard, n := range plan {
+		for i := 0; i < n; i++ {
+			allKeys = append(allKeys, shard<<56|uint64(i))
+		}
+	}
+
+	w, err := NewWriterSharded(filePath)
+	require.NoError(err)
+	w.DisableFsync()
+	for _, k := range allKeys {
+		require.NoError(w.AddHash(k))
+	}
+	require.NoError(w.Build())
+	w.Close()
+
+	r, err := NewReaderSharded(filePath)
+	require.NoError(err)
+	defer r.Close()
+	for _, k := range allKeys {
+		require.True(r.ContainsHash(k))
+	}
+}
+
+// Feed duplicated hashes to one shard to exercise xorfilter's in-place
+// pruneDuplicates pass against the RDWR mmap of the temp file.
+func TestWriterShardedMmapMutationOnDuplicates(t *testing.T) {
+	require := require.New(t)
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "sharded_dedup")
+
+	const unique = 1000
+	w, err := NewWriterSharded(filePath)
+	require.NoError(err)
+	w.DisableFsync()
+	for i := 0; i < unique; i++ {
+		require.NoError(w.AddHash(uint64(i)))
+	}
+	for i := 0; i < 100; i++ {
+		require.NoError(w.AddHash(uint64(i))) // duplicates
+	}
+	require.NoError(w.Build())
+	w.Close()
+
+	r, err := NewReaderSharded(filePath)
+	require.NoError(err)
+	defer r.Close()
+	for i := 0; i < unique; i++ {
+		require.True(r.ContainsHash(uint64(i)))
+	}
 }
 
 func TestMultipleFilters(t *testing.T) {

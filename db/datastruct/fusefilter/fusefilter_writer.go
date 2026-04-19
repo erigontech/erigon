@@ -197,6 +197,8 @@ func (w *Writer) Close() {
 // Embeds WriterOffHeap for the shared page-buffer + temp-file machinery.
 type WriterSharded struct {
 	WriterOffHeap
+	filePath string
+	noFsync  bool
 }
 
 func NewWriterSharded(filePath string) (*WriterSharded, error) {
@@ -204,7 +206,40 @@ func NewWriterSharded(filePath string) (*WriterSharded, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &WriterSharded{WriterOffHeap{tmpFile: f, tmpFilePath: f.Name(), features: initFeatures()}}, nil
+	return &WriterSharded{
+		WriterOffHeap: WriterOffHeap{tmpFile: f, tmpFilePath: f.Name(), features: initFeatures()},
+		filePath:      filePath,
+	}, nil
+}
+
+func (w *WriterSharded) DisableFsync() { w.noFsync = true }
+
+// Build writes the sharded fusefilter to w.filePath using the same atomic
+// temp-then-rename pattern as Writer.Build.
+func (w *WriterSharded) Build() error {
+	f, err := dir.CreateTemp(w.filePath)
+	if err != nil {
+		return fmt.Errorf("%s %w", w.filePath, err)
+	}
+	defer dir.RemoveFile(f.Name())
+	defer f.Close()
+
+	fw := bufio.NewWriter(f)
+	if _, err = w.BuildTo(fw); err != nil {
+		return fmt.Errorf("%s %w", w.filePath, err)
+	}
+	if err = fw.Flush(); err != nil {
+		return err
+	}
+	if !w.noFsync {
+		if err = f.Sync(); err != nil {
+			return err
+		}
+	}
+	if err = f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), w.filePath)
 }
 
 // BuildTo writes sharded fusefilter (file version 1) to fw.

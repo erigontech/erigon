@@ -244,33 +244,38 @@ func (idx *Index) init() (err error) {
 		offset += int(arrSz)
 	}
 
-	if idx.dataStructureVersion == 1 && idx.lessFalsePositives && idx.keyCount > 0 {
-		var sz int
-		idx.existenceV1, sz, err = fusefilter.NewReaderOnBytes(idx.data[offset:], idx.fileName)
-		if err != nil {
-			return fmt.Errorf("NewReaderOnBytes: %w, %s", err, idx.fileName)
+	if idx.lessFalsePositives && idx.keyCount > 0 {
+		switch idx.dataStructureVersion {
+		case 0: // parsed above
+		case 1:
+			var sz int
+			idx.existenceV1, sz, err = fusefilter.NewReaderOnBytes(idx.data[offset:], idx.fileName)
+			if err != nil {
+				return fmt.Errorf("NewReaderOnBytes: %w, %s", err, idx.fileName)
+			}
+			if fusefilter.MadvWillNeedByDefault {
+				idx.existenceV1.MadvWillNeed()
+			}
+			if fusefilter.MadvNormalByDefault {
+				idx.existenceV1.MadvNormal()
+			}
+			offset += sz
+		case 2:
+			var sz int
+			idx.existenceV2, sz, err = fusefilter.NewReaderShardedOnBytes(idx.data[offset:], idx.fileName)
+			if err != nil {
+				return fmt.Errorf("NewReaderShardedOnBytes: %w, %s", err, idx.fileName)
+			}
+			if fusefilter.MadvWillNeedByDefault {
+				idx.existenceV2.MadvWillNeed()
+			}
+			if fusefilter.MadvNormalByDefault {
+				idx.existenceV2.MadvNormal()
+			}
+			offset += sz
+		default:
+			return fmt.Errorf("%w. unsupported existence filter version %d", IncompatibleErr, idx.dataStructureVersion)
 		}
-		if fusefilter.MadvWillNeedByDefault {
-			idx.existenceV1.MadvWillNeed()
-		}
-		if fusefilter.MadvNormalByDefault {
-			idx.existenceV1.MadvNormal()
-		}
-		offset += sz
-	}
-	if idx.dataStructureVersion >= 2 && idx.lessFalsePositives && idx.keyCount > 0 {
-		var sz int
-		idx.existenceV2, sz, err = fusefilter.NewReaderShardedOnBytes(idx.data[offset:], idx.fileName)
-		if err != nil {
-			return fmt.Errorf("NewReaderShardedOnBytes: %w, %s", err, idx.fileName)
-		}
-		if fusefilter.MadvWillNeedByDefault {
-			idx.existenceV2.MadvWillNeed()
-		}
-		if fusefilter.MadvNormalByDefault {
-			idx.existenceV2.MadvNormal()
-		}
-		offset += sz
 	}
 
 	// Size of golomb rice params
@@ -298,11 +303,13 @@ func (idx *Index) init() (err error) {
 }
 
 func (idx *Index) ForceExistenceFilterInRAM() datasize.ByteSize {
-	if idx.dataStructureVersion == 1 && idx.lessFalsePositives && idx.keyCount > 0 {
-		return idx.existenceV1.ForceInMem()
-	}
-	if idx.dataStructureVersion >= 2 && idx.lessFalsePositives && idx.keyCount > 0 {
-		return idx.existenceV2.ForceInMem()
+	if idx.lessFalsePositives && idx.keyCount > 0 {
+		switch idx.dataStructureVersion {
+		case 1:
+			return idx.existenceV1.ForceInMem()
+		case 2:
+			return idx.existenceV2.ForceInMem()
+		}
 	}
 	return 0
 }
@@ -386,11 +393,12 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 		return 0, true
 	}
 	if idx.lessFalsePositives {
-		if idx.dataStructureVersion == 1 {
+		switch idx.dataStructureVersion {
+		case 1:
 			if ok := idx.existenceV1.ContainsHash(bucketHash); !ok {
 				return 0, false
 			}
-		} else if idx.dataStructureVersion >= 2 {
+		case 2:
 			if ok := idx.existenceV2.ContainsHash(bucketHash); !ok {
 				return 0, false
 			}

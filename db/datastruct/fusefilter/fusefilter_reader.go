@@ -145,8 +145,53 @@ func (r *Reader) Close() {
 // Only the shard matching keyHash >> 56 is checked on lookup.
 // shards is a value array (not pointer array) so ContainsHash needs only one pointer dereference.
 type ReaderSharded struct {
-	m      mmap.MMap // outer slice spanning header + all shard blobs, used for madvise
-	shards [256]Reader
+	m         mmap.MMap // outer slice spanning header + all shard blobs, used for madvise
+	f         *os.File  // non-nil only when opened via NewReaderSharded(filePath)
+	fileName  string
+	keepInMem bool // ForceInMem replaced m with an anonymous heap copy; skip madvise/munmap
+	shards    [256]Reader
+}
+
+func NewReaderSharded(filePath string) (*ReaderSharded, error) {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	st, err := f.Stat()
+	if err != nil {
+		_ = f.Close() //nolint
+		return nil, err
+	}
+	sz := int(st.Size())
+	m, err := mmap.MapRegion(f, sz, mmap.RDONLY, 0, 0)
+	if err != nil {
+		_ = f.Close() //nolint
+		return nil, err
+	}
+	_, fileName := filepath.Split(filePath)
+	r, _, err := NewReaderShardedOnBytes(m, fileName)
+	if err != nil {
+		_ = m.Unmap() //nolint
+		_ = f.Close() //nolint
+		return nil, err
+	}
+	r.f = f
+	r.m = m
+	r.fileName = fileName
+	return r, nil
+}
+
+func (r *ReaderSharded) FileName() string { return r.fileName }
+
+func (r *ReaderSharded) Close() {
+	if r == nil || r.f == nil {
+		return
+	}
+	if !r.keepInMem {
+		_ = r.m.Unmap() //nolint
+	}
+	_ = r.f.Close() //nolint
+	r.f = nil
 }
 
 func NewReaderShardedOnBytes(m []byte, fName string) (*ReaderSharded, int, error) {
@@ -202,21 +247,35 @@ func (r *ReaderSharded) ContainsHash(v uint64) bool {
 	return s.ContainsHash(v)
 }
 
+// ForceInMem clones the entire mmap region into anonymous heap memory in a
+// single allocation, then re-points each shard's Fingerprints slice into the
+// clone at the same byte offset. Avoids 256 separate allocations.
 func (r *ReaderSharded) ForceInMem() datasize.ByteSize {
-	var total datasize.ByteSize
-	for i := range r.shards {
-		if r.shards[i].inner != nil {
-			total += r.shards[i].ForceInMem()
-		}
+	if len(r.m) == 0 {
+		return 0
 	}
-	return total
+	base := unsafe.Pointer(&r.m[0])
+	clone := bytes.Clone(r.m)
+	for i := range r.shards {
+		s := &r.shards[i]
+		if s.inner == nil || len(s.inner.Fingerprints) == 0 {
+			continue
+		}
+		off := uintptr(unsafe.Pointer(&s.inner.Fingerprints[0])) - uintptr(base)
+		ln := len(s.inner.Fingerprints)
+		s.inner.Fingerprints = clone[off : off+uintptr(ln)]
+		s.keepInMem = true
+	}
+	r.m = clone
+	r.keepInMem = true
+	return datasize.ByteSize(len(clone))
 }
 
 // MadvWillNeed hints to the OS that all shard blobs will be accessed.
 // One madvise on the outer mmap slice covers all shards in a single syscall,
 // instead of 256 madvise calls on adjacent sub-slices of the same VMA.
 func (r *ReaderSharded) MadvWillNeed() {
-	if len(r.m) == 0 {
+	if r == nil || len(r.m) == 0 || r.keepInMem {
 		return
 	}
 	if err := mm.MadviseWillNeed(r.m); err != nil {
@@ -225,7 +284,7 @@ func (r *ReaderSharded) MadvWillNeed() {
 }
 
 func (r *ReaderSharded) MadvNormal() {
-	if len(r.m) == 0 {
+	if r == nil || len(r.m) == 0 || r.keepInMem {
 		return
 	}
 	if err := mm.MadviseNormal(r.m); err != nil {

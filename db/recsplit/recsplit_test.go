@@ -162,6 +162,11 @@ func TestIndexLookup(t *testing.T) {
 		cfg.Version = 1
 		test(t, cfg)
 	})
+	t.Run("v2", func(t *testing.T) {
+		cfg := cfg
+		cfg.Version = 2
+		test(t, cfg)
+	})
 }
 
 func TestFindBijection(t *testing.T) {
