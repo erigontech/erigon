@@ -92,7 +92,7 @@ jobs:
         id: generate_token_build
         uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf  ## v2.2.1
         with:
-          app-id: ${{ vars.RELEASE_BOT_APP_ID }}
+          client-id: ${{ vars.RELEASE_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
           repositories: "erigon"
 
@@ -565,7 +565,7 @@ jobs:
       if: ${{ inputs.perform_release }}
       uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf  ## v2.2.1
       with:
-        app-id: ${{ vars.RELEASE_BOT_APP_ID }}
+        client-id: ${{ vars.RELEASE_BOT_APP_ID }}
         private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
         repositories: "erigon"
 
@@ -699,7 +699,7 @@ jobs:
         id: generate_token_rollback
         uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf  ## v2.2.1
         with:
-          app-id: ${{ vars.RELEASE_BOT_APP_ID }}
+          client-id: ${{ vars.RELEASE_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
           repositories: "erigon"
 
