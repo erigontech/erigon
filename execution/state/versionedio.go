@@ -1218,8 +1218,6 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 		}
 		tag = strings.Join(parts, "<-")
 	}
-	// Always emit an entry log so we can confirm which call sites hit.
-	fmt.Fprintf(os.Stderr, "[BAL-ASSEMBLE-ENTRY] caller=%s maxTxIndex=%d inputsLen=%d\n", tag, maxTxIndex, len(io.inputs))
 	for txIndex := -1; txIndex <= maxTxIndex; txIndex++ {
 		io.ReadSet(txIndex).Scan(func(vr *VersionedRead) bool {
 			if vr.Path != StoragePath {
