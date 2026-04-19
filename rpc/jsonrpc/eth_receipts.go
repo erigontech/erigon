@@ -385,7 +385,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		if r, ok := api.receiptsGenerator.TryGetCachedReceipt(header.Hash(), txNum, txIndex); ok {
 			for _, filteredLog := range r.Logs.FilterWithTopicMap(addrMap, topicMap, 0) {
 				if maxResults != 0 && len(logs) >= maxResults {
-					return nil, fmt.Errorf("%s: %d", errExceedLogResults, maxResults)
+					return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("%s: %d", errExceedLogResults, maxResults)}
 				}
 				logs = append(logs, &types.ErigonLog{Log: *filteredLog, Timestamp: header.Time})
 			}
