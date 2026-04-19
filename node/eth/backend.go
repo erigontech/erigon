@@ -91,7 +91,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node"
-	downloadercomp "github.com/erigontech/erigon/node/components/downloader"
+	storagecomp "github.com/erigontech/erigon/node/components/storage"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/ethstats"
@@ -101,6 +101,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/node/nodebuilder"
 	privateapi2 "github.com/erigontech/erigon/node/privateapi"
 	"github.com/erigontech/erigon/node/rulesconfig"
 	"github.com/erigontech/erigon/node/shards"
@@ -201,7 +202,7 @@ type Ethereum struct {
 	txPoolRpcClient           txpoolproto.TxpoolClient
 	shutterPool               *shutter.Pool
 	blockBuilderNotifyNewTxns chan struct{}
-	downloaderProvider        *downloadercomp.Provider
+	components                *nodebuilder.Builder
 
 	blockSnapshots *freezeblocks.RoSnapshots
 	blockReader    services.FullBlockReader
@@ -409,45 +410,43 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.blockSnapshots, backend.blockReader, backend.blockWriter = allSnapshots, blockReader, blockWriter
 	backend.chainDB = temporalDb
 
-	// Initialize the downloader component (local in-process or remote via gRPC).
-	backend.downloaderProvider = &downloadercomp.Provider{}
-	backend.downloaderProvider.Configure(config.Downloader, config.Snapshot, config.Dirs, logger, stack.Config().DebugMux)
-	if err := backend.downloaderProvider.Initialize(ctx); err != nil {
+	// Initialize extracted components.
+	//
+	// Downloader is initialized here; OnFilesChange file-change callbacks
+	// are registered inside storage.Provider.Initialize (see BuildStorage
+	// call further below), not in backend.go.
+	backend.components = nodebuilder.New()
+	if err := backend.components.BuildDownloader(ctx, config.Downloader, config.Snapshot, config.Dirs, logger, stack.Config().DebugMux); err != nil {
 		return nil, err
 	}
-	backend.downloaderClient = backend.downloaderProvider.Client
+	backend.downloaderClient = backend.components.Downloader.Client
 
-	// Register file-change callbacks so completed snapshots are seeded and
-	// deleted snapshots are removed from the swarm. These stay here because
-	// they need chainDB and notifications (set below).
-	backend.chainDB.OnFilesChange(func(frozenFileNames []string) {
-		backend.logger.Debug("files changed...sending notification")
-		events := backend.notifications.Events
-		events.OnNewSnapshot()
-		if config.Downloader != nil && config.Downloader.ChainName == "" {
-			return
-		}
-		if backend.config.Snapshot.NoDownloader || backend.downloaderClient == nil || len(frozenFileNames) == 0 {
-			return
-		}
-		if err := backend.downloaderClient.Seed(ctx, frozenFileNames); err != nil {
-			backend.logger.Warn("[snapshots] downloader.Seed", "err", err)
-		}
-	}, func(deletedFiles []string) {
-		if config.Downloader != nil && config.Downloader.ChainName == "" {
-			return
-		}
-		if backend.config.Snapshot.NoDownloader || backend.downloaderClient == nil || len(deletedFiles) == 0 {
-			return
-		}
-		if err := backend.downloaderClient.Delete(ctx, deletedFiles); err != nil {
-			backend.logger.Warn("[snapshots] downloader.Delete", "err", err)
-		}
-	})
-
-	kvRPC := remotedbserver.NewKvServer(ctx, backend.chainDB, allSnapshots, allBorSnapshots, temporalDb.Debug(), logger)
+	// KV RPC + Notifications stay in backend.go — Notifications is an
+	// execution-layer concern that will move to the execution component.
+	kvRPC := remotedbserver.NewKvServer(ctx, temporalDb, allSnapshots, allBorSnapshots, temporalDb.Debug(), logger)
 	backend.notifications = shards.NewNotifications(kvRPC)
 	backend.kvRPC = kvRPC
+
+	// Storage component: owns DB references, file-change callbacks, block retire.
+	if err := backend.components.BuildStorage(storagecomp.Deps{
+		Ctx:                  ctx,
+		ChainDB:              temporalDb,
+		BlockReader:          blockReader,
+		BlockWriter:          blockWriter,
+		AllSnapshots:         allSnapshots,
+		AllBorSnapshots:      allBorSnapshots,
+		BridgeStore:          bridgeStore,
+		HeimdallStore:        heimdallStore,
+		ChainConfig:          chainConfig,
+		Genesis:              genesis,
+		Config:               config,
+		DBEventNotifier:      backend.notifications.Events,
+		DownloaderClient:     backend.downloaderClient,
+		SegmentsBuildLimiter: segmentsBuildLimiter,
+		Logger:               logger,
+	}); err != nil {
+		return nil, err
+	}
 
 	p2pConfig := stack.Config().P2P
 	var sentries []sentryproto.SentryClient
@@ -566,12 +565,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	// Wire chain.toml ENR updater and P2P discovery after sentry servers are created.
-	// Only applies in local downloader mode; remote-downloader mode has nil backend.downloaderProvider.Downloader.
+	// Only applies in local downloader mode; remote-downloader mode has nil Downloader.
 	// Gated behind --snap.p2p-manifest so default syncs stay on the pre-v2 path and
 	// avoid the torrent-name collision between a locally-seeded chain.toml and the
 	// downloaded chain.toml.torrent in AddTorrentsFromDisk (see #20615).
-	if backend.downloaderProvider != nil && backend.downloaderProvider.Downloader != nil && len(backend.sentryServers) > 0 && backend.config.Snapshot.P2PManifest {
-		dl := backend.downloaderProvider.Downloader
+	if backend.components.Downloader.Downloader != nil && len(backend.sentryServers) > 0 && backend.config.Snapshot.P2PManifest {
+		dl := backend.components.Downloader.Downloader
 		dl.SetENRUpdater(func(ct enr.ChainToml) {
 			// Resolve the torrent port at update time rather than capture-time:
 			// the torrent client may not be listening yet when the updater
@@ -825,7 +824,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		chainConfig,
 	)
 
-	backend.stateDiffClient = direct.NewStateDiffClientDirect(kvRPC)
+	backend.stateDiffClient = direct.NewStateDiffClientDirect(backend.kvRPC)
 	var txnProvider txnprovider.TxnProvider
 	if config.TxPool.Disable {
 		backend.txPoolGrpcServer = &txpool.GrpcDisabled{}
@@ -988,7 +987,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	)
 	backend.pendingBlocks = blkBuilder.PendingBlockCh()
 
-	blockRetire := freezeblocks.NewBlockRetire(1, dirs, blockReader, blockWriter, backend.chainDB, heimdallStore, bridgeStore, backend.chainConfig, config, backend.notifications.Events, segmentsBuildLimiter, logger)
+	blockRetire := backend.components.Storage.BlockRetire
 	var creds credentials.TransportCredentials
 	if stack.Config().PrivateApiAddr != "" {
 		if stack.Config().TLSConnection {
@@ -998,7 +997,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			}
 		}
 		backend.privateAPI, err = privateapi2.StartGrpc(
-			kvRPC,
+			backend.kvRPC,
 			backend.ethBackendRPC,
 			backend.txPoolGrpcServer,
 			backend.miningRPC,
@@ -1058,9 +1057,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	// snapshots not in that set could cause issues. That's an unsolved issue and probably requires
 	// always resetting before resuming/starting a sync.
 	var afterSnapshotDownload func(ctx context.Context) error
-	if backend.downloaderProvider != nil && backend.downloaderProvider.Downloader != nil {
+	if backend.components.Downloader != nil && backend.components.Downloader.Downloader != nil {
 		afterSnapshotDownload = func(ctx context.Context) (err error) {
-			incomplete, err := backend.downloaderProvider.Downloader.AddTorrentsFromDisk(ctx)
+			incomplete, err := backend.components.Downloader.Downloader.AddTorrentsFromDisk(ctx)
 			if err != nil {
 				err = fmt.Errorf("adding torrents from disk: %w", err)
 				return
@@ -1630,8 +1629,8 @@ func (s *Ethereum) Stop() error {
 	if s.unsubscribeEthstat != nil {
 		s.unsubscribeEthstat()
 	}
-	if s.downloaderProvider != nil {
-		s.downloaderProvider.Close()
+	if s.components != nil && s.components.Downloader != nil {
+		s.components.Downloader.Close()
 	}
 	if s.privateAPI != nil {
 		shutdownDone := make(chan bool)
