@@ -302,11 +302,12 @@ func (t *prestateTracer) processDiffState() {
 			postAccount.Nonce = newNonce
 		}
 
-		// Default to EmptyCodeHash when no codeHash is stored in the prestate (i.e. the account
-		// had no code before the transaction). This matches go-ethereum behaviour: a touched but
-		// previously non-existent account returns NilCodeHash (0x0) as its post-codeHash, which
-		// differs from EmptyCodeHash, so it correctly appears in the post state with codeHash=0x0.
-		prevCodeHash := accounts.EmptyCodeHash.Value()
+		// prevCodeHash is: EmptyCodeHash for existing codeless accounts (set in lookupAccount),
+		// the actual codeHash for accounts with code, or common.Hash{} (0x0 / NilCodeHash) for
+		// accounts that did not exist before the transaction (CodeHash == nil in pre-state).
+		// This means a non-existent pre-tx account that now exists codeless will have
+		// prevCodeHash=0x0 vs newCodeHash=EmptyCodeHash, triggering the correct diff entry.
+		prevCodeHash := common.Hash{}
 		if t.pre[addr].CodeHash != nil {
 			prevCodeHash = *t.pre[addr].CodeHash
 		}
@@ -397,7 +398,17 @@ func (t *prestateTracer) lookupAccount(addr accounts.Address) {
 		codeHash := crypto.HashData(code)
 		t.pre[addr].CodeHash = &codeHash
 	} else {
-		t.pre[addr].CodeHash = nil
+		// For existing accounts with no code, store EmptyCodeHash explicitly so we
+		// can distinguish "existed with no code" from "did not exist" (nil CodeHash)
+		// in processDiffState. A nil CodeHash means the account was non-existent
+		// before the transaction, which correctly maps to NilCodeHash (0x0).
+		exists, _ := t.env.IntraBlockState.Exist(addr)
+		if exists {
+			emptyHash := accounts.EmptyCodeHash.Value()
+			t.pre[addr].CodeHash = &emptyHash
+		} else {
+			t.pre[addr].CodeHash = nil
+		}
 	}
 
 	if !t.config.DisableCode {
