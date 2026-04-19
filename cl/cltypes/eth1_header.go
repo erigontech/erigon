@@ -47,11 +47,13 @@ type Eth1Header struct {
 	Extra         *solid.ExtraData `json:"extra_data"`
 	BaseFeePerGas common.Hash      `json:"base_fee_per_gas"`
 	// Extra fields
-	BlockHash        common.Hash `json:"block_hash"`
-	TransactionsRoot common.Hash `json:"transactions_root"`
-	WithdrawalsRoot  common.Hash `json:"withdrawals_root"`
-	BlobGasUsed      uint64      `json:"blob_gas_used,string"`
-	ExcessBlobGas    uint64      `json:"excess_blob_gas,string"`
+	BlockHash           common.Hash `json:"block_hash"`
+	TransactionsRoot    common.Hash `json:"transactions_root"`
+	WithdrawalsRoot     common.Hash `json:"withdrawals_root"`
+	BlobGasUsed         uint64      `json:"blob_gas_used,string"`
+	ExcessBlobGas       uint64      `json:"excess_blob_gas,string"`
+	BlockAccessListRoot common.Hash `json:"block_access_list_root,omitempty"` // [New in Gloas:EIP7928]
+	SlotNumber          uint64      `json:"slot_number,string"`               // [New in Gloas:EIP7843]
 	// internals
 	version clparams.StateVersion
 }
@@ -74,6 +76,7 @@ func (e *Eth1Header) Copy() *Eth1Header {
 	if e.Extra != nil {
 		copied.Extra.SetBytes(e.Extra.Bytes())
 	}
+	// BlockAccessListRoot and SlotNumber are value types, copied by *e above.
 	return &copied
 }
 
@@ -98,7 +101,8 @@ func (e *Eth1Header) IsZero() bool {
 		e.ReceiptsRoot == common.Hash{} && e.LogsBloom == types.Bloom{} && e.PrevRandao == common.Hash{} && e.BlockNumber == 0 &&
 		e.GasLimit == 0 && e.GasUsed == 0 && e.Time == 0 && e.Extra.EncodingSizeSSZ() == 0 && e.BaseFeePerGas == [32]byte{} &&
 		e.BlockHash == common.Hash{} && e.TransactionsRoot == common.Hash{} && e.WithdrawalsRoot == common.Hash{} &&
-		e.BlobGasUsed == 0 && e.ExcessBlobGas == 0
+		e.BlobGasUsed == 0 && e.ExcessBlobGas == 0 &&
+		e.BlockAccessListRoot == common.Hash{} && e.SlotNumber == 0
 }
 
 // EncodeSSZ encodes the header in SSZ format.
@@ -126,6 +130,10 @@ func (h *Eth1Header) EncodingSizeSSZ() int {
 	if h.version >= clparams.DenebVersion {
 		size += 8 * 2 // BlobGasUsed + ExcessBlobGas
 	}
+	if h.version >= clparams.GloasVersion {
+		size += 32 // BlockAccessListRoot
+		size += 8  // SlotNumber
+	}
 	if h.Extra == nil {
 		h.Extra = solid.NewExtraData()
 	}
@@ -149,6 +157,9 @@ func (h *Eth1Header) getSchema() []any {
 	if h.version >= clparams.DenebVersion {
 		s = append(s, &h.BlobGasUsed, &h.ExcessBlobGas)
 	}
+	if h.version >= clparams.GloasVersion {
+		s = append(s, h.BlockAccessListRoot[:], &h.SlotNumber)
+	}
 	return s
 }
 
@@ -159,7 +170,8 @@ func (h *Eth1Header) Static() bool {
 func (h *Eth1Header) MarshalJSON() ([]byte, error) {
 	baseFeePerGas := uint256.NewInt(0).SetBytes32(h.BaseFeePerGas[:])
 	baseFeePerGas.ReverseBytes(baseFeePerGas)
-	return json.Marshal(struct {
+
+	type basePayload struct {
 		ParentHash       common.Hash      `json:"parent_hash"`
 		FeeRecipient     common.Address   `json:"fee_recipient"`
 		StateRoot        common.Hash      `json:"state_root"`
@@ -177,7 +189,8 @@ func (h *Eth1Header) MarshalJSON() ([]byte, error) {
 		WithdrawalsRoot  common.Hash      `json:"withdrawals_root"`
 		BlobGasUsed      uint64           `json:"blob_gas_used,string"`
 		ExcessBlobGas    uint64           `json:"excess_blob_gas,string"`
-	}{
+	}
+	base := basePayload{
 		ParentHash:       h.ParentHash,
 		FeeRecipient:     h.FeeRecipient,
 		StateRoot:        h.StateRoot,
@@ -195,28 +208,43 @@ func (h *Eth1Header) MarshalJSON() ([]byte, error) {
 		WithdrawalsRoot:  h.WithdrawalsRoot,
 		BlobGasUsed:      h.BlobGasUsed,
 		ExcessBlobGas:    h.ExcessBlobGas,
-	})
+	}
+
+	if h.version >= clparams.GloasVersion {
+		return json.Marshal(struct {
+			basePayload
+			BlockAccessListRoot common.Hash `json:"block_access_list_root"`
+			SlotNumber          uint64      `json:"slot_number,string"`
+		}{
+			basePayload:         base,
+			BlockAccessListRoot: h.BlockAccessListRoot,
+			SlotNumber:          h.SlotNumber,
+		})
+	}
+	return json.Marshal(base)
 }
 
 func (h *Eth1Header) UnmarshalJSON(data []byte) error {
 	var aux struct {
-		ParentHash       common.Hash    `json:"parent_hash"`
-		FeeRecipient     common.Address `json:"fee_recipient"`
-		StateRoot        common.Hash    `json:"state_root"`
-		ReceiptsRoot     common.Hash    `json:"receipts_root"`
-		LogsBloom        hexutil.Bytes  `json:"logs_bloom"`
-		PrevRandao       common.Hash    `json:"prev_randao"`
-		BlockNumber      uint64         `json:"block_number,string"`
-		GasLimit         uint64         `json:"gas_limit,string"`
-		GasUsed          uint64         `json:"gas_used,string"`
-		Time             uint64         `json:"timestamp,string"`
-		Extra            hexutil.Bytes  `json:"extra_data"`
-		BaseFeePerGas    string         `json:"base_fee_per_gas"`
-		BlockHash        common.Hash    `json:"block_hash"`
-		TransactionsRoot common.Hash    `json:"transactions_root"`
-		WithdrawalsRoot  common.Hash    `json:"withdrawals_root"`
-		BlobGasUsed      uint64         `json:"blob_gas_used,string"`
-		ExcessBlobGas    uint64         `json:"excess_blob_gas,string"`
+		ParentHash          common.Hash    `json:"parent_hash"`
+		FeeRecipient        common.Address `json:"fee_recipient"`
+		StateRoot           common.Hash    `json:"state_root"`
+		ReceiptsRoot        common.Hash    `json:"receipts_root"`
+		LogsBloom           hexutil.Bytes  `json:"logs_bloom"`
+		PrevRandao          common.Hash    `json:"prev_randao"`
+		BlockNumber         uint64         `json:"block_number,string"`
+		GasLimit            uint64         `json:"gas_limit,string"`
+		GasUsed             uint64         `json:"gas_used,string"`
+		Time                uint64         `json:"timestamp,string"`
+		Extra               hexutil.Bytes  `json:"extra_data"`
+		BaseFeePerGas       string         `json:"base_fee_per_gas"`
+		BlockHash           common.Hash    `json:"block_hash"`
+		TransactionsRoot    common.Hash    `json:"transactions_root"`
+		WithdrawalsRoot     common.Hash    `json:"withdrawals_root"`
+		BlobGasUsed         uint64         `json:"blob_gas_used,string"`
+		ExcessBlobGas       uint64         `json:"excess_blob_gas,string"`
+		BlockAccessListRoot common.Hash    `json:"block_access_list_root"`
+		SlotNumber          uint64         `json:"slot_number,string"`
 	}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
@@ -245,5 +273,7 @@ func (h *Eth1Header) UnmarshalJSON(data []byte) error {
 	h.WithdrawalsRoot = aux.WithdrawalsRoot
 	h.BlobGasUsed = aux.BlobGasUsed
 	h.ExcessBlobGas = aux.ExcessBlobGas
+	h.BlockAccessListRoot = aux.BlockAccessListRoot
+	h.SlotNumber = aux.SlotNumber
 	return nil
 }

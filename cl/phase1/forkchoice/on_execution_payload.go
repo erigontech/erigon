@@ -61,15 +61,19 @@ func (f *ForkChoiceStore) validateEnvelopeAgainstBlock(
 	}
 	envelope := signedEnvelope.Message
 
+	// [REJECT] block.slot equals envelope.payload.slot_number (EIP-7843)
+	if envelope.Payload == nil {
+		return errors.New("envelope missing payload")
+	}
+	if block.Block.Slot != envelope.Payload.SlotNumber {
+		return fmt.Errorf("block slot %d != envelope.payload.slot_number %d",
+			block.Block.Slot, envelope.Payload.SlotNumber)
+	}
+
 	// Get the bid from the block
 	bid := block.Block.Body.GetSignedExecutionPayloadBid()
 	if bid == nil || bid.Message == nil {
 		return errors.New("block missing signed_execution_payload_bid")
-	}
-
-	// Validate block.slot equals envelope.slot
-	if block.Block.Slot != envelope.Slot {
-		return fmt.Errorf("block slot %d != envelope slot %d", block.Block.Slot, envelope.Slot)
 	}
 
 	// Validate envelope.builder_index == bid.builder_index
@@ -79,9 +83,6 @@ func (f *ForkChoiceStore) validateEnvelopeAgainstBlock(
 	}
 
 	// Validate payload.block_hash == bid.block_hash
-	if envelope.Payload == nil {
-		return errors.New("envelope missing payload")
-	}
 	if envelope.Payload.BlockHash != bid.Message.BlockHash {
 		return fmt.Errorf("payload block_hash %v != bid block_hash %v",
 			envelope.Payload.BlockHash, bid.Message.BlockHash)
@@ -101,7 +102,7 @@ func (f *ForkChoiceStore) validateEnvelopeAgainstBlock(
 	}
 
 	// Verify builder signature
-	if err := f.verifyEnvelopeBuilderSignature(signedEnvelope, blockState); err != nil {
+	if err := f.verifyEnvelopeBuilderSignature(signedEnvelope, blockState, block.Block.Slot); err != nil {
 		return fmt.Errorf("invalid builder signature: %w", err)
 	}
 
@@ -113,6 +114,7 @@ func (f *ForkChoiceStore) validateEnvelopeAgainstBlock(
 func (f *ForkChoiceStore) verifyEnvelopeBuilderSignature(
 	signedEnvelope *cltypes.SignedExecutionPayloadEnvelope,
 	blockState abstract.BeaconState,
+	blockSlot uint64,
 ) error {
 	envelope := signedEnvelope.Message
 	builderIndex := envelope.BuilderIndex
@@ -143,7 +145,7 @@ func (f *ForkChoiceStore) verifyEnvelopeBuilderSignature(
 	}
 
 	// Get domain for builder signature
-	epoch := state.GetEpochAtSlot(f.beaconCfg, envelope.Slot)
+	epoch := state.GetEpochAtSlot(f.beaconCfg, blockSlot)
 	domain, err := blockState.GetDomain(f.beaconCfg.DomainBeaconBuilder, epoch)
 	if err != nil {
 		return fmt.Errorf("failed to get domain: %w", err)

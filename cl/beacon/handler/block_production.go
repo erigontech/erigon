@@ -514,7 +514,14 @@ func (a *ApiHandler) getBuilderPayload(
 		return nil, err
 	}
 	// get the parent hash of base execution block
-	parentHash := baseState.LatestExecutionPayloadHeader().BlockHash
+	// [Modified in Gloas:EIP7732] LatestExecutionPayloadHeader is stale in GLOAS;
+	// use GetLatestBlockHash which returns the correct hash from the bid.
+	var parentHash common.Hash
+	if baseState.Version() >= clparams.GloasVersion {
+		parentHash = baseState.GetLatestBlockHash()
+	} else {
+		parentHash = baseState.LatestExecutionPayloadHeader().BlockHash
+	}
 	header, err := a.builderClient.GetHeader(ctx, int64(targetSlot), parentHash, pubKey)
 	if err != nil {
 		return nil, err
@@ -893,6 +900,8 @@ func (a *ApiHandler) produceBeaconBody(
 					},
 				)
 				executionPayload.Transactions = payload.Transactions
+				executionPayload.BlockAccessList = payload.BlockAccessList
+				executionPayload.SlotNumber = payload.SlotNumber
 				// Cache the block body so the beacon API can return transactions
 				// immediately, before the EL commits to its database.
 				a.cacheExecutionBody(payload)

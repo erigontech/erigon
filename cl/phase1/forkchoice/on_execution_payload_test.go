@@ -33,11 +33,12 @@ func TestValidateEnvelopeAgainstBlock_NoBid(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	f := &ForkChoiceStore{beaconCfg: cfg}
 
+	payload := cltypes.NewEth1Block(clparams.GloasVersion, cfg)
+	payload.SlotNumber = 100 // Must match block.Slot to pass slot_number check
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{
 		Message: &cltypes.ExecutionPayloadEnvelope{
-			Slot:         100,
 			BuilderIndex: 1,
-			Payload:      cltypes.NewEth1Block(clparams.GloasVersion, cfg),
+			Payload:      payload,
 		},
 	}
 
@@ -57,23 +58,24 @@ func TestValidateEnvelopeAgainstBlock_NoBid(t *testing.T) {
 	require.Contains(t, err.Error(), "block missing signed_execution_payload_bid")
 }
 
-// TestValidateEnvelopeAgainstBlock_SlotMismatch tests that validation fails when slots don't match
-func TestValidateEnvelopeAgainstBlock_SlotMismatch(t *testing.T) {
+// TestValidateEnvelopeAgainstBlock_SlotNumberMismatch tests that validation fails when
+// block.slot != envelope.payload.slot_number (EIP-7843 / GLOAS p2p-interface REJECT rule).
+func TestValidateEnvelopeAgainstBlock_SlotNumberMismatch(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	f := &ForkChoiceStore{beaconCfg: cfg}
 
 	blockHash := common.HexToHash("0x1234")
+	payload := cltypes.NewEth1Block(clparams.GloasVersion, cfg)
+	payload.BlockHash = blockHash
+	payload.SlotNumber = 200 // Different from block slot
+
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{
 		Message: &cltypes.ExecutionPayloadEnvelope{
-			Slot:         100,
 			BuilderIndex: 1,
-			Payload: &cltypes.Eth1Block{
-				BlockHash: blockHash,
-			},
+			Payload:      payload,
 		},
 	}
 
-	// Create block with different slot
 	body := cltypes.NewBeaconBody(cfg, clparams.GloasVersion)
 	body.SignedExecutionPayloadBid = &cltypes.SignedExecutionPayloadBid{
 		Message: &cltypes.ExecutionPayloadBid{
@@ -85,14 +87,14 @@ func TestValidateEnvelopeAgainstBlock_SlotMismatch(t *testing.T) {
 
 	block := &cltypes.SignedBeaconBlock{
 		Block: &cltypes.BeaconBlock{
-			Slot: 200, // Different slot
+			Slot: 100, // Different from payload.SlotNumber
 			Body: body,
 		},
 	}
 
 	err := f.validateEnvelopeAgainstBlock(envelope, block, nil)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "block slot 200 != envelope slot 100")
+	require.Contains(t, err.Error(), "block slot 100 != envelope.payload.slot_number 200")
 }
 
 // TestValidateEnvelopeAgainstBlock_BuilderIndexMismatch tests that validation fails when builder indices don't match
@@ -103,10 +105,10 @@ func TestValidateEnvelopeAgainstBlock_BuilderIndexMismatch(t *testing.T) {
 	blockHash := common.HexToHash("0x1234")
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{
 		Message: &cltypes.ExecutionPayloadEnvelope{
-			Slot:         100,
 			BuilderIndex: 1,
 			Payload: &cltypes.Eth1Block{
-				BlockHash: blockHash,
+				BlockHash:  blockHash,
+				SlotNumber: 100, // Match block.Slot to pass slot_number check
 			},
 		},
 	}
@@ -139,7 +141,6 @@ func TestValidateEnvelopeAgainstBlock_NilPayload(t *testing.T) {
 
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{
 		Message: &cltypes.ExecutionPayloadEnvelope{
-			Slot:         100,
 			BuilderIndex: 1,
 			Payload:      nil, // No payload
 		},
@@ -173,10 +174,10 @@ func TestValidateEnvelopeAgainstBlock_BlockHashMismatch(t *testing.T) {
 
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{
 		Message: &cltypes.ExecutionPayloadEnvelope{
-			Slot:         100,
 			BuilderIndex: 1,
 			Payload: &cltypes.Eth1Block{
-				BlockHash: common.HexToHash("0x1111"), // Different hash
+				BlockHash:  common.HexToHash("0x1111"), // Different hash
+				SlotNumber: 100,                        // Match block.Slot
 			},
 		},
 	}
@@ -256,7 +257,6 @@ func TestValidatePayloadWithEL_NoEngine(t *testing.T) {
 	}
 
 	envelope := &cltypes.ExecutionPayloadEnvelope{
-		Slot:    100,
 		Payload: cltypes.NewEth1Block(clparams.GloasVersion, cfg),
 	}
 

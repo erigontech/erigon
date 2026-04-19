@@ -361,7 +361,6 @@ type ExecutionPayloadEnvelope struct {
 	ExecutionRequests *ExecutionRequests `json:"execution_requests"`
 	BuilderIndex      uint64             `json:"builder_index,string"`
 	BeaconBlockRoot   common.Hash        `json:"beacon_block_root"`
-	Slot              uint64             `json:"slot,string"`
 
 	beaconCfg *clparams.BeaconChainConfig
 }
@@ -372,7 +371,6 @@ func NewExecutionPayloadEnvelope(cfg *clparams.BeaconChainConfig) *ExecutionPayl
 		ExecutionRequests: NewExecutionRequests(cfg),
 		BuilderIndex:      0,
 		BeaconBlockRoot:   common.Hash{},
-		Slot:              0,
 		beaconCfg:         cfg,
 	}
 }
@@ -383,7 +381,6 @@ func (e *ExecutionPayloadEnvelope) HashSSZ() ([32]byte, error) {
 		e.ExecutionRequests,
 		e.BuilderIndex,
 		e.BeaconBlockRoot[:],
-		e.Slot,
 	)
 }
 
@@ -397,7 +394,6 @@ func (e *ExecutionPayloadEnvelope) EncodeSSZ(buf []byte) ([]byte, error) {
 		e.ExecutionRequests,
 		e.BuilderIndex,
 		e.BeaconBlockRoot[:],
-		e.Slot,
 	)
 }
 
@@ -413,14 +409,13 @@ func (e *ExecutionPayloadEnvelope) DecodeSSZ(buf []byte, version int) error {
 		e.ExecutionRequests,
 		&e.BuilderIndex,
 		e.BeaconBlockRoot[:],
-		&e.Slot,
 	)
 }
 
 func (e *ExecutionPayloadEnvelope) EncodingSizeSSZ() int {
 	return 4 + e.Payload.EncodingSizeSSZ() + // offset for Payload (variable-length)
 		4 + e.ExecutionRequests.EncodingSizeSSZ() + // offset for ExecutionRequests (variable-length)
-		8 + length.Hash + 8
+		8 + length.Hash
 }
 
 func (e *ExecutionPayloadEnvelope) Clone() clonable.Clonable {
@@ -429,7 +424,6 @@ func (e *ExecutionPayloadEnvelope) Clone() clonable.Clonable {
 		ExecutionRequests: e.ExecutionRequests,
 		BuilderIndex:      e.BuilderIndex,
 		BeaconBlockRoot:   e.BeaconBlockRoot,
-		Slot:              e.Slot,
 		beaconCfg:         e.beaconCfg,
 	}
 }
