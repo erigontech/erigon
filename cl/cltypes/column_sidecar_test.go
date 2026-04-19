@@ -28,7 +28,7 @@ import (
 func init() {
 	// Initialize global config for tests
 	cfg := &clparams.BeaconChainConfig{
-		MaxBlobCommittmentsPerBlock: 6,
+		MaxBlobCommittmentsPerBlock: 4096, // mainnet value, needed by spectest-based SSZ round-trip tests
 		NumberOfColumns:             128,
 		GloasForkEpoch:              18446744073709551615, // Max uint64 - Gloas not activated by default
 	}
