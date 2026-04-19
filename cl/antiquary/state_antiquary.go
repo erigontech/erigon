@@ -19,6 +19,7 @@ package antiquary
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -379,6 +380,17 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 						return err
 					}
 				}
+				if s.currentState.Version() >= clparams.GloasVersion {
+					if err := stateAntiquaryCollector.collectBuildersDump(slot, s.currentState.GetBuilders()); err != nil {
+						return err
+					}
+					if err := stateAntiquaryCollector.collectBuilderPendingWithdrawalsDump(slot, s.currentState.GetBuilderPendingWithdrawals()); err != nil {
+						return err
+					}
+					if err := stateAntiquaryCollector.collectPayloadExpectedWithdrawalsDump(slot, s.currentState.GetPayloadExpectedWithdrawals()); err != nil {
+						return err
+					}
+				}
 			}
 			if slot%s.cfg.SlotsPerEpoch == 0 {
 				if err := stateAntiquaryCollector.collectBalancesDiffs(ctx, slot, s.balances32, s.currentState.RawBalances()); err != nil {
@@ -444,6 +456,17 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 					return err
 				}
 			}
+			if s.currentState.Version() >= clparams.GloasVersion {
+				if err := stateAntiquaryCollector.collectBuildersDump(slot, s.currentState.GetBuilders()); err != nil {
+					return err
+				}
+				if err := stateAntiquaryCollector.collectBuilderPendingWithdrawalsDump(slot, s.currentState.GetBuilderPendingWithdrawals()); err != nil {
+					return err
+				}
+				if err := stateAntiquaryCollector.collectPayloadExpectedWithdrawalsDump(slot, s.currentState.GetPayloadExpectedWithdrawals()); err != nil {
+					return err
+				}
+			}
 		}
 		// collect current diffs.
 		if err := stateAntiquaryCollector.collectBalancesDiffs(ctx, slot, s.balances32, s.currentState.RawBalances()); err != nil {
@@ -452,6 +475,23 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 
 		if s.currentState.Version() >= clparams.ElectraVersion {
 			if err := stateAntiquaryCollector.collectElectraQueuesDiffs(slot, s.currentState.PendingDeposits(), s.currentState.PendingConsolidations(), s.currentState.PendingPartialWithdrawals()); err != nil {
+				return err
+			}
+		}
+		if s.currentState.Version() >= clparams.GloasVersion {
+			if err := stateAntiquaryCollector.collectGloasQueuesDiffs(slot, s.currentState.GetBuilders(), s.currentState.GetBuilderPendingWithdrawals(), s.currentState.GetPayloadExpectedWithdrawals()); err != nil {
+				return err
+			}
+			if err := stateAntiquaryCollector.collectExecutionPayloadAvailability(slot, s.currentState.GetExecutionPayloadAvailability()); err != nil {
+				return err
+			}
+			if err := stateAntiquaryCollector.collectBuilderPendingPayments(slot, s.currentState.GetBuilderPendingPayments()); err != nil {
+				return err
+			}
+			if err := stateAntiquaryCollector.collectPtcWindow(slot, s.currentState.GetPtcWindow()); err != nil {
+				return err
+			}
+			if err := stateAntiquaryCollector.collectLatestExecutionPayloadBid(slot, s.currentState.GetLatestExecutionPayloadBid()); err != nil {
 				return err
 			}
 		}
@@ -616,6 +656,14 @@ func (s *Antiquary) initializeStateAntiquaryIfNeeded(ctx context.Context, tx kv.
 		// progress not 0 ? we need to load the state from the DB
 		s.currentState, err = historicalReader.ReadHistoricalState(ctx, tx, attempt)
 		if err != nil {
+			// If GLOAS snapshot data is missing (DB upgraded but not yet
+			// re-antiquated), back off to an earlier slot so the antiquary
+			// can rebuild forward from a valid pre-GLOAS state.
+			if errors.Is(err, historical_states_reader.ErrMissingGloasData) {
+				log.Warn("GLOAS snapshot data missing, backing off to re-antiquate", "slot", attempt, "err", err)
+				backoffStep += backoffStrides
+				continue
+			}
 			return fmt.Errorf("failed to read historical state at slot %d: %w", attempt, err)
 		}
 
