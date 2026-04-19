@@ -69,8 +69,6 @@ type EliasFano struct {
 // OffHeapBuilder wraps *EliasFano with a mmapped temp file as the backing
 // buffer. OS resources (file descriptor + mmap) live here rather than on
 // EliasFano so heap-backed EliasFano carries no extra overhead.
-// Call Close() after Write() to release the mmap and delete the temp file.
-// Idempotent.
 type OffHeapBuilder struct {
 	*EliasFano
 	backingMmap mmap.MMap
@@ -81,6 +79,12 @@ func (b *OffHeapBuilder) Close() {
 	if b.backingMmap != nil {
 		_ = b.backingMmap.Unmap()
 		b.backingMmap = nil
+		// Nil the sub-slices so any use-after-Close panics immediately
+		// instead of silently reading unmapped memory.
+		b.EliasFano.data = nil
+		b.EliasFano.lowerBits = nil
+		b.EliasFano.upperBits = nil
+		b.EliasFano.jump = nil
 	}
 	if b.backingFile != nil {
 		name := b.backingFile.Name()
@@ -116,7 +120,6 @@ func NewEliasFanoOffHeap(count uint64, maxOffset uint64, tmpFilePath string) (*O
 		maxOffset: maxOffset,
 	}
 	ef.u = maxOffset + 1
-	// Pre-size ef.data so deriveFields reslices instead of allocating.
 	_, _, _, totalWords := ef.computeLayout()
 	sizeBytes := int64(totalWords) * uint64Size
 	if sizeBytes > math.MaxInt {
