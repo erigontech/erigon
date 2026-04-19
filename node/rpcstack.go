@@ -20,6 +20,7 @@
 package node
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
 	"errors"
@@ -31,6 +32,8 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	libdeflate "github.com/erigontech/go-libdeflate"
 
 	"github.com/rs/cors"
 
@@ -509,24 +512,68 @@ func (h *virtualHostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 var gzPool = sync.Pool{
+	New: func() any { return gzip.NewWriter(io.Discard) },
+}
+
+var gzCompressorPool = sync.Pool{
 	New: func() any {
-		w := gzip.NewWriter(io.Discard)
-		return w
+		c, err := libdeflate.NewCompressor(libdeflate.DefaultCompression)
+		if err != nil {
+			panic(fmt.Sprintf("libdeflate: failed to create compressor: %v", err))
+		}
+		return c
 	},
 }
 
+var gzBufPool = sync.Pool{
+	New: func() any { return new(bytes.Buffer) },
+}
+
+// gzDstPool pools the destination slice for libdeflate one-shot compression,
+// avoiding a large per-request allocation. The slice is grown as needed.
+var gzDstPool = sync.Pool{
+	New: func() any { b := make([]byte, 0, 64*1024); return &b },
+}
+
 type gzipResponseWriter struct {
-	io.Writer
+	buf    *bytes.Buffer
+	gzw    *gzip.Writer
+	status int
 	http.ResponseWriter
 }
 
 func (w *gzipResponseWriter) WriteHeader(status int) {
-	w.Header().Del("Content-Length")
-	w.ResponseWriter.WriteHeader(status)
+	if w.gzw != nil {
+		w.ResponseWriter.WriteHeader(status)
+	} else {
+		w.status = status
+	}
 }
 
 func (w *gzipResponseWriter) Write(b []byte) (int, error) {
-	return w.Writer.Write(b)
+	if w.gzw != nil {
+		return w.gzw.Write(b)
+	}
+	return w.buf.Write(b)
+}
+
+// Flush implements http.Flusher. Switches from buffering to stdlib gzip streaming
+// so that libdeflate is used only for non-streaming responses.
+func (w *gzipResponseWriter) Flush() {
+	if w.gzw != nil {
+		return
+	}
+	w.ResponseWriter.Header().Set("Content-Encoding", "gzip")
+	w.ResponseWriter.Header().Del("Content-Length")
+	if w.status != 0 {
+		w.ResponseWriter.WriteHeader(w.status)
+	}
+	w.gzw = gzPool.Get().(*gzip.Writer)
+	w.gzw.Reset(w.ResponseWriter)
+	if w.buf.Len() > 0 {
+		_, _ = w.gzw.Write(w.buf.Bytes())
+		w.buf.Reset()
+	}
 }
 
 func newGzipHandler(next http.Handler) http.Handler {
@@ -536,15 +583,43 @@ func newGzipHandler(next http.Handler) http.Handler {
 			return
 		}
 
+		buf := gzBufPool.Get().(*bytes.Buffer)
+		buf.Reset()
+		defer gzBufPool.Put(buf)
+		grw := &gzipResponseWriter{buf: buf, ResponseWriter: w}
+		next.ServeHTTP(grw, r)
+
+		if grw.gzw != nil {
+			defer gzPool.Put(grw.gzw)
+			_ = grw.gzw.Close()
+			return
+		}
+
+		// Non-streaming: use libdeflate for faster one-shot compression.
+		c := gzCompressorPool.Get().(*libdeflate.Compressor)
+		defer gzCompressorPool.Put(c)
+
+		src := grw.buf.Bytes()
+		dstPtr := gzDstPool.Get().(*[]byte)
+		defer gzDstPool.Put(dstPtr)
+		needed := c.GzipCompressBound(len(src))
+		if cap(*dstPtr) < needed {
+			*dstPtr = make([]byte, needed)
+		} else {
+			*dstPtr = (*dstPtr)[:needed]
+		}
+		n, err := c.CompressGzip(*dstPtr, src)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
 		w.Header().Set("Content-Encoding", "gzip")
-
-		gz := gzPool.Get().(*gzip.Writer)
-		defer gzPool.Put(gz)
-
-		gz.Reset(w)
-		defer gz.Close()
-
-		next.ServeHTTP(&gzipResponseWriter{ResponseWriter: w, Writer: gz}, r)
+		w.Header().Del("Content-Length")
+		if grw.status != 0 {
+			w.WriteHeader(grw.status)
+		}
+		w.Write((*dstPtr)[:n]) //nolint:errcheck
 	})
 }
 
