@@ -609,6 +609,96 @@ func TestEngineApiBALParallelConsistencyStress(t *testing.T) {
 	})
 }
 
+// TestEngineApiBALCreateSSTOREThenSelfdestructInInitCode is a targeted
+// regression test for the proposer/validator BAL divergence that manifested
+// as the glamsterdam assertoor flake.
+//
+// Scenario: a single CREATE transaction whose init code does SSTORE followed
+// by SELFDESTRUCT (of the just-created contract). The SSTORE's EIP-2200
+// gas calculation records a StoragePath read on the new contract; the
+// SELFDESTRUCT then marks the state object as deleted. Pre-fix behavior
+// differed between the two execution paths:
+//
+//   - Block assembler (serial, proposer): FinalizeTx iterated
+//     sdb.journal.dirties after the tx and, for any stateObject with
+//     `so.deleted == true`, dropped its whole versionedReads entry:
+//     if so.deleted { delete(sdb.versionedReads, addr) }
+//     That removed the new contract's SSTORE-gas-calc read from the
+//     per-tx read set before it was merged into balIO.
+//
+//   - Parallel executor (validator): txtask.Execute calls SoftFinalise +
+//     MakeWriteSet, which never had the corresponding delete. The read
+//     survived into result.TxIn and ended up in blockIO as a
+//     storageReads=[0x01] entry on the ephemeral contract's address.
+//
+// BuildCanonicalBlock ran the block through both paths (assembler-signed
+// header BAL hash, parallel-executor validator BAL hash). Divergence →
+// engine_newPayload returned INVALID → this test fails. The fix (remove
+// the delete from FinalizeTx) makes both paths retain the read, matching
+// EIP-7928's access-list semantics.
+//
+// The bytecode is ~15 bytes of handwritten EVM. Init code:
+//
+//	6001600155  SSTORE slot 0x01 = 1   (records StoragePath read on slot 0x01)
+//	33          CALLER
+//	FF          SELFDESTRUCT            (EIP-6780 actually destroys because
+//	                                     the contract was created this tx)
+//
+// There is no deployed code (no `f3` RETURN), so the create returns no
+// bytecode — the only output the test needs is the BAL agreement.
+func TestEngineApiBALCreateSSTOREThenSelfdestructInInitCode(t *testing.T) {
+	if !dbg.Exec3Parallel {
+		t.Skip("requires parallel exec")
+	}
+	eat := engineapitester.DefaultEngineApiTester(t)
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		signer := types.LatestSignerForChainID(eat.ChainConfig.ChainID)
+		coinbaseAddr := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
+
+		nonce, err := eat.RpcApiClient.GetTransactionCount(coinbaseAddr, rpc.PendingBlock)
+		require.NoError(t, err)
+		gasPrice, err := eat.RpcApiClient.GasPrice()
+		require.NoError(t, err)
+		gasPriceU256, _ := uint256.FromBig(gasPrice)
+
+		// SSTORE-then-SELFDESTRUCT init code. See the docstring above for
+		// the bytecode breakdown.
+		initCode := []byte{
+			0x60, 0x01, // PUSH1 0x01 (value)
+			0x60, 0x01, // PUSH1 0x01 (slot)
+			0x55, // SSTORE
+			0x33, // CALLER
+			0xff, // SELFDESTRUCT
+		}
+
+		createTx := &types.LegacyTx{
+			CommonTx: types.CommonTx{
+				Nonce:    nonce.Uint64(),
+				GasLimit: 1_000_000,
+				To:       nil, // CREATE
+				Value:    uint256.Int{},
+				Data:     initCode,
+			},
+			GasPrice: *gasPriceU256,
+		}
+		signedCreateTx, err := types.SignTx(createTx, *signer, eat.CoinbaseKey)
+		require.NoError(t, err)
+		_, err = eat.RpcApiClient.SendTransaction(signedCreateTx)
+		require.NoError(t, err)
+
+		// BuildCanonicalBlock drives proposer (serial) + validator (parallel)
+		// through the full engine_newPayload roundtrip. If their BAL hashes
+		// diverge, this call errors with "block access list mismatch".
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err, "BAL divergence: block assembler vs parallel executor")
+		require.NoError(t, eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx,
+			payload.ExecutionPayload, signedCreateTx.Hash()))
+
+		// Sanity-check the BAL body decodes and validates.
+		_ = decodeAndValidateBAL(t, payload)
+	})
+}
+
 // TestEngineApiBALSelfDestruct tests BAL tracking when a contract self-destructs.
 // Exercises storage writes followed by self-destruct in the same block.
 func TestEngineApiBALSelfDestruct(t *testing.T) {
