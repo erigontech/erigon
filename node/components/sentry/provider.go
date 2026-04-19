@@ -78,46 +78,60 @@ type Config struct {
 
 	// External-sentry mode is triggered when P2P.SentryAddr is non-empty:
 	// the Provider dials these addresses via gRPC instead of building
-	// local servers. All fields below are only consulted in local mode.
+	// local servers. The fields below divide into two groups: those
+	// required in both modes (StatusDataProvider, MultiClient, Start
+	// subscriptions all need them) and those consulted only when
+	// building local servers.
 
-	// ChainDB is queried by the readNodeInfo callback during ENR refresh,
-	// by StatusDataProvider during status-message construction, and by the
-	// multi-sentry client built via BuildMultiClient. It must satisfy
-	// kv.TemporalRoDB so the MultiClient can open temporal read transactions
-	// for header validation during backward download.
+	// --- Required in both modes ---
+
+	// ChainDB is consumed by StatusDataProvider (status-message
+	// construction) and by the multi-sentry Client built via
+	// BuildMultiClient, which opens temporal read transactions for
+	// header validation during backward download. In local mode it
+	// additionally backs the readNodeInfo callback for ENR refresh.
+	// Must satisfy kv.TemporalRoDB.
 	ChainDB kv.TemporalRoDB
 
-	// ChainConfig, GenesisHash, NetworkID are threaded into the
+	// ChainConfig, GenesisHash, NetworkID are consumed by
+	// StatusDataProvider to construct status messages and by the
+	// MultiClient's stream pumps. In local mode they also feed the
 	// readNodeInfo closure so each sentry server can report up-to-date
-	// node metadata in its ENR record. ChainConfig + Genesis + NetworkID
-	// are also consumed by StatusDataProvider.
+	// ENR metadata.
 	ChainConfig *chain.Config
 	GenesisHash common.Hash
 	NetworkID   uint64
 
-	// Genesis is the canonical genesis block; required by StatusDataProvider
-	// to compute fork IDs and genesis-hash checks on incoming status messages.
+	// Genesis is the canonical genesis block; required by
+	// StatusDataProvider to compute fork IDs and genesis-hash checks
+	// on incoming status messages. Both modes.
 	Genesis *types.Block
 
-	// BlockReader supplies current header/body access to StatusDataProvider
-	// when refreshing status messages on new-head notifications.
+	// BlockReader supplies current header/body access to
+	// StatusDataProvider when refreshing status messages on new-head
+	// notifications. Both modes.
 	BlockReader services.FullBlockReader
 
-	// EthDiscoveryURLs is the DNS-discovery list advertised alongside any
-	// chain-specific bootnodes.
+	// --- Local-mode only ---
+
+	// EthDiscoveryURLs is the DNS-discovery list advertised alongside
+	// any chain-specific bootnodes. Not used in external-sentry mode.
 	EthDiscoveryURLs []string
 
-	// ChainName (e.g. "mainnet", "hoodi") selects the chainspec used to
-	// look up bootnodes and DNS network. Sourced from
-	// config.Snapshot.ChainName.
+	// ChainName (e.g. "mainnet", "hoodi") selects the chainspec used
+	// to look up bootnodes and DNS network. Sourced from
+	// config.Snapshot.ChainName. Not used in external-sentry mode.
 	ChainName string
 
 	// NodesDir is the node database directory; the Provider appends
 	// per-protocol subdirectories beneath it (e.g. "eth68", "eth69").
+	// Not used in external-sentry mode.
 	NodesDir string
 
-	// EnableWitProtocol toggles the WIT sideprotocol on the direct sentry
-	// clients. Sourced from stack.Config().P2P.EnableWitProtocol.
+	// EnableWitProtocol toggles the WIT sideprotocol on the direct
+	// sentry clients we build locally. Sourced from
+	// stack.Config().P2P.EnableWitProtocol. Not used in
+	// external-sentry mode.
 	EnableWitProtocol bool
 
 	// Events is the node-level shards.Events instance. Start subscribes to
@@ -191,8 +205,11 @@ func (p *Provider) Configure(cfg Config) {
 // one sentry.GrpcServer per requested protocol version, wraps each in a
 // direct client, and appends them to Sentries.
 //
-// After this returns, p.Sentries is ready for multi-client construction and
-// p.Servers is the list of local servers (empty in external mode).
+// After this returns, p.Sentries is ready for multi-client construction,
+// p.Servers is the list of local servers (empty in external mode), and
+// p.StatusDataProvider / p.Multiplexer / the execution-P2P layer are
+// populated in both modes — MultiClient construction assumes these are
+// non-nil.
 //
 // Initialize does NOT start background goroutines — call Start for that.
 func (p *Provider) Initialize(ctx context.Context) error {
@@ -205,6 +222,7 @@ func (p *Provider) Initialize(ctx context.Context) error {
 			}
 			p.Sentries = append(p.Sentries, sentryClient)
 		}
+		p.buildStatusAndExecutionP2P()
 		return nil
 	}
 
@@ -254,7 +272,7 @@ func (p *Provider) Initialize(ctx context.Context) error {
 			}
 			if !checkPortIsFree(fmt.Sprintf("%s:%d", listenHost, pc)) {
 				p.logger.Warn("bind protocol to port has failed: port is busy",
-					"protocols", fmt.Sprintf("eth/%d", cfg.ProtocolVersion), "port", pc)
+					"protocol", eth.ProtocolToString[protocol], "port", pc)
 				continue
 			}
 			if listenPort != pc {
