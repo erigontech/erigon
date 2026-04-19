@@ -1195,55 +1195,6 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 	ac := make(map[accounts.Address]*accountState)
 	maxTxIndex := io.Len() - 1
 
-	// TEMP BAL-DIAG: dump all entries for the target addr+slot that drive the
-	// mismatch (d38595... slot 0x026794 or 59817756... slot 0x026794 etc).
-	// Caller-tag via callers to distinguish block_assembler vs exec3_parallel
-	// (ProcessBAL).
-	var tag string
-	{
-		var pcs [8]uintptr
-		n := runtime.Callers(2, pcs[:])
-		frames := runtime.CallersFrames(pcs[:n])
-		var parts []string
-		for {
-			f, more := frames.Next()
-			fn := f.Function
-			if i := strings.LastIndex(fn, "/"); i >= 0 {
-				fn = fn[i+1:]
-			}
-			parts = append(parts, fn)
-			if !more {
-				break
-			}
-		}
-		tag = strings.Join(parts, "<-")
-	}
-	for txIndex := -1; txIndex <= maxTxIndex; txIndex++ {
-		io.ReadSet(txIndex).Scan(func(vr *VersionedRead) bool {
-			if vr.Path != StoragePath {
-				return true
-			}
-			hv := vr.Key.Value()
-			hk := hex.EncodeToString(hv[:])
-			if !strings.HasSuffix(hk, "026794") {
-				return true
-			}
-			fmt.Fprintf(os.Stderr, "[BAL-ASSEMBLE] caller=%s txIndex=%d READ addr=%x slot=%s internal=%v vr.Val=%v\n", tag, txIndex, vr.Address, hk, vr.internal, vr.Val)
-			return true
-		})
-		for _, vw := range io.WriteSet(txIndex) {
-			if vw.Path != StoragePath {
-				continue
-			}
-			hv := vw.Key.Value()
-			hk := hex.EncodeToString(hv[:])
-			if !strings.HasSuffix(hk, "026794") {
-				continue
-			}
-			fmt.Fprintf(os.Stderr, "[BAL-ASSEMBLE] caller=%s txIndex=%d WRITE addr=%x slot=%s val=%v\n", tag, txIndex, vw.Address, hk, vw.Val)
-		}
-	}
-
 	for txIndex := -1; txIndex <= maxTxIndex; txIndex++ {
 		io.ReadSet(txIndex).Scan(func(vr *VersionedRead) bool {
 			if vr.Address.IsNil() || vr.internal {
