@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
@@ -417,11 +418,17 @@ func (b *Eth1Block) DecodeSSZ(buf []byte, version int) error {
 
 // EncodeSSZ encodes the block in SSZ format.
 func (b *Eth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
+	if b.Extra == nil {
+		b.Extra = solid.NewExtraData()
+	}
 	return ssz2.MarshalSSZ(dst, b.getSchema()...)
 }
 
 // HashSSZ calculates the SSZ hash of the Eth1Block's payload header.
 func (b *Eth1Block) HashSSZ() ([32]byte, error) {
+	if b.Extra == nil {
+		b.Extra = solid.NewExtraData()
+	}
 	return merkle_tree.HashTreeRoot(b.getSchema()...)
 }
 
@@ -495,6 +502,20 @@ func (b *Eth1Block) RlpHeader(parentRoot *common.Hash, executionReqHash common.H
 
 	if b.version >= clparams.ElectraVersion {
 		header.RequestsHash = &executionReqHash
+	}
+
+	// [New in Gloas:EIP7928/EIP7843] Populate block access list hash and slot number.
+	// Matches the engine API pattern in engine_server.go: keccak256(raw RLP bytes).
+	if b.version >= clparams.GloasVersion {
+		blockAccessListHash := new(common.Hash)
+		if b.BlockAccessList == nil || b.BlockAccessList.EncodingSizeSSZ() == 0 {
+			*blockAccessListHash = empty.BlockAccessListHash
+		} else {
+			*blockAccessListHash = crypto.HashData(b.BlockAccessList.Bytes())
+		}
+		header.BlockAccessListHash = blockAccessListHash
+		slotNumber := b.SlotNumber
+		header.SlotNumber = &slotNumber
 	}
 
 	// If the header hash does not match the block hash, return an error.

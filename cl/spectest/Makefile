@@ -1,7 +1,7 @@
 .PHONY: clean setup example run clean
 
 download-spec:
-	curl -sSL -o mainnet.tar.gz https://github.com/ethereum/consensus-specs/releases/download/v1.7.0-alpha.4/mainnet.tar.gz
+	curl -sSL -o mainnet.tar.gz https://github.com/ethereum/consensus-specs/releases/download/v1.7.0-alpha.5/mainnet.tar.gz
 
 tests: download-spec
 	tar xf mainnet.tar.gz
