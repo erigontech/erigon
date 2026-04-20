@@ -61,7 +61,9 @@ func init() {
 		With("get_head", &ForkChoice{}).
 		With("on_block", &ForkChoice{}).
 		With("on_merge_block", &ForkChoice{}).
-		With("ex_ante", &ForkChoice{})
+		With("ex_ante", &ForkChoice{}).
+		With("on_execution_payload_envelope", &ForkChoice{}).
+		With("get_parent_payload_status", &ForkChoice{})
 	TestFormats.Add("fork").
 		With("fork", ForksFork)
 	TestFormats.Add("genesis").
@@ -86,14 +88,17 @@ func init() {
 		WithFn("consolidation_request", operationConsolidationRequestHandler).
 		WithFn("deposit_request", operationDepositRequstHandler).
 		WithFn("withdrawal_request", operationWithdrawalRequstHandler).
+		WithFn("execution_payload", operationExecutionPayloadHandler).
 		WithFn("execution_payload_bid", operationExecutionPayloadBidHandler).
-		WithFn("payload_attestation", operationPayloadAttestationHandler)
+		WithFn("payload_attestation", operationPayloadAttestationHandler).
+		WithFn("parent_execution_payload", operationParentExecutionPayloadHandler)
 	TestFormats.Add("random").
 		With("random", SanityBlocks)
 	TestFormats.Add("rewards").
 		With("basic", &RewardsCore{}).
 		With("random", &RewardsCore{}).
-		With("leak", &RewardsCore{})
+		With("leak", &RewardsCore{}).
+		With("inactivity_scores", &RewardsCore{})
 	TestFormats.Add("sanity").
 		With("slots", SanitySlots).
 		With("blocks", SanityBlocks)
@@ -107,7 +112,9 @@ func init() {
 		With("core", &TransitionCore{})
 	TestFormats.Add("networking").
 		WithFn("compute_columns_for_custody_group", TestComputeColumnsForCustodyGroup).
-		WithFn("get_custody_groups", TestGetCustodyGroups)
+		WithFn("get_custody_groups", TestGetCustodyGroups).
+		WithFn("gossip_attester_slashing", gossipAttesterSlashingHandler).
+		WithFn("gossip_proposer_slashing", gossipProposerSlashingHandler)
 
 	addSszTests()
 }
@@ -261,5 +268,12 @@ func addSszTests() {
 			}, runAfterVersion(clparams.GloasVersion))).
 		With("SignedProposerPreferences", sszStaticTestByEmptyObject(&cltypes.SignedProposerPreferences{
 			Message: &cltypes.ProposerPreferences{},
-		}, runAfterVersion(clparams.GloasVersion)))
+		}, runAfterVersion(clparams.GloasVersion))).
+		// Types with fixtures but no Go SSZ implementation
+		With("DepositMessage", spectest.UnimplementedHandler).
+		With("ForkData", spectest.UnimplementedHandler).
+		With("HistoricalBatch", spectest.UnimplementedHandler).
+		With("PowBlock", spectest.UnimplementedHandler).
+		With("SigningData", spectest.UnimplementedHandler).
+		With("ForkChoiceNode", spectest.UnimplementedHandler)
 }

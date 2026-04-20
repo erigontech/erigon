@@ -67,12 +67,21 @@ func ComputeProposerIndex(b *raw.BeaconState, indices []uint64, seed [32]byte) (
 
 func computeProposerIndexElectra(b *raw.BeaconState, indices []uint64, seed [32]byte) (uint64, error) {
 	maxRandomValue := uint64(1<<16 - 1)
+	maxEffBal := b.BeaconConfig().MaxEffectiveBalanceForVersion(b.Version())
 	i := uint64(0)
 	total := uint64(len(indices))
-	input := make([]byte, 40)
+
+	hashFn := utils.OptimizedSha256NotThreadSafe()
+
+	var buf [40]byte
+	copy(buf[:32], seed[:])
+
+	var cachedHash [32]byte
+	cachedGroup := ^uint64(0)
+
 	preInputs := ComputeShuffledIndexPreInputs(b.BeaconConfig(), seed)
 	for {
-		shuffled, err := ComputeShuffledIndex(b.BeaconConfig(), i%total, total, seed, preInputs, utils.Sha256)
+		shuffled, err := ComputeShuffledIndex(b.BeaconConfig(), i%total, total, seed, preInputs, hashFn)
 		if err != nil {
 			return 0, err
 		}
@@ -81,17 +90,20 @@ func computeProposerIndexElectra(b *raw.BeaconState, indices []uint64, seed [32]
 		// random_bytes = hash(seed + uint_to_bytes(i // 16))
 		// offset = i % 16 * 2
 		// random_value = bytes_to_uint64(random_bytes[offset:offset + 2])
-		copy(input, seed[:])
-		binary.LittleEndian.PutUint64(input[32:], i/16)
-		randomBytes := utils.Sha256(input)
+		group := i / 16
+		if group != cachedGroup {
+			binary.LittleEndian.PutUint64(buf[32:], group)
+			cachedHash = hashFn(buf[:])
+			cachedGroup = group
+		}
 		offset := (i % 16) * 2
-		randomValue := binary.LittleEndian.Uint16(randomBytes[offset : offset+2])
+		randomValue := binary.LittleEndian.Uint16(cachedHash[offset : offset+2])
 
 		validator, err := b.ValidatorForValidatorIndex(int(candidateIndex))
 		if err != nil {
 			return 0, err
 		}
-		if validator.EffectiveBalance()*maxRandomValue >= b.BeaconConfig().MaxEffectiveBalanceForVersion(b.Version())*uint64(randomValue) {
+		if validator.EffectiveBalance()*maxRandomValue >= maxEffBal*uint64(randomValue) {
 			return candidateIndex, nil
 		}
 		i += 1
@@ -145,10 +157,23 @@ func ComputeBalanceWeightedSelection(
 		return nil, errors.New("ComputeBalanceWeightedSelection: indices must not be empty")
 	}
 
+	hashFn := utils.OptimizedSha256NotThreadSafe()
+
 	var preInputs [][32]byte
 	if shuffleIndices {
 		preInputs = ComputeShuffledIndexPreInputs(s.BeaconConfig(), seed)
 	}
+
+	maxRandomValue := uint64(1<<16 - 1)
+	maxEffectiveBalance := s.BeaconConfig().MaxEffectiveBalanceElectra
+
+	// Stack-allocate the hash input buffer: 32-byte seed + 8-byte counter.
+	var buf [40]byte
+	copy(buf[:32], seed[:])
+
+	// Cache the SHA256 output per i/16 group (one hash covers 16 iterations).
+	var cachedHash [32]byte
+	cachedGroup := ^uint64(0) // impossible initial value to force first computation
 
 	selected := make([]uint64, 0, size)
 	i := uint64(0)
@@ -157,14 +182,30 @@ func ComputeBalanceWeightedSelection(
 		if shuffleIndices {
 			var err error
 			nextIndex, err = ComputeShuffledIndex(
-				s.BeaconConfig(), nextIndex, total, seed, preInputs, utils.Sha256,
+				s.BeaconConfig(), nextIndex, total, seed, preInputs, hashFn,
 			)
 			if err != nil {
 				return nil, fmt.Errorf("ComputeBalanceWeightedSelection: %w", err)
 			}
 		}
 		candidateIndex := indices[nextIndex]
-		if ComputeBalanceWeightedAcceptance(s, candidateIndex, seed, i) {
+
+		// Inline balance-weighted acceptance with cached hashing.
+		// Spec: random_byte = hash(seed + uint_to_bytes(i // 16))[2*(i%16) : 2*(i%16)+2]
+		group := i / 16
+		if group != cachedGroup {
+			binary.LittleEndian.PutUint64(buf[32:], group)
+			cachedHash = hashFn(buf[:])
+			cachedGroup = group
+		}
+		offset := (i % 16) * 2
+		randomValue := uint64(binary.LittleEndian.Uint16(cachedHash[offset : offset+2]))
+
+		validator, err := s.ValidatorForValidatorIndex(int(candidateIndex))
+		if err != nil {
+			return nil, fmt.Errorf("ComputeBalanceWeightedSelection: unable to get validator %d: %w", candidateIndex, err)
+		}
+		if validator.EffectiveBalance()*maxRandomValue >= maxEffectiveBalance*randomValue {
 			selected = append(selected, candidateIndex)
 		}
 		i++
@@ -177,10 +218,10 @@ func ComputeBalanceWeightedSelection(
 func ComputeBalanceWeightedAcceptance(s *raw.BeaconState, index uint64, seed [32]byte, i uint64) bool {
 	maxRandomValue := uint64(1<<16 - 1)
 
-	input := make([]byte, 40)
-	copy(input, seed[:])
-	binary.LittleEndian.PutUint64(input[32:], i/16)
-	randomBytes := utils.Sha256(input)
+	var buf [40]byte
+	copy(buf[:32], seed[:])
+	binary.LittleEndian.PutUint64(buf[32:], i/16)
+	randomBytes := utils.Sha256(buf[:])
 
 	offset := (i % 16) * 2
 	randomValue := uint64(binary.LittleEndian.Uint16(randomBytes[offset : offset+2]))
