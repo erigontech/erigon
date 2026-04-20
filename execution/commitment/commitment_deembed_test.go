@@ -197,9 +197,9 @@ func Test_DeEmbedCommitment_RoundTrip(t *testing.T) {
 		if len(data) < 4 {
 			continue
 		}
-		tMap, aMap, cells, err := SplitBranchDataIntoChildren(data)
+		tMap, aMap, hMap, cells, hashes, err := SplitBranchDataIntoChildren(data)
 		require.NoErrorf(t, err, "split %x", prefix)
-		reassembled, err := ReassembleBranchData(tMap, aMap, cells, nil)
+		reassembled, err := ReassembleBranchData(tMap, aMap, hMap, cells, hashes, nil)
 		require.NoErrorf(t, err, "reassemble %x", prefix)
 		require.Equalf(t, []byte(data), []byte(reassembled),
 			"round-trip mismatch at prefix %x", prefix)

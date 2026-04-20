@@ -122,26 +122,22 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 	}
 
 	if commitment.DeEmbedCommitment {
-		return transformDeEmbedValue(branch, replacer)
+		return transformDeEmbedValue(prefix, branch, replacer)
 	}
 	return branch.ReplacePlainKeys(nil, replacer)
 }
 
 // transformDeEmbedValue applies the plain-key replacer to a value stored under
-// the de-embedded layout. 4-byte metadata entries are returned unchanged; any
-// other value is treated as a single cell fragment (layout:
-// [fieldBits:1][fields...]). Legacy embedded blobs (len>=4 with a valid map
-// header but not the metadata pattern) would not normally coexist with
-// de-embed writes, but if encountered we fall back to the embedded transform.
-func transformDeEmbedValue(val commitment.BranchData, replacer func(key []byte, isStorage bool) ([]byte, error)) (commitment.BranchData, error) {
-	if len(val) == 0 {
+// the de-embedded layout. The key's last byte distinguishes meta entries
+// (DeEmbedMetaMarker) from cell fragments (nibble 0x00-0x0F). Meta entries
+// contain only bitmaps and packed hashes — no plain keys to transform.
+func transformDeEmbedValue(key []byte, val commitment.BranchData, replacer func(key []byte, isStorage bool) ([]byte, error)) (commitment.BranchData, error) {
+	if len(val) == 0 || len(key) == 0 {
 		return val, nil
 	}
-	if len(val) == 4 {
-		// de-embedded metadata entry: [touchMap:2][afterMap:2]
+	if key[len(key)-1] == commitment.DeEmbedMetaMarker {
 		return val, nil
 	}
-	// de-embedded cell fragment
 	out, err := commitment.ReplacePlainKeysInCell(val, nil, replacer)
 	if err != nil {
 		return nil, err
@@ -320,7 +316,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 	ma := accounts.dataReader(mergedAccount.decompressor)
 	dt.d.logger.Debug("prepare commitmentValTransformDomain", "merge", rng.String("range", dt.d.stepSize), "Mstorage", hadToLookupStorage, "Maccount", hadToLookupAccount)
 
-	vt := func(valBuf []byte, keyFromTxNum, keyEndTxNum uint64) (transValBuf []byte, err error) {
+	vt := func(valKey, valBuf []byte, keyFromTxNum, keyEndTxNum uint64) (transValBuf []byte, err error) {
 		if !dt.d.ReplaceKeysInValues || len(valBuf) == 0 || !ValuesPlainKeyReferencingThresholdReached(dt.d.stepSize, rng.from, rng.to) {
 			return valBuf, nil
 		}
@@ -416,7 +412,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 		}
 
 		if commitment.DeEmbedCommitment {
-			return transformDeEmbedValue(commitment.BranchData(valBuf), replacer)
+			return transformDeEmbedValue(valKey, commitment.BranchData(valBuf), replacer)
 		}
 		branchData, err := commitment.BranchData(valBuf).ReplacePlainKeys(nil, replacer)
 		if err != nil {

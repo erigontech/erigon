@@ -381,7 +381,7 @@ func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyF
 	return
 }
 
-type valueTransformer func(val []byte, startTxNum, endTxNum uint64) ([]byte, error)
+type valueTransformer func(key, val []byte, startTxNum, endTxNum uint64) ([]byte, error)
 
 const DomainMinStepsToCompress = 16
 
@@ -497,7 +497,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		if keyBuf != nil {
 			if vt != nil {
 				if !bytes.Equal(keyBuf, commitmentdb.KeyCommitmentState) { // no replacement for state key
-					valBufRet, err := vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
+					valBufRet, err := vt(keyBuf, valBuf, keyFileStartTxNum, keyFileEndTxNum)
 					if err != nil {
 						return nil, nil, nil, fmt.Errorf("merge: valTransform failed: %w", err)
 					}
@@ -519,7 +519,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	if keyBuf != nil {
 		if vt != nil {
 			if !bytes.Equal(keyBuf, commitmentdb.KeyCommitmentState) { // no replacement for state key
-				valBufRet, err := vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
+				valBufRet, err := vt(keyBuf, valBuf, keyFileStartTxNum, keyFileEndTxNum)
 				if err != nil {
 					return nil, nil, nil, fmt.Errorf("merge: valTransform failed: %w", err)
 				}

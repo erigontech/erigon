@@ -689,7 +689,7 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *
 		} else {
 
 			if vt != nil {
-				v, err = vt(v[8:], fromTxNum, endTxNum)
+				v, err = vt(k, v[8:], fromTxNum, endTxNum)
 				if err != nil {
 					return fmt.Errorf("vt: %w", err)
 				}
@@ -717,7 +717,7 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *
 	}
 	for _, kv := range kvs {
 		if vt != nil {
-			kv.v, err = vt(kv.v, fromTxNum, endTxNum)
+			kv.v, err = vt(kv.k, kv.v, fromTxNum, endTxNum)
 		}
 		if err != nil {
 			return coll, fmt.Errorf("vt: %w", err)

@@ -256,7 +256,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 				}
 
 				if !bytes.Equal(k, commitmentdb.KeyCommitmentState) {
-					v, err = vt(v, af.startTxNum, af.endTxNum)
+					v, err = vt(k, v, af.startTxNum, af.endTxNum)
 					if err != nil {
 						return fmt.Errorf("failed to transform commitment value: %w", err)
 					}

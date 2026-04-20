@@ -53,36 +53,103 @@ func DeEmbedChildKey(compactPrefix []byte, nibble byte, buf []byte) []byte {
 	return buf
 }
 
-// BuildDeEmbedMetaValue serialises a branch's touchMap and afterMap into the
-// 4-byte metadata value.
-func BuildDeEmbedMetaValue(touchMap, afterMap uint16, buf []byte) []byte {
-	if cap(buf) < 4 {
-		buf = make([]byte, 4)
+// DeEmbedHashSize is the fixed size of a cell hash stored in the meta entry.
+// HexPatricia cells always produce either a 32-byte hash or no hash at all
+// (hashLen == 0), so the packed hash vector uses a fixed stride of 32 bytes.
+const DeEmbedHashSize = 32
+
+// Bit position of the fieldHash flag in the cell encoding (flag == 8).
+const fieldHashFlag = 8
+
+// BuildDeEmbedMetaValue serialises a branch's touchMap, afterMap, hashMap and
+// the 32-byte hashes for every bit set in hashMap into the metadata value.
+// Value layout: [touchMap:2][afterMap:2][hashMap:2][hash_0 : 32]...[hash_k : 32]
+// where hashes appear in ascending-nibble order over the set bits of hashMap.
+func BuildDeEmbedMetaValue(touchMap, afterMap, hashMap uint16, hashes [16][]byte, buf []byte) []byte {
+	n := bits.OnesCount16(hashMap)
+	size := 6 + n*DeEmbedHashSize
+	if cap(buf) < size {
+		buf = make([]byte, size)
 	} else {
-		buf = buf[:4]
+		buf = buf[:size]
 	}
 	binary.BigEndian.PutUint16(buf[0:2], touchMap)
 	binary.BigEndian.PutUint16(buf[2:4], afterMap)
+	binary.BigEndian.PutUint16(buf[4:6], hashMap)
+	pos := 6
+	for bitset := hashMap; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		bitset ^= bit
+		h := hashes[nibble]
+		if len(h) != DeEmbedHashSize {
+			// hashMap is expected to match exactly which cells contributed a
+			// 32-byte hash; if not, zero-fill the slot for safety.
+			for i := 0; i < DeEmbedHashSize; i++ {
+				buf[pos+i] = 0
+			}
+			copy(buf[pos:pos+DeEmbedHashSize], h)
+		} else {
+			copy(buf[pos:pos+DeEmbedHashSize], h)
+		}
+		pos += DeEmbedHashSize
+	}
 	return buf
 }
 
-// ParseDeEmbedMetaValue decodes the 4-byte metadata value.
-func ParseDeEmbedMetaValue(data []byte) (touchMap, afterMap uint16, err error) {
-	if len(data) < 4 {
-		return 0, 0, fmt.Errorf("de-embed metadata too short: %d bytes", len(data))
+// ParseDeEmbedMetaValue decodes the metadata value into its maps and hashes.
+// hashes[nibble] aliases data when the corresponding hashMap bit is set.
+func ParseDeEmbedMetaValue(data []byte) (touchMap, afterMap, hashMap uint16, hashes [16][]byte, err error) {
+	if len(data) < 6 {
+		err = fmt.Errorf("de-embed metadata too short: %d bytes", len(data))
+		return
 	}
 	touchMap = binary.BigEndian.Uint16(data[0:2])
 	afterMap = binary.BigEndian.Uint16(data[2:4])
+	hashMap = binary.BigEndian.Uint16(data[4:6])
+	expected := 6 + bits.OnesCount16(hashMap)*DeEmbedHashSize
+	if len(data) != expected {
+		err = fmt.Errorf("de-embed metadata length mismatch: got %d want %d (hashMap=%04x)", len(data), expected, hashMap)
+		return
+	}
+	pos := 6
+	for bitset := hashMap; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		bitset ^= bit
+		hashes[nibble] = data[pos : pos+DeEmbedHashSize]
+		pos += DeEmbedHashSize
+	}
 	return
 }
 
-// SplitBranchDataIntoChildren parses a full branch blob and returns its
-// touchMap, afterMap, and per-child cell byte slices. For each bit set in
-// touchMap&afterMap, cells[nibble] is a slice into data covering that cell's
-// [fields:1][field_data...]. Other slots are nil.
-func SplitBranchDataIntoChildren(data []byte) (touchMap, afterMap uint16, cells [16][]byte, err error) {
+// IsDeEmbedMetaValue returns true when data is shaped like a meta entry
+// ([touchMap:2][afterMap:2][hashMap:2][packed_hashes]). It validates the
+// length matches 6 + 32*popcount(hashMap). Used by the squeeze/merge
+// transform path to distinguish meta from cell fragments when the key is
+// not available.
+func IsDeEmbedMetaValue(data []byte) bool {
+	if len(data) < 6 {
+		return false
+	}
+	hashMap := binary.BigEndian.Uint16(data[4:6])
+	return len(data) == 6+bits.OnesCount16(hashMap)*DeEmbedHashSize
+}
+
+// SplitBranchDataIntoChildren parses a canonical embedded branch blob into
+// the pieces stored under the de-embed format:
+//   - touchMap / afterMap as in the source blob;
+//   - hashMap: bit set for each cell whose fieldHash was present;
+//   - cells[nibble]: the cell fragment with the fieldHash field removed and
+//     the fieldHash bit cleared in fieldBits;
+//   - hashes[nibble]: the raw 32-byte hash for that cell (aliases source data).
+//
+// Cells whose fieldHash was absent are stored as-is and hashMap has the
+// corresponding bit cleared.
+func SplitBranchDataIntoChildren(data []byte) (touchMap, afterMap, hashMap uint16, cells [16][]byte, hashes [16][]byte, err error) {
 	if len(data) < 4 {
-		return 0, 0, cells, fmt.Errorf("branch data too short: %d bytes", len(data))
+		err = fmt.Errorf("branch data too short: %d bytes", len(data))
+		return
 	}
 	touchMap = binary.BigEndian.Uint16(data[0:2])
 	afterMap = binary.BigEndian.Uint16(data[2:4])
@@ -95,24 +162,40 @@ func SplitBranchDataIntoChildren(data []byte) (touchMap, afterMap uint16, cells 
 			continue
 		}
 		if pos >= len(data) {
-			return 0, 0, cells, fmt.Errorf("branch data truncated at nibble %d pos %d/%d", nibble, pos, len(data))
+			err = fmt.Errorf("branch data truncated at nibble %d pos %d/%d", nibble, pos, len(data))
+			return
 		}
-		start := pos
+		cellStart := pos
 		fieldBits := data[pos]
 		pos++
-		pos, err = advancePastCellFields(data, pos, fieldBits)
-		if err != nil {
-			return 0, 0, cells, fmt.Errorf("split at nibble %d: %w", nibble, err)
+		hashFieldStart, hashValueStart, hashValueEnd, newPos, pErr := walkCellFieldsLocatingHash(data, pos, fieldBits)
+		if pErr != nil {
+			err = fmt.Errorf("split at nibble %d: %w", nibble, pErr)
+			return
 		}
-		cells[nibble] = data[start:pos]
+		pos = newPos
+		if hashFieldStart >= 0 && hashValueEnd-hashValueStart == DeEmbedHashSize {
+			hashes[nibble] = data[hashValueStart:hashValueEnd]
+			hashMap |= bit
+			// Build stored fragment: clear fieldHash bit, drop the hash field bytes.
+			clearedBits := fieldBits &^ byte(fieldHashFlag)
+			fragSize := (pos - cellStart) - (hashValueEnd - hashFieldStart)
+			frag := make([]byte, 0, fragSize)
+			frag = append(frag, clearedBits)
+			frag = append(frag, data[cellStart+1:hashFieldStart]...)
+			frag = append(frag, data[hashValueEnd:pos]...)
+			cells[nibble] = frag
+		} else {
+			cells[nibble] = data[cellStart:pos]
+		}
 	}
-	return touchMap, afterMap, cells, nil
+	return
 }
 
-// ReassembleBranchData rebuilds a BranchData blob from metadata maps and
-// per-child cell byte slices. The output byte layout matches the embedded
-// encoding produced by BranchEncoder.EncodeBranch.
-func ReassembleBranchData(touchMap, afterMap uint16, cells [16][]byte, buf []byte) (BranchData, error) {
+// ReassembleBranchData rebuilds the canonical embedded branch blob from the
+// stored pieces: the three bitmaps, the cell fragments (fieldHash stripped
+// for entries in hashMap) and the 32-byte hashes vector.
+func ReassembleBranchData(touchMap, afterMap, hashMap uint16, cells [16][]byte, hashes [16][]byte, buf []byte) (BranchData, error) {
 	bitmap := touchMap & afterMap
 	buf = buf[:0]
 	var hdr [4]byte
@@ -127,40 +210,115 @@ func ReassembleBranchData(touchMap, afterMap uint16, cells [16][]byte, buf []byt
 		if len(cellBytes) == 0 {
 			return nil, fmt.Errorf("missing cell data for nibble %d while reassembling branch", nibble)
 		}
-		buf = append(buf, cellBytes...)
+		if hashMap&bit != 0 {
+			h := hashes[nibble]
+			if len(h) != DeEmbedHashSize {
+				return nil, fmt.Errorf("missing or malformed hash for nibble %d", nibble)
+			}
+			var err error
+			buf, err = spliceHashIntoStoredCell(buf, cellBytes, h)
+			if err != nil {
+				return nil, fmt.Errorf("splice hash for nibble %d: %w", nibble, err)
+			}
+		} else {
+			buf = append(buf, cellBytes...)
+		}
 	}
 	return buf, nil
 }
 
-// advancePastCellFields advances pos past the fields indicated by fieldBits,
-// returning the new position or an error if the data is truncated or malformed.
-// Field layout per flag: [varint length][data]. Flags are:
-//
-//	1=extension, 2=accountAddr, 4=storageAddr, 8=hash, 16=stateHash
-func advancePastCellFields(data []byte, pos int, fieldBits byte) (int, error) {
+// spliceHashIntoStoredCell appends to dst the canonical cell fragment rebuilt
+// from a stored fragment (cell — which has the fieldHash bit cleared) and the
+// raw hash bytes. The hash is inserted just before stateHash in encoding
+// order (i.e., after extension / accountAddr / storageAddr).
+func spliceHashIntoStoredCell(dst, cell, hash []byte) ([]byte, error) {
+	if len(cell) == 0 {
+		return dst, errors.New("spliceHashIntoStoredCell: empty cell")
+	}
+	fieldBits := cell[0]
+	if fieldBits&byte(fieldHashFlag) != 0 {
+		return dst, fmt.Errorf("spliceHashIntoStoredCell: fieldHash bit unexpectedly set (fieldBits=%02x)", fieldBits)
+	}
+	pos := 1
+	// Walk past extension, accountAddr, storageAddr (flags 1,2,4) — hash goes
+	// before stateHash (flag 16) in the canonical encoding order.
+	for _, flag := range [3]byte{1, 2, 4} {
+		if fieldBits&flag == 0 {
+			continue
+		}
+		if pos >= len(cell) {
+			return dst, fmt.Errorf("spliceHashIntoStoredCell: truncated before flag %d", flag)
+		}
+		l, n := binary.Uvarint(cell[pos:])
+		if n == 0 {
+			return dst, fmt.Errorf("spliceHashIntoStoredCell: bad varint for flag %d", flag)
+		}
+		if n < 0 {
+			return dst, fmt.Errorf("spliceHashIntoStoredCell: overflow varint for flag %d", flag)
+		}
+		pos += n
+		if l > 0 {
+			if len(cell) < pos+int(l) {
+				return dst, fmt.Errorf("spliceHashIntoStoredCell: truncated flag %d", flag)
+			}
+			pos += int(l)
+		}
+	}
+	dst = append(dst, fieldBits|byte(fieldHashFlag))
+	dst = append(dst, cell[1:pos]...)
+	var lenBuf [binary.MaxVarintLen64]byte
+	ln := binary.PutUvarint(lenBuf[:], uint64(len(hash)))
+	dst = append(dst, lenBuf[:ln]...)
+	dst = append(dst, hash...)
+	dst = append(dst, cell[pos:]...)
+	return dst, nil
+}
+
+// walkCellFieldsLocatingHash walks the cell fields starting at pos (first
+// field byte, right after fieldBits) and returns the position of the hash
+// field if present. All indices are into data. hashFieldStart points at the
+// varint-length byte; hashValueStart at the first hash byte; hashValueEnd at
+// the end of the hash data. When no hash field is present, all three are -1.
+// newPos is the byte immediately after the last field.
+func walkCellFieldsLocatingHash(data []byte, pos int, fieldBits byte) (hashFieldStart, hashValueStart, hashValueEnd, newPos int, err error) {
+	hashFieldStart, hashValueStart, hashValueEnd = -1, -1, -1
 	for flag := byte(1); flag <= 16; flag <<= 1 {
 		if fieldBits&flag == 0 {
 			continue
 		}
 		if pos >= len(data) {
-			return pos, fmt.Errorf("truncated before varint for field flag %d", flag)
+			err = fmt.Errorf("truncated before varint for field flag %d", flag)
+			return
 		}
+		fieldStart := pos
 		l, n := binary.Uvarint(data[pos:])
 		if n == 0 {
-			return pos, errors.New("varint: buffer too small for length")
+			err = errors.New("varint: buffer too small for length")
+			return
 		}
 		if n < 0 {
-			return pos, errors.New("varint: value overflow for length")
+			err = errors.New("varint: value overflow for length")
+			return
 		}
 		pos += n
 		if l > 0 {
 			if len(data) < pos+int(l) {
-				return pos, fmt.Errorf("truncated field flag %d: need %d more bytes, have %d", flag, l, len(data)-pos)
+				err = fmt.Errorf("truncated field flag %d: need %d more bytes, have %d", flag, l, len(data)-pos)
+				return
 			}
+		}
+		valueStart := pos
+		if l > 0 {
 			pos += int(l)
 		}
+		if flag == fieldHashFlag {
+			hashFieldStart = fieldStart
+			hashValueStart = valueStart
+			hashValueEnd = pos
+		}
 	}
-	return pos, nil
+	newPos = pos
+	return
 }
 
 // ReplacePlainKeysInCell applies fn to the accountAddr / storageAddr fields of

@@ -786,7 +786,8 @@ func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) e
 // at compact(P) || [0xFF] and then each present child at compact(P) || [nibble].
 // Returns (nil, 0, nil) if the branch is absent.
 func (sdc *TrieContext) branchDeEmbedded(pref []byte) ([]byte, kv.Step, error) {
-	metaKey := commitment.DeEmbedMetaKey(pref, nil)
+	var keyBuf [64]byte
+	metaKey := commitment.DeEmbedMetaKey(pref, keyBuf[:0])
 	metaVal, step, err := sdc.readDomain(kv.CommitmentDomain, metaKey)
 	if err != nil {
 		return nil, 0, fmt.Errorf("read de-embed meta at %x: %w", pref, err)
@@ -794,7 +795,7 @@ func (sdc *TrieContext) branchDeEmbedded(pref []byte) ([]byte, kv.Step, error) {
 	if len(metaVal) == 0 {
 		return nil, 0, nil
 	}
-	touchMap, afterMap, err := commitment.ParseDeEmbedMetaValue(metaVal)
+	touchMap, afterMap, hashMap, hashes, err := commitment.ParseDeEmbedMetaValue(metaVal)
 	if err != nil {
 		return nil, 0, fmt.Errorf("parse de-embed meta at %x: %w", pref, err)
 	}
@@ -804,7 +805,7 @@ func (sdc *TrieContext) branchDeEmbedded(pref []byte) ([]byte, kv.Step, error) {
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
 		bitset ^= bit
-		childKey := commitment.DeEmbedChildKey(pref, byte(nibble), nil)
+		childKey := commitment.DeEmbedChildKey(pref, byte(nibble), keyBuf[:0])
 		childVal, _, err := sdc.readDomain(kv.CommitmentDomain, childKey)
 		if err != nil {
 			return nil, 0, fmt.Errorf("read de-embed child nibble=%d prefix=%x: %w", nibble, pref, err)
@@ -814,7 +815,7 @@ func (sdc *TrieContext) branchDeEmbedded(pref []byte) ([]byte, kv.Step, error) {
 		}
 		cells[nibble] = childVal
 	}
-	data, err := commitment.ReassembleBranchData(touchMap, afterMap, cells, nil)
+	data, err := commitment.ReassembleBranchData(touchMap, afterMap, hashMap, cells, hashes, nil)
 	if err != nil {
 		return nil, 0, fmt.Errorf("reassemble de-embed branch at %x: %w", pref, err)
 	}
@@ -823,23 +824,42 @@ func (sdc *TrieContext) branchDeEmbedded(pref []byte) ([]byte, kv.Step, error) {
 
 // putBranchDeEmbedded splits the incoming merged branch blob into per-child
 // domain writes. The input `data` is the already-merged (via BranchMerger)
-// embedded representation produced by the trie; we diff it against the current
-// on-disk metadata and only write or delete the children that changed.
-func (sdc *TrieContext) putBranchDeEmbedded(prefix []byte, data []byte, _ []byte) error {
-	tNew, aNew, cellsNew, err := commitment.SplitBranchDataIntoChildren(data)
+// embedded representation produced by the trie; when `prevData` is the
+// reassembled prior blob we derive per-child previous bytes from it to skip
+// unchanged writes and avoid a hidden per-child GetLatest inside DomainPut.
+func (sdc *TrieContext) putBranchDeEmbedded(prefix []byte, data []byte, prevData []byte) error {
+	tNew, aNew, hashMapNew, cellsNew, hashesNew, err := commitment.SplitBranchDataIntoChildren(data)
 	if err != nil {
 		return fmt.Errorf("split new branch data at %x: %w", prefix, err)
 	}
 
-	metaKey := commitment.DeEmbedMetaKey(prefix, nil)
-	prevMeta, _, err := sdc.readDomain(kv.CommitmentDomain, metaKey)
-	if err != nil {
-		return fmt.Errorf("read prev de-embed meta at %x: %w", prefix, err)
-	}
-	var tPrev, aPrev uint16
-	if len(prevMeta) >= 4 {
-		if tPrev, aPrev, err = commitment.ParseDeEmbedMetaValue(prevMeta); err != nil {
-			return fmt.Errorf("parse prev de-embed meta at %x: %w", prefix, err)
+	var (
+		tPrev, aPrev  uint16
+		hashMapPrev   uint16
+		cellsPrev     [16][]byte
+		hashesPrev    [16][]byte
+		prevMeta      []byte
+		haveCellsPrev bool
+		keyBuf        [64]byte
+	)
+
+	if len(prevData) >= 4 {
+		tPrev, aPrev, hashMapPrev, cellsPrev, hashesPrev, err = commitment.SplitBranchDataIntoChildren(prevData)
+		if err != nil {
+			return fmt.Errorf("split prev branch data at %x: %w", prefix, err)
+		}
+		prevMeta = commitment.BuildDeEmbedMetaValue(tPrev, aPrev, hashMapPrev, hashesPrev, nil)
+		haveCellsPrev = true
+	} else {
+		metaKey := commitment.DeEmbedMetaKey(prefix, keyBuf[:0])
+		prevMeta, _, err = sdc.readDomain(kv.CommitmentDomain, metaKey)
+		if err != nil {
+			return fmt.Errorf("read prev de-embed meta at %x: %w", prefix, err)
+		}
+		if len(prevMeta) >= 6 {
+			if tPrev, aPrev, hashMapPrev, hashesPrev, err = commitment.ParseDeEmbedMetaValue(prevMeta); err != nil {
+				return fmt.Errorf("parse prev de-embed meta at %x: %w", prefix, err)
+			}
 		}
 	}
 
@@ -853,8 +873,15 @@ func (sdc *TrieContext) putBranchDeEmbedded(prefix []byte, data []byte, _ []byte
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
 		bitset ^= bit
-		childKey := commitment.DeEmbedChildKey(prefix, byte(nibble), nil)
-		if err := sdc.putter.DomainPut(kv.CommitmentDomain, childKey, cellsNew[nibble], sdc.txNum, nil); err != nil {
+		var prevChild []byte
+		if haveCellsPrev {
+			prevChild = cellsPrev[nibble]
+			if bytes.Equal(prevChild, cellsNew[nibble]) {
+				continue
+			}
+		}
+		childKey := commitment.DeEmbedChildKey(prefix, byte(nibble), keyBuf[:0])
+		if err := sdc.putter.DomainPut(kv.CommitmentDomain, childKey, cellsNew[nibble], sdc.txNum, prevChild); err != nil {
 			return fmt.Errorf("put de-embed child nibble=%d prefix=%x: %w", nibble, prefix, err)
 		}
 	}
@@ -863,14 +890,48 @@ func (sdc *TrieContext) putBranchDeEmbedded(prefix []byte, data []byte, _ []byte
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
 		bitset ^= bit
-		childKey := commitment.DeEmbedChildKey(prefix, byte(nibble), nil)
-		if err := sdc.putter.DomainDel(kv.CommitmentDomain, childKey, sdc.txNum, nil); err != nil {
+		childKey := commitment.DeEmbedChildKey(prefix, byte(nibble), keyBuf[:0])
+		var prevChild []byte
+		if haveCellsPrev {
+			prevChild = cellsPrev[nibble]
+		}
+		if err := sdc.putter.DomainDel(kv.CommitmentDomain, childKey, sdc.txNum, prevChild); err != nil {
 			return fmt.Errorf("del de-embed child nibble=%d prefix=%x: %w", nibble, prefix, err)
 		}
 	}
 
-	if tPrev != mergedT || aPrev != mergedA {
-		newMeta := commitment.BuildDeEmbedMetaValue(mergedT, mergedA, nil)
+	var mergedHashMap uint16
+	var mergedHashes [16][]byte
+	for bitset := mergedBitmap; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		bitset ^= bit
+		if bitmapNew&bit != 0 {
+			if hashMapNew&bit != 0 {
+				mergedHashes[nibble] = hashesNew[nibble]
+				mergedHashMap |= bit
+			}
+		} else if hashMapPrev&bit != 0 {
+			mergedHashes[nibble] = hashesPrev[nibble]
+			mergedHashMap |= bit
+		}
+	}
+
+	metaChanged := tPrev != mergedT || aPrev != mergedA || hashMapPrev != mergedHashMap
+	if !metaChanged {
+		for bitset := mergedHashMap; bitset != 0; {
+			bit := bitset & -bitset
+			nibble := bits.TrailingZeros16(bit)
+			bitset ^= bit
+			if !bytes.Equal(mergedHashes[nibble], hashesPrev[nibble]) {
+				metaChanged = true
+				break
+			}
+		}
+	}
+	if metaChanged {
+		metaKey := commitment.DeEmbedMetaKey(prefix, keyBuf[:0])
+		newMeta := commitment.BuildDeEmbedMetaValue(mergedT, mergedA, mergedHashMap, mergedHashes, nil)
 		if err := sdc.putter.DomainPut(kv.CommitmentDomain, metaKey, newMeta, sdc.txNum, prevMeta); err != nil {
 			return fmt.Errorf("put de-embed meta at %x: %w", prefix, err)
 		}

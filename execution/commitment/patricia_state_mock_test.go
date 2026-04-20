@@ -95,14 +95,18 @@ func (ms *MockState) Branch(prefix []byte) ([]byte, kv.Step, error) {
 // key-value pairs rather than a single blob. Caller must hold ms.mu when
 // ms.concurrent is true.
 func (ms *MockState) putBranchDeEmbeddedLocked(prefix []byte, data []byte) error {
-	tNew, aNew, cellsNew, err := SplitBranchDataIntoChildren(data)
+	tNew, aNew, hashMapNew, cellsNew, hashesNew, err := SplitBranchDataIntoChildren(data)
 	if err != nil {
 		return fmt.Errorf("mock put de-embed split: %w", err)
 	}
 	metaKey := DeEmbedMetaKey(prefix, nil)
-	var tPrev, aPrev uint16
-	if prevMeta, ok := ms.cm[string(metaKey)]; ok && len(prevMeta) >= 4 {
-		if tPrev, aPrev, err = ParseDeEmbedMetaValue(prevMeta); err != nil {
+	var (
+		tPrev, aPrev uint16
+		hashMapPrev  uint16
+		hashesPrev   [16][]byte
+	)
+	if prevMeta, ok := ms.cm[string(metaKey)]; ok && len(prevMeta) >= 6 {
+		if tPrev, aPrev, hashMapPrev, hashesPrev, err = ParseDeEmbedMetaValue(prevMeta); err != nil {
 			return fmt.Errorf("mock put de-embed parse prev meta: %w", err)
 		}
 	}
@@ -126,9 +130,24 @@ func (ms *MockState) putBranchDeEmbeddedLocked(prefix []byte, data []byte) error
 		childKey := DeEmbedChildKey(prefix, byte(nibble), nil)
 		delete(ms.cm, string(childKey))
 	}
-	if tPrev != mergedT || aPrev != mergedA {
-		ms.cm[string(metaKey)] = BuildDeEmbedMetaValue(mergedT, mergedA, nil)
+
+	var mergedHashMap uint16
+	var mergedHashes [16][]byte
+	for bitset := mergedBitmap; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		bitset ^= bit
+		if bitmapNew&bit != 0 {
+			if hashMapNew&bit != 0 {
+				mergedHashes[nibble] = slices.Clone(hashesNew[nibble])
+				mergedHashMap |= bit
+			}
+		} else if hashMapPrev&bit != 0 {
+			mergedHashes[nibble] = hashesPrev[nibble]
+			mergedHashMap |= bit
+		}
 	}
+	ms.cm[string(metaKey)] = BuildDeEmbedMetaValue(mergedT, mergedA, mergedHashMap, mergedHashes, nil)
 	return nil
 }
 
@@ -140,7 +159,7 @@ func (ms *MockState) branchDeEmbeddedLocked(prefix []byte) ([]byte, kv.Step, err
 	if !ok || len(metaVal) == 0 {
 		return nil, 0, nil
 	}
-	tMap, aMap, err := ParseDeEmbedMetaValue(metaVal)
+	tMap, aMap, hMap, hashes, err := ParseDeEmbedMetaValue(metaVal)
 	if err != nil {
 		return nil, 0, fmt.Errorf("mock get de-embed parse meta at %x: %w", prefix, err)
 	}
@@ -157,7 +176,7 @@ func (ms *MockState) branchDeEmbeddedLocked(prefix []byte) ([]byte, kv.Step, err
 		}
 		cells[nibble] = val
 	}
-	data, err := ReassembleBranchData(tMap, aMap, cells, nil)
+	data, err := ReassembleBranchData(tMap, aMap, hMap, cells, hashes, nil)
 	if err != nil {
 		return nil, 0, fmt.Errorf("mock get de-embed reassemble at %x: %w", prefix, err)
 	}
