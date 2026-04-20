@@ -17,7 +17,6 @@
 package snapshotsync
 
 import (
-	"context"
 	"path/filepath"
 	"slices"
 	"strings"

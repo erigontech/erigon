@@ -17,7 +17,6 @@
 package freezeblocks
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"

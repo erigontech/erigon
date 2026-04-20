@@ -2,7 +2,6 @@ package state_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"os"
 	"path/filepath"

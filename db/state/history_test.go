@@ -828,7 +828,7 @@ func filledHistoryValues(tb testing.TB, largeValues bool, values map[string][]up
 	tb.Cleanup(db.Close)
 	tb.Cleanup(h.Close)
 
-	ctx := t.Context()
+	ctx := tb.Context()
 	//tx, err := db.BeginRw(ctx)
 	//require.NoError(tb, err)
 	//defer tx.Rollback()
@@ -872,7 +872,7 @@ func filledHistoryValues(tb testing.TB, largeValues bool, values map[string][]up
 func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History, uint64) {
 	tb.Helper()
 	db, h := testDbAndHistory(tb, largeValues, logger)
-	ctx := t.Context()
+	ctx := tb.Context()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(tb, err)
 	defer tx.Rollback()
@@ -1179,7 +1179,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	ctx := t.Context()
+	ctx := tb.Context()
 	tx, err := db.BeginRwNosync(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
@@ -1230,7 +1230,7 @@ func collateAndMergeHistoryWithCollisionRetry(tb testing.TB, db kv.RwDB, h *Hist
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	ctx := t.Context()
+	ctx := tb.Context()
 	tx, err := db.BeginRwNosync(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
@@ -1757,7 +1757,7 @@ func TestScanStaticFilesH(t *testing.T) {
 func writeSomeHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History, [][]byte, uint64) {
 	tb.Helper()
 	db, h := testDbAndHistory(tb, largeValues, logger)
-	ctx := t.Context()
+	ctx := tb.Context()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(tb, err)
 	defer tx.Rollback()
@@ -2399,7 +2399,7 @@ func TestHistory_IterateChangedRecent_PhantomDBKey(t *testing.T) {
 // across a wide txNum range from segment files (exercises HistoryChangesIterFiles.advance).
 func BenchmarkHistoryRange(b *testing.B) {
 	logger := log.New()
-	ctx := t.Context()
+	ctx := b.Context()
 
 	db, h, txs := filledHistory(b, true, logger)
 	collateAndMergeHistory(b, db, h, txs, true)
@@ -2428,7 +2428,7 @@ func BenchmarkHistoryRange(b *testing.B) {
 // from segment files (exercises HistoryRangeAsOfFiles.advanceInFiles).
 func BenchmarkRangeAsOf(b *testing.B) {
 	logger := log.New()
-	ctx := t.Context()
+	ctx := b.Context()
 
 	db, h, txs := filledHistory(b, true, logger)
 	collateAndMergeHistory(b, db, h, txs, true)
@@ -2459,7 +2459,7 @@ func BenchmarkRangeAsOf(b *testing.B) {
 // This leaves many small files in the heap, exercising heap operations during iteration.
 func collateHistory(b *testing.B, db kv.RwDB, h *History, txs uint64) {
 	b.Helper()
-	ctx := t.Context()
+	ctx := b.Context()
 	tx, err := db.BeginRwNosync(ctx)
 	require.NoError(b, err)
 	defer tx.Rollback()
@@ -2473,7 +2473,7 @@ func collateHistory(b *testing.B, db kv.RwDB, h *History, txs uint64) {
 // step-files unmerged so the heap has ~60 elements, actually exercising heap ops.
 func BenchmarkHistoryRange_MultiFile(b *testing.B) {
 	logger := log.New()
-	ctx := t.Context()
+	ctx := b.Context()
 
 	db, h, txs := filledHistory(b, true, logger)
 	collateHistory(b, db, h, txs)
@@ -2502,7 +2502,7 @@ func BenchmarkHistoryRange_MultiFile(b *testing.B) {
 // step-files unmerged so the heap has ~60 elements, actually exercising heap ops.
 func BenchmarkRangeAsOf_MultiFile(b *testing.B) {
 	logger := log.New()
-	ctx := t.Context()
+	ctx := b.Context()
 
 	db, h, txs := filledHistory(b, true, logger)
 	collateHistory(b, db, h, txs)

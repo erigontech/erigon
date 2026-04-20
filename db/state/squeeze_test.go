@@ -1,7 +1,6 @@
 package state_test
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
@@ -155,16 +154,16 @@ func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig)
 	db, agg := testDbAndAggregatorv3(tb, cfg.stepSize)
 	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, !cfg.disableCommitmentBranchTransform)
 
-	ctx := t.Context()
+	ctx := tb.Context()
 
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
-	rwTx, err := db.BeginTemporalRw(t.Context())
+	rwTx, err := db.BeginTemporalRw(tb.Context())
 	require.NoError(tb, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(tb.Context(), rwTx, log.New())
 	require.NoError(tb, err)
 	defer domains.Close()
 
@@ -196,7 +195,7 @@ func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig)
 		}
 	}
 
-	err = domains.Flush(t.Context(), rwTx)
+	err = domains.Flush(tb.Context(), rwTx)
 	require.NoError(tb, err)
 
 	require.NoError(tb, rwTx.Commit())

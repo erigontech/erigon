@@ -17,7 +17,6 @@
 package state
 
 import (
-	"context"
 	"encoding/binary"
 	"fmt"
 	"math/rand"

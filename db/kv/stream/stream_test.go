@@ -18,7 +18,6 @@ package stream_test
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"testing"
 

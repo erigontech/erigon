@@ -3,7 +3,6 @@ package state
 import (
 	"bytes"
 	"container/heap"
-	"context"
 	"encoding/binary"
 	"testing"
 

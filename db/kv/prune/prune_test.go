@@ -240,7 +240,7 @@ func BenchmarkTableScanningPrune(b *testing.B) {
 	defer db.Close()
 
 	const N = 10_000
-	tx, err := db.BeginRw(t.Context())
+	tx, err := db.BeginRw(b.Context())
 	require.NoError(b, err)
 	defer tx.Rollback()
 	insertEntries(b, tx, N, 0) // txNums 0..N-1; prune [0, N/2)
@@ -253,7 +253,7 @@ func BenchmarkTableScanningPrune(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		cur := openPseudoCursor(b, tx)
 		prune.TableScanningPrune( //nolint:errcheck
-			t.Context(), "bench", "txlookup",
+			b.Context(), "bench", "txlookup",
 			0, N/2, 0, 1, logEvery, logger,
 			nil, cur, false, &prune.Stat{}, prune.ValueOffset8StorageMode,
 		)

@@ -19,7 +19,6 @@
 package mdbx_test
 
 import (
-	"context"
 	"testing"
 	"time"
 

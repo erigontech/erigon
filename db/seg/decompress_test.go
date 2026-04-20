@@ -17,7 +17,6 @@ package seg
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"fmt"
 	"math/rand"

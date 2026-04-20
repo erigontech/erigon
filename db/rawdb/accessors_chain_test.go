@@ -18,7 +18,6 @@ package rawdb_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"

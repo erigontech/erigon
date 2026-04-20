@@ -17,7 +17,6 @@
 package test
 
 import (
-	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"math"

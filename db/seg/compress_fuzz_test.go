@@ -17,7 +17,6 @@
 package seg
 
 import (
-	"context"
 	"fmt"
 	"math/rand"
 	"path/filepath"

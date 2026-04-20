@@ -18,7 +18,6 @@ package state
 
 import (
 	"bytes"
-	"context"
 	"path/filepath"
 	"sort"
 	"testing"

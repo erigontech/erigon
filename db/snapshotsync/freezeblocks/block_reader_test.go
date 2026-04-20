@@ -17,7 +17,6 @@
 package freezeblocks
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
 

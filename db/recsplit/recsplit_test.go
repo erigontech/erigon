@@ -17,7 +17,6 @@
 package recsplit
 
 import (
-	"context"
 	"crypto/sha256"
 	"fmt"
 	"io"
@@ -369,7 +368,7 @@ func BenchmarkBuild(b *testing.B) {
 			}
 		}
 		b.StartTimer()
-		if err := rs.Build(t.Context()); err != nil {
+		if err := rs.Build(b.Context()); err != nil {
 			b.Fatal(err)
 		}
 		b.StopTimer()
@@ -417,7 +416,7 @@ func BenchmarkAddKeyAndBuild(b *testing.B) {
 						b.Fatal(err)
 					}
 				}
-				if err := rs.Build(t.Context()); err != nil {
+				if err := rs.Build(b.Context()); err != nil {
 					b.Fatal(err)
 				}
 				b.StopTimer()
@@ -624,7 +623,7 @@ func BenchmarkBuildParallel(b *testing.B) {
 					}
 				}
 				b.StartTimer()
-				if err := rs.Build(t.Context()); err != nil {
+				if err := rs.Build(b.Context()); err != nil {
 					b.Fatal(err)
 				}
 				b.StopTimer()

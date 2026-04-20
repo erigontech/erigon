@@ -2,7 +2,6 @@ package test
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"testing"
 

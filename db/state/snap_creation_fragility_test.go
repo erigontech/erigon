@@ -5,7 +5,6 @@ package state
 // These tests catch issues as early as possible.
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"

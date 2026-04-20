@@ -17,7 +17,6 @@
 package membatchwithdb_test
 
 import (
-	"context"
 	"fmt"
 	"sync"
 	"testing"
@@ -228,7 +227,7 @@ func newTestTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx) {
 	dirs := datadir.New(tb.TempDir())
 	stepSize := uint64(16)
 	db := temporaltest.NewTestDBWithStepSize(tb, dirs, stepSize)
-	tx, err := db.BeginTemporalRw(t.Context()) //nolint:gocritic
+	tx, err := db.BeginTemporalRw(tb.Context()) //nolint:gocritic
 	if err != nil {
 		tb.Fatal(err)
 	}

@@ -17,7 +17,6 @@
 package recsplit
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
 

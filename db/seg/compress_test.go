@@ -18,7 +18,6 @@ package seg
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"hash/crc32"
 	"io"

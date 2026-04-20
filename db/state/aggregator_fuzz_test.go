@@ -17,7 +17,6 @@
 package state_test
 
 import (
-	"context"
 	"encoding/binary"
 	"testing"
 	"time"
@@ -42,11 +41,11 @@ import (
 func Fuzz_AggregatorV3_Merge(f *testing.F) {
 	db, agg := testFuzzDbAndAggregatorv3(f, 10)
 
-	rwTx, err := db.BeginTemporalRw(t.Context())
+	rwTx, err := db.BeginTemporalRw(f.Context())
 	require.NoError(f, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(f.Context(), rwTx, log.New())
 	require.NoError(f, err)
 	defer domains.Close()
 
@@ -158,11 +157,11 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 	db, agg := testFuzzDbAndAggregatorv3(f, 10)
 	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
 
-	rwTx, err := db.BeginTemporalRw(t.Context())
+	rwTx, err := db.BeginTemporalRw(f.Context())
 	require.NoError(f, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(f.Context(), rwTx, log.New())
 	require.NoError(f, err)
 	defer domains.Close()
 

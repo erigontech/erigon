@@ -724,7 +724,7 @@ func filledInvIndex(tb testing.TB, logger log.Logger) (kv.RwDB, *InvertedIndex, 
 func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64, logger log.Logger) (kv.RwDB, *InvertedIndex, uint64) {
 	tb.Helper()
 	db, ii := testDbAndInvertedIndex(tb, aggStep, logger)
-	ctx, require := t.Context(), require.New(tb)
+	ctx, require := tb.Context(), require.New(tb)
 
 	err := db.Update(ctx, func(tx kv.RwTx) error {
 		ic := ii.beginForTests()
@@ -871,7 +871,7 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 	tb.Helper()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	ctx := t.Context()
+	ctx := tb.Context()
 	// Leave the last 2 aggregation steps un-collated
 	tx, err := db.BeginRw(ctx)
 	require.NoError(tb, err)

@@ -17,7 +17,6 @@
 package remotedbserver
 
 import (
-	"context"
 	"runtime"
 	"testing"
 

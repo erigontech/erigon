@@ -18,7 +18,6 @@ package seg
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"math/rand"
 	"path/filepath"

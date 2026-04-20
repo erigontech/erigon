@@ -17,7 +17,6 @@
 package rawdbv3
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"

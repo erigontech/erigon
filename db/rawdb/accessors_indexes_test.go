@@ -137,14 +137,14 @@ func readTransactionByHash(db kv.Tx, hash common.Hash, br services.FullBlockRead
 		return nil, common.Hash{}, 0, 0, 0, nil
 	}
 	txNum = *txNumPtr
-	blockHash, ok, err := br.CanonicalHash(t.Context(), db, blockNumber)
+	blockHash, ok, err := br.CanonicalHash(context.Background(), db, blockNumber)
 	if err != nil {
 		return nil, common.Hash{}, 0, 0, 0, err
 	}
 	if !ok || blockHash == (common.Hash{}) {
 		return nil, common.Hash{}, 0, 0, 0, nil
 	}
-	body, _ := br.BodyWithTransactions(t.Context(), db, blockHash, blockNumber)
+	body, _ := br.BodyWithTransactions(context.Background(), db, blockHash, blockNumber)
 	if body == nil {
 		log.Error("Transaction referenced missing", "number", blockNumber, "hash", blockHash)
 		return nil, common.Hash{}, 0, 0, 0, nil

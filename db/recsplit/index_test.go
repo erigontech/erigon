@@ -18,7 +18,6 @@ package recsplit
 
 import (
 	"bufio"
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
