@@ -120,10 +120,10 @@ func (t *testingImpl) decodeTxnProvider(ctx context.Context, transactions *[]hex
 		want := expectedNonce[sender]
 		got := tx.GetNonce()
 		if got > want {
-			return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("nonce too high: address %v, tx: %d state: %d", sender.Value(), got, want)}
+			return nil, &rpc.CustomError{Code: rpc.ErrCodeDefault, Message: fmt.Sprintf("nonce too high: address %v, tx: %d state: %d", sender.Value(), got, want)}
 		}
 		if got < want {
-			return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("nonce too low: address %v, tx: %d state: %d", sender.Value(), got, want)}
+			return nil, &rpc.CustomError{Code: rpc.ErrCodeDefault, Message: fmt.Sprintf("nonce too low: address %v, tx: %d state: %d", sender.Value(), got, want)}
 		}
 		expectedNonce[sender]++
 		decoded = append(decoded, tx)
@@ -279,8 +279,6 @@ func (t *testingImpl) BuildBlockV1(
 		return nil, err
 	}
 	response.ShouldOverrideBuilder = false
-	// Return blockValue=0, matching Geth's BuildTestingPayload behaviour.
-	response.BlockValue = new(hexutil.Big)
 	if extraData != nil {
 		h := types.CopyHeader(assembled.Block.Block.Header())
 		h.Extra = *extraData

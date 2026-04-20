@@ -49,7 +49,7 @@ type ExecutionPayload struct {
 	Withdrawals     []*types.Withdrawal `json:"withdrawals"`
 	BlobGasUsed     *hexutil.Uint64     `json:"blobGasUsed"`
 	ExcessBlobGas   *hexutil.Uint64     `json:"excessBlobGas"`
-	SlotNumber      *hexutil.Uint64     `json:"slotNumber"`
+	SlotNumber      *hexutil.Uint64     `json:"slotNumber,omitempty"`
 	BlockAccessList hexutil.Bytes       `json:"blockAccessList,omitempty"`
 }
 

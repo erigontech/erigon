@@ -532,9 +532,8 @@ func TestBuildBlockV1(t *testing.T) {
 		assert.Equal(t, hexutil.Bytes("test"), resp.ExecutionPayload.ExtraData)
 		assert.Equal(t, false, resp.ShouldOverrideBuilder)
 
-		// blockValue is always 0 (matching Geth's BuildTestingPayload behaviour).
 		require.NotNil(t, resp.BlockValue)
-		assert.Equal(t, "0", resp.BlockValue.ToInt().String())
+		assert.Equal(t, "12345", resp.BlockValue.ToInt().String())
 	})
 
 	t.Run("happy path with extraData override", func(t *testing.T) {
@@ -620,8 +619,9 @@ func TestBuildBlockV1(t *testing.T) {
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), &txs, nil)
 		require.Nil(t, resp)
 		require.Error(t, err)
-		var rpcErr *rpc.InvalidParamsError
+		var rpcErr *rpc.CustomError
 		require.ErrorAs(t, err, &rpcErr)
+		assert.Equal(t, rpc.ErrCodeDefault, rpcErr.Code)
 		assert.Contains(t, rpcErr.Message, "nonce too high")
 	})
 
@@ -642,8 +642,9 @@ func TestBuildBlockV1(t *testing.T) {
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), &txs, nil)
 		require.Nil(t, resp)
 		require.Error(t, err)
-		var rpcErr *rpc.InvalidParamsError
+		var rpcErr *rpc.CustomError
 		require.ErrorAs(t, err, &rpcErr)
+		assert.Equal(t, rpc.ErrCodeDefault, rpcErr.Code)
 		assert.Contains(t, rpcErr.Message, "nonce too low")
 	})
 
@@ -877,8 +878,9 @@ func TestBuildBlockV1MultipleSendersNonce(t *testing.T) {
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), &txs, nil)
 		require.Nil(t, resp)
 		require.Error(t, err)
-		var rpcErr *rpc.InvalidParamsError
+		var rpcErr *rpc.CustomError
 		require.ErrorAs(t, err, &rpcErr)
+		assert.Equal(t, rpc.ErrCodeDefault, rpcErr.Code)
 		assert.Contains(t, rpcErr.Message, "nonce too high")
 	})
 }
