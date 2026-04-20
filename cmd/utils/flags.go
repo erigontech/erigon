@@ -1205,6 +1205,27 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 	cfg.BootstrapNodesV5 = nodes
 }
 
+// resolveChainName returns the chain name to use for looking up network
+// defaults (bootnodes, DNS discovery URLs, static peers). It mirrors
+// go-ethereum's behavior: when --networkid is explicitly set to a non-mainnet
+// value and --chain is not, the "mainnet" default on --chain should not bleed
+// into network defaults. If the networkid maps to a known chain, that name is
+// returned; otherwise an empty string is returned, yielding no defaults.
+func resolveChainName(ctx *cli.Context) string {
+	chain := ctx.String(ChainFlag.Name)
+	if !ctx.IsSet(NetworkIdFlag.Name) || ctx.IsSet(ChainFlag.Name) {
+		return chain
+	}
+	networkID := ctx.Uint64(NetworkIdFlag.Name)
+	if networkID == 1 {
+		return chain
+	}
+	if chainName, ok := chainspec.NetworkNameByID[networkID]; ok {
+		return chainName
+	}
+	return ""
+}
+
 // getBootnodesFromContext resolves bootstrap nodes from the CLI context. An explicitly
 // set --bootnodes flag (even if empty) overrides chain defaults, matching go-ethereum's
 // behavior and allowing callers to run discovery with no bootstrap peers.
@@ -1212,7 +1233,7 @@ func getBootnodesFromContext(ctx *cli.Context) ([]*enode.Node, error) {
 	if ctx.IsSet(BootnodesFlag.Name) {
 		return enode.ParseNodesFromURLs(common.CliString2Array(ctx.String(BootnodesFlag.Name)))
 	}
-	return GetBootnodesFromFlags("", ctx.String(ChainFlag.Name))
+	return GetBootnodesFromFlags("", resolveChainName(ctx))
 }
 
 // GetBootnodesFromFlags makes a list of bootnodes from command line flags.
@@ -1236,8 +1257,7 @@ func setStaticPeers(ctx *cli.Context, cfg *p2p.Config) {
 	if ctx.IsSet(StaticPeersFlag.Name) {
 		urls = common.CliString2Array(ctx.String(StaticPeersFlag.Name))
 	} else {
-		chain := ctx.String(ChainFlag.Name)
-		urls = chainspec.StaticPeerURLsOfChain(chain)
+		urls = chainspec.StaticPeerURLsOfChain(resolveChainName(ctx))
 	}
 
 	nodes, err := enode.ParseNodesFromURLs(urls)
@@ -1873,18 +1893,9 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.CaplinConfig.BootstrapNodes = ctx.StringSlice(SentinelBootnodes.Name)
 	cfg.CaplinConfig.StaticPeers = ctx.StringSlice(SentinelStaticPeers.Name)
 
-	chain := ctx.String(ChainFlag.Name) // mainnet by default
+	chain := resolveChainName(ctx)
 	if ctx.IsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = ctx.Uint64(NetworkIdFlag.Name)
-		if cfg.NetworkID != 1 && !ctx.IsSet(ChainFlag.Name) {
-			chainName, ok := chainspec.NetworkNameByID[cfg.NetworkID]
-			if !ok {
-				chain = "" // don't default to mainnet if NetworkID != 1 and it's devchain or smth
-			} else {
-				chain = chainName // fetch network name from id if name wasn't provided
-			}
-
-		}
 	} else if chain != networkname.Dev && chain != networkname.BorDevnet {
 		spec, err := chainspec.ChainSpecByName(chain)
 		if err != nil {
