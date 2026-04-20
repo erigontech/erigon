@@ -189,7 +189,7 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 		return fmt.Errorf("[BeaconState] err: %s", ssz.ErrLowBufferSize)
 	}
 	if version >= int(clparams.BellatrixVersion) {
-		b.latestExecutionPayloadHeader = &cltypes.Eth1Header{}
+		b.latestExecutionPayloadHeader = cltypes.NewEth1Header(clparams.StateVersion(version))
 	}
 	if version >= int(clparams.ElectraVersion) {
 		b.pendingDeposits = solid.NewPendingDepositList(b.beaconConfig)

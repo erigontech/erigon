@@ -130,10 +130,6 @@ func (h *Eth1Header) EncodingSizeSSZ() int {
 	if h.version >= clparams.DenebVersion {
 		size += 8 * 2 // BlobGasUsed + ExcessBlobGas
 	}
-	if h.version >= clparams.GloasVersion {
-		size += 32 // BlockAccessListRoot
-		size += 8  // SlotNumber
-	}
 	if h.Extra == nil {
 		h.Extra = solid.NewExtraData()
 	}
@@ -156,9 +152,6 @@ func (h *Eth1Header) getSchema() []any {
 	}
 	if h.version >= clparams.DenebVersion {
 		s = append(s, &h.BlobGasUsed, &h.ExcessBlobGas)
-	}
-	if h.version >= clparams.GloasVersion {
-		s = append(s, h.BlockAccessListRoot[:], &h.SlotNumber)
 	}
 	return s
 }
@@ -210,17 +203,6 @@ func (h *Eth1Header) MarshalJSON() ([]byte, error) {
 		ExcessBlobGas:    h.ExcessBlobGas,
 	}
 
-	if h.version >= clparams.GloasVersion {
-		return json.Marshal(struct {
-			basePayload
-			BlockAccessListRoot common.Hash `json:"block_access_list_root"`
-			SlotNumber          uint64      `json:"slot_number,string"`
-		}{
-			basePayload:         base,
-			BlockAccessListRoot: h.BlockAccessListRoot,
-			SlotNumber:          h.SlotNumber,
-		})
-	}
 	return json.Marshal(base)
 }
 

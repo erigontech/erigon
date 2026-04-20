@@ -330,18 +330,20 @@ func (f *ForkChoiceStore) applyEnvelope(ctx context.Context, signedEnvelope *clt
 		return false, nil
 	}
 
-	// Get block state for verification (no copy needed — we don't mutate it for state transition).
-	// We use a copy only because ProcessExecutionPayloadEnvelope backfills the header root
-	// as part of verification, but we don't want that to affect the canonical block state.
+	// Get block state for verification.
+	// ProcessExecutionPayloadEnvelope backfills the header root as part of verification,
+	// but we don't want that to affect the canonical block state.
 	blockState, err := f.forkGraph.GetState(beaconBlockRoot, false)
 	if err != nil {
 		return false, fmt.Errorf("OnExecutionPayload: failed to get block state: %w", err)
 	}
 	if blockState == nil {
-		// Block hasn't arrived yet, queue envelope for later processing
+		// Block hasn't arrived yet, queue envelope for later processing.
+		// Per spec: assert envelope.beacon_block_root in store.block_states
+		// Return an error so callers can distinguish "queued" from "applied".
 		f.pendingEnvelopes.Add(beaconBlockRoot, signedEnvelope)
 		log.Debug("OnExecutionPayload: block not found, queuing envelope for later", "beaconBlockRoot", common.Hash(beaconBlockRoot))
-		return false, nil
+		return false, fmt.Errorf("OnExecutionPayload: block state not found for beacon_block_root %v", common.Hash(beaconBlockRoot))
 	}
 
 	// Get the block to verify it exists
@@ -349,7 +351,7 @@ func (f *ForkChoiceStore) applyEnvelope(ctx context.Context, signedEnvelope *clt
 	if !ok || block == nil {
 		f.pendingEnvelopes.Add(beaconBlockRoot, signedEnvelope)
 		log.Debug("OnExecutionPayload: block not found in fork graph, queuing envelope", "beaconBlockRoot", common.Hash(beaconBlockRoot))
-		return false, nil
+		return false, fmt.Errorf("OnExecutionPayload: block not found in fork graph for beacon_block_root %v", common.Hash(beaconBlockRoot))
 	}
 
 	// Validate envelope against block (bid matching + signature verification)
@@ -381,8 +383,10 @@ func (f *ForkChoiceStore) applyEnvelope(ctx context.Context, signedEnvelope *clt
 		}
 	}
 
-	// Run ProcessExecutionPayloadEnvelope for verification only (no state mutation).
-	if err := transition.DefaultMachine.ProcessExecutionPayloadEnvelope(blockState, signedEnvelope); err != nil {
+	// Run ProcessExecutionPayloadEnvelope for CL-level verification (no state mutation).
+	// Always use ValidatingMachine so that signature verification and all spec checks run,
+	// regardless of whether the EL-level validatePayload flag is set.
+	if err := transition.ValidatingMachine.ProcessExecutionPayloadEnvelope(blockState, signedEnvelope); err != nil {
 		return false, fmt.Errorf("OnExecutionPayload: failed to verify execution payload: %w", err)
 	}
 
