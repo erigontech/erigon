@@ -1153,6 +1153,7 @@ func (srv *Server) listErrors() []any {
 	for err, count := range srv.errors {
 		list = append(list, err, count)
 	}
+	clear(srv.errors)
 	return list
 }
 
@@ -1164,6 +1165,12 @@ func cleanError(err string) string {
 		return "closed by remote"
 	case strings.HasSuffix(err, "connection reset by peer"):
 		return "closed by remote"
+	case strings.Contains(err, "broken pipe"):
+		return "broken pipe"
+	case strings.Contains(err, "connection refused"):
+		return "connection refused"
+	case strings.Contains(err, "no route to host"):
+		return "no route to host"
 	default:
 		return err
 	}
