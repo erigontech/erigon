@@ -228,7 +228,7 @@ with `--sim.limit "suite1|suite2|..."`.
 ./hive --client-file erigon-local.yaml \
   --sim ethereum/eels/consume-engine \
   --sim.parallelism=12 --docker.nocache=true \
-  --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/${EEST_VERSION}/fixtures_develop.tar.gz \
+  --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/${EEST_VERSION}/fixtures_stable.tar.gz \
   --sim.timelimit 60m
 ```
 

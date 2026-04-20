@@ -119,7 +119,7 @@ cd temp/<hive-dir>/hive
 
 # Run EEST engine simulator
 ./hive --sim ethereum/eels/consume-engine --sim.limit="" --client erigon \
-  --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v5.3.0/fixtures_develop.tar.gz
+  --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v5.3.0/fixtures_stable.tar.gz
 ```
 
 ## Suites Covered

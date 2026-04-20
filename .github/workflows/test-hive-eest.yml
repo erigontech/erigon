@@ -143,7 +143,7 @@ jobs:
           docker ps
           fixtures_url="${{ matrix.fixtures-url }}"
           if [ -z "$fixtures_url" ]; then
-            fixtures_url="https://github.com/ethereum/execution-spec-tests/releases/download/${{ env.EEST_VERSION }}/fixtures_develop.tar.gz"
+            fixtures_url="https://github.com/ethereum/execution-spec-tests/releases/download/${{ env.EEST_VERSION }}/fixtures_stable.tar.gz"
           fi
           run_suite() {
             echo -e "\n\n============================================================"
