@@ -576,7 +576,7 @@ func TestEngineApiBALParallelConsistencyStress(t *testing.T) {
 				// Distinct receiver per (sender, block) to avoid nonce/collision.
 				receiver := common.HexToAddress(fmt.Sprintf("0x%040x", (blockIdx*numSenders+i)+0x1000))
 				_, err := eat.Transactor.SubmitSimpleTransfer(key, receiver, big.NewInt(1))
-				require.NoError(t, err, "block %d sender %d: submit transfer", blockIdx, i)
+				require.NoErrorf(t, err, "block %d sender %d: submit transfer", blockIdx, i)
 			}
 			// Coinbase also deploys a Token (CREATE path, emits code change).
 			coinbaseAuth, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, chainId)
@@ -637,7 +637,7 @@ func TestEngineApiBALParallelConsistencyStress(t *testing.T) {
 // the delete from FinalizeTx) makes both paths retain the read, matching
 // EIP-7928's access-list semantics.
 //
-// The bytecode is ~15 bytes of handwritten EVM. Init code:
+// The bytecode is 7 bytes of handwritten EVM. Init code:
 //
 //	6001600155  SSTORE slot 0x01 = 1   (records StoragePath read on slot 0x01)
 //	33          CALLER
@@ -659,7 +659,8 @@ func TestEngineApiBALCreateSSTOREThenSelfdestructInInitCode(t *testing.T) {
 		require.NoError(t, err)
 		gasPrice, err := eat.RpcApiClient.GasPrice()
 		require.NoError(t, err)
-		gasPriceU256, _ := uint256.FromBig(gasPrice)
+		gasPriceU256, overflow := uint256.FromBig(gasPrice)
+		require.False(t, overflow, "gas price overflows uint256")
 
 		// SSTORE-then-SELFDESTRUCT init code. See the docstring above for
 		// the bytecode breakdown.
