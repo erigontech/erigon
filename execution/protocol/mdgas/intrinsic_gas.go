@@ -36,6 +36,7 @@ type IntrinsicGasCalcArgs struct {
 	IsEIP2028          bool
 	IsEIP3860          bool
 	IsEIP7623          bool
+	IsEIP7981          bool
 	IsEIP8037          bool
 	IsAATxn            bool
 }
@@ -82,10 +83,10 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 		result.RegularGas = params.TxGas
 	}
 	result.FloorGasCost = params.TxGas
+	nz := args.DataNonZeroLen
 	// Bump the required gas by the amount of transactional data
 	if dataLen > 0 {
 		// Zero and non-zero bytes are priced differently
-		nz := args.DataNonZeroLen
 		// Make sure we don't exceed uint64 for all data combinations
 		nonZeroGas := params.TxDataNonZeroGasFrontier
 		if args.IsEIP2028 {
@@ -123,18 +124,6 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 				return IntrinsicGasCalcResult{}, true
 			}
 		}
-
-		if args.IsEIP7623 {
-			tokenLen := dataLen + 3*nz
-			dataGas, overflow := math.SafeMul(tokenLen, params.TxTotalCostFloorPerToken)
-			if overflow {
-				return IntrinsicGasCalcResult{}, true
-			}
-			result.FloorGasCost, overflow = math.SafeAdd(result.FloorGasCost, dataGas)
-			if overflow {
-				return IntrinsicGasCalcResult{}, true
-			}
-		}
 	}
 	if args.AccessListLen > 0 {
 		product, overflow := math.SafeMul(args.AccessListLen, params.TxAccessListAddressGas)
@@ -151,6 +140,72 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 			return IntrinsicGasCalcResult{}, true
 		}
 		result.RegularGas, overflow = math.SafeAdd(result.RegularGas, product)
+		if overflow {
+			return IntrinsicGasCalcResult{}, true
+		}
+	}
+
+	// Floor data gas cost.
+	//
+	// EIP-7981 supersedes EIP-7976 which supersedes EIP-7623. When EIP-7981 is active:
+	//   - every calldata byte (zero or non-zero) counts as TxStandardTokensPerByte floor tokens
+	//   - access list data (addresses + storage keys) also contributes floor tokens
+	//   - access list data is always charged at floor rate in the intrinsic cost, so that
+	//     access lists cannot be used to bypass the calldata floor pricing
+	if args.IsEIP7981 {
+		floorCalldataTokens, overflow := math.SafeMul(dataLen, params.TxStandardTokensPerByte)
+		if overflow {
+			return IntrinsicGasCalcResult{}, true
+		}
+		accessListBytes, overflow := math.SafeMul(args.AccessListLen, params.TxAccessListAddressBytes)
+		if overflow {
+			return IntrinsicGasCalcResult{}, true
+		}
+		storageKeyBytes, overflow := math.SafeMul(args.StorageKeysLen, params.TxAccessListStorageKeyBytes)
+		if overflow {
+			return IntrinsicGasCalcResult{}, true
+		}
+		accessListBytes, overflow = math.SafeAdd(accessListBytes, storageKeyBytes)
+		if overflow {
+			return IntrinsicGasCalcResult{}, true
+		}
+		floorAccessListTokens, overflow := math.SafeMul(accessListBytes, params.TxStandardTokensPerByte)
+		if overflow {
+			return IntrinsicGasCalcResult{}, true
+		}
+
+		// Always charge the access list data cost in the standard intrinsic gas path so
+		// that access list data is charged at floor rate regardless of execution level.
+		if floorAccessListTokens > 0 {
+			accessListDataGas, overflow := math.SafeMul(floorAccessListTokens, params.TxTotalCostFloorPerTokenEIP7976)
+			if overflow {
+				return IntrinsicGasCalcResult{}, true
+			}
+			result.RegularGas, overflow = math.SafeAdd(result.RegularGas, accessListDataGas)
+			if overflow {
+				return IntrinsicGasCalcResult{}, true
+			}
+		}
+
+		totalFloorTokens, overflow := math.SafeAdd(floorCalldataTokens, floorAccessListTokens)
+		if overflow {
+			return IntrinsicGasCalcResult{}, true
+		}
+		dataGas, overflow := math.SafeMul(totalFloorTokens, params.TxTotalCostFloorPerTokenEIP7976)
+		if overflow {
+			return IntrinsicGasCalcResult{}, true
+		}
+		result.FloorGasCost, overflow = math.SafeAdd(result.FloorGasCost, dataGas)
+		if overflow {
+			return IntrinsicGasCalcResult{}, true
+		}
+	} else if args.IsEIP7623 && dataLen > 0 {
+		tokenLen := dataLen + 3*nz
+		dataGas, overflow := math.SafeMul(tokenLen, params.TxTotalCostFloorPerToken)
+		if overflow {
+			return IntrinsicGasCalcResult{}, true
+		}
+		result.FloorGasCost, overflow = math.SafeAdd(result.FloorGasCost, dataGas)
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
