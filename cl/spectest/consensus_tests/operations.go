@@ -571,6 +571,37 @@ func operationExecutionPayloadBidHandler(t *testing.T, root fs.FS, c spectest.Te
 	return nil
 }
 
+func operationParentExecutionPayloadHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
+	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
+	require.NoError(t, err)
+	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
+	expectedError := os.IsNotExist(err)
+	if err != nil && !expectedError {
+		return err
+	}
+	block := cltypes.NewBeaconBlock(&clparams.MainnetBeaconConfig, c.Version())
+	if err := spectest.ReadSszOld(root, block, c.Version(), blockFileName); err != nil {
+		return err
+	}
+	if err := c.Machine.ProcessParentExecutionPayload(preState, block); err != nil {
+		if expectedError {
+			return nil
+		}
+		return err
+	}
+	if expectedError {
+		return errors.New("expected error")
+	}
+	haveRoot, err := preState.HashSSZ()
+	require.NoError(t, err)
+
+	expectedRoot, err := postState.HashSSZ()
+	require.NoError(t, err)
+
+	assert.EqualValues(t, expectedRoot, haveRoot)
+	return nil
+}
+
 func operationPayloadAttestationHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
 	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
 	require.NoError(t, err)

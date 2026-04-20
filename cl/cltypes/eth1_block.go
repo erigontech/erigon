@@ -417,11 +417,17 @@ func (b *Eth1Block) DecodeSSZ(buf []byte, version int) error {
 
 // EncodeSSZ encodes the block in SSZ format.
 func (b *Eth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
+	if b.Extra == nil {
+		b.Extra = solid.NewExtraData()
+	}
 	return ssz2.MarshalSSZ(dst, b.getSchema()...)
 }
 
 // HashSSZ calculates the SSZ hash of the Eth1Block's payload header.
 func (b *Eth1Block) HashSSZ() ([32]byte, error) {
+	if b.Extra == nil {
+		b.Extra = solid.NewExtraData()
+	}
 	return merkle_tree.HashTreeRoot(b.getSchema()...)
 }
 
