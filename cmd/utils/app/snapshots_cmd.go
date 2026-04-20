@@ -69,6 +69,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -3022,9 +3023,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		if err != nil {
 			return err
 		}
-		// Cap at block-snapshot progress so state files cannot advance past
-		// block files (unrecoverable without rm-state --latest).
-		maxCollatable, err := integrity.MaxCollatableTxNum(ctx, tx, blockReader)
+		maxCollatable, err := services.MaxCollatableTxNum(ctx, tx, blockReader)
 		if err != nil {
 			return err
 		}
