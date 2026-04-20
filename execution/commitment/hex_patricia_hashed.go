@@ -1538,9 +1538,6 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted boo
 	fileEndTxNum := uint64(step) // TODO: investigate why we cast step to txNum!
 	hph.depthsToTxNum[depth] = fileEndTxNum
 
-	if len(branchData) >= 2 {
-		branchData = branchData[2:] // skip touch map and keep the rest
-	}
 	if hph.trace {
 		fmt.Printf("unfoldBranchNode prefix '%x', nibbles [%x] depth %d row %d '%x'\n",
 			key, hph.currentKey[:hph.currentKeyLen], depth, row, branchData)
@@ -1847,7 +1844,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 
 		upCell.reset()
 		if hph.branchBefore[row] {
-			_, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, RetrieveCellNoop)
+			_, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, RetrieveCellNoop)
 			if err != nil {
 				return fmt.Errorf("failed to encode leaf node update: %w", err)
 			}
@@ -1877,7 +1874,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 
 		if hph.branchBefore[row] { // encode Delete if prefix existed before
 			//fmt.Printf("delete existed row %d prefix %x\n", row, updateKey)
-			_, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, RetrieveCellNoop)
+			_, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, RetrieveCellNoop)
 			if err != nil {
 				return fmt.Errorf("failed to encode leaf node update: %w", err)
 			}
@@ -1897,11 +1894,9 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 				hph.touchMap[row-1] |= uint16(1) << nibble
 			}
 		}
-		bitmap := hph.touchMap[row] & hph.afterMap[row]
 		if !hph.branchBefore[row] {
 			// There was no branch node before, so we need to touch even the singular child that existed
 			hph.touchMap[row] |= hph.afterMap[row]
-			bitmap |= hph.afterMap[row]
 		}
 
 		// Calculate total length of all hashes
@@ -1971,7 +1966,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 
 		b := [...]byte{0x80}
 		cellGetter := hph.createCellGetter(b[:], updateKey, row, depth)
-		lastNibble, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], cellGetter)
+		lastNibble, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, hph.afterMap[row], cellGetter)
 		if err != nil {
 			return fmt.Errorf("failed to encode branch update: %w", err)
 		}
@@ -2482,7 +2477,6 @@ var (
 type state struct {
 	Root         []byte      // encoded root cell
 	Depths       [128]int16  // For each row, the depth of cells in that row
-	TouchMap     [128]uint16 // For each row, bitmap of cells that were either present before modification, or modified or deleted
 	AfterMap     [128]uint16 // For each row, bitmap of cells that were present after modification
 	BranchBefore [128]bool   // For each row, whether there was a branch node in the database loaded in unfold
 	RootChecked  bool        // Set to false if it is not known whether the root is empty, set to true if it is checked
@@ -2518,9 +2512,6 @@ func (s *state) Encode(buf []byte) ([]byte, error) {
 	}
 	if n, err := ee.Write(d); err != nil || n != len(s.Depths) {
 		return nil, fmt.Errorf("encode depths: %w", err)
-	}
-	if err := binary.Write(ee, binary.BigEndian, s.TouchMap); err != nil {
-		return nil, fmt.Errorf("encode touchMap: %w", err)
 	}
 	if err := binary.Write(ee, binary.BigEndian, s.AfterMap); err != nil {
 		return nil, fmt.Errorf("encode afterMap: %w", err)
@@ -2577,9 +2568,6 @@ func (s *state) Decode(buf []byte) error {
 	}
 	for i := 0; i < len(s.Depths); i++ {
 		s.Depths[i] = int16(d[i])
-	}
-	if err := binary.Read(aux, binary.BigEndian, &s.TouchMap); err != nil {
-		return fmt.Errorf("touchMap: %w", err)
 	}
 	if err := binary.Read(aux, binary.BigEndian, &s.AfterMap); err != nil {
 		return fmt.Errorf("afterMap: %w", err)
@@ -2723,7 +2711,6 @@ func (hph *HexPatriciaHashed) EncodeCurrentState(buf []byte) ([]byte, error) {
 	s.Root = hph.root.Encode()
 	copy(s.Depths[:], hph.depths[:])
 	copy(s.BranchBefore[:], hph.branchBefore[:])
-	copy(s.TouchMap[:], hph.touchMap[:])
 	copy(s.AfterMap[:], hph.afterMap[:])
 
 	return s.Encode(buf)
@@ -2767,7 +2754,6 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 
 	copy(hph.depths[:], s.Depths[:])
 	copy(hph.branchBefore[:], s.BranchBefore[:])
-	copy(hph.touchMap[:], s.TouchMap[:])
 	copy(hph.afterMap[:], s.AfterMap[:])
 
 	if hph.root.accountAddrLen > 0 {
