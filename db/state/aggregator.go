@@ -765,7 +765,7 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int) erro
 
 type AggV3StaticFiles struct {
 	d    [kv.DomainLen]StaticFiles
-	ivfs []InvertedFiles
+	ivfs [kv.StandaloneIdxLen]InvertedFiles
 }
 
 // CleanupOnError - call it on collation fail. It's closing all files
@@ -1273,7 +1273,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 }
 
 func (at *AggregatorRoTx) stepsRangeInDBAsStr(tx kv.Tx) string {
-	steps := make([]string, 0, len(at.d)+len(at.iis))
+	steps := make([]string, 0, len(at.d)+at.iisCount)
 	for _, dt := range at.d {
 		a1, a2 := dt.stepsRangeInDB(tx)
 		steps = append(steps, fmt.Sprintf("%s:%.1f", dt.d.FilenameBase, a2-a1))
@@ -1641,7 +1641,6 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 	}
 
 	if r.anyDomainValues() { // Prioritize domain value merges: if any domain has pending value merges, skip standalone II merges this round.
-		r.invertedIndex = [kv.StandaloneIdxLen]*MergeRange{}
 		return r
 	}
 

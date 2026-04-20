@@ -81,7 +81,7 @@ func (at *AggregatorRoTx) FilesInRange(r *Ranges) (*SelectedStaticFiles, error) 
 }
 
 func (at *AggregatorRoTx) InvertedIndicesLen() int {
-	return at.a.iisCount
+	return at.iisCount
 }
 
 func (at *AggregatorRoTx) InvertedIndexName(id int) kv.InvertedIdx {
