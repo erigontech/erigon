@@ -84,6 +84,7 @@ var (
 	benchSampleSize int
 	benchSeed       int64
 	benchUseGetAsOf bool
+	benchViaTrieCtx bool
 )
 
 // bench-history-lookup command flags
@@ -143,6 +144,7 @@ func init() {
 	cmdCommitmentBenchLookup.Flags().IntVar(&benchSampleSize, "sample-size", 10000000, "number of random keys to sample via reservoir sampling")
 	cmdCommitmentBenchLookup.Flags().Int64Var(&benchSeed, "seed", 0, "random seed for sampling (0 = use current time)")
 	cmdCommitmentBenchLookup.Flags().BoolVar(&benchUseGetAsOf, "use-get-as-of", false, "use GetAsOf(math.MaxUint64) instead of GetLatest() for lookups")
+	cmdCommitmentBenchLookup.Flags().BoolVar(&benchViaTrieCtx, "via-trie-ctx", false, "measure logical branch fetch via TrieContext.Branch(prefix) instead of raw domain lookup (exposes de-embed read amplification)")
 	commitmentCmd.AddCommand(cmdCommitmentBenchLookup)
 
 	// commitment bench-history-lookup
@@ -618,9 +620,67 @@ func benchLookup(ctx context.Context, logger log.Logger) error {
 		defer sd.Close()
 		commitmentReader = commitmentdb.NewLatestStateReader(tx, sd)
 	}
-	durations := make([]time.Duration, len(keys))
-	var totalSize int64
 	stepSize := tx.Debug().StepSize()
+
+	var (
+		durations []time.Duration
+		totalSize int64
+		mode      string
+	)
+
+	if benchViaTrieCtx {
+		// In de-embed mode sampled keys are compact(P)||0xFF or compact(P)||nibble.
+		// Strip the trailing byte to get the branch prefix and dedupe so each
+		// logical branch is measured once (vs popcount+1 times).
+		prefixes := keys
+		if commitment.DeEmbedCommitment {
+			seen := make(map[string]struct{}, len(keys))
+			prefixes = prefixes[:0]
+			for _, k := range keys {
+				if len(k) == 0 {
+					continue
+				}
+				p := k[:len(k)-1]
+				if _, ok := seen[string(p)]; ok {
+					continue
+				}
+				seen[string(p)] = struct{}{}
+				prefixes = append(prefixes, append([]byte(nil), p...))
+			}
+			logger.Info("Deduped child/meta keys to branch prefixes", "prefixes", len(prefixes), "sampledKeys", len(keys))
+		}
+
+		trieCtx := commitmentdb.NewTrieContextRo(commitmentReader, stepSize)
+		durations = make([]time.Duration, len(prefixes))
+		mode = "TrieContext.Branch (logical branch fetch)"
+		logger.Info("Benchmarking via TrieContext.Branch", "prefixes", len(prefixes), "deEmbed", commitment.DeEmbedCommitment)
+
+		startTime := time.Now()
+		for i, prefix := range prefixes {
+			lookupStart := time.Now()
+			val, _, err := trieCtx.Branch(prefix)
+			durations[i] = time.Since(lookupStart)
+			if err != nil {
+				logger.Warn("Branch fetch failed", "prefix", fmt.Sprintf("%x", prefix), "error", err)
+				continue
+			}
+			totalSize += int64(len(val))
+
+			if (i+1)%10000 == 0 {
+				elapsed := time.Since(startTime)
+				opsPerSec := float64(i+1) / elapsed.Seconds()
+				logger.Info("Progress", "completed", i+1, "total", len(prefixes), "ops/sec", fmt.Sprintf("%.0f", opsPerSec))
+			}
+		}
+		totalBenchTime := time.Since(startTime)
+		stats := calculateBenchStats(durations)
+		stats.Throughput = float64(len(prefixes)) / totalBenchTime.Seconds()
+		printBenchResults(mode, stats, totalSize, len(prefixes), totalCount)
+		return nil
+	}
+
+	durations = make([]time.Duration, len(keys))
+	mode = "Commitment Domain Lookups"
 
 	startTime := time.Now()
 	for i, key := range keys {
@@ -648,7 +708,7 @@ func benchLookup(ctx context.Context, logger log.Logger) error {
 	stats.Throughput = float64(len(keys)) / totalBenchTime.Seconds()
 
 	// Print results
-	printBenchResults("Commitment Domain Lookups", stats, totalSize, len(keys), totalCount)
+	printBenchResults(mode, stats, totalSize, len(keys), totalCount)
 
 	return nil
 }
