@@ -23,15 +23,24 @@ package engineapi
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	execctx "github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/txnprovider"
 )
 
 // TestingAPI is the interface for the testing_ RPC namespace.
@@ -43,30 +52,91 @@ type TestingAPI interface {
 	//
 	// transactions: nil  → draw from mempool (normal builder behaviour)
 	//               []   → build an empty block (mempool bypassed, no txs)
-	//               [...] → TODO: explicit tx list not yet supported; returns error
-	//
-	// NOTE: overriding extraData post-assembly means the BlockHash in the returned payload
-	// will NOT match a block header that includes that extraData. Callers should treat the
-	// result as a template when extraData is overridden.
+	//               [...] → build a block containing exactly these transactions (strict nonce check)
 	BuildBlockV1(ctx context.Context, parentHash common.Hash, payloadAttributes *engine_types.PayloadAttributes, transactions *[]hexutil.Bytes, extraData *hexutil.Bytes) (*engine_types.GetPayloadResponse, error)
 }
 
 // testingImpl is the concrete implementation of TestingAPI.
 type testingImpl struct {
 	server *EngineServer
+	logger log.Logger
+	db     kv.TemporalRoDB
 }
 
 // NewTestingImpl returns a new TestingAPI implementation wrapping the given EngineServer.
-func NewTestingImpl(server *EngineServer) TestingAPI {
-	return &testingImpl{server: server}
+func NewTestingImpl(server *EngineServer, logger log.Logger, db kv.TemporalRoDB) TestingAPI {
+	return &testingImpl{server: server, logger: logger, db: db}
+}
+
+// decodeTxnProvider decodes raw transactions into a TxnProvider.
+// Returns nil if transactions is nil (mempool path).
+// Opens a single temporal DB transaction for all nonce lookups to avoid per-sender overhead.
+func (t *testingImpl) decodeTxnProvider(ctx context.Context, transactions *[]hexutil.Bytes, blockNumber, timestamp uint64) (txnprovider.TxnProvider, error) {
+	if transactions == nil {
+		return nil, nil
+	}
+
+	var reader *state.ReaderV3
+	if t.db != nil {
+		dbTx, err := t.db.BeginTemporalRo(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("testing_buildBlockV1: could not begin temporal transaction: %w", err)
+		}
+		defer dbTx.Rollback()
+		sd, err := execctx.NewSharedDomains(ctx, dbTx, t.logger)
+		if err != nil {
+			return nil, fmt.Errorf("testing_buildBlockV1: NewSharedDomains error: %w", err)
+		}
+		defer sd.Close()
+		reader = state.NewReaderV3(sd.AsGetter(dbTx))
+	}
+
+	decoded := make([]types.Transaction, 0, len(*transactions))
+	signer := types.MakeSigner(t.server.config, blockNumber, timestamp)
+	expectedNonce := make(map[accounts.Address]uint64, len(*transactions))
+	for i, rawTx := range *transactions {
+		tx, err := types.DecodeTransaction(rawTx)
+		if err != nil {
+			return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("transaction %d: decode error: %v", i, err)}
+		}
+		sender, err := signer.Sender(tx)
+		if err != nil {
+			return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("transaction %d: cannot recover sender: %v", i, err)}
+		}
+		tx.SetSender(sender)
+		if _, seen := expectedNonce[sender]; !seen {
+			var stateNonce uint64
+			if reader != nil {
+				acc, err := reader.ReadAccountData(accounts.InternAddress(sender.Value()))
+				if err != nil {
+					return nil, fmt.Errorf("testing_buildBlockV1: ReadAccountData error: %w", err)
+				}
+				if acc != nil {
+					stateNonce = acc.Nonce
+				}
+			}
+			expectedNonce[sender] = stateNonce
+		}
+		want := expectedNonce[sender]
+		got := tx.GetNonce()
+		if got > want {
+			return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("nonce too high: address %v, tx: %d state: %d", sender.Value(), got, want)}
+		}
+		if got < want {
+			return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("nonce too low: address %v, tx: %d state: %d", sender.Value(), got, want)}
+		}
+		expectedNonce[sender]++
+		decoded = append(decoded, tx)
+	}
+	return &staticTxnProvider{txns: decoded}, nil
 }
 
 // NewTestingRPCEntry returns the rpc.API descriptor for the testing_ namespace.
-func NewTestingRPCEntry(server *EngineServer) rpc.API {
+func NewTestingRPCEntry(server *EngineServer, logger log.Logger, db kv.TemporalRoDB) rpc.API {
 	return rpc.API{
 		Namespace: "testing",
 		Public:    false,
-		Service:   TestingAPI(NewTestingImpl(server)),
+		Service:   TestingAPI(NewTestingImpl(server, logger, db)),
 		Version:   "1.0",
 	}
 }
@@ -81,12 +151,6 @@ func (t *testingImpl) BuildBlockV1(
 ) (*engine_types.GetPayloadResponse, error) {
 	if payloadAttributes == nil {
 		return nil, &rpc.InvalidParamsError{Message: "payloadAttributes must not be null"}
-	}
-
-	// Explicit transaction list is not yet supported (requires proto extension).
-	// TODO: implement forced_transactions via AssembleBlockRequest proto extension.
-	if transactions != nil && len(*transactions) > 0 {
-		return nil, &rpc.InvalidParamsError{Message: "explicit transaction list not yet supported in testing_buildBlockV1; use null for mempool or [] for empty block"}
 	}
 
 	// Validate parent block exists.
@@ -130,6 +194,11 @@ func (t *testingImpl) BuildBlockV1(
 		return nil, &rpc.InvalidParamsError{Message: "parentBeaconBlockRoot not supported before Cancun"}
 	}
 
+	customProvider, err := t.decodeTxnProvider(ctx, transactions, parentHeader.Number.Uint64()+1, timestamp)
+	if err != nil {
+		return nil, err
+	}
+
 	// Build the AssembleBlock parameters (mirrors forkchoiceUpdated logic).
 	assembleParams := &builder.Parameters{
 		ParentHash:            parentHash,
@@ -137,6 +206,7 @@ func (t *testingImpl) BuildBlockV1(
 		PrevRandao:            payloadAttributes.PrevRandao,
 		SuggestedFeeRecipient: payloadAttributes.SuggestedFeeRecipient,
 		SlotNumber:            (*uint64)(payloadAttributes.SlotNumber),
+		CustomTxnProvider:     customProvider,
 	}
 	if version >= clparams.CapellaVersion {
 		assembleParams.Withdrawals = payloadAttributes.Withdrawals
@@ -155,7 +225,6 @@ func (t *testingImpl) BuildBlockV1(
 		deadline = ctxDeadline
 	}
 
-	// Step 1: AssembleBlock (locked scope).
 	var payloadID uint64
 	execBusy, err := func() (bool, error) {
 		t.server.lock.Lock()
@@ -180,7 +249,6 @@ func (t *testingImpl) BuildBlockV1(
 		return nil, errors.New("execution service is busy, cannot build block")
 	}
 
-	// Step 2: GetAssembledBlock (separate locked scope).
 	var assembled execmodule.AssembledBlockResult
 	execBusy, err = func() (bool, error) {
 		t.server.lock.Lock()
@@ -211,12 +279,30 @@ func (t *testingImpl) BuildBlockV1(
 		return nil, err
 	}
 	response.ShouldOverrideBuilder = false
-
-	// Override extra data if provided. Note: the BlockHash in ExecutionPayload reflects the
-	// originally built block; overriding ExtraData here means BlockHash will NOT match.
+	// Return blockValue=0, matching Geth's BuildTestingPayload behaviour.
+	response.BlockValue = new(hexutil.Big)
 	if extraData != nil {
+		h := types.CopyHeader(assembled.Block.Block.Header())
+		h.Extra = *extraData
 		response.ExecutionPayload.ExtraData = *extraData
+		response.ExecutionPayload.BlockHash = h.Hash()
 	}
 
 	return response, nil
+}
+
+// staticTxnProvider is a TxnProvider that yields a fixed transaction list exactly once,
+// then returns nil on every subsequent call. Used only by the testing_ namespace.
+type staticTxnProvider struct {
+	txns []types.Transaction
+	done atomic.Bool
+}
+
+func (s *staticTxnProvider) ProvideTxns(_ context.Context, _ ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	if !s.done.CompareAndSwap(false, true) {
+		return nil, nil
+	}
+	txns := s.txns
+	s.txns = nil // release for GC after handing off
+	return txns, nil
 }
