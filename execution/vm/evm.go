@@ -328,11 +328,11 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 			return nil, mdgas.MdGas{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
 		if !exist {
-			// EIP-4788/6110/7002/7251 system calls to a non-deployed target
-			// are no-ops (see e.g. EIP-4788: "If the contract code is empty,
-			// the system call is a no-op"). Short-circuit here to preserve
-			// that semantics at the fork-transition block where the target
-			// contract has not been deployed yet.
+			// Under Spurious Dragon, a zero-value CALL to a non-existent
+			// non-precompile account short-circuits as a no-op instead of
+			// creating the account. This also preserves the EIP-4788
+			// beacon-root syscall's "no-op when not deployed" semantics at
+			// the fork-transition block, before the contract is deployed.
 			if !isPrecompile && evm.chainRules.IsSpuriousDragon && value.IsZero() {
 				return nil, gas, nil
 			}
