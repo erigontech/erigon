@@ -66,6 +66,13 @@ func (f *FileEntry) Range() StepRange {
 	return StepRange{f.FromStep, f.ToStep}
 }
 
+// Clone returns a shallow copy of the FileEntry. All fields are value types,
+// so a shallow copy is a full copy.
+func (f *FileEntry) Clone() *FileEntry {
+	c := *f
+	return &c
+}
+
 // Inventory tracks all known snapshot files (local and remote) for a node,
 // organized by domain. It is the state model that storage uses to decide:
 //   - What to download (gaps in local coverage vs peer offerings)
