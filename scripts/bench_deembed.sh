@@ -64,16 +64,20 @@ if [[ ! -x "${INTEGRATION_BIN}" ]]; then
 fi
 
 run_bench() {
-    local label="$1" datadir="$2" deembed_env="$3" via_trie_ctx="$4"
+    local label="$1" datadir="$2" deembed_env="$3" mode="$4"
     local extra=()
-    if [[ "${via_trie_ctx}" == "true" ]]; then
-        extra+=(--via-trie-ctx)
-    fi
+    case "${mode}" in
+        raw)               : ;;
+        branch)            extra+=(--via-trie-ctx) ;;
+        meta)              extra+=(--via-branch-meta) ;;
+        meta-child)        extra+=(--via-branch-meta-child) ;;
+        *) echo "unknown mode: ${mode}" >&2; exit 1 ;;
+    esac
     echo
     echo "===== ${label} ====="
     echo "COMMITMENT_DEEMBED=${deembed_env}"
     echo "datadir=${datadir}"
-    echo "via-trie-ctx=${via_trie_ctx}"
+    echo "mode=${mode}"
     COMMITMENT_DEEMBED="${deembed_env}" "${INTEGRATION_BIN}" commitment bench-lookup \
         --datadir "${datadir}" \
         --chain "${CHAIN}" \
@@ -82,7 +86,11 @@ run_bench() {
         "${extra[@]}"
 }
 
-run_bench "embedded / raw"            "${DATADIR_EMBEDDED}" "false" "false"
-run_bench "embedded / via-trie-ctx"   "${DATADIR_EMBEDDED}" "false" "true"
-run_bench "de-embedded / raw"         "${DATADIR_DEEMBED}"  "true"  "false"
-run_bench "de-embedded / via-trie-ctx" "${DATADIR_DEEMBED}" "true"  "true"
+run_bench "embedded / raw"              "${DATADIR_EMBEDDED}" "false" "raw"
+run_bench "embedded / branch"           "${DATADIR_EMBEDDED}" "false" "branch"
+run_bench "embedded / meta"             "${DATADIR_EMBEDDED}" "false" "meta"
+run_bench "embedded / meta+child"       "${DATADIR_EMBEDDED}" "false" "meta-child"
+run_bench "de-embedded / raw"           "${DATADIR_DEEMBED}"  "true"  "raw"
+run_bench "de-embedded / branch"        "${DATADIR_DEEMBED}"  "true"  "branch"
+run_bench "de-embedded / meta"          "${DATADIR_DEEMBED}"  "true"  "meta"
+run_bench "de-embedded / meta+child"    "${DATADIR_DEEMBED}"  "true"  "meta-child"

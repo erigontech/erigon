@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/bits"
 	"math/rand"
 	"os"
 	"path"
@@ -81,10 +82,12 @@ var (
 
 // bench-lookup command flags
 var (
-	benchSampleSize int
-	benchSeed       int64
-	benchUseGetAsOf bool
-	benchViaTrieCtx bool
+	benchSampleSize     int
+	benchSeed           int64
+	benchUseGetAsOf     bool
+	benchViaTrieCtx     bool
+	benchViaBranchMeta  bool
+	benchViaBranchChild bool
 )
 
 // bench-history-lookup command flags
@@ -145,6 +148,8 @@ func init() {
 	cmdCommitmentBenchLookup.Flags().Int64Var(&benchSeed, "seed", 0, "random seed for sampling (0 = use current time)")
 	cmdCommitmentBenchLookup.Flags().BoolVar(&benchUseGetAsOf, "use-get-as-of", false, "use GetAsOf(math.MaxUint64) instead of GetLatest() for lookups")
 	cmdCommitmentBenchLookup.Flags().BoolVar(&benchViaTrieCtx, "via-trie-ctx", false, "measure logical branch fetch via TrieContext.Branch(prefix) instead of raw domain lookup (exposes de-embed read amplification)")
+	cmdCommitmentBenchLookup.Flags().BoolVar(&benchViaBranchMeta, "via-branch-meta", false, "measure bitmap+hash fetch via TrieContext.BranchMeta(prefix) — models parent-hash recompute (1 read in de-embed)")
+	cmdCommitmentBenchLookup.Flags().BoolVar(&benchViaBranchChild, "via-branch-meta-child", false, "measure BranchMeta + one BranchChild lookup — models descent into a single nibble (2 reads in de-embed)")
 	commitmentCmd.AddCommand(cmdCommitmentBenchLookup)
 
 	// commitment bench-history-lookup
@@ -628,7 +633,7 @@ func benchLookup(ctx context.Context, logger log.Logger) error {
 		mode      string
 	)
 
-	if benchViaTrieCtx {
+	if benchViaTrieCtx || benchViaBranchMeta || benchViaBranchChild {
 		// In de-embed mode sampled keys are compact(P)||0xFF or compact(P)||nibble.
 		// Strip the trailing byte to get the branch prefix and dedupe so each
 		// logical branch is measured once (vs popcount+1 times).
@@ -652,19 +657,70 @@ func benchLookup(ctx context.Context, logger log.Logger) error {
 
 		trieCtx := commitmentdb.NewTrieContextRo(commitmentReader, stepSize)
 		durations = make([]time.Duration, len(prefixes))
-		mode = "TrieContext.Branch (logical branch fetch)"
-		logger.Info("Benchmarking via TrieContext.Branch", "prefixes", len(prefixes), "deEmbed", commitment.DeEmbedCommitment)
+		rng := rand.New(rand.NewSource(benchSeed))
+
+		switch {
+		case benchViaBranchChild:
+			mode = "TrieContext.BranchMeta + BranchChild (descent sim)"
+		case benchViaBranchMeta:
+			mode = "TrieContext.BranchMeta (parent-hash recompute)"
+		default:
+			mode = "TrieContext.Branch (logical branch fetch)"
+		}
+		logger.Info("Benchmarking via TrieContext", "mode", mode, "prefixes", len(prefixes), "deEmbed", commitment.DeEmbedCommitment)
 
 		startTime := time.Now()
 		for i, prefix := range prefixes {
 			lookupStart := time.Now()
-			val, _, err := trieCtx.Branch(prefix)
-			durations[i] = time.Since(lookupStart)
-			if err != nil {
-				logger.Warn("Branch fetch failed", "prefix", fmt.Sprintf("%x", prefix), "error", err)
-				continue
+			var sz int
+			switch {
+			case benchViaBranchChild:
+				tMap, aMap, _, _, _, err := trieCtx.BranchMeta(prefix)
+				if err != nil {
+					durations[i] = time.Since(lookupStart)
+					logger.Warn("BranchMeta failed", "prefix", fmt.Sprintf("%x", prefix), "error", err)
+					continue
+				}
+				bitmap := tMap & aMap
+				if bitmap != 0 {
+					popcount := bits.OnesCount16(bitmap)
+					targetIdx := rng.Intn(popcount)
+					var nibble byte
+					for bs, seen := bitmap, 0; bs != 0; {
+						b := bs & -bs
+						if seen == targetIdx {
+							nibble = byte(bits.TrailingZeros16(b))
+							break
+						}
+						bs ^= b
+						seen++
+					}
+					child, _, err := trieCtx.BranchChild(prefix, nibble)
+					if err != nil {
+						durations[i] = time.Since(lookupStart)
+						logger.Warn("BranchChild failed", "prefix", fmt.Sprintf("%x", prefix), "nibble", nibble, "error", err)
+						continue
+					}
+					sz = len(child)
+				}
+			case benchViaBranchMeta:
+				_, _, _, _, _, err := trieCtx.BranchMeta(prefix)
+				if err != nil {
+					durations[i] = time.Since(lookupStart)
+					logger.Warn("BranchMeta failed", "prefix", fmt.Sprintf("%x", prefix), "error", err)
+					continue
+				}
+			default:
+				val, _, err := trieCtx.Branch(prefix)
+				if err != nil {
+					durations[i] = time.Since(lookupStart)
+					logger.Warn("Branch fetch failed", "prefix", fmt.Sprintf("%x", prefix), "error", err)
+					continue
+				}
+				sz = len(val)
 			}
-			totalSize += int64(len(val))
+			durations[i] = time.Since(lookupStart)
+			totalSize += int64(sz)
 
 			if (i+1)%10000 == 0 {
 				elapsed := time.Since(startTime)

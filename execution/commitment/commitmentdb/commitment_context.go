@@ -822,6 +822,79 @@ func (sdc *TrieContext) branchDeEmbedded(pref []byte) ([]byte, kv.Step, error) {
 	return data, step, nil
 }
 
+// BranchMeta returns just the bitmaps and the packed 32-byte hash vector for a
+// branch at pref, without loading any child fragments. In de-embed mode this
+// is a single domain lookup. In embedded mode it falls back to Branch() and
+// splits the blob; callers get the same bitmap/hash view at a higher cost.
+// Returns (_, _, _, _, 0, nil) when the branch is absent.
+func (sdc *TrieContext) BranchMeta(pref []byte) (touchMap, afterMap, hashMap uint16, hashes [16][]byte, step kv.Step, err error) {
+	if commitment.DeEmbedCommitment && !bytes.Equal(pref, KeyCommitmentState) {
+		var keyBuf [64]byte
+		metaKey := commitment.DeEmbedMetaKey(pref, keyBuf[:0])
+		metaVal, s, rerr := sdc.readDomain(kv.CommitmentDomain, metaKey)
+		if rerr != nil {
+			err = fmt.Errorf("read de-embed meta at %x: %w", pref, rerr)
+			return
+		}
+		if len(metaVal) == 0 {
+			return
+		}
+		touchMap, afterMap, hashMap, hashes, err = commitment.ParseDeEmbedMetaValue(metaVal)
+		if err != nil {
+			err = fmt.Errorf("parse de-embed meta at %x: %w", pref, err)
+			return
+		}
+		step = s
+		return
+	}
+	data, s, rerr := sdc.readDomain(kv.CommitmentDomain, pref)
+	if rerr != nil {
+		err = rerr
+		return
+	}
+	if len(data) < 4 {
+		step = s
+		return
+	}
+	var cells [16][]byte
+	touchMap, afterMap, hashMap, cells, hashes, err = commitment.SplitBranchDataIntoChildren(data)
+	if err != nil {
+		err = fmt.Errorf("split embedded branch at %x: %w", pref, err)
+		return
+	}
+	_ = cells
+	step = s
+	return
+}
+
+// BranchChild returns a single child cell fragment (in the de-embed on-disk
+// layout: fieldHash bit cleared, hash field dropped) for the given nibble. In
+// de-embed mode this is a single domain lookup of compact(P)||[nibble]. In
+// embedded mode it falls back to Branch() and returns the split cell fragment.
+// Returns (nil, 0, nil) when the child is absent.
+func (sdc *TrieContext) BranchChild(pref []byte, nibble byte) ([]byte, kv.Step, error) {
+	if nibble > 0x0F {
+		return nil, 0, fmt.Errorf("BranchChild: invalid nibble %d", nibble)
+	}
+	if commitment.DeEmbedCommitment && !bytes.Equal(pref, KeyCommitmentState) {
+		var keyBuf [64]byte
+		childKey := commitment.DeEmbedChildKey(pref, nibble, keyBuf[:0])
+		return sdc.readDomain(kv.CommitmentDomain, childKey)
+	}
+	data, step, err := sdc.readDomain(kv.CommitmentDomain, pref)
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(data) < 4 {
+		return nil, step, nil
+	}
+	_, _, _, cells, _, err := commitment.SplitBranchDataIntoChildren(data)
+	if err != nil {
+		return nil, 0, fmt.Errorf("split embedded branch at %x: %w", pref, err)
+	}
+	return cells[nibble], step, nil
+}
+
 // putBranchDeEmbedded splits the incoming merged branch blob into per-child
 // domain writes. The input `data` is the already-merged (via BranchMerger)
 // embedded representation produced by the trie; when `prevData` is the
