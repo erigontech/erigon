@@ -807,8 +807,12 @@ func (d *Downloader) DownloadSnapshots(ctx context.Context, items []preverifiedS
 	}
 
 	// After downloads complete, regenerate chain.toml with all available torrents.
-	if pubErr := d.PublishLocalChainToml(); pubErr != nil {
-		d.logger.Warn("[Downloader] failed to publish chain.toml after download", "err", pubErr)
+	// Only republish when P2P manifest mode is opt-in (matches the gate in backend.go);
+	// manifestReady is non-nil iff EnableP2PManifest was called by the backend.
+	if d.manifestReady != nil {
+		if pubErr := d.PublishLocalChainToml(); pubErr != nil {
+			d.logger.Warn("[Downloader] failed to publish chain.toml after download", "err", pubErr)
+		}
 	}
 	return
 }
