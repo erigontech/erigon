@@ -1172,7 +1172,7 @@ func TestHexPatriciaHashedLoadStateIfNeededReturnsCounters(t *testing.T) {
 		Build()
 	require.NoError(t, ms.applyPlainUpdates(plainKeys, updates))
 
-	hph := NewHexPatriciaHashed(length.Addr, ms)
+	hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
 
 	t.Run("account", func(t *testing.T) {
 		var accountCell cell
