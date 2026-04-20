@@ -169,7 +169,25 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		roTx.Rollback()
 		return err
 	}
-	doms.SetInMemHistoryReads(false)
+	// inMemHistoryReads MUST be true. This is a correctness requirement,
+	// not the perf/RPC tradeoff described in main PR #20245.
+	//
+	// Any task that gets classified HistoryExecution=true by exec3.go's
+	// `inputTxNum <= lastFrozenTxNum` check reads through HistoryReaderV3,
+	// which uses GetAsOf. When sd.mem's inMemHistoryReads is off, sd.GetAsOf
+	// errors and the chain falls through to ttx.GetAsOf — which hits only
+	// the persisted history index and cannot see intra-block writes.
+	//
+	// Parallel is masked by the versionMap intra-block cushion; serial has
+	// no such cushion and fails immediately when any tx reads state written
+	// by an earlier tx in the same block (e.g. serial halted at block
+	// 24839112 tx 7 with "insufficient funds" when the deposit from an
+	// earlier tx in the same block was invisible).
+	//
+	// Hardcoded true so a later merge/cherry-pick doesn't silently re-
+	// introduce the env knob: that knob is a footgun framed as a perf
+	// toggle by someone who didn't trace the read paths that depend on it.
+	doms.SetInMemHistoryReads(true)
 
 	var finishStageBeforeSync uint64
 	if hook != nil {
@@ -295,7 +313,10 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		if err != nil {
 			return err
 		}
-		doms.SetInMemHistoryReads(false)
+		// inMemHistoryReads MUST be true — correctness requirement, not a
+		// perf toggle. See the detailed comment at the first SetInMemHistoryReads
+		// call above (ProcessFrozenBlocks entry).
+		doms.SetInMemHistoryReads(true)
 		if err := doms.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
 			return fmt.Errorf("ProcessFrozenBlocks: reinit overlay: %w", err)
 		}
