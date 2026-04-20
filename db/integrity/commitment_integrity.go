@@ -1008,7 +1008,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 			if err != nil {
 				return fmt.Errorf("CheckCommitmentHistAtBlkRange: build index window=[%d,%d): %w", windowStart, windowEnd, err)
 			}
-			// Each goroutine needs its own Sampler
+			// Each goroutine needs its own Sampler — the RNG is not goroutine-safe.
 			sampler := sc.NewWindowSampler(windowStart)
 			for blockNum := range sampler.BlockNums(windowStart, windowEnd) {
 				if err := checkCommitmentHistAtBlkWithIdx(wCtx, tx, sd, br, blockNum, idx, log.LvlTrace, logger); err != nil {
