@@ -26,16 +26,17 @@ import (
 
 // Transport abstracts the file exchange layer between peers. Production nodes
 // use an anacrolix/torrent client; harness scenarios use SimulatedTransport
-// (in-process byte copy through a shared Coordinator).
+// (in-process event exchange through a shared Coordinator).
 //
 // A Transport subscribes to DownloadRequested on its bus and responds by
 // publishing DownloadComplete (success) or DownloadFailed (e.g. unknown
 // info-hash).
 type Transport interface {
-	// Seed registers a file so remote peers sharing the Coordinator can fetch
-	// it. Real-transport implementations register a torrent; SimulatedTransport
-	// adds the file bytes to the shared registry.
-	Seed(name string, data []byte, infoHash [20]byte) error
+	// Seed registers a file so remote peers sharing the Coordinator can
+	// fetch it. Only metadata is passed (name + declared size) — the
+	// simulated transport does not actually move bytes, so no payload is
+	// needed. Real-transport implementations register a torrent.
+	Seed(name string, size int64, infoHash [20]byte) error
 
 	// Close stops any seeding + cancels in-flight downloads.
 	Close() error
@@ -51,7 +52,7 @@ type Coordinator struct {
 
 type fileData struct {
 	name string
-	data []byte
+	size int64
 }
 
 // NewCoordinator returns an empty coordinator shared by a set of simulated
@@ -60,10 +61,10 @@ func NewCoordinator() *Coordinator {
 	return &Coordinator{files: make(map[[20]byte]fileData)}
 }
 
-func (c *Coordinator) register(infoHash [20]byte, name string, data []byte) {
+func (c *Coordinator) register(infoHash [20]byte, name string, size int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.files[infoHash] = fileData{name: name, data: data}
+	c.files[infoHash] = fileData{name: name, size: size}
 }
 
 func (c *Coordinator) lookup(infoHash [20]byte) (fileData, bool) {
@@ -100,8 +101,8 @@ func NewSimulatedTransport(bus event.EventBus, coord *Coordinator) (*SimulatedTr
 	return t, nil
 }
 
-func (t *SimulatedTransport) Seed(name string, data []byte, infoHash [20]byte) error {
-	t.coord.register(infoHash, name, data)
+func (t *SimulatedTransport) Seed(name string, size int64, infoHash [20]byte) error {
+	t.coord.register(infoHash, name, size)
 	return nil
 }
 
@@ -141,6 +142,6 @@ func (t *SimulatedTransport) onDownloadRequested(req flow.DownloadRequested) {
 		FileName:  req.FileName,
 		InfoHash:  req.InfoHash,
 		LocalPath: "/sim/" + fd.name,
-		Size:      int64(len(fd.data)),
+		Size:      fd.size,
 	})
 }

@@ -67,7 +67,7 @@ func (p *FakePeer) assignAndRegister(e *snapshot.FileEntry) {
 	if e.TorrentHash == ([20]byte{}) {
 		e.TorrentHash = deterministicHash(p.ID, e.Name)
 	}
-	p.coord.register(e.TorrentHash, e.Name, syntheticBytes(e.Size))
+	p.coord.register(e.TorrentHash, e.Name, e.Size)
 }
 
 // AnnounceTo publishes a PeerManifestReceived on the target node's bus,
@@ -90,18 +90,4 @@ func (p *FakePeer) AnnounceTo(target *Node) {
 // map — no cryptographic properties are relied upon.
 func deterministicHash(peerID, fileName string) [20]byte {
 	return sha1.Sum([]byte(fmt.Sprintf("%s:%s", peerID, fileName))) //nolint:gosec
-}
-
-// syntheticBytes fills a slice of the requested size with a recognisable A–Z
-// pattern so a hex-dump during debugging visibly distinguishes fixture bytes
-// from uninitialised or zeroed memory.
-func syntheticBytes(size int64) []byte {
-	if size <= 0 {
-		return nil
-	}
-	b := make([]byte, size)
-	for i := range b {
-		b[i] = byte('A' + (i % 26))
-	}
-	return b
 }
