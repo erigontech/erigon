@@ -14,6 +14,7 @@ import (
 )
 
 func TestStepRange(t *testing.T) {
+	t.Parallel()
 	stepSize := uint64(4)
 
 	t.Run("simple range", func(t *testing.T) {
@@ -53,6 +54,7 @@ func TestStepRange(t *testing.T) {
 }
 
 func TestFileItemWithMissedAccessor(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 
 	// filesItem

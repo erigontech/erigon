@@ -149,7 +149,11 @@ func (t *testingImpl) BuildBlockV1(
 	// time of BuildBlockV1 is bounded to one slot (e.g. 12 s), not two.
 	// Each step acquires the lock independently, matching production behaviour
 	// where ForkChoiceUpdated and GetPayload are separate RPC calls.
+	// If the caller already set a context deadline shorter than one slot, honour it.
 	deadline := time.Now().Add(time.Duration(t.server.config.SecondsPerSlot()) * time.Second)
+	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
+		deadline = ctxDeadline
+	}
 
 	// Step 1: AssembleBlock (locked scope).
 	var payloadID uint64
