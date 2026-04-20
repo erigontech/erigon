@@ -604,7 +604,7 @@ func (x *ExecutionPayload) GetSlotNumber() uint64 {
 
 type BlockAccessListStorageChange struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Index         uint32                 `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
+	Index         uint64                 `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
 	Value         *H256                  `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -640,7 +640,7 @@ func (*BlockAccessListStorageChange) Descriptor() ([]byte, []int) {
 	return file_types_types_proto_rawDescGZIP(), []int{8}
 }
 
-func (x *BlockAccessListStorageChange) GetIndex() uint32 {
+func (x *BlockAccessListStorageChange) GetIndex() uint64 {
 	if x != nil {
 		return x.Index
 	}
@@ -708,7 +708,7 @@ func (x *BlockAccessListSlotChanges) GetChanges() []*BlockAccessListStorageChang
 
 type BlockAccessListBalanceChange struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Index         uint32                 `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
+	Index         uint64                 `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
 	Value         *H256                  `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -744,7 +744,7 @@ func (*BlockAccessListBalanceChange) Descriptor() ([]byte, []int) {
 	return file_types_types_proto_rawDescGZIP(), []int{10}
 }
 
-func (x *BlockAccessListBalanceChange) GetIndex() uint32 {
+func (x *BlockAccessListBalanceChange) GetIndex() uint64 {
 	if x != nil {
 		return x.Index
 	}
@@ -760,7 +760,7 @@ func (x *BlockAccessListBalanceChange) GetValue() *H256 {
 
 type BlockAccessListNonceChange struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Index         uint32                 `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
+	Index         uint64                 `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
 	Value         uint64                 `protobuf:"varint,2,opt,name=value,proto3" json:"value,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -796,7 +796,7 @@ func (*BlockAccessListNonceChange) Descriptor() ([]byte, []int) {
 	return file_types_types_proto_rawDescGZIP(), []int{11}
 }
 
-func (x *BlockAccessListNonceChange) GetIndex() uint32 {
+func (x *BlockAccessListNonceChange) GetIndex() uint64 {
 	if x != nil {
 		return x.Index
 	}
@@ -812,7 +812,7 @@ func (x *BlockAccessListNonceChange) GetValue() uint64 {
 
 type BlockAccessListCodeChange struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Index         uint32                 `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
+	Index         uint64                 `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
 	Data          []byte                 `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -848,7 +848,7 @@ func (*BlockAccessListCodeChange) Descriptor() ([]byte, []int) {
 	return file_types_types_proto_rawDescGZIP(), []int{12}
 }
 
-func (x *BlockAccessListCodeChange) GetIndex() uint32 {
+func (x *BlockAccessListCodeChange) GetIndex() uint64 {
 	if x != nil {
 		return x.Index
 	}

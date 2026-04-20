@@ -66,7 +66,7 @@ message Header {
 
 // Block Access List structures (EIP-7928)
 message BlockAccessListStorageChange {
-  uint32 index = 1;
+  uint64 index = 1;
   types.H256 value = 2;
 }
 
@@ -76,17 +76,17 @@ message BlockAccessListSlotChanges {
 }
 
 message BlockAccessListBalanceChange {
-  uint32 index = 1;
+  uint64 index = 1;
   types.H256 value = 2;
 }
 
 message BlockAccessListNonceChange {
-  uint32 index = 1;
+  uint64 index = 1;
   uint64 value = 2;
 }
 
 message BlockAccessListCodeChange {
-  uint32 index = 1;
+  uint64 index = 1;
   bytes data = 2;
 }
 
