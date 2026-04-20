@@ -109,10 +109,10 @@ func TransactionsListRoot(transactions [][]byte) ([32]byte, error) {
 }
 
 func ListObjectSSZRoot[T ssz.HashableSSZ](list []T, limit uint64) ([32]byte, error) {
-	globalHasher.mu2.Lock()
-	defer globalHasher.mu2.Unlock()
-	// due to go generics we cannot make a method for global hasher.
-	subLeaves := globalHasher.getBufferForSSZList(len(list))
+	// Allocate a local buffer instead of using the global hasher buffer.
+	// The global mutex (mu2) caused reentrant deadlocks when element.HashSSZ()
+	// itself called ListObjectSSZRoot (e.g., PartialDataColumnSidecar → Header list → PartialDataColumnHeader → KzgCommitments list).
+	subLeaves := make([][32]byte, len(list))
 	for i, element := range list {
 		subLeaf, err := element.HashSSZ()
 		if err != nil {

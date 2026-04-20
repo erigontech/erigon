@@ -125,7 +125,7 @@ func New(cfg *clparams.BeaconChainConfig) *BeaconState {
 		historicalSummaries:          solid.NewStaticListSSZ[*cltypes.HistoricalSummary](int(cfg.HistoricalRootsLimit), 64),
 		currentSyncCommittee:         solid.NewSyncCommitteeWithSize(int(cfg.SyncCommitteeSize)),
 		nextSyncCommittee:            solid.NewSyncCommitteeWithSize(int(cfg.SyncCommitteeSize)),
-		latestExecutionPayloadHeader: &cltypes.Eth1Header{},
+		latestExecutionPayloadHeader: cltypes.NewEth1Header(clparams.Phase0Version),
 		inactivityScores:             solid.NewUint64ListSSZ(int(cfg.ValidatorRegistryLimit)),
 		balances:                     solid.NewUint64ListSSZ(int(cfg.ValidatorRegistryLimit)),
 		previousEpochParticipation:   solid.NewParticipationBitList(0, int(cfg.ValidatorRegistryLimit)),

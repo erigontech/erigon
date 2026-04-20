@@ -80,7 +80,7 @@ func TestEth1Header(t *testing.T) {
 	// Test EncodeSSZ and DecodeSSZ
 	encodedData, err := header.EncodeSSZ(nil)
 	require.NoError(t, err)
-	decodedHeader := &Eth1Header{}
+	decodedHeader := NewEth1Header(0)
 	err = decodedHeader.DecodeSSZ(encodedData, int(version))
 	require.NoError(t, err)
 	assert.Equal(t, header, decodedHeader)
