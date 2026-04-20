@@ -18,8 +18,7 @@ func CheckStateProgress(ctx context.Context, db kv.TemporalRoDB, blockReader ser
 
 	stateFileProgress := tx.Debug().DomainFiles(kv.CommitmentDomain).EndRootNum()
 
-	txnumReader := blockReader.TxnumReader()
-	blockFileProgress, err := txnumReader.Max(ctx, tx, blockReader.FrozenBlocks())
+	blockFileProgress, err := MaxCollatableTxNum(ctx, tx, blockReader)
 	if err != nil {
 		return err
 	}
@@ -29,4 +28,14 @@ func CheckStateProgress(ctx context.Context, db kv.TemporalRoDB, blockReader ser
 	}
 
 	return nil
+}
+
+// MaxCollatableTxNum returns the upper bound txNum that state collation may
+// target without running ahead of block snapshot files. Callers of
+// Aggregator.BuildFiles / BuildFilesInBackground must cap their target txNum
+// by this value — otherwise state files may advance past block files, an
+// unrecoverable state that requires manual `erigon seg rm-state --latest` to
+// release. See CheckStateProgress for the detection counterpart.
+func MaxCollatableTxNum(ctx context.Context, tx kv.Tx, blockReader services.FullBlockReader) (uint64, error) {
+	return blockReader.TxnumReader().Max(ctx, tx, blockReader.FrozenBlocks())
 }

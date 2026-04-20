@@ -2962,6 +2962,13 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		if err != nil {
 			return err
 		}
+		// Cap at block-snapshot progress so state files cannot advance past
+		// block files (unrecoverable without rm-state --latest).
+		maxCollatable, err := integrity.MaxCollatableTxNum(ctx, tx, blockReader)
+		if err != nil {
+			return err
+		}
+		lastTxNum = min(lastTxNum, maxCollatable)
 		return nil
 	}); err != nil {
 		return err
