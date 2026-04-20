@@ -124,7 +124,11 @@ func (p *PersistentBlockCollector) AddBlock(block *cltypes.BeaconBlock) error {
 	})
 }
 
-// Flush loads all collected blocks into the execution engine and clears the database
+// Flush loads all collected blocks into the execution engine and clears the database.
+// Keys are block-number + SSZ root, so a single execution block can appear under
+// multiple keys when caplin sees it via competing beacon variants; those duplicates
+// are ignored. If a real gap is detected, rows past the gap are kept so the next
+// Flush can retry once the missing range is re-downloaded.
 func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -138,6 +142,7 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 
 	minInsertableBlockNumber := p.engine.FrozenBlocks(ctx)
 	var prevBlockNum uint64
+	gapDetected := false
 	if err := p.db.View(ctx, func(tx kv.Tx) error {
 		cursor, err := tx.Cursor(kv.Headers)
 		if err != nil {
@@ -162,10 +167,15 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 				continue
 			}
 
+			// Same execution block seen via another beacon variant: keep the first pick.
+			if prevBlockNum > 0 && block.NumberU64() == prevBlockNum {
+				continue
+			}
 			if prevBlockNum > 0 && block.NumberU64() != prevBlockNum+1 {
 				p.logger.Warn("[BlockCollector] Gap detected in collected blocks, will re-download missing range",
 					"lastBlock", prevBlockNum, "nextBlock", block.NumberU64(),
 					"gap", block.NumberU64()-prevBlockNum-1)
+				gapDetected = true
 				break
 			}
 			prevBlockNum = block.NumberU64()
@@ -190,7 +200,38 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 		}
 	}
 
-	// Close, remove, and reopen the database to clear it
+	if gapDetected {
+		// Prune only rows the caller is done with; rows past the gap stay so a
+		// future re-download of the missing range unblocks the next Flush.
+		cutoff := minInsertableBlockNumber
+		if prevBlockNum+1 > cutoff {
+			cutoff = prevBlockNum + 1
+		}
+		if err := p.db.Update(ctx, func(tx kv.RwTx) error {
+			cursor, err := tx.RwCursor(kv.Headers)
+			if err != nil {
+				return err
+			}
+			defer cursor.Close()
+			for k, _, err := cursor.First(); k != nil; k, _, err = cursor.Next() {
+				if err != nil {
+					return err
+				}
+				if len(k) < 8 || binary.BigEndian.Uint64(k[:8]) >= cutoff {
+					break
+				}
+				if err := cursor.DeleteCurrent(); err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			p.logger.Warn("[BlockCollector] Failed to prune consumed blocks", "err", err)
+		}
+		return nil
+	}
+
+	// No gap: drop the whole DB — cheaper than walking keys.
 	p.db.Close()
 
 	if err := dir.RemoveAll(p.persistDir); err != nil {
