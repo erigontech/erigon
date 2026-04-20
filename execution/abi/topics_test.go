@@ -75,6 +75,12 @@ func TestMakeTopics(t *testing.T) {
 			false,
 		},
 		{
+			"support negative *big.Int boundary in topics",
+			args{[][]any{{big.NewInt(-2)}}},
+			[][]common.Hash{{common.HexToHash("0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe")}},
+			false,
+		},
+		{
 			"support boolean types in topics",
 			args{[][]any{
 				{true},
@@ -142,6 +148,19 @@ func TestMakeTopics(t *testing.T) {
 				t.Errorf("makeTopics() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestMakeTopicsOversizedStaticBytesReturnsErrorNoPanic(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("MakeTopics() panicked for oversized static bytes: %v", r)
+		}
+	}()
+
+	_, err := MakeTopics([]any{[33]byte{1}})
+	if err == nil {
+		t.Fatal("MakeTopics() expected error for oversized static bytes")
 	}
 }
 
