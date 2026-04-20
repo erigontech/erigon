@@ -51,6 +51,16 @@ type Orchestrator struct {
 	peerMu    sync.RWMutex
 	peerFiles map[string]*snapshot.FileEntry
 	pending   map[string]*snapshot.FileEntry
+
+	// Handlers are materialised once so Subscribe and Unsubscribe see the
+	// same reflect.Value.Pointer(). Re-referencing a method value
+	// (o.onXxx) allocates a fresh closure whose pointer the event bus
+	// cannot reliably match against the one it recorded at Subscribe time.
+	hBlocksFlushed        func(BlocksFlushed)
+	hPeerManifestReceived func(PeerManifestReceived)
+	hDownloadComplete     func(DownloadComplete)
+	hDownloadFailed       func(DownloadFailed)
+	hPeerDeparted         func(PeerDeparted)
 }
 
 // New creates a flow orchestrator bound to the given bus and inventory.
@@ -59,13 +69,19 @@ func New(bus event.EventBus, inv *snapshot.Inventory, logger log.Logger) *Orches
 	if logger == nil {
 		logger = log.Root()
 	}
-	return &Orchestrator{
+	o := &Orchestrator{
 		bus:       bus,
 		inventory: inv,
 		log:       logger,
 		peerFiles: make(map[string]*snapshot.FileEntry),
 		pending:   make(map[string]*snapshot.FileEntry),
 	}
+	o.hBlocksFlushed = o.onBlocksFlushed
+	o.hPeerManifestReceived = o.onPeerManifestReceived
+	o.hDownloadComplete = o.onDownloadComplete
+	o.hDownloadFailed = o.onDownloadFailed
+	o.hPeerDeparted = o.onPeerDeparted
+	return o
 }
 
 // Start performs the startup sequence:
@@ -80,11 +96,11 @@ func (o *Orchestrator) Start(_ context.Context) error {
 		return fmt.Errorf("flow orchestrator already started")
 	}
 	subs := []interface{}{
-		o.onBlocksFlushed,
-		o.onPeerManifestReceived,
-		o.onDownloadComplete,
-		o.onDownloadFailed,
-		o.onPeerDeparted,
+		o.hBlocksFlushed,
+		o.hPeerManifestReceived,
+		o.hDownloadComplete,
+		o.hDownloadFailed,
+		o.hPeerDeparted,
 	}
 	for i, sub := range subs {
 		if err := o.bus.Subscribe(sub); err != nil {
@@ -119,11 +135,11 @@ func (o *Orchestrator) Close() error {
 	// with our teardown.
 	o.bus.WaitAsync()
 	for _, sub := range []interface{}{
-		o.onBlocksFlushed,
-		o.onPeerManifestReceived,
-		o.onDownloadComplete,
-		o.onDownloadFailed,
-		o.onPeerDeparted,
+		o.hBlocksFlushed,
+		o.hPeerManifestReceived,
+		o.hDownloadComplete,
+		o.hDownloadFailed,
+		o.hPeerDeparted,
 	} {
 		if err := o.bus.Unsubscribe(sub); err != nil {
 			o.log.Warn("[flow] unsubscribe", "err", err)
@@ -275,6 +291,23 @@ func (o *Orchestrator) coverageForRoleLocked(domain snapshot.Domain, role string
 		}
 	}
 	return ranges.Normalize()
+}
+
+// PendingCount returns the number of in-flight downloads the orchestrator is
+// currently tracking. Exposed for soak-style tests that need to observe
+// whether the state bounded correctly across long scenarios.
+func (o *Orchestrator) PendingCount() int {
+	o.peerMu.RLock()
+	defer o.peerMu.RUnlock()
+	return len(o.pending)
+}
+
+// PeerFilesCount returns the number of distinct peer-advertised file names
+// cached. Same observability role as PendingCount.
+func (o *Orchestrator) PeerFilesCount() int {
+	o.peerMu.RLock()
+	defer o.peerMu.RUnlock()
+	return len(o.peerFiles)
 }
 
 // onPeerDeparted removes the departing peer's file-shape entries from the

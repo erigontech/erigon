@@ -86,16 +86,37 @@ type SimulatedTransport struct {
 	coord *Coordinator
 	bus   event.EventBus
 
+	// handler is the method value stored once at construction so Subscribe
+	// and Unsubscribe see the same reflect.Value.Pointer(). Re-referencing
+	// the method (t.onDownloadRequested) allocates a fresh closure whose
+	// pointer the event bus cannot reliably match against the one it
+	// recorded at Subscribe time.
+	handler func(flow.DownloadRequested)
+
 	mu      sync.Mutex
 	closed  bool
+	failFn  func(name string) bool
 	pending sync.WaitGroup
+}
+
+// SetFailFn installs a predicate that decides whether to fail a given
+// DownloadRequested by file name. When the predicate returns true, the
+// transport publishes DownloadFailed instead of DownloadComplete. Used by
+// soak tests to inject intermittent failures.
+//
+// Passing nil removes the predicate.
+func (t *SimulatedTransport) SetFailFn(fn func(name string) bool) {
+	t.mu.Lock()
+	t.failFn = fn
+	t.mu.Unlock()
 }
 
 // NewSimulatedTransport wires a transport to the given bus and coordinator
 // and subscribes it to DownloadRequested.
 func NewSimulatedTransport(bus event.EventBus, coord *Coordinator) (*SimulatedTransport, error) {
 	t := &SimulatedTransport{coord: coord, bus: bus}
-	if err := bus.Subscribe(t.onDownloadRequested); err != nil {
+	t.handler = t.onDownloadRequested
+	if err := bus.Subscribe(t.handler); err != nil {
 		return nil, fmt.Errorf("subscribe DownloadRequested: %w", err)
 	}
 	return t, nil
@@ -110,7 +131,7 @@ func (t *SimulatedTransport) Seed(name string, size int64, infoHash [20]byte) er
 // start, marks the transport closed, then waits for any in-flight simulated
 // transfers to drain.
 func (t *SimulatedTransport) Close() error {
-	err := t.bus.Unsubscribe(t.onDownloadRequested)
+	err := t.bus.Unsubscribe(t.handler)
 
 	t.mu.Lock()
 	t.closed = true
@@ -126,9 +147,18 @@ func (t *SimulatedTransport) onDownloadRequested(req flow.DownloadRequested) {
 		t.mu.Unlock()
 		return
 	}
+	failFn := t.failFn
 	t.pending.Add(1)
 	t.mu.Unlock()
 	defer t.pending.Done()
+
+	if failFn != nil && failFn(req.FileName) {
+		t.bus.Publish(flow.DownloadFailed{
+			FileName: req.FileName,
+			Reason:   "fault injection",
+		})
+		return
+	}
 
 	fd, ok := t.coord.lookup(req.InfoHash)
 	if !ok {
