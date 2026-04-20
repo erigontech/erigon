@@ -175,9 +175,14 @@ func (t *TorrentTransport) Close() error {
 	return unsubErr
 }
 
-// onDownloadRequested adds the info-hash to the client, injects every known
-// peer address from req.FromPeers, waits for metainfo + pieces, and
-// publishes DownloadComplete or DownloadFailed.
+// onDownloadRequested runs its transfer asynchronously so the orchestrator
+// can issue multiple DownloadRequested events concurrently without the
+// publisher's goroutine blocking on real TCP transfer time. Each request
+// gets its own goroutine; Close waits on pending to drain.
+//
+// SimulatedTransport keeps its handler synchronous because its completion
+// is immediate — the goroutine hop would add no value and would surprise
+// tests that rely on WaitAsync synchronising everything.
 func (t *TorrentTransport) onDownloadRequested(req flow.DownloadRequested) {
 	t.mu.Lock()
 	if t.closed {
@@ -193,8 +198,15 @@ func (t *TorrentTransport) onDownloadRequested(req flow.DownloadRequested) {
 	ctx := t.ctx
 	t.pending.Add(1)
 	t.mu.Unlock()
-	defer t.pending.Done()
 
+	go func() {
+		defer t.pending.Done()
+		t.runDownload(ctx, req, addrs)
+	}()
+}
+
+// runDownload performs a single transfer and publishes the outcome.
+func (t *TorrentTransport) runDownload(ctx context.Context, req flow.DownloadRequested, addrs []ipPortAddr) {
 	tor, _ := t.client.AddTorrentInfoHash(req.InfoHash)
 	for _, a := range addrs {
 		tor.AddPeers([]torrent.PeerInfo{{Addr: a, Trusted: true}})
