@@ -34,11 +34,11 @@ import (
 	"github.com/erigontech/erigon/common/cmp"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
+	"github.com/erigontech/erigon/db/services"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -142,9 +142,7 @@ func ExecV3(ctx context.Context,
 	}
 
 	if execStage.SyncMode() == stages.ModeApplyingBlocks {
-		// Cap state collation at block-snapshot progress so state files cannot
-		// advance past block files (unrecoverable without rm-state --latest).
-		maxCollatable, err := integrity.MaxCollatableTxNum(ctx, applyTx, cfg.blockReader)
+		maxCollatable, err := services.MaxCollatableTxNum(ctx, applyTx, cfg.blockReader)
 		if err != nil {
 			return err
 		}
