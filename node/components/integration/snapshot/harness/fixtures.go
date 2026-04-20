@@ -114,3 +114,90 @@ func HoodiBaselineMixedTrust() *Fixture {
 	}
 	return f
 }
+
+// HoodiMerged500 represents a fully-merged archive covering steps [0, 500):
+// every domain has a single merged file per role. Used as "peer with the
+// merge completed" in merge-divergence scenarios.
+func HoodiMerged500() *Fixture {
+	return mergedFixture("hoodi_merged_500", 0, 500)
+}
+
+// HoodiUnmerged500 covers the same range [0, 500) as HoodiMerged500 but as
+// five unmerged 100-step files per domain role (.kv and .kvi). Other domains
+// stay merged to keep the fixture focused — only the accounts domain is
+// unmerged, since that is what the three-node divergence test exercises.
+func HoodiUnmerged500() *Fixture {
+	f := mergedFixture("hoodi_unmerged_500", 0, 500)
+	f.Domains[snapshot.DomainAccounts] = unmergedSlices(snapshot.DomainAccounts, 0, 500, 100)
+	return f
+}
+
+// mergedFixture builds a fixture where every domain is a single merged file
+// per role over [from, to).
+func mergedFixture(name string, from, to uint64) *Fixture {
+	mkDomain := func(d snapshot.Domain, ext string) *snapshot.FileEntry {
+		return &snapshot.FileEntry{
+			Domain:   d,
+			FromStep: from,
+			ToStep:   to,
+			Name:     fmt.Sprintf("v1.0-%s.%d-%d.%s", d, from, to, ext),
+			Size:     1024,
+			Local:    true,
+			Trust:    snapshot.TrustVerified,
+		}
+	}
+	mkBlock := func(kind string, blkFrom, blkTo uint64) *snapshot.FileEntry {
+		return &snapshot.FileEntry{
+			FromStep: blkFrom,
+			ToStep:   blkTo,
+			Name:     fmt.Sprintf("v1.0-%06d-%06d-%s.seg", blkFrom, blkTo, kind),
+			Size:     2048,
+			Local:    true,
+			Trust:    snapshot.TrustVerified,
+		}
+	}
+	return &Fixture{
+		Name: name,
+		Domains: map[snapshot.Domain][]*snapshot.FileEntry{
+			snapshot.DomainAccounts: {
+				mkDomain(snapshot.DomainAccounts, "kv"),
+				mkDomain(snapshot.DomainAccounts, "kvi"),
+			},
+			snapshot.DomainStorage: {
+				mkDomain(snapshot.DomainStorage, "kv"),
+				mkDomain(snapshot.DomainStorage, "kvi"),
+			},
+			snapshot.DomainCode:       {mkDomain(snapshot.DomainCode, "kv")},
+			snapshot.DomainCommitment: {mkDomain(snapshot.DomainCommitment, "kv")},
+		},
+		Blocks: []*snapshot.FileEntry{
+			mkBlock("headers", 0, 500),
+			mkBlock("bodies", 0, 500),
+		},
+	}
+}
+
+// unmergedSlices builds a series of small .kv / .kvi entries covering
+// [from, to) in `step`-sized slices, approximating a domain whose merge
+// cycle has not yet collapsed them.
+func unmergedSlices(d snapshot.Domain, from, to, step uint64) []*snapshot.FileEntry {
+	entries := make([]*snapshot.FileEntry, 0, 2*((to-from)/step))
+	for lo := from; lo < to; lo += step {
+		hi := lo + step
+		if hi > to {
+			hi = to
+		}
+		for _, ext := range []string{"kv", "kvi"} {
+			entries = append(entries, &snapshot.FileEntry{
+				Domain:   d,
+				FromStep: lo,
+				ToStep:   hi,
+				Name:     fmt.Sprintf("v1.0-%s.%d-%d.%s", d, lo, hi, ext),
+				Size:     256,
+				Local:    true,
+				Trust:    snapshot.TrustVerified,
+			})
+		}
+	}
+	return entries
+}
