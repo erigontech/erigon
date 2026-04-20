@@ -801,6 +801,10 @@ type DenebSignedBeaconBlock struct {
 	SignedBlock *SignedBeaconBlock        `json:"signed_block"`
 	KZGProofs   *solid.ListSSZ[*KZGProof] `json:"kzg_proofs"`
 	Blobs       *solid.ListSSZ[*Blob]     `json:"blobs"`
+	// SignedExecutionPayloadEnvelope is the validator-signed envelope for GLOAS self-build blocks.
+	// Present only on POST /eth/v2/beacon/blocks when the validator client submits a signed
+	// envelope alongside the signed block. [New in Gloas:EIP7732]
+	SignedExecutionPayloadEnvelope *SignedExecutionPayloadEnvelope `json:"signed_execution_payload_envelope,omitempty"`
 }
 
 func NewDenebSignedBeaconBlock(beaconCfg *clparams.BeaconChainConfig, version clparams.StateVersion) *DenebSignedBeaconBlock {
