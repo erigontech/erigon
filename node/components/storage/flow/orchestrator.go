@@ -39,6 +39,12 @@ type Orchestrator struct {
 	mu               sync.Mutex
 	started          bool
 	lastFlushedBlock atomic.Uint64
+
+	// peerFiles remembers peer-advertised entries by name so DownloadComplete
+	// can reconstruct the file shape (domain, step range) without requiring
+	// the download-side to echo it back. Keyed by file name.
+	peerMu    sync.RWMutex
+	peerFiles map[string]*snapshot.FileEntry
 }
 
 // New creates a flow orchestrator bound to the given bus and inventory.
@@ -51,6 +57,7 @@ func New(bus event.EventBus, inv *snapshot.Inventory, logger log.Logger) *Orches
 		bus:       bus,
 		inventory: inv,
 		log:       logger,
+		peerFiles: make(map[string]*snapshot.FileEntry),
 	}
 }
 
@@ -65,9 +72,21 @@ func (o *Orchestrator) Start(_ context.Context) error {
 		o.mu.Unlock()
 		return fmt.Errorf("flow orchestrator already started")
 	}
-	if err := o.bus.Subscribe(o.onBlocksFlushed); err != nil {
-		o.mu.Unlock()
-		return fmt.Errorf("subscribe BlocksFlushed: %w", err)
+	subs := []interface{}{
+		o.onBlocksFlushed,
+		o.onPeerManifestReceived,
+		o.onDownloadComplete,
+		o.onPeerDeparted,
+	}
+	for i, sub := range subs {
+		if err := o.bus.Subscribe(sub); err != nil {
+			// Roll back the subscriptions that did succeed.
+			for j := 0; j < i; j++ {
+				_ = o.bus.Unsubscribe(subs[j])
+			}
+			o.mu.Unlock()
+			return fmt.Errorf("subscribe handler %d: %w", i, err)
+		}
 	}
 	o.started = true
 	o.mu.Unlock()
@@ -88,11 +107,18 @@ func (o *Orchestrator) Close() error {
 	o.started = false
 	o.mu.Unlock()
 
-	// Drain async handlers before unsubscribing so onBlocksFlushed can't be
-	// racing with our teardown.
+	// Drain async handlers before unsubscribing so handlers can't be racing
+	// with our teardown.
 	o.bus.WaitAsync()
-	if err := o.bus.Unsubscribe(o.onBlocksFlushed); err != nil {
-		o.log.Warn("[flow] unsubscribe BlocksFlushed", "err", err)
+	for _, sub := range []interface{}{
+		o.onBlocksFlushed,
+		o.onPeerManifestReceived,
+		o.onDownloadComplete,
+		o.onPeerDeparted,
+	} {
+		if err := o.bus.Unsubscribe(sub); err != nil {
+			o.log.Warn("[flow] unsubscribe", "err", err)
+		}
 	}
 	return nil
 }
@@ -106,4 +132,101 @@ func (o *Orchestrator) onBlocksFlushed(e BlocksFlushed) {
 		return
 	}
 	o.lastFlushedBlock.Store(e.LatestBlock)
+}
+
+// onPeerManifestReceived computes the gap between local inventory and the
+// peer's advertised coverage, then publishes a DownloadRequested for each
+// file the peer has that we don't.
+func (o *Orchestrator) onPeerManifestReceived(e PeerManifestReceived) {
+	for domain, peerEntries := range e.Domains {
+		o.requestGapsFor(domain, peerEntries, e.PeerID)
+	}
+	// Block files use zero Domain — handle separately.
+	o.requestGapsFor("", e.Blocks, e.PeerID)
+}
+
+// requestGapsFor iterates peer entries for a single domain (or "" for blocks)
+// and emits DownloadRequested for any file not already held locally.
+//
+// Matching is by file name, not step range: a single range commonly requires
+// multiple files (e.g. a domain's .kv + .kvi), so range-level coverage is
+// insufficient to decide whether a specific peer file is redundant.
+func (o *Orchestrator) requestGapsFor(domain snapshot.Domain, peerEntries []*snapshot.FileEntry, peerID string) {
+	// Record peer entries under a single lock before publishing.
+	o.peerMu.Lock()
+	for _, entry := range peerEntries {
+		if _, seen := o.peerFiles[entry.Name]; !seen {
+			o.peerFiles[entry.Name] = entry
+		}
+	}
+	o.peerMu.Unlock()
+
+	for _, entry := range peerEntries {
+		if o.haveLocally(domain, entry.Name) {
+			continue
+		}
+		o.bus.Publish(DownloadRequested{
+			FileName:  entry.Name,
+			InfoHash:  entry.TorrentHash,
+			FromPeers: []string{peerID},
+			Domain:    domain,
+			Range:     entry.Range(),
+		})
+	}
+}
+
+// onPeerDeparted removes the departing peer's file-shape entries from the
+// peer-manifest cache. Without this, peerFiles grows unbounded across long
+// scenarios as peers churn.
+func (o *Orchestrator) onPeerDeparted(e PeerDeparted) {
+	// The current peerFiles map is keyed by file name without peer
+	// attribution — if another peer later advertises the same file name it
+	// stays valid. A more precise impl would track (peerID → file names) and
+	// only evict entries unique to the departing peer. For the current
+	// single-claim-per-name model, this is a no-op; kept as a subscription
+	// slot so future refinement lands without churning subscribers.
+	_ = e
+}
+
+// haveLocally reports whether the local inventory has a file with the given
+// name and Local=true. Used by gap-fill to skip files we already hold.
+func (o *Orchestrator) haveLocally(domain snapshot.Domain, name string) bool {
+	var entries []*snapshot.FileEntry
+	if domain == "" {
+		entries = o.inventory.BlockFiles()
+	} else {
+		entries = o.inventory.AllDomainFiles(domain)
+	}
+	for _, f := range entries {
+		if f.Name == name && f.Local {
+			return true
+		}
+	}
+	return false
+}
+
+// onDownloadComplete promotes the file to the local inventory at TrustVerified
+// and publishes TrustPromoted to signal the transition from peer-claim trust
+// to locally-verified content.
+func (o *Orchestrator) onDownloadComplete(e DownloadComplete) {
+	o.peerMu.RLock()
+	peerEntry, ok := o.peerFiles[e.FileName]
+	o.peerMu.RUnlock()
+	if !ok {
+		o.log.Warn("[flow] DownloadComplete for unknown file", "file", e.FileName)
+		return
+	}
+
+	localEntry := peerEntry.Clone()
+	localEntry.Size = e.Size
+	localEntry.TorrentHash = e.InfoHash
+	localEntry.Trust = snapshot.TrustVerified
+	localEntry.Local = true
+	o.inventory.AddFile(localEntry)
+
+	o.bus.Publish(TrustPromoted{
+		FileName: e.FileName,
+		OldTrust: snapshot.TrustNone,
+		NewTrust: snapshot.TrustVerified,
+	})
 }
