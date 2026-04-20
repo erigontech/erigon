@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
+	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/cl/transition/machine"
@@ -346,9 +347,40 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	} else {
 		resp = newBeaconResponse(block.ToExecution())
 	}
-	return resp.WithVersion(block.Version()).With("execution_payload_blinded", block.IsBlinded()).
+	resp = resp.WithVersion(block.Version()).With("execution_payload_blinded", block.IsBlinded()).
 		With("execution_payload_value", strconv.FormatUint(block.GetExecutionValue().Uint64(), 10)).
-		With("consensus_block_value", strconv.FormatUint(consensusValue, 10)), nil
+		With("consensus_block_value", strconv.FormatUint(consensusValue, 10))
+
+	// [New in Gloas:EIP7732] For self-build blocks, compute the unsigned ExecutionPayloadEnvelope
+	// and include it in the response so the validator client can sign it.
+	// The beacon block root can only be computed here (after the state root is set).
+	if block.Version() >= clparams.GloasVersion && !block.IsBlinded() {
+		if bid := block.BeaconBody.GetSignedExecutionPayloadBid(); bid != nil && bid.Message != nil &&
+			bid.Message.BuilderIndex == clparams.BuilderIndexSelfBuild {
+			// Compute the beacon block root from the finalized unsigned block.
+			denebBlock := block.ToExecution()
+			beaconBlockRoot, err := denebBlock.Block.HashSSZ()
+			if err != nil {
+				log.Warn("Failed to compute beacon block root for self-build envelope", "err", err)
+			} else {
+				// Look up the cached execution payload for this block hash.
+				cached, ok := a.selfBuildPayloads.Get(bid.Message.BlockHash)
+				if ok {
+					envelope := &cltypes.ExecutionPayloadEnvelope{
+						Payload:           cached.Payload,
+						ExecutionRequests: cached.ExecutionRequests,
+						BuilderIndex:      clparams.BuilderIndexSelfBuild,
+						BeaconBlockRoot:   beaconBlockRoot,
+					}
+					resp = resp.With("execution_payload_envelope", envelope)
+					log.Info("BlockProduction: included unsigned execution payload envelope in response",
+						"slot", targetSlot, "beaconBlockRoot", beaconBlockRoot, "blockHash", bid.Message.BlockHash)
+				}
+			}
+		}
+	}
+
+	return resp, nil
 }
 
 func (a *ApiHandler) produceBlock(
@@ -449,7 +481,28 @@ func (a *ApiHandler) produceBlock(
 		// 1. builder is not enabled
 		// 2. failed to get builder payload
 		// 3. GLOAS: MEV-Boost blinded blocks not supported; builders use ePBS gossip bids
-		// TODO(GLOAS): select highest bid from epbsPool instead of always self-building
+
+		// GLOAS: check epbsPool for an external builder bid that beats the local value.
+		if stateVersion.AfterOrEqual(clparams.GloasVersion) && a.epbsPool != nil {
+			selfBid := beaconBody.SignedExecutionPayloadBid.Message
+			bidKey := pool.HighestBidKey{
+				Slot:            targetSlot,
+				ParentBlockHash: selfBid.ParentBlockHash,
+				ParentBlockRoot: selfBid.ParentBlockRoot,
+			}
+			if externalBid, found := a.epbsPool.HighestBids.Get(bidKey); found &&
+				externalBid != nil && externalBid.Message != nil &&
+				externalBid.Message.Value > localExecValue {
+				log.Info("GLOAS: selected external builder bid over self-build",
+					"slot", targetSlot,
+					"builderIndex", externalBid.Message.BuilderIndex,
+					"bidValue", externalBid.Message.Value,
+					"localValue", localExecValue)
+				beaconBody.SignedExecutionPayloadBid = externalBid
+				localExecValue = externalBid.Message.Value
+			}
+		}
+
 		block.BeaconBody = beaconBody
 		block.Blobs = blobs
 		block.KzgProofs = kzgProofs
@@ -650,6 +703,8 @@ func (a *ApiHandler) produceBeaconBody(
 
 	var executionPayload *cltypes.Eth1Block
 	var executionValue uint64
+	var executionRequestsRoot common.Hash
+	var gloasExecRequests *cltypes.ExecutionRequests // [New in Gloas:EIP7732] saved for envelope construction
 
 	blockRoot := baseBlockRoot
 	// Process the execution data in a thread.
@@ -870,6 +925,36 @@ func (a *ApiHandler) produceBeaconBody(
 					}
 				}
 
+				// GLOAS: decode execution requests from the bundle to compute the bid's ExecutionRequestsRoot.
+				if stateVersion.AfterOrEqual(clparams.GloasVersion) && requestsBundle != nil && requestsBundle.GetRequests() != nil {
+					execReqs := cltypes.NewExecutionRequests(a.beaconChainCfg)
+					for _, request := range requestsBundle.GetRequests() {
+						rType := request[0]
+						requestData := request[1:]
+						switch rType {
+						case types.DepositRequestType:
+							if err := execReqs.Deposits.DecodeSSZ(requestData, int(stateVersion)); err != nil {
+								log.Error("BlockProduction: GLOAS failed to decode deposit request for root", "err", err)
+							}
+						case types.WithdrawalRequestType:
+							if err := execReqs.Withdrawals.DecodeSSZ(requestData, int(stateVersion)); err != nil {
+								log.Error("BlockProduction: GLOAS failed to decode withdrawal request for root", "err", err)
+							}
+						case types.ConsolidationRequestType:
+							if err := execReqs.Consolidations.DecodeSSZ(requestData, int(stateVersion)); err != nil {
+								log.Error("BlockProduction: GLOAS failed to decode consolidation request for root", "err", err)
+							}
+						}
+					}
+					root, err := execReqs.HashSSZ()
+					if err != nil {
+						log.Error("BlockProduction: GLOAS failed to compute ExecutionRequestsRoot", "err", err)
+					} else {
+						executionRequestsRoot = common.Hash(root)
+					}
+					gloasExecRequests = execReqs
+				}
+
 				// Setup executionPayload
 				executionPayload = cltypes.NewEth1Block(beaconBody.Version, a.beaconChainCfg)
 				executionPayload.BlockHash = payload.BlockHash
@@ -948,10 +1033,6 @@ func (a *ApiHandler) produceBeaconBody(
 
 	if stateVersion.AfterOrEqual(clparams.GloasVersion) {
 		// GLOAS self-build: populate the bid with payload metadata.
-		// TODO(GLOAS): the executionPayload built here is discarded — it must be
-		// packaged into a SignedExecutionPayloadEnvelope and broadcast on the
-		// execution_payload gossip topic for the block to reach FULL status.
-		// This requires the proposer's BLS signature (beacon-APIs V4, PR #580).
 		bid := beaconBody.SignedExecutionPayloadBid.Message
 		bid.Slot = targetSlot
 		bid.ParentBlockRoot = baseBlockRoot
@@ -963,8 +1044,20 @@ func (a *ApiHandler) produceBeaconBody(
 		bid.BuilderIndex = clparams.BuilderIndexSelfBuild
 		bid.Value = 0
 		bid.ExecutionPayment = 0
+		bid.ExecutionRequestsRoot = executionRequestsRoot
 		// BlobKzgCommitments are already populated during bundle processing above
 		beaconBody.SignedExecutionPayloadBid.Signature = common.Bytes96(bls.InfiniteSignature)
+
+		// Cache the execution payload and requests so broadcastBlock can construct
+		// the SignedExecutionPayloadEnvelope when the validator publishes the signed
+		// block. The envelope needs the beacon block root (only available after the
+		// block is fully assembled), so we defer envelope construction to broadcast time.
+		// [New in Gloas:EIP7732]
+		a.selfBuildPayloads.Add(executionPayload.BlockHash, &selfBuildPayload{
+			Payload:           executionPayload,
+			ExecutionRequests: gloasExecRequests,
+		})
+
 		return beaconBody, executionValue, nil
 	}
 
@@ -1122,7 +1215,7 @@ func (a *ApiHandler) postBeaconBlocks(w http.ResponseWriter, r *http.Request, ap
 	}
 	_ = validation
 
-	if err := a.broadcastBlock(ctx, block.SignedBlock); err != nil {
+	if err := a.broadcastBlock(ctx, block.SignedBlock, block.SignedExecutionPayloadEnvelope); err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
 	return newBeaconResponse(nil), nil
@@ -1327,7 +1420,7 @@ func (a *ApiHandler) parseRequestBeaconBlock(
 	return nil, errors.New("invalid content type")
 }
 
-func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeaconBlock) error {
+func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeaconBlock, signedEnvelope ...*cltypes.SignedExecutionPayloadEnvelope) error {
 	blkSSZ, err := blk.EncodeSSZ(nil)
 	if err != nil {
 		return err
@@ -1491,6 +1584,107 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 			}
 		}
 	}
+
+	// [New in Gloas:EIP7732] For self-built blocks, construct and broadcast the
+	// SignedExecutionPayloadEnvelope so the block can transition from PENDING to FULL.
+	// If the validator client provided a signed envelope, use it directly (real BLS signature).
+	// Otherwise fall back to constructing one from the cache (legacy/fallback path).
+	if blk.Version() >= clparams.GloasVersion {
+		var validatorSignedEnvelope *cltypes.SignedExecutionPayloadEnvelope
+		if len(signedEnvelope) > 0 && signedEnvelope[0] != nil {
+			validatorSignedEnvelope = signedEnvelope[0]
+		}
+		if err := a.broadcastSelfBuildEnvelope(ctx, blk, validatorSignedEnvelope); err != nil {
+			a.logger.Error("Failed to broadcast self-build execution payload envelope", "err", err)
+		}
+	}
+
+	return nil
+}
+
+// broadcastSelfBuildEnvelope constructs and broadcasts a SignedExecutionPayloadEnvelope
+// for a self-built GLOAS block. If the validator client provided a signed envelope
+// (via the block publish request), it is used directly with the real BLS signature.
+// Otherwise, the envelope is reconstructed from the cache as a fallback.
+//
+// The function:
+//  1. Broadcasts the envelope on the execution_payload gossip topic
+//  2. Processes the envelope through forkchoice (OnExecutionPayload) so the local
+//     node transitions the block from PENDING to FULL status
+//
+// [New in Gloas:EIP7732]
+func (a *ApiHandler) broadcastSelfBuildEnvelope(ctx context.Context, blk *cltypes.SignedBeaconBlock, validatorSignedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
+	bid := blk.Block.Body.GetSignedExecutionPayloadBid()
+	if bid == nil || bid.Message == nil {
+		return nil // no bid in block, nothing to do
+	}
+	if bid.Message.BuilderIndex != clparams.BuilderIndexSelfBuild {
+		return nil // not a self-build block; builder will broadcast the envelope
+	}
+
+	// Compute the beacon block root
+	blockRoot, err := blk.Block.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("failed to compute block root: %w", err)
+	}
+
+	var signedEnvelope *cltypes.SignedExecutionPayloadEnvelope
+
+	if validatorSignedEnvelope != nil && validatorSignedEnvelope.Message != nil {
+		// Use the validator-signed envelope directly (real BLS signature).
+		signedEnvelope = validatorSignedEnvelope
+		log.Info("BlockPublishing: using validator-signed execution payload envelope",
+			"slot", blk.Block.Slot, "blockRoot", blockRoot)
+	} else {
+		// Fallback: reconstruct from cache. This path uses InfiniteSignature and will
+		// fail BLS verification on other nodes — it exists only as a backward-compat
+		// safety net during the transition period.
+		cached, ok := a.selfBuildPayloads.Get(bid.Message.BlockHash)
+		if !ok {
+			return fmt.Errorf("self-build payload not found in cache for block hash %v", bid.Message.BlockHash)
+		}
+
+		log.Warn("BlockPublishing: no validator-signed envelope provided, falling back to InfiniteSignature (will fail BLS verification on peers)",
+			"slot", blk.Block.Slot, "blockRoot", blockRoot, "blockHash", bid.Message.BlockHash)
+
+		envelope := &cltypes.ExecutionPayloadEnvelope{
+			Payload:           cached.Payload,
+			ExecutionRequests: cached.ExecutionRequests,
+			BuilderIndex:      clparams.BuilderIndexSelfBuild,
+			BeaconBlockRoot:   blockRoot,
+		}
+		signedEnvelope = &cltypes.SignedExecutionPayloadEnvelope{
+			Message:   envelope,
+			Signature: common.Bytes96(bls.InfiniteSignature),
+		}
+	}
+
+	// Remove from cache after use (regardless of path taken)
+	a.selfBuildPayloads.Remove(bid.Message.BlockHash)
+
+	// Process through forkchoice so the local node marks the block as FULL.
+	// validatePayload=true so the EL receives NewPayload for the self-built block.
+	// Note: this typically returns an error because OnBlock (running in a background
+	// goroutine) has not finished yet — the forkchoice store queues the envelope in
+	// pendingEnvelopes and OnBlock will pick it up. Debug-level to avoid noisy logs.
+	if err := a.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, false, true); err != nil {
+		a.logger.Debug("Self-build envelope queued for pending processing", "err", err, "blockRoot", blockRoot)
+	}
+
+	// Broadcast the envelope on the execution_payload gossip topic
+	encodedSSZ, err := signedEnvelope.EncodeSSZ(nil)
+	if err != nil {
+		return fmt.Errorf("failed to encode self-build envelope: %w", err)
+	}
+	if err := a.gossipManager.Publish(ctx, gossip.TopicNameExecutionPayload, encodedSSZ); err != nil {
+		a.logger.Error("Failed to publish self-build execution payload envelope", "err", err, "blockRoot", blockRoot)
+	} else {
+		log.Info("BlockPublishing: broadcast self-build execution payload envelope",
+			"slot", blk.Block.Slot,
+			"blockRoot", blockRoot,
+			"blockHash", bid.Message.BlockHash)
+	}
+
 	return nil
 }
 
