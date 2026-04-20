@@ -24,22 +24,59 @@ import (
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 var PrunedError = errors.New("old data not available due to pruning")
 
-// HistoryReaderV3 Implements StateReader and StateWriter
+// HistoryReaderV3 Implements StateReader and StateWriter.
+//
+// When sd is non-nil, GetAsOf reads check the in-batch memory state
+// (sd.GetAsOf) first and only fall back to the backing temporal tx
+// (ttx.GetAsOf, which hits DB + snapshot files) if the key isn't in
+// the batch. This mirrors the pattern in committer.go:asOfStateReader
+// and prevents in-batch writes (e.g. a prior block's writes within the
+// same batch commit window) from being invisible to historic-mode
+// reads executed later in the same batch.
+//
+// RPC and other consumers that want to read strictly persisted history
+// pass sd=nil via the legacy NewHistoryReaderV3 constructor.
 type HistoryReaderV3 struct {
 	txNum       uint64
 	trace       bool
 	tracePrefix string
 	ttx         kv.TemporalTx
+	sd          *execctx.SharedDomains
 	composite   []byte
 }
 
 func NewHistoryReaderV3(ttx kv.TemporalTx, txNum uint64) *HistoryReaderV3 {
 	return &HistoryReaderV3{composite: make([]byte, 20+32), ttx: ttx, txNum: txNum}
+}
+
+// NewHistoryReaderV3WithSharedDomains is the in-batch variant used by the
+// parallel executor. Reads chain sd.GetAsOf (in-memory batch state) then
+// fall back to ttx.GetAsOf so a tx can see prior-tx writes from the same
+// batch that have not yet been flushed to the history index.
+func NewHistoryReaderV3WithSharedDomains(ttx kv.TemporalTx, sd *execctx.SharedDomains, txNum uint64) *HistoryReaderV3 {
+	return &HistoryReaderV3{composite: make([]byte, 20+32), ttx: ttx, sd: sd, txNum: txNum}
+}
+
+// getAsOf chains sd.GetAsOf (in-batch memory) before ttx.GetAsOf (DB
+// history + snapshot files). Callers requesting only persisted history
+// construct the reader with sd=nil, skipping the first tier. If sd.mem
+// has inMemHistoryReads disabled (e.g. the serial executor path), sd.GetAsOf
+// returns an error — we silently fall through to ttx so the same reader
+// type is usable in both modes.
+func (hr *HistoryReaderV3) getAsOf(domain kv.Domain, key []byte) (enc []byte, ok bool, err error) {
+	if hr.sd != nil {
+		enc, ok, err = hr.sd.GetAsOf(domain, key, hr.txNum)
+		if err == nil && ok {
+			return enc, true, nil
+		}
+	}
+	return hr.ttx.GetAsOf(domain, key, hr.txNum)
 }
 
 func (hr *HistoryReaderV3) String() string {
@@ -80,7 +117,7 @@ func (hr *HistoryReaderV3) DiscardReadList() {}
 
 func (hr *HistoryReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	addressValue := address.Value()
-	enc, ok, err := hr.ttx.GetAsOf(kv.AccountsDomain, addressValue[:], hr.txNum)
+	enc, ok, err := hr.getAsOf(kv.AccountsDomain, addressValue[:])
 	if err != nil || !ok || len(enc) == 0 {
 		if hr.trace {
 			fmt.Printf("%sReadAccountData (hist)[%x] => []\n", hr.tracePrefix, address)
@@ -107,7 +144,7 @@ func (hr *HistoryReaderV3) ReadAccountStorage(address accounts.Address, key acco
 	addressValue := address.Value()
 	keyValue := key.Value()
 	hr.composite = append(append(hr.composite[:0], addressValue[:]...), keyValue[:]...)
-	enc, ok, err := hr.ttx.GetAsOf(kv.StorageDomain, hr.composite, hr.txNum)
+	enc, ok, err := hr.getAsOf(kv.StorageDomain, hr.composite)
 	if hr.trace {
 		fmt.Printf("%sReadAccountStorage (hist)[%x] [%x] => [%x]\n", hr.tracePrefix, address, key, enc)
 	}
@@ -153,7 +190,7 @@ func (hr *HistoryReaderV3) ReadAccountCode(address accounts.Address) ([]byte, er
 	//  must pass key2=Nil here: because Erigon4 does concatinate key1+key2 under the hood
 	//code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
 	addressValue := address.Value()
-	code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, addressValue[:], hr.txNum)
+	code, _, err := hr.getAsOf(kv.CodeDomain, addressValue[:])
 	if hr.trace {
 		lenc, cs := printCode(code)
 		fmt.Printf("%sReadAccountCode (hist)[%x] => [%d:%s]\n", hr.tracePrefix, address, lenc, cs)
@@ -163,13 +200,13 @@ func (hr *HistoryReaderV3) ReadAccountCode(address accounts.Address) ([]byte, er
 
 func (hr *HistoryReaderV3) ReadAccountCodeSize(address accounts.Address) (int, error) {
 	addressValue := address.Value()
-	enc, _, err := hr.ttx.GetAsOf(kv.CodeDomain, addressValue[:], hr.txNum)
+	enc, _, err := hr.getAsOf(kv.CodeDomain, addressValue[:])
 	return len(enc), err
 }
 
 func (hr *HistoryReaderV3) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
 	addressValue := address.Value()
-	enc, ok, err := hr.ttx.GetAsOf(kv.AccountsDomain, addressValue[:], hr.txNum)
+	enc, ok, err := hr.getAsOf(kv.AccountsDomain, addressValue[:])
 	if err != nil || !ok || len(enc) == 0 {
 		if hr.trace {
 			fmt.Printf("%sReadAccountIncarnation (hist)[%x] => [0]\n", hr.tracePrefix, address)

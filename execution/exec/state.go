@@ -440,7 +440,10 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 		// in case if we cancelled execution and commitment happened in the middle of the block, we have to process block
 		// from the beginning until committed txNum and only then disable history mode.
 		// Needed to correctly evaluate spent gas and other things.
-		rw.SetReader(state.NewHistoryReaderV3(rw.chainTx, txTask.Version().TxNum))
+		// Chain sd.mem → chainTx so historic-mode reads see prior-tx writes
+		// from the current batch (same class as the record-vs-field fix in
+		// the coinbase race investigation).
+		rw.SetReader(state.NewHistoryReaderV3WithSharedDomains(rw.chainTx, rw.rs.Domains(), txTask.Version().TxNum))
 	} else if !txTask.IsHistoric() && (rw.stateReader == nil || rw.historyMode) {
 		rw.SetReader(state.NewCachedReaderV3(rw.rs.Domains().AsGetter(rw.chainTx), nil))
 	}

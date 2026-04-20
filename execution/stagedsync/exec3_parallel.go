@@ -2132,7 +2132,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				if stateReader == nil {
 					if txTask.IsHistoric() {
-						stateReader = state.NewHistoryReaderV3(applyTx, txTask.Version().TxNum)
+						// Chain sd.mem → applyTx so historic-mode reads see
+						// prior-tx writes from the current batch that haven't
+						// been flushed to the history index yet.
+						stateReader = state.NewHistoryReaderV3WithSharedDomains(applyTx, pe.rs.Domains(), txTask.Version().TxNum)
 					} else {
 						// Use CachedReaderV3 with readCurrent=true so the
 						// finalize (including system TXs) reads from the
@@ -2342,7 +2345,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			pe.RLock()
 			var reader state.StateReader
 			if finalTask.IsHistoric() {
-				reader = state.NewHistoryReaderV3(applyTx, finalVersion.TxNum)
+				// Chain sd.mem → applyTx so historic-mode reads see prior-tx
+				// writes from the current batch that haven't been flushed to
+				// the history index yet.
+				reader = state.NewHistoryReaderV3WithSharedDomains(applyTx, pe.rs.Domains(), finalVersion.TxNum)
 			} else {
 				reader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsGetter(applyTx), be.blockStateCache)
 			}

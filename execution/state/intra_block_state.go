@@ -361,7 +361,7 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.refund = 0
 	sdb.txIndex = 0
 	sdb.logSize = 0
-	sdb.accessList = newAccessList()
+	sdb.accessList.Reset()
 	sdb.transientStorage = newTransientStorage()
 	sdb.versionMap = nil
 	// Do not clear the maps in place — result.TxIn / result.TxOut may still
