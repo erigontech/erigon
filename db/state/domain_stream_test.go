@@ -147,7 +147,7 @@ func TestDomain_IteratePrefix_PrefersFilesOverDB(t *testing.T) {
 	t.Parallel()
 
 	logger := log.New()
-	ctx := context.Background()
+	ctx := t.Context()
 	require := require.New(t)
 
 	stepSize := uint64(16)

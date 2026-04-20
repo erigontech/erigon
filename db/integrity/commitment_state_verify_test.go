@@ -45,7 +45,7 @@ func TestCheckStateVerify(t *testing.T) {
 	t.Parallel()
 
 	logger := log.New()
-	ctx := context.Background()
+	ctx := t.Context()
 	stepSize := uint64(100)
 
 	dirs := datadir.New(t.TempDir())
@@ -123,7 +123,7 @@ func TestCheckStateVerify_NoopWrite(t *testing.T) {
 	t.Parallel()
 
 	logger := log.New()
-	ctx := context.Background()
+	ctx := t.Context()
 	stepSize := uint64(100)
 
 	dirs := datadir.New(t.TempDir())
@@ -239,7 +239,7 @@ func TestVerifyBranchHashesFromDB(t *testing.T) {
 	t.Parallel()
 
 	logger := log.New()
-	ctx := context.Background()
+	ctx := t.Context()
 	stepSize := uint64(100)
 
 	dirs := datadir.New(t.TempDir())

@@ -50,7 +50,7 @@ func TestTrieReader_IntegrationWithRealData(t *testing.T) {
 	db, agg := testDbAndAggregatorv3(t, stepSize)
 	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer rwTx.Rollback()

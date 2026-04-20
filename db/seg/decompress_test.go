@@ -44,7 +44,7 @@ func prepareLoremDict(t *testing.T) *Decompressor {
 	cfg := DefaultCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func prepareStupidDict(t *testing.T, size int) *Decompressor {
 	cfg := DefaultCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +268,7 @@ func prepareLoremDictUncompressed(t *testing.T) *Decompressor {
 	cfg := DefaultCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	require.NoError(t, err)
 	defer c.Close()
 	for k, w := range loremStrings {
@@ -360,7 +360,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		cfg := DefaultCfg
 		cfg.MinPatternScore = 1
 		cfg.Workers = 2
-		c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+		c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 		require.NoError(t, err)
 		defer c.Close()
 		for k, w := range loremStrings {
@@ -382,7 +382,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		cfg := DefaultCfg
 		cfg.MinPatternScore = 1
 		cfg.Workers = 2
-		c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+		c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 		require.NoError(t, err)
 		defer c.Close()
 		err = c.Compress()
@@ -400,7 +400,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		cfg := DefaultCfg
 		cfg.MinPatternScore = 1
 		cfg.Workers = 2
-		c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+		c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 		require.NoError(t, err)
 		defer c.Close()
 		for k, w := range loremStrings {
@@ -422,7 +422,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		cfg := DefaultCfg
 		cfg.MinPatternScore = 1
 		cfg.Workers = 2
-		c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+		c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 		require.NoError(t, err)
 		defer c.Close()
 		err = c.Compress()
@@ -583,7 +583,7 @@ func prepareRandomDict(t *testing.T) (d *Decompressor, WORDS [N][]byte, WORD_FLA
 	cfg := DefaultCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -639,7 +639,7 @@ func TestMatchCmpCompressedBinaryKeys(t *testing.T) {
 	cfg := DefaultCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	require.NoError(t, err)
 
 	// Generate sorted binary keys (20 bytes, like address hashes)
@@ -731,7 +731,7 @@ func TestMatchCmpUncompressedBinaryKeys(t *testing.T) {
 	cfg := DefaultCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	require.NoError(t, err)
 
 	keys := make([][]byte, 200)
@@ -791,7 +791,7 @@ func TestMatchCmpEmptyAndNil(t *testing.T) {
 	cfg := DefaultCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	require.NoError(t, err)
 
 	// Write: nil, empty, short, empty, nil
@@ -835,7 +835,7 @@ func TestMatchAllEdgeCases(t *testing.T) {
 		cfg := DefaultCfg
 		cfg.MinPatternScore = 1
 		cfg.Workers = 2
-		c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+		c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 		require.NoError(t, err)
 		for _, w := range words {
 			require.NoError(t, c.AddWord(w))
@@ -855,7 +855,7 @@ func TestMatchAllEdgeCases(t *testing.T) {
 		cfg := DefaultCfg
 		cfg.MinPatternScore = 1
 		cfg.Workers = 2
-		c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+		c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 		require.NoError(t, err)
 		for _, w := range words {
 			require.NoError(t, c.AddUncompressedWord(w))

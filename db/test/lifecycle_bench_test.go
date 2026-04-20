@@ -167,7 +167,7 @@ func runLifecycle(b *testing.B, cfg lifecycleConfig) (*lifecycleTimings, kv.Temp
 	stepSize := uint64(cfg.txsPerBlock * cfg.blocksPerStep)
 	db, agg := testDbAndAggregatorBench(b, stepSize)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(b, err)
 	defer rwTx.Rollback()
@@ -334,7 +334,7 @@ func BenchmarkLifecycle_PhaseIsolation(b *testing.B) {
 
 	b.Run("Execute_Only", func(b *testing.B) {
 		db, _ := testDbAndAggregatorBench(b, stepSize)
-		ctx := context.Background()
+		ctx := t.Context()
 		rwTx, err := db.BeginTemporalRw(ctx)
 		require.NoError(b, err)
 		defer rwTx.Rollback()
@@ -367,7 +367,7 @@ func BenchmarkLifecycle_PhaseIsolation(b *testing.B) {
 
 	b.Run("Commit_Only", func(b *testing.B) {
 		db, _ := testDbAndAggregatorBench(b, stepSize)
-		ctx := context.Background()
+		ctx := t.Context()
 		rwTx, err := db.BeginTemporalRw(ctx)
 		require.NoError(b, err)
 		defer rwTx.Rollback()
@@ -404,7 +404,7 @@ func BenchmarkLifecycle_PhaseIsolation(b *testing.B) {
 
 	b.Run("Flush_Only", func(b *testing.B) {
 		db, _ := testDbAndAggregatorBench(b, stepSize)
-		ctx := context.Background()
+		ctx := t.Context()
 
 		rnd := newRnd(42)
 		keyGen := newKeyGenerator(rnd, cfg.hotAccounts, cfg.coldAccounts)
@@ -442,7 +442,7 @@ func BenchmarkLifecycle_PhaseIsolation(b *testing.B) {
 	b.Run("Collate_Only", func(b *testing.B) {
 		// Build up enough data in MDBX, then benchmark only the BuildFiles call.
 		db, agg := testDbAndAggregatorBench(b, stepSize)
-		ctx := context.Background()
+		ctx := t.Context()
 		rwTx, err := db.BeginTemporalRw(ctx)
 		require.NoError(b, err)
 		defer rwTx.Rollback()
@@ -509,7 +509,7 @@ func BenchmarkReadAfterLifecycle(b *testing.B) {
 
 	_, db, _ := runLifecycle(b, cfg)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(b, err)
 	defer rwTx.Rollback()

@@ -39,7 +39,7 @@ func TestNoOverflowPages(t *testing.T) {
 	db := mdbx.New(dbcfg.ChainDB, log.Root()).InMem(t, dirs.Chaindata).PageSize(ethconfig.DefaultChainDBPageSize).MustOpen()
 	t.Cleanup(db.Close)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -224,7 +224,7 @@ func BenchmarkWriteDiffSet(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; b.Loop(); i++ {
-		ctx := context.Background()
+		ctx := t.Context()
 		tx, err := db.BeginRw(ctx)
 		if err != nil {
 			b.Fatal(err)
@@ -252,7 +252,7 @@ func BenchmarkWriteDiffSetLarge(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; b.Loop(); i++ {
-		ctx := context.Background()
+		ctx := t.Context()
 		tx, err := db.BeginRw(ctx)
 		if err != nil {
 			b.Fatal(err)

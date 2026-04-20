@@ -51,16 +51,16 @@ func TestRecSplit2(t *testing.T) {
 	if err = rs.AddKey([]byte("first_key"), 0); err != nil {
 		t.Error(err)
 	}
-	if err = rs.Build(context.Background()); err == nil {
+	if err = rs.Build(t.Context()); err == nil {
 		t.Errorf("test is expected to fail, too few keys added")
 	}
 	if err = rs.AddKey([]byte("second_key"), 0); err != nil {
 		t.Error(err)
 	}
-	if err = rs.Build(context.Background()); err != nil {
+	if err = rs.Build(t.Context()); err != nil {
 		t.Error(err)
 	}
-	if err = rs.Build(context.Background()); err == nil {
+	if err = rs.Build(t.Context()); err == nil {
 		t.Errorf("test is expected to fail, hash gunction was built already")
 	}
 	if err = rs.AddKey([]byte("key_to_fail"), 0); err == nil {
@@ -90,7 +90,7 @@ func TestRecSplitDuplicate(t *testing.T) {
 	if err := rs.AddKey([]byte("first_key"), 0); err != nil {
 		t.Error(err)
 	}
-	if err := rs.Build(context.Background()); err == nil {
+	if err := rs.Build(t.Context()); err == nil {
 		t.Errorf("test is expected to fail, duplicate key")
 	}
 }
@@ -129,7 +129,7 @@ func TestIndexLookup(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if err := rs.Build(context.Background()); err != nil {
+		if err := rs.Build(t.Context()); err != nil {
 			t.Fatal(err)
 		}
 		idx := MustOpen(indexFile)
@@ -369,7 +369,7 @@ func BenchmarkBuild(b *testing.B) {
 			}
 		}
 		b.StartTimer()
-		if err := rs.Build(context.Background()); err != nil {
+		if err := rs.Build(t.Context()); err != nil {
 			b.Fatal(err)
 		}
 		b.StopTimer()
@@ -417,7 +417,7 @@ func BenchmarkAddKeyAndBuild(b *testing.B) {
 						b.Fatal(err)
 					}
 				}
-				if err := rs.Build(context.Background()); err != nil {
+				if err := rs.Build(t.Context()); err != nil {
 					b.Fatal(err)
 				}
 				b.StopTimer()
@@ -446,7 +446,7 @@ func TestTwoLayerIndex(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if err := rs.Build(context.Background()); err != nil {
+		if err := rs.Build(t.Context()); err != nil {
 			t.Fatal(err)
 		}
 
@@ -512,7 +512,7 @@ func TestIndexLookupParallel(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := rs.Build(context.Background()); err != nil {
+			if err := rs.Build(t.Context()); err != nil {
 				t.Fatal(err)
 			}
 			idx := MustOpen(indexFile)
@@ -570,7 +570,7 @@ func TestParallelMatchesSequential(t *testing.T) {
 		for i, k := range keys {
 			require.NoError(t, rs.AddKey(k, uint64(i*17)))
 		}
-		require.NoError(t, rs.Build(context.Background()))
+		require.NoError(t, rs.Build(t.Context()))
 	}
 
 	seqFile := filepath.Join(tmpDir, "seq.idx")
@@ -624,7 +624,7 @@ func BenchmarkBuildParallel(b *testing.B) {
 					}
 				}
 				b.StartTimer()
-				if err := rs.Build(context.Background()); err != nil {
+				if err := rs.Build(t.Context()); err != nil {
 					b.Fatal(err)
 				}
 				b.StopTimer()

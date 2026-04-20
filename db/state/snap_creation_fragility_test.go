@@ -478,7 +478,7 @@ func TestRealFileCreation_DomainDataFile(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create the file using the same compressor used in production
-	comp, err := seg.NewCompressor(context.Background(), t.Name(), dataPath, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+	comp, err := seg.NewCompressor(t.Context(), t.Name(), dataPath, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 	require.NoError(t, err)
 	comp.DisableFsync()
 	require.NoError(t, comp.AddWord([]byte("key1")))
@@ -743,7 +743,7 @@ func TestFindFilesBySearchVersion(t *testing.T) {
 	// Create v1.0 file on disk using a real compressor
 	v10Path, err := schema.DataFile(version.V1_0, from, to)
 	require.NoError(t, err)
-	comp, err := seg.NewCompressor(context.Background(), t.Name(), v10Path, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+	comp, err := seg.NewCompressor(t.Context(), t.Name(), v10Path, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 	require.NoError(t, err)
 	comp.DisableFsync()
 	require.NoError(t, comp.AddWord([]byte("key1")))
@@ -814,7 +814,7 @@ func TestFindFilesBySearchVersion_VersionRangeFiltering(t *testing.T) {
 	makeFile := func(v version.Version) {
 		path, err := schema.DataFile(v, from, to)
 		require.NoError(t, err)
-		comp, err := seg.NewCompressor(context.Background(), t.Name(), path, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+		comp, err := seg.NewCompressor(t.Context(), t.Name(), path, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 		require.NoError(t, err)
 		comp.DisableFsync()
 		require.NoError(t, comp.AddWord([]byte("word")))
@@ -853,7 +853,7 @@ func TestFindFilesByStrictSearchVersion(t *testing.T) {
 	makeFile := func(v version.Version) {
 		path, err := schema.DataFile(v, from, to)
 		require.NoError(t, err)
-		comp, err := seg.NewCompressor(context.Background(), t.Name(), path, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+		comp, err := seg.NewCompressor(t.Context(), t.Name(), path, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 		require.NoError(t, err)
 		comp.DisableFsync()
 		require.NoError(t, comp.AddWord([]byte("word")))
@@ -875,7 +875,7 @@ func TestFindFilesByStrictSearchVersion(t *testing.T) {
 	makeFileFn := func(v version.Version) {
 		path, err := schema2.DataFile(v, from, to)
 		require.NoError(t, err)
-		comp, err := seg.NewCompressor(context.Background(), t.Name(), path, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+		comp, err := seg.NewCompressor(t.Context(), t.Name(), path, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 		require.NoError(t, err)
 		comp.DisableFsync()
 		require.NoError(t, comp.AddWord([]byte("word")))
