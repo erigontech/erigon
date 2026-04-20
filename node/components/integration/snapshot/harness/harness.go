@@ -42,11 +42,13 @@ const perNodePoolSize = 4
 // Node is a single in-process node wired for integration tests.
 //
 // After New, call Start to kick off the orchestrator (which publishes
-// InventoryLoaded). Close stops the orchestrator and drains async handlers.
+// InventoryLoaded). Close stops the orchestrator, closes any attached
+// transport, and drains async handlers.
 type Node struct {
 	Bus       *CapturedBus
 	Inventory *snapshot.Inventory
 	Orch      *flow.Orchestrator
+	Transport Transport // optional; set via AttachTransport
 
 	pool    *testPool
 	workers *workerpool.WorkerPool
@@ -83,14 +85,36 @@ func (n *Node) Start(ctx context.Context) error {
 	return n.Orch.Start(ctx)
 }
 
-// Close stops the orchestrator, waits for any in-flight async work to drain,
-// and releases the worker pool.
+// AttachSimulatedTransport wires a SimulatedTransport into this node's bus
+// against the shared coordinator. The transport is stored on the node so
+// Close handles its lifecycle.
+func (n *Node) AttachSimulatedTransport(coord *Coordinator) error {
+	t, err := NewSimulatedTransport(n.Bus, coord)
+	if err != nil {
+		return err
+	}
+	n.Transport = t
+	return nil
+}
+
+// Close stops the orchestrator, closes any attached transport, waits for
+// in-flight async work to drain, and releases the worker pool.
 func (n *Node) Close() error {
-	err := n.Orch.Close()
+	orchErr := n.Orch.Close()
+
+	var transportErr error
+	if n.Transport != nil {
+		transportErr = n.Transport.Close()
+	}
+
 	n.Bus.WaitAsync()
 	n.pool.wg.Wait()
 	n.workers.StopWait()
-	return err
+
+	if orchErr != nil {
+		return orchErr
+	}
+	return transportErr
 }
 
 // --- internal exec pool ---

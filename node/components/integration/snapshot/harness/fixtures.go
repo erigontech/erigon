@@ -41,6 +41,16 @@ func (f *Fixture) Apply(inv *snapshot.Inventory) {
 	}
 }
 
+// FileCount returns the total number of file entries across all domains and
+// block snapshots.
+func (f *Fixture) FileCount() int {
+	total := len(f.Blocks)
+	for _, entries := range f.Domains {
+		total += len(entries)
+	}
+	return total
+}
+
 // HoodiBaseline returns a procedural fixture approximating a fully-merged
 // Hoodi archive snapshot tree. Each domain has a single merged file covering
 // steps [0, 256), plus a handful of block snapshot files.
