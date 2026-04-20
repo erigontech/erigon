@@ -47,6 +47,13 @@ func (bus *ManagedEventBus) Register(object interface{}, fns ...interface{}) (er
 			}
 		}
 	}
+	// reflect.Value.Pointer() only supports kinds with an addressable pointer.
+	// Reject others with a descriptive error instead of panicking.
+	switch objectVal.Kind() {
+	case reflect.Pointer, reflect.Chan, reflect.Map, reflect.Func, reflect.Slice, reflect.UnsafePointer:
+	default:
+		return fmt.Errorf("ManagedEventBus.Register: object kind %s is not supported; pass a pointer", objectVal.Kind())
+	}
 	objectPtr := objectVal.Pointer()
 
 	bus.registrationLock.Lock()
@@ -62,7 +69,13 @@ func (bus *ManagedEventBus) Register(object interface{}, fns ...interface{}) (er
 }
 
 func (bus *ManagedEventBus) UnregisterAll(object interface{}) error {
-	objectPtr := reflect.ValueOf(object).Pointer()
+	objectVal := reflect.ValueOf(object)
+	switch objectVal.Kind() {
+	case reflect.Pointer, reflect.Chan, reflect.Map, reflect.Func, reflect.Slice, reflect.UnsafePointer:
+	default:
+		return fmt.Errorf("ManagedEventBus.UnregisterAll: object kind %s is not supported; pass a pointer", objectVal.Kind())
+	}
+	objectPtr := objectVal.Pointer()
 
 	bus.registrationLock.Lock()
 	for _, fn := range bus.registrations[objectPtr] {

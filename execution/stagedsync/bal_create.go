@@ -96,20 +96,11 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, ams
 			return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", blockNum, dbBAL.Hash(), headerBALHash)
 		}
 	}
-	// Validate computed BAL against header. The parallel executor's speculative
-	// execution can produce slightly different storage reads than sequential
-	// execution (the block assembler), so when the stored BAL (from the proposer's
-	// sequential block assembler) matches the header, trust it even if the
-	// computed BAL differs. The state root check (commitment verification) still
-	// guarantees execution correctness.
+	// Always validate computed BAL against header. The BalancePath cross-check
+	// in VersionMap.validateRead ensures deterministic parallel execution even
+	// without a stored BAL body (HasBAL=false), so the computed BAL is accurate.
 	if headerBALHash != bal.Hash() {
-		if dbBALBytes != nil {
-			if dbBAL2, decErr := types.DecodeBlockAccessListBytes(dbBALBytes); decErr == nil && dbBAL2 != nil && dbBAL2.Hash() == headerBALHash {
-				log.Debug("BAL: computed BAL differs from stored/header, trusting stored BAL",
-					"block", blockNum, "computedHash", bal.Hash(), "headerHash", headerBALHash)
-				return nil
-			}
-		}
+		dumpDir := ""
 		if dataDir != "" {
 			balDir := filepath.Join(dataDir, "bal")
 			if err := os.MkdirAll(balDir, 0o755); err != nil {
@@ -118,6 +109,8 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, ams
 				computedPath := filepath.Join(balDir, fmt.Sprintf("computed_bal_%d.txt", blockNum))
 				if err := os.WriteFile(computedPath, []byte(bal.DebugString()), 0o644); err != nil {
 					log.Warn("failed to write computed BAL debug file", "path", computedPath, "err", err)
+				} else {
+					dumpDir = balDir
 				}
 				dbBAL2, err := types.DecodeBlockAccessListBytes(dbBALBytes)
 				if err != nil {
@@ -130,7 +123,12 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, ams
 				}
 			}
 		}
-		return fmt.Errorf("%w, block=%d: block access list mismatch: got %s expected %s", rules.ErrInvalidBlock, blockNum, bal.Hash(), headerBALHash)
+		if dumpDir != "" {
+			return fmt.Errorf("%w, block=%d (hash=%s): block access list mismatch: got %s expected %s; debug dumps in %s",
+				rules.ErrInvalidBlock, blockNum, blockHash, bal.Hash(), headerBALHash, dumpDir)
+		}
+		return fmt.Errorf("%w, block=%d (hash=%s): block access list mismatch: got %s expected %s",
+			rules.ErrInvalidBlock, blockNum, blockHash, bal.Hash(), headerBALHash)
 	}
 	return nil
 }
