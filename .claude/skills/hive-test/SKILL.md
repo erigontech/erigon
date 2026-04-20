@@ -55,20 +55,27 @@ The user may specify one or more test suites in any combination:
 
 ## Expected Failures (CI thresholds)
 
+Sources of truth: `.github/workflows/test-hive.yml` (`max-allowed-failures` per matrix
+entry) for engine + rpc-compat suites, `.github/workflows/test-hive-eest.yml`
+(`max-failures`, default 0) for eest shards.
+
 | Suite | Max Allowed Failures |
 |-------|---------------------|
 | exchange-capabilities | 0 |
 | withdrawals | 0 |
-| cancun | 3 |
+| cancun | 3 (2 known Hive/Geth secondary-client failures + 1 known parallelism flake) |
 | api | 0 |
 | auth | 0 |
-| rpc-compat | 23 |
+| rpc-compat | 0 |
 | eest (consume-engine) | 0 |
-| eest-bal | 4 (upstream BPO2ToAmsterdamAtTime15k fork transition) |
 | eest-rlp | 0 |
+| eest-bal (CI shard: `glamsterdam-devnet`) | 1 (`test_block_regular_gas_limit` — `GAS_USED_OVERFLOW` vs `GAS_ALLOWANCE_EXCEEDED` error classification mismatch) |
 
 Note: Failure counts are version-dependent and may change with newer fixtures.
-The eest-bal fork transition failures are a known upstream issue, not Erigon bugs.
+The CI `glamsterdam-devnet` shard runs BAL EIPs (`8024|7708|7778|7843|7928|7954|8037`)
+against `bal@v5.6.1/fixtures_bal.tar.gz` from the `devnets/bal/3` branch, with
+`--experimental.bal` enabled on the erigon side. Reproduce locally by aligning
+the `eest-bal` invocation with these arguments.
 
 ## Procedure
 
