@@ -74,14 +74,16 @@ func TestExecutionPayloadEnvelopesByRangeHandler(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	startSlot := uint64(100)
+	ethClock, beaconCfg := getGloasEthClockAndConfig(t)
+
+	// Use a startSlot near the current slot so blocks fall within the serve range
+	// (the handler enforces minServeEpoch based on the current epoch).
+	startSlot := ethClock.GetCurrentSlot() - 10
 	count := uint64(5)
 
 	// Populate database with blocks (needed for canonical root lookup)
 	expBlocks := populateDatabaseWithBlocks(t, store, tx, startSlot, count)
 	require.NoError(t, tx.Commit())
-
-	ethClock, beaconCfg := getGloasEthClockAndConfig(t)
 
 	// Create mock fork choice with envelopes
 	fcMock := mock_services.NewForkChoiceStorageMock(t)
@@ -232,13 +234,15 @@ func TestExecutionPayloadEnvelopesByRootHandler(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	startSlot := uint64(100)
+	ethClock, beaconCfg := getGloasEthClockAndConfig(t)
+
+	// Use a startSlot near the current slot so blocks fall within the serve range
+	// (the handler enforces minServeEpoch based on the current epoch).
+	startSlot := ethClock.GetCurrentSlot() - 10
 	count := uint64(5)
 
 	expBlocks := populateDatabaseWithBlocks(t, store, tx, startSlot, count)
 	require.NoError(t, tx.Commit())
-
-	ethClock, beaconCfg := getGloasEthClockAndConfig(t)
 
 	fcMock := mock_services.NewForkChoiceStorageMock(t)
 

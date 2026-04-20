@@ -63,6 +63,15 @@ type BlobBundle struct {
 	KzgProofs  []common.Bytes48
 }
 
+// selfBuildPayload holds the execution payload and requests built by the local EL
+// during self-build block production. Cached so broadcastBlock can construct the
+// SignedExecutionPayloadEnvelope when the validator publishes the signed block.
+// [New in Gloas:EIP7732]
+type selfBuildPayload struct {
+	Payload           *cltypes.Eth1Block
+	ExecutionRequests *cltypes.ExecutionRequests
+}
+
 type ApiHandler struct {
 	o   sync.Once
 	mux *chi.Mux
@@ -121,6 +130,12 @@ type ApiHandler struct {
 	epbsPool                   *pool.EpbsPool
 	executionPayloadBidService services.ExecutionPayloadBidService
 	payloadAttestationService  services.PayloadAttestationService
+	// selfBuildPayloads caches the execution payload + requests built by the local
+	// EL during self-build block production, keyed by the execution block hash.
+	// When the validator publishes the signed block, broadcastBlock retrieves the
+	// cached data, wraps it into a SignedExecutionPayloadEnvelope, and broadcasts
+	// it on the execution_payload gossip topic so the block can reach FULL status.
+	selfBuildPayloads *lru.Cache[common.Hash, *selfBuildPayload]
 }
 
 func NewApiHandler(
@@ -172,6 +187,10 @@ func NewApiHandler(
 	if err != nil {
 		panic(err)
 	}
+	selfBuildPayloads, err := lru.New[common.Hash, *selfBuildPayload]("selfBuildPayloads", 4)
+	if err != nil {
+		panic(err)
+	}
 	return &ApiHandler{
 		logger:                             logger,
 		validatorParams:                    validatorParams,
@@ -217,6 +236,7 @@ func NewApiHandler(
 		epbsPool:                         epbsPool,
 		executionPayloadBidService:       executionPayloadBidService,
 		payloadAttestationService:        payloadAttestationService,
+		selfBuildPayloads:                selfBuildPayloads,
 	}
 }
 
