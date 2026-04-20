@@ -1269,6 +1269,8 @@ func (result *execResult) finalizeWithIBS(
 	// Clone() is required because ReadSet is a map type — VersionedReads()
 	// returns a reference, so subsequent versionedRead.Set() calls from
 	// postApplyMessageFunc/FinalizeTx would mutate the "snapshot" in place.
+	// The set is small at this point (a handful of BalancePath entries for
+	// coinbase + burnt contract), so the per-tx clone cost is negligible.
 	feeDistributionReads := ibs.VersionedReads().Clone()
 
 	if engine != nil {
