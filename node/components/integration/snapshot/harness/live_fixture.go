@@ -59,8 +59,14 @@ func LoadLiveFixture(name, snapshotsDir string) (*Fixture, error) {
 			return nil
 		}
 		dir := filepath.Dir(path)
-		parsed, isStateFile, ok := snaptype.ParseFileName(dir, d.Name())
-		if !ok {
+		parsed, isStateFile, _ := snaptype.ParseFileName(dir, d.Name())
+		// ParseFileName returns ok=false for non-state files whose type
+		// string ("headers", "bodies", ...) isn't registered in the current
+		// binary. We still have From/To/TypeString populated in that case
+		// — the parser reached the end of its structural check — so accept
+		// entries as long as TypeString is non-empty. Truly unparseable
+		// names leave TypeString empty.
+		if parsed.TypeString == "" {
 			return nil
 		}
 
