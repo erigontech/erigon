@@ -874,9 +874,9 @@ type validatorIdentityResponse struct {
 		"activation_epoch": "1"
 	}
 	*/
-	Index           uint64         `json:"index"`
+	Index           uint64         `json:"index,string"`
 	Pubkey          common.Bytes48 `json:"pubkey"`
-	ActivationEpoch uint64         `json:"activation_epoch"`
+	ActivationEpoch uint64         `json:"activation_epoch,string"`
 }
 
 func (v *validatorIdentityResponse) EncodeSSZ(buf []byte) ([]byte, error) {
