@@ -137,7 +137,7 @@ func (bal btBlockAccessList) toBAL() types.BlockAccessList {
 			}
 			for _, change := range sc.SlotChanges {
 				slotChanges.Changes = append(slotChanges.Changes, &types.StorageChange{
-					Index: uint64(change.BlockAccessIndex),
+					Index: uint32(change.BlockAccessIndex),
 					Value: *uint256.MustFromBig((*big.Int)(&change.PostValue)),
 				})
 			}
@@ -148,19 +148,19 @@ func (bal btBlockAccessList) toBAL() types.BlockAccessList {
 		}
 		for _, bc := range ac.BalanceChanges {
 			entry.BalanceChanges = append(entry.BalanceChanges, &types.BalanceChange{
-				Index: uint64(bc.BlockAccessIndex),
+				Index: uint32(bc.BlockAccessIndex),
 				Value: *uint256.MustFromBig((*big.Int)(&bc.PostBalance)),
 			})
 		}
 		for _, nc := range ac.NonceChanges {
 			entry.NonceChanges = append(entry.NonceChanges, &types.NonceChange{
-				Index: uint64(nc.BlockAccessIndex),
+				Index: uint32(nc.BlockAccessIndex),
 				Value: uint64(nc.PostNonce),
 			})
 		}
 		for _, cc := range ac.CodeChanges {
 			entry.CodeChanges = append(entry.CodeChanges, &types.CodeChange{
-				Index:    uint64(cc.BlockAccessIndex),
+				Index:    uint32(cc.BlockAccessIndex),
 				Bytecode: cc.NewCode,
 			})
 		}
