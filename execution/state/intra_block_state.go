@@ -1978,9 +1978,6 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 
 		so.newlyCreated = false
 		sdb.stateObjectsDirty[addr] = struct{}{}
-		if so.deleted {
-			delete(sdb.versionedReads, addr)
-		}
 	}
 	// Invalidate journal because reverting across transactions is not allowed.
 	sdb.clearJournalAndRefund()
