@@ -153,7 +153,6 @@ EEST: $EEST_VERSION | BAL: $BAL_TAG (branch: $BAL_BRANCH) | Strict matching: ena
    - Base image: `golang:1.25.7-trixie` (Debian, not Alpine)
    - Build command: `make erigon`
    - Runtime: `debian:13-slim` with `bash curl jq libstdc++6 libgcc-s1`
-   - P2P protocol: `erigon.sh` must include `--p2p.protocol 68,69`
 
    If `clients/erigon/Dockerfile.local` doesn't already exist, write the correct version:
    ```dockerfile
@@ -178,9 +177,7 @@ EEST: $EEST_VERSION | BAL: $BAL_TAG (branch: $BAL_BRANCH) | Strict matching: ena
    ```
 
 6. **P2P protocol configuration:**
-   Do NOT add `--p2p.protocol` flags to erigon.sh. The hive devp2p simulator
-   does not yet support eth/69, so advertising it causes Fork ID test failures
-   (`rlp: expected input list for devp2p.Disconnect`). Let erigon use its default
+   Do NOT add `--p2p.protocol` flags to erigon.sh. Let erigon use its default
    protocol negotiation.
 
 6b. **Parallel execution for Amsterdam (BAL) blocks:**
@@ -315,9 +312,6 @@ docker image prune -f
 ```
 
 ## Troubleshooting
-
-### Fork ID test failures: "rlp: expected input list for devp2p.Disconnect"
-The erigon.sh is missing eth/69 support. Ensure `--p2p.protocol 68,69`.
 
 ### Timeout failures
 Run suites separately instead of combining them. Increase `--sim.timelimit` if needed.
