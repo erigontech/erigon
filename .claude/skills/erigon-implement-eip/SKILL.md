@@ -1,7 +1,7 @@
 ---
 name: erigon-implement-eip
 description: Implement a new EIP for a hardfork under development in Erigon. Use when the user asks to implement, port, or wire up an EIP — covers spec lookup, dep analysis, prior-work check, implementation, lint, tests, and a wrap-up saved to `agentspecs/`.
-argument-hint: "<fork> <eip-number>"
+argument-hint: "<fork> <eip-number> [devnet]"
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, WebFetch, Skill
 ---
 
@@ -57,7 +57,31 @@ The meta EIP for the **current fork under development** usually has these lists:
 - **PFI** — EIPs Proposed For Inclusion
 - **DFI** — EIPs Declined For Inclusion
 
-## Step 4 — Reference the Ethereum Yellow Paper
+## Step 4 — Locate the latest devnet specification
+
+If a devnet name was provided as the third argument (`$2`), fetch its specification from:
+
+```
+https://notes.ethereum.org/@ethpandaops/$2
+```
+
+### What devnets are
+
+Devnets are short-lived test networks where changes for a hardfork under development are validated. Core developers iterate through a series of devnets, progressively adding EIPs and refining their specs, until all hardfork changes are ready for release.
+
+### What the devnet spec contains
+
+A devnet spec typically lists:
+- All EIPs being tested in that devnet
+- What is new or changed compared to the previous devnet (e.g. newly added EIPs, revised EIP behaviour, client-config tweaks)
+
+Use the spec to pinpoint which changes for EIP-$1 are in scope for this devnet and how they differ from prior devnet iterations. This is especially valuable when an earlier version of the EIP was already implemented for a previous devnet — the delta between devnets tells you exactly what needs updating (and ties directly into Step 6 below).
+
+### When this step does not apply
+
+The devnet argument is optional. If none was provided, skip this step — this is expected when an EIP is being implemented before any devnet spec exists for it.
+
+## Step 5 — Reference the Ethereum Yellow Paper
 
 Reference the Ethereum Yellow Paper for deeper information about the Ethereum protocol. It can be found at:
 
@@ -69,21 +93,21 @@ Note however that the current version of it covers up to and including the Shang
 
 The yellow paper provides deep base knowledge that can be used to confirm correctness up to Shanghai, and later for parts that haven't been changed by subsequent hard forks. For parts that have been changed in subsequent hard forks, the corresponding EIP specs from those hardforks — read in chronological order — become the main source of truth.
 
-## Step 5 — Check for previous work on this EIP
+## Step 6 — Check for previous work on this EIP
 
 Check whether any previous work for this EIP has already been done in the codebase. This may happen if we've previously implemented this EIP but against an older / outdated spec for a previous devnet.
 
 In this case, analyse the current code and compare it to the latest specs. Implement the necessary changes to address any discrepancies that you find.
 
-## Step 6 — Implement the change
+## Step 7 — Implement the change
 
-Implement the EIP changes in the code, based on the understanding gathered in Steps 1–5 and the codebase mapping you produced. Touch the packages, files, and existing constructs identified during that mapping.
+Implement the EIP changes in the code, based on the understanding gathered in Steps 1–6 and the codebase mapping you produced. Touch the packages, files, and existing constructs identified during that mapping.
 
 If during implementation you discover something that is unclear or appears to contradict the spec, stop and ask for clarification rather than guessing.
 
 After making code changes, run `make lint` and fix any reported issues. The linter is non-deterministic — run it repeatedly until it is clean.
 
-## Step 7 — Run local tests
+## Step 8 — Run local tests
 
 Run local tests using the `/erigon-test-all` skill. Analyse and fix any failures **in the implementation** (see also "Question the tests — do not silently fix them" below). Keep iterating until all tests are fixed.
 
@@ -136,7 +160,7 @@ For faster iteration when only one fork is relevant, the `cl/spectest/Makefile` 
 
 If `make tests` fails (e.g. fixture download issue), the CI workflow treats it as a soft skip — but locally you should investigate and fix it before relying on the CL test results.
 
-## Step 8 — Wrap up
+## Step 9 — Wrap up
 
 Once implementation is complete and tests are passing, produce a wrap-up summary of all the work done. The summary should cover:
 
