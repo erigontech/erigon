@@ -31,14 +31,13 @@ import (
 // A Transport subscribes to DownloadRequested on its bus and responds by
 // publishing DownloadComplete (success) or DownloadFailed (e.g. unknown
 // info-hash).
+//
+// Seeding-side surface is intentionally absent from this interface. FakePeer
+// registers with the Coordinator directly; real-transport implementations
+// (anacrolix/torrent) will own their own seeding lifecycle as part of their
+// construction, not via a Transport-level method.
 type Transport interface {
-	// Seed registers a file so remote peers sharing the Coordinator can
-	// fetch it. Only metadata is passed (name + declared size) — the
-	// simulated transport does not actually move bytes, so no payload is
-	// needed. Real-transport implementations register a torrent.
-	Seed(name string, size int64, infoHash [20]byte) error
-
-	// Close stops any seeding + cancels in-flight downloads.
+	// Close stops the transport and cancels in-flight downloads.
 	Close() error
 }
 
@@ -122,21 +121,20 @@ func NewSimulatedTransport(bus event.EventBus, coord *Coordinator) (*SimulatedTr
 	return t, nil
 }
 
-func (t *SimulatedTransport) Seed(name string, size int64, infoHash [20]byte) error {
-	t.coord.register(infoHash, name, size)
-	return nil
-}
-
 // Close unsubscribes from the bus first so no new DownloadRequested handlers
 // start, marks the transport closed, then waits for any in-flight simulated
-// transfers to drain.
+// transfers to drain. Idempotent: repeated Close calls return nil without
+// touching the bus.
 func (t *SimulatedTransport) Close() error {
-	err := t.bus.Unsubscribe(t.handler)
-
 	t.mu.Lock()
+	if t.closed {
+		t.mu.Unlock()
+		return nil
+	}
 	t.closed = true
 	t.mu.Unlock()
 
+	err := t.bus.Unsubscribe(t.handler)
 	t.pending.Wait()
 	return err
 }
