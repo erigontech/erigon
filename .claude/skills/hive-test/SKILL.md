@@ -28,6 +28,7 @@ The user may specify one or more test suites in any combination:
 | `rpc-compat` | ethereum/rpc | RPC compatibility |
 | `eest` | ethereum/eels/consume-engine | Execution Spec Tests (version auto-discovered) |
 | `eest-bal` | ethereum/eels/consume-engine | EEST BAL amsterdam fixtures (version auto-discovered) |
+| `eest-rlp` | ethereum/eels/consume-rlp | EEST RLP block import (BlockchainTest, all forks) |
 
 ### Groups
 | Group name | Expands to |
@@ -41,6 +42,7 @@ The user may specify one or more test suites in any combination:
 - `/hive-test engine` - Run all engine suites
 - `/hive-test engine rpc-compat` - Run all engine suites plus rpc-compat
 - `/hive-test eest-bal` - Run BAL-specific EEST tests
+- `/hive-test eest-rlp` - Run EEST RLP block-import tests
 - `/hive-test all` - Run everything
 
 ### Options
@@ -63,6 +65,7 @@ The user may specify one or more test suites in any combination:
 | rpc-compat | 23 |
 | eest (consume-engine) | 0 |
 | eest-bal | 4 (upstream BPO2ToAmsterdamAtTime15k fork transition) |
+| eest-rlp | 0 |
 
 Note: Failure counts are version-dependent and may change with newer fixtures.
 The eest-bal fork transition failures are a known upstream issue, not Erigon bugs.
@@ -243,6 +246,30 @@ with `--sim.limit "suite1|suite2|..."`.
   --sim.buildarg branch=${BAL_BRANCH} \
   --sim.buildarg fixtures=${BAL_FIXTURES_URL} \
   ${DISABLE_STRICT} \
+  --sim.timelimit 60m
+```
+
+**EEST RLP** (sim: `ethereum/eels/consume-rlp`):
+
+Tests block import via RLP-encoded blocks loaded at client startup (the historical
+sync code path). Uses the `BlockchainTest` fixture format and covers all forks
+including pre-merge, complementary to consume-engine which only covers Paris+.
+See https://eest.ethereum.org/main/running_tests/running/#engine-vs-rlp-simulator.
+
+The full RLP test set is too large to run end-to-end in CI — always pass a
+`--sim.limit` regex narrowing the scope. CI mirrors this by running only
+`.*eip2930_access_list.*`. For local debugging, target a single EIP / opcode
+group similarly. Fixtures come from the same `fixtures_develop.tar.gz` archive
+as consume-engine.
+
+```bash
+# $EEST_VERSION discovered in Phase 0 (e.g. v5.4.0), or user-provided via eest-version=
+# Replace the sim.limit regex to scope to the area under test.
+./hive --client-file erigon-local.yaml \
+  --sim ethereum/eels/consume-rlp \
+  --sim.limit=".*eip2930_access_list.*" \
+  --sim.parallelism=12 --docker.nocache=true \
+  --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/${EEST_VERSION}/fixtures_develop.tar.gz \
   --sim.timelimit 60m
 ```
 
