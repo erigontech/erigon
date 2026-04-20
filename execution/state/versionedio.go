@@ -122,26 +122,6 @@ func (s ReadSet) Delete(addr accounts.Address, key AccountKey) {
 	}
 }
 
-// Clone returns a deep copy of the ReadSet. Both the outer address→reads map
-// and each inner AccountKey→VersionedRead map are cloned. The VersionedRead
-// values themselves are copied by value. Use Clone to implement snapshot/
-// restore semantics: capturing VersionedReads() returns a reference to the
-// same map, so subsequent .Set() calls mutate the "snapshot" in place.
-func (s ReadSet) Clone() ReadSet {
-	if s == nil {
-		return nil
-	}
-	out := make(ReadSet, len(s))
-	for addr, reads := range s {
-		inner := make(map[AccountKey]VersionedRead, len(reads))
-		for k, v := range reads {
-			inner[k] = v
-		}
-		out[addr] = inner
-	}
-	return out
-}
-
 type WriteSet map[accounts.Address]map[AccountKey]VersionedWrite
 
 func (s WriteSet) Set(v VersionedWrite) {
