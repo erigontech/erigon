@@ -19,6 +19,7 @@ package flow
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -43,8 +44,13 @@ type Orchestrator struct {
 	// peerFiles remembers peer-advertised entries by name so DownloadComplete
 	// can reconstruct the file shape (domain, step range) without requiring
 	// the download-side to echo it back. Keyed by file name.
+	//
+	// pending tracks in-flight downloads so coverage queries include them —
+	// this is how merge-divergence handling avoids redundantly downloading
+	// unmerged equivalents of a range already being served by a merged file.
 	peerMu    sync.RWMutex
 	peerFiles map[string]*snapshot.FileEntry
+	pending   map[string]*snapshot.FileEntry
 }
 
 // New creates a flow orchestrator bound to the given bus and inventory.
@@ -58,6 +64,7 @@ func New(bus event.EventBus, inv *snapshot.Inventory, logger log.Logger) *Orches
 		inventory: inv,
 		log:       logger,
 		peerFiles: make(map[string]*snapshot.FileEntry),
+		pending:   make(map[string]*snapshot.FileEntry),
 	}
 }
 
@@ -76,6 +83,7 @@ func (o *Orchestrator) Start(_ context.Context) error {
 		o.onBlocksFlushed,
 		o.onPeerManifestReceived,
 		o.onDownloadComplete,
+		o.onDownloadFailed,
 		o.onPeerDeparted,
 	}
 	for i, sub := range subs {
@@ -114,6 +122,7 @@ func (o *Orchestrator) Close() error {
 		o.onBlocksFlushed,
 		o.onPeerManifestReceived,
 		o.onDownloadComplete,
+		o.onDownloadFailed,
 		o.onPeerDeparted,
 	} {
 		if err := o.bus.Unsubscribe(sub); err != nil {
@@ -146,13 +155,14 @@ func (o *Orchestrator) onPeerManifestReceived(e PeerManifestReceived) {
 }
 
 // requestGapsFor iterates peer entries for a single domain (or "" for blocks)
-// and emits DownloadRequested for any file not already held locally.
+// and emits DownloadRequested for any file whose (domain, role, range) is not
+// already served by a local or pending download.
 //
-// Matching is by file name, not step range: a single range commonly requires
-// multiple files (e.g. a domain's .kv + .kvi), so range-level coverage is
-// insufficient to decide whether a specific peer file is redundant.
+// Matching is role-scoped: different file roles under the same range (.kv
+// vs .kvi) are non-interchangeable, so coverage is checked per role. Within
+// a role, a larger merged file subsumes smaller unmerged files — this is how
+// merge-divergent peer manifests are rationalised without duplicate work.
 func (o *Orchestrator) requestGapsFor(domain snapshot.Domain, peerEntries []*snapshot.FileEntry, peerID string) {
-	// Record peer entries under a single lock before publishing.
 	o.peerMu.Lock()
 	for _, entry := range peerEntries {
 		if _, seen := o.peerFiles[entry.Name]; !seen {
@@ -161,10 +171,25 @@ func (o *Orchestrator) requestGapsFor(domain snapshot.Domain, peerEntries []*sna
 	}
 	o.peerMu.Unlock()
 
+	// First pass: decide which entries to request and mark them pending under
+	// a single lock, so subsequent coverage checks in the same manifest see
+	// their own earlier selections.
+	toRequest := make([]*snapshot.FileEntry, 0, len(peerEntries))
+	o.peerMu.Lock()
 	for _, entry := range peerEntries {
 		if o.haveLocally(domain, entry.Name) {
 			continue
 		}
+		role := fileRole(entry.Name)
+		if o.coverageForRoleLocked(domain, role).IsComplete(entry.FromStep, entry.ToStep) {
+			continue
+		}
+		o.pending[entry.Name] = entry
+		toRequest = append(toRequest, entry)
+	}
+	o.peerMu.Unlock()
+
+	for _, entry := range toRequest {
 		o.bus.Publish(DownloadRequested{
 			FileName:  entry.Name,
 			InfoHash:  entry.TorrentHash,
@@ -173,6 +198,83 @@ func (o *Orchestrator) requestGapsFor(domain snapshot.Domain, peerEntries []*sna
 			Range:     entry.Range(),
 		})
 	}
+}
+
+// onDownloadFailed removes the failed download from the pending map so a
+// retry (from this or another peer) isn't silently suppressed by the
+// role-coverage check.
+func (o *Orchestrator) onDownloadFailed(e DownloadFailed) {
+	o.peerMu.Lock()
+	delete(o.pending, e.FileName)
+	o.peerMu.Unlock()
+	o.log.Warn("[flow] download failed", "file", e.FileName, "reason", e.Reason)
+}
+
+// fileRole extracts a role token that distinguishes non-interchangeable
+// files at the same (domain, range). Rules, by filename shape:
+//
+//   - Domain files (e.g. "v1.0-accounts.0-256.kv"): the extension is
+//     sufficient — "kv" and "kvi" are the only roles, and the range
+//     precedes the extension as "<from>-<to>.<ext>".
+//   - Block files (e.g. "v1.0-000000-000500-headers.seg"): the range and
+//     the role both sit in dash-separated segments; "headers.seg" and
+//     "bodies.seg" share extension but are distinct roles. So if the
+//     segment immediately before the extension is alphabetic, it is part
+//     of the role.
+func fileRole(name string) string {
+	extIdx := strings.LastIndexByte(name, '.')
+	if extIdx < 0 {
+		return name
+	}
+	ext := name[extIdx+1:]
+	base := name[:extIdx]
+
+	dashIdx := strings.LastIndexByte(base, '-')
+	if dashIdx < 0 {
+		return ext
+	}
+	lastSeg := base[dashIdx+1:]
+	if isAlphabetic(lastSeg) {
+		return lastSeg + "." + ext
+	}
+	return ext
+}
+
+func isAlphabetic(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')) {
+			return false
+		}
+	}
+	return true
+}
+
+// coverageForRoleLocked is the body of coverageForRole. The caller must hold
+// peerMu (read or write) for the duration of the call. Used on the
+// request-gaps hot path where peerMu is already held to batch pending
+// inserts.
+func (o *Orchestrator) coverageForRoleLocked(domain snapshot.Domain, role string) snapshot.StepRanges {
+	var entries []*snapshot.FileEntry
+	if domain == "" {
+		entries = o.inventory.BlockFiles()
+	} else {
+		entries = o.inventory.AllDomainFiles(domain)
+	}
+	var ranges snapshot.StepRanges
+	for _, f := range entries {
+		if f.Local && fileRole(f.Name) == role {
+			ranges = append(ranges, f.Range())
+		}
+	}
+	for _, p := range o.pending {
+		if p.Domain == domain && fileRole(p.Name) == role {
+			ranges = append(ranges, p.Range())
+		}
+	}
+	return ranges.Normalize()
 }
 
 // onPeerDeparted removes the departing peer's file-shape entries from the
@@ -223,6 +325,10 @@ func (o *Orchestrator) onDownloadComplete(e DownloadComplete) {
 	localEntry.Trust = snapshot.TrustVerified
 	localEntry.Local = true
 	o.inventory.AddFile(localEntry)
+
+	o.peerMu.Lock()
+	delete(o.pending, e.FileName)
+	o.peerMu.Unlock()
 
 	o.bus.Publish(TrustPromoted{
 		FileName: e.FileName,
