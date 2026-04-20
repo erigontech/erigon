@@ -170,12 +170,11 @@ func ComputeSubnetForDataColumnSidecar(columnIndex cltypes.ColumnIndex) uint64 {
 // This function is re-entrant and thread-safe.
 // Version-aware: handles both Fulu and GLOAS sidecars.
 func VerifyDataColumnSidecarInclusionProof(sidecar *cltypes.DataColumnSidecar) bool {
-	// For GLOAS: inclusion proof is not part of the sidecar
-	// TODO: Implement GLOAS-specific inclusion proof verification when spec is finalized
+	// GLOAS removes KzgCommitmentsInclusionProof from DataColumnSidecar
+	// (consensus-specs v1.7.0-alpha.5). KZG commitments are verified against
+	// the builder's bid instead, so no Merkle inclusion proof is needed here.
 	if sidecar.Version() >= clparams.GloasVersion {
-		// GLOAS sidecars don't have KzgCommitmentsInclusionProof
-		// The verification needs to be done differently
-		return true // Skip for now, will be verified through different mechanism
+		return true
 	}
 
 	// Fulu verification

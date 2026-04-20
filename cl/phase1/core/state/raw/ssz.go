@@ -219,7 +219,10 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 
 // SSZ size of the Beacon State
 func (b *BeaconState) EncodingSizeSSZ() (size int) {
-	size = int(b.baseOffsetSSZ()) + b.historicalRoots.EncodingSizeSSZ()
+	// Start with the fixed portion (includes offset pointers for variable-size fields).
+	size = int(b.baseOffsetSSZ())
+	// Add the variable-size field data (only fields where Static() == false).
+	size += b.historicalRoots.EncodingSizeSSZ()
 	size += b.eth1DataVotes.EncodingSizeSSZ()
 	size += b.validators.EncodingSizeSSZ()
 	size += b.balances.Length() * 8
@@ -229,29 +232,24 @@ func (b *BeaconState) EncodingSizeSSZ() (size int) {
 	} else {
 		size += b.previousEpochParticipation.Length()
 		size += b.currentEpochParticipation.Length()
+		size += b.inactivityScores.Length() * 8
 	}
-
-	size += b.inactivityScores.Length() * 8
-	size += b.historicalSummaries.EncodingSizeSSZ()
-
+	if b.version >= clparams.BellatrixVersion && b.version < clparams.GloasVersion {
+		size += b.latestExecutionPayloadHeader.EncodingSizeSSZ()
+	}
+	if b.version >= clparams.CapellaVersion {
+		size += b.historicalSummaries.EncodingSizeSSZ()
+	}
 	if b.version >= clparams.ElectraVersion {
 		size += b.pendingDeposits.EncodingSizeSSZ()
 		size += b.pendingPartialWithdrawals.EncodingSizeSSZ()
 		size += b.pendingConsolidations.EncodingSizeSSZ()
 	}
 	if b.version >= clparams.GloasVersion {
-		// Position 24: replace latestExecutionPayloadHeader with latestBlockHash (32 bytes)
-		size -= b.latestExecutionPayloadHeader.EncodingSizeSSZ()
-		size += 32 // latestBlockHash
-		// New Gloas fields (positions 38-45)
 		size += b.builders.EncodingSizeSSZ()
-		size += 8 // nextWithdrawalBuilderIndex
-		size += b.executionPayloadAvailability.EncodingSizeSSZ()
-		size += b.builderPendingPayments.EncodingSizeSSZ()
 		size += b.builderPendingWithdrawals.EncodingSizeSSZ()
 		size += b.latestExecutionPayloadBid.EncodingSizeSSZ()
 		size += b.payloadExpectedWithdrawals.EncodingSizeSSZ()
-		size += b.ptcWindow.EncodingSizeSSZ()
 	}
 	return
 }
