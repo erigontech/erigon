@@ -26,6 +26,7 @@ import (
 
 	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/execution/abi/bind"
@@ -33,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state/contracts"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc"
 )
@@ -283,5 +285,189 @@ func TestNewPayloadShouldReturnValidWhenSideChainGoingBackIsLtMaxReorgDepth(t *t
 		ps, err := eatCanonical.MockCl.InsertNewPayload(ctx, sideChain)
 		require.NoError(t, err)
 		require.Equal(t, enginetypes.ValidStatus, ps.Status)
+	})
+}
+
+// TestEngineApiFcuToCanonicalAncestorMovesHead verifies that an FCU pointing the
+// head at a canonical ancestor of the current head actually moves the EL head
+// back to that ancestor (spec: ethereum/execution-apis#770 — EL must support
+// reorg to head's ancestor).
+func TestEngineApiFcuToCanonicalAncestorMovesHead(t *testing.T) {
+	eat := engineapitester.DefaultEngineApiTester(t)
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		// Build canonical chain: genesis (0) + empty b1 from DefaultEngineApiTester,
+		// then b2..b5 here. Head is at b5.
+		receiver := common.HexToAddress("0x42")
+		payloads := make([]*engineapitester.MockClPayload, 4)
+		for i := range payloads {
+			txn, err := eat.Transactor.SubmitSimpleTransfer(eat.CoinbaseKey, receiver, big.NewInt(int64(100*(i+1))))
+			require.NoError(t, err)
+			p, err := eat.MockCl.BuildCanonicalBlock(ctx)
+			require.NoError(t, err)
+			err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, p.ExecutionPayload, txn.Hash())
+			require.NoError(t, err)
+			payloads[i] = p
+		}
+		// Sanity: head is at block 5.
+		latest, err := eat.RpcApiClient.GetBlockByNumber(ctx, rpc.LatestBlockNumber, false)
+		require.NoError(t, err)
+		require.Equal(t, uint64(5), latest.Number.Uint64())
+
+		// Point FCU at block 3 (two blocks behind head), no payload attributes.
+		ancestor := payloads[1]
+		ancestorHash := ancestor.ExecutionPayload.BlockHash
+		require.Equal(t, uint64(3), ancestor.ExecutionPayload.BlockNumber.Uint64())
+
+		fcs := enginetypes.ForkChoiceState{
+			HeadHash:           ancestorHash,
+			SafeBlockHash:      eat.GenesisBlock.Hash(),
+			FinalizedBlockHash: eat.GenesisBlock.Hash(),
+		}
+		resp, err := eat.EngineApiClient.ForkchoiceUpdatedV4(ctx, &fcs, nil)
+		require.NoError(t, err)
+		require.Equal(t, enginetypes.ValidStatus, resp.PayloadStatus.Status)
+		require.NotNil(t, resp.PayloadStatus.LatestValidHash)
+		require.Equal(t, ancestorHash, *resp.PayloadStatus.LatestValidHash)
+		require.Nil(t, resp.PayloadId)
+
+		// EL head must now be the ancestor.
+		latest, err = eat.RpcApiClient.GetBlockByNumber(ctx, rpc.LatestBlockNumber, false)
+		require.NoError(t, err)
+		require.Equal(t, uint64(3), latest.Number.Uint64())
+		require.Equal(t, ancestorHash, latest.Hash)
+	})
+}
+
+// TestEngineApiFcuToCanonicalAncestorWithPayloadAttributes verifies that an FCU
+// with payload attributes whose head is a canonical ancestor triggers a reorg
+// to the ancestor and begins building a payload on top of it (spec:
+// ethereum/execution-apis#770).
+func TestEngineApiFcuToCanonicalAncestorWithPayloadAttributes(t *testing.T) {
+	eat := engineapitester.DefaultEngineApiTester(t)
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		receiver := common.HexToAddress("0x42")
+		payloads := make([]*engineapitester.MockClPayload, 4)
+		for i := range payloads {
+			txn, err := eat.Transactor.SubmitSimpleTransfer(eat.CoinbaseKey, receiver, big.NewInt(int64(100*(i+1))))
+			require.NoError(t, err)
+			p, err := eat.MockCl.BuildCanonicalBlock(ctx)
+			require.NoError(t, err)
+			err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, p.ExecutionPayload, txn.Hash())
+			require.NoError(t, err)
+			payloads[i] = p
+		}
+		// Head is at block 5. Target ancestor: block 3.
+		ancestor := payloads[1]
+		ancestorHash := ancestor.ExecutionPayload.BlockHash
+		require.Equal(t, uint64(3), ancestor.ExecutionPayload.BlockNumber.Uint64())
+
+		// Build payload attributes for a sibling of block 4, on top of block 3.
+		newTimestamp := uint64(ancestor.ExecutionPayload.Timestamp) + 1
+		parentBeaconBlockRoot := common.HexToHash("0xfeedface")
+		slotNum := eat.MockCl.State().NextSlotNumber()
+		attrs := &enginetypes.PayloadAttributes{
+			Timestamp:             hexutil.Uint64(newTimestamp),
+			PrevRandao:            common.HexToHash("0xdeadbeef"),
+			SuggestedFeeRecipient: eat.GenesisBlock.Coinbase(),
+			Withdrawals:           []*types.Withdrawal{},
+			ParentBeaconBlockRoot: &parentBeaconBlockRoot,
+			SlotNumber:            (*hexutil.Uint64)(&slotNum),
+		}
+		fcs := enginetypes.ForkChoiceState{
+			HeadHash:           ancestorHash,
+			SafeBlockHash:      eat.GenesisBlock.Hash(),
+			FinalizedBlockHash: eat.GenesisBlock.Hash(),
+		}
+		resp, err := eat.EngineApiClient.ForkchoiceUpdatedV4(ctx, &fcs, attrs)
+		require.NoError(t, err)
+		require.Equal(t, enginetypes.ValidStatus, resp.PayloadStatus.Status)
+		require.NotNil(t, resp.PayloadStatus.LatestValidHash)
+		require.Equal(t, ancestorHash, *resp.PayloadStatus.LatestValidHash)
+		require.NotNil(t, resp.PayloadId, "payloadId expected when building on ancestor")
+
+		// Retrieve the newly built payload and verify it is built on top of the ancestor.
+		newPayload, err := eat.EngineApiClient.GetPayloadV6(ctx, *resp.PayloadId)
+		require.NoError(t, err)
+		require.Equal(t, ancestorHash, newPayload.ExecutionPayload.ParentHash)
+		require.Equal(t, uint64(4), uint64(newPayload.ExecutionPayload.BlockNumber))
+		require.Equal(t, newTimestamp, uint64(newPayload.ExecutionPayload.Timestamp))
+
+		// EL head should be the ancestor until the newly built block is promoted.
+		latest, err := eat.RpcApiClient.GetBlockByNumber(ctx, rpc.LatestBlockNumber, false)
+		require.NoError(t, err)
+		require.Equal(t, uint64(3), latest.Number.Uint64())
+		require.Equal(t, ancestorHash, latest.Hash)
+	})
+}
+
+// TestEngineApiFcuToDistantCanonicalAncestorSkipsReorg verifies the MAY-skip branch
+// of ethereum/execution-apis#770: when the requested head is a canonical ancestor
+// more than MaxAncestorReorgDepth (32) blocks behind the current head, the EL may
+// skip the forkchoice update and must return {VALID, latestValidHash: head, payloadId: null}
+// without moving the EL head.
+func TestEngineApiFcuToDistantCanonicalAncestorSkipsReorg(t *testing.T) {
+	eat := engineapitester.DefaultEngineApiTester(t)
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		// DefaultEngineApiTester already built block 1 (empty). Build 35 more so head
+		// is at block 36 and the depth to block 3 is 33 (> 32).
+		const extraBlocks = 35
+		payloads := make([]*engineapitester.MockClPayload, extraBlocks)
+		for i := range payloads {
+			p, err := eat.MockCl.BuildCanonicalBlock(ctx)
+			require.NoError(t, err)
+			payloads[i] = p
+		}
+		latest, err := eat.RpcApiClient.GetBlockByNumber(ctx, rpc.LatestBlockNumber, false)
+		require.NoError(t, err)
+		currentHeadNumber := uint64(extraBlocks) + 1
+		require.Equal(t, currentHeadNumber, latest.Number.Uint64())
+		currentHeadHash := latest.Hash
+
+		// Target: block 3 (33 blocks behind head at block 36).
+		ancestor := payloads[1]
+		ancestorHash := ancestor.ExecutionPayload.BlockHash
+		require.Equal(t, uint64(3), ancestor.ExecutionPayload.BlockNumber.Uint64())
+		require.Greater(t, currentHeadNumber-3, uint64(32), "need depth > MaxAncestorReorgDepth")
+
+		// FCU to the distant ancestor must be skipped: response VALID, payloadId nil, head unmoved.
+		fcs := enginetypes.ForkChoiceState{
+			HeadHash:           ancestorHash,
+			SafeBlockHash:      eat.GenesisBlock.Hash(),
+			FinalizedBlockHash: eat.GenesisBlock.Hash(),
+		}
+		resp, err := eat.EngineApiClient.ForkchoiceUpdatedV4(ctx, &fcs, nil)
+		require.NoError(t, err)
+		require.Equal(t, enginetypes.ValidStatus, resp.PayloadStatus.Status)
+		require.NotNil(t, resp.PayloadStatus.LatestValidHash)
+		require.Equal(t, ancestorHash, *resp.PayloadStatus.LatestValidHash)
+		require.Nil(t, resp.PayloadId)
+
+		latest, err = eat.RpcApiClient.GetBlockByNumber(ctx, rpc.LatestBlockNumber, false)
+		require.NoError(t, err)
+		require.Equal(t, currentHeadNumber, latest.Number.Uint64())
+		require.Equal(t, currentHeadHash, latest.Hash)
+
+		// Even when payload attributes are provided, the skip path must return payloadId=nil
+		// and must not build a payload atop the distant ancestor.
+		newTimestamp := uint64(ancestor.ExecutionPayload.Timestamp) + 1
+		parentBeaconBlockRoot := common.HexToHash("0xcafeface")
+		slotNum := eat.MockCl.State().NextSlotNumber()
+		attrs := &enginetypes.PayloadAttributes{
+			Timestamp:             hexutil.Uint64(newTimestamp),
+			PrevRandao:            common.HexToHash("0xdeadbeef"),
+			SuggestedFeeRecipient: eat.GenesisBlock.Coinbase(),
+			Withdrawals:           []*types.Withdrawal{},
+			ParentBeaconBlockRoot: &parentBeaconBlockRoot,
+			SlotNumber:            (*hexutil.Uint64)(&slotNum),
+		}
+		resp, err = eat.EngineApiClient.ForkchoiceUpdatedV4(ctx, &fcs, attrs)
+		require.NoError(t, err)
+		require.Equal(t, enginetypes.ValidStatus, resp.PayloadStatus.Status)
+		require.Nil(t, resp.PayloadId, "payloadId must be nil when skipping distant ancestor")
+
+		latest, err = eat.RpcApiClient.GetBlockByNumber(ctx, rpc.LatestBlockNumber, false)
+		require.NoError(t, err)
+		require.Equal(t, currentHeadNumber, latest.Number.Uint64())
+		require.Equal(t, currentHeadHash, latest.Hash)
 	})
 }

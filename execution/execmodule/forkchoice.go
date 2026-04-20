@@ -293,6 +293,9 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	if fcuHeader.Number.Sign() > 0 {
 		if canonicalHash == blockHash && fcuHeader.Number.Uint64() >= finishProgressBefore {
 			// if block hash is part of the canonical chain and execution is not ahead, treat as no-op.
+			// When the requested head is canonical but execution is *ahead* (fcuHeader.Number < finishProgressBefore),
+			// we fall through to the reorg branch below and actually move the head back — required by
+			// ethereum/execution-apis#770 (EL must support reorg to head's ancestor).
 			writeForkChoiceHashes(tx, blockHash, safeHash, finalizedHash)
 			valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
 			if err != nil {

@@ -548,6 +548,8 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 		// For NewPayload: if the block is already canonical and known, return VALID immediately.
 		// For FCU: we must always go through HandleForkChoice so the EL head actually moves,
 		// even if the requested head is a canonical ancestor (e.g. fork choice head regression).
+		// See ethereum/execution-apis#770 — EL must support reorg to the head's ancestor and
+		// allow building a payload on top of it.
 		if newPayload && currentHeader != nil && header != nil && isCanonical {
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
@@ -669,6 +671,19 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	}
 
 	s.logger.Debug("[ForkChoiceUpdated] processing new request", newReqLogInfoArgs...)
+
+	// PR 770 (ethereum/execution-apis#770): the EL MUST reorg to a canonical ancestor
+	// within MaxAncestorReorgDepth blocks of the current head, but MAY skip the forkchoice
+	// update for deeper canonical ancestors (e.g. a CL that is still catching up). When
+	// we skip, the spec mandates returning {status: VALID, latestValidHash: head, payloadId: null}
+	// without moving the EL head or building a payload. This only applies to ancestor reorgs;
+	// cross-branch reorgs have no depth limit.
+	if skipResp, skipErr := s.maybeSkipDistantAncestorFcu(ctx, forkchoiceState); skipErr != nil {
+		return nil, skipErr
+	} else if skipResp != nil {
+		return skipResp, nil
+	}
+
 	status, err := s.getQuickPayloadStatusIfPossible(ctx, forkchoiceState.HeadHash, 0, common.Hash{}, forkchoiceState, false)
 	if err != nil {
 		return nil, err
@@ -787,6 +802,54 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 			LatestValidHash: &forkchoiceState.HeadHash,
 		},
 		PayloadId: engine_types.ConvertPayloadId(assembled.PayloadID),
+	}, nil
+}
+
+// maybeSkipDistantAncestorFcu implements the "skip" branch of ethereum/execution-apis#770:
+// when the requested head is a VALID canonical ancestor more than MaxAncestorReorgDepth
+// blocks behind the current EL head, we return VALID with payloadId=null and leave the
+// EL head in place. Returns (nil, nil) when the FCU should proceed through the normal path
+// (not an ancestor, close ancestor, canonical state unknown, etc.).
+func (s *EngineServer) maybeSkipDistantAncestorFcu(
+	ctx context.Context,
+	forkchoiceState *engine_types.ForkChoiceState,
+) (*engine_types.ForkChoiceUpdatedResponse, error) {
+	currentHeader := s.chainRW.CurrentHeader(ctx)
+	if currentHeader == nil {
+		return nil, nil
+	}
+	requestedHeader := s.chainRW.GetHeaderByHash(ctx, forkchoiceState.HeadHash)
+	if requestedHeader == nil {
+		return nil, nil
+	}
+	currentNumber := currentHeader.Number.Uint64()
+	requestedNumber := requestedHeader.Number.Uint64()
+	if requestedNumber >= currentNumber {
+		return nil, nil // not an ancestor (same height or ahead — handled by the reorg path)
+	}
+	if currentNumber-requestedNumber <= engine_helpers.MaxAncestorReorgDepth {
+		return nil, nil // close ancestor — MUST reorg per spec
+	}
+	isCanonical, err := s.chainRW.IsCanonicalHash(ctx, forkchoiceState.HeadHash)
+	if err != nil {
+		return nil, err
+	}
+	if !isCanonical {
+		return nil, nil // side chain — reorg MUST NOT be limited in depth
+	}
+	s.logger.Info(
+		"[ForkChoiceUpdated] skipping reorg to distant canonical ancestor",
+		"head", forkchoiceState.HeadHash,
+		"headNumber", requestedNumber,
+		"currentNumber", currentNumber,
+		"depth", currentNumber-requestedNumber,
+	)
+	headHash := forkchoiceState.HeadHash
+	return &engine_types.ForkChoiceUpdatedResponse{
+		PayloadStatus: &engine_types.PayloadStatus{
+			Status:          engine_types.ValidStatus,
+			LatestValidHash: &headHash,
+		},
 	}, nil
 }
 

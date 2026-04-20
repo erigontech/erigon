@@ -20,6 +20,12 @@ import "github.com/erigontech/erigon/rpc"
 
 const MaxBuilders = 128
 
+// MaxAncestorReorgDepth is the maximum depth behind the current EL head for which
+// a reorg to a canonical ancestor MUST be supported on FCU. See
+// ethereum/execution-apis#770: within this depth we always reorg; beyond it we
+// MAY skip the forkchoice state update and return VALID with payloadId = null.
+const MaxAncestorReorgDepth = 32
+
 var UnknownPayloadErr = rpc.CustomError{Code: -38001, Message: "Unknown payload"}
 var InvalidForkchoiceStateErr = rpc.CustomError{Code: -38002, Message: "Invalid forkchoice state"}
 var InvalidPayloadAttributesErr = rpc.CustomError{Code: -38003, Message: "Invalid payload attributes"}
