@@ -109,7 +109,10 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, ams
 		computedDebug := bal.DebugString()
 		var storedDebug string
 		if dbBALBytes != nil {
-			if dbBAL2, decErr := types.DecodeBlockAccessListBytes(dbBALBytes); decErr == nil && dbBAL2 != nil {
+			dbBAL2, decErr := types.DecodeBlockAccessListBytes(dbBALBytes)
+			if decErr != nil {
+				log.Warn("failed to decode stored BAL for debug dump", "err", decErr)
+			} else if dbBAL2 != nil {
 				storedDebug = dbBAL2.DebugString()
 			}
 		}
