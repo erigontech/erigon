@@ -19,6 +19,7 @@ package engineapi_test
 import (
 	"context"
 	"crypto/ecdsa"
+	"fmt"
 	"math/big"
 	"testing"
 
@@ -505,6 +506,197 @@ func TestEngineApiBALMixedBlock(t *testing.T) {
 			"beacon root contract should appear in BAL (system tx at block start)\n%s", bal.DebugString())
 		require.NotEmpty(t, beaconRootChanges.StorageChanges,
 			"beacon root contract should have storage changes")
+	})
+}
+
+// TestEngineApiBALParallelConsistencyStress exercises the parallel executor's
+// BAL computation under heavy concurrent write pressure to surface any
+// divergence from the block assembler's BAL (proposer side, serial). The
+// engineapi round-trip — BuildCanonicalBlock → InsertNewPayload → validate —
+// fails with an INVALID payload status if the two BALs disagree, converting
+// cross-path non-determinism into a test failure.
+//
+// Pattern mirrors the spamoor workload on the bal-devnet-3 Kurtosis cluster
+// where BAL mismatches have been observed:
+//   - Many independent senders → parallel exec schedules them concurrently.
+//   - Mixed tx types (transfer / deploy / storage-write) → different finalize
+//     and coinbase-rebase paths per tx.
+//   - Multiple blocks → accumulated state, cross-block dependencies.
+//   - Shared contract targets → storage-conflict retry in the parallel executor.
+//
+// If this test flakes, it's the same class of bug that makes the glamsterdam
+// assertoor suite fail. Runs under -race should eventually expose non-
+// determinism sources that survive a single execution.
+func TestEngineApiBALParallelConsistencyStress(t *testing.T) {
+	if !dbg.Exec3Parallel {
+		t.Skip("requires parallel exec")
+	}
+	const (
+		numSenders = 20
+		numBlocks  = 3
+	)
+	senderKeys := make([]*ecdsa.PrivateKey, numSenders)
+	for i := range senderKeys {
+		key, err := crypto.GenerateKey()
+		require.NoError(t, err)
+		senderKeys[i] = key
+	}
+
+	genesis, coinbaseKey := engineapitester.DefaultEngineApiTesterGenesis(t)
+	for _, key := range senderKeys {
+		addr := crypto.PubkeyToAddress(key.PublicKey)
+		genesis.Alloc[addr] = types.GenesisAccount{
+			Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil), // 100 ETH each
+		}
+	}
+
+	eat := engineapitester.InitialiseEngineApiTester(t, engineapitester.EngineApiTesterInitArgs{
+		Logger:      testlog.Logger(t, log.LvlInfo),
+		DataDir:     t.TempDir(),
+		Genesis:     genesis,
+		CoinbaseKey: coinbaseKey,
+	})
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		chainId := eat.ChainConfig.ChainID
+
+		// Block 1: deploy a Changer contract used by subsequent blocks for
+		// shared-target storage writes (exercises parallel conflict retry).
+		auth, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, chainId)
+		require.NoError(t, err)
+		auth.GasLimit = params.MaxTxnGasLimit
+		_, _, sharedChanger, err := stateContracts.DeployChanger(auth, eat.ContractBackend)
+		require.NoError(t, err)
+		_, err = eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err, "block 1 (deploy shared Changer) must build cleanly")
+
+		for blockIdx := 0; blockIdx < numBlocks; blockIdx++ {
+			// Each sender does one simple transfer (fully independent state).
+			for i, key := range senderKeys {
+				// Distinct receiver per (sender, block) to avoid nonce/collision.
+				receiver := common.HexToAddress(fmt.Sprintf("0x%040x", (blockIdx*numSenders+i)+0x1000))
+				_, err := eat.Transactor.SubmitSimpleTransfer(key, receiver, big.NewInt(1))
+				require.NoErrorf(t, err, "block %d sender %d: submit transfer", blockIdx, i)
+			}
+			// Coinbase also deploys a Token (CREATE path, emits code change).
+			coinbaseAuth, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, chainId)
+			require.NoError(t, err)
+			_, _, _, err = contracts.DeployToken(coinbaseAuth, eat.ContractBackend, crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey))
+			require.NoError(t, err)
+			// Coinbase also hits the shared Changer (storage-write conflict target).
+			coinbaseAuth, err = bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, chainId)
+			require.NoError(t, err)
+			coinbaseAuth.GasLimit = params.MaxTxnGasLimit
+			_, err = sharedChanger.Change(coinbaseAuth)
+			require.NoError(t, err)
+
+			// The payoff: BuildCanonicalBlock assembles (serial, proposer BAL)
+			// and then validates via newPayload (parallel, validator BAL).
+			// A hash mismatch surfaces here as an error.
+			payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+			require.NoErrorf(t, err, "block %d: assembler vs parallel-executor BAL mismatch", blockIdx+2)
+
+			// Also assert the header hash ties out to the decoded BAL body,
+			// catching any encoding/decoding asymmetry.
+			bal := decodeAndValidateBAL(t, payload)
+			blockNumber := rpc.BlockNumber(payload.ExecutionPayload.BlockNumber)
+			block, err := eat.RpcApiClient.GetBlockByNumber(ctx, blockNumber, false)
+			require.NoError(t, err)
+			require.NotNil(t, block.BlockAccessListHash)
+			require.Equalf(t, bal.Hash(), *block.BlockAccessListHash,
+				"block %d: BAL body hash doesn't match header BAL hash", blockIdx+2)
+		}
+	})
+}
+
+// TestEngineApiBALCreateSSTOREThenSelfdestructInInitCode is a targeted
+// regression test for the proposer/validator BAL divergence that manifested
+// as the glamsterdam assertoor flake.
+//
+// Scenario: a single CREATE transaction whose init code does SSTORE followed
+// by SELFDESTRUCT (of the just-created contract). The SSTORE's EIP-2200
+// gas calculation records a StoragePath read on the new contract; the
+// SELFDESTRUCT then marks the state object as deleted. Pre-fix behavior
+// differed between the two execution paths:
+//
+//   - Block assembler (serial, proposer): FinalizeTx iterated
+//     sdb.journal.dirties after the tx and, for any stateObject with
+//     `so.deleted == true`, dropped its whole versionedReads entry:
+//     if so.deleted { delete(sdb.versionedReads, addr) }
+//     That removed the new contract's SSTORE-gas-calc read from the
+//     per-tx read set before it was merged into balIO.
+//
+//   - Parallel executor (validator): txtask.Execute calls SoftFinalise +
+//     MakeWriteSet, which never had the corresponding delete. The read
+//     survived into result.TxIn and ended up in blockIO as a
+//     storageReads=[0x01] entry on the ephemeral contract's address.
+//
+// BuildCanonicalBlock ran the block through both paths (assembler-signed
+// header BAL hash, parallel-executor validator BAL hash). Divergence →
+// engine_newPayload returned INVALID → this test fails. The fix (remove
+// the delete from FinalizeTx) makes both paths retain the read, matching
+// EIP-7928's access-list semantics.
+//
+// The bytecode is 7 bytes of handwritten EVM. Init code:
+//
+//	6001600155  SSTORE slot 0x01 = 1   (records StoragePath read on slot 0x01)
+//	33          CALLER
+//	FF          SELFDESTRUCT            (EIP-6780 actually destroys because
+//	                                     the contract was created this tx)
+//
+// There is no deployed code (no `f3` RETURN), so the create returns no
+// bytecode — the only output the test needs is the BAL agreement.
+func TestEngineApiBALCreateSSTOREThenSelfdestructInInitCode(t *testing.T) {
+	if !dbg.Exec3Parallel {
+		t.Skip("requires parallel exec")
+	}
+	eat := engineapitester.DefaultEngineApiTester(t)
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		signer := types.LatestSignerForChainID(eat.ChainConfig.ChainID)
+		coinbaseAddr := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
+
+		nonce, err := eat.RpcApiClient.GetTransactionCount(coinbaseAddr, rpc.PendingBlock)
+		require.NoError(t, err)
+		gasPrice, err := eat.RpcApiClient.GasPrice()
+		require.NoError(t, err)
+		gasPriceU256, overflow := uint256.FromBig(gasPrice)
+		require.False(t, overflow, "gas price overflows uint256")
+
+		// SSTORE-then-SELFDESTRUCT init code. See the docstring above for
+		// the bytecode breakdown.
+		initCode := []byte{
+			0x60, 0x01, // PUSH1 0x01 (value)
+			0x60, 0x01, // PUSH1 0x01 (slot)
+			0x55, // SSTORE
+			0x33, // CALLER
+			0xff, // SELFDESTRUCT
+		}
+
+		createTx := &types.LegacyTx{
+			CommonTx: types.CommonTx{
+				Nonce:    nonce.Uint64(),
+				GasLimit: 1_000_000,
+				To:       nil, // CREATE
+				Value:    uint256.Int{},
+				Data:     initCode,
+			},
+			GasPrice: *gasPriceU256,
+		}
+		signedCreateTx, err := types.SignTx(createTx, *signer, eat.CoinbaseKey)
+		require.NoError(t, err)
+		_, err = eat.RpcApiClient.SendTransaction(signedCreateTx)
+		require.NoError(t, err)
+
+		// BuildCanonicalBlock drives proposer (serial) + validator (parallel)
+		// through the full engine_newPayload roundtrip. If their BAL hashes
+		// diverge, this call errors with "block access list mismatch".
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err, "BAL divergence: block assembler vs parallel executor")
+		require.NoError(t, eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx,
+			payload.ExecutionPayload, signedCreateTx.Hash()))
+
+		// Sanity-check the BAL body decodes and validates.
+		_ = decodeAndValidateBAL(t, payload)
 	})
 }
 

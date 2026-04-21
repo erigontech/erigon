@@ -100,6 +100,27 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, ams
 	// in VersionMap.validateRead ensures deterministic parallel execution even
 	// without a stored BAL body (HasBAL=false), so the computed BAL is accurate.
 	if headerBALHash != bal.Hash() {
+		// Dump full BAL DebugStrings to stderr via the logger so container
+		// stdout captures (kurtosis/docker log collection) preserve the diff
+		// even when the on-disk dumpDir below is unreachable (e.g. ephemeral
+		// container, CI runner without artifact capture of /data).
+		// Each DebugString is one multi-line value tagged with block metadata
+		// so operators can diff computed vs stored without hunting for files.
+		computedDebug := bal.DebugString()
+		var storedDebug string
+		if dbBALBytes != nil {
+			dbBAL2, decErr := types.DecodeBlockAccessListBytes(dbBALBytes)
+			if decErr != nil {
+				log.Warn("failed to decode stored BAL for debug dump", "err", decErr)
+			} else if dbBAL2 != nil {
+				storedDebug = dbBAL2.DebugString()
+			}
+		}
+		log.Error("BAL mismatch: computed", "block", blockNum, "hash", bal.Hash(), "headerHash", headerBALHash, "bal", computedDebug)
+		if storedDebug != "" {
+			log.Error("BAL mismatch: stored (from sidecar)", "block", blockNum, "hash", headerBALHash, "bal", storedDebug)
+		}
+
 		dumpDir := ""
 		if dataDir != "" {
 			balDir := filepath.Join(dataDir, "bal")
@@ -107,17 +128,14 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, ams
 				log.Warn("failed to create BAL debug directory", "dir", balDir, "err", err)
 			} else {
 				computedPath := filepath.Join(balDir, fmt.Sprintf("computed_bal_%d.txt", blockNum))
-				if err := os.WriteFile(computedPath, []byte(bal.DebugString()), 0o644); err != nil {
+				if err := os.WriteFile(computedPath, []byte(computedDebug), 0o644); err != nil {
 					log.Warn("failed to write computed BAL debug file", "path", computedPath, "err", err)
 				} else {
 					dumpDir = balDir
 				}
-				dbBAL2, err := types.DecodeBlockAccessListBytes(dbBALBytes)
-				if err != nil {
-					log.Warn("failed to decode stored BAL for debug dump", "err", err)
-				} else if dbBAL2 != nil {
+				if storedDebug != "" {
 					storedPath := filepath.Join(balDir, fmt.Sprintf("stored_bal_%d.txt", blockNum))
-					if err := os.WriteFile(storedPath, []byte(dbBAL2.DebugString()), 0o644); err != nil {
+					if err := os.WriteFile(storedPath, []byte(storedDebug), 0o644); err != nil {
 						log.Warn("failed to write stored BAL debug file", "path", storedPath, "err", err)
 					}
 				}
