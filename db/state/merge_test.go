@@ -800,7 +800,7 @@ func TestMergeFiles(t *testing.T) {
 	txs := d.stepSize * 8
 	data := generateTestData(t, 20, 52, txs, txs, 100)
 
-	rwTx, err := db.BeginRw(context.Background())
+	rwTx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
@@ -816,18 +816,18 @@ func TestMergeFiles(t *testing.T) {
 		}
 	}
 
-	require.NoError(t, w.Flush(context.Background(), rwTx))
+	require.NoError(t, w.Flush(t.Context(), rwTx))
 	w.Close()
 	err = rwTx.Commit()
 	require.NoError(t, err)
 
-	err = db.UpdateNosync(context.Background(), func(tx kv.RwTx) error {
+	err = db.UpdateNosync(t.Context(), func(tx kv.RwTx) error {
 		collateAndMerge(t, tx, d, txs)
 		return nil
 	})
 	require.NoError(t, err)
 
-	rwTx, err = db.BeginRw(context.Background())
+	rwTx, err = db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
