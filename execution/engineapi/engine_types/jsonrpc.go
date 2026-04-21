@@ -49,8 +49,8 @@ type ExecutionPayload struct {
 	Withdrawals     []*types.Withdrawal `json:"withdrawals"`
 	BlobGasUsed     *hexutil.Uint64     `json:"blobGasUsed"`
 	ExcessBlobGas   *hexutil.Uint64     `json:"excessBlobGas"`
-	SlotNumber      *hexutil.Uint64     `json:"slotNumber"`
-	BlockAccessList hexutil.Bytes       `json:"blockAccessList"`
+	SlotNumber      *hexutil.Uint64     `json:"slotNumber,omitempty"`
+	BlockAccessList hexutil.Bytes       `json:"blockAccessList,omitempty"`
 }
 
 // PayloadAttributes represent the attributes required to start assembling a payload
@@ -141,7 +141,7 @@ type ExecutionPayloadBody struct {
 type ExecutionPayloadBodyV2 struct {
 	Transactions    []hexutil.Bytes     `json:"transactions" gencodec:"required"`
 	Withdrawals     []*types.Withdrawal `json:"withdrawals"  gencodec:"required"`
-	BlockAccessList hexutil.Bytes       `json:"blockAccessList"`
+	BlockAccessList hexutil.Bytes       `json:"blockAccessList,omitempty"`
 }
 
 type PayloadStatus struct {

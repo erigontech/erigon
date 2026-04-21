@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
@@ -63,7 +64,17 @@ type Aggregator struct {
 	dirs              datadir.Dirs
 	stepSize          atomic.Uint64
 	stepsInFrozenFile atomic.Uint64
-	reorgBlockDepth   uint64
+	// erigondbDomainStepsInFrozenFile overrides stepsInFrozenFile for the domain merge cap only
+	// (history/II keep using stepsInFrozenFile). Set once at construction via AggOpts. Semantics:
+	//   0                             → no override (default)
+	//   config3.UnboundedDomainMerge  → domain merge is unbounded (no cap)
+	//   other                         → use this value instead of stepsInFrozenFile as the domain cap
+	//
+	// Note: this is a SOFT limit applied during the merge process. If you apply a smaller limit to
+	// an existing datadir, the existing domain files containing more steps will be unaffected.
+	erigondbDomainStepsInFrozenFile uint64
+
+	reorgBlockDepth uint64
 
 	dirtyFilesLock sync.Mutex
 	// visible is published via atomic.Store under dirtyFilesLock; readers take no lock.
@@ -1588,6 +1599,18 @@ func (v *aggregatorVisible) stateMinimaxTxNum() uint64 {
 
 func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFile uint64) *Ranges {
 	maxSpan := stepSize * stepsInFrozenFile
+
+	// --erigondb.domain.steps-in-frozen-file adjusts the domain cap only; history/II keep maxSpan.
+	domainMaxSpan := maxSpan
+	switch override := at.a.erigondbDomainStepsInFrozenFile; override {
+	case 0:
+		// no override
+	case config3.UnboundedDomainMerge:
+		domainMaxSpan = config3.UnboundedDomainMerge // no cap on domain merge
+	default:
+		domainMaxSpan = stepSize * override
+	}
+
 	r := &Ranges{invertedIndex: make([]*MergeRange, len(at.a.iis))}
 	commitmentUseReferencedBranches := at.a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues
 	if commitmentUseReferencedBranches {
@@ -1606,7 +1629,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 		if d.d.Disable {
 			continue
 		}
-		r.domain[id] = d.findMergeRange(maxEndTxNum, maxSpan)
+		r.domain[id] = d.findMergeRange(maxEndTxNum, domainMaxSpan, maxSpan)
 	}
 
 	if commitmentUseReferencedBranches && r.domain[kv.CommitmentDomain].values.needMerge {
