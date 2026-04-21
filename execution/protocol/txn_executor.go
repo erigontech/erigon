@@ -311,7 +311,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		}
 	}
 
-	if st.msg.Gas() > st.gp.Gas() {
+	if st.gp != nil && st.msg.Gas() > st.gp.Gas() {
 		return ErrGasLimitReached
 	}
 
