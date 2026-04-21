@@ -161,7 +161,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 
 		// Check if blob data is available (skip if blobs are in txpool)
 		if checkDataAvaiability && block.Block.Body.BlobKzgCommitments.Len() > 0 && !elHasBlobs {
-			if block.Version() >= clparams.FuluVersion {
+			if block.Version() >= clparams.FuluVersion && f.peerDas != nil {
 				available, err := f.peerDas.IsDataAvailable(block.Block.Slot, blockRoot)
 				if err != nil {
 					return err
@@ -214,6 +214,9 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			f.executionPayloadStatus.Add(executionBlockHash, payloadStatus)
 
 			switch payloadStatus {
+			case execution_client.PayloadStatusNone:
+				log.Debug("OnBlock: EL failed to process block", "block", common.Hash(blockRoot), "err", err)
+				return fmt.Errorf("%w: %v", ErrNewPayloadNoStatus, err)
 			case execution_client.PayloadStatusNotValidated:
 				log.Debug("OnBlock: block is not validated yet", "block", common.Hash(blockRoot))
 				// optimistic block candidate
