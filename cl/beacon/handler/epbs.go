@@ -18,6 +18,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -216,6 +217,9 @@ func (a *ApiHandler) PostEthV1BeaconPoolPayloadAttestations(w http.ResponseWrite
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
 		}
+	} else {
+		beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("payload attestation validation service not available")).WriteTo(w)
+		return
 	}
 
 	// Store in pool for GET endpoint serving
@@ -298,6 +302,9 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadBid(w http.ResponseWriter, r
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
 		}
+	} else {
+		beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("execution payload bid validation service not available")).WriteTo(w)
+		return
 	}
 
 	// Broadcast to gossip

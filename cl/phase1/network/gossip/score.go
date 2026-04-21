@@ -3,7 +3,6 @@ package gossip
 import (
 	"fmt"
 	"math"
-	"strings"
 	"time"
 
 	"github.com/erigontech/erigon/cl/gossip"
@@ -73,17 +72,22 @@ const (
 
 func (g *GossipManager) topicScoreParams(topic string) *pubsub.TopicScoreParams {
 	switch {
-	case strings.Contains(topic, gossip.TopicNameBeaconBlock) || gossip.IsTopicBlobSidecar(topic):
+	case topic == gossip.TopicNameBeaconBlock || gossip.IsTopicBlobSidecar(topic):
 		return g.defaultBlockTopicParams()
-	case strings.Contains(topic, gossip.TopicNameExecutionPayload):
+	case topic == gossip.TopicNameExecutionPayload:
 		return g.defaultExecutionPayloadTopicParams()
-	case strings.Contains(topic, gossip.TopicNameVoluntaryExit):
+	case topic == gossip.TopicNameExecutionPayloadBid:
+		return g.defaultExecutionPayloadTopicParams()
+	case topic == gossip.TopicNamePayloadAttestation:
+		return g.defaultVoluntaryExitTopicParams()
+	case topic == gossip.TopicNameProposerPreferences:
+		return g.defaultVoluntaryExitTopicParams()
+	case topic == gossip.TopicNameVoluntaryExit:
 		return g.defaultVoluntaryExitTopicParams()
 	case gossip.IsTopicBeaconAttestation(topic):
 		return g.defaultAggregateSubnetTopicParams()
 	case gossip.IsTopicSyncCommittee(topic):
 		return g.defaultSyncSubnetTopicParams(g.activeIndicies)
-
 	default:
 		return nil
 	}

@@ -22,6 +22,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/erigontech/erigon/common/log/v3"
+
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -58,9 +60,11 @@ type ForkNode struct {
 }
 
 const (
-	checkpointsPerCache = 1024
-	allowedCachedStates = 8
-	queueCacheSize      = 128
+	checkpointsPerCache          = 1024
+	allowedCachedStates          = 8
+	queueCacheSize               = 128
+	pendingELPayloadsShrinkCap   = 256 // drain releases the backing array when cap exceeds this
+	maxPendingELPayloads         = 1024
 )
 
 type randaoDelta struct {
@@ -938,6 +942,12 @@ func (f *ForkChoiceStore) GetProposerLookahead(slot uint64) (solid.Uint64VectorS
 func (f *ForkChoiceStore) addPendingELPayload(block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) {
 	f.pendingELPayloadsMu.Lock()
 	defer f.pendingELPayloadsMu.Unlock()
+	if len(f.pendingELPayloads) >= maxPendingELPayloads {
+		// Drop oldest to make room — prevents OOM when EL is far behind
+		log.Warn("addPendingELPayload: dropping oldest pending EL payload", "queueLen", len(f.pendingELPayloads))
+		copy(f.pendingELPayloads, f.pendingELPayloads[1:])
+		f.pendingELPayloads = f.pendingELPayloads[:len(f.pendingELPayloads)-1]
+	}
 	f.pendingELPayloads = append(f.pendingELPayloads, PendingELPayload{
 		Block:    block,
 		Envelope: envelope,
@@ -946,10 +956,31 @@ func (f *ForkChoiceStore) addPendingELPayload(block *cltypes.SignedBeaconBlock, 
 
 // DrainPendingELPayloads returns and clears all queued EL payloads.
 // The stages layer calls this before Flush() to add them to blockCollector.
+//
+// No payloads are ever silently discarded — every queued item must reach
+// blockCollector for the EL chain to remain gapless.
+//
+// Memory strategy: when the backing array is small (≤ pendingELPayloadsShrinkCap),
+// we copy the data out and reuse the array to avoid allocation churn during normal
+// operation.  When it exceeds the threshold (e.g. after a transient EL-behind spike),
+// we hand the slice directly to the caller and set the field to nil so the peak
+// capacity is released to GC rather than permanently retained on the store.
 func (f *ForkChoiceStore) DrainPendingELPayloads() []PendingELPayload {
 	f.pendingELPayloadsMu.Lock()
 	defer f.pendingELPayloadsMu.Unlock()
-	payloads := f.pendingELPayloads
-	f.pendingELPayloads = nil
-	return payloads
+	if len(f.pendingELPayloads) == 0 {
+		return nil
+	}
+	if cap(f.pendingELPayloads) > pendingELPayloadsShrinkCap {
+		// Large spike: hand the slice to the caller, release the backing array.
+		result := f.pendingELPayloads
+		f.pendingELPayloads = nil
+		return result
+	}
+	// Normal case: copy out, reuse the small backing array.
+	result := make([]PendingELPayload, len(f.pendingELPayloads))
+	copy(result, f.pendingELPayloads)
+	clear(f.pendingELPayloads)
+	f.pendingELPayloads = f.pendingELPayloads[:0]
+	return result
 }

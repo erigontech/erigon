@@ -77,6 +77,36 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWithdrawals(w http.ResponseWr
 		}
 		return newBeaconResponse(expectedWithdrawals.Withdrawals).WithFinalized(false), nil
 	}
+	// [New in Gloas:EIP7732] For GLOAS+ states, compute withdrawals directly from the beacon state
+	// since GLOAS blocks have no ExecutionPayload and the look-ahead loop cannot find withdrawals.
+	stateVersion := a.beaconChainCfg.GetCurrentStateVersion(*slot / a.beaconChainCfg.SlotsPerEpoch)
+	if stateVersion >= clparams.GloasVersion {
+		beaconState, err := a.forkchoiceStore.GetStateAtBlockRoot(root, true)
+		if err != nil {
+			return nil, err
+		}
+		if beaconState == nil {
+			canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, *slot)
+			if err != nil {
+				return nil, err
+			}
+			if canonicalRoot != root {
+				return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("state not found"))
+			}
+			beaconState, err = a.stateReader.ReadHistoricalState(ctx, tx, *slot)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if beaconState == nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("state not found"))
+		}
+		expectedWithdrawals, err := state.GetExpectedWithdrawals(beaconState, state.Epoch(beaconState))
+		if err != nil {
+			return nil, err
+		}
+		return newBeaconResponse(expectedWithdrawals.Withdrawals).WithFinalized(false).WithOptimistic(isOptimistic), nil
+	}
 	lookAhead := 1024
 	for currSlot := *slot + 1; currSlot < *slot+uint64(lookAhead); currSlot++ {
 		if currSlot > a.syncedData.HeadSlot() {

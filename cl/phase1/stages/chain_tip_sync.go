@@ -435,7 +435,12 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 		// but whose EL newPayload failed (EL was behind).  Adding them to the collector
 		// before Flush ensures they are inserted into EL in block-number order, filling
 		// the gap that would otherwise permanently break the EL chain.
-		for _, p := range cfg.forkChoice.DrainPendingELPayloads() {
+		pendingPayloads := cfg.forkChoice.DrainPendingELPayloads()
+		if len(pendingPayloads) > 256 {
+			log.Warn("[chainTipSync] large pending EL payload queue — EL may be significantly behind",
+				"count", len(pendingPayloads))
+		}
+		for _, p := range pendingPayloads {
 			if p.Envelope != nil && p.Envelope.Message != nil && p.Envelope.Message.Payload != nil {
 				if addErr := cfg.blockCollector.AddGloasBlock(p.Block.Block, p.Envelope); addErr != nil {
 					log.Warn("[chainTipSync] failed to add pending EL payload to collector", "err", addErr)
