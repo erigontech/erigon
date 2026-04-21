@@ -500,7 +500,8 @@ var snapshotCommand = cli.Command{
 		{
 			Name: "publishable",
 			Action: func(cliCtx *cli.Context) error {
-				if err := doPublishable(cliCtx, nil); err != nil {
+				dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+				if err := doPublishable(dirs, nil); err != nil {
 					log.Error("[publishable]", "err", err)
 					return err
 				}
@@ -1392,7 +1393,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 						return err
 					}
 				case integrity.Publishable:
-					if err := doPublishable(cliCtx, chainDB); err != nil {
+					if err := doPublishable(dirs, chainDB); err != nil {
 						return err
 					}
 				case integrity.CommitmentRoot:
@@ -2156,8 +2157,7 @@ func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) 
 
 }
 
-func doPublishable(cliCtx *cli.Context, chainDB kv.RoDB) error {
-	dat := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+func doPublishable(dat datadir.Dirs, chainDB kv.RoDB) error {
 	// Check block snapshots sanity
 	if err := checkIfBlockSnapshotsPublishable(dat.Snap); err != nil {
 		return err
