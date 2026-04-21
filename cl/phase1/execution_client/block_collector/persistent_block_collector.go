@@ -167,7 +167,10 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 				continue
 			}
 
-			// Same execution block seen via another beacon variant: keep the first pick.
+			// Two rows sharing a block number are competing forks at that height
+			// (identical payloads would collide on payloadKey and Put would overwrite).
+			// First-in-cursor-order wins as a heuristic; if that picks the wrong fork,
+			// InsertBlocks will surface the parent mismatch on the next row.
 			if prevBlockNum > 0 && block.NumberU64() == prevBlockNum {
 				continue
 			}
@@ -217,7 +220,11 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 				if err != nil {
 					return err
 				}
-				if len(k) < 8 || binary.BigEndian.Uint64(k[:8]) >= cutoff {
+				if len(k) < 8 {
+					// Defensive: payloadKey always produces 40-byte keys.
+					continue
+				}
+				if binary.BigEndian.Uint64(k[:8]) >= cutoff {
 					break
 				}
 				if err := cursor.DeleteCurrent(); err != nil {
