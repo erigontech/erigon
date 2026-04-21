@@ -16,6 +16,10 @@
 
 package integrity
 
+import (
+	"sort"
+)
+
 type Check string
 
 const (
@@ -129,3 +133,42 @@ var DeprecatedChecks = []Check{
 	CommitmentKvDeref, //StateVerify - will overcome
 }
 var AllChecks = append(append(append([]Check{}, FastChecks...), SlowChecks...), DeprecatedChecks...)
+
+// fastCheckOrder ranks FastChecks from cheapest to heaviest for time-budgeted runs.
+// Lower index runs earlier, so unused time rolls forward to heavier checks at the tail.
+var fastCheckOrder = map[Check]int{
+	StateProgress:            0,
+	Publishable:              1,
+	HeaderNoGaps:             2,
+	BlocksTxnID:              3,
+	Blocks:                   4,
+	ReceiptsNoDups:           5,
+	RCacheNoDups:             6,
+	InvertedIndex:            7,
+	CommitmentRoot:           8,
+	CommitmentKvi:            9,
+	HistoryNoSystemTxs:       10,
+	CommitmentHistVal:        11,
+	StateRootVerifyByHistory: 12,
+}
+
+// SortChecksByCost returns a copy of checks ordered cheapest→heaviest per fastCheckOrder.
+// Checks not in fastCheckOrder are appended at the end in their original input order.
+func SortChecksByCost(checks []Check) []Check {
+	out := append([]Check{}, checks...)
+	sort.SliceStable(out, func(i, j int) bool {
+		ri, oki := fastCheckOrder[out[i]]
+		rj, okj := fastCheckOrder[out[j]]
+		switch {
+		case oki && okj:
+			return ri < rj
+		case oki:
+			return true
+		case okj:
+			return false
+		default:
+			return false
+		}
+	})
+	return out
+}
