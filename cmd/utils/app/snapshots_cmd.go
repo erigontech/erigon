@@ -3648,9 +3648,21 @@ func doEFSizes(dirs datadir.Dirs) error {
 
 	sort.Slice(results, func(i, j int) bool { return results[i].count > results[j].count })
 	for _, r := range results {
-		fmt.Printf("%12d  %s\n", r.count, r.name)
+		fmt.Printf("%10s  %s\n", fmtCount(r.count), r.name)
 	}
 	return nil
+}
+
+func fmtCount(n int) string {
+	s := strconv.Itoa(n)
+	out := make([]byte, 0, len(s)+len(s)/3)
+	for i, c := range s {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			out = append(out, ',')
+		}
+		out = append(out, byte(c))
+	}
+	return string(out)
 }
 
 func doDU(cliCtx *cli.Context, dirs datadir.Dirs) error {
