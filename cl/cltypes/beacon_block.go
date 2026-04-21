@@ -287,7 +287,11 @@ func NewBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparams.State
 	if version < clparams.GloasVersion {
 		// Pre-GLOAS: ExecutionPayload, BlobKzgCommitments in BeaconBody
 		body.ExecutionPayload = NewEth1Block(version, beaconCfg)
-		body.BlobKzgCommitments = solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48)
+		maxBlobCommitments := MaxBlobsCommittmentsPerBlock
+		if beaconCfg != nil && beaconCfg.MaxBlobCommittmentsPerBlock > 0 {
+			maxBlobCommitments = int(beaconCfg.MaxBlobCommittmentsPerBlock)
+		}
+		body.BlobKzgCommitments = solid.NewStaticListSSZ[*KZGCommitment](maxBlobCommitments, 48)
 		if version >= clparams.ElectraVersion {
 			body.ExecutionRequests = NewExecutionRequests(beaconCfg)
 		}

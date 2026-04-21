@@ -150,7 +150,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 
 		// Check if EL has blobs
 		elHasBlobs := false
-		if f.engine != nil && checkDataAvaiability && block.Block.Body.BlobKzgCommitments.Len() > 0 && !f.peerDas.IsArchivedMode() {
+		if f.engine != nil && f.peerDas != nil && checkDataAvaiability && block.Block.Body.BlobKzgCommitments.Len() > 0 && !f.peerDas.IsArchivedMode() {
 			blobsWithProof, proofs, err := f.engine.GetBlobs(ctx, versionedHashes, block.Version())
 			if err != nil {
 				log.Warn("OnBlock: GetBlobs failed", "blockRoot", common.Hash(blockRoot), "err", err)
