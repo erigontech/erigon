@@ -467,7 +467,6 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 			return ValidationResult{}, fmt.Errorf("ValidateChain: flush overlay to validation tx: %w", err)
 		}
 	}
-
 	doms, err := execctx.NewSharedDomains(ctx, tx, e.logger)
 	if err != nil {
 		return ValidationResult{}, err
