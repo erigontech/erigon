@@ -17,7 +17,6 @@
 package sentry
 
 import (
-	"context"
 	"net"
 	"testing"
 
@@ -32,7 +31,7 @@ import (
 func TestConfigureIsPure(t *testing.T) {
 	p := &Provider{}
 	cfg := Config{
-		SentryCtx: context.Background(),
+		SentryCtx: t.Context(),
 		Logger:    log.Root(),
 	}
 	p.Configure(cfg)
@@ -54,7 +53,7 @@ func TestCloseIdempotent(t *testing.T) {
 
 	// Configure, then Close twice.
 	p.Configure(Config{
-		SentryCtx: context.Background(),
+		SentryCtx: t.Context(),
 		Logger:    log.Root(),
 	})
 	p.Close()
