@@ -1205,12 +1205,16 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 	cfg.BootstrapNodesV5 = nodes
 }
 
-// resolveChainName returns the chain name to use for looking up network
-// defaults (bootnodes, DNS discovery URLs, static peers). It mirrors
-// go-ethereum's behavior: when --networkid is explicitly set to a non-mainnet
-// value and --chain is not, the "mainnet" default on --chain should not bleed
-// into network defaults. If the networkid maps to a known chain, that name is
-// returned; otherwise an empty string is returned, yielding no defaults.
+// resolveChainName returns the effective chain name from --chain and --networkid.
+// It is used for bootnodes, DNS discovery URLs, static peers, and the
+// chain-derived configuration in SetEthConfig (snapshot chain name,
+// chain-specific branches, etc.).
+//
+// It mirrors go-ethereum's behavior: when --networkid is explicitly set to a
+// non-mainnet value and --chain is not, the "mainnet" default on --chain
+// should not bleed into chain-derived config. If the networkid maps to a known
+// chain, that name is returned; otherwise an empty string is returned,
+// yielding no defaults.
 func resolveChainName(ctx *cli.Context) string {
 	chain := ctx.String(ChainFlag.Name)
 	if !ctx.IsSet(NetworkIdFlag.Name) || ctx.IsSet(ChainFlag.Name) {
