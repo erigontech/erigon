@@ -69,6 +69,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -3022,6 +3023,11 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		if err != nil {
 			return err
 		}
+		maxCollatable, err := services.MaxCollatableTxNum(ctx, tx, blockReader)
+		if err != nil {
+			return err
+		}
+		lastTxNum = min(lastTxNum, maxCollatable)
 		return nil
 	}); err != nil {
 		return err

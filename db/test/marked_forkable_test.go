@@ -2,7 +2,6 @@ package test
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"testing"
 
@@ -106,7 +105,7 @@ func TestMarked_PutToDb(t *testing.T) {
 
 	ma_tx := ma.BeginTemporalTx()
 	defer ma_tx.Close()
-	rwtx, err := db.BeginRw(context.Background())
+	rwtx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer rwtx.Rollback()
 
@@ -140,7 +139,7 @@ func TestPrune(t *testing.T) {
 			dir, db, log := setup(t)
 			headerId, ma := setupHeader(t, log, dir, db)
 
-			ctx := context.Background()
+			ctx := t.Context()
 			cfg := state.Registry.SnapshotConfig(headerId)
 			extras_count := uint64(5) // in db
 			entries_count = cfg.MinimumSize + cfg.SafetyMargin + extras_count
@@ -231,7 +230,7 @@ func TestBuildFiles_Marked(t *testing.T) {
 	// then unwind and check get
 	dir, db, log := setup(t)
 	headerId, ma := setupHeader(t, log, dir, db)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	ma_tx := ma.BeginTemporalTx()
 	defer ma_tx.Close()
