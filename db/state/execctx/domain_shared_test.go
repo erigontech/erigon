@@ -421,12 +421,11 @@ func TestSharedDomain_RepeatedUnwindAcrossStepBoundary(t *testing.T) {
 	// Verify: commitment "state" key is at blockNum ≤ unwindTarget.
 	stateVal, _, err := rwTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
 	require.NoError(err)
-	if len(stateVal) >= 16 {
-		postBlock := binary.BigEndian.Uint64(stateVal[8:16])
-		require.LessOrEqualf(postBlock, unwindTarget,
-			"commitment state blockNum=%d must be ≤ unwindTarget=%d after repeated unwinds",
-			postBlock, unwindTarget)
-	}
+	require.GreaterOrEqual(len(stateVal), 16, "commitment state record must exist post-unwind (was forward-populated by executeRange)")
+	postBlock := binary.BigEndian.Uint64(stateVal[8:16])
+	require.LessOrEqualf(postBlock, unwindTarget,
+		"commitment state blockNum=%d must be ≤ unwindTarget=%d after repeated unwinds",
+		postBlock, unwindTarget)
 	// Verify: no commitment values table entries with step > unwindTarget/stepSize.
 	maxStep := unwindTarget / stepSize
 	c, err := rwTx.Cursor(kv.TblCommitmentVals)
@@ -548,13 +547,12 @@ func TestSharedDomain_UnwindAcrossStepBoundary(t *testing.T) {
 	// Phase 5: the commitment "state" key should now decode to blockNum ≤ unwindTarget.
 	stateVal, _, err = rwTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
 	require.NoError(err)
-	if len(stateVal) >= 16 {
-		postTxNum := binary.BigEndian.Uint64(stateVal[:8])
-		postBlock := binary.BigEndian.Uint64(stateVal[8:16])
-		require.LessOrEqualf(postBlock, unwindTarget,
-			"post-unwind: commitment state blockNum=%d must be ≤ unwindTarget=%d (txNum=%d)",
-			postBlock, unwindTarget, postTxNum)
-	}
+	require.GreaterOrEqual(len(stateVal), 16, "post-unwind: commitment state record must exist (was populated in phase 2)")
+	postTxNum := binary.BigEndian.Uint64(stateVal[:8])
+	postBlock := binary.BigEndian.Uint64(stateVal[8:16])
+	require.LessOrEqualf(postBlock, unwindTarget,
+		"post-unwind: commitment state blockNum=%d must be ≤ unwindTarget=%d (txNum=%d)",
+		postBlock, unwindTarget, postTxNum)
 	// Fix: also confirm no values table entries exist above the unwind-target step.
 	maxStep := unwindTarget / stepSize // step 0 for target 4
 	c, err := rwTx.Cursor(kv.TblCommitmentVals)
