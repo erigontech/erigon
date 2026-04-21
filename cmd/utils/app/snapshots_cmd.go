@@ -3627,19 +3627,29 @@ func doEFSizes(dirs datadir.Dirs) error {
 	if err != nil {
 		return fmt.Errorf("walking snapshots: %w", err)
 	}
-	var ef []duFileInfo
+
+	type efResult struct {
+		name  string
+		count int
+	}
+	var results []efResult
+
 	for _, f := range files {
-		if strings.HasSuffix(f.Name, ".ef") {
-			ef = append(ef, f)
+		if !strings.HasSuffix(f.Name, ".ef") {
+			continue
 		}
+		d, err := seg.NewDecompressor(f.Path)
+		if err != nil {
+			return fmt.Errorf("open %s: %w", f.Name, err)
+		}
+		results = append(results, efResult{f.Name, d.Count()})
+		d.Close()
 	}
-	sort.Slice(ef, func(i, j int) bool { return ef[i].Size > ef[j].Size })
-	var total int64
-	for _, f := range ef {
-		fmt.Printf("%8.2f MB  %s\n", float64(f.Size)/(1024*1024), f.Name)
-		total += f.Size
+
+	sort.Slice(results, func(i, j int) bool { return results[i].count > results[j].count })
+	for _, r := range results {
+		fmt.Printf("%12d  %s\n", r.count, r.name)
 	}
-	fmt.Printf("---\n%8.2f MB  total (%d files)\n", float64(total)/(1024*1024), len(ef))
 	return nil
 }
 
