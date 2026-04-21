@@ -263,7 +263,7 @@ See https://eest.ethereum.org/main/running_tests/running/#engine-vs-rlp-simulato
 The full RLP test set is too large to run end-to-end in CI — always pass a
 `--sim.limit` regex narrowing the scope. CI mirrors this by running only
 `.*eip2930_access_list.*`. For local debugging, target a single EIP / opcode
-group similarly. Fixtures come from the same `fixtures_develop.tar.gz` archive
+group similarly. Fixtures come from the same `fixtures_stable.tar.gz` archive
 as consume-engine.
 
 ```bash
@@ -273,7 +273,7 @@ as consume-engine.
   --sim ethereum/eels/consume-rlp \
   --sim.limit=".*eip2930_access_list.*" \
   --sim.parallelism=12 --docker.nocache=true \
-  --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/${EEST_VERSION}/fixtures_develop.tar.gz \
+  --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/${EEST_VERSION}/fixtures_stable.tar.gz \
   --sim.timelimit 60m
 ```
 
