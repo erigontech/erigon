@@ -7,7 +7,7 @@ accounts:
             current: v2.0
             min: v1.0
         kvei:
-            current: v2.0
+            current: v1.1
             min: v1.0
     hist:
         v:
@@ -40,7 +40,7 @@ code:
             current: v2.0
             min: v1.0
         kvei:
-            current: v2.0
+            current: v1.1
             min: v1.0
     hist:
         v:
@@ -62,7 +62,7 @@ commitment:
             current: v2.0
             min: v1.0
         kvi:
-            current: v2.0
+            current: v3.0
             min: v1.0
     hist:
         v:
@@ -108,7 +108,7 @@ rcache:
             current: v3.0
             min: v1.0
         kvi:
-            current: v2.0
+            current: v3.0
             min: v1.0
     hist:
         v:
@@ -133,7 +133,7 @@ receipt:
             current: v3.0
             min: v1.0
         kvei:
-            current: v2.0
+            current: v1.2
             min: v1.0
     hist:
         v:
@@ -158,7 +158,7 @@ storage:
             current: v2.0
             min: v1.0
         kvei:
-            current: v2.0
+            current: v1.1
             min: v1.0
     hist:
         v:
