@@ -422,10 +422,6 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		executionPayloadBidService,
 	)
 
-	// Create PeerDas after gossip topics are registered so that resubscribeGossip() finds them.
-	peerDas := das.NewPeerDas(ctx, beaconRpc, beaconConfig, &config, columnStorage, blobStorage, sentinel, localNode.ID(), ethClock, peerDasState, gossipManager)
-	forkChoice.InitPeerDas(peerDas) // hack init
-
 	{
 		go batchSignatureVerifier.Start()
 	}
