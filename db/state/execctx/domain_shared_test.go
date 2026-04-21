@@ -256,6 +256,17 @@ func TestSharedDomain_RepeatedUnwindAcrossStepBoundary(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
+	// Skipped on release/3.4: this test asserts the pre-unwind commitment
+	// "state" value is restored after repeated unwind/re-exec cycles. That
+	// relies on overlay-pruning semantics introduced by PR #20625 (prune
+	// TemporalMemBatch overlay entries past unwindToTxNum), which is only
+	// present on main. release/3.4 uses a different approach
+	// (stagedsync.ClearLatestCache + flush unwind changeset to DB before
+	// re-execution) and so the test cannot run unmodified here. The single-
+	// unwind variants (TestSharedDomain_UnwindAcrossStepBoundary,
+	// TestSharedDomain_MergeUnwindAcrossStepBoundary) still exercise the
+	// per-step orphan-entry invariant that #20710 fixes.
+	t.Skip("depends on PR #20625 overlay-pruning (not in release/3.4)")
 	t.Parallel()
 
 	stepSize := uint64(10)
@@ -472,7 +483,7 @@ func TestSharedDomain_MergeUnwindAcrossStepBoundary(t *testing.T) {
 
 	// Merge sd2 into sd1. Both sides carry a non-nil unwindChangeset, so
 	// TemporalMemBatch.Merge takes the raw-merge branch.
-	require.NoError(sd1.Merge(ctx, unwindTarget, sd2, unwindTarget))
+	require.NoError(sd1.Merge(unwindTarget, sd2, unwindTarget))
 
 	// Flush replays the combined raw changeset against MDBX.
 	require.NoError(sd1.Flush(ctx, rwTx))
