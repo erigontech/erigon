@@ -307,7 +307,11 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 	prevProgress := currentSlot.Load()
 
 	// Stale progress detection: if no progress for this duration, exit and let ChainTipSync take over.
-	const staleTimeout = 2 * time.Minute
+	// Use a longer timeout for pre-GLOAS chains where range-request stalls are less common.
+	staleTimeout := 2 * time.Minute
+	if cfg.beaconCfg.GetCurrentStateVersion(cfg.ethClock.GetCurrentEpoch()) < clparams.GloasVersion {
+		staleTimeout = 5 * time.Minute
+	}
 	lastProgressTime := time.Now()
 	lastProgressSlot := currentSlot.Load()
 
