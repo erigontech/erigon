@@ -668,7 +668,7 @@ func collateAndMerge(t *testing.T, tx kv.RwTx, d *Domain, txs uint64) {
 		if stop := func() bool {
 			domainRoTx := d.beginForTests()
 			defer domainRoTx.Close()
-			r = domainRoTx.findMergeRange(domainRoTx.files.EndTxNum(), maxSpan)
+			r = domainRoTx.findMergeRange(domainRoTx.files.EndTxNum(), maxSpan, maxSpan)
 			if !r.any() {
 				return true
 			}
@@ -707,7 +707,7 @@ func collateAndMergeOnceWithScanPrune(t *testing.T, d *Domain, tx kv.RwTx, step 
 		if stop := func() bool {
 			domainRoTx := d.beginForTests()
 			defer domainRoTx.Close()
-			r := domainRoTx.findMergeRange(domainRoTx.files.EndTxNum(), maxSpan)
+			r := domainRoTx.findMergeRange(domainRoTx.files.EndTxNum(), maxSpan, maxSpan)
 			if !r.any() {
 				return true
 			}
@@ -743,7 +743,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step kv.Step, prun
 	maxSpan := d.stepSize * config3.DefaultStepsInFrozenFile
 	for {
 		domainRoTx := d.beginForTests()
-		r := domainRoTx.findMergeRange(domainRoTx.files.EndTxNum(), maxSpan)
+		r := domainRoTx.findMergeRange(domainRoTx.files.EndTxNum(), maxSpan, maxSpan)
 		if !r.any() {
 			domainRoTx.Close()
 			break
@@ -1601,7 +1601,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 		_, err = domainRoTx.Prune(ctx, tx, step, txFrom, txTo, math.MaxUint64, logEvery)
 		require.NoError(t, err)
 
-		ranges := domainRoTx.findMergeRange(txFrom, txTo)
+		ranges := domainRoTx.findMergeRange(txFrom, txTo, txTo)
 		vl, il, hl := domainRoTx.staticFilesInRange(ranges)
 
 		dv, di, dh, err := domainRoTx.mergeFiles(ctx, vl, il, hl, ranges, nil, ps)
@@ -3485,7 +3485,7 @@ func collateAndMergeWithCollisionRetry(t *testing.T, tx kv.RwTx, d *Domain, txs 
 	defer domainRoTx.Close()
 
 	// Merge with collision retry
-	r := domainRoTx.findMergeRange(d.dirtyFilesEndTxNumMinimax(), d.dirtyFilesEndTxNumMinimax())
+	r := domainRoTx.findMergeRange(d.dirtyFilesEndTxNumMinimax(), d.dirtyFilesEndTxNumMinimax(), d.dirtyFilesEndTxNumMinimax())
 	if r.values.needMerge {
 		valuesOuts, indexOuts, historyOuts := domainRoTx.staticFilesInRange(r)
 		valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, background.NewProgressSet())
