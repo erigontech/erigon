@@ -125,13 +125,13 @@ func (p *PersistentBlockCollector) AddBlock(block *cltypes.BeaconBlock) error {
 }
 
 // Flush loads all collected blocks into the execution engine and clears the database.
-// Keys are block-number + SSZ root, so a single execution block can appear under
-// multiple keys when caplin sees it via competing beacon variants. Rows sharing a
-// block number are competing forks at that height (identical payloads collide on
-// payloadKey and Put overwrites); the variant chosen is the one whose BlockHash
-// matches the ParentHash of the next row — a single-row look-ahead. If a real gap
-// is detected, rows past the gap are kept so the next Flush can retry once the
-// missing range is re-downloaded.
+// Keys are block-number + payload SSZ root. Identical execution payloads therefore
+// collide on payloadKey and tx.Put overwrites the existing row, so multiple rows at
+// the same block number only exist when the execution payload itself differs (that
+// is, competing execution forks at the same height). The variant chosen is the one
+// whose BlockHash matches the ParentHash of the next row — a single-row look-ahead.
+// If a real gap is detected, rows past the gap are kept so the next Flush can retry
+// once the missing range is re-downloaded.
 func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -268,11 +268,14 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 	if gapDetected {
 		// Prune only rows the caller is done with; rows past the gap stay so a
 		// future re-download of the missing range unblocks the next Flush.
+		// Use a non-cancelable context: if ctx was cancelled the caller cares
+		// about stopping, but skipping cleanup would leave already-inserted
+		// rows in place and the next Flush would re-read and re-insert them.
 		cutoff := minInsertableBlockNumber
 		if lastCommittedHeight+1 > cutoff {
 			cutoff = lastCommittedHeight + 1
 		}
-		if err := p.db.Update(ctx, func(tx kv.RwTx) error {
+		if err := p.db.Update(context.Background(), func(tx kv.RwTx) error {
 			cursor, err := tx.RwCursor(kv.Headers)
 			if err != nil {
 				return err
