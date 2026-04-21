@@ -100,10 +100,7 @@ func (b *BuilderPendingPayment) HashSSZ() ([32]byte, error) {
 }
 
 func (b *BuilderPendingPayment) EncodingSizeSSZ() int {
-	if b.Withdrawal == nil {
-		return 8
-	}
-	return 8 + b.Withdrawal.EncodingSizeSSZ()
+	return 8 + new(BuilderPendingWithdrawal).EncodingSizeSSZ() // weight + withdrawal (static)
 }
 
 func (b *BuilderPendingPayment) Static() bool {
