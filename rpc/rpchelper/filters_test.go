@@ -841,3 +841,67 @@ func TestFilters_FilterUpdateWaitsForAppliedAck(t *testing.T) {
 		t.Fatal("expected filter update to finish after applied ack")
 	}
 }
+
+func TestFilters_LateAppliedAckDoesNotSatisfyNextUpdate(t *testing.T) {
+	t.Parallel()
+
+	config := FiltersConfig{}
+	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New(), nil)
+	f.filterUpdateAckTimeout = 20 * time.Millisecond
+
+	requestorCalled := make(chan struct{}, 2)
+	f.receiptsRequestor.Store(func(_ *remoteproto.ReceiptsFilterRequest) error {
+		requestorCalled <- struct{}{}
+		return nil
+	})
+
+	firstDone := make(chan error, 1)
+	go func() {
+		firstDone <- f.sendReceiptsFilterUpdate()
+	}()
+
+	select {
+	case <-requestorCalled:
+	case <-time.After(time.Second):
+		t.Fatal("expected first receipts filter update to be sent")
+	}
+
+	select {
+	case err := <-firstDone:
+		if err == nil {
+			t.Fatal("expected first update to time out")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected first update to time out")
+	}
+
+	secondDone := make(chan error, 1)
+	go func() {
+		secondDone <- f.sendReceiptsFilterUpdate()
+	}()
+
+	select {
+	case <-requestorCalled:
+	case <-time.After(time.Second):
+		t.Fatal("expected second receipts filter update to be sent")
+	}
+
+	f.OnReceipts(appliedReceiptsReply())
+
+	select {
+	case err := <-secondDone:
+		t.Fatalf("second update returned after stale applied ack: %v", err)
+	default:
+	}
+
+	f.OnReceipts(appliedReceiptsReply())
+
+	select {
+	case err := <-secondDone:
+		if err != nil {
+			t.Fatalf("expected successful second update after matching applied ack, got %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected second update to finish after matching applied ack")
+	}
+}

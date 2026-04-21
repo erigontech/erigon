@@ -60,19 +60,23 @@ type Filters struct {
 
 	pendingBlock *types.Block
 
-	headsSubs                *concurrent.SyncMap[HeadsSubID, Sub[*types.Header]]
-	pendingLogsSubs          *concurrent.SyncMap[PendingLogsSubID, Sub[types.Logs]]
-	pendingBlockSubs         *concurrent.SyncMap[PendingBlockSubID, Sub[*types.Block]]
-	pendingTxsSubs           *concurrent.SyncMap[PendingTxsSubID, Sub[[]types.Transaction]]
-	logsSubs                 *LogsFilterAggregator
-	logsRequestor            atomic.Value
-	logsFilterAppliedAck     chan struct{}
-	pendingLogsUpdate        atomic.Bool
-	receiptsSubs             *ReceiptsFilterAggregator
-	receiptsRequestor        atomic.Value
-	receiptsFilterAppliedAck chan struct{}
-	pendingReceiptsUpdate    atomic.Bool
-	onNewSnapshot            func()
+	headsSubs                  *concurrent.SyncMap[HeadsSubID, Sub[*types.Header]]
+	pendingLogsSubs            *concurrent.SyncMap[PendingLogsSubID, Sub[types.Logs]]
+	pendingBlockSubs           *concurrent.SyncMap[PendingBlockSubID, Sub[*types.Block]]
+	pendingTxsSubs             *concurrent.SyncMap[PendingTxsSubID, Sub[[]types.Transaction]]
+	logsSubs                   *LogsFilterAggregator
+	logsRequestor              atomic.Value
+	logsFilterAppliedAck       chan struct{}
+	logsFilterAppliedCount     atomic.Uint64
+	logsFilterUpdateCount      atomic.Uint64
+	pendingLogsUpdate          atomic.Bool
+	receiptsSubs               *ReceiptsFilterAggregator
+	receiptsRequestor          atomic.Value
+	receiptsFilterAppliedAck   chan struct{}
+	receiptsFilterAppliedCount atomic.Uint64
+	receiptsFilterUpdateCount  atomic.Uint64
+	pendingReceiptsUpdate      atomic.Bool
+	onNewSnapshot              func()
 
 	logsStores         *concurrent.SyncMap[LogsSubID, []*types.Log]
 	pendingHeadsStores *concurrent.SyncMap[HeadsSubID, []*types.Header]
@@ -88,6 +92,8 @@ type Filters struct {
 	events   *shards.Events
 
 	config FiltersConfig
+
+	filterUpdateAckTimeout time.Duration
 }
 
 type logsReadySubscriber interface {
@@ -117,6 +123,7 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 		logger:                   logger,
 		config:                   config,
 		events:                   events,
+		filterUpdateAckTimeout:   defaultFilterUpdateAckTimeout,
 	}
 
 	go func() {
@@ -561,7 +568,7 @@ func (ff *Filters) sendReceiptsFilterUpdate() error {
 	}
 	send := loaded.(func(*remoteproto.ReceiptsFilterRequest) error)
 	ff.mu.Unlock()
-	return ff.waitForFilterUpdateApplied("receipts", ff.receiptsFilterAppliedAck, &ff.receiptsUpdateMu, func() error {
+	return ff.waitForFilterUpdateApplied("receipts", ff.receiptsFilterAppliedAck, &ff.receiptsFilterAppliedCount, &ff.receiptsFilterUpdateCount, &ff.receiptsUpdateMu, func() error {
 		return send(rfr)
 	})
 }
@@ -653,7 +660,7 @@ func (ff *Filters) sendLogsFilterUpdate() error {
 	}
 	send := loaded.(func(*remoteproto.LogsFilterRequest) error)
 	ff.mu.Unlock()
-	return ff.waitForFilterUpdateApplied("logs", ff.logsFilterAppliedAck, &ff.logsUpdateMu, func() error {
+	return ff.waitForFilterUpdateApplied("logs", ff.logsFilterAppliedAck, &ff.logsFilterAppliedCount, &ff.logsFilterUpdateCount, &ff.logsUpdateMu, func() error {
 		return send(lfr)
 	})
 }
@@ -774,7 +781,7 @@ func (ff *Filters) onNewHeader(event *remoteproto.SubscribeReply) error {
 // OnReceipts handles a new receipt event from the remote and processes it.
 func (ff *Filters) OnReceipts(reply *remoteproto.SubscribeReceiptsReply) {
 	if isReceiptsFilterAppliedReply(reply) {
-		ff.signalFilterApplied(ff.receiptsFilterAppliedAck)
+		ff.signalFilterApplied(ff.receiptsFilterAppliedAck, &ff.receiptsFilterAppliedCount)
 		return
 	}
 	ff.receiptsSubs.distributeReceipt(reply)
@@ -804,47 +811,42 @@ func (ff *Filters) OnNewTx(reply *txpoolproto.OnAddReply) {
 // OnNewLogs handles a new log event from the remote and processes it.
 func (ff *Filters) OnNewLogs(reply *remoteproto.SubscribeLogsReply) {
 	if isLogsFilterAppliedReply(reply) {
-		ff.signalFilterApplied(ff.logsFilterAppliedAck)
+		ff.signalFilterApplied(ff.logsFilterAppliedAck, &ff.logsFilterAppliedCount)
 		return
 	}
 	ff.logsSubs.distributeLog(reply)
 }
 
-const filterUpdateAckTimeout = 5 * time.Second
+const defaultFilterUpdateAckTimeout = 5 * time.Second
 
-func (ff *Filters) waitForFilterUpdateApplied(kind string, ackCh chan struct{}, updateMu *sync.Mutex, send func() error) error {
+func (ff *Filters) waitForFilterUpdateApplied(kind string, ackCh chan struct{}, appliedCount, updateCount *atomic.Uint64, updateMu *sync.Mutex, send func() error) error {
 	updateMu.Lock()
 	defer updateMu.Unlock()
 
-	drainFilterAppliedAck(ackCh)
 	if err := send(); err != nil {
 		return err
 	}
+	targetCount := updateCount.Add(1)
 
-	timer := time.NewTimer(filterUpdateAckTimeout)
+	timer := time.NewTimer(ff.filterUpdateAckTimeout)
 	defer timer.Stop()
 
-	select {
-	case <-ackCh:
-		return nil
-	case <-timer.C:
-		return fmt.Errorf("timed out waiting for %s filter update to apply", kind)
-	case <-ff.ctx.Done():
-		return ff.ctx.Err()
-	}
-}
-
-func drainFilterAppliedAck(ackCh chan struct{}) {
 	for {
+		if appliedCount.Load() >= targetCount {
+			return nil
+		}
 		select {
 		case <-ackCh:
-		default:
-			return
+		case <-timer.C:
+			return fmt.Errorf("timed out waiting for %s filter update to apply", kind)
+		case <-ff.ctx.Done():
+			return ff.ctx.Err()
 		}
 	}
 }
 
-func (ff *Filters) signalFilterApplied(ackCh chan struct{}) {
+func (ff *Filters) signalFilterApplied(ackCh chan struct{}, appliedCount *atomic.Uint64) {
+	appliedCount.Add(1)
 	select {
 	case ackCh <- struct{}{}:
 	default:
