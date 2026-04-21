@@ -141,6 +141,22 @@ func (b *BeaconState) baseOffsetSSZ() uint32 {
 		size += uint32((cfg.MinSeedLookahead+1)*cfg.SlotsPerEpoch) * 8 // proposer_lookahead (Vector)
 	}
 
+	if b.version >= clparams.GloasVersion {
+		// In GLOAS, latestExecutionPayloadHeader (variable, 4-byte offset) is replaced by
+		// latestBlockHash (fixed 32-byte Hash) at the Bellatrix position.
+		size -= 4  // remove latestExecutionPayloadHeader offset (already counted)
+		size += 32 // latestBlockHash (fixed Hash)
+		// New GLOAS fields:
+		size += 4                                                                                          // builders offset (List, variable)
+		size += 8                                                                                          // next_withdrawal_builder_index
+		size += uint32(cfg.SlotsPerHistoricalRoot) / 8                                                     // execution_payload_availability (BitVector)
+		size += uint32(2*cfg.SlotsPerEpoch) * uint32(new(cltypes.BuilderPendingPayment).EncodingSizeSSZ()) // builder_pending_payments (Vector, fixed-size elements)
+		size += 4                                                                                          // builder_pending_withdrawals offset (List, variable)
+		size += 4                                                                                          // latest_execution_payload_bid offset (variable)
+		size += 4                                                                                          // payload_expected_withdrawals offset (List, variable)
+		size += uint32((2+cfg.MinSeedLookahead)*cfg.SlotsPerEpoch) * uint32(clparams.PtcSize) * 8          // ptc_window (Vector[Vector[uint64, PTC_SIZE]])
+	}
+
 	return size
 }
 
