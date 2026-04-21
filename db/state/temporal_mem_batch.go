@@ -635,6 +635,13 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 			}
 			// Also merge the raw changesets — Flush walks these to ensure every
 			// step entry in MDBX gets reverted, not just the collapsed one.
+			//
+			// Precondition: both sd.unwindChangesetRaw[domain] and otherDiffs
+			// must be sorted by Key; MergeDiffSets relies on that ordering.
+			// The invariant is established upstream — DomainDiff.GetDiffSet
+			// sorts (db/kv/helpers.go), the serialize/deserialize pair
+			// preserves order, TemporalMemBatch.Unwind copies its sorted input
+			// verbatim, and MergeDiffSets itself returns sorted output.
 			if other.unwindChangesetRaw != nil {
 				if sd.unwindChangesetRaw == nil {
 					sd.unwindChangesetRaw = other.unwindChangesetRaw
@@ -664,13 +671,12 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
 		// unwindChangeset would lose every (key, step) entry except one per
 		// real key, which leaves orphan domain-values entries at steps above
 		// the unwind target (observed on mainnet for the commitment domain).
-		changeSet := *sd.unwindChangesetRaw
-		for domain := range changeSet {
-			sort.Slice(changeSet[domain], func(i, j int) bool {
-				return changeSet[domain][i].Key < changeSet[domain][j].Key
+		for domain := range sd.unwindChangesetRaw {
+			sort.Slice(sd.unwindChangesetRaw[domain], func(i, j int) bool {
+				return sd.unwindChangesetRaw[domain][i].Key < sd.unwindChangesetRaw[domain][j].Key
 			})
 		}
-		tx.(kv.TemporalRwTx).Unwind(ctx, sd.unwindToTxNum, &changeSet)
+		tx.(kv.TemporalRwTx).Unwind(ctx, sd.unwindToTxNum, sd.unwindChangesetRaw)
 	}
 
 	if err := sd.flushDiffSet(ctx, tx); err != nil {

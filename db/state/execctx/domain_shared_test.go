@@ -452,6 +452,162 @@ func TestSharedDomain_RepeatedUnwindAcrossStepBoundary(t *testing.T) {
 		offending, maxStep, exampleStep)
 }
 
+// TestSharedDomain_MergeUnwindAcrossStepBoundary exercises the raw-changeset
+// merge branch of TemporalMemBatch.Merge, which is what ForkValidator.MergeExtendingFork
+// drives in production. It splits the unwind of a step-boundary-crossing range
+// between two SharedDomains: sd1 carries the step-0 slice and sd2 carries the
+// step-1 slice. Merging sd2 into sd1 must preserve every (key, step) entry so
+// the subsequent Flush deletes orphan values-table rows on both sides of the
+// boundary. Under the pre-fix Merge, the collapsed (one-entry-per-real-key)
+// map would have dropped one step per key, leaving step-1 orphans.
+func TestSharedDomain_MergeUnwindAcrossStepBoundary(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	stepSize := uint64(10)
+	db := newTestDb(t, stepSize)
+	ctx := t.Context()
+	require := require.New(t)
+
+	// Blocks 0..14 span step 0 (0..9) and step 1 (10..14).
+	const lastBlock = uint64(14)
+	const unwindTarget = uint64(4) // inside step 0
+	maxStep := unwindTarget / stepSize
+
+	// Phase 1: forward-execute all blocks and flush so the values tables
+	// actually contain step-0 and step-1 entries (otherwise there are no
+	// orphans to miss, and the test trivially passes).
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(err)
+	defer rwTx.Rollback()
+	for bn := uint64(0); bn <= lastBlock; bn++ {
+		require.NoError(rawdbv3.TxNums.Append(rwTx, bn, bn))
+	}
+	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(err)
+	addr := make([]byte, length.Addr)
+	var perBlockDiffs [lastBlock + 1]*changeset.StateChangeSet
+	for bn := uint64(0); bn <= lastBlock; bn++ {
+		cs := &changeset.StateChangeSet{}
+		doms.SetChangesetAccumulator(cs)
+		// Write the same 8 addresses every block so each key accumulates
+		// values at both step 0 and step 1.
+		for i := 0; i < 8; i++ {
+			addr[0] = byte(i)
+			acc := accounts3.Account{Nonce: bn, Balance: *uint256.NewInt(bn*1000 + uint64(i))}
+			pv, _, err := doms.GetLatest(kv.AccountsDomain, rwTx, addr)
+			require.NoError(err)
+			require.NoError(doms.DomainPut(kv.AccountsDomain, rwTx, addr, accounts3.SerialiseV3(&acc), bn, pv))
+		}
+		rh, err := doms.ComputeCommitment(ctx, rwTx, true, bn, bn, "", nil)
+		require.NoError(err)
+		doms.SavePastChangesetAccumulator(common.BytesToHash(rh), bn, cs)
+		perBlockDiffs[bn] = cs
+		doms.SetChangesetAccumulator(nil)
+	}
+	require.NoError(doms.Flush(ctx, rwTx))
+	doms.Close()
+	require.NoError(rwTx.Commit())
+
+	// Merge the per-block diffs for [from..to] into a single changeset,
+	// matching the pattern used by stage_exec's unwind path.
+	mergeRange := func(from, to uint64) *[kv.DomainLen][]kv.DomainEntryDiff {
+		var merged [kv.DomainLen][]kv.DomainEntryDiff
+		for bn := int64(to); bn >= int64(from); bn-- {
+			if perBlockDiffs[bn] == nil {
+				continue
+			}
+			for idx, d := range perBlockDiffs[bn].Diffs {
+				keys := d.GetDiffSet()
+				if merged[idx] == nil {
+					merged[idx] = keys
+				} else {
+					merged[idx] = changeset.MergeDiffSets(merged[idx], keys)
+				}
+			}
+		}
+		return &merged
+	}
+
+	// Phase 2: on a fresh tx, split the unwind between two SharedDomains.
+	// sd1 gets diffs for blocks 5..9 (step-0 entries only); sd2 gets diffs
+	// for blocks 10..14 (step-1 entries only). Both Unwind to the same
+	// target, so neither the collapsed nor the raw merge can short-circuit
+	// on unwindToTxNum.
+	rwTx, err = db.BeginTemporalRw(ctx)
+	require.NoError(err)
+	defer rwTx.Rollback()
+
+	sd1, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(err)
+	sd1.Unwind(unwindTarget, mergeRange(unwindTarget+1, 9))
+	sd1.SetTxNum(unwindTarget)
+
+	sd2, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(err)
+	sd2.Unwind(unwindTarget, mergeRange(10, lastBlock))
+	sd2.SetTxNum(unwindTarget)
+
+	// Merge sd2 into sd1. Both sides carry a non-nil unwindChangeset, so
+	// TemporalMemBatch.Merge takes the raw-merge branch.
+	require.NoError(sd1.Merge(ctx, unwindTarget, sd2, unwindTarget))
+
+	// Flush replays the combined raw changeset against MDBX.
+	require.NoError(sd1.Flush(ctx, rwTx))
+	sd1.Close()
+
+	// Assertion 1: the commitment "state" key must decode to a blockNum
+	// ≤ unwindTarget. This is the check that actually fails under the
+	// collapsed-merge bug: the collapsed map keeps one entry per real key
+	// (the higher-step one via MergeDiffSets' sorted tiebreaker), Flush
+	// deletes that step's row and re-writes the restoration value at the
+	// unwind step — but the value carried by the retained entry is the
+	// pre-step-1-write value (block 9's state), not the unwindTarget's
+	// state (block 4). A later GetLatest then sees blockNum=9 > target=4.
+	stateVal, _, err := rwTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+	require.NoError(err)
+	require.GreaterOrEqual(len(stateVal), 16, "commitment state record must exist after Merge+Flush")
+	postBlock := binary.BigEndian.Uint64(stateVal[8:16])
+	require.LessOrEqualf(postBlock, unwindTarget,
+		"commitment state blockNum=%d must be ≤ unwindTarget=%d after Merge+Flush; "+
+			"raw changeset merge lost the step-0 restoration value",
+		postBlock, unwindTarget)
+
+	// Assertion 2: no values-table entry at step > maxStep. The PR's
+	// single-SharedDomains tests catch leftover step-1 rows this way; the
+	// Merge path's collapsed tiebreaker happens to delete the step-1 row
+	// (while corrupting the restored value), so this assertion is mostly
+	// belt-and-braces — still worth guarding against a future regression
+	// that drops entries outright instead of just mis-writing them.
+	checkTableForOrphans := func(table string) {
+		c, err := rwTx.Cursor(table)
+		require.NoError(err)
+		defer c.Close()
+		offending := 0
+		var exampleStep uint64
+		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+			require.NoError(err)
+			if len(v) < 8 {
+				continue
+			}
+			step := ^binary.BigEndian.Uint64(v[:8])
+			if step > maxStep {
+				if offending == 0 {
+					exampleStep = step
+				}
+				offending++
+			}
+		}
+		require.Zerof(offending,
+			"table %s has %d orphan values entries at step > %d after Merge+Flush (e.g. step %d)",
+			table, offending, maxStep, exampleStep)
+	}
+	checkTableForOrphans(kv.TblAccountVals)
+	checkTableForOrphans(kv.TblCommitmentVals)
+}
+
 // TestSharedDomain_UnwindAcrossStepBoundary reproduces the mainnet corruption
 // where the commitment domain's persisted "state" key (and branch entries)
 // stayed at a step beyond the unwind target after a forkchoice-driven unwind.
