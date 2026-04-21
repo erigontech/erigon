@@ -159,6 +159,17 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
+			Name:  "ef",
+			Usage: "Print size (MB) of all .ef files, sorted by size descending",
+			Action: func(c *cli.Context) error {
+				dirs := datadir.Open(c.String(utils.DataDirFlag.Name))
+				return doEFSizes(dirs)
+			},
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+			}),
+		},
+		{
 			Name:    "accessor",
 			Aliases: []string{"index"},
 			Action: func(c *cli.Context) error {
@@ -3611,6 +3622,27 @@ func duFormatJSON(w io.Writer, result duResult) error {
 }
 
 // doDU implements the "erigon seg du" subcommand.
+func doEFSizes(dirs datadir.Dirs) error {
+	files, err := duWalkSnapshots(dirs)
+	if err != nil {
+		return fmt.Errorf("walking snapshots: %w", err)
+	}
+	var ef []duFileInfo
+	for _, f := range files {
+		if strings.HasSuffix(f.Name, ".ef") {
+			ef = append(ef, f)
+		}
+	}
+	sort.Slice(ef, func(i, j int) bool { return ef[i].Size > ef[j].Size })
+	var total int64
+	for _, f := range ef {
+		fmt.Printf("%8.2f MB  %s\n", float64(f.Size)/(1024*1024), f.Name)
+		total += f.Size
+	}
+	fmt.Printf("---\n%8.2f MB  total (%d files)\n", float64(total)/(1024*1024), len(ef))
+	return nil
+}
+
 func doDU(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	// Resolve chain name and configured prune mode from chaindata (best-effort).
 	// Use recover because both MustOpen and fromdb.ChainConfig can panic
