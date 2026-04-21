@@ -1350,9 +1350,6 @@ func ConvertExecutionProtoToBlockAccessList(protoList []*executionproto.BlockAcc
 				if change == nil {
 					return nil, fmt.Errorf("blockAccessList account %d storageChanges[%d].changes[%d] is nil", accountIdx, slotIdx, changeIdx)
 				}
-				if change.Index > math.MaxUint32 {
-					return nil, fmt.Errorf("blockAccessList account %d storageChanges[%d].changes[%d] index overflow: %d", accountIdx, slotIdx, changeIdx, change.Index)
-				}
 
 				if change.Value == nil {
 					return nil, fmt.Errorf("blockAccessList account %d storageChanges[%d].changes[%d] missing value", accountIdx, slotIdx, changeIdx)
@@ -1375,9 +1372,6 @@ func ConvertExecutionProtoToBlockAccessList(protoList []*executionproto.BlockAcc
 			if balanceChange == nil {
 				return nil, fmt.Errorf("blockAccessList account %d balanceChanges[%d] is nil", accountIdx, balanceIdx)
 			}
-			if balanceChange.Index > math.MaxUint32 {
-				return nil, fmt.Errorf("blockAccessList account %d balanceChanges[%d] index overflow: %d", accountIdx, balanceIdx, balanceChange.Index)
-			}
 
 			if balanceChange.Value == nil {
 				return nil, fmt.Errorf("blockAccessList account %d balanceChanges[%d] missing value", accountIdx, balanceIdx)
@@ -1392,9 +1386,6 @@ func ConvertExecutionProtoToBlockAccessList(protoList []*executionproto.BlockAcc
 			if nonceChange == nil {
 				return nil, fmt.Errorf("blockAccessList account %d nonceChanges[%d] is nil", accountIdx, nonceIdx)
 			}
-			if nonceChange.Index > math.MaxUint32 {
-				return nil, fmt.Errorf("blockAccessList account %d nonceChanges[%d] index overflow: %d", accountIdx, nonceIdx, nonceChange.Index)
-			}
 
 			accountChanges.NonceChanges = append(accountChanges.NonceChanges, &NonceChange{
 				Index: uint32(nonceChange.Index),
@@ -1404,9 +1395,6 @@ func ConvertExecutionProtoToBlockAccessList(protoList []*executionproto.BlockAcc
 		for codeIdx, codeChange := range account.CodeChanges {
 			if codeChange == nil {
 				return nil, fmt.Errorf("blockAccessList account %d codeChanges[%d] is nil", accountIdx, codeIdx)
-			}
-			if codeChange.Index > math.MaxUint32 {
-				return nil, fmt.Errorf("blockAccessList account %d codeChanges[%d] index overflow: %d", accountIdx, codeIdx, codeChange.Index)
 			}
 
 			data := make([]byte, len(codeChange.Data))
