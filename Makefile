@@ -510,8 +510,13 @@ stringer:
 	$(GOBUILD) -o $(GOBIN)/stringer golang.org/x/tools/cmd/stringer
 	PATH="$(GOBIN):$(PATH)" go generate -run "stringer" ./...
 
+## versions-gen:                       regenerate version_schema_gen.go from versions.yaml
+versions-gen:
+	$(GOBUILD) -o $(GOBIN)/bumper ./cmd/bumper
+	PATH="$(GOBIN):$(PATH)" go generate -run "bumper" ./db/state/statecfg/
+
 ## gen:                               generate all auto-generated code in the codebase
-gen: mocks solc abigen gencodec graphql grpc stringer
+gen: mocks solc abigen gencodec graphql grpc stringer versions-gen
 
 ## bindings:                          generate test contracts and core contracts
 bindings:
