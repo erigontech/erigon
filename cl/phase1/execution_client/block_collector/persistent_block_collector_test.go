@@ -175,6 +175,29 @@ func TestFlushPicksCanonicalVariantRegardlessOfOrder(t *testing.T) {
 	require.Equal(t, blockHash(b1b), h.inserted[0].Hash())
 }
 
+func TestFlushPreservesMultiVariantAtEndOfCursor(t *testing.T) {
+	// Two variants at the final height with no successor to disambiguate.
+	// Guessing would risk the clean-path DB wipe discarding the canonical
+	// variant, so we leave the rows for the next Flush.
+	h := newFlushTestHarness(t, 0)
+
+	b1 := makeBeaconBlock(t, 1, 'a', common.Hash{})
+	b2a := makeBeaconBlock(t, 2, 'a', blockHash(b1))
+	b2b := makeBeaconBlock(t, 2, 'b', blockHash(b1))
+	for _, bb := range []*cltypes.BeaconBlock{b1, b2a, b2b} {
+		require.NoError(t, h.collector.AddBlock(bb))
+	}
+
+	require.NoError(t, h.collector.Flush(t.Context()))
+
+	// Block 1 resolves against b2a's (or b2b's — same parent) ParentHash.
+	// Block 2's variants stay unresolved.
+	require.Equal(t, []uint64{1}, h.insertedNumbers())
+	require.False(t, h.collector.HasBlock(1))
+	require.True(t, h.collector.HasBlock(2))
+	require.Equal(t, 2, countRowsAtOrAbove(t, h.collector.db, 0))
+}
+
 func TestFlushStopsWhenForkHasNoMatchingParent(t *testing.T) {
 	// Two variants at height 1, and block 2's parent matches neither. This is
 	// a fork we can't resolve forward: abort iteration, leave all rows for a

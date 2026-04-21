@@ -238,12 +238,18 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 		}
 
 		// End of cursor: resolve the final pending group with no successor to match
-		// against. Single variants are unambiguous; with multiple variants the first
-		// is picked and InsertBlocks will reject it if we guessed wrong.
+		// against. Single variants are unambiguous. With multiple variants we can't
+		// disambiguate, so leave them for a future Flush (same policy as the
+		// mid-cursor gap branch) rather than guessing a pick the clean-path DB wipe
+		// could permanently discard.
 		if !gapDetected && pendingHeight > 0 {
-			if resolved := resolvePending(nil); resolved != nil {
-				blocksBatch = append(blocksBatch, resolved)
+			if len(pending) == 1 {
+				blocksBatch = append(blocksBatch, pending[0])
 				lastCommittedHeight = pendingHeight
+			} else {
+				p.logger.Warn("[BlockCollector] Fork at final height with no successor, leaving rows for retry",
+					"height", pendingHeight, "variants", len(pending))
+				gapDetected = true
 			}
 		}
 
