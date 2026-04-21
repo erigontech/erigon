@@ -1020,6 +1020,47 @@ func TestSimulatedBackend_PendingAndCallContract(t *testing.T) {
 	}
 }
 
+func TestSimulatedBackend_PendingAndCallContractOsakaDefaultGas(t *testing.T) {
+	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
+	sim := NewSimulatedBackendWithConfig(
+		t,
+		types.GenesisAlloc{testAddr: {Balance: big.NewInt(common.Ether)}},
+		chain.TestChainOsakaConfig,
+		50000000,
+	)
+	bgCtx := context.Background()
+
+	parsed, err := abi.JSON(strings.NewReader(abiJSON))
+	require.NoError(t, err)
+
+	contractAuth, err := bind.NewKeyedTransactorWithChainID(testKey, big.NewInt(1337))
+	require.NoError(t, err)
+	contractAuth.GasPrice = big.NewInt(params.InitialBaseFee)
+	contractAuth.GasLimit = params.MaxTxnGasLimit
+
+	addr, _, _, err := bind.DeployContract(contractAuth, parsed, common.FromHex(abiBin), sim)
+	require.NoError(t, err)
+
+	input, err := parsed.Pack("receive", []byte("X"))
+	require.NoError(t, err)
+
+	call := ethereum.CallMsg{
+		From: testAddr,
+		To:   &addr,
+		Data: input,
+	}
+
+	res, err := sim.PendingCallContract(bgCtx, call)
+	require.NoError(t, err)
+	require.Equal(t, expectedReturn, res)
+
+	sim.Commit()
+
+	res, err = sim.CallContract(bgCtx, call, nil)
+	require.NoError(t, err)
+	require.Equal(t, expectedReturn, res)
+}
+
 // This test is based on the following contract:
 /*
 contract Reverter {

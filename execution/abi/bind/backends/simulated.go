@@ -728,6 +728,7 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 // state is modified during execution, make sure to copy it if necessary.
 func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg, block *types.Block, statedb *state.IntraBlockState) (*evmtypes.ExecutionResult, error) {
 	const baseFeeUpperLimit = 880000000
+	const defaultCallGas = 50000000
 	// Ensure message is initialized properly.
 	if call.GasPrice == nil {
 		call.GasPrice = &u256.Num1
@@ -739,10 +740,16 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 		call.TipCap = uint256.NewInt(baseFeeUpperLimit)
 	}
 	if call.Gas == 0 {
-		call.Gas = 50000000
+		call.Gas = defaultCallGas
+		if call.Gas > params.MaxTxnGasLimit && b.m.ChainConfig.IsOsaka(block.Time()) {
+			call.Gas = params.MaxTxnGasLimit
+		}
 	}
 	if call.Value == nil {
 		call.Value = new(uint256.Int)
+	}
+	if call.MaxFeePerBlobGas == nil {
+		call.MaxFeePerBlobGas = new(uint256.Int)
 	}
 	// Set infinite balance to the fake caller account.
 	from, err := statedb.GetOrNewStateObject(accounts.InternAddress(call.From))
