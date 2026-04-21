@@ -594,8 +594,8 @@ func (a *Aggregator) SetBuildAccessorsWorkers(i int) {
 func (a *Aggregator) PresetChainTipConcurrency() {
 	a.SetCollateAndBuildWorkers(1)
 	a.SetMergeWorkers(dbg.MergeWorkers)
-	a.SetCompressWorkers(dbg.CompressWorkers)
-	a.SetBuildAccessorsWorkers(dbg.CompressWorkers)
+	a.SetCompressWorkers(max(1, dbg.CompressWorkers))
+	a.SetBuildAccessorsWorkers(max(1, dbg.CompressWorkers))
 }
 
 // PresetNonChainTipConcurrency configures workers for initial sync (not at chain tip):
@@ -603,26 +603,38 @@ func (a *Aggregator) PresetChainTipConcurrency() {
 func (a *Aggregator) PresetNonChainTipConcurrency() {
 	a.SetCollateAndBuildWorkers(dbg.CollateWorkers)
 	a.SetMergeWorkers(dbg.MergeWorkers)
-	a.SetCompressWorkers(dbg.CompressWorkers)
-	a.SetBuildAccessorsWorkers(dbg.CompressWorkers)
+	a.SetCompressWorkers(max(1, dbg.CompressWorkers))
+	a.SetBuildAccessorsWorkers(max(1, dbg.CompressWorkers))
 }
 
 // PresetOfflineMerge configures workers for offline merge operations:
 // uses RAM/CPU estimates to maximise merge and compression throughput.
+// COMPRESS_WORKERS env-var overrides the estimate when set.
 func (a *Aggregator) PresetOfflineMerge() {
 	a.SetCollateAndBuildWorkers(estimate.StateV3Collate.Workers())
-	a.SetMergeWorkers(min(4, estimate.StateV3Collate.Workers()))
-	a.SetCompressWorkers(estimate.CompressSnapshot.Workers())
-	a.SetBuildAccessorsWorkers(estimate.CompressSnapshot.Workers())
+	if dbg.CompressWorkers > 0 {
+		a.SetCompressWorkers(dbg.CompressWorkers)
+		a.SetBuildAccessorsWorkers(dbg.CompressWorkers)
+	} else {
+		a.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+		a.SetBuildAccessorsWorkers(estimate.IndexSnapshot.Workers())
+	}
+	a.SetMergeWorkers(dbg.MergeWorkers) // compression and accessors: support parallel-building means we don't need multiple `merge_workers` usually
 }
 
 // PresetOfflineExecution configures workers for offline execution (e.g. integration tool):
 // uses RAM/CPU estimates to maximise collate/build and compression throughput.
+// COMPRESS_WORKERS env-var overrides the estimate when set.
 func (a *Aggregator) PresetOfflineExecution() {
-	a.SetCollateAndBuildWorkers(min(4, estimate.StateV3Collate.Workers()))
-	a.SetMergeWorkers(min(2, estimate.StateV3Collate.Workers()))
-	a.SetCompressWorkers(estimate.CompressSnapshot.WorkersHalf())
-	a.SetBuildAccessorsWorkers(estimate.CompressSnapshot.WorkersHalf())
+	a.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
+	if dbg.CompressWorkers > 0 {
+		a.SetCompressWorkers(dbg.CompressWorkers)
+		a.SetBuildAccessorsWorkers(dbg.CompressWorkers)
+	} else {
+		a.SetCompressWorkers(estimate.CompressSnapshot.WorkersHalf())
+		a.SetBuildAccessorsWorkers(estimate.IndexSnapshot.WorkersHalf())
+	}
+	a.SetMergeWorkers(dbg.MergeWorkers) // compression and accessors: support parallel-building means we don't need multiple `merge_workers` usually
 }
 
 func (a *Aggregator) LockWorkersEditing()   { a.lockWorkersEditing = true }

@@ -82,7 +82,7 @@ func TestSharedDomain_Unwind(t *testing.T) {
 	db := newTestDb(t, stepSize)
 	//db := wrapDbWithCtx(_db, agg)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer rwTx.Rollback()
@@ -192,7 +192,7 @@ func TestSharedDomain_UnwindDoesNotRestoreOverlayForNewKey(t *testing.T) {
 
 	stepSize := uint64(100)
 	db := newTestDb(t, stepSize)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
@@ -266,7 +266,7 @@ func TestNewSharedDomains_StateAheadOfBlocks(t *testing.T) {
 	require := require.New(t)
 	db := newTestDb(t, stepSize)
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Phase 1: write some accounts, compute commitment, flush, and append TxNums up to block N.
 	rwTx, err := db.BeginTemporalRw(ctx)
@@ -336,7 +336,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	db := newTestDb(t, stepSize)
 	//db := wrapDbWithCtx(_db, agg)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer rwTx.Rollback()
@@ -480,7 +480,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 	require := require.New(t)
 	db := newTestDb(t, stepSize)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(err)
 	defer rwTx.Rollback()
@@ -645,7 +645,7 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 	}
 	t.Parallel()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
 
 	stepSize := uint64(1)
@@ -916,7 +916,7 @@ func TestDomainPut_HistoryCorrectness(t *testing.T) {
 	for _, dc := range domainCases {
 		t.Run(dc.domain.String(), func(t *testing.T) {
 			t.Parallel()
-			ctx := context.Background()
+			ctx := t.Context()
 			stepSize := uint64(1000)
 			db := newTestDb(t, stepSize)
 
@@ -1032,7 +1032,7 @@ func TestDomainPut_HistoryCorrectness(t *testing.T) {
 func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 	t.Parallel()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
 
 	stepSize := uint64(1)
