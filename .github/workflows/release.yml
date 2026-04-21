@@ -90,9 +90,9 @@ jobs:
 
       - name: Generate GitHub App token for git operations
         id: generate_token_build
-        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf  ## v2.2.1
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3  ## v3.1.1
         with:
-          app-id: ${{ vars.RELEASE_BOT_APP_ID }}
+          client-id: ${{ vars.RELEASE_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
           repositories: "erigon"
 
@@ -142,28 +142,45 @@ jobs:
           RELEASE_VERSION: ${{ inputs.release_version }}
         run: |
           cd erigon
-          APP_VERSION=$(awk '
+
+          APP_BASE=$(awk '
             /Major\s*=/{major=$3}
             /Minor\s*=/{minor=$3}
             /Micro\s*=/{micro=$3}
-            /Modifier\s*=/{gsub(/"/, "", $3); modifier=$3}
-            END{
-              v=sprintf("%s.%s.%s", major, minor, micro)
-              if (modifier != "") v=v "-" modifier
-              printf "%s", v
-            }
+            END{printf "%s.%s.%s", major, minor, micro}
           ' db/version/app.go)
-          INPUT_VERSION=$(echo "${RELEASE_VERSION}" | sed -e 's/^v//')
+          APP_MODIFIER=$(awk '/Modifier\s*=/{gsub(/["[:space:]]/, "", $3); print $3}' db/version/app.go)
 
-          echo "Version from db/version/app.go: ${APP_VERSION}"
-          echo "Version from workflow input: ${INPUT_VERSION} (raw: ${RELEASE_VERSION})"
+          INPUT_FULL=$(echo "${RELEASE_VERSION}" | sed 's/^v//')
+          INPUT_BASE=$(echo "${INPUT_FULL}" | cut -d'-' -f1)
+          INPUT_PRE=$(echo "${INPUT_FULL}" | grep -oE '\-.+' | sed 's/^-//' || true)
 
-          if [ "${APP_VERSION}" != "${INPUT_VERSION}" ]; then
-            echo "ERROR: release_version (${RELEASE_VERSION}) does not match db/version/app.go version (${APP_VERSION})."
+          echo "app.go base version : ${APP_BASE}"
+          echo "app.go Modifier     : ${APP_MODIFIER:-<empty>}"
+          echo "Input base version  : ${INPUT_BASE}"
+          echo "Input pre-release   : ${INPUT_PRE:-<none>}"
+
+          # Level 1 (hard): Major.Minor.Micro must match exactly
+          if [ "${APP_BASE}" != "${INPUT_BASE}" ]; then
+            echo "ERROR: Major.Minor.Micro mismatch: app.go=${APP_BASE}, input=${INPUT_BASE}"
             exit 1
           fi
+          echo "OK: base version matches."
 
-          echo "OK: release_version matches db/version/app.go."
+          # Level 2 (soft): Modifier alignment — warns but never blocks,
+          # unless a non-dev Modifier is set and clearly wrong.
+          if [ "${APP_MODIFIER}" = "dev" ]; then
+            echo "::warning::Modifier in app.go is 'dev' — binary will report ${APP_BASE}-dev. Update Modifier in db/version/app.go before release for accurate --version output."
+          elif [ -z "${APP_MODIFIER}" ]; then
+            if [ -n "${INPUT_PRE}" ]; then
+              echo "::warning::Releasing pre-release ${RELEASE_VERSION} but Modifier is empty in app.go — binary will report ${APP_BASE}. Consider setting Modifier=\"${INPUT_PRE}\" in db/version/app.go."
+            fi
+          elif [ "${APP_MODIFIER}" != "${INPUT_PRE}" ]; then
+            echo "ERROR: Modifier mismatch: app.go Modifier='${APP_MODIFIER}', input pre-release='${INPUT_PRE:-<none>}'"
+            exit 1
+          else
+            echo "OK: Modifier matches pre-release suffix."
+          fi
 
       - name: Login to Docker Hub
         uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2  ## v4.0.0
@@ -563,9 +580,9 @@ jobs:
     - name: Generate GitHub App token for release publishing
       id: generate_token
       if: ${{ inputs.perform_release }}
-      uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf  ## v2.2.1
+      uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3  ## v3.1.1
       with:
-        app-id: ${{ vars.RELEASE_BOT_APP_ID }}
+        client-id: ${{ vars.RELEASE_BOT_APP_ID }}
         private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
         repositories: "erigon"
 
@@ -697,9 +714,9 @@ jobs:
     steps:
       - name: Generate GitHub App token for git operations
         id: generate_token_rollback
-        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf  ## v2.2.1
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3  ## v3.1.1
         with:
-          app-id: ${{ vars.RELEASE_BOT_APP_ID }}
+          client-id: ${{ vars.RELEASE_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
           repositories: "erigon"
 
