@@ -74,8 +74,20 @@ type TemporalMemBatch struct {
 	currentChangesAccumulator *changeset.StateChangeSet
 	pastChangesAccumulator    map[string]*changeset.StateChangeSet
 
-	unwindToTxNum   uint64
+	unwindToTxNum uint64
+	// unwindChangeset is keyed by the pre-step portion of each entry's Key
+	// (`Key[:len(Key)-8]`) and is consulted only by the getLatest fallback —
+	// it's intentionally collapsed to one entry per real key so a pre-unwind
+	// value can be found by the same key the overlay uses.
 	unwindChangeset *[kv.DomainLen]map[string]kv.DomainEntryDiff
+	// unwindChangesetRaw preserves every diff entry (distinct by Key+step) so
+	// Flush can replay a complete unwind against MDBX, including multiple
+	// step entries for the same real key (e.g. a commitment branch that was
+	// written in both step N and N+1 during forward execution). Collapsing
+	// these — as unwindChangeset does — loses every step except the one that
+	// happened to be iterated last, leaving orphan domain entries at steps
+	// above the unwind target.
+	unwindChangesetRaw *[kv.DomainLen][]kv.DomainEntryDiff
 
 	metrics *changeset.DomainMetrics
 }
@@ -293,6 +305,7 @@ func (sd *TemporalMemBatch) ClearRam() {
 	sd.storage = btree2.NewMap[string, []dataWithTxNum](128)
 	sd.unwindToTxNum = 0
 	sd.unwindChangeset = nil
+	sd.unwindChangesetRaw = nil
 
 	sd.metrics.Lock()
 	defer sd.metrics.Unlock()
@@ -475,14 +488,20 @@ func (sd *TemporalMemBatch) Unwind(unwindToTxNum uint64, changeset *[kv.DomainLe
 	}
 
 	var unwindChangeset *[kv.DomainLen]map[string]kv.DomainEntryDiff
+	var unwindChangesetRaw *[kv.DomainLen][]kv.DomainEntryDiff
 
 	if changeset != nil {
 		unwindChangeset = &[kv.DomainLen]map[string]kv.DomainEntryDiff{}
+		unwindChangesetRaw = &[kv.DomainLen][]kv.DomainEntryDiff{}
 
 		for domain, changes := range changeset {
 			if unwindChangeset[domain] == nil {
 				unwindChangeset[domain] = map[string]kv.DomainEntryDiff{}
 			}
+
+			// unwindChangesetRaw preserves every (key, step) entry — Flush needs
+			// the full list to delete every orphan step entry from MDBX.
+			unwindChangesetRaw[domain] = append(unwindChangesetRaw[domain][:0], changes...)
 
 			for _, change := range changes {
 				unwindChangeset[domain][change.Key[:len(change.Key)-8]] = change
@@ -491,6 +510,7 @@ func (sd *TemporalMemBatch) Unwind(unwindToTxNum uint64, changeset *[kv.DomainLe
 	}
 
 	sd.unwindChangeset = unwindChangeset
+	sd.unwindChangesetRaw = unwindChangesetRaw
 }
 
 func (sd *TemporalMemBatch) IndexAdd(table kv.InvertedIdx, key []byte, txNum uint64) (err error) {
@@ -598,6 +618,7 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 		if sd.unwindChangeset == nil {
 			sd.unwindToTxNum = other.unwindToTxNum
 			sd.unwindChangeset = other.unwindChangeset
+			sd.unwindChangesetRaw = other.unwindChangesetRaw
 		} else {
 			for domain, otherDiffs := range other.unwindChangeset {
 				for key, otherDiff := range otherDiffs {
@@ -612,6 +633,21 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 					}
 				}
 			}
+			// Also merge the raw changesets — Flush walks these to ensure every
+			// step entry in MDBX gets reverted, not just the collapsed one.
+			if other.unwindChangesetRaw != nil {
+				if sd.unwindChangesetRaw == nil {
+					sd.unwindChangesetRaw = other.unwindChangesetRaw
+				} else {
+					for domain, otherDiffs := range other.unwindChangesetRaw {
+						if sd.unwindToTxNum < other.unwindToTxNum {
+							sd.unwindChangesetRaw[domain] = changeset.MergeDiffSets(otherDiffs, sd.unwindChangesetRaw[domain])
+						} else {
+							sd.unwindChangesetRaw[domain] = changeset.MergeDiffSets(sd.unwindChangesetRaw[domain], otherDiffs)
+						}
+					}
+				}
+			}
 			if sd.unwindToTxNum < other.unwindToTxNum {
 				sd.unwindToTxNum = other.unwindToTxNum
 			}
@@ -623,12 +659,13 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 }
 
 func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
-	if sd.unwindChangeset != nil {
-		var changeSet [kv.DomainLen][]kv.DomainEntryDiff
-		for domain, diffEntries := range sd.unwindChangeset {
-			for _, entry := range diffEntries {
-				changeSet[domain] = append(changeSet[domain], entry)
-			}
+	if sd.unwindChangesetRaw != nil {
+		// Replay against the RAW (step-preserving) changeset — the collapsed
+		// unwindChangeset would lose every (key, step) entry except one per
+		// real key, which leaves orphan domain-values entries at steps above
+		// the unwind target (observed on mainnet for the commitment domain).
+		changeSet := *sd.unwindChangesetRaw
+		for domain := range changeSet {
 			sort.Slice(changeSet[domain], func(i, j int) bool {
 				return changeSet[domain][i].Key < changeSet[domain][j].Key
 			})

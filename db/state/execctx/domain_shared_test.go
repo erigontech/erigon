@@ -323,6 +323,259 @@ func TestNewSharedDomains_StateAheadOfBlocks(t *testing.T) {
 	require.NoError(err)
 }
 
+// TestSharedDomain_RepeatedUnwindAcrossStepBoundary mimics the FCU-driven
+// pattern that left a mainnet node with commitment one step ahead of all
+// other domains: three successive unwinds, each followed by forward execution
+// that re-advances past the step boundary.
+//
+// After the final unwind the commitment "state" key and the commitment values
+// table must not contain entries at a step beyond the unwind target —
+// otherwise the next `SeekCommitment` will return a blockNum > TxNums.Last()
+// and execution will skip blocks.
+func TestSharedDomain_RepeatedUnwindAcrossStepBoundary(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	stepSize := uint64(10)
+	db := newTestDb(t, stepSize)
+	ctx := t.Context()
+	require := require.New(t)
+
+	// 30 blocks covering 3 steps (0,1,2). Each FCU cycle will unwind back to
+	// the middle of step 0, then re-execute forward, mirroring the ~54-block
+	// unwinds we saw on mainnet.
+	const lastBlock = uint64(29)
+	const unwindTarget = uint64(4) // inside step 0
+
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(err)
+	defer rwTx.Rollback()
+	for bn := uint64(0); bn <= lastBlock; bn++ {
+		require.NoError(rawdbv3.TxNums.Append(rwTx, bn, bn))
+	}
+
+	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(err)
+	defer doms.Close()
+	addr := make([]byte, length.Addr)
+	perBlockDiffs := make(map[uint64]*changeset.StateChangeSet)
+	blockHashes := make(map[uint64]common.Hash)
+
+	executeRange := func(from, to uint64) {
+		for bn := from; bn <= to; bn++ {
+			cs := &changeset.StateChangeSet{}
+			doms.SetChangesetAccumulator(cs)
+			for i := 0; i < 8; i++ {
+				addr[0] = byte(i)
+				addr[1] = byte(bn)
+				acc := accounts3.Account{Nonce: bn, Balance: *uint256.NewInt(bn*1000 + uint64(i))}
+				pv, _, err := doms.GetLatest(kv.AccountsDomain, rwTx, addr)
+				require.NoError(err)
+				require.NoError(doms.DomainPut(kv.AccountsDomain, rwTx, addr, accounts3.SerialiseV3(&acc), bn, pv))
+			}
+			rh, err := doms.ComputeCommitment(ctx, rwTx, true, bn, bn, "", nil)
+			require.NoError(err)
+			blockHashes[bn] = common.BytesToHash(rh)
+			doms.SavePastChangesetAccumulator(blockHashes[bn], bn, cs)
+			perBlockDiffs[bn] = cs
+			doms.SetChangesetAccumulator(nil)
+		}
+	}
+
+	unwindTo := func(target uint64, curBlock uint64) {
+		var merged [kv.DomainLen][]kv.DomainEntryDiff
+		for bn := curBlock; bn > target; bn-- {
+			for idx, d := range perBlockDiffs[bn].Diffs {
+				keys := d.GetDiffSet()
+				if merged[idx] == nil {
+					merged[idx] = keys
+				} else {
+					merged[idx] = changeset.MergeDiffSets(merged[idx], keys)
+				}
+			}
+		}
+		doms.Unwind(target, &merged)
+		doms.SetTxNum(target)
+	}
+
+	// Cycle 1: execute 0..lastBlock, flush, unwind, flush.
+	executeRange(0, lastBlock)
+	require.NoError(doms.Flush(ctx, rwTx))
+	unwindTo(unwindTarget, lastBlock)
+	require.NoError(doms.Flush(ctx, rwTx))
+
+	// Cycle 2: re-execute, unwind, flush.
+	executeRange(unwindTarget+1, lastBlock)
+	require.NoError(doms.Flush(ctx, rwTx))
+	unwindTo(unwindTarget, lastBlock)
+	require.NoError(doms.Flush(ctx, rwTx))
+
+	// Cycle 3: re-execute, unwind, flush.
+	executeRange(unwindTarget+1, lastBlock)
+	require.NoError(doms.Flush(ctx, rwTx))
+	unwindTo(unwindTarget, lastBlock)
+	require.NoError(doms.Flush(ctx, rwTx))
+
+	// Verify: commitment "state" key is at blockNum ≤ unwindTarget.
+	stateVal, _, err := rwTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+	require.NoError(err)
+	if len(stateVal) >= 16 {
+		postBlock := binary.BigEndian.Uint64(stateVal[8:16])
+		require.LessOrEqualf(postBlock, unwindTarget,
+			"commitment state blockNum=%d must be ≤ unwindTarget=%d after repeated unwinds",
+			postBlock, unwindTarget)
+	}
+	// Verify: no commitment values table entries with step > unwindTarget/stepSize.
+	maxStep := unwindTarget / stepSize
+	c, err := rwTx.Cursor(kv.TblCommitmentVals)
+	require.NoError(err)
+	defer c.Close()
+	offending := 0
+	var exampleStep uint64
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		require.NoError(err)
+		if len(v) < 8 {
+			continue
+		}
+		step := ^binary.BigEndian.Uint64(v[:8])
+		if step > maxStep {
+			if offending == 0 {
+				exampleStep = step
+			}
+			offending++
+		}
+	}
+	require.Zerof(offending,
+		"%d commitment values entries have step > %d after repeated unwinds (e.g. step %d); "+
+			"these are the \"orphan\" entries that caused mainnet execution to start at stale commitment state",
+		offending, maxStep, exampleStep)
+}
+
+// TestSharedDomain_UnwindAcrossStepBoundary reproduces the mainnet corruption
+// where the commitment domain's persisted "state" key (and branch entries)
+// stayed at a step beyond the unwind target after a forkchoice-driven unwind.
+//
+// Scenario: write accounts + commitment across two steps (blocks that span
+// step boundary), flush, then unwind to a block inside the earlier step, flush.
+// After unwind the commitment "state" key should decode to a blockNum ≤ the
+// unwind target — otherwise execution will later start at commitment.blockNum+1
+// against accounts that are still at the unwind-target's state, producing
+// "nonce too high" errors.
+func TestSharedDomain_UnwindAcrossStepBoundary(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	stepSize := uint64(10)
+	db := newTestDb(t, stepSize)
+	ctx := t.Context()
+	require := require.New(t)
+
+	// Phase 1: register txNums for blocks 0..14 (spans step 0 [0..9] and step 1 [10..19]).
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(err)
+	defer rwTx.Rollback()
+	const lastBlock = uint64(14)
+	for bn := uint64(0); bn <= lastBlock; bn++ {
+		// Each block gets 1 txNum for simplicity: maxTxNum(bn) = bn.
+		require.NoError(rawdbv3.TxNums.Append(rwTx, bn, bn))
+	}
+
+	// Phase 2: forward execution of all 15 blocks — write accounts + commitment per block.
+	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(err)
+	stateChangeset := &changeset.StateChangeSet{}
+	doms.SetChangesetAccumulator(stateChangeset)
+
+	var perBlockDiffs [lastBlock + 1]*changeset.StateChangeSet
+	blockHashes := make([]common.Hash, lastBlock+1)
+	addr := make([]byte, length.Addr)
+	for bn := uint64(0); bn <= lastBlock; bn++ {
+		cs := &changeset.StateChangeSet{}
+		doms.SetChangesetAccumulator(cs)
+		// Write a handful of account updates so commitment has real branches.
+		for i := 0; i < 8; i++ {
+			addr[0] = byte(i)
+			addr[1] = byte(bn)
+			acc := accounts3.Account{Nonce: bn, Balance: *uint256.NewInt(bn*1000 + uint64(i))}
+			pv, _, err := doms.GetLatest(kv.AccountsDomain, rwTx, addr)
+			require.NoError(err)
+			require.NoError(doms.DomainPut(kv.AccountsDomain, rwTx, addr, accounts3.SerialiseV3(&acc), bn, pv))
+		}
+		rh, err := doms.ComputeCommitment(ctx, rwTx, true, bn, bn, "", nil)
+		require.NoError(err)
+		require.NotEmpty(rh)
+		blockHashes[bn] = common.BytesToHash(rh)
+		doms.SavePastChangesetAccumulator(blockHashes[bn], bn, cs)
+		perBlockDiffs[bn] = cs
+		doms.SetChangesetAccumulator(nil)
+	}
+	require.NoError(doms.Flush(ctx, rwTx))
+	doms.Close()
+	require.NoError(rwTx.Commit())
+
+	// Phase 3: read the commitment "state" key — should decode to blockNum=lastBlock.
+	rwTx, err = db.BeginTemporalRw(ctx)
+	require.NoError(err)
+	defer rwTx.Rollback()
+	stateVal, _, err := rwTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+	require.NoError(err)
+	require.GreaterOrEqual(len(stateVal), 16)
+	commitTxNum := binary.BigEndian.Uint64(stateVal[:8])
+	commitBlock := binary.BigEndian.Uint64(stateVal[8:16])
+	require.Equal(lastBlock, commitBlock, "pre-unwind: commitment state should be at last block")
+	require.Equal(lastBlock, commitTxNum, "pre-unwind: commitment state txNum")
+
+	// Phase 4: unwind to block 4 (end of step 0). The per-block diffs for
+	// blocks 5..14 are merged and passed to the domain-level Unwind.
+	const unwindTarget = uint64(4)
+	var merged [kv.DomainLen][]kv.DomainEntryDiff
+	for bn := uint64(lastBlock); bn > unwindTarget; bn-- {
+		for idx, d := range perBlockDiffs[bn].Diffs {
+			currentKeys := d.GetDiffSet()
+			if merged[idx] == nil {
+				merged[idx] = currentKeys
+			} else {
+				merged[idx] = changeset.MergeDiffSets(merged[idx], currentKeys)
+			}
+		}
+	}
+	require.NoError(rwTx.Unwind(ctx, unwindTarget, &merged))
+
+	// Phase 5: the commitment "state" key should now decode to blockNum ≤ unwindTarget.
+	stateVal, _, err = rwTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+	require.NoError(err)
+	if len(stateVal) >= 16 {
+		postTxNum := binary.BigEndian.Uint64(stateVal[:8])
+		postBlock := binary.BigEndian.Uint64(stateVal[8:16])
+		require.LessOrEqualf(postBlock, unwindTarget,
+			"post-unwind: commitment state blockNum=%d must be ≤ unwindTarget=%d (txNum=%d)",
+			postBlock, unwindTarget, postTxNum)
+	}
+	// Fix: also confirm no values table entries exist above the unwind-target step.
+	maxStep := unwindTarget / stepSize // step 0 for target 4
+	c, err := rwTx.Cursor(kv.TblCommitmentVals)
+	require.NoError(err)
+	defer c.Close()
+	offending := 0
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		require.NoError(err)
+		if len(v) < 8 {
+			continue
+		}
+		step := ^binary.BigEndian.Uint64(v[:8])
+		if step > maxStep {
+			offending++
+		}
+	}
+	require.Zerof(offending,
+		"post-unwind: %d commitment values entries have step > %d (maxStep for unwindTarget=%d)",
+		offending, maxStep, unwindTarget)
+}
+
 func TestSharedDomain_StorageIter(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
