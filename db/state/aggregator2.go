@@ -24,7 +24,7 @@ type AggOpts struct { //nolint:gocritic
 	logger                          log.Logger
 	stepSize                        uint64 // != 0 mean override erigondb.toml settings
 	stepsInFrozenFile               uint64 // != 0 mean override erigondb.toml settings
-	domainStepsInFrozenFileOverride uint64
+	erigondbDomainStepsInFrozenFile uint64
 	reorgBlockDepth                 uint64
 
 	genSaltIfNeed   bool
@@ -68,7 +68,7 @@ func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) {
 
 	a.stepSize.Store(opts.stepSize)
 	a.stepsInFrozenFile.Store(opts.stepsInFrozenFile)
-	a.domainStepsInFrozenFileOverride = opts.domainStepsInFrozenFileOverride
+	a.erigondbDomainStepsInFrozenFile = opts.erigondbDomainStepsInFrozenFile
 
 	a.disableHistory = opts.disableHistory
 	a.disableFsync = opts.disableFsync
@@ -98,12 +98,12 @@ func (opts AggOpts) StepsInFrozenFile(steps uint64) AggOpts { //nolint:gocritic
 	return opts
 }
 
-// DomainStepsInFrozenFileOverride sets the domain-only cap override (see
-// Aggregator.domainStepsInFrozenFileOverride). 0 clears the override;
+// ErigondbDomainStepsInFrozenFile sets the domain-only cap override (see
+// Aggregator.erigondbDomainStepsInFrozenFile). 0 clears the override;
 // config3.UnboundedDomainMerge disables the cap; any other value replaces stepsInFrozenFile
 // for domain merges only.
-func (opts AggOpts) DomainStepsInFrozenFileOverride(steps uint64) AggOpts { //nolint:gocritic
-	opts.domainStepsInFrozenFileOverride = steps
+func (opts AggOpts) ErigondbDomainStepsInFrozenFile(steps uint64) AggOpts { //nolint:gocritic
+	opts.erigondbDomainStepsInFrozenFile = steps
 	return opts
 }
 func (opts AggOpts) ReorgBlockDepth(d uint64) AggOpts { //nolint:gocritic

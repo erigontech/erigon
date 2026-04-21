@@ -122,7 +122,7 @@ func (iit *InvertedIndexRoTx) FirstStepNotInFiles() kv.Step {
 //
 // domainMaxSpan caps the domain values merge range; historyMaxSpan is forwarded to the history
 // (and underlying inverted index) merge. They are passed separately so that the
-// --override.domain.steps-in-frozen-file CLI flag can relax the domain cap without affecting
+// --erigondb.domain.steps-in-frozen-file CLI flag can relax the domain cap without affecting
 // history/II, which keep using the erigondb.toml stepsInFrozenFile value.
 func (dt *DomainRoTx) findMergeRange(maxEndTxNum, domainMaxSpan, maxSpan uint64) DomainRanges {
 	r := DomainRanges{

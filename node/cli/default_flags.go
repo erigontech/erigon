@@ -258,5 +258,5 @@ var DefaultFlags = []cli.Flag{
 	&utils.MCPAddrFlag,
 	&utils.MCPPortFlag,
 
-	&utils.OverrideDomainStepsInFrozenFileFlag,
+	&utils.ErigondbDomainStepsInFrozenFileFlag,
 }

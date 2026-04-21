@@ -64,7 +64,7 @@ type Aggregator struct {
 	dirs              datadir.Dirs
 	stepSize          atomic.Uint64
 	stepsInFrozenFile atomic.Uint64
-	// domainStepsInFrozenFileOverride overrides stepsInFrozenFile for the domain merge cap only
+	// erigondbDomainStepsInFrozenFile overrides stepsInFrozenFile for the domain merge cap only
 	// (history/II keep using stepsInFrozenFile). Set once at construction via AggOpts. Semantics:
 	//   0                             → no override (default)
 	//   config3.UnboundedDomainMerge  → domain merge is unbounded (no cap)
@@ -72,7 +72,7 @@ type Aggregator struct {
 	//
 	// Note: this is a SOFT limit applied during the merge process. If you apply a smaller limit to
 	// an existing datadir, the existing domain files containing more steps will be unaffected.
-	domainStepsInFrozenFileOverride uint64
+	erigondbDomainStepsInFrozenFile uint64
 
 	reorgBlockDepth uint64
 
@@ -1600,9 +1600,9 @@ func (v *aggregatorVisible) stateMinimaxTxNum() uint64 {
 func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFile uint64) *Ranges {
 	maxSpan := stepSize * stepsInFrozenFile
 
-	// --override.domain.steps-in-frozen-file adjusts the domain cap only; history/II keep maxSpan.
+	// --erigondb.domain.steps-in-frozen-file adjusts the domain cap only; history/II keep maxSpan.
 	domainMaxSpan := maxSpan
-	switch override := at.a.domainStepsInFrozenFileOverride; override {
+	switch override := at.a.erigondbDomainStepsInFrozenFile; override {
 	case 0:
 		// no override
 	case config3.UnboundedDomainMerge:

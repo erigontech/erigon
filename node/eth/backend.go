@@ -1286,14 +1286,14 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
 	aggOpts := state.New(dirs).Logger(logger).SanityOldNaming().GenSaltIfNeed(createNewSaltFileIfNeeded).WithErigonDBSettings(erigonDBSettings)
-	if snConfig.OverrideDomainStepsInFrozenFile != nil {
-		v := *snConfig.OverrideDomainStepsInFrozenFile
+	if snConfig.ErigondbDomainStepsInFrozenFile != nil {
+		v := *snConfig.ErigondbDomainStepsInFrozenFile
 		stepsStr := "Inf"
 		if v != config3.UnboundedDomainMerge {
 			stepsStr = fmt.Sprintf("%d", v)
 		}
 		logger.Info("domain merge cap overridden", "steps_in_frozen_file", stepsStr)
-		aggOpts = aggOpts.DomainStepsInFrozenFileOverride(v)
+		aggOpts = aggOpts.ErigondbDomainStepsInFrozenFile(v)
 	}
 	agg, err := aggOpts.Open(ctx, db)
 	if err != nil {
