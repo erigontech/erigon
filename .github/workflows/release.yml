@@ -109,7 +109,7 @@ jobs:
           path: 'erigon'
           token: ${{ steps.generate_token_build.outputs.token }}
 
-      - name: Check if tag ${{ inputs.release_version }} already exists and create it in case perform_release is set.
+      - name: Check if tag ${{ inputs.release_version }} already exists
         if: ${{ (inputs.perform_release) && (inputs.release_version != '') }}
         env:
           RELEASE_VERSION: ${{ inputs.release_version }}
@@ -119,10 +119,7 @@ jobs:
             echo "ERROR: tag ${RELEASE_VERSION} exists and workflow is performing release. Exit."
             exit 1
           else
-            echo "OK: tag ${RELEASE_VERSION} does not exists. Proceeding."
-            git tag ${RELEASE_VERSION}
-            git push origin ${RELEASE_VERSION}
-            echo; echo "Git TAG ${RELEASE_VERSION} created and pushed."
+            echo "OK: tag ${RELEASE_VERSION} does not exist. Proceeding."
           fi
 
       - name: Create sub-directories, get commit id, etc
@@ -205,6 +202,16 @@ jobs:
           else
             echo "OK: Modifier matches pre-release suffix."
           fi
+
+      - name: Create and push git tag ${{ inputs.release_version }}
+        if: ${{ (inputs.perform_release) && (inputs.release_version != '') }}
+        env:
+          RELEASE_VERSION: ${{ inputs.release_version }}
+        run: |
+          cd erigon
+          git tag ${RELEASE_VERSION}
+          git push origin ${RELEASE_VERSION}
+          echo "Git TAG ${RELEASE_VERSION} created and pushed."
 
       - name: Login to Docker Hub
         uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2  ## v4.0.0
