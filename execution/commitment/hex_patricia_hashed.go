@@ -2344,7 +2344,7 @@ func (hph *HexPatriciaHashed) loadStateIfNeeded(cell *cell, counters skipStat) (
 			hph.metrics.AccountLoad(cell.accountAddr[:cell.accountAddrLen])
 			upd, err := hph.accountFromCacheOrDB(cell.accountAddr[:cell.accountAddrLen])
 			if err != nil {
-				return skipStat{}, err
+				return counters, err
 			}
 			cell.setFromUpdate(upd)
 			// if the update is empty, the loaded flag was not updated so do it manually
@@ -2355,7 +2355,7 @@ func (hph *HexPatriciaHashed) loadStateIfNeeded(cell *cell, counters skipStat) (
 			hph.metrics.StorageLoad(cell.storageAddr[:cell.storageAddrLen])
 			upd, err := hph.storageFromCacheOrDB(cell.storageAddr[:cell.storageAddrLen])
 			if err != nil {
-				return skipStat{}, err
+				return counters, err
 			}
 			cell.setFromUpdate(upd)
 			// if the update is empty, the loaded flag was not updated so do it manually
@@ -2363,7 +2363,7 @@ func (hph *HexPatriciaHashed) loadStateIfNeeded(cell *cell, counters skipStat) (
 			counters.storLoaded++
 		}
 	}
-	return skipStat{}, nil
+	return counters, nil
 }
 
 func (hph *HexPatriciaHashed) deleteCell(hashedKey []byte) {

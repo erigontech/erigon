@@ -3,7 +3,6 @@ package state
 import (
 	"bytes"
 	"container/heap"
-	"context"
 	"encoding/binary"
 	"testing"
 
@@ -18,6 +17,7 @@ import (
 )
 
 func TestCursorHeapPriority_RAMOverDBOverFILE(t *testing.T) {
+	t.Parallel()
 	// When the same key exists in RAM, DB, and FILE with equal endTxNum,
 	// RAM must win (highest priority), then DB, then FILE.
 	// This prevents IteratePrefix from returning stale DB/FILE values
@@ -46,6 +46,7 @@ func TestCursorHeapPriority_RAMOverDBOverFILE(t *testing.T) {
 }
 
 func TestCursorHeapPriority_MaxUint64TieBreak(t *testing.T) {
+	t.Parallel()
 	// Reproduces the exact scenario from #20246: RAM and DB both use
 	// math.MaxUint64 as endTxNum in debugIteratePrefixLatest.
 	// RAM must win so DomainDelPrefix picks up the current uncommitted value.
@@ -60,6 +61,7 @@ func TestCursorHeapPriority_MaxUint64TieBreak(t *testing.T) {
 }
 
 func TestCursorHeapPriority_EndTxNumStillWins(t *testing.T) {
+	t.Parallel()
 	// Higher endTxNum should still beat lower endTxNum regardless of cursor type.
 	var h CursorHeap
 	heap.Init(&h)
@@ -72,6 +74,7 @@ func TestCursorHeapPriority_EndTxNumStillWins(t *testing.T) {
 }
 
 func TestCursorHeapMergeLoop_RAMOverridesDB(t *testing.T) {
+	t.Parallel()
 	// Simulates the merge loop in debugIteratePrefixLatest where the same key
 	// exists in both RAM and DB with endTxNum=MaxUint64. The loop takes lastVal
 	// from the heap top, then pops all items with that key. RAM must be the top
@@ -143,7 +146,7 @@ func TestDomain_IteratePrefix_PrefersFilesOverDB(t *testing.T) {
 	t.Parallel()
 
 	logger := log.New()
-	ctx := context.Background()
+	ctx := t.Context()
 	require := require.New(t)
 
 	stepSize := uint64(16)

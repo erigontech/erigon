@@ -17,7 +17,6 @@
 package rawdbv3
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -35,35 +34,35 @@ func TestTxNum(t *testing.T) {
 	db := mdbx.New(dbcfg.ChainDB, log.New()).InMem(t, dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
 
-	err := db.Update(context.Background(), func(tx kv.RwTx) error {
+	err := db.Update(t.Context(), func(tx kv.RwTx) error {
 		require.NoError(TxNums.Append(tx, 0, 3))
 		require.NoError(TxNums.Append(tx, 1, 99))
 		require.NoError(TxNums.Append(tx, 2, 100))
 
-		n, _, err := TxNums.FindBlockNum(context.Background(), tx, 10)
+		n, _, err := TxNums.FindBlockNum(t.Context(), tx, 10)
 		require.NoError(err)
 		require.Equal(1, int(n))
 
-		n, _, err = TxNums.FindBlockNum(context.Background(), tx, 0)
+		n, _, err = TxNums.FindBlockNum(t.Context(), tx, 0)
 		require.NoError(err)
 		require.Equal(0, int(n))
 
-		n, _, err = TxNums.FindBlockNum(context.Background(), tx, 3)
+		n, _, err = TxNums.FindBlockNum(t.Context(), tx, 3)
 		require.NoError(err)
 		require.Equal(0, int(n))
-		n, _, err = TxNums.FindBlockNum(context.Background(), tx, 4)
+		n, _, err = TxNums.FindBlockNum(t.Context(), tx, 4)
 		require.NoError(err)
 		require.Equal(1, int(n))
 
-		n, _, err = TxNums.FindBlockNum(context.Background(), tx, 99)
+		n, _, err = TxNums.FindBlockNum(t.Context(), tx, 99)
 		require.NoError(err)
 		require.Equal(1, int(n))
 
-		n, _, err = TxNums.FindBlockNum(context.Background(), tx, 100)
+		n, _, err = TxNums.FindBlockNum(t.Context(), tx, 100)
 		require.NoError(err)
 		require.Equal(2, int(n))
 
-		_, ok, err := TxNums.FindBlockNum(context.Background(), tx, 101)
+		_, ok, err := TxNums.FindBlockNum(t.Context(), tx, 101)
 		require.NoError(err)
 		require.False(ok)
 		return nil

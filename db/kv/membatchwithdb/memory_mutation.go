@@ -869,8 +869,10 @@ func (m *MemoryMutation) RangeAsOf(name kv.Domain, fromKey, toKey []byte, ts uin
 }
 
 func (m *MemoryMutation) HistorySeek(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
-	panic("not supported")
-	// return m.db.HistorySeek(name, k, ts)
+	if m.db == nil {
+		return nil, false, fmt.Errorf("MemoryMutation: history read requires backing tx (detached overlay)")
+	}
+	return m.db.HistorySeek(name, k, ts)
 }
 
 func (m *MemoryMutation) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps stream.U64, err error) {
@@ -881,8 +883,10 @@ func (m *MemoryMutation) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs 
 }
 
 func (m *MemoryMutation) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, limit int) (it stream.KV, err error) {
-	panic("not supported")
-	// return m.db.HistoryRange(name, fromTs, toTs, asc, limit)
+	if m.db == nil {
+		return nil, fmt.Errorf("MemoryMutation: history read requires backing tx (detached overlay)")
+	}
+	return m.db.HistoryRange(name, fromTs, toTs, asc, limit)
 }
 
 func (m *MemoryMutation) HistoryStartFrom(name kv.Domain) uint64 {
