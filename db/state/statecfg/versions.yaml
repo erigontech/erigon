@@ -7,27 +7,27 @@ accounts:
             current: v2.0
             min: v1.0
         kvei:
-            current: v1.1
-            min: v1.0
+            current: v2.0
+            min: v2.0
     hist:
         v:
             current: v2.0
             min: v1.0
         vi:
-            current: v1.2
-            min: v1.0
+            current: v2.0
+            min: v2.0
     ii:
         ef:
             current: v3.0
             min: v1.0
         efi:
-            current: v2.1
-            min: v1.0
+            current: v3.0
+            min: v3.0
 bodies:
     block:
         idx:
-            current: v2.0
-            min: v1.0
+            current: v3.0
+            min: v3.0
         seg:
             current: v1.1
             min: v1.0
@@ -40,22 +40,22 @@ code:
             current: v2.0
             min: v1.0
         kvei:
-            current: v1.1
-            min: v1.0
+            current: v2.0
+            min: v2.0
     hist:
         v:
             current: v2.0
             min: v1.0
         vi:
-            current: v1.1
-            min: v1.0
+            current: v2.0
+            min: v2.0
     ii:
         ef:
             current: v3.0
             min: v1.0
         efi:
-            current: v2.0
-            min: v1.0
+            current: v3.0
+            min: v3.0
 commitment:
     domain:
         kv:
@@ -69,20 +69,20 @@ commitment:
             current: v2.0
             min: v1.0
         vi:
-            current: v1.1
-            min: v1.0
+            current: v2.0
+            min: v2.0
     ii:
         ef:
             current: v3.0
             min: v1.0
         efi:
-            current: v2.0
-            min: v1.0
+            current: v3.0
+            min: v3.0
 headers:
     block:
         idx:
-            current: v2.0
-            min: v1.0
+            current: v3.0
+            min: v3.0
         seg:
             current: v1.1
             min: v1.0
@@ -92,16 +92,16 @@ logaddrs:
             current: v3.0
             min: v1.0
         efi:
-            current: v2.1
-            min: v1.0
+            current: v3.0
+            min: v3.0
 logtopics:
     ii:
         ef:
             current: v3.0
             min: v1.0
         efi:
-            current: v2.1
-            min: v1.0
+            current: v3.0
+            min: v3.0
 rcache:
     domain:
         kv:
@@ -115,15 +115,15 @@ rcache:
             current: v3.0
             min: v1.0
         vi:
-            current: v1.1
-            min: v1.0
+            current: v2.0
+            min: v2.0
     ii:
         ef:
             current: v3.0
             min: v1.0
         efi:
-            current: v2.0
-            min: v1.0
+            current: v3.0
+            min: v3.0
 receipt:
     domain:
         bt:
@@ -133,22 +133,22 @@ receipt:
             current: v3.0
             min: v1.0
         kvei:
-            current: v1.2
-            min: v1.0
+            current: v2.0
+            min: v2.0
     hist:
         v:
             current: v3.0
             min: v1.0
         vi:
-            current: v1.2
-            min: v1.0
+            current: v2.0
+            min: v2.0
     ii:
         ef:
             current: v3.0
             min: v1.0
         efi:
-            current: v2.1
-            min: v1.0
+            current: v3.0
+            min: v3.0
 storage:
     domain:
         bt:
@@ -158,48 +158,48 @@ storage:
             current: v2.0
             min: v1.0
         kvei:
-            current: v1.1
-            min: v1.0
+            current: v2.0
+            min: v2.0
     hist:
         v:
             current: v2.0
             min: v1.0
         vi:
-            current: v1.1
-            min: v1.0
+            current: v2.0
+            min: v2.0
     ii:
         ef:
             current: v3.0
             min: v1.0
         efi:
-            current: v2.0
-            min: v1.0
+            current: v3.0
+            min: v3.0
 tracesfrom:
     ii:
         ef:
             current: v3.0
             min: v1.0
         efi:
-            current: v2.1
-            min: v1.0
+            current: v3.0
+            min: v3.0
 tracesto:
     ii:
         ef:
             current: v3.0
             min: v1.0
         efi:
-            current: v2.1
-            min: v1.0
+            current: v3.0
+            min: v3.0
 transactions:
     block:
         idx:
-            current: v2.0
-            min: v1.0
+            current: v3.0
+            min: v3.0
         seg:
             current: v1.1
             min: v1.0
 transactiontoblock:
     block:
         idx:
-            current: v2.0
-            min: v1.0
+            current: v3.0
+            min: v3.0
