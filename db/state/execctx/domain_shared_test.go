@@ -730,6 +730,167 @@ func TestSharedDomain_UnwindAcrossStepBoundary(t *testing.T) {
 		offending, maxStep, unwindTarget)
 }
 
+// TestSharedDomain_UnwindWithDeleteAcrossStepBoundary is the delete-path
+// analogue of TestSharedDomain_RepeatedUnwindAcrossStepBoundary — PR review
+// correctly raised that deletes go through a slightly different on-disk
+// shape than live writes and deserve their own coverage. The forward flush
+// emits a tombstone dup (`^step || nil`, 8 bytes) rather than `^step || v`,
+// and getLatestFromDb treats a first-dup whose value is 8 bytes long as
+// "key absent". If the SharedDomains Flush path drops the delete-diff when
+// collapsing `unwindChangeset`, the step-1 tombstone survives in MDBX —
+// and because ^1 sorts before ^0 in DupSort, the orphan tombstone becomes
+// the new "latest" even though the older step-0 entry was restored. The
+// account then appears deleted rather than being returned to its
+// pre-unwind value.
+//
+// The test must go through doms.Unwind()+doms.Flush() (not rwTx.Unwind
+// directly) because the buggy code paths live in TemporalMemBatch.Unwind
+// (building unwindChangeset) and TemporalMemBatch.Flush (replaying it).
+func TestSharedDomain_UnwindWithDeleteAcrossStepBoundary(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	stepSize := uint64(10)
+	db := newTestDb(t, stepSize)
+	ctx := t.Context()
+	require := require.New(t)
+
+	// Blocks 0..19 span step 0 (0..9) and step 1 (10..19).
+	const lastBlock = uint64(19)
+	const unwindTarget = uint64(4) // inside step 0
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(err)
+	defer rwTx.Rollback()
+	for bn := uint64(0); bn <= lastBlock; bn++ {
+		require.NoError(rawdbv3.TxNums.Append(rwTx, bn, bn))
+	}
+
+	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(err)
+	defer doms.Close()
+
+	addr := make([]byte, length.Addr)
+	addr[0] = 0x42
+
+	perBlockDiffs := make(map[uint64]*changeset.StateChangeSet)
+	executeBlock := func(bn uint64, fn func()) {
+		cs := &changeset.StateChangeSet{}
+		doms.SetChangesetAccumulator(cs)
+		fn()
+		rh, err := doms.ComputeCommitment(ctx, rwTx, true, bn, bn, "", nil)
+		require.NoError(err)
+		doms.SavePastChangesetAccumulator(common.BytesToHash(rh), bn, cs)
+		perBlockDiffs[bn] = cs
+		doms.SetChangesetAccumulator(nil)
+	}
+
+	// Forward execution:
+	//   block 0 (step 0): write addr = {nonce=1, balance=100}
+	//   block 5 (step 0): overwrite addr = {nonce=2, balance=200}
+	//   block 15 (step 1): delete addr
+	// After Flush, MDBX has two dups for addr:
+	//   (^0, acc2)       — current step-0 value (acc1 was replaced by acc2)
+	//   (^1, tombstone)  — the delete tombstone at step 1 (just 8 bytes)
+	acc1 := accounts3.Account{Nonce: 1, Balance: *uint256.NewInt(100)}
+	acc2 := accounts3.Account{Nonce: 2, Balance: *uint256.NewInt(200)}
+	acc1Bytes := accounts3.SerialiseV3(&acc1)
+	acc2Bytes := accounts3.SerialiseV3(&acc2)
+
+	pv0, _, err := doms.GetLatest(kv.AccountsDomain, rwTx, addr)
+	require.NoError(err)
+	executeBlock(0, func() {
+		require.NoError(doms.DomainPut(kv.AccountsDomain, rwTx, addr, acc1Bytes, 0, pv0))
+	})
+	pv5, _, err := doms.GetLatest(kv.AccountsDomain, rwTx, addr)
+	require.NoError(err)
+	executeBlock(5, func() {
+		require.NoError(doms.DomainPut(kv.AccountsDomain, rwTx, addr, acc2Bytes, 5, pv5))
+	})
+	pv15, _, err := doms.GetLatest(kv.AccountsDomain, rwTx, addr)
+	require.NoError(err)
+	executeBlock(15, func() {
+		require.NoError(doms.DomainDel(kv.AccountsDomain, rwTx, addr, 15, pv15))
+	})
+	require.NoError(doms.Flush(ctx, rwTx))
+
+	// Sanity: post-forward, addr is absent (deleted in block 15).
+	v, _, err := rwTx.GetLatest(kv.AccountsDomain, addr)
+	require.NoError(err)
+	require.Empty(v, "post-forward: addr must be absent (was deleted in block 15)")
+
+	// Unwind to block 4 — crosses the step boundary. Route the unwind
+	// through doms.Unwind()+doms.Flush() so the SharedDomains layer's
+	// collapse-then-replay logic is actually exercised. (rwTx.Unwind
+	// directly would bypass TemporalMemBatch.Unwind and never hit the bug.)
+	var merged [kv.DomainLen][]kv.DomainEntryDiff
+	for bn := lastBlock; bn > unwindTarget; bn-- {
+		cs, ok := perBlockDiffs[bn]
+		if !ok {
+			continue
+		}
+		for idx, d := range cs.Diffs {
+			keys := d.GetDiffSet()
+			if merged[idx] == nil {
+				merged[idx] = keys
+			} else {
+				merged[idx] = changeset.MergeDiffSets(merged[idx], keys)
+			}
+		}
+	}
+	doms.Unwind(unwindTarget, &merged)
+	doms.SetTxNum(unwindTarget)
+	require.NoError(doms.Flush(ctx, rwTx))
+
+	// Assertion 1: addr must be restored to acc1 (the block-0 value).
+	// Pre-fix failure mode: TemporalMemBatch.Unwind collapses both diff
+	// entries into the same "addr" map key; only one survives (the
+	// sorted-last one, which is the step-0 entry). Flush replays only
+	// that one, leaving the step-1 tombstone in MDBX. DupSort orders
+	// dups by their raw bytes, so (^1, tombstone) sorts before (^0, acc1);
+	// SeekExact returns the tombstone, getLatestFromDb sees an 8-byte
+	// value, and the caller reads "addr is absent" instead of acc1.
+	v, _, err = rwTx.GetLatest(kv.AccountsDomain, addr)
+	require.NoError(err)
+	require.NotEmptyf(v,
+		"post-unwind: addr must be restored (got empty slice — step-1 tombstone "+
+			"was not cleaned up; getLatestFromDb reads it as 'deleted')")
+	var post accounts3.Account
+	require.NoError(accounts3.DeserialiseV3(&post, v))
+	require.Equal(uint64(1), post.Nonce,
+		"post-unwind: nonce must be block-0 value (1); got %d — restore wrote "+
+			"wrong step entry or was shadowed by a stale higher-step tombstone",
+		post.Nonce)
+	require.Equal(uint64(100), post.Balance.Uint64())
+
+	// Assertion 2: no addr rows with step > unwindTarget/stepSize. This
+	// is the direct orphan-tombstone check — the ^1 tombstone must be gone.
+	maxStep := unwindTarget / stepSize
+	c, err := rwTx.CursorDupSort(kv.TblAccountVals)
+	require.NoError(err)
+	defer c.Close()
+	offending := 0
+	var exampleStep uint64
+	for k, v, err := c.SeekExact(addr); k != nil; k, v, err = c.NextDup() {
+		require.NoError(err)
+		if len(v) < 8 {
+			continue
+		}
+		step := ^binary.BigEndian.Uint64(v[:8])
+		if step > maxStep {
+			if offending == 0 {
+				exampleStep = step
+			}
+			offending++
+		}
+	}
+	require.Zerof(offending,
+		"post-unwind: addr has %d dups at step > %d (example step %d); "+
+			"step-1 tombstone for the deleted account was not cleaned up",
+		offending, maxStep, exampleStep)
+}
+
 func TestSharedDomain_StorageIter(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
