@@ -80,6 +80,11 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 		if err != nil {
 			return nil, fmt.Errorf("decoding transaction from: %x: %w", reply.Txs[i].RlpTx, err)
 		}
+		// Blob transactions (type 3) are excluded from txpool_content, matching Geth and Nethermind behaviour.
+		// Geth's BlobPool.Content() returns empty maps; Nethermind queries only the standard pool.
+		if txn.Type() == types.BlobTxType {
+			continue
+		}
 		addr := gointerfaces.ConvertH160toAddress(reply.Txs[i].Sender)
 		switch reply.Txs[i].TxnType {
 		case txpoolproto.AllReply_PENDING:
@@ -138,6 +143,11 @@ func (api *TxPoolAPIImpl) ContentFrom(ctx context.Context, addr common.Address) 
 		}
 		sender := gointerfaces.ConvertH160toAddress(reply.Txs[i].Sender)
 		if sender != addr {
+			continue
+		}
+		// Blob transactions (type 3) are excluded from txpool_content, matching Geth and Nethermind behaviour.
+		// Geth's BlobPool.Content() returns empty maps; Nethermind queries only the standard pool.
+		if txn.Type() == types.BlobTxType {
 			continue
 		}
 
