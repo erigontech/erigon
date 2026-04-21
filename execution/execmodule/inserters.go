@@ -107,13 +107,6 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 		if err := rawdb.WriteTd(blockOverlay, header.Hash(), height, td); err != nil {
 			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeTd: %s", err)
 		}
-		// Verify WriteTd read-back from overlay
-		verifyTd, verifyErr := rawdb.ReadTd(blockOverlay, header.Hash(), height)
-		if verifyErr != nil || verifyTd == nil {
-			e.logger.Error("[InsertBlocks] WRITE-TD READBACK FAILED",
-				"blockNum", height, "blockHash", header.Hash(),
-				"writtenTd", td, "readBackTd", verifyTd, "readBackErr", verifyErr)
-		}
 		if _, err := rawdb.WriteRawBodyIfNotExists(blockOverlay, header.Hash(), height, body); err != nil {
 			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBody: %s", err)
 		}
@@ -131,12 +124,6 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 			if err := rawdb.WriteBlockAccessListBytes(blockOverlay, header.Hash(), height, balBytes); err != nil {
 				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBlockAccessList, block %d: %s", height, err)
 			}
-		}
-		// Log every block in the 3220-3250 range for debugging
-		if height >= 3220 && height <= 3250 {
-			e.logger.Info("[InsertBlocks] block detail",
-				"blockNum", height, "blockHash", header.Hash(),
-				"parentHash", header.ParentHash, "td", td)
 		}
 		e.logger.Trace("Inserted block", "hash", header.Hash(), "number", header.Number)
 	}

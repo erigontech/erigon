@@ -96,7 +96,7 @@ func (b *BeaconState) CopyInto(dst *BeaconState) error {
 	}
 
 	if b.version >= clparams.FuluVersion {
-		dst.proposerLookahead = b.proposerLookahead
+		b.proposerLookahead.CopyTo(dst.proposerLookahead)
 	}
 
 	if b.version >= clparams.GloasVersion {
