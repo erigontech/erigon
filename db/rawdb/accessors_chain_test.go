@@ -18,7 +18,6 @@ package rawdb_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -481,7 +480,7 @@ func TestBlockStorage(t *testing.T) {
 	} else if entry.Hash() != block.Hash() {
 		t.Fatalf("Retrieved header mismatch: have %v, want %v", entry, block.Header())
 	}
-	if err := rawdb.TruncateBlocks(context.Background(), tx, 2); err != nil {
+	if err := rawdb.TruncateBlocks(t.Context(), tx, 2); err != nil {
 		t.Fatal(err)
 	}
 	if entry, _ := br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64()); entry == nil {
@@ -490,7 +489,7 @@ func TestBlockStorage(t *testing.T) {
 		t.Fatalf("Retrieved body mismatch: have %v, want %v", entry, block.Body())
 	}
 	// Delete the block and verify the execution
-	if err := rawdb.TruncateBlocks(context.Background(), tx, block.NumberU64()); err != nil {
+	if err := rawdb.TruncateBlocks(t.Context(), tx, block.NumberU64()); err != nil {
 		t.Fatal(err)
 	}
 	//if err := DeleteBlock(tx, block.Hash(), block.NumberU64()); err != nil {
@@ -826,10 +825,10 @@ func TestBlockReceiptStorage(t *testing.T) {
 	var txNum uint64
 	{
 		blockNum := header.Number.Uint64()
-		sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+		sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
 		require.NoError(err)
 		defer sd.Close()
-		base, err := txNumReader.Min(context.Background(), tx, 1)
+		base, err := txNumReader.Min(t.Context(), tx, 1)
 		require.NoError(err)
 		// Insert the receipt slice into the database and check presence
 		txNum = base
@@ -881,7 +880,7 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 	br, bw := m.BlocksIO()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// create fake withdrawals
 	w := types.Withdrawal{
@@ -942,7 +941,7 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	} else if entry.Hash() != block.Hash() {
 		t.Fatalf("Retrieved header mismatch: have %v, want %v", entry, block.Header())
 	}
-	if err := rawdb.TruncateBlocks(context.Background(), tx, 2); err != nil {
+	if err := rawdb.TruncateBlocks(t.Context(), tx, 2); err != nil {
 		t.Fatal(err)
 	}
 	entry, _ := br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
@@ -974,7 +973,7 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	require.Equal(uint64(1001), rw2.Amount)
 
 	// Delete the block and verify the execution
-	if err := rawdb.TruncateBlocks(context.Background(), tx, block.NumberU64()); err != nil {
+	if err := rawdb.TruncateBlocks(t.Context(), tx, block.NumberU64()); err != nil {
 		t.Fatal(err)
 	}
 	//if err := DeleteBlock(tx, block.Hash(), block.NumberU64()); err != nil {
