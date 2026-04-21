@@ -121,7 +121,7 @@ func (mf *MergedFilesV3) Close() {
 	if mf == nil {
 		return
 	}
-	clist := make([]*FilesItem, 0, kv.DomainLen+4)
+	clist := make([]*FilesItem, 0, 3*int(kv.DomainLen)+kv.StandaloneIdxLen)
 	for id := range mf.d {
 		clist = append(clist, mf.d[id], mf.dHist[id], mf.dIdx[id])
 	}

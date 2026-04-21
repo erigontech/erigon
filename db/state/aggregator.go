@@ -1422,7 +1422,7 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 		}
 	}
 
-	stats := make([]*InvertedIndexPruneStat, at.a.iisCount)
+	stats := make([]*InvertedIndexPruneStat, at.iisCount)
 	for iikey := range stats {
 		select {
 		case <-ctx.Done():
