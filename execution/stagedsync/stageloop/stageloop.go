@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
+	commitmentdb "github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/stagedsync/headerdownload"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -145,15 +146,22 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 	}
 
 	// after StageSnapshots (files downloading): if domains are ahead of block files, then nothing to execute.
-	if execctx.IsDomainAheadOfBlocks(ctx, tx, logger) {
-		return tx.Commit()
-	}
-
 	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
 	if err != nil {
-		return err
+		if !errors.Is(err, commitmentdb.ErrBehindCommitment) {
+			return err
+		}
+		if doms == nil {
+			// Snap downloading ahead of blocks: nothing to execute yet.
+			return tx.Commit()
+		}
+		// ErrBehindCommitment with initialized domains means TxNums index is behind commitment.
+		// This is a transient state after migrations. Continue with stages to rebuild the index.
+		logger.Debug("[sync] TxNums index is behind commitment, running stages to rebuild", "err", err)
 	}
-	defer doms.Close()
+	if doms != nil {
+		defer doms.Close()
+	}
 	doms.SetInMemHistoryReads(inMemHistoryReads)
 
 	var finishStageBeforeSync uint64
