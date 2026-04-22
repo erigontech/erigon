@@ -12,18 +12,9 @@ import (
 )
 
 const (
-	// overlay parameters
-	gossipSubD    = 4 // topic stable mesh target count
-	gossipSubDlo  = 2 // topic stable mesh low watermark
-	gossipSubDhi  = 6 // topic stable mesh high watermark
-	gossipSubDout = 1 // topic stable mesh target out degree. // Dout must be set below Dlo, and must not exceed D / 2.
-
-	// gossip parameters
-	gossipSubMcacheLen    = 6   // number of windows to retain full messages in cache for `IWANT` responses
-	gossipSubMcacheGossip = 3   // number of windows to gossip about
-	gossipSubSeenTTL      = 550 // number of heartbeat intervals to retain message IDs
-	// heartbeat interval
-	gossipSubHeartbeatInterval = 700 * time.Millisecond // frequency of heartbeat, milliseconds
+	// gossipSubD is the topic stable mesh target count, used for attestation
+	// rate computations here.
+	gossipSubD = 4
 
 	// decayToZero specifies the terminal value that we will use when decaying
 	// a value.
