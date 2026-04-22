@@ -185,6 +185,24 @@ func (v Versions) Supports(ver Version) bool {
 	return ver.GreaterOrEqual(v.MinSupported) && ver.LessOrEqual(v.Current)
 }
 
+// MustSupport panics if ver is outside [MinSupported, Current].
+// Too-low means snapshots are stale; too-high means the binary is older than the files.
+func (v Versions) MustSupport(ver Version, filename string) {
+	if v.Supports(ver) {
+		return
+	}
+	if ver.Less(v.MinSupported) {
+		panic(fmt.Sprintf(
+			"FileVersion is too low, try to run snapshot reset: `erigon --datadir $DATADIR --chain $CHAIN snapshots reset`. file=%s, min_supported=%s, current=%s",
+			filename, v.MinSupported, v.Current,
+		))
+	}
+	panic(fmt.Sprintf(
+		"FileVersion is too high (binary is older than snapshot files), please upgrade erigon. file=%s, file_version=%s, current=%s",
+		filename, ver, v.Current,
+	))
+}
+
 // FindFilesWithVersionsByPattern return an filepath by pattern
 func FindFilesWithVersionsByPattern(pattern string) (string, Version, bool, error) {
 	matches, err := filepath.Glob(pattern)
@@ -310,13 +328,4 @@ func (v *Version) UnmarshalYAML(node *yaml.Node) error {
 	}
 	*v = ver
 	return nil
-}
-
-func VersionTooLowPanic(filename string, version Versions) {
-	panic(fmt.Sprintf(
-		"FileVersion is too low, try to run snapshot reset: `erigon --datadir $DATADIR --chain $CHAIN snapshots reset`. file=%s, min_supported=%s, current=%s",
-		filename,
-		version.MinSupported,
-		version.Current,
-	))
 }

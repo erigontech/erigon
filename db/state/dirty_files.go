@@ -351,13 +351,10 @@ func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 					continue
 				}
 
-				if fileVer.Less(d.FileVersion.DataKV.MinSupported) {
-					_, fName := filepath.Split(fPath)
-					versionTooLowPanic(fName, d.FileVersion.DataKV)
-				}
+				_, fName := filepath.Split(fPath)
+				d.FileVersion.DataKV.MustSupport(fileVer, fName)
 
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
-					_, fName := filepath.Split(fPath)
 					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
 						d.logger.Debug("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 					} else {
@@ -379,12 +376,9 @@ func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 				}
 				if ok {
-					if fileVer.Less(d.FileVersion.AccessorKVI.MinSupported) {
-						_, fName := filepath.Split(fPath)
-						versionTooLowPanic(fName, d.FileVersion.AccessorKVI)
-					}
+					_, fName := filepath.Split(fPath)
+					d.FileVersion.AccessorKVI.MustSupport(fileVer, fName)
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
-						_, fName := filepath.Split(fPath)
 						d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
 					}
@@ -398,12 +392,9 @@ func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 				}
 				if ok {
-					if fileVer.Less(d.FileVersion.AccessorBT.MinSupported) {
-						_, fName := filepath.Split(fPath)
-						versionTooLowPanic(fName, d.FileVersion.AccessorBT)
-					}
+					_, fName := filepath.Split(fPath)
+					d.FileVersion.AccessorBT.MustSupport(fileVer, fName)
 					if item.bindex, err = btindex.OpenBtreeIndexWithDecompressor(fPath, btindex.DefaultBtreeM, d.dataReader(item.decompressor)); err != nil {
-						_, fName := filepath.Split(fPath)
 						d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
 					}
@@ -417,12 +408,9 @@ func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 				}
 				if ok {
-					if fileVer.Less(d.FileVersion.AccessorKVEI.MinSupported) {
-						_, fName := filepath.Split(fPath)
-						versionTooLowPanic(fName, d.FileVersion.AccessorKVEI)
-					}
+					_, fName := filepath.Split(fPath)
+					d.FileVersion.AccessorKVEI.MustSupport(fileVer, fName)
 					if item.existence, err = existence.OpenFilter(fPath, false); err != nil {
-						_, fName := filepath.Split(fPath)
 						d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
 					}
@@ -465,13 +453,10 @@ func (h *History) openDirtyFiles(dataEntries, accessorEntries []string) error {
 					invalidFilesMu.Unlock()
 					continue
 				}
-				if fileVer.Less(h.FileVersion.DataV.MinSupported) {
-					_, fName := filepath.Split(fPath)
-					versionTooLowPanic(fName, h.FileVersion.DataV)
-				}
+				_, fName := filepath.Split(fPath)
+				h.FileVersion.DataV.MustSupport(fileVer, fName)
 
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
-					_, fName := filepath.Split(fPath)
 					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
 						h.logger.Debug("[agg] History.openDirtyFiles", "err", err, "f", fName)
 						// TODO we do not restore those files so we could just remove them along with indices. Same for domains/indices.
@@ -506,12 +491,9 @@ func (h *History) openDirtyFiles(dataEntries, accessorEntries []string) error {
 					h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
 				}
 				if ok {
-					if fileVer.Less(h.FileVersion.AccessorVI.MinSupported) {
-						_, fName := filepath.Split(fPath)
-						versionTooLowPanic(fName, h.FileVersion.AccessorVI)
-					}
+					_, fName := filepath.Split(fPath)
+					h.FileVersion.AccessorVI.MustSupport(fileVer, fName)
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
-						_, fName := filepath.Split(fPath)
 						h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
 					}
@@ -555,13 +537,10 @@ func (ii *InvertedIndex) openDirtyFiles(dataEntries, accessorEntries []string) e
 					continue
 				}
 
-				if fileVer.Less(ii.FileVersion.DataEF.MinSupported) {
-					_, fName := filepath.Split(fPath)
-					versionTooLowPanic(fName, ii.FileVersion.DataEF)
-				}
+				_, fName := filepath.Split(fPath)
+				ii.FileVersion.DataEF.MustSupport(fileVer, fName)
 
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
-					_, fName := filepath.Split(fPath)
 					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
 						ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
 					} else {
@@ -584,12 +563,9 @@ func (ii *InvertedIndex) openDirtyFiles(dataEntries, accessorEntries []string) e
 					// don't interrupt on error. other files may be good
 				}
 				if ok {
-					if fileVer.Less(ii.FileVersion.AccessorEFI.MinSupported) {
-						_, fName := filepath.Split(fPath)
-						versionTooLowPanic(fName, ii.FileVersion.AccessorEFI)
-					}
+					_, fName := filepath.Split(fPath)
+					ii.FileVersion.AccessorEFI.MustSupport(fileVer, fName)
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
-						_, fName := filepath.Split(fPath)
 						ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
 					}
