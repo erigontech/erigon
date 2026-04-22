@@ -24,7 +24,7 @@ You must first enable metrics collection in your running Erigon instance.
 ./erigon --metrics --datadir=/your/data/dir
 ```
 
-To specify a custom address for metrics, use the `--metrics.addr` flag.
+To specify a custom address and port for metrics, use the `--metrics.addr` and `--metrics.port` flags (default port: `6061`).
 
 #### Step 2: Configure Prometheus Targets
 
@@ -56,14 +56,16 @@ Once the containers are running, access the Grafana interface at `localhost:3000
 
 #### Step 5: Utilize Pre-configured Dashboards
 
-Erigon comes with comprehensive, pre-built dashboards that you can find in `./cmd/prometheus/readme.md` .
+Erigon comes with pre-built dashboards located in `./cmd/prometheus/dashboards/`. See `./cmd/prometheus/Readme.md` for details.
 
-The `erigon.json` dashboard is the recommended high-level board for most users, tracking critical performance and resource metrics:
+**`erigon.json`** is the recommended dashboard for most users. It contains the following sections:
 
-* **Performance**: Block Execution Speed, Processing Times (validation and execution latencies).
-* **Storage & Growth**: Monitor chaindata and snapshot sizes.
-* **Network Activity**: Gossip bandwidth and P2P metrics.
-* **State Management**: Domain operations and pruning statistics.
+* **Blockchain**: Block execution speed and processing times.
+* **Block consume delay**: Latency between block production and consumption.
+* **RPC**: Request rates and response times for the JSON-RPC interface.
+* **Private api** (collapsed): Internal gRPC API metrics.
+
+**`erigon_internals.json`** is a low-level dashboard used by the Erigon development team for deep internal debugging. It is exported from Erigon's own Grafana Cloud instance and requires a pre-release Grafana build — it is _not recommended_ for typical users or self-hosted setups.
 
 #### Step 6: Memory Usage Monitoring (Important Note)
 
@@ -77,9 +79,10 @@ You can customize the setup using environment variables:
 
 | **Variable**               | **Description**                           |
 | -------------------------- | ----------------------------------------- |
-| `XDG_DATA_HOME`            | Changes default database folder location. |
-| `ERIGON_PROMETHEUS_CONFIG` | Path to a custom `prometheus.yml` file.   |
-| `ERIGON_GRAFANA_CONFIG`    | Path to a custom `grafana.ini` file.      |
+| `XDG_DATA_HOME`            | Changes default database folder location.  |
+| `ERIGON_PROMETHEUS_CONFIG` | Path to a custom `prometheus.yml` file.    |
+| `ERIGON_GRAFANA_CONFIG`    | Path to a custom `grafana.ini` file.       |
+| `ERIGON_GRAFANA_DASHBOARD` | Path to a custom dashboards directory.     |
 
 Example with a Custom Prometheus Configuration:
 
@@ -92,10 +95,10 @@ ERIGON_PROMETHEUS_CONFIG=/path/to/custom/prometheus.yml docker compose up promet
 #### Troubleshooting
 
 * Ensure Erigon is running with the `--metrics` flag enabled.
-* Verify Prometheus can reach your Erigon metrics endpoint (default port varies).
+* Verify Prometheus can reach your Erigon metrics endpoint (default port: `6061`).
 * Check Docker container logs if services fail to start.
 * Confirm firewall settings allow access to monitoring ports.
 
 #### For Developers
 
-For developers, the `erigon_internals.json` dashboard offers a low-level, complex view of the node for in-depth debugging (not recommended for typical users). Custom metrics can be added by searching for `grpc_prometheus.Register` within the codebase.
+Custom metrics can be added by searching for `grpc_prometheus.Register` within the codebase.

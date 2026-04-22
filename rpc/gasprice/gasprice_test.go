@@ -51,7 +51,7 @@ func newTestBackend(t *testing.T) *execmoduletester.ExecModuleTester {
 		key, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr   = crypto.PubkeyToAddress(key.PublicKey)
 		gspec  = &types.Genesis{
-			Config: chain.TestChainConfig,
+			Config: chain.TestChainBerlinConfig,
 			Alloc:  types.GenesisAlloc{addr: {Balance: big.NewInt(math.MaxInt64)}},
 		}
 		signer = types.LatestSigner(gspec.Config)
@@ -88,7 +88,7 @@ func TestSuggestPrice(t *testing.T) {
 	}
 
 	m := newTestBackend(t) //, big.NewInt(16), c.pending)
-	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewDummy(), m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
+	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewSimple(), m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
 
 	tx, err := m.DB.BeginTemporalRo(m.Ctx)
 	require.NoError(t, err)
@@ -285,7 +285,7 @@ func (m *mockOracleBackend) BlockByNumber(ctx context.Context, _ rpc.BlockNumber
 	return types.NewBlock(m.head, nil, nil, nil, nil), nil
 }
 
-func (m *mockOracleBackend) ChainConfig() *chain.Config { return chain.TestChainConfig }
+func (m *mockOracleBackend) ChainConfig() *chain.Config { return chain.AllProtocolChanges }
 
 func (m *mockOracleBackend) GetLatestBlockNumber() (uint64, error) {
 	return m.head.Number.Uint64(), nil
@@ -337,7 +337,7 @@ func TestSuggestTipCap_SparseBlocks(t *testing.T) {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	addr := crypto.PubkeyToAddress(key.PublicKey)
 	gspec := &types.Genesis{
-		Config: chain.TestChainConfig,
+		Config: chain.AllProtocolChanges,
 		Alloc:  types.GenesisAlloc{addr: {Balance: big.NewInt(math.MaxInt64)}},
 	}
 	signer := types.LatestSigner(gspec.Config)
@@ -367,7 +367,7 @@ func TestSuggestTipCap_SparseBlocks(t *testing.T) {
 		Percentile: 60,
 		Default:    uint256.NewInt(common.GWei),
 	}
-	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewDummy(), m.BlockReader, false,
+	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewSimple(), m.BlockReader, false,
 		rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
 
 	dbTx, txErr := m.DB.BeginTemporalRo(m.Ctx)
@@ -389,7 +389,7 @@ func TestSuggestTipCap_AllEmptyBlocks(t *testing.T) {
 		t.Skip("slow test")
 	}
 
-	gspec := &types.Genesis{Config: chain.TestChainConfig}
+	gspec := &types.Genesis{Config: chain.AllProtocolChanges}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
 
 	const totalBlocks = 5
@@ -405,7 +405,7 @@ func TestSuggestTipCap_AllEmptyBlocks(t *testing.T) {
 		Percentile: 60,
 		Default:    uint256.NewInt(common.GWei),
 	}
-	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewDummy(), m.BlockReader, false,
+	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewSimple(), m.BlockReader, false,
 		rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
 
 	dbTx, txErr := m.DB.BeginTemporalRo(m.Ctx)

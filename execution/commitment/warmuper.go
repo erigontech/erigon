@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 // TrieContextFactory creates new PatriciaContext instances for parallel warmup.
@@ -194,7 +195,7 @@ func (w *Warmuper) Start() {
 func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDepth int) {
 	depth := startDepth
 	for depth <= len(hashedKey) && depth <= w.maxDepth {
-		prefix := HexNibblesToCompactBytes(hashedKey[:depth])
+		prefix := nibbles.HexToCompact(hashedKey[:depth])
 
 		// Check cache first, then fall back to DB
 		branchData, err := w.branchFromCacheOrDB(trieCtx, prefix)
@@ -283,11 +284,8 @@ func (w *Warmuper) Wait() error {
 	if !w.started.Load() || w.numWorkers <= 0 {
 		return nil
 	}
-
-	// Only close the channel once
-	close(w.work)
+	w.Close()
 	w.g.Wait()
-
 	return nil
 }
 
@@ -317,13 +315,12 @@ func (w *Warmuper) DrainPending() {
 	}
 }
 
-// WaitAndClose waits for all warmup work to complete and then closes the warmuper.
-func (w *Warmuper) WaitAndClose() {
-	if w.closed.Swap(true) {
-		return // Already closed
-	}
-	w.Wait()
+// CloseAndWait cancel and waits for all warmup work
+func (w *Warmuper) CloseAndWait() {
 	w.Close()
+	if w.g != nil {
+		_ = w.g.Wait()
+	}
 }
 
 // Close cancels all warmup work and releases resources.
@@ -332,5 +329,7 @@ func (w *Warmuper) Close() {
 		return // Already closed
 	}
 	w.cancel()
-	close(w.work)
+	if w.work != nil {
+		close(w.work)
+	}
 }

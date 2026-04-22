@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -66,27 +67,13 @@ type Stream struct {
 
 // Reset sets all slices to zero sizes, without de-allocating
 func (s *Stream) Reset() {
-	if len(s.keyBytes) > 0 {
-		s.keyBytes = s.keyBytes[:0]
-	}
-	if len(s.keySizes) > 0 {
-		s.keySizes = s.keySizes[:0]
-	}
-	if len(s.itemTypes) > 0 {
-		s.itemTypes = s.itemTypes[:0]
-	}
-	if len(s.aValues) > 0 {
-		s.aValues = s.aValues[:0]
-	}
-	if len(s.aCodes) > 0 {
-		s.aCodes = s.aCodes[:0]
-	}
-	if len(s.sValues) > 0 {
-		s.sValues = s.sValues[:0]
-	}
-	if len(s.hashes) > 0 {
-		s.hashes = s.hashes[:0]
-	}
+	s.keyBytes = s.keyBytes[:0]
+	s.keySizes = s.keySizes[:0]
+	s.itemTypes = s.itemTypes[:0]
+	s.aValues = s.aValues[:0]
+	s.aCodes = s.aCodes[:0]
+	s.sValues = s.sValues[:0]
+	s.hashes = s.hashes[:0]
 }
 
 type StreamIterator interface {
@@ -125,21 +112,15 @@ func NewIterator(t *Trie, rl *RetainList, trace bool) *Iterator {
 func (it *Iterator) Reset(t *Trie, rl *RetainList, trace bool) {
 	it.rl = rl
 	it.hex = it.hex[:0]
-	if len(it.nodeStack) > 0 {
-		it.nodeStack = it.nodeStack[:0]
-	}
+	it.nodeStack = it.nodeStack[:0]
 	it.nodeStack = append(it.nodeStack, t.RootNode)
-	if len(it.iStack) > 0 {
-		it.iStack = it.iStack[:0]
-	}
-	it.lenStack = append(it.lenStack, 0)
-	if len(it.goDeepStack) > 0 {
-		it.goDeepStack = it.goDeepStack[:0]
-	}
+	it.iStack = it.iStack[:0]
+	it.iStack = append(it.iStack, 0)
+	it.goDeepStack = it.goDeepStack[:0]
 	it.goDeepStack = append(it.goDeepStack, true)
-	if len(it.accountStack) > 0 {
-		it.accountStack = it.accountStack[:0]
-	}
+	it.lenStack = it.lenStack[:0]
+	it.lenStack = append(it.lenStack, 0)
+	it.accountStack = it.accountStack[:0]
 	it.accountStack = append(it.accountStack, true)
 	it.top = 1
 	it.trace = trace
@@ -812,12 +793,12 @@ func HashWithModifications(
 	offset := 0
 	for ki < keyCount {
 		if accountKeyHex == nil && ai < len(aKeys) {
-			accountKeyHex = keybytesToHex(aKeys[ai][:])
+			accountKeyHex = nibbles.KeybytesToHex(aKeys[ai][:])
 			accountKeyHex = accountKeyHex[:len(accountKeyHex)-1]
 			ai++
 		}
 		if storageKeyHex == nil && si < len(sKeys) {
-			storageKeyHex = keybytesToHex(sKeys[si][:])
+			storageKeyHex = nibbles.KeybytesToHex(sKeys[si][:])
 			storageKeyHex = storageKeyHex[:len(storageKeyHex)-1]
 			si++
 		}

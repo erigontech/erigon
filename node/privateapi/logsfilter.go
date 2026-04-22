@@ -22,6 +22,7 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/notifications"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
@@ -154,36 +155,44 @@ func (a *LogsFilterAggregator) subscribeLogs(server remoteproto.ETHBACKEND_Subsc
 	return nil
 }
 
-func (a *LogsFilterAggregator) distributeLogs(logs []*remoteproto.SubscribeLogsReply) error {
+// distributeLogs receives native log notifications, filters them, and converts
+// to protobuf only when sending over gRPC.
+func (a *LogsFilterAggregator) distributeLogs(logs []*notifications.LogNotification) error {
 	a.logsFilterLock.Lock()
 	defer a.logsFilterLock.Unlock()
 
 	filtersToDelete := make(map[uint64]*LogsFilter)
 outerLoop:
-	for _, log := range logs {
-		// Use aggregate filter first
+	for _, lg := range logs {
+		// Use aggregate filter first — native types, no conversion needed
 		if a.aggLogsFilter.allAddrs == 0 {
-			if _, addrOk := a.aggLogsFilter.addrs[gointerfaces.ConvertH160toAddress(log.Address)]; !addrOk {
+			if _, addrOk := a.aggLogsFilter.addrs[lg.Address]; !addrOk {
 				continue
 			}
 		}
 		if a.aggLogsFilter.allTopics == 0 {
-			if !a.chooseTopics(a.aggLogsFilter.topics, log.GetTopics()) {
+			if !a.chooseTopicsNative(a.aggLogsFilter.topics, lg.Topics) {
 				continue
 			}
 		}
+		// Convert to protobuf once for all matching subscribers
+		var proto *remoteproto.SubscribeLogsReply
 		for filterId, filter := range a.logsFilters {
 			if filter.allAddrs == 0 {
-				if _, addrOk := filter.addrs[gointerfaces.ConvertH160toAddress(log.Address)]; !addrOk {
+				if _, addrOk := filter.addrs[lg.Address]; !addrOk {
 					continue
 				}
 			}
 			if filter.allTopics == 0 {
-				if !a.chooseTopics(filter.topics, log.GetTopics()) {
+				if !a.chooseTopicsNative(filter.topics, lg.Topics) {
 					continue
 				}
 			}
-			if err := filter.sender.Send(log); err != nil {
+			// Lazy convert: only build protobuf when we actually need to send
+			if proto == nil {
+				proto = logNotificationToProto(lg)
+			}
+			if err := filter.sender.Send(proto); err != nil {
 				filtersToDelete[filterId] = filter
 				continue outerLoop
 			}
@@ -198,11 +207,30 @@ outerLoop:
 	return nil
 }
 
-func (a *LogsFilterAggregator) chooseTopics(filterTopics map[common.Hash]int, logTopics []*typesproto.H256) bool {
-	for _, logTopic := range logTopics {
-		if _, ok := filterTopics[gointerfaces.ConvertH256ToHash(logTopic)]; ok {
+func (a *LogsFilterAggregator) chooseTopicsNative(filterTopics map[common.Hash]int, logTopics []common.Hash) bool {
+	for _, topic := range logTopics {
+		if _, ok := filterTopics[topic]; ok {
 			return true
 		}
 	}
 	return false
+}
+
+// logNotificationToProto converts a native LogNotification to protobuf for gRPC.
+func logNotificationToProto(lg *notifications.LogNotification) *remoteproto.SubscribeLogsReply {
+	topics := make([]*typesproto.H256, 0, len(lg.Topics))
+	for _, topic := range lg.Topics {
+		topics = append(topics, gointerfaces.ConvertHashToH256(topic))
+	}
+	return &remoteproto.SubscribeLogsReply{
+		Address:          gointerfaces.ConvertAddressToH160(lg.Address),
+		BlockHash:        gointerfaces.ConvertHashToH256(lg.BlockHash),
+		BlockNumber:      lg.BlockNumber,
+		Data:             lg.Data,
+		LogIndex:         uint64(lg.Index),
+		Topics:           topics,
+		TransactionHash:  gointerfaces.ConvertHashToH256(lg.TxHash),
+		TransactionIndex: uint64(lg.TxIndex),
+		Removed:          lg.Removed,
+	}
 }
