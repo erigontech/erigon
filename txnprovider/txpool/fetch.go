@@ -27,18 +27,32 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
 // errInternalDB wraps errors that originate from local DB lookups (not from the peer's data).
 // This prevents penalizing peers for our own internal failures.
 var errInternalDB = errors.New("internal db error")
+
+// announceInfo records the (type, size) that a peer promised for a given hash
+// in an eth/68 NewPooledTransactionHashes announcement. We keep the peer id so
+// that a later PooledTransactions reply from a different peer does not clobber
+// the check (two peers can legitimately announce the same hash).
+type announceInfo struct {
+	peerHash uint64 // maphash of the announcing peer's 64-byte id
+	txnType  byte
+	size     uint32
+}
 
 // Fetch connects to sentry and implements eth/66 protocol regarding the transaction
 // messages. It tries to "prime" the sentry with StatusData message containing given
@@ -56,6 +70,7 @@ type Fetch struct {
 	sentryClients            []sentryproto.SentryClient // sentry clients that will be used for accessing the network
 	stateChangesParseCtxLock sync.Mutex
 	pooledTxnsParseCtxLock   sync.Mutex
+	announcements            *maphash.LRU[announceInfo] // hash -> expected (type, size) from its announcer
 	logger                   log.Logger
 }
 
@@ -77,6 +92,9 @@ func NewFetch(
 	opts ...Option,
 ) *Fetch {
 	options := applyOpts(opts...)
+	// 64k entries covers ~1 day of typical announce traffic on mainnet and caps
+	// memory growth for a DoSing peer that spams unique hashes.
+	announcements, _ := maphash.NewLRU[announceInfo](64 * 1024)
 	f := &Fetch{
 		ctx:                  ctx,
 		sentryClients:        sentryClients,
@@ -85,6 +103,7 @@ func NewFetch(
 		stateChangesClient:   stateChangesClient,
 		stateChangesParseCtx: NewTxnParseContext(chainID).ChainIDRequired(), //TODO: change ctx if rules changed
 		pooledTxnsParseCtx:   NewTxnParseContext(chainID).ChainIDRequired(),
+		announcements:        announcements,
 		wg:                   options.p2pFetcherWg,
 		logger:               logger,
 	}
@@ -92,6 +111,79 @@ func NewFetch(
 	f.stateChangesParseCtx.ValidateRLP(f.pool.ValidateSerializedTxn)
 
 	return f
+}
+
+// peerHash maps a peer's H512 id to the 64-bit hash we store alongside each
+// announcement entry. It lets us tell whether the peer delivering a
+// PooledTransactions reply is the same one that announced the hash.
+func peerHash(pid *typesproto.H512) uint64 {
+	b := gointerfaces.ConvertH512ToHash(pid)
+	return maphash.Hash(b[:])
+}
+
+// recordAnnouncement remembers the (type, size) a peer promised for hashes it
+// announced via eth/68 NewPooledTransactionHashes. Used later to detect peers
+// that lie in their announcements (see checkPooledTxnAnnouncement).
+func (f *Fetch) recordAnnouncement(pid *typesproto.H512, types []byte, sizes []uint32, hashes []byte) {
+	if f.announcements == nil || len(types) == 0 {
+		return
+	}
+	ph := peerHash(pid)
+	const hashSize = 32
+	for i := range types {
+		info := announceInfo{peerHash: ph, txnType: types[i], size: sizes[i]}
+		f.announcements.Set(hashes[i*hashSize:(i+1)*hashSize], info)
+	}
+}
+
+// checkPooledTxnAnnouncement returns an error if the peer delivering `slot`
+// announced it earlier with a different type or size. Unannounced txs (including
+// those announced by a different peer) are skipped — only a self-contradicting
+// announcement is a violation.
+func (f *Fetch) checkPooledTxnAnnouncement(pid *typesproto.H512, slot *TxnSlot) error {
+	if f.announcements == nil {
+		return nil
+	}
+	info, ok := f.announcements.Get(slot.IDHash[:])
+	if !ok {
+		return nil
+	}
+	if info.peerHash != peerHash(pid) {
+		return nil
+	}
+	if info.txnType != slot.TxType() {
+		return fmt.Errorf("announced tx type %d != actual %d for hash %x", info.txnType, slot.TxType(), slot.IDHash[:])
+	}
+	if info.size != slot.Size {
+		return fmt.Errorf("announced tx size %d != actual %d for hash %x", info.size, slot.Size, slot.IDHash[:])
+	}
+	// One-shot: drop the entry so the same announcement can't be replayed.
+	f.announcements.Delete(slot.IDHash[:])
+	return nil
+}
+
+// checkBlobSidecar verifies EIP-4844 per-commitment invariants on a blob tx
+// wrapper that arrived from a peer. Returns an error when the sidecar's
+// commitments don't match the tx's blob_versioned_hashes — the peer that
+// delivered it gets penalized. Non-blob txs and txs parsed without a sidecar
+// pass through unchecked.
+func (f *Fetch) checkBlobSidecar(slot *TxnSlot) error {
+	if slot == nil || slot.Txn == nil || slot.Txn.Type() != types.BlobTxType {
+		return nil
+	}
+	if len(slot.BlobBundles) == 0 {
+		return nil // no wrapper data — not our check to do here
+	}
+	blobHashes := slot.Txn.GetBlobHashes()
+	if len(blobHashes) != len(slot.BlobBundles) {
+		return fmt.Errorf("blob_versioned_hashes count %d != blobs count %d", len(blobHashes), len(slot.BlobBundles))
+	}
+	for i := range slot.BlobBundles {
+		if libkzg.KZGToVersionedHash(slot.BlobBundles[i].Commitment) != libkzg.VersionedHash(blobHashes[i]) {
+			return fmt.Errorf("commitment[%d] does not match blob_versioned_hash[%d]", i, i)
+		}
+	}
+	return nil
 }
 
 func (f *Fetch) threadSafeParsePooledTxn(cb func(*TxnParseContext) error) error {
@@ -363,12 +455,13 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 			sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
 			return nil
 		}
-		_, _, hashes, _, err := parseAnnouncements(req.Data, 0)
+		types, sizes, hashes, _, err := parseAnnouncements(req.Data, 0)
 		if err != nil {
 			f.logger.Debug("[txpool] penalizing peer for malformed NewPooledTransactionHashes68", "peer", req.PeerId, "err", err)
 			sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
 			return nil
 		}
+		f.recordAnnouncement(req.PeerId, types, sizes, hashes)
 
 		unknownHashes, err := f.pool.FilterKnownIdHashes(tx, hashes)
 		if err != nil {
@@ -488,6 +581,18 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 				f.logger.Debug("[txpool] penalizing peer for malformed PooledTransactions66", "peer", req.PeerId, "err", err)
 				sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
 				return nil
+			}
+			for i := range txns.Txns {
+				if err := f.checkPooledTxnAnnouncement(req.PeerId, txns.Txns[i]); err != nil {
+					f.logger.Debug("[txpool] penalizing peer for mismatched tx announcement", "peer", req.PeerId, "err", err)
+					sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
+					return nil
+				}
+				if err := f.checkBlobSidecar(txns.Txns[i]); err != nil {
+					f.logger.Debug("[txpool] penalizing peer for bad blob sidecar", "peer", req.PeerId, "err", err)
+					sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
+					return nil
+				}
 			}
 		default:
 			return fmt.Errorf("unexpected message: %s", req.Id.String())

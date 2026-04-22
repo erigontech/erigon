@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
@@ -510,6 +511,86 @@ func TestOversizedHashAnnouncement(t *testing.T) {
 			require.NoError(t, err, "oversized announcement should be handled gracefully")
 		})
 	}
+}
+
+// TestCheckPooledTxnAnnouncement verifies that a peer delivering a tx whose
+// type or size does not match what it previously announced is flagged, while
+// mismatches from an unrelated peer or without a prior announcement are not.
+func TestCheckPooledTxnAnnouncement(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+
+	ctrl := gomock.NewController(t)
+	sentryServer := sentryproto.NewMockSentryServer(ctrl)
+	pool := NewMockPool(ctrl)
+
+	m := NewMockSentry(ctx, sentryServer)
+	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
+	require.NoError(t, err)
+
+	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
+
+	otherPeer := gointerfaces.ConvertHashToH512([64]byte{0xfe, 0xed})
+
+	hash := [32]byte{0xaa, 0xbb}
+	slot := &TxnSlot{IDHash: hash, Size: 200, Txn: &types.DynamicFeeTransaction{}}
+	// No announcement yet — must be a no-op.
+	require.NoError(t, fetch.checkPooledTxnAnnouncement(peerID, slot))
+
+	// Record an announcement: peer promised (type=DynamicFee, size=200).
+	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{200}, hash[:])
+
+	// Same peer, matching (type, size) — ok.
+	require.NoError(t, fetch.checkPooledTxnAnnouncement(peerID, slot))
+
+	// After a successful match the entry is consumed; re-announce for further checks.
+	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{200}, hash[:])
+
+	// Same peer, mismatching type (announcement says DynamicFee but we deliver Legacy).
+	badTypeSlot := &TxnSlot{IDHash: hash, Size: 200, Txn: &types.LegacyTx{}}
+	require.Error(t, fetch.checkPooledTxnAnnouncement(peerID, badTypeSlot),
+		"peer delivering wrong type should be flagged")
+
+	// After the mismatch, re-announce and check the size path.
+	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{200}, hash[:])
+	badSizeSlot := &TxnSlot{IDHash: hash, Size: 999, Txn: &types.DynamicFeeTransaction{}}
+	require.Error(t, fetch.checkPooledTxnAnnouncement(peerID, badSizeSlot),
+		"peer delivering wrong size should be flagged")
+
+	// Different peer delivering the same hash must not be penalized based on
+	// another peer's announcement.
+	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{200}, hash[:])
+	require.NoError(t, fetch.checkPooledTxnAnnouncement(otherPeer, badTypeSlot))
+}
+
+// TestCheckBlobSidecar verifies that a blob tx whose wrapper commitments do not
+// match its blob_versioned_hashes is flagged, while a correctly-formed wrapper
+// and a non-blob tx pass through cleanly.
+func TestCheckBlobSidecar(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+
+	ctrl := gomock.NewController(t)
+	sentryServer := sentryproto.NewMockSentryServer(ctrl)
+	pool := NewMockPool(ctrl)
+	m := NewMockSentry(ctx, sentryServer)
+	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
+	require.NoError(t, err)
+	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
+
+	// Non-blob tx — unchecked.
+	require.NoError(t, fetch.checkBlobSidecar(&TxnSlot{Txn: &types.DynamicFeeTransaction{}}))
+
+	// Properly formed blob tx: a slot produced by makeBlobTxn() has both the
+	// inner BlobTx (with BlobVersionedHashes patched to match commitments) and
+	// the populated BlobBundles.
+	good := makeBlobTxn()
+	require.NoError(t, fetch.checkBlobSidecar(&good), "matching sidecar should pass")
+
+	// Corrupt a commitment so it no longer hashes to the versioned-hash.
+	bad := makeBlobTxn()
+	bad.BlobBundles[0].Commitment[0] ^= 0xff
+	require.Error(t, fetch.checkBlobSidecar(&bad), "mismatched commitment should be flagged")
 }
 
 // TestNoPenaltyOnInternalDBError verifies that when IdHashKnown returns a DB error
