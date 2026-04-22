@@ -18,7 +18,6 @@ package seg
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"fmt"
 	"math/rand"
@@ -103,7 +102,7 @@ func prepareBinaryDict(b testing.TB, keyCount int, keySize int, compressed bool)
 	cfg := DefaultCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
-	c, err := NewCompressor(context.Background(), b.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	c, err := NewCompressor(b.Context(), b.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	require.NoError(b, err)
 
 	rng := rand.New(rand.NewSource(42))
