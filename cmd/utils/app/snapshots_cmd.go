@@ -1222,7 +1222,8 @@ func doIntegrity(cliCtx *cli.Context) error {
 	ctx := cliCtx.Context
 	checkStr := cliCtx.String("check")
 	var requestedChecks []integrity.Check
-	if len(checkStr) > 0 {
+	useDefaultChecks := len(checkStr) == 0
+	if !useDefaultChecks {
 		for split := range strings.SplitSeq(checkStr, ",") {
 			requestedChecks = append(requestedChecks, integrity.Check(split))
 		}
@@ -1391,13 +1392,13 @@ func doIntegrity(cliCtx *cli.Context) error {
 		}
 	}
 
-	requestedChecks = integrity.SortChecksByCost(requestedChecks)
-
-	budget := cliCtx.Duration("integrity.budget")
 	var deadline time.Time
-	if budget > 0 {
-		deadline = time.Now().Add(budget)
-		logger.Info("[integrity] budget", "total", budget, "perCheck", budget/time.Duration(len(requestedChecks)))
+	if useDefaultChecks {
+		requestedChecks = integrity.SortChecksByCost(requestedChecks)
+		if budget := cliCtx.Duration("integrity.budget"); budget > 0 {
+			deadline = time.Now().Add(budget)
+			logger.Info("[integrity] budget", "total", budget, "perCheck", budget/time.Duration(len(requestedChecks)))
+		}
 	}
 
 	for i, chk := range requestedChecks {
@@ -1410,7 +1411,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 		if !deadline.IsZero() {
 			remaining := time.Until(deadline)
 			if remaining <= 0 {
-				logger.Warn("[integrity] budget exhausted, skipping remaining", "skipped", len(requestedChecks)-i)
+				logger.Info("[integrity] budget exhausted, skipping remaining", "skipped", len(requestedChecks)-i)
 				break
 			}
 			slice := remaining / time.Duration(len(requestedChecks)-i)
@@ -1433,7 +1434,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 			return parentErr
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
-			logger.Warn("[integrity] budget exhausted, moving on", "check", chk, "elapsed", elapsed)
+			logger.Info("[integrity] budget exhausted, moving on", "check", chk, "elapsed", elapsed)
 			continue
 		}
 		return fmt.Errorf("%s: %w", chk, err)
