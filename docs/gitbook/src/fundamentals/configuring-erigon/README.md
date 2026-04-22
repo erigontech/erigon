@@ -71,6 +71,9 @@ These flags control database performance and memory usage.
   * Default: `0MB`
 * `--sync.parallel-state-flushing`: Enables parallel state flushing.
   * Default: `true`
+* `--erigondb.domain.steps-in-frozen-file value`: Overrides the `steps_in_frozen_file` setting from `erigondb.toml` for the domain merge cap only (history and inverted-index merges are unaffected). Pass a positive integer to set an explicit cap, or `Inf` to leave the domain merge unbounded.
+  * Default: unset (uses the value from `erigondb.toml`)
+  * Use with care — an incorrect value may affect database structure.
 
 ### Pruning and Snapshots
 
