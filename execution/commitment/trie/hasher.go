@@ -299,10 +299,18 @@ func (h *hasher) valueNodeToBuffer(vn ValueNode, buffer []byte, pos int) (int, e
 }
 
 func (h *hasher) accountNodeToBuffer(ac *AccountNode, buffer []byte, pos int) (int, error) {
-	encLen := ac.EncodingLengthForHashing()
-	// Reuse the end of the pre-allocated 1MB buffers to avoid heap allocation.
-	// Account RLP encoding is always small (usually ~80 bytes).
-	acRlp := h.buffers[len(h.buffers)-128 : len(h.buffers)-128+int(encLen)]
+	encLen := int(ac.EncodingLengthForHashing())
+	const accountRlpScratchSize = 128
+	// Reuse the end of the pre-allocated buffers to avoid heap allocation when
+	// the account RLP fits in the scratch region. Fall back to a dedicated
+	// allocation if the encoding grows beyond the scratch capacity.
+	var acRlp []byte
+	if encLen <= accountRlpScratchSize && len(h.buffers) >= accountRlpScratchSize {
+		start := len(h.buffers) - accountRlpScratchSize
+		acRlp = h.buffers[start : start+encLen]
+	} else {
+		acRlp = make([]byte, encLen)
+	}
 	ac.EncodeForHashing(acRlp)
 	enc := rlp.RlpEncodedBytes(acRlp)
 	h.bw.Setup(buffer, pos)
