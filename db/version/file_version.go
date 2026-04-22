@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 /*
