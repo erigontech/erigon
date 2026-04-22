@@ -217,7 +217,7 @@ func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression 
 		var keyOffset uint64 // byte offset of the current key in the bitstream
 		for kvReader.HasNext() {
 			// Skip path is hot (full-skip mode loops over every key); amortize the ctx check.
-			if keyCount%16384 == 0 {
+			if keyCount%100000 == 0 {
 				if err := ctx.Err(); err != nil {
 					return err
 				}
