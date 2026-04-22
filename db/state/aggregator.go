@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
@@ -59,11 +60,22 @@ import (
 type Aggregator struct {
 	db                kv.RoDB //TODO: remove this field. Accept `tx` and `db` from outside. But it must be field of `temporal.DB` - and only `temporal.DB` must pass it to us. App-Level code must call methods of `temporal.DB`
 	d                 [kv.DomainLen]*Domain
-	iis               []*InvertedIndex
+	iis               [kv.StandaloneIdxLen]*InvertedIndex
+	iisCount          int
 	dirs              datadir.Dirs
 	stepSize          atomic.Uint64
 	stepsInFrozenFile atomic.Uint64
-	reorgBlockDepth   uint64
+	// erigondbDomainStepsInFrozenFile overrides stepsInFrozenFile for the domain merge cap only
+	// (history/II keep using stepsInFrozenFile). Set once at construction via AggOpts. Semantics:
+	//   0                             → no override (default)
+	//   config3.UnboundedDomainMerge  → domain merge is unbounded (no cap)
+	//   other                         → use this value instead of stepsInFrozenFile as the domain cap
+	//
+	// Note: this is a SOFT limit applied during the merge process. If you apply a smaller limit to
+	// an existing datadir, the existing domain files containing more steps will be unaffected.
+	erigondbDomainStepsInFrozenFile uint64
+
+	reorgBlockDepth uint64
 
 	dirtyFilesLock sync.Mutex
 	// visible is published via atomic.Store under dirtyFilesLock; readers take no lock.
@@ -213,9 +225,16 @@ func (a *Aggregator) RegisterII(cfg statecfg.InvIdxCfg, salt *uint32, dirs datad
 		return err
 	}
 	ii.salt.Store(salt)
-	a.iis = append(a.iis, ii)
+	if a.iisCount >= kv.StandaloneIdxLen {
+		return fmt.Errorf("too many standalone inverted indices: max %d", kv.StandaloneIdxLen)
+	}
+	a.iis[a.iisCount] = ii
+	a.iisCount++
 	return nil
 }
+
+// standaloneIIs returns a slice of the registered standalone inverted indices.
+func (a *Aggregator) standaloneIIs() []*InvertedIndex { return a.iis[:a.iisCount] }
 
 func (a *Aggregator) OnFilesChange(onChange, onDel kv.OnFilesChange) {
 	a.onFilesChange = onChange
@@ -248,7 +267,7 @@ func (a *Aggregator) reloadSalt() error {
 		}
 	}
 
-	for _, ii := range a.iis {
+	for _, ii := range a.standaloneIIs() {
 		if ii != nil {
 			ii.salt.Store(salt)
 		}
@@ -282,7 +301,7 @@ func (a *Aggregator) ReloadErigonDBSettings(noDownloader bool) error {
 				d.History.InvertedIndex.setStepSize(settings.StepSize, settings.StepsInFrozenFile)
 			}
 		}
-		for _, ii := range a.iis {
+		for _, ii := range a.standaloneIIs() {
 			if ii != nil {
 				ii.setStepSize(settings.StepSize, settings.StepsInFrozenFile)
 			}
@@ -315,7 +334,7 @@ func (a *Aggregator) ConfigureDomains() error {
 				d.DisableFsync()
 			}
 		}
-		for _, ii := range a.iis {
+		for _, ii := range a.standaloneIIs() {
 			if ii != nil {
 				ii.DisableFsync()
 			}
@@ -467,7 +486,7 @@ func (a *Aggregator) openFolder() error {
 			return d.openFolder(scanDirsRes)
 		})
 	}
-	for _, ii := range a.iis {
+	for _, ii := range a.standaloneIIs() {
 		if ii.Disable {
 			continue
 		}
@@ -525,7 +544,7 @@ func (a *Aggregator) closeDirtyFiles() {
 			d.Close()
 		}()
 	}
-	for _, ii := range a.iis {
+	for _, ii := range a.standaloneIIs() {
 		if ii == nil {
 			continue
 		}
@@ -565,7 +584,7 @@ func (a *Aggregator) SetCompressWorkers(i int) {
 			d.History.InvertedIndex.CompressorCfg.Workers = i
 		}
 	}
-	for _, ii := range a.iis {
+	for _, ii := range a.standaloneIIs() {
 		ii.CompressorCfg.Workers = i
 	}
 }
@@ -584,7 +603,7 @@ func (a *Aggregator) SetBuildAccessorsWorkers(i int) {
 			d.History.InvertedIndex.BuildAccessorsWorkers = i
 		}
 	}
-	for _, ii := range a.iis {
+	for _, ii := range a.standaloneIIs() {
 		ii.BuildAccessorsWorkers = i
 	}
 }
@@ -658,7 +677,7 @@ func (at *AggregatorRoTx) AllFiles() VisibleFiles {
 	for _, d := range at.d {
 		res = append(res, d.Files()...)
 	}
-	for _, ii := range at.iis {
+	for _, ii := range at.standaloneIIs() {
 		res = append(res, ii.Files()...)
 	}
 	return res
@@ -691,7 +710,7 @@ func (a *Aggregator) LS() {
 		doLS(d.History.dirtyFiles)
 		doLS(d.History.InvertedIndex.dirtyFiles)
 	}
-	for _, d := range a.iis {
+	for _, d := range a.standaloneIIs() {
 		doLS(d.dirtyFiles)
 	}
 }
@@ -750,7 +769,7 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int) erro
 		d.BuildMissedAccessors(ctx, g, ps, missedFilesItems.domain[d.Name])
 	}
 
-	for _, ii := range a.iis {
+	for _, ii := range a.standaloneIIs() {
 		ii.BuildMissedAccessors(ctx, g, ps, missedFilesItems.ii[ii.Name])
 	}
 
@@ -769,7 +788,7 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int) erro
 
 type AggV3StaticFiles struct {
 	d    [kv.DomainLen]StaticFiles
-	ivfs []InvertedFiles
+	ivfs [kv.StandaloneIdxLen]InvertedFiles
 }
 
 // CleanupOnError - call it on collation fail. It's closing all files
@@ -800,7 +819,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		txTo          = a.FirstTxNumOfStep(step + 1)
 		stepStartedAt = time.Now()
 
-		static          = &AggV3StaticFiles{ivfs: make([]InvertedFiles, len(a.iis))}
+		static          = &AggV3StaticFiles{}
 		closeCollations = true
 		collations      = make([]Collation, 0)
 	)
@@ -861,7 +880,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		collations = append(collations, collation)
 		domainColls = append(domainColls, domainCollResult{d: d, collation: collation})
 	}
-	for iikey, ii := range a.iis {
+	for iikey, ii := range a.standaloneIIs() {
 		if ii.Disable {
 			continue
 		}
@@ -1101,7 +1120,7 @@ func (a *Aggregator) IntegrateDirtyFiles(sf *AggV3StaticFiles, txNumFrom, txNumT
 	for id, d := range a.d {
 		d.integrateDirtyFiles(sf.d[id], txNumFrom, txNumTo)
 	}
-	for id, ii := range a.iis {
+	for id, ii := range a.standaloneIIs() {
 		ii.integrateDirtyFiles(sf.ivfs[id], txNumFrom, txNumTo)
 	}
 
@@ -1134,7 +1153,7 @@ func (a *Aggregator) InvertedIdxTables(indices ...kv.InvertedIdx) (tables []stri
 }
 
 func (a *Aggregator) searchII(name kv.InvertedIdx) *InvertedIndex {
-	for _, ii := range a.iis {
+	for _, ii := range a.standaloneIIs() {
 		if ii.Name == name {
 			return ii
 		}
@@ -1177,7 +1196,7 @@ func (at *AggregatorRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
 			return true
 		}
 	}
-	for _, ii := range at.iis {
+	for _, ii := range at.standaloneIIs() {
 		if ii.CanPrune(tx, untilTx) {
 			return true
 		}
@@ -1277,12 +1296,12 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 }
 
 func (at *AggregatorRoTx) stepsRangeInDBAsStr(tx kv.Tx) string {
-	steps := make([]string, 0, len(at.d)+len(at.iis))
+	steps := make([]string, 0, len(at.d)+at.iisCount)
 	for _, dt := range at.d {
 		a1, a2 := dt.stepsRangeInDB(tx)
 		steps = append(steps, fmt.Sprintf("%s:%.1f", dt.d.FilenameBase, a2-a1))
 	}
-	for _, iit := range at.iis {
+	for _, iit := range at.standaloneIIs() {
 		a1, a2 := iit.stepsRangeInDB(tx)
 		valPruneFinished := "prune finished"
 		if v, _ := GetPruneValProgress(tx, []byte(iit.ii.ValuesTable)); v.ValueProgress != prune.Done || v.KeyProgress != prune.Done {
@@ -1426,8 +1445,8 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 		}
 	}
 
-	stats := make([]*InvertedIndexPruneStat, len(at.a.iis))
-	for iikey := range at.a.iis {
+	stats := make([]*InvertedIndexPruneStat, at.iisCount)
+	for iikey := range stats {
 		select {
 		case <-ctx.Done():
 			return aggStat, ctx.Err()
@@ -1449,7 +1468,7 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 		}
 		stats[iikey] = stat
 	}
-	for iikey := range at.a.iis {
+	for iikey := range stats {
 		aggStat.Indices[at.iis[iikey].ii.FilenameBase] = stats[iikey]
 	}
 
@@ -1475,7 +1494,7 @@ func (a *Aggregator) FilesAmount() (res []int) {
 	for _, d := range a.d {
 		res = append(res, d.dirtyFiles.Len())
 	}
-	for _, ii := range a.iis {
+	for _, ii := range a.standaloneIIs() {
 		res = append(res, ii.dirtyFiles.Len())
 	}
 	return res
@@ -1536,10 +1555,10 @@ func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
 // domains, histories, inverted indexes and the state minimax.
 type aggregatorVisible struct {
 	d            [kv.DomainLen]*domainVisible
-	dh           [kv.DomainLen]visibleFiles // per-domain History visible files
-	dhii         [kv.DomainLen]*iiVisible   // per-domain History.InvertedIndex visible
-	iis          []*iiVisible               // top-level inverted indexes (aligned with a.iis)
-	minimaxTxNum uint64                     // min of domain file EndTxNum across kv.StateDomains
+	dh           [kv.DomainLen]visibleFiles      // per-domain History visible files
+	dhii         [kv.DomainLen]*iiVisible        // per-domain History.InvertedIndex visible
+	iis          [kv.StandaloneIdxLen]*iiVisible // top-level inverted indexes (aligned with a.iis)
+	minimaxTxNum uint64                          // min of domain file EndTxNum across kv.StateDomains
 }
 
 // recalcVisibleFiles must be called with dirtyFilesLock held (writers are
@@ -1549,14 +1568,14 @@ type aggregatorVisible struct {
 // Per-entity visibility is not mutated; readers atomically observe one
 // cross-entity-consistent generation.
 func (a *Aggregator) recalcVisibleFiles(toTxNum uint64) {
-	next := &aggregatorVisible{iis: make([]*iiVisible, len(a.iis))}
+	next := &aggregatorVisible{}
 	for id, d := range a.d {
 		if d == nil {
 			continue
 		}
 		next.d[id], next.dh[id], next.dhii[id] = d.calcVisibleFiles(toTxNum)
 	}
-	for id, ii := range a.iis {
+	for id, ii := range a.standaloneIIs() {
 		if ii == nil {
 			continue
 		}
@@ -1588,7 +1607,19 @@ func (v *aggregatorVisible) stateMinimaxTxNum() uint64 {
 
 func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFile uint64) *Ranges {
 	maxSpan := stepSize * stepsInFrozenFile
-	r := &Ranges{invertedIndex: make([]*MergeRange, len(at.a.iis))}
+
+	// --erigondb.domain.steps-in-frozen-file adjusts the domain cap only; history/II keep maxSpan.
+	domainMaxSpan := maxSpan
+	switch override := at.a.erigondbDomainStepsInFrozenFile; override {
+	case 0:
+		// no override
+	case config3.UnboundedDomainMerge:
+		domainMaxSpan = config3.UnboundedDomainMerge // no cap on domain merge
+	default:
+		domainMaxSpan = stepSize * override
+	}
+
+	r := &Ranges{}
 	commitmentUseReferencedBranches := at.a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues
 	if commitmentUseReferencedBranches {
 		lmrAcc := at.d[kv.AccountsDomain].files.LatestMergedRange(stepSize)
@@ -1606,7 +1637,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 		if d.d.Disable {
 			continue
 		}
-		r.domain[id] = d.findMergeRange(maxEndTxNum, maxSpan)
+		r.domain[id] = d.findMergeRange(maxEndTxNum, domainMaxSpan, maxSpan)
 	}
 
 	if commitmentUseReferencedBranches && r.domain[kv.CommitmentDomain].values.needMerge {
@@ -1645,11 +1676,10 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 	}
 
 	if r.anyDomainValues() { // Prioritize domain value merges: if any domain has pending value merges, skip standalone II merges this round.
-		r.invertedIndex = nil
 		return r
 	}
 
-	for id, ii := range at.iis {
+	for id, ii := range at.standaloneIIs() {
 		if ii.ii.Disable {
 			continue
 		}
@@ -1661,7 +1691,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 }
 
 func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticFiles, r *Ranges) (mf *MergedFilesV3, err error) {
-	mf = &MergedFilesV3{iis: make([]*FilesItem, len(at.a.iis))}
+	mf = &MergedFilesV3{}
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(at.a.mergeWorkers)
 	closeFiles := true
@@ -1723,7 +1753,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 	}
 
 	for id, rng := range r.invertedIndex {
-		if at.iis[id].ii.Disable {
+		if rng == nil || at.iis[id] == nil || at.iis[id].ii.Disable {
 			continue
 		}
 
@@ -1762,7 +1792,7 @@ func (a *Aggregator) IntegrateMergedDirtyFiles(in *MergedFilesV3) {
 		d.integrateMergedDirtyFiles(in.d[id], in.dIdx[id], in.dHist[id])
 	}
 
-	for id, ii := range a.iis {
+	for id, ii := range a.standaloneIIs() {
 		if ii.Disable {
 			continue
 		}
@@ -1792,7 +1822,7 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 			deleted = append(deleted, d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id], dryRun)...)
 		}
 	}
-	for id, ii := range at.iis {
+	for id, ii := range at.standaloneIIs() {
 		if ii.ii.Disable {
 			continue
 		}
@@ -1816,7 +1846,7 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 			d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id], dryRun)
 		}
 	}
-	for id, ii := range at.iis {
+	for id, ii := range at.standaloneIIs() {
 		if ii.ii.Disable {
 			continue
 		}
@@ -2058,9 +2088,10 @@ func (at *AggregatorRoTx) FileStream(name kv.Domain, fromTxNum, toTxNum uint64) 
 //   - user will not see "partial writes" or "new files appearance"
 //   - last reader removing garbage files inside `Close` method
 type AggregatorRoTx struct {
-	a   *Aggregator
-	d   [kv.DomainLen]*DomainRoTx
-	iis []*InvertedIndexRoTx
+	a        *Aggregator
+	d        [kv.DomainLen]*DomainRoTx
+	iis      [kv.StandaloneIdxLen]*InvertedIndexRoTx
+	iisCount int
 
 	_leakID uint64 // set only if TRACE_AGG=true
 }
@@ -2068,9 +2099,9 @@ type AggregatorRoTx struct {
 func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 	v := a.visible.Load()
 	ac := &AggregatorRoTx{
-		a:       a,
-		_leakID: a.leakDetector.Add(),
-		iis:     make([]*InvertedIndexRoTx, len(v.iis)),
+		a:        a,
+		iisCount: a.iisCount,
+		_leakID:  a.leakDetector.Add(),
 	}
 	for id, iv := range v.iis {
 		if iv == nil {
@@ -2087,7 +2118,8 @@ func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 	return ac
 }
 
-func (at *AggregatorRoTx) Dirs() datadir.Dirs { return at.a.dirs }
+func (at *AggregatorRoTx) Dirs() datadir.Dirs                  { return at.a.dirs }
+func (at *AggregatorRoTx) standaloneIIs() []*InvertedIndexRoTx { return at.iis[:at.iisCount] }
 
 func (at *AggregatorRoTx) DomainProgress(name kv.Domain, tx kv.Tx) uint64 {
 	d := at.d[name]
@@ -2195,7 +2227,7 @@ func (at *AggregatorRoTx) Unwind(ctx context.Context, tx kv.RwTx, txNumUnwindTo 
 			return err
 		}
 	}
-	for _, ii := range at.iis {
+	for _, ii := range at.standaloneIIs() {
 		if err := ii.unwind(ctx, tx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true); err != nil {
 			return err
 		}
@@ -2206,6 +2238,9 @@ func (at *AggregatorRoTx) Unwind(ctx context.Context, tx kv.RwTx, txNumUnwindTo 
 // --- Domain part END ---
 
 func (at *AggregatorRoTx) MadvNormal() *AggregatorRoTx {
+	if at == nil || at.a == nil {
+		return at
+	}
 	for _, d := range at.d {
 		for _, f := range d.files {
 			f.src.MadvNormal()
@@ -2217,7 +2252,7 @@ func (at *AggregatorRoTx) MadvNormal() *AggregatorRoTx {
 			f.src.MadvNormal()
 		}
 	}
-	for _, ii := range at.iis {
+	for _, ii := range at.standaloneIIs() {
 		for _, f := range ii.files {
 			f.src.MadvNormal()
 		}
@@ -2225,6 +2260,9 @@ func (at *AggregatorRoTx) MadvNormal() *AggregatorRoTx {
 	return at
 }
 func (at *AggregatorRoTx) DisableReadAhead() {
+	if at == nil || at.a == nil {
+		return
+	}
 	for _, d := range at.d {
 		for _, f := range d.files {
 			f.src.DisableReadAhead()
@@ -2236,7 +2274,7 @@ func (at *AggregatorRoTx) DisableReadAhead() {
 			f.src.DisableReadAhead()
 		}
 	}
-	for _, ii := range at.iis {
+	for _, ii := range at.standaloneIIs() {
 		for _, f := range ii.files {
 			f.src.DisableReadAhead()
 		}
@@ -2256,7 +2294,7 @@ func (a *Aggregator) MadvNormal() *Aggregator {
 			f.MadvNormal()
 		}
 	}
-	for _, ii := range a.iis {
+	for _, ii := range a.standaloneIIs() {
 		for _, f := range ii.dirtyFiles.Items() {
 			f.MadvNormal()
 		}
@@ -2277,7 +2315,7 @@ func (a *Aggregator) DisableReadAhead() {
 			f.DisableReadAhead()
 		}
 	}
-	for _, ii := range a.iis {
+	for _, ii := range a.standaloneIIs() {
 		for _, f := range ii.dirtyFiles.Items() {
 			f.DisableReadAhead()
 		}
@@ -2296,7 +2334,7 @@ func (at *AggregatorRoTx) Close() {
 			d.Close()
 		}
 	}
-	for _, ii := range at.iis {
+	for _, ii := range at.standaloneIIs() {
 		ii.Close()
 	}
 }
