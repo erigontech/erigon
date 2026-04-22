@@ -170,8 +170,8 @@ func TestEIP7976FloorCost(t *testing.T) {
 
 func TestEIP7976VsEIP7623Floor(t *testing.T) {
 	// Compare EIP-7976 vs EIP-7623 floor costs for the same data.
-	// EIP-7976 should always be >= EIP-7623 for zero bytes,
-	// and equal or different for non-zero bytes.
+	// EIP-7976 is strictly greater than EIP-7623 for any non-empty calldata
+	// (64 > 10 for zero bytes, 64 > 40 for non-zero bytes).
 	assert := assert.New(t)
 
 	// 32 non-zero bytes:
