@@ -188,6 +188,8 @@ func (v Versions) Supports(ver Version) bool {
 	return ver.GreaterOrEqual(v.MinSupported) && ver.LessOrEqual(v.Current)
 }
 
+var mustSupportLogOnce sync.Once
+
 // MustSupport panics if ver is outside [MinSupported, Current].
 // Too-low means snapshots are stale; too-high means the binary is older than the files.
 func (v Versions) MustSupport(ver Version, filename string) {
@@ -197,16 +199,16 @@ func (v Versions) MustSupport(ver Version, filename string) {
 	var msg string
 	if ver.Less(v.MinSupported) {
 		msg = fmt.Sprintf(
-			"Snapshot file is too old for this Erigon build: file=%s, file_version=%s, minimum_required=%s. To fix, reset snapshots: `erigon snapshots reset --datadir $DATADIR --chain $CHAIN`",
-			filename, ver, v.MinSupported,
+			"Snapshot file is too old for this Erigon build: file=%s, minimum_required=%s. To fix, reset snapshots: `erigon snapshots reset --datadir $DATADIR --chain $CHAIN`",
+			filename, v.MinSupported,
 		)
 	} else {
 		msg = fmt.Sprintf(
-			"Snapshot file is newer than this Erigon build supports: file=%s, file_version=%s, highest_supported=<%s. To fix, either upgrade Erigon to a newer release, or reset snapshots: `erigon snapshots reset --datadir $DATADIR --chain $CHAIN`",
-			filename, ver, ver,
+			"Snapshot file is newer than this Erigon build supports: file=%s, highest_supported=<%s. To fix, either upgrade Erigon to a newer release, or reset snapshots: `erigon snapshots reset --datadir $DATADIR --chain $CHAIN`",
+			filename, ver,
 		)
 	}
-	log.Error(msg)
+	mustSupportLogOnce.Do(func() { log.Error(msg) })
 	panic(msg)
 }
 
