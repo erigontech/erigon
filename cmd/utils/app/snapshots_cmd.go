@@ -1256,6 +1256,11 @@ func doIntegrity(cliCtx *cli.Context) error {
 		requestedChecks = finalChecks
 	}
 
+	if len(requestedChecks) == 0 {
+		logger.Warn("[integrity] no checks to run (all filtered out)")
+		return nil
+	}
+
 	failFast := cliCtx.Bool("failFast")
 	fromStep := cliCtx.Uint64("fromStep")
 
