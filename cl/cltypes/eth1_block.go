@@ -67,11 +67,6 @@ func NewEth1Block(version clparams.StateVersion, beaconCfg *clparams.BeaconChain
 		version:   version,
 		beaconCfg: beaconCfg,
 	}
-	b.Extra = solid.NewExtraData()
-	b.Transactions = &solid.TransactionsSSZ{}
-	if version >= clparams.CapellaVersion {
-		b.Withdrawals = solid.NewStaticListSSZ[*Withdrawal](int(beaconCfg.MaxWithdrawalsPerPayload), 44)
-	}
 	if version >= clparams.GloasVersion {
 		b.BlockAccessList = solid.NewByteListSSZ(beaconCfg.MaxBytesPerTransaction)
 	}
@@ -423,18 +418,28 @@ func (b *Eth1Block) DecodeSSZ(buf []byte, version int) error {
 
 // EncodeSSZ encodes the block in SSZ format.
 func (b *Eth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
-	if b.Extra == nil {
-		b.Extra = solid.NewExtraData()
-	}
+	b.ensureSSZFields()
 	return ssz2.MarshalSSZ(dst, b.getSchema()...)
 }
 
 // HashSSZ calculates the SSZ hash of the Eth1Block's payload header.
 func (b *Eth1Block) HashSSZ() ([32]byte, error) {
+	b.ensureSSZFields()
+	return merkle_tree.HashTreeRoot(b.getSchema()...)
+}
+
+// ensureSSZFields lazily initializes nil slice/list fields that getSchema()
+// references, so that HashSSZ/EncodeSSZ never panic on a zero-value Eth1Block.
+func (b *Eth1Block) ensureSSZFields() {
 	if b.Extra == nil {
 		b.Extra = solid.NewExtraData()
 	}
-	return merkle_tree.HashTreeRoot(b.getSchema()...)
+	if b.Transactions == nil {
+		b.Transactions = &solid.TransactionsSSZ{}
+	}
+	if b.version >= clparams.CapellaVersion && b.Withdrawals == nil && b.beaconCfg != nil {
+		b.Withdrawals = solid.NewStaticListSSZ[*Withdrawal](int(b.beaconCfg.MaxWithdrawalsPerPayload), 44)
+	}
 }
 
 func (b *Eth1Block) getSchema() []any {
