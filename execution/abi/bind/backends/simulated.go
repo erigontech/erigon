@@ -741,7 +741,11 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 	}
 	if call.Gas == 0 {
 		call.Gas = defaultCallGas
-		if call.Gas > params.MaxTxnGasLimit && b.m.ChainConfig.IsOsaka(block.Time()) {
+		if call.Gas > params.MaxTxnGasLimit &&
+			b.m.ChainConfig.IsOsaka(block.Time()) &&
+			!b.m.ChainConfig.IsAmsterdam(block.Time()) {
+			// Cap the maximum gas allowance according to EIP-7825 if Osaka (but not Amsterdam).
+			// In Amsterdam (EIP-8037), transactions can provide state gas via a total gas limit > MaxTxnGasLimit.
 			call.Gas = params.MaxTxnGasLimit
 		}
 	}
