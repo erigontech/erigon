@@ -478,8 +478,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		CommitCycle: func(ctx context.Context, sd *execctx.SharedDomains) (kv.TemporalRwTx, error) {
 			// Release the RO transaction before opening the RW transaction so that
 			// pages freed by earlier commits are reclaimable during sd.Flush.
-			// Without this, the old roTx pins the read snapshot and MDBX cannot
-			// recycle freed pages, leading to MDBX_MAP_FULL under heavy pruning.
 			roTx.Rollback()
 
 			commitRwTx, err := e.db.BeginTemporalRw(ctx) //nolint:gocritic
