@@ -191,7 +191,6 @@ func (v Versions) Supports(ver Version) bool {
 var mustSupportLogOnce sync.Once
 
 // MustSupport panics if ver is outside [MinSupported, Current].
-// Too-low means snapshots are stale; too-high means the binary is older than the files.
 func (v Versions) MustSupport(ver Version, filename string) {
 	if v.Supports(ver) {
 		return
