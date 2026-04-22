@@ -71,6 +71,12 @@ type blockService struct {
 	blocksScheduledForLaterExecution sync.Map
 	// store the block in db
 	db kv.RwDB
+
+	// [New in Gloas:EIP7732] OnBidWon is called when a gossip-received block
+	// contains a winning bid. Fired after proposer signature verify but before
+	// full state transition to minimise reveal latency. The builderIndex
+	// identifies which builder won so the receiver can filter for its own bids.
+	OnBidWon func(slot uint64, builderIndex uint64, parentBlockHash common.Hash, parentBlockRoot common.Hash, beaconBlockRoot common.Hash)
 }
 
 // NewBlockService creates a new block service
@@ -98,6 +104,12 @@ func NewBlockService(
 	}
 	go b.loop(ctx)
 	return b
+}
+
+// SetOnBidWon sets the callback that fires when a gossip-received beacon block
+// contains a winning execution-payload bid (GLOAS / EIP-7732).
+func (b *blockService) SetOnBidWon(fn func(slot uint64, builderIndex uint64, parentBlockHash common.Hash, parentBlockRoot common.Hash, beaconBlockRoot common.Hash)) {
+	b.OnBidWon = fn
 }
 
 func (b *blockService) Names() []string {
@@ -221,6 +233,17 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 			return ErrInvalidCommitmentsCount
 		}
 	}
+	// [New in Gloas:EIP7732] Notify builder if the block contains our bid.
+	// Fired here (after proposer sig verify, before state transition) to
+	// minimise reveal-path latency.
+	if b.OnBidWon != nil && msg.Block.Body.GetSignedExecutionPayloadBid() != nil {
+		bid := msg.Block.Body.GetSignedExecutionPayloadBid().Message
+		blockRoot, err := msg.Block.HashSSZ()
+		if err == nil {
+			b.OnBidWon(msg.Block.Slot, bid.BuilderIndex, bid.ParentBlockHash, bid.ParentBlockRoot, common.Hash(blockRoot))
+		}
+	}
+
 	b.publishBlockGossipEvent(msg)
 	// the rest of the validation is done in the forkchoice store
 	if err := b.processAndStoreBlock(ctx, msg); err != nil {

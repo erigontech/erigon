@@ -97,6 +97,12 @@ type ForkChoiceStorageReader interface {
 	// the full payload for the given head node. Used for proposer reorg of unavailable blocks.
 	ShouldBuildOnFull(head ForkChoiceNode) bool
 
+	// [New in Gloas:EIP7732] ActiveParents returns the set of viable parent
+	// candidates for building a block at the given slot. For MVP this is the
+	// current head. Each candidate carries the resolved EL parent hash
+	// (accounting for FULL/EMPTY via ShouldExtendPayload).
+	ActiveParents(slot uint64) []ParentCandidate
+
 	GetBalances(blockRoot common.Hash) (solid.Uint64ListSSZ, error)
 	GetInactivitiesScores(blockRoot common.Hash) (solid.Uint64ListSSZ, error)
 	GetPreviousParticipationIndicies(blockRoot common.Hash) (*solid.ParticipationBitList, error)
