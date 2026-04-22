@@ -692,6 +692,8 @@ const (
 	LogAddrIdx    InvertedIdx = 7
 	TracesFromIdx InvertedIdx = 8
 	TracesToIdx   InvertedIdx = 9
+
+	StandaloneIdxLen = 4 // Count of standalone IIs registered via RegisterII (LogTopicIdx..TracesToIdx). Update this when adding a new standalone II.
 )
 
 func (idx InvertedIdx) String() string {
