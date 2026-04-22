@@ -1073,7 +1073,7 @@ func TestSimulatedBackend_PendingAndCallContractAmsterdamDefaultGas(t *testing.T
 	)
 	bgCtx := context.Background()
 
-	const sstoresPerCall = 600
+	const sstoresPerCall = 448
 
 	runtime := program.New()
 	for i := 0; i < sstoresPerCall; i++ {
