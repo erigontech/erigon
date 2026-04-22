@@ -22,6 +22,7 @@ package types
 import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -30,20 +31,24 @@ import (
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func CreateAddress(a common.Address, nonce uint64) common.Address {
 	listLen := 21 + rlp.U64Len(nonce)
-	data := make([]byte, listLen+1)
-	pos := rlp.EncodeListPrefix(listLen, data)
-	av := a
-	pos += rlp.EncodeAddress(av[:], data[pos:])
-	rlp.EncodeU64(nonce, data[pos:])
+	data := make([]byte, 1+listLen)
+	pos := rlp.EncodeListPrefixToBuf(listLen, data)
+	pos += rlp.EncodeStringToBuf(a[:], data[pos:])
+	rlp.EncodeU64ToBuf(nonce, data[pos:])
 	return common.BytesToAddress(crypto.Keccak256(data)[12:])
 }
-
-var createAddress2Prefix = []byte{0xff}
 
 // CreateAddress2 creates an ethereum address given the address bytes, initial
 // contract code hash and a salt.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func CreateAddress2(b common.Address, salt [32]byte, inithash accounts.CodeHash) common.Address {
+	// 0xff | address (20) | salt (32) | inithash (32) = 85 bytes, fixed size → stack array
+	var buf [1 + length.Addr + length.Hash + length.Hash]byte
+	buf[0] = 0xff
+	copy(buf[1:], b[:])
+	copy(buf[1+length.Addr:], salt[:])
 	initHashValue := inithash.Value()
-	return common.BytesToAddress(crypto.Keccak256(createAddress2Prefix, b[:], salt[:], initHashValue[:])[12:])
+	copy(buf[1+length.Addr+length.Hash:], initHashValue[:])
+	h := crypto.HashData(buf[:])
+	return common.Address(h[12:])
 }

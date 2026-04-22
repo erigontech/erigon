@@ -313,7 +313,7 @@ func (t *jsTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing.
 	log.pc = pc
 	log.gas = gas
 	log.cost = cost
-	log.refund = t.env.IntraBlockState.GetRefund()
+	log.refund = t.env.IntraBlockState.GetRefund().Total()
 	log.depth = depth
 	log.err = err
 	if _, err := t.step(t.obj, t.logValue, t.dbValue); err != nil {
@@ -494,7 +494,7 @@ func (t *jsTracer) setBuiltinFunctions() {
 			return nil
 		}
 		code = common.Copy(code)
-		codeHash := accounts.InternCodeHash(common.Hash(crypto.Keccak256(code)))
+		codeHash := accounts.InternCodeHash(crypto.HashData(code))
 		b := types.CreateAddress2(addr, common.HexToHash(salt), codeHash).Bytes()
 		res, err := t.toBuf(vm, b)
 		if err != nil {

@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -162,9 +163,9 @@ func (h *hasher) hashChildren(original Node, bufOffset int) ([]byte, error) {
 	case *ShortNode:
 		// Starting at position 3, to leave space for len prefix
 		// Encode key
-		compactKey := hexToCompact(n.Key)
+		compactKey := nibbles.HexToCompact(n.Key)
 		h.bw.Setup(buffer, pos)
-		written, err := rlp.EncodeByteArrayAsRlp(compactKey, h.bw, h.prefixBuf[:])
+		written, err := rlp.EncodeStringWithLen(compactKey, h.bw, h.prefixBuf[:])
 		if err != nil {
 			return nil, err
 		}

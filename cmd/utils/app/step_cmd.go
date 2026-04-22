@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pelletier/go-toml"
+	"github.com/pelletier/go-toml/v2"
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon/common/dir"
@@ -27,7 +27,7 @@ func stepRebase(cliCtx *cli.Context) error {
 	defer ticker.Stop()
 
 	dirs := datadir.Open(cliCtx.String("datadir"))
-	settings, err := state.CreateOrReadErigonDBSettings(dirs, logger)
+	settings, err := state.ResolveErigonDBSettings(dirs, logger, true)
 	if err != nil {
 		return err
 	}
@@ -35,6 +35,11 @@ func stepRebase(cliCtx *cli.Context) error {
 	currentStepSize := settings.StepSize
 	newStepSize := cliCtx.Uint64("new-step-size")
 	logger.Info("Rebasing step size", "current", currentStepSize, "new", newStepSize)
+
+	if newStepSize == 0 {
+		logger.Crit("Invalid step size", "new-step-size", newStepSize)
+		return fmt.Errorf("new step size must be greater than 0")
+	}
 
 	if newStepSize == currentStepSize {
 		logger.Info("Step size is already at the desired value; exiting", "new-step-size", newStepSize)
@@ -111,7 +116,11 @@ func stepRebase(cliCtx *cli.Context) error {
 	dels = append(dels, idxTorrents...)
 
 	// include whole chaindata directory for deletion
-	dels = append(dels, dirs.Chaindata)
+	dels = append(dels, dirs.Chaindata) //nolint:gocritic
+
+	// include erigondb.toml.torrent which is invalidated by the rebase
+	dels = append(dels, filepath.Join(dirs.Snap, "erigondb.toml.torrent"))
+
 	for _, f := range dels {
 		fmt.Printf("D: %s\n", f)
 	}

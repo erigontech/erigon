@@ -143,31 +143,6 @@ func (I *impl) ProcessAttesterSlashing(
 	return nil
 }
 
-func isValidDepositSignature(depositData *cltypes.DepositData, cfg *clparams.BeaconChainConfig) (bool, error) {
-	// Agnostic domain.
-	domain, err := fork.ComputeDomain(
-		cfg.DomainDeposit[:],
-		utils.Uint32ToBytes4(uint32(cfg.GenesisForkVersion)),
-		[32]byte{},
-	)
-	if err != nil {
-		return false, err
-	}
-	depositMessageRoot, err := depositData.MessageHash()
-	if err != nil {
-		return false, err
-	}
-	signedRoot := utils.Sha256(depositMessageRoot[:], domain)
-	// Perform BLS verification and if successful noice.
-	valid, err := bls.Verify(depositData.Signature[:], signedRoot[:], depositData.PubKey[:])
-	if err != nil || !valid {
-		// ignore err here
-		log.Debug("Validator BLS verification failed", "valid", valid, "err", err)
-		return false, nil
-	}
-	return true, nil
-}
-
 func (I *impl) ProcessDeposit(s abstract.BeaconState, deposit *cltypes.Deposit) error {
 	if deposit == nil {
 		return nil
@@ -382,10 +357,12 @@ func (I *impl) ProcessExecutionPayload(s abstract.BeaconState, body cltypes.Gene
 			prevRandao,
 		)
 	}
-	if time != state.ComputeTimestampAtSlot(s, s.Slot()) {
+	expectedTimestamp := state.ComputeTimestampAtSlot(s, s.Slot())
+	if time != expectedTimestamp {
 		// Verify timestamp
 		// assert payload.timestamp == compute_timestamp_at_slot(state, state.slot)
-		return errors.New("ProcessExecutionPayload: invalid Eth1 timestamp")
+		return fmt.Errorf("ProcessExecutionPayload: invalid Eth1 timestamp: got %d, expected %d (slot=%d, genesisTime=%d, genesisSlot=%d, secsPerSlot=%d)",
+			time, expectedTimestamp, s.Slot(), s.GenesisTime(), s.BeaconConfig().GenesisSlot, s.BeaconConfig().SecondsPerSlot)
 	}
 
 	// Verify commitments are under limit

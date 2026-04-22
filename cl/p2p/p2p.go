@@ -2,6 +2,7 @@ package p2p
 
 import (
 	"context"
+	"net"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -13,6 +14,7 @@ import (
 	"github.com/erigontech/erigon/p2p/discover"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
+	p2pnat "github.com/erigontech/erigon/p2p/nat"
 	"github.com/libp2p/go-libp2p"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/host"
@@ -38,6 +40,12 @@ type P2PConfig struct {
 	TmpDir         string
 	LocalDiscovery bool
 
+	// NAT is the NAT interface used to resolve the external IP for discv5 ENR and
+	// libp2p multiaddrs. When set, ExternalIP is populated at startup via ExternalIP().
+	// Supports extip:<IP>, stun, upnp, pmp modes (same as devp2p --nat flag).
+	NAT        p2pnat.Interface
+	ExternalIP net.IP // resolved from NAT at startup; set by NewP2Pmanager
+
 	MaxPeerCount uint64
 }
 
@@ -53,6 +61,17 @@ type p2pManager struct {
 }
 
 func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethClock eth_clock.EthereumClock) (P2PManager, error) {
+	// Resolve external IP from NAT once so both discv5 ENR and libp2p multiaddrs use
+	// the same public address. ExtIP resolves immediately; STUN/UPnP make network calls.
+	if cfg.NAT != nil {
+		if extIP, err := cfg.NAT.ExternalIP(); err == nil {
+			cfg.ExternalIP = extIP
+			logger.Info("[Caplin] NAT external IP resolved", "ip", extIP, "nat", cfg.NAT)
+		} else {
+			logger.Warn("[Caplin] NAT external IP resolution failed — incoming peers may not reach this node", "nat", cfg.NAT, "err", err)
+		}
+	}
+
 	// Setup discovery
 	enodes := make([]*enode.Node, len(cfg.NetworkConfig.BootNodes))
 	for i, bootnode := range cfg.NetworkConfig.BootNodes {

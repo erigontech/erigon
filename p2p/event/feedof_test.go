@@ -267,8 +267,7 @@ func BenchmarkFeedOfSend1000(b *testing.B) {
 	}
 
 	// The actual benchmark.
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		if feed.Send(i) != nsubs {
 			panic("wrong number of sends")
 		}

@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"math"
 	"time"
-	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 
@@ -51,7 +50,6 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/shards"
-	"github.com/erigontech/erigon/node/silkworm"
 )
 
 const (
@@ -86,7 +84,6 @@ type ExecuteBlockCfg struct {
 	syncCfg   ethconfig.Sync
 	genesis   *types.Genesis
 
-	silkworm        *silkworm.Silkworm
 	experimentalBAL bool
 }
 
@@ -106,7 +103,6 @@ func StageExecuteBlocksCfg(
 	hd headerDownloader,
 	genesis *types.Genesis,
 	syncCfg ethconfig.Sync,
-	silkworm *silkworm.Silkworm,
 	experimentalBAL bool,
 ) ExecuteBlockCfg {
 	if dirs.SnapDomain == "" {
@@ -129,7 +125,6 @@ func StageExecuteBlocksCfg(
 		genesis:         genesis,
 		historyV3:       true,
 		syncCfg:         syncCfg,
-		silkworm:        silkworm,
 		experimentalBAL: experimentalBAL,
 	}
 }
@@ -222,6 +217,15 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 	if err := unwindExec3State(ctx, doms, rwTx, u.UnwindPoint, txNum, accumulator, changeSet, lastExecHash, logger); err != nil {
 		return fmt.Errorf("unwindExec3State(%d->%d): %w, took %s", s.BlockNumber, u.UnwindPoint, err, time.Since(t))
 	}
+	// Surgically evict keys touched by the unwound blocks from the state cache.
+	// Keys not in the diffset remain cached (they weren't modified by the unwound range).
+	if stateCache := doms.GetStateCache(); stateCache != nil && changeSet != nil {
+		unwindTargetHash, _, err := br.CanonicalHash(ctx, rwTx, u.UnwindPoint)
+		if err != nil {
+			unwindTargetHash = common.Hash{}
+		}
+		stateCache.RevertWithDiffset(changeSet, lastExecHash, unwindTargetHash)
+	}
 	if err := rawdb.DeleteNewerEpochs(rwTx, u.UnwindPoint+1); err != nil {
 		return fmt.Errorf("delete newer epochs: %w", err)
 	}
@@ -289,17 +293,6 @@ func unwindExec3State(ctx context.Context,
 	defer stateChanges.Close()
 	stateChanges.SortAndFlushInBackground(true)
 
-	// Invalidate state cache entries affected by the unwind.
-	// Pass the hash of the last executed block so RevertWithDiffset can detect
-	// if the cache was modified by a rolled-back tx (e.g. ValidatePayload).
-	if stateCache := sd.GetStateCache(); stateCache != nil {
-		unwindToHash, err := rawdb.ReadCanonicalHash(tx, blockUnwindTo)
-		if err != nil {
-			logger.Warn("failed to read canonical hash for cache update", "block", blockUnwindTo, "err", err)
-			unwindToHash = common.Hash{}
-		}
-		stateCache.RevertWithDiffset(changeset, lastExecutedBlockHash, unwindToHash)
-	}
 	if changeset != nil {
 		accountDiffs := changeset[kv.AccountsDomain]
 		for _, entry := range accountDiffs {
@@ -317,13 +310,13 @@ func unwindExec3State(ctx context.Context,
 					fmt.Printf("unwind (Block:%d,Tx:%d): del acc: %x, step: %d\n", blockUnwindTo, txUnwindTo, address, keyStep)
 				}
 			}
-			if err := stateChanges.Collect(toBytesZeroCopy(entry.Key)[:length.Addr], entry.Value); err != nil {
+			if err := stateChanges.Collect(common.ToBytesZeroCopy(entry.Key)[:length.Addr], entry.Value); err != nil {
 				return err
 			}
 		}
 		storageDiffs := changeset[kv.StorageDomain]
 		for _, kv := range storageDiffs {
-			if err := stateChanges.Collect(toBytesZeroCopy(kv.Key), kv.Value); err != nil {
+			if err := stateChanges.Collect(common.ToBytesZeroCopy(kv.Key), kv.Value); err != nil {
 				return err
 			}
 		}
@@ -354,8 +347,6 @@ func unwindExec3State(ctx context.Context,
 	sd.SetTxNum(txUnwindTo)
 	return nil
 }
-
-func toBytesZeroCopy(s string) []byte { return unsafe.Slice(unsafe.StringData(s), len(s)) }
 
 func stageProgress(tx kv.Tx, db kv.RoDB, stage stages.SyncStage) (prevStageProgress uint64, err error) {
 	if tx != nil {
@@ -409,7 +400,12 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 		return nil
 	}
 
-	logger.Info(fmt.Sprintf("[%s] Unwind Execution", u.LogPrefix()), "from", s.BlockNumber, "to", u.UnwindPoint, "stack", dbg.Stack())
+	logger.Info(fmt.Sprintf("[%s] Unwind Execution", u.LogPrefix()), "from", s.BlockNumber, "to", u.UnwindPoint)
+
+	// Discard any pending deferred commitment updates from the previous
+	// (failed) execution. If left in place, the next ComputeCommitment
+	// would flush stale branch data that doesn't match the unwound state.
+	doms.ResetPendingUpdates()
 
 	unwindToLimit, ok, err := rawtemporaldb.CanUnwindBeforeBlockNum(u.UnwindPoint, rwTx)
 	if err != nil {

@@ -223,6 +223,11 @@ func (srv *Server) LocalNode() *enode.LocalNode {
 	return srv.localnode
 }
 
+// DiscV5 returns the UDPv5 discovery protocol instance, or nil if not running.
+func (srv *Server) DiscV5() *discover.UDPv5 {
+	return srv.discv5
+}
+
 // Peers returns all connected peers.
 func (srv *Server) Peers() []*Peer {
 	var ps []*Peer
@@ -737,6 +742,11 @@ running:
 				// Ensure that the trusted flag is set before checking against MaxPeers.
 				c.flags |= trustedConn
 			}
+			if c.flags&inboundConn != 0 {
+				// Once the peer ID is known, suppress outbound dials to the same node
+				// until this inbound setup completes or fails.
+				srv.dialsched.inboundPending(c.node.ID())
+			}
 			c.cont <- nil
 
 		case c := <-srv.checkpointAddPeer:
@@ -911,6 +921,11 @@ func (srv *Server) checkInboundConn(fd net.Conn, remoteIP netip.Addr) error {
 // or the handshakes have failed.
 func (srv *Server) SetupConn(fd net.Conn, flags connFlag, dialDest *enode.Node) error {
 	c := &conn{fd: fd, flags: flags, cont: make(chan error)}
+	defer func() {
+		if c.is(inboundConn) && c.node != nil {
+			srv.dialsched.inboundCompleted(c.node.ID())
+		}
+	}()
 	if dialDest == nil {
 		c.transport = srv.newTransport(fd, nil)
 	} else {

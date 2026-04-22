@@ -19,7 +19,6 @@ package bridge
 import (
 	"context"
 	"errors"
-	"math/big"
 	"sync"
 	"testing"
 	"time"
@@ -39,7 +38,7 @@ import (
 var defaultBorConfig = borcfg.BorConfig{
 	Sprint:                     map[string]uint64{"0": 2},
 	StateReceiverContract:      "0x0000000000000000000000000000000000001001",
-	IndoreBlock:                big.NewInt(10),
+	IndoreBlock:                common.NewUint64(10),
 	StateSyncConfirmationDelay: map[string]uint64{"0": 1},
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"sync"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/erigontech/erigon/db/datadir"
+	sharedreceipts "github.com/erigontech/erigon/execution/receipts"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 
 	"github.com/erigontech/erigon/common"
@@ -24,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/aa"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -46,6 +49,8 @@ type Generator struct {
 	blockExecMutex *loaderMutex[common.Hash]
 	txnExecMutex   *loaderMutex[common.Hash] // only 1 txn with current hash executed at a time - same parallel requests are waiting for results
 
+	execSem chan struct{} // limits concurrent block executions to bound memory usage
+
 	receiptsCacheTrace bool
 	receiptCacheTrace  bool
 	evmTimeout         time.Duration
@@ -55,6 +60,7 @@ type Generator struct {
 	engine      rules.EngineReader
 
 	commitmentReplay *rpchelper.CommitmentReplay
+	filters          *rpchelper.Filters
 }
 
 type ReceiptEnv struct {
@@ -67,11 +73,12 @@ type ReceiptEnv struct {
 }
 
 var (
-	receiptsCacheLimit = dbg.EnvInt("R_LRU", 1024) //ethmainnet: 1K receipts is ~200mb RAM
-	receiptsCacheTrace = dbg.EnvBool("R_LRU_TRACE", false)
+	receiptsCacheLimit      = dbg.EnvInt("R_LRU", 1024) //ethmainnet: 1K receipts is ~200mb RAM
+	receiptsCacheTrace      = dbg.EnvBool("R_LRU_TRACE", false)
+	receiptsExecConcurrency = dbg.EnvInt("R_EXEC_CONCURRENCY", max(1, runtime.GOMAXPROCS(0)/2))
 )
 
-func NewGenerator(dirs datadir.Dirs, blockReader services.FullBlockReader, engine rules.EngineReader, stateCache kvcache.Cache, evmTimeout time.Duration) *Generator {
+func NewGenerator(dirs datadir.Dirs, blockReader services.FullBlockReader, engine rules.EngineReader, stateCache kvcache.Cache, evmTimeout time.Duration, filters ...*rpchelper.Filters) *Generator {
 	receiptsCache, err := lru.New[common.Hash, types.Receipts](receiptsCacheLimit) //TODO: is handling both of them a good idea though...?
 	if err != nil {
 		panic(err)
@@ -83,6 +90,11 @@ func NewGenerator(dirs datadir.Dirs, blockReader services.FullBlockReader, engin
 	}
 
 	txNumReader := blockReader.TxnumReader()
+
+	var f *rpchelper.Filters
+	if len(filters) > 0 {
+		f = filters[0]
+	}
 
 	return &Generator{
 		stateCache:         stateCache,
@@ -97,8 +109,10 @@ func NewGenerator(dirs datadir.Dirs, blockReader services.FullBlockReader, engin
 
 		blockExecMutex: &loaderMutex[common.Hash]{},
 		txnExecMutex:   &loaderMutex[common.Hash]{},
+		execSem:        make(chan struct{}, receiptsExecConcurrency),
 
 		commitmentReplay: rpchelper.NewCommitmentReplay(dirs, txNumReader, log.Root()),
+		filters:          f,
 	}
 }
 
@@ -235,7 +249,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	var evm *vm.EVM
 	var genEnv *ReceiptEnv
 
-	err = rpchelper.CheckBlockExecuted(tx, blockNum)
+	err = rpchelper.CheckBlockExecuted(g.filters.WithOverlay(tx), blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -431,7 +445,14 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		return receipts, nil
 	}
 
-	err = rpchelper.CheckBlockExecuted(tx, blockNum)
+	select {
+	case g.execSem <- struct{}{}:
+		defer func() { <-g.execSem }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+
+	err = rpchelper.CheckBlockExecuted(g.filters.WithOverlay(tx), blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -464,72 +485,101 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	if err != nil {
 		return nil, err
 	}
-	//genEnv.ibs.SetTrace(true)
-	vmCfg := vm.Config{}
-	hashFn := protocol.GetHashFn(genEnv.header, genEnv.getHeader)
+
 	ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
 	defer cancel()
 
-	var sharedDomains *execctx.SharedDomains
-	defer func() {
-		if sharedDomains != nil {
-			sharedDomains.Close()
-		}
-	}()
-
-	minTxNum, err := g.txNumReader.Min(ctx, tx, blockNum)
-	if err != nil {
-		return nil, err
-	}
-
-	var stateWriter state.StateWriter
-	if calculatePostState && commitmentHistory {
-		sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root())
+	if !calculatePostState {
+		// Fast path (post-Byzantium): use the shared derivation package.
+		// DeriveBlockReceipts sets BlockHash and FirstLogIndexWithinBlock.
+		receipts, err = sharedreceipts.DeriveBlockReceipts(ctx, cfg, g.engine, block.HeaderNoCopy(), block.Transactions(), genEnv.ibs, genEnv.gp, genEnv.getHeader)
 		if err != nil {
 			return nil, err
 		}
-		sharedDomains.GetCommitmentContext().SetDeferBranchUpdates(false)
-		// commitment are indexed by txNum of the first tx (system-tx) of the block
-		sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, minTxNum)
-		latestTxNum, _, err := sharedDomains.SeekCommitment(ctx, tx)
-		if err != nil {
-			return nil, err
+		sharedreceipts.DeriveFields(receipts, blockHash)
+		if dbg.AssertEnabled && receiptsFromDB != nil {
+			for i, receipt := range receipts {
+				if i < len(receiptsFromDB) {
+					g.assertEqualReceipts(receipt, receiptsFromDB[i])
+				}
+			}
 		}
-		stateWriter = state.NewWriter(sharedDomains.AsPutDel(tx), nil, latestTxNum)
 	} else {
-		stateWriter = genEnv.noopWriter
-	}
+		// Slow path (pre-Byzantium): need to compute post-state root per transaction.
+		vmCfg := vm.Config{}
+		hashFn := protocol.GetHashFn(genEnv.header, genEnv.getHeader)
 
-	for i, txn := range block.Transactions() {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
-		}
-
-		evm := protocol.CreateEVM(cfg, hashFn, g.engine, accounts.NilAddress, genEnv.ibs, genEnv.header, vmCfg)
-		go func() {
-			<-ctx.Done()
-			evm.Cancel()
+		var sharedDomains *execctx.SharedDomains
+		defer func() {
+			if sharedDomains != nil {
+				sharedDomains.Close()
+			}
 		}()
 
-		genEnv.ibs.SetTxContext(blockNum, i)
-		receipt, err := protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, txn, genEnv.gasUsed, vmCfg, evm)
+		minTxNum, err := g.txNumReader.Min(ctx, tx, blockNum)
 		if err != nil {
-			return nil, fmt.Errorf("ReceiptGen.GetReceipts: bn=%d, txnIdx=%d, %w", block.NumberU64(), i, err)
-		}
-		if evm.Cancelled() {
-			return nil, fmt.Errorf("execution aborted (timeout = %v)", g.evmTimeout)
+			return nil, err
 		}
 
-		if calculatePostState {
+		var stateWriter state.StateWriter
+		if commitmentHistory {
+			sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root())
+			if err != nil {
+				return nil, err
+			}
+			sharedDomains.GetCommitmentContext().SetDeferBranchUpdates(false)
+			sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, minTxNum)
+			latestTxNum, _, err := sharedDomains.SeekCommitment(ctx, tx)
+			if err != nil {
+				return nil, err
+			}
+			stateWriter = state.NewWriter(sharedDomains.AsPutDel(tx), nil, latestTxNum)
+		} else {
+			stateWriter = genEnv.noopWriter
+		}
+
+		for i, txn := range block.Transactions() {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			default:
+			}
+
+			evm := protocol.CreateEVM(cfg, hashFn, g.engine, accounts.NilAddress, genEnv.ibs, genEnv.header, vmCfg)
+			// txDone is a cancellation bridge: a goroutine watches for context
+			// cancellation (e.g. RPC timeout) and calls evm.Cancel() to abort the
+			// EVM mid-execution. Closing txDone signals that the transaction
+			// completed normally, so the goroutine can exit without cancelling.
+			// txDone signals the cancel-watcher goroutine to exit once the
+			// transaction finishes normally. Without it, the goroutine would
+			// leak (blocked on ctx.Done) for every successfully executed tx.
+			// On context cancellation, evm.Cancel() aborts the EVM mid-opcode
+			// so even gas-heavy transactions respond to RPC timeouts promptly.
+			txDone := make(chan struct{})
+			go func() {
+				select {
+				case <-ctx.Done():
+					evm.Cancel()
+				case <-txDone:
+				}
+			}()
+
+			genEnv.ibs.SetTxContext(blockNum, i)
+			receipt, err := protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, txn, genEnv.gasUsed, vmCfg, evm)
+			close(txDone)
+			if err != nil {
+				return nil, fmt.Errorf("ReceiptGen.GetReceipts: bn=%d, txnIdx=%d, %w", block.NumberU64(), i, err)
+			}
+			if evm.Cancelled() {
+				return nil, fmt.Errorf("execution aborted (timeout = %v)", g.evmTimeout)
+			}
+
 			txNum := minTxNum + 1 + uint64(i)
 
 			if err := genEnv.ibs.CommitBlock(evm.ChainRules(), stateWriter); err != nil {
 				return nil, fmt.Errorf("CommitBlock failed: %w", err)
 			}
 
-			// calculate state root after tx identified by txNum (txNim+1)
 			var stateRoot []byte
 			if commitmentHistory {
 				sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, txNum+1)
@@ -541,25 +591,22 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 				if err != nil {
 					return nil, err
 				}
-			} else { // use state history to compute commitment
+			} else {
 				stateRoot, err = g.computeCommitmentFromStateHistory(ctx, tx, blockNum, txNum)
 				if err != nil {
 					return nil, err
 				}
 			}
 			receipt.PostState = stateRoot
+			receipts[i] = receipt
 		}
-
-		receipt.BlockHash = blockHash
-		if len(receipt.Logs) > 0 {
-			receipt.FirstLogIndexWithinBlock = uint32(receipt.Logs[0].Index)
-		} else if i > 0 {
-			receipt.FirstLogIndexWithinBlock = receipts[i-1].FirstLogIndexWithinBlock + uint32(len(receipts[i-1].Logs))
-		}
-		receipts[i] = receipt
-
-		if dbg.AssertEnabled && receiptsFromDB != nil && i < len(receiptsFromDB) {
-			g.assertEqualReceipts(receipt, receiptsFromDB[i])
+		sharedreceipts.DeriveFields(receipts, blockHash)
+		if dbg.AssertEnabled && receiptsFromDB != nil {
+			for i, receipt := range receipts {
+				if i < len(receiptsFromDB) {
+					g.assertEqualReceipts(receipt, receiptsFromDB[i])
+				}
+			}
 		}
 	}
 
@@ -664,7 +711,7 @@ func (m *loaderMutex[K]) unlock(mu *sync.Mutex, key K) {
 
 func (g *Generator) computeCommitmentFromStateHistory(ctx context.Context, tx kv.TemporalTx, blockNum uint64, txNum uint64) ([]byte, error) {
 	receiptComputeCommitment := func(ctx context.Context, ttx kv.TemporalTx, tsd *execctx.SharedDomains) ([]byte, error) {
-		tsd.GetCommitmentCtx().SetStateReader(rpchelper.NewCommitmentReplayStateReader(ttx, tx, tsd, txNum+1))
+		tsd.GetCommitmentCtx().SetStateReader(commitmentdb.NewCommitmentReplayStateReader(ttx, tx, tsd, txNum+1))
 		minTxNum, err := g.txNumReader.Min(ctx, tx, blockNum)
 		if err != nil {
 			return nil, err

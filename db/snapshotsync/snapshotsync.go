@@ -262,7 +262,7 @@ func isReceiptsSegmentPruned(ctx context.Context, tx kv.RwTx, txNumsReader rawdb
 	}
 	pruneHeight := pruneMode.Blocks.PruneTo(head) // if a receipt is below this height, it is pruned
 	if pruneMode.Blocks == prune.DefaultBlocksPruneMode && cc.MergeHeight != nil {
-		pruneHeight = cc.MergeHeight.Uint64()
+		pruneHeight = *cc.MergeHeight
 	}
 
 	// We use the pre-merge data policy.
@@ -412,7 +412,7 @@ func SyncSnapshots(
 				continue
 			}
 			if headerchain &&
-				!(strings.Contains(p.Name, "headers") || strings.Contains(p.Name, "bodies") || p.Name == "salt-blocks.txt") {
+				!(strings.Contains(p.Name, "headers") || strings.Contains(p.Name, "bodies") || p.Name == "salt-blocks.txt" || p.Name == "erigondb.toml") {
 				continue
 			}
 			if !syncCfg.KeepExecutionProofs && isStateHistory(p.Name) && strings.Contains(p.Name, kv.CommitmentDomain.String()) {
