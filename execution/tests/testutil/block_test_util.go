@@ -97,22 +97,22 @@ type btSlotChanges struct {
 }
 
 type btStorageChange struct {
-	BlockAccessIndex hexutil.Uint64       `json:"blockAccessIndex"`
+	BlockAccessIndex hexutil.Uint32       `json:"blockAccessIndex"`
 	PostValue        math.HexOrDecimal256 `json:"postValue"`
 }
 
 type btBalanceChange struct {
-	BlockAccessIndex hexutil.Uint64       `json:"blockAccessIndex"`
+	BlockAccessIndex hexutil.Uint32       `json:"blockAccessIndex"`
 	PostBalance      math.HexOrDecimal256 `json:"postBalance"`
 }
 
 type btNonceChange struct {
-	BlockAccessIndex hexutil.Uint64      `json:"blockAccessIndex"`
+	BlockAccessIndex hexutil.Uint32      `json:"blockAccessIndex"`
 	PostNonce        math.HexOrDecimal64 `json:"postNonce"`
 }
 
 type btCodeChange struct {
-	BlockAccessIndex hexutil.Uint64 `json:"blockAccessIndex"`
+	BlockAccessIndex hexutil.Uint32 `json:"blockAccessIndex"`
 	NewCode          hexutil.Bytes  `json:"newCode"`
 }
 
