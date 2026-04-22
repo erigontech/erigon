@@ -45,6 +45,15 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 )
 
+// ParentCandidate represents a viable parent for building a block at a given slot.
+// The builder uses this to start speculative EL builds with the correct parent hash.
+type ParentCandidate struct {
+	Slot          uint64      // slot of the parent block
+	BlockRoot     common.Hash // CL block root of the parent
+	ExecutionHash common.Hash // resolved EL parent hash (accounts for FULL/EMPTY)
+	ShouldExtend  bool        // true if parent payload was FULL (extend its EL block)
+}
+
 // ForkNode is a struct that represents a node in the fork choice tree.
 type ForkNode struct {
 	Slot           uint64      `json:"slot,string"`
@@ -691,6 +700,55 @@ func (f *ForkChoiceStore) ForkNodes() []ForkNode {
 		return forkNodes[i].Slot < forkNodes[j].Slot
 	})
 	return forkNodes
+}
+
+// ActiveParents returns the set of viable parent candidates for building a
+// block at the given slot. For MVP this returns only the current head, with
+// the EL parent hash resolved via FULL/EMPTY logic (ShouldExtendPayload).
+//
+// The slot parameter is reserved for future multi-parent support (e.g. after
+// reorgs where multiple parents are viable).
+func (f *ForkChoiceStore) ActiveParents(slot uint64) []ParentCandidate {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	headRoot := f.headHash
+	if headRoot == (common.Hash{}) {
+		return nil
+	}
+
+	header, ok := f.forkGraph.GetHeader(headRoot)
+	if !ok {
+		return nil
+	}
+
+	// Resolve the EL parent hash using FULL/EMPTY logic.
+	// This mirrors the branching in block_production.go:660-687.
+	shouldExtend := f.ShouldExtendPayload(headRoot)
+	var executionHash common.Hash
+	headState, err := f.forkGraph.GetState(headRoot, false)
+	if err != nil || headState == nil {
+		// Fallback: use eth2Roots mapping
+		executionHash, _ = f.eth2Roots.Get(headRoot)
+	} else {
+		parentBid := headState.GetLatestExecutionPayloadBid()
+		if parentBid != nil {
+			if f.HasEnvelope(headRoot) && shouldExtend {
+				executionHash = parentBid.BlockHash
+			} else {
+				executionHash = parentBid.ParentBlockHash
+			}
+		} else {
+			executionHash = headState.GetLatestBlockHash()
+		}
+	}
+
+	return []ParentCandidate{{
+		Slot:          header.Slot,
+		BlockRoot:     headRoot,
+		ExecutionHash: executionHash,
+		ShouldExtend:  shouldExtend,
+	}}
 }
 
 func (f *ForkChoiceStore) Synced() bool {

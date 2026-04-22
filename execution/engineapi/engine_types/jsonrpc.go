@@ -92,6 +92,10 @@ type BlobsBundle struct {
 
 // BlobsBundleFromTransactions builds a BlobsBundle by extracting blobs,
 // commitments, and proofs from blob transactions in the given list.
+// For legacy (wrapper_version=0) blob transactions that carry a single
+// KZG proof per blob, cell-level proofs are computed on the fly so that
+// the returned bundle is always in the PeerDAS/Fulu format (128 proofs
+// per blob).
 func BlobsBundleFromTransactions(txs types.Transactions) (*BlobsBundle, error) {
 	bundle := &BlobsBundle{
 		Commitments: make([]hexutil.Bytes, 0),
@@ -111,7 +115,13 @@ func BlobsBundleFromTransactions(txs types.Transactions) (*BlobsBundle, error) {
 			copy(cp, c[:])
 			bundle.Commitments = append(bundle.Commitments, cp)
 		}
-		for _, p := range blobTx.Proofs {
+		// EnsureCellProofs returns v1 cell proofs directly for v1 wrappers,
+		// and computes them from blobs for legacy v0 wrappers.
+		proofs, err := blobTx.EnsureCellProofs()
+		if err != nil {
+			return nil, fmt.Errorf("ensure cell proofs for tx %d: %w", i, err)
+		}
+		for _, p := range proofs {
 			pp := make([]byte, len(p))
 			copy(pp, p[:])
 			bundle.Proofs = append(bundle.Proofs, pp)

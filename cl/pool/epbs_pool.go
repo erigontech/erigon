@@ -48,6 +48,12 @@ type EpbsPool struct {
 	// PayloadAttestations stores recently validated PayloadAttestationMessages for beacon API serving.
 	// Short-lived cache (~1 slot), keyed by (slot, validatorIndex).
 	PayloadAttestations *lru.Cache[PayloadAttestationKey, *cltypes.PayloadAttestationMessage]
+
+	// OnPreferencesReceived is an optional callback invoked by the proposer
+	// preferences gossip service after a validated preference is stored.
+	// The ePBS builder wires this to PreferencesWatcher.OnPreferencesReceived
+	// so the builder loop wakes up without polling the LRU cache.
+	OnPreferencesReceived func(slot uint64, prefs *cltypes.SignedProposerPreferences)
 }
 
 func NewEpbsPool() *EpbsPool {

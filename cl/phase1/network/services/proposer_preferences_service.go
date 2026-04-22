@@ -173,6 +173,11 @@ func (s *proposerPreferencesService) ProcessMessage(ctx context.Context, _ *uint
 		DependentRoot: preferences.DependentRoot,
 	}, msg)
 
+	// Notify builder (if wired) so it can wake up without polling.
+	if cb := s.epbsPool.OnPreferencesReceived; cb != nil {
+		cb(proposalSlot, msg)
+	}
+
 	log.Trace("Processed proposer preferences via gossip",
 		"proposalSlot", proposalSlot,
 		"validatorIndex", validatorIndex,

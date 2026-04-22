@@ -29,6 +29,8 @@ import (
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc/credentials"
 
+	epbs "github.com/erigontech/erigon/cl/builder/epbs"
+	"github.com/erigontech/erigon/cl/builder/epbs/eladapter"
 	"github.com/erigontech/erigon/cl/aggregation"
 	"github.com/erigontech/erigon/cl/antiquary"
 	"github.com/erigontech/erigon/cl/beacon"
@@ -69,6 +71,7 @@ import (
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader"
@@ -182,7 +185,9 @@ func upgradeGenesisState(s *state.CachingBeaconState, from, to clparams.StateVer
 
 func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngine, config clparams.CaplinConfig,
 	dirs datadir.Dirs, eth1Getter snapshot_format.ExecutionBlockReaderByNumber,
-	snDownloader downloader.Client, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted) error {
+	snDownloader downloader.Client, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted,
+	execModule execmodule.ExecutionModule, // nil when ePBS builder is not available (standalone caplin mode)
+) error {
 
 	var networkConfig *clparams.NetworkConfig
 	var beaconConfig *clparams.BeaconChainConfig
@@ -502,6 +507,36 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 
 	{
 		go batchSignatureVerifier.Start()
+	}
+
+	// [New in Gloas:EIP7732] Wire ePBS builder if enabled.
+	if config.EpbsBuilder.Enabled && execModule != nil {
+		adapter := eladapter.NewAdapter(execModule, clparams.GloasVersion, beaconConfig)
+		builderSvc, initErr := epbs.InitBuilderService(config.EpbsBuilder, epbs.BuilderDeps{
+			Ctx:        ctx,
+			BeaconCfg:  beaconConfig,
+			EthClock:   ethClock,
+			SyncedData: syncedDataManager,
+			ForkChoice: forkChoice,
+			Exec:       adapter,
+			EpbsPool:   epbsPool,
+			Gossip:     gossipManager,
+			Emitters:   emitters,
+		})
+		if initErr != nil {
+			logger.Error("ePBS builder: initialization failed", "err", initErr)
+		} else if builderSvc != nil {
+			type bidWonSetter interface {
+				SetOnBidWon(func(uint64, uint64, common.Hash, common.Hash, common.Hash))
+			}
+			if setter, ok := blockService.(bidWonSetter); ok {
+				setter.SetOnBidWon(epbs.OnBidWonFunc(ctx, builderSvc.Loop))
+			}
+			defer builderSvc.Shutdown()
+			logger.Info("ePBS builder: wired into block service")
+		}
+	} else if config.EpbsBuilder.Enabled {
+		logger.Warn("ePBS builder: enabled but no execution module available (standalone mode) — builder disabled")
 	}
 
 	{ // start ticking forkChoice
