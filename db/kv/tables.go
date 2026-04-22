@@ -89,9 +89,6 @@ const (
 	// Progress of sync stages: stageName -> stageData
 	SyncStageProgress = "SyncStage"
 
-	CliqueSeparate     = "CliqueSeparate"
-	CliqueLastSnapshot = "CliqueLastSnapshot"
-
 	// Node database tables (see nodedb.go)
 
 	// NodeRecords stores P2P node records (ENR)
@@ -453,12 +450,7 @@ var SentryTables = []string{
 	Inodes,
 	NodeRecords,
 }
-var ConsensusTables = append([]string{
-	CliqueSeparate,
-	CliqueLastSnapshot,
-},
-	ChaindataTables..., //TODO: move bor tables from chaintables to `ConsensusTables`
-)
+var ConsensusTables = ChaindataTables //TODO: move bor tables from chaintables to `ConsensusTables`
 var HeimdallTables = ChaindataTables
 var PolygonBridgeTables = ChaindataTables
 var DownloaderTables = []string{
@@ -700,6 +692,8 @@ const (
 	LogAddrIdx    InvertedIdx = 7
 	TracesFromIdx InvertedIdx = 8
 	TracesToIdx   InvertedIdx = 9
+
+	StandaloneIdxLen = 4 // Count of standalone IIs registered via RegisterII (LogTopicIdx..TracesToIdx). Update this when adding a new standalone II.
 )
 
 func (idx InvertedIdx) String() string {

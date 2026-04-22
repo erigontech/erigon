@@ -146,8 +146,7 @@ func TestHashWithModificationsChanges(t *testing.T) {
 	tr.Hash()
 	// Generate account change
 	binary.BigEndian.PutUint32(preimage[:], 5000000)
-	var insertKey common.Hash
-	copy(insertKey[:], crypto.Keccak256(preimage[:]))
+	insertKey := crypto.HashData(preimage[:])
 	var insertA accounts.Account
 	insertA.Balance.SetUint64(300000)
 	insertA.Root = EmptyRoot

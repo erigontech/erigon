@@ -23,8 +23,6 @@ import (
 	"math/big"
 	"time"
 
-	"google.golang.org/protobuf/types/known/emptypb"
-
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -32,30 +30,26 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
-	"github.com/erigontech/erigon/execution/execmodule/moduleutil"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/gointerfaces"
-	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
 type ChainReaderWriterEth1 struct {
 	cfg             *chain.Config
-	executionModule executionproto.ExecutionClient
+	executionModule execmodule.ExecutionModule
 
-	fcuTimeoutMillis uint64
+	fcuTimeout time.Duration
 }
 
-func NewChainReaderEth1(cfg *chain.Config, executionModule executionproto.ExecutionClient, fcuTimeout time.Duration) ChainReaderWriterEth1 {
-	if fcuTimeout > 0 && fcuTimeout < time.Millisecond {
-		panic("chain rw eth1: fcuTimeout must be at least 1ms or 0 for unlimited")
-	}
+func NewChainReaderEth1(cfg *chain.Config, executionModule execmodule.ExecutionModule, fcuTimeout time.Duration) ChainReaderWriterEth1 {
 	return ChainReaderWriterEth1{
-		cfg:              cfg,
-		executionModule:  executionModule,
-		fcuTimeoutMillis: uint64(fcuTimeout.Milliseconds()),
+		cfg:             cfg,
+		executionModule: executionModule,
+		fcuTimeout:      fcuTimeout,
 	}
 }
 
@@ -64,40 +58,21 @@ func (c ChainReaderWriterEth1) Config() *chain.Config {
 }
 
 func (c ChainReaderWriterEth1) CurrentHeader(ctx context.Context) *types.Header {
-	resp, err := c.executionModule.CurrentHeader(ctx, &emptypb.Empty{})
+	h, err := c.executionModule.CurrentHeader(ctx)
 	if err != nil {
 		log.Warn("[engine] CurrentHeader", "err", err)
 		return nil
 	}
-	if resp == nil || resp.Header == nil {
-		return nil
-	}
-	ret, err := moduleutil.HeaderRpcToHeader(resp.Header)
-	if err != nil {
-		log.Warn("[engine] CurrentHeader", "err", err)
-		return nil
-	}
-	return ret
+	return h
 }
 
 func (c ChainReaderWriterEth1) GetHeader(ctx context.Context, hash common.Hash, number uint64) *types.Header {
-	resp, err := c.executionModule.GetHeader(ctx, &executionproto.GetSegmentRequest{
-		BlockNumber: &number,
-		BlockHash:   gointerfaces.ConvertHashToH256(hash),
-	})
+	h, err := c.executionModule.GetHeader(ctx, &hash, &number)
 	if err != nil {
 		log.Warn("[engine] GetHeader", "err", err)
 		return nil
 	}
-	if resp == nil || resp.Header == nil {
-		return nil
-	}
-	ret, err := moduleutil.HeaderRpcToHeader(resp.Header)
-	if err != nil {
-		log.Warn("[engine] GetHeader", "err", err)
-		return nil
-	}
-	return ret
+	return h
 }
 
 func (c ChainReaderWriterEth1) GetBlockByHash(ctx context.Context, hash common.Hash) *types.Block {
@@ -107,20 +82,12 @@ func (c ChainReaderWriterEth1) GetBlockByHash(ctx context.Context, hash common.H
 	}
 
 	number := header.Number.Uint64()
-	resp, err := c.executionModule.GetBody(ctx, &executionproto.GetSegmentRequest{
-		BlockNumber: &number,
-		BlockHash:   gointerfaces.ConvertHashToH256(hash),
-	})
+	body, err := c.executionModule.GetBody(ctx, &hash, &number)
 	if err != nil {
 		log.Warn("[engine] GetBlockByHash", "err", err)
 		return nil
 	}
-	if resp == nil || resp.Body == nil {
-		return nil
-	}
-	body, err := moduleutil.ConvertRawBlockBodyFromRpc(resp.Body)
-	if err != nil {
-		log.Warn("[engine] GetBlockByHash", "err", err)
+	if body == nil {
 		return nil
 	}
 	txs, err := types.DecodeTransactions(body.Transactions)
@@ -137,19 +104,12 @@ func (c ChainReaderWriterEth1) GetBlockByNumber(ctx context.Context, number uint
 		return nil
 	}
 
-	resp, err := c.executionModule.GetBody(ctx, &executionproto.GetSegmentRequest{
-		BlockNumber: &number,
-	})
+	body, err := c.executionModule.GetBody(ctx, nil, &number)
 	if err != nil {
 		log.Warn("[engine] GetBlockByNumber", "err", err)
 		return nil
 	}
-	if resp == nil || resp.Body == nil {
-		return nil
-	}
-	body, err := moduleutil.ConvertRawBlockBodyFromRpc(resp.Body)
-	if err != nil {
-		log.Warn("[engine] GetBlockByNumber", "err", err)
+	if body == nil {
 		return nil
 	}
 	txs, err := types.DecodeTransactions(body.Transactions)
@@ -161,125 +121,57 @@ func (c ChainReaderWriterEth1) GetBlockByNumber(ctx context.Context, number uint
 }
 
 func (c ChainReaderWriterEth1) GetHeaderByHash(ctx context.Context, hash common.Hash) *types.Header {
-	resp, err := c.executionModule.GetHeader(ctx, &executionproto.GetSegmentRequest{
-		BlockNumber: nil,
-		BlockHash:   gointerfaces.ConvertHashToH256(hash),
-	})
+	h, err := c.executionModule.GetHeader(ctx, &hash, nil)
 	if err != nil {
 		log.Warn("[engine] GetHeaderByHash", "err", err)
 		return nil
 	}
-	if resp == nil || resp.Header == nil {
-		return nil
-	}
-	ret, err := moduleutil.HeaderRpcToHeader(resp.Header)
-	if err != nil {
-		log.Warn("[engine] GetHeaderByHash", "err", err)
-		return nil
-	}
-	return ret
+	return h
 }
 
 func (c ChainReaderWriterEth1) GetHeaderByNumber(ctx context.Context, number uint64) *types.Header {
-	resp, err := c.executionModule.GetHeader(ctx, &executionproto.GetSegmentRequest{
-		BlockNumber: &number,
-		BlockHash:   nil,
-	})
+	h, err := c.executionModule.GetHeader(ctx, nil, &number)
 	if err != nil {
 		log.Warn("[engine] GetHeaderByNumber", "err", err)
 		return nil
 	}
-	if resp == nil || resp.Header == nil {
-		return nil
-	}
-	ret, err := moduleutil.HeaderRpcToHeader(resp.Header)
-	if err != nil {
-		log.Warn("[engine] GetHeaderByNumber", "err", err)
-		return nil
-	}
-	return ret
+	return h
 }
 
 func (c ChainReaderWriterEth1) GetTd(ctx context.Context, hash common.Hash, number uint64) *big.Int {
-	resp, err := c.executionModule.GetTD(ctx, &executionproto.GetSegmentRequest{
-		BlockNumber: &number,
-		BlockHash:   gointerfaces.ConvertHashToH256(hash),
-	})
+	td, err := c.executionModule.GetTD(ctx, &hash, &number)
 	if err != nil {
 		log.Warn("[engine] GetTd", "err", err)
 		return nil
 	}
-	if resp == nil || resp.Td == nil {
-		return nil
-	}
-	return moduleutil.ConvertBigIntFromRpc(resp.Td)
+	return td
 }
 
 func (c ChainReaderWriterEth1) GetBodiesByHashes(ctx context.Context, hashes []common.Hash) ([]*types.RawBody, error) {
-	grpcHashes := make([]*typesproto.H256, len(hashes))
-	for i := range grpcHashes {
-		grpcHashes[i] = gointerfaces.ConvertHashToH256(hashes[i])
-	}
-	resp, err := c.executionModule.GetBodiesByHashes(ctx, &executionproto.GetBodiesByHashesRequest{
-		Hashes: grpcHashes,
-	})
-	if err != nil {
-		return nil, err
-	}
-	ret := make([]*types.RawBody, len(resp.Bodies))
-	for i := range ret {
-		ret[i], err = moduleutil.ConvertRawBlockBodyFromRpc(resp.Bodies[i])
-		if err != nil {
-			return nil, err
-		}
-	}
-	return ret, nil
+	return c.executionModule.GetBodiesByHashes(ctx, hashes)
 }
 
 func (c ChainReaderWriterEth1) GetBodiesByRange(ctx context.Context, start, count uint64) ([]*types.RawBody, error) {
-	resp, err := c.executionModule.GetBodiesByRange(ctx, &executionproto.GetBodiesByRangeRequest{
-		Start: start,
-		Count: count,
-	})
-	if err != nil {
-		return nil, err
-	}
-	ret := make([]*types.RawBody, len(resp.Bodies))
-	for i := range ret {
-		ret[i], err = moduleutil.ConvertRawBlockBodyFromRpc(resp.Bodies[i])
-		if err != nil {
-			return nil, err
-		}
-	}
-	return ret, nil
+	return c.executionModule.GetBodiesByRange(ctx, start, count)
 }
 
 func (c ChainReaderWriterEth1) GetPayloadBodiesByHash(ctx context.Context, hashes []common.Hash) ([]*engine_types.ExecutionPayloadBodyV2, error) {
-	grpcHashes := make([]*typesproto.H256, len(hashes))
-	for i := range grpcHashes {
-		grpcHashes[i] = gointerfaces.ConvertHashToH256(hashes[i])
-	}
-	resp, err := c.executionModule.GetPayloadBodiesByHash(ctx, &executionproto.GetPayloadBodiesByHashRequest{
-		Hashes: grpcHashes,
-	})
+	bodies, err := c.executionModule.GetPayloadBodiesByHash(ctx, hashes)
 	if err != nil {
 		return nil, err
 	}
-	return convertPayloadBodiesFromRpc(resp.Bodies), nil
+	return convertPayloadBodies(bodies), nil
 }
 
 func (c ChainReaderWriterEth1) GetPayloadBodiesByRange(ctx context.Context, start, count uint64) ([]*engine_types.ExecutionPayloadBodyV2, error) {
-	resp, err := c.executionModule.GetPayloadBodiesByRange(ctx, &executionproto.GetPayloadBodiesByRangeRequest{
-		Start: start,
-		Count: count,
-	})
+	bodies, err := c.executionModule.GetPayloadBodiesByRange(ctx, start, count)
 	if err != nil {
 		return nil, err
 	}
-	return convertPayloadBodiesFromRpc(resp.Bodies), nil
+	return convertPayloadBodies(bodies), nil
 }
 
-func convertPayloadBodiesFromRpc(bodies []*typesproto.ExecutionPayloadBody) []*engine_types.ExecutionPayloadBodyV2 {
+func convertPayloadBodies(bodies []*execmodule.PayloadBody) []*engine_types.ExecutionPayloadBodyV2 {
 	result := make([]*engine_types.ExecutionPayloadBodyV2, len(bodies))
 	for i, body := range bodies {
 		if body == nil {
@@ -291,7 +183,7 @@ func convertPayloadBodiesFromRpc(bodies []*typesproto.ExecutionPayloadBody) []*e
 		}
 		result[i] = &engine_types.ExecutionPayloadBodyV2{
 			Transactions:    txs,
-			Withdrawals:     moduleutil.ConvertWithdrawalsFromRpc(body.Withdrawals),
+			Withdrawals:     body.Withdrawals,
 			BlockAccessList: body.BlockAccessList,
 		}
 	}
@@ -299,241 +191,247 @@ func convertPayloadBodiesFromRpc(bodies []*typesproto.ExecutionPayloadBody) []*e
 }
 
 func (c ChainReaderWriterEth1) Ready(ctx context.Context) (bool, error) {
-	resp, err := c.executionModule.Ready(ctx, &emptypb.Empty{})
-	if err != nil {
-		return false, err
-	}
-	return resp.Ready, nil
+	return c.executionModule.Ready(ctx)
 }
 
 func (c ChainReaderWriterEth1) HeaderNumber(ctx context.Context, hash common.Hash) (*uint64, error) {
-	resp, err := c.executionModule.GetHeaderHashNumber(ctx, gointerfaces.ConvertHashToH256(hash))
-	if err != nil {
-		return nil, err
-	}
-	if resp == nil {
-		return nil, nil
-	}
-	return resp.BlockNumber, nil
+	return c.executionModule.GetHeaderHashNumber(ctx, hash)
 }
 
 func (c ChainReaderWriterEth1) IsCanonicalHash(ctx context.Context, hash common.Hash) (bool, error) {
-	resp, err := c.executionModule.IsCanonicalHash(ctx, gointerfaces.ConvertHashToH256(hash))
-	if err != nil {
-		return false, err
-	}
-	if resp == nil {
-		return false, nil
-	}
-	return resp.Canonical, nil
+	return c.executionModule.IsCanonicalHash(ctx, hash)
 }
 
 func (c ChainReaderWriterEth1) FrozenBlocks(ctx context.Context) (uint64, bool) {
-	ret, err := c.executionModule.FrozenBlocks(ctx, &emptypb.Empty{})
+	frozen, hasGap, err := c.executionModule.FrozenBlocks(ctx)
 	if err != nil {
 		panic(err)
 	}
-	return ret.FrozenBlocks, ret.HasGap
+	return frozen, hasGap
 }
 
 func (c ChainReaderWriterEth1) InsertBlocksAndWait(ctx context.Context, blocks []*types.Block) error {
 	return c.InsertBlocksAndWaitWithAccessLists(ctx, blocks, nil)
 }
 
-func (c ChainReaderWriterEth1) InsertBlocksAndWaitWithAccessLists(ctx context.Context, blocks []*types.Block, accessLists []*executionproto.BlockAccessListEntry) error {
-	request := &executionproto.InsertBlocksRequest{
-		Blocks:           moduleutil.ConvertBlocksToRPC(blocks),
-		BlockAccessLists: accessLists,
-	}
-	response, err := c.executionModule.InsertBlocks(ctx, request)
-	if err != nil {
-		return err
-	}
-
-	for response.Result == executionproto.ExecutionStatus_Busy {
+// InsertBlocksAndWaitWithAccessLists inserts blocks and waits for confirmation.
+// accessLists maps block hash to its RLP-encoded block access list bytes (nil if not present).
+func (c ChainReaderWriterEth1) InsertBlocksAndWaitWithAccessLists(ctx context.Context, blocks []*types.Block, accessLists map[common.Hash][]byte) error {
+	rawBlocks := blocksToRaw(blocks, accessLists)
+	for {
+		status, err := c.executionModule.InsertBlocks(ctx, rawBlocks)
+		if err != nil {
+			return err
+		}
+		if status != execmodule.ExecutionStatusBusy {
+			if status != execmodule.ExecutionStatusSuccess {
+				return fmt.Errorf("InsertBlocksAndWait: executionModule.InsertBlocks ExecutionStatus = %s", status)
+			}
+			return nil
+		}
 		const retryDelay = 100 * time.Millisecond
 		select {
 		case <-time.After(retryDelay):
 		case <-ctx.Done():
 			return ctx.Err()
 		}
-
-		response, err = c.executionModule.InsertBlocks(ctx, request)
-		if err != nil {
-			return err
-		}
 	}
-	if response.Result != executionproto.ExecutionStatus_Success {
-		return fmt.Errorf("InsertBlocksAndWait: executionModule.InsertBlocks ExecutionStatus = %s", response.Result.String())
-	}
-	return nil
 }
 
 func (c ChainReaderWriterEth1) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
 	return c.InsertBlocksWithAccessLists(ctx, blocks, nil)
 }
 
-func (c ChainReaderWriterEth1) InsertBlocksWithAccessLists(ctx context.Context, blocks []*types.Block, accessLists []*executionproto.BlockAccessListEntry) error {
-	request := &executionproto.InsertBlocksRequest{
-		Blocks:           moduleutil.ConvertBlocksToRPC(blocks),
-		BlockAccessLists: accessLists,
-	}
-	response, err := c.executionModule.InsertBlocks(ctx, request)
+// InsertBlocksWithAccessLists inserts blocks without waiting for confirmation.
+// accessLists maps block hash to its RLP-encoded block access list bytes (nil if not present).
+func (c ChainReaderWriterEth1) InsertBlocksWithAccessLists(ctx context.Context, blocks []*types.Block, accessLists map[common.Hash][]byte) error {
+	rawBlocks := blocksToRaw(blocks, accessLists)
+	status, err := c.executionModule.InsertBlocks(ctx, rawBlocks)
 	if err != nil {
 		return err
 	}
-
-	if response.Result == executionproto.ExecutionStatus_Busy {
+	if status == execmodule.ExecutionStatusBusy {
 		return context.DeadlineExceeded
 	}
-	if response.Result != executionproto.ExecutionStatus_Success {
-		return fmt.Errorf("InsertBlocks: invalid code received from execution module: %s", response.Result.String())
+	if status != execmodule.ExecutionStatusSuccess {
+		return fmt.Errorf("InsertBlocks: invalid code received from execution module: %s", status)
 	}
 	return nil
 }
 
 func (c ChainReaderWriterEth1) InsertBlockAndWait(ctx context.Context, block *types.Block) error {
-	blocks := []*types.Block{block}
-	return c.InsertBlocksAndWait(ctx, blocks)
+	return c.InsertBlocksAndWait(ctx, []*types.Block{block})
 }
 
-func (c ChainReaderWriterEth1) ValidateChain(ctx context.Context, hash common.Hash, number uint64) (executionproto.ExecutionStatus, *string, common.Hash, error) {
-	resp, err := c.executionModule.ValidateChain(ctx, &executionproto.ValidationRequest{
-		Hash:   gointerfaces.ConvertHashToH256(hash),
-		Number: number,
-	})
+func blocksToRaw(blocks []*types.Block, accessLists map[common.Hash][]byte) []*types.RawBlock {
+	raw := make([]*types.RawBlock, len(blocks))
+	for i, b := range blocks {
+		rawBody := b.RawBody()
+		rb := &types.RawBlock{Header: b.Header(), Body: rawBody}
+		if accessLists != nil {
+			if bal, ok := accessLists[b.Hash()]; ok {
+				rb.BlockAccessList = bal
+			}
+		}
+		raw[i] = rb
+	}
+	return raw
+}
+
+func (c ChainReaderWriterEth1) ValidateChain(ctx context.Context, hash common.Hash, number uint64) (execmodule.ExecutionStatus, *string, common.Hash, error) {
+	result, err := c.executionModule.ValidateChain(ctx, hash, number)
 	if err != nil {
 		return 0, nil, common.Hash{}, err
 	}
 	var validationError *string
-	if len(resp.ValidationError) > 0 {
-		validationError = &resp.ValidationError
+	if len(result.ValidationError) > 0 {
+		validationError = &result.ValidationError
 	}
-	return resp.ValidationStatus, validationError, gointerfaces.ConvertH256ToHash(resp.LatestValidHash), err
+	return result.ValidationStatus, validationError, result.LatestValidHash, nil
 }
 
-func (c ChainReaderWriterEth1) UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizeHash common.Hash, timeoutOverride ...uint64) (executionproto.ExecutionStatus, *string, common.Hash, error) {
-	timeout := c.fcuTimeoutMillis
+func (c ChainReaderWriterEth1) UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizeHash common.Hash, timeoutOverride ...uint64) (execmodule.ExecutionStatus, *string, common.Hash, error) {
+	// Apply timeout via context so the native UpdateForkChoice returns Busy on deadline exceeded.
+	timeout := c.fcuTimeout
 	if len(timeoutOverride) > 0 {
-		timeout = timeoutOverride[0]
+		timeout = time.Duration(timeoutOverride[0]) * time.Millisecond
 	}
-	resp, err := c.executionModule.UpdateForkChoice(ctx, &executionproto.ForkChoice{
-		HeadBlockHash:      gointerfaces.ConvertHashToH256(headHash),
-		SafeBlockHash:      gointerfaces.ConvertHashToH256(safeHash),
-		FinalizedBlockHash: gointerfaces.ConvertHashToH256(finalizeHash),
-		Timeout:            timeout,
-	})
+	callCtx := ctx
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		callCtx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+	result, err := c.executionModule.UpdateForkChoice(callCtx, headHash, safeHash, finalizeHash)
 	if err != nil {
 		return 0, nil, common.Hash{}, err
 	}
 	var validationError *string
-	if len(resp.ValidationError) > 0 {
-		validationError = &resp.ValidationError
+	if len(result.ValidationError) > 0 {
+		validationError = &result.ValidationError
 	}
-	return resp.Status, validationError, gointerfaces.ConvertH256ToHash(resp.LatestValidHash), err
+	return result.Status, validationError, result.LatestValidHash, nil
 }
 
 func (c ChainReaderWriterEth1) GetForkChoice(ctx context.Context) (headHash, finalizedHash, safeHash common.Hash, err error) {
-	var resp *executionproto.ForkChoice
-	resp, err = c.executionModule.GetForkChoice(ctx, &emptypb.Empty{})
+	state, err := c.executionModule.GetForkChoice(ctx)
 	if err != nil {
 		log.Warn("[engine] GetForkChoice", "err", err)
 		return
 	}
-	return gointerfaces.ConvertH256ToHash(resp.HeadBlockHash), gointerfaces.ConvertH256ToHash(resp.FinalizedBlockHash),
-		gointerfaces.ConvertH256ToHash(resp.SafeBlockHash), nil
+	return state.HeadHash, state.FinalizedHash, state.SafeHash, nil
 }
 
 func (c ChainReaderWriterEth1) HasBlock(ctx context.Context, hash common.Hash) (bool, error) {
-	resp, err := c.executionModule.HasBlock(ctx, &executionproto.GetSegmentRequest{
-		BlockHash: gointerfaces.ConvertHashToH256(hash),
-	})
-	if err != nil {
-		return false, err
-	}
-	return resp.HasBlock, nil
+	return c.executionModule.HasBlock(ctx, &hash, nil)
 }
 
 func (c ChainReaderWriterEth1) AssembleBlock(baseHash common.Hash, attributes *engine_types.PayloadAttributes) (id uint64, err error) {
-	request := &executionproto.AssembleBlockRequest{
+	params := &builder.Parameters{
+		ParentHash:            baseHash,
 		Timestamp:             uint64(attributes.Timestamp),
-		PrevRandao:            gointerfaces.ConvertHashToH256(attributes.PrevRandao),
-		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(attributes.SuggestedFeeRecipient),
-		Withdrawals:           moduleutil.ConvertWithdrawalsToRpc(attributes.Withdrawals),
-		ParentHash:            gointerfaces.ConvertHashToH256(baseHash),
+		PrevRandao:            attributes.PrevRandao,
+		SuggestedFeeRecipient: attributes.SuggestedFeeRecipient,
+		Withdrawals:           attributes.Withdrawals,
+		SlotNumber:            (*uint64)(attributes.SlotNumber),
+		ParentBeaconBlockRoot: attributes.ParentBeaconBlockRoot,
 	}
-	if attributes.ParentBeaconBlockRoot != nil {
-		request.ParentBeaconBlockRoot = gointerfaces.ConvertHashToH256(*attributes.ParentBeaconBlockRoot)
-	}
-	if attributes.SlotNumber != nil {
-		sn := uint64(*attributes.SlotNumber)
-		request.SlotNumber = &sn
-	}
-	resp, err := c.executionModule.AssembleBlock(context.Background(), request)
+	result, err := c.executionModule.AssembleBlock(context.Background(), params)
 	if err != nil {
 		return 0, err
 	}
-	if resp.Busy {
+	if result.Busy {
 		return 0, errors.New("execution data is still syncing")
 	}
-	return resp.Id, nil
+	return result.PayloadID, nil
 }
 
 func (c ChainReaderWriterEth1) GetAssembledBlock(id uint64) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
-	resp, err := c.executionModule.GetAssembledBlock(context.Background(), &executionproto.GetAssembledBlockRequest{
-		Id: id,
-	})
+	result, err := c.executionModule.GetAssembledBlock(context.Background(), id)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	if resp.Busy {
+	if result.Busy {
 		return nil, nil, nil, nil, errors.New("execution data is still syncing")
 	}
-	if resp.Data == nil {
+	if result.Block == nil {
 		return nil, nil, nil, nil, nil
 	}
 
-	bundle := engine_types.ConvertBlobsFromRpc(resp.Data.BlobsBundle)
-	blockValue := gointerfaces.ConvertH256ToUint256Int(resp.Data.BlockValue).ToBig()
-	payloadRpc := resp.Data.ExecutionPayload
+	br := result.Block
+	block := br.Block
+	header := block.Header()
 
+	// Encode transactions
+	encodedTxs, err := types.MarshalTransactionsBinary(block.Transactions())
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+
+	// Build CL Eth1Block
 	extraData := solid.NewExtraData()
-	extraData.SetBytes(payloadRpc.ExtraData)
-	blockHash := gointerfaces.ConvertH256ToHash(payloadRpc.BlockHash)
-	block := &cltypes.Eth1Block{
-		ParentHash:    gointerfaces.ConvertH256ToHash(payloadRpc.ParentHash),
-		FeeRecipient:  gointerfaces.ConvertH160toAddress(payloadRpc.Coinbase),
-		StateRoot:     gointerfaces.ConvertH256ToHash(payloadRpc.StateRoot),
-		ReceiptsRoot:  gointerfaces.ConvertH256ToHash(payloadRpc.ReceiptRoot),
-		LogsBloom:     gointerfaces.ConvertH2048ToBloom(payloadRpc.LogsBloom),
-		BlockNumber:   payloadRpc.BlockNumber,
-		GasLimit:      payloadRpc.GasLimit,
-		GasUsed:       payloadRpc.GasUsed,
-		Time:          payloadRpc.Timestamp,
-		Extra:         extraData,
-		PrevRandao:    gointerfaces.ConvertH256ToHash(payloadRpc.PrevRandao),
-		Transactions:  solid.NewTransactionsSSZFromTransactions(payloadRpc.Transactions),
-		BlockHash:     blockHash,
-		BaseFeePerGas: gointerfaces.ConvertH256ToHash(payloadRpc.BaseFeePerGas),
-	}
-	utils.ReverseBytes(&block.BaseFeePerGas)
-	if payloadRpc.ExcessBlobGas != nil {
-		block.ExcessBlobGas = *payloadRpc.ExcessBlobGas
-	}
-	if payloadRpc.BlobGasUsed != nil {
-		block.BlobGasUsed = *payloadRpc.BlobGasUsed
+	extraData.SetBytes(header.Extra)
+	blockHash := block.Hash()
+
+	// BaseFeePerGas in cltypes.Eth1Block is stored as little-endian bytes in a common.Hash.
+	var baseFeeLE common.Hash
+	if header.BaseFee != nil {
+		be := header.BaseFee.Bytes32() // big-endian [32]byte
+		copy(baseFeeLE[:], be[:])
+		utils.ReverseBytes(&baseFeeLE) // convert to little-endian
 	}
 
-	// change the limit later
+	eth1Block := &cltypes.Eth1Block{
+		ParentHash:    header.ParentHash,
+		FeeRecipient:  header.Coinbase,
+		StateRoot:     header.Root,
+		ReceiptsRoot:  header.ReceiptHash,
+		LogsBloom:     header.Bloom,
+		BlockNumber:   header.Number.Uint64(),
+		GasLimit:      header.GasLimit,
+		GasUsed:       header.GasUsed,
+		Time:          header.Time,
+		Extra:         extraData,
+		PrevRandao:    header.MixDigest,
+		Transactions:  solid.NewTransactionsSSZFromTransactions(encodedTxs),
+		BlockHash:     blockHash,
+		BaseFeePerGas: baseFeeLE,
+	}
+	if header.ExcessBlobGas != nil {
+		eth1Block.ExcessBlobGas = *header.ExcessBlobGas
+	}
+	if header.BlobGasUsed != nil {
+		eth1Block.BlobGasUsed = *header.BlobGasUsed
+	}
+
+	// Withdrawals
 	withdrawals := solid.NewStaticListSSZ[*cltypes.Withdrawal](int(clparams.MainnetBeaconConfig.MaxWithdrawalsPerPayload), 44)
-	for _, w := range payloadRpc.Withdrawals {
+	for _, w := range block.Withdrawals() {
 		withdrawals.Append(&cltypes.Withdrawal{
 			Amount:    w.Amount,
-			Address:   gointerfaces.ConvertH160toAddress(w.Address),
+			Address:   w.Address,
 			Index:     w.Index,
-			Validator: w.ValidatorIndex,
+			Validator: w.Validator,
 		})
 	}
-	block.Withdrawals = withdrawals
-	return block, bundle, resp.Data.Requests, blockValue, nil
+	eth1Block.Withdrawals = withdrawals
+
+	// Blob bundle
+	blobsBundle, err := engine_types.BlobsBundleFromTransactions(block.Transactions())
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+
+	// Requests bundle
+	var requestsBundle *typesproto.RequestsBundle
+	if br.Requests != nil {
+		requestsBundle = &typesproto.RequestsBundle{}
+		for _, r := range br.Requests {
+			requestsBundle.Requests = append(requestsBundle.Requests, r.Encode())
+		}
+	}
+
+	blockValue := result.BlockValue.ToBig()
+
+	return eth1Block, blobsBundle, requestsBundle, blockValue, nil
 }

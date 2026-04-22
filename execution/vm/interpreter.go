@@ -61,15 +61,53 @@ type CallContext struct {
 	stateGas uint64
 	input    []byte
 	Memory   Memory
+
+	// Opcode-scoped key/address intern cache. cacheGen is incremented once per
+	// opcode dispatch in the interpreter loop; cachedKeyGen/cachedAddrGen hold
+	// the generation at which the entry was populated. An entry is valid only
+	// when its gen equals cacheGen, giving the gas phase and execute phase of
+	// the same opcode a shared interned value without a second unique.Make call.
+	// Placed before Stack so these fields stay in L1D rather than being pushed
+	// out by Stack.data (32 KB).
+	cacheGen      uint64
+	cachedKeyGen  uint64
+	cachedAddrGen uint64
+	cachedKey     accounts.StorageKey
+	cachedAddr    accounts.Address
+
 	Stack    Stack
 	Contract Contract
 }
 
+// peekStorageKey returns the top-of-stack value as an interned StorageKey.
+// The result is cached for the lifetime of one opcode dispatch (gas phase +
+// execute phase share the same cacheGen), so unique.Make is called at most
+// once per opcode. Callers must invoke this before any stack mutation
+// (pop/push/swap) within the same dispatch — the cache is keyed by generation
+// only and will not detect a changed stack top within the same opcode.
+func (ctx *CallContext) peekStorageKey() accounts.StorageKey {
+	if ctx.cachedKeyGen == ctx.cacheGen {
+		return ctx.cachedKey
+	}
+	ctx.cachedKey = accounts.InternKey(ctx.Stack.peek().Bytes32())
+	ctx.cachedKeyGen = ctx.cacheGen
+	return ctx.cachedKey
+}
+
+// peekAddress returns the top-of-stack value as an interned Address.
+// Cached like peekStorageKey; same constraint: call before any stack mutation.
+func (ctx *CallContext) peekAddress() accounts.Address {
+	if ctx.cachedAddrGen == ctx.cacheGen {
+		return ctx.cachedAddr
+	}
+	ctx.cachedAddr = accounts.InternAddress(ctx.Stack.peek().Bytes20())
+	ctx.cachedAddrGen = ctx.cacheGen
+	return ctx.cachedAddr
+}
+
 var contextPool = sync.Pool{
 	New: func() any {
-		return &CallContext{
-			Stack: Stack{data: make([]uint256.Int, 0, 16)},
-		}
+		return &CallContext{}
 	},
 }
 
@@ -89,6 +127,15 @@ func getCallContext(contract Contract, input []byte, gas mdgas.MdGas) *CallConte
 func (c *CallContext) put() {
 	c.Memory.reset()
 	c.Stack.Reset()
+	c.cacheGen = 0
+	// Use sentinel values so that a peek call before the first cacheGen++ is
+	// always a miss rather than returning a stale handle from a prior use.
+	c.cachedKeyGen = ^uint64(0)
+	c.cachedAddrGen = ^uint64(0)
+	// Zero the handles to release their canonMap pins while the context is
+	// idle in the pool; unique.Handle values keep interned entries alive.
+	c.cachedKey = accounts.NilKey
+	c.cachedAddr = accounts.NilAddress
 	contextPool.Put(c)
 }
 
@@ -178,7 +225,7 @@ func (ctx *CallContext) MemoryData() []byte {
 // StackData returns the stack data. Callers must not modify the contents
 // of the returned data.
 func (ctx *CallContext) StackData() []uint256.Int {
-	return ctx.Stack.data
+	return ctx.Stack.data[:ctx.Stack.top]
 }
 
 // Caller returns the current caller.
@@ -219,7 +266,7 @@ func (ctx *CallContext) Gas() mdgas.MdGas {
 
 // restoreChildGas returns the child frame's leftover gas to the parent.
 // On success the parent adopts the child's remaining reservoir.
-// On error handleFrameRevert sets returnGas.State = initialChildState + spill
+// On error handleFrameRevert adds childStateConsumed back to returnGas.State
 // per EIP-8037: "all state gas consumed by the child… is restored to the
 // parent's reservoir." Early-exit errors (collision, depth, insufficient
 // balance) preserve gasRemaining.State so the reservoir is returned intact.
@@ -365,7 +412,6 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 	// explicit STOP, RETURN or SELFDESTRUCT is executed, an error occurred during
 	// the execution of one of the operations or until the done flag is set by the
 	// parent context.
-	steps := 0
 
 	var traceGas = func(op OpCode, callGas, cost uint64) uint64 {
 		switch op {
@@ -376,12 +422,13 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		}
 	}
 
+	// Hoist to locals so the compiler sees them as loop-invariant.
+	isAmsterdam := evm.chainRules.IsAmsterdam
+	anyTrace := dbg.TraceDynamicGas || debug || trace
+
 	for {
-		steps++
-		if steps%50_000 == 0 && evm.Cancelled() {
-			break
-		}
-		if dbg.TraceDynamicGas || debug || trace {
+		callContext.cacheGen++
+		if anyTrace {
 			// Capture pre-execution values for tracing.
 			logged, pcCopy, gasCopy = false, pc, callContext.gas
 			blockNum, txIndex, txIncarnation = evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation()
@@ -404,7 +451,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			callContext.gas -= cost
 		}
 		// EIP-8037: Track constantGas immediately after deduction for block-level accounting.
-		if evm.chainRules.IsAmsterdam && cost > 0 {
+		if isAmsterdam && cost > 0 {
 			evm.regularGasConsumed += cost
 		}
 
@@ -451,7 +498,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 				return nil, callContext.Gas(), ErrOutOfGas
 			}
 			callContext.gas -= dynamicCost.Regular
-			if evm.chainRules.IsAmsterdam {
+			if isAmsterdam {
 				// EIP-8037: Track dynamic regular gas immediately after deduction.
 				// For CALL variants, callGasTemp is the gas forwarded to child (escrow),
 				// so we subtract it to get parent's actual cost.
@@ -471,7 +518,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		}
 
 		// Do gas tracing before memory expansion
-		if tracer != nil {
+		if debug {
 			if tracer.OnGasChange != nil {
 				tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
 			}

@@ -45,6 +45,12 @@ func TestMakeTopics(t *testing.T) {
 			false,
 		},
 		{
+			"reject fixed byte types longer than 32 bytes",
+			args{[][]any{{[33]byte{1}}}},
+			nil,
+			true,
+		},
+		{
 			"support common.Hash types in topics",
 			args{[][]any{{common.Hash{1, 2, 3, 4, 5}}}},
 			[][]common.Hash{{common.Hash{1, 2, 3, 4, 5}}},
@@ -60,6 +66,12 @@ func TestMakeTopics(t *testing.T) {
 			"support *big.Int types in topics",
 			args{[][]any{{big.NewInt(1).Lsh(big.NewInt(2), 254)}}},
 			[][]common.Hash{{common.Hash{128}}},
+			false,
+		},
+		{
+			"support negative *big.Int types in topics",
+			args{[][]any{{big.NewInt(-1)}}},
+			[][]common.Hash{{common.HexToHash("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")}},
 			false,
 		},
 		{
