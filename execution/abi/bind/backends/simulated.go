@@ -50,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
+	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -58,6 +59,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/p2p/event"
+	"github.com/erigontech/erigon/polygon/bor"
 )
 
 // This nil assignment ensures at compile time that SimulatedBackend implements bind.ContractBackend.
@@ -104,7 +106,15 @@ func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, confi
 		config = &copy
 	}
 	genesis := types.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
-	engine := ethash.NewFaker()
+	var engine rules.Engine
+	switch {
+	case config.Bor != nil:
+		engine = bor.NewFaker()
+	case config.TerminalTotalDifficultyPassed:
+		engine = merge.NewFaker(ethash.NewFaker())
+	default:
+		engine = ethash.NewFaker()
+	}
 	//SimulatedBackend - it's remote blockchain node. This is reason why it has own `MockSentry` and own `DB` (even if external unit-test have one already)
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&genesis), execmoduletester.WithEngine(engine))
 
