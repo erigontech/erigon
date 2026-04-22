@@ -74,6 +74,22 @@ func importChain(cliCtx *cli.Context) error {
 	if cliCtx.NArg() < 1 {
 		utils.Fatalf("This command requires an argument.")
 	}
+
+	// Force-disable subsystems the one-shot import doesn't need, via the normal
+	// flag path so the downstream config build skips their setup entirely.
+	// --nat=none in particular avoids a ~2s UPnP/NAT-PMP autodiscovery probe in
+	// downloadernat.DoNat that otherwise dominates per-run startup (observable
+	// in hive eest/consume-rlp).
+	for flag, value := range map[string]string{
+		utils.NATFlag.Name:               "none",
+		utils.NoDownloaderFlag.Name:      "true",
+		utils.ExternalConsensusFlag.Name: "true",
+	} {
+		if err := cliCtx.Set(flag, value); err != nil {
+			return fmt.Errorf("importChain: set %s=%s: %w", flag, value, err)
+		}
+	}
+
 	logger, tracer, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
@@ -85,8 +101,6 @@ func importChain(cliCtx *cli.Context) error {
 	}
 
 	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
-	ethCfg.Snapshot.NoDownloader = true // no need to run this for import chain (also used in hive eest/consume-rlp tests)
-	ethCfg.InternalCL = false           // no need to run this for import chain (also used in hive eest/consume-rlp tests)
 	stack := makeConfigNode(cliCtx.Context, nodeCfg, logger)
 	defer stack.Close()
 
