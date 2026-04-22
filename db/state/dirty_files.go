@@ -335,7 +335,7 @@ func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 				fNameMask := d.kvFileNameMask(fromStep, toStep)
 				fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, dirEntries, d.dirs.SnapDomain)
 				if err != nil {
-					_, fName := filepath.Split(fPath)
+					fName := filepath.Base(fPath)
 					d.logger.Debug("[agg] Domain.openDirtyFiles: FileExist err", "f", fName, "err", err)
 					invalidFileItemsLock.Lock()
 					invalidFileItems = append(invalidFileItems, item)
@@ -351,7 +351,7 @@ func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 					continue
 				}
 
-				_, fName := filepath.Split(fPath)
+				fName := filepath.Base(fPath)
 				d.FileVersion.DataKV.MustSupport(fileVer, fName)
 
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
@@ -372,11 +372,11 @@ func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 				fNameMask := d.kviAccessorFileNameMask(fromStep, toStep)
 				fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, dirEntries, d.dirs.SnapDomain)
 				if err != nil {
-					_, fName := filepath.Split(fPath)
+					fName := filepath.Base(fPath)
 					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 				}
 				if ok {
-					_, fName := filepath.Split(fPath)
+					fName := filepath.Base(fPath)
 					d.FileVersion.AccessorKVI.MustSupport(fileVer, fName)
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
@@ -388,11 +388,11 @@ func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 				fNameMask := d.kvBtAccessorFileNameMask(fromStep, toStep)
 				fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, dirEntries, d.dirs.SnapDomain)
 				if err != nil {
-					_, fName := filepath.Split(fPath)
+					fName := filepath.Base(fPath)
 					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 				}
 				if ok {
-					_, fName := filepath.Split(fPath)
+					fName := filepath.Base(fPath)
 					d.FileVersion.AccessorBT.MustSupport(fileVer, fName)
 					if item.bindex, err = btindex.OpenBtreeIndexWithDecompressor(fPath, btindex.DefaultBtreeM, d.dataReader(item.decompressor)); err != nil {
 						d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
@@ -404,11 +404,11 @@ func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 				fNameMask := d.kvExistenceIdxFileNameMask(fromStep, toStep)
 				fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, dirEntries, d.dirs.SnapDomain)
 				if err != nil {
-					_, fName := filepath.Split(fPath)
+					fName := filepath.Base(fPath)
 					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 				}
 				if ok {
-					_, fName := filepath.Split(fPath)
+					fName := filepath.Base(fPath)
 					d.FileVersion.AccessorKVEI.MustSupport(fileVer, fName)
 					if item.existence, err = existence.OpenFilter(fPath, false); err != nil {
 						d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
@@ -438,7 +438,7 @@ func (h *History) openDirtyFiles(dataEntries, accessorEntries []string) error {
 				fNameMask := h.vFileNameMask(fromStep, toStep)
 				fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, dataEntries, h.dirs.SnapHistory)
 				if err != nil {
-					_, fName := filepath.Split(fPath)
+					fName := filepath.Base(fPath)
 					h.logger.Debug("[agg] History.openDirtyFiles: FileExist", "f", fName, "err", err)
 					invalidFilesMu.Lock()
 					invalidFileItems = append(invalidFileItems, item)
@@ -453,7 +453,7 @@ func (h *History) openDirtyFiles(dataEntries, accessorEntries []string) error {
 					invalidFilesMu.Unlock()
 					continue
 				}
-				_, fName := filepath.Split(fPath)
+				fName := filepath.Base(fPath)
 				h.FileVersion.DataV.MustSupport(fileVer, fName)
 
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
@@ -487,11 +487,11 @@ func (h *History) openDirtyFiles(dataEntries, accessorEntries []string) error {
 				fNameMask := h.vAccessorFileNameMask(fromStep, toStep)
 				fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, accessorEntries, h.dirs.SnapAccessors)
 				if err != nil {
-					_, fName := filepath.Split(fPath)
+					fName := filepath.Base(fPath)
 					h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
 				}
 				if ok {
-					_, fName := filepath.Split(fPath)
+					fName := filepath.Base(fPath)
 					h.FileVersion.AccessorVI.MustSupport(fileVer, fName)
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
@@ -520,7 +520,7 @@ func (ii *InvertedIndex) openDirtyFiles(dataEntries, accessorEntries []string) e
 				fNameMask := ii.efFileNameMask(fromStep, toStep)
 				fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, dataEntries, ii.dirs.SnapIdx)
 				if err != nil {
-					_, fName := filepath.Split(fPath)
+					fName := filepath.Base(fPath)
 					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: MatchVersionedFile error", "f", fName, "err", err)
 					invalidFileItemsLock.Lock()
 					invalidFileItems = append(invalidFileItems, item)
@@ -537,7 +537,7 @@ func (ii *InvertedIndex) openDirtyFiles(dataEntries, accessorEntries []string) e
 					continue
 				}
 
-				_, fName := filepath.Split(fPath)
+				fName := filepath.Base(fPath)
 				ii.FileVersion.DataEF.MustSupport(fileVer, fName)
 
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
@@ -558,12 +558,12 @@ func (ii *InvertedIndex) openDirtyFiles(dataEntries, accessorEntries []string) e
 				fNameMask := ii.efAccessorFileNameMask(fromStep, toStep)
 				fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, accessorEntries, ii.dirs.SnapAccessors)
 				if err != nil {
-					_, fName := filepath.Split(fPath)
+					fName := filepath.Base(fPath)
 					ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
 					// don't interrupt on error. other files may be good
 				}
 				if ok {
-					_, fName := filepath.Split(fPath)
+					fName := filepath.Base(fPath)
 					ii.FileVersion.AccessorEFI.MustSupport(fileVer, fName)
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
