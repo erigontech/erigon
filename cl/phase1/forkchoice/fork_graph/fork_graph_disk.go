@@ -154,10 +154,11 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_d
 	// Fix GLOAS checkpoint sync: persist the filled-in Root back to the actual state
 	// so that transitionSlot won't re-compute HashSSZ() (which may return a different
 	// value after DumpBeaconStateOnDisk mutates the internal merkle cache).
-	// Only do this when the original header Root was zero (PENDING state or genesis-like).
-	// For FULL states (post-envelope), Root is already correctly set to the pre-envelope
-	// state hash — overwriting it with post-envelope HashSSZ() would be wrong.
-	if anchorState.LatestBlockHeader().Root == [32]byte{} && anchorState.Slot() > 0 {
+	// Only do this for GLOAS+: in GLOAS, BlockRoot() uses the stored Root directly
+	// when non-zero, so both NewForkGraphDisk and NewForkChoiceStore see the same
+	// anchorRoot. Pre-GLOAS always re-derives via HashSSZ(), so mutating the header
+	// here would make the second BlockRoot() call return a different value.
+	if anchorState.Version() >= clparams.GloasVersion && anchorState.LatestBlockHeader().Root == [32]byte{} && anchorState.Slot() > 0 {
 		anchorState.SetLatestBlockHeader(&anchorHeader)
 	}
 
