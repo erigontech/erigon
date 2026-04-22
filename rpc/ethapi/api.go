@@ -604,8 +604,8 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime u
 	return result
 }
 
-func computeGasPrice(txn types.Transaction, blockHash common.Hash, baseFee *uint256.Int) *hexutil.Big {
-	if baseFee != nil && blockHash != (common.Hash{}) {
+func computeGasPrice(txn types.Transaction, _ common.Hash, baseFee *uint256.Int) *hexutil.Big {
+	if baseFee != nil {
 		// price = min(tip + baseFee, gasFeeCap)
 		price := u256.Min(u256.Add(*txn.GetTipCap(), *baseFee), *txn.GetFeeCap())
 		return (*hexutil.Big)(price.ToBig())

@@ -2,7 +2,6 @@ package state_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"os"
 	"path/filepath"
@@ -229,7 +228,7 @@ func TestConcurrentRebuildCommitment(t *testing.T) {
 	db, agg, dirs := testDbAndAggregatorForLargeData(t, stepSize, persistentDir)
 	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// --- Open transaction and shared domains ---
 	rwTx, err := db.BeginTemporalRw(ctx)
@@ -505,7 +504,7 @@ func TestConcurrentRebuildCommitmentNoSqueeze(t *testing.T) {
 	db, agg, dirs := testDbAndAggregatorForLargeData(t, stepSize, "")
 	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer rwTx.Rollback()

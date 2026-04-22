@@ -92,7 +92,7 @@ func TestTableScanningPrune_Basic(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()
 
-	tx, err := db.BeginRw(context.Background())
+	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
@@ -105,7 +105,7 @@ func TestTableScanningPrune_Basic(t *testing.T) {
 	defer cur.Close()
 
 	stat, err := prune.TableScanningPrune(
-		context.Background(), "test", "txlookup",
+		t.Context(), "test", "txlookup",
 		5, 15, 0, 1, logEvery, log.New(),
 		nil, cur, false, &prune.Stat{}, prune.ValueOffset8StorageMode,
 	)
@@ -129,7 +129,7 @@ func TestTableScanningPrune_RollingCursor(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()
 
-	tx, err := db.BeginRw(context.Background())
+	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
@@ -154,7 +154,7 @@ func TestTableScanningPrune_RollingCursor(t *testing.T) {
 
 	cur := openPseudoCursor(t, tx)
 	stat1, err := prune.TableScanningPrune(
-		context.Background(), "test", "txlookup",
+		t.Context(), "test", "txlookup",
 		0, 8, 0, 1, logEvery, log.New(),
 		nil, cur, false, prevStat, prune.ValueOffset8StorageMode,
 	)
@@ -177,7 +177,7 @@ func TestTableScanningPrune_RollingCursor(t *testing.T) {
 	}
 	cur = openPseudoCursor(t, tx)
 	stat2, err := prune.TableScanningPrune(
-		context.Background(), "test", "txlookup",
+		t.Context(), "test", "txlookup",
 		0, 10, 0, 1, logEvery, log.New(),
 		nil, cur, false, newRotStat, prune.ValueOffset8StorageMode,
 	)
@@ -198,7 +198,7 @@ func TestTableScanningPrune_CtxCancelOnOutOfRange(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()
 
-	tx, err := db.BeginRw(context.Background())
+	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
@@ -210,7 +210,7 @@ func TestTableScanningPrune_CtxCancelOnOutOfRange(t *testing.T) {
 	defer logEvery.Stop()
 
 	// Pre-cancel the context so ctx.Done() is immediately readable.
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
 	cur := openPseudoCursor(t, tx)
@@ -240,7 +240,7 @@ func BenchmarkTableScanningPrune(b *testing.B) {
 	defer db.Close()
 
 	const N = 10_000
-	tx, err := db.BeginRw(context.Background())
+	tx, err := db.BeginRw(b.Context())
 	require.NoError(b, err)
 	defer tx.Rollback()
 	insertEntries(b, tx, N, 0) // txNums 0..N-1; prune [0, N/2)
@@ -253,7 +253,7 @@ func BenchmarkTableScanningPrune(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		cur := openPseudoCursor(b, tx)
 		prune.TableScanningPrune( //nolint:errcheck
-			context.Background(), "bench", "txlookup",
+			b.Context(), "bench", "txlookup",
 			0, N/2, 0, 1, logEvery, logger,
 			nil, cur, false, &prune.Stat{}, prune.ValueOffset8StorageMode,
 		)

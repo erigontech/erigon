@@ -17,7 +17,6 @@
 package test
 
 import (
-	"context"
 	"encoding/binary"
 	"fmt"
 	"io/fs"
@@ -74,7 +73,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 
 	aggStep := uint64(100)
 	blockSize := uint64(10) // lets say that each block contains 10 tx, after each block we do commitment
-	ctx := context.Background()
+	ctx := t.Context()
 
 	db, agg, datadir := testDbAndAggregatorv3(t, t.TempDir(), aggStep)
 	tx, err := db.BeginTemporalRw(ctx)
@@ -288,7 +287,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		hashes    = make([][]byte, 0)
 	)
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	db, agg, datadir := testDbAndAggregatorv3(t, t.TempDir(), aggStep)
 	blockNum, txNum := uint64(0), uint64(0)
@@ -448,7 +447,7 @@ func randomAccount(t *testing.T) (*accounts.Account, accounts.Address) {
 func TestCommit(t *testing.T) {
 	aggStep := uint64(100)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	db, _, _ := testDbAndAggregatorv3(t, t.TempDir(), aggStep)
 	tx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
