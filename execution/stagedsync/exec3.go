@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
+	"github.com/erigontech/erigon/db/services"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -141,7 +142,11 @@ func ExecV3(ctx context.Context,
 	}
 
 	if execStage.SyncMode() == stages.ModeApplyingBlocks {
-		agg.BuildFilesInBackground(initialTxNum)
+		maxCollatable, err := services.MaxCollatableTxNum(ctx, applyTx, cfg.blockReader)
+		if err != nil {
+			return err
+		}
+		agg.BuildFilesInBackground(min(initialTxNum, maxCollatable))
 	}
 
 	var (
