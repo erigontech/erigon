@@ -82,7 +82,7 @@ Flags for managing how old chain data is handled and stored.
   * Default: `0`
 * `--prune.distance.blocks value`: Keeps block history for the latest `N` blocks.
   * Default: `0`
-* `--prune.include-commitment-history, --prune.experimental.include-commitment-history, --experimental.commitment-history`: Enables blazing fast `eth_getProof` for executed blocks by storing commitment history.
+* `--prune.include-commitment-history, --prune.experimental.include-commitment-history, --experimental.commitment-history`: Enables blazing fast `eth_getProof` for executed blocks by storing commitment history. Requires +32 GB RAM. See [`eth_getProof`](../../interacting-with-erigon/eth.md#eth_getproof).
   * Default: `false`
 * `--snap.keepblocks`: Keeps ancient blocks in the database for debugging.
   * Default: `false`
@@ -139,9 +139,9 @@ These flags manage network connectivity, peer discovery, and traffic control.
 * `--nodiscover`: Disables peer discovery.
   * Default: `false`
 * `--discovery.v4`, `--discv4`: Enables the Node Discovery Protocol v4 (Discv4) for managed ENRs and topic discovery.
-  * Default: `false`
+  * Default: `false` (disabled by default since v3.4; discv5 is now the default discovery protocol)
 * `--discovery.v5`, `--discv5`, `--v5disc`: Enables the Node Discovery Protocol v5 (Discv5) for managed ENRs and topic discovery.
-  * Default: `true`
+  * Default: `true` (enabled by default since v3.4)
 * `--netrestrict value`: Restricts network communication to specific IP networks.
 * `--nodekey value`: The P2P node key file.
 * `--nodekeyhex value`: The P2P node key as a hexadecimal string.
@@ -208,8 +208,10 @@ Flags for configuring various RPC servers and their behavior.
   * Default: `50000000`
 * `--rpc.batch.limit value`: Sets the maximum number of requests in a batch.
   * Default: `100`
-* `--rpc.blockrange.limit value`: Sets a hardware cap on the number of blocks scanned per RPC request. Protects the rpcdaemon from resource exhaustion (CPU/Memory) and hangs caused by "heavy" queries. A value of `0` means unlimited.
-  * Default: `0`
+* `--rpc.blockrange.limit value`: Sets a cap on the number of blocks scanned per RPC request for `eth_getLogs` and similar range queries. Protects the node from resource exhaustion. A value of `0` means unlimited.
+  * Default: `1000` (changed from `0` in v3.4)
+* `--rpc.logs.maxresults value`: Sets the maximum number of log results returned per query.
+  * Default: `20000`
 * `--rpc.returndata.limit value`: Sets the maximum return data size for `eth_call`.
   * Default: `100000`
 * `--rpc.allow-unprotected-txs`: Allows unprotected transactions via RPC.
