@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"io"
 	"math/bits"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
