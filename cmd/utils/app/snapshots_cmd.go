@@ -1337,6 +1337,10 @@ func doIntegrity(cliCtx *cli.Context) error {
 			return integrity.E3EfFiles(ctx, db, failFast, fromStep)
 		case integrity.HistoryNoSystemTxs:
 			return integrity.HistoryCheckNoSystemTxs(ctx, db, blockReader)
+		case integrity.StateProgress:
+			return integrity.CheckStateProgress(ctx, db, blockReader, failFast)
+		case integrity.Publishable:
+			return doPublishable(dirs, chainDB)
 		case integrity.BorEvents:
 			if !CheckBorChain(chainConfig.ChainName) {
 				logger.Info("BorEvents skipped because not bor chain")
@@ -1360,10 +1364,6 @@ func doIntegrity(cliCtx *cli.Context) error {
 			return integrity.CheckReceiptsNoDups(ctx, sc, db, blockReader, failFast)
 		case integrity.RCacheNoDups:
 			return integrity.CheckRCacheNoDups(ctx, sc, db, blockReader, failFast)
-		case integrity.StateProgress:
-			return integrity.CheckStateProgress(ctx, db, blockReader, failFast)
-		case integrity.Publishable:
-			return doPublishable(dirs, chainDB)
 		case integrity.CommitmentRoot:
 			return integrity.CheckCommitmentRoot(ctx, db, blockReader, failFast, logger)
 		case integrity.CommitmentKvi:
