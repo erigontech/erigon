@@ -557,6 +557,15 @@ func TestCheckPooledTxnAnnouncement(t *testing.T) {
 	require.Error(t, fetch.checkPooledTxnAnnouncement(peerID, badSizeSlot),
 		"peer delivering wrong size should be flagged")
 
+	// Size within the 8-byte slack is not a violation — RLP vs consensus-format
+	// accounting can disagree by a handful of bytes for legacy/typed txs.
+	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{208}, hash[:])
+	require.NoError(t, fetch.checkPooledTxnAnnouncement(peerID, slot),
+		"size diff of 8 bytes should be within slack")
+	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{209}, hash[:])
+	require.Error(t, fetch.checkPooledTxnAnnouncement(peerID, slot),
+		"size diff of 9 bytes should exceed slack")
+
 	// Different peer delivering the same hash must not be penalized based on
 	// another peer's announcement.
 	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{200}, hash[:])

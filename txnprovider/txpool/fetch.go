@@ -136,10 +136,18 @@ func (f *Fetch) recordAnnouncement(pid *typesproto.H512, types []byte, sizes []u
 	}
 }
 
+// announcedSizeSlack is the wiggle-room we allow between the size a peer
+// announces in eth/68 NewPooledTransactionHashes and the size it later
+// delivers. Matches go-ethereum's tx fetcher (eth/fetcher/tx_fetcher.go):
+// typed-tx RLP vs consensus-format size accounting has off-by-a-few-bytes
+// quirks in the wild, so a strict equality check produces false positives.
+const announcedSizeSlack = 8
+
 // checkPooledTxnAnnouncement returns an error if the peer delivering `slot`
-// announced it earlier with a different type or size. Unannounced txs (including
-// those announced by a different peer) are skipped — only a self-contradicting
-// announcement is a violation.
+// announced it earlier with a different type or a grossly different size
+// (see announcedSizeSlack). Unannounced txs (including those announced by a
+// different peer) are skipped — only a self-contradicting announcement is a
+// violation.
 func (f *Fetch) checkPooledTxnAnnouncement(pid *typesproto.H512, slot *TxnSlot) error {
 	if f.announcements == nil {
 		return nil
@@ -154,7 +162,8 @@ func (f *Fetch) checkPooledTxnAnnouncement(pid *typesproto.H512, slot *TxnSlot) 
 	if info.txnType != slot.TxType() {
 		return fmt.Errorf("announced tx type %d != actual %d for hash %x", info.txnType, slot.TxType(), slot.IDHash[:])
 	}
-	if info.size != slot.Size {
+	sizeDiff := int64(info.size) - int64(slot.Size)
+	if sizeDiff < -announcedSizeSlack || sizeDiff > announcedSizeSlack {
 		return fmt.Errorf("announced tx size %d != actual %d for hash %x", info.size, slot.Size, slot.IDHash[:])
 	}
 	// One-shot: drop the entry so the same announcement can't be replayed.
