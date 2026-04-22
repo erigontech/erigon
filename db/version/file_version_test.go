@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -412,6 +413,63 @@ func TestMatchVersionedFile_DifferentSegAndIdxNames(t *testing.T) {
 	if ok {
 		t.Fatal("expected ok == false for non-existent file type")
 	}
+}
+
+func TestMustSupport(t *testing.T) {
+	supported := Versions{Current: V1_2, MinSupported: V1_1}
+
+	t.Run("in-range does not panic", func(t *testing.T) {
+		for _, ver := range []Version{V1_1, V1_2} {
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						t.Errorf("unexpected panic for ver=%s: %v", ver, r)
+					}
+				}()
+				supported.MustSupport(ver, "test.kv")
+			}()
+		}
+	})
+
+	t.Run("too low panics with reset instructions", func(t *testing.T) {
+		defer func() {
+			r := recover()
+			if r == nil {
+				t.Fatal("expected panic for too-low version")
+			}
+			msg, ok := r.(string)
+			if !ok {
+				t.Fatalf("expected string panic, got %T", r)
+			}
+			if !strings.Contains(msg, "too old") || !strings.Contains(msg, "snapshots reset") {
+				t.Errorf("panic message missing remediation hint: %q", msg)
+			}
+			if !strings.Contains(msg, "test.kv") {
+				t.Errorf("panic message missing filename: %q", msg)
+			}
+		}()
+		supported.MustSupport(V1_0, "test.kv")
+	})
+
+	t.Run("too high panics with upgrade instructions", func(t *testing.T) {
+		defer func() {
+			r := recover()
+			if r == nil {
+				t.Fatal("expected panic for too-high version")
+			}
+			msg, ok := r.(string)
+			if !ok {
+				t.Fatalf("expected string panic, got %T", r)
+			}
+			if !strings.Contains(msg, "newer than") || !strings.Contains(msg, "upgrade Erigon") || !strings.Contains(msg, "snapshots reset") {
+				t.Errorf("panic message missing remediation hint: %q", msg)
+			}
+			if !strings.Contains(msg, "test.kv") {
+				t.Errorf("panic message missing filename: %q", msg)
+			}
+		}()
+		supported.MustSupport(V2_0, "test.kv")
+	})
 }
 
 func BenchmarkMatchVersionedFile(b *testing.B) {

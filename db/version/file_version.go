@@ -193,13 +193,22 @@ func (v Versions) MustSupport(ver Version, filename string) {
 	}
 	if ver.Less(v.MinSupported) {
 		panic(fmt.Sprintf(
-			"FileVersion is too low, try to run snapshot reset: `erigon --datadir $DATADIR --chain $CHAIN snapshots reset`. file=%s, min_supported=%s, current=%s",
-			filename, v.MinSupported, v.Current,
+			"Snapshot file is too old for this Erigon build.\n"+
+				"  file:             %s\n"+
+				"  file version:     %s\n"+
+				"  minimum required: %s\n"+
+				"To fix, reset snapshots: `erigon snapshots reset --datadir $DATADIR --chain $CHAIN`",
+			filename, ver, v.MinSupported,
 		))
 	}
 	panic(fmt.Sprintf(
-		"FileVersion is too high (binary is older than snapshot files), please upgrade erigon. file=%s, file_version=%s, current=%s",
-		filename, ver, v.Current,
+		"Snapshot file is newer than this Erigon build supports.\n"+
+			"  file:              %s\n"+
+			"  file version:      %s\n"+
+			"  highest supported: < %s\n"+
+			"To fix, either upgrade Erigon to a newer release,\n"+
+			"or reset snapshots: `erigon snapshots reset --datadir $DATADIR --chain $CHAIN`",
+		filename, ver, ver,
 	))
 }
 
