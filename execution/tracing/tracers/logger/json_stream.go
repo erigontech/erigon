@@ -214,8 +214,13 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 			} else {
 				l.stream.WriteMore()
 			}
-			l.stream.WriteObjectField(string(l.hexEncodeBuf[0:hex.Encode(l.hexEncodeBuf[:], loc[:])]))
-			l.stream.WriteString(string(l.hexEncodeBuf[0:hex.Encode(l.hexEncodeBuf[:], value[:])]))
+			// Storage keys and values must be 0x-prefixed to match go-ethereum output.
+			n := hex.Encode(l.hexEncodeBuf[2:], loc[:])
+			l.hexEncodeBuf[0], l.hexEncodeBuf[1] = '0', 'x'
+			l.stream.WriteObjectField(string(l.hexEncodeBuf[0 : 2+n]))
+			n = hex.Encode(l.hexEncodeBuf[2:], value[:])
+			l.hexEncodeBuf[0], l.hexEncodeBuf[1] = '0', 'x'
+			l.stream.WriteString(string(l.hexEncodeBuf[0 : 2+n]))
 		}
 		l.stream.WriteObjectEnd()
 	}

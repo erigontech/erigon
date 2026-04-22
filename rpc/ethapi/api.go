@@ -415,7 +415,8 @@ func FormatLogs(logs []logger.StructLog) []StructLogRes {
 		if trace.Storage != nil {
 			storage := make(map[string]string)
 			for i, storageValue := range trace.Storage {
-				storage[fmt.Sprintf("%x", i)] = fmt.Sprintf("%x", storageValue)
+				// Use 0x-prefixed hex to match go-ethereum output
+				storage[fmt.Sprintf("0x%x", i)] = fmt.Sprintf("0x%x", storageValue)
 			}
 			formatted[index].Storage = &storage
 		}
