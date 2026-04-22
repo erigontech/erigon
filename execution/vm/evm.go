@@ -328,7 +328,12 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 			return nil, mdgas.MdGas{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
 		if !exist {
-			if !isPrecompile && evm.chainRules.IsSpuriousDragon && value.IsZero() && !syscall {
+			// Under Spurious Dragon, a zero-value CALL to a non-existent
+			// non-precompile account short-circuits as a no-op instead of
+			// creating the account. This also preserves the EIP-4788
+			// beacon-root syscall's "no-op when not deployed" semantics at
+			// the fork-transition block, before the contract is deployed.
+			if !isPrecompile && evm.chainRules.IsSpuriousDragon && value.IsZero() {
 				return nil, gas, nil
 			}
 			evm.intraBlockState.CreateAccount(addr, false)
