@@ -17,7 +17,6 @@
 package state
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
@@ -48,7 +47,7 @@ func benchmarkIIMergeFiles(b *testing.B, numFiles int) {
 	const module = 31 // number of distinct keys
 
 	txs := uint64(numFiles) * aggStep
-	ctx := context.Background()
+	ctx := b.Context()
 	logger := log.New()
 
 	db, ii, _ := filledInvIndexOfSize(b, txs, aggStep, module, logger)

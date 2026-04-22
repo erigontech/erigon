@@ -24,7 +24,7 @@ type SelectedStaticFiles struct {
 	d     [kv.DomainLen][]*FilesItem
 	dHist [kv.DomainLen][]*FilesItem
 	dIdx  [kv.DomainLen][]*FilesItem
-	ii    [][]*FilesItem
+	ii    [kv.StandaloneIdxLen][]*FilesItem
 }
 
 func (sf *SelectedStaticFiles) DomainFiles(name kv.Domain) []*FilesItem {
@@ -44,12 +44,12 @@ func (sf *SelectedStaticFiles) InvertedIndexFiles(id int) []*FilesItem {
 }
 
 func (sf *SelectedStaticFiles) Close() {
-	clist := make([][]*FilesItem, 0, int(kv.DomainLen)+len(sf.ii))
+	clist := make([][]*FilesItem, 0, 3*int(kv.DomainLen)+kv.StandaloneIdxLen)
 	for id := range sf.d {
 		clist = append(clist, sf.d[id], sf.dIdx[id], sf.dHist[id])
 	}
 
-	clist = append(clist, sf.ii...)
+	clist = append(clist, sf.ii[:]...)
 	for _, group := range clist {
 		for _, item := range group {
 			item.closeFiles()
@@ -58,7 +58,7 @@ func (sf *SelectedStaticFiles) Close() {
 }
 
 func (at *AggregatorRoTx) FilesInRange(r *Ranges) (*SelectedStaticFiles, error) {
-	sf := &SelectedStaticFiles{ii: make([][]*FilesItem, len(r.invertedIndex))}
+	sf := &SelectedStaticFiles{}
 	for id := range at.d {
 		if at.d[id].d.Disable {
 			continue
@@ -69,10 +69,10 @@ func (at *AggregatorRoTx) FilesInRange(r *Ranges) (*SelectedStaticFiles, error) 
 		sf.d[id], sf.dIdx[id], sf.dHist[id] = at.d[id].staticFilesInRange(r.domain[id])
 	}
 	for id, rng := range r.invertedIndex {
-		if at.iis[id].ii.Disable {
+		if rng == nil || at.iis[id] == nil || at.iis[id].ii.Disable {
 			continue
 		}
-		if rng == nil || !rng.needMerge {
+		if !rng.needMerge {
 			continue
 		}
 		sf.ii[id] = at.iis[id].staticFilesInRange(rng.from, rng.to)
@@ -81,7 +81,7 @@ func (at *AggregatorRoTx) FilesInRange(r *Ranges) (*SelectedStaticFiles, error) 
 }
 
 func (at *AggregatorRoTx) InvertedIndicesLen() int {
-	return len(at.iis)
+	return at.iisCount
 }
 
 func (at *AggregatorRoTx) InvertedIndexName(id int) kv.InvertedIdx {
@@ -92,7 +92,7 @@ type MergedFilesV3 struct {
 	d     [kv.DomainLen]*FilesItem
 	dHist [kv.DomainLen]*FilesItem
 	dIdx  [kv.DomainLen]*FilesItem
-	iis   []*FilesItem
+	iis   [kv.StandaloneIdxLen]*FilesItem
 }
 
 func (mf MergedFilesV3) FilePaths(relative string) (fPaths []string) {
@@ -121,11 +121,11 @@ func (mf *MergedFilesV3) Close() {
 	if mf == nil {
 		return
 	}
-	clist := make([]*FilesItem, 0, kv.DomainLen+4)
+	clist := make([]*FilesItem, 0, 3*int(kv.DomainLen)+kv.StandaloneIdxLen)
 	for id := range mf.d {
 		clist = append(clist, mf.d[id], mf.dHist[id], mf.dIdx[id])
 	}
-	clist = append(clist, mf.iis...)
+	clist = append(clist, mf.iis[:]...)
 	for _, item := range clist {
 		item.closeFiles()
 	}

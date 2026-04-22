@@ -311,6 +311,10 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		}
 	}
 
+	if st.gp != nil && st.msg.Gas() > st.gp.Gas() {
+		return ErrGasLimitReached
+	}
+
 	// Make sure the transaction feeCap is greater than the block's baseFee.
 	if rules.IsLondon {
 		// Skip the checks if gas fields are zero and baseFee was explicitly disabled (eth_call)
