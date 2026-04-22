@@ -173,6 +173,12 @@ type blockService struct {
 	blockJobsStopped                 bool
 	// store the block in db
 	db kv.RwDB
+
+	// [New in Gloas:EIP7732] OnBidWon is called when a gossip-received block
+	// contains a winning bid. Fired after proposer signature verify but before
+	// full state transition to minimise reveal latency. The builderIndex
+	// identifies which builder won so the receiver can filter for its own bids.
+	OnBidWon func(slot uint64, builderIndex uint64, parentBlockHash common.Hash, parentBlockRoot common.Hash, beaconBlockRoot common.Hash)
 }
 
 // NewBlockService creates a new block service
@@ -204,6 +210,12 @@ func NewBlockService(
 	return b
 }
 
+// SetOnBidWon sets the callback that fires when a gossip-received beacon block
+// contains a winning execution-payload bid (GLOAS / EIP-7732).
+func (b *blockService) SetOnBidWon(fn func(slot uint64, builderIndex uint64, parentBlockHash common.Hash, parentBlockRoot common.Hash, beaconBlockRoot common.Hash)) {
+	b.OnBidWon = fn
+}
+
 func (b *blockService) Names() []string {
 	return []string{gossip.TopicNameBeaconBlock}
 }
@@ -230,6 +242,13 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	// [IGNORE] The block is the first block with valid signature received for the proposer for the slot, signed_beacon_block.message.slot.
 	if err := b.validateFirstGossip(ctx, msg, func() { b.ScheduleBlockForLaterProcessing(msg) }, true); err != nil {
 		return err
+	}
+	if b.OnBidWon != nil && msg.Block.Body.GetSignedExecutionPayloadBid() != nil {
+		bid := msg.Block.Body.GetSignedExecutionPayloadBid().Message
+		blockRoot, err := msg.Block.HashSSZ()
+		if err == nil {
+			b.OnBidWon(msg.Block.Slot, bid.BuilderIndex, bid.ParentBlockHash, bid.ParentBlockRoot, common.Hash(blockRoot))
+		}
 	}
 	b.publishBlockGossipEvent(msg)
 	if err := b.processAndStoreBlock(ctx, msg); err != nil {

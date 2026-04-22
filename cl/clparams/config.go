@@ -32,6 +32,7 @@ import (
 	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
+	"github.com/erigontech/erigon/cl/builder/epbs/epbscfg"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain/networkname"
@@ -105,6 +106,9 @@ type CaplinConfig struct {
 
 	// Extra
 	EnableEngineAPI bool
+
+	// ePBS builder config (EIP-7732)
+	EpbsBuilder epbscfg.Config
 }
 
 func (c CaplinConfig) IsDevnet() bool {

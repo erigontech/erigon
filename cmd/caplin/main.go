@@ -124,5 +124,5 @@ func runCaplinNode(ctx context.Context, cliCtx *cli.Command) error {
 		MaxOutboundTrafficPerPeer: datasize.MB,
 		BootstrapNodes:            cfg.Bootnodes,
 		StaticPeers:               cfg.StaticPeers,
-	}, cfg.Dirs, getters.NewExecutionEngineReader(ctx, executionEngine), nil, nil, blockSnapBuildSema)
+	}, cfg.Dirs, getters.NewExecutionEngineReader(ctx, executionEngine), nil, nil, blockSnapBuildSema, nil)
 }
