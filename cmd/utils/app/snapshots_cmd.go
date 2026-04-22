@@ -416,7 +416,7 @@ var snapshotCommand = cli.Command{
 				&cli.BoolFlag{Name: "skip-torrent-verify", Usage: "skip torrent piece verification when using file-integrity-cache"},
 				&cli.Int64Flag{Name: "seed", Usage: "random seed for sampling (auto-generated if not set)"},
 				&cli.Float64Flag{Name: "sample", Usage: "fraction of items to check via pseudo-random sampling (0.0-1.0)", Value: 0.01},
-				&cli.DurationFlag{Name: "integrity.budget", Value: time.Hour, Usage: "total wall-clock budget for the run; each check gets (remaining / remaining_checks). 0 disables"},
+				&cli.DurationFlag{Name: "integrity.budget", Value: 0, Usage: "total wall-clock budget for the run; each check gets (remaining / remaining_checks). 0 (default) means no limit"},
 			}),
 		},
 		{
@@ -1222,8 +1222,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 	ctx := cliCtx.Context
 	checkStr := cliCtx.String("check")
 	var requestedChecks []integrity.Check
-	useDefaultChecks := len(checkStr) == 0
-	if !useDefaultChecks {
+	if len(checkStr) > 0 {
 		for split := range strings.SplitSeq(checkStr, ",") {
 			requestedChecks = append(requestedChecks, integrity.Check(split))
 		}
@@ -1393,12 +1392,10 @@ func doIntegrity(cliCtx *cli.Context) error {
 	}
 
 	var deadline time.Time
-	if useDefaultChecks {
+	if budget := cliCtx.Duration("integrity.budget"); budget > 0 {
 		requestedChecks = integrity.SortChecksByCost(requestedChecks)
-		if budget := cliCtx.Duration("integrity.budget"); budget > 0 {
-			deadline = time.Now().Add(budget)
-			logger.Info("[integrity] budget", "total", budget, "perCheck", budget/time.Duration(len(requestedChecks)))
-		}
+		deadline = time.Now().Add(budget)
+		logger.Info("[integrity] budget", "total", budget, "perCheck", budget/time.Duration(len(requestedChecks)))
 	}
 
 	for i, chk := range requestedChecks {
