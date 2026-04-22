@@ -121,10 +121,12 @@ const (
 	Publishable Check = "Publishable"
 )
 
+// FastChecks is ordered cheapest → heaviest so time-budgeted runs give unused
+// budget to the heavier checks at the tail.
 var FastChecks = []Check{
-	Blocks, HeaderNoGaps, BlocksTxnID, InvertedIndex, StateProgress, HistoryNoSystemTxs,
-	CommitmentKvi, ReceiptsNoDups, RCacheNoDups, CommitmentRoot,
-	CommitmentHistVal, StateRootVerifyByHistory, Publishable,
+	StateProgress, Publishable, HeaderNoGaps, BlocksTxnID, Blocks,
+	ReceiptsNoDups, RCacheNoDups, InvertedIndex, CommitmentRoot, CommitmentKvi,
+	HistoryNoSystemTxs, CommitmentHistVal, StateRootVerifyByHistory,
 }
 
 var SlowChecks = []Check{StateVerify}
@@ -134,31 +136,17 @@ var DeprecatedChecks = []Check{
 }
 var AllChecks = append(append(append([]Check{}, FastChecks...), SlowChecks...), DeprecatedChecks...)
 
-// fastCheckOrder ranks FastChecks from cheapest to heaviest for time-budgeted runs.
-// Lower index runs earlier, so unused time rolls forward to heavier checks at the tail.
-var fastCheckOrder = map[Check]int{
-	StateProgress:            0,
-	Publishable:              1,
-	HeaderNoGaps:             2,
-	BlocksTxnID:              3,
-	Blocks:                   4,
-	ReceiptsNoDups:           5,
-	RCacheNoDups:             6,
-	InvertedIndex:            7,
-	CommitmentRoot:           8,
-	CommitmentKvi:            9,
-	HistoryNoSystemTxs:       10,
-	CommitmentHistVal:        11,
-	StateRootVerifyByHistory: 12,
-}
-
-// SortChecksByCost returns a copy of checks ordered cheapest→heaviest per fastCheckOrder.
-// Checks not in fastCheckOrder are appended at the end in their original input order.
+// SortChecksByCost returns a copy of checks ordered by their position in FastChecks
+// (cheapest → heaviest). Checks not in FastChecks keep their original relative order at the end.
 func SortChecksByCost(checks []Check) []Check {
+	rank := make(map[Check]int, len(FastChecks))
+	for i, c := range FastChecks {
+		rank[c] = i
+	}
 	out := append([]Check{}, checks...)
 	sort.SliceStable(out, func(i, j int) bool {
-		ri, oki := fastCheckOrder[out[i]]
-		rj, okj := fastCheckOrder[out[j]]
+		ri, oki := rank[out[i]]
+		rj, okj := rank[out[j]]
 		switch {
 		case oki && okj:
 			return ri < rj
