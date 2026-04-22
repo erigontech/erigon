@@ -119,6 +119,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.SnapStopFlag,
 	&utils.SnapStateStopFlag,
 	&utils.SnapSkipStateSnapshotDownloadFlag,
+	&utils.SnapP2PManifestFlag,
 	&utils.SnapDownloadToBlockFlag,
 	&utils.DbPageSizeFlag,
 	&utils.DbSizeLimitFlag,
@@ -256,4 +257,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.MCPDisableFlag,
 	&utils.MCPAddrFlag,
 	&utils.MCPPortFlag,
+
+	&utils.ErigondbDomainStepsInFrozenFileFlag,
 }

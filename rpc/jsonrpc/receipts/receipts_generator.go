@@ -12,6 +12,7 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/erigontech/erigon/db/datadir"
+	sharedreceipts "github.com/erigontech/erigon/execution/receipts"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 
 	"github.com/erigontech/erigon/common"
@@ -484,77 +485,101 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	if err != nil {
 		return nil, err
 	}
-	//genEnv.ibs.SetTrace(true)
-	vmCfg := vm.Config{}
-	hashFn := protocol.GetHashFn(genEnv.header, genEnv.getHeader)
+
 	ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
 	defer cancel()
 
-	var sharedDomains *execctx.SharedDomains
-	defer func() {
-		if sharedDomains != nil {
-			sharedDomains.Close()
-		}
-	}()
-
-	minTxNum, err := g.txNumReader.Min(ctx, tx, blockNum)
-	if err != nil {
-		return nil, err
-	}
-
-	var stateWriter state.StateWriter
-	if calculatePostState && commitmentHistory {
-		sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root())
+	if !calculatePostState {
+		// Fast path (post-Byzantium): use the shared derivation package.
+		// DeriveBlockReceipts sets BlockHash and FirstLogIndexWithinBlock.
+		receipts, err = sharedreceipts.DeriveBlockReceipts(ctx, cfg, g.engine, block.HeaderNoCopy(), block.Transactions(), genEnv.ibs, genEnv.gp, genEnv.getHeader)
 		if err != nil {
 			return nil, err
 		}
-		sharedDomains.GetCommitmentContext().SetDeferBranchUpdates(false)
-		// commitment are indexed by txNum of the first tx (system-tx) of the block
-		sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, minTxNum)
-		latestTxNum, _, err := sharedDomains.SeekCommitment(ctx, tx)
-		if err != nil {
-			return nil, err
+		sharedreceipts.DeriveFields(receipts, blockHash)
+		if dbg.AssertEnabled && receiptsFromDB != nil {
+			for i, receipt := range receipts {
+				if i < len(receiptsFromDB) {
+					g.assertEqualReceipts(receipt, receiptsFromDB[i])
+				}
+			}
 		}
-		stateWriter = state.NewWriter(sharedDomains.AsPutDel(tx), nil, latestTxNum)
 	} else {
-		stateWriter = genEnv.noopWriter
-	}
+		// Slow path (pre-Byzantium): need to compute post-state root per transaction.
+		vmCfg := vm.Config{}
+		hashFn := protocol.GetHashFn(genEnv.header, genEnv.getHeader)
 
-	for i, txn := range block.Transactions() {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
-		}
-
-		evm := protocol.CreateEVM(cfg, hashFn, g.engine, accounts.NilAddress, genEnv.ibs, genEnv.header, vmCfg)
-		txDone := make(chan struct{})
-		go func() {
-			select {
-			case <-ctx.Done():
-				evm.Cancel()
-			case <-txDone:
+		var sharedDomains *execctx.SharedDomains
+		defer func() {
+			if sharedDomains != nil {
+				sharedDomains.Close()
 			}
 		}()
 
-		genEnv.ibs.SetTxContext(blockNum, i)
-		receipt, err := protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, txn, genEnv.gasUsed, vmCfg, evm)
-		close(txDone)
+		minTxNum, err := g.txNumReader.Min(ctx, tx, blockNum)
 		if err != nil {
-			return nil, fmt.Errorf("ReceiptGen.GetReceipts: bn=%d, txnIdx=%d, %w", block.NumberU64(), i, err)
-		}
-		if evm.Cancelled() {
-			return nil, fmt.Errorf("execution aborted (timeout = %v)", g.evmTimeout)
+			return nil, err
 		}
 
-		if calculatePostState {
+		var stateWriter state.StateWriter
+		if commitmentHistory {
+			sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root())
+			if err != nil {
+				return nil, err
+			}
+			sharedDomains.GetCommitmentContext().SetDeferBranchUpdates(false)
+			sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, minTxNum)
+			latestTxNum, _, err := sharedDomains.SeekCommitment(ctx, tx)
+			if err != nil {
+				return nil, err
+			}
+			stateWriter = state.NewWriter(sharedDomains.AsPutDel(tx), nil, latestTxNum)
+		} else {
+			stateWriter = genEnv.noopWriter
+		}
+
+		for i, txn := range block.Transactions() {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			default:
+			}
+
+			evm := protocol.CreateEVM(cfg, hashFn, g.engine, accounts.NilAddress, genEnv.ibs, genEnv.header, vmCfg)
+			// txDone is a cancellation bridge: a goroutine watches for context
+			// cancellation (e.g. RPC timeout) and calls evm.Cancel() to abort the
+			// EVM mid-execution. Closing txDone signals that the transaction
+			// completed normally, so the goroutine can exit without cancelling.
+			// txDone signals the cancel-watcher goroutine to exit once the
+			// transaction finishes normally. Without it, the goroutine would
+			// leak (blocked on ctx.Done) for every successfully executed tx.
+			// On context cancellation, evm.Cancel() aborts the EVM mid-opcode
+			// so even gas-heavy transactions respond to RPC timeouts promptly.
+			txDone := make(chan struct{})
+			go func() {
+				select {
+				case <-ctx.Done():
+					evm.Cancel()
+				case <-txDone:
+				}
+			}()
+
+			genEnv.ibs.SetTxContext(blockNum, i)
+			receipt, err := protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, txn, genEnv.gasUsed, vmCfg, evm)
+			close(txDone)
+			if err != nil {
+				return nil, fmt.Errorf("ReceiptGen.GetReceipts: bn=%d, txnIdx=%d, %w", block.NumberU64(), i, err)
+			}
+			if evm.Cancelled() {
+				return nil, fmt.Errorf("execution aborted (timeout = %v)", g.evmTimeout)
+			}
+
 			txNum := minTxNum + 1 + uint64(i)
 
 			if err := genEnv.ibs.CommitBlock(evm.ChainRules(), stateWriter); err != nil {
 				return nil, fmt.Errorf("CommitBlock failed: %w", err)
 			}
 
-			// calculate state root after tx identified by txNum (txNim+1)
 			var stateRoot []byte
 			if commitmentHistory {
 				sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, txNum+1)
@@ -566,25 +591,22 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 				if err != nil {
 					return nil, err
 				}
-			} else { // use state history to compute commitment
+			} else {
 				stateRoot, err = g.computeCommitmentFromStateHistory(ctx, tx, blockNum, txNum)
 				if err != nil {
 					return nil, err
 				}
 			}
 			receipt.PostState = stateRoot
+			receipts[i] = receipt
 		}
-
-		receipt.BlockHash = blockHash
-		if len(receipt.Logs) > 0 {
-			receipt.FirstLogIndexWithinBlock = uint32(receipt.Logs[0].Index)
-		} else if i > 0 {
-			receipt.FirstLogIndexWithinBlock = receipts[i-1].FirstLogIndexWithinBlock + uint32(len(receipts[i-1].Logs))
-		}
-		receipts[i] = receipt
-
-		if dbg.AssertEnabled && receiptsFromDB != nil && i < len(receiptsFromDB) {
-			g.assertEqualReceipts(receipt, receiptsFromDB[i])
+		sharedreceipts.DeriveFields(receipts, blockHash)
+		if dbg.AssertEnabled && receiptsFromDB != nil {
+			for i, receipt := range receipts {
+				if i < len(receiptsFromDB) {
+					g.assertEqualReceipts(receipt, receiptsFromDB[i])
+				}
+			}
 		}
 	}
 

@@ -17,7 +17,6 @@
 package snapshotsync
 
 import (
-	"context"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -44,7 +43,7 @@ import (
 func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, dir string, ver snaptype.Version, logger log.Logger) {
 	compressCfg := seg.DefaultCfg
 	compressCfg.MinPatternScore = 100
-	c, err := seg.NewCompressor(context.Background(), "test", filepath.Join(dir, snaptype.SegmentFileName(ver, from, to, name)), dir, compressCfg, log.LvlDebug, logger)
+	c, err := seg.NewCompressor(t.Context(), "test", filepath.Join(dir, snaptype.SegmentFileName(ver, from, to, name)), dir, compressCfg, log.LvlDebug, logger)
 	require.NoError(t, err)
 	defer c.Close()
 	c.DisableFsync()
@@ -64,7 +63,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, di
 	idx.DisableFsync()
 	err = idx.AddKey([]byte{1}, 0)
 	require.NoError(t, err)
-	err = idx.Build(context.Background())
+	err = idx.Build(t.Context())
 	require.NoError(t, err)
 	if name == snaptype2.Transactions.Enum() {
 		idx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
@@ -77,7 +76,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, di
 		require.NoError(t, err)
 		err = idx.AddKey([]byte{1}, 0)
 		require.NoError(t, err)
-		err = idx.Build(context.Background())
+		err = idx.Build(t.Context())
 		require.NoError(t, err)
 		defer idx.Close()
 	}
@@ -213,7 +212,7 @@ func TestMergeSnapshots(t *testing.T) {
 		s.OpenSegments(snaptype2.BlockSnapshotTypes, false, true)
 		Ranges := merger.FindMergeRanges(s.Ranges(false), s.SegmentsMax())
 		require.Len(Ranges, 3)
-		err := merger.Merge(context.Background(), s, snaptype2.BlockSnapshotTypes, Ranges, s.Dir(), false, nil, nil)
+		err := merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, Ranges, s.Dir(), false, nil, nil)
 		require.NoError(err)
 	}
 
@@ -230,7 +229,7 @@ func TestMergeSnapshots(t *testing.T) {
 		s.OpenFolder()
 		Ranges := merger.FindMergeRanges(s.Ranges(false), s.SegmentsMax())
 		require.Empty(Ranges)
-		err := merger.Merge(context.Background(), s, snaptype2.BlockSnapshotTypes, Ranges, s.Dir(), false, nil, nil)
+		err := merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, Ranges, s.Dir(), false, nil, nil)
 		require.NoError(err)
 	}
 
@@ -257,7 +256,7 @@ func TestMergeSnapshots(t *testing.T) {
 	// 	fmt.Println(s.Ranges(), s.SegmentsMax())
 	// 	Ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
 	// 	require.True(len(Ranges) > 0)
-	// 	err := merger.Merge(context.Background(), s, snaptype2.BlockSnapshotTypes, Ranges, s.Dir(), false, nil, nil)
+	// 	err := merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, Ranges, s.Dir(), false, nil, nil)
 	// 	require.NoError(err)
 	// }
 
@@ -274,7 +273,7 @@ func TestMergeSnapshots(t *testing.T) {
 	// 	s.OpenSegments(snaptype2.BlockSnapshotTypes, false)
 	// 	Ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
 	// 	require.True(len(Ranges) == 0)
-	// 	err := merger.Merge(context.Background(), s, snaptype2.BlockSnapshotTypes, Ranges, s.Dir(), false, nil, nil)
+	// 	err := merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, Ranges, s.Dir(), false, nil, nil)
 	// 	require.NoError(err)
 	// }
 

@@ -18,6 +18,7 @@ package state
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"slices"
 	"testing"
@@ -26,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 	btree2 "github.com/tidwall/btree"
 
+	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -61,12 +63,12 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 
 	t.Run("empty_and_single_file", func(t *testing.T) {
 		dt := newDomainRoTx(1, []visibleFile{})
-		result := dt.findMergeRange(100, 32)
+		result := dt.findMergeRange(100, 32, 32)
 		assert.False(t, result.values.needMerge)
 		assert.Equal(t, uint64(1), result.aggStep)
 
 		dt = newDomainRoTx(1, []visibleFile{createFile(0, 2)})
-		result = dt.findMergeRange(4, 32)
+		result = dt.findMergeRange(4, 32, 32)
 		assert.False(t, result.values.needMerge)
 	})
 
@@ -78,7 +80,7 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 			createFile(5, 6),
 		}
 		dt := newDomainRoTx(1, files)
-		result := dt.findMergeRange(16, 32)
+		result := dt.findMergeRange(16, 32, 32)
 		assert.True(t, result.values.needMerge)
 		assert.Equal(t, uint64(0), result.values.from)
 		assert.Equal(t, uint64(4), result.values.to)
@@ -92,7 +94,7 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 			createFile(3, 4),
 		}
 		dt := newDomainRoTx(1, files)
-		result := dt.findMergeRange(4, 32)
+		result := dt.findMergeRange(4, 32, 32)
 		assert.True(t, result.values.needMerge)
 		assert.Equal(t, uint64(0), result.values.from)
 		assert.Equal(t, uint64(4), result.values.to)
@@ -106,7 +108,7 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 				createFile(aggStep, aggStep*2),
 			}
 			dt := newDomainRoTx(aggStep, files)
-			result := dt.findMergeRange(endTx, 32)
+			result := dt.findMergeRange(endTx, 32, 32)
 			assert.Equal(t, aggStep, result.aggStep)
 			assert.True(t, result.values.needMerge)
 		}
@@ -538,7 +540,7 @@ func TestFindMergeRange_Optimal(t *testing.T) {
 		files := []visibleFile{
 			f(0, 16), f(16, 24), f(24, 28), f(28, 30), f(30, 31), f(31, 32),
 		}
-		r := newDomainRoTx(1, files).findMergeRange(32, 32)
+		r := newDomainRoTx(1, files).findMergeRange(32, 32, 32)
 		assert.True(t, r.values.needMerge)
 		assert.Equal(t, 0, int(r.values.from))
 		assert.Equal(t, 32, int(r.values.to))
@@ -555,7 +557,7 @@ func TestFindMergeRange_Optimal(t *testing.T) {
 	t.Run("domain/after_partial_merge", func(t *testing.T) {
 		// After a prior merge produced 0-32, the remaining files allow 0-64.
 		files := []visibleFile{f(0, 32), f(32, 48), f(48, 64)}
-		r := newDomainRoTx(16, files).findMergeRange(64, 64)
+		r := newDomainRoTx(16, files).findMergeRange(64, 64, 64)
 		assert.True(t, r.values.needMerge)
 		assert.Equal(t, 0, int(r.values.from))
 		assert.Equal(t, 64, int(r.values.to))
@@ -566,7 +568,7 @@ func TestFindMergeRange_Optimal(t *testing.T) {
 	t.Run("domain/four_equal_steps", func(t *testing.T) {
 		// 4 single-step files → merges 0-64 directly (4-way, single pass).
 		files := []visibleFile{f(0, 16), f(16, 32), f(32, 48), f(48, 64)}
-		r := newDomainRoTx(16, files).findMergeRange(64, 64)
+		r := newDomainRoTx(16, files).findMergeRange(64, 64, 64)
 		assert.True(t, r.values.needMerge)
 		assert.Equal(t, 0, int(r.values.from))
 		assert.Equal(t, 64, int(r.values.to))
@@ -584,7 +586,7 @@ func TestFindMergeRange_Optimal(t *testing.T) {
 			f(0, 1), f(1, 2), f(2, 3), f(3, 4),
 			f(4, 5), f(5, 6), f(6, 7), f(7, 8),
 		}
-		r := newDomainRoTx(1, files).findMergeRange(8, 8)
+		r := newDomainRoTx(1, files).findMergeRange(8, 8, 8)
 		assert.True(t, r.values.needMerge)
 		assert.Equal(t, 0, int(r.values.from))
 		assert.Equal(t, 8, int(r.values.to))
@@ -604,7 +606,7 @@ func TestFindMergeRange_Optimal(t *testing.T) {
 		files := []visibleFile{
 			f(0, 1), f(1, 2), f(2, 3), f(3, 4), f(4, 5), f(5, 6),
 		}
-		r := newDomainRoTx(1, files).findMergeRange(6, 8)
+		r := newDomainRoTx(1, files).findMergeRange(6, 8, 8)
 		assert.True(t, r.values.needMerge)
 		assert.Equal(t, 0, int(r.values.from))
 		assert.Equal(t, 4, int(r.values.to))
@@ -614,7 +616,7 @@ func TestFindMergeRange_Optimal(t *testing.T) {
 		files := []visibleFile{
 			f(0, 1), f(1, 2), f(2, 3), f(3, 4), f(4, 5),
 		}
-		r := newDomainRoTx(1, files).findMergeRange(5, 8)
+		r := newDomainRoTx(1, files).findMergeRange(5, 8, 8)
 		assert.True(t, r.values.needMerge)
 		assert.Equal(t, 0, int(r.values.from))
 		assert.Equal(t, 4, int(r.values.to))
@@ -798,7 +800,7 @@ func TestMergeFiles(t *testing.T) {
 	txs := d.stepSize * 8
 	data := generateTestData(t, 20, 52, txs, txs, 100)
 
-	rwTx, err := db.BeginRw(context.Background())
+	rwTx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
@@ -814,18 +816,18 @@ func TestMergeFiles(t *testing.T) {
 		}
 	}
 
-	require.NoError(t, w.Flush(context.Background(), rwTx))
+	require.NoError(t, w.Flush(t.Context(), rwTx))
 	w.Close()
 	err = rwTx.Commit()
 	require.NoError(t, err)
 
-	err = db.UpdateNosync(context.Background(), func(tx kv.RwTx) error {
+	err = db.UpdateNosync(t.Context(), func(tx kv.RwTx) error {
 		collateAndMerge(t, tx, d, txs)
 		return nil
 	})
 	require.NoError(t, err)
 
-	rwTx, err = db.BeginRw(context.Background())
+	rwTx, err = db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
@@ -1098,9 +1100,7 @@ func TestHistoryAndIIAlignment(t *testing.T) {
 	})
 	t.Cleanup(func() {
 		h.dirtyFiles.Scan(func(item *FilesItem) bool {
-			if item.decompressor != nil {
-				item.decompressor.Close()
-			}
+			item.decompressor.Close()
 			return true
 		})
 	})
@@ -1118,9 +1118,7 @@ func TestHistoryAndIIAlignment(t *testing.T) {
 	})
 	t.Cleanup(func() {
 		ii.dirtyFiles.Scan(func(item *FilesItem) bool {
-			if item.decompressor != nil {
-				item.decompressor.Close()
-			}
+			item.decompressor.Close()
 			return true
 		})
 	})
@@ -1142,4 +1140,82 @@ func TestHistoryAndIIAlignment(t *testing.T) {
 
 	// no garbage with iit, since history is not merged
 	require.Len(t, roTx.iit.garbage(&FilesItem{startTxNum: 0, endTxNum: 4}), 0)
+}
+
+// TestInvIndexMergeFiles_SharedKey verifies that mergeFiles correctly merges N .ef
+// files where a single key appears in every file, producing a merged sequence that
+// contains all expected txNums.
+func TestInvIndexMergeFiles_SharedKey(t *testing.T) {
+	t.Parallel()
+
+	// aggStep > SIMPLE_SEQUENCE_MAX_THRESHOLD (16) forces EliasFano encoding per file,
+	// exercising the expensive merge path.
+	const aggStep = 32
+	const numFiles = 4
+	// module=1 means key-1 appears at every txNum, so it is present in all files.
+	const module = 1
+
+	txs := uint64(numFiles) * aggStep
+	ctx := context.Background()
+	logger := log.New()
+
+	db, ii, _ := filledInvIndexOfSize(t, txs, aggStep, module, logger)
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	ps := background.NewProgressSet()
+	for step := kv.Step(0); step < kv.Step(numFiles); step++ {
+		require.NoError(t, ii.collateBuildIntegrate(ctx, step, tx, ps))
+	}
+
+	ic := ii.beginForTests()
+	defer ic.Close()
+
+	maxEndTxNum := ii.dirtyFilesEndTxNumMinimax()
+	maxSpan := ii.stepSize * config3.DefaultStepsInFrozenFile
+	mr := ic.findMergeRange(maxEndTxNum, maxSpan)
+	require.True(t, mr.needMerge)
+	require.EqualValues(t, 0, mr.from)
+	require.EqualValues(t, txs, mr.to)
+
+	inputFiles := ic.staticFilesInRange(mr.from, mr.to)
+	require.Len(t, inputFiles, numFiles)
+
+	out, err := ic.mergeFiles(ctx, inputFiles, mr.from, mr.to, ps)
+	require.NoError(t, err)
+	t.Cleanup(out.closeFilesAndRemove)
+
+	// filledInvIndexOfSize adds key k when txNum%k==0; for k=1 that is every txNum 1..txs.
+	g := ic.dataReader(out.decompressor)
+	g.Reset(0)
+	require.True(t, g.HasNext(), "merged file must not be empty")
+
+	key, _ := g.Next(nil)
+	val, _ := g.Next(nil)
+	require.False(t, g.HasNext(), "expected exactly one key in merged file")
+
+	var expectedKey [8]byte
+	binary.BigEndian.PutUint64(expectedKey[:], 1)
+	require.Equal(t, expectedKey[:], key)
+
+	var seq multiencseq.SequenceReader
+	seq.Reset(mr.from, val)
+	it := seq.Iterator(0)
+
+	got := make([]uint64, 0, txs-1)
+	for it.HasNext() {
+		v, err := it.Next()
+		require.NoError(t, err)
+		got = append(got, v)
+	}
+
+	// filledInvIndexOfSize fills txNums 1..txs, but step (numFiles-1) covers
+	// [txs-aggStep, txs), so txNum==txs is not yet collated into a file.
+	want := make([]uint64, 0, txs-1)
+	for txNum := uint64(1); txNum < txs; txNum++ {
+		want = append(want, txNum)
+	}
+	require.Equal(t, want, got)
 }
