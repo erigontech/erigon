@@ -387,14 +387,22 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 			return nil
 		}
 
-		// Skip duplicates using LRU cache with maphash to avoid string allocs
-		if _, seen := seenLRU.Get(req.Data); seen {
-			if f.wg != nil {
-				f.wg.Done()
+		// Skip duplicate tx-body messages (TRANSACTIONS_66, POOLED_TRANSACTIONS_66):
+		// blob-tx verification is the expensive work worth amortizing. We must NOT
+		// dedupe announcements (NEW_POOLED_TRANSACTION_HASHES_66/68) across peers —
+		// when one peer delivers a bad tx for an announced hash and gets kicked,
+		// the tx fetcher falls back to a different peer that announced the same
+		// hash, which only works if each peer's announcement is actually processed.
+		switch req.Id {
+		case sentryproto.MessageId_TRANSACTIONS_66, sentryproto.MessageId_POOLED_TRANSACTIONS_66:
+			if _, seen := seenLRU.Get(req.Data); seen {
+				if f.wg != nil {
+					f.wg.Done()
+				}
+				continue
 			}
-			continue
+			seenLRU.Set(req.Data, struct{}{})
 		}
-		seenLRU.Set(req.Data, struct{}{})
 
 		batchLock.Lock()
 		batch = append(batch, req)
