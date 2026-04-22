@@ -454,7 +454,7 @@ mocks:
 	PATH="$(GOBIN):$(PATH)" go generate -run "mockgen" ./...
 
 ## solc:                              generate all solidity contracts
-solc:
+solc: $(OPENZEPPELIN)
 	PATH="$(GOBIN):$(PATH)" go generate -run "solc" -skip "txnprovider/shutter" ./...
 	@cd txnprovider/shutter && $(MAKE) solc
 

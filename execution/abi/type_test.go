@@ -22,6 +22,7 @@ package abi
 import (
 	"math/big"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
@@ -116,6 +117,30 @@ func TestTypeRegexp(t *testing.T) {
 		if !reflect.DeepEqual(typ, tt.kind) {
 			t.Errorf("type %q: parsed type mismatch:\nGOT %s\nWANT %s ", tt.blob, spew.Sdump(typeWithoutStringer(typ)), spew.Sdump(typeWithoutStringer(tt.kind)))
 		}
+	}
+}
+
+func TestTypeRejectsInvalidTupleFieldNames(t *testing.T) {
+	tests := []struct {
+		name      string
+		fieldName string
+	}{
+		{name: "underscore_digit", fieldName: "_1"},
+		{name: "ampersand", fieldName: "&"},
+		{name: "dashes", fieldName: "----"},
+		{name: "dotted", fieldName: "foo.Bar"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewType("tuple", "", []ArgumentMarshaling{{Name: tt.fieldName, Type: "bool"}})
+			if err == nil {
+				t.Fatalf("expected error for field name %q, got nil", tt.fieldName)
+			}
+			if !strings.Contains(err.Error(), "invalid name") {
+				t.Fatalf("expected invalid-name error for %q, got: %v", tt.fieldName, err)
+			}
+		})
 	}
 }
 
