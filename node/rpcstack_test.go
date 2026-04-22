@@ -461,7 +461,7 @@ func TestWsConnectionLimit(t *testing.T) {
 	url := fmt.Sprintf("ws://%v", srv.listenAddr())
 
 	// First connection should succeed.
-	conn1, resp1, err := websocket.DefaultDialer.Dial(url, nil)
+	conn1, resp1, err := websocket.Dial(context.Background(), url, nil)
 	if resp1 != nil {
 		resp1.Body.Close()
 	}
@@ -472,7 +472,7 @@ func TestWsConnectionLimit(t *testing.T) {
 		5*time.Second, 5*time.Millisecond)
 
 	// While first connection is open the second must be rejected.
-	_, resp, err2 := websocket.DefaultDialer.Dial(url, nil)
+	_, resp, err2 := websocket.Dial(context.Background(), url, nil)
 	require.Error(t, err2, "second connection should be rejected")
 	if resp != nil {
 		assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
@@ -480,17 +480,17 @@ func TestWsConnectionLimit(t *testing.T) {
 	}
 
 	// Close first connection and wait for the counter to drop.
-	conn1.Close()
+	conn1.CloseNow()
 	require.Eventually(t, func() bool { return srv.wsLimiter.count.Load() == 0 },
 		5*time.Second, 5*time.Millisecond)
 
 	// A new connection should now succeed.
-	conn3, resp3, err := websocket.DefaultDialer.Dial(url, nil)
+	conn3, resp3, err := websocket.Dial(context.Background(), url, nil)
 	if resp3 != nil {
 		resp3.Body.Close()
 	}
 	require.NoError(t, err, "connection after limit released should succeed")
-	conn3.Close()
+	conn3.CloseNow()
 }
 
 // TestNewWSConnectionLimiter tests the standalone NewWSConnectionLimiter handler.
