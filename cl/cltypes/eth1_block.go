@@ -67,6 +67,11 @@ func NewEth1Block(version clparams.StateVersion, beaconCfg *clparams.BeaconChain
 		version:   version,
 		beaconCfg: beaconCfg,
 	}
+	b.Extra = solid.NewExtraData()
+	b.Transactions = &solid.TransactionsSSZ{}
+	if version >= clparams.CapellaVersion {
+		b.Withdrawals = solid.NewStaticListSSZ[*Withdrawal](int(beaconCfg.MaxWithdrawalsPerPayload), 44)
+	}
 	if version >= clparams.GloasVersion {
 		b.BlockAccessList = solid.NewByteListSSZ(beaconCfg.MaxBytesPerTransaction)
 	}
