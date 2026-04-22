@@ -1,7 +1,6 @@
 package state
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
 
@@ -25,7 +24,7 @@ func TestDirtyFilesRoTx_CloseCallsCloseAndRemoveWhenRefCntDropsToZero(t *testing
 	fPath := filepath.Join(tmp, "v1-foo.0-1.kv")
 
 	// Create a real compressed segment file so seg.NewDecompressor can open it.
-	comp, err := seg.NewCompressor(context.Background(), t.Name(), fPath, tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+	comp, err := seg.NewCompressor(t.Context(), t.Name(), fPath, tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 	require.NoError(t, err)
 	comp.DisableFsync()
 	require.NoError(t, comp.AddWord([]byte("word")))
