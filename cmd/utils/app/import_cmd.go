@@ -284,6 +284,11 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 	if err != nil {
 		return err
 	}
+	// If execution rejected the block no state changes will be emitted, so skip
+	// the state-diff wait below — otherwise stream.Recv() blocks indefinitely.
+	if status != execmodule.ExecutionStatusSuccess {
+		return fmt.Errorf("insertion failed for block %d, code: %s", chain.Blocks[chain.Length()-1].NumberU64(), status.String())
+	}
 
 	// UpdateForkChoice has an async commit so we need to wait to make sure
 	// it is completed before assuming all state changes etc are inserted
@@ -314,16 +319,8 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 		}
 	}
 
-	err = ethereum.ChainDB().Update(ethereum.SentryCtx(), func(tx kv.RwTx) error {
+	return ethereum.ChainDB().Update(ethereum.SentryCtx(), func(tx kv.RwTx) error {
 		rawdb.WriteHeadBlockHash(tx, lvh)
 		return nil
 	})
-	if err != nil {
-		return err
-	}
-	if status != execmodule.ExecutionStatusSuccess {
-		return fmt.Errorf("insertion failed for block %d, code: %s", chain.Blocks[chain.Length()-1].NumberU64(), status.String())
-	}
-
-	return nil
 }
