@@ -193,25 +193,29 @@ func (v Versions) MustSupport(ver Version, filename string) {
 	if v.Supports(ver) {
 		return
 	}
+	var msg string
 	if ver.Less(v.MinSupported) {
-		panic(fmt.Sprintf(
+		msg = fmt.Sprintf(
 			"Snapshot file is too old for this Erigon build.\n"+
 				"  file:             %s\n"+
 				"  file version:     %s\n"+
 				"  minimum required: %s\n"+
 				"To fix, reset snapshots: `erigon snapshots reset --datadir $DATADIR --chain $CHAIN`",
 			filename, ver, v.MinSupported,
-		))
+		)
+	} else {
+		msg = fmt.Sprintf(
+			"Snapshot file is newer than this Erigon build supports.\n"+
+				"  file:              %s\n"+
+				"  file version:      %s\n"+
+				"  highest supported: < %s\n"+
+				"To fix, either upgrade Erigon to a newer release,\n"+
+				"or reset snapshots: `erigon snapshots reset --datadir $DATADIR --chain $CHAIN`",
+			filename, ver, ver,
+		)
 	}
-	panic(fmt.Sprintf(
-		"Snapshot file is newer than this Erigon build supports.\n"+
-			"  file:              %s\n"+
-			"  file version:      %s\n"+
-			"  highest supported: < %s\n"+
-			"To fix, either upgrade Erigon to a newer release,\n"+
-			"or reset snapshots: `erigon snapshots reset --datadir $DATADIR --chain $CHAIN`",
-		filename, ver, ver,
-	))
+	log.Error(msg)
+	panic(msg)
 }
 
 // FindFilesWithVersionsByPattern return an filepath by pattern
