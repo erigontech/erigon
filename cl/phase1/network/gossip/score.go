@@ -12,16 +12,6 @@ import (
 )
 
 const (
-	// gossipSubD is the topic stable mesh target count, used for attestation
-	// rate computations here.
-	gossipSubD = 4
-
-	// decayToZero specifies the terminal value that we will use when decaying
-	// a value.
-	decayToZero = 0.01
-)
-
-const (
 	// beaconBlockWeight specifies the scoring weight that we apply to
 	// our beacon block topic.
 	beaconBlockWeight = 0.8
@@ -140,7 +130,7 @@ func (g *GossipManager) defaultSyncSubnetTopicParams(activeValidators uint64) *p
 	firstDecayDuration := 1 * g.oneEpochDuration()
 	meshDecayDuration := 4 * g.oneEpochDuration()
 
-	rate := subnetWeight * 2 / gossipSubD
+	rate := subnetWeight * 2 / gossip.GossipSubD
 	if rate == 0 {
 		log.Warn("rate is 0, skipping initializing topic scoring")
 		return nil
@@ -247,7 +237,7 @@ func (g *GossipManager) defaultAggregateSubnetTopicParams() *pubsub.TopicScorePa
 		firstDecayDuration = 4 * g.oneEpochDuration()
 		meshDecayDuration = 16 * g.oneEpochDuration()
 	}
-	rate := numPerSlot * 2 / gossipSubD
+	rate := numPerSlot * 2 / gossip.GossipSubD
 	if rate == 0 {
 		log.Trace("rate is 0, skipping initializing topic scoring")
 		return nil
@@ -300,8 +290,8 @@ func (g *GossipManager) inMeshCap() float64 {
 }
 
 // determines the decay rate from the provided time period till
-// the decayToZero value. Ex: ( 1 -> 0.01)
+// the gossip.DecayToZero value. Ex: ( 1 -> 0.01)
 func (g *GossipManager) scoreDecay(totalDurationDecay time.Duration) float64 {
 	numOfTimes := totalDurationDecay / g.oneSlotDuration()
-	return math.Pow(decayToZero, 1/float64(numOfTimes))
+	return math.Pow(gossip.DecayToZero, 1/float64(numOfTimes))
 }

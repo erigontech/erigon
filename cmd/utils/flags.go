@@ -813,7 +813,7 @@ var (
 
 	HealthCheckFlag = cli.BoolFlag{
 		Name:  "healthcheck",
-		Usage: "Enabling grpc health check",
+		Usage: "Enable grpc health check",
 	}
 
 	WebSeedsFlag = cli.StringFlag{
