@@ -1055,10 +1055,10 @@ func hasCoverVisibleFile(visibleFiles []visibleFile, item *FilesItem) bool {
 
 type Ranges struct {
 	domain        [kv.DomainLen]DomainRanges
-	invertedIndex []*MergeRange
+	invertedIndex [kv.StandaloneIdxLen]*MergeRange
 }
 
-func NewRanges(domain [kv.DomainLen]DomainRanges, invertedIndex []*MergeRange) Ranges {
+func NewRanges(domain [kv.DomainLen]DomainRanges, invertedIndex [kv.StandaloneIdxLen]*MergeRange) Ranges {
 	return Ranges{domain: domain, invertedIndex: invertedIndex}
 }
 
