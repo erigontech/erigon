@@ -17,7 +17,6 @@
 package state_test
 
 import (
-	"context"
 	"encoding/binary"
 	"testing"
 	"time"
@@ -42,11 +41,11 @@ import (
 func Fuzz_AggregatorV3_Merge(f *testing.F) {
 	db, agg := testFuzzDbAndAggregatorv3(f, 10)
 
-	rwTx, err := db.BeginTemporalRw(context.Background())
+	rwTx, err := db.BeginTemporalRw(f.Context())
 	require.NoError(f, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(context.Background(), rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(f.Context(), rwTx, log.New())
 	require.NoError(f, err)
 	defer domains.Close()
 
@@ -111,7 +110,7 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 
 		}
 
-		err = domains.Flush(context.Background(), rwTx)
+		err = domains.Flush(t.Context(), rwTx)
 		require.NoError(t, err)
 
 		require.NoError(t, err)
@@ -121,21 +120,21 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 		err = agg.BuildFiles(txs)
 		require.NoError(t, err)
 
-		rwTx, err = db.BeginTemporalRw(context.Background())
+		rwTx, err = db.BeginTemporalRw(t.Context())
 		require.NoError(t, err)
 		defer rwTx.Rollback()
 
-		_, err := rwTx.PruneSmallBatches(context.Background(), time.Hour)
+		_, err := rwTx.PruneSmallBatches(t.Context(), time.Hour)
 		require.NoError(t, err)
 
 		err = rwTx.Commit()
 		require.NoError(t, err)
 
-		err = agg.MergeLoop(context.Background())
+		err = agg.MergeLoop(t.Context())
 		require.NoError(t, err)
 
 		// Check the history
-		roTx, err := db.BeginTemporalRo(context.Background())
+		roTx, err := db.BeginTemporalRo(t.Context())
 		require.NoError(t, err)
 		defer roTx.Rollback()
 
@@ -158,11 +157,11 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 	db, agg := testFuzzDbAndAggregatorv3(f, 10)
 	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
 
-	rwTx, err := db.BeginTemporalRw(context.Background())
+	rwTx, err := db.BeginTemporalRw(f.Context())
 	require.NoError(f, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(context.Background(), rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(f.Context(), rwTx, log.New())
 	require.NoError(f, err)
 	defer domains.Close()
 
@@ -204,7 +203,7 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 			require.NoError(t, err)
 
 			if (txNum+1)%agg.StepSize() == 0 {
-				_, err := domains.ComputeCommitment(context.Background(), rwTx, true, txNum/10, txNum, "", nil)
+				_, err := domains.ComputeCommitment(t.Context(), rwTx, true, txNum/10, txNum, "", nil)
 				require.NoError(t, err)
 			}
 
@@ -212,7 +211,7 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 			state[string(addrs[txNum].Bytes())+string(locs[txNum].Bytes())] = []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}
 		}
 
-		err = domains.Flush(context.Background(), rwTx)
+		err = domains.Flush(t.Context(), rwTx)
 		require.NoError(t, err)
 
 		err = rwTx.Commit()
@@ -221,17 +220,17 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 		err = agg.BuildFiles(txs)
 		require.NoError(t, err)
 
-		rwTx, err = db.BeginTemporalRw(context.Background())
+		rwTx, err = db.BeginTemporalRw(t.Context())
 		require.NoError(t, err)
 		defer rwTx.Rollback()
 
-		_, err := rwTx.PruneSmallBatches(context.Background(), time.Hour)
+		_, err := rwTx.PruneSmallBatches(t.Context(), time.Hour)
 		require.NoError(t, err)
 
 		err = rwTx.Commit()
 		require.NoError(t, err)
 
-		err = agg.MergeLoop(context.Background())
+		err = agg.MergeLoop(t.Context())
 		require.NoError(t, err)
 	})
 }

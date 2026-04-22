@@ -40,7 +40,7 @@ func setupBlockService(t *testing.T, ctrl *gomock.Controller) (BlockService, *sy
 	syncedDataManager := synced_data.NewSyncedDataManager(cfg, true)
 	ethClock := eth_clock.NewMockEthereumClock(ctrl)
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
-	blockService := NewBlockService(context.Background(), db, forkchoiceMock, syncedDataManager, ethClock, cfg, nil)
+	blockService := NewBlockService(t.Context(), db, forkchoiceMock, syncedDataManager, ethClock, cfg, nil)
 	return blockService, syncedDataManager, ethClock, forkchoiceMock
 }
 

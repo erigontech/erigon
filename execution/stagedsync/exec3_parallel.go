@@ -353,10 +353,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 									prevCommittedTransactions = committedTransactions
 									prevCommitedGas = committedGas
 								}
-
-								if pe.agg.HasBackgroundFilesBuild() {
-									pe.logger.Info(fmt.Sprintf("[%s] Background files build", pe.logPrefix), "progress", pe.agg.BackgroundProgress())
-								}
 							}
 
 							if time.Since(lastExecutedLog) > logInterval/50 {
@@ -389,8 +385,9 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 								return err
 							}
 
-							if (pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) || pe.cfg.experimentalBAL) && !applyResult.isPartial {
-								err = ProcessBAL(rwTx, lastHeader, applyResult.TxIO, pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime), pe.cfg.experimentalBAL, pe.isForkValidation, pe.cfg.dirs.DataDir)
+							amsterdam := pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime)
+							if (amsterdam || pe.cfg.experimentalBAL) && !applyResult.isPartial {
+								err = ProcessBAL(rwTx, lastHeader, applyResult.TxIO, amsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir)
 								if err != nil {
 									return err
 								}
