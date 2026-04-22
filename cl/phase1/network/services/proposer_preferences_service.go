@@ -150,6 +150,11 @@ func (s *proposerPreferencesService) ProcessMessage(ctx context.Context, _ *uint
 	s.seenCache.Add(seenKey, struct{}{})
 	s.epbsPool.ProposerPreferences.Add(proposalSlot, msg)
 
+	// Notify builder (if wired) so it can wake up without polling.
+	if cb := s.epbsPool.OnPreferencesReceived; cb != nil {
+		cb(proposalSlot, msg)
+	}
+
 	log.Trace("Processed proposer preferences via gossip",
 		"proposalSlot", proposalSlot,
 		"validatorIndex", validatorIndex,

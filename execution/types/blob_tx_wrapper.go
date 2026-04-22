@@ -433,13 +433,14 @@ func (txw *BlobTxWrapper) MarshalBinaryWrapped(w io.Writer) error {
 	return nil
 }
 
-// ConvertToV1 converts a legacy (wrapper_version=0) blob sidecar into
-// wrapper_version=1 by computing EIP-7594 cell proofs from the blobs.
-// Returns the re-encoded wrapped transaction bytes.
-// TODO: remove once ecosystem tooling fully supports wrapper_version=1.
-func (txw *BlobTxWrapper) ConvertToV1() ([]byte, error) {
+// EnsureCellProofs returns cell-level KZG proofs suitable for PeerDAS/Fulu.
+// For v1 wrappers the existing proofs are returned directly.
+// For v0 (legacy) wrappers, cell proofs are computed from the blobs.
+func (txw *BlobTxWrapper) EnsureCellProofs() (KZGProofs, error) {
+	if txw.WrapperVersion != 0 {
+		return txw.Proofs, nil
+	}
 	kzgCtx := libkzg.Ctx()
-
 	cellProofs := make(KZGProofs, 0, len(txw.Blobs)*int(goethkzg.CellsPerExtBlob))
 	for i := range txw.Blobs {
 		_, proofs, err := kzgCtx.ComputeCellsAndKZGProofs((*goethkzg.Blob)(&txw.Blobs[i]), 4)
@@ -450,6 +451,18 @@ func (txw *BlobTxWrapper) ConvertToV1() ([]byte, error) {
 			cellProofs = append(cellProofs, KZGProof(p))
 		}
 	}
+	return cellProofs, nil
+}
+
+// ConvertToV1 converts a legacy (wrapper_version=0) blob sidecar into
+// wrapper_version=1 by computing EIP-7594 cell proofs from the blobs.
+// Returns the re-encoded wrapped transaction bytes.
+// TODO: remove once ecosystem tooling fully supports wrapper_version=1.
+func (txw *BlobTxWrapper) ConvertToV1() ([]byte, error) {
+	cellProofs, err := txw.EnsureCellProofs()
+	if err != nil {
+		return nil, err
+	}
 
 	// Mutate in-place for marshalling, then restore.
 	origVersion := txw.WrapperVersion
@@ -458,13 +471,13 @@ func (txw *BlobTxWrapper) ConvertToV1() ([]byte, error) {
 	txw.Proofs = cellProofs
 
 	var buf bytes.Buffer
-	err := txw.MarshalBinaryWrapped(&buf)
+	marshalErr := txw.MarshalBinaryWrapped(&buf)
 
 	txw.WrapperVersion = origVersion
 	txw.Proofs = origProofs
 
-	if err != nil {
-		return nil, fmt.Errorf("marshal converted wrapper: %w", err)
+	if marshalErr != nil {
+		return nil, fmt.Errorf("marshal converted wrapper: %w", marshalErr)
 	}
 	return buf.Bytes(), nil
 }

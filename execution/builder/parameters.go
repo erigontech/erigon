@@ -33,6 +33,11 @@ type Parameters struct {
 	Withdrawals           []*types.Withdrawal // added in Shapella (EIP-4895)
 	ParentBeaconBlockRoot *common.Hash        // added in Dencun (EIP-4788)
 	SlotNumber            *uint64             // added in Amsterdam (EIP-7843)
+	// GasLimit overrides the process-wide BuilderConfig.GasLimit for this
+	// build. Required by ePBS: proposer preferences specify a per-slot gas
+	// limit that must match the bid exactly.
+	// nil → use BuilderConfig.GasLimit (existing behaviour).
+	GasLimit *uint64 // added for ePBS (EIP-7732)
 	// CustomTxnProvider overrides the block's transaction source when non-nil.
 	// nil → use the injected TxnProvider (normal mempool path)
 	CustomTxnProvider txnprovider.TxnProvider
