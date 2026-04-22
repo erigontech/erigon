@@ -17,13 +17,13 @@
 package downloader
 
 import (
-	"context"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/node/ethconfig"
-	"github.com/stretchr/testify/require"
 )
 
 func TestProviderDisabled(t *testing.T) {
@@ -36,7 +36,7 @@ func TestProviderDisabled(t *testing.T) {
 		nil,
 	)
 
-	err := p.Initialize(context.Background())
+	err := p.Initialize(t.Context())
 	require.NoError(t, err)
 	require.False(t, p.IsEnabled())
 	require.Nil(t, p.Client)
@@ -56,7 +56,7 @@ func TestProviderNoConfig(t *testing.T) {
 		nil,
 	)
 
-	err := p.Initialize(context.Background())
+	err := p.Initialize(t.Context())
 	require.NoError(t, err)
 	// No config → no client, but no error
 	require.Nil(t, p.Client)

@@ -133,7 +133,7 @@ func TestWorkerTimeout(t *testing.T) {
 	defer wp.Stop()
 
 	// Start workers, and have them all wait on ctx before completing.
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	wp.Pause(ctx)
 
 	if anyReady(wp) {
@@ -170,7 +170,7 @@ func TestStop(t *testing.T) {
 	wp := New(max)
 
 	// Start workers, and have them all wait on ctx before completing.
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	wp.Pause(ctx)
 
 	// Release workers.
@@ -437,7 +437,7 @@ func TestPause(t *testing.T) {
 	wp := New(25)
 	defer wp.Stop()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 
 	ran := make(chan struct{})
 	wp.Submit(func() {
@@ -483,10 +483,10 @@ func TestPause(t *testing.T) {
 
 	// ---- Test pause while paused
 
-	ctx, cancel = context.WithCancel(context.Background())
+	ctx, cancel = context.WithCancel(t.Context())
 	wp.Pause(ctx)
 
-	ctx2, cancel2 := context.WithCancel(context.Background())
+	ctx2, cancel2 := context.WithCancel(t.Context())
 
 	pauseDone := make(chan struct{})
 	go func() {
@@ -516,8 +516,8 @@ func TestPause(t *testing.T) {
 
 	// ---- Test concurrent pauses
 
-	ctx, cancel = context.WithCancel(context.Background())
-	ctx2, cancel2 = context.WithCancel(context.Background())
+	ctx, cancel = context.WithCancel(t.Context())
+	ctx2, cancel2 = context.WithCancel(t.Context())
 	pauseDone = make(chan struct{})
 	pause2Done := make(chan struct{})
 	go func() {
@@ -544,8 +544,8 @@ func TestPause(t *testing.T) {
 
 	// ---- Test stopping paused pool ----
 
-	ctx, cancel = context.WithCancel(context.Background())
-	ctx2, cancel2 = context.WithCancel(context.Background())
+	ctx, cancel = context.WithCancel(t.Context())
+	ctx2, cancel2 = context.WithCancel(t.Context())
 
 	// Stack up two pauses
 	wp.Pause(ctx)
@@ -581,7 +581,7 @@ func TestPause(t *testing.T) {
 
 	// ---- Test pause after stop ----
 
-	ctx, cancel = context.WithCancel(context.Background())
+	ctx, cancel = context.WithCancel(t.Context())
 	pauseDone = make(chan struct{})
 	go func() {
 		wp.Pause(ctx)
