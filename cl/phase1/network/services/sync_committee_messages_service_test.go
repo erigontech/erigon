@@ -36,7 +36,7 @@ func setupSyncCommitteesServiceTest(t *testing.T, ctrl *gomock.Controller) (Sync
 	syncedDataManager := synced_data.NewSyncedDataManager(cfg, true)
 	ethClock := eth_clock.NewMockEthereumClock(ctrl)
 	syncContributionPool := syncpoolmock.NewMockSyncContributionPool(ctrl)
-	
+
 	verifierCtx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
