@@ -1808,31 +1808,7 @@ func resolveHashNodes(node Node, nodeMap map[common.Hash]Node, insideStorageTree
 }
 
 func sameNodeType(a, b Node) bool {
-	switch a.(type) {
-	case *ShortNode:
-		_, ok := b.(*ShortNode)
-		return ok
-	case *FullNode:
-		_, ok := b.(*FullNode)
-		return ok
-	case *DuoNode:
-		_, ok := b.(*DuoNode)
-		return ok
-	case *AccountNode:
-		_, ok := b.(*AccountNode)
-		return ok
-	case *HashNode:
-		_, ok := b.(*HashNode)
-		return ok
-	case ValueNode:
-		_, ok := b.(ValueNode)
-		return ok
-	case CodeNode:
-		_, ok := b.(CodeNode)
-		return ok
-	default:
-		return false
-	}
+	return reflect.TypeOf(a) == reflect.TypeOf(b)
 }
 
 // GetNode returns the trie node found at the given hex-nibble path,
