@@ -19,6 +19,7 @@ package txpool
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"sync"
@@ -116,15 +117,26 @@ func NewFetch(
 	return f
 }
 
-// peerHash maps a peer's H512 id to the 64-bit hash we store alongside each
-// announcement entry. It lets us tell whether the peer delivering a
-// PooledTransactions reply is the same one that announced the hash.
-// The check is probabilistic (64-bit birthday ~4B peers before a collision
-// is likely) — fine in practice, the worst case is a missed kick for a
-// different peer that hash-collides with the announcer.
+// peerHash maps a peer's H512 id to the 64-bit hash we use as part of the
+// announcements LRU key and as a sanity check on lookup. The check is
+// probabilistic (64-bit birthday ~4B peers before a collision is likely) —
+// fine in practice, the worst case is a missed kick for a different peer
+// that hash-collides with the announcer.
 func peerHash(pid *typesproto.H512) uint64 {
 	b := gointerfaces.ConvertH512ToHash(pid)
 	return maphash.Hash(b[:])
+}
+
+// announceKey builds the composite (txHash, peerHash) LRU key used to record
+// and look up announcements. Keying by peer as well as hash prevents a second
+// announcer of the same hash from clobbering the first's entry — without it,
+// a later benign announcement can exonerate an earlier lying peer by making
+// checkPooledTxnAnnouncement bail out on a mismatched peerHash.
+func announceKey(txHash []byte, peerHash uint64) [40]byte {
+	var k [40]byte
+	copy(k[:32], txHash)
+	binary.BigEndian.PutUint64(k[32:], peerHash)
+	return k
 }
 
 // recordAnnouncement remembers the (type, size) a peer promised for each
@@ -151,7 +163,8 @@ func (f *Fetch) recordAnnouncement(pid *typesproto.H512, types []byte, sizes []u
 			}
 			fPos += hashSize
 		}
-		f.announcements.Set(h, announceInfo{peerHash: ph, txnType: types[i], size: sizes[i]})
+		k := announceKey(h, ph)
+		f.announcements.Set(k[:], announceInfo{peerHash: ph, txnType: types[i], size: sizes[i]})
 	}
 }
 
@@ -174,11 +187,15 @@ func (f *Fetch) checkPooledTxnAnnouncement(pid *typesproto.H512, slot *TxnSlot) 
 	if f.announcements == nil {
 		return nil
 	}
-	info, ok := f.announcements.Get(slot.IDHash[:])
+	ph := peerHash(pid)
+	k := announceKey(slot.IDHash[:], ph)
+	info, ok := f.announcements.Get(k[:])
 	if !ok {
 		return nil
 	}
-	if info.peerHash != peerHash(pid) {
+	// Defence against a maphash collision — peer is part of the key, so on
+	// a clean hit info.peerHash must equal ph.
+	if info.peerHash != ph {
 		return nil
 	}
 	if info.txnType != slot.TxType() {
@@ -189,7 +206,7 @@ func (f *Fetch) checkPooledTxnAnnouncement(pid *typesproto.H512, slot *TxnSlot) 
 		return fmt.Errorf("announced tx size %d != actual %d for hash %x", info.size, slot.Size, slot.IDHash[:])
 	}
 	// One-shot: drop the entry so the same announcement can't be replayed.
-	f.announcements.Delete(slot.IDHash[:])
+	f.announcements.Delete(k[:])
 	return nil
 }
 
@@ -630,20 +647,27 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 				sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
 				return nil
 			}
-			for i := range txns.Txns {
+		default:
+			return fmt.Errorf("unexpected message: %s", req.Id.String())
+		}
+		// Post-parse peer-behaviour checks. checkPooledTxnAnnouncement only
+		// applies to the POOLED_TRANSACTIONS_66 (pull) path since TRANSACTIONS_66
+		// has no prior announcement to compare against; checkBlobSidecar applies
+		// to both because a peer can ship a blob-tx wrapper with mismatched
+		// commitments via either message and must be kicked either way.
+		for i := range txns.Txns {
+			if req.Id == sentryproto.MessageId_POOLED_TRANSACTIONS_66 {
 				if err := f.checkPooledTxnAnnouncement(req.PeerId, txns.Txns[i]); err != nil {
 					f.logger.Debug("[txpool] penalizing peer for mismatched tx announcement", "peer", req.PeerId, "err", err)
 					sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
 					return nil
 				}
-				if err := f.checkBlobSidecar(txns.Txns[i]); err != nil {
-					f.logger.Debug("[txpool] penalizing peer for bad blob sidecar", "peer", req.PeerId, "err", err)
-					sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
-					return nil
-				}
 			}
-		default:
-			return fmt.Errorf("unexpected message: %s", req.Id.String())
+			if err := f.checkBlobSidecar(txns.Txns[i]); err != nil {
+				f.logger.Debug("[txpool] penalizing peer for bad blob sidecar", "peer", req.PeerId, "err", err)
+				sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
+				return nil
+			}
 		}
 		if len(txns.Txns) == 0 {
 			return nil

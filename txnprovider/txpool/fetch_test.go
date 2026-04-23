@@ -590,6 +590,26 @@ func TestCheckPooledTxnAnnouncement(t *testing.T) {
 	require.Error(t, fetch.checkPooledTxnAnnouncement(peerID,
 		&TxnSlot{IDHash: hashA, Size: 999, Txn: &types.DynamicFeeTransaction{}}),
 		"hashA was recorded, so the wrong-size delivery must fire")
+
+	// Multi-peer clobber regression: peer A lies in its announcement, peer B
+	// then announces the same hash with correct metadata. Without a composite
+	// (hash, peer) LRU key, B's entry would overwrite A's and A's lie would
+	// slip through the check. Both announcements must survive so A's delivery
+	// is still matched against A's own record.
+	//
+	// Concretely: A announces (DynamicFee, wrong size), B announces
+	// (DynamicFee, correct size), A then delivers the real 200-byte tx. The
+	// mismatch against A's own announcement must still fire.
+	hashC := [32]byte{0xdd, 0x01}
+	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{999}, hashC[:], nil)
+	fetch.recordAnnouncement(otherPeer, []byte{types.DynamicFeeTxType}, []uint32{200}, hashC[:], nil)
+	require.Error(t, fetch.checkPooledTxnAnnouncement(peerID,
+		&TxnSlot{IDHash: hashC, Size: 200, Txn: &types.DynamicFeeTransaction{}}),
+		"peer A's own lying announcement must still match A's delivery after B also announces")
+	// Peer B's delivery against its own (truthful) announcement is clean.
+	require.NoError(t, fetch.checkPooledTxnAnnouncement(otherPeer,
+		&TxnSlot{IDHash: hashC, Size: 200, Txn: &types.DynamicFeeTransaction{}}),
+		"peer B's matching delivery must not fire")
 }
 
 // TestCheckBlobSidecar verifies that a blob tx whose wrapper commitments do not
