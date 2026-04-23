@@ -36,6 +36,7 @@ type IntrinsicGasCalcArgs struct {
 	IsEIP2028          bool
 	IsEIP3860          bool
 	IsEIP7623          bool
+	IsEIP7976          bool
 	IsEIP7981          bool
 	IsEIP8037          bool
 	IsAATxn            bool
@@ -147,16 +148,46 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 
 	// Floor data gas cost.
 	//
-	// EIP-7981 supersedes EIP-7976 which supersedes EIP-7623. When EIP-7981 is active:
-	//   - every calldata byte (zero or non-zero) counts as TxStandardTokensPerByte floor tokens
-	//   - access list data (addresses + storage keys) also contributes floor tokens
-	//   - access list data is always charged at floor rate in the intrinsic cost, so that
-	//     access lists cannot be used to bypass the calldata floor pricing
-	if args.IsEIP7981 {
-		floorCalldataTokens, overflow := math.SafeMul(dataLen, params.TxStandardTokensPerByte)
-		if overflow {
-			return IntrinsicGasCalcResult{}, true
+	// Three EIPs layer here — each covers an independent contribution, and they
+	// can be combined (EIP-7976 + EIP-7981 both activate at Glamsterdam):
+	//   - EIP-7623 (Prague): legacy calldata floor using zero/non-zero byte
+	//     tokens (zero_bytes + 4*nonzero_bytes) at 10 gas/token.
+	//   - EIP-7976 (Glamsterdam): supersedes the EIP-7623 calldata formula —
+	//     every byte of calldata counts as 4 tokens regardless of value, priced
+	//     at 16 gas/token.
+	//   - EIP-7981 (Glamsterdam): extends floor coverage to access-list data
+	//     (addresses + storage keys) on top of the calldata floor, using the
+	//     same 4 tokens-per-byte / 16 gas-per-token rate. Also charges the
+	//     access-list data cost at floor rate in the regular intrinsic gas path
+	//     so access lists cannot be used to bypass calldata floor pricing.
+	//
+	// Compute calldata floor tokens (EIP-7623 or EIP-7976) independently from
+	// access-list floor tokens (EIP-7981), then combine at the appropriate cost
+	// per token so both EIPs are exercised when both are active.
+	var (
+		calldataFloorTokens   uint64
+		accessListFloorTokens uint64
+		costPerToken          uint64
+	)
+	if args.IsEIP7623 && dataLen > 0 {
+		if args.IsEIP7976 {
+			var overflow bool
+			calldataFloorTokens, overflow = math.SafeMul(dataLen, params.TxStandardTokensPerByte)
+			if overflow {
+				return IntrinsicGasCalcResult{}, true
+			}
+		} else {
+			nzTokens, overflow := math.SafeMul(3, nz)
+			if overflow {
+				return IntrinsicGasCalcResult{}, true
+			}
+			calldataFloorTokens, overflow = math.SafeAdd(dataLen, nzTokens)
+			if overflow {
+				return IntrinsicGasCalcResult{}, true
+			}
 		}
+	}
+	if args.IsEIP7981 {
 		accessListBytes, overflow := math.SafeMul(args.AccessListLen, params.TxAccessListAddressBytes)
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
@@ -169,15 +200,16 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
-		floorAccessListTokens, overflow := math.SafeMul(accessListBytes, params.TxStandardTokensPerByte)
+		accessListFloorTokens, overflow = math.SafeMul(accessListBytes, params.TxStandardTokensPerByte)
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
 
-		// Always charge the access list data cost in the standard intrinsic gas path so
-		// that access list data is charged at floor rate regardless of execution level.
-		if floorAccessListTokens > 0 {
-			accessListDataGas, overflow := math.SafeMul(floorAccessListTokens, params.TxTotalCostFloorPerTokenEIP7976)
+		// Always charge the access list data cost in the standard intrinsic gas
+		// path so access list data is charged at floor rate regardless of
+		// execution level.
+		if accessListFloorTokens > 0 {
+			accessListDataGas, overflow := math.SafeMul(accessListFloorTokens, params.TxTotalCostFloorPerTokenEIP7976)
 			if overflow {
 				return IntrinsicGasCalcResult{}, true
 			}
@@ -186,22 +218,18 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 				return IntrinsicGasCalcResult{}, true
 			}
 		}
-
-		totalFloorTokens, overflow := math.SafeAdd(floorCalldataTokens, floorAccessListTokens)
-		if overflow {
-			return IntrinsicGasCalcResult{}, true
-		}
-		dataGas, overflow := math.SafeMul(totalFloorTokens, params.TxTotalCostFloorPerTokenEIP7976)
-		if overflow {
-			return IntrinsicGasCalcResult{}, true
-		}
-		result.FloorGasCost, overflow = math.SafeAdd(result.FloorGasCost, dataGas)
-		if overflow {
-			return IntrinsicGasCalcResult{}, true
-		}
-	} else if args.IsEIP7623 && dataLen > 0 {
-		tokenLen := dataLen + 3*nz
-		dataGas, overflow := math.SafeMul(tokenLen, params.TxTotalCostFloorPerToken)
+	}
+	if args.IsEIP7976 {
+		costPerToken = params.TxTotalCostFloorPerTokenEIP7976
+	} else {
+		costPerToken = params.TxTotalCostFloorPerToken
+	}
+	totalFloorTokens, overflow := math.SafeAdd(calldataFloorTokens, accessListFloorTokens)
+	if overflow {
+		return IntrinsicGasCalcResult{}, true
+	}
+	if totalFloorTokens > 0 {
+		dataGas, overflow := math.SafeMul(totalFloorTokens, costPerToken)
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
