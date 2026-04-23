@@ -229,11 +229,35 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 		}
 
 		for _, request := range requests {
-			go handleRequest(ctx, request, connections, codec, logger)
+			fmt.Println("Received request", request)
+			var requestId string
+
+			if err = json.Unmarshal(request.ID, &requestId); err != nil {
+				logger.Error("Invalid request id", "err", err)
+				continue
+			}
+
+			nodeRequest := nodeRequest{}
+
+			if err = json.Unmarshal(request.Params, &nodeRequest); err != nil {
+				logger.Error("Invalid node request", "err", err, "id", requestId)
+				continue
+			}
+
+			if conn, ok := connections[nodeRequest.NodeId]; ok {
+				fmt.Println("Sending request to", conn.debugURL)
+				conn.requestChannel <- requestAction{
+					requestId:   requestId,
+					method:      request.Method,
+					queryParams: nodeRequest.QueryParams,
+				}
+			}
 		}
 	}
 }
 
+// Establishes a WebSocket connection with diagnostics system (flag: diagnostics.addr) and creates a codec for communication.
+// This function connects to the diagnostics server using a WebSocket and initializes an RPC codec for bidirectional communication.
 func createCodec(ctx context.Context, diagnosticsUrl string) (rpc.ServerCodec, error) {
 	conn, err := establishConnection(ctx, diagnosticsUrl)
 	if err != nil {
@@ -245,7 +269,7 @@ func createCodec(ctx context.Context, diagnosticsUrl string) (rpc.ServerCodec, e
 	return codec, nil
 }
 
-// Attempts to establish a WebSocket connection to the diagnostics URL.
+// Establishes a WebSocket connection with the diagnostics system.
 // Trying to establish secure wss:// connection first, if it fails, fallback to ws://.
 // Returns the WebSocket connection if successful, otherwise an error.
 func establishConnection(ctx context.Context, diagnosticsUrl string) (*websocket.Conn, error) {
@@ -266,129 +290,110 @@ func establishConnection(ctx context.Context, diagnosticsUrl string) (*websocket
 }
 
 // Creates connections to the nodes specified by the flag debug.addrs.
-// Each node connection is established via its diagnostics WebSocket endpoint.
-func createConnections(ctx context.Context, codec rpc.ServerCodec, metricsClient *http.Client, debugURLs []string) ([]*nodeConnection, error) {
-	connections := make([]*nodeConnection, 0, len(debugURLs))
+// Returns a map of node connections, where the key is the node ID.
+// As soon as connection created for a node, it starts processing requests and responses.
+func createConnections(ctx context.Context, codec rpc.ServerCodec, metricsClient *http.Client, debugURLs []string) (map[string]*nodeConnection, error) {
+	nodes := map[string]*nodeConnection{}
+
 	for _, debugURL := range debugURLs {
-		connection, err := newNodeConnection(ctx, debugURL, codec, metricsClient)
+		reply, err := queryNode(metricsClient, debugURL)
 		if err != nil {
 			return nil, err
 		}
-		connections = append(connections, connection)
-	}
-	return connections, nil
-}
 
-func sendNodesInfoToDiagnostics(ctx context.Context, codec rpc.ServerCodec, sessionIds []string, connections []*nodeConnection) error {
-	for _, sessionId := range sessionIds {
-		for _, connection := range connections {
-			nodeInfo, err := connection.readNodeInfo()
-			if err != nil {
-				return err
-			}
-			message := map[string]any{
-				"jsonrpc": "2.0",
-				"method":  "diag_connect",
-				"params": map[string]any{
-					"version":   Version,
-					"session_id": sessionId,
-					"node_info":  nodeInfo,
-				},
-			}
-			if err := codec.WriteJSON(ctx, message); err != nil {
-				return err
+		for _, ni := range reply.NodesInfo {
+			if n, ok := nodes[ni.Id]; ok {
+				n.info.Enodes = append(n.info.Enodes, tunnelEnode{
+					Enode:        ni.Enode,
+					Enr:          ni.Enr,
+					Ports:        ni.Ports,
+					ListenerAddr: ni.ListenerAddr,
+				})
+			} else {
+				node := &nodeConnection{
+					ctx:             ctx,
+					debugURL:        debugURL,
+					info:            &tunnelInfo{Id: ni.Id, Name: ni.Name, Protocols: ni.Protocols},
+					requestChannel:  make(chan requestAction, 100),
+					responseChannel: make(chan nodeResponse, 100),
+					codec:           codec,
+				}
+				go node.processRequests(metricsClient)
+				go node.processResponses()
+				nodes[ni.Id] = node
 			}
 		}
 	}
-	return nil
+
+	return nodes, nil
 }
 
-func handleRequest(ctx context.Context, request *rpc.JsonRpcMessage, connections []*nodeConnection, codec rpc.ServerCodec, logger log.Logger) {
-	if !request.IsNotification() && !request.IsCall() {
-		return
+// Attempt to query nodes specified by flag debug.addrs and return the response.
+// If the request fails, an error is returned, as we expect all nodes to be reachable.
+// TODO: maybe it make sense to think about allowing some nodes to be unreachable
+func queryNode(metricsClient *http.Client, debugURL string) (*remoteproto.NodesInfoReply, error) {
+	debugResponse, err := metricsClient.Get(debugURL + "/debug/diag/nodeinfo")
+
+	if err != nil {
+		return nil, err
 	}
 
-	var nodeReq nodeRequest
-	if err := json.Unmarshal(request.Params, &nodeReq); err != nil {
-		logger.Warn("Failed to parse node request", "err", err)
-		return
+	if debugResponse.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("debug request to %s failed: %s", debugURL, debugResponse.Status)
 	}
 
-	for _, connection := range connections {
-		if connection.nodeId == nodeReq.NodeId {
-			response := connection.handleRequest(ctx, request.ID, request.Method, nodeReq.QueryParams)
-			if err := codec.WriteJSON(ctx, response); err != nil {
-				logger.Warn("Failed to write response", "err", err)
+	var reply remoteproto.NodesInfoReply
+
+	err = json.NewDecoder(debugResponse.Body).Decode(&reply)
+
+	debugResponse.Body.Close()
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &reply, nil
+}
+
+// Send nodes info to diagnostics to notify about connection and nodes details like: enode, enr, ports, listener_addr
+// This info will tell diagnostics about the nodes that are connected to the diagnostics system
+func sendNodesInfoToDiagnostics(ctx context.Context, codec rpc.ServerCodec, sessionIds []string, nodes map[string]*nodeConnection) error {
+	type connectionInfo struct {
+		Version  uint64        `json:"version"`
+		Sessions []string      `json:"sessions"`
+		Nodes    []*tunnelInfo `json:"nodes"`
+	}
+
+	err := codec.WriteJSON(ctx, &connectionInfo{
+		Version:  Version,
+		Sessions: sessionIds,
+		Nodes: func() (replies []*tunnelInfo) {
+			for _, node := range nodes {
+				replies = append(replies, node.info)
 			}
-			return
-		}
-	}
+
+			return replies
+		}(),
+	})
+
+	return err
 }
 
 type nodeConnection struct {
-	ctx           context.Context
-	debugURL      string
-	nodeId        string
-	connection    *websocket.Conn
-	codec         rpc.ServerCodec
-	metricsClient *http.Client
-	requestId     string
+	ctx             context.Context
+	debugURL        string
+	info            *tunnelInfo
+	connection      *websocket.Conn
+	requestId       string
+	requestChannel  chan requestAction
+	responseChannel chan nodeResponse
+	codec           rpc.ServerCodec
 }
 
-func newNodeConnection(ctx context.Context, debugURL string, codec rpc.ServerCodec, metricsClient *http.Client) (*nodeConnection, error) {
-	connection := &nodeConnection{ctx: ctx, debugURL: debugURL, codec: codec, metricsClient: metricsClient}
-	if err := connection.connect(); err != nil {
-		return nil, err
-	}
-	return connection, nil
-}
-
-func (nc *nodeConnection) connect() error {
-	nodeInfo, err := nc.readNodeInfo()
-	if err != nil {
-		return err
-	}
-	nc.nodeId = nodeInfo.Id
-	return nil
-}
-
-func (nc *nodeConnection) readNodeInfo() (*tunnelInfo, error) {
-	result, err := nc.performRequest(nc.debugURL + "/debug/diag/nodeinfo")
-	if err != nil {
-		return nil, err
-	}
-	var nodeInfo tunnelInfo
-	if err := json.Unmarshal(result, &nodeInfo); err != nil {
-		return nil, err
-	}
-	return &nodeInfo, nil
-}
-
-func (nc *nodeConnection) handleRequest(ctx context.Context, requestId json.RawMessage, method string, queryParams url.Values) *nodeResponse {
-	result, err := nc.performRequest(nc.debugURL + "/debug/diag/" + method + "?" + queryParams.Encode())
-	if err != nil {
-		return &nodeResponse{Id: string(requestId), Error: &responseError{Code: -1, Message: err.Error()}, Last: true}
-	}
-	return &nodeResponse{Id: string(requestId), Result: result, Last: true}
-}
-
-func (nc *nodeConnection) performRequest(requestURL string) (json.RawMessage, error) {
-	resp, err := nc.metricsClient.Get(requestURL)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("request failed: %s", resp.Status)
-	}
-	return body, nil
-}
-
+// Connects to the WebSocket endpoint of the node and starts listening for incoming messages.
+// (erigon nodes) ----> (support cmd)
 func (nc *nodeConnection) connectSocket(requestId string) error {
+	//already connected
 	if nc.connection != nil {
 		return nil
 	}
@@ -407,6 +412,7 @@ func (nc *nodeConnection) connectSocket(requestId string) error {
 	nc.requestId = requestId
 
 	go nc.startListening()
+
 	return nil
 }
 
@@ -422,9 +428,12 @@ func (nc *nodeConnection) closeWebSocket() error {
 	}
 
 	nc.connection = nil
+	fmt.Println("WebSocket connection closed successfully")
 	return nil
 }
 
+// Starts listening for incoming messages from the WebSocket connection.
+// (erigon nodes) ----> (support cmd)
 func (nc *nodeConnection) startListening() {
 	for {
 		select {
@@ -432,8 +441,8 @@ func (nc *nodeConnection) startListening() {
 			return
 		default:
 		}
-
 		if nc.connection == nil {
+			fmt.Println("connection closed, exiting read loop")
 			return
 		}
 
@@ -447,16 +456,197 @@ func (nc *nodeConnection) startListening() {
 			return
 		}
 
-		var jsonMessage map[string]any
-		if err := json.Unmarshal(message, &jsonMessage); err != nil {
-			fmt.Printf("Error unmarshalling message: %v\n", err)
-			continue
-		}
-
-		jsonMessage["requestId"] = nc.requestId
-		if err := nc.codec.WriteJSON(nc.ctx, jsonMessage); err != nil {
-			fmt.Printf("Error writing message to codec: %v\n", err)
-			return
+		nc.responseChannel <- nodeResponse{
+			Id:     nc.requestId,
+			Result: message,
+			Last:   false,
 		}
 	}
+}
+
+type subscrigeResponse struct {
+	MessageType string `json:"type"`
+	Message     string `json:"message"`
+}
+
+// Processes the incoming requests from the diagnostics system.
+// Handle subscribe/unsubscribe and all other messages.
+func (nc *nodeConnection) processRequests(metricsClient *http.Client) {
+	for action := range nc.requestChannel {
+		select {
+		case <-nc.ctx.Done():
+			return
+		default:
+		}
+
+		switch {
+		case isSubscribe(action.method):
+			err := nc.connectSocket(action.requestId)
+			if err != nil {
+				nc.responseChannel <- errorResponseMessage(action.requestId, http.StatusFailedDependency, fmt.Sprintf("Subscription failed: %v", err))
+				continue
+			}
+
+			fmt.Println("Subscribed to", nc.debugURL)
+
+			response := subscrigeResponse{
+				MessageType: "subscribe",
+				Message:     "subscribed",
+			}
+
+			bytes := &bytes.Buffer{}
+
+			if err := json.NewEncoder(bytes).Encode(response); err != nil {
+				nc.responseChannel <- errorResponseMessage(action.requestId, http.StatusInternalServerError, "Failed to encode response: "+err.Error())
+				continue
+			}
+
+			nc.responseChannel <- nodeResponse{
+				Id:     action.requestId,
+				Result: json.RawMessage(bytes.Bytes()),
+				Last:   false,
+			}
+
+		case isUnsubscribe(action.method):
+			err := nc.closeWebSocket()
+			if err != nil {
+				nc.responseChannel <- errorResponseMessage(action.requestId, http.StatusFailedDependency, fmt.Sprintf("Unsubscription failed: %v", err))
+				continue
+			}
+
+			fmt.Println("Unsubscribed from", nc.debugURL)
+			response := subscrigeResponse{
+				MessageType: "subscribe",
+				Message:     "unsubscribed",
+			}
+
+			bytes := &bytes.Buffer{}
+
+			if err := json.NewEncoder(bytes).Encode(response); err != nil {
+				nc.responseChannel <- errorResponseMessage(action.requestId, http.StatusInternalServerError, "Failed to encode response: "+err.Error())
+				continue
+			}
+
+			nc.responseChannel <- nodeResponse{
+				Id:     action.requestId,
+				Result: json.RawMessage(bytes.Bytes()),
+				Last:   true,
+			}
+
+		default:
+			debugURL := nc.debugURL + "/debug/diag/" + action.method + "?" + action.queryParams.Encode()
+			debugResponse, err := metricsClient.Get(debugURL)
+			if err != nil {
+				nc.responseChannel <- errorResponseMessage(action.requestId, http.StatusFailedDependency, "Request failed: "+err.Error())
+				debugResponse.Body.Close()
+				continue
+			}
+
+			if debugResponse.StatusCode != http.StatusOK {
+				body, _ := io.ReadAll(debugResponse.Body)
+				nc.responseChannel <- errorResponseMessage(action.requestId, int64(debugResponse.StatusCode), "Request failed: "+string(body))
+				debugResponse.Body.Close()
+				continue
+			}
+
+			buffer := &bytes.Buffer{}
+			if err := copyResponseBody(buffer, debugResponse); err != nil {
+				nc.responseChannel <- errorResponseMessage(action.requestId, http.StatusInternalServerError, "Request failed: "+err.Error())
+				debugResponse.Body.Close()
+				continue
+			}
+
+			debugResponse.Body.Close()
+			nc.responseChannel <- nodeResponse{
+				Id:     action.requestId,
+				Result: json.RawMessage(buffer.Bytes()),
+				Last:   true,
+			}
+		}
+	}
+}
+
+// Sends responses to the diagnostics system.
+// (support cmd) ----> (diagnostics system)
+func (nc *nodeConnection) processResponses() {
+	for response := range nc.responseChannel {
+		select {
+		case <-nc.ctx.Done():
+			return
+		default:
+		}
+
+		if err := nc.codec.WriteJSON(nc.ctx, response); err != nil {
+			fmt.Println("Failed to send response", err)
+		}
+	}
+}
+
+// detect if the method is a txpool subscription
+// TODO: implementation of other subscriptions (e.g. downloader)
+// TODO: change subscribe from plain string to something more structured
+func isSubscribe(method string) bool {
+	return method == "subscribe/txpool"
+}
+
+func isUnsubscribe(method string) bool {
+	return method == "unsubscribe/txpool"
+}
+
+func errorResponseMessage(requestId string, code int64, message string) nodeResponse {
+	return nodeResponse{
+		Id: requestId,
+		Error: &responseError{
+			Code:    code,
+			Message: message,
+		},
+		Last: true,
+	}
+}
+
+// Processes and copies the HTTP response body to a buffer based on content type.
+// Supported Content Types: application/json, application/octet-stream, application/profile
+func copyResponseBody(buffer *bytes.Buffer, debugResponse *http.Response) error {
+	switch debugResponse.Header.Get("Content-Type") {
+	case "application/json":
+		_, err := io.Copy(buffer, debugResponse.Body)
+		return err
+	case "application/octet-stream":
+		if _, err := io.Copy(buffer, debugResponse.Body); err != nil {
+			return err
+		}
+		offset, _ := strconv.ParseInt(debugResponse.Header.Get("X-Offset"), 10, 64)
+		size, _ := strconv.ParseInt(debugResponse.Header.Get("X-Size"), 10, 64)
+		data, err := json.Marshal(struct {
+			Offset int64  `json:"offset"`
+			Size   int64  `json:"size"`
+			Data   []byte `json:"chunk"`
+		}{
+			Offset: offset,
+			Size:   size,
+			Data:   buffer.Bytes(),
+		})
+		if err != nil {
+			return err
+		}
+		buffer.Reset()
+		buffer.Write(data)
+	case "application/profile":
+		if _, err := io.Copy(buffer, debugResponse.Body); err != nil {
+			return err
+		}
+		data, err := json.Marshal(struct {
+			Data []byte `json:"chunk"`
+		}{
+			Data: buffer.Bytes(),
+		})
+		if err != nil {
+			return err
+		}
+		buffer.Reset()
+		buffer.Write(data)
+	default:
+		return fmt.Errorf("unhandled content type: %s, from: %s", debugResponse.Header.Get("Content-Type"), debugResponse.Request.URL)
+	}
+	return nil
 }
