@@ -2013,15 +2013,6 @@ func (dt *DomainRoTx) Files() (res VisibleFiles) {
 }
 func (dt *DomainRoTx) Name() kv.Domain { return dt.name }
 
-func versionTooLowPanic(filename string, version version.Versions) {
-	panic(fmt.Sprintf(
-		"FileVersion is too low, try to run snapshot reset: `erigon --datadir $DATADIR --chain $CHAIN snapshots reset`. file=%s, min_supported=%s, current=%s",
-		filename,
-		version.MinSupported,
-		version.Current,
-	))
-}
-
 // [startTxNum, endTxNum)
 func (dt *DomainRoTx) TraceKey(ctx context.Context, key []byte, startTxNum, endTxNum uint64, roTx kv.Tx) (stream.U64V, error) {
 	// need to do this first as TraceKey doesn't work if internal seg readers are seeked into different locations
