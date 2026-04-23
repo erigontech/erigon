@@ -635,18 +635,20 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 				vTxNum := baseTxNum + uint64(off)
 				seqBuilder.AddOffset(vTxNum)
 
-				var (
-					val      []byte
-					fetchErr error
-				)
+				var val []byte
 				if i == 0 {
 					binary.BigEndian.PutUint64(numBuf, vTxNum)
-					val, fetchErr = cd.SeekBothRange(prevKey, numBuf)
+					var err error
+					val, err = cd.SeekBothRange(prevKey, numBuf)
+					if err != nil {
+						return fmt.Errorf("seekBothRange %s history val [%x]: %w", h.FilenameBase, prevKey, err)
+					}
 				} else {
-					_, val, fetchErr = cd.NextDup()
-				}
-				if fetchErr != nil {
-					return fmt.Errorf("seek %s history val [%x]: %w", h.FilenameBase, prevKey, fetchErr)
+					var err error
+					_, val, err = cd.NextDup()
+					if err != nil {
+						return fmt.Errorf("nextDup %s history val [%x]: %w", h.FilenameBase, prevKey, err)
+					}
 				}
 				if val != nil && binary.BigEndian.Uint64(val) == vTxNum {
 					val = val[8:]
@@ -665,23 +667,23 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 				vTxNum := baseTxNum + uint64(off)
 				seqBuilder.AddOffset(vTxNum)
 
-				var (
-					val      []byte
-					fetchErr error
-				)
+				var val []byte
 				if i == 0 {
 					binary.BigEndian.PutUint64(numBuf, vTxNum)
 					keyBuf = append(append(keyBuf[:0], prevKey...), numBuf...)
-					_, val, fetchErr = c.SeekExact(keyBuf)
-				} else {
-					var nextKey []byte
-					nextKey, val, fetchErr = c.Next()
-					if len(nextKey) != len(prevKey)+8 || !bytes.Equal(nextKey[:len(prevKey)], prevKey) {
-						val = nil
+					var err error
+					_, val, err = c.SeekExact(keyBuf)
+					if err != nil {
+						return fmt.Errorf("seekExact %s history val [%x]: %w", h.FilenameBase, prevKey, err)
 					}
-				}
-				if fetchErr != nil {
-					return fmt.Errorf("seek %s history val [%x]: %w", h.FilenameBase, prevKey, fetchErr)
+				} else {
+					nextKey, nextVal, err := c.Next()
+					if err != nil {
+						return fmt.Errorf("next %s history val [%x]: %w", h.FilenameBase, prevKey, err)
+					}
+					if len(nextKey) == len(prevKey)+8 && bytes.Equal(nextKey[:len(prevKey)], prevKey) {
+						val = nextVal
+					}
 				}
 				if len(val) == 0 {
 					val = nil
