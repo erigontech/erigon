@@ -166,6 +166,14 @@ type GetPayloadResponse struct {
 	sszVersion            int
 }
 
+type NewPayloadRequest struct {
+	Payload               *ExecutionPayload
+	BlobVersionedHashes   []common.Hash
+	ParentBeaconBlockRoot common.Hash
+	ExecutionRequests     []hexutil.Bytes
+	sszVersion            int
+}
+
 type ClientVersionV1 struct {
 	Code    string `json:"code" gencodec:"required"`
 	Name    string `json:"name" gencodec:"required"`

@@ -459,7 +459,7 @@ func TestSszRestNewPayloadV1ValidSSZ(t *testing.T) {
 		// Should be an SSZ PayloadStatus response (minimum 9 bytes fixed + 1 byte union selector)
 		req.GreaterOrEqual(len(respBody), 10)
 		// Decode the response to verify it's valid SSZ
-		ps, err := engine_types.DecodePayloadStatusSSZ(respBody)
+		ps, err := engine_types.DecodePayloadStatus(respBody)
 		req.NoError(err)
 		req.NotEmpty(ps.Status)
 	} else {

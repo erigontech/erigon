@@ -39,7 +39,7 @@ func TestPayloadStatusSSZRoundTrip(t *testing.T) {
 
 	encoded, err := ps.EncodeSSZ(nil)
 	req.NoError(err)
-	decoded, err := DecodePayloadStatusSSZ(encoded)
+	decoded, err := DecodePayloadStatus(encoded)
 	req.NoError(err)
 	req.Equal(ps.Status, decoded.Status)
 	req.NotNil(decoded.LatestValidHash)
@@ -54,7 +54,7 @@ func TestPayloadStatusSSZRoundTrip(t *testing.T) {
 
 	encoded2, err := ps2.EncodeSSZ(nil)
 	req.NoError(err)
-	decoded2, err := DecodePayloadStatusSSZ(encoded2)
+	decoded2, err := DecodePayloadStatus(encoded2)
 	req.NoError(err)
 	req.Equal(SyncingStatus, decoded2.Status)
 	req.Nil(decoded2.LatestValidHash)
@@ -73,7 +73,7 @@ func TestPayloadStatusConversion(t *testing.T) {
 
 	encoded, err := ps.EncodeSSZ(nil)
 	req.NoError(err)
-	back, err := DecodePayloadStatusSSZ(encoded)
+	back, err := DecodePayloadStatus(encoded)
 	req.NoError(err)
 	req.Equal(ValidStatus, back.Status)
 	req.Equal(hash, *back.LatestValidHash)
@@ -211,7 +211,7 @@ func TestGetBlobsRequestEmpty(t *testing.T) {
 func TestPayloadStatusSSZDecodeShortBuffer(t *testing.T) {
 	req := require.New(t)
 
-	_, err := DecodePayloadStatusSSZ(make([]byte, 5))
+	_, err := DecodePayloadStatus(make([]byte, 5))
 	req.Error(err)
 }
 
@@ -220,7 +220,6 @@ func TestCapabilitiesDecodeShortBuffer(t *testing.T) {
 
 	_, err := DecodeCapabilities(make([]byte, 2))
 	req.Error(err)
-	req.Contains(err.Error(), "buffer too short")
 }
 
 func TestClientVersionDecodeShortBuffer(t *testing.T) {
@@ -450,8 +449,8 @@ func TestNewPayloadRequestV1RoundTrip(t *testing.T) {
 	req := require.New(t)
 
 	ep := makeTestExecutionPayloadV1()
-	encoded := EncodeNewPayloadRequestSSZ(ep, nil, nil, nil, 1)
-	decodedEp, blobHashes, parentRoot, execReqs, err := DecodeNewPayloadRequestSSZ(encoded, 1)
+	encoded := EncodeNewPayloadRequest(ep, nil, nil, nil, 1)
+	decodedEp, blobHashes, parentRoot, execReqs, err := DecodeNewPayloadRequest(encoded, 1)
 	req.NoError(err)
 	req.Nil(blobHashes)
 	req.Nil(parentRoot)
@@ -476,8 +475,8 @@ func TestNewPayloadRequestV3RoundTrip(t *testing.T) {
 	}
 	root := common.HexToHash("0xcccc")
 
-	encoded := EncodeNewPayloadRequestSSZ(ep, hashes, &root, nil, 3)
-	decodedEp, decodedHashes, decodedRoot, _, err := DecodeNewPayloadRequestSSZ(encoded, 3)
+	encoded := EncodeNewPayloadRequest(ep, hashes, &root, nil, 3)
+	decodedEp, decodedHashes, decodedRoot, _, err := DecodeNewPayloadRequest(encoded, 3)
 	req.NoError(err)
 	req.Equal(ep.BlockHash, decodedEp.BlockHash)
 	req.Len(decodedHashes, 2)
@@ -503,8 +502,8 @@ func TestNewPayloadRequestV4RoundTrip(t *testing.T) {
 		{0x01, 0x04, 0x05},
 	}
 
-	encoded := EncodeNewPayloadRequestSSZ(ep, hashes, &root, execReqs, 4)
-	decodedEp, decodedHashes, decodedRoot, decodedReqs, err := DecodeNewPayloadRequestSSZ(encoded, 4)
+	encoded := EncodeNewPayloadRequest(ep, hashes, &root, execReqs, 4)
+	decodedEp, decodedHashes, decodedRoot, decodedReqs, err := DecodeNewPayloadRequest(encoded, 4)
 	req.NoError(err)
 	req.Equal(ep.BlockHash, decodedEp.BlockHash)
 	req.Len(decodedHashes, 1)
@@ -561,7 +560,6 @@ func TestGetPayloadResponseShortBuffer(t *testing.T) {
 
 	_, err := DecodeGetPayloadResponseSSZ(make([]byte, 10), 2)
 	req.Error(err)
-	req.Contains(err.Error(), "buffer too short")
 }
 
 // --- uint256 SSZ conversion tests ---

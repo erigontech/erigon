@@ -17,18 +17,18 @@
 package engineapi
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 
 	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	ssz2 "github.com/erigontech/erigon/cl/ssz"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
-	commonssz "github.com/erigontech/erigon/common/ssz"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -164,7 +164,7 @@ func (s *SszRestServer) handleNewPayload(w http.ResponseWriter, r *http.Request,
 	}
 
 	// Decode the SSZ request: V1/V2 is just ExecutionPayload, V3/V4 is a wrapper container
-	ep, blobHashes, parentBeaconBlockRoot, executionRequests, err := engine_types.DecodeNewPayloadRequestSSZ(body, version)
+	ep, blobHashes, parentBeaconBlockRoot, executionRequests, err := engine_types.DecodeNewPayloadRequest(body, version)
 	if err != nil {
 		sszErrorResponse(w, http.StatusBadRequest, -32602, fmt.Sprintf("SSZ decode error: %v", err))
 		return
@@ -232,43 +232,26 @@ func (s *SszRestServer) handleForkchoiceUpdated(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// SSZ Container layout per execution-apis spec:
-	// Fixed: forkchoice_state(96) + payload_attributes_offset(4) = 100 bytes
-	// Variable: List[PayloadAttributes, 1] (0 elements = no attributes, 1 element = attributes present)
-	const fixedSize = 100
-
+	const fixedSize = 100 // forkchoice_state(96) + payload_attributes_offset(4)
 	if len(body) < fixedSize {
 		sszErrorResponse(w, http.StatusBadRequest, -32602, "request body too short for ForkchoiceUpdatedRequest")
 		return
 	}
-
-	// Decode ForkchoiceState (first 96 bytes)
-	fcs, err := engine_types.DecodeForkchoiceState(body[:96])
-	if err != nil {
-		sszErrorResponse(w, http.StatusBadRequest, -32602, err.Error())
+	attrOffset := int(binary.LittleEndian.Uint32(body[96:]))
+	if attrOffset < fixedSize || attrOffset > len(body) || (attrOffset < len(body) && len(body)-attrOffset < 4) {
+		sszErrorResponse(w, http.StatusBadRequest, -32602, "invalid payload attributes list offset")
 		return
 	}
 
+	fcs := &engine_types.ForkChoiceState{}
+	payloadAttributesList := solid.NewDynamicListSSZ[*engine_types.PayloadAttributes](1)
+	if err := ssz2.UnmarshalSSZ(body, version, fcs, payloadAttributesList); err != nil {
+		sszErrorResponse(w, http.StatusBadRequest, -32602, fmt.Sprintf("SSZ decode error: %v", err))
+		return
+	}
 	var payloadAttributes *engine_types.PayloadAttributes
-
-	attrOffset := commonssz.DecodeOffset(body[96:])
-	if attrOffset < uint32(len(body)) {
-		attrData := body[attrOffset:]
-		if len(attrData) > 0 {
-			// List[PayloadAttributes, 1]: since PayloadAttributes is variable-size,
-			// the list data is offset(4) + element. Skip the 4-byte list item offset.
-			if len(attrData) < 4 {
-				sszErrorResponse(w, http.StatusBadRequest, -32602, "payload attributes list too short")
-				return
-			}
-			pa, err := decodePayloadAttributesSSZ(attrData[4:], version)
-			if err != nil {
-				sszErrorResponse(w, http.StatusUnprocessableEntity, -32602, err.Error())
-				return
-			}
-			payloadAttributes = pa
-		}
-		// Empty list = no attributes (payloadAttributes stays nil)
+	if payloadAttributesList.Len() > 0 {
+		payloadAttributes = payloadAttributesList.Get(0)
 	}
 
 	ctx := r.Context()
@@ -300,70 +283,6 @@ func (s *SszRestServer) handleForkchoiceUpdated(w http.ResponseWriter, r *http.R
 	respBytes := engine_types.EncodeForkchoiceUpdatedResponse(resp)
 	s.logger.Info("[SSZ-REST] ForkchoiceUpdated encoded", "len", len(respBytes), "first20", fmt.Sprintf("%x", respBytes[:min(20, len(respBytes))]))
 	sszResponse(w, respBytes)
-}
-
-// decodePayloadAttributesSSZ decodes PayloadAttributes from SSZ bytes.
-// The version determines the layout:
-//   - V1 (Bellatrix): timestamp(8) + prev_randao(32) + fee_recipient(20) = 60 bytes fixed
-//   - V2 (Capella): timestamp(8) + prev_randao(32) + fee_recipient(20) + withdrawals_offset(4) = 64 bytes fixed + withdrawals
-//   - V3 (Deneb/Electra): same as V2 + parent_beacon_block_root(32) = 96 bytes fixed + withdrawals
-func decodePayloadAttributesSSZ(buf []byte, version int) (*engine_types.PayloadAttributes, error) {
-	if len(buf) < 60 {
-		return nil, fmt.Errorf("PayloadAttributes: buffer too short (%d < 60)", len(buf))
-	}
-
-	timestamp := commonssz.UnmarshalUint64SSZ(buf[0:])
-	pa := &engine_types.PayloadAttributes{
-		Timestamp: hexutil.Uint64(timestamp),
-	}
-	copy(pa.PrevRandao[:], buf[8:40])
-	copy(pa.SuggestedFeeRecipient[:], buf[40:60])
-
-	if version == 1 {
-		return pa, nil
-	}
-
-	// V2+: has withdrawals_offset at byte 60
-	if len(buf) < 64 {
-		return nil, fmt.Errorf("PayloadAttributes V2+: buffer too short (%d < 64)", len(buf))
-	}
-	withdrawalsOffset := commonssz.DecodeOffset(buf[60:])
-
-	if version >= 3 {
-		// V3: has parent_beacon_block_root at bytes 64-96
-		if len(buf) < 96 {
-			return nil, fmt.Errorf("PayloadAttributes V3: buffer too short (%d < 96)", len(buf))
-		}
-		root := common.BytesToHash(buf[64:96])
-		pa.ParentBeaconBlockRoot = &root
-	}
-
-	// Decode withdrawals from the offset
-	if withdrawalsOffset <= uint32(len(buf)) {
-		wdBuf := buf[withdrawalsOffset:]
-		if len(wdBuf) > 0 {
-			// Each withdrawal = 44 bytes (index:8 + validator:8 + address:20 + amount:8)
-			if len(wdBuf)%44 != 0 {
-				return nil, fmt.Errorf("PayloadAttributes: withdrawals buffer length %d not divisible by 44", len(wdBuf))
-			}
-			count := len(wdBuf) / 44
-			pa.Withdrawals = make([]*types.Withdrawal, count)
-			for i := 0; i < count; i++ {
-				off := i * 44
-				w := &types.Withdrawal{
-					Index:     commonssz.UnmarshalUint64SSZ(wdBuf[off:]),
-					Validator: commonssz.UnmarshalUint64SSZ(wdBuf[off+8:]),
-					Amount:    commonssz.UnmarshalUint64SSZ(wdBuf[off+36:]),
-				}
-				copy(w.Address[:], wdBuf[off+16:off+36])
-				pa.Withdrawals[i] = w
-			}
-		} else {
-			pa.Withdrawals = []*types.Withdrawal{}
-		}
-	}
-
-	return pa, nil
 }
 
 // --- getPayload handlers (GET with payload_id in URL path) ---
@@ -530,48 +449,7 @@ func (s *SszRestServer) handleGetBlobsV1(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Encode blobs response: count(4) + for each blob: has_blob(1) + blob(131072) + proof(48)
-	respBuf := encodeGetBlobsV1Response(result)
-	sszResponse(w, respBuf)
-}
-
-// encodeGetBlobsV1Response encodes the GetBlobsV1 response as an SSZ Container.
-// Layout: list_offset(4) + N * BlobAndProof (each 131120 bytes = blob:131072 + proof:48)
-// Only non-nil blobs are included in the list.
-func encodeGetBlobsV1Response(blobs []*engine_types.BlobAndProofV1) []byte {
-	const blobAndProofSize = 131072 + 48 // blob + KZG proof
-
-	// Count non-nil blobs
-	var count int
-	for _, b := range blobs {
-		if b != nil {
-			count++
-		}
-	}
-
-	// SSZ Container with a single List field
-	fixedSize := 4 // list_offset
-	listSize := count * blobAndProofSize
-	buf := make([]byte, fixedSize+listSize)
-
-	// Offset to the list data
-	commonssz.EncodeOffset(buf[0:], uint32(fixedSize))
-
-	// Write each non-nil BlobAndProof as fixed-size items
-	pos := fixedSize
-	for _, b := range blobs {
-		if b == nil {
-			continue
-		}
-		// Blob (131072 bytes, zero-padded if shorter)
-		copy(buf[pos:pos+131072], b.Blob)
-		pos += 131072
-		// Proof (48 bytes, zero-padded if shorter)
-		copy(buf[pos:pos+48], b.Proof)
-		pos += 48
-	}
-
-	return buf
+	sszResponse(w, engine_types.EncodeGetBlobsV1Response(result))
 }
 
 // --- exchangeCapabilities handler ---
