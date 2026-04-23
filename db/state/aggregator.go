@@ -1957,34 +1957,38 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 		}
 
 		// Gap detection: refuse to build when MDBX's earliest history entry lies
-		// strictly above `step`. In that case iterating [step, lastInDB) would
-		// collate empty ranges for the gap steps, producing header-only .kv
-		// files. A subsequent merge combines those with older preverified files
-		// and yields a composite file whose advertised step range is larger
-		// than its actual data coverage — silent, permanent state corruption.
+		// strictly above `step` AND we already have snapshot files below `step`.
+		// In that case iterating [step, lastInDB) would collate empty ranges for
+		// the gap steps, producing header-only .kv files. A subsequent merge
+		// combines those with the existing earlier files and yields a composite
+		// whose advertised step range is larger than its actual data coverage —
+		// silent, permanent state corruption.
 		//
-		// This typically indicates the preverified snapshot set doesn't reach
-		// MDBX's minimum step (e.g. execution started on a partially-covered
-		// datadir). The user must close the gap — usually by removing state
-		// snapshots and re-syncing — before aggregation can safely proceed.
-		var firstInDB kv.Step
-		var anyHasData bool
-		for _, d := range []*Domain{a.d[kv.AccountsDomain], a.d[kv.StorageDomain], a.d[kv.CodeDomain]} {
-			if s, ok := firstIdInDB(a.db, d); ok {
-				if !anyHasData || s < firstInDB {
-					firstInDB = s
+		// The `step > 0` clause is what distinguishes this from a legitimate
+		// empty step on a fresh datadir (no earlier files exist, so there's
+		// nothing to merge with and no corruption path). The bug only lives on
+		// datadirs where the preverified snapshot set stops below MDBX's
+		// minimum step.
+		if step > 0 {
+			var firstInDB kv.Step
+			var anyHasData bool
+			for _, d := range []*Domain{a.d[kv.AccountsDomain], a.d[kv.StorageDomain], a.d[kv.CodeDomain]} {
+				if s, ok := firstIdInDB(a.db, d); ok {
+					if !anyHasData || s < firstInDB {
+						firstInDB = s
+					}
+					anyHasData = true
 				}
-				anyHasData = true
 			}
-		}
-		if anyHasData && firstInDB > step {
-			a.logger.Error("[snapshots] gap between snapshots and MDBX — refusing to build files",
-				"step", step, "firstInDB", firstInDB, "lastInDB", lastInDB,
-				"hint", "MDBX history starts above the next step to aggregate; building here would create empty step files and a merge would silently drop state. "+
-					"To recover, stop erigon and delete BOTH the state snapshots (e.g. `erigon snapshots reset`) AND the chaindata/ directory, then re-sync. "+
-					"Removing only the snapshots is not enough: an earlier build may have already populated chaindata with values read from a corrupt snapshot file.")
-			close(fin)
-			return
+			if anyHasData && firstInDB > step {
+				a.logger.Error("[snapshots] gap between snapshots and MDBX — refusing to build files",
+					"step", step, "firstInDB", firstInDB, "lastInDB", lastInDB,
+					"hint", "MDBX history starts above the next step to aggregate; building here would create empty step files and a merge would silently drop state. "+
+						"To recover, stop erigon and delete BOTH the state snapshots (e.g. `erigon snapshots reset`) AND the chaindata/ directory, then re-sync. "+
+						"Removing only the snapshots is not enough: an earlier build may have already populated chaindata with values read from a corrupt snapshot file.")
+				close(fin)
+				return
+			}
 		}
 
 		// trying to create as much small-step-files as possible:
