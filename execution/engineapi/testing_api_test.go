@@ -35,9 +35,11 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -965,6 +967,51 @@ func TestForkchoiceUpdatedV2PayloadAttributesWithdrawalsValidation(t *testing.T)
 		require.Error(t, err)
 		require.Equal(t, -38003, err.(rpc.Error).ErrorCode())
 	})
+}
+
+// TestForkchoiceUpdatedV2ValidatesAttributesWhenSyncing pins the engine-api spec
+// requirement that payloadAttributes validation runs regardless of fork-choice
+// sync state. The hive `engine-withdrawals / Empty Withdrawals (Paris)` test
+// exercises exactly this: CLMocker sends fcuV2 with nil withdrawals at a
+// Shanghai timestamp while the EL reports SYNCING, and expects -38003.
+func TestForkchoiceUpdatedV2ValidatesAttributesWhenSyncing(t *testing.T) {
+	t.Parallel()
+
+	forkchoiceState := &engine_types.ForkChoiceState{
+		HeadHash:           common.Hash{0x1},
+		SafeBlockHash:      common.Hash{0x2},
+		FinalizedBlockHash: common.Hash{0x3},
+	}
+	stub := &stubExecutionModule{} // GetHeaderHashNumber returns nil -> HandleForkChoice -> SYNCING
+	srv := NewEngineServer(
+		log.New(),
+		preCancunChainConfig(),
+		stub,
+		// minimal downloader just provides the badHeaders LRU used by
+		// getQuickPayloadStatusIfPossible; other deps are not touched because
+		// srv.test = true guards StartDownloading below.
+		engine_block_downloader.NewEngineBlockDownloader(
+			context.Background(), log.New(), stub, nil, nil, preCancunChainConfig(), ethconfig.Sync{}, nil,
+		),
+		false,
+		false,
+		false,
+		true,
+		nil,
+		0,
+		0,
+	)
+	srv.test = true // avoid invoking downloader.StartDownloading on the SYNCING path
+
+	resp, err := srv.forkchoiceUpdated(context.Background(), forkchoiceState, &engine_types.PayloadAttributes{
+		Timestamp:             hexutil.Uint64(1001),
+		PrevRandao:            common.Hash{0xaa},
+		SuggestedFeeRecipient: common.HexToAddress("0x1111111111111111111111111111111111111111"),
+		Withdrawals:           nil, // invalid: Shanghai timestamp requires non-nil withdrawals
+	}, clparams.CapellaVersion)
+	require.Nil(t, resp)
+	require.Error(t, err)
+	require.Equal(t, -38003, err.(rpc.Error).ErrorCode())
 }
 
 func ptrUint64(v uint64) *uint64 {
