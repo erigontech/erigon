@@ -18,7 +18,6 @@ package stream_test
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"testing"
 
@@ -82,7 +81,7 @@ func TestUnion(t *testing.T) {
 }
 func TestUnionPairs(t *testing.T) {
 	db := memdb.NewTestDB(t, dbcfg.ChainDB)
-	ctx := context.Background()
+	ctx := t.Context()
 	t.Run("simple", func(t *testing.T) {
 		require := require.New(t)
 		tx, err := db.BeginRw(ctx)
@@ -152,7 +151,7 @@ func TestUnionPairs(t *testing.T) {
 
 func TestMultisetKV(t *testing.T) {
 	db := memdb.NewTestDB(t, dbcfg.ChainDB)
-	ctx := context.Background()
+	ctx := t.Context()
 	t.Run("preserves duplicates", func(t *testing.T) {
 		require := require.New(t)
 		tx, err := db.BeginRw(ctx)
