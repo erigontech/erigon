@@ -601,7 +601,6 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 	baseTxNum := uint64(step) * h.stepSize
 	var (
 		keyBuf = make([]byte, 0, 256)
-		numBuf = make([]byte, 8)
 		// offsets: stores (txNum-baseTxNum) values; ETL delivers txNums sorted per key
 		// so no dedup/sort needed. Safe: collate covers exactly one step so values < stepSize < math.MaxUint32.
 		// Worst case: one key touched every txNum in the step → stepSize uint32 entries.
@@ -628,18 +627,27 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 		}
 		seqBuilder.Reset(baseTxNum, uint64(len(offsets)), baseTxNum+uint64(offsets[len(offsets)-1]))
 
+		// prevKey is fixed for the whole group. Set up histKeyBuf[8:] = prevKey once;
+		// only the txNum prefix (first 8 bytes) is overwritten per iteration.
+		if cap(histKeyBuf) < 8+len(prevKey) {
+			histKeyBuf = make([]byte, 8+len(prevKey))
+		} else {
+			histKeyBuf = histKeyBuf[:8+len(prevKey)]
+		}
+		copy(histKeyBuf[8:], prevKey)
+
 		if !h.HistoryLargeValues {
 			// Offsets are sorted ascending; DupSort dups are sorted ascending by txNum.
 			// Seek only for the first txNum per key group; step sequentially for the rest.
 			for i, off := range offsets {
 				vTxNum := baseTxNum + uint64(off)
 				seqBuilder.AddOffset(vTxNum)
+				binary.BigEndian.PutUint64(histKeyBuf, vTxNum)
 
 				var val []byte
 				if i == 0 {
-					binary.BigEndian.PutUint64(numBuf, vTxNum)
 					var err error
-					val, err = cd.SeekBothRange(prevKey, numBuf)
+					val, err = cd.SeekBothRange(prevKey, histKeyBuf[:8])
 					if err != nil {
 						return fmt.Errorf("seekBothRange %s history val [%x]: %w", h.FilenameBase, prevKey, err)
 					}
@@ -655,7 +663,6 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 				} else {
 					val = nil
 				}
-				histKeyBuf = historyKey(vTxNum, prevKey, histKeyBuf)
 				if err := historyWriter.Add(histKeyBuf, val); err != nil {
 					return fmt.Errorf("add %s history val [%x]: %w", h.FilenameBase, prevKey, err)
 				}
@@ -663,14 +670,21 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 		} else {
 			// LargeValues keys are prevKey+txNum, sorted lexicographically.
 			// Seek only for the first txNum per key group; step sequentially for the rest.
+			// Set up keyBuf prefix (prevKey) once; only the 8-byte txNum suffix changes per seek.
+			if cap(keyBuf) < len(prevKey)+8 {
+				keyBuf = make([]byte, len(prevKey)+8)
+			} else {
+				keyBuf = keyBuf[:len(prevKey)+8]
+			}
+			copy(keyBuf, prevKey)
 			for i, off := range offsets {
 				vTxNum := baseTxNum + uint64(off)
 				seqBuilder.AddOffset(vTxNum)
+				binary.BigEndian.PutUint64(histKeyBuf, vTxNum)
 
 				var val []byte
 				if i == 0 {
-					binary.BigEndian.PutUint64(numBuf, vTxNum)
-					keyBuf = append(append(keyBuf[:0], prevKey...), numBuf...)
+					binary.BigEndian.PutUint64(keyBuf[len(prevKey):], vTxNum)
 					var err error
 					_, val, err = c.SeekExact(keyBuf)
 					if err != nil {
@@ -688,7 +702,6 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 				if len(val) == 0 {
 					val = nil
 				}
-				histKeyBuf = historyKey(vTxNum, prevKey, histKeyBuf)
 				if err := historyWriter.Add(histKeyBuf, val); err != nil {
 					return fmt.Errorf("add %s history val [%x]: %w", h.FilenameBase, prevKey, err)
 				}
