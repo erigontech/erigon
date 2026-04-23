@@ -518,46 +518,6 @@ func TestAggregator_CommittedTxNumGuard(t *testing.T) {
 		"guard should allow: committed txNum is well past the step")
 }
 
-// TestAggregator_firstIdInDB verifies the helper that detects the minimum step
-// with a history entry in a domain. This underpins the gap-detection guard in
-// buildFilesInBackground — see the comment there for why the guard exists.
-func TestAggregator_firstIdInDB(t *testing.T) {
-	t.Parallel()
-	stepSize := uint64(100)
-	db, agg := testDbAndAggregatorv3(t, stepSize)
-
-	accountsD := agg.d[kv.AccountsDomain]
-	commitmentD := agg.d[kv.CommitmentDomain] // HistoryDisabled=true
-
-	// Empty DB: no history entries anywhere.
-	firstStep, hasData := firstIdInDB(db, accountsD)
-	require.False(t, hasData, "empty DB must report no data")
-	require.Zero(t, firstStep)
-
-	// Commitment: HistoryDisabled, so the helper must report no meaningful answer.
-	firstStep, hasData = firstIdInDB(db, commitmentD)
-	require.False(t, hasData, "HistoryDisabled domain must report no data")
-	require.Zero(t, firstStep)
-
-	// Insert a single history-keys row at txNum 1000 (step 10).
-	putHistoryKey(t, db, accountsD.History.KeysTable, 1000, []byte("addr"))
-
-	firstStep, hasData = firstIdInDB(db, accountsD)
-	require.True(t, hasData)
-	require.Equal(t, kv.Step(10), firstStep, "txNum 1000 / stepSize 100 = step 10")
-
-	// Insert a lower txNum; firstStep must retreat to it.
-	putHistoryKey(t, db, accountsD.History.KeysTable, 250, []byte("addr2"))
-	firstStep, hasData = firstIdInDB(db, accountsD)
-	require.True(t, hasData)
-	require.Equal(t, kv.Step(2), firstStep, "txNum 250 / stepSize 100 = step 2")
-
-	// Another domain without any entries must still report no data independently.
-	firstStep, hasData = firstIdInDB(db, agg.d[kv.StorageDomain])
-	require.False(t, hasData)
-	require.Zero(t, firstStep)
-}
-
 // TestAggregator_BuildFiles_GapRefuses verifies that buildFilesInBackground
 // refuses to aggregate when MDBX's earliest history entry lies strictly above
 // the next step to build AND snapshot files already cover the earlier range.

@@ -1968,19 +1968,23 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 		// empty step on a fresh datadir (no earlier files exist, so there's
 		// nothing to merge with and no corruption path). The bug only lives on
 		// datadirs where the preverified snapshot set stops below MDBX's
-		// minimum step.
+		// minimum step. `minStepInDB` returns 0 for both "no keys" and "first
+		// key at step 0"; either way a zero can't exceed a positive `step`, so
+		// we don't need to disambiguate.
 		if step > 0 {
 			var firstInDB kv.Step
-			var anyHasData bool
-			for _, d := range []*Domain{a.d[kv.AccountsDomain], a.d[kv.StorageDomain], a.d[kv.CodeDomain]} {
-				if s, ok := firstIdInDB(a.db, d); ok {
-					if !anyHasData || s < firstInDB {
+			if err := a.db.View(a.ctx, func(tx kv.Tx) error {
+				for _, d := range []*Domain{a.d[kv.AccountsDomain], a.d[kv.StorageDomain], a.d[kv.CodeDomain]} {
+					s := kv.Step(d.minStepInDB(tx))
+					if s > 0 && (firstInDB == 0 || s < firstInDB) {
 						firstInDB = s
 					}
-					anyHasData = true
 				}
+				return nil
+			}); err != nil {
+				a.logger.Warn("[snapshots] gap-detection", "err", err)
 			}
-			if anyHasData && firstInDB > step {
+			if firstInDB > step {
 				a.logger.Error("[snapshots] gap between snapshots and MDBX — refusing to build files",
 					"step", step, "firstInDB", firstInDB, "lastInDB", lastInDB,
 					"hint", "MDBX history starts above the next step to aggregate; building here would create empty step files and a merge would silently drop state. "+
@@ -2387,25 +2391,4 @@ func lastIdInDB(db kv.RoDB, domain *Domain) (lstInDb kv.Step) {
 		log.Warn("[snapshots] lastIdInDB", "history", domain.HistoryDisabled, "err", err)
 	}
 	return lstInDb
-}
-
-// firstIdInDB returns the minimum step with a history entry in the domain's
-// History.KeysTable, and whether any history entry exists at all. Returns
-// (0, false) for domains whose history is disabled (no meaningful answer).
-func firstIdInDB(db kv.RoDB, domain *Domain) (firstStep kv.Step, hasData bool) {
-	if domain.HistoryDisabled {
-		return 0, false
-	}
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		lstIdx, _ := kv.FirstKey(tx, domain.History.KeysTable)
-		if len(lstIdx) == 0 {
-			return nil
-		}
-		hasData = true
-		firstStep = kv.Step(binary.BigEndian.Uint64(lstIdx) / domain.stepSize)
-		return nil
-	}); err != nil {
-		log.Warn("[snapshots] firstIdInDB", "domain", domain.FilenameBase, "err", err)
-	}
-	return
 }
