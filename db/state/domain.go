@@ -749,41 +749,21 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 	// Compress files only in `merge` which ok to be slow.
 	comp := seg.NewWriter(coll.valuesComp, seg.CompressNone)
 
-	stepBytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(stepBytes, ^uint64(step))
-
-	var valsCursor kv.Cursor
+	stepVal := ^uint64(step)
 
 	if d.LargeValues {
-		valsCursor, err = roTx.Cursor(d.ValuesTable)
+		valsCursor, err := roTx.Cursor(d.ValuesTable)
 		if err != nil {
-			return Collation{}, fmt.Errorf("create %s values cursorDupsort: %w", d.FilenameBase, err)
+			return Collation{}, fmt.Errorf("create %s values cursor: %w", d.FilenameBase, err)
 		}
-	} else {
-		valsCursor, err = roTx.CursorDupSort(d.ValuesTable)
-		if err != nil {
-			return Collation{}, fmt.Errorf("create %s values cursorDupsort: %w", d.FilenameBase, err)
-		}
-	}
-	defer valsCursor.Close()
-
-	var stepInDB []byte
-	for k, v, err := valsCursor.First(); k != nil; {
-		if err != nil {
-			return coll, err
-		}
-
-		if d.LargeValues {
-			stepInDB = k[len(k)-8:]
-		} else {
-			stepInDB = v[:8]
-		}
-		if !bytes.Equal(stepBytes, stepInDB) { // [txFrom; txTo)
-			k, v, err = valsCursor.Next()
-			continue
-		}
-
-		if d.LargeValues {
+		defer valsCursor.Close()
+		for k, v, err := valsCursor.First(); k != nil; k, v, err = valsCursor.Next() {
+			if err != nil {
+				return coll, err
+			}
+			if binary.BigEndian.Uint64(k[len(k)-8:]) != stepVal {
+				continue
+			}
 			bareKey := k[:len(k)-8]
 			if _, err = comp.Write(bareKey); err != nil {
 				return coll, fmt.Errorf("add %s values key [%x]: %w", d.FilenameBase, bareKey, err)
@@ -791,15 +771,28 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 			if _, err = comp.Write(v); err != nil {
 				return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, bareKey, v, err)
 			}
-			k, v, err = valsCursor.Next()
-		} else {
+		}
+	} else {
+		valsCursor, err := roTx.CursorDupSort(d.ValuesTable)
+		if err != nil {
+			return Collation{}, fmt.Errorf("create %s values cursorDupsort: %w", d.FilenameBase, err)
+		}
+		defer valsCursor.Close()
+		for k, v, err := valsCursor.First(); k != nil; {
+			if err != nil {
+				return coll, err
+			}
+			if binary.BigEndian.Uint64(v[:8]) != stepVal {
+				k, v, err = valsCursor.Next()
+				continue
+			}
 			if _, err = comp.Write(k); err != nil {
 				return coll, fmt.Errorf("add %s values key [%x]: %w", d.FilenameBase, k, err)
 			}
 			if _, err = comp.Write(v[8:]); err != nil {
 				return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, k, v[8:], err)
 			}
-			k, v, err = valsCursor.(kv.CursorDupSort).NextNoDup()
+			k, v, err = valsCursor.NextNoDup()
 		}
 	}
 
