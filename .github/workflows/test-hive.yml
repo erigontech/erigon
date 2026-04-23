@@ -25,12 +25,6 @@ jobs:
         # `sim` is the simulator path passed to `hive --sim`. Most simulators
         # live under simulators/ethereum/, but a few (e.g. devp2p) are top-level.
         include:
-          # engine-exchange-capabilities and engine-auth are the two smallest
-          # engine shards (~180s each) and both require 0 failures; running them
-          # together in one job frees a queue slot on the capacity-limited `hive`
-          # runner group. Alternation works because `--sim.limit.exact=false`
-          # treats the value as a regex and neither substring appears in other
-          # engine suite names.
           - sim: ethereum/engine
             sim-limit: exchange-capabilities|auth
             max-allowed-failures: 0

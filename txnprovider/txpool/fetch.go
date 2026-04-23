@@ -17,6 +17,7 @@
 package txpool
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -92,8 +93,10 @@ func NewFetch(
 	opts ...Option,
 ) *Fetch {
 	options := applyOpts(opts...)
-	// 64k entries covers ~1 day of typical announce traffic on mainnet and caps
-	// memory growth for a DoSing peer that spams unique hashes.
+	// 64k entries is roughly 1–2 hours of mainnet announcement traffic — more
+	// than the fetcher's own working window (announce → POOLED_TRANSACTIONS
+	// reply is typically seconds, at worst minutes), and bounded so a DoSing
+	// peer spamming unique hashes can't grow this unboundedly.
 	announcements, _ := maphash.NewLRU[announceInfo](64 * 1024)
 	f := &Fetch{
 		ctx:                  ctx,
@@ -116,32 +119,48 @@ func NewFetch(
 // peerHash maps a peer's H512 id to the 64-bit hash we store alongside each
 // announcement entry. It lets us tell whether the peer delivering a
 // PooledTransactions reply is the same one that announced the hash.
+// The check is probabilistic (64-bit birthday ~4B peers before a collision
+// is likely) — fine in practice, the worst case is a missed kick for a
+// different peer that hash-collides with the announcer.
 func peerHash(pid *typesproto.H512) uint64 {
 	b := gointerfaces.ConvertH512ToHash(pid)
 	return maphash.Hash(b[:])
 }
 
-// recordAnnouncement remembers the (type, size) a peer promised for hashes it
-// announced via eth/68 NewPooledTransactionHashes. Used later to detect peers
+// recordAnnouncement remembers the (type, size) a peer promised for each
+// announced hash that also appears in `filter`. Used later to detect peers
 // that lie in their announcements (see checkPooledTxnAnnouncement).
-func (f *Fetch) recordAnnouncement(pid *typesproto.H512, types []byte, sizes []uint32, hashes []byte) {
+//
+// `filter` must be a subset of `hashes` preserving order — pass the result of
+// FilterKnownIdHashes so we only record entries for txs we're about to fetch;
+// entries for already-known hashes would otherwise sit unused in the LRU
+// until evicted, displacing announcements we actually care about. Pass nil
+// to record every hash.
+func (f *Fetch) recordAnnouncement(pid *typesproto.H512, types []byte, sizes []uint32, hashes, filter []byte) {
 	if f.announcements == nil || len(types) == 0 {
 		return
 	}
 	ph := peerHash(pid)
 	const hashSize = 32
+	fPos := 0
 	for i := range types {
-		info := announceInfo{peerHash: ph, txnType: types[i], size: sizes[i]}
-		f.announcements.Set(hashes[i*hashSize:(i+1)*hashSize], info)
+		h := hashes[i*hashSize : (i+1)*hashSize]
+		if filter != nil {
+			if fPos >= len(filter) || !bytes.Equal(h, filter[fPos:fPos+hashSize]) {
+				continue
+			}
+			fPos += hashSize
+		}
+		f.announcements.Set(h, announceInfo{peerHash: ph, txnType: types[i], size: sizes[i]})
 	}
 }
 
 // announcedSizeSlack is the wiggle-room we allow between the size a peer
 // announces in eth/68 NewPooledTransactionHashes and the size it later
-// delivers. Matches go-ethereum's tx fetcher (eth/fetcher/tx_fetcher.go):
+// delivers. Matches go-ethereum's txSizeSlack (eth/fetcher/tx_fetcher.go):
 // typed-tx RLP vs consensus-format size accounting has off-by-a-few-bytes
 // quirks in the wild, so a strict equality check produces false positives.
-const announcedSizeSlack = 8
+const announcedSizeSlack = 16
 
 // checkPooledTxnAnnouncement returns an error if the peer delivering `slot`
 // announced it earlier with a different type or a grossly different size
@@ -393,6 +412,12 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 		// when one peer delivers a bad tx for an announced hash and gets kicked,
 		// the tx fetcher falls back to a different peer that announced the same
 		// hash, which only works if each peer's announcement is actually processed.
+		// Same-peer repeated announcements are not deduped here either: the
+		// dominant cost per announcement (a FilterKnownIdHashes call plus one
+		// GET_POOLED_TRANSACTIONS_66 per unknown hash) is self-limiting — once
+		// the pool has ingested the tx, FilterKnownIdHashes returns empty for
+		// all subsequent announcements. Per-peer announcement spam before that
+		// is a peer-reputation concern, not a fetcher dedup one.
 		switch req.Id {
 		case sentryproto.MessageId_TRANSACTIONS_66, sentryproto.MessageId_POOLED_TRANSACTIONS_66:
 			if _, seen := seenLRU.Get(req.Data); seen {
@@ -478,12 +503,15 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 			sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
 			return nil
 		}
-		f.recordAnnouncement(req.PeerId, types, sizes, hashes)
 
 		unknownHashes, err := f.pool.FilterKnownIdHashes(tx, hashes)
 		if err != nil {
 			return err
 		}
+		// Record only for unknown hashes — a POOLED_TRANSACTIONS_66 reply
+		// won't come back for already-known txs, so entries for them would
+		// just sit unused in the LRU until evicted.
+		f.recordAnnouncement(req.PeerId, types, sizes, hashes, unknownHashes)
 
 		if len(unknownHashes) > 0 {
 			var encodedRequest []byte

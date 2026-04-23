@@ -538,13 +538,14 @@ func TestCheckPooledTxnAnnouncement(t *testing.T) {
 	require.NoError(t, fetch.checkPooledTxnAnnouncement(peerID, slot))
 
 	// Record an announcement: peer promised (type=DynamicFee, size=200).
-	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{200}, hash[:])
+	// Tests pass nil filter to record every announced hash.
+	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{200}, hash[:], nil)
 
 	// Same peer, matching (type, size) — ok.
 	require.NoError(t, fetch.checkPooledTxnAnnouncement(peerID, slot))
 
 	// After a successful match the entry is consumed; re-announce for further checks.
-	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{200}, hash[:])
+	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{200}, hash[:], nil)
 
 	// Same peer, mismatching type (announcement says DynamicFee but we deliver Legacy).
 	badTypeSlot := &TxnSlot{IDHash: hash, Size: 200, Txn: &types.LegacyTx{}}
@@ -552,24 +553,43 @@ func TestCheckPooledTxnAnnouncement(t *testing.T) {
 		"peer delivering wrong type should be flagged")
 
 	// After the mismatch, re-announce and check the size path.
-	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{200}, hash[:])
+	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{200}, hash[:], nil)
 	badSizeSlot := &TxnSlot{IDHash: hash, Size: 999, Txn: &types.DynamicFeeTransaction{}}
 	require.Error(t, fetch.checkPooledTxnAnnouncement(peerID, badSizeSlot),
 		"peer delivering wrong size should be flagged")
 
-	// Size within the 8-byte slack is not a violation — RLP vs consensus-format
+	// Size within the 16-byte slack is not a violation — RLP vs consensus-format
 	// accounting can disagree by a handful of bytes for legacy/typed txs.
-	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{208}, hash[:])
+	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{216}, hash[:], nil)
 	require.NoError(t, fetch.checkPooledTxnAnnouncement(peerID, slot),
-		"size diff of 8 bytes should be within slack")
-	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{209}, hash[:])
+		"size diff of 16 bytes should be within slack")
+	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{217}, hash[:], nil)
 	require.Error(t, fetch.checkPooledTxnAnnouncement(peerID, slot),
-		"size diff of 9 bytes should exceed slack")
+		"size diff of 17 bytes should exceed slack")
 
 	// Different peer delivering the same hash must not be penalized based on
 	// another peer's announcement.
-	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{200}, hash[:])
+	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{200}, hash[:], nil)
 	require.NoError(t, fetch.checkPooledTxnAnnouncement(otherPeer, badTypeSlot))
+
+	// Filter subset: an announcement for a hash not in the filter is skipped.
+	//
+	//  - hashA is in the filter — its (type, size) should be recorded.
+	//  - hashB is absent from the filter — its entry must NOT be recorded,
+	//    so a subsequent check for hashB from the same peer is a no-op.
+	hashA := [32]byte{0xcc, 0x01}
+	hashB := [32]byte{0xcc, 0x02}
+	both := append(append([]byte{}, hashA[:]...), hashB[:]...)
+	filter := hashA[:] // only hashA survives FilterKnownIdHashes
+	fetch.recordAnnouncement(peerID,
+		[]byte{types.DynamicFeeTxType, types.DynamicFeeTxType},
+		[]uint32{200, 200}, both, filter)
+	require.NoError(t, fetch.checkPooledTxnAnnouncement(peerID,
+		&TxnSlot{IDHash: hashB, Size: 999, Txn: &types.DynamicFeeTransaction{}}),
+		"hashB was filtered out at record time, so no mismatch should fire")
+	require.Error(t, fetch.checkPooledTxnAnnouncement(peerID,
+		&TxnSlot{IDHash: hashA, Size: 999, Txn: &types.DynamicFeeTransaction{}}),
+		"hashA was recorded, so the wrong-size delivery must fire")
 }
 
 // TestCheckBlobSidecar verifies that a blob tx whose wrapper commitments do not
