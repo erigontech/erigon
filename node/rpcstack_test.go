@@ -297,8 +297,7 @@ func wsRequest(t *testing.T, url, browserOrigin string) error {
 		}
 		return err
 	}
-	conn.CloseNow()
-	return nil
+	return conn.Close(websocket.StatusNormalClosure, "")
 }
 
 func TestAllowList(t *testing.T) {
@@ -462,7 +461,7 @@ func TestWsConnectionLimit(t *testing.T) {
 
 	// First connection should succeed.
 	conn1, resp1, err := websocket.Dial(context.Background(), url, nil)
-	if resp1 != nil {
+	if err != nil && resp1 != nil {
 		resp1.Body.Close()
 	}
 	require.NoError(t, err, "first connection should succeed")
@@ -480,17 +479,17 @@ func TestWsConnectionLimit(t *testing.T) {
 	}
 
 	// Close first connection and wait for the counter to drop.
-	conn1.CloseNow()
+	require.NoError(t, conn1.Close(websocket.StatusNormalClosure, ""))
 	require.Eventually(t, func() bool { return srv.wsLimiter.count.Load() == 0 },
 		5*time.Second, 5*time.Millisecond)
 
 	// A new connection should now succeed.
 	conn3, resp3, err := websocket.Dial(context.Background(), url, nil)
-	if resp3 != nil {
+	if err != nil && resp3 != nil {
 		resp3.Body.Close()
 	}
 	require.NoError(t, err, "connection after limit released should succeed")
-	conn3.CloseNow()
+	require.NoError(t, conn3.Close(websocket.StatusNormalClosure, ""))
 }
 
 // TestNewWSConnectionLimiter tests the standalone NewWSConnectionLimiter handler.
