@@ -284,8 +284,8 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 	if err != nil {
 		return err
 	}
-	// If execution rejected the block no state changes will be emitted, so skip
-	// the state-diff wait below — otherwise stream.Recv() blocks indefinitely.
+	// On any non-success status the commit is skipped and no state-diff events
+	// will be emitted, so skip the wait below — otherwise stream.Recv() hangs.
 	if status != execmodule.ExecutionStatusSuccess {
 		blockNum := chain.Blocks[chain.Length()-1].NumberU64()
 		if validationErr != nil {
