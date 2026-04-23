@@ -1012,35 +1012,35 @@ func (iit *InvertedIndexRoTx) garbage(merged *FilesItem) (outs []*FilesItem) {
 func garbage(dirtyFiles *btree.BTreeG[*FilesItem], visibleFiles []visibleFile, merged *FilesItem, checker func(startTxNum, endTxNum uint64) bool) (outs []*FilesItem) {
 	// `kill -9` may leave some garbage
 	// AggRoTx doesn't have such files, only Agg.files does
-	dirtyFiles.Walk(func(items []*FilesItem) bool {
-		for _, item := range items {
-			if item.frozen {
-				continue
-			}
+	iter := dirtyFiles.Iter()
+	defer iter.Release()
+	for ok := iter.First(); ok; ok = iter.Next() {
+		item := iter.Item()
+		if item.frozen {
+			continue
+		}
 
-			if merged == nil {
-				if hasCoverVisibleFile(visibleFiles, item) {
-					outs = append(outs, item)
-				}
-				continue
-			}
-			// this case happens when in previous process run, the merged file was created,
-			// but the processed ended before subsumed files could be deleted.
-			// delete garbage file only if it's before merged range and it has bigger file (which indexed and visible for user now - using `DomainRoTx`)
-			if item.isBefore(merged) && hasCoverVisibleFile(visibleFiles, item) {
+		if merged == nil {
+			if hasCoverVisibleFile(visibleFiles, item) {
 				outs = append(outs, item)
-				continue
 			}
+			continue
+		}
+		// this case happens when in previous process run, the merged file was created,
+		// but the processed ended before subsumed files could be deleted.
+		// delete garbage file only if it's before merged range and it has bigger file (which indexed and visible for user now - using `DomainRoTx`)
+		if item.isBefore(merged) && hasCoverVisibleFile(visibleFiles, item) {
+			outs = append(outs, item)
+			continue
+		}
 
-			if item.isProperSubsetOf(merged) {
-				if checker == nil || !checker(item.startTxNum, item.endTxNum) {
-					// no dependent file is present for item, can delete safely...
-					outs = append(outs, item)
-				}
+		if item.isProperSubsetOf(merged) {
+			if checker == nil || !checker(item.startTxNum, item.endTxNum) {
+				// no dependent file is present for item, can delete safely...
+				outs = append(outs, item)
 			}
 		}
-		return true
-	})
+	}
 	return outs
 }
 

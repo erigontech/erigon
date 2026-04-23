@@ -692,15 +692,15 @@ func (a *Aggregator) Files() []string {
 }
 func (a *Aggregator) LS() {
 	doLS := func(dirtyFiles *btree.BTreeG[*FilesItem]) {
-		dirtyFiles.Walk(func(items []*FilesItem) bool {
-			for _, item := range items {
-				if item.decompressor == nil {
-					continue
-				}
-				a.logger.Info("[agg] ", "f", item.decompressor.FileName(), "words", item.decompressor.Count())
+		iter := dirtyFiles.Iter()
+		defer iter.Release()
+		for ok := iter.First(); ok; ok = iter.Next() {
+			item := iter.Item()
+			if item.decompressor == nil {
+				continue
 			}
-			return true
-		})
+			a.logger.Info("[agg] ", "f", item.decompressor.FileName(), "words", item.decompressor.Count())
+		}
 	}
 
 	a.dirtyFilesLock.Lock()
