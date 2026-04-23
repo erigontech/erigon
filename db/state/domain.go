@@ -783,7 +783,7 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 				return coll, err
 			}
 			if binary.BigEndian.Uint64(v[:8]) != stepVal {
-				k, v, err = valsCursor.NextNoDup()
+				k, v, err = valsCursor.Next()
 				continue
 			}
 			if _, err = comp.Write(k); err != nil {
