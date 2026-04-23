@@ -42,6 +42,15 @@ const (
 	// blsToExecutionChangeWeight specifies the scoring weight that we apply to
 	// our bls to execution topic.
 	blsToExecutionChangeWeight = 0.05
+	// executionPayloadBidWeight specifies the scoring weight that we apply to
+	// our execution payload bid topic. [New in Gloas:EIP7732]
+	executionPayloadBidWeight = 0.5
+	// payloadAttestationWeight specifies the scoring weight that we apply to
+	// our payload attestation message topic. [New in Gloas:EIP7732]
+	payloadAttestationWeight = 0.5
+	// proposerPreferencesWeight specifies the scoring weight that we apply to
+	// our proposer preferences topic. [New in Gloas:EIP7732]
+	proposerPreferencesWeight = 0.05
 
 	// maxInMeshScore describes the max score a peer can attain from being in the mesh.
 	maxInMeshScore = 10
@@ -56,8 +65,15 @@ func (g *GossipManager) topicScoreParams(topic string) *pubsub.TopicScoreParams 
 	switch {
 	case strings.Contains(topic, gossip.TopicNameBeaconBlock) || gossip.IsTopicBlobSidecar(topic):
 		return g.defaultBlockTopicParams()
+	// execution_payload_bid must be checked before execution_payload (substring match).
+	case strings.Contains(topic, gossip.TopicNameExecutionPayloadBid):
+		return g.defaultExecutionPayloadBidTopicParams()
 	case strings.Contains(topic, gossip.TopicNameExecutionPayload):
 		return g.defaultExecutionPayloadTopicParams()
+	case strings.Contains(topic, gossip.TopicNamePayloadAttestation):
+		return g.defaultPayloadAttestationTopicParams()
+	case strings.Contains(topic, gossip.TopicNameProposerPreferences):
+		return g.defaultProposerPreferencesTopicParams()
 	case strings.Contains(topic, gossip.TopicNameVoluntaryExit):
 		return g.defaultVoluntaryExitTopicParams()
 	case gossip.IsTopicBeaconAttestation(topic):
@@ -118,6 +134,82 @@ func (g *GossipManager) defaultExecutionPayloadTopicParams() *pubsub.TopicScoreP
 		MeshFailurePenaltyWeight:        meshWeight,
 		MeshFailurePenaltyDecay:         g.scoreDecay(5 * g.oneEpochDuration()),
 		InvalidMessageDeliveriesWeight:  -140.4475,
+		InvalidMessageDeliveriesDecay:   g.scoreDecay(50 * g.oneEpochDuration()),
+	}
+}
+
+// defaultExecutionPayloadBidTopicParams returns scoring parameters for the execution_payload_bid topic.
+// Builders may submit multiple bids per slot; scored similarly to blocks but with lower weight. [New in Gloas:EIP7732]
+func (g *GossipManager) defaultExecutionPayloadBidTopicParams() *pubsub.TopicScoreParams {
+	blocksPerEpoch := g.beaconConfig.SlotsPerEpoch
+	meshWeight := float64(0)
+	return &pubsub.TopicScoreParams{
+		TopicWeight:                     executionPayloadBidWeight,
+		TimeInMeshWeight:                maxInMeshScore / g.inMeshCap(),
+		TimeInMeshQuantum:               g.oneSlotDuration(),
+		TimeInMeshCap:                   g.inMeshCap(),
+		FirstMessageDeliveriesWeight:    1,
+		FirstMessageDeliveriesDecay:     g.scoreDecay(20 * g.oneEpochDuration()),
+		FirstMessageDeliveriesCap:       23,
+		MeshMessageDeliveriesWeight:     meshWeight,
+		MeshMessageDeliveriesDecay:      g.scoreDecay(5 * g.oneEpochDuration()),
+		MeshMessageDeliveriesCap:        float64(blocksPerEpoch * 5),
+		MeshMessageDeliveriesThreshold:  float64(blocksPerEpoch*5) / 10,
+		MeshMessageDeliveriesWindow:     2 * time.Second,
+		MeshMessageDeliveriesActivation: 4 * g.oneEpochDuration(),
+		MeshFailurePenaltyWeight:        meshWeight,
+		MeshFailurePenaltyDecay:         g.scoreDecay(5 * g.oneEpochDuration()),
+		InvalidMessageDeliveriesWeight:  -140.4475,
+		InvalidMessageDeliveriesDecay:   g.scoreDecay(50 * g.oneEpochDuration()),
+	}
+}
+
+// defaultPayloadAttestationTopicParams returns scoring parameters for the payload_attestation_message topic.
+// PTC validators attest to payload timeliness once per slot. [New in Gloas:EIP7732]
+func (g *GossipManager) defaultPayloadAttestationTopicParams() *pubsub.TopicScoreParams {
+	blocksPerEpoch := g.beaconConfig.SlotsPerEpoch
+	meshWeight := float64(0)
+	return &pubsub.TopicScoreParams{
+		TopicWeight:                     payloadAttestationWeight,
+		TimeInMeshWeight:                maxInMeshScore / g.inMeshCap(),
+		TimeInMeshQuantum:               g.oneSlotDuration(),
+		TimeInMeshCap:                   g.inMeshCap(),
+		FirstMessageDeliveriesWeight:    1,
+		FirstMessageDeliveriesDecay:     g.scoreDecay(20 * g.oneEpochDuration()),
+		FirstMessageDeliveriesCap:       23,
+		MeshMessageDeliveriesWeight:     meshWeight,
+		MeshMessageDeliveriesDecay:      g.scoreDecay(5 * g.oneEpochDuration()),
+		MeshMessageDeliveriesCap:        float64(blocksPerEpoch * 5),
+		MeshMessageDeliveriesThreshold:  float64(blocksPerEpoch*5) / 10,
+		MeshMessageDeliveriesWindow:     2 * time.Second,
+		MeshMessageDeliveriesActivation: 4 * g.oneEpochDuration(),
+		MeshFailurePenaltyWeight:        meshWeight,
+		MeshFailurePenaltyDecay:         g.scoreDecay(5 * g.oneEpochDuration()),
+		InvalidMessageDeliveriesWeight:  -140.4475,
+		InvalidMessageDeliveriesDecay:   g.scoreDecay(50 * g.oneEpochDuration()),
+	}
+}
+
+// defaultProposerPreferencesTopicParams returns scoring parameters for the proposer_preferences topic.
+// Low-frequency messages from proposers. [New in Gloas:EIP7732]
+func (g *GossipManager) defaultProposerPreferencesTopicParams() *pubsub.TopicScoreParams {
+	return &pubsub.TopicScoreParams{
+		TopicWeight:                     proposerPreferencesWeight,
+		TimeInMeshWeight:                maxInMeshScore / g.inMeshCap(),
+		TimeInMeshQuantum:               g.oneSlotDuration(),
+		TimeInMeshCap:                   g.inMeshCap(),
+		FirstMessageDeliveriesWeight:    2,
+		FirstMessageDeliveriesDecay:     g.scoreDecay(100 * g.oneEpochDuration()),
+		FirstMessageDeliveriesCap:       5,
+		MeshMessageDeliveriesWeight:     0,
+		MeshMessageDeliveriesDecay:      0,
+		MeshMessageDeliveriesCap:        0,
+		MeshMessageDeliveriesThreshold:  0,
+		MeshMessageDeliveriesWindow:     0,
+		MeshMessageDeliveriesActivation: 0,
+		MeshFailurePenaltyWeight:        0,
+		MeshFailurePenaltyDecay:         0,
+		InvalidMessageDeliveriesWeight:  -2000,
 		InvalidMessageDeliveriesDecay:   g.scoreDecay(50 * g.oneEpochDuration()),
 	}
 }
@@ -227,6 +319,9 @@ func (g *GossipManager) committeeCountPerSlot() uint64 {
 }
 
 // maxScore attainable by a peer.
+// TODO: make fork-aware to include GLOAS weights (executionPayloadWeight,
+// executionPayloadBidWeight, payloadAttestationWeight, proposerPreferencesWeight)
+// only when running on a GLOAS-era fork, so pre-GLOAS forks are not affected.
 func maxScore() float64 {
 	totalWeight := beaconBlockWeight + aggregateWeight + syncContributionWeight +
 		attestationTotalWeight + syncCommitteesTotalWeight + attesterSlashingWeight +
