@@ -41,10 +41,6 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
-const (
-	memoryPadLimit = 1024 * 1024
-)
-
 var assetTracers = make(map[string]string)
 
 // init retrieves the JavaScript transaction tracers included in go-ethereum.

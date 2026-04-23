@@ -371,7 +371,7 @@ func TestVersionedIO_StaleBalanceReadAfterWriteDoesNotCorruptNoOpCheck(t *testin
 			require.Len(t, ac.BalanceChanges, 1,
 				"tx1's write of 200 is a no-op (same as tx0's 200); stale read must not cause a spurious second entry")
 			// blockAccessIndex = TxIndex+1, so tx0 (TxIndex=0) → Index=1.
-			require.Equal(t, uint16(1), ac.BalanceChanges[0].Index,
+			require.Equal(t, uint32(1), ac.BalanceChanges[0].Index,
 				"the single balance change must be from tx0 (blockAccessIndex=1)")
 		}
 	}
