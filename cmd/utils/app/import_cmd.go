@@ -249,7 +249,12 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 	insertedBlocks := map[uint64]struct{}{}
 
 	for _, block := range chain.Blocks {
-		if err := block.HashCheck(true); err != nil {
+		// Use fullCheck=false here: execution-spec-tests (hive consume-rlp) intentionally
+		// import blocks with EmptyRootHash receipt hash but non-zero transactions to test
+		// that the EL rejects the tx during execution. HashCheck(true) would abort before
+		// execution ever happens, causing erigon to terminate unexpectedly in the test.
+		// The exec_module_tester follows the same pattern with HashCheck(false).
+		if err := block.HashCheck(false); err != nil {
 			return err
 		}
 		insertedBlocks[block.NumberU64()] = struct{}{}
