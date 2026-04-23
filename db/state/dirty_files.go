@@ -328,7 +328,6 @@ func deleteMergeFile(dirtyFiles *btree2.BTreeG[*FilesItem], outs []*FilesItem, f
 func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 	var invalidFileItems []*FilesItem
 	iter := d.dirtyFiles.Iter()
-	defer iter.Release()
 	for ok := iter.First(); ok; ok = iter.Next() {
 		item := iter.Item()
 		fromStep, toStep := item.StepRange(d.stepSize)
@@ -412,6 +411,7 @@ func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 			}
 		}
 	}
+	iter.Release()
 
 	for _, item := range invalidFileItems {
 		item.closeFiles() // just close, not remove from disk
@@ -424,7 +424,6 @@ func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 func (h *History) openDirtyFiles(dataEntries, accessorEntries []string) error {
 	var invalidFileItems []*FilesItem
 	iter := h.dirtyFiles.Iter()
-	defer iter.Release()
 	for ok := iter.First(); ok; ok = iter.Next() {
 		item := iter.Item()
 		fromStep, toStep := item.StepRange(h.stepSize)
@@ -488,6 +487,7 @@ func (h *History) openDirtyFiles(dataEntries, accessorEntries []string) error {
 			}
 		}
 	}
+	iter.Release()
 
 	for _, item := range invalidFileItems {
 		item.closeFiles()
@@ -500,7 +500,6 @@ func (h *History) openDirtyFiles(dataEntries, accessorEntries []string) error {
 func (ii *InvertedIndex) openDirtyFiles(dataEntries, accessorEntries []string) error {
 	var invalidFileItems []*FilesItem
 	iter := ii.dirtyFiles.Iter()
-	defer iter.Release()
 	for ok := iter.First(); ok; ok = iter.Next() {
 		item := iter.Item()
 		fromStep, toStep := item.StepRange(ii.stepSize)
@@ -554,6 +553,7 @@ func (ii *InvertedIndex) openDirtyFiles(dataEntries, accessorEntries []string) e
 			}
 		}
 	}
+	iter.Release()
 
 	for _, item := range invalidFileItems {
 		item.closeFiles()
@@ -789,7 +789,6 @@ func closeWhatNotInList(dirtyFiles *btree2.BTreeG[*FilesItem], fNames []string) 
 	}
 	var toClose []*FilesItem
 	iter := dirtyFiles.Iter()
-	defer iter.Release()
 	for ok := iter.First(); ok; ok = iter.Next() {
 		item := iter.Item()
 		if item.decompressor != nil {
@@ -799,6 +798,7 @@ func closeWhatNotInList(dirtyFiles *btree2.BTreeG[*FilesItem], fNames []string) 
 		}
 		toClose = append(toClose, item)
 	}
+	iter.Release()
 	for _, item := range toClose {
 		item.closeFiles()
 		dirtyFiles.Delete(item)
