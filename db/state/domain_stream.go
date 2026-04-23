@@ -206,13 +206,15 @@ func (hi *DomainLatestIterFile) initCursorMDBX(domainRoTx *DomainRoTx) error {
 				return err
 			}
 			// Skip DB entries within file range — files are authoritative there.
-			for key != nil && (hi.to == nil || bytes.Compare(key[:len(key)-8], hi.to) < 0) {
+			var pushed bool
+			for key != nil && len(key) > 8 && (hi.to == nil || bytes.Compare(key[:len(key)-8], hi.to) < 0) {
 				k := key[:len(key)-8]
 				stepBytes := key[len(key)-8:]
 				step := ^binary.BigEndian.Uint64(stepBytes)
 				endTxNum := step * domainRoTx.d.stepSize
 				if endTxNum >= hi.filesEndTxNum {
 					heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(value), cNonDup: valsCursor, endTxNum: endTxNum, reverse: true})
+					pushed = true
 					break
 				}
 				key, value, err = valsCursor.Next()
@@ -220,12 +222,16 @@ func (hi *DomainLatestIterFile) initCursorMDBX(domainRoTx *DomainRoTx) error {
 					return err
 				}
 			}
+			if !pushed {
+				valsCursor.Close()
+			}
 		} else {
 			valsCursor, err := hi.roTx.CursorDupSort(domainRoTx.d.ValuesTable) //nolint:gocritic
 			if err != nil {
 				return err
 			}
 
+			var pushed bool
 			key, value, err := valsCursor.Seek(hi.from)
 			if err != nil {
 				return err
@@ -238,12 +244,16 @@ func (hi *DomainLatestIterFile) initCursorMDBX(domainRoTx *DomainRoTx) error {
 				endTxNum := step * domainRoTx.d.stepSize
 				if endTxNum >= hi.filesEndTxNum {
 					heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(key), val: common.Copy(val), cDup: valsCursor, endTxNum: endTxNum, reverse: true})
+					pushed = true
 					break
 				}
 				key, value, err = valsCursor.NextNoDup()
 				if err != nil {
 					return err
 				}
+			}
+			if !pushed {
+				valsCursor.Close()
 			}
 		}
 		return nil
@@ -293,7 +303,7 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 							return err
 						}
 						var k []byte
-						for initial != nil && (k == nil || bytes.Equal(initial[:len(initial)-8], k[:len(k)-8])) {
+						for initial != nil && len(initial) > 8 && (k == nil || (len(k) > 8 && bytes.Equal(initial[:len(initial)-8], k[:len(k)-8]))) {
 							k, v, err = ci1.cNonDup.Next()
 							if err != nil {
 								return err
@@ -303,7 +313,7 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 							}
 						}
 
-						if len(k) == 0 || !(hi.to == nil || bytes.Compare(k[:len(k)-8], hi.to) < 0) {
+						if len(k) <= 8 || !(hi.to == nil || bytes.Compare(k[:len(k)-8], hi.to) < 0) {
 							break
 						}
 						stepBytes := k[len(k)-8:]
