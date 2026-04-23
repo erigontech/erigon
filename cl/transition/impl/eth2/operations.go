@@ -589,7 +589,8 @@ func (I *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltypes.
 // It processes execution requests (deposits, withdrawals, consolidations), queues the builder
 // payment, and updates latest_block_hash. This is the spec's apply_parent_execution_payload.
 // [New in Gloas:EIP7732]
-func (I *impl) ApplyParentExecutionPayload(s abstract.BeaconState, parentBid *cltypes.ExecutionPayloadBid, requests *cltypes.ExecutionRequests) error {
+func (I *impl) ApplyParentExecutionPayload(s abstract.BeaconState, requests *cltypes.ExecutionRequests) error {
+	parentBid := s.GetLatestExecutionPayloadBid()
 	// Process execution requests (deposits, withdrawals, consolidations)
 	if requests.Deposits != nil {
 		if err := solid.RangeErr[*solid.DepositRequest](requests.Deposits, func(_ int, req *solid.DepositRequest, _ int) error {
@@ -712,7 +713,7 @@ func (I *impl) ProcessParentExecutionPayload(s abstract.BeaconState, block cltyp
 		return fmt.Errorf("ProcessParentExecutionPayload: parent_execution_requests root %v does not match committed bid execution_requests_root %v", requestsRoot, parentBid.ExecutionRequestsRoot)
 	}
 
-	return I.ApplyParentExecutionPayload(s, parentBid, parentExecutionRequests)
+	return I.ApplyParentExecutionPayload(s, parentExecutionRequests)
 }
 
 // verifyExecutionPayloadBidSignature verifies the BLS signature of a signed execution payload bid.
