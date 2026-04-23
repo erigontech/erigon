@@ -253,7 +253,7 @@ func newMockLog(topics []common.Hash, txHash common.Hash) types.Log {
 		Address:     common.HexToAddress("0x0"),
 		Topics:      topics,
 		Data:        hexutil.MustDecode(hexData),
-		BlockNumber: uint64(26),
+		BlockNumber: 26,
 		TxHash:      txHash,
 		TxIndex:     111,
 		BlockHash:   common.BytesToHash([]byte{1, 2, 3, 4, 5}),

@@ -843,6 +843,7 @@ func (st *TxnExecutor) calcIntrinsicGas(contractCreation bool, auths []types.Aut
 		IsEIP2028:          rules.IsIstanbul,
 		IsEIP3860:          vmConfig.HasEip3860(rules),
 		IsEIP7623:          rules.IsPrague,
+		IsEIP7976:          rules.IsAmsterdam,
 		IsEIP8037:          rules.IsAmsterdam,
 	})
 }
