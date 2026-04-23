@@ -79,6 +79,17 @@ func (a *LogsFilterAggregator) checkEmpty() {
 func (a *LogsFilterAggregator) removeLogsFilter(filterId uint64, filter *LogsFilter) {
 	a.logsFilterLock.Lock()
 	defer a.logsFilterLock.Unlock()
+	a.removeLogsFilterLocked(filterId, filter)
+}
+
+func (a *LogsFilterAggregator) removeLogsFilterLocked(filterId uint64, filter *LogsFilter) {
+	storedFilter, ok := a.logsFilters[filterId]
+	if !ok {
+		return
+	}
+	if filter == nil || filter != storedFilter {
+		filter = storedFilter
+	}
 	a.subtractLogFilters(filter)
 	delete(a.logsFilters, filterId)
 	a.checkEmpty()
@@ -177,6 +188,9 @@ func (a *LogsFilterAggregator) distributeLogs(logs []*notifications.LogNotificat
 		// Convert to protobuf once for all matching subscribers
 		var proto *remoteproto.SubscribeLogsReply
 		for filterId, filter := range a.logsFilters {
+			if _, markedForDelete := filtersToDelete[filterId]; markedForDelete {
+				continue
+			}
 			if filter.allAddrs == 0 {
 				if _, addrOk := filter.addrs[lg.Address]; !addrOk {
 					continue
@@ -199,8 +213,7 @@ func (a *LogsFilterAggregator) distributeLogs(logs []*notifications.LogNotificat
 	}
 	// remove malfunctioned filters
 	for filterId, filter := range filtersToDelete {
-		a.subtractLogFilters(filter)
-		delete(a.logsFilters, filterId)
+		a.removeLogsFilterLocked(filterId, filter)
 	}
 
 	return nil

@@ -51,6 +51,8 @@ type testServer struct {
 	received         chan *remoteproto.LogsFilterRequest
 	receiveCompleted chan struct{}
 	sent             []*remoteproto.SubscribeLogsReply
+	sendErr          error
+	sendCalls        int
 	ctx              context.Context
 	grpc.ServerStream
 }
@@ -79,6 +81,10 @@ func newFailingTestServer(ctx context.Context) *failingTestServer {
 }
 
 func (ts *testServer) Send(m *remoteproto.SubscribeLogsReply) error {
+	ts.sendCalls++
+	if ts.sendErr != nil {
+		return ts.sendErr
+	}
 	ts.sent = append(ts.sent, m)
 	return nil
 }
@@ -326,5 +332,39 @@ func TestLogsFilter_SendFailure_DoesNotSkipHealthySubscribers(t *testing.T) {
 	}
 	if got := len(agg.logsFilters); got != 1 {
 		t.Fatalf("expected only healthy subscriber to remain, got %d", got)
+	}
+}
+
+func TestLogsFilter_RemoveLogsFilter_IsIdempotent(t *testing.T) {
+	events := shards.NewEvents()
+	agg := NewLogsFilterAggregator(events)
+
+	ctx := t.Context()
+	brokenSrv := newTestServer(ctx)
+	brokenSrv.sendErr = errors.New("send failed")
+	healthySrv := newTestServer(ctx)
+
+	brokenID, brokenFilter := agg.insertLogsFilter(brokenSrv)
+	healthyID, healthyFilter := agg.insertLogsFilter(healthySrv)
+
+	req := &remoteproto.LogsFilterRequest{AllAddresses: true, AllTopics: true}
+	agg.updateLogsFilter(brokenFilter, req)
+	agg.updateLogsFilter(healthyFilter, req)
+
+	if err := agg.distributeLogs([]*notifications.LogNotification{createLog()}); err != nil {
+		t.Fatalf("distributeLogs returned error: %v", err)
+	}
+
+	// Simulate deferred cleanup in subscribeLogs for a filter already removed in distributeLogs.
+	agg.removeLogsFilter(brokenID, brokenFilter)
+
+	if agg.aggLogsFilter.allAddrs != 1 {
+		t.Fatalf("expected allAddrs to remain 1 after duplicate removal, got %d", agg.aggLogsFilter.allAddrs)
+	}
+	if agg.aggLogsFilter.allTopics != 1 {
+		t.Fatalf("expected allTopics to remain 1 after duplicate removal, got %d", agg.aggLogsFilter.allTopics)
+	}
+	if _, ok := agg.logsFilters[healthyID]; !ok {
+		t.Fatalf("expected healthy filter %d to remain", healthyID)
 	}
 }
