@@ -24,6 +24,7 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/types"
@@ -47,6 +48,29 @@ func bodyToRawBody(body *types.Body) (*types.RawBody, error) {
 }
 
 var errNotFound = errors.New("notfound")
+
+func (e *ExecModule) readPayloadBodyBAL(ctx context.Context, tx kv.Tx, hash common.Hash, number uint64) ([]byte, error) {
+	balBytes, err := rawdb.ReadBlockAccessListBytes(tx, hash, number)
+	if err != nil {
+		return nil, err
+	}
+	if len(balBytes) > 0 {
+		return bytes.Clone(balBytes), nil
+	}
+
+	// NOTE(EIP-7928): old buggy inserts could persist the empty BAL hash in the
+	// header without storing the canonical empty BAL bytes (0xc0). If we see that
+	// exact commitment, recover the expected sidecar bytes on read so empty BALs
+	// round-trip distinctly from nil/pruned/pre-Amsterdam payloads.
+	header, err := e.blockReader.Header(ctx, tx, hash, number)
+	if err != nil {
+		return nil, err
+	}
+	if header != nil && header.BlockAccessListHash != nil && *header.BlockAccessListHash == empty.BlockAccessListHash {
+		return types.EncodeBlockAccessListBytes(nil)
+	}
+	return nil, nil
+}
 
 // beginOverlayOrRo returns a tx that reads from the block overlay (if a
 // persistent SharedDomains with an active overlay exists) or a plain DB RO tx.
@@ -263,13 +287,9 @@ func (e *ExecModule) GetPayloadBodiesByHash(ctx context.Context, hashes []common
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByHash: MarshalTransactionsBinary error %w", err)
 		}
-		balBytes, err := rawdb.ReadBlockAccessListBytes(tx, h, *number)
+		bal, err := e.readPayloadBodyBAL(ctx, tx, h, *number)
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByHash: ReadBlockAccessListBytes error %w", err)
-		}
-		var bal []byte
-		if len(balBytes) > 0 {
-			bal = bytes.Clone(balBytes)
 		}
 		bodies = append(bodies, &PayloadBody{
 			Transactions:    txs,
@@ -309,13 +329,9 @@ func (e *ExecModule) GetPayloadBodiesByRange(ctx context.Context, start, count u
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByRange: MarshalTransactionsBinary error %w", err)
 		}
-		balBytes, err := rawdb.ReadBlockAccessListBytes(tx, hash, blockNum)
+		bal, err := e.readPayloadBodyBAL(ctx, tx, hash, blockNum)
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByRange: ReadBlockAccessListBytes error %w", err)
-		}
-		var bal []byte
-		if len(balBytes) > 0 {
-			bal = bytes.Clone(balBytes)
 		}
 		bodies = append(bodies, &PayloadBody{
 			Transactions:    txs,

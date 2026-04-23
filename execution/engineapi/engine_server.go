@@ -347,6 +347,17 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			return nil, &rpc.InvalidParamsError{Message: "blockAccessList missing"}
 		}
 		if len(req.BlockAccessList) == 0 {
+			// NOTE(EIP-7928): the spec describes an empty BAL as the empty RLP list
+			// 0xc0 (with block_access_list_hash = keccak256(rlp.encode([]))), not as
+			// an omitted sidecar. This branch currently sets the empty hash but keeps
+			// blockAccessListBytes nil, so downstream storage/retrieval paths can no
+			// longer distinguish "empty BAL" from "missing/pruned/pre-Amsterdam".
+			// Normalize the empty BAL to its canonical RLP encoding so it can be
+			// stored and served back as 0xc0.
+			blockAccessListBytes, err = types.EncodeBlockAccessListBytes(nil)
+			if err != nil {
+				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("encode empty blockAccessList: %v", err)}
+			}
 			blockAccessList = nil
 			header.BlockAccessListHash = &empty.BlockAccessListHash
 		} else {
@@ -1078,7 +1089,10 @@ func assembledBlockToPayloadResponse(br *types.BlockWithReceipts, blockValue *ui
 		sn := hexutil.Uint64(*header.SlotNumber)
 		ep.SlotNumber = &sn
 	}
-	if header.BlockAccessListHash != nil && br.BlockAccessList != nil {
+	if header.BlockAccessListHash != nil {
+		// NOTE(EIP-7928): an empty BAL still round-trips as the RLP bytes 0xc0, so
+		// we encode even when br.BlockAccessList is nil/empty as long as the header
+		// carries a BAL commitment.
 		encoded, encErr := types.EncodeBlockAccessListBytes(br.BlockAccessList)
 		if encErr == nil {
 			ep.BlockAccessList = encoded
