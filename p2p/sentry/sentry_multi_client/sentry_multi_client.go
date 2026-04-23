@@ -219,6 +219,10 @@ type MultiClient struct {
 
 var _ eth.ReceiptsGetter = new(receipts.Generator) // compile-time interface-check
 
+// DefaultBlockBufferSize is the default block buffer depth passed to
+// NewMultiClient by both production and integration tooling.
+const DefaultBlockBufferSize = 128
+
 func NewMultiClient(
 	dirs datadir.Dirs,
 	db kv.TemporalRoDB,

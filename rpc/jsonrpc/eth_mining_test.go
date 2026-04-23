@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
@@ -68,7 +69,7 @@ func TestPendingLogs(t *testing.T) {
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 	mining := txpoolproto.NewMiningClient(conn)
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log, nil)
-	expect := []byte{211}
+	expect := hexutil.Bytes{211}
 
 	ch, id := ff.SubscribePendingLogs(1)
 	defer ff.UnsubscribePendingLogs(id)
