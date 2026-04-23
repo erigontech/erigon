@@ -613,9 +613,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 		initialized bool
 	)
 
-	cnt := 0
 	var histKeyBuf []byte
-	//log.Warn("[dbg] collate", "name", h.filenameBase, "sampling", h.historyValuesOnCompressedPage)
 
 	loadBitmapsFunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		txNum := binary.BigEndian.Uint64(v)
@@ -630,41 +628,68 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 		}
 		seqBuilder.Reset(baseTxNum, uint64(len(offsets)), baseTxNum+uint64(offsets[len(offsets)-1]))
 
-		for _, off := range offsets {
-			cnt++
-			vTxNum := baseTxNum + uint64(off)
-			seqBuilder.AddOffset(vTxNum)
+		if !h.HistoryLargeValues {
+			// Offsets are sorted ascending; DupSort dups are sorted ascending by txNum.
+			// Seek only for the first txNum per key group; step sequentially for the rest.
+			for i, off := range offsets {
+				vTxNum := baseTxNum + uint64(off)
+				seqBuilder.AddOffset(vTxNum)
+				binary.BigEndian.PutUint64(numBuf, vTxNum)
 
-			binary.BigEndian.PutUint64(numBuf, vTxNum)
-			if !h.HistoryLargeValues {
-				val, err := cd.SeekBothRange(prevKey, numBuf)
-				if err != nil {
-					return fmt.Errorf("seekBothRange %s history val [%x]: %w", h.FilenameBase, prevKey, err)
+				var (
+					val      []byte
+					fetchErr error
+				)
+				if i == 0 {
+					val, fetchErr = cd.SeekBothRange(prevKey, numBuf)
+				} else {
+					_, val, fetchErr = cd.NextDup()
+				}
+				if fetchErr != nil {
+					return fmt.Errorf("seek %s history val [%x]: %w", h.FilenameBase, prevKey, fetchErr)
 				}
 				if val != nil && binary.BigEndian.Uint64(val) == vTxNum {
 					val = val[8:]
 				} else {
 					val = nil
 				}
-
 				histKeyBuf = historyKey(vTxNum, prevKey, histKeyBuf)
 				if err := historyWriter.Add(histKeyBuf, val); err != nil {
 					return fmt.Errorf("add %s history val [%x]: %w", h.FilenameBase, prevKey, err)
 				}
-				continue
 			}
-			keyBuf = append(append(keyBuf[:0], prevKey...), numBuf...)
-			key, val, err := c.SeekExact(keyBuf)
-			if err != nil {
-				return fmt.Errorf("seekExact %s history val [%x]: %w", h.FilenameBase, key, err)
-			}
-			if len(val) == 0 {
-				val = nil
-			}
+		} else {
+			// LargeValues keys are prevKey+txNum, sorted lexicographically.
+			// Seek only for the first txNum per key group; step sequentially for the rest.
+			for i, off := range offsets {
+				vTxNum := baseTxNum + uint64(off)
+				seqBuilder.AddOffset(vTxNum)
+				binary.BigEndian.PutUint64(numBuf, vTxNum)
 
-			histKeyBuf = historyKey(vTxNum, prevKey, histKeyBuf)
-			if err := historyWriter.Add(histKeyBuf, val); err != nil {
-				return fmt.Errorf("add %s history val [%x]: %w", h.FilenameBase, key, err)
+				var (
+					val      []byte
+					fetchErr error
+				)
+				if i == 0 {
+					keyBuf = append(append(keyBuf[:0], prevKey...), numBuf...)
+					_, val, fetchErr = c.SeekExact(keyBuf)
+				} else {
+					var nextKey []byte
+					nextKey, val, fetchErr = c.Next()
+					if len(nextKey) != len(prevKey)+8 || !bytes.Equal(nextKey[:len(prevKey)], prevKey) {
+						val = nil
+					}
+				}
+				if fetchErr != nil {
+					return fmt.Errorf("seek %s history val [%x]: %w", h.FilenameBase, prevKey, fetchErr)
+				}
+				if len(val) == 0 {
+					val = nil
+				}
+				histKeyBuf = historyKey(vTxNum, prevKey, histKeyBuf)
+				if err := historyWriter.Add(histKeyBuf, val); err != nil {
+					return fmt.Errorf("add %s history val [%x]: %w", h.FilenameBase, prevKey, err)
+				}
 			}
 		}
 		offsets = offsets[:0]
