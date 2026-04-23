@@ -284,10 +284,8 @@ func (t *prestateTracer) processDiffState() {
 		newBalance, _ := t.env.IntraBlockState.GetBalance(addr)
 		newNonce, _ := t.env.IntraBlockState.GetNonce(addr)
 		newCode, _ := t.env.IntraBlockState.GetCode(addr)
-		newCodeHash := empty.CodeHash
-		if len(newCode) > 0 {
-			newCodeHash = crypto.HashData(newCode)
-		}
+		newCodeHashHandle, _ := t.env.IntraBlockState.GetCodeHash(addr)
+		newCodeHash := newCodeHashHandle.Value()
 
 		if newBalance.ToBig().Cmp(t.pre[addr].Balance) != 0 {
 			modified = true
