@@ -217,6 +217,15 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 	if err := unwindExec3State(ctx, doms, rwTx, u.UnwindPoint, txNum, accumulator, changeSet, lastExecHash, logger); err != nil {
 		return fmt.Errorf("unwindExec3State(%d->%d): %w, took %s", s.BlockNumber, u.UnwindPoint, err, time.Since(t))
 	}
+	// Surgically evict keys touched by the unwound blocks from the state cache.
+	// Keys not in the diffset remain cached (they weren't modified by the unwound range).
+	if stateCache := doms.GetStateCache(); stateCache != nil && changeSet != nil {
+		unwindTargetHash, _, err := br.CanonicalHash(ctx, rwTx, u.UnwindPoint)
+		if err != nil {
+			unwindTargetHash = common.Hash{}
+		}
+		stateCache.RevertWithDiffset(changeSet, lastExecHash, unwindTargetHash)
+	}
 	if err := rawdb.DeleteNewerEpochs(rwTx, u.UnwindPoint+1); err != nil {
 		return fmt.Errorf("delete newer epochs: %w", err)
 	}
@@ -391,7 +400,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 		return nil
 	}
 
-	logger.Info(fmt.Sprintf("[%s] Unwind Execution", u.LogPrefix()), "from", s.BlockNumber, "to", u.UnwindPoint, "stack", dbg.Stack())
+	logger.Info(fmt.Sprintf("[%s] Unwind Execution", u.LogPrefix()), "from", s.BlockNumber, "to", u.UnwindPoint)
 
 	// Discard any pending deferred commitment updates from the previous
 	// (failed) execution. If left in place, the next ComputeCommitment

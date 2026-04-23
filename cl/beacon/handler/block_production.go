@@ -1366,6 +1366,12 @@ func (a *ApiHandler) storeBlockAndBlobs(
 		return err
 	}
 
+	// Advance fork choice time to the current slot so OnBlock accepts the block.
+	// Normally OnTick is called from the ForkChoice stage, but storeBlockAndBlobs
+	// runs from the beacon API handler which may execute before the stage loop.
+	currentSlot := a.ethClock.GetCurrentSlot()
+	a.forkchoiceStore.OnTick(a.ethClock.GenesisTime() + currentSlot*a.beaconChainCfg.SecondsPerSlot)
+
 	// Skip BLS re-verification for locally-produced blocks. The block was just
 	// built by this node, so re-verifying the signature is redundant. Additionally,
 	// AddChainSegment replays from the nearest checkpoint state, and the replayed
