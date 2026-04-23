@@ -634,13 +634,13 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 			for i, off := range offsets {
 				vTxNum := baseTxNum + uint64(off)
 				seqBuilder.AddOffset(vTxNum)
-				binary.BigEndian.PutUint64(numBuf, vTxNum)
 
 				var (
 					val      []byte
 					fetchErr error
 				)
 				if i == 0 {
+					binary.BigEndian.PutUint64(numBuf, vTxNum)
 					val, fetchErr = cd.SeekBothRange(prevKey, numBuf)
 				} else {
 					_, val, fetchErr = cd.NextDup()
@@ -664,13 +664,13 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 			for i, off := range offsets {
 				vTxNum := baseTxNum + uint64(off)
 				seqBuilder.AddOffset(vTxNum)
-				binary.BigEndian.PutUint64(numBuf, vTxNum)
 
 				var (
 					val      []byte
 					fetchErr error
 				)
 				if i == 0 {
+					binary.BigEndian.PutUint64(numBuf, vTxNum)
 					keyBuf = append(append(keyBuf[:0], prevKey...), numBuf...)
 					_, val, fetchErr = c.SeekExact(keyBuf)
 				} else {
