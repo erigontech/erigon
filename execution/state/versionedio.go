@@ -1200,7 +1200,7 @@ type accountState struct {
 	balanceValue            *uint256.Int                        // tracks latest seen balance
 	initialBalanceValue     *uint256.Int                        // tracks pre-block balance for net-zero detection
 	selfDestructed          bool                                //
-	selfDestructedAt        uint16                              // access index of the selfdestruct
+	selfDestructedAt        uint32                              // access index of the selfdestruct
 	storageReadValues       map[accounts.StorageKey]uint256.Int // original read values for net-zero detection
 	nonRevertableUserAccess bool                                // true if a user tx (txIndex >= 0) has non-revertable access
 }
@@ -1216,7 +1216,7 @@ type fieldTracker[T any] struct {
 	changes changeTracker[T]
 }
 
-func (ft *fieldTracker[T]) recordWrite(idx uint16, value T, copyFn func(T) T, equal func(T, T) bool) {
+func (ft *fieldTracker[T]) recordWrite(idx uint32, value T, copyFn func(T) T, equal func(T, T) bool) {
 	ft.changes.recordWrite(idx, value, copyFn, equal)
 }
 
@@ -1231,7 +1231,7 @@ func applyToBalance(bt *fieldTracker[uint256.Int], ac *types.AccountChanges, ini
 	// must be excluded. Geth's scope-based BAL builder handles this via
 	// ExitScope which converts reverted writes to reads.
 	firstFiltered := false
-	bt.changes.apply(func(idx uint16, value uint256.Int) {
+	bt.changes.apply(func(idx uint32, value uint256.Int) {
 		if !firstFiltered {
 			firstFiltered = true
 			if initialBalance != nil && value.Eq(initialBalance) {
@@ -1250,7 +1250,7 @@ func newNonceTracker() *fieldTracker[uint64] {
 }
 
 func applyToNonce(nt *fieldTracker[uint64], ac *types.AccountChanges) {
-	nt.changes.apply(func(idx uint16, value uint64) {
+	nt.changes.apply(func(idx uint32, value uint64) {
 		ac.NonceChanges = append(ac.NonceChanges, &types.NonceChange{
 			Index: idx,
 			Value: value,
@@ -1263,7 +1263,7 @@ func newCodeTracker() *fieldTracker[[]byte] {
 }
 
 func applyToCode(ct *fieldTracker[[]byte], ac *types.AccountChanges) {
-	ct.changes.apply(func(idx uint16, value []byte) {
+	ct.changes.apply(func(idx uint32, value []byte) {
 		ac.CodeChanges = append(ac.CodeChanges, &types.CodeChange{
 			Index:    idx,
 			Bytecode: bytes.Clone(value),
@@ -1272,24 +1272,24 @@ func applyToCode(ct *fieldTracker[[]byte], ac *types.AccountChanges) {
 }
 
 type changeTracker[T any] struct {
-	entries map[uint16]T
+	entries map[uint32]T
 	equal   func(T, T) bool
 }
 
-func (ct *changeTracker[T]) recordWrite(idx uint16, value T, copyFn func(T) T, equal func(T, T) bool) {
+func (ct *changeTracker[T]) recordWrite(idx uint32, value T, copyFn func(T) T, equal func(T, T) bool) {
 	if ct.entries == nil {
-		ct.entries = make(map[uint16]T)
+		ct.entries = make(map[uint32]T)
 		ct.equal = equal
 	}
 	ct.entries[idx] = copyFn(value)
 }
 
-func (ct *changeTracker[T]) apply(applyFn func(uint16, T)) {
+func (ct *changeTracker[T]) apply(applyFn func(uint32, T)) {
 	if len(ct.entries) == 0 {
 		return
 	}
 
-	indices := make([]uint16, 0, len(ct.entries))
+	indices := make([]uint32, 0, len(ct.entries))
 	for idx := range ct.entries {
 		indices = append(indices, idx)
 	}
@@ -1321,7 +1321,7 @@ func ensureAccountState(accounts map[accounts.Address]*accountState, addr accoun
 	return account
 }
 
-func (account *accountState) updateWrite(vw *VersionedWrite, accessIndex uint16) {
+func (account *accountState) updateWrite(vw *VersionedWrite, accessIndex uint32) {
 	switch vw.Path {
 	case StoragePath:
 		// Skip intra-tx net-zero storage writes: if this is the first write
@@ -1444,7 +1444,7 @@ func (account *accountState) updateRead(vr *VersionedRead) {
 	}
 }
 
-func addStorageUpdate(ac *types.AccountChanges, vw *VersionedWrite, txIndex uint16) {
+func addStorageUpdate(ac *types.AccountChanges, vw *VersionedWrite, txIndex uint32) {
 	// If we already recorded a read for this slot, drop it because a write takes precedence.
 	removeStorageRead(ac, vw.Key)
 

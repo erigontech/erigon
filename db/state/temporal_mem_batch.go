@@ -676,7 +676,9 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
 				return sd.unwindChangesetRaw[domain][i].Key < sd.unwindChangesetRaw[domain][j].Key
 			})
 		}
-		tx.(kv.TemporalRwTx).Unwind(ctx, sd.unwindToTxNum, sd.unwindChangesetRaw)
+		if err := tx.(kv.TemporalRwTx).Unwind(ctx, sd.unwindToTxNum, sd.unwindChangesetRaw); err != nil {
+			return err
+		}
 	}
 
 	if err := sd.flushDiffSet(ctx, tx); err != nil {
