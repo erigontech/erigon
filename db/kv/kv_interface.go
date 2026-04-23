@@ -310,6 +310,37 @@ type PseudoDupSortRwCursor interface { // For both DupSort and usual cursors (us
 	CountDuplicates() (uint64, error) // CountDuplicates - number of duplicates for the current key
 }
 
+// RwCursorPseudoDupSort wraps any RwCursor to satisfy PseudoDupSortRwCursor
+// for non-DupSort tables. Each key has exactly one value, so dup operations
+// are trivial: CountDuplicates returns 1, NextDup returns nil, etc.
+type RwCursorPseudoDupSort struct {
+	RwCursor
+}
+
+func (c *RwCursorPseudoDupSort) DeleteExact(k1, k2 []byte) error {
+	return c.Delete(k1)
+}
+func (c *RwCursorPseudoDupSort) NextNoDup() ([]byte, []byte, error) {
+	return c.Next()
+}
+func (c *RwCursorPseudoDupSort) NextDup() ([]byte, []byte, error) {
+	return nil, nil, nil
+}
+func (c *RwCursorPseudoDupSort) FirstDup() ([]byte, error) {
+	_, v, err := c.Current()
+	return v, err
+}
+func (c *RwCursorPseudoDupSort) LastDup() ([]byte, error) {
+	_, v, err := c.Current()
+	return v, err
+}
+func (c *RwCursorPseudoDupSort) DeleteCurrentDuplicates() error {
+	return c.DeleteCurrent()
+}
+func (c *RwCursorPseudoDupSort) CountDuplicates() (uint64, error) {
+	return 1, nil
+}
+
 const Unlim int = -1 // const Unbounded/EOF/EndOfTable []byte = nil
 
 type StatelessRwTx interface {
@@ -449,6 +480,9 @@ type TemporalDebugTx interface {
 	// TraceKey returns stream of <txNum->value_after_txnum_change> for a given key
 	TraceKey(domain Domain, k []byte, fromTxNum, toTxNum uint64) (stream.U64V, error)
 
+	// HistoryKeyTxNumRange returns (key, txNum) pairs for every txNum at which a key changed in [fromTs, toTs)
+	HistoryKeyTxNumRange(name Domain, fromTs, toTs int, asc order.By, limit int) (it stream.KU64, err error)
+
 	DomainFiles(domain ...Domain) VisibleFiles
 	CurrentDomainVersion(domain Domain) version.Version
 	TxNumsInFiles(domains ...Domain) (minTxNum uint64)
@@ -486,8 +520,9 @@ type TemporalMemBatch interface {
 	Merge(other TemporalMemBatch) error
 	ClearRam()
 	IndexAdd(table InvertedIdx, key []byte, txNum uint64) (err error)
-	IteratePrefix(domain Domain, prefix []byte, roTx Tx, it func(k []byte, v []byte, step Step) (cont bool, err error)) error
+	IteratePrefix(domain Domain, prefix []byte, roTx Tx, it func(k []byte, v []byte) (cont bool, err error)) error
 	HasPrefix(domain Domain, prefix []byte, roTx Tx) ([]byte, []byte, bool, error)
+	HasPrefixInRAM(domain Domain, prefix []byte) bool
 	SizeEstimate() uint64
 	Flush(ctx context.Context, tx RwTx) error
 	Close()
@@ -495,6 +530,7 @@ type TemporalMemBatch interface {
 	DiscardWrites(domain Domain)
 	Unwind(txNumUnwindTo uint64, changeset *[DomainLen][]DomainEntryDiff)
 	GetAsOf(domain Domain, key []byte, ts uint64) (v []byte, ok bool, err error)
+	SetInMemHistoryReads(v bool)
 }
 
 type WithFreezeInfo interface {
@@ -690,6 +726,24 @@ var (
 	//DbGcSelfPnlMergeVolume = metrics.NewCounter(`db_gc_pnl{phase="self_merge_volume"}`)               //nolint
 	//DbGcSelfPnlMergeCalls  = metrics.NewCounter(`db_gc_pnl{phase="slef_merge_calls"}`)                //nolint
 )
+
+// ErrReadTxLimitExceeded is returned by BeginRo when the read-tx semaphore is full and no slot is
+// available for a new concurrent read transaction. The RPC layer remaps this to HTTP 503 / JSON-RPC -32005.
+var ErrReadTxLimitExceeded = errors.New("read-tx limit exceeded: too many concurrent read transactions")
+
+type nonBlockingAcquireKey struct{}
+
+// WithNonBlockingAcquire tags ctx to request fail-fast semaphore acquisition in BeginRo.
+// When set, BeginRo uses TryAcquire and returns ErrReadTxLimitExceeded immediately if the
+// read-tx semaphore is full, instead of blocking until a slot is available.
+func WithNonBlockingAcquire(ctx context.Context) context.Context {
+	return context.WithValue(ctx, nonBlockingAcquireKey{}, struct{}{})
+}
+
+// IsNonBlockingAcquire reports whether ctx was tagged by WithNonBlockingAcquire.
+func IsNonBlockingAcquire(ctx context.Context) bool {
+	return ctx.Value(nonBlockingAcquireKey{}) != nil
+}
 
 type Closer interface {
 	Close()

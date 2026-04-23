@@ -28,12 +28,16 @@ The diagnostics are requested by providing a configuration object that specifies
 * `vmTrace`: Provides a Virtual Machine Execution Trace, delivering a full step-by-step trace of the EVM's state throughout the transaction, including all opcodes and gas usage.
 * `stateDiff`: Provides a State Difference, detailing all altered portions of the Ethereum state (e.g., storage, balances, nonces) resulting from the transaction's execution.
 
+#### Flat Tracers
+
+As of v3.4, Erigon supports **flat tracers**, which produce OpenEthereum-compatible call traces in a flat (non-nested) list format. Each call frame is emitted as a separate object with an explicit `subtraces` count, matching the standard output format of `trace_transaction` and `trace_block`. Flat tracers are available for all ad-hoc tracing methods by including `"trace"` in the trace type array.
+
 #### Providing a Transaction to Trace
 
 There are three primary ways to specify the transaction to be traced:
 
 1. Hypothetical Call: Providing the transaction information (like sender, recipient, and data) as if making a call using `eth_call` (see `trace_call`).
-2. Raw Transaction: Providing raw, signed transaction data, as when using `eth_sendRawTransaction` (see `trace_rawTransaction`).
+2. Raw Transaction: Providing raw, signed transaction data, as when using `eth_sendRawTransaction` (see `trace_rawTransaction`). This method is fully functional and provides complete `trace`, `vmTrace`, and `stateDiff` outputs.
 3. Mined Transaction: Providing a transaction hash for a previously mined transaction (see `trace_replayTransaction`).
 
 {% hint style="info" %}

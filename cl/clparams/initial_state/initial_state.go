@@ -88,7 +88,7 @@ func GetGenesisState(network clparams.NetworkType) (*state.CachingBeaconState, e
 			return nil, err
 		}
 	case chainspec.BloatnetNetworkID:
-		if err := returnState.DecodeSSZ(bloatnetStateSSZ, int(clparams.DenebVersion)); err != nil {
+		if err := returnState.DecodeSSZ(bloatnetStateSSZ, int(clparams.ElectraVersion)); err != nil {
 			return nil, err
 		}
 	default:

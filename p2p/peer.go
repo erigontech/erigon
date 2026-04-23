@@ -129,10 +129,17 @@ type Peer struct {
 
 // NewPeer returns a peer for testing purposes.
 func NewPeer(id enode.ID, pubkey [64]byte, name string, caps []Cap, metricsEnabled bool) *Peer {
+	return NewPeerWithProtocols(id, pubkey, name, caps, nil, metricsEnabled)
+}
+
+// NewPeerWithProtocols returns a peer for testing purposes with the given
+// protocols registered in its running map. Caps and protocols must match
+// for a protocol to appear as running.
+func NewPeerWithProtocols(id enode.ID, pubkey [64]byte, name string, caps []Cap, protocols []Protocol, metricsEnabled bool) *Peer {
 	pipe, _ := net.Pipe()
 	node := enode.SignNull(new(enr.Record), id)
 	conn := &conn{fd: pipe, transport: nil, node: node, caps: caps, name: name}
-	peer := newPeer(log.Root(), conn, nil, pubkey, metricsEnabled)
+	peer := newPeer(log.Root(), conn, protocols, pubkey, metricsEnabled)
 	close(peer.closed) // ensures Disconnect doesn't block
 	return peer
 }

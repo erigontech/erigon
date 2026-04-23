@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 //go:embed test_data/electra/blocks_0.ssz_snappy
@@ -120,6 +121,10 @@ func (m *MockBlockReader) ReadHeaderByRoot(ctx context.Context, tx kv.Tx, blockR
 
 func (m *MockBlockReader) FrozenSlots() uint64 {
 	panic("implement me")
+}
+
+func (m *MockBlockReader) CacheBlockBody(blockNumber uint64, transactions [][]byte, withdrawals []*types.Withdrawal) {
+	// no-op in tests
 }
 
 func LoadChain(blocks []*cltypes.SignedBeaconBlock, s *state.CachingBeaconState, db kv.RwDB, t *testing.T) *MockBlockReader {

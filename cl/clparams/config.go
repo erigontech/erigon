@@ -17,17 +17,13 @@
 package clparams
 
 import (
-	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
-	"math/big"
 	mathrand "math/rand"
 	"os"
-	"path"
 	"sort"
-	"strconv"
 	"time"
 
 	"gopkg.in/yaml.v2"
@@ -51,6 +47,11 @@ type CaplinConfig struct {
 	ImmediateBlobsBackfilling bool
 	BlobPruningDisabled       bool
 	SnapshotGenerationEnabled bool
+	// ColumnKeepSlots is the number of slots to keep PeerDAS data column sidecars.
+	// Default: MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS * SLOTS_PER_EPOCH (4096 * 32 = 131072, ~18 days).
+	// Increase for DA oracle nodes or rollups that need longer history; decrease only if disk is constrained
+	// and spec compliance for column serving is not required.
+	ColumnKeepSlots uint64
 	// Network related config
 	NetworkId NetworkType
 	// DisableCheckpointSync is optional and is used to disable checkpoint sync used by default in the node
@@ -65,6 +66,10 @@ type CaplinConfig struct {
 	CustomConfigPath       string
 	CustomGenesisStatePath string
 
+	// Dev validator (embedded VC for --chain=dev)
+	DevValidatorSeed  string // deterministic BLS key seed; empty = disabled
+	DevValidatorCount int    // number of validators (default 64)
+
 	// Network stuff
 	CaplinDiscoveryAddr         string
 	CaplinDiscoveryPort         uint64
@@ -74,6 +79,7 @@ type CaplinConfig struct {
 	SubscribeAllTopics          bool
 	MaxPeerCount                uint64
 	EnableUPnP                  bool
+	CaplinNAT                   string // NAT mode for Caplin P2P (extip:<IP>|stun|upnp|pmp|none)
 	MaxInboundTrafficPerPeer    datasize.ByteSize
 	MaxOutboundTrafficPerPeer   datasize.ByteSize
 	AdptableTrafficRequirements bool
@@ -90,7 +96,7 @@ type CaplinConfig struct {
 }
 
 func (c CaplinConfig) IsDevnet() bool {
-	return c.CustomConfigPath != "" || c.CustomGenesisStatePath != ""
+	return c.CustomConfigPath != "" || c.CustomGenesisStatePath != "" || c.DevValidatorSeed != ""
 }
 
 func (c CaplinConfig) HaveInvalidDevnetParams() bool {
@@ -164,9 +170,22 @@ var (
 		"enr:-LK4QIJUAxX9uNgW4ACkq8AixjnSTcs9sClbEtWRq9F8Uy9OEExsr4ecpBTYpxX66cMk6pUHejCSX3wZkK2pOCCHWHEBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpA-v9SEBAAAZP__________gmlkgnY0gmlwhCPSnDuJc2VjcDI1NmsxoQNuaAjFE-ANkH3pbeBdPiEIwjR5kxFuKaBWxHkqFuPz5IN0Y3CCIyiDdWRwgiMo",
 	}
 	ChiadoBootstrapNodes = []string{
-		"enr:-LG4QMFq8SbY6bah7uUaC_tqv0p3z2v01mhoiTxqNAYuXD9uRQ31iftwjwHkU7xjLs2GZU_Gy---HC6Ow3ezxNhSH0UCg2V0aMvKhFDTnXuEZG4OTIRldGgykJ0ztnX_______________-CaWSCdjSCaXCEOYD8e4lzZWNwMjU2azGhAvzFf5X-nJT-XcAh9WiQcow3U4xQbTa9zLgAw7F3KLmMg3RjcIJ2X4N1ZHCCdl8",
-		"enr:-LG4QPJwqCehYsNwk1o7X1klrAB2sdveN0ExSN5cCgLA-r_wEP_jZaOzweZctGNctqg-xL741J-i78Elmx8lHX2iK-kCg2V0aMvKhFDTnXuEZG4OTIRldGgykJ0ztnX_______________-CaWSCdjSCaXCENieUYolzZWNwMjU2azGhA_dbrqWKyfZg4kXgHRAMSdRFnq2rOmLmAHL2tsx-kLvRg3RjcIJ2X4N1ZHCCdl8",
-		"enr:-Le4QAbc1ed8LNw6rAkyiWEdSIaeNGh0HdGivJkndykFlAznHKLX-rTswkHe2epyBO_569hM_4YohAgaHFpJFSF9llEDh2F0dG5ldHOI__________-DY2djBIRldGgykP8Vq-EFAABv__________-CaWSCdjSCaXCEM_9KZYlzZWNwMjU2azGhAmmnHVdNFq8KVuX7eJhsu3q04S1L5GmS0MBG3MaToTQ_g3RjcIIjLYN1ZHCCIy0",
+		// chiado-lighthouse-0
+		"enr:-L64QOijsdi9aVIawMb5h5PWueaPM9Ai6P17GNPFlHzz7MGJQ8tFMdYrEx8WQitNKLG924g2Q9cCdzg54M0UtKa3QIKCMxaHYXR0bmV0c4j__________4RldGgykDE2cEMCAABv__________-CaWSCdjSCaXCEi5AaWYlzZWNwMjU2azGhA8CjTkD4m1s8FbKCN18LgqlYcE65jrT148vFtwd9U62SiHN5bmNuZXRzD4N0Y3CCIyiDdWRwgiMo",
+		// chiado-lighthouse-1
+		"enr:-L64QKYKGQj5ybkfBxyFU5IEVzP7oJkGHJlie4W8BCGAYEi4P0mmMksaasiYF789mVW_AxYVNVFUjg9CyzmdvpyWQ1KCMlmHYXR0bmV0c4j__________4RldGgykDE2cEMCAABv__________-CaWSCdjSCaXCEi5CtNolzZWNwMjU2azGhAuA7BAwIijy1z81AO9nz_MOukA1ER68rGA67PYQ5pF1qiHN5bmNuZXRzD4N0Y3CCIyiDdWRwgiMo",
+		// chiado-lodestar-0
+		"enr:-Ly4QJJUnV9BxP_rw2Bv7E9iyw4sYS2b4OQZIf4Mu_cA6FljJvOeSTQiCUpbZhZjR4R0VseBhdTzrLrlHrAuu_OeZqgJh2F0dG5ldHOI__________-EZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhIuQGnOJc2VjcDI1NmsxoQPT_u3IjDtB2r-nveH5DhUmlM8F2IgLyxhmwmqW4L5k3ohzeW5jbmV0cw-DdGNwgiMog3VkcIIjKA",
+		// chiado-prysm-0
+		"enr:-MK4QCkOyqOTPX1_-F-5XVFjPclDUc0fj3EeR8FJ5-hZjv6ARuGlFspM0DtioHn1r6YPUXkOg2g3x6EbeeKdsrvVBYmGAYQKrixeh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhIuQGlWJc2VjcDI1NmsxoQKdW3-DgLExBkpLGMRtuM88wW_gZkC7Yeg0stYDTrlynYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
+		// chiado-teku-0
+		"enr:-Ly4QLYLNqrjvSxD3lpAPBUNlxa6cIbe79JqLZLFcZZjWoCjZcw-85agLUErHiygG2weRSCLnd5V460qTbLbwJQsfZkoh2F0dG5ldHOI__________-EZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhKq7mu-Jc2VjcDI1NmsxoQP900YAYa9kdvzlSKGjVo-F3XVzATjOYp3BsjLjSophO4hzeW5jbmV0cw-DdGNwgiMog3VkcIIjKA",
+		// chiado-teku-1
+		"enr:-Ly4QCGeYvTCNOGKi0mKRUd45rLj96b4pH98qG7B9TCUGXGpHZALtaL2-XfjASQyhbCqENccI4PGXVqYTIehNT9KJMQgh2F0dG5ldHOI__________-EZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhIuQrVSJc2VjcDI1NmsxoQP9iDchx2PGl3JyJ29B9fhLCvVMN6n23pPAIIeFV-sHOIhzeW5jbmV0cw-DdGNwgiMog3VkcIIjKA",
+		// GnosisDAO Bootnode: 3.71.132.231
+		"enr:-Ly4QAtr21x5Ps7HYhdZkIBRBgcBkvlIfEel1YNjtFWf4cV3au2LgBGICz9PtEs9-p2HUl_eME8m1WImxTxSB3AkCMwBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhANHhOeJc2VjcDI1NmsxoQNLp1QPV8-pyMCohOtj6xGtSBM_GtVTqzlbvNsCF4ezkYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
+		// GnosisDAO Bootnode: 3.69.35.13
+		"enr:-Ly4QLgn8Bx6faigkKUGZQvd1HDToV2FAxZIiENK-lczruzQb90qJK-4E65ADly0s4__dQOW7IkLMW7ZAyJy2vtiLy8Bh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhANFIw2Jc2VjcDI1NmsxoQMa-fWEy9UJHfOl_lix3wdY5qust78sHAqZnWwEiyqKgYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
 	}
 	HoodiBootstrapNodes = []string{
 		"enr:-Mq4QLkmuSwbGBUph1r7iHopzRpdqE-gcm5LNZfcE-6T37OCZbRHi22bXZkaqnZ6XdIyEDTelnkmMEQB8w6NbnJUt9GGAZWaowaYh2F0dG5ldHOIABgAAAAAAACEZXRoMpDS8Zl_YAAJEAAIAAAAAAAAgmlkgnY0gmlwhNEmfKCEcXVpY4IyyIlzZWNwMjU2azGhA0hGa4jZJZYQAS-z6ZFK-m4GCFnWS8wfjO0bpSQn6hyEiHN5bmNuZXRzAIN0Y3CCIyiDdWRwgiMo",
@@ -178,8 +197,13 @@ var (
 	}
 	BloatnetBootstrapNodes = []string{
 		"enr:-Iq4QO5d3m9DzBlj1PLCovLotwN8b9mFp_MrCx-KiNjzltphcYYT7oeD-VU7qyuNJd50X3wlJwjd6C989B3DkVcQ3tiGAZfpKz9kgmlkgnY0gmlwhJ20DuWJc2VjcDI1NmsxoQJJ3h8aUO3GJHv-bdvHtsQZ2OEisutelYfGjXO4lSg8BYN1ZHCCIzI",
-		"enr:-LK4QAtyVYCHLTOF1iJ8TK84phLbeuUt42ub5x9OODjTbvnwHS96e6NFlpappH6eeUcyiVmS98usL3cwHUb8F1Y3NTwIh2F0dG5ldHOIAACAAQAAAACEZXRoMpBAw1JZYIAnZP__________gmlkgnY0gmlwhJ20DuWJc2VjcDI1NmsxoQJMpOlHHZBgztApCE2mE4_MZRqgAi2Y81u446NOF7RE04N0Y3CCIyiDdWRwgiMo",
-		"enr:-Mq4QNiucamyTUE9hnWkibGb5BgmKQkEBTkzhLCZJa0SpH6IOLWx4Bkx0E-xzVea9A0-cmtBbk3Sz416oVN8tCq1IMGGAZfpPPVeh2F0dG5ldHOIAAADAAAAAACEZXRoMpBAw1JZcAAAAP__________gmlkgnY0gmlwhJ20DuGEcXVpY4IyyIlzZWNwMjU2azGhA7HMxNX8T5X4lwmmbnuglDAgSHvAw_XSIEu4sf0I4gdYiHN5bmNuZXRzD4N0Y3CCIyiDdWRwgiMo",
+		"enr:-LK4QL8T5e1VWIkPmwdj_tYp0aR-GAqiKg2dO6azs25df44IT6TTZt-iybpRpAblEWEARfYKr3LWglSS0TNzlQ243nUEh2F0dG5ldHOIAAAAAAAAAAyEZXRoMpCpeSKMYDZEaf__________gmlkgnY0gmlwhJ20DuWJc2VjcDI1NmsxoQPlfW3XDntHy35jQwan5Cyesx4lrVVXDdyfOlcsnBL6S4N0Y3CCIyiDdWRwgiMo",
+		"enr:-N24QFEzQ_JIL0cEz4HROg-YhNJgX75kjiawDIhTt3DGKU-sYnxnTfOuCeO6B3mS0nl7-aNSPMXPzl8Gi4knbOjbGkkDh2F0dG5ldHOIAAAAAAAABgCGY2xpZW500YpMaWdodGhvdXNlhTguMS4whGV0aDKQqXkijGA2RGn__________4JpZIJ2NIJpcITOvTovhHF1aWOCIymJc2VjcDI1NmsxoQL8higsdFOIx759KuDWcM09KXKQvMqTARVKnN6S5qELUohzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
+		"enr:-N24QPb7SqEEvJK5ws9HxJWC4K0kcSJW5ZwlWDRo7TEM2w0xIXQMRJjT8hYVlYx5e_KWZa2JMEF6kNfQ0XVijo_5a5IDh2F0dG5ldHOIAAAAYAAAAACGY2xpZW500YpMaWdodGhvdXNlhTguMS4whGV0aDKQqXkijGA2RGn__________4JpZIJ2NIJpcISdtA7mhHF1aWOCIymJc2VjcDI1NmsxoQJMmRIjDEBzk1RE01Bvb_fIXG9ZfxKs92CypoBJTE6y44hzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
+		"enr:-N24QHsp9pbbf-6tYpyaUP1eaXNbUKgkQ_kkVOqxAgF3vOrIHjDbeqVltdhkHVVzD4C4lC9zhP5HbLplCZrw5c9idNsDh2F0dG5ldHOIAAAAAMAAAACGY2xpZW500YpMaWdodGhvdXNlhTguMS4whGV0aDKQqXkijGA2RGn__________4JpZIJ2NIJpcISdtA7jhHF1aWOCIymJc2VjcDI1NmsxoQJMAIcNubXwQuD9RYFo4rcOc58C5YqexXLAS5sFzWJNTohzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
+		"enr:-Le4QGFJJPou4aP5ghuvjc_aIohwh1-hE2f2M3Ec5Qn4CJbQTMCMmzEDA8L5eiv9pLwjmrR9xcPky9S-U1YFTUo2_7cDh2F0dG5ldHOIAAADAAAAAACDY2djBIRldGgykKl5IoxgNkRp__________-CaWSCdjSCaXCEnbQO4olzZWNwMjU2azGhAlvTDd_xk8EfKIqq0uqh7RYxTkVq4KjYoE0rB75SyzGqg3RjcIIjKIN1ZHCCIyg",
+		"enr:-Mq4QGYx7TrWf9SO6dJUxcON0pT6G3LsoeHXxl7FvEOlPQpSK-pc6jqWk3REApaO5mIUzLcz9SK29Zj0naftKvJg-6eGAZxwhJQCh2F0dG5ldHOIAAAAAAAAAAyEZXRoMpCpeSKMcAAAAP__________gmlkgnY0gmlwhJ20DuGEcXVpY4IyyIlzZWNwMjU2azGhA3rJ9h5udMo-Bz4vMDH1h1YSDoKRiE4oYK6xOMictvbziHN5bmNuZXRzD4N0Y3CCIyiDdWRwgiMo",
+		"enr:-LK4QFs_NfU-2-9t1yjePgJFVsZZoVsEx_mXN8BkKgo5f30CIUtZcxAfcDL5bE33Y77fD4rcOXD9OGbO360Vvpk9oZcEh2F0dG5ldHOIDAAAAAAAAACEZXRoMpCpeSKMYDZEaf__________gmlkgnY0gmlwhJ20DuSJc2VjcDI1NmsxoQIwulbHaiOcC3DFsV7btzBVbU1jBIM0BpwsunpYg-t8OoN0Y3CCIyiDdWRwgiMo",
 	}
 )
 
@@ -362,7 +386,7 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 		"https://hoodi-checkpoint-sync.attestant.io/eth/v2/debug/beacon/states/finalized",
 	},
 	chainspec.BloatnetNetworkID: {
-		"https://checkpoint-sync.perf-devnet-2.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
+		"https://checkpoint-sync.perf-devnet-3.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
 	},
 }
 
@@ -562,6 +586,8 @@ type BeaconChainConfig struct {
 	ElectraForkEpoch     uint64            `yaml:"ELECTRA_FORK_EPOCH" spec:"true" json:"ELECTRA_FORK_EPOCH,string"`     // ElectraForkEpoch is used to represent the assigned fork epoch for Electra.
 	FuluForkVersion      ConfigForkVersion `yaml:"FULU_FORK_VERSION" spec:"true" json:"FULU_FORK_VERSION"`              // FuluForkVersion is used to represent the fork version for Fulu.
 	FuluForkEpoch        uint64            `yaml:"FULU_FORK_EPOCH" spec:"true" json:"FULU_FORK_EPOCH,string"`           // FuluForkEpoch is used to represent the assigned fork epoch for Fulu.
+	GloasForkVersion     ConfigForkVersion `yaml:"GLOAS_FORK_VERSION" spec:"true" json:"GLOAS_FORK_VERSION"`            // GloasForkVersion is used to represent the fork version for Gloas (Glamsterdam).
+	GloasForkEpoch       uint64            `yaml:"GLOAS_FORK_EPOCH" spec:"true" json:"GLOAS_FORK_EPOCH,string"`         // GloasForkEpoch is used to represent the assigned fork epoch for Gloas (Glamsterdam).
 
 	ForkVersionSchedule map[common.Bytes4]VersionScheduleEntry `json:"-"` // Schedule of fork epochs by version.
 
@@ -692,6 +718,12 @@ func (b *BeaconChainConfig) SyncCommitteePeriod(slot uint64) uint64 {
 	return slot / (b.SlotsPerEpoch * b.EpochsPerSyncCommitteePeriod)
 }
 
+// SyncCommitteeAggregationBitsSize returns the byte length of the aggregation bits
+// in a sync committee Contribution: SyncCommitteeSize / SyncCommitteeSubnetCount / 8.
+func (b *BeaconChainConfig) SyncCommitteeAggregationBitsSize() int {
+	return int(b.SyncCommitteeSize) / int(b.SyncCommitteeSubnetCount) / 8
+}
+
 func (b *BeaconChainConfig) RoundSlotToVotePeriod(slot uint64) uint64 {
 	p := b.SlotsPerEpoch * b.EpochsPerEth1VotingPeriod
 	return slot - (slot % p)
@@ -705,6 +737,7 @@ func (b *BeaconChainConfig) GetCurrentStateVersion(epoch uint64) StateVersion {
 		b.DenebForkEpoch,
 		b.ElectraForkEpoch,
 		b.FuluForkEpoch,
+		b.GloasForkEpoch,
 	}
 	stateVersion := Phase0Version
 	for _, forkEpoch := range forkEpochList {
@@ -734,6 +767,7 @@ func configForkSchedule(b *BeaconChainConfig) map[common.Bytes4]VersionScheduleE
 	fvs[utils.Uint32ToBytes4(uint32(b.DenebForkVersion))] = VersionScheduleEntry{b.DenebForkEpoch, DenebVersion}
 	fvs[utils.Uint32ToBytes4(uint32(b.ElectraForkVersion))] = VersionScheduleEntry{b.ElectraForkEpoch, ElectraVersion}
 	fvs[utils.Uint32ToBytes4(uint32(b.FuluForkVersion))] = VersionScheduleEntry{b.FuluForkEpoch, FuluVersion}
+	fvs[utils.Uint32ToBytes4(uint32(b.GloasForkVersion))] = VersionScheduleEntry{b.GloasForkEpoch, GloasVersion}
 	return fvs
 }
 
@@ -890,6 +924,8 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	ElectraForkEpoch:     364032,
 	FuluForkVersion:      0x06000000,
 	FuluForkEpoch:        411392,
+	GloasForkVersion:     0x07000000,
+	GloasForkEpoch:       math.MaxUint64,
 
 	// New values introduced in Altair hard fork 1.
 	// Participation flag indices.
@@ -1000,6 +1036,18 @@ func CustomConfig(configFile string) (BeaconChainConfig, NetworkConfig, error) {
 		return BeaconChainConfig{}, NetworkConfig{}, err
 	}
 
+	// Detect PRESET_BASE to use the correct base config.
+	// The minimal preset has different SSZ vector sizes, committee sizes, etc.
+	var presetProbe struct {
+		PresetBase string `yaml:"PRESET_BASE"`
+	}
+	if err := yaml.Unmarshal(b, &presetProbe); err != nil {
+		return BeaconChainConfig{}, NetworkConfig{}, err
+	}
+	if presetProbe.PresetBase == "minimal" {
+		ApplyMinimalPreset(beaconCfg)
+	}
+
 	// setup beacon chain config
 	if err := yaml.Unmarshal(b, &beaconCfg); err != nil {
 		return BeaconChainConfig{}, NetworkConfig{}, err
@@ -1011,6 +1059,39 @@ func CustomConfig(configFile string) (BeaconChainConfig, NetworkConfig, error) {
 		return BeaconChainConfig{}, NetworkConfig{}, err
 	}
 	return *beaconCfg, *networkConfig, nil
+}
+
+// ApplyMinimalPreset overrides the mainnet base config with values from the
+// Ethereum consensus-specs "minimal" preset. Only fields that differ from
+// mainnet are changed. Reference:
+// https://github.com/ethereum/consensus-specs/tree/dev/presets/minimal
+func ApplyMinimalPreset(cfg *BeaconChainConfig) {
+	cfg.PresetBase = "minimal"
+
+	// Phase0 preset differences
+	cfg.SecondsPerSlot = 6
+	cfg.TargetCommitteeSize = 4
+	cfg.MaxCommitteesPerSlot = 4
+	cfg.ShuffleRoundCount = 10
+	cfg.MinGenesisActiveValidatorCount = 64
+	cfg.Eth1FollowDistance = 16
+	cfg.SlotsPerEpoch = 8
+	cfg.SlotsPerHistoricalRoot = 64
+	cfg.EpochsPerHistoricalVector = 64
+	cfg.EpochsPerSlashingsVector = 64
+	cfg.EpochsPerEth1VotingPeriod = 4
+	cfg.GenesisDelay = 300
+
+	// Altair preset differences
+	cfg.SyncCommitteeSize = 32
+	cfg.EpochsPerSyncCommitteePeriod = 8
+
+	// Capella preset differences
+	cfg.MaxWithdrawalsPerPayload = 4
+	cfg.MaxValidatorsPerWithdrawalsSweep = 16
+
+	// Deneb preset differences
+	cfg.MaxBlobCommittmentsPerBlock = 16
 }
 
 func sepoliaConfig() BeaconChainConfig {
@@ -1104,8 +1185,8 @@ func bloatnetConfig() BeaconChainConfig {
 	cfg := MainnetBeaconConfig
 	cfg.ConfigName = "testnet"
 	cfg.MinGenesisActiveValidatorCount = 500
-	cfg.MinGenesisTime = 1751967000 // 2025-Jul-08 09:30:00 AM UTC
-	cfg.GenesisForkVersion = 0x10802764
+	cfg.MinGenesisTime = 1771423200 // 2026-Feb-19 02:00:00 AM UTC
+	cfg.GenesisForkVersion = 0x10364469
 	cfg.GenesisDelay = 60
 
 	// Time parameters
@@ -1125,15 +1206,15 @@ func bloatnetConfig() BeaconChainConfig {
 
 	// Forking - all forks at epoch 0 except Fulu
 	cfg.AltairForkEpoch = 0
-	cfg.AltairForkVersion = 0x20802764
+	cfg.AltairForkVersion = 0x20364469
 	cfg.BellatrixForkEpoch = 0
-	cfg.BellatrixForkVersion = 0x30802764
+	cfg.BellatrixForkVersion = 0x30364469
 	cfg.CapellaForkEpoch = 0
-	cfg.CapellaForkVersion = 0x40802764
+	cfg.CapellaForkVersion = 0x40364469
 	cfg.DenebForkEpoch = 0
-	cfg.DenebForkVersion = 0x50802764
+	cfg.DenebForkVersion = 0x50364469
 	cfg.ElectraForkEpoch = 0
-	cfg.ElectraForkVersion = 0x60802764
+	cfg.ElectraForkVersion = 0x60364469
 	cfg.FuluForkEpoch = math.MaxUint64
 	cfg.FuluForkVersion = 0x70000000
 	cfg.TerminalTotalDifficulty = "58750000000000000000000"
@@ -1181,7 +1262,7 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.DenebForkVersion = 0x04000064
 	cfg.ElectraForkEpoch = 1337856
 	cfg.ElectraForkVersion = 0x05000064
-	cfg.FuluForkEpoch = math.MaxUint64
+	cfg.FuluForkEpoch = 1714688
 	cfg.FuluForkVersion = 0x06000064
 	cfg.TerminalTotalDifficulty = "8626000000000000000000058750000000000000000000"
 	cfg.DepositContractAddress = "0x0B98057eA310F4d31F2a452B414647007d1645d9"
@@ -1229,7 +1310,7 @@ func chiadoConfig() BeaconChainConfig {
 	cfg.DenebForkVersion = 0x0400006f
 	cfg.ElectraForkEpoch = 948224
 	cfg.ElectraForkVersion = 0x0500006f
-	cfg.FuluForkEpoch = math.MaxUint64
+	cfg.FuluForkEpoch = 1353216
 	cfg.FuluForkVersion = 0x0600006f
 	cfg.TerminalTotalDifficulty = "231707791542740786049188744689299064356246512"
 	cfg.DepositContractAddress = "0xb97036A26259B7147018913bD58a774cf91acf25"
@@ -1395,6 +1476,8 @@ func (b *BeaconChainConfig) GetForkVersionByVersion(v StateVersion) uint32 {
 		return uint32(b.ElectraForkVersion)
 	case FuluVersion:
 		return uint32(b.FuluForkVersion)
+	case GloasVersion:
+		return uint32(b.GloasForkVersion)
 	}
 	panic("invalid version")
 }
@@ -1415,6 +1498,8 @@ func (b *BeaconChainConfig) GetForkEpochByVersion(v StateVersion) uint64 {
 		return b.ElectraForkEpoch
 	case FuluVersion:
 		return b.FuluForkEpoch
+	case GloasVersion:
+		return b.GloasForkEpoch
 	}
 	panic("invalid version")
 }
@@ -1475,30 +1560,6 @@ func GetAllCheckpointSyncEndpoints(net NetworkType) []string {
 	return urls
 }
 
-func GetCheckpointSyncEndpoint(net NetworkType) string {
-	randomOne := func(checkpoints []string) string {
-		if len(checkpoints) == 1 {
-			return checkpoints[0]
-		}
-		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(checkpoints))))
-		if err != nil {
-			panic(err)
-		}
-		return checkpoints[n.Int64()]
-	}
-	// Check if the user has configured a custom checkpoint sync endpoint
-	if len(ConfigurableCheckpointsURLs) > 0 {
-		return randomOne(ConfigurableCheckpointsURLs)
-	}
-
-	// Otherwise, use the default endpoints
-	checkpoints, ok := CheckpointSyncEndpoints[net]
-	if !ok {
-		return ""
-	}
-	return randomOne(checkpoints)
-}
-
 // Check if chain with a specific ID is supported or not
 //
 // note: the following code uses chainID constants because they are usually the same as the network ID,
@@ -1514,15 +1575,5 @@ func EmbeddedSupported(networkId uint64) bool {
 }
 
 func SupportBackfilling(networkId uint64) bool {
-	return networkId == chainspec.MainnetChainID ||
-		networkId == chainspec.SepoliaChainID ||
-		networkId == chainspec.GnosisChainID ||
-		networkId == chainspec.ChiadoChainID ||
-		networkId == chainspec.HoodiChainID ||
-		networkId == chainspec.BloatnetNetworkID
-}
-
-func EpochToPaths(slot uint64, config *BeaconChainConfig, suffix string) (string, string) {
-	folderPath := path.Clean(strconv.FormatUint(slot/SubDivisionFolderSize, 10))
-	return folderPath, path.Clean(fmt.Sprintf("%s/%d.%s.sz", folderPath, slot, suffix))
+	return EmbeddedSupported(networkId)
 }

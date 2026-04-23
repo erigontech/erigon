@@ -46,7 +46,10 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
+
+var dbRoTxOverloaded = metrics.GetOrCreateCounter(`db_rotx_overloaded_total`)
 
 func init() {
 	mdbx.MapFullErrorMessage += " You can try remove the database files (e.g., by running rm -rf /path/to/db)"
@@ -582,8 +585,13 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		return nil, errors.New("db closed")
 	}
 
-	// will return nil err if context is cancelled (may appear to acquire the semaphore)
-	if semErr := db.roTxsLimiter.Acquire(ctx, 1); semErr != nil {
+	if kv.IsNonBlockingAcquire(ctx) {
+		if !db.roTxsLimiter.TryAcquire(1) {
+			db.trackTxEnd()
+			dbRoTxOverloaded.Inc()
+			return nil, kv.ErrReadTxLimitExceeded
+		}
+	} else if semErr := db.roTxsLimiter.Acquire(ctx, 1); semErr != nil {
 		db.trackTxEnd()
 		return nil, fmt.Errorf("mdbx.MdbxKV.BeginRo: roTxsLimiter error %w", semErr)
 	}
@@ -616,6 +624,12 @@ func (db *MdbxKV) BeginRw(ctx context.Context) (kv.RwTx, error) {
 }
 func (db *MdbxKV) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
 	return db.beginRw(ctx, mdbx.TxNoSync)
+}
+
+// BeginRwTry opens a write transaction without blocking. Returns syscall.EBUSY
+// if another write transaction is already open.
+func (db *MdbxKV) BeginRwTry(ctx context.Context) (kv.RwTx, error) {
+	return db.beginRw(ctx, mdbx.TxTry)
 }
 
 func (db *MdbxKV) beginRw(ctx context.Context, flags uint) (txn kv.RwTx, err error) {
@@ -819,7 +833,7 @@ func NewAsyncTx(tx kv.Tx, queueSize int) *asyncTx {
 }
 
 func (a *asyncTx) Apply(ctx context.Context, f func(kv.Tx) error) error {
-	rc := make(chan error)
+	rc := make(chan error, 1)
 	a.requests <- &applyTx{rc, a.Tx, f}
 	select {
 	case err := <-rc:
@@ -843,7 +857,7 @@ func NewAsyncRwTx(tx kv.RwTx, queueSize int) *asyncRwTx {
 }
 
 func (a *asyncRwTx) Apply(ctx context.Context, f func(kv.Tx) error) error {
-	rc := make(chan error)
+	rc := make(chan error, 1)
 	a.requests <- &applyTx{rc, a.RwTx, f}
 	select {
 	case err := <-rc:
@@ -854,7 +868,7 @@ func (a *asyncRwTx) Apply(ctx context.Context, f func(kv.Tx) error) error {
 }
 
 func (a *asyncRwTx) ApplyRw(ctx context.Context, f func(kv.RwTx) error) error {
-	rc := make(chan error)
+	rc := make(chan error, 1)
 	a.requests <- &applyRwTx{rc, a.RwTx, f}
 	select {
 	case err := <-rc:
@@ -1223,14 +1237,9 @@ func (tx *MdbxTx) DBSize() (uint64, error) {
 
 func (tx *MdbxTx) RwCursor(bucket string) (kv.RwCursor, error) {
 	b := tx.db.buckets[bucket]
-	if b.AutoDupSortKeysConversion {
-		return tx.stdCursor(bucket)
-	}
-
 	if b.Flags&kv.DupSort != 0 {
 		return tx.RwCursorDupSort(bucket)
 	}
-
 	return tx.stdCursor(bucket)
 }
 

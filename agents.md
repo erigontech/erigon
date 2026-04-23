@@ -1,208 +1,87 @@
-# Agent Task
+# Erigon Agent Guidelines
 
-This folder is being worked on by an automated agent.
+This file provides guidance for AI agents working with this codebase.
 
-## Project Context
+**Requirements**: Go 1.25+, GCC 10+ or Clang, 32GB+ RAM, SSD/NVMe storage
 
-Kurtosis devnet validation for EIP-8161.
-
-EL erigon: /Users/monkeair/work/eip-maker/erigon  image=eip8161-el-erigon:latest
-CL prysm: /Users/monkeair/work/eip-maker/prysm  image=eip8161-cl-prysm:latest
-
-## Specification
-
-# Kurtosis Devnet Validation for EIP-8161
-
-Validate the EIP-8161 implementation by building Docker images,
-launching a Kurtosis devnet, and spamming it with transactions.
-
-## EIP Specification (for reference)
-
----
-eip: 8161
-title: SSZ-REST Engine API Transport
-description: Defines the ssz_rest communication channel for the Engine API, replacing JSON-RPC with SSZ-encoded payloads over REST
-author: Giulio Rebuffo (@Giulio2002), Ben Adams (@benaadams)
-discussions-to: https://ethereum-magicians.org/t/eip-8161-ssz-rest-engine-api-transport/1
-status: Draft
-type: Standards Track
-category: Core
-created: 2026-03-01
-requires: 8160
----
-
-## Abstract
-
-This EIP defines the `ssz_rest` communication channel advertised via `engine_getClientCommunicationChannelsV1` (EIP-8160). It specifies how every `engine_*` JSON-RPC method maps to an SSZ-encoded REST endpoint, using `application/octet-stream` for request and response bodies. This eliminates JSON serialization overhead and hex-encoding bloat, cutting payload sizes roughly in half and removing a major CPU bottleneck on the Engine API hot path.
-
-## Motivation
-
-EIP-8160 added the discovery mechanism — the EL can now tell the CL "I also speak ssz_rest at this URL." But it didn't define what `ssz_rest` actually means. This EIP fills that gap.
-
-JSON-RPC is the bottleneck. Every block, the CL and EL exchange full execution payloads — all transactions, withdrawals, block headers, receipts. JSON hex-encodes every byte slice (`0x` prefix + 2 hex chars per byte), roughly doubling the wire size. Then both sides burn CPU encoding and decoding JSON. As blocks get bigger, this gets worse linearly.
-
-SSZ (Simple Serialize) is already the consensus layer's native encoding. Execution payloads already have SSZ definitions in the consensus specs. By sending SSZ directly over HTTP REST, we:
-
-1. **Cut wire size ~50%** — raw bytes instead of hex strings
-2. **Eliminate JSON encode/decode CPU** — SSZ is trivially fast to serialize
-3. **Align with the CL's native format** — the CL already thinks in SSZ, so zero conversion overhead on the CL side
-4. **Provide a concrete migration path** — clients can gradually move methods to SSZ-REST while keeping JSON-RPC as fallback
-
-## Specification
-
-### URL Structure
-
-All SSZ-REST endpoints live under the base URL advertised in the `engine_getClientCommunicationChannelsV1` response for `protocol: "ssz_rest"`.
-
-Each `engine_*` method maps to a REST endpoint:
-
-```
-POST {base_url}/engine/{method_name}
-```
-
-Where `{method_name}` is the JSON-RPC method name without the `engine_` prefix and without the version suffix, but with the version as a path segment:
-
-```
-engine_newPayloadV4       → POST {base_url}/engine/v4/new_payload
-engine_forkchoiceUpdatedV3 → POST {base_url}/engine/v3/forkchoice_updated
-engine_getPayloadV4       → POST {base_url}/engine/v4/get_payload
-engine_getClientVersionV1 → POST {base_url}/engine/v1/get_client_version
-engine_exchangeCapabilitiesV1 → POST {base_url}/engine/v1/exchange_capabilities
-engine_getClientCommunicationChannelsV1 → POST {base_url}/engine/v1/get_client_communication_channels
-engine_getBlobsV1         → POST {base_url}/engine/v1/get_blobs
-```
-
-### Content Types
-
-- Request: `Content-Type: application/octet-stream` (SSZ-encoded body)
-- Response: `Content-Type: application/octet-stream` (SSZ-encoded body)
-- Methods with no request parameters send an empty body.
-- Methods with no SSZ-encodable response return an SSZ-encoded wrapper (see below).
-
-### Authentication
-
-The same JWT authentication as JSON-RPC MUST be used. The JWT token is passed in the `Authorization` header:
-
-```
-Authorization: Bearer <jwt_token>
-```
-
-### HTTP Status Codes
-
-| Code | Meaning |
-|------|---------|
-| 200  | Success — response body is SSZ-encoded |
-| 400  | Bad request — malformed SSZ or invalid parameters |
-| 401  | Unauthorized — invalid or missing JWT |
-| 404  | Unknown endpoint |
-| 500  | Internal server error |
-
-### Error Responses
-
-On non-200 responses, the body is a UTF-8 JSON error object (not SSZ) for debuggability:
-
-```json
-{"code": -32602, "message": "Invalid payload id"}
-```
-
-### SSZ Types for Engine API Methods
-
-#### `new_payload` (v4)
-
-**Request:** SSZ-encoded container
-
-## Step 1: Docker Build
-
-Build every client image. If there is no Dockerfile, look in
-`Dockerfile`, `docker/Dockerfile`, or create a minimal one that
-builds the Go / Rust binary.
+## Build & Test
 
 ```bash
-# EL — erigon → eip8161-el-erigon:latest
-cd /Users/monkeair/work/eip-maker/erigon && docker build -t eip8161-el-erigon:latest .
-
-# CL — prysm → eip8161-cl-prysm:latest
-cd /Users/monkeair/work/eip-maker/prysm && docker build -t eip8161-cl-prysm:latest .
+make erigon              # Build main binary (./build/bin/erigon)
+make integration         # Build integration test binary
+make lint                # Run golangci-lint + mod tidy check
+make test-short          # Quick unit tests (-short -failfast)
+make test-all            # Full test suite with coverage
+make gen                 # Generate all auto-generated code (mocks, grpc, etc.)
 ```
 
-ALL images MUST build successfully before proceeding.
+Before committing, always verify changes with: `make lint && make erigon integration`
 
-## Step 2: Kurtosis Network
+## Architecture Overview
 
-Create `network_params.yaml` and launch:
+- Erigon is an Ethereum execution client
+- Data flow: `db -> snapshots`
+- `snapshots` are immutable
+- `Unwind` beyond data in snapshots not allowed
+
+## Key Directories
+
+| Directory | Purpose | Component Docs |
+|-----------|---------|----------------|
+| `cmd/` | Entry points: erigon, rpcdaemon, caplin, sentry, downloader | - |
+| `execution/stagedsync/` | Staged sync pipeline | [agents.md](execution/stagedsync/agents.md) |
+| `db/` | Storage: MDBX, snapshots, ETL | [agents.md](db/agents.md) |
+| `cl/` | Consensus layer (Caplin) | [agents.md](cl/agents.md) |
+| `p2p/` | P2P networking (DevP2P) | [agents.md](p2p/agents.md) |
+| `rpc/jsonrpc/` | JSON-RPC API | - |
+
+## Running
 
 ```bash
-kurtosis run github.com/ethpandaops/ethereum-package --args-file network_params.yaml
+./build/bin/erigon --datadir=./data --chain=mainnet
+./build/bin/erigon --datadir=dev --chain=dev --beacon.api=beacon,validator,node,config  # PoS dev mode
 ```
 
-Suggested network_params.yaml:
+## Conventions
 
-```yaml
-participants:
-  - el_type: erigon
-    el_image: eip8161-el-erigon:latest
-    cl_type: prysm
-    cl_image: eip8161-cl-prysm:latest
-    count: 1
-network_params:
-  network_id: "3151908"
-  seconds_per_slot: 3
-additional_services: []
-```
+Commit messages: prefix with package(s) modified, e.g., `eth, rpc: make trace configs optional`
 
-Adapt `el_type` / `cl_type` to the actual client names supported by
-the ethereum-package (erigon, geth, reth, nethermind, besu, prysm,
-lighthouse, lodestar, teku, nimbus, etc.).
+Run `make lint` before every push. The linter is non-deterministic — run it repeatedly until clean.
 
-Enable the fork containing EIP-8161 at genesis or a low epoch
-by adding the right `network_params` key (e.g. `electra_fork_epoch: 0`).
+**Important**: Always run `make lint` after making code changes and before committing. Fix any linter errors before proceeding. PRs must pass `make lint` before being opened or updated.
 
-## Step 3: Wait for Finalization
+## Pull Requests & Workflows
 
-1. Get EL RPC: `kurtosis port print <enclave> <service> rpc`
-2. Poll `eth_getBlockByNumber("finalized", false)` until at least
-   2 finalized epochs (finalized block > 0 and increasing)
-3. Verify chain is progressing (block numbers increase)
+When manually dispatching a workflow that is not part of the PR's automatic check list, add a comment on the PR explaining which workflow was dispatched, why it was chosen, and include a direct link to the workflow run.
 
-## Step 4: Transaction Spam
+## Pre-push
 
-1. Use `cast` (foundry) or raw `curl` JSON-RPC to send txs
-2. Send at least 100 simple ETH transfers
-3. If EIP-8161 introduces a new TX type, send those too
-4. Verify transactions included in blocks
-5. Check client logs: `kurtosis service logs <enclave> <service>`
+Before running `git push`, always run `make lint` first and fix all issues. Run lint multiple times if needed — it is non-deterministic.
 
-## Step 5: Cleanup
+## Lint Notes
 
-```bash
-kurtosis enclave rm -f <enclave_name>
-```
+The linter (`make lint`) is non-deterministic in which files it scans — new issues may appear on subsequent runs. Run lint repeatedly until clean.
 
-## Hard Rules
+Common lint categories and fixes:
+- **ruleguard (defer tx.Rollback/cursor.Close):** The error check must come *before* `defer tx.Rollback()`. Never remove an explicit `.Close()` or `.Rollback()` — add `defer` as a safety net alongside it, since the timing of the explicit call may matter.
+- **prealloc:** Pre-allocate slices when the length is known from a range.
+- **unslice:** Remove redundant `[:]` on variables that are already slices.
+- **newDeref:** Replace `*new(T)` with `T{}`.
+- **appendCombine:** Combine consecutive `append` calls into one.
+- **rangeExprCopy:** Use `&x` in `range` to avoid copying large arrays.
+- **dupArg:** For intentional `x.Equal(x)` self-equality tests, suppress with `//nolint:gocritic`.
+- **Loop ruleguard in benchmarks:** For `BeginRw`/`BeginRo` inside loops where `defer` doesn't apply, suppress with `//nolint:gocritic`.
 
-- ALL Docker images MUST build before starting Kurtosis
-- Network MUST reach finality (≥2 finalized epochs)
-- ≥100 transactions sent and confirmed
-- No panics / fatal errors / crashes in any client log
-- Clean up the enclave when done
+## Workflows
 
+Make sure all scripts and shell code used from GitHub workflows is cross platform, for macOS, Windows and Linux.
 
-## Success Criteria (Objective)
+Read [`CI-GUIDELINES.md`](CI-GUIDELINES.md) for guidelines before making changes to workflows.
 
-## Success Criteria for Kurtosis Validation of EIP-8161
+## Go Test Caching
 
-1. Every Docker image builds successfully
-2. Kurtosis devnet launches with all custom images
-3. Network reaches finality (at least 2 finalized epochs)
-4. At least 100 transactions sent and confirmed in blocks
-5. No panics, fatal errors, or crashes in client logs
-6. Enclave is cleaned up after validation
+Go's test result cache keys on the mtime+size of every file read (via Go stdlib) during a test run. CI normalizes mtimes via `git restore-mtime` in `.github/actions/setup-erigon/action.yml` so that unchanged files get stable mtimes across runs.
 
+**When a test reads a data file at runtime** (via `os.Open`, `os.ReadFile`, `os.Stat`, etc.) that lives outside a `testdata/` directory, it must be added to the `git restore-mtime` pattern list in `setup-erigon/action.yml`. Otherwise that package's test results will never be cached in CI.
 
-## Important Notes
-
-- A **strict verifier agent** will independently check your work when you are done.
-- The verifier has no access to your session — it only reads the actual files.
-- Claims you make that are not backed by real file changes will be caught.
-- Do not leave TODOs, stubs, or placeholder code. Every criterion must be fully met.
-- Run tests / build commands to confirm your work is correct before finishing.
+Covered patterns already include `**/testdata/**`, `execution/tests/test-corners/**`, `cl/spectest/**/data_*/**`, `cl/transition/**/test_data/**`, `cl/utils/eth2shuffle/spec/**`, and `execution/state/genesiswrite/*.json`.

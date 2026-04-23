@@ -29,9 +29,7 @@ func (r EstimatedRamPerWorker) Workers() int {
 	maxWorkersForGivenMemory := r.WorkersByRAMOnly()
 	return min(AlmostAllCPUs(), maxWorkersForGivenMemory)
 }
-
-func (r EstimatedRamPerWorker) WorkersHalf() int    { return max(1, r.Workers()/2) }
-func (r EstimatedRamPerWorker) WorkersQuarter() int { return max(1, r.Workers()/4) }
+func (r EstimatedRamPerWorker) WorkersHalf() int { return max(1, r.Workers()/2) }
 
 // WorkersByRAMOnly - return max workers amount based on total Memory and estimated RAM per worker
 func (r EstimatedRamPerWorker) WorkersByRAMOnly() int {
@@ -41,8 +39,8 @@ func (r EstimatedRamPerWorker) WorkersByRAMOnly() int {
 
 const (
 	//elias-fano index building is single-threaded
-	// when set it to 3GB - observed OOM-kil at server with 128Gb ram and 32CPU
-	IndexSnapshot = EstimatedRamPerWorker(4 * datasize.GB)
+	// when set it to 4GB - observed OOM-kill at server with 128Gb ram and 32CPU
+	IndexSnapshot = EstimatedRamPerWorker(1 * datasize.GB)
 
 	//1-file-compression is multi-threaded
 	CompressSnapshot = EstimatedRamPerWorker(1 * datasize.GB)

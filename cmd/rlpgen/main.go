@@ -160,7 +160,7 @@ func process(typ *types.Named, b1, b2, b3 *bytes.Buffer) error {
 	// 2. start EncodeRLP
 	fmt.Fprintf(b2, "func (obj *%s) EncodeRLP(w io.Writer) error {\n", typename)
 	fmt.Fprint(b2, "    var b [32]byte\n")
-	fmt.Fprint(b2, "    if err := rlp.EncodeStructSizePrefix(obj.EncodingSize(), w, b[:]); err != nil {\n")
+	fmt.Fprint(b2, "    if err := rlp.EncodeListPrefix(obj.EncodingSize(), w, b[:]); err != nil {\n")
 	fmt.Fprint(b2, "        return err\n")
 	fmt.Fprint(b2, "    }\n")
 

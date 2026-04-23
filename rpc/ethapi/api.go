@@ -20,7 +20,6 @@
 package ethapi
 
 import (
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
@@ -200,9 +199,13 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (*typ
 
 // ToTransaction converts CallArgs to the Transaction type used by the core evm
 func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (types.Transaction, error) {
-	chainID, overflow := uint256.FromBig((*big.Int)(args.ChainID))
-	if overflow {
-		return nil, errors.New("chainId field caused an overflow (uint256)")
+	var chainID uint256.Int
+	if args.ChainID != nil {
+		cid, overflow := uint256.FromBig((*big.Int)(args.ChainID))
+		if overflow {
+			return nil, errors.New("chainId field caused an overflow (uint256)")
+		}
+		chainID = *cid
 	}
 
 	msg, err := args.ToMessage(globalGasCap, baseFee)
@@ -233,12 +236,12 @@ func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (
 					Nonce:    msg.Nonce(),
 					GasLimit: msg.Gas(),
 					To:       args.To,
-					Value:    msg.Value(),
+					Value:    *msg.Value(),
 					Data:     msg.Data(),
 				},
 				ChainID:    chainID,
-				FeeCap:     msg.FeeCap(),
-				TipCap:     msg.TipCap(),
+				FeeCap:     *msg.FeeCap(),
+				TipCap:     *msg.TipCap(),
 				AccessList: al,
 			},
 			Authorizations: authorizations,
@@ -254,15 +257,15 @@ func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (
 					Nonce:    msg.Nonce(),
 					GasLimit: msg.Gas(),
 					To:       args.To,
-					Value:    msg.Value(),
+					Value:    *msg.Value(),
 					Data:     msg.Data(),
 				},
 				ChainID:    chainID,
-				FeeCap:     msg.FeeCap(),
-				TipCap:     msg.TipCap(),
+				FeeCap:     *msg.FeeCap(),
+				TipCap:     *msg.TipCap(),
 				AccessList: al,
 			},
-			MaxFeePerBlobGas:    uint256.MustFromBig(args.MaxFeePerBlobGas.ToInt()),
+			MaxFeePerBlobGas:    *uint256.MustFromBig(args.MaxFeePerBlobGas.ToInt()),
 			BlobVersionedHashes: args.BlobVersionedHashes,
 		}
 	case args.MaxFeePerGas != nil:
@@ -275,12 +278,12 @@ func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (
 				Nonce:    msg.Nonce(),
 				GasLimit: msg.Gas(),
 				To:       args.To,
-				Value:    msg.Value(),
+				Value:    *msg.Value(),
 				Data:     msg.Data(),
 			},
 			ChainID:    chainID,
-			FeeCap:     msg.FeeCap(),
-			TipCap:     msg.TipCap(),
+			FeeCap:     *msg.FeeCap(),
+			TipCap:     *msg.TipCap(),
 			AccessList: al,
 		}
 	case args.AccessList != nil:
@@ -294,10 +297,10 @@ func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (
 					Nonce:    msg.Nonce(),
 					GasLimit: msg.Gas(),
 					To:       args.To,
-					Value:    msg.Value(),
+					Value:    *msg.Value(),
 					Data:     msg.Data(),
 				},
-				GasPrice: msg.GasPrice(),
+				GasPrice: *msg.GasPrice(),
 			},
 			ChainID:    chainID,
 			AccessList: al,
@@ -308,10 +311,10 @@ func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (
 				Nonce:    msg.Nonce(),
 				GasLimit: msg.Gas(),
 				To:       args.To,
-				Value:    msg.Value(),
+				Value:    *msg.Value(),
 				Data:     msg.Data(),
 			},
-			GasPrice: msg.GasPrice(),
+			GasPrice: *msg.GasPrice(),
 		}
 	}
 	return tx, nil
@@ -374,53 +377,11 @@ type ExecutionResult struct {
 
 // StructLogRes stores a structured log emitted by the EVM while replaying a
 // transaction in debug mode
-type StructLogRes struct {
-	Pc      uint64             `json:"pc"`
-	Op      string             `json:"op"`
-	Gas     uint64             `json:"gas"`
-	GasCost uint64             `json:"gasCost"`
-	Depth   int                `json:"depth"`
-	Error   error              `json:"error,omitempty"`
-	Stack   *[]string          `json:"stack,omitempty"`
-	Memory  *[]string          `json:"memory,omitempty"`
-	Storage *map[string]string `json:"storage,omitempty"`
-}
+type StructLogRes = logger.StructLogRes
 
 // FormatLogs formats EVM returned structured logs for json output
 func FormatLogs(logs []logger.StructLog) []StructLogRes {
-	formatted := make([]StructLogRes, len(logs))
-	for index, trace := range logs {
-		formatted[index] = StructLogRes{
-			Pc:      trace.Pc,
-			Op:      trace.Op.String(),
-			Gas:     trace.Gas,
-			GasCost: trace.GasCost,
-			Depth:   trace.Depth,
-			Error:   trace.Err,
-		}
-		if trace.Stack != nil {
-			stack := make([]string, len(trace.Stack))
-			for i, stackValue := range trace.Stack {
-				stack[i] = hex.EncodeToString(math.PaddedBigBytes(stackValue, 32))
-			}
-			formatted[index].Stack = &stack
-		}
-		if trace.Memory != nil {
-			memory := make([]string, 0, (len(trace.Memory)+31)/32)
-			for i := 0; i+32 <= len(trace.Memory); i += 32 {
-				memory = append(memory, hex.EncodeToString(trace.Memory[i:i+32]))
-			}
-			formatted[index].Memory = &memory
-		}
-		if trace.Storage != nil {
-			storage := make(map[string]string)
-			for i, storageValue := range trace.Storage {
-				storage[fmt.Sprintf("%x", i)] = fmt.Sprintf("%x", storageValue)
-			}
-			formatted[index].Storage = &storage
-		}
-	}
-	return formatted
+	return logger.FormatLogs(logs)
 }
 
 // RPCMarshalHeader converts the given header to the RPC output .
@@ -643,8 +604,8 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime u
 	return result
 }
 
-func computeGasPrice(txn types.Transaction, blockHash common.Hash, baseFee *uint256.Int) *hexutil.Big {
-	if baseFee != nil && blockHash != (common.Hash{}) {
+func computeGasPrice(txn types.Transaction, _ common.Hash, baseFee *uint256.Int) *hexutil.Big {
+	if baseFee != nil {
 		// price = min(tip + baseFee, gasFeeCap)
 		price := u256.Min(u256.Add(*txn.GetTipCap(), *baseFee), *txn.GetFeeCap())
 		return (*hexutil.Big)(price.ToBig())

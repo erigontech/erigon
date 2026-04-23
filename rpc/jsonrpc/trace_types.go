@@ -128,20 +128,6 @@ type TraceResult struct {
 	Output  hexutil.Bytes `json:"output"`
 }
 
-// Allows for easy printing of a geth trace for debugging
-func (p GethTrace) String() string {
-	var ret strings.Builder
-	ret.WriteString(fmt.Sprintf("Type: %s\n", p.Type))
-	ret.WriteString(fmt.Sprintf("From: %s\n", p.From))
-	ret.WriteString(fmt.Sprintf("To: %s\n", p.To))
-	ret.WriteString(fmt.Sprintf("Value: %s\n", p.Value))
-	ret.WriteString(fmt.Sprintf("Gas: %s\n", p.Gas))
-	ret.WriteString(fmt.Sprintf("GasUsed: %s\n", p.GasUsed))
-	ret.WriteString(fmt.Sprintf("Input: %s\n", p.Input))
-	ret.WriteString(fmt.Sprintf("Output: %s\n", p.Output))
-	return ret.String()
-}
-
 // Allows for easy printing of a parity trace for debugging
 func (t ParityTrace) String() string {
 	var ret strings.Builder

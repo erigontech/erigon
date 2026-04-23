@@ -37,6 +37,7 @@
   * [TxPool](fundamentals/modules/txpool.md)
   * [Sentry](fundamentals/modules/sentry.md)
   * [Downloader](fundamentals/modules/downloader.md)
+* [MCP Server](fundamentals/mcp.md)
 * [Creating a dashboard](fundamentals/creating-a-dashboard.md)
 * [Docker Compose](fundamentals/docker-compose.md)
 * [Otterscan](fundamentals/otterscan.md)
@@ -58,6 +59,9 @@
   * [ots](interacting-with-erigon/ots.md)
   * [internal](interacting-with-erigon/internal.md)
   * [gRPC](interacting-with-erigon/grpc.md)
+  * [overlay](interacting-with-erigon/overlay.md)
+  * [parity](interacting-with-erigon/parity.md)
+  * [graphql](interacting-with-erigon/graphql.md)
 
 ## STAKING
 

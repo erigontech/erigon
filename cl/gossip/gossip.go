@@ -17,7 +17,6 @@
 package gossip
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 )
@@ -41,6 +40,14 @@ const (
 )
 
 const SSZSnappyCodec = "ssz_snappy"
+
+// GossipSubD is the libp2p pubsub topic stable mesh target count (matches
+// the Ethereum consensus-layer spec value).
+const GossipSubD = 4
+
+// DecayToZero is the terminal value used when decaying pubsub scoring
+// values toward zero.
+const DecayToZero = 0.01
 
 func IsTopicNameWithSubnet(name string) bool {
 	return IsTopicBeaconAttestation(name) || IsTopicSyncCommittee(name) || IsTopicBlobSidecar(name) || IsTopicDataColumnSidecar(name)
@@ -75,13 +82,4 @@ func IsTopicSyncCommittee(d string) bool {
 }
 func IsTopicBeaconAttestation(d string) bool {
 	return strings.Contains(d, "beacon_attestation_")
-}
-
-func SubnetIdFromTopicBeaconAttestation(d string) (uint64, error) {
-	if !IsTopicBeaconAttestation(d) {
-		return 0, errors.New("not a beacon attestation topic")
-	}
-	var id uint64
-	_, err := fmt.Sscanf(d, TopicNamePrefixBeaconAttestation, &id)
-	return id, err
 }

@@ -20,7 +20,6 @@
 package misc
 
 import (
-	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -41,8 +40,8 @@ func copyConfig(original *chain.Config) *chain.Config {
 }
 
 func config() *chain.Config {
-	config := copyConfig(chain.TestChainConfig)
-	config.LondonBlock = big.NewInt(5)
+	config := copyConfig(chain.AllProtocolChanges)
+	config.LondonBlock = common.NewUint64(5)
 	return config
 }
 
