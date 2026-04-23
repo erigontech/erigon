@@ -1956,6 +1956,35 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 			return
 		}
 
+		// Gap detection: refuse to build when MDBX's earliest history entry lies
+		// strictly above `step`. In that case iterating [step, lastInDB) would
+		// collate empty ranges for the gap steps, producing header-only .kv
+		// files. A subsequent merge combines those with older preverified files
+		// and yields a composite file whose advertised step range is larger
+		// than its actual data coverage — silent, permanent state corruption.
+		//
+		// This typically indicates the preverified snapshot set doesn't reach
+		// MDBX's minimum step (e.g. execution started on a partially-covered
+		// datadir). The user must close the gap — usually by removing state
+		// snapshots and re-syncing — before aggregation can safely proceed.
+		var firstInDB kv.Step
+		var anyHasData bool
+		for _, d := range []*Domain{a.d[kv.AccountsDomain], a.d[kv.StorageDomain], a.d[kv.CodeDomain]} {
+			if s, ok := firstIdInDB(a.db, d); ok {
+				if !anyHasData || s < firstInDB {
+					firstInDB = s
+				}
+				anyHasData = true
+			}
+		}
+		if anyHasData && firstInDB > step {
+			a.logger.Error("[snapshots] gap between snapshots and MDBX — refusing to build files",
+				"step", step, "firstInDB", firstInDB, "lastInDB", lastInDB,
+				"hint", "MDBX history starts above the next step to aggregate; building here would create empty step files and a merge would silently drop state. Remove state snapshots and re-sync to close the gap.")
+			close(fin)
+			return
+		}
+
 		// trying to create as much small-step-files as possible:
 		// - to reduce amount of small merges
 		// - to remove old data from db as early as possible
@@ -2352,4 +2381,25 @@ func lastIdInDB(db kv.RoDB, domain *Domain) (lstInDb kv.Step) {
 		log.Warn("[snapshots] lastIdInDB", "history", domain.HistoryDisabled, "err", err)
 	}
 	return lstInDb
+}
+
+// firstIdInDB returns the minimum step with a history entry in the domain's
+// History.KeysTable, and whether any history entry exists at all. Returns
+// (0, false) for domains whose history is disabled (no meaningful answer).
+func firstIdInDB(db kv.RoDB, domain *Domain) (firstStep kv.Step, hasData bool) {
+	if domain.HistoryDisabled {
+		return 0, false
+	}
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		lstIdx, _ := kv.FirstKey(tx, domain.History.KeysTable)
+		if len(lstIdx) == 0 {
+			return nil
+		}
+		hasData = true
+		firstStep = kv.Step(binary.BigEndian.Uint64(lstIdx) / domain.stepSize)
+		return nil
+	}); err != nil {
+		log.Warn("[snapshots] firstIdInDB", "domain", domain.FilenameBase, "err", err)
+	}
+	return
 }

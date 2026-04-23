@@ -517,6 +517,90 @@ func TestAggregator_CommittedTxNumGuard(t *testing.T) {
 		"guard should allow: committed txNum is well past the step")
 }
 
+// TestAggregator_firstIdInDB verifies the helper that detects the minimum step
+// with a history entry in a domain. This underpins the gap-detection guard in
+// buildFilesInBackground — see the comment there for why the guard exists.
+func TestAggregator_firstIdInDB(t *testing.T) {
+	t.Parallel()
+	stepSize := uint64(100)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
+
+	accountsD := agg.d[kv.AccountsDomain]
+	commitmentD := agg.d[kv.CommitmentDomain] // HistoryDisabled=true
+
+	// Empty DB: no history entries anywhere.
+	firstStep, hasData := firstIdInDB(db, accountsD)
+	require.False(t, hasData, "empty DB must report no data")
+	require.Zero(t, firstStep)
+
+	// Commitment: HistoryDisabled, so the helper must report no meaningful answer.
+	firstStep, hasData = firstIdInDB(db, commitmentD)
+	require.False(t, hasData, "HistoryDisabled domain must report no data")
+	require.Zero(t, firstStep)
+
+	// Insert a single history-keys row at txNum 1000 (step 10).
+	putHistoryKey(t, db, accountsD.History.KeysTable, 1000, []byte("addr"))
+
+	firstStep, hasData = firstIdInDB(db, accountsD)
+	require.True(t, hasData)
+	require.Equal(t, kv.Step(10), firstStep, "txNum 1000 / stepSize 100 = step 10")
+
+	// Insert a lower txNum; firstStep must retreat to it.
+	putHistoryKey(t, db, accountsD.History.KeysTable, 250, []byte("addr2"))
+	firstStep, hasData = firstIdInDB(db, accountsD)
+	require.True(t, hasData)
+	require.Equal(t, kv.Step(2), firstStep, "txNum 250 / stepSize 100 = step 2")
+
+	// Another domain without any entries must still report no data independently.
+	firstStep, hasData = firstIdInDB(db, agg.d[kv.StorageDomain])
+	require.False(t, hasData)
+	require.Zero(t, firstStep)
+}
+
+// TestAggregator_BuildFiles_GapRefuses verifies that buildFilesInBackground
+// refuses to aggregate when MDBX's earliest history entry lies strictly above
+// the next step to build. This is the scenario that silently corrupted state
+// after a partial OtterSync: the preverified set stopped at step S-1, MDBX
+// only had history for step S+k (from a short catch-up execution), and the
+// aggregator produced empty files for steps S..S+k-1 that the merge later
+// combined with preverified inputs to advertise phantom coverage.
+func TestAggregator_BuildFiles_GapRefuses(t *testing.T) {
+	t.Parallel()
+	stepSize := uint64(100)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
+
+	// Simulate the gap: MDBX has history only at step 10 (txNum 1000),
+	// but the aggregator will want to start building at step 0.
+	putHistoryKey(t, db, agg.d[kv.AccountsDomain].History.KeysTable, 1000, []byte("k"))
+	// A single domain is enough: the guard uses min across Accounts/Storage/Code,
+	// and the others will report no data.
+
+	// Ask the aggregator to build up through step 11 (txNum 1100).
+	// Without the guard, buildFilesInBackground would iterate step=0..10 and
+	// produce empty/stale files for steps 0..9. With the guard, BuildFiles
+	// bails out without producing any snapshot file for accounts.
+	require.NoError(t, agg.BuildFiles(11*stepSize))
+
+	// No accounts .kv files should exist on disk.
+	files, err := dir.ListFiles(agg.Dirs().SnapDomain, ".kv")
+	require.NoError(t, err)
+	for _, f := range files {
+		require.NotContains(t, f, "-accounts.", "accounts domain must not have produced any snapshot file: %s", f)
+	}
+}
+
+// putHistoryKey inserts a single (txNumBE, key) pair into the domain's
+// History.KeysTable. The table is a DupSort table, but DupSort Put semantics
+// are equivalent to Put for a single value, which is all these tests need.
+func putHistoryKey(t *testing.T, db kv.RwDB, table string, txNum uint64, k []byte) {
+	t.Helper()
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		var key [8]byte
+		binary.BigEndian.PutUint64(key[:], txNum)
+		return tx.Put(table, key[:], k)
+	}))
+}
+
 func TestAggregator_CommitmentHistoryOnlyMerge(t *testing.T) {
 	// Regression: when commitment values are already merged (values.needMerge=false) but history
 	// is not, the old aggregator.mergeFiles called commitmentValTransformDomain with a zero
