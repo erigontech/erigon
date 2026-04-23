@@ -30,8 +30,6 @@ func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
 		logger:          log.Root(),
 		dirs:            dirs,
 		reorgBlockDepth: dbg.MaxReorgDepth,
-		genSaltIfNeed:   false,
-		disableFsync:    false,
 	}
 }
 
