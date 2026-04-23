@@ -344,7 +344,7 @@ func (a *Aggregator) ConfigureDomains() error {
 	func() {
 		a.dirtyFilesLock.Lock()
 		defer a.dirtyFilesLock.Unlock()
-		a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
+		a.recalcVisibleFiles()
 	}()
 	return nil
 }
@@ -401,7 +401,7 @@ func (a *Aggregator) EnableAllDependencies() {
 	a.checker.Enable()
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
-	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
+	a.recalcVisibleFiles()
 }
 
 func (a *Aggregator) DisableAllDependencies() {
@@ -411,7 +411,7 @@ func (a *Aggregator) DisableAllDependencies() {
 	a.checker.Disable()
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
-	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
+	a.recalcVisibleFiles()
 }
 
 func (a *Aggregator) DisableInterDomainDependencies() {
@@ -421,7 +421,7 @@ func (a *Aggregator) DisableInterDomainDependencies() {
 	a.checker.DisableInterDomain()
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
-	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
+	a.recalcVisibleFiles()
 }
 
 func (a *Aggregator) OpenFolder() error {
@@ -496,7 +496,7 @@ func (a *Aggregator) openFolder() error {
 	if err := eg.Wait(); err != nil {
 		return fmt.Errorf("openFolder: %w", err)
 	}
-	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
+	a.recalcVisibleFiles()
 	return nil
 }
 
@@ -529,7 +529,7 @@ func (a *Aggregator) Close() {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	a.closeDirtyFiles()
-	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
+	a.recalcVisibleFiles()
 }
 
 func (a *Aggregator) closeDirtyFiles() {
@@ -1124,7 +1124,7 @@ func (a *Aggregator) IntegrateDirtyFiles(sf *AggV3StaticFiles, txNumFrom, txNumT
 		ii.integrateDirtyFiles(sf.ivfs[id], txNumFrom, txNumTo)
 	}
 
-	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
+	a.recalcVisibleFiles()
 }
 
 func (a *Aggregator) DomainTables(names ...kv.Domain) (tables []string) {
@@ -1567,7 +1567,8 @@ type aggregatorVisible struct {
 // helpers, then publishes the completed snapshot with a.visible.Store(next).
 // Per-entity visibility is not mutated; readers atomically observe one
 // cross-entity-consistent generation.
-func (a *Aggregator) recalcVisibleFiles(toTxNum uint64) {
+func (a *Aggregator) recalcVisibleFiles() {
+	toTxNum := a.dirtyFilesEndTxNumMinimax()
 	next := &aggregatorVisible{}
 	for id, d := range a.d {
 		if d == nil {
@@ -1857,7 +1858,7 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 		}
 	}
 
-	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
+	a.recalcVisibleFiles()
 }
 
 // KeepRecentTxnsOfHistoriesWithDisabledSnapshots limits amount of recent transactions protected from prune in domains history.
