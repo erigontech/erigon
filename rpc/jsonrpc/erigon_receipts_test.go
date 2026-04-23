@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
@@ -48,7 +49,7 @@ func TestGetLogs(t *testing.T) {
 
 		logs, err := ethApi.GetLogs(context.Background(), filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(10)})
 		require.NoError(err)
-		assert.Equal(uint64(10), logs[0].BlockNumber)
+		assert.Equal(hexutil.Uint64(10), logs[0].BlockNumber)
 
 		// filter by wrong address
 		logs, err = ethApi.GetLogs(context.Background(), filters.FilterCriteria{
@@ -83,16 +84,8 @@ func TestErigonGetLatestLogs(t *testing.T) {
 	expectedErigonLogs := make(types.ErigonLogs, 0)
 	for i := len(expectedLogs) - 1; i >= 0; i-- {
 		expectedErigonLogs = append(expectedErigonLogs, &types.ErigonLog{
-			Address:     expectedLogs[i].Address,
-			Topics:      expectedLogs[i].Topics,
-			Data:        expectedLogs[i].Data,
-			BlockNumber: expectedLogs[i].BlockNumber,
-			TxHash:      expectedLogs[i].TxHash,
-			TxIndex:     expectedLogs[i].TxIndex,
-			BlockHash:   expectedLogs[i].BlockHash,
-			Index:       expectedLogs[i].Index,
-			Removed:     expectedLogs[i].Removed,
-			Timestamp:   expectedLogs[i].Timestamp,
+			Log:       expectedLogs[i].Log,
+			Timestamp: expectedLogs[i].Timestamp,
 		})
 	}
 	actual, err := api.GetLatestLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())}, filters.LogFilterOptions{
@@ -105,16 +98,18 @@ func TestErigonGetLatestLogs(t *testing.T) {
 	assert.Equal(expectedErigonLogs, actual)
 
 	expectedLog := &types.ErigonLog{
-		Address:     common.HexToAddress("0x3CB5b6E26e0f37F2514D45641F15Bd6fEC2E0c4c"),
-		Topics:      []common.Hash{common.HexToHash("0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb")},
-		Data:        []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 151, 160, 176, 241, 203, 220, 75, 75, 222, 127, 170, 33, 171, 34, 107, 143, 20, 185, 234, 201},
-		BlockNumber: 10,
-		TxHash:      common.HexToHash("0xb6449d8e167a8826d050afe4c9f07095236ff769a985f02649b1023c2ded2059"),
-		TxIndex:     0,
-		BlockHash:   common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef"),
-		Index:       0,
-		Removed:     false,
-		Timestamp:   100,
+		Log: types.Log{
+			Address:     common.HexToAddress("0x3CB5b6E26e0f37F2514D45641F15Bd6fEC2E0c4c"),
+			Topics:      []common.Hash{common.HexToHash("0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb")},
+			Data:        []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 151, 160, 176, 241, 203, 220, 75, 75, 222, 127, 170, 33, 171, 34, 107, 143, 20, 185, 234, 201},
+			BlockNumber: 10,
+			TxHash:      common.HexToHash("0xb6449d8e167a8826d050afe4c9f07095236ff769a985f02649b1023c2ded2059"),
+			TxIndex:     0,
+			BlockHash:   common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef"),
+			Index:       0,
+			Removed:     false,
+		},
+		Timestamp: 100,
 	}
 	assert.Equal(expectedLog, actual[0])
 }
@@ -129,16 +124,8 @@ func TestErigonGetLatestLogsIgnoreTopics(t *testing.T) {
 	expectedErigonLogs := make([]*types.ErigonLog, 0)
 	for i := len(expectedLogs) - 1; i >= 0; i-- {
 		expectedErigonLogs = append(expectedErigonLogs, &types.ErigonLog{
-			Address:     expectedLogs[i].Address,
-			Topics:      expectedLogs[i].Topics,
-			Data:        expectedLogs[i].Data,
-			BlockNumber: expectedLogs[i].BlockNumber,
-			TxHash:      expectedLogs[i].TxHash,
-			TxIndex:     expectedLogs[i].TxIndex,
-			BlockHash:   expectedLogs[i].BlockHash,
-			Index:       expectedLogs[i].Index,
-			Removed:     expectedLogs[i].Removed,
-			Timestamp:   expectedLogs[i].Timestamp,
+			Log:       expectedLogs[i].Log,
+			Timestamp: expectedLogs[i].Timestamp,
 		})
 	}
 
@@ -147,7 +134,7 @@ func TestErigonGetLatestLogsIgnoreTopics(t *testing.T) {
 	containsTopics := make([][]common.Hash, 0)
 
 	for i := range expectedLogs {
-		if expectedLogs[i].BlockNumber != lastBlock {
+		if uint64(expectedLogs[i].BlockNumber) != lastBlock {
 			blockCount++
 		}
 		containsTopics = append(containsTopics, []common.Hash{
@@ -247,7 +234,11 @@ func TestGetLogs_RangeLimitExceeded(t *testing.T) {
 		ToBlock:   big.NewInt(10),
 	})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), errExceedBlockRange)
+
+	var rpcErr rpc.Error
+	require.ErrorAs(t, err, &rpcErr)
+	assert.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+	assert.Equal(t, errExceedBlockRange+": 5", rpcErr.Error())
 }
 
 // TestGetLogs_RangeLimitOk verifies that eth_getLogs succeeds when the requested block
@@ -274,6 +265,24 @@ func TestGetLogs_MaxResultsOk(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.NotEmpty(t, logs)
+}
+
+// TestGetLogs_MaxResultsExceeded verifies that eth_getLogs returns invalid params
+// when the matching log count exceeds maxResults.
+func TestGetLogs_MaxResultsExceeded(t *testing.T) {
+	m, _, contractAddr, _ := chainWithDeployedContract(t)
+	ethApi := newEthApiForTest(newBaseApiWithLimits(m, 0, 1), m.DB, nil, nil)
+	_, err := ethApi.GetLogs(context.Background(), filters.FilterCriteria{
+		FromBlock: big.NewInt(0),
+		ToBlock:   big.NewInt(rpc.LatestBlockNumber.Int64()),
+		Addresses: common.Addresses{contractAddr},
+	})
+	require.Error(t, err)
+
+	var rpcErr rpc.Error
+	require.ErrorAs(t, err, &rpcErr)
+	assert.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+	assert.Equal(t, errExceedLogResults+": 1", rpcErr.Error())
 }
 
 // TestGetLatestLogs_LogCountExceedsMaxResults verifies that erigon_getLatestLogs
@@ -352,7 +361,7 @@ func mockWithGenerator(t *testing.T, blocks int, generator func(int, *blockgen.B
 	m := execmoduletester.New(
 		t,
 		execmoduletester.WithGenesisSpec(&types.Genesis{
-			Config: chain.TestChainConfig,
+			Config: chain.TestChainBerlinConfig,
 			Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
 		}),
 		execmoduletester.WithKey(testKey),

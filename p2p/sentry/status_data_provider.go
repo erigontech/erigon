@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"math/big"
 	"sync"
-	"time"
+	"sync/atomic"
 
 	"github.com/holiman/uint256"
 
@@ -63,17 +63,14 @@ type StatusDataProvider struct {
 
 	logger log.Logger
 
-	// commitGate is the shared RWMutex from the Aggregator. Background
-	// db.View() calls hold RLock; commit+prune paths hold the write Lock.
-	// May be nil if not set (pre-existing callers).
-	commitGate *sync.RWMutex
-
-	// Cached status data — avoids opening MDBX readers on every
-	// peer status exchange. Valid until the next expected block
-	// (headTime + 12s slot duration).
-	cacheMu      sync.Mutex
-	cachedStatus *sentryproto.StatusData
-	cacheExpiry  time.Time // when the cached data becomes stale
+	// cache holds the latest ChainHead, invalidated by new-header
+	// notifications from the execution pipeline (via Run).
+	// Protected by cacheMu for concurrent fetch coalescing.
+	// cacheVer is bumped on each invalidation so that a fetch in
+	// progress doesn't store stale data after a concurrent invalidation.
+	cache    atomic.Pointer[ChainHead]
+	cacheMu  sync.Mutex
+	cacheVer atomic.Uint64
 }
 
 func NewStatusDataProvider(
@@ -96,12 +93,6 @@ func NewStatusDataProvider(
 	s.heightForks, s.timeForks = forkid.GatherForks(chainConfig, genesis.Time())
 
 	return s
-}
-
-// SetCommitGate sets the shared commit gate so db.View() calls participate
-// in the commit exclusion protocol. Call after the Aggregator is available.
-func (s *StatusDataProvider) SetCommitGate(gate *sync.RWMutex) {
-	s.commitGate = gate
 }
 
 func uint256FromBigInt(num *big.Int) (*uint256.Int, error) {
@@ -138,81 +129,100 @@ func (s *StatusDataProvider) makeStatusData(head ChainHead) *sentryproto.StatusD
 		MinimumBlockHeight: head.MinimumHeight,
 		ForkData: &sentryproto.Forks{
 			Genesis:     gointerfaces.ConvertHashToH256(s.genesisHash),
-			HeightForks: s.heightForks,
-			TimeForks:   s.timeForks,
+			HeightForks: append([]uint64(nil), s.heightForks...),
+			TimeForks:   append([]uint64(nil), s.timeForks...),
 		},
 	}
 }
 
+// Run listens for new-header notifications and invalidates the cached
+// ChainHead so the next GetStatusData call fetches fresh data from the DB.
+// Blocks until ctx is cancelled.
+func (s *StatusDataProvider) Run(ctx context.Context, headersCh <-chan [][]byte, snapshotsCh <-chan struct{}) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-headersCh:
+			s.cacheVer.Add(1)
+			s.cache.Store(nil)
+		case <-snapshotsCh:
+			s.cacheVer.Add(1)
+			s.cache.Store(nil)
+		}
+	}
+}
+
 // GetStatusData returns the current StatusData.
-// Results are cached until the next expected block (headTime + 12s)
-// to avoid opening MDBX readers on every peer status exchange.
-// The mutex is held for the entire refresh to prevent thundering herd:
-// multiple sentry loops calling simultaneously would all open db.View txs.
+//
+// The ChainHead is cached and invalidated by new-header notifications from
+// the execution pipeline (via Run). Concurrent callers share a single DB
+// fetch through cacheMu. This eliminates repeated MDBX read transactions
+// that previously blocked GC page reclamation.
+//
+// Falls back to snapshot data when the DB head is unavailable.
 func (s *StatusDataProvider) GetStatusData(ctx context.Context) (*sentryproto.StatusData, error) {
+	if head := s.cache.Load(); head != nil {
+		return s.makeStatusData(*head), nil
+	}
+
+	// Cache miss — fetch from DB, coalescing concurrent callers.
 	s.cacheMu.Lock()
 	defer s.cacheMu.Unlock()
 
-	if s.cachedStatus != nil && time.Now().Before(s.cacheExpiry) {
-		return s.cachedStatus, nil
+	// Double-check after acquiring lock.
+	if head := s.cache.Load(); head != nil {
+		return s.makeStatusData(*head), nil
 	}
 
-	// TryRLock the commit gate — if a commit is in progress, return stale
-	// cached data rather than blocking or opening an RO tx that would
-	// prevent MDBX GC page reclamation.
-	if s.commitGate != nil && !s.commitGate.TryRLock() {
-		if s.cachedStatus != nil {
-			return s.cachedStatus, nil
-		}
-		// No cached data at all — must block to get initial status.
-		s.commitGate.RLock()
-		defer s.commitGate.RUnlock()
-	} else if s.commitGate != nil {
-		defer s.commitGate.RUnlock()
-	}
-
-	// Single db.View to read both minimumBlock and chain head, avoiding
-	// two separate RO transactions.
-	var head ChainHead
-	var headErr error
-	err := s.db.View(ctx, func(tx kv.Tx) error {
-		minimumBlock, err := s.blockReader.MinimumBlockAvailable(ctx, tx)
-		if err != nil {
-			return err
-		}
-		head, headErr = ReadChainHeadWithTx(tx, minimumBlock)
-		return nil
-	})
+	ver := s.cacheVer.Load()
+	head, err := s.fetchChainHead(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("GetStatusData: db.View error: %w", err)
+		return nil, err
 	}
 
-	var result *sentryproto.StatusData
+	// Only store if no invalidation happened during the fetch.
+	if s.cacheVer.Load() == ver {
+		s.cache.Store(&head)
+	}
+	return s.makeStatusData(head), nil
+}
+
+// fetchChainHead reads MinimumBlockAvailable and ChainHead in a single DB
+// read transaction. Falls back to snapshot data when the DB head is missing.
+func (s *StatusDataProvider) fetchChainHead(ctx context.Context) (ChainHead, error) {
+	var (
+		chainHead    ChainHead
+		minimumBlock uint64
+		headErr      error
+	)
+
+	if err := s.db.View(ctx, func(tx kv.Tx) error {
+		var err error
+		minimumBlock, err = s.blockReader.MinimumBlockAvailable(ctx, tx)
+		if err != nil {
+			return fmt.Errorf("MinimumBlockAvailable: %w", err)
+		}
+		chainHead, headErr = ReadChainHeadWithTx(tx, minimumBlock)
+		return nil // headErr handled below (ErrNoHead → snapshot fallback)
+	}); err != nil {
+		return ChainHead{}, fmt.Errorf("GetStatusData: %w", err)
+	}
 
 	if headErr == nil {
-		result = s.makeStatusData(head)
-	} else if !errors.Is(headErr, ErrNoHead) {
-		return nil, headErr
-	} else {
-		s.logger.Warn("sentry.StatusDataProvider: The canonical chain current header not found in the database. Check the database consistency. Using latest available snapshot data.")
-		snapHead, err := s.ReadChainHeadFromSnapshots(ctx, 0)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read chain head from snapshots: %w", err)
-		}
-		result = s.makeStatusData(snapHead)
+		return chainHead, nil
+	}
+	if !errors.Is(headErr, ErrNoHead) {
+		return ChainHead{}, headErr
 	}
 
-	// Cache duration depends on how close we are to the chain tip.
-	// At tip (headTime within 60s of now): 12s (one slot).
-	// During initial sync (headTime far in the past): 60s.
-	cacheDuration := 60 * time.Second
-	if result.MaxBlockTime > 0 && time.Since(time.Unix(int64(result.MaxBlockTime), 0)) < 60*time.Second {
-		cacheDuration = 12 * time.Second
-	}
-	s.cachedStatus = result
-	s.cacheExpiry = time.Now().Add(cacheDuration)
+	s.logger.Warn("sentry.StatusDataProvider: The canonical chain current header not found in the database. Check the database consistency. Using latest available snapshot data.")
 
-	return result, nil
+	snapHead, err := s.ReadChainHeadFromSnapshots(ctx, minimumBlock)
+	if err != nil {
+		return ChainHead{}, fmt.Errorf("failed to read chain head from snapshots: %w", err)
+	}
+	return snapHead, nil
 }
 
 // ReadChainHeadWithTx reads chain head in DB

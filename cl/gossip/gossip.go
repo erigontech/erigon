@@ -41,6 +41,14 @@ const (
 
 const SSZSnappyCodec = "ssz_snappy"
 
+// GossipSubD is the libp2p pubsub topic stable mesh target count (matches
+// the Ethereum consensus-layer spec value).
+const GossipSubD = 4
+
+// DecayToZero is the terminal value used when decaying pubsub scoring
+// values toward zero.
+const DecayToZero = 0.01
+
 func IsTopicNameWithSubnet(name string) bool {
 	return IsTopicBeaconAttestation(name) || IsTopicSyncCommittee(name) || IsTopicBlobSidecar(name) || IsTopicDataColumnSidecar(name)
 }

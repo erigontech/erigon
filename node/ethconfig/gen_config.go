@@ -13,7 +13,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
-	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash/ethashcfg"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/gasprice/gaspricecfg"
@@ -38,7 +37,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		Whitelist                           map[uint64]common.Hash `toml:"-"`
 		Builder                             buildercfg.BuilderConfig
 		Ethash                              ethashcfg.Config
-		Clique                              chainspec.ConsensusSnapshotConfig
 		Aura                                chain.AuRaConfig
 		TxPool                              txpoolcfg.Config
 		Shutter                             shuttercfg.Config
@@ -61,6 +59,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		FcuBackgroundPrune                  bool
 		FcuBackgroundCommit                 bool
 		MCPAddress                          string
+		ErigondbDomainStepsInFrozenFile     *uint64 `toml:",omitempty"`
 	}
 	var enc Config
 	enc.Genesis = c.Genesis
@@ -77,7 +76,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.Whitelist = c.Whitelist
 	enc.Builder = c.Builder
 	enc.Ethash = c.Ethash
-	enc.Clique = c.Clique
 	enc.Aura = c.Aura
 	enc.TxPool = c.TxPool
 	enc.Shutter = c.Shutter
@@ -100,6 +98,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.FcuBackgroundPrune = c.FcuBackgroundPrune
 	enc.FcuBackgroundCommit = c.FcuBackgroundCommit
 	enc.MCPAddress = c.MCPAddress
+	enc.ErigondbDomainStepsInFrozenFile = c.ErigondbDomainStepsInFrozenFile
 	return &enc, nil
 }
 
@@ -120,7 +119,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		Whitelist                           map[uint64]common.Hash `toml:"-"`
 		Builder                             *buildercfg.BuilderConfig
 		Ethash                              *ethashcfg.Config
-		Clique                              *chainspec.ConsensusSnapshotConfig
 		Aura                                *chain.AuRaConfig
 		TxPool                              *txpoolcfg.Config
 		Shutter                             *shuttercfg.Config
@@ -143,6 +141,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		FcuBackgroundPrune                  *bool
 		FcuBackgroundCommit                 *bool
 		MCPAddress                          *string
+		ErigondbDomainStepsInFrozenFile     *uint64 `toml:",omitempty"`
 	}
 	var dec Config
 	if err := unmarshal(&dec); err != nil {
@@ -189,9 +188,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.Ethash != nil {
 		c.Ethash = *dec.Ethash
-	}
-	if dec.Clique != nil {
-		c.Clique = *dec.Clique
 	}
 	if dec.Aura != nil {
 		c.Aura = *dec.Aura
@@ -258,6 +254,9 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.MCPAddress != nil {
 		c.MCPAddress = *dec.MCPAddress
+	}
+	if dec.ErigondbDomainStepsInFrozenFile != nil {
+		c.ErigondbDomainStepsInFrozenFile = dec.ErigondbDomainStepsInFrozenFile
 	}
 	return nil
 }

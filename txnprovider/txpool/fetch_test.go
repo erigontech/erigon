@@ -23,6 +23,7 @@ import (
 	"io"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -440,6 +441,77 @@ func TestPenalizePeerForMalformedMessages(t *testing.T) {
 	}
 }
 
+// TestOversizedHashAnnouncement verifies that both eth/66 and eth/68 handlers
+// penalize peers that send more than 4096 hashes per NewPooledTransactionHashes
+// message (the devp2p soft limit) and do not issue a GetPooledTransactions request.
+func TestOversizedHashAnnouncement(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+
+	const oversizedCount = 4097
+
+	// Build oversized eth/66 payload: an RLP list of 4097 hashes.
+	hashes := make([]byte, 32*oversizedCount)
+	for i := range oversizedCount {
+		hashes[i*32] = byte(i)
+		hashes[i*32+1] = byte(i >> 8)
+	}
+	payload66 := EncodeHashes(hashes, nil)
+
+	// Build oversized eth/68 payload: announcement with 4097 entries.
+	types68 := make([]byte, oversizedCount)
+	sizes68 := make([]uint32, oversizedCount)
+	for i := range oversizedCount {
+		types68[i] = 2   // EIP-1559
+		sizes68[i] = 100 // arbitrary size
+	}
+	encodeBuf := make([]byte, announcementsLen(types68, sizes68, hashes))
+	n := encodeAnnouncements(types68, sizes68, hashes, encodeBuf)
+	payload68 := make([]byte, n)
+	copy(payload68, encodeBuf[:n])
+
+	tests := []struct {
+		name string
+		id   sentryproto.MessageId
+		data []byte
+	}{
+		{"eth/66", sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_66, payload66},
+		{"eth/68", sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, payload68},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ctrl := gomock.NewController(t)
+			sentryServer := sentryproto.NewMockSentryServer(ctrl)
+			pool := NewMockPool(ctrl)
+			pool.EXPECT().Started().Return(true)
+
+			// Expect peer to be penalized.
+			sentryServer.EXPECT().
+				PenalizePeer(gomock.Any(), gomock.Any()).
+				DoAndReturn(func(_ context.Context, req *sentryproto.PenalizePeerRequest) (*emptypb.Empty, error) {
+					assert.Equal(t, sentryproto.PenaltyKind_Kick, req.Penalty)
+					return &emptypb.Empty{}, nil
+				}).
+				Times(1)
+
+			m := NewMockSentry(ctx, sentryServer)
+			sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
+			require.NoError(t, err)
+
+			fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
+
+			err = fetch.handleInboundMessageWithTx(ctx, nil, &sentryproto.InboundMessage{
+				Id:     tt.id,
+				Data:   tt.data,
+				PeerId: peerID,
+			}, sentryClient)
+			require.NoError(t, err, "oversized announcement should be handled gracefully")
+		})
+	}
+}
+
 // TestNoPenaltyOnInternalDBError verifies that when IdHashKnown returns a DB error
 // during transaction parsing, the peer is NOT penalized (since it's our internal failure,
 // not the peer's fault).
@@ -475,6 +547,74 @@ func TestNoPenaltyOnInternalDBError(t *testing.T) {
 		PeerId: peerID,
 	}, sentryClient)
 	require.Error(t, err, "internal DB error should be propagated, not swallowed")
+}
+
+// TestFetchConnectGoroutinesExitOnCancel is a regression test for a goroutine
+// leak where ConnectCore/ConnectSentries spawned fire-and-forget goroutines
+// that used bare time.Sleep in retry loops. After context cancellation, Run()
+// would return via the errgroup while the fetch goroutines continued sleeping
+// through a 3-second backoff, racing with downstream cleanup (DB.Close(), etc.).
+//
+// The fix replaced time.Sleep with select on ctx.Done() and added a WaitGroup
+// so callers can block until all goroutines exit. This test verifies that all
+// goroutines exit promptly (well under 3s) after cancellation.
+func TestFetchConnectGoroutinesExitOnCancel(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(t.Context())
+
+	// Mock sentry server: HandShake returns io.EOF, forcing receiveMessageLoop
+	// and receivePeerLoop into retry-with-backoff loops.
+	srv := &retrySentryServer{}
+	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, srv, nil)
+	require.NoError(t, err)
+
+	// Mock state changes client: StateChanges returns io.EOF, forcing the
+	// ConnectCore goroutine into its retry loop.
+	ctrl := gomock.NewController(t)
+	stateChanges := remoteproto.NewMockKVClient(ctrl)
+	stateChanges.EXPECT().
+		StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(nil, io.EOF).AnyTimes()
+
+	pool := NewMockPool(ctrl)
+
+	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, stateChanges, nil, u256.N1, log.New())
+
+	// Start all goroutines: 1 from ConnectCore + 2 from ConnectSentries.
+	fetch.ConnectCore()
+	fetch.ConnectSentries()
+
+	// Let goroutines enter their retry-sleep selects.
+	time.Sleep(50 * time.Millisecond)
+
+	// Cancel the context — goroutines should notice via ctx.Done() and exit.
+	cancel()
+
+	// Wait must return well within 3 seconds. Before the fix, goroutines used
+	// bare time.Sleep(3 * time.Second) and would not notice cancellation until
+	// the sleep completed.
+	done := make(chan struct{})
+	go func() {
+		fetch.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// All goroutines exited promptly.
+	case <-time.After(1 * time.Second):
+		t.Fatal("goroutines did not exit within 1s of context cancellation — likely sleeping through backoff")
+	}
+}
+
+// retrySentryServer is a minimal SentryServer where HandShake always returns
+// io.EOF, forcing Fetch goroutines into their retry-with-backoff loops.
+type retrySentryServer struct {
+	sentryproto.UnimplementedSentryServer
+}
+
+func (s *retrySentryServer) HandShake(context.Context, *emptypb.Empty) (*sentryproto.HandShakeReply, error) {
+	return nil, io.EOF
 }
 
 func testRlps(num int) [][]byte {

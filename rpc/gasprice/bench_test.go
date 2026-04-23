@@ -54,7 +54,7 @@ func newTestBackendN(tb testing.TB, n int) *execmoduletester.ExecModuleTester {
 	// Use MaxInt64 × 100 to cover the largest benchmark (200 blocks).
 	balance := new(big.Int).Mul(big.NewInt(math.MaxInt64), big.NewInt(100))
 	gspec := &types.Genesis{
-		Config: chain.TestChainConfig,
+		Config: chain.AllProtocolChanges,
 		Alloc:  types.GenesisAlloc{addr: {Balance: balance}},
 	}
 	signer := types.LatestSigner(gspec.Config)
@@ -94,7 +94,7 @@ func BenchmarkSuggestTipCap(b *testing.B) {
 	m := newTestBackendN(b, numBlocks)
 	defer m.Close()
 
-	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewDummy(), m.BlockReader, false,
+	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewSimple(), m.BlockReader, false,
 		rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
 
 	tx, err := m.DB.BeginTemporalRo(m.Ctx)
@@ -159,7 +159,7 @@ func BenchmarkFeeHistory(b *testing.B) {
 	m := newTestBackendN(b, numBlocks)
 	defer m.Close()
 
-	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewDummy(), m.BlockReader, false,
+	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewSimple(), m.BlockReader, false,
 		rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
 
 	// Single read-only tx used only by the main goroutine (GetLatestBlockNumber,

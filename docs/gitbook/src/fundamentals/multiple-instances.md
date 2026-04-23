@@ -197,7 +197,7 @@ Erigon itself consumes less than 2GB of RAM. Therefore, Erigon will benefit from
 ```
 
 ```yaml
-      --datadir=/home/erigon/.local/share/erigon --chain=dev --private.api.addr=0.0.0.0:9090 --mine --log.dir.path=/logs/node1
+      --datadir=/home/erigon/.local/share/erigon --chain=dev --private.api.addr=0.0.0.0:9090 --beacon.api=beacon,validator,node,config --log.dir.path=/logs/node1
     ports:
       - "8551:8551"
     volumes:

@@ -40,6 +40,8 @@ func (p AccountPath) String() string {
 		return "Destruct"
 	case StoragePath:
 		return "Storage"
+	case CreateContractPath:
+		return "CreateContract"
 	default:
 		return fmt.Sprintf(" Unknown %d", p)
 	}
@@ -95,25 +97,6 @@ func NewVersionMap(changes []*types.AccountChanges) *VersionMap {
 
 func (vm *VersionMap) SetTrace(trace bool) {
 	vm.trace = trace
-}
-
-// StorageKeys returns all storage keys that have been written for the given
-// address in the versionMap. Used by resolveStorageWrites to emit storage
-// DELETE entries when an account self-destructs.
-func (vm *VersionMap) StorageKeys(addr accounts.Address) []accounts.StorageKey {
-	vm.mu.RLock()
-	defer vm.mu.RUnlock()
-	addrMap, ok := vm.s[addr]
-	if !ok {
-		return nil
-	}
-	var keys []accounts.StorageKey
-	for ak := range addrMap {
-		if ak.Path == StoragePath {
-			keys = append(keys, ak.Key)
-		}
-	}
-	return keys
 }
 
 func (vm *VersionMap) getKeyCells(addr accounts.Address, path AccountPath, key accounts.StorageKey, fNoKey func(addr accounts.Address, path AccountPath, key accounts.StorageKey) *btree.Map[int, *WriteCell]) (cells *btree.Map[int, *WriteCell]) {
@@ -356,40 +339,36 @@ func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path Acco
 	valid := VersionValid
 
 	rr := vm.Read(addr, path, key, txIndex)
-
 	switch rr.Status() {
 	case MVReadResultDone:
 		if source != MapRead {
-			// Value tiebreaker: if the StorageRead value matches the
-			// versionMap Done value, the read is still valid despite
-			// the source mismatch. This avoids unnecessary invalidation
-			// when a prior TX wrote the same value that was in storage.
-			if readVal != nil && rr.Value() != nil && valuesEqual(path, readVal, rr.Value()) {
-				// Values match — read is valid
-			} else {
-				valid = VersionInvalid
+			// When BAL is present, significant writes for BalancePath,
+			// NoncePath, CodePath and StoragePath are pre-populated in the
+			// VersionMap before execution.  If a read of one of those paths
+			// was from storage (no VersionMap entry at execution time) but
+			// the VersionMap now has an entry from a concurrent worker
+			// flush, the entry is a BAL-filtered no-op write and the read
+			// value is still correct.
+			//
+			// AddressPath and other paths are NOT pre-populated by the BAL,
+			// so a new VersionMap entry means a real state change from a
+			// concurrent worker (e.g. account creation) and must trigger
+			// invalidation.
+			isBALPrePopulatedPath := path == BalancePath || path == NoncePath ||
+				path == CodePath || path == StoragePath
+			if !vm.HasBAL || !isBALPrePopulatedPath {
+				// Value tiebreaker: if the StorageRead value matches the
+				// versionMap Done value, the read is still valid despite
+				// the source mismatch. This avoids unnecessary invalidation
+				// when a prior TX wrote the same value that was in storage.
+				if readVal != nil && rr.Value() != nil && valuesEqual(path, readVal, rr.Value()) {
+					// Values match — read is valid
+				} else {
+					valid = VersionInvalid
+				}
 			}
 		} else {
 			valid = checkVersion(version, rr.Version())
-		}
-
-		// Cross-check: an AddressPath read (record-level) must also be
-		// validated against field-level writes (BalancePath, NoncePath).
-		// With split fee logic, the finalize writes coinbase BalancePath
-		// sequentially. Workers with shouldDelayFeeCalc=true don't read
-		// coinbase for fee purposes, so any coinbase AddressPath read in
-		// the ReadSet is a genuine EVM read (BALANCE opcode) that must
-		// be validated against the finalize's BalancePath write.
-		if valid == VersionValid && path == AddressPath {
-			for _, fieldPath := range []AccountPath{BalancePath, NoncePath} {
-				fieldRR := vm.Read(addr, fieldPath, accounts.NilKey, txIndex)
-				if fieldRR.Status() == MVReadResultDone {
-					if fv := checkVersion(version, fieldRR.Version()); fv != VersionValid {
-						valid = fv
-						break
-					}
-				}
-			}
 		}
 	case MVReadResultDependency:
 		valid = VersionInvalid
@@ -398,27 +377,33 @@ func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path Acco
 			valid = VersionInvalid
 		} else {
 			if valid = checkVersion(version, version); valid == VersionValid {
-				// Cross-validate any account property read against
-				// SelfDestructPath and CreateContractPath.  A prior tx may
-				// have created or self-destructed the account, invalidating
-				// storage reads of any property.
-				//
-				// For SelfDestructPath: pass readVal=false since the TX read
-				// the account from storage (it exists, not destroyed). The
-				// value tiebreaker will match SelfDestructPath=false → valid.
-				// Only SelfDestructPath=true (actual destruction) invalidates.
-				//
-				// For CreateContractPath: same logic — pass readVal=false.
-				if path != AddressPath && path != SelfDestructPath && path != CreateContractPath {
-					valid = vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
-						version, false, checkVersion, traceInvalid, tracePrefix)
-					if valid == VersionValid {
-						valid = vm.validateRead(txIndex, addr, CreateContractPath, accounts.StorageKey{}, source,
-							version, false, checkVersion, traceInvalid, tracePrefix)
+				// Cross-validate any account property read against AddressPath
+				// and SelfDestructPath.  A prior tx may have created or
+				// self-destructed the account, invalidating storage reads of
+				// any property (code, storage slots, balance, nonce, etc.).
+				if path != AddressPath && path != SelfDestructPath {
+					if valid = vm.validateRead(txIndex, addr, AddressPath, accounts.StorageKey{}, source,
+						version, nil, checkVersion, traceInvalid, tracePrefix); valid == VersionValid {
+						valid = vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
+							version, nil, checkVersion, traceInvalid, tracePrefix)
+					} else {
+						vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
+							version, nil, checkVersion, traceInvalid, tracePrefix)
 					}
 				} else if path == AddressPath {
 					valid = vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
-						version, false, checkVersion, traceInvalid, tracePrefix)
+						version, nil, checkVersion, traceInvalid, tracePrefix)
+
+					// If a prior tx created this account, BalancePath will
+					// have an entry at a lower txIndex (from BAL pre-population
+					// or worker flush). A nil AddressPath read from storage
+					// is then stale and must be invalidated.
+					if valid == VersionValid {
+						balRR := vm.Read(addr, BalancePath, accounts.NilKey, txIndex)
+						if balRR.Status() == MVReadResultDone {
+							valid = VersionInvalid
+						}
+					}
 				}
 			}
 		}
@@ -497,14 +482,6 @@ func valuesEqual(path AccountPath, readVal, writeVal any) bool {
 		}
 		return rv.Balance.Eq(&wv.Balance) && rv.Nonce == wv.Nonce &&
 			rv.Incarnation == wv.Incarnation && rv.CodeHash == wv.CodeHash
-	case StoragePath:
-		rv, ok1 := readVal.(uint256.Int)
-		wv, ok2 := writeVal.(uint256.Int)
-		return ok1 && ok2 && rv.Eq(&wv)
-	case SelfDestructPath:
-		rv, ok1 := readVal.(bool)
-		wv, ok2 := writeVal.(bool)
-		return ok1 && ok2 && rv == wv
 	default:
 		return false
 	}
@@ -525,8 +502,8 @@ type Version struct {
 
 var UnknownVersion = Version{TxIndex: UnknownDep, Incarnation: -1}
 
-func (v Version) blockAccessIndex() uint16 {
-	return uint16(v.TxIndex + 1)
+func (v Version) blockAccessIndex() uint32 {
+	return uint32(v.TxIndex + 1)
 }
 
 const (

@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/execution/chain"
@@ -155,7 +156,7 @@ func (r *TxResult) CreateNextReceipt(prev *types.Receipt) (*types.Receipt, error
 func (r *TxResult) CreateReceipt(txIndex int, cumulativeGasUsed uint64, firstLogIndex uint32) (*types.Receipt, error) {
 	logIndex := firstLogIndex
 	for i := range r.Logs {
-		r.Logs[i].Index = uint(logIndex)
+		r.Logs[i].Index = hexutil.Uint(logIndex)
 		logIndex++
 	}
 
@@ -174,7 +175,7 @@ func (r *TxResult) CreateReceipt(txIndex int, cumulativeGasUsed uint64, firstLog
 
 	for _, l := range receipt.Logs {
 		l.TxHash = receipt.TxHash
-		l.BlockNumber = blockNum
+		l.BlockNumber = hexutil.Uint64(blockNum)
 		l.BlockHash = receipt.BlockHash
 	}
 	if r.ExecutionResult.Failed() {
@@ -666,7 +667,7 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 	}
 
 	result.ExecutionResult.ReceiptGasUsed = gasUsed
-	result.ExecutionResult.BlockGasUsed = gasUsed
+	result.ExecutionResult.BlockRegularGasUsed = gasUsed
 	// Update the state with pending changes
 	ibs.SoftFinalise()
 	result.Logs = ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())

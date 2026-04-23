@@ -330,7 +330,7 @@ func TestBpsTree_Seek(t *testing.T) {
 	efi, _ := eliasfano32.ReadEliasFano(ef.AppendBytes(nil))
 
 	ir := NewMockIndexReader(efi)
-	bp := NewBpsTree(g, efi, uint64(M), ir.dataLookup, ir.keyCmp)
+	bp := NewBpsTree(g, efi, uint64(M), ir.dataLookup)
 	bp.cursorGetter = ir.newCursor
 	bp.trace = false
 
@@ -385,25 +385,6 @@ func (b *mockIndexReader) dataLookup(di uint64, g *seg.Reader) (k, v []byte, off
 	return k, v, offset, nil
 }
 
-// comparing `k` with item of index `di`. using buffer `kBuf` to avoid allocations
-func (b *mockIndexReader) keyCmp(k []byte, di uint64, g *seg.Reader, resBuf []byte) (int, []byte, error) {
-	if di >= b.ef.Count() {
-		return 0, resBuf, fmt.Errorf("%w: keyCount=%d, but key %d requested. file: %s", ErrBtIndexLookupBounds, b.ef.Count(), di+1, g.FileName())
-	}
-
-	offset := b.ef.Get(di)
-	g.Reset(offset)
-	if !g.HasNext() {
-		return 0, resBuf, fmt.Errorf("key at %d/%d not found, file: %s", di, b.ef.Count(), g.FileName())
-	}
-
-	resBuf, _ = g.Next(resBuf)
-
-	//TODO: use `b.getter.Match` after https://github.com/erigontech/erigon/issues/7855
-	return bytes.Compare(resBuf, k), resBuf, nil
-	//return b.getter.Match(k), result, nil
-}
-
 func TestNewBtIndex(t *testing.T) {
 	t.Parallel()
 	keyCount := 10000
@@ -429,6 +410,9 @@ func TestNewBtIndex(t *testing.T) {
 
 func BenchmarkBtIndex_Get(b *testing.B) {
 	keyCount := 1_000_000
+	if testing.Short() {
+		keyCount = 10_000
+	}
 	compress := seg.CompressKeys
 
 	for _, M := range []uint64{256, 128, 64, 32} {

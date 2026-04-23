@@ -205,12 +205,3 @@ func encodeHashes(files []fileFingerprint) string {
 	}
 	return sb.String()
 }
-
-// encodeEntry produces the tab-separated cache line written to the cache file:
-//
-//	CheckName\tbasename1:hash1hex\tbasename2:hash2hex...
-//
-// Hash is 40 hex characters (20 bytes SHA1 InfoHash).
-func encodeEntry(check string, files []fileFingerprint) string {
-	return formatEntry(cacheKey(check, files), encodeHashes(files))
-}

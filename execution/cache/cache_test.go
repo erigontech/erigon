@@ -21,10 +21,11 @@ import (
 	"testing"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 // Test helpers
@@ -601,6 +602,38 @@ func TestStateCache_Delete(t *testing.T) {
 
 	_, ok := c.Get(kv.AccountsDomain, addr)
 	assert.False(t, ok)
+}
+
+// Put(key, nil) must be a cache hit, not a miss. SharedDomains.GetLatest
+// caches deleted keys via Put(key, nil); if Get treats that as "not found",
+// the caller unnecessarily falls through to the DB on every read.
+func TestStateCache_PutEmpty_ThenGet_IsCacheHit(t *testing.T) {
+	c := NewStateCache(100, 100, 100, 100, 100)
+
+	key := make([]byte, 52) // addr(20) + slot(32)
+	key[0] = 0x1d
+	key[51] = 0xa2
+
+	c.Put(kv.StorageDomain, key, nil)
+
+	v, ok := c.Get(kv.StorageDomain, key)
+	assert.True(t, ok, "Get after Put(nil) must be a cache hit, not a miss")
+	assert.Empty(t, v, "cached value for a deleted key must be empty")
+}
+
+// Same test for []byte{} (zero-length but non-nil).
+func TestStateCache_PutEmptySlice_ThenGet_IsCacheHit(t *testing.T) {
+	c := NewStateCache(100, 100, 100, 100, 100)
+
+	key := make([]byte, 52)
+	key[0] = 0x1d
+	key[51] = 0xa2
+
+	c.Put(kv.StorageDomain, key, []byte{})
+
+	v, ok := c.Get(kv.StorageDomain, key)
+	assert.True(t, ok, "Get after Put([]byte{}) must be a cache hit")
+	assert.Empty(t, v)
 }
 
 func TestStateCache_Delete_UnsupportedDomain(t *testing.T) {

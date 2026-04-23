@@ -26,30 +26,33 @@ import (
 )
 
 var (
-	chaindata                    string
-	databaseVerbosity            int
-	referenceChaindata           string
-	block, pruneTo, unwind       uint64
-	unwindEvery                  uint64
-	batchSizeStr                 string
-	domain                       string
-	reset, noCommit, squeeze     bool
-	bucket                       string
-	datadirCli, toChaindata      string
-	migration                    string
-	integrityFast, integritySlow bool
-	file                         string
-	HeimdallURL                  string
-	txtrace                      bool   // Whether to trace the execution (should only be used together with `block`)
-	chain                        string // Which chain to use (mainnet, sepolia, etc.)
-	outputCsvFile                string
+	chaindata                     string
+	databaseVerbosity             int
+	referenceChaindata            string
+	block, pruneTo, unwind        uint64
+	unwindEvery                   uint64
+	batchSizeStr                  string
+	domain                        string
+	reset, noCommit, squeeze, yes bool
+	bucket                        string
+	datadirCli, toChaindata       string
+	migration                     string
+	integrityFast, integritySlow  bool
+	file                          string
+	HeimdallURL                   string
+	txtrace                       bool   // Whether to trace the execution (should only be used together with `block`)
+	chain                         string // Which chain to use (mainnet, sepolia, etc.)
+	outputCsvFile                 string
 
 	startTxNum uint64
 
 	dbWriteMap bool
 
-	chainTipMode bool
-	syncCfg      = ethconfig.Defaults.Sync
+	chainTipMode    bool
+	clearCommitment bool
+	resume          bool
+	noHistory       bool
+	syncCfg         = ethconfig.Defaults.Sync
 )
 
 func must(err error) {
@@ -109,8 +112,24 @@ func withReset(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&reset, "reset", false, "reset given stage")
 }
 
+func withYes(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&yes, "yes", false, "skip interactive prompts (for non-interactive/background use)")
+}
+
 func withSqueeze(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&squeeze, "squeeze", true, "use offset-pointers from commitment.kv to account.kv")
+}
+
+func withClearCommitment(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&clearCommitment, "clear-commitment", false, "remove commitment data from DB and delete state files, then exit without rebuilding")
+}
+
+func withResume(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&resume, "resume", false, "resume a previously interrupted commitment rebuild")
+}
+
+func withNoHistory(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&noHistory, "no-history", false, "skip history regeneration and only rebuild commitment KV files")
 }
 
 func withBucket(cmd *cobra.Command) {

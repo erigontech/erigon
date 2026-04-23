@@ -1,20 +1,7 @@
 name: Consensus spec
 on:
-  push:
-    branches:
-      - main
-      - 'release/**'
-  pull_request:
-    branches:
-      - main
-      - 'release/**'
-      - performance
-      - performance-stable
-    types:
-      - opened
-      - reopened
-      - synchronize
-      - ready_for_review
+  workflow_dispatch:
+  workflow_call:
 
 defaults:
   run:

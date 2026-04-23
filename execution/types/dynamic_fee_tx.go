@@ -43,21 +43,7 @@ type DynamicFeeTransaction struct {
 func (tx *DynamicFeeTransaction) GetFeeCap() *uint256.Int { return &tx.FeeCap }
 func (tx *DynamicFeeTransaction) GetTipCap() *uint256.Int { return &tx.TipCap }
 func (tx *DynamicFeeTransaction) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
-	if baseFee == nil {
-		return tx.GetTipCap()
-	}
-	gasFeeCap := tx.GetFeeCap()
-	// return 0 because effectiveFee cant be < 0
-	// transaction max fee is below base fee
-	if gasFeeCap.Lt(baseFee) {
-		return uint256.NewInt(0)
-	}
-	effectiveFee := new(uint256.Int).Sub(gasFeeCap, baseFee)
-	if tx.GetTipCap().Lt(effectiveFee) {
-		return tx.GetTipCap()
-	} else {
-		return effectiveFee
-	}
+	return CalcEffectiveGasTip(baseFee, tx.GetTipCap, tx.GetFeeCap)
 }
 
 func (tx *DynamicFeeTransaction) Unwrap() Transaction {
@@ -145,8 +131,8 @@ func (tx *DynamicFeeTransaction) WithSignature(signer Signer, sig []byte) (Trans
 // transactions, it returns the type and payload.
 func (tx *DynamicFeeTransaction) MarshalBinary(w io.Writer) error {
 	payloadSize, accessListLen := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 	// encode TxType
 	b[0] = DynamicFeeTxType
 	if _, err := w.Write(b[:1]); err != nil {
@@ -160,7 +146,7 @@ func (tx *DynamicFeeTransaction) MarshalBinary(w io.Writer) error {
 
 func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen int) error {
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+	if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
 		return err
 	}
 	// encode ChainID
@@ -168,7 +154,7 @@ func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSiz
 		return err
 	}
 	// encode Nonce
-	if err := rlp.EncodeInt(tx.Nonce, w, b); err != nil {
+	if err := rlp.EncodeU64(tx.Nonce, w, b); err != nil {
 		return err
 	}
 	// encode MaxPriorityFeePerGas
@@ -180,11 +166,11 @@ func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSiz
 		return err
 	}
 	// encode GasLimit
-	if err := rlp.EncodeInt(tx.GasLimit, w, b); err != nil {
+	if err := rlp.EncodeU64(tx.GasLimit, w, b); err != nil {
 		return err
 	}
 	// encode To
-	if err := rlp.EncodeOptionalAddress(tx.To, w, b); err != nil {
+	if err := EncodeOptionalAddress(tx.To, w, b); err != nil {
 		return err
 	}
 	// encode Value
@@ -196,7 +182,7 @@ func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSiz
 		return err
 	}
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(accessListLen, w, b); err != nil {
+	if err := rlp.EncodeListPrefix(accessListLen, w, b); err != nil {
 		return err
 	}
 	// encode AccessList
@@ -222,10 +208,10 @@ func (tx *DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
 	payloadSize, accessListLen := tx.payloadSize()
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 	// envelope
-	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
+	if err := rlp.EncodeStringPrefix(envelopeSize, w, b[:]); err != nil {
 		return err
 	}
 	// encode TxType
@@ -259,7 +245,7 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 	if tx.GasLimit, err = s.Uint64(); err != nil {
 		return err
 	}
-	if err = rlp.DecodeOptionalAddress(&tx.To, s); err != nil {
+	if err = DecodeOptionalAddress(&tx.To, s); err != nil {
 		return err
 	}
 	if err = s.ReadUint256(&tx.Value); err != nil {

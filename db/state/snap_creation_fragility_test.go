@@ -5,7 +5,6 @@ package state
 // These tests catch issues as early as possible.
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -23,6 +22,7 @@ import (
 // but its .bt accessor is missing, FilesWithMissedAccessors reports it.
 // Partial file creation (data written, accessor not yet written) must be detected early.
 func TestFilesWithMissedAccessors_BTree(t *testing.T) {
+	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
@@ -54,6 +54,7 @@ func TestFilesWithMissedAccessors_BTree(t *testing.T) {
 // TestFilesWithMissedAccessors_Existence verifies that when a .kv data file exists
 // but its .kvei existence filter is missing, it is detected.
 func TestFilesWithMissedAccessors_Existence(t *testing.T) {
+	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
@@ -82,6 +83,7 @@ func TestFilesWithMissedAccessors_Existence(t *testing.T) {
 // TestFilesWithMissedAccessors_HashMap verifies that when a .kv data file exists
 // but its .kvi HashMap accessor is missing, it is detected.
 func TestFilesWithMissedAccessors_HashMap(t *testing.T) {
+	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
@@ -111,6 +113,7 @@ func TestFilesWithMissedAccessors_HashMap(t *testing.T) {
 // TestFilesWithMissedAccessors_AllPresent verifies that when all accessor files
 // are present, FilesWithMissedAccessors returns nothing.
 func TestFilesWithMissedAccessors_AllPresent(t *testing.T) {
+	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
@@ -135,6 +138,7 @@ func TestFilesWithMissedAccessors_AllPresent(t *testing.T) {
 // can be parsed back by Parse() and yield matching from/to/ext values.
 // A mismatch here would mean files created at one path can't be found at another — a hard-to-debug prod issue.
 func TestFileNamingRoundTrip_Domain(t *testing.T) {
+	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	stepSize := uint64(1000)
@@ -182,6 +186,7 @@ func TestFileNamingRoundTrip_Domain(t *testing.T) {
 
 // TestFileNamingRoundTrip_History verifies history file naming round-trip.
 func TestFileNamingRoundTrip_History(t *testing.T) {
+	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	stepSize := uint64(1000)
@@ -213,6 +218,7 @@ func TestFileNamingRoundTrip_History(t *testing.T) {
 
 // TestFileNamingRoundTrip_II verifies inverted index file naming round-trip.
 func TestFileNamingRoundTrip_II(t *testing.T) {
+	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	stepSize := uint64(1000)
@@ -245,6 +251,7 @@ func TestFileNamingRoundTrip_II(t *testing.T) {
 // TestSnapshotConfigValidation verifies that invalid SnapshotCreationConfig panics early.
 // This prevents misconfigured nodes from silently creating files with wrong ranges.
 func TestSnapshotConfigValidation(t *testing.T) {
+	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	schema := NewE2SnapSchema(dirs, "bodies", NewE2SnapSchemaVersion(ver, ver))
@@ -281,6 +288,7 @@ func TestSnapshotConfigValidation(t *testing.T) {
 // when an accessor is declared in `accessors` but its Build* method is not called,
 // or vice versa. This catches configuration mistakes at startup rather than at runtime.
 func TestE3SnapSchemaBuilder_MismatchedAccessors(t *testing.T) {
+	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	stepSize := uint64(1000)
@@ -319,6 +327,7 @@ func TestE3SnapSchemaBuilder_MismatchedAccessors(t *testing.T) {
 // TestDirtyFilesWithNoBtreeAccessors verifies detection of data files missing .bt index.
 // This is the key early-warning for incomplete file creation.
 func TestDirtyFilesWithNoBtreeAccessors(t *testing.T) {
+	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
@@ -346,6 +355,7 @@ func TestDirtyFilesWithNoBtreeAccessors(t *testing.T) {
 
 // TestDirtyFilesWithNoHashAccessors verifies detection of data files missing .kvi index.
 func TestDirtyFilesWithNoHashAccessors(t *testing.T) {
+	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
@@ -372,6 +382,7 @@ func TestDirtyFilesWithNoHashAccessors(t *testing.T) {
 // TestDirtyFilesWithAccessors_NoneWhenPresent verifies that when accessors exist,
 // the missing-accessor detection functions return empty.
 func TestDirtyFilesWithAccessors_NoneWhenPresent(t *testing.T) {
+	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
@@ -394,6 +405,7 @@ func TestDirtyFilesWithAccessors_NoneWhenPresent(t *testing.T) {
 // some data files have no accessors. This is critical: a node shouldn't crash if file
 // creation was partially completed (data written, accessor build was interrupted).
 func TestOpenFolder_PartialFiles_StillOpens(t *testing.T) {
+	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
@@ -433,6 +445,7 @@ func TestOpenFolder_PartialFiles_StillOpens(t *testing.T) {
 // TestSnapInfoIsDataFile verifies that IsDataFile correctly classifies all valid data extensions.
 // Misclassifying a data extension means files get skipped during recovery.
 func TestSnapInfoIsDataFile(t *testing.T) {
+	t.Parallel()
 	dataExts := []string{".kv", ".v", ".ef", ".seg"}
 	for _, ext := range dataExts {
 		info := &SnapInfo{Ext: ext}
@@ -451,6 +464,7 @@ func TestSnapInfoIsDataFile(t *testing.T) {
 // compressor path and verifies it can be decompressed after creation.
 // This catches bugs in the file creation path that only manifest with real I/O.
 func TestRealFileCreation_DomainDataFile(t *testing.T) {
+	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	stepSize := uint64(1000)
@@ -463,7 +477,7 @@ func TestRealFileCreation_DomainDataFile(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create the file using the same compressor used in production
-	comp, err := seg.NewCompressor(context.Background(), t.Name(), dataPath, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+	comp, err := seg.NewCompressor(t.Context(), t.Name(), dataPath, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 	require.NoError(t, err)
 	comp.DisableFsync()
 	require.NoError(t, comp.AddWord([]byte("key1")))
@@ -487,6 +501,7 @@ func TestRealFileCreation_DomainDataFile(t *testing.T) {
 // TestFilesWithMissedAccessors_PartialBTree verifies that when some files have
 // BTree accessors and some don't, only the ones without are reported as missing.
 func TestFilesWithMissedAccessors_PartialBTree(t *testing.T) {
+	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
@@ -520,6 +535,7 @@ func TestFilesWithMissedAccessors_PartialBTree(t *testing.T) {
 // across different step sizes. A step-size bug would cause files to be generated
 // at wrong paths and never found on re-open.
 func TestFileNamingRoundTrip_AllStepSizes(t *testing.T) {
+	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 
@@ -545,6 +561,7 @@ func TestFileNamingRoundTrip_AllStepSizes(t *testing.T) {
 // TestE3ParseRejectsWrongTag verifies that Parse rejects filenames with a different
 // entity name. Files of different entities must not be confused with each other.
 func TestE3ParseRejectsWrongTag(t *testing.T) {
+	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	stepSize := uint64(1000)
@@ -569,6 +586,7 @@ func TestE3ParseRejectsWrongTag(t *testing.T) {
 // accessors are present vs when some are missing. If IsEmpty is wrong, the system
 // may skip building missing accessors and leave files in a broken state.
 func TestMissedFilesMap_IsEmpty(t *testing.T) {
+	t.Parallel()
 	// Empty map: nothing missing
 	empty := MissedFilesMap{}
 	require.True(t, empty.IsEmpty())
@@ -593,6 +611,7 @@ func TestMissedFilesMap_IsEmpty(t *testing.T) {
 // (domain, history, II) generate parseable filenames. Schema changes that break
 // filename compatibility cause prod nodes to fail to find their existing data files.
 func TestProductionSchemas_ValidNamesAndRoundTrip(t *testing.T) {
+	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	stepSize := uint64(1000)
@@ -652,6 +671,7 @@ func TestProductionSchemas_ValidNamesAndRoundTrip(t *testing.T) {
 // returns empty for an empty repo (no dirty files). This is a boundary case
 // that must not panic.
 func TestFilesWithMissedAccessors_EmptyRepo(t *testing.T) {
+	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
@@ -671,6 +691,7 @@ func TestFilesWithMissedAccessors_EmptyRepo(t *testing.T) {
 // extensions in the snapshot directory are silently ignored. This prevents
 // accidental files (temp files, README, etc.) from causing parse panics.
 func TestOpenFolder_UnrelatedFilesIgnored(t *testing.T) {
+	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
@@ -708,6 +729,7 @@ func TestOpenFolder_UnrelatedFilesIgnored(t *testing.T) {
 // This function is used to re-open snapshot files after restart. A bug here means
 // a node restart fails to find its existing files → falls back to full re-download.
 func TestFindFilesBySearchVersion(t *testing.T) {
+	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	stepSize := uint64(1000)
@@ -720,7 +742,7 @@ func TestFindFilesBySearchVersion(t *testing.T) {
 	// Create v1.0 file on disk using a real compressor
 	v10Path, err := schema.DataFile(version.V1_0, from, to)
 	require.NoError(t, err)
-	comp, err := seg.NewCompressor(context.Background(), t.Name(), v10Path, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+	comp, err := seg.NewCompressor(t.Context(), t.Name(), v10Path, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 	require.NoError(t, err)
 	comp.DisableFsync()
 	require.NoError(t, comp.AddWord([]byte("key1")))
@@ -742,6 +764,7 @@ func TestFindFilesBySearchVersion(t *testing.T) {
 // instead of crashing the node. If a file creation was interrupted before content
 // was written, the node must still start up correctly.
 func TestOpenFolder_CorruptedDataFile(t *testing.T) {
+	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
@@ -774,6 +797,7 @@ func TestOpenFolder_CorruptedDataFile(t *testing.T) {
 // selects the highest-version file within [MinSupported, Current] and rejects files
 // outside that range. If an unsupported version is selected, data can be misread.
 func TestFindFilesBySearchVersion_VersionRangeFiltering(t *testing.T) {
+	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	stepSize := uint64(1000)
 
@@ -789,7 +813,7 @@ func TestFindFilesBySearchVersion_VersionRangeFiltering(t *testing.T) {
 	makeFile := func(v version.Version) {
 		path, err := schema.DataFile(v, from, to)
 		require.NoError(t, err)
-		comp, err := seg.NewCompressor(context.Background(), t.Name(), path, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+		comp, err := seg.NewCompressor(t.Context(), t.Name(), path, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 		require.NoError(t, err)
 		comp.DisableFsync()
 		require.NoError(t, comp.AddWord([]byte("word")))
@@ -815,6 +839,7 @@ func TestFindFilesBySearchVersion_VersionRangeFiltering(t *testing.T) {
 // - returns a match when exactly one file exists
 // - errors when multiple files exist (strict = no ambiguity)
 func TestFindFilesByStrictSearchVersion(t *testing.T) {
+	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	stepSize := uint64(1000)
@@ -827,7 +852,7 @@ func TestFindFilesByStrictSearchVersion(t *testing.T) {
 	makeFile := func(v version.Version) {
 		path, err := schema.DataFile(v, from, to)
 		require.NoError(t, err)
-		comp, err := seg.NewCompressor(context.Background(), t.Name(), path, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+		comp, err := seg.NewCompressor(t.Context(), t.Name(), path, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 		require.NoError(t, err)
 		comp.DisableFsync()
 		require.NoError(t, comp.AddWord([]byte("word")))
@@ -849,7 +874,7 @@ func TestFindFilesByStrictSearchVersion(t *testing.T) {
 	makeFileFn := func(v version.Version) {
 		path, err := schema2.DataFile(v, from, to)
 		require.NoError(t, err)
-		comp, err := seg.NewCompressor(context.Background(), t.Name(), path, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+		comp, err := seg.NewCompressor(t.Context(), t.Name(), path, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 		require.NoError(t, err)
 		comp.DisableFsync()
 		require.NoError(t, comp.AddWord([]byte("word")))
@@ -867,6 +892,7 @@ func TestFindFilesByStrictSearchVersion(t *testing.T) {
 // scales correctly — only files with missing accessors are reported, even in a
 // larger set with many complete files.
 func TestFilesWithMissedAccessors_LargeRepo(t *testing.T) {
+	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
@@ -903,6 +929,7 @@ func TestFilesWithMissedAccessors_LargeRepo(t *testing.T) {
 // AccessorIdxFile work correctly with SearchVersion. The restart path must be able
 // to find all file types on disk, not just the data (.kv) file.
 func TestFindAccessorFilesBySearchVersion(t *testing.T) {
+	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	stepSize := uint64(1000)
@@ -944,6 +971,7 @@ func TestFindAccessorFilesBySearchVersion(t *testing.T) {
 // file types (.kvi, .vi, .efi, .bt, .kvei). A naming bug in any of these causes
 // the accessor to not be found on restart → full rebuild required.
 func TestFileNamingRoundTrip_AllAccessorTypes(t *testing.T) {
+	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	stepSize := uint64(1000)
@@ -999,6 +1027,7 @@ func TestFileNamingRoundTrip_AllAccessorTypes(t *testing.T) {
 // A file created without its accessor must be invisible to readers — it cannot be used
 // until the accessor is built, even if the data file is valid.
 func TestVisibleFiles_RequiresCompleteAccessors(t *testing.T) {
+	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
@@ -1037,6 +1066,7 @@ func TestVisibleFiles_RequiresCompleteAccessors(t *testing.T) {
 
 // TestVisibleFiles_HashMap verifies the safety property for HashMap accessor.
 func TestVisibleFiles_HashMap(t *testing.T) {
+	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
@@ -1069,6 +1099,7 @@ func TestVisibleFiles_HashMap(t *testing.T) {
 // create accessor → no longer missing → visible to readers.
 // This is the key end-to-end flow for catching file creation bugs early.
 func TestFileCreationLifecycle_FullCycle(t *testing.T) {
+	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
@@ -1116,6 +1147,7 @@ func TestFileCreationLifecycle_FullCycle(t *testing.T) {
 // end boundary of the last file. This value is used to determine how far file
 // creation has progressed — a wrong value causes gaps or duplicate file creation.
 func TestDirtyFilesMaxRootNum(t *testing.T) {
+	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
@@ -1150,6 +1182,7 @@ func TestDirtyFilesMaxRootNum(t *testing.T) {
 // Without this detection, a restarted node might serve data from files with
 // missing accessors (causing reads to silently fail or return wrong results).
 func TestNodeRestart_PartialFileCreation(t *testing.T) {
+	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
@@ -1201,6 +1234,7 @@ func TestNodeRestart_PartialFileCreation(t *testing.T) {
 // failed or haven't started yet). In this state, NO files should be visible to readers.
 // This prevents serving incorrect state from files without their lookup indexes.
 func TestAllFilesDataOnly_NoneVisible(t *testing.T) {
+	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
@@ -1242,6 +1276,7 @@ func TestAllFilesDataOnly_NoneVisible(t *testing.T) {
 // filenames. E2 schemas are used for block-level snapshots; a bug here would
 // prevent block headers/bodies from being found after they're snapshotted.
 func TestE2Schema_FileNamingRoundTrip(t *testing.T) {
+	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	ver := NewE2SnapSchemaVersion(version.V1_0_standart, version.V1_0_standart)
 	stepSize := uint64(1000)
@@ -1289,6 +1324,7 @@ func TestE2Schema_FileNamingRoundTrip(t *testing.T) {
 // When (0-20) is processed, it removes both (0-10) and (10-20) from newVisibleFiles via
 // the isProperSubsetOf check — this is the critical subset-removal invariant.
 func TestVisibleFiles_MergedFilePrefersOverConstituents(t *testing.T) {
+	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (string, SnapNameSchema) {
