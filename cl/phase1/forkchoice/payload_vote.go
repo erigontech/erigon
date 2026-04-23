@@ -185,6 +185,11 @@ func (f *ForkChoiceStore) getParentPayloadStatus(block *cltypes.BeaconBlock) clt
 		return cltypes.PayloadStatusEmpty
 	}
 
+	// Pre-GLOAS parent blocks have no bid field; treat as PENDING per consensus-specs #5125.
+	if parentBlock.Block.Body.Version < clparams.GloasVersion {
+		return cltypes.PayloadStatusPending
+	}
+
 	// Get parent_block_hash from current block's signed_execution_payload_bid
 	currentBid := block.Body.GetSignedExecutionPayloadBid()
 	if currentBid == nil || currentBid.Message == nil {
