@@ -31,6 +31,9 @@ import (
 const (
 	BlobCommitmentVersionKZG uint8 = 0x01
 	PrecompileInputLength    int   = 192
+	DataPerBlob                    = 64
+	CellsPerBlob                   = 128
+	CellProofsPerBlob              = 128
 )
 
 type VersionedHash [32]byte
