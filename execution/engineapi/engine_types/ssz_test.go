@@ -31,10 +31,10 @@ func TestPayloadStatusSSZRoundTrip(t *testing.T) {
 
 	// Test with all fields set
 	hash := common.HexToHash("0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
-	ps := &PayloadStatusSSZ{
-		Status:          SSZStatusValid,
+	ps := &PayloadStatus{
+		Status:          ValidStatus,
 		LatestValidHash: &hash,
-		ValidationError: "test error",
+		ValidationError: NewStringifiedErrorFromString("test error"),
 	}
 
 	encoded, err := ps.EncodeSSZ(nil)
@@ -44,22 +44,21 @@ func TestPayloadStatusSSZRoundTrip(t *testing.T) {
 	req.Equal(ps.Status, decoded.Status)
 	req.NotNil(decoded.LatestValidHash)
 	req.Equal(*ps.LatestValidHash, *decoded.LatestValidHash)
-	req.Equal(ps.ValidationError, decoded.ValidationError)
+	req.Equal(ps.ValidationError.Error().Error(), decoded.ValidationError.Error().Error())
 
 	// Test with nil LatestValidHash
-	ps2 := &PayloadStatusSSZ{
-		Status:          SSZStatusSyncing,
+	ps2 := &PayloadStatus{
+		Status:          SyncingStatus,
 		LatestValidHash: nil,
-		ValidationError: "",
 	}
 
 	encoded2, err := ps2.EncodeSSZ(nil)
 	req.NoError(err)
 	decoded2, err := DecodePayloadStatusSSZ(encoded2)
 	req.NoError(err)
-	req.Equal(SSZStatusSyncing, decoded2.Status)
+	req.Equal(SyncingStatus, decoded2.Status)
 	req.Nil(decoded2.LatestValidHash)
-	req.Empty(decoded2.ValidationError)
+	req.Nil(decoded2.ValidationError)
 }
 
 func TestPayloadStatusConversion(t *testing.T) {
@@ -72,12 +71,10 @@ func TestPayloadStatusConversion(t *testing.T) {
 		ValidationError: NewStringifiedErrorFromString("block invalid"),
 	}
 
-	ssz := PayloadStatusToSSZ(ps)
-	req.Equal(SSZStatusValid, ssz.Status)
-	req.Equal(hash, *ssz.LatestValidHash)
-	req.Equal("block invalid", ssz.ValidationError)
-
-	back := ssz.ToPayloadStatus()
+	encoded, err := ps.EncodeSSZ(nil)
+	req.NoError(err)
+	back, err := DecodePayloadStatusSSZ(encoded)
+	req.NoError(err)
 	req.Equal(ValidStatus, back.Status)
 	req.Equal(hash, *back.LatestValidHash)
 	req.NotNil(back.ValidationError)
@@ -258,9 +255,9 @@ func TestForkchoiceUpdatedResponseRoundTrip(t *testing.T) {
 	encoded := EncodeForkchoiceUpdatedResponse(resp)
 	decoded, err := DecodeForkchoiceUpdatedResponse(encoded)
 	req.NoError(err)
-	req.Equal(SSZStatusValid, decoded.PayloadStatus.Status)
+	req.Equal(ValidStatus, decoded.PayloadStatus.Status)
 	req.Equal(hash, *decoded.PayloadStatus.LatestValidHash)
-	req.Empty(decoded.PayloadStatus.ValidationError)
+	req.Nil(decoded.PayloadStatus.ValidationError)
 	req.Nil(decoded.PayloadId)
 }
 
@@ -289,9 +286,9 @@ func TestForkchoiceUpdatedResponseWithPayloadId(t *testing.T) {
 	encoded := EncodeForkchoiceUpdatedResponse(resp)
 	decoded, err := DecodeForkchoiceUpdatedResponse(encoded)
 	req.NoError(err)
-	req.Equal(SSZStatusSyncing, decoded.PayloadStatus.Status)
+	req.Equal(SyncingStatus, decoded.PayloadStatus.Status)
 	req.NotNil(decoded.PayloadId)
-	req.Equal([]byte(pidBytes), decoded.PayloadId)
+	req.Equal(pidBytes, *decoded.PayloadId)
 }
 
 func TestForkchoiceUpdatedResponseWithValidationError(t *testing.T) {
@@ -313,11 +310,11 @@ func TestForkchoiceUpdatedResponseWithValidationError(t *testing.T) {
 	encoded := EncodeForkchoiceUpdatedResponse(resp)
 	decoded, err := DecodeForkchoiceUpdatedResponse(encoded)
 	req.NoError(err)
-	req.Equal(SSZStatusInvalid, decoded.PayloadStatus.Status)
+	req.Equal(InvalidStatus, decoded.PayloadStatus.Status)
 	req.Equal(hash, *decoded.PayloadStatus.LatestValidHash)
-	req.Equal("block gas limit exceeded by a very long error message that makes the buffer larger", decoded.PayloadStatus.ValidationError)
+	req.Equal("block gas limit exceeded by a very long error message that makes the buffer larger", decoded.PayloadStatus.ValidationError.Error().Error())
 	req.NotNil(decoded.PayloadId)
-	req.Equal([]byte(pidBytes), decoded.PayloadId)
+	req.Equal(pidBytes, *decoded.PayloadId)
 }
 
 func TestForkchoiceUpdatedResponseShortBuffer(t *testing.T) {

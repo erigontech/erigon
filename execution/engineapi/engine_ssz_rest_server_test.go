@@ -456,12 +456,12 @@ func TestSszRestNewPayloadV1ValidSSZ(t *testing.T) {
 	// We verify the SSZ-REST transport layer correctly decoded and dispatched the request.
 	if resp.StatusCode == http.StatusOK {
 		req.Equal("application/octet-stream", resp.Header.Get("Content-Type"))
-		// Should be a PayloadStatusSSZ response (minimum 9 bytes fixed + 1 byte union selector)
+		// Should be an SSZ PayloadStatus response (minimum 9 bytes fixed + 1 byte union selector)
 		req.GreaterOrEqual(len(respBody), 10)
 		// Decode the response to verify it's valid SSZ
 		ps, err := engine_types.DecodePayloadStatusSSZ(respBody)
 		req.NoError(err)
-		req.True(ps.Status <= engine_types.SSZStatusInvalidBlockHash)
+		req.NotEmpty(ps.Status)
 	} else {
 		// Engine errors come back as JSON
 		req.Equal("application/json", resp.Header.Get("Content-Type"))

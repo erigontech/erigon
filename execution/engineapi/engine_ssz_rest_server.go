@@ -205,9 +205,7 @@ func (s *SszRestServer) handleNewPayload(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	// Encode PayloadStatus response
-	ps := engine_types.PayloadStatusToSSZ(result)
-	psBytes, _ := ps.EncodeSSZ(nil)
+	psBytes, _ := result.EncodeSSZ(nil)
 	sszResponse(w, psBytes)
 }
 
@@ -522,6 +520,10 @@ func (s *SszRestServer) handleGetBlobsV1(w http.ResponseWriter, r *http.Request)
 	}
 
 	ctx := r.Context()
+	if s.engine.txpool == nil {
+		sszErrorResponse(w, http.StatusInternalServerError, -32603, "txpool unavailable")
+		return
+	}
 	result, err := s.engine.GetBlobsV1(ctx, hashes)
 	if err != nil {
 		s.handleEngineError(w, err)
