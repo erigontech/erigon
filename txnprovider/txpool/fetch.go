@@ -157,10 +157,13 @@ func (f *Fetch) recordAnnouncement(pid *typesproto.H512, types []byte, sizes []u
 
 // announcedSizeSlack is the wiggle-room we allow between the size a peer
 // announces in eth/68 NewPooledTransactionHashes and the size it later
-// delivers. Matches go-ethereum's txSizeSlack (eth/fetcher/tx_fetcher.go):
+// delivers. Matches go-ethereum's inline threshold of 8 in
+// eth/fetcher/tx_fetcher.go (|announced-delivered| > 8 drops the peer):
 // typed-tx RLP vs consensus-format size accounting has off-by-a-few-bytes
 // quirks in the wild, so a strict equality check produces false positives.
-const announcedSizeSlack = 16
+// The devp2p BlobViolations hive test probes with a +10 byte mismatch, so
+// raising this above 8 silently disables the size check for that scenario.
+const announcedSizeSlack = 8
 
 // checkPooledTxnAnnouncement returns an error if the peer delivering `slot`
 // announced it earlier with a different type or a grossly different size
