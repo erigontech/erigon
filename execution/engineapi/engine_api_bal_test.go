@@ -147,7 +147,7 @@ func TestEngineApiGeneratedPayloadIncludesBlockAccessList(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, receipt)
 
-		balIndex := uint16(receipt.TransactionIndex + 1)
+		balIndex := uint32(receipt.TransactionIndex + 1)
 
 		senderBalance, err := eat.RpcApiClient.GetBalance(sender, rpc.LatestBlock)
 		require.NoError(t, err)
@@ -203,7 +203,7 @@ func TestEngineApiBALContractCreation(t *testing.T) {
 		receipt, err := eat.RpcApiClient.GetTransactionReceipt(ctx, deployTx.Hash())
 		require.NoError(t, err)
 		require.NotNil(t, receipt)
-		balIndex := uint16(receipt.TransactionIndex + 1)
+		balIndex := uint32(receipt.TransactionIndex + 1)
 
 		codeChange := findCodeChange(contractChanges, balIndex)
 		require.NotNilf(t, codeChange, "missing code change at index %d\n%s", balIndex, bal.DebugString())
@@ -260,7 +260,7 @@ func TestEngineApiBALStorageWrites(t *testing.T) {
 
 		receipt, err := eat.RpcApiClient.GetTransactionReceipt(ctx, mintTx.Hash())
 		require.NoError(t, err)
-		balIndex := uint16(receipt.TransactionIndex + 1)
+		balIndex := uint32(receipt.TransactionIndex + 1)
 
 		// Verify at least one storage slot was written at the mint tx index
 		foundStorageChange := false
@@ -329,8 +329,8 @@ func TestEngineApiBALMultiTxBlock(t *testing.T) {
 		require.NoError(t, err)
 		mintReceipt, err := eat.RpcApiClient.GetTransactionReceipt(ctx, mintTx.Hash())
 		require.NoError(t, err)
-		transferIdx := uint16(transferReceipt.TransactionIndex + 1)
-		mintIdx := uint16(mintReceipt.TransactionIndex + 1)
+		transferIdx := uint32(transferReceipt.TransactionIndex + 1)
+		mintIdx := uint32(mintReceipt.TransactionIndex + 1)
 		require.NotEqual(t, transferIdx, mintIdx, "transactions should have different indices")
 
 		// Sender: should have balance+nonce changes at BOTH indices
@@ -453,14 +453,14 @@ func TestEngineApiBALMixedBlock(t *testing.T) {
 		changeReceipt, err := eat.RpcApiClient.GetTransactionReceipt(ctx, changeTx.Hash())
 		require.NoError(t, err)
 
-		transferIdx := uint16(transferReceipt.TransactionIndex + 1)
-		deployIdx := uint16(deployReceipt.TransactionIndex + 1)
-		changeIdx := uint16(changeReceipt.TransactionIndex + 1)
+		transferIdx := uint32(transferReceipt.TransactionIndex + 1)
+		deployIdx := uint32(deployReceipt.TransactionIndex + 1)
+		changeIdx := uint32(changeReceipt.TransactionIndex + 1)
 
 		// --- Verify sender: balance+nonce changes at all tx indices ---
 		senderChanges := findAccountChanges(bal, accounts.InternAddress(sender))
 		require.NotNilf(t, senderChanges, "missing sender changes\n%s", bal.DebugString())
-		for _, idx := range []uint16{transferIdx, deployIdx, changeIdx} {
+		for _, idx := range []uint32{transferIdx, deployIdx, changeIdx} {
 			require.NotNilf(t, findBalanceChange(senderChanges, idx),
 				"missing sender balance change at index %d", idx)
 			require.NotNilf(t, findNonceChange(senderChanges, idx),
@@ -771,7 +771,7 @@ func findAccountChanges(bal types.BlockAccessList, addr accounts.Address) *types
 	return nil
 }
 
-func findBalanceChange(ac *types.AccountChanges, index uint16) *types.BalanceChange {
+func findBalanceChange(ac *types.AccountChanges, index uint32) *types.BalanceChange {
 	if ac == nil {
 		return nil
 	}
@@ -783,7 +783,7 @@ func findBalanceChange(ac *types.AccountChanges, index uint16) *types.BalanceCha
 	return nil
 }
 
-func findNonceChange(ac *types.AccountChanges, index uint16) *types.NonceChange {
+func findNonceChange(ac *types.AccountChanges, index uint32) *types.NonceChange {
 	if ac == nil {
 		return nil
 	}
@@ -795,7 +795,7 @@ func findNonceChange(ac *types.AccountChanges, index uint16) *types.NonceChange 
 	return nil
 }
 
-func findCodeChange(ac *types.AccountChanges, index uint16) *types.CodeChange {
+func findCodeChange(ac *types.AccountChanges, index uint32) *types.CodeChange {
 	if ac == nil {
 		return nil
 	}
@@ -807,7 +807,7 @@ func findCodeChange(ac *types.AccountChanges, index uint16) *types.CodeChange {
 	return nil
 }
 
-func findStorageChange(sc *types.SlotChanges, index uint16) *types.StorageChange {
+func findStorageChange(sc *types.SlotChanges, index uint32) *types.StorageChange {
 	if sc == nil {
 		return nil
 	}
