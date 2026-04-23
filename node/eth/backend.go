@@ -251,8 +251,6 @@ func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, logger log.Logger, dirs datadi
 	return nil
 }
 
-const blockBufferSize = 128
-
 // sentryMcDisableBlockDownload suppresses the MultiClient's internal header +
 // body downloaders. Blocks are fetched via the staged-sync download path
 // (engine API + snapshot-sync) instead. Also guards the mined-block
@@ -678,7 +676,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		Dirs:                   stack.Config().Dirs,
 		Engine:                 backend.engine,
 		SyncCfg:                config.Sync,
-		BlockBufferSize:        blockBufferSize,
+		BlockBufferSize:        sentry_multi_client.DefaultBlockBufferSize,
 		LogPeerInfo:            stack.Config().SentryLogPeerInfo,
 		MaxBlockBroadcastPeers: maxBlockBroadcastPeers,
 		DisableBlockDownload:   sentryMcDisableBlockDownload,

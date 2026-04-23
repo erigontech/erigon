@@ -195,6 +195,30 @@ func (s *EngineServer) isWithdrawalsPresenceValid(time uint64, withdrawals types
 	return withdrawals != nil
 }
 
+func (s *EngineServer) validatePayloadAttributes(version clparams.StateVersion, payloadAttributes *engine_types.PayloadAttributes) error {
+	if version < clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot != nil {
+		return &engine_helpers.InvalidPayloadAttributesErr // Unexpected Beacon Root
+	}
+	if version >= clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot == nil {
+		return &engine_helpers.InvalidPayloadAttributesErr // Beacon Root missing
+	}
+
+	timestamp := uint64(payloadAttributes.Timestamp)
+	if !s.config.IsCancun(timestamp) && version >= clparams.DenebVersion { // V3 before cancun
+		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
+	}
+	if s.config.IsCancun(timestamp) && version < clparams.DenebVersion { // Not V3 after cancun
+		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
+	}
+	if version >= clparams.CapellaVersion && !s.isWithdrawalsPresenceValid(timestamp, payloadAttributes.Withdrawals) {
+		return &engine_helpers.InvalidPayloadAttributesErr
+	}
+	if version >= clparams.GloasVersion && payloadAttributes.SlotNumber == nil {
+		return &engine_helpers.InvalidPayloadAttributesErr // SlotNumber required for Glamsterdam (EIP-7843)
+	}
+	return nil
+}
+
 func (s *EngineServer) checkRequestsPresence(version clparams.StateVersion, executionRequests []hexutil.Bytes) error {
 	if version < clparams.ElectraVersion {
 		if executionRequests != nil {
@@ -701,31 +725,23 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		s.logger.Debug("[ForkChoiceUpdated] got quick payload status", "status", status.Status)
 	}
 
+	// Per the engine API spec, payloadAttributes must be validated against the
+	// fork schedule regardless of the fork-choice sync state. Doing this before
+	// the SYNCING short-circuit below lets the CL detect misconfigured attributes
+	// (e.g. fcuV2 with nil withdrawals at a Shanghai timestamp) even when the
+	// head is still syncing.
+	if payloadAttributes != nil {
+		if err := s.validatePayloadAttributes(version, payloadAttributes); err != nil {
+			return nil, err
+		}
+	}
+
 	// No need for payload building
 	if payloadAttributes == nil || status.Status != engine_types.ValidStatus {
 		return &engine_types.ForkChoiceUpdatedResponse{PayloadStatus: status}, nil
 	}
 
-	if version < clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot != nil {
-		return nil, &engine_helpers.InvalidPayloadAttributesErr // Unexpected Beacon Root
-	}
-	if version >= clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot == nil {
-		return nil, &engine_helpers.InvalidPayloadAttributesErr // Beacon Root missing
-	}
-
 	timestamp := uint64(payloadAttributes.Timestamp)
-	if !s.config.IsCancun(timestamp) && version >= clparams.DenebVersion { // V3 before cancun
-		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
-	}
-	if s.config.IsCancun(timestamp) && version < clparams.DenebVersion { // Not V3 after cancun
-		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
-	}
-	if version >= clparams.CapellaVersion && !s.isWithdrawalsPresenceValid(timestamp, payloadAttributes.Withdrawals) {
-		return nil, &engine_helpers.InvalidPayloadAttributesErr
-	}
-	if version >= clparams.GloasVersion && payloadAttributes.SlotNumber == nil {
-		return nil, &engine_helpers.InvalidPayloadAttributesErr // SlotNumber required for Glamsterdam (EIP-7843)
-	}
 
 	if !s.proposing {
 		return nil, errors.New("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
