@@ -50,6 +50,9 @@ autobind:
 # modelgen, the others will be allowed when binding to fields. Configure them to
 # your liking
 models:
+  Account:
+    model:
+      - github.com/erigontech/erigon/cmd/rpcdaemon/graphql/graph/model.Account
   Int:
     model:
       - github.com/99designs/gqlgen/graphql.Int

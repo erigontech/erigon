@@ -170,7 +170,7 @@ func RawRlpHash(rawRlpData rlp.RawValue) common.Hash {
 	return crypto.HashData(rawRlpData)
 }
 
-func rlpHash(x any) common.Hash {
+func RlpHash(x any) common.Hash {
 	sha := crypto.NewKeccakState()
 	rlp.Encode(sha, x) //nolint:errcheck
 	h := crypto.FinalizeHash(sha)

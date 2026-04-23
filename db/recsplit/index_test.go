@@ -18,7 +18,6 @@ package recsplit
 
 import (
 	"bufio"
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -52,7 +51,7 @@ func TestReWriteIndex(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := rs.Build(context.Background()); err != nil {
+	if err := rs.Build(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	idx := MustOpen(indexFile)

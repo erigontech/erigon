@@ -30,12 +30,13 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
-	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 const reorgTooDeepDepth = 3
@@ -110,11 +111,11 @@ func (cc *ExecutionClientDirect) NewPayload(
 	monitor.ObserveExecutionClientValidateChain(startValidateChain)
 	// check status
 	switch status {
-	case executionproto.ExecutionStatus_BadBlock, executionproto.ExecutionStatus_InvalidForkchoice:
+	case execmodule.ExecutionStatusBadBlock, execmodule.ExecutionStatusInvalidForkchoice:
 		return PayloadStatusInvalidated, errors.New("bad block")
-	case executionproto.ExecutionStatus_Busy, executionproto.ExecutionStatus_MissingSegment, executionproto.ExecutionStatus_TooFarAway:
+	case execmodule.ExecutionStatusBusy, execmodule.ExecutionStatusMissingSegment, execmodule.ExecutionStatusTooFarAway:
 		return PayloadStatusNotValidated, nil
-	case executionproto.ExecutionStatus_Success:
+	case execmodule.ExecutionStatusSuccess:
 		return PayloadStatusValidated, nil
 	}
 	return PayloadStatusNone, errors.New("unexpected status")
@@ -125,17 +126,27 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized
 	if err != nil {
 		return nil, fmt.Errorf("execution Client RPC failed to retrieve ForkChoiceUpdate response, err: %w", err)
 	}
-	if status == executionproto.ExecutionStatus_InvalidForkchoice {
+	if status == execmodule.ExecutionStatusInvalidForkchoice {
 		return nil, errors.New("forkchoice was invalid")
 	}
-	if status == executionproto.ExecutionStatus_BadBlock {
+	if status == execmodule.ExecutionStatusBadBlock {
 		return nil, errors.New("bad block as forkchoice")
 	}
 	if attr == nil {
 		return nil, nil
 	}
+	// Retry AssembleBlock if the EL is busy (semaphore contention with
+	// fork choice commits). This is common in single-process dev mode
+	// where the CL and EL share the same process.
 	idBytes := make([]byte, 8)
-	id, err := cc.chainRW.AssembleBlock(head, attr)
+	var id uint64
+	for attempt := 0; attempt < 30; attempt++ {
+		id, err = cc.chainRW.AssembleBlock(head, attr)
+		if err == nil {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -209,6 +220,9 @@ func (cc *ExecutionClientDirect) GetBlobs(ctx context.Context, versionedHashes [
 	}
 	resp, err := cc.txpool.GetBlobs(ctx, req)
 	if err != nil {
+		if errors.Is(err, txpool.ErrPoolDisabled) {
+			return nil, nil, nil
+		}
 		return nil, nil, fmt.Errorf("txpool GetBlobs: %w", err)
 	}
 	blobsWithProof := resp.BlobsWithProofs
