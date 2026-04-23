@@ -45,6 +45,14 @@ func init() {
 	register("prestateTracer", newPrestateTracer)
 }
 
+// codeHashAccessor is an optional extension of tracing.IntraBlockState that
+// exposes the stored code hash directly. Used to detect accounts with a literal
+// zero codeHash (e.g. pre-EIP-161 or EIP-7702 deauthorized accounts) without
+// modifying the base interface.
+type codeHashAccessor interface {
+	GetCodeHash(accounts.Address) (accounts.CodeHash, error)
+}
+
 type state = map[accounts.Address]*account
 
 type account struct {
@@ -284,8 +292,14 @@ func (t *prestateTracer) processDiffState() {
 		newBalance, _ := t.env.IntraBlockState.GetBalance(addr)
 		newNonce, _ := t.env.IntraBlockState.GetNonce(addr)
 		newCode, _ := t.env.IntraBlockState.GetCode(addr)
-		newCodeHashHandle, _ := t.env.IntraBlockState.GetCodeHash(addr)
-		newCodeHash := newCodeHashHandle.Value()
+		newCodeHash := empty.CodeHash
+		if len(newCode) > 0 {
+			newCodeHash = crypto.HashData(newCode)
+		} else if chg, ok := t.env.IntraBlockState.(codeHashAccessor); ok {
+			if h, _ := chg.GetCodeHash(addr); !h.IsNil() {
+				newCodeHash = h.Value()
+			}
+		}
 
 		if newBalance.ToBig().Cmp(t.pre[addr].Balance) != 0 {
 			modified = true
