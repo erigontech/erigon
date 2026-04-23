@@ -2132,10 +2132,14 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				if stateReader == nil {
 					if txTask.IsHistoric() {
-						// Chain sd.mem → applyTx so historic-mode reads see
-						// prior-tx writes from the current batch that haven't
-						// been flushed to the history index yet.
-						stateReader = state.NewHistoryReaderV3WithSharedDomains(applyTx, pe.rs.Domains(), txTask.Version().TxNum)
+						// Chain blockCache → sd.mem → applyTx so historic-mode
+						// finalize reads see every prior-tx write from the
+						// current block. The per-tx finalize path (fee calc,
+						// post-apply hooks) uses this reader for base reads
+						// not satisfied by the versionMap; omitting blockCache
+						// would let a later tx read a pre-block balance that
+						// an earlier tx already updated in-batch.
+						stateReader = state.NewHistoryReaderV3WithBlockCache(applyTx, pe.rs.Domains(), be.blockStateCache, txTask.Version().TxNum)
 					} else {
 						// Use CachedReaderV3 with readCurrent=true so the
 						// finalize (including system TXs) reads from the
@@ -2345,10 +2349,13 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			pe.RLock()
 			var reader state.StateReader
 			if finalTask.IsHistoric() {
-				// Chain sd.mem → applyTx so historic-mode reads see prior-tx
-				// writes from the current batch that haven't been flushed to
-				// the history index yet.
-				reader = state.NewHistoryReaderV3WithSharedDomains(applyTx, pe.rs.Domains(), finalVersion.TxNum)
+				// Chain blockCache → sd.mem → applyTx so the block-finalize
+				// IBS (withdrawals, EIP-7002/7251 system calls) sees every
+				// prior-tx write from the current block. Omitting blockCache
+				// here was the root cause of the trie-root race at block
+				// 24839300: a tip-adjacent historic block's withdrawal read
+				// the pre-block balance and stomped tx 28's in-block update.
+				reader = state.NewHistoryReaderV3WithBlockCache(applyTx, pe.rs.Domains(), be.blockStateCache, finalVersion.TxNum)
 			} else {
 				reader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsGetter(applyTx), be.blockStateCache)
 			}
@@ -2364,23 +2371,21 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 
 			if tt, ok := lastResult.Task.(*taskVersion).Task.(*exec.TxTask); ok {
-				// Syscalls need to see intra-block storage writes (e.g.,
-				// consolidation requests queued by regular TXs). When the main
-				// IBS uses HistoryReaderV3 (historic blocks), create a separate
-				// IBS with CurrentCachedReaderV3 for syscalls. The syscall
-				// writes (dequeue operations) are applied back to the main IBS
-				// and BlockStateCache so subsequent blocks see the dequeued state.
-				var syscallIBS *state.IntraBlockState
-				if finalTask.IsHistoric() {
-					pe.RLock()
-					syscallReader := state.NewCurrentCachedReaderV3(pe.rs.Domains().AsGetter(applyTx), be.blockStateCache)
-					pe.RUnlock()
-					syscallIBS = state.New(syscallReader)
-					syscallIBS.SetTxContext(finalVersion.BlockNum, finalVersion.TxIndex)
-					syscallIBS.SetVersionMap(state.NewVersionMap(nil))
-				} else {
-					syscallIBS = ibs
-				}
+				// Syscalls share the main ibs so their writes (EIP-7002/7251
+				// dequeue, EIP-4788 beacon root) land in ibs.VersionedWrites
+				// and then in finalizeWrites via MakeWriteSet. If we instead
+				// create a separate syscallIBS in historic mode, the syscall
+				// writes land only in BlockStateCache and never reach the
+				// commitment calculator's txResult feed — producing a wrong
+				// trie root whenever an EIP-7002/7251 SSTORE changes a
+				// previously-untouched slot (see the 24839762 race where
+				// slots 0x01/0x03 of the EIP-7002 predeploy ended with
+				// stale value 0x01 instead of cleared).
+				//
+				// Main ibs uses HistoryReaderV3WithBlockCache in historic
+				// mode (see finalTask.IsHistoric() branch above), so it can
+				// still see intra-batch writes from the blockCache.
+				syscallIBS := ibs
 
 				syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 					ret, err := protocol.SysCallContract(contract, data, pe.cfg.chainConfig, syscallIBS, tt.Header, pe.cfg.engine, false, *pe.cfg.vmConfig)
@@ -2398,18 +2403,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					return nil, fmt.Errorf("%w: can't finalize block %d: %v", rules.ErrInvalidBlock, be.blockNum, err)
 				}
 
-				// If syscall used a separate IBS, apply its writes back to
-				// the BlockStateCache so the dequeued values (zeros) are
-				// visible to subsequent blocks in this batch.
-				if syscallIBS != ibs {
-					syscallWrites := syscallIBS.VersionedWrites(true)
-					if len(syscallWrites) > 0 {
-						if err := pe.rs.ApplyStateWrites(ctx, applyTx, be.blockNum, finalVersion.TxNum,
-							syscallWrites, nil, lastResult.Rules(), be.blockStateCache); err != nil {
-							return nil, err
-						}
-					}
-				}
+				// syscallIBS == ibs unconditionally now; no separate write
+				// propagation needed — syscall writes flow through
+				// ibs.MakeWriteSet into finalizeWrites below.
 
 				be.blockIO.RecordReads(finalVersion, ibs.VersionedReads())
 				be.blockIO.RecordAccesses(finalVersion, ibs.AccessedAddresses())

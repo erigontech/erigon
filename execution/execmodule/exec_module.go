@@ -41,9 +41,9 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/exec"
@@ -563,7 +563,15 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 						"frozenBlocks", frozenBlocks,
 						"maxSafeStep", maxSafeStep,
 						"action", fmt.Sprintf("remove state domain files above step %d and restart", maxSafeStep))
-					// Don't release semaphore — Ready() stays false.
+					// Fatal startup condition — execution cannot proceed and
+					// won't self-heal. Shut the node down so the operator
+					// notices instead of leaving Caplin to sync indefinitely
+					// against a non-executing node.
+					go func() {
+						if stopErr := e.stopNode(); stopErr != nil {
+							e.logger.Error("Could not stop node on behind-commitment", "err", stopErr)
+						}
+					}()
 					return
 				}
 			}

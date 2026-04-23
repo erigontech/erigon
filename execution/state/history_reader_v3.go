@@ -22,6 +22,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -32,22 +33,34 @@ var PrunedError = errors.New("old data not available due to pruning")
 
 // HistoryReaderV3 Implements StateReader and StateWriter.
 //
-// When sd is non-nil, GetAsOf reads check the in-batch memory state
-// (sd.GetAsOf) first and only fall back to the backing temporal tx
-// (ttx.GetAsOf, which hits DB + snapshot files) if the key isn't in
-// the batch. This mirrors the pattern in committer.go:asOfStateReader
-// and prevents in-batch writes (e.g. a prior block's writes within the
-// same batch commit window) from being invisible to historic-mode
-// reads executed later in the same batch.
+// The read chain, from most-recent to persisted, is:
+//
+//	blockCache (in-flight parallel-block writes, per-field) →
+//	sd.GetAsOf (in-batch memory state) →
+//	ttx.GetAsOf (DB history + snapshot files).
+//
+// blockCache is populated by applyVersionedWrites in the parallel executor
+// for every committed tx in the current block. Those writes do NOT land in
+// sd.mem until Flush at block boundary, so a finalize-time IBS constructed
+// in historic mode (withdrawals, EIP-7002/7251 system calls on a
+// tip-adjacent historic block) would otherwise read the pre-block balance
+// and stomp a prior tx's in-block update. Consulting blockCache first fixes
+// that gap.
+//
+// sd is the SharedDomains for the batch. When non-nil, the reader checks
+// sd.GetAsOf before ttx.GetAsOf so prior-batch writes that haven't been
+// flushed to the history index yet are still visible.
 //
 // RPC and other consumers that want to read strictly persisted history
-// pass sd=nil via the legacy NewHistoryReaderV3 constructor.
+// pass sd=nil and blockCache=nil via the legacy NewHistoryReaderV3
+// constructor.
 type HistoryReaderV3 struct {
 	txNum       uint64
 	trace       bool
 	tracePrefix string
 	ttx         kv.TemporalTx
 	sd          *execctx.SharedDomains
+	blockCache  *BlockStateCache
 	composite   []byte
 }
 
@@ -63,13 +76,60 @@ func NewHistoryReaderV3WithSharedDomains(ttx kv.TemporalTx, sd *execctx.SharedDo
 	return &HistoryReaderV3{composite: make([]byte, 20+32), ttx: ttx, sd: sd, txNum: txNum}
 }
 
-// getAsOf chains sd.GetAsOf (in-batch memory) before ttx.GetAsOf (DB
-// history + snapshot files). Callers requesting only persisted history
-// construct the reader with sd=nil, skipping the first tier. If sd.mem
-// has inMemHistoryReads disabled (e.g. the serial executor path), sd.GetAsOf
-// returns an error — we silently fall through to ttx so the same reader
-// type is usable in both modes.
+// NewHistoryReaderV3WithBlockCache is the finalize-time variant used by
+// the parallel executor for historic blocks. In addition to the
+// sd.GetAsOf → ttx.GetAsOf chain, it consults the per-block BlockStateCache
+// first so the block-finalize IBS (withdrawals, EIP-7002/7251 system calls)
+// sees every prior-tx write recorded in the current block, not just the
+// pre-block committed state.
+func NewHistoryReaderV3WithBlockCache(ttx kv.TemporalTx, sd *execctx.SharedDomains, blockCache *BlockStateCache, txNum uint64) *HistoryReaderV3 {
+	return &HistoryReaderV3{composite: make([]byte, 20+32), ttx: ttx, sd: sd, blockCache: blockCache, txNum: txNum}
+}
+
+// SetBlockStateCache updates the in-flight block cache tier. Used when the
+// reader is reused across blocks in the parallel executor.
+func (hr *HistoryReaderV3) SetBlockStateCache(cache *BlockStateCache) {
+	hr.blockCache = cache
+}
+
+// getAsOf chains blockCache (in-flight parallel block writes, per-field)
+// before sd.GetAsOf (in-batch memory) and ttx.GetAsOf (DB history +
+// snapshot files). Callers requesting only persisted history construct the
+// reader with sd=nil and blockCache=nil. If sd.mem has inMemHistoryReads
+// disabled (e.g. the serial executor path), sd.GetAsOf returns an error —
+// we silently fall through to ttx so the same reader type is usable in
+// both modes.
+//
+// blockCache is consulted for the AccountsDomain and StorageDomain only;
+// CodeDomain is not currently cached per block, so for code reads we fall
+// straight through to sd/ttx. For storage we use the full 52-byte
+// composite key (addr||slot) like the rest of the state domain.
 func (hr *HistoryReaderV3) getAsOf(domain kv.Domain, key []byte) (enc []byte, ok bool, err error) {
+	if hr.blockCache != nil {
+		switch domain {
+		case kv.AccountsDomain:
+			if len(key) == 20 {
+				var raw common.Address
+				copy(raw[:], key)
+				addr := accounts.InternAddress(raw)
+				if cached, hit := hr.blockCache.GetCurrentAccount(addr); hit {
+					return cached, cached != nil, nil
+				}
+			}
+		case kv.StorageDomain:
+			if len(key) == 20+32 {
+				var rawAddr common.Address
+				var rawSlot common.Hash
+				copy(rawAddr[:], key[:20])
+				copy(rawSlot[:], key[20:])
+				addr := accounts.InternAddress(rawAddr)
+				slot := accounts.InternKey(rawSlot)
+				if cached, hit := hr.blockCache.GetCurrentStorage(addr, slot); hit {
+					return cached, len(cached) > 0, nil
+				}
+			}
+		}
+	}
 	if hr.sd != nil {
 		enc, ok, err = hr.sd.GetAsOf(domain, key, hr.txNum)
 		if err == nil && ok {

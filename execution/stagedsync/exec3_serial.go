@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -226,12 +227,19 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			if blockNum == 24364003 {
 				commitmentdb.TraceCommitReads = true
 			}
+			// Always arm trie capture so a root mismatch can be dumped on the
+			// first occurrence — see committer.go for the parallel equivalent.
+			// Non-deterministic failures may not reproduce on re-run, so the
+			// evidence must be captured at the moment of fail.
+			sdCtx := se.doms.GetCommitmentContext()
+			sdCtx.SetCapture([]string{})
 			rh, err := se.doms.ComputeCommitment(ctx, execDomainRoTx, true, blockNum, inputTxNum-1, se.logPrefix, nil)
 			commitmentdb.TraceCommitReads = false
 			commitment.TraceTouchKeys = false
 			se.doms.SetTrace(false, false)
 
 			if err != nil {
+				sdCtx.SetCapture(nil)
 				return nil, rwTx, err
 			}
 
@@ -240,13 +248,40 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			}
 			se.doms.SetChangesetAccumulator(nil)
 
-			if !bytes.Equal(rh, header.Root.Bytes()) {
+			mismatch := !bytes.Equal(rh, header.Root.Bytes())
+			traceThisBlock := dbg.TraceBlock(blockNum)
+			capture := sdCtx.GetCapture(true)
+			if mismatch || traceThisBlock {
+				dumpFile := fmt.Sprintf("/tmp/trie_keys_serial_block_%d.log", blockNum)
+				if f, ferr := os.Create(dumpFile); ferr == nil {
+					fmt.Fprintf(f, "SERIAL block=%d computed=%x expected=%x txNum=%d updates=%d\n",
+						blockNum, rh, header.Root.Bytes(), inputTxNum-1, len(capture))
+					for _, line := range capture {
+						fmt.Fprintln(f, line)
+					}
+					f.Close()
+					fmt.Printf("SERIAL_TRIE_CAPTURE: block=%d dumped %d entries to %s\n", blockNum, len(capture), dumpFile)
+				}
+			}
+
+			if mismatch {
 				se.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", se.logPrefix, header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
 				return b.HeaderNoCopy(), rwTx, fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, blockNum)
 			}
 		}
 
 		if dbg.StopAfterBlock > 0 && blockNum == dbg.StopAfterBlock {
+			// Force a batch-boundary commit at the stop block so callers that
+			// want a reference trie dump for this exact block (e.g.
+			// ERIGON_TRACE_BLOCKS=<stop_block>) get it. Without this, the
+			// panic below fires before any batch-boundary compute path and
+			// no dump is emitted for the stop block.
+			if !dbg.DiscardCommitment() {
+				_, _, cerr := computeAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), rwTx, se.doms, se.cfg, execStage, false, se.logger, u)
+				if cerr != nil {
+					se.logger.Error(fmt.Sprintf("[%s] stop-boundary commit failed: %v", se.logPrefix, cerr))
+				}
+			}
 			panic(fmt.Sprintf("stopping: block %d complete", blockNum))
 			//return fmt.Errorf("stopping: block %d complete", blockNum)
 		}

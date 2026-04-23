@@ -1201,7 +1201,23 @@ func (c *BlockStateCache) Flush(domains *execctx.SharedDomains, roTx kv.Temporal
 		}
 	}
 
-	// Flush dirty storage — only write if value changed from committed.
+	// Flush dirty storage to sd.mem.
+	//
+	// We deliberately do NOT dedup against c.committedStorage here. That map
+	// is populated lazily on first read per key and never refreshed, so
+	// across multiple blocks sharing one cache the "committed" entry keeps
+	// reflecting the *pre-batch* value — not the post-last-flush value. When
+	// an earlier block flushes a new value to sd.mem and a later block
+	// writes back the original pre-batch value, the stale committed entry
+	// made Flush skip the write and sd.mem was left at the earlier block's
+	// value. This produced the trie-root mismatch at block 24839762: the
+	// EIP-7002 predeploy's slots 0x01/0x03 accrued value 0x01 from an
+	// earlier block's dequeue accounting, and the later block's clearing
+	// SSTORE was skipped because committed still said "nil".
+	//
+	// DomainPut/DomainDel already no-op when the write matches the current
+	// sd.mem value, so dropping the skip costs little. See
+	// TestBlockStateCacheFlushClearsAcrossBlocks for the regression test.
 	for addr, slots := range c.dirtyStorage {
 		addrVal := addr.Value()
 		for key := range slots {
@@ -1212,14 +1228,6 @@ func (c *BlockStateCache) Flush(domains *execctx.SharedDomains, roTx kv.Temporal
 			var val []byte
 			if addrSlots, ok := c.currentStorage[addr]; ok {
 				val = addrSlots[key]
-			}
-			// Skip if current value matches pre-block committed value.
-			if committedSlots, ok := c.committedStorage[addr]; ok {
-				if committedVal, ok := committedSlots[key]; ok {
-					if bytes.Equal(committedVal, val) {
-						continue
-					}
-				}
 			}
 			if len(val) == 0 {
 				if err := domains.DomainDel(kv.StorageDomain, roTx, composite, txNum, nil); err != nil {

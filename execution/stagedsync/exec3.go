@@ -913,10 +913,14 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 		return false, times, fmt.Errorf("compute commitment: %w", err)
 	}
 
-	// Dump trie ops for specific blocks (ERIGON_TRACE_BLOCKS) so we have
-	// a correct serial baseline to diff against parallel failures.
-	if dbg.TraceBlock(header.Number.Uint64()) {
-		capture := doms.GetCommitmentContext().GetCapture(false)
+	// Dump trie ops on root mismatch (always) or for specific blocks
+	// (ERIGON_TRACE_BLOCKS) so we have a correct baseline to diff against
+	// parallel failures. Non-deterministic mismatches may not reproduce on
+	// re-run, so evidence must be captured at the moment of fail.
+	mismatch := !bytes.Equal(computedRootHash, header.Root.Bytes())
+	traceThisBlock := dbg.TraceBlock(header.Number.Uint64())
+	capture := doms.GetCommitmentContext().GetCapture(true)
+	if mismatch || traceThisBlock {
 		dumpFile := fmt.Sprintf("/tmp/trie_keys_serial_block_%d.log", header.Number.Uint64())
 		if f, ferr := os.Create(dumpFile); ferr == nil {
 			fmt.Fprintf(f, "SERIAL block=%d computed=%x expected=%x txNum=%d updates=%d\n",
@@ -928,9 +932,8 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 			fmt.Printf("SERIAL_TRIE_CAPTURE: block=%d dumped %d entries to %s\n", header.Number.Uint64(), len(capture), dumpFile)
 		}
 	}
-	doms.GetCommitmentContext().SetCapture(nil)
 
-	if !bytes.Equal(computedRootHash, header.Root.Bytes()) {
+	if mismatch {
 		logger.Warn(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), computedRootHash, header.Root.Bytes(), header.Hash()))
 		err = handleIncorrectRootHashError(header.Number.Uint64(), header.Hash(), header.ParentHash, applyTx, cfg, e, logger, u)
 		return false, times, err
