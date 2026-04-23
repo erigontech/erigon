@@ -1980,7 +1980,9 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 		if anyHasData && firstInDB > step {
 			a.logger.Error("[snapshots] gap between snapshots and MDBX — refusing to build files",
 				"step", step, "firstInDB", firstInDB, "lastInDB", lastInDB,
-				"hint", "MDBX history starts above the next step to aggregate; building here would create empty step files and a merge would silently drop state. Remove state snapshots and re-sync to close the gap.")
+				"hint", "MDBX history starts above the next step to aggregate; building here would create empty step files and a merge would silently drop state. "+
+					"To recover, stop erigon and delete BOTH the state snapshots (e.g. `erigon snapshots reset`) AND the chaindata/ directory, then re-sync. "+
+					"Removing only the snapshots is not enough: an earlier build may have already populated chaindata with values read from a corrupt snapshot file.")
 			close(fin)
 			return
 		}
