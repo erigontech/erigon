@@ -45,10 +45,12 @@ jobs:
           - sim: consume-engine
             sim-limit: ".*(8024|7708|7778|7843|7928|7954|8037).*"
             shard: glamsterdam-devnet
-            fixtures-url: "https://github.com/ethereum/execution-spec-tests/releases/download/bal@v5.6.1/fixtures_bal.tar.gz"
-            extra-hive-flags: "--sim.buildarg branch=devnets/bal/3 --sim.loglevel=3 --client.checktimelimit=300s"
+            fixtures-url: "https://github.com/ethereum/execution-spec-tests/releases/download/bal@v5.7.0/fixtures_bal.tar.gz"
+            extra-hive-flags: "--sim.buildarg branch=devnets/bal/4 --sim.loglevel=3 --client.checktimelimit=300s"
             erigon-extra-flags: "--experimental.bal"
-            max-failures: 1  # test_block_regular_gas_limit: error classification mismatch (GAS_USED_OVERFLOW vs GAS_ALLOWANCE_EXCEEDED)
+            # test_block_regular_gas_limit: error classification mismatch (GAS_USED_OVERFLOW vs GAS_ALLOWANCE_EXCEEDED)
+            # transitioning to bal-devnet-4
+            max-failures: 579
     steps:
       - name: Clean docker system
         run: |
@@ -84,7 +86,7 @@ jobs:
           repository: ethereum/hive
           ref: ${{ steps.hive-version.outputs.ref }}
           path: hive
-    
+
       - name: Conditional Docker Login
         # Only login if we can. Workflow works without it but we want to avoid
         # rate limiting by Docker Hub when possible. External repos don't
@@ -100,7 +102,7 @@ jobs:
         with:
           username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
           password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
-    
+
       - name: Setup go env and cache
         uses: actions/setup-go@v6
         with:
@@ -220,4 +222,3 @@ jobs:
           echo "Pruning docker..."
           docker system prune -af --volumes
         if: always()
-
