@@ -1,3 +1,5 @@
+//go:generate bumper codegen --file versions.yaml --out version_schema_gen.go
+
 package statecfg
 
 import (

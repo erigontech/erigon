@@ -59,6 +59,13 @@ func (c SamplerCfg) NewSampler() *Sampler {
 	}
 }
 
+// NewWindowSampler returns a Sampler whose seed is derived by XORing offset into
+// c.Seed.  Use this when spawning one sampler per window/shard so that each shard
+// samples different relative positions rather than all selecting identical offsets.
+func (c SamplerCfg) NewWindowSampler(offset uint64) *Sampler {
+	return SamplerCfg{Seed: c.Seed ^ int64(offset), SampleRatio: c.SampleRatio}.NewSampler()
+}
+
 // validateSampleRatio returns an error if sampleRatio is outside the valid range (0, 1].
 func validateSampleRatio(sampleRatio float64) error {
 	if sampleRatio <= 0 || sampleRatio > 1 {
