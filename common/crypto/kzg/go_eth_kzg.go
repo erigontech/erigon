@@ -93,17 +93,16 @@ func VerifyCells(cells []goethkzg.Cell, commitments []goethkzg.KZGCommitment, pr
 // ComputeCells computes the cells from the given blobs.
 func ComputeCells(blobs []goethkzg.Blob) ([]goethkzg.Cell, error) {
 	InitKZGCtx()
-	cells := make([]goethkzg.Cell, 0, goethkzg.CellsPerExtBlob*len(blobs))
+	cells := make([]goethkzg.Cell, goethkzg.CellsPerExtBlob*len(blobs))
 
 	for i := range blobs {
 		cellsI, err := gokzgCtx.ComputeCells((*goethkzg.Blob)(&blobs[i]), 2)
 		if err != nil {
 			return []goethkzg.Cell{}, err
 		}
-		for _, c := range cellsI {
-			if c != nil {
-				cells = append(cells, goethkzg.Cell(*c))
-			}
+		base := i * goethkzg.CellsPerExtBlob
+		for j, c := range cellsI {
+			cells[base+j] = *c
 		}
 	}
 	return cells, nil
@@ -139,30 +138,30 @@ func validateCellIndices(cells []goethkzg.Cell, cellIndices []uint64) error {
 func gokzgVerifyCells(cells []goethkzg.Cell, commitments []goethkzg.KZGCommitment, cellProofs []goethkzg.KZGProof, cellIndices []uint64) error {
 	InitKZGCtx()
 
-	var (
-		proofs   = make([]goethkzg.KZGProof, len(cellProofs))
-		commits  = make([]goethkzg.KZGCommitment, 0, len(cellProofs))
-		indices  = make([]uint64, 0, len(cellProofs))
-		kzgcells = make([]*goethkzg.Cell, 0, len(cellProofs))
-	)
-	// Copy over the cell proofs and cells
-	for i := range cellProofs {
-		proofs[i] = goethkzg.KZGProof(cellProofs[i])
-		gc := goethkzg.Cell(cells[i])
-		kzgcells = append(kzgcells, &gc)
-	}
-	cellCounts := len(cellProofs) / len(commitments)
-	// Blow up the commitments to be the same length as the proofs
-	for _, commitment := range commitments {
-		for j := 0; j < cellCounts; j++ {
-			commits = append(commits, goethkzg.KZGCommitment(commitment))
-		}
-	}
-	for j := 0; j < len(commitments); j++ {
-		indices = append(indices, cellIndices...)
+	n := len(cellProofs)
+	cellsPerCommit := n / len(commitments)
+
+	commits := make([]goethkzg.KZGCommitment, n)
+	indices := make([]uint64, n)
+	kzgcells := make([]*goethkzg.Cell, n)
+
+	for i := range n {
+		kzgcells[i] = &cells[i]
 	}
 
-	return gokzgCtx.VerifyCellKZGProofBatch(commits, indices, kzgcells, proofs)
+	// Expand commitments: each repeated cellsPerCommit times.
+	off := 0
+	for i := range commitments {
+		for range cellsPerCommit {
+			commits[off] = commitments[i]
+			off++
+		}
+	}
+
+	for i := range len(commitments) {
+		copy(indices[i*len(cellIndices):], cellIndices)
+	}
+	return gokzgCtx.VerifyCellKZGProofBatch(commits, indices, kzgcells, cellProofs)
 }
 
 // gokzgRecoverBlobs recovers blobs from cells and cell indices.
@@ -170,30 +169,23 @@ func gokzgRecoverBlobs(cells []goethkzg.Cell, cellIndices []uint64) ([]goethkzg.
 	InitKZGCtx()
 
 	blobCount := len(cells) / len(cellIndices)
-	blobs := make([]goethkzg.Blob, 0, blobCount)
+	blobs := make([]goethkzg.Blob, blobCount)
+	kzgcells := make([]*goethkzg.Cell, len(cellIndices))
 
-	offset := 0
-	for range blobCount {
-		kzgcells := make([]*goethkzg.Cell, 0, len(cellIndices))
-
-		for _, cell := range cells[offset : offset+len(cellIndices)] {
-			gc := goethkzg.Cell(cell)
-			kzgcells = append(kzgcells, &gc)
+	for i := range blobCount {
+		offset := i * len(cellIndices)
+		for j := range len(cellIndices) {
+			kzgcells[j] = &cells[offset+j]
 		}
 
 		extCells, err := gokzgCtx.RecoverCells(cellIndices, kzgcells, 2)
 		if err != nil {
-			return []goethkzg.Blob{}, err
+			return nil, err
 		}
 
-		var blob goethkzg.Blob
-		for i, cell := range extCells[:DataPerBlob] {
-			copy(blob[i*len(cell):], cell[:])
+		for j, cell := range extCells[:DataPerBlob] {
+			copy(blobs[i][j*len(cell):], cell[:])
 		}
-		blobs = append(blobs, blob)
-
-		offset = offset + len(cellIndices)
 	}
-
 	return blobs, nil
 }
