@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
-	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc"
 )
@@ -76,9 +75,8 @@ func newSszRestTestSetup(t *testing.T) *sszRestTestSetup {
 
 	mockSentry := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
 
-	executionRpc := direct.NewExecutionClientDirect(mockSentry.ExecModule)
 	maxReorgDepth := ethconfig.Defaults.MaxReorgDepth
-	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, true, nil, ethconfig.Defaults.FcuTimeout, maxReorgDepth)
+	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, mockSentry.ExecModule, nil, false, false, false, true, nil, ethconfig.Defaults.FcuTimeout, maxReorgDepth)
 
 	port := getFreePort(t)
 	engineServer.httpConfig = &httpcfg.HttpCfg{
@@ -162,7 +160,6 @@ func (s *sszRestTestSetup) doRequestWithToken(t *testing.T, path string, body []
 
 	respBody, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
-	resp.Body.Close()
 
 	return resp, respBody
 }
@@ -198,6 +195,7 @@ func TestSszRestJWTAuth(t *testing.T) {
 	// Request with valid token should succeed
 	body := engine_types.EncodeCapabilities([]string{"engine_newPayloadV4"})
 	resp3, _ := setup.doRequest(t, "/engine/v1/exchange_capabilities", body)
+	defer resp3.Body.Close()
 	req.Equal(http.StatusOK, resp3.StatusCode)
 }
 
@@ -215,6 +213,7 @@ func TestSszRestExchangeCapabilities(t *testing.T) {
 
 	body := engine_types.EncodeCapabilities(clCapabilities)
 	resp, respBody := setup.doRequest(t, "/engine/v1/exchange_capabilities", body)
+	defer resp.Body.Close()
 	req.Equal(http.StatusOK, resp.StatusCode)
 	req.Equal("application/octet-stream", resp.Header.Get("Content-Type"))
 
@@ -241,6 +240,7 @@ func TestSszRestGetClientVersion(t *testing.T) {
 
 	body := engine_types.EncodeClientVersion(callerVersion)
 	resp, respBody := setup.doRequest(t, "/engine/v1/get_client_version", body)
+	defer resp.Body.Close()
 	req.Equal(http.StatusOK, resp.StatusCode)
 
 	versions, err := engine_types.DecodeClientVersions(respBody)
@@ -259,6 +259,7 @@ func TestSszRestGetBlobsV1(t *testing.T) {
 	hashes := []common.Hash{}
 	body := engine_types.EncodeGetBlobsRequest(hashes)
 	resp, _ := setup.doRequest(t, "/engine/v1/get_blobs", body)
+	defer resp.Body.Close()
 	// The test setup doesn't have a fully initialized txpool/blockDownloader,
 	// so the handler may panic (recovered) or return an engine error.
 	// We verify the SSZ-REST transport layer handled it gracefully.
@@ -272,6 +273,7 @@ func TestSszRestNotFoundEndpoint(t *testing.T) {
 	req := require.New(t)
 
 	resp, _ := setup.doRequest(t, "/engine/v99/nonexistent_method", nil)
+	defer resp.Body.Close()
 	// Go 1.22+ mux returns 404 for unmatched routes, or 405 for wrong methods
 	req.True(resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed)
 }
@@ -284,6 +286,7 @@ func TestSszRestErrorResponseFormat(t *testing.T) {
 
 	// Send malformed body to get_blobs
 	resp, respBody := setup.doRequest(t, "/engine/v1/get_blobs", []byte{0x01})
+	defer resp.Body.Close()
 	req.Equal(http.StatusBadRequest, resp.StatusCode)
 	req.Equal("application/json", resp.Header.Get("Content-Type"))
 
@@ -326,6 +329,7 @@ func TestSszRestForkchoiceUpdatedV3(t *testing.T) {
 
 	// ForkchoiceUpdatedV3 with no payload attributes
 	resp, respBody := setup.doRequest(t, "/engine/v3/forkchoice_updated", body)
+	defer resp.Body.Close()
 	// The test setup doesn't have a fully initialized blockDownloader,
 	// so the engine may panic (recovered by SSZ-REST middleware) or return an error.
 	// We verify the SSZ-REST transport layer handled it gracefully without crashing.
@@ -347,6 +351,7 @@ func TestSszRestForkchoiceUpdatedShortBody(t *testing.T) {
 
 	// Send a body that's too short for ForkchoiceState
 	resp, respBody := setup.doRequest(t, "/engine/v3/forkchoice_updated", make([]byte, 50))
+	defer resp.Body.Close()
 	req.Equal(http.StatusBadRequest, resp.StatusCode)
 
 	var errResp struct {
@@ -366,6 +371,7 @@ func TestSszRestGetPayloadWrongBodySize(t *testing.T) {
 
 	// Send wrong-sized body (not 8 bytes)
 	resp, respBody := setup.doRequest(t, "/engine/v4/get_payload", make([]byte, 10))
+	defer resp.Body.Close()
 	req.Equal(http.StatusBadRequest, resp.StatusCode)
 
 	var errResp struct {
@@ -385,6 +391,7 @@ func TestSszRestNewPayloadV1EmptyBody(t *testing.T) {
 
 	// Empty body should return 400
 	resp, respBody := setup.doRequest(t, "/engine/v1/new_payload", nil)
+	defer resp.Body.Close()
 	req.Equal(http.StatusBadRequest, resp.StatusCode)
 
 	var errResp struct {
@@ -404,6 +411,7 @@ func TestSszRestNewPayloadV1MalformedBody(t *testing.T) {
 
 	// Body too short to be a valid ExecutionPayload SSZ
 	resp, respBody := setup.doRequest(t, "/engine/v1/new_payload", make([]byte, 100))
+	defer resp.Body.Close()
 	req.Equal(http.StatusBadRequest, resp.StatusCode)
 
 	var errResp struct {
@@ -441,6 +449,7 @@ func TestSszRestNewPayloadV1ValidSSZ(t *testing.T) {
 
 	body := engine_types.EncodeExecutionPayloadSSZ(ep, 1)
 	resp, respBody := setup.doRequest(t, "/engine/v1/new_payload", body)
+	defer resp.Body.Close()
 
 	// The engine may return a real PayloadStatus or an error.
 	// With the mock setup, it might fail because engine consumption is not enabled.
@@ -470,6 +479,7 @@ func TestSszRestGetPayloadV1ValidRequest(t *testing.T) {
 	payloadId[7] = 0x01 // payload ID = 1
 
 	resp, respBody := setup.doRequest(t, "/engine/v1/get_payload", payloadId)
+	defer resp.Body.Close()
 
 	// The engine will likely return an error (unknown payload ID) or internal error
 	// because we haven't built a payload. The important thing is the handler doesn't
@@ -498,6 +508,7 @@ func TestSszRestGetPayloadV4ValidRequest(t *testing.T) {
 	payloadId[7] = 0x01
 
 	resp, respBody := setup.doRequest(t, "/engine/v4/get_payload", payloadId)
+	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusOK {
 		req.Equal("application/octet-stream", resp.Header.Get("Content-Type"))
@@ -510,4 +521,3 @@ func TestSszRestGetPayloadV4ValidRequest(t *testing.T) {
 		req.NotContains(errResp.Message, "SSZ ExecutionPayload encoding")
 	}
 }
-

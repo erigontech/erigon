@@ -150,7 +150,7 @@ func (p *PayloadStatusSSZ) EncodingSizeSSZ() int {
 	return size
 }
 
-func (p *PayloadStatusSSZ) Static() bool          { return false }
+func (p *PayloadStatusSSZ) Static() bool             { return false }
 func (p *PayloadStatusSSZ) Clone() clonable.Clonable { return &PayloadStatusSSZ{} }
 
 // ToPayloadStatus converts SSZ format to the standard JSON-RPC PayloadStatus.
@@ -206,8 +206,8 @@ func (f *ForkchoiceStateSSZ) DecodeSSZ(buf []byte, version int) error {
 	return ssz2.UnmarshalSSZ(buf, version, f.HeadBlockHash[:], f.SafeBlockHash[:], f.FinalizedBlockHash[:])
 }
 
-func (f *ForkchoiceStateSSZ) EncodingSizeSSZ() int   { return 96 }
-func (f *ForkchoiceStateSSZ) Static() bool            { return true }
+func (f *ForkchoiceStateSSZ) EncodingSizeSSZ() int     { return 96 }
+func (f *ForkchoiceStateSSZ) Static() bool             { return true }
 func (f *ForkchoiceStateSSZ) Clone() clonable.Clonable { return &ForkchoiceStateSSZ{} }
 
 func EncodeForkchoiceState(fcs *ForkChoiceState) []byte {
@@ -299,8 +299,10 @@ func (r *ForkchoiceUpdatedResponseSSZ) EncodingSizeSSZ() int {
 	return size
 }
 
-func (r *ForkchoiceUpdatedResponseSSZ) Static() bool            { return false }
-func (r *ForkchoiceUpdatedResponseSSZ) Clone() clonable.Clonable { return &ForkchoiceUpdatedResponseSSZ{PayloadStatus: &PayloadStatusSSZ{}} }
+func (r *ForkchoiceUpdatedResponseSSZ) Static() bool { return false }
+func (r *ForkchoiceUpdatedResponseSSZ) Clone() clonable.Clonable {
+	return &ForkchoiceUpdatedResponseSSZ{PayloadStatus: &PayloadStatusSSZ{}}
+}
 
 func EncodeForkchoiceUpdatedResponse(resp *ForkChoiceUpdatedResponse) []byte {
 	ps := PayloadStatusToSSZ(resp.PayloadStatus)
@@ -330,11 +332,14 @@ func DecodeForkchoiceUpdatedResponse(buf []byte) (*ForkchoiceUpdatedResponseSSZ,
 // ByteListSSZ wraps a byte slice for use in SSZ schemas as a variable-length field.
 type ByteListSSZ struct{ data []byte }
 
-func (b *ByteListSSZ) EncodeSSZ(buf []byte) ([]byte, error)  { return append(buf, b.data...), nil }
-func (b *ByteListSSZ) DecodeSSZ(buf []byte, _ int) error      { b.data = append([]byte(nil), buf...); return nil }
-func (b *ByteListSSZ) EncodingSizeSSZ() int                    { return len(b.data) }
-func (b *ByteListSSZ) Static() bool                            { return false }
-func (b *ByteListSSZ) Clone() clonable.Clonable                { return &ByteListSSZ{} }
+func (b *ByteListSSZ) EncodeSSZ(buf []byte) ([]byte, error) { return append(buf, b.data...), nil }
+func (b *ByteListSSZ) DecodeSSZ(buf []byte, _ int) error {
+	b.data = append([]byte(nil), buf...)
+	return nil
+}
+func (b *ByteListSSZ) EncodingSizeSSZ() int     { return len(b.data) }
+func (b *ByteListSSZ) Static() bool             { return false }
+func (b *ByteListSSZ) Clone() clonable.Clonable { return &ByteListSSZ{} }
 
 // TransactionListSSZ wraps a list of variable-length transactions for SSZ schemas.
 type TransactionListSSZ struct{ txs [][]byte }
@@ -437,8 +442,8 @@ func (w *WithdrawalSSZ) DecodeSSZ(buf []byte, _ int) error {
 	return nil
 }
 
-func (w *WithdrawalSSZ) EncodingSizeSSZ() int   { return 44 }
-func (w *WithdrawalSSZ) Static() bool            { return true }
+func (w *WithdrawalSSZ) EncodingSizeSSZ() int     { return 44 }
+func (w *WithdrawalSSZ) Static() bool             { return true }
 func (w *WithdrawalSSZ) Clone() clonable.Clonable { return &WithdrawalSSZ{} }
 
 func (w *WithdrawalSSZ) ToExecution() *types.Withdrawal {
@@ -482,8 +487,8 @@ func (l *WithdrawalListSSZ) DecodeSSZ(buf []byte, _ int) error {
 	return nil
 }
 
-func (l *WithdrawalListSSZ) EncodingSizeSSZ() int   { return len(l.withdrawals) * 44 }
-func (l *WithdrawalListSSZ) Static() bool            { return false }
+func (l *WithdrawalListSSZ) EncodingSizeSSZ() int     { return len(l.withdrawals) * 44 }
+func (l *WithdrawalListSSZ) Static() bool             { return false }
 func (l *WithdrawalListSSZ) Clone() clonable.Clonable { return &WithdrawalListSSZ{} }
 
 // HashListSSZ is a list of 32-byte hashes for SSZ schemas.
@@ -508,8 +513,8 @@ func (h *HashListSSZ) DecodeSSZ(buf []byte, _ int) error {
 	return nil
 }
 
-func (h *HashListSSZ) EncodingSizeSSZ() int   { return len(h.hashes) * 32 }
-func (h *HashListSSZ) Static() bool            { return false }
+func (h *HashListSSZ) EncodingSizeSSZ() int     { return len(h.hashes) * 32 }
+func (h *HashListSSZ) Static() bool             { return false }
 func (h *HashListSSZ) Clone() clonable.Clonable { return &HashListSSZ{} }
 
 // ConcatBytesListSSZ wraps a list of fixed-size byte slices (commitments, proofs, blobs).
@@ -553,8 +558,10 @@ func (c *ConcatBytesListSSZ) EncodingSizeSSZ() int {
 	return size
 }
 
-func (c *ConcatBytesListSSZ) Static() bool             { return false }
-func (c *ConcatBytesListSSZ) Clone() clonable.Clonable { return &ConcatBytesListSSZ{itemSize: c.itemSize} }
+func (c *ConcatBytesListSSZ) Static() bool { return false }
+func (c *ConcatBytesListSSZ) Clone() clonable.Clonable {
+	return &ConcatBytesListSSZ{itemSize: c.itemSize}
+}
 
 // ---------------------------------------------------------------
 // ExchangeCapabilities SSZ
@@ -710,7 +717,9 @@ func (cv *ClientVersionSSZ) DecodeSSZ(buf []byte, _ int) error {
 	return nil
 }
 
-func (cv *ClientVersionSSZ) EncodingSizeSSZ() int { return 16 + len(cv.Code) + len(cv.Name) + len(cv.Version) }
+func (cv *ClientVersionSSZ) EncodingSizeSSZ() int {
+	return 16 + len(cv.Code) + len(cv.Name) + len(cv.Version)
+}
 func (cv *ClientVersionSSZ) Static() bool             { return false }
 func (cv *ClientVersionSSZ) Clone() clonable.Clonable { return &ClientVersionSSZ{} }
 
@@ -872,7 +881,7 @@ func (g *GetBlobsRequestSSZ) DecodeSSZ(buf []byte, version int) error {
 	return ssz2.UnmarshalSSZ(buf, version, g.VersionedHashes)
 }
 
-func (g *GetBlobsRequestSSZ) EncodingSizeSSZ() int { return 4 + g.VersionedHashes.EncodingSizeSSZ() }
+func (g *GetBlobsRequestSSZ) EncodingSizeSSZ() int     { return 4 + g.VersionedHashes.EncodingSizeSSZ() }
 func (g *GetBlobsRequestSSZ) Static() bool             { return false }
 func (g *GetBlobsRequestSSZ) Clone() clonable.Clonable { return &GetBlobsRequestSSZ{} }
 
@@ -911,11 +920,11 @@ type ExecutionPayloadSSZ struct {
 	BaseFeePerGas   [32]byte // uint256 LE
 	BlockHash       common.Hash
 	Transactions    *TransactionListSSZ
-	Withdrawals     *WithdrawalListSSZ  // v2+
-	BlobGasUsed     uint64              // v3+
-	ExcessBlobGas   uint64              // v3+
-	SlotNumber      uint64              // v4+
-	BlockAccessList *ByteListSSZ        // v4+
+	Withdrawals     *WithdrawalListSSZ // v2+
+	BlobGasUsed     uint64             // v3+
+	ExcessBlobGas   uint64             // v3+
+	SlotNumber      uint64             // v4+
+	BlockAccessList *ByteListSSZ       // v4+
 	version         int
 }
 
@@ -1426,7 +1435,10 @@ func (g *GetPayloadResponseSSZType) EncodeSSZ(buf []byte) ([]byte, error) {
 	if g.version == 1 {
 		return g.Payload.EncodeSSZ(buf)
 	}
-	overrideByte := commonssz.BoolSSZ(g.ShouldOverrideBuilder)
+	var overrideByte byte
+	if g.ShouldOverrideBuilder {
+		overrideByte = 1
+	}
 	return ssz2.MarshalSSZ(buf,
 		g.Payload, g.BlockValue[:], g.BlobsBundle, []byte{overrideByte}, g.ExecutionRequests,
 	)
