@@ -351,10 +351,11 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			erigonLog := &types.ErigonLog{}
 			erigonLog.BlockNumber = hexutil.Uint64(blockNum)
 			erigonLog.BlockHash = blockHash
-			if int(log.TxIndex) == len(body.Transactions) {
+			txi := int(log.TxIndex)
+			if txi == len(body.Transactions) {
 				erigonLog.TxHash = bortypes.ComputeBorTxHash(blockNum, blockHash)
 			} else {
-				erigonLog.TxHash = body.Transactions[log.TxIndex].Hash()
+				erigonLog.TxHash = body.Transactions[txi].Hash()
 			}
 			erigonLog.Timestamp = hexutil.Uint64(timestamp)
 			erigonLog.Address = log.Address
