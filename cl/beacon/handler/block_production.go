@@ -675,7 +675,7 @@ func (a *ApiHandler) produceBeaconBody(
 					return nil, 0, fmt.Errorf("produceBeaconBody: head is FULL but envelope/requests missing for root %x", baseBlockRoot)
 				}
 				stfMachine := &eth2.Impl{}
-				if err := stfMachine.ApplyParentExecutionPayload(stateCopy, parentBid, envelope.Message.ExecutionRequests); err != nil {
+				if err := stfMachine.ApplyParentExecutionPayload(stateCopy, envelope.Message.ExecutionRequests); err != nil {
 					return nil, 0, fmt.Errorf("produceBeaconBody: failed to apply parent execution payload: %w", err)
 				}
 				gloasWithdrawalsState = stateCopy
