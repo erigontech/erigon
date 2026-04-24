@@ -283,23 +283,21 @@ func (t *prestateTracer) processDiffState() {
 
 		newBalance, _ := t.env.IntraBlockState.GetBalance(addr)
 		newNonce, _ := t.env.IntraBlockState.GetNonce(addr)
-		newCode, _ := t.env.IntraBlockState.GetCode(addr)
-		newCodeHash := empty.CodeHash
-		if len(newCode) > 0 {
-			newCodeHash = crypto.HashData(newCode)
-		}
+		// GetCodeHash returns common.Hash{} for deleted accounts; GetCode cannot make
+		// that distinction (empty bytes for both deleted and codeless accounts).
+		codeHash, _ := t.env.IntraBlockState.GetCodeHash(addr)
+		newCodeHash := codeHash.Value()
 
-		if newBalance.ToBig().Cmp(t.pre[addr].Balance) != 0 {
+		newBalanceBig := newBalance.ToBig()
+		if newBalanceBig.Cmp(t.pre[addr].Balance) != 0 {
 			modified = true
-			postAccount.Balance = newBalance.ToBig()
+			postAccount.Balance = newBalanceBig
 		}
 		if newNonce != t.pre[addr].Nonce {
 			modified = true
 			postAccount.Nonce = newNonce
 		}
 
-		// Empty code hashes are excluded from the prestate, so default
-		// to EmptyCodeHash to match what GetCodeHash returns for codeless accounts.
 		prevCodeHash := empty.CodeHash
 		if t.pre[addr].CodeHash != nil {
 			prevCodeHash = *t.pre[addr].CodeHash
@@ -311,6 +309,7 @@ func (t *prestateTracer) processDiffState() {
 		}
 
 		if !t.config.DisableCode {
+			newCode, _ := t.env.IntraBlockState.GetCode(addr)
 			var prevCode []byte
 			if t.pre[addr].Code != nil {
 				prevCode = *t.pre[addr].Code

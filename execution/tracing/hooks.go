@@ -48,6 +48,7 @@ type IntraBlockState interface {
 	GetBalance(accounts.Address) (uint256.Int, error)
 	GetNonce(accounts.Address) (uint64, error)
 	GetCode(accounts.Address) ([]byte, error)
+	GetCodeHash(accounts.Address) (accounts.CodeHash, error)
 	GetState(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error)
 	Exist(accounts.Address) (bool, error)
 	GetRefund() uint64
