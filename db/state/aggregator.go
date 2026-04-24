@@ -697,7 +697,7 @@ func (a *Aggregator) LS() {
 				if item.decompressor == nil {
 					continue
 				}
-				a.logger.Info("[agg] ", "f", item.decompressor.FileName(), "words", item.decompressor.Count())
+				a.logger.Info("[agg] ", "f", item.decompressor.FileName(), "words", item.decompressor.Count(), "dict", common.ByteCount(item.decompressor.SerializedDictSize()+item.decompressor.SerializedLenSize()))
 			}
 			return true
 		})

@@ -111,12 +111,12 @@ func (s *CaplinSnapshots) LS() {
 
 	if view.BeaconBlockRotx != nil {
 		for _, seg := range view.BeaconBlockRotx.Segments {
-			log.Info("[agg] ", "f", seg.Src().Decompressor.FileName(), "words", seg.Src().Decompressor.Count())
+			log.Info("[agg] ", "f", seg.Src().Decompressor.FileName(), "words", seg.Src().Decompressor.Count(), "dict", common.ByteCount(seg.Src().Decompressor.SerializedDictSize()+seg.Src().Decompressor.SerializedLenSize()))
 		}
 	}
 	if view.BlobSidecarRotx != nil {
 		for _, seg := range view.BlobSidecarRotx.Segments {
-			log.Info("[agg] ", "f", seg.Src().Decompressor.FileName(), "words", seg.Src().Decompressor.Count())
+			log.Info("[agg] ", "f", seg.Src().Decompressor.FileName(), "words", seg.Src().Decompressor.Count(), "dict", common.ByteCount(seg.Src().Decompressor.SerializedDictSize()+seg.Src().Decompressor.SerializedLenSize()))
 		}
 	}
 }
