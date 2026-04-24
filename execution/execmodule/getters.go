@@ -62,7 +62,7 @@ func (e *ExecModule) readPayloadBodyBAL(ctx context.Context, tx kv.Tx, hash comm
 	// header without storing the canonical empty BAL bytes (0xc0). If we see that
 	// exact commitment, recover the expected sidecar bytes on read so empty BALs
 	// round-trip distinctly from nil/pruned/pre-Amsterdam payloads.
-	header, err := e.blockReader.Header(ctx, tx, hash, number)
+	header, err := e.getHeader(ctx, tx, hash, number)
 	if err != nil {
 		return nil, err
 	}

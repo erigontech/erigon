@@ -359,7 +359,8 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("encode empty blockAccessList: %v", err)}
 			}
 			blockAccessList = nil
-			header.BlockAccessListHash = &empty.BlockAccessListHash
+			hash := empty.BlockAccessListHash
+			header.BlockAccessListHash = &hash
 		} else {
 			blockAccessList, err = types.DecodeBlockAccessListBytes(req.BlockAccessList)
 			if err != nil {
