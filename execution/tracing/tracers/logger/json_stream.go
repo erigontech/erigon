@@ -215,7 +215,7 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 	if l.cfg.EnableReturnData && len(rData) > 0 {
 		l.stream.WriteMore()
 		l.stream.WriteObjectField("returnData")
-		l.stream.WriteString(l.hexWithPrefix(rData))
+		l.stream.WriteString("0x" + hex.EncodeToString(rData))
 	}
 	if outputStorage {
 		l.stream.WriteMore()
