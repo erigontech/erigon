@@ -1,0 +1,10 @@
+[
+  {
+    "number": 20779,
+    "url": "https://github.com/erigontech/erigon/pull/20779",
+    "title": "[SharovBot] execution/types: fix EEST hive receipt hash regression",
+    "branch": "fix/eest-receipt-hash-regression",
+    "base": "release/3.4",
+    "status": "open"
+  }
+]
