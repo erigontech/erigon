@@ -31,34 +31,34 @@ before running a query.
 
 ### `measure` — before/after delta
 
+Single before/after snapshot pair. No `--interval` flag.
+
 ```bash
-# Launch a command and report pages it loads:
+# Launch a command — drops page cache first for a clean baseline (Linux, root):
 pgwatch measure --cmd "erigon-tool dump-state --block 21000000" /data/state.kv
 
-# Drop page cache first (Linux, root required) for a clean baseline:
-pgwatch measure --cmd "..." /data/state.kv          # drops cache by default
-pgwatch measure --cmd "..." --no-drop /data/state.kv  # skip drop (production safe)
+# Skip cache drop (production safe, macOS, or no root):
+pgwatch measure --cmd "..." --no-drop /data/state.kv
 
-# Attach to an already-running process:
+# Attach to an already-running process (cache drop skipped automatically):
 pgwatch measure --pid 12345 /data/state.kv
 ```
 
-Reports the set of pages newly loaded during the command. With `--pid`, cache
-drop is skipped automatically — you are observing a live process.
-
 ### `watch` — temporal sampling
 
+Same as `measure` but polls mincore every `--interval` and adds a temporal
+phase breakdown showing which clusters lit up at which point in time.
+`--interval` is a `watch`-only flag — `measure` does not have it.
+
 ```bash
-# Launch a command and sample every 50ms:
-pgwatch watch --cmd "..." --interval 50ms /data/state.kv
+# Launch a command, sample every 50ms (default):
+pgwatch watch --cmd "..." /data/state.kv
+pgwatch watch --cmd "..." --interval 100ms /data/state.kv
 
 # Attach to a running process (Ctrl-C to stop):
 pgwatch watch --pid $(pgrep erigon) /data/state.kv
 pgwatch watch --pid $(pgrep erigon) --interval 100ms /data/a.kv /data/b.kv
 ```
-
-Same as `measure` but takes mincore snapshots throughout execution and reports
-temporal phases — which clusters lit up at which point in time.
 
 ### `diff` — compare two snapshots *(Phase 2, not yet implemented)*
 

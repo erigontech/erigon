@@ -20,12 +20,16 @@ make pgwatch
 Commands:
 
 ```
-pgwatch snapshot <file>...                          # current page-cache state
-pgwatch measure --cmd "<shell>" [--no-drop] <file>... # drop cache, run command, report delta
-pgwatch watch   --cmd "<shell>" --interval 50ms <file>... # temporal snapshot during command
+pgwatch snapshot <file>...                                    # current page-cache state
+pgwatch measure (--cmd "<shell>" | --pid <pid>) [--no-drop] <file>...  # before/after delta
+pgwatch watch   (--cmd "<shell>" | --pid <pid>) [--interval 50ms] <file>...  # temporal sampling
 ```
 
-`--no-drop` is required for production systems (no root needed, observational only).
+Key distinction:
+- `measure` — single before/after snapshot pair. No `--interval`. Use when you want a clean delta.
+- `watch` — polls mincore every `--interval` throughout execution and adds temporal phase breakdown.
+- `--pid` attaches to an already-running process (no cache drop). `--cmd` launches a new one.
+- `--no-drop` skips the cache flush on `measure --cmd` (always implied with `--pid`).
 
 ## Workflow
 
@@ -38,16 +42,27 @@ pgwatch watch   --cmd "<shell>" --interval 50ms <file>... # temporal snapshot du
 
 ### Step 2: Measure
 
-Run `pgwatch measure` (or `watch` for temporal detail):
+Choose based on what you have:
 
 ```bash
+# You control the command — clean baseline (drops cache, needs root on Linux):
 ./build/bin/pgwatch measure --cmd "<query-command>" /path/to/db.dat
+
+# Production system or macOS — skip cache drop:
+./build/bin/pgwatch measure --cmd "<query-command>" --no-drop /path/to/db.dat
+
+# Attach to an already-running process (Ctrl-C to stop):
+./build/bin/pgwatch measure --pid <pid> /path/to/db.dat
+
+# Want temporal phase breakdown too? Use watch instead of measure:
+./build/bin/pgwatch watch --pid <pid> --interval 50ms /path/to/db.dat
+./build/bin/pgwatch watch --cmd "<query-command>" /path/to/db.dat
 ```
 
-For MDBX domain files (Erigon), typical targets:
+For Erigon domain snapshot files, typical targets:
 ```
-<datadir>/snapshots/domain/accounts.0-*.kv
-<datadir>/snapshots/domain/storage.0-*.kv
+<datadir>/snapshots/domain/v2.0-accounts.*.kv
+<datadir>/snapshots/domain/v2.0-storage.*.kv
 ```
 
 ### Step 3: Read the report
