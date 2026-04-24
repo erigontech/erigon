@@ -669,6 +669,7 @@ func (a *Aggregator) Files() []string {
 	return ac.AllFiles().Fullpaths()
 }
 func (a *Aggregator) LS() {
+	var totalWords, totalDict, totalDictMem uint64
 	doLS := func(dirtyFiles *btree.BTreeG[*FilesItem]) {
 		dirtyFiles.Walk(func(items []*FilesItem) bool {
 			for _, item := range items {
@@ -676,6 +677,9 @@ func (a *Aggregator) LS() {
 					continue
 				}
 				a.logger.Info("[agg] ", "f", item.decompressor.FileName(), "words", item.decompressor.Count(), "dict", common.ByteCount(item.decompressor.SerializedTotalDictSize()), "dictMem", common.ByteCount(item.decompressor.DictMemSize()))
+				totalWords += uint64(item.decompressor.Count())
+				totalDict += item.decompressor.SerializedTotalDictSize()
+				totalDictMem += item.decompressor.DictMemSize()
 			}
 			return true
 		})
@@ -691,6 +695,7 @@ func (a *Aggregator) LS() {
 	for _, d := range a.iis {
 		doLS(d.dirtyFiles)
 	}
+	a.logger.Info("[agg] total", "words", totalWords, "dict", common.ByteCount(totalDict), "dictMem", common.ByteCount(totalDictMem))
 }
 
 func (a *Aggregator) WaitForBuildAndMerge(ctx context.Context) chan struct{} {
