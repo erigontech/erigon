@@ -32,11 +32,8 @@ func init() {
 }
 
 func runMeasure(cmd *cobra.Command, args []string) error {
-	if measureFlags.cmd == "" && measureFlags.pid == 0 {
-		return fmt.Errorf("one of --cmd or --pid is required")
-	}
-	if measureFlags.cmd != "" && measureFlags.pid != 0 {
-		return fmt.Errorf("--cmd and --pid are mutually exclusive")
+	if err := validateCmdPid(measureFlags.cmd, measureFlags.pid); err != nil {
+		return err
 	}
 
 	// Drop caches only when launching our own command and --no-drop is not set.
@@ -46,18 +43,9 @@ func runMeasure(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Snapshot before.
-	before := make([][]bool, len(args))
-	sizes := make([]int64, len(args))
-	sampled := make([]bool, len(args))
-	for i, path := range args {
-		res, size, samp, err := mincore.Residency(path)
-		if err != nil {
-			return fmt.Errorf("%s: %w", path, err)
-		}
-		before[i] = res
-		sizes[i] = size
-		sampled[i] = samp
+	bases, err := takeBaseline(args)
+	if err != nil {
+		return err
 	}
 
 	// Run command or wait for PID.
@@ -86,8 +74,8 @@ func runMeasure(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("%s (after): %w", path, err)
 		}
-		delta := deltaResidency(before[i], after)
-		results = append(results, buildResult(path, sizes[i], delta, sampled[i], nil))
+		delta := deltaResidency(bases[i].residency, after)
+		results = append(results, buildResult(path, bases[i].fileSize, delta, bases[i].sampled, nil))
 	}
 
 	report.WriteMeasure(os.Stdout, report.MeasureHeader{

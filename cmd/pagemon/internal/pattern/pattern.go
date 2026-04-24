@@ -1,8 +1,6 @@
 package pattern
 
 import (
-	"time"
-
 	"github.com/erigontech/erigon/cmd/pagemon/internal/cluster"
 	"github.com/erigontech/erigon/cmd/pagemon/internal/metrics"
 	"github.com/erigontech/erigon/cmd/pagemon/internal/sampler"
@@ -62,15 +60,23 @@ func avgClusterPages(clusters []cluster.Cluster) float64 {
 	return float64(total) / float64(len(clusters))
 }
 
-// isBursty returns true if there are temporal gaps > 500ms between loading phases.
+// isBursty returns true when there is a sustained pause in page loading —
+// 3+ consecutive snapshots with no increase in NewPages. At a 50ms interval
+// that is ~150ms of silence, indicating a distinct phase boundary.
 func isBursty(snaps []sampler.Snapshot) bool {
-	if len(snaps) < 2 {
+	if len(snaps) < 4 {
 		return false
 	}
-	const burstGap = 500 * time.Millisecond
+	const minRun = 3
+	run := 0
 	for i := 1; i < len(snaps); i++ {
-		if snaps[i].At-snaps[i-1].At > burstGap {
-			return true
+		if snaps[i].NewPages == snaps[i-1].NewPages {
+			run++
+			if run >= minRun {
+				return true
+			}
+		} else {
+			run = 0
 		}
 	}
 	return false

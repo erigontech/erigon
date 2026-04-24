@@ -1,6 +1,7 @@
 package sampler
 
 import (
+	"sync"
 	"time"
 
 	"github.com/erigontech/erigon/cmd/pagemon/internal/mincore"
@@ -9,7 +10,8 @@ import (
 // Snapshot is a single mincore reading taken at a point in time.
 type Snapshot struct {
 	At        time.Duration // elapsed since sampling started
-	Residency []bool
+	NewPages  int64         // pages newly loaded vs the baseline passed to New
+	Residency []bool        // full bitmap, kept for temporal phase analysis
 	FileSize  int64
 	Sampled   bool // true if huge-file stride sampling was used
 }
@@ -17,31 +19,34 @@ type Snapshot struct {
 // Phase is a temporal interval during which a distinct cluster set was loading.
 type Phase struct {
 	Start, End time.Duration
-	ClusterIDs []int // indices into the cluster slice for that file
+	ClusterIDs []int
 }
 
-// Sampler continuously snapshots a file's page residency at a fixed interval
-// while a command runs.
+// Sampler continuously snapshots a file's page residency at a fixed interval.
 type Sampler struct {
 	path     string
 	interval time.Duration
+	baseline []bool
 	stop     chan struct{}
 	done     chan struct{}
 	snaps    []Snapshot
+	mu       sync.Mutex
 	latest   Snapshot
 }
 
-// New creates a Sampler for path. Call Start to begin sampling.
-func New(path string, interval time.Duration) *Sampler {
+// New creates a Sampler for path. baseline is the before-snapshot used to
+// compute NewPages on each captured Snapshot. Call Start to begin sampling.
+func New(path string, interval time.Duration, baseline []bool) *Sampler {
 	return &Sampler{
 		path:     path,
 		interval: interval,
+		baseline: baseline,
 		stop:     make(chan struct{}),
 		done:     make(chan struct{}),
 	}
 }
 
-// Start launches the background sampling goroutine and records t0.
+// Start launches the background sampling goroutine.
 func (s *Sampler) Start() {
 	go s.run()
 }
@@ -53,6 +58,13 @@ func (s *Sampler) Stop() []Snapshot {
 	return s.snaps
 }
 
+// Latest returns the most recent snapshot. Safe to call from any goroutine.
+func (s *Sampler) Latest() Snapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.latest
+}
+
 func (s *Sampler) run() {
 	defer close(s.done)
 	t0 := time.Now()
@@ -61,7 +73,6 @@ func (s *Sampler) run() {
 	for {
 		select {
 		case <-s.stop:
-			// one final snapshot
 			s.capture(time.Since(t0))
 			return
 		case t := <-ticker.C:
@@ -70,10 +81,6 @@ func (s *Sampler) run() {
 	}
 }
 
-// Latest returns the most recent snapshot without stopping the sampler.
-// Safe to call from another goroutine while sampling is running.
-func (s *Sampler) Latest() Snapshot { return s.latest }
-
 func (s *Sampler) capture(elapsed time.Duration) {
 	res, size, sampled, err := mincore.Residency(s.path)
 	if err != nil {
@@ -81,10 +88,23 @@ func (s *Sampler) capture(elapsed time.Duration) {
 	}
 	snap := Snapshot{
 		At:        elapsed,
+		NewPages:  countNewPages(res, s.baseline),
 		Residency: res,
 		FileSize:  size,
 		Sampled:   sampled,
 	}
+	s.mu.Lock()
 	s.latest = snap
+	s.mu.Unlock()
 	s.snaps = append(s.snaps, snap)
+}
+
+func countNewPages(current, baseline []bool) int64 {
+	var n int64
+	for i, in := range current {
+		if in && (i >= len(baseline) || !baseline[i]) {
+			n++
+		}
+	}
+	return n
 }
