@@ -54,6 +54,22 @@ const RecSplitLogPrefix = "recsplit"
 
 const MaxLeafSize = 24
 
+// ExistenceFilterVersion selects the existence-filter format written for new index files.
+//
+//	0 = byte-array of first-bytes (legacy, no FuseFilter)
+//	1 = BinaryFuse[uint8] — monolithic FuseFilter (current default)
+//	2 = BinaryFuse[uint8] sharded by keyHash>>56 (256 shards; reduces build-time RAM 256×)
+const ExistenceFilterVersion version.DataStructureVersion = 1
+
+func newExistenceFilterWriter(filePath string) (v1 *fusefilter.WriterOffHeap, v2 *fusefilter.WriterSharded, err error) {
+	if ExistenceFilterVersion == 2 {
+		v2, err = fusefilter.NewWriterSharded(filePath)
+		return
+	}
+	v1, err = fusefilter.NewWriterOffHeap(filePath)
+	return
+}
+
 /** David Stafford's (http://zimbry.blogspot.com/2011/09/better-bit-mixing-improving-on.html)
  * 13th variant of the 64-bit finalizer function in Austin Appleby's
  * MurmurHash3 (https://github.com/aappleby/smhasher).
@@ -190,7 +206,7 @@ type RecSplitArgs struct {
 	// if Enum=true:  must have sorted values (can have duplicates) - monotonically growing sequence
 	Enums              bool
 	LessFalsePositives bool
-	Version            uint8
+	Version            version.DataStructureVersion
 
 	IndexFile  string // File name where the index and the minimal perfect hash function will be written to
 	TmpDir     string
@@ -284,21 +300,10 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 		}
 
 	}
-	if args.KeyCount > 0 && rs.lessFalsePositives {
-		switch rs.dataStructureVersion {
-		case 0: // first-bytes byte array, initialized above
-		case 1:
-			rs.existenceFV1, err = fusefilter.NewWriterOffHeap(rs.filePath)
-			if err != nil {
-				return nil, err
-			}
-		case 2:
-			rs.existenceFV2, err = fusefilter.NewWriterSharded(rs.filePath)
-			if err != nil {
-				return nil, err
-			}
-		default:
-			return nil, fmt.Errorf("unsupported dataStructureVersion %d with LessFalsePositives", rs.dataStructureVersion)
+	if args.KeyCount > 0 && rs.lessFalsePositives && rs.dataStructureVersion >= 1 {
+		rs.existenceFV1, rs.existenceFV2, err = newExistenceFilterWriter(rs.filePath)
+		if err != nil {
+			return nil, err
 		}
 	}
 
