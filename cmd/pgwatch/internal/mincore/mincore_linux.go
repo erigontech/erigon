@@ -40,9 +40,14 @@ func Residency(path string) (residency []bool, fileSize int64, sampled bool, err
 	nPages := (fileSize + pageSize - 1) / pageSize
 	vec := make([]byte, nPages)
 
-	// unix.Mincore signature: Mincore(addr uintptr, length uintptr, vec []byte) error
-	if err := unix.Mincore(uintptr(unsafe.Pointer(&data[0])), uintptr(fileSize), vec); err != nil {
-		return nil, fileSize, false, fmt.Errorf("mincore: %w", err)
+	// unix.Mincore is not available in x/sys; call the syscall directly.
+	_, _, errno := unix.Syscall(unix.SYS_MINCORE,
+		uintptr(unsafe.Pointer(&data[0])),
+		uintptr(fileSize),
+		uintptr(unsafe.Pointer(&vec[0])),
+	)
+	if errno != 0 {
+		return nil, fileSize, false, fmt.Errorf("mincore: %w", errno)
 	}
 
 	const sampleThreshold = 50 << 30 // 50 GB
