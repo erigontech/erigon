@@ -123,3 +123,39 @@ amplification = Loaded bytes / bytes logically needed by the query
 The `/data-colocation-advisor` skill runs `pgwatch measure` for you, reads the
 report, estimates read amplification, and recommends layout changes (covering
 indexes, vertical partitioning, physical reorganisation, co-location).
+
+---
+
+## Feature log
+
+### Shipped
+
+| Feature | Origin |
+|---------|--------|
+| `snapshot` subcommand — point-in-time mincore residency | design |
+| `measure --cmd` — drop caches, run command, report delta | design |
+| `measure --no-drop` — skip drop_caches for production / no-root use | design |
+| `watch --cmd` — temporal mincore sampling every `--interval` | design |
+| Cluster detection — groups loaded pages separated by < 32-page gaps | design |
+| Inter-cluster gap reporting | design |
+| Temporal phase breakdown in `watch` output | design |
+| Pattern classification: SEQUENTIAL / INDEX_LOOKUP_SCATTERED / HOT_COLD_MIXED / RANDOM_SCATTERED / BURSTY / UNKNOWN | design |
+| Huge-file sampling mode — strides every 8 pages for files > 50GB | design |
+| Non-Linux build stub — binary compiles on any platform, fails clearly at runtime | implementation |
+| `--pid` on `watch` — attach to a running process instead of launching a command | requested |
+| `--pid` on `measure` — before/after delta against a running process | requested |
+| macOS (Darwin) support — `SYS_MINCORE=78` available on darwin/amd64 and arm64 | requested |
+| Live status line every 5s during `watch` — shows new pages loaded so far | requested |
+| `diff` subcommand stub (Phase 2 placeholder) | implementation |
+| `/data-colocation-advisor` Claude Code skill | design |
+
+### Planned (not yet implemented)
+
+| Feature | Notes |
+|---------|-------|
+| Terminal heatmap (`--heatmap` flag) | Unicode block chars, ANSI colours; auto-on when stdout is a tty |
+| `diff <before> <after>` | Requires `--out <file>` on snapshot/measure to save residency state; shows side-by-side heatmap and delta metrics |
+| Temporal heatmap replay in `watch` | One heatmap frame per phase, top-to-bottom scan shows evolution |
+| eBPF access-frequency layer | mincore shows residency, not frequency; eBPF would add per-page heat counts |
+| O_DIRECT / io_uring bypass detection | Files accessed with O_DIRECT bypass the page cache and are invisible to mincore |
+| Windows support | mincore has no equivalent; would need `QueryWorkingSetEx` |
