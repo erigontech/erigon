@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/node/app/event"
 	"github.com/erigontech/erigon/node/components/storage/flow"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
+	"github.com/erigontech/erigon/p2p/enode"
 )
 
 // busState holds the Provider's event-bus wiring state. It is a separate
@@ -142,4 +143,39 @@ func (p *Provider) AnnouncePeerDeparted(peerID string) {
 	p.bus.mu.Unlock()
 
 	bus.Publish(flow.PeerDeparted{PeerID: peerID})
+}
+
+// PublishPeerConnected fires a sentry.PeerConnected event for the given
+// peer. This is the production signal the manifest-exchange component
+// subscribes to in order to trigger a V2 chain.toml fetch.
+//
+// No-op when not bound. No state is tracked per-peer at this layer —
+// PublishPeerDisconnected is independent.
+func (p *Provider) PublishPeerConnected(peer *enode.Node) {
+	if p == nil || p.bus == nil || peer == nil {
+		return
+	}
+	p.bus.mu.Lock()
+	bus := p.bus.bus
+	p.bus.mu.Unlock()
+	if bus == nil {
+		return
+	}
+	bus.Publish(PeerConnected{Peer: peer})
+}
+
+// PublishPeerDisconnected fires a sentry.PeerDisconnected event. No-op
+// when not bound. The peerID should match what PeerConnected carried via
+// Peer.ID().String() so subscribers can correlate.
+func (p *Provider) PublishPeerDisconnected(peerID string) {
+	if p == nil || p.bus == nil {
+		return
+	}
+	p.bus.mu.Lock()
+	bus := p.bus.bus
+	p.bus.mu.Unlock()
+	if bus == nil {
+		return
+	}
+	bus.Publish(PeerDisconnected{PeerID: peerID})
 }

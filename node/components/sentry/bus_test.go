@@ -22,9 +22,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/node/app/event"
 	"github.com/erigontech/erigon/node/components/storage/flow"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/enr"
 )
 
 func newTestBus() event.EventBus { return event.NewEventBus(nil) }
@@ -136,4 +139,60 @@ func TestAnnounceBeforeBindIsNoop(t *testing.T) {
 	p.AnnouncePeerManifest("peer-ghost", nil, nil)
 	p.AnnouncePeerDeparted("peer-ghost")
 	require.NoError(t, p.UnbindBus())
+}
+
+func TestPublishPeerConnectedFiresEvent(t *testing.T) {
+	p := &Provider{}
+	bus := newTestBus()
+	require.NoError(t, p.BindBus(bus))
+
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	var r enr.Record
+	require.NoError(t, enode.SignV4(&r, key))
+	node, err := enode.New(enode.ValidSchemes, &r)
+	require.NoError(t, err)
+
+	var got []PeerConnected
+	var mu sync.Mutex
+	require.NoError(t, bus.Subscribe(func(e PeerConnected) {
+		mu.Lock()
+		got = append(got, e)
+		mu.Unlock()
+	}))
+
+	p.PublishPeerConnected(node)
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Len(t, got, 1)
+	require.Equal(t, node.ID(), got[0].Peer.ID())
+}
+
+func TestPublishPeerDisconnectedFiresEvent(t *testing.T) {
+	p := &Provider{}
+	bus := newTestBus()
+	require.NoError(t, p.BindBus(bus))
+
+	var got []PeerDisconnected
+	var mu sync.Mutex
+	require.NoError(t, bus.Subscribe(func(e PeerDisconnected) {
+		mu.Lock()
+		got = append(got, e)
+		mu.Unlock()
+	}))
+
+	p.PublishPeerDisconnected("peer-X")
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Len(t, got, 1)
+	require.Equal(t, "peer-X", got[0].PeerID)
+}
+
+func TestPublishPeerEventsBeforeBindAreNoop(t *testing.T) {
+	p := &Provider{}
+	// No panic, no publish.
+	p.PublishPeerConnected(nil)
+	p.PublishPeerDisconnected("none")
 }
