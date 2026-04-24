@@ -388,7 +388,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				if maxResults != 0 && len(logs) >= maxResults {
 					return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("%s: %d", errExceedLogResults, maxResults)}
 				}
-				logs = append(logs, &types.ErigonLog{Log: *filteredLog, Timestamp: header.Time})
+				logs = append(logs, &types.ErigonLog{Log: *filteredLog, Timestamp: hexutil.Uint64(header.Time)})
 			}
 			continue
 		}
