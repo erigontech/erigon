@@ -22,14 +22,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # `sim` is the simulator path passed to `hive --sim`. Most simulators
+        # live under simulators/ethereum/, but a few (e.g. devp2p) are top-level.
         include:
-          - sim: engine
-            sim-limit: exchange-capabilities
+          - sim: ethereum/engine
+            sim-limit: exchange-capabilities|auth
             max-allowed-failures: 0
-          - sim: engine
+          - sim: ethereum/engine
             sim-limit: withdrawals
             max-allowed-failures: 0
-          - sim: engine
+          - sim: ethereum/engine
             sim-limit: cancun
             # 2 failures (not due to us, but due to Hive/Geth secondary client)
             # will remove once resolved by STEEL team (these 2 tests are failing on all clients)
@@ -38,14 +40,19 @@ jobs:
             # known flake under --sim.parallelism=8 due to timing/resource contention; passes
             # cleanly in isolation (--sim.parallelism=1)
             max-allowed-failures: 3
-          - sim: engine
+          - sim: ethereum/engine
             sim-limit: api
             max-allowed-failures: 0
-          - sim: engine
-            sim-limit: auth
-            max-allowed-failures: 0
-          - sim: rpc-compat
+          - sim: ethereum/rpc-compat
             sim-limit: ".*"
+            max-allowed-failures: 0
+          # devp2p/eth: regression guard for eth wire protocol handlers
+          # (GetBlockHeaders skip traversal, BlockRangeUpdate invalid-packet kick,
+          # blob-sidecar commitment check, eth/68 announcement size/type check).
+          # The sibling devp2p suites (snap, discv4, discv5) are intentionally
+          # excluded — they have unrelated pre-existing failures.
+          - sim: devp2p
+            sim-limit: eth
             max-allowed-failures: 0
     steps:
       - name: Checkout Erigon meta
@@ -140,7 +147,7 @@ jobs:
             echo -e "\n\n============================================================"
             echo "Running test: ${1}-${2}"
             echo -e "\n"
-            ./hive -docker.auth --sim ethereum/"${1}" --sim.limit="${2}" --sim.limit.exact=false --sim.parallelism=8 --sim.timelimit 15m --docker.output --client erigon 2>&1 | tee output.log || {
+            ./hive -docker.auth --sim "${1}" --sim.limit="${2}" --sim.limit.exact=false --sim.parallelism=8 --sim.timelimit 15m --docker.output --client erigon 2>&1 | tee output.log || {
               if [ $? -gt 0 ]; then
                 echo "Exitcode gt 0"
               fi
@@ -150,12 +157,12 @@ jobs:
             if [ -z "$suites" ]; then
               status_line=$(tail -1 output.log | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g")
               suites=$(echo "$status_line" | sed -n 's/.*suites=\([0-9]*\).*/\1/p')
-            fi 
+            fi
             tests=$(echo "$status_line" | sed -n 's/.*tests=\([0-9]*\).*/\1/p')
             failed=$(echo "$status_line" | sed -n 's/.*failed=\([0-9]*\).*/\1/p')
 
             echo -e "\n"
-            echo "-----------   Results for ${1}-${2}    -----------" 
+            echo "-----------   Results for ${1}-${2}    -----------"
             echo "Tests: $tests, Failed: $failed"
             echo -e "\n\n============================================================"
 
