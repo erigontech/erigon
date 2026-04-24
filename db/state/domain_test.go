@@ -885,7 +885,7 @@ func TestDomain_CollationIsolatedFromLaterSteps(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback() //nolint:gocritic
-	dt := d.beginForTests()
+	dt := d.BeginFilesRo()
 	w := dt.NewWriter()
 
 	// Step 0 writes (txNums 0-15)
@@ -964,7 +964,7 @@ func TestDomain_UnwindRestoredEntryVisibility(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback() //nolint:gocritic
 
-	dt := d.beginForTests()
+	dt := d.BeginFilesRo()
 	w := dt.NewWriter()
 	require.NoError(t, w.PutWithPrev(k1, []byte("V1"), 2, nil))
 	require.NoError(t, w.PutWithPrev(k1, []byte("V2"), 10, []byte("V1")))
@@ -976,7 +976,7 @@ func TestDomain_UnwindRestoredEntryVisibility(t *testing.T) {
 	require.NoError(t, d.collateBuildIntegrate(ctx, 0, tx, background.NewProgressSet()))
 
 	// Prune step 0 from DB — entries now only in files.
-	dt = d.beginForTests()
+	dt = d.BeginFilesRo()
 	_, err = dt.Prune(ctx, tx, 0, 0, 16, math.MaxUint64, logEvery)
 	dt.Close()
 	require.NoError(t, err)
@@ -993,13 +993,13 @@ func TestDomain_UnwindRestoredEntryVisibility(t *testing.T) {
 	}
 
 	// Unwind to txNum 5 (between the V1 write at 2 and V2 write at 10, still in step 0).
-	dt = d.beginForTests()
+	dt = d.BeginFilesRo()
 	err = dt.unwind(ctx, tx, 0, 5, uint64(dt.FirstStepNotInFiles()), diffs)
 	dt.Close()
 	require.NoError(t, err)
 
 	// GetLatest must return V1 (the changeset-restored value), NOT V2 (the file value).
-	dt = d.beginForTests()
+	dt = d.BeginFilesRo()
 	defer dt.Close()
 	v, _, found, err := dt.GetLatest(k1, tx)
 	require.NoError(t, err)
