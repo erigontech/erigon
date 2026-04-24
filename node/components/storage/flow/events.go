@@ -163,3 +163,22 @@ type SnapshotsReady struct {
 	FromBlock uint64
 	ToBlock   uint64
 }
+
+// InitialStateReady signals that the state-domain phase of a peered sync
+// has finished — every state file the orchestrator gap-filled for is now
+// in the local inventory at TrustVerified. Execution can begin replaying
+// forward from this point while the block-file phase continues to
+// download in parallel.
+//
+// Fires at most once per orchestrator lifetime. If a peer's manifest
+// requires no state-file downloads (the local inventory already
+// satisfies the state coverage), the event still fires immediately so
+// downstream consumers don't need a separate "is state already
+// covered?" check.
+type InitialStateReady struct {
+	// StateDomains lists the domains the phase-1 gap-fill covered.
+	// Consumers that care about which subset of state was filled can
+	// read this; consumers that only care about "is the gate open?"
+	// can ignore it.
+	StateDomains []snapshot.Domain
+}

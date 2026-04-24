@@ -81,6 +81,24 @@ type Orchestrator struct {
 	peerFiles map[string]*snapshot.FileEntry
 	pending   map[string]*snapshot.FileEntry
 
+	// Phased scheduling: state-domain files are requested first; block
+	// files are held in blocksQueued until the last state download
+	// completes, at which point InitialStateReady fires and the queued
+	// block requests are published. Execution can then replay blocks
+	// forward while subsequent block transfers continue in parallel.
+	//
+	// statePending counts the state-domain downloads still in flight;
+	// when it reaches zero after having been positive (or when we
+	// initially observe a manifest with no state gap to fill),
+	// InitialStateReady fires exactly once per orchestrator lifetime.
+	//
+	// stateDomainsSeen records which domains contributed to phase 1 so
+	// the InitialStateReady payload can list them.
+	statePending     int
+	stateReadyFired  bool
+	stateDomainsSeen map[snapshot.Domain]struct{}
+	blocksQueued     []queuedBlock
+
 	// Handlers are materialised once so Subscribe and Unsubscribe see the
 	// same reflect.Value.Pointer(). Re-referencing a method value
 	// (o.onXxx) allocates a fresh closure whose pointer the event bus
@@ -90,6 +108,13 @@ type Orchestrator struct {
 	hDownloadComplete     func(DownloadComplete)
 	hDownloadFailed       func(DownloadFailed)
 	hPeerDeparted         func(PeerDeparted)
+}
+
+// queuedBlock is a held-back block-file DownloadRequested that will be
+// published after InitialStateReady fires.
+type queuedBlock struct {
+	entry  *snapshot.FileEntry
+	peerID string
 }
 
 // New creates a flow orchestrator bound to the given bus and inventory.
@@ -112,11 +137,12 @@ func NewWithStorage(bus event.EventBus, storage Storage, logger log.Logger) *Orc
 		logger = log.Root()
 	}
 	o := &Orchestrator{
-		bus:       bus,
-		storage:   storage,
-		log:       logger,
-		peerFiles: make(map[string]*snapshot.FileEntry),
-		pending:   make(map[string]*snapshot.FileEntry),
+		bus:              bus,
+		storage:          storage,
+		log:              logger,
+		peerFiles:        make(map[string]*snapshot.FileEntry),
+		pending:          make(map[string]*snapshot.FileEntry),
+		stateDomainsSeen: make(map[snapshot.Domain]struct{}),
 	}
 	o.hBlocksFlushed = o.onBlocksFlushed
 	o.hPeerManifestReceived = o.onPeerManifestReceived
@@ -204,12 +230,28 @@ func (o *Orchestrator) onBlocksFlushed(e BlocksFlushed) {
 // onPeerManifestReceived computes the gap between local inventory and the
 // peer's advertised coverage, then publishes a DownloadRequested for each
 // file the peer has that we don't.
+//
+// Phased scheduling: state-domain gaps publish immediately and increment
+// statePending; block-file gaps are held in blocksQueued until the state
+// phase completes (InitialStateReady fires). If the manifest produces no
+// state gap at all — either we already have all the state, or the peer
+// only advertises blocks — InitialStateReady fires immediately at the
+// end of this call so the queue drains.
 func (o *Orchestrator) onPeerManifestReceived(e PeerManifestReceived) {
 	for domain, peerEntries := range e.Domains {
 		o.requestGapsFor(domain, peerEntries, e.PeerID)
 	}
 	// Block files use zero Domain — handle separately.
 	o.requestGapsFor("", e.Blocks, e.PeerID)
+
+	// If the state phase has nothing pending and hasn't fired yet, open
+	// phase 2 now. Handles the all-local and blocks-only cases.
+	o.peerMu.Lock()
+	shouldFire := !o.stateReadyFired && o.statePending == 0
+	o.peerMu.Unlock()
+	if shouldFire {
+		o.fireInitialStateReady()
+	}
 }
 
 // requestGapsFor iterates peer entries for a single domain (or "" for blocks)
@@ -260,6 +302,28 @@ func (o *Orchestrator) requestGapsFor(domain snapshot.Domain, peerEntries []*sna
 		return toRequest[i].Name > toRequest[j].Name
 	})
 
+	// Phase routing. State-domain gaps publish now and count toward
+	// statePending. Block-file gaps publish now only if phase 2 is
+	// already open; otherwise they queue for release when the state
+	// phase completes.
+	isState := domain != ""
+	o.peerMu.Lock()
+	holdForPhase2 := !isState && !o.stateReadyFired
+	if isState && len(toRequest) > 0 {
+		o.statePending += len(toRequest)
+		o.stateDomainsSeen[domain] = struct{}{}
+	}
+	if holdForPhase2 {
+		for _, entry := range toRequest {
+			o.blocksQueued = append(o.blocksQueued, queuedBlock{entry: entry, peerID: peerID})
+		}
+	}
+	o.peerMu.Unlock()
+
+	if holdForPhase2 {
+		return
+	}
+
 	for _, entry := range toRequest {
 		o.bus.Publish(DownloadRequested{
 			FileName:  entry.Name,
@@ -267,6 +331,38 @@ func (o *Orchestrator) requestGapsFor(domain snapshot.Domain, peerEntries []*sna
 			FromPeers: []string{peerID},
 			Domain:    domain,
 			Range:     entry.Range(),
+		})
+	}
+}
+
+// fireInitialStateReady publishes InitialStateReady exactly once and
+// drains any block-file DownloadRequested events queued while the state
+// phase was in flight. Safe to call concurrently — the state-ready flag
+// serialises.
+func (o *Orchestrator) fireInitialStateReady() {
+	o.peerMu.Lock()
+	if o.stateReadyFired {
+		o.peerMu.Unlock()
+		return
+	}
+	o.stateReadyFired = true
+	domains := make([]snapshot.Domain, 0, len(o.stateDomainsSeen))
+	for d := range o.stateDomainsSeen {
+		domains = append(domains, d)
+	}
+	sort.Slice(domains, func(i, j int) bool { return domains[i] < domains[j] })
+	queue := o.blocksQueued
+	o.blocksQueued = nil
+	o.peerMu.Unlock()
+
+	o.bus.Publish(InitialStateReady{StateDomains: domains})
+	for _, qb := range queue {
+		o.bus.Publish(DownloadRequested{
+			FileName:  qb.entry.Name,
+			InfoHash:  qb.entry.TorrentHash,
+			FromPeers: []string{qb.peerID},
+			// Blocks carry zero Domain.
+			Range: qb.entry.Range(),
 		})
 	}
 }
@@ -425,6 +521,18 @@ func (o *Orchestrator) onDownloadComplete(e DownloadComplete) {
 
 	o.peerMu.Lock()
 	delete(o.pending, e.FileName)
+	// Decrement state-phase pending count for state-domain completions.
+	// If this drains the state phase, fire InitialStateReady + release
+	// the block queue (done after unlock via fireInitialStateReady).
+	var shouldFireStateReady bool
+	if peerEntry.Domain != "" {
+		if o.statePending > 0 {
+			o.statePending--
+		}
+		if o.statePending == 0 && !o.stateReadyFired {
+			shouldFireStateReady = true
+		}
+	}
 	o.peerMu.Unlock()
 
 	o.bus.Publish(TrustPromoted{
@@ -432,4 +540,8 @@ func (o *Orchestrator) onDownloadComplete(e DownloadComplete) {
 		OldTrust: snapshot.TrustNone,
 		NewTrust: snapshot.TrustVerified,
 	})
+
+	if shouldFireStateReady {
+		o.fireInitialStateReady()
+	}
 }

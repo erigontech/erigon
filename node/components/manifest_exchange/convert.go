@@ -18,6 +18,8 @@ package manifest_exchange
 
 import (
 	"encoding/hex"
+	"strconv"
+	"strings"
 
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/node/components/storage/flow"
@@ -75,9 +77,17 @@ func v2ToPeerManifest(peerID string, m *downloader.ChainTomlV2) flow.PeerManifes
 			if !ok {
 				continue
 			}
+			// V2 Blocks is a flat map name→hash with no per-entry
+			// step range field. Parse the range from the filename so
+			// the orchestrator's gap-fill can compare coverage — an
+			// entry with zero FromStep/ToStep is treated as trivially
+			// covered (IsComplete(0, 0) is true) and would be dropped.
+			from, to := parseBlockFileRange(name)
 			out.Blocks = append(out.Blocks, &snapshot.FileEntry{
 				Name:        name,
 				TorrentHash: hash,
+				FromStep:    from,
+				ToStep:      to,
 				// V2 blocks don't carry per-file trust; they're deterministic.
 				// The orchestrator promotes to TrustVerified on DownloadComplete.
 				Trust: snapshot.TrustNone,
@@ -86,6 +96,38 @@ func v2ToPeerManifest(peerID string, m *downloader.ChainTomlV2) flow.PeerManifes
 	}
 
 	return out
+}
+
+// parseBlockFileRange extracts the block-number range from a V1-era
+// block snapshot filename of the form "v1.0-<from>-<to>-<role>.<ext>".
+// Returns (0, 0) if the filename doesn't follow the expected shape —
+// the orchestrator will then treat the entry as zero-range and
+// decline to gap-fill it, which is the correct behaviour for a
+// non-canonical name.
+func parseBlockFileRange(name string) (uint64, uint64) {
+	// Strip the extension and the role segment.
+	extIdx := strings.LastIndexByte(name, '.')
+	if extIdx < 0 {
+		return 0, 0
+	}
+	base := name[:extIdx]
+
+	// "v1.0-000000-000500-headers" → split on '-'.
+	parts := strings.Split(base, "-")
+	if len(parts) < 4 {
+		return 0, 0
+	}
+	// The two numeric segments sit at [len-3] and [len-2]; the last
+	// segment is the role ("headers", "bodies", etc.).
+	from, err := strconv.ParseUint(parts[len(parts)-3], 10, 64)
+	if err != nil {
+		return 0, 0
+	}
+	to, err := strconv.ParseUint(parts[len(parts)-2], 10, 64)
+	if err != nil {
+		return 0, 0
+	}
+	return from, to
 }
 
 // decodeHash parses a 40-char hex torrent hash into a fixed-size array.
