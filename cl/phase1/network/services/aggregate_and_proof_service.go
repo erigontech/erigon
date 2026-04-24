@@ -210,16 +210,16 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		localValidatorIsProposer  bool
 	)
 	if err := a.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
-		// If our head state is too far from the aggregate's target epoch, committee
+		// If our head state is too far from the aggregate's epoch, committee
 		// computations will use a stale RANDAO mix and produce wrong results.
-		// Allow current and previous epoch (spec permits both).
-		// Note: this is separate from the epoch window check below — that check uses
-		// highestSeenEpoch for spec compliance, but head state can only correctly
-		// compute committees for epochs it has RANDAO mixes for.
+		// Allow current and previous epoch per spec: compute_epoch_at_slot(slot)
+		// in (get_previous_epoch(state), get_current_epoch(state)).
+		// Note: uses epoch (from slot), not target.Epoch, so malformed messages
+		// with wrong target.Epoch still reach the reject check below.
 		headEpoch := state.Epoch(headState)
-		if target.Epoch != headEpoch && target.Epoch != state.PreviousEpoch(headState) {
-			return fmt.Errorf("head epoch %d too far from target epoch %d: %w",
-				headEpoch, target.Epoch, ErrIgnore)
+		if epoch != headEpoch && epoch != state.PreviousEpoch(headState) {
+			return fmt.Errorf("head epoch %d too far from aggregate epoch %d: %w",
+				headEpoch, epoch, ErrIgnore)
 		}
 		// [IGNORE] the epoch of aggregate.data.slot is either the current or previous epoch
 		// When the head state lags behind (solo validator / genesis start), use the
