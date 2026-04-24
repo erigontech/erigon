@@ -18,6 +18,7 @@ package types
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -29,6 +30,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -934,6 +936,110 @@ func BenchmarkLogCustomVsGeneratedFixed(b *testing.B) {
 		var decoded LogForStorageGen
 		for b.Loop() {
 			rlp.DecodeBytes(buf.Bytes(), &decoded)
+		}
+	})
+}
+
+var benchJSONSink []byte
+
+func BenchmarkLogJSON(b *testing.B) {
+	tr := NewTRand()
+
+	mkLog := func() *Log {
+		l := tr.RandLogFixed()
+		l.BlockNumber = hexutil.Uint64(tr.rnd.Uint64())
+		l.TxHash = tr.RandHash()
+		l.TxIndex = hexutil.Uint(tr.rnd.Intn(200))
+		l.BlockHash = tr.RandHash()
+		l.Index = hexutil.Uint(tr.rnd.Intn(500))
+		return l
+	}
+
+	log := mkLog()
+
+	b.Run("Log/Single", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			benchJSONSink, _ = json.Marshal(log)
+		}
+	})
+
+	logs := make([]*Log, 100)
+	for i := range logs {
+		logs[i] = mkLog()
+	}
+	b.Run("Log/Batch100", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			benchJSONSink, _ = json.Marshal(logs)
+		}
+	})
+
+	rpcLog := &RPCLog{
+		Log:            *log,
+		BlockTimestamp: hexutil.Uint64(1700000000),
+	}
+	b.Run("RPCLog/Single", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			benchJSONSink, _ = json.Marshal(rpcLog)
+		}
+	})
+
+	erigonLog := &ErigonLog{
+		Log:       *log,
+		Timestamp: hexutil.Uint64(1700000000),
+	}
+	b.Run("ErigonLog/Single", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			benchJSONSink, _ = json.Marshal(erigonLog)
+		}
+	})
+}
+
+var benchLogSink Log
+
+func BenchmarkLogJSONUnmarshal(b *testing.B) {
+	tr := NewTRand()
+
+	mkLog := func() *Log {
+		l := tr.RandLogFixed()
+		l.BlockNumber = hexutil.Uint64(tr.rnd.Uint64())
+		l.TxHash = tr.RandHash()
+		l.TxIndex = hexutil.Uint(tr.rnd.Intn(200))
+		l.BlockHash = tr.RandHash()
+		l.Index = hexutil.Uint(tr.rnd.Intn(500))
+		return l
+	}
+
+	log := mkLog()
+	encoded, _ := json.Marshal(log)
+
+	b.Run("Log/Single", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			_ = json.Unmarshal(encoded, &benchLogSink)
+		}
+	})
+
+	rpcLog := &RPCLog{Log: *log, BlockTimestamp: hexutil.Uint64(1700000000)}
+	rpcEncoded, _ := json.Marshal(rpcLog)
+	var rpcSink RPCLog
+	b.Run("RPCLog/Single", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			_ = json.Unmarshal(rpcEncoded, &rpcSink)
+		}
+	})
+
+	erigonLog := &ErigonLog{Log: *log, Timestamp: hexutil.Uint64(1700000000)}
+	erigonEncoded, _ := json.Marshal(erigonLog)
+	var erigonSink ErigonLog
+	b.Run("ErigonLog/Single", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			_ = json.Unmarshal(erigonEncoded, &erigonSink)
 		}
 	})
 }

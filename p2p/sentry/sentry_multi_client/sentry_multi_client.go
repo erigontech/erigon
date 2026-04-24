@@ -219,6 +219,10 @@ type MultiClient struct {
 
 var _ eth.ReceiptsGetter = new(receipts.Generator) // compile-time interface-check
 
+// DefaultBlockBufferSize is the default block buffer depth passed to
+// NewMultiClient by both production and integration tooling.
+const DefaultBlockBufferSize = 128
+
 func NewMultiClient(
 	dirs datadir.Dirs,
 	db kv.TemporalRoDB,
@@ -1031,6 +1035,13 @@ func (cs *MultiClient) blockRange69(ctx context.Context, inreq *sentryproto.Inbo
 		return fmt.Errorf("decoding blockRange69: %w, data: %x", err, inreq.Data)
 	}
 	if err := query.Validate(); err != nil {
+		cs.logger.Debug("Kick peer for invalid BlockRangeUpdate", "peer", inreq.PeerId.String(), "err", err)
+		if _, err1 := sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{
+			PeerId:  inreq.PeerId,
+			Penalty: sentryproto.PenaltyKind_Kick,
+		}, &grpc.EmptyCallOption{}); err1 != nil {
+			cs.logger.Error("Could not send penalty", "err", err1)
+		}
 		return err
 	}
 

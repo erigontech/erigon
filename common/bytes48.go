@@ -51,7 +51,7 @@ func (b *Bytes48) UnmarshalText(input []byte) error {
 func (b Bytes48) MarshalText() ([]byte, error) {
 	bl := b[:]
 	result := make([]byte, len(b)*2+2)
-	copy(result, hexPrefix)
+	copy(result, hexutil.HexPrefix)
 	hex.Encode(result[2:], bl)
 	return result, nil
 }
