@@ -441,3 +441,92 @@ func TestAnswerGetReceiptsQueryCacheOnly70_EmptyQuery(t *testing.T) {
 		t.Fatalf("expected 0 block receipt lists, got %d", len(result.EncodedReceipts))
 	}
 }
+
+// mockHeaderReader implements services.HeaderReader for TestAnswerGetBlockHeadersQuery*.
+// It exposes a canonical chain keyed by block number; each block's hash is derived
+// deterministically from its number so the ancestor walk works both ways.
+type mockHeaderReader struct {
+	headers map[uint64]*types.Header // number -> header
+	byHash  map[common.Hash]uint64   // hash -> number
+}
+
+func newMockHeaderReader(chainLen int) *mockHeaderReader {
+	m := &mockHeaderReader{
+		headers: make(map[uint64]*types.Header, chainLen),
+		byHash:  make(map[common.Hash]uint64, chainLen),
+	}
+	var parent common.Hash
+	for i := uint64(0); i < uint64(chainLen); i++ {
+		h := &types.Header{ParentHash: parent}
+		h.Number.SetUint64(i)
+		hash := h.Hash()
+		m.headers[i] = h
+		m.byHash[hash] = i
+		parent = hash
+	}
+	return m
+}
+
+func (m *mockHeaderReader) Header(_ context.Context, _ kv.Getter, hash common.Hash, blockNum uint64) (*types.Header, error) {
+	if h, ok := m.headers[blockNum]; ok && h.Hash() == hash {
+		return h, nil
+	}
+	return nil, nil
+}
+func (m *mockHeaderReader) HeaderByNumber(_ context.Context, _ kv.Getter, blockNum uint64) (*types.Header, error) {
+	return m.headers[blockNum], nil
+}
+func (m *mockHeaderReader) HeaderNumber(_ context.Context, _ kv.Getter, hash common.Hash) (*uint64, error) {
+	if n, ok := m.byHash[hash]; ok {
+		return &n, nil
+	}
+	return nil, nil
+}
+func (m *mockHeaderReader) HeaderByHash(_ context.Context, _ kv.Getter, hash common.Hash) (*types.Header, error) {
+	n, ok := m.byHash[hash]
+	if !ok {
+		return nil, nil
+	}
+	return m.headers[n], nil
+}
+func (m *mockHeaderReader) ReadAncestor(_ kv.Getter, hash common.Hash, number, ancestor uint64, _ *uint64) (common.Hash, uint64) {
+	n, ok := m.byHash[hash]
+	if !ok || n != number || ancestor > number {
+		return common.Hash{}, 0
+	}
+	anc := m.headers[number-ancestor]
+	return anc.Hash(), number - ancestor
+}
+func (m *mockHeaderReader) HeadersRange(_ context.Context, _ func(*types.Header) error) error {
+	return nil
+}
+func (m *mockHeaderReader) Integrity(_ context.Context) error { return nil }
+
+// TestAnswerGetBlockHeadersQuery_HashModeSkip guards against a regression where
+// the non-reverse hash-mode branch read `query.Origin.Number` (the current block)
+// instead of `next`, causing the ancestor check to fail and the handler to
+// return only the origin header when Amount > 1.
+func TestAnswerGetBlockHeadersQuery_HashModeSkip(t *testing.T) {
+	reader := newMockHeaderReader(10)
+	origin := reader.headers[1]
+
+	query := &GetBlockHeadersPacket{
+		Origin:  HashOrNumber{Hash: origin.Hash()},
+		Amount:  3,
+		Skip:    1,
+		Reverse: false,
+	}
+	headers, err := AnswerGetBlockHeadersQuery(nil, query, reader)
+	if err != nil {
+		t.Fatalf("AnswerGetBlockHeadersQuery returned error: %v", err)
+	}
+	if len(headers) != 3 {
+		t.Fatalf("expected 3 headers, got %d", len(headers))
+	}
+	expectedNumbers := []uint64{1, 3, 5}
+	for i, h := range headers {
+		if h.Number.Uint64() != expectedNumbers[i] {
+			t.Fatalf("header %d: expected block %d, got %d", i, expectedNumbers[i], h.Number.Uint64())
+		}
+	}
+}
