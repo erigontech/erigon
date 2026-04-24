@@ -14,19 +14,19 @@ accounts:
             current: v2.0
             min: v1.0
         vi:
-            current: v1.2
+            current: v2.0
             min: v1.0
     ii:
         ef:
             current: v3.0
             min: v1.0
         efi:
-            current: v2.1
+            current: v3.0
             min: v1.0
 bodies:
     block:
         idx:
-            current: v2.0
+            current: v3.0
             min: v1.0
         seg:
             current: v1.1
@@ -47,14 +47,14 @@ code:
             current: v2.0
             min: v1.0
         vi:
-            current: v1.1
+            current: v2.0
             min: v1.0
     ii:
         ef:
             current: v3.0
             min: v1.0
         efi:
-            current: v2.0
+            current: v3.0
             min: v1.0
 commitment:
     domain:
@@ -62,26 +62,26 @@ commitment:
             current: v2.0
             min: v1.0
         kvi:
-            current: v2.0
+            current: v3.0
             min: v1.0
     hist:
         v:
             current: v2.0
             min: v1.0
         vi:
-            current: v1.1
+            current: v2.0
             min: v1.0
     ii:
         ef:
             current: v3.0
             min: v1.0
         efi:
-            current: v2.0
+            current: v3.0
             min: v1.0
 headers:
     block:
         idx:
-            current: v2.0
+            current: v3.0
             min: v1.0
         seg:
             current: v1.1
@@ -92,7 +92,7 @@ logaddrs:
             current: v3.0
             min: v1.0
         efi:
-            current: v2.1
+            current: v3.0
             min: v1.0
 logtopics:
     ii:
@@ -100,7 +100,7 @@ logtopics:
             current: v3.0
             min: v1.0
         efi:
-            current: v2.1
+            current: v3.0
             min: v1.0
 rcache:
     domain:
@@ -108,21 +108,21 @@ rcache:
             current: v3.0
             min: v1.0
         kvi:
-            current: v2.0
+            current: v3.0
             min: v1.0
     hist:
         v:
             current: v3.0
             min: v1.0
         vi:
-            current: v1.1
+            current: v2.0
             min: v1.0
     ii:
         ef:
             current: v3.0
             min: v1.0
         efi:
-            current: v2.0
+            current: v3.0
             min: v1.0
 receipt:
     domain:
@@ -140,14 +140,14 @@ receipt:
             current: v3.0
             min: v1.0
         vi:
-            current: v1.2
+            current: v2.0
             min: v1.0
     ii:
         ef:
             current: v3.0
             min: v1.0
         efi:
-            current: v2.1
+            current: v3.0
             min: v1.0
 storage:
     domain:
@@ -165,14 +165,14 @@ storage:
             current: v2.0
             min: v1.0
         vi:
-            current: v1.1
+            current: v2.0
             min: v1.0
     ii:
         ef:
             current: v3.0
             min: v1.0
         efi:
-            current: v2.0
+            current: v3.0
             min: v1.0
 tracesfrom:
     ii:
@@ -180,7 +180,7 @@ tracesfrom:
             current: v3.0
             min: v1.0
         efi:
-            current: v2.1
+            current: v3.0
             min: v1.0
 tracesto:
     ii:
@@ -188,12 +188,12 @@ tracesto:
             current: v3.0
             min: v1.0
         efi:
-            current: v2.1
+            current: v3.0
             min: v1.0
 transactions:
     block:
         idx:
-            current: v2.0
+            current: v3.0
             min: v1.0
         seg:
             current: v1.1
@@ -201,5 +201,5 @@ transactions:
 transactiontoblock:
     block:
         idx:
-            current: v2.0
+            current: v3.0
             min: v1.0
