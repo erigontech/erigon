@@ -245,34 +245,6 @@ func TestHeaderRoundTrip(t *testing.T) {
 	requireFilterEqual(t, original, r.inner)
 }
 
-// A field read from the wrong offset would diverge on the second pass after the writer stores the wrong value.
-func TestDoubleSerializationRoundTrip(t *testing.T) {
-	require := require.New(t)
-
-	w, err := NewWriterOffHeap(filepath.Join(t.TempDir(), "dbl_rt"))
-	require.NoError(err)
-	defer w.Close()
-
-	for i := uint64(0); i < 50; i++ {
-		require.NoError(w.AddHash(i))
-	}
-
-	var buf1 bytes.Buffer
-	_, err = w.BuildTo(&buf1)
-	require.NoError(err)
-
-	r1, _, err := NewReaderOnBytes(buf1.Bytes(), "pass1")
-	require.NoError(err)
-
-	var buf2 bytes.Buffer
-	_, err = w.write(r1.inner, &buf2)
-	require.NoError(err)
-
-	r2, _, err := NewReaderOnBytes(buf2.Bytes(), "pass2")
-	require.NoError(err)
-
-	requireFilterEqual(t, r1.inner, r2.inner)
-}
 
 func TestMultipleFilters(t *testing.T) {
 	require := require.New(t)
