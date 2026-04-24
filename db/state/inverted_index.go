@@ -366,12 +366,20 @@ func (w *InvertedIndexBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) err
 		return nil
 	}
 
-	if err := w.index.Load(tx, w.indexTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	var nIndex, nKeys int
+	if err := w.index.Load(tx, w.indexTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		nIndex++
+		return next(k, k, v)
+	}, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := w.indexKeys.Load(tx, w.indexKeysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := w.indexKeys.Load(tx, w.indexKeysTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		nKeys++
+		return next(k, k, v)
+	}, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
+	log.Warn("[flush] ii", "ii", w.name, "index", nIndex, "keys", nKeys)
 	w.close()
 	return nil
 }

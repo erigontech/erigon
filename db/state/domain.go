@@ -426,11 +426,15 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	log.Warn("[flush] domain history+ii", "domain", w.name, "took", time.Since(t).Round(time.Millisecond))
 
 	if w.largeVals {
+		var nKeys int
 		t = time.Now()
-		if err := w.values.Load(tx, w.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
+		if err := w.values.Load(tx, w.valsTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			nKeys++
+			return next(k, k, v)
+		}, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 			return err
 		}
-		log.Warn("[flush] domain values (largeVals)", "domain", w.name, "took", time.Since(t).Round(time.Millisecond))
+		log.Warn("[flush] domain values (largeVals)", "domain", w.name, "keys", nKeys, "took", time.Since(t).Round(time.Millisecond))
 		w.Close()
 		return nil
 	}
@@ -452,8 +456,10 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	lastKey = bytes.Clone(lastKey) // copy: cursor may overwrite on next op
 	canAppend := lastKey == nil
 
+	var nKeys int
 	t = time.Now()
 	if err := w.values.Load(tx, w.valsTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		nKeys++
 		if !canAppend && bytes.Compare(k, lastKey) > 0 {
 			canAppend = true
 		}
@@ -471,7 +477,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	}, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 		return err
 	}
-	log.Warn("[flush] domain values", "domain", w.name, "took", time.Since(t).Round(time.Millisecond))
+	log.Warn("[flush] domain values", "domain", w.name, "keys", nKeys, "took", time.Since(t).Round(time.Millisecond))
 	w.Close()
 
 	return nil

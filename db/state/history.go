@@ -489,11 +489,15 @@ func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		return err
 	}
 	log.Warn("[flush] history ii", "ii", w.ii.name, "took", time.Since(t).Round(time.Millisecond))
+	var nKeys int
 	t = time.Now()
-	if err := w.historyVals.Load(tx, w.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := w.historyVals.Load(tx, w.historyValsTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		nKeys++
+		return next(k, k, v)
+	}, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	log.Warn("[flush] history vals", "ii", w.ii.name, "took", time.Since(t).Round(time.Millisecond))
+	log.Warn("[flush] history vals", "ii", w.ii.name, "keys", nKeys, "took", time.Since(t).Round(time.Millisecond))
 	w.close()
 	return nil
 }
