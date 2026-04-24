@@ -92,6 +92,8 @@ type HexPatriciaHashed struct {
 	hashAuxBuffer [128]byte     // buffer to compute cell hash or write hash-related things
 	cellHashBuf   common.Hash   // shared scratch buffer for hashKey calls (avoids per-cell allocation)
 	auxBuffer     *bytes.Buffer // auxiliary buffer used during branch updates encoding
+	unfoldKeyBuf  [128]byte     // scratch buffer for compact encoding in unfoldBranchNode
+	compactKeyBuf [128]byte     // scratch buffer for compact encoding in fold
 	branchEncoder *BranchEncoder
 
 	mounted    bool // true if this trie is mounted to some root trie
@@ -306,11 +308,8 @@ func (cell *cell) reset() {
 	cell.hashLen = 0
 	cell.stateHashLen = 0
 	cell.loaded = cellLoadNone
-	clear(cell.hashedExtension[:])
-	clear(cell.extension[:])
-	clear(cell.accountAddr[:])
-	clear(cell.storageAddr[:])
-	clear(cell.hash[:])
+	// Length fields are zeroed above; all reads are gated by them,
+	// so clearing the backing arrays is unnecessary.
 	cell.Update.Reset()
 }
 
@@ -502,50 +501,100 @@ func (cell *cell) deriveHashedKeys(depth int16, keccak keccak.KeccakState, accou
 }
 
 func (cell *cell) fillFromFields(data []byte, pos int, fieldBits cellFields) (int, error) {
-	fields := []struct {
-		flag      cellFields
-		lenField  *int16
-		dataField []byte
-		extraFunc func(int16)
-	}{
-		{fieldExtension, &cell.hashedExtLen, cell.hashedExtension[:], func(l int16) {
-			cell.extLen = l
-			if l > 0 {
-				copy(cell.extension[:], cell.hashedExtension[:l])
-			}
-		}},
-		{fieldAccountAddr, &cell.accountAddrLen, cell.accountAddr[:], nil},
-		{fieldStorageAddr, &cell.storageAddrLen, cell.storageAddr[:], nil},
-		{fieldHash, &cell.hashLen, cell.hash[:], nil},
-		{fieldStateHash, &cell.stateHashLen, cell.stateHash[:], nil},
+	// Inlined field parsing avoids per-call slice+closure heap allocations.
+	if fieldBits&fieldExtension != 0 {
+		l, n, err := readUvarint(data[pos:])
+		if err != nil {
+			return 0, err
+		}
+		pos += n
+		if len(data) < pos+int(l) {
+			return 0, fmt.Errorf("buffer too small for %v", fieldExtension)
+		}
+		cell.hashedExtLen = int16(l)
+		if l > 0 {
+			copy(cell.hashedExtension[:], data[pos:pos+int(l)])
+			pos += int(l)
+		}
+		cell.extLen = int16(l)
+		if l > 0 {
+			copy(cell.extension[:], cell.hashedExtension[:l])
+		}
+	} else {
+		cell.hashedExtLen = 0
+		cell.extLen = 0
 	}
 
-	for _, f := range fields {
-		if fieldBits&f.flag != 0 {
-			l, n, err := readUvarint(data[pos:])
-			if err != nil {
-				return 0, err
-			}
-			pos += n
-
-			if len(data) < pos+int(l) {
-				return 0, fmt.Errorf("buffer too small for %v", f.flag)
-			}
-
-			*f.lenField = int16(l)
-			if l > 0 {
-				copy(f.dataField, data[pos:pos+int(l)])
-				pos += int(l)
-			}
-			if f.extraFunc != nil {
-				f.extraFunc(int16(l))
-			}
-		} else {
-			*f.lenField = 0
-			if f.flag == fieldExtension {
-				cell.extLen = 0
-			}
+	if fieldBits&fieldAccountAddr != 0 {
+		l, n, err := readUvarint(data[pos:])
+		if err != nil {
+			return 0, err
 		}
+		pos += n
+		if len(data) < pos+int(l) {
+			return 0, fmt.Errorf("buffer too small for %v", fieldAccountAddr)
+		}
+		cell.accountAddrLen = int16(l)
+		if l > 0 {
+			copy(cell.accountAddr[:], data[pos:pos+int(l)])
+			pos += int(l)
+		}
+	} else {
+		cell.accountAddrLen = 0
+	}
+
+	if fieldBits&fieldStorageAddr != 0 {
+		l, n, err := readUvarint(data[pos:])
+		if err != nil {
+			return 0, err
+		}
+		pos += n
+		if len(data) < pos+int(l) {
+			return 0, fmt.Errorf("buffer too small for %v", fieldStorageAddr)
+		}
+		cell.storageAddrLen = int16(l)
+		if l > 0 {
+			copy(cell.storageAddr[:], data[pos:pos+int(l)])
+			pos += int(l)
+		}
+	} else {
+		cell.storageAddrLen = 0
+	}
+
+	if fieldBits&fieldHash != 0 {
+		l, n, err := readUvarint(data[pos:])
+		if err != nil {
+			return 0, err
+		}
+		pos += n
+		if len(data) < pos+int(l) {
+			return 0, fmt.Errorf("buffer too small for %v", fieldHash)
+		}
+		cell.hashLen = int16(l)
+		if l > 0 {
+			copy(cell.hash[:], data[pos:pos+int(l)])
+			pos += int(l)
+		}
+	} else {
+		cell.hashLen = 0
+	}
+
+	if fieldBits&fieldStateHash != 0 {
+		l, n, err := readUvarint(data[pos:])
+		if err != nil {
+			return 0, err
+		}
+		pos += n
+		if len(data) < pos+int(l) {
+			return 0, fmt.Errorf("buffer too small for %v", fieldStateHash)
+		}
+		cell.stateHashLen = int16(l)
+		if l > 0 {
+			copy(cell.stateHash[:], data[pos:pos+int(l)])
+			pos += int(l)
+		}
+	} else {
+		cell.stateHashLen = 0
 	}
 
 	if fieldBits&fieldAccountAddr != 0 {
@@ -984,7 +1033,11 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 		hashedKeyBuf[64-hashedKeyOffset] = terminatorHexByte // Add terminator
 
 		if cell.stateHashLen > 0 {
-			res := append([]byte{160}, cell.stateHash[:cell.stateHashLen]...)
+			// Stack-allocated buffer avoids heap allocation for the common 33-byte result
+			var resBuf [33]byte
+			resBuf[0] = 160
+			copy(resBuf[1:], cell.stateHash[:cell.stateHashLen])
+			res := resBuf[:1+cell.stateHashLen]
 			hph.keccak.Reset()
 			if hph.trace {
 				fmt.Printf("REUSED stateHash %x spk %x\n", res, cell.storageAddr[:cell.storageAddrLen])
@@ -1076,7 +1129,10 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 		}
 		if !cell.loaded.account() {
 			if cell.stateHashLen > 0 {
-				res := append([]byte{160}, cell.stateHash[:cell.stateHashLen]...)
+				var resBuf [33]byte
+				resBuf[0] = 160
+				copy(resBuf[1:], cell.stateHash[:cell.stateHashLen])
+				res := resBuf[:1+cell.stateHashLen]
 				hph.keccak.Reset()
 
 				mxTrieStateSkipRate.Inc()
@@ -1160,7 +1216,9 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 			mxTrieStateSkipRate.Inc()
 			skippedLoad.Add(1)
 			if !singleton {
-				return append(append(buf[:0], byte(160)), cell.stateHash[:cell.stateHashLen]...), nil
+				hph.hashAuxBuffer[0] = 160
+				copy(hph.hashAuxBuffer[1:], cell.stateHash[:cell.stateHashLen])
+				return hph.hashAuxBuffer[:1+cell.stateHashLen], nil
 			}
 			storageRootHashIsSet = true
 			storageRootHash = *(*common.Hash)(cell.stateHash[:cell.stateHashLen])
@@ -1238,7 +1296,9 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 				if hph.trace {
 					fmt.Printf("REUSED stateHash %x apk %x\n", cell.stateHash[:cell.stateHashLen], cell.accountAddr[:cell.accountAddrLen])
 				}
-				return append(append(buf[:0], byte(160)), cell.stateHash[:cell.stateHashLen]...), nil
+				hph.hashAuxBuffer[0] = 160
+				copy(hph.hashAuxBuffer[1:], cell.stateHash[:cell.stateHashLen])
+				return hph.hashAuxBuffer[:1+cell.stateHashLen], nil
 			}
 			// storage root update or extension update could invalidate older stateHash, so we need to reload state
 			hph.metrics.AccountLoad(cell.accountAddr[:cell.accountAddrLen])
@@ -1717,7 +1777,7 @@ func (hph *HexPatriciaHashed) readBranchAndCheckForFlushing(prefix []byte) ([]by
 
 // unfoldBranchNode returns true if unfolding has been done
 func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bool) error {
-	key := nibbles.HexToCompact(hph.currentKey[:hph.currentKeyLen])
+	key := nibbles.HexToCompactBuf(hph.currentKey[:hph.currentKeyLen], hph.unfoldKeyBuf[:])
 	hph.metrics.BranchLoad(hph.currentKey[:hph.currentKeyLen])
 
 	branchData, err := hph.readBranchAndCheckForFlushing(key)
@@ -2259,8 +2319,7 @@ func (hph *HexPatriciaHashed) fold() error {
 	}
 
 	depth := hph.depths[row]
-
-	updateKey := nibbles.HexToCompact(hph.currentKey[:updateKeyLen])
+	updateKey := nibbles.HexToCompactBuf(hph.currentKey[:updateKeyLen], hph.compactKeyBuf[:])
 	defer func() { hph.depthsToTxNum[depth] = 0 }()
 
 	if hph.trace {

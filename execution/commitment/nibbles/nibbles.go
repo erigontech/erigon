@@ -45,6 +45,25 @@ func HexToCompact(hex []byte) []byte {
 	return buf
 }
 
+// HexToCompactBuf is a zero-allocation variant of HexToCompact that writes to a caller-provided buffer.
+func HexToCompactBuf(hex []byte, buf []byte) []byte {
+	terminator := byte(0)
+	if HasTerm(hex) {
+		terminator = 1
+		hex = hex[:len(hex)-1]
+	}
+	buf[0] = terminator << 5 // the flag byte
+	if len(hex)&1 == 1 {
+		buf[0] |= 1 << 4 // odd flag
+		buf[0] |= hex[0] // first nibble is contained in the first byte
+		hex = hex[1:]
+	} else {
+		// even flag is 0
+	}
+	decodeNibbles(hex, buf[1:])
+	return buf[:len(hex)/2+1]
+}
+
 // CompactToHex converts a compact (hex-prefix) encoded byte slice back to
 // a hex nibble sequence.
 func CompactToHex(compact []byte) []byte {
