@@ -6,6 +6,7 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -136,8 +137,8 @@ func getBorLogs(msgs []*types.Message, evm *vm.EVM, gp *protocol.GasPool, ibs *s
 		}
 	}
 	for i, l := range receiptLogs {
-		l.TxIndex = txIndex
-		l.Index = logIndex + uint(i)
+		l.TxIndex = hexutil.Uint(txIndex)
+		l.Index = hexutil.Uint(logIndex + uint(i))
 	}
 	return receiptLogs, nil
 }

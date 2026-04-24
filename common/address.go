@@ -144,7 +144,7 @@ func (a *Address) SetBytes(b []byte) {
 func (a Address) MarshalText() ([]byte, error) {
 	b := a[:]
 	result := make([]byte, len(b)*2+2)
-	copy(result, hexPrefix)
+	copy(result, hexutil.HexPrefix)
 	hex.Encode(result[2:], b)
 	return result, nil
 }

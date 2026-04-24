@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
@@ -372,7 +373,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 					}
 					logs = append(logs, &types.ErigonLog{
 						Log:       *filteredLog,
-						Timestamp: header.Time,
+						Timestamp: hexutil.Uint64(header.Time),
 					})
 				}
 			}
@@ -417,7 +418,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			}
 			logs = append(logs, &types.ErigonLog{
 				Log:       *filteredLog,
-				Timestamp: header.Time,
+				Timestamp: hexutil.Uint64(header.Time),
 			})
 		}
 	}
