@@ -203,7 +203,7 @@ func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], con
 }
 
 func (g *GossipManager) registerGossipService(service serviceintf.Service[any], conditions ...ConditionFunc) error {
-	validator := g.newPubsubValidator(service)
+	validator := g.newPubsubValidator(service, conditions...)
 	forkDigest, err := g.ethClock.CurrentForkDigest()
 	if err != nil {
 		return err
