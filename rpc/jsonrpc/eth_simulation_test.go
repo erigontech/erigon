@@ -2,6 +2,8 @@ package jsonrpc
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"math"
 	"math/big"
 	"testing"
@@ -492,6 +494,58 @@ func TestSimulatedCanonicalReaderBadHeaderNumber(t *testing.T) {
 	blockHeight, err := reader.BadHeaderNumber(context.TODO(), nil, common.Hash{})
 	assert.Nil(t, blockHeight)
 	require.Error(t, err)
+}
+
+func TestValidateSimulationRequest(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		blocks    []SimulatedBlock
+		wantCode  int
+		wantError string
+	}{
+		{
+			name:      "too many blocks in request",
+			blocks:    make([]SimulatedBlock, maxSimulateBlocks+1),
+			wantCode:  rpc.ErrCodeClientLimitExceeded,
+			wantError: fmt.Sprintf("too many blocks in request: %d > %d", maxSimulateBlocks+1, maxSimulateBlocks),
+		},
+		{
+			name: "too many calls in block",
+			blocks: []SimulatedBlock{
+				{Calls: make([]ethapi.CallArgs, maxSimulateCallsPerBlock+1)},
+			},
+			wantCode:  rpc.ErrCodeClientLimitExceeded,
+			wantError: fmt.Sprintf("too many calls in block: %d > %d", maxSimulateCallsPerBlock+1, maxSimulateCallsPerBlock),
+		},
+		{
+			name: "too many calls in request",
+			blocks: []SimulatedBlock{
+				{Calls: make([]ethapi.CallArgs, maxSimulateCallsPerBlock)},
+				{Calls: make([]ethapi.CallArgs, maxSimulateCallsPerBlock)},
+				{Calls: make([]ethapi.CallArgs, 1)},
+			},
+			wantCode:  rpc.ErrCodeClientLimitExceeded,
+			wantError: fmt.Sprintf("too many calls: %d > %d", maxSimulateTotalCalls+1, maxSimulateTotalCalls),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateSimulationRequest(tc.blocks)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+
+			var customErr *rpc.CustomError
+			if !errors.As(err, &customErr) {
+				t.Fatalf("expected rpc.CustomError, got %T", err)
+			}
+			if customErr.Code != tc.wantCode {
+				t.Fatalf("unexpected error code: want %d, got %d", tc.wantCode, customErr.Code)
+			}
+			if customErr.Message != tc.wantError {
+				t.Fatalf("unexpected error message: want %q, got %q", tc.wantError, customErr.Message)
+			}
+		})
+	}
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────

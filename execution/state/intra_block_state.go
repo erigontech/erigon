@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/trie"
@@ -408,8 +409,8 @@ func releaseResources(stateObjects map[accounts.Address]*stateObject, journal *j
 
 func (sdb *IntraBlockState) AddLog(log *types.Log) {
 	sdb.journal.append(addLogChange{txIndex: sdb.txIndex})
-	log.TxIndex = uint(sdb.txIndex)
-	log.Index = sdb.logSize
+	log.TxIndex = hexutil.Uint(sdb.txIndex)
+	log.Index = hexutil.Uint(sdb.logSize)
 	if dbg.TraceLogs && (sdb.trace || dbg.TraceAccount(accounts.InternAddress(log.Address).Handle())) {
 		var topics string
 		for i := 0; i < 4 && i < len(log.Topics); i++ {
@@ -437,7 +438,7 @@ func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash common.Hash, blockNumbe
 	logs := sdb.logs[txIndex+1]
 	for _, l := range logs {
 		l.TxHash = txnHash
-		l.BlockNumber = blockNumber
+		l.BlockNumber = hexutil.Uint64(blockNumber)
 		l.BlockHash = blockHash
 	}
 	return slices.Clone(logs)
@@ -955,22 +956,7 @@ func (sdb *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int
 	// EIP161: We must check emptiness for the objects such that the account
 	// clearing (0,0,0 objects) can take effect.
 	if amount.IsZero() {
-		stateObject, err := sdb.GetOrNewStateObject(addr)
-		if err != nil {
-			return err
-		}
-
-		if stateObject.data.Empty() {
-			versionWritten(sdb, addr, BalancePath, accounts.NilKey, uint256.Int{})
-			if _, ok := sdb.journal.dirties[addr]; !ok {
-				if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
-					fmt.Printf("%d (%d.%d) Touch %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
-				}
-				sdb.touchAccount(addr)
-			}
-		}
-
-		return nil
+		return sdb.TouchAccount(addr)
 	}
 
 	prev, wasCommited, _ := sdb.getBalance(addr)
@@ -1008,6 +994,27 @@ func (sdb *IntraBlockState) touchAccount(addr accounts.Address) {
 		// flattened journals.
 		sdb.journal.dirty(addr)
 	}
+}
+
+// TouchAccount materializes an empty account and records the zero-balance touch
+// needed for state clearing and trie consistency.
+func (sdb *IntraBlockState) TouchAccount(addr accounts.Address) error {
+	stateObject, err := sdb.GetOrNewStateObject(addr)
+	if err != nil {
+		return err
+	}
+
+	if stateObject.data.Empty() {
+		versionWritten(sdb, addr, BalancePath, accounts.NilKey, uint256.Int{})
+		if _, ok := sdb.journal.dirties[addr]; !ok {
+			if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
+				fmt.Printf("%d (%d.%d) Touch %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
+			}
+			sdb.touchAccount(addr)
+		}
+	}
+
+	return nil
 }
 
 func (sdb *IntraBlockState) getVersionedAccount(addr accounts.Address, readStorage bool) (*accounts.Account, ReadSource, Version, error) {
@@ -1140,10 +1147,17 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readA
 // SubBalance subtracts amount from the account associated with addr.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) SubBalance(addr accounts.Address, amount uint256.Int, reason tracing.BalanceChangeReason) error {
-	if amount.IsZero() && addr != params.SystemAddress {
-		// We skip this early exit if the sender is the system address
-		// because Gnosis has a special logic to create an empty system account
-		// even after Spurious Dragon (see PR 5645 and Issue 18276).
+	if amount.IsZero() {
+		if addr == params.SystemAddress {
+			// Gnosis/AuRa keeps an empty system account even after
+			// Spurious Dragon (see PR 5645 and Issue 18276).
+			//
+			// The primary syscall path in evm.call() handles this via
+			// TouchAccount directly; this branch is retained as
+			// defense-in-depth for other callers (AuRa engine,
+			// consensus callbacks).
+			return sdb.TouchAccount(addr)
+		}
 		return nil
 	}
 
@@ -1965,9 +1979,6 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 
 		so.newlyCreated = false
 		sdb.stateObjectsDirty[addr] = struct{}{}
-		if so.deleted {
-			delete(sdb.versionedReads, addr)
-		}
 	}
 	// Invalidate journal because reverting across transactions is not allowed.
 	sdb.clearJournalAndRefund()
@@ -2283,6 +2294,41 @@ func (sdb *IntraBlockState) MarkReadsInternal(addr accounts.Address) {
 		return
 	}
 	for key, vr := range sdb.versionedReads[addr] {
+		vr.internal = true
+		sdb.versionedReads[addr][key] = vr
+	}
+}
+
+// SnapshotVersionedReadKeys returns the current set of read keys for addr.
+// Used with MarkNewReadsInternal to mark only reads added after the snapshot,
+// preserving pre-existing legitimate reads.
+func (sdb *IntraBlockState) SnapshotVersionedReadKeys(addr accounts.Address) map[AccountKey]struct{} {
+	if sdb.versionedReads == nil {
+		return nil
+	}
+	reads := sdb.versionedReads[addr]
+	if len(reads) == 0 {
+		return nil
+	}
+	snapshot := make(map[AccountKey]struct{}, len(reads))
+	for k := range reads {
+		snapshot[k] = struct{}{}
+	}
+	return snapshot
+}
+
+// MarkNewReadsInternal marks as internal only the reads for addr that were
+// added after the given snapshot. Use this when gas-calculation-only reads
+// were recorded on top of earlier legitimate reads — the legitimate ones
+// must remain non-internal so they appear in the block access list.
+func (sdb *IntraBlockState) MarkNewReadsInternal(addr accounts.Address, before map[AccountKey]struct{}) {
+	if sdb.versionedReads == nil {
+		return
+	}
+	for key, vr := range sdb.versionedReads[addr] {
+		if _, existed := before[key]; existed {
+			continue
+		}
 		vr.internal = true
 		sdb.versionedReads[addr][key] = vr
 	}

@@ -70,10 +70,10 @@ jobs:
           python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
 
       - name: Restore rpc-tests cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ runner.workspace }}/rpc-tests
-          key: rpc-tests-${{ runner.os }}-${{ runner.arch }}-v2.6.0
+          key: rpc-tests-${{ runner.os }}-${{ runner.arch }}-v2.7.0
 
       - name: Run RPC Integration Tests
         id: test_step

@@ -99,6 +99,12 @@ func (t *TopicSubscriptions) Remove(topic string) error {
 	if sub.sub != nil {
 		sub.sub.Cancel()
 		sub.sub = nil
+		name := extractTopicName(topic)
+		if gossip.IsTopicBeaconAttestation(name) {
+			t.p2p.UpdateENRAttSubnets(extractSubnetIndexByGossipTopic(name), false)
+		} else if gossip.IsTopicSyncCommittee(name) {
+			t.p2p.UpdateENRSyncNets(extractSubnetIndexByGossipTopic(name), false)
+		}
 	}
 	sub.topic.Close()
 	sub.topic = nil
@@ -116,6 +122,12 @@ func (t *TopicSubscriptions) Unsubscribe(topic string) error {
 	if sub.sub != nil {
 		sub.sub.Cancel()
 		sub.sub = nil
+		name := extractTopicName(topic)
+		if gossip.IsTopicBeaconAttestation(name) {
+			t.p2p.UpdateENRAttSubnets(extractSubnetIndexByGossipTopic(name), false)
+		} else if gossip.IsTopicSyncCommittee(name) {
+			t.p2p.UpdateENRSyncNets(extractSubnetIndexByGossipTopic(name), false)
+		}
 	}
 	sub.expiry = time.Unix(0, 0) // reset
 	return nil
@@ -142,16 +154,16 @@ func (t *TopicSubscriptions) SubscribeWithExpiry(topic string, expiry time.Time)
 		}
 		log.Info("[GossipManager] Subscribed to topic", "topic", topic, "expiration", expiry)
 		sub.sub = s
+
+		// update ENR only on first subscription, not on expiry renewal
+		name := extractTopicName(topic)
+		if gossip.IsTopicBeaconAttestation(name) {
+			t.p2p.UpdateENRAttSubnets(extractSubnetIndexByGossipTopic(name), true)
+		} else if gossip.IsTopicSyncCommittee(name) {
+			t.p2p.UpdateENRSyncNets(extractSubnetIndexByGossipTopic(name), true)
+		}
 	}
 	sub.expiry = expiry
-
-	// update ENR on subscription
-	name := extractTopicName(topic)
-	if gossip.IsTopicBeaconAttestation(name) {
-		t.p2p.UpdateENRAttSubnets(extractSubnetIndexByGossipTopic(name), true)
-	} else if gossip.IsTopicSyncCommittee(name) {
-		t.p2p.UpdateENRSyncNets(extractSubnetIndexByGossipTopic(name), true)
-	}
 	return nil
 }
 
