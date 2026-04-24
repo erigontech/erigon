@@ -181,7 +181,10 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 	s.seenEnvelopesCache.Add(seenKey, struct{}{})
 
 	// Emit SSE event for execution_payload_available [New in Gloas:EIP7732]
-	s.emitters.Operation().SendExecutionPayloadAvailable(signedEnvelope)
+	s.emitters.Operation().SendExecutionPayloadAvailable(&beaconevents.ExecutionPayloadAvailableData{
+		Slot:      block.Block.Slot,
+		BlockRoot: beaconBlockRoot,
+	})
 
 	log.Debug("Processed execution payload via gossip",
 		"slot", block.Block.Slot,

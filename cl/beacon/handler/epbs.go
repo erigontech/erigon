@@ -104,7 +104,15 @@ func (a *ApiHandler) PostEthV1ValidatorDutiesPtc(w http.ResponseWriter, r *http.
 		return nil, err
 	}
 
-	return newBeaconResponse(duties), nil
+	// PTC duties use the same dependent_root as proposer duties (start of epoch shuffling)
+	dependentRoot, err := a.getDependentRoot(epoch, false)
+	if err != nil {
+		return nil, err
+	}
+
+	return newBeaconResponse(duties).
+		WithOptimistic(a.forkchoiceStore.IsHeadOptimistic()).
+		With("dependent_root", dependentRoot), nil
 }
 
 // ---- Payload Attestation Data ----
@@ -199,43 +207,62 @@ func (a *ApiHandler) GetEthV1BeaconPoolPayloadAttestations(w http.ResponseWriter
 	return newBeaconResponse(results), nil
 }
 
-// PostEthV1BeaconPoolPayloadAttestations submits a PayloadAttestationMessage.
+// PostEthV1BeaconPoolPayloadAttestations submits an array of PayloadAttestationMessages.
 // POST /eth/v1/beacon/pool/payload_attestations
 // [New in Gloas:EIP7732]
 func (a *ApiHandler) PostEthV1BeaconPoolPayloadAttestations(w http.ResponseWriter, r *http.Request) {
-	req := &cltypes.PayloadAttestationMessage{}
-	if err := json.NewDecoder(r.Body).Decode(req); err != nil {
+	req := []*cltypes.PayloadAttestationMessage{}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
 
-	// Validate via PayloadAttestationService (handles dedup, clock disparity, pending queue,
-	// and delegates to forkchoice.OnPayloadAttestationMessage for signature + PTC checks)
-	if a.payloadAttestationService != nil {
-		if err := a.payloadAttestationService.ProcessMessage(r.Context(), nil, req); err != nil {
-			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
-			return
+	failures := []poolingFailure{}
+	for i, msg := range req {
+		// Validate via PayloadAttestationService (handles dedup, clock disparity, pending queue,
+		// and delegates to forkchoice.OnPayloadAttestationMessage for signature + PTC checks)
+		if a.payloadAttestationService != nil {
+			if err := a.payloadAttestationService.ProcessMessage(r.Context(), nil, msg); err != nil {
+				failures = append(failures, poolingFailure{
+					Index:   i,
+					Message: err.Error(),
+				})
+				continue
+			}
+		}
+
+		// Store in pool for GET endpoint serving
+		if a.epbsPool != nil && msg.Data != nil {
+			a.epbsPool.PayloadAttestations.Add(pool.PayloadAttestationKey{
+				Slot:           msg.Data.Slot,
+				ValidatorIndex: msg.ValidatorIndex,
+			}, msg)
+		}
+
+		// Broadcast to gossip
+		if a.sentinel != nil {
+			encodedSSZ, err := msg.EncodeSSZ(nil)
+			if err != nil {
+				beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
+				return
+			}
+			if err := a.gossipManager.Publish(r.Context(), gossip.TopicNamePayloadAttestation, encodedSSZ); err != nil {
+				a.logger.Debug("[Beacon REST] failed to publish payload attestation to gossip", "err", err)
+			}
 		}
 	}
 
-	// Store in pool for GET endpoint serving
-	if a.epbsPool != nil && req.Data != nil {
-		a.epbsPool.PayloadAttestations.Add(pool.PayloadAttestationKey{
-			Slot:           req.Data.Slot,
-			ValidatorIndex: req.ValidatorIndex,
-		}, req)
-	}
-
-	// Broadcast to gossip
-	if a.sentinel != nil {
-		encodedSSZ, err := req.EncodeSSZ(nil)
-		if err != nil {
-			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
-			return
+	if len(failures) > 0 {
+		errResp := poolingError{
+			Code:     http.StatusBadRequest,
+			Message:  "some failures",
+			Failures: failures,
 		}
-		if err := a.gossipManager.Publish(r.Context(), gossip.TopicNamePayloadAttestation, encodedSSZ); err != nil {
-			a.logger.Debug("[Beacon REST] failed to publish payload attestation to gossip", "err", err)
+		w.WriteHeader(http.StatusBadRequest)
+		if err := json.NewEncoder(w).Encode(errResp); err != nil {
+			a.logger.Warn("failed to encode response", "err", err)
 		}
+		return
 	}
 	w.WriteHeader(http.StatusOK)
 }
@@ -276,8 +303,13 @@ func (a *ApiHandler) GetEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrite
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
 			fmt.Errorf("block not found for block root %v", blockRoot))
 	}
-	epoch := block.Block.Slot / a.beaconChainCfg.SlotsPerEpoch
-	return newBeaconResponse(envelope).WithVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch)), nil
+	slot := block.Block.Slot
+	epoch := slot / a.beaconChainCfg.SlotsPerEpoch
+	isFinalized := slot <= a.forkchoiceStore.FinalizedSlot()
+	return newBeaconResponse(envelope).
+		WithVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch)).
+		WithOptimistic(a.forkchoiceStore.IsRootOptimistic(blockRoot)).
+		WithFinalized(isFinalized), nil
 }
 
 // ---- Execution Payload Bid ----
