@@ -210,6 +210,13 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		localValidatorIsProposer  bool
 	)
 	if err := a.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		// If our head state is at a different epoch than the aggregate, committee
+		// computations will use a stale RANDAO mix and produce wrong results.
+		// Ignore early to avoid wasted work and false rejections.
+		if state.Epoch(headState) != target.Epoch {
+			return fmt.Errorf("head epoch %d != target epoch %d: %w",
+				state.Epoch(headState), target.Epoch, ErrIgnore)
+		}
 		// [IGNORE] the epoch of aggregate.data.slot is either the current or previous epoch
 		// When the head state lags behind (solo validator / genesis start), use the
 		// highest seen slot to widen the accepted epoch window.
@@ -268,13 +275,6 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 
 		// [REJECT] The aggregator's validator index is within the committee -- i.e. aggregate_and_proof.aggregator_index in get_beacon_committee(state, aggregate.data.slot, index).
 		if !slices.Contains(committee, aggregateAndProof.SignedAggregateAndProof.Message.AggregatorIndex) {
-			// If our head state is at a different epoch than the aggregate, the
-			// RANDAO-based committee computation may be stale. Ignore instead of
-			// reject to avoid banning legitimate peers while we are catching up.
-			if state.Epoch(headState) != target.Epoch {
-				return fmt.Errorf("aggregator not in committee but head epoch %d != target epoch %d: %w",
-					state.Epoch(headState), target.Epoch, ErrIgnore)
-			}
 			return errors.New("committee index not in committee")
 		}
 		// [REJECT] The aggregate attestation's target block is an ancestor of the block named in the LMD vote -- i.e. get_checkpoint_block(store, aggregate.data.beacon_block_root, aggregate.data.target.epoch) == aggregate.data.target.root
