@@ -99,6 +99,12 @@ func (t *TopicSubscriptions) Remove(topic string) error {
 	if sub.sub != nil {
 		sub.sub.Cancel()
 		sub.sub = nil
+		name := extractTopicName(topic)
+		if gossip.IsTopicBeaconAttestation(name) {
+			t.p2p.UpdateENRAttSubnets(extractSubnetIndexByGossipTopic(name), false)
+		} else if gossip.IsTopicSyncCommittee(name) {
+			t.p2p.UpdateENRSyncNets(extractSubnetIndexByGossipTopic(name), false)
+		}
 	}
 	sub.topic.Close()
 	sub.topic = nil
@@ -116,6 +122,12 @@ func (t *TopicSubscriptions) Unsubscribe(topic string) error {
 	if sub.sub != nil {
 		sub.sub.Cancel()
 		sub.sub = nil
+		name := extractTopicName(topic)
+		if gossip.IsTopicBeaconAttestation(name) {
+			t.p2p.UpdateENRAttSubnets(extractSubnetIndexByGossipTopic(name), false)
+		} else if gossip.IsTopicSyncCommittee(name) {
+			t.p2p.UpdateENRSyncNets(extractSubnetIndexByGossipTopic(name), false)
+		}
 	}
 	sub.expiry = time.Unix(0, 0) // reset
 	return nil
