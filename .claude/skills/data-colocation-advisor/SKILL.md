@@ -8,6 +8,10 @@ allowed-tools: Bash, Read
 
 You are a storage-layout advisor. You run `pagemon` to measure which file pages a database query actually loads, then interpret the results and recommend how to improve data colocation to reduce read amplification.
 
+## How to invoke this skill
+
+The user types `/data-colocation-advisor` in the Claude Code prompt. Go directly to Step 1.
+
 ## Tool: pagemon
 
 Built from `cmd/pagemon/`. If not present, build it first:
@@ -17,6 +21,8 @@ make pagemon
 # binary at ./build/bin/pagemon
 ```
 
+Runs on **Linux and macOS**. The `mincore(2)` syscall is available on both.
+
 Commands:
 
 ```
@@ -25,19 +31,21 @@ pagemon measure (--cmd "<shell>" | --pid <pid>) [--no-drop] <file>...  # before/
 pagemon watch   (--cmd "<shell>" | --pid <pid>) [--interval 50ms] <file>...  # temporal sampling
 ```
 
-Key distinction:
+Key distinctions:
 - `measure` — single before/after snapshot pair. No `--interval`. Use when you want a clean delta.
-- `watch` — polls mincore every `--interval` throughout execution and adds temporal phase breakdown.
+- `watch` — polls mincore every `--interval` throughout execution and adds temporal phase breakdown. Prints live status to stderr every 5 s so the user can see sampling is active.
 - `--pid` attaches to an already-running process (no cache drop). `--cmd` launches a new one.
 - `--no-drop` skips the cache flush on `measure --cmd` (always implied with `--pid`).
+- **macOS**: `/proc/sys/vm/drop_caches` does not exist. Always use `--no-drop` or `--pid` on macOS.
 
 ## Workflow
 
 ### Step 1: Clarify (ask before running anything)
 
 - Which database files to monitor? (MDBX `.dat` files, SQLite, Postgres heap files, etc.)
-- What command or query represents the typical workload?
-- Is this a production system? (determines --no-drop)
+- What command or query represents the typical workload? Or is there a PID already running?
+- Linux or macOS? (macOS requires `--no-drop` always)
+- Is this a production system? (production: always `--no-drop` regardless of OS)
 - Roughly how many rows/bytes does the query logically need?
 
 ### Step 2: Measure
@@ -45,10 +53,10 @@ Key distinction:
 Choose based on what you have:
 
 ```bash
-# You control the command — clean baseline (drops cache, needs root on Linux):
+# Linux, non-production, you control the command — drops cache first (needs root):
 ./build/bin/pagemon measure --cmd "<query-command>" /path/to/db.dat
 
-# Production system or macOS — skip cache drop:
+# Production OR macOS — skip cache drop:
 ./build/bin/pagemon measure --cmd "<query-command>" --no-drop /path/to/db.dat
 
 # Attach to an already-running process (Ctrl-C to stop):
@@ -57,6 +65,11 @@ Choose based on what you have:
 # Want temporal phase breakdown too? Use watch instead of measure:
 ./build/bin/pagemon watch --pid <pid> --interval 50ms /path/to/db.dat
 ./build/bin/pagemon watch --cmd "<query-command>" /path/to/db.dat
+```
+
+`watch` prints a live status line to stderr every 5 s, e.g.:
+```
+  [10s] accounts.kv: +4,200 pages new (+16.8 MB loaded)
 ```
 
 For Erigon domain snapshot files, typical targets:
