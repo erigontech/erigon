@@ -375,6 +375,7 @@ func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWrit
 
 	w := &DomainBufferedWriter{
 		discard:   discard,
+		name:      dt.d.Name,
 		aux:       make([]byte, 0, 128),
 		valsTable: dt.d.ValuesTable,
 		largeVals: dt.d.LargeValues,
@@ -392,6 +393,7 @@ type DomainBufferedWriter struct {
 
 	discard bool
 
+	name      kv.Domain
 	valsTable string
 	largeVals bool
 
@@ -417,14 +419,18 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if w.discard {
 		return nil
 	}
+	t := time.Now()
 	if err := w.h.Flush(ctx, tx); err != nil {
 		return err
 	}
+	log.Warn("[flush] domain history+ii", "domain", w.name, "took", time.Since(t).Round(time.Millisecond))
 
 	if w.largeVals {
+		t = time.Now()
 		if err := w.values.Load(tx, w.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 			return err
 		}
+		log.Warn("[flush] domain values (largeVals)", "domain", w.name, "took", time.Since(t).Round(time.Millisecond))
 		w.Close()
 		return nil
 	}
@@ -434,6 +440,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		return err
 	}
 	defer valuesCursor.Close()
+	t = time.Now()
 	if err := w.values.Load(tx, w.valsTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		foundVal, err := valuesCursor.SeekBothRange(k, v[:8])
 		if err != nil {
@@ -455,6 +462,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	}, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 		return err
 	}
+	log.Warn("[flush] domain values", "domain", w.name, "took", time.Since(t).Round(time.Millisecond))
 	w.Close()
 
 	return nil

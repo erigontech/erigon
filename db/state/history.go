@@ -484,12 +484,16 @@ func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if w.discard {
 		return nil
 	}
+	t := time.Now()
 	if err := w.ii.Flush(ctx, tx); err != nil {
 		return err
 	}
+	log.Warn("[flush] history ii", "ii", w.ii.name, "took", time.Since(t).Round(time.Millisecond))
+	t = time.Now()
 	if err := w.historyVals.Load(tx, w.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
+	log.Warn("[flush] history vals", "ii", w.ii.name, "took", time.Since(t).Round(time.Millisecond))
 	w.close()
 	return nil
 }
