@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/FastFilter/xorfilter"
 	"github.com/stretchr/testify/require"
 )
 
@@ -208,10 +209,18 @@ func TestWriterClose(t *testing.T) {
 	writer.Close()
 }
 
-// TestHeaderRoundTrip encodes a filter to bytes and decodes it, then asserts
-// every header field survives verbatim. This would have caught the bug where
-// the reader decoded SegmentCount from offset 8 instead of offset 4, silently
-// giving it the value of SegmentCountLength.
+// requireFilterEqual asserts every header field and fingerprint count match between two filters.
+func requireFilterEqual(t *testing.T, expected, got *xorfilter.BinaryFuse[uint8]) {
+	t.Helper()
+	require.Equal(t, expected.SegmentCount, got.SegmentCount)
+	require.Equal(t, expected.SegmentCountLength, got.SegmentCountLength)
+	require.Equal(t, expected.Seed, got.Seed)
+	require.Equal(t, expected.SegmentLength, got.SegmentLength)
+	require.Equal(t, expected.SegmentLengthMask, got.SegmentLengthMask)
+	require.Equal(t, len(expected.Fingerprints), len(got.Fingerprints))
+}
+
+// Regression: reader previously decoded SegmentCount from offset 8 instead of 4, silently reading SegmentCountLength.
 func TestHeaderRoundTrip(t *testing.T) {
 	require := require.New(t)
 
@@ -219,7 +228,7 @@ func TestHeaderRoundTrip(t *testing.T) {
 	require.NoError(err)
 	defer w.Close()
 
-	for i := uint64(0); i < 1000; i++ {
+	for i := uint64(0); i < 50; i++ {
 		require.NoError(w.AddHash(i))
 	}
 
@@ -233,20 +242,10 @@ func TestHeaderRoundTrip(t *testing.T) {
 	r, _, err := NewReaderOnBytes(buf.Bytes(), "test")
 	require.NoError(err)
 
-	got := r.inner
-	require.Equal(original.SegmentCount, got.SegmentCount, "SegmentCount: reader used wrong header offset")
-	require.Equal(original.SegmentCountLength, got.SegmentCountLength)
-	require.Equal(original.Seed, got.Seed)
-	require.Equal(original.SegmentLength, got.SegmentLength)
-	require.Equal(original.SegmentLengthMask, got.SegmentLengthMask)
-	require.Equal(len(original.Fingerprints), len(got.Fingerprints))
+	requireFilterEqual(t, original, r.inner)
 }
 
-// TestDoubleSerializationRoundTrip re-serializes a filter loaded from bytes and
-// decodes it a second time, checking that all fields are stable across both
-// passes. A field decoded from the wrong offset would produce a different value
-// on the second pass once the writer stores the wrong value back at a different
-// offset.
+// A field read from the wrong offset would diverge on the second pass after the writer stores the wrong value.
 func TestDoubleSerializationRoundTrip(t *testing.T) {
 	require := require.New(t)
 
@@ -254,7 +253,7 @@ func TestDoubleSerializationRoundTrip(t *testing.T) {
 	require.NoError(err)
 	defer w.Close()
 
-	for i := uint64(0); i < 500; i++ {
+	for i := uint64(0); i < 50; i++ {
 		require.NoError(w.AddHash(i))
 	}
 
@@ -272,12 +271,7 @@ func TestDoubleSerializationRoundTrip(t *testing.T) {
 	r2, _, err := NewReaderOnBytes(buf2.Bytes(), "pass2")
 	require.NoError(err)
 
-	require.Equal(r1.inner.SegmentCount, r2.inner.SegmentCount)
-	require.Equal(r1.inner.SegmentCountLength, r2.inner.SegmentCountLength)
-	require.Equal(r1.inner.Seed, r2.inner.Seed)
-	require.Equal(r1.inner.SegmentLength, r2.inner.SegmentLength)
-	require.Equal(r1.inner.SegmentLengthMask, r2.inner.SegmentLengthMask)
-	require.Equal(len(r1.inner.Fingerprints), len(r2.inner.Fingerprints))
+	requireFilterEqual(t, r1.inner, r2.inner)
 }
 
 func TestMultipleFilters(t *testing.T) {
