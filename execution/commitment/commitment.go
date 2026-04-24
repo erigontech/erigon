@@ -241,10 +241,10 @@ func cellEncodeDataFromCell(c *cell) cellEncodeData {
 // This allows collecting updates during the fold phase and running computeCellHash + EncodeBranch in parallel.
 type DeferredBranchUpdate struct {
 	prefixBuf [64]byte // pre-allocated buffer for prefix
-	prefix   []byte
-	bitmap   uint16
-	touchMap uint16
-	afterMap uint16
+	prefix    []byte
+	bitmap    uint16
+	touchMap  uint16
+	afterMap  uint16
 
 	// Cells needed for EncodeBranch - only the fields required for encoding
 	cells [16]cellEncodeData
@@ -665,7 +665,7 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	// Get a pooled DeferredBranchUpdate and copy all fields.
 	// getDeferredUpdate handles copying the prefix into its own prefixBuf.
 	upd := getDeferredUpdate(prefix, bitmap, touchMap, afterMap, cells, prev)
-	
+
 	be.pendingPrefixes.Set(upd.prefix, struct{}{})
 	be.deferred = append(be.deferred, upd)
 	return nil
