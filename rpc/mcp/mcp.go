@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"net/http"
 	"os"
 	"strings"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -1200,7 +1202,16 @@ func (e *ErigonMCPServer) ServeContext(ctx context.Context) error {
 
 // ServeSSE starts MCP server with SSE transport
 func (e *ErigonMCPServer) ServeSSE(addr string) (err error) {
-	sse := server.NewSSEServer(e.mcpServer)
+	// Tag every tool-call context with NonBlockingAcquire so that BeginRo
+	// fails fast (ErrServerOverloaded) instead of blocking indefinitely when
+	// all DB read slots are held by a concurrent write/ETL transaction.
+	// Without this the SSE handler goroutine waits forever and the client
+	// never receives a response. The HTTP RPC layer sets the same flag in
+	// node/rpcstack.go.
+	contextFunc := func(ctx context.Context, _ *http.Request) context.Context {
+		return kv.WithNonBlockingAcquire(ctx)
+	}
+	sse := server.NewSSEServer(e.mcpServer, server.WithSSEContextFunc(contextFunc))
 
 	defer func() {
 		if r := recover(); r != nil {
