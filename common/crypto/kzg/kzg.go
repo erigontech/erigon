@@ -31,9 +31,9 @@ import (
 const (
 	BlobCommitmentVersionKZG uint8 = 0x01
 	PrecompileInputLength    int   = 192
-	DataPerBlob                    = 64
-	CellsPerBlob                   = 128
-	CellProofsPerBlob              = 128
+	CellsPerBlob                   = goethkzg.CellsPerExtBlob //128
+	DataPerBlob                    = CellsPerBlob / 2         //64
+	CellProofsPerBlob              = CellsPerBlob             //128
 )
 
 type VersionedHash [32]byte

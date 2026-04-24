@@ -141,6 +141,44 @@ func TestComputeCellsAndVerifyBatch(t *testing.T) {
 	}
 }
 
+func TestVerifyCellProofBatchValidation(t *testing.T) {
+	blob := randBlob()
+	kzgCtx := Ctx()
+
+	commitment, err := kzgCtx.BlobToKZGCommitment(&blob, 0)
+	if err != nil {
+		t.Fatalf("failed to create commitment: %v", err)
+	}
+	_, proofs, err := kzgCtx.ComputeCellsAndKZGProofs(&blob, 2)
+	if err != nil {
+		t.Fatalf("failed to compute cell proofs: %v", err)
+	}
+	var cellProofs []goethkzg.KZGProof
+	for _, p := range &proofs {
+		cellProofs = append(cellProofs, p)
+	}
+	blobsBytes := [][]byte{blob[:]}
+
+	t.Run("mismatched commitments and blobs count", func(t *testing.T) {
+		// 2 commitments for 1 blob
+		if err := VerifyCellProofBatch(blobsBytes, []goethkzg.KZGCommitment{commitment, commitment}, cellProofs); err == nil {
+			t.Fatal("expected error for mismatched commitments and blobs count")
+		}
+	})
+	t.Run("mismatched cellProofs count", func(t *testing.T) {
+		// truncate proofs to be shorter than expected
+		if err := VerifyCellProofBatch(blobsBytes, []goethkzg.KZGCommitment{commitment}, cellProofs[:len(cellProofs)-1]); err == nil {
+			t.Fatal("expected error for mismatched cellProofs count")
+		}
+	})
+	t.Run("invalid blob length", func(t *testing.T) {
+		shortBlob := make([]byte, 100)
+		if err := VerifyCellProofBatch([][]byte{shortBlob}, []goethkzg.KZGCommitment{commitment}, cellProofs); err == nil {
+			t.Fatal("expected error for invalid blob length")
+		}
+	})
+}
+
 // ---------------------------------------------------------------------------
 // VerifyCells (partial cell verification)
 // ---------------------------------------------------------------------------
@@ -380,9 +418,18 @@ func BenchmarkVerifyCells(b *testing.B) {
 	blob := randBlob()
 	kzgCtx := Ctx()
 
-	commitment, _ := kzgCtx.BlobToKZGCommitment(&blob, 0)
-	_, cellProofs, _ := kzgCtx.ComputeCellsAndKZGProofs(&blob, 2)
-	cells, _ := ComputeCells([]goethkzg.Blob{blob})
+	commitment, err := kzgCtx.BlobToKZGCommitment(&blob, 0)
+	if err != nil {
+		b.Fatalf("failed to compute commitment: %v", err)
+	}
+	_, cellProofs, err := kzgCtx.ComputeCellsAndKZGProofs(&blob, 2)
+	if err != nil {
+		b.Fatalf("failed to compute cell proofs: %v", err)
+	}
+	cells, err := ComputeCells([]goethkzg.Blob{blob})
+	if err != nil {
+		b.Fatalf("failed to compute cells: %v", err)
+	}
 
 	indices := make([]uint64, 8)
 	for i := range indices {
@@ -406,7 +453,10 @@ func BenchmarkVerifyCells(b *testing.B) {
 func BenchmarkRecoverBlobs(b *testing.B) {
 	blob := randBlob()
 	blobs := []goethkzg.Blob{blob}
-	cells, _ := ComputeCells(blobs)
+	cells, err := ComputeCells(blobs)
+	if err != nil {
+		b.Fatalf("failed to compute cells: %v", err)
+	}
 
 	// Use exactly DataPerBlob cells (minimum for recovery)
 	indices := make([]uint64, DataPerBlob)

@@ -25,7 +25,13 @@ import (
 func VerifyCellProofBatch(blobsBytes [][]byte, commitments []goethkzg.KZGCommitment, cellProofs []goethkzg.KZGProof) error {
 	InitKZGCtx()
 
+	if len(commitments) != len(blobsBytes) {
+		return errors.New("mismatched commitments and blobs count")
+	}
 	totalCells := len(blobsBytes) * goethkzg.CellsPerExtBlob
+	if len(cellProofs) != totalCells {
+		return errors.New("mismatched cellProofs count for given blobs")
+	}
 	commitsExt := make([]goethkzg.KZGCommitment, totalCells)
 	cellIndices := make([]uint64, totalCells)
 	cells := make([]*goethkzg.Cell, totalCells)
@@ -47,6 +53,9 @@ func VerifyCellProofBatch(blobsBytes [][]byte, commitments []goethkzg.KZGCommitm
 
 	// Compute cells and fill cellIndices per blob.
 	for i, blob := range blobsBytes {
+		if len(blob) != len(goethkzg.Blob{}) {
+			return errors.New("invalid blob length")
+		}
 		cellsI, err := gokzgCtx.ComputeCells((*goethkzg.Blob)(blob), 2)
 		if err != nil {
 			return err
@@ -78,7 +87,7 @@ func VerifyCells(cells []goethkzg.Cell, commitments []goethkzg.KZGCommitment, pr
 	case len(proofs)%len(commitments) != 0:
 		return errors.New("len(proofs) must be a multiple of len(commitments)")
 	case len(cells) != len(proofs):
-		return errors.New("mismatched len(cellProofs) and len(cells)")
+		return errors.New("mismatched len(proofs) and len(cells)")
 	}
 	if err := validateCellIndices(cells, cellIndices); err != nil {
 		return err
