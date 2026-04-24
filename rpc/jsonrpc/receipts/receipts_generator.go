@@ -17,6 +17,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
@@ -412,8 +413,8 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	receipt.FirstLogIndexWithinBlock = firstLogIndex
 
 	for i := range receipt.Logs {
-		receipt.Logs[i].TxIndex = uint(index)
-		receipt.Logs[i].Index = uint(firstLogIndex + uint32(i))
+		receipt.Logs[i].TxIndex = hexutil.Uint(index)
+		receipt.Logs[i].Index = hexutil.Uint(firstLogIndex + uint32(i))
 	}
 
 	g.addToCacheReceipt(txnHash, receipt)
