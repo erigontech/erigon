@@ -31,6 +31,7 @@ import (
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
@@ -658,10 +659,12 @@ func (sd *TemporalMemBatch) flushWritersWithTimings(ctx context.Context, tx kv.R
 	for di, ws := range sd.pastDomainWriters {
 		t := time.Now()
 		for i := len(ws) - 1; i >= 0; i-- {
+			wt := time.Now()
 			if err := ws[i].Flush(ctx, tx); err != nil {
 				return nil, err
 			}
 			ws[i].Close()
+			log.Debug("[flush] past domain writer", "domain", kv.Domain(di).String(), "i", i, "took", common.Round(time.Since(wt), 0))
 		}
 		if len(ws) > 0 {
 			timings = append(timings, "past_"+kv.Domain(di).String(), common.Round(time.Since(t), 0))
@@ -682,9 +685,11 @@ func (sd *TemporalMemBatch) flushWritersWithTimings(ctx context.Context, tx kv.R
 
 	t := time.Now()
 	for i := len(sd.pastIIWriters) - 1; i >= 0; i-- {
+		wt := time.Now()
 		if err := sd.pastIIWriters[i].Flush(ctx, tx); err != nil {
 			return nil, err
 		}
+		log.Debug("[flush] past ii writer", "ii", sd.pastIIWriters[i].name.String(), "took", common.Round(time.Since(wt), 0))
 		sd.pastIIWriters[i].close()
 	}
 	if len(sd.pastIIWriters) > 0 {
