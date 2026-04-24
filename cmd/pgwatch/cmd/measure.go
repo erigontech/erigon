@@ -14,24 +14,33 @@ import (
 
 var measureFlags struct {
 	cmd    string
+	pid    int
 	noDrop bool
 }
 
 var measureCmd = &cobra.Command{
-	Use:   "measure --cmd <shell-command> [--no-drop] <file>...",
-	Short: "Drop caches, run a command, then report newly loaded pages",
+	Use:   "measure (--cmd <shell-command> | --pid <pid>) [--no-drop] <file>...",
+	Short: "Report pages newly loaded into cache by a command or a running PID",
 	Args:  cobra.MinimumNArgs(1),
 	RunE:  runMeasure,
 }
 
 func init() {
-	measureCmd.Flags().StringVar(&measureFlags.cmd, "cmd", "", "shell command to run (required)")
-	measureCmd.Flags().BoolVar(&measureFlags.noDrop, "no-drop", false, "skip drop_caches (observational/production mode)")
-	_ = measureCmd.MarkFlagRequired("cmd")
+	measureCmd.Flags().StringVar(&measureFlags.cmd, "cmd", "", "shell command to run")
+	measureCmd.Flags().IntVar(&measureFlags.pid, "pid", 0, "PID of an already-running process to watch until it exits (or Ctrl-C)")
+	measureCmd.Flags().BoolVar(&measureFlags.noDrop, "no-drop", false, "skip drop_caches (always implied with --pid)")
 }
 
 func runMeasure(cmd *cobra.Command, args []string) error {
-	if !measureFlags.noDrop {
+	if measureFlags.cmd == "" && measureFlags.pid == 0 {
+		return fmt.Errorf("one of --cmd or --pid is required")
+	}
+	if measureFlags.cmd != "" && measureFlags.pid != 0 {
+		return fmt.Errorf("--cmd and --pid are mutually exclusive")
+	}
+
+	// Drop caches only when launching our own command and --no-drop is not set.
+	if measureFlags.pid == 0 && !measureFlags.noDrop {
 		if err := dropCaches(); err != nil {
 			return fmt.Errorf("drop_caches: %w (use --no-drop for production systems)", err)
 		}
@@ -51,13 +60,22 @@ func runMeasure(cmd *cobra.Command, args []string) error {
 		sampled[i] = samp
 	}
 
-	// Run command.
+	// Run command or wait for PID.
+	var cmdLabel string
 	t0 := time.Now()
-	c := exec.Command("sh", "-c", measureFlags.cmd) //nolint:gosec
-	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
-	if err := c.Run(); err != nil {
-		return fmt.Errorf("command failed: %w", err)
+	if measureFlags.cmd != "" {
+		cmdLabel = measureFlags.cmd
+		c := exec.Command("sh", "-c", measureFlags.cmd) //nolint:gosec
+		c.Stdout = os.Stdout
+		c.Stderr = os.Stderr
+		if err := c.Run(); err != nil {
+			return fmt.Errorf("command failed: %w", err)
+		}
+	} else {
+		cmdLabel = fmt.Sprintf("pid %d", measureFlags.pid)
+		if err := waitForPID(measureFlags.pid); err != nil {
+			return fmt.Errorf("watch ended: %w", err)
+		}
 	}
 	dur := time.Since(t0)
 
@@ -73,7 +91,7 @@ func runMeasure(cmd *cobra.Command, args []string) error {
 	}
 
 	report.WriteMeasure(os.Stdout, report.MeasureHeader{
-		Command:  measureFlags.cmd,
+		Command:  cmdLabel,
 		Duration: dur,
 	}, results)
 	return nil
