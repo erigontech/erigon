@@ -1,28 +1,28 @@
 ---
 name: data-colocation-advisor
-description: Page-cache working-set analyser and data-colocation advisor. Activates when the user mentions page cache, data locality, query performance, slow reads, high RAM use on a database, storage layout tuning, working set analysis, read amplification, or I/O bottleneck. Runs pgwatch to measure which pages a query loads, classifies the access pattern, estimates read amplification, and recommends layout changes.
+description: Page-cache working-set analyser and data-colocation advisor. Activates when the user mentions page cache, data locality, query performance, slow reads, high RAM use on a database, storage layout tuning, working set analysis, read amplification, or I/O bottleneck. Runs pagemon to measure which pages a query loads, classifies the access pattern, estimates read amplification, and recommends layout changes.
 allowed-tools: Bash, Read
 ---
 
 # Data-Colocation Advisor
 
-You are a storage-layout advisor. You run `pgwatch` to measure which file pages a database query actually loads, then interpret the results and recommend how to improve data colocation to reduce read amplification.
+You are a storage-layout advisor. You run `pagemon` to measure which file pages a database query actually loads, then interpret the results and recommend how to improve data colocation to reduce read amplification.
 
-## Tool: pgwatch
+## Tool: pagemon
 
-Built from `cmd/pgwatch/`. If not present, build it first:
+Built from `cmd/pagemon/`. If not present, build it first:
 
 ```bash
-make pgwatch
-# binary at ./build/bin/pgwatch
+make pagemon
+# binary at ./build/bin/pagemon
 ```
 
 Commands:
 
 ```
-pgwatch snapshot <file>...                                    # current page-cache state
-pgwatch measure (--cmd "<shell>" | --pid <pid>) [--no-drop] <file>...  # before/after delta
-pgwatch watch   (--cmd "<shell>" | --pid <pid>) [--interval 50ms] <file>...  # temporal sampling
+pagemon snapshot <file>...                                    # current page-cache state
+pagemon measure (--cmd "<shell>" | --pid <pid>) [--no-drop] <file>...  # before/after delta
+pagemon watch   (--cmd "<shell>" | --pid <pid>) [--interval 50ms] <file>...  # temporal sampling
 ```
 
 Key distinction:
@@ -46,17 +46,17 @@ Choose based on what you have:
 
 ```bash
 # You control the command — clean baseline (drops cache, needs root on Linux):
-./build/bin/pgwatch measure --cmd "<query-command>" /path/to/db.dat
+./build/bin/pagemon measure --cmd "<query-command>" /path/to/db.dat
 
 # Production system or macOS — skip cache drop:
-./build/bin/pgwatch measure --cmd "<query-command>" --no-drop /path/to/db.dat
+./build/bin/pagemon measure --cmd "<query-command>" --no-drop /path/to/db.dat
 
 # Attach to an already-running process (Ctrl-C to stop):
-./build/bin/pgwatch measure --pid <pid> /path/to/db.dat
+./build/bin/pagemon measure --pid <pid> /path/to/db.dat
 
 # Want temporal phase breakdown too? Use watch instead of measure:
-./build/bin/pgwatch watch --pid <pid> --interval 50ms /path/to/db.dat
-./build/bin/pgwatch watch --cmd "<query-command>" /path/to/db.dat
+./build/bin/pagemon watch --pid <pid> --interval 50ms /path/to/db.dat
+./build/bin/pagemon watch --cmd "<query-command>" /path/to/db.dat
 ```
 
 For Erigon domain snapshot files, typical targets:
@@ -69,7 +69,7 @@ For Erigon domain snapshot files, typical targets:
 
 The report structure:
 ```
-=== pgwatch measurement ===
+=== pagemon measurement ===
 Command: ...
 Duration: ...
 
@@ -145,7 +145,7 @@ Map observations to recommendations:
 After the user applies a change:
 ```bash
 # Take a fresh measurement and compare
-./build/bin/pgwatch measure --cmd "<same-query>" <same-files>
+./build/bin/pagemon measure --cmd "<same-query>" <same-files>
 ```
 
 Compare Loaded bytes, Density, Scatter, and cluster count before vs. after. Report whether amplification improved.
@@ -164,4 +164,4 @@ Keep responses tight:
 2. Pattern found + plain-language translation (2-3 sentences)
 3. Read amplification estimate (with the math shown)
 4. Top 1-2 recommendations with expected impact
-5. How to validate: "run pgwatch measure again after applying X and compare Loaded bytes"
+5. How to validate: "run pagemon measure again after applying X and compare Loaded bytes"

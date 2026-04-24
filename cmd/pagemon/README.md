@@ -1,4 +1,4 @@
-# pgwatch
+# pagemon
 
 Page-cache working-set analyser for database files.
 
@@ -13,9 +13,9 @@ Root is needed only for `--drop` cache (Linux only).
 ## Build
 
 ```bash
-make pgwatch          # output: ./build/bin/pgwatch
+make pagemon          # output: ./build/bin/pagemon
 # or
-go run ./cmd/pgwatch
+go run ./cmd/pagemon
 ```
 
 ## Commands
@@ -23,7 +23,7 @@ go run ./cmd/pgwatch
 ### `snapshot` — current page-cache state
 
 ```bash
-pgwatch snapshot <file>...
+pagemon snapshot <file>...
 ```
 
 Shows which pages are resident right now. Useful to check how warm a file is
@@ -35,13 +35,13 @@ Single before/after snapshot pair. No `--interval` flag.
 
 ```bash
 # Launch a command — drops page cache first for a clean baseline (Linux, root):
-pgwatch measure --cmd "erigon-tool dump-state --block 21000000" /data/state.kv
+pagemon measure --cmd "erigon-tool dump-state --block 21000000" /data/state.kv
 
 # Skip cache drop (production safe, macOS, or no root):
-pgwatch measure --cmd "..." --no-drop /data/state.kv
+pagemon measure --cmd "..." --no-drop /data/state.kv
 
 # Attach to an already-running process (cache drop skipped automatically):
-pgwatch measure --pid 12345 /data/state.kv
+pagemon measure --pid 12345 /data/state.kv
 ```
 
 ### `watch` — temporal sampling
@@ -52,27 +52,27 @@ phase breakdown showing which clusters lit up at which point in time.
 
 ```bash
 # Launch a command, sample every 50ms (default):
-pgwatch watch --cmd "..." /data/state.kv
-pgwatch watch --cmd "..." --interval 100ms /data/state.kv
+pagemon watch --cmd "..." /data/state.kv
+pagemon watch --cmd "..." --interval 100ms /data/state.kv
 
 # Attach to a running process (Ctrl-C to stop):
-pgwatch watch --pid $(pgrep erigon) /data/state.kv
-pgwatch watch --pid $(pgrep erigon) --interval 100ms /data/a.kv /data/b.kv
+pagemon watch --pid $(pgrep erigon) /data/state.kv
+pagemon watch --pid $(pgrep erigon) --interval 100ms /data/a.kv /data/b.kv
 ```
 
 ### `diff` — compare two snapshots *(Phase 2, not yet implemented)*
 
 ```bash
-pgwatch snapshot --out before.snap /data/state.kv
+pagemon snapshot --out before.snap /data/state.kv
 # ... apply a change ...
-pgwatch snapshot --out after.snap /data/state.kv
-pgwatch diff before.snap after.snap
+pagemon snapshot --out after.snap /data/state.kv
+pagemon diff before.snap after.snap
 ```
 
 ## Output format
 
 ```
-=== pgwatch measurement ===
+=== pagemon measurement ===
 Command:  <cmd or pid N>
 Duration: 2847ms
 
@@ -120,7 +120,7 @@ amplification = Loaded bytes / bytes logically needed by the query
 
 ## Claude Code skill
 
-The `/data-colocation-advisor` skill runs `pgwatch measure` for you, reads the
+The `/data-colocation-advisor` skill runs `pagemon measure` for you, reads the
 report, estimates read amplification, and recommends layout changes (covering
 indexes, vertical partitioning, physical reorganisation, co-location).
 

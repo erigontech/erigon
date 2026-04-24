@@ -8,8 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/erigontech/erigon/cmd/pgwatch/internal/mincore"
-	"github.com/erigontech/erigon/cmd/pgwatch/internal/report"
+	"github.com/erigontech/erigon/cmd/pagemon/internal/mincore"
+	"github.com/erigontech/erigon/cmd/pagemon/internal/report"
 )
 
 var measureFlags struct {

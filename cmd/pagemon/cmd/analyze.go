@@ -1,12 +1,12 @@
 package cmd
 
 import (
-	"github.com/erigontech/erigon/cmd/pgwatch/internal/cluster"
-	"github.com/erigontech/erigon/cmd/pgwatch/internal/metrics"
-	"github.com/erigontech/erigon/cmd/pgwatch/internal/mincore"
-	"github.com/erigontech/erigon/cmd/pgwatch/internal/pattern"
-	"github.com/erigontech/erigon/cmd/pgwatch/internal/report"
-	"github.com/erigontech/erigon/cmd/pgwatch/internal/sampler"
+	"github.com/erigontech/erigon/cmd/pagemon/internal/cluster"
+	"github.com/erigontech/erigon/cmd/pagemon/internal/metrics"
+	"github.com/erigontech/erigon/cmd/pagemon/internal/mincore"
+	"github.com/erigontech/erigon/cmd/pagemon/internal/pattern"
+	"github.com/erigontech/erigon/cmd/pagemon/internal/report"
+	"github.com/erigontech/erigon/cmd/pagemon/internal/sampler"
 )
 
 // buildResult derives a FileResult from a residency bitmap and optional snapshots.

@@ -11,9 +11,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/erigontech/erigon/cmd/pgwatch/internal/mincore"
-	"github.com/erigontech/erigon/cmd/pgwatch/internal/report"
-	"github.com/erigontech/erigon/cmd/pgwatch/internal/sampler"
+	"github.com/erigontech/erigon/cmd/pagemon/internal/mincore"
+	"github.com/erigontech/erigon/cmd/pagemon/internal/report"
+	"github.com/erigontech/erigon/cmd/pagemon/internal/sampler"
 )
 
 var watchFlags struct {

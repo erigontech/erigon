@@ -3,7 +3,7 @@ package sampler
 import (
 	"time"
 
-	"github.com/erigontech/erigon/cmd/pgwatch/internal/mincore"
+	"github.com/erigontech/erigon/cmd/pagemon/internal/mincore"
 )
 
 // Snapshot is a single mincore reading taken at a point in time.

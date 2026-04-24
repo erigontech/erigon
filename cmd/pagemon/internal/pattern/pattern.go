@@ -3,9 +3,9 @@ package pattern
 import (
 	"time"
 
-	"github.com/erigontech/erigon/cmd/pgwatch/internal/cluster"
-	"github.com/erigontech/erigon/cmd/pgwatch/internal/metrics"
-	"github.com/erigontech/erigon/cmd/pgwatch/internal/sampler"
+	"github.com/erigontech/erigon/cmd/pagemon/internal/cluster"
+	"github.com/erigontech/erigon/cmd/pagemon/internal/metrics"
+	"github.com/erigontech/erigon/cmd/pagemon/internal/sampler"
 )
 
 // Pattern is the access pattern tag emitted by the tool.

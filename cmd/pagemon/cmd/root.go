@@ -8,9 +8,9 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "pgwatch",
+	Use:   "pagemon",
 	Short: "Page-cache working-set analyser for database files",
-	Long: `pgwatch measures which pages of a file are resident in the Linux page cache
+	Long: `pagemon measures which pages of a file are resident in the Linux page cache
 before and after a command runs, then classifies the access pattern and reports
 cluster structure to help identify data-colocation opportunities.
 

@@ -6,11 +6,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon/cmd/pgwatch/internal/cluster"
-	"github.com/erigontech/erigon/cmd/pgwatch/internal/metrics"
-	"github.com/erigontech/erigon/cmd/pgwatch/internal/mincore"
-	"github.com/erigontech/erigon/cmd/pgwatch/internal/pattern"
-	"github.com/erigontech/erigon/cmd/pgwatch/internal/sampler"
+	"github.com/erigontech/erigon/cmd/pagemon/internal/cluster"
+	"github.com/erigontech/erigon/cmd/pagemon/internal/metrics"
+	"github.com/erigontech/erigon/cmd/pagemon/internal/mincore"
+	"github.com/erigontech/erigon/cmd/pagemon/internal/pattern"
+	"github.com/erigontech/erigon/cmd/pagemon/internal/sampler"
 )
 
 // FileResult holds all derived data for one file.
@@ -35,7 +35,7 @@ type MeasureHeader struct {
 
 // WriteSnapshot renders a snapshot report (no command context).
 func WriteSnapshot(w io.Writer, files []FileResult) {
-	fmt.Fprintln(w, "=== pgwatch snapshot ===")
+	fmt.Fprintln(w, "=== pagemon snapshot ===")
 	for i := range files {
 		writeFileResult(w, &files[i])
 	}
@@ -43,7 +43,7 @@ func WriteSnapshot(w io.Writer, files []FileResult) {
 
 // WriteMeasure renders a measure report (command + delta).
 func WriteMeasure(w io.Writer, hdr MeasureHeader, files []FileResult) {
-	fmt.Fprintln(w, "=== pgwatch measurement ===")
+	fmt.Fprintln(w, "=== pagemon measurement ===")
 	fmt.Fprintf(w, "Command:  %s\n", hdr.Command)
 	fmt.Fprintf(w, "Duration: %s\n", hdr.Duration.Round(time.Millisecond))
 	for i := range files {
