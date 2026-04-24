@@ -330,6 +330,9 @@ func NewWebsocketCodec(conn *websocket.Conn, host string, req http.Header, remot
 }
 
 func (wc *websocketCodec) Close() {
+	// Send a WebSocket Close frame before closing the underlying connection,
+	// so the server sees a clean 1000 (normal closure) instead of 1006 (abnormal).
+	wc.conn.Close(websocket.StatusNormalClosure, "")
 	wc.jsonCodec.Close()
 	wc.wg.Wait()
 }
