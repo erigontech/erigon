@@ -24,7 +24,7 @@ func runSnapshot(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("%s: %w", path, err)
 		}
-		results = append(results, buildResult(path, size, res, sampled, nil))
+		results = append(results, buildResult(path, size, res, sampled, nil, 0))
 	}
 	report.WriteSnapshot(os.Stdout, results)
 	return nil

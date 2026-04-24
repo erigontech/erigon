@@ -13,9 +13,10 @@ import (
 )
 
 var measureFlags struct {
-	cmd    string
-	pid    int
-	noDrop bool
+	cmd          string
+	pid          int
+	noDrop       bool
+	logicalBytes int64
 }
 
 var measureCmd = &cobra.Command{
@@ -29,6 +30,7 @@ func init() {
 	measureCmd.Flags().StringVar(&measureFlags.cmd, "cmd", "", "shell command to run")
 	measureCmd.Flags().IntVar(&measureFlags.pid, "pid", 0, "PID of an already-running process to watch until it exits (or Ctrl-C)")
 	measureCmd.Flags().BoolVar(&measureFlags.noDrop, "no-drop", false, "skip drop_caches (always implied with --pid)")
+	measureCmd.Flags().Int64Var(&measureFlags.logicalBytes, "logical-bytes", 0, "bytes the workload logically needs (enables read-amplification line in report)")
 }
 
 func runMeasure(cmd *cobra.Command, args []string) error {
@@ -75,7 +77,7 @@ func runMeasure(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("%s (after): %w", path, err)
 		}
 		delta := deltaResidency(bases[i].residency, after)
-		results = append(results, buildResult(path, bases[i].fileSize, delta, bases[i].sampled, nil))
+		results = append(results, buildResult(path, bases[i].fileSize, delta, bases[i].sampled, nil, measureFlags.logicalBytes))
 	}
 
 	report.WriteMeasure(os.Stdout, report.MeasureHeader{

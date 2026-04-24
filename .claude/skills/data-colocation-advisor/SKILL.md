@@ -72,6 +72,15 @@ Choose based on what you have:
   [10s] accounts.kv: +4,200 pages new (+16.8 MB loaded)
 ```
 
+**Read amplification in the report** — if you know how many bytes the workload logically needs, pass `--logical-bytes N`. The report will print a `Read amplification: Nx` line automatically:
+
+```bash
+./build/bin/pagemon measure --cmd "<query>" --logical-bytes 4096 /path/to/db.dat
+# → Read amplification: 12.4×  (48.6 MB loaded / 4.0 KB needed)
+```
+
+Use this whenever you can estimate or derive logical bytes (rows × row_size, key count × avg_value_size, etc.). Skip it when unknown — the raw Loaded + Density numbers still tell the story.
+
 For Erigon domain snapshot files, typical targets:
 ```
 <datadir>/snapshots/domain/v2.0-accounts.*.kv
@@ -123,14 +132,15 @@ Pattern: <TAG>
 - High density + sequential temporal → table scan (check if intended)
 - Multiple distant clusters → fragmented working set (strong colocation signal)
 
-### Step 5: Estimate read amplification
+### Step 5: Read amplification
 
-Ask the user (or derive from a query plan):
-- `bytes_logically_needed` = rows_returned × avg_row_size
+If `--logical-bytes` was passed, the report already contains a `Read amplification: Nx` line — read it directly.
 
-```
-read_amplification = bytes_loaded / bytes_logically_needed
-```
+If not, derive logical bytes and compute manually:
+- `bytes_logically_needed` = rows_returned × avg_row_size (from EXPLAIN, schema, or user estimate)
+- `read_amplification = bytes_loaded / bytes_logically_needed`
+
+Re-run with `--logical-bytes <N>` to get the line in the report for future reference.
 
 Thresholds:
 - < 2× — good

@@ -73,7 +73,8 @@ func waitForPID(pid int) error {
 }
 
 // buildResult derives a FileResult from a residency bitmap and optional snapshots.
-func buildResult(path string, fileSize int64, residency []bool, sampled bool, snaps []sampler.Snapshot) report.FileResult {
+// logicalBytes is the byte count the workload logically needed; 0 means unknown.
+func buildResult(path string, fileSize int64, residency []bool, sampled bool, snaps []sampler.Snapshot, logicalBytes int64) report.FileResult {
 	ps := mincore.PageSize()
 	m := metrics.Compute(residency, ps)
 	clusters := cluster.Detect(residency, ps, cluster.DefaultGapThreshold)
@@ -81,15 +82,16 @@ func buildResult(path string, fileSize int64, residency []bool, sampled bool, sn
 	pat := pattern.Classify(m, clusters, snaps)
 
 	return report.FileResult{
-		Path:      path,
-		FileSize:  fileSize,
-		Sampled:   sampled,
-		Residency: residency,
-		Metrics:   m,
-		Clusters:  clusters,
-		Gaps:      gaps,
-		Pattern:   pat,
-		Snapshots: snaps,
+		Path:         path,
+		FileSize:     fileSize,
+		Sampled:      sampled,
+		LogicalBytes: logicalBytes,
+		Residency:    residency,
+		Metrics:      m,
+		Clusters:     clusters,
+		Gaps:         gaps,
+		Pattern:      pat,
+		Snapshots:    snaps,
 	}
 }
 

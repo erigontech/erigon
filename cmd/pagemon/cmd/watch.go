@@ -15,9 +15,10 @@ import (
 )
 
 var watchFlags struct {
-	cmd      string
-	pid      int
-	interval time.Duration
+	cmd          string
+	pid          int
+	interval     time.Duration
+	logicalBytes int64
 }
 
 var watchCmd = &cobra.Command{
@@ -31,6 +32,7 @@ func init() {
 	watchCmd.Flags().StringVar(&watchFlags.cmd, "cmd", "", "shell command to launch and watch")
 	watchCmd.Flags().IntVar(&watchFlags.pid, "pid", 0, "PID of an already-running process to watch until it exits (or Ctrl-C)")
 	watchCmd.Flags().DurationVar(&watchFlags.interval, "interval", 50*time.Millisecond, "mincore sampling interval")
+	watchCmd.Flags().Int64Var(&watchFlags.logicalBytes, "logical-bytes", 0, "bytes the workload logically needs (enables read-amplification line in report)")
 }
 
 func runWatch(cmd *cobra.Command, args []string) error {
@@ -97,7 +99,7 @@ func runWatch(cmd *cobra.Command, args []string) error {
 			finalRes, _, _, _ = mincore.Residency(path) //nolint:errcheck
 		}
 		delta := deltaResidency(bases[i].residency, finalRes)
-		results = append(results, buildResult(path, bases[i].fileSize, delta, bases[i].sampled, allSnaps[i]))
+		results = append(results, buildResult(path, bases[i].fileSize, delta, bases[i].sampled, allSnaps[i], watchFlags.logicalBytes))
 	}
 
 	report.WriteWatch(os.Stdout, report.MeasureHeader{

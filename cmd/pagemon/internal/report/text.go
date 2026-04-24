@@ -15,9 +15,10 @@ import (
 
 // FileResult holds all derived data for one file.
 type FileResult struct {
-	Path     string
-	FileSize int64
-	Sampled  bool // huge-file stride sampling was used
+	Path         string
+	FileSize     int64
+	Sampled      bool  // huge-file stride sampling was used
+	LogicalBytes int64 // bytes the workload logically needed; 0 = unknown
 
 	Residency []bool
 	Metrics   metrics.Metrics
@@ -69,6 +70,11 @@ func writeFileResult(w io.Writer, r *FileResult) {
 		HumanBytes(r.FileSize), humanNum(nPages), sampleNote)
 	fmt.Fprintf(w, "Loaded:  %s (%s pages)\n",
 		HumanBytes(r.Metrics.BytesLoaded), humanNum(r.Metrics.PagesLoaded))
+	if r.LogicalBytes > 0 && r.Metrics.BytesLoaded > 0 {
+		amp := float64(r.Metrics.BytesLoaded) / float64(r.LogicalBytes)
+		fmt.Fprintf(w, "Read amplification: %.1f×  (%s loaded / %s needed)\n",
+			amp, HumanBytes(r.Metrics.BytesLoaded), HumanBytes(r.LogicalBytes))
+	}
 	fmt.Fprintf(w, "Density: %.1f%%   Scatter: avg %.0f pages   Max gap: %s pages\n",
 		r.Metrics.Density*100, r.Metrics.ScatterScore, humanNum(r.Metrics.MaxGap))
 
