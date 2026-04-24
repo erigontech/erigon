@@ -40,8 +40,8 @@ import (
 )
 
 var (
-	mockSlot          = uint64(321)
-	mockEpoch         = uint64(10)
+	mockSlot          = uint64(64)
+	mockEpoch         = uint64(2)
 	mockSlotsPerEpoch = uint64(32)
 	attData           = &solid.AttestationData{
 		Slot:            mockSlot,
