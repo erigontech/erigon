@@ -24,6 +24,7 @@ import (
 	"github.com/RoaringBitmap/roaring/v2"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -309,7 +310,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 
 		blockLogs = exec.GetRawLogs(txIndex)
 		for _, log := range blockLogs {
-			log.Index = logIndex
+			log.Index = hexutil.Uint(logIndex)
 			logIndex++
 		}
 		var filtered types.Logs
@@ -328,7 +329,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		}
 
 		for i := range filtered {
-			filtered[i].TxIndex = uint(txIndex)
+			filtered[i].TxIndex = hexutil.Uint(txIndex)
 			logCount++
 		}
 
@@ -348,14 +349,15 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 				return nil, &rpc.CustomError{Message: fmt.Sprintf("%s: %d", errExceedLogResults, api.getLogsMaxResults), Code: rpc.ErrCodeInvalidParams}
 			}
 			erigonLog := &types.ErigonLog{}
-			erigonLog.BlockNumber = blockNum
+			erigonLog.BlockNumber = hexutil.Uint64(blockNum)
 			erigonLog.BlockHash = blockHash
-			if log.TxIndex == uint(len(body.Transactions)) {
+			txi := int(log.TxIndex)
+			if txi == len(body.Transactions) {
 				erigonLog.TxHash = bortypes.ComputeBorTxHash(blockNum, blockHash)
 			} else {
-				erigonLog.TxHash = body.Transactions[log.TxIndex].Hash()
+				erigonLog.TxHash = body.Transactions[txi].Hash()
 			}
-			erigonLog.Timestamp = timestamp
+			erigonLog.Timestamp = hexutil.Uint64(timestamp)
 			erigonLog.Address = log.Address
 			erigonLog.Topics = log.Topics
 			erigonLog.Data = log.Data
