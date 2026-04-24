@@ -218,7 +218,7 @@ func (s *CaplinStateSnapshots) LS() {
 	for _, roTx := range view.roTxs {
 		if roTx != nil {
 			for _, seg := range roTx.Segments {
-				s.logger.Info("[agg] ", "f", seg.src.filePath, "words", seg.src.Decompressor.Count())
+				s.logger.Info("[agg] ", "f", seg.src.filePath, "words", seg.src.Decompressor.Count(), "dict", common.ByteCount(seg.src.Decompressor.SerializedDictSize()+seg.src.Decompressor.SerializedLenSize()))
 			}
 		}
 	}
