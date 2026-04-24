@@ -245,7 +245,6 @@ func TestHeaderRoundTrip(t *testing.T) {
 	requireFilterEqual(t, original, r.inner)
 }
 
-
 func TestMultipleFilters(t *testing.T) {
 	require := require.New(t)
 
