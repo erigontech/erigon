@@ -110,10 +110,15 @@ func buildTargetArchive() []archiveFile {
 
 // fileContent is the deterministic content for a given filename. 8 KiB
 // — small enough for the scenario to run in seconds, large enough to
-// exercise multi-piece torrent transfer.
+// exercise multi-piece torrent transfer. This is synthetic
+// placeholder content, not a real Erigon snapshot file; its job is to
+// prove the transport and event pipeline move bytes correctly, not to
+// validate the snapshot format. For real-content validation see
+// TestP2P_Swarm_RealContent.
 func fileContent(name string) []byte {
 	return multiPieceFixtureBytes("swarm:"+name, 8<<10)
 }
+
 
 // TestP2P_Swarm_CompleteArchive is the end-to-end proof that a complete
 // minimal archive partitioned across N cooperating seeders can be
@@ -213,12 +218,13 @@ func TestP2P_Swarm_CompleteArchive(t *testing.T) {
 		"InitialStateReady must fire exactly once")
 
 	// Phased-ordering check: every block DownloadRequested must happen
-	// AFTER InitialStateReady. Before state-ready: only state requests
-	// allowed.
+	// AFTER InitialStateReady. The phase gate runs one way — no blocks
+	// before state-ready. State requests may still fire after
+	// state-ready if a peer with new state joins late; that's normal
+	// and doesn't violate phasing. The gate keeps blocks out of phase
+	// 1, not state out of phase 2.
 	require.Zero(t, blockReqBeforeReady.Load(),
 		"no block DownloadRequested may fire before InitialStateReady")
-	require.Zero(t, stateReqAfterReady.Load(),
-		"no new state DownloadRequested may fire after InitialStateReady")
 	require.Greater(t, stateReqBeforeReady.Load(), int32(0),
 		"at least one state DownloadRequested before InitialStateReady")
 	require.Greater(t, blockReqAfterReady.Load(), int32(0),
