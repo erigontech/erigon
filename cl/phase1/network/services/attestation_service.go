@@ -253,7 +253,13 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 			// [REJECT] The attester is a member of the committee -- i.e. attestation.attester_index in get_beacon_committee(state, attestation.data.slot, index).
 			memIndexInCommittee := contains(att.SingleAttestation.AttesterIndex, beaconCommittee)
 			if memIndexInCommittee < 0 {
-				//return errors.New("attester is not a member of the committee")
+				// If our head state is at a different epoch than the attestation, the
+				// RANDAO-based committee computation may be stale. Ignore instead of
+				// reject to avoid banning legitimate peers while we are catching up.
+				if state.Epoch(headState) != attEpoch {
+					return fmt.Errorf("attester not in committee but head epoch %d != attestation epoch %d: %w",
+						state.Epoch(headState), attEpoch, ErrIgnore)
+				}
 				return fmt.Errorf("attester is not a member of the committee. attester index %d committeeIndex %v", att.SingleAttestation.AttesterIndex, committeeIndex)
 			}
 			vIndex = att.SingleAttestation.AttesterIndex
