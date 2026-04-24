@@ -1,6 +1,7 @@
 package fusefilter
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -205,6 +206,78 @@ func TestWriterClose(t *testing.T) {
 
 	// Close again (should be safe)
 	writer.Close()
+}
+
+// TestHeaderRoundTrip encodes a filter to bytes and decodes it, then asserts
+// every header field survives verbatim. This would have caught the bug where
+// the reader decoded SegmentCount from offset 8 instead of offset 4, silently
+// giving it the value of SegmentCountLength.
+func TestHeaderRoundTrip(t *testing.T) {
+	require := require.New(t)
+
+	w, err := NewWriterOffHeap(filepath.Join(t.TempDir(), "hdr_rt"))
+	require.NoError(err)
+	defer w.Close()
+
+	for i := uint64(0); i < 1000; i++ {
+		require.NoError(w.AddHash(i))
+	}
+
+	original, err := w.build()
+	require.NoError(err)
+
+	var buf bytes.Buffer
+	_, err = w.write(original, &buf)
+	require.NoError(err)
+
+	r, _, err := NewReaderOnBytes(buf.Bytes(), "test")
+	require.NoError(err)
+
+	got := r.inner
+	require.Equal(original.SegmentCount, got.SegmentCount, "SegmentCount: reader used wrong header offset")
+	require.Equal(original.SegmentCountLength, got.SegmentCountLength)
+	require.Equal(original.Seed, got.Seed)
+	require.Equal(original.SegmentLength, got.SegmentLength)
+	require.Equal(original.SegmentLengthMask, got.SegmentLengthMask)
+	require.Equal(len(original.Fingerprints), len(got.Fingerprints))
+}
+
+// TestDoubleSerializationRoundTrip re-serializes a filter loaded from bytes and
+// decodes it a second time, checking that all fields are stable across both
+// passes. A field decoded from the wrong offset would produce a different value
+// on the second pass once the writer stores the wrong value back at a different
+// offset.
+func TestDoubleSerializationRoundTrip(t *testing.T) {
+	require := require.New(t)
+
+	w, err := NewWriterOffHeap(filepath.Join(t.TempDir(), "dbl_rt"))
+	require.NoError(err)
+	defer w.Close()
+
+	for i := uint64(0); i < 500; i++ {
+		require.NoError(w.AddHash(i))
+	}
+
+	var buf1 bytes.Buffer
+	_, err = w.BuildTo(&buf1)
+	require.NoError(err)
+
+	r1, _, err := NewReaderOnBytes(buf1.Bytes(), "pass1")
+	require.NoError(err)
+
+	var buf2 bytes.Buffer
+	_, err = w.write(r1.inner, &buf2)
+	require.NoError(err)
+
+	r2, _, err := NewReaderOnBytes(buf2.Bytes(), "pass2")
+	require.NoError(err)
+
+	require.Equal(r1.inner.SegmentCount, r2.inner.SegmentCount)
+	require.Equal(r1.inner.SegmentCountLength, r2.inner.SegmentCountLength)
+	require.Equal(r1.inner.Seed, r2.inner.Seed)
+	require.Equal(r1.inner.SegmentLength, r2.inner.SegmentLength)
+	require.Equal(r1.inner.SegmentLengthMask, r2.inner.SegmentLengthMask)
+	require.Equal(len(r1.inner.Fingerprints), len(r2.inner.Fingerprints))
 }
 
 func TestMultipleFilters(t *testing.T) {
