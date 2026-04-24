@@ -109,24 +109,22 @@ func (s *CaplinSnapshots) LS() {
 	view := s.View()
 	defer view.Close()
 
-	var totalWords, totalDict, totalDictMem uint64
+	var stats seg.Stats
 	lsSeg := func(d *seg.Decompressor) {
-		log.Info("[agg] ", "f", d.FileName(), "words", d.Count(), "dict", common.ByteCount(d.SerializedTotalDictSize()), "dictMem", common.ByteCount(d.DictMemSize()))
-		totalWords += uint64(d.Count())
-		totalDict += d.SerializedTotalDictSize()
-		totalDictMem += d.DictMemSize()
+		log.Info("[agg] ", "f", d.FileName(), "words", d.Count(), "dictOnDisk", common.ByteCount(d.SerializedTotalDictSize()), "dictMem", common.ByteCount(d.DictMemSize()))
+		stats.Add(d)
 	}
 	if view.BeaconBlockRotx != nil {
-		for _, seg := range view.BeaconBlockRotx.Segments {
-			lsSeg(seg.Src().Decompressor)
+		for _, sn := range view.BeaconBlockRotx.Segments {
+			lsSeg(sn.Src().Decompressor)
 		}
 	}
 	if view.BlobSidecarRotx != nil {
-		for _, seg := range view.BlobSidecarRotx.Segments {
-			lsSeg(seg.Src().Decompressor)
+		for _, sn := range view.BlobSidecarRotx.Segments {
+			lsSeg(sn.Src().Decompressor)
 		}
 	}
-	log.Info("[agg] total", "words", totalWords, "dict", common.ByteCount(totalDict), "dictMem", common.ByteCount(totalDictMem))
+	log.Info("[agg] total", "words", stats.Words, "dictOnDisk", common.ByteCount(stats.Dict), "dictMem", common.ByteCount(stats.DictMem))
 }
 
 func (s *CaplinSnapshots) SegFileNames(from, to uint64) []string {

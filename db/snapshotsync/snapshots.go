@@ -944,19 +944,18 @@ func (s *RoSnapshots) Ls() {
 	view := s.View()
 	defer view.Close()
 
-	var totalWords, totalDict, totalDictMem uint64
+	var stats seg.Stats
 	for _, t := range s.enums {
-		for _, seg := range view.segments[t].Segments {
-			if seg.src == nil || seg.src.Decompressor == nil {
+		for _, sn := range view.segments[t].Segments {
+			if sn.src == nil || sn.src.Decompressor == nil {
 				continue
 			}
-			log.Info("[snapshots] ", "f", seg.src.Decompressor.FileName(), "words", seg.src.Decompressor.Count(), "dict", common.ByteCount(seg.src.Decompressor.SerializedTotalDictSize()), "dictMem", common.ByteCount(seg.src.Decompressor.DictMemSize()))
-			totalWords += uint64(seg.src.Decompressor.Count())
-			totalDict += seg.src.Decompressor.SerializedTotalDictSize()
-			totalDictMem += seg.src.Decompressor.DictMemSize()
+			d := sn.src.Decompressor
+			log.Info("[snapshots] ", "f", d.FileName(), "words", d.Count(), "dictOnDisk", common.ByteCount(d.SerializedTotalDictSize()), "dictMem", common.ByteCount(d.DictMemSize()))
+			stats.Add(d)
 		}
 	}
-	log.Info("[snapshots] total", "words", totalWords, "dict", common.ByteCount(totalDict), "dictMem", common.ByteCount(totalDictMem))
+	log.Info("[snapshots] total", "words", stats.Words, "dictOnDisk", common.ByteCount(stats.Dict), "dictMem", common.ByteCount(stats.DictMem))
 }
 
 func (s *RoSnapshots) Files() (list []string) {
