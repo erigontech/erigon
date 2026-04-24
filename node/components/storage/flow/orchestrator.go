@@ -19,6 +19,7 @@ package flow
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -245,6 +246,19 @@ func (o *Orchestrator) requestGapsFor(domain snapshot.Domain, peerEntries []*sna
 		toRequest = append(toRequest, entry)
 	}
 	o.peerMu.Unlock()
+
+	// Schedule later files first. For domain files, "later" means higher
+	// ToStep (more recent state); for block files, FromStep / ToStep
+	// carry block numbers, so the same ordering works.
+	sort.SliceStable(toRequest, func(i, j int) bool {
+		if toRequest[i].ToStep != toRequest[j].ToStep {
+			return toRequest[i].ToStep > toRequest[j].ToStep
+		}
+		if toRequest[i].FromStep != toRequest[j].FromStep {
+			return toRequest[i].FromStep > toRequest[j].FromStep
+		}
+		return toRequest[i].Name > toRequest[j].Name
+	})
 
 	for _, entry := range toRequest {
 		o.bus.Publish(DownloadRequested{
