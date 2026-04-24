@@ -949,7 +949,7 @@ func (s *RoSnapshots) Ls() {
 			if seg.src == nil || seg.src.Decompressor == nil {
 				continue
 			}
-			log.Info("[snapshots] ", "f", seg.src.Decompressor.FileName(), "count", seg.src.Decompressor.Count(), "dict", common.ByteCount(seg.src.Decompressor.SerializedDictSize()+seg.src.Decompressor.SerializedLenSize()))
+			log.Info("[snapshots] ", "f", seg.src.Decompressor.FileName(), "words", seg.src.Decompressor.Count(), "dict", common.ByteCount(seg.src.Decompressor.SerializedTotalDictSize()), "dictMem", common.ByteCount(seg.src.Decompressor.DictMemSize()))
 		}
 	}
 }

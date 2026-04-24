@@ -509,8 +509,25 @@ func (d *Decompressor) DataHandle() unsafe.Pointer {
 }
 func (d *Decompressor) SerializedDictSize() uint64      { return d.serializedDictSize }
 func (d *Decompressor) SerializedLenSize() uint64       { return d.lenDictSize }
+func (d *Decompressor) SerializedTotalDictSize() uint64 { return d.serializedDictSize + d.lenDictSize }
 func (d *Decompressor) DictWords() int                  { return d.dictWords }
 func (d *Decompressor) DictLens() int                   { return d.dictLens }
+
+// DictMemSize returns the in-memory size of the decoded Huffman tables (arena allocations).
+func (d *Decompressor) DictMemSize() uint64 {
+	var total uint64
+	if d.patArena != nil {
+		total += uint64(cap(d.patArena.codewords)) * uint64(unsafe.Sizeof(codeword{}))
+		total += uint64(cap(d.patArena.tables)) * uint64(unsafe.Sizeof(patternTable{}))
+		total += uint64(cap(d.patArena.slots)) * uint64(unsafe.Sizeof((*codeword)(nil)))
+	}
+	if d.posArena != nil {
+		total += uint64(cap(d.posArena.tables)) * uint64(unsafe.Sizeof(posTable{}))
+		total += uint64(cap(d.posArena.entriesArr)) * uint64(unsafe.Sizeof(posEntry{}))
+		total += uint64(cap(d.posArena.ptrsArr)) * uint64(unsafe.Sizeof((*posTable)(nil)))
+	}
+	return total
+}
 func (d *Decompressor) CompressedPageValuesCount() int  { return int(d.compPageValuesCount) }
 func (d *Decompressor) CompressionFormatVersion() uint8 { return d.version }
 
