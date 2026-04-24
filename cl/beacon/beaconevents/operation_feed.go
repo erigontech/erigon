@@ -97,7 +97,7 @@ func (f *operationFeed) SendExecutionPayloadBid(value *SignedExecutionPayloadBid
 }
 
 // SendExecutionPayloadAvailable emits an execution_payload_available event. [New in Gloas:EIP7732]
-func (f *operationFeed) SendExecutionPayloadAvailable(value *SignedExecutionPayloadEnvelopeData) int {
+func (f *operationFeed) SendExecutionPayloadAvailable(value *ExecutionPayloadAvailableData) int {
 	return f.feed.Send(&EventStream{
 		Event: OpExecutionPayloadAvailable,
 		Data:  value,

@@ -41,8 +41,7 @@ type (
 	ContributionAndProofData           = cltypes.SignedContributionAndProof
 	BlobSidecarData                    = cltypes.BlobSidecar
 	PayloadAttestationMessageData      = cltypes.PayloadAttestationMessage
-	SignedExecutionPayloadBidData      = cltypes.SignedExecutionPayloadBid
-	SignedExecutionPayloadEnvelopeData = cltypes.SignedExecutionPayloadEnvelope
+	SignedExecutionPayloadBidData = cltypes.SignedExecutionPayloadBid
 )
 
 // DataColumnSidecarData includes block_root and slot for SSE events
@@ -131,6 +130,11 @@ type LightClientFinalityUpdateData struct {
 type LightClientOptimisticUpdateData struct {
 	Version string                              `json:"version"`
 	Data    cltypes.LightClientOptimisticUpdate `json:"data"`
+}
+
+type ExecutionPayloadAvailableData struct {
+	Slot      uint64      `json:"slot,string"`
+	BlockRoot common.Hash `json:"block_root"`
 }
 
 type PayloadAttributesData struct {

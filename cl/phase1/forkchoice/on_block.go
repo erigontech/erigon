@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/monitor"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
@@ -37,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -403,28 +405,41 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		}
 	}
 
-	// [New in Gloas:EIP7732] Check if there's a pending envelope waiting for this block
+	// [New in Gloas:EIP7732] Check if there's a pending envelope waiting for this block.
 	// This handles the case where envelope arrives before the block via gossip.
-	// We need to release the lock before calling OnExecutionPayload to avoid deadlock.
-	var pendingEnvelope *cltypes.SignedExecutionPayloadEnvelope
+	// Process the envelope while still holding f.mu to avoid a TOCTOU race where
+	// another goroutine could modify fork choice state between unlock and re-lock.
+	// The DB index write is deferred until after the lock is released to avoid
+	// deadlock with postForkchoiceOperations (which holds MDBX tx then needs f.mu.RLock).
+	var appliedEnvelope *cltypes.ExecutionPayloadEnvelope
 	if blockVersion >= clparams.GloasVersion {
 		if pending, ok := f.pendingEnvelopes.Get(common.Hash(blockRoot)); ok {
 			f.pendingEnvelopes.Remove(common.Hash(blockRoot))
-			pendingEnvelope = pending
+			log.Debug("OnBlock: processing pending envelope", "blockRoot", common.Hash(blockRoot))
+			// Always validate payload with EL for pending envelopes, regardless of the caller's newPayload flag.
+			// During forward sync newPayload is false, but the envelope still needs to reach the EL;
+			// otherwise the EL never learns about this block and the chain stalls.
+			applied, applyErr := f.applyEnvelopeLocked(ctx, pending, checkDataAvaiability, true)
+			if applyErr != nil {
+				log.Warn("OnBlock: failed to process pending envelope", "blockRoot", common.Hash(blockRoot), "err", applyErr)
+			} else if applied {
+				appliedEnvelope = pending.Message
+			}
 		}
 	}
 
-	// Release lock before processing pending envelope
+	// Release lock (via defer) before writing DB indices for the applied envelope.
 	unlocked = true
 	f.mu.Unlock()
 
-	if pendingEnvelope != nil {
-		log.Debug("OnBlock: processing pending envelope", "blockRoot", common.Hash(blockRoot))
-		// Always validate payload with EL for pending envelopes, regardless of the caller's newPayload flag.
-		// During forward sync newPayload is false, but the envelope still needs to reach the EL;
-		// otherwise the EL never learns about this block and the chain stalls.
-		if err := f.OnExecutionPayload(ctx, pendingEnvelope, checkDataAvaiability, true); err != nil {
-			log.Warn("OnBlock: failed to process pending envelope", "blockRoot", common.Hash(blockRoot), "err", err)
+	// Write execution payload envelope indices outside f.mu to avoid deadlock
+	// with postForkchoiceOperations (which holds MDBX tx then needs f.mu.RLock).
+	if appliedEnvelope != nil && f.db != nil {
+		if err := f.db.Update(ctx, func(tx kv.RwTx) error {
+			return beacon_indicies.WriteExecutionPayloadEnvelopeIndicies(tx, common.Hash(blockRoot), appliedEnvelope)
+		}); err != nil {
+			log.Warn("OnBlock: failed to write execution payload indices for pending envelope",
+				"blockRoot", common.Hash(blockRoot), "err", err)
 		}
 	}
 

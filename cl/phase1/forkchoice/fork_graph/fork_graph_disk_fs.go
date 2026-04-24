@@ -32,6 +32,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
+const maxSSZBufferSize = 128 << 20 // 128 MB
+
 func getBeaconStateFilename(blockRoot common.Hash) string {
 	return fmt.Sprintf("%x.snappy_ssz", blockRoot)
 }
@@ -74,7 +76,15 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot common.Hash) (bs *stat
 		return nil, fmt.Errorf("failed to read length: %d, want 8, root: %x", n, blockRoot)
 	}
 
-	f.sszBuffer = f.sszBuffer[:binary.BigEndian.Uint64(lengthBytes)]
+	length := binary.BigEndian.Uint64(lengthBytes)
+	if length > maxSSZBufferSize {
+		return nil, fmt.Errorf("corrupt beacon state file: length %d exceeds max %d, root: %x", length, maxSSZBufferSize, blockRoot)
+	}
+	if length > uint64(cap(f.sszBuffer)) {
+		f.sszBuffer = make([]byte, length)
+	} else {
+		f.sszBuffer = f.sszBuffer[:length]
+	}
 	n, err = io.ReadFull(f.sszSnappyReader, f.sszBuffer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read snappy buffer: %w, root: %x", err, blockRoot)
@@ -192,7 +202,15 @@ func (f *forkGraphDisk) ReadEnvelopeFromDisk(blockRoot common.Hash) (envelope *c
 		return nil, fmt.Errorf("failed to read length: %d, want 8, root: %x", n, blockRoot)
 	}
 
-	f.sszBuffer = f.sszBuffer[:binary.BigEndian.Uint64(lengthBytes)]
+	envelopeLength := binary.BigEndian.Uint64(lengthBytes)
+	if envelopeLength > maxSSZBufferSize {
+		return nil, fmt.Errorf("corrupt envelope file: length %d exceeds max %d, root: %x", envelopeLength, maxSSZBufferSize, blockRoot)
+	}
+	if envelopeLength > uint64(cap(f.sszBuffer)) {
+		f.sszBuffer = make([]byte, envelopeLength)
+	} else {
+		f.sszBuffer = f.sszBuffer[:envelopeLength]
+	}
 	n, err = io.ReadFull(f.sszSnappyReader, f.sszBuffer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read snappy buffer: %w, root: %x", err, blockRoot)

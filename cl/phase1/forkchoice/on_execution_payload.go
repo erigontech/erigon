@@ -319,11 +319,25 @@ func (f *ForkChoiceStore) applyEnvelope(ctx context.Context, signedEnvelope *clt
 		log.Warn("[applyEnvelope] received signed envelope with nil message")
 		return false, errors.New("signed envelope has nil message")
 	}
-	envelope := signedEnvelope.Message
-	beaconBlockRoot := envelope.BeaconBlockRoot
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
+
+	return f.applyEnvelopeLocked(ctx, signedEnvelope, checkBlobData, validatePayload)
+}
+
+// applyEnvelopeLocked is the lock-held implementation of applyEnvelope.
+// The caller MUST hold f.mu before calling this method.
+// Returns (true, nil) if the envelope was applied,
+// (false, nil) if it was skipped (already processed or block not yet known),
+// or (false, err) on failure.
+func (f *ForkChoiceStore) applyEnvelopeLocked(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) (bool, error) {
+	if signedEnvelope.Message == nil {
+		log.Warn("[applyEnvelopeLocked] received signed envelope with nil message")
+		return false, errors.New("signed envelope has nil message")
+	}
+	envelope := signedEnvelope.Message
+	beaconBlockRoot := envelope.BeaconBlockRoot
 
 	// Skip if envelope already processed and persisted
 	if f.forkGraph.HasEnvelope(beaconBlockRoot) {
