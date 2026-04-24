@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -93,6 +94,15 @@ func buildResult(path string, fileSize int64, residency []bool, sampled bool, sn
 		Pattern:      pat,
 		Snapshots:    snaps,
 	}
+}
+
+// isInterrupt reports whether err came from a SIGINT/SIGTERM — normal Ctrl-C stop.
+func isInterrupt(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "interrupt") || strings.Contains(s, "terminated")
 }
 
 // deltaResidency returns a bitmap of pages present in after but not in before.

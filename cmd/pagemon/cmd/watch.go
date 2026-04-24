@@ -85,11 +85,8 @@ func runWatch(cmd *cobra.Command, args []string) error {
 		allSnaps[i] = s.Stop()
 	}
 
-	if runErr != nil {
-		return fmt.Errorf("watch ended: %w", runErr)
-	}
-
-	// Build delta results.
+	// Build and print the report regardless of how the watch ended.
+	// Ctrl-C on a --pid watch is normal usage, not a failure.
 	var results []report.FileResult
 	for i, path := range args {
 		var finalRes []bool
@@ -106,6 +103,10 @@ func runWatch(cmd *cobra.Command, args []string) error {
 		Command:  cmdLabel,
 		Duration: dur,
 	}, results)
+
+	if runErr != nil && !isInterrupt(runErr) {
+		return fmt.Errorf("watch ended: %w", runErr)
+	}
 	return nil
 }
 
