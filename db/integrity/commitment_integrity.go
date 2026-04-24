@@ -82,7 +82,7 @@ func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br services.Fu
 			if failFast {
 				return err
 			}
-			log.Warn(err.Error())
+			logger.Warn(err.Error())
 			integrityErr = err
 			continue
 		}
