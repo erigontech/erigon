@@ -447,14 +447,16 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 
 	// canAppend: once ETL keys pass the last key in the table, use AppendDup (no B-tree seek).
 	// ETL emits sorted keys, so once past lastKey all remaining entries are brand-new.
-	// Within a key, ETL emits step_bytes in ascending order (^step, so newer steps first),
-	// satisfying AppendDup's dup >= last-dup requirement.
+	// AppendDup is only safe for the FIRST dup of each new key: ETL sorts by key only (stable
+	// by insertion order), so multiple dups for the same key are NOT guaranteed to arrive in
+	// ascending dup-byte order. Fall back to Put for same-key subsequent entries.
 	lastKey, _, err := valuesCursor.Last()
 	if err != nil {
 		return err
 	}
 	lastKey = bytes.Clone(lastKey) // copy: cursor may overwrite on next op
 	canAppend := lastKey == nil
+	var appendedKey []byte // last key for which we used AppendDup
 
 	var nKeys int
 	t = time.Now()
@@ -464,7 +466,13 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 			canAppend = true
 		}
 		if canAppend {
-			return valuesCursor.AppendDup(k, v)
+			if !bytes.Equal(k, appendedKey) {
+				// first dup for this new key: safe to AppendDup
+				appendedKey = append(appendedKey[:0], k...)
+				return valuesCursor.AppendDup(k, v)
+			}
+			// same key, subsequent dup: dups may be out of ascending order in ETL, use Put
+			return valuesCursor.Put(k, v)
 		}
 		foundVal, err := valuesCursor.SeekBothRange(k, v[:8])
 		if err != nil {
