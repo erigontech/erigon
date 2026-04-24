@@ -1196,22 +1196,26 @@ func (e *ErigonMCPServer) Serve() error {
 // ServeContext starts MCP server in stdio mode using the provided context
 // for lifecycle management, avoiding duplicate signal handlers.
 func (e *ErigonMCPServer) ServeContext(ctx context.Context) error {
+	// Apply NonBlockingAcquire so BeginRo fails fast (ErrServerOverloaded)
+	// instead of blocking the entire sequential stdio session indefinitely.
 	s := server.NewStdioServer(e.mcpServer)
+	s.SetContextFunc(func(ctx context.Context) context.Context {
+		return kv.WithNonBlockingAcquire(ctx)
+	})
 	return s.Listen(ctx, os.Stdin, os.Stdout)
 }
 
 // ServeSSE starts MCP server with SSE transport
 func (e *ErigonMCPServer) ServeSSE(addr string) (err error) {
-	// Tag every tool-call context with NonBlockingAcquire so that BeginRo
-	// fails fast (ErrServerOverloaded) instead of blocking indefinitely when
-	// all DB read slots are held by a concurrent write/ETL transaction.
-	// Without this the SSE handler goroutine waits forever and the client
-	// never receives a response. The HTTP RPC layer sets the same flag in
-	// node/rpcstack.go.
-	contextFunc := func(ctx context.Context, _ *http.Request) context.Context {
-		return kv.WithNonBlockingAcquire(ctx)
-	}
-	sse := server.NewSSEServer(e.mcpServer, server.WithSSEContextFunc(contextFunc))
+	// Apply NonBlockingAcquire so BeginRo fails fast (ErrServerOverloaded)
+	// instead of blocking the SSE handler goroutine indefinitely when all DB
+	// read slots are held by a concurrent write/ETL transaction. The HTTP RPC
+	// layer sets the same flag in node/rpcstack.go.
+	sse := server.NewSSEServer(e.mcpServer,
+		server.WithSSEContextFunc(func(ctx context.Context, _ *http.Request) context.Context {
+			return kv.WithNonBlockingAcquire(ctx)
+		}),
+	)
 
 	defer func() {
 		if r := recover(); r != nil {
