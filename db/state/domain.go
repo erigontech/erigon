@@ -435,6 +435,16 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	}
 	defer valuesCursor.Close()
 	if err := w.values.Load(tx, w.valsTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		// Fast path: attempt insert without a seek. Wins on initial sync where
+		// most keys are brand new (1 CGo call vs 2).
+		inserted, err := valuesCursor.PutNoOverwrite(k, v)
+		if err != nil {
+			return err
+		}
+		if inserted {
+			return nil
+		}
+		// Key already has dups — find the matching step and update in-place.
 		foundVal, err := valuesCursor.SeekBothRange(k, v[:8])
 		if err != nil {
 			return err
@@ -442,7 +452,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		if len(foundVal) == 0 || !bytes.Equal(foundVal[:8], v[:8]) {
 			return valuesCursor.Put(k, v)
 		}
-		return valuesCursor.PutCurrent(k, v) // DeleteCurrent+Put
+		return valuesCursor.PutCurrent(k, v)
 	}, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 		return err
 	}

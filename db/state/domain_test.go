@@ -75,12 +75,12 @@ func newRnd(seed uint64) *rndGen {
 func (r *rndGen) IntN(n int) int                   { return int(r.Uint64N(uint64(n))) }
 func (r *rndGen) Read(p []byte) (n int, err error) { return r.oldGen.Read(p) } // seems `go1.22` doesn't have `Read` method on `math/v2` generator
 
-func testDbAndDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain) {
+func testDbAndDomain(t testing.TB, logger log.Logger) (kv.RwDB, *Domain) {
 	t.Helper()
 	return testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, logger)
 }
 
-func testDbAndDomainOfStep(t *testing.T, domainCfg statecfg.DomainCfg, aggStep uint64, logger log.Logger) (kv.RwDB, *Domain) {
+func testDbAndDomainOfStep(t testing.TB, domainCfg statecfg.DomainCfg, aggStep uint64, logger log.Logger) (kv.RwDB, *Domain) {
 	t.Helper()
 	dirs := datadir2.New(t.TempDir())
 	cfg := domainCfg

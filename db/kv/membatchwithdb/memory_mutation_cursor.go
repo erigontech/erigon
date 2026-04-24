@@ -301,6 +301,10 @@ func (m *memoryMutationCursor) PutCurrent(key, value []byte) error {
 	panic("Not implemented")
 }
 
+func (m *memoryMutationCursor) PutNoOverwrite(key, value []byte) (bool, error) {
+	panic("Not implemented")
+}
+
 func (m *memoryMutationCursor) Delete(k []byte) error {
 	return m.mutation.Delete(m.table, k)
 }

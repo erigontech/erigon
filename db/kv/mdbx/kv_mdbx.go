@@ -1623,6 +1623,19 @@ func (c *MdbxDupSortCursor) PutCurrent(k, v []byte) error {
 	return nil
 }
 
+// PutNoOverwrite inserts (k,v) only if k has no dup entries yet (MDBX_NOOVERWRITE).
+// Returns inserted=true on success; inserted=false,err=nil when the key already
+// has dups so the caller can fall back to SeekBothRange+PutCurrent.
+func (c *MdbxDupSortCursor) PutNoOverwrite(k, v []byte) (bool, error) {
+	if err := c.c.Put(k, v, mdbx.NoOverwrite); err != nil {
+		if errors.Is(err, mdbx.KeyExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("label: %s, in PutNoOverwrite: %w", c.label, err)
+	}
+	return true, nil
+}
+
 // DeleteCurrentDuplicates - delete all of the data items for the current key.
 func (c *MdbxDupSortCursor) DeleteCurrentDuplicates() error {
 	if err := c.c.Del(mdbx.AllDups); err != nil {

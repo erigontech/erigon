@@ -294,9 +294,13 @@ type RwCursorDupSort interface {
 
 	PutNoDupData(key, value []byte) error // PutNoDupData - inserts key without dupsort
 	PutCurrent(key, value []byte) error   // PutCurrent - replaces the current dup entry in-place (cursor must be positioned); saves Del+Put round-trip
-	DeleteCurrentDuplicates() error       // DeleteCurrentDuplicates - deletes all values of the current key
-	DeleteExact(k1, k2 []byte) error      // DeleteExact - delete 1 value from given key
-	AppendDup(key, value []byte) error    // AppendDup - same as Append, but for sorted dup data
+	// PutNoOverwrite inserts (key,value) only when key has no dup entries yet (MDBX_NOOVERWRITE).
+	// Returns inserted=true on success; inserted=false,err=nil if the key already has dups (caller must seek+update).
+	// Saves the SeekBothRange CGo call on the insert-heavy path (e.g. initial sync).
+	PutNoOverwrite(key, value []byte) (inserted bool, err error)
+	DeleteCurrentDuplicates() error    // DeleteCurrentDuplicates - deletes all values of the current key
+	DeleteExact(k1, k2 []byte) error   // DeleteExact - delete 1 value from given key
+	AppendDup(key, value []byte) error // AppendDup - same as Append, but for sorted dup data
 }
 
 type PseudoDupSortRwCursor interface { // For both DupSort and usual cursors (usual imitates functionality of ds)

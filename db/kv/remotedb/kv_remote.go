@@ -674,12 +674,13 @@ func (c *remoteCursorDupSort) SeekBothRange(k, v []byte) ([]byte, error) {
 	return c.getBothRange(k, v)
 }
 
-func (c *remoteCursorDupSort) DeleteExact(k1, k2 []byte) error    { panic("not supported") }
-func (c *remoteCursorDupSort) AppendDup(k []byte, v []byte) error { panic("not supported") }
-func (c *remoteCursorDupSort) PutNoDupData(k, v []byte) error     { panic("not supported") }
-func (c *remoteCursorDupSort) PutCurrent(k, v []byte) error       { panic("not supported") }
-func (c *remoteCursorDupSort) DeleteCurrentDuplicates() error     { panic("not supported") }
-func (c *remoteCursorDupSort) CountDuplicates() (uint64, error)   { panic("not supported") }
+func (c *remoteCursorDupSort) DeleteExact(k1, k2 []byte) error          { panic("not supported") }
+func (c *remoteCursorDupSort) AppendDup(k []byte, v []byte) error       { panic("not supported") }
+func (c *remoteCursorDupSort) PutNoDupData(k, v []byte) error           { panic("not supported") }
+func (c *remoteCursorDupSort) PutCurrent(k, v []byte) error             { panic("not supported") }
+func (c *remoteCursorDupSort) PutNoOverwrite(k, v []byte) (bool, error) { panic("not supported") }
+func (c *remoteCursorDupSort) DeleteCurrentDuplicates() error           { panic("not supported") }
+func (c *remoteCursorDupSort) CountDuplicates() (uint64, error)         { panic("not supported") }
 
 func (c *remoteCursorDupSort) FirstDup() ([]byte, error)          { return c.firstDup() }
 func (c *remoteCursorDupSort) NextDup() ([]byte, []byte, error)   { return c.nextDup() }
