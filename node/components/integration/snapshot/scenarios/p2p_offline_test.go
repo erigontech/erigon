@@ -120,14 +120,12 @@ func TestP2P_OnePeerOffline_SurvivorCompletes(t *testing.T) {
 	leecher.AddDevP2PPeer(seederA.DevP2PSelf())
 	leecher.AddDevP2PPeer(seederB.DevP2PSelf())
 
-	// Wait until at least one manifest has been fetched — confirms both
-	// handshakes happened and the flow orchestrator started gap-fill.
-	// (Two peers with identical V2 manifests share an infohash, and
-	// manifest_exchange doesn't dedup by hash yet — only one of the
-	// two fetches succeeds, so we can't assert manifestCount == 2 here.
-	// That dedup is a follow-up.)
-	waitForP2P(t, func() bool { return manifestCount.Load() >= 1 },
-		30*time.Second, "at least one PeerManifestReceived")
+	// Wait until both manifests have been fetched. Two peers advertise
+	// the same V2 infohash; FetchPeerManifestV2 dedupes by hash so the
+	// second call reuses the first's bytes and both PeerManifestReceived
+	// events still fire, each tagged with its own peerID.
+	waitForP2P(t, func() bool { return manifestCount.Load() >= 2 },
+		30*time.Second, "both PeerManifestReceived events to fire")
 
 	// Seeder A drops. Its sentry disconnects cleanly; the leecher's
 	// real peer-event observer sees the disconnect and fires

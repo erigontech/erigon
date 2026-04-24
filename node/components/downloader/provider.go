@@ -30,6 +30,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sync"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -68,6 +69,21 @@ type Provider struct {
 	bus        event.EventBus
 	busCtx     context.Context
 	busHandler func(flow.DownloadRequested)
+
+	// peerManifestInflight deduplicates FetchPeerManifestV2 calls by
+	// infohash. Multiple peers advertising the same chain.toml.v2 all
+	// receive the same fetched bytes from a single underlying torrent,
+	// avoiding anacrolix's per-infohash dedup silently dropping the
+	// second caller's Storage.
+	peerManifestInflight sync.Map // [20]byte → *peerManifestFetch
+}
+
+// peerManifestFetch holds the result of a de-duplicated FetchPeerManifestV2
+// call so concurrent callers for the same infohash share one fetch.
+type peerManifestFetch struct {
+	done chan struct{}
+	data []byte
+	err  error
 }
 
 // Configure applies configuration. Call before Initialize.

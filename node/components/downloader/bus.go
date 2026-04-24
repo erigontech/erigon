@@ -100,14 +100,42 @@ func (p *Provider) FetchPeerManifestV2(ctx context.Context, peerID string, infoH
 	if p == nil || p.Downloader == nil {
 		return nil, fmt.Errorf("downloader.FetchPeerManifestV2: provider or downloader nil")
 	}
+
+	// Deduplicate by infohash. anacrolix keys torrents by infohash, so
+	// concurrent callers with the same hash but different per-peer
+	// Storage options would have the second caller's Storage silently
+	// ignored — only the first caller's peerDir receives bytes. Share
+	// one fetch across callers; each gets the same data and can publish
+	// PeerManifestReceived independently under its own peerID.
+	newFetch := &peerManifestFetch{done: make(chan struct{})}
+	v, loaded := p.peerManifestInflight.LoadOrStore(infoHash, newFetch)
+	fetch := v.(*peerManifestFetch)
+	if loaded {
+		// Another call is fetching this infohash; wait for its result.
+		select {
+		case <-fetch.done:
+			return fetch.data, fetch.err
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+
+	// We are the fetcher. Record the result for waiters.
+	defer func() {
+		close(fetch.done)
+		p.peerManifestInflight.Delete(infoHash)
+	}()
+
 	client := p.Downloader.TorrentClient()
 	if client == nil {
-		return nil, fmt.Errorf("downloader.FetchPeerManifestV2: torrent client nil")
+		fetch.err = fmt.Errorf("downloader.FetchPeerManifestV2: torrent client nil")
+		return nil, fetch.err
 	}
 
 	peerDir := filepath.Join(p.dirs.Snap, ".peers", peerID)
 	if err := os.MkdirAll(peerDir, 0o755); err != nil {
-		return nil, fmt.Errorf("creating peer dir: %w", err)
+		fetch.err = fmt.Errorf("creating peer dir: %w", err)
+		return nil, fetch.err
 	}
 
 	peerStorage := anastorage.NewFileOpts(anastorage.NewFileClientOpts{
@@ -134,31 +162,38 @@ func (p *Provider) FetchPeerManifestV2(ctx context.Context, peerID string, infoH
 	select {
 	case <-t.GotInfo():
 	case <-dlCtx.Done():
-		return nil, fmt.Errorf("waiting for chain.toml.v2 info from peer %s: %w", peerID, dlCtx.Err())
+		fetch.err = fmt.Errorf("waiting for chain.toml.v2 info from peer %s: %w", peerID, dlCtx.Err())
+		return nil, fetch.err
 	}
 
 	info := t.Info()
 	if info == nil {
-		return nil, fmt.Errorf("peer %s chain.toml.v2 torrent info missing", peerID)
+		fetch.err = fmt.Errorf("peer %s chain.toml.v2 torrent info missing", peerID)
+		return nil, fetch.err
 	}
 	if len(info.Files) != 0 {
-		return nil, fmt.Errorf("peer %s chain.toml.v2 torrent is multi-file (%d)", peerID, len(info.Files))
+		fetch.err = fmt.Errorf("peer %s chain.toml.v2 torrent is multi-file (%d)", peerID, len(info.Files))
+		return nil, fetch.err
 	}
 	if info.Name != dl.ChainTomlV2FileName {
-		return nil, fmt.Errorf("peer %s torrent name %q, expected %q", peerID, info.Name, dl.ChainTomlV2FileName)
+		fetch.err = fmt.Errorf("peer %s torrent name %q, expected %q", peerID, info.Name, dl.ChainTomlV2FileName)
+		return nil, fetch.err
 	}
 
 	t.DownloadAll()
 	select {
 	case <-t.Complete().On():
 	case <-dlCtx.Done():
-		return nil, fmt.Errorf("downloading chain.toml.v2 from peer %s: %w", peerID, dlCtx.Err())
+		fetch.err = fmt.Errorf("downloading chain.toml.v2 from peer %s: %w", peerID, dlCtx.Err())
+		return nil, fetch.err
 	}
 
 	data, err := os.ReadFile(filepath.Join(peerDir, dl.ChainTomlV2FileName))
 	if err != nil {
-		return nil, fmt.Errorf("reading downloaded chain.toml.v2 from peer %s: %w", peerID, err)
+		fetch.err = fmt.Errorf("reading downloaded chain.toml.v2 from peer %s: %w", peerID, err)
+		return nil, fetch.err
 	}
+	fetch.data = data
 	return data, nil
 }
 
