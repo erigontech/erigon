@@ -440,25 +440,34 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		return err
 	}
 	defer valuesCursor.Close()
+
+	// canAppend: once ETL keys pass the last key in the table, use AppendDup (no B-tree seek).
+	// ETL emits sorted keys, so once past lastKey all remaining entries are brand-new.
+	// Within a key, ETL emits step_bytes in ascending order (^step, so newer steps first),
+	// satisfying AppendDup's dup >= last-dup requirement.
+	lastKey, _, err := valuesCursor.Last()
+	if err != nil {
+		return err
+	}
+	lastKey = bytes.Clone(lastKey) // copy: cursor may overwrite on next op
+	canAppend := lastKey == nil
+
 	t = time.Now()
 	if err := w.values.Load(tx, w.valsTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		if !canAppend && bytes.Compare(k, lastKey) > 0 {
+			canAppend = true
+		}
+		if canAppend {
+			return valuesCursor.AppendDup(k, v)
+		}
 		foundVal, err := valuesCursor.SeekBothRange(k, v[:8])
 		if err != nil {
 			return err
 		}
 		if len(foundVal) == 0 || !bytes.Equal(foundVal[:8], v[:8]) {
-			if err := valuesCursor.Put(k, v); err != nil {
-				return err
-			}
-			return nil
+			return valuesCursor.Put(k, v)
 		}
-		if err := valuesCursor.DeleteCurrent(); err != nil {
-			return err
-		}
-		if err := valuesCursor.Put(k, v); err != nil {
-			return err
-		}
-		return nil
+		return valuesCursor.PutCurrent(k, v) // cursor already positioned; no re-seek
 	}, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 		return err
 	}
