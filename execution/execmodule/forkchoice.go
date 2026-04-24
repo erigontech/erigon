@@ -191,7 +191,11 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	if err != nil {
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
-	defer func() { roTx.Rollback() }() // closure: CommitCycle may reassign roTx
+	defer func() {
+		if roTx != nil {
+			roTx.Rollback()
+		}
+	}() // closure: CommitCycle may reassign roTx; bg-commit path sets it to nil after ownership transfer
 
 	// Check if InsertBlocks already created a block overlay with data
 	// (headers, bodies, TDs, canonical hashes).
@@ -619,8 +623,11 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			go func() {
 				defer e.semaphore.Release(1)
 				defer bgSD.Close()
+				// bgRoTx is rolled back inside runForkchoiceFlushCommit between
+				// Flush and Commit so the commit sees openTxs=1 in MDBX. This
+				// defer is a safety net — Rollback is idempotent.
 				defer bgRoTx.Rollback()
-				err := e.runPostForkchoice(bgSD, finishProgressBefore, isSynced, initialCycle)
+				err := e.runPostForkchoice(bgSD, bgRoTx, finishProgressBefore, isSynced, initialCycle)
 				if err != nil && !errors.Is(err, context.Canceled) {
 					e.logger.Error("Error running background post forkchoice", "err", err)
 				}
@@ -631,7 +638,10 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				}
 			}()
 		} else {
-			ct, err := e.runForkchoiceFlushCommit(currentContext, finishProgressBefore, isSynced)
+			// Foreground commit: pass the outer roTx so it gets released
+			// between Flush and Commit (same openTxs=2→1 optimization as
+			// the bg-commit path).
+			ct, err := e.runForkchoiceFlushCommit(currentContext, roTx, finishProgressBefore, isSynced)
 			if err != nil {
 				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 			}
@@ -680,10 +690,10 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 
 // runPostForkchoice runs flush+commit+UpdateHead+prune in a background goroutine.
 // Notifications have already been dispatched inline from the overlay.
-func (e *ExecModule) runPostForkchoice(sd *execctx.SharedDomains, finishProgressBefore uint64, isSynced bool, initialCycle bool) error {
+func (e *ExecModule) runPostForkchoice(sd *execctx.SharedDomains, bgRoTx kv.TemporalTx, finishProgressBefore uint64, isSynced bool, initialCycle bool) error {
 	var timings []any
 	if e.fcuBackgroundCommit && sd != nil {
-		commitTimings, err := e.runForkchoiceFlushCommit(sd, finishProgressBefore, isSynced)
+		commitTimings, err := e.runForkchoiceFlushCommit(sd, bgRoTx, finishProgressBefore, isSynced)
 		if err != nil {
 			return err
 		}
@@ -749,7 +759,15 @@ func (e *ExecModule) dispatchNotificationsFromOverlay(sd *execctx.SharedDomains,
 
 // runForkchoiceFlushCommit opens a brief RwTx, flushes the SharedDomains
 // (block overlay + domain mem), commits, then updates the sentry head.
-func (e *ExecModule) runForkchoiceFlushCommit(sd *execctx.SharedDomains, finishProgressBefore uint64, isSynced bool) ([]any, error) {
+//
+// roTxToCloseBeforeCommit (may be nil) is released between Flush and Commit so
+// the commit transaction observes openTxs=1 in MDBX rather than 2. This lets
+// MDBX GC reclaim pages freed during the commit window immediately, instead of
+// pinning them behind the still-open RO reader until the next commit. SD.Flush
+// only writes in-memory state to rwTx and does not read from the RO tx, so
+// closing it after Flush is safe. Rollback is idempotent, so callers keep their
+// outer `defer roTx.Rollback()` as a safety net.
+func (e *ExecModule) runForkchoiceFlushCommit(sd *execctx.SharedDomains, roTxToCloseBeforeCommit kv.TemporalTx, finishProgressBefore uint64, isSynced bool) ([]any, error) {
 	var timings []any
 
 	rwTx, err := e.db.BeginTemporalRw(e.bacgroundCtx)
@@ -762,6 +780,9 @@ func (e *ExecModule) runForkchoiceFlushCommit(sd *execctx.SharedDomains, finishP
 		return nil, err
 	}
 	timings = append(timings, "flush", common.Round(time.Since(flushStart), 0))
+	if roTxToCloseBeforeCommit != nil {
+		roTxToCloseBeforeCommit.Rollback()
+	}
 	commitStart := time.Now()
 	if err := rwTx.Commit(); err != nil {
 		return nil, err
