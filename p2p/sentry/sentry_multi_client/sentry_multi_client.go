@@ -901,8 +901,8 @@ func (cs *MultiClient) addBlockWitnesses(ctx context.Context, inreq *sentryproto
 		if pageResponse.TotalPages > wit.MaxWitnessPages {
 			return fmt.Errorf("witness response advertises TotalPages %d > max %d for hash %x", pageResponse.TotalPages, wit.MaxWitnessPages, pageResponse.Hash)
 		}
-		// Per protocol, Page >= TotalPages signals that the peer has no data for this
-		// witness (e.g. TotalPages == 0). Skip rather than allocate or reject.
+		// Page >= TotalPages is the empty-response sentinel documented on
+		// wit.WitnessPageResponse.Page; skip without allocating.
 		if pageResponse.Page >= pageResponse.TotalPages {
 			continue
 		}
