@@ -380,7 +380,7 @@ type MultiClientDeps struct {
 func (p *Provider) BuildMultiClient(deps MultiClientDeps) error {
 	bufSize := deps.BlockBufferSize
 	if bufSize == 0 {
-		bufSize = defaultBlockBufferSize
+		bufSize = sentry_multi_client.DefaultBlockBufferSize
 	}
 
 	client, err := sentry_multi_client.NewMultiClient(
@@ -405,10 +405,6 @@ func (p *Provider) BuildMultiClient(deps MultiClientDeps) error {
 	p.Client = client
 	return nil
 }
-
-// defaultBlockBufferSize mirrors the previous backend.go blockBufferSize
-// constant; used when MultiClientDeps.BlockBufferSize is zero.
-const defaultBlockBufferSize = 128
 
 // Start kicks off background work:
 //   - MultiClient stream loops (the sentry→MultiClient gRPC pumps).

@@ -16,6 +16,10 @@
 
 package integrity
 
+import (
+	"sort"
+)
+
 type Check string
 
 const (
@@ -117,10 +121,12 @@ const (
 	Publishable Check = "Publishable"
 )
 
+// FastChecks is ordered cheapest → heaviest so time-budgeted runs give unused
+// budget to the heavier checks at the tail.
 var FastChecks = []Check{
-	Blocks, HeaderNoGaps, BlocksTxnID, InvertedIndex, StateProgress, HistoryNoSystemTxs,
-	CommitmentKvi, ReceiptsNoDups, RCacheNoDups, CommitmentRoot,
-	CommitmentHistVal, StateRootVerifyByHistory, Publishable,
+	StateProgress, Publishable, HeaderNoGaps, BlocksTxnID, Blocks,
+	ReceiptsNoDups, RCacheNoDups, InvertedIndex, CommitmentRoot, CommitmentKvi,
+	HistoryNoSystemTxs, CommitmentHistVal, StateRootVerifyByHistory,
 }
 
 var SlowChecks = []Check{StateVerify}
@@ -129,3 +135,28 @@ var DeprecatedChecks = []Check{
 	CommitmentKvDeref, //StateVerify - will overcome
 }
 var AllChecks = append(append(append([]Check{}, FastChecks...), SlowChecks...), DeprecatedChecks...)
+
+// SortChecksByCost returns a copy of checks ordered by their position in FastChecks
+// (cheapest → heaviest). Checks not in FastChecks keep their original relative order at the end.
+func SortChecksByCost(checks []Check) []Check {
+	rank := make(map[Check]int, len(FastChecks))
+	for i, c := range FastChecks {
+		rank[c] = i
+	}
+	out := append([]Check{}, checks...)
+	sort.SliceStable(out, func(i, j int) bool {
+		ri, oki := rank[out[i]]
+		rj, okj := rank[out[j]]
+		switch {
+		case oki && okj:
+			return ri < rj
+		case oki:
+			return true
+		case okj:
+			return false
+		default:
+			return false
+		}
+	})
+	return out
+}

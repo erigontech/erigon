@@ -23,6 +23,12 @@ const (
 	IsLittleEndianFeature Features = 0b1
 )
 
+// headerSize is the fixed byte layout of the fusefilter on-disk header:
+//
+//	1B version + 3B features + 4B SegmentCount + 4B SegmentCountLength +
+//	8B Seed + 4B SegmentLength + 4B SegmentLengthMask + 8B fingerprints-len.
+const headerSize = 1 + 3 + 4 + 4 + 8 + 4 + 4 + 8
+
 type Reader struct {
 	inner     *xorfilter.BinaryFuse[uint8]
 	keepInMem bool // keep it in mem insted of mmap
@@ -80,10 +86,11 @@ func parseHeaderFeatures(header []byte, fName string) (version uint8, features F
 }
 
 func NewReaderOnBytes(m []byte, fName string) (*Reader, int, error) {
-	const headerSize = filterBlobHeaderSize
 	if len(m) < headerSize {
 		return nil, 0, fmt.Errorf("fusefilter %s: too small for header (%d < %d)", fName, len(m), headerSize)
 	}
+	filter := &xorfilter.BinaryFuse[uint8]{}
+
 	header, data := m[:headerSize], m[headerSize:]
 
 	v, features, err := parseHeaderFeatures(header, fName)
@@ -91,7 +98,11 @@ func NewReaderOnBytes(m []byte, fName string) (*Reader, int, error) {
 		return nil, 0, err
 	}
 
-	filter := &xorfilter.BinaryFuse[uint8]{}
+	// Writer layout: SegmentCount at header[4:8], SegmentCountLength at
+	// header[8:12]. The previous reader decoded both from header[8:]
+	// (offset 4+4), so SegmentCount silently took the value the writer
+	// had put at SegmentCountLength and the real SegmentCount at
+	// offset 4 was never consumed.
 	filter.SegmentCount = binary.BigEndian.Uint32(header[4:])
 	filter.SegmentCountLength = binary.BigEndian.Uint32(header[4+4:])
 	filter.Seed = binary.BigEndian.Uint64(header[4+4+4:])

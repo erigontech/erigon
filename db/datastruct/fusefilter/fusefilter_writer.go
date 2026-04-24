@@ -87,7 +87,6 @@ func writeFilter(features Features, filter *xorfilter.BinaryFuse[uint8], fw io.W
 	if filter.SegmentCount > math.MaxUint32/2 {
 		return 0, fmt.Errorf("SegmentCount=%d cannot be greater than u32/2", filter.SegmentCount)
 	}
-	const headerSize = filterBlobHeaderSize
 	const version uint8 = 0
 	var header [headerSize]byte
 
