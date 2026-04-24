@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
+	"github.com/erigontech/erigon/db/services"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -141,7 +142,11 @@ func ExecV3(ctx context.Context,
 	}
 
 	if execStage.SyncMode() == stages.ModeApplyingBlocks {
-		agg.BuildFilesInBackground(initialTxNum)
+		maxCollatable, err := services.MaxCollatableTxNum(ctx, applyTx, cfg.blockReader)
+		if err != nil {
+			return err
+		}
+		agg.BuildFilesInBackground(min(initialTxNum, maxCollatable))
 	}
 
 	var (
@@ -594,6 +599,10 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 			}
 			go warmTxsHashes(b)
 
+			if stateCache := te.doms.GetStateCache(); stateCache != nil {
+				stateCache.ValidateAndPrepare(b.ParentHash(), b.Hash())
+			}
+
 			var dbBAL types.BlockAccessList
 			var data []byte
 			// Use a fresh read tx (not tx.Apply) so we can see BAL data
@@ -618,9 +627,22 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 			txs := b.Transactions()
 			header := b.HeaderNoCopy()
 
-			// BLOCKHASH looks back at most 256 blocks. Use a short-lived read
-			// tx (not the apply-tx) to avoid races with fcuOverlay lifecycle.
+			// BLOCKHASH looks back at most 256 blocks. During initial sync the
+			// headers for recently-inserted blocks live in the in-memory block
+			// overlay (see execmodule/inserters.go) and are not yet in the main
+			// DB; read them via an OverlayReadView so that the walk-back used by
+			// GetHashFn can find every header between (blockNum-256) and
+			// (blockNum-1).
 			blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
+				if overlay := te.doms.BlockOverlay(); overlay != nil {
+					roTx, err := te.cfg.db.BeginRo(ctx) //nolint:gocritic
+					if err != nil {
+						return nil, err
+					}
+					defer roTx.Rollback()
+					view := overlay.NewReadView(roTx)
+					return te.cfg.blockReader.Header(ctx, view, hash, number)
+				}
 				var h *types.Header
 				if err := te.cfg.db.View(ctx, func(roTx kv.Tx) error {
 					var err error
@@ -832,16 +854,14 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 
 }
 
-func shouldGenerateChangeSets(cfg ExecuteBlockCfg, blockNum, maxBlockNum uint64, initialCycle bool) bool {
+func shouldGenerateChangeSets(cfg ExecuteBlockCfg, blockNum, maxBlockNum uint64) bool {
 	if cfg.syncCfg.AlwaysGenerateChangesets {
 		return true
 	}
 	if blockNum < cfg.blockReader.FrozenBlocks() {
 		return false
 	}
-	if initialCycle {
-		return false
-	}
-	// once past the initial cycle, make sure to generate changesets for the last blocks that fall in the reorg window
+	// Generate changesets for blocks within the reorg window of the batch end,
+	// so the node can handle reorgs at the tip.
 	return blockNum+cfg.syncCfg.MaxReorgDepth >= maxBlockNum
 }

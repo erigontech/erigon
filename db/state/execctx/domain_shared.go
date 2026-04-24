@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -76,11 +77,13 @@ type accHolder interface {
 
 func IsDomainAheadOfBlocks(ctx context.Context, tx kv.TemporalRwTx, logger log.Logger) bool {
 	doms, err := NewSharedDomains(ctx, tx, logger)
+	if doms != nil {
+		defer doms.Close()
+	}
 	if err != nil {
 		logger.Debug("domain ahead of blocks", "err", err, "stack", dbg.Stack())
 		return errors.Is(err, commitmentdb.ErrBehindCommitment)
 	}
-	defer doms.Close()
 	return false
 }
 
@@ -117,6 +120,17 @@ type SharedDomains struct {
 }
 
 func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
+	tv := commitment.VariantHexPatriciaTrie
+	if statecfg.ExperimentalConcurrentCommitment {
+		tv = commitment.VariantConcurrentHexPatricia
+	}
+	return NewSharedDomainsWithTrieVariant(ctx, tx, logger, tv)
+}
+
+// NewSharedDomainsWithTrieVariant is like NewSharedDomains but accepts an
+// explicit trie variant instead of reading the global statecfg flag. Use this
+// when the caller needs a specific variant without mutating process-wide state.
+func NewSharedDomainsWithTrieVariant(ctx context.Context, tx kv.TemporalTx, logger log.Logger, tv commitment.TrieVariant) (*SharedDomains, error) {
 	sd := &SharedDomains{
 		logger: logger,
 		//trace:   true,
@@ -125,16 +139,22 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) 
 	}
 
 	sd.mem = tx.Debug().NewMemBatch(&sd.metrics)
-
-	tv := commitment.VariantHexPatriciaTrie
-	if statecfg.ExperimentalConcurrentCommitment {
-		tv = commitment.VariantConcurrentHexPatricia
-	}
-
 	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv, tx.Debug().Dirs().Tmp)
 
-	if _, _, err := sd.SeekCommitment(ctx, tx); err != nil {
+	_, blockNum, err := sd.SeekCommitment(ctx, tx)
+	if err != nil {
 		return sd, err
+	}
+
+	// ErrBehindCommitment is an environmental signal; sd is fully initialized.
+	if blockNum > 0 {
+		lastBn, _, err := rawdbv3.TxNums.Last(tx)
+		if err != nil {
+			return sd, err
+		}
+		if lastBn < blockNum {
+			return sd, fmt.Errorf("%w: TxNums index is at block %d and behind commitment %d", commitmentdb.ErrBehindCommitment, lastBn, blockNum)
+		}
 	}
 
 	return sd, nil
@@ -480,16 +500,31 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		}
 	}
 
+	type MeteredGetter interface {
+		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
+	}
+
 	// stateCache holds in-flight values from previous transactions in the same batch
 	// that haven't been flushed to DB yet. Early return keeps correctness AND performance.
 	if sd.stateCache != nil {
 		if v, ok := sd.stateCache.Get(domain, k); ok {
+			if dbg.AssertStateCache {
+				// Fetch authoritative value from the backing tx and panic on any divergence.
+				// sd.mem and sd.parent.mem were already checked above and missed, so the
+				// backing tx is the single source of truth for this key at this point.
+				var vDB []byte
+				if aggTx, okAgg := tx.AggTx().(MeteredGetter); okAgg {
+					vDB, _, _, _ = aggTx.MeteredGetLatest(domain, k, tx, maxStep, &sd.metrics, start)
+				} else {
+					vDB, _, _ = tx.GetLatest(domain, k)
+				}
+				if !bytes.Equal(v, vDB) {
+					panic(fmt.Sprintf("stateCache divergence: domain=%v key=%x cached=%x db=%x txNum=%d",
+						domain, k, v, vDB, sd.txNum))
+				}
+			}
 			return v, 0, nil
 		}
-	}
-
-	type MeteredGetter interface {
-		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
 	}
 
 	if aggTx, ok := tx.AggTx().(MeteredGetter); ok {

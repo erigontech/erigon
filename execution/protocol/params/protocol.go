@@ -94,11 +94,12 @@ const (
 	SelfdestructRefundGas uint64 = 24000 // Refunded following a selfdestruct operation.
 	MemoryGas             uint64 = 3     // Times the address of the (highest referenced byte in memory + 1). NOTE: referencing happens on read, write and in instructions such as RETURN and CALL.
 
-	TxDataNonZeroGasFrontier  uint64 = 68   // Per byte of data attached to a transaction that is not equal to zero. NOTE: Not payable on data of calls between transactions.
-	TxDataNonZeroGasEIP2028   uint64 = 16   // Per byte of non zero data attached to a transaction after EIP 2028 (part in Istanbul)
-	TxAccessListAddressGas    uint64 = 2400 // Per address specified in EIP 2930 access list
-	TxAccessListStorageKeyGas uint64 = 1900 // Per storage key specified in EIP 2930 access list
-	TxTotalCostFloorPerToken  uint64 = 10   // Per token of calldata in a transaction, as a minimum the txn must pay (EIP-7623)
+	TxDataNonZeroGasFrontier        uint64 = 68   // Per byte of data attached to a transaction that is not equal to zero. NOTE: Not payable on data of calls between transactions.
+	TxDataNonZeroGasEIP2028         uint64 = 16   // Per byte of non zero data attached to a transaction after EIP 2028 (part in Istanbul)
+	TxAccessListAddressGas          uint64 = 2400 // Per address specified in EIP 2930 access list
+	TxAccessListStorageKeyGas       uint64 = 1900 // Per storage key specified in EIP 2930 access list
+	TxTotalCostFloorPerToken        uint64 = 10   // Per token of calldata in a transaction, as a minimum the txn must pay (EIP-7623)
+	TxTotalCostFloorPerTokenEIP7976 uint64 = 16   // Per token of calldata floor cost (EIP-7976), replaces EIP-7623 value
 
 	// These have been changed during the course of the chain
 	CallGasFrontier              uint64 = 40  // Once per CALL operation & message call transaction.

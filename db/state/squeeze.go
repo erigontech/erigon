@@ -33,6 +33,7 @@ import (
 	downloadertype "github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
@@ -781,7 +782,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	}
 	logger.Info("[rebuild_commitment_history] squeeze starting")
 
-	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
+	a.recalcVisibleFiles()
 
 	// Check if account files exist - squeeze requires them for ReplaceKeysInValues
 	actx := a.BeginFilesRo()
@@ -938,6 +939,12 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		}
 		roTx.Rollback()
 
+		concurrent := statecfg.ExperimentalConcurrentCommitment
+		trieVariant := commitment.VariantHexPatriciaTrie
+		if concurrent {
+			trieVariant = commitment.VariantConcurrentHexPatricia
+		}
+
 		for shardFrom < lastShard { // recreate this file range 1+ steps
 			nextKey := func() (ok bool, k []byte) {
 				if !keyIter.HasNext() {
@@ -961,7 +968,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			}
 			defer rwTx.Rollback()
 
-			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+			domains, err := execctx.NewSharedDomainsWithTrieVariant(ctx, rwTx, log.New(), trieVariant)
 			if err != nil {
 				return nil, err
 			}
@@ -969,6 +976,9 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			domains.SetTxNum(lastTxnumInShard - 1)
 			currentTxNum := lastTxnumInShard - 1
 			domains.GetCommitmentCtx().SetLimitedHistoryStateReader(rwTx, lastTxnumInShard) // this helps to read state from correct file during commitment
+			if concurrent {
+				domains.EnableParaTrieDB(rwDb)
+			}
 
 			rebuiltCommit, err = rebuildCommitmentShard(ctx, domains, rwTx, nextKey, &rebuiltCommitment{
 				StepFrom: shardFrom,
@@ -988,7 +998,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 			// make new file visible for all aggregator transactions
 			a.dirtyFilesLock.Lock()
-			a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
+			a.recalcVisibleFiles()
 			a.dirtyFilesLock.Unlock()
 			rwTx.Rollback()
 
@@ -1038,7 +1048,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		return latestRoot, nil
 	}
 	logger.Info("[squeeze] starting")
-	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
+	a.recalcVisibleFiles()
 
 	logger.Info(fmt.Sprintf("[squeeze] latest root %x", latestRoot))
 	a.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
@@ -1091,6 +1101,7 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 	if err != nil {
 		return nil, err
 	}
+
 	logger.Info(cfg.LogPrefix+" now sealing (dumping on disk)", "root", hex.EncodeToString(rh),
 		"keysInShard", common.PrettyCounter(processed), "keysInRange", common.PrettyCounter(cfg.Keys))
 

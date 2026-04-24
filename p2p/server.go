@@ -223,6 +223,11 @@ func (srv *Server) LocalNode() *enode.LocalNode {
 	return srv.localnode
 }
 
+// DiscV5 returns the UDPv5 discovery protocol instance, or nil if not running.
+func (srv *Server) DiscV5() *discover.UDPv5 {
+	return srv.discv5
+}
+
 // Peers returns all connected peers.
 func (srv *Server) Peers() []*Peer {
 	var ps []*Peer
@@ -771,7 +776,7 @@ running:
 			}
 		case <-logTimer.C:
 			vals := []any{"protocol", srv.Config.Protocols[0].Version, "peers", len(peers), "trusted", len(trusted), "inbound", inboundCount}
-			vals = append(vals, srv.listErrors()...)
+			vals = append(vals, srv.listAndResetErrors()...)
 
 			srv.logger.Debug("[p2p] Server", vals...)
 		}
@@ -821,8 +826,6 @@ func (srv *Server) postHandshakeChecks(peers map[enode.ID]*Peer, inboundCount in
 // inbound connections.
 func (srv *Server) listenLoop(ctx context.Context) {
 	srv.logger.Trace("TCP listener up", "addr", srv.listener.Addr())
-
-	srv.resetErrors()
 
 	// The slots limit accepts of new connections.
 	slots := semaphore.NewWeighted(int64(srv.MaxPendingPeers))
@@ -1134,13 +1137,7 @@ func (srv *Server) addError(err error) {
 	srv.errors[cleanError(err.Error())]++
 }
 
-func (srv *Server) resetErrors() {
-	srv.errorsMu.Lock()
-	srv.errors = map[string]uint{}
-	srv.errorsMu.Unlock()
-}
-
-func (srv *Server) listErrors() []any {
+func (srv *Server) listAndResetErrors() []any {
 	srv.errorsMu.Lock()
 	defer srv.errorsMu.Unlock()
 
@@ -1148,6 +1145,7 @@ func (srv *Server) listErrors() []any {
 	for err, count := range srv.errors {
 		list = append(list, err, count)
 	}
+	clear(srv.errors)
 	return list
 }
 
@@ -1159,6 +1157,12 @@ func cleanError(err string) string {
 		return "closed by remote"
 	case strings.HasSuffix(err, "connection reset by peer"):
 		return "closed by remote"
+	case strings.Contains(err, "broken pipe"):
+		return "broken pipe"
+	case strings.Contains(err, "connection refused"):
+		return "connection refused"
+	case strings.Contains(err, "no route to host"):
+		return "no route to host"
 	default:
 		return err
 	}
