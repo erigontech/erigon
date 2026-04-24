@@ -125,7 +125,32 @@ type DomainLatestIterFile struct {
 }
 
 func (hi *DomainLatestIterFile) Close() {
+	if hi.h == nil {
+		return
+	}
+	for hi.h.Len() > 0 {
+		hi.closeCursorItem(heap.Pop(hi.h).(*CursorItem))
+	}
 }
+
+func (hi *DomainLatestIterFile) closeCursorItem(item *CursorItem) {
+	if item == nil {
+		return
+	}
+	if item.btCursor != nil {
+		item.btCursor.Close()
+		item.btCursor = nil
+	}
+	if item.cNonDup != nil {
+		item.cNonDup.Close()
+		item.cNonDup = nil
+	}
+	if item.cDup != nil {
+		item.cDup.Close()
+		item.cDup = nil
+	}
+}
+
 func (hi *DomainLatestIterFile) Trace(prefix string) *stream.TracedDuo[[]byte, []byte] {
 	return stream.TraceDuo(hi, hi.logger, "[dbg] DomainLatestIterFile.Next "+prefix)
 }
@@ -167,6 +192,8 @@ func (hi *DomainLatestIterFile) init(domainRoTx *DomainRoTx) error {
 			if key != nil && (hi.to == nil || bytes.Compare(key, hi.to) < 0) {
 				val := btCursor.Value()
 				heap.Push(hi.h, &CursorItem{t: FILE_CURSOR, key: key, val: val, btCursor: btCursor, endTxNum: txNum, reverse: true})
+			} else {
+				btCursor.Close()
 			}
 		} else if domainRoTx.d.Accessors.Has(statecfg.AccessorHashMap) {
 			// For domains without BTree (e.g., commitment with HashMap accessor),
@@ -203,6 +230,7 @@ func (hi *DomainLatestIterFile) initCursorMDBX(domainRoTx *DomainRoTx) error {
 			}
 			key, value, err := valsCursor.Seek(hi.from)
 			if err != nil {
+				valsCursor.Close()
 				return err
 			}
 			// Skip DB entries within file range — files are authoritative there.
@@ -234,6 +262,7 @@ func (hi *DomainLatestIterFile) initCursorMDBX(domainRoTx *DomainRoTx) error {
 			var pushed bool
 			key, value, err := valsCursor.Seek(hi.from)
 			if err != nil {
+				valsCursor.Close()
 				return err
 			}
 			// Skip DB entries within file range — files are authoritative there.
@@ -277,9 +306,11 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 						ci1.val = ci1.btCursor.Value()
 						if ci1.key != nil && (hi.to == nil || bytes.Compare(ci1.key, hi.to) < 0) {
 							heap.Push(hi.h, ci1)
+						} else {
+							hi.closeCursorItem(ci1)
 						}
 					} else {
-						ci1.btCursor.Close()
+						hi.closeCursorItem(ci1)
 					}
 				} else { // Direct .kv file iteration
 					if ci1.kvReader.HasNext() {
@@ -300,6 +331,7 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 						// start from current go to next
 						initial, v, err := ci1.cNonDup.Current()
 						if err != nil {
+							hi.closeCursorItem(ci1)
 							return err
 						}
 						var k []byte
@@ -339,6 +371,7 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 						// start from current go to next
 						k, stepBytesWithValue, err := ci1.cDup.NextNoDup()
 						if err != nil {
+							hi.closeCursorItem(ci1)
 							return err
 						}
 
