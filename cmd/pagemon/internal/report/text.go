@@ -84,22 +84,38 @@ func writeFileResult(w io.Writer, r *FileResult) {
 	fmt.Fprintf(w, "\nPattern: %s\n", r.Pattern)
 }
 
+const maxListLines = 10
+
 func writeClusters(w io.Writer, clusters []cluster.Cluster, gaps []int64) {
 	if len(clusters) == 0 {
 		fmt.Fprintln(w, "\nClusters: none")
 		return
 	}
 	fmt.Fprintf(w, "\nClusters (%d):\n", len(clusters))
-	for i, c := range clusters {
+	show := len(clusters)
+	if show > maxListLines {
+		show = maxListLines
+	}
+	for i := range clusters[:show] {
+		c := clusters[i]
 		fmt.Fprintf(w, "  %d: pages %s–%s  (%s)\n",
 			i+1, humanNum(c.StartPage), humanNum(c.EndPage), HumanBytes(c.SizeBytes))
 	}
+	if len(clusters) > maxListLines {
+		fmt.Fprintf(w, "  ... %d more clusters\n", len(clusters)-maxListLines)
+	}
 	if len(gaps) > 0 {
-		parts := make([]string, len(gaps))
-		for i, g := range gaps {
+		showGaps := gaps
+		suffix := ""
+		if len(gaps) > maxListLines {
+			showGaps = gaps[:maxListLines]
+			suffix = fmt.Sprintf(", ... %d more", len(gaps)-maxListLines)
+		}
+		parts := make([]string, len(showGaps))
+		for i, g := range showGaps {
 			parts[i] = HumanBytes(g)
 		}
-		fmt.Fprintf(w, "Inter-cluster gaps: %s\n", strings.Join(parts, ", "))
+		fmt.Fprintf(w, "Inter-cluster gaps: %s%s\n", strings.Join(parts, ", "), suffix)
 	}
 }
 
@@ -112,17 +128,29 @@ func writeTemporalPhases(w io.Writer, snaps []sampler.Snapshot, clusters []clust
 		return
 	}
 	fmt.Fprintf(w, "\nTemporal phases (%d):\n", len(phases))
-	for _, p := range phases {
+	show := len(phases)
+	if show > maxListLines {
+		show = maxListLines
+	}
+	for _, p := range phases[:show] {
 		clusterDesc := "none"
 		if len(p.ClusterIDs) > 0 {
-			parts := make([]string, len(p.ClusterIDs))
-			for i, id := range p.ClusterIDs {
+			ids := p.ClusterIDs
+			suffix := ""
+			if len(ids) > 5 {
+				ids, suffix = ids[:5], fmt.Sprintf(", +%d more", len(p.ClusterIDs)-5)
+			}
+			parts := make([]string, len(ids))
+			for i, id := range ids {
 				parts[i] = fmt.Sprintf("cluster %d", id+1)
 			}
-			clusterDesc = strings.Join(parts, ", ")
+			clusterDesc = strings.Join(parts, ", ") + suffix
 		}
 		fmt.Fprintf(w, "  %s–%s:  %s\n",
 			p.Start.Round(time.Millisecond), p.End.Round(time.Millisecond), clusterDesc)
+	}
+	if len(phases) > maxListLines {
+		fmt.Fprintf(w, "  ... %d more phases\n", len(phases)-maxListLines)
 	}
 }
 
