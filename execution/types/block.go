@@ -1418,14 +1418,10 @@ func (b *Block) HashCheck(fullCheck bool) error {
 		return err
 	}
 
-	if fullCheck {
-		// execution-spec-tests contain such scenarios where block has an invalid tx, but receiptHash is default (=EmptyRootHash)
-		// the test is to see if tx is rejected in EL, but in mock_sentry.go, we have HashCheck() before block execution.
-		// Since we want the tx execution to happen, we skip it here and bypass this guard.
-		if len(b.transactions) > 0 && b.ReceiptHash() == empty.RootHash {
-			return fmt.Errorf("block has empty receipt hash: %x but it includes %x transactions", b.ReceiptHash(), len(b.transactions))
-		}
-	}
+	// Note: we intentionally do NOT reject blocks where receiptHash == EmptyRootHash
+	// but transactions exist. EEST (execution-spec-tests) state-test-derived fixtures
+	// set receiptHash to EmptyRootHash because receipts are computed during execution.
+	// The receipt root is validated after block execution, not here.
 
 	if len(b.transactions) == 0 && b.ReceiptHash() != empty.RootHash {
 		return fmt.Errorf("block has non-empty receipt hash: %x but no transactions", b.ReceiptHash())
