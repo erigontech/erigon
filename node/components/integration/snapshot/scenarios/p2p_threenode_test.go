@@ -26,7 +26,6 @@
 package scenarios_test
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"sync/atomic"
@@ -91,20 +90,20 @@ func seedUnmergedPeer(t *testing.T, node *harness.P2PNode) [20]byte {
 	return node.PublishV2Manifest()
 }
 
-// setENR publishes the peer's ChainToml + BT port on its DevP2P
-// listener's live LocalNode so connecting peers see the advertisement
-// in the signed ENR.
-func setENR(t *testing.T, node *harness.P2PNode, listener *harness.DevP2PListener, v2Hash [20]byte, coverageSteps uint64) {
+// setENR publishes the peer's ChainToml + BT port on its sentry
+// provider's live LocalNode so connecting peers see the advertisement
+// in the signed ENR during the real eth/68 handshake.
+func setENR(t *testing.T, node *harness.P2PNode, v2Hash [20]byte, coverageSteps, mergeDepth uint64) {
 	t.Helper()
 	_, btPort := node.LocalTorrentAddr()
-	listener.SetENREntry(enr.ChainToml{
+	node.SetDevP2PENREntry(enr.ChainToml{
 		AuthoritativeBlocks: 0,
 		KnownBlocks:         0,
 		InfoHash:            v2Hash,
 		DomainSteps:         coverageSteps,
-		MergeDepth:          coverageSteps, // merged:500, unmerged: 100 largest slice
+		MergeDepth:          mergeDepth,
 	})
-	listener.SetENREntry(enr.BT(btPort))
+	node.SetDevP2PENREntry(enr.BT(btPort))
 }
 
 // TestP2P_ThreeNode_MergeDivergence_RealStack runs the merge-divergence
@@ -120,28 +119,11 @@ func TestP2P_ThreeNode_MergeDivergence_RealStack(t *testing.T) {
 	peerB := harness.NewP2PNode(t, logger) // unmerged
 	leecher := harness.NewP2PNode(t, logger)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-
-	listenerA := harness.StartDevP2PListener(t, ctx, peerA.Sentry, logger)
-	t.Cleanup(listenerA.Close)
-	listenerB := harness.StartDevP2PListener(t, ctx, peerB.Sentry, logger)
-	t.Cleanup(listenerB.Close)
-	listenerC := harness.StartDevP2PListener(t, ctx, leecher.Sentry, logger)
-	t.Cleanup(listenerC.Close)
-
 	mergedHash := seedMergedPeer(t, peerA)
-	setENR(t, peerA, listenerA, mergedHash, mergedTo)
+	setENR(t, peerA, mergedHash, mergedTo, mergedTo)
 
 	unmergedHash := seedUnmergedPeer(t, peerB)
-	// Largest slice on B is 128 steps wide; MergeDepth reflects that.
-	_, btPortB := peerB.LocalTorrentAddr()
-	listenerB.SetENREntry(enr.ChainToml{
-		InfoHash:    unmergedHash,
-		DomainSteps: unmergedSlices * unmergedWidth,
-		MergeDepth:  unmergedWidth,
-	})
-	listenerB.SetENREntry(enr.BT(btPortB))
+	setENR(t, peerB, unmergedHash, unmergedSlices*unmergedWidth, unmergedWidth)
 
 	// Leecher needs BT static peers for both seeders so new torrents
 	// can reach whichever has the file.
@@ -155,10 +137,11 @@ func TestP2P_ThreeNode_MergeDivergence_RealStack(t *testing.T) {
 	require.NoError(t, leecher.Bus.Subscribe(func(flow.PeerManifestReceived) { manifestCount.Add(1) }))
 	require.NoError(t, leecher.Bus.Subscribe(func(flow.TrustPromoted) { promotedCount.Add(1) }))
 
-	// Kick off both handshakes simultaneously. Their relative ordering
-	// is unpredictable on real DevP2P — that's the point of the test.
-	listenerC.AddStaticPeer(listenerA.Self())
-	listenerC.AddStaticPeer(listenerB.Self())
+	// Kick off both handshakes simultaneously through real sentry. The
+	// relative ordering is unpredictable on real DevP2P — that's the
+	// point of the test.
+	leecher.AddDevP2PPeer(peerA.DevP2PSelf())
+	leecher.AddDevP2PPeer(peerB.DevP2PSelf())
 
 	// Wait for gap-fill to settle: at least one manifest received, and
 	// the orchestrator's pending-map drained, AND the promoted count

@@ -218,9 +218,10 @@ func (p *Provider) EnablePeerEventAutoWire(ctx context.Context) (execp2p.Unregis
 		switch msg.EventId {
 		case sentryproto.PeerEvent_Connect:
 			node := p.peerNodeByID([64]byte(*peerID))
-			if node != nil {
-				p.PublishPeerConnected(node)
+			if node == nil {
+				return
 			}
+			p.PublishPeerConnected(node)
 		case sentryproto.PeerEvent_Disconnect:
 			p.PublishPeerDisconnected(peerID.String())
 		}
