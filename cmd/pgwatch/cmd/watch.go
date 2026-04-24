@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -15,24 +17,32 @@ import (
 
 var watchFlags struct {
 	cmd      string
+	pid      int
 	interval time.Duration
 }
 
 var watchCmd = &cobra.Command{
-	Use:   "watch --cmd <shell-command> [--interval 50ms] <file>...",
-	Short: "Sample page-cache residency during a command and report temporal phases",
+	Use:   "watch (--cmd <shell-command> | --pid <pid>) [--interval 50ms] <file>...",
+	Short: "Sample page-cache residency during a command or while a PID runs",
 	Args:  cobra.MinimumNArgs(1),
 	RunE:  runWatch,
 }
 
 func init() {
-	watchCmd.Flags().StringVar(&watchFlags.cmd, "cmd", "", "shell command to run (required)")
+	watchCmd.Flags().StringVar(&watchFlags.cmd, "cmd", "", "shell command to launch and watch")
+	watchCmd.Flags().IntVar(&watchFlags.pid, "pid", 0, "PID of an already-running process to watch until it exits (or Ctrl-C)")
 	watchCmd.Flags().DurationVar(&watchFlags.interval, "interval", 50*time.Millisecond, "mincore sampling interval")
-	_ = watchCmd.MarkFlagRequired("cmd")
 }
 
 func runWatch(cmd *cobra.Command, args []string) error {
-	// Take a "before" baseline so we can compute delta residency.
+	if watchFlags.cmd == "" && watchFlags.pid == 0 {
+		return fmt.Errorf("one of --cmd or --pid is required")
+	}
+	if watchFlags.cmd != "" && watchFlags.pid != 0 {
+		return fmt.Errorf("--cmd and --pid are mutually exclusive")
+	}
+
+	// Baseline snapshot.
 	before := make([][]bool, len(args))
 	sizes := make([]int64, len(args))
 	sampled := make([]bool, len(args))
@@ -54,25 +64,36 @@ func runWatch(cmd *cobra.Command, args []string) error {
 		samplers[i] = s
 	}
 
-	// Run command.
-	t0 := time.Now()
-	c := exec.Command("sh", "-c", watchFlags.cmd) //nolint:gosec
-	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
-	runErr := c.Run()
-	dur := time.Since(t0)
+	var (
+		cmdLabel string
+		runErr   error
+		dur      time.Duration
+	)
 
-	// Stop samplers and collect snapshots.
+	t0 := time.Now()
+	if watchFlags.cmd != "" {
+		cmdLabel = watchFlags.cmd
+		c := exec.Command("sh", "-c", watchFlags.cmd) //nolint:gosec
+		c.Stdout = os.Stdout
+		c.Stderr = os.Stderr
+		runErr = c.Run()
+	} else {
+		cmdLabel = fmt.Sprintf("pid %d", watchFlags.pid)
+		runErr = waitForPID(watchFlags.pid)
+	}
+	dur = time.Since(t0)
+
+	// Stop samplers.
 	allSnaps := make([][]sampler.Snapshot, len(args))
 	for i, s := range samplers {
 		allSnaps[i] = s.Stop()
 	}
 
 	if runErr != nil {
-		return fmt.Errorf("command failed: %w", runErr)
+		return fmt.Errorf("watch ended: %w", runErr)
 	}
 
-	// Build delta results with temporal data.
+	// Build delta results.
 	var results []report.FileResult
 	for i, path := range args {
 		var finalRes []bool
@@ -86,8 +107,37 @@ func runWatch(cmd *cobra.Command, args []string) error {
 	}
 
 	report.WriteWatch(os.Stdout, report.MeasureHeader{
-		Command:  watchFlags.cmd,
+		Command:  cmdLabel,
 		Duration: dur,
 	}, results)
 	return nil
+}
+
+// waitForPID blocks until the process exits or the user sends SIGINT/SIGTERM.
+// Returns nil when the process exits naturally, or an error explaining why we stopped.
+func waitForPID(pid int) error {
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sig)
+
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return fmt.Errorf("pid %d not found: %w", pid, err)
+	}
+
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+
+	fmt.Fprintf(os.Stderr, "watching pid %d — press Ctrl-C to stop\n", pid)
+	for {
+		select {
+		case s := <-sig:
+			return fmt.Errorf("interrupted by %s", s)
+		case <-ticker.C:
+			if err := proc.Signal(syscall.Signal(0)); err != nil {
+				// Process no longer exists.
+				return nil
+			}
+		}
+	}
 }
