@@ -191,6 +191,7 @@ COMMANDS += caplin
 COMMANDS += snapshots
 COMMANDS += diag
 COMMANDS += mcp
+COMMANDS += pgwatch
 
 # build each command using %.cmd rule
 $(COMMANDS): %: %.cmd
