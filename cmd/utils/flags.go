@@ -407,7 +407,12 @@ var (
 	RpcBlockRangeLimit = cli.IntFlag{
 		Name:  "rpc.blockrange.limit",
 		Usage: "Maximum block range (end - begin) allowed for range queries (0 = unlimited)",
-		Value: 0,
+		Value: 1_000,
+	}
+	RpcGetLogsMaxResults = cli.IntFlag{
+		Name:  "rpc.logs.maxresults",
+		Usage: "Maximum number of logs returned by eth_getLogs, erigon_getLogs, erigon_getLatestLogs (0 = unlimited)",
+		Value: 20_000,
 	}
 	RpcTraceCompatFlag = cli.BoolFlag{
 		Name:  "trace.compat",

@@ -55,6 +55,9 @@ type mockIBS struct{}
 func (m *mockIBS) GetBalance(accounts.Address) (uint256.Int, error) { return uint256.Int{}, nil }
 func (m *mockIBS) GetNonce(accounts.Address) (uint64, error)        { return 0, nil }
 func (m *mockIBS) GetCode(accounts.Address) ([]byte, error)         { return nil, nil }
+func (m *mockIBS) GetCodeHash(accounts.Address) (accounts.CodeHash, error) {
+	return accounts.NilCodeHash, nil
+}
 func (m *mockIBS) GetState(accounts.Address, accounts.StorageKey) (uint256.Int, error) {
 	return uint256.Int{}, nil
 }

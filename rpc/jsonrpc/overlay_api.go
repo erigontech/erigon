@@ -296,6 +296,10 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 		return nil, err
 	}
 
+	if api.blockRangeLimit != 0 && (end-begin) > uint64(api.blockRangeLimit) {
+		return nil, fmt.Errorf("%s: %d", errExceedBlockRange, api.blockRangeLimit)
+	}
+
 	numBlocks := end - begin + 1
 	var (
 		results = make([]*blockReplayResult, numBlocks)
@@ -405,7 +409,12 @@ blockLoop:
 		if res == nil {
 			continue
 		}
-		logs = append(logs, res.Logs...)
+		for _, l := range res.Logs {
+			if api.getLogsMaxResults != 0 && len(logs) >= api.getLogsMaxResults {
+				return nil, fmt.Errorf("%s: %d", errExceedLogResults, api.getLogsMaxResults)
+			}
+			logs = append(logs, l)
+		}
 	}
 	return logs, nil
 }
