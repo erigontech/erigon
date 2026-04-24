@@ -215,13 +215,18 @@ func (s *CaplinStateSnapshots) LS() {
 	view := s.View()
 	defer view.Close()
 
+	var totalWords, totalDict, totalDictMem uint64
 	for _, roTx := range view.roTxs {
 		if roTx != nil {
 			for _, seg := range roTx.Segments {
 				s.logger.Info("[agg] ", "f", seg.src.filePath, "words", seg.src.Decompressor.Count(), "dict", common.ByteCount(seg.src.Decompressor.SerializedTotalDictSize()), "dictMem", common.ByteCount(seg.src.Decompressor.DictMemSize()))
+				totalWords += uint64(seg.src.Decompressor.Count())
+				totalDict += seg.src.Decompressor.SerializedTotalDictSize()
+				totalDictMem += seg.src.Decompressor.DictMemSize()
 			}
 		}
 	}
+	s.logger.Info("[agg] total", "words", totalWords, "dict", common.ByteCount(totalDict), "dictMem", common.ByteCount(totalDictMem))
 }
 
 func (s *CaplinStateSnapshots) SegFileNames(from, to uint64) []string {

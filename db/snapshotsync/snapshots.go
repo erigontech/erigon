@@ -944,14 +944,19 @@ func (s *RoSnapshots) Ls() {
 	view := s.View()
 	defer view.Close()
 
+	var totalWords, totalDict, totalDictMem uint64
 	for _, t := range s.enums {
 		for _, seg := range view.segments[t].Segments {
 			if seg.src == nil || seg.src.Decompressor == nil {
 				continue
 			}
 			log.Info("[snapshots] ", "f", seg.src.Decompressor.FileName(), "words", seg.src.Decompressor.Count(), "dict", common.ByteCount(seg.src.Decompressor.SerializedTotalDictSize()), "dictMem", common.ByteCount(seg.src.Decompressor.DictMemSize()))
+			totalWords += uint64(seg.src.Decompressor.Count())
+			totalDict += seg.src.Decompressor.SerializedTotalDictSize()
+			totalDictMem += seg.src.Decompressor.DictMemSize()
 		}
 	}
+	log.Info("[snapshots] total", "words", totalWords, "dict", common.ByteCount(totalDict), "dictMem", common.ByteCount(totalDictMem))
 }
 
 func (s *RoSnapshots) Files() (list []string) {
