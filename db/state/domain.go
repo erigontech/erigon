@@ -1987,7 +1987,7 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	mxDupsPruneSizeIndex.AddUint64(pruneStat.DupsDeleted)
 
 	stat.MinStep = kv.Step(pruneStat.MinTxNum / dt.stepSize)
-	stat.MaxStep = kv.Step(pruneStat.MinTxNum / dt.stepSize)
+	stat.MaxStep = kv.Step(pruneStat.MaxTxNum / dt.stepSize)
 	stat.Values = pruneStat.PruneCountValues
 	stat.Dups = pruneStat.DupsDeleted
 	stat.Progress = pruneStat.ValueProgress
@@ -2012,15 +2012,6 @@ func (dt *DomainRoTx) Files() (res VisibleFiles) {
 	return append(res, dt.ht.Files()...)
 }
 func (dt *DomainRoTx) Name() kv.Domain { return dt.name }
-
-func versionTooLowPanic(filename string, version version.Versions) {
-	panic(fmt.Sprintf(
-		"FileVersion is too low, try to run snapshot reset: `erigon --datadir $DATADIR --chain $CHAIN snapshots reset`. file=%s, min_supported=%s, current=%s",
-		filename,
-		version.MinSupported,
-		version.Current,
-	))
-}
 
 // [startTxNum, endTxNum)
 func (dt *DomainRoTx) TraceKey(ctx context.Context, key []byte, startTxNum, endTxNum uint64, roTx kv.Tx) (stream.U64V, error) {

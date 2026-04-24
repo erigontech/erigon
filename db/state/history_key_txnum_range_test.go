@@ -17,7 +17,6 @@
 package state
 
 import (
-	"context"
 	"encoding/binary"
 	"fmt"
 	"math/rand"
@@ -75,7 +74,7 @@ func TestHistoryKeyTxNumRange(t *testing.T) {
 	t.Parallel()
 
 	logger := log.New()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	test := func(t *testing.T, h *History, db kv.RwDB, txs uint64) {
 		t.Helper()
@@ -126,7 +125,7 @@ func TestHistoryKeyTxNumRange_EdgeCases(t *testing.T) {
 	t.Parallel()
 
 	logger := log.New()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	test := func(t *testing.T, h *History, db kv.RwDB, txs uint64) {
 		t.Helper()
@@ -205,7 +204,7 @@ func TestHistoryKeyTxNumRange_DBOnly(t *testing.T) {
 	t.Parallel()
 
 	logger := log.New()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	test := func(t *testing.T, h *History, db kv.RwDB, txs uint64) {
 		t.Helper()
@@ -248,7 +247,7 @@ func TestHistoryKeyTxNumRange_RandomRanges(t *testing.T) {
 	t.Parallel()
 
 	logger := log.New()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	test := func(t *testing.T, h *History, db kv.RwDB, txs uint64) {
 		t.Helper()

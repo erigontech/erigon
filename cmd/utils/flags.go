@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/snapcfg"
@@ -812,7 +813,7 @@ var (
 
 	HealthCheckFlag = cli.BoolFlag{
 		Name:  "healthcheck",
-		Usage: "Enabling grpc health check",
+		Usage: "Enable grpc health check",
 	}
 
 	WebSeedsFlag = cli.StringFlag{
@@ -1144,6 +1145,10 @@ var (
 		Usage: "Port for MCP RPC server",
 		Value: 8553,
 	}
+	ErigondbDomainStepsInFrozenFileFlag = cli.StringFlag{
+		Name:  "erigondb.domain.steps-in-frozen-file",
+		Usage: `Override erigondb.toml "steps_in_frozen_file" for the domain merge cap only (history/inverted-index merges are unaffected). Pass a positive integer to set an explicit cap, or "Inf" to leave the domain merge unbounded. Default: unset, meaning the domain uses the same cap as determined by erigondb.toml.`,
+	}
 )
 
 var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag}
@@ -1183,7 +1188,7 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 		return
 	}
 
-	nodes, err := GetBootnodesFromFlags(ctx.String(BootnodesFlag.Name), ctx.String(ChainFlag.Name))
+	nodes, err := getBootnodesFromContext(ctx)
 	if err != nil {
 		Fatalf("Option %s: %v", BootnodesFlag.Name, err)
 	}
@@ -1197,12 +1202,47 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 		return
 	}
 
-	nodes, err := GetBootnodesFromFlags(ctx.String(BootnodesFlag.Name), ctx.String(ChainFlag.Name))
+	nodes, err := getBootnodesFromContext(ctx)
 	if err != nil {
 		Fatalf("Option %s: %v", BootnodesFlag.Name, err)
 	}
 
 	cfg.BootstrapNodesV5 = nodes
+}
+
+// resolveChainName returns the effective chain name from --chain and --networkid.
+// It is used for bootnodes, DNS discovery URLs, static peers, and the
+// chain-derived configuration in SetEthConfig (snapshot chain name,
+// chain-specific branches, etc.).
+//
+// It mirrors go-ethereum's behavior: when --networkid is explicitly set to a
+// non-mainnet value and --chain is not, the "mainnet" default on --chain
+// should not bleed into chain-derived config. If the networkid maps to a known
+// chain, that name is returned; otherwise an empty string is returned,
+// yielding no defaults.
+func resolveChainName(ctx *cli.Context) string {
+	chain := ctx.String(ChainFlag.Name)
+	if !ctx.IsSet(NetworkIdFlag.Name) || ctx.IsSet(ChainFlag.Name) {
+		return chain
+	}
+	networkID := ctx.Uint64(NetworkIdFlag.Name)
+	if networkID == 1 {
+		return chain
+	}
+	if chainName, ok := chainspec.NetworkNameByID[networkID]; ok {
+		return chainName
+	}
+	return ""
+}
+
+// getBootnodesFromContext resolves bootstrap nodes from the CLI context. An explicitly
+// set --bootnodes flag (even if empty) overrides chain defaults, matching go-ethereum's
+// behavior and allowing callers to run discovery with no bootstrap peers.
+func getBootnodesFromContext(ctx *cli.Context) ([]*enode.Node, error) {
+	if ctx.IsSet(BootnodesFlag.Name) {
+		return enode.ParseNodesFromURLs(common.CliString2Array(ctx.String(BootnodesFlag.Name)))
+	}
+	return GetBootnodesFromFlags("", resolveChainName(ctx))
 }
 
 // GetBootnodesFromFlags makes a list of bootnodes from command line flags.
@@ -1226,8 +1266,7 @@ func setStaticPeers(ctx *cli.Context, cfg *p2p.Config) {
 	if ctx.IsSet(StaticPeersFlag.Name) {
 		urls = common.CliString2Array(ctx.String(StaticPeersFlag.Name))
 	} else {
-		chain := ctx.String(ChainFlag.Name)
-		urls = chainspec.StaticPeerURLsOfChain(chain)
+		urls = chainspec.StaticPeerURLsOfChain(resolveChainName(ctx))
 	}
 
 	nodes, err := enode.ParseNodesFromURLs(urls)
@@ -1863,18 +1902,9 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.CaplinConfig.BootstrapNodes = ctx.StringSlice(SentinelBootnodes.Name)
 	cfg.CaplinConfig.StaticPeers = ctx.StringSlice(SentinelStaticPeers.Name)
 
-	chain := ctx.String(ChainFlag.Name) // mainnet by default
+	chain := resolveChainName(ctx)
 	if ctx.IsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = ctx.Uint64(NetworkIdFlag.Name)
-		if cfg.NetworkID != 1 && !ctx.IsSet(ChainFlag.Name) {
-			chainName, ok := chainspec.NetworkNameByID[cfg.NetworkID]
-			if !ok {
-				chain = "" // don't default to mainnet if NetworkID != 1 and it's devchain or smth
-			} else {
-				chain = chainName // fetch network name from id if name wasn't provided
-			}
-
-		}
 	} else if chain != networkname.Dev && chain != networkname.BorDevnet {
 		spec, err := chainspec.ChainSpecByName(chain)
 		if err != nil {
@@ -2132,6 +2162,24 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 			panic(err)
 		}
 		downloadernat.DoNat(nodeConfig.P2P.NAT, cfg.Downloader.ClientConfig, logger)
+	}
+
+	if ctx.IsSet(ErigondbDomainStepsInFrozenFileFlag.Name) {
+		s := ctx.String(ErigondbDomainStepsInFrozenFileFlag.Name)
+		var v uint64
+		if strings.EqualFold(s, "inf") {
+			v = config3.UnboundedDomainMerge
+		} else {
+			parsed, err := strconv.ParseUint(s, 10, 64)
+			if err != nil {
+				Fatalf("invalid --%s value %q: must be a positive integer or \"Inf\"", ErigondbDomainStepsInFrozenFileFlag.Name, s)
+			}
+			if parsed == 0 {
+				Fatalf("invalid --%s value %q: must be a positive integer or \"Inf\"", ErigondbDomainStepsInFrozenFileFlag.Name, s)
+			}
+			v = parsed
+		}
+		cfg.ErigondbDomainStepsInFrozenFile = &v
 	}
 }
 
