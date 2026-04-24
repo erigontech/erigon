@@ -1033,11 +1033,9 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 		hashedKeyBuf[64-hashedKeyOffset] = terminatorHexByte // Add terminator
 
 		if cell.stateHashLen > 0 {
-			// Stack-allocated buffer avoids heap allocation for the common 33-byte result
-			var resBuf [33]byte
-			resBuf[0] = 160
-			copy(resBuf[1:], cell.stateHash[:cell.stateHashLen])
-			res := resBuf[:1+cell.stateHashLen]
+			hph.hashAuxBuffer[0] = 160
+			copy(hph.hashAuxBuffer[1:], cell.stateHash[:cell.stateHashLen])
+			res := hph.hashAuxBuffer[:1+cell.stateHashLen]
 			hph.keccak.Reset()
 			if hph.trace {
 				fmt.Printf("REUSED stateHash %x spk %x\n", res, cell.storageAddr[:cell.storageAddrLen])
@@ -1129,10 +1127,9 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 		}
 		if !cell.loaded.account() {
 			if cell.stateHashLen > 0 {
-				var resBuf [33]byte
-				resBuf[0] = 160
-				copy(resBuf[1:], cell.stateHash[:cell.stateHashLen])
-				res := resBuf[:1+cell.stateHashLen]
+				hph.hashAuxBuffer[0] = 160
+				copy(hph.hashAuxBuffer[1:], cell.stateHash[:cell.stateHashLen])
+				res := hph.hashAuxBuffer[:1+cell.stateHashLen]
 				hph.keccak.Reset()
 
 				mxTrieStateSkipRate.Inc()
