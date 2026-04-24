@@ -1533,7 +1533,7 @@ func (ss *GrpcServer) send(msgID sentryproto.MessageId, peerID [64]byte, b []byt
 		before := len(ch)
 		libsentry.EvictOldestIfHalfFull(ch)
 		if before > cap(ch)/2 {
-			ss.logger.Debug("[sentry] consuming is slow, drop 50% of old messages", "msgID", msgID.String())
+			ss.logger.Debug("[sentry] consuming is slow, drop oldest 25% of messages", "msgID", msgID.String())
 		}
 	}
 }
