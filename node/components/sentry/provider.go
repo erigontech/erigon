@@ -39,6 +39,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -191,6 +192,12 @@ type Provider struct {
 	logger  log.Logger
 	started bool           // guards Start from firing twice
 	eg      errgroup.Group // tracks background goroutines launched in Start
+
+	// Event-bus wiring. bus is nil until BindBus is called. busStateOnce
+	// guards lazy allocation so BindBus remains safe to call from multiple
+	// goroutines in setups that wire the component after Initialize.
+	busStateOnce sync.Once
+	bus          *busState
 }
 
 // Configure stores the Provider's configuration. Call before Initialize.
@@ -534,6 +541,7 @@ func (p *Provider) runPeerCountLogger() error {
 //
 // Safe to call multiple times.
 func (p *Provider) Close() error {
+	_ = p.UnbindBus()
 	for _, srv := range p.Servers {
 		srv.Close()
 	}

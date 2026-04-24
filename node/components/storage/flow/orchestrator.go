@@ -28,14 +28,42 @@ import (
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
 )
 
-// Orchestrator mediates between the Inventory, the event bus, and the
-// Storage / Downloader / Execution components. It subscribes to external
-// signals (BlocksFlushed, PeerManifestReceived, DownloadComplete) and
-// translates them into Inventory mutations or outbound event publications.
+// Storage is the narrow interface the Orchestrator needs from the storage
+// layer. Production wires the real storage.Provider; tests wire MockStorage.
+//
+//   - Inventory exposes the current in-memory inventory for coverage and
+//     membership queries. Callers must treat the returned value as read-only
+//     with respect to orchestrator semantics — writes go through RecordFile
+//     so storage can synchronise side effects (disk move, inventory bump,
+//     notifications).
+//   - RecordFile registers a newly downloaded file as locally present. The
+//     implementation is responsible for making the file discoverable via
+//     Inventory() on return.
+type Storage interface {
+	Inventory() *snapshot.Inventory
+	RecordFile(*snapshot.FileEntry) error
+}
+
+// inventoryStorage adapts a bare *snapshot.Inventory to the Storage
+// interface so the legacy New(bus, inv, logger) constructor keeps working
+// without rippling through every caller.
+type inventoryStorage struct{ inv *snapshot.Inventory }
+
+func (s *inventoryStorage) Inventory() *snapshot.Inventory { return s.inv }
+
+func (s *inventoryStorage) RecordFile(e *snapshot.FileEntry) error {
+	s.inv.AddFile(e)
+	return nil
+}
+
+// Orchestrator mediates between the Storage, the event bus, and the
+// Downloader / Execution components. It subscribes to external signals
+// (BlocksFlushed, PeerManifestReceived, DownloadComplete) and translates
+// them into storage mutations or outbound event publications.
 type Orchestrator struct {
-	bus       event.EventBus
-	inventory *snapshot.Inventory
-	log       log.Logger
+	bus     event.EventBus
+	storage Storage
+	log     log.Logger
 
 	mu               sync.Mutex
 	started          bool
@@ -65,13 +93,26 @@ type Orchestrator struct {
 
 // New creates a flow orchestrator bound to the given bus and inventory.
 // Neither is owned — the caller manages their lifecycles.
+//
+// Uses an adapter so the inventory is treated as the backing Storage; use
+// NewWithStorage to plug in a richer storage implementation (e.g. MockStorage
+// or the production storage.Provider).
 func New(bus event.EventBus, inv *snapshot.Inventory, logger log.Logger) *Orchestrator {
+	return NewWithStorage(bus, &inventoryStorage{inv: inv}, logger)
+}
+
+// NewWithStorage creates a flow orchestrator bound to the given bus and
+// Storage. The orchestrator routes inventory reads through Storage.Inventory
+// and newly downloaded files through Storage.RecordFile, so callers can
+// intercept the "file landed" moment (e.g. to fire side effects or fail tests
+// on unexpected files).
+func NewWithStorage(bus event.EventBus, storage Storage, logger log.Logger) *Orchestrator {
 	if logger == nil {
 		logger = log.Root()
 	}
 	o := &Orchestrator{
 		bus:       bus,
-		inventory: inv,
+		storage:   storage,
 		log:       logger,
 		peerFiles: make(map[string]*snapshot.FileEntry),
 		pending:   make(map[string]*snapshot.FileEntry),
@@ -116,7 +157,7 @@ func (o *Orchestrator) Start(_ context.Context) error {
 	o.mu.Unlock()
 
 	// Publish without holding the lock — handlers may re-enter the orchestrator.
-	o.bus.Publish(InventoryLoaded{Inventory: o.inventory})
+	o.bus.Publish(InventoryLoaded{Inventory: o.storage.Inventory()})
 	return nil
 }
 
@@ -273,11 +314,12 @@ func isAlphabetic(s string) bool {
 // request-gaps hot path where peerMu is already held to batch pending
 // inserts.
 func (o *Orchestrator) coverageForRoleLocked(domain snapshot.Domain, role string) snapshot.StepRanges {
+	inv := o.storage.Inventory()
 	var entries []*snapshot.FileEntry
 	if domain == "" {
-		entries = o.inventory.BlockFiles()
+		entries = inv.BlockFiles()
 	} else {
-		entries = o.inventory.AllDomainFiles(domain)
+		entries = inv.AllDomainFiles(domain)
 	}
 	var ranges snapshot.StepRanges
 	for _, f := range entries {
@@ -326,11 +368,12 @@ func (o *Orchestrator) onPeerDeparted(e PeerDeparted) {
 // haveLocally reports whether the local inventory has a file with the given
 // name and Local=true. Used by gap-fill to skip files we already hold.
 func (o *Orchestrator) haveLocally(domain snapshot.Domain, name string) bool {
+	inv := o.storage.Inventory()
 	var entries []*snapshot.FileEntry
 	if domain == "" {
-		entries = o.inventory.BlockFiles()
+		entries = inv.BlockFiles()
 	} else {
-		entries = o.inventory.AllDomainFiles(domain)
+		entries = inv.AllDomainFiles(domain)
 	}
 	for _, f := range entries {
 		if f.Name == name && f.Local {
@@ -357,7 +400,14 @@ func (o *Orchestrator) onDownloadComplete(e DownloadComplete) {
 	localEntry.TorrentHash = e.InfoHash
 	localEntry.Trust = snapshot.TrustVerified
 	localEntry.Local = true
-	o.inventory.AddFile(localEntry)
+	if err := o.storage.RecordFile(localEntry); err != nil {
+		o.log.Warn("[flow] storage.RecordFile failed", "file", e.FileName, "err", err)
+		// Leave pending as-is; a retry or a subsequent DownloadComplete
+		// will re-attempt. Dropping pending here would let gap-fill re-
+		// request the file immediately, amplifying a transient storage
+		// error into redundant downloads.
+		return
+	}
 
 	o.peerMu.Lock()
 	delete(o.pending, e.FileName)

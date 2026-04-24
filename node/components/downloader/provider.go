@@ -36,6 +36,8 @@ import (
 	dl "github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
+	"github.com/erigontech/erigon/node/app/event"
+	"github.com/erigontech/erigon/node/components/storage/flow"
 	"github.com/erigontech/erigon/node/ethconfig"
 	downloaderproto "github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
@@ -58,6 +60,14 @@ type Provider struct {
 
 	// Internal state
 	grpcClient downloaderproto.DownloaderClient // raw gRPC client before wrapping
+
+	// Event-bus wiring. Installed by BindBus, torn down by UnbindBus.
+	// busHandler is stored as a materialised func value so Subscribe and
+	// Unsubscribe see the same reflect.Value.Pointer() — re-referencing
+	// p.onDownloadRequested would allocate a fresh closure each time.
+	bus        event.EventBus
+	busCtx     context.Context
+	busHandler func(flow.DownloadRequested)
 }
 
 // Configure applies configuration. Call before Initialize.
@@ -140,6 +150,7 @@ func (p *Provider) initDownloader(ctx context.Context) (downloaderproto.Download
 
 // Close shuts down the downloader. Safe to call multiple times.
 func (p *Provider) Close() {
+	_ = p.UnbindBus()
 	if p.Downloader != nil {
 		p.Downloader.Close()
 		p.Downloader = nil
