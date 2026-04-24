@@ -36,7 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
-	commitmentdb "github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/metrics"
 	execp2p "github.com/erigontech/erigon/execution/p2p"
@@ -145,23 +145,16 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		return nil
 	}
 
-	// after StageSnapshots (files downloading): if domains are ahead of block files, then nothing to execute.
 	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
+	if err != nil && !errors.Is(err, commitmentdb.ErrBehindCommitment) {
+		return err
+	}
 	if err != nil {
-		if !errors.Is(err, commitmentdb.ErrBehindCommitment) {
-			return err
-		}
-		if doms == nil {
-			// Snap downloading ahead of blocks: nothing to execute yet.
-			return tx.Commit()
-		}
-		// ErrBehindCommitment with initialized domains means TxNums index is behind commitment.
-		// This is a transient state after migrations. Continue with stages to rebuild the index.
+		// TxNums index is behind commitment (e.g. transient post-migration state).
+		// SD is fully initialized; run stages to rebuild the index.
 		logger.Debug("[sync] TxNums index is behind commitment, running stages to rebuild", "err", err)
 	}
-	if doms != nil {
-		defer doms.Close()
-	}
+	defer doms.Close()
 	doms.SetInMemHistoryReads(inMemHistoryReads)
 
 	var finishStageBeforeSync uint64
