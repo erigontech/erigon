@@ -28,11 +28,10 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
-	"github.com/gorilla/websocket"
+	"github.com/coder/websocket"
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -42,12 +41,10 @@ import (
 	"github.com/erigontech/erigon/rpc"
 )
 
-const (
-	wsReadBuffer  = 1024
-	wsWriteBuffer = 1024
-)
-
-var wsBufferPool = new(sync.Pool)
+// wsMessageSizeLimit caps incoming message size to 32 MB — large enough for
+// pprof profiles, binary snapshot chunks, and metric payloads sent over the
+// diagnostics tunnel. coder/websocket's default is only 32 KB.
+const wsMessageSizeLimit = 32 * 1024 * 1024
 
 var (
 	diagnosticsURLFlag = cli.StringFlag{
@@ -267,7 +264,7 @@ func createCodec(ctx context.Context, diagnosticsUrl string) (rpc.ServerCodec, e
 		return nil, err
 	}
 
-	codec := rpc.NewWebsocketCodec(conn, "wss://"+diagnosticsUrl, nil) //TODO: revise why is it so
+	codec := rpc.NewWebsocketCodec(conn, "wss://"+diagnosticsUrl, nil, diagnosticsUrl) //TODO: revise why is it so
 
 	return codec, nil
 }
@@ -276,37 +273,20 @@ func createCodec(ctx context.Context, diagnosticsUrl string) (rpc.ServerCodec, e
 // Trying to establish secure wss:// connection first, if it fails, fallback to ws://.
 // Returns the WebSocket connection if successful, otherwise an error.
 func establishConnection(ctx context.Context, diagnosticsUrl string) (*websocket.Conn, error) {
-	dialer := websocket.Dialer{
-		ReadBufferSize:  wsReadBuffer,
-		WriteBufferSize: wsWriteBuffer,
-		WriteBufferPool: wsBufferPool,
-	}
-
-	var conn *websocket.Conn
-	var resp *http.Response
-	var err error
-
-	// Attempt to establish a secure WebSocket connection (wss://)
-	conn, resp, err = dialer.DialContext(ctx, "wss://"+diagnosticsUrl, nil)
-	if err != nil {
-		conn, resp, err = dialer.DialContext(ctx, "ws://"+diagnosticsUrl, nil)
-	}
-
-	defer func() {
-		if resp != nil {
-			resp.Body.Close()
+	var lastErr error
+	for _, scheme := range []string{"wss://", "ws://"} {
+		conn, resp, err := websocket.Dial(ctx, scheme+diagnosticsUrl, nil)
+		if err != nil {
+			if resp != nil {
+				resp.Body.Close()
+			}
+			lastErr = err
+			continue
 		}
-	}()
-
-	if err != nil {
-		return nil, err
+		conn.SetReadLimit(wsMessageSizeLimit)
+		return conn, nil
 	}
-
-	if resp.StatusCode != http.StatusSwitchingProtocols {
-		return nil, fmt.Errorf("support request to %s failed: %s", diagnosticsUrl, resp.Status)
-	}
-
-	return conn, nil
+	return nil, fmt.Errorf("support connection to %s failed: %w", diagnosticsUrl, lastErr)
 }
 
 // Creates connections to the nodes specified by the flag debug.addrs.
@@ -419,11 +399,14 @@ func (nc *nodeConnection) connectSocket(requestId string) error {
 	}
 
 	socketURL := strings.Replace(nc.debugURL, "http://", "ws://", 1) + "/debug/diag/ws"
-	conn, resp, err := websocket.DefaultDialer.Dial(socketURL, nil)
-	defer resp.Body.Close()
+	conn, resp, err := websocket.Dial(nc.ctx, socketURL, nil)
 	if err != nil {
+		if resp != nil {
+			resp.Body.Close()
+		}
 		return err
 	}
+	conn.SetReadLimit(wsMessageSizeLimit)
 
 	nc.connection = conn
 	nc.requestId = requestId
@@ -438,12 +421,7 @@ func (nc *nodeConnection) closeWebSocket() error {
 		return nil
 	}
 
-	err := nc.connection.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "closing connection"))
-	if err != nil {
-		fmt.Printf("Failed to send close message: %v\n", err)
-	}
-
-	err = nc.connection.Close()
+	err := nc.connection.Close(websocket.StatusNormalClosure, "closing connection")
 	if err != nil {
 		fmt.Printf("Failed to close connection: %v\n", err)
 		return err
@@ -468,15 +446,13 @@ func (nc *nodeConnection) startListening() {
 			return
 		}
 
-		_, message, err := nc.connection.ReadMessage()
+		_, message, err := nc.connection.Read(nc.ctx)
 		if err != nil {
-			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) ||
-				websocket.IsUnexpectedCloseError(err) {
+			if websocket.CloseStatus(err) != -1 {
 				fmt.Println("Connection closed by peer:", err)
-				return
+			} else {
+				fmt.Println("Error reading message:", err)
 			}
-
-			fmt.Println("Error reading message:", err)
 			return
 		}
 

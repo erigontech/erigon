@@ -280,9 +280,18 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 	}
 
 	tipHash := chain.TopBlock.Hash()
-	status, _, lvh, err := chainRW.UpdateForkChoice(ctx, tipHash, tipHash, tipHash)
+	status, validationErr, lvh, err := chainRW.UpdateForkChoice(ctx, tipHash, tipHash, tipHash)
 	if err != nil {
 		return err
+	}
+	// On any non-success status the commit is skipped and no state-diff events
+	// will be emitted, so skip the wait below — otherwise stream.Recv() hangs.
+	if status != execmodule.ExecutionStatusSuccess {
+		blockNum := chain.Blocks[chain.Length()-1].NumberU64()
+		if validationErr != nil {
+			return fmt.Errorf("fork-choice rejected block %d, status: %s: %s", blockNum, status.String(), *validationErr)
+		}
+		return fmt.Errorf("fork-choice rejected block %d, status: %s", blockNum, status.String())
 	}
 
 	// UpdateForkChoice has an async commit so we need to wait to make sure
@@ -314,16 +323,8 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 		}
 	}
 
-	err = ethereum.ChainDB().Update(ethereum.SentryCtx(), func(tx kv.RwTx) error {
+	return ethereum.ChainDB().Update(ethereum.SentryCtx(), func(tx kv.RwTx) error {
 		rawdb.WriteHeadBlockHash(tx, lvh)
 		return nil
 	})
-	if err != nil {
-		return err
-	}
-	if status != execmodule.ExecutionStatusSuccess {
-		return fmt.Errorf("insertion failed for block %d, code: %s", chain.Blocks[chain.Length()-1].NumberU64(), status.String())
-	}
-
-	return nil
 }
