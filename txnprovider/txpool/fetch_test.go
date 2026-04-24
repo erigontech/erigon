@@ -559,13 +559,21 @@ func TestCheckPooledTxnAnnouncement(t *testing.T) {
 		"peer delivering wrong size should be flagged")
 
 	// Size within the 8-byte slack is not a violation — RLP vs consensus-format
-	// accounting can disagree by a handful of bytes for legacy/typed txs.
+	// accounting can disagree by a handful of bytes for legacy/typed txs. The
+	// check is symmetric: both announced-larger-than-delivered and
+	// announced-smaller-than-delivered are bounded by the same slack.
 	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{208}, hash[:], nil)
 	require.NoError(t, fetch.checkPooledTxnAnnouncement(peerID, slot),
-		"size diff of 8 bytes should be within slack")
+		"size diff of +8 bytes should be within slack")
 	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{209}, hash[:], nil)
 	require.Error(t, fetch.checkPooledTxnAnnouncement(peerID, slot),
-		"size diff of 9 bytes should exceed slack")
+		"size diff of +9 bytes should exceed slack")
+	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{192}, hash[:], nil)
+	require.NoError(t, fetch.checkPooledTxnAnnouncement(peerID, slot),
+		"size diff of -8 bytes should be within slack")
+	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{191}, hash[:], nil)
+	require.Error(t, fetch.checkPooledTxnAnnouncement(peerID, slot),
+		"size diff of -9 bytes should exceed slack")
 
 	// Different peer delivering the same hash must not be penalized based on
 	// another peer's announcement.
@@ -640,6 +648,13 @@ func TestCheckBlobSidecar(t *testing.T) {
 	bad := makeBlobTxn()
 	bad.BlobBundles[0].Commitment[0] ^= 0xff
 	require.Error(t, fetch.checkBlobSidecar(&bad), "mismatched commitment should be flagged")
+
+	// Blob tx arriving with no sidecar at all: the inner blob_versioned_hashes
+	// declares blobs but the wrapper delivers none. Treated as a protocol
+	// violation via the count-mismatch check (peer gets kicked).
+	missing := makeBlobTxn()
+	missing.BlobBundles = nil
+	require.Error(t, fetch.checkBlobSidecar(&missing), "blob tx with missing sidecar should be flagged")
 }
 
 // TestNoPenaltyOnInternalDBError verifies that when IdHashKnown returns a DB error

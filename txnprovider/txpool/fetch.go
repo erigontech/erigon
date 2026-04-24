@@ -72,7 +72,7 @@ type Fetch struct {
 	sentryClients            []sentryproto.SentryClient // sentry clients that will be used for accessing the network
 	stateChangesParseCtxLock sync.Mutex
 	pooledTxnsParseCtxLock   sync.Mutex
-	announcements            *maphash.LRU[announceInfo] // hash -> expected (type, size) from its announcer
+	announcements            *maphash.LRU[announceInfo] // announceKey(txHash, peerHash) -> announced (type, size) from that peer
 	logger                   log.Logger
 }
 
@@ -148,14 +148,14 @@ func announceKey(txHash []byte, peerHash uint64) [40]byte {
 // entries for already-known hashes would otherwise sit unused in the LRU
 // until evicted, displacing announcements we actually care about. Pass nil
 // to record every hash.
-func (f *Fetch) recordAnnouncement(pid *typesproto.H512, types []byte, sizes []uint32, hashes, filter []byte) {
-	if f.announcements == nil || len(types) == 0 {
+func (f *Fetch) recordAnnouncement(pid *typesproto.H512, txTypes []byte, sizes []uint32, hashes, filter []byte) {
+	if f.announcements == nil || len(txTypes) == 0 {
 		return
 	}
 	ph := peerHash(pid)
 	const hashSize = 32
 	fPos := 0
-	for i := range types {
+	for i := range txTypes {
 		h := hashes[i*hashSize : (i+1)*hashSize]
 		if filter != nil {
 			if fPos >= len(filter) || !bytes.Equal(h, filter[fPos:fPos+hashSize]) {
@@ -164,7 +164,7 @@ func (f *Fetch) recordAnnouncement(pid *typesproto.H512, types []byte, sizes []u
 			fPos += hashSize
 		}
 		k := announceKey(h, ph)
-		f.announcements.Set(k[:], announceInfo{peerHash: ph, txnType: types[i], size: sizes[i]})
+		f.announcements.Set(k[:], announceInfo{peerHash: ph, txnType: txTypes[i], size: sizes[i]})
 	}
 }
 
@@ -213,14 +213,16 @@ func (f *Fetch) checkPooledTxnAnnouncement(pid *typesproto.H512, slot *TxnSlot) 
 // checkBlobSidecar verifies EIP-4844 per-commitment invariants on a blob tx
 // wrapper that arrived from a peer. Returns an error when the sidecar's
 // commitments don't match the tx's blob_versioned_hashes — the peer that
-// delivered it gets penalized. Non-blob txs and txs parsed without a sidecar
-// pass through unchecked.
+// delivered it gets penalized. Non-blob txs pass through unchecked.
+//
+// Callers must parse with wrappedWithBlobs=true (as TRANSACTIONS_66 and
+// POOLED_TRANSACTIONS_66 do), so a blob tx reaching this check is expected
+// to carry a sidecar. A blob tx with an empty sidecar is treated as a
+// protocol violation via the blob_versioned_hashes / BlobBundles count
+// mismatch below (blob txs must declare >=1 blob per EIP-4844).
 func (f *Fetch) checkBlobSidecar(slot *TxnSlot) error {
 	if slot == nil || slot.Txn == nil || slot.Txn.Type() != types.BlobTxType {
 		return nil
-	}
-	if len(slot.BlobBundles) == 0 {
-		return nil // no wrapper data — not our check to do here
 	}
 	blobHashes := slot.Txn.GetBlobHashes()
 	if len(blobHashes) != len(slot.BlobBundles) {
@@ -517,7 +519,7 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 			sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
 			return nil
 		}
-		types, sizes, hashes, _, err := parseAnnouncements(req.Data, 0)
+		txTypes, sizes, hashes, _, err := parseAnnouncements(req.Data, 0)
 		if err != nil {
 			f.logger.Debug("[txpool] penalizing peer for malformed NewPooledTransactionHashes68", "peer", req.PeerId, "err", err)
 			sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
@@ -531,7 +533,7 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		// Record only for unknown hashes — a POOLED_TRANSACTIONS_66 reply
 		// won't come back for already-known txs, so entries for them would
 		// just sit unused in the LRU until evicted.
-		f.recordAnnouncement(req.PeerId, types, sizes, hashes, unknownHashes)
+		f.recordAnnouncement(req.PeerId, txTypes, sizes, hashes, unknownHashes)
 
 		if len(unknownHashes) > 0 {
 			var encodedRequest []byte

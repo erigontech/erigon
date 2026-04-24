@@ -1080,12 +1080,12 @@ func (ss *GrpcServer) deletePeer(peerID [64]byte) {
 
 func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgcode uint64, data []byte, ttl time.Duration) {
 	peerInfo.Async(func() {
-		// Async enqueue can win a race against Remove closing pi.removed, so a
+		// Async enqueue can win the race against Remove closing pi.removed, so a
 		// queued task may be scheduled to run on a peer we have already asked
-		// p2p to disconnect. Writing anyway lets one last frame slip out ahead
-		// of the Disconnect, which Hive's devp2p BlobViolations asserts against.
-		// Drop the write here; matches go-ethereum, where Disconnect runs on
-		// the same goroutine as the detection so nothing further is sent.
+		// p2p to disconnect. Without this check, one last frame would slip out
+		// after Disconnect — which Hive's devp2p BlobViolations asserts against.
+		// Matches go-ethereum, where Disconnect runs on the same goroutine as
+		// detection so nothing further can be sent.
 		select {
 		case <-peerInfo.removed:
 			return
