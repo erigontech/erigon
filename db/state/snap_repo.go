@@ -359,7 +359,6 @@ func (f *SnapshotRepo) openDirtyFiles(dirEntries []string) error {
 	p := f.schema
 	dir := f.schema.DataDirectory()
 	iter := f.dirtyFiles.Iter()
-	defer iter.Release()
 	for ok := iter.First(); ok; ok = iter.Next() {
 		item := iter.Item()
 		if item.decompressor == nil {
@@ -422,6 +421,7 @@ func (f *SnapshotRepo) openDirtyFiles(dirEntries []string) error {
 			}
 		}
 	}
+	iter.Release()
 
 	for _, item := range invalidFileItems {
 		item.closeFiles()
