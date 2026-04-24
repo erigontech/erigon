@@ -217,6 +217,12 @@ func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression 
 		var keyBuf []byte
 		var keyOffset uint64 // byte offset of the current key in the bitstream
 		for kvReader.HasNext() {
+			// Skip path is hot (full-skip mode loops over every key); amortize the ctx check.
+			if keyCount%100000 == 0 {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+			}
 			if sampler.CanSkip() {
 				kvReader.Skip()                // skip key (no decompression of bytes)
 				keyOffset, _ = kvReader.Skip() // skip value, advance to next key
@@ -227,7 +233,7 @@ func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression 
 			nextOffset, _ := kvReader.Skip()      // skip value
 			select {
 			case <-ctx.Done():
-				return nil
+				return ctx.Err()
 			case workCh <- kviWorkItem{key: bytes.Clone(keyBuf), offset: keyOffset}:
 			}
 			keyOffset = nextOffset
