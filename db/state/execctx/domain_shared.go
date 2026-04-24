@@ -373,6 +373,19 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	return sd.mem.Flush(ctx, tx)
 }
 
+type memBatchWithTimings interface {
+	FlushWithTimings(ctx context.Context, tx kv.RwTx) ([]any, error)
+}
+
+// FlushWithTimings flushes and returns per-phase timing breakdown for diagnostics.
+func (sd *SharedDomains) FlushWithTimings(ctx context.Context, tx kv.RwTx) ([]any, error) {
+	defer mxFlushTook.ObserveDuration(time.Now())
+	if m, ok := sd.mem.(memBatchWithTimings); ok {
+		return m.FlushWithTimings(ctx, tx)
+	}
+	return nil, sd.mem.Flush(ctx, tx)
+}
+
 // TemporalDomain satisfaction
 func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte) (v []byte, step kv.Step, err error) {
 	if tx == nil {

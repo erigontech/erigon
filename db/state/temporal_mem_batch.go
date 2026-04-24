@@ -25,6 +25,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 	"unsafe"
 
 	btree2 "github.com/tidwall/btree"
@@ -616,6 +617,117 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
 		return fmt.Errorf("can't write plain state version: %w", err)
 	}
 	return nil
+}
+
+// FlushWithTimings is like Flush but also returns per-phase timing breakdown for diagnostics.
+func (sd *TemporalMemBatch) FlushWithTimings(ctx context.Context, tx kv.RwTx) (timings []any, err error) {
+	if sd.unwindChangesetRaw != nil {
+		t := time.Now()
+		for domain := range sd.unwindChangesetRaw {
+			sort.Slice(sd.unwindChangesetRaw[domain], func(i, j int) bool {
+				return sd.unwindChangesetRaw[domain][i].Key < sd.unwindChangesetRaw[domain][j].Key
+			})
+		}
+		tx.(kv.TemporalRwTx).Unwind(ctx, sd.unwindToTxNum, sd.unwindChangesetRaw)
+		timings = append(timings, "unwind", common.Round(time.Since(t), 0))
+	}
+
+	t := time.Now()
+	if err := sd.flushDiffSet(ctx, tx); err != nil {
+		return nil, err
+	}
+	timings = append(timings, "diffSet", common.Round(time.Since(t), 0))
+
+	writerTimings, err := sd.flushWritersWithTimings(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	timings = append(timings, writerTimings...)
+
+	t = time.Now()
+	if _, err := rawdb.IncrementStateVersion(tx); err != nil {
+		return nil, fmt.Errorf("can't write plain state version: %w", err)
+	}
+	timings = append(timings, "stateVer", common.Round(time.Since(t), 0))
+	return timings, nil
+}
+
+func (sd *TemporalMemBatch) flushWritersWithTimings(ctx context.Context, tx kv.RwTx) (timings []any, err error) {
+	aggTx := AggTx(tx)
+
+	for di, ws := range sd.pastDomainWriters {
+		t := time.Now()
+		for i := len(ws) - 1; i >= 0; i-- {
+			if err := ws[i].Flush(ctx, tx); err != nil {
+				return nil, err
+			}
+			ws[i].Close()
+		}
+		if len(ws) > 0 {
+			timings = append(timings, "past_"+kv.Domain(di).String(), common.Round(time.Since(t), 0))
+		}
+	}
+	for di, w := range sd.domainWriters {
+		if w == nil {
+			continue
+		}
+		t := time.Now()
+		if err := w.Flush(ctx, tx); err != nil {
+			return nil, err
+		}
+		aggTx.d[di].closeValsCursor() //TODO: why?
+		w.Close()
+		timings = append(timings, kv.Domain(di).String(), common.Round(time.Since(t), 0))
+	}
+
+	t := time.Now()
+	for i := len(sd.pastIIWriters) - 1; i >= 0; i-- {
+		if err := sd.pastIIWriters[i].Flush(ctx, tx); err != nil {
+			return nil, err
+		}
+		sd.pastIIWriters[i].close()
+	}
+	if len(sd.pastIIWriters) > 0 {
+		timings = append(timings, "pastII", common.Round(time.Since(t), 0))
+	}
+
+	t = time.Now()
+	for _, w := range sd.iiWriters {
+		if w == nil {
+			continue
+		}
+		if err := w.Flush(ctx, tx); err != nil {
+			return nil, err
+		}
+		w.close()
+	}
+	timings = append(timings, "ii", common.Round(time.Since(t), 0))
+
+	t = time.Now()
+	for _, ws := range sd.pastForkableWriters {
+		for i := len(ws) - 1; i >= 0; i-- {
+			if err := ws[i].Flush(ctx, tx); err != nil {
+				return nil, err
+			}
+			ws[i].Close()
+		}
+	}
+	if len(sd.pastForkableWriters) > 0 {
+		timings = append(timings, "pastForkable", common.Round(time.Since(t), 0))
+	}
+
+	t = time.Now()
+	for _, w := range sd.forkableWriters {
+		if w == nil {
+			continue
+		}
+		if err := w.Flush(ctx, tx); err != nil {
+			return nil, err
+		}
+		w.Close()
+	}
+	timings = append(timings, "forkable", common.Round(time.Since(t), 0))
+	return timings, nil
 }
 
 func (sd *TemporalMemBatch) flushDiffSet(_ context.Context, tx kv.RwTx) error {

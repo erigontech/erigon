@@ -565,7 +565,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			if len(timings) > 0 {
 				var m runtime.MemStats
 				dbg.ReadMemStats(&m)
-				timings = append(timings, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+				timings = append(timings, "block", finishProgressBefore, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 				e.logger.Info("Timings: Forkchoice Commit", timings...)
 			}
 		}
@@ -579,7 +579,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		if len(timings) > 0 {
 			var m runtime.MemStats
 			dbg.ReadMemStats(&m)
-			timings = append(timings, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+			timings = append(timings, "block", finishProgressBefore, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 			e.logger.Info("Timings: Forkchoice Prune", timings...)
 		}
 	}
@@ -603,6 +603,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 }
 
 func (e *ExecModule) runPostForkchoice(sd *execctx.SharedDomains, finishProgressBefore uint64, isSynced bool, initialCycle bool) error {
+	startedAt := time.Now()
 	var timings []any
 	if e.fcuBackgroundCommit && sd != nil {
 		err := e.db.UpdateTemporal(e.bacgroundCtx, func(tx kv.TemporalRwTx) error {
@@ -627,7 +628,7 @@ func (e *ExecModule) runPostForkchoice(sd *execctx.SharedDomains, finishProgress
 	if len(timings) > 0 {
 		var m runtime.MemStats
 		dbg.ReadMemStats(&m)
-		timings = append(timings, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+		timings = append(timings, "block", finishProgressBefore, "isSynced", isSynced, "total", common.Round(time.Since(startedAt), 0), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 		e.logger.Info("Timings: Post-Forkchoice", timings...)
 	}
 	return nil
@@ -636,10 +637,12 @@ func (e *ExecModule) runPostForkchoice(sd *execctx.SharedDomains, finishProgress
 func (e *ExecModule) runForkchoiceCommit(sd *execctx.SharedDomains, tx kv.TemporalRwTx, finishProgressBefore uint64, isSynced bool) ([]any, error) {
 	var timings []any
 	flushStart := time.Now()
-	if err := sd.Flush(e.bacgroundCtx, tx); err != nil {
+	flushTimings, err := sd.FlushWithTimings(e.bacgroundCtx, tx)
+	if err != nil {
 		return nil, err
 	}
 	timings = append(timings, "flush", common.Round(time.Since(flushStart), 0))
+	timings = append(timings, flushTimings...)
 	commitStart := time.Now()
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -682,6 +685,7 @@ func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
 		if err := e.executionPipeline.RunPrune(e.bacgroundCtx, tx, initialCycle, pruneTimeout); err != nil {
 			return err
 		}
+		timings = append(timings, "pruneTimeout", common.Round(pruneTimeout, 0))
 		return nil
 	}); err != nil {
 		return nil, err
