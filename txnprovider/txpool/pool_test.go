@@ -93,6 +93,7 @@ func newTestSetCodeTxnSlot(nonce uint64, senderID uint64, tip, feeCap uint64, ga
 func writeTestSenderState(t *testing.T, ctx context.Context, coreDB kv.TemporalRwDB, logger log.Logger, addr [20]byte, value []byte, txNum uint64) {
 	tx, err := coreDB.BeginTemporalRw(ctx)
 	require.NoError(t, err)
+	defer tx.Rollback()
 
 	sd, err := execctx.NewSharedDomains(ctx, tx, logger)
 	require.NoError(t, err)
@@ -1055,15 +1056,16 @@ func TestValidateTxReturnsSenderInfoError(t *testing.T) {
 
 	ch := make(chan Announcements, 1)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	cache := kvcache.NewDummy()
+	cache := kvcache.New(kvcache.DefaultCoherentConfig)
 	logger := log.New()
 
-	pool, err := New(ctx, ch, nil, coreDB, txpoolcfg.DefaultConfig, cache, chain.TestChainConfig, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, nil, coreDB, txpoolcfg.DefaultConfig, cache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
 	require.NoError(t, err)
+	pool.blockGasLimit.Store(30_000_000)
 
 	var badAddr [20]byte
 	badAddr[0] = 1
-	writeTestSenderState(t, ctx, coreDB, logger, badAddr, []byte{0xff}, 0)
+	writeTestSenderState(t, ctx, coreDB, logger, badAddr, []byte{0, 0, 0}, 0)
 
 	txn := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
 	txn.IDHash[0] = 0xaa
@@ -1094,16 +1096,16 @@ func TestAddLocalTxnsKeepsBatchOnSenderInfoError(t *testing.T) {
 	ch := make(chan Announcements, 1)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	db := memdb.NewTestPoolDB(t)
-	cache := kvcache.NewDummy()
+	cache := kvcache.New(kvcache.DefaultCoherentConfig)
 	logger := log.New()
 
-	pool, err := New(ctx, ch, db, coreDB, txpoolcfg.DefaultConfig, cache, chain.TestChainConfig, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, txpoolcfg.DefaultConfig, cache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
 	require.NoError(t, err)
 	pool.blockGasLimit.Store(30_000_000)
 
 	var badAddr [20]byte
 	badAddr[0] = 1
-	writeTestSenderState(t, ctx, coreDB, logger, badAddr, []byte{0xff}, 0)
+	writeTestSenderState(t, ctx, coreDB, logger, badAddr, []byte{0, 0, 0}, 0)
 
 	var goodAddr [20]byte
 	goodAddr[0] = 2
