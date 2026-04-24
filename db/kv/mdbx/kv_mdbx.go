@@ -522,11 +522,24 @@ func (db *MdbxKV) trackTxBegin() bool {
 	isOpen := !db.closed.Load()
 	if isOpen {
 		db.txsCount++
-		if db.txsCount > 2 {
-			fmt.Printf("MDBX_TX_OPEN: count=%d stack=%s\n", db.txsCount, dbg.Stack())
-		}
 	}
 	return isOpen
+}
+
+// logTxLifecycle prints open/close events for chaindata txs so we can pair
+// them by traceID and see which callsites hold concurrent readers during a
+// commit (i.e. why openTxs=N at commit time). Skipped for non-ChainDB labels
+// to avoid flooding from caplin and ancillary DBs.
+func (db *MdbxKV) logTxLifecycle(event string, traceID uint64, readOnly bool) {
+	if db.opts.label != dbcfg.ChainDB {
+		return
+	}
+	kind := "rw"
+	if readOnly {
+		kind = "ro"
+	}
+	fmt.Printf("MDBX_TX_%s: id=%d kind=%s count=%d stack=%s\n",
+		event, traceID, kind, db.txsCount, dbg.Stack())
 }
 
 func (db *MdbxKV) hasTxsAllDoneAndClosed() bool {
@@ -613,13 +626,15 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, db.opts.label, stack2.Trace().String())
 	}
 
-	return &MdbxTx{
+	mt := &MdbxTx{
 		ctx:      ctx,
 		db:       db,
 		tx:       tx,
 		readOnly: true,
 		traceID:  db.leakDetector.Add(),
-	}, nil
+	}
+	db.logTxLifecycle("OPEN", mt.traceID, true)
+	return mt, nil
 }
 
 func (db *MdbxKV) BeginRw(ctx context.Context) (kv.RwTx, error) {
@@ -654,12 +669,14 @@ func (db *MdbxKV) beginRw(ctx context.Context, flags uint) (txn kv.RwTx, err err
 		return nil, fmt.Errorf("%w, lable: %s, trace: %s", err, db.opts.label, stack2.Trace().String())
 	}
 
-	return &MdbxTx{
+	mt := &MdbxTx{
 		db:      db,
 		tx:      tx,
 		ctx:     ctx,
 		traceID: db.leakDetector.Add(),
-	}, nil
+	}
+	db.logTxLifecycle("OPEN", mt.traceID, false)
+	return mt, nil
 }
 
 type MdbxTx struct {
@@ -1019,6 +1036,7 @@ func (tx *MdbxTx) Commit() error {
 	defer func() {
 		tx.tx = nil
 		tx.db.trackTxEnd()
+		tx.db.logTxLifecycle("COMMIT", tx.traceID, tx.readOnly)
 		if tx.readOnly {
 			tx.db.roTxsLimiter.Release(1)
 		} else {
@@ -1074,6 +1092,7 @@ func (tx *MdbxTx) Rollback() {
 	tx.tx.Abort()
 	tx.tx = nil
 	tx.db.trackTxEnd()
+	tx.db.logTxLifecycle("ROLLBACK", tx.traceID, tx.readOnly)
 	if tx.readOnly {
 		tx.db.roTxsLimiter.Release(1)
 	} else {
