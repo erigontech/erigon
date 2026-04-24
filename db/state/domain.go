@@ -588,6 +588,13 @@ func (d *Domain) BeginFilesRo() *DomainRoTx {
 	}
 }
 
+// beginForTests recomputes visible files from dirtyFiles directly.
+// Only safe in tests without an Aggregator.
+func (d *Domain) beginForTests() *DomainRoTx {
+	d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
+	return d.BeginFilesRo()
+}
+
 func (dt *DomainRoTx) FirstStepNotInFiles() kv.Step {
 	return kv.Step(dt.files.EndTxNum() / dt.stepSize)
 }
