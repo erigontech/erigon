@@ -1033,20 +1033,26 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 		hashedKeyBuf[64-hashedKeyOffset] = terminatorHexByte // Add terminator
 
 		if cell.stateHashLen > 0 {
-			hph.hashAuxBuffer[0] = 160
-			copy(hph.hashAuxBuffer[1:], cell.stateHash[:cell.stateHashLen])
-			res := hph.hashAuxBuffer[:1+cell.stateHashLen]
+			resultLen := 1 + int(cell.stateHashLen)
+			var result []byte
+			if cap(buf) >= resultLen {
+				result = buf[:resultLen]
+			} else {
+				result = make([]byte, resultLen)
+			}
+			result[0] = 160
+			copy(result[1:], cell.stateHash[:cell.stateHashLen])
 			hph.keccak.Reset()
 			if hph.trace {
-				fmt.Printf("REUSED stateHash %x spk %x\n", res, cell.storageAddr[:cell.storageAddrLen])
+				fmt.Printf("REUSED stateHash %x spk %x\n", result, cell.storageAddr[:cell.storageAddrLen])
 			}
 			mxTrieStateSkipRate.Inc()
 			skippedLoad.Add(1)
 			if !singleton {
-				return res, storageRootHashIsSet, nil, err
+				return result, storageRootHashIsSet, nil, err
 			} else {
 				storageRootHashIsSet = true
-				storageRootHash = *(*common.Hash)(res[1:])
+				storageRootHash = *(*common.Hash)(result[1:])
 				//copy(storageRootHash[:], res[1:])
 				//cell.stateHashLen = 0
 			}
@@ -1127,17 +1133,23 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 		}
 		if !cell.loaded.account() {
 			if cell.stateHashLen > 0 {
-				hph.hashAuxBuffer[0] = 160
-				copy(hph.hashAuxBuffer[1:], cell.stateHash[:cell.stateHashLen])
-				res := hph.hashAuxBuffer[:1+cell.stateHashLen]
+				resultLen := 1 + int(cell.stateHashLen)
+				var result []byte
+				if cap(buf) >= resultLen {
+					result = buf[:resultLen]
+				} else {
+					result = make([]byte, resultLen)
+				}
+				result[0] = 160
+				copy(result[1:], cell.stateHash[:cell.stateHashLen])
 				hph.keccak.Reset()
 
 				mxTrieStateSkipRate.Inc()
 				skippedLoad.Add(1)
 				if hph.trace {
-					fmt.Printf("REUSED stateHash %x apk %x\n", res, cell.accountAddr[:cell.accountAddrLen])
+					fmt.Printf("REUSED stateHash %x apk %x\n", result, cell.accountAddr[:cell.accountAddrLen])
 				}
-				return res, storageRootHashIsSet, storageRootHash[:], nil
+				return result, storageRootHashIsSet, storageRootHash[:], nil
 			}
 			// storage root update or extension update could invalidate older stateHash, so we need to reload state
 			hph.metrics.AccountLoad(cell.accountAddr[:cell.accountAddrLen])
@@ -1213,9 +1225,16 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 			mxTrieStateSkipRate.Inc()
 			skippedLoad.Add(1)
 			if !singleton {
-				hph.hashAuxBuffer[0] = 160
-				copy(hph.hashAuxBuffer[1:], cell.stateHash[:cell.stateHashLen])
-				return hph.hashAuxBuffer[:1+cell.stateHashLen], nil
+				resultLen := 1 + int(cell.stateHashLen)
+				var result []byte
+				if cap(buf) >= resultLen {
+					result = buf[:resultLen]
+				} else {
+					result = make([]byte, resultLen)
+				}
+				result[0] = 160
+				copy(result[1:], cell.stateHash[:cell.stateHashLen])
+				return result, nil
 			}
 			storageRootHashIsSet = true
 			storageRootHash = *(*common.Hash)(cell.stateHash[:cell.stateHashLen])
@@ -1293,9 +1312,16 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 				if hph.trace {
 					fmt.Printf("REUSED stateHash %x apk %x\n", cell.stateHash[:cell.stateHashLen], cell.accountAddr[:cell.accountAddrLen])
 				}
-				hph.hashAuxBuffer[0] = 160
-				copy(hph.hashAuxBuffer[1:], cell.stateHash[:cell.stateHashLen])
-				return hph.hashAuxBuffer[:1+cell.stateHashLen], nil
+				resultLen := 1 + int(cell.stateHashLen)
+				var result []byte
+				if cap(buf) >= resultLen {
+					result = buf[:resultLen]
+				} else {
+					result = make([]byte, resultLen)
+				}
+				result[0] = 160
+				copy(result[1:], cell.stateHash[:cell.stateHashLen])
+				return result, nil
 			}
 			// storage root update or extension update could invalidate older stateHash, so we need to reload state
 			hph.metrics.AccountLoad(cell.accountAddr[:cell.accountAddrLen])
