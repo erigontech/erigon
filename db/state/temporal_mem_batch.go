@@ -664,7 +664,7 @@ func (sd *TemporalMemBatch) flushWritersWithTimings(ctx context.Context, tx kv.R
 				return nil, err
 			}
 			ws[i].Close()
-			log.Debug("[flush] past domain writer", "domain", kv.Domain(di).String(), "i", i, "took", common.Round(time.Since(wt), 0))
+			log.Warn("[flush] past domain writer", "domain", kv.Domain(di).String(), "i", i, "took", common.Round(time.Since(wt), 0))
 		}
 		if len(ws) > 0 {
 			timings = append(timings, "past_"+kv.Domain(di).String(), common.Round(time.Since(t), 0))
@@ -689,7 +689,7 @@ func (sd *TemporalMemBatch) flushWritersWithTimings(ctx context.Context, tx kv.R
 		if err := sd.pastIIWriters[i].Flush(ctx, tx); err != nil {
 			return nil, err
 		}
-		log.Debug("[flush] past ii writer", "ii", sd.pastIIWriters[i].name.String(), "took", common.Round(time.Since(wt), 0))
+		log.Warn("[flush] past ii writer", "ii", sd.pastIIWriters[i].name.String(), "took", common.Round(time.Since(wt), 0))
 		sd.pastIIWriters[i].close()
 	}
 	if len(sd.pastIIWriters) > 0 {
