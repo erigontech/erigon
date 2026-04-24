@@ -20,11 +20,12 @@ import (
 
 // AggOpts is an Aggregator builder and contains only runtime-changeable configs (which may vary between Erigon nodes)
 type AggOpts struct { //nolint:gocritic
-	dirs              datadir.Dirs
-	logger            log.Logger
-	stepSize          uint64 // != 0 mean override erigondb.toml settings
-	stepsInFrozenFile uint64 // != 0 mean override erigondb.toml settings
-	reorgBlockDepth   uint64
+	dirs                            datadir.Dirs
+	logger                          log.Logger
+	stepSize                        uint64 // != 0 mean override erigondb.toml settings
+	stepsInFrozenFile               uint64 // != 0 mean override erigondb.toml settings
+	erigondbDomainStepsInFrozenFile uint64
+	reorgBlockDepth                 uint64
 
 	genSaltIfNeed   bool
 	sanityOldNaming bool // prevent start directory with old file names
@@ -67,6 +68,7 @@ func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) {
 
 	a.stepSize.Store(opts.stepSize)
 	a.stepsInFrozenFile.Store(opts.stepsInFrozenFile)
+	a.erigondbDomainStepsInFrozenFile = opts.erigondbDomainStepsInFrozenFile
 
 	a.disableHistory = opts.disableHistory
 	a.disableFsync = opts.disableFsync
@@ -93,6 +95,15 @@ func (opts AggOpts) MustOpen(ctx context.Context, db kv.RoDB) *Aggregator { //no
 func (opts AggOpts) StepSize(s uint64) AggOpts { opts.stepSize = s; return opts } //nolint:gocritic
 func (opts AggOpts) StepsInFrozenFile(steps uint64) AggOpts { //nolint:gocritic
 	opts.stepsInFrozenFile = steps
+	return opts
+}
+
+// ErigondbDomainStepsInFrozenFile sets the domain-only cap override (see
+// Aggregator.erigondbDomainStepsInFrozenFile). 0 clears the override;
+// config3.UnboundedDomainMerge disables the cap; any other value replaces stepsInFrozenFile
+// for domain merges only.
+func (opts AggOpts) ErigondbDomainStepsInFrozenFile(steps uint64) AggOpts { //nolint:gocritic
+	opts.erigondbDomainStepsInFrozenFile = steps
 	return opts
 }
 func (opts AggOpts) ReorgBlockDepth(d uint64) AggOpts { //nolint:gocritic

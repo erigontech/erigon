@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 var ErrNotSupported = errors.New("operation not supported in engine API mode")
@@ -525,6 +526,9 @@ func (cc *ExecutionClientEngine) GetBlobs(ctx context.Context, versionedHashes [
 		}
 		resp, err := cc.txpool.GetBlobs(ctx, req)
 		if err != nil {
+			if errors.Is(err, txpool.ErrPoolDisabled) {
+				return nil, nil, nil
+			}
 			return nil, nil, fmt.Errorf("txpool GetBlobs: %w", err)
 		}
 		blobsWithProof := resp.BlobsWithProofs

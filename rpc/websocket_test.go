@@ -21,6 +21,7 @@ package rpc
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -30,7 +31,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gorilla/websocket"
+	"github.com/coder/websocket"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -72,9 +73,12 @@ func TestWebsocketOriginCheck(t *testing.T) {
 		client.Close()
 		t.Fatal("no error for wrong origin")
 	}
-	wantErr := wsHandshakeError{websocket.ErrBadHandshake, "403 Forbidden"}
-	if err.Error() != wantErr.Error() {
-		t.Fatalf("wrong error for wrong origin: %q", err)
+	var handshakeErr wsHandshakeError
+	if !errors.As(err, &handshakeErr) {
+		t.Fatalf("wrong error type %T: %v", err, err)
+	}
+	if handshakeErr.status != "403 Forbidden" {
+		t.Fatalf("wrong HTTP status in error: %q", handshakeErr.status)
 	}
 
 	// Connections without origin header should work.
@@ -223,15 +227,12 @@ func wsPingTestServer(t *testing.T, sendPing <-chan struct{}) *http.Server {
 	})
 	srv.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Upgrade to WebSocket.
-		upgrader := websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool { return true },
-		}
-		conn, err := upgrader.Upgrade(w, r, nil)
+		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
 		if err != nil {
 			t.Errorf("server WS upgrade error: %v", err)
 			return
 		}
-		defer conn.Close()
+		defer conn.CloseNow()
 
 		// Handle the connection.
 		wsPingTestHandler(t, conn, shutdown, sendPing)
@@ -255,39 +256,35 @@ func wsPingTestHandler(t *testing.T, conn *websocket.Conn, shutdown, sendPing <-
 	)
 
 	// Handle subscribe request.
-	if _, _, err := conn.ReadMessage(); err != nil {
+	if _, _, err := conn.Read(context.Background()); err != nil {
 		t.Errorf("server read error: %v", err)
 		return
 	}
-	if err := conn.WriteMessage(websocket.TextMessage, []byte(subResp)); err != nil {
+	if err := conn.Write(context.Background(), websocket.MessageText, []byte(subResp)); err != nil {
 		t.Errorf("server write error: %v", err)
 		return
 	}
 
-	// Read from the connection to process control messages.
-	var pongCh = make(chan string)
-	conn.SetPongHandler(func(d string) error {
-		t.Logf("server got pong: %q", d)
-		pongCh <- d
-		return nil
-	})
+	// coder/websocket requires a concurrent conn.Read() for conn.Ping() to work:
+	// pong frames are only processed (and the waiting Ping() unblocked) when the
+	// read pump is actively reading. Run a background goroutine for this purpose.
+	readCtx, readCancel := context.WithCancel(context.Background())
+	defer readCancel()
 	go func() {
 		for {
-			typ, msg, err := conn.ReadMessage()
+			typ, msg, err := conn.Read(readCtx)
 			if err != nil {
 				return
 			}
-			t.Logf("server got message (%d): %q", typ, msg)
+			t.Logf("server got message (%s): %q", typ, msg)
 		}
 	}()
 
 	// Write messages.
-	var (
-		wantPong string
-		timer    = time.NewTimer(0)
-	)
+	var timer = time.NewTimer(0)
 	defer timer.Stop()
 	<-timer.C
+
 	for {
 		select {
 		case _, open := <-sendPing:
@@ -295,21 +292,19 @@ func wsPingTestHandler(t *testing.T, conn *websocket.Conn, shutdown, sendPing <-
 				sendPing = nil
 			}
 			t.Logf("server sending ping")
-			conn.WriteMessage(websocket.PingMessage, []byte("ping"))
-			wantPong = "ping"
-		case data := <-pongCh:
-			if wantPong == "" {
-				t.Errorf("unexpected pong")
-			} else if data != wantPong {
-				t.Errorf("got pong with wrong data %q", data)
+			pingCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			err := conn.Ping(pingCtx)
+			cancel()
+			if err != nil {
+				t.Logf("server ping error: %v", err)
+				return
 			}
-			wantPong = ""
+			t.Logf("server got pong")
 			timer.Reset(200 * time.Millisecond)
 		case <-timer.C:
 			t.Logf("server sending response")
-			conn.WriteMessage(websocket.TextMessage, []byte(subNotify))
+			conn.Write(context.Background(), websocket.MessageText, []byte(subNotify)) //nolint:errcheck
 		case <-shutdown:
-			conn.Close()
 			return
 		}
 	}

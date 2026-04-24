@@ -353,10 +353,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 									prevCommittedTransactions = committedTransactions
 									prevCommitedGas = committedGas
 								}
-
-								if pe.agg.HasBackgroundFilesBuild() {
-									pe.logger.Info(fmt.Sprintf("[%s] Background files build", pe.logPrefix), "progress", pe.agg.BackgroundProgress())
-								}
 							}
 
 							if time.Since(lastExecutedLog) > logInterval/50 {
