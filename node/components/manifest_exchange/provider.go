@@ -28,36 +28,34 @@ package manifest_exchange
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
+	"net"
 	"sync"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/downloader"
-	dl "github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/node/app/event"
 	"github.com/erigontech/erigon/node/components/sentry"
 	"github.com/erigontech/erigon/node/components/storage/flow"
-	"github.com/erigontech/erigon/node/gointerfaces"
-	downloaderproto "github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon/p2p/enr"
 )
 
-// peerDirPrefix is the subdirectory under snapDir where each peer's
-// chain.toml.v2 is fetched into. Keeps peer manifests isolated from our
-// own chain.toml.v2 at the snapDir root.
-const peerDirPrefix = ".peers"
+// ManifestFetcher abstracts the "fetch a peer's chain.toml.v2 by
+// infohash" operation so manifest_exchange doesn't depend on a concrete
+// torrent client. Production wires the downloader.Provider's
+// FetchPeerManifestV2 method; tests wire a canned-bytes stub.
+type ManifestFetcher interface {
+	FetchPeerManifestV2(ctx context.Context, peerID string, infoHash [20]byte, peerIP net.IP, peerPort uint16) ([]byte, error)
+}
 
 // Provider is the manifest_exchange component's runtime state. It owns a
-// bus binding, a downloader client for fetching peer manifests, and a
-// snapDir for writing them to disk.
+// bus binding and a ManifestFetcher for fetching peer chain.toml.v2
+// manifests.
 type Provider struct {
 	mu        sync.Mutex
 	bus       event.EventBus
-	client    dl.Client
+	fetcher   ManifestFetcher
 	ctx       context.Context
 	cancelCtx context.CancelFunc
-	snap      string
 	log       log.Logger
 
 	// Materialised handlers — stable reflect.Value.Pointer() for
@@ -76,25 +74,20 @@ type Provider struct {
 }
 
 // BindBus wires the component to the framework event bus. After this
-// call, peer-connect events trigger manifest fetches and peer-disconnect
-// events publish flow.PeerDeparted.
+// call, peer-connect events trigger manifest fetches via the
+// ManifestFetcher and peer-disconnect events publish flow.PeerDeparted.
 //
 // ctx is the component's lifetime context — used as the context for
-// underlying Client.Download calls. snapDir is the root snapshots
-// directory; peer manifests land at <snapDir>/.peers/<peerID>/chain.toml.v2
-// when fetched.
-func (p *Provider) BindBus(ctx context.Context, bus event.EventBus, client dl.Client, snapDir string, logger log.Logger) error {
+// underlying fetch calls.
+func (p *Provider) BindBus(ctx context.Context, bus event.EventBus, fetcher ManifestFetcher, logger log.Logger) error {
 	if p == nil {
 		return fmt.Errorf("manifest_exchange.BindBus: nil provider")
 	}
 	if bus == nil {
 		return fmt.Errorf("manifest_exchange.BindBus: nil bus")
 	}
-	if client == nil {
-		return fmt.Errorf("manifest_exchange.BindBus: nil downloader client")
-	}
-	if snapDir == "" {
-		return fmt.Errorf("manifest_exchange.BindBus: empty snapDir")
+	if fetcher == nil {
+		return fmt.Errorf("manifest_exchange.BindBus: nil manifest fetcher")
 	}
 	if logger == nil {
 		logger = log.Root()
@@ -109,10 +102,9 @@ func (p *Provider) BindBus(ctx context.Context, bus event.EventBus, client dl.Cl
 	// without disturbing the caller's ctx.
 	childCtx, cancel := context.WithCancel(ctx)
 	p.bus = bus
-	p.client = client
+	p.fetcher = fetcher
 	p.ctx = childCtx
 	p.cancelCtx = cancel
-	p.snap = snapDir
 	p.log = logger
 	p.inflight = make(map[string]struct{})
 	p.hConnected = p.onPeerConnected
@@ -170,10 +162,9 @@ func (p *Provider) UnbindBus() error {
 func (p *Provider) unbindNoLock() {
 	p.mu.Lock()
 	p.bus = nil
-	p.client = nil
+	p.fetcher = nil
 	p.ctx = nil
 	p.cancelCtx = nil
-	p.snap = ""
 	p.hConnected = nil
 	p.hDisconnected = nil
 	p.inflight = nil
@@ -199,6 +190,13 @@ func (p *Provider) onPeerConnected(e sentry.PeerConnected) {
 		return
 	}
 
+	// Extract BT endpoint from the ENR so the fetcher can add the peer
+	// as a direct torrent peer. Falls back to zero if absent — the
+	// fetcher will rely on static peers or discovery in that case.
+	var btPort enr.BT
+	_ = e.Peer.Record().Load(&btPort)
+	peerIP := e.Peer.IP()
+
 	p.mu.Lock()
 	if p.inflight == nil {
 		p.mu.Unlock()
@@ -215,7 +213,7 @@ func (p *Provider) onPeerConnected(e sentry.PeerConnected) {
 
 	go func() {
 		defer p.fetchWG.Done()
-		p.fetchAndPublish(ctx, peerID, ct.InfoHash)
+		p.fetchAndPublish(ctx, peerID, ct.InfoHash, peerIP, uint16(btPort))
 	}()
 }
 
@@ -234,36 +232,21 @@ func (p *Provider) onPeerDisconnected(e sentry.PeerDisconnected) {
 // fetchAndPublish runs the full fetch → parse → publish pipeline for a
 // single peer. Runs in its own goroutine so multiple peer-connects can
 // proceed in parallel without serialising on the bus handler.
-func (p *Provider) fetchAndPublish(ctx context.Context, peerID string, infoHash [20]byte) {
+func (p *Provider) fetchAndPublish(ctx context.Context, peerID string, infoHash [20]byte, peerIP net.IP, peerPort uint16) {
 	defer p.clearInflight(peerID)
 
 	p.mu.Lock()
-	client := p.client
-	snap := p.snap
+	fetcher := p.fetcher
 	logger := p.log
 	bus := p.bus
 	p.mu.Unlock()
-	if client == nil || snap == "" || bus == nil {
+	if fetcher == nil || bus == nil {
 		return
 	}
 
-	relPath := filepath.Join(peerDirPrefix, peerID, downloader.ChainTomlV2FileName)
-	req := &downloaderproto.DownloadRequest{
-		Items: []*downloaderproto.DownloadItem{{
-			Path:        relPath,
-			TorrentHash: gointerfaces.ConvertAddressToH160(infoHash),
-		}},
-		LogTarget: "manifest_exchange",
-	}
-	if err := client.Download(ctx, req); err != nil {
-		logger.Warn("[manifest_exchange] download peer manifest", "peer", peerID, "err", err)
-		return
-	}
-
-	fullPath := filepath.Join(snap, relPath)
-	data, err := os.ReadFile(fullPath)
+	data, err := fetcher.FetchPeerManifestV2(ctx, peerID, infoHash, peerIP, peerPort)
 	if err != nil {
-		logger.Warn("[manifest_exchange] read peer manifest", "peer", peerID, "path", fullPath, "err", err)
+		logger.Warn("[manifest_exchange] fetch peer manifest", "peer", peerID, "err", err)
 		return
 	}
 

@@ -17,12 +17,15 @@
 package sentry
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
+	execp2p "github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/node/app/event"
 	"github.com/erigontech/erigon/node/components/storage/flow"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
+	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/p2p/enode"
 )
 
@@ -178,4 +181,63 @@ func (p *Provider) PublishPeerDisconnected(peerID string) {
 		return
 	}
 	bus.Publish(PeerDisconnected{PeerID: peerID})
+}
+
+// EnablePeerEventAutoWire subscribes to the ExecutionP2PMessageListener's
+// peer-event stream and translates sentry protobuf peer events into
+// PeerConnected / PeerDisconnected publications on the framework event
+// bus. This is how real DevP2P handshakes drive manifest_exchange in a
+// live-network configuration.
+//
+// Requires Initialize (which builds ExecutionP2PMessageListener) and
+// BindBus to have completed. Returns an UnregisterFunc the caller must
+// invoke on teardown — typically via t.Cleanup in tests or as part of
+// the component's Close path in production.
+//
+// External-sentry mode is not supported here because the peer-node
+// lookup requires a local GrpcServer; in that mode Peer Connect fires
+// but the enode.Node isn't available locally. This returns nil in that
+// mode without error — the auto-wire is simply skipped.
+func (p *Provider) EnablePeerEventAutoWire(ctx context.Context) (execp2p.UnregisterFunc, error) {
+	if p == nil {
+		return nil, fmt.Errorf("sentry.EnablePeerEventAutoWire: nil provider")
+	}
+	if p.ExecutionP2PMessageListener == nil {
+		return nil, fmt.Errorf("sentry.EnablePeerEventAutoWire: MessageListener not initialised; call Initialize first")
+	}
+	if p.bus == nil || !p.bus.bound() {
+		return nil, fmt.Errorf("sentry.EnablePeerEventAutoWire: bus not bound; call BindBus first")
+	}
+	if len(p.Servers) == 0 {
+		// External-sentry mode: no local peer-node lookup. Skip silently.
+		return func() {}, nil
+	}
+
+	observer := func(msg *sentryproto.PeerEvent) {
+		peerID := execp2p.PeerIdFromH512(msg.PeerId)
+		switch msg.EventId {
+		case sentryproto.PeerEvent_Connect:
+			node := p.peerNodeByID([64]byte(*peerID))
+			if node != nil {
+				p.PublishPeerConnected(node)
+			}
+		case sentryproto.PeerEvent_Disconnect:
+			p.PublishPeerDisconnected(peerID.String())
+		}
+	}
+
+	unreg := p.ExecutionP2PMessageListener.RegisterPeerEventObserver(observer, execp2p.WithReplayConnected(ctx))
+	return unreg, nil
+}
+
+// peerNodeByID asks each local GrpcServer in turn for the *enode.Node of
+// the peer. Returns nil if the peer is not in any server's good-peers set
+// (e.g. the connect event raced the auto-wire).
+func (p *Provider) peerNodeByID(peerID [64]byte) *enode.Node {
+	for _, s := range p.Servers {
+		if n := s.PeerNode(peerID); n != nil {
+			return n
+		}
+	}
+	return nil
 }

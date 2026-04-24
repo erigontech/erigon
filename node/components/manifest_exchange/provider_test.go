@@ -20,8 +20,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -30,86 +30,62 @@ import (
 
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/downloader"
-	dl "github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/node/app/event"
 	"github.com/erigontech/erigon/node/components/sentry"
 	"github.com/erigontech/erigon/node/components/storage/flow"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
-	"github.com/erigontech/erigon/node/gointerfaces"
-	downloaderproto "github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
 )
 
-// mockCopyClient is a dl.Client that copies bytes from a pre-registered
-// source path to the requested target path based on the torrent hash in
-// the request. Used to simulate a successful download with real content
-// so ParseV2 has something to parse.
-type mockCopyClient struct {
+// mockFetcher is a ManifestFetcher implementation for unit tests. It
+// returns bytes from a pre-registered (infohash → file) map, simulating
+// a successful peer fetch without touching a real torrent client.
+type mockFetcher struct {
 	mu      sync.Mutex
 	sources map[[20]byte]string
-	rootDir string
 	err     error
 	calls   int
 }
 
-func newMockCopyClient(rootDir string) *mockCopyClient {
-	return &mockCopyClient{sources: make(map[[20]byte]string), rootDir: rootDir}
+func newMockFetcher() *mockFetcher {
+	return &mockFetcher{sources: make(map[[20]byte]string)}
 }
 
-func (c *mockCopyClient) register(hash [20]byte, srcPath string) {
-	c.mu.Lock()
-	c.sources[hash] = srcPath
-	c.mu.Unlock()
+func (m *mockFetcher) register(hash [20]byte, srcPath string) {
+	m.mu.Lock()
+	m.sources[hash] = srcPath
+	m.mu.Unlock()
 }
 
-func (c *mockCopyClient) setError(err error) {
-	c.mu.Lock()
-	c.err = err
-	c.mu.Unlock()
+func (m *mockFetcher) setError(err error) {
+	m.mu.Lock()
+	m.err = err
+	m.mu.Unlock()
 }
 
-func (c *mockCopyClient) callCount() int {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.calls
+func (m *mockFetcher) callCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.calls
 }
 
-func (c *mockCopyClient) Download(_ context.Context, req *downloaderproto.DownloadRequest) error {
-	c.mu.Lock()
-	c.calls++
-	err := c.err
-	srcMap := c.sources
-	rootDir := c.rootDir
-	c.mu.Unlock()
+func (m *mockFetcher) FetchPeerManifestV2(_ context.Context, _ string, infoHash [20]byte, _ net.IP, _ uint16) ([]byte, error) {
+	m.mu.Lock()
+	m.calls++
+	err := m.err
+	src, ok := m.sources[infoHash]
+	m.mu.Unlock()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	for _, item := range req.Items {
-		hash := gointerfaces.ConvertH160toAddress(item.TorrentHash)
-		src, ok := srcMap[hash]
-		if !ok {
-			return fmt.Errorf("hash %x not registered with mockCopyClient", hash)
-		}
-		data, rerr := os.ReadFile(src)
-		if rerr != nil {
-			return rerr
-		}
-		dst := filepath.Join(rootDir, item.Path)
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			return err
-		}
-		if err := os.WriteFile(dst, data, 0o644); err != nil {
-			return err
-		}
+	if !ok {
+		return nil, fmt.Errorf("hash %x not registered with mockFetcher", infoHash)
 	}
-	return nil
+	return os.ReadFile(src)
 }
 
-func (c *mockCopyClient) Seed(context.Context, []string) error   { return nil }
-func (c *mockCopyClient) Delete(context.Context, []string) error { return nil }
-
-var _ dl.Client = (*mockCopyClient)(nil)
+var _ ManifestFetcher = (*mockFetcher)(nil)
 
 func newTestBus() event.EventBus { return event.NewEventBus(nil) }
 
@@ -178,8 +154,7 @@ type env struct {
 	bus      event.EventBus
 	p        *Provider
 	sentry   *sentry.Provider
-	client   *mockCopyClient
-	leechDir string
+	fetcher  *mockFetcher
 	received []flow.PeerManifestReceived
 	departed []flow.PeerDeparted
 	recvMu   sync.Mutex
@@ -201,20 +176,18 @@ func (e *env) departedCount() int {
 func newEnv(t *testing.T) *env {
 	t.Helper()
 	bus := newTestBus()
-	leechDir := t.TempDir()
-	client := newMockCopyClient(leechDir)
+	fetcher := newMockFetcher()
 
 	sp := &sentry.Provider{}
 	require.NoError(t, sp.BindBus(bus))
 
 	e := &env{
-		bus:      bus,
-		p:        &Provider{},
-		sentry:   sp,
-		client:   client,
-		leechDir: leechDir,
+		bus:     bus,
+		p:       &Provider{},
+		sentry:  sp,
+		fetcher: fetcher,
 	}
-	require.NoError(t, e.p.BindBus(context.Background(), bus, client, leechDir, nil))
+	require.NoError(t, e.p.BindBus(context.Background(), bus, fetcher, nil))
 
 	require.NoError(t, bus.Subscribe(func(evt flow.PeerManifestReceived) {
 		e.recvMu.Lock()
@@ -241,7 +214,7 @@ func TestOnPeerConnectedFetchesAndPublishes(t *testing.T) {
 	seedDir := t.TempDir()
 	inv := makeInventory(t)
 	seedPath, hash := seedPeerManifest(t, seedDir, inv)
-	e.client.register(hash, seedPath)
+	e.fetcher.register(hash, seedPath)
 
 	peer := makePeerNode(t, &enr.ChainToml{
 		AuthoritativeBlocks: 100,
@@ -268,7 +241,7 @@ func TestOnPeerConnectedFetchesAndPublishes(t *testing.T) {
 	require.Len(t, got.Blocks, 1)
 	require.Equal(t, "v1.0-000000-000500-headers.seg", got.Blocks[0].Name)
 
-	require.Equal(t, 1, e.client.callCount())
+	require.Equal(t, 1, e.fetcher.callCount())
 }
 
 func TestOnPeerConnectedNoENRIsNoop(t *testing.T) {
@@ -281,7 +254,7 @@ func TestOnPeerConnectedNoENRIsNoop(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 
 	require.Zero(t, e.receivedCount())
-	require.Zero(t, e.client.callCount(), "no download should fire for peer without chain-toml ENR")
+	require.Zero(t, e.fetcher.callCount(), "no download should fire for peer without chain-toml ENR")
 }
 
 func TestOnPeerConnectedZeroInfoHashIsNoop(t *testing.T) {
@@ -298,13 +271,13 @@ func TestOnPeerConnectedZeroInfoHashIsNoop(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 
 	require.Zero(t, e.receivedCount())
-	require.Zero(t, e.client.callCount())
+	require.Zero(t, e.fetcher.callCount())
 }
 
 func TestOnPeerConnectedDownloadFailure(t *testing.T) {
 	e := newEnv(t)
 
-	e.client.setError(errors.New("simulated transport failure"))
+	e.fetcher.setError(errors.New("simulated transport failure"))
 
 	// Register a hash so the peer advertises a non-zero InfoHash.
 	hash := [20]byte{0x99, 0x88, 0x77}
@@ -316,7 +289,7 @@ func TestOnPeerConnectedDownloadFailure(t *testing.T) {
 	e.sentry.PublishPeerConnected(peer)
 
 	// Allow the goroutine to fire.
-	waitFor(t, func() bool { return e.client.callCount() == 1 },
+	waitFor(t, func() bool { return e.fetcher.callCount() == 1 },
 		2*time.Second, "download attempt")
 
 	e.bus.WaitAsync()
@@ -341,20 +314,19 @@ func TestOnPeerDisconnectedPublishesPeerDeparted(t *testing.T) {
 func TestBindBusRejectsInvalidInputs(t *testing.T) {
 	p := &Provider{}
 	bus := newTestBus()
-	client := newMockCopyClient(t.TempDir())
+	fetcher := newMockFetcher()
 
-	require.Error(t, p.BindBus(context.Background(), nil, client, "/tmp", nil))
-	require.Error(t, p.BindBus(context.Background(), bus, nil, "/tmp", nil))
-	require.Error(t, p.BindBus(context.Background(), bus, client, "", nil))
+	require.Error(t, p.BindBus(context.Background(), nil, fetcher, nil))
+	require.Error(t, p.BindBus(context.Background(), bus, nil, nil))
 }
 
 func TestBindBusDoubleBind(t *testing.T) {
 	p := &Provider{}
 	bus := newTestBus()
-	client := newMockCopyClient(t.TempDir())
+	fetcher := newMockFetcher()
 
-	require.NoError(t, p.BindBus(context.Background(), bus, client, t.TempDir(), nil))
-	err := p.BindBus(context.Background(), bus, client, t.TempDir(), nil)
+	require.NoError(t, p.BindBus(context.Background(), bus, fetcher, nil))
+	err := p.BindBus(context.Background(), bus, fetcher, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "already bound")
 }
@@ -364,8 +336,8 @@ func TestUnbindBusIdempotent(t *testing.T) {
 	require.NoError(t, p.UnbindBus())
 
 	bus := newTestBus()
-	client := newMockCopyClient(t.TempDir())
-	require.NoError(t, p.BindBus(context.Background(), bus, client, t.TempDir(), nil))
+	fetcher := newMockFetcher()
+	require.NoError(t, p.BindBus(context.Background(), bus, fetcher, nil))
 	require.NoError(t, p.UnbindBus())
 	require.NoError(t, p.UnbindBus())
 }
@@ -376,7 +348,7 @@ func TestConcurrentPeerConnectedDoesntDoubleFetch(t *testing.T) {
 	seedDir := t.TempDir()
 	inv := makeInventory(t)
 	seedPath, hash := seedPeerManifest(t, seedDir, inv)
-	e.client.register(hash, seedPath)
+	e.fetcher.register(hash, seedPath)
 
 	peer := makePeerNode(t, &enr.ChainToml{
 		AuthoritativeBlocks: 100,
@@ -395,6 +367,6 @@ func TestConcurrentPeerConnectedDoesntDoubleFetch(t *testing.T) {
 	e.bus.WaitAsync()
 	time.Sleep(50 * time.Millisecond)
 
-	require.Equal(t, 1, e.client.callCount(),
+	require.Equal(t, 1, e.fetcher.callCount(),
 		"second PeerConnected for same peer should not trigger a second fetch while first is in flight")
 }
