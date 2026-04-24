@@ -39,7 +39,7 @@ jobs:
             sim-limit: ".*/.*fork_Osaka"
             shard: osaka
           - sim: consume-rlp
-            sim-limit: ".*eip2930_access_list.*" # all tests take too long
+            sim-limit: ".*(eip2930_access_list|eip4844_blobs).*" # all tests take too long
             shard: rlp
           # Glamsterdam devnet: BAL EIPs against devnet fixtures
           - sim: consume-engine
