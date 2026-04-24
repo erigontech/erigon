@@ -90,7 +90,12 @@ func NewReaderOnBytes(m []byte, fName string) (*Reader, int, error) {
 		return nil, 0, fmt.Errorf("file %s is not compatible with your machine (different Endianness), but you can run `erigon snapshots index`", fName)
 	}
 
-	filter.SegmentCount = binary.BigEndian.Uint32(header[4+4:])
+	// Writer layout: SegmentCount at header[4:8], SegmentCountLength at
+	// header[8:12]. The previous reader decoded both from header[8:]
+	// (offset 4+4), so SegmentCount silently took the value the writer
+	// had put at SegmentCountLength and the real SegmentCount at
+	// offset 4 was never consumed.
+	filter.SegmentCount = binary.BigEndian.Uint32(header[4:])
 	filter.SegmentCountLength = binary.BigEndian.Uint32(header[4+4:])
 	filter.Seed = binary.BigEndian.Uint64(header[4+4+4:])
 	filter.SegmentLength = binary.BigEndian.Uint32(header[4+4+4+8:])
