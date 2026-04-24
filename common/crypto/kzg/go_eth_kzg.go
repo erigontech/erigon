@@ -101,7 +101,7 @@ func ComputeCells(blobs []goethkzg.Blob) ([]goethkzg.Cell, error) {
 			return []goethkzg.Cell{}, err
 		}
 		base := i * goethkzg.CellsPerExtBlob
-		for j, c := range cellsI {
+		for j, c := range &cellsI {
 			cells[base+j] = *c
 		}
 	}
