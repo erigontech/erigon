@@ -42,6 +42,9 @@ pagemon measure --cmd "..." --no-drop /data/state.kv
 
 # Attach to an already-running process (cache drop skipped automatically):
 pagemon measure --pid 12345 /data/state.kv
+
+# Show read amplification inline — pass the bytes the query logically needs:
+pagemon measure --cmd "..." --logical-bytes 204800 /data/state.kv
 ```
 
 ### `watch` — temporal sampling
@@ -58,6 +61,15 @@ pagemon watch --cmd "..." --interval 100ms /data/state.kv
 # Attach to a running process (Ctrl-C to stop):
 pagemon watch --pid $(pgrep erigon) /data/state.kv
 pagemon watch --pid $(pgrep erigon) --interval 100ms /data/a.kv /data/b.kv
+
+# Show read amplification inline:
+pagemon watch --pid $(pgrep erigon) --logical-bytes 204800 /data/state.kv
+```
+
+Prints a live status line to stderr every 5 s while sampling:
+
+```
+  [10s] state.kv: +4,200 pages new (+16.8 MB loaded)
 ```
 
 ### `diff` — compare two snapshots *(Phase 2, not yet implemented)*
@@ -79,6 +91,7 @@ Duration: 2847ms
 === File: /path/to/db ===
 Size:    4.2GB (1,048,576 pages)
 Loaded:  48.6MB (12,450 pages)
+Read amplification: 12.4×  (48.6 MB loaded / 3.9 MB needed)   ← only with --logical-bytes
 Density: 1.3%   Scatter: avg 78 pages   Max gap: 45,000 pages
 
 Clusters (4):
@@ -109,9 +122,16 @@ Pattern: INDEX_LOOKUP_SCATTERED
 
 ## Read amplification
 
+Pass `--logical-bytes N` (bytes the query logically needs) to `measure` or `watch` and the
+report will compute it inline:
+
 ```
-amplification = Loaded bytes / bytes logically needed by the query
+Read amplification: 12.4×  (48.6 MB loaded / 3.9 MB needed)
 ```
+
+Derive `N` from: rows returned × avg row size, key count × avg value size, or an `EXPLAIN` estimate.
+
+Thresholds:
 
 - < 2× — good
 - 2–3× — acceptable
@@ -148,6 +168,7 @@ indexes, vertical partitioning, physical reorganisation, co-location).
 | Live status line every 5s during `watch` — shows new pages loaded so far | requested |
 | `diff` subcommand stub (Phase 2 placeholder) | implementation |
 | `/data-colocation-advisor` Claude Code skill | design |
+| `--logical-bytes` on `measure`/`watch` — inline read-amplification line in report | requested |
 
 ### Planned (not yet implemented)
 
