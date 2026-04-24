@@ -38,6 +38,12 @@ func (s *ExecutionClientDirect) AssembleBlock(ctx context.Context, in *execution
 	return s.server.AssembleBlock(ctx, in)
 }
 
+// Server returns the underlying ExecutionServer, allowing callers to type-assert it to
+// concrete types that provide methods beyond the proto interface (e.g. AssembleBlockWithParams).
+func (s *ExecutionClientDirect) Server() executionproto.ExecutionServer {
+	return s.server
+}
+
 func (s *ExecutionClientDirect) GetBodiesByHashes(ctx context.Context, in *executionproto.GetBodiesByHashesRequest, opts ...grpc.CallOption) (*executionproto.GetBodiesBatchResponse, error) {
 	return s.server.GetBodiesByHashes(ctx, in)
 }

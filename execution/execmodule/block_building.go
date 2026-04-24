@@ -108,6 +108,31 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, req *executionproto.Asse
 	}, nil
 }
 
+// AssembleBlockWithParams starts building a block with the given parameters directly (no proto
+// conversion). Unlike AssembleBlock, it skips the dedup check so that a caller can inject a
+// CustomTxnProvider even when the other parameters match a previous request.
+func (e *ExecModule) AssembleBlockWithParams(ctx context.Context, params *builder.Parameters) (payloadID uint64, busy bool, err error) {
+	if !e.semaphore.TryAcquire(1) {
+		return 0, true, nil
+	}
+	defer e.semaphore.Release(1)
+
+	if err := e.checkWithdrawalsPresence(params.Timestamp, params.Withdrawals); err != nil {
+		return 0, false, err
+	}
+
+	e.evictOldBuilders()
+
+	e.nextPayloadId++
+	params.PayloadId = e.nextPayloadId
+	e.lastParameters = params
+
+	e.builders[e.nextPayloadId] = builder.NewBlockBuilder(e.builderFunc, params, e.config.SecondsPerSlot()/4)
+	e.logger.Info("[ForkChoiceUpdated] BlockBuilder added", "payload", e.nextPayloadId)
+
+	return e.nextPayloadId, false, nil
+}
+
 // The expected value to be received by the feeRecipient in wei
 func blockValue(br *types.BlockWithReceipts, baseFee *uint256.Int) *uint256.Int {
 	blockValue := uint256.NewInt(0)

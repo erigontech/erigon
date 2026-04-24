@@ -17,21 +17,39 @@
 package engineapi
 
 // testing_api.go implements the testing_ RPC namespace, specifically testing_buildBlockV1.
-// This namespace MUST NOT be enabled on production networks. Gate it with --rpc.testing.
+// Enable via --http.api=...,testing (e.g. --http.api eth,erigon,testing).
+// This namespace MUST NOT be enabled on production networks.
 
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	execctx "github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/txnprovider"
 )
+
+// directServerAccessor is implemented by direct.ExecutionClientDirect, which wraps the real
+// ExecModule.  We use a two-step assertion (client → server → concrete method) to avoid
+// importing execution/builder inside node/direct (which would introduce an import cycle).
+type directServerAccessor interface {
+	Server() executionproto.ExecutionServer
+}
 
 // TestingAPI is the interface for the testing_ RPC namespace.
 type TestingAPI interface {
@@ -42,23 +60,110 @@ type TestingAPI interface {
 	//
 	// transactions: nil  → draw from mempool (normal builder behaviour)
 	//               []   → build an empty block (mempool bypassed, no txs)
-	//               [...] → TODO: explicit tx list not yet supported; returns error
-	//
-	// NOTE: overriding extraData post-assembly means the BlockHash in the returned payload
-	// will NOT match a block header that includes that extraData. Callers should treat the
-	// result as a template when extraData is overridden.
+	//               [...] → build a block containing exactly these transactions (strict nonce check)
 	BuildBlockV1(ctx context.Context, parentHash common.Hash, payloadAttributes *engine_types.PayloadAttributes, transactions *[]hexutil.Bytes, extraData *hexutil.Bytes) (*engine_types.GetPayloadResponse, error)
+}
+
+// blockParamAssembler is implemented by execmodule.ExecModule.  We reach it via the two-step
+// assertion executionService → directServerAccessor.Server() → blockParamAssembler.
+type blockParamAssembler interface {
+	AssembleBlockWithParams(ctx context.Context, params *builder.Parameters) (payloadID uint64, busy bool, err error)
+}
+
+// resolveBlockParamAssembler extracts a blockParamAssembler from the execution service,
+// using the directServerAccessor indirection to avoid circular imports.
+func resolveBlockParamAssembler(svc executionproto.ExecutionClient) (blockParamAssembler, bool) {
+	dsa, ok := svc.(directServerAccessor)
+	if !ok {
+		return nil, false
+	}
+	bpa, ok := dsa.Server().(blockParamAssembler)
+	return bpa, ok
 }
 
 // testingImpl is the concrete implementation of TestingAPI.
 type testingImpl struct {
-	server  *EngineServer
-	enabled bool
+	server *EngineServer
+	logger log.Logger
+	db     kv.TemporalRoDB
 }
 
 // NewTestingImpl returns a new TestingAPI implementation wrapping the given EngineServer.
-func NewTestingImpl(server *EngineServer, enabled bool) TestingAPI {
-	return &testingImpl{server: server, enabled: enabled}
+func NewTestingImpl(server *EngineServer, logger log.Logger, db kv.TemporalRoDB) TestingAPI {
+	return &testingImpl{server: server, logger: logger, db: db}
+}
+
+// NewTestingRPCEntry returns the rpc.API descriptor for the testing_ namespace.
+func NewTestingRPCEntry(server *EngineServer, logger log.Logger, db kv.TemporalRoDB) rpc.API {
+	return rpc.API{
+		Namespace: "testing",
+		Public:    false,
+		Service:   TestingAPI(NewTestingImpl(server, logger, db)),
+		Version:   "1.0",
+	}
+}
+
+// decodeTxnProvider decodes raw transactions into a TxnProvider.
+// Returns nil if transactions is nil (mempool path).
+// Opens a single temporal DB transaction for all nonce lookups to avoid per-sender overhead.
+func (t *testingImpl) decodeTxnProvider(ctx context.Context, transactions *[]hexutil.Bytes, blockNumber, timestamp uint64) (txnprovider.TxnProvider, error) {
+	if transactions == nil {
+		return nil, nil
+	}
+
+	var reader *state.ReaderV3
+	if t.db != nil {
+		dbTx, err := t.db.BeginTemporalRo(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("testing_buildBlockV1: could not begin temporal transaction: %w", err)
+		}
+		defer dbTx.Rollback()
+		sd, err := execctx.NewSharedDomains(ctx, dbTx, t.logger)
+		if err != nil {
+			return nil, fmt.Errorf("testing_buildBlockV1: NewSharedDomains error: %w", err)
+		}
+		defer sd.Close()
+		reader = state.NewReaderV3(sd.AsGetter(dbTx))
+	}
+
+	decoded := make([]types.Transaction, 0, len(*transactions))
+	signer := types.MakeSigner(t.server.config, blockNumber, timestamp)
+	expectedNonce := make(map[accounts.Address]uint64, len(*transactions))
+	for i, rawTx := range *transactions {
+		tx, err := types.DecodeTransaction(rawTx)
+		if err != nil {
+			return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("transaction %d: decode error: %v", i, err)}
+		}
+		sender, err := signer.Sender(tx)
+		if err != nil {
+			return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("transaction %d: cannot recover sender: %v", i, err)}
+		}
+		tx.SetSender(sender)
+		if _, seen := expectedNonce[sender]; !seen {
+			var stateNonce uint64
+			if reader != nil {
+				acc, err := reader.ReadAccountData(accounts.InternAddress(sender.Value()))
+				if err != nil {
+					return nil, fmt.Errorf("testing_buildBlockV1: ReadAccountData error: %w", err)
+				}
+				if acc != nil {
+					stateNonce = acc.Nonce
+				}
+			}
+			expectedNonce[sender] = stateNonce
+		}
+		want := expectedNonce[sender]
+		got := tx.GetNonce()
+		if got > want {
+			return nil, &rpc.CustomError{Code: rpc.ErrCodeDefault, Message: fmt.Sprintf("nonce too high: address %v, tx: %d state: %d", sender.Value(), got, want)}
+		}
+		if got < want {
+			return nil, &rpc.CustomError{Code: rpc.ErrCodeDefault, Message: fmt.Sprintf("nonce too low: address %v, tx: %d state: %d", sender.Value(), got, want)}
+		}
+		expectedNonce[sender]++
+		decoded = append(decoded, tx)
+	}
+	return &staticTxnProvider{txns: decoded}, nil
 }
 
 // BuildBlockV1 implements TestingAPI.
@@ -69,18 +174,8 @@ func (t *testingImpl) BuildBlockV1(
 	transactions *[]hexutil.Bytes,
 	extraData *hexutil.Bytes,
 ) (*engine_types.GetPayloadResponse, error) {
-	if !t.enabled {
-		return nil, &rpc.InvalidParamsError{Message: "testing namespace is disabled; start erigon with --rpc.testing (WARNING: not for production use)"}
-	}
-
 	if payloadAttributes == nil {
 		return nil, &rpc.InvalidParamsError{Message: "payloadAttributes must not be null"}
-	}
-
-	// Explicit transaction list is not yet supported (requires proto extension).
-	// TODO: implement forced_transactions via AssembleBlockRequest proto extension.
-	if transactions != nil && len(*transactions) > 0 {
-		return nil, &rpc.InvalidParamsError{Message: "explicit transaction list not yet supported in testing_buildBlockV1; use null for mempool or [] for empty block"}
 	}
 
 	// Validate parent block exists.
@@ -124,19 +219,9 @@ func (t *testingImpl) BuildBlockV1(
 		return nil, &rpc.InvalidParamsError{Message: "parentBeaconBlockRoot not supported before Cancun"}
 	}
 
-	// Build the AssembleBlock request (mirrors forkchoiceUpdated logic).
-	req := &executionproto.AssembleBlockRequest{
-		ParentHash:            gointerfaces.ConvertHashToH256(parentHash),
-		Timestamp:             timestamp,
-		PrevRandao:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
-		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
-		SlotNumber:            (*uint64)(payloadAttributes.SlotNumber),
-	}
-	if version >= clparams.CapellaVersion {
-		req.Withdrawals = engine_types.ConvertWithdrawalsToRpc(payloadAttributes.Withdrawals)
-	}
-	if version >= clparams.DenebVersion {
-		req.ParentBeaconBlockRoot = gointerfaces.ConvertHashToH256(*payloadAttributes.ParentBeaconBlockRoot)
+	customProvider, err := t.decodeTxnProvider(ctx, transactions, parentHeader.Number.Uint64()+1, timestamp)
+	if err != nil {
+		return nil, err
 	}
 
 	// Both steps share a single slot-duration budget so the total wall-clock
@@ -144,14 +229,62 @@ func (t *testingImpl) BuildBlockV1(
 	// Each step acquires the lock independently, matching production behaviour
 	// where ForkChoiceUpdated and GetPayload are separate RPC calls.
 	deadline := time.Now().Add(time.Duration(t.server.config.SecondsPerSlot()) * time.Second)
+	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
+		deadline = ctxDeadline
+	}
 
-	// Step 1: AssembleBlock (locked scope).
-	assembleResp, execBusy, err := func() (*executionproto.AssembleBlockResponse, bool, error) {
+	// Step 1: AssembleBlock.
+	var payloadID uint64
+	execBusy, err := func() (bool, error) {
 		t.server.lock.Lock()
 		defer t.server.lock.Unlock()
 
+		if customProvider != nil {
+			// Explicit tx list path: use AssembleBlockWithParams to pass CustomTxnProvider.
+			bpa, ok := resolveBlockParamAssembler(t.server.executionService)
+			if !ok {
+				return false, errors.New("execution service does not support explicit transaction list")
+			}
+			params := &builder.Parameters{
+				ParentHash:            parentHash,
+				Timestamp:             timestamp,
+				PrevRandao:            payloadAttributes.PrevRandao,
+				SuggestedFeeRecipient: payloadAttributes.SuggestedFeeRecipient,
+				SlotNumber:            (*uint64)(payloadAttributes.SlotNumber),
+				CustomTxnProvider:     customProvider,
+			}
+			if version >= clparams.CapellaVersion {
+				params.Withdrawals = payloadAttributes.Withdrawals
+			}
+			if version >= clparams.DenebVersion {
+				params.ParentBeaconBlockRoot = payloadAttributes.ParentBeaconBlockRoot
+			}
+			var id uint64
+			var busy bool
+			var err error
+			busy, err = waitForResponse(time.Until(deadline), func() (bool, error) {
+				id, busy, err = bpa.AssembleBlockWithParams(ctx, params)
+				return busy, err
+			})
+			payloadID = id
+			return busy, err
+		}
+
+		// Mempool / empty tx path: use the proto-based AssembleBlock.
+		req := &executionproto.AssembleBlockRequest{
+			ParentHash:            gointerfaces.ConvertHashToH256(parentHash),
+			Timestamp:             timestamp,
+			PrevRandao:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
+			SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
+			SlotNumber:            (*uint64)(payloadAttributes.SlotNumber),
+		}
+		if version >= clparams.CapellaVersion {
+			req.Withdrawals = engine_types.ConvertWithdrawalsToRpc(payloadAttributes.Withdrawals)
+		}
+		if version >= clparams.DenebVersion {
+			req.ParentBeaconBlockRoot = gointerfaces.ConvertHashToH256(*payloadAttributes.ParentBeaconBlockRoot)
+		}
 		var resp *executionproto.AssembleBlockResponse
-		var err error
 		busy, err := waitForResponse(time.Until(deadline), func() (bool, error) {
 			resp, err = t.server.executionService.AssembleBlock(ctx, req)
 			if err != nil {
@@ -159,7 +292,10 @@ func (t *testingImpl) BuildBlockV1(
 			}
 			return resp.Busy, nil
 		})
-		return resp, busy, err
+		if resp != nil {
+			payloadID = resp.Id
+		}
+		return busy, err
 	}()
 	if err != nil {
 		return nil, err
@@ -168,15 +304,12 @@ func (t *testingImpl) BuildBlockV1(
 		return nil, errors.New("execution service is busy, cannot build block")
 	}
 
-	payloadID := assembleResp.Id
-
-	// Step 2: GetAssembledBlock (separate locked scope).
+	// Step 2: GetAssembledBlock (proto-based).
 	getResp, execBusy, err := func() (*executionproto.GetAssembledBlockResponse, bool, error) {
 		t.server.lock.Lock()
 		defer t.server.lock.Unlock()
 
 		var resp *executionproto.GetAssembledBlockResponse
-		var err error
 		busy, err := waitForResponse(time.Until(deadline), func() (bool, error) {
 			resp, err = t.server.executionService.GetAssembledBlock(ctx, &executionproto.GetAssembledBlockRequest{
 				Id: payloadID,
@@ -212,19 +345,32 @@ func (t *testingImpl) BuildBlockV1(
 	}
 
 	response := &engine_types.GetPayloadResponse{
-		ExecutionPayload:  engine_types.ConvertPayloadFromRpc(data.ExecutionPayload),
-		BlockValue:        (*hexutil.Big)(gointerfaces.ConvertH256ToUint256Int(data.BlockValue).ToBig()),
-		BlobsBundle:       engine_types.ConvertBlobsFromRpc(data.BlobsBundle),
-		ExecutionRequests: executionRequests,
-		// ShouldOverrideBuilder is always false for the testing namespace (no MEV-boost context).
+		ExecutionPayload:      engine_types.ConvertPayloadFromRpc(data.ExecutionPayload),
+		BlockValue:            (*hexutil.Big)(gointerfaces.ConvertH256ToUint256Int(data.BlockValue).ToBig()),
+		BlobsBundle:           engine_types.ConvertBlobsFromRpc(data.BlobsBundle),
+		ExecutionRequests:     executionRequests,
 		ShouldOverrideBuilder: false,
 	}
 
-	// Override extra data if provided. Note: the BlockHash in ExecutionPayload reflects the
-	// originally built block; overriding ExtraData here means BlockHash will NOT match.
 	if extraData != nil {
 		response.ExecutionPayload.ExtraData = *extraData
 	}
 
 	return response, nil
+}
+
+// staticTxnProvider is a TxnProvider that yields a fixed transaction list exactly once,
+// then returns nil on every subsequent call. Used only by the testing_ namespace.
+type staticTxnProvider struct {
+	txns []types.Transaction
+	done atomic.Bool
+}
+
+func (s *staticTxnProvider) ProvideTxns(_ context.Context, _ ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	if !s.done.CompareAndSwap(false, true) {
+		return nil, nil
+	}
+	txns := s.txns
+	s.txns = nil // release for GC after handing off
+	return txns, nil
 }

@@ -187,7 +187,7 @@ func makeParentHeader(timestamp uint64) (*types.Header, *executionproto.Header) 
 
 // newTestingAPI creates a testingImpl backed by a stub execution server
 // wrapped with direct.NewExecutionClientDirect.
-func newTestingAPI(cfg *chain.Config, stub *stubExecutionServer, enabled bool) TestingAPI {
+func newTestingAPI(cfg *chain.Config, stub *stubExecutionServer) TestingAPI {
 	srv := NewEngineServer(
 		log.New(),
 		cfg,
@@ -200,7 +200,7 @@ func newTestingAPI(cfg *chain.Config, stub *stubExecutionServer, enabled bool) T
 		0,     // fcuTimeout
 		0,     // maxReorgDepth
 	)
-	return NewTestingImpl(srv, enabled)
+	return NewTestingImpl(srv, log.New(), nil)
 }
 
 // validPayloadAttrs returns payload attributes valid for a post-Cancun chain
@@ -244,22 +244,10 @@ func TestBuildBlockV1(t *testing.T) {
 	parentHdr, parentRPC := makeParentHeader(parentTimestamp)
 	parentHash := parentHdr.Hash()
 
-	t.Run("disabled gate", func(t *testing.T) {
-		t.Parallel()
-		stub := &stubExecutionServer{}
-		api := newTestingAPI(allForksChainConfig(), stub, false)
-		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), nil, nil)
-		require.Nil(t, resp)
-		require.Error(t, err)
-		var rpcErr *rpc.InvalidParamsError
-		require.ErrorAs(t, err, &rpcErr)
-		assert.Contains(t, rpcErr.Message, "testing namespace is disabled")
-	})
-
 	t.Run("nil payloadAttributes", func(t *testing.T) {
 		t.Parallel()
 		stub := &stubExecutionServer{}
-		api := newTestingAPI(allForksChainConfig(), stub, true)
+		api := newTestingAPI(allForksChainConfig(), stub)
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, nil, nil, nil)
 		require.Nil(t, resp)
 		require.Error(t, err)
@@ -268,17 +256,20 @@ func TestBuildBlockV1(t *testing.T) {
 		assert.Contains(t, rpcErr.Message, "payloadAttributes must not be null")
 	})
 
-	t.Run("explicit non-empty transaction list", func(t *testing.T) {
+	t.Run("explicit non-empty transaction list with invalid tx", func(t *testing.T) {
 		t.Parallel()
-		stub := &stubExecutionServer{}
-		api := newTestingAPI(allForksChainConfig(), stub, true)
-		txs := []hexutil.Bytes{{0x01, 0x02}}
+		_, rpcHeader := makeParentHeader(parentTimestamp)
+		stub := &stubExecutionServer{
+			getHeaderFunc: getHeaderReturning(parentHash, rpcHeader),
+		}
+		api := newTestingAPI(allForksChainConfig(), stub)
+		txs := []hexutil.Bytes{{0x01, 0x02}} // invalid RLP/tx encoding
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), &txs, nil)
 		require.Nil(t, resp)
 		require.Error(t, err)
 		var rpcErr *rpc.InvalidParamsError
 		require.ErrorAs(t, err, &rpcErr)
-		assert.Contains(t, rpcErr.Message, "explicit transaction list not yet supported")
+		assert.Contains(t, rpcErr.Message, "decode error")
 	})
 
 	t.Run("empty transaction list is allowed", func(t *testing.T) {
@@ -291,7 +282,7 @@ func TestBuildBlockV1(t *testing.T) {
 				return &executionproto.GetHeaderResponse{Header: nil}, nil
 			},
 		}
-		api := newTestingAPI(allForksChainConfig(), stub, true)
+		api := newTestingAPI(allForksChainConfig(), stub)
 		txs := []hexutil.Bytes{} // empty slice, not nil
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), &txs, nil)
 		require.Nil(t, resp)
@@ -309,7 +300,7 @@ func TestBuildBlockV1(t *testing.T) {
 				return &executionproto.GetHeaderResponse{Header: nil}, nil
 			},
 		}
-		api := newTestingAPI(allForksChainConfig(), stub, true)
+		api := newTestingAPI(allForksChainConfig(), stub)
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), nil, nil)
 		require.Nil(t, resp)
 		require.Error(t, err)
@@ -323,7 +314,7 @@ func TestBuildBlockV1(t *testing.T) {
 		stub := &stubExecutionServer{
 			getHeaderFunc: getHeaderReturning(parentHash, parentRPC),
 		}
-		api := newTestingAPI(allForksChainConfig(), stub, true)
+		api := newTestingAPI(allForksChainConfig(), stub)
 		attrs := validPayloadAttrs(parentTimestamp)
 		attrs.Timestamp = hexutil.Uint64(parentTimestamp) // equal, not greater
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, attrs, nil, nil)
@@ -339,7 +330,7 @@ func TestBuildBlockV1(t *testing.T) {
 		stub := &stubExecutionServer{
 			getHeaderFunc: getHeaderReturning(parentHash, parentRPC),
 		}
-		api := newTestingAPI(allForksChainConfig(), stub, true)
+		api := newTestingAPI(allForksChainConfig(), stub)
 		attrs := validPayloadAttrs(parentTimestamp)
 		attrs.Timestamp = hexutil.Uint64(parentTimestamp - 1) // less than parent
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, attrs, nil, nil)
@@ -355,7 +346,7 @@ func TestBuildBlockV1(t *testing.T) {
 		stub := &stubExecutionServer{
 			getHeaderFunc: getHeaderReturning(parentHash, parentRPC),
 		}
-		api := newTestingAPI(allForksChainConfig(), stub, true)
+		api := newTestingAPI(allForksChainConfig(), stub)
 		attrs := validPayloadAttrs(parentTimestamp)
 		attrs.ParentBeaconBlockRoot = nil // required for Cancun+
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, attrs, nil, nil)
@@ -372,7 +363,7 @@ func TestBuildBlockV1(t *testing.T) {
 			getHeaderFunc: getHeaderReturning(parentHash, parentRPC),
 		}
 		// Use a pre-Cancun config (Shanghai only).
-		api := newTestingAPI(preCancunChainConfig(), stub, true)
+		api := newTestingAPI(preCancunChainConfig(), stub)
 		attrs := validPayloadAttrs(parentTimestamp)
 		// attrs already has ParentBeaconBlockRoot set, which is invalid pre-Cancun.
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, attrs, nil, nil)
@@ -401,7 +392,7 @@ func TestBuildBlockV1(t *testing.T) {
 				}, nil
 			},
 		}
-		api := newTestingAPI(shortSlotCfg, stub, true)
+		api := newTestingAPI(shortSlotCfg, stub)
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), nil, nil)
 		require.Nil(t, resp)
 		require.Error(t, err)
@@ -424,7 +415,7 @@ func TestBuildBlockV1(t *testing.T) {
 				}, nil
 			},
 		}
-		api := newTestingAPI(shortSlotCfg, stub, true)
+		api := newTestingAPI(shortSlotCfg, stub)
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), nil, nil)
 		require.Nil(t, resp)
 		require.Error(t, err)
@@ -445,7 +436,7 @@ func TestBuildBlockV1(t *testing.T) {
 				}, nil
 			},
 		}
-		api := newTestingAPI(allForksChainConfig(), stub, true)
+		api := newTestingAPI(allForksChainConfig(), stub)
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), nil, nil)
 		require.Nil(t, resp)
 		require.Error(t, err)
@@ -500,7 +491,7 @@ func TestBuildBlockV1(t *testing.T) {
 				}, nil
 			},
 		}
-		api := newTestingAPI(allForksChainConfig(), stub, true)
+		api := newTestingAPI(allForksChainConfig(), stub)
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), nil, nil)
 		require.NoError(t, err)
 		require.NotNil(t, resp)
@@ -551,7 +542,7 @@ func TestBuildBlockV1(t *testing.T) {
 				}, nil
 			},
 		}
-		api := newTestingAPI(allForksChainConfig(), stub, true)
+		api := newTestingAPI(allForksChainConfig(), stub)
 		overrideData := hexutil.Bytes("overridden-extra")
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), nil, &overrideData)
 		require.NoError(t, err)
@@ -566,7 +557,7 @@ func TestBuildBlockV1(t *testing.T) {
 			getHeaderFunc: getHeaderReturning(parentHash, parentRPC),
 		}
 		// Use pre-Cancun (Shanghai-only) config.
-		api := newTestingAPI(preCancunChainConfig(), stub, true)
+		api := newTestingAPI(preCancunChainConfig(), stub)
 		attrs := &engine_types.PayloadAttributes{
 			Timestamp:             hexutil.Uint64(parentTimestamp + 1),
 			PrevRandao:            common.Hash{0xaa},
@@ -588,7 +579,7 @@ func TestBuildBlockV1(t *testing.T) {
 			getHeaderFunc: getHeaderReturning(parentHash, parentRPC),
 		}
 		// Use pre-Shanghai config.
-		api := newTestingAPI(preShanghaiChainConfig(), stub, true)
+		api := newTestingAPI(preShanghaiChainConfig(), stub)
 		attrs := &engine_types.PayloadAttributes{
 			Timestamp:             hexutil.Uint64(parentTimestamp + 1),
 			PrevRandao:            common.Hash{0xaa},
