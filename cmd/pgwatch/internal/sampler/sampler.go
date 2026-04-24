@@ -28,6 +28,7 @@ type Sampler struct {
 	stop     chan struct{}
 	done     chan struct{}
 	snaps    []Snapshot
+	latest   Snapshot
 }
 
 // New creates a Sampler for path. Call Start to begin sampling.
@@ -69,15 +70,21 @@ func (s *Sampler) run() {
 	}
 }
 
+// Latest returns the most recent snapshot without stopping the sampler.
+// Safe to call from another goroutine while sampling is running.
+func (s *Sampler) Latest() Snapshot { return s.latest }
+
 func (s *Sampler) capture(elapsed time.Duration) {
 	res, size, sampled, err := mincore.Residency(s.path)
 	if err != nil {
 		return
 	}
-	s.snaps = append(s.snaps, Snapshot{
+	snap := Snapshot{
 		At:        elapsed,
 		Residency: res,
 		FileSize:  size,
 		Sampled:   sampled,
-	})
+	}
+	s.latest = snap
+	s.snaps = append(s.snaps, snap)
 }

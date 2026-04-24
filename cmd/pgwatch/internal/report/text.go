@@ -66,9 +66,9 @@ func writeFileResult(w io.Writer, r *FileResult) {
 		sampleNote = "  (sampled at 8-page stride)"
 	}
 	fmt.Fprintf(w, "Size:    %s (%s pages)%s\n",
-		humanBytes(r.FileSize), humanNum(nPages), sampleNote)
+		HumanBytes(r.FileSize), humanNum(nPages), sampleNote)
 	fmt.Fprintf(w, "Loaded:  %s (%s pages)\n",
-		humanBytes(r.Metrics.BytesLoaded), humanNum(r.Metrics.PagesLoaded))
+		HumanBytes(r.Metrics.BytesLoaded), humanNum(r.Metrics.PagesLoaded))
 	fmt.Fprintf(w, "Density: %.1f%%   Scatter: avg %.0f pages   Max gap: %s pages\n",
 		r.Metrics.Density*100, r.Metrics.ScatterScore, humanNum(r.Metrics.MaxGap))
 
@@ -86,12 +86,12 @@ func writeClusters(w io.Writer, clusters []cluster.Cluster, gaps []int64) {
 	fmt.Fprintf(w, "\nClusters (%d):\n", len(clusters))
 	for i, c := range clusters {
 		fmt.Fprintf(w, "  %d: pages %s–%s  (%s)\n",
-			i+1, humanNum(c.StartPage), humanNum(c.EndPage), humanBytes(c.SizeBytes))
+			i+1, humanNum(c.StartPage), humanNum(c.EndPage), HumanBytes(c.SizeBytes))
 	}
 	if len(gaps) > 0 {
 		parts := make([]string, len(gaps))
 		for i, g := range gaps {
-			parts[i] = humanBytes(g)
+			parts[i] = HumanBytes(g)
 		}
 		fmt.Fprintf(w, "Inter-cluster gaps: %s\n", strings.Join(parts, ", "))
 	}
@@ -183,8 +183,8 @@ func sameIDs(a, b []int) bool {
 	return true
 }
 
-// humanBytes formats bytes as a human-readable string.
-func humanBytes(n int64) string {
+// HumanBytes formats bytes as a human-readable string.
+func HumanBytes(n int64) string {
 	switch {
 	case n >= 1<<40:
 		return fmt.Sprintf("%.1fTB", float64(n)/(1<<40))

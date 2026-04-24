@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -64,6 +65,12 @@ func runWatch(cmd *cobra.Command, args []string) error {
 		samplers[i] = s
 	}
 
+	// Status printer: every 5s write a summary line to stderr so the user
+	// can see that sampling is active.
+	stopStatus := make(chan struct{})
+	fmt.Fprintln(os.Stderr, "sampling started — status every 5s, report on exit")
+	go printStatus(stopStatus, args, before, samplers)
+
 	var (
 		cmdLabel string
 		runErr   error
@@ -82,6 +89,7 @@ func runWatch(cmd *cobra.Command, args []string) error {
 		runErr = waitForPID(watchFlags.pid)
 	}
 	dur = time.Since(t0)
+	close(stopStatus)
 
 	// Stop samplers.
 	allSnaps := make([][]sampler.Snapshot, len(args))
@@ -128,7 +136,6 @@ func waitForPID(pid int) error {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 
-	fmt.Fprintf(os.Stderr, "watching pid %d — press Ctrl-C to stop\n", pid)
 	for {
 		select {
 		case s := <-sig:
@@ -137,6 +144,38 @@ func waitForPID(pid int) error {
 			if err := proc.Signal(syscall.Signal(0)); err != nil {
 				// Process no longer exists.
 				return nil
+			}
+		}
+	}
+}
+
+// printStatus writes a one-line status to stderr every 5s while sampling.
+// Shows pages newly loaded since the baseline for each file.
+func printStatus(stop <-chan struct{}, paths []string, baseline [][]bool, samplers []*sampler.Sampler) {
+	ps := mincore.PageSize()
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	t0 := time.Now()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+			elapsed := time.Since(t0).Round(time.Second)
+			for i, s := range samplers {
+				snap := s.Latest()
+				if snap.Residency == nil {
+					continue
+				}
+				newPages := int64(0)
+				base := baseline[i]
+				for j, in := range snap.Residency {
+					if in && (j >= len(base) || !base[j]) {
+						newPages++
+					}
+				}
+				fmt.Fprintf(os.Stderr, "  [%s] %s: +%d pages new (+%s loaded)\n",
+					elapsed, filepath.Base(paths[i]), newPages, report.HumanBytes(newPages*ps))
 			}
 		}
 	}
