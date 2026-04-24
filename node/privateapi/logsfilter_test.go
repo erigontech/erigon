@@ -25,6 +25,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/notifications"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -321,7 +322,7 @@ func TestLogsFilter_SendFailure_DoesNotSkipHealthySubscribers(t *testing.T) {
 	logs := make([]*notifications.LogNotification, 0, logsToSend)
 	for i := range logsToSend {
 		lg := createLog()
-		lg.Index = uint(i)
+		lg.Index = hexutil.Uint(i)
 		logs = append(logs, lg)
 	}
 
