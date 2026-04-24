@@ -187,7 +187,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	// overlay (MemoryMutation) which implements kv.TemporalRwTx. No MDBX write
 	// lock is held during pipeline execution — a brief RwTx is opened only at
 	// commit time to flush everything atomically.
-	roTx, err := e.db.BeginTemporalRo(ctx)
+	roTx, err := e.db.BeginTemporalRo(ctx) //nolint:gocritic // deferred via closure below (bg-commit path sets roTx=nil after ownership transfer)
 	if err != nil {
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}

@@ -30,10 +30,10 @@ import (
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/metrics"
@@ -140,6 +140,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		if err != nil {
 			return err
 		}
+		defer tx.Rollback() //nolint:gocritic // safety net; explicit Rollback/Commit above take precedence
 		if err := sync.RunSnapshots(nil, tx); err != nil {
 			tx.Rollback()
 			return err
@@ -158,10 +159,15 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 	// Execution loop: RO tx for reads, brief RwTx for commit.
 	// New SharedDomains after each commit so SeekCommitment picks up
 	// the freshly committed state.
-	roTx, err := db.BeginTemporalRo(ctx)
+	roTx, err := db.BeginTemporalRo(ctx) //nolint:gocritic // deferred via closure below (roTx is reassigned across iterations)
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if roTx != nil {
+			roTx.Rollback()
+		}
+	}() // safety net; roTx is reassigned per iteration, explicit Rollbacks below
 
 	doms, err := execctx.NewSharedDomains(ctx, roTx, logger)
 	if err != nil {
@@ -228,6 +234,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		if err != nil {
 			return fmt.Errorf("ProcessFrozenBlocks: begin rw: %w", err)
 		}
+		defer commitTx.Rollback() //nolint:gocritic // safety net; explicit Rollback/Commit below take precedence
 		if err := overlay.Flush(ctx, commitTx); err != nil {
 			commitTx.Rollback()
 			return fmt.Errorf("ProcessFrozenBlocks: flush overlay: %w", err)
@@ -271,7 +278,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		// Reopen RO tx and reinit block overlay on same doms.
 		// Keep doms alive across iterations — it tracks commitment
 		// position in memory and advances past the snapshot value.
-		roTx, err = db.BeginTemporalRo(ctx)
+		roTx, err = db.BeginTemporalRo(ctx) //nolint:gocritic // rolled back at next iteration's line 207 or outer defer
 		if err != nil {
 			return err
 		}

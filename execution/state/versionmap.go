@@ -99,6 +99,26 @@ func (vm *VersionMap) SetTrace(trace bool) {
 	vm.trace = trace
 }
 
+// StorageKeys returns every storage slot key recorded for addr. Used by
+// normalizeWriteSet to emit synthetic delete entries for every slot of a
+// selfdestructed contract, matching DomainDelPrefix behaviour from the
+// sequential path.
+func (vm *VersionMap) StorageKeys(addr accounts.Address) []accounts.StorageKey {
+	vm.mu.RLock()
+	defer vm.mu.RUnlock()
+	addrMap, ok := vm.s[addr]
+	if !ok {
+		return nil
+	}
+	var keys []accounts.StorageKey
+	for ak := range addrMap {
+		if ak.Path == StoragePath {
+			keys = append(keys, ak.Key)
+		}
+	}
+	return keys
+}
+
 func (vm *VersionMap) getKeyCells(addr accounts.Address, path AccountPath, key accounts.StorageKey, fNoKey func(addr accounts.Address, path AccountPath, key accounts.StorageKey) *btree.Map[int, *WriteCell]) (cells *btree.Map[int, *WriteCell]) {
 	it, ok := vm.s[addr]
 
