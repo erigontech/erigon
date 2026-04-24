@@ -2086,6 +2086,10 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 					return plainKey, nil
 				})
 				if err != nil {
+					clear(accountValues)
+					clear(storageValues)
+					valMapPool.Put(accountValues)
+					valMapPool.Put(storageValues)
 					if failFast {
 						return err
 					}
@@ -2095,18 +2099,31 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 
 				// Only verify if we have at least one value to check.
 				if len(accountValues) == 0 && len(storageValues) == 0 {
+					clear(accountValues)
+					clear(storageValues)
+					valMapPool.Put(accountValues)
+					valMapPool.Put(storageValues)
 					continue
 				}
 
 				err = commitment.VerifyBranchHashes(item.branchKey, resolvedBranchData, accountValues, storageValues)
 				if err != nil {
 					hashMismatches.Add(1)
+					clear(accountValues)
+					clear(storageValues)
+					valMapPool.Put(accountValues)
+					valMapPool.Put(storageValues)
 					if failFast {
 						return fmt.Errorf("%w: %s in %s", ErrIntegrity, err.Error(), fileName)
 					}
 					logger.Warn("[integrity] StateVerify hash mismatch", "err", err, "kv", fileName)
+					continue
 				}
 				hashChecked.Add(1)
+				clear(accountValues)
+				clear(storageValues)
+				valMapPool.Put(accountValues)
+				valMapPool.Put(storageValues)
 			}
 			return nil
 		})
