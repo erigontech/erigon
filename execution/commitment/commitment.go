@@ -28,6 +28,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unsafe"
 
 	keccak "github.com/erigontech/fastkeccak"
@@ -441,6 +442,9 @@ var (
 
 // ApplyDeferredBranchUpdates encodes deferred branch updates concurrently and writes them.
 // Returns the number of updates successfully written.
+// Updates are sorted by prefix before encoding so putBranch receives keys in lexicographic order.
+// This lets the commitment history ETL accumulate already-sorted entries (timsort O(n) best-case),
+// avoiding the O(n log n) sort + I/O-bound disk-merge that occurs with random-order input.
 func ApplyDeferredBranchUpdates(
 	deferred []*DeferredBranchUpdate,
 	numWorkers int,
@@ -452,6 +456,13 @@ func ApplyDeferredBranchUpdates(
 	if numWorkers <= 1 {
 		numWorkers = 1
 	}
+
+	// Sort by prefix so putBranch is called in lexicographic order.
+	t := time.Now()
+	slices.SortFunc(deferred, func(a, b *DeferredBranchUpdate) int {
+		return bytes.Compare(a.prefix, b.prefix)
+	})
+	log.Warn("[flush] commitment deferred sort", "n", len(deferred), "took", time.Since(t).Round(time.Millisecond))
 
 	// Sequential fast path: avoids goroutine and channel overhead for small batches.
 	if numWorkers == 1 || len(deferred) <= numWorkers {
@@ -477,14 +488,19 @@ func ApplyDeferredBranchUpdates(
 		return written, nil
 	}
 
-	// Pipeline: workers encode in parallel, results sent to channel, main goroutine writes sequentially.
-	type result struct {
+	// Pipeline: workers encode in parallel; results are collected by original index so that
+	// putBranch is called in the same sorted prefix order as the input slice.
+	type indexedResult struct {
+		idx int
 		upd *DeferredBranchUpdate
 		err error
 	}
-	// Size channels to actual batch length, not the 50K max.
-	resultCh := make(chan result, len(deferred))
-	workCh := make(chan *DeferredBranchUpdate, len(deferred))
+	resultCh := make(chan indexedResult, len(deferred))
+	type indexedWork struct {
+		idx int
+		upd *DeferredBranchUpdate
+	}
+	workCh := make(chan indexedWork, len(deferred))
 
 	// Start workers with pooled encoders/mergers.
 	var wg sync.WaitGroup
@@ -497,31 +513,36 @@ func ApplyDeferredBranchUpdates(
 			defer workerEncoderPool.Put(encoder)
 			defer workerMergerPool.Put(merger)
 
-			for upd := range workCh {
-				err := encodeDeferredUpdate(upd, encoder, merger)
-				resultCh <- result{upd: upd, err: err}
+			for work := range workCh {
+				err := encodeDeferredUpdate(work.upd, encoder, merger)
+				resultCh <- indexedResult{idx: work.idx, upd: work.upd, err: err}
 			}
 		}()
 	}
 
-	// Close resultCh when all workers are done
 	go func() {
 		wg.Wait()
 		close(resultCh)
 	}()
 
-	// Send work in background
 	go func() {
-		for _, upd := range deferred {
-			workCh <- upd
+		for i, upd := range deferred {
+			workCh <- indexedWork{i, upd}
 		}
 		close(workCh)
 	}()
 
-	// Process results as they come in - write to storage immediately
+	// Collect results into a pre-allocated slice indexed by original position,
+	// then call putBranch in order to preserve the sorted prefix sequence.
+	ordered := make([]*indexedResult, len(deferred))
+	for res := range resultCh {
+		r := res
+		ordered[r.idx] = &r
+	}
+
 	var firstErr error
 	var written int
-	for res := range resultCh {
+	for _, res := range ordered {
 		if res.err != nil {
 			if firstErr == nil {
 				firstErr = res.err
@@ -529,10 +550,10 @@ func ApplyDeferredBranchUpdates(
 			continue
 		}
 		if res.upd.encoded == nil {
-			continue // skip unchanged
+			continue
 		}
 		if firstErr != nil {
-			continue // drain channel but don't write after error
+			continue
 		}
 		if err := putBranch(res.upd.prefix, res.upd.encoded, res.upd.prev); err != nil {
 			firstErr = err
