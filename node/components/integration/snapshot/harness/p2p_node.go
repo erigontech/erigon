@@ -133,6 +133,19 @@ func (n *P2PNode) AddDevP2PPeer(node *enode.Node) {
 	}
 }
 
+// RemoveDevP2PPeer removes the given peer from this node's static set
+// and disconnects any active connection to it. The peer may be
+// re-added later via AddDevP2PPeer — soak / churn scenarios use this
+// pair to exercise connect/disconnect lifecycle events without
+// destroying and rebuilding whole nodes.
+func (n *P2PNode) RemoveDevP2PPeer(node *enode.Node) {
+	for _, srv := range n.Sentry.Servers {
+		if p2pServer := srv.GetP2PServer(); p2pServer != nil {
+			p2pServer.RemovePeer(node)
+		}
+	}
+}
+
 // SetDevP2PENREntry installs a custom entry on every sentry server's
 // LocalNode. Takes effect immediately — the node re-signs its ENR on
 // each mutation and peers see the new version on next handshake.
