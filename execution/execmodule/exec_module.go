@@ -491,31 +491,40 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		e.stateCache.ClearWithHash(header.ParentHash)
 	}
 
-	// Throw away the tx and start a new one (do not persist changes to the canonical chain)
+	// Throw away the validation tx — by design we do not persist changes to the
+	// canonical chain from a validation run.
 	tx.Rollback()
-	tx, err = e.db.BeginTemporalRwNosync(ctx)
-	if err != nil {
-		return ValidationResult{}, err
-	}
-	defer tx.Rollback()
 
-	// if the block is deemed invalid then we delete it. perhaps we want to keep bad blocks and just keep an index of bad ones.
 	validationStatus := ExecutionStatusSuccess
 	if status == engine_types.AcceptedStatus {
 		validationStatus = ExecutionStatusMissingSegment
 	}
 	isInvalidChain := status == engine_types.InvalidStatus || status == engine_types.InvalidBlockHashStatus || validationError != nil
-	if isInvalidChain && (lvh != common.Hash{}) && lvh != blockHash {
-		if err := e.purgeBadChain(ctx, tx, lvh, blockHash); err != nil {
+
+	// Only open a second tx when we actually need to write (bad-chain purge).
+	// On the valid-chain path (the common case at tip) opening + empty-committing
+	// a second RwTx just produces no-op commits with openTxs>=2, pinning freelist
+	// pages against concurrent readers.
+	if isInvalidChain {
+		purgeTx, err := e.db.BeginTemporalRwNosync(ctx)
+		if err != nil {
 			return ValidationResult{}, err
 		}
-	}
-	if isInvalidChain {
+		defer purgeTx.Rollback()
+
+		if (lvh != common.Hash{}) && lvh != blockHash {
+			if err := e.purgeBadChain(ctx, purgeTx, lvh, blockHash); err != nil {
+				return ValidationResult{}, err
+			}
+		}
 		e.logger.Warn("ethereumExecutionModule.ValidateChain: chain is invalid", "hash", blockHash)
 		validationStatus = ExecutionStatusBadBlock
 		// Discard the block overlay — it may contain the bad block's data.
 		if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
 			e.currentContext.BlockOverlay().Close()
+		}
+		if err := purgeTx.Commit(); err != nil {
+			return ValidationResult{}, err
 		}
 	}
 	result := ValidationResult{
@@ -525,7 +534,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	if validationError != nil {
 		result.ValidationError = validationError.Error()
 	}
-	return result, tx.Commit()
+	return result, nil
 }
 
 func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidHash, headHash common.Hash) error {

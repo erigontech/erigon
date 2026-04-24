@@ -490,11 +490,15 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				return nil, fmt.Errorf("updateForkChoice: flush sd after hasMore: %w", err)
 			}
 			sd.ClearRam(true)
+			// Release the outer RO tx BEFORE commit so MDBX sees openTxs=1 at
+			// commit time and can release freelist pages to the GC immediately
+			// (same pattern as runForkchoiceFlushCommit). SD.Flush is done; the
+			// commit does not need to read from roTx.
+			roTx.Rollback()
 			if err = commitRwTx.Commit(); err != nil {
 				return nil, fmt.Errorf("updateForkChoice: tx commit after hasMore: %w", err)
 			}
 			// Recreate RO tx + block overlay on the fresh committed state.
-			roTx.Rollback()
 			roTx, err = e.db.BeginTemporalRo(ctx) //nolint:gocritic
 			if err != nil {
 				return nil, fmt.Errorf("updateForkChoice: begin ro after hasMore: %w", err)
