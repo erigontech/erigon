@@ -1409,6 +1409,8 @@ func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcf
 	if err != nil {
 		return nil, err
 	}
+	// reasons is indexed by originalTxns; addReasons is indexed by goodTxns.
+	// Walk reasons and advance j only on slots that survived validation.
 	for i, j := 0, 0; i < len(reasons) && j < len(addReasons); i++ {
 		if reasons[i] != txpoolcfg.NotSet {
 			continue
