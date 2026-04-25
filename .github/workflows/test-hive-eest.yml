@@ -83,8 +83,11 @@ jobs:
       - name: Checkout Hive
         uses: actions/checkout@v6
         with:
-          repository: ethereum/hive
-          ref: ${{ steps.hive-version.outputs.ref }}
+          # EXPERIMENT: pinned to erigontech/hive yperbasis/genesis-pool to test
+          # the client-pool prototype. Revert to ethereum/hive +
+          # steps.hive-version.outputs.ref before merging.
+          repository: erigontech/hive
+          ref: c46813fa410308b4defe849c0518404a6c77505b
           path: hive
 
       - name: Conditional Docker Login
@@ -151,7 +154,7 @@ jobs:
             echo -e "\n\n============================================================"
             echo "Running test: ${1}"
             echo -e "\n"
-            ./hive -docker.output -docker.auth --sim ethereum/eels/"${1}" --sim.limit="${2}" --sim.parallelism=12 --client erigon --docker.nocache=true --sim.limit.exact=false --sim.buildarg fixtures="${fixtures_url}" ${{ matrix.extra-hive-flags }} 2>&1 | tee output.log || {
+            ./hive -docker.output -docker.auth --sim ethereum/eels/"${1}" --sim.limit="${2}" --sim.parallelism=12 --client.pool.size=4 --client erigon --docker.nocache=true --sim.limit.exact=false --sim.buildarg fixtures="${fixtures_url}" ${{ matrix.extra-hive-flags }} 2>&1 | tee output.log || {
               if [ $? -gt 0 ]; then
                 echo "Exitcode gt 0"
               fi
