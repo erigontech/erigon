@@ -36,8 +36,6 @@ import (
 	"github.com/erigontech/erigon/node/shards"
 )
 
-var inMemHistoryReads = dbg.EnvBool("ERIGON_IN_MEM_HISTORY", true)
-
 // PipelineExecutor centralises all staged sync pipeline invocations:
 // ProcessFrozenBlocks (startup), RunLoop (FCU catchup), and ValidateBlock
 // (fork validation). It is created once and stored on ExecModule.
@@ -49,6 +47,7 @@ type PipelineExecutor struct {
 	engine                  rules.Engine
 	validationSync          *stagedsync.Sync
 	validationNotifications *shards.Notifications
+	dispatcher              *Dispatcher
 	logger                  log.Logger
 }
 
@@ -65,6 +64,7 @@ func NewPipelineExecutor(
 	engine rules.Engine,
 	validationSync *stagedsync.Sync,
 	validationNotifications *shards.Notifications,
+	dispatcher *Dispatcher,
 	logger log.Logger,
 ) *PipelineExecutor {
 	return &PipelineExecutor{
@@ -75,6 +75,7 @@ func NewPipelineExecutor(
 		engine:                  engine,
 		validationSync:          validationSync,
 		validationNotifications: validationNotifications,
+		dispatcher:              dispatcher,
 		logger:                  logger,
 	}
 }
@@ -85,6 +86,17 @@ func NewPipelineExecutor(
 // MergeExtendingFork to copy to the main accumulator.
 func (pe *PipelineExecutor) ValidationNotifications() *shards.Notifications {
 	return pe.validationNotifications
+}
+
+// Dispatcher returns the notification dispatcher for sending state-change
+// notifications. Used by FCU commit paths and Hook.
+func (pe *PipelineExecutor) Dispatcher() *Dispatcher {
+	return pe.dispatcher
+}
+
+// Sync returns the main pipeline Sync object. Needed for PrevUnwindPoint().
+func (pe *PipelineExecutor) Sync() *stagedsync.Sync {
+	return pe.sync
 }
 
 // UnwindTo sets the unwind point on the main pipeline.
@@ -263,7 +275,10 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 			if err != nil {
 				return err
 			}
-			if err = hook.AfterRun(tx, finishStageBeforeSync, false); err != nil {
+			if err = hook.SendNotifications(tx, finishStageBeforeSync); err != nil {
+				return err
+			}
+			if err = hook.UpdateHead(tx, finishStageBeforeSync, false); err != nil {
 				return err
 			}
 			hook.LastNewBlockSeen(headersProgress)

@@ -66,7 +66,7 @@ var (
 //
 // Note: After the Merge the work is mostly done on the Consensus Layer, so nothing much is to be added on this side.
 type Merge struct {
-	eth1Engine rules.Engine // Original rules engine used in eth1, e.g. ethash or clique
+	eth1Engine rules.Engine // Original rules engine used in eth1, e.g. ethash
 
 	// Reusable buffer for collecting logs in Finalize - protected by logsBufMu
 	logsBufMu sync.Mutex
@@ -224,14 +224,14 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		if depositReqs != nil {
 			rs = append(rs, *depositReqs)
 		}
-		withdrawalReq, err := misc.DequeueWithdrawalRequests7002(syscall, state)
+		withdrawalReq, err := misc.DequeueWithdrawalRequests7002(syscall, state, config.GetWithdrawalRequestContract())
 		if err != nil {
 			return nil, err
 		}
 		if withdrawalReq != nil {
 			rs = append(rs, *withdrawalReq)
 		}
-		consolidations, err := misc.DequeueConsolidationRequests7251(syscall, state)
+		consolidations, err := misc.DequeueConsolidationRequests7251(syscall, state, config.GetConsolidationRequestContract())
 		if err != nil {
 			return nil, err
 		}

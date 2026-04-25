@@ -122,16 +122,23 @@ type LightClientUpdate struct {
 	FinalityBranch          solid.HashVectorSSZ  `json:"finality_branch"`
 	SyncAggregate           *SyncAggregate       `json:"sync_aggregate"`
 	SignatureSlot           uint64               `json:"signature_slot,string"`
+
+	beaconConfig *clparams.BeaconChainConfig
 }
 
-func NewLightClientUpdate(version clparams.StateVersion) *LightClientUpdate {
+func NewLightClientUpdate(version clparams.StateVersion, cfg *clparams.BeaconChainConfig) *LightClientUpdate {
+	if cfg == nil {
+		cfg = &clparams.MainnetBeaconConfig
+	}
+	committeeSize := int(cfg.SyncCommitteeSize)
 	return &LightClientUpdate{
 		AttestedHeader:          NewLightClientHeader(version),
-		NextSyncCommittee:       &solid.SyncCommittee{},
+		NextSyncCommittee:       solid.NewSyncCommitteeWithSize(committeeSize),
 		NextSyncCommitteeBranch: solid.NewHashVector(getCurrentSyncCommitteeBranchSize(version)),
 		FinalizedHeader:         NewLightClientHeader(version),
 		FinalityBranch:          solid.NewHashVector(getFinalizedBranchSize(version)),
-		SyncAggregate:           &SyncAggregate{},
+		SyncAggregate:           NewSyncAggregateWithSize(committeeSize / 8),
+		beaconConfig:            cfg,
 	}
 }
 
@@ -140,12 +147,18 @@ func (l *LightClientUpdate) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (l *LightClientUpdate) DecodeSSZ(buf []byte, version int) error {
-	l.AttestedHeader = NewLightClientHeader(clparams.StateVersion(version))
-	l.NextSyncCommittee = &solid.SyncCommittee{}
-	l.NextSyncCommitteeBranch = solid.NewHashVector(getCurrentSyncCommitteeBranchSize(clparams.StateVersion(version)))
-	l.FinalizedHeader = NewLightClientHeader(clparams.StateVersion(version))
-	l.FinalityBranch = solid.NewHashVector(getFinalizedBranchSize(clparams.StateVersion(version)))
-	l.SyncAggregate = &SyncAggregate{}
+	cfg := l.beaconConfig
+	if cfg == nil {
+		cfg = &clparams.MainnetBeaconConfig
+	}
+	committeeSize := int(cfg.SyncCommitteeSize)
+	sv := clparams.StateVersion(version)
+	l.AttestedHeader = NewLightClientHeader(sv)
+	l.NextSyncCommittee = solid.NewSyncCommitteeWithSize(committeeSize)
+	l.NextSyncCommitteeBranch = solid.NewHashVector(getCurrentSyncCommitteeBranchSize(sv))
+	l.FinalizedHeader = NewLightClientHeader(sv)
+	l.FinalityBranch = solid.NewHashVector(getFinalizedBranchSize(sv))
+	l.SyncAggregate = NewSyncAggregateWithSize(committeeSize / 8)
 	return ssz2.UnmarshalSSZ(buf, version, l.AttestedHeader, l.NextSyncCommittee, l.NextSyncCommitteeBranch, l.FinalizedHeader, l.FinalityBranch, l.SyncAggregate, &l.SignatureSlot)
 }
 
@@ -175,20 +188,26 @@ func (l *LightClientUpdate) Clone() clonable.Clonable {
 	if l.AttestedHeader != nil {
 		v = l.AttestedHeader.version
 	}
-	return NewLightClientUpdate(v)
+	return NewLightClientUpdate(v, l.beaconConfig)
 }
 
 type LightClientBootstrap struct {
 	Header                     *LightClientHeader   `json:"header"`
 	CurrentSyncCommittee       *solid.SyncCommittee `json:"current_sync_committee"`
 	CurrentSyncCommitteeBranch solid.HashVectorSSZ  `json:"current_sync_committee_branch"`
+
+	beaconConfig *clparams.BeaconChainConfig
 }
 
-func NewLightClientBootstrap(version clparams.StateVersion) *LightClientBootstrap {
+func NewLightClientBootstrap(version clparams.StateVersion, cfg *clparams.BeaconChainConfig) *LightClientBootstrap {
+	if cfg == nil {
+		cfg = &clparams.MainnetBeaconConfig
+	}
 	return &LightClientBootstrap{
 		Header:                     NewLightClientHeader(version),
-		CurrentSyncCommittee:       &solid.SyncCommittee{},
+		CurrentSyncCommittee:       solid.NewSyncCommitteeWithSize(int(cfg.SyncCommitteeSize)),
 		CurrentSyncCommitteeBranch: solid.NewHashVector(getCurrentSyncCommitteeBranchSize(version)),
+		beaconConfig:               cfg,
 	}
 }
 
@@ -197,9 +216,14 @@ func (l *LightClientBootstrap) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (l *LightClientBootstrap) DecodeSSZ(buf []byte, version int) error {
-	l.Header = NewLightClientHeader(clparams.StateVersion(version))
-	l.CurrentSyncCommittee = &solid.SyncCommittee{}
-	l.CurrentSyncCommitteeBranch = solid.NewHashVector(getCurrentSyncCommitteeBranchSize(clparams.StateVersion(version)))
+	cfg := l.beaconConfig
+	if cfg == nil {
+		cfg = &clparams.MainnetBeaconConfig
+	}
+	sv := clparams.StateVersion(version)
+	l.Header = NewLightClientHeader(sv)
+	l.CurrentSyncCommittee = solid.NewSyncCommitteeWithSize(int(cfg.SyncCommitteeSize))
+	l.CurrentSyncCommitteeBranch = solid.NewHashVector(getCurrentSyncCommitteeBranchSize(sv))
 	return ssz2.UnmarshalSSZ(buf, version, l.Header, l.CurrentSyncCommittee, l.CurrentSyncCommitteeBranch)
 }
 
@@ -222,7 +246,7 @@ func (l *LightClientBootstrap) Clone() clonable.Clonable {
 	if l.Header != nil {
 		v = l.Header.version
 	}
-	return NewLightClientBootstrap(v)
+	return NewLightClientBootstrap(v, l.beaconConfig)
 }
 
 type LightClientFinalityUpdate struct {
@@ -231,14 +255,20 @@ type LightClientFinalityUpdate struct {
 	FinalityBranch  solid.HashVectorSSZ `json:"finality_branch"`
 	SyncAggregate   *SyncAggregate      `json:"sync_aggregate"`
 	SignatureSlot   uint64              `json:"signature_slot,string"`
+
+	beaconConfig *clparams.BeaconChainConfig
 }
 
-func NewLightClientFinalityUpdate(version clparams.StateVersion) *LightClientFinalityUpdate {
+func NewLightClientFinalityUpdate(version clparams.StateVersion, cfg *clparams.BeaconChainConfig) *LightClientFinalityUpdate {
+	if cfg == nil {
+		cfg = &clparams.MainnetBeaconConfig
+	}
 	return &LightClientFinalityUpdate{
 		AttestedHeader:  NewLightClientHeader(version),
 		FinalizedHeader: NewLightClientHeader(version),
 		FinalityBranch:  solid.NewHashVector(getFinalizedBranchSize(version)),
-		SyncAggregate:   &SyncAggregate{},
+		SyncAggregate:   NewSyncAggregateWithSize(int(cfg.SyncCommitteeSize) / 8),
+		beaconConfig:    cfg,
 	}
 }
 
@@ -247,10 +277,15 @@ func (l *LightClientFinalityUpdate) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (l *LightClientFinalityUpdate) DecodeSSZ(buf []byte, version int) error {
-	l.AttestedHeader = NewLightClientHeader(clparams.StateVersion(version))
-	l.FinalizedHeader = NewLightClientHeader(clparams.StateVersion(version))
-	l.FinalityBranch = solid.NewHashVector(getFinalizedBranchSize(clparams.StateVersion(version)))
-	l.SyncAggregate = &SyncAggregate{}
+	cfg := l.beaconConfig
+	if cfg == nil {
+		cfg = &clparams.MainnetBeaconConfig
+	}
+	sv := clparams.StateVersion(version)
+	l.AttestedHeader = NewLightClientHeader(sv)
+	l.FinalizedHeader = NewLightClientHeader(sv)
+	l.FinalityBranch = solid.NewHashVector(getFinalizedBranchSize(sv))
+	l.SyncAggregate = NewSyncAggregateWithSize(int(cfg.SyncCommitteeSize) / 8)
 	return ssz2.UnmarshalSSZ(buf, version, l.AttestedHeader, l.FinalizedHeader, l.FinalityBranch, l.SyncAggregate, &l.SignatureSlot)
 }
 
@@ -278,19 +313,25 @@ func (l *LightClientFinalityUpdate) Clone() clonable.Clonable {
 	if l.AttestedHeader != nil {
 		v = l.AttestedHeader.version
 	}
-	return NewLightClientFinalityUpdate(v)
+	return NewLightClientFinalityUpdate(v, l.beaconConfig)
 }
 
 type LightClientOptimisticUpdate struct {
 	AttestedHeader *LightClientHeader `json:"attested_header"`
 	SyncAggregate  *SyncAggregate     `json:"sync_aggregate"`
 	SignatureSlot  uint64             `json:"signature_slot,string"`
+
+	beaconConfig *clparams.BeaconChainConfig
 }
 
-func NewLightClientOptimisticUpdate(version clparams.StateVersion) *LightClientOptimisticUpdate {
+func NewLightClientOptimisticUpdate(version clparams.StateVersion, cfg *clparams.BeaconChainConfig) *LightClientOptimisticUpdate {
+	if cfg == nil {
+		cfg = &clparams.MainnetBeaconConfig
+	}
 	return &LightClientOptimisticUpdate{
 		AttestedHeader: NewLightClientHeader(version),
-		SyncAggregate:  &SyncAggregate{},
+		SyncAggregate:  NewSyncAggregateWithSize(int(cfg.SyncCommitteeSize) / 8),
+		beaconConfig:   cfg,
 	}
 }
 
@@ -299,8 +340,12 @@ func (l *LightClientOptimisticUpdate) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (l *LightClientOptimisticUpdate) DecodeSSZ(buf []byte, version int) error {
+	cfg := l.beaconConfig
+	if cfg == nil {
+		cfg = &clparams.MainnetBeaconConfig
+	}
 	l.AttestedHeader = NewLightClientHeader(clparams.StateVersion(version))
-	l.SyncAggregate = &SyncAggregate{}
+	l.SyncAggregate = NewSyncAggregateWithSize(int(cfg.SyncCommitteeSize) / 8)
 	return ssz2.UnmarshalSSZ(buf, version, l.AttestedHeader, l.SyncAggregate, &l.SignatureSlot)
 }
 
@@ -323,7 +368,7 @@ func (l *LightClientOptimisticUpdate) Clone() clonable.Clonable {
 	if l.AttestedHeader != nil {
 		v = l.AttestedHeader.version
 	}
-	return NewLightClientOptimisticUpdate(v)
+	return NewLightClientOptimisticUpdate(v, l.beaconConfig)
 }
 
 func getCurrentSyncCommitteeBranchSize(version clparams.StateVersion) int {

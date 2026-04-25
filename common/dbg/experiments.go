@@ -81,9 +81,13 @@ var (
 	numWorkers           = runtime.NumCPU() / 2
 	Exec3Workers         = EnvInt("EXEC3_WORKERS", numWorkers)
 	ExecTerseLoggerLevel = EnvInt("EXEC_TERSE_LOGGER_LEVEL", int(log.LvlWarn))
-	CompressWorkers      = EnvInt("COMPRESS_WORKERS", 1)
+	CompressWorkers      = EnvInt("COMPRESS_WORKERS", 0) // 0 means "not set": online presets default to 1, offline presets use RAM/CPU estimates
 	MergeWorkers         = EnvInt("MERGE_WORKERS", 1)
 	CollateWorkers       = EnvInt("COLLATE_WORKERS", 2)
+
+	AggregationDelayMs = EnvInt("AGGREGATION_DELAY_MS", 0)
+
+	MergeThrottleMs = EnvInt("ERIGON_MERGE_THROTTLE_MS", 0)
 
 	TraceAccounts         = EnvStrings("TRACE_ACCOUNTS", ",", nil)
 	TraceStateKeys        = EnvStrings("TRACE_STATE_KEYS", ",", nil)
@@ -106,6 +110,8 @@ var (
 	CaplinEfficientReorg  = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 	UseTxDependencies     = EnvBool("USE_TX_DEPENDENCIES", false)
 	UseStateCache         = EnvBool("USE_STATE_CACHE", true)
+	AssertStateCache      = EnvBool("ASSERT_STATE_CACHE", false)
+	ReadAhead             = EnvBool("READ_AHEAD", true)
 
 	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
 	TraceDeletion         = EnvBool("TRACE_DELETION", false)
@@ -126,6 +132,16 @@ func NoMerge() bool              { return noMerge }
 func NoMergeHistory() bool       { return noMergeHistory }
 func NoDeepMergeHistory() bool   { return noDeepMergeHistory }
 func PruneTotalDifficulty() bool { return pruneTotalDifficulty }
+
+// CLI-override setters for the performance toggles that also have env-var
+// twins. The env var sets the initial value at package init; the CLI layer
+// calls these at node startup only when the user explicitly set the flag.
+func SetIgnoreBAL(b bool)     { IgnoreBAL = b }
+func SetUseStateCache(b bool) { UseStateCache = b }
+func SetReadAhead(b bool)     { ReadAhead = b }
+func SetExec3Workers(n int)   { Exec3Workers = n }
+func SetNoPrune(b bool)       { noPrune = b }
+func SetNoMerge(b bool)       { noMerge = b }
 
 var (
 	dirtySace     uint64

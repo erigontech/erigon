@@ -246,7 +246,7 @@ func (c *SentryClientDirect) Messages(ctx context.Context, in *sentryproto.Messa
 	in = &sentryproto.MessagesRequest{
 		Ids: filterIds(in.Ids, allProtocols),
 	}
-	ch := make(chan *inboundMessageReply, 16384)
+	ch := make(chan *inboundMessageReply, libsentry.MessagesQueueSize)
 	streamServer := &SentryMessagesStreamS{ch: ch, ctx: ctx}
 	go func() {
 		defer close(ch)
@@ -269,6 +269,7 @@ type SentryMessagesStreamS struct {
 
 func (s *SentryMessagesStreamS) Send(m *sentryproto.InboundMessage) error {
 	s.ch <- &inboundMessageReply{r: m}
+	libsentry.EvictOldestIfHalfFull(s.ch)
 	return nil
 }
 
@@ -311,7 +312,7 @@ func (c *SentryMessagesStreamC) RecvMsg(anyMessage any) error {
 // -- start Peers
 
 func (c *SentryClientDirect) PeerEvents(ctx context.Context, in *sentryproto.PeerEventsRequest, opts ...grpc.CallOption) (sentryproto.Sentry_PeerEventsClient, error) {
-	ch := make(chan *peersReply, 16384)
+	ch := make(chan *peersReply, libsentry.MessagesQueueSize)
 	streamServer := &SentryPeersStreamS{ch: ch, ctx: ctx}
 	go func() {
 		defer close(ch)
@@ -350,6 +351,7 @@ type SentryPeersStreamS struct {
 
 func (s *SentryPeersStreamS) Send(m *sentryproto.PeerEvent) error {
 	s.ch <- &peersReply{r: m}
+	libsentry.EvictOldestIfHalfFull(s.ch)
 	return nil
 }
 

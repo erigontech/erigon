@@ -67,11 +67,22 @@ const (
 
 // Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
 func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBlock *rpc.BlockNumberOrHash, stateOverrides *ethapi2.StateOverrides, blockOverrides *ethapi2.BlockOverrides) (hexutil.Bytes, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	roTx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer roTx.Rollback()
+
+	// Use the block overlay if available — reads uncommitted data from the
+	// pre-commit overlay so consumers don't need to wait for DB commit.
+	var tx kv.TemporalTx = roTx
+	if api.filters != nil {
+		if sd := api.filters.LatestSD(); sd != nil {
+			if overlayTx := sd.BlockOverlayTemporalTx(roTx); overlayTx != nil {
+				tx = overlayTx
+			}
+		}
+	}
 
 	var blockNrOrHash rpc.BlockNumberOrHash
 	if requestedBlock != nil {
@@ -102,7 +113,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 		return nil, err
 	}
 
-	err = rpchelper.CheckBlockExecuted(tx, header.Number.Uint64())
+	err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), header.Number.Uint64())
 	if err != nil {
 		return nil, err
 	}
@@ -185,12 +196,13 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		return 0, err
 	}
 
-	err = rpchelper.CheckBlockExecuted(dbtx, header.Number.Uint64())
+	stateTx := api.filters.WithTemporalOverlay(dbtx)
+	err = rpchelper.CheckBlockExecuted(stateTx, header.Number.Uint64())
 	if err != nil {
 		return 0, err
 	}
 
-	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, dbtx, blockNum.Uint64(), isLatest, 0, api.stateCache, api._txNumReader)
+	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, stateTx, blockNum.Uint64(), isLatest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return 0, err
 	}
@@ -570,9 +582,11 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		}
 
 		// prepare key path (keccak(address) | keccak(key))
+		addrHash := crypto.HashData(address.Bytes())
+		keyHash := crypto.HashData(storageKey.Hash.Bytes())
 		fullKey := make([]byte, 0, 64)
-		fullKey = append(fullKey, crypto.Keccak256(address.Bytes())...)
-		fullKey = append(fullKey, crypto.Keccak256(storageKey.Hash.Bytes())...)
+		fullKey = append(fullKey, addrHash[:]...)
+		fullKey = append(fullKey, keyHash[:]...)
 
 		// get proof for the given key
 		storageProof, err := proofTrie.Prove(fullKey, len(proof.AccountProof), true)
@@ -845,7 +859,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 			return nil, err
 		}
 
-		err = rpchelper.CheckBlockExecuted(tx, header.Number.Uint64())
+		err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), header.Number.Uint64())
 		if err != nil {
 			return nil, err
 		}

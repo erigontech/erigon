@@ -195,6 +195,14 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		attestation *solid.Attestation // SingleAttestation will be transformed to Attestation struct with given member index in committee
 	)
 	if err := s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		// If our head state is too far from the attestation epoch, committee
+		// computations will use a stale RANDAO mix and produce wrong results.
+		// Allow current and previous epoch (spec permits both).
+		headEpoch := state.Epoch(headState)
+		if attEpoch != headEpoch && attEpoch != state.PreviousEpoch(headState) {
+			return fmt.Errorf("head epoch %d too far from attestation epoch %d: %w",
+				headEpoch, attEpoch, ErrIgnore)
+		}
 		// [REJECT] The committee index is within the expected range
 		committeeCount := computeCommitteeCountPerSlot(headState, slot, s.beaconCfg.SlotsPerEpoch)
 		if committeeIndex >= committeeCount {
@@ -253,11 +261,10 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 			// [REJECT] The attester is a member of the committee -- i.e. attestation.attester_index in get_beacon_committee(state, attestation.data.slot, index).
 			memIndexInCommittee := contains(att.SingleAttestation.AttesterIndex, beaconCommittee)
 			if memIndexInCommittee < 0 {
-				//return errors.New("attester is not a member of the committee")
 				return fmt.Errorf("attester is not a member of the committee. attester index %d committeeIndex %v", att.SingleAttestation.AttesterIndex, committeeIndex)
 			}
 			vIndex = att.SingleAttestation.AttesterIndex
-			attestation = att.SingleAttestation.ToAttestation(memIndexInCommittee, len(beaconCommittee))
+			attestation = att.SingleAttestation.ToAttestation(memIndexInCommittee, len(beaconCommittee), int(s.beaconCfg.MaxCommitteesPerSlot))
 		}
 		// [IGNORE] There has been no other valid attestation seen on an attestation subnet that has an identical attestation.data.target.epoch and participating validator index.
 		// mark the validator as seen

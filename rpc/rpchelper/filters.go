@@ -23,23 +23,26 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"sync"
 
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/concurrent"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/rpc/filters"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
@@ -68,13 +71,21 @@ type Filters struct {
 	pendingTxsStores   *concurrent.SyncMap[PendingTxsSubID, [][]types.Transaction]
 	logger             log.Logger
 
+	// latestSD is the local fallback for the most recent SharedDomains.
+	// When events is non-nil (embedded mode), LatestSD() reads directly from
+	// Events.LatestSD() which is updated synchronously in PublishOverlay.
+	// When events is nil (remote mode), latestSD is not populated and
+	// LatestSD() returns nil — remote rpcdaemons do not use the overlay.
+	latestSD atomic.Pointer[execctx.SharedDomains]
+	events   *shards.Events
+
 	config FiltersConfig
 }
 
 // New creates a new Filters instance, initializes it, and starts subscription goroutines for Ethereum events.
 // It requires a context, Ethereum backend, transaction pool client, mining client, snapshot callback function,
 // and a logger for logging events.
-func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient, onNewSnapshot func(), logger log.Logger) *Filters {
+func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient, onNewSnapshot func(), logger log.Logger, events *shards.Events) *Filters {
 	logger.Info("rpc filters: subscribing to Erigon events")
 
 	ff := &Filters{
@@ -90,6 +101,7 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 		pendingTxsStores:   concurrent.NewSyncMap[PendingTxsSubID, [][]types.Transaction](),
 		logger:             logger,
 		config:             config,
+		events:             events,
 	}
 
 	go func() {
@@ -725,6 +737,7 @@ func (ff *Filters) onNewHeader(event *remoteproto.SubscribeReply) error {
 	if err != nil {
 		return fmt.Errorf("unprocessable payload: %w", err)
 	}
+
 	return ff.headsSubs.Range(func(k HeadsSubID, v Sub[*types.Header]) error {
 		v.Send(&header)
 		return nil
@@ -863,4 +876,51 @@ func (ff *Filters) AddPendingTxs(id PendingTxsSubID, txs []types.Transaction) {
 // It returns the transactions and a boolean indicating whether the transactions were found.
 func (ff *Filters) ReadPendingTxs(id PendingTxsSubID) ([][]types.Transaction, bool) {
 	return ff.pendingTxsStores.Delete(id)
+}
+
+// LatestSD returns the most recent SharedDomains published via Events,
+// or nil if none is available (either no background commit in progress
+// or the commit has completed).
+// In embedded mode, reads directly from Events.LatestSD() which is updated
+// synchronously in PublishOverlay — no channel delay.
+func (ff *Filters) LatestSD() *execctx.SharedDomains {
+	if ff.events != nil {
+		return ff.events.LatestSD()
+	}
+	return ff.latestSD.Load()
+}
+
+// WithOverlay returns a read view backed by the latest block overlay if one
+// is available, otherwise returns the given tx unchanged. The read view uses
+// the overlay's in-memory data for table lookups, falling back to the caller's tx
+// for data not in the overlay.
+// Safe to call on a nil receiver.
+func (ff *Filters) WithOverlay(tx kv.Tx) kv.Tx {
+	if ff == nil {
+		return tx
+	}
+	sd := ff.LatestSD()
+	if sd == nil {
+		return tx
+	}
+	if overlay := sd.BlockOverlay(); overlay != nil {
+		return overlay.NewReadView(tx)
+	}
+	return tx
+}
+
+// WithTemporalOverlay is like WithOverlay but returns kv.TemporalTx directly,
+// avoiding repeated type assertions at callsites that need temporal access.
+func (ff *Filters) WithTemporalOverlay(tx kv.TemporalTx) kv.TemporalTx {
+	if ff == nil {
+		return tx
+	}
+	sd := ff.LatestSD()
+	if sd == nil {
+		return tx
+	}
+	if overlay := sd.BlockOverlay(); overlay != nil {
+		return overlay.NewReadView(tx)
+	}
+	return tx
 }
