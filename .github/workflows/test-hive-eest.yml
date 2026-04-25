@@ -102,7 +102,7 @@ jobs:
           # pool. Revert to ethereum/hive + steps.hive-version.outputs.ref
           # once that PR lands; until then we ride this fork.
           repository: erigontech/hive
-          ref: 06b9774991053bf4952c98750c53fc52bceb3991
+          ref: a3c9afd9ada800efc41c0287d66f7d083684d3cb
           path: hive
 
       - name: Conditional Docker Login
