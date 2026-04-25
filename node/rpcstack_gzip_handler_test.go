@@ -22,6 +22,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -50,9 +51,10 @@ func gzipRequest(t *testing.T, handler http.Handler) *httptest.ResponseRecorder 
 }
 
 // TestGzipHandlerNonStreaming verifies that a normal (non-streaming) response
-// is gzip-compressed and the decompressed body matches the original.
+// above minGzipBodySize is gzip-compressed and the decompressed body matches
+// the original. Content-Length must equal the compressed size (no chunked).
 func TestGzipHandlerNonStreaming(t *testing.T) {
-	body := []byte(`{"jsonrpc":"2.0","result":"hello"}`)
+	body := bytes.Repeat([]byte(`{"jsonrpc":"2.0","result":"hello"}`), 64) // > minGzipBodySize
 	handler := newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(body)
 	}))
@@ -60,7 +62,25 @@ func TestGzipHandlerNonStreaming(t *testing.T) {
 	rec := gzipRequest(t, handler)
 
 	assert.Equal(t, "gzip", rec.Header().Get("Content-Encoding"))
+	assert.Equal(t, strconv.Itoa(rec.Body.Len()), rec.Header().Get("Content-Length"))
 	assert.Equal(t, body, decompressGzip(t, rec.Body))
+}
+
+// TestGzipHandlerSmallBody verifies that responses below minGzipBodySize are
+// sent as-is: no Content-Encoding, correct Content-Length, verbatim body.
+func TestGzipHandlerSmallBody(t *testing.T) {
+	body := []byte(`{"jsonrpc":"2.0","result":"ok"}`)
+	require.Less(t, len(body), minGzipBodySize)
+
+	handler := newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(body)
+	}))
+
+	rec := gzipRequest(t, handler)
+
+	assert.Empty(t, rec.Header().Get("Content-Encoding"))
+	assert.Equal(t, strconv.Itoa(len(body)), rec.Header().Get("Content-Length"))
+	assert.Equal(t, body, rec.Body.Bytes())
 }
 
 // TestGzipHandlerNoAcceptEncoding verifies that the response is not compressed
@@ -102,17 +122,20 @@ func TestGzipHandlerStreaming(t *testing.T) {
 }
 
 // TestGzipHandlerStatusBuffered verifies that a custom HTTP status set before
-// any write is correctly forwarded in the non-streaming (buffered) path.
+// any write is correctly forwarded in the non-streaming (buffered) path, for
+// a body large enough to trigger gzip compression.
 func TestGzipHandlerStatusBuffered(t *testing.T) {
+	body := bytes.Repeat([]byte("x"), minGzipBodySize)
 	handler := newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`ok`))
+		_, _ = w.Write(body)
 	}))
 
 	rec := gzipRequest(t, handler)
 
 	assert.Equal(t, http.StatusCreated, rec.Code)
 	assert.Equal(t, "gzip", rec.Header().Get("Content-Encoding"))
+	assert.Equal(t, body, decompressGzip(t, rec.Body))
 }
 
 // TestGzipHandlerStatusStreaming verifies that a custom HTTP status set before

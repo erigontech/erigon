@@ -29,6 +29,7 @@ import (
 	"net"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -514,6 +515,10 @@ func (h *virtualHostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // gzPoolBufCap is the maximum buffer capacity retained in pools to bound RSS growth.
 const gzPoolBufCap = 1 << 20
 
+// minGzipBodySize is the minimum response body size to compress. Responses
+// smaller than this are sent as-is: gzip framing overhead would exceed savings.
+const minGzipBodySize = 1024
+
 var gzPool = sync.Pool{
 	New: func() any { w, _ := gzip.NewWriterLevel(io.Discard, gzip.BestSpeed); return w },
 }
@@ -627,12 +632,26 @@ func newGzipHandler(next http.Handler) http.Handler {
 			return
 		}
 
+		// Non-streaming: skip compression for small responses where gzip overhead
+		// would exceed the savings (header ~18 B + deflate framing).
+		src := grw.buf.Bytes()
+		if len(src) < minGzipBodySize {
+			w.Header().Set("Content-Length", strconv.Itoa(len(src)))
+			if grw.status != 0 {
+				w.WriteHeader(grw.status)
+			}
+			w.Write(src) //nolint:errcheck
+			if buf.Cap() <= gzPoolBufCap {
+				gzBufPool.Put(buf)
+			}
+			return
+		}
+
 		// Non-streaming: prefer libdeflate for faster one-shot compression.
 		if raw := gzCompressorPool.Get(); raw != nil {
 			c := raw.(*libdeflate.Compressor)
 			defer gzCompressorPool.Put(c)
 
-			src := grw.buf.Bytes()
 			dstPtr := gzDstPool.Get().(*[]byte)
 			needed := c.GzipCompressBound(len(src))
 			if cap(*dstPtr) < needed {
@@ -655,7 +674,7 @@ func newGzipHandler(next http.Handler) http.Handler {
 				gzBufPool.Put(buf)
 			}
 			w.Header().Set("Content-Encoding", "gzip")
-			w.Header().Del("Content-Length")
+			w.Header().Set("Content-Length", strconv.Itoa(n))
 			if grw.status != 0 {
 				w.WriteHeader(grw.status)
 			}
@@ -666,7 +685,7 @@ func newGzipHandler(next http.Handler) http.Handler {
 			return
 		}
 
-		writeStdlibGzip(w, grw.buf.Bytes(), grw.status, buf)
+		writeStdlibGzip(w, src, grw.status, buf)
 	})
 }
 
