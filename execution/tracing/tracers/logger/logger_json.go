@@ -92,6 +92,9 @@ func (l *JSONLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope traci
 		}
 		log.Stack = logstack
 	}
+	if l.cfg.EnableReturnData {
+		log.ReturnData = rData
+	}
 	_ = l.encoder.Encode(log)
 }
 
