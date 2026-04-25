@@ -1610,7 +1610,16 @@ func (c *MdbxDupSortCursor) PutNoDupData(k, v []byte) error {
 	if err := c.c.Put(k, v, mdbx.NoDupData); err != nil {
 		return fmt.Errorf("label: %s, in PutNoDupData: %w", c.label, err)
 	}
+	return nil
+}
 
+// PutCurrent replaces the current dup entry in-place. The cursor must be
+// positioned (e.g. via SeekBothRange) on the entry to replace.
+// Saves one CGo call vs DeleteCurrent()+Put() for the update path.
+func (c *MdbxDupSortCursor) PutCurrent(k, v []byte) error {
+	if err := c.c.PutCurrent(k, v); err != nil {
+		return fmt.Errorf("label: %s, in PutCurrent: %w", c.label, err)
+	}
 	return nil
 }
 

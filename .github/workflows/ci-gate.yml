@@ -26,6 +26,13 @@ concurrency:
     }}
   cancel-in-progress: true
 
+# actions: write lets merge-queue runs call `gh run cancel` on a leaf
+# failure so the gate doesn't stall waiting for still-running siblings.
+# Reusable leaves inherit these from the caller.
+permissions:
+  actions: write
+  contents: read
+
 jobs:
   lint:
     if: github.event_name == 'pull_request'
