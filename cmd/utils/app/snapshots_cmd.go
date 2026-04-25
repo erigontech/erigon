@@ -327,6 +327,16 @@ var snapshotCommand = cli.Command{
 			),
 		},
 		{
+			Name:    "rm-blocks",
+			Aliases: []string{"rm-block-snapshots", "rm-block-segments"},
+			Usage:   "Remove the latest block snapshot files (headers/bodies/transactions and their indexes) from <datadir>/snapshots",
+			Action:  doRmBlockSnapshots,
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.BoolFlag{Name: "dry-run"},
+			}),
+		},
+		{
 			Name: "rollback-snapshots-to-block",
 			Description: "Rollback the node back to a given block by deleting chaindata and all corresponding " +
 				"snapshots that contain data related to the given block and blocks after it. It deletes block " +
@@ -1033,6 +1043,218 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 		DryRun:                 dryRun,
 		StepRange:              stepRange,
 		DomainNames:            domainNames,
+	})
+}
+
+type DeleteBlockSnapshotsArgs struct {
+	Dirs                   datadir.Dirs
+	PromptUserBeforeDelete bool
+	DryRun                 bool
+}
+
+// promptRemoveFiles displays a "remove N files (~size)?" prompt and returns
+// true if the user confirmed deletion (1), false if they chose to exit (4).
+// On scan error or EOF the user is treated as having declined.
+func promptRemoveFiles(count, totalBytes uint64) bool {
+AllowPruneSteps:
+	fmt.Printf("\nremove %d files (~%s)?\n1) RemoveFile\n4) Exit\n (pick number): ",
+		count, common.ByteCount(totalBytes))
+	var ans uint8
+	if _, err := fmt.Scanf("%d\n", &ans); err != nil {
+		fmt.Printf("err: %v\n", err)
+		return false
+	}
+	switch ans {
+	case 1:
+		return true
+	case 4:
+		return false
+	default:
+		fmt.Printf("invalid input: %d; Just a number 1 or 4 expected.\n", ans)
+		goto AllowPruneSteps
+	}
+}
+
+// DeleteBlockSnapshots removes the latest (highest-From) block snapshot range
+// from dirs.Snap. It walks .seg / .idx files, parses them with snaptype.ParseFileName
+// (which already understands composite type strings like "transactions-to-block"),
+// then deletes the matching primary files, any companion .torrent / .torrent<suffix>
+// partials, and unconditionally sweeps .tmp artifacts in dirs.Snap.
+func DeleteBlockSnapshots(args DeleteBlockSnapshotsArgs) error {
+	dirs := args.Dirs
+
+	filePaths, err := dir2.ListFiles(dirs.Snap)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			fmt.Printf("snapshot directory does not exist: %s\n", dirs.Snap)
+			return nil
+		}
+		return err
+	}
+
+	allFiles := make([]snaptype.FileInfo, 0, len(filePaths))
+	var maxFrom uint64
+	for _, p := range filePaths {
+		_, name := filepath.Split(p)
+		ext := filepath.Ext(name)
+		// Only consider primary block snapshot artifacts. Companion .torrent /
+		// .torrent<suffix> files are handled below via glob; .tmp files are
+		// swept unconditionally at the end.
+		if ext != ".seg" && ext != ".idx" {
+			continue
+		}
+		res, isStateFile, ok := snaptype.ParseFileName(dirs.Snap, name)
+		if !ok || isStateFile {
+			continue
+		}
+		// Skip salt-* files which ParseFileName also accepts.
+		if res.TypeString == "salt" {
+			continue
+		}
+		allFiles = append(allFiles, res)
+		if res.From > maxFrom {
+			maxFrom = res.From
+		}
+	}
+
+	if len(allFiles) == 0 {
+		fmt.Printf("no block snapshot files found in %s\n", dirs.Snap)
+		return sweepTmpFilesInSnapDir(dirs.Snap, args.DryRun)
+	}
+
+	toRemove := make([]snaptype.FileInfo, 0)
+	var maxTo, removeSize uint64
+	for _, f := range allFiles {
+		if f.From != maxFrom {
+			continue
+		}
+		toRemove = append(toRemove, f)
+		if f.To > maxTo {
+			maxTo = f.To
+		}
+		info, err := os.Stat(f.Path)
+		if err != nil {
+			fmt.Printf("warn: stat %s: %v\n", f.Path, err)
+			continue
+		}
+		removeSize += uint64(info.Size())
+	}
+
+	// Sort by (From desc, To desc, name asc) for display: newest ranges first.
+	sort.Slice(allFiles, func(i, j int) bool {
+		if allFiles[i].From != allFiles[j].From {
+			return allFiles[i].From > allFiles[j].From
+		}
+		if allFiles[i].To != allFiles[j].To {
+			return allFiles[i].To > allFiles[j].To
+		}
+		return allFiles[i].Name() < allFiles[j].Name()
+	})
+
+	fmt.Printf("\nDatadir: %s\n", dirs.DataDir)
+	fmt.Printf("Latest block range: [%d, %d)\n\n", maxFrom, maxTo)
+
+	// Show files at the latest From plus a bit of older context for orientation.
+	shown := 0
+	const contextLines = 12
+	for _, f := range allFiles {
+		atMax := f.From == maxFrom
+		if !atMax && shown >= contextLines {
+			break
+		}
+		var sizeStr string
+		if info, err := os.Stat(f.Path); err == nil {
+			sizeStr = common.ByteCount(uint64(info.Size()))
+		} else {
+			sizeStr = "unknown"
+		}
+		action := "KEEP  "
+		if atMax {
+			action = "REMOVE"
+		}
+		fmt.Printf("  %s %s  (%s)\n", action, f.Name(), sizeStr)
+		shown++
+	}
+
+	if args.PromptUserBeforeDelete {
+		if !promptRemoveFiles(uint64(len(toRemove)), removeSize) {
+			return nil
+		}
+	}
+
+	var removed uint64
+	for _, f := range toRemove {
+		// Catch both ".torrent" and partial ".torrent<suffix>" companions
+		// (see snaptype.IsTorrentPartial).
+		torrentArtifacts, err := filepath.Glob(f.Path + ".torrent*")
+		if err != nil {
+			return err
+		}
+		if args.DryRun {
+			fmt.Printf("[dry-run] rm %s\n", f.Path)
+			for _, t := range torrentArtifacts {
+				fmt.Printf("[dry-run] rm %s\n", t)
+			}
+			continue
+		}
+		if err := dir2.RemoveFile(f.Path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+		for _, t := range torrentArtifacts {
+			if err := dir2.RemoveFile(t); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return err
+			}
+		}
+		removed++
+	}
+	if args.DryRun {
+		fmt.Printf("[dry-run] would remove %d block snapshot files (~%s)\n", len(toRemove), common.ByteCount(removeSize))
+	} else {
+		fmt.Printf("removed %d block snapshot files\n", removed)
+	}
+
+	return sweepTmpFilesInSnapDir(dirs.Snap, args.DryRun)
+}
+
+// sweepTmpFilesInSnapDir removes (or, in dry-run mode, lists) all .tmp artifacts
+// in the given snapshot directory. Mirrors the unconditional sweep that
+// DeleteStateSnapshots performs across state snapshot directories.
+func sweepTmpFilesInSnapDir(snapDir string, dryRun bool) error {
+	tmpFiles, err := snaptype.TmpFiles(snapDir)
+	if err != nil {
+		return err
+	}
+	if len(tmpFiles) == 0 {
+		return nil
+	}
+	for _, tf := range tmpFiles {
+		if dryRun {
+			fmt.Printf("[dry-run] rm %s\n", tf)
+			continue
+		}
+		if err := dir2.RemoveFile(tf); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+	}
+	if dryRun {
+		fmt.Printf("[dry-run] would remove %d .tmp files\n", len(tmpFiles))
+	} else {
+		fmt.Printf("removed %d .tmp files\n", len(tmpFiles))
+	}
+	return nil
+}
+
+func doRmBlockSnapshots(cliCtx *cli.Context) error {
+	dirs, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
+	if err != nil {
+		return err
+	}
+	defer l.Unlock()
+
+	return DeleteBlockSnapshots(DeleteBlockSnapshotsArgs{
+		Dirs:                   dirs,
+		PromptUserBeforeDelete: true,
+		DryRun:                 cliCtx.Bool("dry-run"),
 	})
 }
 
