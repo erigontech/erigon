@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"sync"
 
-	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -129,10 +128,11 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 	lastKnownNumber := refNumber
 	lastKnownHash := refHash
 
-	// lru.New only returns err on -ve size
-	hashLookupCache, _ := lru.New[uint64, common.Hash](8192)
+	// BLOCKHASH can look back at most 256 blocks, so a plain map with
+	// capacity 256 is sufficient — no need for an LRU eviction policy.
+	hashLookupCache := make(map[uint64]common.Hash, 256)
 	hashLookupCacheLock := sync.Mutex{}
-	hashLookupCache.Add(refNumber, refHash)
+	hashLookupCache[refNumber] = refHash
 
 	return func(n uint64) (common.Hash, error) {
 		hashLookupCacheLock.Lock()
@@ -148,7 +148,7 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 			return refHash, nil
 		}
 
-		if hash, ok := hashLookupCache.Get(n); ok {
+		if hash, ok := hashLookupCache[n]; ok {
 			//fmt.Println("GH-CA", n, hash)
 			return hash, nil
 		}
@@ -163,7 +163,7 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 
 		for {
 			for {
-				hash, ok := hashLookupCache.Get(lastKnownNumber - 1)
+				hash, ok := hashLookupCache[lastKnownNumber-1]
 
 				if !ok {
 					break
@@ -192,7 +192,7 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 			}
 			lastKnownHash = header.ParentHash
 			lastKnownNumber = header.Number.Uint64() - 1
-			hashLookupCache.Add(lastKnownNumber, lastKnownHash)
+			hashLookupCache[lastKnownNumber] = lastKnownHash
 
 			if n == lastKnownNumber {
 				//fmt.Println("GH-DB", lastKnownNumber, lastKnownHash)
