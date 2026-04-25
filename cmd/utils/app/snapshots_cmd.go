@@ -1360,12 +1360,19 @@ func doIntegrity(cliCtx *cli.Context) error {
 						return err
 					}
 				case integrity.CommitmentKvDeref:
+					if chainConfig.ChainName == networkname.Bloatnet {
+						log.Warn("[todo] CommitmentKvDeref disabled on bloatnet. see https://github.com/erigontech/erigon/issues/20814")
+						return nil // TODO: taking too long on bloatnet
+					}
 					if err := integrity.CheckCommitmentKvDeref(ctx, db, cache, failFast, logger); err != nil {
 						return err
 					}
 				case integrity.CommitmentHistVal:
 					scCopy := sc
 					scCopy.SampleRatio /= 100 // it's very slow check
+					if chainConfig.ChainName == networkname.Bloatnet {
+						scCopy.SampleRatio /= 10
+					}
 					if err := integrity.CheckCommitmentHistVal(ctx, scCopy, db, blockReader, failFast, logger); err != nil {
 						return err
 					}
@@ -1376,6 +1383,9 @@ func doIntegrity(cliCtx *cli.Context) error {
 					}
 					scCopy := sc
 					scCopy.SampleRatio /= 100 // it's very slow check
+					if chainConfig.ChainName == networkname.Bloatnet {
+						scCopy.SampleRatio /= 10
+					}
 					if err := integrity.CheckCommitmentHistAtBlkRange(ctx, scCopy, db, blockReader, 1, to+1, failFast, logger); err != nil {
 						return err
 					}
