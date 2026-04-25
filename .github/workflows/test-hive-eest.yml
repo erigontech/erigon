@@ -27,10 +27,13 @@ jobs:
           # matches the suite name (eest/consume-engine) while the remainder
           # filters individual pytest test IDs by fork parameter.
           # pool-size: --client.pool.size for hive's warm-daemon client pool.
-          # Set to 24 on shards with high pre-state reuse (cancun/prague/osaka
-          # at ~3× reuse, glamsterdam-devnet); kept at 0 on shards where the
-          # corpus has ~unique pre-state per test (paris+shanghai, consume-rlp)
-          # so we don't pay the per-test reset overhead with no compensating hits.
+          # Tuned per shard from a trace-instrumented dispatch (run 24938677388);
+          # the LRU hit-rate curve plateaus at ~50% past size=4 on the long
+          # consume-engine shards (reuse is essentially depth-2 consecutive),
+          # so 4 captures all available reuse and 24+ buys nothing. paris+shanghai
+          # and consume-rlp have ~unique pre-state per test (0% hit at any size).
+          # glamsterdam-devnet is the exception — its curve keeps climbing past
+          # 24, so it gets a larger pool.
           - sim: consume-engine
             sim-limit: ".*/.*fork_(Paris|Shanghai)"
             shard: paris+shanghai
@@ -38,15 +41,15 @@ jobs:
           - sim: consume-engine
             sim-limit: ".*/.*fork_Cancun"
             shard: cancun
-            pool-size: 24
+            pool-size: 4
           - sim: consume-engine
             sim-limit: ".*/.*fork_Prague"
             shard: prague
-            pool-size: 24
+            pool-size: 4
           - sim: consume-engine
             sim-limit: ".*/.*fork_Osaka"
             shard: osaka
-            pool-size: 24
+            pool-size: 4
           - sim: consume-rlp
             sim-limit: ".*(eip2930_access_list|eip4844_blobs).*" # all tests take too long
             shard: rlp
