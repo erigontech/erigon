@@ -2010,6 +2010,9 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 				defer stoClose()
 			}
 
+			plainKeyBuf := make([]byte, 0, length.Addr+length.Hash)
+			valBuf := make([]byte, 0, 128)
+
 			for item := range workCh {
 				select {
 				case <-ctx.Done():
@@ -2019,6 +2022,7 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 				if err := verifyHashItem(item, failFast, fileName, isReferencing,
 					preloadedAccValues, preloadedStoValues,
 					accReader, stoReader,
+					plainKeyBuf, valBuf,
 					&hashMismatches, &hashChecked,
 					logger); err != nil {
 					return err
@@ -2117,6 +2121,7 @@ func verifyHashItem(
 	isReferencing bool,
 	preloadedAccValues, preloadedStoValues map[string][]byte,
 	accReader, stoReader *seg.Reader,
+	plainKeyBuf, valBuf []byte,
 	hashMismatches, hashChecked *atomic.Uint64,
 	logger log.Logger,
 ) error {
@@ -2128,9 +2133,6 @@ func verifyHashItem(
 		valMapPool.Put(accountValues)
 		valMapPool.Put(storageValues)
 	}()
-
-	plainKeyBuf := make([]byte, 0, length.Addr+length.Hash)
-	valBuf := make([]byte, 0, 128)
 
 	branchData := commitment.BranchData(item.branchValue)
 	resolvedBranchData, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
@@ -2161,7 +2163,6 @@ func verifyHashItem(
 			return plainKey, nil
 		}
 
-		// Account key
 		plainKey := key
 		isRef := len(key) != length.Addr
 		if isRef {
