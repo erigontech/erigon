@@ -276,7 +276,7 @@ func (txw *BlobTxWrapper) Type() byte               { return txw.Tx.Type() }
 func (txw *BlobTxWrapper) GetChainID() *uint256.Int { return txw.Tx.GetChainID() }
 func (txw *BlobTxWrapper) GetNonce() uint64         { return txw.Tx.GetNonce() }
 func (txw *BlobTxWrapper) GetTipCap() *uint256.Int  { return txw.Tx.GetTipCap() }
-func (txw *BlobTxWrapper) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
+func (txw *BlobTxWrapper) GetEffectiveGasTip(baseFee *uint256.Int) uint256.Int {
 	return txw.Tx.GetEffectiveGasTip(baseFee)
 }
 func (txw *BlobTxWrapper) GetFeeCap() *uint256.Int { return txw.Tx.GetFeeCap() }

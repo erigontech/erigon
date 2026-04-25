@@ -2326,7 +2326,8 @@ func TestEIP1559Transition(t *testing.T) {
 	err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
 		statedb := state.New(m.NewHistoryStateReader(1, tx))
 		baseFee := block.BaseFee()
-		effectiveTip := block.Transactions()[0].GetEffectiveGasTip(baseFee).Uint64()
+		tip := block.Transactions()[0].GetEffectiveGasTip(baseFee)
+		effectiveTip := tip.Uint64()
 
 		// 6+5: Ensure that miner received only the tx's effective tip.
 		actual, err := statedb.GetBalance(accounts.InternAddress(block.Coinbase()))

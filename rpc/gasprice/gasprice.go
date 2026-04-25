@@ -294,7 +294,7 @@ func (oracle *Oracle) getBlockPricesFromBackend(ctx context.Context, backend Ora
 	// Pre-compute effective tip for every transaction exactly once.
 	type txWithTip struct {
 		tx  types.Transaction
-		tip *uint256.Int
+		tip uint256.Int
 	}
 	items := make([]txWithTip, len(block.Transactions()))
 	for i, tx := range block.Transactions() {
@@ -302,7 +302,7 @@ func (oracle *Oracle) getBlockPricesFromBackend(ctx context.Context, backend Ora
 	}
 
 	// Sort ascending by effective tip; slices.SortFunc uses pdqsort (no reflection).
-	slices.SortFunc(items, func(a, b txWithTip) int { return a.tip.Cmp(b.tip) })
+	slices.SortFunc(items, func(a, b txWithTip) int { return a.tip.Cmp(&b.tip) })
 
 	// Since items are sorted ascending, all tips below ignoreUnder form a
 	// contiguous prefix that we can skip with a single pass.
@@ -320,7 +320,8 @@ func (oracle *Oracle) getBlockPricesFromBackend(ctx context.Context, backend Ora
 		}
 		sender, _ := item.tx.GetSender()
 		if sender.Value() != coinbase {
-			*out = append(*out, item.tip)
+			tipCopy := new(uint256.Int).Set(&item.tip)
+			*out = append(*out, tipCopy)
 			count++
 		}
 	}
