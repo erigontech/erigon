@@ -257,6 +257,23 @@ type wsConnAdapter struct {
 }
 
 func (a *wsConnAdapter) Close() error {
+	// Attempt a graceful WebSocket close handshake first, so the peer sees a clean
+	// 1000 (normal closure) instead of 1006 (abnormal). The underlying codec close path
+	// may hard-close the transport, so give the handshake a bounded chance to complete
+	// before falling back to CloseNow().
+	closeDone := make(chan struct{})
+	go func() {
+		defer close(closeDone)
+		_ = a.conn.Close(websocket.StatusNormalClosure, "")
+	}()
+	
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
+	select {
+	case <-closeDone:
+	case <-timer.C:
+	}
+
 	return a.conn.CloseNow()
 }
 
@@ -330,9 +347,6 @@ func NewWebsocketCodec(conn *websocket.Conn, host string, req http.Header, remot
 }
 
 func (wc *websocketCodec) Close() {
-	// Send a WebSocket Close frame before closing the underlying connection,
-	// so the server sees a clean 1000 (normal closure) instead of 1006 (abnormal).
-	wc.conn.Close(websocket.StatusNormalClosure, "")
 	wc.jsonCodec.Close()
 	wc.wg.Wait()
 }
