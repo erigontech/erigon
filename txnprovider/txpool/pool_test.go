@@ -90,6 +90,20 @@ func newTestSetCodeTxnSlot(nonce uint64, senderID uint64, tip, feeCap uint64, ga
 	}
 }
 
+func writeTestSenderState(t *testing.T, ctx context.Context, coreDB kv.TemporalRwDB, logger log.Logger, addr [20]byte, value []byte, txNum uint64) {
+	tx, err := coreDB.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	sd, err := execctx.NewSharedDomains(ctx, tx, logger)
+	require.NoError(t, err)
+
+	require.NoError(t, sd.DomainPut(kv.AccountsDomain, tx, addr[:], value, txNum, nil))
+	require.NoError(t, sd.Flush(ctx, tx))
+	sd.Close()
+	require.NoError(t, tx.Commit())
+}
+
 func TestNonceFromAddress(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan Announcements, 100)
@@ -919,7 +933,8 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			view, err := cache.View(ctx, tx)
 			asrt.NoError(err)
 			pool.blockGasLimit.Store(30_000_000)
-			reason := pool.validateTx(txn, false, view)
+			reason, err := pool.validateTx(txn, false, view)
+			asrt.NoError(err)
 
 			if reason != test.expected {
 				t.Errorf("expected %v, got %v", test.expected, reason)
@@ -1030,8 +1045,93 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	view, err := cache.View(ctx, tx)
 	require.NoError(t, err)
 
-	result := pool.validateTx(txn, false /* isLocal */, view)
+	result, err := pool.validateTx(txn, false /* isLocal */, view)
+	require.NoError(t, err)
 	assert.Equal(t, txpoolcfg.Success, result)
+}
+
+func TestValidateTxReturnsSenderInfoError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	ch := make(chan Announcements, 1)
+	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	cache := kvcache.New(kvcache.DefaultCoherentConfig)
+	logger := log.New()
+
+	pool, err := New(ctx, ch, nil, coreDB, txpoolcfg.DefaultConfig, cache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
+	require.NoError(t, err)
+	pool.blockGasLimit.Store(30_000_000)
+
+	var badAddr [20]byte
+	badAddr[0] = 1
+	writeTestSenderState(t, ctx, coreDB, logger, badAddr, []byte{0, 0, 0}, 0)
+
+	txn := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
+	txn.IDHash[0] = 0xaa
+	var txns TxnSlots
+	txns.Append(txn, badAddr[:], true)
+
+	require.NoError(t, pool.senders.registerNewSenders(&txns, logger))
+
+	tx, err := coreDB.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	view, err := cache.View(ctx, tx)
+	require.NoError(t, err)
+
+	reason, err := pool.validateTx(txn, true, view)
+	require.Error(t, err)
+	require.Equal(t, txpoolcfg.ErrGetSenderInfo, reason)
+	require.ErrorContains(t, err, "validateTx: sender info")
+	require.ErrorContains(t, err, "idHash=aa")
+	require.ErrorContains(t, err, "senderID=1")
+}
+
+func TestAddLocalTxnsKeepsBatchOnSenderInfoError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	ch := make(chan Announcements, 1)
+	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	db := memdb.NewTestPoolDB(t)
+	cache := kvcache.New(kvcache.DefaultCoherentConfig)
+	logger := log.New()
+
+	pool, err := New(ctx, ch, db, coreDB, txpoolcfg.DefaultConfig, cache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
+	require.NoError(t, err)
+	pool.blockGasLimit.Store(30_000_000)
+
+	var badAddr [20]byte
+	badAddr[0] = 1
+	writeTestSenderState(t, ctx, coreDB, logger, badAddr, []byte{0, 0, 0}, 0)
+
+	var goodAddr [20]byte
+	goodAddr[0] = 2
+	goodAcc := accounts3.Account{
+		Nonce:       0,
+		Balance:     *uint256.NewInt(common.Ether),
+		CodeHash:    accounts.EmptyCodeHash,
+		Incarnation: 1,
+	}
+	writeTestSenderState(t, ctx, coreDB, logger, goodAddr, accounts3.SerialiseV3(&goodAcc), 1)
+
+	badTxn := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
+	badTxn.IDHash[0] = 1
+	goodTxn := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
+	goodTxn.IDHash[0] = 2
+
+	var txns TxnSlots
+	txns.Append(badTxn, badAddr[:], true)
+	txns.Append(goodTxn, goodAddr[:], true)
+
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.ErrGetSenderInfo, txpoolcfg.Success}, reasons)
+
+	pending, baseFee, queued := pool.CountContent()
+	require.Equal(t, 1, pending+baseFee+queued)
 }
 
 // Blob gas price bump + other requirements to replace existing txns in the pool
