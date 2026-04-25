@@ -84,10 +84,10 @@ jobs:
         uses: actions/checkout@v6
         with:
           # EXPERIMENT: pinned to erigontech/hive yperbasis/genesis-pool to test
-          # the client-pool prototype. Revert to ethereum/hive +
-          # steps.hive-version.outputs.ref before merging.
+          # the client-pool prototype with the snapshot-restore path enabled.
+          # Revert to ethereum/hive + steps.hive-version.outputs.ref before merging.
           repository: erigontech/hive
-          ref: c46813fa410308b4defe849c0518404a6c77505b
+          ref: bc2cfecf24066898d0308f967d1d6d66a2dafc41
           path: hive
 
       - name: Conditional Docker Login
