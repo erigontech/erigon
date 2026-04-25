@@ -372,6 +372,8 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		txsCountMutex:         txsCountMutex,
 		txsAllDoneOnCloseCond: sync.NewCond(txsCountMutex),
 
+		liveTxs: make(map[*MdbxTx]liveTxInfo),
+
 		leakDetector: dbg.NewLeakDetector("db."+string(opts.label), dbg.SlowTx()),
 
 		MaxBatchSize:  DefaultMaxBatchSize,
@@ -453,6 +455,13 @@ type MdbxKV struct {
 	txsCountMutex         *sync.Mutex
 	txsAllDoneOnCloseCond *sync.Cond
 
+	// liveTxs tracks all currently-open chaindata txs so we can dump the
+	// stacks of concurrent txs when a commit observes openTxs > 1 — answering
+	// "who held a tx alive while I was committing?" for diagnostic purposes.
+	// Keyed by the *MdbxTx pointer. Protected by txsCountMutex.
+	liveTxs       map[*MdbxTx]liveTxInfo
+	liveTxCounter uint64
+
 	leakDetector *dbg.LeakDetector
 
 	// MaxBatchSize is the maximum size of a batch. Default value is
@@ -515,6 +524,20 @@ func (db *MdbxKV) openDBIs(buckets []string) error {
 	})
 }
 
+// mdbxTraceTx enables per-tx lifecycle logging and concurrent-tx stack dumps on
+// ChainDB. Read once at startup so enabling/disabling requires a restart.
+// When false, all tracer code paths early-return — zero overhead in production.
+var mdbxTraceTx = os.Getenv("MDBX_TRACE_TX") == "true"
+
+// liveTxInfo is a diagnostic record for a currently-open chaindata tx.
+// Lets us dump the stacks of concurrent txs when a commit observes openTxs>1.
+type liveTxInfo struct {
+	id       uint64
+	kind     string // "ro" or "rw"
+	openedAt time.Time
+	stack    string
+}
+
 func (db *MdbxKV) trackTxBegin() bool {
 	db.txsCountMutex.Lock()
 	defer db.txsCountMutex.Unlock()
@@ -526,20 +549,82 @@ func (db *MdbxKV) trackTxBegin() bool {
 	return isOpen
 }
 
-// logTxLifecycle prints open/close events for chaindata txs so we can pair
-// them by traceID and see which callsites hold concurrent readers during a
-// commit (i.e. why openTxs=N at commit time). Skipped for non-ChainDB labels
-// to avoid flooding from caplin and ancillary DBs.
-func (db *MdbxKV) logTxLifecycle(event string, traceID uint64, readOnly bool) {
-	if db.opts.label != dbcfg.ChainDB {
+// registerLiveTx records an open chaindata tx with its stack so concurrent-tx
+// dumps at commit time can identify it. No-op unless MDBX_TRACE_TX=true and
+// the DB is ChainDB (avoids per-alloc overhead on every ancillary DB tx).
+func (db *MdbxKV) registerLiveTx(tx *MdbxTx, readOnly bool) {
+	if !mdbxTraceTx || db.opts.label != dbcfg.ChainDB {
 		return
 	}
 	kind := "rw"
 	if readOnly {
 		kind = "ro"
 	}
+	stack := dbg.Stack()
+	openedAt := time.Now()
+
+	db.txsCountMutex.Lock()
+	db.liveTxCounter++
+	id := db.liveTxCounter
+	db.liveTxs[tx] = liveTxInfo{
+		id:       id,
+		kind:     kind,
+		openedAt: openedAt,
+		stack:    stack,
+	}
+	count := db.txsCount
+	db.txsCountMutex.Unlock()
+
+	fmt.Printf("MDBX_TX_OPEN: id=%d kind=%s count=%d stack=%s\n", id, kind, count, stack)
+}
+
+// unregisterLiveTx removes a tx from the live set and logs a close event.
+// No-op unless MDBX_TRACE_TX=true and the DB is ChainDB.
+func (db *MdbxKV) unregisterLiveTx(tx *MdbxTx, event string) {
+	if !mdbxTraceTx || db.opts.label != dbcfg.ChainDB {
+		return
+	}
+	db.txsCountMutex.Lock()
+	info, ok := db.liveTxs[tx]
+	if ok {
+		delete(db.liveTxs, tx)
+	}
+	count := db.txsCount
+	db.txsCountMutex.Unlock()
+
+	if !ok {
+		return
+	}
 	fmt.Printf("MDBX_TX_%s: id=%d kind=%s count=%d stack=%s\n",
-		event, traceID, kind, db.txsCount, dbg.Stack())
+		event, info.id, info.kind, count, dbg.Stack())
+}
+
+// dumpConcurrentTxs prints the stacks of all live chaindata txs EXCEPT the
+// one currently committing. Called only when a commit observes openTxs>1,
+// to pinpoint which other tx was held alive during the commit window.
+func (db *MdbxKV) dumpConcurrentTxs(committer *MdbxTx) {
+	if !mdbxTraceTx || db.opts.label != dbcfg.ChainDB {
+		return
+	}
+	db.txsCountMutex.Lock()
+	snapshot := make([]liveTxInfo, 0, len(db.liveTxs))
+	committerID := uint64(0)
+	if info, ok := db.liveTxs[committer]; ok {
+		committerID = info.id
+	}
+	for tx, info := range db.liveTxs {
+		if tx == committer {
+			continue
+		}
+		snapshot = append(snapshot, info)
+	}
+	db.txsCountMutex.Unlock()
+
+	now := time.Now()
+	for _, info := range snapshot {
+		fmt.Printf("CONCURRENT_TX: committer_id=%d id=%d kind=%s alive=%s stack=%s\n",
+			committerID, info.id, info.kind, now.Sub(info.openedAt), info.stack)
+	}
 }
 
 func (db *MdbxKV) hasTxsAllDoneAndClosed() bool {
@@ -633,7 +718,7 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		readOnly: true,
 		traceID:  db.leakDetector.Add(),
 	}
-	db.logTxLifecycle("OPEN", mt.traceID, true)
+	db.registerLiveTx(mt, true)
 	return mt, nil
 }
 
@@ -675,7 +760,7 @@ func (db *MdbxKV) beginRw(ctx context.Context, flags uint) (txn kv.RwTx, err err
 		ctx:     ctx,
 		traceID: db.leakDetector.Add(),
 	}
-	db.logTxLifecycle("OPEN", mt.traceID, false)
+	db.registerLiveTx(mt, false)
 	return mt, nil
 }
 
@@ -1034,9 +1119,9 @@ func (tx *MdbxTx) Commit() error {
 		return nil
 	}
 	defer func() {
+		tx.db.unregisterLiveTx(tx, "COMMIT")
 		tx.tx = nil
 		tx.db.trackTxEnd()
-		tx.db.logTxLifecycle("COMMIT", tx.traceID, tx.readOnly)
 		if tx.readOnly {
 			tx.db.roTxsLimiter.Release(1)
 		} else {
@@ -1061,12 +1146,13 @@ func (tx *MdbxTx) Commit() error {
 		}
 	}
 	if tx.db.opts.label == dbcfg.ChainDB {
+		openTxs := tx.db.txsCount
 		tx.db.opts.log.Info("[mdbx] commit",
 			"whole", latency.Whole,
 			"gc", latency.GCWallClock,
 			"write", latency.Write,
 			"sync", latency.Sync,
-			"openTxs", tx.db.txsCount,
+			"openTxs", openTxs,
 			"gcLoops", latency.GCDetails.Wloops,
 			"gcCoalesce", latency.GCDetails.Coalescences,
 			"gcWorkRsteps", latency.GCDetails.WorkRsteps,
@@ -1079,6 +1165,12 @@ func (tx *MdbxTx) Commit() error {
 			"gcFlushes", latency.GCDetails.Flushes,
 			"gcKicks", latency.GCDetails.Kicks,
 		)
+		// openTxs includes the committer itself — >1 means at least one other
+		// tx was held alive during this commit. Dump its stack so we can
+		// identify the callsite.
+		if openTxs > 1 {
+			tx.db.dumpConcurrentTxs(tx)
+		}
 	}
 
 	return nil
@@ -1090,9 +1182,9 @@ func (tx *MdbxTx) Rollback() {
 	}
 	tx.closeCursors()
 	tx.tx.Abort()
+	tx.db.unregisterLiveTx(tx, "ROLLBACK")
 	tx.tx = nil
 	tx.db.trackTxEnd()
-	tx.db.logTxLifecycle("ROLLBACK", tx.traceID, tx.readOnly)
 	if tx.readOnly {
 		tx.db.roTxsLimiter.Release(1)
 	} else {
