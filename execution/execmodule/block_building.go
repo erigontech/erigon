@@ -87,7 +87,7 @@ func blockValue(br *types.BlockWithReceipts, baseFee *uint256.Int) *uint256.Int 
 	var gas, txValue uint256.Int
 	for i := range txs {
 		gas.SetUint64(br.Receipts[i].GasUsed)
-		
+
 		effectiveTip := txs[i].GetEffectiveGasTip(baseFee)
 
 		txValue.Mul(&gas, &effectiveTip)
