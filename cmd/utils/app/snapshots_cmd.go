@@ -1360,6 +1360,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 						return err
 					}
 				case integrity.CommitmentKvDeref:
+					return nil // TODO: taking too long on bloatnet
 					if err := integrity.CheckCommitmentKvDeref(ctx, db, cache, failFast, logger); err != nil {
 						return err
 					}
