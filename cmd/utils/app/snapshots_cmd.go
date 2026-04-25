@@ -1360,8 +1360,10 @@ func doIntegrity(cliCtx *cli.Context) error {
 						return err
 					}
 				case integrity.CommitmentKvDeref:
-					log.Warn("[todo] CommitmentKvDeref disabled on bloatnet. see https://github.com/erigontech/erigon/issues/20814")
-					return nil // TODO: taking too long on bloatnet
+					if chainConfig.ChainName == networkname.Bloatnet {
+						log.Warn("[todo] CommitmentKvDeref disabled on bloatnet. see https://github.com/erigontech/erigon/issues/20814")
+						return nil // TODO: taking too long on bloatnet
+					}
 					if err := integrity.CheckCommitmentKvDeref(ctx, db, cache, failFast, logger); err != nil {
 						return err
 					}
