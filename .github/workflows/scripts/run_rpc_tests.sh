@@ -3,7 +3,7 @@ set -e # Enable exit on error
 
 # Sanity check for mandatory parameters
 if [ -z "$1" ] || [ -z "$2" ]; then
-  echo "Usage: $0 <CHAIN> <RPC_VERSION> [DISABLED_TESTS] [WORKSPACE] [RESULT_DIR] [TESTS_TYPE] [REFERENCE_HOST] [COMPARE_ERROR_MESSAGE] [DUMP_RESPONSE]"
+  echo "Usage: $0 <CHAIN> <RPC_VERSION> [DISABLED_TESTS] [WORKSPACE] [RESULT_DIR] [TESTS_TYPE] [REFERENCE_HOST] [COMPARE_ERROR_MESSAGE] [DUMP_RESPONSE] [TRANSPORT_TYPES]"
   echo
   echo "  CHAIN:                 The chain identifier (possible values: mainnet, gnosis, polygon)"
   echo "  RPC_VERSION:           The rpc-tests repository version or branch (e.g., v1.66.0, main)"
@@ -14,6 +14,7 @@ if [ -z "$1" ] || [ -z "$2" ]; then
   echo "  REFERENCE_HOST:        Host address of client node used as reference system (optional, default: empty)"
   echo "  COMPARE_ERROR_MESSAGE: Verify the error message (optional, default: empty, possible values: do-not-compare-error-message)"
   echo "  DUMP_RESPONSE:         Dump each test response (optional, default: empty, possible values: always-dump-response)"
+  echo "  TRANSPORT_TYPES:       Comma-separated list of transport types (optional, default: empty, e.g. http,http_comp,websocket)"
   echo
   exit 1
 fi
@@ -27,6 +28,7 @@ TEST_TYPE="$6"
 REFERENCE_HOST="$7"
 COMPARE_ERROR_MESSAGE="$8"
 DUMP_RESPONSE="$9"
+TRANSPORT_TYPES="${10:-${RPC_TRANSPORT_TYPES:-}}"
 
 OPTIONAL_FLAGS=""
 NUM_OF_RETRIES=2
@@ -57,6 +59,10 @@ fi
 
 if [ "$DUMP_RESPONSE" = "always-dump-response" ]; then
     OPTIONAL_FLAGS+=" --dump-response"
+fi
+
+if [ -n "$TRANSPORT_TYPES" ]; then
+    OPTIONAL_FLAGS+=" --transport-type $TRANSPORT_TYPES"
 fi
 
 echo "Setup the test execution environment..."
