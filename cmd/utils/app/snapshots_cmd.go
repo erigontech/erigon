@@ -1188,8 +1188,10 @@ func doIntegrity(cliCtx *cli.Context) error {
 				continue
 			}
 
+			err := fmt.Errorf("requested check %s not found", check)
+			logger.Warn(err.Error())
 			continue
-			//return fmt.Errorf("requested check %s not found", check)
+
 		}
 	} else {
 		requestedChecks = integrity.FastChecks
