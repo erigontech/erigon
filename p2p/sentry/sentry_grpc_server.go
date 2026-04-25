@@ -57,6 +57,7 @@ import (
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/protocols/wit"
+	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
@@ -1541,15 +1542,10 @@ func (ss *GrpcServer) send(msgID sentryproto.MessageId, peerID [64]byte, b []byt
 	for i := range ss.messageStreams[msgID] {
 		ch := ss.messageStreams[msgID][i]
 		ch <- req
-		if len(ch) > MessagesQueueSize/2 {
-			ss.logger.Debug("[sentry] consuming is slow, drop 50% of old messages", "msgID", msgID.String())
-			// evict old messages from channel
-			for j := 0; j < MessagesQueueSize/4; j++ {
-				select {
-				case <-ch:
-				default:
-				}
-			}
+		before := len(ch)
+		libsentry.EvictOldestIfHalfFull(ch)
+		if before > cap(ch)/2 {
+			ss.logger.Debug("[sentry] consuming is slow, drop oldest 25% of messages", "msgID", msgID.String())
 		}
 	}
 }
@@ -1588,10 +1584,9 @@ func (ss *GrpcServer) addMessagesStream(ids []sentryproto.MessageId, ch chan *se
 	}
 }
 
-const MessagesQueueSize = 1024 // one such queue per client of .Messages stream
 func (ss *GrpcServer) Messages(req *sentryproto.MessagesRequest, server sentryproto.Sentry_MessagesServer) error {
 	ss.logger.Trace("[Messages] new subscriber", "to", req.Ids)
-	ch := make(chan *sentryproto.InboundMessage, MessagesQueueSize)
+	ch := make(chan *sentryproto.InboundMessage, libsentry.MessagesQueueSize)
 	defer close(ch)
 	clean := ss.addMessagesStream(req.Ids, ch)
 	defer clean()
