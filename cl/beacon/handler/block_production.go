@@ -660,7 +660,14 @@ func (a *ApiHandler) produceBeaconBody(
 	if stateVersion >= clparams.GloasVersion {
 		parentBid := baseState.GetLatestExecutionPayloadBid()
 		if parentBid != nil {
-			if a.forkchoiceStore.HasEnvelope(baseBlockRoot) && a.forkchoiceStore.ShouldExtendPayload(baseBlockRoot) {
+			// Fork boundary: the initial bid created by UpgradeToGloas has
+			// ParentBlockHash == Hash32() (zero) because pre-GLOAS blocks have no
+			// parent bid. Pre-GLOAS blocks always had their payloads executed, so
+			// the EL head is parentBid.BlockHash (the last pre-GLOAS block hash).
+			isPreGloasParent := parentBid.ParentBlockHash == (common.Hash{}) && parentBid.Slot == 0
+			if isPreGloasParent {
+				head = parentBid.BlockHash
+			} else if a.forkchoiceStore.HasEnvelope(baseBlockRoot) && a.forkchoiceStore.ShouldExtendPayload(baseBlockRoot) {
 				head = parentBid.BlockHash
 				// Copy state and apply parent execution payload to compute correct withdrawals
 				stateCopy, err := baseState.Copy()
@@ -795,6 +802,10 @@ func (a *ApiHandler) produceBeaconBody(
 		)
 		if err != nil {
 			log.Error("BlockProduction: Failed to get payload id", "err", err)
+			return
+		}
+		if len(idBytes) == 0 {
+			log.Warn("BlockProduction: ForkchoiceUpdate returned no payload id (EL may be syncing)", "slot", targetSlot)
 			return
 		}
 		// Keep requesting block until it's ready

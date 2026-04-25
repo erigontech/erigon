@@ -371,11 +371,15 @@ func (g *GossipManager) subscribeUpcomingTopics(digest common.Bytes4) error {
 				return err
 			}
 		}
+		if err := g.p2p.Pubsub().RegisterTopicValidator(newTopic, prevTopicHandle.validator); err != nil {
+			topicHandle.Close()
+			return err
+		}
 		if err := g.subscriptions.Add(newTopic, topicHandle, prevTopicHandle.validator); err != nil {
 			topicHandle.Close()
 			return err
 		}
-		if err := g.subscriptions.SubscribeWithExpiry(newTopic, prevTopicHandle.expiry); err != nil {
+		if err := g.subscriptions.SubscribeWithExpiry(newTopic, prevTopicHandle.expiry); err != nil && !errors.Is(err, ErrExpiryInThePast) {
 			return err
 		}
 	}
