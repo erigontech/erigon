@@ -83,11 +83,12 @@ jobs:
       - name: Checkout Hive
         uses: actions/checkout@v6
         with:
-          # EXPERIMENT: pinned to erigontech/hive yperbasis/genesis-pool to test
-          # the client-pool prototype with the snapshot-restore path enabled.
+          # EXPERIMENT: pinned to erigontech/hive yperbasis/genesis-pool. This
+          # iteration is the warm-daemon variant — pool keeps client daemons
+          # running across tests and resets state via debug_setHead(0).
           # Revert to ethereum/hive + steps.hive-version.outputs.ref before merging.
           repository: erigontech/hive
-          ref: bc2cfecf24066898d0308f967d1d6d66a2dafc41
+          ref: c916d4357edcfdb2b23900c2b04157b6b924a84f
           path: hive
 
       - name: Conditional Docker Login
