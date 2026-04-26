@@ -229,13 +229,35 @@ func TestP2P_Swarm_FullReplication(t *testing.T) {
 	// fix at p2p/server.go:setupConn. Without that fix the acceptor
 	// would silently see a stub enode and the manifest fetch would not
 	// fire.
+	//
+	// Two passes, intentionally. The p2p server's static-peer lookup
+	// (see fix at p2p/server.go:setupConn) is consulted from the
+	// inbound-handshake path to recover the dialer's full ENR. If we
+	// dialed in the same iteration as we registered, peer 0's first
+	// dial would race ahead and complete its inbound handshake on
+	// peer 1 BEFORE peer 1 has registered peer 0 as a static peer —
+	// the lookup misses, fallback to stub enode, and ENR entries are
+	// lost. So:
+	//
+	//   pass 1: every peer AddDevP2PPeer's every other peer. Static-peer
+	//           table is populated synchronously on every server. Dial
+	//           is also scheduled.
+	//   pass 2: BT-level AddSeederPeer, after every server has the
+	//           full static set.
+	for i, p := range peers {
+		for j, other := range peers {
+			if i == j {
+				continue
+			}
+			p.AddDevP2PPeer(other.DevP2PSelf())
+		}
+	}
 	for i, p := range peers {
 		for j, other := range peers {
 			if i == j {
 				continue
 			}
 			p.AddSeederPeer(other)
-			p.AddDevP2PPeer(other.DevP2PSelf())
 		}
 	}
 
