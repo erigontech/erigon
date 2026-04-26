@@ -76,6 +76,13 @@ type Provider struct {
 	// avoiding anacrolix's per-infohash dedup silently dropping the
 	// second caller's Storage.
 	peerManifestInflight sync.Map // [20]byte → *peerManifestFetch
+
+	// Auto-publish wiring. Installed by BindAutoPublish, torn down by
+	// UnbindAutoPublish. Re-publishes chain.toml.v2 + updates ENR
+	// whenever the local inventory grows (a TrustPromoted event arrives).
+	autoPublishHandler func(flow.TrustPromoted)
+	autoPublishCancel  context.CancelFunc
+	autoPublishDone    chan struct{}
 }
 
 // peerManifestFetch holds the result of a de-duplicated FetchPeerManifestV2
