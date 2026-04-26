@@ -178,11 +178,36 @@ func (w *Warmuper) Start() {
 				defer cleanup()
 			}
 
+			var logTicker *time.Ticker
+			if i == 0 {
+				logTicker = time.NewTicker(20 * time.Second)
+				defer logTicker.Stop()
+			}
+
+			var lastKeys uint64
+			var lastTime = time.Now()
+
 			for item := range w.work {
 				select {
 				case <-w.ctx.Done():
 					return w.ctx.Err()
 				default:
+				}
+
+				if logTicker != nil {
+					select {
+					case <-logTicker.C:
+						now := time.Now()
+						total := w.keysProcessed.Load()
+						elapsed := now.Sub(lastTime).Seconds()
+						keysPerSec := float64(total-lastKeys) / elapsed
+						lastKeys = total
+						lastTime = now
+						log.Info(fmt.Sprintf("[%s][warmup] worker", w.logPrefix),
+							"keys/s", fmt.Sprintf("%.0f", keysPerSec),
+							"queue", len(w.work))
+					default:
+					}
 				}
 
 				w.warmupKey(trieCtx, item.hashedKey, item.startDepth)
