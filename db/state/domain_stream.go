@@ -284,6 +284,79 @@ func (hi *DomainLatestIterFile) initCursorOnDB(domainRoTx *DomainRoTx) error {
 	return nil
 }
 
+// advanceLargeValsDBCursor owns ci1: it either re-pushes it onto the heap or closes it.
+func (hi *DomainLatestIterFile) advanceLargeValsDBCursor(ci1 *CursorItem) error {
+	var pushed bool
+	defer func() {
+		if !pushed {
+			hi.closeCursorItem(ci1)
+		}
+	}()
+	for {
+		initial, v, err := ci1.cNonDup.Current()
+		if err != nil {
+			return err
+		}
+		var k []byte
+		for initial != nil && len(initial) > 8 && (k == nil || (len(k) > 8 && bytes.Equal(initial[:len(initial)-8], k[:len(k)-8]))) {
+			k, v, err = ci1.cNonDup.Next()
+			if err != nil {
+				return err
+			}
+			if k == nil {
+				break
+			}
+		}
+		if len(k) <= 8 || !(hi.to == nil || bytes.Compare(k[:len(k)-8], hi.to) < 0) {
+			break
+		}
+		stepBytes := k[len(k)-8:]
+		step := ^binary.BigEndian.Uint64(stepBytes)
+		endTxNum := step * hi.aggStep
+		if endTxNum >= hi.filesEndTxNum {
+			ci1.key = common.Copy(k[:len(k)-8])
+			ci1.endTxNum = endTxNum
+			ci1.val = common.Copy(v)
+			heap.Push(hi.h, ci1)
+			pushed = true
+			break
+		}
+	}
+	return nil
+}
+
+// advanceDupSortDBCursor owns ci1: it either re-pushes it onto the heap or closes it.
+func (hi *DomainLatestIterFile) advanceDupSortDBCursor(ci1 *CursorItem) error {
+	var pushed bool
+	defer func() {
+		if !pushed {
+			hi.closeCursorItem(ci1)
+		}
+	}()
+	for {
+		k, stepBytesWithValue, err := ci1.cDup.NextNoDup()
+		if err != nil {
+			return err
+		}
+		if len(k) == 0 || !(hi.to == nil || bytes.Compare(k, hi.to) < 0) {
+			break
+		}
+		stepBytes := stepBytesWithValue[:8]
+		v := stepBytesWithValue[8:]
+		step := ^binary.BigEndian.Uint64(stepBytes)
+		endTxNum := step * hi.aggStep
+		if endTxNum >= hi.filesEndTxNum {
+			ci1.key = common.Copy(k)
+			ci1.endTxNum = endTxNum
+			ci1.val = common.Copy(v)
+			heap.Push(hi.h, ci1)
+			pushed = true
+			break
+		}
+	}
+	return nil
+}
+
 func (hi *DomainLatestIterFile) advanceInFiles() error {
 	for hi.h.Len() > 0 {
 		lastKey := (*hi.h)[0].key
@@ -320,73 +393,12 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 				}
 			case DB_CURSOR:
 				if hi.largeVals {
-					// Skip DB entries within file range — files are authoritative there.
-					var pushed bool
-					for {
-						// start from current go to next
-						initial, v, err := ci1.cNonDup.Current()
-						if err != nil {
-							hi.closeCursorItem(ci1)
-							return err
-						}
-						var k []byte
-						for initial != nil && len(initial) > 8 && (k == nil || (len(k) > 8 && bytes.Equal(initial[:len(initial)-8], k[:len(k)-8]))) {
-							k, v, err = ci1.cNonDup.Next()
-							if err != nil {
-								hi.closeCursorItem(ci1)
-								return err
-							}
-							if k == nil {
-								break
-							}
-						}
-
-						if len(k) <= 8 || !(hi.to == nil || bytes.Compare(k[:len(k)-8], hi.to) < 0) {
-							break
-						}
-						stepBytes := k[len(k)-8:]
-						step := ^binary.BigEndian.Uint64(stepBytes)
-						endTxNum := step * hi.aggStep
-						if endTxNum >= hi.filesEndTxNum {
-							ci1.key = common.Copy(k[:len(k)-8])
-							ci1.endTxNum = endTxNum
-							ci1.val = common.Copy(v)
-							heap.Push(hi.h, ci1)
-							pushed = true
-							break
-						}
-					}
-					if !pushed {
-						hi.closeCursorItem(ci1)
+					if err := hi.advanceLargeValsDBCursor(ci1); err != nil {
+						return err
 					}
 				} else {
-					var pushed bool
-					for {
-						// start from current go to next
-						k, stepBytesWithValue, err := ci1.cDup.NextNoDup()
-						if err != nil {
-							hi.closeCursorItem(ci1)
-							return err
-						}
-
-						if len(k) == 0 || !(hi.to == nil || bytes.Compare(k, hi.to) < 0) {
-							break
-						}
-						stepBytes := stepBytesWithValue[:8]
-						v := stepBytesWithValue[8:]
-						step := ^binary.BigEndian.Uint64(stepBytes)
-						endTxNum := step * hi.aggStep
-						if endTxNum >= hi.filesEndTxNum {
-							ci1.key = common.Copy(k)
-							ci1.endTxNum = endTxNum
-							ci1.val = common.Copy(v)
-							heap.Push(hi.h, ci1)
-							pushed = true
-							break
-						}
-					}
-					if !pushed {
-						hi.closeCursorItem(ci1)
+					if err := hi.advanceDupSortDBCursor(ci1); err != nil {
+						return err
 					}
 				}
 
