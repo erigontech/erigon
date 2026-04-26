@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"sort"
 	"sync/atomic"
 	"time"
 
@@ -198,24 +199,20 @@ func (w *Warmuper) Start() {
 						now := time.Now()
 						elapsed := now.Sub(lastTime).Seconds()
 						lastTime = now
-						var total, minRate, maxRate uint64
-						minRate = ^uint64(0)
+						rates := make([]uint64, w.numWorkers)
 						for j := range w.workerKeys {
 							cur := w.workerKeys[j].Load()
-							rate := uint64(float64(cur-lastSnap[j]) / elapsed)
+							rates[j] = uint64(float64(cur-lastSnap[j]) / elapsed)
 							lastSnap[j] = cur
-							total += rate
-							if rate < minRate {
-								minRate = rate
-							}
-							if rate > maxRate {
-								maxRate = rate
-							}
 						}
+						sort.Slice(rates, func(a, b int) bool { return rates[a] < rates[b] })
+						n := len(rates)
 						log.Info(fmt.Sprintf("[%s][warmup]", w.logPrefix),
-							"keys/s", common.PrettyCounter(total),
-							"min", common.PrettyCounter(minRate),
-							"max", common.PrettyCounter(maxRate),
+							"p0", common.PrettyCounter(rates[0]),
+							"p25", common.PrettyCounter(rates[n/4]),
+							"p50", common.PrettyCounter(rates[n/2]),
+							"p75", common.PrettyCounter(rates[n*3/4]),
+							"p100", common.PrettyCounter(rates[n-1]),
 							"queue", len(w.work))
 					default:
 					}
