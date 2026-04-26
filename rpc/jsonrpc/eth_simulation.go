@@ -171,16 +171,21 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 	defer sharedDomains.Close()
 	sharedDomains.GetCommitmentContext().SetDeferBranchUpdates(false)
 
-	// Iterate over each given SimulatedBlock
+	// Iterate over each given SimulatedBlock.
+	// blockHashOverrides accumulates hashes of previously-simulated blocks so that
+	// BLOCKHASH in subsequent blocks resolves to the simulated hash, not the real chain hash.
+	blockHashOverrides := ethapi.BlockHashOverrides{}
 	parent := sim.base
 	for index, bsc := range simulatedBlocks {
-		blockResult, current, err := sim.simulateBlock(ctx, tx, sharedDomains, &bsc, headers[index], parent, headers[:index], blockNumber == latestBlockNumber)
+		blockResult, current, err := sim.simulateBlock(ctx, tx, sharedDomains, &bsc, headers[index], parent, headers[:index], blockNumber == latestBlockNumber, blockHashOverrides)
 		if err != nil {
 			return nil, err
 		}
 		simulatedBlockResults = append(simulatedBlockResults, blockResult)
 		headers[index] = current.Header()
 		parent = current.Header()
+		// Record this simulated block's hash so subsequent blocks can look it up via BLOCKHASH.
+		blockHashOverrides[current.NumberU64()] = current.Hash()
 	}
 
 	return simulatedBlockResults, nil
@@ -507,6 +512,7 @@ func (s *simulator) simulateBlock(
 	parent *types.Header,
 	ancestors []*types.Header,
 	latest bool,
+	blockHashOverrides ethapi.BlockHashOverrides,
 ) (SimulatedBlockResult, *types.Block, error) {
 	header.ParentHash = parent.Hash()
 	if s.chainConfig.IsLondon(header.Number.Uint64()) {
@@ -529,7 +535,6 @@ func (s *simulator) simulateBlock(
 
 	blockNumber := header.Number.Uint64()
 
-	blockHashOverrides := ethapi.BlockHashOverrides{}
 	txnList := make([]types.Transaction, 0, len(bsc.Calls))
 	receiptList := make(types.Receipts, 0, len(bsc.Calls))
 	tracer := rpchelper.NewLogTracer(s.traceTransfers, blockNumber, common.Hash{}, common.Hash{}, 0)
