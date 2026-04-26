@@ -70,6 +70,7 @@ type Warmuper struct {
 
 	// Stats
 	keysProcessed atomic.Uint64
+	workerKeys    []atomic.Uint64
 	startTime     time.Time
 
 	// State
@@ -165,6 +166,7 @@ func (w *Warmuper) Start() {
 	}
 
 	w.work = make(chan warmupWorkItem, w.numWorkers*64)
+	w.workerKeys = make([]atomic.Uint64, w.numWorkers)
 	w.g, w.ctx = errgroup.WithContext(w.ctx)
 
 	for i := 0; i < w.numWorkers; i++ {
@@ -174,16 +176,14 @@ func (w *Warmuper) Start() {
 				defer cleanup()
 			}
 
-			isEdge := i == 0 || i == w.numWorkers-1
 			var logTicker *time.Ticker
-			if isEdge {
+			if i == 0 {
 				logTicker = time.NewTicker(20 * time.Second)
 				defer logTicker.Stop()
 			}
 
-			var localKeys uint64
-			var lastLocalKeys uint64
-			var lastTime = time.Now()
+			lastSnap := make([]uint64, w.numWorkers)
+			lastTime := time.Now()
 
 			for item := range w.work {
 				select {
@@ -197,11 +197,15 @@ func (w *Warmuper) Start() {
 					case <-logTicker.C:
 						now := time.Now()
 						elapsed := now.Sub(lastTime).Seconds()
-						keysPerSec := uint64(float64(localKeys-lastLocalKeys) / elapsed)
-						lastLocalKeys = localKeys
 						lastTime = now
-						log.Info(fmt.Sprintf("[%s][warmup] worker%d", w.logPrefix, i),
-							"keys/s", common.PrettyCounter(keysPerSec),
+						rates := make([]string, w.numWorkers)
+						for j := range w.workerKeys {
+							cur := w.workerKeys[j].Load()
+							rates[j] = common.PrettyCounter(uint64(float64(cur-lastSnap[j]) / elapsed))
+							lastSnap[j] = cur
+						}
+						log.Info(fmt.Sprintf("[%s][warmup]", w.logPrefix),
+							"keys/s", rates,
 							"queue", len(w.work))
 					default:
 					}
@@ -209,7 +213,7 @@ func (w *Warmuper) Start() {
 
 				w.warmupKey(trieCtx, item.hashedKey, item.startDepth)
 				w.keysProcessed.Add(1)
-				localKeys++
+				w.workerKeys[i].Add(1)
 			}
 			return nil
 		})
