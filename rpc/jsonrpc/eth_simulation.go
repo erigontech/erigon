@@ -790,7 +790,7 @@ func (s *simulator) simulateCall(
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	msg.SetCheckGas(s.validation)
+	msg.SetCheckGas(false) // EIP-7825 gas cap does not apply to simulated calls (matches Geth SkipTransactionChecks)
 	msg.SetCheckNonce(s.validation)
 	txCtx := protocol.NewEVMTxContext(msg)
 	txn, err := call.ToTransaction(s.gasPool.Gas(), &blockCtx.BaseFee)
