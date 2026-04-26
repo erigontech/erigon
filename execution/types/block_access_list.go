@@ -523,7 +523,9 @@ func decodeBlockAccessList(out *BlockAccessList, s *rlp.Stream) error {
 	var size uint64
 	if size, err = s.List(); err != nil {
 		if errors.Is(err, rlp.EOL) {
-			*out = nil
+			// EIP-7928: return initialized empty slice so 0xc0 round-trips
+			// as a valid empty BAL, distinct from nil (missing/pruned).
+			*out = make(BlockAccessList, 0)
 			return nil
 		}
 		return err
@@ -558,7 +560,8 @@ func decodeBlockAccessList(out *BlockAccessList, s *rlp.Stream) error {
 		return err
 	}
 	if len(changes) == 0 {
-		*out = nil
+		// EIP-7928: initialized empty slice, not nil (see above).
+		*out = make(BlockAccessList, 0)
 		return nil
 	}
 	*out = changes
@@ -577,9 +580,6 @@ func DecodeBlockAccessListBytes(data []byte) (BlockAccessList, error) {
 
 // EncodeBlockAccessListBytes encodes a block access list into RLP bytes.
 func EncodeBlockAccessListBytes(bal BlockAccessList) ([]byte, error) {
-	if len(bal) == 0 {
-		return []byte{0xc0}, nil
-	}
 	if err := bal.Validate(); err != nil {
 		return nil, err
 	}

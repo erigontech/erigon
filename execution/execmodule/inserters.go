@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -111,23 +110,11 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 		if _, err := rawdb.WriteRawBodyIfNotExists(blockOverlay, header.Hash(), height, body); err != nil {
 			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBody: %s", err)
 		}
-		// NOTE(EIP-7928): Amsterdam blocks with an empty BAL still have a valid
-		// sidecar payload equal to rlp.encode([]) == 0xc0. Guarding this write on
-		// len(block.BlockAccessList) > 0 means we currently persist only non-empty
-		// BALs, so the empty BAL sidecar is dropped even when the header carries
-		// keccak256(rlp.encode([])).
-		if len(block.BlockAccessList) > 0 || (header.BlockAccessListHash != nil && *header.BlockAccessListHash == empty.BlockAccessListHash) {
+		if len(block.BlockAccessList) > 0 {
 			if header.BlockAccessListHash == nil {
 				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: block access list provided without hash for block %d", height)
 			}
-			balBytes := block.BlockAccessList
-			if len(balBytes) == 0 {
-				balBytes, err = types.EncodeBlockAccessListBytes(nil)
-				if err != nil {
-					return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: encode empty block access list, block %d: %s", height, err)
-				}
-			}
-			if err := rawdb.WriteBlockAccessListBytes(blockOverlay, header.Hash(), height, balBytes); err != nil {
+			if err := rawdb.WriteBlockAccessListBytes(blockOverlay, header.Hash(), height, block.BlockAccessList); err != nil {
 				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBlockAccessList, block %d: %s", height, err)
 			}
 		}
