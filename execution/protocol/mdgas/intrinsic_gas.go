@@ -125,39 +125,6 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 				return IntrinsicGasCalcResult{}, true
 			}
 		}
-		if args.IsEIP7623 {
-			var tokenLen uint64
-			var costPerToken uint64
-			if args.IsEIP7976 {
-				// EIP-7976: floor_tokens = total_bytes * 4, cost_per_token = 16
-				// => 64 gas per byte (both zero and non-zero)
-				var overflow bool
-				tokenLen, overflow = math.SafeMul(dataLen, 4)
-				if overflow {
-					return IntrinsicGasCalcResult{}, true
-				}
-				costPerToken = params.TxTotalCostFloorPerTokenEIP7976
-			} else {
-				// EIP-7623: tokens = zero_bytes + 4*nonzero_bytes = dataLen + 3*nz
-				nzTokens, overflow := math.SafeMul(3, nz)
-				if overflow {
-					return IntrinsicGasCalcResult{}, true
-				}
-				tokenLen, overflow = math.SafeAdd(dataLen, nzTokens)
-				if overflow {
-					return IntrinsicGasCalcResult{}, true
-				}
-				costPerToken = params.TxTotalCostFloorPerToken
-			}
-			dataGas, overflow := math.SafeMul(tokenLen, costPerToken)
-			if overflow {
-				return IntrinsicGasCalcResult{}, true
-			}
-			result.FloorGasCost, overflow = math.SafeAdd(result.FloorGasCost, dataGas)
-			if overflow {
-				return IntrinsicGasCalcResult{}, true
-			}
-		}
 	}
 	if args.AccessListLen > 0 {
 		product, overflow := math.SafeMul(args.AccessListLen, params.TxAccessListAddressGas)
@@ -252,7 +219,13 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 			}
 		}
 	}
-	if args.IsEIP7976 {
+	// EIP-7976 and EIP-7981 share the same per-token rate (16 gas/token), and
+	// EIP-7981 spec requires EIP-7976 as a precondition. Selecting the rate on
+	// either flag keeps the access-list floor surcharge (always charged at
+	// EIP-7976 rate in RegularGas above) consistent with the FloorGasCost rate
+	// even in the unsupported configuration where EIP-7981 is enabled without
+	// EIP-7976.
+	if args.IsEIP7976 || args.IsEIP7981 {
 		costPerToken = params.TxTotalCostFloorPerTokenEIP7976
 	} else {
 		costPerToken = params.TxTotalCostFloorPerToken

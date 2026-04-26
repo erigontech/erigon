@@ -109,16 +109,10 @@ func TestZeroDataIntrinsicGas(t *testing.T) {
 	assert.Equal(params.TxGas, result.FloorGasCost)
 }
 
-<<<<<<< HEAD
 // TestEIP7976FloorCost covers EIP-7976 (Increase Calldata Floor Cost): every
 // calldata byte (zero or non-zero) contributes TxStandardTokensPerByte tokens,
 // each costing TxTotalCostFloorPerTokenEIP7976 gas.
 func TestEIP7976FloorCost(t *testing.T) {
-=======
-func TestEIP7976FloorCost(t *testing.T) {
-	// EIP-7976 floor: 64 gas per byte (both zero and non-zero),
-	// computed as floor_tokens = total_bytes * 4, cost_per_token = 16.
->>>>>>> e3bbdc7ec7b05c607f0b596eb264fbb1f95bc723
 	cases := map[string]struct {
 		dataLen        uint64
 		dataNonZeroLen uint64
@@ -133,37 +127,23 @@ func TestEIP7976FloorCost(t *testing.T) {
 			// 32 zero bytes: floor_tokens = 32*4 = 128, floor = 128*16 = 2048
 			dataLen:        32,
 			dataNonZeroLen: 0,
-			expectedFloor:  params.TxGas + 32*4*params.TxTotalCostFloorPerTokenEIP7976, // 21000 + 2048 = 23048
+			expectedFloor:  params.TxGas + 32*params.TxStandardTokensPerByte*params.TxTotalCostFloorPerTokenEIP7976, // 21000 + 2048 = 23048
 		},
 		"all non-zero bytes": {
-<<<<<<< HEAD
 			// Same floor as all-zero (byte value doesn't matter)
 			dataLen:        32,
 			dataNonZeroLen: 32,
-			expectedFloor:  params.TxGas + 32*4*params.TxTotalCostFloorPerTokenEIP7976,
+			expectedFloor:  params.TxGas + 32*params.TxStandardTokensPerByte*params.TxTotalCostFloorPerTokenEIP7976,
 		},
 		"mixed bytes": {
 			dataLen:        32,
 			dataNonZeroLen: 12,
-			expectedFloor:  params.TxGas + 32*4*params.TxTotalCostFloorPerTokenEIP7976,
-=======
-			// 32 non-zero bytes: floor_tokens = 32*4 = 128, floor = 128*16 = 2048
-			// Key property: same floor as all-zero (byte value doesn't matter)
-			dataLen:        32,
-			dataNonZeroLen: 32,
-			expectedFloor:  params.TxGas + 32*4*params.TxTotalCostFloorPerTokenEIP7976, // 21000 + 2048 = 23048
-		},
-		"mixed bytes": {
-			// 20 zero + 12 non-zero = 32 total: floor_tokens = 32*4 = 128, floor = 128*16 = 2048
-			dataLen:        32,
-			dataNonZeroLen: 12,
-			expectedFloor:  params.TxGas + 32*4*params.TxTotalCostFloorPerTokenEIP7976, // 21000 + 2048 = 23048
->>>>>>> e3bbdc7ec7b05c607f0b596eb264fbb1f95bc723
+			expectedFloor:  params.TxGas + 32*params.TxStandardTokensPerByte*params.TxTotalCostFloorPerTokenEIP7976,
 		},
 		"single byte non-zero": {
 			dataLen:        1,
 			dataNonZeroLen: 1,
-			expectedFloor:  params.TxGas + 1*4*params.TxTotalCostFloorPerTokenEIP7976, // 21000 + 64 = 21064
+			expectedFloor:  params.TxGas + 1*params.TxStandardTokensPerByte*params.TxTotalCostFloorPerTokenEIP7976, // 21000 + 64 = 21064
 		},
 	}
 
@@ -187,16 +167,9 @@ func TestEIP7976FloorCost(t *testing.T) {
 	}
 }
 
-<<<<<<< HEAD
 // TestEIP7976VsEIP7623Floor verifies EIP-7976 floors are strictly greater
 // than EIP-7623 floors for the same calldata.
 func TestEIP7976VsEIP7623Floor(t *testing.T) {
-=======
-func TestEIP7976VsEIP7623Floor(t *testing.T) {
-	// Compare EIP-7976 vs EIP-7623 floor costs for the same data.
-	// EIP-7976 is strictly greater than EIP-7623 for any non-empty calldata
-	// (64 > 10 for zero bytes, 64 > 40 for non-zero bytes).
->>>>>>> e3bbdc7ec7b05c607f0b596eb264fbb1f95bc723
 	assert := assert.New(t)
 
 	// 32 non-zero bytes:
@@ -221,21 +194,11 @@ func TestEIP7976VsEIP7623Floor(t *testing.T) {
 	})
 	assert.False(overflow)
 
-<<<<<<< HEAD
 	assert.Equal(params.TxGas+128*params.TxTotalCostFloorPerToken, result7623.FloorGasCost)
 	assert.Equal(params.TxGas+128*params.TxTotalCostFloorPerTokenEIP7976, result7976.FloorGasCost)
 	assert.Greater(result7976.FloorGasCost, result7623.FloorGasCost)
 
 	// 32 zero bytes:
-=======
-	assert.Equal(params.TxGas+128*params.TxTotalCostFloorPerToken, result7623.FloorGasCost)        // 21000+1280=22280
-	assert.Equal(params.TxGas+128*params.TxTotalCostFloorPerTokenEIP7976, result7976.FloorGasCost) // 21000+2048=23048
-	assert.Greater(result7976.FloorGasCost, result7623.FloorGasCost)
-
-	// 32 zero bytes:
-	// EIP-7623: tokens = 32 + 3*0 = 32, floor = 32*10 = 320
-	// EIP-7976: tokens = 32*4 = 128, floor = 128*16 = 2048
->>>>>>> e3bbdc7ec7b05c607f0b596eb264fbb1f95bc723
 	result7623z, overflow := CalcIntrinsicGas(IntrinsicGasCalcArgs{
 		Data:           make([]byte, 32),
 		DataNonZeroLen: 0,
@@ -255,7 +218,6 @@ func TestEIP7976VsEIP7623Floor(t *testing.T) {
 	})
 	assert.False(overflow)
 
-<<<<<<< HEAD
 	assert.Equal(params.TxGas+32*params.TxTotalCostFloorPerToken, result7623z.FloorGasCost)
 	assert.Equal(params.TxGas+128*params.TxTotalCostFloorPerTokenEIP7976, result7976z.FloorGasCost)
 	assert.Greater(result7976z.FloorGasCost, result7623z.FloorGasCost)
@@ -268,12 +230,6 @@ func TestEIP7976VsEIP7623Floor(t *testing.T) {
 // access list data contributes to the floor calculation, and the access
 // list data cost is always charged in the standard intrinsic gas path.
 func TestEIP7981IntrinsicGas(t *testing.T) {
-	const (
-		floorCostPerToken = 16
-		tokensPerByte     = 4
-		addressBytes      = 20
-		storageKeyBytes   = 32
-	)
 	cases := map[string]struct {
 		dataLen              uint64
 		dataNonZeroLen       uint64
@@ -296,9 +252,12 @@ func TestEIP7981IntrinsicGas(t *testing.T) {
 			accessListLen:  1,
 			storageKeysLen: 0,
 			// regular = 21000 + 2400 + (20*4)*16 = 21000 + 2400 + 1280
-			expectedRegularGas: params.TxGas + params.TxAccessListAddressGas + addressBytes*tokensPerByte*floorCostPerToken,
+			expectedRegularGas: params.TxGas +
+				params.TxAccessListAddressGas +
+				params.TxAccessListAddressBytes*params.TxStandardTokensPerByte*params.TxTotalCostFloorPerTokenEIP7976,
 			// floor = 21000 + (20*4)*16 = 21000 + 1280
-			expectedFloorGasCost: params.TxGas + addressBytes*tokensPerByte*floorCostPerToken,
+			expectedFloorGasCost: params.TxGas +
+				params.TxAccessListAddressBytes*params.TxStandardTokensPerByte*params.TxTotalCostFloorPerTokenEIP7976,
 		},
 		"access list with storage keys": {
 			dataLen:        0,
@@ -310,8 +269,9 @@ func TestEIP7981IntrinsicGas(t *testing.T) {
 			expectedRegularGas: params.TxGas +
 				params.TxAccessListAddressGas +
 				2*params.TxAccessListStorageKeyGas +
-				(addressBytes+2*storageKeyBytes)*tokensPerByte*floorCostPerToken,
-			expectedFloorGasCost: params.TxGas + (addressBytes+2*storageKeyBytes)*tokensPerByte*floorCostPerToken,
+				(params.TxAccessListAddressBytes+2*params.TxAccessListStorageKeyBytes)*params.TxStandardTokensPerByte*params.TxTotalCostFloorPerTokenEIP7976,
+			expectedFloorGasCost: params.TxGas +
+				(params.TxAccessListAddressBytes+2*params.TxAccessListStorageKeyBytes)*params.TxStandardTokensPerByte*params.TxTotalCostFloorPerTokenEIP7976,
 		},
 		"calldata only all non-zero": {
 			dataLen:        32,
@@ -321,7 +281,7 @@ func TestEIP7981IntrinsicGas(t *testing.T) {
 			// regular = 21000 + 32*16 = 21512
 			expectedRegularGas: params.TxGas + 32*params.TxDataNonZeroGasEIP2028,
 			// floor = 21000 + (32*4)*16 = 21000 + 2048
-			expectedFloorGasCost: params.TxGas + 32*tokensPerByte*floorCostPerToken,
+			expectedFloorGasCost: params.TxGas + 32*params.TxStandardTokensPerByte*params.TxTotalCostFloorPerTokenEIP7976,
 		},
 		"calldata only all zero bytes": {
 			dataLen:        32,
@@ -331,7 +291,7 @@ func TestEIP7981IntrinsicGas(t *testing.T) {
 			// regular = 21000 + 32*4 = 21128
 			expectedRegularGas: params.TxGas + 32*params.TxDataZeroGas,
 			// EIP-7976: zero bytes also cost 4 tokens each for the floor => 21000 + (32*4)*16 = 23048
-			expectedFloorGasCost: params.TxGas + 32*tokensPerByte*floorCostPerToken,
+			expectedFloorGasCost: params.TxGas + 32*params.TxStandardTokensPerByte*params.TxTotalCostFloorPerTokenEIP7976,
 		},
 		"calldata and access list": {
 			dataLen:        32,
@@ -344,9 +304,10 @@ func TestEIP7981IntrinsicGas(t *testing.T) {
 				32*params.TxDataNonZeroGasEIP2028 +
 				params.TxAccessListAddressGas +
 				2*params.TxAccessListStorageKeyGas +
-				(addressBytes+2*storageKeyBytes)*tokensPerByte*floorCostPerToken,
+				(params.TxAccessListAddressBytes+2*params.TxAccessListStorageKeyBytes)*params.TxStandardTokensPerByte*params.TxTotalCostFloorPerTokenEIP7976,
 			// floor tokens = 32*4 + 84*4 = 128 + 336 = 464; floor = 21000 + 464*16 = 28424
-			expectedFloorGasCost: params.TxGas + (32+addressBytes+2*storageKeyBytes)*tokensPerByte*floorCostPerToken,
+			expectedFloorGasCost: params.TxGas +
+				(32+params.TxAccessListAddressBytes+2*params.TxAccessListStorageKeyBytes)*params.TxStandardTokensPerByte*params.TxTotalCostFloorPerTokenEIP7976,
 		},
 	}
 
@@ -389,15 +350,5 @@ func TestEIP7981NotActive(t *testing.T) {
 	// Regular: 21000 + 32*16 + 2400 + 2*1900 = 27712 (no access list data floor charge)
 	assert.Equal(t, params.TxGas+32*params.TxDataNonZeroGasEIP2028+params.TxAccessListAddressGas+2*params.TxAccessListStorageKeyGas, result.RegularGas)
 	// Floor (EIP-7976, access list not included): 21000 + (32*4)*16 = 23048
-	assert.Equal(t, params.TxGas+32*4*params.TxTotalCostFloorPerTokenEIP7976, result.FloorGasCost)
+	assert.Equal(t, params.TxGas+32*params.TxStandardTokensPerByte*params.TxTotalCostFloorPerTokenEIP7976, result.FloorGasCost)
 }
-=======
-	assert.Equal(params.TxGas+32*params.TxTotalCostFloorPerToken, result7623z.FloorGasCost)         // 21000+320=21320
-	assert.Equal(params.TxGas+128*params.TxTotalCostFloorPerTokenEIP7976, result7976z.FloorGasCost) // 21000+2048=23048
-	assert.Greater(result7976z.FloorGasCost, result7623z.FloorGasCost)
-
-	// Standard gas should be the same regardless of EIP-7976
-	assert.Equal(result7623.RegularGas, result7976.RegularGas)
-	assert.Equal(result7623z.RegularGas, result7976z.RegularGas)
-}
->>>>>>> e3bbdc7ec7b05c607f0b596eb264fbb1f95bc723
