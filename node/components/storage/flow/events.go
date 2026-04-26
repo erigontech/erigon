@@ -62,10 +62,17 @@ type TrustPromoted struct {
 
 // PeerManifestReceived carries the full manifest state a peer currently
 // advertises. Supersedes any prior manifest from the same peer.
+//
+// Domains carries every kind a domain advertises (kv, history, idx);
+// inspect FileEntry.Kind to filter. Blocks holds top-level block .seg.
+// Caplin, Meta, Salt are flat slices keyed by their respective Kind.
 type PeerManifestReceived struct {
 	PeerID  string
 	Domains map[snapshot.Domain][]*snapshot.FileEntry
 	Blocks  []*snapshot.FileEntry
+	Caplin  []*snapshot.FileEntry
+	Meta    []*snapshot.FileEntry
+	Salt    []*snapshot.FileEntry
 }
 
 // PeerDeparted fires when a peer leaves; its manifest is no longer authoritative.

@@ -57,6 +57,7 @@ func v2ToPeerManifest(peerID string, m *downloader.ChainTomlV2) flow.PeerManifes
 				}
 				entries = append(entries, &snapshot.FileEntry{
 					Domain:      domain,
+					Kind:        domainKindFromV2(f.Kind),
 					Name:        f.Name,
 					FromStep:    f.Range[0],
 					ToStep:      f.Range[1],
@@ -95,7 +96,68 @@ func v2ToPeerManifest(peerID string, m *downloader.ChainTomlV2) flow.PeerManifes
 		}
 	}
 
+	if len(m.Caplin) > 0 {
+		out.Caplin = make([]*snapshot.FileEntry, 0, len(m.Caplin))
+		for _, c := range m.Caplin {
+			hash, ok := decodeHash(c.Hash)
+			if !ok {
+				continue
+			}
+			trust, err := snapshot.ParseTrustLevel(c.Trust)
+			if err != nil {
+				trust = snapshot.TrustNone
+			}
+			out.Caplin = append(out.Caplin, &snapshot.FileEntry{
+				Kind:        snapshot.KindCaplin,
+				Name:        c.Name,
+				TorrentHash: hash,
+				Trust:       trust,
+			})
+		}
+	}
+
+	out.Meta = flatHashMapToEntries(m.Meta, snapshot.KindMeta)
+	out.Salt = flatHashMapToEntries(m.Salt, snapshot.KindSalt)
+
 	return out
+}
+
+// flatHashMapToEntries converts a name→hex-hash map (used by Meta and
+// Salt sections) into peer FileEntry slices tagged with the given Kind.
+// Entries with malformed hex are skipped silently.
+func flatHashMapToEntries(m map[string]string, kind snapshot.FileKind) []*snapshot.FileEntry {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make([]*snapshot.FileEntry, 0, len(m))
+	for name, hashStr := range m {
+		hash, ok := decodeHash(hashStr)
+		if !ok {
+			continue
+		}
+		out = append(out, &snapshot.FileEntry{
+			Kind:        kind,
+			Name:        name,
+			TorrentHash: hash,
+			Trust:       snapshot.TrustNone,
+		})
+	}
+	return out
+}
+
+// domainKindFromV2 maps the on-the-wire kind string to a snapshot.FileKind.
+// Empty (back-compat for older publishers) and unrecognised strings both
+// default to KindKV — preserves forward-compat while keeping the
+// orchestrator's gap-fill on a known kind.
+func domainKindFromV2(s string) snapshot.FileKind {
+	switch s {
+	case downloader.KindHistoryName:
+		return snapshot.KindHistory
+	case downloader.KindIdxName:
+		return snapshot.KindIdx
+	default:
+		return snapshot.KindKV
+	}
 }
 
 // parseBlockFileRange extracts the block-number range from a V1-era
