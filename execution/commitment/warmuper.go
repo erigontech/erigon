@@ -19,6 +19,7 @@ package commitment
 import (
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"sync/atomic"
 	"time"
@@ -275,6 +276,7 @@ func (w *Warmuper) WarmKey(hashedKey []byte, startDepth int) {
 	case w.work <- warmupWorkItem{hashedKey: hashedKey, startDepth: startDepth}:
 	case <-w.ctx.Done():
 	default: // non-blocking
+		log.Warn("[dbg] warmuper drop", "key", hex.EncodeToString(hashedKey))
 	}
 }
 
