@@ -1513,7 +1513,6 @@ func (dt *DomainRoTx) Close() {
 	}
 	dt.ht.Close()
 
-	log.Warn("[dbg] DomainRoTx.Close", "n", dt.name, "nil", dt.getFromFileCache == nil)
 	dt.visible.returnGetFromFileCache(dt.getFromFileCache)
 }
 
