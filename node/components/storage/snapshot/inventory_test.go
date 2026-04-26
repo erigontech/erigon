@@ -182,3 +182,43 @@ func TestInventoryBlockFiles(t *testing.T) {
 	blocks := inv.BlockFiles()
 	require.Len(t, blocks, 2)
 }
+
+// TestInventoryNonKVKinds covers the new caplin/meta/salt slices. Each kind
+// routes to its own slice via AddFile and is returned by its accessor.
+// History + idx kinds stay under the domain map alongside kv but distinct
+// per Kind, so CoverageOfKind can detect a missing-history gap even when
+// kv coverage is complete.
+func TestInventoryNonKVKinds(t *testing.T) {
+	inv := NewInventory()
+
+	// Caplin, meta, salt — each goes to its own bucket and back-out via the kind accessor.
+	inv.AddFile(&FileEntry{Kind: KindCaplin, Name: "v1.1-000000-000010-beaconblocks.seg", Local: true, Trust: TrustVerified})
+	inv.AddFile(&FileEntry{Kind: KindMeta, Name: "erigondb.toml", Local: true, Trust: TrustVerified})
+	inv.AddFile(&FileEntry{Kind: KindSalt, Name: "salt-blocks.txt", Local: true, Trust: TrustVerified})
+
+	require.Len(t, inv.CaplinFiles(), 1)
+	require.Len(t, inv.MetaFiles(), 1)
+	require.Len(t, inv.SaltFiles(), 1)
+	require.Len(t, inv.BlockFiles(), 0, "non-block kinds must not leak into BlockFiles")
+
+	// History + idx land under the domain map. Kv full-coverage masks the
+	// missing-history gap unless callers use CoverageOfKind.
+	inv.AddFile(&FileEntry{Domain: DomainAccounts, FromStep: 0, ToStep: 128, Name: "v1.1-accounts.0-128.kv", Local: true, Trust: TrustVerified})
+	inv.AddFile(&FileEntry{Domain: DomainAccounts, FromStep: 0, ToStep: 128, Kind: KindHistory, Name: "v1.1-accounts.0-128.v", Local: true, Trust: TrustVerified})
+
+	kvCov := inv.CoverageOfKind(DomainAccounts, KindKV)
+	histCov := inv.CoverageOfKind(DomainAccounts, KindHistory)
+	idxCov := inv.CoverageOfKind(DomainAccounts, KindIdx)
+
+	require.Equal(t, StepRanges{{From: 0, To: 128}}, kvCov)
+	require.Equal(t, StepRanges{{From: 0, To: 128}}, histCov)
+	require.Empty(t, idxCov, "idx kind absent — coverage must be empty even though kv covers the same range")
+
+	// LocalFiles returns every kind for the domain, callers can filter by Kind.
+	all := inv.LocalFiles(DomainAccounts)
+	require.Len(t, all, 2)
+
+	// RemoveFile must scan every category since the caller doesn't supply a kind hint.
+	inv.RemoveFile("erigondb.toml")
+	require.Empty(t, inv.MetaFiles())
+}
