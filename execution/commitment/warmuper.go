@@ -276,6 +276,7 @@ func (w *Warmuper) WarmKey(hashedKey []byte, startDepth int) {
 	// Speed of system is equal to speed of facing all page-faults during
 	// Or warmapers face them or main thread
 	// It means doesn't make much sense to unblock main thread if all Warmupers are loaded
+	// Anyway main thread can't run ahead of Warmupers (there are page-faults which will stop him)
 	select {
 	case w.work <- warmupWorkItem{hashedKey: hashedKey, startDepth: startDepth}:
 	case <-w.ctx.Done():
