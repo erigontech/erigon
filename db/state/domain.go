@@ -1371,7 +1371,6 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 	hi, lo := dt.ht.iit.hashKey(k)
 
 	getFromFileCache := dt.getFromFileCache
-	log.Warn("[dbg] getLatestFromFiles", "useCache", useCache, "getFromFileCache", getFromFileCache == nil, "domainGetFromFileCacheEnabled", domainGetFromFileCacheEnabled)
 
 	if useCache && getFromFileCache == nil {
 		if dt.getFromFileCache == nil {
@@ -1379,6 +1378,7 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 		}
 		getFromFileCache = dt.getFromFileCache
 	}
+	log.Warn("[dbg] getLatestFromFiles", "useCache", useCache, "getFromFileCache", dt.getFromFileCache == nil, "domainGetFromFileCacheEnabled", domainGetFromFileCacheEnabled)
 	if getFromFileCache != nil && useCache {
 		if cv, ok := getFromFileCache.Get(hi); ok {
 			return cv.v, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
