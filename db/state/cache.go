@@ -80,7 +80,6 @@ func (v *domainVisible) newGetFromFileCache() *DomainGetFromFileCache {
 	return v.caches.Get().(*DomainGetFromFileCache)
 }
 func (v *domainVisible) returnGetFromFileCache(c *DomainGetFromFileCache) {
-	log.Warn("[dbg] domainVisible.returnGetFromFileCache", "nil", c == nil)
 	if c == nil {
 		return
 	}
