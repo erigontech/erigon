@@ -133,6 +133,72 @@ func TestParseV2RejectsV1(t *testing.T) {
 	require.Contains(t, err.Error(), "version")
 }
 
+// TestV2FullScopeRoundTrip exercises every section a V2 manifest can carry —
+// blocks, meta, salt, domains with mixed kv/history/idx files, and caplin.
+// Roundtrip must preserve names, hashes, kinds, and per-domain coverage.
+func TestV2FullScopeRoundTrip(t *testing.T) {
+	inv := snapshotinv.NewInventory()
+
+	inv.AddFile(&snapshotinv.FileEntry{
+		Name: "v1.1-000000-000100-headers.seg",
+		TorrentHash: [20]byte{0xb1}, Local: true, Trust: snapshotinv.TrustVerified,
+	})
+	inv.AddFile(&snapshotinv.FileEntry{
+		Kind: snapshotinv.KindMeta, Name: "erigondb.toml",
+		TorrentHash: [20]byte{0x1e}, Local: true, Trust: snapshotinv.TrustVerified,
+	})
+	inv.AddFile(&snapshotinv.FileEntry{
+		Kind: snapshotinv.KindSalt, Name: "salt-blocks.txt",
+		TorrentHash: [20]byte{0x5a}, Local: true, Trust: snapshotinv.TrustVerified,
+	})
+	inv.AddFile(&snapshotinv.FileEntry{
+		Kind: snapshotinv.KindCaplin, Name: "v1.1-000000-000010-beaconblocks.seg",
+		TorrentHash: [20]byte{0xca}, Local: true, Trust: snapshotinv.TrustVerified,
+	})
+	for _, kind := range []snapshotinv.FileKind{snapshotinv.KindKV, snapshotinv.KindHistory, snapshotinv.KindIdx} {
+		ext := map[snapshotinv.FileKind]string{snapshotinv.KindKV: "kv", snapshotinv.KindHistory: "v", snapshotinv.KindIdx: "ef"}[kind]
+		inv.AddFile(&snapshotinv.FileEntry{
+			Domain: snapshotinv.DomainAccounts, Kind: kind,
+			FromStep: 0, ToStep: 128,
+			Name:        "v1.1-accounts.0-128." + ext,
+			TorrentHash: [20]byte{0xa0 + byte(len(ext))},
+			Local:       true, Trust: snapshotinv.TrustVerified,
+		})
+	}
+
+	original := GenerateV2(inv)
+	data, err := MarshalV2(original)
+	require.NoError(t, err)
+
+	parsed, err := ParseV2(data)
+	require.NoError(t, err)
+
+	require.Equal(t, original.Blocks, parsed.Blocks)
+	require.Equal(t, original.Meta, parsed.Meta)
+	require.Equal(t, original.Salt, parsed.Salt)
+	require.Equal(t, original.Caplin, parsed.Caplin)
+
+	require.Len(t, parsed.Domains, 1)
+	files := parsed.Domains["accounts"].Files
+	require.Len(t, files, 3)
+	gotKinds := map[string]bool{}
+	for _, f := range files {
+		gotKinds[f.Kind] = true
+		require.Equal(t, [2]uint64{0, 128}, f.Range)
+	}
+	require.True(t, gotKinds["kv"] && gotKinds["history"] && gotKinds["idx"],
+		"every kind must roundtrip; got %v", gotKinds)
+
+	// Coverage is computed from kv only — even with history+idx present.
+	require.Equal(t, [2]uint64{0, 128}, parsed.Domains["accounts"].Coverage)
+
+	// Determinism: marshalling the same inventory twice must produce
+	// byte-identical output.
+	again, err := MarshalV2(GenerateV2(inv))
+	require.NoError(t, err)
+	require.Equal(t, data, again, "GenerateV2 + MarshalV2 must be deterministic")
+}
+
 func TestDomainManifestStepRanges(t *testing.T) {
 	dm := &DomainManifest{
 		Coverage: [2]uint64{0, 4096},
