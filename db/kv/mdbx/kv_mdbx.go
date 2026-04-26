@@ -1145,7 +1145,11 @@ func (tx *MdbxTx) Commit() error {
 			tx.db.opts.log.Error("failed to record mdbx summaries", "err", err)
 		}
 	}
-	if tx.db.opts.label == dbcfg.ChainDB {
+	// Per-commit diagnostic log. Pairs with the MDBX_TX_OPEN/COMMIT/ROLLBACK
+	// tracer and the CONCURRENT_TX dumper — only useful when actively
+	// investigating GC / openTxs behavior. Gated behind the same env var so
+	// production runs don't get a log line per chaindata commit.
+	if mdbxTraceTx && tx.db.opts.label == dbcfg.ChainDB {
 		openTxs := tx.db.txsCount
 		tx.db.opts.log.Info("[mdbx] commit",
 			"whole", latency.Whole,

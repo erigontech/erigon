@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/metrics"
@@ -792,6 +793,25 @@ func (e *ExecModule) runForkchoiceFlushCommit(sd *execctx.SharedDomains, roTxToC
 		return nil, err
 	}
 	timings = append(timings, "commit", common.Round(time.Since(commitStart), 0))
+
+	// Track the highest fully-flushed commitment txNum so the aggregator's
+	// collation safety cap (aggregator.go: stepFullyCommitted gate) advances
+	// during normal FCU operation. Without this update, the cap stays at its
+	// initial-cycle value forever and `lastFlushedCommitmentTxNum > 0` guard
+	// at aggregator.go:2140 stops capping correctly — the calculator-port
+	// flushes through commitment domain into MDBX every commit but the
+	// aggregator never learns about it. Mirrors stageloop.go:266.
+	if hasAgg, ok := e.db.(dbstate.HasAgg); ok {
+		if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok && agg != nil {
+			if verifyTx, verifyErr := e.db.BeginTemporalRo(e.bacgroundCtx); verifyErr == nil {
+				if v, _, getErr := verifyTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState); getErr == nil && len(v) >= 16 {
+					committedTxNum, _ := commitmentdb.DecodeTxBlockNums(v)
+					agg.SetLastFlushedCommitmentTxNum(committedTxNum)
+				}
+				verifyTx.Rollback()
+			}
+		}
+	}
 
 	// Update head and announce block range (notifications already dispatched).
 	if e.hook != nil {
