@@ -272,5 +272,5 @@ func (c *CodeCache) PrintStatsAndReset() {
 	//	"addr_usage_pct", addrUsagePct,
 	//	"code_size_mb", codeSizeB/(1024*1024),
 	//	"code_usage_pct", codeUsagePct,
-	)
+	//)
 }
