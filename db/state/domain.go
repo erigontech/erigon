@@ -441,11 +441,16 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	log.Info("[dbg] domain.flush history", "t", time.Since(t), "tbl", w.valsTable)
 
 	t = time.Now()
+	var count uint64
 	if w.largeVals {
-		if err := w.values.Load(tx, w.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
+		if err := w.values.Load(tx, w.valsTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			count++
+			return loadFunc(k, v, table, next)
+		}, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 			return err
 		}
-		log.Info("[dbg] domain.flush vals", "t", time.Since(t), "tbl", w.valsTable)
+		took := time.Since(t)
+		log.Info("[dbg] domain.flush vals", "t", took, "keys/s", common.PrettyCounter(uint64(float64(count)/took.Seconds())), "tbl", w.valsTable)
 		w.Close()
 		return nil
 	}
@@ -456,6 +461,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	}
 	defer valuesCursor.Close()
 	if err := w.values.Load(tx, w.valsTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		count++
 		foundVal, err := valuesCursor.SeekBothRange(k, v[:8])
 		if err != nil {
 			return err
@@ -476,7 +482,8 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	}, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 		return err
 	}
-	log.Info("[dbg] domain.flush vals", "t", time.Since(t), "tbl", w.valsTable)
+	took := time.Since(t)
+	log.Info("[dbg] domain.flush vals", "t", took, "keys/s", common.PrettyCounter(uint64(float64(count)/took.Seconds())), "tbl", w.valsTable)
 	w.Close()
 
 	return nil
