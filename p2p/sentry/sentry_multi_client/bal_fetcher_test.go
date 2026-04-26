@@ -144,16 +144,18 @@ func TestBALFetcher_ValidPopulatedResponse(t *testing.T) {
 	}
 }
 
-// TestBALFetcher_EmptyBALAcceptedOnlyWhenExpected verifies the empty-RLP
-// ambiguity is resolved correctly: 0xc0 is accepted iff the expected hash
-// equals empty.BlockAccessListHash; otherwise it is returned as "not
-// available" (nil slot) without penalising the peer.
-func TestBALFetcher_EmptyBALAcceptedOnlyWhenExpected(t *testing.T) {
+// TestBALFetcher_EmptyBALAndNotAvailableSentinels verifies the EIP-8159
+// (post ethereum/EIPs#11553) three-way decode: 0xc0 is accepted as a
+// genuinely empty BAL iff the expected hash equals empty.BlockAccessListHash,
+// and 0x80 is the explicit "not available" sentinel returned as nil.
+func TestBALFetcher_EmptyBALAndNotAvailableSentinels(t *testing.T) {
 	f := NewBALFetcher()
 	sentry := &fakeSentry{}
 
 	peerID := [64]byte{0xbb}
-	// Two blocks: first expects an empty BAL, second expects a non-empty one.
+	// Two blocks: first expects an empty BAL (peer returns 0xc0 — accepted),
+	// second expects a non-empty one and the peer doesn't have it (peer
+	// returns 0x80 — returned as nil to caller).
 	blockHashes := []common.Hash{makeHash(0x01), makeHash(0x02)}
 	expected := []common.Hash{empty.BlockAccessListHash, makeHash(0xee)}
 
@@ -161,11 +163,8 @@ func TestBALFetcher_EmptyBALAcceptedOnlyWhenExpected(t *testing.T) {
 		go func() {
 			reqID := waitForRequestID(t, sentry)
 			f.Deliver(peerID, &eth.BlockAccessListsPacket66{
-				RequestId: reqID,
-				// Both slots return 0xc0. First slot — peer says "block has
-				// empty BAL", which matches expected[0]. Second slot — peer
-				// says "I don't have this one", expected[1] non-empty.
-				BlockAccessListsPacket: []rlp.RawValue{{0xc0}, {0xc0}},
+				RequestId:              reqID,
+				BlockAccessListsPacket: []rlp.RawValue{{0xc0}, {0x80}},
 			})
 		}()
 	}
@@ -184,7 +183,43 @@ func TestBALFetcher_EmptyBALAcceptedOnlyWhenExpected(t *testing.T) {
 		t.Errorf("slot 1: expected nil (not available), got %x", got[1])
 	}
 	if len(sentry.penalized) != 0 {
-		t.Errorf("unexpected penalty on benign empty replies: %+v", sentry.penalized)
+		t.Errorf("unexpected penalty on benign empty/not-available replies: %+v", sentry.penalized)
+	}
+}
+
+// TestBALFetcher_EmptyListClaimWithNonEmptyHashKicks verifies that returning
+// 0xc0 (genuine-empty BAL claim) for a slot whose expected hash is not the
+// empty-BAL hash is treated as a hash-mismatch and penalised. Pre-EIP-11553
+// this case was indistinguishable from "not available" and silently returned
+// nil; post-EIP-11553 the 0x80 sentinel removes the ambiguity, so a peer
+// claiming 0xc0 with a non-empty expected hash is lying.
+func TestBALFetcher_EmptyListClaimWithNonEmptyHashKicks(t *testing.T) {
+	f := NewBALFetcher()
+	sentry := &fakeSentry{}
+
+	peerID := [64]byte{0xcd}
+	blockHash := makeHash(0x01)
+	expected := makeHash(0xee) // not the empty-BAL hash
+
+	sentry.onSendMessageID = func(*sentryproto.SendMessageByIdRequest) {
+		go func() {
+			reqID := waitForRequestID(t, sentry)
+			f.Deliver(peerID, &eth.BlockAccessListsPacket66{
+				RequestId:              reqID,
+				BlockAccessListsPacket: []rlp.RawValue{{0xc0}},
+			})
+		}()
+	}
+
+	_, err := f.FetchBlockAccessLists(context.Background(), sentry, peerID, []common.Hash{blockHash}, []common.Hash{expected})
+	if !errors.Is(err, ErrBadBALResponse) {
+		t.Fatalf("expected ErrBadBALResponse, got %v", err)
+	}
+	if len(sentry.penalized) != 1 {
+		t.Fatalf("expected exactly 1 penalty, got %d: %+v", len(sentry.penalized), sentry.penalized)
+	}
+	if sentry.penalized[0].Penalty != sentryproto.PenaltyKind_Kick {
+		t.Errorf("expected Kick penalty, got %v", sentry.penalized[0].Penalty)
 	}
 }
 
@@ -258,15 +293,15 @@ func TestBALFetcher_DeliverIgnoresWrongPeer(t *testing.T) {
 			// Impostor delivers first — must be ignored.
 			if f.Deliver(wrongPeer, &eth.BlockAccessListsPacket66{
 				RequestId:              reqID,
-				BlockAccessListsPacket: []rlp.RawValue{{0xc0}},
+				BlockAccessListsPacket: []rlp.RawValue{{0x80}},
 			}) {
 				t.Errorf("Deliver should return false for response from wrong peer")
 			}
-			// Target peer replies; expected != empty-list-hash → returns nil
-			// for that slot (not available), not a penalty.
+			// Target peer replies with the EIP-8159 not-available sentinel
+			// (0x80) — fetcher returns nil for that slot, no penalty.
 			f.Deliver(targetPeer, &eth.BlockAccessListsPacket66{
 				RequestId:              reqID,
-				BlockAccessListsPacket: []rlp.RawValue{{0xc0}},
+				BlockAccessListsPacket: []rlp.RawValue{{0x80}},
 			})
 		}()
 	}

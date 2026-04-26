@@ -76,13 +76,14 @@ type balRequest struct {
 // own sentry subscriptions; the MultiClient's existing blockAccessLists71
 // inbound handler delivers responses to the fetcher by calling Deliver().
 //
-// Validation: for each entry in the response, the fetcher computes
-// keccak256(payload) and compares it against the caller-supplied expectedHash
-// (which typically comes from header.BlockAccessListHash). An empty payload
-// (0xc0) is accepted only if the expected hash equals the keccak256 of an
-// empty RLP list (empty.BlockAccessListHash) — the valid "block has no state
-// accesses" case. Any non-empty payload with a mismatched hash triggers
-// ErrBadBALResponse and a sentry-level kick.
+// Validation (per EIP-8159 post ethereum/EIPs#11553):
+//   - 0x80 (empty RLP string) — peer's "not available" sentinel. Returned to
+//     the caller as nil so they can retry from a different peer.
+//   - 0xc0 (empty RLP list) — peer claims the BAL is genuinely empty.
+//     Accepted only if the caller-supplied expectedHash equals
+//     empty.BlockAccessListHash; otherwise the peer is lying and is kicked.
+//   - any other payload — must hash (keccak256) to expectedHash. Otherwise
+//     ErrBadBALResponse is returned and the peer is kicked via Sentry.PenalizePeer.
 //
 // This fetcher intentionally covers only the one-shot, explicit-peer request
 // flow. A production sync stage integration (peer selection, pipelining,
@@ -104,15 +105,15 @@ func NewBALFetcher() *BALFetcher {
 //
 // expectedHashes MUST have the same length as blockHashes and carry the
 // BlockAccessListHash each block's header commits to. Entries where the peer
-// does not have the BAL (valid payload = 0xc0 and the expected hash is NOT
-// the empty-list hash) are returned as nil — callers should retry those from
-// a different peer.
+// does not have the BAL (payload = 0x80, EIP-8159 not-available sentinel)
+// are returned as nil — callers should retry those from a different peer.
 //
-// If the peer returns a non-0xc0 payload whose keccak256 does not equal the
-// expected hash, the peer is penalised (Sentry.PenalizePeer with Kick) and
-// ErrBadBALResponse is returned without waiting for retries. A cancelled
-// context or the default timeout each return their respective error; neither
-// penalises the peer.
+// If the peer returns a non-sentinel payload whose keccak256 does not equal
+// the expected hash, the peer is penalised (Sentry.PenalizePeer with Kick)
+// and ErrBadBALResponse is returned without waiting for retries. The same
+// applies if the peer returns 0xc0 (genuinely empty BAL claim) but the
+// expected hash isn't the empty-BAL hash. A cancelled context or the default
+// timeout each return their respective error; neither penalises the peer.
 func (f *BALFetcher) FetchBlockAccessLists(
 	ctx context.Context,
 	sentry sentryproto.SentryClient,
@@ -194,20 +195,26 @@ func (f *BALFetcher) FetchBlockAccessLists(
 	for i := range response {
 		entry := response[i]
 		expected := expectedHashes[i]
-		if len(entry) == 0 || (len(entry) == 1 && entry[0] == 0xc0) {
-			// Empty RLP list — peer's "not available" sentinel OR a genuinely
-			// empty BAL. Disambiguate against the expected hash.
-			if expected == empty.BlockAccessListHash {
-				// Genuinely empty BAL — accepted.
-				out[i] = rlp.RawValue{0xc0}
-			} else {
-				// Peer doesn't have it. Leave out[i] = nil so the caller can
-				// retry from a different peer.
-				out[i] = nil
-			}
+		// EIP-8159 (post ethereum/EIPs#11553) three-way decode:
+		// 0x80 = "not available", 0xc0 = "genuinely empty BAL",
+		// anything else = actual BAL bytes that must hash to expected.
+		if len(entry) == 0 || (len(entry) == 1 && entry[0] == 0x80) {
+			// Peer doesn't have it. Leave out[i] = nil so the caller can
+			// retry from a different peer.
 			continue
 		}
-		// Non-empty payload — must hash to expected.
+		if len(entry) == 1 && entry[0] == 0xc0 {
+			// Peer claims the BAL is genuinely empty. Accept only if the
+			// expected hash actually is the empty-BAL hash; otherwise the
+			// peer is lying about empty — treat as a hash mismatch.
+			if expected != empty.BlockAccessListHash {
+				f.penalise(ctx, sentry, peerID)
+				return nil, fmt.Errorf("%w: entry %d expected non-empty BAL with hash %x, peer returned 0xc0", ErrBadBALResponse, i, expected)
+			}
+			out[i] = rlp.RawValue{0xc0}
+			continue
+		}
+		// Non-sentinel payload — must hash to expected.
 		if !bytes.Equal(keccak256(entry), expected[:]) {
 			f.penalise(ctx, sentry, peerID)
 			return nil, fmt.Errorf("%w: entry %d expected=%x got-hash=%x", ErrBadBALResponse, i, expected, keccak256(entry))

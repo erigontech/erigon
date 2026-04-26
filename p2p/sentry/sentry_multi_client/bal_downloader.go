@@ -234,17 +234,17 @@ func (d *BALDownloader) fetchBatch(ctx context.Context, peer [64]byte, batch []m
 		return
 	}
 
-	// Write accepted (hash-validated) entries. nil slots are "peer doesn't
-	// have it" — skip, retry next pass from some other peer.
+	// Write accepted entries. The fetcher already decoded EIP-8159 (post
+	// ethereum/EIPs#11553) sentinels: nil = "peer doesn't have it" (was 0x80
+	// on the wire) — skip and retry next pass from another peer; {0xc0} =
+	// "genuinely empty BAL, hash-verified" — write the canonical RLP so
+	// callers that distinguish "have" vs "don't have" via rawdb see the
+	// record; anything else = hash-validated BAL bytes.
 	var stored int
 	if err := d.rwDB.Update(ctx, func(tx kv.RwTx) error {
 		for i, payload := range got {
 			if len(payload) == 0 {
 				continue
-			}
-			if len(payload) == 1 && payload[0] == 0xc0 {
-				// Valid empty-BAL — write the canonical RLP so callers that
-				// distinguish "have" vs "don't have" via rawdb see the record.
 			}
 			if err := rawdb.WriteBlockAccessListBytes(tx, batch[i].hash, batch[i].number, payload); err != nil {
 				return err

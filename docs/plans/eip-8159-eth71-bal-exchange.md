@@ -12,7 +12,7 @@
 2. **eth wire protocol bump**: `eth/70 → eth/71`.
 3. **Two new wire messages**:
    - `GetBlockAccessLists (0x12)`  — request BALs by block hash list
-   - `BlockAccessLists    (0x13)`  — response, BAL bytes per requested hash (empty RLP list `0xc0` for unavailable)
+   - `BlockAccessLists    (0x13)`  — response, BAL bytes per requested hash (empty RLP string `0x80` for unavailable, per ethereum/EIPs#11553)
 4. **Validation**: peers verify received BAL by `keccak256(rlp.encode(bal)) == header.BlockAccessListHash`.
 
 No execution-layer / opcode / gas / consensus changes. Purely p2p distribution.
@@ -59,8 +59,9 @@ type GetBlockAccessListsPacket66 struct {
 }
 
 // BlockAccessListsPacket66 replies with RLP-encoded BALs, positionally aligned
-// with the request. An empty RLP list (0xc0) indicates the peer does not have
-// that BAL.
+// with the request. An empty RLP string (0x80) indicates the peer does not
+// have that BAL (per ethereum/EIPs#11553 — the original 0xc0 sentinel was
+// changed because it collided with a genuinely empty BAL).
 type BlockAccessListsPacket66 struct {
     RequestId uint64
     BALs      []rlp.RawValue
@@ -91,7 +92,7 @@ func AnswerGetBlockAccessListsQuery(
 
 - Iterate `query.BlockHashes`, resolve block number via `blockReader.HeaderNumber(hash)`.
 - Call `rawdb.ReadBlockAccessListBytes(db, hash, num)`.
-- If nil → append empty RLP list `[]byte{0xc0}`.
+- If nil → append "not available" sentinel `[]byte{0x80}` (empty RLP string, per ethereum/EIPs#11553).
 - If size would exceed `softResponseLimit` (default 2 MiB), truncate and stop.
 
 Unit tests in `handlers_test.go`: seed rawdb with a BAL for one hash, leave another unseeded; assert response ordering + empty for the missing one.
@@ -121,19 +122,18 @@ Decision point: whether to make BAL fetching a first-class blocking stage or an 
 
 **Validation lives in the p2p layer (not a higher layer callback).** Follow the existing pattern where BlockBodies / Receipts validation runs inside the fetcher against header data it already has in scope. The fetcher pre-loads `header.BlockAccessListHash` for each pending request hash, and on each inbound `BlockAccessLists` response validates `keccak256(payload) == expected_hash` inline — **before** dispatching to the rawdb writer. Non-matching payloads never cross the p2p boundary.
 
-**Empty-RLP ambiguity** (`0xc0` has two meanings on the wire):
+**Three-way decode** (per EIP-8159 post ethereum/EIPs#11553 — earlier drafts used `0xc0` as the "unavailable" sentinel which collided with a genuinely empty BAL):
 
-- `0xc0` means *"peer does not have this BAL"* when `expected_hash != empty.BlockAccessListHash`.
-- `0xc0` means *"block genuinely has an empty BAL"* when `expected_hash == empty.BlockAccessListHash` (the keccak256 of the empty RLP list, `0x1dcc4de8...`; already exported at [common/empty/empty_hashes.go:49](common/empty/empty_hashes.go#L49)).
-
-The fetcher always disambiguates against the expected hash, never by inspecting the payload alone. Accept `0xc0` only when the hashes match.
+- `0x80` (empty RLP string) means *"peer does not have this BAL"*. Unambiguous.
+- `0xc0` (empty RLP list) means *"block genuinely has an empty BAL"*. Accepted only when `expected_hash == empty.BlockAccessListHash` (the keccak256 of the empty RLP list, `0x1dcc4de8...`; already exported at [common/empty/empty_hashes.go:49](common/empty/empty_hashes.go#L49)). A `0xc0` claim with any other expected hash is a hash-mismatch → kick the peer.
+- Anything else must hash to `expected_hash` or the peer is kicked.
 
 **Bad-peer management** — two distinct penalty tracks layered on top of the per-peer request-rate limits:
 
-1. **Garbage / wrong hash.** Any non-`0xc0` payload whose `keccak256` does not equal the expected hash → immediate disconnect via `Sentry.PenalizePeer`. No ambiguity: the peer is corrupt or malicious.
-2. **Silent withholding.** A peer that consistently returns `0xc0` for BAL hashes we know to be non-empty is DoS-ing the stream without sending garbage. Maintain a per-peer score that decrements on each confirmed-withholding reply (expected ≠ empty-list hash but peer returned `0xc0`) and increments on each valid answer; drop and temporarily ban below a threshold (N withholdings in a rolling window, or an absolute ratio — tune against the existing body-fetcher thresholds for parity). Same `Sentry.PenalizePeer` path so the usual peer telemetry and reconnection logic applies.
+1. **Garbage / wrong hash.** Any non-sentinel payload whose `keccak256` does not equal the expected hash → immediate disconnect via `Sentry.PenalizePeer`. Same applies to `0xc0` claims that don't match the empty-BAL hash. No ambiguity: the peer is corrupt or malicious.
+2. **Silent withholding.** A peer that consistently returns `0x80` for BAL hashes we know to be non-empty is DoS-ing the stream without sending garbage. Maintain a per-peer score that decrements on each confirmed-withholding reply (expected ≠ empty-BAL hash but peer returned `0x80`) and increments on each valid answer; drop and temporarily ban below a threshold (N withholdings in a rolling window, or an absolute ratio — tune against the existing body-fetcher thresholds for parity). Same `Sentry.PenalizePeer` path so the usual peer telemetry and reconnection logic applies.
 
-Unit tests in the fetcher cover: valid full BAL accepted, valid empty BAL accepted (expected hash = empty-list hash), mismatched-hash → disconnect, and repeated-`0xc0`-for-non-empty-expected → ban. Fetcher should emit metrics for each case so the behaviour is observable in production.
+Unit tests in the fetcher cover: valid full BAL accepted, valid empty BAL (`0xc0`) accepted when expected hash = empty-BAL hash, `0xc0`-with-non-empty-expected → kick, mismatched-hash → kick, and repeated-`0x80`-for-non-empty-expected → ban. Fetcher should emit metrics for each case so the behaviour is observable in production.
 
 ### Phase 6 — Hive / integration tests
 
@@ -153,7 +153,7 @@ Before merging each phase:
 ## Risks & open questions
 
 1. **Amsterdam timing**: the Amsterdam activation timestamp on mainnet is not yet set (field is `*uint64`, nil on mainnet today). eth/71 must negotiate regardless of fork activation (peers can request BALs for historic blocks after the fork activates). No fork-gate on the wire protocol version itself — only on the header field's required-ness.
-2. **Empty-list semantics**: EIP spec says empty RLP list = "not available". Our implementation also produces `0xc0` when `ReadBlockAccessListBytes` returns nil. Need to distinguish "peer genuinely has no BAL for this hash" from "BAL is empty because the block had zero state accesses" — the latter is a valid hash (`empty.BlockAccessListHash`). Callers must compare against the header's expected hash.
+2. **Empty-BAL semantics**: ~~EIP spec says empty RLP list = "not available"~~ — that ambiguity was the bug ethereum/EIPs#11553 fixed. The current spec uses `0x80` (empty RLP string) for "not available" and `0xc0` (empty RLP list) for "block genuinely has an empty BAL". Peer claims of `0xc0` are still hash-validated against `expected_hash == empty.BlockAccessListHash`, but no longer ambiguous with the unavailable case.
 3. **Ordering**: spec says response array aligns positionally with request. Handler must preserve request order even when some entries are missing. Phase 3 enforces this.
 4. **Response limit**: EIP recommends 2 MiB per message. If a single BAL exceeds 2 MiB we return empty for it (peer will fall back to regenerate). Phase 3 handles this.
 5. **DoS**: large `GetBlockAccessLists` requests. Enforce per-peer request-rate and max-hashes-per-message limits (follow `BlockBodiesMsg` precedent — check its rate limit code path).
