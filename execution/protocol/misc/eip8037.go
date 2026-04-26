@@ -17,28 +17,27 @@
 package misc
 
 import (
-	"math"
 	"math/bits"
 
 	"github.com/erigontech/erigon/execution/protocol/params"
 )
 
+// CostPerStateByte derives the per-byte price for new state using the block
+// gas limit as per EIP-8037.
+//
+//	raw = ceil((gas_limit * BLOCKS_PER_YEAR) / (2 * TARGET_STATE_GROWTH_PER_YEAR))
+//	shifted = raw + CPSB_OFFSET
+//	shift = max(bit_length(shifted) - CPSB_SIGNIFICANT_BITS, 0)
+//	quantized = (shifted >> shift) << shift
+//	cost_per_state_byte = quantized - CPSB_OFFSET, floored at 1
 func CostPerStateByte(gasLimit uint64) uint64 {
-	// TODO this should be removed after bal-devnet-3 (we use hardcoded cspb=1174 for now)
-	const balDevnet3Spec = true
-	if balDevnet3Spec {
-		return 1174
-	}
-	//raw = ceil((gas_limit * 2_628_000) / (2 * TARGET_STATE_GROWTH_PER_YEAR))
-	//shifted = raw + CPSB_OFFSET
-	//shift = max(bit_length(shifted) - CPSB_SIGNIFICANT_BITS, 0)
-	//cost_per_state_byte = max(((shifted >> shift) << shift) - CPSB_OFFSET, 1)
-	raw := uint64(math.Ceil(float64(gasLimit*2_628_000) / float64(2*params.TargetStateGrowthPerYear)))
+	denominator := 2 * params.TargetStateGrowthPerYear
+	raw := (gasLimit*params.BlocksPerYear + denominator - 1) / denominator
 	shifted := raw + params.CpsbOffset
 	shift := max(bits.Len64(shifted)-params.CpsbSignificantBits, 0)
-	rounded := (shifted >> shift) << shift
-	if rounded <= params.CpsbOffset {
+	quantized := (shifted >> shift) << shift
+	if quantized <= params.CpsbOffset {
 		return 1
 	}
-	return rounded - params.CpsbOffset
+	return quantized - params.CpsbOffset
 }

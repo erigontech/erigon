@@ -50,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
@@ -691,13 +692,15 @@ func (a *Aggregator) Files() []string {
 	return ac.AllFiles().Fullpaths()
 }
 func (a *Aggregator) LS() {
+	var stats seg.Stats
 	doLS := func(dirtyFiles *btree.BTreeG[*FilesItem]) {
 		dirtyFiles.Walk(func(items []*FilesItem) bool {
 			for _, item := range items {
 				if item.decompressor == nil {
 					continue
 				}
-				a.logger.Info("[agg] ", "f", item.decompressor.FileName(), "words", item.decompressor.Count())
+				a.logger.Info("[agg] ", "f", item.decompressor.FileName(), "words", item.decompressor.Count(), "dictOnDisk", common.ByteCount(item.decompressor.SerializedTotalDictSize()), "dictMem", common.ByteCount(item.decompressor.DictMemSize()))
+				stats.Add(item.decompressor)
 			}
 			return true
 		})
@@ -713,6 +716,7 @@ func (a *Aggregator) LS() {
 	for _, d := range a.standaloneIIs() {
 		doLS(d.dirtyFiles)
 	}
+	a.logger.Info("[agg] total", "words", stats.Words, "dictOnDisk", common.ByteCount(stats.Dict), "dictMem", common.ByteCount(stats.DictMem))
 }
 
 func (a *Aggregator) WaitForBuildAndMerge(ctx context.Context) chan struct{} {
@@ -812,8 +816,6 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		a.logger.Debug("[agg] step not ready for collation", "step", step, "lastTxInStep", lastTxNumOfStep(step, a.StepSize()), "lastBlockInStep", lastBlockInStep, "lastTxInDB", lastTxInDB, "lastBlockInDB", lastBlockInDB)
 		return errStepNotReady
 	}
-	a.logger.Debug("[agg] collate and build", "step", step, "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].CompressCfg.Workers)
-
 	var (
 		txFrom        = a.FirstTxNumOfStep(step)
 		txTo          = a.FirstTxNumOfStep(step + 1)
@@ -896,6 +898,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	}
 	collationTx.Rollback() // release the read-tx before Phase 2 (no DB access needed)
 	closeCollations = false
+	buildAt := time.Now()
 
 	// Phase 2: build files from collations in parallel (no DB access needed).
 	g, ctx := errgroup.WithContext(ctx)
@@ -943,6 +946,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		static.CleanupOnError()
 		return fmt.Errorf("domain collate-build: %w", err)
 	}
+	a.logger.Debug("[agg] collate-build", "step", step, "collate_workers", a.collateAndBuildWorkers, "compress_workers", a.d[kv.AccountsDomain].CompressCfg.Workers, "collate_in", buildAt.Sub(stepStartedAt), "build_in", time.Since(buildAt))
 	mxStepTook.ObserveDuration(stepStartedAt)
 	a.IntegrateDirtyFiles(static, txFrom, txTo)
 	a.logger.Info("[snapshots] aggregated", "step", step, "took", time.Since(stepStartedAt), "workers", a.collateAndBuildWorkers)

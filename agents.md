@@ -54,6 +54,15 @@ Run `make lint` before every push. The linter is non-deterministic — run it re
 
 When manually dispatching a workflow that is not part of the PR's automatic check list, add a comment on the PR explaining which workflow was dispatched, why it was chosen, and include a direct link to the workflow run.
 
+### Backport PRs to release branches
+
+When opening a PR against `release/3.4` (or another release branch):
+
+- **Title**: prefix with `[r3.4]` — e.g. `[r3.4] db/version: enforce upper-bound file version check`. Variants `[r34]` and `[3.4]` also appear but `[r3.4]` is the dominant form.
+- **Body**: keep it short. For a straight cherry-pick: `Cherry-pick of #<N> to release/3.4.` When release-branch adjustments were needed (different APIs, skipped tests, etc.), add a `## r3.4-specific adaptations` section listing the deltas. When the change is not a cherry-pick of a merged PR (e.g. a dependency bump pulling a fix), describe what's being pulled in and why it's needed on the release branch.
+- **Branch name**: keep a `3.4` marker. Common forms: `cherry-pick-<PR#>-to-release-3.4`, `cherry-pick-<PR#>-r34`, `cp/<PR#>-to-3.4`, or `<user>/<short>_34`.
+- **Base branch**: `release/3.4`.
+
 ## Pre-push
 
 Before running `git push`, always run `make lint` first and fix all issues. Run lint multiple times if needed — it is non-deterministic.

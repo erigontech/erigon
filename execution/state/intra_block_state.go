@@ -1438,6 +1438,40 @@ func (sdb *IntraBlockState) IsNewContract(addr accounts.Address) (bool, error) {
 	return !delegated, nil
 }
 
+// SameTxSelfDestructedNewAccounts returns addresses of contracts that were
+// both created and self-destructed during the current transaction, along with
+// the number of non-zero storage writes and the deployed-code length for each.
+// Used by EIP-8037 to refund the account-creation / storage-set / code-deposit
+// state gas charges to the tx at end-of-execution (since no state grew).
+func (sdb *IntraBlockState) SameTxSelfDestructedNewAccounts() []SelfDestructedNewAccount {
+	var result []SelfDestructedNewAccount
+	for addr, so := range sdb.stateObjects {
+		if so == nil || !so.selfdestructed || !so.newlyCreated {
+			continue
+		}
+		var nonZeroSlots uint64
+		for _, val := range so.dirtyStorage {
+			if !val.IsZero() {
+				nonZeroSlots++
+			}
+		}
+		result = append(result, SelfDestructedNewAccount{
+			Address:      addr,
+			NonZeroSlots: nonZeroSlots,
+			CodeLen:      uint64(len(so.code)),
+		})
+	}
+	return result
+}
+
+// SelfDestructedNewAccount summarises a contract that was created and
+// self-destructed in the same transaction, for EIP-8037 refund accounting.
+type SelfDestructedNewAccount struct {
+	Address      accounts.Address
+	NonZeroSlots uint64
+	CodeLen      uint64
+}
+
 // SetTransientState sets transient storage for a given account. It
 // adds the change to the journal so that it can be rolled back
 // to its previous value if there is a revert.
