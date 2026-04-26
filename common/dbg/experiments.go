@@ -111,7 +111,7 @@ var (
 	TraceDeletion         = EnvBool("TRACE_DELETION", false)
 
 	RpcDropResponse  = EnvBool("RPC_DROP_RESPONSE", false)
-	TipTrieWarmupers = EnvInt("TIP_TRIE_WARMUPERS", runtime.NumCPU()*16) //io-bound (not cpu-bound)
+	TipTrieWarmupers = EnvInt("TIP_TRIE_WARMUPERS", runtime.NumCPU()*8) //io-bound (not cpu-bound)
 )
 
 func ReadMemStats(m *runtime.MemStats) {
