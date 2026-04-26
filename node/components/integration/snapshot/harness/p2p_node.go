@@ -187,26 +187,58 @@ func (n *P2PNode) Close() {
 // with the torrent client as a seedable file, and adds a matching entry
 // to the node's inventory at TrustVerified / Local=true. Returns the
 // infohash the torrent client computed.
+//
+// fileName may include a leading subdirectory (e.g. "domain/v1.1-..."
+// or "caplin/v1.1-...") — the parent dir is created on demand.
 func (n *P2PNode) SeedFile(fileName string, content []byte, domain snapshot.Domain, fromStep, toStep uint64) [20]byte {
 	n.T.Helper()
 	path := filepath.Join(n.Dirs.Snap, fileName)
+	require.NoError(n.T, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(n.T, os.WriteFile(path, content, 0o644))
+	return n.registerSeedable(fileName, int64(len(content)), &snapshot.FileEntry{
+		Domain:   domain,
+		FromStep: fromStep,
+		ToStep:   toStep,
+		Name:     fileName,
+	})
+}
+
+// SeedExistingFile registers a file that's already on disk under the
+// node's Dirs.Snap (e.g. hardlinked or copied in by the test) as
+// seedable, and adds it to the inventory with the supplied entry
+// fields. Returns the infohash the torrent client computes.
+//
+// Handles primary kinds (kv, history, idx, block .seg, caplin .seg)
+// plus meta and salt files. The caller fills in Domain / FromStep /
+// ToStep / Kind appropriately on entryTemplate; Name / Size / Local /
+// Trust / TorrentHash are filled in by this method.
+func (n *P2PNode) SeedExistingFile(fileName string, entryTemplate *snapshot.FileEntry) [20]byte {
+	n.T.Helper()
+	path := filepath.Join(n.Dirs.Snap, fileName)
+	info, err := os.Stat(path)
+	require.NoError(n.T, err, "SeedExistingFile: %s missing on disk", path)
+	tpl := *entryTemplate
+	tpl.Name = fileName
+	return n.registerSeedable(fileName, info.Size(), &tpl)
+}
+
+// registerSeedable is the shared tail of SeedFile / SeedExistingFile.
+// Tells the downloader to compute the torrent for fileName, captures
+// the infohash, and adds the finalised inventory entry.
+func (n *P2PNode) registerSeedable(fileName string, size int64, entryTemplate *snapshot.FileEntry) [20]byte {
+	n.T.Helper()
 	require.NoError(n.T, n.dCore.AddNewSeedableFile(n.ctx, fileName))
 
 	torrentFS := dl.NewAtomicTorrentFS(n.Dirs.Snap)
 	spec, err := torrentFS.LoadByName(fileName + ".torrent")
 	require.NoError(n.T, err)
 
-	n.Inventory.AddFile(&snapshot.FileEntry{
-		Domain:      domain,
-		FromStep:    fromStep,
-		ToStep:      toStep,
-		Name:        fileName,
-		Size:        int64(len(content)),
-		TorrentHash: [20]byte(spec.InfoHash),
-		Local:       true,
-		Trust:       snapshot.TrustVerified,
-	})
+	entry := *entryTemplate
+	entry.Size = size
+	entry.TorrentHash = [20]byte(spec.InfoHash)
+	entry.Local = true
+	entry.Trust = snapshot.TrustVerified
+	n.Inventory.AddFile(&entry)
 	return [20]byte(spec.InfoHash)
 }
 
@@ -236,12 +268,22 @@ func convertGenesisDifficulty(b *types.Block) *typesproto.H256 {
 // DevP2P listener.
 func NewP2PNode(t *testing.T, logger log.Logger) *P2PNode {
 	t.Helper()
+	return NewP2PNodeAt(t, t.TempDir(), logger)
+}
+
+// NewP2PNodeAt is NewP2PNode with an explicit base directory. Use when
+// the test needs the node's data to live on a specific filesystem —
+// e.g. so hardlinks from a fixture directory on the same filesystem
+// work for cheap content sharing across peers. Cleans up at test end
+// the same way TempDir does.
+func NewP2PNodeAt(t *testing.T, baseDir string, logger log.Logger) *P2PNode {
+	t.Helper()
 	if logger == nil {
 		logger = log.New()
 		logger.SetHandler(log.DiscardHandler())
 	}
 
-	dirs := datadir.New(t.TempDir())
+	dirs := datadir.New(baseDir)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// --- Downloader (anacrolix/torrent) -----------------------------------
