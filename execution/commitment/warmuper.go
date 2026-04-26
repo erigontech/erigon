@@ -169,6 +169,10 @@ func (w *Warmuper) Start() {
 
 	for i := 0; i < w.numWorkers; i++ {
 		w.g.Go(func() error {
+			t := time.Now()
+			defer func() {
+				log.Warn("[dbg] Warmuper worker done", "i", i, "in", time.Since(t))
+			}()
 			trieCtx, cleanup := w.ctxFactory()
 			if cleanup != nil {
 				defer cleanup()
