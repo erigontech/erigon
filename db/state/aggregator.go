@@ -1552,6 +1552,20 @@ func (a *Aggregator) SetLastFlushedCommitmentTxNum(txNum uint64) {
 	a.lastFlushedCommitmentTxNum.Store(txNum)
 }
 
+// MaxPrunableStepsBacklog returns the largest prunable-step count across the
+// state domains (accounts, storage, code, commitment). Used by FCU to size
+// the prune-cycle budget — a larger backlog gets more time. Reads the same
+// gauges set during canScanPruneDomainTables, so values reflect the most
+// recent visibility recompute. Returns 0 if no scan has run yet.
+func (a *Aggregator) MaxPrunableStepsBacklog() uint64 {
+	return max(
+		mxPrunableDAcc.GetValueUint64(),
+		mxPrunableDSto.GetValueUint64(),
+		mxPrunableDCode.GetValueUint64(),
+		mxPrunableDComm.GetValueUint64(),
+	)
+}
+
 // LockCollation acquires exclusive access, blocking until all in-flight
 // background db.View() txs complete. Callers must call UnlockCollation when done.
 // Use around BeginTemporalRw (NOT the full commit) — once the RW tx exists,

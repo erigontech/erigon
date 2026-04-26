@@ -803,7 +803,8 @@ func (e *ExecModule) runForkchoiceFlushCommit(sd *execctx.SharedDomains, roTxToC
 	// aggregator never learns about it. Mirrors stageloop.go:266.
 	if hasAgg, ok := e.db.(dbstate.HasAgg); ok {
 		if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok && agg != nil {
-			if verifyTx, verifyErr := e.db.BeginTemporalRo(e.bacgroundCtx); verifyErr == nil {
+			if verifyTx, verifyErr := e.db.BeginTemporalRo(e.bacgroundCtx); verifyErr == nil { //nolint:gocritic // Rollback below; defer would shadow named-tx scope
+				defer verifyTx.Rollback() //nolint:gocritic // safety net alongside the explicit Rollback below
 				if v, _, getErr := verifyTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState); getErr == nil && len(v) >= 16 {
 					committedTxNum, _ := commitmentdb.DecodeTxBlockNums(v)
 					agg.SetLastFlushedCommitmentTxNum(committedTxNum)
@@ -834,27 +835,49 @@ func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
 	var timings []any
 	pruneStart := time.Now()
 	defer UpdateForkChoicePruneDuration(pruneStart)
-	if err := e.db.UpdateTemporal(e.bacgroundCtx, func(tx kv.TemporalRwTx) error {
-		// check that the current header isn't less than a step, this
-		// is mainly to prevent noise in testing on short chains with
-		// no snapshots and no need for pruning
-		currentHeader := rawdb.ReadCurrentHeader(tx)
-		if currentHeader == nil {
-			return nil
-		}
-		maxTxNum, err := rawdbv3.TxNums.Max(e.bacgroundCtx, tx, currentHeader.Number.Uint64())
-		if err != nil || maxTxNum < (tx.Debug().StepSize()*5)/4 {
-			return nil
-		}
 
-		pruneTimeout := time.Duration(e.config.SecondsPerSlot()*1000/3) * time.Millisecond / 2
-		if err := e.pipelineExecutor.RunPrune(e.bacgroundCtx, tx, initialCycle, pruneTimeout); err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
+	// Pre-check (read-only): skip work on short chains with no snapshots /
+	// no need for pruning. Same gate as before; just lifted out of the RW
+	// path so we don't hold a write tx unnecessarily.
+	roTx, err := e.db.BeginTemporalRo(e.bacgroundCtx) //nolint:gocritic // closed below before CollateAndPruneIfNeeded opens its own RW tx
+	if err != nil {
 		return nil, err
 	}
+	defer roTx.Rollback() //nolint:gocritic // safety net alongside the explicit Rollback below
+	skip := false
+	currentHeader := rawdb.ReadCurrentHeader(roTx)
+	if currentHeader == nil {
+		skip = true
+	} else {
+		maxTxNum, txNumErr := rawdbv3.TxNums.Max(e.bacgroundCtx, roTx, currentHeader.Number.Uint64())
+		if txNumErr != nil || maxTxNum < (roTx.Debug().StepSize()*5)/4 {
+			skip = true
+		}
+	}
+	roTx.Rollback()
+	if skip {
+		return nil, nil
+	}
+
+	// Kick collation (build files) + prune via the same path that
+	// stageloop.StageLoopIteration uses. Without this call from the FCU
+	// path, files would never advance once the node is at tip — execution
+	// keeps writing to MDBX above the file boundary, but no new file is
+	// built so the data above never becomes prunable. Result: MDBX grows
+	// unbounded (commitment domain especially) until the next initial-cycle
+	// trip through StageLoopIteration. CollateAndPruneIfNeeded internally
+	// opens its own RW tx and calls the pruneFn callback inside it.
+	if hasAgg, ok := e.db.(dbstate.HasAgg); ok {
+		if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok && agg != nil {
+			pruneTimeout := time.Duration(e.config.SecondsPerSlot()*1000/3) * time.Millisecond / 2
+			if err := agg.CollateAndPruneIfNeeded(e.bacgroundCtx, e.db, func(tx kv.TemporalRwTx) error {
+				return e.pipelineExecutor.RunPrune(e.bacgroundCtx, tx, initialCycle, pruneTimeout)
+			}, e.logger); err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	timings = append(timings, "prune", common.Round(time.Since(pruneStart), 0))
 	if len(timings) > 0 {
 		timings = append(timings, "initialCycle", initialCycle)

@@ -462,7 +462,24 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 	//  - stop prune when `tx.SpaceDirty()` is big
 	//  - and set ~500ms timeout
 	// because on slow disks - prune is slower. but for now - let's tune for nvme first, and add `tx.SpaceDirty()` check later https://github.com/erigontech/erigon/issues/11635
-	quickPruneTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*1000/3) * time.Millisecond / 2
+	// 2026-04: tip-mode commitment-domain prune throughput exceeded the prior
+	// /2 budget. Use a base budget of one-third of a slot and extend it
+	// adaptively when there is a large prunable backlog, capped at two-thirds
+	// of a slot so FCU still has time. The proper fix is a background prune
+	// that defers to FCU when work is pending — out of scope here.
+	baseTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*1000/3) * time.Millisecond
+	maxTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*2000/3) * time.Millisecond
+	quickPruneTimeout := baseTimeout
+	if hasAgg, ok := cfg.db.(state.HasAgg); ok {
+		if agg, ok := hasAgg.Agg().(*state.Aggregator); ok && agg != nil {
+			// Each 100 prunable steps adds 200ms. 1000-step backlog -> +2s.
+			extra := time.Duration(agg.MaxPrunableStepsBacklog()/100) * 200 * time.Millisecond
+			quickPruneTimeout = baseTimeout + extra
+			if quickPruneTimeout > maxTimeout {
+				quickPruneTimeout = maxTimeout
+			}
+		}
+	}
 
 	if timeout > 0 && timeout > quickPruneTimeout {
 		quickPruneTimeout = timeout
