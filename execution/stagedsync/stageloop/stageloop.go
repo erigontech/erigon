@@ -354,15 +354,11 @@ func StageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sync *stagedsyn
 		if err != nil {
 			return err
 		}
-		// Collate (if steps accumulated) + prune in separate transaction.
-		if a, ok := db.(state.HasAgg); ok {
-			agg := a.Agg().(*state.Aggregator)
-			if err := agg.CollateAndPruneIfNeeded(ctx, db, func(tx kv.TemporalRwTx) error {
-				return sync.RunPrune(ctx, tx, initialCycle, 0)
-			}, logger); err != nil {
-				return err
-			}
-		}
+		// Collate + prune now lives in the Storage component's background
+		// loop (Provider.StartBackgroundLoop in node/components/storage). It
+		// ticks every 5s and runs CollateAndPruneIfNeeded on its own schedule,
+		// so the StageLoopIteration no longer needs to kick it. The bg loop's
+		// pruneFn is sync.RunPrune, identical to what was called inline here.
 	}
 	return nil
 }

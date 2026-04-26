@@ -831,58 +831,18 @@ func (e *ExecModule) runForkchoiceFlushCommit(sd *execctx.SharedDomains, roTxToC
 	return timings, nil
 }
 
+// runForkchoicePrune is now a no-op shell. Collate+prune has moved to
+// the Storage component's background loop (Provider.StartBackgroundLoop in
+// node/components/storage). The bg loop ticks every 5s, runs CollateAndPruneIfNeeded
+// when there is accumulated work, and never blocks the FCU path. Keeping the
+// function callable (rather than removing it from the dispatch sites) so the
+// foreground-vs-background-prune mode flags in updateForkChoice still wire up.
+//
+// TODO(storage-component Stage D): remove this and its call sites once the
+// stage signature cleanup lands.
 func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
-	var timings []any
-	pruneStart := time.Now()
-	defer UpdateForkChoicePruneDuration(pruneStart)
-
-	// Pre-check (read-only): skip work on short chains with no snapshots /
-	// no need for pruning. Same gate as before; just lifted out of the RW
-	// path so we don't hold a write tx unnecessarily.
-	roTx, err := e.db.BeginTemporalRo(e.bacgroundCtx) //nolint:gocritic // closed below before CollateAndPruneIfNeeded opens its own RW tx
-	if err != nil {
-		return nil, err
-	}
-	defer roTx.Rollback() //nolint:gocritic // safety net alongside the explicit Rollback below
-	skip := false
-	currentHeader := rawdb.ReadCurrentHeader(roTx)
-	if currentHeader == nil {
-		skip = true
-	} else {
-		maxTxNum, txNumErr := rawdbv3.TxNums.Max(e.bacgroundCtx, roTx, currentHeader.Number.Uint64())
-		if txNumErr != nil || maxTxNum < (roTx.Debug().StepSize()*5)/4 {
-			skip = true
-		}
-	}
-	roTx.Rollback()
-	if skip {
-		return nil, nil
-	}
-
-	// Kick collation (build files) + prune via the same path that
-	// stageloop.StageLoopIteration uses. Without this call from the FCU
-	// path, files would never advance once the node is at tip — execution
-	// keeps writing to MDBX above the file boundary, but no new file is
-	// built so the data above never becomes prunable. Result: MDBX grows
-	// unbounded (commitment domain especially) until the next initial-cycle
-	// trip through StageLoopIteration. CollateAndPruneIfNeeded internally
-	// opens its own RW tx and calls the pruneFn callback inside it.
-	if hasAgg, ok := e.db.(dbstate.HasAgg); ok {
-		if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok && agg != nil {
-			pruneTimeout := time.Duration(e.config.SecondsPerSlot()*1000/3) * time.Millisecond / 2
-			if err := agg.CollateAndPruneIfNeeded(e.bacgroundCtx, e.db, func(tx kv.TemporalRwTx) error {
-				return e.pipelineExecutor.RunPrune(e.bacgroundCtx, tx, initialCycle, pruneTimeout)
-			}, e.logger); err != nil {
-				return nil, err
-			}
-		}
-	}
-
-	timings = append(timings, "prune", common.Round(time.Since(pruneStart), 0))
-	if len(timings) > 0 {
-		timings = append(timings, "initialCycle", initialCycle)
-	}
-	return timings, nil
+	defer UpdateForkChoicePruneDuration(time.Now())
+	return nil, nil
 }
 
 func (e *ExecModule) logHeadUpdated(blockHash common.Hash, fcuHeader *types.Header, txnum uint64, msg string, debug bool) {

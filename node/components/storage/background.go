@@ -20,11 +20,28 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/diagnostics/metrics"
+)
+
+var (
+	// storage_bg_collate_ticks counts every collator wake-up (work or no-op).
+	// Lets operators verify the bg loop is actually firing — at startup the
+	// first tick is the cheap no-op confirmation; beyond that the value
+	// climbs at roughly collateInterval^-1.
+	mxBgCollateTicks = metrics.GetOrCreateCounter("storage_bg_collate_ticks")
+	// storage_bg_collate_runs counts ticks where CollateAndPruneIfNeeded did
+	// real work (returned without short-circuiting on stepsInDB threshold).
+	// Inferred from non-zero duration; coarse but useful as a kick-rate signal.
+	mxBgCollateRuns = metrics.GetOrCreateCounter("storage_bg_collate_runs")
+	// storage_bg_collate_errors counts ticks that returned an error (excluding
+	// context.Canceled on shutdown).
+	mxBgCollateErrors = metrics.GetOrCreateCounter("storage_bg_collate_errors")
 )
 
 // PruneFn is the prune callback supplied by the execution layer. It is invoked
@@ -55,6 +72,11 @@ type backgroundLoop struct {
 	// is cheap when there is no work to do. 5s is fast enough to keep up at
 	// chain tip without monopolising the CPU during quiet periods.
 	collateInterval time.Duration
+
+	// firstTickLogged ensures we emit exactly one Info log when the loop's
+	// first tick completes — operators want a visible confirmation that the
+	// bg loop is alive without log spam from the per-tick path.
+	firstTickLogged atomic.Bool
 }
 
 func newBackgroundLoop(parent context.Context, db kv.TemporalRwDB, agg *dbstate.Aggregator, pruneFn PruneFn, logger log.Logger) *backgroundLoop {
@@ -100,13 +122,26 @@ func (b *backgroundLoop) runCollator() {
 		case <-b.ctx.Done():
 			return
 		case <-t.C:
-			if err := b.agg.CollateAndPruneIfNeeded(b.ctx, b.db, func(tx kv.TemporalRwTx) error {
+			mxBgCollateTicks.Inc()
+			started := time.Now()
+			err := b.agg.CollateAndPruneIfNeeded(b.ctx, b.db, func(tx kv.TemporalRwTx) error {
 				return b.pruneFn(b.ctx, tx)
-			}, b.logger); err != nil {
+			}, b.logger)
+			took := time.Since(started)
+			// CollateAndPruneIfNeeded short-circuits cheaply (single Aggregator
+			// gauge read) when stepsInDB <= target. Anything taking >50 ms is
+			// real work — count it as a "run" for the kick-rate metric.
+			if took > 50*time.Millisecond {
+				mxBgCollateRuns.Inc()
+			}
+			if err != nil {
 				if errors.Is(err, context.Canceled) {
 					return
 				}
-				b.logger.Warn("storage bg: CollateAndPruneIfNeeded", "err", err)
+				mxBgCollateErrors.Inc()
+				b.logger.Warn("storage bg: CollateAndPruneIfNeeded", "err", err, "took", took)
+			} else if b.firstTickLogged.CompareAndSwap(false, true) {
+				b.logger.Info("storage bg: collator alive", "interval", b.collateInterval, "first_tick_took", took)
 			}
 		}
 	}
