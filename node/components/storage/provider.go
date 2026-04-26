@@ -42,12 +42,29 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
+)
+
+// Stage E.0: per-checkpoint metrics. Bytes/page-op counters are already
+// exposed by the MDBX layer (db_pgops{phase="newly"}, tx_dirty, tx_retired)
+// and don't need duplication here — for write-cost analysis subtract those
+// gauges across two scrape windows. What MDBX doesn't give is the
+// storage-layer view (count, flush vs commit split, error rate), which is
+// what these metrics provide. Use the resulting summaries to validate the
+// "≈0 IO write at tip" claim: at tip, both flush and commit summaries
+// should hold sub-50ms quantiles steady regardless of throughput.
+var (
+	mxCheckpointTotal  = metrics.GetOrCreateCounter("storage_checkpoint_total")
+	mxCheckpointErrors = metrics.GetOrCreateCounter("storage_checkpoint_errors")
+	mxCheckpointFlush  = metrics.GetOrCreateSummary(`storage_checkpoint_seconds{phase="flush"}`)
+	mxCheckpointCommit = metrics.GetOrCreateSummary(`storage_checkpoint_seconds{phase="commit"}`)
+	mxCheckpointTotalS = metrics.GetOrCreateSummary(`storage_checkpoint_seconds{phase="total"}`)
 )
 
 // Provider holds the storage component runtime state.
@@ -153,17 +170,21 @@ func (p *Provider) WriteCheckpoint(
 	if p.ChainDB == nil {
 		return 0, 0, fmt.Errorf("storage: WriteCheckpoint called before Initialize")
 	}
+	checkpointStart := time.Now()
 	rwTx, err := p.ChainDB.BeginTemporalRw(ctx)
 	if err != nil {
+		mxCheckpointErrors.Inc()
 		return 0, 0, fmt.Errorf("storage: WriteCheckpoint begin rw: %w", err)
 	}
 	defer rwTx.Rollback()
 
 	flushStart := time.Now()
 	if err := fn(rwTx); err != nil {
+		mxCheckpointErrors.Inc()
 		return 0, 0, err
 	}
 	flushDur = time.Since(flushStart)
+	mxCheckpointFlush.ObserveDuration(flushStart)
 
 	if beforeCommit != nil {
 		beforeCommit()
@@ -171,9 +192,13 @@ func (p *Provider) WriteCheckpoint(
 
 	commitStart := time.Now()
 	if err := rwTx.Commit(); err != nil {
+		mxCheckpointErrors.Inc()
 		return flushDur, 0, fmt.Errorf("storage: WriteCheckpoint commit: %w", err)
 	}
 	commitDur = time.Since(commitStart)
+	mxCheckpointCommit.ObserveDuration(commitStart)
+	mxCheckpointTotalS.ObserveDuration(checkpointStart)
+	mxCheckpointTotal.Inc()
 
 	// Advance the aggregator's collation cap from the freshly committed
 	// commitment-state. Best-effort: failure is silent — the cap will catch
