@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	anatorrent "github.com/anacrolix/torrent"
 	"github.com/stretchr/testify/require"
@@ -157,6 +158,28 @@ func (n *P2PNode) SetDevP2PENREntry(entry enr.Entry) {
 	}
 }
 
+// EnableAutoPublishV2 wires the downloader's auto-republish loop: every
+// time the orchestrator promotes a file to TrustVerified (download
+// complete), the chain.toml.v2 manifest is regenerated, the new
+// info-hash is written into the local ENR, and the new V2 torrent is
+// re-seeded. Debounced — a burst of completions coalesces to one
+// publish.
+//
+// Required for staggered-entry scenarios so a late joiner sees the
+// CURRENT inventory of peers it dials, not the inventory those peers
+// had at startup.
+func (n *P2PNode) EnableAutoPublishV2(debounce time.Duration) {
+	n.T.Helper()
+	require.NoError(n.T, n.Downloader.BindAutoPublish(n.ctx, downloader.AutoPublishOpts{
+		Bus:       n.Bus,
+		Inventory: n.Inventory,
+		Debounce:  debounce,
+		ENRUpdater: func(ct enr.ChainToml) {
+			n.SetDevP2PENREntry(ct)
+		},
+	}))
+}
+
 // Close tears down every subcomponent. Cancels the context up front so
 // sentry / downloader background goroutines can exit, then waits for
 // them via their respective Close methods.
@@ -168,6 +191,7 @@ func (n *P2PNode) Close() {
 		n.cancel()
 	}
 	_ = n.Mx.UnbindBus()
+	_ = n.Downloader.UnbindAutoPublish()
 	_ = n.Orch.Close()
 	n.Downloader.Close()
 	_ = n.Sentry.Close()
