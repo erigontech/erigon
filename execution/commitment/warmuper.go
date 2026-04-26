@@ -76,6 +76,7 @@ type Warmuper struct {
 	// State
 	started atomic.Bool
 	closed  atomic.Bool
+	drop    int
 }
 
 type warmupWorkItem struct {
@@ -276,7 +277,10 @@ func (w *Warmuper) WarmKey(hashedKey []byte, startDepth int) {
 	case w.work <- warmupWorkItem{hashedKey: hashedKey, startDepth: startDepth}:
 	case <-w.ctx.Done():
 	default: // non-blocking
-		log.Warn("[dbg] warmuper drop", "key", hex.EncodeToString(hashedKey))
+		w.drop++
+		if w.drop%10 == 0 {
+			log.Warn("[dbg] warmuper drop", "key", hex.EncodeToString(hashedKey))
+		}
 	}
 }
 
