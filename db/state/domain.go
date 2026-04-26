@@ -433,14 +433,19 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if w.discard {
 		return nil
 	}
+
+	t := time.Now()
 	if err := w.h.Flush(ctx, tx); err != nil {
 		return err
 	}
+	log.Info("[dbg] domain.flush history", "t", time.Since(t), "tbl", w.valsTable)
 
+	t = time.Now()
 	if w.largeVals {
 		if err := w.values.Load(tx, w.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 			return err
 		}
+		log.Info("[dbg] domain.flush vals", "t", time.Since(t), "tbl", w.valsTable)
 		w.Close()
 		return nil
 	}
@@ -471,6 +476,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	}, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 		return err
 	}
+	log.Info("[dbg] domain.flush vals", "t", time.Since(t), "tbl", w.valsTable)
 	w.Close()
 
 	return nil
