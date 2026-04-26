@@ -257,7 +257,12 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	updateCount := sdc.updates.Size()
 	start := time.Now()
 	defer func() {
-		log.Debug("[commitment] processed", "block", blockNum, "txNum", txNum, "keys", common.PrettyCounter(updateCount), "mode", sdc.updates.Mode(), "spent", time.Since(start), "rootHash", hex.EncodeToString(rootHash))
+		took := time.Since(start)
+		var keysPerSec uint64
+		if took > 0 {
+			keysPerSec = uint64(float64(updateCount) / took.Seconds())
+		}
+		log.Debug("[commitment] processed", "block", blockNum, "txNum", txNum, "keys", common.PrettyCounter(updateCount), "keys/s", common.PrettyCounter(keysPerSec), "mode", sdc.updates.Mode(), "spent", took, "rootHash", hex.EncodeToString(rootHash))
 	}()
 	if updateCount == 0 {
 		rootHash, err = sdc.patriciaTrie.RootHash()
