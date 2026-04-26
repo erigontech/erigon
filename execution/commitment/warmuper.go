@@ -174,13 +174,15 @@ func (w *Warmuper) Start() {
 				defer cleanup()
 			}
 
+			isEdge := i == 0 || i == w.numWorkers-1
 			var logTicker *time.Ticker
-			if i == 0 {
+			if isEdge {
 				logTicker = time.NewTicker(20 * time.Second)
 				defer logTicker.Stop()
 			}
 
-			var lastKeys uint64
+			var localKeys uint64
+			var lastLocalKeys uint64
 			var lastTime = time.Now()
 
 			for item := range w.work {
@@ -194,12 +196,11 @@ func (w *Warmuper) Start() {
 					select {
 					case <-logTicker.C:
 						now := time.Now()
-						total := w.keysProcessed.Load()
 						elapsed := now.Sub(lastTime).Seconds()
-						keysPerSec := uint64(float64(total-lastKeys) / elapsed)
-						lastKeys = total
+						keysPerSec := uint64(float64(localKeys-lastLocalKeys) / elapsed)
+						lastLocalKeys = localKeys
 						lastTime = now
-						log.Info(fmt.Sprintf("[%s][warmup] worker", w.logPrefix),
+						log.Info(fmt.Sprintf("[%s][warmup] worker%d", w.logPrefix, i),
 							"keys/s", common.PrettyCounter(keysPerSec),
 							"queue", len(w.work))
 					default:
@@ -208,6 +209,7 @@ func (w *Warmuper) Start() {
 
 				w.warmupKey(trieCtx, item.hashedKey, item.startDepth)
 				w.keysProcessed.Add(1)
+				localKeys++
 			}
 			return nil
 		})
