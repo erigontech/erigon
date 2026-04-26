@@ -926,41 +926,41 @@ func toBlobs(_blobs [][]byte) []*goethkzg.Blob {
 	return blobs
 }
 
-func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.CacheView) txpoolcfg.DiscardReason {
+func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.CacheView) (txpoolcfg.DiscardReason, error) {
 	isEIP3860 := p.isShanghai() || p.isAgra()
 	isPrague := p.isPrague() || p.isBhilai()
 	isAmsterdam := p.isAmsterdam()
 	isEIP7954 := isAmsterdam
 	if txn.IsCreation() {
 		if err := vm.CheckMaxInitCodeSize(uint64(txn.GetDataLen()), isEIP3860, isEIP7954); err != nil {
-			return txpoolcfg.InitCodeTooLarge
+			return txpoolcfg.InitCodeTooLarge, nil
 		}
 	}
 
 	if txn.TxType() == types.AccountAbstractionTxType {
 		if !p.cfg.AllowAA {
-			return txpoolcfg.TypeNotActivated
+			return txpoolcfg.TypeNotActivated, nil
 		}
 
 		res, err := p.ethBackend.AAValidation(context.Background(), &remoteproto.AAValidationRequest{Tx: txn.ToProtoAccountAbstractionTxn()}) // enforces ERC-7562 rules
 		if err != nil {
-			return txpoolcfg.InvalidAA
+			return txpoolcfg.InvalidAA, nil
 		}
 		if !res.Valid {
-			return txpoolcfg.InvalidAA
+			return txpoolcfg.InvalidAA, nil
 		}
 	}
 
 	authorizationLen := len(txn.AuthAndNonces)
 	if txn.TxType() == SetCodeTxnType {
 		if !isPrague {
-			return txpoolcfg.TypeNotActivated
+			return txpoolcfg.TypeNotActivated, nil
 		}
 		if txn.IsCreation() {
-			return txpoolcfg.InvalidCreateTxn
+			return txpoolcfg.InvalidCreateTxn, nil
 		}
 		if authorizationLen == 0 {
-			return txpoolcfg.NoAuthorizations
+			return txpoolcfg.NoAuthorizations, nil
 		}
 	}
 
@@ -969,7 +969,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx underpriced idHash=%x local=%t, feeCap=%d, cfg.MinFeeCap=%d", txn.IDHash, isLocal, txn.GetFeeCap(), p.cfg.MinFeeCap))
 		}
-		return txpoolcfg.UnderPriced
+		return txpoolcfg.UnderPriced, nil
 	}
 
 	isAATxn := txn.TxType() == types.AccountAbstractionTxType
@@ -1004,19 +1004,19 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas calculated failed due to overflow idHash=%x", txn.IDHash))
 		}
-		return txpoolcfg.GasUintOverflow
+		return txpoolcfg.GasUintOverflow, nil
 	}
 	if gas.Total() > txn.GetGas() {
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas > txn.gas idHash=%x gas=%d, txn.gas=%d", txn.IDHash, gas, txn.GetGas()))
 		}
-		return txpoolcfg.IntrinsicGas
+		return txpoolcfg.IntrinsicGas, nil
 	}
 	if txn.GetGas() > p.blockGasLimit.Load() {
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx txn.gas > block gas limit idHash=%x gas=%d, block gas limit=%d", txn.IDHash, txn.GetGas(), p.blockGasLimit.Load()))
 		}
-		return txpoolcfg.GasLimitTooHigh
+		return txpoolcfg.GasLimitTooHigh, nil
 	}
 	// EIP-7825: Transaction Gas Limit Cap.
 	// EIP-8037 (Amsterdam): TX_MAX_GAS_LIMIT applies to the regular gas dimension only.
@@ -1031,23 +1031,26 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx gas cap exceeded idHash=%x gasToCap=%d, max=%d", txn.IDHash, gasToCap, params.MaxTxnGasLimit))
 		}
-		return txpoolcfg.GasLimitTooHigh
+		return txpoolcfg.GasLimitTooHigh, nil
 	}
 
 	if !isLocal && uint64(p.all.count(txn.SenderID)) > p.cfg.AccountSlots {
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming idHash=%x slots=%d, limit=%d", txn.IDHash, p.all.count(txn.SenderID), p.cfg.AccountSlots))
 		}
-		return txpoolcfg.Spammer
+		return txpoolcfg.Spammer, nil
 	}
 
 	// Check nonce and balance
-	senderNonce, senderBalance, _ := p.senders.info(stateCache, txn.SenderID)
+	senderNonce, senderBalance, err := p.senders.info(stateCache, txn.SenderID)
+	if err != nil {
+		return txpoolcfg.ErrGetSenderInfo, fmt.Errorf("validateTx: sender info for idHash=%x senderID=%d: %w", txn.IDHash, txn.SenderID, err)
+	}
 	if senderNonce > txn.Nonce {
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx nonce too low idHash=%x nonce in state=%d, txn.nonce=%d", txn.IDHash, senderNonce, txn.Nonce))
 		}
-		return txpoolcfg.NonceTooLow
+		return txpoolcfg.NonceTooLow, nil
 	}
 
 	// Transactor should have enough funds to cover the costs
@@ -1056,12 +1059,12 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx insufficient funds idHash=%x balance in state=%d, txn.gas*txn.tip=%d", txn.IDHash, senderBalance, total))
 		}
-		return txpoolcfg.InsufficientFunds
+		return txpoolcfg.InsufficientFunds, nil
 	}
 	if txn.TxType() == BlobTxnType {
-		return p.validateBlobTxn(txn, isLocal)
+		return p.validateBlobTxn(txn, isLocal), nil
 	}
-	return txpoolcfg.Success
+	return txpoolcfg.Success, nil
 }
 
 func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardReason {
@@ -1307,7 +1310,15 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView) (rea
 
 	goodCount := 0
 	for i, txn := range txns.Txns {
-		reason := p.validateTx(txn, txns.IsLocal[i], stateCache)
+		reason, err := p.validateTx(txn, txns.IsLocal[i], stateCache)
+		if err != nil {
+			if reason == txpoolcfg.ErrGetSenderInfo {
+				p.logger.Warn("[txpool] validateTxns: sender info", "err", err)
+				reasons[i] = reason
+				continue
+			}
+			return reasons, goodTxns, err
+		}
 		if reason == txpoolcfg.Success {
 			goodCount++
 			// Success here means no DiscardReason yet, so leave it NotSet
@@ -1386,28 +1397,36 @@ func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcf
 		return nil, err
 	}
 
-	reasons, newTxns, err := p.validateTxns(&newTxns, cacheView)
+	originalTxns := newTxns
+
+	reasons, goodTxns, err := p.validateTxns(&newTxns, cacheView)
 	if err != nil {
 		return nil, err
 	}
 
-	announcements, addReasons, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, p.senders, newTxns,
+	announcements, addReasons, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, p.senders, goodTxns,
 		p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), p.blockGasLimit.Load(), true, p.logger)
 	if err != nil {
 		return nil, err
 	}
-	for i, reason := range addReasons {
-		if reason != txpoolcfg.NotSet {
-			reasons[i] = reason
+	// reasons is indexed by originalTxns; addReasons is indexed by goodTxns.
+	// Walk reasons and advance j only on slots that survived validation.
+	for i, j := 0, 0; i < len(reasons) && j < len(addReasons); i++ {
+		if reasons[i] != txpoolcfg.NotSet {
+			continue
 		}
+		if addReasons[j] != txpoolcfg.NotSet {
+			reasons[i] = addReasons[j]
+		}
+		j++
 	}
 	p.promoted.Reset()
 	p.promoted.AppendOther(announcements)
 
-	reasons = fillDiscardReasons(reasons, newTxns, p.discardReasonsLRU)
+	reasons = fillDiscardReasons(reasons, originalTxns, p.discardReasonsLRU)
 	for i, reason := range reasons {
 		if reason == txpoolcfg.Success {
-			txn := newTxns.Txns[i]
+			txn := originalTxns.Txns[i]
 			if txn.Traced {
 				p.logger.Info(fmt.Sprintf("TX TRACING: AddLocalTxns promotes idHash=%x, senderId=%d", txn.IDHash, txn.SenderID))
 			}
@@ -2611,7 +2630,11 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.TemporalTx) err
 		txn.SenderID, txn.Traced = p.senders.getOrCreateID(addr, p.logger)
 		isLocalTx := p.isLocalLRU.Contains(string(k))
 
-		if reason := p.validateTx(txn, isLocalTx, cacheView); reason != txpoolcfg.NotSet && reason != txpoolcfg.Success {
+		reason, err := p.validateTx(txn, isLocalTx, cacheView)
+		if err != nil {
+			return err
+		}
+		if reason != txpoolcfg.NotSet && reason != txpoolcfg.Success {
 			return nil // TODO: Clarify - if one of the txns has the wrong reason, no pooled txns!
 		}
 		txns.Resize(uint(i + 1))
