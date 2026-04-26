@@ -63,6 +63,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	dl "github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/node/components/integration/snapshot/harness"
+	sentrycomp "github.com/erigontech/erigon/node/components/sentry"
 	"github.com/erigontech/erigon/node/components/storage/flow"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
 	"github.com/erigontech/erigon/p2p/enr"
@@ -193,16 +194,41 @@ func TestP2P_Swarm_FullReplication(t *testing.T) {
 	// Subscribers on each peer to observe progress.
 	manifestCounts := make([]*atomic.Int32, numPeers)
 	promotedCounts := make([]*atomic.Int32, numPeers)
+	sentryConnCounts := make([]*atomic.Int32, numPeers)
 	for i, p := range peers {
 		manifestCounts[i] = &atomic.Int32{}
 		promotedCounts[i] = &atomic.Int32{}
+		sentryConnCounts[i] = &atomic.Int32{}
 		mc := manifestCounts[i]
 		pc := promotedCounts[i]
+		sc := sentryConnCounts[i]
 		require.NoError(t, p.Bus.Subscribe(func(flow.PeerManifestReceived) { mc.Add(1) }))
 		require.NoError(t, p.Bus.Subscribe(func(flow.TrustPromoted) { pc.Add(1) }))
+		require.NoError(t, p.Bus.Subscribe(func(e sentrycomp.PeerConnected) {
+			sc.Add(1)
+			peerID := "unknown"
+			if e.Peer != nil {
+				peerID = e.Peer.ID().String()
+			}
+			var ct enr.ChainToml
+			hasV2 := false
+			if e.Peer != nil {
+				if err := e.Peer.Record().Load(&ct); err == nil && ct.InfoHash != [20]byte{} {
+					hasV2 = true
+				}
+			}
+			t.Logf("[sentry-conn] peer %d saw connection from %s (V2-in-ENR=%v)",
+				i, peerID[:16], hasV2)
+		}))
 	}
 
 	// Mesh-connect every peer to every other at BT + DevP2P layers.
+	// AddDevP2PPeer registers the other peer as static-dialed so the
+	// p2p server preserves its full ENR (with chain-toml v2 InfoHash)
+	// across the inbound side of each handshake — see the corresponding
+	// fix at p2p/server.go:setupConn. Without that fix the acceptor
+	// would silently see a stub enode and the manifest fetch would not
+	// fire.
 	for i, p := range peers {
 		for j, other := range peers {
 			if i == j {
@@ -236,7 +262,13 @@ func TestP2P_Swarm_FullReplication(t *testing.T) {
 	// Convergence check, with progress logging woven in so a hang shows
 	// its shape (which peer is starved, which peers' manifests aren't
 	// landing) rather than just timing out blind.
-	lastLog := time.Now()
+	progressInterval := 2 * time.Minute
+	if v := os.Getenv("SNAPSHOT_PROGRESS_INTERVAL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			progressInterval = d
+		}
+	}
+	lastLog := time.Time{} // log immediately on first miss
 	waitForP2P(t, func() bool {
 		converged := true
 		for _, p := range peers {
@@ -247,13 +279,14 @@ func TestP2P_Swarm_FullReplication(t *testing.T) {
 				converged = false
 			}
 		}
-		if !converged && time.Since(lastLog) > 2*time.Minute {
+		if !converged && time.Since(lastLog) > progressInterval {
 			lastLog = time.Now()
 			for i, p := range peers {
-				t.Logf("[progress %s] peer %d: files-on-disk=%d/%d pending=%d manifests=%d promoted=%d",
+				t.Logf("[progress %s] peer %d: files-on-disk=%d/%d pending=%d sentry-conns=%d manifests=%d promoted=%d",
 					time.Since(transferStart).Round(time.Second), i,
 					countFilesUnder(t, p.Dirs.Snap, present), expectedFilesPerPeer,
-					p.Orch.PendingCount(), manifestCounts[i].Load(), promotedCounts[i].Load())
+					p.Orch.PendingCount(),
+					sentryConnCounts[i].Load(), manifestCounts[i].Load(), promotedCounts[i].Load())
 			}
 		}
 		return converged
