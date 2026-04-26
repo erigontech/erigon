@@ -165,7 +165,7 @@ func (w *Warmuper) Start() {
 		return
 	}
 
-	w.work = make(chan warmupWorkItem, w.numWorkers*128)
+	w.work = make(chan warmupWorkItem, w.numWorkers*64)
 	w.g, w.ctx = errgroup.WithContext(w.ctx)
 
 	for i := 0; i < w.numWorkers; i++ {
@@ -272,14 +272,10 @@ func (w *Warmuper) WarmKey(hashedKey []byte, startDepth int) {
 	if !w.started.Load() || w.numWorkers <= 0 || w.closed.Load() {
 		return
 	}
+	// Blocking! It's by-design. Speed of system is equal to speed of warmupers
 	select {
 	case w.work <- warmupWorkItem{hashedKey: hashedKey, startDepth: startDepth}:
 	case <-w.ctx.Done():
-	default: // non-blocking
-		w.drop++
-		if w.drop%1000 == 0 {
-			log.Warn("[dbg] warmuper drop", "drop", w.drop)
-		}
 	}
 }
 
