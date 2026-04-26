@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/components/storage"
 	"github.com/erigontech/erigon/node/shards"
 )
 
@@ -42,6 +43,7 @@ import (
 type PipelineExecutor struct {
 	sync                    *stagedsync.Sync
 	db                      kv.TemporalRwDB
+	storage                 *storage.Provider
 	blockReader             services.FullBlockReader
 	chainConfig             *chain.Config
 	engine                  rules.Engine
@@ -59,6 +61,7 @@ type PipelineExecutor struct {
 func NewPipelineExecutor(
 	sync *stagedsync.Sync,
 	db kv.TemporalRwDB,
+	storageProvider *storage.Provider,
 	blockReader services.FullBlockReader,
 	chainConfig *chain.Config,
 	engine rules.Engine,
@@ -70,6 +73,7 @@ func NewPipelineExecutor(
 	return &PipelineExecutor{
 		sync:                    sync,
 		db:                      db,
+		storage:                 storageProvider,
 		blockReader:             blockReader,
 		chainConfig:             chainConfig,
 		engine:                  engine,
@@ -237,6 +241,13 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 			sd.ClearRam(true)
 			if err := tx.Commit(); err != nil {
 				return nil, err
+			}
+			// Outer tx mixed sd.Flush + RunSnapshots writes, so we couldn't route
+			// through Provider.WriteCheckpoint — but the bg-loop collation cap
+			// still needs to learn that commitment data was flushed, otherwise
+			// initial sync never advances the cap and prune lags forever.
+			if pe.storage != nil {
+				pe.storage.AdvanceCommitmentFlushCap(ctx)
 			}
 			newTx, err := pe.db.BeginTemporalRw(ctx) //nolint:gocritic
 			if err != nil {

@@ -1055,13 +1055,14 @@ func TestNotificationDispatchBackgroundCommit(t *testing.T) {
 }
 
 // TestNotificationDispatchBackgroundPrune verifies that with the default
-// production configuration (foreground commit + background prune), notifications
-// are dispatched and data is committed before FCU returns. This was a real bug:
-// background prune was incorrectly pulling the commit into the background
-// goroutine too, causing eth_getBlockByNumber to return null after FCU Success.
+// production configuration (foreground commit + background prune in the
+// Storage component's bg loop), notifications are dispatched and data is
+// committed before FCU returns. This was a real bug: background prune
+// was incorrectly pulling the commit into the background goroutine too,
+// causing eth_getBlockByNumber to return null after FCU Success.
 func TestNotificationDispatchBackgroundPrune(t *testing.T) {
 	ctx := t.Context()
-	m := execmoduletester.New(t, execmoduletester.WithFcuBackgroundPrune())
+	m := execmoduletester.New(t)
 	exec := m.ExecModule
 
 	headerCh, unsub := m.Notifications.Events.AddHeaderSubscription()

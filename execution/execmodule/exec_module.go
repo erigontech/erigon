@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/components/storage"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
@@ -193,6 +194,7 @@ type ExecModule struct {
 
 	// MDBX database
 	db               kv.TemporalRwDB // main database
+	storage          *storage.Provider
 	semaphore        *semaphore.Weighted
 	forkValidator    *ForkValidator
 	pipelineExecutor *PipelineExecutor
@@ -214,7 +216,6 @@ type ExecModule struct {
 	// rules engine
 	engine rules.Engine
 
-	fcuBackgroundPrune      bool
 	fcuBackgroundCommit     bool
 	onlySnapDownloadOnStart bool
 	// metrics for average mgas/sec
@@ -236,6 +237,7 @@ func NewExecModule(
 	ctx context.Context,
 	blockReader services.FullBlockReader,
 	db kv.TemporalRwDB,
+	storageProvider *storage.Provider,
 	pipelineExecutor *PipelineExecutor,
 	currentBlockNumber uint64,
 	config *chain.Config,
@@ -246,7 +248,6 @@ func NewExecModule(
 	logger log.Logger,
 	engine rules.Engine,
 	syncCfg ethconfig.Sync,
-	fcuBackgroundPrune bool,
 	fcuBackgroundCommit bool,
 	onlySnapDownloadOnStart bool,
 	stopNode func() error,
@@ -257,6 +258,7 @@ func NewExecModule(
 	em := &ExecModule{
 		blockReader:             blockReader,
 		db:                      db,
+		storage:                 storageProvider,
 		logger:                  logger,
 		forkValidator:           forkValidator,
 		pipelineExecutor:        pipelineExecutor,
@@ -269,7 +271,6 @@ func NewExecModule(
 		engine:                  engine,
 		syncCfg:                 syncCfg,
 		bacgroundCtx:            ctx,
-		fcuBackgroundPrune:      fcuBackgroundPrune,
 		fcuBackgroundCommit:     fcuBackgroundCommit,
 		onlySnapDownloadOnStart: onlySnapDownloadOnStart,
 		stateCache:              domainCache,

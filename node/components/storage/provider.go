@@ -30,6 +30,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"golang.org/x/sync/semaphore"
 
@@ -42,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/polygon/bridge"
@@ -110,6 +112,92 @@ func (p *Provider) Close() {
 		p.bg.Stop()
 		p.bg = nil
 	}
+}
+
+// WriteCheckpoint opens a brief RwTx, calls fn (which performs the flush
+// work — typically sd.Flush plus any related ClearRam), invokes beforeCommit
+// between Flush and Commit (typically releases the outer RO tx so MDBX sees
+// openTxs=1 at commit time, freeing freelist pages immediately), commits,
+// then advances the Aggregator's lastFlushedCommitmentTxNum from the freshly
+// committed commitment-state.
+//
+// Centralising this here (instead of duplicating the flush+commit+SetLastFlushed
+// triple across forkchoice.go, ProcessFrozenBlocks, and stageloop.go) ensures
+// the collation cap (aggregator.go's stepFullyCommitted gate) advances on
+// every flush/commit cycle regardless of which call site triggered it. Without
+// the cap advance, the bg-loop collator never learns that commitment data has
+// been flushed and refuses to prune past the initial-cycle baseline.
+//
+// Returns flush+commit durations so the caller can build its own timings log
+// line; ignore them if not needed. beforeCommit may be nil.
+func (p *Provider) WriteCheckpoint(
+	ctx context.Context,
+	fn func(tx kv.TemporalRwTx) error,
+	beforeCommit func(),
+) (flushDur, commitDur time.Duration, err error) {
+	if p.ChainDB == nil {
+		return 0, 0, fmt.Errorf("storage: WriteCheckpoint called before Initialize")
+	}
+	rwTx, err := p.ChainDB.BeginTemporalRw(ctx)
+	if err != nil {
+		return 0, 0, fmt.Errorf("storage: WriteCheckpoint begin rw: %w", err)
+	}
+	defer rwTx.Rollback()
+
+	flushStart := time.Now()
+	if err := fn(rwTx); err != nil {
+		return 0, 0, err
+	}
+	flushDur = time.Since(flushStart)
+
+	if beforeCommit != nil {
+		beforeCommit()
+	}
+
+	commitStart := time.Now()
+	if err := rwTx.Commit(); err != nil {
+		return flushDur, 0, fmt.Errorf("storage: WriteCheckpoint commit: %w", err)
+	}
+	commitDur = time.Since(commitStart)
+
+	// Advance the aggregator's collation cap from the freshly committed
+	// commitment-state. Best-effort: failure is silent — the cap will catch
+	// up on the next checkpoint. Mirrors the SetLastFlushedCommitmentTxNum
+	// dance that previously lived inline in runForkchoiceFlushCommit and
+	// stageloop.go, so this is the single place that pattern lives now.
+	p.AdvanceCommitmentFlushCap(ctx)
+
+	return flushDur, commitDur, nil
+}
+
+// AdvanceCommitmentFlushCap reads the freshly committed commitment-state and
+// records the txNum on the Aggregator's lastFlushedCommitmentTxNum field.
+// No-op if the chainDB has no Aggregator (integration tools).
+//
+// Exposed for call sites (e.g. ProcessFrozenBlocks) whose tx contains more
+// than just SD writes and therefore cannot route through WriteCheckpoint —
+// they need to commit their own combined tx and then advance the cap from
+// the committed state.
+func (p *Provider) AdvanceCommitmentFlushCap(ctx context.Context) {
+	hasAgg, ok := p.ChainDB.(dbstate.HasAgg)
+	if !ok {
+		return
+	}
+	agg, ok := hasAgg.Agg().(*dbstate.Aggregator)
+	if !ok || agg == nil {
+		return
+	}
+	roTx, err := p.ChainDB.BeginTemporalRo(ctx)
+	if err != nil {
+		return
+	}
+	defer roTx.Rollback()
+	v, _, err := roTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+	if err != nil || len(v) < 16 {
+		return
+	}
+	committedTxNum, _ := commitmentdb.DecodeTxBlockNums(v)
+	agg.SetLastFlushedCommitmentTxNum(committedTxNum)
 }
 
 // WithForegroundPriority runs fn while signalling the background loop to

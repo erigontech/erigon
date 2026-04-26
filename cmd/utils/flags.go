@@ -1122,7 +1122,7 @@ var (
 	}
 	FcuBackgroundPruneFlag = cli.BoolFlag{
 		Name:  "fcu.background.prune",
-		Usage: "Enables background pruning post fcu",
+		Usage: "(deprecated, ignored) Pruning is now owned by the Storage component's bg loop",
 		Value: ethconfig.Defaults.FcuBackgroundPrune,
 	}
 	FcuBackgroundCommitFlag = cli.BoolFlag{

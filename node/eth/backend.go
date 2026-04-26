@@ -974,7 +974,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	validationSync := stageloop.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentryProvider.Client,
 		validationNotifications, blockReader, blockWriter, logger)
 	dispatcher := execmodule.NewDispatcher(chainConfig, backend.notifications.Events, backend.notifications.StateChangesConsumer, logger)
-	pipelineExecutor := execmodule.NewPipelineExecutor(backend.pipelineStagedSync, backend.chainDB, blockReader, chainConfig, backend.engine, validationSync, validationNotifications, dispatcher, logger)
+	pipelineExecutor := execmodule.NewPipelineExecutor(backend.pipelineStagedSync, backend.chainDB, backend.components.Storage, blockReader, chainConfig, backend.engine, validationSync, validationNotifications, dispatcher, logger)
 
 	hook := stageloop.NewHook(backend.sentryCtx, backend.notifications, backend.stagedSync, backend.chainConfig, backend.logger, dispatcher, backend.sentryProvider.Client.SetStatus, statusDataProvider, backend.sentryProvider.ExecutionP2PPublisher)
 
@@ -988,6 +988,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		ctx,
 		blockReader,
 		backend.chainDB,
+		backend.components.Storage,
 		pipelineExecutor,
 		currentBlockNumber,
 		chainConfig,
@@ -998,7 +999,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		logger,
 		backend.engine,
 		config.Sync,
-		config.FcuBackgroundPrune,
 		config.FcuBackgroundCommit,
 		onlySnapDownloadOnStart,
 		backend.stopNode,

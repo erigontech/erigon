@@ -71,6 +71,7 @@ import (
 	debugtracer "github.com/erigontech/erigon/execution/tracing/tracers/debug"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/node/components/storage"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -331,15 +332,12 @@ func WithChainConfig(cfg *chain.Config) Option {
 	}
 }
 
+// WithFcuBackgroundCommit opts the test into the bg-commit FCU mode (not the
+// default for tests because it races multi-block read-after-FCU sequences —
+// see TestNotificationDispatchBackgroundCommit's skip).
 func WithFcuBackgroundCommit() Option {
 	return func(opts *options) {
 		opts.fcuBackgroundCommit = true
-	}
-}
-
-func WithFcuBackgroundPrune() Option {
-	return func(opts *options) {
-		opts.fcuBackgroundPrune = true
 	}
 }
 
@@ -355,7 +353,6 @@ type options struct {
 	withTxPool          bool
 	enableDomains       []kv.Domain
 	fcuBackgroundCommit bool
-	fcuBackgroundPrune  bool
 }
 
 func applyOptions(opts []Option) options {
@@ -434,7 +431,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	cfg.Genesis = gspec
 	cfg.Prune = pruneMode
 	cfg.ExperimentalBAL = opt.experimentalBAL
-	cfg.FcuBackgroundPrune = opt.fcuBackgroundPrune
 	cfg.FcuBackgroundCommit = opt.fcuBackgroundCommit
 
 	logLvl := log.LvlError
@@ -703,7 +699,11 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	validationSync := stageloop.NewInMemoryExecution(mock.Ctx, mock.DB, &cfg, mock.sentriesClient,
 		validationNotifications, mock.BlockReader, blockWriter, logger)
 	dispatcher := execmodule.NewDispatcher(mock.ChainConfig, mock.Notifications.Events, mock.Notifications.StateChangesConsumer, logger)
-	pipelineExecutor := execmodule.NewPipelineExecutor(mock.posStagedSync, mock.DB, mock.BlockReader, mock.ChainConfig, mock.Engine, validationSync, validationNotifications, dispatcher, logger)
+	// Minimal Storage Provider — exposes ChainDB so WriteCheckpoint can open
+	// brief RwTxs for FCU commits. BlockReader/BlockWriter etc. are unused
+	// in tests since BlockRetire and the bg loop aren't started.
+	storageProvider := &storage.Provider{ChainDB: mock.DB}
+	pipelineExecutor := execmodule.NewPipelineExecutor(mock.posStagedSync, mock.DB, storageProvider, mock.BlockReader, mock.ChainConfig, mock.Engine, validationSync, validationNotifications, dispatcher, logger)
 
 	hook := stageloop.NewHook(mock.Ctx, mock.Notifications, mock.posStagedSync, mock.ChainConfig, logger, dispatcher, nil, nil, nil)
 
@@ -718,6 +718,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		ctx,
 		mock.BlockReader,
 		mock.DB,
+		storageProvider,
 		pipelineExecutor,
 		1, // currentBlockNumber
 		mock.ChainConfig,
@@ -728,7 +729,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		logger,
 		engine,
 		cfg.Sync,
-		cfg.FcuBackgroundPrune,
 		cfg.FcuBackgroundCommit,
 		onlySnapDownloadOnStart,
 		func() error { return nil },

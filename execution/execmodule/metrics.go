@@ -23,10 +23,9 @@ import (
 )
 
 var (
-	updateForkChoiceArrivalDelay  = metrics.NewSummary(`update_fork_choice{type="arrival_delay"}`)
-	updateForkChoiceDuration      = metrics.NewSummary(`update_fork_choice{type="execution_duration"}`)
-	updateForkChoiceDepth         = metrics.NewSummary(`update_fork_choice{type="fork_depth"}`)
-	updateForkChoicePruneDuration = metrics.NewSummary(`update_fork_choice{type="prune_duration"}`)
+	updateForkChoiceArrivalDelay = metrics.NewSummary(`update_fork_choice{type="arrival_delay"}`)
+	updateForkChoiceDuration     = metrics.NewSummary(`update_fork_choice{type="execution_duration"}`)
+	updateForkChoiceDepth        = metrics.NewSummary(`update_fork_choice{type="fork_depth"}`)
 )
 
 func UpdateForkChoiceArrivalDelay(blockTime uint64) {
@@ -40,8 +39,4 @@ func UpdateForkChoiceDuration(start time.Time) {
 
 func UpdateForkChoiceDepth(depth uint64) {
 	updateForkChoiceDepth.Observe(float64(depth))
-}
-
-func UpdateForkChoicePruneDuration(start time.Time) {
-	updateForkChoicePruneDuration.ObserveDuration(start)
 }
