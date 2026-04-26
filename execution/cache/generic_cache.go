@@ -21,8 +21,8 @@ import (
 	"sync/atomic"
 
 	"github.com/c2h5oh/datasize"
+
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
 )
 
@@ -199,9 +199,10 @@ func (c *GenericCache[T]) PrintStatsAndReset(name string) {
 	}
 	sizeBytes := c.currentSize.Load()
 	usagePct := float64(sizeBytes) / float64(c.capacityB) * 100
-	log.Debug(name+" cache stats",
-		"hits", hits, "misses", misses, "hit_rate", hitRate,
-		"entries", c.data.Len(), "size_mb", sizeBytes/(1024*1024),
-		"capacity_mb", c.capacityB/datasize.MB, "usage_pct", usagePct,
-	)
+	_, _ = hitRate, usagePct
+	//log.Debug(name+" cache stats",
+	//	"hits", hits, "misses", misses, "hit_rate", hitRate,
+	//	"entries", c.data.Len(), "size_mb", sizeBytes/(1024*1024),
+	//	"capacity_mb", c.capacityB/datasize.MB, "usage_pct", usagePct,
+	//)
 }
