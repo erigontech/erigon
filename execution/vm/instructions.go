@@ -1316,6 +1316,10 @@ func opSelfdestruct(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 
 	ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct)
 	ibs.Selfdestruct(self)
+	if kind := ClassifySDBurn(false, false, self == beneficiaryAddr, balance.IsZero()); kind == SDBurnSelf {
+		SDBurnLog("SD-SELF block=%d tx=%x addr=%x ben=%x balance=%s just_created=pre6780",
+			evm.Context.BlockNumber, evm.TxHash, self, beneficiaryAddr, balance.String())
+	}
 	tracer := evm.Config().Tracer
 	if tracer != nil && tracer.OnEnter != nil {
 		tracer.OnEnter(evm.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, 0, balance, nil)
@@ -1361,6 +1365,14 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 		} else if newContract {
 			ibs.AddLog(misc.EthBurnLog(self.Value(), balance))
 		}
+	}
+	switch ClassifySDBurn(true, newContract, self == beneficiaryAddr, balance.IsZero()) {
+	case SDBurnSelf:
+		SDBurnLog("SD-SELF block=%d tx=%x addr=%x ben=%x balance=%s just_created=true",
+			evm.Context.BlockNumber, evm.TxHash, self, beneficiaryAddr, balance.String())
+	case SDBurnFake:
+		SDBurnLog("FAKE-BURN block=%d tx=%x addr=%x ben=%x balance=%s",
+			evm.Context.BlockNumber, evm.TxHash, self, beneficiaryAddr, balance.String())
 	}
 	tracer := evm.Config().Tracer
 	if tracer != nil && tracer.OnEnter != nil {

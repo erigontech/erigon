@@ -226,9 +226,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 				return err
 			}
 			txContext := protocol.NewEVMTxContext(msg)
-			if rw.vmCfg.TraceJumpDest {
-				txContext.TxHash = txn.Hash()
-			}
+			txContext.TxHash = txn.Hash()
 			rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, txContext, ibs, *rw.vmCfg, rules)
 			if hooks != nil && hooks.OnTxStart != nil {
 				hooks.OnTxStart(rw.evm.GetVMContext(), txn, msg.From())

@@ -1894,8 +1894,12 @@ func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, add
 	emptyRemoval := EIP161Enabled && stateObject.data.Empty() && (!isAura || addr != params.SystemAddress)
 	if stateObject.selfdestructed || (isDirty && emptyRemoval) {
 		balance := stateObject.Balance()
-		if tracingHooks != nil && tracingHooks.OnBalanceChange != nil && !(&balance).IsZero() && stateObject.selfdestructed {
-			tracingHooks.OnBalanceChange(stateObject.address, balance, uint256.Int{}, tracing.BalanceDecreaseSelfdestructBurn)
+		if !(&balance).IsZero() && stateObject.selfdestructed {
+			if tracingHooks != nil && tracingHooks.OnBalanceChange != nil {
+				tracingHooks.OnBalanceChange(stateObject.address, balance, uint256.Int{}, tracing.BalanceDecreaseSelfdestructBurn)
+			}
+			sdBurnLogf("SD-FINAL block=%d tx=%d addr=%x balance=%s newly_created=%v",
+				stateObject.db.blockNum, stateObject.db.txIndex, stateObject.address, balance.String(), stateObject.newlyCreated)
 		}
 		if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (trace || dbg.TraceAccount(addr.Handle()))) {
 			if _, ok := stateWriter.(*NoopWriter); !ok || dbg.TraceNoopIO {
