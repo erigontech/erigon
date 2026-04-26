@@ -90,7 +90,7 @@ func DefaultEngineApiTesterGenesis(t *testing.T) (*types.Genesis, *ecdsa.Private
 		Config:     &chainConfig,
 		Coinbase:   coinbaseAddr,
 		Difficulty: merge.ProofOfStakeDifficulty,
-		GasLimit:   1_000_000_000,
+		GasLimit:   100_000_000,
 		Alloc: types.GenesisAlloc{
 			coinbaseAddr: {
 				Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(21), nil), // 1_000 ETH
