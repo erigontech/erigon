@@ -399,13 +399,13 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		slot.AuthAndNonces = make([]AuthAndNonce, 0, len(auths))
 		for _, auth := range auths {
 			if !auth.ChainID.IsUint64() {
-				return 0, fmt.Errorf("%w: authorization chainId is too big: %s", ErrParseTxn, &auth.ChainID)
+				return p, fmt.Errorf("%w: authorization chainId is too big: %s", ErrRejected, &auth.ChainID)
 			}
 			authCopy := auth
 			ctx.authBuf.Reset()
 			authority, err := authCopy.RecoverSigner(&ctx.authBuf, ctx.authHashBuf[:])
 			if err != nil {
-				return 0, fmt.Errorf("%w: recover authorization signer: %s stack: %s", ErrParseTxn, err, dbg.Stack()) //nolint
+				return p, fmt.Errorf("%w: recover authorization signer: %s stack: %s", ErrRejected, err, dbg.Stack()) //nolint
 			}
 			slot.AuthAndNonces = append(slot.AuthAndNonces, AuthAndNonce{*authority, auth.Nonce})
 		}
@@ -426,7 +426,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 			}
 			addr, err := txn.Sender(*signer)
 			if err != nil {
-				return 0, fmt.Errorf("%w: recovering sender from signature: %s", ErrParseTxn, err) //nolint
+				return p, fmt.Errorf("%w: recovering sender from signature: %s", ErrRejected, err) //nolint
 			}
 			addrBytes := addr.Value()
 			copy(sender, addrBytes[:])

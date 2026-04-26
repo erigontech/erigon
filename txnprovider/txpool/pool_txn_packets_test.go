@@ -174,6 +174,61 @@ func TestPooledTransactionsPacket66(t *testing.T) {
 	}
 }
 
+// TestSenderSigBatchPoisoning verifies that a transaction with an unrecoverable
+// sender signature (R=0) in a batch does not cause siblings to be dropped.
+// Before the fix, ParseTransaction wrapped the sender-recovery error as
+// ErrParseTxn which aborted the whole batch; the fix wraps it as ErrRejected
+// so only the malformed tx is skipped.
+func TestSenderSigBatchPoisoning(t *testing.T) {
+	// goodTx1 and goodTx2 are valid legacy txns on chain ID 1 (from existing test data).
+	goodTx1 := hexutil.MustDecodeHex("f867088504a817c8088302e2489435353535353535353535353535353535353535358202008025a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10")
+	goodTx2 := hexutil.MustDecodeHex("f867098504a817c809830334509435353535353535353535353535353535353535358202d98025a052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afba052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb")
+
+	// badTx is the same as goodTx1 but with R=0 (RLP-encoded as 0x80 = empty string).
+	// This makes the sender signature unrecoverable.
+	// Original R field: a064b1702d...c12 (33 bytes) → replaced with 80 (1 byte).
+	// List length shrinks from 103 (0x67) to 71 (0x47), prefix stays long-form f8.
+	badTx := hexutil.MustDecodeHex("f847088504a817c8088302e248943535353535353535353535353535353535353535820200802580a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10")
+
+	t.Run("ParseTransactions_skips_bad_sender_sig", func(t *testing.T) {
+		require := require.New(t)
+		// Encode 3 txns: [good, bad, good]
+		encodeBuf := EncodeTransactions([][]byte{goodTx1, badTx, goodTx2}, nil)
+
+		ctx := NewTxnParseContext(*uint256.NewInt(1))
+		slots := &TxnSlots{}
+		_, err := ParseTransactions(encodeBuf, 0, ctx, slots, nil)
+		require.NoError(err, "batch parse should not fail due to one bad sender sig")
+		require.Len(slots.Txns, 2, "two good txns should survive; only the bad one is dropped")
+	})
+
+	t.Run("ParsePooledTransactions66_skips_bad_sender_sig", func(t *testing.T) {
+		require := require.New(t)
+		var requestID uint64 = 42
+		// Encode 3 txns: [good, bad, good]
+		encodeBuf := EncodePooledTransactions66([][]byte{goodTx1, badTx, goodTx2}, requestID, nil)
+
+		ctx := NewTxnParseContext(*uint256.NewInt(1))
+		slots := &TxnSlots{}
+		gotRequestID, _, err := ParsePooledTransactions66(encodeBuf, 0, ctx, slots, nil)
+		require.NoError(err, "batch parse should not fail due to one bad sender sig")
+		require.Equal(requestID, gotRequestID)
+		require.Len(slots.Txns, 2, "two good txns should survive; only the bad one is dropped")
+	})
+
+	t.Run("ParseTransactions_all_bad_sender_sigs", func(t *testing.T) {
+		require := require.New(t)
+		// Encode a batch with only the bad tx.
+		encodeBuf := EncodeTransactions([][]byte{badTx}, nil)
+
+		ctx := NewTxnParseContext(*uint256.NewInt(1))
+		slots := &TxnSlots{}
+		_, err := ParseTransactions(encodeBuf, 0, ctx, slots, nil)
+		require.NoError(err, "batch parse should succeed even if all txns have bad sigs")
+		require.Empty(slots.Txns, "no txns should survive when all have bad sigs")
+	})
+}
+
 var tpEncodeTests = []struct {
 	txns        [][]byte
 	encoded     string
