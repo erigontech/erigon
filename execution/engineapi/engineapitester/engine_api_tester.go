@@ -249,8 +249,8 @@ func InitialiseEngineApiTester(t testing.TB, args EngineApiTesterInitArgs) Engin
 	if !args.NoEmptyBlock1 {
 		// build 1 empty block before proceeding to properly initialise everything
 		_, err = mockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
 	}
-	require.NoError(t, err)
 	return EngineApiTester{
 		GenesisBlock:         genesisBlock,
 		CoinbaseKey:          args.CoinbaseKey,

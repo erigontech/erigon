@@ -291,8 +291,18 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	}
 
 	if fcuHeader.Number.Sign() > 0 {
-		if canonicalHash == blockHash && fcuHeader.Number.Uint64() >= finishProgressBefore {
-			// if block hash is part of the canonical chain and execution is not ahead, treat as no-op.
+		var finalisedBlockNum uint64
+		if finalizedHash == (common.Hash{}) {
+			finalisedBlockNum = finishProgressBefore
+		} else {
+			blockNum, err := e.blockReader.HeaderNumber(ctx, tx, finalizedHash)
+			if err != nil {
+				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			}
+			finalisedBlockNum = *blockNum
+		}
+		if canonicalHash == blockHash && fcuHeader.Number.Uint64() <= finalisedBlockNum {
+			// if block hash is part of the canonical chain and is at or behind last finalized hash, treat as no-op.
 			writeForkChoiceHashes(tx, blockHash, safeHash, finalizedHash)
 			valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
 			if err != nil {
@@ -356,8 +366,11 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
 		if unwindTarget < minUnwindableBlock {
-			e.logger.Info("Reorg requested too low, capping to the minimum unwindable block", "unwindTarget", unwindTarget, "minUnwindableBlock", minUnwindableBlock)
-			unwindTarget = minUnwindableBlock
+			e.logger.Warn("reorg requested too low, capping to the minimum unwindable block", "unwindTarget", unwindTarget, "minUnwindableBlock", minUnwindableBlock)
+			return sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+				LatestValidHash: common.Hash{},
+				Status:          ExecutionStatusReorgTooDeep,
+			}, false)
 		}
 
 		if err := e.pipelineExecutor.UnwindTo(unwindTarget, stagedsync.ForkChoice, tx); err != nil {
