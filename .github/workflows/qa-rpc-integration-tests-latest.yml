@@ -34,6 +34,7 @@ jobs:
       ERIGON_ASSERT: true
       RPC_PAST_TEST_DIR: /opt/rpc-past-tests
       CHAIN: mainnet
+      RPC_VERSION: v2.8.1
 
     steps:
       - name: Check out repository

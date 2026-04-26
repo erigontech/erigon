@@ -29,6 +29,7 @@ jobs:
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       RPC_PAST_TEST_DIR: /opt/rpc-past-tests
       CHAIN: mainnet
+      RPC_VERSION: v2.4.0
 
     steps:
       - name: Check out repository
@@ -53,7 +54,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ${{ runner.workspace }}/rpc-tests
-          key: rpc-tests-${{ runner.os }}-${{ runner.arch }}-v2.4.0
+          key: rpc-tests-${{ runner.os }}-${{ runner.arch }}-${{ env.RPC_VERSION }}
 
       - name: Run RPC Integration Tests
         id: test_step
