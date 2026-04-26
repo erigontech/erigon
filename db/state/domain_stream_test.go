@@ -3,6 +3,7 @@ package state
 import (
 	"bytes"
 	"container/heap"
+	"context"
 	"encoding/binary"
 	"testing"
 
@@ -225,6 +226,205 @@ func TestDomain_IteratePrefix_PrefersFilesOverDB(t *testing.T) {
 		return true, nil
 	}, roTx)
 	require.NoError(err)
+
+	require.Equal(v1[:], gotVal,
+		"file value (V1) must win over stale DB value (V0) when DB step is within file range")
+}
+
+// TestDomainLatestIterFile_PrefersFilesOverDB verifies that DomainLatestIterFile
+// (used by DebugRangeLatest) skips DB entries whose step falls within the file
+// range, so file values are returned instead of stale DB data.
+//
+// This is the DomainLatestIterFile counterpart to
+// TestDomain_IteratePrefix_PrefersFilesOverDB which tests debugIteratePrefixLatest.
+func TestDomainLatestIterFile_PrefersFilesOverDB(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	logger := log.New()
+	ctx := context.Background()
+	require := require.New(t)
+
+	stepSize := uint64(16)
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, stepSize, logger)
+
+	// Write a key at step 0 (txNum=1) with V0, then at step 1 (txNum=17) with V1.
+	var key [8]byte
+	key[0] = 0x01
+	key[7] = 0x01
+
+	var v0, v1 [8]byte
+	v0[7] = 0xAA
+	v1[7] = 0xBB
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+
+	dt := d.beginForTests()
+	writer := dt.NewWriter()
+
+	require.NoError(writer.PutWithPrev(key[:], v0[:], 1, nil))
+	require.NoError(writer.Flush(ctx, tx))
+
+	require.NoError(writer.PutWithPrev(key[:], v1[:], 17, v0[:]))
+	require.NoError(writer.Flush(ctx, tx))
+
+	writer.Close()
+	dt.Close()
+	require.NoError(tx.Commit())
+
+	// Build files for steps 0 and 1 without pruning.
+	tx, err = db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+	collateAndMergeOnce(t, d, tx, kv.Step(0), false)
+	collateAndMergeOnce(t, d, tx, kv.Step(1), false)
+	require.NoError(tx.Commit())
+
+	// Files now cover the key with latest value V1.
+	dt = d.beginForTests()
+	require.Greater(dt.files.EndTxNum(), uint64(0), "files should exist")
+	dt.Close()
+
+	// Delete step 1 dup from DB, leaving only the stale step 0 entry (V0).
+	// This simulates the state after a partial lexicographic prune where the
+	// latest dup was removed but a stale older dup remained.
+	tx, err = db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+	c, err := tx.RwCursorDupSort(d.ValuesTable)
+	require.NoError(err)
+	defer c.Close()       //nolint:gocritic
+	var step1Dup [16]byte // [^step1 (8 bytes) | V1 (8 bytes)]
+	binary.BigEndian.PutUint64(step1Dup[:8], ^uint64(1))
+	copy(step1Dup[8:], v1[:])
+	require.NoError(c.DeleteExact(key[:], step1Dup[:]))
+	require.NoError(tx.Commit())
+
+	// DebugRangeLatest (which uses DomainLatestIterFile) should return V1
+	// (from files), not V0 (from the stale DB entry at step 0).
+	roTx, err := db.BeginRo(ctx)
+	require.NoError(err)
+	defer roTx.Rollback()
+
+	dt = d.beginForTests()
+	defer dt.Close()
+
+	iter, err := dt.DebugRangeLatest(roTx, nil, nil, kv.Unlim)
+	require.NoError(err)
+	defer iter.Close()
+
+	var gotVal []byte
+	for iter.HasNext() {
+		k, v, err := iter.Next()
+		require.NoError(err)
+		if bytes.Equal(k, key[:]) {
+			gotVal = common.Copy(v)
+		}
+	}
+
+	require.Equal(v1[:], gotVal,
+		"file value (V1) must win over stale DB value (V0) when DB step is within file range")
+}
+
+// TestDomainLatestIterFile_PrefersFilesOverDB_LargeValues is the LargeValues
+// counterpart to TestDomainLatestIterFile_PrefersFilesOverDB.  It uses
+// CodeDomain (LargeValues: true) so that both initCursorMDBX branches and both
+// advanceInFiles DB_CURSOR branches are exercised.
+//
+// For LargeValues domains the DB key layout is:
+//
+//	key = userKey || ^step (8 bytes)
+//	value = raw value
+//
+// (as opposed to DupSort domains where key = userKey, dup = ^step || value).
+func TestDomainLatestIterFile_PrefersFilesOverDB_LargeValues(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	logger := log.New()
+	ctx := context.Background()
+	require := require.New(t)
+
+	stepSize := uint64(16)
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.CodeDomain, stepSize, logger)
+
+	// Write a key at step 0 (txNum=1) with V0, then at step 1 (txNum=17) with V1.
+	var key [8]byte
+	key[0] = 0x01
+	key[7] = 0x01
+
+	var v0, v1 [8]byte
+	v0[7] = 0xAA
+	v1[7] = 0xBB
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+
+	dt := d.beginForTests()
+	writer := dt.NewWriter()
+
+	require.NoError(writer.PutWithPrev(key[:], v0[:], 1, nil))
+	require.NoError(writer.Flush(ctx, tx))
+
+	require.NoError(writer.PutWithPrev(key[:], v1[:], 17, v0[:]))
+	require.NoError(writer.Flush(ctx, tx))
+
+	writer.Close()
+	dt.Close()
+	require.NoError(tx.Commit())
+
+	// Build files for steps 0 and 1 without pruning.
+	tx, err = db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+	collateAndMergeOnce(t, d, tx, kv.Step(0), false)
+	collateAndMergeOnce(t, d, tx, kv.Step(1), false)
+	require.NoError(tx.Commit())
+
+	// Files now cover the key with latest value V1.
+	dt = d.beginForTests()
+	require.Greater(dt.files.EndTxNum(), uint64(0), "files should exist")
+	dt.Close()
+
+	// Delete step 1 entry from DB, leaving only the stale step 0 entry (V0).
+	// For LargeValues the DB key is userKey || ^step (8 bytes).
+	tx, err = db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+	var step1Key [16]byte // [userKey (8 bytes) || ^step1 (8 bytes)]
+	copy(step1Key[:8], key[:])
+	binary.BigEndian.PutUint64(step1Key[8:], ^uint64(1))
+	require.NoError(tx.Delete(d.ValuesTable, step1Key[:]))
+	require.NoError(tx.Commit())
+
+	// DebugRangeLatest (which uses DomainLatestIterFile) should return V1
+	// (from files), not V0 (from the stale DB entry at step 0).
+	roTx, err := db.BeginRo(ctx)
+	require.NoError(err)
+	defer roTx.Rollback()
+
+	dt = d.beginForTests()
+	defer dt.Close()
+
+	iter2, err := dt.DebugRangeLatest(roTx, nil, nil, kv.Unlim)
+	require.NoError(err)
+	defer iter2.Close()
+
+	var gotVal []byte
+	for iter2.HasNext() {
+		k, v, err := iter2.Next()
+		require.NoError(err)
+		if bytes.Equal(k, key[:]) {
+			gotVal = common.Copy(v)
+		}
+	}
 
 	require.Equal(v1[:], gotVal,
 		"file value (V1) must win over stale DB value (V0) when DB step is within file range")
