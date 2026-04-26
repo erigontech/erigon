@@ -284,7 +284,6 @@ func (hi *DomainLatestIterFile) initCursorOnDB(domainRoTx *DomainRoTx) error {
 	return nil
 }
 
-// advanceLargeValsDBCursor owns ci1: it either re-pushes it onto the heap or closes it.
 func (hi *DomainLatestIterFile) advanceLargeValsDBCursor(ci1 *CursorItem) error {
 	var pushed bool
 	defer func() {
@@ -293,21 +292,25 @@ func (hi *DomainLatestIterFile) advanceLargeValsDBCursor(ci1 *CursorItem) error 
 		}
 	}()
 	for {
-		initial, v, err := ci1.cNonDup.Current()
+		initial, _, err := ci1.cNonDup.Current()
 		if err != nil {
 			return err
 		}
-		var k []byte
-		for initial != nil && len(initial) > 8 && (k == nil || (len(k) > 8 && bytes.Equal(initial[:len(initial)-8], k[:len(k)-8]))) {
+		if initial == nil || len(initial) <= 8 {
+			break
+		}
+		baseKey := initial[:len(initial)-8]
+		var k, v []byte
+		for {
 			k, v, err = ci1.cNonDup.Next()
 			if err != nil {
 				return err
 			}
-			if k == nil {
+			if k == nil || len(k) <= 8 || !bytes.Equal(k[:len(k)-8], baseKey) {
 				break
 			}
 		}
-		if len(k) <= 8 || !(hi.to == nil || bytes.Compare(k[:len(k)-8], hi.to) < 0) {
+		if k == nil || len(k) <= 8 || !(hi.to == nil || bytes.Compare(k[:len(k)-8], hi.to) < 0) {
 			break
 		}
 		stepBytes := k[len(k)-8:]
@@ -325,7 +328,6 @@ func (hi *DomainLatestIterFile) advanceLargeValsDBCursor(ci1 *CursorItem) error 
 	return nil
 }
 
-// advanceDupSortDBCursor owns ci1: it either re-pushes it onto the heap or closes it.
 func (hi *DomainLatestIterFile) advanceDupSortDBCursor(ci1 *CursorItem) error {
 	var pushed bool
 	defer func() {
