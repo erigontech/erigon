@@ -1108,10 +1108,12 @@ func drainHeaders(t *testing.T, ch <-chan [][]byte, timeout time.Duration) {
 // TestAssembleBlockStateGasLimit verifies that the builder respects the EIP-8037
 // block validity invariant: gas_used = max(regular, state) <= gas_limit.
 //
-// Contract creations have high intrinsic state gas (~131K per create at
-// CostPerStateByte=1174) but low regular gas (~30K). With a 500K gas limit,
-// about 4 creates would push state gas past the limit even though regular gas
-// has room. Without the fix the builder would produce an invalid block.
+// Under EIP-8037's dynamic cost_per_state_byte, ~730 creates (at any
+// gas limit) are needed to fill intrinsic state gas via account creation
+// alone. To exercise the check in a small number of txns we pad each create
+// with large initcode so that code deposit state gas (L × cpsb) dominates.
+// With a 120M gas limit (cpsb = 1174) and ~12 KiB initcode each create costs
+// ~14.5M state gas, so ~8 fit before state gas trips the block limit.
 func TestAssembleBlockStateGasLimit(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -1122,7 +1124,7 @@ func TestAssembleBlockStateGasLimit(t *testing.T) {
 
 	genesis := &types.Genesis{
 		Config:   chain.AllProtocolChanges,
-		GasLimit: 500_000, // low limit so state gas from a few creates exceeds it
+		GasLimit: 120_000_000, // cpsb = 1174 at this limit
 		Alloc: types.GenesisAlloc{
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
@@ -1144,13 +1146,32 @@ func TestAssembleBlockStateGasLimit(t *testing.T) {
 	require.NoError(t, err)
 
 	// Submit 10 contract creation txns to the pool.
-	// Each has ~131K intrinsic state gas but only ~30K regular gas.
+	// Each deploys a ~12 KiB contract so state gas (code deposit + account
+	// creation) per create is ~14.5M at cpsb=1174.
+	// Initcode layout: 12-byte prefix (CODECOPY+RETURN) that deploys the
+	// `runtimeSize` bytes of JUMPDEST that follow it.
+	const runtimeSize = 12 * 1024
+	initCode := make([]byte, 12+runtimeSize)
+	initCode[0] = 0x61                     // PUSH2
+	initCode[1] = byte(runtimeSize >> 8)   //   size hi
+	initCode[2] = byte(runtimeSize & 0xff) //   size lo
+	initCode[3] = 0x80                     // DUP1
+	initCode[4] = 0x60                     // PUSH1
+	initCode[5] = 0x0c                     //   srcOffset = 12
+	initCode[6] = 0x60                     // PUSH1
+	initCode[7] = 0x00                     //   dstOffset = 0
+	initCode[8] = 0x39                     // CODECOPY
+	initCode[9] = 0x60                     // PUSH1
+	initCode[10] = 0x00                    //   retOffset = 0
+	initCode[11] = 0xf3                    // RETURN
+	for i := 12; i < len(initCode); i++ {
+		initCode[i] = 0x5b // JUMPDEST — valid-as-code filler; value doesn't matter for state gas
+	}
 	baseFee := chainPack.TopBlock.BaseFee().Uint64()
-	deployCode := []byte{0x60, 0x00} // PUSH1 0x00 — minimal contract
 	rlpTxs := make([][]byte, 10)
 	for i := range rlpTxs {
 		tx, txErr := types.SignTx(
-			types.NewContractCreation(uint64(i), uint256.NewInt(0), 200_000, uint256.NewInt(baseFee), deployCode),
+			types.NewContractCreation(uint64(i), uint256.NewInt(0), 16_000_000, uint256.NewInt(baseFee), initCode),
 			*types.LatestSignerForChainID(m.ChainConfig.ChainID), privKey,
 		)
 		require.NoError(t, txErr)
@@ -1198,11 +1219,11 @@ func TestAssembleBlockStateGasLimit(t *testing.T) {
 // invariant for execution-time state gas (SSTOREs), as opposed to intrinsic
 // state gas (contract creations tested above).
 //
-// A deployed contract writes 4 new storage slots per call (~150K execution
-// state gas, ~41K regular gas, 0 intrinsic state gas). The txpool cannot
-// filter these by state gas — only the check inside applyTransaction
-// (between ApplyMessage and FinalizeTx) prevents the block from exceeding
-// gas_limit.
+// A deployed contract writes 4 new storage slots per call. At cpsb=1174
+// (120M gas limit) that costs ~150K execution state gas per call. The
+// txpool cannot filter these by state gas — only the check inside
+// applyTransaction (between ApplyMessage and FinalizeTx) prevents the
+// block from exceeding gas_limit.
 func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -1213,7 +1234,7 @@ func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 
 	genesis := &types.Genesis{
 		Config:   chain.AllProtocolChanges,
-		GasLimit: 500_000,
+		GasLimit: 120_000_000,
 		Alloc: types.GenesisAlloc{
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
@@ -1227,17 +1248,49 @@ func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 	exec := m.ExecModule
 	txpool := m.TxPoolGrpcServer
 
-	// Deploy a contract whose runtime writes to 4 storage slots per call.
-	// Runtime: base = calldataload(0); sstore(base+i, 1) for i in 0..3.
-	deployCode, err := hex.DecodeString(
-		"601d600c600039601d6000f3" + // initcode: deploy 29-byte runtime
-			"6000356001815560018160010155600181600201556001816003015500") // runtime
-	require.NoError(t, err)
+	// Deploy a contract whose runtime writes to `slotsPerCall` NEW storage
+	// slots per call. Slot index is base + calldataload(0), so different
+	// callers/calldata write to non-overlapping regions. At cpsb=1174 each
+	// slot costs 32 × 1174 = 37,568 state gas.
+	const slotsPerCall = 100
+	// Runtime layout (unrolled):
+	//   PUSH1 0; CALLDATALOAD          → stack: [base]
+	//   repeat slotsPerCall times:
+	//     DUP1; PUSH2 i; ADD; PUSH1 1; SWAP1; SSTORE  // write 1 at base+i
+	//   STOP
+	runtime := []byte{0x60, 0x00, 0x35} // PUSH1 0; CALLDATALOAD
+	for i := 0; i < slotsPerCall; i++ {
+		runtime = append(runtime,
+			0x80,                           // DUP1 (base)
+			0x61, byte(i>>8), byte(i&0xff), // PUSH2 i
+			0x01,       // ADD
+			0x60, 0x01, // PUSH1 1 (value)
+			0x90, // SWAP1 (swap value and key)
+			0x55, // SSTORE
+		)
+	}
+	runtime = append(runtime, 0x00) // STOP
+	runtimeSize := len(runtime)
+	// Initcode prefix: CODECOPY the runtime into memory then RETURN it.
+	deployCode := make([]byte, 12+runtimeSize)
+	deployCode[0] = 0x61                     // PUSH2
+	deployCode[1] = byte(runtimeSize >> 8)   //   size hi
+	deployCode[2] = byte(runtimeSize & 0xff) //   size lo
+	deployCode[3] = 0x80                     // DUP1
+	deployCode[4] = 0x60                     // PUSH1
+	deployCode[5] = 0x0c                     //   srcOffset = 12
+	deployCode[6] = 0x60                     // PUSH1
+	deployCode[7] = 0x00                     //   dstOffset = 0
+	deployCode[8] = 0x39                     // CODECOPY
+	deployCode[9] = 0x60                     // PUSH1
+	deployCode[10] = 0x00                    //   retOffset = 0
+	deployCode[11] = 0xf3                    // RETURN
+	copy(deployCode[12:], runtime)
 
 	signer := *types.LatestSignerForChainID(m.ChainConfig.ChainID)
 	baseFee := m.Genesis.BaseFee().Uint64()
 	deployTx, err := types.SignTx(
-		types.NewContractCreation(0, uint256.NewInt(0), 300_000, uint256.NewInt(baseFee), deployCode),
+		types.NewContractCreation(0, uint256.NewInt(0), 16_000_000, uint256.NewInt(baseFee), deployCode),
 		signer, privKey,
 	)
 	require.NoError(t, err)
@@ -1250,18 +1303,20 @@ func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 	err = m.InsertChain(chainPack)
 	require.NoError(t, err)
 
-	// Submit 10 call txns. Each writes 4 new slots (~150K state gas, ~41K
-	// regular gas). With a 500K gas limit, 3 calls fit (~451K state gas)
-	// but the 4th would push to ~601K. Intrinsic state gas is 0 for all
-	// calls, so the txpool's regular-gas filter lets them all through —
-	// the applyTransaction check is the only defense.
+	// Submit 50 call txns. Each writes 100 new slots (~3.76M state gas at
+	// cpsb=1174, negligible regular gas compared to state). With a 120M
+	// gas limit, ~32 calls fit before state gas trips the block limit.
+	// Intrinsic state gas is 0 for all calls, so the txpool's regular-gas
+	// filter lets them all through — the applyTransaction check is the
+	// only defense.
+	const txCount = 50
 	baseFee = chainPack.TopBlock.BaseFee().Uint64()
-	rlpTxs := make([][]byte, 10)
+	rlpTxs := make([][]byte, txCount)
 	for i := range rlpTxs {
 		var calldata [32]byte
-		binary.BigEndian.PutUint64(calldata[24:], uint64(i*4))
+		binary.BigEndian.PutUint64(calldata[24:], uint64(i*slotsPerCall))
 		tx, txErr := types.SignTx(
-			types.NewTransaction(uint64(i+1), contractAddr, uint256.NewInt(0), 300_000, uint256.NewInt(baseFee), calldata[:]),
+			types.NewTransaction(uint64(i+1), contractAddr, uint256.NewInt(0), 16_000_000, uint256.NewInt(baseFee), calldata[:]),
 			signer, privKey,
 		)
 		require.NoError(t, txErr)
@@ -1291,9 +1346,9 @@ func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 	block, err := getAssembledBlock(ctx, exec, payloadId)
 	require.NoError(t, err)
 
-	txCount := len(block.Transactions())
-	require.Greater(t, txCount, 0, "block should contain at least one tx")
-	require.Less(t, txCount, 10, "builder should stop before all 10 calls fit")
+	actualTxCount := len(block.Transactions())
+	require.Greater(t, actualTxCount, 0, "block should contain at least one tx")
+	require.Less(t, actualTxCount, txCount, "builder should stop before all calls fit")
 
 	// EIP-8037 invariant: gas_used <= gas_limit.
 	require.LessOrEqual(t, block.GasUsed(), block.GasLimit(),

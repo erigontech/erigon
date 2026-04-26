@@ -98,6 +98,13 @@ type EVM struct {
 	stateGasConsumed   uint64 // total state gas charged during tx execution (restored on depth>0 revert, kept on depth-0)
 	regularGasConsumed uint64 // total regular gas charged during tx execution (for block-level accounting)
 	revertedSpillGas   uint64 // state gas that spilled to regular and was restored on depth-0 revert
+	// EIP-8037 state gas refund accumulated across all live frames of this tx.
+	// Matches python spec's `state_gas_refund`: on child-frame revert we
+	// subtract the child's contribution (tracked via save/restore around the
+	// child call) from the reservoir returned to the parent, so the inline
+	// refund that was credited to the child's reservoir does not leak across
+	// the revert boundary.
+	stateGasRefund uint64
 }
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
@@ -174,6 +181,45 @@ func (evm *EVM) ResetGasConsumed() {
 	evm.stateGasConsumed = 0
 	evm.regularGasConsumed = 0
 	evm.revertedSpillGas = 0
+	evm.stateGasRefund = 0
+}
+
+// CreditStateGasRefund applies an EIP-8037 state gas refund: credits `amount`
+// to the scope's reservoir (like python's `evm.state_gas_left += applied`),
+// removes it from block-level state gas accounting, and bumps the tx-level
+// refund tracker so that a subsequent frame revert can unwind the inflation.
+//
+// Unlike regular gas refunds (refund_counter, 20% cap at tx end), state gas
+// refunds are returned immediately and uncapped, per the EIP.
+func (evm *EVM) CreditStateGasRefund(ctx *CallContext, amount uint64) {
+	if amount == 0 {
+		return
+	}
+	ctx.stateGas += amount
+	if amount > evm.stateGasConsumed {
+		// Defensive clamp. In practice the charge that produced the refund
+		// must already be in stateGasConsumed, but CALLCODE/DELEGATECALL can
+		// push the matching charge up to an ancestor that shares storage.
+		evm.stateGasConsumed = 0
+	} else {
+		evm.stateGasConsumed -= amount
+	}
+	evm.stateGasRefund += amount
+}
+
+// RefundTxStateGas reduces the tx-level stateGasConsumed counter. Used by
+// end-of-tx refund paths (EIP-6780 same-tx selfdestruct) where there is no
+// live frame scope to credit — the tx executor adds the matching amount to
+// gasRemaining directly.
+func (evm *EVM) RefundTxStateGas(amount uint64) {
+	if amount == 0 {
+		return
+	}
+	if amount > evm.stateGasConsumed {
+		evm.stateGasConsumed = 0
+	} else {
+		evm.stateGasConsumed -= amount
+	}
 }
 
 // handleFrameRevert handles the full error path for a call or create frame:
@@ -181,7 +227,7 @@ func (evm *EVM) ResetGasConsumed() {
 // gas accounting (spill restoration, depth-dependent reservoir preservation).
 func (evm *EVM) handleFrameRevert(gas *mdgas.MdGas, err error, depth int,
 	snapshot int,
-	savedStateGasConsumed, initialChildState uint64) {
+	savedStateGasConsumed, savedStateGasRefund, initialChildState uint64) {
 
 	// 1. Revert state changes.
 	evm.intraBlockState.RevertToSnapshot(snapshot, err)
@@ -202,12 +248,17 @@ func (evm *EVM) handleFrameRevert(gas *mdgas.MdGas, err error, depth int,
 		return
 	}
 	childStateConsumed := evm.stateGasConsumed - savedStateGasConsumed
+	// Inline state-gas refunds applied inside the child already inflated
+	// `gas.State` when they were credited. Unwind that inflation so the
+	// parent's reservoir reflects only the net-of-refund delta.
+	childStateGasRefund := evm.stateGasRefund - savedStateGasRefund
 
-	// For child frames (depth > 0), restore stateGasConsumed so the parent
-	// frame sees the correct value. At depth 0 there is no parent, and we
-	// keep the full value for block gas accounting.
+	// For child frames (depth > 0), restore stateGasConsumed and the refund
+	// tracker so the parent frame sees the pre-child value. At depth 0 there
+	// is no parent and we keep the full value for block gas accounting.
 	if depth > 0 {
 		evm.stateGasConsumed = savedStateGasConsumed
+		evm.stateGasRefund = savedStateGasRefund
 	}
 
 	// EIP-8037: "On child revert or exceptional halt, all state gas
@@ -235,8 +286,14 @@ func (evm *EVM) handleFrameRevert(gas *mdgas.MdGas, err error, depth int,
 	} else {
 		// Child frame (depth > 0): restore all consumed state gas
 		// (reservoir-sourced + spill) to the reservoir, preserving any
-		// sub-child restorations already in the reservoir.
+		// sub-child restorations already in the reservoir. Subtract the
+		// child's inline refunds to avoid leaking the bonus into the parent.
 		gas.State += childStateConsumed
+		if gas.State >= childStateGasRefund {
+			gas.State -= childStateGasRefund
+		} else {
+			gas.State = 0
+		}
 		// Regular gas: REVERT preserves it (step 2 doesn't apply);
 		// exceptional halt burns it (step 2 zeroed gas.Regular).
 	}
@@ -363,6 +420,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	}
 
 	savedStateGasConsumed := evm.stateGasConsumed
+	savedStateGasRefund := evm.stateGasRefund
 	initialChildState := gas.State
 
 	// It is allowed to call precompiles, even via delegatecall
@@ -420,7 +478,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	// above we revert to the snapshot and consume any gas remaining. Additionally
 	// when we're in Homestead this also counts for code storage gas errors.
 	if err != nil || evm.config.RestoreState {
-		evm.handleFrameRevert(&gas, err, depth, snapshot, savedStateGasConsumed, initialChildState)
+		evm.handleFrameRevert(&gas, err, depth, snapshot, savedStateGasConsumed, savedStateGasRefund, initialChildState)
 	}
 
 	return ret, gas, err
@@ -598,6 +656,7 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	}
 
 	savedStateGasConsumed := evm.stateGasConsumed
+	savedStateGasRefund := evm.stateGasRefund
 	initialChildState := gasRemaining.State
 
 	ret, gasRemaining, err = evm.Run(contract, gasRemaining, nil, false)
@@ -665,7 +724,7 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	// above, we revert to the snapshot and consume any gas remaining. Additionally,
 	// when we're in Homestead, this also counts for code storage gas errors.
 	if err != nil && (evm.chainRules.IsHomestead || err != ErrCodeStoreOutOfGas) {
-		evm.handleFrameRevert(&gasRemaining, err, depth, snapshot, savedStateGasConsumed, initialChildState)
+		evm.handleFrameRevert(&gasRemaining, err, depth, snapshot, savedStateGasConsumed, savedStateGasRefund, initialChildState)
 	}
 
 	return ret, address, gasRemaining, err

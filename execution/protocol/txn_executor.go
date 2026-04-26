@@ -405,13 +405,15 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 		State:   intrinsicGasResult.StateGas,
 	}
 	st.gasRemaining = mdgas.SplitTxnGasLimit(st.msg.Gas(), imdGas, rules)
-	// EIP-8037 × EIP-7702: authority-exists refund moves from intrinsic state
-	// gas into the reservoir so execution-time state ops can draw from it.
+	st.initialGas = st.gasRemaining.Plus(imdGas)
+	// EIP-8037 × EIP-7702: intrinsic_state_gas is worst-case (assumes all auths
+	// create new accounts). For each existing-account auth, 112 × cpsb is
+	// refunded to the reservoir so execution can draw from it; intrinsic_state_gas
+	// is immutable after validation, so the block-level state gas keeps the
+	// worst-case value.
 	if stateIgasRefund > 0 && rules.IsAmsterdam {
-		imdGas.State -= stateIgasRefund
 		st.gasRemaining.State += stateIgasRefund
 	}
-	st.initialGas = st.gasRemaining.Plus(imdGas)
 
 	// Execute the preparatory steps for txn execution which includes:
 	// - prepare accessList(post-berlin; eip-7702)
@@ -552,11 +554,10 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		State:   intrinsicGasResult.StateGas,
 	}
 	st.gasRemaining = mdgas.SplitTxnGasLimit(st.msg.Gas(), imdGas, rules)
+	st.initialGas = st.gasRemaining.Plus(imdGas)
 	if rules.IsAmsterdam && stateIgasRefund > 0 {
-		imdGas.State -= stateIgasRefund
 		st.gasRemaining.State += stateIgasRefund
 	}
-	st.initialGas = st.gasRemaining.Plus(imdGas)
 
 	if t := st.evm.Config().Tracer; t != nil && t.OnGasChange != nil {
 		t.OnGasChange(st.initialGas.Total(), st.gasRemaining.Total(), tracing.GasChangeTxIntrinsicGas)
@@ -610,18 +611,63 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			refundQuotient = params.RefundQuotientEIP3529
 		}
 		if rules.IsAmsterdam {
+			// EIP-8037: on a successful tx, refund state gas for accounts
+			// that were created and self-destructed in the same tx (EIP-6780
+			// means no state actually grew). Covers account creation
+			// (112 × cpsb), non-zero storage writes (32 × cpsb each) and
+			// the deployed code (len × cpsb). Clamped to the execution
+			// state gas used so far.
+			if vmerr == nil {
+				var stateRefund uint64
+				for _, acc := range st.state.SameTxSelfDestructedNewAccounts() {
+					stateRefund += params.StateBytesNewAccount * st.evm.Context.CostPerStateByte
+					stateRefund += acc.NonZeroSlots * 32 * st.evm.Context.CostPerStateByte
+					stateRefund += acc.CodeLen * st.evm.Context.CostPerStateByte
+				}
+				if stateRefund > st.evm.StateGasConsumed() {
+					stateRefund = st.evm.StateGasConsumed()
+				}
+				if stateRefund > 0 {
+					st.evm.RefundTxStateGas(stateRefund)
+					st.gasRemaining.State += stateRefund
+				}
+			}
 			// EIP-8037 + EIP-7778: Block gas accounting uses two dimensions.
 			// stateGasConsumed tracks ALL state gas charges (including spill to regular gas).
 			// regularGasConsumed tracks only regular-dimension opcode gas.
-			blockState := imdGas.State + st.evm.StateGasConsumed()
+			//
+			// EIP-8037: on top-level tx error, execution state gas is refunded
+			// to the reservoir (state_gas_used := 0). Intrinsic state gas stays
+			// charged. Block-level state gas therefore collapses to the
+			// worst-case intrinsic, and the receipt's gas-used drops the
+			// execution state-gas portion.
+			executionStateGas := st.evm.StateGasConsumed()
+			if vmerr != nil {
+				executionStateGas = 0
+			}
+			blockState := imdGas.State + executionStateGas
 			blockRegular := imdGas.Regular + st.evm.RegularGasConsumed()
 			st.blockRegularGasUsed = max(blockRegular, intrinsicGasResult.FloorGasCost)
 			st.blockStateGasUsed = blockState
 			// Receipt gasUsed: EIP-8037 formula tx.gas - gas_left - reservoir.
 			// Use Total()-level subtraction to avoid per-component uint64 underflow
 			// when gasRemaining.State > initialGas.State (reservoir grew via child reverts).
+			// RevertedSpillGas is added because handleFrameRevert restores
+			// the spilled state gas to gas.Regular on top-level REVERT —
+			// without adding it back here the receipt would under-charge by
+			// the spill amount.
 			st.txnGasUsedB4Refunds = st.initialGas.Total() - st.gasRemaining.Total() + st.evm.RevertedSpillGas()
-			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Total())
+			if vmerr != nil {
+				// Top-level error: subtract the execution state gas that is
+				// refunded to the reservoir (Python spec:
+				// `state_gas_left += state_gas_used; state_gas_used = 0`).
+				// This covers both the reservoir-drained and spill portions.
+				st.txnGasUsedB4Refunds -= st.evm.StateGasConsumed()
+			}
+			// EIP-8037: only the regular gas refund flows through the
+			// 20%-capped refund_counter; state gas refunds have already been
+			// credited to the reservoir directly via CreditStateGasRefund.
+			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Regular)
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
 		} else if rules.IsPrague {
 			st.txnGasUsedB4Refunds = st.initialGas.Regular - st.gasRemaining.Regular

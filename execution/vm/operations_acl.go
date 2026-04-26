@@ -98,8 +98,11 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 				// EIP 2200 Original clause:
 				//evm.StateDB.AddRefund(params.SstoreSetGasEIP2200 - params.SloadGasEIP2200)
 				if rules.IsAmsterdam {
+					// EIP-8037: regular gas refund still flows through the 20%-capped
+					// refund_counter; state gas refund is uncapped and credited
+					// directly to the current frame's reservoir.
 					evm.IntraBlockState().AddRefund(params.SstoreSetGasEIP8037 - params.WarmStorageReadCostEIP2929)
-					evm.IntraBlockState().AddStateRefund(32 * evm.Context.CostPerStateByte)
+					evm.CreditStateGasRefund(callContext, 32*evm.Context.CostPerStateByte)
 				} else {
 					evm.IntraBlockState().AddRefund(params.SstoreSetGasEIP2200 - params.WarmStorageReadCostEIP2929)
 				}

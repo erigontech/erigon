@@ -214,6 +214,7 @@ const (
 
 	// EIP-8037: State Creation Gas Cost Increase
 	TargetStateGrowthPerYear uint64 = 107_374_182_400 // 100 × 1024^3 bytes
+	BlocksPerYear            uint64 = 2_628_000       // blocks per year at 12s slot time
 	CpsbOffset                      = 9_578           // cost_per_state_byte_offset (for quantization)
 	CpsbSignificantBits             = 5               // cost_per_state_byte_significant_bits (for quantization)
 	CreateGasEIP8037                = CallValueTransferGas
