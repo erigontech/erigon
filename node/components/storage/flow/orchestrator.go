@@ -244,6 +244,13 @@ func (o *Orchestrator) onPeerManifestReceived(e PeerManifestReceived) {
 	// Block files use zero Domain — handle separately.
 	o.requestGapsFor("", e.Blocks, e.PeerID)
 
+	// Non-ranged categories (caplin, meta, salt). Identified by
+	// name+infohash; no coverage check. Same phase gate as blocks: held
+	// behind InitialStateReady so state-domain bandwidth isn't contended.
+	o.requestSimpleGaps(e.Caplin, e.PeerID)
+	o.requestSimpleGaps(e.Meta, e.PeerID)
+	o.requestSimpleGaps(e.Salt, e.PeerID)
+
 	// If the state phase has nothing pending and hasn't fired yet, open
 	// phase 2 now. Handles the all-local and blocks-only cases.
 	o.peerMu.Lock()
@@ -251,6 +258,56 @@ func (o *Orchestrator) onPeerManifestReceived(e PeerManifestReceived) {
 	o.peerMu.Unlock()
 	if shouldFire {
 		o.fireInitialStateReady()
+	}
+}
+
+// requestSimpleGaps emits DownloadRequested for non-ranged peer entries
+// (caplin .seg, meta, salt) that aren't already local. Bypasses
+// coverage logic since these files don't carry step semantics. Honours
+// the phase-2 gate the same way blocks do.
+func (o *Orchestrator) requestSimpleGaps(peerEntries []*snapshot.FileEntry, peerID string) {
+	if len(peerEntries) == 0 {
+		return
+	}
+
+	o.peerMu.Lock()
+	for _, entry := range peerEntries {
+		if _, seen := o.peerFiles[entry.Name]; !seen {
+			o.peerFiles[entry.Name] = entry
+		}
+	}
+	o.peerMu.Unlock()
+
+	toRequest := make([]*snapshot.FileEntry, 0, len(peerEntries))
+	o.peerMu.Lock()
+	for _, entry := range peerEntries {
+		if o.haveLocally("", entry.Name) {
+			continue
+		}
+		if _, pending := o.pending[entry.Name]; pending {
+			continue
+		}
+		o.pending[entry.Name] = entry
+		toRequest = append(toRequest, entry)
+	}
+	holdForPhase2 := !o.stateReadyFired
+	if holdForPhase2 {
+		for _, entry := range toRequest {
+			o.blocksQueued = append(o.blocksQueued, queuedBlock{entry: entry, peerID: peerID})
+		}
+	}
+	o.peerMu.Unlock()
+
+	if holdForPhase2 {
+		return
+	}
+
+	for _, entry := range toRequest {
+		o.bus.Publish(DownloadRequested{
+			FileName:  entry.Name,
+			InfoHash:  entry.TorrentHash,
+			FromPeers: []string{peerID},
+		})
 	}
 }
 
@@ -477,11 +534,18 @@ func (o *Orchestrator) onPeerDeparted(e PeerDeparted) {
 
 // haveLocally reports whether the local inventory has a file with the given
 // name and Local=true. Used by gap-fill to skip files we already hold.
+//
+// When domain is empty the caller may be looking for a block, caplin,
+// meta, or salt file — they all live outside the per-domain map. Scan
+// every flat slice rather than make the caller pre-classify by Kind.
 func (o *Orchestrator) haveLocally(domain snapshot.Domain, name string) bool {
 	inv := o.storage.Inventory()
 	var entries []*snapshot.FileEntry
 	if domain == "" {
-		entries = inv.BlockFiles()
+		entries = append(entries, inv.BlockFiles()...)
+		entries = append(entries, inv.CaplinFiles()...)
+		entries = append(entries, inv.MetaFiles()...)
+		entries = append(entries, inv.SaltFiles()...)
 	} else {
 		entries = inv.AllDomainFiles(domain)
 	}
