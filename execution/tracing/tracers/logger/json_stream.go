@@ -23,6 +23,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
@@ -196,7 +197,7 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 		}
 		l.stream.WriteArrayEnd()
 	}
-	if !l.cfg.DisableMemory {
+	if l.cfg.EnableMemory {
 		l.stream.WriteMore()
 		l.stream.WriteObjectField("memory")
 		l.stream.WriteArrayStart()
@@ -211,6 +212,11 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 			l.writeMemoryWordRaw(memory[i:end])
 		}
 		l.stream.WriteArrayEnd()
+	}
+	if l.cfg.EnableReturnData && len(rData) > 0 {
+		l.stream.WriteMore()
+		l.stream.WriteObjectField("returnData")
+		l.stream.WriteString(hexutil.Encode(rData))
 	}
 	if outputStorage {
 		l.stream.WriteMore()
