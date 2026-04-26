@@ -272,7 +272,10 @@ func (w *Warmuper) WarmKey(hashedKey []byte, startDepth int) {
 	if !w.started.Load() || w.numWorkers <= 0 || w.closed.Load() {
 		return
 	}
-	// Blocking! It's by-design. Speed of system is equal to speed of warmupers
+	// Blocking By-Design!
+	// Speed of system is equal to speed of facing all page-faults during
+	// Or warmapers face them or main thread
+	// It means doesn't make much sense to unblock main thread if all Warmupers are loaded
 	select {
 	case w.work <- warmupWorkItem{hashedKey: hashedKey, startDepth: startDepth}:
 	case <-w.ctx.Done():
