@@ -965,7 +965,24 @@ func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *enode.Node) erro
 	if dialDest != nil {
 		c.node = dialDest
 	} else {
-		c.node = nodeFromConn(remotePubkey, c.fd)
+		// Inbound connection: there's no dial-time enode, so by default
+		// nodeFromConn fabricates a stub from pubkey + remote addr. That
+		// stub is missing any ENR entries the remote advertises. If the
+		// remote is a configured static peer we already hold its full
+		// enode, so prefer that — keeps custom ENR entries intact across
+		// inbound handshakes without requiring discv5 / discovery v5
+		// ENR resolution. Pure-discovery deployments (no static peers)
+		// keep the stub fallback.
+		c.node = nil
+		if srv.dialsched != nil {
+			id := enode.PubkeyToIDV4(remotePubkey)
+			if static := srv.dialsched.lookupStatic(id); static != nil {
+				c.node = static
+			}
+		}
+		if c.node == nil {
+			c.node = nodeFromConn(remotePubkey, c.fd)
+		}
 	}
 	clog := srv.logger.New("id", c.node.ID(), "addr", c.fd.RemoteAddr(), "conn", c.flags)
 	err = srv.checkpoint(c, srv.checkpointPostHandshake)
