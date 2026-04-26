@@ -169,6 +169,15 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 		accessListFloorTokens uint64
 		costPerToken          uint64
 	)
+	// EIP-7976 and EIP-7981 share the same per-token rate (16 gas/token), and
+	// EIP-7981 spec requires EIP-7976 as a precondition. Selecting the rate on
+	// either flag keeps the access-list floor surcharge (charged at floor rate
+	// in RegularGas) consistent with the FloorGasCost rate.
+	if args.IsEIP7976 || args.IsEIP7981 {
+		costPerToken = params.TxTotalCostFloorPerTokenEIP7976
+	} else {
+		costPerToken = params.TxTotalCostFloorPerToken
+	}
 	if args.IsEIP7623 && dataLen > 0 {
 		if args.IsEIP7976 {
 			var overflow bool
@@ -209,7 +218,7 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 		// path so access list data is charged at floor rate regardless of
 		// execution level.
 		if accessListFloorTokens > 0 {
-			accessListDataGas, overflow := math.SafeMul(accessListFloorTokens, params.TxTotalCostFloorPerTokenEIP7976)
+			accessListDataGas, overflow := math.SafeMul(accessListFloorTokens, costPerToken)
 			if overflow {
 				return IntrinsicGasCalcResult{}, true
 			}
@@ -218,17 +227,6 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 				return IntrinsicGasCalcResult{}, true
 			}
 		}
-	}
-	// EIP-7976 and EIP-7981 share the same per-token rate (16 gas/token), and
-	// EIP-7981 spec requires EIP-7976 as a precondition. Selecting the rate on
-	// either flag keeps the access-list floor surcharge (always charged at
-	// EIP-7976 rate in RegularGas above) consistent with the FloorGasCost rate
-	// even in the unsupported configuration where EIP-7981 is enabled without
-	// EIP-7976.
-	if args.IsEIP7976 || args.IsEIP7981 {
-		costPerToken = params.TxTotalCostFloorPerTokenEIP7976
-	} else {
-		costPerToken = params.TxTotalCostFloorPerToken
 	}
 	totalFloorTokens, overflow := math.SafeAdd(calldataFloorTokens, accessListFloorTokens)
 	if overflow {
