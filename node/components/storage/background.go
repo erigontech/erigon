@@ -42,6 +42,9 @@ var (
 	// storage_bg_collate_errors counts ticks that returned an error (excluding
 	// context.Canceled on shutdown).
 	mxBgCollateErrors = metrics.GetOrCreateCounter("storage_bg_collate_errors")
+	// storage_bg_collate_yields counts ticks skipped because a foreground
+	// priority caller is active (Stage B's WithForegroundPriority).
+	mxBgCollateYields = metrics.GetOrCreateCounter("storage_bg_collate_yields")
 )
 
 // PruneFn is the prune callback supplied by the execution layer. It is invoked
@@ -77,6 +80,13 @@ type backgroundLoop struct {
 	// first tick completes — operators want a visible confirmation that the
 	// bg loop is alive without log spam from the per-tick path.
 	firstTickLogged atomic.Bool
+
+	// fgPriority counts active foreground-priority callers (Stage B). When
+	// non-zero, bg workers skip the next tick to yield CPU/IO/lock budget.
+	// Counter (not bool) so multiple callers stack — the gate releases only
+	// when the last one decrements back to zero. Atomic for lock-free reads
+	// from worker goroutines.
+	fgPriority atomic.Int32
 }
 
 func newBackgroundLoop(parent context.Context, db kv.TemporalRwDB, agg *dbstate.Aggregator, pruneFn PruneFn, logger log.Logger) *backgroundLoop {
@@ -123,6 +133,15 @@ func (b *backgroundLoop) runCollator() {
 			return
 		case <-t.C:
 			mxBgCollateTicks.Inc()
+			// Yield to foreground priority callers — when WithForegroundPriority
+			// is active the counter is >0 and we skip this tick. The next tick
+			// (5 s later) re-checks. This is coarse-grained yielding (per-tick,
+			// not per-key) but enough for FCU-cadence interruption since a tick
+			// rarely runs longer than a few hundred ms.
+			if b.fgPriority.Load() > 0 {
+				mxBgCollateYields.Inc()
+				continue
+			}
 			started := time.Now()
 			err := b.agg.CollateAndPruneIfNeeded(b.ctx, b.db, func(tx kv.TemporalRwTx) error {
 				return b.pruneFn(b.ctx, tx)

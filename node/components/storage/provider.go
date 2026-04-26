@@ -112,6 +112,28 @@ func (p *Provider) Close() {
 	}
 }
 
+// WithForegroundPriority runs fn while signalling the background loop to
+// yield. Background workers check the counter at tick boundaries and skip
+// the tick when it is non-zero, surrendering CPU/IO/lock budget to the
+// foreground caller. The counter stacks: multiple concurrent calls to
+// WithForegroundPriority all hold the priority simultaneously, and the
+// gate releases only when the last one returns.
+//
+// Useful for FCU heavy operations (unwind, integrity check, debug snapshot)
+// that need predictable resource availability without coordinating with
+// the background loop's exact phase.
+//
+// fn is invoked synchronously; this method returns when fn returns.
+// Returns fn's error verbatim. Safe to call before StartBackgroundLoop —
+// the priority counter is just an atomic; no bg loop means nothing to yield.
+func (p *Provider) WithForegroundPriority(fn func() error) error {
+	if p.bg != nil {
+		p.bg.fgPriority.Add(1)
+		defer p.bg.fgPriority.Add(-1)
+	}
+	return fn()
+}
+
 // Deps holds all external dependencies needed by Initialize.
 // backend.go calls SetUpBlockReader and passes the results here.
 type Deps struct {
