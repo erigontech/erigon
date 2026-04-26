@@ -198,14 +198,24 @@ func (w *Warmuper) Start() {
 						now := time.Now()
 						elapsed := now.Sub(lastTime).Seconds()
 						lastTime = now
-						rates := make([]string, w.numWorkers)
+						var total, minRate, maxRate uint64
+						minRate = ^uint64(0)
 						for j := range w.workerKeys {
 							cur := w.workerKeys[j].Load()
-							rates[j] = common.PrettyCounter(uint64(float64(cur-lastSnap[j]) / elapsed))
+							rate := uint64(float64(cur-lastSnap[j]) / elapsed)
 							lastSnap[j] = cur
+							total += rate
+							if rate < minRate {
+								minRate = rate
+							}
+							if rate > maxRate {
+								maxRate = rate
+							}
 						}
 						log.Info(fmt.Sprintf("[%s][warmup]", w.logPrefix),
-							"keys/s", rates,
+							"keys/s", common.PrettyCounter(total),
+							"min", common.PrettyCounter(minRate),
+							"max", common.PrettyCounter(maxRate),
 							"queue", len(w.work))
 					default:
 					}
