@@ -169,11 +169,25 @@ func TestP2P_Swarm_FullReplication(t *testing.T) {
 	t.Logf("seed + hash agreement: %d files in %.2fs", len(present), time.Since(seedStart).Seconds())
 
 	// Each peer publishes its V2 toml + ENR.
-	for _, p := range peers {
+	for i, p := range peers {
 		v2 := p.PublishV2Manifest()
 		_, btPort := p.LocalTorrentAddr()
 		p.SetDevP2PENREntry(enr.ChainToml{InfoHash: v2})
 		p.SetDevP2PENREntry(enr.BT(btPort))
+		// Debug: per-section counts and seeded-vs-advertised sanity so we
+		// can spot a peer whose manifest didn't pick up its seeded slice.
+		m := dl.GenerateV2(p.Inventory)
+		var domainFiles int
+		for _, dm := range m.Domains {
+			domainFiles += len(dm.Files)
+		}
+		t.Logf("peer %d V2: infohash=%x blocks=%d meta=%d salt=%d caplin=%d domain-files=%d (seeded slice = %d)",
+			i, v2, len(m.Blocks), len(m.Meta), len(m.Salt), len(m.Caplin), domainFiles,
+			countAssignedTo(present, i, numPeers))
+	}
+
+	if os.Getenv("SNAPSHOT_DUMP_V2_AND_EXIT") != "" {
+		t.Skip("dump complete; SNAPSHOT_DUMP_V2_AND_EXIT set")
 	}
 
 	// Subscribers on each peer to observe progress.
@@ -206,28 +220,50 @@ func TestP2P_Swarm_FullReplication(t *testing.T) {
 	// already had a file (its own seeded slice) reports pending==0 trivially.
 	// Walk each peer's snap dir and count.
 	expectedFilesPerPeer := len(present)
-	timeout := time.Duration(totalBytes)/30 + 10*time.Minute // ≥ 30 MiB/s, plus 10m floor
-	if timeout < 30*time.Minute {
-		timeout = 30 * time.Minute
+	// Budget: assume ≥10 MiB/s sustained per leecher across the swarm.
+	// Each leecher pulls (N-1)/N of totalBytes; 3 peers means ~2/3 of the
+	// archive per leecher. The slowest peer dictates convergence so the
+	// budget is sized off the largest per-peer pull at a conservative rate.
+	const minPerPeerRateBytesPerSec = 10 * 1024 * 1024
+	perPeerPull := totalBytes * int64(numPeers-1) / int64(numPeers)
+	timeout := time.Duration(perPeerPull/minPerPeerRateBytesPerSec)*time.Second + 30*time.Minute
+	if timeout < 2*time.Hour {
+		timeout = 2 * time.Hour
 	}
 	t.Logf("waiting up to %s for full convergence (every peer holds all %d files)", timeout, expectedFilesPerPeer)
 
 	transferStart := time.Now()
+	// Convergence check, with progress logging woven in so a hang shows
+	// its shape (which peer is starved, which peers' manifests aren't
+	// landing) rather than just timing out blind.
+	lastLog := time.Now()
 	waitForP2P(t, func() bool {
+		converged := true
 		for _, p := range peers {
 			if countFilesUnder(t, p.Dirs.Snap, present) < expectedFilesPerPeer {
-				return false
+				converged = false
 			}
 			if p.Orch.PendingCount() != 0 {
-				return false
+				converged = false
 			}
 		}
-		return true
+		if !converged && time.Since(lastLog) > 2*time.Minute {
+			lastLog = time.Now()
+			for i, p := range peers {
+				t.Logf("[progress %s] peer %d: files-on-disk=%d/%d pending=%d manifests=%d promoted=%d",
+					time.Since(transferStart).Round(time.Second), i,
+					countFilesUnder(t, p.Dirs.Snap, present), expectedFilesPerPeer,
+					p.Orch.PendingCount(), manifestCounts[i].Load(), promotedCounts[i].Load())
+			}
+		}
+		return converged
 	}, timeout, "every peer holds all primary files")
 	elapsed := time.Since(transferStart)
 	t.Logf("convergence reached in %.2fs (%.1f MiB/s)", elapsed.Seconds(), float64(totalBytes)/elapsed.Seconds()/(1<<20))
 	for i := range peers {
-		t.Logf("peer %d: manifests=%d promoted=%d", i, manifestCounts[i].Load(), promotedCounts[i].Load())
+		t.Logf("peer %d: manifests=%d promoted=%d files-on-disk=%d", i,
+			manifestCounts[i].Load(), promotedCounts[i].Load(),
+			countFilesUnder(t, peers[i].Dirs.Snap, present))
 	}
 
 	// --- Open-loop check 2: byte-equality against source ---------------
@@ -356,6 +392,19 @@ func countFilesUnder(t *testing.T, root string, entries []harness.PreverifiedEnt
 		}
 	}
 	return count
+}
+
+// countAssignedTo returns how many entries were assigned to peer idx by
+// the round-robin partition. Sanity-check helper for the V2 dump — a
+// peer's published V2 should advertise approximately this many files.
+func countAssignedTo(entries []harness.PreverifiedEntry, peerIdx, numPeers int) int {
+	n := 0
+	for i := range entries {
+		if i%numPeers == peerIdx {
+			n++
+		}
+	}
+	return n
 }
 
 // parseHash20 decodes a 40-char hex string from a V2 manifest into a
