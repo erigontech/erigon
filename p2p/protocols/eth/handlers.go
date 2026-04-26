@@ -169,24 +169,27 @@ func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket, blockReader
 	return bodies
 }
 
-// emptyRLPList is the canonical RLP encoding of an empty list (0xc0). EIP-8159
-// uses this as the positional "not available" sentinel in a BlockAccessLists
-// response. Per the spec the caller disambiguates "unavailable" from "block
-// has a genuinely empty BAL" by comparing keccak256(payload) against the
-// corresponding header.BlockAccessListHash (equal to common/empty.BlockAccessListHash
-// for an empty BAL).
-var emptyRLPList = rlp.RawValue{0xc0}
+// notAvailableSentinel is the RLP encoding of an empty string (0x80). EIP-8159
+// (post ethereum/EIPs#11553) uses this as the positional "not available"
+// sentinel in a BlockAccessLists response. Earlier drafts used 0xc0 (empty
+// RLP list), but that collides with a genuinely empty BAL — 0xc0 is the
+// canonical encoding of an empty access-list list — so "unavailable" and
+// "valid empty BAL" were indistinguishable on the wire. Using 0x80 keeps
+// the two distinct: 0x80 = "I don't have it", 0xc0 = "the BAL really is
+// empty (e.g. a chain without system contracts)".
+var notAvailableSentinel = rlp.RawValue{0x80}
 
 // AnswerGetBlockAccessListsQuery looks up the RLP-encoded Block Access List
 // for each requested block hash (EIP-7928 / EIP-8159 eth/71). The response is
 // positionally aligned with the request: entry i is the BAL bytes for query[i],
-// or the empty RLP list (0xc0) if the local node does not have a BAL for that
-// hash. BALs are stored in canonical RLP form by rawdb.WriteBlockAccessListBytes,
-// so we hand the bytes through unchanged as rlp.RawValue.
+// or the "not available" sentinel (0x80, empty RLP string) if the local node
+// does not have a BAL for that hash. BALs are stored in canonical RLP form by
+// rawdb.WriteBlockAccessListBytes, so we hand the bytes through unchanged as
+// rlp.RawValue. A genuinely empty BAL is stored as 0xc0 and returned as such.
 //
 // Limits mirror AnswerGetBlockBodiesQuery: softResponseLimit caps total reply
 // size, MaxBlockAccessListsServe caps the disk-lookup count. When a limit is
-// reached, the response is truncated (not padded with 0xc0) — the peer sees a
+// reached, the response is truncated (not padded with 0x80) — the peer sees a
 // shorter array than requested, same convention as the BlockBodies handler.
 func AnswerGetBlockAccessListsQuery(db kv.Tx, query GetBlockAccessListsPacket, blockReader services.HeaderReader) []rlp.RawValue { //nolint:unparam
 	var bytes int
@@ -200,17 +203,17 @@ func AnswerGetBlockAccessListsQuery(db kv.Tx, query GetBlockAccessListsPacket, b
 		number, _ := blockReader.HeaderNumber(context.Background(), db, hash)
 		if number == nil {
 			// We don't know the block — peer can retry elsewhere.
-			bals = append(bals, emptyRLPList)
-			bytes += len(emptyRLPList)
+			bals = append(bals, notAvailableSentinel)
+			bytes += len(notAvailableSentinel)
 			continue
 		}
 		bal, _ := rawdb.ReadBlockAccessListBytes(db, hash, *number)
 		if len(bal) == 0 {
 			// We have the block but no BAL stored (pre-Amsterdam, or pruned).
-			// Return 0xc0 — caller disambiguates "don't have" from "empty BAL"
-			// via the header.BlockAccessListHash comparison.
-			bals = append(bals, emptyRLPList)
-			bytes += len(emptyRLPList)
+			// Return 0x80 — unambiguously "not available", distinct from a
+			// genuinely empty BAL which would be stored as 0xc0.
+			bals = append(bals, notAvailableSentinel)
+			bytes += len(notAvailableSentinel)
 			continue
 		}
 		bals = append(bals, bal)

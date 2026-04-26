@@ -567,8 +567,9 @@ func (balHeaderReader) Integrity(context.Context) error { panic("not expected") 
 
 // TestAnswerGetBlockAccessListsQuery_OrderedResponseWithMissing verifies that
 // the handler returns one entry per requested hash in request order, returning
-// an empty RLP list (0xc0) for any hash we don't have stored — including
-// unknown blocks and known blocks with no BAL recorded.
+// the "not available" sentinel (0x80, an empty RLP string per EIP-8159 post-
+// ethereum/EIPs#11553) for any hash we don't have stored — including unknown
+// blocks and known blocks with no BAL recorded.
 func TestAnswerGetBlockAccessListsQuery_OrderedResponseWithMissing(t *testing.T) {
 	db := memdb.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
@@ -601,11 +602,11 @@ func TestAnswerGetBlockAccessListsQuery_OrderedResponseWithMissing(t *testing.T)
 	if !bytes.Equal(result[0], bal) {
 		t.Errorf("result[0] (known+BAL): have %x, want %x", result[0], bal)
 	}
-	if !bytes.Equal(result[1], []byte{0xc0}) {
-		t.Errorf("result[1] (unknown block): have %x, want 0xc0", result[1])
+	if !bytes.Equal(result[1], []byte{0x80}) {
+		t.Errorf("result[1] (unknown block): have %x, want 0x80", result[1])
 	}
-	if !bytes.Equal(result[2], []byte{0xc0}) {
-		t.Errorf("result[2] (known, no BAL): have %x, want 0xc0", result[2])
+	if !bytes.Equal(result[2], []byte{0x80}) {
+		t.Errorf("result[2] (known, no BAL): have %x, want 0x80", result[2])
 	}
 }
 
