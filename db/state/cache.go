@@ -49,7 +49,6 @@ func (c *DomainGetFromFileCache) LogStats(dt kv.Domain) {
 	if c == nil {
 		return
 	}
-	log.Warn("[dbg] DomainGetFromFileCache.LogStats", "enabled", c.enabled, "trace", c.trace)
 	if !c.enabled || !c.trace {
 		return
 	}
