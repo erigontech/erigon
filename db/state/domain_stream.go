@@ -105,9 +105,10 @@ func (ch *CursorHeap) Pop() any {
 }
 
 type DomainLatestIterFile struct {
-	aggStep   uint64
-	roTx      kv.Tx
-	valsTable string
+	aggStep       uint64
+	filesEndTxNum uint64 // files are authoritative for steps below this txNum
+	roTx          kv.Tx
+	valsTable     string
 
 	limit       int
 	largeVals   bool
@@ -163,6 +164,7 @@ func (hi *DomainLatestIterFile) init(domainRoTx *DomainRoTx) error {
 	//     DB endTxNum    = 16, because db has step 2, and first txNum of step 2 is 16.
 	//     RAM endTxNum   = 17, because current tcurrent txNum is 17
 	hi.largeVals = domainRoTx.d.LargeValues
+	hi.filesEndTxNum = domainRoTx.files.EndTxNum()
 	heap.Init(hi.h)
 	var key, value []byte
 
@@ -231,14 +233,24 @@ func (hi *DomainLatestIterFile) initCursorMDBX(domainRoTx *DomainRoTx) error {
 				valsCursor.Close()
 				return err
 			}
-			if key != nil && (hi.to == nil || bytes.Compare(key[:len(key)-8], hi.to) < 0) {
+			// Skip DB entries within file range — files are authoritative there.
+			var pushed bool
+			for key != nil && len(key) > 8 && (hi.to == nil || bytes.Compare(key[:len(key)-8], hi.to) < 0) {
 				k := key[:len(key)-8]
 				stepBytes := key[len(key)-8:]
 				step := ^binary.BigEndian.Uint64(stepBytes)
-				endTxNum := step * domainRoTx.d.stepSize // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
-
-				heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(value), cNonDup: valsCursor, endTxNum: endTxNum, reverse: true})
-			} else {
+				endTxNum := step * domainRoTx.d.stepSize
+				if endTxNum >= hi.filesEndTxNum {
+					heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(value), cNonDup: valsCursor, endTxNum: endTxNum, reverse: true})
+					pushed = true
+					break
+				}
+				key, value, err = valsCursor.Next()
+				if err != nil {
+					return err
+				}
+			}
+			if !pushed {
 				valsCursor.Close()
 			}
 		} else {
@@ -247,19 +259,29 @@ func (hi *DomainLatestIterFile) initCursorMDBX(domainRoTx *DomainRoTx) error {
 				return err
 			}
 
+			var pushed bool
 			key, value, err := valsCursor.Seek(hi.from)
 			if err != nil {
 				valsCursor.Close()
 				return err
 			}
-			if key != nil && (hi.to == nil || bytes.Compare(key, hi.to) < 0) {
+			// Skip DB entries within file range — files are authoritative there.
+			for key != nil && (hi.to == nil || bytes.Compare(key, hi.to) < 0) {
 				stepBytes := value[:8]
-				value = value[8:]
+				val := value[8:]
 				step := ^binary.BigEndian.Uint64(stepBytes)
-				endTxNum := step * domainRoTx.d.stepSize // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
-
-				heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(key), val: common.Copy(value), cDup: valsCursor, endTxNum: endTxNum, reverse: true})
-			} else {
+				endTxNum := step * domainRoTx.d.stepSize
+				if endTxNum >= hi.filesEndTxNum {
+					heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(key), val: common.Copy(val), cDup: valsCursor, endTxNum: endTxNum, reverse: true})
+					pushed = true
+					break
+				}
+				key, value, err = valsCursor.NextNoDup()
+				if err != nil {
+					return err
+				}
+			}
+			if !pushed {
 				valsCursor.Close()
 			}
 		}
@@ -303,57 +325,75 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 				}
 			case DB_CURSOR:
 				if hi.largeVals {
-					// start from current go to next
-					initial, v, err := ci1.cNonDup.Current()
-					if err != nil {
-						hi.closeCursorItem(ci1)
-						return err
-					}
-					var k []byte
-					for initial != nil && (k == nil || bytes.Equal(initial[:len(initial)-8], k[:len(k)-8])) {
-						k, v, err = ci1.cNonDup.Next()
+					// Skip DB entries within file range — files are authoritative there.
+					var pushed bool
+					for {
+						// start from current go to next
+						initial, v, err := ci1.cNonDup.Current()
 						if err != nil {
 							hi.closeCursorItem(ci1)
 							return err
 						}
-						if k == nil {
+						var k []byte
+						for initial != nil && len(initial) > 8 && (k == nil || (len(k) > 8 && bytes.Equal(initial[:len(initial)-8], k[:len(k)-8]))) {
+							k, v, err = ci1.cNonDup.Next()
+							if err != nil {
+								return err
+							}
+							if k == nil {
+								break
+							}
+						}
+
+						if len(k) <= 8 || !(hi.to == nil || bytes.Compare(k[:len(k)-8], hi.to) < 0) {
 							break
 						}
-					}
-
-					if len(k) > 0 && (hi.to == nil || bytes.Compare(k[:len(k)-8], hi.to) < 0) {
 						stepBytes := k[len(k)-8:]
-						k = k[:len(k)-8]
-						ci1.key = common.Copy(k)
 						step := ^binary.BigEndian.Uint64(stepBytes)
-						endTxNum := step * hi.aggStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
-						ci1.endTxNum = endTxNum
-
-						ci1.val = common.Copy(v)
-						heap.Push(hi.h, ci1)
-					} else {
-						hi.closeCursorItem(ci1)
+						endTxNum := step * hi.aggStep
+						if endTxNum >= hi.filesEndTxNum {
+							ci1.key = common.Copy(k[:len(k)-8])
+							ci1.endTxNum = endTxNum
+							ci1.val = common.Copy(v)
+							heap.Push(hi.h, ci1)
+							pushed = true
+							break
+						}
+						// Skip this DB entry, continue to next key
+					}
+					if !pushed {
+						ci1.cNonDup.Close()
 					}
 				} else {
-					// start from current go to next
-					k, stepBytesWithValue, err := ci1.cDup.NextNoDup()
-					if err != nil {
-						hi.closeCursorItem(ci1)
-						return err
-					}
+					// Skip DB entries within file range — files are authoritative there.
+					var pushed bool
+					for {
+						// start from current go to next
+						k, stepBytesWithValue, err := ci1.cDup.NextNoDup()
+						if err != nil {
+							hi.closeCursorItem(ci1)
+							return err
+						}
 
-					if len(k) > 0 && (hi.to == nil || bytes.Compare(k, hi.to) < 0) {
+						if len(k) == 0 || !(hi.to == nil || bytes.Compare(k, hi.to) < 0) {
+							break
+						}
 						stepBytes := stepBytesWithValue[:8]
 						v := stepBytesWithValue[8:]
-						ci1.key = common.Copy(k)
 						step := ^binary.BigEndian.Uint64(stepBytes)
-						endTxNum := step * hi.aggStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
-						ci1.endTxNum = endTxNum
-
-						ci1.val = common.Copy(v)
-						heap.Push(hi.h, ci1)
-					} else {
-						hi.closeCursorItem(ci1)
+						endTxNum := step * hi.aggStep
+						if endTxNum >= hi.filesEndTxNum {
+							ci1.key = common.Copy(k)
+							ci1.endTxNum = endTxNum
+							ci1.val = common.Copy(v)
+							heap.Push(hi.h, ci1)
+							pushed = true
+							break
+						}
+						// Skip this DB entry, continue to next key
+					}
+					if !pushed {
+						ci1.cDup.Close()
 					}
 				}
 

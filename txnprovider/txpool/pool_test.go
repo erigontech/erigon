@@ -82,6 +82,10 @@ func newTestSetCodeTxnSlot(nonce uint64, senderID uint64, tip, feeCap uint64, ga
 			TipCap: *uint256.NewInt(tip),
 			FeeCap: *uint256.NewInt(feeCap),
 		},
+		// One placeholder auth tuple so Txn.GetAuthorizations() length matches
+		// the AuthAndNonces the test will set: the pool reads the on-tx list
+		// for gas billing and the non-empty check (validateTx).
+		Authorizations: []types.Authorization{{}},
 	}
 	return &TxnSlot{
 		Txn:      txn,

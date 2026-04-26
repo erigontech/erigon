@@ -781,7 +781,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 		// not an exact science using intrinsic gas but as close as we could hope for at
 		// this stage
 		isAATxn := mt.TxnSlot.TxType() == types.AccountAbstractionTxType
-		authorizationLen := uint64(len(mt.TxnSlot.AuthAndNonces))
+		authorizationLen := uint64(len(mt.TxnSlot.Txn.GetAuthorizations()))
 		intrinsicGasResult, _ := mdgas.CalcIntrinsicGas(mdgas.IntrinsicGasCalcArgs{
 			Data:               make([]byte, mt.TxnSlot.GetDataLen()),
 			DataNonZeroLen:     uint64(mt.TxnSlot.GetDataNonZeroLen()),
@@ -952,7 +952,10 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		}
 	}
 
-	authorizationLen := len(txn.AuthAndNonces)
+	// Use the on-tx authorization list length, not len(AuthAndNonces): per
+	// EIP-7702 the sender pays for every auth tuple regardless of validity,
+	// and AuthAndNonces only holds successfully-recovered entries.
+	authorizationLen := len(txn.Txn.GetAuthorizations())
 	if txn.TxType() == SetCodeTxnType {
 		if !isPrague {
 			return txpoolcfg.TypeNotActivated, nil
