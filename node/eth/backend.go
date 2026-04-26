@@ -958,6 +958,15 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	backend.stagedSync = stagedsync.New(config.Sync, backend.syncStages, backend.syncUnwindOrder, backend.syncPruneOrder, logger, stages.ModeApplyingBlocks)
 
+	// Storage owns a background goroutine that periodically invokes
+	// Aggregator.CollateAndPruneIfNeeded so file building and prune happen
+	// independently of FCU/stageloop kicks. Stage A of the storage-component
+	// extraction. Pruning callback is sync.RunPrune from the main staged sync
+	// (covers BlockHashes + Execution + Finish prune stages).
+	backend.components.Storage.StartBackgroundLoop(ctx, func(bgCtx context.Context, tx kv.TemporalRwTx) error {
+		return backend.stagedSync.RunPrune(bgCtx, tx, false, 0)
+	})
+
 	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentryProvider.Client, backend.notifications, backend.downloaderClient, blockReader, blockRetire, tracer, afterSnapshotDownload)
 	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 

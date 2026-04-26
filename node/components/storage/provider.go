@@ -68,6 +68,48 @@ type Provider struct {
 	BlockRetire          services.BlockRetire
 
 	logger log.Logger
+
+	// bg owns the background workers (collation+prune today, retire later).
+	// nil until StartBackgroundLoop is called from backend.go after the Sync
+	// object is constructed (Sync supplies the prune callback).
+	bg *backgroundLoop
+}
+
+// StartBackgroundLoop spawns the storage-owned background workers. Must be
+// called from backend.go AFTER the Sync object exists (Sync.RunPrune is the
+// pruneFn the bg loop invokes via Aggregator.CollateAndPruneIfNeeded).
+//
+// Today's loop: a single collator goroutine ticking every 5s. If the chainDB
+// has no Aggregator (integration tools) or pruneFn is nil, this is a no-op.
+//
+// Idempotent: repeated calls overwrite the existing loop; the prior loop is
+// stopped first. Provider.Close cancels and waits.
+func (p *Provider) StartBackgroundLoop(ctx context.Context, pruneFn PruneFn) {
+	if p.ChainDB == nil || pruneFn == nil {
+		return
+	}
+	hasAgg, ok := p.ChainDB.(dbstate.HasAgg)
+	if !ok {
+		return
+	}
+	agg, ok := hasAgg.Agg().(*dbstate.Aggregator)
+	if !ok || agg == nil {
+		return
+	}
+	if p.bg != nil {
+		p.bg.Stop()
+	}
+	p.bg = newBackgroundLoop(ctx, p.ChainDB, agg, pruneFn, p.logger)
+	p.bg.Start()
+}
+
+// Close stops any running background loop. Safe to call when the loop was
+// never started (no-op).
+func (p *Provider) Close() {
+	if p.bg != nil {
+		p.bg.Stop()
+		p.bg = nil
+	}
 }
 
 // Deps holds all external dependencies needed by Initialize.
