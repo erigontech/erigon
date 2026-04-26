@@ -277,7 +277,7 @@ func (w *Warmuper) WarmKey(hashedKey []byte, startDepth int) {
 	case <-w.ctx.Done():
 	default: // non-blocking
 		w.drop++
-		if w.drop%100 == 0 {
+		if w.drop%1000 == 0 {
 			log.Warn("[dbg] warmuper drop", "drop", w.drop)
 		}
 	}
