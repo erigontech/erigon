@@ -433,23 +433,21 @@ func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader services
 	return nil
 }
 
-// SnapshotsPrune moving block data from db into snapshots, removing old snapshots (if --prune.* enabled)
+// SnapshotsPrune handles the initial-cycle bulk retire+prune and canonical-marker
+// cleanup. Steady-state retire+prune at chain tip is owned by the Storage
+// component's bg loop (see node/components/storage/background.go runRetirer)
+// — this stage no longer drives it.
 func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx, logger log.Logger) (err error) {
 	freezingCfg := cfg.blockReader.FreezingCfg()
-	if freezingCfg.ProduceE2 {
-		//TODO: initialSync maybe save files progress here
-
-		var minBlockNumber uint64
-
-		if s.CurrentSyncCycle.IsInitialCycle {
-			cfg.blockRetire.SetWorkers(estimate.CompressSnapshot.Workers())
-		} else {
-			cfg.blockRetire.SetWorkers(1)
-		}
-
+	if freezingCfg.ProduceE2 && s.CurrentSyncCycle.IsInitialCycle {
+		// Initial-cycle bulk retire: many workers, large prune limit + long
+		// timeout. The bg loop's steady-state cadence (1 worker, 10 blocks
+		// per tick) would be far too slow to keep up with initial sync's
+		// block ingestion rate.
+		cfg.blockRetire.SetWorkers(estimate.CompressSnapshot.Workers())
 		started := cfg.blockRetire.RetireBlocksInBackground(
 			ctx,
-			minBlockNumber,
+			0, // minBlockNumber
 			s.ForwardProgress,
 			log.LvlDebug,
 			cfg.getSeederClient(),
@@ -468,16 +466,9 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 		if cfg.notifier != nil {
 			cfg.notifier.Events.OnRetirementStart(started)
 		}
-	}
-
-	pruneLimit := 10
-	pruneTimeout := 125 * time.Millisecond
-	if s.CurrentSyncCycle.IsInitialCycle {
-		pruneLimit = 10_000
-		pruneTimeout = time.Hour
-	}
-	if _, err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit, pruneTimeout); err != nil {
-		return err
+		if _, err := cfg.blockRetire.PruneAncientBlocks(tx, 10_000, time.Hour); err != nil {
+			return err
+		}
 	}
 	if err := pruneCanonicalMarkers(ctx, tx, cfg.blockReader); err != nil {
 		return err

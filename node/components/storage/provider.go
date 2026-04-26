@@ -105,6 +105,21 @@ func (p *Provider) StartBackgroundLoop(ctx context.Context, pruneFn PruneFn) {
 	p.bg.Start()
 }
 
+// StartRetireLoop attaches a retire+prune worker to the running bg loop.
+// Must be called after StartBackgroundLoop (the bg loop must exist). The
+// retire worker drives BlockRetire.RetireBlocksInBackground (kicks the
+// existing internal goroutine) and BlockRetire.PruneAncientBlocks (in a
+// brief RwTx) on its own cadence (default 30 s).
+//
+// No-op if StartBackgroundLoop was never called or BlockRetire is nil
+// (integration tools without a sync object).
+func (p *Provider) StartRetireLoop(deps RetireDeps) {
+	if p.bg == nil || deps.BlockRetire == nil {
+		return
+	}
+	p.bg.AddRetirer(deps)
+}
+
 // Close stops any running background loop. Safe to call when the loop was
 // never started (no-op).
 func (p *Provider) Close() {

@@ -967,6 +967,35 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		return backend.stagedSync.RunPrune(bgCtx, tx, false, 0)
 	})
 
+	// Stage A.2: storage owns BlockRetire too. The bg loop's retirer ticks
+	// every 30 s, kicks RetireBlocksInBackground (already async internally
+	// via the BlockRetire `working` flag), and prunes ancient blocks in a
+	// brief RwTx. Eliminates the SnapshotsPrune stage's responsibility for
+	// driving retirement — see stage_snapshots.go for the trim there.
+	backend.components.Storage.StartRetireLoop(storagecomp.RetireDeps{
+		BlockRetire: backend.components.Storage.BlockRetire,
+		GetMaxBlock: func(bgCtx context.Context) (uint64, error) {
+			// ForwardProgress = stages.Senders progress (mirrors what
+			// SnapshotsPrune used). Read from chainDB inside a brief RO tx.
+			var progress uint64
+			err := backend.chainDB.View(bgCtx, func(tx kv.Tx) error {
+				p, err := stages.GetStageProgress(tx, stages.Senders)
+				progress = p
+				return err
+			})
+			return progress, err
+		},
+		GetSeeder: func() downloader.SeederClient {
+			if backend.downloaderClient == nil {
+				return downloader.NoopSeederClient{}
+			}
+			return backend.downloaderClient
+		},
+		OnRetirementStart: backend.notifications.Events.OnRetirementStart,
+		OnRetirementDone:  backend.notifications.Events.OnRetirementDone,
+		OnNewSnapshot:     backend.notifications.Events.OnNewSnapshot,
+	})
+
 	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentryProvider.Client, backend.notifications, backend.downloaderClient, blockReader, blockRetire, tracer, afterSnapshotDownload)
 	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 
