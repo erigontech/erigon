@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"sync"
 
 	"github.com/erigontech/erigon/common/dbg"
@@ -13,31 +12,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
-
-// dumpTrieCaptureOnMismatch writes a capture of the commitment trie
-// fold/unfold operations to /tmp/trie_keys_parallel_block_<N>.log for a
-// block that just produced a Wrong-trie-root. The dump is the per-block
-// mirror of what the serial path emits at exec3.go for ERIGON_TRACE_BLOCKS,
-// and lets us diff the two sides to locate the divergent key/value.
-//
-// `capture` is the slice returned by sdCtx.GetCapture — one string per
-// fold/unfold/read op. We prefix the file with the computed and expected
-// roots so the dump is self-identifying.
-func dumpTrieCaptureOnMismatch(blockNum uint64, computed, expected []byte, txNum uint64, capture []string) {
-	dumpFile := fmt.Sprintf("/tmp/trie_keys_parallel_block_%d.log", blockNum)
-	f, err := os.Create(dumpFile)
-	if err != nil {
-		fmt.Printf("PARALLEL_TRIE_CAPTURE_ERR: block=%d file=%s err=%v\n", blockNum, dumpFile, err)
-		return
-	}
-	defer f.Close()
-	fmt.Fprintf(f, "PARALLEL block=%d computed=%x expected=%x txNum=%d updates=%d\n",
-		blockNum, computed, expected, txNum, len(capture))
-	for _, line := range capture {
-		fmt.Fprintln(f, line)
-	}
-	fmt.Printf("PARALLEL_TRIE_CAPTURE: block=%d dumped %d entries to %s\n", blockNum, len(capture), dumpFile)
-}
 
 // commitmentResult is the outcome of a single commitment computation.
 type commitmentResult struct {
@@ -216,19 +190,12 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			} else {
 				cc.computeAndCheck(ctx, r)
 			}
-		} else {
-			// Batch mode: just log receipt of blockResult
-			if r.BlockNum%1000 == 0 {
-				fmt.Printf("CALC_BLOCK: batch mode, block=%d\n", r.BlockNum)
-			}
 		}
 		// In BatchCommitments mode: just accumulate — compute only on
 		// explicit commitComputeRequest from the apply loop.
 
 	case *commitComputeRequest:
 		// Explicit compute signal from the apply loop at batch boundary.
-		fmt.Printf("CALC_REQUEST: lastBlock=%v lastComputed=%d\n",
-			cc.lastBlockResult != nil, cc.lastComputedBlock)
 		if cc.lastBlockResult != nil && cc.lastBlockResult.BlockNum > cc.lastComputedBlock {
 			cc.computeAndPublish(ctx, cc.lastBlockResult)
 		} else {
@@ -242,8 +209,6 @@ func (cc *commitmentCalculator) computeAndPublish(ctx context.Context, br *block
 	cc.state.FlushToUpdates(cc.updates)
 	cc.state.ResetBlockFlags()
 
-	fmt.Printf("CALC_PUBLISH: block=%d txNum=%d updatesLen=%d\n", br.BlockNum, br.lastTxNum, cc.updates.Size())
-
 	sdCtx := cc.doms.GetCommitmentContext()
 	sdCtx.SetUpdates(cc.updates)
 	cc.updates = cc.updates.NewEmpty()
@@ -251,15 +216,8 @@ func (cc *commitmentCalculator) computeAndPublish(ctx context.Context, br *block
 	cc.asOfReader.txNum = br.lastTxNum + 1
 	sdCtx.SetStateReader(cc.asOfReader)
 
-	// Always arm capture so a root mismatch can be dumped on the first
-	// occurrence — non-deterministic failures may not reproduce on re-run,
-	// so we need the per-fold/unfold trace captured at the moment of fail.
-	// Matches the serial path at exec3.go:906.
-	sdCtx.SetCapture([]string{})
-
 	rh, err := cc.doms.ComputeCommitment(ctx, cc.roTx, true, br.BlockNum, br.lastTxNum, cc.logPrefix, nil)
 	if err != nil {
-		sdCtx.SetCapture(nil)
 		cc.publish(ctx, commitmentResult{
 			blockNum: br.BlockNum,
 			txNum:    br.lastTxNum,
@@ -275,17 +233,8 @@ func (cc *commitmentCalculator) computeAndPublish(ctx context.Context, br *block
 	}
 
 	// Check against expected root from the block header.
-	mismatch := !bytes.Equal(rh, br.StateRoot.Bytes())
-	if mismatch {
+	if !bytes.Equal(rh, br.StateRoot.Bytes()) {
 		r.err = fmt.Errorf("%w: block %d root %x expected %x", ErrWrongTrieRoot, br.BlockNum, rh, br.StateRoot)
-	}
-
-	// Dump capture on mismatch (always) or on traced blocks (even success,
-	// to produce a positive reference).
-	traceThisBlock := dbg.TraceBlock(br.BlockNum)
-	capture := sdCtx.GetCapture(true)
-	if mismatch || traceThisBlock {
-		dumpTrieCaptureOnMismatch(br.BlockNum, rh, br.StateRoot.Bytes(), br.lastTxNum, capture)
 	}
 
 	cc.lastComputedBlock = br.BlockNum
@@ -304,8 +253,6 @@ func (cc *commitmentCalculator) computeWithoutCheck(ctx context.Context, br *blo
 	cc.state.FlushToUpdates(cc.updates)
 	cc.state.ResetBlockFlags()
 
-	fmt.Printf("CALC_PARTIAL: block=%d txNum=%d updatesLen=%d\n", br.BlockNum, br.lastTxNum, cc.updates.Size())
-
 	sdCtx := cc.doms.GetCommitmentContext()
 	sdCtx.SetUpdates(cc.updates)
 	cc.updates = cc.updates.NewEmpty()
@@ -313,10 +260,7 @@ func (cc *commitmentCalculator) computeWithoutCheck(ctx context.Context, br *blo
 	cc.asOfReader.txNum = br.lastTxNum + 1
 	sdCtx.SetStateReader(cc.asOfReader)
 
-	_, err := cc.doms.ComputeCommitment(ctx, cc.roTx, true, br.BlockNum, br.lastTxNum, cc.logPrefix, nil)
-	if err != nil {
-		fmt.Printf("CALC_PARTIAL_ERR: block=%d err=%v\n", br.BlockNum, err)
-	}
+	_, _ = cc.doms.ComputeCommitment(ctx, cc.roTx, true, br.BlockNum, br.lastTxNum, cc.logPrefix, nil)
 
 	cc.lastComputedBlock = br.BlockNum
 }
@@ -328,8 +272,6 @@ func (cc *commitmentCalculator) computeAndCheck(ctx context.Context, br *blockRe
 	cc.state.FlushToUpdates(cc.updates)
 	cc.state.ResetBlockFlags()
 
-	fmt.Printf("CALC_COMPUTE: block=%d txNum=%d updatesLen=%d\n", br.BlockNum, br.lastTxNum, cc.updates.Size())
-
 	sdCtx := cc.doms.GetCommitmentContext()
 	sdCtx.SetUpdates(cc.updates)
 	cc.updates = cc.updates.NewEmpty()
@@ -339,13 +281,8 @@ func (cc *commitmentCalculator) computeAndCheck(ctx context.Context, br *blockRe
 	cc.asOfReader.txNum = br.lastTxNum + 1
 	sdCtx.SetStateReader(cc.asOfReader)
 
-	// Always arm capture so a root mismatch can be dumped on the first
-	// occurrence. See note in computeAndPublish.
-	sdCtx.SetCapture([]string{})
-
 	rh, err := cc.doms.ComputeCommitment(ctx, cc.roTx, true, br.BlockNum, br.lastTxNum, cc.logPrefix, nil)
 	if err != nil {
-		sdCtx.SetCapture(nil)
 		cc.publish(ctx, commitmentResult{
 			blockNum: br.BlockNum,
 			txNum:    br.lastTxNum,
@@ -360,18 +297,8 @@ func (cc *commitmentCalculator) computeAndCheck(ctx context.Context, br *blockRe
 	// entry at or before this block's txNum. Reclaims memory from
 	// accumulated inMemHistoryReads entries during batch processing.
 
-	mismatch := !bytes.Equal(rh, br.StateRoot.Bytes())
-
-	// Dump capture on mismatch (always) or on traced blocks (even success,
-	// to produce a positive reference).
-	traceThisBlock := dbg.TraceBlock(br.BlockNum)
-	capture := sdCtx.GetCapture(true)
-	if mismatch || traceThisBlock {
-		dumpTrieCaptureOnMismatch(br.BlockNum, rh, br.StateRoot.Bytes(), br.lastTxNum, capture)
-	}
-
 	// Only publish on mismatch — success is silent.
-	if mismatch {
+	if mismatch := !bytes.Equal(rh, br.StateRoot.Bytes()); mismatch {
 		cc.publish(ctx, commitmentResult{
 			blockNum: br.BlockNum,
 			txNum:    br.lastTxNum,

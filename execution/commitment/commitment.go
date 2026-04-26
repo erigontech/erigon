@@ -1121,20 +1121,12 @@ func validatePlainKeys(branchKey []byte, row [16]*cell, keccak keccak.KeccakStat
 		if c.storageAddrLen > 0 {
 			plainKeyNibbles = KeyToHexNibbleHash(c.storageAddr[:])
 			if c.accountAddrLen > 0 {
-				//fmt.Printf("--- debug --- cell with accountAddrLen>0 and storageAddrLen>0: branchKey=%x, branchKeyLen=%d, uncompactedBranchKey=%x, uncompactedBranchKeyLen=%d, plainKeyNibbles=%x, branchKeyAndExtNibbles=%x, cell=%s\n", branchKey, len(branchKey), uncompactedBranchKey, len(uncompactedBranchKey), plainKeyNibbles, branchKeyAndExtNibbles, c)
 				if !bytes.Equal(c.accountAddr[:], c.storageAddr[:length.Addr]) {
 					return fmt.Errorf("accountAddr mismatch with storageAddr: %s != %x", common.BytesToAddress(c.accountAddr[:]), common.BytesToHash(c.storageAddr[:length.Addr]))
 				}
-			} else {
-				//nolint:staticcheck
-				//fmt.Printf("--- debug --- cell with accountAddrLen=0 and storageAddrLen>0: branchKey=%x, branchKeyLen=%d, uncompactedBranchKey=%x, uncompactedBranchKeyLen=%d, plainKeyNibbles=%x, branchKeyAndExtNibbles=%x, cell=%s\n", branchKey, len(branchKey), uncompactedBranchKey, len(uncompactedBranchKey), plainKeyNibbles, branchKeyAndExtNibbles, c)
 			}
 		}
-		//if c.extLen > 0 {
-		//	fmt.Printf("--- debug --- cell with plainKey and extLen>0: branchKey=%x, branchKeyLen=%d, uncompactedBranchKey=%x, uncompactedBranchKeyLen=%d, plainKeyNibbles=%x, branchKeyAndExtNibbles=%x, cell=%s\n", branchKey, len(branchKey), uncompactedBranchKey, len(uncompactedBranchKey), plainKeyNibbles, branchKeyAndExtNibbles, c)
-		//}
 		if !bytes.Equal(plainKeyNibbles, branchKeyAndExtNibbles) {
-			//fmt.Printf("--- debug --- branchKey=%x, branchKeyLen=%d, uncompactedBranchKey=%x, uncompactedBranchKeyLen=%d, plainKeyNibbles=%x, branchKeyAndExtNibbles=%x, cell=%s\n", branchKey, len(branchKey), uncompactedBranchKey, len(uncompactedBranchKey), plainKeyNibbles, branchKeyAndExtNibbles, c)
 			return fmt.Errorf("branch and hashed extension nibbles dont match plainKey nibbles: %x vs %x", plainKeyNibbles, branchKeyAndExtNibbles)
 		}
 	}
@@ -1224,8 +1216,6 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 				}
 				pos1 += n
 				if len(branch1) < pos1+int(l) {
-					fmt.Printf("b1: %x %v\n", branch1, branch1)
-					fmt.Printf("b2: %x\n", branch2)
 					return nil, fmt.Errorf("MergeHexBranches branch1 is too small: expected at least %d got %d bytes", pos1+int(l), len(branch1))
 				}
 				if l > 0 {
@@ -1574,44 +1564,9 @@ func (t *Updates) Size() (updates uint64) {
 	}
 }
 
-// TraceTouchKeys enables global touch key tracing for debugging.
-var TraceTouchKeys bool
-
-// DumpKeys prints all plain keys in the Updates tree with their flags.
-func (t *Updates) DumpKeys(prefix string) {
-	t.DumpKeysN(prefix, -1)
-}
-
-// DumpKeysN prints up to n plain keys. Pass -1 for all.
-func (t *Updates) DumpKeysN(prefix string, n int) {
-	count := 0
-	switch t.mode {
-	case ModeUpdate:
-		t.tree.Ascend(func(item *KeyUpdate) bool {
-			if n >= 0 && count >= n {
-				return false
-			}
-			fmt.Printf("%s: key=%x len=%d flags=%d update=%s\n", prefix, item.plainKey, len(item.plainKey), item.update.Flags, item.update)
-			count++
-			return true
-		})
-	case ModeDirect:
-		for k := range t.keys {
-			if n >= 0 && count >= n {
-				break
-			}
-			fmt.Printf("%s: key=%x len=%d\n", prefix, k, len(k))
-			count++
-		}
-	}
-}
-
 // TouchPlainKey marks plainKey as updated and applies different fn for different key types
 // (different behaviour for Code, Account and Storage key modifications).
 func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, val []byte)) {
-	if TraceTouchKeys {
-		fmt.Printf("TOUCH_KEY: key=%x len=%d valLen=%d\n", key, len(key), len(val))
-	}
 	switch t.mode {
 	case ModeUpdate:
 		if existing, ok := t.treeIdx[key]; ok {
@@ -1651,9 +1606,6 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 // receives aggregated state changes via channel instead of serialized bytes
 // from DomainPut.
 func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
-	if TraceTouchKeys {
-		fmt.Printf("TOUCH_DIRECT: key=%x len=%d flags=%d\n", key, len(key), update.Flags)
-	}
 	switch t.mode {
 	case ModeUpdate:
 		if existing, ok := t.treeIdx[key]; ok {

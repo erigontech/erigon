@@ -259,18 +259,12 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		// This is the authoritative source for what's been committed —
 		// use it to cap collation so files don't capture uncommitted data.
 		if verifyTx, verifyErr := db.BeginTemporalRo(ctx); verifyErr == nil {
-			v, step, getErr := verifyTx.GetLatest(kv.CommitmentDomain, []byte("state"))
-			if getErr != nil {
-				fmt.Printf("POST_COMMIT_VERIFY: err=%v\n", getErr)
-			} else if len(v) >= 16 {
+			v, _, getErr := verifyTx.GetLatest(kv.CommitmentDomain, []byte("state"))
+			if getErr == nil && len(v) >= 16 {
 				committedTxNum := binary.BigEndian.Uint64(v[:8])
-				committedBlock := binary.BigEndian.Uint64(v[8:16])
-				fmt.Printf("POST_COMMIT_VERIFY: found len=%d step=%d txNum=%d block=%d\n", len(v), step, committedTxNum, committedBlock)
 				if a, ok := db.(state.HasAgg); ok {
 					a.Agg().(*state.Aggregator).SetLastFlushedCommitmentTxNum(committedTxNum)
 				}
-			} else {
-				fmt.Printf("POST_COMMIT_VERIFY: NOT FOUND in MDBX\n")
 			}
 			verifyTx.Rollback()
 		}

@@ -334,10 +334,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 						if err := pe.getPostValidator().Process(applyResult.BlockGasUsed, applyResult.BlobGasUsed, checkReceipts, applyResult.Receipts,
 							lastHeader, b.Transactions(), pe.cfg.chainConfig, pe.logger); err != nil {
-							// Error may be from THIS block (sync) or a PREVIOUS
-							// block (async, cached in validator). Dump both.
-							dumpGasMismatchDiag(applyResult, pe.logger)
-							dumpGasMismatchDiag(&lastBlockResult, pe.logger)
 							return fmt.Errorf("%w, block=%d, %v", rules.ErrInvalidBlock, applyResult.BlockNum, err) //same as in stage_exec.go
 						}
 
@@ -364,7 +360,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					// Post-execution validation (receipts, BAL) runs here.
 					err = pe.getPostValidator().Wait()
 					if err != nil {
-						dumpGasMismatchDiag(applyResult, pe.logger)
 						return err
 					}
 
@@ -653,16 +648,13 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 			}
 		case nextResult, ok := <-pe.rws.ResultCh():
 			if !ok {
-				fmt.Printf("FLOW: rws closed lastBlock=%d\n", pe.lastExecutedBlockNum.Load())
 				return nil
 			}
 			closed, err := pe.rws.Drain(ctx, nextResult)
 			if err != nil {
-				fmt.Printf("FLOW: drain err=%v lastBlock=%d\n", err, pe.lastExecutedBlockNum.Load())
 				return err
 			}
 			if closed {
-				fmt.Printf("FLOW: drain closed lastBlock=%d\n", pe.lastExecutedBlockNum.Load())
 				return nil
 			}
 		}
@@ -670,7 +662,6 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 		blockResult, err := pe.processResults(ctx, applyTx)
 
 		if err != nil {
-			fmt.Printf("FLOW: processResults err=%v\n", err)
 			return err
 		}
 
@@ -692,7 +683,6 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					pe.blockExecMetrics.BlockCount.Add(1)
 				}
 				if err := blockExecutor.sendResult(ctx, blockResult); err != nil {
-					fmt.Printf("FLOW: sendResult err=%v block=%d\n", err, blockResult.BlockNum)
 					return err
 				}
 
@@ -725,7 +715,6 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				}
 
 				if dbg.StopAfterBlock > 0 && blockResult.BlockNum >= dbg.StopAfterBlock {
-					fmt.Printf("FLOW: STOP_AFTER_BLOCK block=%d\n", blockResult.BlockNum)
 					pe.triggerBatchCommitment(ctx)
 					return nil
 				}
@@ -920,15 +909,9 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		execLoopCtxCancel()
 
 		pe.in.Release()
-		fmt.Printf("LIFECYCLE: stopWorkers start\n")
 		pe.stopWorkers()
-		fmt.Printf("LIFECYCLE: stopWorkers done\n")
 
-		fmt.Printf("LIFECYCLE: wait start\n")
-		if err := pe.wait(ctx); err != nil {
-			fmt.Printf("LIFECYCLE: wait err=%v\n", err)
-		}
-		fmt.Printf("LIFECYCLE: wait done\n")
+		_ = pe.wait(ctx)
 	}, nil
 }
 
@@ -1656,10 +1639,6 @@ func (result *execResult) finalizeTxSimple(
 	// entries from the finalize's writes will cause invalidation of
 	// subsequent TXs that read stale coinbase/burnt values.
 
-	if txTrace {
-		fmt.Println(tracePrefix, "finalizeTxSimple", allWrites)
-	}
-
 	return receipt, nil, allWrites, nil
 }
 
@@ -1908,33 +1887,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 
 			if res.Version().Incarnation > len(be.tasks) {
-				// Dump full state for diagnosis
-				depTxIndex := execErr.DependencyTxIndex
-				fmt.Printf("DEADLOCK: block=%d tx=%d inc=%d dep=%d origErr=%v\n",
-					be.blockNum, res.Version().TxIndex, res.Version().Incarnation,
-					depTxIndex, execErr.OriginError)
-				// Check dep path in versionedRead — the dep might be from a
-				// version conflict (line 712), not an estimate. Log what the
-				// worker's first read for the dep address looks like.
-				fmt.Printf("  depTxIndex=%d (this is the conflicting version, not necessarily an estimate)\n", depTxIndex)
-				fmt.Printf("  execTasks: maxComplete=%d\n", be.execTasks.maxComplete())
-				fmt.Printf("  validateTasks: minPending=%d maxComplete=%d\n",
-					be.validateTasks.minPending(), be.validateTasks.maxComplete())
-				fmt.Printf("  publishTasks: minPending=%d countComplete=%d\n",
-					be.publishTasks.minPending(), be.publishTasks.countComplete())
-				// Check what TX 198 looks like
-				depTx := execErr.DependencyTxIndex
-				if depTx >= 0 && depTx < len(be.tasks) {
-					depVersion := be.tasks[depTx].Task.Version()
-					fmt.Printf("  depTx %d: version=(%d.%d) blocked=%v\n",
-						depTx, depVersion.TxIndex, depVersion.Incarnation,
-						be.execTasks.isBlocked(depTx))
-				}
-				// Show which TXs around 297 are pending/blocked
-				for i := max(0, tx-3); i <= min(tx+3, len(be.tasks)-1); i++ {
-					v := be.tasks[i].Task.Version()
-					fmt.Printf("  tx[%d]: inc=%d blocked=%v\n", i, v.Incarnation, be.execTasks.isBlocked(i))
-				}
 				if execErr.OriginError != nil {
 					return nil, fmt.Errorf("could not apply tx %d:%d [%v]: %w: too many incarnations: %d, expected: %d", be.blockNum, res.Version().TxIndex, task.TxHash(), execErr.OriginError, res.Version().Incarnation, len(be.tasks))
 				} else {
@@ -2263,10 +2215,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				applyResult.blockGasUsed = int64(receiptGas)
 				be.blockGasUsed += receiptGas
 
-				if dbg.TraceGas && dbg.TraceBlock(be.blockNum) {
-					fmt.Printf("GAS_ACCUM block=%d tx=%d gasUsed=%d blockTotal=%d\n",
-						be.blockNum, tx, receiptGas, be.blockGasUsed)
-				}
 				receipt := *result.Receipt
 				applyResult.receipt = &receipt
 				applyResult.receipt.Logs = append([]*types.Log{}, result.Receipt.Logs...)
@@ -2331,17 +2279,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		// side so finalize writes go to the BlockStateCache before the Flush.
 		var finalizeWrites state.VersionedWrites
 		if be.blockNum > 0 {
-			if be.blockNum == 24268193 {
-				// Check if consolidation contract storage is in the cache
-				consolidationAddr := accounts.InternAddress([20]byte{0x00, 0x00, 0xbb, 0xdd, 0xc7, 0xce, 0x48, 0x86, 0x42, 0xfb, 0x57, 0x9f, 0x8b, 0x00, 0xf3, 0xa5, 0x90, 0x00, 0x72, 0x51})
-				slot0 := accounts.StorageKey{}
-				if val, ok := be.blockStateCache.GetCurrentStorage(consolidationAddr, slot0); ok {
-					fmt.Printf("FINALIZE_CHECK: block=24268193 consolidation slot0 in cache: len=%d val=%x\n", len(val), val)
-				} else {
-					fmt.Printf("FINALIZE_CHECK: block=24268193 consolidation slot0 NOT in cache\n")
-				}
-				fmt.Printf("FINALIZE_CHECK: block=24268193 results=%d tasks=%d\n", len(be.results), len(be.tasks))
-			}
 			lastResult := be.results[len(be.results)-1]
 			finalTask := be.tasks[len(be.tasks)-1].Task
 			finalVersion := finalTask.Version()
@@ -2366,9 +2303,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			localVersionMap := state.NewVersionMap(nil)
 			ibs.SetVersionMap(localVersionMap)
 			ibs.SetTxContext(finalVersion.BlockNum, finalVersion.TxIndex)
-			if be.blockNum == 24268193 {
-				ibs.SetTrace(true)
-			}
 
 			if tt, ok := lastResult.Task.(*taskVersion).Task.(*exec.TxTask); ok {
 				// Syscalls share the main ibs so their writes (EIP-7002/7251
@@ -2964,59 +2898,4 @@ func resolveStorageWrites(writes state.VersionedWrites, vm *state.VersionMap, tx
 		filtered = append(filtered, w)
 	}
 	return filtered
-}
-
-// dumpGasMismatchDiag identifies which TX(s) have wrong gas and dumps
-// diagnostic data for the divergent TX and its predecessors.
-func dumpGasMismatchDiag(br *blockResult, logger log.Logger) {
-	if br == nil || br.Header == nil || br.TxIO == nil {
-		return
-	}
-	headerGas := br.Header.GasUsed
-	execGas := br.BlockGasUsed
-	if execGas == headerGas {
-		return
-	}
-
-	fmt.Printf("\n=== GAS MISMATCH DIAGNOSTIC block=%d ===\n", br.BlockNum)
-	fmt.Printf("header=%d exec=%d diff=%+d txCount=%d\n",
-		headerGas, execGas, int64(execGas)-int64(headerGas), len(br.Receipts))
-
-	// Summary: all TXs with gas + incarnation
-	fmt.Printf("\nALL TX SUMMARY:\n")
-	for i, r := range br.Receipts {
-		inc := br.TxIO.ReadSetIncarnation(i)
-		fmt.Printf("  tx[%d] gas=%d inc=%d status=%d\n", i, r.GasUsed, inc, r.Status)
-	}
-
-	// Dump full read/write sets for the first few TXs and any retried TX.
-	limit := min(5, len(br.Receipts))
-	for i := 0; i < len(br.Receipts); i++ {
-		inc := br.TxIO.ReadSetIncarnation(i)
-		if i >= limit && inc == 0 {
-			continue
-		}
-
-		var txHash string
-		if i < len(br.Txs) {
-			txHash = br.Txs[i].Hash().Hex()
-		}
-		fmt.Printf("\nGAS_DIAG tx[%d] inc=%d gas=%d status=%d hash=%s\n",
-			i, inc, br.Receipts[i].GasUsed, br.Receipts[i].Status, txHash)
-
-		readSet := br.TxIO.ReadSet(i)
-		fmt.Printf("  READS (%d):\n", readSet.Len())
-		readSet.Scan(func(vr *state.VersionedRead) bool {
-			fmt.Printf("    %s\n", vr.String())
-			return true
-		})
-
-		writeSet := br.TxIO.WriteSet(i)
-		fmt.Printf("  WRITES (%d):\n", len(writeSet))
-		for _, vw := range writeSet {
-			fmt.Printf("    %s\n", vw.String())
-		}
-	}
-	fmt.Printf("=== END DIAGNOSTIC ===\n\n")
-	os.Stdout.Sync()
 }

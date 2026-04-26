@@ -377,17 +377,6 @@ func InitializeBlockExecution(engine rules.Engine, chain rules.ChainHeaderReader
 var alwaysSkipReceiptCheck = dbg.EnvBool("EXEC_SKIP_RECEIPT_CHECK", false)
 
 func BlockPostValidation(blockGasUsed, blobGasUsed uint64, checkReceipts bool, receipts types.Receipts, h *types.Header, txns types.Transactions, chainConfig *chain.Config, logger log.Logger) error {
-	// Dump per-TX gas for specific blocks being debugged
-	if h.Number.Uint64() == 24408870 {
-		for i, r := range receipts {
-			var txHash string
-			if i < len(txns) {
-				txHash = txns[i].Hash().Hex()[:18]
-			}
-			fmt.Printf("BLOCK_GAS: block=%d txIdx=%d txHash=%s gasUsed=%d cumGas=%d status=%d\n",
-				h.Number.Uint64(), i, txHash, r.GasUsed, r.CumulativeGasUsed, r.Status)
-		}
-	}
 	if blockGasUsed != h.GasUsed {
 		logger.Warn("gas used mismatch", "block", h.Number.Uint64(), "header", h.GasUsed, "execution", blockGasUsed,
 			"diff", int64(blockGasUsed)-int64(h.GasUsed), "txCount", len(txns), "receiptCount", len(receipts))

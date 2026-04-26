@@ -19,12 +19,10 @@ package stagedsync
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/big"
 	"os"
-	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -42,7 +40,6 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -50,7 +47,6 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/shards"
 )
 
@@ -107,8 +103,6 @@ func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, curr
 
 	inputTxNum = min
 
-	//_max, _ := txNumsReader.Max(applyTx, blockNum)
-	//fmt.Printf("[commitment] found domain.txn %d, inputTxn %d, offset %d. DB found block %d {%d, %d}\n", currentTxNum, inputTxNum, offsetFromBlockBeginning, blockNum, _min, _max)
 	return inputTxNum, maxTxNum, offsetFromBlockBeginning, blockNum, nil
 }
 
@@ -128,9 +122,6 @@ func ExecV3(ctx context.Context,
 	if err != nil {
 		return err
 	}
-	logger.Info(fmt.Sprintf("[%s] SeekCommitment result", execStage.LogPrefix()),
-		"txNum", initialTxNum, "blockNum", blockNum,
-		"stageProgress", execStage.BlockNumber)
 
 	agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	if isApplyingBlocks {
@@ -368,10 +359,6 @@ func ExecV3(ctx context.Context,
 		lastCommittedTxNum = se.lastCommittedTxNum.Load()
 	}
 
-	if false && !isForkValidation {
-		dumpPlainStateDebug(applyTx, doms)
-	}
-
 	// If execution already failed with ErrInvalidBlock, skip the step-frozen check
 	// and propagate the original error directly. The step-frozen check only makes
 	// sense when execution succeeded partially and we need to persist the commitment.
@@ -405,43 +392,6 @@ func ExecV3(ctx context.Context,
 	}
 
 	return execErr
-}
-
-func dumpTxIODebug(blockNum uint64, txIO *state.VersionedIO) {
-	maxTxIndex := len(txIO.Inputs()) - 1
-
-	for txIndex := -1; txIndex < maxTxIndex; txIndex++ {
-		txIncarnation := txIO.ReadSetIncarnation(txIndex)
-
-		fmt.Println(
-			fmt.Sprintf("%d (%d.%d) RD", blockNum, txIndex, txIncarnation), txIO.ReadSet(txIndex).Len(),
-			"WRT", len(txIO.WriteSet(txIndex)))
-
-		var reads []*state.VersionedRead
-		txIO.ReadSet(txIndex).Scan(func(vr *state.VersionedRead) bool {
-			reads = append(reads, vr)
-			return true
-		})
-
-		slices.SortFunc(reads, func(a, b *state.VersionedRead) int { return a.Address.Cmp(b.Address) })
-
-		for _, vr := range reads {
-			fmt.Println(fmt.Sprintf("%d (%d.%d)", blockNum, txIndex, txIncarnation), "RD", vr.String())
-		}
-
-		writeSet := txIO.WriteSet(txIndex)
-		writes := make([]*state.VersionedWrite, 0, len(writeSet))
-
-		for _, vw := range writeSet {
-			writes = append(writes, vw)
-		}
-
-		slices.SortFunc(writes, func(a, b *state.VersionedWrite) int { return a.Address.Cmp(b.Address) })
-
-		for _, vw := range writes {
-			fmt.Println(fmt.Sprintf("%d (%d.%d)", blockNum, txIndex, txIncarnation), "WRT", vw.String())
-		}
-	}
 }
 
 type txExecutor struct {
@@ -762,58 +712,6 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 	return nil
 }
 
-// nolint
-func dumpPlainStateDebug(tx kv.TemporalRwTx, doms *execctx.SharedDomains) {
-	if doms != nil {
-		doms.Flush(context.Background(), tx)
-	}
-
-	{
-		it, err := tx.Debug().RangeLatest(kv.AccountsDomain, nil, nil, -1)
-		if err != nil {
-			panic(err)
-		}
-		for it.HasNext() {
-			k, v, err := it.Next()
-			if err != nil {
-				panic(err)
-			}
-			a := accounts.NewAccount()
-			accounts.DeserialiseV3(&a, v)
-			fmt.Printf("%x, %d, %d, %d, %x\n", k, &a.Balance, a.Nonce, a.Incarnation, a.CodeHash)
-		}
-	}
-	{
-		it, err := tx.Debug().RangeLatest(kv.StorageDomain, nil, nil, -1)
-		if err != nil {
-			panic(1)
-		}
-		for it.HasNext() {
-			k, v, err := it.Next()
-			if err != nil {
-				panic(err)
-			}
-			fmt.Printf("%x, %x\n", k, v)
-		}
-	}
-	{
-		it, err := tx.Debug().RangeLatest(kv.CommitmentDomain, nil, nil, -1)
-		if err != nil {
-			panic(1)
-		}
-		for it.HasNext() {
-			k, v, err := it.Next()
-			if err != nil {
-				panic(err)
-			}
-			fmt.Printf("%x, %x\n", k, v)
-			if bytes.Equal(k, []byte("state")) {
-				fmt.Printf("state: t=%d b=%d\n", binary.BigEndian.Uint64(v[:8]), binary.BigEndian.Uint64(v[8:]))
-			}
-		}
-	}
-}
-
 func handleIncorrectRootHashError(blockNumber uint64, blockHash common.Hash, parentHash common.Hash, applyTx kv.TemporalRwTx, cfg ExecuteBlockCfg, s *StageState, logger log.Logger, u Unwinder) error {
 	if cfg.badBlockHalt {
 		return fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, blockNumber)
@@ -895,45 +793,14 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 	if err != nil {
 		return false, times, err
 	}
-	// Trace commitment reads for the first 5 blocks
-	if header.Number.Uint64() <= 24408870 {
-		commitmentdb.TraceCommitReads = true
-		defer func() { commitmentdb.TraceCommitReads = false }()
-		fmt.Printf("SERIAL_COMPUTE: block=%d txNum=%d\n", header.Number.Uint64(), blockTxNum)
-	}
-
-	// Enable trie capture so we can dump keys on failure for comparison.
-	doms.GetCommitmentContext().SetCapture([]string{})
-
 	computedRootHash, err := doms.ComputeCommitment(ctx, commitRoTx, true, header.Number.Uint64(), blockTxNum, e.LogPrefix(), nil)
 
 	times.ComputeCommitment = time.Since(start)
 	if err != nil {
-		doms.GetCommitmentContext().SetCapture(nil)
 		return false, times, fmt.Errorf("compute commitment: %w", err)
 	}
 
-	// Dump trie ops on root mismatch (always) or for specific blocks
-	// (ERIGON_TRACE_BLOCKS) so we have a correct baseline to diff against
-	// parallel failures. Non-deterministic mismatches may not reproduce on
-	// re-run, so evidence must be captured at the moment of fail.
-	mismatch := !bytes.Equal(computedRootHash, header.Root.Bytes())
-	traceThisBlock := dbg.TraceBlock(header.Number.Uint64())
-	capture := doms.GetCommitmentContext().GetCapture(true)
-	if mismatch || traceThisBlock {
-		dumpFile := fmt.Sprintf("/tmp/trie_keys_serial_block_%d.log", header.Number.Uint64())
-		if f, ferr := os.Create(dumpFile); ferr == nil {
-			fmt.Fprintf(f, "SERIAL block=%d computed=%x expected=%x txNum=%d updates=%d\n",
-				header.Number.Uint64(), computedRootHash, header.Root.Bytes(), blockTxNum, len(capture))
-			for _, line := range capture {
-				fmt.Fprintln(f, line)
-			}
-			f.Close()
-			fmt.Printf("SERIAL_TRIE_CAPTURE: block=%d dumped %d entries to %s\n", header.Number.Uint64(), len(capture), dumpFile)
-		}
-	}
-
-	if mismatch {
+	if !bytes.Equal(computedRootHash, header.Root.Bytes()) {
 		logger.Warn(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), computedRootHash, header.Root.Bytes(), header.Hash()))
 		err = handleIncorrectRootHashError(header.Number.Uint64(), header.Hash(), header.ParentHash, applyTx, cfg, e, logger, u)
 		return false, times, err
