@@ -113,6 +113,7 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		CaplinDiscoveryTCPPort:    uint64(cfg.ServerTcpPort),
 		BeaconAPIRouter:           rcfg,
 		NetworkId:                 networkId,
+		LocalDiscovery:            cfg.LocalDiscovery,
 		MevRelayUrl:               cfg.MevRelayUrl,
 		CustomConfigPath:          cfg.CustomConfig,
 		CustomGenesisStatePath:    cfg.CustomGenesisState,

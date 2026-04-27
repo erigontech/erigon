@@ -121,8 +121,8 @@ func (s *Sentinel) findPeersForSubnets(subnets []subnetSearchState) {
 		checked++
 		node := filteredIterator.Node()
 
-		// Skip private IPs
-		if node.IP().IsPrivate() {
+		// Skip private IPs unless local discovery is enabled
+		if !s.cfg.P2PConfig.LocalDiscovery && node.IP().IsPrivate() {
 			continue
 		}
 
@@ -525,8 +525,8 @@ func (s *Sentinel) listenForPeers() {
 		}
 		s.pidToEnr.Store(peerInfo.ID, node)
 		s.pidToEnodeId.Store(peerInfo.ID, node.ID())
-		// Skip Peer if IP was private.
-		if node.IP().IsPrivate() {
+		// Skip Peer if IP was private, unless local discovery is enabled.
+		if !s.cfg.P2PConfig.LocalDiscovery && node.IP().IsPrivate() {
 			continue
 		}
 

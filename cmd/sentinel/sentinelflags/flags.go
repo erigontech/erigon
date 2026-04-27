@@ -30,6 +30,7 @@ var CliFlags = []cli.Flag{
 	&SentinelServerAddr,
 	&SentinelTcpPort,
 	&NoDiscovery,
+	&LocalDiscovery,
 	&BootnodesFlag,
 	&SentinelStaticPeersFlag,
 }
