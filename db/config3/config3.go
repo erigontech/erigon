@@ -16,6 +16,8 @@
 
 package config3
 
+import "math"
+
 // This is the default step size up to Erigon 3.3
 const LegacyStepSize = 1_562_500
 
@@ -29,6 +31,11 @@ const DefaultStepSize = 1_562_500
 // files of smaller size are also immutable, but can be removed after merge to bigger files.
 // TODO: there are exceptions to this rule; domains override this limit hardcoded inside domain construction to be unlimited; it could be made more explicit in the schema.
 const DefaultStepsInFrozenFile = 64
+
+// UnboundedDomainMerge is a sentinel "steps in frozen file" value used to signal domain merges
+// are unbounded, i.e., can be merged infinitely. This was the default behavior for Erigon <= 3.4 and
+// this value can be used to restore it.
+const UnboundedDomainMerge uint64 = math.MaxUint64
 
 const EnableHistoryV4InTest = true
 
