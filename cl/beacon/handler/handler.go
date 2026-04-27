@@ -136,6 +136,12 @@ type ApiHandler struct {
 	// cached data, wraps it into a SignedExecutionPayloadEnvelope, and broadcasts
 	// it on the execution_payload gossip topic so the block can reach FULL status.
 	selfBuildPayloads *lru.Cache[common.Hash, *selfBuildPayload]
+	// selfBuildEnvelopes caches the unsigned ExecutionPayloadEnvelope by slot so
+	// the validator client can retrieve it via
+	// GET /eth/v1/validator/execution_payload_envelope/{slot}/{builder_index}.
+	// Populated during block production alongside selfBuildPayloads.
+	// [New in Gloas:EIP7732]
+	selfBuildEnvelopes *lru.Cache[uint64, *cltypes.ExecutionPayloadEnvelope]
 }
 
 func NewApiHandler(
@@ -191,6 +197,10 @@ func NewApiHandler(
 	if err != nil {
 		panic(err)
 	}
+	selfBuildEnvelopes, err := lru.New[uint64, *cltypes.ExecutionPayloadEnvelope]("selfBuildEnvelopes", 4)
+	if err != nil {
+		panic(err)
+	}
 	return &ApiHandler{
 		logger:                             logger,
 		validatorParams:                    validatorParams,
@@ -237,6 +247,7 @@ func NewApiHandler(
 		executionPayloadBidService:       executionPayloadBidService,
 		payloadAttestationService:        payloadAttestationService,
 		selfBuildPayloads:                selfBuildPayloads,
+		selfBuildEnvelopes:               selfBuildEnvelopes,
 	}
 }
 
@@ -336,6 +347,7 @@ func (a *ApiHandler) init() {
 					r.Get("/blob_sidecars/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconBlobSidecars))
 					// [New in Gloas:EIP7732]
 					r.Get("/execution_payload_envelope/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconExecutionPayloadEnvelope))
+					r.Post("/execution_payload_envelope", a.PostEthV1BeaconExecutionPayloadEnvelope)
 					r.Post("/execution_payload_bid", a.PostEthV1BeaconExecutionPayloadBid)
 					r.Route("/states", func(r chi.Router) {
 						r.Route("/{state_id}", func(r chi.Router) {
@@ -381,6 +393,7 @@ func (a *ApiHandler) init() {
 					// [New in Gloas:EIP7732]
 					r.Get("/payload_attestation_data/{slot}", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorPayloadAttestationData))
 					r.Get("/execution_payload_bid/{slot}/{builder_index}", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorExecutionPayloadBid))
+					r.Get("/execution_payload_envelope/{slot}/{builder_index}", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorExecutionPayloadEnvelope))
 					if a.routerCfg.Builder {
 						r.Post("/register_validator", beaconhttp.HandleEndpointFunc(a.PostEthV1BuilderRegisterValidator))
 					}
@@ -425,6 +438,7 @@ func (a *ApiHandler) init() {
 		})
 		if a.routerCfg.Validator {
 			r.Get("/v3/validator/blocks/{slot}", beaconhttp.HandleEndpointFunc(a.GetEthV3ValidatorBlock))
+			r.Get("/v4/validator/blocks/{slot}", beaconhttp.HandleEndpointFunc(a.GetEthV3ValidatorBlock))
 		}
 	})
 }

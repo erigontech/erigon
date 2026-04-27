@@ -2,7 +2,6 @@ package statechange
 
 import (
 	"github.com/erigontech/erigon/cl/abstract"
-	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 )
 
@@ -23,7 +22,7 @@ func ProcessPtcWindow(s abstract.BeaconState) error {
 	lastEpochStart := totalSlots - int(slotsPerEpoch)
 
 	// Build a new window, shifting entries forward by one epoch.
-	newWindow := solid.NewUint64VectorOfVectors(totalSlots, int(clparams.PtcSize))
+	newWindow := solid.NewUint64VectorOfVectors(totalSlots, int(cfg.PtcSize))
 	for i := 0; i < lastEpochStart; i++ {
 		newWindow.Set(i, ptcWindow.Get(i+int(slotsPerEpoch)))
 	}
@@ -38,7 +37,7 @@ func ProcessPtcWindow(s abstract.BeaconState) error {
 		if err != nil {
 			return err
 		}
-		vec := solid.NewUint64VectorSSZ(int(clparams.PtcSize))
+		vec := solid.NewUint64VectorSSZ(int(cfg.PtcSize))
 		for j, idx := range ptc {
 			vec.Set(j, idx)
 		}

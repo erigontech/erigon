@@ -530,7 +530,7 @@ func TestReadHistoricalState_GloasFieldsReconstruction(t *testing.T) {
 	})
 
 	// PtcWindow vector of vectors — seed a non-zero entry at outer=2, inner=5
-	expectedPtcWindow := solid.NewUint64VectorOfVectors(int((2+cfg.MinSeedLookahead)*cfg.SlotsPerEpoch), int(clparams.PtcSize))
+	expectedPtcWindow := solid.NewUint64VectorOfVectors(int((2+cfg.MinSeedLookahead)*cfg.SlotsPerEpoch), int(cfg.PtcSize))
 	expectedPtcWindow.Get(2).Set(5, 42)
 
 	// ---- Build SlotData (GLOAS version, use real numValidators from genesis) ----

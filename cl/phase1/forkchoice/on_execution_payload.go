@@ -119,6 +119,15 @@ func (f *ForkChoiceStore) verifyEnvelopeBuilderSignature(
 	envelope := signedEnvelope.Message
 	builderIndex := envelope.BuilderIndex
 
+	// Skip BLS verification for locally-produced self-build envelopes that carry
+	// InfiniteSignature. The CL node constructs these when the VC does not provide
+	// a pre-signed envelope; the private key lives in the VC and is not available here.
+	// Gossip-received self-build envelopes from other proposers carry real signatures
+	// and will NOT match this check.
+	if builderIndex == clparams.BuilderIndexSelfBuild && signedEnvelope.Signature == common.Bytes96(bls.InfiniteSignature) {
+		return nil
+	}
+
 	var pk [48]byte
 	if builderIndex == clparams.BuilderIndexSelfBuild {
 		// Self-build: use the proposer's pubkey
@@ -233,7 +242,7 @@ func (f *ForkChoiceStore) validatePayloadWithEL(
 	}
 
 	// Calculate versioned hashes from committed bid's blob_kzg_commitments
-	var versionedHashes []common.Hash
+	versionedHashes := make([]common.Hash, 0)
 	blobCommitments := &committedBid.Message.BlobKzgCommitments
 	if blobCommitments.Len() > 0 {
 		versionedHashes = make([]common.Hash, 0, blobCommitments.Len())
@@ -396,6 +405,14 @@ func (f *ForkChoiceStore) applyEnvelopeLocked(ctx context.Context, signedEnvelop
 			}
 		}
 	}
+
+	// Ensure the correct state root is available for the beacon_block_root check
+	// inside ProcessExecutionPayloadEnvelope. PreviousStateRoot() is consumptive
+	// (cleared on read) and may have already been consumed by transitionSlot during
+	// TransitionState, or by a replay in GetState. Re-setting it from the block's
+	// known-correct StateRoot guarantees ProcessExecutionPayloadEnvelope can
+	// reconstruct the block header root without relying on the incremental hash cache.
+	blockState.SetPreviousStateRoot(block.Block.StateRoot)
 
 	// Run ProcessExecutionPayloadEnvelope for CL-level verification (no state mutation).
 	// Always use ValidatingMachine so that signature verification and all spec checks run,

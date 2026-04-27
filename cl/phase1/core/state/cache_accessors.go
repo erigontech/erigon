@@ -585,7 +585,7 @@ func (b *CachingBeaconState) ComputePTC(slot uint64) ([]uint64, error) {
 		b.BeaconState,
 		indices,
 		seed,
-		clparams.PtcSize,
+		b.BeaconConfig().PtcSize,
 		false,
 	)
 	if err != nil {
@@ -603,7 +603,7 @@ func (b *CachingBeaconState) InitializePtcWindow() error {
 	slotsPerEpoch := cfg.SlotsPerEpoch
 	totalSlots := (2 + cfg.MinSeedLookahead) * slotsPerEpoch
 
-	ptcWindow := solid.NewUint64VectorOfVectors(int(totalSlots), int(clparams.PtcSize))
+	ptcWindow := solid.NewUint64VectorOfVectors(int(totalSlots), int(cfg.PtcSize))
 
 	// First SLOTS_PER_EPOCH entries (previous epoch) remain as zero vectors (already initialized).
 
@@ -618,7 +618,7 @@ func (b *CachingBeaconState) InitializePtcWindow() error {
 			if err != nil {
 				return fmt.Errorf("InitializePtcWindow: failed to compute PTC for slot %d: %w", slot, err)
 			}
-			vec := solid.NewUint64VectorSSZ(int(clparams.PtcSize))
+			vec := solid.NewUint64VectorSSZ(int(cfg.PtcSize))
 			for j, idx := range ptc {
 				vec.Set(j, idx)
 			}

@@ -308,6 +308,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	f.updateProposerBoostRoot(block.Block, common.Hash(blockRoot))
 
 	// [New in Gloas:EIP7732] GLOAS-specific on_block logic (post state transition)
+	var appliedEnvelope *cltypes.ExecutionPayloadEnvelope
 	if blockVersion >= clparams.GloasVersion {
 		// Initialize payload timeliness and data availability votes for this block
 		f.payloadTimelinessVote.Store(common.Hash(blockRoot), [clparams.PtcSize]bool{})
@@ -318,6 +319,27 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		// for fork choice at the chain tip, not for historical blocks.
 		if block.Block.Body.PayloadAttestations != nil && newPayload {
 			f.notifyPtcMessages(lastProcessedState, block.Block.Body.PayloadAttestations)
+		}
+
+		// [New in Gloas:EIP7732] Check if there's a pending envelope waiting for this block.
+		// This handles the case where envelope arrives before the block via gossip.
+		// IMPORTANT: must run BEFORE ProcessJustificationBitsAndFinality below, which
+		// temporarily mutates the state for unrealized justification. The envelope's
+		// ProcessExecutionPayloadEnvelope spec check requires state.HashSSZ() to match
+		// the block's state_root, and the mutation+restoration cycle can cause the
+		// incremental hash cache to diverge.
+		if pending, ok := f.pendingEnvelopes.Get(common.Hash(blockRoot)); ok {
+			f.pendingEnvelopes.Remove(common.Hash(blockRoot))
+			log.Debug("OnBlock: processing pending envelope", "blockRoot", common.Hash(blockRoot))
+			// Always validate payload with EL for pending envelopes, regardless of the caller's newPayload flag.
+			// During forward sync newPayload is false, but the envelope still needs to reach the EL;
+			// otherwise the EL never learns about this block and the chain stalls.
+			applied, applyErr := f.applyEnvelopeLocked(ctx, pending, checkDataAvaiability, true)
+			if applyErr != nil {
+				log.Warn("OnBlock: failed to process pending envelope", "blockRoot", common.Hash(blockRoot), "err", applyErr)
+			} else if applied {
+				appliedEnvelope = pending.Message
+			}
 		}
 	}
 	if lastProcessedState.Slot()%f.beaconCfg.SlotsPerEpoch == 0 {
@@ -402,29 +424,6 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			// update the custody requirement whenever we see a new block
 			custodyRequirement := state.GetValidatorsCustodyRequirement(lastProcessedState, connectedValidators)
 			f.peerDas.UpdateValidatorsCustody(custodyRequirement)
-		}
-	}
-
-	// [New in Gloas:EIP7732] Check if there's a pending envelope waiting for this block.
-	// This handles the case where envelope arrives before the block via gossip.
-	// Process the envelope while still holding f.mu to avoid a TOCTOU race where
-	// another goroutine could modify fork choice state between unlock and re-lock.
-	// The DB index write is deferred until after the lock is released to avoid
-	// deadlock with postForkchoiceOperations (which holds MDBX tx then needs f.mu.RLock).
-	var appliedEnvelope *cltypes.ExecutionPayloadEnvelope
-	if blockVersion >= clparams.GloasVersion {
-		if pending, ok := f.pendingEnvelopes.Get(common.Hash(blockRoot)); ok {
-			f.pendingEnvelopes.Remove(common.Hash(blockRoot))
-			log.Debug("OnBlock: processing pending envelope", "blockRoot", common.Hash(blockRoot))
-			// Always validate payload with EL for pending envelopes, regardless of the caller's newPayload flag.
-			// During forward sync newPayload is false, but the envelope still needs to reach the EL;
-			// otherwise the EL never learns about this block and the chain stalls.
-			applied, applyErr := f.applyEnvelopeLocked(ctx, pending, checkDataAvaiability, true)
-			if applyErr != nil {
-				log.Warn("OnBlock: failed to process pending envelope", "blockRoot", common.Hash(blockRoot), "err", applyErr)
-			} else if applied {
-				appliedEnvelope = pending.Message
-			}
 		}
 	}
 

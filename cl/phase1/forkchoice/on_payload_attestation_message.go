@@ -80,9 +80,14 @@ func (f *ForkChoiceStore) OnPayloadAttestationMessage(
 
 	// Verify the signature and check that it's for the current slot if coming from wire
 	if !isFromBlock {
-		// [IGNORE] Check that the attestation is for the current slot
-		if data.Slot != f.Slot() {
-			return fmt.Errorf("%w: attestation slot %d is not current slot %d", ErrIgnore, data.Slot, f.Slot())
+		// [IGNORE] Check that the attestation is for the current slot.
+		// Use ethClock.GetCurrentSlot() (wall-clock based) instead of f.Slot()
+		// (forkchoice-store time based) because f.Slot() depends on f.time which
+		// is only updated by OnTick and can be stale or uninitialized, causing
+		// uint64 underflow and an absurdly large slot number.
+		currentSlot := f.ethClock.GetCurrentSlot()
+		if data.Slot != currentSlot {
+			return fmt.Errorf("%w: attestation slot %d is not current slot %d", ErrIgnore, data.Slot, currentSlot)
 		}
 		// [REJECT] Verify the signature
 		indexedAttestation := &cltypes.IndexedPayloadAttestation{

@@ -39,9 +39,18 @@ const (
 	PayloadStatusPending PayloadStatus = 2 // PAYLOAD_STATUS_PENDING per EIP-7732 fork-choice spec
 )
 
-// PayloadAttestationSSZSize is the fixed SSZ encoding size of PayloadAttestation:
+// PayloadAttestationSSZSize is the fixed SSZ encoding size of PayloadAttestation
+// using the mainnet PTC_SIZE (512). For preset-aware code, use
+// PayloadAttestationSSZSizeWithPtcSize(cfg.PtcSize) instead.
+//
 // AggregationBits (PtcSize/8) + PayloadAttestationData (Hash + uint64 + bool + bool) + Signature (Bytes96)
-const PayloadAttestationSSZSize = int(clparams.PtcSize/8) + length.Hash + 8 + 1 + 1 + length.Bytes96
+const PayloadAttestationSSZSize = int(clparams.MaxPtcSize/8) + length.Hash + 8 + 1 + 1 + length.Bytes96
+
+// PayloadAttestationSSZSizeWithPtcSize returns the fixed SSZ encoding size of a
+// PayloadAttestation for a given PTC_SIZE preset value.
+func PayloadAttestationSSZSizeWithPtcSize(ptcSize uint64) int {
+	return int(ptcSize/8) + length.Hash + 8 + 1 + 1 + length.Bytes96
+}
 
 // PayloadAttestationData represents attestation data for a payload.
 type PayloadAttestationData struct {
@@ -105,7 +114,7 @@ func (p *PayloadAttestation) HashSSZ() ([32]byte, error) {
 
 func (p *PayloadAttestation) EncodingSizeSSZ() int {
 	if p.AggregationBits == nil {
-		p.AggregationBits = solid.NewBitVector(int(clparams.PtcSize))
+		p.AggregationBits = solid.NewBitVector(int(clparams.MaxPtcSize))
 	}
 	if p.Data == nil {
 		p.Data = new(PayloadAttestationData)
@@ -122,14 +131,26 @@ func (p *PayloadAttestation) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (p *PayloadAttestation) DecodeSSZ(buf []byte, version int) error {
-	p.AggregationBits = solid.NewBitVector(int(clparams.PtcSize))
+	// Infer PTC_SIZE from the buffer length. The fixed structure is:
+	//   AggregationBits (PTC_SIZE/8) + PayloadAttestationData (42) + Signature (96)
+	// so PTC_SIZE = (len(buf) - 42 - 96) * 8
+	dataAndSigSize := length.Hash + 8 + 1 + 1 + length.Bytes96 // 42 + 96 = 138
+	ptcSize := (len(buf) - dataAndSigSize) * 8
+	if ptcSize <= 0 {
+		ptcSize = int(clparams.MaxPtcSize) // fallback
+	}
+	p.AggregationBits = solid.NewBitVector(ptcSize)
 	p.Data = new(PayloadAttestationData)
 	return ssz2.UnmarshalSSZ(buf, version, p.AggregationBits, p.Data, p.Signature[:])
 }
 
 func (p *PayloadAttestation) Clone() clonable.Clonable {
+	ptcSize := int(clparams.MaxPtcSize)
+	if p.AggregationBits != nil {
+		ptcSize = p.AggregationBits.BitCap()
+	}
 	return &PayloadAttestation{
-		AggregationBits: solid.NewBitVector(int(clparams.PtcSize)),
+		AggregationBits: solid.NewBitVector(ptcSize),
 		Data:            new(PayloadAttestationData),
 	}
 }
@@ -179,7 +200,7 @@ type IndexedPayloadAttestation struct {
 
 func NewIndexedPayloadAttestation() *IndexedPayloadAttestation {
 	return &IndexedPayloadAttestation{
-		AttestingIndices: solid.NewRawUint64List(int(clparams.PtcSize), []uint64{}),
+		AttestingIndices: solid.NewRawUint64List(int(clparams.MaxPtcSize), []uint64{}),
 		Data:             &PayloadAttestationData{},
 	}
 }
@@ -193,7 +214,7 @@ func (i *IndexedPayloadAttestation) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (i *IndexedPayloadAttestation) DecodeSSZ(buf []byte, version int) error {
-	i.AttestingIndices = solid.NewRawUint64List(int(clparams.PtcSize), nil)
+	i.AttestingIndices = solid.NewRawUint64List(int(clparams.MaxPtcSize), nil)
 	i.Data = new(PayloadAttestationData)
 	return ssz2.UnmarshalSSZ(buf, version, i.AttestingIndices, i.Data, i.Signature[:])
 }
@@ -208,7 +229,7 @@ func (i *IndexedPayloadAttestation) HashSSZ() ([32]byte, error) {
 }
 
 func (i *IndexedPayloadAttestation) Clone() clonable.Clonable {
-	newIndices := solid.NewRawUint64List(int(clparams.PtcSize), make([]uint64, i.AttestingIndices.Length()))
+	newIndices := solid.NewRawUint64List(int(clparams.MaxPtcSize), make([]uint64, i.AttestingIndices.Length()))
 	for idx := 0; idx < i.AttestingIndices.Length(); idx++ {
 		newIndices.Set(idx, i.AttestingIndices.Get(idx))
 	}
@@ -357,10 +378,10 @@ func (s *SignedExecutionPayloadBid) Clone() clonable.Clonable {
 
 // ExecutionPayloadEnvelope represents an execution payload envelope with associated metadata.
 type ExecutionPayloadEnvelope struct {
-	Payload           *Eth1Block         `json:"payload"`
+	Payload           *Eth1Block        `json:"payload"`
 	ExecutionRequests *ExecutionRequests `json:"execution_requests"`
-	BuilderIndex      uint64             `json:"builder_index,string"`
-	BeaconBlockRoot   common.Hash        `json:"beacon_block_root"`
+	BuilderIndex      uint64            `json:"builder_index,string"`
+	BeaconBlockRoot   common.Hash       `json:"beacon_block_root"`
 
 	beaconCfg *clparams.BeaconChainConfig
 }
