@@ -2,7 +2,7 @@
 set -e # Enable exit on error
 
 # Sanity check for mandatory parameters
-if [ -z "$1" ]; then
+if [ -z "$1" ] || [ -z "$2" ]; then
   echo "Usage: $0 <CHAIN> <RPC_VERSION> [DISABLED_TESTS] [WORKSPACE] [RESULT_DIR] [TESTS_TYPE] [REFERENCE_HOST] [COMPARE_ERROR_MESSAGE] [DUMP_RESPONSE]"
   echo
   echo "  CHAIN:                 The chain identifier (possible values: mainnet, gnosis, polygon)"
@@ -15,10 +15,6 @@ if [ -z "$1" ]; then
   echo "  COMPARE_ERROR_MESSAGE: Verify the error message (optional, default: empty, possible values: do-not-compare-error-message)"
   echo "  DUMP_RESPONSE:         Dump each test response (optional, default: empty, possible values: always-dump-response)"
   echo
-  exit 1
-fi
-if [ -z "$2" ]; then
-  echo "Error: RPC_VERSION is not set — export RPC_VERSION=<tag> before running (e.g. vX.Y.Z)"
   exit 1
 fi
 
