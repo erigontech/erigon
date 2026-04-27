@@ -231,7 +231,13 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	}
 	defer tx.Rollback()
 
-	if number != rpc.PendingBlockNumber {
+	var b *types.Block
+	if number == rpc.PendingBlockNumber {
+		b, err = api.blockByNumber(ctx, number, tx)
+		if err != nil {
+			return nil, err
+		}
+	} else {
 		blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
 		if err != nil {
 			if errors.As(err, &rpc.BlockNotFoundErr{}) {
@@ -239,18 +245,16 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 			}
 			return nil, err
 		}
-		err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
-		if err != nil {
+		if err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum); err != nil {
 			return nil, err
 		}
-	}
-
-	b, err := api.blockByNumber(ctx, number, tx)
-	if err != nil {
-		if errors.As(err, &rpc.BlockNotFoundErr{}) {
-			return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
+		b, err = api.blockByNumber(ctx, rpc.BlockNumber(blockNum), tx)
+		if err != nil {
+			if errors.As(err, &rpc.BlockNotFoundErr{}) {
+				return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
+			}
+			return nil, err
 		}
-		return nil, err
 	}
 	if b == nil {
 		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645

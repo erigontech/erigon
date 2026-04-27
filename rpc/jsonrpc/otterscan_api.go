@@ -362,7 +362,13 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 	}
 	defer tx.Rollback()
 
-	if number != rpc.PendingBlockNumber {
+	var b *types.Block
+	if number == rpc.PendingBlockNumber {
+		b, _, err = api.getBlockWithSenders(ctx, number, tx)
+		if err != nil {
+			return nil, err
+		}
+	} else {
 		blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
 		if err != nil {
 			if errors.As(err, &rpc.BlockNotFoundErr{}) {
@@ -370,15 +376,13 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 			}
 			return nil, err
 		}
-		err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+		if err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum); err != nil {
+			return nil, err
+		}
+		b, _, err = api.getBlockWithSenders(ctx, rpc.BlockNumber(blockNum), tx)
 		if err != nil {
 			return nil, err
 		}
-	}
-
-	b, _, err := api.getBlockWithSenders(ctx, number, tx)
-	if err != nil {
-		return nil, err
 	}
 	if b == nil {
 		return nil, nil
