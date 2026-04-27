@@ -178,12 +178,13 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 			}
 
 			if d.balance != nil || d.nonce != nil || d.incarnation != nil || d.codeHash != nil || d.code != nil {
-				// When blockCache is present (parallel path), read the current
-				// base from the cache/domain, then overlay only fields present
-				// in the writes. LightCollector emits all 4 account fields,
-				// but some may carry stale values from speculative execution.
-				// Reading the base ensures unmodified fields keep their correct
-				// accumulated values.
+				// LightCollector emits only fields that changed vs the per-TX
+				// `original` snapshot, so missing fields here mean "unchanged"
+				// — we must read the current base (from blockCache when present,
+				// else directly from the domain) and overlay only the present
+				// fields. Without this, an unchanged field would silently reset
+				// to zero. See TestLightCollectorNoncePreservation* for the
+				// scenario this defends against.
 				acc := accounts.NewAccount()
 				if blockCache != nil {
 					if enc, ok := blockCache.GetCurrentAccount(addr); ok && len(enc) > 0 {
@@ -191,6 +192,8 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 					} else if enc0, _, err := domains.GetLatest(kv.AccountsDomain, roTx, address[:]); err == nil && len(enc0) > 0 {
 						_ = accounts.DeserialiseV3(&acc, enc0)
 					}
+				} else if enc0, _, err := domains.GetLatest(kv.AccountsDomain, roTx, address[:]); err == nil && len(enc0) > 0 {
+					_ = accounts.DeserialiseV3(&acc, enc0)
 				}
 				if d.balance != nil {
 					acc.Balance = *d.balance
@@ -699,16 +702,24 @@ func (c *LightCollector) UpdateAccountData(address accounts.Address, original, a
 		c.writes = append(c.writes, &VersionedWrite{Address: address, Path: SelfDestructPath, Val: true})
 	}
 
-	// Emit ALL fields. In the parallel executor, the account values come
-	// from the worker's IBS (via versionMap reads). These may contain stale
-	// values for accounts loaded but not modified by this TX.
-	// TODO: filter to only emit fields the TX actually modified.
-	c.writes = append(c.writes,
-		&VersionedWrite{Address: address, Path: BalancePath, Val: accountCopy.Balance},
-		&VersionedWrite{Address: address, Path: NoncePath, Val: accountCopy.Nonce},
-		&VersionedWrite{Address: address, Path: IncarnationPath, Val: accountCopy.Incarnation},
-		&VersionedWrite{Address: address, Path: CodeHashPath, Val: accountCopy.CodeHash},
-	)
+	// Only emit fields that changed vs `original`. In the parallel executor
+	// `original` comes from the worker's block-origin snapshot (pre-block
+	// values), so emitting an unchanged field would carry a stale block-
+	// origin value that overwrites a later TX's update on apply (e.g. a
+	// balance-only transfer overwriting an earlier TX's nonce increment).
+	// See TestLightCollectorNoncePreservation* for the exact scenario.
+	if !accountCopy.Balance.Eq(&original.Balance) {
+		c.writes = append(c.writes, &VersionedWrite{Address: address, Path: BalancePath, Val: accountCopy.Balance})
+	}
+	if accountCopy.Nonce != original.Nonce {
+		c.writes = append(c.writes, &VersionedWrite{Address: address, Path: NoncePath, Val: accountCopy.Nonce})
+	}
+	if accountCopy.Incarnation != original.Incarnation {
+		c.writes = append(c.writes, &VersionedWrite{Address: address, Path: IncarnationPath, Val: accountCopy.Incarnation})
+	}
+	if accountCopy.CodeHash != original.CodeHash {
+		c.writes = append(c.writes, &VersionedWrite{Address: address, Path: CodeHashPath, Val: accountCopy.CodeHash})
+	}
 	return nil
 }
 
