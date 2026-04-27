@@ -116,6 +116,17 @@ func (iit *InvertedIndexRoTx) FirstStepNotInFiles() kv.Step {
 	return kv.Step(iit.files.EndTxNum() / iit.stepSize)
 }
 
+// calculateMergeStartTxNum returns the txNum where the maximally possible
+// merge ending at endTxNum would start. The rightmost set bit of
+// endTxNum/stepSize gives the largest power-of-two step range aligned to
+// that step; maxSpan caps it.
+func calculateMergeStartTxNum(endTxNum, stepSize, maxSpan uint64) uint64 {
+	endStep := kv.Step(endTxNum / stepSize)
+	spanStep := endStep & -endStep
+	span := min(spanStep.ToTxNum(stepSize), maxSpan)
+	return endTxNum - span
+}
+
 // findMergeRange
 // make merge determenistic across nodes: even if Node has much small files - do earliest-first merges
 // As any other methods of DomainRoTx - it can't see any files overlaps or garbage
@@ -133,10 +144,7 @@ func (dt *DomainRoTx) findMergeRange(maxEndTxNum, domainMaxSpan, maxSpan uint64)
 		if item.endTxNum > maxEndTxNum {
 			break
 		}
-		endStep := item.endTxNum / dt.stepSize
-		spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
-		span := min(spanStep*dt.stepSize, domainMaxSpan)
-		fromTxNum := item.endTxNum - span
+		fromTxNum := calculateMergeStartTxNum(item.endTxNum, dt.stepSize, domainMaxSpan)
 		if fromTxNum >= item.startTxNum {
 			continue
 		}
@@ -172,10 +180,7 @@ func (ht *HistoryRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges
 		if item.endTxNum > maxEndTxNum {
 			continue
 		}
-		endStep := item.endTxNum / ht.stepSize
-		spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
-		span := min(spanStep*ht.stepSize, maxSpan)
-		startTxNum := item.endTxNum - span
+		startTxNum := calculateMergeStartTxNum(item.endTxNum, ht.stepSize, maxSpan)
 
 		foundSuperSet := r.history.from == item.startTxNum && item.endTxNum >= r.history.to
 		if foundSuperSet {
@@ -225,10 +230,7 @@ func (iit *InvertedIndexRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Merge
 		if item.endTxNum > maxEndTxNum {
 			continue
 		}
-		endStep := item.endTxNum / iit.stepSize
-		spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
-		span := min(spanStep*iit.stepSize, maxSpan)
-		start := item.endTxNum - span
+		start := calculateMergeStartTxNum(item.endTxNum, iit.stepSize, maxSpan)
 		foundSuperSet := startTxNum == item.startTxNum && item.endTxNum >= endTxNum
 		if foundSuperSet {
 			minFound = false
