@@ -1141,8 +1141,6 @@ func blocksIO(db kv.RoDB, logger log.Logger) (services.FullBlockReader, *blockio
 	return _blockReaderSingleton, _blockWriterSingleton
 }
 
-const blockBufferSize = 128
-
 func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.BuilderConfig, logger log.Logger) (
 	services.BlockRetire, rules.Engine, *vm.Config, *stagedsync.Sync,
 ) {
@@ -1212,7 +1210,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.
 		nil,
 		ethconfig.Defaults.Sync,
 		blockReader,
-		blockBufferSize,
+		sentry_multi_client.DefaultBlockBufferSize,
 		statusDataProvider,
 		false,
 		maxBlockBroadcastPeers,

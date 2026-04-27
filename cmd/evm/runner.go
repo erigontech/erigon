@@ -152,11 +152,11 @@ func runCmd(ctx *cli.Context) error {
 		log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(ctx.Int(VerbosityFlag.Name)), log.StderrHandler))
 	}
 	logconfig := &logger.LogConfig{
-		DisableMemory:     ctx.Bool(DisableMemoryFlag.Name),
-		DisableStack:      ctx.Bool(DisableStackFlag.Name),
-		DisableStorage:    ctx.Bool(DisableStorageFlag.Name),
-		DisableReturnData: ctx.Bool(DisableReturnDataFlag.Name),
-		Debug:             ctx.Bool(DebugFlag.Name),
+		EnableMemory:     !ctx.Bool(DisableMemoryFlag.Name),
+		DisableStack:     ctx.Bool(DisableStackFlag.Name),
+		DisableStorage:   ctx.Bool(DisableStorageFlag.Name),
+		EnableReturnData: !ctx.Bool(DisableReturnDataFlag.Name),
+		Debug:            ctx.Bool(DebugFlag.Name),
 	}
 
 	var (
@@ -316,7 +316,7 @@ func runCmd(ctx *cli.Context) error {
 		input = append(code, input...)
 		execFunc = func() ([]byte, uint64, error) {
 			output, _, gasLeft, err := runtime.Create(input, &runtimeConfig, 0)
-			return output, gasLeft.Total(), err
+			return output, initialGas - gasLeft.Total(), err
 		}
 	} else {
 		if len(code) > 0 {

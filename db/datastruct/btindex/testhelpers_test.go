@@ -1,7 +1,6 @@
 package btindex
 
 import (
-	"context"
 	"encoding/binary"
 	"fmt"
 	randOld "math/rand"
@@ -68,7 +67,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	values := make([]byte, valueSize)
 
 	dataPath := filepath.Join(tmp, fmt.Sprintf("%dk.kv", keyCount/1000))
-	comp, err := seg.NewCompressor(context.Background(), "cmp", dataPath, tmp, seg.DefaultCfg, log.LvlDebug, logger)
+	comp, err := seg.NewCompressor(tb.Context(), "cmp", dataPath, tmp, seg.DefaultCfg, log.LvlDebug, logger)
 	require.NoError(tb, err)
 
 	bufSize := 8 * datasize.KB

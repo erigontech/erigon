@@ -832,7 +832,7 @@ func (s *simulator) simulateCall(
 	for _, l := range logs {
 		rpcLog := &types.RPCLog{
 			Log:            *l,
-			BlockTimestamp: header.Time,
+			BlockTimestamp: hexutil.Uint64(header.Time),
 		}
 		callResult.Logs = append(callResult.Logs, rpcLog)
 	}

@@ -525,11 +525,11 @@ func (tab *Table) addIP(b *bucket, ip netip.Addr) bool {
 		return true
 	}
 	if !tab.ips.AddAddr(ip) {
-		tab.log.Debug("[p2p] IP exceeds table limit", "ip", ip)
+		tab.log.Trace("[p2p] IP exceeds table limit", "ip", ip)
 		return false
 	}
 	if !b.ips.AddAddr(ip) {
-		tab.log.Debug("[p2p] IP exceeds bucket limit", "ip", ip)
+		tab.log.Trace("[p2p] IP exceeds bucket limit", "ip", ip)
 		tab.ips.RemoveAddr(ip)
 		return false
 	}
@@ -641,7 +641,7 @@ func (tab *Table) deleteInBucket(b *bucket, id enode.ID) *tableNode {
 
 	// Add replacement.
 	if len(b.replacements) == 0 {
-		tab.log.Debug("[p2p] Removed dead node", "b", b.index, "id", n.ID(), "ip", n.IPAddr())
+		tab.log.Trace("[p2p] Removed dead node", "b", b.index, "id", n.ID(), "ip", n.IPAddr())
 		return nil
 	}
 	rindex := tab.rand.Intn(len(b.replacements))
@@ -649,7 +649,7 @@ func (tab *Table) deleteInBucket(b *bucket, id enode.ID) *tableNode {
 	b.replacements = slices.Delete(b.replacements, rindex, rindex+1)
 	b.entries = append(b.entries, rep)
 	tab.nodeAdded(b, rep)
-	tab.log.Debug("[p2p] Replaced dead node", "b", b.index, "id", n.ID(), "ip", n.IPAddr(), "r", rep.ID(), "rip", rep.IPAddr())
+	tab.log.Trace("[p2p] Replaced dead node", "b", b.index, "id", n.ID(), "ip", n.IPAddr(), "r", rep.ID(), "rip", rep.IPAddr())
 	return rep
 }
 

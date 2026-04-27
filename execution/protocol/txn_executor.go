@@ -311,6 +311,10 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		}
 	}
 
+	if st.gp != nil && st.msg.Gas() > st.gp.Gas() {
+		return ErrGasLimitReached
+	}
+
 	// Make sure the transaction feeCap is greater than the block's baseFee.
 	if rules.IsLondon {
 		// Skip the checks if gas fields are zero and baseFee was explicitly disabled (eth_call)
@@ -839,6 +843,8 @@ func (st *TxnExecutor) calcIntrinsicGas(contractCreation bool, auths []types.Aut
 		IsEIP2028:          rules.IsIstanbul,
 		IsEIP3860:          vmConfig.HasEip3860(rules),
 		IsEIP7623:          rules.IsPrague,
+		IsEIP7976:          rules.IsAmsterdam,
+		IsEIP7981:          rules.IsAmsterdam,
 		IsEIP8037:          rules.IsAmsterdam,
 	})
 }

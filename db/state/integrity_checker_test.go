@@ -1,7 +1,6 @@
 package state
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
@@ -173,7 +172,7 @@ func getPopulatedCommitmentFilesItem(t *testing.T, dirs datadir.Dirs, startTxNum
 	t.Helper()
 
 	base := fmt.Sprintf(dirs.Snap+"/commitment.%d-%d", startTxNum, endTxNum)
-	comp, err := seg.NewCompressor(context.Background(), "", base+"data", dirs.Tmp, seg.DefaultCfg, log.LvlInfo, logger)
+	comp, err := seg.NewCompressor(t.Context(), "", base+"data", dirs.Tmp, seg.DefaultCfg, log.LvlInfo, logger)
 	require.NoError(t, err)
 	require.NotNil(t, comp)
 	defer comp.Close()
@@ -201,7 +200,7 @@ func getPopulatedCommitmentFilesItem(t *testing.T, dirs datadir.Dirs, startTxNum
 		require.NotNil(t, index)
 		defer index.Close()
 
-		require.NoError(t, index.Build(context.Background()))
+		require.NoError(t, index.Build(t.Context()))
 
 		idx0 = recsplit.MustOpen(base + "index")
 		t.Cleanup(idx0.Close)
