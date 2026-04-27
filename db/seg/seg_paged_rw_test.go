@@ -18,7 +18,6 @@ package seg
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"fmt"
 	"hash/crc32"
@@ -42,7 +41,7 @@ func prepareLoremDictOnPagedWriter(t *testing.T, pageSize int, pageCompression b
 	cfg := DefaultCfg.WithValuesOnCompressedPage(pageSize)
 	cfg.MinPatternScore = 1
 	cfg.Workers = 1
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	require.NoError(err)
 	defer c.Close()
 
@@ -485,7 +484,7 @@ func prepareKVUncompressedKeysCompressedVals(t *testing.T, keyLen int, numPairs 
 	cfg := DefaultCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	require.NoError(t, err)
 
 	require.GreaterOrEqual(t, keyLen, 8, "keyLen must be >= 8 for binary.BigEndian.PutUint64")

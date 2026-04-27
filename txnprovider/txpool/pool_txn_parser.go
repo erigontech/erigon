@@ -26,7 +26,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -394,18 +393,28 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	slot.Nonce = txn.GetNonce()
 
 	// Authorization signers for SetCode txns (EIP-7702).
+	// Per EIP-7702, invalid auth tuples (unrecoverable signature, out-of-range
+	// chainID, etc.) do not invalidate the enclosing transaction — at execution
+	// time the spec dictates that "if any step fails for a tuple, processing
+	// continues to the next one". We therefore skip bad tuples here instead of
+	// returning a parse error: failing the parse would (a) drop sibling txns
+	// in the same Transactions/PooledTransactions packet and (b) censor txns
+	// that other clients accept. Only successfully-recovered authorities are
+	// indexed in AuthAndNonces (used for pool-replacement bookkeeping); the
+	// original auth-list length is still available via Txn.GetAuthorizations()
+	// for gas accounting (the sender pays for every tuple regardless).
 	if txn.Type() == types.SetCodeTxType {
 		auths := txn.GetAuthorizations()
 		slot.AuthAndNonces = make([]AuthAndNonce, 0, len(auths))
 		for _, auth := range auths {
 			if !auth.ChainID.IsUint64() {
-				return 0, fmt.Errorf("%w: authorization chainId is too big: %s", ErrParseTxn, &auth.ChainID)
+				continue
 			}
 			authCopy := auth
 			ctx.authBuf.Reset()
 			authority, err := authCopy.RecoverSigner(&ctx.authBuf, ctx.authHashBuf[:])
 			if err != nil {
-				return 0, fmt.Errorf("%w: recover authorization signer: %s stack: %s", ErrParseTxn, err, dbg.Stack()) //nolint
+				continue
 			}
 			slot.AuthAndNonces = append(slot.AuthAndNonces, AuthAndNonce{*authority, auth.Nonce})
 		}
@@ -461,7 +470,7 @@ type TxnSlot struct {
 	Size     uint32            // Cached size of the RLP payload (persists after Rlp is set to nil)
 
 	BlobBundles   []PoolBlobBundle // Zero-copy blob data for EIP-4844 wrapped blob txns
-	AuthAndNonces []AuthAndNonce   // Indexed authorization signers + nonces for EIP-7702 txns (type-4)
+	AuthAndNonces []AuthAndNonce   // Recovered authority + nonce for each valid EIP-7702 auth tuple. Tuples with unrecoverable signatures are skipped (per the EIP, they don't invalidate the txn). For total auth-list length (gas billing) use Txn.GetAuthorizations().
 }
 
 // Accessor methods that delegate to the stored Transaction.

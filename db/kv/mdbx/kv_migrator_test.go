@@ -19,7 +19,6 @@
 package mdbx_test
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -117,7 +116,7 @@ func TestReadOnlyMode(t *testing.T) {
 	}).MustOpen()
 	defer db2.Close()
 
-	tx, err := db2.BeginRo(context.Background())
+	tx, err := db2.BeginRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
