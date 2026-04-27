@@ -9,9 +9,15 @@ const (
 	BuilderIndexSelfBuild              = math.MaxUint64
 	BuilderPaymentThresholdNumerator   = uint64(6)
 	BuilderPaymentThresholdDenominator = uint64(10)
-	PtcSize                            = uint64(512)
-	PayloadTimelyThreshold             = PtcSize / 2 // 256
-	DataAvailabilityTimelyThreshold    = PtcSize / 2 // 256
+	// MaxPtcSize is the largest PTC_SIZE across all presets (mainnet=512).
+	// It is used ONLY for fixed-size array declarations in the forkchoice
+	// vote tracking. SSZ encoding/decoding and other logic MUST use the
+	// configurable BeaconChainConfig.PtcSize instead.
+	MaxPtcSize = uint64(512)
+
+	// Deprecated: kept as an alias for MaxPtcSize for backward compatibility.
+	// New code should use BeaconChainConfig.PtcSize for the runtime value.
+	PtcSize = MaxPtcSize
 
 	AttestationTimelinessIndex  = 0
 	PtcTimelinessIndex          = 1

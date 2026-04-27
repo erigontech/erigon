@@ -462,8 +462,11 @@ func applyWithdrawals(s abstract.BeaconState, withdrawals *solid.ListSSZ[*cltype
 				return fmt.Errorf("applyWithdrawals: builder_index %d out of range (builders length %d)", builderIndex, builders.Len())
 			}
 			builder := builders.Get(int(builderIndex))
-			builder.Balance -= min(w.Amount, builder.Balance)
-			builders.Set(int(builderIndex), builder)
+			// Copy-on-write: create a new Builder to avoid mutating a shared pointer
+			// (ShallowCopy shares *Builder pointers across state copies).
+			newBuilder := *builder
+			newBuilder.Balance -= min(w.Amount, newBuilder.Balance)
+			builders.Set(int(builderIndex), &newBuilder)
 			buildersModified = true
 			return nil
 		}
@@ -756,9 +759,22 @@ func (I *impl) ProcessExecutionPayloadEnvelope(s abstract.BeaconState, signedEnv
 	// Compute the block root locally without mutating state.
 	// Per spec: header = copy(state.latest_block_header); header.state_root = hash_tree_root(state)
 	latestBlockHeader := s.LatestBlockHeader()
-	stateRoot, err := s.HashSSZ()
-	if err != nil {
-		return fmt.Errorf("ProcessExecutionPayloadEnvelope: failed to compute state root: %w", err)
+	// Prefer the previously-saved state root (set by TransitionState after VerifyTransition)
+	// over recomputing HashSSZ(). The incremental hash cache can diverge when the state is
+	// used as a shared reference (e.g. fork-choice operations between AddChainSegment and
+	// pending-envelope processing). PreviousStateRoot() is authoritative because
+	// VerifyTransition already confirmed it equals the block's state_root.
+	stateRoot := s.PreviousStateRoot()
+	if stateRoot != (common.Hash{}) {
+		// PreviousStateRoot() is consume-once; put it back so the next
+		// transitionSlot() call can use it instead of falling back to HashSSZ().
+		s.SetPreviousStateRoot(stateRoot)
+	} else {
+		var err error
+		stateRoot, err = s.HashSSZ()
+		if err != nil {
+			return fmt.Errorf("ProcessExecutionPayloadEnvelope: failed to compute state root: %w", err)
+		}
 	}
 	latestBlockHeader.Root = stateRoot
 	headerRoot, err := latestBlockHeader.HashSSZ()
@@ -1601,11 +1617,12 @@ func (I *impl) ProcessSlots(s abstract.BeaconState, slot uint64) error {
 }
 
 func (I *impl) ProcessDepositRequest(s abstract.BeaconState, depositRequest *solid.DepositRequest) error {
-	// [Pre-Gloas] Set deposit request start index on first deposit request
-	if s.Version() < clparams.GloasVersion {
-		if s.GetDepositRequestsStartIndex() == s.BeaconConfig().UnsetDepositRequestsStartIndex {
-			s.SetDepositRequestsStartIndex(depositRequest.Index)
-		}
+	// Set deposit request start index on first deposit request.
+	// This applies to all versions (Electra through GLOAS) so that
+	// ProcessPendingDeposits can distinguish bridge deposits from
+	// execution-layer deposit requests.
+	if s.GetDepositRequestsStartIndex() == s.BeaconConfig().UnsetDepositRequestsStartIndex {
+		s.SetDepositRequestsStartIndex(depositRequest.Index)
 	}
 
 	// [New in Gloas:EIP7732] Route builder deposits immediately
@@ -1645,10 +1662,13 @@ func (I *impl) ProcessWithdrawalRequest(s abstract.BeaconState, req *solid.Withd
 	if uint64(s.GetPendingPartialWithdrawals().Len()) >= s.BeaconConfig().PendingPartialWithdrawalsLimit && !isFullExitRequest {
 		return nil
 	}
-	// Verify pubkey exists
+	// Verify pubkey exists (check validators first, then builders)
 	vindex, exist := s.ValidatorIndexByPubkey(reqPubkey)
 	if !exist {
-		log.Warn("ProcessWithdrawalRequest: validator index not found", "pubkey", common.Bytes2Hex(reqPubkey[:]))
+		// [New in Gloas:EIP7732] Check if the pubkey belongs to a builder
+		if s.Version() >= clparams.GloasVersion {
+			return I.processBuilderWithdrawalRequest(s, req)
+		}
 		return nil
 	}
 	validator, err := s.ValidatorForValidatorIndex(int(vindex))
@@ -1703,6 +1723,55 @@ func (I *impl) ProcessWithdrawalRequest(s abstract.BeaconState, req *solid.Withd
 			WithdrawableEpoch: withdrawableEpoch,
 		})
 	}
+	return nil
+}
+
+// processBuilderWithdrawalRequest handles EL-triggered withdrawal requests for builders.
+// [New in Gloas:EIP7732]
+// For full exit requests (amount == 0): initiates builder exit if active and no pending withdrawals.
+// For partial withdrawal requests (amount > 0): no-op for builders.
+func (I *impl) processBuilderWithdrawalRequest(s abstract.BeaconState, req *solid.WithdrawalRequest) error {
+	builders := s.GetBuilders()
+	if builders == nil {
+		return nil
+	}
+
+	// Find builder by pubkey
+	builderIndex := -1
+	for i := 0; i < builders.Len(); i++ {
+		if builders.Get(i).Pubkey == req.ValidatorPubKey {
+			builderIndex = i
+			break
+		}
+	}
+	if builderIndex < 0 {
+		return nil
+	}
+
+	builder := builders.Get(builderIndex)
+
+	// Verify source address matches builder's execution address
+	if req.SourceAddress != builder.ExecutionAddress {
+		return nil
+	}
+
+	// Check builder is active
+	if !state.IsActiveBuilder(s, uint64(builderIndex)) {
+		return nil
+	}
+
+	// Only full exit requests (amount == 0) are supported for builders
+	if req.Amount != FullExitRequestAmount {
+		return nil
+	}
+
+	// Only exit builder if it has no pending withdrawals in the queue
+	pendingBalance := state.GetPendingBalanceToWithdrawForBuilder(s, uint64(builderIndex))
+	if pendingBalance > 0 {
+		return nil
+	}
+
+	s.InitiateBuilderExit(uint64(builderIndex))
 	return nil
 }
 

@@ -40,21 +40,13 @@ import (
 // reflect the pre-envelope state. Since (b) locks Root before those mutations, we must use
 // the already-stored value when present rather than recomputing HashSSZ() on a post-envelope state.
 func (b *BeaconState) BlockRoot() ([32]byte, error) {
-	var root [32]byte
-	if b.version >= clparams.GloasVersion {
-		// GLOAS: use the stored state_root if already backfilled by process_slot or
-		// ProcessExecutionPayloadEnvelope; fall back to HashSSZ() only when Root is
-		// still zero (i.e. right after process_block_header, before envelope processing).
-		root = b.latestBlockHeader.Root
-		if root == [32]byte{} {
-			var err error
-			root, err = b.HashSSZ()
-			if err != nil {
-				return [32]byte{}, err
-			}
-		}
-	} else {
-		// Pre-GLOAS: always compute the current state root (original behaviour).
+	// Use the stored state_root from latestBlockHeader when it has already been
+	// backfilled (by process_slot at the start of the next slot, or by
+	// ProcessExecutionPayloadEnvelope in GLOAS). Only fall back to computing the
+	// state root when Root is still zero (right after process_block_header sets a
+	// new header with zero state_root).
+	root := b.latestBlockHeader.Root
+	if root == [32]byte{} {
 		var err error
 		root, err = b.HashSSZ()
 		if err != nil {
@@ -154,7 +146,7 @@ func (b *BeaconState) baseOffsetSSZ() uint32 {
 		size += 4                                                                                          // builder_pending_withdrawals offset (List, variable)
 		size += 4                                                                                          // latest_execution_payload_bid offset (variable)
 		size += 4                                                                                          // payload_expected_withdrawals offset (List, variable)
-		size += uint32((2+cfg.MinSeedLookahead)*cfg.SlotsPerEpoch) * uint32(clparams.PtcSize) * 8          // ptc_window (Vector[Vector[uint64, PTC_SIZE]])
+		size += uint32((2+cfg.MinSeedLookahead)*cfg.SlotsPerEpoch) * uint32(cfg.PtcSize) * 8               // ptc_window (Vector[Vector[uint64, PTC_SIZE]])
 	}
 
 	return size
@@ -224,7 +216,7 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 		b.builderPendingWithdrawals = solid.NewStaticListSSZ[*cltypes.BuilderPendingWithdrawal](int(b.beaconConfig.BuilderPendingWithdrawalsLimit), new(cltypes.BuilderPendingWithdrawal).EncodingSizeSSZ())
 		b.latestBlockHash = common.Hash{}
 		b.payloadExpectedWithdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(b.beaconConfig.MaxWithdrawalsPerPayload), new(cltypes.Withdrawal).EncodingSizeSSZ())
-		b.ptcWindow = solid.NewUint64VectorOfVectors(int((2+b.beaconConfig.MinSeedLookahead)*b.beaconConfig.SlotsPerEpoch), int(clparams.PtcSize))
+		b.ptcWindow = solid.NewUint64VectorOfVectors(int((2+b.beaconConfig.MinSeedLookahead)*b.beaconConfig.SlotsPerEpoch), int(b.beaconConfig.PtcSize))
 	}
 	if err := ssz2.UnmarshalSSZ(buf, version, b.getSchema()...); err != nil {
 		return err

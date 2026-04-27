@@ -692,6 +692,7 @@ type BeaconChainConfig struct {
 
 	// Gloas
 	BuilderWithdrawalPrefix        ConfigByte `yaml:"-" json:"-"`
+	PtcSize                        uint64     `yaml:"PTC_SIZE" spec:"true" json:"PTC_SIZE,string"`                                                     // PtcSize is the number of validators in the Payload Timeliness Committee (preset: 512 mainnet, 2 minimal).
 	MaxPayloadAttestations         uint64     `yaml:"MAX_PAYLOAD_ATTESTATIONS" spec:"true" json:"MAX_PAYLOAD_ATTESTATIONS,string"`                     // MaxPayloadAttestations defines the maximum number of payload attestations in a block.
 	BuilderRegistryLimit           uint64     `yaml:"BUILDER_REGISTRY_LIMIT" spec:"true" json:"BUILDER_REGISTRY_LIMIT,string"`                         // BuilderRegistryLimit defines the upper bound of builders can participate in eth2.
 	BuilderPendingWithdrawalsLimit uint64     `yaml:"BUILDER_PENDING_WITHDRAWALS_LIMIT" spec:"true" json:"BUILDER_PENDING_WITHDRAWALS_LIMIT,string"`   // BuilderPendingWithdrawalsLimit defines the maximum number of pending withdrawals for builders.
@@ -1038,6 +1039,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 
 	// Gloas
 	BuilderWithdrawalPrefix:        0x03,
+	PtcSize:                        512,
 	MaxPayloadAttestations:         4,
 	BuilderRegistryLimit:           1 << 40,
 	BuilderPendingWithdrawalsLimit: 1 << 20,
@@ -1114,6 +1116,10 @@ func ApplyMinimalPreset(cfg *BeaconChainConfig) {
 
 	// Deneb preset differences
 	cfg.MaxBlobCommittmentsPerBlock = 16
+
+	// Gloas preset differences
+	cfg.PtcSize = 2
+	cfg.MaxBuildersPerWithdrawalsSweep = 16
 }
 
 func sepoliaConfig() BeaconChainConfig {

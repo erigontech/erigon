@@ -62,6 +62,7 @@ func (arr *RawUint64List) Get(index int) uint64 {
 }
 
 func (arr *RawUint64List) Set(index int, v uint64) {
+	arr.cachedHash = common.Hash{}
 	arr.u[index] = v
 }
 

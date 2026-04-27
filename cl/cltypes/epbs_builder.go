@@ -24,9 +24,9 @@ type Builder struct {
 	Pubkey            common.Bytes48 `json:"pubkey"`
 	Version           uint8          `json:"version"`
 	ExecutionAddress  common.Address `json:"execution_address"`
-	Balance           uint64         `json:"balance"`
-	DepositEpoch      uint64         `json:"deposit_epoch"`
-	WithdrawableEpoch uint64         `json:"withdrawable_epoch"`
+	Balance           uint64         `json:"balance,string"`
+	DepositEpoch      uint64         `json:"deposit_epoch,string"`
+	WithdrawableEpoch uint64         `json:"withdrawable_epoch,string"`
 }
 
 func (b *Builder) EncodingSizeSSZ() int {
@@ -61,8 +61,8 @@ func (b *Builder) HashSSZ() ([32]byte, error) {
 // BuilderPendingWithdrawal represents a pending withdrawal for a builder.
 type BuilderPendingWithdrawal struct {
 	FeeRecipient common.Address `json:"fee_recipient"`
-	Amount       uint64         `json:"amount"`
-	BuilderIndex uint64         `json:"builder_index"`
+	Amount       uint64         `json:"amount,string"`
+	BuilderIndex uint64         `json:"builder_index,string"`
 }
 
 func (b *BuilderPendingWithdrawal) EncodingSizeSSZ() int {
@@ -91,7 +91,7 @@ func (b *BuilderPendingWithdrawal) HashSSZ() ([32]byte, error) {
 
 // BuilderPendingPayment represents a pending payment for a builder.
 type BuilderPendingPayment struct {
-	Weight     uint64                    `json:"weight"`
+	Weight     uint64                    `json:"weight,string"`
 	Withdrawal *BuilderPendingWithdrawal `json:"withdrawal"`
 }
 

@@ -110,12 +110,16 @@ func (b *BeaconState) CopyInto(dst *BeaconState) error {
 		b.ptcWindow.CopyTo(dst.ptcWindow)
 	}
 	dst.version = b.version
-	// Now sync internals
+	// Now sync internals: copy the cached leaf hashes but mark every leaf
+	// dirty so the destination will recompute them on the next HashSSZ().
+	// This avoids propagating stale cache entries when the source state is
+	// mutated after the copy (e.g. by TransitionState on a shared
+	// currentState pointer in the fork graph, or by a background goroutine
+	// accessing the state after a ViewHeadState lock is released).
 	copy(dst.leaves, b.leaves)
 	dst.touchedLeaves = make([]atomic.Uint32, StateLeafSizeLatest)
-	for leafIndex := range b.touchedLeaves {
-		// Copy the value
-		dst.touchedLeaves[leafIndex].Store(b.touchedLeaves[leafIndex].Load())
+	for leafIndex := range dst.touchedLeaves {
+		dst.touchedLeaves[leafIndex].Store(LeafDirtyValue)
 	}
 	return nil
 }

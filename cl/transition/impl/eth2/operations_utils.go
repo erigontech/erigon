@@ -9,6 +9,7 @@ import (
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils/bls"
+	"github.com/erigontech/erigon/common"
 )
 
 // verifyExecutionPayloadEnvelopeSignature verifies the BLS signature of a signed execution payload envelope.
@@ -16,6 +17,14 @@ import (
 // [New in Gloas:EIP7732]
 func verifyExecutionPayloadEnvelopeSignature(s abstract.BeaconState, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) (bool, error) {
 	builderIndex := signedEnvelope.Message.BuilderIndex
+
+	// Skip BLS verification for locally-produced self-build envelopes that carry
+	// InfiniteSignature. The CL node constructs these when the VC does not provide
+	// a pre-signed envelope; the private key lives in the VC and is not available here.
+	if builderIndex == clparams.BuilderIndexSelfBuild && signedEnvelope.Signature == common.Bytes96(bls.InfiniteSignature) {
+		return true, nil
+	}
+
 	var pk [48]byte
 	if builderIndex == clparams.BuilderIndexSelfBuild {
 		// Self-build: use the proposer's pubkey

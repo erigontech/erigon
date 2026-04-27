@@ -144,7 +144,7 @@ func (f *ForkChoiceStore) isPayloadTimely(root common.Hash) bool {
 		}
 	}
 
-	return presentCount > clparams.PayloadTimelyThreshold
+	return presentCount > f.beaconCfg.PtcSize/2
 }
 
 // isPayloadDataAvailable returns whether the blob data for the beacon block with root
@@ -172,7 +172,7 @@ func (f *ForkChoiceStore) isPayloadDataAvailable(root common.Hash) bool {
 		}
 	}
 
-	return availableCount > clparams.DataAvailabilityTimelyThreshold
+	return availableCount > f.beaconCfg.PtcSize/2
 }
 
 // getParentPayloadStatus returns the payload status of the parent block.
@@ -185,9 +185,16 @@ func (f *ForkChoiceStore) getParentPayloadStatus(block *cltypes.BeaconBlock) clt
 		return cltypes.PayloadStatusEmpty
 	}
 
-	// Pre-GLOAS parent blocks have no bid field; treat as PENDING per consensus-specs #5125.
+	// Pre-GLOAS parent blocks have no bid field. From the GLOAS fork choice
+	// perspective they are treated as EMPTY: they always carried their execution
+	// payload inline (no separate envelope), so the PENDING → EMPTY/FULL
+	// traversal in getNodeChildren produces only an EMPTY child for them
+	// (HasEnvelope returns false). Returning EMPTY here lets the next
+	// generation of blocks (whose parent is pre-GLOAS) be found by the
+	// EMPTY branch, unblocking the fork-choice head from advancing past the
+	// GLOAS fork boundary.
 	if parentBlock.Block.Body.Version < clparams.GloasVersion {
-		return cltypes.PayloadStatusPending
+		return cltypes.PayloadStatusEmpty
 	}
 
 	// Get parent_block_hash from current block's signed_execution_payload_bid

@@ -2,6 +2,7 @@ package solid
 
 import (
 	"encoding/binary"
+	"encoding/json"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
@@ -267,4 +268,12 @@ func (v *VectorSSZ[T]) HashSSZ() ([32]byte, error) {
 
 func (v *VectorSSZ[T]) Clone() clonable.Clonable {
 	return NewVectorSSZ[T](len(v.items))
+}
+
+func (v VectorSSZ[T]) MarshalJSON() ([]byte, error) {
+	return json.Marshal(v.items)
+}
+
+func (v *VectorSSZ[T]) UnmarshalJSON(data []byte) error {
+	return json.Unmarshal(data, &v.items)
 }

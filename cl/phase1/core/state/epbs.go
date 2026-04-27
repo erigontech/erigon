@@ -51,8 +51,9 @@ func IsActiveBuilder(state abstract.BeaconState, builderIndex uint64) bool {
 		log.Warn("builder is nil", "builderIndex", builderIndex)
 		return false
 	}
-	return builder.DepositEpoch < state.FinalizedCheckpoint().Epoch &&
-		builder.WithdrawableEpoch == state.BeaconConfig().FarFutureEpoch
+	finalizedEpoch := state.FinalizedCheckpoint().Epoch
+	farFuture := state.BeaconConfig().FarFutureEpoch
+	return builder.DepositEpoch < finalizedEpoch && builder.WithdrawableEpoch == farFuture
 }
 
 // IsBuilderWithdrawalCredential checks if the withdrawal credentials belong to a builder.
@@ -320,9 +321,12 @@ func ApplyDepositForBuilder(s abstract.BeaconState, pubkey common.Bytes48, withd
 		}
 	} else {
 		// Existing builder: increase balance
+		// Copy-on-write: create a new Builder to avoid mutating a shared pointer
+		// (ShallowCopy shares *Builder pointers across state copies).
 		builder := builders.Get(builderIndex)
-		builder.Balance += amount
-		builders.Set(builderIndex, builder)
+		newBuilder := *builder
+		newBuilder.Balance += amount
+		builders.Set(builderIndex, &newBuilder)
 		s.SetBuilders(builders)
 	}
 }

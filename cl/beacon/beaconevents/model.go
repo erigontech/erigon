@@ -32,15 +32,15 @@ const (
 
 type (
 	// Operation event data types
-	AttestationData                    = solid.Attestation
-	SingleAttestationData              = solid.SingleAttestation
-	VoluntaryExitData                  = cltypes.SignedVoluntaryExit
-	ProposerSlashingData               = cltypes.ProposerSlashing
-	AttesterSlashingData               = cltypes.AttesterSlashing
-	BlsToExecutionChangesData          = cltypes.SignedBLSToExecutionChange
-	ContributionAndProofData           = cltypes.SignedContributionAndProof
-	BlobSidecarData                    = cltypes.BlobSidecar
-	PayloadAttestationMessageData      = cltypes.PayloadAttestationMessage
+	AttestationData               = solid.Attestation
+	SingleAttestationData         = solid.SingleAttestation
+	VoluntaryExitData             = cltypes.SignedVoluntaryExit
+	ProposerSlashingData          = cltypes.ProposerSlashing
+	AttesterSlashingData          = cltypes.AttesterSlashing
+	BlsToExecutionChangesData     = cltypes.SignedBLSToExecutionChange
+	ContributionAndProofData      = cltypes.SignedContributionAndProof
+	BlobSidecarData               = cltypes.BlobSidecar
+	PayloadAttestationMessageData = cltypes.PayloadAttestationMessage
 	SignedExecutionPayloadBidData = cltypes.SignedExecutionPayloadBid
 )
 

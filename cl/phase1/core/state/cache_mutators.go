@@ -183,7 +183,10 @@ func (b *CachingBeaconState) InitiateBuilderExit(builderIndex uint64) {
 	if builder.WithdrawableEpoch != b.BeaconConfig().FarFutureEpoch {
 		return
 	}
-	builder.WithdrawableEpoch = Epoch(b) + b.BeaconConfig().MinBuilderWithdrawabilityDelay
-	builders.Set(int(builderIndex), builder)
+	// Copy-on-write: create a new Builder to avoid mutating a shared pointer
+	// (ShallowCopy shares *Builder pointers across state copies).
+	newBuilder := *builder
+	newBuilder.WithdrawableEpoch = Epoch(b) + b.BeaconConfig().MinBuilderWithdrawabilityDelay
+	builders.Set(int(builderIndex), &newBuilder)
 	b.SetBuilders(builders)
 }

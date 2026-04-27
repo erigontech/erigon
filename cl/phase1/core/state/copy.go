@@ -20,6 +20,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
 )
 
@@ -32,6 +33,14 @@ func (b *CachingBeaconState) CopyInto(bs *CachingBeaconState) (err error) {
 	err = bs.reinitCaches()
 	if err != nil {
 		return err
+	}
+	// Preserve the previousStateRoot so that transitionSlot can fill
+	// latestBlockHeader.Root with the correct (block-attested) state root
+	// instead of recomputing HashSSZ(), which may diverge when the
+	// incremental hashing cache has been dirtied by fork-choice operations.
+	bs.previousStateRoot = b.previousStateRoot
+	if b.previousStateRoot != (common.Hash{}) {
+		log.Debug("CopyInto: preserved previousStateRoot", "srcSlot", b.Slot(), "dstSlot", bs.Slot(), "root", b.previousStateRoot)
 	}
 	return nil
 }

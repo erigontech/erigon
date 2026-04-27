@@ -371,7 +371,7 @@ func setHeadStateFromForkChoice(cfg *Cfg, logger log.Logger) {
 	if err != nil || headState == nil {
 		return
 	}
-	if err := cfg.syncedData.OnHeadState(headState); err != nil {
+	if err := cfg.syncedData.OnHeadStateWithBlockRoot(headState, headRoot); err != nil {
 		logger.Debug("Could not set head state from fork choice", "err", err)
 		return
 	}

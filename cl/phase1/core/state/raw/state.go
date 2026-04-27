@@ -152,7 +152,7 @@ func New(cfg *clparams.BeaconChainConfig) *BeaconState {
 		builderPendingWithdrawals:    solid.NewStaticListSSZ[*cltypes.BuilderPendingWithdrawal](int(cfg.BuilderPendingWithdrawalsLimit), new(cltypes.BuilderPendingWithdrawal).EncodingSizeSSZ()),
 		latestBlockHash:              common.Hash{},
 		payloadExpectedWithdrawals:   solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), new(cltypes.Withdrawal).EncodingSizeSSZ()),
-		ptcWindow:                    solid.NewUint64VectorOfVectors(int((2+cfg.MinSeedLookahead)*cfg.SlotsPerEpoch), int(clparams.PtcSize)),
+		ptcWindow:                    solid.NewUint64VectorOfVectors(int((2+cfg.MinSeedLookahead)*cfg.SlotsPerEpoch), int(cfg.PtcSize)),
 	}
 	state.init()
 	return state
@@ -228,7 +228,12 @@ func (b *BeaconState) MarshalJSON() ([]byte, error) {
 		obj["latest_execution_payload_bid"] = b.latestExecutionPayloadBid
 		obj["builders"] = b.builders
 		obj["next_withdrawal_builder_index"] = strconv.FormatInt(int64(b.nextWithdrawalBuilderIndex), 10)
-		obj["execution_payload_availability"] = b.executionPayloadAvailability
+		// Serialize as raw bytes so Go's JSON encoder emits base64
+		// (the standard Go encoding for []byte), matching what assertoor and
+		// other Go-based Eth2 tooling expect for Bitvector fields.
+		epaBuf := make([]byte, b.executionPayloadAvailability.EncodingSizeSSZ())
+		epaBuf, _ = b.executionPayloadAvailability.EncodeSSZ(epaBuf)
+		obj["execution_payload_availability"] = epaBuf
 		obj["builder_pending_payments"] = b.builderPendingPayments
 		obj["builder_pending_withdrawals"] = b.builderPendingWithdrawals
 		obj["latest_block_hash"] = b.latestBlockHash
