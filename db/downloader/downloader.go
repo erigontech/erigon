@@ -1639,6 +1639,28 @@ func (d *Downloader) spawn(f func()) bool {
 	return true
 }
 
+// DropTorrentByName drops the torrent registered under name from the
+// torrent client and clears it from the Downloader's bookkeeping, but
+// leaves both the data file and the .torrent sidecar in place. Used by
+// callers that re-publish a manifest in place — chain.toml.v2 grows
+// over the lifetime of a node, and each republish swaps to a new
+// infohash for the same on-disk filename. Without dropping the old
+// registration first, addTorrent rejects the new infohash with
+// "snapshot already loaded with different infohash".
+//
+// No-op if no torrent is registered under name.
+func (d *Downloader) DropTorrentByName(name string) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	t, ok := d.torrentsByName[name]
+	if !ok {
+		return
+	}
+	t.Drop()
+	g.MustDelete(d.torrentsByName, name)
+	delete(d.downloads, t)
+}
+
 // Delete - stop seeding, remove file, remove .torrent. TODO: Double check the usage of this.
 func (d *Downloader) Delete(name string) error {
 	d.lock.Lock()

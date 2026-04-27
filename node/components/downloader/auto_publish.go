@@ -188,17 +188,23 @@ func (p *Provider) autoPublishLoop(
 // current inventory, advertises the new info-hash via ENR, and seeds
 // the V2 torrent. Reuses the helper at db/downloader.PublishChainTomlV2
 // so the wire format and ENR fields match the startup publish path.
+//
+// Each republish produces a NEW infohash for the same on-disk filename
+// (chain.toml.v2). The torrent client's per-name registry refuses to
+// reload an existing name with a different infohash, so we drop the
+// old registration first. The data file and .torrent sidecar are
+// already overwritten in place by PublishChainTomlV2; this just clears
+// the in-memory bookkeeping so AddNewSeedableFile can re-register
+// against the new infohash.
 func (p *Provider) republishChainTomlV2(opts AutoPublishOpts) error {
 	torrentFS := dl.NewAtomicTorrentFS(p.dirs.Snap)
 	hash, err := dl.PublishChainTomlV2(p.dirs.Snap, torrentFS, opts.Inventory, opts.AuthoritativeBlocks, opts.ENRUpdater)
 	if err != nil {
 		return err
 	}
-	// Make the new torrent seedable so connected peers can fetch it.
+	p.Downloader.DropTorrentByName(dl.ChainTomlV2FileName)
 	if err := p.Downloader.AddNewSeedableFile(p.busCtx, dl.ChainTomlV2FileName); err != nil {
-		// Non-fatal — the file is on disk and seeded by AddTorrentsFromDisk
-		// during normal lifecycle; this is just a fast-path.
-		p.logger.Debug("[downloader] auto-publish: re-add seedable failed", "err", err, "hash", fmt.Sprintf("%x", hash))
+		return fmt.Errorf("re-seeding chain.toml.v2 after republish: %w (hash=%x)", err, hash)
 	}
 	return nil
 }
