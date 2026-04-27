@@ -20,6 +20,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/caches"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
@@ -30,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 const (
@@ -64,7 +66,38 @@ func New(cfg *clparams.BeaconChainConfig) *CachingBeaconState {
 	return state
 }
 
+// BlockRoot overrides raw.BeaconState.BlockRoot to use previousStateRoot
+// (set by TransitionState after VerifyTransition) when latestBlockHeader.Root
+// is still zero. In GLOAS, the execution payload envelope has not yet been
+// processed at the point AddChainSegment checks this, so the raw fallback to
+// HashSSZ() can return a diverged value. previousStateRoot is the
+// authoritative state root confirmed by TransitionState.
+func (b *CachingBeaconState) BlockRoot() ([32]byte, error) {
+	hdr := b.LatestBlockHeader()
+	root := hdr.Root
+	if root == (common.Hash{}) && b.previousStateRoot != (common.Hash{}) {
+		root = b.previousStateRoot
+	}
+	if root == (common.Hash{}) {
+		var err error
+		root, err = b.HashSSZ()
+		if err != nil {
+			return [32]byte{}, err
+		}
+	}
+	return (&cltypes.BeaconBlockHeader{
+		Slot:          hdr.Slot,
+		ProposerIndex: hdr.ProposerIndex,
+		BodyRoot:      hdr.BodyRoot,
+		ParentRoot:    hdr.ParentRoot,
+		Root:          root,
+	}).HashSSZ()
+}
+
 func (b *CachingBeaconState) SetPreviousStateRoot(root common.Hash) {
+	if root != (common.Hash{}) {
+		log.Debug("SetPreviousStateRoot", "slot", b.Slot(), "root", root)
+	}
 	b.previousStateRoot = root
 }
 

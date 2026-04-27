@@ -302,7 +302,7 @@ func NewBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparams.State
 				BlobKzgCommitments: *solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48),
 			},
 		}
-		body.PayloadAttestations = solid.NewStaticListSSZ[*PayloadAttestation](int(beaconCfg.MaxPayloadAttestations), PayloadAttestationSSZSize)
+		body.PayloadAttestations = solid.NewStaticListSSZ[*PayloadAttestation](int(beaconCfg.MaxPayloadAttestations), PayloadAttestationSSZSizeWithPtcSize(beaconCfg.PtcSize))
 		body.ParentExecutionRequests = NewExecutionRequests(beaconCfg)
 	}
 
@@ -370,7 +370,7 @@ func (b *BeaconBody) ensureNilFields() {
 			}
 		}
 		if b.PayloadAttestations == nil {
-			b.PayloadAttestations = solid.NewStaticListSSZ[*PayloadAttestation](int(b.beaconCfg.MaxPayloadAttestations), PayloadAttestationSSZSize)
+			b.PayloadAttestations = solid.NewStaticListSSZ[*PayloadAttestation](int(b.beaconCfg.MaxPayloadAttestations), PayloadAttestationSSZSizeWithPtcSize(b.beaconCfg.PtcSize))
 		}
 		if b.ParentExecutionRequests == nil {
 			b.ParentExecutionRequests = NewExecutionRequests(b.beaconCfg)
@@ -436,7 +436,7 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version int) error {
 				BlobKzgCommitments: *solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48),
 			},
 		}
-		b.PayloadAttestations = solid.NewStaticListSSZ[*PayloadAttestation](int(b.beaconCfg.MaxPayloadAttestations), PayloadAttestationSSZSize)
+		b.PayloadAttestations = solid.NewStaticListSSZ[*PayloadAttestation](int(b.beaconCfg.MaxPayloadAttestations), PayloadAttestationSSZSizeWithPtcSize(b.beaconCfg.PtcSize))
 		b.ParentExecutionRequests = NewExecutionRequests(b.beaconCfg)
 	}
 	err := ssz2.UnmarshalSSZ(buf, version, b.getSchema(false)...)
@@ -592,7 +592,7 @@ func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 				BlobKzgCommitments: *solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48),
 			},
 		}
-		tmp.PayloadAttestations = solid.NewStaticListSSZ[*PayloadAttestation](int(b.beaconCfg.MaxPayloadAttestations), PayloadAttestationSSZSize)
+		tmp.PayloadAttestations = solid.NewStaticListSSZ[*PayloadAttestation](int(b.beaconCfg.MaxPayloadAttestations), PayloadAttestationSSZSizeWithPtcSize(b.beaconCfg.PtcSize))
 		tmp.ParentExecutionRequests = NewExecutionRequests(b.beaconCfg)
 	}
 

@@ -387,7 +387,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	}
 	ret.SetBuilderPendingPayments(builderPendingPayments)
 
-	ptcWindow := solid.NewUint64VectorOfVectors(int((2+r.cfg.MinSeedLookahead)*r.cfg.SlotsPerEpoch), int(clparams.PtcSize))
+	ptcWindow := solid.NewUint64VectorOfVectors(int((2+r.cfg.MinSeedLookahead)*r.cfg.SlotsPerEpoch), int(r.cfg.PtcSize))
 	if err := readCompressedSSZ(kvGetter, slot, kv.PtcWindowTable, ptcWindow, int(ret.Version())); err != nil {
 		return nil, fmt.Errorf("failed to read ptc window: %w", err)
 	}

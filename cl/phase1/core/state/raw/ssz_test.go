@@ -124,6 +124,51 @@ func TestBaseOffsetSSZ(t *testing.T) {
 	}
 }
 
+// TestBeaconStateSSZRoundtripMinimalGloas verifies that a GLOAS BeaconState using
+// the minimal preset (PTC_SIZE=2) can be encoded and decoded without error.
+// This is the scenario that broke genesis state loading when gloas_fork_epoch=0
+// in kurtosis with the minimal preset.
+func TestBeaconStateSSZRoundtripMinimalGloas(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	clparams.ApplyMinimalPreset(&cfg)
+
+	state := New(&cfg)
+	state.SetVersion(clparams.GloasVersion)
+
+	// Initialize ExecutionPayloadBid with BlobKzgCommitments (required for encode)
+	state.latestExecutionPayloadBid = &cltypes.ExecutionPayloadBid{
+		BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
+	}
+
+	// Verify that PtcSize is the minimal preset value
+	require.Equal(t, uint64(2), cfg.PtcSize, "minimal preset PTC_SIZE should be 2")
+
+	// Encode
+	encoded, err := state.EncodeSSZ(nil)
+	require.NoError(t, err, "EncodeSSZ failed for minimal GLOAS state")
+
+	// The encoded size should be much smaller than mainnet due to PTC_SIZE=2 vs 512
+	// ptcWindow contributes: (2+1)*8 * PTC_SIZE * 8 bytes
+	// Minimal: 24 * 2 * 8 = 384 bytes
+	// Mainnet: 96 * 512 * 8 = 393216 bytes
+	require.Less(t, len(encoded), 100000,
+		"minimal GLOAS state should be much smaller than mainnet (got %d bytes)", len(encoded))
+
+	// Decode into a fresh state with the same config
+	state2 := New(&cfg)
+	err = state2.DecodeSSZ(encoded, int(clparams.GloasVersion))
+	require.NoError(t, err, "DecodeSSZ failed for minimal GLOAS state")
+
+	// Re-encode and verify bytes match
+	encoded2, err := state2.EncodeSSZ(nil)
+	require.NoError(t, err, "second EncodeSSZ failed")
+
+	require.Equal(t, len(encoded), len(encoded2),
+		"encoded length mismatch: first=%d second=%d", len(encoded), len(encoded2))
+	require.Equal(t, encoded, encoded2,
+		"encoded bytes differ after roundtrip")
+}
+
 // TestBeaconStateSSZRoundtrip verifies that encoding then decoding a beacon state
 // produces the same SSZ hash and identical bytes for every version.
 func TestBeaconStateSSZRoundtrip(t *testing.T) {

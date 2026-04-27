@@ -280,6 +280,7 @@ func (b *CachingBeaconState) UpgradeToFulu() error {
 }
 
 func (b *CachingBeaconState) UpgradeToGloas() error {
+	log.Debug("UpgradeToGloas: clearing previousStateRoot", "slot", b.Slot(), "wasSet", b.previousStateRoot != common.Hash{})
 	b.previousStateRoot = common.Hash{}
 	epoch := Epoch(b.BeaconState)
 	cfg := b.BeaconConfig()
@@ -353,6 +354,13 @@ func (b *CachingBeaconState) UpgradeToGloas() error {
 	// Initialize ptc_window: first epoch zeros, remaining epochs computed via ComputePTC
 	if err := b.InitializePtcWindow(); err != nil {
 		return fmt.Errorf("upgrade to Gloas: %w", err)
+	}
+
+	// If deposit_requests_start_index is still UNSET from the Electra fork,
+	// set it to eth1_deposit_index so ProcessPendingDeposits stops waiting
+	// for bridge deposits that will never arrive in GLOAS.
+	if b.GetDepositRequestsStartIndex() == cfg.UnsetDepositRequestsStartIndex {
+		b.SetDepositRequestsStartIndex(b.Eth1DepositIndex())
 	}
 
 	// Update the state version

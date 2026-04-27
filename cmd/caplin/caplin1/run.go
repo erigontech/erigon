@@ -67,6 +67,7 @@ import (
 	"github.com/erigontech/erigon/cl/validator/committee_subscription"
 	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -140,6 +141,45 @@ func OpenCaplinIndexDb(ctx context.Context, dbPath string) (kv.RwDB, error) {
 		}).Open(ctx)
 }
 
+// upgradeGenesisState applies sequential fork upgrades to bring a genesis state from
+// actualVersion to targetVersion. This is needed when the genesis tool produces SSZ at
+// an older fork (e.g. Fulu) but the beacon config expects a newer fork at epoch 0 (e.g. GLOAS).
+func upgradeGenesisState(s *state.CachingBeaconState, from, to clparams.StateVersion) error {
+	for v := from + 1; v <= to; v++ {
+		switch v {
+		case clparams.AltairVersion:
+			if err := s.UpgradeToAltair(); err != nil {
+				return err
+			}
+		case clparams.BellatrixVersion:
+			if err := s.UpgradeToBellatrix(); err != nil {
+				return err
+			}
+		case clparams.CapellaVersion:
+			if err := s.UpgradeToCapella(); err != nil {
+				return err
+			}
+		case clparams.DenebVersion:
+			if err := s.UpgradeToDeneb(); err != nil {
+				return err
+			}
+		case clparams.ElectraVersion:
+			if err := s.UpgradeToElectra(); err != nil {
+				return err
+			}
+		case clparams.FuluVersion:
+			if err := s.UpgradeToFulu(); err != nil {
+				return err
+			}
+		case clparams.GloasVersion:
+			if err := s.UpgradeToGloas(); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngine, config clparams.CaplinConfig,
 	dirs datadir.Dirs, eth1Getter snapshot_format.ExecutionBlockReaderByNumber,
 	snDownloader downloader.Client, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted) error {
@@ -170,8 +210,31 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		}
 		genesisState = state.New(beaconConfig)
 
-		if err := genesisState.DecodeSSZ(stateBytes, int(beaconConfig.GetCurrentStateVersion(beaconConfig.GenesisEpoch))); err != nil {
-			return fmt.Errorf("could not decode genesis state: %s", err)
+		// Detect actual state version from fork.current_version embedded in the SSZ bytes.
+		// SSZ layout: genesis_time(8) + genesis_validators_root(32) + slot(8) + fork.previous_version(4) → offset 52.
+		// External genesis tools (e.g. ethpandaops) may not yet support the latest fork, so the
+		// SSZ could be at an older version (e.g. Fulu) even when the config expects GLOAS at epoch 0.
+		targetVersion := beaconConfig.GetCurrentStateVersion(beaconConfig.GenesisEpoch)
+		actualVersion := targetVersion
+		const forkCurrentVersionOffset = 52
+		if len(stateBytes) >= forkCurrentVersionOffset+4 {
+			var forkVersion common.Bytes4
+			copy(forkVersion[:], stateBytes[forkCurrentVersionOffset:forkCurrentVersionOffset+4])
+			if entry, ok := beaconConfig.ForkVersionSchedule[forkVersion]; ok {
+				actualVersion = entry.StateVersion
+			}
+		}
+
+		if err := genesisState.DecodeSSZ(stateBytes, int(actualVersion)); err != nil {
+			return fmt.Errorf("could not decode genesis state (detected version %s): %s", actualVersion, err)
+		}
+
+		// If the genesis SSZ is at an older fork version than expected, apply sequential upgrades.
+		if actualVersion < targetVersion {
+			log.Info("[Caplin] Upgrading genesis state to target fork", "from", actualVersion, "to", targetVersion)
+			if err := upgradeGenesisState(genesisState, actualVersion, targetVersion); err != nil {
+				return fmt.Errorf("could not upgrade genesis state from %s to %s: %s", actualVersion, targetVersion, err)
+			}
 		}
 	} else {
 		networkConfig, beaconConfig = clparams.GetConfigsByNetwork(config.NetworkId)

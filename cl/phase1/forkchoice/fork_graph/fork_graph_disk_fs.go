@@ -96,6 +96,23 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot common.Hash) (bs *stat
 		return nil, fmt.Errorf("failed to decode beacon state: %w, root: %x, len: %d, decLen: %d, bs: %+v", err, blockRoot, n, len(f.sszBuffer), bs)
 	}
 
+	// Re-initialize caches after SSZ decode. state.New() called InitBeaconState()
+	// on an empty state; after DecodeSSZ populates real data, caches like
+	// publicKeyIndicies are stale (empty). Reinitialize them from the decoded data.
+	if err = bs.InitBeaconState(); err != nil {
+		return nil, fmt.Errorf("failed to reinitialize caches after SSZ decode: %w, root: %x", err, blockRoot)
+	}
+
+	// Try to read the persisted previousStateRoot (appended after SSZ data).
+	// This is needed for GLOAS where the execution payload envelope modifies
+	// the state after TransitionState, making HashSSZ() diverge from
+	// the block's state_root. Older state files won't have this field;
+	// in that case we leave previousStateRoot as zero (HashSSZ fallback).
+	var prevRoot [32]byte
+	if _, readErr := io.ReadFull(f.sszSnappyReader, prevRoot[:]); readErr == nil {
+		bs.SetPreviousStateRoot(common.Hash(prevRoot))
+	}
+
 	return
 }
 
@@ -140,6 +157,22 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot common.Hash, bs *state.C
 	// Lastly dump the state
 	if _, err := f.sszSnappyWriter.Write(f.sszBuffer); err != nil {
 		log.Error("failed to write ssz buffer", "err", err)
+		return err
+	}
+	// Write the authoritative state root so it can be restored on load.
+	// Use the stored block header's Root (set from block.StateRoot in AddChainSegment)
+	// rather than the state's PreviousStateRoot cache field, which can be stale if
+	// a concurrent block arrival modified f.currentState between GetStateAtBlockRoot
+	// and the copy in OnHeadStateWithBlockRoot.
+	var stateRootToWrite common.Hash
+	if hdr, ok := f.GetHeader(blockRoot); ok {
+		stateRootToWrite = hdr.Root
+	} else {
+		// Fallback for anchor state or cases where header isn't stored yet
+		stateRootToWrite = bs.PeekPreviousStateRoot()
+	}
+	if _, err := f.sszSnappyWriter.Write(stateRootToWrite[:]); err != nil {
+		log.Error("failed to write previousStateRoot", "err", err)
 		return err
 	}
 	if err = f.sszSnappyWriter.Flush(); err != nil {

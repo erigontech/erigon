@@ -37,14 +37,14 @@ func TestGetters(t *testing.T) {
 
 	root, err := state.BlockRoot()
 	require.NoError(t, err)
-	require.Equal(t, common.Hash(root), common.HexToHash("0x9f1620db18ee06b9cbdf1b7fa9658701063d2bd05d54b09780f6c0a074b4ce5f"))
+	require.Equal(t, common.Hash(root), common.HexToHash("0xfc09c7ba749aa6d19ff97e8199c768dcb626df924060806b763ca2e7c8385805"))
 
 	copied, err := state.Copy()
 	require.NoError(t, err)
 
 	root, err = copied.BlockRoot()
 	require.NoError(t, err)
-	require.Equal(t, common.Hash(root), common.HexToHash("0x9f1620db18ee06b9cbdf1b7fa9658701063d2bd05d54b09780f6c0a074b4ce5f"))
+	require.Equal(t, common.Hash(root), common.HexToHash("0xfc09c7ba749aa6d19ff97e8199c768dcb626df924060806b763ca2e7c8385805"))
 }
 
 // TestNewBeaconStateMinimalPreset verifies that creating a BeaconState with
@@ -53,12 +53,7 @@ func TestGetters(t *testing.T) {
 func TestNewBeaconStateMinimalPreset(t *testing.T) {
 	// Start from mainnet defaults and override to minimal preset values.
 	cfg := clparams.MainnetBeaconConfig
-	cfg.PresetBase = "minimal"
-	cfg.SlotsPerEpoch = 8
-	cfg.EpochsPerHistoricalVector = 64
-	cfg.SlotsPerHistoricalRoot = 64
-	cfg.EpochsPerSlashingsVector = 64
-	cfg.SecondsPerSlot = 6
+	clparams.ApplyMinimalPreset(&cfg)
 	cfg.GenesisDelay = 20
 	cfg.GloasForkEpoch = 1
 	cfg.GloasForkVersion = 0x80000038
@@ -74,11 +69,11 @@ func TestNewBeaconStateMinimalPreset(t *testing.T) {
 	require.NotNil(t, ptcWindow)
 	require.Equal(t, 24, ptcWindow.Length(), "ptc_window should have 24 slots under minimal preset")
 
-	// Each slot in ptc_window should be a vector of PTC_SIZE (512).
+	// Each slot in ptc_window should be a vector of PTC_SIZE (2 for minimal preset).
 	for i := 0; i < ptcWindow.Length(); i++ {
 		vec := ptcWindow.Get(i)
-		require.Equal(t, int(clparams.PtcSize), vec.Length(),
-			"ptc_window[%d] should have PTC_SIZE=%d entries", i, clparams.PtcSize)
+		require.Equal(t, int(cfg.PtcSize), vec.Length(),
+			"ptc_window[%d] should have PTC_SIZE=%d entries", i, cfg.PtcSize)
 	}
 
 	// Verify other minimal-preset-sensitive structures.

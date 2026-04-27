@@ -315,11 +315,22 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 
 	// Verify currentState.BlockRoot() matches the actual block root.
 	if computedRoot, cerr := f.currentState.BlockRoot(); cerr == nil && computedRoot != common.Hash(blockRoot) {
+		// Detailed diagnostics: compare state header fields with block fields.
+		hdr := f.currentState.LatestBlockHeader()
+		stateHashSSZ, _ := f.currentState.HashSSZ()
 		log.Warn("AddChainSegment: BlockRoot MISMATCH after TransitionState",
 			"slot", block.Slot,
 			"expectedBlockRoot", common.Hash(blockRoot),
 			"computedBlockRoot", computedRoot,
 			"parentRoot", block.ParentRoot,
+			"blockStateRoot", block.StateRoot,
+			"stateHashSSZ", stateHashSSZ,
+			"fullValidation", fullValidation,
+			"hdrSlot", hdr.Slot,
+			"hdrProposer", hdr.ProposerIndex,
+			"hdrParentRoot", hdr.ParentRoot,
+			"hdrBodyRoot", hdr.BodyRoot,
+			"hdrRoot", hdr.Root,
 		)
 	}
 
@@ -393,13 +404,9 @@ func (f *forkGraphDisk) useCachedStateIfPossible(blockRoot common.Hash, in *stat
 	}
 	if f.syncedData.HeadRoot() == blockRoot {
 		err = f.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
-			headBlockRoot, err := headState.BlockRoot()
-			if err != nil {
-				return err
-			}
-			if headBlockRoot != blockRoot {
-				return nil
-			}
+			// HeadRoot() already matched blockRoot, so we trust the stored root
+			// rather than recomputing BlockRoot() which can return incorrect results
+			// when the state's incremental hashing cache has been dirtied.
 			ok = true
 			var err2 error
 
@@ -448,17 +455,11 @@ func (f *forkGraphDisk) useCachedStateIfPossible(blockRoot common.Hash, in *stat
 }
 
 func (f *forkGraphDisk) getState(blockRoot common.Hash, alwaysCopy bool, addChainSegment bool) (*state.CachingBeaconState, error) {
-	if f.currentState != nil {
-		currentStateBlockRoot, err := f.currentState.BlockRoot()
-		if err != nil {
-			return nil, err
+	if f.currentState != nil && f.currentStateBlockRoot == blockRoot {
+		if alwaysCopy {
+			return f.currentState.Copy()
 		}
-		if currentStateBlockRoot == blockRoot {
-			if alwaysCopy {
-				return f.currentState.Copy()
-			}
-			return f.currentState, nil
-		}
+		return f.currentState, nil
 	}
 	if addChainSegment && !alwaysCopy {
 		if state, ok, err := f.useCachedStateIfPossible(blockRoot, f.currentState); ok {

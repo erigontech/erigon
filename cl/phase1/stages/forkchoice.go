@@ -277,7 +277,7 @@ func emitNextPaylodAttributesEvent(cfg *Cfg, headSlot uint64, headRoot common.Ha
 			ProposerIndex:     proposerIndex,
 			ProposalSlot:      nextSlot,
 			ParentBlockNumber: headPayloadHeader.BlockNumber,
-			ParentBlockHash:   headPayloadHeader.StateRoot,
+			ParentBlockHash:   headPayloadHeader.BlockHash,
 			ParentBlockRoot:   headRoot,
 			PayloadAttributes: payloadAttributes,
 		},
@@ -340,7 +340,7 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 	start := time.Now()
 	cfg.forkChoice.SetSynced(true) // Now we are synced
 	// Update the head state with the new head state
-	if err := cfg.syncedData.OnHeadState(headState); err != nil {
+	if err := cfg.syncedData.OnHeadStateWithBlockRoot(headState, headRoot); err != nil {
 		return fmt.Errorf("failed to set head state: %w", err)
 	}
 	defer func() {
