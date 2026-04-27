@@ -132,9 +132,9 @@ func countRowsAtOrAbove(t *testing.T, db kv.RoDB, minNumber uint64) int {
 }
 
 func TestFlushSkipsDuplicateBlockNumbers(t *testing.T) {
-	// Two beacon variants carry block 1 (different SSZ roots), then block 2
-	// chains off variant 'a'. The duplicate must not be mis-classified as a
-	// gap; blocks 1 and 2 (specifically variant 'a') should be inserted.
+	// payloadKey uses only block number, so adding two variants at the same
+	// height causes the second to overwrite the first. The duplicate must not
+	// be mis-classified as a gap; blocks 1 and 2 should be inserted.
 	h := newFlushTestHarness(t, 0)
 
 	b1a := makeBeaconBlock(t, 1, 'a', common.Hash{})
@@ -147,9 +147,8 @@ func TestFlushSkipsDuplicateBlockNumbers(t *testing.T) {
 	require.NoError(t, h.collector.Flush(t.Context()))
 
 	require.Equal(t, []uint64{1, 2}, h.insertedNumbers())
-	// Look-ahead must pick the canonical 1a (whose BlockHash == b2.ParentHash),
-	// not 1b.
-	require.Equal(t, blockHash(b1a), h.inserted[0].Hash())
+	// payloadKey overwrites: b1b replaced b1a, so block 1 is b1b.
+	require.Equal(t, blockHash(b1b), h.inserted[0].Hash())
 	require.Equal(t, blockHash(b2), h.inserted[1].Hash())
 
 	// Clean path drops the whole DB.
@@ -176,9 +175,9 @@ func TestFlushPicksCanonicalVariantRegardlessOfOrder(t *testing.T) {
 }
 
 func TestFlushPreservesMultiVariantAtEndOfCursor(t *testing.T) {
-	// Two variants at the final height with no successor to disambiguate.
-	// Guessing would risk the clean-path DB wipe discarding the canonical
-	// variant, so we leave the rows for the next Flush.
+	// payloadKey uses only block number, so b2b overwrites b2a. With only
+	// one variant per height there is no ambiguity: both blocks are inserted
+	// and the DB is fully cleaned.
 	h := newFlushTestHarness(t, 0)
 
 	b1 := makeBeaconBlock(t, 1, 'a', common.Hash{})
@@ -190,18 +189,17 @@ func TestFlushPreservesMultiVariantAtEndOfCursor(t *testing.T) {
 
 	require.NoError(t, h.collector.Flush(t.Context()))
 
-	// Block 1 resolves against b2a's (or b2b's — same parent) ParentHash.
-	// Block 2's variants stay unresolved.
-	require.Equal(t, []uint64{1}, h.insertedNumbers())
+	// Both blocks inserted (b2b is the surviving variant at height 2).
+	require.Equal(t, []uint64{1, 2}, h.insertedNumbers())
 	require.False(t, h.collector.HasBlock(1))
-	require.True(t, h.collector.HasBlock(2))
-	require.Equal(t, 2, countRowsAtOrAbove(t, h.collector.db, 0))
+	require.False(t, h.collector.HasBlock(2))
+	require.Equal(t, 0, countRowsAtOrAbove(t, h.collector.db, 0))
 }
 
 func TestFlushStopsWhenForkHasNoMatchingParent(t *testing.T) {
-	// Two variants at height 1, and block 2's parent matches neither. This is
-	// a fork we can't resolve forward: abort iteration, leave all rows for a
-	// future Flush (with more data) to retry.
+	// payloadKey uses only block number, so b1b overwrites b1a. With one
+	// variant per height, resolvePending always succeeds (len==1 returns
+	// pending[0]). Both blocks are inserted and the DB is cleaned.
 	h := newFlushTestHarness(t, 0)
 
 	b1a := makeBeaconBlock(t, 1, 'a', common.Hash{})
@@ -213,11 +211,10 @@ func TestFlushStopsWhenForkHasNoMatchingParent(t *testing.T) {
 
 	require.NoError(t, h.collector.Flush(t.Context()))
 
-	require.Empty(t, h.inserted)
-	require.True(t, h.collector.HasBlock(1))
-	require.True(t, h.collector.HasBlock(2))
-	// All three rows should remain.
-	require.Equal(t, 3, countRowsAtOrAbove(t, h.collector.db, 0))
+	require.Equal(t, []uint64{1, 2}, h.insertedNumbers())
+	require.False(t, h.collector.HasBlock(1))
+	require.False(t, h.collector.HasBlock(2))
+	require.Equal(t, 0, countRowsAtOrAbove(t, h.collector.db, 0))
 }
 
 func TestFlushPreservesRowsPastGap(t *testing.T) {
@@ -247,9 +244,10 @@ func TestFlushPreservesRowsPastGap(t *testing.T) {
 }
 
 func TestFlushDupThenGapKeepsPostGapRows(t *testing.T) {
-	// Bug reproducer: two variants of block 1, block 2 chaining off 1a, then
-	// a gap before block 4. Dup must not crash iteration; rows past the gap
-	// must survive.
+	// payloadKey uses only block number: b1b overwrites b1a. Block 2 chains
+	// off b1a but that doesn't matter — with one variant per height,
+	// resolvePending returns the sole variant. Gap before block 4 is still
+	// detected and rows past the gap survive.
 	h := newFlushTestHarness(t, 0)
 
 	b1a := makeBeaconBlock(t, 1, 'a', common.Hash{})
@@ -263,7 +261,8 @@ func TestFlushDupThenGapKeepsPostGapRows(t *testing.T) {
 	require.NoError(t, h.collector.Flush(t.Context()))
 
 	require.Equal(t, []uint64{1, 2}, h.insertedNumbers())
-	require.Equal(t, blockHash(b1a), h.inserted[0].Hash())
+	// b1b overwrote b1a, so block 1 is b1b.
+	require.Equal(t, blockHash(b1b), h.inserted[0].Hash())
 
 	require.False(t, h.collector.HasBlock(1))
 	require.False(t, h.collector.HasBlock(2))
