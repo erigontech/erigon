@@ -47,11 +47,15 @@ jobs:
       TOTAL_TIME_SECONDS: ${{ matrix.total_time_seconds || 43200 }} # 12 hours
       CHAIN: ${{ matrix.chain }}
       ERIGON_ASSERT: true
-      RPC_VERSION: v2.8.1
 
     steps:
     - name: Check out repository
       uses: actions/checkout@v6
+
+    - name: Read RPC version
+      run: |
+        source .github/workflows/scripts/rpc_version.env
+        echo "RPC_VERSION=$RPC_VERSION" >> $GITHUB_ENV
 
     - name: Clean Erigon Build & Data Directories
       run: |
