@@ -16,12 +16,6 @@
 
 package misc
 
-import (
-	"math/bits"
-
-	"github.com/erigontech/erigon/execution/protocol/params"
-)
-
 // CostPerStateByte derives the per-byte price for new state using the block
 // gas limit as per EIP-8037.
 //
@@ -31,13 +25,18 @@ import (
 //	quantized = (shifted >> shift) << shift
 //	cost_per_state_byte = quantized - CPSB_OFFSET, floored at 1
 func CostPerStateByte(gasLimit uint64) uint64 {
-	denominator := 2 * params.TargetStateGrowthPerYear
-	raw := (gasLimit*params.BlocksPerYear + denominator - 1) / denominator
-	shifted := raw + params.CpsbOffset
-	shift := max(bits.Len64(shifted)-params.CpsbSignificantBits, 0)
-	quantized := (shifted >> shift) << shift
-	if quantized <= params.CpsbOffset {
-		return 1
-	}
-	return quantized - params.CpsbOffset
+	//
+	// TODO clean up all changes related to the dynamic nature of this. Simplify to static val references.
+	//
+	// it was decided to stick to static gas
+	return 1174
+	//denominator := 2 * params.TargetStateGrowthPerYear
+	//raw := (gasLimit*params.BlocksPerYear + denominator - 1) / denominator
+	//shifted := raw + params.CpsbOffset
+	//shift := max(bits.Len64(shifted)-params.CpsbSignificantBits, 0)
+	//quantized := (shifted >> shift) << shift
+	//if quantized <= params.CpsbOffset {
+	//	return 1
+	//}
+	//return quantized - params.CpsbOffset
 }
