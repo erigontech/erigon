@@ -488,7 +488,10 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		return err
 	}
 	took := time.Since(t)
-	log.Info("[dbg] domain.flush vals", "t", took, "keys/s", common.PrettyCounter(uint64(float64(count)/took.Seconds())), "tbl", w.valsTable)
+	keysPerSec := uint64(float64(count) / took.Seconds())
+	if took > time.Millisecond && keysPerSec > 0 {
+		log.Info("[dbg] domain.flush vals", "t", took, "keys/s", common.PrettyCounter(keysPerSec), "tbl", w.valsTable)
+	}
 	w.Close()
 
 	return nil
