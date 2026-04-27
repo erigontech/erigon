@@ -495,7 +495,9 @@ func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if err := w.ii.Flush(ctx, tx); err != nil {
 		return err
 	}
-	log.Info("[dbg] history.flush ii", "t", time.Since(t), "tbl", w.historyValsTable)
+	if took := time.Since(t); took > time.Millisecond {
+		log.Info("[dbg] history.flush ii", "t", took, "tbl", w.historyValsTable)
+	}
 
 	t = time.Now()
 	var count uint64
@@ -510,7 +512,9 @@ func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if took > 0 {
 		keysPerSec = uint64(float64(count) / took.Seconds())
 	}
-	log.Info("[dbg] history.flush vals", "t", took, "keys/s", common.PrettyCounter(keysPerSec), "tbl", w.historyValsTable)
+	if took > time.Millisecond && keysPerSec > 0 {
+		log.Info("[dbg] history.flush vals", "t", took, "keys/s", common.PrettyCounter(keysPerSec), "tbl", w.historyValsTable)
+	}
 	w.close()
 	return nil
 }
