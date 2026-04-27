@@ -1438,6 +1438,20 @@ func (result *execResult) finalizeTx(
 			minIBS.SetTxContext(blockNum, txIndex)
 			minIBS.SetVersion(txIncarnation)
 			minIBS.SetVersionMap(&state.VersionMap{})
+			feeAccountSelfDestructs := make(state.VersionedWrites, 0, 2)
+			for _, w := range result.TxOut {
+				if w.Path != state.SelfDestructPath {
+					continue
+				}
+				if w.Address == result.Coinbase || (hasBurnt && w.Address == burntAddr) {
+					feeAccountSelfDestructs = append(feeAccountSelfDestructs, w)
+				}
+			}
+			if len(feeAccountSelfDestructs) > 0 {
+				if err := minIBS.ApplyVersionedWrites(feeAccountSelfDestructs); err != nil {
+					return nil, nil, nil, err
+				}
+			}
 			// Set adjusted balances so GetRemovedAccountsWithBalance
 			// can detect selfdestructed fee accounts with residual balance.
 			if err := minIBS.SetBalance(result.Coinbase, newCoinbaseBalance, tracing.BalanceIncreaseRewardTransactionFee); err != nil {

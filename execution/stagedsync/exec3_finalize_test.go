@@ -8,8 +8,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/protocol/misc"
+	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
+	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -341,6 +346,93 @@ func TestFinalizeTx_London(t *testing.T) {
 	burntBalance := burntWrite.Val.(uint256.Int)
 	expected := new(uint256.Int).Add(uint256.NewInt(500_000), &s.feeBurnt)
 	assert.Equal(t, *expected, burntBalance, "burnt contract should receive base fee")
+}
+
+func TestFinalizeTxEIP7708BurnLogWhenCoinbaseSelfDestructs(t *testing.T) {
+	t.Parallel()
+
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	sender := crypto.PubkeyToAddress(key.PublicKey)
+	coinbase := accounts.InternAddress(types.CreateAddress(sender, 0))
+
+	chainID := big.NewInt(1)
+	config := &chain.Config{
+		ChainID:       chainID,
+		LondonBlock:   new(uint64),
+		AmsterdamTime: new(uint64),
+	}
+	header := &types.Header{
+		Number:   *uint256.NewInt(1),
+		GasLimit: 30_000_000,
+		GasUsed:  200_000,
+		BaseFee:  uint256.NewInt(1),
+	}
+
+	gasPrice := uint256.NewInt(2)
+	createTx := types.NewContractCreation(0, uint256.NewInt(0), 200_000, gasPrice, []byte{0x33, 0xff})
+	signer := types.LatestSignerForChainID(chainID)
+	signedCreateTx, err := types.SignTx(createTx, *signer, key)
+	require.NoError(t, err)
+
+	txTask := &exec.TxTask{
+		Header:  header,
+		Txs:     types.Transactions{signedCreateTx},
+		TxNum:   1,
+		TxIndex: 0,
+		Config:  config,
+		EvmBlockContext: evmtypes.BlockContext{
+			BlockNumber: header.Number.Uint64(),
+		},
+	}
+	task := &taskVersion{
+		execTask: &execTask{
+			Task:               txTask,
+			shouldDelayFeeCalc: true,
+		},
+		version: state.Version{
+			BlockNum: header.Number.Uint64(),
+			TxNum:    1,
+			TxIndex:  0,
+		},
+	}
+	result := &execResult{TxResult: &exec.TxResult{
+		Task: task,
+		ExecutionResult: evmtypes.ExecutionResult{
+			FeeTipped:           *uint256.NewInt(21_000),
+			ReceiptGasUsed:      21_000,
+			BlockRegularGasUsed: 21_000,
+		},
+		Coinbase: coinbase,
+		TxOut: state.VersionedWrites{
+			{Address: coinbase, Path: state.SelfDestructPath, Val: true},
+		},
+	}}
+
+	vm := state.NewVersionMap(nil)
+	reader := newMapStateReader()
+	receipt, _, _, err := result.finalizeTx(
+		task, txTask, nil, merge.New(ethash.NewFaker()), vm, reader,
+		uint256.Int{}, false, false,
+		uint256.Int{}, false, false,
+		&chain.Rules{IsLondon: true, IsAmsterdam: true, IsSpuriousDragon: true},
+		false, "",
+	)
+	require.NoError(t, err)
+	require.NotNil(t, receipt)
+
+	var burnLog *types.Log
+	for _, log := range receipt.Logs {
+		if log.Address == params.SystemAddress.Value() && len(log.Topics) > 0 && log.Topics[0] == misc.EthBurnLogEvent {
+			burnLog = log
+			break
+		}
+	}
+	require.NotNil(t, burnLog, "direct finalizeTx must replay selfdestruct status before EIP-7708 burn logging")
+	require.Len(t, burnLog.Topics, 2)
+	require.Equal(t, coinbase.Value().Hash(), burnLog.Topics[1])
+	expectedBurn := result.ExecutionResult.FeeTipped.Bytes32()
+	require.Equal(t, expectedBurn[:], []byte(burnLog.Data))
 }
 
 // coinbaseIsRecipientScenario: coinbase is the recipient of the transfer.
