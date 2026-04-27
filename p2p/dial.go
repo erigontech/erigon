@@ -127,6 +127,15 @@ type dialScheduler struct {
 	static     map[enode.ID]*dialTask
 	staticPool []*dialTask
 
+	// staticByID is a concurrency-safe view of the static-peer enodes,
+	// indexed by enode.ID. Populated by addStatic / removeStatic so
+	// setupConn can resolve an inbound peer's full enode (with its ENR
+	// record) by pubkey, instead of falling back to a stub enode that
+	// strips custom ENR entries. Held outside the loop's exclusive
+	// state because setupConn runs on a different goroutine.
+	staticByIDMu sync.RWMutex
+	staticByID   map[enode.ID]*enode.Node
+
 	// The dial history keeps recently dialed nodes. Members of history are not dialed.
 	history          expHeap
 	historyTimer     mclock.Timer
@@ -204,6 +213,12 @@ func (d *dialScheduler) stop() {
 
 // addStatic adds a static dial candidate.
 func (d *dialScheduler) addStatic(n *enode.Node) {
+	d.staticByIDMu.Lock()
+	if d.staticByID == nil {
+		d.staticByID = make(map[enode.ID]*enode.Node)
+	}
+	d.staticByID[n.ID()] = n
+	d.staticByIDMu.Unlock()
 	select {
 	case d.addStaticCh <- n:
 	case <-d.ctx.Done():
@@ -212,10 +227,23 @@ func (d *dialScheduler) addStatic(n *enode.Node) {
 
 // removeStatic removes a static dial candidate.
 func (d *dialScheduler) removeStatic(n *enode.Node) {
+	d.staticByIDMu.Lock()
+	delete(d.staticByID, n.ID())
+	d.staticByIDMu.Unlock()
 	select {
 	case d.remStaticCh <- n:
 	case <-d.ctx.Done():
 	}
+}
+
+// lookupStatic returns the enode for a configured static peer by ID, or
+// nil if no static entry exists. Used by Server.setupConn to resolve
+// inbound connections from known static peers to their full enode (with
+// custom ENR entries) instead of the stub created from pubkey + addr.
+func (d *dialScheduler) lookupStatic(id enode.ID) *enode.Node {
+	d.staticByIDMu.RLock()
+	defer d.staticByIDMu.RUnlock()
+	return d.staticByID[id]
 }
 
 // peerAdded updates the peer set.
