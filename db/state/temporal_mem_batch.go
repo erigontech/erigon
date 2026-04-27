@@ -568,7 +568,9 @@ func (sd *TemporalMemBatch) flushDiffSet(_ context.Context, tx kv.RwTx) error {
 			return err
 		}
 	}
-	log.Info("[dbg] diffset.flush", "t", time.Since(st), "blocks", len(sd.pastChangesAccumulator))
+	if took := time.Since(st); took > time.Millisecond {
+		log.Info("[dbg] diffset.flush", "t", took, "blocks", len(sd.pastChangesAccumulator))
+	}
 	return nil
 }
 
