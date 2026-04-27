@@ -125,6 +125,9 @@ func RecoverBlobs(cells []goethkzg.Cell, cellIndices []uint64) ([]goethkzg.Blob,
 	if err := validateCellIndices(cells, cellIndices); err != nil {
 		return nil, err
 	}
+	if len(cellIndices) < DataPerBlob {
+		return nil, errors.New("insufficient cells for recovery")
+	}
 	return gokzgRecoverBlobs(cells, cellIndices)
 }
 

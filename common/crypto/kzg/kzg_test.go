@@ -275,7 +275,9 @@ func TestVerifyCellsValidation(t *testing.T) {
 		// so use 3 proofs with 2 commitments to hit the modular check.
 		threeProofs := append(proofs, proofs[0])
 		threeCells := append(cells, cells[0])
-		if err := VerifyCells(threeCells, d.commitments[:1], threeProofs, indices); err == nil {
+		threeIndices := append(indices, indices[0])
+		commitments := []goethkzg.KZGCommitment{d.commitments[0], d.commitments[0]}
+		if err := VerifyCells(threeCells, commitments, threeProofs, threeIndices); err == nil {
 			t.Fatal("expected error for mismatched proofs/commitments count")
 		}
 	})
@@ -356,8 +358,13 @@ func TestRecoverBlobWithInsufficientCells(t *testing.T) {
 			partialCells = append(partialCells, d.cells[bi*CellsPerBlob+int(idx)])
 		}
 	}
-	if _, err := RecoverBlobs(partialCells, indices); err == nil {
+	_, err := RecoverBlobs(partialCells, indices)
+	if err == nil {
 		t.Fatalf("expected error with only %d cells, got none", len(indices))
+	}
+	expectedErr := "insufficient cells for recovery"
+	if err.Error() != expectedErr {
+		t.Fatalf("expected error %q, got %q", expectedErr, err.Error())
 	}
 }
 
