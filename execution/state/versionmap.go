@@ -502,6 +502,10 @@ func valuesEqual(path AccountPath, readVal, writeVal any) bool {
 		}
 		return rv.Balance.Eq(&wv.Balance) && rv.Nonce == wv.Nonce &&
 			rv.Incarnation == wv.Incarnation && rv.CodeHash == wv.CodeHash
+	case StoragePath:
+		rv, ok1 := readVal.(uint256.Int)
+		wv, ok2 := writeVal.(uint256.Int)
+		return ok1 && ok2 && rv.Eq(&wv)
 	default:
 		return false
 	}
