@@ -523,9 +523,9 @@ func decodeBlockAccessList(out *BlockAccessList, s *rlp.Stream) error {
 	var size uint64
 	if size, err = s.List(); err != nil {
 		if errors.Is(err, rlp.EOL) {
-			// EIP-7928: return initialized empty slice so 0xc0 round-trips
-			// as a valid empty BAL, distinct from nil (missing/pruned).
-			*out = make(BlockAccessList, 0)
+			// EOL at List() time means the BAL value is missing/pruned,
+			// not that an empty list (0xc0) was decoded. Return nil.
+			*out = nil
 			return nil
 		}
 		return err
@@ -560,7 +560,8 @@ func decodeBlockAccessList(out *BlockAccessList, s *rlp.Stream) error {
 		return err
 	}
 	if len(changes) == 0 {
-		// EIP-7928: initialized empty slice, not nil (see above).
+		// EIP-7928: a genuine empty list (0xc0) was successfully decoded.
+		// Return an initialized empty slice, not nil.
 		*out = make(BlockAccessList, 0)
 		return nil
 	}
