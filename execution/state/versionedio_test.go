@@ -378,6 +378,59 @@ func TestVersionedIO_StaleBalanceReadAfterWriteDoesNotCorruptNoOpCheck(t *testin
 	require.True(t, found, "address must appear in BAL (tx0's write is a real change)")
 }
 
+// TestVersionedIO_PostWriteBalanceReadDoesNotPoisonInitialBalance is the
+// regression test for the bal-devnet-3 block-91648 BAL hash mismatch.
+//
+// Pattern reproduced from the production failure: a single user-tx balance
+// write to an address (the EIP-1559 burnt contract on this devnet — the zero
+// address) followed by a *later* BalancePath read of the same address with
+// the same value. The later read is the one the parallel executor's block-end
+// finalize emits when it spins up a fresh IntraBlockState — the cached state
+// objects from the per-tx execution aren't shared, so the finalize hits the
+// underlying state and observes the post-write value (or, in the validator
+// path, the value that was pre-populated into the version map from the BAL
+// sidecar).
+//
+// Before the fix, updateRead would seed initialBalanceValue from this
+// post-write read; applyToBalance's net-zero filter would then see the very
+// first recorded write equal to "initialBalanceValue" and drop it, producing
+// a BAL hash that disagreed with the header.
+func TestVersionedIO_PostWriteBalanceReadDoesNotPoisonInitialBalance(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000000000"))
+	burned := *uint256.NewInt(0x16eaeb76) // value pulled from bal-devnet-3 block 91648
+
+	io := NewVersionedIO(2)
+
+	// Tx 1 burns the base fee to addr (value goes from pre-block balance to `burned`).
+	io.RecordWrites(Version{TxIndex: 1}, VersionedWrites{
+		&VersionedWrite{Address: addr, Path: BalancePath, Version: Version{TxIndex: 1}, Val: burned},
+	})
+
+	// A later BalancePath read of the same value — emitted by the fresh-IBS
+	// finalize / BAL pre-pop. Before the fix, this poisoned initialBalanceValue.
+	reads := ReadSet{}
+	reads.Set(VersionedRead{Address: addr, Path: BalancePath, Val: burned})
+	io.RecordReads(Version{TxIndex: 2}, reads)
+
+	bal := io.AsBlockAccessList()
+
+	found := false
+	for _, ac := range bal {
+		if ac.Address == addr {
+			found = true
+			require.Len(t, ac.BalanceChanges, 1,
+				"tx 1's burn write must remain in BAL — a post-write read with the same value must not seed initialBalanceValue and trigger the net-zero filter")
+			// blockAccessIndex = TxIndex+1, so tx 1 → Index=2.
+			require.Equal(t, uint32(2), ac.BalanceChanges[0].Index)
+			require.True(t, ac.BalanceChanges[0].Value.Eq(&burned),
+				"the surviving balance change must hold the actual burn value")
+		}
+	}
+	require.True(t, found, "burn target address must appear in BAL")
+}
+
 // TestIBSVersionedWrites_SelfdestructRetainsBalanceDropsOtherPaths verifies
 // that IntraBlockState.VersionedWrites retains SelfDestructPath, BalancePath
 // (including non-zero residual balances — EIP-7708 case 2), and IncarnationPath
