@@ -122,7 +122,7 @@ func (iit *InvertedIndexRoTx) FirstStepNotInFiles() kv.Step {
 // that step; maxSpan caps it.
 func calculateMergeStartTxNum(endTxNum, stepSize, maxSpan uint64) uint64 {
 	endStep := kv.Step(endTxNum / stepSize)
-	spanStep := endStep & -endStep
+	spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
 	span := min(spanStep.ToTxNum(stepSize), maxSpan)
 	return endTxNum - span
 }
