@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/db/state/stats"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -637,7 +638,7 @@ func readCommitmentBlockFromDB(ctx context.Context, db kv.TemporalRwDB) uint64 {
 		return 0
 	}
 	defer roTx.Rollback()
-	v, _, err := roTx.GetLatest(kv.CommitmentDomain, []byte("state"))
+	v, _, err := roTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
 	if err != nil || len(v) < 16 {
 		return 0
 	}

@@ -1,17 +1,24 @@
 package stagedsync
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/stretchr/testify/require"
 )
+
+// rpcHTTPClient has a bounded timeout so a stalled localhost:8545 cannot
+// hang the test suite. The endpoint is best-effort (the test t.Skip()'s
+// when RPC is unavailable), so a short timeout is appropriate.
+var rpcHTTPClient = &http.Client{Timeout: 10 * time.Second}
 
 // TestReceiptHashFromRPC fetches receipts from a running serial node
 // and verifies that DeriveSha produces the correct receipt root.
@@ -90,7 +97,14 @@ func rpcCall(t *testing.T, method string, params ...string) json.RawMessage {
 		paramStr = strings.Join(quoted, ",")
 	}
 	body := fmt.Sprintf(`{"jsonrpc":"2.0","method":"%s","params":[%s],"id":1}`, method, paramStr)
-	resp, err := http.Post("http://localhost:8545", "application/json", strings.NewReader(body))
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://localhost:8545", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("build RPC request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := rpcHTTPClient.Do(req)
 	if err != nil {
 		t.Skipf("RPC not available: %v", err)
 	}

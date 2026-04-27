@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/metrics"
 	execp2p "github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -259,7 +260,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		// This is the authoritative source for what's been committed —
 		// use it to cap collation so files don't capture uncommitted data.
 		if verifyTx, verifyErr := db.BeginTemporalRo(ctx); verifyErr == nil {
-			v, _, getErr := verifyTx.GetLatest(kv.CommitmentDomain, []byte("state"))
+			v, _, getErr := verifyTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
 			if getErr == nil && len(v) >= 16 {
 				committedTxNum := binary.BigEndian.Uint64(v[:8])
 				if a, ok := db.(state.HasAgg); ok {

@@ -1950,7 +1950,12 @@ type KeyUpdate struct {
 }
 
 func keyUpdateLessFn(i, j *KeyUpdate) bool {
-	return bytes.Compare(i.hashedKey, j.hashedKey) < 0 // sorted by hashedKey for correct trie traversal order
+	// Sorted by hashedKey for correct trie traversal order. We deliberately
+	// do NOT use plainKey as a tie-breaker: in this domain the hashedKey IS
+	// the trie position, so two plainKeys hashing to the same value
+	// represent the same logical trie node — coalescing them via
+	// ReplaceOrInsert (last write wins) is correct behaviour, not a bug.
+	return bytes.Compare(i.hashedKey, j.hashedKey) < 0
 }
 
 type UpdateFlags uint8

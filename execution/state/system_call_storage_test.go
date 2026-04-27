@@ -178,19 +178,19 @@ func TestBlockStateCacheStorageDirtyFlag(t *testing.T) {
 	// Put a committed value
 	cache.PutCommittedStorage(addr, slot, []byte{0x01})
 
-	// Write same value → should NOT be dirty (optimization)
+	// Write same value — WriteStorage marks dirty unconditionally so the
+	// commitment flush sees this slot, even if the post-write value matches
+	// the committed value (system-call storage relies on this behaviour).
 	cache.WriteStorage(addr, slot, []byte{0x01})
 
-	// Check dirty flag
-	if dirtySlots, ok := cache.dirtyStorage[addr]; ok {
-		// The dirty flag is set unconditionally in WriteStorage
-		require.True(t, dirtySlots[slot], "WriteStorage should always set dirty flag")
-	}
+	dirtySlots, ok := cache.dirtyStorage[addr]
+	require.True(t, ok, "Address should have dirty slots after same-value write")
+	assert.True(t, dirtySlots[slot], "WriteStorage should always set dirty flag, even when value unchanged")
 
-	// Write different value → should be dirty
+	// Write different value → still dirty.
 	cache.WriteStorage(addr, slot, []byte{0x02})
 
-	dirtySlots, ok := cache.dirtyStorage[addr]
+	dirtySlots, ok = cache.dirtyStorage[addr]
 	require.True(t, ok, "Address should have dirty slots")
 	assert.True(t, dirtySlots[slot], "Different value should be dirty")
 

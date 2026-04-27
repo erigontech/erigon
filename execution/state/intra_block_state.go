@@ -1435,11 +1435,9 @@ func (sdb *IntraBlockState) Selfdestruct(addr accounts.Address) (bool, error) {
 	// When versionMap is active, the calculator needs explicit DELETE entries
 	// for each storage slot — it can't use DomainDelPrefix like the serial path.
 	if sdb.versionMap != nil {
-		dirtyCount := len(stateObject.dirtyStorage)
 		for key := range stateObject.dirtyStorage {
 			versionWritten(sdb, addr, StoragePath, key, uint256.Int{})
 		}
-		_ = dirtyCount
 	}
 
 	return true, nil
@@ -2151,10 +2149,6 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 	}
 
 	for _, addr := range reverted {
-		if fmt.Sprintf("%x", addr.Value()) == "1a44076050125825900e736c501f859c50fe728c" {
-			fmt.Printf("TRACE_CONTRACT_REVERTED: block=%d tx=%d inc=%d addr=%x\n",
-				sdb.blockNum, sdb.txIndex, sdb.version, addr)
-		}
 		sdb.versionMap.DeleteAll(addr, sdb.txIndex)
 		delete(sdb.versionedWrites, addr)
 	}
