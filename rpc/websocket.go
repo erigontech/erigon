@@ -266,7 +266,7 @@ func (a *wsConnAdapter) Close() error {
 		defer close(closeDone)
 		_ = a.conn.Close(websocket.StatusNormalClosure, "")
 	}()
-	
+
 	timer := time.NewTimer(time.Second)
 	defer timer.Stop()
 	select {

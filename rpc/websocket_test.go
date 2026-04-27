@@ -388,6 +388,7 @@ func TestWebsocketServerGracefulClose(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to dial: %v", err)
 	}
+	defer conn.CloseNow()
 
 	if err := conn.Write(ctx, websocket.MessageText, []byte("invalid json")); err != nil {
 		t.Fatalf("failed to write: %v", err)
