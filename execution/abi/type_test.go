@@ -417,4 +417,3 @@ func TestNewTypeFixedPointWrongSizeSubmatch(t *testing.T) {
 		}
 	}
 }
-
