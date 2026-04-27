@@ -88,6 +88,7 @@ type CaplinConfig struct {
 	// Beacon API router configuration
 	BeaconAPIRouter beacon_router_configuration.RouterConfiguration
 
+	LocalDiscovery bool
 	BootstrapNodes []string
 	StaticPeers    []string
 

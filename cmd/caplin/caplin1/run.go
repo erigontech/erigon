@@ -384,11 +384,12 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	}
 
 	p2p, err := clp2p.NewP2Pmanager(ctx, &clp2p.P2PConfig{
-		IpAddr:     config.CaplinDiscoveryAddr,
-		Port:       int(config.CaplinDiscoveryPort),
-		TCPPort:    uint(config.CaplinDiscoveryTCPPort),
-		EnableUPnP: config.EnableUPnP,
-		NAT:        caplinNAT,
+		IpAddr:         config.CaplinDiscoveryAddr,
+		Port:           int(config.CaplinDiscoveryPort),
+		TCPPort:        uint(config.CaplinDiscoveryTCPPort),
+		EnableUPnP:     config.EnableUPnP,
+		NAT:            caplinNAT,
+		LocalDiscovery: config.LocalDiscovery,
 		//MaxInboundTrafficPerPeer:     config.MaxInboundTrafficPerPeer,
 		//MaxOutboundTrafficPerPeer:    config.MaxOutboundTrafficPerPeer,
 		//AdaptableTrafficRequirements: config.AdptableTrafficRequirements,
@@ -406,15 +407,16 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	columnStorage := blob_storage.NewDataColumnStore(afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinColumnData), pruneBlobDistance, beaconConfig, ethClock, emitters)
 	sentinel, localNode, err := service.StartSentinelService(&sentinel.SentinelConfig{
 		P2PConfig: clp2p.P2PConfig{
-			IpAddr:        config.CaplinDiscoveryAddr,
-			Port:          int(config.CaplinDiscoveryPort),
-			TCPPort:       uint(config.CaplinDiscoveryTCPPort),
-			EnableUPnP:    config.EnableUPnP,
-			NAT:           caplinNAT,
-			NetworkConfig: networkConfig,
-			BeaconConfig:  beaconConfig,
-			TmpDir:        dirs.Tmp,
-			MaxPeerCount:  config.MaxPeerCount,
+			IpAddr:         config.CaplinDiscoveryAddr,
+			Port:           int(config.CaplinDiscoveryPort),
+			TCPPort:        uint(config.CaplinDiscoveryTCPPort),
+			EnableUPnP:     config.EnableUPnP,
+			NAT:            caplinNAT,
+			LocalDiscovery: config.LocalDiscovery,
+			NetworkConfig:  networkConfig,
+			BeaconConfig:   beaconConfig,
+			TmpDir:         dirs.Tmp,
+			MaxPeerCount:   config.MaxPeerCount,
 		},
 		MaxInboundTrafficPerPeer:     config.MaxInboundTrafficPerPeer,
 		MaxOutboundTrafficPerPeer:    config.MaxOutboundTrafficPerPeer,
