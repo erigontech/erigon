@@ -1346,10 +1346,6 @@ func doIntegrity(cliCtx *cli.Context) error {
 			scCopy.SampleRatio = 0 // Sudeep will try to speedup it different way: by use `cache`
 			return integrity.CheckCommitmentKvi(ctx, scCopy, db, cache, failFast, logger)
 		case integrity.CommitmentKvDeref:
-			if chainConfig.ChainName == networkname.Bloatnet {
-				log.Warn("[todo] CommitmentKvDeref disabled on bloatnet. see https://github.com/erigontech/erigon/issues/20814")
-				return nil // TODO: taking too long on bloatnet
-			}
 			return integrity.CheckCommitmentKvDeref(ctx, db, cache, failFast, logger)
 		case integrity.CommitmentHistVal:
 			if !commitmentHistoryEnabled {
