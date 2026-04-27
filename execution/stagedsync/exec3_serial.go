@@ -378,14 +378,34 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 
 				chainReader := consensuschain.NewReader(se.cfg.chainConfig, se.applyTx, se.cfg.blockReader, se.logger)
 
+				// When the block is partially in frozen snapshots (startTxIndex > 0), the
+				// current-run blockReceipts only covers transactions executed in this
+				// invocation (none, in the all-frozen case). However, EIP-7685 request
+				// validation in Finalize needs logs from ALL transactions in the block
+				// (e.g. EIP-6110 deposit logs) to compute the requestsHash correctly.
+				// Read the historical receipts from the receipt-cache domain so that
+				// Finalize sees the complete log set even for fully-frozen blocks.
+				finalizeReceipts := blockReceipts
+				if startTxIndex > 0 && txTask.Header != nil && txTask.Header.RequestsHash != nil {
+					block, err2 := exec.BlockWithSenders(context.Background(), se.cfg.db, se.applyTx, se.cfg.blockReader, txTask.BlockNumber())
+					if err2 == nil && block != nil {
+						histReceipts, err2 := rawdb.ReadReceiptsCacheV2(se.applyTx, block, se.cfg.blockReader.TxnumReader())
+						if err2 == nil && len(histReceipts) > 0 {
+							// Prepend historical receipts for frozen txns before any newly
+							// executed receipts collected in this run.
+							finalizeReceipts = append(histReceipts, blockReceipts...)
+						}
+					}
+				}
+
 				if se.isBlockProduction {
 					_, _, err = se.cfg.engine.FinalizeAndAssemble(
 						se.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles,
-						blockReceipts, txTask.Withdrawals, chainReader, syscall, nil, se.logger)
+						finalizeReceipts, txTask.Withdrawals, chainReader, syscall, nil, se.logger)
 				} else {
 					_, err = se.cfg.engine.Finalize(
 						se.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles,
-						blockReceipts, txTask.Withdrawals, chainReader, syscall, false, se.logger)
+						finalizeReceipts, txTask.Withdrawals, chainReader, syscall, false, se.logger)
 				}
 
 				if err != nil {
