@@ -677,7 +677,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			stagedsync.StageFinishCfg(),
 		),
 		stagedsync.DefaultUnwindOrder,
-		stagedsync.DefaultPruneOrder,
 		logger,
 		stages.ModeApplyingBlocks,
 	)
@@ -691,8 +690,8 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	}
 
 	cfg.Genesis = gspec
-	pipelineStages := stageloop.NewPipelineStages(mock.Ctx, db, &cfg, mock.sentriesClient, mock.Notifications, snapDownloader, mock.BlockReader, blockRetire, tracer, nil)
-	mock.posStagedSync = stagedsync.New(cfg.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
+	pipelineStages := stageloop.NewPipelineStages(mock.Ctx, db, &cfg, mock.sentriesClient, mock.Notifications, snapDownloader, mock.BlockReader, blockRetire, tracer, nil, nil /* storage Provider unused in tests */, logger)
+	mock.posStagedSync = stagedsync.New(cfg.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, logger, stages.ModeApplyingBlocks)
 
 	// Create validation Sync and PipelineExecutor.
 	validationNotifications := shards.NewNotifications(nil)

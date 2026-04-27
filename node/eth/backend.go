@@ -181,7 +181,6 @@ type Ethereum struct {
 	pipelineStagedSync *stagedsync.Sync
 	syncStages         []*stagedsync.Stage
 	syncUnwindOrder    stagedsync.UnwindOrder
-	syncPruneOrder     stagedsync.PruneOrder
 
 	downloaderClient downloader.Client
 
@@ -952,20 +951,17 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	backend.syncStages = stageloop.NewDefaultStages(backend.sentryCtx, backend.chainDB, p2pConfig, config, backend.sentryProvider.Client, backend.notifications, backend.downloaderClient,
-		blockReader, blockRetire, tracer, afterSnapshotDownload)
+		blockReader, blockRetire, tracer, afterSnapshotDownload, backend.components.Storage, logger)
 	backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder
-	backend.syncPruneOrder = stagedsync.DefaultPruneOrder
 
-	backend.stagedSync = stagedsync.New(config.Sync, backend.syncStages, backend.syncUnwindOrder, backend.syncPruneOrder, logger, stages.ModeApplyingBlocks)
+	backend.stagedSync = stagedsync.New(config.Sync, backend.syncStages, backend.syncUnwindOrder, logger, stages.ModeApplyingBlocks)
 
-	// Storage owns a background goroutine that periodically invokes
-	// Aggregator.CollateAndPruneIfNeeded so file building and prune happen
-	// independently of FCU/stageloop kicks. Stage A of the storage-component
-	// extraction. Pruning callback is sync.RunPrune from the main staged sync
-	// (covers BlockHashes + Execution + Finish prune stages).
-	backend.components.Storage.StartBackgroundLoop(ctx, func(bgCtx context.Context, tx kv.TemporalRwTx) error {
-		return backend.stagedSync.RunPrune(bgCtx, tx, false, 0)
-	})
+	// Storage owns the prune loop entirely now (Stage D). Per-stage prune
+	// callbacks were removed from the Stage struct; equivalent work is
+	// registered with the Provider via RegisterPruneJob inside
+	// stageloop.NewDefaultStages / NewPipelineStages where the cfgs live.
+	// The bg loop's pruneFn iterates registered jobs each tick.
+	backend.components.Storage.StartBackgroundLoop(ctx)
 
 	// Stage A.2: storage owns BlockRetire too. The bg loop's retirer ticks
 	// every 30 s, kicks RetireBlocksInBackground (already async internally
@@ -996,8 +992,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		OnNewSnapshot:     backend.notifications.Events.OnNewSnapshot,
 	})
 
-	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentryProvider.Client, backend.notifications, backend.downloaderClient, blockReader, blockRetire, tracer, afterSnapshotDownload)
-	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
+	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentryProvider.Client, backend.notifications, backend.downloaderClient, blockReader, blockRetire, tracer, afterSnapshotDownload, backend.components.Storage, logger)
+	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, logger, stages.ModeApplyingBlocks)
 
 	validationNotifications := shards.NewNotifications(nil)
 	validationSync := stageloop.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentryProvider.Client,

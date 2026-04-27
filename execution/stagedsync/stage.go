@@ -17,10 +17,8 @@
 package stagedsync
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -40,11 +38,9 @@ type ExecFunc func(badBlockUnwind bool, s *StageState, unwinder Unwinder, doms *
 // * stageState - represents the state of this stage at the beginning of unwind.
 type UnwindFunc func(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, logger log.Logger) error
 
-// PruneFunc is the execution function for the stage to prune old data.
-// * state - is the current state of the stage and contains stage data.
-type PruneFunc func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error
-
-// Stage is a single sync stage in staged sync.
+// Stage is a single sync stage in staged sync. As of Stage D the staged-sync
+// pipeline only handles forward and unwind; prune work has moved to the
+// storage component's bg loop (see Provider.RegisterPruneJob).
 type Stage struct {
 	// Description is a string that is shown in the logs.
 	Description string
@@ -54,7 +50,6 @@ type Stage struct {
 	Forward ExecFunc
 	// Unwind is called when the stage should be unwound. The unwind logic should be there. MUST NOT be nil!
 	Unwind UnwindFunc
-	Prune  PruneFunc
 	// ID of the sync stage. Should not be empty and should be unique. It is recommended to prefix it with reverse domain to avoid clashes (`com.example.my-stage`).
 	ID stages.SyncStage
 	// Disabled defines if the stage is disabled. It sets up when the stage is build by its `StageBuilder`.
@@ -179,12 +174,35 @@ type PruneState struct {
 	ID              stages.SyncStage
 	ForwardProgress uint64 // progress of stage forward move
 	PruneProgress   uint64 // progress of stage prune move. after sync cycle it become equal to ForwardProgress by Done() method
-	state           *Sync
+	// state is the back-reference to the Sync that produced this PruneState
+	// (used by LogPrefix). Stage D extracted prune from the Sync pipeline,
+	// so prune jobs registered with the storage Provider construct
+	// PruneState directly via NewStandalonePruneState — those have state==nil
+	// and LogPrefix falls back to the stage ID.
+	state *Sync
 
 	CurrentSyncCycle CurrentSyncCycleInfo
 }
 
-func (s *PruneState) LogPrefix() string { return s.state.LogPrefix() + " Prune" }
+// NewStandalonePruneState builds a PruneState that doesn't carry a Sync
+// back-reference. Used by prune jobs registered with the storage component's
+// bg loop (Provider.RegisterPruneJob) — they don't have a Sync handle but
+// still need to call existing PruneXxx funcs that take *PruneState.
+func NewStandalonePruneState(id stages.SyncStage, fwdProgress, pruneProgress uint64, isInitialCycle bool) *PruneState {
+	return &PruneState{
+		ID:               id,
+		ForwardProgress:  fwdProgress,
+		PruneProgress:    pruneProgress,
+		CurrentSyncCycle: CurrentSyncCycleInfo{IsInitialCycle: isInitialCycle},
+	}
+}
+
+func (s *PruneState) LogPrefix() string {
+	if s.state == nil {
+		return string(s.ID) + " Prune"
+	}
+	return s.state.LogPrefix() + " Prune"
+}
 func (s *PruneState) Done(db kv.Putter) error {
 	return stages.SaveStagePruneProgress(db, s.ID, s.ForwardProgress)
 }

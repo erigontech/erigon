@@ -17,7 +17,6 @@
 package stagedsync
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -43,7 +42,6 @@ type Sync struct {
 
 	stages        []*Stage
 	unwindOrder   []*Stage
-	pruningOrder  []*Stage
 	currentStage  uint
 	timings       []Timing
 	logPrefixes   []string
@@ -193,7 +191,9 @@ func (s *Sync) SetCurrentStage(id stages.SyncStage) error {
 	return fmt.Errorf("stage not found with id: %v", id)
 }
 
-func New(cfg ethconfig.Sync, stagesList []*Stage, unwindOrder UnwindOrder, pruneOrder PruneOrder, logger log.Logger, mode stages.Mode) *Sync {
+// New constructs a staged-sync pipeline. Stage D removed the pruneOrder
+// parameter — prune is owned by the storage component's bg loop now.
+func New(cfg ethconfig.Sync, stagesList []*Stage, unwindOrder UnwindOrder, logger log.Logger, mode stages.Mode) *Sync {
 	stageMap := make(map[stages.SyncStage]*Stage, len(stagesList))
 	for _, s := range stagesList {
 		stageMap[s.ID] = s
@@ -207,21 +207,9 @@ func New(cfg ethconfig.Sync, stagesList []*Stage, unwindOrder UnwindOrder, prune
 		}
 	}
 
-	var filteredPruneOrder PruneOrder
-	for _, stageIndex := range pruneOrder {
-		if _, exists := stageMap[stageIndex]; exists {
-			filteredPruneOrder = append(filteredPruneOrder, stageIndex)
-		}
-	}
-
 	unwindStages := make([]*Stage, len(filteredUnwindOrder))
 	for i, stageIndex := range filteredUnwindOrder {
 		unwindStages[i] = stageMap[stageIndex]
-	}
-
-	pruneStages := make([]*Stage, len(filteredPruneOrder))
-	for i, stageIndex := range filteredPruneOrder {
-		pruneStages[i] = stageMap[stageIndex]
 	}
 
 	logPrefixes := make([]string, len(stagesList))
@@ -236,7 +224,6 @@ func New(cfg ethconfig.Sync, stagesList []*Stage, unwindOrder UnwindOrder, prune
 		stages:        stagesList,
 		currentStage:  0,
 		unwindOrder:   unwindStages,
-		pruningOrder:  pruneStages,
 		logPrefixes:   logPrefixes,
 		logger:        logger,
 		stagesIdsList: stagesIdsList,
@@ -449,24 +436,6 @@ func (s *Sync) Run(sd *execctx.SharedDomains, tx kv.TemporalRwTx, initialCycle, 
 	return more, errBadBlock
 }
 
-// RunPrune pruning for stages as per the defined pruning order, if enabled for that stage
-func (s *Sync) RunPrune(ctx context.Context, tx kv.RwTx, initialCycle bool, timeout time.Duration) error {
-	s.timings = s.timings[:0]
-	for i := 0; i < len(s.pruningOrder); i++ {
-		if s.pruningOrder[i] == nil || s.pruningOrder[i].Disabled || s.pruningOrder[i].Prune == nil {
-			continue
-		}
-		if err := s.pruneStage(ctx, initialCycle, s.pruningOrder[i], tx, timeout); err != nil {
-			return err
-		}
-	}
-	if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
-		return err
-	}
-	s.currentStage = 0
-	return nil
-}
-
 func (s *Sync) PrintTimings() []any {
 	var logCtx []any
 	count := 0
@@ -554,39 +523,6 @@ func (s *Sync) unwindStage(initialCycle bool, stage *Stage, sd *execctx.SharedDo
 	}
 	s.timings = append(s.timings, Timing{isUnwind: true, stage: stage.ID, took: took})
 	s.metricsCache.stageUnwindDurationSummary(stage.ID).Observe(took.Seconds())
-	return nil
-}
-
-// Run the pruning function for the given stage
-func (s *Sync) pruneStage(ctx context.Context, initialCycle bool, stage *Stage, tx kv.RwTx, timeout time.Duration) error {
-	start := time.Now()
-
-	stageState, err := s.StageState(stage.ID, tx, initialCycle, false)
-	if err != nil {
-		return err
-	}
-
-	pruneState, err := s.PruneStageState(stage.ID, stageState.BlockNumber, tx, initialCycle)
-	if err != nil {
-		return err
-	}
-	if err = s.SetCurrentStage(stage.ID); err != nil {
-		return err
-	}
-
-	err = stage.Prune(ctx, pruneState, tx, timeout, s.logger)
-	if err != nil {
-		return fmt.Errorf("[%s] %w", s.LogPrefix(), err)
-	}
-
-	took := time.Since(start)
-	if took > 30*time.Second {
-		s.logger.Info(fmt.Sprintf("[%s] prune done", s.LogPrefix()), "in", took)
-	} else {
-		s.logger.Debug(fmt.Sprintf("[%s] prune done", s.LogPrefix()), "in", took)
-	}
-	s.timings = append(s.timings, Timing{isPrune: true, stage: stage.ID, took: took})
-	s.metricsCache.stagePruneDurationSummary(stage.ID).Observe(took.Seconds())
 	return nil
 }
 

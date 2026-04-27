@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/node/components/storage"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/shards"
@@ -216,10 +217,14 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 				}
 				capRoTx.Rollback()
 			}
-			if err := agg.CollateAndPrune(ctx, db, func(pruneTx kv.TemporalRwTx) error {
-				return sync.RunPrune(ctx, pruneTx, initialCycle, 0)
+			// Stage D: prune is owned by storage component's bg loop (firing
+			// every 5 s in parallel). No need to drive it from here — pass
+			// a no-op pruneFn so collate still runs synchronously for the
+			// initial-sync cap-advance, but skip the prune integration.
+			if err := agg.CollateAndPrune(ctx, db, func(kv.TemporalRwTx) error {
+				return nil
 			}, logger); err != nil {
-				return fmt.Errorf("ProcessFrozenBlocks: collate+prune: %w", err)
+				return fmt.Errorf("ProcessFrozenBlocks: collate: %w", err)
 			}
 		}
 
@@ -716,6 +721,8 @@ func NewDefaultStages(ctx context.Context,
 	blockRetire services.BlockRetire,
 	tracer *tracers.Tracer,
 	afterSnapshotDownload func(ctx context.Context) error,
+	storageProvider *storage.Provider,
+	logger log.Logger,
 ) []*stagedsync.Stage {
 	var tracingHooks *tracing.Hooks
 	if tracer != nil {
@@ -723,17 +730,79 @@ func NewDefaultStages(ctx context.Context,
 	}
 	dirs := cfg.Dirs
 	blockWriter := blockio.NewBlockWriter()
+	snapshotsCfg := stagedsync.StageSnapshotsCfg(db, controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.InternalCL && cfg.CaplinConfig.ArchiveBlocks, cfg.CaplinConfig.ArchiveBlobs, cfg.CaplinConfig.ArchiveStates, cfg.Prune, afterSnapshotDownload, cfg.Snapshot.ManifestReady)
+	executeCfg := stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{Tracer: tracingHooks}, notifications, cfg.StateStream, dbg.BadBlockHalt, dirs, blockReader, controlServer.Hd, cfg.Genesis, cfg.Sync, cfg.ExperimentalBAL)
+	txLookupCfg := stagedsync.StageTxLookupCfg(cfg.Prune, dirs.Tmp, blockReader)
+	registerPruneJobs(storageProvider, snapshotsCfg, executeCfg, txLookupCfg, logger)
 	return stagedsync.DefaultStages(
 		ctx,
-		stagedsync.StageSnapshotsCfg(db, controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.InternalCL && cfg.CaplinConfig.ArchiveBlocks, cfg.CaplinConfig.ArchiveBlobs, cfg.CaplinConfig.ArchiveStates, cfg.Prune, afterSnapshotDownload, cfg.Snapshot.ManifestReady),
+		snapshotsCfg,
 		stagedsync.StageHeadersCfg(controlServer.Hd, controlServer.ChainConfig, cfg.Sync, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, p2pCfg.NoDiscovery, blockReader),
 		stagedsync.StageBlockHashesCfg(dirs.Tmp, blockWriter),
 		stagedsync.StageBodiesCfg(controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, controlServer.ChainConfig, blockReader, blockWriter),
 		stagedsync.StageSendersCfg(controlServer.ChainConfig, cfg.Sync, dbg.BadBlockHalt, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd),
-		stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{Tracer: tracingHooks}, notifications, cfg.StateStream, dbg.BadBlockHalt, dirs, blockReader, controlServer.Hd, cfg.Genesis, cfg.Sync, cfg.ExperimentalBAL),
-		stagedsync.StageTxLookupCfg(cfg.Prune, dirs.Tmp, blockReader),
+		executeCfg,
+		txLookupCfg,
 		stagedsync.StageFinishCfg(),
 	)
+}
+
+// registerPruneJobs is the Stage D bridge: backend.go used to wire each
+// stage's Prune callback inside default_stages.go, but Stage D removed
+// stage-level Prune entirely. Instead the equivalent work is registered
+// with the storage Provider's bg loop here, where the cfgs are built. The
+// bg loop ticks every 5 s and runs each registered job inside the agg-
+// managed RwTx that CollateAndPruneIfNeeded opens.
+//
+// Each closure builds a standalone PruneState (state==nil) from the chainDB
+// progress so the existing PruneXxx funcs work unchanged.
+func registerPruneJobs(p *storage.Provider, snapshotsCfg stagedsync.SnapshotsCfg, executeCfg stagedsync.ExecuteBlockCfg, txLookupCfg stagedsync.TxLookupCfg, logger log.Logger) {
+	if p == nil {
+		return
+	}
+	p.RegisterPruneJob(storage.PruneJob{
+		Name: "Snapshots",
+		Fn: func(ctx context.Context, tx kv.TemporalRwTx) error {
+			ps, err := buildStandalonePruneState(tx, stages.Snapshots)
+			if err != nil {
+				return err
+			}
+			return stagedsync.SnapshotsPrune(ps, snapshotsCfg, ctx, tx, logger)
+		},
+	})
+	p.RegisterPruneJob(storage.PruneJob{
+		Name: "Execution",
+		Fn: func(ctx context.Context, tx kv.TemporalRwTx) error {
+			ps, err := buildStandalonePruneState(tx, stages.Execution)
+			if err != nil {
+				return err
+			}
+			return stagedsync.PruneExecutionStage(ctx, ps, tx, executeCfg, 0, logger)
+		},
+	})
+	p.RegisterPruneJob(storage.PruneJob{
+		Name: "TxLookup",
+		Fn: func(ctx context.Context, tx kv.TemporalRwTx) error {
+			ps, err := buildStandalonePruneState(tx, stages.TxLookup)
+			if err != nil {
+				return err
+			}
+			return stagedsync.PruneTxLookup(ps, tx, txLookupCfg, ctx, logger)
+		},
+	})
+}
+
+func buildStandalonePruneState(tx kv.Tx, stageID stages.SyncStage) (*stagedsync.PruneState, error) {
+	fwd, err := stages.GetStageProgress(tx, stageID)
+	if err != nil {
+		return nil, err
+	}
+	prunedTo, err := stages.GetStagePruneProgress(tx, stageID)
+	if err != nil {
+		return nil, err
+	}
+	// At-tip mode: bg loop never runs during initial sync's bulk path.
+	return stagedsync.NewStandalonePruneState(stageID, fwd, prunedTo, false), nil
 }
 
 func NewPipelineStages(ctx context.Context,
@@ -746,6 +815,8 @@ func NewPipelineStages(ctx context.Context,
 	blockRetire services.BlockRetire,
 	tracer *tracers.Tracer,
 	afterSnapshotDownload func(ctx context.Context) error,
+	storageProvider *storage.Provider,
+	logger log.Logger,
 ) []*stagedsync.Stage {
 	var tracingHooks *tracing.Hooks
 	if tracer != nil {
@@ -760,12 +831,16 @@ func NewPipelineStages(ctx context.Context,
 	}
 	_ = depositContract
 
+	snapshotsCfg := stagedsync.StageSnapshotsCfg(db, controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.InternalCL && cfg.CaplinConfig.ArchiveBlocks, cfg.CaplinConfig.ArchiveBlobs, cfg.CaplinConfig.ArchiveStates, cfg.Prune, afterSnapshotDownload, cfg.Snapshot.ManifestReady)
+	executeCfg := stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{Tracer: tracingHooks}, notifications, cfg.StateStream, dbg.BadBlockHalt, dirs, blockReader, controlServer.Hd, cfg.Genesis, cfg.Sync, cfg.ExperimentalBAL)
+	txLookupCfg := stagedsync.StageTxLookupCfg(cfg.Prune, dirs.Tmp, blockReader)
+	registerPruneJobs(storageProvider, snapshotsCfg, executeCfg, txLookupCfg, logger)
 	return stagedsync.PipelineStages(ctx,
-		stagedsync.StageSnapshotsCfg(db, controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.InternalCL && cfg.CaplinConfig.ArchiveBlocks, cfg.CaplinConfig.ArchiveBlobs, cfg.CaplinConfig.ArchiveStates, cfg.Prune, afterSnapshotDownload, cfg.Snapshot.ManifestReady),
+		snapshotsCfg,
 		stagedsync.StageBlockHashesCfg(dirs.Tmp, blockWriter),
 		stagedsync.StageSendersCfg(controlServer.ChainConfig, cfg.Sync, dbg.BadBlockHalt, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd),
-		stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{Tracer: tracingHooks}, notifications, cfg.StateStream, dbg.BadBlockHalt, dirs, blockReader, controlServer.Hd, cfg.Genesis, cfg.Sync, cfg.ExperimentalBAL),
-		stagedsync.StageTxLookupCfg(cfg.Prune, dirs.Tmp, blockReader),
+		executeCfg,
+		txLookupCfg,
 		stagedsync.StageFinishCfg(),
 		stagedsync.StageWitnessProcessingCfg(controlServer.ChainConfig, controlServer.WitnessBuffer),
 	)
@@ -791,7 +866,6 @@ func NewInMemoryExecution(
 			stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{}, notifications, cfg.StateStream, true, cfg.Dirs, blockReader, controlServer.Hd, cfg.Genesis, cfg.Sync, cfg.ExperimentalBAL),
 		),
 		stagedsync.StateUnwindOrder,
-		nil, /* pruneOrder */
 		logger,
 		stages.ModeForkValidation,
 	)

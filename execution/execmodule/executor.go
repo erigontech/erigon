@@ -113,11 +113,6 @@ func (pe *PipelineExecutor) RunUnwind(sd *execctx.SharedDomains, tx kv.TemporalR
 	return pe.sync.RunUnwind(sd, tx)
 }
 
-// RunPrune executes pruning on the main pipeline.
-func (pe *PipelineExecutor) RunPrune(ctx context.Context, tx kv.RwTx, initialCycle bool, timeout time.Duration) error {
-	return pe.sync.RunPrune(ctx, tx, initialCycle, timeout)
-}
-
 // CommitCycleFn is called between hasMore iterations to persist accumulated
 // state and obtain a fresh tx for the next iteration. Implementations must
 // flush the SharedDomains, commit, and return a fresh kv.TemporalRwTx.
@@ -163,9 +158,9 @@ func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomai
 			return tx, err
 		}
 
-		if err := pe.sync.RunPrune(ctx, tx, cfg.InitialCycle, cfg.PruneTimeout); err != nil {
-			return tx, err
-		}
+		// Stage D: prune is owned by the storage component's bg loop —
+		// the per-iteration prune call here was redundant with the bg
+		// loop's 5 s tick and is removed.
 
 		if cfg.ShouldBreak != nil {
 			stop, err := cfg.ShouldBreak(tx)

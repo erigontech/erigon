@@ -30,6 +30,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"golang.org/x/sync/semaphore"
@@ -88,23 +89,66 @@ type Provider struct {
 
 	logger log.Logger
 
-	// bg owns the background workers (collation+prune today, retire later).
-	// nil until StartBackgroundLoop is called from backend.go after the Sync
-	// object is constructed (Sync supplies the prune callback).
+	// bg owns the background workers (collation, prune, retire). nil until
+	// StartBackgroundLoop is called from backend.go after the Sync and stage
+	// configs are constructed (so backend.go can register the per-stage
+	// prune jobs first via RegisterPruneJob).
 	bg *backgroundLoop
+
+	// pruneJobs is the list of registered prune callbacks the bg loop runs
+	// inside CollateAndPruneIfNeeded's pruneFn closure. Guarded by
+	// pruneJobsMu so callers can register before or after StartBackgroundLoop.
+	pruneJobsMu sync.Mutex
+	pruneJobs   []PruneJob
+}
+
+// PruneJob is a registered piece of prune work the storage bg loop runs.
+// Stage D extracted prune from the stage loop entirely — each stage that
+// previously had a Prune callback registers its work as a PruneJob with
+// the storage Provider, and the bg loop iterates them inside
+// CollateAndPruneIfNeeded's pruneFn closure (using the agg-managed tx).
+type PruneJob struct {
+	Name string // for logging + per-job timing
+	Fn   PruneFn
+}
+
+// RegisterPruneJob appends a prune job to be run by the bg loop's prune
+// callback. Safe to call before or after StartBackgroundLoop — the bg
+// loop snapshots the slice on each tick under pruneJobsMu.
+func (p *Provider) RegisterPruneJob(job PruneJob) {
+	if job.Fn == nil {
+		return
+	}
+	p.pruneJobsMu.Lock()
+	p.pruneJobs = append(p.pruneJobs, job)
+	p.pruneJobsMu.Unlock()
+}
+
+// snapshotPruneJobs returns a copy of the current registered prune jobs.
+// Called from the bg loop's pruneFn each tick; cheap (jobs is a few entries).
+func (p *Provider) snapshotPruneJobs() []PruneJob {
+	p.pruneJobsMu.Lock()
+	defer p.pruneJobsMu.Unlock()
+	if len(p.pruneJobs) == 0 {
+		return nil
+	}
+	out := make([]PruneJob, len(p.pruneJobs))
+	copy(out, p.pruneJobs)
+	return out
 }
 
 // StartBackgroundLoop spawns the storage-owned background workers. Must be
-// called from backend.go AFTER the Sync object exists (Sync.RunPrune is the
-// pruneFn the bg loop invokes via Aggregator.CollateAndPruneIfNeeded).
+// called from backend.go AFTER all RegisterPruneJob calls have completed —
+// the bg loop iterates p.pruneJobs without locking, so registration after
+// Start is unsupported.
 //
 // Today's loop: a single collator goroutine ticking every 5s. If the chainDB
-// has no Aggregator (integration tools) or pruneFn is nil, this is a no-op.
+// has no Aggregator (integration tools), this is a no-op.
 //
 // Idempotent: repeated calls overwrite the existing loop; the prior loop is
 // stopped first. Provider.Close cancels and waits.
-func (p *Provider) StartBackgroundLoop(ctx context.Context, pruneFn PruneFn) {
-	if p.ChainDB == nil || pruneFn == nil {
+func (p *Provider) StartBackgroundLoop(ctx context.Context) {
+	if p.ChainDB == nil {
 		return
 	}
 	hasAgg, ok := p.ChainDB.(dbstate.HasAgg)
@@ -117,6 +161,16 @@ func (p *Provider) StartBackgroundLoop(ctx context.Context, pruneFn PruneFn) {
 	}
 	if p.bg != nil {
 		p.bg.Stop()
+	}
+	// The bg loop's pruneFn snapshots the registered jobs each tick under
+	// pruneJobsMu, so callers can RegisterPruneJob before or after Start.
+	pruneFn := func(ctx context.Context, tx kv.TemporalRwTx) error {
+		for _, j := range p.snapshotPruneJobs() {
+			if err := j.Fn(ctx, tx); err != nil {
+				return fmt.Errorf("storage bg prune %q: %w", j.Name, err)
+			}
+		}
+		return nil
 	}
 	p.bg = newBackgroundLoop(ctx, p.ChainDB, agg, pruneFn, p.logger)
 	p.bg.Start()
