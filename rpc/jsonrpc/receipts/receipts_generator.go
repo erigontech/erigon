@@ -42,7 +42,7 @@ import (
 type Generator struct {
 	stateCache    kvcache.Cache
 	receiptsCache *lru.Cache[common.Hash, types.Receipts]
-	receiptCache  *lru.Cache[common.Hash, *types.Receipt]
+	receiptCache  *lru.Cache[uint64, *types.Receipt] // keyed by txNum: avoids TxnByIdxInBlock (snapshot read) on cache hit
 
 	// blockExecMutex ensuring that only 1 block with given hash
 	// executed at a time - all parallel requests for same hash will wait for results
@@ -85,7 +85,7 @@ func NewGenerator(dirs datadir.Dirs, blockReader services.FullBlockReader, engin
 		panic(err)
 	}
 
-	receiptCache, err := lru.New[common.Hash, *types.Receipt](receiptsCacheLimit * 100) // think they should be connected in some of that way
+	receiptCache, err := lru.New[uint64, *types.Receipt](receiptsCacheLimit * 100) // think they should be connected in some of that way
 	if err != nil {
 		panic(err)
 	}
@@ -127,8 +127,32 @@ func (g *Generator) GetCachedReceipts(ctx context.Context, blockHash common.Hash
 	return g.receiptsCache.Get(blockHash)
 }
 
-func (g *Generator) GetCachedReceipt(ctx context.Context, hash common.Hash) (*types.Receipt, bool) {
-	return g.receiptCache.Get(hash)
+func (g *Generator) GetCachedReceipt(ctx context.Context, txNum uint64) (*types.Receipt, bool) {
+	return g.receiptCache.Get(txNum)
+}
+
+// TryGetCachedReceipt is a fast path that avoids calling TxnByIdxInBlock.
+// TxnByIdxInBlock opens snapshot segments (Bodies + Transactions) or reads MDBX just to obtain
+// the txnHash, which is then used only to key the execution mutex in GetReceipt. When the receipt
+// is already cached, that I/O and decode are unnecessary — TryGetCachedReceipt short-circuits them.
+//
+// Only safe for callers that do not require postState (i.e. pass postState=nil to GetReceipt).
+// receiptCache (per-tx, keyed by txNum) is checked first because it is populated by every
+// eth_getLogs / eth_getTransactionReceipt call. receiptsCache (block-level) is only populated
+// by eth_getBlockReceipts, so it is checked second to avoid an unnecessary lookup in the common case.
+func (g *Generator) TryGetCachedReceipt(blockHash common.Hash, txNum uint64, txIndex int) (*types.Receipt, bool) {
+	if receipt, ok := g.receiptCache.Get(txNum); ok {
+		if receipt.BlockHash == blockHash && len(receipt.PostState) == 0 {
+			return receipt, true
+		}
+		// stale or postState mismatch — let GetReceipt evict under its mutex
+	}
+	if txIndex >= 0 {
+		if receipts, ok := g.receiptsCache.Get(blockHash); ok && len(receipts) > txIndex {
+			return receipts[txIndex], true
+		}
+	}
+	return nil, false
 }
 
 var rpcDisableRCache = dbg.EnvBool("RPC_DISABLE_RCACHE", false)
@@ -172,12 +196,12 @@ func (g *Generator) addToCacheReceipts(header *types.Header, receipts types.Rece
 	g.receiptsCache.Add(header.Hash(), receipts)
 }
 
-func (g *Generator) addToCacheReceipt(hash common.Hash, receipt *types.Receipt) {
+func (g *Generator) addToCacheReceipt(txNum uint64, receipt *types.Receipt) {
 	if rpcDisableRLRU {
 		return
 	}
-	//g.receiptCache.Add(hash, receipt.Copy()) // .Copy() helps pprof to attribute memory to cache - instead of evm (where it was allocated). but 5% perf
-	g.receiptCache.Add(hash, receipt)
+	//g.receiptCache.Add(txNum, receipt.Copy()) // .Copy() helps pprof to attribute memory to cache - instead of evm (where it was allocated). but 5% perf
+	g.receiptCache.Add(txNum, receipt)
 }
 
 type PostStateInfo struct {
@@ -216,13 +240,13 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 	mu := g.txnExecMutex.lock(txnHash)
 	defer g.txnExecMutex.unlock(mu, txnHash)
-	if receipt, ok := g.receiptCache.Get(txnHash); ok {
+	if receipt, ok := g.receiptCache.Get(txNum); ok {
 		if receipt.BlockHash == blockHash && // elegant way to handle reorgs
 			calculatePostState == (len(receipt.PostState) != 0) { // verify if the expected postState matches the actual postState on cache. Otherwise re-calculate it
 			return receipt, nil
 		}
 
-		g.receiptCache.Remove(txnHash) // remove old receipt with same hash, but different blockHash OR different postState
+		g.receiptCache.Remove(txNum) // remove old receipt with same txNum, but different blockHash OR different postState
 	}
 
 	// Now the snapshot have not the `postState` field. Therefore, for pre-Byzantium blocks,
@@ -242,7 +266,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			return nil, err
 		}
 		if ok && receiptFromDB != nil && !dbg.AssertEnabled {
-			g.addToCacheReceipt(txnHash, receiptFromDB)
+			g.addToCacheReceipt(txNum, receiptFromDB)
 			return receiptFromDB, nil
 		}
 	}
@@ -417,7 +441,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		receipt.Logs[i].Index = hexutil.Uint(firstLogIndex + uint32(i))
 	}
 
-	g.addToCacheReceipt(txnHash, receipt)
+	g.addToCacheReceipt(txNum, receipt)
 
 	if dbg.AssertEnabled && receiptFromDB != nil {
 		g.assertEqualReceipts(receipt, receiptFromDB)

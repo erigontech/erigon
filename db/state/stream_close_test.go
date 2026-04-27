@@ -53,14 +53,14 @@ func TestDomainLatestIterFileInitCursorMDBXClosesDupCursorOutsideRange(t *testin
 		d:        &Domain{DomainCfg: statecfg.DomainCfg{ValuesTable: "vals"}},
 	}
 
-	err := hi.initCursorMDBX(domainRoTx)
+	err := hi.initCursorOnDB(domainRoTx)
 
 	require.NoError(t, err)
 	require.Equal(t, 1, c.closed)
 	require.Zero(t, hi.h.Len())
 }
 
-func TestDomainLatestIterFileInitCursorMDBXClosesCursorOutsideRangeForLargeValues(t *testing.T) {
+func TestDomainLatestIterFileInitCursorOnDBClosesCursorOutsideRangeForLargeValues(t *testing.T) {
 	c := &testCursor{seekKey: []byte("b\x00\x00\x00\x00\x00\x00\x00\x00")}
 	tx := &testTx{cursor: c}
 	hi := &DomainLatestIterFile{
@@ -73,7 +73,7 @@ func TestDomainLatestIterFileInitCursorMDBXClosesCursorOutsideRangeForLargeValue
 		d:        &Domain{DomainCfg: statecfg.DomainCfg{LargeValues: true, ValuesTable: "vals"}},
 	}
 
-	err := hi.initCursorMDBX(domainRoTx)
+	err := hi.initCursorOnDB(domainRoTx)
 
 	require.NoError(t, err)
 	require.Equal(t, 1, c.closed)
