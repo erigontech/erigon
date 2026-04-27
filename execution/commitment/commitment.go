@@ -334,7 +334,7 @@ type BranchEncoder struct {
 
 	// Deferred updates support
 	deferUpdates       bool
-	maxDeferredUpdates int // flush threshold; 0 = use defaultMaxDeferredUpdates from config
+	maxDeferredUpdates int // flush threshold; 0 = use DefaultMaxDeferredUpdates from config
 	deferred           []*DeferredBranchUpdate
 	pendingPrefixes    *maphash.NonConcurrentMap[struct{}] // tracks pending prefixes to detect duplicates
 	cache              *WarmupCache
@@ -615,7 +615,7 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	// Flush if duplicate prefix or too many deferred updates
 	limit := be.maxDeferredUpdates
 	if limit == 0 {
-		limit = defaultMaxDeferredUpdates
+		limit = DefaultMaxDeferredUpdates
 	}
 	needsFlush := len(be.deferred) >= limit
 	if !needsFlush {

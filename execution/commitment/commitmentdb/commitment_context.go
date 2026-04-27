@@ -42,15 +42,16 @@ type sd interface {
 }
 
 type SharedDomainsCommitmentContext struct {
-	sharedDomains sd
-	updates       *commitment.Updates
-	patriciaTrie  commitment.Trie
-	justRestored  atomic.Bool // set to true when commitment trie was just restored from snapshot
-	trace         bool
-	stateReader   StateReader
-	paraTrieDB    kv.TemporalRoDB // DB used for para trie and/or parallel trie warmup
-	trieWarmup    bool            // toggle for parallel trie warmup of MDBX page cache during commitment
-	tmpDir        string          // temp directory for ETL collectors
+	sharedDomains    sd
+	updates          *commitment.Updates
+	patriciaTrie     commitment.Trie
+	justRestored     atomic.Bool // set to true when commitment trie was just restored from snapshot
+	trace            bool
+	stateReader      StateReader
+	paraTrieDB       kv.TemporalRoDB // DB used for para trie and/or parallel trie warmup
+	trieWarmup       bool            // toggle for parallel trie warmup of MDBX page cache during commitment
+	warmupNumWorkers int             // number of workers for the warmup pool; 0 = use commitment.DefaultWarmupNumWorkers
+	tmpDir           string          // temp directory for ETL collectors
 
 	// deferCommitmentUpdates when true, deferred branch updates are stored as a pending update
 	// instead of being applied inline after Process(). Used during fork validation.
@@ -147,9 +148,10 @@ func (sdc *SharedDomainsCommitmentContext) ClearWarmupCache() {
 
 func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir string, cfg commitment.TrieConfig) *SharedDomainsCommitmentContext {
 	ctx := &SharedDomainsCommitmentContext{
-		sharedDomains: sd,
-		tmpDir:        tmpDir,
-		trieWarmup:    cfg.EnableTrieWarmup,
+		sharedDomains:    sd,
+		tmpDir:           tmpDir,
+		trieWarmup:       cfg.EnableTrieWarmup,
+		warmupNumWorkers: cfg.WarmupNumWorkersOrDefault(),
 	}
 	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(mode, tmpDir, cfg)
 	return ctx
@@ -362,7 +364,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 			warmupConfig.CtxFactory = sdc.trieContextFactory(ctx, sdc.paraTrieDB, txNum)
 		}
 		warmupConfig.Enabled = sdc.trieWarmup
-		warmupConfig.NumWorkers = 16
+		warmupConfig.NumWorkers = sdc.warmupNumWorkers
 		warmupConfig.MaxDepth = commitment.WarmupMaxDepth
 		warmupConfig.LogPrefix = logPrefix
 	}

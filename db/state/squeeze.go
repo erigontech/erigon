@@ -867,6 +867,12 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	logger.Info("[commitment_rebuild] collected shards to build", "count", len(sf.d[kv.AccountsDomain]))
 	start := time.Now()
 
+	// rebuild trie config: drives both the per-shard step cap below and the SharedDomains
+	// constructed inside the inner loop. Variant is set per-iteration depending on
+	// statecfg.ExperimentalConcurrentCommitment.
+	rebuildTrieCfg := commitment.DefaultTrieConfig()
+	maxShardSteps := rebuildTrieCfg.RebuildShardMaxStepsOrDefault()
+
 	var totalKeysCommitted uint64
 
 	for i, r := range ranges {
@@ -896,7 +902,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		keysPerStep := totalKeys / stepsInShard // how many keys in just one step?
 
 		// shardStepsSize := kv.Step(2)
-		shardStepsSize := kv.Step(min(uint64(math.Pow(2, math.Log2(float64(stepsInShard)))), 16))
+		shardStepsSize := kv.Step(min(uint64(math.Pow(2, math.Log2(float64(stepsInShard)))), maxShardSteps))
 		if uint64(shardStepsSize) != stepsInShard { // processing shard in several smaller steps
 			shardTo = shardFrom + shardStepsSize // if shard is quite big, we will process it in several steps
 		}
@@ -968,9 +974,9 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			}
 			defer rwTx.Rollback()
 
-			rebuildTrieCfg := commitment.DefaultTrieConfig()
-			rebuildTrieCfg.Variant = trieVariant
-			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), rebuildTrieCfg)
+			iterTrieCfg := rebuildTrieCfg
+			iterTrieCfg.Variant = trieVariant
+			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), iterTrieCfg)
 			if err != nil {
 				return nil, err
 			}

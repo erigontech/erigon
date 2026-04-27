@@ -36,13 +36,46 @@ func TestDefaultTrieConfig(t *testing.T) {
 	if cfg.SubtrieConfig != nil {
 		t.Error("SubtrieConfig should default to nil")
 	}
+	if cfg.RebuildShardMaxSteps != 0 {
+		t.Errorf("RebuildShardMaxSteps should default to 0 (use default), got %d", cfg.RebuildShardMaxSteps)
+	}
+	if cfg.KeyReferencingMinSteps != 0 {
+		t.Errorf("KeyReferencingMinSteps should default to 0 (use default), got %d", cfg.KeyReferencingMinSteps)
+	}
+	if cfg.WarmupNumWorkers != 0 {
+		t.Errorf("WarmupNumWorkers should default to 0 (use default), got %d", cfg.WarmupNumWorkers)
+	}
+}
+
+func TestTrieConfig_OrDefaultHelpers(t *testing.T) {
+	cfg := TrieConfig{}
+	if got := cfg.RebuildShardMaxStepsOrDefault(); got != DefaultRebuildShardMaxSteps {
+		t.Errorf("RebuildShardMaxStepsOrDefault: expected %d, got %d", DefaultRebuildShardMaxSteps, got)
+	}
+	if got := cfg.KeyReferencingMinStepsOrDefault(); got != DefaultKeyReferencingMinSteps {
+		t.Errorf("KeyReferencingMinStepsOrDefault: expected %d, got %d", DefaultKeyReferencingMinSteps, got)
+	}
+	if got := cfg.WarmupNumWorkersOrDefault(); got != DefaultWarmupNumWorkers {
+		t.Errorf("WarmupNumWorkersOrDefault: expected %d, got %d", DefaultWarmupNumWorkers, got)
+	}
+
+	cfg = TrieConfig{RebuildShardMaxSteps: 7, KeyReferencingMinSteps: 4, WarmupNumWorkers: 3}
+	if got := cfg.RebuildShardMaxStepsOrDefault(); got != 7 {
+		t.Errorf("RebuildShardMaxStepsOrDefault: expected 7, got %d", got)
+	}
+	if got := cfg.KeyReferencingMinStepsOrDefault(); got != 4 {
+		t.Errorf("KeyReferencingMinStepsOrDefault: expected 4, got %d", got)
+	}
+	if got := cfg.WarmupNumWorkersOrDefault(); got != 3 {
+		t.Errorf("WarmupNumWorkersOrDefault: expected 3, got %d", got)
+	}
 }
 
 func TestTrieConfig_maxDeferredUpdatesOrDefault(t *testing.T) {
 	t.Run("zero returns default", func(t *testing.T) {
 		cfg := TrieConfig{}
-		if got := cfg.maxDeferredUpdatesOrDefault(); got != defaultMaxDeferredUpdates {
-			t.Errorf("expected %d, got %d", defaultMaxDeferredUpdates, got)
+		if got := cfg.maxDeferredUpdatesOrDefault(); got != DefaultMaxDeferredUpdates {
+			t.Errorf("expected %d, got %d", DefaultMaxDeferredUpdates, got)
 		}
 	})
 	t.Run("custom value preserved", func(t *testing.T) {
@@ -159,11 +192,11 @@ func TestTrieConfig_MaxDeferredUpdatesApplied(t *testing.T) {
 		t.Errorf("expected branchEncoder.maxDeferredUpdates=999, got %d", hph.branchEncoder.maxDeferredUpdates)
 	}
 
-	// Default config should give defaultMaxDeferredUpdates
+	// Default config should give DefaultMaxDeferredUpdates
 	hph2 := NewHexPatriciaHashed(length.Addr, nil, DefaultTrieConfig())
 	defer hph2.Release()
 
-	if hph2.branchEncoder.maxDeferredUpdates != defaultMaxDeferredUpdates {
-		t.Errorf("expected branchEncoder.maxDeferredUpdates=%d, got %d", defaultMaxDeferredUpdates, hph2.branchEncoder.maxDeferredUpdates)
+	if hph2.branchEncoder.maxDeferredUpdates != DefaultMaxDeferredUpdates {
+		t.Errorf("expected branchEncoder.maxDeferredUpdates=%d, got %d", DefaultMaxDeferredUpdates, hph2.branchEncoder.maxDeferredUpdates)
 	}
 }
