@@ -134,11 +134,17 @@ func (al *accessList) DeleteSlot(address accounts.Address, slot accounts.Storage
 	if !addrOk {
 		panic("reverting slot change, address not present in list")
 	}
+	if idx == -1 {
+		panic("reverting slot change, address has no slots")
+	}
 	slotmap := al.slots[idx]
 	delete(slotmap, slot)
 	// Since additions and rollbacks are always in LIFO order, when a slot map
 	// becomes empty it must be the last one appended — truncate the slice.
 	if len(slotmap) == 0 {
+		if idx != len(al.slots)-1 {
+			panic("reverting slot change, LIFO violation: emptied slot map is not the last element")
+		}
 		al.slots = al.slots[:idx]
 		al.addresses[address] = -1
 	}
@@ -149,5 +155,12 @@ func (al *accessList) DeleteSlot(address accounts.Address, slot accounts.Storage
 // This method is meant to be used by the journal, which maintains ordering of
 // operations.
 func (al *accessList) DeleteAddress(address accounts.Address) {
+	idx, addrOk := al.addresses[address]
+	if !addrOk {
+		panic("reverting address change, address not present in list")
+	}
+	if idx != -1 {
+		panic("reverting address change, address still has slots")
+	}
 	delete(al.addresses, address)
 }

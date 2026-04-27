@@ -41,10 +41,6 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
-const (
-	memoryPadLimit = 1024 * 1024
-)
-
 var assetTracers = make(map[string]string)
 
 // init retrieves the JavaScript transaction tracers included in go-ethereum.
@@ -494,7 +490,7 @@ func (t *jsTracer) setBuiltinFunctions() {
 			return nil
 		}
 		code = common.Copy(code)
-		codeHash := accounts.InternCodeHash(common.Hash(crypto.Keccak256(code)))
+		codeHash := accounts.InternCodeHash(crypto.HashData(code))
 		b := types.CreateAddress2(addr, common.HexToHash(salt), codeHash).Bytes()
 		res, err := t.toBuf(vm, b)
 		if err != nil {

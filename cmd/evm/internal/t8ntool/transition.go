@@ -121,10 +121,10 @@ func Main(ctx *cli.Context) error {
 	if ctx.Bool(TraceFlag.Name) {
 		// Configure the EVM logger
 		logConfig := &trace_logger.LogConfig{
-			DisableStack:      ctx.Bool(TraceDisableStackFlag.Name),
-			DisableMemory:     ctx.Bool(TraceDisableMemoryFlag.Name),
-			DisableReturnData: ctx.Bool(TraceDisableReturnDataFlag.Name),
-			Debug:             true,
+			DisableStack:     ctx.Bool(TraceDisableStackFlag.Name),
+			EnableMemory:     !ctx.Bool(TraceDisableMemoryFlag.Name),
+			EnableReturnData: !ctx.Bool(TraceDisableReturnDataFlag.Name),
+			Debug:            true,
 		}
 		var prevFile *os.File
 		// This one closes the last file
@@ -233,7 +233,7 @@ func Main(ctx *cli.Context) error {
 	}
 
 	eip1559 := chainConfig.IsLondon(prestate.Env.Number)
-	// Sanity check, to not `panic` in state_transition
+	// Sanity check, to not `panic` in txn_executor
 	if eip1559 {
 		if prestate.Env.BaseFee == nil {
 			return NewError(ErrorVMConfig, errors.New("EIP-1559 config but missing 'currentBaseFee' in env section"))

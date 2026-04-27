@@ -2,6 +2,7 @@ package gossip
 
 import (
 	"context"
+	"maps"
 	"strconv"
 	"strings"
 	"sync"
@@ -78,18 +79,24 @@ func (s *gossipMessageStats) goPrintStats(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				// logger has internal mutex
+				// means need make current mutex lock as short as possible
 				s.statsMutex.Lock()
+				accepts := maps.Clone(s.accepts)
+				rejects := maps.Clone(s.rejects)
+				ignores := maps.Clone(s.ignores)
+				s.statsMutex.Unlock()
+
 				totalSeconds := float64(times * int64(duration.Seconds()))
-				for name, count := range s.accepts {
+				for name, count := range accepts {
 					log.Debug("Gossip Message Accepts Stats", "name", name, "count", count, "rate_sec", float64(count)/totalSeconds)
 				}
-				for name, count := range s.rejects {
+				for name, count := range rejects {
 					log.Debug("Gossip Message Rejects Stats", "name", name, "count", count, "rate_sec", float64(count)/totalSeconds)
 				}
-				for name, count := range s.ignores {
+				for name, count := range ignores {
 					log.Debug("Gossip Message Ignores Stats", "name", name, "count", count, "rate_sec", float64(count)/totalSeconds)
 				}
-				s.statsMutex.Unlock()
 				times++
 			}
 		}

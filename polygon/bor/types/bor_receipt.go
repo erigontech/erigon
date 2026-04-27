@@ -21,6 +21,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -65,11 +66,11 @@ func DeriveFieldsForBorReceipt(receipt *types.Receipt, blockHash common.Hash, bl
 
 	// The derived log fields can simply be set from the block and transaction
 	for j := 0; j < len(receipt.Logs); j++ {
-		receipt.Logs[j].BlockNumber = blockNumber
+		receipt.Logs[j].BlockNumber = hexutil.Uint64(blockNumber)
 		receipt.Logs[j].BlockHash = blockHash
 		receipt.Logs[j].TxHash = txHash
-		receipt.Logs[j].TxIndex = txIndex
-		receipt.Logs[j].Index = uint(logIndex)
+		receipt.Logs[j].TxIndex = hexutil.Uint(txIndex)
+		receipt.Logs[j].Index = hexutil.Uint(logIndex)
 		logIndex++
 	}
 }

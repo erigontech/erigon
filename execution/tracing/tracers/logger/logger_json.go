@@ -81,7 +81,7 @@ func (l *JSONLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope traci
 		RefundCounter: l.env.IntraBlockState.GetRefund().Total(),
 		Err:           err,
 	}
-	if !l.cfg.DisableMemory {
+	if l.cfg.EnableMemory {
 		log.Memory = memory
 	}
 	if !l.cfg.DisableStack {
@@ -91,6 +91,9 @@ func (l *JSONLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope traci
 			logstack[i] = item.ToBig()
 		}
 		log.Stack = logstack
+	}
+	if l.cfg.EnableReturnData {
+		log.ReturnData = rData
 	}
 	_ = l.encoder.Encode(log)
 }

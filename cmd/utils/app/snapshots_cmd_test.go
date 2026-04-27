@@ -415,6 +415,111 @@ func Test_DeleteLatestStateSnaps_NoCrossDomainSubsetRemoval(t *testing.T) {
 	confirmDoesntExist(t, file)
 }
 
+// Test_DeleteStateSnaps_StepRange_OverlappingNonSubsetPreserved verifies that files whose
+// step range overlaps a removed file but is NOT a strict subset are preserved.
+// Uses --step mode to precisely control which range is targeted, avoiding the
+// _maxFrom/_maxTo heuristics of --latest mode.
+func Test_DeleteStateSnaps_StepRange_OverlappingNonSubsetPreserved(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	b := bundle{}
+	dc := statecfg.Schema.ReceiptDomain
+	b.domain, b.history, b.ii = state.SnapSchemaFromDomainCfg(dc, dirs, 1)
+
+	// Create files:
+	// 0-64: base file (outside target range)
+	// 64-192: merged file targeted for removal via --step 64-192
+	// 32-128: overlaps 64-192 but starts before it — NOT a subset
+	// 128-256: overlaps 64-192 but extends beyond it — NOT a subset
+	// 96-160: strict subset of 64-192 — SHOULD be removed
+	// 64-128: strict subset of 64-192 — SHOULD be removed
+	ranges := [][2]int{
+		{0, 64},
+		{64, 192},
+		{32, 128},
+		{128, 256},
+		{96, 160},
+		{64, 128},
+	}
+	for _, r := range ranges {
+		createFiles(t, dirs, r[0], r[1], &b)
+	}
+
+	// Use --step 64-192 to precisely target the merged file
+	err := DeleteStateSnapshots(DeleteStateSnapshotsArgs{Dirs: dirs, StepRange: "64-192", DomainNames: []string{"receipt"}})
+	require.NoError(t, err)
+
+	// 64-192 and its strict subsets 96-160, 64-128 should be gone
+	for _, r := range [][2]int{{64, 192}, {96, 160}, {64, 128}} {
+		file, _ := b.domain.DataFile(version.V1_0, RootNum(r[0]), RootNum(r[1]))
+		confirmDoesntExist(t, file)
+	}
+
+	// Overlapping-but-non-subset files should still exist
+	file, _ := b.domain.DataFile(version.V1_0, RootNum(32), RootNum(128))
+	confirmExist(t, file)
+	file, _ = b.domain.DataFile(version.V1_0, RootNum(128), RootNum(256))
+	confirmExist(t, file)
+
+	// Base file should still exist
+	file, _ = b.domain.DataFile(version.V1_0, RootNum(0), RootNum(64))
+	confirmExist(t, file)
+}
+
+// Test_DeleteLatestStateSnaps_DryRunPreservesSubsetFiles verifies that dry-run mode
+// does not actually delete subset files — they should appear in output but remain on disk.
+func Test_DeleteLatestStateSnaps_DryRunPreservesSubsetFiles(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	b := bundle{}
+	dc := statecfg.Schema.ReceiptDomain
+	b.domain, b.history, b.ii = state.SnapSchemaFromDomainCfg(dc, dirs, 1)
+
+	// Create files:
+	// 0-128: base merged file
+	// 128-256: merged file (latest, will be targeted for removal)
+	// 128-192, 192-224: sub-ranges of 128-256
+	// 256-257: tip file
+	ranges := [][2]int{
+		{0, 128},
+		{128, 256},
+		{128, 192}, {192, 224},
+		{256, 257},
+	}
+	for _, r := range ranges {
+		createFiles(t, dirs, r[0], r[1], &b)
+	}
+
+	// First dry-run call: targets tip 256-257 — should NOT delete anything
+	err := DeleteStateSnapshots(DeleteStateSnapshotsArgs{Dirs: dirs, RemoveLatest: true, DryRun: true, DomainNames: []string{"receipt"}})
+	require.NoError(t, err)
+
+	// ALL files should still exist after dry-run
+	for _, r := range [][2]int{{0, 128}, {128, 256}, {128, 192}, {192, 224}, {256, 257}} {
+		file, _ := b.domain.DataFile(version.V1_0, RootNum(r[0]), RootNum(r[1]))
+		confirmExist(t, file)
+	}
+
+	// Now actually remove the tip so the next call targets 128-256
+	err = DeleteStateSnapshots(DeleteStateSnapshotsArgs{Dirs: dirs, RemoveLatest: true, DomainNames: []string{"receipt"}})
+	require.NoError(t, err)
+
+	file, _ := b.domain.DataFile(version.V1_0, RootNum(256), RootNum(257))
+	confirmDoesntExist(t, file)
+
+	// Dry-run targeting 128-256 and its subsets — should NOT delete anything
+	err = DeleteStateSnapshots(DeleteStateSnapshotsArgs{Dirs: dirs, RemoveLatest: true, DryRun: true, DomainNames: []string{"receipt"}})
+	require.NoError(t, err)
+
+	// 128-256 and all sub-ranges should STILL exist (dry-run)
+	for _, r := range [][2]int{{128, 256}, {128, 192}, {192, 224}} {
+		file, _ := b.domain.DataFile(version.V1_0, RootNum(r[0]), RootNum(r[1]))
+		confirmExist(t, file)
+	}
+
+	// Base file should still exist
+	file, _ = b.domain.DataFile(version.V1_0, RootNum(0), RootNum(128))
+	confirmExist(t, file)
+}
+
 // ── du tests ────────────────────────────────────────────────────────────
 
 func TestDUClassifyFile(t *testing.T) {
@@ -1102,4 +1207,96 @@ func TestDUAcceptanceCriteria(t *testing.T) {
 	// Verify JSON estimates also maintain archive >= full >= minimal.
 	require.GreaterOrEqual(t, decoded.Estimates[0].TotalBytes, decoded.Estimates[1].TotalBytes)
 	require.GreaterOrEqual(t, decoded.Estimates[1].TotalBytes, decoded.Estimates[2].TotalBytes)
+}
+
+// touchBlockSnap creates an empty file at <dirs.Snap>/<name>, ensuring the snap
+// directory exists. Used by the rm-blocks tests below.
+func touchBlockSnap(t *testing.T, dirs datadir.Dirs, name string) string {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(dirs.Snap, 0755))
+	full := filepath.Join(dirs.Snap, name)
+	f, err := os.OpenFile(full, os.O_RDONLY|os.O_CREATE, 0644)
+	require.NoError(t, err)
+	f.Close()
+	return full
+}
+
+// Test_DeleteBlockSnaps covers the happy path end-to-end: only the latest
+// range is removed (incl. transactions-to-block.idx and .torrent / partial
+// .torrent<suffix> companions), older ranges and their torrents survive,
+// and .tmp artifacts in dirs.Snap are swept regardless.
+func Test_DeleteBlockSnaps(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+
+	keep := []string{
+		"v1.0-000000-000500-headers.seg",
+		"v1.0-000000-000500-headers.seg.torrent", // companion of an older range — must survive
+		"v1.0-000000-000500-bodies.seg",
+		"v1.0-000000-000500-transactions.seg",
+		"v1.0-000000-000500-transactions-to-block.idx",
+	}
+	rm := []string{
+		"v1.0-000500-001000-headers.seg",
+		"v1.0-000500-001000-headers.seg.torrent",      // exact .torrent companion
+		"v1.0-000500-001000-headers.seg.torrent.bolt", // partial .torrent<suffix>
+		"v1.0-000500-001000-bodies.seg",
+		"v1.0-000500-001000-transactions.seg",
+		"v1.0-000500-001000-transactions.idx",
+		"v1.0-000500-001000-transactions-to-block.idx",
+		"v1.1-headers.0-500.seg.123456.tmp",     // unconditional sweep
+		"v1.0-000500-001000-bodies.seg.999.tmp", // unconditional sweep
+	}
+	var keepPaths, rmPaths []string
+	for _, n := range keep {
+		keepPaths = append(keepPaths, touchBlockSnap(t, dirs, n))
+	}
+	for _, n := range rm {
+		rmPaths = append(rmPaths, touchBlockSnap(t, dirs, n))
+	}
+
+	err := DeleteBlockSnapshots(DeleteBlockSnapshotsArgs{Dirs: dirs})
+	require.NoError(t, err)
+
+	for _, p := range keepPaths {
+		confirmExist(t, p)
+	}
+	for _, p := range rmPaths {
+		confirmDoesntExist(t, p)
+	}
+}
+
+// Test_DeleteBlockSnaps_DryRun verifies that DryRun does not modify the
+// filesystem (block files OR .tmp artifacts).
+func Test_DeleteBlockSnaps_DryRun(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	files := []string{
+		"v1.0-000000-000500-headers.seg",
+		"v1.0-000500-001000-headers.seg",
+		"v1.0-000500-001000-transactions-to-block.idx",
+		"v1.0-000500-001000-headers.seg.torrent.bolt",
+		"v1.1-headers.0-500.seg.123456.tmp",
+	}
+	var paths []string
+	for _, n := range files {
+		paths = append(paths, touchBlockSnap(t, dirs, n))
+	}
+
+	err := DeleteBlockSnapshots(DeleteBlockSnapshotsArgs{Dirs: dirs, DryRun: true})
+	require.NoError(t, err)
+
+	for _, p := range paths {
+		confirmExist(t, p)
+	}
+}
+
+// Test_DeleteBlockSnaps_NoBlockFilesSweepsTmp verifies the empty-snap-dir
+// branch still cleans .tmp leftovers.
+func Test_DeleteBlockSnaps_NoBlockFilesSweepsTmp(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	tmp := touchBlockSnap(t, dirs, "v1.1-headers.0-500.seg.123456.tmp")
+
+	err := DeleteBlockSnapshots(DeleteBlockSnapshotsArgs{Dirs: dirs})
+	require.NoError(t, err)
+
+	confirmDoesntExist(t, tmp)
 }

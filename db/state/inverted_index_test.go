@@ -98,7 +98,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		db, ii, _ := filledInvIndexOfSize(t, 1000, 16, 1, log.New())
 		t.Cleanup(func() { ii.Close(); db.Close() })
 
-		tx, err := db.BeginRw(context.Background())
+		tx, err := db.BeginRw(t.Context())
 		require.NoError(t, err)
 		t.Cleanup(tx.Rollback)
 
@@ -116,7 +116,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		ii, tx, logEvery, from, to := setup(t)
 
 		t.Run("no_files_no_force", func(t *testing.T) {
-			ic := ii.BeginFilesRo()
+			ic := ii.beginForTests()
 			defer ic.Close()
 
 			icc, err := tx.CursorDupSort(ii.KeysTable)
@@ -135,13 +135,13 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 			require.Equal(t, count, pruneIters*int(pruneLimit))
 
 			// this one should not prune anything due to forced=false but no files built
-			stat, err := ic.HashSeekingPrune(context.Background(), tx, 0, 10, pruneLimit, logEvery, false, nil, nil, prune.DefaultStorageMode)
+			stat, err := ic.HashSeekingPrune(t.Context(), tx, 0, 10, pruneLimit, logEvery, false, nil, nil, prune.DefaultStorageMode)
 			require.NoError(t, err)
 			require.Zero(t, stat.PruneCountTx)
 			require.Zero(t, stat.PruneCountValues)
 
 			// this one should not prune anything as well due to given range [0,1) even it is forced
-			stat, err = ic.HashSeekingPrune(context.Background(), tx, 0, 1, pruneLimit, logEvery, true, nil, nil, prune.DefaultStorageMode)
+			stat, err = ic.HashSeekingPrune(t.Context(), tx, 0, 1, pruneLimit, logEvery, true, nil, nil, prune.DefaultStorageMode)
 			require.NoError(t, err)
 			require.Zero(t, stat.PruneCountTx)
 			require.Zero(t, stat.PruneCountValues)
@@ -150,45 +150,43 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		})
 
 		t.Run("retire_one_step_no_force", func(t *testing.T) {
-			collation, err := ii.collate(context.Background(), 0, tx)
+			collation, err := ii.collate(t.Context(), 0, tx)
 			require.NoError(t, err)
-			sf, _ := ii.buildFiles(context.Background(), 0, collation, background.NewProgressSet())
+			sf, _ := ii.buildFiles(t.Context(), 0, collation, background.NewProgressSet())
 			collation.Close()
 			txFrom, txTo := firstTxNumOfStep(0, ii.stepSize), firstTxNumOfStep(1, ii.stepSize)
-			ii.integrateDirtyFiles(sf, txFrom, txTo)
 
 			// without `reCalcVisibleFiles` must be nothing to prune - because files are not visible yet.
-			ic := ii.BeginFilesRo()
+			ic := ii.beginForTests()
 			defer ic.Close()
-			stat, err := ic.HashSeekingPrune(context.Background(), tx, 0, 10, pruneLimit, logEvery, false, nil, nil, prune.DefaultStorageMode)
+
+			ii.integrateDirtyFiles(sf, txFrom, txTo)
+			stat, err := ic.HashSeekingPrune(t.Context(), tx, 0, 10, pruneLimit, logEvery, false, nil, nil, prune.DefaultStorageMode)
 			require.NoError(t, err)
 			require.Zero(t, stat.PruneCountTx)
 			require.Zero(t, stat.PruneCountValues)
 
-			// after reCalcVisibleFiles must be able to prune step 0. but not more
-			ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
-
-			ic = ii.BeginFilesRo()
+			ic = ii.beginForTests()
 			defer ic.Close()
-			stat, err = ic.HashSeekingPrune(context.Background(), tx, 0, 10, pruneLimit, logEvery, false, nil, nil, prune.DefaultStorageMode)
+			stat, err = ic.HashSeekingPrune(t.Context(), tx, 0, 10, pruneLimit, logEvery, false, nil, nil, prune.DefaultStorageMode)
 			require.NoError(t, err)
 			require.Equal(t, 9, int(stat.PruneCountTx))
 			require.Equal(t, 9, int(stat.PruneCountValues))
 
 			// prune only what left in step 0. Even if requested more. don't allow print more than what we have in visible files
-			stat, err = ic.HashSeekingPrune(context.Background(), tx, 0, 20, pruneLimit, logEvery, false, nil, nil, prune.DefaultStorageMode)
+			stat, err = ic.HashSeekingPrune(t.Context(), tx, 0, 20, pruneLimit, logEvery, false, nil, nil, prune.DefaultStorageMode)
 			require.NoError(t, err)
 			require.Equal(t, 6, int(stat.PruneCountTx))
 			require.Equal(t, 6, int(stat.PruneCountValues))
 		})
 
 		t.Run("force", func(t *testing.T) {
-			ic := ii.BeginFilesRo()
+			ic := ii.beginForTests()
 			defer ic.Close()
 
 			// this should prune exactly pruneLimit*pruneIter transactions
 			for i := 0; i < pruneIters; i++ {
-				stat, err := ic.HashSeekingPrune(context.Background(), tx, 0, 1000, pruneLimit, logEvery, true, nil, nil, prune.DefaultStorageMode)
+				stat, err := ic.HashSeekingPrune(t.Context(), tx, 0, 1000, pruneLimit, logEvery, true, nil, nil, prune.DefaultStorageMode)
 				require.NoError(t, err)
 				t.Logf("[%d] stats: %v", i, stat)
 			}
@@ -237,10 +235,10 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		t.Parallel()
 		ii, tx, logEvery, from, to := setup(t)
 		thr := time.Millisecond * 20
-		ctx := context.WithValue(context.Background(), throttle, &thr)
+		ctx := context.WithValue(t.Context(), throttle, &thr)
 
 		t.Run("no_files_no_force", func(t *testing.T) {
-			ic := ii.BeginFilesRo()
+			ic := ii.beginForTests()
 			defer ic.Close()
 
 			icc, err := tx.CursorDupSort(ii.KeysTable)
@@ -285,17 +283,18 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		})
 
 		t.Run("prune was in progress", func(t *testing.T) {
-			collation, err := ii.collate(context.Background(), 0, tx)
+			collation, err := ii.collate(t.Context(), 0, tx)
 			require.NoError(t, err)
 			defer collation.Close()
-			sf, _ := ii.buildFiles(context.Background(), 0, collation, background.NewProgressSet())
+			sf, _ := ii.buildFiles(t.Context(), 0, collation, background.NewProgressSet())
 			defer sf.CleanupOnError()
 			txFrom, txTo := firstTxNumOfStep(0, ii.stepSize), firstTxNumOfStep(1, ii.stepSize)
-			ii.integrateDirtyFiles(sf, txFrom, txTo)
 
 			// without `reCalcVisibleFiles` must be nothing to prune - because files are not visible yet.
-			ic := ii.BeginFilesRo()
+			ic := ii.beginForTests()
 			defer ic.Close()
+
+			ii.integrateDirtyFiles(sf, txFrom, txTo)
 			st := &prune.Stat{
 				MinTxNum:         0,
 				MaxTxNum:         0,
@@ -316,47 +315,47 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		})
 
 		t.Run("prune was done", func(t *testing.T) {
-			collation, err := ii.collate(context.Background(), 0, tx)
+			ii, tx, logEvery, _, _ := setup(t)
+
+			collation, err := ii.collate(t.Context(), 0, tx)
 			require.NoError(t, err)
 			defer collation.Close()
-			sf, _ := ii.buildFiles(context.Background(), 0, collation, background.NewProgressSet())
+			sf, _ := ii.buildFiles(t.Context(), 0, collation, background.NewProgressSet())
 			defer sf.CleanupOnError()
 			txFrom, txTo := firstTxNumOfStep(0, ii.stepSize), firstTxNumOfStep(1, ii.stepSize)
-			ii.integrateDirtyFiles(sf, txFrom, txTo)
 
 			// without `reCalcVisibleFiles` must be nothing to prune - because files are not visible yet.
-			ic := ii.BeginFilesRo()
+			ic := ii.beginForTests()
 			defer ic.Close()
+			ii.integrateDirtyFiles(sf, txFrom, txTo)
+
+			// Drain step 0 from the db so minTxNumInDB >= files.EndTxNum; otherwise
+			// CanPrune's files-based clause would return true regardless of progress state.
+			_, err = ic.TableScanningPrune(ctx, tx, txFrom, txTo, math.MaxUint64, logEvery, true, nil, nil, mxPruneSizeIndex, prune.DefaultStorageMode)
+			require.NoError(t, err)
+
 			st := &prune.Stat{
-				MinTxNum:         0,
-				MaxTxNum:         0,
-				PruneCountTx:     0,
-				PruneCountValues: 0,
-				DupsDeleted:      0,
-				LastPrunedValue:  nil,
-				LastPrunedKey:    nil,
-				KeyProgress:      prune.Done,
-				ValueProgress:    prune.Done,
-				TxFrom:           0,
-				TxTo:             10,
+				KeyProgress:   prune.Done,
+				ValueProgress: prune.Done,
+				TxFrom:        0,
+				TxTo:          10,
 			}
 			err = SavePruneValProgress(tx, ic.ii.ValuesTable, st)
 			require.NoError(t, err)
-			can := ic.CanPrune(tx, 10)
-			require.False(t, can)
+			require.False(t, ic.CanPrune(tx, 10))
 		})
 
 		t.Run("retire_one_step_no_force", func(t *testing.T) {
 			t.Skip() //TODO: can't deal with this false-positive but it's so theoretical in scanprune, so IDK
-			collation, err := ii.collate(context.Background(), 0, tx)
+			collation, err := ii.collate(t.Context(), 0, tx)
 			require.NoError(t, err)
-			sf, _ := ii.buildFiles(context.Background(), 0, collation, background.NewProgressSet())
+			sf, _ := ii.buildFiles(t.Context(), 0, collation, background.NewProgressSet())
 			collation.Close()
 			txFrom, txTo := firstTxNumOfStep(0, ii.stepSize), firstTxNumOfStep(1, ii.stepSize)
 			ii.integrateDirtyFiles(sf, txFrom, txTo)
 
 			// without `reCalcVisibleFiles` must be nothing to prune - because files are not visible yet.
-			ic := ii.BeginFilesRo()
+			ic := ii.beginForTests()
 			defer ic.Close()
 			st := &prune.Stat{
 				MinTxNum:         0,
@@ -378,13 +377,10 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 			require.Zero(t, stat.PruneCountTx)
 			require.Zero(t, stat.PruneCountValues)
 
-			// after reCalcVisibleFiles must be able to prune step 0. but not more
-			ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
-
-			ic = ii.BeginFilesRo()
+			ic = ii.beginForTests()
 			defer ic.Close()
 			newTHR := 9 * time.Millisecond
-			otherCtx := context.WithValue(context.Background(), throttle, &newTHR)
+			otherCtx := context.WithValue(t.Context(), throttle, &newTHR)
 			stat, err = ic.TableScanningPrune(otherCtx, tx, 0, 10, pruneLimit, logEvery, false, nil, nil, mxPruneSizeIndex, prune.DefaultStorageMode)
 			require.NoError(t, err)
 			require.Equal(t, 9, int(stat.PruneCountTx))
@@ -399,10 +395,10 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 
 		t.Run("force", func(t *testing.T) {
 			t.Skip() //TODO: figure out how to make it pretty
-			ic := ii.BeginFilesRo()
+			ic := ii.beginForTests()
 			defer ic.Close()
 			newTHR := 1 * time.Millisecond
-			ctx := context.WithValue(context.Background(), "throttle", &newTHR)
+			ctx := context.WithValue(t.Context(), "throttle", &newTHR)
 			// this should prune exactly pruneLimit*pruneIter transactions
 			for i := 0; i < pruneIters; i++ {
 				stat, err := ic.TableScanningPrune(ctx, tx, 0, 1000, pruneLimit, logEvery, true, nil, nil, mxPruneSizeIndex, prune.DefaultStorageMode)
@@ -462,11 +458,11 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	db, ii := testDbAndInvertedIndex(t, 16, logger)
-	ctx := context.Background()
+	ctx := t.Context()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	ic := ii.BeginFilesRo()
+	ic := ii.beginForTests()
 	defer ic.Close()
 	writer := ic.NewWriter()
 	defer writer.close()
@@ -536,7 +532,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	db, ii := testDbAndInvertedIndex(t, 16, log.New())
-	ctx := context.Background()
+	ctx := t.Context()
 	tx, err := db.BeginRw(ctx) //nolint:gocritic
 	require.NoError(t, err)
 	defer func() {
@@ -544,7 +540,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 			tx.Rollback()
 		}
 	}()
-	ic := ii.BeginFilesRo()
+	ic := ii.beginForTests()
 	defer ic.Close()
 	writer := ic.NewWriter()
 	defer writer.close()
@@ -576,7 +572,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 		require.Equal(t, "0.1", fmt.Sprintf("%.1f", from))
 		require.Equal(t, "0.4", fmt.Sprintf("%.1f", to))
 
-		ic = ii.BeginFilesRo()
+		ic = ii.beginForTests()
 		defer ic.Close()
 
 		_, err = ic.TableScanningPrune(ctx, tx, 0, 16, math.MaxUint64, logEvery, false, nil, nil, mxPruneSizeIndex, prune.DefaultStorageMode)
@@ -606,6 +602,116 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	require.Equal(t, float64(0), to)   //nolint:testifylint
 }
 
+// TestInvIndex_PruneRollingCursorProgress verifies the three properties of the
+// rolling-cursor optimisation added to inverted_index.tableScanningPrune:
+//
+//  1. Early-exit: prg.TxTo >= txTo && KeyProgress==Done && ValueProgress==Done
+//     → return immediately, no deletions.
+//  2. Rotation reset: after Done a call with larger txTo resets cursor to First
+//     and picks up newly pruneable entries.
+//  3. Cursor preservation: an InProgress cursor survives a txTo advance —
+//     the subsequent call resumes from LastPrunedValue rather than First.
+func TestInvIndex_PruneRollingCursorProgress(t *testing.T) {
+	t.Parallel()
+
+	const (
+		aggStep  = uint64(16)
+		keyCount = 40 // unique keys written to the index
+	)
+	ctx := t.Context()
+	db, ii := testDbAndInvertedIndex(t, aggStep, log.New())
+
+	rwTx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	// writeKeys adds keyCount entries to the index at the given txNum.
+	// forced=true in TableScanningPrune bypasses the CanPrune file check.
+	writeKeys := func(txNum uint64) {
+		t.Helper()
+		ic := ii.beginForTests()
+		defer ic.Close()
+		w := ic.NewWriter()
+		defer w.close()
+		for k := uint64(0); k < keyCount; k++ {
+			var key [8]byte
+			binary.BigEndian.PutUint64(key[:], k)
+			require.NoError(t, w.Add(key[:], txNum))
+		}
+		require.NoError(t, w.Flush(ctx, rwTx))
+	}
+
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
+	// callPrune calls TableScanningPrune in table-scanning mode (txTo != MaxUint64,
+	// forced=true so no file-presence check is required).
+	callPrune := func(txFrom, txTo uint64) *InvertedIndexPruneStat {
+		t.Helper()
+		ic := ii.beginForTests()
+		defer ic.Close()
+		stat, err := ic.TableScanningPrune(ctx, rwTx, txFrom, txTo, math.MaxUint64, logEvery,
+			true /*forced*/, nil, nil, nil, prune.DefaultStorageMode)
+		require.NoError(t, err)
+		return stat
+	}
+
+	// ── Write step-0 and step-1 data (txNums 1 and aggStep+1). ────────────
+	writeKeys(1)           // step 0
+	writeKeys(aggStep + 1) // step 1
+
+	// ── Property 1: early-exit ─────────────────────────────────────────────
+	// Full prune of step 0 (txTo = aggStep).
+	stat0 := callPrune(0, aggStep)
+	require.Equal(t, prune.Done, stat0.Progress)
+	require.NotZero(t, stat0.PruneCountValues+stat0.PruneCountTx, "step-0 entries must be deleted")
+
+	prg, err := GetPruneValProgress(rwTx, []byte(ii.ValuesTable))
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, prg.ValueProgress)
+	require.Equal(t, prune.Done, prg.KeyProgress)
+	require.EqualValues(t, aggStep, prg.TxTo)
+
+	// Repeat with same txTo → early-exit, no work.
+	statEarly := callPrune(0, aggStep)
+	require.Equal(t, prune.Done, statEarly.Progress)
+	require.Zero(t, statEarly.PruneCountValues+statEarly.PruneCountTx,
+		"early-exit must delete nothing")
+
+	// ── Property 2: rotation reset when txTo advances ──────────────────────
+	stat1 := callPrune(aggStep, aggStep*2)
+	require.Equal(t, prune.Done, stat1.Progress)
+	require.NotZero(t, stat1.PruneCountValues+stat1.PruneCountTx,
+		"step-1 entries must be deleted in the new rotation")
+
+	prg1, err := GetPruneValProgress(rwTx, []byte(ii.ValuesTable))
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, prg1.ValueProgress)
+	require.Nil(t, prg1.LastPrunedValue, "cursor must be nil after rotation completion")
+
+	// ── Property 3: cursor preservation when txTo advances mid-rotation ────
+	writeKeys(aggStep*2 + 1) // step 2
+
+	// Inject InProgress at the midpoint key so the prune resumes from there.
+	midKey := make([]byte, 8)
+	binary.BigEndian.PutUint64(midKey, keyCount/2)
+	txFrom2, txTo2 := aggStep*2, aggStep*3
+	injected := &prune.Stat{
+		ValueProgress:   prune.InProgress,
+		KeyProgress:     prune.Done, // keys pass already done
+		LastPrunedValue: midKey,
+		TxFrom:          txFrom2,
+		TxTo:            txTo2,
+	}
+	require.NoError(t, SavePruneValProgress(rwTx, ii.ValuesTable, injected))
+
+	stat2 := callPrune(txFrom2, txTo2)
+	require.Equal(t, prune.Done, stat2.Progress)
+	// Cursor started at midKey so only the second half of entries could be pruned.
+	require.LessOrEqual(t, stat2.PruneCountValues, uint64(keyCount/2),
+		"cursor preserved: only entries at/after midKey should be deleted")
+}
+
 func filledInvIndex(tb testing.TB, logger log.Logger) (kv.RwDB, *InvertedIndex, uint64) {
 	tb.Helper()
 	return filledInvIndexOfSize(tb, uint64(1000), 16, 31, logger)
@@ -618,10 +724,10 @@ func filledInvIndex(tb testing.TB, logger log.Logger) (kv.RwDB, *InvertedIndex, 
 func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64, logger log.Logger) (kv.RwDB, *InvertedIndex, uint64) {
 	tb.Helper()
 	db, ii := testDbAndInvertedIndex(tb, aggStep, logger)
-	ctx, require := context.Background(), require.New(tb)
+	ctx, require := tb.Context(), require.New(tb)
 
 	err := db.Update(ctx, func(tx kv.RwTx) error {
-		ic := ii.BeginFilesRo()
+		ic := ii.beginForTests()
 		defer ic.Close()
 		writer := ic.NewWriter()
 		defer writer.close()
@@ -658,8 +764,8 @@ func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64, logger log
 
 func checkRanges(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 	t.Helper()
-	ctx := context.Background()
-	ic := ii.BeginFilesRo()
+	ctx := t.Context()
+	ic := ii.beginForTests()
 	defer ic.Close()
 
 	// Check the iterator invertedIndex first without roTx
@@ -758,7 +864,6 @@ func (ii *InvertedIndex) collateBuildIntegrate(ctx context.Context, step kv.Step
 		return err
 	}
 	ii.integrateDirtyFiles(sf, step.ToTxNum(ii.stepSize), (step + 1).ToTxNum(ii.stepSize))
-	ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 	return nil
 }
 
@@ -766,7 +871,7 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 	tb.Helper()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	ctx := context.Background()
+	ctx := tb.Context()
 	// Leave the last 2 aggregation steps un-collated
 	tx, err := db.BeginRw(ctx)
 	require.NoError(tb, err)
@@ -776,7 +881,7 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 	for step := kv.Step(0); step < kv.Step(txs/ii.stepSize)-1; step++ {
 		func() {
 			require.NoError(tb, ii.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
-			ic := ii.BeginFilesRo()
+			ic := ii.beginForTests()
 			defer ic.Close()
 			_, err = ic.TableScanningPrune(ctx, tx, step.ToTxNum(ii.stepSize), (step + 1).ToTxNum(ii.stepSize), math.MaxUint64, logEvery, false, nil, nil, mxPruneSizeIndex, prune.DefaultStorageMode)
 			require.NoError(tb, err)
@@ -787,7 +892,7 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 
 			for {
 				if stop := func() bool {
-					ic := ii.BeginFilesRo()
+					ic := ii.beginForTests()
 					defer ic.Close()
 					mr := ic.findMergeRange(maxEndTxNum, maxSpan)
 					found, startTxNum, endTxNum = mr.needMerge, mr.from, mr.to
@@ -798,7 +903,6 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 					in, err := ic.mergeFiles(ctx, outs, startTxNum, endTxNum, background.NewProgressSet())
 					require.NoError(tb, err)
 					ii.integrateMergedDirtyFiles(in)
-					ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 					return false
 				}(); stop {
 					break
@@ -821,7 +925,7 @@ func TestInvIndexRanges(t *testing.T) {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	db, ii, txs := filledInvIndex(t, logger)
-	ctx := context.Background()
+	ctx := t.Context()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -830,7 +934,7 @@ func TestInvIndexRanges(t *testing.T) {
 	for step := kv.Step(0); step < kv.Step(txs/ii.stepSize)-1; step++ {
 		func() {
 			require.NoError(t, ii.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
-			ic := ii.BeginFilesRo()
+			ic := ii.beginForTests()
 			defer ic.Close()
 			_, err = ic.TableScanningPrune(ctx, tx, step.ToTxNum(ii.stepSize), (step + 1).ToTxNum(ii.stepSize), math.MaxUint64, logEvery, false, nil, nil, mxPruneSizeIndex, prune.DefaultStorageMode)
 			require.NoError(t, err)
@@ -895,8 +999,9 @@ func TestScanStaticFiles(t *testing.T) {
 	}
 	ii.scanDirtyFiles(files)
 	require.Equal(t, 6, ii.dirtyFiles.Len())
-	ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
-	require.Equal(t, 0, len(ii._visible.files))
+	ic := ii.beginForTests()
+	require.Equal(t, 0, len(ic.files))
+	ic.Close()
 }
 
 func TestCtxFiles(t *testing.T) {
@@ -983,10 +1088,12 @@ func TestInvIndex_OpenFolder(t *testing.T) {
 
 	mergeInverted(t, db, ii, txs)
 
-	list := ii._visible.files
+	ic := ii.beginForTests()
+	list := ic.files
 	require.NotEmpty(t, list)
 	ff := list[len(list)-1]
 	fn := ff.src.decompressor.FilePath()
+	ic.Close()
 	ii.Close()
 
 	err := dir.RemoveFile(fn)
@@ -999,4 +1106,179 @@ func TestInvIndex_OpenFolder(t *testing.T) {
 	err = ii.openFolder(scanDirsRes)
 	require.NoError(t, err)
 	ii.Close()
+}
+
+// TestInvertedIndex_IdxRange_SkipsFileRange verifies that recentIterateRange narrows
+// its DB query to exclude txNums already covered by frozen files.
+// Without the fix the DB query would read prunable data in the file range,
+// and after that data is pruned the results would be incomplete.
+func TestInvertedIndex_IdxRange_SkipsFileRange(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
+	aggStep := uint64(16)
+	db, ii := testDbAndInvertedIndex(t, aggStep, logger)
+	ctx := t.Context()
+	require := require.New(t)
+
+	// Write entries for a single key across 3 steps (txNums 1..47).
+	// Step 0: txNums 0-15, Step 1: 16-31, Step 2: 32-47
+	var key [8]byte
+	binary.BigEndian.PutUint64(key[:], 1)
+
+	txNums := []uint64{2, 5, 10, 18, 25, 30, 35, 42}
+
+	err := db.Update(ctx, func(tx kv.RwTx) error {
+		ic := ii.beginForTests()
+		defer ic.Close()
+		writer := ic.NewWriter()
+		defer writer.close()
+		for _, txNum := range txNums {
+			if err := writer.Add(key[:], txNum); err != nil {
+				return err
+			}
+		}
+		return writer.Flush(ctx, tx)
+	})
+	require.NoError(err)
+
+	// Build files for steps 0 and 1 (covers txNums 0..31).
+	tx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+
+	for step := kv.Step(0); step <= 1; step++ {
+		require.NoError(ii.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
+	}
+
+	// Prune DB entries that are now covered by files (txNums 0..31).
+	ic := ii.beginForTests()
+	_, err = ic.TableScanningPrune(ctx, tx, 0, aggStep*2, math.MaxUint64, logEvery, false, nil, nil, mxPruneSizeIndex, prune.DefaultStorageMode)
+	require.NoError(err)
+	ic.Close()
+
+	require.NoError(tx.Commit())
+
+	// Now query IdxRange spanning both file and DB ranges.
+	roTx, err := db.BeginRo(ctx)
+	require.NoError(err)
+	defer roTx.Rollback()
+
+	ic = ii.beginForTests()
+	defer ic.Close()
+
+	// Ascending: full range [0, 48) should return all txNums.
+	it, err := ic.IdxRange(key[:], 0, 48, order.Asc, -1, roTx)
+	require.NoError(err)
+	var got []uint64
+	for it.HasNext() {
+		v, err := it.Next()
+		require.NoError(err)
+		got = append(got, v)
+	}
+	it.Close()
+	require.Equal(txNums, got, "ascending IdxRange after prune")
+
+	// Descending: full range (48, 0] should return all txNums reversed.
+	it, err = ic.IdxRange(key[:], 48, 0, order.Desc, -1, roTx)
+	require.NoError(err)
+	var gotDesc []uint64
+	for it.HasNext() {
+		v, err := it.Next()
+		require.NoError(err)
+		gotDesc = append(gotDesc, v)
+	}
+	it.Close()
+	wantDesc := make([]uint64, len(txNums))
+	copy(wantDesc, txNums)
+	for i, j := 0, len(wantDesc)-1; i < j; i, j = i+1, j-1 {
+		wantDesc[i], wantDesc[j] = wantDesc[j], wantDesc[i]
+	}
+	require.Equal(wantDesc, gotDesc, "descending IdxRange after prune")
+}
+
+// TestInvertedIndex_IdxRange_IgnoresDBInFileRange proves the DB is not consulted
+// for txNums within the file range. It inserts a rogue txNum directly into the DB's
+// ValuesTable inside the frozen range; IdxRange must NOT return it.
+func TestInvertedIndex_IdxRange_IgnoresDBInFileRange(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+
+	aggStep := uint64(16)
+	db, ii := testDbAndInvertedIndex(t, aggStep, logger)
+	ctx := t.Context()
+	require := require.New(t)
+
+	var key [8]byte
+	binary.BigEndian.PutUint64(key[:], 1)
+
+	txNums := []uint64{2, 5, 10, 18, 25, 30, 35, 42}
+
+	err := db.Update(ctx, func(tx kv.RwTx) error {
+		ic := ii.beginForTests()
+		defer ic.Close()
+		writer := ic.NewWriter()
+		defer writer.close()
+		for _, txNum := range txNums {
+			if err := writer.Add(key[:], txNum); err != nil {
+				return err
+			}
+		}
+		return writer.Flush(ctx, tx)
+	})
+	require.NoError(err)
+
+	// Build files for steps 0 and 1 (covers txNums 0..31).
+	tx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+
+	for step := kv.Step(0); step <= 1; step++ {
+		require.NoError(ii.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
+	}
+
+	// Inject a rogue txNum (7) into the DB's ValuesTable within the frozen range.
+	// If the DB is queried for the file range, this would appear in results.
+	var rogueTxNum [8]byte
+	binary.BigEndian.PutUint64(rogueTxNum[:], 7)
+	require.NoError(tx.Put(ii.ValuesTable, key[:], rogueTxNum[:]))
+	require.NoError(tx.Commit())
+
+	roTx, err := db.BeginRo(ctx)
+	require.NoError(err)
+	defer roTx.Rollback()
+
+	ic := ii.beginForTests()
+	defer ic.Close()
+
+	// Ascending: rogue txNum 7 must not appear.
+	it, err := ic.IdxRange(key[:], 0, 48, order.Asc, -1, roTx)
+	require.NoError(err)
+	var got []uint64
+	for it.HasNext() {
+		v, err := it.Next()
+		require.NoError(err)
+		got = append(got, v)
+	}
+	it.Close()
+	require.Equal(txNums, got, "ascending: rogue DB entry in file range must be invisible")
+
+	// Descending: rogue txNum 7 must not appear.
+	it, err = ic.IdxRange(key[:], 48, 0, order.Desc, -1, roTx)
+	require.NoError(err)
+	var gotDesc []uint64
+	for it.HasNext() {
+		v, err := it.Next()
+		require.NoError(err)
+		gotDesc = append(gotDesc, v)
+	}
+	it.Close()
+	wantDesc := make([]uint64, len(txNums))
+	copy(wantDesc, txNums)
+	for i, j := 0, len(wantDesc)-1; i < j; i, j = i+1, j-1 {
+		wantDesc[i], wantDesc[j] = wantDesc[j], wantDesc[i]
+	}
+	require.Equal(wantDesc, gotDesc, "descending: rogue DB entry in file range must be invisible")
 }

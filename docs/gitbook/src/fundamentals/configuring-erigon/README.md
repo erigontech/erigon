@@ -71,6 +71,9 @@ These flags control database performance and memory usage.
   * Default: `0MB`
 * `--sync.parallel-state-flushing`: Enables parallel state flushing.
   * Default: `true`
+* `--erigondb.domain.steps-in-frozen-file value`: Overrides the `steps_in_frozen_file` setting from `erigondb.toml` for the domain merge cap only (history and inverted-index merges are unaffected). Pass a positive integer to set an explicit cap, or `Inf` to leave the domain merge unbounded.
+  * Default: unset (uses the value from `erigondb.toml`)
+  * Use with care — an incorrect value may affect database structure.
 
 ### Pruning and Snapshots
 
@@ -82,7 +85,7 @@ Flags for managing how old chain data is handled and stored.
   * Default: `0`
 * `--prune.distance.blocks value`: Keeps block history for the latest `N` blocks.
   * Default: `0`
-* `--prune.include-commitment-history, --prune.experimental.include-commitment-history, --experimental.commitment-history`: Enables blazing fast `eth_getProof` for executed blocks by storing commitment history.
+* `--prune.include-commitment-history, --prune.experimental.include-commitment-history, --experimental.commitment-history`: Enables blazing fast `eth_getProof` for executed blocks by storing commitment history. Requires +32 GB RAM. See [`eth_getProof`](../../interacting-with-erigon/eth.md#eth_getproof).
   * Default: `false`
 * `--snap.keepblocks`: Keeps ancient blocks in the database for debugging.
   * Default: `false`
@@ -139,9 +142,9 @@ These flags manage network connectivity, peer discovery, and traffic control.
 * `--nodiscover`: Disables peer discovery.
   * Default: `false`
 * `--discovery.v4`, `--discv4`: Enables the Node Discovery Protocol v4 (Discv4) for managed ENRs and topic discovery.
-  * Default: `false`
+  * Default: `false` (disabled by default since v3.4; discv5 is now the default discovery protocol)
 * `--discovery.v5`, `--discv5`, `--v5disc`: Enables the Node Discovery Protocol v5 (Discv5) for managed ENRs and topic discovery.
-  * Default: `true`
+  * Default: `true` (enabled by default since v3.4)
 * `--netrestrict value`: Restricts network communication to specific IP networks.
 * `--nodekey value`: The P2P node key file.
 * `--nodekeyhex value`: The P2P node key as a hexadecimal string.
@@ -160,9 +163,6 @@ Flags for configuring various RPC servers and their behavior.
   * Default: `127.0.0.1:9090`
 * `--private.api.ratelimit value`: Limits the number of simultaneous internal API requests.
   * Default: `31872`
-* `--ipcdisable`: Disables the IPC-RPC server.
-  * Default: `false`
-* `--ipcpath value`: Filename for the IPC socket/pipe within the datadir (explicit paths escape it).
 * `--http`: Enables the JSON-RPC HTTP server.
   * Default: `true`
 * `--http.enabled`: An alternative flag to enable the HTTP server.
@@ -189,12 +189,8 @@ Flags for configuring various RPC servers and their behavior.
   * Default: `eth,erigon,engine`
 * `--ws`: Enables the WS-RPC server.
   * Default: `false`
-* `--ws.addr value`: The WS-RPC server listening interface.
-  * Default: `localhost`
 * `--ws.port value`: The WS-RPC server listening port.
   * Default: `8546`
-* `--ws.api value`: The APIs offered over the WS-RPC interface.
-* `--ws.origins value`: Origins from which to accept WebSocket requests.
 * `--ws.compression`: Enables compression over WebSocket.
   * Default: `true`
 * `--rpc.gethcompat`: Enables Geth-compatible storage iteration order for `debug_storageRangeAt` (sorted by keccak256 hash). Disabled by default for performance.
@@ -205,6 +201,9 @@ Flags for configuring various RPC servers and their behavior.
   * Default: `1m0s`
 * `--rpc.batch.concurrency value`: Limits the number of goroutines for batch requests.
   * Default: `2`
+* `--rpc.max.concurrency value`: Maximum number of concurrent HTTP RPC requests (HTTP admission control).
+  * Default: `0` (inherits value from `--db.read.concurrency`)
+  * Set to `-1` to disable admission control (unlimited)
 * `--rpc.streaming.disable`: Disables JSON streaming for heavy endpoints.
   * Default: `false`
 * `--rpc.accessList value`: Specifies a granular API allowlist.
@@ -212,8 +211,10 @@ Flags for configuring various RPC servers and their behavior.
   * Default: `50000000`
 * `--rpc.batch.limit value`: Sets the maximum number of requests in a batch.
   * Default: `100`
-* `--rpc.blockrange.limit value`: Sets a hardware cap on the number of blocks scanned per RPC request. Protects the rpcdaemon from resource exhaustion (CPU/Memory) and hangs caused by "heavy" queries. A value of `0` means unlimited.
-  * Default: `0`
+* `--rpc.blockrange.limit value`: Sets a cap on the number of blocks scanned per RPC request for `eth_getLogs` and similar range queries. Protects the node from resource exhaustion. A value of `0` means unlimited.
+  * Default: `1000` (changed from `0` in v3.4)
+* `--rpc.logs.maxresults value`: Sets the maximum number of log results returned per query.
+  * Default: `20000`
 * `--rpc.returndata.limit value`: Sets the maximum return data size for `eth_call`.
   * Default: `100000`
 * `--rpc.allow-unprotected-txs`: Allows unprotected transactions via RPC.
@@ -308,21 +309,12 @@ Flags for controlling logging and performance profiling.
 
 Flags related to consensus mechanisms and network forks.
 
-* `--clique.checkpoint value`: The number of blocks after which to save the vote snapshot.
-  * Default: `10`
-* `--clique.snapshots value`: The number of recent vote snapshots to keep in memory.
-  * Default: `1024`
-* `--clique.signatures value`: The number of recent block signatures to keep in memory.
-  * Default: `16384`
-* `--clique.datadir value`: The path to the clique database folder.
 * `--fakepow`: Disables proof-of-work verification.
   * Default: `false`
 * `--gpo.blocks value`: The number of recent blocks to check for gas prices.
   * Default: `20`
 * `--gpo.percentile value`: The percentile of recent transaction gas prices to use for a suggested gas price.
   * Default: `60`
-* `--gpo.maxprice value`: The maximum gas price recommended by the gas price oracle.
-  * Default: `500000000000` (500 GWei)
 * `--proposer.disable`: Disables the PoS proposer.
   * Default: `false`
 * `--builder.maxblobs value`: Cap the number of blob transactions included in a built block.
@@ -672,6 +664,7 @@ GLOBAL OPTIONS:
    --rpc.batch.concurrency value                                                                                           Does limit amount of goroutines to process 1 batch request. Means 1 bach request can't overload server. 1 batch still can have unlimited amount of request (default: 2)
    --rpc.streaming.disable                                                                                                 Erigon has enabled json streaming for some heavy endpoints (like trace_*). It's a trade-off: greatly reduce amount of RAM (in some cases from 30GB to 30mb), but it produce invalid json format if error happened in the middle of streaming (because json is not streaming-friendly format) (default: false)
    --db.read.concurrency value                                                                                             Does limit amount of parallel db reads. Default: equal to GOMAXPROCS (or number of CPU) (default: 1408)
+   --rpc.max.concurrency value                                                                                             Maximum number of concurrent HTTP RPC requests (HTTP admission control). 0 = use db.read.concurrency, -1 = unlimited (no admission control) (default: 0)
    --rpc.accessList value                                                                                                  Specify granular (method-by-method) API allowlist
    --trace.compat                                                                                                          Bug for bug compatibility with OE for trace_ routines (default: false)
    --rpc.gascap value                                                                                                      Sets a cap on gas that can be used in eth_call/estimateGas (default: 50000000)
@@ -737,7 +730,6 @@ GLOBAL OPTIONS:
    --maxpeers value                                                                                                        Maximum number of network peers per protocol version (network disabled if set to 0) (default: 32)
    --maxpendpeers value                                                                                                    Maximum number of TCP connections pending to become connected peers (per protocol version) (default: 1000)
    --chain value                                                                                                           name of the network to join (default: "mainnet")
-   --dev.period value                                                                                                      Block period to use in developer mode (0 = mine only if transaction pending) (default: 0)
    --vmdebug                                                                                                               Record information useful for VM and contract debugging (default: false)
    --networkid value                                                                                                       Explicitly set network id (integer)(For testnets: use --chain <testnet_name> instead) (default: 1)
    --persist.receipts, --experiment.persist.receipts.v2                                                                    Download historical Receipts. If disabled: using state-history to re-exec transactions and generate Receipts - all RPC: eth_getLogs, eth_getBlockReceipts will work (just higher latency) (default: false)
@@ -746,10 +738,6 @@ GLOBAL OPTIONS:
    --gpo.percentile value                                                                                                  Suggested gas price is the given percentile of a set of recent transaction gas prices (default: 60)
    --allow-insecure-unlock                                                                                                 Allow insecure account unlocking when account-related RPCs are exposed by http (default: false)
    --identity value                                                                                                        Custom node name
-   --clique.checkpoint value                                                                                               Number of blocks after which to save the vote snapshot to the database (default: 10)
-   --clique.snapshots value                                                                                                Number of recent vote snapshots to keep in memory (default: 1024)
-   --clique.signatures value                                                                                               Number of recent block signatures to keep in memory (default: 16384)
-   --clique.datadir value                                                                                                  Path to clique db folder
    --proposer.disable                                                                                                      Disables PoS proposer (default: false)
    --miner.gaslimit value                                                                                                  Target gas limit for mined blocks (default: 0)
    --miner.etherbase value                                                                                                 Public address for block mining rewards (default: "0")
@@ -807,7 +795,7 @@ GLOBAL OPTIONS:
    --beacon.api.read.timeout value                                                                                         Sets the seconds for a read time out in the beacon api (default: 5)
    --beacon.api.write.timeout value                                                                                        Sets the seconds for a write time out in the beacon api (default: 31536000)
    --beacon.api.protocol value                                                                                             Protocol for beacon API (default: "tcp")
-   --beacon.api.ide.timeout value                                                                                          Sets the seconds for a write time out in the beacon api (default: 25)
+   --beacon.api.idle.timeout value                                                                                          Sets the seconds for a write time out in the beacon api (default: 25)
    --caplin.blocks-archive                                                                                                 sets whether backfilling is enabled for caplin (default: false)
    --caplin.blobs-archive                                                                                                  sets whether backfilling is enabled for caplin (default: false)
    --caplin.states-archive                                                                                                 enables archival node for historical states in caplin (it will enable block archival as well) (default: false)
