@@ -276,7 +276,7 @@ func (s *Sentinel) Identity() (pid, enrStr string, p2pAddresses, discoveryAddres
 	enrStr = s.listener.LocalNode().Node().String()
 	p2pAddresses = make([]string, 0, len(s.p2p.Host().Addrs()))
 	for _, addr := range s.p2p.Host().Addrs() {
-		p2pAddresses = append(p2pAddresses, fmt.Sprintf("%s/%s", addr.String(), pid))
+		p2pAddresses = append(p2pAddresses, fmt.Sprintf("%s/p2p/%s", addr.String(), pid))
 	}
 	discoveryAddresses = []string{}
 
