@@ -385,10 +385,10 @@ func TestWebsocketServerGracefulClose(t *testing.T) {
 	defer cancel()
 
 	conn, resp, err := websocket.Dial(ctx, wsURL, nil)
-	if resp != nil && resp.Body != nil {
-		defer resp.Body.Close()
-	}
 	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
 		t.Fatalf("failed to dial: %v", err)
 	}
 	defer conn.CloseNow()
