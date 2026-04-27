@@ -13,6 +13,11 @@ DISABLED_TEST_LIST=(
   net_listening/test_1.json
   # Temporary disable required block 24298763
   debug_traceBlockByNumber/test_51.json
+  # Stale fixtures after #20775 (cherry-picked via #20830) fixed prestateTracer
+  # diff mode to include deleted accounts. rpc-tests fix at erigontech/rpc-tests#554;
+  # re-enable once a new tag (v2.8.2+) is cut and the version is bumped here.
+  debug_traceBlockByNumber/test_33.tar
+  debug_traceBlockByNumber/test_34.tar
   # to investigate
   engine_exchangeCapabilities/test_1.json
   engine_exchangeTransitionConfigurationV1/test_01.json
