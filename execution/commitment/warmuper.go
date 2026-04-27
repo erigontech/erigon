@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"sort"
 	"sync/atomic"
 	"time"
 
@@ -71,7 +70,6 @@ type Warmuper struct {
 
 	// Stats
 	keysProcessed atomic.Uint64
-	workerKeys    []atomic.Uint64
 	startTime     time.Time
 
 	// State
@@ -167,7 +165,6 @@ func (w *Warmuper) Start() {
 	}
 
 	w.work = make(chan warmupWorkItem, w.numWorkers*64)
-	w.workerKeys = make([]atomic.Uint64, w.numWorkers)
 	w.g, w.ctx = errgroup.WithContext(w.ctx)
 
 	for i := 0; i < w.numWorkers; i++ {
@@ -177,15 +174,6 @@ func (w *Warmuper) Start() {
 				defer cleanup()
 			}
 
-			var logTicker *time.Ticker
-			if i == 0 {
-				logTicker = time.NewTicker(20 * time.Second)
-				defer logTicker.Stop()
-			}
-
-			lastSnap := make([]uint64, w.numWorkers)
-			lastTime := time.Now()
-
 			for item := range w.work {
 				select {
 				case <-w.ctx.Done():
@@ -193,34 +181,8 @@ func (w *Warmuper) Start() {
 				default:
 				}
 
-				if logTicker != nil {
-					select {
-					case <-logTicker.C:
-						now := time.Now()
-						elapsed := now.Sub(lastTime).Seconds()
-						lastTime = now
-						rates := make([]uint64, w.numWorkers)
-						for j := range w.workerKeys {
-							cur := w.workerKeys[j].Load()
-							rates[j] = uint64(float64(cur-lastSnap[j]) / elapsed)
-							lastSnap[j] = cur
-						}
-						sort.Slice(rates, func(a, b int) bool { return rates[a] < rates[b] })
-						n := len(rates)
-						log.Info(fmt.Sprintf("[%s][warmup]", w.logPrefix),
-							"p0", common.PrettyCounter(rates[0]),
-							"p25", common.PrettyCounter(rates[n/4]),
-							"p50", common.PrettyCounter(rates[n/2]),
-							"p75", common.PrettyCounter(rates[n*3/4]),
-							"p100", common.PrettyCounter(rates[n-1]),
-							"queue", len(w.work))
-					default:
-					}
-				}
-
 				w.warmupKey(trieCtx, item.hashedKey, item.startDepth)
 				w.keysProcessed.Add(1)
-				w.workerKeys[i].Add(1)
 			}
 			return nil
 		})
