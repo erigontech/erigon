@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -42,7 +43,7 @@ func (m *postTxIBS) GetState(accounts.Address, accounts.StorageKey) (uint256.Int
 	return uint256.Int{}, nil
 }
 func (m *postTxIBS) Exist(accounts.Address) (bool, error) { return false, nil }
-func (m *postTxIBS) GetRefund() uint64                    { return 0 }
+func (m *postTxIBS) GetRefund() mdgas.MdGas               { return mdgas.MdGas{} }
 func (m *postTxIBS) GetCodeHash(addr accounts.Address) (accounts.CodeHash, error) {
 	if addr == m.deletedAddr {
 		return accounts.NilCodeHash, nil
