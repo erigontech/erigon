@@ -125,7 +125,7 @@ func TestBaseOffsetSSZ(t *testing.T) {
 }
 
 // TestBeaconStateSSZRoundtripMinimalGloas verifies that a GLOAS BeaconState using
-// the minimal preset (PTC_SIZE=2) can be encoded and decoded without error.
+// the minimal preset (PTC_SIZE=16) can be encoded and decoded without error.
 // This is the scenario that broke genesis state loading when gloas_fork_epoch=0
 // in kurtosis with the minimal preset.
 func TestBeaconStateSSZRoundtripMinimalGloas(t *testing.T) {
@@ -140,16 +140,16 @@ func TestBeaconStateSSZRoundtripMinimalGloas(t *testing.T) {
 		BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
 	}
 
-	// Verify that PtcSize is the minimal preset value
-	require.Equal(t, uint64(2), cfg.PtcSize, "minimal preset PTC_SIZE should be 2")
+	// Verify that PtcSize is the minimal preset value (consensus-specs minimal/gloas.yaml)
+	require.Equal(t, uint64(16), cfg.PtcSize, "minimal preset PTC_SIZE should be 16")
 
 	// Encode
 	encoded, err := state.EncodeSSZ(nil)
 	require.NoError(t, err, "EncodeSSZ failed for minimal GLOAS state")
 
-	// The encoded size should be much smaller than mainnet due to PTC_SIZE=2 vs 512
+	// The encoded size should be much smaller than mainnet due to PTC_SIZE=16 vs 512
 	// ptcWindow contributes: (2+1)*8 * PTC_SIZE * 8 bytes
-	// Minimal: 24 * 2 * 8 = 384 bytes
+	// Minimal: 24 * 16 * 8 = 3072 bytes
 	// Mainnet: 96 * 512 * 8 = 393216 bytes
 	require.Less(t, len(encoded), 100000,
 		"minimal GLOAS state should be much smaller than mainnet (got %d bytes)", len(encoded))
