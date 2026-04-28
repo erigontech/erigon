@@ -412,8 +412,8 @@ func TestNewTypeFixedPointWrongSizeSubmatch(t *testing.T) {
 		if err == nil {
 			t.Fatalf("type %q: expected error for unsupported fixed-point type", s)
 		}
-		if strings.Contains(err.Error(), "error parsing variable size") {
-			t.Fatalf("type %q: got size parse error (wrong regexp submatch); want unsupported: %v", s, err)
+		if !strings.Contains(err.Error(), "unsupported arg type") {
+			t.Fatalf("type %q: got %v; want error containing %q", s, err, "unsupported arg type")
 		}
 	}
 }
