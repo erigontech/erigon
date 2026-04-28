@@ -19,7 +19,6 @@ package execmodule
 import (
 	"context"
 	"fmt"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -27,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
@@ -52,8 +52,6 @@ type PipelineExecutor struct {
 	dispatcher              *Dispatcher
 	logger                  log.Logger
 	knownTipHint            atomic.Uint64
-	knownTipHintReady       chan struct{}
-	knownTipHintReadyOnce   sync.Once
 }
 
 // NewPipelineExecutor creates a new executor. validationSync may be nil
@@ -82,7 +80,6 @@ func NewPipelineExecutor(
 		validationNotifications: validationNotifications,
 		dispatcher:              dispatcher,
 		logger:                  logger,
-		knownTipHintReady:       make(chan struct{}),
 	}
 }
 
@@ -112,7 +109,6 @@ func (pe *PipelineExecutor) SetKnownTipHint(blockNum uint64) {
 			return
 		}
 		if pe.knownTipHint.CompareAndSwap(current, blockNum) {
-			pe.knownTipHintReadyOnce.Do(func() { close(pe.knownTipHintReady) })
 			return
 		}
 	}
@@ -122,17 +118,44 @@ func (pe *PipelineExecutor) KnownTipHint() uint64 {
 	return pe.knownTipHint.Load()
 }
 
-func (pe *PipelineExecutor) waitKnownTipHint(ctx context.Context, timeout time.Duration) {
-	if pe.KnownTipHint() != 0 || timeout <= 0 {
+func (pe *PipelineExecutor) waitKnownTipHint(ctx context.Context, minBlock uint64, timeout time.Duration) {
+	if pe.KnownTipHint() > minBlock || timeout <= 0 {
 		return
 	}
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
 	select {
-	case <-pe.knownTipHintReady:
 	case <-timer.C:
+		return
 	case <-ctx.Done():
+		return
+	case <-ticker.C:
+		for pe.KnownTipHint() <= minBlock {
+			select {
+			case <-timer.C:
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
 	}
+}
+
+func (pe *PipelineExecutor) knownTipHintFloor(tx kv.Getter) (uint64, error) {
+	headersProgress, err := stages.GetStageProgress(tx, stages.Headers)
+	if err != nil {
+		return 0, err
+	}
+	knownTip := stagedsync.KnownTip(headersProgress, pe.blockReader.FrozenBlocks())
+	if lastTipReachedBlock, ok, err := rawdb.ReadLastTipReachedBlock(tx); err != nil {
+		return 0, err
+	} else if ok {
+		knownTip = max(knownTip, lastTipReachedBlock)
+	}
+	return knownTip, nil
 }
 
 // UnwindTo sets the unwind point on the main pipeline.
@@ -263,7 +286,11 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		return nil
 	}
 
-	pe.waitKnownTipHint(ctx, 500*time.Millisecond)
+	knownTipFloor, err := pe.knownTipHintFloor(tx)
+	if err != nil {
+		return err
+	}
+	pe.waitKnownTipHint(ctx, knownTipFloor, 500*time.Millisecond)
 
 	// If domains are ahead of block files, nothing to execute.
 	if execctx.IsDomainAheadOfBlocks(ctx, tx, pe.logger) {
