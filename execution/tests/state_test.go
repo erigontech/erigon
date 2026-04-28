@@ -26,7 +26,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -44,42 +43,8 @@ import (
 )
 
 func TestStateCornerCases(t *testing.T) {
-	t.Parallel()
-
-	defer log.Root().SetHandler(log.Root().GetHandler())
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
-	if runtime.GOOS == "windows" {
-		t.Skip("fix me on win please") // it's too slow on win and stops on macos, need generally improve speed of this tests
-	}
-
-	st := new(testutil.TestMatcher)
-
-	testDir := path.Join(cornersDir, "state")
-	st.Walk(t, testDir, func(t *testing.T, name string, test *testutil.StateTest) {
-		tmpDir, err := os.MkdirTemp("", "erigon-test-*")
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { dir.RemoveAll(tmpDir) })
-		dirs := datadir.New(tmpDir)
-		db := temporaltest.NewTestDB(t, dirs)
-		for _, subtest := range test.Subtests() {
-			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
-			t.Run(key, func(t *testing.T) {
-				withTrace(t, func(vmconfig vm.Config) error {
-					tx := beginRwNoContention(t, db)
-					defer tx.Rollback()
-					_, _, err = test.Run(t, tx, subtest, vmconfig, dirs)
-					tx.Rollback()
-					if err != nil && len(test.Json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
-						// Ignore expected errors
-						return nil
-					}
-					return st.CheckFailure(t, err)
-				})
-			})
-		}
-	})
+	stateTestSetup(t)
+	runStateTests(t, new(testutil.TestMatcher), filepath.Join(cornersDir, "state"))
 }
 
 // TestLegacyCancunState runs the pre-Istanbul ethereum/tests GeneralStateTests
@@ -94,67 +59,46 @@ func TestLegacyCancunState(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	t.Parallel()
-
-	if runtime.GOOS == "windows" {
-		t.Skip("fix me on win please")
-	}
-	defer log.Root().SetHandler(log.Root().GetHandler())
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
-
-	st := new(testutil.TestMatcher)
-	testDir := filepath.Join(legacyDir, "LegacyTests", "Cancun", "GeneralStateTests")
-
-	st.Walk(t, testDir, func(t *testing.T, name string, test *testutil.StateTest) {
-		tmpDir, err := os.MkdirTemp("", "erigon-test-*")
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { dir.RemoveAll(tmpDir) })
-		dirs := datadir.New(tmpDir)
-		db := temporaltest.NewTestDB(t, dirs)
-		for _, subtest := range test.Subtests() {
-			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
-			t.Run(key, func(t *testing.T) {
-				withTrace(t, func(vmconfig vm.Config) error {
-					tx := beginRwNoContention(t, db)
-					defer tx.Rollback()
-					_, _, err = test.Run(t, tx, subtest, vmconfig, dirs)
-					tx.Rollback()
-					if err != nil && len(test.Json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
-						// Ignore expected errors
-						return nil
-					}
-					return st.CheckFailure(t, err)
-				})
-			})
-		}
-	})
+	stateTestSetup(t)
+	runStateTests(t, new(testutil.TestMatcher), filepath.Join(legacyDir, "LegacyTests", "Cancun", "GeneralStateTests"))
 }
 
 func TestState(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	t.Parallel()
-
-	if runtime.GOOS == "windows" {
-		t.Skip("fix me on win please") // it's too slow on win and stops on macos, need generally improve speed of this tests
-	}
-	defer log.Root().SetHandler(log.Root().GetHandler())
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
+	stateTestSetup(t)
 
 	st := new(testutil.TestMatcher)
-	// Corresponds to GeneralStateTests from ethereum/tests:
-	// see https://github.com/ethereum/execution-spec-tests/releases/tag/v5.0.0
-	testDir := filepath.Join(eestDir, "state_tests", "static", "state_tests")
-
 	// Slow tests
 	st.Slow(`^stPreCompiledContracts/precompsEIP2929Cancun`)
-
 	// Very slow tests
 	st.SkipLoad(`^stTimeConsuming/`)
 
+	// Corresponds to GeneralStateTests from ethereum/tests:
+	// see https://github.com/ethereum/execution-spec-tests/releases/tag/v5.0.0
+	runStateTests(t, st, filepath.Join(eestDir, "state_tests", "static", "state_tests"))
+}
+
+// stateTestSetup applies the parallel/log/Windows-skip boilerplate shared by
+// state-test runners.
+func stateTestSetup(t *testing.T) {
+	t.Helper()
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please") // it's too slow on win and stops on macos, need generally improve speed of this tests
+	}
+	prev := log.Root().GetHandler()
+	t.Cleanup(func() { log.Root().SetHandler(prev) })
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
+}
+
+// runStateTests walks testDir and runs each StateTest's subtests through the
+// shared per-subtest harness (temp datadir, fresh DB, withTrace). The matcher
+// is supplied by the caller pre-configured with any Slow/SkipLoad/Whitelist
+// patterns.
+func runStateTests(t *testing.T, st *testutil.TestMatcher, testDir string) {
+	t.Helper()
 	st.Walk(t, testDir, func(t *testing.T, name string, test *testutil.StateTest) {
 		tmpDir, err := os.MkdirTemp("", "erigon-test-*")
 		if err != nil {
