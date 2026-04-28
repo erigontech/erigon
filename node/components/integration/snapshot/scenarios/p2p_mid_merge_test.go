@@ -43,6 +43,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -472,6 +473,339 @@ func partitionLabel(idx int) string {
 		return "empty late joiner"
 	}
 	return "unknown"
+}
+
+// midMergeRole tags a peer's seeded role for the multi-peer mid-merge
+// scenario. Used purely for logging + final-state classification.
+type midMergeRole int
+
+const (
+	roleConstituents midMergeRole = iota
+	roleMerged
+	roleEmpty
+)
+
+func (r midMergeRole) String() string {
+	switch r {
+	case roleConstituents:
+		return "constituents"
+	case roleMerged:
+		return "merged"
+	case roleEmpty:
+		return "empty"
+	}
+	return "?"
+}
+
+// TestP2P_Swarm_MidMergeMany scales the mid-merge scenario up to N
+// peers to surface any bias in the orchestrator's selection between
+// constituents and merged forms.
+//
+// Topology:
+//   - K_C peers seeded with constituents only.
+//   - K_M peers seeded with merged only.
+//   - K_E empty late joiners, staggered every SNAPSHOT_STAGGER_INTERVAL.
+//
+// The empty joiners are the population we measure. Each joiner picks
+// its accounts coverage from whichever advertiser's manifest the
+// orchestrator processes first (today's behaviour). With balanced
+// initial seeders we expect ~50/50 if the orchestrator is unbiased.
+//
+// Knobs:
+//   SNAPSHOT_PEERS               default 10
+//   SNAPSHOT_MIDMERGE_CONSTITS   default 2
+//   SNAPSHOT_MIDMERGE_MERGED     default 2
+//   SNAPSHOT_STAGGER_INTERVAL    default 5s (local high-speed network)
+//
+// What's surfaced (not asserted today, useful for future preferring-
+// merged validator regression checks):
+//   - Among empty late joiners, how many ended with merged form vs
+//     constituents-only vs both vs neither.
+//   - Whether later joiners trend more toward one form (Polya-urn
+//     preferential attachment effect: as more peers acquire merged,
+//     they re-advertise merged, so subsequent joiners see more merged
+//     advertisers — the dominant form can grow).
+//
+// Baseline distribution (10 runs, 2 constituents + 2 merged + 6 empty,
+// 60 empty-joiner outcomes total): merged=25 (41.7%), constituents=35
+// (58.3%), both=0. Mean per run merged=2.5 vs expected 3.0 if 50/50;
+// well within 1σ — no significant bias. `both=0` across every run is
+// the load-bearing observation: the orchestrator's range-coverage
+// check stops a peer pulling the alternate form once [0, 64) is
+// covered. When the merge-equivalence validator lands, the assertion
+// tightens from "every peer covers [0, 64)" to "every peer holds the
+// canonical merged form" — at which point this test's both-count and
+// constituents-count both go to zero.
+func TestP2P_Swarm_MidMergeMany(t *testing.T) {
+	logger := log.New()
+	logger.SetHandler(log.StreamHandler(os.Stderr, log.TerminalFormat()))
+
+	totalPeers := 10
+	if v := os.Getenv("SNAPSHOT_PEERS"); v != "" {
+		n, err := strconv.Atoi(v)
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, n, 4, "SNAPSHOT_PEERS must be >= 4 (need at least one of each role)")
+		totalPeers = n
+	}
+	kConstits := 2
+	if v := os.Getenv("SNAPSHOT_MIDMERGE_CONSTITS"); v != "" {
+		n, err := strconv.Atoi(v)
+		require.NoError(t, err)
+		kConstits = n
+	}
+	kMerged := 2
+	if v := os.Getenv("SNAPSHOT_MIDMERGE_MERGED"); v != "" {
+		n, err := strconv.Atoi(v)
+		require.NoError(t, err)
+		kMerged = n
+	}
+	kEmpty := totalPeers - kConstits - kMerged
+	require.Greater(t, kEmpty, 0, "need at least one empty late joiner")
+	staggerInterval := 5 * time.Second
+	if v := os.Getenv("SNAPSHOT_STAGGER_INTERVAL"); v != "" {
+		d, err := time.ParseDuration(v)
+		require.NoError(t, err)
+		staggerInterval = d
+	}
+
+	t.Logf("topology: %d constituents-seeders + %d merged-seeders + %d empty late joiners (every %s)",
+		kConstits, kMerged, kEmpty, staggerInterval)
+
+	baseDir := t.TempDir()
+	srcDir := buildMidMergeFixture(t, baseDir)
+	entries, err := harness.LoadPreverified(srcDir)
+	require.NoError(t, err)
+
+	var primaries []harness.PreverifiedEntry
+	for _, e := range entries {
+		if e.Role.IsPrimary() {
+			primaries = append(primaries, e)
+		}
+	}
+
+	common := map[string]bool{
+		"v1.0-000000-000100-headers.seg": true,
+		"v1.0-000000-000100-bodies.seg":  true,
+		"erigondb.toml":                  true,
+		"salt-blocks.txt":                true,
+		"salt-state.txt":                 true,
+	}
+	roleOf := func(idx int) midMergeRole {
+		switch {
+		case idx < kConstits:
+			return roleConstituents
+		case idx < kConstits+kMerged:
+			return roleMerged
+		default:
+			return roleEmpty
+		}
+	}
+	owns := func(role midMergeRole) map[string]bool {
+		if role == roleEmpty {
+			return nil
+		}
+		o := map[string]bool{}
+		for k, v := range common {
+			o[k] = v
+		}
+		switch role {
+		case roleConstituents:
+			o["domain/v1.0-accounts.0-32.kv"] = true
+			o["domain/v1.0-accounts.32-64.kv"] = true
+		case roleMerged:
+			o["domain/v1.0-accounts.0-64.kv"] = true
+		}
+		return o
+	}
+
+	type manyPeer struct {
+		role          midMergeRole
+		joinAt        time.Duration
+		node          *harness.P2PNode
+		manifestCount *atomic.Int32
+		promotedCount *atomic.Int32
+	}
+	peers := make([]*manyPeer, totalPeers)
+
+	bringUp := func(idx int, joinAt time.Duration) *manyPeer {
+		t.Helper()
+		role := roleOf(idx)
+		peerDir := filepath.Join(baseDir, fmt.Sprintf("peer-%d", idx))
+		require.NoError(t, os.MkdirAll(peerDir, 0o755))
+		node := harness.NewP2PNodeAt(t, peerDir, logger)
+		ownership := owns(role)
+		seeded := 0
+		for _, e := range primaries {
+			if !ownership[e.RelPath] {
+				continue
+			}
+			src := filepath.Join(srcDir, e.RelPath)
+			dst := filepath.Join(node.Dirs.Snap, e.RelPath)
+			require.NoError(t, os.MkdirAll(filepath.Dir(dst), 0o755))
+			if err := os.Link(src, dst); err != nil {
+				require.NoError(t, copyFile(src, dst), "copy %s", e.RelPath)
+			}
+			got := node.SeedExistingFile(e.RelPath, &snapshot.FileEntry{
+				Domain: e.Domain, Kind: e.Kind, FromStep: e.FromStep, ToStep: e.ToStep,
+			})
+			require.Equal(t, e.InfoHash, got, "open-loop check 1 FAILED for peer %d %s", idx, e.RelPath)
+			seeded++
+		}
+
+		v2 := node.PublishV2Manifest()
+		_, btPort := node.LocalTorrentAddr()
+		node.SetDevP2PENREntry(enr.ChainToml{InfoHash: v2})
+		node.SetDevP2PENREntry(enr.BT(btPort))
+		node.EnableAutoPublishV2(1 * time.Second)
+
+		mp := &manyPeer{role: role, joinAt: joinAt, node: node,
+			manifestCount: &atomic.Int32{}, promotedCount: &atomic.Int32{}}
+		mc := mp.manifestCount
+		pc := mp.promotedCount
+		require.NoError(t, node.Bus.Subscribe(func(flow.PeerManifestReceived) { mc.Add(1) }))
+		require.NoError(t, node.Bus.Subscribe(func(flow.TrustPromoted) { pc.Add(1) }))
+		t.Logf("peer %d up [%s] joinAt=%s seeded=%d", idx, role, joinAt, seeded)
+		return mp
+	}
+
+	meshAdd := func(upTo int) {
+		t.Helper()
+		for i := 0; i <= upTo; i++ {
+			for j := 0; j <= upTo; j++ {
+				if i == j || peers[i] == nil || peers[j] == nil {
+					continue
+				}
+				peers[i].node.AddDevP2PPeer(peers[j].node.DevP2PSelf())
+			}
+		}
+		for i := 0; i <= upTo; i++ {
+			for j := 0; j <= upTo; j++ {
+				if i == j || peers[i] == nil || peers[j] == nil {
+					continue
+				}
+				peers[i].node.AddSeederPeer(peers[j].node)
+			}
+		}
+		for i := 0; i <= upTo; i++ {
+			for j := 0; j <= upTo; j++ {
+				if i == j || peers[i] == nil || peers[j] == nil {
+					continue
+				}
+				peers[i].node.Sentry.PublishPeerConnected(peers[j].node.DevP2PSelf())
+			}
+		}
+	}
+
+	// Wave 1: all constituents + merged seeders at t=0.
+	wave1Start := time.Now()
+	for i := 0; i < kConstits+kMerged; i++ {
+		peers[i] = bringUp(i, 0)
+	}
+	meshAdd(kConstits + kMerged - 1)
+
+	// Wave 2: empty late joiners, one per stagger interval.
+	for i := kConstits + kMerged; i < totalPeers; i++ {
+		time.Sleep(staggerInterval)
+		joinAt := time.Since(wave1Start)
+		peers[i] = bringUp(i, joinAt)
+		meshAdd(i)
+	}
+
+	// Convergence wait: every peer covers [0, 64) for accounts and
+	// has all common files. Form (constituents vs merged) varies.
+	hasFile := func(snap, rel string) bool {
+		_, err := os.Stat(filepath.Join(snap, rel))
+		return err == nil
+	}
+	hasAccountsCoverage := func(snap string) bool {
+		merged := hasFile(snap, "domain/v1.0-accounts.0-64.kv")
+		c1 := hasFile(snap, "domain/v1.0-accounts.0-32.kv")
+		c2 := hasFile(snap, "domain/v1.0-accounts.32-64.kv")
+		return merged || (c1 && c2)
+	}
+	allCommonPresent := func(snap string) bool {
+		for k := range common {
+			if !hasFile(snap, k) {
+				return false
+			}
+		}
+		return true
+	}
+
+	timeout := 5*time.Minute + time.Duration(kEmpty)*staggerInterval
+	transferStart := time.Now()
+	t.Logf("waiting up to %s for all peers to cover [0, 64)", timeout)
+
+	lastLog := time.Time{}
+	waitForP2P(t, func() bool {
+		converged := true
+		for _, pe := range peers {
+			if pe == nil {
+				converged = false
+				continue
+			}
+			if pe.node.Orch.PendingCount() != 0 {
+				converged = false
+			}
+			if !hasAccountsCoverage(pe.node.Dirs.Snap) {
+				converged = false
+			}
+			if !allCommonPresent(pe.node.Dirs.Snap) {
+				converged = false
+			}
+		}
+		if !converged && time.Since(lastLog) > 15*time.Second {
+			lastLog = time.Now()
+			for i, pe := range peers {
+				if pe == nil {
+					continue
+				}
+				t.Logf("[progress %s] peer %d [%s]: covers=%v common=%v pending=%d manifests=%d promoted=%d",
+					time.Since(transferStart).Round(time.Second), i, pe.role,
+					hasAccountsCoverage(pe.node.Dirs.Snap),
+					allCommonPresent(pe.node.Dirs.Snap),
+					pe.node.Orch.PendingCount(),
+					pe.manifestCount.Load(),
+					pe.promotedCount.Load())
+			}
+		}
+		return converged
+	}, timeout, "every peer covers [0, 64)")
+	t.Logf("transport-layer convergence reached in %.2fs", time.Since(transferStart).Seconds())
+
+	// Tabulate the form distribution among empty late joiners.
+	var (
+		mergedCount, constituentsCount, bothCount int
+	)
+	t.Logf("=== final form distribution ===")
+	for i, pe := range peers {
+		if pe == nil {
+			continue
+		}
+		merged := hasFile(pe.node.Dirs.Snap, "domain/v1.0-accounts.0-64.kv")
+		c1 := hasFile(pe.node.Dirs.Snap, "domain/v1.0-accounts.0-32.kv")
+		c2 := hasFile(pe.node.Dirs.Snap, "domain/v1.0-accounts.32-64.kv")
+		form := "neither"
+		switch {
+		case merged && c1 && c2:
+			form = "BOTH"
+			bothCount++
+		case merged:
+			form = "merged"
+			if pe.role == roleEmpty {
+				mergedCount++
+			}
+		case c1 && c2:
+			form = "constituents"
+			if pe.role == roleEmpty {
+				constituentsCount++
+			}
+		}
+		t.Logf("peer %2d [%-12s] joinAt=%-8s form=%s",
+			i, pe.role, pe.joinAt.Round(time.Second), form)
+	}
+	t.Logf("=== empty-joiner distribution: merged=%d constituents=%d both=%d (of %d empty joiners)",
+		mergedCount, constituentsCount, bothCount, kEmpty)
 }
 
 // inventorySummary lists the canonical-file names in an inventory's

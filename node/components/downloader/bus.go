@@ -132,6 +132,30 @@ func (p *Provider) FetchPeerManifestV2(ctx context.Context, peerID string, infoH
 		return nil, fetch.err
 	}
 
+	// Local-seed short-circuit. anacrolix keys torrents by infohash; if
+	// a peer advertises a V2 whose content is byte-identical to a V2
+	// generation we are already seeding (same file set → same toml bytes
+	// → same infohash), AddTorrentOpt would return our existing torrent
+	// and silently ignore the per-peer Storage we pass below — bytes
+	// stay in the local snap-dir while ReadFile(peerDir/...) returns
+	// ENOENT. Detect that case up front and read the local file directly.
+	if existing, ok := client.Torrent(infoHash); ok {
+		select {
+		case <-existing.GotInfo():
+		case <-ctx.Done():
+			fetch.err = ctx.Err()
+			return nil, fetch.err
+		}
+		if info := existing.Info(); info != nil && len(info.Files) == 0 {
+			if _, ok := dl.ParseChainTomlV2FileName(info.Name); ok {
+				if data, rerr := os.ReadFile(filepath.Join(p.dirs.Snap, info.Name)); rerr == nil {
+					fetch.data = data
+					return data, nil
+				}
+			}
+		}
+	}
+
 	peerDir := filepath.Join(p.dirs.Snap, ".peers", peerID)
 	if err := os.MkdirAll(peerDir, 0o755); err != nil {
 		fetch.err = fmt.Errorf("creating peer dir: %w", err)

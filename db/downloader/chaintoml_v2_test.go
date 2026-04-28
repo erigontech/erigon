@@ -140,7 +140,7 @@ func TestV2FullScopeRoundTrip(t *testing.T) {
 	inv := snapshotinv.NewInventory()
 
 	inv.AddFile(&snapshotinv.FileEntry{
-		Name: "v1.1-000000-000100-headers.seg",
+		Name:        "v1.1-000000-000100-headers.seg",
 		TorrentHash: [20]byte{0xb1}, Local: true, Trust: snapshotinv.TrustVerified,
 	})
 	inv.AddFile(&snapshotinv.FileEntry{

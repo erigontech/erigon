@@ -38,6 +38,7 @@ import (
 
 	"github.com/anacrolix/torrent/metainfo"
 
+	"github.com/erigontech/erigon/common/dir"
 	snapshotinv "github.com/erigontech/erigon/node/components/storage/snapshot"
 	"github.com/erigontech/erigon/p2p/enr"
 )
@@ -213,8 +214,8 @@ func (r *RollingV2Publisher) evictOldestLocked() {
 		if r.downloader != nil {
 			r.downloader.DropTorrentByName(oldName)
 		}
-		_ = os.Remove(filepath.Join(r.snapDir, oldName))
-		_ = os.Remove(filepath.Join(r.snapDir, oldName+".torrent"))
+		_ = dir.RemoveFile(filepath.Join(r.snapDir, oldName))
+		_ = dir.RemoveFile(filepath.Join(r.snapDir, oldName+".torrent"))
 	}
 }
 
@@ -254,8 +255,8 @@ func (r *RollingV2Publisher) Cleanup() error {
 		if r.downloader != nil {
 			r.downloader.DropTorrentByName(e.Name())
 		}
-		_ = os.Remove(filepath.Join(r.snapDir, e.Name()))
-		_ = os.Remove(filepath.Join(r.snapDir, e.Name()+".torrent"))
+		_ = dir.RemoveFile(filepath.Join(r.snapDir, e.Name()))
+		_ = dir.RemoveFile(filepath.Join(r.snapDir, e.Name()+".torrent"))
 	}
 	return nil
 }

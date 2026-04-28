@@ -78,7 +78,7 @@ type DomainManifest struct {
 
 // DomainFileEntry is a single file in a domain manifest.
 type DomainFileEntry struct {
-	Name string    `toml:"name"`
+	Name string `toml:"name"`
 	// Range is the [from, to) step range this file covers.
 	Range [2]uint64 `toml:"range"`
 	// Kind is "kv" (default when empty for back-compat), "history" (.v),

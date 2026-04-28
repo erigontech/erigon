@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -114,7 +115,7 @@ func seedPeerManifest(t *testing.T, seedDir string, inv *snapshot.Inventory) (st
 	torrentFS := downloader.NewAtomicTorrentFS(seedDir)
 	hash, err := downloader.PublishChainTomlV2(seedDir, torrentFS, inv, 0, nil)
 	require.NoError(t, err)
-	return downloader.ChainTomlV2Path(seedDir), [20]byte(hash)
+	return filepath.Join(seedDir, downloader.ChainTomlV2FileNameForSeq(0)), [20]byte(hash)
 }
 
 func makeInventory(t *testing.T) *snapshot.Inventory {

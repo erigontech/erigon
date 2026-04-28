@@ -44,17 +44,17 @@ import (
 type PreverifiedRole int
 
 const (
-	RoleUnknown PreverifiedRole = iota
-	RoleBlockSeg                 // top-level v*.seg (headers, bodies, transactions)
-	RoleDomainKV                 // domain/v*-<domain>.<from>-<to>.kv
-	RoleDomainHistory            // history/v*-<domain>.<from>-<to>.v
-	RoleDomainIdx                // idx/v*-<domain>.<from>-<to>.ef
-	RoleCaplinSeg                // caplin/v*-beaconblocks.seg
-	RoleMeta                     // erigondb.toml
-	RoleSalt                     // salt-*.txt
-	RoleDerivedAccessor          // .vi, .efi, .kvi, .kvei, .bt — rebuilt locally
-	RoleDerivedBlockIdx          // top-level .idx — rebuilt locally
-	RoleDerivedCaplinIdx         // caplin/*.idx — rebuilt locally
+	RoleUnknown          PreverifiedRole = iota
+	RoleBlockSeg                         // top-level v*.seg (headers, bodies, transactions)
+	RoleDomainKV                         // domain/v*-<domain>.<from>-<to>.kv
+	RoleDomainHistory                    // history/v*-<domain>.<from>-<to>.v
+	RoleDomainIdx                        // idx/v*-<domain>.<from>-<to>.ef
+	RoleCaplinSeg                        // caplin/v*-beaconblocks.seg
+	RoleMeta                             // erigondb.toml
+	RoleSalt                             // salt-*.txt
+	RoleDerivedAccessor                  // .vi, .efi, .kvi, .kvei, .bt — rebuilt locally
+	RoleDerivedBlockIdx                  // top-level .idx — rebuilt locally
+	RoleDerivedCaplinIdx                 // caplin/*.idx — rebuilt locally
 )
 
 // IsPrimary reports whether the role is one a peer must transfer over P2P
