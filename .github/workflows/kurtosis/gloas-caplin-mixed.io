@@ -10,7 +10,7 @@ participants:
   - cl_type: caplin
     cl_image: test/erigon:glamsterdam-caplin
     cl_log_level: "debug"
-    cl_extra_params: ["--local-discovery"]
+    cl_extra_params: ["--local-discovery", "--caplin.subscribe-all-topics"]
     el_type: erigon
     el_image: test/erigon:glamsterdam-caplin
     el_log_level: "debug"

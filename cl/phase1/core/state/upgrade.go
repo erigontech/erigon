@@ -356,12 +356,9 @@ func (b *CachingBeaconState) UpgradeToGloas() error {
 		return fmt.Errorf("upgrade to Gloas: %w", err)
 	}
 
-	// If deposit_requests_start_index is still UNSET from the Electra fork,
-	// set it to eth1_deposit_index so ProcessPendingDeposits stops waiting
-	// for bridge deposits that will never arrive in GLOAS.
-	if b.GetDepositRequestsStartIndex() == cfg.UnsetDepositRequestsStartIndex {
-		b.SetDepositRequestsStartIndex(b.Eth1DepositIndex())
-	}
+	// Note: deposit_requests_start_index is intentionally preserved as-is from the
+	// pre-state, matching the consensus spec (specs/gloas/fork.md) and Lighthouse.
+	// Even if it is still UNSET (2^64-1), it must not be modified during the upgrade.
 
 	// Update the state version
 	b.SetVersion(clparams.GloasVersion)
