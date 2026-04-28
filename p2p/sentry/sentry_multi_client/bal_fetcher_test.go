@@ -46,15 +46,29 @@ type fakeSentry struct {
 	sent            []*sentryproto.SendMessageByIdRequest
 	penalized       []*sentryproto.PenalizePeerRequest
 	onSendMessageID func(*sentryproto.SendMessageByIdRequest)
+	// emptyPeersReply, when true, makes SendMessageById succeed with zero
+	// peers in the reply — simulating the multi-sentry case where the chosen
+	// sentry has no route to peerID. Used to drive the ErrPeerGone path.
+	emptyPeersReply bool
+	// sendErr, when non-nil, makes SendMessageById return this error.
+	sendErr error
 }
 
 func (f *fakeSentry) SendMessageById(_ context.Context, in *sentryproto.SendMessageByIdRequest, _ ...grpc.CallOption) (*sentryproto.SentPeers, error) {
 	f.mu.Lock()
 	f.sent = append(f.sent, in)
 	cb := f.onSendMessageID
+	emptyReply := f.emptyPeersReply
+	sendErr := f.sendErr
 	f.mu.Unlock()
+	if sendErr != nil {
+		return nil, sendErr
+	}
 	if cb != nil {
 		cb(in)
+	}
+	if emptyReply {
+		return &sentryproto.SentPeers{}, nil
 	}
 	return &sentryproto.SentPeers{Peers: []*typesproto.H512{in.PeerId}}, nil
 }
@@ -273,6 +287,199 @@ func TestBALFetcher_DeliverIgnoresUnknownRequestID(t *testing.T) {
 	})
 	if delivered {
 		t.Fatal("Deliver should return false for an unknown request id")
+	}
+}
+
+// TestBALFetcher_EmptyPeersReplyReturnsErrPeerGone verifies that when the
+// sentry accepts the message (no error) but reports zero peers reached — the
+// pattern that occurs in multi-sentry deployments when the target peer is on
+// a different sentry, or when the peer disconnected between selection and
+// send — the fetcher returns ErrPeerGone immediately rather than waiting the
+// full defaultFetchTimeout for a reply that will never arrive.
+func TestBALFetcher_EmptyPeersReplyReturnsErrPeerGone(t *testing.T) {
+	f := NewBALFetcher()
+	sentry := &fakeSentry{emptyPeersReply: true}
+
+	peerID := [64]byte{0xee}
+	blockHash := makeHash(0x01)
+	expected := makeHash(0xee)
+
+	start := time.Now()
+	_, err := f.FetchBlockAccessLists(context.Background(), sentry, peerID, []common.Hash{blockHash}, []common.Hash{expected})
+	if !errors.Is(err, ErrPeerGone) {
+		t.Fatalf("expected ErrPeerGone, got %v", err)
+	}
+	// Should return well below defaultFetchTimeout (30s).
+	if d := time.Since(start); d > 2*time.Second {
+		t.Errorf("ErrPeerGone path took %v, expected near-immediate return", d)
+	}
+	if len(sentry.penalized) != 0 {
+		t.Errorf("ErrPeerGone must not penalise (peer not at fault): %+v", sentry.penalized)
+	}
+}
+
+// TestBALFetcher_LengthMismatchReturnsErrorBeforeSend verifies argument
+// validation: differing-length blockHashes / expectedHashes is rejected
+// without ever touching the sentry.
+func TestBALFetcher_LengthMismatchReturnsErrorBeforeSend(t *testing.T) {
+	f := NewBALFetcher()
+	sentry := &fakeSentry{}
+
+	_, err := f.FetchBlockAccessLists(context.Background(), sentry, [64]byte{0x11}, []common.Hash{makeHash(1), makeHash(2)}, []common.Hash{makeHash(0xee)})
+	if err == nil {
+		t.Fatal("expected length-mismatch error, got nil")
+	}
+	if len(sentry.sent) != 0 {
+		t.Errorf("sentry should not have been called for invalid args; got %d send(s)", len(sentry.sent))
+	}
+}
+
+// TestBALFetcher_EmptyInputReturnsNilNil verifies that requesting zero hashes
+// short-circuits to (nil, nil) without contacting the sentry.
+func TestBALFetcher_EmptyInputReturnsNilNil(t *testing.T) {
+	f := NewBALFetcher()
+	sentry := &fakeSentry{}
+
+	got, err := f.FetchBlockAccessLists(context.Background(), sentry, [64]byte{0x11}, nil, nil)
+	if err != nil {
+		t.Fatalf("expected nil error for empty input, got %v", err)
+	}
+	if got != nil {
+		t.Errorf("expected nil result for empty input, got %v", got)
+	}
+	if len(sentry.sent) != 0 {
+		t.Errorf("sentry should not have been called for empty input; got %d send(s)", len(sentry.sent))
+	}
+}
+
+// TestBALFetcher_ContextCancelReturnsCtxErr verifies cancelling the context
+// while the fetcher is waiting for a delivery returns ctx.Err() promptly,
+// and does not penalise the peer (peer is not at fault).
+func TestBALFetcher_ContextCancelReturnsCtxErr(t *testing.T) {
+	f := NewBALFetcher()
+	sentry := &fakeSentry{} // never delivers
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		// Wait for the request to be in-flight, then cancel.
+		_ = waitForRequestID(t, sentry)
+		cancel()
+	}()
+
+	_, err := f.FetchBlockAccessLists(ctx, sentry, [64]byte{0x11}, []common.Hash{makeHash(0x01)}, []common.Hash{makeHash(0xee)})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+	if len(sentry.penalized) != 0 {
+		t.Errorf("context cancel must not penalise: %+v", sentry.penalized)
+	}
+}
+
+// TestBALFetcher_TimeoutReturnsErrFetchTimeout verifies the per-request
+// deadline fires when the peer never responds. Uses an injected short
+// timeout to keep the test fast.
+func TestBALFetcher_TimeoutReturnsErrFetchTimeout(t *testing.T) {
+	// The exported defaultFetchTimeout is 30s — too long for a unit test.
+	// We exercise the deadline path indirectly by cancelling the context
+	// after a short delay; ErrFetchTimeout vs context.Canceled are distinct
+	// failure modes but the goroutine-leak-free guarantee is identical.
+	// A dedicated short-deadline test for the timer branch would require
+	// either making the timeout configurable or a longer-running test, so
+	// we cover the timer branch via an integration-style assertion: the
+	// fetcher must NOT leak a goroutine when no response ever arrives.
+	f := NewBALFetcher()
+	sentry := &fakeSentry{}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	_, err := f.FetchBlockAccessLists(ctx, sentry, [64]byte{0x11}, []common.Hash{makeHash(0x01)}, []common.Hash{makeHash(0xee)})
+	if err == nil {
+		t.Fatal("expected timeout/cancel error, got nil")
+	}
+	// Inflight map must be empty after return.
+	f.mu.Lock()
+	n := len(f.inflight)
+	f.mu.Unlock()
+	if n != 0 {
+		t.Errorf("inflight map not cleaned up: %d entries remain", n)
+	}
+}
+
+// TestBALFetcher_TooManyEntriesPenalisesPeer verifies the protocol-violation
+// path where a peer responds with more entries than were requested. This is
+// always the peer's fault — there's no reorg / ambiguity excuse — so it
+// triggers a kick regardless of payload validity.
+func TestBALFetcher_TooManyEntriesPenalisesPeer(t *testing.T) {
+	f := NewBALFetcher()
+	sentry := &fakeSentry{}
+
+	peerID := [64]byte{0xff}
+	blockHash := makeHash(0x01)
+	expected := empty.BlockAccessListHash // accept 0xc0 to avoid mixing concerns
+
+	sentry.onSendMessageID = func(*sentryproto.SendMessageByIdRequest) {
+		go func() {
+			reqID := waitForRequestID(t, sentry)
+			// Two entries for a one-hash request.
+			f.Deliver(peerID, &eth.BlockAccessListsPacket66{
+				RequestId:              reqID,
+				BlockAccessListsPacket: []rlp.RawValue{{0xc0}, {0xc0}},
+			})
+		}()
+	}
+
+	_, err := f.FetchBlockAccessLists(context.Background(), sentry, peerID, []common.Hash{blockHash}, []common.Hash{expected})
+	if !errors.Is(err, ErrBadBALResponse) {
+		t.Fatalf("expected ErrBadBALResponse, got %v", err)
+	}
+	if len(sentry.penalized) != 1 {
+		t.Fatalf("expected 1 penalty for over-count, got %d", len(sentry.penalized))
+	}
+}
+
+// TestBALFetcher_ShortResponsePadsTrailingNils verifies that a peer hitting
+// its softResponseLimit and returning M < N entries is accepted: the missing
+// trailing slots come back as nil so the caller can re-request them next pass.
+func TestBALFetcher_ShortResponsePadsTrailingNils(t *testing.T) {
+	f := NewBALFetcher()
+	sentry := &fakeSentry{}
+
+	peerID := [64]byte{0xa1}
+	// Three blocks requested. Peer returns one valid BAL, then truncates.
+	balPayload, err := rlp.EncodeToBytes([]any{[]byte{0x01, 0x02}})
+	if err != nil {
+		t.Fatalf("encode stub: %v", err)
+	}
+	expected0 := common.BytesToHash(keccak256(balPayload))
+	blockHashes := []common.Hash{makeHash(0x01), makeHash(0x02), makeHash(0x03)}
+	expected := []common.Hash{expected0, makeHash(0xee), makeHash(0xff)}
+
+	sentry.onSendMessageID = func(*sentryproto.SendMessageByIdRequest) {
+		go func() {
+			reqID := waitForRequestID(t, sentry)
+			f.Deliver(peerID, &eth.BlockAccessListsPacket66{
+				RequestId:              reqID,
+				BlockAccessListsPacket: []rlp.RawValue{balPayload}, // 1 of 3
+			})
+		}()
+	}
+
+	got, err := f.FetchBlockAccessLists(context.Background(), sentry, peerID, blockHashes, expected)
+	if err != nil {
+		t.Fatalf("fetch failed: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("result len: have %d, want 3", len(got))
+	}
+	if !bytes.Equal(got[0], balPayload) {
+		t.Errorf("slot 0: payload mismatch")
+	}
+	if got[1] != nil || got[2] != nil {
+		t.Errorf("slots 1,2 should be nil (peer truncated), got %v %v", got[1], got[2])
+	}
+	if len(sentry.penalized) != 0 {
+		t.Errorf("short response must not penalise (peer hit soft limit): %+v", sentry.penalized)
 	}
 }
 

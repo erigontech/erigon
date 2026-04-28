@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
@@ -112,7 +113,7 @@ func (d *BALDownloader) Run(ctx context.Context) {
 // rawdb, and fetches them in parallel (bounded by maxConcurrent) from any
 // eth/71 peer. Missing / failed entries are silently left for a later pass.
 func (d *BALDownloader) scanAndFetch(ctx context.Context) error {
-	peer, found, err := d.pickEth71Peer(ctx)
+	peer, sentryI, found, err := d.pickEth71Peer(ctx)
 	if err != nil {
 		return err
 	}
@@ -131,7 +132,11 @@ func (d *BALDownloader) scanAndFetch(ctx context.Context) error {
 	d.logger.Debug("[bal-downloader] scan complete", "missing", len(missing), "peer", hex.EncodeToString(peer[:8]))
 
 	// Fetch in batches. Each batch shares one GetBlockAccessLists round trip.
-	const batchSize = 32
+	// batchSize is conservative against the 2 MiB softResponseLimit that peers
+	// enforce on the response side. Reviewer note: 32 × ~70 KiB ≈ 2.2 MiB
+	// would routinely truncate; we drop to 24 to keep typical responses below
+	// the cap so peers don't have to truncate and we don't pad with nils.
+	const batchSize = 24
 	sem := make(chan struct{}, d.maxConcurrent)
 	var wg sync.WaitGroup
 	for i := 0; i < len(missing); i += batchSize {
@@ -152,7 +157,7 @@ func (d *BALDownloader) scanAndFetch(ctx context.Context) error {
 		go func(batch []missingBAL) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			d.fetchBatch(ctx, peer, batch)
+			d.fetchBatch(ctx, peer, sentryI, batch)
 		}(batch)
 	}
 	wg.Wait()
@@ -193,7 +198,16 @@ func (d *BALDownloader) collectMissingBALs(ctx context.Context) ([]missingBAL, e
 				break
 			}
 			hash := hdr.Hash()
-			existing, _ := rawdb.ReadBlockAccessListBytes(tx, hash, n)
+			existing, err := rawdb.ReadBlockAccessListBytes(tx, hash, n)
+			if err != nil {
+				// A real DB error here used to silently fall through, treating
+				// this slot as "missing" — leading to refetch+rewrite+refetch
+				// loops on every scan pass against a transient or persistent
+				// DB issue. Log and skip; next scan will retry.
+				d.logger.Debug("[bal-downloader] ReadBlockAccessListBytes failed, skipping slot",
+					"n", n, "hash", hash, "err", err)
+				continue
+			}
 			if len(existing) > 0 {
 				continue
 			}
@@ -214,7 +228,45 @@ func (d *BALDownloader) collectMissingBALs(ctx context.Context) ([]missingBAL, e
 // fetchBatch issues a single GetBlockAccessLists for the batch's hashes and
 // writes any validated returns to rawdb. Individual fetch failures are
 // logged at debug and do not propagate — the next scan pass will retry.
-func (d *BALDownloader) fetchBatch(ctx context.Context, peer [64]byte, batch []missingBAL) {
+//
+// Just before issuing the request, re-validates each batch entry's expected
+// BAL hash against the current canonical view. Entries whose canonical view
+// has diverged since collectMissingBALs (head reorg, prune) are dropped from
+// this batch silently — kicking the peer for delivering the BAL of the now-
+// non-canonical block would be a false-positive penalty.
+func (d *BALDownloader) fetchBatch(ctx context.Context, peer [64]byte, sentryI int, batch []missingBAL) {
+	// Reorg-aware re-validation: drop entries whose expected hash no longer
+	// matches the current canonical header at that block number.
+	live := batch[:0:len(batch)]
+	if err := d.mc.db.View(ctx, func(tx kv.Tx) error {
+		for _, m := range batch {
+			hdr, err := d.mc.blockReader.HeaderByNumber(ctx, tx, m.number)
+			if err != nil {
+				// Treat any read error as "drop this entry from the batch
+				// silently" — collectMissingBALs already logs at scan-pass
+				// granularity; we don't want the peer kicked for our DB issue.
+				d.logger.Debug("[bal-downloader] HeaderByNumber failed, dropping from batch", "n", m.number, "err", err)
+				continue
+			}
+			if hdr == nil || hdr.BlockAccessListHash == nil {
+				continue
+			}
+			if hdr.Hash() != m.hash || *hdr.BlockAccessListHash != m.expected {
+				// Reorg or prune: scan-time canonical view has diverged.
+				continue
+			}
+			live = append(live, m)
+		}
+		return nil
+	}); err != nil {
+		d.logger.Debug("[bal-downloader] revalidation View failed, retrying next scan", "err", err, "batch_size", len(batch))
+		return
+	}
+	if len(live) == 0 {
+		return
+	}
+	batch = live
+
 	hashes := make([]common.Hash, len(batch))
 	expected := make([]common.Hash, len(batch))
 	for i, m := range batch {
@@ -222,7 +274,7 @@ func (d *BALDownloader) fetchBatch(ctx context.Context, peer [64]byte, batch []m
 		expected[i] = m.expected
 	}
 
-	got, err := d.mc.FetchBlockAccessLists(ctx, peer, hashes, expected)
+	got, err := d.mc.FetchBlockAccessLists(ctx, sentryI, peer, hashes, expected)
 	if err != nil {
 		d.logger.Debug("[bal-downloader] fetch failed",
 			"err", err,
@@ -268,21 +320,32 @@ func (d *BALDownloader) fetchBatch(ctx context.Context, peer [64]byte, batch []m
 }
 
 // pickEth71Peer iterates all sentries and returns a random peer that
-// advertises the eth/71 capability, or (_, false, nil) if none is connected.
-// Transient RPC errors are folded into "no peer found" rather than surfaced,
-// because the caller retries each scan interval.
-func (d *BALDownloader) pickEth71Peer(ctx context.Context) ([64]byte, bool, error) {
+// advertises the eth/71 capability, plus the index of the sentry that peer
+// is connected via, or (_, _, false, nil) if none is connected. The sentry
+// index is required by FetchBlockAccessLists because SendMessageById in
+// multi-sentry mode silently returns an empty Peers reply (no error) when
+// the peer isn't on the chosen sentry — see GrpcServer.SendMessageById's
+// peer-to-sentry-mapping TODO. Transient Peers() RPC errors are logged at
+// Debug and folded into "skip this sentry" rather than surfaced.
+func (d *BALDownloader) pickEth71Peer(ctx context.Context) ([64]byte, int, bool, error) {
+	return pickEth71PeerFromSentries(ctx, d.mc.sentries, d.logger)
+}
+
+// pickEth71PeerFromSentries is the testable core of pickEth71Peer: takes the
+// sentry slice directly so callers don't need a full MultiClient.
+func pickEth71PeerFromSentries(ctx context.Context, sentries []sentryproto.SentryClient, logger log.Logger) ([64]byte, int, bool, error) {
 	type candidate struct {
 		peerID  [64]byte
 		sentryI int
 	}
 	var cands []candidate
-	for i, sc := range d.mc.sentries {
+	for i, sc := range sentries {
 		if ready, ok := sc.(interface{ Ready() bool }); ok && !ready.Ready() {
 			continue
 		}
 		reply, err := sc.Peers(ctx, &emptypb.Empty{}, grpc.EmptyCallOption{})
 		if err != nil {
+			logger.Debug("[bal-downloader] Peers() failed on sentry, skipping", "sentry", i, "err", err)
 			continue
 		}
 		for _, p := range reply.GetPeers() {
@@ -299,10 +362,10 @@ func (d *BALDownloader) pickEth71Peer(ctx context.Context) ([64]byte, bool, erro
 		}
 	}
 	if len(cands) == 0 {
-		return [64]byte{}, false, nil
+		return [64]byte{}, -1, false, nil
 	}
 	c := cands[rand.Intn(len(cands))] //nolint:gosec
-	return c.peerID, true, nil
+	return c.peerID, c.sentryI, true, nil
 }
 
 // peerSupportsEth71 checks the peer's advertised capabilities for "eth/71".

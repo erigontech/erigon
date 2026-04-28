@@ -47,6 +47,12 @@ var ErrBadBALResponse = errors.New("bal: peer returned BAL with mismatched hash"
 // another peer and may accumulate score over repeated timeouts.
 var ErrFetchTimeout = errors.New("bal: fetch timed out waiting for peer response")
 
+// ErrPeerGone is returned when SendMessageById accepts the request without
+// error but the sentry's reply lists zero peers — i.e. the target peer
+// disconnected (or routed to a different sentry) between selection and send.
+// Caller should retry from a different peer next pass.
+var ErrPeerGone = errors.New("bal: target peer no longer reachable on this sentry")
+
 // defaultFetchTimeout bounds a single GetBlockAccessLists → BlockAccessLists
 // round trip. EIP-8159 suggests a 2 MiB response cap; this timeout leaves
 // plenty of room for slow peers without blocking sync indefinitely.
@@ -64,8 +70,10 @@ type balRequest struct {
 	// number of block hashes in the original request.
 	n int
 
-	// deliver is a single-use, non-blocking channel. Closed on context cancel
-	// or timeout so a goroutine sending on it never leaks.
+	// deliver is a single-use, buffered(1) channel. Never closed: leak-freedom
+	// comes from the buffered, non-blocking send in Deliver() plus the defer
+	// delete(f.inflight, reqID) in FetchBlockAccessLists, which prevents any
+	// later Deliver from finding this request and attempting another send.
 	deliver chan []rlp.RawValue
 }
 
@@ -165,8 +173,18 @@ func (f *BALFetcher) FetchBlockAccessLists(
 			Data: encoded,
 		},
 	}
-	if _, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
+	sent, err := sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
+	if err != nil {
 		return nil, fmt.Errorf("bal: send GetBlockAccessLists: %w", err)
+	}
+	// SendMessageById returns (reply, nil) with empty Peers when the peer
+	// isn't reachable on this sentry — either because it disconnected since
+	// pickEth71Peer or because of the multi-sentry peer-routing TODO in
+	// sentry_grpc_server.go. Without this check we'd register the in-flight
+	// request and waste the full defaultFetchTimeout waiting for a reply
+	// that will never come.
+	if sent == nil || len(sent.GetPeers()) == 0 {
+		return nil, ErrPeerGone
 	}
 
 	timer := time.NewTimer(defaultFetchTimeout)

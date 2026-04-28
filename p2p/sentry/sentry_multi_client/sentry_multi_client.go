@@ -625,27 +625,38 @@ func (cs *MultiClient) blockAccessLists71(_ context.Context, inreq *sentryproto.
 }
 
 // FetchBlockAccessLists issues a one-shot GetBlockAccessLists (eth/71,
-// EIP-8159) request to peerID and returns the validated BALs aligned with
-// blockHashes. expectedHashes must match blockHashes in length and carry
-// the BlockAccessListHash from each block's header. See BALFetcher for the
-// validation and bad-peer semantics.
+// EIP-8159) request to peerID via the sentry at sentryIndex, returning the
+// validated BALs aligned with blockHashes. expectedHashes must match
+// blockHashes in length and carry the BlockAccessListHash from each block's
+// header. See BALFetcher for validation and bad-peer semantics.
 //
-// The request is routed through the first ready sentry that successfully
-// accepts SendMessageById; the response comes back through the normal
-// inbound-message path and is delivered by blockAccessLists71.
+// sentryIndex MUST be the sentry where peerID is actually connected. In
+// multi-sentry deployments, GrpcServer.SendMessageById currently has no
+// peer-to-sentry routing (sentry_grpc_server.go: "TODO: enable after support
+// peer to sentry mapping") and silently returns an empty Peers reply with
+// nil error when the peer isn't local — so picking a random sentry would
+// produce defaultFetchTimeout-bounded silent failures roughly (N-1)/N of
+// the time on N sentries. Use BALDownloader.pickEth71Peer to obtain a
+// matched (peer, sentryIndex) pair.
+//
+// Returns an error if sentryIndex is out of range or that sentry is not
+// ready. Responses come back through the normal inbound-message path and
+// are delivered by blockAccessLists71.
 func (cs *MultiClient) FetchBlockAccessLists(
 	ctx context.Context,
+	sentryIndex int,
 	peerID [64]byte,
 	blockHashes []common.Hash,
 	expectedHashes []common.Hash,
 ) ([]rlp.RawValue, error) {
-	for i, ok, next := cs.randSentryIndex(); ok; i, ok = next() {
-		if ready, ok := cs.sentries[i].(interface{ Ready() bool }); ok && !ready.Ready() {
-			continue
-		}
-		return cs.balFetcher.FetchBlockAccessLists(ctx, cs.sentries[i], peerID, blockHashes, expectedHashes)
+	if sentryIndex < 0 || sentryIndex >= len(cs.sentries) {
+		return nil, fmt.Errorf("bal: sentry index %d out of range [0,%d)", sentryIndex, len(cs.sentries))
 	}
-	return nil, fmt.Errorf("bal: no ready sentry available to send GetBlockAccessLists")
+	sc := cs.sentries[sentryIndex]
+	if ready, ok := sc.(interface{ Ready() bool }); ok && !ready.Ready() {
+		return nil, fmt.Errorf("bal: sentry %d not ready", sentryIndex)
+	}
+	return cs.balFetcher.FetchBlockAccessLists(ctx, sc, peerID, blockHashes, expectedHashes)
 }
 
 // getBlockAccessLists71 answers an inbound eth/71 GetBlockAccessLists request
