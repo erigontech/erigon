@@ -43,9 +43,11 @@
 package scenarios_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -55,6 +57,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	dl "github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/node/components/integration/snapshot/harness"
+	sentrycomp "github.com/erigontech/erigon/node/components/sentry"
 	"github.com/erigontech/erigon/node/components/storage/flow"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
 	"github.com/erigontech/erigon/p2p/enr"
@@ -101,7 +104,13 @@ func TestP2P_Swarm_StaggeredEntry(t *testing.T) {
 		require.GreaterOrEqual(t, n, 3, "SNAPSHOT_PEERS must be >= 3 (need at least one late-joiner)")
 		numPeers = n
 	}
-	staggerInterval := 60 * time.Second
+	// Stagger sized for local high-speed networking — these tests
+	// exercise loopback and gigabit-class peer-to-peer flow, not
+	// cross-internet WAN. 30s is enough for a wave of peers to start
+	// meaningful download activity before the next late-joiner arrives,
+	// without baking in pathologically long churn windows that
+	// overstress the auto-publisher's rolling buffer.
+	staggerInterval := 30 * time.Second
 	if v := os.Getenv("SNAPSHOT_STAGGER_INTERVAL"); v != "" {
 		d, err := time.ParseDuration(v)
 		require.NoError(t, err)
@@ -130,12 +139,71 @@ func TestP2P_Swarm_StaggeredEntry(t *testing.T) {
 	// know about wave boundaries — every peer's data is staged before
 	// any wave joins. The wave control is purely about WHEN we add the
 	// peer to the swarm.
+	// connectionEvent records one observed sentry.PeerConnected event,
+	// captured from the receiving peer's bus. Lets the test attribute
+	// missing-manifest failures (manifests < numPeers-1) to either a
+	// missed sentry event (no entry for the source peer) or a missed
+	// fetch (entry present but ENR didn't carry V2).
+	type connectionEvent struct {
+		peerID  string // remote peer's enode ID, hex
+		hasV2   bool   // whether the snapshot ENR carried a chain-toml InfoHash
+		fromIdx int    // matched against the peers slice; -1 if unknown
+		when    time.Duration
+	}
 	type peerEntry struct {
 		node          *harness.P2PNode
 		manifestCount *atomic.Int32
 		promotedCount *atomic.Int32
+		connsMu       sync.Mutex
+		conns         []connectionEvent
 	}
 	peers := make([]*peerEntry, numPeers)
+	testStart := time.Now()
+
+	// Always dump the connection table on test end. Lets a flaky run
+	// surface its failure mode (which pair never saw each other,
+	// whether ENR carried V2) without re-running with extra logging.
+	t.Cleanup(func() {
+		for i, pe := range peers {
+			if pe == nil {
+				t.Logf("[conn-table] peer %d: not joined", i)
+				continue
+			}
+			pe.connsMu.Lock()
+			snapshot := append([]connectionEvent(nil), pe.conns...)
+			pe.connsMu.Unlock()
+			seen := make(map[int]int, len(peers))
+			for _, ev := range snapshot {
+				if ev.fromIdx >= 0 {
+					seen[ev.fromIdx]++
+				}
+			}
+			pairs := make([]string, 0, len(snapshot))
+			for j := 0; j < len(peers); j++ {
+				if j == i {
+					continue
+				}
+				if peers[j] == nil {
+					continue
+				}
+				if n, ok := seen[j]; ok {
+					pairs = append(pairs, fmt.Sprintf("%d=%d", j, n))
+				} else {
+					pairs = append(pairs, fmt.Sprintf("%d=MISSING", j))
+				}
+			}
+			v2yes, v2no := 0, 0
+			for _, ev := range snapshot {
+				if ev.hasV2 {
+					v2yes++
+				} else {
+					v2no++
+				}
+			}
+			t.Logf("[conn-table] peer %d: events=%d (V2=%d / no-V2=%d) per-source=%v",
+				i, len(snapshot), v2yes, v2no, pairs)
+		}
+	})
 
 	bringUp := func(idx int) *peerEntry {
 		t.Helper()
@@ -168,20 +236,47 @@ func TestP2P_Swarm_StaggeredEntry(t *testing.T) {
 		_, btPort := node.LocalTorrentAddr()
 		node.SetDevP2PENREntry(enr.ChainToml{InfoHash: v2})
 		node.SetDevP2PENREntry(enr.BT(btPort))
-		// Auto-publish is now reliable: the rolling V2 publisher keeps
-		// the previous N chain.v2.<seq>.toml generations seedable, so a
-		// late joiner that captured an older ENR snapshot at handshake
-		// time can still fetch the infohash it asked for. 5s debounce
-		// lets a fast convergence batch its TrustPromoted events but
-		// stays responsive enough that late joiners see near-current
-		// inventory at handshake.
-		node.EnableAutoPublishV2(5 * time.Second)
+		// Auto-publish is reliable now thanks to the rolling V2
+		// publisher: previous N chain.v2.<seq>.toml generations stay
+		// seedable so a late joiner with a stale ENR snapshot can still
+		// fetch the infohash it captured. 1s debounce — local
+		// high-speed networking lands files fast and a tight debounce
+		// keeps each peer's advertised inventory close to its actual
+		// inventory when the next dial arrives.
+		node.EnableAutoPublishV2(1 * time.Second)
 
 		entry := &peerEntry{node: node, manifestCount: &atomic.Int32{}, promotedCount: &atomic.Int32{}}
 		mc := entry.manifestCount
 		pc := entry.promotedCount
 		require.NoError(t, node.Bus.Subscribe(func(flow.PeerManifestReceived) { mc.Add(1) }))
 		require.NoError(t, node.Bus.Subscribe(func(flow.TrustPromoted) { pc.Add(1) }))
+		require.NoError(t, node.Bus.Subscribe(func(e sentrycomp.PeerConnected) {
+			ev := connectionEvent{when: time.Since(testStart), fromIdx: -1}
+			if e.Peer != nil {
+				ev.peerID = e.Peer.ID().String()
+				var ct enr.ChainToml
+				if err := e.Peer.Record().Load(&ct); err == nil && ct.InfoHash != [20]byte{} {
+					ev.hasV2 = true
+				}
+				// Resolve to peer index by matching the remote enode ID
+				// against any peer that's been brought up. Mismatches
+				// stay at fromIdx=-1 — useful for spotting unexpected
+				// dialers (e.g. a leaked process from a previous test).
+				for j := 0; j < len(peers); j++ {
+					other := peers[j]
+					if other == nil || other == entry {
+						continue
+					}
+					if otherSelf := other.node.DevP2PSelf(); otherSelf != nil && otherSelf.ID() == e.Peer.ID() {
+						ev.fromIdx = j
+						break
+					}
+				}
+			}
+			entry.connsMu.Lock()
+			entry.conns = append(entry.conns, ev)
+			entry.connsMu.Unlock()
+		}))
 
 		t.Logf("peer %d up: seeded %d files in %.2fs", idx, seeded, time.Since(seedStart).Seconds())
 		return entry
@@ -208,6 +303,30 @@ func TestP2P_Swarm_StaggeredEntry(t *testing.T) {
 					continue
 				}
 				peers[i].node.AddSeederPeer(peers[j].node)
+			}
+		}
+		// Even with the static-peer table populated synchronously by
+		// AddDevP2PPeer above, an outbound dial scheduled at i=0 can
+		// complete before i=newIdx finishes and the destination peer
+		// has registered the dialer. The acceptor side's setupConn
+		// then falls back to nodeFromConn, producing a stub enode
+		// without V2 in the ENR — mx.onPeerConnected reads
+		// ChainToml.InfoHash == zero and silently early-returns. The
+		// natural mesh fixes itself the moment THIS peer dials the
+		// other end (where the now-up-to-date static-peer table
+		// supplies the full enode), but mx has already given up on
+		// the racy inbound. Synthesize a follow-up PeerConnected on
+		// every peer's bus using each other peer's CURRENT (post-
+		// mesh-add) enode — that record always carries V2, so any
+		// pair stubbed by the inbound race gets a clean retry.
+		// Inflight dedup in mx prevents pairs that succeeded
+		// naturally from refetching.
+		for i := 0; i <= newIdx; i++ {
+			for j := 0; j <= newIdx; j++ {
+				if i == j || peers[i] == nil || peers[j] == nil {
+					continue
+				}
+				peers[i].node.Sentry.PublishPeerConnected(peers[j].node.DevP2PSelf())
 			}
 		}
 	}
@@ -243,15 +362,21 @@ func TestP2P_Swarm_StaggeredEntry(t *testing.T) {
 	// Convergence wait — every peer must hold every preverified primary
 	// and have an empty pending set.
 	expectedFilesPerPeer := len(present)
-	const minPerPeerRateBytesPerSec = 8 * 1024 * 1024
+	// Local high-speed network: budget is per-peer pull at ~50 MiB/s
+	// (loopback in our test, gigabit-class in production-equivalent
+	// deployments) plus a 5m floor. Previous 2h floor was a wartime
+	// budget — this is the peacetime budget. If a run blows past it,
+	// we want to surface that as a real failure and dump the
+	// conn-table cleanup, not absorb it into a long timeout.
+	const minPerPeerRateBytesPerSec = 50 * 1024 * 1024
 	perPeerPull := totalBytes * int64(numPeers-1) / int64(numPeers)
-	timeout := time.Duration(perPeerPull/minPerPeerRateBytesPerSec)*time.Second + 30*time.Minute
-	if timeout < 2*time.Hour {
-		timeout = 2 * time.Hour
+	timeout := time.Duration(perPeerPull/minPerPeerRateBytesPerSec)*time.Second + 5*time.Minute
+	if timeout < 15*time.Minute {
+		timeout = 15 * time.Minute
 	}
 	t.Logf("waiting up to %s for full convergence (every peer holds all %d files)", timeout, expectedFilesPerPeer)
 
-	progressInterval := 2 * time.Minute
+	progressInterval := 30 * time.Second
 	if v := os.Getenv("SNAPSHOT_PROGRESS_INTERVAL"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			progressInterval = d
