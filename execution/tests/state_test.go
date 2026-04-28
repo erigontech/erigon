@@ -82,6 +82,56 @@ func TestStateCornerCases(t *testing.T) {
 	})
 }
 
+// TestLegacyCancunState runs the pre-Istanbul ethereum/tests GeneralStateTests
+// fixtures (state-test format) shipped under
+// legacy-tests/LegacyTests/Cancun/GeneralStateTests. TestState only walks the
+// EEST static_tests, which don't carry every variant of the original fixtures
+// (e.g. RevertPrecompiledTouch_d3 in Berlin/Istanbul/London, which catches the
+// ripemd-touch state-clearing path that the Hive `legacy-cancun` simulator
+// flagged). Run them locally so that class of regression is caught on CI
+// rather than only by the weekly out-of-tree Hive run.
+func TestLegacyCancunState(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
+	defer log.Root().SetHandler(log.Root().GetHandler())
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
+
+	st := new(testutil.TestMatcher)
+	testDir := filepath.Join(legacyDir, "LegacyTests", "Cancun", "GeneralStateTests")
+
+	st.Walk(t, testDir, func(t *testing.T, name string, test *testutil.StateTest) {
+		tmpDir, err := os.MkdirTemp("", "erigon-test-*")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { dir.RemoveAll(tmpDir) })
+		dirs := datadir.New(tmpDir)
+		db := temporaltest.NewTestDB(t, dirs)
+		for _, subtest := range test.Subtests() {
+			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
+			t.Run(key, func(t *testing.T) {
+				withTrace(t, func(vmconfig vm.Config) error {
+					tx := beginRwNoContention(t, db)
+					defer tx.Rollback()
+					_, _, err = test.Run(t, tx, subtest, vmconfig, dirs)
+					tx.Rollback()
+					if err != nil && len(test.Json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
+						// Ignore expected errors
+						return nil
+					}
+					return st.CheckFailure(t, err)
+				})
+			})
+		}
+	})
+}
+
 func TestState(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
