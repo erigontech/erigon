@@ -19,9 +19,6 @@ DISABLED_TEST_LIST=(
   net_listening/test_1.json
   # Temporary disable required block 24298763
   debug_traceBlockByNumber/test_51.json
-  # Temporary disable after merge #20830, waiting for new rpc-tests tag after merge PR #552
-  debug_traceBlockByNumber/test_33.tar
-  debug_traceBlockByNumber/test_34.tar
   # to investigate
   engine_exchangeCapabilities/test_1.json
   engine_exchangeTransitionConfigurationV1/test_01.json

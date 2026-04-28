@@ -20,9 +20,6 @@ DISABLED_TEST_LIST=(
   # these tests/apis are disabled because some methods are not implmented on grpc
   eth_getProof
   eth_simulateV1
-  # Temporary disable after merge #20830, waiting for new rpc-tests tag after merge PR #552
-  debug_traceBlockByNumber/test_33.tar
-  debug_traceBlockByNumber/test_34.tar
   # Temporary disable required block 24298763
   debug_traceBlockByNumber/test_51.json
   # Temporary disable required block 23917742
