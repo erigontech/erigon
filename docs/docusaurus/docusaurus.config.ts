@@ -44,6 +44,7 @@ const config: Config = {
       docs: {
         sidebarPath: './sidebars.ts',
         routeBasePath: '/',
+        lastVersion: 'current',
         versions: {
           current: {
             label: 'v3.4',
