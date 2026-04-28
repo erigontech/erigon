@@ -613,40 +613,9 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			refundQuotient = params.RefundQuotientEIP3529
 		}
 		if rules.IsAmsterdam {
-			// EIP-8037: per-frame state-gas accounting is journal-walk based and
-			// runs inside the EVM at each frame's commit. The top-frame walk
-			// applies the EIP-6780 selfdestruct filter, so create+destroy in
-			// same tx (any nesting) naturally produces a negative top-frame
-			// delta that credits the over-charge back. No TxnExecutor-level
-			// refund needed. evm.ExecutionStateGas() reflects the net charges.
-			//
-			// Block-level state gas: zero on top-level error (state didn't grow);
-			// otherwise intrinsic + executionStateGas.
-			executionStateGas := st.evm.ExecutionStateGas()
-			blockExecutionStateGas := executionStateGas
-			if vmerr != nil {
-				blockExecutionStateGas = 0
-			}
-			blockState := imdGas.State + blockExecutionStateGas
-			blockRegular := imdGas.Regular + st.evm.RegularGasConsumed()
-			st.blockRegularGasUsed = max(blockRegular, intrinsicGasResult.FloorGasCost)
-			st.blockStateGasUsed = blockState
-			// Receipt gasUsed: tx.gas - gas_left - reservoir. Use Total()-level
-			// subtraction to avoid per-component uint64 underflow when
-			// gasRemaining.State > initialGas.State (reservoir grew via child
-			// reverts/credits).
+			st.blockRegularGasUsed = max(imdGas.Regular+st.evm.RegularGasConsumed(), intrinsicGasResult.FloorGasCost)
+			st.blockStateGasUsed = imdGas.State + st.evm.ExecutionStateGas()
 			st.txnGasUsedB4Refunds = st.initialGas.Total() - st.gasRemaining.Total()
-			if vmerr != nil {
-				// Top-level error: per spec, execution state gas is refunded
-				// to the reservoir (`state_gas_left += state_gas_used;
-				// state_gas_used = 0`). The actual charges are still in
-				// gasRemaining (sub-frame charges decremented gas.State, never
-				// restored), so subtract them explicitly here.
-				st.txnGasUsedB4Refunds -= executionStateGas
-			}
-			// Only the regular-gas refund flows through the 20%-capped
-			// refund_counter. State-gas charges/credits are already netted
-			// inside evm.executionStateGas via per-frame deltas.
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Regular)
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
 		} else if rules.IsPrague {
