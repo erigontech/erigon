@@ -1115,8 +1115,10 @@ func ApplyMinimalPreset(cfg *BeaconChainConfig) {
 	cfg.MaxWithdrawalsPerPayload = 4
 	cfg.MaxValidatorsPerWithdrawalsSweep = 16
 
-	// Deneb preset differences
-	cfg.MaxBlobCommittmentsPerBlock = 16
+	// Electra preset differences
+	cfg.PendingPartialWithdrawalsLimit = 64
+	cfg.PendingConsolidationsLimit = 64
+	cfg.MaxPendingPartialsPerWithdrawalsSweep = 2
 
 	// Gloas preset differences
 	cfg.PtcSize = 2

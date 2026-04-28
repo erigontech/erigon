@@ -1481,21 +1481,30 @@ func (a *ApiHandler) parseGloasRequestBeaconBlock(
 
 	switch r.Header.Get("Content-Type") {
 	case "application/json":
-		// JSON: try to decode as DenebSignedBeaconBlock first (has optional envelope),
-		// fall back to plain SignedBeaconBlock.
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			return nil, err
 		}
 
-		// Try the full wrapper first (for clients that send the envelope alongside)
-		block := cltypes.NewDenebSignedBeaconBlock(a.beaconChainCfg, version)
-		if block != nil {
-			if err := json.Unmarshal(body, block); err == nil {
-				return block, nil
+		// Peek at top-level JSON keys to determine the schema.
+		// DenebSignedBeaconBlock uses "signed_block"; plain SignedBeaconBlock uses "message".
+		// encoding/json silently ignores unknown keys, so a bare SignedBeaconBlock would
+		// "successfully" unmarshal into DenebSignedBeaconBlock with all-default fields.
+		// We must check for the "signed_block" key explicitly to avoid broadcasting an
+		// empty block.
+		var probe map[string]json.RawMessage
+		if err := json.Unmarshal(body, &probe); err != nil {
+			return nil, fmt.Errorf("json probe: %w", err)
+		}
+		if _, hasSignedBlock := probe["signed_block"]; hasSignedBlock {
+			block := cltypes.NewDenebSignedBeaconBlock(a.beaconChainCfg, version)
+			if block != nil {
+				if err := json.Unmarshal(body, block); err == nil {
+					return block, nil
+				}
 			}
 		}
-		// Fall back to plain SignedBeaconBlock
+		// Fall back to plain SignedBeaconBlock (keys: "message", "signature")
 		if err := json.Unmarshal(body, signedBlock); err != nil {
 			return nil, fmt.Errorf("json: %w", err)
 		}
@@ -1774,18 +1783,27 @@ func (a *ApiHandler) broadcastSelfBuildEnvelope(ctx context.Context, blk *cltype
 		a.logger.Debug("Self-build envelope queued for pending processing", "err", err, "blockRoot", blockRoot)
 	}
 
-	// Broadcast the envelope on the execution_payload gossip topic
-	encodedSSZ, err := signedEnvelope.EncodeSSZ(nil)
-	if err != nil {
-		return fmt.Errorf("failed to encode self-build envelope: %w", err)
-	}
-	if err := a.gossipManager.Publish(ctx, gossip.TopicNameExecutionPayload, encodedSSZ); err != nil {
-		a.logger.Error("Failed to publish self-build execution payload envelope", "err", err, "blockRoot", blockRoot)
+	// Only broadcast the envelope if it has a real BLS signature.
+	// Envelopes with InfiniteSignature (fallback when the VC doesn't provide a
+	// pre-signed envelope) will fail BLS verification on peers, causing them to
+	// penalize and ban us. Process locally only until the VC supports envelope signing.
+	if signedEnvelope.Signature == common.Bytes96(bls.InfiniteSignature) {
+		log.Warn("BlockPublishing: skipping gossip of self-build envelope with InfiniteSignature (no valid BLS signature)",
+			"slot", blk.Block.Slot, "blockRoot", blockRoot, "blockHash", bid.Message.BlockHash)
 	} else {
-		log.Info("BlockPublishing: broadcast self-build execution payload envelope",
-			"slot", blk.Block.Slot,
-			"blockRoot", blockRoot,
-			"blockHash", bid.Message.BlockHash)
+		// Broadcast the envelope on the execution_payload gossip topic
+		encodedSSZ, err := signedEnvelope.EncodeSSZ(nil)
+		if err != nil {
+			return fmt.Errorf("failed to encode self-build envelope: %w", err)
+		}
+		if err := a.gossipManager.Publish(ctx, gossip.TopicNameExecutionPayload, encodedSSZ); err != nil {
+			a.logger.Error("Failed to publish self-build execution payload envelope", "err", err, "blockRoot", blockRoot)
+		} else {
+			log.Info("BlockPublishing: broadcast self-build execution payload envelope",
+				"slot", blk.Block.Slot,
+				"blockRoot", blockRoot,
+				"blockHash", bid.Message.BlockHash)
+		}
 	}
 
 	return nil

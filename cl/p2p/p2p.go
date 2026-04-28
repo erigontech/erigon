@@ -170,8 +170,14 @@ func (p *p2pManager) setupENR() error {
 	if err != nil {
 		return err
 	}
+	// Set initial attnets with a couple of subnets so peers don't see all-zeros
+	// and penalize us as a "useless peer". The VC will update subnets later via
+	// committee subscriptions; this just ensures early handshakes succeed.
+	initialAttnets := bitfield.NewBitvector64()
+	initialAttnets.SetBitAt(0, true) // subnet 0
+	initialAttnets.SetBitAt(1, true) // subnet 1
 	node.Set(enr.WithEntry(p.cfg.NetworkConfig.Eth2key, forkId))
-	node.Set(enr.WithEntry(p.cfg.NetworkConfig.AttSubnetKey, bitfield.NewBitvector64().Bytes()))
+	node.Set(enr.WithEntry(p.cfg.NetworkConfig.AttSubnetKey, initialAttnets.Bytes()))
 	node.Set(enr.WithEntry(p.cfg.NetworkConfig.SyncCommsSubnetKey, bitfield.Bitvector4{byte(0x00)}.Bytes()))
 	node.Set(enr.WithEntry(p.cfg.NetworkConfig.CgcKey, []byte{}))
 	node.Set(enr.WithEntry(p.cfg.NetworkConfig.NfdKey, nfd))
@@ -209,17 +215,10 @@ func (s *p2pManager) updateENR() {
 }
 
 func (s *p2pManager) UpdateENRAttSubnets(subnetIndex int, on bool) {
-	s.updateSubnetENR(s.cfg.NetworkConfig.AttSubnetKey, subnetIndex, on)
-}
-
-func (s *p2pManager) UpdateENRSyncNets(subnetIndex int, on bool) {
-	s.updateSubnetENR(s.cfg.NetworkConfig.SyncCommsSubnetKey, subnetIndex, on)
-}
-
-func (s *p2pManager) updateSubnetENR(subnetKey string, subnetIndex int, on bool) {
-	subnetField := bitfield.NewBitvector4()
-	if err := s.udpv5.LocalNode().Node().Load(enr.WithEntry(subnetKey, &subnetField)); err != nil {
-		log.Error("[Sentinel] Could not load syncCommsSubnetKey", "err", err)
+	// Attestation subnets use Bitvector64 (8 bytes for 64 subnets).
+	subnetField := bitfield.NewBitvector64()
+	if err := s.udpv5.LocalNode().Node().Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &subnetField)); err != nil {
+		log.Error("[Sentinel] Could not load AttSubnetKey", "err", err)
 		return
 	}
 	subnetField = common.Copy(subnetField)
@@ -228,7 +227,7 @@ func (s *p2pManager) updateSubnetENR(subnetKey string, subnetIndex int, on bool)
 		return
 	}
 	if len(subnetField) <= subnetIndex/8 {
-		log.Error("[Sentinel] Subnet index out of range", "subnetIndex", subnetIndex, "len", len(subnetField))
+		log.Error("[Sentinel] Att subnet index out of range", "subnetIndex", subnetIndex, "len", len(subnetField))
 		return
 	}
 	if on {
@@ -236,6 +235,27 @@ func (s *p2pManager) updateSubnetENR(subnetKey string, subnetIndex int, on bool)
 	} else {
 		subnetField[subnetIndex/8] &^= 1 << (subnetIndex % 8)
 	}
-	s.udpv5.LocalNode().Set(enr.WithEntry(subnetKey, &subnetField))
-	log.Debug("[Sentinel] Updated subnet", "subnetKey", subnetKey, "subnetIndex", subnetIndex, "on", on)
+	s.udpv5.LocalNode().Set(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &subnetField))
+	log.Info("[Sentinel] Updated att subnet", "subnetIndex", subnetIndex, "on", on)
+}
+
+func (s *p2pManager) UpdateENRSyncNets(subnetIndex int, on bool) {
+	// Sync committee subnets use Bitvector4 (1 byte for 4 subnets).
+	subnetField := bitfield.NewBitvector4()
+	if err := s.udpv5.LocalNode().Node().Load(enr.WithEntry(s.cfg.NetworkConfig.SyncCommsSubnetKey, &subnetField)); err != nil {
+		log.Error("[Sentinel] Could not load SyncCommsSubnetKey", "err", err)
+		return
+	}
+	subnetField = common.Copy(subnetField)
+	if len(subnetField) <= subnetIndex/8 {
+		log.Error("[Sentinel] Sync subnet index out of range", "subnetIndex", subnetIndex, "len", len(subnetField))
+		return
+	}
+	if on {
+		subnetField[subnetIndex/8] |= 1 << (subnetIndex % 8)
+	} else {
+		subnetField[subnetIndex/8] &^= 1 << (subnetIndex % 8)
+	}
+	s.udpv5.LocalNode().Set(enr.WithEntry(s.cfg.NetworkConfig.SyncCommsSubnetKey, &subnetField))
+	log.Info("[Sentinel] Updated sync subnet", "subnetIndex", subnetIndex, "on", on)
 }

@@ -109,9 +109,18 @@ func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cf
 	// Continuously fetch and process blocks
 	for {
 		// Calculate the range of blocks to fetch
-		from := cfg.forkChoice.HighestSeen() - 2
+		highestSeen := cfg.forkChoice.HighestSeen()
+		var from uint64
+		if highestSeen >= 2 {
+			from = highestSeen - 2
+		}
 		currentSlot := cfg.ethClock.GetCurrentSlot()
-		count := (currentSlot - from) + 4
+		var count uint64
+		if currentSlot >= from {
+			count = (currentSlot - from) + 4
+		} else {
+			count = 4
+		}
 
 		// Stop fetching if the highest seen block is greater than or equal to the target slot
 		if cfg.forkChoice.HighestSeen() >= args.targetSlot {

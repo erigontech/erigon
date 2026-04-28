@@ -344,8 +344,12 @@ func TestStatus(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	hs := handshake.New(ctx, getEthClock(t), &clparams.MainnetBeaconConfig, handler, mockPeerDasStateReader)
+	ethClock := getEthClock(t)
+	hs := handshake.New(ctx, ethClock, &clparams.MainnetBeaconConfig, handler, mockPeerDasStateReader)
+	forkDigest, err := ethClock.CurrentForkDigest()
+	require.NoError(t, err)
 	s := &cltypes.Status{
+		ForkDigest:     forkDigest,
 		FinalizedRoot:  common.Hash{1, 2, 4},
 		HeadRoot:       common.Hash{1, 2, 4},
 		FinalizedEpoch: 1,
@@ -371,7 +375,14 @@ func TestStatus(t *testing.T) {
 	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.StatusProtocolV1))
 	require.NoError(t, err)
 
-	_, err = stream.Write(nil)
+	// Send a Status request body (per eth2 spec the requester sends its own Status).
+	reqStatus := &cltypes.Status{
+		FinalizedRoot:  common.Hash{9, 8, 7},
+		HeadRoot:       common.Hash{9, 8, 7},
+		FinalizedEpoch: 2,
+		HeadSlot:       2,
+	}
+	err = ssz_snappy.EncodeAndWrite(stream, reqStatus)
 	require.NoError(t, err)
 
 	firstByte := make([]byte, 1)
