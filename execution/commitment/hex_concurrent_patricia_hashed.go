@@ -1,6 +1,7 @@
 package commitment
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
@@ -240,11 +242,36 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 			defer trieCtxClose()
 			phnib.ResetContext(trieCtx)
 
+			// Phase-1 detection of single-account-dominated subtries (storage-
+			// level sub-fanout candidates). When STORAGE_PARALLEL_TRIE_THRESHOLD
+			// is non-zero, count storage updates per account prefix while
+			// dispatching to followAndUpdate; emit one Info log per qualifying
+			// subtrie. The actual sub-fanout fold is Phase 2 — see
+			// docs/plans/storage-parallel-trie-fanout.md.
+			detectThreshold := dbg.StorageParallelTrieThreshold
+			var (
+				detectAccount    [32]byte
+				detectCount      int
+				detectAccountSet bool
+				detectMixed      bool
+			)
 			cnt := 0
 			err := nib.Load(nil, "", func(hashedKey, plainKey []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 				cnt++
 				if phnib.trace {
 					fmt.Printf("\n%x) %d plainKey [%x] hashedKey [%x] currentKey [%x]\n", ni, cnt, plainKey, hashedKey, phnib.currentKey[:phnib.currentKeyLen])
+				}
+				if detectThreshold > 0 && !detectMixed && len(hashedKey) > 32 {
+					// Storage update: hashed key = keccak256(addr) || keccak256(slot).
+					if !detectAccountSet {
+						copy(detectAccount[:], hashedKey[:32])
+						detectAccountSet = true
+						detectCount = 1
+					} else if bytes.Equal(detectAccount[:], hashedKey[:32]) {
+						detectCount++
+					} else {
+						detectMixed = true
+					}
 				}
 				if err := phnib.followAndUpdate(hashedKey, plainKey, nil); err != nil {
 					return fmt.Errorf("followAndUpdate[%x]: %w", ni, err)
@@ -256,6 +283,14 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 			}
 			if cnt == 0 {
 				return nil
+			}
+			if detectThreshold > 0 && !detectMixed && detectAccountSet && detectCount >= detectThreshold {
+				log.Info("[commitment] storage-parallel-trie candidate",
+					"subtrie", fmt.Sprintf("%x", ni),
+					"account_keccak_prefix", fmt.Sprintf("%x", detectAccount[:8]),
+					"storage_updates", detectCount,
+					"threshold", detectThreshold,
+					"note", "phase1 detect-only; sub-fanout fold not yet implemented")
 			}
 			if pph.mounts[ni].trace {
 				fmt.Printf("ConcurrentTrie: folding [%2x] keys %d maxDepth %d\n", ni, cnt, phnib.depths[0])

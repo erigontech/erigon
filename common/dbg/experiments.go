@@ -118,6 +118,12 @@ var (
 
 	RpcDropResponse  = EnvBool("RPC_DROP_RESPONSE", false)
 	TipTrieWarmupers = EnvInt("TIP_TRIE_WARMUPERS", runtime.NumCPU()*8) //io-bound (not cpu-bound). it's ok to have `io-threads > cpus`
+
+	// StorageParallelTrieThreshold turns on a sub-level 16-way fanout inside
+	// ConcurrentPatriciaHashed when a single account-level subtrie has more
+	// than this many storage updates. Default 0 = disabled. See
+	// docs/plans/storage-parallel-trie-fanout.md for the design.
+	StorageParallelTrieThreshold = EnvInt("STORAGE_PARALLEL_TRIE_THRESHOLD", 0)
 )
 
 func ReadMemStats(m *runtime.MemStats) {
