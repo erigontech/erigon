@@ -33,9 +33,12 @@ testnet is stable or `max-attempts` is reached.
 
 1. **Docker** running: `docker info >/dev/null` should succeed.
 2. **Kurtosis CLI** installed: `kurtosis version`. Install from
-   https://docs.kurtosis.com/install if missing. CLI **≥ 1.18.1** is required for
-   `glamsterdam`-style configs (the `GpuConfig` Starlark built-in is otherwise
-   undefined — see Troubleshooting).
+   https://docs.kurtosis.com/install if missing. CLI **≥ 1.18.1** is only needed when
+   the `--package@branch` you run includes the `GpuConfig` Starlark built-in (i.e.
+   `ethereum-package` `main` post commit `835dd9b`). The pinned branches in the
+   mapping table below — including `glamsterdam`'s `6.1.0` — predate that change, so
+   they work on older CLIs. See Troubleshooting if you hit a `GpuConfig` Starlark
+   error.
 3. **Erigon source tree** at the cwd: `Makefile` exists and `go.mod` contains
    `module github.com/erigontech/erigon`.
 4. **Fork detection** — skim the YAML for fork-epoch keys
@@ -97,23 +100,37 @@ user to confirm.
 | `regular-assertoor.io` | `github.com/ethpandaops/ethereum-package@5.0.1` |
 | `pectra.io` | `github.com/ethpandaops/ethereum-package@5.0.1` |
 | `glamsterdam.io` | `github.com/ethpandaops/ethereum-package@6.1.0` |
+| `caplin-assertoor.io` | `github.com/erigontech/ethereum-package@erigontech/fix-caplin-launcher` |
 | `caplin-minimal-assertoor.io` | `github.com/erigontech/ethereum-package@erigontech/fix-caplin-launcher` |
 | (other / user-supplied) | default `5.0.1`, prompt user if unsure |
 
 Note: `glamsterdam` is pinned to `6.1.0` rather than `main` because `main` introduced
-the `GpuConfig` Starlark built-in which requires kurtosis CLI ≥ 1.18.1.
+the `GpuConfig` Starlark built-in which requires kurtosis CLI ≥ 1.18.1. Caplin suites
+(`caplin-assertoor.io`, `caplin-minimal-assertoor.io`) require the `erigontech` fork —
+do not let them fall back to the default `5.0.1`.
 
 ## Start the testnet
 
 ```bash
 ENCLAVE="${2:-kurtosis-test-$(date +%s)}"
 CONFIG="$1"
-PACKAGE_REF=$(get_package_ref_from_config_path "$CONFIG")  # see mapping above
+
+# Map config basename → ethereum-package branch (mirrors the table above).
+case "$(basename "$CONFIG")" in
+  glamsterdam.io)
+    PACKAGE_REF="github.com/ethpandaops/ethereum-package@6.1.0" ;;
+  caplin-assertoor.io|caplin-minimal-assertoor.io)
+    PACKAGE_REF="github.com/erigontech/ethereum-package@erigontech/fix-caplin-launcher" ;;
+  regular-assertoor.io|pectra.io)
+    PACKAGE_REF="github.com/ethpandaops/ethereum-package@5.0.1" ;;
+  *)
+    PACKAGE_REF="github.com/ethpandaops/ethereum-package@5.0.1" ;;
+esac
 
 kurtosis run \
+  "$PACKAGE_REF" \
   --enclave "$ENCLAVE" \
   --args-file "$CONFIG" \
-  "$PACKAGE_REF" \
   --verbosity detailed --cli-log-level trace
 ```
 
@@ -315,7 +332,7 @@ docker image prune -f
 
 | Problem | Solution |
 |---|---|
-| `kurtosis run` fails with Starlark error mentioning `GpuConfig` | Pin `--package@branch` to ≤ `6.0.0` OR upgrade kurtosis CLI to ≥ 1.18.1 |
+| `kurtosis run` fails with Starlark error mentioning `GpuConfig` | Use one of the pinned `--package@branch` values from the mapping table (e.g. `6.1.0` for glamsterdam, `5.0.1` for regular/pectra) — they predate the `GpuConfig` built-in. OR upgrade kurtosis CLI to ≥ 1.18.1 if you need an `ethereum-package` branch that includes it. |
 | `kurtosis enclave dump` errors "destination exists" | Use a fresh dir name or `rm -rf` it first |
 | All `el-*-erigon-*` services missing from `enclave inspect` | Image build failed; check `docker images \| grep test/erigon` and rerun docker build |
 | `eth_blockNumber` returns `0x0` forever | Validators didn't start; check `vc-*` service logs; verify keystore mounting |
