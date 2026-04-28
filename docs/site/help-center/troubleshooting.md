@@ -6,7 +6,7 @@ sidebar_position: 3
 
 # Troubleshooting
 
-**🛡️ Resilience and Data Integrity**
+## Resilience and Data Integrity
 
 Erigon is highly resilient and uses a fully-transactional database. This design makes it safe against hard termination (`kill -9`) and power outages. The database ensures users never see "partial writes," meaning all data changes are atomic (all-or-nothing), and all RPC methods operate within Read-Only Transactions, guaranteeing a consistent data view.
 
@@ -33,9 +33,7 @@ When an issue arises, follow these steps to methodically diagnose and resolve th
 17. **Report a Bug:** If all else fails, open a detailed bug report on GitHub with logs, version info, and a clear description of the problem.
 18. **Engage with the Community:** The Erigon Discord server is an invaluable resource for seeking help from core developers and experienced users.
 
----
-
-**Collecting Diagnostics for Bug Reports**
+## Collecting Diagnostics for Bug Reports
 
 Before opening a GitHub issue, gather the following information to help the team reproduce and fix your problem faster.
 
@@ -61,9 +59,7 @@ go tool pprof -http=:8080 cpu.pprof
 
 Attach the `.pprof` files and the goroutine dump to your GitHub issue.
 
----
-
-**Hetzner Cloud / Dedicated Server Firewall Note**
+## Hetzner Cloud / Dedicated Server Firewall Note
 
 Hetzner applies a stateless firewall at the network edge. Ensure the following ports are open for **both TCP and UDP, inbound and outbound**:
 
