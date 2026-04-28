@@ -69,18 +69,18 @@ then it should look something like:
 
 #### Ad-hoc Tracing
 
-* [trace\_call](trace.md#trace_call)
-* [trace\_callMany](trace.md#trace_callmany)
-* [trace\_rawTransaction](trace.md#trace_rawtransaction)
-* [trace\_replayBlockTransactions](trace.md#trace_replayblocktransactions)
-* [trace\_replayTransaction](trace.md#trace_replaytransaction)
+* [trace\_call](#trace_call)
+* [trace\_callMany](#trace_callmany)
+* [trace\_rawTransaction](#trace_rawtransaction)
+* [trace\_replayBlockTransactions](#trace_replayblocktransactions)
+* [trace\_replayTransaction](#trace_replaytransaction)
 
 #### Transaction-Trace Filtering
 
-* [trace\_block](trace.md#trace_block)
-* [trace\_filter](trace.md#trace_filter)
-* [trace\_get](trace.md#trace_get)
-* [trace\_transaction](trace.md#trace_transaction)
+* [trace\_block](#trace_block)
+* [trace\_filter](#trace_filter)
+* [trace\_get](#trace_get)
+* [trace\_transaction](#trace_transaction)
 
 ## JSON-RPC API Reference
 

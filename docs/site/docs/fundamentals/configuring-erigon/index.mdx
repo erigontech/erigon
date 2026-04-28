@@ -8,13 +8,13 @@ sidebar_position: 3
 
 The Erigon CLI has a wide range of flags that can be used to customize its behavior. There are 3 ways to configure Erigon, listed by priority:
 
-* [Command line options](/docs/fundamentals/configuring-erigon/#command-line-options) (flags)
-* [Configuration file](/docs/fundamentals/configuring-erigon/#configuration-file)
-* [Environment variables](/docs/fundamentals/configuring-erigon/#environment-variables)
+* [Command line options](/fundamentals/configuring-erigon/#command-line-options) (flags)
+* [Configuration file](/fundamentals/configuring-erigon/#configuration-file)
+* [Environment variables](/fundamentals/configuring-erigon/#environment-variables)
 
 ## Command line options
 
-Here's a breakdown of the most important flags, see [options](/docs/fundamentals/configuring-erigon/#options) for the full list:
+Here's a breakdown of the most important flags, see [options](/fundamentals/configuring-erigon/#options) for the full list:
 
 ### General Options
 
@@ -27,7 +27,7 @@ These flags cover the general behavior and configuration of the Erigon client.
 * `--config value`: Sets Erigon flags using a YAML/TOML file.
 * `--version, -v`: Prints the version information.
 * `--help, -h`: Displays help information.
-* `--chain value`: Sets the name of the [network](/docs/fundamentals/supported-networks) to join.
+* `--chain value`: Sets the name of the [network](/fundamentals/supported-networks) to join.
   * Default: `mainnet`
 * `--networkid value`: Explicitly sets the network ID.
   * Default: `1`
@@ -74,13 +74,13 @@ These flags control database performance and memory usage.
 
 Flags for managing how old chain data is handled and stored.
 
-* `--prune.mode value`: Selects a pruning preset (`full`, `archive`, `minimal`, `blocks`). See also [Sync Modes](/docs/fundamentals/sync-modes)
+* `--prune.mode value`: Selects a pruning preset (`full`, `archive`, `minimal`, `blocks`). See also [Sync Modes](/fundamentals/sync-modes)
   * Default: `"full"`
 * `--prune.distance value`: Keeps state history for the latest `N` blocks.
   * Default: `0`
 * `--prune.distance.blocks value`: Keeps block history for the latest `N` blocks.
   * Default: `0`
-* `--prune.include-commitment-history, --prune.experimental.include-commitment-history, --experimental.commitment-history`: Enables fast `eth_getProof` for executed blocks by storing commitment history. Requires +32 GB RAM. See [`eth_getProof`](/docs/interacting-with-erigon/eth.md#eth_getproof).
+* `--prune.include-commitment-history, --prune.experimental.include-commitment-history, --experimental.commitment-history`: Enables fast `eth_getProof` for executed blocks by storing commitment history. Requires +32 GB RAM. See [`eth_getProof`](/interacting-with-erigon/eth#eth_getproof).
   * Default: `false`
 * `--snap.keepblocks`: Keeps ancient blocks in the database for debugging.
   * Default: `false`
@@ -133,7 +133,7 @@ These flags manage network connectivity, peer discovery, and traffic control.
   * Default: `68`, `69`
 * `--p2p.allowed-ports value`: A comma-separated list of allowed ports for different P2P protocols.
   * Default: `30303, 30304, 30305, 30306, 30307`
-* `--nat value`: The NAT port mapping mechanism (See [here](/docs/fundamentals/configuring-erigon/nat) for more details).
+* `--nat value`: The NAT port mapping mechanism (See [here](/fundamentals/configuring-erigon/nat) for more details).
 * `--nodiscover`: Disables peer discovery.
   * Default: `false`
 * `--discovery.v4`, `--discv4`: Enables the Node Discovery Protocol v4 (Discv4) for managed ENRs and topic discovery.

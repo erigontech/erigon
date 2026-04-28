@@ -11,12 +11,12 @@ Erigon 3 supports three prune modes that control how much chain history your nod
 
 | **Prune Mode**                                                        | **Flag**               | **Data Retained**                                                                                   | **Primary Use Case**                                                                     |
 | --------------------------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| <p>* <a href="sync-modes.md#full-node">Full Node</a><br />(Default)</p> | `--prune.mode=full`    | Retains latest state, necessary blocks, and prunes ancient blocks and state (EIP-4444 enabled)      | General users, DApp interaction, fastest sync.                                           |
-| \* [Minimal Node](sync-modes.md#minimal-node)                         | `--prune.mode=minimal` | Only recent blocks and latest state                                                                 | Solo staking, users with constrained hardware, maximum privacy for sending transactions. |
+| <p>* <a href="#full-node">Full Node</a><br />(Default)</p> | `--prune.mode=full`    | Retains latest state, necessary blocks, and prunes ancient blocks and state (EIP-4444 enabled)      | General users, DApp interaction, fastest sync.                                           |
+| \* [Minimal Node](#minimal-node)                         | `--prune.mode=minimal` | Only recent blocks and latest state                                                                 | Solo staking, users with constrained hardware, maximum privacy for sending transactions. |
 | Historical Blocks                                                     | `--prune.mode=blocks`  | Retains the full block/transaction history, but still prunes the historical state before the merge. | Users needing historical block data for research or indexing.                            |
-| [Archive Node](sync-modes.md#archive-node)                            | `--prune.mode=archive` | All historical state and all blocks                                                                 | Developers, researchers, and RPC providers requiring full historical state access.       |
+| [Archive Node](#archive-node)                            | `--prune.mode=archive` | All historical state and all blocks                                                                 | Developers, researchers, and RPC providers requiring full historical state access.       |
 
-By **default**, Erigon run as a [full node](sync-modes.md#full-node), to change its behavior use the flag `--prune.mode <value>`.
+By **default**, Erigon run as a [full node](#full-node), to change its behavior use the flag `--prune.mode <value>`.
 
 In order to switch type of node, you must first delete the `/chaindata` folder in the chosen `--datadir` directory and re-sync from scratch.
 
