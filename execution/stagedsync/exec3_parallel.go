@@ -313,19 +313,14 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						fmt.Println(applyResult.blockNum, "apply", applyResult.txNum, len(applyResult.writes))
 					}
 					blockUpdateCount += len(applyResult.writes)
-					// All ApplyStateWrites (including finalize) run in the
-					// execLoop, writing to BlockStateCache then flushing to
-					// sd.mem before the blockResult crosses the channel.
-					err := pe.rs.ApplyTxIndexes(applyRoTx, applyResult.txNum, applyResult.receipt, applyResult.blobGasUsed,
-						applyResult.logs, applyResult.traceFroms, applyResult.traceTos)
-					if err == nil && pe.accumulator != nil {
+					// All ApplyStateWrites + ApplyTxIndexes run in the execLoop
+					// (sole sd.mem writer). The apply loop here only collects
+					// accumulator notifications and per-tx counters.
+					if pe.accumulator != nil {
 						pendingAccumulatorWrites = append(pendingAccumulatorWrites, applyResult.writes)
 					}
 					blockApplyCount += len(applyResult.writes)
 					pe.rs.SetTrace(false)
-					if err != nil {
-						return err
-					}
 				case *blockResult:
 					// StartChange + NotifyAccumulator must both run in the apply
 					// goroutine — keeps all accumulator access single-threaded
@@ -2357,6 +2352,15 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			if err := pe.rs.ApplyStateWrites(ctx, applyTx, applyResult.blockNum, applyResult.txNum, applyResult.writes,
 				nil, applyResult.rules, be.blockStateCache); err != nil {
 				return nil, err
+			}
+
+			// Apply per-tx indexes (logs, traces, receipt cache) here in the
+			// exec loop, on the SAME goroutine that owns sd.mem mutations.
+			// Doing this in the apply loop instead used to race with the next
+			// tx / block-end ApplyStateWrites on SharedDomains.mem.
+			if err := pe.rs.ApplyTxIndexes(applyTx, applyResult.txNum, applyResult.receipt, applyResult.blobGasUsed,
+				applyResult.logs, applyResult.traceFroms, applyResult.traceTos); err != nil {
+				return nil, fmt.Errorf("ApplyTxIndexes block=%d txNum=%d: %w", applyResult.blockNum, applyResult.txNum, err)
 			}
 
 			if err := be.sendResult(ctx, &applyResult); err != nil {
