@@ -341,3 +341,24 @@ details.alert.alert--info summary {
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(239,119,22,0.15);
 }
+
+/* ─── Version dropdown ───────────────────────────────────────────────────── */
+
+.navbar__item.dropdown .navbar__link[data-toggle="dropdown"],
+.navbar__item.dropdown > .navbar__link {
+  font-family: 'Montserrat', sans-serif;
+  font-weight: 800;
+  font-size: 0.9rem;
+}
+
+.dropdown__menu {
+  border: 1px solid var(--ifm-color-emphasis-200);
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+}
+
+.dropdown__link--active,
+.dropdown__link:hover {
+  color: #EF7716 !important;
+  background: rgba(239,119,22,0.06);
+}

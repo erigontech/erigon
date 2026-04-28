@@ -44,6 +44,12 @@ const config: Config = {
       docs: {
         sidebarPath: './sidebars.ts',
         routeBasePath: '/',
+        versions: {
+          current: {
+            label: 'v3.4',
+            badge: false,
+          },
+        },
       },
       blog: false as false,
       theme: { customCss: './src/css/custom.css' },
@@ -70,6 +76,11 @@ const config: Config = {
           docsPluginId: 'help-center',
           position: 'left',
           label: 'Help Center',
+        },
+        {
+          type: 'docsVersionDropdown',
+          position: 'right',
+          dropdownActiveClassDisabled: true,
         },
         {
           type: 'html',
