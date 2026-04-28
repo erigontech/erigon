@@ -1877,10 +1877,16 @@ type blockExecutor struct {
 	// result if be.results[tx] is overwritten between finalize and publish.
 	finalizedResults map[int]*execResult
 
-	// cumulative gas for this block
-	blockGasUsed uint64
-	blobGasUsed  uint64
-	gasPool      *protocol.GasPool
+	// cumulative gas for this block.
+	// blockRegularGasUsed and blockStateGasUsed are tracked separately so the
+	// final blockGasUsed = max(regular, state) matches EIP-8037 / EIP-7778
+	// block-level accounting and equals what the builder set in header.GasUsed
+	// via protocol.SetGasUsed (= max(cumRegular, cumState)).
+	blockRegularGasUsed uint64
+	blockStateGasUsed   uint64
+	blockGasUsed        uint64
+	blobGasUsed         uint64
+	gasPool             *protocol.GasPool
 
 	execFailed, execAborted []int
 
@@ -2287,12 +2293,18 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 
 			if result.Receipt != nil {
-				// Use receipt gas (from finalize) rather than
-				// result.ExecutionResult.BlockGasUsed which may be from
-				// an intermediate incarnation that was superseded.
-				receiptGas := result.Receipt.GasUsed
-				applyResult.blockGasUsed = int64(receiptGas)
-				be.blockGasUsed += receiptGas
+				// EIP-8037 / EIP-7778: block-level gas is max(cum regular,
+				// cum state) — NOT sum of per-tx receipt gas. Receipt gas
+				// accounts for refunds and (post-Amsterdam) carries the
+				// FloorGasCost floor; summing it bears no fixed relationship
+				// to header.GasUsed, which the builder sets via
+				// protocol.SetGasUsed = max(cumBlockRegular, cumBlockState).
+				be.blockRegularGasUsed += result.ExecutionResult.BlockRegularGasUsed
+				be.blockStateGasUsed += result.ExecutionResult.BlockStateGasUsed
+				be.blockGasUsed = max(be.blockRegularGasUsed, be.blockStateGasUsed)
+				// applyResult.blockGasUsed is the per-tx contribution used for
+				// progress / uncommittedGas tracking; receipt gas is fine here.
+				applyResult.blockGasUsed = int64(result.Receipt.GasUsed)
 
 				receipt := *result.Receipt
 				applyResult.receipt = &receipt
