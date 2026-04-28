@@ -7,7 +7,7 @@ sidebar_position: 2
 
 # Sync Modes
 
-Erigon 3 introduces a flexible approach to node configuration, offering three distinct types to suit various user needs. Depending on your need, you can choose from three different node types.
+Erigon 3 supports three prune modes that control how much chain history your node retains. Choose based on your use case — most users should run a Full Node.
 
 | **Prune Mode**                                                        | **Flag**               | **Data Retained**                                                                                   | **Primary Use Case**                                                                     |
 | --------------------------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
