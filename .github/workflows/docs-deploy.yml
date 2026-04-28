@@ -10,12 +10,18 @@ on:
   # Allow manual trigger from Actions tab
   workflow_dispatch:
 
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
+permissions:
+  contents: read
+  pages: write
+  id-token: write
 
+concurrency:
+  group: docs-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -33,10 +39,18 @@ jobs:
         run: npm run build
         working-directory: docs/docusaurus
 
-      - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: docs/docusaurus/build
-          cname: docs.erigon.tech
-          commit_message: 'deploy: ${{ github.sha }}'
+          path: docs/docusaurus/build
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
