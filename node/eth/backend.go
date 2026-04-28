@@ -1433,6 +1433,9 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	}
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 	agg.SetProduceMod(snConfig.Snapshot.ProduceE3)
+	agg.SetMaxCollatableTxNumFn(func(ctx context.Context, tx kv.Tx) (uint64, error) {
+		return services.MaxCollatableTxNum(ctx, tx, blockReader)
+	})
 
 	allSegmentsDownloadComplete, err := rawdb.AllSegmentsDownloadCompleteFromDB(db)
 	if err != nil {

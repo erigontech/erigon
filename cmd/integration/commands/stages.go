@@ -980,6 +980,9 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		_aggSingleton = dbstate.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings).MustOpen(ctx, db)
 
 		_aggSingleton.SetProduceMod(snapCfg.ProduceE3)
+		_aggSingleton.SetMaxCollatableTxNumFn(func(ctx context.Context, tx kv.Tx) (uint64, error) {
+			return services.MaxCollatableTxNum(ctx, tx, blockReader)
+		})
 
 		g := &errgroup.Group{}
 		g.Go(func() error {
