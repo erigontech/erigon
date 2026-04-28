@@ -291,18 +291,20 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	}
 
 	if fcuHeader.Number.Sign() > 0 {
-		var finalisedBlockNum uint64
+		// Per execution-apis #786, if headBlockHash is canonical and at or
+		// behind the finalised block, treat the FCU as a no-op rather than
+		// reorging away from the finalised tip.
+		var finalisedBlockNum *uint64
 		if finalizedHash == (common.Hash{}) {
-			finalisedBlockNum = finishProgressBefore
+			// The CL has not finalised anything yet (e.g. fresh devnet before finality kicks in).
+			finalisedBlockNum = &finishProgressBefore
 		} else {
-			blockNum, err := e.blockReader.HeaderNumber(ctx, tx, finalizedHash)
+			finalisedBlockNum, err = e.blockReader.HeaderNumber(ctx, tx, finalizedHash)
 			if err != nil {
 				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			}
-			finalisedBlockNum = *blockNum
 		}
-		if canonicalHash == blockHash && fcuHeader.Number.Uint64() <= finalisedBlockNum {
-			// if block hash is part of the canonical chain and is at or behind last finalized hash, treat as no-op.
+		if finalisedBlockNum != nil && canonicalHash == blockHash && fcuHeader.Number.Uint64() <= *finalisedBlockNum {
 			writeForkChoiceHashes(tx, blockHash, safeHash, finalizedHash)
 			valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
 			if err != nil {
@@ -366,7 +368,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
 		if unwindTarget < minUnwindableBlock {
-			e.logger.Warn("reorg requested too low, capping to the minimum unwindable block", "unwindTarget", unwindTarget, "minUnwindableBlock", minUnwindableBlock)
+			e.logger.Warn("reorg target below minimum unwindable block", "unwindTarget", unwindTarget, "minUnwindableBlock", minUnwindableBlock)
 			return sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
 				LatestValidHash: common.Hash{},
 				Status:          ExecutionStatusReorgTooDeep,

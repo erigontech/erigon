@@ -369,5 +369,9 @@ func TestFcuReturnsReorgTooDeepCode38006(t *testing.T) {
 		// unwind back to b2 should return "Too deep reorg" error with code 38006
 		err = eat.MockCl.UpdateForkChoice(ctx, b2Canon)
 		require.Error(t, err)
+		var rpcErr rpc.Error
+		require.ErrorAs(t, err, &rpcErr)
+		require.Equal(t, -38006, rpcErr.ErrorCode())
+		require.Equal(t, "Too deep reorg", rpcErr.Error())
 	})
 }
