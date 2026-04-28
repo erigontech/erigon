@@ -269,6 +269,9 @@ func ExecV3(ctx context.Context,
 			}
 			if cfg.badBlockHalt && dbg.BadBlockHalt {
 				logger.Error(fmt.Sprintf("[%s] BAD_BLOCK_HALT: halting on invalid block (debug mode, no commit)", execStage.LogPrefix()), "err", execErr)
+				// Intentional os.Exit: BAD_BLOCK_HALT is a debug switch whose whole purpose is
+				// to freeze process state at the bad block. Returning would run deferred
+				// rollback/commit/flush paths and overwrite the very state we want to inspect.
 				os.Exit(1)
 			}
 		}
@@ -366,7 +369,7 @@ func ExecV3(ctx context.Context,
 		return execErr
 	}
 
-	lastCommitedStep := kv.Step((lastCommittedTxNum) / doms.StepSize())
+	lastCommittedStep := kv.Step((lastCommittedTxNum) / doms.StepSize())
 	// applyTx may be stale after parallel execution (the underlying mdbx tx
 	// was invalidated by Flush/CommitAndBegin). Use a fresh roTx for the check.
 	var lastFrozenStep kv.Step
@@ -375,12 +378,12 @@ func ExecV3(ctx context.Context,
 		stepCheckTx.Rollback()
 	}
 
-	if lastCommitedStep > 0 && lastCommitedStep < lastFrozenStep && !dbg.DiscardCommitment() {
-		logger.Warn("["+execStage.LogPrefix()+"] can't persist comittement: txn step frozen",
-			"block", lastCommittedBlockNum, "txNum", lastCommittedTxNum, "step", lastCommitedStep,
+	if lastCommittedStep > 0 && lastCommittedStep < lastFrozenStep && !dbg.DiscardCommitment() {
+		logger.Warn("["+execStage.LogPrefix()+"] can't persist commitment: txn step frozen",
+			"block", lastCommittedBlockNum, "txNum", lastCommittedTxNum, "step", lastCommittedStep,
 			"lastFrozenStep", lastFrozenStep, "lastFrozenTxNum", ((lastFrozenStep+1)*kv.Step(doms.StepSize()))-1)
-		return fmt.Errorf("can't persist comittement for blockNum %d, txNum %d: step %d is frozen",
-			lastCommittedBlockNum, lastCommittedTxNum, lastCommitedStep)
+		return fmt.Errorf("can't persist commitment for blockNum %d, txNum %d: step %d is frozen",
+			lastCommittedBlockNum, lastCommittedTxNum, lastCommittedStep)
 	}
 
 	if !shouldReportToTxPool && cfg.notifications != nil && cfg.notifications.Accumulator != nil && lastHeader != nil {
@@ -680,7 +683,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			lastExecutedStep := kv.Step(inputTxNum / te.doms.StepSize())
 
 			// if we're in the initialCycle before we consider the blockLimit we need to make sure we keep executing
-			// until we reach a transaction whose comittement which is writable to the db, otherwise the update will get lost
+			// until we reach a transaction whose commitment which is writable to the db, otherwise the update will get lost
 			var exhausted *ErrLoopExhausted
 			if !initialCycle || lastExecutedStep > 0 && lastExecutedStep > lastFrozenStep && !dbg.DiscardCommitment() {
 				if blockLimit > 0 && blockNum-startBlockNum+1 >= blockLimit && blockNum != maxBlockNum {

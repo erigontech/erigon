@@ -805,11 +805,20 @@ func (e *ExecModule) runForkchoiceFlushCommit(sd *execctx.SharedDomains, roTxToC
 		if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok && agg != nil {
 			if verifyTx, verifyErr := e.db.BeginTemporalRo(e.bacgroundCtx); verifyErr == nil { //nolint:gocritic // Rollback below; defer would shadow named-tx scope
 				defer verifyTx.Rollback() //nolint:gocritic // safety net alongside the explicit Rollback below
-				if v, _, getErr := verifyTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState); getErr == nil && len(v) >= 16 {
+				v, _, getErr := verifyTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+				if getErr != nil {
+					// Log but do not fail FCU — aggregator stays at its prior watermark; the
+					// next commit's GetLatest will retry. Silent failure here is what motivated
+					// this fix in the first place: a stale watermark caused the aggregator to
+					// never learn about flushes and broke collation capping.
+					e.logger.Warn("[fcu] SetLastFlushedCommitmentTxNum: GetLatest failed; aggregator watermark unchanged", "err", getErr)
+				} else if len(v) >= 16 {
 					committedTxNum, _ := commitmentdb.DecodeTxBlockNums(v)
 					agg.SetLastFlushedCommitmentTxNum(committedTxNum)
 				}
 				verifyTx.Rollback()
+			} else {
+				e.logger.Warn("[fcu] SetLastFlushedCommitmentTxNum: BeginTemporalRo failed; aggregator watermark unchanged", "err", verifyErr)
 			}
 		}
 	}

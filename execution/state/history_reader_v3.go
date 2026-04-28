@@ -113,7 +113,16 @@ func (hr *HistoryReaderV3) getAsOf(domain kv.Domain, key []byte) (enc []byte, ok
 				copy(raw[:], key)
 				addr := accounts.InternAddress(raw)
 				if cached, hit := hr.blockCache.GetCurrentAccount(addr); hit {
-					return cached, cached != nil, nil
+					// hit==true is authoritative for the in-flight block, including the
+					// deletion case (cached==nil). Return immediately rather than falling
+					// through to sd/ttx, which would surface the pre-deletion value from
+					// history. Downstream callers (ReadAccountData) treat enc=nil as
+					// "no account" regardless of ok, so emitting ok=true here just
+					// reflects the cache's authoritative status.
+					if cached == nil {
+						return nil, false, nil
+					}
+					return cached, true, nil
 				}
 			}
 		case kv.StorageDomain:
@@ -125,7 +134,12 @@ func (hr *HistoryReaderV3) getAsOf(domain kv.Domain, key []byte) (enc []byte, ok
 				addr := accounts.InternAddress(rawAddr)
 				slot := accounts.InternKey(rawSlot)
 				if cached, hit := hr.blockCache.GetCurrentStorage(addr, slot); hit {
-					return cached, len(cached) > 0, nil
+					// Same as the account case above: hit==true is authoritative even
+					// when the slot was cleared (len(cached)==0), so do not fall through.
+					if len(cached) == 0 {
+						return nil, false, nil
+					}
+					return cached, true, nil
 				}
 			}
 		}

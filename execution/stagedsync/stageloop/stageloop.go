@@ -261,13 +261,20 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		// use it to cap collation so files don't capture uncommitted data.
 		if verifyTx, verifyErr := db.BeginTemporalRo(ctx); verifyErr == nil {
 			v, _, getErr := verifyTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
-			if getErr == nil && len(v) >= 16 {
+			if getErr != nil {
+				// Log but continue — aggregator stays at its prior watermark; the next iteration
+				// will retry. Silent failure here is the failure mode that motivated the fix:
+				// without the watermark refresh, collation files capture uncommitted data.
+				logger.Warn("[stageloop frozen] SetLastFlushedCommitmentTxNum: GetLatest failed; aggregator watermark unchanged", "err", getErr)
+			} else if len(v) >= 16 {
 				committedTxNum := binary.BigEndian.Uint64(v[:8])
 				if a, ok := db.(state.HasAgg); ok {
 					a.Agg().(*state.Aggregator).SetLastFlushedCommitmentTxNum(committedTxNum)
 				}
 			}
 			verifyTx.Rollback()
+		} else {
+			logger.Warn("[stageloop frozen] SetLastFlushedCommitmentTxNum: BeginTemporalRo failed; aggregator watermark unchanged", "err", verifyErr)
 		}
 
 		// Reopen RO tx and reinit block overlay on same doms.

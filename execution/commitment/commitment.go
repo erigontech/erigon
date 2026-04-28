@@ -1418,11 +1418,16 @@ func (m Mode) String() string {
 }
 
 type Updates struct {
-	hasher  keyHasher
-	keys    map[string]struct{}       // plain keys to keep only unique keys in etl
-	etl     *etl.Collector            // all-in-one collector
-	tree    *btree.BTreeG[*KeyUpdate] // sorted by hashedKey for correct trie traversal order
-	treeIdx map[string]*KeyUpdate     // plainKey → btree entry for O(1) lookup in ModeUpdate
+	hasher keyHasher
+	keys   map[string]struct{} // plain keys to keep only unique keys in etl
+	etl    *etl.Collector      // all-in-one collector
+	// Sorted by plainKey (see keyUpdateLessFn). Trie traversal order is established
+	// later when entries are emitted into the etl collector keyed by hashedKey;
+	// this btree is only for in-memory dedup/lookup in ModeUpdate. Keeping plainKey
+	// ordering matches main and avoids regressing TouchPlainKey/TouchHashedKey
+	// callers that mix entries with and without a hashedKey.
+	tree    *btree.BTreeG[*KeyUpdate]
+	treeIdx map[string]*KeyUpdate // plainKey → btree entry for O(1) lookup in ModeUpdate
 	mode    Mode
 	tmpdir  string
 
@@ -1949,6 +1954,11 @@ type KeyUpdate struct {
 	update    *Update
 }
 
+// keyUpdateLessFn orders KeyUpdate entries by plainKey. This matches main
+// and is intentional: entries created by TouchHashedKey have an empty plainKey
+// and need to coexist in the same btree without a non-nil hashedKey requirement.
+// Trie traversal order is enforced downstream by the etl collector keyed on
+// hashedKey, not by this btree.
 func keyUpdateLessFn(i, j *KeyUpdate) bool {
 	return i.plainKey < j.plainKey
 }

@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"runtime"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -154,6 +156,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	// Disable trie warmup — the Warmuper uses sdCtx.updates which the
 	// calculator replaces via SetUpdates before ComputeCommitment.
 	pe.rs.Domains().EnableTrieWarmup(false)
+	defer pe.rs.Domains().EnableTrieWarmup(true)
 
 	// Skip step-boundary commitment — the calculator handles this.
 	pe.rs.StateV3.SetSkipStepBoundaryCommitment(true)
@@ -377,6 +380,9 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 					if dbg.StopAfterBlock > 0 && applyResult.BlockNum == dbg.StopAfterBlock {
 						pe.logger.Warn(fmt.Sprintf("[%s] STOP_AFTER_BLOCK reached, exiting without commit (debug mode)", pe.logPrefix), "block", applyResult.BlockNum)
+						// Intentional os.Exit: STOP_AFTER_BLOCK is a debug switch used to capture
+						// state at exactly N blocks executed. Returning would let deferred commit
+						// paths flush past the requested stop point, defeating the harness.
 						os.Exit(0)
 					}
 
@@ -386,7 +392,11 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					}
 				}
 
-			case cr := <-rootResults:
+			case cr, ok := <-rootResults:
+				if !ok {
+					// rootResults closed by the calculator on Stop — exit the apply loop cleanly.
+					return nil
+				}
 				if err := handleCommitResult(cr); err != nil {
 					return err
 				}
@@ -503,7 +513,19 @@ func (pe *parallelExecutor) triggerBatchCommitment(ctx context.Context) {
 	if pe.commitResultsCh == nil {
 		return
 	}
-	defer func() { recover() }() // channel may be closed by executeBlocks
+	defer func() {
+		// The exec loop closes commitResultsCh on shutdown; a concurrent send
+		// here would panic with "send on closed channel". That race is benign:
+		// the calculator is already shutting down and the request would be
+		// dropped anyway. Recover only that specific panic and re-raise anything
+		// else so real bugs still surface.
+		if rec := recover(); rec != nil {
+			if e, ok := rec.(runtime.Error); ok && strings.Contains(e.Error(), "send on closed channel") {
+				return
+			}
+			panic(rec)
+		}
+	}()
 	select {
 	case pe.commitResultsCh <- &commitComputeRequest{}:
 	case <-ctx.Done():
@@ -547,7 +569,17 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 		// close channels — it returns from the errgroup after loading
 		// blocks, but the exec loop keeps processing.
 		safeClose := func(ch chan applyResult) {
-			defer func() { recover() }()
+			defer func() {
+				// "close of closed channel" panics here are benign — it just means the
+				// channel was already closed by another shutdown path. Recover only that
+				// specific panic and re-raise anything else so real bugs still surface.
+				if rec := recover(); rec != nil {
+					if e, ok := rec.(runtime.Error); ok && strings.Contains(e.Error(), "close of closed channel") {
+						return
+					}
+					panic(rec)
+				}
+			}()
 			close(ch)
 		}
 		if pe.commitResultsCh != nil {
@@ -700,11 +732,10 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					sizeEst = pe.rs.SizeEstimateAfterCommitment()
 				}
 				batchLimit := pe.cfg.batchSize.Bytes()
-				// Always process at least 10 blocks before checking size.
-				// sd.mem starts with a large commitment baseline (~500MB) from
-				// the snapshot trie state. Without this minimum, the batch
-				// exits immediately after the first block.
-				if pe.blockExecMetrics.BlockCount.Load() > 10 && sizeEst > batchLimit {
+				// We are inside the `blockResult != nil` branch, so at least one
+				// complete (non-partial) block has been applied in this batch.
+				// That is enough to safely trigger a batch commit on size.
+				if sizeEst > batchLimit {
 					pe.triggerBatchCommitment(ctx)
 					return nil
 				}

@@ -575,7 +575,7 @@ func (db *MdbxKV) registerLiveTx(tx *MdbxTx, readOnly bool) {
 	count := db.txsCount
 	db.txsCountMutex.Unlock()
 
-	fmt.Printf("MDBX_TX_OPEN: id=%d kind=%s count=%d stack=%s\n", id, kind, count, stack)
+	db.log.Trace("MDBX_TX_OPEN", "id", id, "kind", kind, "count", count, "stack", stack)
 }
 
 // unregisterLiveTx removes a tx from the live set and logs a close event.
@@ -595,8 +595,7 @@ func (db *MdbxKV) unregisterLiveTx(tx *MdbxTx, event string) {
 	if !ok {
 		return
 	}
-	fmt.Printf("MDBX_TX_%s: id=%d kind=%s count=%d stack=%s\n",
-		event, info.id, info.kind, count, dbg.Stack())
+	db.log.Trace("MDBX_TX_"+event, "id", info.id, "kind", info.kind, "count", count, "stack", dbg.Stack())
 }
 
 // dumpConcurrentTxs prints the stacks of all live chaindata txs EXCEPT the
@@ -622,8 +621,7 @@ func (db *MdbxKV) dumpConcurrentTxs(committer *MdbxTx) {
 
 	now := time.Now()
 	for _, info := range snapshot {
-		fmt.Printf("CONCURRENT_TX: committer_id=%d id=%d kind=%s alive=%s stack=%s\n",
-			committerID, info.id, info.kind, now.Sub(info.openedAt), info.stack)
+		db.log.Trace("CONCURRENT_TX", "committer_id", committerID, "id", info.id, "kind", info.kind, "alive", now.Sub(info.openedAt), "stack", info.stack)
 	}
 }
 
