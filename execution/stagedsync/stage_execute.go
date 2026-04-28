@@ -462,80 +462,77 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 	//  - stop prune when `tx.SpaceDirty()` is big
 	//  - and set ~500ms timeout
 	// because on slow disks - prune is slower. but for now - let's tune for nvme first, and add `tx.SpaceDirty()` check later https://github.com/erigontech/erigon/issues/11635
-	quickPruneTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*1000/3) * time.Millisecond / 2
+	stagePruneTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*1000/3) * time.Millisecond / 2
+	if timeout > 0 && timeout > stagePruneTimeout {
+		stagePruneTimeout = timeout
+	}
 
-	if timeout > 0 && timeout > quickPruneTimeout {
-		quickPruneTimeout = timeout
+	pruneDiffsLimit := 1_000
+	pruneBalLimit := 10_000
+	if s.CurrentSyncCycle.IsInitialCycle {
+		pruneDiffsLimit = math.MaxInt
+		pruneBalLimit = math.MaxInt
+		stagePruneTimeout = 12 * time.Hour
+	}
+
+	stagePruneStartTime := time.Now()
+	remainingPruneTimeout := func() time.Duration {
+		remaining := stagePruneTimeout - time.Since(stagePruneStartTime)
+		if remaining <= 0 {
+			return 0
+		}
+		return remaining
 	}
 
 	if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth && !cfg.syncCfg.AlwaysGenerateChangesets {
 		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
 		// Some blocks on bor-mainnet have 400 chunks of diff = 3mb
-		var pruneDiffsLimitOnChainTip = 1_000
-		pruneTimeout := quickPruneTimeout
-		if s.CurrentSyncCycle.IsInitialCycle {
-			pruneDiffsLimitOnChainTip = math.MaxInt
-			pruneTimeout = time.Hour
-		}
-		pruneChangeSetsStartTime := time.Now()
-		if err := rawdb.PruneTable(
-			tx,
-			kv.ChangeSets3,
-			s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
-			ctx,
-			pruneDiffsLimitOnChainTip,
-			pruneTimeout,
-			logger,
-			s.LogPrefix(),
-		); err != nil {
-			return err
-		}
-		if duration := time.Since(pruneChangeSetsStartTime); duration > quickPruneTimeout {
-			logger.Debug(
-				fmt.Sprintf("[%s] prune changesets timing", s.LogPrefix()),
-				"duration", duration,
-				"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
-			)
+		if pruneTimeout := remainingPruneTimeout(); pruneTimeout > 0 {
+			if err := rawdb.PruneTable(
+				tx,
+				kv.ChangeSets3,
+				s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
+				ctx,
+				pruneDiffsLimit,
+				pruneTimeout,
+				logger,
+				s.LogPrefix(),
+			); err != nil {
+				return err
+			}
 		}
 	}
 
 	if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth {
-		pruneBalLimit := 10_000
-		pruneTimeout := quickPruneTimeout
-		if s.CurrentSyncCycle.IsInitialCycle {
-			pruneBalLimit = math.MaxInt
-			pruneTimeout = time.Hour
-		}
-		if err := rawdb.PruneTable(
-			tx,
-			kv.BlockAccessList,
-			s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
-			ctx,
-			pruneBalLimit,
-			pruneTimeout,
-			logger,
-			s.LogPrefix(),
-		); err != nil {
-			return err
+		if pruneTimeout := remainingPruneTimeout(); pruneTimeout > 0 {
+			if err := rawdb.PruneTable(
+				tx,
+				kv.BlockAccessList,
+				s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
+				ctx,
+				pruneBalLimit,
+				pruneTimeout,
+				logger,
+				s.LogPrefix(),
+			); err != nil {
+				return err
+			}
 		}
 	}
 
 	agg := cfg.db.(state.HasAgg).Agg().(*state.Aggregator)
 	mxExecStepsInDB.Set(rawdbhelpers.IdxStepsCountV3(tx, agg.StepSize()) * 100)
 
-	pruneTimeout := quickPruneTimeout
-	if s.CurrentSyncCycle.IsInitialCycle {
-		pruneTimeout = 12 * time.Hour
+	if pruneTimeout := remainingPruneTimeout(); pruneTimeout > 0 {
+		if _, err := tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, pruneTimeout); err != nil {
+			return err
+		}
 	}
-
-	pruneSmallBatchesStartTime := time.Now()
-	if _, err := tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, pruneTimeout); err != nil {
-		return err
-	}
-	if duration := time.Since(pruneSmallBatchesStartTime); duration > quickPruneTimeout {
+	if duration := time.Since(stagePruneStartTime); duration > stagePruneTimeout {
 		logger.Debug(
-			fmt.Sprintf("[%s] prune small batches timing", s.LogPrefix()),
+			fmt.Sprintf("[%s] prune execution timing", s.LogPrefix()),
 			"duration", duration,
+			"timeout", stagePruneTimeout,
 			"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
 		)
 	}
