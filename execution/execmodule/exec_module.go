@@ -452,26 +452,49 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		}, nil
 	}
 
-	tx, err := e.db.BeginTemporalRwNosync(ctx)
+	// Use the overlay-as-rwTx pattern: the validation pipeline writes through
+	// a fresh BlockOverlay on a new SharedDomains. This mirrors updateForkChoice
+	// (forkchoice.go:239-251) and is required by the parallel exec path —
+	// executeBlocks opens its own roTx in a separate goroutine and reads
+	// recently-inserted block data via te.doms.BlockOverlay().NewReadView,
+	// which shares the overlay's mem layer. A plain BeginTemporalRwNosync
+	// would leave doms with no overlay and the parallel goroutine could not
+	// see uncommitted block headers/bodies.
+	roTx, err := e.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return ValidationResult{}, err
 	}
-	defer tx.Rollback()
+	defer roTx.Rollback()
+
+	doms, err := execctx.NewSharedDomains(ctx, roTx, e.logger)
+	if err != nil {
+		return ValidationResult{}, err
+	}
+	// NOTE: do NOT defer doms.Close(). On the success path, ownership of
+	// doms transfers to forkValidator.sharedDom inside ValidatePayload —
+	// later phases (MergeExtendingFork, NotifyCurrentHeight) close it.
+	// We Close explicitly only on the early-return error paths below.
+	doms.SetInMemHistoryReads(inMemHistoryReads)
+
+	if err := doms.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
+		doms.Close()
+		return ValidationResult{}, fmt.Errorf("ValidateChain: init block overlay: %w", err)
+	}
+	var tx kv.TemporalRwTx = doms.BlockOverlay()
 
 	// Flush block overlay data (headers, bodies, TDs from InsertBlocks) into
-	// this RW tx so that unwindToCommonCanonical and ValidatePayload can see
-	// the block data without it being committed to DB. This tx will be rolled
-	// back, so the flush is temporary — the overlay retains all data.
+	// the validation overlay so unwindToCommonCanonical and ValidatePayload —
+	// and the parallel exec goroutine via NewReadView — see this block data.
+	// The InsertBlocks overlay on e.currentContext retains its data unchanged.
+	// Do NOT UpdateTxn on e.currentContext.BlockOverlay() here — that would
+	// reassign its backing db to our soon-to-be-rolled-back roTx and leave
+	// e.currentContext in an inconsistent state for UpdateForkChoice.
 	if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
 		if err := e.currentContext.BlockOverlay().Flush(ctx, tx); err != nil {
+			doms.Close()
 			return ValidationResult{}, fmt.Errorf("ValidateChain: flush overlay to validation tx: %w", err)
 		}
 	}
-	doms, err := execctx.NewSharedDomains(ctx, tx, e.logger)
-	if err != nil {
-		return ValidationResult{}, err
-	}
-	doms.SetInMemHistoryReads(inMemHistoryReads)
 
 	// Set state cache in SharedDomains for use during state reading
 	doms.SetStateCache(e.stateCache)
@@ -491,9 +514,9 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		e.stateCache.ClearWithHash(header.ParentHash)
 	}
 
-	// Throw away the validation tx — by design we do not persist changes to the
-	// canonical chain from a validation run.
-	tx.Rollback()
+	// Validation tx is the SD's BlockOverlay; defer doms.Close() above handles
+	// its rollback. By design we do not persist validation-run writes — there
+	// is no Flush/Commit on this path.
 
 	validationStatus := ExecutionStatusSuccess
 	if status == engine_types.AcceptedStatus {

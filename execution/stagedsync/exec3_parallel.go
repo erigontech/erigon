@@ -95,6 +95,13 @@ type parallelExecutor struct {
 	applyResultsCh  chan applyResult
 	commitResultsCh chan applyResult
 	maxBlockNum     uint64 // set before execLoop; exec loop exits when reached
+	// reachedMaxBlock is set by the exec loop when it exits cleanly because
+	// blockResult.BlockNum >= maxBlockNum (i.e. all requested work is done),
+	// as opposed to sizeEst > batchLimit (more work pending). The apply loop
+	// uses this to decide whether to return ErrLoopExhausted (more work) or
+	// nil (clean exit). Read after applyResults is closed; safe under happens-
+	// before because the exec loop sets it before triggering the channel close.
+	reachedMaxBlock atomic.Bool
 	// accumulator for txpool state-diff notifications; set before execLoop
 	// starts so that AuRa system-call nonce changes are emitted per block.
 	accumulator *shards.Accumulator
@@ -266,6 +273,17 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						pe.txExecutor.lastCommittedBlockNum.Store(lastBlockResult.BlockNum)
 						pe.txExecutor.lastCommittedTxNum.Store(lastBlockResult.lastTxNum)
 					}
+					// Two reasons the exec loop closes the channel:
+					//   (1) sizeEst > batchLimit — flush and tell the stage loop
+					//       there is more work pending (ErrLoopExhausted)
+					//   (2) blockResult.BlockNum >= pe.maxBlockNum — we processed
+					//       every block we were asked to; clean exit, not "more work"
+					// Fork validation (StateStep, single-block batches) only ever hits
+					// case (2); returning ErrLoopExhausted there causes the stage loop
+					// to error with "unexpected state step has more work".
+					if pe.reachedMaxBlock.Load() {
+						return nil
+					}
 					return &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult.BlockNum, Reason: "block batch is full"}
 				}
 				switch applyResult := applyResult.(type) {
@@ -386,7 +404,12 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						os.Exit(0)
 					}
 
-					if shouldGenerateChangesets && applyResult.BlockNum > 0 {
+					// Only prepare a fresh accumulator if there's another block coming
+					// in this batch. Otherwise the dangling currentChangesAccumulator
+					// blocks subsequent SD merges (e.g. ForkValidator.MergeExtendingFork
+					// in fork validation, where this is the only batch and no later
+					// block will consume the accumulator).
+					if shouldGenerateChangesets && applyResult.BlockNum > 0 && applyResult.BlockNum < pe.maxBlockNum {
 						changeSet = &changeset.StateChangeSet{}
 						pe.domains().SetChangesetAccumulator(changeSet)
 					}
@@ -660,8 +683,14 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 			}
 			continue
 		case <-ctx.Done():
-			// Context cancelled (executeBlocks returned from errgroup).
-			// Drain any remaining results then exit.
+			// Context cancelled (executeBlocks returned from errgroup, or
+			// executor cleanup ran). Drain any remaining worker results,
+			// forward any completed blockResults to the apply loop +
+			// commitment calculator, then exit. Without forwarding the
+			// trailing blockResult, the apply loop sees only the channel
+			// close and never observes that maxBlockNum was reached —
+			// which makes single-block fork validation see "more work
+			// pending" when there is none.
 			for {
 				select {
 				case nextResult, ok := <-pe.rws.ResultCh():
@@ -671,8 +700,26 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					if closed, err := pe.rws.Drain(ctx, nextResult); err != nil || closed {
 						return err
 					}
-					if _, err := pe.processResults(ctx, applyTx); err != nil {
+					blockResult, err := pe.processResults(ctx, applyTx)
+					if err != nil {
 						return err
+					}
+					if blockResult != nil {
+						pe.RLock()
+						blockExecutor, exists := pe.blockExecutors[blockResult.BlockNum]
+						pe.RUnlock()
+						if exists {
+							pe.lastExecutedBlockNum.Store(int64(blockResult.BlockNum))
+							if err := blockExecutor.sendResult(ctx, blockResult); err != nil {
+								return err
+							}
+							pe.Lock()
+							delete(pe.blockExecutors, blockResult.BlockNum)
+							pe.Unlock()
+							if blockResult.BlockNum >= pe.maxBlockNum {
+								pe.reachedMaxBlock.Store(true)
+							}
+						}
 					}
 				default:
 					return nil
@@ -741,6 +788,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				}
 
 				if blockResult.BlockNum >= pe.maxBlockNum {
+					pe.reachedMaxBlock.Store(true)
 					pe.triggerBatchCommitment(ctx)
 					return nil
 				}
