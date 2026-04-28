@@ -1,0 +1,42 @@
+name: Deploy Docs
+
+on:
+  push:
+    branches:
+      - release/3.4
+    paths:
+      - 'docs/docusaurus/**'
+
+  # Allow manual trigger from Actions tab
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: docs/docusaurus/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: docs/docusaurus
+
+      - name: Build
+        run: npm run build
+        working-directory: docs/docusaurus
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: docs/docusaurus/build
+          cname: docs.erigon.tech
+          commit_message: 'deploy: ${{ github.sha }}'
