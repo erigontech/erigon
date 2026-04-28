@@ -94,12 +94,15 @@ func runGapFillIteration(t *testing.T, i int) {
 
 // TestSoakLite_PeerChurn sends repeated announce / PeerDeparted cycles at a
 // single Node from many distinct peers and asserts that the orchestrator's
-// peer-file cache does not grow without bound beyond what the fixture would
-// require.
+// peer-file cache evicts cleanly once every advertiser has departed.
 //
-// Current orchestrator semantics key peerFiles by file name across all peers
-// — so advertising the same HoodiBaseline from N peers ends with peerFiles
-// equal to the fixture size, not N × fixture size. This test locks that in.
+// With per-peer attribution in peerFiles, each claim tracks the set of
+// peers that advertised it. When a peer departs, it is removed from
+// every claim's set; a claim whose set drops to empty (and that has no
+// in-flight download) is dropped. So after sequential announce-then-
+// depart cycles for N peers, no peer is currently advertising anything,
+// and peerFiles must be zero. This test locks that in — it is the
+// regression check for the per-peer-attribution bookkeeping.
 func TestSoakLite_PeerChurn(t *testing.T) {
 	if testing.Short() {
 		t.Skip("soak-lite tests skipped under -short")
@@ -122,9 +125,8 @@ func TestSoakLite_PeerChurn(t *testing.T) {
 
 	node.Bus.WaitAsync()
 
-	baseline := harness.HoodiBaseline().FileCount()
-	require.Equal(t, baseline, node.Orch.PeerFilesCount(),
-		"peerFiles should cap at fixture size regardless of peer churn")
+	require.Equal(t, 0, node.Orch.PeerFilesCount(),
+		"peerFiles should evict to zero once every advertiser has departed")
 	require.Equal(t, 0, node.Orch.PendingCount(),
 		"pending should be zero after churn completes")
 }

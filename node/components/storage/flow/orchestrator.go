@@ -74,11 +74,17 @@ type Orchestrator struct {
 	// can reconstruct the file shape (domain, step range) without requiring
 	// the download-side to echo it back. Keyed by file name.
 	//
+	// Each entry tracks the set of peer IDs currently advertising it. On
+	// PeerDeparted we remove the peer from each entry's set; an entry whose
+	// set becomes empty AND is not in `pending` is dropped. This is what
+	// future UCAN peer-selection consumes (which trusted peers offer file
+	// X) and what bounds the cache after long churn.
+	//
 	// pending tracks in-flight downloads so coverage queries include them —
 	// this is how merge-divergence handling avoids redundantly downloading
 	// unmerged equivalents of a range already being served by a merged file.
 	peerMu    sync.RWMutex
-	peerFiles map[string]*snapshot.FileEntry
+	peerFiles map[string]*peerFileClaim
 	pending   map[string]*snapshot.FileEntry
 
 	// Phased scheduling: state-domain files are requested first; block
@@ -117,6 +123,18 @@ type queuedBlock struct {
 	peerID string
 }
 
+// peerFileClaim is the orchestrator's per-file-name record of which
+// peers currently advertise that file. The file shape (entry) is
+// captured from the first advertiser; subsequent advertisers add to
+// peers but never overwrite the shape — every honest advertiser of the
+// same file name agrees on its (domain, range, infohash). When peers
+// disagree, validation lives at a different layer (per
+// feature-pluggable-validation-phase).
+type peerFileClaim struct {
+	entry *snapshot.FileEntry
+	peers map[string]struct{}
+}
+
 // New creates a flow orchestrator bound to the given bus and inventory.
 // Neither is owned — the caller manages their lifecycles.
 //
@@ -140,7 +158,7 @@ func NewWithStorage(bus event.EventBus, storage Storage, logger log.Logger) *Orc
 		bus:              bus,
 		storage:          storage,
 		log:              logger,
-		peerFiles:        make(map[string]*snapshot.FileEntry),
+		peerFiles:        make(map[string]*peerFileClaim),
 		pending:          make(map[string]*snapshot.FileEntry),
 		stateDomainsSeen: make(map[snapshot.Domain]struct{}),
 	}
@@ -272,9 +290,7 @@ func (o *Orchestrator) requestSimpleGaps(peerEntries []*snapshot.FileEntry, peer
 
 	o.peerMu.Lock()
 	for _, entry := range peerEntries {
-		if _, seen := o.peerFiles[entry.Name]; !seen {
-			o.peerFiles[entry.Name] = entry
-		}
+		o.recordPeerClaimLocked(entry, peerID)
 	}
 	o.peerMu.Unlock()
 
@@ -322,9 +338,7 @@ func (o *Orchestrator) requestSimpleGaps(peerEntries []*snapshot.FileEntry, peer
 func (o *Orchestrator) requestGapsFor(domain snapshot.Domain, peerEntries []*snapshot.FileEntry, peerID string) {
 	o.peerMu.Lock()
 	for _, entry := range peerEntries {
-		if _, seen := o.peerFiles[entry.Name]; !seen {
-			o.peerFiles[entry.Name] = entry
-		}
+		o.recordPeerClaimLocked(entry, peerID)
 	}
 	o.peerMu.Unlock()
 
@@ -519,17 +533,66 @@ func (o *Orchestrator) PeerFilesCount() int {
 	return len(o.peerFiles)
 }
 
-// onPeerDeparted removes the departing peer's file-shape entries from the
-// peer-manifest cache. Without this, peerFiles grows unbounded across long
-// scenarios as peers churn.
+// recordPeerClaimLocked adds peerID's claim for entry. Caller must hold
+// o.peerMu. The first claim wires up the file shape; subsequent claims
+// only add to the peer set (entries are immutable here — the orchestrator
+// trusts that two honest advertisers of the same name agree on the
+// shape; mismatches are a validation-phase concern).
+func (o *Orchestrator) recordPeerClaimLocked(entry *snapshot.FileEntry, peerID string) {
+	claim, ok := o.peerFiles[entry.Name]
+	if !ok {
+		claim = &peerFileClaim{entry: entry, peers: map[string]struct{}{}}
+		o.peerFiles[entry.Name] = claim
+	}
+	if peerID != "" {
+		claim.peers[peerID] = struct{}{}
+	}
+}
+
+// onPeerDeparted removes the departing peer from each peerFiles claim's
+// advertiser set. A claim whose advertiser set drops to empty AND that
+// has no in-flight download is evicted; entries with an in-flight
+// download are kept so onDownloadComplete can still resolve the file
+// shape when the bytes arrive.
 func (o *Orchestrator) onPeerDeparted(e PeerDeparted) {
-	// The current peerFiles map is keyed by file name without peer
-	// attribution — if another peer later advertises the same file name it
-	// stays valid. A more precise impl would track (peerID → file names) and
-	// only evict entries unique to the departing peer. For the current
-	// single-claim-per-name model, this is a no-op; kept as a subscription
-	// slot so future refinement lands without churning subscribers.
-	_ = e
+	if e.PeerID == "" {
+		return
+	}
+	o.peerMu.Lock()
+	defer o.peerMu.Unlock()
+	for name, claim := range o.peerFiles {
+		if _, had := claim.peers[e.PeerID]; !had {
+			continue
+		}
+		delete(claim.peers, e.PeerID)
+		if len(claim.peers) > 0 {
+			continue
+		}
+		if _, inflight := o.pending[name]; inflight {
+			continue
+		}
+		delete(o.peerFiles, name)
+	}
+}
+
+// PeersOffering returns the set of peer IDs currently advertising the
+// named file. Used by future UCAN peer-selection — given a trusted-peer
+// filter, the orchestrator can pick a fetch source from the
+// intersection of advertisers and trusted peers. Returns nil if no peer
+// has advertised the file.
+func (o *Orchestrator) PeersOffering(name string) []string {
+	o.peerMu.RLock()
+	defer o.peerMu.RUnlock()
+	claim, ok := o.peerFiles[name]
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(claim.peers))
+	for id := range claim.peers {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // haveLocally reports whether the local inventory has a file with the given
@@ -562,12 +625,13 @@ func (o *Orchestrator) haveLocally(domain snapshot.Domain, name string) bool {
 // to locally-verified content.
 func (o *Orchestrator) onDownloadComplete(e DownloadComplete) {
 	o.peerMu.RLock()
-	peerEntry, ok := o.peerFiles[e.FileName]
+	claim, ok := o.peerFiles[e.FileName]
 	o.peerMu.RUnlock()
 	if !ok {
 		o.log.Warn("[flow] DownloadComplete for unknown file", "file", e.FileName)
 		return
 	}
+	peerEntry := claim.entry
 
 	localEntry := peerEntry.Clone()
 	localEntry.Size = e.Size
@@ -585,6 +649,13 @@ func (o *Orchestrator) onDownloadComplete(e DownloadComplete) {
 
 	o.peerMu.Lock()
 	delete(o.pending, e.FileName)
+	// Evict orphan claims: if every advertiser departed while this
+	// download was in flight, the claim was retained on PeerDeparted
+	// (because pending was set). Now that pending is clear and there
+	// are no peers, drop it.
+	if len(claim.peers) == 0 {
+		delete(o.peerFiles, e.FileName)
+	}
 	// Decrement state-phase pending count for state-domain completions.
 	// If this drains the state phase, fire InitialStateReady + release
 	// the block queue (done after unlock via fireInitialStateReady).
