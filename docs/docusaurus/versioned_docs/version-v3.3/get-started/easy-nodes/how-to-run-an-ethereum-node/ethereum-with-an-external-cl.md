@@ -1,13 +1,11 @@
 ---
 title: "Ethereum with an external CL"
 sidebar_position: 1
+hide_title: true
 ---
 
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
-
----
----
 
 # Ethereum with an external CL
 
