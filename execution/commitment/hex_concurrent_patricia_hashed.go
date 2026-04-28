@@ -242,13 +242,28 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 			defer trieCtxClose()
 			phnib.ResetContext(trieCtx)
 
-			// Phase-1 detection of single-account-dominated subtries (storage-
-			// level sub-fanout candidates). When STORAGE_PARALLEL_TRIE_THRESHOLD
-			// is non-zero, count storage updates per account prefix while
-			// dispatching to followAndUpdate; emit one Info log per qualifying
-			// subtrie. The actual sub-fanout fold is Phase 2 — see
+			// Phase 2a — storage-level warmup-only fanout. When the threshold
+			// is configured (>0) and a single account dominates this subtrie's
+			// updates with >= threshold storage entries, we spawn 16 inner
+			// goroutines that each `followAndUpdate` a CLONE subtrie over
+			// 1/16 of the storage entries (split on keccak256(slot)[0]) using
+			// independent MDBX RoTxs. The clones are discarded; their only
+			// purpose is to populate the process-wide MDBX OS page cache so
+			// the subsequent canonical pass on `phnib` reads warm pages.
+			//
+			// The per-HPH cellHash cache is per-instance and discarded with
+			// the clone, so CPU-side hash work remains serial. Only I/O is
+			// parallelised. The full mount-at-depth-64 fanout (Phase 2b)
+			// adds CPU parallelism on top — see
 			// docs/plans/storage-parallel-trie-fanout.md.
 			detectThreshold := dbg.StorageParallelTrieThreshold
+
+			// Buffer entries: we may need to iterate twice (once for warmup
+			// clones, once for the canonical pass). 4200 entries × ~64 bytes
+			// is ~270 KB — fine to keep in memory.
+			type kvCopy struct{ hashedKey, plainKey []byte }
+			var entries []kvCopy
+			var storageBuckets [16][]kvCopy
 			var (
 				detectAccount    [32]byte
 				detectCount      int
@@ -258,11 +273,12 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 			cnt := 0
 			err := nib.Load(nil, "", func(hashedKey, plainKey []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 				cnt++
-				if phnib.trace {
-					fmt.Printf("\n%x) %d plainKey [%x] hashedKey [%x] currentKey [%x]\n", ni, cnt, plainKey, hashedKey, phnib.currentKey[:phnib.currentKeyLen])
-				}
+				// etl callback reuses the underlying byte slices; copy before
+				// keeping references across iterations.
+				hk := append([]byte(nil), hashedKey...)
+				pk := append([]byte(nil), plainKey...)
+				entries = append(entries, kvCopy{hk, pk})
 				if detectThreshold > 0 && !detectMixed && len(hashedKey) > 32 {
-					// Storage update: hashed key = keccak256(addr) || keccak256(slot).
 					if !detectAccountSet {
 						copy(detectAccount[:], hashedKey[:32])
 						detectAccountSet = true
@@ -272,9 +288,9 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 					} else {
 						detectMixed = true
 					}
-				}
-				if err := phnib.followAndUpdate(hashedKey, plainKey, nil); err != nil {
-					return fmt.Errorf("followAndUpdate[%x]: %w", ni, err)
+					if !detectMixed {
+						storageBuckets[hashedKey[32]>>4] = append(storageBuckets[hashedKey[32]>>4], kvCopy{hk, pk})
+					}
 				}
 				return nil
 			}, etl.TransformArgs{Quit: gctx.Done()})
@@ -284,13 +300,66 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 			if cnt == 0 {
 				return nil
 			}
-			if detectThreshold > 0 && !detectMixed && detectAccountSet && detectCount >= detectThreshold {
-				log.Info("[commitment] storage-parallel-trie candidate",
+
+			doWarmupFanout := detectThreshold > 0 && !detectMixed && detectAccountSet && detectCount >= detectThreshold
+			if doWarmupFanout {
+				warmupStart := time.Now()
+				log.Info("[commitment] storage-parallel-trie warmup-fanout starting",
 					"subtrie", fmt.Sprintf("%x", ni),
 					"account_keccak_prefix", fmt.Sprintf("%x", detectAccount[:8]),
 					"storage_updates", detectCount,
-					"threshold", detectThreshold,
-					"note", "phase1 detect-only; sub-fanout fold not yet implemented")
+					"threshold", detectThreshold)
+				innerG, innerGctx := errgroup.WithContext(gctx)
+				innerG.SetLimit(16)
+				for b := 0; b < 16; b++ {
+					if len(storageBuckets[b]) == 0 {
+						continue
+					}
+					bucket := storageBuckets[b]
+					innerG.Go(func() error {
+						// Independent MDBX RoTx per clone so reads run in
+						// parallel.
+						wctx, wctxClose := trieCtxFactory()
+						defer wctxClose()
+						clone := NewHexPatriciaHashed(phnib.accountKeyLen, wctx)
+						defer clone.Release()
+						clone.mountTo(pph.root, ni)
+						for _, e := range bucket {
+							if err := innerGctx.Err(); err != nil {
+								return err
+							}
+							// Warmup-only: ignore errors; the canonical pass
+							// on phnib will surface real errors.
+							_ = clone.followAndUpdate(e.hashedKey, e.plainKey, nil)
+						}
+						return nil
+					})
+				}
+				if werr := innerG.Wait(); werr != nil {
+					log.Debug("[commitment] storage-parallel-trie warmup error",
+						"subtrie", fmt.Sprintf("%x", ni), "err", werr)
+				}
+				populated := 0
+				for _, b := range storageBuckets {
+					if len(b) > 0 {
+						populated++
+					}
+				}
+				log.Info("[commitment] storage-parallel-trie warmup-fanout done",
+					"subtrie", fmt.Sprintf("%x", ni),
+					"buckets_populated", populated,
+					"duration", time.Since(warmupStart))
+			}
+
+			// Canonical pass on the parent subtrie. After 2a's warmup, MDBX
+			// page reads here are likely served from the OS page cache.
+			for _, e := range entries {
+				if phnib.trace {
+					fmt.Printf("\n%x) plainKey [%x] hashedKey [%x] currentKey [%x]\n", ni, e.plainKey, e.hashedKey, phnib.currentKey[:phnib.currentKeyLen])
+				}
+				if err := phnib.followAndUpdate(e.hashedKey, e.plainKey, nil); err != nil {
+					return fmt.Errorf("followAndUpdate[%x]: %w", ni, err)
+				}
 			}
 			if pph.mounts[ni].trace {
 				fmt.Printf("ConcurrentTrie: folding [%2x] keys %d maxDepth %d\n", ni, cnt, phnib.depths[0])
