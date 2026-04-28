@@ -45,6 +45,10 @@ type ChainReaderWriterEth1 struct {
 	fcuTimeout time.Duration
 }
 
+type knownTipHintReceiver interface {
+	SetKnownTipHint(blockNum uint64)
+}
+
 func NewChainReaderEth1(cfg *chain.Config, executionModule execmodule.ExecutionModule, fcuTimeout time.Duration) ChainReaderWriterEth1 {
 	return ChainReaderWriterEth1{
 		cfg:             cfg,
@@ -55,6 +59,12 @@ func NewChainReaderEth1(cfg *chain.Config, executionModule execmodule.ExecutionM
 
 func (c ChainReaderWriterEth1) Config() *chain.Config {
 	return c.cfg
+}
+
+func (c ChainReaderWriterEth1) SetKnownTipHint(blockNum uint64) {
+	if receiver, ok := c.executionModule.(knownTipHintReceiver); ok {
+		receiver.SetKnownTipHint(blockNum)
+	}
 }
 
 func (c ChainReaderWriterEth1) CurrentHeader(ctx context.Context) *types.Header {

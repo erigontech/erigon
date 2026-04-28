@@ -218,6 +218,11 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	if err != nil {
 		return err
 	}
+	if tipHintReceiver, ok := engine.(interface{ SetKnownTipHint(uint64) }); ok {
+		if latestExecutionPayloadHeader := state.LatestExecutionPayloadHeader(); latestExecutionPayloadHeader != nil && !latestExecutionPayloadHeader.IsZero() {
+			tipHintReceiver.SetKnownTipHint(latestExecutionPayloadHeader.BlockNumber)
+		}
+	}
 	ethClock := eth_clock.NewEthereumClock(state.GenesisTime(), state.GenesisValidatorsRoot(), beaconConfig)
 
 	pruneBlobDistance := uint64(128600)

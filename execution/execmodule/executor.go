@@ -19,6 +19,7 @@ package execmodule
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/common/dbg"
@@ -49,6 +50,7 @@ type PipelineExecutor struct {
 	validationNotifications *shards.Notifications
 	dispatcher              *Dispatcher
 	logger                  log.Logger
+	knownTipHint            atomic.Uint64
 }
 
 // NewPipelineExecutor creates a new executor. validationSync may be nil
@@ -97,6 +99,22 @@ func (pe *PipelineExecutor) Dispatcher() *Dispatcher {
 // Sync returns the main pipeline Sync object. Needed for PrevUnwindPoint().
 func (pe *PipelineExecutor) Sync() *stagedsync.Sync {
 	return pe.sync
+}
+
+func (pe *PipelineExecutor) SetKnownTipHint(blockNum uint64) {
+	for {
+		current := pe.knownTipHint.Load()
+		if blockNum <= current {
+			return
+		}
+		if pe.knownTipHint.CompareAndSwap(current, blockNum) {
+			return
+		}
+	}
+}
+
+func (pe *PipelineExecutor) KnownTipHint() uint64 {
+	return pe.knownTipHint.Load()
 }
 
 // UnwindTo sets the unwind point on the main pipeline.
@@ -257,10 +275,10 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		FirstCycle:   false,
 		PruneTimeout: 0,
 		InitialCycleFn: func(curTx kv.TemporalRwTx) (bool, error) {
-			return stagedsync.IsInitialCycle(curTx, pe.sync.Cfg(), pe.blockReader.FrozenBlocks())
+			return stagedsync.IsInitialCycle(curTx, pe.sync.Cfg(), pe.blockReader.FrozenBlocks(), pe.KnownTipHint())
 		},
 		AfterPrune: func(curTx kv.TemporalRwTx, _ bool) error {
-			return stagedsync.UpdateTipReached(curTx, pe.blockReader.FrozenBlocks())
+			return stagedsync.UpdateTipReached(curTx, pe.blockReader.FrozenBlocks(), pe.KnownTipHint())
 		},
 		CommitCycle: func(ctx context.Context, sd *execctx.SharedDomains) (kv.TemporalRwTx, error) {
 			if err := sd.Flush(ctx, tx); err != nil {
