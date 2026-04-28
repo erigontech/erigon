@@ -8,7 +8,7 @@ sidebar_position: 5
 
 These integrated practices focus on maximizing the reliability, efficiency, and security of your Erigon node setup.
 
-**1. Hardware and Data Integrity**
+## Hardware and Data Integrity
 
 | **Practice**                        | **Details**                                                                                                                                                                     | **Rationale**                                                                                                                                                                           |
 | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -17,7 +17,7 @@ These integrated practices focus on maximizing the reliability, efficiency, and 
 | Symlink Data Directories (Advanced) | For systems with multiple disks, consider symlinking `snapshots` and `temp` directories to a cheaper, high-capacity drive, while keeping the main `chaindata` on the fast NVMe. See [Optimizing Storage](/fundamentals/optimizing-storage). | Optimizes cost and capacity while retaining performance for critical files.                                                                          |
 | Maintain Sufficient RAM             | Ensure your system has at least the recommended RAM for your chosen network and [sync mode](/fundamentals/sync-modes). See [Hardware Requirements](/get-started/hardware-requirements). | Insufficient RAM, even with Erigon's memory efficiency, will lead to OOM-kill events (Out-of-Memory).                                                                                   |
 
-**2. Node Configuration and Startup**
+## Node Configuration and Startup
 
 | **Practice**                               | **Details**                                                                                                                                                                         | **Rationale**                                                                                                                                                           |
 | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -28,7 +28,7 @@ These integrated practices focus on maximizing the reliability, efficiency, and 
 | Tune Sync Speed with Flags                 | Use flags like `--sync.loop.block.limit` and `--batchSize` to tune the synchronization speed, especially during the initial sync. See [Configuring Erigon](/fundamentals/configuring-erigon). | Allows you to optimize the sync process based on your system's hardware capabilities.                                                   |
 | Lock the Latest State in RAM (Advanced)    | On systems with high historical RPC traffic, a tool like vmtouch can be used to lock the latest state files in RAM. See [Performance Tricks](/fundamentals/performance-tricks).     | Improves RPC response times for common queries by keeping the latest data in the fastest memory.                                                                        |
 
-**3. Security and Monitoring**
+## Security and Monitoring
 
 | **Practice**                | **Details**                                                                                                                                                            | **Rationale**                                                                                               |
 | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
@@ -39,7 +39,7 @@ These integrated practices focus on maximizing the reliability, efficiency, and 
 | Tune RPC Batch Concurrency  | Adjust the `--rpc.batch.concurrency` flag. See [RPC & API flags](/fundamentals/configuring-erigon#rpc--api).                                                           | Limits the number of parallel database reads to prevent a single batch request from overloading the server. |
 | Harden Public RPC Endpoints | Place a reverse proxy (e.g. Nginx, Caddy) in front of Erigon. Enable rate-limiting, TLS termination, and authentication at the proxy layer. Never bind `--http.addr` to `0.0.0.0` directly on a public interface. See [TLS Authentication](/fundamentals/tls-authentication). | A direct public binding exposes the node to DoS attacks and unrestricted calls that can exhaust resources. |
 
-**4. Maintenance and Development**
+## Maintenance and Development
 
 | **Practice**                   | **Details**                                                                                                         | **Rationale**                                                                                       |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
@@ -48,14 +48,14 @@ These integrated practices focus on maximizing the reliability, efficiency, and 
 | Run a Test Sync on a Testnet   | Before running on Mainnet, consider performing a sync on a testnet (e.g., Sepolia). See [Supported Networks](/fundamentals/supported-networks). | Familiarizes you with the process and your system's performance characteristics.          |
 | Report Issues with Diagnostics | When a bug is encountered, provide a detailed report on GitHub with a stack trace and other diagnostic information. | Helps the development team quickly identify and fix issues.                                         |
 
-**5. Validator-Specific Practices**
+## Validator-Specific Practices
 
 | **Practice**                      | **Details**                                                                                    | **Rationale**                                                           |
 | --------------------------------- | ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
 | Check Validator Health            | For validator nodes, a daily check of the node's logs and service status is essential. See [Caplin](/staking/caplin) and [External Consensus Client](/staking/external-consensus-client-as-validator). | Confirms that the node is signing attestations and performing its duty. |
 | Maintain a Sufficient ETH Balance | Validators must maintain an adequate ETH balance on their signer address.                      | Required to cover transaction fees for checkpoint submissions.          |
 
-**6. Advanced Performance Tricks**
+## Advanced Performance Tricks
 
 The following shell snippets can provide meaningful performance gains on the right hardware. See [Performance Tricks](/fundamentals/performance-tricks) for the full list.
 
