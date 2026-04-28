@@ -293,12 +293,14 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		return err
 	}
 
-	// For dev mode (PoS from genesis), write the genesis beacon block to the
-	// index DB before the fork choice is created. This ensures the anchor
-	// block exists and the fork choice can resolve the EL genesis hash.
-	if config.DevValidatorSeed != "" && state != nil {
+	// Write the genesis beacon block to the index DB before the sentinel and fork
+	// choice are created. This ensures the genesis block is available when peers
+	// ask for it via beacon_blocks_by_root (otherwise we return empty and get banned).
+	// Previously this only ran for dev mode, but Kurtosis devnets also start from
+	// genesis and need the block written early.
+	if state != nil && state.Slot() == 0 {
 		if err := writeDevGenesisBeaconBlock(ctx, state, beaconConfig, indexDB); err != nil {
-			return fmt.Errorf("write dev genesis beacon block: %w", err)
+			return fmt.Errorf("write genesis beacon block: %w", err)
 		}
 	}
 
@@ -428,13 +430,22 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		Network: "tcp",
 		Addr:    fmt.Sprintf("%s:%d", config.SentinelAddr, config.SentinelPort),
 		Creds:   creds,
-		InitialStatus: &cltypes.Status{
-			ForkDigest:     forkDigest,
-			FinalizedRoot:  state.FinalizedCheckpoint().Root,
-			FinalizedEpoch: state.FinalizedCheckpoint().Epoch,
-			HeadSlot:       state.FinalizedCheckpoint().Epoch * beaconConfig.SlotsPerEpoch,
-			HeadRoot:       state.FinalizedCheckpoint().Root,
-		},
+		InitialStatus: func() *cltypes.Status {
+			// Use the fork choice anchor root (actual genesis block root) instead of
+			// state.FinalizedCheckpoint().Root which is 0x00..00 at genesis.
+			// IMPORTANT: HeadSlot must be 0 (matching the genesis anchor slot) so that
+			// head_root and head_slot are consistent. Setting head_slot to the clock
+			// slot while head_root is the genesis root causes Lighthouse to penalize
+			// us for head_root/head_slot mismatch (-20 score, eventually banned).
+			anchorRoot := forkChoice.AnchorRoot()
+			return &cltypes.Status{
+				ForkDigest:     forkDigest,
+				FinalizedRoot:  anchorRoot,
+				FinalizedEpoch: forkChoice.FinalizedCheckpoint().Epoch,
+				HeadSlot:       0,
+				HeadRoot:       anchorRoot,
+			}
+		}(),
 	}, ethClock, forkChoice, columnStorage, peerDasState, p2p, logger)
 	if err != nil {
 		return err

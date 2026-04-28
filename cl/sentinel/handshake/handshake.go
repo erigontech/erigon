@@ -53,12 +53,19 @@ type HandShaker struct {
 }
 
 func New(ctx context.Context, ethClock eth_clock.EthereumClock, beaconConfig *clparams.BeaconChainConfig, handler http.Handler, peerDasStateReader peerdasstate.PeerDasStateReader) *HandShaker {
+	// Compute initial fork digest so the status message is never all-zeros.
+	// Without this, peers connecting before SetStatus is called see a genesis-like
+	// status and may request blocks we cannot serve.
+	initialStatus := &cltypes.Status{}
+	if forkDigest, err := ethClock.CurrentForkDigest(); err == nil {
+		initialStatus.ForkDigest = forkDigest
+	}
 	return &HandShaker{
 		ctx:                ctx,
 		handler:            handler,
 		ethClock:           ethClock,
 		beaconConfig:       beaconConfig,
-		status:             &cltypes.Status{},
+		status:             initialStatus,
 		peerDasStateReader: peerDasStateReader,
 	}
 }
@@ -80,16 +87,14 @@ func (h *HandShaker) SetStatus(status *cltypes.Status) {
 		h.status.FinalizedRoot = status.FinalizedRoot
 	}
 
-	if status.FinalizedEpoch != 0 {
-		h.status.FinalizedEpoch = status.FinalizedEpoch
-	}
+	// Always update FinalizedEpoch and HeadSlot — 0 is a valid value at genesis.
+	// Skipping 0 prevents the status from being properly set at genesis, causing
+	// peers to see a stale head and ban us as "useless".
+	h.status.FinalizedEpoch = status.FinalizedEpoch
+	h.status.HeadSlot = status.HeadSlot
 
 	if status.HeadRoot != [32]byte{} {
 		h.status.HeadRoot = status.HeadRoot
-	}
-
-	if status.HeadSlot != 0 {
-		h.status.HeadSlot = status.HeadSlot
 	}
 
 	if status.EarliestAvailableSlot != nil {

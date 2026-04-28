@@ -18,6 +18,7 @@ package handlers
 
 import (
 	"encoding/hex"
+	"io"
 	"strings"
 
 	"github.com/libp2p/go-libp2p/core/network"
@@ -120,14 +121,25 @@ func (c *ConsensusHandlers) metadataV3Handler(s network.Stream) error {
 	}, SuccessfulResponsePrefix)
 }
 
-// TODO: Actually respond with proper status
 func (c *ConsensusHandlers) statusHandler(s network.Stream) error {
+	// Per eth2 spec the responder must read the peer's Status before replying.
+	// Read and discard the incoming request body so the stream advances correctly.
+	peerStatus := &cltypes.Status{}
+	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, peerStatus, clparams.Phase0Version); err != nil {
+		// If we cannot read the request, drain whatever is left and proceed.
+		_, _ = io.Copy(io.Discard, s)
+	}
 	status := c.hs.Status()
 	status.EarliestAvailableSlot = nil
 	return ssz_snappy.EncodeAndWrite(s, status, SuccessfulResponsePrefix)
 }
 
 func (c *ConsensusHandlers) statusV2Handler(s network.Stream) error {
+	// Per eth2 spec the responder must read the peer's Status before replying.
+	peerStatus := &cltypes.Status{}
+	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, peerStatus, clparams.Phase0Version); err != nil {
+		_, _ = io.Copy(io.Discard, s)
+	}
 	status := c.hs.Status()
 	forkDigest, err := c.ethClock.CurrentForkDigest()
 	if err != nil {

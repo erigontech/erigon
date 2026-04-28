@@ -379,8 +379,22 @@ func (b *BlindedBeaconBody) DecodeSSZ(buf []byte, version int) error {
 
 	b.ExecutionPayload = NewEth1Header(b.Version)
 
-	err := ssz2.UnmarshalSSZ(buf, version, b.getSchema(false)...)
-	return err
+	if err := ssz2.UnmarshalSSZ(buf, version, b.getSchema(false)...); err != nil {
+		return err
+	}
+
+	// Post-decode fixup: propagate preset-aware limits to decoded attestations and slashings.
+	if b.beaconCfg != nil && b.Version.AfterOrEqual(clparams.ElectraVersion) {
+		b.Attestations.Range(func(_ int, att *solid.Attestation, _ int) bool {
+			att.SetBeaconConfig(b.beaconCfg)
+			return true
+		})
+		b.AttesterSlashings.Range(func(_ int, as *AttesterSlashing, _ int) bool {
+			as.SetVersionWithConfig(b.Version, b.beaconCfg)
+			return true
+		})
+	}
+	return nil
 }
 
 func (b *BlindedBeaconBody) HashSSZ() ([32]byte, error) {

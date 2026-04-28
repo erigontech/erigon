@@ -57,6 +57,7 @@ func createSentinel(
 	dataColumnStorage blob_storage.DataColumnStorage,
 	peerDasStateReader peerdasstate.PeerDasStateReader,
 	p2p p2p.P2PManager,
+	initialStatus *cltypes.Status,
 	logger log.Logger) (*sentinel.Sentinel, *enode.LocalNode, error) {
 	sent, err := sentinel.New(
 		context.Background(),
@@ -73,6 +74,12 @@ func createSentinel(
 	)
 	if err != nil {
 		return nil, nil, err
+	}
+	// Set initial status BEFORE starting the listener so that peers connecting
+	// immediately see a valid Status (fork digest, head, finalized checkpoint)
+	// instead of all-zeros which causes them to penalize/ban us.
+	if initialStatus != nil {
+		sent.SetStatus(initialStatus)
 	}
 	localNode, err := sent.Start()
 	if err != nil {
@@ -105,15 +112,13 @@ func StartSentinelService(
 		dataColumnStorage,
 		PeerDasStateReader,
 		p2p,
+		srvCfg.InitialStatus,
 		logger,
 	)
 	if err != nil {
 		return nil, nil, err
 	}
 	logger.Info("[Sentinel] Sentinel started", "enr", sent.String())
-	if srvCfg.InitialStatus != nil {
-		sent.SetStatus(srvCfg.InitialStatus)
-	}
 	server := NewSentinelServer(ctx, sent, logger)
 	go StartServe(server, srvCfg, srvCfg.Creds)
 

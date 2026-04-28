@@ -431,14 +431,19 @@ func writeGenesisBeaconBlock(ctx context.Context, cfg *Cfg) error {
 		return fmt.Errorf("genesis body HashSSZ failed: %w", err)
 	}
 	if bodyRoot != header.BodyRoot {
-		// The genesis generator may produce a body root that differs from what
-		// we compute locally (e.g. due to extra default-initialized EL fields
-		// like ReceiptsRoot or LogsBloom in the execution payload header).
-		// Since this is a synthetic genesis block, log the mismatch and proceed
-		// -- the genesis state is authoritative and the block root is still correct.
-		log.Warn("genesis body root mismatch (proceeding anyway)",
+		// Body root mismatch means our reconstructed genesis block body does not
+		// match what the genesis state's LatestBlockHeader expects. This can happen
+		// when using an external genesis generator (e.g. ethereum-genesis-generator)
+		// that initializes the body differently.
+		// Log a warning and skip writing the genesis block. The genesis block is
+		// synthetic (slot 0) and never actually produced by a validator. Fork choice
+		// already tracks the anchor root from initialization, and peers won't request
+		// the genesis block by root in normal operation. Subsequent real blocks
+		// (slot 1+) will be written normally.
+		log.Warn("Genesis body root mismatch — skipping genesis block write",
 			"computed", fmt.Sprintf("%x", bodyRoot),
 			"expected", fmt.Sprintf("%x", header.BodyRoot))
+		return nil
 	}
 
 	return cfg.indiciesDB.Update(ctx, func(tx kv.RwTx) error {
@@ -449,8 +454,20 @@ func writeGenesisBeaconBlock(ctx context.Context, cfg *Cfg) error {
 // refreshStatusFromForkChoice updates the advertised P2P status using local forkchoice state.
 func refreshStatusFromForkChoice(cfg *Cfg) {
 	fc := cfg.forkChoice.FinalizedCheckpoint()
-	headSlot := cfg.ethClock.GetCurrentSlot()
-	if err := cfg.rpc.SetStatus(fc.Root, fc.Epoch, fc.Root, headSlot); err != nil {
+	// Use the actual fork-choice head so peers see a head_root that corresponds
+	// to head_slot, instead of the finalized root which lags behind. Lighthouse
+	// (and other CLs) penalize peers whose head_root maps to a slot far below
+	// head_slot as "useless peers".
+	headRoot, headSlot, err := cfg.forkChoice.GetHead(nil)
+	if err != nil {
+		// Fallback: use the finalized checkpoint root at slot 0.
+		// Do NOT inflate head_slot to the clock slot — the head_root would
+		// still point to slot 0, creating a root/slot mismatch that causes
+		// Lighthouse to penalize us as a "useless peer".
+		headSlot = 0
+		headRoot = fc.Root
+	}
+	if err := cfg.rpc.SetStatus(fc.Root, fc.Epoch, headRoot, headSlot); err != nil {
 		log.Trace("Could not refresh status", "err", err)
 	}
 }
