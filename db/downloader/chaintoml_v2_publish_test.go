@@ -101,16 +101,17 @@ func TestPublishChainTomlV2Roundtrip(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEqual(t, [20]byte{}, hash, "infohash must be non-zero after publish")
 
-	// The file was written.
-	tomlBytes, err := os.ReadFile(ChainTomlV2Path(snapDir))
+	// The file was written under the gen-0 name.
+	gen0 := ChainTomlV2FileNameForSeq(0)
+	tomlBytes, err := os.ReadFile(filepath.Join(snapDir, gen0))
 	require.NoError(t, err)
 	require.NotEmpty(t, tomlBytes)
 	require.Equal(t, 2, DetectVersion(tomlBytes), "on-disk file must parse as V2")
 
 	// The torrent file was built.
-	torrentExists, err := torrentFS.Exists(ChainTomlV2FileName)
+	torrentExists, err := torrentFS.Exists(gen0)
 	require.NoError(t, err)
-	require.True(t, torrentExists, "chain.toml.v2.torrent must exist")
+	require.True(t, torrentExists, "%s.torrent must exist", gen0)
 
 	// ENR updater was called exactly once with the computed fields.
 	require.Equal(t, 1, enrCalls)
@@ -130,10 +131,11 @@ func TestPublishChainTomlV2NilEnrUpdaterSkipped(t *testing.T) {
 	_, err := PublishChainTomlV2(snapDir, torrentFS, inv, 0, nil)
 	require.NoError(t, err, "nil enrUpdater must be a tolerated no-op")
 
-	// File was still written.
-	exists, err := dirExists(filepath.Join(snapDir, ChainTomlV2FileName))
+	// File was still written under the gen-0 name.
+	gen0 := ChainTomlV2FileNameForSeq(0)
+	exists, err := dirExists(filepath.Join(snapDir, gen0))
 	require.NoError(t, err)
-	require.True(t, exists, "chain.toml.v2 must be written even when ENR updater is nil")
+	require.True(t, exists, "%s must be written even when ENR updater is nil", gen0)
 }
 
 func TestPublishChainTomlV2Regenerates(t *testing.T) {

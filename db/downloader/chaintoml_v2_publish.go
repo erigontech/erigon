@@ -17,35 +17,14 @@
 package downloader
 
 import (
+	"context"
 	"fmt"
-	"path/filepath"
 
 	"github.com/anacrolix/torrent/metainfo"
 
 	snapshotinv "github.com/erigontech/erigon/node/components/storage/snapshot"
 	"github.com/erigontech/erigon/p2p/enr"
 )
-
-// ChainTomlV2FileName is the on-disk name of the V2 manifest. It lives
-// alongside V1 (`chain.toml`) so peers on either format coexist during
-// rollout.
-const ChainTomlV2FileName = "chain.toml.v2"
-
-// ChainTomlV2Path returns the full path to chain.toml.v2 in snapDir.
-func ChainTomlV2Path(snapDir string) string {
-	return filepath.Join(snapDir, ChainTomlV2FileName)
-}
-
-// SaveChainTomlV2 atomically writes the V2 manifest bytes to snapDir.
-func SaveChainTomlV2(snapDir string, tomlBytes []byte) error {
-	return saveChainTomlFile(ChainTomlV2Path(snapDir), tomlBytes)
-}
-
-// BuildChainTomlV2Torrent creates (or recreates) the .torrent file for
-// chain.toml.v2 and returns its info-hash.
-func BuildChainTomlV2Torrent(snapDir string, torrentFS *AtomicTorrentFS) (metainfo.Hash, error) {
-	return buildChainTomlTorrentByName(ChainTomlV2FileName, snapDir, torrentFS)
-}
 
 // ComputeENRFields derives the DomainSteps and MergeDepth values the ENR
 // advertises from a V2 manifest. See chaintoml-v2-spec-baseline §4.2:
@@ -75,25 +54,23 @@ func ComputeENRFields(manifest *ChainTomlV2) (domainSteps, mergeDepth uint64) {
 	return domainSteps, mergeDepth
 }
 
-// PublishChainTomlV2 orchestrates the full V2 publish flow from an
-// inventory:
+// PublishChainTomlV2 is a one-shot wrapper around RollingV2Publisher
+// for callers that don't keep a long-lived publisher (tests, simple
+// startup paths). It writes the next chain.v2.<seq>.toml generation
+// based on what's already on disk, builds the .torrent, registers it
+// with no torrent client (caller's responsibility for one-shot use),
+// and calls enrUpdater with the new info-hash.
 //
-//  1. GenerateV2 from inventory
-//  2. MarshalV2 to deterministic TOML bytes
-//  3. SaveChainTomlV2 to disk
-//  4. BuildChainTomlV2Torrent to compute the infohash
-//  5. Call enrUpdater with the V2 infohash + DomainSteps + MergeDepth
+// For repeated publication driven by inventory growth, callers should
+// hold a long-lived RollingV2Publisher instead — its rolling buffer
+// keeps recent generations seedable, which a fresh wrapper can't do
+// because each invocation rebuilds the publisher state from disk.
 //
-// authoritativeBlocks is the caller's declaration of how many blocks this
-// node considers authoritative (typically snapcfg.KnownCfg.ExpectBlocks).
-// Tests may pass 0 when not exercising block coverage.
+// authoritativeBlocks passes through to the ENR ChainToml entry.
+// enrUpdater may be nil for cold-start paths where P2P isn't up yet;
+// the manifest still gets written and the .torrent still gets built.
 //
-// enrUpdater may be nil — callers that don't have a live P2P node yet
-// (e.g. cold-start before DevP2P is up) get the file written and the
-// torrent built but the ENR update skipped. The caller is expected to
-// rerun Publish (or trigger the ENR update separately) once P2P comes up.
-//
-// Returns the V2 infohash so callers can log / verify it.
+// Returns the V2 infohash for logs / verification.
 func PublishChainTomlV2(
 	snapDir string,
 	torrentFS *AtomicTorrentFS,
@@ -108,32 +85,9 @@ func PublishChainTomlV2(
 		return metainfo.Hash{}, fmt.Errorf("PublishChainTomlV2: nil torrent fs")
 	}
 
-	manifest := GenerateV2(inv)
-
-	tomlBytes, err := MarshalV2(manifest)
-	if err != nil {
-		return metainfo.Hash{}, fmt.Errorf("marshal chain.toml.v2: %w", err)
-	}
-
-	if err := SaveChainTomlV2(snapDir, tomlBytes); err != nil {
-		return metainfo.Hash{}, fmt.Errorf("save chain.toml.v2: %w", err)
-	}
-
-	infoHash, err := BuildChainTomlV2Torrent(snapDir, torrentFS)
+	pub, err := NewRollingV2Publisher(snapDir, torrentFS, nil, 0)
 	if err != nil {
 		return metainfo.Hash{}, err
 	}
-
-	if enrUpdater != nil {
-		domainSteps, mergeDepth := ComputeENRFields(manifest)
-		enrUpdater(enr.ChainToml{
-			AuthoritativeBlocks: authoritativeBlocks,
-			KnownBlocks:         authoritativeBlocks,
-			InfoHash:            infoHash,
-			DomainSteps:         domainSteps,
-			MergeDepth:          mergeDepth,
-		})
-	}
-
-	return infoHash, nil
+	return pub.Publish(context.Background(), inv, authoritativeBlocks, enrUpdater)
 }

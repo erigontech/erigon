@@ -175,8 +175,12 @@ func (p *Provider) FetchPeerManifestV2(ctx context.Context, peerID string, infoH
 		fetch.err = fmt.Errorf("peer %s chain.toml.v2 torrent is multi-file (%d)", peerID, len(info.Files))
 		return nil, fetch.err
 	}
-	if info.Name != dl.ChainTomlV2FileName {
-		fetch.err = fmt.Errorf("peer %s torrent name %q, expected %q", peerID, info.Name, dl.ChainTomlV2FileName)
+	// info.Name is the filename the publisher used for this generation:
+	// chain.v2.<seq>.toml. The seq is opaque to the consumer — we just
+	// need the shape match so we know we're not pointed at a different
+	// torrent that happens to share an infohash collision.
+	if _, ok := dl.ParseChainTomlV2FileName(info.Name); !ok {
+		fetch.err = fmt.Errorf("peer %s torrent name %q is not a chain.v2.<seq>.toml manifest", peerID, info.Name)
 		return nil, fetch.err
 	}
 
@@ -184,13 +188,13 @@ func (p *Provider) FetchPeerManifestV2(ctx context.Context, peerID string, infoH
 	select {
 	case <-t.Complete().On():
 	case <-dlCtx.Done():
-		fetch.err = fmt.Errorf("downloading chain.toml.v2 from peer %s: %w", peerID, dlCtx.Err())
+		fetch.err = fmt.Errorf("downloading %s from peer %s: %w", info.Name, peerID, dlCtx.Err())
 		return nil, fetch.err
 	}
 
-	data, err := os.ReadFile(filepath.Join(peerDir, dl.ChainTomlV2FileName))
+	data, err := os.ReadFile(filepath.Join(peerDir, info.Name))
 	if err != nil {
-		fetch.err = fmt.Errorf("reading downloaded chain.toml.v2 from peer %s: %w", peerID, err)
+		fetch.err = fmt.Errorf("reading downloaded %s from peer %s: %w", info.Name, peerID, err)
 		return nil, fetch.err
 	}
 	fetch.data = data
