@@ -1,23 +1,23 @@
 participants:
   - cl_type: lighthouse
-    cl_image: ethpandaops/lighthouse:glamsterdam-devnet-0
+    cl_image: ethpandaops/lighthouse:bal-devnet-3
     el_type: erigon
-    el_image: test/erigon:glamsterdam-caplin
+    el_image: test/erigon:current
     el_log_level: "debug"
     el_extra_params: ["--experimental.bal"]
     supernode: true
     count: 2
   - cl_type: caplin
-    cl_image: test/erigon:glamsterdam-caplin
+    cl_image: test/erigon:current
     cl_log_level: "debug"
     cl_extra_params: ["--local-discovery", "--caplin.subscribe-all-topics"]
     el_type: erigon
-    el_image: test/erigon:glamsterdam-caplin
+    el_image: test/erigon:current
     el_log_level: "debug"
     el_extra_params: ["--experimental.bal"]
     use_separate_vc: true
     vc_type: lighthouse
-    vc_image: ethpandaops/lighthouse:glamsterdam-devnet-0
+    vc_image: ethpandaops/lighthouse:bal-devnet-3
     count: 1
 global_log_level: 'debug'
 network_params:
