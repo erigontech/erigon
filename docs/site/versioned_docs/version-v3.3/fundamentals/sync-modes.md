@@ -37,4 +37,4 @@ We strongly recommend running a Full Node whenever possible, as its reduced disk
 
 ## Minimal node
 
-The Minimal Node configuration (`--prune.mode=minimal`) is the smallest possible setup. By keeping only recent blocks, it is perfectly suited for **solo staking** and users seeking maximum **privacy** when interacting with the EVM, such as sending transactions directly through their node. This mode is the most suitable for users with severely constrained hardware.
+The Minimal Node configuration (`--prune.mode=minimal`) is the smallest possible setup. It keeps only recent blocks and the **latest state** — it does not retain state history, so historical state queries are not supported. This makes it perfectly suited for **solo staking** and users seeking maximum **privacy** when interacting with the EVM, such as sending transactions directly through their node. This mode is the most suitable for users with severely constrained hardware.
