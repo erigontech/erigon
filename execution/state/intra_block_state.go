@@ -1438,40 +1438,6 @@ func (sdb *IntraBlockState) IsNewContract(addr accounts.Address) (bool, error) {
 	return !delegated, nil
 }
 
-// SameTxSelfDestructedNewAccounts returns addresses of contracts that were
-// both created and self-destructed during the current transaction, along with
-// the number of non-zero storage writes and the deployed-code length for each.
-// Used by EIP-8037 to refund the account-creation / storage-set / code-deposit
-// state gas charges to the tx at end-of-execution (since no state grew).
-func (sdb *IntraBlockState) SameTxSelfDestructedNewAccounts() []SelfDestructedNewAccount {
-	var result []SelfDestructedNewAccount
-	for addr, so := range sdb.stateObjects {
-		if so == nil || !so.selfdestructed || !so.newlyCreated {
-			continue
-		}
-		var nonZeroSlots uint64
-		for _, val := range so.dirtyStorage {
-			if !val.IsZero() {
-				nonZeroSlots++
-			}
-		}
-		result = append(result, SelfDestructedNewAccount{
-			Address:      addr,
-			NonZeroSlots: nonZeroSlots,
-			CodeLen:      uint64(len(so.code)),
-		})
-	}
-	return result
-}
-
-// SelfDestructedNewAccount summarises a contract that was created and
-// self-destructed in the same transaction, for EIP-8037 refund accounting.
-type SelfDestructedNewAccount struct {
-	Address      accounts.Address
-	NonZeroSlots uint64
-	CodeLen      uint64
-}
-
 // SetTransientState sets transient storage for a given account. It
 // adds the change to the journal so that it can be rolled back
 // to its previous value if there is a revert.
@@ -1888,6 +1854,129 @@ func (sdb *IntraBlockState) PushSnapshot() int {
 		sdb.revisions = revisionsPool.Get().(*revisions)
 	}
 	return sdb.revisions.snapshot(sdb.journal)
+}
+
+// JournalLength returns the current number of journal entries. Used by EIP-8037
+// frame-end state-gas accounting to capture frame-segment boundaries.
+func (sdb *IntraBlockState) JournalLength() int {
+	return sdb.journal.length()
+}
+
+// ComputeFrameStateBytes walks the journal segment journal[start:end] and
+// returns the total state bytes attributable to that frame, per EIP-8037.
+//
+// Rules:
+//   - Account creations (createObjectChange / resetObjectChange), first per
+//     address: skip if account == excludeCreate. Skip if stateObject is nil.
+//     If applyFilter AND .newlyCreated && .selfdestructed, skip. Otherwise
+//     +StateBytesNewAccount.
+//   - Code deposits (codeChange), first per address: same selfdestruct filter.
+//     If prevhash was empty AND current stateObject.code is non-empty,
+//     +len(code).
+//   - Storage 0→non-zero (storageChange), first per (address, key): same
+//     filter. Use the entry's originalValue (= tx-entry value) — when
+//     originalValue.IsZero() AND the current value is non-zero, +32.
+//
+// All other entry types (selfdestruct/balance/nonce/refund/log/access-list/
+// transient/touch/balanceIncrease/fakeStorage) are skipped.
+//
+// applyFilter is set true only at the top frame's commit (depth==0). Sub-frames
+// pass false so that EIP-6780 net-zero cases temporarily over-count and the
+// negative-delta credit at top frame compensates.
+//
+// excludeCreate is the contract address of a top-level CREATE tx (already
+// covered by the 112×CPSB intrinsic). Pass NilAddress otherwise.
+func (sdb *IntraBlockState) ComputeFrameStateBytes(
+	start, end int,
+	applyFilter bool,
+	excludeCreate accounts.Address,
+) uint64 {
+	if start >= end {
+		return 0
+	}
+	type slotKey struct {
+		addr accounts.Address
+		key  accounts.StorageKey
+	}
+	seenAccount := make(map[accounts.Address]struct{})
+	seenCode := make(map[accounts.Address]struct{})
+	seenSlot := make(map[slotKey]struct{})
+
+	// liveAccount returns the stateObject for addr and whether it should be
+	// counted, applying the EIP-6780 selfdestruct filter at the top frame.
+	liveAccount := func(addr accounts.Address) (*stateObject, bool) {
+		so := sdb.stateObjects[addr]
+		if so == nil {
+			return nil, false
+		}
+		if applyFilter && so.newlyCreated && so.selfdestructed {
+			return so, false
+		}
+		return so, true
+	}
+
+	var total uint64
+	for i := start; i < end && i < len(sdb.journal.entries); i++ {
+		switch e := sdb.journal.entries[i].(type) {
+		case createObjectChange:
+			if e.account == excludeCreate {
+				continue
+			}
+			if _, ok := seenAccount[e.account]; ok {
+				continue
+			}
+			seenAccount[e.account] = struct{}{}
+			if _, alive := liveAccount(e.account); alive {
+				total += params.StateBytesNewAccount
+			}
+		case resetObjectChange:
+			if e.account == excludeCreate {
+				continue
+			}
+			if _, ok := seenAccount[e.account]; ok {
+				continue
+			}
+			seenAccount[e.account] = struct{}{}
+			if _, alive := liveAccount(e.account); alive {
+				total += params.StateBytesNewAccount
+			}
+		case codeChange:
+			if _, ok := seenCode[e.account]; ok {
+				continue
+			}
+			seenCode[e.account] = struct{}{}
+			so, alive := liveAccount(e.account)
+			if !alive {
+				continue
+			}
+			// EIP-8037 code-deposit rule: counts only if prior code hash was
+			// empty and current code is non-empty.
+			if e.prevhash.IsEmpty() && len(so.code) > 0 {
+				total += uint64(len(so.code))
+			}
+		case storageChange:
+			k := slotKey{addr: e.account, key: e.key}
+			if _, ok := seenSlot[k]; ok {
+				continue
+			}
+			seenSlot[k] = struct{}{}
+			so, alive := liveAccount(e.account)
+			if !alive {
+				continue
+			}
+			// EIP-8037 new-slot rule: tx-entry zero AND current non-zero.
+			if !e.originalValue.IsZero() {
+				continue
+			}
+			current, _ := so.GetState(e.key)
+			if !current.IsZero() {
+				total += 32
+			}
+		default:
+			// All other entry types are not state-bytes-relevant.
+		}
+	}
+	return total
 }
 
 func (sdb *IntraBlockState) PopSnapshot(snapshot int) {

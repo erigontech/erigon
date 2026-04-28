@@ -223,6 +223,15 @@ const (
 	PerAuthBaseCostEIP8037          = 7_500
 	StateBytesNewAccount            = 112 // bytes per new account creation
 	StateBytesAuthBase              = 23  // bytes per authorization base cost
+	StateBytesPerStorageSlot        = 32  // bytes per fresh non-zero storage slot
+	// SystemMaxSstoresPerCall is the upper bound on the number of new storage
+	// slots a single system call (EIP-2935 / EIP-4788 / EIP-7002 / EIP-7251 etc.)
+	// is expected to write. Per EIPs PR 11573 commit d2a0230, the system call's
+	// state_gas_reservoir is sized as
+	// StateBytesPerStorageSlot × CostPerStateByte × SystemMaxSstoresPerCall, so
+	// a single system call can SSTORE up to this many fresh slots without
+	// running out of state gas.
+	SystemMaxSstoresPerCall uint64 = 16
 )
 
 // EIP-7702: Set EOA account code

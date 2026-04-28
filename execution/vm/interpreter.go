@@ -175,11 +175,14 @@ func useMdGas(evm *EVM, initial mdgas.MdGas, gas uint64, t mdgas.MdGasType, trac
 	var ok bool
 	switch t {
 	case mdgas.StateGas:
+		// EIP-8037 frame-end charging: state gas is consumed at frame commit
+		// via chargeFrameStateGas, which calls useMdGas. The consumed amount
+		// is added to evm.executionStateGas for tx-level block accounting.
 		originalGas := gas
 		initial.State, ok = useGas(initial.State, gas, tracer, reason)
 		if ok {
 			if evm != nil {
-				evm.stateGasConsumed += originalGas
+				evm.executionStateGas += originalGas
 			}
 			return initial, true
 		}
@@ -188,7 +191,7 @@ func useMdGas(evm *EVM, initial mdgas.MdGas, gas uint64, t mdgas.MdGasType, trac
 		initial.State = 0
 		initial.Regular, ok = useGas(initial.Regular, gas, tracer, reason)
 		if ok && evm != nil {
-			evm.stateGasConsumed += originalGas
+			evm.executionStateGas += originalGas
 		}
 		return initial, ok
 	case mdgas.RegularGas:

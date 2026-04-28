@@ -144,10 +144,16 @@ type (
 		wasCommited bool
 	}
 	storageChange struct {
-		account     accounts.Address
-		key         accounts.StorageKey
-		prevalue    uint256.Int
-		wasCommited bool
+		account  accounts.Address
+		key      accounts.StorageKey
+		prevalue uint256.Int
+		// originalValue is the slot's value at transaction start (committed
+		// state). Captured at SetState time via GetCommittedState. Used by
+		// IntraBlockState.ComputeFrameStateBytes to determine whether a write
+		// creates new state per EIP-8037: a slot is "new" if originalValue == 0
+		// and the current value at frame commit is non-zero.
+		originalValue uint256.Int
+		wasCommited   bool
 	}
 	fakeStorageChange struct {
 		account  accounts.Address

@@ -264,12 +264,22 @@ func (so *stateObject) SetState(key accounts.StorageKey, value uint256.Int, forc
 		return false, nil
 	}
 
+	// EIP-8037: capture the slot's value at transaction start (committed
+	// state). Used by ComputeFrameStateBytes to identify new slots.
+	// GetCommittedState caches via originStorage so this is O(1) after the
+	// first call per (addr, key) per tx.
+	originalValue, err := so.GetCommittedState(key)
+	if err != nil {
+		return false, err
+	}
+
 	// New value is different, update and journal the change
 	so.db.journal.append(storageChange{
-		account:     so.address,
-		key:         key,
-		prevalue:    prev,
-		wasCommited: commited,
+		account:       so.address,
+		key:           key,
+		prevalue:      prev,
+		originalValue: originalValue,
+		wasCommited:   commited,
 	})
 
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnStorageChange != nil {
