@@ -26,21 +26,26 @@ The Erigon node software is developed in the [erigontech/erigon](https://github.
    go test ./...
    ```
 
+### Reporting bugs and requesting features
+
+- **Bugs:** open a [GitHub issue](https://github.com/erigontech/erigon/issues/new?template=bug_report.md) with steps to reproduce, your OS, Go version, and Erigon version.
+- **Feature requests:** open an issue describing the use case and expected behaviour before writing any code — this avoids wasted effort if the direction needs alignment.
+- For questions or informal discussion, join the [Erigon Discord](https://discord.gg/e8MBWss7uJ).
+
 ### Opening a pull request
 
 - Target the `main` branch for new features and non-critical fixes.
 - Target the relevant `release/x.y` branch for release-specific backports.
 - Keep PRs focused — one logical change per PR makes review faster.
+- Feel free to open a draft PR early if you want feedback on the direction before the implementation is complete.
 - Include a clear description of what changed, why, and how it was tested.
-- For significant changes, open an issue first to discuss the approach before writing code.
 
 ### Code style and guidelines
 
 - Follow the existing Go conventions in the codebase.
 - Run `make lint` before submitting — the CI will enforce it.
 - All new code should be covered by tests where practical.
-
-For questions, join the [Erigon Discord](https://discord.gg/e8MBWss7uJ) or open a discussion on GitHub.
+- Use the package-prefix commit message format: `eth, rpc: make trace configs optional`. This keeps the git log scannable by subsystem.
 
 ## Documentation
 
