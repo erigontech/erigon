@@ -59,11 +59,21 @@ Frame commit (success path, IsAmsterdam, !RestoreState):
         evm.committedChildBytes[depth-1] += walkTotal    // propagate to parent
 
 Frame revert/halt:
-    RevertToSnapshot                                     // journal undoes everything
+    poppedChildBytes = pop evm.committedChildBytes[depth]    // do NOT add to parent
+    if IsAmsterdam && !RestoreState && poppedChildBytes > 0:
+        // EIP-8037: restore all state gas consumed by committed descendants
+        // to this frame's reservoir (which is then propagated to the parent
+        // via restoreChildGas). Spec: "On child revert or exceptional halt,
+        // all state gas consumed by the child, both from the reservoir and
+        // any that spilled into gas_left, is restored to the parent's
+        // reservoir." At depth==0 this naturally zeroes evm.executionStateGas
+        // because the top frame's accumulator holds the sum of all charged
+        // bytes for the tx.
+        restoreGas = poppedChildBytes * cpsb
+        gas.State += restoreGas
+        evm.executionStateGas -= restoreGas                  // saturate at 0
+    RevertToSnapshot                                         // journal undoes everything
     burn regular gas on exceptional halt (same as today)
-    pop evm.committedChildBytes[depth]                   // do NOT add to parent
-    on top-level revert (depth==0, err != nil):
-        evm.executionStateGas = 0
 
 Tx finalize (TxnExecutor.Execute):
     blockStateGas = intrinsicStateGas + evm.executionStateGas
@@ -124,7 +134,7 @@ So the walk's "first createObjectChange/codeChange per address" rule is spec-cor
 
 ## Found test challenges
 
-After implementing the plan and running `TestExecutionSpecBlockchainDevnet` from `execution/tests/eest_devnet/`, **1,857 of 15,429 subtests fail** (~12%). The implementation is consistent with EIP-8037 PR 11573, but the EEST fixtures pre-date PR 11573 and were generated against the old opcode-time state-gas-charging semantics.
+After implementing the plan and running `TestExecutionSpecBlockchainDevnet` from `execution/tests/eest_devnet/`, **1,845 of 15,429 subtests fail** (~12%). The implementation is consistent with EIP-8037 PR 11573, but the EEST fixtures pre-date PR 11573 and were generated against the old opcode-time state-gas-charging semantics. (Initial run before adding the revert-time state-gas restoration was 1,857; the restoration fix moved 12 tests from FAIL to PASS.)
 
 The fixture submodule at `execution/tests/execution-spec-tests` is pinned to commit `6c2af7fc95d1c0aa781898b1a7ad78769a536d7f` ("add snolbal-devnet-4 fixtures with static cpsb"), which is from **before** PR 11573's "fixed CPSB + frame accounting" rewrite. As a result the fixtures expect:
 
@@ -179,7 +189,7 @@ Common failure mode across all categories: the fixture's expected `gasUsed` refl
 
 ### Recommended next step
 
-Per the `erigon-implement-eip` skill ("question the tests — do not silently fix them"): the EEST fixtures need to be regenerated against the PR-11573-aligned python-spec implementation. Until that lands upstream, the 1,857 Amsterdam-EIP fixture failures are expected and should be documented in the PR description rather than worked around in the implementation.
+Per the `erigon-implement-eip` skill ("question the tests — do not silently fix them"): the EEST fixtures need to be regenerated against the PR-11573-aligned python-spec implementation. Until that lands upstream, the 1,845 Amsterdam-EIP fixture failures are expected and should be documented in the PR description rather than worked around in the implementation.
 
 If a sooner check is needed, options are:
 1. Wait for upstream EEST regeneration against PR 11573 and re-pin the submodule.
@@ -334,6 +344,9 @@ Same short-circuit as Case A: `originalValue=X` non-zero never triggers the new-
 - `execCreate` (lines 1024–1086): delete the `accountStateGas` pre-deduction block (1027–1038). Delete the `CreditStateGasRefund` on failure (1076–1078).
 - `opSelfdestruct6780` (lines 1341–1385): no state-gas changes needed in the opcode itself; the gas table changes above are sufficient.
 - `opCall`/`opCallCode`/`opDelegateCall`/`opStaticCall`: no signature changes. The CallStipend regular-gas correction at lines 1126–1128 / 1177–1179 stays as-is.
+
+### `execution/vm/interpreter.go`
+- `useMdGas` for `mdgas.StateGas`: make the spillover-into-`Regular` path **transactional**. If neither `State` alone nor `State + spilled-Regular` can cover the requested amount, return `(initial, false)` **without mutating** `initial.State` (don't pre-zero it). This is required so that the revert-time restoration in `evm.call()`/`evm.create()` (which adds `committedChildBytes × cpsb` back to `gas.State`) reflects the correct pre-charge state. Without this fix, a failed-charge attempt would silently lose `State` gas during the half-applied deduction, causing the parent's reservoir to be under-restored on the subsequent revert.
 
 ### `execution/protocol/txn_executor.go`
 - No need to communicate the top-level contract address — `evm.create()` derives it from `depth == 0` and the local `address` parameter at commit time.
