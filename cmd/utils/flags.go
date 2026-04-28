@@ -706,7 +706,7 @@ var (
 	}
 	SnapSkipStateSnapshotDownloadFlag = cli.BoolFlag{
 		Name:  "snap.skip-state-snapshot-download",
-		Usage: "Skip state download and start from genesis block",
+		Usage: "Skip state snapshot download and re-execute from genesis to build state. Unlike --prune.mode=blocks which downloads state snapshots then prunes history, this flag skips the download entirely.",
 		Value: false,
 	}
 	SnapP2PManifestFlag = cli.BoolFlag{
