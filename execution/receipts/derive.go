@@ -24,6 +24,8 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -99,9 +101,26 @@ func DeriveForRange(
 		}
 		ibs.SetTxContext(blockNum, i)
 		evm := protocol.CreateEVM(cfg, hashFn, engine, accounts.NilAddress, ibs, header, vmCfg)
+
+		// Cancel watcher: abort mid-opcode if the context is cancelled
+		// (e.g. RPC timeout). Without this, a gas-heavy transaction would
+		// run to completion even after the caller has given up.
+		txDone := make(chan struct{})
+		go func() {
+			select {
+			case <-ctx.Done():
+				evm.Cancel()
+			case <-txDone:
+			}
+		}()
+
 		receipt, err := protocol.ApplyTransactionWithEVM(cfg, engine, gp, ibs, noopWriter, header, txns[i], gasUsed, vmCfg, evm)
+		close(txDone)
 		if err != nil {
 			return nil, fmt.Errorf("receipts.DeriveForRange: replay tx %d: %w", i, err)
+		}
+		if evm.Cancelled() {
+			return nil, fmt.Errorf("receipts.DeriveForRange: execution aborted (context cancelled)")
 		}
 		receipts = append(receipts, receipt)
 	}
@@ -124,9 +143,27 @@ func DeriveBlockReceipts(
 	return DeriveForRange(ctx, cfg, engine, header, txns, 0, len(txns), ibs, gp, getHeader)
 }
 
-// DerivePriorReceipts replays transactions 0..startTxIndex-1 and returns their
-// receipts. Used when execution resumes mid-block from a snapshot boundary and
-// Finalize needs the full receipt set for requests hash computation.
+// DeriveFields populates BlockHash and FirstLogIndexWithinBlock on each receipt.
+// ApplyTransactionWithEVM sets most receipt fields, but BlockHash and the
+// per-receipt first-log-index need a second pass once all receipts are known.
+func DeriveFields(receipts types.Receipts, blockHash common.Hash) {
+	for i, receipt := range receipts {
+		receipt.BlockHash = blockHash
+		if len(receipt.Logs) > 0 {
+			receipt.FirstLogIndexWithinBlock = uint32(receipt.Logs[0].Index)
+		} else if i > 0 {
+			receipt.FirstLogIndexWithinBlock = receipts[i-1].FirstLogIndexWithinBlock + uint32(len(receipts[i-1].Logs))
+		}
+	}
+}
+
+// DerivePriorReceipts returns receipts for transactions 0..startTxIndex-1.
+// It first tries to read them from RCacheV2 (persistent receipt cache). If all
+// prior receipts are cached, no replay is needed. Otherwise falls back to
+// replaying via DeriveForRange.
+//
+// Used when execution resumes mid-block from a snapshot boundary and Finalize
+// needs the full receipt set for requests hash computation.
 func DerivePriorReceipts(
 	ctx context.Context,
 	cfg *chain.Config,
@@ -134,9 +171,42 @@ func DerivePriorReceipts(
 	header *types.Header,
 	txns types.Transactions,
 	startTxIndex int,
+	blockStartTxNum uint64,
+	tx kv.TemporalTx,
 	ibs *state.IntraBlockState,
 	gp *protocol.GasPool,
 	getHeader GetHeaderFunc,
 ) (types.Receipts, error) {
+	if startTxIndex <= 0 {
+		return nil, nil
+	}
+
+	// Try RCacheV2 first — read each prior receipt from the persistent cache.
+	blockHash := header.Hash()
+	blockNum := header.Number.Uint64()
+	cached := make(types.Receipts, 0, startTxIndex)
+	allCached := true
+	for i := 0; i < startTxIndex && i < len(txns); i++ {
+		// blockStartTxNum = firstTask.TxNum - firstTask.TxIndex, which is
+		// already the first user tx's txNum (system tx has TxIndex=-1).
+		txNum := blockStartTxNum + uint64(i)
+		receipt, ok, err := rawdb.ReadReceiptCacheV2(tx, rawdb.RCacheV2Query{
+			BlockNum:      blockNum,
+			BlockHash:     blockHash,
+			TxnHash:       txns[i].Hash(),
+			TxNum:         txNum,
+			DontCalcBloom: true,
+		})
+		if err != nil || !ok {
+			allCached = false
+			break
+		}
+		cached = append(cached, receipt)
+	}
+	if allCached && len(cached) == startTxIndex {
+		return cached, nil
+	}
+
+	// Fall back to replay.
 	return DeriveForRange(ctx, cfg, engine, header, txns, 0, startTxIndex, ibs, gp, getHeader)
 }

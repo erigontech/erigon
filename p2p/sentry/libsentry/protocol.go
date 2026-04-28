@@ -26,6 +26,7 @@ var ethProtocolsByVersion = []sentryproto.Protocol{
 	sentryproto.Protocol_ETH68,
 	sentryproto.Protocol_ETH69,
 	sentryproto.Protocol_ETH70,
+	sentryproto.Protocol_ETH71,
 }
 
 func MinProtocol(m sentryproto.MessageId) sentryproto.Protocol {
@@ -90,5 +91,23 @@ var ProtoIds = map[sentryproto.Protocol]map[sentryproto.MessageId]struct{}{
 		sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66:       struct{}{},
 		sentryproto.MessageId_POOLED_TRANSACTIONS_66:           struct{}{},
 		sentryproto.MessageId_BLOCK_RANGE_UPDATE_69:            struct{}{},
+	},
+	sentryproto.Protocol_ETH71: {
+		sentryproto.MessageId_GET_BLOCK_HEADERS_66:             struct{}{},
+		sentryproto.MessageId_BLOCK_HEADERS_66:                 struct{}{},
+		sentryproto.MessageId_GET_BLOCK_BODIES_66:              struct{}{},
+		sentryproto.MessageId_BLOCK_BODIES_66:                  struct{}{},
+		sentryproto.MessageId_GET_RECEIPTS_70:                  struct{}{},
+		sentryproto.MessageId_RECEIPTS_70:                      struct{}{},
+		sentryproto.MessageId_NEW_BLOCK_HASHES_66:              struct{}{},
+		sentryproto.MessageId_NEW_BLOCK_66:                     struct{}{},
+		sentryproto.MessageId_TRANSACTIONS_66:                  struct{}{},
+		sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68: struct{}{},
+		sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66:       struct{}{},
+		sentryproto.MessageId_POOLED_TRANSACTIONS_66:           struct{}{},
+		sentryproto.MessageId_BLOCK_RANGE_UPDATE_69:            struct{}{},
+		// Added in eth/71 (EIP-8159 Block Access List Exchange)
+		sentryproto.MessageId_GET_BLOCK_ACCESS_LISTS_71: struct{}{},
+		sentryproto.MessageId_BLOCK_ACCESS_LISTS_71:     struct{}{},
 	},
 }

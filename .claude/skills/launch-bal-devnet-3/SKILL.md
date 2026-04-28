@@ -1,33 +1,33 @@
 ---
-name: launch-bal-devnet-2
-description: Launch erigon + Lighthouse on the bal-devnet-2 ethpandaops devnet (EIP-7928 Block Access Lists). Manages start/stop of both EL and CL clients with proper port offsets and JWT auth.
+name: launch-bal-devnet-3
+description: Launch erigon + Lighthouse on the bal-devnet-3 ethpandaops devnet (EIP-7928 Block Access Lists). Manages start/stop of both EL and CL clients with proper port offsets and JWT auth.
 allowed-tools: Bash, Read, Write, Edit, Glob
 allowed-prompts:
   - tool: Bash
-    prompt: start, stop, and manage erigon and lighthouse processes for bal-devnet-2
+    prompt: start, stop, and manage erigon and lighthouse processes for bal-devnet-3
 ---
 
-# Launch bal-devnet-2 (EIP-7928 BAL Devnet)
+# Launch bal-devnet-3 (EIP-7928 BAL Devnet)
 
-Run erigon (EL) + Lighthouse (CL) on the bal-devnet-2 ethpandaops devnet for testing EIP-7928 Block Access Lists.
+Run erigon (EL) + Lighthouse (CL) on the bal-devnet-3 ethpandaops devnet for testing EIP-7928 Block Access Lists.
 
 ## Network Details
 
 | Parameter | Value |
 |-----------|-------|
-| Chain ID | 7033429093 |
-| Genesis timestamp | 1770388190 |
-| Amsterdam timestamp | 1770400508 (epoch 32) |
-| Lighthouse image | `ethpandaops/lighthouse:bal-devnet-2-65bb283` |
-| Lighthouse version | v8.0.1 (commit 65bb283, branch bal-devnet-2) |
-| Explorer | https://explorer.bal-devnet-2.ethpandaops.io |
-| Faucet | https://faucet.bal-devnet-2.ethpandaops.io |
-| RPC | https://rpc.bal-devnet-2.ethpandaops.io |
-| Checkpoint sync | https://checkpoint-sync.bal-devnet-2.ethpandaops.io |
+| Chain ID | 7098917910 |
+| Genesis timestamp | 1775658600 |
+| Amsterdam timestamp | 1775662086 (epoch 9) |
+| Lighthouse image | `ethpandaops/lighthouse:bal-devnet-3-65bb283` |
+| Lighthouse version | v8.0.1 (commit 65bb283, branch bal-devnet-3) |
+| Explorer (Dora) | https://dora.bal-devnet-3.ethpandaops.io |
+| Faucet | https://faucet.bal-devnet-3.ethpandaops.io |
+| RPC | https://rpc.bal-devnet-3.ethpandaops.io |
+| Checkpoint sync | https://checkpoint-sync.bal-devnet-3.ethpandaops.io |
 
 ## Working Directory
 
-Ask the user where they want the working directory. Default suggestion: `~/bal-devnet-2/`.
+Ask the user where they want the working directory. Default suggestion: `~/bal-devnet-3/`.
 Use `$WORKDIR` throughout to refer to the chosen path.
 
 ```
@@ -70,19 +70,19 @@ $WORKDIR/
 1. Verify erigon binary exists at `./build/bin/erigon`. If not, invoke `/erigon-build`.
 2. Verify the Lighthouse Docker image is available:
    ```bash
-   docker image inspect ethpandaops/lighthouse:bal-devnet-2-65bb283 > /dev/null 2>&1
+   docker image inspect ethpandaops/lighthouse:bal-devnet-3-65bb283 > /dev/null 2>&1
    ```
    If not, pull it:
    ```bash
-   docker pull ethpandaops/lighthouse:bal-devnet-2-65bb283
+   docker pull ethpandaops/lighthouse:bal-devnet-3-65bb283
    ```
 3. Verify config files exist in `$WORKDIR` (genesis.json, testnet-config/).
    If not, download them:
    ```bash
    mkdir -p $WORKDIR/testnet-config
-   curl -sL -o $WORKDIR/genesis.json https://config.bal-devnet-2.ethpandaops.io/el/genesis.json
-   curl -sL -o $WORKDIR/testnet-config/config.yaml https://config.bal-devnet-2.ethpandaops.io/cl/config.yaml
-   curl -sL -o $WORKDIR/testnet-config/genesis.ssz https://config.bal-devnet-2.ethpandaops.io/cl/genesis.ssz
+   curl -sL -o $WORKDIR/genesis.json https://config.bal-devnet-3.ethpandaops.io/el/genesis.json
+   curl -sL -o $WORKDIR/testnet-config/config.yaml https://config.bal-devnet-3.ethpandaops.io/cl/config.yaml
+   curl -sL -o $WORKDIR/testnet-config/genesis.ssz https://config.bal-devnet-3.ethpandaops.io/cl/genesis.ssz
    echo "0" > $WORKDIR/testnet-config/deposit_contract_block.txt
    echo "0" > $WORKDIR/testnet-config/deploy_block.txt
    ```
@@ -100,17 +100,17 @@ If the start/stop/clean scripts don't exist yet, generate them. The scripts must
 
 **start-erigon.sh** — Runs erigon with `--externalcl`. Must start FIRST (creates JWT secret).
 - Env vars: `ERIGON_EXEC3_PARALLEL=true`, `ERIGON_ASSERT=true`, `ERIGON_EXEC3_WORKERS=12`, `LOG_HASH_MISMATCH_REASON=true`
-- Flags: `--datadir=$WORKDIR/erigon-data`, `--externalcl`, `--networkid=7033429093`, all 16 EL bootnodes, erigon static peers, `--prune.mode=minimal`, all offset ports (see port table), `--http.api=eth,erigon,engine,debug`, `--pprof`, `--metrics`
-- EL bootnodes: fetch from `https://config.bal-devnet-2.ethpandaops.io/api/v1/nodes/inventory` (extract enode URLs from `execution.enode` fields)
+- Flags: `--datadir=$WORKDIR/erigon-data`, `--externalcl`, `--networkid=7098917910`, all 15 EL bootnodes, erigon static peers, `--prune.mode=minimal`, all offset ports (see port table), `--http.api=eth,erigon,engine,debug`, `--pprof`, `--metrics`
+- EL bootnodes: fetch from `https://config.bal-devnet-3.ethpandaops.io/api/v1/nodes/inventory` (extract enode URLs from `execution.enode` fields)
 
 **start-lighthouse.sh** — Runs Lighthouse via Docker with `--network=host`. Must start SECOND.
 - Checks JWT exists at `$WORKDIR/erigon-data/jwt.hex`
-- Docker container name: `bal-devnet-2-lighthouse`
+- Docker container name: `bal-devnet-3-lighthouse`
 - Mounts: `$WORKDIR/testnet-config:/config:ro`, `$WORKDIR/lighthouse-data:/data`, JWT as `/jwt.hex:ro`
-- Flags: `--testnet-dir=/config`, `--execution-endpoint=http://127.0.0.1:8651`, `--execution-jwt=/jwt.hex`, all 15 CL ENR bootnodes, offset ports, `--checkpoint-sync-url=https://checkpoint-sync.bal-devnet-2.ethpandaops.io`
+- Flags: `--testnet-dir=/config`, `--execution-endpoint=http://127.0.0.1:8651`, `--execution-jwt=/jwt.hex`, all 15 CL ENR bootnodes, offset ports, `--checkpoint-sync-url=https://checkpoint-sync.bal-devnet-3.ethpandaops.io`
 - CL bootnodes: fetch from same inventory URL (extract ENR entries from `consensus.enr` fields)
 
-**stop.sh** — Stops Lighthouse (`docker stop bal-devnet-2-lighthouse`) then erigon (`pkill -f "datadir.*bal-devnet-2/erigon-data"`).
+**stop.sh** — Stops Lighthouse (`docker stop bal-devnet-3-lighthouse`) then erigon (`pkill -f "datadir.*bal-devnet-3/erigon-data"`).
 
 **clean.sh** — Runs `stop.sh`, removes erigon chain data (chaindata, snapshots, txpool, nodes, temp) and lighthouse data, re-initializes genesis.
 
@@ -179,7 +179,7 @@ Compare parallel execution throughput with and without BAL scheduling optimizati
 
 ### Overview
 
-- **Instance A (BAL)**: Default `bal-devnet-2` instance at `$WORKDIR` — uses BAL to pre-populate version maps and schedule transactions optimistically
+- **Instance A (BAL)**: Default `bal-devnet-3` instance at `$WORKDIR` — uses BAL to pre-populate version maps and schedule transactions optimistically
 - **Instance B (No-BAL)**: Second instance at `$WORKDIR-nobal` — sets `IGNORE_BAL=true` to force dependency-tracking scheduling path
 
 Both instances sync the same chain, enabling direct throughput comparison.
@@ -211,9 +211,9 @@ Both instances sync the same chain, enabling direct throughput comparison.
    cp $WORKDIR/genesis.json $NOBAL_DIR/
    ```
 
-2. Build a binary with `IGNORE_BAL` support (requires bal-devnet-2 branch with commit `45625d09`+):
+2. Build a binary with `IGNORE_BAL` support (requires the bal-devnet-3 branch that includes the `IGNORE_BAL` flag):
    ```bash
-   # Build from bal-devnet-2 branch (or use existing binary if already up to date)
+   # Build from bal-devnet-3 branch (or use existing binary if already up to date)
    make erigon
    ```
 
@@ -225,7 +225,7 @@ Both instances sync the same chain, enabling direct throughput comparison.
 4. Create start scripts — same as Instance A but with:
    - `export IGNORE_BAL=true` in `start-erigon.sh`
    - Port offsets from the table above
-   - Docker container name: `bal-devnet-2-nobal-lighthouse`
+   - Docker container name: `bal-devnet-3-nobal-lighthouse`
    - `--execution-endpoint=http://127.0.0.1:8951` in Lighthouse
    - `--disable-enr-auto-update` in Lighthouse (second instance on same host)
 
@@ -265,8 +265,8 @@ grep -E "parallel (executed|done)" ${WORKDIR}-nobal/erigon-data/logs/erigon.log 
 
 ```bash
 # Stop Instance B
-docker stop bal-devnet-2-nobal-lighthouse 2>/dev/null
-pkill -f "datadir.*bal-devnet-2-nobal/erigon-data"
+docker stop bal-devnet-3-nobal-lighthouse 2>/dev/null
+pkill -f "datadir.*bal-devnet-3-nobal/erigon-data"
 # Optionally remove data
 rm -rf ${WORKDIR}-nobal
 ```
