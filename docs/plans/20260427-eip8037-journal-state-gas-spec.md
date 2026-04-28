@@ -121,6 +121,70 @@ For **accounts and code**, no equivalent tx-entry field is needed because the EV
 
 So the walk's "first createObjectChange/codeChange per address" rule is spec-correct without any tx-entry comparison. No remaining divergence.
 
+## Found test challenges
+
+After implementing the plan and running `TestExecutionSpecBlockchainDevnet` from `execution/tests/eest_devnet/`, **1,857 of 15,429 subtests fail** (~12%). The implementation is consistent with EIP-8037 PR 11573, but the EEST fixtures pre-date PR 11573 and were generated against the old opcode-time state-gas-charging semantics.
+
+The fixture submodule at `execution/tests/execution-spec-tests` is pinned to commit `6c2af7fc95d1c0aa781898b1a7ad78769a536d7f` ("add snolbal-devnet-4 fixtures with static cpsb"), which is from **before** PR 11573's "fixed CPSB + frame accounting" rewrite. As a result the fixtures expect:
+
+- State-gas charges to fire at the SSTORE/CREATE/CALL-to-empty opcodes inline, spilling into `gas_left` when `state_gas_reservoir == 0`.
+- Receipt gas to subtract the `stateGasConsumed` on top-level revert/halt (effectively refunding the spilled regular gas).
+
+Our implementation (per PR 11573):
+- Charges state gas only at frame commit via journal walk.
+- On top-level revert/halt, the commit-time charge never fires → state gas = 0; remaining regular gas is fully burned.
+
+The math on a representative failure confirms the divergence comes from this single source.
+
+### Pattern verification: `dupn_stack_underflow.json`
+
+Test path: `for_amsterdam/amsterdam/eip8024_dupn_swapn_exchange/dupn/dupn_stack_underflow.json` → `test_dupn_stack_underflow[fork_Amsterdam-blockchain_test_from_state_test-dupn_underflow_imm_0]`.
+
+Tx gas limit: 1,000,000. Bytecode: `PUSH1 1 PUSH1 0 SSTORE` then DUPN underflow (exceptional halt at top frame).
+
+| Quantity | Old EIP-8037 (fixture) | PR 11573 (our impl) |
+|---|---|---|
+| SSTORE 0→1 regular gas | 5,000 | 5,000 |
+| SSTORE 0→1 state gas | 32 × 1,174 = 37,568 (charged inline, spills to `gas_left`) | 0 (deferred to frame commit) |
+| Frame commit fires? | n/a (charged inline) | No — exceptional halt aborts |
+| Remaining gas at halt | 979,000 − 5,000 − 37,568 = 936,432 | 979,000 − 5,000 = 974,000 |
+| Burned on halt | 936,432 | 974,000 |
+| `regularGasConsumed` | 5,000 + 936,432 = 941,432 | 5,000 + 974,000 = 979,000 |
+| Receipt subtracts `stateGasConsumed`? | 37,568 (yes) | 0 (no) |
+| Block `gas_used` (header) | 21,000 + 941,432 = **962,432** | 21,000 + 979,000 = **1,000,000** |
+
+Difference: exactly 37,568 = 32 × CPSB (one slot-set worth of state gas).
+
+### Failing test categories
+
+All five failing categories live under `for_amsterdam/amsterdam/`:
+
+| Category | Representative failing tests |
+|---|---|
+| `eip8024_dupn_swapn_exchange` (DUPN/SWAPN/EXCHANGE) | `dupn/dupn_stack_underflow.json::test_dupn_stack_underflow[*]` (all 6 imm variants) |
+| `eip7954_increase_max_contract_size` (max code size) | `max_code_size/max_code_size_deposit_gas.json::test_max_code_size_deposit_gas[short_one_gas]` |
+| `eip7928_block_level_access_lists` (BAL — block-level access lists) | `block_access_lists_opcodes/bal_create_oog_code_deposit.json`; `bal_create_contract_init_revert.json`; `bal_create2_collision.json`; `bal_create_and_oog.json[CREATE/CREATE2 × oog_before/after_target_access]`; `block_access_lists/bal_net_zero_balance_transfer.json[zero_balance_zero_transfer_selfdestruct]`; `bal_nonexistent_account_access_read_only.json[staticcall]`; `bal_aborted_storage_access.json[invalid]`; `bal_precompile_call.json[0x01..0x100]` |
+| `eip7708_eth_transfer_logs` (ETH transfer logs) | `transfer_logs/zero_value_operations_no_log.json[selfdestruct]`; `transfer_logs/selfdestruct_to_system_address.json`; `transfer_logs/failed_create_with_value_no_log.json[initcode_invalid]`; `transfer_logs/create_collision_no_log.json[CREATE/CREATE2]`; `transfer_logs/create_out_of_gas_no_log.json[create_out_of_gas_code_deposit]` |
+| `eip8037_state_creation_gas_cost_increase` (the EIP we refactored) | broad coverage; many subtests across the EIP-8037 fixture set |
+
+Common failure mode across all categories: the fixture's expected `gasUsed` reflects the OLD EIP-8037 state-gas spillover behaviour; under our PR-11573-aligned model, `gasUsed` is higher by some multiple of 32 × CPSB or 112 × CPSB depending on what state-gas charges the test exercises.
+
+### Other test signals
+
+- `make lint` — clean.
+- `make test-short` — passes for all packages.
+- `make erigon` and `make integration` — both build clean.
+- Pre-Amsterdam fork tests in `TestExecutionSpecBlockchain` (and the per-fork `*Cancun*` / `*Prague*` / `*Osaka*` variants) — pass; no divergence outside Amsterdam.
+
+### Recommended next step
+
+Per the `erigon-implement-eip` skill ("question the tests — do not silently fix them"): the EEST fixtures need to be regenerated against the PR-11573-aligned python-spec implementation. Until that lands upstream, the 1,857 Amsterdam-EIP fixture failures are expected and should be documented in the PR description rather than worked around in the implementation.
+
+If a sooner check is needed, options are:
+1. Wait for upstream EEST regeneration against PR 11573 and re-pin the submodule.
+2. Hand-craft per-test expected values in a local override layer (fragile and high-maintenance).
+3. Hold the implementation behind a temporary fork-rules feature flag while both spec lines stabilise (defers the divergence rather than resolving it).
+
 ## Edge cases (worked traces)
 
 The "originalValue (tx-entry) + current-value-at-commit" rule, combined with the per-frame `delta = walk − committedChildBytes` charge/credit, handles these without any opcode-level refund plumbing. All scenarios assume EIP-8037 (`IsAmsterdam`) and `cpsb = cost_per_state_byte`. Since `storageChange.originalValue` is the slot's value at tx start (captured via `GetCommittedState`), pre-S=X scenarios short-circuit to 0 bytes immediately — the slot was already non-zero at tx start, so no rule can identify it as "new state".
