@@ -1,6 +1,4 @@
 ---
-title: "Sentry"
-description: "The sentry module: Erigon's network-facing peer-to-peer communication layer."
 sidebar_position: 3
 ---
 

@@ -1,9 +1,6 @@
 ---
-title: "Using an external consensus client as validator"
-description: "Connect Lighthouse, Prysm, Teku, or Nimbus to Erigon via the Engine API for split EL/CL validator setups."
 sidebar_position: 2
 ---
-
 
 # Using an external consensus client as validator
 
@@ -18,7 +15,7 @@ Once you have Erigon and a CL client up and running, you can proceed to set up a
 
 To set up a VC, follow the instructions provided in the official documentation, such as:
 
-[https://lighthouse-book.sigmaprime.io/mainnet_validator.html](https://lighthouse-book.sigmaprime.io/mainnet_validator.html).
+[https://lighthouse-book.sigmaprime.io/mainnet-validator.html](https://lighthouse-book.sigmaprime.io/mainnet-validator.html).
 
 This guide will walk you through the process of setting up a VC, including:
 
@@ -57,6 +54,6 @@ erigon \
 * `--http.api=engine,eth,net,web3`: Enables the necessary APIs for external clients and Caplin.
 * `--ws`: enables WebSocket-based communication, which is optional.
 
-:::info
+:::note
 Note that many pre-merge flags, such as `--miner.etherbase`, are no longer useful, as block rewards and other validator-related configurations are now controlled by the Consensus Layer (CL).
 :::

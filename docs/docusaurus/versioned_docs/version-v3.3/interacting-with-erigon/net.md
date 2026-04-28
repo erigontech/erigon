@@ -1,6 +1,4 @@
 ---
-title: "net"
-description: "net_ namespace: network ID, peer count, and node listening status."
 sidebar_position: 5
 ---
 
@@ -9,10 +7,6 @@ sidebar_position: 5
 The `net` namespace provides network-related methods that are part of the standard Ethereum JSON-RPC API. These methods offer information about the node's network connectivity, peer count, and network version. In Erigon, the net namespace is implemented through the `NetAPI` interface and `NetAPIImpl` struct.
 
 The `net` namespace is enabled by default in Erigon's RPC daemon and provides essential network information that applications use to understand the node's connectivity status and network configuration.
-
-For API usage refer to the below official resources:
-
-[View on ethereum.org](https://ethereum.org/en/developers/docs/apis/json-rpc/)
 
 ### Implementation Details
 
@@ -42,3 +36,9 @@ For API usage refer to the below official resources:
 
 * The current implementation shows some limitations noted in the documentation, such as hardcoded return values in certain scenarios.
 * `net_peerCount` specifically counts only internal sentries, which may not reflect the total peer count in distributed setups.
+
+## API Documentation
+
+For comprehensive API details, refer to two official sources: the general Ethereum JSON-RPC documentation on ethereum.org (covering `eth`, `net`, and `web3` namespaces).
+
+[https://ethereum.org/developers/docs/apis/json-rpc/](https://ethereum.org/developers/docs/apis/json-rpc/)

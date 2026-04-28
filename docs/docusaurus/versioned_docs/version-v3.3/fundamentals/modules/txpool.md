@@ -1,6 +1,4 @@
 ---
-title: "TxPool"
-description: "The txpool module: managing the pending transaction pool as a standalone service."
 sidebar_position: 2
 ---
 

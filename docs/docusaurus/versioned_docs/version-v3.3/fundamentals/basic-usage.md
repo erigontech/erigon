@@ -1,64 +1,29 @@
 ---
-title: "Basic Usage"
-description: "Command-line flags, common arguments, and first steps running the Erigon binary."
 sidebar_position: 1
 ---
 
-import Tabs from '@theme/Tabs';
-import TabItem from '@theme/TabItem';
-
 # Basic Usage
 
-Erigon is mainly operated through the command line. The commands may vary based on your installation method.
+Erigon is primarily controlled using the command line, started using the `./build/bin/erigon` command and stopped by pressing `CTRL-C`.
 
-<Tabs>
-<TabItem value="pre-built-binaries" label="Pre-Built Binaries">
-Open your terminal and simply start Erigon with the command:
-
-```
-erigon [options]
-```
-</TabItem>
-<TabItem value="docker" label="Docker">
-* You can use Docker Compose like in this [example](/get-started/easy-nodes/how-to-run-an-ethereum-node#a-create-the-configuration-file)
-*   Alternatively you can use the Docker syntax, for example:
-
-    `docker run -it erigontech/erigon:v3.2.2 [options]`
-</TabItem>
-<TabItem value="built-from-source" label="Built from Source">
-Open your terminal and move to the directory where you installed Erigon
-
-```
-cd erigon
-```
-
-You can then start Erigon with the below command:
+Using the command-line options allows for configurations, and several functionalities can be called using sub commands. To add a configuration flag to the command line simply add the argument and, optionally, its value:
 
 ```shell
 ./build/bin/erigon [options]
 ```
-</TabItem>
-<TabItem value="windows" label="Windows">
-To run Erigon after a native compilation, enter the following command in your Command Prompt or PowerShell:
 
-```powershell
-erigon.exe [options]
+for example:
+
+```shell
+./build/bin/erigon --http.addr="0.0.0.0"
 ```
-
-:::warning
-**Note**: When you first start Erigon, Windows Firewall may prompt you to allow internet access. Select "YES" to proceed.
-:::
-</TabItem>
-</Tabs>
-
-To gracefully stop Erigon simply press `CTRL` + `C`.
 
 ## All-in-One Client
 
 The all-in-one client is the preferred option for most users:
 
 ```bash
-./build/bin/erigon [options]
+./build/bin/erigon
 ```
 
 This CLI command allows you to run an Ethereum **full node** where every process is integrated and no special configuration is needed.
@@ -94,13 +59,11 @@ To run Erigon with RPCDaemon, TxPool, and other components in a single process i
 * `--log.dir.path` dictates where [logs](logs) will be output - useful for sending reports to the Erigon team when issues occur.
 * Based on the [sync mode](sync-modes) you want to run you can add `--prune.mode=archive` to run a archive node, `--prune.mode=full` for a full node (default value) or `--prune.mode=minimal` for a minimal node.
 * `--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool` to use [RPC Service](../interacting-with-erigon/) and e.g. be able to connect your [wallet](web3-wallet).
-* `--torrent.download.rate=512mb` sets the maximum download speed. The default is `512mb`. You can lower this value to limit bandwidth usage, for example `--torrent.download.rate=128mb` to cap downloads at 128 MB/s.
+* `--torrent.download.rate=512mb` to increase download speed. While the default downloading speed is 128mb, with this flag Erigon will use as much download speed as it can, up to a maximum of 512 megabytes per second. This means it will try to download data as quickly as possible, but it won't exceed the 512 MB/s limit you've set.
 
 To stop the Erigon node you can use the `CTRL+C` command.
 
 Additional flags can be added to configure the node with several options.
-
-- [configuring-erigon](configuring-erigon/)
 
 ## Help
 

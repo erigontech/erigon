@@ -1,30 +1,22 @@
 ---
-title: "RPC Daemon"
-description: "The RPCdaemon module: serving JSON-RPC requests as a separate, remoteable process."
 sidebar_position: 1
 ---
 
-
 # RPC Daemon
 
-The RPC daemon is a core component of Erigon that implements the [**RPC Service**](../../interacting-with-erigon/) by processing JSON remote procedure calls (RPCs). It can be deployed in-process (running inside Erigon) or out-of-process (as a standalone service).
+The RPC daemon is a vital part of Erigon, as it implements the **RPC Service** by processing JSON remote procedure calls (RPCs). This is what allows clients to access Erigon's APIs. Its flexible architecture means it can be deployed in-process (running inside Erigon) or out-of-process (as a standalone service).
 
 ### RPC Deployment Modes
 
 The Erigon RPC service offers three distinct deployment modes when it comes to the logical functionality, depending on whether it runs as part of the main `erigon` process or as a standalone `rpcdaemon` process.
 
-| Mode | Configuration | CLI Command to Run | Key Characteristics |
-| --- | --- | --- | --- |
-| Embedded | RPC server is hosted within the erigon process. | ./build/bin/erigon | The simplest, all-in-one solution. No separate RPC command is needed. |
-| Local | rpcdaemon runs as a standalone process on the same machine as erigon. It directly accesses local data storage. | First (Erigon):./build/bin/erigon --private.api.addr="&#x3C;host_IP>:9090"Second (rpcdaemon):./build/bin/rpcdaemon --datadir="&#x3C;erigon_data_path>" | Improves isolation, increases tuning options, and maintains high-performance data access. Requires two processes running on the same machine. |
-| Remote | rpcdaemon runs as a standalone process on a separate machine and accesses data storage remotely via the Erigon gRPC interface. | First (Erigon):./build/bin/erigon --private.api.addr="&#x3C;host_IP>:9090"Second (rpcdaemon):./build/bin/rpcdaemon --private.api.addr="&#x3C;erigon_IP>:9090" | Scalable, leverages the same data storage for multiple service endpoints. Uses the --private.api.addr flag to point the daemon to the remote Erigon instance. Note: the --grpc flag is only available on the standalone rpcdaemon binary; the main erigon binary exposes its gRPC interface automatically via --private.api.addr. |
-
+<table data-header-hidden><thead><tr><th width="137"></th><th></th><th></th><th></th></tr></thead><tbody><tr><td><strong>Mode</strong></td><td><strong>Configuration</strong></td><td><strong>CLI Command to Run</strong></td><td><strong>Key Characteristics</strong></td></tr><tr><td>Embedded 🏡</td><td>RPC server is hosted within the <code>erigon</code> process.</td><td><code>./build/bin/erigon</code></td><td>The simplest, all-in-one solution. No separate RPC command is needed.</td></tr><tr><td>Local ⚙️</td><td><code>rpcdaemon</code> runs as a standalone process on the same machine as <code>erigon</code>. It directly accesses local data storage.</td><td><p>First (Erigon):</p><p><code>./build/bin/erigon --private.api.addr="&#x3C;host_IP>:9090"</code><br/></p><p>Second (<code>rpcdaemon</code>):</p><p><code>./build/bin/rpcdaemon --datadir="&#x3C;erigon_data_path>"</code></p></td><td>Improves isolation, increases tuning options, and maintains high-performance data access. Requires two processes running on the same machine.</td></tr><tr><td>Remote 🌐</td><td><code>rpcdaemon</code> runs as a standalone process on a separate machine and accesses data storage remotely via the Erigon gRPC interface.</td><td><p>First (Erigon):</p><p><code>./build/bin/erigon --private.api.addr="&#x3C;host_IP>:9090" --grpc</code></p><p></p><p>Second (<code>rpcdaemon</code>):</p><p><code>./build/bin/rpcdaemon --private.api.addr="&#x3C;erigon_IP>:9090"</code></p></td><td>Highly scalable, leverages the same data storage for multiple service endpoints. Uses the <code>--private.api.addr</code> flag to point the daemon to the remote Erigon instance.</td></tr></tbody></table>
 
 For a comprehensive understanding and the latest instructions, the official documentation is essential:
 
-* **Detailed Functionality and Configuration**: The primary documentation for the `rpcdaemon` is located at [https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md](https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md).
+* **Detailed Functionality and Configuration**: The primary documentation for the `rpcdaemon` is located at [https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md](https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/).
 * **Local Access**: This documentation is also contained in your locally compiled Erigon folder at `/cmd/rpcdaemon`.
-* **Remote Running Instructions**: For detailed instructions on running RPC in Remote mode, refer to the documentation [here](https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md#running-remotely).
+* **Remote Running Instructions**: For detailed instructions on running RPC in Remote mode, refer to the documentation [here](https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README#running-remotely).
 
 :::tip
 To interact with the **RPC Service** visit the dedicated page [Interacting with Erigon](../../interacting-with-erigon/).
@@ -130,4 +122,3 @@ Flags:
       --ws.api.subscribelogs.channelsize int        Size of the channel used for websocket logs subscriptions (default 8192)
       --ws.compression                              Enable Websocket compression (RFC 7692)
 ```
-

@@ -1,9 +1,6 @@
 ---
-title: "How to run a Polygon node"
-description: "Step-by-step guide to running an Erigon node on the Polygon PoS network."
 sidebar_position: 3
 ---
-
 
 # How to run a Polygon node
 
@@ -70,6 +67,7 @@ Now you can relax and watch your Erigon Polygon node sync!
 
 ## Flag explanation
 
+* `-it` lets you see what's happening and interact with Erigon.
 * `--chain=bor-mainnet` and `--bor.heimdall=https://heimdall-api.polygon.technologyspecifies` specify respectively the Polygon mainnet and the API endpoint for the Heimdall network
   * to use Amoy tesnet replace with flags `--chain=amoy --bor.heimdall=https://heimdall-api-amoy.polygon.technology`
 * Add `--prune.mode=minimal` to run minimal [Sync Mode](../../fundamentals/sync-modes) or `--prune.mode=archive` to run an archive node

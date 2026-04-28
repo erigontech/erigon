@@ -1,10 +1,8 @@
 ---
-title: "web3 Wallet"
-description: "Connecting MetaMask and other web3 wallets to a local Erigon node."
-sidebar_position: 20
+sidebar_position: 19
 ---
 
-# web3 Wallet
+# Web3 Wallet
 
 Whatever network you are running, it's easy to connect your Erigon node to your local web3 wallet.
 

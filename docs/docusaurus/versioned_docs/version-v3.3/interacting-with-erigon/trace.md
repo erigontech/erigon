@@ -1,9 +1,6 @@
 ---
-title: "trace"
-description: "trace_ namespace: OpenEthereum-compatible transaction and block traces."
 sidebar_position: 7
 ---
-
 
 # trace
 
@@ -27,10 +24,6 @@ The diagnostics are requested by providing a configuration object that specifies
 * `vmTrace`: Provides a Virtual Machine Execution Trace, delivering a full step-by-step trace of the EVM's state throughout the transaction, including all opcodes and gas usage.
 * `stateDiff`: Provides a State Difference, detailing all altered portions of the Ethereum state (e.g., storage, balances, nonces) resulting from the transaction's execution.
 
-#### Flat Tracers
-
-As of v3.4, Erigon supports **flat tracers**, which produce OpenEthereum-compatible call traces in a flat (non-nested) list format. Each call frame is emitted as a separate object with an explicit `subtraces` count, matching the standard output format of `trace_transaction` and `trace_block`. Flat tracers are available for all ad-hoc tracing methods by including `"trace"` in the trace type array.
-
 #### Providing a Transaction to Trace
 
 There are three primary ways to specify the transaction to be traced:
@@ -39,7 +32,7 @@ There are three primary ways to specify the transaction to be traced:
 2. Raw Transaction: Providing raw, signed transaction data, as when using `eth_sendRawTransaction` (see `trace_rawTransaction`).
 3. Mined Transaction: Providing a transaction hash for a previously mined transaction (see `trace_replayTransaction`).
 
-:::info
+:::note
 **Note**: For replaying mined transactions, your node must be in archive mode, or the transaction must be within the most recent 1000 blocks.
 :::
 
@@ -69,18 +62,18 @@ then it should look something like:
 
 #### Ad-hoc Tracing
 
-* [trace\_call](trace.md#trace_call)
-* [trace\_callMany](trace.md#trace_callmany)
-* [trace\_rawTransaction](trace.md#trace_rawtransaction)
-* [trace\_replayBlockTransactions](trace.md#trace_replayblocktransactions)
-* [trace\_replayTransaction](trace.md#trace_replaytransaction)
+* [trace\_call](trace#trace_call)
+* [trace\_callMany](trace#trace_callmany)
+* [trace\_rawTransaction](trace#trace_rawtransaction)
+* [trace\_replayBlockTransactions](trace#trace_replayblocktransactions)
+* [trace\_replayTransaction](trace#trace_replaytransaction)
 
 #### Transaction-Trace Filtering
 
-* [trace\_block](trace.md#trace_block)
-* [trace\_filter](trace.md#trace_filter)
-* [trace\_get](trace.md#trace_get)
-* [trace\_transaction](trace.md#trace_transaction)
+* [trace\_block](trace#trace_block)
+* [trace\_filter](trace#trace_filter)
+* [trace\_get](trace#trace_get)
+* [trace\_transaction](trace#trace_transaction)
 
 ## JSON-RPC API Reference
 
@@ -105,7 +98,6 @@ Request
 ```bash
 curl --data '{"method":"trace_call","params":[{ ... },["trace"]],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
 ```
-
 
 Response
 
@@ -140,7 +132,7 @@ Performs multiple call traces on top of the same block. i.e. transaction `n` wil
 #### Parameters
 
 1. `Array` - List of trace calls with the type of trace, one or more of: `"vmTrace"`, `"trace"`, `"stateDiff"`.
-2. `Quantity` or `Tag` - (optional) integer block number, or the string `'latest'`, `'earliest'` or `'pending'` (default block parameter).
+2. `Quantity` or `Tag` - (optional) integer block number, or the string `'latest'`, `'earliest'` or `'pending'`, see the [default block parameter](trace#the-default-block-parameter).
 
 ```js
 params: [
@@ -177,7 +169,6 @@ Request
 ```bash
 curl --data '{"method":"trace_callMany","params":[[[{"from":"0x407d73d8a49eeb85d32cf465507dd71d507100c1","to":"0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b","value":"0x186a0"},["trace"]],[{"from":"0x407d73d8a49eeb85d32cf465507dd71d507100c1","to":"0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b","value":"0x186a0"},["trace"]]],"latest"],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
 ```
-
 
 Response
 
@@ -252,7 +243,6 @@ params: [
 ]
 ```
 
-
 #### Returns
 
 * `Object` - Block traces.
@@ -264,7 +254,6 @@ Request
 ```bash
 curl --data '{"method":"trace_rawTransaction","params":["0xd46e8dd67c5d32be8d46e8dd67c5d32be8058bb8eb970870f072445675058bb8eb970870f072445675",["trace"]],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
 ```
-
 
 Response
 
@@ -319,7 +308,6 @@ Request
 ```bash
 curl --data '{"method":"trace_replayBlockTransactions","params":["0x2ed119",["trace"]],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
 ```
-
 
 Response
 
@@ -379,7 +367,6 @@ Request
 curl --data '{"method":"trace_replayTransaction","params":["0x02d4a872e096445e80d05276ee756cefef7f3b376bcec14246469c0cd97dad8f",["trace"]],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
 ```
 
-
 Response
 
 ```js
@@ -432,7 +419,6 @@ Request
 curl --data '{"method":"trace_block","params":["0x2ed119"],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
 ```
 
-
 Response
 
 ```js
@@ -481,8 +467,6 @@ Returns traces matching given filter
    * `toAddress`: `Address` - (optional) Sent to these addresses.
    * `after`: `Quantity` - (optional) The offset trace number
    * `count`: `Quantity` - (optional) Integer number of traces to display in a batch.
-   * `mode`: `String` - (optional) Default is `"union"`, meaning traces matching either address filter are returned. Set to `"intersection"` to only return traces that satisfy both `fromAddress` and `toAddress` filters simultaneously.
-
 
 ```js
 params: [{
@@ -505,7 +489,6 @@ Request
 ```bash
 curl --data '{"method":"trace_filter","params":[{"fromBlock":"0x2ed0c4","toBlock":"0x2ed128","toAddress":["0x8bbB73BCB5d553B5A556358d27625323Fd781D37"],"after":1000,"count":100}],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
 ```
-
 
 Response
 
@@ -570,7 +553,6 @@ Request
 curl --data '{"method":"trace_get","params":["0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3",["0x0"]],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
 ```
 
-
 Response
 
 ```js
@@ -617,7 +599,6 @@ Returns all traces of given transaction
 params: ["0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3"]
 ```
 
-
 #### Returns
 
 * `Array` - Traces of given transaction
@@ -629,7 +610,6 @@ Request
 ```bash
 curl --data '{"method":"trace_transaction","params":["0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3"],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
 ```
-
 
 Response
 

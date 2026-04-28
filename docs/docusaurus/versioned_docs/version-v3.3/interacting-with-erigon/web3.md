@@ -1,16 +1,10 @@
 ---
-title: "web3"
-description: "web3_ namespace: client version info and SHA3 hash utilities."
 sidebar_position: 4
 ---
 
 # web3
 
 The `web3` namespace provides utility methods that are part of the standard Ethereum JSON-RPC API. These methods offer basic functionality for client identification and cryptographic operations. In Erigon, the web3 namespace is implemented through the `Web3API` interface and `Web3APIImpl` struct. The web3 namespace is enabled by default in Erigon's RPC daemon and provides essential utility functions that many Ethereum applications rely on for basic operations.
-
-For API usage refer to the below official resources:
-
-[View on ethereum.org](https://ethereum.org/en/developers/docs/apis/json-rpc/)
 
 ### Implementation Details
 
@@ -29,3 +23,9 @@ For API usage refer to the below official resources:
 * The web3 namespace is enabled by default in Erigon's RPC daemon
 * No special configuration is required to use these methods
 * They are available on both HTTP and WebSocket connections
+
+## API Documentation
+
+For comprehensive API details, refer to two official sources: the general Ethereum JSON-RPC documentation on ethereum.org (covering `eth`, `net`, and `web3` namespaces).
+
+[https://ethereum.org/developers/docs/apis/json-rpc/](https://ethereum.org/developers/docs/apis/json-rpc/)

@@ -1,35 +1,16 @@
 ---
-title: "Contributing"
-description: "How to contribute code, report bugs, write docs, and submit pull requests to the Erigon project."
 sidebar_position: 1
 ---
 
 # Contributing
 
-The Erigon documentation is built with [Docusaurus](https://docusaurus.io) and lives in the [erigontech/docs](https://github.com/erigontech/docs) repository.
+This documentation is powered by [MdBook](https://rust-lang.github.io/mdBook).
 
-## Reporting issues
+To contribute to the Erigon Docs, you can either:
 
-Open an issue in the repository to suggest corrections, flag outdated content, or request new pages.
+1. Create an Issue: Open a new issue in the main branch to suggest changes or report problems.
+2. Open a Branch and Submit a PR: Create a new branch, make your changes, and submit a pull request (PR) on Github.
 
-## Editing locally
+[https://github.com/erigontech/erigon](https://github.com/erigontech/erigon)
 
-1. Clone the repository and install dependencies:
-   ```bash
-   git clone https://github.com/erigontech/docs.git
-   cd docs
-   npm install
-   ```
-2. Start the local dev server:
-   ```bash
-   npm run start
-   ```
-3. Open `http://localhost:3000/docs/` in your browser — changes to Markdown files hot-reload automatically.
-
-## Submitting a pull request
-
-1. Create a new branch from `main`.
-2. Edit or add `.md` / `.mdx` files under the `docs/` directory.
-3. Verify your changes render correctly in the local dev server.
-4. Open a pull request against `main` with a clear description of what changed and why.
-
+Before committing your changes, it's recommended to run the documentation locally to verify the output. This ensures that your changes render correctly and maintain the consistency of the documentation.

@@ -1,6 +1,4 @@
 ---
-title: "txpool"
-description: "txpool_ namespace: inspect pending and queued transactions in the mempool."
 sidebar_position: 8
 ---
 
@@ -61,7 +59,6 @@ None
 curl -s --data '{"jsonrpc":"2.0","method":"txpool_content","params":[],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
-
 **Returns**
 
 | Type    | Description                                         |
@@ -89,7 +86,6 @@ Returns the content of the transaction pool for a specific sender address, showi
 curl -s --data '{"jsonrpc":"2.0","method":"txpool_contentFrom","params":["0xb60e8dd61c5d32be8058bb8eb970870f07233155"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
-
 **Returns**
 
 | Type    | Description                                        |
@@ -114,7 +110,6 @@ None
 ```bash
 curl -s --data '{"jsonrpc":"2.0","method":"txpool_status","params":[],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
-
 
 **Returns**
 

@@ -1,11 +1,12 @@
 ---
-title: "Migrating from Geth"
-description: "Switch from go-ethereum to Erigon — what changes, what stays the same, and how to preserve your data."
 sidebar_position: 4
 ---
 
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
+
+---
+---
 
 # Migrating from Geth
 
@@ -13,22 +14,22 @@ import TabItem from '@theme/TabItem';
 
 When moving from another Execution Layer (EL) such as Geth, Nethermind, Reth or Besu to Erigon, node runners have a primary choice regarding their Consensus Layer (CL) setup:
 
-* **Erigon with Caplin**: The integrated setup using Erigon's embedded CL client, [Caplin](../fundamentals/caplin). Suitable for all node types — simplifies operation by removing the need for a separate consensus client.
+* **Erigon with Caplin**: This is the highly efficient, all-in-one setup, utilizing Erigon's embedded CL client, [Caplin](../fundamentals/caplin). It's an excellent choice for simplicity and performance for all node types and usage.
 * **Erigon with an External Consensus Client**: This is the traditional setup, allowing to reuse an existing external CL client (like Prysm or Lighthouse).
 
-The recommended approach involves running and syncing an **Erigon node alongside your existing Execution Layer (EL) client (like Geth)**. This allows for full functional verification, thorough testing, and a transition with **zero downtime**. Since Erigon requires **less disk space** than most clients, running both in parallel is practical for the duration of the migration.
+The most secure and reliable method for all users involves running and syncing an **Erigon node alongside your existing Execution Layer (EL) client (like Geth)**. This parallel process allows for full functional verification, thorough testing, and ensures a smooth transition with **zero downtime**. Since Erigon requires significantly **less disk space** than many other clients, this parallel sync approach is practical and highly recommended for all migrations.
 
 #### Choosing Your Migration Strategy
 
-* [Option 1](#option-1-sync-erigon-alongside-geth-and-its-cl): If you run a critical process and have enough disk space, syncing Erigon alongside Geth or any other EL is the recommended choice, and is essential for validators and RPC providers.
+* [Option 1](migrating-from-geth#option-1-sync-erigon-alongside-geth-and-its-cl): In case you run a highly critical process and have enough disk space, syncing Erigon alongside Geth or any other EL is the highly recommended choice for all users, and is essential for validators and RPC providers.
   * If disk space is limited and downtime is not an option, consider syncing Erigon on a separate machine.
-* [Option 2](#option-2-remove-old-el-and-sync-erigon-downtime-accepted): If you are a home user or standard node runner (not running a validator), and the disk space is limited and downtime is acceptable, choose this option to remove your EL and the existing CL first.
+* [Option 2](migrating-from-geth#option-2-remove-old-el-and-sync-erigon-downtime-accepted): If you are a home user or standard node runner (not running a validator), and the disk space is limited and downtime is acceptable, choose this option to remove your EL and the existing CL first.
 
 | **Node Runner Type**                                            | **Recommended Path (If Disk Space Allows)**                                                                                        | **Rationale**                                        |
 | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| Validators                                                      | [Option 1](#option-1-sync-erigon-alongside-geth-and-its-cl): Sync Alongside Geth or any EL                   | Ensures minimal downtime and prevents slashing risk. |
-| Public RPC Providers                                            | [Option 1](#option-1-sync-erigon-alongside-geth-and-its-cl): Sync Alongside Geth or any EL                   | Guarantees zero service interruption for users.      |
-| Home Users / Standard Node Runners with no critical utilization | [Option 2](#option-2-remove-old-el-and-sync-erigon-downtime-accepted): Remove Geth or any EL and Sync Erigon | The fastest method if downtime is accepted.          |
+| Validators                                                      | [Option 1](migrating-from-geth#option-1-sync-erigon-alongside-geth-and-its-cl): Sync Alongside Geth or any EL                   | Ensures minimal downtime and prevents slashing risk. |
+| Public RPC Providers                                            | [Option 1](migrating-from-geth#option-1-sync-erigon-alongside-geth-and-its-cl): Sync Alongside Geth or any EL                   | Guarantees zero service interruption for users.      |
+| Home Users / Standard Node Runners with no critical utilization | [Option 2](migrating-from-geth#option-2-remove-old-el-and-sync-erigon-downtime-accepted): Remove Geth or any EL and Sync Erigon | The fastest method if downtime is accepted.          |
 
 ### Option 1: Sync Erigon Alongside Geth and its CL
 
@@ -41,39 +42,39 @@ This path offers the simplest validator configuration by using Erigon's embedded
 **Steps for Minimal Downtime**
 
 1. **Preparation**: [Install](installation/) Erigon.
-2. **Configuration Check** (No Conflict): Ensure Erigon's standard [ports](../fundamentals/default-ports) (JSON-RPC, P2P) are different from Geth's. These ports are configured via the `--port` and `--p2p.allowed-ports` command-line options. For example:
+2.  **Configuration Check** (No Conflict): Ensure Erigon's standard [ports](../fundamentals/default-ports) (JSON-RPC, P2P) are different from Geth's. These ports are configured via command-line options: `--port <port>` and `--p2p.listen-addr <IP:port>`. For example:
 
     ```sh
     erigon \
       --datadir=/data/erigon \
       --chain=mainnet \
-      --port=30304 \
-      --p2p.allowed-ports=30310,30311,30312,30313,30314,30315,30316
+      --port: 30304 \
+      --p2p.allowed-ports: 30310, 30311, 30312, 30313, 30314, 30315, 30316
     ```
 3. **Synchronization**: Start syncing Erigon. Monitor the sync status using the `eth_syncing` JSON-[RPC method](../interacting-with-erigon/) or a health check.
 4. **Validator Swap**: Once Erigon is fully synced, shut down Geth and the external CL client.
 5. **Reconfiguration and Restart**:
-   * To restart Erigon, there's no need to specify `--port` or `--P2P.allowed-ports`. Refer to this [guide](../fundamentals/caplin) for additional Erigon + Caplin configuration recommendations.
+   * To restart Erigon, there's no need to specify `--port` or `--P2P.allowed-ports`. Refer to this [guide](../staking/caplin) for additional configuration recommendations..
    * Crucially, reconfigure your **validator keys manager** to point directly to the Erigon Beacon API, as Erigon/Caplin now handles both layers internally).
 6. **Decommission Old Setup**: Verify Erigon/Caplin is proposing and attesting blocks correctly. If confirmed, safely remove Geth, the external CL client, and all their data, including the old JWT secret.
 </TabItem>
+
 <TabItem value="migrate-to-erigon-+-external-cl" label="Migrate to Erigon + External CL">
 Switch to an Erigon Execution Layer (EL) while keeping your current external Consensus Layer (CL) client (e.g., Prysm, Lighthouse) and your existing JWT secret. Start by syncing Erigon with Caplin as the CL, then configure it to use the external CL.
 
 **Steps for Minimal Downtime**
 
 1. **Preparation**: [Install](installation/) Erigon.
-2. **Configuration Check**: run Erigon + Caplin simultaneously with Geth (or any other EL) for fast, parallel syncing and assign unique ports for its P2P networking via `--port` and `--p2p.allowed-ports` (check which ports your present
-   EL is using). For example:
+2.  **Configuration Check**: to run Erigon + Caplin simultaneously with Geth (or any other EL) for fast, parallel syncing, you must assign unique ports for its P2P networking (check which ports your EL is using). For example:
 
     ```sh
     erigon \
       --datadir=/data/erigon \
       --chain=mainnet \
-      --port=30304 \
-      --p2p.allowed-ports=30310,30311,30312,30313,30314,30315,30316
+      --port: 30304 \
+      --p2p.allowed-ports: 30310, 30311, 30312, 30313, 30314, 30315, 30316
     ```
-3. **Synchronization**: Monitor the sync status using the `eth_syncing` JSON-RPC method or a health check.
+3. **Synchronization**: Start syncing Erigon. Monitor the sync status using the `eth_syncing` JSON-[RPC method](../interacting-with-erigon/) or a health check.
 4. **Validator Swap**: Once Erigon is fully synced, **shut down** both Geth and Erigon. **Keep the external CL client running.**
 5. **Reconfiguration and Restart**: Restart Erigon, ensuring it uses the **original Engine API port and JWT secret** that your old EL client used. See [here](../staking/external-consensus-client-as-validator) for details.
 6. **Decommission Old Setup**: Verify Erigon and your external CL client are proposing and attesting blocks correctly. If confirmed, safely remove Geth and its data.
@@ -92,11 +93,12 @@ This path is the fastest way to get Erigon running. It utilizes **Erigon's embed
 
 1. **Decommission Old Setup**: Shut down and **remove your old EL** client (Geth, etc.) and its data. If you were using an external CL client, you can shut it down as well.
 2. **Installation**: [Install](installation/) Erigon.
-3. **Configuration**: Erigon requires no special configuration; it uses default ports and settings. The [basic setup](../fundamentals/basic-usage) is sufficient for most situations.
+3. **Configuration**: Erigon requires no special configuration; it uses default ports and settings. The [basic setup](../fundamentals/basic-usage#example-of-configuration) is sufficient for most situations.
 4. **Synchronization**: Start syncing Erigon with the default Caplin configuration (Caplin does not use the Engine API).
 5. **Final Setup**: Once Erigon is fully synced, your node is online.
 6. **Monitoring**: Monitor the sync progress using `eth_syncing` or the health check, and ensure no errors appear in Erigon's logs.
 </TabItem>
+
 <TabItem value="erigon-+-external-cl-(reuse-existing-cl)" label="Erigon + External CL (Reuse Existing CL)">
 This path retains your existing **external Consensus Layer (CL)** client (e.g., Prysm, Lighthouse) but swaps the old EL client for Erigon. Since downtime is accepted, this process requires simpler port management.
 
@@ -130,5 +132,4 @@ This path retains your existing **external Consensus Layer (CL)** client (e.g., 
 
 ***
 
-See [Basic Usage](../fundamentals/basic-usage) and [Configuring Erigon](../fundamentals/configuring-erigon/) for more details on available options.
-
+See [Basic Usage](../fundamentals/basic-usage) of [Configuring Erigon](../fundamentals/configuring-erigon/) for more details on available options.

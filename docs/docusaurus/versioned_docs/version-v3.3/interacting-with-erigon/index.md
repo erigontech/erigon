@@ -1,38 +1,38 @@
 ---
-title: "Interacting with Erigon"
-sidebar_position: 4
+sidebar_position: 1
 ---
 
-# RPC Service
+# Interacting with Erigon
 
-The Erigon RPC Service, managed by Erigon's modular [RPC daemon](/docs/fundamentals/modules/rpc-daemon), supports various API namespaces, which can be enabled or disabled using the `--http.api` flag. The available namespaces include:
+The Erigon RPC Service, managed by Erigon's modular [RPC daemon](../fundamentals/modules/rpc-daemon), supports various API namespaces, which can be enabled or disabled using the `--http.api` flag. The available namespaces include:
 
-* [`eth`](/docs/interacting-with-erigon/eth): Standard Ethereum API.
-* [`erigon`](/docs/interacting-with-erigon/erigon): Erigon-specific extensions.
-* [`engine`](/docs/interacting-with-erigon/engine): The JSON-RPC Interface for Execution and Consensus Layer Communication.
-* [`web3`](/docs/interacting-with-erigon/web3): Web3 compatibility API.
-* [`net`](/docs/interacting-with-erigon/net): Network information API.
-* [`debug`](/docs/interacting-with-erigon/debug): Debugging and tracing API.
-* [`trace`](/docs/interacting-with-erigon/trace): Transaction tracing API.
-* [`txpool`](/docs/interacting-with-erigon/txpool): Transaction pool API.
-* [`admin`](/docs/interacting-with-erigon/admin): Node administration API
-* [`bor`](/docs/interacting-with-erigon/bor): Polygon Bor-specific API (when running on Polygon)
-* [`ots`](/docs/interacting-with-erigon/ots): These methods are specifically tailored for use with Otterscan, an open-source, fast block explorer.
-* [`internal`](/docs/interacting-with-erigon/internal): Erigon specific API for development and debugging purposes.
-* [`gRPC`](/docs/interacting-with-erigon/grpc): API for lower-level data access.
-* [`overlay`](/docs/interacting-with-erigon/overlay): Erigon-specific overlay API for replaying blocks with state overrides (archive nodes only).
-* [`parity`](/docs/interacting-with-erigon/parity): Partial OpenEthereum compatibility (`parity_listStorageKeys`).
-* [`graphql`](/docs/interacting-with-erigon/graphql): GraphQL endpoint following EIP-1767.
+* [`eth`](eth.md): Standard Ethereum API.
+* [`erigon`](erigon.md): Erigon-specific extensions.
+* [`engine`](engine.md): The JSON-RPC Interface for Execution and Consensus Layer Communication.
+* [`web3`](web3.md): Web3 compatibility API.
+* [`net`](net.md): Network information API.
+* [`debug`](debug.md): Debugging and tracing API.
+* [`trace`](trace.md): Transaction tracing API.
+* [`txpool`](txpool.md): Transaction pool API.
+* [`admin`](admin.md): Node administration API
+* [`bor`](bor.md): Polygon Bor-specific API (when running on Polygon)
+* [`ots`](ots.md): These methods are specifically tailored for use with Otterscan, an open-source, fast block explorer.
+* [`internal`](internal.md): Erigon specific API for development and debugging purposes.
+* [`gRPC`](grpc.md): API for lower-level data access.
 
-For a complete reference on the standard Ethereum JSON-RPC methods, especially those in the `eth`, `net`, and `web3` namespaces, it is recommended to consult the general documentation on [ethereum.org's JSON-RPC API page](https://ethereum.org/en/developers/docs/apis/json-rpc/). Additionally, for the formal specification of the `debug`, `engine`, and `eth` namespaces, including unique, detailed descriptions for methods like `eth_getProof` and `eth_simulateV1`, refer to the [Execution APIs documentation](https://ethereum.github.io/execution-apis).
+:::danger
+**Warning**: `admin_` and `debug_` namespaces are not intended to be publicly accessible. To prevent unauthorized access, you must not expose RPC daemon port to the Internetif you are using these namespaces. For environments serving both public and private requests, we strongly recommend running a second, private RPC daemon exclusively for your internal `admin_` and `debug_` requests.
+:::
 
-[View on ethereum.org](https://ethereum.org/en/developers/docs/apis/json-rpc/)
+For a complete reference on the standard Ethereum JSON-RPC methods, especially those in the `eth`, `net`, and `web3` namespaces, it is recommended to consult the general documentation on [ethereum.org's JSON-RPC API page](https://ethereum.org/en/developers/docs/apis/json-rpc/). Additionally, for the formal specification of the `debug`, `engine`, and `eth` namespaces, including unique, detailed descriptions for methods like `eth_getProof` and `eth_simulateV1`, refer to the [Execution APIs documentation](https://ethereum.github.io/execution-apis/api-documentation/).
 
-[View on ethereum.github.io](https://ethereum.github.io/execution-apis/)
+[https://ethereum.org/en/developers/docs/apis/json-rpc/](https://ethereum.org/en/developers/docs/apis/json-rpc/)
+
+[https://ethereum.github.io/execution-apis/api-documentation/](https://ethereum.github.io/execution-apis/api-documentation/)
 
 ## Erigon RPC Transports
 
-Erigon supports [HTTP](/docs/interacting-with-erigon/#http), [HTTPS](/docs/interacting-with-erigon/#https), [WebSockets](/docs/interacting-with-erigon/#websockets), [IPC](/docs/interacting-with-erigon/#ipc), [gRPC](/docs/interacting-with-erigon/#grpc) and [GraphQL](/docs/interacting-with-erigon/#graphql) through its RPC daemon.
+Erigon supports [HTTP](#http), [HTTPS](#https), [WebSockets](#websockets), [IPC](#ipc), [gRPC](#grpc) and [GraphQL](#graphql) through its RPC daemon.
 
 ### HTTP
 
@@ -113,62 +113,13 @@ erigon --http --ws --http.api eth,net,debug,trace
 
 IPC is a simpler transport protocol for use in local environments where the node and the client exist on the same machine.
 
-**Note:** IPC is only available through the separate `rpcdaemon` process, not the main `erigon` binary. Erigon uses a
-modular architecture where RPC functionality is handled by a standalone daemon.
-
-#### Enabling IPC with rpcdaemon
-
-First, start Erigon with the private API enabled:
+The IPC transport can be enabled using `--socket.enabled` and configured with `--socket.url`:
 
 ```bash
-erigon --datadir=<path-to-datadir> --private.api.addr=localhost:9090
+erigon --socket.enabled --socket.url unix:///var/run/erigon.ipc
 ```
 
-Then, in a separate terminal, start rpcdaemon with IPC enabled:
-
-```bash
-rpcdaemon --private.api.addr=localhost:9090 --socket.enabled --socket.url unix:///<path-to-datadir>/erigon.ipc
-```
-
-**Important:** Make sure you have write permissions to the directory where the socket will be created.
-
-On Linux and macOS, Erigon uses UNIX sockets. On Windows, IPC is provided using named pipes (use `\\.\pipe\erigon.ipc`
-format). The socket inherits the API namespaces from the `--http.api` flag passed to `rpcdaemon`:
-
-```bash
-rpcdaemon --private.api.addr=localhost:9090 --socket.enabled --socket.url unix:///<path-to-datadir>/erigon.ipc --http.api eth,net,web3,debug,trace
-```
-
-#### TCP Socket Alternative (Advanced)
-
-You can also serve the raw JSON-RPC2 protocol over TCP instead of Unix sockets:
-
-```bash
-rpcdaemon --private.api.addr=localhost:9090 --socket.enabled --socket.url tcp://127.0.0.1:8546
-```
-
-**Note**: This creates a raw JSON-RPC2 socket without HTTP wrapping. Most users should use the HTTP endpoint (enabled by
-default on port 8545) instead. The TCP socket is for specialized clients that support raw JSON-RPC2 protocol.
-
-#### Testing IPC Connection
-
-Test your IPC connection using curl:
-
-```bash
-curl --unix-socket <path-to-datadir>/erigon.ipc \
-     -X POST http://localhost/ \
-     -H "Content-Type: application/json" \
-     --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
-```
-
-Or use the HTTP endpoint (enabled by default on port 8545):
-
-```bash
-curl http://127.0.0.1:8545 \
-     -X POST \
-     -H "Content-Type: application/json" \
-     --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
-```
+On Linux and macOS, Erigon uses UNIX sockets. On Windows, IPC is provided using named pipes. The socket inherits the namespaces from `--http.api`.
 
 ### gRPC
 

@@ -1,9 +1,6 @@
 ---
-title: "JWT Secret"
-description: "Generating and configuring the JWT secret for Engine API communication."
 sidebar_position: 12
 ---
-
 
 # JWT Secret
 
@@ -16,7 +13,7 @@ In Ethereum, JWTs can be used to validate transactions or API calls. The Ethereu
 If the newly generated signature matches the one in the JWT, it proves the JWT is valid and comes from an authorized source in possession of the secret. Different nodes/servers would have different secrets allowing them to verify the JWTs intended for them.
 
 :::tip
-More information available at [https://github.com/ethereum/execution-apis/blob/main/src/engine/authentication.md](https://github.com/ethereum/execution-apis/blob/main/src/engine/authentication.md)
+More information available at [https://github.com/ethereum/execution-apis/blob/main/src/engine/authentication.md](https://github.com/ethereum/execution-apis/blob/main/src/engine/authentication)
 :::
 
 ## Erigon JWT secret

@@ -1,15 +1,12 @@
 ---
-title: "How to run an Ethereum node"
-description: "Run a full Ethereum mainnet node using Caplin (built-in consensus layer) or connect an external CL client."
 sidebar_position: 1
 ---
-
 
 # How to run a Ethereum node
 
 ## 1. Prerequisites Check
 
-1. Confirm your machine meets the necessary [Hardware Requirements](/docs/get-started/hardware-requirements) based on your desired sync mode.
+1. Confirm your machine meets the necessary [Hardware Requirements](../../get-started/hardware-requirements) based on your desired sync mode.
 2. **Install Docker**:
    * For Linux, install [Docker Engine](https://docs.docker.com/engine/install).
    * For macOS or Windows, install [Docker Desktop](https://docs.docker.com/desktop/).
@@ -63,15 +60,15 @@ docker compose up
 
 ## Flag explanation
 
-* `--chain=gnosis` specifies to run on Gnosis Chain, use `--chain=chiado` for Chiado testnet
-* Add `--prune.mode=minimal` to run minimal [Sync Mode](/docs/fundamentals/sync-modes) or `--prune.mode=archive` to run an archive node
-* `--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](/docs/fundamentals/web3-wallet)
+* `--chain=mainnet` specifies to run on Ethereum mainnet, see also other [Supported Networks](../../fundamentals/supported-networks)
+* Add `--prune.mode=minimal` to run minimal [Sync Mode](../../fundamentals/sync-modes) or `--prune.mode=archive` to run an archive node
+* `--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](../../fundamentals/web3-wallet)
 * `--torrent.download.rate=512mb` to increase download speed. While the default downloading speed is 128mb, with this flag Erigon will use as much download speed as it can, up to a maximum of 512 megabytes per second. This means it will try to download data as quickly as possible, but it won't exceed the 512 MB/s limit you've set
 
-When you get familiar with running Erigon from CLI you may also consider [staking](/docs/staking/caplin) and/or run a Gnosis node with an [external Consensus Layer](/docs/get-started/easy-nodes/how-to-run-an-ethereum-node/ethereum-with-an-external-cl).
+When you get familiar with running Erigon from CLI you may also consider [staking](../../../staking/caplin) and/or run a Ethereum node with an [external Consensus Layer](ethereum-with-an-external-cl.md).
 
 :::tip
 Press `Ctrl+C` in your terminal to stop Erigon.
 :::
 
-Additional flags can be added to [configure](/docs/fundamentals/configuring-erigon/) Erigon with several options.
+Additional flags can be added to [configure](../../fundamentals/configuring-erigon) Erigon with several options.

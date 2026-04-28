@@ -1,6 +1,4 @@
 ---
-title: "Gnosis Chain with an external CL"
-description: "Connect an external consensus layer client to Erigon for a Gnosis Chain full or validator node."
 sidebar_position: 1
 ---
 
@@ -42,7 +40,7 @@ Because Erigon needs a target head in order to sync, Lighthouse must be synced b
 
 To communicate with Erigon, the execution endpoint must be specified as `<erigon address>:8551`, where `<erigon address>` is either `http://localhost` or the IP address of the device running Erigon.
 
-1.  Lighthouse must point to the [JWT secret](../../../fundamentals/jwt) automatically created by Erigon in the `--datadir` directory. In the following example the default data directory is used.
+1.  Lighthouse must point to the [JWT secret](https://erigon.gitbook.io/docs/fundamentals/jwt) automatically created by Erigon in the `--datadir` directory. In the following example the default data directory is used.
 
     Copy
 

@@ -1,9 +1,6 @@
 ---
-title: "TLS Authentication"
-description: "Mutual TLS setup for securing gRPC and RPC daemon endpoints."
 sidebar_position: 13
 ---
-
 
 # TLS Authentication
 
@@ -13,12 +10,12 @@ TLS authentication can be enabled to ensure communication integrity and access c
 
 At a high level, the process consists of:
 
-1. [Generate the Certificate Authority (CA) key pair](tls-authentication.md#1-generating-the-key-pair-for-the-certificate-authority-ca)
-2. [Create the Certificate Authority certificate file](tls-authentication.md#2-creating-the-ca-certificate-file)
-3. [Generate a key pair](tls-authentication.md#3-generating-a-key-pair)
-4. [Create the certificate file for each public key](tls-authentication.md#4-creating-the-certificate-file-for-each-public-key)
-5. [Deploy the files to each instance](tls-authentication.md#5-deploy-the-files-on-each-instance)
-6. [Run Erigon and RPCdaemon with the correct tags](tls-authentication.md#6-run-erigon-and-rpcdaemon-with-the-correct-tags)
+1. [Generate the Certificate Authority (CA) key pair](tls-authentication#1-generating-the-key-pair-for-the-certificate-authority-ca)
+2. [Create the Certificate Authority certificate file](tls-authentication#2-creating-the-ca-certificate-file)
+3. [Generate a key pair](tls-authentication#3-generating-a-key-pair)
+4. [Create the certificate file for each public key](tls-authentication#4-creating-the-certificate-file-for-each-public-key)
+5. [Deploy the files to each instance](tls-authentication#5-deploy-the-files-on-each-instance)
+6. [Run Erigon and RPCdaemon with the correct tags](tls-authentication#6-run-erigon-and-rpcdaemon-with-the-correct-tags)
 
 The following is a detailed description of how to use the **OpenSSL** suite of tools to secure the connection between a remote Erigon node and a remote or local RPCdaemon. The same procedure applies to any Erigon component you wish to run separately; it is recommended to name the files accordingly.
 

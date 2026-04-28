@@ -1,6 +1,4 @@
 ---
-title: "Using Caplin as Validator"
-description: "Configure Erigon's embedded consensus layer to act as a full validator node without any external CL dependency."
 sidebar_position: 1
 ---
 

@@ -1,7 +1,5 @@
 ---
-title: "Docker Compose"
-description: "Running Erigon and all its modules with Docker Compose."
-sidebar_position: 18
+sidebar_position: 17
 ---
 
 # Docker Compose
@@ -40,7 +38,7 @@ docker run \
 
 In this example, the Erigon process inside the container will run as user `1205` and the contents of the host directory `/erigon-data` will be written and owned by user `1205` on your host OS.
 
-### Environment Variables
+### Environment Variables <a href="#environment-variables" id="environment-variables"></a>
 
 There is a `.env.example` file in the root of the repo.
 
@@ -58,13 +56,13 @@ If not specified, the UID/GID will use the current user.
 
 A good choice for `XDG_DATA_HOME` is to use the `~erigon/.ethereum` directory created by helper targets `make user_linux` or `make user_macos`.
 
-#### Check: Permissions
+#### Check: Permissions <a href="#check-permissions" id="check-permissions"></a>
 
 In all cases, `XDG_DATA_HOME` (specified or default) must be writeable by the user UID/GID in docker, which will be determined by the `DOCKER_UID` and `DOCKER_GID` at build time.
 
 If a build or service startup is failing due to permissions, check that all the directories, UID, and GID controlled by these environment variables are correct.
 
-#### Run
+#### Run <a href="#run" id="run"></a>
 
 Next command starts: `erigon` on port `30303`, `rpcdaemon` on port `8545`, `prometheus` on port `9090`, and `grafana` on port `3000`:
 
@@ -102,6 +100,6 @@ ERIGON_USER=erigon
 sudo -u ${ERIGON_USER} DOCKER_UID=$(id -u ${ERIGON_USER}) DOCKER_GID=$(id -g ${ERIGON_USER}) XDG_DATA_HOME=~${ERIGON_USER}/.ethereum DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 make docker-compose
 ```
 
-`makefile` creates the initial directories for `erigon`, `prometheus` and `grafana`. The PID namespace is shared between erigon and rpcdaemon which is required to open Erigon's DB from another process (RPCDaemon local-mode). See: [https://github.com/erigontech/erigon/pull/2392/files](https://github.com/erigontech/erigon/pull/2392/files)
+`makefile` creates the initial directories for `erigon`, `prometheus` and `grafana`. The PID namespace is shared between erigon and rpcdaemon which is required to open Erigon's DB from another process (RPCDaemon local-mode). See: [https://github.com/ledgerwatch/erigon/pull/2392/files](https://github.com/ledgerwatch/erigon/pull/2392/files)
 
 If your docker installation requires the docker daemon to run as root (which is by default), you will need to prefix the command above with `sudo`. However, it is sometimes recommended running docker (and therefore its containers) as a non-root user for security reasons. For more information about how to do this, refer to this [article](https://docs.docker.com/engine/install/linux-postinstall/#manage-docker-as-a-non-root-user).

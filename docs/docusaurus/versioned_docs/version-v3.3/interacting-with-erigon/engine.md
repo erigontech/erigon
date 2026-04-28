@@ -1,6 +1,4 @@
 ---
-title: "engine"
-description: "Engine API for consensus layer communication, used by CL clients post-Merge."
 sidebar_position: 3
 ---
 
@@ -9,12 +7,6 @@ sidebar_position: 3
 The Engine API is a standardized JSON-RPC interface defined by the Ethereum specification. Its purpose is to enable secure and structured communication between the Consensus Layer (CL) client and the Execution Layer (EL) client in the post-Merge Proof-of-Stake architecture.
 
 The Engine API replaced older `eth_` methods for consensus communication. It is only required when running Erigon with an external consensus client like Prysm, Lighthouse, or Teku, as these external clients communicate exclusively through this interface.
-
-For API usage refer to the below official resources:
-
-[View on ethereum.org](https://ethereum.org/en/developers/docs/apis/json-rpc/)
-
-[View on ethereum.github.io](https://ethereum.github.io/execution-apis/)
 
 #### Default Erigon Behavior (Caplin)
 
@@ -30,7 +22,6 @@ When in use (with external CL clients), the Engine API provides essential method
 * Fork Choice Updates: `engine_forkchoiceUpdatedV1/V2/V3` updates the chain head and triggers block building.
 * Payload Retrieval: `engine_getPayloadV1/V2/V3/V4` retrieves built blocks for the CL to propose.
 * Payload Bodies: `engine_getPayloadBodiesByHashV1` and `engine_getPayloadBodiesByRangeV1` fetch historical data.
-* Blob Retrieval: `engine_getBlobsV1/V2/V3` retrieves blobs by versioned hash, with V3 adding support for PeerDAS data columns.
 
 #### Configuration and Security
 
@@ -39,3 +30,9 @@ For security, the Engine API listens on port 8551 by default and requires JWT au
 * A JWT secret is automatically generated and saved in the file `jwt.hex` within your data directory.
 * This secret must be shared with your external consensus layer client to establish secure communication.
 * If your CL client runs on a different machine, you must expose the API using `--authrpc.addr 0.0.0.0` and configure virtual hosts appropriately with `--authrpc.vhosts`.
+
+## API Documentation
+
+For comprehensive API details, refer the formal Execution APIs documentation for detailed specifications of `debug`, `engine`, and advanced `eth` methods like `eth_getProof`.
+
+[https://ethereum.github.io/execution-apis/api-documentation/](https://ethereum.github.io/execution-apis/api-documentation/)

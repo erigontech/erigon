@@ -1,9 +1,6 @@
 ---
-title: "Upgrading from a previous version"
-description: "Upgrade from a previous version of Erigon without losing chain data or your configuration."
 sidebar_position: 1
 ---
-
 
 # Upgrading from a previous version
 
@@ -20,7 +17,7 @@ Updating to the latest version of Erigon gives you access to the latest features
 Erigon 3.1 introduces a new snapshot format while continuing to support the old one. This means that new releases are fully compatible with your existing data. However, users who want the latest data files and data-specific fixes can perform an **optional** manual data upgrade:
 
 1. Backup your datadir.
-2. [Upgrade your Erigon installation](upgrading.md#upgrading-your-erigon-installation) whether from a binary, compiled source code, or Docker.
+2. [Upgrade your Erigon installation](upgrading#upgrading-your-erigon-installation) whether from a binary, compiled source code, or Docker.
 3. To initiate the data upgrade, use the following command: `./build/bin/erigon snapshots reset --datadir /your/datadir`.
 4. Run Erigon, it will reuse existing data and sync only newer snapshots.
 
@@ -66,19 +63,19 @@ If upgrading snapshots(`3.0`to `3.1`) now happens automatically, you should foll
 
 Follow the below instructions depending on your installation method:
 
-* [Pre-built binaries](upgrading.md#pre-built-binaries-only-linux-and-macos)
-* [Docker](upgrading.md#docker)
-* [Compiled source code](upgrading.md#compiled-from-source)
+* [Pre-built binaries](upgrading#pre-built-binaries-only-linux-and-macos)
+* [Docker](upgrading#docker)
+* [Compiled source code](upgrading#compiled-from-source)
 
 ### Pre-built Binaries (only Linux and MacOS)
 
-Download the latest binary file from [https://github.com/erigontech/erigon/releases](https://github.com/erigontech/erigon/releases), do the [checksum](./#install-prebuilt) and reinstall it, no other operation needed.
+Download the latest binary file from [https://github.com/erigontech/erigon/releases](https://github.com/erigontech/erigon/releases), do the checksum and reinstall it, no other operation needed.
 
 ### Docker
 
 If you're using Docker to run Erigon, the process to upgrade to a newer version of the software is straightforward and revolves around pulling the latest Docker image and then running it.
 
-Simply follow the [Docker](upgrading.md#docker) instructions and install and launch the new version.
+Simply follow the [Docker](upgrading#docker) instructions and install and launch the new version.
 
 ### Compiled from source
 

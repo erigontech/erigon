@@ -1,6 +1,4 @@
 ---
-title: "Disclaimer"
-description: "Important notices about software maturity, stability expectations, and intended use."
 sidebar_position: 3
 ---
 

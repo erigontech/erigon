@@ -1,15 +1,16 @@
 ---
-title: "Ethereum with an external CL"
-description: "Connect Lighthouse, Prysm, or another consensus client to Erigon for a full Ethereum node."
 sidebar_position: 1
 ---
 
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
+---
+---
+
 # Ethereum with an external CL
 
-You can use **Prysm**, **Lighthouse**, or any other Consensus Layer client with Erigon by including the `--externalcl` flag. This integration enables direct access to the Ethereum blockchain, allowing you to manage your keys for staking ETH and block production.
+Both [Prysm](ethereum-with-an-external-cl#erigon-with-prysm-as-the-external-cl) and [Lighthouse](ethereum-with-an-external-cl#erigon-with-lighthouse-as-the-external-cl), or any other Consensus Layer client can be used alongside Erigon by adding the `--externalcl` flag. This allows you to access the Ethereum blockchain directly and manage your keys to stake your ETH and produce blocks.
 
 ## Erigon with Prysm as the external CL
 
@@ -38,7 +39,9 @@ You can use **Prysm**, **Lighthouse**, or any other Consensus Layer client with 
     --checkpoint-sync-url=https://beaconstate.info \
     --genesis-beacon-api-url=https://beaconstate.info
     ```
+
 </TabItem>
+
 <TabItem value="lighthouse" label="Lighthouse">
 1.  Start Erigon adding the `--externalcl` flag:
 

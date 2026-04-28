@@ -1,9 +1,6 @@
 ---
-title: "Downloader"
-description: "The downloader module: fetching and verifying Erigon snapshots from the BitTorrent network."
 sidebar_position: 4
 ---
-
 
 # Downloader
 
@@ -13,7 +10,7 @@ The Downloader is a service responsible for seeding and downloading historical d
 **Info**: While all Erigon components are separable and can be run on different machines, the Downloader must run on the same machine as Erigon to be able to share downloaded and seeded files.
 :::
 
-For a comprehensive understanding of the Downloader's functionality, configuration, and usage, please refer to [./cmd/downloader/README.md](https://github.com/erigontech/erigon/blob/main/cmd/downloader/readme.md) with the following key topics:
+For a comprehensive understanding of the Downloader's functionality, configuration, and usage, please refer to [./cmd/downloader/README.md](https://github.com/erigontech/erigon/blob/main/cmd/downloader/readme) with the following key topics:
 
 1. **Snapshots overview**: An introduction to snapshots, their benefits, and how they are created and used in Erigon.
 2. **Starting Erigon with snapshots support**: Instructions on how to start Erigon with snapshots support, either by default or as a separate process.
@@ -73,7 +70,7 @@ Flags:
       --diagnostics.endpoint.port uint     Diagnostics HTTP server listening port (default 6062)
       --diagnostics.speedtest              Enable speed test
       --downloader.api.addr string         external downloader api network address, for example: 127.0.0.1:9093 serves remote downloader interface (default "127.0.0.1:9093")
-      --downloader.disable.ipv4            Turns off ipv4 for the downloader
+      --downloader.disable.ipv4            Turns off ipv6 for the downloader
       --downloader.disable.ipv6            Turns off ipv6 for the downloader
   -h, --help                               help for this command
       --log.console.json                   Format console logs with JSON
@@ -104,12 +101,12 @@ Flags:
       --pprof.port int                     pprof HTTP server listening port (default 6060)
       --seedbox                            Turns downloader into independent (doesn't need Erigon) software which discover/download/seed new files - useful for Erigon network, and can work on very cheap hardware. It will: 1) download .torrent from webseed 2) download new files after upgrade 3) we planing add discovery of new files soon
       --torrent.conns.perfile int          Number of connections per file (default 10)
-      --torrent.download.rate string       Bytes per second, example: 32mb (default "512mb")
-      --torrent.download.slots int         (DEPRECATED: No longer has any effect) Amount of files to download in parallel. (default 32)
+      --torrent.download.rate string       Bytes per second, example: 32mb (default "128mb")
+      --torrent.download.slots int         Amount of files to download in parallel. (default 128)
       --torrent.maxpeers int               Unused parameter (reserved for future use) (default 100)
       --torrent.port int                   Port to listen and serve BitTorrent protocol (default 42069)
       --torrent.staticpeers string         Comma separated host:port to connect to
-      --torrent.upload.rate string         Bytes per second, example: 32mb (default "16mb")
+      --torrent.upload.rate string         Bytes per second, example: 32mb (default "4mb")
       --torrent.verbosity int              0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (must set --verbosity to equal or higher level and has default: 2) (default 2)
       --trace string                       Write execution trace to the given file
       --verbosity string                   Set the log level for console logs (default "info")
