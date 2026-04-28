@@ -106,15 +106,10 @@ type Aggregator struct {
 	savedSalt    *uint32
 	disableFsync bool
 
-	// frozenBlocks, if set, supplies the count of blocks already in
-	// block-snapshot files. readyForCollation reads it to compute the
-	// upper-bound txNum that state collation may target — state files past
-	// frozen-block files are an unrecoverable state. nil = no cap (test default).
+	// nil = no cap. See #20701.
 	frozenBlocks FrozenBlocksProvider
 }
 
-// FrozenBlocksProvider returns the count of blocks already in block-snapshot
-// files. Any *freezeblocks.BlockReader satisfies this interface.
 type FrozenBlocksProvider interface {
 	FrozenBlocks() uint64
 }
@@ -948,12 +943,6 @@ func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastB
 		return 0, 0, 0, true, nil
 	}
 
-	// Block-snapshots cap: refuse to mark a step ready if collating it would
-	// advance state files past frozen-block files. Without this, both
-	// buildFilesInBackground (loops to lastInDB) and BuildFiles2 (loops to
-	// caller-supplied toStep) can race state files past blocks — an
-	// unrecoverable state requiring `erigon seg rm-state --latest`. Production
-	// wiring installs the provider; tests leave it nil (no cap). See #20701, #20852.
 	if a.frozenBlocks != nil {
 		var capTxNum uint64
 		if err = a.db.View(ctx, func(tx kv.Tx) error {
@@ -1842,12 +1831,9 @@ func (a *Aggregator) SetProduceMod(produce bool) {
 	a.produce = produce
 }
 
-// SetFrozenBlocksProvider installs the source of truth for the frozen-block
-// count. readyForCollation uses it to derive the upper-bound txNum and refuses
-// to mark a step ready if collating it would advance state files past block
-// snapshots. Without this, the collation loop may file steps past the
-// block-snapshots boundary — an unrecoverable state requiring `erigon seg
-// rm-state --latest`. Production wiring passes the live *freezeblocks.BlockReader.
+// SetFrozenBlocksProvider caps state collation at the block-snapshots boundary.
+// Without it, state files may advance past block files — recovery requires
+// `erigon seg rm-state --latest`. See #20701.
 func (a *Aggregator) SetFrozenBlocksProvider(p FrozenBlocksProvider) {
 	a.frozenBlocks = p
 }
@@ -1937,7 +1923,6 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 			if !stepFullyCommitted(committedTxNum, step, a.StepSize()) {
 				break // step not fully committed yet — wait for execution to catch up
 			}
-			// Block-snapshots cap is enforced inside buildFiles (returns errStepNotReady).
 			if err := a.buildFiles(a.ctx, step); err != nil {
 				if errors.Is(err, errStepNotReady) {
 					break
