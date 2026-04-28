@@ -1,7 +1,7 @@
 ---
 title: "Frequently Asked Questions (FAQs)"
 description: "Answers to the most common questions about installing, syncing, and operating Erigon."
-sidebar_position: 1
+sidebar_position: 2
 ---
 
 # Frequently Asked Questions (FAQs)

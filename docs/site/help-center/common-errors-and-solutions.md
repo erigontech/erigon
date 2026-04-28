@@ -1,7 +1,7 @@
 ---
 title: "Common Errors and Solutions"
 description: "Error messages decoded — causes explained and actionable fixes provided."
-sidebar_position: 5
+sidebar_position: 6
 ---
 
 # Common Errors and Solutions

@@ -1,7 +1,7 @@
 ---
 title: "Troubleshooting"
 description: "Step-by-step diagnostic guides for the most frequent runtime and sync issues."
-sidebar_position: 2
+sidebar_position: 3
 ---
 
 # Troubleshooting

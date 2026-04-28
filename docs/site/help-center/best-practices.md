@@ -1,7 +1,7 @@
 ---
 title: "Best Practices"
 description: "Recommended configurations, operational patterns, and tips for stable long-running nodes."
-sidebar_position: 4
+sidebar_position: 5
 ---
 
 # Best Practices
