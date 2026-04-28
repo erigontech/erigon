@@ -295,6 +295,11 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		}
 	}
 
+	// Store the block early so that blocks_by_root can serve it while the state
+	// transition runs. Without this, peers asking for a block that's mid-processing
+	// get an empty response and penalize us (Lighthouse: -20 per NullBlocksByRoot).
+	f.blocks.Store(common.Hash(blockRoot), signedBlock)
+
 	blockRewardsCollector := &eth2.BlockRewardsCollector{}
 
 	if !isBlockRootTheCurrentState {
@@ -302,6 +307,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		if invalidBlockErr := transition.TransitionState(newState, signedBlock, blockRewardsCollector, fullValidation); invalidBlockErr != nil {
 			// Add block to list of invalid blocks
 			log.Warn("Invalid beacon block", "slot", block.Slot, "blockRoot", common.Bytes2Hex(blockRoot[:]), "reason", invalidBlockErr)
+			f.blocks.Delete(common.Hash(blockRoot)) // remove early-stored block
 			f.badBlocks.Store(common.Hash(blockRoot), struct{}{})
 			f.currentState = nil
 			f.currentStateBlockRoot = common.Hash{}
@@ -357,7 +363,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		}
 	}
 
-	f.blocks.Store(common.Hash(blockRoot), signedBlock)
+	// f.blocks.Store already done above (early store for RPC serving)
 	bodyRoot, err := signedBlock.Block.Body.HashSSZ()
 	if err != nil {
 		return nil, LogisticError, err
