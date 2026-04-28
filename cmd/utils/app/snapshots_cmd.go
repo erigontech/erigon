@@ -1698,9 +1698,12 @@ func stateProgress(ctx context.Context, db kv.TemporalRoDB, txNumsReader rawdbv3
 		return 0, err
 	}
 	defer roTx.Rollback()
-	blockNum, _, err := txNumsReader.FindBlockNum(ctx, roTx, aggMax)
+	blockNum, ok, err := txNumsReader.FindBlockNum(ctx, roTx, aggMax)
 	if err != nil {
 		return 0, err
+	}
+	if !ok {
+		return 0, fmt.Errorf("find block num for tx num %d: not found", aggMax)
 	}
 	if blockNum > 0 {
 		blockNum-- // FindBlockNum returns the block *containing* aggMax, but the per-block check needs the entire block covered
@@ -2864,8 +2867,14 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		ac := res.Aggregator.BeginFilesRo()
 		defer ac.Close()
 		stats.LogStats(ac, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
-			histBlockNumProgress, _, err := blockReader.TxnumReader().FindBlockNum(ctx, tx, endTxNumMinimax)
-			return histBlockNumProgress, err
+			histBlockNumProgress, ok, err := blockReader.TxnumReader().FindBlockNum(ctx, tx, endTxNumMinimax)
+			if err != nil {
+				return 0, err
+			}
+			if !ok {
+				return 0, fmt.Errorf("find block num for tx num %d: not found", endTxNumMinimax)
+			}
+			return histBlockNumProgress, nil
 		})
 		return nil
 	})
