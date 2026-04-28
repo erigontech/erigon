@@ -222,7 +222,7 @@ func TestTypeCheck(t *testing.T) {
 		{"int232", nil, big.NewInt(1), ""},
 		{"int240", nil, big.NewInt(1), ""},
 		{"int248", nil, big.NewInt(1), ""},
-		{"uint30", nil, uint8(1), "abi: cannot use uint8 as type ptr as argument"},
+		{"uint30", nil, "", "unsupported arg type: uint30"},
 		{"uint8", nil, uint16(1), "abi: cannot use uint16 as type uint8 as argument"},
 		{"uint8", nil, uint32(1), "abi: cannot use uint32 as type uint8 as argument"},
 		{"uint8", nil, uint64(1), "abi: cannot use uint64 as type uint8 as argument"},
@@ -297,6 +297,13 @@ func TestTypeCheck(t *testing.T) {
 		{"bytes0", nil, "", "unsupported arg type: bytes0"},
 		{"bytes33", nil, "", "unsupported arg type: bytes33"},
 		{"bytes64", nil, "", "unsupported arg type: bytes64"},
+		// int/uint outside the valid ABI range 8 <= M <= 256 and M % 8 == 0 should be rejected
+		{"int0", nil, "", "unsupported arg type: int0"},
+		{"uint0", nil, "", "unsupported arg type: uint0"},
+		{"int257", nil, "", "unsupported arg type: int257"},
+		{"uint257", nil, "", "unsupported arg type: uint257"},
+		{"int7", nil, "", "unsupported arg type: int7"},
+		{"uint7", nil, "", "unsupported arg type: uint7"},
 		// simple tuple
 		{"tuple", []ArgumentMarshaling{{Name: "a", Type: "uint256"}, {Name: "b", Type: "uint256"}}, struct {
 			A *big.Int
