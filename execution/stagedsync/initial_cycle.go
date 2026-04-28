@@ -44,6 +44,7 @@ func IsInitialCycleFromProgress(tx kv.Getter, knownTip, finishProgress, ttl uint
 	if !ok || finishProgress == 0 {
 		return true, nil
 	}
+	knownTip = max(knownTip, lastTipReachedBlock)
 	recentlyReachedTip := withinBlockTTL(knownTip, lastTipReachedBlock, ttl) && withinBlockTTL(knownTip, finishProgress, ttl)
 	return !recentlyReachedTip, nil
 }

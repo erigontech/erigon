@@ -69,6 +69,20 @@ func TestIsInitialCycleFromProgress(t *testing.T) {
 			finish:       0,
 			initialCycle: true,
 		},
+		{
+			name:         "local progress behind marker beyond ttl",
+			markerBlock:  ptr(uint64(3000)),
+			knownTip:     1200,
+			finish:       1200,
+			initialCycle: true,
+		},
+		{
+			name:         "local progress behind marker within ttl",
+			markerBlock:  ptr(uint64(1500)),
+			knownTip:     1499,
+			finish:       1499,
+			initialCycle: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -122,6 +136,17 @@ func TestIsInitialCycleFromProgressUsesKnownTip(t *testing.T) {
 	require.NoError(t, rawdb.WriteTipReached(tx, 1000))
 
 	initialCycle, err := IsInitialCycleFromProgress(tx, 1046, 1000, 1)
+	require.NoError(t, err)
+	require.True(t, initialCycle)
+}
+
+func TestIsInitialCycleFromProgressUsesMarkerAsKnownTipFloor(t *testing.T) {
+	_, tx := memdb.NewTestTx(t)
+	defer tx.Rollback()
+
+	require.NoError(t, rawdb.WriteTipReached(tx, 20922434))
+
+	initialCycle, err := IsInitialCycleFromProgress(tx, 20922400, 20922400, 1)
 	require.NoError(t, err)
 	require.True(t, initialCycle)
 }

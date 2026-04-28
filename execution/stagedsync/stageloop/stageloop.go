@@ -76,7 +76,7 @@ func StageLoop(
 		logger.Error("Staged Sync", "err", err)
 	}
 
-	if err := ProcessFrozenBlocks(ctx, db, blockReader, sync, hook, false /* onlySnapDownload */, logger); err != nil {
+	if err := ProcessFrozenBlocks(ctx, db, blockReader, sync, hook, false /* onlySnapDownload */, logger, hd.Progress()); err != nil {
 		if errors.Is(err, common.ErrStopped) || errors.Is(err, context.Canceled) {
 			return
 		}
@@ -152,7 +152,7 @@ func initialCycleFromDB(ctx context.Context, db kv.TemporalRwDB, sync *stagedsyn
 	return initialCycle, nil
 }
 
-func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader services.FullBlockReader, sync *stagedsync.Sync, hook *Hook, onlySnapDownload bool, logger log.Logger) error {
+func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader services.FullBlockReader, sync *stagedsync.Sync, hook *Hook, onlySnapDownload bool, logger log.Logger, knownTipHints ...uint64) error {
 	sawZeroBlocksTimes := 0
 	tx, err := db.BeginTemporalRw(ctx)
 	if err != nil {
@@ -171,7 +171,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 
 	// after StageSnapshots (files downloading): if domains are ahead of block files, then nothing to execute.
 	if execctx.IsDomainAheadOfBlocks(ctx, tx, logger) {
-		if err := stagedsync.UpdateTipReached(tx, blockReader.FrozenBlocks()); err != nil {
+		if err := stagedsync.UpdateTipReached(tx, blockReader.FrozenBlocks(), knownTipHints...); err != nil {
 			return err
 		}
 		return tx.Commit()
@@ -196,7 +196,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 	}
 	firstCycle := false
 	for more := true; more; {
-		initialCycle, err := stagedsync.IsInitialCycle(tx, sync.Cfg(), blockReader.FrozenBlocks())
+		initialCycle, err := stagedsync.IsInitialCycle(tx, sync.Cfg(), blockReader.FrozenBlocks(), knownTipHints...)
 		if err != nil {
 			return err
 		}
@@ -208,7 +208,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		if err := sync.RunPrune(ctx, tx, initialCycle, 0); err != nil {
 			return fmt.Errorf("ProcessFrozenBlocks: %w", err)
 		}
-		if err := stagedsync.UpdateTipReached(tx, blockReader.FrozenBlocks()); err != nil {
+		if err := stagedsync.UpdateTipReached(tx, blockReader.FrozenBlocks(), knownTipHints...); err != nil {
 			return fmt.Errorf("ProcessFrozenBlocks: %w", err)
 		}
 
