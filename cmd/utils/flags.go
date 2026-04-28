@@ -1165,6 +1165,11 @@ var (
 		Usage: "Parallel executor worker count (equivalent to EXEC3_WORKERS). Default: half the number of CPU cores, other half reserved for snapshots build/merge/prune.",
 		Value: runtime.NumCPU() / 2,
 	}
+	ExecSerialFlag = cli.BoolFlag{
+		Name:  "exec.serial",
+		Usage: "Force serial execution by clamping the parallel executor to a single worker. Wins over --exec.workers and EXEC3_WORKERS — use to disable parallelism for diagnostics or like-for-like baseline comparisons.",
+		Value: false,
+	}
 	ExecNoMergeFlag = cli.BoolFlag{
 		Name:  "exec.no-merge",
 		Usage: "Disable state-aggregator file merges for Domain / History / Inverted-Index (equivalent to NO_MERGE=true). Diagnostic / perf-comparison use only.",
@@ -2002,6 +2007,11 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		n := ctx.Int(ExecWorkersFlag.Name)
 		dbg.SetExec3Workers(n)
 		cfg.ExecWorkerCount = n
+	}
+	// --exec.serial wins over --exec.workers / EXEC3_WORKERS: clamp to 1.
+	if ctx.IsSet(ExecSerialFlag.Name) && ctx.Bool(ExecSerialFlag.Name) {
+		dbg.SetExec3Workers(1)
+		cfg.ExecWorkerCount = 1
 	}
 	if ctx.IsSet(ExecNoMergeFlag.Name) {
 		dbg.SetNoMerge(ctx.Bool(ExecNoMergeFlag.Name))
