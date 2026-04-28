@@ -62,6 +62,10 @@ func ResetState(db kv.TemporalRwDB, ctx context.Context) error {
 }
 
 func ResetBlocks(tx kv.RwTx, db kv.RoDB, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, logger log.Logger) error {
+	if err := rawdb.DeleteTipReached(tx); err != nil {
+		return err
+	}
+
 	// keep Genesis
 	if err := rawdb.TruncateBlocks(context.Background(), tx, 1); err != nil {
 		return err
@@ -127,6 +131,9 @@ func ResetExec(ctx context.Context, db kv.TemporalRwDB) (err error) {
 	cleanupList = append(cleanupList, db.Debug().InvertedIdxTables(kv.LogAddrIdx, kv.LogTopicIdx, kv.TracesFromIdx, kv.TracesToIdx)...)
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
+		if err := rawdb.DeleteTipReached(tx); err != nil {
+			return err
+		}
 		if err := clearStageProgress(tx, stages.Execution); err != nil {
 			return err
 		}

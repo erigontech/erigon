@@ -123,6 +123,13 @@ type CommitCycleFn func(ctx context.Context, sd *execctx.SharedDomains) (kv.Temp
 // to check whether the loop should stop early. Return true to break.
 type ShouldBreakFn func(tx kv.TemporalRwTx) (bool, error)
 
+// InitialCycleFn is called before each pipeline Run when the caller needs
+// lifecycle state derived from the current transaction.
+type InitialCycleFn func(tx kv.TemporalRwTx) (bool, error)
+
+// AfterPruneFn is called after a successful RunPrune, before any commit.
+type AfterPruneFn func(tx kv.TemporalRwTx, initialCycle bool) error
+
 // BeforeIterationFn is called before each pipeline Run (e.g. to set state cache).
 type BeforeIterationFn func(sd *execctx.SharedDomains)
 
@@ -133,6 +140,8 @@ type RunLoopConfig struct {
 	PruneTimeout    time.Duration
 	CommitCycle     CommitCycleFn     // required when hasMore
 	ShouldBreak     ShouldBreakFn     // optional early exit
+	InitialCycleFn  InitialCycleFn    // optional per-iteration initial-cycle decision
+	AfterPrune      AfterPruneFn      // optional post-prune hook
 	BeforeIteration BeforeIterationFn // optional per-iteration setup
 }
 
@@ -153,14 +162,29 @@ func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomai
 			cfg.BeforeIteration(sd)
 		}
 
+		initialCycle := cfg.InitialCycle
+		if cfg.InitialCycleFn != nil {
+			var err error
+			initialCycle, err = cfg.InitialCycleFn(tx)
+			if err != nil {
+				return tx, err
+			}
+		}
+
 		var err error
-		hasMore, err = pe.sync.Run(sd, tx, cfg.InitialCycle, cfg.FirstCycle)
+		hasMore, err = pe.sync.Run(sd, tx, initialCycle, cfg.FirstCycle)
 		if err != nil {
 			return tx, err
 		}
 
-		if err := pe.sync.RunPrune(ctx, tx, cfg.InitialCycle, cfg.PruneTimeout); err != nil {
+		if err := pe.sync.RunPrune(ctx, tx, initialCycle, cfg.PruneTimeout); err != nil {
 			return tx, err
+		}
+
+		if cfg.AfterPrune != nil {
+			if err := cfg.AfterPrune(tx, initialCycle); err != nil {
+				return tx, err
+			}
 		}
 
 		if cfg.ShouldBreak != nil {
@@ -205,6 +229,9 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 
 	// If domains are ahead of block files, nothing to execute.
 	if execctx.IsDomainAheadOfBlocks(ctx, tx, pe.logger) {
+		if err := stagedsync.UpdateTipReached(tx, pe.blockReader.FrozenBlocks()); err != nil {
+			return err
+		}
 		return tx.Commit()
 	}
 
@@ -227,9 +254,14 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 	}
 
 	tx, err = pe.RunLoop(ctx, doms, tx, RunLoopConfig{
-		InitialCycle: true,
 		FirstCycle:   false,
 		PruneTimeout: 0,
+		InitialCycleFn: func(curTx kv.TemporalRwTx) (bool, error) {
+			return stagedsync.IsInitialCycle(curTx, pe.sync.Cfg(), pe.blockReader.FrozenBlocks())
+		},
+		AfterPrune: func(curTx kv.TemporalRwTx, _ bool) error {
+			return stagedsync.UpdateTipReached(curTx, pe.blockReader.FrozenBlocks())
+		},
 		CommitCycle: func(ctx context.Context, sd *execctx.SharedDomains) (kv.TemporalRwTx, error) {
 			if err := sd.Flush(ctx, tx); err != nil {
 				return nil, fmt.Errorf("ProcessFrozenBlocks: flush: %w", err)

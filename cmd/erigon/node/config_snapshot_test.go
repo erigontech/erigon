@@ -65,6 +65,7 @@ type configSnapshot struct {
 	LoopThrottle    string `json:"loop_throttle"`
 	BreakAfterStage string `json:"break_after_stage"`
 	LoopBlockLimit  uint   `json:"loop_block_limit"`
+	InitialCycleTTL uint64 `json:"initial_cycle_ttl"`
 	ExecWorkerCount int    `json:"exec_worker_count"`
 
 	// Feature flags
@@ -93,6 +94,7 @@ func snapshotConfig(cfg *ethconfig.Config) configSnapshot {
 		LoopThrottle:                     cfg.Sync.LoopThrottle.String(),
 		BreakAfterStage:                  cfg.Sync.BreakAfterStage,
 		LoopBlockLimit:                   cfg.Sync.LoopBlockLimit,
+		InitialCycleTTL:                  cfg.Sync.InitialCycleBlockTTL,
 		ExecWorkerCount:                  cfg.Sync.ExecWorkerCount,
 		ExperimentalBAL:                  cfg.ExperimentalBAL,
 		KeepExecutionProofs:              cfg.Sync.KeepExecutionProofs,
@@ -118,6 +120,7 @@ func TestConfigDefaults(t *testing.T) {
 	require.True(t, snap.InternalCL, "internal CL (Caplin) is on by default")
 	require.False(t, snap.ExperimentalBAL, "experimental BAL should be off by default")
 	require.False(t, snap.KeepExecutionProofs, "keep execution proofs should be off by default")
+	require.Equal(t, uint64(1024), snap.InitialCycleTTL, "initial cycle block ttl should use the default block window")
 
 	// Snapshot defaults
 	require.True(t, snap.SnapProduceE2, "snap produce e2 should be on by default")
@@ -175,6 +178,13 @@ func TestConfigWithFlags(t *testing.T) {
 			args: []string{"--sync.loop.block.limit=1000"},
 			check: func(t *testing.T, snap configSnapshot) {
 				require.Equal(t, uint(1000), snap.LoopBlockLimit)
+			},
+		},
+		{
+			name: "sync initial cycle ttl",
+			args: []string{"--sync.initial-cycle-block-ttl=2048"},
+			check: func(t *testing.T, snap configSnapshot) {
+				require.Equal(t, uint64(2048), snap.InitialCycleTTL)
 			},
 		},
 	}

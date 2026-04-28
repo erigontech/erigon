@@ -379,13 +379,18 @@ type Getter interface {
 	ForAmount(table string, prefix []byte, amount uint32, walker func(k, v []byte) error) error
 }
 
-// Putter wraps the database write operations.
-type Putter interface {
-	// Put inserts or updates a single entry.
-	Put(table string, k, v []byte) error
-
+// Deleter wraps the database delete operation.
+type Deleter interface {
 	// Delete removes a single entry.
 	Delete(table string, k []byte) error
+}
+
+// Putter wraps the database write operations.
+type Putter interface {
+	Deleter
+
+	// Put inserts or updates a single entry.
+	Put(table string, k, v []byte) error
 
 	/*
 		IncrementSequence - AutoIncrement generator.
