@@ -1,4 +1,6 @@
 ---
+title: "Sync Modes"
+description: "Full, minimal, and archive sync explained — choose the right mode for your use case."
 sidebar_position: 2
 ---
 
