@@ -1,4 +1,5 @@
 ---
+title: "Gnosis Chain with an external CL"
 sidebar_position: 1
 ---
 

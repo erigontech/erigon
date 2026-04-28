@@ -1,8 +1,9 @@
 ---
+title: "How to run an Ethereum node"
 sidebar_position: 1
 ---
 
-# How to run a Ethereum node
+# How to run an Ethereum node
 
 ## 1. Prerequisites Check
 

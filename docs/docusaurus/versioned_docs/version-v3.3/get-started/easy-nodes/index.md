@@ -1,4 +1,5 @@
 ---
+title: Easy Nodes
 sidebar_position: 1
 ---
 

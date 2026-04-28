@@ -1,4 +1,5 @@
 ---
+title: "Why using Erigon?"
 sidebar_position: 2
 ---
 

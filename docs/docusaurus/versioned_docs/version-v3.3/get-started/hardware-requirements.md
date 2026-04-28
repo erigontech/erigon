@@ -1,4 +1,6 @@
 ---
+title: "Hardware Requirements"
+description: "Minimum and recommended specs for running Erigon on mainnet, testnets, and archive mode."
 sidebar_position: 2
 ---
 

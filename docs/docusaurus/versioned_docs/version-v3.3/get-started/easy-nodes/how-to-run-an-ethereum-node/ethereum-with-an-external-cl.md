@@ -1,4 +1,5 @@
 ---
+title: "Ethereum with an external CL"
 sidebar_position: 1
 ---
 

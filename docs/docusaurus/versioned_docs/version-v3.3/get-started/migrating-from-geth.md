@@ -1,4 +1,5 @@
 ---
+title: "Migrating from Geth"
 sidebar_position: 4
 ---
 

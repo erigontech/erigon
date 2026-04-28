@@ -1,4 +1,5 @@
 ---
+title: "Upgrading from a previous version"
 sidebar_position: 1
 ---
 

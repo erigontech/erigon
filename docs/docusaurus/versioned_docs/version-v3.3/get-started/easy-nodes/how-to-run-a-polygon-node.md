@@ -1,4 +1,5 @@
 ---
+title: "How to run a Polygon node"
 sidebar_position: 3
 ---
 

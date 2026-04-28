@@ -1,4 +1,5 @@
 ---
+title: "How to run a Gnosis Chain node"
 sidebar_position: 1
 ---
 
