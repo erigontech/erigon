@@ -47,11 +47,12 @@ func TestStateCornerCases(t *testing.T) {
 	runStateTests(t, new(testutil.TestMatcher), filepath.Join(cornersDir, "state"))
 }
 
-// TestLegacyCancunState runs the pre-Istanbul ethereum/tests GeneralStateTests
-// fixtures (state-test format) shipped under
-// legacy-tests/LegacyTests/Cancun/GeneralStateTests. TestState only walks the
-// EEST static_tests, which don't carry every variant of the original fixtures
-// (e.g. RevertPrecompiledTouch_d3 in Berlin/Istanbul/London, which catches the
+// TestLegacyCancunState runs legacy ethereum/tests GeneralStateTests fixtures
+// (state-test format, non-EEST) at the Cancun-era snapshot, under
+// legacy-tests/LegacyTests/Cancun/GeneralStateTests. The fixtures cover all
+// pre-merge fork variants (Frontier through London, plus Paris/Shanghai/Cancun)
+// — TestState only walks EEST static_tests, which don't carry every variant
+// (e.g. RevertPrecompiledTouch_d3 in Berlin/Istanbul/London catches the
 // ripemd-touch state-clearing path that the Hive `legacy-cancun` simulator
 // flagged). Run them locally so that class of regression is caught on CI
 // rather than only by the weekly out-of-tree Hive run.
