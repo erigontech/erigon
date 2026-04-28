@@ -769,12 +769,19 @@ func TestAggregatorV3_BuildFiles_WithReorgDepth(t *testing.T) {
 	require.Equal(t, kv.Step(6), kv.Step(agg.EndTxNumMinimax()/agg.StepSize()))
 }
 
+// fakeFrozenBlocks is a stand-in FrozenBlocksProvider for tests. With
+// txnsPerBlock=1 in the rawdbv3.TxNums setup, fakeFrozenBlocks(N) yields
+// capTxNum=N (since TxNums.Max(tx, N) == N).
+type fakeFrozenBlocks uint64
+
+func (f fakeFrozenBlocks) FrozenBlocks() uint64 { return uint64(f) }
+
 // TestAggregatorV3_BuildFiles_RespectsMaxCollatableTxNumCap verifies that when
-// a cap callback is installed via SetMaxCollatableTxNumFn, the buildFiles loop
-// stops at the cap regardless of how much data is sitting in the DB. Regression
-// test for the bug behind PR #20701: previously the cap arg was only consulted
-// as an early-return gate; once the loop entered, it built every step in the
-// DB and could blow past block-snapshots progress.
+// a FrozenBlocksProvider is installed via SetFrozenBlocksProvider, the buildFiles
+// loop stops at the cap regardless of how much data is sitting in the DB.
+// Regression test for the bug behind PR #20701: previously the cap arg was
+// only consulted as an early-return gate; once the loop entered, it built
+// every step in the DB and could blow past block-snapshots progress.
 func TestAggregatorV3_BuildFiles_RespectsMaxCollatableTxNumCap(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
@@ -784,16 +791,14 @@ func TestAggregatorV3_BuildFiles_RespectsMaxCollatableTxNumCap(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	t.Cleanup(db.Close)
-	agg := state.NewTest(dirs).ReorgBlockDepth(0).StepSize(2).Logger(logger).MustOpen(ctx, db)
+	agg := state.NewTest(dirs).ReorgBlockDepth(1).StepSize(2).Logger(logger).MustOpen(ctx, db)
 	t.Cleanup(agg.Close)
 	require.NoError(t, agg.OpenFolder())
 
 	// Cap collation at txNum 8 — i.e., 4 steps worth of data may be filed even
 	// though we'll write 9 steps' worth into the DB.
 	const capTxNum = uint64(8)
-	agg.SetMaxCollatableTxNumFn(func(_ context.Context, _ kv.Tx) (uint64, error) {
-		return capTxNum, nil
-	})
+	agg.SetFrozenBlocksProvider(fakeFrozenBlocks(capTxNum))
 
 	tdb, err := temporal.New(db, agg)
 	require.NoError(t, err)
@@ -835,10 +840,10 @@ func TestAggregatorV3_BuildFiles_NoCapHookBuildsAll(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	t.Cleanup(db.Close)
-	agg := state.NewTest(dirs).ReorgBlockDepth(0).StepSize(2).Logger(logger).MustOpen(ctx, db)
+	agg := state.NewTest(dirs).ReorgBlockDepth(1).StepSize(2).Logger(logger).MustOpen(ctx, db)
 	t.Cleanup(agg.Close)
 	require.NoError(t, agg.OpenFolder())
-	// Note: SetMaxCollatableTxNumFn is intentionally not called.
+	// Note: SetFrozenBlocksProvider is intentionally not called.
 
 	tdb, err := temporal.New(db, agg)
 	require.NoError(t, err)
@@ -861,8 +866,56 @@ func TestAggregatorV3_BuildFiles_NoCapHookBuildsAll(t *testing.T) {
 
 	require.NoError(t, agg.BuildFiles(txnNums))
 
-	// All 9 steps (18 txnums / stepSize 2) should be filed when no cap is set.
-	require.Equal(t, uint64(18), agg.EndTxNumMinimax())
+	// With reorgBlockDepth=1 and txnsPerBlock=1, the last block stays in DB so the
+	// last filed step ends at txNum 16 (step 8). Cap is not set → only the
+	// reorg-depth tail is held back, not the cap.
+	require.Equal(t, uint64(16), agg.EndTxNumMinimax())
+}
+
+// TestAggregatorV3_BuildFiles2_RespectsMaxCollatableTxNumCap verifies that
+// BuildFiles2 (used by stage_custom_trace and squeeze rebuild paths) honors
+// the same cap as buildFilesInBackground.
+func TestAggregatorV3_BuildFiles2_RespectsMaxCollatableTxNumCap(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	ctx := t.Context()
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	t.Cleanup(db.Close)
+	agg := state.NewTest(dirs).ReorgBlockDepth(1).StepSize(2).Logger(logger).MustOpen(ctx, db)
+	t.Cleanup(agg.Close)
+	require.NoError(t, agg.OpenFolder())
+
+	const capTxNum = uint64(8)
+	agg.SetFrozenBlocksProvider(fakeFrozenBlocks(capTxNum))
+
+	tdb, err := temporal.New(db, agg)
+	require.NoError(t, err)
+	t.Cleanup(tdb.Close)
+	tx, err := tdb.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+	doms, err := execctx.NewSharedDomains(context.Background(), tx, logger)
+	require.NoError(t, err)
+	t.Cleanup(doms.Close)
+
+	const txnNums = uint64(18)
+	for i := uint64(0); i < txnNums; i++ {
+		require.NoError(t, rawdbv3.TxNums.Append(tx, i+1, i+1))
+	}
+	generateSharedDomainsUpdates(t, doms, tx, txnNums, newRnd(0), length.Addr, 10, 1)
+	require.NoError(t, doms.Flush(ctx, tx))
+	require.NoError(t, tx.Commit())
+
+	// Ask for steps [0, 9) — without the cap all 9 steps would be filed.
+	// With cap=8 (txSize=2 → 4 steps fit), only steps 0..3 should land.
+	require.NoError(t, agg.BuildFiles2(ctx, 0, kv.Step(txnNums/agg.StepSize()), false))
+	agg.WaitForFiles()
+
+	require.Equal(t, capTxNum, agg.EndTxNumMinimax(),
+		"BuildFiles2 must clamp to cap (%d), not toStep", capTxNum)
 }
 
 // TestAggregatorV3_BuildFiles_CapBelowVisibleIsNoop verifies that if the cap
@@ -878,7 +931,7 @@ func TestAggregatorV3_BuildFiles_CapBelowVisibleIsNoop(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	t.Cleanup(db.Close)
-	agg := state.NewTest(dirs).ReorgBlockDepth(0).StepSize(2).Logger(logger).MustOpen(ctx, db)
+	agg := state.NewTest(dirs).ReorgBlockDepth(1).StepSize(2).Logger(logger).MustOpen(ctx, db)
 	t.Cleanup(agg.Close)
 	require.NoError(t, agg.OpenFolder())
 
@@ -902,17 +955,13 @@ func TestAggregatorV3_BuildFiles_CapBelowVisibleIsNoop(t *testing.T) {
 	require.NoError(t, tx.Commit())
 
 	// First, build files to step 4 (cap=8) so there's existing state at txNum 8.
-	agg.SetMaxCollatableTxNumFn(func(_ context.Context, _ kv.Tx) (uint64, error) {
-		return uint64(8), nil
-	})
+	agg.SetFrozenBlocksProvider(fakeFrozenBlocks(8))
 	require.NoError(t, agg.BuildFiles(txnNums))
 	require.Equal(t, uint64(8), agg.EndTxNumMinimax())
 
 	// Now lower the cap below current visible — simulates "state already ahead
 	// of blocks". The loop must skip without filing more (and without panicking).
-	agg.SetMaxCollatableTxNumFn(func(_ context.Context, _ kv.Tx) (uint64, error) {
-		return uint64(4), nil
-	})
+	agg.SetFrozenBlocksProvider(fakeFrozenBlocks(4))
 	require.NoError(t, agg.BuildFiles(txnNums))
 	require.Equal(t, uint64(8), agg.EndTxNumMinimax(), "files must not roll back; loop must be a no-op")
 }

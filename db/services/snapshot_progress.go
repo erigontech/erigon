@@ -23,11 +23,10 @@ import (
 )
 
 // MaxCollatableTxNum returns the upper bound txNum that state collation may
-// target without running ahead of block snapshot files. Production wiring
-// installs this as Aggregator.SetMaxCollatableTxNumFn so the aggregator caps its
-// own collation loop — otherwise state files may advance past block files, an
-// unrecoverable state that requires manual `erigon seg rm-state --latest` to
-// release.
+// target without running ahead of block snapshot files. Used by the
+// integrity check at db/integrity/commitment_progress_check.go to detect
+// state-ahead-of-blocks drift. The Aggregator enforces the same cap
+// internally via Aggregator.SetFrozenBlocksProvider.
 func MaxCollatableTxNum(ctx context.Context, tx kv.Tx, blockReader FullBlockReader) (uint64, error) {
 	return blockReader.TxnumReader().Max(ctx, tx, blockReader.FrozenBlocks())
 }

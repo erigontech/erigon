@@ -106,12 +106,17 @@ type Aggregator struct {
 	savedSalt    *uint32
 	disableFsync bool
 
-	// maxCollatableTxNumFn, if set, returns the upper-bound txNum that state
-	// collation may target — typically the txNum at the end of the last block
-	// snapshot. The buildFilesInBackground loop consults it before each step
-	// and stops if filing the next step would advance state files past block
-	// snapshots (an unrecoverable state). nil = no cap (test default).
-	maxCollatableTxNumFn func(ctx context.Context, tx kv.Tx) (uint64, error)
+	// frozenBlocks, if set, supplies the count of blocks already in
+	// block-snapshot files. readyForCollation reads it to compute the
+	// upper-bound txNum that state collation may target — state files past
+	// frozen-block files are an unrecoverable state. nil = no cap (test default).
+	frozenBlocks FrozenBlocksProvider
+}
+
+// FrozenBlocksProvider returns the count of blocks already in block-snapshot
+// files. Any *freezeblocks.BlockReader satisfies this interface.
+type FrozenBlocksProvider interface {
+	FrozenBlocks() uint64
 }
 
 func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
@@ -941,6 +946,30 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
 	if a.reorgBlockDepth == 0 {
 		return 0, 0, 0, true, nil
+	}
+
+	// Block-snapshots cap: refuse to mark a step ready if collating it would
+	// advance state files past frozen-block files. Without this, both
+	// buildFilesInBackground (loops to lastInDB) and BuildFiles2 (loops to
+	// caller-supplied toStep) can race state files past blocks — an
+	// unrecoverable state requiring `erigon seg rm-state --latest`. Production
+	// wiring installs the provider; tests leave it nil (no cap). See #20701, #20852.
+	if a.frozenBlocks != nil {
+		var capTxNum uint64
+		if err = a.db.View(ctx, func(tx kv.Tx) error {
+			var err error
+			capTxNum, err = rawdbv3.TxNums.Max(ctx, tx, a.frozenBlocks.FrozenBlocks())
+			return err
+		}); err != nil {
+			return 0, 0, 0, false, fmt.Errorf("read max collatable txNum: %w", err)
+		}
+		if uint64(step+1)*a.StepSize() > capTxNum {
+			a.logger.Info("[snapshots] holding state collation at block snapshot boundary",
+				"step", step,
+				"stepEndTxNum", fmt.Sprintf("%d (step %d)", uint64(step+1)*a.StepSize(), uint64(step+1)),
+				"blockSnapshotsTxNum", fmt.Sprintf("%d (step %d)", capTxNum, capTxNum/a.StepSize()))
+			return 0, 0, 0, false, nil
+		}
 	}
 	err = a.db.View(ctx, func(tx kv.Tx) error {
 		lastBlockInStep, ok, err = rawdbv3.TxNums.FindBlockNum(ctx, tx, lastTxNumOfStep(step, a.stepSize))
@@ -1813,13 +1842,14 @@ func (a *Aggregator) SetProduceMod(produce bool) {
 	a.produce = produce
 }
 
-// SetMaxCollatableTxNumFn installs a callback used by buildFilesInBackground to
-// cap state collation at the block-snapshots boundary. Production wiring sets
-// this to services.MaxCollatableTxNum(blockReader). Without it, the loop
-// builds every step present in the DB and may advance state files past block
-// files — an unrecoverable state requiring `erigon seg rm-state --latest`.
-func (a *Aggregator) SetMaxCollatableTxNumFn(fn func(ctx context.Context, tx kv.Tx) (uint64, error)) {
-	a.maxCollatableTxNumFn = fn
+// SetFrozenBlocksProvider installs the source of truth for the frozen-block
+// count. readyForCollation uses it to derive the upper-bound txNum and refuses
+// to mark a step ready if collating it would advance state files past block
+// snapshots. Without this, the collation loop may file steps past the
+// block-snapshots boundary — an unrecoverable state requiring `erigon seg
+// rm-state --latest`. Production wiring passes the live *freezeblocks.BlockReader.
+func (a *Aggregator) SetFrozenBlocksProvider(p FrozenBlocksProvider) {
+	a.frozenBlocks = p
 }
 func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 	return a.buildFilesInBackground(txNum, true)
@@ -1888,17 +1918,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 			// the DB before a CommitCycle flushes step S's writes, producing a
 			// file that misses entries. Pruning then removes those entries from
 			// the DB, and the values are lost. See #20169.
-			//
-			// Also enforce the block-snapshots cap (maxCollatableTxNumFn): never
-			// collate a step whose end-txNum would exceed the frozen-block
-			// boundary, otherwise state files race past block files. See
-			// #20701. Read with a plain kv.Tx since TxnumReader.Max doesn't
-			// need temporal access — and a.db is the raw chaindb (production
-			// passes the raw mdbx db to Aggregator before wrapping it with
-			// temporal.New).
 			var committedTxNum uint64
-			var capTxNum uint64
-			capSet := a.maxCollatableTxNumFn != nil
 			if temporalDB, ok := a.db.(kv.TemporalRoDB); ok {
 				if err := temporalDB.ViewTemporal(a.ctx, func(tx kv.TemporalTx) error {
 					v, _, err := tx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
@@ -1914,27 +1934,10 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 					break
 				}
 			}
-			if capSet {
-				if err := a.db.View(a.ctx, func(tx kv.Tx) error {
-					var err error
-					capTxNum, err = a.maxCollatableTxNumFn(a.ctx, tx)
-					return err
-				}); err != nil {
-					a.logger.Warn("[snapshots] buildFilesInBackground: read max collatable txNum", "err", err)
-					break
-				}
-			}
 			if !stepFullyCommitted(committedTxNum, step, a.StepSize()) {
 				break // step not fully committed yet — wait for execution to catch up
 			}
-			if capSet && (uint64(step+1)*a.StepSize()) > capTxNum {
-				a.logger.Info("[snapshots] holding state collation at block snapshot boundary",
-					"step", step,
-					"stepEndTxNum", fmt.Sprintf("%d (step %d)", uint64(step+1)*a.StepSize(), uint64(step+1)),
-					"blockSnapshotsTxNum", fmt.Sprintf("%d (step %d)", capTxNum, capTxNum/a.StepSize()),
-					"lastInDB", lastInDB)
-				break
-			}
+			// Block-snapshots cap is enforced inside buildFiles (returns errStepNotReady).
 			if err := a.buildFiles(a.ctx, step); err != nil {
 				if errors.Is(err, errStepNotReady) {
 					break

@@ -67,7 +67,6 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -2908,9 +2907,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 
 	blockReader, _ := br.IO()
-	agg.SetMaxCollatableTxNumFn(func(ctx context.Context, tx kv.Tx) (uint64, error) {
-		return services.MaxCollatableTxNum(ctx, tx, blockReader)
-	})
+	agg.SetFrozenBlocksProvider(blockReader)
 
 	agg.PresetOfflineMerge()
 	agg.PeriodicalyPrintProcessSet(ctx)
