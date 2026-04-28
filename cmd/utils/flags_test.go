@@ -132,6 +132,9 @@ func TestExecPerfFlags_OverrideDbg(t *testing.T) {
 		if ctx.IsSet(ExecWorkersFlag.Name) {
 			dbg.SetExec3Workers(ctx.Int(ExecWorkersFlag.Name))
 		}
+		if ctx.IsSet(ExecSerialFlag.Name) && ctx.Bool(ExecSerialFlag.Name) {
+			dbg.SetExec3Workers(1)
+		}
 		if ctx.IsSet(ExecNoMergeFlag.Name) {
 			dbg.SetNoMerge(ctx.Bool(ExecNoMergeFlag.Name))
 		}
@@ -145,7 +148,7 @@ func TestExecPerfFlags_OverrideDbg(t *testing.T) {
 		app := cli.NewApp()
 		app.Flags = []cli.Flag{
 			&ExecBatchedIOFlag, &ExecStateCacheFlag, &ExecWorkersFlag,
-			&ExecNoMergeFlag, &ExecNoPruneFlag,
+			&ExecSerialFlag, &ExecNoMergeFlag, &ExecNoPruneFlag,
 		}
 		app.Action = apply
 		require.NoError(t, app.Run(append([]string{"test"}, args...)))
@@ -193,6 +196,26 @@ func TestExecPerfFlags_OverrideDbg(t *testing.T) {
 		dbg.SetExec3Workers(1)
 		run("--exec.workers=7")
 		require.Equal(t, 7, dbg.Exec3Workers)
+	})
+
+	t.Run("serial=true clamps Exec3Workers to 1", func(t *testing.T) {
+		dbg.SetExec3Workers(8)
+		run("--exec.serial=true")
+		require.Equal(t, 1, dbg.Exec3Workers)
+	})
+
+	t.Run("serial=true wins over --exec.workers", func(t *testing.T) {
+		dbg.SetExec3Workers(1)
+		// flags are applied in declaration order (workers first, then serial),
+		// so serial should override workers regardless of CLI argument order.
+		run("--exec.workers=12", "--exec.serial=true")
+		require.Equal(t, 1, dbg.Exec3Workers)
+	})
+
+	t.Run("serial=false leaves Exec3Workers untouched", func(t *testing.T) {
+		dbg.SetExec3Workers(8)
+		run("--exec.serial=false")
+		require.Equal(t, 8, dbg.Exec3Workers)
 	})
 
 	t.Run("no-merge and no-prune set to true", func(t *testing.T) {
