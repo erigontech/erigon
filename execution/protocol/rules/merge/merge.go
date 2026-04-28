@@ -241,6 +241,21 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		if header.RequestsHash != nil {
 			rh := rs.Hash()
 			if *header.RequestsHash != *rh {
+				var depositBytes, withdrawalBytes, consolidationBytes int
+				if depositReqs != nil {
+					depositBytes = len(depositReqs.RequestData)
+				}
+				if withdrawalReq != nil {
+					withdrawalBytes = len(withdrawalReq.RequestData)
+				}
+				if consolidations != nil {
+					consolidationBytes = len(consolidations.RequestData)
+				}
+				logger.Warn("requests root mismatch",
+					"block", header.Number, "logs", len(allLogs),
+					"depositBytes", depositBytes, "withdrawalBytes", withdrawalBytes, "consolidationBytes", consolidationBytes,
+					"skipReceiptsEval", skipReceiptsEval,
+				)
 				return nil, fmt.Errorf("error: invalid requests root hash in header, expected: %v, got:%v", header.RequestsHash, rh)
 			}
 		}
