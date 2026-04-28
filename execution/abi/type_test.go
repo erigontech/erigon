@@ -405,3 +405,22 @@ func TestGetTypeSize(t *testing.T) {
 		}
 	}
 }
+
+// TestNewTypeFixedPointWrongSizeSubmatch is a regression test for a bug in NewType
+// that used the wrong regexp submatch (parsedType[2]) for the first numeric size.
+// For types like fixed128x18, the overall second group is "128x18", not an integer
+// string; the first integer is parsedType[3] ("128"). The bug caused strconv.Atoi
+// to fail with "error parsing variable size" instead of the intended "unsupported
+// arg type" outcome for unimplemented fixed-point encodings.
+func TestNewTypeFixedPointWrongSizeSubmatch(t *testing.T) {
+	t.Parallel()
+	for _, s := range []string{"fixed128x18", "ufixed256x10"} {
+		_, err := NewType(s, "", nil)
+		if err == nil {
+			t.Fatalf("type %q: expected error for unsupported fixed-point type", s)
+		}
+		if !strings.Contains(err.Error(), "unsupported arg type") {
+			t.Fatalf("type %q: got %v; want error containing %q", s, err, "unsupported arg type")
+		}
+	}
+}
