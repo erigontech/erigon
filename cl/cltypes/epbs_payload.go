@@ -146,7 +146,7 @@ func (p *PayloadAttestation) DecodeSSZ(buf []byte, version int) error {
 
 func (p *PayloadAttestation) Clone() clonable.Clonable {
 	ptcSize := int(clparams.MaxPtcSize)
-	if p.AggregationBits != nil {
+	if p != nil && p.AggregationBits != nil {
 		ptcSize = p.AggregationBits.BitCap()
 	}
 	return &PayloadAttestation{
@@ -378,10 +378,10 @@ func (s *SignedExecutionPayloadBid) Clone() clonable.Clonable {
 
 // ExecutionPayloadEnvelope represents an execution payload envelope with associated metadata.
 type ExecutionPayloadEnvelope struct {
-	Payload           *Eth1Block        `json:"payload"`
+	Payload           *Eth1Block         `json:"payload"`
 	ExecutionRequests *ExecutionRequests `json:"execution_requests"`
-	BuilderIndex      uint64            `json:"builder_index,string"`
-	BeaconBlockRoot   common.Hash       `json:"beacon_block_root"`
+	BuilderIndex      uint64             `json:"builder_index,string"`
+	BeaconBlockRoot   common.Hash        `json:"beacon_block_root"`
 
 	beaconCfg *clparams.BeaconChainConfig
 }
