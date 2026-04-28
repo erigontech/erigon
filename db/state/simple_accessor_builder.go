@@ -192,6 +192,7 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, decomp *seg.Decompres
 
 	defer iidq.reader.MadvNormal().DisableReadAhead()
 	for {
+		iidq.reader.Reset(0)
 		rs.SetProgress(p)
 		stream := iidq.GetStream(ctx)
 		defer stream.Close()
