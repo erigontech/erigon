@@ -25,7 +25,7 @@ Create a new file named `docker-compose.yml` in a directory where you want to ma
 ```sh
 services:
   erigon:
-    image: erigontech/erigon:v3.2.2
+    image: erigontech/erigon:v{ERIGON_VERSION}
     container_name: erigon-node
     restart: always
     command:

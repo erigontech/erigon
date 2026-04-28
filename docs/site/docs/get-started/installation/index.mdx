@@ -91,7 +91,7 @@ docker pull erigontech/erigon:<version_tag>
 For example:
 
 ```sh
-docker pull erigontech/erigon:v3.2.2
+docker pull erigontech/erigon:v{ERIGON_VERSION}
 ```
 
 **3. Start the Erigon container**
@@ -106,7 +106,7 @@ docker run -it erigontech/erigon:<version_tag> <flags>
 For example:
 
 ```sh
-docker run -it erigontech/erigon:v3.2.2 --chain=hoodi --prune.mode=minimal --datadir /erigon-data
+docker run -it erigontech/erigon:v{ERIGON_VERSION} --chain=hoodi --prune.mode=minimal --datadir /erigon-data
 ```
 
 
@@ -126,7 +126,7 @@ docker run -it erigontech/erigon:v3.2.2 --chain=hoodi --prune.mode=minimal --dat
 
 **1. Select Your Processor Architecture and Download**
 
-Go to the Erigon [releases page](https://github.com/erigontech/erigon/releases) on GitHub and select the latest stable version (e.g., `3.4.x`) or whichever version you prefer.
+Go to the Erigon [releases page](https://github.com/erigontech/erigon/releases) on GitHub and select the latest stable version (e.g., `{ERIGON_VERSION}`) or whichever version you prefer.
 
 
 
@@ -134,11 +134,11 @@ Download the appropriate binary file for your processor architecture:
 
 | Processor Type | Binary File Type | Example File Name |
 | --- | --- | --- |
-| 64-bit Intel/AMD | Debian Package (.deb) | erigon_`3.4.x`_amd64.deb |
-| 64-bit ARM | Debian Package (.deb) | erigon_`3.4.x`_arm64.deb |
-| 64-bit Intel/AMD | Compressed Archive (.tar.gz) | erigon_v`3.4.x`_linux_amd64.tar.gz |
-| 64-bit Intel/AMDv2 | Compressed Archive (.tar.gz) | erigon_v`3.4.x`_amd64v2.tar.gz |
-| 64-bit ARM | Compressed Archive (.tar.gz) | erigon_v`3.4.x`_linux_arm64.tar.gz |
+| 64-bit Intel/AMD | Debian Package (.deb) | erigon_`{ERIGON_VERSION}`_amd64.deb |
+| 64-bit ARM | Debian Package (.deb) | erigon_`{ERIGON_VERSION}`_arm64.deb |
+| 64-bit Intel/AMD | Compressed Archive (.tar.gz) | erigon_v`{ERIGON_VERSION}`_linux_amd64.tar.gz |
+| 64-bit Intel/AMDv2 | Compressed Archive (.tar.gz) | erigon_v`{ERIGON_VERSION}`_amd64v2.tar.gz |
+| 64-bit ARM | Compressed Archive (.tar.gz) | erigon_v`{ERIGON_VERSION}`_linux_arm64.tar.gz |
 
 
 Note that the Release Page Assets table contains also the **checksum** for each file and a checksum file.
@@ -158,7 +158,7 @@ sha256sum <DOWNLOADED_FILE_NAME>
 Example with a `tar.gz` file:
 
 ```sh
-sha256sum erigon_v3.2.2_linux_amd64.tar.gz
+sha256sum erigon_v{ERIGON_VERSION}_linux_amd64.tar.gz
 ```
 
 This command will output a long string (the computed checksum) followed by the file name.
@@ -282,7 +282,7 @@ git fetch --tags
 Check out the desired version tag by replacing `<tag_name>` with the version you want. Normally latest stable version is the best, check the official [Release Notes](https://github.com/erigontech/erigon/releases). For example:
 
 ```sh
-git checkout v3.2.2
+git checkout v{ERIGON_VERSION}
 ```
 
 **2.3 Compile the Software**
@@ -401,7 +401,7 @@ git fetch --tags
 Check out the desired version tag by replacing `<tag_name>` with the version you want. Normally latest stable version is the best, check the official [Release Notes](https://github.com/erigontech/erigon/releases). For example:
 
 ```bash
-git checkout v3.2.2
+git checkout v{ERIGON_VERSION}
 ```
 
 You might need to change the `ExecutionPolicy` to allow scripts created locally or signed by a trusted publisher to run. Open a **Powershell session as Administrator** and type:
