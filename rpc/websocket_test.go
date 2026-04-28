@@ -367,3 +367,44 @@ func TestWebsocketNonBlockingAcquire(t *testing.T) {
 		t.Errorf("expected error code %d (server overloaded), got %d", ErrCodeServerOverloaded, rpcErr.ErrorCode())
 	}
 }
+
+// TestWebsocketServerGracefulClose verifies that when the server initiates a
+// websocket closure, it explicitly sends a clean StatusNormalClosure (1000)
+// rather than an abnormal closure.
+func TestWebsocketServerGracefulClose(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+
+	srv := newTestServer(logger)
+	httpsrv := httptest.NewServer(srv.WebsocketHandler([]string{"*"}, nil, false, logger))
+	wsURL := "ws:" + strings.TrimPrefix(httpsrv.URL, "http:")
+	defer srv.Stop()
+	defer httpsrv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, resp, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
+		t.Fatalf("failed to dial: %v", err)
+	}
+	defer conn.CloseNow()
+
+	if err := conn.Write(ctx, websocket.MessageText, []byte("invalid json")); err != nil {
+		t.Fatalf("failed to write: %v", err)
+	}
+
+	for {
+		_, _, err := conn.Read(ctx)
+		if err != nil {
+			status := websocket.CloseStatus(err)
+			if status != websocket.StatusNormalClosure {
+				t.Errorf("expected close status %v, got %v (err: %v)", websocket.StatusNormalClosure, status, err)
+			}
+			break
+		}
+	}
+}

@@ -777,7 +777,6 @@ running:
 		case <-logTimer.C:
 			vals := []any{"protocol", srv.Config.Protocols[0].Version, "peers", len(peers), "trusted", len(trusted), "inbound", inboundCount}
 			vals = append(vals, srv.listAndResetErrors()...)
-
 			srv.logger.Debug("[p2p] Server", vals...)
 		}
 	}
