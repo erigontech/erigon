@@ -51,6 +51,7 @@ type ExecutionPayload struct {
 	ExcessBlobGas   *hexutil.Uint64     `json:"excessBlobGas"`
 	SlotNumber      *hexutil.Uint64     `json:"slotNumber,omitempty"`
 	BlockAccessList hexutil.Bytes       `json:"blockAccessList,omitempty"`
+	sszVersion      int
 }
 
 // PayloadAttributes represent the attributes required to start assembling a payload
@@ -162,6 +163,15 @@ type GetPayloadResponse struct {
 	BlobsBundle           *BlobsBundle      `json:"blobsBundle"`
 	ExecutionRequests     []hexutil.Bytes   `json:"executionRequests"`
 	ShouldOverrideBuilder bool              `json:"shouldOverrideBuilder"`
+	sszVersion            int
+}
+
+type NewPayloadRequest struct {
+	Payload               *ExecutionPayload
+	BlobVersionedHashes   []common.Hash
+	ParentBeaconBlockRoot common.Hash
+	ExecutionRequests     []hexutil.Bytes
+	sszVersion            int
 }
 
 type ClientVersionV1 struct {

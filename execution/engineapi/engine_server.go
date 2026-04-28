@@ -92,6 +92,7 @@ type EngineServer struct {
 	// TODO Remove this on next release
 	printPectraBanner bool
 	maxReorgDepth     uint64
+	httpConfig        *httpcfg.HttpCfg
 }
 
 func NewEngineServer(
@@ -151,6 +152,7 @@ func (e *EngineServer) Start(
 			return nil
 		})
 	}
+	e.httpConfig = httpConfig
 	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, httpConfig.WithDatadir, httpConfig.EvmCallTimeout, engineReader, httpConfig.Dirs, nil, httpConfig.BlockRangeLimit, httpConfig.GetLogsMaxResults)
 	ethImpl := jsonrpc.NewEthAPI(base, db, eth, e.txpool, mining, jsonrpc.NewEthApiConfig(httpConfig), e.logger)
 
@@ -167,6 +169,11 @@ func (e *EngineServer) Start(
 			Version:   "1.0",
 		}}
 
+	// EIP-8161: Register SSZ-REST handler on the same port as JSON-RPC.
+	// Path-based routing: /engine/* → SSZ-REST, / → JSON-RPC
+	httpConfig.SszRestHandler = NewSszRestHandler(e, e.logger)
+	e.logger.Info("[EngineServer] SSZ-REST routes registered on Engine API port")
+
 	eg.Go(func() error {
 		defer e.logger.Debug("[EngineServer] engine rpc server goroutine terminated")
 		err := cli.StartRpcServerWithJwtAuthentication(ctx, httpConfig, apiList, e.logger)
@@ -175,6 +182,7 @@ func (e *EngineServer) Start(
 		}
 		return err
 	})
+
 	return eg.Wait()
 }
 
