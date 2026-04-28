@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -663,22 +662,28 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *
 	}
 	comp := seg.NewWriter(coll.valuesComp, compress)
 
-	kvs := make([]struct {
-		k, v []byte
-	}, 0, 128)
 	var fromTxNum, endTxNum uint64 = 0, uint64(stepTo) * d.stepSize
 	if stepFrom > 0 {
 		fromTxNum = uint64(stepFrom-1) * d.stepSize
 	}
 
-	//var stepInDB []byte
 	err = wal.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if d.LargeValues {
-			kvs = append(kvs, struct {
-				k, v []byte
-			}{k[:len(k)-8], v})
+			bareKey := k[:len(k)-8]
+			val := v
+			if vt != nil {
+				val, err = vt(v, fromTxNum, endTxNum)
+				if err != nil {
+					return fmt.Errorf("vt: %w", err)
+				}
+			}
+			if _, err = comp.Write(bareKey); err != nil {
+				return fmt.Errorf("add %s values key [%x]: %w", d.FilenameBase, bareKey, err)
+			}
+			if _, err = comp.Write(val); err != nil {
+				return fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, bareKey, val, err)
+			}
 		} else {
-
 			if vt != nil {
 				v, err = vt(v[8:], fromTxNum, endTxNum)
 				if err != nil {
@@ -696,31 +701,6 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *
 		}
 		return nil
 	}, etl.TransformArgs{Quit: ctx.Done()})
-
-	sort.Slice(kvs, func(i, j int) bool {
-		return bytes.Compare(kvs[i].k, kvs[j].k) < 0
-	})
-	// check if any key is duplicated
-	for i := 1; i < len(kvs); i++ {
-		if bytes.Equal(kvs[i].k, kvs[i-1].k) {
-			return coll, fmt.Errorf("duplicate key [%x]", kvs[i].k)
-		}
-	}
-	for _, kv := range kvs {
-		if vt != nil {
-			kv.v, err = vt(kv.v, fromTxNum, endTxNum)
-		}
-		if err != nil {
-			return coll, fmt.Errorf("vt: %w", err)
-		}
-		if _, err = comp.Write(kv.k); err != nil {
-			return coll, fmt.Errorf("add %s values key [%x]: %w", d.FilenameBase, kv.k, err)
-		}
-		if _, err = comp.Write(kv.v); err != nil {
-			return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, kv.k, kv.v, err)
-		}
-	}
-	// could also do key squeezing
 
 	closeCollation = false
 	coll.valuesCount = coll.valuesComp.Count() / 2
@@ -746,9 +726,7 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 	}
 
 	started := time.Now()
-	defer func() {
-		mxCollateTook.ObserveDuration(started)
-	}()
+	defer mxCollateTook.ObserveDuration(started)
 
 	coll.HistoryCollation, err = d.History.collate(ctx, step, txFrom, txTo, roTx)
 	if err != nil {
@@ -771,75 +749,50 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 	// Compress files only in `merge` which ok to be slow.
 	comp := seg.NewWriter(coll.valuesComp, seg.CompressNone)
 
-	stepBytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(stepBytes, ^uint64(step))
-
-	var valsCursor kv.Cursor
+	stepVal := ^uint64(step)
 
 	if d.LargeValues {
-		valsCursor, err = roTx.Cursor(d.ValuesTable)
+		valsCursor, err := roTx.Cursor(d.ValuesTable)
 		if err != nil {
-			return Collation{}, fmt.Errorf("create %s values cursorDupsort: %w", d.FilenameBase, err)
+			return Collation{}, fmt.Errorf("create %s values cursor: %w", d.FilenameBase, err)
+		}
+		defer valsCursor.Close()
+		for k, v, err := valsCursor.First(); k != nil; k, v, err = valsCursor.Next() {
+			if err != nil {
+				return coll, err
+			}
+			if binary.BigEndian.Uint64(k[len(k)-8:]) != stepVal {
+				continue
+			}
+			bareKey := k[:len(k)-8]
+			if _, err = comp.Write(bareKey); err != nil {
+				return coll, fmt.Errorf("add %s values key [%x]: %w", d.FilenameBase, bareKey, err)
+			}
+			if _, err = comp.Write(v); err != nil {
+				return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, bareKey, v, err)
+			}
 		}
 	} else {
-		valsCursor, err = roTx.CursorDupSort(d.ValuesTable)
+		valsCursor, err := roTx.CursorDupSort(d.ValuesTable)
 		if err != nil {
 			return Collation{}, fmt.Errorf("create %s values cursorDupsort: %w", d.FilenameBase, err)
 		}
-	}
-	defer valsCursor.Close()
-
-	kvs := make([]struct {
-		k, v []byte
-	}, 0, 128)
-
-	var stepInDB []byte
-	for k, v, err := valsCursor.First(); k != nil; {
-		if err != nil {
-			return coll, err
-		}
-
-		if d.LargeValues {
-			stepInDB = k[len(k)-8:]
-		} else {
-			stepInDB = v[:8]
-		}
-		if !bytes.Equal(stepBytes, stepInDB) { // [txFrom; txTo)
-			k, v, err = valsCursor.Next()
-			continue
-		}
-
-		if d.LargeValues {
-			kvs = append(kvs, struct {
-				k, v []byte
-			}{k[:len(k)-8], v})
-			k, v, err = valsCursor.Next()
-		} else {
+		defer valsCursor.Close()
+		for k, v, err := valsCursor.First(); k != nil; {
+			if err != nil {
+				return coll, err
+			}
+			if binary.BigEndian.Uint64(v[:8]) != stepVal {
+				k, v, err = valsCursor.Next()
+				continue
+			}
 			if _, err = comp.Write(k); err != nil {
 				return coll, fmt.Errorf("add %s values key [%x]: %w", d.FilenameBase, k, err)
 			}
 			if _, err = comp.Write(v[8:]); err != nil {
 				return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, k, v[8:], err)
 			}
-			k, v, err = valsCursor.(kv.CursorDupSort).NextNoDup()
-		}
-	}
-
-	sort.Slice(kvs, func(i, j int) bool {
-		return bytes.Compare(kvs[i].k, kvs[j].k) < 0
-	})
-	// check if any key is duplicated
-	for i := 1; i < len(kvs); i++ {
-		if bytes.Equal(kvs[i].k, kvs[i-1].k) {
-			return coll, fmt.Errorf("duplicate key [%x]", kvs[i].k)
-		}
-	}
-	for _, kv := range kvs {
-		if _, err = comp.Write(kv.k); err != nil {
-			return coll, fmt.Errorf("add %s values key [%x]: %w", d.FilenameBase, kv.k, err)
-		}
-		if _, err = comp.Write(kv.v); err != nil {
-			return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, kv.k, kv.v, err)
+			k, v, err = valsCursor.NextNoDup()
 		}
 	}
 

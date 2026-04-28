@@ -58,6 +58,13 @@ const (
 	// containing 200+ transactions nowadays, the practical limit will always
 	// be softResponseLimit.
 	maxReceiptsServe = 1024
+
+	// MaxBlockAccessListsServe is the maximum number of block access lists to
+	// serve for an eth/71 GetBlockAccessLists request (EIP-8159). The spec
+	// recommends a per-response cap of 2 MiB, which softResponseLimit already
+	// enforces; this cap limits the number of disk lookups even when
+	// individual BALs are small.
+	MaxBlockAccessListsServe = 1024
 )
 
 // NodeInfo represents a short summary of the `eth` sub-protocol metadata

@@ -275,15 +275,15 @@ func (a *ProtoForkable) BeginFilesRo() *ProtoForkableTx {
 // take dirtyFiles lock before using this
 func (a *ProtoForkable) DebugBeginDirtyFilesRo() *forkableDirtyFilesRoTx {
 	var files []*FilesItem
-	a.snaps.dirtyFiles.Walk(func(items []*FilesItem) bool {
-		files = append(files, items...)
-		for _, item := range items {
-			if !item.frozen {
-				item.refcount.Add(1)
-			}
+	iter := a.snaps.dirtyFiles.Iter()
+	defer iter.Release()
+	for ok := iter.First(); ok; ok = iter.Next() {
+		item := iter.Item()
+		files = append(files, item)
+		if !item.frozen {
+			item.refcount.Add(1)
 		}
-		return true
-	})
+	}
 	return &forkableDirtyFilesRoTx{
 		p:     a,
 		files: files,

@@ -27,6 +27,9 @@ import (
 	"unicode"
 
 	"github.com/c2h5oh/datasize"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	"github.com/libp2p/go-libp2p/core/peer"
+
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/gossip"
@@ -37,8 +40,6 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	pubsub "github.com/libp2p/go-libp2p-pubsub"
-	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 // PeerBanner is an interface for banning misbehaving peers.
@@ -96,7 +97,7 @@ func NewGossipManager(
 
 	go gm.observeBandwidth(cctx, maxInboundTrafficPerPeer, maxOutboundTrafficPerPeer, adaptableTrafficRequirements)
 	go gm.goCheckForkAndResubscribe(cctx)
-	gm.stats.goPrintStats(cctx)
+	//gm.stats.goPrintStats(cctx)
 	return gm
 }
 

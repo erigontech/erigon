@@ -100,7 +100,7 @@ func (p *p2pManager) peerMonitor(ctx context.Context) {
 					closed++
 				}
 			}
-			log.Debug("[caplin p2p] reporting connected peers", "connected", connected, "closed", closed, "emptyAddrs", emptyAddrs)
+			log.Trace("[caplin p2p] reporting connected peers", "connected", connected, "closed", closed, "emptyAddrs", emptyAddrs)
 		case <-ctx.Done():
 			return
 		}
