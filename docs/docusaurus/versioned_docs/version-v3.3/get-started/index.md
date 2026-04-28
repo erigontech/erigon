@@ -67,4 +67,13 @@ import Link from '@docusaurus/Link';
   <div className="lp-card-desc">Switch from go-ethereum to Erigon — what changes, what stays the same, and how to preserve your data.</div>
 </Link>
 
+<Link className="lp-card" to="/docs/v3.3/interacting-with-erigon/">
+  <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="16 18 22 12 16 6"/>
+    <polyline points="8 6 2 12 8 18"/>
+  </svg>
+  <div className="lp-card-title">Interacting with Erigon</div>
+  <div className="lp-card-desc">JSON-RPC and gRPC API reference — eth, debug, trace, engine, txpool, and other namespaces.</div>
+</Link>
+
 </div>
