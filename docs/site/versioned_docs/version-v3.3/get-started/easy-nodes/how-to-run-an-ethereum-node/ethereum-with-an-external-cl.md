@@ -40,7 +40,11 @@ Both [Prysm](ethereum-with-an-external-cl#erigon-with-prysm-as-the-external-cl) 
     ```
 
 </TabItem>
+</Tabs>
 
+## Erigon with Lighthouse as the external CL
+
+<Tabs>
 <TabItem value="lighthouse" label="Lighthouse">
 1.  Start Erigon adding the `--externalcl` flag:
 

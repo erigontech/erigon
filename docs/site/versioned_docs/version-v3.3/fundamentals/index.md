@@ -13,7 +13,7 @@ import Link from '@docusaurus/Link';
 
 <div className="lp-grid">
 
-<Link className="lp-card" to="/docs/v3.3/fundamentals/basic-usage">
+<Link className="lp-card" to="/v3.3/fundamentals/basic-usage">
   <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="4 17 10 11 4 5"/>
     <line x1="12" y1="19" x2="20" y2="19"/>
@@ -22,7 +22,7 @@ import Link from '@docusaurus/Link';
   <div className="lp-card-desc">Command-line flags, common arguments, and first steps running the Erigon binary.</div>
 </Link>
 
-<Link className="lp-card" to="/docs/v3.3/fundamentals/sync-modes">
+<Link className="lp-card" to="/v3.3/fundamentals/sync-modes">
   <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="23 4 23 10 17 10"/>
     <polyline points="1 20 1 14 7 14"/>
@@ -32,7 +32,7 @@ import Link from '@docusaurus/Link';
   <div className="lp-card-desc">Full, minimal, and archive sync explained — choose the right mode for your use case.</div>
 </Link>
 
-<Link className="lp-card" to="/docs/v3.3/fundamentals/configuring-erigon/">
+<Link className="lp-card" to="/v3.3/fundamentals/configuring-erigon/">
   <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="12" cy="12" r="3"/>
     <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
@@ -41,7 +41,7 @@ import Link from '@docusaurus/Link';
   <div className="lp-card-desc">Full CLI flag reference, config file format, and per-component tuning options.</div>
 </Link>
 
-<Link className="lp-card" to="/docs/v3.3/fundamentals/supported-networks">
+<Link className="lp-card" to="/v3.3/fundamentals/supported-networks">
   <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="12" cy="12" r="10"/>
     <line x1="2" y1="12" x2="22" y2="12"/>
@@ -51,7 +51,7 @@ import Link from '@docusaurus/Link';
   <div className="lp-card-desc">All chains and testnets supported by Erigon, with network-specific flags and notes.</div>
 </Link>
 
-<Link className="lp-card" to="/docs/v3.3/fundamentals/optimizing-storage">
+<Link className="lp-card" to="/v3.3/fundamentals/optimizing-storage">
   <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <ellipse cx="12" cy="5" rx="9" ry="3"/>
     <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
@@ -61,7 +61,7 @@ import Link from '@docusaurus/Link';
   <div className="lp-card-desc">Pruning, snapshots, and techniques to minimize disk footprint.</div>
 </Link>
 
-<Link className="lp-card" to="/docs/v3.3/fundamentals/docker-compose">
+<Link className="lp-card" to="/v3.3/fundamentals/docker-compose">
   <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polygon points="12 2 2 7 12 12 22 7 12 2"/>
     <polyline points="2 17 12 22 22 17"/>
@@ -71,7 +71,7 @@ import Link from '@docusaurus/Link';
   <div className="lp-card-desc">Run Erigon and all its modules together with Docker Compose.</div>
 </Link>
 
-<Link className="lp-card" to="/docs/v3.3/fundamentals/security">
+<Link className="lp-card" to="/v3.3/fundamentals/security">
   <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
   </svg>
@@ -79,7 +79,7 @@ import Link from '@docusaurus/Link';
   <div className="lp-card-desc">Firewall rules, API exposure best practices, and hardening recommendations.</div>
 </Link>
 
-<Link className="lp-card" to="/docs/v3.3/fundamentals/modules/">
+<Link className="lp-card" to="/v3.3/fundamentals/modules/">
   <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <rect x="3" y="3" width="7" height="7"/>
     <rect x="14" y="3" width="7" height="7"/>

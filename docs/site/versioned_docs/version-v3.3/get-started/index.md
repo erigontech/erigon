@@ -13,7 +13,7 @@ import Link from '@docusaurus/Link';
 
 <div className="lp-grid">
 
-<Link className="lp-card" to="/docs/v3.3/get-started/why-using-erigon">
+<Link className="lp-card" to="/v3.3/get-started/why-using-erigon">
   <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
   </svg>
@@ -21,7 +21,7 @@ import Link from '@docusaurus/Link';
   <div className="lp-card-desc">Performance benchmarks, disk savings, and architecture advantages over other Ethereum clients.</div>
 </Link>
 
-<Link className="lp-card" to="/docs/v3.3/get-started/hardware-requirements">
+<Link className="lp-card" to="/v3.3/get-started/hardware-requirements">
   <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <rect x="4" y="4" width="16" height="16" rx="2"/>
     <rect x="9" y="9" width="6" height="6"/>
@@ -38,7 +38,7 @@ import Link from '@docusaurus/Link';
   <div className="lp-card-desc">Minimum and recommended specs for mainnet, testnets, and archive mode.</div>
 </Link>
 
-<Link className="lp-card" to="/docs/v3.3/get-started/installation/">
+<Link className="lp-card" to="/v3.3/get-started/installation/">
   <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
     <polyline points="7 10 12 15 17 10"/>
@@ -48,7 +48,7 @@ import Link from '@docusaurus/Link';
   <div className="lp-card-desc">Binary releases, building from source, Docker images, and upgrade instructions.</div>
 </Link>
 
-<Link className="lp-card" to="/docs/v3.3/get-started/easy-nodes/">
+<Link className="lp-card" to="/v3.3/get-started/easy-nodes/">
   <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
   </svg>
@@ -56,7 +56,7 @@ import Link from '@docusaurus/Link';
   <div className="lp-card-desc">One-command guided setup for Ethereum, Gnosis Chain, and Polygon nodes with sensible defaults.</div>
 </Link>
 
-<Link className="lp-card" to="/docs/v3.3/get-started/migrating-from-geth">
+<Link className="lp-card" to="/v3.3/get-started/migrating-from-geth">
   <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="17 1 21 5 17 9"/>
     <path d="M3 11V9a4 4 0 0 1 4-4h14"/>
@@ -67,7 +67,7 @@ import Link from '@docusaurus/Link';
   <div className="lp-card-desc">Switch from go-ethereum to Erigon — what changes, what stays the same, and how to preserve your data.</div>
 </Link>
 
-<Link className="lp-card" to="/docs/v3.3/interacting-with-erigon/">
+<Link className="lp-card" to="/v3.3/interacting-with-erigon/">
   <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="16 18 22 12 16 6"/>
     <polyline points="8 6 2 12 8 18"/>

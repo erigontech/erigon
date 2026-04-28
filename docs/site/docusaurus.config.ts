@@ -11,8 +11,8 @@ const config: Config = {
   organizationName: 'erigontech',
   projectName: 'docs',
   trailingSlash: false,
-  onBrokenLinks: 'warn',
-  onBrokenMarkdownLinks: 'warn',
+  onBrokenLinks: 'throw',
+  onBrokenMarkdownLinks: 'throw',
   i18n: { defaultLocale: 'en', locales: ['en'] },
 
   plugins: [

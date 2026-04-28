@@ -25,7 +25,7 @@ These flags cover the general behavior and configuration of the Erigon client.
 * `--config value`: Sets Erigon flags using a YAML/TOML file.
 * `--version, -v`: Prints the version information.
 * `--help, -h`: Displays help information.
-* `--chain value`: Sets the name of the [network](../supported-networks) to join.
+* `--chain value`: Sets the name of the [network](../fundamentals/supported-networks) to join.
   * Default: `mainnet`
 * `--networkid value`: Explicitly sets the network ID.
   * Default: `1`
@@ -469,8 +469,8 @@ Erigon supports configuration through environment variables, primarily for exper
 
 **Synchronization and Pruning:**
 
-* `NO_PRUNE` - Disables pruning when set to true [5](configuring-erigon#0-4)
-* `NO_MERGE` - Disables merging operations [6](configuring-erigon#0-5)
+* `NO_PRUNE` - Disables pruning when set to true
+* `NO_MERGE` - Disables merging operations
 * `PRUNE_TOTAL_DIFFICULTY` - Controls total difficulty pruning (default: `true`)
 * `MAX_REORG_DEPTH` - Sets maximum reorganization depth (default: `512`)
 

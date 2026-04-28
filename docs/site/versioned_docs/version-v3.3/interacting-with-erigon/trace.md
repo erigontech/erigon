@@ -645,3 +645,15 @@ Response
   ]
 }
 ```
+
+## The Default Block Parameter
+
+Several trace methods accept an optional block parameter to specify which block to query. The following string values are recognised in addition to integer block numbers:
+
+| Value | Description |
+|---|---|
+| `"latest"` | The most recent block that has been mined (default when omitted) |
+| `"earliest"` | The genesis block (block 0) |
+| `"pending"` | The pending block currently being assembled by the miner |
+
+Integer block numbers may be provided as a hex-encoded quantity (e.g. `"0x1b4"` for block 436).

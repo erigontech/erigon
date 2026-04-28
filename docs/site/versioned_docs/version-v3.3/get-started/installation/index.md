@@ -69,7 +69,7 @@ _(Note: The container itself is built on multi-platform Linux architectures (lin
 * Images are stored at [https://hub.docker.com/r/erigontech/erigon](https://hub.docker.com/r/erigontech/erigon).
 
 :::warning
-**Windows**: note that Docker on Windows is affected by [WSL2 Performance and Data Storage](/docs/v3.3/get-started/installation/#install-wsl).
+**Windows**: note that Docker on Windows is affected by [WSL2 Performance and Data Storage](/ v3.3/get-started/installation/#install-wsl).
 :::
 
 #### **Download and start Erigon in Docker**
@@ -112,8 +112,8 @@ docker run -it erigontech/erigon:v3.3.10 --chain=hoodi --prune.mode=minimal --da
 
 * `-v` connects a folder on your computer to the container (must have authorization)
 * `-it` lets you see what's happening and interact with Erigon
-* `--chain=hoodi` specifies which [network](/docs/v3.3/fundamentals/supported-networks) to sync
-* `--prune.mode=minimal` tells Erigon to use minimal [Sync Mode](/docs/v3.3/fundamentals/sync-modes)
+* `--chain=hoodi` specifies which [network](/ v3.3/fundamentals/supported-networks) to sync
+* `--prune.mode=minimal` tells Erigon to use minimal [Sync Mode](/ v3.3/fundamentals/sync-modes)
 * `--datadir` tells Erigon where to store data inside the container
 
 </details>
@@ -457,7 +457,7 @@ WSL enables you to run a complete GNU/Linux environment natively within Windows,
 
 **Building Erigon**
 
-Once WSL2 is set up, you can build and run Erigon exactly as you would on a regular [Linux/macOS](/docs/v3.3/get-started/installation/#linuxmacos) distribution.
+Once WSL2 is set up, you can build and run Erigon exactly as you would on a regular [Linux/macOS](/ v3.3/get-started/installation/#linuxmacos) distribution.
 
 **Performance and Data Storage**
 
@@ -491,4 +491,4 @@ If you need to connect to Erigon from an external network (e.g., opening a port 
 
 Once you have Erigon installed, you can see Basic Usage to configure your node.
 
-- [Basic Usage](/docs/v3.3/fundamentals/basic-usage)
+- [Basic Usage](/ v3.3/fundamentals/basic-usage)
