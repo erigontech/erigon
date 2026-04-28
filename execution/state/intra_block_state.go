@@ -2511,33 +2511,34 @@ func (sdb *IntraBlockState) VersionedWrites(checkDirty bool) VersionedWrites {
 				}
 			}
 
-			// If an account was selfdestructed, strip writes that don't affect
-			// state: keep SelfDestructPath, BalancePath (all values — the BAL
-			// needs to see residual balance from EIP-7708 case 2), and
-			// IncarnationPath (so resurrection txs find the prior incarnation).
-			// Other paths (NoncePath, CodePath) are dropped because selfdestruct
-			// resets them.
-			var appends = make(VersionedWrites, 0, len(vwrites))
+			// First pass: detect whether this account was selfdestructed in
+			// the current TX. We must do this before filtering because vwrites
+			// is a map and iteration order is non-deterministic — folding the
+			// detection into the filter loop would drop storage writes that
+			// happened to iterate before the SelfDestructPath entry.
 			var selfDestructed bool
 			for _, v := range vwrites {
-				v := v // local copy for pointer
 				if v.Path == SelfDestructPath && v.Val.(bool) {
 					selfDestructed = true
-					prevs := appends
-					appends = VersionedWrites{&v}
-					for _, prev := range prevs {
-						if prev.Path == BalancePath || prev.Path == IncarnationPath {
-							appends = append(appends, prev)
-						}
-					}
-				} else {
-					if selfDestructed {
-						if v.Path == BalancePath || v.Path == IncarnationPath || v.Path == StoragePath {
-							appends = append(appends, &v)
-						}
-					} else {
-						appends = append(appends, &v)
-					}
+					break
+				}
+			}
+
+			// Second pass: if selfdestructed, keep only SelfDestructPath,
+			// BalancePath (the BAL needs residual balance from EIP-7708 case 2),
+			// IncarnationPath (so resurrection txs find the prior incarnation),
+			// and StoragePath (the calculator needs explicit per-slot DELETE
+			// entries since it can't use DomainDelPrefix). NoncePath and CodePath
+			// are dropped because selfdestruct resets them.
+			appends := make(VersionedWrites, 0, len(vwrites))
+			for _, v := range vwrites {
+				v := v // local copy for pointer
+				if !selfDestructed ||
+					v.Path == SelfDestructPath ||
+					v.Path == BalancePath ||
+					v.Path == IncarnationPath ||
+					v.Path == StoragePath {
+					appends = append(appends, &v)
 				}
 			}
 			writes = append(writes, appends...)
