@@ -19,7 +19,7 @@ For a more accurate view of Erigon's memory usage, use one of these tools:
 
 * **`vmmap -summary PID`** _(macOS only)_: Shows a detailed breakdown with separate **`MALLOC ZONE`** and **`REGION TYPE`** sections for application memory and OS page cache.
 * **`pmap -x PID`** _(Linux)_: Prints a per-mapping breakdown of RSS and dirty pages. For the full raw detail use `cat /proc/<PID>/smaps`.
-* **Prometheus Dashboard**: This provides a graphical representation of the Go application's memory usage, excluding the OS page cache. You can run it with `make prometheus` and access it in your browser at `localhost:3000` with the credentials `admin/admin`.
+* **Prometheus Dashboard**: This provides a graphical representation of the Go application's memory usage, excluding the OS page cache. You can run it with `make prometheus` and access it in your browser at `localhost:3000` with the credentials `admin/admin`. See [Creating a Dashboard](/fundamentals/creating-a-dashboard) for full setup instructions.
 
 Erigon typically uses about **4 GB of RAM** during a genesis sync and about **1 GB** during normal operation. The OS page cache, however, can use an unlimited amount of memory.
 
@@ -50,7 +50,7 @@ Certain file system features, such as `autodefrag` on btrfs, can drastically inc
 
 #### The `--mount` Option and BuildKit Errors
 
-If you're encountering a BuildKit error when starting Erigon, it's likely due to an issue with the `--mount` option in your command. To fix this, you can use the following command to start Erigon with `docker-compose`:
+If you're encountering a BuildKit error when starting Erigon, it's likely due to an issue with the `--mount` option in your command. To fix this, you can use the following command to start Erigon with `docker-compose`. See [Docker Compose](/fundamentals/docker-compose) for the full setup guide.
 
 ```bash
 XDG_DATA_HOME=/preferred/data/folder make docker-compose
@@ -68,6 +68,6 @@ vm.max_map_count = 16777216
 
 ### Changing `--db.pagesize` After First Sync
 
-The `--db.pagesize` flag sets the MDBX page size and **must be chosen before the first sync**. It cannot be changed on an existing database without deleting the datadir and re-syncing from scratch.
+The `--db.pagesize` flag sets the MDBX page size and **must be chosen before the first sync**. It cannot be changed on an existing database without deleting the datadir and re-syncing from scratch. See [Configuring Erigon](/fundamentals/configuring-erigon) for all database flags.
 
-The default page size is `16KB`. For cloud drives or any storage with high sequential I/O latency, a larger page size (e.g. `--db.pagesize=64kb`) reduces database fragmentation and improves I/O efficiency.
+The default page size is `16KB`. For cloud drives or any storage with high sequential I/O latency, a larger page size (e.g. `--db.pagesize=64kb`) reduces database fragmentation and improves I/O efficiency. See [Performance Tricks](/fundamentals/performance-tricks) and [Optimizing Storage](/fundamentals/optimizing-storage) for further tuning options.
