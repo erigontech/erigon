@@ -498,7 +498,7 @@ func statelessGasCall(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 }
 
 func statefulGasCall(evm *EVM, callContext *CallContext, gas mdgas.MdGas, availableGas mdgas.MdGas, transfersValue bool) (mdgas.MdGas, error) {
-	var accountGas, stateGas uint64
+	var accountGas uint64
 	var address = accounts.InternAddress(callContext.Stack.Back(1).Bytes20())
 	rules := evm.ChainRules()
 	if rules.IsSpuriousDragon {
@@ -510,12 +510,13 @@ func statefulGasCall(evm *EVM, callContext *CallContext, gas mdgas.MdGas, availa
 		// tracking unconditionally, since the read happens regardless of
 		// whether the CALL proceeds or transfers value.
 		evm.IntraBlockState().MarkAddressAccess(address, false)
-		if transfersValue && empty {
-			if rules.IsAmsterdam {
-				stateGas = params.StateBytesNewAccount * evm.Context.CostPerStateByte
-			} else {
-				accountGas = params.CallNewAccountGas
-			}
+		// EIP-8037: under Amsterdam, the state gas for materializing a new
+		// account via CALL-with-value is no longer charged inline. The
+		// CreateAccount call inside evm.call() emits a createObjectChange
+		// after the called frame's snapshot, so the called frame's commit
+		// walk picks up +112. Pre-Amsterdam keeps the regular CallNewAccountGas.
+		if transfersValue && empty && !rules.IsAmsterdam {
+			accountGas = params.CallNewAccountGas
 		}
 	} else {
 		exists, err := evm.IntraBlockState().Exist(address)
@@ -539,13 +540,6 @@ func statefulGasCall(evm *EVM, callContext *CallContext, gas mdgas.MdGas, availa
 	if dbg.TraceDynamicGas && evm.intraBlockState.Trace() {
 		fmt.Printf("%d (%d.%d) Call Gas: account: %d\n",
 			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), accountGas)
-	}
-
-	if stateGas > 0 {
-		gas.State, overflow = math.SafeAdd(gas.State, stateGas)
-		if overflow {
-			return mdgas.MdGas{}, ErrGasUintOverflow
-		}
 	}
 
 	return gas, nil

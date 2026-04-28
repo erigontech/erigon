@@ -297,6 +297,11 @@ const (
 	GasChangeCallFailedExecution GasChangeReason = 14
 	// GasChangeDelegatedDesignation is the amount of gas that will be charged for resolution of delegated designation.
 	GasChangeDelegatedDesignation GasChangeReason = 15
+	// GasChangeFrameStateGas is the EIP-8037 per-frame state-gas charge or
+	// credit emitted at frame commit, computed via journal walk.
+	// Positive (charge) reduces gas.State (with spill into gas.Regular).
+	// Negative (credit) increases gas.State and decrements executionStateGas.
+	GasChangeFrameStateGas GasChangeReason = 16
 
 	// GasChangeIgnored is a special value that can be used to indicate that the gas change should be ignored as
 	// it will be "manually" tracked by a direct emit of the gas change event.

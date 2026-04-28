@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -1023,20 +1022,11 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 
 // execCreate is the shared implementation for opCreate (salt == nil) and opCreate2 (salt != nil).
 func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, input []byte, salt *uint256.Int) (uint64, []byte, error) {
-	var accountStateGas uint64
-	if evm.ChainRules().IsAmsterdam {
-		// EIP-8037: charge state gas for account creation after the static-context
-		// check so that it is not consumed on early failures where no state is
-		// created (per execution-specs#2608). On any failure (silent
-		// balance/nonce/depth/collision, child revert, child halt, code deposit
-		// OOG, oversized code, invalid prefix) the charge is refunded to the
-		// reservoir below since no account was created.
-		accountStateGas = uint64(params.StateBytesNewAccount) * evm.Context.CostPerStateByte
-		if !scope.useMdGas(evm, accountStateGas, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeIgnored) {
-			return pc, nil, ErrOutOfGas
-		}
-	}
-
+	// EIP-8037: state gas for account creation is no longer pre-charged here.
+	// On success, the createObjectChange emitted by evm.Create's CreateAccount
+	// is picked up by the frame-commit walk in evm.create. On silent failure
+	// (collision/balance/depth/nonce overflow), the snapshot is pushed and
+	// immediately popped so no journal entry persists → 0 bytes counted.
 	gas := scope.Gas()
 	if evm.ChainRules().IsTangerineWhistle {
 		gas.Regular -= gas.Regular / 64
@@ -1068,14 +1058,6 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	scope.Stack.push(result)
 
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
-
-	// EIP-8037: on any CREATE failure no account was created, so refund the
-	// account-creation state gas to the reservoir and back out of the block
-	// accounting. The 32*cpsb per-storage-slot and code-deposit charges are
-	// handled separately (undone by snapshot revert / preDeposit rollback).
-	if suberr != nil && evm.ChainRules().IsAmsterdam && accountStateGas > 0 {
-		evm.CreditStateGasRefund(scope, accountStateGas)
-	}
 
 	if suberr == ErrExecutionReverted {
 		evm.returnData = res // set REVERT data to return data buffer

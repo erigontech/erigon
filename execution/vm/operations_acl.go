@@ -74,10 +74,13 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		if original.Eq(&current) {
 			if original.IsZero() { // create slot (2.1.1)
 				if rules.IsAmsterdam {
-					return mdgas.MdGas{Regular: cost + params.SstoreSetGasEIP8037, State: 32 * evm.Context.CostPerStateByte}, nil
-				} else {
-					return mdgas.MdGas{Regular: cost + params.SstoreSetGasEIP2200}, nil
+					// EIP-8037: state gas for the new slot is no longer charged
+					// inline. It is computed at frame commit by the journal walk
+					// (see IntraBlockState.ComputeFrameStateBytes). Only the
+					// regular-gas component changes here.
+					return mdgas.MdGas{Regular: cost + params.SstoreSetGasEIP8037}, nil
 				}
+				return mdgas.MdGas{Regular: cost + params.SstoreSetGasEIP2200}, nil
 			}
 			if value.IsZero() { // delete slot (2.1.2b)
 				evm.IntraBlockState().AddRefund(clearingRefund)
@@ -98,11 +101,12 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 				// EIP 2200 Original clause:
 				//evm.StateDB.AddRefund(params.SstoreSetGasEIP2200 - params.SloadGasEIP2200)
 				if rules.IsAmsterdam {
-					// EIP-8037: regular gas refund still flows through the 20%-capped
-					// refund_counter; state gas refund is uncapped and credited
-					// directly to the current frame's reservoir.
+					// EIP-8037: regular-gas refund still flows through the 20%-capped
+					// refund_counter. The state-gas component is no longer credited
+					// inline — the slot's net contribution is computed at frame
+					// commit via the journal walk, so a 0→X→0 within the same tx
+					// naturally produces 0 state gas without any explicit refund.
 					evm.IntraBlockState().AddRefund(params.SstoreSetGasEIP8037 - params.WarmStorageReadCostEIP2929)
-					evm.CreditStateGasRefund(callContext, 32*evm.Context.CostPerStateByte)
 				} else {
 					evm.IntraBlockState().AddRefund(params.SstoreSetGasEIP2200 - params.WarmStorageReadCostEIP2929)
 				}
@@ -292,12 +296,12 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 		if balance.IsZero() && address != callContext.Address() {
 			evm.IntraBlockState().MarkNewReadsInternal(address, beneficiaryReadsBefore)
 		}
-		if empty && !balance.IsZero() {
-			if evm.chainRules.IsAmsterdam {
-				gas.State = params.StateBytesNewAccount * evm.Context.CostPerStateByte
-			} else {
-				gas.Regular += params.CreateBySelfdestructGas
-			}
+		// EIP-8037: under Amsterdam, the state gas for a new beneficiary account
+		// is no longer charged inline — the AddBalance call inside opSelfdestruct
+		// emits a createObjectChange that's picked up by the frame-commit walk.
+		// Pre-Amsterdam still charges CreateBySelfdestructGas (regular only).
+		if empty && !balance.IsZero() && !evm.chainRules.IsAmsterdam {
+			gas.Regular += params.CreateBySelfdestructGas
 		}
 
 		hasSelfdestructed, err := evm.IntraBlockState().HasSelfdestructed(callContext.Address())
