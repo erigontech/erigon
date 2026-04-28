@@ -1486,6 +1486,11 @@ func doIntegrity(cliCtx *cli.Context) error {
 		return nil
 	}
 
+	if len(requestedChecks) == 0 {
+		logger.Warn("[integrity] no checks to run (all filtered out)")
+		return nil
+	}
+
 	failFast := cliCtx.Bool("failFast")
 	fromStep := cliCtx.Uint64("fromStep")
 
@@ -1555,6 +1560,15 @@ func doIntegrity(cliCtx *cli.Context) error {
 	blockReader, _ := blockRetire.IO()
 	heimdallStore, _ := blockRetire.BorStore()
 
+	var commitmentHistoryEnabled bool
+	if err := chainDB.View(ctx, func(tx kv.Tx) error {
+		var err error
+		commitmentHistoryEnabled, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
+		return err
+	}); err != nil {
+		return fmt.Errorf("failed to read CommitmentHistory config: %w", err)
+	}
+
 	runCheck := func(ctx context.Context, chk integrity.Check) error {
 		switch chk {
 		case integrity.BlocksTxnID:
@@ -1601,12 +1615,12 @@ func doIntegrity(cliCtx *cli.Context) error {
 			scCopy.SampleRatio = 0 // Sudeep will try to speedup it different way: by use `cache`
 			return integrity.CheckCommitmentKvi(ctx, scCopy, db, cache, failFast, logger)
 		case integrity.CommitmentKvDeref:
-			if chainConfig.ChainName == networkname.Bloatnet {
-				log.Warn("[todo] CommitmentKvDeref disabled on bloatnet. see https://github.com/erigontech/erigon/issues/20814")
-				return nil // TODO: taking too long on bloatnet
-			}
 			return integrity.CheckCommitmentKvDeref(ctx, db, cache, failFast, logger)
 		case integrity.CommitmentHistVal:
+			if !commitmentHistoryEnabled {
+				logger.Info("[integrity] CommitmentHistVal skipped because commitment history is not enabled on this datadir")
+				return nil
+			}
 			scCopy := sc
 			scCopy.SampleRatio /= 100 // it's very slow check
 			if chainConfig.ChainName == networkname.Bloatnet {
@@ -1614,6 +1628,10 @@ func doIntegrity(cliCtx *cli.Context) error {
 			}
 			return integrity.CheckCommitmentHistVal(ctx, scCopy, db, blockReader, failFast, logger)
 		case integrity.StateRootVerifyByHistory:
+			if !commitmentHistoryEnabled {
+				logger.Info("[integrity] StateRootVerifyByHistory skipped because commitment history is not enabled on this datadir")
+				return nil
+			}
 			to, err := stateProgress(ctx, db, blockReader.TxnumReader())
 			if err != nil {
 				return err
