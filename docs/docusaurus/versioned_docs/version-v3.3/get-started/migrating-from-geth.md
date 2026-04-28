@@ -1,13 +1,11 @@
 ---
 title: "Migrating from Geth"
 sidebar_position: 4
+hide_title: true
 ---
 
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
-
----
----
 
 # Migrating from Geth
 

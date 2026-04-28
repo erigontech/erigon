@@ -2,13 +2,11 @@
 title: "Hardware Requirements"
 description: "Minimum and recommended specs for running Erigon on mainnet, testnets, and archive mode."
 sidebar_position: 2
+hide_title: true
 ---
 
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
-
----
----
 
 # Hardware Requirements
 
