@@ -1,10 +1,10 @@
 ---
-title: "Contributing"
+title: "Contributing to these docs"
 description: "How to contribute code, report bugs, write docs, and submit pull requests to the Erigon project."
 sidebar_position: 1
 ---
 
-# Contributing
+# Contributing to these docs
 
 The Erigon documentation is built with [Docusaurus](https://docusaurus.io) and lives in the [erigontech/erigon](https://github.com/erigontech/erigon) repository under `docs/site/`.
 
