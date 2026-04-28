@@ -18,8 +18,26 @@ async function fetchLatestVersion(): Promise<string> {
   }
 }
 
+async function fetchLatestV33Version(): Promise<string> {
+  try {
+    const res = await fetch(
+      'https://api.github.com/repos/erigontech/erigon/releases?per_page=50',
+      {headers: {Accept: 'application/vnd.github.v3+json'}},
+    );
+    if (!res.ok) return '3.3.10';
+    const releases = await res.json() as Array<{tag_name: string; prerelease: boolean}>;
+    const latest = releases.find((r) => !r.prerelease && r.tag_name.startsWith('v3.3.'));
+    return latest?.tag_name.replace(/^v/, '') ?? '3.3.10';
+  } catch {
+    return '3.3.10';
+  }
+}
+
 export default async function createConfig(): Promise<Config> {
-  const latestVersion = await fetchLatestVersion();
+  const [latestVersion, v33Version] = await Promise.all([
+    fetchLatestVersion(),
+    fetchLatestV33Version(),
+  ]);
 
   return {
     title: 'Erigon Documentation',
@@ -72,7 +90,7 @@ export default async function createConfig(): Promise<Config> {
               badge: false,
             },
           },
-          remarkPlugins: [[versionReplace, {version: latestVersion}]],
+          remarkPlugins: [[versionReplace, {currentVersion: latestVersion, v33Version}]],
         },
         blog: false as false,
         theme: {customCss: './src/css/custom.css'},

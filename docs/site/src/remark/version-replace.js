@@ -1,9 +1,11 @@
 // Remark plugin — replaces {ERIGON_VERSION} in all text, inlineCode, and code nodes.
-// Configured in docusaurus.config.ts with the version fetched from GitHub at build time.
+// Uses vfile.path to pick the right version: v3.3 versioned docs get v33Version,
+// everything else (current docs) gets currentVersion.
 function versionReplace(options) {
-  const version = (options && options.version) || 'latest';
+  const currentVersion = (options && options.currentVersion) || 'latest';
+  const v33Version = (options && options.v33Version) || 'latest';
 
-  function visit(node) {
+  function visit(node, version) {
     if (
       node.type === 'text' ||
       node.type === 'inlineCode' ||
@@ -12,12 +14,13 @@ function versionReplace(options) {
       node.value = node.value.replace(/\{ERIGON_VERSION\}/g, version);
     }
     if (node.children) {
-      node.children.forEach(visit);
+      node.children.forEach((child) => visit(child, version));
     }
   }
 
-  return function (tree) {
-    visit(tree);
+  return function (tree, vfile) {
+    const isV33 = vfile && vfile.path && vfile.path.includes('version-v3.3');
+    visit(tree, isV33 ? v33Version : currentVersion);
   };
 }
 

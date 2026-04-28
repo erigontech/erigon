@@ -9,11 +9,13 @@ import TabItem from '@theme/TabItem';
 export const go = (id) => {
   const el = document.getElementById(id);
   if (!el) return;
+  const scroll = () => el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   if (!el.open) {
-    const summary = el.querySelector('summary');
-    if (summary) summary.click();
+    el.addEventListener('toggle', scroll, { once: true });
+    el.open = true;
+  } else {
+    scroll();
   }
-  setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
 };
 
 
