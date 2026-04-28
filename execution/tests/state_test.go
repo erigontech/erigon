@@ -60,7 +60,14 @@ func TestLegacyCancunState(t *testing.T) {
 		t.Skip()
 	}
 	stateTestSetup(t)
-	runStateTests(t, new(testutil.TestMatcher), filepath.Join(legacyDir, "LegacyTests", "Cancun", "GeneralStateTests"))
+
+	st := new(testutil.TestMatcher)
+	// Slow tests
+	st.Slow(`^stPreCompiledContracts/precompsEIP2929Cancun`)
+	// Very slow tests
+	st.SkipLoad(`^stTimeConsuming/`)
+
+	runStateTests(t, st, filepath.Join(legacyDir, "LegacyTests", "Cancun", "GeneralStateTests"))
 }
 
 func TestState(t *testing.T) {
