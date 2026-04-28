@@ -186,14 +186,21 @@ func useMdGas(evm *EVM, initial mdgas.MdGas, gas uint64, t mdgas.MdGasType, trac
 			}
 			return initial, true
 		}
-		// otherwise use up all remaining state gas and try to use some from the regular gas
-		gas = gas - initial.State
+		// State alone is insufficient. Check if spilling into Regular can
+		// cover the remainder before mutating anything — useMdGas must be
+		// transactional so that on insufficient gas the frame's reservoir
+		// is left untouched (so revert-time restoration of consumed-by-
+		// children state gas works correctly per EIP-8037).
+		needFromRegular := gas - initial.State
+		if initial.Regular < needFromRegular {
+			return initial, false
+		}
 		initial.State = 0
-		initial.Regular, ok = useGas(initial.Regular, gas, tracer, reason)
-		if ok && evm != nil {
+		initial.Regular, _ = useGas(initial.Regular, needFromRegular, tracer, reason)
+		if evm != nil {
 			evm.executionStateGas += originalGas
 		}
-		return initial, ok
+		return initial, true
 	case mdgas.RegularGas:
 		initial.Regular, ok = useGas(initial.Regular, gas, tracer, reason)
 		if ok && evm != nil {

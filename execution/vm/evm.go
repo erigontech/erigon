@@ -492,12 +492,26 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	// when we're in Homestead this also counts for code storage gas errors.
 	if err != nil || evm.config.RestoreState {
 		if !frameAccumulatorPopped {
-			evm.popFrameAccumulator()
+			poppedChildBytes := evm.popFrameAccumulator()
+			// EIP-8037: on child revert or exceptional halt, all state gas
+			// consumed by committed descendants — both from the reservoir and
+			// any that spilled into gas_left — is restored to this frame's
+			// reservoir (which is then propagated to the parent via
+			// restoreChildGas). Skip in RestoreState mode (caller discards
+			// results anyway). At depth==0 this also naturally zeroes
+			// evm.executionStateGas because the top frame's accumulator holds
+			// the sum of all charged bytes for the tx.
+			if !evm.config.RestoreState && evm.chainRules.IsAmsterdam && poppedChildBytes > 0 {
+				restoreGas := poppedChildBytes * evm.Context.CostPerStateByte
+				gas.State += restoreGas
+				if restoreGas > evm.executionStateGas {
+					evm.executionStateGas = 0
+				} else {
+					evm.executionStateGas -= restoreGas
+				}
+			}
 		}
 		evm.handleFrameRevert(&gas, err, depth, snapshot)
-		// On top-level revert, evm.executionStateGas keeps its accumulated value
-		// so TxnExecutor can subtract it from the receipt gas. Block-level
-		// accounting uses 0 explicitly when vmerr != nil (TxnExecutor decision).
 	} else if !frameAccumulatorPopped {
 		// Pre-Amsterdam: no state-gas charging happens in this branch; pop the
 		// accumulator without propagating.
@@ -762,12 +776,21 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	// when we're in Homestead, this also counts for code storage gas errors.
 	if err != nil && (evm.chainRules.IsHomestead || err != ErrCodeStoreOutOfGas) {
 		if !frameAccumulatorPopped {
-			evm.popFrameAccumulator()
+			poppedChildBytes := evm.popFrameAccumulator()
+			// EIP-8037: on child revert or exceptional halt, restore all state
+			// gas consumed by committed descendants to this frame's reservoir.
+			// See evm.call() for the full rationale.
+			if !evm.config.RestoreState && evm.chainRules.IsAmsterdam && poppedChildBytes > 0 {
+				restoreGas := poppedChildBytes * evm.Context.CostPerStateByte
+				gasRemaining.State += restoreGas
+				if restoreGas > evm.executionStateGas {
+					evm.executionStateGas = 0
+				} else {
+					evm.executionStateGas -= restoreGas
+				}
+			}
 		}
 		evm.handleFrameRevert(&gasRemaining, err, depth, snapshot)
-		// On top-level revert, evm.executionStateGas keeps its accumulated value
-		// so TxnExecutor can subtract it from the receipt gas. Block-level
-		// accounting uses 0 explicitly when vmerr != nil (TxnExecutor decision).
 	} else if !frameAccumulatorPopped {
 		// Pre-Amsterdam or RestoreState: pop the accumulator without
 		// propagating (no state-gas charging happens in this branch).
