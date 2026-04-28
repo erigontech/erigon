@@ -280,21 +280,10 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		limitedBigJump = (fcuBlockNum-finishProgressBefore)+limitedBigJumpPadding > uint64(e.syncCfg.LoopBlockLimit)
 	}
 
-	knownTip := stagedsync.KnownTip(headersProgressBefore, e.blockReader.FrozenBlocks(), fcuBlockNum)
-	lifecycleInitialCycle, err := stagedsync.IsInitialCycleFromProgress(tx, knownTip, finishProgressBefore, e.syncCfg.InitialCycleBlockTTL)
-	if err != nil {
-		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-	}
-	initialCycle := limitedBigJump || lifecycleInitialCycle
-
 	isSynced := finishProgressBefore > 0 && finishProgressBefore > e.blockReader.FrozenBlocks() && finishProgressBefore == headersProgressBefore
-	if initialCycle {
-		isSynced = false
-	}
 	if limitedBigJump {
+		isSynced = false
 		e.logger.Info("[sync] limited big jump", "from", finishProgressBefore, "to", fcuHeader.Number.Uint64(), "amount", uint64(e.syncCfg.LoopBlockLimit), "padding", limitedBigJumpPadding)
-	} else if lifecycleInitialCycle {
-		e.logger.Debug("[sync] lifecycle initial cycle", "finish", finishProgressBefore, "knownTip", knownTip, "ttl", e.syncCfg.InitialCycleBlockTTL)
 	}
 
 	canonicalHash, err := e.canonicalHash(ctx, tx, fcuHeader.Number.Uint64())
@@ -479,6 +468,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		rawdb.WriteHeadBlockHash(tx, blockHash)
 	}
 	// Run the forkchoice
+	initialCycle := limitedBigJump
 	firstCycle := false
 
 	tx, err = e.pipelineExecutor.RunLoop(ctx, currentContext, tx, RunLoopConfig{

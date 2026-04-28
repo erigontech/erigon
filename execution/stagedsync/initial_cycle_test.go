@@ -107,6 +107,12 @@ func TestUpdateTipReachedFromProgress(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, uint64(1500), block)
+
+	require.NoError(t, UpdateTipReachedFromProgress(tx, 1200, 1200))
+	block, ok, err = rawdb.ReadLastTipReachedBlock(tx)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, uint64(1500), block)
 }
 
 func TestIsInitialCycleFromProgressUsesKnownTip(t *testing.T) {

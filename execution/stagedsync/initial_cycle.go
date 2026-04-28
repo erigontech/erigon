@@ -60,8 +60,15 @@ func UpdateTipReached(tx kv.GetPut, frozenBlocks uint64, knownTipHints ...uint64
 	return UpdateTipReachedFromProgress(tx, KnownTip(headersProgress, frozenBlocks, knownTipHints...), finishProgress)
 }
 
-func UpdateTipReachedFromProgress(tx kv.Putter, knownTip, finishProgress uint64) error {
+func UpdateTipReachedFromProgress(tx kv.GetPut, knownTip, finishProgress uint64) error {
 	if finishProgress > 0 && finishProgress >= knownTip {
+		lastTipReachedBlock, ok, err := rawdb.ReadLastTipReachedBlock(tx)
+		if err != nil {
+			return err
+		}
+		if ok && finishProgress <= lastTipReachedBlock {
+			return nil
+		}
 		return rawdb.WriteTipReached(tx, finishProgress)
 	}
 	return nil
