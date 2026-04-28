@@ -70,6 +70,9 @@ echo "Setup the test execution environment..."
 # Clone rpc-tests repository at specific tag/branch, reusing existing clone if already at the right version
 if [ -d "$WORKSPACE/rpc-tests/.git" ] && [ "$(git -C "$WORKSPACE/rpc-tests" describe --tags --exact-match 2>/dev/null)" = "$RPC_VERSION" ]; then
   echo "Using cached rpc-tests at $RPC_VERSION"
+  # Remove stale untracked test fixtures left by runs using a different branch/version,
+  # but preserve .venv/ and build/ which are the expensive parts of the cache.
+  git -C "$WORKSPACE/rpc-tests" clean -fd -e .venv -e build >/dev/null 2>&1
 else
   rm -rf "$WORKSPACE/rpc-tests" >/dev/null 2>&1
   git -c advice.detachedHead=false clone --depth 1 --branch "$RPC_VERSION" https://github.com/erigontech/rpc-tests "$WORKSPACE/rpc-tests" >/dev/null 2>&1
