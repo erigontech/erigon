@@ -26,10 +26,6 @@ The Erigon RPC Service, managed by Erigon's modular [RPC daemon](/fundamentals/m
 
 For a complete reference on the standard Ethereum JSON-RPC methods, especially those in the `eth`, `net`, and `web3` namespaces, it is recommended to consult the general documentation on [ethereum.org's JSON-RPC API page](https://ethereum.org/en/developers/docs/apis/json-rpc/). Additionally, for the formal specification of the `debug`, `engine`, and `eth` namespaces, including unique, detailed descriptions for methods like `eth_getProof` and `eth_simulateV1`, refer to the [Execution APIs documentation](https://ethereum.github.io/execution-apis).
 
-[View on ethereum.org](https://ethereum.org/en/developers/docs/apis/json-rpc/)
-
-[View on ethereum.github.io](https://ethereum.github.io/execution-apis/)
-
 ## Erigon RPC Transports
 
 Erigon supports [HTTP](/interacting-with-erigon/#http), [HTTPS](/interacting-with-erigon/#https), [WebSockets](/interacting-with-erigon/#websockets), [IPC](/interacting-with-erigon/#ipc), [gRPC](/interacting-with-erigon/#grpc) and [GraphQL](/interacting-with-erigon/#graphql) through its RPC daemon.

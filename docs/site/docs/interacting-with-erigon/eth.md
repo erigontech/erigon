@@ -15,9 +15,8 @@ Key methods within this namespace allow you to check an account's balance (`eth_
 
 For API usage refer to the below official resources:
 
-[View on ethereum.org](https://ethereum.org/en/developers/docs/apis/json-rpc/)
-
-[View on ethereum.github.io](https://ethereum.github.io/execution-apis/)
+* [https://ethereum.org/en/developers/docs/apis/json-rpc/](https://ethereum.org/en/developers/docs/apis/json-rpc/)
+* [https://ethereum.github.io/execution-apis/](https://ethereum.github.io/execution-apis/)
 
 ### eth\_getProof
 

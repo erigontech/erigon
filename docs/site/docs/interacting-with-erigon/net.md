@@ -12,7 +12,7 @@ The `net` namespace is enabled by default in Erigon's RPC daemon and provides es
 
 For API usage refer to the below official resources:
 
-[View on ethereum.org](https://ethereum.org/en/developers/docs/apis/json-rpc/)
+* [https://ethereum.org/en/developers/docs/apis/json-rpc/](https://ethereum.org/en/developers/docs/apis/json-rpc/)
 
 ### Implementation Details
 

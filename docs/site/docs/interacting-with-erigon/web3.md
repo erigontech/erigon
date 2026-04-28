@@ -10,7 +10,7 @@ The `web3` namespace provides utility methods that are part of the standard Ethe
 
 For API usage refer to the below official resources:
 
-[View on ethereum.org](https://ethereum.org/en/developers/docs/apis/json-rpc/)
+* [https://ethereum.org/en/developers/docs/apis/json-rpc/](https://ethereum.org/en/developers/docs/apis/json-rpc/)
 
 ### Implementation Details
 

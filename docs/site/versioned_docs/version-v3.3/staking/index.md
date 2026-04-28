@@ -15,14 +15,8 @@ import Link from '@docusaurus/Link';
 
 <Link className="lp-card" to="/docs/v3.3/staking/caplin">
   <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M12 2L12 6"/>
-    <path d="M12 6C9 6 6 9 6 12"/>
-    <path d="M12 6C15 6 18 9 18 12"/>
-    <path d="M6 12C4.5 15 5 18 7 20"/>
-    <path d="M18 12C19.5 15 19 18 17 20"/>
-    <line x1="12" y1="6" x2="12" y2="20"/>
-    <circle cx="12" cy="3" r="1" fill="currentColor" stroke="none"/>
-    <path d="M7 20L17 20"/>
+    <circle cx="12" cy="12" r="2"/>
+    <path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"/>
   </svg>
   <div className="lp-card-title">Caplin (Built-in CL)</div>
   <div className="lp-card-desc">Configure Erigon's embedded consensus layer as a full validator — no external CL dependency required.</div>

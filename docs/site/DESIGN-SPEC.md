@@ -482,18 +482,14 @@ color:        #EF7716;
 ### Chain Icons
 | File | Chain |
 |---|---|
-| `static/img/eth.png` / `eth.svg` | Ethereum |
-| `static/img/gno.png` / `gno.svg` | Gnosis Chain |
-| `static/img/pol.png` / `pol.svg` | Polygon |
+| `static/img/eth.svg` | Ethereum |
+| `static/img/gno.svg` | Gnosis Chain |
+| `static/img/pol.svg` | Polygon |
 
 ### Brand Illustrations
 | File | Usage |
 |---|---|
-| `static/img/otter.svg` | Erigon mascot |
-| `static/img/otter-bg-1.png` | Background variant 1 |
-| `static/img/otter-bg-2.png` | Background variant 2 |
-| `static/img/shutter.png` / `shutter.svg` | Shutter feature graphic |
-| `static/img/shutter-icon.png` | Shutter icon |
+| `static/img/shutter.svg` | Shutter Network card icon (staking landing page) |
 
 ### Deployment
 `static/.nojekyll` — required for GitHub Pages to serve files beginning with `_`

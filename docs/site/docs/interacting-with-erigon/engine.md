@@ -12,9 +12,8 @@ The Engine API replaced older `eth_` methods for consensus communication. It is 
 
 For API usage refer to the below official resources:
 
-[View on ethereum.org](https://ethereum.org/en/developers/docs/apis/json-rpc/)
-
-[View on ethereum.github.io](https://ethereum.github.io/execution-apis/)
+* [https://ethereum.org/en/developers/docs/apis/json-rpc/](https://ethereum.org/en/developers/docs/apis/json-rpc/)
+* [https://ethereum.github.io/execution-apis/](https://ethereum.github.io/execution-apis/)
 
 #### Default Erigon Behavior (Caplin)
 

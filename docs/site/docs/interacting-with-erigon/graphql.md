@@ -27,9 +27,7 @@ GraphQL shares the same port as the HTTP JSON-RPC server (default `8545`). It do
 
 ## Schema Reference
 
-Erigon follows the Geth GraphQL schema. For the full schema reference, query examples, and field descriptions, see:
-
-[View on geth.ethereum.org](https://geth.ethereum.org/docs/interacting-with-geth/rpc/graphql)
+Erigon follows the Geth GraphQL schema. For the full schema reference, query examples, and field descriptions, see https://geth.ethereum.org/docs/interacting-with-geth/rpc/graphql.
 
 The schema includes queries for blocks, transactions, accounts, logs, and pending state, as well as the `sendRawTransaction` mutation.
 
