@@ -19,6 +19,7 @@ package execmodule
 import (
 	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -51,6 +52,8 @@ type PipelineExecutor struct {
 	dispatcher              *Dispatcher
 	logger                  log.Logger
 	knownTipHint            atomic.Uint64
+	knownTipHintReady       chan struct{}
+	knownTipHintReadyOnce   sync.Once
 }
 
 // NewPipelineExecutor creates a new executor. validationSync may be nil
@@ -79,6 +82,7 @@ func NewPipelineExecutor(
 		validationNotifications: validationNotifications,
 		dispatcher:              dispatcher,
 		logger:                  logger,
+		knownTipHintReady:       make(chan struct{}),
 	}
 }
 
@@ -108,6 +112,7 @@ func (pe *PipelineExecutor) SetKnownTipHint(blockNum uint64) {
 			return
 		}
 		if pe.knownTipHint.CompareAndSwap(current, blockNum) {
+			pe.knownTipHintReadyOnce.Do(func() { close(pe.knownTipHintReady) })
 			return
 		}
 	}
@@ -115,6 +120,19 @@ func (pe *PipelineExecutor) SetKnownTipHint(blockNum uint64) {
 
 func (pe *PipelineExecutor) KnownTipHint() uint64 {
 	return pe.knownTipHint.Load()
+}
+
+func (pe *PipelineExecutor) waitKnownTipHint(ctx context.Context, timeout time.Duration) {
+	if pe.KnownTipHint() != 0 || timeout <= 0 {
+		return
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-pe.knownTipHintReady:
+	case <-timer.C:
+	case <-ctx.Done():
+	}
 }
 
 // UnwindTo sets the unwind point on the main pipeline.
@@ -244,6 +262,8 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 	if onlySnapDownload {
 		return nil
 	}
+
+	pe.waitKnownTipHint(ctx, 500*time.Millisecond)
 
 	// If domains are ahead of block files, nothing to execute.
 	if execctx.IsDomainAheadOfBlocks(ctx, tx, pe.logger) {
