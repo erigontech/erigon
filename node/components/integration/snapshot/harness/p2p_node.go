@@ -77,13 +77,14 @@ type P2PNode struct {
 	Orch       *flow.Orchestrator
 	Dirs       datadir.Dirs
 
-	dCore     *dl.Downloader
-	cfg       *downloadercfg.Cfg
-	pool      *testPool
-	workers   *workerpool.WorkerPool
-	unregPeer execp2p.UnregisterFunc
-	ctx       context.Context
-	cancel    context.CancelFunc
+	dCore       *dl.Downloader
+	cfg         *downloadercfg.Cfg
+	pool        *testPool
+	workers     *workerpool.WorkerPool
+	unregPeer   execp2p.UnregisterFunc
+	v2Publisher *dl.RollingV2Publisher // lazy — constructed on first PublishV2Manifest
+	ctx         context.Context
+	cancel      context.CancelFunc
 }
 
 // LocalTorrentAddr returns the BT endpoint the underlying torrent client
@@ -160,10 +161,14 @@ func (n *P2PNode) SetDevP2PENREntry(entry enr.Entry) {
 
 // EnableAutoPublishV2 wires the downloader's auto-republish loop: every
 // time the orchestrator promotes a file to TrustVerified (download
-// complete), the chain.toml.v2 manifest is regenerated, the new
-// info-hash is written into the local ENR, and the new V2 torrent is
-// re-seeded. Debounced — a burst of completions coalesces to one
-// publish.
+// complete), the rolling V2 publisher writes the next chain.v2.<seq>.toml
+// generation, the new info-hash is written into the local ENR, and the
+// new torrent is registered as seedable. Debounced — a burst of
+// completions coalesces to one publish.
+//
+// Reuses the harness's own rolling publisher when one already exists
+// (typically from a startup PublishV2Manifest call) so the rolling
+// history is consistent across the manual + auto paths.
 //
 // Required for staggered-entry scenarios so a late joiner sees the
 // CURRENT inventory of peers it dials, not the inventory those peers
@@ -174,6 +179,7 @@ func (n *P2PNode) EnableAutoPublishV2(debounce time.Duration) {
 		Bus:       n.Bus,
 		Inventory: n.Inventory,
 		Debounce:  debounce,
+		Publisher: n.v2Publisher,
 		ENRUpdater: func(ct enr.ChainToml) {
 			n.SetDevP2PENREntry(ct)
 		},
@@ -266,17 +272,34 @@ func (n *P2PNode) registerSeedable(fileName string, size int64, entryTemplate *s
 	return [20]byte(spec.InfoHash)
 }
 
-// PublishV2Manifest generates chain.toml.v2 from the node's inventory,
-// writes + seeds it, and returns the V2 infohash suitable for the peer's
-// ENR chain-toml entry.
+// PublishV2Manifest writes the next chain.v2.<seq>.toml generation
+// from the node's inventory via a long-lived RollingV2Publisher, builds
+// + seeds its .torrent, and returns the new V2 infohash suitable for
+// the peer's ENR chain-toml entry. Subsequent calls advance seq, keeping
+// up to RollingV2Publisher.MaxRetained generations seedable so peers
+// holding stale ENR snapshots can still fetch the infohash they
+// captured at handshake time.
+//
+// The publisher is constructed lazily on first call so tests that
+// never publish don't pay for it.
 func (n *P2PNode) PublishV2Manifest() [20]byte {
 	n.T.Helper()
-	torrentFS := dl.NewAtomicTorrentFS(n.Dirs.Snap)
-	hash, err := dl.PublishChainTomlV2(n.Dirs.Snap, torrentFS, n.Inventory, 0, nil)
+	if n.v2Publisher == nil {
+		torrentFS := dl.NewAtomicTorrentFS(n.Dirs.Snap)
+		pub, err := dl.NewRollingV2Publisher(n.Dirs.Snap, torrentFS, n.dCore, 0)
+		require.NoError(n.T, err)
+		n.v2Publisher = pub
+	}
+	hash, err := n.v2Publisher.Publish(n.ctx, n.Inventory, 0, nil)
 	require.NoError(n.T, err)
-	require.NoError(n.T, n.dCore.AddNewSeedableFile(n.ctx, dl.ChainTomlV2FileName))
 	return [20]byte(hash)
 }
+
+// V2Publisher exposes the lazily-constructed rolling V2 publisher so
+// callers (e.g. EnableAutoPublishV2) can subscribe to its republish
+// loop instead of constructing a parallel publisher that wouldn't
+// share the rolling history.
+func (n *P2PNode) V2Publisher() *dl.RollingV2Publisher { return n.v2Publisher }
 
 // convertGenesisDifficulty wraps gointerfaces.ConvertUint256IntToH256
 // for a genesis block — Difficulty() returns a value (uint256.Int) but

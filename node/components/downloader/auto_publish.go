@@ -34,7 +34,7 @@ type AutoPublishOpts struct {
 	Bus event.EventBus
 
 	// Inventory is the snapshot inventory to read when regenerating
-	// chain.toml.v2. Required.
+	// chain.v2.<seq>.toml. Required.
 	Inventory *snapshotinv.Inventory
 
 	// Debounce coalesces a burst of TrustPromoted events into one
@@ -50,16 +50,42 @@ type AutoPublishOpts struct {
 	// drive the ENR another way).
 	ENRUpdater func(enr.ChainToml)
 
-	// AuthoritativeBlocks passes through to PublishChainTomlV2. Zero
-	// is fine when not exercising block-coverage advertisement.
+	// AuthoritativeBlocks passes through to the rolling publisher.
+	// Zero is fine when not exercising block-coverage advertisement.
 	AuthoritativeBlocks uint64
+
+	// MaxRetained caps the rolling buffer of generations kept on disk
+	// and registered with the torrent client. Zero selects the
+	// publisher's default (db/downloader.DefaultV2MaxRetained = 64).
+	// Old generations stay seedable so peers that captured a stale ENR
+	// snapshot can still fetch the infohash they asked for.
+	//
+	// Ignored when Publisher is supplied — the publisher's own
+	// MaxRetained governs eviction.
+	MaxRetained int
+
+	// Publisher, when non-nil, is the rolling publisher to drive from
+	// the auto-publish loop. Useful when the caller already holds a
+	// publisher (e.g. a test harness that called Publish() at startup
+	// and wants the auto-publisher to advance the same generation
+	// history rather than spin up a parallel publisher with its own
+	// state). When nil, BindAutoPublish constructs a fresh publisher
+	// scoped to this binding.
+	Publisher *dl.RollingV2Publisher
 }
 
-// BindAutoPublish wires automatic re-publication of chain.toml.v2 to a
-// growing inventory. Subscribes to flow.TrustPromoted; coalesces bursts
-// inside the debounce window, then regenerates the V2 manifest, builds
-// its .torrent, calls ENRUpdater with the new info-hash, and seeds the
-// new chain.toml.v2 torrent.
+// BindAutoPublish wires automatic re-publication of chain.v2.<seq>.toml
+// to a growing inventory. Subscribes to flow.TrustPromoted; coalesces
+// bursts inside the debounce window, then asks the rolling publisher
+// to write the next generation, calls ENRUpdater with the new
+// info-hash, and seeds the new torrent.
+//
+// Each republish writes a NEW chain.v2.<seq>.toml (rather than
+// overwriting a single file in place). Old generations stay seedable
+// up to MaxRetained — peers that captured a stale ENR snapshot at
+// handshake time can still fetch the older infohash. The rolling
+// buffer is the disk-bound; an explicit Cleanup() call on the
+// publisher is the defence-in-depth.
 //
 // Multiple TrustPromoted events arriving within the debounce window
 // trigger exactly one publish. Late-arriving downloads inside an
@@ -89,11 +115,20 @@ func (p *Provider) BindAutoPublish(ctx context.Context, opts AutoPublishOpts) er
 		debounce = time.Second
 	}
 
+	publisher := opts.Publisher
+	if publisher == nil {
+		var err error
+		publisher, err = dl.NewRollingV2Publisher(p.dirs.Snap, dl.NewAtomicTorrentFS(p.dirs.Snap), p.Downloader, opts.MaxRetained)
+		if err != nil {
+			return fmt.Errorf("constructing rolling V2 publisher: %w", err)
+		}
+	}
+
 	ctx, cancel := context.WithCancel(ctx)
 	tick := make(chan struct{}, 1)
 	done := make(chan struct{})
 
-	go p.autoPublishLoop(ctx, opts, tick, done, debounce)
+	go p.autoPublishLoop(ctx, opts, publisher, tick, done, debounce)
 
 	handler := func(flow.TrustPromoted) {
 		// Non-blocking nudge — the loop coalesces.
@@ -143,6 +178,7 @@ func (p *Provider) UnbindAutoPublish() error {
 func (p *Provider) autoPublishLoop(
 	ctx context.Context,
 	opts AutoPublishOpts,
+	publisher *dl.RollingV2Publisher,
 	tick <-chan struct{},
 	done chan<- struct{},
 	debounce time.Duration,
@@ -178,33 +214,8 @@ func (p *Provider) autoPublishLoop(
 			}
 		}
 
-		if err := p.republishChainTomlV2(opts); err != nil {
+		if _, err := publisher.Publish(ctx, opts.Inventory, opts.AuthoritativeBlocks, opts.ENRUpdater); err != nil {
 			p.logger.Warn("[downloader] auto-publish failed", "err", err)
 		}
 	}
-}
-
-// republishChainTomlV2 generates+writes a fresh chain.toml.v2 from the
-// current inventory, advertises the new info-hash via ENR, and seeds
-// the V2 torrent. Reuses the helper at db/downloader.PublishChainTomlV2
-// so the wire format and ENR fields match the startup publish path.
-//
-// Each republish produces a NEW infohash for the same on-disk filename
-// (chain.toml.v2). The torrent client's per-name registry refuses to
-// reload an existing name with a different infohash, so we drop the
-// old registration first. The data file and .torrent sidecar are
-// already overwritten in place by PublishChainTomlV2; this just clears
-// the in-memory bookkeeping so AddNewSeedableFile can re-register
-// against the new infohash.
-func (p *Provider) republishChainTomlV2(opts AutoPublishOpts) error {
-	torrentFS := dl.NewAtomicTorrentFS(p.dirs.Snap)
-	hash, err := dl.PublishChainTomlV2(p.dirs.Snap, torrentFS, opts.Inventory, opts.AuthoritativeBlocks, opts.ENRUpdater)
-	if err != nil {
-		return err
-	}
-	p.Downloader.DropTorrentByName(dl.ChainTomlV2FileName)
-	if err := p.Downloader.AddNewSeedableFile(p.busCtx, dl.ChainTomlV2FileName); err != nil {
-		return fmt.Errorf("re-seeding chain.toml.v2 after republish: %w (hash=%x)", err, hash)
-	}
-	return nil
 }

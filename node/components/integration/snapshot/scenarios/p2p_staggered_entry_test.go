@@ -168,18 +168,14 @@ func TestP2P_Swarm_StaggeredEntry(t *testing.T) {
 		_, btPort := node.LocalTorrentAddr()
 		node.SetDevP2PENREntry(enr.ChainToml{InfoHash: v2})
 		node.SetDevP2PENREntry(enr.BT(btPort))
-		// Auto-publish is opt-in via SNAPSHOT_AUTOPUBLISH=1. The
-		// staggered-entry happy path doesn't need it: each peer's
-		// startup V2 advertises that peer's initial slice, and late
-		// joiners can request straight from the owner. With it on,
-		// every TrustPromoted republishes V2 with a fresh infohash
-		// — the drop-then-add window races with in-flight V2 fetches
-		// from other peers, occasionally costing one a manifest.
-		// Real fix is versioned chain.toml.v2 filenames so old
-		// infohashes stay seedable; tracked as future work.
-		if os.Getenv("SNAPSHOT_AUTOPUBLISH") != "" {
-			node.EnableAutoPublishV2(60 * time.Second)
-		}
+		// Auto-publish is now reliable: the rolling V2 publisher keeps
+		// the previous N chain.v2.<seq>.toml generations seedable, so a
+		// late joiner that captured an older ENR snapshot at handshake
+		// time can still fetch the infohash it asked for. 5s debounce
+		// lets a fast convergence batch its TrustPromoted events but
+		// stays responsive enough that late joiners see near-current
+		// inventory at handshake.
+		node.EnableAutoPublishV2(5 * time.Second)
 
 		entry := &peerEntry{node: node, manifestCount: &atomic.Int32{}, promotedCount: &atomic.Int32{}}
 		mc := entry.manifestCount
