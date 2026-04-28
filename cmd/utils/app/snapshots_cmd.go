@@ -1698,12 +1698,9 @@ func stateProgress(ctx context.Context, db kv.TemporalRoDB, txNumsReader rawdbv3
 		return 0, err
 	}
 	defer roTx.Rollback()
-	blockNum, ok, err := txNumsReader.FindBlockNum(ctx, roTx, aggMax)
+	blockNum, err := findBlockNumByTxNum(ctx, roTx, txNumsReader, aggMax)
 	if err != nil {
 		return 0, err
-	}
-	if !ok {
-		return 0, fmt.Errorf("find block num for tx num %d: not found", aggMax)
 	}
 	if blockNum > 0 {
 		blockNum-- // FindBlockNum returns the block *containing* aggMax, but the per-block check needs the entire block covered
@@ -1717,6 +1714,29 @@ func stateProgress(ctx context.Context, db kv.TemporalRoDB, txNumsReader rawdbv3
 		blockNum = execProgress
 	}
 	return blockNum, nil
+}
+
+func findBlockNumByTxNum(ctx context.Context, tx kv.Tx, txNumsReader rawdbv3.TxNumsReader, txNum uint64) (uint64, error) {
+	blockNum, ok, err := txNumsReader.FindBlockNum(ctx, tx, txNum)
+	if err != nil {
+		return 0, err
+	}
+	if ok {
+		return blockNum, nil
+	}
+
+	firstBlockNum, firstTxNum, err := txNumsReader.First(tx)
+	if err != nil {
+		return 0, fmt.Errorf("find block num for tx num %d: not found; read first txnum index bound: %w", txNum, err)
+	}
+	lastBlockNum, lastTxNum, err := txNumsReader.Last(tx)
+	if err != nil {
+		return 0, fmt.Errorf("find block num for tx num %d: not found; read last txnum index bound: %w", txNum, err)
+	}
+	return 0, fmt.Errorf(
+		"find block num for tx num %d: not found (txnum index bounds: first block=%d txnum=%d, last block=%d txnum=%d)",
+		txNum, firstBlockNum, firstTxNum, lastBlockNum, lastTxNum,
+	)
 }
 
 func doCheckCommitmentHistAtBlk(cliCtx *cli.Context, logger log.Logger) error {
@@ -2867,14 +2887,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		ac := res.Aggregator.BeginFilesRo()
 		defer ac.Close()
 		stats.LogStats(ac, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
-			histBlockNumProgress, ok, err := blockReader.TxnumReader().FindBlockNum(ctx, tx, endTxNumMinimax)
-			if err != nil {
-				return 0, err
-			}
-			if !ok {
-				return 0, fmt.Errorf("find block num for tx num %d: not found", endTxNumMinimax)
-			}
-			return histBlockNumProgress, nil
+			return findBlockNumByTxNum(ctx, tx, blockReader.TxnumReader(), endTxNumMinimax)
 		})
 		return nil
 	})
