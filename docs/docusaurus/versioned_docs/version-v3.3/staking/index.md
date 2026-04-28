@@ -1,6 +1,46 @@
 ---
-sidebar_position: 1
+title: Staking
+sidebar_position: 5
+hide_title: true
 ---
 
-# STAKING
+import Link from '@docusaurus/Link';
 
+<div className="lp-hero">
+  <h1>Staking</h1>
+  <p>Run an Ethereum validator with Erigon — using the built-in Caplin consensus layer or any external CL client.</p>
+</div>
+
+<div className="lp-grid">
+
+<Link className="lp-card" to="/docs/v3.3/staking/caplin">
+  <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 2L12 6"/>
+    <path d="M12 6C9 6 6 9 6 12"/>
+    <path d="M12 6C15 6 18 9 18 12"/>
+    <path d="M6 12C4.5 15 5 18 7 20"/>
+    <path d="M18 12C19.5 15 19 18 17 20"/>
+    <line x1="12" y1="6" x2="12" y2="20"/>
+    <circle cx="12" cy="3" r="1" fill="currentColor" stroke="none"/>
+    <path d="M7 20L17 20"/>
+  </svg>
+  <div className="lp-card-title">Caplin (Built-in CL)</div>
+  <div className="lp-card-desc">Configure Erigon's embedded consensus layer as a full validator — no external CL dependency required.</div>
+</Link>
+
+<Link className="lp-card" to="/docs/v3.3/staking/external-consensus-client-as-validator">
+  <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+  </svg>
+  <div className="lp-card-title">External Consensus Client</div>
+  <div className="lp-card-desc">Connect Lighthouse, Prysm, Teku, or Nimbus via the Engine API for split EL/CL validator setups.</div>
+</Link>
+
+<Link className="lp-card" to="/docs/v3.3/staking/shutter-network">
+  <img src="/docs/img/shutter.svg" className="lp-icon" alt="Shutter Network" />
+  <div className="lp-card-title">Shutter Network</div>
+  <div className="lp-card-desc">Privacy-preserving mempool protection — shield validator transactions from front-running and MEV.</div>
+</Link>
+
+</div>
