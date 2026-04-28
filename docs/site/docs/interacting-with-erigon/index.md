@@ -5,24 +5,24 @@ sidebar_position: 4
 
 # RPC Service
 
-The Erigon RPC Service, managed by Erigon's modular [RPC daemon](/docs/fundamentals/modules/rpc-daemon), supports various API namespaces, which can be enabled or disabled using the `--http.api` flag. The available namespaces include:
+The Erigon RPC Service, managed by Erigon's modular [RPC daemon](/fundamentals/modules/rpc-daemon), supports various API namespaces, which can be enabled or disabled using the `--http.api` flag. The available namespaces include:
 
-* [`eth`](/docs/interacting-with-erigon/eth): Standard Ethereum API.
-* [`erigon`](/docs/interacting-with-erigon/erigon): Erigon-specific extensions.
-* [`engine`](/docs/interacting-with-erigon/engine): The JSON-RPC Interface for Execution and Consensus Layer Communication.
-* [`web3`](/docs/interacting-with-erigon/web3): Web3 compatibility API.
-* [`net`](/docs/interacting-with-erigon/net): Network information API.
-* [`debug`](/docs/interacting-with-erigon/debug): Debugging and tracing API.
-* [`trace`](/docs/interacting-with-erigon/trace): Transaction tracing API.
-* [`txpool`](/docs/interacting-with-erigon/txpool): Transaction pool API.
-* [`admin`](/docs/interacting-with-erigon/admin): Node administration API
-* [`bor`](/docs/interacting-with-erigon/bor): Polygon Bor-specific API (when running on Polygon)
-* [`ots`](/docs/interacting-with-erigon/ots): These methods are specifically tailored for use with Otterscan, an open-source, fast block explorer.
-* [`internal`](/docs/interacting-with-erigon/internal): Erigon specific API for development and debugging purposes.
-* [`gRPC`](/docs/interacting-with-erigon/grpc): API for lower-level data access.
-* [`overlay`](/docs/interacting-with-erigon/overlay): Erigon-specific overlay API for replaying blocks with state overrides (archive nodes only).
-* [`parity`](/docs/interacting-with-erigon/parity): Partial OpenEthereum compatibility (`parity_listStorageKeys`).
-* [`graphql`](/docs/interacting-with-erigon/graphql): GraphQL endpoint following EIP-1767.
+* [`eth`](/interacting-with-erigon/eth): Standard Ethereum API.
+* [`erigon`](/interacting-with-erigon/erigon): Erigon-specific extensions.
+* [`engine`](/interacting-with-erigon/engine): The JSON-RPC Interface for Execution and Consensus Layer Communication.
+* [`web3`](/interacting-with-erigon/web3): Web3 compatibility API.
+* [`net`](/interacting-with-erigon/net): Network information API.
+* [`debug`](/interacting-with-erigon/debug): Debugging and tracing API.
+* [`trace`](/interacting-with-erigon/trace): Transaction tracing API.
+* [`txpool`](/interacting-with-erigon/txpool): Transaction pool API.
+* [`admin`](/interacting-with-erigon/admin): Node administration API
+* [`bor`](/interacting-with-erigon/bor): Polygon Bor-specific API (when running on Polygon)
+* [`ots`](/interacting-with-erigon/ots): These methods are specifically tailored for use with Otterscan, an open-source, fast block explorer.
+* [`internal`](/interacting-with-erigon/internal): Erigon specific API for development and debugging purposes.
+* [`gRPC`](/interacting-with-erigon/grpc): API for lower-level data access.
+* [`overlay`](/interacting-with-erigon/overlay): Erigon-specific overlay API for replaying blocks with state overrides (archive nodes only).
+* [`parity`](/interacting-with-erigon/parity): Partial OpenEthereum compatibility (`parity_listStorageKeys`).
+* [`graphql`](/interacting-with-erigon/graphql): GraphQL endpoint following EIP-1767.
 
 For a complete reference on the standard Ethereum JSON-RPC methods, especially those in the `eth`, `net`, and `web3` namespaces, it is recommended to consult the general documentation on [ethereum.org's JSON-RPC API page](https://ethereum.org/en/developers/docs/apis/json-rpc/). Additionally, for the formal specification of the `debug`, `engine`, and `eth` namespaces, including unique, detailed descriptions for methods like `eth_getProof` and `eth_simulateV1`, refer to the [Execution APIs documentation](https://ethereum.github.io/execution-apis).
 
@@ -32,7 +32,7 @@ For a complete reference on the standard Ethereum JSON-RPC methods, especially t
 
 ## Erigon RPC Transports
 
-Erigon supports [HTTP](/docs/interacting-with-erigon/#http), [HTTPS](/docs/interacting-with-erigon/#https), [WebSockets](/docs/interacting-with-erigon/#websockets), [IPC](/docs/interacting-with-erigon/#ipc), [gRPC](/docs/interacting-with-erigon/#grpc) and [GraphQL](/docs/interacting-with-erigon/#graphql) through its RPC daemon.
+Erigon supports [HTTP](/interacting-with-erigon/#http), [HTTPS](/interacting-with-erigon/#https), [WebSockets](/interacting-with-erigon/#websockets), [IPC](/interacting-with-erigon/#ipc), [gRPC](/interacting-with-erigon/#grpc) and [GraphQL](/interacting-with-erigon/#graphql) through its RPC daemon.
 
 ### HTTP
 
