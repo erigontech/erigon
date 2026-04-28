@@ -1,41 +1,19 @@
-# Website
+# Erigon Documentation Site
 
-This website is built using [Docusaurus](https://docusaurus.io/), a modern static website generator.
-
-## Installation
-
-```bash
-yarn
-```
+Built with [Docusaurus 3](https://docusaurus.io/). Deployed automatically to [docs.erigon.tech](https://docs.erigon.tech) via GitHub Actions on push to `release/3.4`.
 
 ## Local Development
 
-```bash
-yarn start
-```
-
-This command starts a local development server and opens up a browser window. Most changes are reflected live without having to restart the server.
-
-## Build
+All commands run from `docs/site/`:
 
 ```bash
-yarn build
+npm install       # Install dependencies
+npm run start     # Dev server → http://localhost:3000 (hot reload)
+npm run build     # Production build → build/
+npm run serve     # Serve the production build locally
+npm run typecheck # TypeScript check without emit
 ```
-
-This command generates static content into the `build` directory and can be served using any static contents hosting service.
 
 ## Deployment
 
-Using SSH:
-
-```bash
-USE_SSH=true yarn deploy
-```
-
-Not using SSH:
-
-```bash
-GIT_USER=<Your GitHub username> yarn deploy
-```
-
-If you are using GitHub pages for hosting, this command is a convenient way to build the website and push to the `gh-pages` branch.
+Deployment is handled automatically by `.github/workflows/docs-deploy.yml` on every push to `release/3.4`. Do not use manual `yarn deploy` — it is not configured for this site.

@@ -18,7 +18,6 @@ Complete specification of every customization applied to this site relative to a
 | `react` / `react-dom` | ^19.0.0 |
 | `typescript` | ~6.0.2 |
 | `@easyops-cn/docusaurus-search-local` | ^0.55.1 |
-| `webpackbar` | ^5.0.2 |
 | `prism-react-renderer` | ^2.3.0 |
 | Node requirement | `>=20.0` |
 
@@ -30,8 +29,8 @@ Complete specification of every customization applied to this site relative to a
 title:            'Erigon Documentation'
 tagline:          'Ethereum execution client'
 favicon:          'img/logo-icon-orange.png'
-url:              'https://erigontech.github.io'
-baseUrl:          '/docs/'
+url:              'https://docs.erigon.tech'
+baseUrl:          '/'
 organizationName: 'erigontech'
 projectName:      'docs'
 trailingSlash:    false
@@ -41,13 +40,6 @@ onBrokenMarkdownLinks: 'warn'
 
 ### i18n
 Single locale — English only. No additional locales configured.
-
-### Mermaid
-Mermaid diagrams enabled:
-```ts
-markdown: { mermaid: true }
-themes: ['@docusaurus/theme-mermaid']
-```
 
 ---
 
