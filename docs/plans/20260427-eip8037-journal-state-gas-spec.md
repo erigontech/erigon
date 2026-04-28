@@ -20,6 +20,7 @@ This sprawl has produced bugs the snøbal-devnet-4 test suite has surfaced, and 
 4. **SELFDESTRUCT filter applied only at the top-frame walk**: sub-frames walk *without* the `.newlyCreated && .selfdestructed` filter (so EIP-6780 net-0 cases temporarily over-count and OOG mid-execution exactly as the spec wants — state IS allocated transiently). At the top frame's commit (depth==0), the walk DOES apply the filter, which makes the top-frame walk `< committed_children_total`, producing the negative delta that credits the over-charge back. Multiple selfdestructs of the same account are deduplicated naturally because the walk keys on address (first occurrence per address).
 5. **Top-level CREATE tx**: pass `excludeAddr` so the contract address (already covered by the 112×cpsb intrinsic) is not double-counted by the top-frame walk. Snapshot stays where it is; the top-level `createObjectChange` is just skipped in the walk. The exclusion is derived in-place from `depth == 0` inside `evm.create()` (where the contract address is already a local parameter) — no coordination from TxnExecutor needed, no field on the EVM struct.
 6. **Per-depth `committedChildBytes` accumulator on the EVM**, populated by each child as it commits. No journal-range bookkeeping (`frameChildRanges` is unnecessary because the running total of children's contributions, combined with the parent's full-segment walk and credit-on-negative-delta, is strictly more correct than range exclusion — the latter would miss cross-frame SSTORE 0→X→0).
+7. **System calls (EIP-2935 / EIP-4788 / EIP-7002 / EIP-7251 etc.) charge state gas internally via the journal walk, but with a dedicated pre-sized reservoir** (per [EIPs PR 11573 commit `d2a0230`](https://github.com/ethereum/EIPs/pull/11573/changes/d2a023056187fb17c94e9477cadd076a0f817760)). The system-call MdGas is initialised as `{Regular: 30_000_000, State: STATE_BYTES_PER_STORAGE_SET × CPSB × SYSTEM_MAX_SSTORES_PER_CALL}` where `SYSTEM_MAX_SSTORES_PER_CALL = 16`. Total `SYSTEM_CALL_GAS_LIMIT = 30_000_000 + 32 × 1_174 × 16 = 30_601_088`. System calls remain not subject to `TX_MAX_GAS_LIMIT`, do not count against the block gas limit, and do not contribute to either `block_regular_gas_used` or `block_state_gas_used` — but they DO walk the journal at frame commit and DO charge state gas from their dedicated reservoir (so each system call can SSTORE up to 16 fresh slots without OOG'ing on state gas).
 
 ## Algorithm
 
@@ -32,7 +33,7 @@ Frame entry (evm.call / evm.create):
 
 Frame body runs (regular gas charged inline as today; no state-gas charges).
 
-Frame commit (success path, IsAmsterdam, chargeStateGas):
+Frame commit (success path, IsAmsterdam, !RestoreState):
     frameEnd   = ibs.JournalLength()
     applyFilt  = (depth == 0)                            // filter only at top frame
     excludeC   = address if (in evm.create() && depth == 0) else NilAddress
@@ -272,7 +273,7 @@ Same short-circuit as Case A: `originalValue=X` non-zero never triggers the new-
 | 43 | Top-level CREATE tx, contract address C: intrinsic charges 112×cpsb for C; execution then runs initcode and deploys L bytes | Top-frame walk uses `excludeCreate=C` so createObjectChange{C} skipped; codeChange{C} counts L bytes; intrinsic + execution = 112 + L | 112×cpsb (intrinsic) + L×cpsb (execution) |
 | 44 | Frame mid-execution OOG (regular gas exhausted before frame commit) | Frame reverts via existing path; no commit-time walk fires → no charge | 0 (for that subtree) |
 | 45 | Top-level revert (tx OOG at top frame, or top REVERT) | `evm.executionStateGas = 0` set on top-level revert path; tx-state-gas = intrinsic only | 0 (intrinsic only) |
-| 46 | SystemAddress sys-call (e.g. EIP-2935 history-storage update) | `evm.chargeStateGas = false` on sys-call paths → frame-commit walk skipped entirely | 0 (sys-call must always succeed) |
+| 46 | SystemAddress sys-call (e.g. EIP-2935 history-storage update) | SysCallContract initialises `gasRemaining = {Regular: 30_000_000, State: 32 × CPSB × 16 = 601_088}` per the SYSTEM_CALL_GAS_LIMIT formula. The frame-commit walk fires (gated on `IsAmsterdam && !RestoreState` only — no special flag) and the per-frame state-gas charge draws from the dedicated reservoir (covers up to 16 fresh storage writes; e.g. 16-slot history buffer for EIP-2935). System calls do not contribute to `block_regular_gas_used` or `block_state_gas_used` — TxnExecutor is not involved, so the EVM's accumulated `executionStateGas`/`regularGasConsumed` are simply discarded after the call returns. | not contributing to block gas; sys call's own reservoir covers up to `SYSTEM_MAX_SSTORES_PER_CALL` slot writes |
 
 ### Mixed-dimension scenarios
 
@@ -300,15 +301,19 @@ Same short-circuit as Case A: `originalValue=X` non-zero never triggers the new-
 - In `stateObject.SetState(key, value)` (the journal-emitting path): when appending `storageChange{...}`, populate `originalValue` from `sdb.GetCommittedState(addr, key)`. Erigon's IBS already caches committed values via `originStorage`, so this lookup is O(1) after first hit per `(addr, key)` per tx.
 - The existing journal-emit site is in `intra_block_state.go` around line 268 (`sdb.journal.append(storageChange{...})`). Add the lookup there.
 
+### `execution/protocol/params/protocol.go`
+- Add `SystemMaxSstoresPerCall = 16` (per [PR 11573 commit `d2a0230`](https://github.com/ethereum/EIPs/pull/11573/changes/d2a023056187fb17c94e9477cadd076a0f817760)) — upper bound on fresh storage slots a single system call writes.
+- Add a helper `SystemCallGasLimit(cpsb uint64) uint64` returning `30_000_000 + StateBytesPerStorageSlot × cpsb × SystemMaxSstoresPerCall` (or use the existing `SysCallGasLimit = 30_000_000` and a separate `SystemCallStateReservoir(cpsb uint64) uint64 = 32 × cpsb × SystemMaxSstoresPerCall` to keep the regular and state portions clearly separated).
+
 ### `execution/vm/evm.go`
 - Add to `EVM` struct:
   - `executionStateGas uint64` (replaces `stateGasConsumed` for block accounting).
   - `committedChildBytes []uint64` (per-depth stack of running children-bytes accumulators).
-  - `chargeStateGas bool` (false during `SysCallContract` paths to avoid charging EIP-2935 / EIP-7002 system writes).
+- **No `chargeStateGas` flag.** Under PR 11573 commit `d2a0230`, system calls also charge state gas via the journal walk (with a pre-sized reservoir, see `SysCallContract` below). The walk's gate is just `IsAmsterdam && !RestoreState`. Block-accounting exemption for system calls is automatic because they don't go through `TxnExecutor`.
 - **Remove**: `stateGasConsumed`, `revertedSpillGas`, `stateGasRefund` fields and their accessors. Remove `CreditStateGasRefund(...)` and `RefundTxStateGas(...)` methods entirely.
 - In `evm.call()` (CALL/CALLCODE/DELEGATECALL/STATICCALL) and `evm.create()`:
   - At entry: capture `frameStart := ibs.JournalLength()`; push `0` onto `committedChildBytes`.
-  - On success commit (Amsterdam, `chargeStateGas`): compute `frameEnd`, walk via `ComputeFrameStateBytes(frameStart, frameEnd, depth==0, excludeAddr)`. Compute `delta = int64(walkTotal) - int64(committedChildBytes[depth])`. If positive, charge from `gas.State` (with spill); on insufficient set `err = ErrOutOfGas`. If negative, credit `gas.State` and decrement `executionStateGas`. Pop self; if `depth > 0`, add `walkTotal` to `committedChildBytes[depth-1]`.
+  - On success commit (`IsAmsterdam && !RestoreState`): compute `frameEnd`, walk via `ComputeFrameStateBytes(frameStart, frameEnd, depth==0, excludeAddr)`. Compute `delta = int64(walkTotal) - int64(committedChildBytes[depth])`. If positive, charge from `gas.State` (with spill); on insufficient set `err = ErrOutOfGas`. If negative, credit `gas.State` and decrement `executionStateGas`. Pop self; if `depth > 0`, add `walkTotal` to `committedChildBytes[depth-1]`.
   - On revert/halt: pop self; do not propagate to parent. Top-level revert (`depth==0 && err != nil`) sets `evm.executionStateGas = 0`.
 - Strip `handleFrameRevert`'s state-gas branches (lines 246–299). Keep only `RevertToSnapshot` and the regular-gas burn on exceptional halt.
 - In `evm.create()`:
@@ -331,15 +336,29 @@ Same short-circuit as Case A: `originalValue=X` non-zero never triggers the new-
 - `opCall`/`opCallCode`/`opDelegateCall`/`opStaticCall`: no signature changes. The CallStipend regular-gas correction at lines 1126–1128 / 1177–1179 stays as-is.
 
 ### `execution/protocol/txn_executor.go`
-- Set `evm.chargeStateGas = true` in `Execute()` (default) and `false` in `SysCallContract` callers (search for `SysCallContract*` to enumerate sites).
 - No need to communicate the top-level contract address — `evm.create()` derives it from `depth == 0` and the local `address` parameter at commit time.
+- No need to set a `chargeStateGas` flag — the walk is gated on `IsAmsterdam && !RestoreState` only.
 - In the refund/finalize block (around lines 608–697 area):
   - Replace `evm.StateGasConsumed()` with `evm.ExecutionStateGas()`.
   - Drop `evm.RevertedSpillGas()` from the receipt-gas formula.
   - **Delete the `SameTxSelfDestructedNewAccounts`-driven refund block entirely** — handled inside the EVM via the top-frame credit.
 - `block_state_gas_used = intrinsic_state_gas + evm.ExecutionStateGas()`.
 - `block_regular_gas_used = intrinsic_regular_gas + evm.regularGasConsumed`.
-- `ApplyFrame` (RIP-7560 path): same treatment, ensure `chargeStateGas`, `executionStateGas`, and `committedChildBytes` are reset between AA passes.
+- `ApplyFrame` (RIP-7560 path): same treatment, ensure `executionStateGas` and `committedChildBytes` are reset between AA passes.
+
+### `execution/protocol/block_exec.go` (`SysCallContract` / `SysCallContractWithBlockContext`)
+- No flag to set — the walk fires automatically on Amsterdam (gated only on `IsAmsterdam && !RestoreState`). What changes is the gas split:
+- Initialise `mdGas` with the new SYSTEM_CALL_GAS_LIMIT split:
+  ```go
+  cpsb := blockContext.CostPerStateByte
+  mdGas := mdgas.MdGas{
+      Regular: params.SysCallGasLimit,                          // 30_000_000
+      State:   32 * cpsb * params.SystemMaxSstoresPerCall,      // dedicated reservoir
+  }
+  ```
+  This matches `SYSTEM_CALL_GAS_LIMIT = 30_000_000 + STATE_BYTES_PER_STORAGE_SET × CPSB × SYSTEM_MAX_SSTORES_PER_CALL` from PR 11573 commit `d2a0230`. With CPSB=1174 the reservoir is `32 × 1174 × 16 = 601_088` state gas, enough to cover up to 16 fresh storage writes per call (sufficient for EIP-2935 history-buffer updates, EIP-4788 beacon-root, EIP-7002 / EIP-7251 system-contract operations).
+- For pre-Amsterdam forks the `State: 0` initialisation stays (no state-gas dimension before EIP-8037). Gate the reservoir initialisation on `chainConfig.Rules(blockContext...)` having `IsAmsterdam`.
+- System calls remain not subject to `TX_MAX_GAS_LIMIT`, do not count against the block gas limit, and do not contribute to either `block_regular_gas_used` or `block_state_gas_used` — automatic in our model because `SysCallContract` does not invoke `TxnExecutor`, so there is no add-step for the EVM's `executionStateGas`/`regularGasConsumed`. After the call returns, the EVM is discarded and its counters are dropped.
 
 ### `execution/tracing/hooks.go`
 - Add `GasChangeFrameStateGas` to the `GasChangeReason` enum.
@@ -351,6 +370,7 @@ Same short-circuit as Case A: `originalValue=X` non-zero never triggers the new-
 - All Amsterdam state-gas charge paths in `gas_table.go`, `operations_acl.go`, `instructions.go`.
 - The `savedStateGas*` save/restore plumbing in `evm.call()`/`evm.create()` and `handleFrameRevert`.
 - `IntraBlockState.SameTxSelfDestructedNewAccounts()` and `SelfDestructedNewAccount` struct.
+- `evm.chargeStateGas` field and `evm.SetChargeStateGas` setter — the walk is gated solely on `IsAmsterdam && !RestoreState`.
 
 ## Critical files
 - `execution/state/intra_block_state.go`
@@ -377,7 +397,7 @@ Same short-circuit as Case A: `originalValue=X` non-zero never triggers the new-
    - Cross-frame CREATE-then-SELFDESTRUCT (sibling destroys): same — net 0.
    - Multiple SELFDESTRUCTs of same newly-created account: credit fires once (per-address dedup at top walk).
    - Frame-end OOG: positive delta exceeds reservoir+gas_left → frame reverts; tx-state-gas = intrinsic only.
-   - SystemAddress sysCall (EIP-2935): no state-gas charging; sys call always succeeds regardless of journal mutations.
+   - SystemAddress sysCall (EIP-2935 history-buffer ring update writes 1 slot per block; EIP-4788 beacon-root similar): SysCallContract initialises reservoir = `32 × cpsb × 16 = 601_088`, walk fires (gated only on `IsAmsterdam && !RestoreState`) and charges state gas for the slot writes (well within the dedicated reservoir budget). Verify the call does not contribute to `block_*_gas_used`.
 2. `execution/vm/gas_table_test.go` — drop assertions on state-gas charges for SSTORE/CALL/SELFDESTRUCT (now zero by design).
 3. `execution/protocol/txn_executor_test.go` — keep gas-pool tests; add frame-end-OOG regression.
 4. Tracer fixtures expecting per-opcode `GasChangeCallCodeStorage` for state-gas events must be updated to expect `GasChangeFrameStateGas` once per frame (potentially with a credit direction at parent commits).
