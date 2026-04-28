@@ -256,7 +256,8 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("forkchoice: block %x not found or was marked invalid", blockHash), false)
 	}
 
-	e.hook.LastNewBlockSeen(fcuHeader.Number.Uint64()) // used by eth_syncing
+	fcuBlockNum := fcuHeader.Number.Uint64()
+	e.hook.LastNewBlockSeen(fcuBlockNum) // used by eth_syncing
 
 	finishProgressBefore, err := stages.GetStageProgress(tx, stages.Finish)
 	if err != nil {
@@ -267,22 +268,33 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
 
-	e.logger.Debug("[execmodule] updating fork choice", "number", fcuHeader.Number.Uint64(), "hash", fcuHeader.Hash())
+	e.logger.Debug("[execmodule] updating fork choice", "number", fcuBlockNum, "hash", fcuHeader.Hash())
 	UpdateForkChoiceArrivalDelay(fcuHeader.Time)
-	metrics.UpdateBlockConsumerPreExecutionDelay(fcuHeader.Time, fcuHeader.Number.Uint64(), e.logger)
+	metrics.UpdateBlockConsumerPreExecutionDelay(fcuHeader.Time, fcuBlockNum, e.logger)
 	defer metrics.UpdateBlockConsumerPostExecutionDelay(fcuHeader.Time, fcuHeader.Number.Uint64(), e.logger)
 
 	var limitedBigJump bool
 	limitedBigJumpPadding := uint64(2)
-	if e.syncCfg.LoopBlockLimit > 0 && fcuHeader.Number.Uint64() > finishProgressBefore {
+	if e.syncCfg.LoopBlockLimit > 0 && fcuBlockNum > finishProgressBefore {
 		// note fcuHeader.Number.Uint64() may be < finishProgressBefore - protect from underflow by checking it is >
-		limitedBigJump = (fcuHeader.Number.Uint64()-finishProgressBefore)+limitedBigJumpPadding > uint64(e.syncCfg.LoopBlockLimit)
+		limitedBigJump = (fcuBlockNum-finishProgressBefore)+limitedBigJumpPadding > uint64(e.syncCfg.LoopBlockLimit)
 	}
 
+	knownTip := stagedsync.KnownTip(headersProgressBefore, e.blockReader.FrozenBlocks(), fcuBlockNum)
+	lifecycleInitialCycle, err := stagedsync.IsInitialCycleFromProgress(tx, knownTip, finishProgressBefore, e.syncCfg.InitialCycleBlockTTL)
+	if err != nil {
+		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+	}
+	initialCycle := limitedBigJump || lifecycleInitialCycle
+
 	isSynced := finishProgressBefore > 0 && finishProgressBefore > e.blockReader.FrozenBlocks() && finishProgressBefore == headersProgressBefore
-	if limitedBigJump {
+	if initialCycle {
 		isSynced = false
+	}
+	if limitedBigJump {
 		e.logger.Info("[sync] limited big jump", "from", finishProgressBefore, "to", fcuHeader.Number.Uint64(), "amount", uint64(e.syncCfg.LoopBlockLimit), "padding", limitedBigJumpPadding)
+	} else if lifecycleInitialCycle {
+		e.logger.Debug("[sync] lifecycle initial cycle", "finish", finishProgressBefore, "knownTip", knownTip, "ttl", e.syncCfg.InitialCycleBlockTTL)
 	}
 
 	canonicalHash, err := e.canonicalHash(ctx, tx, fcuHeader.Number.Uint64())
@@ -467,7 +479,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		rawdb.WriteHeadBlockHash(tx, blockHash)
 	}
 	// Run the forkchoice
-	initialCycle := limitedBigJump
 	firstCycle := false
 
 	tx, err = e.pipelineExecutor.RunLoop(ctx, currentContext, tx, RunLoopConfig{

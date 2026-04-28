@@ -109,6 +109,17 @@ func TestUpdateTipReachedFromProgress(t *testing.T) {
 	require.Equal(t, uint64(1500), block)
 }
 
+func TestIsInitialCycleFromProgressUsesKnownTip(t *testing.T) {
+	_, tx := memdb.NewTestTx(t)
+	defer tx.Rollback()
+
+	require.NoError(t, rawdb.WriteTipReached(tx, 1000))
+
+	initialCycle, err := IsInitialCycleFromProgress(tx, 1046, 1000, 1)
+	require.NoError(t, err)
+	require.True(t, initialCycle)
+}
+
 func TestDeleteTipReached(t *testing.T) {
 	_, tx := memdb.NewTestTx(t)
 	defer tx.Rollback()
