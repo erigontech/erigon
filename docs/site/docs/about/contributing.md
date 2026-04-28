@@ -33,3 +33,39 @@ Open an issue in the repository to suggest corrections, flag outdated content, o
 3. Verify your changes render correctly in the local dev server.
 4. Open a pull request against `release/3.4` with a clear description of what changed and why.
 
+## Contributing to the Erigon codebase
+
+The Erigon node software is developed in the same [erigontech/erigon](https://github.com/erigontech/erigon) repository. Code contributions follow the standard GitHub fork-and-PR workflow.
+
+### Getting started
+
+1. Fork the repository and clone your fork:
+   ```bash
+   git clone https://github.com/<your-username>/erigon.git
+   cd erigon
+   ```
+2. Build the project (requires Go 1.24+ and a C++ compiler):
+   ```bash
+   make erigon
+   ```
+3. Run the test suite:
+   ```bash
+   go test ./...
+   ```
+
+### Opening a pull request
+
+- Target the `main` branch for new features and non-critical fixes.
+- Target the relevant `release/x.y` branch for release-specific backports.
+- Keep PRs focused — one logical change per PR makes review faster.
+- Include a clear description of what changed, why, and how it was tested.
+- For significant changes, open an issue first to discuss the approach before writing code.
+
+### Code style and guidelines
+
+- Follow the existing Go conventions in the codebase.
+- Run `make lint` before submitting — the CI will enforce it.
+- All new code should be covered by tests where practical.
+
+For questions, join the [Erigon Discord](https://discord.gg/e8MBWss7uJ) or open a discussion on GitHub.
+
