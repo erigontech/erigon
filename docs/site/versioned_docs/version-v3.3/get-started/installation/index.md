@@ -126,17 +126,17 @@ docker run -it erigontech/erigon:v3.3.10 --chain=hoodi --prune.mode=minimal --da
 
 **1. Select Your Processor Architecture and Download**
 
-Go to the Erigon [releases page](https://github.com/erigontech/erigon/releases) on GitHub and select the latest stable version (e.g., `3.3.x`) or whichever version you prefer.
+Go to the Erigon [releases page](https://github.com/erigontech/erigon/releases) on GitHub and select the latest stable version (e.g., v{ERIGON_VERSION}) or whichever version you prefer.
 
 Download the appropriate binary file for your processor architecture:
 
 | Processor Type | Binary File Type | Example File Name |
 | --- | --- | --- |
-| 64-bit Intel/AMD | Debian Package (.deb) | erigon_`3.3.x`_amd64.deb |
-| 64-bit ARM | Debian Package (.deb) | erigon_`3.3.x`_arm64.deb |
-| 64-bit Intel/AMD | Compressed Archive (.tar.gz) | erigon_v`3.3.x`_linux_amd64.tar.gz |
-| 64-bit Intel/AMDv2 | Compressed Archive (.tar.gz) | erigon_v`3.3.x`_amd64v2.tar.gz |
-| 64-bit ARM | Compressed Archive (.tar.gz) | erigon_v`3.3.x`_linux_arm64.tar.gz |
+| 64-bit Intel/AMD | Debian Package (.deb) | erigon_{ERIGON_VERSION}_amd64.deb |
+| 64-bit ARM | Debian Package (.deb) | erigon_{ERIGON_VERSION}_arm64.deb |
+| 64-bit Intel/AMD | Compressed Archive (.tar.gz) | erigon_v{ERIGON_VERSION}_linux_amd64.tar.gz |
+| 64-bit Intel/AMDv2 | Compressed Archive (.tar.gz) | erigon_v{ERIGON_VERSION}_linux_amd64v2.tar.gz |
+| 64-bit ARM | Compressed Archive (.tar.gz) | erigon_v{ERIGON_VERSION}_linux_arm64.tar.gz |
 
 
 Note that the Release Page Assets table contains also the **checksum** for each file and a checksum file.
@@ -489,6 +489,4 @@ If you need to connect to Erigon from an external network (e.g., opening a port 
 
 </details>
 
-Once you have Erigon installed, you can see Basic Usage to configure your node.
-
-- [Basic Usage](/ v3.3/fundamentals/basic-usage)
+Once you have Erigon installed, you can see [Basic Usage](/v3.3/fundamentals/basic-usage) to configure your node.
