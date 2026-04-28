@@ -120,11 +120,55 @@ func TestTruncateCanonicalChain(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, common.Hash(blockRoot), canonicalRoot)
 
-	require.NoError(t, TruncateCanonicalChain(context.Background(), tx, 0))
+	_, _, err = TruncateCanonicalChain(context.Background(), tx, 0)
+	require.NoError(t, err)
 
 	canonicalRoot, err = ReadCanonicalBlockRoot(tx, block.Block.Slot)
 	require.NoError(t, err)
 	require.Equal(t, common.Hash{}, canonicalRoot)
+}
+
+// TestTruncateCanonicalChainReturnsHighest verifies that TruncateCanonicalChain
+// returns the slot and root of the highest entry it deleted, and preserves
+// entries below the truncation point.
+func TestTruncateCanonicalChainReturnsHighest(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	slots := []uint64{100, 101, 102, 103, 104}
+	roots := make([]common.Hash, len(slots))
+	for i, slot := range slots {
+		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+		block.Block.Slot = slot
+		block.Block.ParentRoot = common.Hash{byte(i + 1)}
+		require.NoError(t, WriteBeaconBlockHeaderAndIndicies(context.Background(), tx, block.SignedBeaconBlockHeader(), true))
+		root, err := block.Block.HashSSZ()
+		require.NoError(t, err)
+		roots[i] = common.Hash(root)
+	}
+
+	// Truncate from slot 102: deletes 102/103/104, preserves 100/101.
+	highestSlot, highestRoot, err := TruncateCanonicalChain(context.Background(), tx, 102)
+	require.NoError(t, err)
+	require.Equal(t, uint64(104), highestSlot)
+	require.Equal(t, roots[4], highestRoot)
+
+	// Slots 100, 101 must still be canonical.
+	for i, slot := range []uint64{100, 101} {
+		preserved, err := ReadCanonicalBlockRoot(tx, slot)
+		require.NoError(t, err)
+		require.Equal(t, roots[i], preserved)
+	}
+
+	// Slots 102, 103, 104 must be gone.
+	for _, slot := range []uint64{102, 103, 104} {
+		gone, err := ReadCanonicalBlockRoot(tx, slot)
+		require.NoError(t, err)
+		require.Equal(t, common.Hash{}, gone)
+	}
 }
 
 func TestReadBeaconBlockHeader(t *testing.T) {

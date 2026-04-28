@@ -244,10 +244,15 @@ func WriteParentBlockRoot(ctx context.Context, tx kv.RwTx, blockRoot, parentRoot
 	return tx.Put(kv.BlockRootToParentRoot, blockRoot[:], parentRoot[:])
 }
 
-func TruncateCanonicalChain(ctx context.Context, tx kv.RwTx, slot uint64) error {
-	return tx.ForEach(kv.CanonicalBlockRoots, base_encoding.Encode64ToBytes4(slot), func(k, _ []byte) error {
+func TruncateCanonicalChain(ctx context.Context, tx kv.RwTx, slot uint64) (uint64, common.Hash, error) {
+	var highestSlot uint64
+	var highestRoot common.Hash
+	err := tx.ForEach(kv.CanonicalBlockRoots, base_encoding.Encode64ToBytes4(slot), func(k, v []byte) error {
+		highestSlot = base_encoding.Decode64FromBytes4(k)
+		copy(highestRoot[:], v)
 		return tx.Delete(kv.CanonicalBlockRoots, k)
 	})
+	return highestSlot, highestRoot, err
 }
 
 func PruneSignedHeaders(tx kv.RwTx, from uint64) error {

@@ -107,18 +107,6 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 		return fmt.Errorf("failed to read canonical block root: %w", err)
 	}
 
-	oldCanonical := common.Hash{}
-	// Guard against uint64 underflow: currentSlot=0 → currentSlot-1 = MaxUint64 → infinite loop.
-	for i := currentSlot; i > 1; i-- {
-		oldCanonical, err = beacon_indicies.ReadCanonicalBlockRoot(tx, i-1)
-		if err != nil {
-			return fmt.Errorf("failed to read canonical block root: %w", err)
-		}
-		if oldCanonical != (common.Hash{}) {
-			break
-		}
-	}
-
 	// List of new canonical chain entries
 	reconnectionRoots := []canonicalEntry{{currentSlot, currentRoot}}
 
@@ -151,8 +139,10 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 		reconnectionRoots = append(reconnectionRoots, canonicalEntry{currentSlot, currentRoot})
 	}
 
-	// Truncate the canonical chain at the current slot
-	if err := beacon_indicies.TruncateCanonicalChain(ctx, tx, currentSlot); err != nil {
+	// Truncate the canonical chain at the common ancestor and capture the
+	// previous canonical tip (highest slot/root deleted) for the chain_reorg event.
+	oldCanonicalSlot, oldCanonical, err := beacon_indicies.TruncateCanonicalChain(ctx, tx, currentSlot)
+	if err != nil {
 		return fmt.Errorf("failed to truncate canonical chain: %w", err)
 	}
 
@@ -168,12 +158,9 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 		return fmt.Errorf("failed to mark root canonical: %w", err)
 	}
 
-	// check reorg
-	parentRoot, err := beacon_indicies.ReadParentBlockRoot(ctx, tx, headRoot)
-	if err != nil {
-		return fmt.Errorf("failed to read parent block root: %w", err)
-	}
-	if parentRoot != oldCanonical {
+	// A reorg occurred if the previous canonical chain extended past the
+	// common ancestor. currentSlot is the common ancestor's slot here.
+	if oldCanonical != (common.Hash{}) && currentSlot < oldCanonicalSlot {
 		log.Debug("cl reorg", "new_head_slot", headSlot, "fork_slot", currentSlot, "old_canonical", oldCanonical, "new_canonical", headRoot)
 		oldStateRoot, err := beacon_indicies.ReadStateRootByBlockRoot(ctx, tx, oldCanonical)
 		if err != nil {
@@ -187,7 +174,7 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 		}
 		reorgEvent := &beaconevents.ChainReorgData{
 			Slot:                headSlot,
-			Depth:               currentSlot - headSlot,
+			Depth:               oldCanonicalSlot - currentSlot,
 			OldHeadBlock:        oldCanonical,
 			NewHeadBlock:        headRoot,
 			OldHeadState:        oldStateRoot,
