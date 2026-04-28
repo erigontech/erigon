@@ -690,7 +690,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 		default:
 			// continue
 		}
-		p.logger.Debug("[txpool] Waiting for block", "expecting", onTopOf, "lastSeen", last, "txRequested", n, "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len())
+		p.logger.Trace("[txpool] Waiting for block", "expecting", onTopOf, "lastSeen", last, "txRequested", n, "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len())
 		p.lastSeenCond.Wait()
 	}
 	// Important: poolDB.BeginRo has a RoTxsLimiter which is implemented using a weighted semaphore object. This means
@@ -795,6 +795,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 			IsEIP3860:          isEIP3860,
 			IsEIP7623:          isEIP7623,
 			IsEIP7976:          isAmsterdam,
+			IsEIP7981:          isAmsterdam,
 			IsEIP8037:          isAmsterdam,
 			IsAATxn:            isAATxn,
 		})
@@ -989,6 +990,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		IsEIP3860:          isEIP3860,
 		IsEIP7623:          isPrague,
 		IsEIP7976:          isAmsterdam,
+		IsEIP7981:          isAmsterdam,
 		IsEIP8037:          isAmsterdam,
 		IsAATxn:            isAATxn,
 	})

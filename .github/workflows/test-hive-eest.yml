@@ -26,25 +26,39 @@ jobs:
           # Pattern format: "<suite-regex>/<test-regex>" — the leading ".*/""
           # matches the suite name (eest/consume-engine) while the remainder
           # filters individual pytest test IDs by fork parameter.
+          # pool-size: --client.pool.size for hive's warm-daemon client pool.
+          # Tuned per shard from a trace-instrumented dispatch (run 24938677388);
+          # the LRU hit-rate curve plateaus at ~50% past size=4 on the long
+          # consume-engine shards (reuse is essentially depth-2 consecutive),
+          # so 4 captures all available reuse and 24+ buys nothing. paris+shanghai
+          # and consume-rlp have ~unique pre-state per test (0% hit at any size).
+          # glamsterdam-devnet is the exception — its curve keeps climbing past
+          # 24, so it gets a larger pool.
           - sim: consume-engine
             sim-limit: ".*/.*fork_(Paris|Shanghai)"
             shard: paris+shanghai
+            pool-size: 0
           - sim: consume-engine
             sim-limit: ".*/.*fork_Cancun"
             shard: cancun
+            pool-size: 4
           - sim: consume-engine
             sim-limit: ".*/.*fork_Prague"
             shard: prague
+            pool-size: 4
           - sim: consume-engine
             sim-limit: ".*/.*fork_Osaka"
             shard: osaka
+            pool-size: 4
           - sim: consume-rlp
             sim-limit: ".*(eip2930_access_list|eip4844_blobs).*" # all tests take too long
             shard: rlp
+            pool-size: 0
           # Glamsterdam devnet: BAL EIPs against devnet fixtures
           - sim: consume-engine
             sim-limit: ".*(8024|7708|7778|7843|7928|7954|8037).*"
             shard: glamsterdam-devnet
+            pool-size: 24
             fixtures-url: "https://github.com/ethereum/execution-spec-tests/releases/download/bal@v5.7.0/fixtures_bal.tar.gz"
             extra-hive-flags: "--sim.buildarg branch=devnets/bal/4 --sim.loglevel=3 --client.checktimelimit=300s"
             erigon-extra-flags: "--experimental.bal"
@@ -83,8 +97,12 @@ jobs:
       - name: Checkout Hive
         uses: actions/checkout@v6
         with:
-          repository: ethereum/hive
-          ref: ${{ steps.hive-version.outputs.ref }}
+          # EXPERIMENT: pinned to erigontech/hive yperbasis/client-pool, which
+          # is the upstream-PR-ready (ethereum/hive#1449) warm-daemon client
+          # pool. Revert to ethereum/hive + steps.hive-version.outputs.ref
+          # once that PR lands; until then we ride this fork.
+          repository: erigontech/hive
+          ref: a3c9afd9ada800efc41c0287d66f7d083684d3cb
           path: hive
 
       - name: Conditional Docker Login
@@ -151,7 +169,7 @@ jobs:
             echo -e "\n\n============================================================"
             echo "Running test: ${1}"
             echo -e "\n"
-            ./hive -docker.output -docker.auth --sim ethereum/eels/"${1}" --sim.limit="${2}" --sim.parallelism=12 --client erigon --docker.nocache=true --sim.limit.exact=false --sim.buildarg fixtures="${fixtures_url}" ${{ matrix.extra-hive-flags }} 2>&1 | tee output.log || {
+            ./hive -docker.output -docker.auth --sim ethereum/eels/"${1}" --sim.limit="${2}" --sim.parallelism=12 --client.pool.size=${{ matrix.pool-size }} --client erigon --docker.nocache=true --sim.limit.exact=false --sim.buildarg fixtures="${fixtures_url}" ${{ matrix.extra-hive-flags }} 2>&1 | tee output.log || {
               if [ $? -gt 0 ]; then
                 echo "Exitcode gt 0"
               fi
