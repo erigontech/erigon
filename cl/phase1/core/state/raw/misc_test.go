@@ -69,7 +69,7 @@ func TestNewBeaconStateMinimalPreset(t *testing.T) {
 	require.NotNil(t, ptcWindow)
 	require.Equal(t, 24, ptcWindow.Length(), "ptc_window should have 24 slots under minimal preset")
 
-	// Each slot in ptc_window should be a vector of PTC_SIZE (2 for minimal preset).
+	// Each slot in ptc_window should be a vector of PTC_SIZE (16 for minimal preset).
 	for i := 0; i < ptcWindow.Length(); i++ {
 		vec := ptcWindow.Get(i)
 		require.Equal(t, int(cfg.PtcSize), vec.Length(),
