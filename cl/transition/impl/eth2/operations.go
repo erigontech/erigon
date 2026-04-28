@@ -1618,11 +1618,12 @@ func (I *impl) ProcessSlots(s abstract.BeaconState, slot uint64) error {
 
 func (I *impl) ProcessDepositRequest(s abstract.BeaconState, depositRequest *solid.DepositRequest) error {
 	// Set deposit request start index on first deposit request.
-	// This applies to all versions (Electra through GLOAS) so that
-	// ProcessPendingDeposits can distinguish bridge deposits from
-	// execution-layer deposit requests.
-	if s.GetDepositRequestsStartIndex() == s.BeaconConfig().UnsetDepositRequestsStartIndex {
-		s.SetDepositRequestsStartIndex(depositRequest.Index)
+	// [Modified in Gloas:EIP7732] This is only done pre-GLOAS; the GLOAS spec
+	// removed this from process_deposit_request (it's set during the fork upgrade).
+	if s.Version() < clparams.GloasVersion {
+		if s.GetDepositRequestsStartIndex() == s.BeaconConfig().UnsetDepositRequestsStartIndex {
+			s.SetDepositRequestsStartIndex(depositRequest.Index)
+		}
 	}
 
 	// [New in Gloas:EIP7732] Route builder deposits immediately

@@ -136,7 +136,9 @@ func DecodeStaticList[T Unmarshaler](bytes []byte, start, end, bytesPerElement u
 	objs := make([]T, elementsNum)
 	for i := range objs {
 		objs[i] = objs[i].Clone().(T)
-		if err := objs[i].DecodeSSZ(buf[i*int(bytesPerElement):], version); err != nil {
+		elemStart := i * int(bytesPerElement)
+		elemEnd := elemStart + int(bytesPerElement)
+		if err := objs[i].DecodeSSZ(buf[elemStart:elemEnd], version); err != nil {
 			return nil, err
 		}
 	}
