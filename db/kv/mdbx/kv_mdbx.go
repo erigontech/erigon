@@ -355,7 +355,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	}
 
 	if opts.roTxsLimiter == nil {
-		targetSemCount := int64(runtime.GOMAXPROCS(-1) * 16)
+		targetSemCount := int64(9_000)
 		opts.roTxsLimiter = semaphore.NewWeighted(targetSemCount) // 1 less than max to allow unlocking to happen
 	}
 
