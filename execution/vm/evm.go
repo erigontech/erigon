@@ -105,11 +105,6 @@ type EVM struct {
 	// frame commits, its walkTotal is added to the parent's slot. Used at
 	// frame-commit to compute delta = walkTotal - committedChildBytes[depth].
 	committedChildBytes []uint64
-	// chargeStateGas controls whether the per-frame walk-and-charge runs.
-	// Set to false during SysCallContract paths (EIP-2935 history storage,
-	// EIP-7002/EIP-7251 system calls) so those system-induced state writes do
-	// not consume state gas. Set true during normal tx execution by TxnExecutor.
-	chargeStateGas bool
 }
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
@@ -177,11 +172,6 @@ func (evm *EVM) ExecutionStateGas() uint64 { return evm.executionStateGas }
 // RegularGasConsumed returns the total regular gas charged during tx execution (for block-level accounting)
 func (evm *EVM) RegularGasConsumed() uint64 { return evm.regularGasConsumed }
 
-// SetChargeStateGas configures whether per-frame state-gas accounting runs in
-// this EVM instance. TxnExecutor sets true for normal tx execution and false
-// for SysCallContract paths so system-induced state writes are exempt.
-func (evm *EVM) SetChargeStateGas(v bool) { evm.chargeStateGas = v }
-
 // ResetGasConsumed resets the gas consumed counters for a new transaction
 func (evm *EVM) ResetGasConsumed() {
 	evm.regularGasConsumed = 0
@@ -219,8 +209,8 @@ func (evm *EVM) propagateChildBytes(walkTotal uint64) {
 }
 
 // chargeFrameStateGas runs the EIP-8037 frame-end state-gas accounting for a
-// successful call/create commit, when chargeStateGas is enabled and Amsterdam
-// is active. It walks the journal segment [frameStart, frameEnd), computes
+// successful call/create commit, when Amsterdam is active and the EVM is not
+// in RestoreState mode. It walks the journal segment [frameStart, frameEnd), computes
 // delta = walkTotal - committedChildBytes[depth], and:
 //   - delta > 0 → charge delta×CPSB from gas.State (with spill into gas.Regular).
 //     On insufficient gas, returns ErrOutOfGas (caller must revert).
@@ -482,10 +472,10 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		ret, gas, err = evm.Run(contract, gas, input, readOnly)
 	}
 
-	// EIP-8037 frame commit (success path, Amsterdam, chargeStateGas enabled):
+	// EIP-8037 frame commit (success path, Amsterdam, not in RestoreState):
 	// run the journal-walk-and-charge before we evaluate the error path so
 	// that an OOG at the frame-end charge correctly triggers a revert.
-	if err == nil && !evm.config.RestoreState && evm.chainRules.IsAmsterdam && evm.chargeStateGas {
+	if err == nil && !evm.config.RestoreState && evm.chainRules.IsAmsterdam {
 		walkTotal, chargeErr := evm.chargeFrameStateGas(&gas, frameStart, depth, accounts.NilAddress)
 		if chargeErr != nil {
 			err = chargeErr
@@ -509,8 +499,8 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		// so TxnExecutor can subtract it from the receipt gas. Block-level
 		// accounting uses 0 explicitly when vmerr != nil (TxnExecutor decision).
 	} else if !frameAccumulatorPopped {
-		// Non-Amsterdam or chargeStateGas disabled: pop the accumulator
-		// without propagating (no state-gas charging happens in this branch).
+		// Pre-Amsterdam: no state-gas charging happens in this branch; pop the
+		// accumulator without propagating.
 		evm.popFrameAccumulator()
 	}
 
@@ -746,13 +736,13 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 		}
 	}
 
-	// EIP-8037 frame commit (success path, Amsterdam, chargeStateGas enabled):
+	// EIP-8037 frame commit (success path, Amsterdam, not in RestoreState):
 	// run the journal-walk-and-charge before the error path so that an OOG at
 	// the frame-end charge correctly triggers a revert. excludeCreate is the
 	// contract address when this is the top-level CREATE tx (depth==0); the
 	// 112×CPSB intrinsic already covers it, so the walk must skip it to avoid
 	// double-counting.
-	if err == nil && evm.chainRules.IsAmsterdam && evm.chargeStateGas {
+	if err == nil && !evm.config.RestoreState && evm.chainRules.IsAmsterdam {
 		excludeCreate := accounts.NilAddress
 		if depth == 0 {
 			excludeCreate = address
@@ -779,8 +769,8 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 		// so TxnExecutor can subtract it from the receipt gas. Block-level
 		// accounting uses 0 explicitly when vmerr != nil (TxnExecutor decision).
 	} else if !frameAccumulatorPopped {
-		// Non-Amsterdam or chargeStateGas disabled: pop the accumulator
-		// without propagating (no state-gas charging in this branch).
+		// Pre-Amsterdam or RestoreState: pop the accumulator without
+		// propagating (no state-gas charging happens in this branch).
 		evm.popFrameAccumulator()
 	}
 

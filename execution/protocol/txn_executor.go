@@ -426,7 +426,6 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	)
 
 	st.evm.ResetGasConsumed()
-	st.evm.SetChargeStateGas(true)
 
 	ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, false)
 
@@ -597,10 +596,6 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	)
 
 	st.evm.ResetGasConsumed()
-	// EIP-8037: enable per-frame state-gas accounting for normal tx execution.
-	// SysCallContract paths set this to false to exempt system-induced state
-	// writes (e.g. EIP-2935 history storage update).
-	st.evm.SetChargeStateGas(true)
 
 	if contractCreation {
 		// The reason why we don't increment nonce here is that we need the original

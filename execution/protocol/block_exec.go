@@ -270,9 +270,18 @@ func SysCallContractWithBlockContext(contract accounts.Address, data []byte, cha
 		txContext = NewEVMTxContext(msg)
 	}
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
+	// EIP-8037 (PR 11573 commit d2a0230): system calls are not subject to the
+	// TX_MAX_GAS_LIMIT cap, do not count against the block gas limit, and do
+	// not contribute to either block_regular_gas_used or block_state_gas_used.
+	// On Amsterdam, they get a dedicated state-gas reservoir sized for up to
+	// SystemMaxSstoresPerCall (=16) fresh storage slots; the regular budget
+	// (msg.Gas() = SysCallGasLimit = 30M) sits alongside it as gas_left.
 	mdGas := mdgas.MdGas{
 		Regular: msg.Gas(),
-		State:   0, // state gas reservoir will consume from regular gas for sys calls
+		State:   0,
+	}
+	if evm.ChainRules().IsAmsterdam {
+		mdGas.State = params.StateBytesPerStorageSlot * evm.Context.CostPerStateByte * params.SystemMaxSstoresPerCall
 	}
 	ret, _, err := evm.Call(
 		msg.From(),
