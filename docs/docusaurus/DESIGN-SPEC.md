@@ -1,5 +1,9 @@
 # Erigon Docusaurus — Design & Customization Spec
 
+> **Canonical specification:** https://github.com/erigontech/erigon-documents/tree/master/public-docs
+> `docusaurus-design-spec.md` is the authoritative reference for this site's design.
+> Always edit and refer to that copy — do not maintain a separate local version.
+
 Complete specification of every customization applied to this site relative to a default Docusaurus 3 install. Use this as a reference when migrating the design to another Docusaurus project (e.g. Cocoon).
 
 ---

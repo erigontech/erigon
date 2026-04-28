@@ -319,3 +319,25 @@ details.alert.alert--info summary {
 .footer {
   background-color: #000000;
 }
+
+/* ─── Footer social pill buttons ─────────────────────────────────────────── */
+
+.footer-social-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.55rem 0.85rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.15);
+  color: rgba(255,255,255,0.65) !important;
+  text-decoration: none !important;
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: color 0.2s ease, border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+.footer-social-btn:hover {
+  color: #EF7716 !important;
+  border-color: #EF7716 !important;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(239,119,22,0.15);
+}

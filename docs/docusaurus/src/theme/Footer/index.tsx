@@ -70,7 +70,7 @@ export default function Footer(): React.ReactElement {
 
         {/* Products column */}
         <div>
-          <p style={{fontFamily: "'Montserrat', sans-serif", fontWeight: 800, fontSize: '0.8rem', letterSpacing: '0.08em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.4)', margin: '0 0 1rem'}}>Products</p>
+          <p style={{fontFamily: "'Montserrat', sans-serif", fontWeight: 800, fontSize: '0.8rem', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#f0f0f0', margin: '0 0 1rem'}}>Products</p>
           <ul style={{listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.6rem'}}>
             {[
               {label: 'Erigon Client', href: 'https://erigon.tech/products/erigon-client/'},
@@ -91,7 +91,7 @@ export default function Footer(): React.ReactElement {
 
         {/* Developers column */}
         <div>
-          <p style={{fontFamily: "'Montserrat', sans-serif", fontWeight: 800, fontSize: '0.8rem', letterSpacing: '0.08em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.4)', margin: '0 0 1rem'}}>Developers</p>
+          <p style={{fontFamily: "'Montserrat', sans-serif", fontWeight: 800, fontSize: '0.8rem', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#f0f0f0', margin: '0 0 1rem'}}>Developers</p>
           <ul style={{listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.6rem'}}>
             {[
               {label: 'Zilkworm Docs ↗', href: 'https://zilkworm.erigon.tech'},
@@ -112,7 +112,7 @@ export default function Footer(): React.ReactElement {
 
         {/* Company column */}
         <div>
-          <p style={{fontFamily: "'Montserrat', sans-serif", fontWeight: 800, fontSize: '0.8rem', letterSpacing: '0.08em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.4)', margin: '0 0 1rem'}}>Company</p>
+          <p style={{fontFamily: "'Montserrat', sans-serif", fontWeight: 800, fontSize: '0.8rem', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#f0f0f0', margin: '0 0 1rem'}}>Company</p>
           <ul style={{listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.6rem'}}>
             {[
               {label: 'About Us', href: 'https://erigon.tech/about/'},
@@ -134,18 +134,15 @@ export default function Footer(): React.ReactElement {
 
         {/* Community column */}
         <div>
-          <p style={{fontFamily: "'Montserrat', sans-serif", fontWeight: 800, fontSize: '0.8rem', letterSpacing: '0.08em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.4)', margin: '0 0 1rem'}}>Community</p>
-          <div style={{display: 'flex', flexDirection: 'column', gap: '0.75rem'}}>
+          <p style={{fontFamily: "'Montserrat', sans-serif", fontWeight: 800, fontSize: '0.8rem', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#f0f0f0', margin: '0 0 1rem'}}>Community</p>
+          <div style={{display: 'flex', flexDirection: 'column', gap: '0.5rem'}}>
             {[
               {label: 'X / Twitter', href: 'https://x.com/erigoneth', Icon: IconX},
               {label: 'Discord', href: 'https://dsc.gg/erigon', Icon: IconDiscord},
               {label: 'GitHub', href: 'https://github.com/erigontech', Icon: IconGitHub},
               {label: 'LinkedIn', href: 'https://www.linkedin.com/company/erigon/', Icon: IconLinkedIn},
             ].map(({label, href, Icon}) => (
-              <a key={label} href={href} target="_blank" rel="noopener noreferrer"
-                style={{display: 'flex', alignItems: 'center', gap: '0.6rem', color: 'rgba(255,255,255,0.65)', textDecoration: 'none', fontSize: '0.9rem', transition: 'color 0.15s'}}
-                onMouseEnter={e => (e.currentTarget.style.color = '#EF7716')}
-                onMouseLeave={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.65)')}>
+              <a key={label} href={href} target="_blank" rel="noopener noreferrer" className="footer-social-btn">
                 <Icon />
                 {label}
               </a>
