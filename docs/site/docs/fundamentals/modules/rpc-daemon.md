@@ -15,9 +15,9 @@ The Erigon RPC service offers three distinct deployment modes when it comes to t
 
 | Mode | Configuration | CLI Command to Run | Key Characteristics |
 | --- | --- | --- | --- |
-| Embedded | RPC server is hosted within the erigon process. | ./build/bin/erigon | The simplest, all-in-one solution. No separate RPC command is needed. |
-| Local | rpcdaemon runs as a standalone process on the same machine as erigon. It directly accesses local data storage. | First (Erigon):./build/bin/erigon --private.api.addr="&#x3C;host_IP>:9090"Second (rpcdaemon):./build/bin/rpcdaemon --datadir="&#x3C;erigon_data_path>" | Improves isolation, increases tuning options, and maintains high-performance data access. Requires two processes running on the same machine. |
-| Remote | rpcdaemon runs as a standalone process on a separate machine and accesses data storage remotely via the Erigon gRPC interface. | First (Erigon):./build/bin/erigon --private.api.addr="&#x3C;host_IP>:9090"Second (rpcdaemon):./build/bin/rpcdaemon --private.api.addr="&#x3C;erigon_IP>:9090" | Scalable, leverages the same data storage for multiple service endpoints. Uses the --private.api.addr flag to point the daemon to the remote Erigon instance. Note: the --grpc flag is only available on the standalone rpcdaemon binary; the main erigon binary exposes its gRPC interface automatically via --private.api.addr. |
+| Embedded | RPC server is hosted within the `erigon` process. | `./build/bin/erigon` | The simplest, all-in-one solution. No separate RPC command is needed. |
+| Local | `rpcdaemon` runs as a standalone process on the same machine as `erigon`. It directly accesses local data storage. | **Erigon:** `./build/bin/erigon --private.api.addr="<host_IP>:9090"`<br/>**rpcdaemon:** `./build/bin/rpcdaemon --datadir="<erigon_data_path>"` | Improves isolation, increases tuning options, and maintains high-performance data access. Requires two processes running on the same machine. |
+| Remote | `rpcdaemon` runs as a standalone process on a separate machine and accesses data storage remotely via the Erigon gRPC interface. | **Erigon:** `./build/bin/erigon --private.api.addr="<host_IP>:9090"`<br/>**rpcdaemon:** `./build/bin/rpcdaemon --private.api.addr="<erigon_IP>:9090"` | Scalable, leverages the same data storage for multiple service endpoints. Uses `--private.api.addr` to point the daemon to the remote Erigon instance. |
 
 
 For a comprehensive understanding and the latest instructions, the official documentation is essential:
