@@ -202,8 +202,12 @@ Flags for configuring various RPC servers and their behavior.
   * Default: `100`
 * `--rpc.blockrange.limit value`: Sets the maximum block range for `eth_getLogs` and similar range queries.
   * Default: `1000`
+  * Applies to: `eth_getLogs`, `erigon_getLogs`
 * `--rpc.logs.maxresults value`: Sets the maximum number of log results returned per query.
   * Default: `20000`
+  * Applies to: `eth_getLogs`, `erigon_getLogs`, `erigon_getLatestLogs`
+  * Set to `0` to remove the limit entirely (use with caution on large ranges).
+  * Works in tandem with `--rpc.blockrange.limit`: both constraints apply independently — a query can be blocked by either limit.
 * `--rpc.returndata.limit value`: Sets the maximum return data size for `eth_call`.
   * Default: `100000`
 * `--rpc.allow-unprotected-txs`: Allows unprotected transactions via RPC.

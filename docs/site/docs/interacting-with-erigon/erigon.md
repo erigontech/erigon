@@ -230,6 +230,10 @@ curl -s --data '{"jsonrpc":"2.0","method":"erigon_getLogs","params":[{"fromBlock
 | ----- | ------------------------------------------------- |
 | Array | Array of ErigonLog objects with enhanced metadata |
 
+:::note
+The number of logs returned is capped by [`--rpc.logs.maxresults`](../fundamentals/configuring-erigon#--rpclogs) (default `20000`). Set to `0` to remove the limit. The block range of the query is independently capped by `--rpc.blockrange.limit` (default `1000`).
+:::
+
 ***
 
 ## **erigon\_getLatestLogs**
@@ -255,6 +259,10 @@ curl -s --data '{"jsonrpc":"2.0","method":"erigon_getLatestLogs","params":[{"add
 | Type  | Description                                                  |
 | ----- | ------------------------------------------------------------ |
 | Array | Array of ErigonLog objects in descending chronological order |
+
+:::note
+The number of logs returned is capped by [`--rpc.logs.maxresults`](../fundamentals/configuring-erigon#--rpclogs) (default `20000`). Set to `0` to remove the limit.
+:::
 
 ***
 
