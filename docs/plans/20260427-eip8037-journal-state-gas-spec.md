@@ -322,7 +322,6 @@ Same short-circuit as Case A: `originalValue=X` non-zero never triggers the new-
 - `make lint` clean.
 - `make test-short` passes.
 - `make test-all` passes.
-- EEST EIP-8037 fixtures pass via Hive (`erigon-test-hive` skill).
 
 ## Rollout
 All changes are gated on `chainRules.IsAmsterdam` — pre-Amsterdam paths are untouched. Cutover is automatic at the fork-transition block, exercising both code paths in a single devnet run.
