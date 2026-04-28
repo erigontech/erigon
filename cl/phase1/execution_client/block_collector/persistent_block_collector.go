@@ -165,7 +165,7 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 			if prevBlockNum > 0 && block.NumberU64() != prevBlockNum+1 {
 				p.logger.Warn("[BlockCollector] Gap detected in collected blocks, will re-download missing range",
 					"lastBlock", prevBlockNum, "nextBlock", block.NumberU64(),
-					"gap", block.NumberU64()-prevBlockNum-1)
+					"gap", int64(block.NumberU64())-int64(prevBlockNum)-1)
 				break
 			}
 			prevBlockNum = block.NumberU64()
