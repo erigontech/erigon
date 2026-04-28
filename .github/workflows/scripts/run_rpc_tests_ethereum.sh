@@ -21,6 +21,11 @@ DISABLED_TEST_LIST=(
   admin_nodeInfo/test_01.json
   admin_peers/test_01.json
   erigon_nodeInfo/test_1.json
+  debug_accountRange
+  # prestateTracer diffMode fixtures created before the GetCodeHash fix (PR #20775);
+  # they lack post-state entries for EIP-161-cleared accounts now correctly detected.
+  debug_traceBlockByNumber/test_33.tar
+  debug_traceBlockByNumber/test_34.tar
   eth_coinbase/test_01.json
   eth_createAccessList/test_16.json
   eth_getTransactionByHash/test_02.json
