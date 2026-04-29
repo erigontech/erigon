@@ -797,15 +797,11 @@ func (a *Aggregator) BuildMissedAccessorsInBackground(workers int) bool {
 	return true
 }
 
-// WarmupDB spawns one goroutine per MDBX table; each goroutine opens its own
-// read transaction and does a full sequential scan to pull pages into the OS
-// page cache. Returns immediately; use agg.wg to wait for completion.
 func (a *Aggregator) WarmupDB() {
 	for name, cfg := range a.db.AllTables() {
 		if cfg.IsDeprecated {
 			continue
 		}
-		name := name
 		a.wg.Add(1)
 		go func() {
 			defer a.wg.Done()
@@ -823,6 +819,9 @@ func (a *Aggregator) WarmupDB() {
 				if a.ctx.Err() != nil {
 					return
 				}
+			}
+			if err != nil {
+				a.logger.Warn("[agg] WarmupDB scan error", "table", name, "err", err)
 			}
 		}()
 	}
