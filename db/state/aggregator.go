@@ -797,6 +797,37 @@ func (a *Aggregator) BuildMissedAccessorsInBackground(workers int) bool {
 	return true
 }
 
+// WarmupDB spawns one goroutine per MDBX table; each goroutine opens its own
+// read transaction and does a full sequential scan to pull pages into the OS
+// page cache. Returns immediately; use agg.wg to wait for completion.
+func (a *Aggregator) WarmupDB() {
+	for name, cfg := range a.db.AllTables() {
+		if cfg.IsDeprecated {
+			continue
+		}
+		name := name
+		a.wg.Add(1)
+		go func() {
+			defer a.wg.Done()
+			tx, err := a.db.BeginRo(a.ctx)
+			if err != nil {
+				return
+			}
+			defer tx.Rollback()
+			c, err := tx.Cursor(name)
+			if err != nil {
+				return
+			}
+			defer c.Close()
+			for k, _, err := c.First(); k != nil && err == nil; k, _, err = c.Next() {
+				if a.ctx.Err() != nil {
+					return
+				}
+			}
+		}()
+	}
+}
+
 type AggV3StaticFiles struct {
 	d    [kv.DomainLen]StaticFiles
 	ivfs []InvertedFiles
