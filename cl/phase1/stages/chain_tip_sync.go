@@ -342,25 +342,27 @@ func fetchParentEnvelopes(ctx context.Context, cfg *Cfg, roots [][32]byte) map[c
 	return envelopes
 }
 
-// recoverMissingEnvelopes walks backwards from the current fork choice head
+// recoverMissingEnvelopes walks backwards from the highest-seen block root
 // and fetches execution payload envelopes for FULL GLOAS blocks that are missing them.
 // It stops when it finds a parent that already has its envelope, since prior blocks are
 // expected to be covered. Fetching runs in a background goroutine to avoid blocking the stage.
+//
+// Uses HighestSeenRoot (O(1) gossip-tracked tip) instead of GetHead to avoid
+// running the full fork choice traversal, which is expensive for large trees.
 func recoverMissingEnvelopes(ctx context.Context, cfg *Cfg) {
-	headRoot, headSlot, err := cfg.forkChoice.GetHead(nil)
-	if err != nil {
-		log.Debug("[chainTipSync] envelope recovery: failed to get head", "err", err)
-		return
-	}
-
-	epoch := headSlot / cfg.beaconCfg.SlotsPerEpoch
-	if cfg.beaconCfg.GetCurrentStateVersion(epoch) < clparams.GloasVersion {
+	headRoot := cfg.forkChoice.HighestSeenRoot()
+	if headRoot == (common.Hash{}) {
 		return
 	}
 
 	childBlock, ok := cfg.forkChoice.GetBlock(headRoot)
 	if !ok {
 		log.Debug("[chainTipSync] envelope recovery: head block not in fork graph", "headRoot", headRoot)
+		return
+	}
+
+	epoch := childBlock.Block.Slot / cfg.beaconCfg.SlotsPerEpoch
+	if cfg.beaconCfg.GetCurrentStateVersion(epoch) < clparams.GloasVersion {
 		return
 	}
 
