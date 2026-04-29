@@ -118,8 +118,8 @@ func DefaultEngineApiTesterGenesis(t *testing.T) (*types.Genesis, *ecdsa.Private
 }
 
 // localhostEphemeral asks the kernel to pick a free TCP port on the loopback
-// interface. Used by the engine-api test harness to pre-bind listeners and
-// avoid TOCTOU races with concurrent tests selecting the same port.
+// interface. Used by the engine-api test harness to avoid TOCTOU races with
+// concurrent tests selecting the same port.
 const localhostEphemeral = "127.0.0.1:0"
 
 func InitialiseEngineApiTester(t testing.TB, args EngineApiTesterInitArgs) EngineApiTester {
@@ -128,16 +128,13 @@ func InitialiseEngineApiTester(t testing.TB, args EngineApiTesterInitArgs) Engin
 	dirs := datadir.New(args.DataDir)
 	genesis := args.Genesis
 
-	// Pre-bind listeners on a kernel-assigned port to avoid TOCTOU port races
-	// with concurrent tests. Each listener is held open until the matching
-	// server takes ownership of the socket. The t.Cleanup calls are safety
-	// nets if InitialiseEngineApiTester aborts before hand-off; on the happy
-	// path the http server's Shutdown closes the listener first and the
-	// cleanup is a silent no-op.
-	sentryListener, err := net.Listen("tcp", localhostEphemeral)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = sentryListener.Close() })
-	sentryPort := sentryListener.Addr().(*net.TCPAddr).Port
+	// Pre-bind the HTTP listeners on a kernel-assigned port to avoid TOCTOU
+	// port races with concurrent tests. Each listener is held open until the
+	// matching server takes ownership of the socket. The t.Cleanup calls are
+	// safety nets if InitialiseEngineApiTester aborts before hand-off; on the
+	// happy path the http server's Shutdown closes the listener first and the
+	// cleanup is a silent no-op. The sentry/P2P stack picks its own kernel-
+	// assigned port directly via its config below, so no pre-bind there.
 	jsonRpcListener, err := net.Listen("tcp", localhostEphemeral)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = jsonRpcListener.Close() })
@@ -146,7 +143,7 @@ func InitialiseEngineApiTester(t testing.TB, args EngineApiTesterInitArgs) Engin
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = engineApiListener.Close() })
 	engineApiPort := engineApiListener.Addr().(*net.TCPAddr).Port
-	logger.Debug("[engine-api-tester] selected ports", "sentry", sentryPort, "engineApi", engineApiPort, "jsonRpc", jsonRpcPort)
+	logger.Debug("[engine-api-tester] selected ports", "engineApi", engineApiPort, "jsonRpc", jsonRpcPort)
 
 	httpConfig := httpcfg.HttpCfg{
 		Enabled:                  true,
@@ -175,13 +172,13 @@ func InitialiseEngineApiTester(t testing.TB, args EngineApiTesterInitArgs) Engin
 		Dirs: dirs,
 		Http: httpConfig,
 		P2P: p2p.Config{
-			ListenAddr:      fmt.Sprintf("127.0.0.1:%d", sentryPort),
+			ListenAddr:      localhostEphemeral,
 			MaxPeers:        1,
 			MaxPendingPeers: 1,
 			NoDiscovery:     true,
 			NoDial:          true,
 			ProtocolVersion: []uint{direct.ETH68},
-			AllowedPorts:    []uint{uint(sentryPort)},
+			AllowedPorts:    []uint{0},
 			PrivateKey:      nodeKey,
 		},
 	}
@@ -205,10 +202,6 @@ func InitialiseEngineApiTester(t testing.TB, args EngineApiTesterInitArgs) Engin
 		args.EthConfigTweaker(&ethConfig)
 	}
 
-	// Release the port for the P2P stack, which doesn't accept pre-created
-	// listeners. A narrow TOCTOU window remains between Close and the sentry's
-	// internal net.Listen, but it hasn't been observed in flaky-test reports.
-	sentryListener.Close()
 	ethNode, err := node.New(ctx, &nodeConfig, logger)
 	require.NoError(t, err)
 	cleanNode := func(ethNode *node.Node) func() {
