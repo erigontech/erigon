@@ -1055,14 +1055,14 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 	acRo.Close()
 
-	if !squeeze && !statecfg.Schema.CommitmentDomain.ReplaceKeysInValues {
+	if !squeeze {
 		return latestRoot, nil
 	}
 	logger.Info("[squeeze] starting")
 	a.recalcVisibleFiles()
 
 	logger.Info(fmt.Sprintf("[squeeze] latest root %x", latestRoot))
-	a.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
+	a.ForTestReplaceKeysInValues(kv.CommitmentDomain, squeeze)
 
 	actx := a.BeginFilesRo()
 	defer actx.Close()
