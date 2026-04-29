@@ -804,6 +804,7 @@ func (a *Aggregator) WarmupDB() {
 		a.wg.Add(1)
 		go func() {
 			defer a.wg.Done()
+			t := time.Now()
 			tx, err := a.db.BeginRo(a.ctx)
 			if err != nil {
 				return
@@ -816,13 +817,19 @@ func (a *Aggregator) WarmupDB() {
 			defer c.Close()
 			// .Next() does return zero-copy pointers to mmap without touching leaf pages of db's btree
 			// so basically it's branch-nodes of btree warmup
-			for k, _, err := c.First(); k != nil && err == nil; k, _, err = c.Next() {
-				if a.ctx.Err() != nil {
+			for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
+				if err != nil {
+					a.logger.Warn("[agg] WarmupDB scan error", "table", name, "err", err)
 					return
 				}
+				select {
+				case <-a.ctx.Done():
+					return
+				default:
+				}
 			}
-			if err != nil {
-				a.logger.Warn("[agg] WarmupDB scan error", "table", name, "err", err)
+			if took := time.Since(t); took > 50*time.Millisecond {
+				a.logger.Debug("[agg] WarmupDB table", "table", name, "took", took)
 			}
 		}()
 	}
