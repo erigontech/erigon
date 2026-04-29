@@ -822,8 +822,10 @@ func (a *Aggregator) WarmupDB() {
 					a.logger.Warn("[agg] WarmupDB scan error", "table", name, "err", err)
 					return
 				}
-				if a.ctx.Err() != nil {
+				select {
+				case <-a.ctx.Done():
 					return
+				default:
 				}
 			}
 		}()
