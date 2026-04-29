@@ -44,6 +44,14 @@ func IsInitialCycleFromProgress(tx kv.Getter, knownTip, finishProgress, ttl uint
 	if !ok || finishProgress == 0 {
 		return true, nil
 	}
+	// knownTip is the floor of "where the chain head is now" — bumped up by the marker
+	// so an outdated headers/frozen view never makes us think we're at tip.
+	//
+	// Two independent invariants must hold to skip the initial cycle:
+	//   1) the recorded tip-reached event is recent: knownTip - lastTipReachedBlock <= ttl
+	//      (otherwise the marker is stale and tells us nothing about the present)
+	//   2) current finish progress is still close to tip: knownTip - finishProgress <= ttl
+	//      (otherwise we've fallen behind and need a full initial cycle again)
 	knownTip = max(knownTip, lastTipReachedBlock)
 	recentlyReachedTip := withinBlockTTL(knownTip, lastTipReachedBlock, ttl) && withinBlockTTL(knownTip, finishProgress, ttl)
 	return !recentlyReachedTip, nil

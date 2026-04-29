@@ -41,6 +41,9 @@ import (
 )
 
 func ResetState(db kv.TemporalRwDB, ctx context.Context) error {
+	if err := db.Update(ctx, func(tx kv.RwTx) error { return rawdb.DeleteTipReached(tx) }); err != nil {
+		return err
+	}
 	// don't reset senders here
 	if err := db.Update(ctx, ResetWitnesses); err != nil {
 		return err

@@ -43,11 +43,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-var (
-	tipReachedMarkerKey    = []byte("syncTipReached")
-	lastTipReachedBlockKey = []byte("syncLastTipReachedBlock")
-	tipReachedMarkerValue  = []byte{1}
-)
+var lastTipReachedBlockKey = []byte("syncLastTipReachedBlock")
 
 // ReadCanonicalHash retrieves the hash assigned to a canonical block number.
 func ReadCanonicalHash(db kv.Getter, number uint64) (common.Hash, error) {
@@ -1246,20 +1242,12 @@ func WriteDBCommitmentHistoryEnabled(tx kv.RwTx, enabled bool) error {
 }
 
 func ReadLastTipReachedBlock(tx kv.Getter) (block uint64, ok bool, err error) {
-	markerExists, err := tx.Has(kv.DatabaseInfo, tipReachedMarkerKey)
-	if err != nil {
-		return 0, false, fmt.Errorf("reading tip reached marker: %w", err)
-	}
-	if !markerExists {
-		return 0, false, nil
-	}
-
 	v, err := tx.GetOne(kv.DatabaseInfo, lastTipReachedBlockKey)
 	if err != nil {
 		return 0, false, fmt.Errorf("reading last tip reached block: %w", err)
 	}
 	if len(v) == 0 {
-		return 0, false, fmt.Errorf("tip reached marker exists but last tip reached block is missing")
+		return 0, false, nil
 	}
 	if len(v) != 8 {
 		return 0, false, fmt.Errorf("incorrect length of last tip reached block: %d", len(v))
@@ -1273,16 +1261,10 @@ func WriteTipReached(tx kv.Putter, block uint64) error {
 	if err := tx.Put(kv.DatabaseInfo, lastTipReachedBlockKey, v[:]); err != nil {
 		return fmt.Errorf("writing last tip reached block: %w", err)
 	}
-	if err := tx.Put(kv.DatabaseInfo, tipReachedMarkerKey, tipReachedMarkerValue); err != nil {
-		return fmt.Errorf("writing tip reached marker: %w", err)
-	}
 	return nil
 }
 
-func DeleteTipReached(tx kv.Deleter) error {
-	if err := tx.Delete(kv.DatabaseInfo, tipReachedMarkerKey); err != nil {
-		return fmt.Errorf("deleting tip reached marker: %w", err)
-	}
+func DeleteTipReached(tx kv.Putter) error {
 	if err := tx.Delete(kv.DatabaseInfo, lastTipReachedBlockKey); err != nil {
 		return fmt.Errorf("deleting last tip reached block: %w", err)
 	}
