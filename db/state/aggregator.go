@@ -830,7 +830,7 @@ func (a *Aggregator) WarmupDB() {
 				default:
 				}
 			}
-			if took := time.Since(t); took > 1*time.Millisecond {
+			if took := time.Since(t); took > 50*time.Millisecond {
 				a.logger.Debug("[agg] WarmupDB table", "table", name, "took", took)
 			}
 		}()
