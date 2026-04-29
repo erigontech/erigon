@@ -19,6 +19,7 @@ package flow
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -27,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/app/event"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
+	"github.com/erigontech/erigon/node/components/storage/validation"
 )
 
 // Storage is the narrow interface the Orchestrator needs from the storage
@@ -48,13 +50,44 @@ type Storage interface {
 // inventoryStorage adapts a bare *snapshot.Inventory to the Storage
 // interface so the legacy New(bus, inv, logger) constructor keeps working
 // without rippling through every caller.
-type inventoryStorage struct{ inv *snapshot.Inventory }
+//
+// Optional fields (chain, snapDir) wire the validation phase. When
+// chain is non-empty, RecordFile runs every validator before adding
+// the file to the inventory. snapDir is the on-disk root the
+// validator's ContentSource resolves against — only used when a
+// validator in the chain actually reads bytes.
+type inventoryStorage struct {
+	inv     *snapshot.Inventory
+	chain   validation.Chain
+	snapDir string
+}
 
 func (s *inventoryStorage) Inventory() *snapshot.Inventory { return s.inv }
 
 func (s *inventoryStorage) RecordFile(e *snapshot.FileEntry) error {
+	if len(s.chain) > 0 {
+		var content validation.ContentSource
+		if s.snapDir != "" && e != nil && e.Name != "" {
+			content = validation.FileContent{Path: filepath.Join(s.snapDir, e.Name)}
+		}
+		if err := s.chain.Validate(e, content); err != nil {
+			return fmt.Errorf("validation: %w", err)
+		}
+	}
 	s.inv.AddFile(e)
 	return nil
+}
+
+// NewInventoryStorage returns a Storage that wraps inv with an
+// optional validation chain. snapDir is where on-disk validators
+// resolve ContentSource paths — pass "" if no chain validator reads
+// bytes (stage-1 metadata-only validators don't).
+//
+// An empty chain produces a passthrough adapter equivalent to the
+// pre-validation behaviour. NewWithStorage(bus, NewInventoryStorage(
+// inv, nil, ""), logger) is identical to New(bus, inv, logger).
+func NewInventoryStorage(inv *snapshot.Inventory, chain validation.Chain, snapDir string) Storage {
+	return &inventoryStorage{inv: inv, chain: chain, snapDir: snapDir}
 }
 
 // Orchestrator mediates between the Storage, the event bus, and the
