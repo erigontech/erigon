@@ -798,6 +798,7 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int) erro
 }
 
 func (a *Aggregator) WarmupDB() {
+	started := time.Now()
 	for name, cfg := range a.db.AllTables() {
 		if cfg.IsDeprecated {
 			continue
@@ -805,6 +806,7 @@ func (a *Aggregator) WarmupDB() {
 		a.wg.Add(1)
 		go func() {
 			defer a.wg.Done()
+			t := time.Now()
 			tx, err := a.db.BeginRo(a.ctx)
 			if err != nil {
 				return
@@ -828,8 +830,17 @@ func (a *Aggregator) WarmupDB() {
 				default:
 				}
 			}
+			if took := time.Since(t); took > 1*time.Millisecond {
+				a.logger.Debug("[agg] WarmupDB table", "table", name, "took", took)
+			}
 		}()
 	}
+	go func() {
+		a.wg.Wait()
+		if took := time.Since(started); took > 1*time.Millisecond {
+			a.logger.Debug("[agg] WarmupDB done", "took", took)
+		}
+	}()
 }
 
 type AggV3StaticFiles struct {
