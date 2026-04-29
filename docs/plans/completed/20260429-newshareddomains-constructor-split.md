@@ -107,11 +107,11 @@ The private helper contains all initialization logic. Both public constructors d
 
 ### Task 4: Final verification
 
-- [ ] Run `make lint` (repeat until clean — linter is non-deterministic)
-- [ ] Run `make test-short` to verify no regressions
-- [ ] Grep for any remaining `NewSharedDomains.*DefaultTrieConfig` calls that were missed
-- [ ] Grep for any remaining variadic `cfg ...commitment.TrieConfig` in the signature
-- [ ] Move this plan to `docs/plans/completed/`
+- [x] Run `make lint` (repeat until clean — linter is non-deterministic)
+- [x] Run `make test-short` to verify no regressions
+- [x] Grep for any remaining `NewSharedDomains.*DefaultTrieConfig` calls that were missed
+- [x] Grep for any remaining variadic `cfg ...commitment.TrieConfig` in the signature
+- [x] Move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 
