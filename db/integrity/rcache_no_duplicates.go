@@ -138,7 +138,7 @@ func parallelChunkCheck(ctx context.Context, sampler *Sampler, fromBlock, toBloc
 	}
 
 	numWorkers := estimate.AlmostAllCPUs()
-	chunkSize := uint64(100)
+	chunkSize := uint64(1000)
 
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(numWorkers)
