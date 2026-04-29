@@ -55,7 +55,8 @@ func StartHTTPEndpoint(urlEndpoint string, cfg *HttpEndpointConfig, handler http
 	if cfg.Listener != nil {
 		listener = cfg.Listener
 	} else {
-		socketUrl, err := url.Parse(urlEndpoint)
+		var socketUrl *url.URL
+		socketUrl, err = url.Parse(urlEndpoint)
 		if err != nil {
 			return nil, nil, fmt.Errorf("malformed http listen url %s: %w", urlEndpoint, err)
 		}

@@ -117,23 +117,32 @@ func DefaultEngineApiTesterGenesis(t *testing.T) (*types.Genesis, *ecdsa.Private
 	return genesis, coinbasePrivKey
 }
 
+// localhostEphemeral asks the kernel to pick a free TCP port on the loopback
+// interface. Used by the engine-api test harness to pre-bind listeners and
+// avoid TOCTOU races with concurrent tests selecting the same port.
+const localhostEphemeral = "127.0.0.1:0"
+
 func InitialiseEngineApiTester(t testing.TB, args EngineApiTesterInitArgs) EngineApiTester {
 	ctx := t.Context()
 	logger := args.Logger
 	dirs := datadir.New(args.DataDir)
 	genesis := args.Genesis
 
-	// Pre-create listeners on port 0 (kernel-assigned) to avoid TOCTOU port races.
-	// The listeners are kept open and handed off to the servers that will use them.
-	sentryListener, err := net.Listen("tcp", "127.0.0.1:0")
+	// Pre-bind listeners on a kernel-assigned port to avoid TOCTOU port races
+	// with concurrent tests. Each listener is held open until the matching
+	// server takes ownership of the socket. The t.Cleanup calls are safety
+	// nets if InitialiseEngineApiTester aborts before hand-off; on the happy
+	// path the http server's Shutdown closes the listener first and the
+	// cleanup is a silent no-op.
+	sentryListener, err := net.Listen("tcp", localhostEphemeral)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sentryListener.Close() })
 	sentryPort := sentryListener.Addr().(*net.TCPAddr).Port
-	jsonRpcListener, err := net.Listen("tcp", "127.0.0.1:0")
+	jsonRpcListener, err := net.Listen("tcp", localhostEphemeral)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = jsonRpcListener.Close() })
 	jsonRpcPort := jsonRpcListener.Addr().(*net.TCPAddr).Port
-	engineApiListener, err := net.Listen("tcp", "127.0.0.1:0")
+	engineApiListener, err := net.Listen("tcp", localhostEphemeral)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = engineApiListener.Close() })
 	engineApiPort := engineApiListener.Addr().(*net.TCPAddr).Port
@@ -196,8 +205,9 @@ func InitialiseEngineApiTester(t testing.TB, args EngineApiTesterInitArgs) Engin
 		args.EthConfigTweaker(&ethConfig)
 	}
 
-	// Close the sentry listener to release the port before the sentry binds to it.
-	// The listener was only held open to reserve the port and prevent TOCTOU races.
+	// Release the port for the P2P stack, which doesn't accept pre-created
+	// listeners. A narrow TOCTOU window remains between Close and the sentry's
+	// internal net.Listen, but it hasn't been observed in flaky-test reports.
 	sentryListener.Close()
 	ethNode, err := node.New(ctx, &nodeConfig, logger)
 	require.NoError(t, err)
