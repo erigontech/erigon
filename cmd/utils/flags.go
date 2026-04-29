@@ -347,6 +347,12 @@ var (
 		Value: "",
 	}
 
+	SnapshotDelegationPath = cli.StringFlag{
+		Name:  "snapshot.delegation",
+		Usage: "Path to the snapshotauth UCAN delegation this node attaches to its V2 manifests. Defaults to <datadir>/snapshot.ucan; auto-generated as a self-signed bootstrap on first run when the file is absent. Use 'erigon snapshots delegate' to issue a non-bootstrap delegation rooted in an external authority.",
+		Value: "",
+	}
+
 	HttpCompressionFlag = cli.BoolFlag{
 		Name:  "http.compression",
 		Usage: "Enable compression over HTTP-RPC. Use --http.compression=false to disable it",

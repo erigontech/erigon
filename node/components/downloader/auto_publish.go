@@ -72,6 +72,18 @@ type AutoPublishOpts struct {
 	// state). When nil, BindAutoPublish constructs a fresh publisher
 	// scoped to this binding.
 	Publisher *dl.RollingV2Publisher
+
+	// DelegationSource, when non-nil, is wired onto the publisher so
+	// every Publish() emits a paired chain.ucan.<seq>.bin sidecar and
+	// stamps the V2 manifest's UCANHash. Production callers populate
+	// this with snapshotauth.LoadOrGenerateDelegation(...) result —
+	// see node/components/snapshotauth.LoadOrGenerateDelegation for
+	// the JWT-style default-path resolution model.
+	//
+	// Nil leaves the publisher in V2-only mode; manifests carry no
+	// UCANHash and consumers running with TrustConfig will reject this
+	// peer.
+	DelegationSource dl.DelegationSource
 }
 
 // BindAutoPublish wires automatic re-publication of chain.v2.<seq>.toml
@@ -122,6 +134,9 @@ func (p *Provider) BindAutoPublish(ctx context.Context, opts AutoPublishOpts) er
 		if err != nil {
 			return fmt.Errorf("constructing rolling V2 publisher: %w", err)
 		}
+	}
+	if opts.DelegationSource != nil {
+		publisher.SetDelegationSource(opts.DelegationSource)
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
