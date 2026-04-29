@@ -19,6 +19,7 @@ package execmodule
 import (
 	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -52,6 +53,8 @@ type PipelineExecutor struct {
 	dispatcher              *Dispatcher
 	logger                  log.Logger
 	knownTipHint            atomic.Uint64
+	knownTipHintReady       chan struct{}
+	knownTipHintOnce        sync.Once
 }
 
 // NewPipelineExecutor creates a new executor. validationSync may be nil
@@ -80,6 +83,7 @@ func NewPipelineExecutor(
 		validationNotifications: validationNotifications,
 		dispatcher:              dispatcher,
 		logger:                  logger,
+		knownTipHintReady:       make(chan struct{}),
 	}
 }
 
@@ -102,45 +106,38 @@ func (pe *PipelineExecutor) Sync() *stagedsync.Sync {
 	return pe.sync
 }
 
+// SetKnownTipHint records an external hint about where the chain head currently
+// is. The single in-process caller is Caplin at startup, propagating either
+// the latest beacon-state execution payload block number or a remote checkpoint
+// sync head. The value is monotonic (max wins) and the first set unblocks
+// waitKnownTipHint listeners.
 func (pe *PipelineExecutor) SetKnownTipHint(blockNum uint64) {
-	for {
-		current := pe.knownTipHint.Load()
-		if blockNum <= current {
-			return
-		}
-		if pe.knownTipHint.CompareAndSwap(current, blockNum) {
-			return
-		}
+	if blockNum == 0 {
+		return
 	}
+	if cur := pe.knownTipHint.Load(); blockNum > cur {
+		pe.knownTipHint.Store(blockNum)
+	}
+	pe.knownTipHintOnce.Do(func() { close(pe.knownTipHintReady) })
 }
 
 func (pe *PipelineExecutor) KnownTipHint() uint64 {
 	return pe.knownTipHint.Load()
 }
 
+// waitKnownTipHint blocks until the first SetKnownTipHint arrives, the timeout
+// elapses, or ctx is cancelled — whichever comes first. minBlock is a fast-path:
+// if a hint already exceeds it, return immediately without arming a timer.
 func (pe *PipelineExecutor) waitKnownTipHint(ctx context.Context, minBlock uint64, timeout time.Duration) {
 	if pe.KnownTipHint() > minBlock || timeout <= 0 {
 		return
 	}
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
 	select {
+	case <-pe.knownTipHintReady:
 	case <-timer.C:
-		return
 	case <-ctx.Done():
-		return
-	case <-ticker.C:
-		for pe.KnownTipHint() <= minBlock {
-			select {
-			case <-timer.C:
-				return
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-			}
-		}
 	}
 }
 

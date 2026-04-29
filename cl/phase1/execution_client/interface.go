@@ -57,3 +57,14 @@ type ExecutionEngine interface {
 	// Blobs
 	GetBlobs(ctx context.Context, versionedHashes []common.Hash, version clparams.StateVersion) (blobs [][]byte, proofs [][][]byte, err error)
 }
+
+// KnownTipHintReceiver is an optional capability of an ExecutionEngine: callers
+// (e.g. Caplin at startup) may propagate the freshest known tip block number
+// they have so the execution module can use it to decide IsInitialCycle before
+// the staged sync pipeline has had a chance to advance Headers progress.
+//
+// Only in-process engines (ExecutionClientDirect) implement this — gRPC
+// engines deliberately do not, and callers must use a type assertion.
+type KnownTipHintReceiver interface {
+	SetKnownTipHint(blockNum uint64)
+}

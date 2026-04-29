@@ -218,7 +218,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	if err != nil {
 		return err
 	}
-	if tipHintReceiver, ok := engine.(interface{ SetKnownTipHint(uint64) }); ok {
+	if tipHintReceiver, ok := engine.(execution_client.KnownTipHintReceiver); ok {
 		var knownTipHint uint64
 		if latestExecutionPayloadHeader := state.LatestExecutionPayloadHeader(); latestExecutionPayloadHeader != nil && !latestExecutionPayloadHeader.IsZero() {
 			knownTipHint = latestExecutionPayloadHeader.BlockNumber
