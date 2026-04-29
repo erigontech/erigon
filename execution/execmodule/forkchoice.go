@@ -291,20 +291,29 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	}
 
 	if fcuHeader.Number.Sign() > 0 {
-		// Per execution-apis #786, if headBlockHash is canonical and at or
-		// behind the finalised block, treat the FCU as a no-op rather than
-		// reorging away from the finalised tip.
-		var finalisedBlockNum *uint64
+		var finalisedBlockNum uint64
 		if finalizedHash == (common.Hash{}) {
 			// The CL has not finalised anything yet (e.g. fresh devnet before finality kicks in).
-			finalisedBlockNum = &finishProgressBefore
+			finalisedBlockNum = finishProgressBefore
 		} else {
-			finalisedBlockNum, err = e.blockReader.HeaderNumber(ctx, tx, finalizedHash)
+			bn, err := e.blockReader.HeaderNumber(ctx, tx, finalizedHash)
 			if err != nil {
 				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			}
+			if bn == nil {
+				return sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+					LatestValidHash: common.Hash{},
+					Status:          ExecutionStatusInvalidForkchoice,
+				}, false)
+			}
+			finalisedBlockNum = *bn
 		}
-		if finalisedBlockNum != nil && canonicalHash == blockHash && fcuHeader.Number.Uint64() <= *finalisedBlockNum {
+		// as per https://github.com/ethereum/execution-apis/pull/786
+		// we short circuit reorgs if:
+		//   1. the head is an ancestor of the last finalised block
+		//   2. the head is a duplicate FCU (e.g. CLs sending the same FCU repeatedly)
+		if canonicalHash == blockHash &&
+			(fcuHeader.Number.Uint64() < finalisedBlockNum || fcuHeader.Number.Uint64() == finishProgressBefore) {
 			writeForkChoiceHashes(tx, blockHash, safeHash, finalizedHash)
 			valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
 			if err != nil {
