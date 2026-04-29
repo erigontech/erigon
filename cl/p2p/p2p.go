@@ -46,7 +46,8 @@ type P2PConfig struct {
 	NAT        p2pnat.Interface
 	ExternalIP net.IP // resolved from NAT at startup; set by NewP2Pmanager
 
-	MaxPeerCount uint64
+	MaxPeerCount       uint64
+	SubscribeAllTopics bool // When true, advertise all attnets/syncnets in ENR
 }
 
 type p2pManager struct {
@@ -170,15 +171,25 @@ func (p *p2pManager) setupENR() error {
 	if err != nil {
 		return err
 	}
-	// Set initial attnets with a couple of subnets so peers don't see all-zeros
-	// and penalize us as a "useless peer". The VC will update subnets later via
-	// committee subscriptions; this just ensures early handshakes succeed.
 	initialAttnets := bitfield.NewBitvector64()
-	initialAttnets.SetBitAt(0, true) // subnet 0
-	initialAttnets.SetBitAt(1, true) // subnet 1
+	initialSyncnets := bitfield.Bitvector4{byte(0x00)}
+	if p.cfg.SubscribeAllTopics {
+		// Advertise all 64 attestation subnets and all 4 sync committee subnets
+		// so that peers see us as a useful node and keep us connected.
+		for i := 0; i < 64; i++ {
+			initialAttnets.SetBitAt(uint64(i), true)
+		}
+		initialSyncnets = bitfield.Bitvector4{byte(0x0f)}
+	} else {
+		// Set a couple of subnets so peers don't see all-zeros and penalize us
+		// as a "useless peer". The VC will update subnets later via committee
+		// subscriptions; this just ensures early handshakes succeed.
+		initialAttnets.SetBitAt(0, true) // subnet 0
+		initialAttnets.SetBitAt(1, true) // subnet 1
+	}
 	node.Set(enr.WithEntry(p.cfg.NetworkConfig.Eth2key, forkId))
 	node.Set(enr.WithEntry(p.cfg.NetworkConfig.AttSubnetKey, initialAttnets.Bytes()))
-	node.Set(enr.WithEntry(p.cfg.NetworkConfig.SyncCommsSubnetKey, bitfield.Bitvector4{byte(0x00)}.Bytes()))
+	node.Set(enr.WithEntry(p.cfg.NetworkConfig.SyncCommsSubnetKey, initialSyncnets.Bytes()))
 	node.Set(enr.WithEntry(p.cfg.NetworkConfig.CgcKey, []byte{}))
 	node.Set(enr.WithEntry(p.cfg.NetworkConfig.NfdKey, nfd))
 	return nil
