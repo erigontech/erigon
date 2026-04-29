@@ -14,7 +14,6 @@ Complete specification of every customization applied to this site relative to a
 |---|---|
 | `@docusaurus/core` | 3.10.0 |
 | `@docusaurus/preset-classic` | 3.10.0 |
-| `@docusaurus/faster` | 3.10.0 |
 | `react` / `react-dom` | ^19.0.0 |
 | `typescript` | ~6.0.2 |
 | `@easyops-cn/docusaurus-search-local` | ^0.55.1 |
@@ -34,8 +33,9 @@ baseUrl:          '/'
 organizationName: 'erigontech'
 projectName:      'docs'
 trailingSlash:    false
-onBrokenLinks:    'warn'
-onBrokenMarkdownLinks: 'warn'
+onBrokenLinks:         'throw'
+onBrokenMarkdownLinks: 'throw'
+onBrokenAnchors:       'throw'
 ```
 
 ### i18n
@@ -448,7 +448,7 @@ color:        #EF7716;
 
 | Component | Location | What it overrides |
 |---|---|---|
-| `NotFound` | `src/theme/NotFound.tsx` | Full 404 page wrapper (Layout + metadata) |
+| `NotFound` | `src/theme/NotFound/index.tsx` | Full 404 page wrapper (Layout + metadata) |
 | `NotFound/Content` | `src/theme/NotFound/Content/index.tsx` | 404 body with branded hero + 6 nav cards |
 | `Footer` | `src/theme/Footer/index.tsx` | Entire footer — multi-column layout with icons |
 
@@ -511,14 +511,14 @@ help-center/
 
 ## 13. Deployment (GitHub Actions)
 
-**Workflow:** `.github/workflows/deploy.yml`
+**Workflow:** `.github/workflows/docs-deploy.yml`
 
-- Trigger: push or PR to `main`
-- Node: 20, with npm cache
-- Build: `npm ci` → `npm run build`
-- Target: GitHub Pages (`erigontech.github.io/docs/`)
+- Trigger: push to `release/3.4` (or manual via `workflow_dispatch`)
+- Node: 20, with npm cache (`docs/site/package-lock.json`)
+- Build: `npm ci` → `npm run build` (with `GITHUB_TOKEN` forwarded for authenticated API calls)
+- Target: GitHub Pages → `docs.erigon.tech`
 - Permissions: `contents:read`, `pages:write`, `id-token:write`
-- Concurrency: one deploy at a time per pages group
+- Concurrency: one deploy at a time (`docs-pages` group)
 
 ---
 
@@ -527,7 +527,6 @@ help-center/
 | Feature | Status |
 |---|---|
 | Blog | Disabled |
-| Versioning | Not configured |
 | i18n (multi-locale) | Not configured |
 | Algolia search | Not used — local search only |
 | Announcements bar | Not configured |
@@ -539,16 +538,15 @@ help-center/
 
 When applying this design to a new Docusaurus project:
 
-- [ ] Install non-default packages: `@easyops-cn/docusaurus-search-local`, `webpackbar`, `@docusaurus/faster`, `@docusaurus/theme-mermaid`
+- [ ] Install non-default packages: `@easyops-cn/docusaurus-search-local`
 - [ ] Copy `src/css/custom.css` (Google Fonts imports + all CSS variables)
 - [ ] Copy `src/theme/Footer/index.tsx` and update column links/addresses
-- [ ] Copy `src/theme/NotFound.tsx` + `src/theme/NotFound/Content/index.tsx` and update nav card links
+- [ ] Copy `src/theme/NotFound/index.tsx` + `src/theme/NotFound/Content/index.tsx` and update nav card links
 - [ ] Add `img/logo-icon-orange.png` (or replace with project logo) to `static/img/`
 - [ ] Configure navbar HTML items (blog btn, release btn, github icon) with correct URLs
 - [ ] Set `routeBasePath: '/'` if docs should serve at root
 - [ ] Add second docs instance (e.g. integration/help-center) if needed
-- [ ] Set `onBrokenLinks: 'warn'` (not `throw`) during migration
-- [ ] Add `markdown: { mermaid: true }` + `@docusaurus/theme-mermaid` if diagrams needed
+- [ ] Set `onBrokenLinks: 'throw'`, `onBrokenMarkdownLinks: 'throw'`, `onBrokenAnchors: 'throw'`
 - [ ] Copy Prism theme config (github light / dracula dark)
 - [ ] Set `trailingSlash: false`
 - [ ] Add `.nojekyll` to `static/` if deploying to GitHub Pages
