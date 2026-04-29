@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
@@ -826,7 +825,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 	var txNum uint64
 	{
 		blockNum := header.Number.Uint64()
-		sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), commitment.DefaultTrieConfig())
+		sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
 		require.NoError(err)
 		defer sd.Close()
 		base, err := txNumReader.Min(t.Context(), tx, 1)

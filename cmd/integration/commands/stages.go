@@ -59,7 +59,6 @@ import (
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	chain2 "github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
@@ -379,7 +378,7 @@ func stageSnapshots(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 	if err := rawdbreset.ResetBlocks(tx, db, br, bw, dirs, logger); err != nil {
 		return fmt.Errorf("resetting blocks: %w", err)
 	}
-	domains, err := execctx.NewSharedDomains(ctx, tx, logger, commitment.DefaultTrieConfig())
+	domains, err := execctx.NewSharedDomains(ctx, tx, logger)
 	if err != nil {
 		return err
 	}
@@ -718,7 +717,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		return err
 	}
 	if execProgress == 0 { // then fallback to how much data we have in stat_snapshots
-		doms, err := execctx.NewSharedDomains(ctx, tx, log.New(), commitment.DefaultTrieConfig())
+		doms, err := execctx.NewSharedDomains(ctx, tx, log.New())
 		if err != nil {
 			panic(err)
 		}
@@ -736,7 +735,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		block = sendersProgress
 	}
 
-	doms, err := execctx.NewSharedDomains(ctx, tx, logger, commitment.DefaultTrieConfig())
+	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
 	if err != nil {
 		return err
 	}

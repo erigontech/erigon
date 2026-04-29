@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -129,7 +128,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 			return nil, nil, err
 		}
 		defer tx.Rollback()
-		sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New(), commitment.DefaultTrieConfig())
+		sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 		if err != nil {
 			return nil, nil, err
 		}
@@ -189,7 +188,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 			return nil, [20]byte{}, mdgas.MdGas{}, err
 		}
 		defer tx.Rollback()
-		sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New(), commitment.DefaultTrieConfig())
+		sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 		if err != nil {
 			return nil, [20]byte{}, mdgas.MdGas{}, err
 		}

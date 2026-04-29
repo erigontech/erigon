@@ -12,7 +12,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/execution/commitment"
 )
 
 func TestAppendReceipt(t *testing.T) {
@@ -23,7 +22,7 @@ func TestAppendReceipt(t *testing.T) {
 	defer tx.Rollback()
 
 	ttx := tx
-	doms, err := execctx.NewSharedDomains(t.Context(), ttx, log.New(), commitment.DefaultTrieConfig())
+	doms, err := execctx.NewSharedDomains(t.Context(), ttx, log.New())
 	require.NoError(err)
 	defer doms.Close()
 

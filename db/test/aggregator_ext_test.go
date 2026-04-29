@@ -68,7 +68,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), commitment.DefaultTrieConfig())
+	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -78,7 +78,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	rnd := newRnd(0)
 	keys := make([][]byte, txs)
 
-	hph := commitment.NewHexPatriciaHashed(1, nil, commitment.DefaultTrieConfig())
+	hph := commitment.NewHexPatriciaHashed(1, nil)
 
 	for txNum := uint64(1); txNum <= txs; txNum++ {
 		addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
@@ -149,7 +149,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	newDoms, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), commitment.DefaultTrieConfig())
+	newDoms, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
 	require.NoError(t, err)
 	defer newDoms.Close()
 
@@ -203,7 +203,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), commitment.DefaultTrieConfig())
+	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -220,7 +220,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 		tx, err = db.BeginTemporalRw(t.Context()) //nolint:gocritic
 		require.NoError(t, err)
 
-		domains, err = execctx.NewSharedDomains(t.Context(), tx, log.New(), commitment.DefaultTrieConfig())
+		domains, err = execctx.NewSharedDomains(t.Context(), tx, log.New())
 		require.NoError(t, err)
 		atomic.StoreUint64(&latestCommitTxNum, txn)
 		return nil
@@ -304,7 +304,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New(), commitment.DefaultTrieConfig())
+	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -454,7 +454,7 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), commitment.DefaultTrieConfig())
+	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -584,7 +584,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New(), commitment.DefaultTrieConfig())
+	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -629,7 +629,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	defer rwTx.Rollback()
 
 	// 4. restart on same (replaced keys) files
-	domains, err = execctx.NewSharedDomains(t.Context(), rwTx, log.New(), commitment.DefaultTrieConfig())
+	domains, err = execctx.NewSharedDomains(t.Context(), rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -658,7 +658,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 
 	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
 
-	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New(), commitment.DefaultTrieConfig())
+	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -745,7 +745,7 @@ func TestAggregatorV3_BuildFiles_WithReorgDepth(t *testing.T) {
 	tx, err := tdb.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
-	doms, err := execctx.NewSharedDomains(t.Context(), tx, logger, commitment.DefaultTrieConfig())
+	doms, err := execctx.NewSharedDomains(t.Context(), tx, logger)
 	require.NoError(t, err)
 	t.Cleanup(doms.Close)
 	txnNums := uint64(18)

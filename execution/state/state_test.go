@@ -37,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -431,7 +430,7 @@ func NewTestRwTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.Shar
 	require.NoError(tb, err)
 	tb.Cleanup(tx.Rollback)
 
-	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New(), commitment.DefaultTrieConfig())
+	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 	require.NoError(tb, err)
 	tb.Cleanup(domains.Close)
 

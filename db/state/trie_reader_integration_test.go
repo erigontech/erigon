@@ -54,7 +54,7 @@ func TestTrieReader_IntegrationWithRealData(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), commitment.DefaultTrieConfig())
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -115,7 +115,7 @@ func TestTrieReader_IntegrationWithRealData(t *testing.T) {
 	defer roTx.Rollback()
 
 	// Create SharedDomains for the RO tx to get a proper TemporalGetter.
-	roDomains, err := execctx.NewSharedDomains(ctx, roTx, log.New(), commitment.DefaultTrieConfig())
+	roDomains, err := execctx.NewSharedDomains(ctx, roTx, log.New())
 	require.NoError(t, err)
 	defer roDomains.Close()
 

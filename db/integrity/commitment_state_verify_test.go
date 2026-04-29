@@ -55,7 +55,7 @@ func TestCheckStateVerify(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, tx, logger, commitment.DefaultTrieConfig())
+	domains, err := execctx.NewSharedDomains(ctx, tx, logger)
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -133,7 +133,7 @@ func TestCheckStateVerify_NoopWrite(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, tx, logger, commitment.DefaultTrieConfig())
+	domains, err := execctx.NewSharedDomains(ctx, tx, logger)
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -248,7 +248,7 @@ func TestVerifyBranchHashesFromDB(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, tx, logger, commitment.DefaultTrieConfig())
+	domains, err := execctx.NewSharedDomains(ctx, tx, logger)
 	require.NoError(t, err)
 	defer domains.Close()
 

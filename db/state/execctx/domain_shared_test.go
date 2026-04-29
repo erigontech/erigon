@@ -42,7 +42,6 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
@@ -88,7 +87,7 @@ func TestSharedDomain_Unwind(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), commitment.DefaultTrieConfig())
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -107,7 +106,7 @@ Loop:
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New(), commitment.DefaultTrieConfig())
+	domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -199,7 +198,7 @@ func TestSharedDomain_UnwindDoesNotRestoreOverlayForNewKey(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), commitment.DefaultTrieConfig())
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -280,7 +279,7 @@ func TestNewSharedDomains_StateAheadOfBlocks(t *testing.T) {
 		require.NoError(rawdbv3.TxNums.Append(rwTx, blockNum, maxTxNum))
 	}
 
-	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), commitment.DefaultTrieConfig())
+	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(err)
 
 	addr := make([]byte, length.Addr)
@@ -310,7 +309,7 @@ func TestNewSharedDomains_StateAheadOfBlocks(t *testing.T) {
 	require.Less(lastBn, lastBlock, "TxNums must be behind commitment block for the test to be meaningful")
 
 	// Phase 3: NewSharedDomains must return ErrBehindCommitment AND a fully-initialized SD.
-	doms, err = execctx.NewSharedDomains(ctx, rwTx, log.New(), commitment.DefaultTrieConfig())
+	doms, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.ErrorIs(err, commitmentdb.ErrBehindCommitment, "expected ErrBehindCommitment signal")
 	require.NotNil(doms, "SD must be returned alongside the signal error")
 	defer doms.Close()
@@ -357,7 +356,7 @@ func TestSharedDomain_RepeatedUnwindAcrossStepBoundary(t *testing.T) {
 		require.NoError(rawdbv3.TxNums.Append(rwTx, bn, bn))
 	}
 
-	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), commitment.DefaultTrieConfig())
+	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(err)
 	defer doms.Close()
 	addr := make([]byte, length.Addr)
@@ -486,7 +485,7 @@ func TestSharedDomain_MergeUnwindAcrossStepBoundary(t *testing.T) {
 	for bn := uint64(0); bn <= lastBlock; bn++ {
 		require.NoError(rawdbv3.TxNums.Append(rwTx, bn, bn))
 	}
-	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), commitment.DefaultTrieConfig())
+	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(err)
 	addr := make([]byte, length.Addr)
 	var perBlockDiffs [lastBlock + 1]*changeset.StateChangeSet
@@ -541,12 +540,12 @@ func TestSharedDomain_MergeUnwindAcrossStepBoundary(t *testing.T) {
 	require.NoError(err)
 	defer rwTx.Rollback()
 
-	sd1, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), commitment.DefaultTrieConfig())
+	sd1, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(err)
 	sd1.Unwind(unwindTarget, mergeRange(unwindTarget+1, 9))
 	sd1.SetTxNum(unwindTarget)
 
-	sd2, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), commitment.DefaultTrieConfig())
+	sd2, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(err)
 	sd2.Unwind(unwindTarget, mergeRange(10, lastBlock))
 	sd2.SetTxNum(unwindTarget)
@@ -641,7 +640,7 @@ func TestSharedDomain_UnwindAcrossStepBoundary(t *testing.T) {
 	}
 
 	// Phase 2: forward execution of all 15 blocks — write accounts + commitment per block.
-	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), commitment.DefaultTrieConfig())
+	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(err)
 	stateChangeset := &changeset.StateChangeSet{}
 	doms.SetChangesetAccumulator(stateChangeset)
@@ -768,7 +767,7 @@ func TestSharedDomain_UnwindWithDeleteAcrossStepBoundary(t *testing.T) {
 		require.NoError(rawdbv3.TxNums.Append(rwTx, bn, bn))
 	}
 
-	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), commitment.DefaultTrieConfig())
+	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(err)
 	defer doms.Close()
 
@@ -910,7 +909,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), commitment.DefaultTrieConfig())
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -989,7 +988,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(rwTx.Rollback)
 
-	domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New(), commitment.DefaultTrieConfig())
+	domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -1070,7 +1069,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.NoError(err)
 	}
 
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), commitment.DefaultTrieConfig())
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(err)
 	defer domains.Close()
 
@@ -1100,7 +1099,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.NoError(err)
 		domains.Close()
 
-		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New(), commitment.DefaultTrieConfig())
+		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
 		require.Equal(int(stepSize), iterCount(domains))
@@ -1109,7 +1108,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 	{ // delete marker is in RAM
 		require.NoError(domains.Flush(ctx, rwTx))
 		domains.Close()
-		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New(), commitment.DefaultTrieConfig())
+		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
 		require.Equal(int(stepSize), iterCount(domains))
@@ -1139,7 +1138,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.NoError(err)
 		domains.Close()
 
-		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New(), commitment.DefaultTrieConfig())
+		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
 		require.Equal(int(stepSize*2+2-2), iterCount(domains))
@@ -1160,7 +1159,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		_, err := ac.PruneSmallBatches(ctx, time.Hour, rwTx)
 		require.NoError(err)
 
-		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New(), commitment.DefaultTrieConfig())
+		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
 		require.Equal(int(stepSize*2+2-2), iterCount(domains))
@@ -1169,7 +1168,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 	{ // delete/update more keys in RAM
 		require.NoError(domains.Flush(ctx, rwTx))
 		domains.Close()
-		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New(), commitment.DefaultTrieConfig())
+		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
 
@@ -1189,7 +1188,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.NoError(err)
 		domains.Close()
 
-		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New(), commitment.DefaultTrieConfig())
+		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
 		require.Equal(int(stepSize*2+2-3), iterCount(domains))
@@ -1199,7 +1198,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.NoError(err)
 		domains.Close()
 
-		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New(), commitment.DefaultTrieConfig())
+		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
 		err := domains.DomainDelPrefix(kv.StorageDomain, rwTx, []byte{}, txNum+1)
@@ -1223,7 +1222,7 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 	rwTtx1, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	t.Cleanup(rwTtx1.Rollback)
-	sd, err := execctx.NewSharedDomains(ctx, rwTtx1, log.New(), commitment.DefaultTrieConfig())
+	sd, err := execctx.NewSharedDomains(ctx, rwTtx1, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
@@ -1493,7 +1492,7 @@ func TestDomainPut_HistoryCorrectness(t *testing.T) {
 			require.NoError(t, err)
 			defer rwTx.Rollback()
 
-			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), commitment.DefaultTrieConfig())
+			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 			require.NoError(t, err)
 			defer domains.Close()
 
@@ -1610,7 +1609,7 @@ func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 	db1RwTx, err := db1.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	t.Cleanup(db1RwTx.Rollback)
-	sd1, err := execctx.NewSharedDomains(ctx, db1RwTx, log.New(), commitment.DefaultTrieConfig())
+	sd1, err := execctx.NewSharedDomains(ctx, db1RwTx, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd1.Close)
 
@@ -1708,7 +1707,7 @@ func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 		roTx2, err := db2.BeginTemporalRo(ctx)
 		require.NoError(t, err)
 		t.Cleanup(roTx2.Rollback)
-		sd2, err := execctx.NewSharedDomains(ctx, roTx2, log.New(), commitment.DefaultTrieConfig())
+		sd2, err := execctx.NewSharedDomains(ctx, roTx2, log.New())
 		require.NoError(t, err)
 		t.Cleanup(sd2.Close)
 

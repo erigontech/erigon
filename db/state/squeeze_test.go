@@ -163,7 +163,7 @@ func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig)
 	require.NoError(tb, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(tb.Context(), rwTx, log.New(), commitment.DefaultTrieConfig())
+	domains, err := execctx.NewSharedDomains(tb.Context(), rwTx, log.New())
 	require.NoError(tb, err)
 	defer domains.Close()
 
@@ -215,7 +215,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New(), commitment.DefaultTrieConfig())
+	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -239,7 +239,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err = execctx.NewSharedDomains(t.Context(), rwTx, log.New(), commitment.DefaultTrieConfig())
+	domains, err = execctx.NewSharedDomains(t.Context(), rwTx, log.New())
 	require.NoError(t, err)
 
 	// collect account keys to trigger commitment
@@ -440,7 +440,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), commitment.DefaultTrieConfig())
+	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -513,7 +513,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 
 	//anotherAgg.SetTx(rwTx)
 	startTx := anotherAgg.EndTxNumMinimax()
-	dom2, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New(), commitment.DefaultTrieConfig())
+	dom2, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
 	require.NoError(t, err)
 	defer dom2.Close()
 
@@ -603,7 +603,7 @@ func TestGenerateCommitmentRebuildData(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), commitment.DefaultTrieConfig())
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -734,7 +734,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New(), commitment.DefaultTrieConfig())
+	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	changesetAt5 := &changeset.StateChangeSet{}
@@ -787,7 +787,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err = execctx.NewSharedDomains(t.Context(), rwTx, log.New(), commitment.DefaultTrieConfig())
+	domains, err = execctx.NewSharedDomains(t.Context(), rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	diffs := [kv.DomainLen][]kv.DomainEntryDiff{}
@@ -837,7 +837,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err = execctx.NewSharedDomains(t.Context(), rwTx, log.New(), commitment.DefaultTrieConfig())
+	domains, err = execctx.NewSharedDomains(t.Context(), rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	for idx := range changesetAt3.Diffs {

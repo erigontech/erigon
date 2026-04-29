@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/execution/commitment"
 )
 
 func skipIfRequested(t testing.TB) {
@@ -59,7 +58,7 @@ func TemporalTxSD(t testing.TB, db kv.TemporalRwDB) (kv.TemporalRwTx, *execctx.S
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
 
-	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New(), commitment.DefaultTrieConfig())
+	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 

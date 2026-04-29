@@ -213,7 +213,7 @@ Examples:
 			}
 		} else {
 			// Latest state read
-			sd, err := execctx.NewSharedDomains(ctx, tx, logger, commitment.DefaultTrieConfig())
+			sd, err := execctx.NewSharedDomains(ctx, tx, logger)
 			if err != nil {
 				logger.Error("Failed to create shared domains", "error", err)
 				return
@@ -611,7 +611,7 @@ func benchLookup(ctx context.Context, logger log.Logger) error {
 		commitmentReader = commitmentdb.NewHistoryStateReader(tx, math.MaxUint64)
 	} else {
 		logger.Info("Using GetLatest() for lookups")
-		sd, err := execctx.NewSharedDomains(ctx, tx, logger, commitment.DefaultTrieConfig())
+		sd, err := execctx.NewSharedDomains(ctx, tx, logger)
 		if err != nil {
 			return fmt.Errorf("failed to create shared domains: %w", err)
 		}

@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/execution/commitment"
 	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -172,7 +171,7 @@ func runLifecycle(b *testing.B, cfg lifecycleConfig) (*lifecycleTimings, kv.Temp
 	require.NoError(b, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), commitment.DefaultTrieConfig())
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(b, err)
 	defer domains.Close()
 
@@ -339,7 +338,7 @@ func BenchmarkLifecycle_PhaseIsolation(b *testing.B) {
 		require.NoError(b, err)
 		defer rwTx.Rollback()
 
-		domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), commitment.DefaultTrieConfig())
+		domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 		require.NoError(b, err)
 		defer domains.Close()
 
@@ -372,7 +371,7 @@ func BenchmarkLifecycle_PhaseIsolation(b *testing.B) {
 		require.NoError(b, err)
 		defer rwTx.Rollback()
 
-		domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), commitment.DefaultTrieConfig())
+		domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 		require.NoError(b, err)
 		defer domains.Close()
 
@@ -414,7 +413,7 @@ func BenchmarkLifecycle_PhaseIsolation(b *testing.B) {
 		require.NoError(b, err)
 		defer rwTx.Rollback()
 
-		domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), commitment.DefaultTrieConfig())
+		domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 		require.NoError(b, err)
 		defer domains.Close()
 
@@ -447,7 +446,7 @@ func BenchmarkLifecycle_PhaseIsolation(b *testing.B) {
 		require.NoError(b, err)
 		defer rwTx.Rollback()
 
-		domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), commitment.DefaultTrieConfig())
+		domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 		require.NoError(b, err)
 		defer domains.Close()
 

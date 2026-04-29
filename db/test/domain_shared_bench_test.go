@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/execution/commitment"
 	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -73,7 +72,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New(), commitment.DefaultTrieConfig())
+	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	maxTx := stepSize * 258
@@ -156,7 +155,7 @@ func BenchmarkSharedDomains_ComputeCommitment(b *testing.B) {
 	require.NoError(b, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(b.Context(), rwTx, log.New(), commitment.DefaultTrieConfig())
+	domains, err := execctx.NewSharedDomains(b.Context(), rwTx, log.New())
 	require.NoError(b, err)
 	defer domains.Close()
 
@@ -296,7 +295,7 @@ func BenchmarkPruneSmallBatches(b *testing.B) {
 	require.NoError(b, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), commitment.DefaultTrieConfig())
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(b, err)
 
 	usedKeys := make(map[string]struct{}, keysCount*maxTx)

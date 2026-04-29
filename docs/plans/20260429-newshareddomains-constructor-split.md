@@ -101,9 +101,9 @@ The private helper contains all initialization logic. Both public constructors d
 - Modify: `db/test/domain_shared_bench_test.go`
 - Modify: `db/test/aggregator_ext_test.go`
 
-- [ ] Remove `, commitment.DefaultTrieConfig()` argument from all call sites listed above
-- [ ] Remove unused `commitment` imports where no other reference remains
-- [ ] Run `make erigon integration` to confirm full build
+- [x] Remove `, commitment.DefaultTrieConfig()` argument from all call sites listed above
+- [x] Remove unused `commitment` imports where no other reference remains
+- [x] Run `make erigon integration` to confirm full build
 
 ### Task 4: Final verification
 

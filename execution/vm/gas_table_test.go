@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
@@ -107,7 +106,7 @@ func testTemporalTxSD(t *testing.T) (kv.TemporalRwTx, *execctx.SharedDomains) {
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
 
-	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New(), commitment.DefaultTrieConfig())
+	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
@@ -182,7 +181,7 @@ func TestCreateGas(t *testing.T) {
 	for i, tt := range createGasTests {
 		address := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
 
-		domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New(), commitment.DefaultTrieConfig())
+		domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 		require.NoError(t, err)
 
 		stateReader := rpchelper.NewLatestStateReader(domains.AsGetter(tx))
