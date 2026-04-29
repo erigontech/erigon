@@ -19,9 +19,6 @@ DISABLED_TEST_LIST=(
   net_listening/test_1.json
   # Temporary disable required block 24298763
   debug_traceBlockByNumber/test_51.json
-  # Temporary disable after merge #20830, waiting for new rpc-tests tag after merge PR #552
-  debug_traceBlockByNumber/test_33.tar
-  debug_traceBlockByNumber/test_34.tar
   # to investigate
   engine_exchangeCapabilities/test_1.json
   engine_exchangeTransitionConfigurationV1/test_01.json
@@ -52,4 +49,4 @@ DISABLED_TEST_LIST=(
 DISABLED_TESTS=$(IFS=,; echo "${DISABLED_TEST_LIST[*]}")
 
 # Call the main test runner script with the required and optional parameters
-"$(dirname "$0")/run_rpc_tests.sh" mainnet "$RPC_VERSION" "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR"
+RPC_TRANSPORT_TYPES="http,http_comp,websocket" "$(dirname "$0")/run_rpc_tests.sh" mainnet "$RPC_VERSION" "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR"

@@ -283,24 +283,24 @@ func (t *prestateTracer) processDiffState() {
 
 		newBalance, _ := t.env.IntraBlockState.GetBalance(addr)
 		newNonce, _ := t.env.IntraBlockState.GetNonce(addr)
-		// GetCodeHash returns common.Hash{} for deleted accounts; GetCode cannot make
-		// that distinction (empty bytes for both deleted and codeless accounts).
+		// GetCode returns empty bytes for both deleted and codeless accounts;
+		// GetCodeHash distinguishes them (deleted → zero hash).
 		codeHash, _ := t.env.IntraBlockState.GetCodeHash(addr)
 		newCodeHash := codeHash.Value()
 
 		newBalanceBig := newBalance.ToBig()
-		if newBalanceBig.Cmp(t.pre[addr].Balance) != 0 {
+		if newBalanceBig.Cmp(state.Balance) != 0 {
 			modified = true
 			postAccount.Balance = newBalanceBig
 		}
-		if newNonce != t.pre[addr].Nonce {
+		if newNonce != state.Nonce {
 			modified = true
 			postAccount.Nonce = newNonce
 		}
 
 		prevCodeHash := empty.CodeHash
-		if t.pre[addr].CodeHash != nil {
-			prevCodeHash = *t.pre[addr].CodeHash
+		if state.CodeHash != nil {
+			prevCodeHash = *state.CodeHash
 		}
 
 		if newCodeHash != prevCodeHash {
@@ -311,8 +311,8 @@ func (t *prestateTracer) processDiffState() {
 		if !t.config.DisableCode {
 			newCode, _ := t.env.IntraBlockState.GetCode(addr)
 			var prevCode []byte
-			if t.pre[addr].Code != nil {
-				prevCode = *t.pre[addr].Code
+			if state.Code != nil {
+				prevCode = *state.Code
 			}
 			if !bytes.Equal(newCode, prevCode) {
 				modified = true
@@ -324,13 +324,13 @@ func (t *prestateTracer) processDiffState() {
 			for key, val := range state.Storage {
 				// don't include the empty slot
 				if val == (common.Hash{}) {
-					delete(t.pre[addr].Storage, key)
+					delete(state.Storage, key)
 				}
 
 				newVal, _ := t.env.IntraBlockState.GetState(addr, accounts.InternKey(key))
 				if new(uint256.Int).SetBytes(val[:]).Eq(&newVal) {
 					// Omit unchanged slots
-					delete(t.pre[addr].Storage, key)
+					delete(state.Storage, key)
 				} else {
 					modified = true
 					if !newVal.IsZero() {
