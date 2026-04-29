@@ -34,8 +34,6 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/metrics"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -205,11 +203,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	// Create SharedDomains on the raw RO tx. Domain state (accounts,
 	// storage, code, commitment) is read from the committed DB state.
 	var isDomainAheadOfBlocks bool
-	trieCfg := commitment.DefaultTrieConfig()
-	if statecfg.ExperimentalConcurrentCommitment {
-		trieCfg.Variant = commitment.VariantConcurrentHexPatricia
-	}
-	currentContext, err := execctx.NewSharedDomains(ctx, roTx, e.logger, trieCfg)
+	currentContext, err := execctx.NewSharedDomains(ctx, roTx, e.logger)
 	if err != nil {
 		// we handle isDomainAheadOfBlocks=true after AppendCanonicalTxNums to allow the node to catch up
 		isDomainAheadOfBlocks = errors.Is(err, commitmentdb.ErrBehindCommitment)

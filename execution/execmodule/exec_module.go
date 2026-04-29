@@ -37,11 +37,9 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -470,11 +468,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		}
 	}
 
-	trieCfg := commitment.DefaultTrieConfig()
-	if statecfg.ExperimentalConcurrentCommitment {
-		trieCfg.Variant = commitment.VariantConcurrentHexPatricia
-	}
-	doms, err := execctx.NewSharedDomains(ctx, tx, e.logger, trieCfg)
+	doms, err := execctx.NewSharedDomains(ctx, tx, e.logger)
 	if err != nil {
 		return ValidationResult{}, err
 	}

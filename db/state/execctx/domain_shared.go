@@ -77,11 +77,7 @@ type accHolder interface {
 }
 
 func IsDomainAheadOfBlocks(ctx context.Context, tx kv.TemporalRwTx, logger log.Logger) bool {
-	cfg := commitment.DefaultTrieConfig()
-	if statecfg.ExperimentalConcurrentCommitment {
-		cfg.Variant = commitment.VariantConcurrentHexPatricia
-	}
-	doms, err := NewSharedDomains(ctx, tx, logger, cfg)
+	doms, err := NewSharedDomains(ctx, tx, logger)
 	if doms != nil {
 		defer doms.Close()
 	}
@@ -124,7 +120,14 @@ type SharedDomains struct {
 	stateCache *cache.StateCache
 }
 
-func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, cfg commitment.TrieConfig) (*SharedDomains, error) {
+func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, cfg ...commitment.TrieConfig) (*SharedDomains, error) {
+	trieCfg := commitment.DefaultTrieConfig()
+	if len(cfg) > 0 {
+		trieCfg = cfg[0]
+	} else if statecfg.ExperimentalConcurrentCommitment {
+		trieCfg.Variant = commitment.VariantConcurrentHexPatricia
+	}
+
 	sd := &SharedDomains{
 		logger: logger,
 		//trace:   true,
@@ -133,7 +136,7 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	}
 
 	sd.mem = tx.Debug().NewMemBatch(&sd.metrics)
-	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tx.Debug().Dirs().Tmp, cfg)
+	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tx.Debug().Dirs().Tmp, trieCfg)
 
 	_, blockNum, err := sd.SeekCommitment(ctx, tx)
 	if err != nil {
