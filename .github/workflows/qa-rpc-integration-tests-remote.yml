@@ -35,6 +35,11 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
 
+      - name: Read RPC version
+        run: |
+          source .github/workflows/scripts/rpc_version.env
+          echo "RPC_VERSION=$RPC_VERSION" >> $GITHUB_ENV
+
       - name: Set reference data dir based on branch
         run: |
           # For pull_request events base_ref is the target branch name; for push/dispatch parse from ref.
@@ -140,7 +145,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ${{ runner.workspace }}/rpc-tests
-          key: rpc-tests-${{ runner.os }}-${{ runner.arch }}-v1.121.0
+          key: rpc-tests-${{ runner.os }}-${{ runner.arch }}-${{ env.RPC_VERSION }}
 
       - name: Run RPC Integration Tests
         id: test_step

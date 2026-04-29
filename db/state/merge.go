@@ -127,6 +127,45 @@ func calculateMergeStartTxNum(endTxNum, stepSize, maxSpan uint64) uint64 {
 	return endTxNum - span
 }
 
+// findMergeRangeInFiles scans files (sorted by endTxNum ascending) and returns
+// the maximally aligned merge range whose endTxNum <= maxEndTxNum. Smaller files
+// inside an already-selected span are skipped — the outer merge will absorb them.
+//
+// maxEndTxNum is the synchronization frontier set by AggregatorRoTx.findMergeRange:
+// min visible EndTxNum across kv.StateDomains, optionally tightened to keep
+// Accounts/Storage/Commitment domain frontiers aligned. Files past it aren't yet
+// merge candidates — going further would let one entity drift ahead of the others.
+//
+// When superSetCheck is true (history & inverted index), a file matching the
+// candidate's from and reaching at least its to replaces the candidate's bounds
+// but resets needMerge to false, letting later smaller-but-still-mergeable files
+// take over.
+func findMergeRangeInFiles(files visibleFiles, stepSize, maxEndTxNum, maxSpan uint64, superSetCheck bool) MergeRange {
+	var r MergeRange
+	for _, item := range files {
+		if item.endTxNum > maxEndTxNum {
+			continue
+		}
+		start := calculateMergeStartTxNum(item.endTxNum, stepSize, maxSpan)
+		if superSetCheck && r.from == item.startTxNum && item.endTxNum >= r.to {
+			r.needMerge = false
+			r.from = start
+			r.to = item.endTxNum
+			continue
+		}
+		if start >= item.startTxNum {
+			continue
+		}
+		if r.needMerge && start > r.from {
+			continue
+		}
+		r.needMerge = true
+		r.from = start
+		r.to = item.endTxNum
+	}
+	return r
+}
+
 // findMergeRange
 // make merge determenistic across nodes: even if Node has much small files - do earliest-first merges
 // As any other methods of DomainRoTx - it can't see any files overlaps or garbage
@@ -140,20 +179,7 @@ func (dt *DomainRoTx) findMergeRange(maxEndTxNum, domainMaxSpan, maxSpan uint64)
 		name:    dt.name,
 		aggStep: dt.stepSize,
 	}
-	for _, item := range dt.files {
-		if item.endTxNum > maxEndTxNum {
-			break
-		}
-		fromTxNum := calculateMergeStartTxNum(item.endTxNum, dt.stepSize, domainMaxSpan)
-		if fromTxNum >= item.startTxNum {
-			continue
-		}
-		if r.values.needMerge && fromTxNum > r.values.from { //skip small files inside `span`
-			continue
-		}
-
-		r.values = MergeRange{"", true, fromTxNum, item.endTxNum}
-	}
+	r.values = findMergeRangeInFiles(dt.files, dt.stepSize, maxEndTxNum, domainMaxSpan, false)
 
 	// merge History only if nothing to merge in Domain. to minimize amount of Domain files:
 	//  - to prioritize blocks execution perf (which needs only LatestState - Domains)
@@ -175,26 +201,7 @@ func (ht *HistoryRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges
 
 	mr := ht.iit.findMergeRange(maxEndTxNum, maxSpan)
 	r.index = *mr
-
-	for _, item := range ht.files {
-		if item.endTxNum > maxEndTxNum {
-			continue
-		}
-		startTxNum := calculateMergeStartTxNum(item.endTxNum, ht.stepSize, maxSpan)
-
-		foundSuperSet := r.history.from == item.startTxNum && item.endTxNum >= r.history.to
-		if foundSuperSet {
-			r.history = MergeRange{from: startTxNum, to: item.endTxNum}
-			continue
-		}
-		if startTxNum >= item.startTxNum {
-			continue
-		}
-		if r.history.needMerge && startTxNum > r.history.from {
-			continue
-		}
-		r.history = MergeRange{"", true, startTxNum, item.endTxNum}
-	}
+	r.history = findMergeRangeInFiles(ht.files, ht.stepSize, maxEndTxNum, maxSpan, true)
 
 	if r.history.needMerge && r.index.needMerge {
 		// history is behind idx: then merge only history
@@ -224,34 +231,12 @@ func (iit *InvertedIndexRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Merge
 	if dbg.NoDeepMergeHistory() {
 		maxSpan = min(maxSpan, 2*iit.stepSize)
 	}
-	var minFound bool
-	var startTxNum, endTxNum uint64
-	for _, item := range iit.files {
-		if item.endTxNum > maxEndTxNum {
-			continue
-		}
-		start := calculateMergeStartTxNum(item.endTxNum, iit.stepSize, maxSpan)
-		foundSuperSet := startTxNum == item.startTxNum && item.endTxNum >= endTxNum
-		if foundSuperSet {
-			minFound = false
-			startTxNum = start
-			endTxNum = item.endTxNum
-			continue
-		}
-		if start >= item.startTxNum {
-			continue
-		}
-		if minFound && start > startTxNum {
-			continue
-		}
-		minFound = true
-		startTxNum = start
-		endTxNum = item.endTxNum
+	mr := findMergeRangeInFiles(iit.files, iit.stepSize, maxEndTxNum, maxSpan, true)
+	mr.name = iit.name.String()
+	if mr.needMerge && mr.from == mr.to {
+		panic(fmt.Sprintf("assert: startTxNum(%d) == endTxNum(%d)", mr.from, mr.to))
 	}
-	if minFound && startTxNum == endTxNum {
-		panic(fmt.Sprintf("assert: startTxNum(%d) == endTxNum(%d)", startTxNum, endTxNum))
-	}
-	return &MergeRange{iit.name.String(), minFound, startTxNum, endTxNum}
+	return &mr
 }
 
 type HistoryRanges struct {
