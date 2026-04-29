@@ -81,35 +81,38 @@ V_TIME=$( { time ERIGON_VI_FROM_V=1 "$ERIGON_BIN" seg index --datadir="$POSSIBLE
 echo ""
 echo "=== Step 7: Parse allocation metrics ==="
 
-# Extract allocation metrics from logs
-# Log format: [INFO] [vi] build complete method=ef_based file=... alloc_bytes=... total_alloc_bytes=... mallocs=...
+# Sum metrics for a given method label. Uses awk to parse `key=value` pairs
+# robustly — earlier versions used `grep -oP 'alloc_bytes=\K[-0-9]+'` which
+# also matched `total_alloc_bytes=` (substring), producing multi-line output
+# and breaking the arithmetic.
 parse_metrics() {
     local logfile="$1"
     local method="$2"
-    local total_alloc=0
-    local total_total_alloc=0
-    local total_mallocs=0
-    local count=0
-
-    while IFS= read -r line; do
-        alloc=$(echo "$line" | grep -oP 'alloc_bytes=\K[-0-9]+' || echo "0")
-        talloc=$(echo "$line" | grep -oP 'total_alloc_bytes=\K[0-9]+' || echo "0")
-        mallocs=$(echo "$line" | grep -oP 'mallocs=\K[0-9]+' || echo "0")
-        total_alloc=$((total_alloc + alloc))
-        total_total_alloc=$((total_total_alloc + talloc))
-        total_mallocs=$((total_mallocs + mallocs))
-        count=$((count + 1))
-    done < <(grep "method=$method" "$logfile" || true)
-
-    echo "$total_alloc $total_total_alloc $total_mallocs $count"
+    awk -v lbl="$method" '
+        $0 ~ "method=" lbl {
+            for (i = 1; i <= NF; i++) {
+                n = split($i, kv, "=")
+                if (n != 2) continue
+                if (kv[1] == "alloc_bytes")          sa += kv[2]
+                else if (kv[1] == "total_alloc_bytes") st += kv[2]
+                else if (kv[1] == "mallocs")           sm += kv[2]
+            }
+            count++
+        }
+        END { printf "%d %d %d %d\n", sa+0, st+0, sm+0, count+0 }
+    ' "$logfile"
 }
 
 read EF_ALLOC EF_TALLOC EF_MALLOCS EF_COUNT <<< "$(parse_metrics "$UNCHANGED_LOG" "ef_based")"
 read V_ALLOC V_TALLOC V_MALLOCS V_COUNT <<< "$(parse_metrics "$POSSIBLEFAST_LOG" "v_based")"
 
-# Format bytes to human-readable
+# In the V-based run, files that are not page-compressed (V0 format or
+# detected_compression_type=none) fall back to the ef_based path. Account
+# for those so the comparison is apples-to-apples.
+read V_RUN_EF_ALLOC V_RUN_EF_TALLOC V_RUN_EF_MALLOCS V_RUN_EF_COUNT <<< "$(parse_metrics "$POSSIBLEFAST_LOG" "ef_based")"
+
 fmt_bytes() {
-    local bytes=$1
+    local bytes=${1:-0}
     if [ "$bytes" -lt 0 ]; then
         echo "${bytes} B"
     elif [ "$bytes" -gt 1073741824 ]; then
@@ -126,12 +129,19 @@ fmt_bytes() {
 echo ""
 echo "=== Results ==="
 echo ""
-printf "%-16s | %-10s | %-20s | %-20s | %-12s | %-5s\n" "Method" "Time" "HeapAlloc Delta" "TotalAlloc Delta" "Mallocs" "Files"
-printf "%-16s-+-%-10s-+-%-20s-+-%-20s-+-%-12s-+-%-5s\n" "----------------" "----------" "--------------------" "--------------------" "------------" "-----"
-printf "%-16s | %-10s | %-20s | %-20s | %-12s | %-5s\n" "ef_based" "${EF_TIME}s" "$(fmt_bytes $EF_ALLOC)" "$(fmt_bytes $EF_TALLOC)" "$EF_MALLOCS" "$EF_COUNT"
-printf "%-16s | %-10s | %-20s | %-20s | %-12s | %-5s\n" "v_based" "${V_TIME}s" "$(fmt_bytes $V_ALLOC)" "$(fmt_bytes $V_TALLOC)" "$V_MALLOCS" "$V_COUNT"
+printf "%-22s | %-10s | %-18s | %-18s | %-14s | %-5s\n" "Run / method" "Time" "HeapAlloc Delta" "TotalAlloc Delta" "Mallocs" "Files"
+printf "%-22s-+-%-10s-+-%-18s-+-%-18s-+-%-14s-+-%-5s\n" "----------------------" "----------" "------------------" "------------------" "--------------" "-----"
+printf "%-22s | %-10s | %-18s | %-18s | %-14s | %-5s\n" "EF run / ef_based"  "${EF_TIME}s" "$(fmt_bytes $EF_ALLOC)" "$(fmt_bytes $EF_TALLOC)" "$EF_MALLOCS" "$EF_COUNT"
+printf "%-22s | %-10s | %-18s | %-18s | %-14s | %-5s\n" "V run / v_based"    "${V_TIME}s"  "$(fmt_bytes $V_ALLOC)"  "$(fmt_bytes $V_TALLOC)"  "$V_MALLOCS"  "$V_COUNT"
+printf "%-22s | %-10s | %-18s | %-18s | %-14s | %-5s\n" "V run / ef_fallback" "-"          "$(fmt_bytes $V_RUN_EF_ALLOC)" "$(fmt_bytes $V_RUN_EF_TALLOC)" "$V_RUN_EF_MALLOCS" "$V_RUN_EF_COUNT"
 
 echo ""
+echo "Notes:"
+echo "  - Wall-clock 'Time' is total ./erigon seg index time including parallel work."
+echo "  - 'V run / ef_fallback' counts files in the V run that fell back to ef_based"
+echo "    (non-page-compressed .v files). For an apples-to-apples comparison,"
+echo "    compare 'EF run / ef_based' restricted to the same fileset vs 'V run / v_based'."
+echo ""
 echo "Detailed logs:"
-echo "  EF-based: $UNCHANGED_LOG"
-echo "  V-based:  $POSSIBLEFAST_LOG"
+echo "  EF-based run: $UNCHANGED_LOG"
+echo "  V-based run:  $POSSIBLEFAST_LOG"
