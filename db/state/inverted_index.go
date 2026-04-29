@@ -379,10 +379,14 @@ func (w *InvertedIndexBufferedWriter) close() {
 		return
 	}
 	if w.index != nil {
-		w.index.Close()
+		index := w.index
+		w.index = nil
+		index.Close()
 	}
 	if w.indexKeys != nil {
-		w.indexKeys.Close()
+		indexKeys := w.indexKeys
+		w.indexKeys = nil
+		indexKeys.Close()
 	}
 }
 
