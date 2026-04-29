@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -30,8 +31,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"math/rand"
 
 	"github.com/erigontech/erigon/db/kv/prune"
 
@@ -815,6 +814,8 @@ func (a *Aggregator) WarmupDB() {
 				return
 			}
 			defer c.Close()
+			// .Next() does return zero-copy pointers to mmap without touching leaf pages of db's btree
+			// so basically it's branch-nodes of btree warmup
 			for k, _, err := c.First(); k != nil && err == nil; k, _, err = c.Next() {
 				if a.ctx.Err() != nil {
 					return
