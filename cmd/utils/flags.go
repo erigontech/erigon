@@ -2229,22 +2229,37 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	}
 
 	if ctx.IsSet(ErigondbDomainStepsInFrozenFileFlag.Name) {
-		s := ctx.String(ErigondbDomainStepsInFrozenFileFlag.Name)
-		var v uint64
-		if strings.EqualFold(s, "inf") {
-			v = config3.UnboundedDomainMerge
-		} else {
-			parsed, err := strconv.ParseUint(s, 10, 64)
-			if err != nil {
-				Fatalf("invalid --%s value %q: must be a positive integer or \"Inf\"", ErigondbDomainStepsInFrozenFileFlag.Name, s)
-			}
-			if parsed == 0 {
-				Fatalf("invalid --%s value %q: must be a positive integer or \"Inf\"", ErigondbDomainStepsInFrozenFileFlag.Name, s)
-			}
-			v = parsed
+		v, err := ParseErigondbDomainStepsInFrozenFile(ctx.String(ErigondbDomainStepsInFrozenFileFlag.Name))
+		if err != nil {
+			Fatalf("%s", err.Error())
 		}
 		cfg.ErigondbDomainStepsInFrozenFile = &v
 	}
+}
+
+// ParseErigondbDomainStepsInFrozenFile parses the value of --erigondb.domain.steps-in-frozen-file:
+// "Inf" (case-insensitive) maps to config3.UnboundedDomainMerge; otherwise the value must be a
+// positive uint64. Returns an error rather than calling Fatalf so callers from non-urfave/cli
+// frontends (e.g. cobra) can surface the failure their own way.
+func ParseErigondbDomainStepsInFrozenFile(s string) (uint64, error) {
+	if strings.EqualFold(s, "inf") {
+		return config3.UnboundedDomainMerge, nil
+	}
+	parsed, err := strconv.ParseUint(s, 10, 64)
+	if err != nil || parsed == 0 {
+		return 0, fmt.Errorf("invalid --%s value %q: must be a positive integer or \"Inf\"", ErigondbDomainStepsInFrozenFileFlag.Name, s)
+	}
+	return parsed, nil
+}
+
+// LogErigondbDomainStepsInFrozenFileOverride emits the standard log entry advertising the
+// --erigondb.domain.steps-in-frozen-file override, formatting config3.UnboundedDomainMerge as "Inf".
+func LogErigondbDomainStepsInFrozenFileOverride(logger log.Logger, v uint64) {
+	stepsStr := "Inf"
+	if v != config3.UnboundedDomainMerge {
+		stepsStr = strconv.FormatUint(v, 10)
+	}
+	logger.Info("domain merge cap overridden", "steps_in_frozen_file", stepsStr)
 }
 
 // Convenience type for optional flag value representing a rate limit that should print nicely for

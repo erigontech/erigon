@@ -250,6 +250,12 @@ func (a *Aggregator) Logger() log.Logger        { return a.logger }
 func (a *Aggregator) ForTestReplaceKeysInValues(domain kv.Domain, v bool) {
 	a.d[domain].ReplaceKeysInValues = v
 }
+
+// ForTestSetErigondbDomainStepsInFrozenFile overrides the domain merge cap after construction.
+// Must be called before any merge runs.
+func (a *Aggregator) ForTestSetErigondbDomainStepsInFrozenFile(v uint64) {
+	a.erigondbDomainStepsInFrozenFile = v
+}
 func (a *Aggregator) Cfg(domain kv.Domain) statecfg.DomainCfg { return a.d[domain].DomainCfg }
 
 func (a *Aggregator) reloadSalt() error {

@@ -44,6 +44,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/semaphore"
 
+	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/cmd/utils/app"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -119,6 +120,7 @@ func init() {
 	withClearCommitment(cmdCommitmentRebuild)
 	withResume(cmdCommitmentRebuild)
 	withNoHistory(cmdCommitmentRebuild)
+	withErigondbDomainStepsInFrozenFile(cmdCommitmentRebuild)
 	commitmentCmd.AddCommand(cmdCommitmentRebuild)
 
 	// commitment print
@@ -268,7 +270,7 @@ var cmdCommitmentRebuild = &cobra.Command{
 		}
 		defer db.Close()
 
-		if err := commitmentRebuild(db, cmd.Context(), logger); err != nil {
+		if err := commitmentRebuild(cmd, db, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -277,7 +279,7 @@ var cmdCommitmentRebuild = &cobra.Command{
 	},
 }
 
-func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
+func commitmentRebuild(cmd *cobra.Command, db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	if clearCommitment && resume {
 		return errors.New("--clear-commitment and --resume are mutually exclusive")
 	}
@@ -392,6 +394,15 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 	agg.PresetOfflineMerge()
 	agg.PeriodicalyPrintProcessSet(ctx)
+
+	if s, _ := cmd.Flags().GetString(utils.ErigondbDomainStepsInFrozenFileFlag.Name); s != "" {
+		v, err := utils.ParseErigondbDomainStepsInFrozenFile(s)
+		if err != nil {
+			return err
+		}
+		utils.LogErigondbDomainStepsInFrozenFileOverride(logger, v)
+		agg.ForTestSetErigondbDomainStepsInFrozenFile(v)
+	}
 
 	if withHistory {
 		if _, err := stagedsync.RebuildPatriciaTrieWithHistory(ctx, cfg, squeeze); err != nil {

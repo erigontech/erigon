@@ -132,6 +132,10 @@ func withNoHistory(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&noHistory, "no-history", false, "skip history regeneration and only rebuild commitment KV files")
 }
 
+func withErigondbDomainStepsInFrozenFile(cmd *cobra.Command) {
+	cmd.Flags().String(utils.ErigondbDomainStepsInFrozenFileFlag.Name, "", utils.ErigondbDomainStepsInFrozenFileFlag.Usage)
+}
+
 func withBucket(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&bucket, "bucket", "", "reset given stage")
 }
