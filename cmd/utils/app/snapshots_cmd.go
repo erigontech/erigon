@@ -323,6 +323,7 @@ var snapshotCommand = cli.Command{
 				&cli.BoolFlag{Name: "recentStep", Aliases: []string{"latest", "latestStep", "recent"}, Usage: "remove minimal possible recent/latest files: and Domain and History. Useful when have 1 corrupted recent file"},
 				&cli.BoolFlag{Name: "dry-run"},
 				&cli.StringSliceFlag{Name: "domain"},
+				&cli.BoolFlag{Name: "only-history", Aliases: []string{"history"}, Usage: "remove only history files (SnapHistory+SnapIdx), not domain data"},
 			},
 			),
 		},
@@ -700,6 +701,7 @@ type DeleteStateSnapshotsArgs struct {
 	DryRun                 bool
 	StepRange              string
 	OnlyDomain             bool
+	OnlyHistory            bool
 	DomainNames            []string
 }
 
@@ -729,6 +731,8 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 	scanDirs := []string{dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapForkable}
 	if args.OnlyDomain {
 		scanDirs = []string{dirs.SnapDomain}
+	} else if args.OnlyHistory {
+		scanDirs = []string{dirs.SnapHistory, dirs.SnapIdx}
 	}
 	for _, dirPath := range scanDirs {
 		filePaths, err := dir2.ListFiles(dirPath)
@@ -1035,6 +1039,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 	stepRange := cliCtx.String("step")
 	domainNames := cliCtx.StringSlice("domain")
 	dryRun := cliCtx.Bool("dry-run")
+	onlyHistory := cliCtx.Bool("only-history")
 	promptUser := true // CLI should always prompt the user
 	return DeleteStateSnapshots(DeleteStateSnapshotsArgs{
 		Dirs:                   dirs,
@@ -1043,6 +1048,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 		DryRun:                 dryRun,
 		StepRange:              stepRange,
 		DomainNames:            domainNames,
+		OnlyHistory:            onlyHistory,
 	})
 }
 
