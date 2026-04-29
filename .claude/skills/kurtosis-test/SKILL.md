@@ -165,9 +165,14 @@ failure trips. All three are captured in the run history.
 
 ### Check A — Block height progress
 
-`duration_secs` is the parsed `duration=Nm` input (default 1200). The loop exits cleanly
-when the duration elapses (→ STABLE) or when the chain stalls past `3 × seconds_per_slot`
-(→ STALL).
+`duration_secs` is the parsed `duration=Nm` input (default 1200). Three terminal
+outcomes:
+
+- **STABLE** — chain produced blocks and the duration elapsed without a stall.
+- **STALL** — chain produced at least one block, then stopped advancing for
+  `>3 × seconds_per_slot`.
+- **NO_PROGRESS** — chain never produced a block within `duration_secs` (e.g.
+  validators didn't start).
 
 ```bash
 duration_secs=${duration_secs:-1200}
@@ -178,6 +183,7 @@ stall_window=$(( slot_secs * 3 ))
 start=$(date +%s)
 end=$(( start + duration_secs ))
 stall_deadline=$(( start + stall_window ))
+outcome=""
 
 while [ "$(date +%s)" -lt "$end" ]; do
   height_hex=$(curl -s --max-time 5 "http://127.0.0.1:${EL_RPC_PORT}" \
@@ -194,20 +200,29 @@ while [ "$(date +%s)" -lt "$end" ]; do
   else
     echo "[$(date -u +%H:%M:%S)] RPC unreachable or invalid response — retrying"
   fi
-  if [ "$(date +%s)" -gt "$stall_deadline" ]; then
-    echo "STALL: chain not progressing for >${stall_window}s (last height=$prev)"
+  # Only declare a stall after seeing at least one block. Many configs set
+  # genesis_delay > stall_window (e.g. glamsterdam.io: 20s delay vs 18s window
+  # at 6s slots), so the pre-genesis gap would otherwise trip a false stall.
+  if [ "$prev" -gt 0 ] && [ "$(date +%s)" -gt "$stall_deadline" ]; then
+    outcome="STALL: chain not progressing for >${stall_window}s (last height=$prev)"
     break
   fi
   sleep "$poll_interval"
 done
 
-if [ "$(date +%s)" -ge "$end" ]; then
-  echo "STABLE: chain progressed for full ${duration_secs}s window (final height=$prev)"
+if [ -z "$outcome" ]; then
+  if [ "$prev" -eq 0 ]; then
+    outcome="NO_PROGRESS: chain never produced a block within ${duration_secs}s"
+  else
+    outcome="STABLE: chain progressed for full ${duration_secs}s window (final height=$prev)"
+  fi
 fi
+echo "$outcome"
 ```
 
-Pass: height advances ≥1 within every `2 × seconds_per_slot` window for the full
-`duration_secs`. Fail: no advance for `>3 × seconds_per_slot`.
+Pass: height advances ≥1 within every `3 × seconds_per_slot` (the stall window),
+sustained for the full `duration_secs` (poll cadence is `2 × seconds_per_slot`).
+Fail: STALL or NO_PROGRESS.
 
 ### Check B — Assertoor results
 
@@ -324,7 +339,8 @@ If `auto=false`, pause for user approval before steps 2–4 of every attempt.
 
 ## Cleanup (always run)
 
-Run on success, failure, and signal interruption (`trap`):
+Run as the final step of every iteration regardless of outcome (success, failure,
+or user interrupt):
 
 ```bash
 DUMP_DIR="/tmp/kurtosis-dump-${ENCLAVE}"
