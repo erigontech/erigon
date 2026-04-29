@@ -797,6 +797,38 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int) erro
 	return nil
 }
 
+func (a *Aggregator) WarmupDB() {
+	for name, cfg := range a.db.AllTables() {
+		if cfg.IsDeprecated {
+			continue
+		}
+		a.wg.Add(1)
+		go func() {
+			defer a.wg.Done()
+			tx, err := a.db.BeginRo(a.ctx)
+			if err != nil {
+				return
+			}
+			defer tx.Rollback()
+			c, err := tx.Cursor(name)
+			if err != nil {
+				return
+			}
+			defer c.Close()
+			// .Next() does return zero-copy pointers to mmap without touching leaf pages of db's btree
+			// so basically it's branch-nodes of btree warmup
+			for k, _, err := c.First(); k != nil && err == nil; k, _, err = c.Next() {
+				if a.ctx.Err() != nil {
+					return
+				}
+			}
+			if err != nil {
+				a.logger.Warn("[agg] WarmupDB scan error", "table", name, "err", err)
+			}
+		}()
+	}
+}
+
 type AggV3StaticFiles struct {
 	d    [kv.DomainLen]StaticFiles
 	ivfs [kv.StandaloneIdxLen]InvertedFiles

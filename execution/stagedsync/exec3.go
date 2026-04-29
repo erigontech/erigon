@@ -128,6 +128,7 @@ func ExecV3(ctx context.Context,
 	}
 
 	agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+	agg.WarmupDB()
 	if isApplyingBlocks {
 		if initialCycle {
 			agg.PresetNonChainTipConcurrency()
