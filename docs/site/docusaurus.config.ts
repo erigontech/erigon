@@ -54,6 +54,21 @@ export default async function createConfig(): Promise<Config> {
 
     customFields: {latestVersion},
 
+    headTags: [
+      {
+        tagName: 'script',
+        attributes: {
+          async: 'true',
+          src: 'https://plausible.io/js/pa-dn7VOPE-2G3BcX86ipmLC.js',
+        },
+      },
+      {
+        tagName: 'script',
+        attributes: {},
+        innerHTML: 'window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};plausible.init()',
+      },
+    ],
+
     plugins: [
       [
         '@docusaurus/plugin-content-docs',
