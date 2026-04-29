@@ -22,7 +22,6 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/types"
@@ -57,6 +56,9 @@ func CheckReceiptRootIntegrity(ctx context.Context, sc SamplerCfg, db kv.Tempora
 }
 
 // ReceiptRootIntegrityRange verifies receipt roots for a range of blocks.
+// It opens a single ReceiptCacheV2Stream covering [fromBlock, toBlock] and
+// walks blocks in lockstep with the stream's txNum cursor, so we avoid one
+// stream + one Min query per block.
 func ReceiptRootIntegrityRange(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
 	if fromBlock > toBlock {
 		panic(fmt.Sprintf("fromBlock(%d) > toBlock(%d)", fromBlock, toBlock))
@@ -70,28 +72,26 @@ func ReceiptRootIntegrityRange(ctx context.Context, fromBlock, toBlock uint64, d
 
 	txNumsReader := blockReader.TxnumReader()
 
-	for blockNum := fromBlock; blockNum <= toBlock; blockNum++ {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
-		if err := checkReceiptRootAtBlock(ctx, tx, blockReader, txNumsReader, blockNum); err != nil {
-			if failFast {
-				return err
-			}
-			log.Error(err.Error())
-		}
+	fromTxNum, err := txNumsReader.Min(ctx, tx, fromBlock)
+	if err != nil {
+		return fmt.Errorf("ReceiptRootIntegrity: failed to get minTxNum for block %d: %w", fromBlock, err)
+	}
+	toTxNum, err := txNumsReader.Max(ctx, tx, toBlock)
+	if err != nil {
+		return fmt.Errorf("ReceiptRootIntegrity: failed to get maxTxNum for block %d: %w", toBlock, err)
 	}
 
-	return nil
-}
+	it, err := rawdb.ReceiptCacheV2Stream(tx, fromTxNum, toTxNum)
+	if err != nil {
+		return fmt.Errorf("ReceiptRootIntegrity: failed to stream receipts for blocks [%d,%d]: %w", fromBlock, toBlock, err)
+	}
+	defer it.Close()
 
-// checkReceiptRootAtBlock verifies that receipts from RCache produce a receipt root
-// matching the block header's ReceiptHash for a single block.
-func checkReceiptRootAtBlock(ctx context.Context, tx kv.TemporalTx, blockReader services.FullBlockReader, txNumsReader rawdbv3.TxNumsReader, blockNum uint64) error {
-	// Get block header
+	blockNum := fromBlock
+	curMax, err := txNumsReader.Max(ctx, tx, blockNum)
+	if err != nil {
+		return err
+	}
 	header, err := blockReader.HeaderByNumber(ctx, tx, blockNum)
 	if err != nil {
 		return fmt.Errorf("ReceiptRootIntegrity: failed to get header for block %d: %w", blockNum, err)
@@ -99,42 +99,66 @@ func checkReceiptRootAtBlock(ctx context.Context, tx kv.TemporalTx, blockReader 
 	if header == nil {
 		return fmt.Errorf("ReceiptRootIntegrity: missing header for block %d", blockNum)
 	}
-
-	// Get txNum range for the block
-	minTxNum, err := txNumsReader.Min(ctx, tx, blockNum)
-	if err != nil {
-		return fmt.Errorf("ReceiptRootIntegrity: failed to get minTxNum for block %d: %w", blockNum, err)
-	}
-	maxTxNum, err := txNumsReader.Max(ctx, tx, blockNum)
-	if err != nil {
-		return fmt.Errorf("ReceiptRootIntegrity: failed to get maxTxNum for block %d: %w", blockNum, err)
-	}
-
-	// Read all receipts for the block from RCache
-	it, err := rawdb.ReceiptCacheV2Stream(tx, minTxNum, maxTxNum)
-	if err != nil {
-		return fmt.Errorf("ReceiptRootIntegrity: failed to stream receipts for block %d: %w", blockNum, err)
-	}
-	defer it.Close()
-
 	var receipts types.Receipts
-	for it.HasNext() {
-		_, r, err := it.Next()
-		if err != nil {
-			return fmt.Errorf("ReceiptRootIntegrity: failed to read receipt for block %d: %w", blockNum, err)
+
+	verifyAndAdvance := func() error {
+		computedRoot := types.DeriveSha(receipts)
+		if computedRoot != header.ReceiptHash {
+			mismatch := fmt.Errorf("%w: ReceiptRootIntegrity: receipt root mismatch at block %d: computed=%s, header=%s",
+				ErrIntegrity, blockNum, computedRoot, header.ReceiptHash)
+			if failFast {
+				return mismatch
+			}
+			log.Error(mismatch.Error())
 		}
+		receipts = receipts[:0]
+		blockNum++
+		if blockNum > toBlock {
+			return nil
+		}
+		curMax, err = txNumsReader.Max(ctx, tx, blockNum)
+		if err != nil {
+			return err
+		}
+		header, err = blockReader.HeaderByNumber(ctx, tx, blockNum)
+		if err != nil {
+			return fmt.Errorf("ReceiptRootIntegrity: failed to get header for block %d: %w", blockNum, err)
+		}
+		if header == nil {
+			return fmt.Errorf("ReceiptRootIntegrity: missing header for block %d", blockNum)
+		}
+		return nil
+	}
+
+	for it.HasNext() {
+		txNum, r, err := it.Next()
+		if err != nil {
+			return fmt.Errorf("ReceiptRootIntegrity: failed to read receipt: %w", err)
+		}
+
+		for txNum > curMax && blockNum <= toBlock {
+			if err := verifyAndAdvance(); err != nil {
+				return err
+			}
+		}
+
 		if r != nil {
 			receipts = append(receipts, r)
 		}
+
+		if txNum%1000 == 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+		}
 	}
 
-	// Compute receipt root
-	computedRoot := types.DeriveSha(receipts)
-
-	// Compare with header's ReceiptHash
-	if computedRoot != header.ReceiptHash {
-		return fmt.Errorf("%w: ReceiptRootIntegrity: receipt root mismatch at block %d: computed=%s, header=%s",
-			ErrIntegrity, blockNum, computedRoot, header.ReceiptHash)
+	for blockNum <= toBlock {
+		if err := verifyAndAdvance(); err != nil {
+			return err
+		}
 	}
 
 	return nil
