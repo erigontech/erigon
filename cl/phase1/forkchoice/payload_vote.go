@@ -345,7 +345,12 @@ func (f *ForkChoiceStore) getNodeChildren(node ForkChoiceNode, blocks map[common
 		children := []ForkChoiceNode{
 			{Root: node.Root, PayloadStatus: cltypes.PayloadStatusEmpty},
 		}
-		// Check disk for envelope existence to determine if FULL status is available
+		// Check disk for envelope existence to determine if FULL status is available.
+		// Spec: is_payload_verified(store, node.root) — in the spec, store.payloads is populated
+		// only after EL returns VALID. During forward sync the EL returns SYNCING for most
+		// payloads, so requiring verifiedExecutionPayload would block the FULL path entirely.
+		// Using HasEnvelope (disk persistence) as a pragmatic proxy; verifiedExecutionPayload
+		// can be added once the EL catches up and validates payloads retroactively.
 		if f.forkGraph.HasEnvelope(node.Root) {
 			children = append(children, ForkChoiceNode{
 				Root: node.Root, PayloadStatus: cltypes.PayloadStatusFull,

@@ -303,27 +303,54 @@ func (f *ForkChoiceStore) getFilterBlockTree(blockRoot common.Hash, blocks map[c
 		}
 		return isAnyViable
 	}
-	// Use per-block unrealized justifications (spec: store.unrealized_justifications[block_root])
-	// Fall back to realized checkpoints if unrealized not available
-	currentJustifiedCheckpoint, has := f.getUnrealizedJustification(blockRoot)
+	// Leaf node — check viability per spec filter_block_tree
+	//
+	// Justified check (spec): voting_source.epoch >= store.justified_checkpoint.epoch
+	// Note: the spec uses >= (not ==) so blocks with higher unrealized justification are viable.
+	// Also implements is_previous_epoch_justified fallback.
+	//
+	// Finalized check (spec): store.finalized_checkpoint.root == get_ancestor(store, block_root, finalized_slot)
+	// Note: checks that the block descends from the finalized block, not checkpoint equality.
+
+	// Get voting source (unrealized justification for this block)
+	votingSource, has := f.getUnrealizedJustification(blockRoot)
 	if !has {
-		currentJustifiedCheckpoint, has = f.forkGraph.GetCurrentJustifiedCheckpoint(blockRoot)
-		if !has {
-			return false
-		}
-	}
-	// Use per-block unrealized finalized checkpoint, fall back to realized
-	finalizedJustifiedCheckpoint, has := f.getUnrealizedFinalization(blockRoot)
-	if !has {
-		finalizedJustifiedCheckpoint, has = f.forkGraph.GetFinalizedCheckpoint(blockRoot)
+		votingSource, has = f.forkGraph.GetCurrentJustifiedCheckpoint(blockRoot)
 		if !has {
 			return false
 		}
 	}
 
 	genesisEpoch := f.beaconCfg.GenesisEpoch
-	justifiedOk := justifiedCheckpoint.Epoch == genesisEpoch || currentJustifiedCheckpoint.Equal(justifiedCheckpoint)
-	finalizedOk := finalizedCheckpoint.Epoch == genesisEpoch || finalizedJustifiedCheckpoint.Equal(finalizedCheckpoint)
+
+	// Spec: correct_justified = store.justified_checkpoint.epoch == GENESIS_EPOCH
+	//       or voting_source.epoch >= store.justified_checkpoint.epoch
+	justifiedOk := justifiedCheckpoint.Epoch == genesisEpoch ||
+		votingSource.Epoch >= justifiedCheckpoint.Epoch
+
+	// is_previous_epoch_justified fallback:
+	// If not correct_justified and previous epoch is justified, check that
+	// the voting source is not more than two epochs ago.
+	if !justifiedOk {
+		currentEpoch := f.computeEpochAtSlot(f.Slot())
+		previousEpoch := currentEpoch - 1
+		if previousEpoch > currentEpoch { // underflow guard
+			previousEpoch = 0
+		}
+		if justifiedCheckpoint.Epoch == previousEpoch {
+			justifiedOk = votingSource.Epoch+2 >= currentEpoch
+		}
+	}
+
+	// Spec: correct_finalized = store.finalized_checkpoint.epoch == GENESIS_EPOCH
+	//       or store.finalized_checkpoint.root == get_ancestor(store, block_root, finalized_slot)
+	finalizedOk := finalizedCheckpoint.Epoch == genesisEpoch
+	if !finalizedOk {
+		finalizedSlot := f.computeStartSlotAtEpoch(finalizedCheckpoint.Epoch)
+		ancestor := f.Ancestor(blockRoot, finalizedSlot)
+		finalizedOk = finalizedCheckpoint.Root == ancestor.Root
+	}
+
 	if justifiedOk && finalizedOk {
 		blocks[blockRoot] = header
 		return true
