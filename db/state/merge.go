@@ -179,7 +179,9 @@ func (dt *DomainRoTx) findMergeRange(maxEndTxNum, domainMaxSpan, maxSpan uint64)
 		name:    dt.name,
 		aggStep: dt.stepSize,
 	}
-	r.values = findMergeRangeInFiles(dt.files, dt.stepSize, maxEndTxNum, domainMaxSpan, false)
+	if !dbg.NoMergeDomain() {
+		r.values = findMergeRangeInFiles(dt.files, dt.stepSize, maxEndTxNum, domainMaxSpan, false)
+	}
 
 	// merge History only if nothing to merge in Domain. to minimize amount of Domain files:
 	//  - to prioritize blocks execution perf (which needs only LatestState - Domains)

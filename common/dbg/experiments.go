@@ -55,12 +55,14 @@ var (
 	mergeTr = EnvInt("MERGE_THRESHOLD", -1)
 
 	//state v3
-	noPrune              = EnvBool("NO_PRUNE", false)
-	noMerge              = EnvBool("NO_MERGE", false)              // don't merge Domain/Hist/II
-	noMergeHistory       = EnvBool("NO_MERGE_HISTORY", false)      // don't merge Hist/II but still merge Domain
-	noDeepMergeHistory   = EnvBool("NO_DEEP_MERGE_HISTORY", false) // merge Hist/II only up to 2 steps (small+fast), skip larger merges
-	discardCommitment    = EnvBool("DISCARD_COMMITMENT", false)
-	pruneTotalDifficulty = EnvBool("PRUNE_TOTAL_DIFFICULTY", true)
+	noPrune                  = EnvBool("NO_PRUNE", false)
+	noMerge                  = EnvBool("NO_MERGE", false)                     // don't merge Domain/Hist/II
+	noMergeDomain            = EnvBool("NO_MERGE_DOMAIN", false)              // don't merge Domain values but still merge Hist/II
+	noMergeHistory           = EnvBool("NO_MERGE_HISTORY", false)             // don't merge Hist/II but still merge Domain
+	noDeepMergeHistory       = EnvBool("NO_DEEP_MERGE_HISTORY", false)        // merge Hist/II only up to 2 steps (small+fast), skip larger merges
+	noCommitmentKeysInValues = EnvBool("NO_COMMITMENT_KEYS_IN_VALUES", false) // disable ReplaceKeysInValues feature on the commitment domain
+	discardCommitment        = EnvBool("DISCARD_COMMITMENT", false)
+	pruneTotalDifficulty     = EnvBool("PRUNE_TOTAL_DIFFICULTY", true)
 
 	// force skipping of any non-Erigon2 .torrent files
 	DownloaderOnlyBlocks = EnvBool("DOWNLOADER_ONLY_BLOCKS", false)
@@ -127,12 +129,14 @@ func ReadMemStats(m *runtime.MemStats) {
 	runtime.ReadMemStats(m)
 }
 
-func DiscardCommitment() bool    { return discardCommitment }
-func NoPrune() bool              { return noPrune }
-func NoMerge() bool              { return noMerge }
-func NoMergeHistory() bool       { return noMergeHistory }
-func NoDeepMergeHistory() bool   { return noDeepMergeHistory }
-func PruneTotalDifficulty() bool { return pruneTotalDifficulty }
+func DiscardCommitment() bool        { return discardCommitment }
+func NoPrune() bool                  { return noPrune }
+func NoMerge() bool                  { return noMerge }
+func NoMergeDomain() bool            { return noMergeDomain }
+func NoMergeHistory() bool           { return noMergeHistory }
+func NoDeepMergeHistory() bool       { return noDeepMergeHistory }
+func NoCommitmentKeysInValues() bool { return noCommitmentKeysInValues }
+func PruneTotalDifficulty() bool     { return pruneTotalDifficulty }
 
 // CLI-override setters for the performance toggles that also have env-var
 // twins. The env var sets the initial value at package init; the CLI layer

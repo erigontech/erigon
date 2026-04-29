@@ -82,6 +82,9 @@ func init() {
 	if dbgCommBtIndex {
 		Schema.CommitmentDomain.Accessors = AccessorBTree | AccessorExistence
 	}
+	if dbg.NoCommitmentKeysInValues() {
+		Schema.CommitmentDomain.ReplaceKeysInValues = false
+	}
 	InitSchemas()
 }
 

@@ -777,6 +777,10 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	}
 
 	// Squeeze pass: re-compress commitment files with ReplaceKeysInValues
+	if dbg.NoCommitmentKeysInValues() {
+		logger.Info("[rebuild_commitment_history] NO_COMMITMENT_KEYS_IN_VALUES set, skipping squeeze pass")
+		return latestRoot, nil
+	}
 	if !squeeze && !statecfg.Schema.CommitmentDomain.ReplaceKeysInValues {
 		return latestRoot, nil
 	}
@@ -1044,6 +1048,10 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 	acRo.Close()
 
+	if dbg.NoCommitmentKeysInValues() {
+		logger.Info("[squeeze] NO_COMMITMENT_KEYS_IN_VALUES set, skipping squeeze pass")
+		return latestRoot, nil
+	}
 	if !squeeze && !statecfg.Schema.CommitmentDomain.ReplaceKeysInValues {
 		return latestRoot, nil
 	}
