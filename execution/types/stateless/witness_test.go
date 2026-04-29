@@ -266,6 +266,13 @@ func TestNewWitnessRequiresHeaderReader(t *testing.T) {
 	}
 }
 
+func TestNewWitnessRejectsGenesisBlock(t *testing.T) {
+	_, err := NewWitness(&types.Header{Number: *uint256.NewInt(0)}, newMockHeaderReader())
+	if err == nil || err.Error() != "cannot create witness for genesis block" {
+		t.Fatalf("expected genesis block error, got %v", err)
+	}
+}
+
 func TestWitnessDecodeRLPRequiresHeader(t *testing.T) {
 	var witness Witness
 	payload, err := rlp.EncodeToBytes(&extWitness{
