@@ -60,10 +60,10 @@
 **Files:**
 - Modify: `execution/tests/testutil/block_test_util.go`
 
-- [ ] Add `M *execmoduletester.ExecModuleTester` field to `BlockTest` struct
-- [ ] Assign `bt.M = m` in `BlockTest.Run()` after `execmoduletester.New()`
-- [ ] Assign `bt.M = m` in `BlockTest.RunCLI()` after `execmoduletester.New()`
-- [ ] Verify existing tests still pass: `go test -short ./execution/tests/testutil/...`
+- [x] Add `M *execmoduletester.ExecModuleTester` field to `BlockTest` struct
+- [x] Assign `bt.M = m` in `BlockTest.Run()` after `execmoduletester.New()`
+- [x] Assign `bt.M = m` in `BlockTest.RunCLI()` after `execmoduletester.New()`
+- [x] Verify existing tests still pass: `go test -short ./execution/tests/testutil/...`
 
 ### Task 3: Add witness test runner
 

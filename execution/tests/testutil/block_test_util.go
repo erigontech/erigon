@@ -54,6 +54,7 @@ type BlockTest struct {
 	json            btJSON
 	br              services.FullBlockReader
 	ExperimentalBAL bool
+	M               *execmoduletester.ExecModuleTester
 }
 
 // UnmarshalJSON implements json.Unmarshaler interface.
@@ -225,6 +226,7 @@ func (bt *BlockTest) Run(t *testing.T) error {
 		mOpts = append(mOpts, execmoduletester.WithExperimentalBAL())
 	}
 	m := execmoduletester.New(t, mOpts...)
+	bt.M = m
 
 	bt.br = m.BlockReader
 	// import pre accounts & construct test genesis block & state root
@@ -267,6 +269,7 @@ func (bt *BlockTest) RunCLI() error {
 	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
 	m := execmoduletester.New(nil, execmoduletester.WithGenesisSpec(bt.genesis(config)), execmoduletester.WithEngine(engine))
 	defer m.DB.Close()
+	bt.M = m
 
 	bt.br = m.BlockReader
 	// import pre accounts & construct test genesis block & state root
