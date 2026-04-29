@@ -420,5 +420,20 @@ Same short-circuit as Case A: `originalValue=X` non-zero never triggers the new-
 - `make test-short` passes.
 - `make test-all` passes.
 
+### Alignment with Mario's TODO test list
+
+The page at https://notes.ethereum.org/@marioevz/eip-8037-todo-tests lists three test cases that the EIP-8037 implementation must satisfy. All three are handled correctly by the journal-walk algorithm without code changes:
+
+1. **"TX spending all balance from an account should not refund account destroy refund"** — A pre-existing account whose entire balance is drained by a tx must NOT trigger a 112×cpsb refund (it was never charged in the first place). In our walk: only `createObjectChange`, `resetObjectChange`, `codeChange`, and `storageChange` contribute bytes. `balanceChange` entries are skipped, and the SELFDESTRUCT filter only fires on accounts with `.newlyCreated && .selfdestructed` — a pre-existing account drained to 0 does not match that predicate, so the top-frame walk does not skip it (and there's nothing to skip, since no `createObjectChange` was emitted for it). Net effect: 0 charge, 0 refund.
+
+2. **"Contract creation -> return successfully -> gas to sstore"** — A top-level CREATE tx that deploys code AND writes a storage slot. Covered by edge case #43: the intrinsic charges 112×cpsb (account); the top-frame walk uses `excludeCreate=C` to skip the contract's `createObjectChange` (avoiding double-count); `codeChange` contributes `len(code)` bytes; `storageChange` contributes 32 bytes. Total state gas: `112×cpsb (intrinsic) + (len(code) + 32)×cpsb (execution)`.
+
+3. **"Not enough gas to pay for account creation at the end of the tx, but still got refund from a self-destruct"** — A frame creates account A and then SELFDESTRUCTs A within the same tx; even if the test runs near OOG limits, the create + self-destruct pair must net to 0 state gas. Covered by edge cases #30, #31, #34, #35–40: the deepest creator frame charges 112+code+slots at its commit (no filter); the top-frame walk applies the filter, sees A is `.newlyCreated && .selfdestructed`, and skips it; this makes `top.walkTotal < top.committedChildBytes`, producing a negative delta that credits the over-charge back. Per-address dedup at the walk level ensures the credit fires exactly once even if A is SELFDESTRUCTed multiple times.
+
+The four design questions on Mario's page are also resolved by the implementation:
+- **Which frame is charged for account creation?** The frame in which `createObjectChange` lands. For `CALL` to non-existent address with value, that's the called frame (snapshot is pushed before `CreateAccount`). For top-level CREATE tx, the contract account is intrinsic-charged (with `excludeCreate` to prevent double-count). For nested `CREATE`, the create-frame charges via its own `createObjectChange`.
+- **Code deposit charge frame?** Always the create-frame, because `codeChange` is emitted by the create-frame's `SetCode` call right before commit.
+- **Double-charging via intrinsic_state_cost?** No — `excludeCreate` parameter to `ComputeFrameStateBytes` skips the top-level CREATE's contract account from the walk.
+
 ## Rollout
 All changes are gated on `chainRules.IsAmsterdam` — pre-Amsterdam paths are untouched. Cutover is automatic at the fork-transition block, exercising both code paths in a single devnet run.
