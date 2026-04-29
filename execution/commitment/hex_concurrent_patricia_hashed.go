@@ -190,11 +190,8 @@ func (p *ConcurrentPatriciaHashed) SetCapture(capture []string) {
 
 func (p *ConcurrentPatriciaHashed) EnableCsvMetrics(filePathPrefix string) {
 	p.root.EnableCsvMetrics(filePathPrefix)
-	p.root.cfg.CsvMetricsFilePrefix = filePathPrefix
 	for i := range p.mounts {
 		p.mounts[i].EnableCsvMetrics(filePathPrefix)
-		p.mounts[i].cfg.CsvMetricsFilePrefix = filePathPrefix
-		p.mounts[i].metrics = p.root.metrics
 	}
 }
 

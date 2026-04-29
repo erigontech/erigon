@@ -2972,6 +2972,7 @@ func (hph *HexPatriciaHashed) SetCapture(capture []string) { hph.capture = captu
 
 func (hph *HexPatriciaHashed) EnableCsvMetrics(filePathPrefix string) {
 	hph.metrics.EnableCsvMetrics(filePathPrefix)
+	hph.cfg.CsvMetricsFilePrefix = filePathPrefix
 }
 
 func (hph *HexPatriciaHashed) Variant() TrieVariant { return VariantHexPatriciaTrie }
