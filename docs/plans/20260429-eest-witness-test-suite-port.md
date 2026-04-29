@@ -94,11 +94,11 @@
 
 ### Task 6: Run witness test suite
 
-- [ ] Initialize submodule: `git submodule update --init execution/tests/execution-spec-tests`
-- [ ] Fetch LFS fixtures: `cd execution/tests/execution-spec-tests && git lfs pull --include='blockchain_tests_zkevm/**/*.json'`
-- [ ] Run test suite: `go test -count=1 -v -run TestExecutionSpecWitness ./execution/tests/eest_zkevm_witness/...`
-- [ ] Verify all 93 fixtures run and pass (via expected-failure annotations)
-- [ ] Document any deviations from expected results with ⚠️
+- [x] Initialize submodule: `git submodule update --init execution/tests/execution-spec-tests`
+- [x] Fetch LFS fixtures: fixtures already checked out as real JSON (git-lfs not needed)
+- [x] Run test suite: `go test -count=1 -v -run TestExecutionSpecWitness ./execution/tests/eest_zkevm_witness/...`
+- [x] Verify all 93 fixtures run and pass (via expected-failure annotations) — 176 subtests, 0 failures
+- [x] No deviations from expected results
 
 ### Task 7: [Final] Move plan to completed
 
