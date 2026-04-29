@@ -41,8 +41,8 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/stagedsync/headerdownload"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/debug"
@@ -265,7 +265,7 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 
 	// Compare the imported chain's total difficulty against the current canonical
 	// head's via the same PoW fork-choice rule as the legacy header sync
-	// (headerdownload.ShouldReorg). If the imported chain doesn't win, persist
+	// (ethash.ShouldReorg). If the imported chain doesn't win, persist
 	// the blocks as a side chain (without changing head or executing them), so
 	// future imports extending this branch can still be validated. Once a
 	// side-chain extension surpasses the canonical TD, the regular
@@ -316,7 +316,7 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 		for _, b := range chain.Blocks {
 			importedTipTd.Add(importedTipTd, b.Header().Difficulty.ToBig())
 		}
-		if !headerdownload.ShouldReorg(currentHeadTd, currentHeadNumber, currentHeadHash, importedTipTd, tipBlock.NumberU64(), tipBlock.Hash()) {
+		if !ethash.ShouldReorg(currentHeadTd, currentHeadNumber, currentHeadHash, importedTipTd, tipBlock.NumberU64(), tipBlock.Hash()) {
 			// Side chain — write headers/bodies/TDs directly without executing
 			// or changing head.
 			return ethereum.ChainDB().Update(ctx, func(tx kv.RwTx) error {

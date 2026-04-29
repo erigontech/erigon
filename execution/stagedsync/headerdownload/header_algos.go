@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/metrics"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/dataflow"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -913,28 +914,6 @@ func (hi *HeaderInserter) ForkingPoint(db kv.StatelessRwTx, header, parent *type
 	return
 }
 
-// ShouldReorg reports whether a candidate header should replace the current
-// canonical head per PoW total-difficulty fork choice.
-//
-// The new chain wins if its total difficulty is strictly higher. On equal
-// total difficulty, the shorter chain wins (smaller block height); on equal
-// total difficulty AND equal height, the lexicographically larger block hash
-// wins. This matches geth's tie-break — see
-// https://github.com/maticnetwork/bor/blob/master/core/forkchoice.go#L81.
-//
-// Both the legacy header sync (FeedHeaderPoW) and the offline import command
-// (cmd/utils/app/import_cmd.go) consult this so PoW canonical-chain selection
-// is identical along both code paths.
-func ShouldReorg(localTd *big.Int, localHeight uint64, localHash common.Hash, newTd *big.Int, newHeight uint64, newHash common.Hash) bool {
-	if cmp := newTd.Cmp(localTd); cmp != 0 {
-		return cmp > 0
-	}
-	if newHeight != localHeight {
-		return newHeight < localHeight
-	}
-	return bytes.Compare(localHash.Bytes(), newHash.Bytes()) < 0
-}
-
 func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader services.HeaderReader, header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64) (td *big.Int, err error) {
 	if hash == hi.prevHash {
 		// Skip duplicates
@@ -967,7 +946,7 @@ func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader servic
 
 	// Now we can decide whether this header will create a change in the canonical head
 	// TODO: Add bor check here if required
-	if ShouldReorg(hi.localTd, hi.highest, hi.highestHash, td, blockHeight, hash) {
+	if ethash.ShouldReorg(hi.localTd, hi.highest, hi.highestHash, td, blockHeight, hash) {
 		hi.newCanonical = true
 		forkingPoint, err := hi.ForkingPoint(db, header, parent)
 		if err != nil {

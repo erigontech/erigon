@@ -116,40 +116,6 @@ func TestSideChainInsert(t *testing.T) {
 	}
 }
 
-func TestShouldReorg(t *testing.T) {
-	t.Parallel()
-
-	// Two distinct hashes ordered so hashLow < hashHigh (lex byte compare).
-	hashLow := common.Hash{0x01}
-	hashHigh := common.Hash{0x02}
-
-	tests := []struct {
-		name        string
-		localTd     int64
-		localHeight uint64
-		localHash   common.Hash
-		newTd       int64
-		newHeight   uint64
-		newHash     common.Hash
-		want        bool
-	}{
-		{"new TD strictly higher", 100, 5, hashLow, 101, 5, hashLow, true},
-		{"new TD strictly lower", 100, 5, hashLow, 99, 5, hashLow, false},
-		{"equal TD, new height shallower", 100, 10, hashLow, 100, 5, hashHigh, true},
-		{"equal TD, new height deeper", 100, 5, hashLow, 100, 10, hashHigh, false},
-		{"equal TD, equal height, new hash larger", 100, 5, hashLow, 100, 5, hashHigh, true},
-		{"equal TD, equal height, new hash smaller", 100, 5, hashHigh, 100, 5, hashLow, false},
-		{"equal TD, equal height, equal hash", 100, 5, hashLow, 100, 5, hashLow, false},
-	}
-	for _, tc := range tests {
-		got := headerdownload.ShouldReorg(big.NewInt(tc.localTd), tc.localHeight, tc.localHash,
-			big.NewInt(tc.newTd), tc.newHeight, tc.newHash)
-		if got != tc.want {
-			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
-		}
-	}
-}
-
 func createTestChain(length uint64, parent common.Hash, diff uint64, extra []byte) []*types.Header {
 	var (
 		i       uint64
