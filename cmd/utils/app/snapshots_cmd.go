@@ -1719,7 +1719,7 @@ func stateProgress(ctx context.Context, db kv.TemporalRoDB, txNumsReader rawdbv3
 func findBlockNumByTxNum(ctx context.Context, tx kv.Tx, txNumsReader rawdbv3.TxNumsReader, txNum uint64) (uint64, error) {
 	blockNum, ok, err := txNumsReader.FindBlockNum(ctx, tx, txNum)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("find block num for tx num %d: %w", txNum, err)
 	}
 	if ok {
 		return blockNum, nil
@@ -1727,11 +1727,11 @@ func findBlockNumByTxNum(ctx context.Context, tx kv.Tx, txNumsReader rawdbv3.TxN
 
 	firstBlockNum, firstTxNum, err := txNumsReader.First(tx)
 	if err != nil {
-		return 0, fmt.Errorf("find block num for tx num %d: not found; read first txnum index bound: %w", txNum, err)
+		return 0, fmt.Errorf("find block num for tx num %d: not found; read txnum index lower bound: %w", txNum, err)
 	}
 	lastBlockNum, lastTxNum, err := txNumsReader.Last(tx)
 	if err != nil {
-		return 0, fmt.Errorf("find block num for tx num %d: not found; read last txnum index bound: %w", txNum, err)
+		return 0, fmt.Errorf("find block num for tx num %d: not found; read txnum index upper bound: %w", txNum, err)
 	}
 	return 0, fmt.Errorf(
 		"find block num for tx num %d: not found (txnum index bounds: first block=%d txnum=%d, last block=%d txnum=%d)",
