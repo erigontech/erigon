@@ -111,26 +111,31 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	var versionedHashes []common.Hash
 	if newPayload && f.engine != nil && block.Version() >= clparams.DenebVersion {
 		versionedHashes = []common.Hash{}
-		solid.RangeErr[*cltypes.KZGCommitment](block.Block.Body.BlobKzgCommitments, func(i1 int, k *cltypes.KZGCommitment, i2 int) error {
+		if err := solid.RangeErr[*cltypes.KZGCommitment](block.Block.Body.BlobKzgCommitments, func(i1 int, k *cltypes.KZGCommitment, i2 int) error {
 			versionedHash, err := utils.KzgCommitmentToVersionedHash(common.Bytes48(*k))
 			if err != nil {
 				return err
 			}
 			versionedHashes = append(versionedHashes, versionedHash)
 			return nil
-		})
+		}); err != nil {
+			return err
+		}
 	}
 
 	elHasBlobs := false
-	if f.engine != nil && checkDataAvaiability && block.Block.Body.BlobKzgCommitments.Len() > 0 && !f.peerDas.IsArchivedMode() {
-		blobsWithProof, proofs := f.engine.GetBlobs(ctx, versionedHashes)
-		elHasBlobs = len(blobsWithProof) == len(versionedHashes) && len(proofs) == len(versionedHashes)
+	if f.engine != nil && f.peerDas != nil && checkDataAvaiability && block.Block.Body.BlobKzgCommitments.Len() > 0 && !f.peerDas.IsArchivedMode() {
+		blobsWithProof, proofs, err := f.engine.GetBlobs(ctx, versionedHashes, block.Version())
+		if err != nil {
+			log.Warn("OnBlock: GetBlobs failed", "blockRoot", common.Hash(blockRoot), "err", err)
+		}
+		elHasBlobs = err == nil && len(blobsWithProof) == len(versionedHashes) && len(proofs) == len(versionedHashes)
 		log.Debug("OnBlock: EL blob data availability", "blockRoot", common.Hash(blockRoot), "elHasBlobs", elHasBlobs)
 	}
 
 	// Check if blob data is available (skip if blobs are in txpool)
 	if checkDataAvaiability && block.Block.Body.BlobKzgCommitments.Len() > 0 && !elHasBlobs {
-		if block.Version() >= clparams.FuluVersion {
+		if block.Version() >= clparams.FuluVersion && f.peerDas != nil {
 			available, err := f.peerDas.IsDataAvailable(block.Block.Slot, blockRoot)
 			if err != nil {
 				return err
@@ -157,9 +162,12 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		}
 	}
 
-	var executionRequestsList []hexutil.Bytes = nil
+	var executionRequestsList []hexutil.Bytes
 	if block.Version() >= clparams.ElectraVersion {
 		executionRequestsList = block.Block.Body.GetExecutionRequestsList()
+		if executionRequestsList == nil {
+			executionRequestsList = []hexutil.Bytes{}
+		}
 	}
 
 	isVerifiedExecutionPayload := f.verifiedExecutionPayload.Contains(blockRoot)
@@ -205,12 +213,20 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		}
 	}
 	log.Trace("OnBlock: engine", "elapsed", time.Since(startEngine))
+	// Update highestSeen early so aggregate/attestation acceptance uses the
+	// latest slot even if AddChainSegment returns PreValidated.
+	if block.Block.Slot > f.highestSeen.Load() {
+		f.highestSeen.Store(block.Block.Slot)
+	}
 	startStateProcess := time.Now()
 	lastProcessedState, status, err := f.forkGraph.AddChainSegment(block, fullValidation)
 	if err != nil {
 		return err
 	}
 	monitor.ObserveFullBlockProcessingTime(startStateProcess)
+	if status != fork_graph.Success {
+		log.Debug("[OnBlock] AddChainSegment non-success", "status", status.String(), "slot", block.Block.Slot)
+	}
 	switch status {
 	case fork_graph.PreValidated:
 		return nil
@@ -225,10 +241,10 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	if block.Block.Body.ExecutionPayload != nil {
 		f.eth2Roots.Add(blockRoot, block.Block.Body.ExecutionPayload.BlockHash)
 	}
+	// Note: highestSeen was already updated before AddChainSegment (line ~216)
+	// so aggregates/attestations for this slot are accepted promptly. No second
+	// update needed here.
 
-	if block.Block.Slot > f.highestSeen.Load() {
-		f.highestSeen.Store(block.Block.Slot)
-	}
 	// Remove the parent from the head set
 	delete(f.headSet, block.Block.ParentRoot)
 	f.headSet[blockRoot] = struct{}{}
@@ -290,6 +306,9 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	if err := statechange.ProcessJustificationBitsAndFinality(lastProcessedState, nil); err != nil {
 		return err
 	}
+	// Store per-block unrealized checkpoints (spec: store.unrealized_justifications[block_root])
+	f.unrealizedJustifications.Store(common.Hash(blockRoot), lastProcessedState.CurrentJustifiedCheckpoint())
+	f.unrealizedFinalizations.Store(common.Hash(blockRoot), lastProcessedState.FinalizedCheckpoint())
 	f.updateUnrealizedCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint(), lastProcessedState.FinalizedCheckpoint())
 	// Set the changed value pre-simulation
 	lastProcessedState.SetPreviousJustifiedCheckpoint(previousJustifiedCheckpoint)
@@ -313,10 +332,12 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		log.Debug("OnBlock", "elapsed", time.Since(start), "slot", block.Block.Slot)
 	}
 
-	if connectedValidators := f.localValidators.GetValidators(); len(connectedValidators) > 0 {
-		// update the custody requirement whenever we see a new block
-		custodyRequirement := state.GetValidatorsCustodyRequirement(lastProcessedState, connectedValidators)
-		f.peerDas.UpdateValidatorsCustody(custodyRequirement)
+	if f.peerDas != nil {
+		if connectedValidators := f.localValidators.GetValidators(); len(connectedValidators) > 0 {
+			// update the custody requirement whenever we see a new block
+			custodyRequirement := state.GetValidatorsCustodyRequirement(lastProcessedState, connectedValidators)
+			f.peerDas.UpdateValidatorsCustody(custodyRequirement)
+		}
 	}
 	return nil
 }

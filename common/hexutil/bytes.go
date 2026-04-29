@@ -28,12 +28,13 @@ var bytesT = reflect.TypeFor[Bytes]()
 // The empty slice marshals as "0x".
 type Bytes []byte
 
-const hexPrefix = `0x`
+// HexPrefix is the "0x" prefix used by all hex-encoded Ethereum values.
+const HexPrefix = `0x`
 
 // MarshalText implements encoding.TextMarshaler
 func (b Bytes) MarshalText() ([]byte, error) {
 	result := make([]byte, len(b)*2+2)
-	copy(result, hexPrefix)
+	copy(result, HexPrefix)
 	hex.Encode(result[2:], b)
 	return result, nil
 }

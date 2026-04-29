@@ -12,9 +12,6 @@ on:
       - reopened
       - synchronize
       - ready_for_review
-  push:
-    branches:
-      - 'release/**'
   merge_group:
   workflow_dispatch:
 
@@ -28,6 +25,13 @@ concurrency:
       format('{0}-{1}', github.workflow, github.run_id)
     }}
   cancel-in-progress: true
+
+# actions: write lets merge-queue runs call `gh run cancel` on a leaf
+# failure so the gate doesn't stall waiting for still-running siblings.
+# Reusable leaves inherit these from the caller.
+permissions:
+  actions: write
+  contents: read
 
 jobs:
   lint:
@@ -75,6 +79,9 @@ jobs:
     secrets: inherit
 
   sonar:
+    # SONAR_TOKEN is a repo secret unavailable to fork PRs, so skip the scan
+    # for external contributions to avoid a guaranteed failure in ci-gate.
+    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
     uses: ./.github/workflows/sonar.yml
     secrets: inherit
 

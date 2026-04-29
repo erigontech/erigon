@@ -11,7 +11,7 @@ import (
 type aggDirtyFilesRoTx struct {
 	agg    *Aggregator
 	domain []*domainDirtyFilesRoTx
-	ii     []*iiDirtyFilesRoTx
+	ii     [kv.StandaloneIdxLen]*iiDirtyFilesRoTx
 }
 
 type domainDirtyFilesRoTx struct {
@@ -35,7 +35,6 @@ func (a *Aggregator) DebugBeginDirtyFilesRo() *aggDirtyFilesRoTx {
 	ac := &aggDirtyFilesRoTx{
 		agg:    a,
 		domain: make([]*domainDirtyFilesRoTx, len(a.d)),
-		ii:     make([]*iiDirtyFilesRoTx, len(a.iis)),
 	}
 
 	a.dirtyFilesLock.Lock()
@@ -44,8 +43,8 @@ func (a *Aggregator) DebugBeginDirtyFilesRo() *aggDirtyFilesRoTx {
 		ac.domain[i] = d.DebugBeginDirtyFilesRo()
 	}
 
-	for i, ii := range a.iis {
-		ac.ii[i] = ii.DebugBeginDirtyFilesRo()
+	for i := 0; i < a.iisCount; i++ {
+		ac.ii[i] = a.iis[i].DebugBeginDirtyFilesRo()
 	}
 
 	return ac
@@ -64,6 +63,9 @@ func (ac *aggDirtyFilesRoTx) MadvNormal() *aggDirtyFilesRoTx {
 		}
 	}
 	for _, ii := range ac.ii {
+		if ii == nil {
+			continue
+		}
 		for _, f := range ii.files {
 			f.MadvNormal()
 		}
@@ -83,6 +85,9 @@ func (ac *aggDirtyFilesRoTx) DisableReadAhead() {
 		}
 	}
 	for _, ii := range ac.ii {
+		if ii == nil {
+			continue
+		}
 		for _, f := range ii.files {
 			f.DisableReadAhead()
 		}
@@ -100,6 +105,9 @@ func (ac *aggDirtyFilesRoTx) FilesWithMissedAccessors() (mf *MissedAccessorAggFi
 		mf.domain[d.d.Name] = d.filesWithMissedAccessors(domainDL, accessorDL)
 	}
 	for _, ii := range ac.ii {
+		if ii == nil {
+			continue
+		}
 		mf.ii[ii.ii.Name] = ii.filesWithMissedAccessors(accessorDL)
 	}
 	return
@@ -114,11 +122,14 @@ func (ac *aggDirtyFilesRoTx) Close() {
 	}
 
 	for _, ii := range ac.ii {
+		if ii == nil {
+			continue
+		}
 		ii.Close()
 	}
 	ac.agg = nil
 	ac.domain = nil
-	ac.ii = nil
+	ac.ii = [kv.StandaloneIdxLen]*iiDirtyFilesRoTx{}
 }
 
 func (d *Domain) DebugBeginDirtyFilesRo() *domainDirtyFilesRoTx {
@@ -353,9 +364,9 @@ func (m *MissedAccessorIIFiles) IsEmpty() bool {
 func (at *AggregatorRoTx) DbgDomain(idx kv.Domain) *DomainRoTx         { return at.d[idx] }
 func (at *AggregatorRoTx) DbgII(idx kv.InvertedIdx) *InvertedIndexRoTx { return at.searchII(idx) }
 func (at *AggregatorRoTx) searchII(idx kv.InvertedIdx) *InvertedIndexRoTx {
-	for _, iit := range at.iis {
-		if iit.name == idx {
-			return iit
+	for i := 0; i < at.iisCount; i++ {
+		if at.iis[i].name == idx {
+			return at.iis[i]
 		}
 	}
 	return nil
