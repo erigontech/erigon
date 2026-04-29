@@ -26,7 +26,7 @@ Flags are passed directly to the `erigon` binary at startup. Each flag starts wi
 ./build/bin/erigon --chain=holesky --datadir=/data/erigon --http --http.port=8545
 ```
 
-Flags can be combined freely. Here's a breakdown of some of the flags:
+Flags can be combined freely, providing a high degree of customization. Here's a breakdown of some of the flags:
 
 ### General Options
 
