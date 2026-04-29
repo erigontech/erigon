@@ -1152,6 +1152,9 @@ func (e *EngineServer) HandleForkChoice(
 	if status == execmodule.ExecutionStatusInvalidForkchoice {
 		return nil, &engine_helpers.InvalidForkchoiceStateErr
 	}
+	if status == execmodule.ExecutionStatusReorgTooDeep {
+		return nil, &engine_helpers.ReorgTooDeepErr
+	}
 	if status == execmodule.ExecutionStatusBusy {
 		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 	}
