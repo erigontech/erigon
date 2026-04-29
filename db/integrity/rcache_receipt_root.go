@@ -143,6 +143,7 @@ func ReceiptRootIntegrityRange(ctx context.Context, fromBlock, toBlock uint64, d
 		}
 
 		if r != nil {
+			r.Bloom = types.CreateBloom(types.Receipts{r})
 			receipts = append(receipts, r)
 		}
 
