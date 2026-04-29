@@ -18,6 +18,7 @@ package etl
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -75,6 +76,17 @@ type Collector struct {
 	sortAndFlushInBackgroundActive atomic.Bool // allow only 1 bg sort per Collector
 
 	allocator *Allocator
+
+	warmupDB     kv.RoDB
+	warmupTbl    string
+	warmupCancel context.CancelFunc
+	warmupWg     sync.WaitGroup
+}
+
+func (c *Collector) WithWarmup(db kv.RoDB, table string) *Collector {
+	c.warmupDB = db
+	c.warmupTbl = table
+	return c
 }
 
 func NewCollectorWithAllocator(logPrefix, tmpdir string, allocator *Allocator, logger log.Logger) *Collector {
@@ -126,6 +138,13 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 		provider := KeepInRAM(c.buf)
 		c.allFlushed = true
 		c.dataProviders = append(c.dataProviders, provider)
+		if c.warmupDB != nil && c.buf.Len() > 100 {
+			ctx, cancel := context.WithCancel(context.Background())
+			c.warmupCancel = cancel
+			buf := c.buf
+			c.warmupWg.Add(1)
+			go func() { defer c.warmupWg.Done(); warmupSortedBuffer(ctx, c.warmupDB, c.warmupTbl, buf) }()
+		}
 		return nil
 	}
 
@@ -149,7 +168,7 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 		c.buf = getBufferByType(c.bufType, datasize.ByteSize(fullBuf.SizeLimit()))
 		c.buf.Prealloc(prevLen/8, prevSize/8)
 	}
-	provider, err := FlushToDiskAsync(c.logPrefix, fullBuf, c.tmpdir, c.logLvl, c.allocator, &c.sortAndFlushInBackgroundActive)
+	provider, err := FlushToDiskAsync(c.logPrefix, fullBuf, c.tmpdir, c.logLvl, c.allocator, &c.sortAndFlushInBackgroundActive, c.warmupDB, c.warmupTbl)
 	if err != nil {
 		return err
 	}
@@ -180,6 +199,8 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 			return e
 		}
 	}
+
+	defer c.stopWarmup()
 
 	bucket := toBucket
 
@@ -260,7 +281,16 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	return nil
 }
 
+func (c *Collector) stopWarmup() {
+	if c.warmupCancel != nil {
+		c.warmupCancel()
+		c.warmupWg.Wait()
+		c.warmupCancel = nil
+	}
+}
+
 func (c *Collector) Close() {
+	c.stopWarmup()
 	if c.buf != nil { //idempotency
 		if c.allocator != nil {
 			c.allocator.Put(c.buf)

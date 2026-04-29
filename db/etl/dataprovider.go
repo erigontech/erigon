@@ -18,13 +18,17 @@ package etl
 
 import (
 	"bufio"
+	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/errgroup"
@@ -32,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mmap"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 type dataProvider interface {
@@ -56,7 +61,7 @@ type mmapBytesReader struct {
 }
 
 // FlushToDiskAsync - `doFsync` is true only for 'critical' collectors (which should not loose).
-func FlushToDiskAsync(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl, allocator *Allocator, inProgress *atomic.Bool) (dataProvider, error) {
+func FlushToDiskAsync(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl, allocator *Allocator, inProgress *atomic.Bool, warmupDB kv.RoDB, warmupTbl string) (dataProvider, error) {
 	if b.Len() == 0 {
 		if allocator != nil {
 			allocator.Put(b)
@@ -78,10 +83,59 @@ func FlushToDiskAsync(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl, al
 		}
 		_, fName := filepath.Split(provider.file.Name())
 		log.Log(lvl, fmt.Sprintf("[%s] Flushed buffer file", logPrefix), "name", fName)
+
+		if warmupDB != nil {
+			warmupSortedBuffer(context.Background(), warmupDB, warmupTbl, b)
+		}
 		return nil
 	})
 
 	return provider, nil
+}
+
+func warmupSortedBuffer(ctx context.Context, db kv.RoDB, table string, b Buffer) {
+	n := b.Len()
+	if n <= 100 {
+		return
+	}
+	t := time.Now()
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	workers := min(runtime.NumCPU(), 4)
+	chunkSize := (n + workers - 1) / workers
+
+	var wg sync.WaitGroup
+	for w := range workers {
+		from := w * chunkSize
+		if from >= n {
+			break
+		}
+		startKey, _ := b.Get(from)
+		endKey, _ := b.Get(min(from+chunkSize, n) - 1)
+		wg.Add(1)
+		go func(startKey, endKey []byte) {
+			defer wg.Done()
+			roTx, err := db.BeginRo(ctx)
+			if err != nil {
+				return
+			}
+			defer roTx.Rollback()
+			cursor, err := roTx.Cursor(table)
+			if err != nil {
+				return
+			}
+			defer cursor.Close()
+			k, _, err := cursor.Seek(startKey)
+			for ; err == nil && k != nil && bytes.Compare(k, endKey) <= 0; k, _, err = cursor.Next() {
+				if ctx.Err() != nil {
+					return
+				}
+			}
+		}(startKey, endKey)
+	}
+	wg.Wait()
+	log.Debug("[etl] warmup", "table", table, "keys", n, "took", time.Since(t))
 }
 
 // FlushToDisk - `doFsync` is true only for 'critical' collectors (which should not loose).

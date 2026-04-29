@@ -1531,3 +1531,29 @@ func TestVmtouchMmap(t *testing.T) {
 	}
 	vmtouch("AFTER full scan")
 }
+
+func TestCollectorWithWarmup(t *testing.T) {
+	logger := log.New()
+	db, tx := memdb.NewTestTx(t)
+	bucket := kv.ChaindataTables[0]
+
+	generateTestData(t, tx, bucket, 50)
+
+	collector := NewCollector(t.Name(), t.TempDir(), NewSortableBuffer(datasize.MB), logger)
+	defer collector.Close()
+	collector.WithWarmup(db, bucket)
+
+	for i := 0; i < 50; i++ {
+		k := fmt.Appendf(nil, "%10d-key-%010d", i, i)
+		v := fmt.Appendf(nil, "val-%099d", i)
+		require.NoError(t, collector.Collect(k, v))
+	}
+
+	loaded := 0
+	err := collector.Load(tx, bucket, func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error {
+		loaded++
+		return next(k, k, v)
+	}, TransformArgs{})
+	require.NoError(t, err)
+	require.Equal(t, 50, loaded)
+}
