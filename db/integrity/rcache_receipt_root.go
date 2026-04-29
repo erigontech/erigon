@@ -24,12 +24,18 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 )
 
 // CheckReceiptRootIntegrity verifies that receipts from RCache domain produce
 // receipt roots matching block headers for a range of blocks with sampling.
-func CheckReceiptRootIntegrity(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
+//
+// Pre-Byzantium blocks are skipped: their consensus receipt encoding includes
+// the 32-byte intermediate state root (PostState), which Erigon does not
+// compute or persist at execution time, so RCache cannot reconstruct the
+// canonical receipt root for those blocks.
+func CheckReceiptRootIntegrity(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, blockReader services.FullBlockReader, cc *chain.Config, failFast bool) (err error) {
 	defer func() {
 		log.Info("[integrity] ReceiptRootIntegrity: done", "err", err)
 	}()
@@ -42,17 +48,24 @@ func CheckReceiptRootIntegrity(ctx context.Context, sc SamplerCfg, db kv.Tempora
 	}
 	defer tx.Rollback()
 
-	_ = txNumsReader
+	rcacheDomainProgress := tx.Debug().DomainProgress(kv.RCacheDomain)
+	fromBlock := uint64(1)
+	if cc.ByzantiumBlock != nil && *cc.ByzantiumBlock > fromBlock {
+		fromBlock = *cc.ByzantiumBlock
+	}
+	toBlock, _, _ := txNumsReader.FindBlockNum(ctx, tx, rcacheDomainProgress)
+
 	if err := ValidateDomainProgress(ctx, db, kv.RCacheDomain, txNumsReader); err != nil {
 		return err
 	}
 
-	// debug: focus on a single failing block, skip parallel chunking.
-	fromBlock := uint64(49401)
-	toBlock := uint64(49401)
-	log.Info("[integrity] ReceiptRootIntegrity starting (debug single-block)", "fromBlock", fromBlock, "toBlock", toBlock)
-	_ = sc
-	return ReceiptRootIntegrityRange(ctx, fromBlock, toBlock, db, blockReader, failFast)
+	if fromBlock > toBlock {
+		log.Info("[integrity] ReceiptRootIntegrity skipped (no post-Byzantium blocks in RCache)", "byzantium", fromBlock, "rcacheTip", toBlock)
+		return nil
+	}
+	log.Info("[integrity] ReceiptRootIntegrity starting", "fromBlock", fromBlock, "toBlock", toBlock)
+
+	return parallelChunkCheck(ctx, sc.NewSampler(), fromBlock, toBlock, db, blockReader, failFast, string(ReceiptRootIntegrity), ReceiptRootIntegrityRange)
 }
 
 // ReceiptRootIntegrityRange verifies receipt roots for a range of blocks.
@@ -104,21 +117,6 @@ func ReceiptRootIntegrityRange(ctx context.Context, fromBlock, toBlock uint64, d
 	verifyAndAdvance := func() error {
 		computedRoot := types.DeriveSha(receipts)
 		if computedRoot != header.ReceiptHash {
-			if blockNum == 49401 {
-				log.Warn("[integrity] ReceiptRootIntegrity dump",
-					"block", blockNum, "numReceipts", len(receipts),
-					"computed", computedRoot, "header", header.ReceiptHash,
-					"headerTxRoot", header.TxHash)
-				for i, r := range receipts {
-					log.Warn("[integrity] receipt",
-						"block", blockNum, "i", i,
-						"type", r.Type, "txIdx", r.TransactionIndex,
-						"status", r.Status, "postStateLen", len(r.PostState),
-						"cumGas", r.CumulativeGasUsed, "gasUsed", r.GasUsed,
-						"numLogs", len(r.Logs), "firstLogIdx", r.FirstLogIndexWithinBlock,
-						"bloomZero", r.Bloom == (types.Bloom{}))
-				}
-			}
 			mismatch := fmt.Errorf("%w: ReceiptRootIntegrity: receipt root mismatch at block %d: computed=%s, header=%s",
 				ErrIntegrity, blockNum, computedRoot, header.ReceiptHash)
 			if failFast {

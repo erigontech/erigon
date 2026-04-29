@@ -1601,7 +1601,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 		case integrity.RCacheNoDups:
 			return integrity.CheckRCacheNoDups(ctx, sc, db, blockReader, failFast)
 		case integrity.ReceiptRootIntegrity:
-			return integrity.CheckReceiptRootIntegrity(ctx, sc, db, blockReader, failFast)
+			return integrity.CheckReceiptRootIntegrity(ctx, sc, db, blockReader, chainConfig, failFast)
 		case integrity.CommitmentRoot:
 			return integrity.CheckCommitmentRoot(ctx, db, blockReader, failFast, logger)
 		case integrity.CommitmentKvi:
