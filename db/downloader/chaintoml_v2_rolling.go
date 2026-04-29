@@ -28,6 +28,7 @@ package downloader
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -120,8 +121,28 @@ type RollingV2Publisher struct {
 	downloader  *Downloader
 	maxRetained int
 
-	mu      sync.Mutex
-	history []uint64 // chronological, oldest first; capped at maxRetained
+	mu               sync.Mutex
+	history          []uint64 // chronological, oldest first; capped at maxRetained
+	delegationSource DelegationSource
+}
+
+// DelegationSource yields the snapshotauth UCAN attestation bytes (canonical
+// CBOR) that should be paired with the next published V2 manifest. Returning
+// (nil, nil) means "no delegation this generation" — Publish() writes the V2
+// without a UCAN sidecar and leaves UCANHash empty. An error aborts Publish.
+//
+// The source is consulted on every Publish() call so operators can rotate
+// delegations without restarting the publisher (e.g. when the operator's
+// signing key gets rolled).
+type DelegationSource func() ([]byte, error)
+
+// SetDelegationSource configures the publisher to write a paired
+// chain.ucan.<seq>.bin alongside each chain.v2.<seq>.toml. Pass nil to
+// clear (V2-only publication).
+func (r *RollingV2Publisher) SetDelegationSource(src DelegationSource) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.delegationSource = src
 }
 
 // NewRollingV2Publisher constructs a publisher for snapDir. Discovers
@@ -168,6 +189,13 @@ func NewRollingV2Publisher(snapDir string, torrentFS *AtomicTorrentFS, dl *Downl
 // trims the oldest retained generation if history is over cap.
 // enrUpdater receives the new generation's infohash.
 //
+// When a DelegationSource is configured, Publish ALSO writes
+// chain.ucan.<seq>.bin (the snapshotauth attestation paired with this
+// generation) and stamps the V2 manifest's UCANHash field with the
+// UCAN torrent's infohash so consumers can fetch the sidecar by that
+// hash. The pair is registered, evicted, and cleaned up together —
+// they are one logical generation on disk.
+//
 // On error, partial state is best-effort cleaned up (file written may
 // stay; .torrent may be missing) — the caller should inspect snapDir
 // state if precision matters. The returned hash is non-zero on success.
@@ -191,7 +219,39 @@ func (r *RollingV2Publisher) Publish(
 	name := ChainTomlV2FileNameForSeq(nextSeq)
 	path := filepath.Join(r.snapDir, name)
 
+	// Write the UCAN sidecar first if a delegation source is wired.
+	// Its infohash is embedded in the V2 manifest, so the V2 must be
+	// generated AFTER the UCAN torrent exists.
+	var ucanHashHex string
+	if r.delegationSource != nil {
+		ucanBytes, err := r.delegationSource()
+		if err != nil {
+			return metainfo.Hash{}, fmt.Errorf("delegation source: %w", err)
+		}
+		if len(ucanBytes) > 0 {
+			ucanName := ChainUCANFileNameForSeq(nextSeq)
+			ucanPath := filepath.Join(r.snapDir, ucanName)
+			if err := saveChainTomlFile(ucanPath, ucanBytes); err != nil {
+				return metainfo.Hash{}, fmt.Errorf("save %s: %w", ucanName, err)
+			}
+			if _, err := BuildTorrentIfNeed(ctx, ucanName, r.snapDir, r.torrentFS); err != nil {
+				return metainfo.Hash{}, fmt.Errorf("build %s.torrent: %w", ucanName, err)
+			}
+			ucanSpec, err := r.torrentFS.LoadByName(ucanName + ".torrent")
+			if err != nil {
+				return metainfo.Hash{}, fmt.Errorf("load %s.torrent: %w", ucanName, err)
+			}
+			if r.downloader != nil {
+				if err := r.downloader.AddNewSeedableFile(ctx, ucanName); err != nil {
+					return metainfo.Hash{}, fmt.Errorf("seed %s: %w", ucanName, err)
+				}
+			}
+			ucanHashHex = hex.EncodeToString(ucanSpec.InfoHash[:])
+		}
+	}
+
 	manifest := GenerateV2(inv)
+	manifest.UCANHash = ucanHashHex
 	tomlBytes, err := MarshalV2(manifest)
 	if err != nil {
 		return metainfo.Hash{}, fmt.Errorf("marshal %s: %w", name, err)
@@ -234,24 +294,38 @@ func (r *RollingV2Publisher) Publish(
 // evictOldestLocked drops generations from the front of history until
 // len(history) <= maxRetained. Each evicted generation's torrent client
 // registration is dropped and its on-disk data + .torrent files are
-// removed. Caller must hold r.mu.
+// removed — for both the V2 manifest and the paired UCAN sidecar (if
+// one was written). Caller must hold r.mu.
 func (r *RollingV2Publisher) evictOldestLocked() {
 	for len(r.history) > r.maxRetained {
 		oldest := r.history[0]
 		r.history = r.history[1:]
-		oldName := ChainTomlV2FileNameForSeq(oldest)
-		if r.downloader != nil {
-			r.downloader.DropTorrentByName(oldName)
-		}
-		_ = dir.RemoveFile(filepath.Join(r.snapDir, oldName))
-		_ = dir.RemoveFile(filepath.Join(r.snapDir, oldName+".torrent"))
+		r.evictGenerationLocked(oldest)
 	}
 }
 
-// Cleanup removes any chain.v2.<seq>.toml file (and its .torrent) in
-// snapDir whose seq is not in the current history. Useful after a
-// crash mid-publish (file written but seq never reached history) or
-// after maxRetained is reduced. Idempotent.
+// evictGenerationLocked removes the V2 + paired UCAN artefacts for a
+// single seq. UCAN files may not exist (delegation source unset for
+// that generation); RemoveFile on a missing path is a silent no-op.
+// Caller must hold r.mu.
+func (r *RollingV2Publisher) evictGenerationLocked(seq uint64) {
+	tomlName := ChainTomlV2FileNameForSeq(seq)
+	ucanName := ChainUCANFileNameForSeq(seq)
+	if r.downloader != nil {
+		r.downloader.DropTorrentByName(tomlName)
+		r.downloader.DropTorrentByName(ucanName)
+	}
+	_ = dir.RemoveFile(filepath.Join(r.snapDir, tomlName))
+	_ = dir.RemoveFile(filepath.Join(r.snapDir, tomlName+".torrent"))
+	_ = dir.RemoveFile(filepath.Join(r.snapDir, ucanName))
+	_ = dir.RemoveFile(filepath.Join(r.snapDir, ucanName+".torrent"))
+}
+
+// Cleanup removes any chain.v2.<seq>.toml + chain.ucan.<seq>.bin file
+// (and their .torrent sidecars) in snapDir whose seq is not in the
+// current history. Useful after a crash mid-publish (file written but
+// seq never reached history) or after maxRetained is reduced.
+// Idempotent.
 //
 // The current generations stay registered in the torrent client; only
 // orphans are removed.
@@ -272,7 +346,11 @@ func (r *RollingV2Publisher) Cleanup() error {
 		if e.IsDir() {
 			continue
 		}
-		seq, ok := ParseChainTomlV2FileName(e.Name())
+		var seq uint64
+		var ok bool
+		if seq, ok = ParseChainTomlV2FileName(e.Name()); !ok {
+			seq, ok = ParseChainUCANFileName(e.Name())
+		}
 		if !ok {
 			continue
 		}
