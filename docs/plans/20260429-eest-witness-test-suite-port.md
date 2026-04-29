@@ -89,8 +89,8 @@
 
 ### Task 5: Lint and build verification
 
-- [ ] Run `make lint` — fix any issues (run multiple times, linter is non-deterministic)
-- [ ] Run `make erigon integration` — verify build passes
+- [x] Run `make lint` — fix any issues (run multiple times, linter is non-deterministic)
+- [x] Run `make erigon integration` — verify build passes
 
 ### Task 6: Run witness test suite
 
