@@ -166,3 +166,28 @@ func (s *trustState) forgetVerified(peerID string) {
 	defer s.mu.Unlock()
 	delete(s.verifiedUntil, peerID)
 }
+
+// Trusted satisfies the flow.TrustFilter interface so the orchestrator
+// can gate DownloadRequested on the manifest-exchange trust state. A
+// peer is trusted if (a) it has a verified-until entry that has not
+// expired, AND (b) it is not currently blacklisted. Returns false if
+// no trust state is configured (caller should treat that as
+// trust-everyone via a nil filter rather than a non-nil filter that
+// rejects all peers).
+func (p *Provider) Trusted(peerID string) bool {
+	p.mu.Lock()
+	state := p.trustState
+	now := p.nowFn
+	p.mu.Unlock()
+	if state == nil {
+		return false
+	}
+	t := time.Now()
+	if now != nil {
+		t = now()
+	}
+	if state.blacklisted(peerID, t) {
+		return false
+	}
+	return state.trusted(peerID, t)
+}

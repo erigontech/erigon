@@ -114,6 +114,30 @@ type Orchestrator struct {
 	hDownloadComplete     func(DownloadComplete)
 	hDownloadFailed       func(DownloadFailed)
 	hPeerDeparted         func(PeerDeparted)
+
+	// trust gates DownloadRequested publication. Nil means trust-
+	// everyone (default). Set via SetTrust before Start; mid-flight
+	// reconfiguration is not supported.
+	trust TrustFilter
+}
+
+// SetTrust attaches a TrustFilter that gates which peers the
+// orchestrator will route DownloadRequested events to. Must be called
+// before Start. Pass nil to clear (trust-everyone). A non-nil filter
+// is consulted at the entry to every gap-fill request path; manifests
+// from untrusted peers update peerFiles attribution but do not
+// trigger downloads.
+func (o *Orchestrator) SetTrust(t TrustFilter) error {
+	if o == nil {
+		return fmt.Errorf("flow.SetTrust: nil orchestrator")
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.started {
+		return fmt.Errorf("flow.SetTrust: orchestrator already started")
+	}
+	o.trust = t
+	return nil
 }
 
 // queuedBlock is a held-back block-file DownloadRequested that will be
@@ -121,6 +145,21 @@ type Orchestrator struct {
 type queuedBlock struct {
 	entry  *snapshot.FileEntry
 	peerID string
+}
+
+// TrustFilter gates which peers the orchestrator will route
+// DownloadRequested events to. Production wires manifest_exchange's
+// trust state (post-UCAN-verification); tests can use a stub. A nil
+// filter on Orchestrator means trust-everyone — preserves the
+// pre-UCAN behaviour.
+//
+// Trusted is consulted at gap-fill time. If a peer that earlier
+// passed UCAN verification has since fallen out of trust (UCAN
+// expired, or ReverifyOnReconnect cleared the cache on disconnect),
+// the orchestrator skips publishing DownloadRequested even though
+// the peer's prior manifest is still cached in peerFiles.
+type TrustFilter interface {
+	Trusted(peerID string) bool
 }
 
 // peerFileClaim is the orchestrator's per-file-name record of which
@@ -288,11 +327,17 @@ func (o *Orchestrator) requestSimpleGaps(peerEntries []*snapshot.FileEntry, peer
 		return
 	}
 
+	// Always record peer-attribution (informational); skip downstream
+	// only if the trust filter rejects the peer.
 	o.peerMu.Lock()
 	for _, entry := range peerEntries {
 		o.recordPeerClaimLocked(entry, peerID)
 	}
 	o.peerMu.Unlock()
+
+	if o.trust != nil && !o.trust.Trusted(peerID) {
+		return
+	}
 
 	toRequest := make([]*snapshot.FileEntry, 0, len(peerEntries))
 	o.peerMu.Lock()
@@ -341,6 +386,10 @@ func (o *Orchestrator) requestGapsFor(domain snapshot.Domain, peerEntries []*sna
 		o.recordPeerClaimLocked(entry, peerID)
 	}
 	o.peerMu.Unlock()
+
+	if o.trust != nil && !o.trust.Trusted(peerID) {
+		return
+	}
 
 	// First pass: decide which entries to request and mark them pending under
 	// a single lock, so subsequent coverage checks in the same manifest see
@@ -428,6 +477,17 @@ func (o *Orchestrator) fireInitialStateReady() {
 
 	o.bus.Publish(InitialStateReady{StateDomains: domains})
 	for _, qb := range queue {
+		// Defensive re-check: a peer that was trusted at queue time
+		// may have fallen out of trust by drain time (UCAN expired,
+		// peer disconnected with ReverifyOnReconnect=true). Drop the
+		// queued request and clear pending so a future trusted
+		// advertiser of the same file is free to request it.
+		if o.trust != nil && !o.trust.Trusted(qb.peerID) {
+			o.peerMu.Lock()
+			delete(o.pending, qb.entry.Name)
+			o.peerMu.Unlock()
+			continue
+		}
 		o.bus.Publish(DownloadRequested{
 			FileName:  qb.entry.Name,
 			InfoHash:  qb.entry.TorrentHash,
