@@ -13,7 +13,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
-	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash/ethashcfg"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/gasprice/gaspricecfg"
@@ -38,7 +37,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		Whitelist                           map[uint64]common.Hash `toml:"-"`
 		Builder                             buildercfg.BuilderConfig
 		Ethash                              ethashcfg.Config
-		Clique                              chainspec.ConsensusSnapshotConfig
 		Aura                                chain.AuRaConfig
 		TxPool                              txpoolcfg.Config
 		Shutter                             shuttercfg.Config
@@ -78,7 +76,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.Whitelist = c.Whitelist
 	enc.Builder = c.Builder
 	enc.Ethash = c.Ethash
-	enc.Clique = c.Clique
 	enc.Aura = c.Aura
 	enc.TxPool = c.TxPool
 	enc.Shutter = c.Shutter
@@ -122,7 +119,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		Whitelist                           map[uint64]common.Hash `toml:"-"`
 		Builder                             *buildercfg.BuilderConfig
 		Ethash                              *ethashcfg.Config
-		Clique                              *chainspec.ConsensusSnapshotConfig
 		Aura                                *chain.AuRaConfig
 		TxPool                              *txpoolcfg.Config
 		Shutter                             *shuttercfg.Config
@@ -192,9 +188,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.Ethash != nil {
 		c.Ethash = *dec.Ethash
-	}
-	if dec.Clique != nil {
-		c.Clique = *dec.Clique
 	}
 	if dec.Aura != nil {
 		c.Aura = *dec.Aura

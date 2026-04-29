@@ -216,6 +216,9 @@ func (ht *HistoryRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges
 //
 // 0-2,2-3: nothing to merge
 func (iit *InvertedIndexRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *MergeRange {
+	if dbg.NoDeepMergeHistory() {
+		maxSpan = min(maxSpan, 2*iit.stepSize)
+	}
 	var minFound bool
 	var startTxNum, endTxNum uint64
 	for _, item := range iit.files {
@@ -654,15 +657,9 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 		}
 	}
 
-	// In the loop below, the pair `keyBuf=>valBuf` is always 1 item behind `lastKey=>lastVal`.
-	// `lastKey` and `lastVal` are taken from the top of the multi-way merge (assisted by the CursorHeap cp), but not processed right away
-	// instead, the pair from the previous iteration is processed first - `keyBuf=>valBuf`. After that, `keyBuf` and `valBuf` are assigned
-	// to `lastKey` and `lastVal` correspondingly, and the next step of multi-way merge happens. Therefore, after the multi-way merge loop
-	// (when CursorHeap cp is empty), there is a need to process the last pair `keyBuf=>valBuf`, because it was one step behind
-	var keyBuf, valBuf []byte
 	var lastKey, lastVal []byte
 	var seqReader multiencseq.SequenceReader
-	builder := &multiencseq.SequenceBuilder{}
+	var builder multiencseq.SequenceBuilder
 	// sameKeyItems collects all heap items sharing the current key; reused across iterations.
 	var sameKeyItems []*CursorItem
 	// mergeBaseNums and mergeSeqs hold the per-item inputs for MergeSorted in ascending txNum order.
@@ -692,7 +689,18 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 		if err := builder.MergeSorted(&seqReader, startTxNum, mergeBaseNums, mergeSeqs); err != nil {
 			return nil, err
 		}
+		for i := range mergeSeqs { // allow for GC
+			mergeSeqs[i] = nil
+		}
 		lastVal = builder.AppendBytes(lastVal[:0])
+
+		if _, err = write.Write(lastKey); err != nil {
+			return nil, err
+		}
+		if _, err = write.Write(lastVal); err != nil {
+			return nil, err
+		}
+		lastVal = lastVal[:0]
 
 		// Advance each item's reader and return non-exhausted ones to the heap.
 		for _, ci := range sameKeyItems {
@@ -705,29 +713,6 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 		}
 		if i%1024 == 0 {
 			p.Processed.Store(i)
-		}
-		if keyBuf != nil {
-			// fmt.Printf("pput %x->%x\n", keyBuf, valBuf)
-			if _, err = write.Write(keyBuf); err != nil {
-				return nil, err
-			}
-			if _, err = write.Write(valBuf); err != nil {
-				return nil, err
-			}
-		}
-		keyBuf = append(keyBuf[:0], lastKey...)
-		if keyBuf == nil {
-			keyBuf = []byte{}
-		}
-		valBuf = append(valBuf[:0], lastVal...)
-	}
-	if keyBuf != nil { //nolint:govet
-		// fmt.Printf("Put %x->%x\n", keyBuf, valBuf)
-		if _, err = write.Write(keyBuf); err != nil {
-			return nil, err
-		}
-		if _, err = write.Write(valBuf); err != nil {
-			return nil, err
 		}
 	}
 	if err = write.Compress(); err != nil {
@@ -857,8 +842,8 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		// to `lastKey` and `lastVal` correspondingly, and the next step of multi-way merge happens. Therefore, after the multi-way merge loop
 		// (when CursorHeap cp is empty), there is a need to process the last pair `keyBuf=>valBuf`, because it was one step behind
 		var lastKey, valBuf, histKeyBuf []byte
-		seq := &multiencseq.SequenceReader{}
-		ss := &multiencseq.SequenceIterator{}
+		var seq multiencseq.SequenceReader
+		var ss multiencseq.SequenceIterator
 		for cp.Len() > 0 {
 			lastKey = append(lastKey[:0], cp[0].key...)
 			// Advance all the items that have this key (including the top)
@@ -866,7 +851,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				ci1 := heap.Pop(&cp).(*CursorItem)
 
 				seq.Reset(ci1.startTxNum, ci1.val)
-				ss.Reset(seq, 0)
+				ss.Reset(&seq, 0)
 
 				for ss.HasNext() {
 					txNum, err := ss.Next()
@@ -1070,10 +1055,10 @@ func hasCoverVisibleFile(visibleFiles []visibleFile, item *FilesItem) bool {
 
 type Ranges struct {
 	domain        [kv.DomainLen]DomainRanges
-	invertedIndex []*MergeRange
+	invertedIndex [kv.StandaloneIdxLen]*MergeRange
 }
 
-func NewRanges(domain [kv.DomainLen]DomainRanges, invertedIndex []*MergeRange) Ranges {
+func NewRanges(domain [kv.DomainLen]DomainRanges, invertedIndex [kv.StandaloneIdxLen]*MergeRange) Ranges {
 	return Ranges{domain: domain, invertedIndex: invertedIndex}
 }
 
@@ -1102,6 +1087,15 @@ func (r Ranges) any() bool {
 	}
 	for _, ii := range r.invertedIndex {
 		if ii != nil && ii.needMerge {
+			return true
+		}
+	}
+	return false
+}
+
+func (r Ranges) anyDomainValues() bool {
+	for _, d := range &r.domain {
+		if d.values.needMerge {
 			return true
 		}
 	}

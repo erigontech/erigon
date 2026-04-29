@@ -59,6 +59,9 @@
   * [ots](interacting-with-erigon/ots.md)
   * [internal](interacting-with-erigon/internal.md)
   * [gRPC](interacting-with-erigon/grpc.md)
+  * [overlay](interacting-with-erigon/overlay.md)
+  * [parity](interacting-with-erigon/parity.md)
+  * [graphql](interacting-with-erigon/graphql.md)
 
 ## STAKING
 

@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/testutil"
@@ -727,7 +728,7 @@ func TestCreate2CollisionWithEIP7702Delegation(t *testing.T) {
 	// Compute the CREATE2 target address: keccak256(0xff ++ factory ++ salt ++ keccak256(initcode))[12:]
 	salt := uint256.NewInt(0)
 	factoryAddr := common.HexToAddress("0xfac0")
-	create2Addr := types.CreateAddress2(factoryAddr, salt.Bytes32(), accounts.InternCodeHash(crypto.Keccak256Hash(initcode)))
+	create2Addr := types.CreateAddress2(factoryAddr, salt.Bytes32(), accounts.InternCodeHash(crypto.HashData(initcode)))
 	delegatedAddr := accounts.InternAddress(create2Addr)
 
 	// Set an EIP-7702 delegation on the target address (points to some arbitrary empty account).
@@ -829,4 +830,160 @@ func TestCreateCollisionWithEIP7702Delegation(t *testing.T) {
 	val, err := statedb.GetState(factoryAcct, accounts.StorageKey{})
 	require.NoError(t, err)
 	require.True(t, val.IsZero(), "CREATE should have returned 0 (collision), but got %x", val)
+}
+
+// TestGasTracingNoUnderflowOnStateGas verifies that the OnGasChange tracer
+// callback receives correct (non-underflowing) gas values when an opcode
+// charges state gas under EIP-8037 multi-dimensional gas (Amsterdam rules).
+//
+// The bug: the interpreter accumulated both regular and state dynamic gas into
+// a single `cost` variable, then computed `gasCopy - cost` for the tracer
+// callback. Because `gasCopy` only captured regular gas, the subtraction
+// underflowed when state gas was non-zero (e.g. SSTORE creating a new slot).
+func TestGasTracingNoUnderflowOnStateGas(t *testing.T) {
+	t.Parallel()
+
+	// Track all OnGasChange calls and check for underflow.
+	type gasChange struct {
+		oldGas uint64
+		newGas uint64
+		reason tracing.GasChangeReason
+	}
+	var gasChanges []gasChange
+
+	hooks := &tracing.Hooks{
+		OnGasChange: func(old, newGas uint64, reason tracing.GasChangeReason) {
+			gasChanges = append(gasChanges, gasChange{old, newGas, reason})
+			// The key invariant: new gas must never exceed old gas for a
+			// consumption event (GasChangeCallOpCode). A uint64 underflow
+			// would produce a very large value.
+			if reason == tracing.GasChangeCallOpCode && newGas > old {
+				t.Errorf("OnGasChange underflow: old=%d new=%d reason=%s", old, newGas, reason)
+			}
+		},
+	}
+
+	// Build bytecode: SSTORE(slot=0, value=1) then STOP.
+	// Under Amsterdam with an empty slot this triggers state gas.
+	code := []byte{
+		byte(vm.PUSH1), 1, // value = 1
+		byte(vm.PUSH1), 0, // slot = 0
+		byte(vm.SSTORE), // creates new slot -> charges state gas
+		byte(vm.STOP),
+	}
+
+	cfg := &Config{
+		EVMConfig: vm.Config{Tracer: hooks},
+		GasLimit:  10_000_000,
+	}
+
+	_, _, err := Execute(code, nil, cfg, t.TempDir())
+	require.NoError(t, err)
+
+	// Verify we actually observed at least one GasChangeCallOpCode event
+	// (the SSTORE should have triggered it).
+	found := false
+	for _, gc := range gasChanges {
+		if gc.reason == tracing.GasChangeCallOpCode {
+			found = true
+			break
+		}
+	}
+	require.True(t, found, "expected at least one GasChangeCallOpCode event from SSTORE")
+}
+
+// TestSystemCallZeroValueSkipsTransferChecks verifies that a system call
+// (caller = SystemAddress, value = 0) executes successfully without triggering
+// CanTransfer or Transfer balance-change hooks on the caller. It also asserts:
+//   - SYSTEM_ADDRESS was touched and exists after the call (positive check on the
+//     caller-side empty-account creation for Gnosis/AuRa; see PR 5645, Issue 18276).
+//   - SYSTEM_ADDRESS remains an empty account after the call.
+//   - SYSTEM_ADDRESS is absent from the BAL produced by the call's TxIO.
+//   - No balance-change tracer events fire for SYSTEM_ADDRESS as a result of
+//     the zero-value transfer path.
+func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
+	t.Parallel()
+
+	db := testutil.TemporalDB(t)
+	tx, domains := testutil.TemporalTxSD(t, db)
+	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
+
+	systemAddr := params.SystemAddress
+	target := accounts.InternAddress(common.HexToAddress("0xbeef"))
+
+	// Deploy a trivial contract at the target that returns 0x42.
+	statedb.CreateAccount(target, true)
+	statedb.SetCode(target, []byte{
+		byte(vm.PUSH1), 0x42,
+		byte(vm.PUSH1), 0,
+		byte(vm.MSTORE),
+		byte(vm.PUSH1), 32,
+		byte(vm.PUSH1), 0,
+		byte(vm.RETURN),
+	})
+
+	// Track balance-change events on SYSTEM_ADDRESS.
+	type balChange struct {
+		addr   accounts.Address
+		oldBal uint256.Int
+		newBal uint256.Int
+		reason tracing.BalanceChangeReason
+	}
+	var balChanges []balChange
+
+	hooks := &tracing.Hooks{
+		OnBalanceChange: func(addr accounts.Address, prev, newBal uint256.Int, reason tracing.BalanceChangeReason) {
+			if addr == systemAddr {
+				balChanges = append(balChanges, balChange{addr, prev, newBal, reason})
+			}
+		},
+	}
+
+	cfg := &Config{
+		State:     statedb,
+		Origin:    systemAddr,
+		EVMConfig: vm.Config{Tracer: hooks},
+		GasLimit:  10_000_000,
+	}
+	setDefaults(cfg)
+
+	vmenv := NewEnv(cfg)
+	rules := vmenv.ChainRules()
+	statedb.Prepare(rules, systemAddr, cfg.Coinbase, target, vm.ActivePrecompiles(rules), nil, nil)
+
+	ret, _, err := vmenv.Call(
+		systemAddr,
+		target,
+		nil,
+		mdgas.SplitTxnGasLimit(cfg.GasLimit, mdgas.MdGas{}, rules),
+		uint256.Int{}, // value = 0
+		false,
+	)
+	require.NoError(t, err)
+
+	// The contract should have returned 0x42.
+	require.Equal(t, 32, len(ret))
+	require.Equal(t, byte(0x42), ret[31])
+
+	// Positive check: SYSTEM_ADDRESS must exist (Gnosis/AuRa invariant).
+	exists, err := statedb.Exist(systemAddr)
+	require.NoError(t, err)
+	require.True(t, exists, "SYSTEM_ADDRESS should exist after a zero-value syscall")
+
+	// SYSTEM_ADDRESS must remain empty after the touch.
+	empty, err := statedb.Empty(systemAddr)
+	require.NoError(t, err)
+	require.True(t, empty, "SYSTEM_ADDRESS should remain empty after a zero-value syscall")
+
+	// The call-level BAL must not include SYSTEM_ADDRESS when the syscall only
+	// performs the sender-side touch and no actual account access.
+	bal := statedb.TxIO().AsBlockAccessList()
+	for _, accountChanges := range bal {
+		require.NotEqual(t, systemAddr, accountChanges.Address,
+			"SYSTEM_ADDRESS should be absent from the BAL after a zero-value syscall")
+	}
+
+	// No balance-change events should have fired for SYSTEM_ADDRESS
+	// from the zero-value call path.
+	require.Empty(t, balChanges, "no balance-change events expected for SYSTEM_ADDRESS on zero-value syscall, got %v", balChanges)
 }

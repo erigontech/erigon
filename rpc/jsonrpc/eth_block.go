@@ -62,7 +62,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	var txs types.Transactions
 
 	for _, txHash := range txHashes {
-		blockNumber, _, ok, err := api.txnLookup(ctx, tx, txHash)
+		blockNumber, txNum, ok, err := api.txnLookup(ctx, tx, txHash)
 		if err != nil {
 			return nil, err
 		}
@@ -75,19 +75,17 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 			return nil, err
 		}
 
-		block, err := api.blockByNumberWithSenders(ctx, tx, blockNumber)
+		txNumMin, err := api._txNumReader.Min(ctx, tx, blockNumber)
 		if err != nil {
 			return nil, err
 		}
-		if block == nil {
-			return nil, fmt.Errorf("block not found %d", blockNumber)
+		if txNumMin+1 > txNum {
+			return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNumber)
 		}
-		var txn types.Transaction
-		for _, transaction := range block.Transactions() {
-			if transaction.Hash() == txHash {
-				txn = transaction
-				break
-			}
+		txnIndex := int(txNum - txNumMin - 1)
+		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNumber, txnIndex)
+		if err != nil {
+			return nil, err
 		}
 		if txn == nil {
 			return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
@@ -150,7 +148,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{})
 
 	// evmPtr is updated atomically each time evm is recreated in the loop,
-	// so the watcher goroutine always cancels the current instance.
+	// so the AfterFunc callback always cancels the current instance.
 	var evmPtr atomic.Pointer[vm.EVM]
 	evmPtr.Store(evm)
 
@@ -171,18 +169,8 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	// this makes sure resources are cleaned up.
 	defer cancel()
 
-	done := make(chan struct{})
-	defer close(done)
-
-	var timedOut atomic.Bool
-	go func() {
-		select {
-		case <-ctx.Done():
-			timedOut.Store(true)
-			evmPtr.Load().Cancel()
-		case <-done:
-		}
-	}()
+	stop := context.AfterFunc(ctx, func() { evmPtr.Load().Cancel() })
+	defer stop()
 
 	// Setup the gas pool (also for unmetered requests)
 	// and apply the message.
@@ -207,8 +195,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		if err != nil {
 			return nil, err
 		}
-		// If the timer caused an abort, return an appropriate error message
-		if timedOut.Load() {
+		if evm.Cancelled() {
 			return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
 		}
 		if err = ibs.FinalizeTx(rules, state.NewNoopWriter()); err != nil {

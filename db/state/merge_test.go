@@ -18,6 +18,7 @@ package state
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"slices"
 	"testing"
@@ -26,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 	btree2 "github.com/tidwall/btree"
 
+	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -164,9 +166,8 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
-		ic := ii.BeginFilesRo()
+		ic := ii.beginForTests()
 		defer ic.Close()
 
 		mr := ic.findMergeRange(4, 32)
@@ -190,7 +191,6 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h.scanDirtyFiles([]string{
 			"v1.0-accounts.0-1.v",
@@ -202,9 +202,8 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
-		hc := h.BeginFilesRo()
+		hc := h.beginForTests()
 		defer hc.Close()
 		r := hc.findMergeRange(4, 32)
 		assert.True(t, r.history.needMerge)
@@ -223,7 +222,6 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h.scanDirtyFiles([]string{
 			"v1.0-accounts.0-1.v",
@@ -233,9 +231,8 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
-		hc := h.BeginFilesRo()
+		hc := h.beginForTests()
 		defer hc.Close()
 
 		r := hc.findMergeRange(4, 32)
@@ -256,7 +253,6 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h.scanDirtyFiles([]string{
 			"v1.0-accounts.0-1.v",
@@ -266,9 +262,8 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
-		hc := h.BeginFilesRo()
+		hc := h.beginForTests()
 		defer hc.Close()
 
 		r := hc.findMergeRange(4, 32)
@@ -290,7 +285,6 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h.scanDirtyFiles([]string{
 			"v1.0-accounts.0-1.v",
@@ -302,9 +296,8 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
-		hc := h.BeginFilesRo()
+		hc := h.beginForTests()
 		defer hc.Close()
 
 		r := hc.findMergeRange(4, 32)
@@ -325,7 +318,6 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h.scanDirtyFiles([]string{
 			"v1.0-accounts.0-1.v",
@@ -337,9 +329,8 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
-		hc := h.BeginFilesRo()
+		hc := h.beginForTests()
 		defer hc.Close()
 
 		r := hc.findMergeRange(4, 32)
@@ -360,7 +351,6 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		// `kill -9` may leave small garbage files, but if big one already exists we assume it's good(fsynced) and no reason to merge again
 		h.scanDirtyFiles([]string{
@@ -372,9 +362,8 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
-		hc := h.BeginFilesRo()
+		hc := h.beginForTests()
 		defer hc.Close()
 
 		r := hc.findMergeRange(4, 32)
@@ -399,7 +388,6 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h.scanDirtyFiles([]string{
 			"v1.0-accounts.0-1.v",
@@ -412,9 +400,8 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
-		hc := h.BeginFilesRo()
+		hc := h.beginForTests()
 		defer hc.Close()
 
 		r := hc.findMergeRange(4, 32)
@@ -438,7 +425,6 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h.scanDirtyFiles([]string{
 			"v1.0-accounts.0-1.v",
@@ -449,9 +435,8 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
-		hc := h.BeginFilesRo()
+		hc := h.beginForTests()
 		defer hc.Close()
 
 		r := hc.findMergeRange(4, 32)
@@ -474,7 +459,6 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h.scanDirtyFiles([]string{
 			"v1.0-accounts.0-1.v",
@@ -486,9 +470,8 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
-		hc := h.BeginFilesRo()
+		hc := h.beginForTests()
 		defer hc.Close()
 		r := hc.findMergeRange(4, 32)
 		assert.False(t, r.index.needMerge)
@@ -507,8 +490,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{}
 			return true
 		})
-		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
-		ic := ii.BeginFilesRo()
+		ic := ii.beginForTests()
 		defer ic.Close()
 		mr := ic.findMergeRange(4, 32)
 		assert.True(t, mr.needMerge)
@@ -793,7 +775,7 @@ func TestCommitmentValTransformDomainPanicsWithNeedMergeFalse(t *testing.T) {
 	// Fix: (1) guard the call with values.needMerge in aggregator.go;
 	//      (2) this panic assert catches future callers that violate the contract.
 	d := emptyTestDomain(t, 1)
-	dc := d.BeginFilesRo()
+	dc := d.beginForTests()
 	defer dc.Close()
 
 	require.Panics(t, func() {
@@ -812,13 +794,13 @@ func TestMergeFiles(t *testing.T) {
 	defer db.Close()
 	defer d.Close()
 
-	dc := d.BeginFilesRo()
+	dc := d.beginForTests()
 	defer dc.Close()
 
 	txs := d.stepSize * 8
 	data := generateTestData(t, 20, 52, txs, txs, 100)
 
-	rwTx, err := db.BeginRw(context.Background())
+	rwTx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
@@ -834,22 +816,22 @@ func TestMergeFiles(t *testing.T) {
 		}
 	}
 
-	require.NoError(t, w.Flush(context.Background(), rwTx))
+	require.NoError(t, w.Flush(t.Context(), rwTx))
 	w.Close()
 	err = rwTx.Commit()
 	require.NoError(t, err)
 
-	err = db.UpdateNosync(context.Background(), func(tx kv.RwTx) error {
+	err = db.UpdateNosync(t.Context(), func(tx kv.RwTx) error {
 		collateAndMerge(t, tx, d, txs)
 		return nil
 	})
 	require.NoError(t, err)
 
-	rwTx, err = db.BeginRw(context.Background())
+	rwTx, err = db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	dc = d.BeginFilesRo()
+	dc = d.beginForTests()
 	defer dc.Close()
 }
 
@@ -913,17 +895,13 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		setupFiles(storage, false)
 		setupFiles(commitment, false)
 
-		account.reCalcVisibleFiles(account.dirtyFilesEndTxNumMinimax())
-		storage.reCalcVisibleFiles(storage.dirtyFilesEndTxNumMinimax())
-		commitment.reCalcVisibleFiles(commitment.dirtyFilesEndTxNumMinimax())
-
 		checkFn := func(files visibleFiles) {
 			assert.Equal(t, 1, len(files))
 			assert.Equal(t, 0, int(files[0].startTxNum))
 			assert.Equal(t, 2, int(files[0].endTxNum))
 		}
 
-		ac, sc, cc := account.BeginFilesRo(), storage.BeginFilesRo(), commitment.BeginFilesRo()
+		ac, sc, cc := account.beginForTests(), storage.beginForTests(), commitment.beginForTests()
 		defer ac.Close()
 		defer sc.Close()
 		defer cc.Close()
@@ -939,10 +917,6 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		setupFiles(storage, false)
 		setupFiles(commitment, true)
 
-		account.reCalcVisibleFiles(account.dirtyFilesEndTxNumMinimax())
-		storage.reCalcVisibleFiles(storage.dirtyFilesEndTxNumMinimax())
-		commitment.reCalcVisibleFiles(commitment.dirtyFilesEndTxNumMinimax())
-
 		checkFn := func(files visibleFiles) {
 			assert.Equal(t, 2, len(files))
 			assert.Equal(t, 0, int(files[0].startTxNum))
@@ -951,7 +925,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 			assert.Equal(t, 2, int(files[1].endTxNum))
 		}
 
-		ac, sc, cc := account.BeginFilesRo(), storage.BeginFilesRo(), commitment.BeginFilesRo()
+		ac, sc, cc := account.beginForTests(), storage.beginForTests(), commitment.beginForTests()
 		defer ac.Close()
 		defer sc.Close()
 		defer cc.Close()
@@ -967,10 +941,6 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		setupFiles(storage, false)
 		setupFiles(commitment, false)
 
-		account.reCalcVisibleFiles(account.dirtyFilesEndTxNumMinimax())
-		storage.reCalcVisibleFiles(storage.dirtyFilesEndTxNumMinimax())
-		commitment.reCalcVisibleFiles(commitment.dirtyFilesEndTxNumMinimax())
-
 		checkFn := func(dtx *DomainRoTx, garbageCount int) {
 			var mergedF *FilesItem
 			items := dtx.d.dirtyFiles.Items()
@@ -981,7 +951,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 			assert.Len(t, dtx.garbage(mergedF), garbageCount)
 		}
 
-		ac, sc, cc := account.BeginFilesRo(), storage.BeginFilesRo(), commitment.BeginFilesRo()
+		ac, sc, cc := account.beginForTests(), storage.beginForTests(), commitment.beginForTests()
 		defer ac.Close()
 		defer sc.Close()
 		defer cc.Close()
@@ -999,7 +969,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		sc.Close()
 		cc.Close()
 
-		ac, sc, cc = account.BeginFilesRo(), storage.BeginFilesRo(), commitment.BeginFilesRo()
+		ac, sc, cc = account.beginForTests(), storage.beginForTests(), commitment.beginForTests()
 		defer ac.Close()
 		defer sc.Close()
 		defer cc.Close()
@@ -1015,15 +985,11 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		setupFiles(storage, false)
 		setupFiles(commitment, false)
 
-		account.reCalcVisibleFiles(account.dirtyFilesEndTxNumMinimax())
-		storage.reCalcVisibleFiles(storage.dirtyFilesEndTxNumMinimax())
-		commitment.reCalcVisibleFiles(commitment.dirtyFilesEndTxNumMinimax())
-
 		checkFn := func(dtx *DomainRoTx, garbageCount int) {
 			assert.Len(t, dtx.garbage(nil), garbageCount)
 		}
 
-		ac, sc, cc := account.BeginFilesRo(), storage.BeginFilesRo(), commitment.BeginFilesRo()
+		ac, sc, cc := account.beginForTests(), storage.beginForTests(), commitment.beginForTests()
 		defer ac.Close()
 		defer sc.Close()
 		defer cc.Close()
@@ -1041,7 +1007,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		sc.Close()
 		cc.Close()
 
-		ac, sc, cc = account.BeginFilesRo(), storage.BeginFilesRo(), commitment.BeginFilesRo()
+		ac, sc, cc = account.beginForTests(), storage.beginForTests(), commitment.beginForTests()
 		defer ac.Close()
 		defer sc.Close()
 		defer cc.Close()
@@ -1057,10 +1023,6 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		setupFiles(storage, false)
 		setupFiles(commitment, true)
 
-		account.reCalcVisibleFiles(account.dirtyFilesEndTxNumMinimax())
-		storage.reCalcVisibleFiles(storage.dirtyFilesEndTxNumMinimax())
-		commitment.reCalcVisibleFiles(commitment.dirtyFilesEndTxNumMinimax())
-
 		checkFn := func(dtx *DomainRoTx) {
 			var mergedF *FilesItem
 			items := dtx.d.dirtyFiles.Items()
@@ -1071,7 +1033,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 			assert.Len(t, dtx.garbage(mergedF), 0)
 		}
 
-		ac, sc, cc := account.BeginFilesRo(), storage.BeginFilesRo(), commitment.BeginFilesRo()
+		ac, sc, cc := account.beginForTests(), storage.beginForTests(), commitment.beginForTests()
 		defer ac.Close()
 		defer sc.Close()
 		defer cc.Close()
@@ -1087,15 +1049,11 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		setupFiles(storage, false)
 		setupFiles(commitment, true)
 
-		account.reCalcVisibleFiles(account.dirtyFilesEndTxNumMinimax())
-		storage.reCalcVisibleFiles(storage.dirtyFilesEndTxNumMinimax())
-		commitment.reCalcVisibleFiles(commitment.dirtyFilesEndTxNumMinimax())
-
 		checkFn := func(dtx *DomainRoTx) {
 			assert.Len(t, dtx.garbage(nil), 0)
 		}
 
-		ac, sc, cc := account.BeginFilesRo(), storage.BeginFilesRo(), commitment.BeginFilesRo()
+		ac, sc, cc := account.beginForTests(), storage.beginForTests(), commitment.beginForTests()
 		defer ac.Close()
 		defer sc.Close()
 		defer cc.Close()
@@ -1142,9 +1100,7 @@ func TestHistoryAndIIAlignment(t *testing.T) {
 	})
 	t.Cleanup(func() {
 		h.dirtyFiles.Scan(func(item *FilesItem) bool {
-			if item.decompressor != nil {
-				item.decompressor.Close()
-			}
+			item.decompressor.Close()
 			return true
 		})
 	})
@@ -1162,15 +1118,12 @@ func TestHistoryAndIIAlignment(t *testing.T) {
 	})
 	t.Cleanup(func() {
 		ii.dirtyFiles.Scan(func(item *FilesItem) bool {
-			if item.decompressor != nil {
-				item.decompressor.Close()
-			}
+			item.decompressor.Close()
 			return true
 		})
 	})
-	h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
-	roTx := h.BeginFilesRo()
+	roTx := h.beginForTests()
 	defer roTx.Close()
 
 	for i, f := range roTx.files {
@@ -1187,4 +1140,82 @@ func TestHistoryAndIIAlignment(t *testing.T) {
 
 	// no garbage with iit, since history is not merged
 	require.Len(t, roTx.iit.garbage(&FilesItem{startTxNum: 0, endTxNum: 4}), 0)
+}
+
+// TestInvIndexMergeFiles_SharedKey verifies that mergeFiles correctly merges N .ef
+// files where a single key appears in every file, producing a merged sequence that
+// contains all expected txNums.
+func TestInvIndexMergeFiles_SharedKey(t *testing.T) {
+	t.Parallel()
+
+	// aggStep > SIMPLE_SEQUENCE_MAX_THRESHOLD (16) forces EliasFano encoding per file,
+	// exercising the expensive merge path.
+	const aggStep = 32
+	const numFiles = 4
+	// module=1 means key-1 appears at every txNum, so it is present in all files.
+	const module = 1
+
+	txs := uint64(numFiles) * aggStep
+	ctx := context.Background()
+	logger := log.New()
+
+	db, ii, _ := filledInvIndexOfSize(t, txs, aggStep, module, logger)
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	ps := background.NewProgressSet()
+	for step := kv.Step(0); step < kv.Step(numFiles); step++ {
+		require.NoError(t, ii.collateBuildIntegrate(ctx, step, tx, ps))
+	}
+
+	ic := ii.beginForTests()
+	defer ic.Close()
+
+	maxEndTxNum := ii.dirtyFilesEndTxNumMinimax()
+	maxSpan := ii.stepSize * config3.DefaultStepsInFrozenFile
+	mr := ic.findMergeRange(maxEndTxNum, maxSpan)
+	require.True(t, mr.needMerge)
+	require.EqualValues(t, 0, mr.from)
+	require.EqualValues(t, txs, mr.to)
+
+	inputFiles := ic.staticFilesInRange(mr.from, mr.to)
+	require.Len(t, inputFiles, numFiles)
+
+	out, err := ic.mergeFiles(ctx, inputFiles, mr.from, mr.to, ps)
+	require.NoError(t, err)
+	t.Cleanup(out.closeFilesAndRemove)
+
+	// filledInvIndexOfSize adds key k when txNum%k==0; for k=1 that is every txNum 1..txs.
+	g := ic.dataReader(out.decompressor)
+	g.Reset(0)
+	require.True(t, g.HasNext(), "merged file must not be empty")
+
+	key, _ := g.Next(nil)
+	val, _ := g.Next(nil)
+	require.False(t, g.HasNext(), "expected exactly one key in merged file")
+
+	var expectedKey [8]byte
+	binary.BigEndian.PutUint64(expectedKey[:], 1)
+	require.Equal(t, expectedKey[:], key)
+
+	var seq multiencseq.SequenceReader
+	seq.Reset(mr.from, val)
+	it := seq.Iterator(0)
+
+	got := make([]uint64, 0, txs-1)
+	for it.HasNext() {
+		v, err := it.Next()
+		require.NoError(t, err)
+		got = append(got, v)
+	}
+
+	// filledInvIndexOfSize fills txNums 1..txs, but step (numFiles-1) covers
+	// [txs-aggStep, txs), so txNum==txs is not yet collated into a file.
+	want := make([]uint64, 0, txs-1)
+	for txNum := uint64(1); txNum < txs; txNum++ {
+		want = append(want, txNum)
+	}
+	require.Equal(t, want, got)
 }

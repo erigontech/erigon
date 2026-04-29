@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"sort"
 
 	"github.com/c2h5oh/datasize"
 )
@@ -51,11 +52,37 @@ func (g *Reader) MatchPrefix(prefix []byte) bool {
 	return g.Getter.MatchPrefixUncompressed(prefix)
 }
 
-func (g *Reader) MatchCmp(prefix []byte) int {
+func (g *Reader) MatchCmp(buf []byte) int {
+	var cmp int
 	if g.c.Has(CompressKeys) {
-		return g.Getter.MatchCmp(prefix)
+		cmp = g.Getter.MatchCmp(buf)
+	} else {
+		cmp = g.Getter.MatchCmpUncompressed(buf)
 	}
-	return g.Getter.MatchCmpUncompressed(prefix)
+	if cmp == 0 {
+		g.nextValue = true // key consumed, next read is value
+	}
+	return cmp
+}
+
+func (g *Reader) BinarySearch(seek []byte, count int, getOffset func(i uint64) (offset uint64)) (foundOffset uint64, ok bool) {
+	foundItem := sort.Search(count, func(i int) bool {
+		offset := getOffset(uint64(i))
+		g.Reset(offset)
+		if g.HasNext() {
+			return g.MatchCmp(seek) <= 0 // MatchCmp returns Compare(seek, word); <=0 means word >= seek
+		}
+		return false
+	})
+	if foundItem == count {
+		return 0, false
+	}
+	foundOffset = getOffset(uint64(foundItem))
+	g.Reset(foundOffset)
+	if !g.HasNext() {
+		return 0, false
+	}
+	return foundOffset, true
 }
 
 func (g *Reader) MadvNormal() MadvDisabler {
