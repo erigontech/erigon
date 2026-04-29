@@ -104,6 +104,19 @@ func ReceiptRootIntegrityRange(ctx context.Context, fromBlock, toBlock uint64, d
 	verifyAndAdvance := func() error {
 		computedRoot := types.DeriveSha(receipts)
 		if computedRoot != header.ReceiptHash {
+			log.Warn("[integrity] ReceiptRootIntegrity dump",
+				"block", blockNum, "numReceipts", len(receipts),
+				"computed", computedRoot, "header", header.ReceiptHash,
+				"headerTxRoot", header.TxHash)
+			for i, r := range receipts {
+				log.Warn("[integrity] receipt",
+					"block", blockNum, "i", i,
+					"type", r.Type, "txIdx", r.TransactionIndex,
+					"status", r.Status, "postStateLen", len(r.PostState),
+					"cumGas", r.CumulativeGasUsed, "gasUsed", r.GasUsed,
+					"numLogs", len(r.Logs), "firstLogIdx", r.FirstLogIndexWithinBlock,
+					"bloomZero", r.Bloom == (types.Bloom{}))
+			}
 			mismatch := fmt.Errorf("%w: ReceiptRootIntegrity: receipt root mismatch at block %d: computed=%s, header=%s",
 				ErrIntegrity, blockNum, computedRoot, header.ReceiptHash)
 			if failFast {
