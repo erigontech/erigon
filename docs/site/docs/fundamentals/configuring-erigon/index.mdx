@@ -22,7 +22,13 @@ In order to see all the available options (flags) you must run the command:
 
 ## Command line options
 
-Here's a breakdown of the most important flags:
+Flags are passed directly to the `erigon` binary at startup. Each flag starts with `--`, followed by the flag name and, where applicable, a value separated by a space or `=`. For example, to start Erigon on the Holesky testnet with a custom data directory and the JSON-RPC API enabled on port 8545:
+
+```bash
+./build/bin/erigon --chain=holesky --datadir=/data/erigon --http --http.port=8545
+```
+
+Flags can be combined freely. Here's a breakdown of the most important flags:
 
 ### General Options
 
