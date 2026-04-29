@@ -14,6 +14,7 @@ import (
 	"github.com/99designs/gqlgen/graphql"
 	"github.com/99designs/gqlgen/graphql/introspection"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql/graph/model"
+	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql/graph/scalar"
 	gqlparser "github.com/vektah/gqlparser/v2"
 	"github.com/vektah/gqlparser/v2/ast"
 )
@@ -28,18 +29,10 @@ func NewExecutableSchema(cfg Config) graphql.ExecutableSchema {
 type Config = graphql.Config[ResolverRoot, DirectiveRoot, ComplexityRoot]
 
 type ResolverRoot interface {
-	Account() AccountResolver
 	Block() BlockResolver
 	Mutation() MutationResolver
 	Query() QueryResolver
-}
-
-type AccountResolver interface {
-	Storage(ctx context.Context, obj *model.Account, slot string) (string, error)
-}
-
-type BlockResolver interface {
-	Account(ctx context.Context, obj *model.Block, address string) (*model.Account, error)
+	Transaction() TransactionResolver
 }
 
 type DirectiveRoot struct {
@@ -174,6 +167,11 @@ type ComplexityRoot struct {
 	}
 }
 
+type BlockResolver interface {
+	TransactionAt(ctx context.Context, obj *model.Block, index int) (*model.Transaction, error)
+
+	Account(ctx context.Context, obj *model.Block, address string) (*model.Account, error)
+}
 type MutationResolver interface {
 	SendRawTransaction(ctx context.Context, data string) (string, error)
 }
@@ -187,6 +185,10 @@ type QueryResolver interface {
 	MaxPriorityFeePerGas(ctx context.Context) (string, error)
 	Syncing(ctx context.Context) (*model.SyncState, error)
 	ChainID(ctx context.Context) (string, error)
+}
+type TransactionResolver interface {
+	From(ctx context.Context, obj *model.Transaction, block *uint64) (*model.Account, error)
+	To(ctx context.Context, obj *model.Transaction, block *uint64) (*model.Account, error)
 }
 
 type executableSchema graphql.ExecutableSchemaState[ResolverRoot, DirectiveRoot, ComplexityRoot]
@@ -1458,8 +1460,7 @@ func (ec *executionContext) _Account_storage(ctx context.Context, field graphql.
 		field,
 		ec.fieldContext_Account_storage,
 		func(ctx context.Context) (any, error) {
-			fc := graphql.GetFieldContext(ctx)
-			return ec.Resolvers.Account().Storage(ctx, obj, fc.Args["slot"].(string))
+			return obj.Storage, nil
 		},
 		nil,
 		ec.marshalNBytes322string,
@@ -1472,8 +1473,8 @@ func (ec *executionContext) fieldContext_Account_storage(ctx context.Context, fi
 	fc = &graphql.FieldContext{
 		Object:     "Account",
 		Field:      field,
-		IsMethod:   true,
-		IsResolver: true,
+		IsMethod:   false,
+		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return nil, errors.New("field of type Bytes32 does not have child fields")
 		},
@@ -2446,7 +2447,8 @@ func (ec *executionContext) _Block_transactionAt(ctx context.Context, field grap
 		field,
 		ec.fieldContext_Block_transactionAt,
 		func(ctx context.Context) (any, error) {
-			return obj.TransactionAt, nil
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Block().TransactionAt(ctx, obj, fc.Args["index"].(int))
 		},
 		nil,
 		ec.marshalOTransaction2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐTransaction,
@@ -2459,8 +2461,8 @@ func (ec *executionContext) fieldContext_Block_transactionAt(ctx context.Context
 	fc = &graphql.FieldContext{
 		Object:     "Block",
 		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
+		IsMethod:   true,
+		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			switch field.Name {
 			case "hash":
@@ -4237,7 +4239,8 @@ func (ec *executionContext) _Transaction_from(ctx context.Context, field graphql
 		field,
 		ec.fieldContext_Transaction_from,
 		func(ctx context.Context) (any, error) {
-			return obj.From, nil
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Transaction().From(ctx, obj, fc.Args["block"].(*uint64))
 		},
 		nil,
 		ec.marshalNAccount2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount,
@@ -4250,8 +4253,8 @@ func (ec *executionContext) fieldContext_Transaction_from(ctx context.Context, f
 	fc = &graphql.FieldContext{
 		Object:     "Transaction",
 		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
+		IsMethod:   true,
+		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			switch field.Name {
 			case "address":
@@ -4289,7 +4292,8 @@ func (ec *executionContext) _Transaction_to(ctx context.Context, field graphql.C
 		field,
 		ec.fieldContext_Transaction_to,
 		func(ctx context.Context) (any, error) {
-			return obj.To, nil
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Transaction().To(ctx, obj, fc.Args["block"].(*uint64))
 		},
 		nil,
 		ec.marshalOAccount2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount,
@@ -4302,8 +4306,8 @@ func (ec *executionContext) fieldContext_Transaction_to(ctx context.Context, fie
 	fc = &graphql.FieldContext{
 		Object:     "Transaction",
 		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
+		IsMethod:   true,
+		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			switch field.Name {
 			case "address":
@@ -4936,7 +4940,7 @@ func (ec *executionContext) _Transaction_type(ctx context.Context, field graphql
 			return obj.Type, nil
 		},
 		nil,
-		ec.marshalOInt2ᚖint,
+		ec.marshalOLong2ᚖuint64,
 		true,
 		false,
 	)
@@ -4949,7 +4953,7 @@ func (ec *executionContext) fieldContext_Transaction_type(_ context.Context, fie
 		IsMethod:   false,
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
-			return nil, errors.New("field of type Int does not have child fields")
+			return nil, errors.New("field of type Long does not have child fields")
 		},
 	}
 	return fc, nil
@@ -6902,56 +6906,56 @@ func (ec *executionContext) _Block(ctx context.Context, sel ast.SelectionSet, ob
 		case "number":
 			out.Values[i] = ec._Block_number(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "hash":
 			out.Values[i] = ec._Block_hash(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "parent":
 			out.Values[i] = ec._Block_parent(ctx, field, obj)
 		case "nonce":
 			out.Values[i] = ec._Block_nonce(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "transactionsRoot":
 			out.Values[i] = ec._Block_transactionsRoot(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "transactionCount":
 			out.Values[i] = ec._Block_transactionCount(ctx, field, obj)
 		case "stateRoot":
 			out.Values[i] = ec._Block_stateRoot(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "receiptsRoot":
 			out.Values[i] = ec._Block_receiptsRoot(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "miner":
 			out.Values[i] = ec._Block_miner(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "extraData":
 			out.Values[i] = ec._Block_extraData(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "gasLimit":
 			out.Values[i] = ec._Block_gasLimit(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "gasUsed":
 			out.Values[i] = ec._Block_gasUsed(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "baseFeePerGas":
 			out.Values[i] = ec._Block_baseFeePerGas(ctx, field, obj)
@@ -6960,22 +6964,22 @@ func (ec *executionContext) _Block(ctx context.Context, sel ast.SelectionSet, ob
 		case "timestamp":
 			out.Values[i] = ec._Block_timestamp(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "logsBloom":
 			out.Values[i] = ec._Block_logsBloom(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "mixHash":
 			out.Values[i] = ec._Block_mixHash(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "difficulty":
 			out.Values[i] = ec._Block_difficulty(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "ommerCount":
 			out.Values[i] = ec._Block_ommerCount(ctx, field, obj)
@@ -6986,38 +6990,100 @@ func (ec *executionContext) _Block(ctx context.Context, sel ast.SelectionSet, ob
 		case "ommerHash":
 			out.Values[i] = ec._Block_ommerHash(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "transactions":
 			out.Values[i] = ec._Block_transactions(ctx, field, obj)
 		case "transactionAt":
-			out.Values[i] = ec._Block_transactionAt(ctx, field, obj)
+			field := field
+
+			innerFunc := func(ctx context.Context, _ *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Block_transactionAt(ctx, field, obj)
+				return res
+			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "logs":
 			out.Values[i] = ec._Block_logs(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "account":
-			out.Values[i] = ec._Block_account(ctx, field, obj)
-			if out.Values[i] == graphql.Null {
-				out.Invalids++
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Block_account(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
 			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "call":
 			out.Values[i] = ec._Block_call(ctx, field, obj)
 		case "estimateGas":
 			out.Values[i] = ec._Block_estimateGas(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "rawHeader":
 			out.Values[i] = ec._Block_rawHeader(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "raw":
 			out.Values[i] = ec._Block_raw(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "withdrawals":
 			out.Values[i] = ec._Block_withdrawals(ctx, field, obj)
@@ -7556,31 +7622,93 @@ func (ec *executionContext) _Transaction(ctx context.Context, sel ast.SelectionS
 		case "hash":
 			out.Values[i] = ec._Transaction_hash(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "nonce":
 			out.Values[i] = ec._Transaction_nonce(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "index":
 			out.Values[i] = ec._Transaction_index(ctx, field, obj)
 		case "from":
-			out.Values[i] = ec._Transaction_from(ctx, field, obj)
-			if out.Values[i] == graphql.Null {
-				out.Invalids++
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Transaction_from(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
 			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "to":
-			out.Values[i] = ec._Transaction_to(ctx, field, obj)
+			field := field
+
+			innerFunc := func(ctx context.Context, _ *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Transaction_to(ctx, field, obj)
+				return res
+			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "value":
 			out.Values[i] = ec._Transaction_value(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "gasPrice":
 			out.Values[i] = ec._Transaction_gasPrice(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "maxFeePerGas":
 			out.Values[i] = ec._Transaction_maxFeePerGas(ctx, field, obj)
@@ -7591,12 +7719,12 @@ func (ec *executionContext) _Transaction(ctx context.Context, sel ast.SelectionS
 		case "gas":
 			out.Values[i] = ec._Transaction_gas(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "inputData":
 			out.Values[i] = ec._Transaction_inputData(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "block":
 			out.Values[i] = ec._Transaction_block(ctx, field, obj)
@@ -7615,17 +7743,17 @@ func (ec *executionContext) _Transaction(ctx context.Context, sel ast.SelectionS
 		case "r":
 			out.Values[i] = ec._Transaction_r(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "s":
 			out.Values[i] = ec._Transaction_s(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "v":
 			out.Values[i] = ec._Transaction_v(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "type":
 			out.Values[i] = ec._Transaction_type(ctx, field, obj)
@@ -7634,12 +7762,12 @@ func (ec *executionContext) _Transaction(ctx context.Context, sel ast.SelectionS
 		case "raw":
 			out.Values[i] = ec._Transaction_raw(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "rawReceipt":
 			out.Values[i] = ec._Transaction_rawReceipt(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
@@ -8063,6 +8191,10 @@ func (ec *executionContext) marshalNAccessTuple2ᚖgithubᚗcomᚋerigontechᚋe
 	return ec._AccessTuple(ctx, sel, v)
 }
 
+func (ec *executionContext) marshalNAccount2githubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount(ctx context.Context, sel ast.SelectionSet, v model.Account) graphql.Marshaler {
+	return ec._Account(ctx, sel, &v)
+}
+
 func (ec *executionContext) marshalNAccount2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount(ctx context.Context, sel ast.SelectionSet, v *model.Account) graphql.Marshaler {
 	if v == nil {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
@@ -8267,13 +8399,13 @@ func (ec *executionContext) marshalNLog2ᚖgithubᚗcomᚋerigontechᚋerigonᚋ
 }
 
 func (ec *executionContext) unmarshalNLong2uint64(ctx context.Context, v any) (uint64, error) {
-	res, err := graphql.UnmarshalUint64(v)
+	res, err := scalar.UnmarshalUint64(v)
 	return res, graphql.ErrorOnPath(ctx, err)
 }
 
 func (ec *executionContext) marshalNLong2uint64(ctx context.Context, sel ast.SelectionSet, v uint64) graphql.Marshaler {
 	_ = sel
-	res := graphql.MarshalUint64(v)
+	res := scalar.MarshalUint64(v)
 	if res == graphql.Null {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
 			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
@@ -8759,7 +8891,7 @@ func (ec *executionContext) unmarshalOLong2ᚖuint64(ctx context.Context, v any)
 	if v == nil {
 		return nil, nil
 	}
-	res, err := graphql.UnmarshalUint64(v)
+	res, err := scalar.UnmarshalUint64(v)
 	return &res, graphql.ErrorOnPath(ctx, err)
 }
 
@@ -8769,7 +8901,7 @@ func (ec *executionContext) marshalOLong2ᚖuint64(ctx context.Context, sel ast.
 	}
 	_ = sel
 	_ = ctx
-	res := graphql.MarshalUint64(*v)
+	res := scalar.MarshalUint64(*v)
 	return res
 }
 

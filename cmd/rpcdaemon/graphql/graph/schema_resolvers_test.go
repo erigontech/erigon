@@ -58,3 +58,54 @@ func TestNewAccountAtBlock(t *testing.T) {
 		t.Errorf("expected BlockNum=42, got %d", acc.BlockNum)
 	}
 }
+
+func TestBlockResolver_TransactionAt(t *testing.T) {
+	r := &blockResolver{&Resolver{}}
+
+	tx0 := &model.Transaction{Hash: "0xaaa"}
+	tx1 := &model.Transaction{Hash: "0xbbb"}
+	block := &model.Block{Transactions: []*model.Transaction{tx0, tx1}}
+
+	tests := []struct {
+		name  string
+		index int
+		want  *model.Transaction
+	}{
+		{"first", 0, tx0},
+		{"second", 1, tx1},
+		{"out of range", 2, nil},
+		{"negative", -1, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := r.TransactionAt(context.Background(), block, tt.index)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("TransactionAt(%d) = %v, want %v", tt.index, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestQueryResolver_Transaction_InvalidHash(t *testing.T) {
+	r := &queryResolver{&Resolver{}} // GraphQLAPI is nil; error fires before it is called
+
+	tests := []struct {
+		name string
+		hash string
+	}{
+		{"empty", ""},
+		{"no 0x prefix", "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"},
+		{"invalid hex chars", "0xGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := r.Transaction(context.Background(), tt.hash)
+			if err == nil {
+				t.Errorf("hash %q: expected error, got nil", tt.hash)
+			}
+		})
+	}
+}
