@@ -33,6 +33,8 @@ import (
 
 const MetadataApi = "rpc"
 
+const minBatchConcurrency uint = 1
+
 // CodecOption specifies which type of messages a codec supports.
 //
 // Deprecated: this option is no longer honored by Server.
@@ -65,6 +67,9 @@ type Server struct {
 
 // NewServer creates a new server instance with no registered handlers.
 func NewServer(batchConcurrency uint, traceRequests, debugSingleRequest, disableStreaming bool, logger log.Logger, rpcSlowLogThreshold time.Duration) *Server {
+	if batchConcurrency == 0 {
+		batchConcurrency = minBatchConcurrency
+	}
 	server := &Server{services: serviceRegistry{logger: logger}, idgen: randomIDGenerator(), codecs: mapset.NewSet[ServerCodec](), batchConcurrency: batchConcurrency,
 		disableStreaming: disableStreaming, traceRequests: traceRequests, debugSingleRequest: debugSingleRequest, logger: logger, rpcSlowLogThreshold: rpcSlowLogThreshold}
 	server.run.Store(true)

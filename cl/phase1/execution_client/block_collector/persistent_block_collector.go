@@ -124,7 +124,14 @@ func (p *PersistentBlockCollector) AddBlock(block *cltypes.BeaconBlock) error {
 	})
 }
 
-// Flush loads all collected blocks into the execution engine and clears the database
+// Flush loads all collected blocks into the execution engine and clears the database.
+// Keys are block-number + payload SSZ root. Identical execution payloads therefore
+// collide on payloadKey and tx.Put overwrites the existing row, so multiple rows at
+// the same block number only exist when the execution payload itself differs (that
+// is, competing execution forks at the same height). The variant chosen is the one
+// whose BlockHash matches the ParentHash of the next row — a single-row look-ahead.
+// If a real gap is detected, rows past the gap are kept so the next Flush can retry
+// once the missing range is re-downloaded.
 func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -137,7 +144,30 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 	inserted := uint64(0)
 
 	minInsertableBlockNumber := p.engine.FrozenBlocks(ctx)
-	var prevBlockNum uint64
+	var pending []*types.Block // variants at pendingHeight, awaiting resolution
+	var pendingHeight uint64
+	var lastCommittedHeight uint64
+	gapDetected := false
+
+	// resolvePending picks the variant from `pending` whose BlockHash matches
+	// next.ParentHash. With one variant (no ambiguity) or next == nil (end of
+	// cursor, nothing to match against), the first variant is returned. Returns
+	// nil only when pending has multiple variants and none chains onto next.
+	resolvePending := func(next *types.Block) *types.Block {
+		if len(pending) == 0 {
+			return nil
+		}
+		if len(pending) == 1 || next == nil {
+			return pending[0]
+		}
+		for _, c := range pending {
+			if c.Hash() == next.ParentHash() {
+				return c
+			}
+		}
+		return nil
+	}
+
 	if err := p.db.View(ctx, func(tx kv.Tx) error {
 		cursor, err := tx.Cursor(kv.Headers)
 		if err != nil {
@@ -162,22 +192,67 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 				continue
 			}
 
-			if prevBlockNum > 0 && block.NumberU64() != prevBlockNum+1 {
+			// Another variant at the current height: buffer it for look-ahead resolution.
+			if pendingHeight > 0 && block.NumberU64() == pendingHeight {
+				pending = append(pending, block)
+				continue
+			}
+
+			// Different height. If not the immediate successor, it's a real gap —
+			// we can't use this block to disambiguate competing variants at pendingHeight.
+			if pendingHeight > 0 && block.NumberU64() != pendingHeight+1 {
+				// Commit the pending group only if it's unambiguous. With multiple
+				// variants and no successor to match against, leave rows for retry.
+				if len(pending) == 1 {
+					blocksBatch = append(blocksBatch, pending[0])
+					lastCommittedHeight = pendingHeight
+				}
 				p.logger.Warn("[BlockCollector] Gap detected in collected blocks, will re-download missing range",
-					"lastBlock", prevBlockNum, "nextBlock", block.NumberU64(),
-					"gap", block.NumberU64()-prevBlockNum-1)
+					"lastBlock", pendingHeight, "nextBlock", block.NumberU64(),
+					"gap", block.NumberU64()-pendingHeight-1)
+				gapDetected = true
 				break
 			}
-			prevBlockNum = block.NumberU64()
-			blocksBatch = append(blocksBatch, block)
 
-			if len(blocksBatch) >= batchSize {
-				if err := p.insertBatch(ctx, blocksBatch, &inserted); err != nil {
-					return err
+			// Immediate successor: resolve the pending group against this block's parent.
+			if pendingHeight > 0 {
+				resolved := resolvePending(block)
+				if resolved == nil {
+					p.logger.Warn("[BlockCollector] Fork detected: no stored variant matches next block's parent, leaving rows for retry",
+						"height", pendingHeight, "nextBlock", block.NumberU64(), "variants", len(pending))
+					gapDetected = true
+					break
 				}
-				blocksBatch = []*types.Block{}
+				blocksBatch = append(blocksBatch, resolved)
+				lastCommittedHeight = pendingHeight
+				if len(blocksBatch) >= batchSize {
+					if err := p.insertBatch(ctx, blocksBatch, &inserted); err != nil {
+						return err
+					}
+					blocksBatch = []*types.Block{}
+				}
+			}
+
+			pending = []*types.Block{block}
+			pendingHeight = block.NumberU64()
+		}
+
+		// End of cursor: resolve the final pending group with no successor to match
+		// against. Single variants are unambiguous. With multiple variants we can't
+		// disambiguate, so leave them for a future Flush (same policy as the
+		// mid-cursor gap branch) rather than guessing a pick the clean-path DB wipe
+		// could permanently discard.
+		if !gapDetected && pendingHeight > 0 {
+			if len(pending) == 1 {
+				blocksBatch = append(blocksBatch, pending[0])
+				lastCommittedHeight = pendingHeight
+			} else {
+				p.logger.Warn("[BlockCollector] Fork at final height with no successor, leaving rows for retry",
+					"height", pendingHeight, "variants", len(pending))
+				gapDetected = true
 			}
 		}
+
 		return nil
 	}); err != nil {
 		return fmt.Errorf("failed to flush blocks from database: %w", err)
@@ -190,7 +265,45 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 		}
 	}
 
-	// Close, remove, and reopen the database to clear it
+	if gapDetected {
+		// Prune only rows the caller is done with; rows past the gap stay so a
+		// future re-download of the missing range unblocks the next Flush.
+		// Use a non-cancelable context: if ctx was cancelled the caller cares
+		// about stopping, but skipping cleanup would leave already-inserted
+		// rows in place and the next Flush would re-read and re-insert them.
+		cutoff := minInsertableBlockNumber
+		if lastCommittedHeight+1 > cutoff {
+			cutoff = lastCommittedHeight + 1
+		}
+		if err := p.db.Update(context.Background(), func(tx kv.RwTx) error {
+			cursor, err := tx.RwCursor(kv.Headers)
+			if err != nil {
+				return err
+			}
+			defer cursor.Close()
+			for k, _, err := cursor.First(); k != nil; k, _, err = cursor.Next() {
+				if err != nil {
+					return err
+				}
+				if len(k) < 8 {
+					// Defensive: payloadKey always produces 40-byte keys.
+					continue
+				}
+				if binary.BigEndian.Uint64(k[:8]) >= cutoff {
+					break
+				}
+				if err := cursor.DeleteCurrent(); err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			p.logger.Warn("[BlockCollector] Failed to prune consumed blocks", "err", err)
+		}
+		return nil
+	}
+
+	// No gap: drop the whole DB — cheaper than walking keys.
 	p.db.Close()
 
 	if err := dir.RemoveAll(p.persistDir); err != nil {

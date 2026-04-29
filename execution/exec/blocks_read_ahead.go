@@ -10,6 +10,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -107,6 +108,10 @@ func AddSendersToGlobalReadAheader(senders []byte, blockHash common.Hash) {
 // Only one warmBody can run at a time - concurrent calls are no-ops.
 func (bra *blockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *types.Header, body *types.Body, workers int) {
 	defer bra.warming.Store(false)
+
+	if !dbg.ReadAhead {
+		return
+	}
 
 	if workers <= 0 {
 		workers = 1

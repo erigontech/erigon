@@ -551,17 +551,17 @@ func (t *UDPv4) readLoop(unhandled chan<- ReadPacket) {
 		nbytes, from, err := t.conn.ReadFromUDPAddrPort(buf)
 		if netutil.IsTemporaryError(err) {
 			// Ignore temporary read errors.
-			t.log.Debug("[p2p] Temporary UDP read error", "err", err)
+			t.log.Trace("[p2p] Temporary UDP read error", "err", err)
 			continue
 		} else if err != nil {
 			// Shut down the loop for permanent errors.
 			if !errors.Is(err, io.EOF) {
-				t.log.Debug("[p2p] UDP read error", "err", err)
+				t.log.Trace("[p2p] UDP read error", "err", err)
 			}
 			return
 		}
 		if err := t.handlePacket(from, buf[:nbytes]); err != nil && unhandled == nil {
-			t.log.Debug("[p2p] Bad discv4 packet", "addr", from, "err", err)
+			t.log.Trace("[p2p] Bad discv4 packet", "addr", from, "err", err)
 		} else if err != nil && unhandled != nil {
 			select {
 			case unhandled <- ReadPacket{buf[:nbytes], from}:
