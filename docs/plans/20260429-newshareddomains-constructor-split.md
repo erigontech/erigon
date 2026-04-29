@@ -57,8 +57,8 @@ The private helper contains all initialization logic. Both public constructors d
 - Modify: `db/state/squeeze.go`
 - Modify: `execution/commitment/backtester/backtester.go`
 
-- [ ] Change all `NewSharedDomains(..., cfg)` calls in above files to `NewSharedDomainsWithTrieConfig(..., cfg)`
-- [ ] Run `go build ./rpc/... ./execution/... ./db/...` on modified packages to verify
+- [x] Change all `NewSharedDomains(..., cfg)` calls in above files to `NewSharedDomainsWithTrieConfig(..., cfg)`
+- [x] Run `go build ./rpc/... ./execution/... ./db/...` on modified packages to verify
 
 ### Task 3: Migrate Group A — remove DefaultTrieConfig() from all call sites
 

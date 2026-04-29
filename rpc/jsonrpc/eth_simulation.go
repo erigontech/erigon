@@ -165,7 +165,7 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		return nil, err
 	}
 
-	sharedDomains, err := execctx.NewSharedDomains(ctx, tx, api.logger, commitment.TrieConfig{Variant: commitment.VariantHexPatriciaTrie, DeferBranchUpdates: false})
+	sharedDomains, err := execctx.NewSharedDomainsWithTrieConfig(ctx, tx, api.logger, commitment.TrieConfig{Variant: commitment.VariantHexPatriciaTrie, DeferBranchUpdates: false})
 	if err != nil {
 		return nil, err
 	}

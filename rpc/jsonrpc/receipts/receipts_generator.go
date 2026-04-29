@@ -324,7 +324,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		var stateWriter state.StateWriter
 
 		if calculatePostState && postState.CommitmentHistory {
-			sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root(), commitment.TrieConfig{Variant: commitment.VariantHexPatriciaTrie, DeferBranchUpdates: false})
+			sharedDomains, err = execctx.NewSharedDomainsWithTrieConfig(ctx, tx, log.Root(), commitment.TrieConfig{Variant: commitment.VariantHexPatriciaTrie, DeferBranchUpdates: false})
 			if err != nil {
 				return nil, err
 			}
@@ -548,7 +548,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 
 		var stateWriter state.StateWriter
 		if commitmentHistory {
-			sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root(), commitment.TrieConfig{Variant: commitment.VariantHexPatriciaTrie, DeferBranchUpdates: false})
+			sharedDomains, err = execctx.NewSharedDomainsWithTrieConfig(ctx, tx, log.Root(), commitment.TrieConfig{Variant: commitment.VariantHexPatriciaTrie, DeferBranchUpdates: false})
 			if err != nil {
 				return nil, err
 			}
