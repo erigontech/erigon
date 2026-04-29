@@ -23,7 +23,9 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -32,6 +34,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/existence"
@@ -47,6 +50,18 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 )
+
+// viFromV controls whether VI indexes are built from .v files (when page-compressed)
+// instead of the traditional .ef-based path. Set ERIGON_VI_FROM_V=1 to enable.
+var viFromV = os.Getenv("ERIGON_VI_FROM_V") == "1"
+
+// canBuildVIFromV returns true if the .v file supports direct VI building
+// (page-compressed with V1 format and env flag enabled).
+func canBuildVIFromV(hist *seg.Decompressor) bool {
+	return viFromV &&
+		hist.CompressedPageValuesCount() > 0 &&
+		hist.CompressionFormatVersion() == seg.FileCompressionFormatV1
+}
 
 type History struct {
 	statecfg.HistCfg // keep higher than embedded InvertedIndexis to correctly shadow it's exposed variables
@@ -203,6 +218,14 @@ func (h *History) buildVi(ctx context.Context, item *FilesItem, ps *background.P
 		return fmt.Errorf("buildVI: passed item with nil decompressor %s %d-%d", h.FilenameBase, fromStep, toStep)
 	}
 
+	idxPath := h.vAccessorNewFilePath(item.StepRange(h.stepSize))
+
+	// New V-based path for page-compressed files
+	if canBuildVIFromV(item.decompressor) {
+		return h.buildVIFromV(ctx, idxPath, item.decompressor, ps)
+	}
+
+	// Existing EF-based path: needs the corresponding .ef file
 	search := &FilesItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum}
 	iiItem, ok := h.InvertedIndex.dirtyFiles.Get(search)
 	if !ok {
@@ -213,7 +236,6 @@ func (h *History) buildVi(ctx context.Context, item *FilesItem, ps *background.P
 		fromStep, toStep := item.StepRange(h.stepSize)
 		return fmt.Errorf("buildVI: got iiItem with nil decompressor %s %d-%d", h.FilenameBase, fromStep, toStep)
 	}
-	idxPath := h.vAccessorNewFilePath(item.StepRange(h.stepSize))
 
 	err = h.buildVI(ctx, idxPath, item.decompressor, iiItem.decompressor, iiItem.startTxNum, ps)
 	if err != nil {
@@ -271,6 +293,9 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 
 	seq := &multiencseq.SequenceReader{}
 	it := &multiencseq.SequenceIterator{}
+
+	var memBefore, memAfter runtime.MemStats
+	dbg.ReadMemStats(&memBefore)
 
 	for {
 		histReader.Reset(0)
@@ -333,6 +358,107 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 			break
 		}
 	}
+
+	dbg.ReadMemStats(&memAfter)
+	log.Info("[vi] build complete",
+		"method", "ef_based",
+		"file", fName,
+		"alloc_bytes", int64(memAfter.HeapAlloc)-int64(memBefore.HeapAlloc),
+		"total_alloc_bytes", memAfter.TotalAlloc-memBefore.TotalAlloc,
+		"mallocs", memAfter.Mallocs-memBefore.Mallocs,
+	)
+
+	return nil
+}
+
+// buildVIFromV builds a .vi index directly from a page-compressed .v file,
+// without needing the .ef file. This is possible because page-compressed .v
+// files store the full historyKey (txNum + accountKey) as the key for each
+// entry within pages.
+func (h *History) buildVIFromV(ctx context.Context, historyIdxPath string, hist *seg.Decompressor, ps *background.ProgressSet) error {
+	compressedPageValuesCount := hist.CompressedPageValuesCount()
+
+	defer hist.MadvSequential().DisableReadAhead()
+
+	// Count pass: iterate all entries in .v to get total count for recsplit.
+	// We must use PagedReader to count individual entries (not pages).
+	countReader := seg.NewPagedReader(hist.MakeGetter(), compressedPageValuesCount, true)
+	countReader.Reset(0)
+
+	cnt := uint64(0)
+	for countReader.HasNext() {
+		countReader.Skip()
+		cnt++
+	}
+
+	_, fName := filepath.Split(historyIdxPath)
+	p := ps.AddNew(fName, cnt)
+	defer ps.Delete(p)
+
+	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
+		KeyCount:   int(cnt),
+		Enums:      false,
+		BucketSize: recsplit.DefaultBucketSize,
+		LeafSize:   recsplit.DefaultLeafSize,
+		TmpDir:     h.dirs.Tmp,
+		IndexFile:  historyIdxPath,
+		Salt:       h.salt.Load(),
+		NoFsync:    h.noFsync,
+		Workers:    h.BuildAccessorsWorkers,
+	}, h.logger)
+	if err != nil {
+		return fmt.Errorf("create recsplit: %w", err)
+	}
+	defer rs.Close()
+	rs.LogLvl(log.LvlTrace)
+	if h._testBuildVIHook != nil {
+		h._testBuildVIHook(rs)
+	}
+
+	var memBefore, memAfter runtime.MemStats
+	dbg.ReadMemStats(&memBefore)
+
+	pagedReader := seg.NewPagedReader(hist.MakeGetter(), compressedPageValuesCount, true)
+
+	for {
+		pagedReader.Reset(0)
+		rs.SetProgress(p)
+
+		for pagedReader.HasNext() {
+			k, _, _, pageOffset := pagedReader.Next2(nil)
+			// k is the full historyKey: txNum(8 bytes) + accountKey
+			if err = rs.AddKey(k, pageOffset); err != nil {
+				return err
+			}
+
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+		}
+
+		if err = rs.Build(ctx); err != nil {
+			if rs.Collision() {
+				log.Info("Building recsplit. Collision happened. It's ok. Restarting...")
+				rs.ResetNextSalt()
+			} else {
+				return fmt.Errorf("build idx: %w", err)
+			}
+		} else {
+			break
+		}
+	}
+
+	dbg.ReadMemStats(&memAfter)
+	log.Info("[vi] build complete",
+		"method", "v_based",
+		"file", fName,
+		"alloc_bytes", int64(memAfter.HeapAlloc)-int64(memBefore.HeapAlloc),
+		"total_alloc_bytes", memAfter.TotalAlloc-memBefore.TotalAlloc,
+		"mallocs", memAfter.Mallocs-memBefore.Mallocs,
+	)
+
 	return nil
 }
 

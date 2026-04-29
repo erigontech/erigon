@@ -879,8 +879,14 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		}
 		ps.Delete(p)
 
-		if err = ht.h.buildVI(ctx, idxPath, decomp, indexIn.decompressor, indexIn.startTxNum, ps); err != nil {
-			return nil, nil, err
+		if canBuildVIFromV(decomp) {
+			if err = ht.h.buildVIFromV(ctx, idxPath, decomp, ps); err != nil {
+				return nil, nil, err
+			}
+		} else {
+			if err = ht.h.buildVI(ctx, idxPath, decomp, indexIn.decompressor, indexIn.startTxNum, ps); err != nil {
+				return nil, nil, err
+			}
 		}
 
 		if index, err = ht.h.openHashMapAccessor(idxPath); err != nil {

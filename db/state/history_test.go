@@ -2498,6 +2498,74 @@ func BenchmarkHistoryRange_MultiFile(b *testing.B) {
 	}
 }
 
+// TestBuildVIFromV_ProducesCorrectIndex verifies that building VI from .v
+// (page-compressed) produces an index that yields correct history lookups,
+// identical to the traditional .ef-based path.
+func TestBuildVIFromV_ProducesCorrectIndex(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	logger := log.New()
+
+	// Enable V-based path for this test
+	origViFromV := viFromV
+	viFromV = true
+	t.Cleanup(func() { viFromV = origViFromV })
+
+	test := func(t *testing.T, largeValues bool) {
+		t.Helper()
+		db, h, txs := filledHistory(t, largeValues, logger)
+		collateAndMergeHistory(t, db, h, txs, true)
+		checkHistoryHistory(t, h, txs)
+	}
+	t.Run("large_values", func(t *testing.T) { test(t, true) })
+	t.Run("small_values", func(t *testing.T) { test(t, false) })
+}
+
+// TestBuildVIFromV_EnvFlagSelection verifies that the viFromV flag correctly
+// gates the V-based path. Both paths must produce correct results.
+func TestBuildVIFromV_EnvFlagSelection(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	logger := log.New()
+
+	for _, useVPath := range []bool{false, true} {
+		t.Run(fmt.Sprintf("viFromV=%v", useVPath), func(t *testing.T) {
+			origViFromV := viFromV
+			viFromV = useVPath
+			t.Cleanup(func() { viFromV = origViFromV })
+
+			db, h, txs := filledHistory(t, false, logger)
+			collateAndMergeHistory(t, db, h, txs, true)
+			checkHistoryHistory(t, h, txs)
+		})
+	}
+}
+
+// TestBuildVIFromV_CollisionRetry verifies that the V-based VI building path
+// correctly handles recsplit collision retries. The PagedReader must be fully
+// reset on each retry to produce correct offsets.
+func TestBuildVIFromV_CollisionRetry(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	logger := log.New()
+
+	origViFromV := viFromV
+	viFromV = true
+	t.Cleanup(func() { viFromV = origViFromV })
+
+	test := func(t *testing.T, largeValues bool) {
+		t.Helper()
+		db, h, txs := filledHistory(t, largeValues, logger)
+		collateAndMergeHistoryWithCollisionRetry(t, db, h, txs)
+		checkHistoryHistory(t, h, txs)
+	}
+	t.Run("large_values", func(t *testing.T) { test(t, true) })
+	t.Run("small_values", func(t *testing.T) { test(t, false) })
+}
+
 // BenchmarkRangeAsOf_MultiFile is like BenchmarkRangeAsOf but keeps all
 // step-files unmerged so the heap has ~60 elements, actually exercising heap ops.
 func BenchmarkRangeAsOf_MultiFile(b *testing.B) {
