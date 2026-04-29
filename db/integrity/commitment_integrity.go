@@ -1056,7 +1056,7 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 		return err
 	}
 	defer tx.Rollback()
-	sd, err := execctx.NewSharedDomainsWithTrieConfig(ctx, tx, logger, commitment.TrieConfig{Variant: commitment.VariantHexPatriciaTrie, DeferBranchUpdates: false})
+	sd, err := execctx.NewSharedDomainsWithTrieConfig(ctx, tx, logger, commitment.NonDeferredTrieConfig())
 	if err != nil {
 		return err
 	}
@@ -1124,7 +1124,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 				return err
 			}
 			defer tx.Rollback()
-			sd, err := execctx.NewSharedDomainsWithTrieConfig(wCtx, tx, logger, commitment.TrieConfig{Variant: commitment.VariantHexPatriciaTrie, DeferBranchUpdates: false})
+			sd, err := execctx.NewSharedDomainsWithTrieConfig(wCtx, tx, logger, commitment.NonDeferredTrieConfig())
 			if err != nil {
 				return err
 			}

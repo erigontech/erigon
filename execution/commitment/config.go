@@ -80,7 +80,11 @@ func (c TrieConfig) WarmupNumWorkersOrDefault() int {
 	return c.WarmupNumWorkers
 }
 
-// TODO: more candidates for TrieConfig fields (follow-up):
-//   - hashSortBatchSize (commitment.go) — internal sort batch size, currently 10_000.
-//   - WarmupMaxDepth (warmuper.go) — currently 128, mathematically tied to max key length;
-//     not really a tunable but worth exposing as a Default* if external code ever needs it.
+// NonDeferredTrieConfig returns a TrieConfig with deferred branch updates and
+// warmup disabled. Used by RPC handlers, block builder, integrity checks, and
+// other short-lived SharedDomains that don't need production commitment features.
+func NonDeferredTrieConfig() TrieConfig {
+	return TrieConfig{
+		Variant: VariantHexPatriciaTrie,
+	}
+}

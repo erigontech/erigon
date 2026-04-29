@@ -87,7 +87,7 @@ func (r *CommitmentReplay) ComputeCustomCommitmentFromStateHistory(
 	}
 	defer ttx.Rollback()
 
-	tsd, err := execctx.NewSharedDomainsWithTrieConfig(ctx, ttx, r.logger, commitment.TrieConfig{Variant: commitment.VariantHexPatriciaTrie, DeferBranchUpdates: false})
+	tsd, err := execctx.NewSharedDomainsWithTrieConfig(ctx, ttx, r.logger, commitment.NonDeferredTrieConfig())
 	if err != nil {
 		return nil, err
 	}
