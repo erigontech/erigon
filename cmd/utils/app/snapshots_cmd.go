@@ -732,7 +732,7 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 	if args.OnlyDomain {
 		scanDirs = []string{dirs.SnapDomain}
 	} else if args.OnlyHistory {
-		scanDirs = []string{dirs.SnapHistory, dirs.SnapIdx}
+		scanDirs = []string{dirs.SnapHistory, dirs.SnapIdx, dirs.SnapAccessors}
 	}
 	for _, dirPath := range scanDirs {
 		filePaths, err := dir2.ListFiles(dirPath)
