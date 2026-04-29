@@ -18,6 +18,7 @@ package etl
 
 import (
 	"bufio"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -25,6 +26,7 @@ import (
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/errgroup"
@@ -32,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mmap"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 type dataProvider interface {
@@ -56,7 +59,7 @@ type mmapBytesReader struct {
 }
 
 // FlushToDiskAsync - `doFsync` is true only for 'critical' collectors (which should not loose).
-func FlushToDiskAsync(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl, allocator *Allocator, inProgress *atomic.Bool) (dataProvider, error) {
+func FlushToDiskAsync(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl, allocator *Allocator, inProgress *atomic.Bool, warmupDB kv.RoDB, warmupTbl string) (dataProvider, error) {
 	if b.Len() == 0 {
 		if allocator != nil {
 			allocator.Put(b)
@@ -78,10 +81,46 @@ func FlushToDiskAsync(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl, al
 		}
 		_, fName := filepath.Split(provider.file.Name())
 		log.Log(lvl, fmt.Sprintf("[%s] Flushed buffer file", logPrefix), "name", fName)
+
+		if warmupDB != nil {
+			warmupSortedBuffer(context.Background(), warmupDB, warmupTbl, b)
+		}
 		return nil
 	})
 
 	return provider, nil
+}
+
+func warmupSortedBuffer(ctx context.Context, db kv.RoDB, table string, b Buffer) {
+	if b.Len() <= 100 {
+		return
+	}
+	t := time.Now()
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	roTx, err := db.BeginRo(ctx)
+	if err != nil {
+		return
+	}
+	defer roTx.Rollback()
+	cursor, err := roTx.Cursor(table)
+	if err != nil {
+		return
+	}
+	defer cursor.Close()
+
+	n := b.Len()
+	seeked := 0
+	for i := 0; i < n; i += 10 {
+		if ctx.Err() != nil {
+			break
+		}
+		k, _ := b.Get(i)
+		cursor.Seek(k) //nolint:errcheck
+		seeked++
+	}
+	log.Debug("[etl] warmup", "table", table, "keys", n, "seeked", seeked, "took", time.Since(t))
 }
 
 // FlushToDisk - `doFsync` is true only for 'critical' collectors (which should not loose).

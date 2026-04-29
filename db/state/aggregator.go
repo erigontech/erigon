@@ -209,6 +209,7 @@ func (a *Aggregator) RegisterDomain(cfg statecfg.DomainCfg, salt *uint32, dirs d
 	if err != nil {
 		return err
 	}
+	a.d[cfg.Name].db = a.db
 	a.d[cfg.Name].salt.Store(salt)
 	a.AddDependencyBtwnHistoryII(cfg.Name)
 	return nil

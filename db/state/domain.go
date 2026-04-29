@@ -72,6 +72,7 @@ var traceGetLatest, _ = kv.String2Domain(dbg.EnvString("AGG_TRACE_GET_LATEST", "
 type Domain struct {
 	statecfg.DomainCfg // keep it above *History to avoid unexpected shadowing
 	*History
+	db kv.RoDB
 
 	// Schema:
 	//  - .kv - key -> value
@@ -380,8 +381,12 @@ func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWrit
 		h:         dt.ht.newWriter(tmpdir, discardHistory),
 	}
 	if !discard {
-		w.values = etl.NewCollectorWithAllocator(dt.d.Name.String()+"domain.flush", tmpdir, etl.SmallSortableBuffers, dt.d.logger).
+		c := etl.NewCollectorWithAllocator(dt.d.Name.String()+"domain.flush", tmpdir, etl.SmallSortableBuffers, dt.d.logger).
 			LogLvl(log.LvlTrace).SortAndFlushInBackground(true)
+		if dt.d.db != nil {
+			c.WithWarmup(dt.d.db, dt.d.ValuesTable)
+		}
+		w.values = c
 	}
 	return w
 }
