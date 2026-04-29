@@ -706,7 +706,7 @@ var (
 	}
 	SnapSkipStateSnapshotDownloadFlag = cli.BoolFlag{
 		Name:  "snap.skip-state-snapshot-download",
-		Usage: "Skip state download and start from genesis block",
+		Usage: "Skip state snapshot download and re-execute from genesis to build state. Unlike --prune.mode=blocks which downloads state snapshots then prunes history, this flag skips the download entirely.",
 		Value: false,
 	}
 	SnapP2PManifestFlag = cli.BoolFlag{
@@ -1164,6 +1164,11 @@ var (
 		Name:  "exec.workers",
 		Usage: "Parallel executor worker count (equivalent to EXEC3_WORKERS). Default: half the number of CPU cores, other half reserved for snapshots build/merge/prune.",
 		Value: runtime.NumCPU() / 2,
+	}
+	ExecSerialFlag = cli.BoolFlag{
+		Name:  "exec.serial",
+		Usage: "Force serial execution by clamping the parallel executor to a single worker. Wins over --exec.workers and EXEC3_WORKERS — use to disable parallelism for diagnostics or like-for-like baseline comparisons.",
+		Value: false,
 	}
 	ExecNoMergeFlag = cli.BoolFlag{
 		Name:  "exec.no-merge",
@@ -2002,6 +2007,11 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		n := ctx.Int(ExecWorkersFlag.Name)
 		dbg.SetExec3Workers(n)
 		cfg.ExecWorkerCount = n
+	}
+	// --exec.serial wins over --exec.workers / EXEC3_WORKERS: clamp to 1.
+	if ctx.IsSet(ExecSerialFlag.Name) && ctx.Bool(ExecSerialFlag.Name) {
+		dbg.SetExec3Workers(1)
+		cfg.ExecWorkerCount = 1
 	}
 	if ctx.IsSet(ExecNoMergeFlag.Name) {
 		dbg.SetNoMerge(ctx.Bool(ExecNoMergeFlag.Name))
