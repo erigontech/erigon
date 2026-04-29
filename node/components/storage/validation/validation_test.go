@@ -99,8 +99,12 @@ func TestDefaultStage1Chain(t *testing.T) {
 	chain := DefaultStage1Chain()
 	require.NotEmpty(t, chain)
 
-	// Pass: a sane file.
-	good := &snapshot.FileEntry{Name: "v1.0-accounts.0-1024.kv", FromStep: 0, ToStep: 1024}
+	// Pass: a sane file. Note Kind="" matches .kv (KindKV is the
+	// empty-string sentinel for primary files).
+	good := &snapshot.FileEntry{
+		Name: "v1.0-accounts.0-1024.kv", Domain: "accounts",
+		FromStep: 0, ToStep: 1024, Kind: snapshot.KindKV,
+	}
 	require.NoError(t, chain.Validate(good, nil))
 
 	// Fail: empty name takes out NameNotEmpty.
@@ -108,6 +112,62 @@ func TestDefaultStage1Chain(t *testing.T) {
 	err := chain.Validate(bad, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "name_not_empty")
+}
+
+func TestKindConsistencyFromName(t *testing.T) {
+	v := KindConsistencyFromName{}
+
+	cases := []struct {
+		name string
+		kind snapshot.FileKind
+		ok   bool
+	}{
+		// Domain primaries — the Kind="" / KindKV case.
+		{"v1.0-accounts.0-1024.kv", snapshot.KindKV, true},
+		{"v1.0-accounts.0-1024.kv", snapshot.KindHistory, false},
+
+		// Domain history.
+		{"v1.0-accounts.0-1024.v", snapshot.KindHistory, true},
+		{"v1.0-accounts.0-1024.v", snapshot.KindKV, false},
+
+		// Domain inverted index.
+		{"v1.0-accounts.0-1024.ef", snapshot.KindIdx, true},
+		{"v1.0-accounts.0-1024.ef", snapshot.KindHistory, false},
+
+		// Block primaries (top-level .seg, no caplin/ prefix).
+		{"v1.0-000000-000500-headers.seg", snapshot.KindKV, true},
+		{"v1.0-000000-000500-headers.seg", snapshot.KindCaplin, false},
+
+		// Caplin beacon archives.
+		{"caplin/v1.0-beaconblocks-0.seg", snapshot.KindCaplin, true},
+		{"caplin/v1.0-beaconblocks-0.seg", snapshot.KindKV, false},
+
+		// Meta (chain config).
+		{"erigondb.toml", snapshot.KindMeta, true},
+		{"erigondb.toml", snapshot.KindSalt, false},
+
+		// Salts.
+		{"salt-blocks.txt", snapshot.KindSalt, true},
+		{"salt-state.txt", snapshot.KindSalt, true},
+		{"salt-blocks.txt", snapshot.KindMeta, false},
+
+		// Unrecognised pattern — accept (validator can't speak to it).
+		{"unknown.bin", snapshot.KindKV, true},
+		{"unknown.bin", snapshot.KindHistory, true},
+	}
+
+	for _, tc := range cases {
+		err := v.Validate(&snapshot.FileEntry{Name: tc.name, Kind: tc.kind}, nil)
+		if tc.ok {
+			require.NoError(t, err, "name=%q kind=%q must accept", tc.name, tc.kind)
+			continue
+		}
+		require.Error(t, err, "name=%q kind=%q must reject", tc.name, tc.kind)
+		require.Contains(t, err.Error(), "implies Kind=")
+	}
+
+	// Nil entry rejected.
+	require.Error(t, v.Validate(nil, nil))
 }
 
 func TestBytesContent_RoundTrip(t *testing.T) {

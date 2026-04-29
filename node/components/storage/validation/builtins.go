@@ -18,6 +18,7 @@ package validation
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
 )
@@ -69,6 +70,73 @@ func (RangeOrdering) Validate(file *snapshot.FileEntry, _ ContentSource) error {
 	return nil
 }
 
+// KindConsistencyFromName rejects FileEntry values whose declared
+// Kind disagrees with what the Name field's pattern implies.
+//
+// Mappings (the only shapes the snapshot subsystem produces):
+//
+//	*.kv                                → KindKV    (Domain non-empty)
+//	*.v                                 → KindHistory
+//	*.ef                                → KindIdx
+//	caplin/*.seg                        → KindCaplin
+//	*.seg (no caplin/ prefix)           → KindKV    (Domain empty — block file)
+//	erigondb.toml                       → KindMeta
+//	salt-*.txt                          → KindSalt
+//
+// Names that don't match any pattern are accepted (the validator
+// can't speak to them) — the chain has other validators that gate
+// shape on different axes.
+type KindConsistencyFromName struct{}
+
+// Name implements Validator.
+func (KindConsistencyFromName) Name() string { return "kind_consistency_from_name" }
+
+// Validate implements Validator.
+func (KindConsistencyFromName) Validate(file *snapshot.FileEntry, _ ContentSource) error {
+	if file == nil {
+		return fmt.Errorf("nil file entry")
+	}
+	expected, ok := inferKindFromName(file.Name)
+	if !ok {
+		return nil // unrecognised pattern; can't speak to this file
+	}
+	if file.Kind != expected {
+		return fmt.Errorf("name %q implies Kind=%q but entry has Kind=%q",
+			file.Name, expected, file.Kind)
+	}
+	return nil
+}
+
+// inferKindFromName maps a snapshot file's name to the Kind the
+// snapshot subsystem would assign to it. Returns ok=false for
+// unrecognised patterns; the caller treats unknown as "can't speak
+// to this file" rather than reject.
+func inferKindFromName(name string) (snapshot.FileKind, bool) {
+	if name == "" {
+		return "", false
+	}
+	if name == "erigondb.toml" {
+		return snapshot.KindMeta, true
+	}
+	if strings.HasPrefix(name, "salt-") && strings.HasSuffix(name, ".txt") {
+		return snapshot.KindSalt, true
+	}
+	switch {
+	case strings.HasSuffix(name, ".kv"):
+		return snapshot.KindKV, true
+	case strings.HasSuffix(name, ".v"):
+		return snapshot.KindHistory, true
+	case strings.HasSuffix(name, ".ef"):
+		return snapshot.KindIdx, true
+	case strings.HasSuffix(name, ".seg"):
+		if strings.HasPrefix(name, "caplin/") {
+			return snapshot.KindCaplin, true
+		}
+		return snapshot.KindKV, true
+	}
+	return "", false
+}
+
 // DefaultStage1Chain returns the baseline stage-1 validator chain
 // every storage adapter starts with when stage-1 validation is
 // enabled. Operators with custom needs append to this slice — the
@@ -77,5 +145,6 @@ func DefaultStage1Chain() Chain {
 	return Chain{
 		NameNotEmpty{},
 		RangeOrdering{},
+		KindConsistencyFromName{},
 	}
 }
