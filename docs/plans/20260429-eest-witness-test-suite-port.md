@@ -71,12 +71,12 @@
 - Create: `execution/tests/eest_zkevm_witness/testmain_test.go`
 - Create: `execution/tests/eest_zkevm_witness/witness_test.go`
 
-- [ ] Create `testmain_test.go` with `TestMain` entrypoint calling `testutil.RunTestMain`
-- [ ] Create `witness_test.go` with `TestExecutionSpecWitness` function
-- [ ] Implement `compareWitness` for element-by-element ordered comparison
-- [ ] Implement `reportSetDiff` for unordered set-diff diagnostics
-- [ ] Add `bt.Fails(".", ...)` annotation marking all 93 fixtures as expected failures
-- [ ] Verify file compiles: `go build ./execution/tests/eest_zkevm_witness/...`
+- [x] Create `testmain_test.go` with `TestMain` entrypoint calling `testutil.RunTestMain`
+- [x] Create `witness_test.go` with `TestExecutionSpecWitness` function
+- [x] Implement `compareWitness` for element-by-element ordered comparison
+- [x] Implement `reportSetDiff` for unordered set-diff diagnostics
+- [x] Add `bt.Fails(".", ...)` annotation marking all 93 fixtures as expected failures
+- [x] Verify file compiles: `go build ./execution/tests/eest_zkevm_witness/...`
 
 ### Task 4: Wire CI test group and fixture fetching
 
