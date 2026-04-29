@@ -817,13 +817,14 @@ func (a *Aggregator) WarmupDB() {
 			defer c.Close()
 			// .Next() does return zero-copy pointers to mmap without touching leaf pages of db's btree
 			// so basically it's branch-nodes of btree warmup
-			for k, _, err := c.First(); k != nil && err == nil; k, _, err = c.Next() {
+			for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
+				if err != nil {
+					a.logger.Warn("[agg] WarmupDB scan error", "table", name, "err", err)
+					return
+				}
 				if a.ctx.Err() != nil {
 					return
 				}
-			}
-			if err != nil {
-				a.logger.Warn("[agg] WarmupDB scan error", "table", name, "err", err)
 			}
 		}()
 	}
