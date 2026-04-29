@@ -84,8 +84,8 @@
 - Modify: `tools/test-groups`
 - Modify: `.github/actions/setup-erigon/action.yml`
 
-- [ ] Add `("execution-eest-zkevm", {"./execution/tests/eest_zkevm_witness/..."})` to `tools/test-groups` between `execution-eest-devnet` and `execution-tests`
-- [ ] Append `,blockchain_tests_zkevm/**/*.json` to git-lfs pull pattern in `setup-erigon/action.yml`
+- [x] Add `("execution-eest-zkevm", {"./execution/tests/eest_zkevm_witness/..."})` to `tools/test-groups` between `execution-eest-devnet` and `execution-tests`
+- [x] Append `,blockchain_tests_zkevm/**/*.json` to git-lfs pull pattern in `setup-erigon/action.yml`
 
 ### Task 5: Lint and build verification
 

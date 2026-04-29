@@ -17,6 +17,7 @@ MODULE = "github.com/erigontech/erigon"
 GROUPS: OrderedDict[str, set[str]] = OrderedDict([
     ("execution-eest-blockchain", {"./execution/tests/eest_blockchain/..."}),
     ("execution-eest-devnet",     {"./execution/tests/eest_devnet/..."}),
+    ("execution-eest-zkevm",      {"./execution/tests/eest_zkevm_witness/..."}),
     ("execution-tests",           {"./execution/tests/..."}),
     ("execution-other",         {"./execution/..."}),
     ("consensus",               {"./cl/..."}),
