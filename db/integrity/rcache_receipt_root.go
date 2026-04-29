@@ -42,17 +42,17 @@ func CheckReceiptRootIntegrity(ctx context.Context, sc SamplerCfg, db kv.Tempora
 	}
 	defer tx.Rollback()
 
-	rcacheDomainProgress := tx.Debug().DomainProgress(kv.RCacheDomain)
-	fromBlock := uint64(1)
-	toBlock, _, _ := txNumsReader.FindBlockNum(ctx, tx, rcacheDomainProgress)
-
+	_ = txNumsReader
 	if err := ValidateDomainProgress(ctx, db, kv.RCacheDomain, txNumsReader); err != nil {
 		return err
 	}
 
-	log.Info("[integrity] ReceiptRootIntegrity starting", "fromBlock", fromBlock, "toBlock", toBlock)
-
-	return parallelChunkCheck(ctx, sc.NewSampler(), fromBlock, toBlock, db, blockReader, failFast, string(ReceiptRootIntegrity), ReceiptRootIntegrityRange)
+	// debug: focus on a single failing block, skip parallel chunking.
+	fromBlock := uint64(49401)
+	toBlock := uint64(49401)
+	log.Info("[integrity] ReceiptRootIntegrity starting (debug single-block)", "fromBlock", fromBlock, "toBlock", toBlock)
+	_ = sc
+	return ReceiptRootIntegrityRange(ctx, fromBlock, toBlock, db, blockReader, failFast)
 }
 
 // ReceiptRootIntegrityRange verifies receipt roots for a range of blocks.
@@ -104,18 +104,20 @@ func ReceiptRootIntegrityRange(ctx context.Context, fromBlock, toBlock uint64, d
 	verifyAndAdvance := func() error {
 		computedRoot := types.DeriveSha(receipts)
 		if computedRoot != header.ReceiptHash {
-			log.Warn("[integrity] ReceiptRootIntegrity dump",
-				"block", blockNum, "numReceipts", len(receipts),
-				"computed", computedRoot, "header", header.ReceiptHash,
-				"headerTxRoot", header.TxHash)
-			for i, r := range receipts {
-				log.Warn("[integrity] receipt",
-					"block", blockNum, "i", i,
-					"type", r.Type, "txIdx", r.TransactionIndex,
-					"status", r.Status, "postStateLen", len(r.PostState),
-					"cumGas", r.CumulativeGasUsed, "gasUsed", r.GasUsed,
-					"numLogs", len(r.Logs), "firstLogIdx", r.FirstLogIndexWithinBlock,
-					"bloomZero", r.Bloom == (types.Bloom{}))
+			if blockNum == 49401 {
+				log.Warn("[integrity] ReceiptRootIntegrity dump",
+					"block", blockNum, "numReceipts", len(receipts),
+					"computed", computedRoot, "header", header.ReceiptHash,
+					"headerTxRoot", header.TxHash)
+				for i, r := range receipts {
+					log.Warn("[integrity] receipt",
+						"block", blockNum, "i", i,
+						"type", r.Type, "txIdx", r.TransactionIndex,
+						"status", r.Status, "postStateLen", len(r.PostState),
+						"cumGas", r.CumulativeGasUsed, "gasUsed", r.GasUsed,
+						"numLogs", len(r.Logs), "firstLogIdx", r.FirstLogIndexWithinBlock,
+						"bloomZero", r.Bloom == (types.Bloom{}))
+				}
 			}
 			mismatch := fmt.Errorf("%w: ReceiptRootIntegrity: receipt root mismatch at block %d: computed=%s, header=%s",
 				ErrIntegrity, blockNum, computedRoot, header.ReceiptHash)
