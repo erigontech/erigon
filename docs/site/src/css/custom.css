@@ -265,6 +265,73 @@ details.alert.alert--info summary {
   color: rgba(255, 255, 255, 0.75);
 }
 
+/* ─── 404 page hero ──────────────────────────────────────────────────────── */
+
+.hero-404 {
+  padding: 6rem 2rem 5rem;
+  text-align: center;
+}
+.hero-404-number {
+  font-family: 'Montserrat', sans-serif;
+  font-weight: 800;
+  font-size: clamp(5rem, 18vw, 10rem);
+  line-height: 1;
+  color: #EF7716;
+  margin-bottom: 1.5rem;
+}
+.hero-404-title {
+  font-family: 'Montserrat', sans-serif;
+  font-weight: 800;
+  font-size: clamp(1.5rem, 4vw, 2.25rem);
+  margin: 0 0 1rem !important;
+}
+.hero-404-desc {
+  font-size: 1.05rem;
+  color: var(--ifm-color-emphasis-700);
+  max-width: 480px;
+  margin: 0 auto 2.5rem !important;
+  line-height: 1.65;
+}
+.hero-404-actions {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+/* ─── 404 page cards section ─────────────────────────────────────────────── */
+
+.cards-404-section {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 3rem 2rem 5rem;
+}
+.cards-404-heading {
+  font-family: 'Montserrat', sans-serif;
+  font-weight: 800;
+  font-size: 1.1rem;
+  margin-bottom: 1.5rem !important;
+  color: var(--ifm-color-emphasis-600);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+.cards-404-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 1rem;
+}
+.card-404-label {
+  font-weight: 700;
+  font-size: 0.95rem;
+  margin-bottom: 0.35rem;
+  color: var(--ifm-font-color-base);
+}
+.card-404-desc {
+  font-size: 0.85rem;
+  color: var(--ifm-color-emphasis-700);
+  line-height: 1.5;
+}
+
 /* ─── 404 page cards ─────────────────────────────────────────────────────── */
 
 .card-404 {

@@ -4,17 +4,23 @@ import type * as Preset from '@docusaurus/preset-classic';
 
 const versionReplace = require('./src/remark/version-replace.js');
 
+function githubHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {Accept: 'application/vnd.github.v3+json'};
+  if (process.env.GITHUB_TOKEN) headers['Authorization'] = `Bearer ${process.env.GITHUB_TOKEN}`;
+  return headers;
+}
+
 async function fetchLatestVersion(): Promise<string> {
   try {
     const res = await fetch(
       'https://api.github.com/repos/erigontech/erigon/releases/latest',
-      {headers: {Accept: 'application/vnd.github.v3+json'}},
+      {headers: githubHeaders()},
     );
-    if (!res.ok) return '3.4.x';
+    if (!res.ok) return 'latest';
     const data = await res.json() as {tag_name?: string};
-    return data.tag_name?.replace(/^v/, '') ?? '3.4.x';
+    return data.tag_name?.replace(/^v/, '') ?? 'latest';
   } catch {
-    return '3.4.x';
+    return 'latest';
   }
 }
 
@@ -22,14 +28,14 @@ async function fetchLatestV33Version(): Promise<string> {
   try {
     const res = await fetch(
       'https://api.github.com/repos/erigontech/erigon/releases?per_page=50',
-      {headers: {Accept: 'application/vnd.github.v3+json'}},
+      {headers: githubHeaders()},
     );
-    if (!res.ok) return '3.3.10';
+    if (!res.ok) return 'latest';
     const releases = await res.json() as Array<{tag_name: string; prerelease: boolean}>;
     const latest = releases.find((r) => !r.prerelease && r.tag_name.startsWith('v3.3.'));
-    return latest?.tag_name.replace(/^v/, '') ?? '3.3.10';
+    return latest?.tag_name.replace(/^v/, '') ?? 'latest';
   } catch {
-    return '3.3.10';
+    return 'latest';
   }
 }
 
@@ -50,6 +56,7 @@ export default async function createConfig(): Promise<Config> {
     trailingSlash: false,
     onBrokenLinks: 'throw',
     onBrokenMarkdownLinks: 'throw',
+    onBrokenAnchors: 'throw',
     i18n: {defaultLocale: 'en', locales: ['en']},
 
     customFields: {latestVersion},

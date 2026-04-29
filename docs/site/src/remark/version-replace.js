@@ -26,7 +26,7 @@ function versionReplace(options) {
   }
 
   return function (tree, vfile) {
-    const isV33 = vfile && vfile.path && vfile.path.includes('version-v3.3');
+    const isV33 = vfile && vfile.path && vfile.path.split('/').includes('version-v3.3');
     visit(tree, isV33 ? v33Version : currentVersion);
   };
 }
