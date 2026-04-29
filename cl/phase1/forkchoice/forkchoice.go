@@ -223,7 +223,7 @@ func NewForkChoiceStore(
 		Epoch: state2.Epoch(anchorState.BeaconState),
 	}
 
-	verifiedExecutionPayload, err := lru.New[common.Hash, struct{}](1024)
+	verifiedExecutionPayload, err := lru.New[common.Hash, struct{}](65536)
 	if err != nil {
 		return nil, err
 	}
