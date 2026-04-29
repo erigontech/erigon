@@ -24,6 +24,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -92,35 +93,49 @@ func FlushToDiskAsync(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl, al
 }
 
 func warmupSortedBuffer(ctx context.Context, db kv.RoDB, table string, b Buffer) {
-	if b.Len() <= 100 {
+	n := b.Len()
+	if n <= 100 {
 		return
 	}
 	t := time.Now()
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	roTx, err := db.BeginRo(ctx)
-	if err != nil {
-		return
-	}
-	defer roTx.Rollback()
-	cursor, err := roTx.Cursor(table)
-	if err != nil {
-		return
-	}
-	defer cursor.Close()
+	const stride = 10
+	workers := min(runtime.NumCPU(), 4)
+	chunkSize := ((n/stride + workers - 1) / workers) * stride
 
-	n := b.Len()
-	seeked := 0
-	for i := 0; i < n; i += 10 {
-		if ctx.Err() != nil {
+	var wg sync.WaitGroup
+	for w := range workers {
+		from := w * chunkSize
+		if from >= n {
 			break
 		}
-		k, _ := b.Get(i)
-		cursor.Seek(k) //nolint:errcheck
-		seeked++
+		to := min(from+chunkSize, n)
+		wg.Add(1)
+		go func(from, to int) {
+			defer wg.Done()
+			roTx, err := db.BeginRo(ctx)
+			if err != nil {
+				return
+			}
+			defer roTx.Rollback()
+			cursor, err := roTx.Cursor(table)
+			if err != nil {
+				return
+			}
+			defer cursor.Close()
+			for i := from; i < to; i += stride {
+				if ctx.Err() != nil {
+					return
+				}
+				k, _ := b.Get(i)
+				cursor.Seek(k) //nolint:errcheck
+			}
+		}(from, to)
 	}
-	log.Debug("[etl] warmup", "table", table, "keys", n, "seeked", seeked, "took", time.Since(t))
+	wg.Wait()
+	log.Debug("[etl] warmup", "table", table, "keys", n, "seeked", n/stride, "took", time.Since(t))
 }
 
 // FlushToDisk - `doFsync` is true only for 'critical' collectors (which should not loose).

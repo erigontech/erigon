@@ -138,7 +138,7 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 		provider := KeepInRAM(c.buf)
 		c.allFlushed = true
 		c.dataProviders = append(c.dataProviders, provider)
-		if c.warmupDB != nil {
+		if c.warmupDB != nil && c.buf.Len() > 100 {
 			ctx, cancel := context.WithCancel(context.Background())
 			c.warmupCancel = cancel
 			buf := c.buf
@@ -200,13 +200,7 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 		}
 	}
 
-	if c.warmupCancel != nil {
-		defer func() {
-			c.warmupCancel()
-			c.warmupWg.Wait()
-			c.warmupCancel = nil
-		}()
-	}
+	defer c.stopWarmup()
 
 	bucket := toBucket
 
@@ -287,12 +281,16 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	return nil
 }
 
-func (c *Collector) Close() {
+func (c *Collector) stopWarmup() {
 	if c.warmupCancel != nil {
 		c.warmupCancel()
 		c.warmupWg.Wait()
 		c.warmupCancel = nil
 	}
+}
+
+func (c *Collector) Close() {
+	c.stopWarmup()
 	if c.buf != nil { //idempotency
 		if c.allocator != nil {
 			c.allocator.Put(c.buf)
