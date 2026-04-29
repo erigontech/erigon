@@ -255,6 +255,9 @@ type stateChangesClient interface {
 }
 
 func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool) error {
+	if len(chain.Blocks) == 0 {
+		return nil
+	}
 	for _, block := range chain.Blocks {
 		if err := block.HashCheck(true); err != nil {
 			return err
