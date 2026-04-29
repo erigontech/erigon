@@ -21,6 +21,10 @@ testnet is stable or `max-attempts` is reached.
 
 ## Inputs
 
+The model parses these arguments and binds them to the shell variables used in the
+bash blocks below: `$1`/`$2` are positional; `duration=Nm` → `duration_secs`,
+`auto=true|false` → `auto`, `max-attempts=N` → `max_attempts`.
+
 | Argument | Default | Notes |
 |---|---|---|
 | `$1` config path | required | Path to an `ethereum-package` YAML (same schema as `.github/workflows/kurtosis/*.io`). If omitted, list those files and ask the user to pick. |
@@ -71,19 +75,10 @@ docker build -t test/erigon:current --build-arg BINARIES="erigon caplin" .
 `caplin` is required in `BINARIES` because some configs (e.g.
 `caplin-minimal-assertoor.io`) use erigon as the CL via the same image.
 
-Skip the rebuild if the image is fresh — i.e. its created timestamp is newer than the
-most recent erigon source change:
-
-```bash
-img_ts=$(docker image inspect test/erigon:current --format '{{.Created}}' 2>/dev/null \
-         | xargs -I{} date -d {} +%s 2>/dev/null || echo 0)
-src_ts=$(git log -1 --format=%ct)
-if [ "$img_ts" -gt "$src_ts" ]; then
-  echo "Image is fresh — skipping rebuild"
-else
-  docker build -t test/erigon:current --build-arg BINARIES="erigon caplin" .
-fi
-```
+Always rebuild before each run — the same approach the CI uses. BuildKit's layer cache
+makes the no-op rebuild fast, and the fix → rebuild → rerun loop necessarily picks up
+uncommitted source edits this way (a freshness check against `git log` would miss them
+and silently run a stale image).
 
 If the user asks for a from-scratch binary build instead of docker, point them at
 `/erigon-build`; this skill itself uses docker because the kurtosis configs reference a
@@ -139,15 +134,16 @@ Once `kurtosis run` returns, capture service names and host-mapped ports:
 ```bash
 kurtosis enclave inspect "$ENCLAVE" --full-uuids
 
-# Pick the first erigon EL service
+# Pick the first erigon EL service. `kurtosis enclave inspect` prints columnar
+# rows (UUID first, then service name), so we match against field 2.
 EL_SERVICE=$(kurtosis enclave inspect "$ENCLAVE" --full-uuids 2>/dev/null \
-  | grep -oE '^el-[0-9]+-erigon-[a-z]+' | head -1)
+  | awk '$2 ~ /^el-[0-9]+-erigon-[a-z]+$/ {print $2; exit}')
 EL_RPC_PORT=$(kurtosis port print "$ENCLAVE" "$EL_SERVICE" rpc 2>/dev/null \
   | sed -E 's|.*:([0-9]+).*|\1|')
 
 # CL endpoint (whichever client paired with that EL)
 CL_SERVICE=$(kurtosis enclave inspect "$ENCLAVE" --full-uuids 2>/dev/null \
-  | grep -oE '^cl-[0-9]+-[a-z]+-erigon' | head -1)
+  | awk '$2 ~ /^cl-[0-9]+-[a-z]+-erigon$/ {print $2; exit}')
 CL_HTTP_PORT=$(kurtosis port print "$ENCLAVE" "$CL_SERVICE" http 2>/dev/null \
   | sed -E 's|.*:([0-9]+).*|\1|')
 
@@ -166,14 +162,21 @@ failure trips. All three are captured in the run history.
 
 ### Check A — Block height progress
 
+`duration_secs` is the parsed `duration=Nm` input (default 1200). The loop exits cleanly
+when the duration elapses (→ STABLE) or when the chain stalls past `3 × seconds_per_slot`
+(→ STALL).
+
 ```bash
+duration_secs=${duration_secs:-1200}
 prev=0
 slot_secs=$(grep -E '^\s*seconds_per_slot:' "$CONFIG" | awk '{print $2}'); slot_secs=${slot_secs:-12}
 poll_interval=$(( slot_secs * 2 ))
 stall_window=$(( slot_secs * 3 ))
-deadline=$(( $(date +%s) + stall_window ))
+start=$(date +%s)
+end=$(( start + duration_secs ))
+stall_deadline=$(( start + stall_window ))
 
-while true; do
+while [ "$(date +%s)" -lt "$end" ]; do
   height_hex=$(curl -s "http://127.0.0.1:${EL_RPC_PORT}" \
     -H 'Content-Type: application/json' \
     -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
@@ -182,17 +185,21 @@ while true; do
   echo "[$(date -u +%H:%M:%S)] height=$height"
   if [ "$height" -gt "$prev" ]; then
     prev=$height
-    deadline=$(( $(date +%s) + stall_window ))
-  elif [ "$(date +%s)" -gt "$deadline" ]; then
-    echo "STALL: chain not progressing for >${stall_window}s"
+    stall_deadline=$(( $(date +%s) + stall_window ))
+  elif [ "$(date +%s)" -gt "$stall_deadline" ]; then
+    echo "STALL: chain not progressing for >${stall_window}s (last height=$prev)"
     break
   fi
   sleep "$poll_interval"
 done
+
+if [ "$(date +%s)" -ge "$end" ]; then
+  echo "STABLE: chain progressed for full ${duration_secs}s window (final height=$prev)"
+fi
 ```
 
-Pass: height advances ≥1 within every `2 × seconds_per_slot` window. Fail: no advance
-for `>3 × seconds_per_slot`.
+Pass: height advances ≥1 within every `2 × seconds_per_slot` window for the full
+`duration_secs`. Fail: no advance for `>3 × seconds_per_slot`.
 
 ### Check B — Assertoor results
 
@@ -208,7 +215,7 @@ stuck `pending` / `running` past 3× its expected duration. The assertoor web UI
 ### Check C — Erigon-focused log scan
 
 ```bash
-kurtosis service logs "$ENCLAVE" "$EL_SERVICE" --follow=false 2>&1 \
+kurtosis service logs "$ENCLAVE" "$EL_SERVICE" 2>&1 \
   | grep -iE 'panic|fatal|^ERROR|"lvl"="error"|consensus failure|invalid block' \
   | tail -200
 ```
@@ -218,9 +225,9 @@ every EL/CL service:
 
 ```bash
 for svc in $(kurtosis enclave inspect "$ENCLAVE" --full-uuids \
-             | grep -oE '^(el|cl|vc)-[0-9]+-[a-z]+-[a-z]+'); do
+             | awk '$2 ~ /^(el|cl|vc)-[0-9]+-[a-z]+-[a-z]+$/ {print $2}'); do
   echo "=== $svc ==="
-  kurtosis service logs "$ENCLAVE" "$svc" --follow=false 2>&1 \
+  kurtosis service logs "$ENCLAVE" "$svc" 2>&1 \
     | grep -iE 'error|panic|fatal' | tail -30
 done
 ```
@@ -243,8 +250,7 @@ first.
 
 ## Debugging methodology — triage erigon vs peer-client vs network/config
 
-The user's rule: **challenge other implementations against erigon — figure out who is
-in the wrong**. Encode it as a deterministic decision tree:
+Decision tree:
 
 1. **Reproduce.** A single one-shot failure gets one re-run before triaging. Truly
    intermittent failures still get triaged, but flag them as flaky.
@@ -266,16 +272,18 @@ in the wrong**. Encode it as a deterministic decision tree:
 5. **Rule out config drift.** Diff the YAML's `el_extra_params`, `network_params`, and
    fork epochs against the equivalent CI suite under `.github/workflows/kurtosis/`.
    Mismatches there are config bugs, not erigon bugs.
-6. **Rule out enclave plumbing.** `kurtosis service exec <enclave> <svc> -- ping
-   <other_svc>` to verify network reachability; check JWT mounting via
-   `kurtosis service exec <enclave> <el-svc> -- ls -la /jwt/`.
+6. **Rule out enclave plumbing.** `kurtosis service exec <enclave> <svc> "ping
+   <other_svc>"` to verify network reachability; check JWT mounting via
+   `kurtosis service exec <enclave> <el-svc> "ls -la /jwt/"`. The CLI takes the
+   command as a single positional arg (multi-word commands must be quoted) — there
+   is no `--` separator.
 
 ### Triage table
 
 | Symptom | Likely owner | Next action |
 |---|---|---|
 | Erigon panic with stack trace inside `execution/...` | Erigon | Capture stack, find offending call in repo, propose fix |
-| `eth_newPayloadV4` returns INVALID; CL logs say block is valid; assertoor passes elsewhere | Erigon (likely block-validation divergence) | Replay the payload via `eth_call` / debug_traceBlockByNumber; check fork activation timestamp |
+| `eth_newPayloadV4` returns INVALID; CL logs say block is valid; assertoor passes elsewhere | Erigon (likely block-validation divergence) | Replay the payload via `debug_traceBlockByNumber` / `debug_traceBlockByHash`; check fork activation timestamp |
 | All EL clients stop progressing after a specific slot | Config (fork epoch wrong) or shared dep | Diff YAML against working CI suite; check ethereum-package branch |
 | Assertoor `block-proposal-check` fails on slot N for `vc-N-erigon-…` | Erigon block builder | Fetch block N body via RPC; replay locally |
 | Assertoor `synchronized-check` fails | Network plumbing | Inspect peer counts; `kurtosis service exec` connectivity test |
@@ -342,4 +350,4 @@ docker image prune -f
 | `eth_blockNumber` advances but assertoor reports timeout | Slot time / preset mismatch; check `seconds_per_slot` and `preset` in YAML |
 | Erigon image stale despite rebuild | `docker image rm test/erigon:current && docker build ...` to force; check BuildKit cache scope |
 | Port already allocated | Another enclave is running — `kurtosis enclave ls` then `kurtosis enclave rm -f <old>` |
-| Engine API JWT mismatch in EL logs | Check `kurtosis service exec <enclave> el-1-erigon-… -- ls -la /jwt/`; restart enclave if missing |
+| Engine API JWT mismatch in EL logs | Check `kurtosis service exec <enclave> el-1-erigon-… "ls -la /jwt/"`; restart enclave if missing |
