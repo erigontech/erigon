@@ -42,16 +42,20 @@ package freezeblocks
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	uint256 "github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 const benchBlockCount = 1_000
@@ -96,6 +100,7 @@ func BenchmarkCanonicalHash_MDBXLookup(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
+	defer rwTx.Rollback() //nolint:gocritic
 	for i := uint64(0); i < benchBlockCount; i++ {
 		if err := rawdb.WriteCanonicalHash(rwTx, realisticHeader(i).Hash(), i); err != nil {
 			b.Fatal(err)
@@ -158,5 +163,136 @@ func BenchmarkCanonicalHash_LRUCacheHit(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		_, _ = cache.Get(uint64(i % benchBlockCount))
+	}
+}
+
+// BenchmarkCanonicalHash_RealSnapshot is an end-to-end benchmark using real
+// snapshot files from disk. It measures the full CanonicalHash call path
+// including MDBX lookup (miss) + snapshot decompression + RLP decode +
+// header.Hash() on main, vs. MDBX lookup (miss) + LRU cache hit on this branch.
+//
+// Requires a local Erigon mainnet datadir with snapshots. Set ERIGON_SNAP_DIR
+// to the snapshots directory, or the benchmark is skipped.
+//
+//	ERIGON_SNAP_DIR=/home/user/.local/share/erigon/snapshots \
+//	  go test -bench=BenchmarkCanonicalHash_RealSnapshot -benchmem -benchtime=5s \
+//	  ./db/snapshotsync/freezeblocks/
+//
+// Run on both main and this branch to compare:
+//
+//	main:        every call pays full snapshot I/O + decompression + hash
+//	this branch: after warmup, every call is a single LRU lookup
+func BenchmarkCanonicalHash_RealSnapshot(b *testing.B) {
+	snapDir := os.Getenv("ERIGON_SNAP_DIR")
+	if snapDir == "" {
+		b.Skip("set ERIGON_SNAP_DIR to a mainnet snapshots directory to run this benchmark")
+	}
+	if _, err := os.Stat(snapDir); err != nil {
+		b.Skipf("snapshot dir not accessible: %v", err)
+	}
+
+	logger := log.New()
+	cfg := ethconfig.Defaults.Snapshot
+	cfg.ChainName = networkname.Mainnet
+	snapshots := NewRoSnapshots(cfg, snapDir, logger)
+	if err := snapshots.OpenFolder(); err != nil {
+		b.Fatal(err)
+	}
+	defer snapshots.Close()
+
+	available := snapshots.BlocksAvailable()
+	if available == 0 {
+		b.Skip("no blocks available in snapshot dir")
+	}
+
+	blockReader := NewBlockReader(snapshots, nil)
+
+	// Use an empty memdb so every lookup misses the DB and falls through to snapshots.
+	db := memdb.NewTestDB(b, dbcfg.ChainDB)
+	tx, err := db.BeginRo(context.Background())
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer tx.Rollback()
+
+	// Pick blocks well inside the available range.
+	const startBlock = 500_000
+	const numBlocks = 1_000
+	if available < startBlock+numBlocks {
+		b.Skipf("need at least %d blocks in snapshots, got %d", startBlock+numBlocks, available)
+	}
+
+	// Warmup: on this branch this populates the cache; on main it is a no-op.
+	for i := uint64(startBlock); i < startBlock+numBlocks; i++ {
+		if _, _, err := blockReader.CanonicalHash(context.Background(), tx, i); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		blockNum := uint64(startBlock + (i % numBlocks))
+		if _, _, err := blockReader.CanonicalHash(context.Background(), tx, blockNum); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// BenchmarkCanonicalHash_RealSnapshot_Cold measures the full snapshot path with
+// no cache warmup. This is what every call costs on main (which has no LRU cache)
+// and what the first call costs on this branch. It cycles through enough distinct
+// block numbers to exceed the LRU cache capacity, forcing cache misses.
+//
+//	ERIGON_SNAP_DIR=/datadisk/erigon34/datadir/snapshots \
+//	  go test -bench=BenchmarkCanonicalHash_RealSnapshot_Cold -benchmem -benchtime=5s \
+//	  ./db/snapshotsync/freezeblocks/
+func BenchmarkCanonicalHash_RealSnapshot_Cold(b *testing.B) {
+	snapDir := os.Getenv("ERIGON_SNAP_DIR")
+	if snapDir == "" {
+		b.Skip("set ERIGON_SNAP_DIR to a mainnet snapshots directory to run this benchmark")
+	}
+	if _, err := os.Stat(snapDir); err != nil {
+		b.Skipf("snapshot dir not accessible: %v", err)
+	}
+
+	logger := log.New()
+	cfg := ethconfig.Defaults.Snapshot
+	cfg.ChainName = networkname.Mainnet
+	snapshots := NewRoSnapshots(cfg, snapDir, logger)
+	if err := snapshots.OpenFolder(); err != nil {
+		b.Fatal(err)
+	}
+	defer snapshots.Close()
+
+	available := snapshots.BlocksAvailable()
+	if available == 0 {
+		b.Skip("no blocks available in snapshot dir")
+	}
+
+	blockReader := NewBlockReader(snapshots, nil)
+
+	db := memdb.NewTestDB(b, dbcfg.ChainDB)
+	tx, err := db.BeginRo(context.Background())
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer tx.Rollback()
+
+	const startBlock = 500_000
+	// Use a range larger than the LRU cache size (10_000) to guarantee cache misses.
+	const coldRange = 20_000
+	if available < startBlock+coldRange {
+		b.Skipf("need at least %d blocks in snapshots, got %d", startBlock+coldRange, available)
+	}
+
+	// No warmup — every call is a cold snapshot read.
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		blockNum := uint64(startBlock + (i % coldRange))
+		if _, _, err := blockReader.CanonicalHash(context.Background(), tx, blockNum); err != nil {
+			b.Fatal(err)
+		}
 	}
 }

@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain/networkname"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
@@ -251,7 +252,7 @@ func TestCanonicalHashCache_MultipleBlocks(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	// Read all blocks to populate cache
+	// Read all blocks — results come from DB, not snapshots, so the cache stays empty.
 	for i := uint64(0); i < 5; i++ {
 		hash, ok, err := blockReader.CanonicalHash(context.Background(), tx, i)
 		require.NoError(t, err)
@@ -264,4 +265,90 @@ func TestCanonicalHashCache_MultipleBlocks(t *testing.T) {
 		_, found := blockReader.canonicalHashCache.Get(i)
 		assert.False(t, found, "block %d should not be cached (DB data)", i)
 	}
+}
+
+// TestCanonicalHashCache_SnapshotPath verifies that CanonicalHash populates
+// canonicalHashCache when the hash is read from a snapshot segment (not from DB),
+// and that subsequent calls are served from the cache without touching the snapshot.
+func TestCanonicalHashCache_SnapshotPath(t *testing.T) {
+	// Use the same from/to range as the other snapshot tests so OpenFolder
+	// recognises the segment (naming convention: v1.0-000000-000001-headers.seg).
+	const (
+		from     = uint64(1)
+		to       = uint64(1000)
+		blockNum = from // first block in the segment; OrdinalLookup(from-from)=OrdinalLookup(0)
+	)
+	tmpDir := t.TempDir()
+	logger := log.New()
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+
+	ver := version.V1_0
+
+	// Build a header and RLP-encode it.
+	// Snapshot word format: 1 prefix byte (skipped by the decoder) + RLP bytes.
+	header := &types.Header{Number: *uint256.NewInt(blockNum)}
+	rlpBytes, err := rlp.EncodeToBytes(header)
+	require.NoError(t, err)
+	word := append([]byte{0}, rlpBytes...)
+
+	// Write the headers segment with a single valid entry.
+	segPath := filepath.Join(tmpDir, snaptype.SegmentFileName(ver, from, to, snaptype2.Enums.Headers))
+	compressCfg := seg.DefaultCfg
+	compressCfg.MinPatternScore = 100
+	c, err := seg.NewCompressor(t.Context(), "test", segPath, tmpDir, compressCfg, log.LvlDebug, logger)
+	require.NoError(t, err)
+	defer c.Close()
+	c.DisableFsync()
+	require.NoError(t, c.AddWord(word))
+	require.NoError(t, c.Compress())
+
+	// Build index with BaseDataID=from so OrdinalLookup(blockNum-from)=OrdinalLookup(0).
+	idxPath := filepath.Join(tmpDir, snaptype.IdxFileName(ver, from, to, snaptype2.Enums.Headers.String()))
+	idx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
+		KeyCount:   1,
+		BucketSize: 10,
+		TmpDir:     tmpDir,
+		IndexFile:  idxPath,
+		LeafSize:   8,
+		BaseDataID: from,
+		Enums:      true,
+	}, logger)
+	require.NoError(t, err)
+	defer idx.Close()
+	idx.DisableFsync()
+	require.NoError(t, idx.AddKey([]byte{0}, 0))
+	require.NoError(t, idx.Build(t.Context()))
+
+	// Bodies and Transactions segments are required for OpenFolder to recognise the range.
+	createTestSegmentFile(t, from, to, snaptype2.Enums.Bodies, tmpDir, ver, logger)
+	createTestSegmentFile(t, from, to, snaptype2.Enums.Transactions, tmpDir, ver, logger)
+
+	cfg := ethconfig.Defaults.Snapshot
+	cfg.ChainName = networkname.Mainnet
+	snapshots := NewRoSnapshots(cfg, tmpDir, logger)
+	require.NoError(t, snapshots.OpenFolder())
+	defer snapshots.Close()
+
+	blockReader := NewBlockReader(snapshots, nil)
+
+	// No canonical hash written to DB → CanonicalHash must fall through to snapshot path.
+	tx, err := db.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	// First call: DB miss → snapshot read → cache populated.
+	hash1, ok, err := blockReader.CanonicalHash(context.Background(), tx, blockNum)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, header.Hash(), hash1)
+
+	cached, found := blockReader.canonicalHashCache.Get(blockNum)
+	assert.True(t, found, "canonicalHashCache must be populated after a snapshot read")
+	assert.Equal(t, header.Hash(), cached)
+
+	// Second call: must be served from cache (no snapshot I/O).
+	hash2, ok2, err := blockReader.CanonicalHash(context.Background(), tx, blockNum)
+	require.NoError(t, err)
+	assert.True(t, ok2)
+	assert.Equal(t, header.Hash(), hash2)
 }
