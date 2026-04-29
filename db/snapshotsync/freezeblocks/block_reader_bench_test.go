@@ -18,20 +18,26 @@ package freezeblocks
 
 // Benchmarks for BlockReader.CanonicalHash hot path.
 //
-// The LRU cache introduced by PR #19173 only populates from snapshot data
-// (immutable, post-finalized blocks). For blocks still in the DB the code
-// path is identical on main and on this branch.
+// Context: CanonicalHash is called on every eth_getBlockByNumber / eth_getTransactionByHash
+// RPC request. For blocks in snapshots (the vast majority of historical blocks),
+// the code path on main is:
 //
-// The three benchmarks below isolate the components that change:
+//   1. rawdb.ReadCanonicalHash (MDBX miss)        ~200 ns
+//   2. headerFromSnapshot (decompress + RLP)      ~several µs (from memory-mapped file)
+//   3. header.Hash() (keccak256 of full RLP)      ~300–500 ns on a real header
 //
-//   BenchmarkCanonicalHash_DBPath          – raw MDBX lookup; same on both branches.
-//   BenchmarkCanonicalHash_SnapshotNoCache – header.Hash() per call; what main
-//                                            pays for every snapshot-range lookup.
-//   BenchmarkCanonicalHash_SnapshotCacheHit – LRU Get() per call; what this branch
-//                                             pays after the first snapshot lookup.
+// On this branch (PR #19173), after the first call the cache is populated and
+// steps 2+3 are replaced by a single LRU lookup (~30–40 ns).
 //
-// Running on main vs. this branch:
+// These benchmarks isolate each component so the saving is measurable
+// without needing real snapshot files:
 //
+//   BenchmarkCanonicalHash_MDBXLookup         – step 1: raw MDBX read; identical on both branches.
+//   BenchmarkCanonicalHash_HeaderHash_Minimal  – step 3 on a trivial header (not representative).
+//   BenchmarkCanonicalHash_HeaderHash_Realistic– step 3 on a full mainnet-like header.
+//   BenchmarkCanonicalHash_LRUCacheHit         – LRU lookup replacing steps 2+3 on this branch.
+//
+// Run with:
 //   go test -bench=BenchmarkCanonicalHash -benchmem ./db/snapshotsync/freezeblocks/
 
 import (
@@ -50,11 +56,40 @@ import (
 
 const benchBlockCount = 1_000
 
-// BenchmarkCanonicalHash_DBPath measures a raw MDBX canonical-hash lookup.
-// This path is taken when the block is in the DB (not yet in snapshots) and
-// is identical on main and on this branch — the cache is never populated from
-// DB data.
-func BenchmarkCanonicalHash_DBPath(b *testing.B) {
+// realisticHeader returns a header that resembles a post-Merge mainnet block:
+// all hash/bloom fields are non-zero so the RLP encoding is representative
+// of real data (~500 bytes), making header.Hash() cost comparable to production.
+func realisticHeader(blockNum uint64) *types.Header {
+	seed := blockNum + 1
+	fill32 := func(offset uint64) (h common.Hash) {
+		for i := range h {
+			h[i] = byte(seed + offset + uint64(i))
+		}
+		return
+	}
+	h := &types.Header{
+		Number:      *uint256.NewInt(blockNum),
+		ParentHash:  fill32(0),
+		UncleHash:   fill32(7),
+		Coinbase:    common.BytesToAddress(fill32(1).Bytes()),
+		Root:        fill32(2),
+		TxHash:      fill32(8),
+		ReceiptHash: fill32(3),
+		GasLimit:    30_000_000,
+		GasUsed:     seed % 30_000_000,
+		Time:        1_700_000_000 + seed,
+		Extra:       fill32(4).Bytes(),
+		MixDigest:   fill32(5),
+		BaseFee:     uint256.NewInt(seed % 1_000_000_000),
+	}
+	copy(h.Bloom[:], fill32(6).Bytes())
+	return h
+}
+
+// BenchmarkCanonicalHash_MDBXLookup measures a raw MDBX canonical-hash read.
+// This is the first step of CanonicalHash on every call; it is identical on
+// main and on this branch.
+func BenchmarkCanonicalHash_MDBXLookup(b *testing.B) {
 	db := memdb.NewTestDB(b, dbcfg.ChainDB)
 
 	rwTx, err := db.BeginRw(context.Background())
@@ -62,8 +97,7 @@ func BenchmarkCanonicalHash_DBPath(b *testing.B) {
 		b.Fatal(err)
 	}
 	for i := uint64(0); i < benchBlockCount; i++ {
-		h := &types.Header{Number: *uint256.NewInt(i)}
-		if err := rawdb.WriteCanonicalHash(rwTx, h.Hash(), i); err != nil {
+		if err := rawdb.WriteCanonicalHash(rwTx, realisticHeader(i).Hash(), i); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -86,39 +120,38 @@ func BenchmarkCanonicalHash_DBPath(b *testing.B) {
 	}
 }
 
-// BenchmarkCanonicalHash_SnapshotNoCache measures the per-call cost of
-// computing a canonical hash from a header object. On main, CanonicalHash
-// calls headerFromSnapshot + header.Hash() on every invocation for blocks
-// that live in snapshots (not in the DB). This benchmark isolates the
-// header.Hash() cost only; in production the full per-call cost also includes
-// headerFromSnapshot (mmap read + decompression + RLP decode), and header.Hash()
-// itself is more expensive because real headers carry more fields.
-func BenchmarkCanonicalHash_SnapshotNoCache(b *testing.B) {
+// BenchmarkCanonicalHash_HeaderHash_Realistic measures the cost of computing a
+// canonical hash from a full mainnet-like header (~500-byte RLP). On main,
+// CanonicalHash pays this cost on EVERY call for snapshot-range blocks because
+// headerFromSnapshot produces a fresh *Header each time (no per-object caching
+// across calls). CalcHash is used here instead of Hash to bypass the per-object
+// atomic cache and reflect the true first-call cost.
+// The real per-call cost on main also includes headerFromSnapshot (decompress +
+// RLP decode from the memory-mapped snapshot file), which is not measured here.
+func BenchmarkCanonicalHash_HeaderHash_Realistic(b *testing.B) {
 	headers := make([]*types.Header, benchBlockCount)
 	for i := uint64(0); i < benchBlockCount; i++ {
-		headers[i] = &types.Header{Number: *uint256.NewInt(i)}
+		headers[i] = realisticHeader(i)
 	}
-
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = headers[i%benchBlockCount].Hash()
+		_ = headers[i%benchBlockCount].CalcHash()
 	}
 }
 
-// BenchmarkCanonicalHash_SnapshotCacheHit measures the steady-state cost on
-// this branch: after the first request populates the LRU cache, every
-// subsequent CanonicalHash call for a snapshot-range block is a single
-// cache lookup. Compare this against BenchmarkCanonicalHash_SnapshotNoCache
-// to see the per-call saving.
-func BenchmarkCanonicalHash_SnapshotCacheHit(b *testing.B) {
+// BenchmarkCanonicalHash_LRUCacheHit measures the steady-state cost of a cache
+// lookup on this branch. After the first CanonicalHash call for a snapshot-range
+// block, all subsequent calls return here instead of calling headerFromSnapshot
+// + header.Hash(). Compare this against BenchmarkCanonicalHash_HeaderHash_Realistic
+// to see the per-call saving (headerFromSnapshot decompression is additional).
+func BenchmarkCanonicalHash_LRUCacheHit(b *testing.B) {
 	cache, err := lru.New[uint64, common.Hash](10_000)
 	if err != nil {
 		b.Fatal(err)
 	}
 	for i := uint64(0); i < benchBlockCount; i++ {
-		h := &types.Header{Number: *uint256.NewInt(i)}
-		cache.Add(i, h.Hash())
+		cache.Add(i, realisticHeader(i).Hash())
 	}
 
 	b.ResetTimer()
