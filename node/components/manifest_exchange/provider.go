@@ -27,9 +27,13 @@ package manifest_exchange
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"encoding/hex"
 	"fmt"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/downloader"
@@ -58,6 +62,14 @@ type Provider struct {
 	cancelCtx context.CancelFunc
 	log       log.Logger
 
+	// trust gates which peers' manifests reach the orchestrator. Nil
+	// means "trust everyone" — preserves the pre-UCAN behaviour. When
+	// non-nil, fetchAndPublish runs the UCAN verification flow before
+	// publishing PeerManifestReceived; failures are warn-logged and
+	// the peer is blacklisted for trust.BlacklistDuration.
+	trust      *TrustConfig
+	trustState *trustState
+
 	// Materialised handlers — stable reflect.Value.Pointer() for
 	// Subscribe/Unsubscribe, same pattern used in downloader/bus.go.
 	hConnected    func(sentry.PeerConnected)
@@ -71,6 +83,45 @@ type Provider struct {
 	// cancel them via ctx and then wait for them to return. Without this,
 	// a slow or hung peer download would outlive the component.
 	fetchWG sync.WaitGroup
+
+	// nowFn is overridable for tests that want deterministic time
+	// evaluation (blacklist expiry, UCAN time-window checks). Defaults
+	// to time.Now.
+	nowFn func() time.Time
+}
+
+// SetTrust configures the UCAN verification gate. Call before BindBus
+// (or while unbound) — modifying trust mid-flight is not supported.
+// Passing nil disables the gate (trust-everyone). When trust is
+// non-nil, the same Fetcher must support FetchPeerUCAN — typically
+// the production downloader.Provider satisfies both ManifestFetcher
+// and UCANFetcher.
+func (p *Provider) SetTrust(cfg *TrustConfig) error {
+	if p == nil {
+		return fmt.Errorf("manifest_exchange.SetTrust: nil provider")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.hConnected != nil {
+		return fmt.Errorf("manifest_exchange.SetTrust: cannot reconfigure while bound")
+	}
+	if cfg != nil {
+		if cfg.Verifier == nil {
+			return fmt.Errorf("manifest_exchange.SetTrust: TrustConfig.Verifier required")
+		}
+		if cfg.Fetcher == nil {
+			return fmt.Errorf("manifest_exchange.SetTrust: TrustConfig.Fetcher required")
+		}
+		if len(cfg.RequiredCapabilities) == 0 {
+			return fmt.Errorf("manifest_exchange.SetTrust: TrustConfig.RequiredCapabilities is empty (would reject every peer)")
+		}
+		p.trust = cfg
+		p.trustState = newTrustState()
+	} else {
+		p.trust = nil
+		p.trustState = nil
+	}
+	return nil
 }
 
 // BindBus wires the component to the framework event bus. After this
@@ -107,6 +158,9 @@ func (p *Provider) BindBus(ctx context.Context, bus event.EventBus, fetcher Mani
 	p.cancelCtx = cancel
 	p.log = logger
 	p.inflight = make(map[string]struct{})
+	if p.nowFn == nil {
+		p.nowFn = time.Now
+	}
 	p.hConnected = p.onPeerConnected
 	p.hDisconnected = p.onPeerDisconnected
 	p.mu.Unlock()
@@ -175,6 +229,11 @@ func (p *Provider) unbindNoLock() {
 // manifest fetch in a goroutine. If the peer has no ENR entry or the
 // advertised InfoHash is zero, the event is silently dropped — the peer
 // doesn't advertise a V2 manifest.
+//
+// When a TrustConfig is set, peers currently on the blacklist are
+// skipped here without spending a fetch. Trust-cached peers proceed
+// through fetchAndPublish; the cache is consulted again there to
+// short-circuit the UCAN re-verification path.
 func (p *Provider) onPeerConnected(e sentry.PeerConnected) {
 	if e.Peer == nil {
 		return
@@ -206,39 +265,74 @@ func (p *Provider) onPeerConnected(e sentry.PeerConnected) {
 		p.mu.Unlock()
 		return
 	}
+	state := p.trustState
+	now := p.nowFn
+	p.mu.Unlock()
+
+	if state != nil && now != nil && state.blacklisted(peerID, now()) {
+		// Peer failed UCAN verification recently; skip until the
+		// blacklist entry expires.
+		return
+	}
+
+	p.mu.Lock()
 	p.inflight[peerID] = struct{}{}
 	ctx := p.ctx
+	peerPub := e.Peer.Pubkey()
 	p.fetchWG.Add(1)
 	p.mu.Unlock()
 
 	go func() {
 		defer p.fetchWG.Done()
-		p.fetchAndPublish(ctx, peerID, ct.InfoHash, peerIP, uint16(btPort))
+		p.fetchAndPublish(ctx, peerID, ct.InfoHash, peerIP, uint16(btPort), peerPub)
 	}()
 }
 
 // onPeerDisconnected publishes flow.PeerDeparted so the orchestrator can
 // release per-peer state.
+//
+// When TrustConfig.ReverifyOnReconnect is set, the peer's cached trust
+// is also evicted so the next reconnect re-runs the UCAN check. This
+// is the takeover-protection path — operators in adversarial
+// environments accept the re-verification cost to defend against a
+// compromised peer rotating keys between issuance and abuse.
 func (p *Provider) onPeerDisconnected(e sentry.PeerDisconnected) {
 	p.mu.Lock()
 	bus := p.bus
+	state := p.trustState
+	cfg := p.trust
 	p.mu.Unlock()
 	if bus == nil {
 		return
 	}
+	if state != nil && cfg != nil && cfg.ReverifyOnReconnect {
+		state.forgetVerified(e.PeerID)
+	}
 	bus.Publish(flow.PeerDeparted{PeerID: e.PeerID})
 }
 
-// fetchAndPublish runs the full fetch → parse → publish pipeline for a
-// single peer. Runs in its own goroutine so multiple peer-connects can
-// proceed in parallel without serialising on the bus handler.
-func (p *Provider) fetchAndPublish(ctx context.Context, peerID string, infoHash [20]byte, peerIP net.IP, peerPort uint16) {
+// fetchAndPublish runs the full fetch → parse → (verify) → publish
+// pipeline for a single peer. Runs in its own goroutine so multiple
+// peer-connects can proceed in parallel without serialising on the
+// bus handler.
+//
+// When TrustConfig is set, the pipeline gains a UCAN-verification
+// step between parse and publish: fetch the chain.ucan.<seq>.bin
+// sidecar pointed to by the V2 manifest's UCANHash field, run it
+// through the Verifier against the peer's pubkey from ENR, and only
+// publish PeerManifestReceived on success. Failures are warn-logged
+// and the peer is added to the in-memory blacklist for
+// trust.BlacklistDuration.
+func (p *Provider) fetchAndPublish(ctx context.Context, peerID string, infoHash [20]byte, peerIP net.IP, peerPort uint16, peerPub *ecdsa.PublicKey) {
 	defer p.clearInflight(peerID)
 
 	p.mu.Lock()
 	fetcher := p.fetcher
 	logger := p.log
 	bus := p.bus
+	cfg := p.trust
+	state := p.trustState
+	now := p.nowFn
 	p.mu.Unlock()
 	if fetcher == nil || bus == nil {
 		return
@@ -256,7 +350,102 @@ func (p *Provider) fetchAndPublish(ctx context.Context, peerID string, infoHash 
 		return
 	}
 
+	// Trust gate. Skipped entirely when trust is unconfigured.
+	if cfg != nil {
+		if !p.gateOnUCAN(ctx, peerID, manifest, peerIP, peerPort, peerPub, cfg, state, now, logger) {
+			return
+		}
+	}
+
 	bus.Publish(v2ToPeerManifest(peerID, manifest))
+}
+
+// gateOnUCAN runs the manifest-side UCAN verification. Returns true iff
+// the peer is trusted (cache hit OR fresh verify success), in which
+// case fetchAndPublish should proceed with the orchestrator
+// publication.
+//
+// On any failure path the peer is blacklisted for cfg.BlacklistDuration
+// and the function returns false. Success caches the verified-until
+// time so the next reconnect can short-circuit (unless
+// ReverifyOnReconnect cleared the cache on disconnect).
+func (p *Provider) gateOnUCAN(
+	ctx context.Context,
+	peerID string,
+	manifest *downloader.ChainTomlV2,
+	peerIP net.IP,
+	peerPort uint16,
+	peerPub *ecdsa.PublicKey,
+	cfg *TrustConfig,
+	state *trustState,
+	nowFn func() time.Time,
+	logger log.Logger,
+) bool {
+	if state.trusted(peerID, nowFn()) {
+		// Cache hit — UCAN previously verified, still in its
+		// validity window. Skip the re-fetch.
+		return true
+	}
+
+	if peerPub == nil {
+		logger.Warn("[manifest_exchange] UCAN gate: peer has no pubkey",
+			"peer", peerID)
+		state.markBlacklisted(peerID, nowFn().Add(cfg.blacklistDuration()))
+		return false
+	}
+
+	if manifest.UCANHash == "" {
+		logger.Warn("[manifest_exchange] UCAN gate: peer manifest has no UCAN hash",
+			"peer", peerID)
+		state.markBlacklisted(peerID, nowFn().Add(cfg.blacklistDuration()))
+		return false
+	}
+	ucanHashBytes, err := hex.DecodeString(manifest.UCANHash)
+	if err != nil || len(ucanHashBytes) != 20 {
+		logger.Warn("[manifest_exchange] UCAN gate: malformed UCANHash",
+			"peer", peerID, "ucan_hash", manifest.UCANHash, "err", err)
+		state.markBlacklisted(peerID, nowFn().Add(cfg.blacklistDuration()))
+		return false
+	}
+	var ucanHash [20]byte
+	copy(ucanHash[:], ucanHashBytes)
+
+	ucanData, err := cfg.Fetcher.FetchPeerUCAN(ctx, peerID, ucanHash, peerIP, peerPort)
+	if err != nil {
+		logger.Warn("[manifest_exchange] UCAN gate: fetch sidecar",
+			"peer", peerID, "err", err)
+		state.markBlacklisted(peerID, nowFn().Add(cfg.blacklistDuration()))
+		return false
+	}
+
+	audience := compressedFromECDSA(peerPub)
+	res, err := cfg.Verifier.Verify(ucanData, audience, cfg.RequiredCapabilities, nowFn())
+	if err != nil {
+		logger.Warn("[manifest_exchange] UCAN gate: verify",
+			"peer", peerID, "err", err)
+		state.markBlacklisted(peerID, nowFn().Add(cfg.blacklistDuration()))
+		return false
+	}
+
+	expiresAt := time.Time{}
+	if res.Leaf.Expires != 0 {
+		expiresAt = time.Unix(res.Leaf.Expires, 0)
+	}
+	state.markVerified(peerID, expiresAt)
+	logger.Debug("[manifest_exchange] UCAN gate: peer trusted",
+		"peer", peerID, "root", res.MatchedRoot.Kind.String())
+	return true
+}
+
+// compressedFromECDSA returns the 33-byte compressed encoding of an
+// ECDSA pubkey. Mirrors the helper in snapshotauth without re-exporting
+// it (small enough that duplication beats a public dependency for a
+// single internal call site).
+func compressedFromECDSA(pub *ecdsa.PublicKey) []byte {
+	if pub == nil || pub.X == nil || pub.Y == nil {
+		return nil
+	}
+	return elliptic.MarshalCompressed(pub.Curve, pub.X, pub.Y)
 }
 
 func (p *Provider) clearInflight(peerID string) {

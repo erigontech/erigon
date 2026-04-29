@@ -53,9 +53,18 @@ const ChainTomlV2BaseName = "chain.v2"
 // never called.
 const DefaultV2MaxRetained = 64
 
+// ChainUCANBaseName is the prefix every UCAN sidecar filename starts
+// with. Pairs with ChainTomlV2BaseName at the same <seq> so a peer's
+// (V2 manifest, UCAN attestation) is one logical generation.
+const ChainUCANBaseName = "chain.ucan"
+
 // chainTomlV2NameRE matches chain.v2.<seq>.toml — the only filename
 // shape RollingV2Publisher emits and recognises.
 var chainTomlV2NameRE = regexp.MustCompile(`^chain\.v2\.(\d+)\.toml$`)
+
+// chainUCANNameRE matches chain.ucan.<seq>.bin — the UCAN sidecar
+// shape paired with each V2 generation.
+var chainUCANNameRE = regexp.MustCompile(`^chain\.ucan\.(\d+)\.bin$`)
 
 // ChainTomlV2FileNameForSeq formats a generational filename for the
 // given sequence number.
@@ -63,10 +72,30 @@ func ChainTomlV2FileNameForSeq(seq uint64) string {
 	return fmt.Sprintf("%s.%d.toml", ChainTomlV2BaseName, seq)
 }
 
+// ChainUCANFileNameForSeq formats the UCAN sidecar filename paired
+// with the V2 manifest at the same seq.
+func ChainUCANFileNameForSeq(seq uint64) string {
+	return fmt.Sprintf("%s.%d.bin", ChainUCANBaseName, seq)
+}
+
 // ParseChainTomlV2FileName extracts the generation seq from a filename
 // matching chain.v2.<seq>.toml. ok=false for any other shape.
 func ParseChainTomlV2FileName(name string) (seq uint64, ok bool) {
 	m := chainTomlV2NameRE.FindStringSubmatch(name)
+	if m == nil {
+		return 0, false
+	}
+	n, err := strconv.ParseUint(m[1], 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+// ParseChainUCANFileName extracts the generation seq from a filename
+// matching chain.ucan.<seq>.bin. ok=false for any other shape.
+func ParseChainUCANFileName(name string) (seq uint64, ok bool) {
+	m := chainUCANNameRE.FindStringSubmatch(name)
 	if m == nil {
 		return 0, false
 	}

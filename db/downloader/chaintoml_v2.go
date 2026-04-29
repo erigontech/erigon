@@ -44,6 +44,14 @@ const (
 type ChainTomlV2 struct {
 	Version int `toml:"version"`
 
+	// UCANHash is the torrent infohash of the snapshotauth delegation
+	// attestation paired with this manifest generation
+	// (chain.ucan.<seq>.bin). Hex-encoded 20 bytes; empty when this
+	// node is not running with attestation. Verifiers configured with
+	// a non-nil TrustConfig MUST reject peers whose manifest carries
+	// no UCANHash; trust-everyone deployments ignore the field.
+	UCANHash string `toml:"ucan_hash,omitempty"`
+
 	// Block snapshot files — deterministic, all nodes produce identical files.
 	Blocks map[string]string `toml:"blocks,omitempty"`
 

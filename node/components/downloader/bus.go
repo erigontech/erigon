@@ -84,21 +84,71 @@ func (p *Provider) UnbindBus() error {
 	return err
 }
 
-// FetchPeerManifestV2 downloads a peer's chain.toml.v2 into a per-peer
+// FetchPeerManifestV2 downloads a peer's chain.v2.<seq>.toml into a
+// per-peer-scoped storage directory and returns the file bytes. See
+// fetchPeerSidecar for shared semantics.
+func (p *Provider) FetchPeerManifestV2(ctx context.Context, peerID string, infoHash [20]byte, peerIP net.IP, peerPort uint16) ([]byte, error) {
+	return p.fetchPeerSidecar(ctx, peerID, infoHash, peerIP, peerPort, sidecarV2Manifest)
+}
+
+// FetchPeerUCAN downloads a peer's chain.ucan.<seq>.bin sidecar — the
+// snapshotauth delegation attestation paired with the V2 manifest at
+// the same generation. Same per-peer-scoped storage + inflight dedup
+// as FetchPeerManifestV2; only the file-name predicate differs.
+//
+// The infohash to fetch comes from the V2 manifest's UCANHash field —
+// callers parse the V2 first, then call this with the embedded hash.
+func (p *Provider) FetchPeerUCAN(ctx context.Context, peerID string, infoHash [20]byte, peerIP net.IP, peerPort uint16) ([]byte, error) {
+	return p.fetchPeerSidecar(ctx, peerID, infoHash, peerIP, peerPort, sidecarUCAN)
+}
+
+// peerSidecarKind identifies which sidecar artefact a fetch is
+// requesting so the file-name predicate matches and error messages
+// say what they're looking for.
+type peerSidecarKind int
+
+const (
+	sidecarV2Manifest peerSidecarKind = iota
+	sidecarUCAN
+)
+
+func (k peerSidecarKind) label() string {
+	switch k {
+	case sidecarV2Manifest:
+		return "chain.v2.<seq>.toml"
+	case sidecarUCAN:
+		return "chain.ucan.<seq>.bin"
+	}
+	return "?"
+}
+
+func (k peerSidecarKind) parseName(name string) bool {
+	switch k {
+	case sidecarV2Manifest:
+		_, ok := dl.ParseChainTomlV2FileName(name)
+		return ok
+	case sidecarUCAN:
+		_, ok := dl.ParseChainUCANFileName(name)
+		return ok
+	}
+	return false
+}
+
+// fetchPeerSidecar is the shared implementation of FetchPeerManifestV2
+// and FetchPeerUCAN. It fetches a single-file torrent into a per-peer
 // scoped storage directory and returns the file bytes. Uses a fresh
 // torrent with isolated storage so concurrent peer fetches do not
-// collide with each other or with the local chain.toml.v2 the node is
-// seeding. The torrent is dropped after completion — chain.toml.v2
-// fetches are one-shot.
+// collide with each other or with locally-seeded artefacts. The
+// torrent is dropped after completion — sidecar fetches are one-shot.
 //
 // peerIP and peerPort are the seeder's BT endpoint from their ENR;
 // passing a zero peerPort means "no direct peer" (relies on other
 // static peers or DHT). The underlying torrent client must have at
 // least one way to reach the seeder — tests pass both via
 // AddStaticPeer and via this call.
-func (p *Provider) FetchPeerManifestV2(ctx context.Context, peerID string, infoHash [20]byte, peerIP net.IP, peerPort uint16) ([]byte, error) {
+func (p *Provider) fetchPeerSidecar(ctx context.Context, peerID string, infoHash [20]byte, peerIP net.IP, peerPort uint16, kind peerSidecarKind) ([]byte, error) {
 	if p == nil || p.Downloader == nil {
-		return nil, fmt.Errorf("downloader.FetchPeerManifestV2: provider or downloader nil")
+		return nil, fmt.Errorf("downloader.fetchPeerSidecar(%s): provider or downloader nil", kind.label())
 	}
 
 	// Deduplicate by infohash. anacrolix keys torrents by infohash, so
@@ -106,7 +156,7 @@ func (p *Provider) FetchPeerManifestV2(ctx context.Context, peerID string, infoH
 	// Storage options would have the second caller's Storage silently
 	// ignored — only the first caller's peerDir receives bytes. Share
 	// one fetch across callers; each gets the same data and can publish
-	// PeerManifestReceived independently under its own peerID.
+	// downstream events independently under its own peerID.
 	newFetch := &peerManifestFetch{done: make(chan struct{})}
 	v, loaded := p.peerManifestInflight.LoadOrStore(infoHash, newFetch)
 	fetch := v.(*peerManifestFetch)
@@ -128,17 +178,17 @@ func (p *Provider) FetchPeerManifestV2(ctx context.Context, peerID string, infoH
 
 	client := p.Downloader.TorrentClient()
 	if client == nil {
-		fetch.err = fmt.Errorf("downloader.FetchPeerManifestV2: torrent client nil")
+		fetch.err = fmt.Errorf("downloader.fetchPeerSidecar(%s): torrent client nil", kind.label())
 		return nil, fetch.err
 	}
 
 	// Local-seed short-circuit. anacrolix keys torrents by infohash; if
-	// a peer advertises a V2 whose content is byte-identical to a V2
-	// generation we are already seeding (same file set → same toml bytes
-	// → same infohash), AddTorrentOpt would return our existing torrent
-	// and silently ignore the per-peer Storage we pass below — bytes
-	// stay in the local snap-dir while ReadFile(peerDir/...) returns
-	// ENOENT. Detect that case up front and read the local file directly.
+	// a peer advertises a sidecar whose content is byte-identical to a
+	// generation we are already seeding (same content → same infohash),
+	// AddTorrentOpt would return our existing torrent and silently
+	// ignore the per-peer Storage we pass below — bytes stay in the
+	// local snap-dir while ReadFile(peerDir/...) returns ENOENT.
+	// Detect that case up front and read the local file directly.
 	if existing, ok := client.Torrent(infoHash); ok {
 		select {
 		case <-existing.GotInfo():
@@ -147,7 +197,7 @@ func (p *Provider) FetchPeerManifestV2(ctx context.Context, peerID string, infoH
 			return nil, fetch.err
 		}
 		if info := existing.Info(); info != nil && len(info.Files) == 0 {
-			if _, ok := dl.ParseChainTomlV2FileName(info.Name); ok {
+			if kind.parseName(info.Name) {
 				if data, rerr := os.ReadFile(filepath.Join(p.dirs.Snap, info.Name)); rerr == nil {
 					fetch.data = data
 					return data, nil
@@ -186,25 +236,25 @@ func (p *Provider) FetchPeerManifestV2(ctx context.Context, peerID string, infoH
 	select {
 	case <-t.GotInfo():
 	case <-dlCtx.Done():
-		fetch.err = fmt.Errorf("waiting for chain.toml.v2 info from peer %s: %w", peerID, dlCtx.Err())
+		fetch.err = fmt.Errorf("waiting for %s info from peer %s: %w", kind.label(), peerID, dlCtx.Err())
 		return nil, fetch.err
 	}
 
 	info := t.Info()
 	if info == nil {
-		fetch.err = fmt.Errorf("peer %s chain.toml.v2 torrent info missing", peerID)
+		fetch.err = fmt.Errorf("peer %s %s torrent info missing", peerID, kind.label())
 		return nil, fetch.err
 	}
 	if len(info.Files) != 0 {
-		fetch.err = fmt.Errorf("peer %s chain.toml.v2 torrent is multi-file (%d)", peerID, len(info.Files))
+		fetch.err = fmt.Errorf("peer %s %s torrent is multi-file (%d)", peerID, kind.label(), len(info.Files))
 		return nil, fetch.err
 	}
-	// info.Name is the filename the publisher used for this generation:
-	// chain.v2.<seq>.toml. The seq is opaque to the consumer — we just
-	// need the shape match so we know we're not pointed at a different
-	// torrent that happens to share an infohash collision.
-	if _, ok := dl.ParseChainTomlV2FileName(info.Name); !ok {
-		fetch.err = fmt.Errorf("peer %s torrent name %q is not a chain.v2.<seq>.toml manifest", peerID, info.Name)
+	// info.Name is the filename the publisher used for this generation.
+	// The seq is opaque to the consumer — we just need the shape match
+	// so we know we're not pointed at a different torrent that happens
+	// to share an infohash collision.
+	if !kind.parseName(info.Name) {
+		fetch.err = fmt.Errorf("peer %s torrent name %q is not a %s sidecar", peerID, info.Name, kind.label())
 		return nil, fetch.err
 	}
 
