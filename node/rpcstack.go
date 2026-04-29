@@ -525,11 +525,13 @@ var gzPool = sync.Pool{
 
 var libdeflateWarnOnce sync.Once
 var libdeflateCompressWarnOnce sync.Once
+var libdeflateDisabled atomic.Bool
 
 var gzCompressorPool = sync.Pool{
 	New: func() any {
 		c, err := libdeflate.NewCompressor(libdeflate.DefaultCompression)
 		if err != nil {
+			libdeflateDisabled.Store(true)
 			libdeflateWarnOnce.Do(func() {
 				log.Warn("libdeflate unavailable, falling back to stdlib gzip", "err", err)
 			})
@@ -544,7 +546,32 @@ var gzBufPool = sync.Pool{
 }
 
 var gzDstPool = sync.Pool{
-	New: func() any { b := make([]byte, 0, 64*1024); return &b },
+	New: func() any { return make([]byte, 0, 64*1024) },
+}
+
+func getBuf() *bytes.Buffer {
+	buf := gzBufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	return buf
+}
+
+func putBuf(buf *bytes.Buffer) {
+	if buf.Cap() <= gzPoolBufCap {
+		gzBufPool.Put(buf)
+	}
+}
+
+func putDst(dst []byte) {
+	if cap(dst) <= gzPoolBufCap {
+		gzDstPool.Put(dst)
+	}
+}
+
+func gzDstGrow(b []byte, wantLen int) []byte {
+	if cap(b) >= wantLen {
+		return b[:wantLen]
+	}
+	return make([]byte, wantLen, max(wantLen, 2*cap(b)))
 }
 
 type gzipResponseWriter struct {
@@ -590,9 +617,7 @@ func (w *gzipResponseWriter) Flush() {
 	}
 }
 
-// writeStdlibGzip compresses src with stdlib gzip and writes the response to w.
-// buf is returned to gzBufPool if its capacity is within gzPoolBufCap.
-func writeStdlibGzip(w http.ResponseWriter, src []byte, status int, buf *bytes.Buffer) {
+func writeStdlibGzip(w http.ResponseWriter, src []byte, status int) {
 	gz := gzPool.Get().(*gzip.Writer)
 	defer gzPool.Put(gz)
 	gz.Reset(w)
@@ -602,10 +627,66 @@ func writeStdlibGzip(w http.ResponseWriter, src []byte, status int, buf *bytes.B
 		w.WriteHeader(status)
 	}
 	_, _ = gz.Write(src)
-	if buf.Cap() <= gzPoolBufCap {
-		gzBufPool.Put(buf)
-	}
 	_ = gz.Close()
+}
+
+// compressLibdeflate tries to compress src with libdeflate and write the response.
+// Returns false if libdeflate is unavailable or compression fails; the caller
+// should then fall back to writeStdlibGzip.
+func compressLibdeflate(w http.ResponseWriter, src []byte, status int) bool {
+	if libdeflateDisabled.Load() {
+		return false
+	}
+	raw := gzCompressorPool.Get()
+	if raw == nil {
+		return false
+	}
+	c := raw.(*libdeflate.Compressor)
+	defer gzCompressorPool.Put(c)
+
+	dst := gzDstPool.Get().([]byte)
+	dst = gzDstGrow(dst, c.GzipCompressBound(len(src)))
+	defer putDst(dst)
+
+	n, err := c.CompressGzip(dst, src)
+	if err != nil {
+		libdeflateCompressWarnOnce.Do(func() {
+			log.Warn("libdeflate compression failed, falling back to stdlib gzip", "err", err)
+		})
+		return false
+	}
+
+	w.Header().Set("Content-Encoding", "gzip")
+	w.Header().Set("Content-Length", strconv.Itoa(n))
+	if status != 0 {
+		w.WriteHeader(status)
+	}
+	w.Write(dst[:n]) //nolint:errcheck
+	return true
+}
+
+func sendGzipResponse(w http.ResponseWriter, grw *gzipResponseWriter) {
+	defer putBuf(grw.buf)
+
+	if grw.gzw != nil {
+		defer gzPool.Put(grw.gzw)
+		defer grw.gzw.Close() //nolint:errcheck
+		return
+	}
+
+	src := grw.buf.Bytes()
+	if len(src) < minGzipBodySize {
+		w.Header().Set("Content-Length", strconv.Itoa(len(src)))
+		if grw.status != 0 {
+			w.WriteHeader(grw.status)
+		}
+		w.Write(src) //nolint:errcheck
+		return
+	}
+
+	if !compressLibdeflate(w, src, grw.status) {
+		writeStdlibGzip(w, src, grw.status)
+	}
 }
 
 func newGzipHandler(next http.Handler) http.Handler {
@@ -615,77 +696,12 @@ func newGzipHandler(next http.Handler) http.Handler {
 			return
 		}
 
-		buf := gzBufPool.Get().(*bytes.Buffer)
-		buf.Reset()
-		grw := &gzipResponseWriter{buf: buf, ResponseWriter: w}
+		grw := &gzipResponseWriter{buf: getBuf(), ResponseWriter: w}
 		// The hook activates streaming mode before the first write; absent when gzip
 		// is off so it cannot prematurely commit HTTP headers (e.g. 200 before 503).
 		r = r.WithContext(rpc.WithGzipStreamingHook(r.Context(), grw.Flush))
 		next.ServeHTTP(grw, r)
-
-		if grw.gzw != nil {
-			if buf.Cap() <= gzPoolBufCap {
-				gzBufPool.Put(buf)
-			}
-			defer gzPool.Put(grw.gzw)
-			_ = grw.gzw.Close()
-			return
-		}
-
-		// Non-streaming: skip compression for small responses where gzip overhead
-		// would exceed the savings (header ~18 B + deflate framing).
-		src := grw.buf.Bytes()
-		if len(src) < minGzipBodySize {
-			w.Header().Set("Content-Length", strconv.Itoa(len(src)))
-			if grw.status != 0 {
-				w.WriteHeader(grw.status)
-			}
-			w.Write(src) //nolint:errcheck
-			if buf.Cap() <= gzPoolBufCap {
-				gzBufPool.Put(buf)
-			}
-			return
-		}
-
-		// Non-streaming: prefer libdeflate for faster one-shot compression.
-		if raw := gzCompressorPool.Get(); raw != nil {
-			c := raw.(*libdeflate.Compressor)
-			defer gzCompressorPool.Put(c)
-
-			dstPtr := gzDstPool.Get().(*[]byte)
-			needed := c.GzipCompressBound(len(src))
-			if cap(*dstPtr) < needed {
-				*dstPtr = make([]byte, needed)
-			} else {
-				*dstPtr = (*dstPtr)[:needed]
-			}
-			n, err := c.CompressGzip(*dstPtr, src)
-			if err != nil {
-				libdeflateCompressWarnOnce.Do(func() {
-					log.Warn("libdeflate compression failed, falling back to stdlib gzip", "err", err)
-				})
-				if cap(*dstPtr) <= gzPoolBufCap {
-					gzDstPool.Put(dstPtr)
-				}
-				writeStdlibGzip(w, src, grw.status, buf)
-				return
-			}
-			if buf.Cap() <= gzPoolBufCap {
-				gzBufPool.Put(buf)
-			}
-			w.Header().Set("Content-Encoding", "gzip")
-			w.Header().Set("Content-Length", strconv.Itoa(n))
-			if grw.status != 0 {
-				w.WriteHeader(grw.status)
-			}
-			w.Write((*dstPtr)[:n]) //nolint:errcheck
-			if cap(*dstPtr) <= gzPoolBufCap {
-				gzDstPool.Put(dstPtr)
-			}
-			return
-		}
-
-		writeStdlibGzip(w, src, grw.status, buf)
+		sendGzipResponse(w, grw)
 	})
 }
 
