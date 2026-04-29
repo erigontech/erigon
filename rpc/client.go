@@ -643,6 +643,16 @@ func (c *Client) dispatch(codec ServerCodec, connCtx context.Context) {
 				// Remove response handlers for the last send. When the read loop
 				// goes down, it will signal all other current operations.
 				conn.handler.removeRequestOp(lastOp)
+			} else if !reading {
+				// The write succeeded but the connection is already dead (read
+				// loop exited with an error). The in-flight request was excluded
+				// from cancelAllRequests so it could be re-registered on a
+				// reconnected connection, but no reconnect happened because the
+				// write did not fail. Cancel it now to avoid blocking forever.
+				if lastOp != nil {
+					lastOp.err = errDead
+					close(lastOp.resp)
+				}
 			}
 			// Let the next request in.
 			reqInitLock = c.reqInit
