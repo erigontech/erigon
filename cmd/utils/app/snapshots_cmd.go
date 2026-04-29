@@ -602,6 +602,21 @@ var snapshotCommand = cli.Command{
 				&ConcurrencyFlag,
 			},
 		},
+		{
+			Name:   "delegate",
+			Usage:  "Issue a snapshotauth delegation UCAN to a target ENR",
+			Action: doSnapshotDelegate,
+			Flags: []cli.Flag{
+				&delegateTargetENRFlag,
+				&delegateSignerKeyFlag,
+				&delegateCapabilitiesFlag,
+				&delegateExpiresFlag,
+				&delegateDepthFlag,
+				&delegateOutputFlag,
+				&delegateParentFlag,
+				&delegateJSONFlag,
+			},
+		},
 	},
 }
 
