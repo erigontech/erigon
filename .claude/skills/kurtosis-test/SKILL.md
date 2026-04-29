@@ -27,7 +27,7 @@ bash blocks below: `$1`/`$2` are positional; `duration=Nm` → `duration_secs`,
 
 | Argument | Default | Notes |
 |---|---|---|
-| `$1` config path | required | Path to an `ethereum-package` YAML (same schema as `.github/workflows/kurtosis/*.io`). If omitted, list those files and ask the user to pick. |
+| `$1` config path | required | Path to an `ethereum-package` args YAML. The reference set lives in `.github/workflows/kurtosis/`, but that directory also contains assertoor playbooks (`id:` / `tasks:` schema) — only the files whose top-level keys are `participants:` or `participants_matrix:` are valid here. To list candidates: `grep -lE '^participants(_matrix)?:' .github/workflows/kurtosis/*.io`. |
 | `$2` enclave name | `kurtosis-test-<unix-ts>` | Used for `kurtosis run --enclave`. Each rerun gets a fresh timestamp. |
 | `duration=Nm` | `20m` | Wall-clock window the monitor watches before declaring "stable" if no failures trip. |
 | `auto=true\|false` | `true` | If `true`, the fix-rebuild-rerun loop runs autonomously up to `max-attempts`. If `false`, pause for user approval before each fix. |
@@ -45,9 +45,12 @@ bash blocks below: `$1`/`$2` are positional; `duration=Nm` → `duration_secs`,
    error.
 3. **Erigon source tree** at the cwd: `Makefile` exists and `go.mod` contains
    `module github.com/erigontech/erigon`.
-4. **Fork detection** — skim the YAML for fork-epoch keys
-   (`{cancun,prague,osaka,fulu,gloas,amsterdam}_fork_epoch`) to know which fork is
-   under test. Feeds the spec-lookup section below.
+4. **`curl` and `jq`** on `$PATH` — used by the monitor / triage snippets below to
+   poll the EL JSON-RPC endpoint and the assertoor API.
+5. **Fork detection** — skim the YAML for `_fork_epoch` keys. The repo's configs use
+   the CL-side fork names: `deneb_fork_epoch` (Cancun on EL), `electra_fork_epoch`
+   (Prague), `fulu_fork_epoch` (Osaka), `gloas_fork_epoch` (Amsterdam). Future fork
+   keys will follow the same CL-naming convention. Feeds the spec-lookup section below.
 
 ## Spec lookup (when debugging unfamiliar forks/EIPs)
 
@@ -177,16 +180,21 @@ end=$(( start + duration_secs ))
 stall_deadline=$(( start + stall_window ))
 
 while [ "$(date +%s)" -lt "$end" ]; do
-  height_hex=$(curl -s "http://127.0.0.1:${EL_RPC_PORT}" \
+  height_hex=$(curl -s --max-time 5 "http://127.0.0.1:${EL_RPC_PORT}" \
     -H 'Content-Type: application/json' \
     -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
-    | jq -r '.result')
-  height=$(printf '%d\n' "$height_hex")
-  echo "[$(date -u +%H:%M:%S)] height=$height"
-  if [ "$height" -gt "$prev" ]; then
-    prev=$height
-    stall_deadline=$(( $(date +%s) + stall_window ))
-  elif [ "$(date +%s)" -gt "$stall_deadline" ]; then
+    | jq -r '.result // empty')
+  if [[ "$height_hex" =~ ^0x[0-9a-fA-F]+$ ]]; then
+    height=$(printf '%d\n' "$height_hex")
+    echo "[$(date -u +%H:%M:%S)] height=$height"
+    if [ "$height" -gt "$prev" ]; then
+      prev=$height
+      stall_deadline=$(( $(date +%s) + stall_window ))
+    fi
+  else
+    echo "[$(date -u +%H:%M:%S)] RPC unreachable or invalid response — retrying"
+  fi
+  if [ "$(date +%s)" -gt "$stall_deadline" ]; then
     echo "STALL: chain not progressing for >${stall_window}s (last height=$prev)"
     break
   fi
