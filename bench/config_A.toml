@@ -1,6 +1,8 @@
 # Erigon A-side benchmarking config (defaults).
 # Metrics exposed on :6061 — paired with B on :6062 for Grafana.
 
+"prune.mode" = "minimal"
+
 metrics = true
 "metrics.addr" = "127.0.0.1"
 "metrics.port" = 6061

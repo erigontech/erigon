@@ -1,6 +1,8 @@
 # Erigon B-side benchmarking config (+100 offset on all ports except metrics, which is +1).
 # Metrics exposed on :6062 — paired with A on :6061 for Grafana.
 
+"prune.mode" = "minimal"
+
 metrics = true
 "metrics.addr" = "127.0.0.1"
 "metrics.port" = 6062
