@@ -25,7 +25,6 @@ import (
 	"slices"
 	"time"
 
-	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -38,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
-	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -230,12 +228,7 @@ func ExecuteBlockEphemerally(
 	return execRs, nil
 }
 
-func rlpHash(x any) (h common.Hash) {
-	hw := keccak.NewFastKeccak()
-	rlp.Encode(hw, x) //nolint:errcheck
-	hw.Sum(h[:0])
-	return h
-}
+var rlpHash = types.RlpHash
 
 func SysCallContract(contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine rules.EngineReader, constCall bool, vmCfg vm.Config) (result []byte, err error) {
 	isBor := chainConfig.Bor != nil

@@ -17,7 +17,6 @@
 package rpchelper
 
 import (
-	"context"
 	"math"
 	"testing"
 	"time"
@@ -92,7 +91,7 @@ func TestFilters_GenerateSubscriptionID(t *testing.T) {
 func TestFilters_SingleSubscription_OnlyTopicsSubscribedAreBroadcast(t *testing.T) {
 	t.Parallel()
 	config := FiltersConfig{}
-	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New(), nil)
+	f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
 
 	subbedTopic := common.BytesToHash([]byte{10, 20})
 
@@ -125,7 +124,7 @@ func TestFilters_SingleSubscription_OnlyTopicsSubscribedAreBroadcast(t *testing.
 func TestFilters_SingleSubscription_EmptyTopicsInCriteria_OnlyTopicsSubscribedAreBroadcast(t *testing.T) {
 	t.Parallel()
 	config := FiltersConfig{}
-	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New(), nil)
+	f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
 
 	var nilTopic common.Hash
 	subbedTopic := common.BytesToHash([]byte{10, 20})
@@ -159,7 +158,7 @@ func TestFilters_SingleSubscription_EmptyTopicsInCriteria_OnlyTopicsSubscribedAr
 func TestFilters_TwoSubscriptionsWithDifferentCriteria(t *testing.T) {
 	t.Parallel()
 	config := FiltersConfig{}
-	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New(), nil)
+	f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
 
 	criteria1 := filters.FilterCriteria{
 		Addresses: nil,
@@ -200,7 +199,7 @@ func TestFilters_TwoSubscriptionsWithDifferentCriteria(t *testing.T) {
 func TestFilters_ThreeSubscriptionsWithDifferentCriteria(t *testing.T) {
 	t.Parallel()
 	config := FiltersConfig{}
-	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New(), nil)
+	f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
 
 	criteria1 := filters.FilterCriteria{
 		Addresses: nil,
@@ -280,7 +279,7 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 	}
 
 	config := FiltersConfig{}
-	f = New(context.TODO(), config, nil, nil, nil, func() {}, log.New(), nil)
+	f = New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
 	f.logsRequestor.Store(loadRequester)
 
 	// first request has no filters
@@ -405,7 +404,7 @@ func TestFilters_AddLogs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			config := FiltersConfig{RpcSubscriptionFiltersMaxLogs: tt.maxLogs}
-			f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New(), nil)
+			f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
 			logID := LogsSubID("test-log")
 			logEntry := &types.Log{Address: common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87")}
 
@@ -439,7 +438,7 @@ func TestFilters_AddPendingBlocks(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			config := FiltersConfig{RpcSubscriptionFiltersMaxHeaders: tt.maxHeaders}
-			f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New(), nil)
+			f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
 			blockID := HeadsSubID("test-block")
 			header := &types.Header{}
 
@@ -474,7 +473,7 @@ func TestFilters_AddPendingTxs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			config := FiltersConfig{RpcSubscriptionFiltersMaxTxs: tt.maxTxs}
-			f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New(), nil)
+			f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
 			txID := PendingTxsSubID("test-tx")
 			var txn types.Transaction = types.NewTransaction(0, common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87"), uint256.NewInt(10), 50000, uint256.NewInt(10), nil)
 			txn, _ = txn.WithSignature(*types.LatestSignerForChainID(nil), common.Hex2Bytes("9bea4c4daac7c7c52e093e6a4c35dbbcf8856f1af7b059ba20253e70848d094f8a8fae537ce25ed8cb5af9adac3f141af69bd515bd2ba031522df09b97dd72b100"))
@@ -552,7 +551,7 @@ var (
 func TestFilters_SingleReceiptsSubscription_OnlyTransactionHashesSubscribedAreBroadcast(t *testing.T) {
 	t.Parallel()
 	config := FiltersConfig{}
-	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New(), nil)
+	f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
 
 	criteria := filters.ReceiptsFilterCriteria{
 		TransactionHashes: []common.Hash{txHash1},
@@ -582,7 +581,7 @@ func TestFilters_SingleReceiptsSubscription_OnlyTransactionHashesSubscribedAreBr
 func TestFilters_ReceiptsSubscription_EmptyFilterSubscribesToAll(t *testing.T) {
 	t.Parallel()
 	config := FiltersConfig{}
-	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New(), nil)
+	f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
 
 	// Empty TransactionHashes means subscribe to all receipts
 	criteria := filters.ReceiptsFilterCriteria{
@@ -610,7 +609,7 @@ func TestFilters_ReceiptsSubscription_EmptyFilterSubscribesToAll(t *testing.T) {
 func TestFilters_TwoReceiptsSubscriptionsWithDifferentCriteria(t *testing.T) {
 	t.Parallel()
 	config := FiltersConfig{}
-	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New(), nil)
+	f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
 
 	// First subscription: all receipts
 	criteria1 := filters.ReceiptsFilterCriteria{
@@ -652,7 +651,7 @@ func TestFilters_TwoReceiptsSubscriptionsWithDifferentCriteria(t *testing.T) {
 func TestFilters_ThreeReceiptsSubscriptionsWithDifferentCriteria(t *testing.T) {
 	t.Parallel()
 	config := FiltersConfig{}
-	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New(), nil)
+	f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
 
 	criteria1 := filters.ReceiptsFilterCriteria{
 		TransactionHashes: []common.Hash{},
@@ -727,7 +726,7 @@ func TestFilters_SubscribeReceiptsGeneratesCorrectReceiptsFilterRequest(t *testi
 	}
 
 	config := FiltersConfig{}
-	f = New(context.TODO(), config, nil, nil, nil, func() {}, log.New(), nil)
+	f = New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
 	f.receiptsRequestor.Store(loadRequester)
 
 	// First request: subscribe to all receipts
@@ -805,7 +804,7 @@ func TestFilters_FilterUpdateWaitsForAppliedAck(t *testing.T) {
 	t.Parallel()
 
 	config := FiltersConfig{}
-	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New(), nil)
+	f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
 	requestorCalled := make(chan struct{}, 1)
 
 	f.receiptsRequestor.Store(func(_ *remoteproto.ReceiptsFilterRequest) error {
@@ -846,7 +845,7 @@ func TestFilters_LateAppliedAckDoesNotSatisfyNextUpdate(t *testing.T) {
 	t.Parallel()
 
 	config := FiltersConfig{}
-	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New(), nil)
+	f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
 	f.filterUpdateAckTimeout = 20 * time.Millisecond
 
 	requestorCalled := make(chan struct{}, 2)

@@ -77,7 +77,6 @@ func (w *WriterOffHeap) write(filter *xorfilter.BinaryFuse[uint8], fw io.Writer)
 	if filter.SegmentCount > math.MaxUint32/2 {
 		return 0, fmt.Errorf("SegmentCount=%d cannot be greater than u32/2", filter.SegmentCount)
 	}
-	const headerSize = 1 + 3 + 4 + 4 + 8 + 4 + 4 + 8
 	const version uint8 = 0
 	var header [headerSize]byte
 

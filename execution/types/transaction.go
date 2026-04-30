@@ -106,6 +106,23 @@ type TransactionMisc struct {
 	from accounts.Address
 }
 
+// CalcEffectiveGasTip computes the effective gas tip given a transaction's tip/fee caps and a base fee.
+// Shared logic used by all transaction types that implement GetEffectiveGasTip.
+func CalcEffectiveGasTip(baseFee *uint256.Int, getTipCap func() *uint256.Int, getFeeCap func() *uint256.Int) *uint256.Int {
+	if baseFee == nil {
+		return getTipCap()
+	}
+	gasFeeCap := getFeeCap()
+	if gasFeeCap.Lt(baseFee) {
+		return uint256.NewInt(0)
+	}
+	effectiveFee := new(uint256.Int).Sub(gasFeeCap, baseFee)
+	if getTipCap().Lt(effectiveFee) {
+		return getTipCap()
+	}
+	return effectiveFee
+}
+
 // RLP-marshalled legacy transactions and binary-marshalled (not wrapped into an RLP string) typed (EIP-2718) transactions
 type BinaryTransactions [][]byte
 

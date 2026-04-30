@@ -17,7 +17,6 @@
 package freezeblocks
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
 
@@ -43,7 +42,7 @@ import (
 func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, dir string, ver snaptype.Version, logger log.Logger) {
 	compressCfg := seg.DefaultCfg
 	compressCfg.MinPatternScore = 100
-	c, err := seg.NewCompressor(context.Background(), "test", filepath.Join(dir, snaptype.SegmentFileName(ver, from, to, name)), dir, compressCfg, log.LvlDebug, logger)
+	c, err := seg.NewCompressor(t.Context(), "test", filepath.Join(dir, snaptype.SegmentFileName(ver, from, to, name)), dir, compressCfg, log.LvlDebug, logger)
 	require.NoError(t, err)
 	defer c.Close()
 	c.DisableFsync()
@@ -63,7 +62,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, di
 	idx.DisableFsync()
 	err = idx.AddKey([]byte{1}, 0)
 	require.NoError(t, err)
-	err = idx.Build(context.Background())
+	err = idx.Build(t.Context())
 	require.NoError(t, err)
 	if name == snaptype2.Transactions.Enum() {
 		idx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
@@ -76,7 +75,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, di
 		require.NoError(t, err)
 		err = idx.AddKey([]byte{1}, 0)
 		require.NoError(t, err)
-		err = idx.Build(context.Background())
+		err = idx.Build(t.Context())
 		require.NoError(t, err)
 		defer idx.Close()
 	}
@@ -88,7 +87,7 @@ func TestBlockReaderGenesisBlockWithSnapshots(t *testing.T) {
 	db := memdb.NewTestDB(t, dbcfg.ChainDB)
 	logger := log.New()
 
-	tx, err := db.BeginRo(context.Background())
+	tx, err := db.BeginRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
@@ -98,7 +97,7 @@ func TestBlockReaderGenesisBlockWithSnapshots(t *testing.T) {
 
 	// create minimal genesis block for testing
 	tx.Rollback()
-	rwTx, err := db.BeginRw(context.Background())
+	rwTx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
@@ -132,28 +131,28 @@ func TestBlockReaderGenesisBlockWithSnapshots(t *testing.T) {
 	blockReader := NewBlockReader(snapshots, nil)
 
 	// Try to read genesis block (block 0) when snapshots exist.This should read from database not snapshots
-	tx, err = db.BeginRo(context.Background())
+	tx, err = db.BeginRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	hash, ok, err := blockReader.CanonicalHash(context.Background(), tx, 0)
+	hash, ok, err := blockReader.CanonicalHash(t.Context(), tx, 0)
 	assert.NoError(t, err)
 	assert.True(t, ok)
 	assert.Equal(t, genesisHash, hash)
 
-	block, senders, err := blockReader.BlockWithSenders(context.Background(), tx, genesisHash, 0)
+	block, senders, err := blockReader.BlockWithSenders(t.Context(), tx, genesisHash, 0)
 	assert.NoError(t, err)
 	// should be nil because genesis block does not have transactions
 	assert.Nil(t, block)
 	assert.Nil(t, senders)
 
-	header, err := blockReader.Header(context.Background(), tx, genesisHash, 0)
+	header, err := blockReader.Header(t.Context(), tx, genesisHash, 0)
 	require.NoError(t, err)
 	assert.NotNil(t, header)
 	assert.Equal(t, uint64(0), header.Number.Uint64())
 
 	// HasSenders should work for genesis
-	hasSenders, err := blockReader.HasSenders(context.Background(), tx, genesisHash, 0)
+	hasSenders, err := blockReader.HasSenders(t.Context(), tx, genesisHash, 0)
 	assert.NoError(t, err)
 	assert.False(t, hasSenders) // should be false because genesis block does not have senders
 }

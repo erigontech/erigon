@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
@@ -48,7 +49,7 @@ func TestGetLogs(t *testing.T) {
 
 		logs, err := ethApi.GetLogs(context.Background(), filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(10)})
 		require.NoError(err)
-		assert.Equal(uint64(10), logs[0].BlockNumber)
+		assert.Equal(hexutil.Uint64(10), logs[0].BlockNumber)
 
 		// filter by wrong address
 		logs, err = ethApi.GetLogs(context.Background(), filters.FilterCriteria{
@@ -133,7 +134,7 @@ func TestErigonGetLatestLogsIgnoreTopics(t *testing.T) {
 	containsTopics := make([][]common.Hash, 0)
 
 	for i := range expectedLogs {
-		if expectedLogs[i].BlockNumber != lastBlock {
+		if uint64(expectedLogs[i].BlockNumber) != lastBlock {
 			blockCount++
 		}
 		containsTopics = append(containsTopics, []common.Hash{

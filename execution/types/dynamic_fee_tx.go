@@ -43,21 +43,7 @@ type DynamicFeeTransaction struct {
 func (tx *DynamicFeeTransaction) GetFeeCap() *uint256.Int { return &tx.FeeCap }
 func (tx *DynamicFeeTransaction) GetTipCap() *uint256.Int { return &tx.TipCap }
 func (tx *DynamicFeeTransaction) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
-	if baseFee == nil {
-		return tx.GetTipCap()
-	}
-	gasFeeCap := tx.GetFeeCap()
-	// return 0 because effectiveFee cant be < 0
-	// transaction max fee is below base fee
-	if gasFeeCap.Lt(baseFee) {
-		return uint256.NewInt(0)
-	}
-	effectiveFee := new(uint256.Int).Sub(gasFeeCap, baseFee)
-	if tx.GetTipCap().Lt(effectiveFee) {
-		return tx.GetTipCap()
-	} else {
-		return effectiveFee
-	}
+	return CalcEffectiveGasTip(baseFee, tx.GetTipCap, tx.GetFeeCap)
 }
 
 func (tx *DynamicFeeTransaction) Unwrap() Transaction {

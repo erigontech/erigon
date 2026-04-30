@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -76,11 +77,13 @@ type accHolder interface {
 
 func IsDomainAheadOfBlocks(ctx context.Context, tx kv.TemporalRwTx, logger log.Logger) bool {
 	doms, err := NewSharedDomains(ctx, tx, logger)
+	if doms != nil {
+		defer doms.Close()
+	}
 	if err != nil {
 		logger.Debug("domain ahead of blocks", "err", err, "stack", dbg.Stack())
 		return errors.Is(err, commitmentdb.ErrBehindCommitment)
 	}
-	defer doms.Close()
 	return false
 }
 
@@ -138,8 +141,20 @@ func NewSharedDomainsWithTrieVariant(ctx context.Context, tx kv.TemporalTx, logg
 	sd.mem = tx.Debug().NewMemBatch(&sd.metrics)
 	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv, tx.Debug().Dirs().Tmp)
 
-	if _, _, err := sd.SeekCommitment(ctx, tx); err != nil {
+	_, blockNum, err := sd.SeekCommitment(ctx, tx)
+	if err != nil {
 		return sd, err
+	}
+
+	// ErrBehindCommitment is an environmental signal; sd is fully initialized.
+	if blockNum > 0 {
+		lastBn, _, err := rawdbv3.TxNums.Last(tx)
+		if err != nil {
+			return sd, err
+		}
+		if lastBn < blockNum {
+			return sd, fmt.Errorf("%w: TxNums index is at block %d and behind commitment %d", commitmentdb.ErrBehindCommitment, lastBn, blockNum)
+		}
 	}
 
 	return sd, nil

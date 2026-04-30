@@ -46,7 +46,9 @@ import (
 	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/common"
 	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/snapcfg"
@@ -101,10 +103,6 @@ var (
 		Aliases: []string{"experiment.persist.receipts.v2"},
 		Usage:   "Download historical Receipts. If disabled: using state-history to re-exec transactions and generate Receipts - all RPC: eth_getLogs, eth_getBlockReceipts will work (just higher latency)",
 		Value:   ethconfig.Defaults.PersistReceiptsCacheV2,
-	}
-	DeveloperPeriodFlag = cli.IntFlag{
-		Name:  "dev.period",
-		Usage: "Block period to use in developer mode (0 = mine only if transaction pending)",
 	}
 	DevValidatorSeedFlag = cli.StringFlag{
 		Name:  "dev-validator-seed",
@@ -417,6 +415,11 @@ var (
 		Usage: "Maximum number of concurrent HTTP RPC requests (HTTP admission control). 0 = use db.read.concurrency, -1 = unlimited (no admission control)",
 		Value: 0,
 	}
+	WsMaxConnectionsFlag = cli.IntFlag{
+		Name:  "ws.max.connections",
+		Usage: "Maximum number of concurrent WebSocket connections. 0 = unlimited",
+		Value: 0,
+	}
 	RpcAccessListFlag = cli.StringFlag{
 		Name:  "rpc.accessList",
 		Usage: "Specify granular (method-by-method) API allowlist",
@@ -689,27 +692,6 @@ var (
 		Value: metrics.DefaultConfig.Port,
 	}
 
-	CliqueSnapshotCheckpointIntervalFlag = cli.UintFlag{
-		Name:  "clique.checkpoint",
-		Usage: "Number of blocks after which to save the vote snapshot to the database",
-		Value: 10,
-	}
-	CliqueSnapshotInmemorySnapshotsFlag = cli.IntFlag{
-		Name:  "clique.snapshots",
-		Usage: "Number of recent vote snapshots to keep in memory",
-		Value: 1024,
-	}
-	CliqueSnapshotInmemorySignaturesFlag = cli.IntFlag{
-		Name:  "clique.signatures",
-		Usage: "Number of recent block signatures to keep in memory",
-		Value: 16384,
-	}
-	CliqueDataDirFlag = flags.DirectoryFlag{
-		Name:  "clique.datadir",
-		Usage: "Path to clique db folder",
-		Value: "",
-	}
-
 	SnapKeepBlocksFlag = cli.BoolFlag{
 		Name:  ethconfig.FlagSnapKeepBlocks,
 		Usage: "Keep ancient blocks in db (useful for debug)",
@@ -724,8 +706,12 @@ var (
 	}
 	SnapSkipStateSnapshotDownloadFlag = cli.BoolFlag{
 		Name:  "snap.skip-state-snapshot-download",
-		Usage: "Skip state download and start from genesis block",
+		Usage: "Skip state snapshot download and re-execute from genesis to build state. Unlike --prune.mode=blocks which downloads state snapshots then prunes history, this flag skips the download entirely.",
 		Value: false,
+	}
+	SnapP2PManifestFlag = cli.BoolFlag{
+		Name:  "snap.p2p-manifest",
+		Usage: "Discover snapshot manifest (chain.toml) from P2P peers via ENR instead of using centralized preverified.toml",
 	}
 	SnapDownloadToBlockFlag = cli.Uint64Flag{
 		Name:    "snap.download.to.block",
@@ -828,7 +814,7 @@ var (
 
 	HealthCheckFlag = cli.BoolFlag{
 		Name:  "healthcheck",
-		Usage: "Enabling grpc health check",
+		Usage: "Enable grpc health check",
 	}
 
 	WebSeedsFlag = cli.StringFlag{
@@ -1160,6 +1146,40 @@ var (
 		Usage: "Port for MCP RPC server",
 		Value: 8553,
 	}
+	ErigondbDomainStepsInFrozenFileFlag = cli.StringFlag{
+		Name:  "erigondb.domain.steps-in-frozen-file",
+		Usage: `Override erigondb.toml "steps_in_frozen_file" for the domain merge cap only (history/inverted-index merges are unaffected). Pass a positive integer to set an explicit cap, or "Inf" to leave the domain merge unbounded. Default: unset, meaning the domain uses the same cap as determined by erigondb.toml.`,
+	}
+	ExecBatchedIOFlag = cli.BoolFlag{
+		Name:  "exec.batched-io",
+		Usage: "Enable BAL-driven I/O and write-dependency optimisations: (1) read-ahead pre-warms the DB page cache with account/code/storage reads before block execution (READ_AHEAD=true), and (2) the parallel executor pre-populates the version map from BAL hints (IGNORE_BAL=false). Disable for cold-read or non-BAL scheduling performance measurements.",
+		Value: true,
+	}
+	ExecStateCacheFlag = cli.BoolFlag{
+		Name:  "exec.state-cache",
+		Usage: "Enable the executor domain-shared read cache (equivalent to USE_STATE_CACHE=true). Disable for cold-read performance measurements.",
+		Value: true,
+	}
+	ExecWorkersFlag = cli.IntFlag{
+		Name:  "exec.workers",
+		Usage: "Parallel executor worker count (equivalent to EXEC3_WORKERS). Default: half the number of CPU cores, other half reserved for snapshots build/merge/prune.",
+		Value: runtime.NumCPU() / 2,
+	}
+	ExecSerialFlag = cli.BoolFlag{
+		Name:  "exec.serial",
+		Usage: "Force serial execution by clamping the parallel executor to a single worker. Wins over --exec.workers and EXEC3_WORKERS — use to disable parallelism for diagnostics or like-for-like baseline comparisons.",
+		Value: false,
+	}
+	ExecNoMergeFlag = cli.BoolFlag{
+		Name:  "exec.no-merge",
+		Usage: "Disable state-aggregator file merges for Domain / History / Inverted-Index (equivalent to NO_MERGE=true). Diagnostic / perf-comparison use only.",
+		Value: false,
+	}
+	ExecNoPruneFlag = cli.BoolFlag{
+		Name:  "exec.no-prune",
+		Usage: "Disable all DB pruning: state-aggregator (Domain/InvertedIndex/forkable) plus stage-level pruning (Execution: ChangeSets3/BlockAccessList; TxLookup; WitnessProcessing; Snapshots: PruneAncientBlocks/canonical markers/retirement) (equivalent to NO_PRUNE=true). Diagnostic / perf-comparison use only.",
+		Value: false,
+	}
 )
 
 var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag}
@@ -1199,7 +1219,7 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 		return
 	}
 
-	nodes, err := GetBootnodesFromFlags(ctx.String(BootnodesFlag.Name), ctx.String(ChainFlag.Name))
+	nodes, err := getBootnodesFromContext(ctx)
 	if err != nil {
 		Fatalf("Option %s: %v", BootnodesFlag.Name, err)
 	}
@@ -1213,12 +1233,47 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 		return
 	}
 
-	nodes, err := GetBootnodesFromFlags(ctx.String(BootnodesFlag.Name), ctx.String(ChainFlag.Name))
+	nodes, err := getBootnodesFromContext(ctx)
 	if err != nil {
 		Fatalf("Option %s: %v", BootnodesFlag.Name, err)
 	}
 
 	cfg.BootstrapNodesV5 = nodes
+}
+
+// resolveChainName returns the effective chain name from --chain and --networkid.
+// It is used for bootnodes, DNS discovery URLs, static peers, and the
+// chain-derived configuration in SetEthConfig (snapshot chain name,
+// chain-specific branches, etc.).
+//
+// It mirrors go-ethereum's behavior: when --networkid is explicitly set to a
+// non-mainnet value and --chain is not, the "mainnet" default on --chain
+// should not bleed into chain-derived config. If the networkid maps to a known
+// chain, that name is returned; otherwise an empty string is returned,
+// yielding no defaults.
+func resolveChainName(ctx *cli.Context) string {
+	chain := ctx.String(ChainFlag.Name)
+	if !ctx.IsSet(NetworkIdFlag.Name) || ctx.IsSet(ChainFlag.Name) {
+		return chain
+	}
+	networkID := ctx.Uint64(NetworkIdFlag.Name)
+	if networkID == 1 {
+		return chain
+	}
+	if chainName, ok := chainspec.NetworkNameByID[networkID]; ok {
+		return chainName
+	}
+	return ""
+}
+
+// getBootnodesFromContext resolves bootstrap nodes from the CLI context. An explicitly
+// set --bootnodes flag (even if empty) overrides chain defaults, matching go-ethereum's
+// behavior and allowing callers to run discovery with no bootstrap peers.
+func getBootnodesFromContext(ctx *cli.Context) ([]*enode.Node, error) {
+	if ctx.IsSet(BootnodesFlag.Name) {
+		return enode.ParseNodesFromURLs(common.CliString2Array(ctx.String(BootnodesFlag.Name)))
+	}
+	return GetBootnodesFromFlags("", resolveChainName(ctx))
 }
 
 // GetBootnodesFromFlags makes a list of bootnodes from command line flags.
@@ -1242,8 +1297,7 @@ func setStaticPeers(ctx *cli.Context, cfg *p2p.Config) {
 	if ctx.IsSet(StaticPeersFlag.Name) {
 		urls = common.CliString2Array(ctx.String(StaticPeersFlag.Name))
 	} else {
-		chain := ctx.String(ChainFlag.Name)
-		urls = chainspec.StaticPeerURLsOfChain(chain)
+		urls = chainspec.StaticPeerURLsOfChain(resolveChainName(ctx))
 	}
 
 	nodes, err := enode.ParseNodesFromURLs(urls)
@@ -1670,17 +1724,6 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *buildercfg.BuilderConfig) {
 	cfg.Etherbase = common.HexToAddress(etherbase)
 }
 
-func setClique(ctx *cli.Context, cfg *chainspec.ConsensusSnapshotConfig, datadir string) {
-	cfg.CheckpointInterval = ctx.Uint64(CliqueSnapshotCheckpointIntervalFlag.Name)
-	cfg.InmemorySnapshots = ctx.Int(CliqueSnapshotInmemorySnapshotsFlag.Name)
-	cfg.InmemorySignatures = ctx.Int(CliqueSnapshotInmemorySignaturesFlag.Name)
-	if ctx.IsSet(CliqueDataDirFlag.Name) {
-		cfg.DBPath = filepath.Join(ctx.String(CliqueDataDirFlag.Name), "clique", "db")
-	} else {
-		cfg.DBPath = filepath.Join(datadir, "clique", "db")
-	}
-}
-
 func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config, nodeConfig *nodecfg.Config, logger log.Logger) {
 	cfg.HeimdallURL = ctx.String(HeimdallURLFlag.Name)
 	cfg.WithoutHeimdall = ctx.Bool(WithoutHeimdallFlag.Name)
@@ -1890,18 +1933,9 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.CaplinConfig.BootstrapNodes = ctx.StringSlice(SentinelBootnodes.Name)
 	cfg.CaplinConfig.StaticPeers = ctx.StringSlice(SentinelStaticPeers.Name)
 
-	chain := ctx.String(ChainFlag.Name) // mainnet by default
+	chain := resolveChainName(ctx)
 	if ctx.IsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = ctx.Uint64(NetworkIdFlag.Name)
-		if cfg.NetworkID != 1 && !ctx.IsSet(ChainFlag.Name) {
-			chainName, ok := chainspec.NetworkNameByID[cfg.NetworkID]
-			if !ok {
-				chain = "" // don't default to mainnet if NetworkID != 1 and it's devchain or smth
-			} else {
-				chain = chainName // fetch network name from id if name wasn't provided
-			}
-
-		}
 	} else if chain != networkname.Dev && chain != networkname.BorDevnet {
 		spec, err := chainspec.ChainSpecByName(chain)
 		if err != nil {
@@ -1922,6 +1956,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.Snapshot.ProduceE3 = !ctx.Bool(SnapStateStopFlag.Name)
 	cfg.Snapshot.DisableDownloadE3 = ctx.Bool(SnapSkipStateSnapshotDownloadFlag.Name)
 	cfg.Snapshot.NoDownloader = ctx.Bool(NoDownloaderFlag.Name)
+	cfg.Snapshot.P2PManifest = ctx.Bool(SnapP2PManifestFlag.Name)
 	cfg.Snapshot.DownloaderAddr = strings.TrimSpace(ctx.String(DownloaderAddrFlag.Name))
 	cfg.Snapshot.ChainName = chain
 	nodeConfig.Http.Snap = cfg.Snapshot
@@ -1933,7 +1968,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	setShutter(ctx, chain, nodeConfig, cfg)
 
 	setEthash(ctx, nodeConfig.Dirs.DataDir, cfg)
-	setClique(ctx, &cfg.Clique, nodeConfig.Dirs.DataDir)
 	setBuilder(ctx, &cfg.Builder)
 	setWhitelist(ctx, cfg)
 	setBorConfig(ctx, cfg, nodeConfig, logger)
@@ -1952,6 +1986,39 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.FcuTimeout = ctx.Duration(FcuTimeoutFlag.Name)
 	cfg.FcuBackgroundPrune = ctx.Bool(FcuBackgroundPruneFlag.Name)
 	cfg.FcuBackgroundCommit = ctx.Bool(FcuBackgroundCommitFlag.Name)
+
+	// Executor performance toggles. When the user explicitly sets the CLI
+	// flag, it overrides the env-var default that dbg read at package init.
+	// Otherwise env vars (IGNORE_BAL, USE_STATE_CACHE, EXEC3_WORKERS,
+	// NO_MERGE, NO_PRUNE) remain the source of truth.
+	if ctx.IsSet(ExecBatchedIOFlag.Name) {
+		// --exec.batched-io toggles two BAL-driven optimisations together:
+		// read-ahead pre-warming (ReadAhead) and version-map pre-population
+		// (IgnoreBAL, inverted). Flipped in lockstep so perf comparisons
+		// test "all BAL I/O off" vs "all BAL I/O on".
+		v := ctx.Bool(ExecBatchedIOFlag.Name)
+		dbg.SetReadAhead(v)
+		dbg.SetIgnoreBAL(!v)
+	}
+	if ctx.IsSet(ExecStateCacheFlag.Name) {
+		dbg.SetUseStateCache(ctx.Bool(ExecStateCacheFlag.Name))
+	}
+	if ctx.IsSet(ExecWorkersFlag.Name) {
+		n := ctx.Int(ExecWorkersFlag.Name)
+		dbg.SetExec3Workers(n)
+		cfg.ExecWorkerCount = n
+	}
+	// --exec.serial wins over --exec.workers / EXEC3_WORKERS: clamp to 1.
+	if ctx.IsSet(ExecSerialFlag.Name) && ctx.Bool(ExecSerialFlag.Name) {
+		dbg.SetExec3Workers(1)
+		cfg.ExecWorkerCount = 1
+	}
+	if ctx.IsSet(ExecNoMergeFlag.Name) {
+		dbg.SetNoMerge(ctx.Bool(ExecNoMergeFlag.Name))
+	}
+	if ctx.IsSet(ExecNoPruneFlag.Name) {
+		dbg.SetNoPrune(ctx.Bool(ExecNoPruneFlag.Name))
+	}
 	if ctx.IsSet(RPCGlobalGasCapFlag.Name) {
 		cfg.RPCGasCap = ctx.Uint64(RPCGlobalGasCapFlag.Name)
 	}
@@ -2008,12 +2075,18 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		)
 
 		// Build PoS EL genesis (TTD=0, post-merge from genesis).
-		cfg.Genesis = chainspec.DeveloperGenesisBlock(0, signerAddr)
-		// Override: remove Clique, set TTD=0, enable all forks from genesis.
-		cfg.Genesis.Config.Clique = nil
+		cfg.Genesis = chainspec.DeveloperGenesisBlock()
+		// Ensure the derived signer address is pre-funded.
+		if cfg.Genesis.Alloc == nil {
+			cfg.Genesis.Alloc = make(types.GenesisAlloc)
+		}
+		if _, ok := cfg.Genesis.Alloc[signerAddr]; !ok {
+			cfg.Genesis.Alloc[signerAddr] = types.GenesisAccount{
+				Balance: big.NewInt(0).Mul(big.NewInt(1000), big.NewInt(common.Ether)),
+			}
+		}
 		cfg.Genesis.Config.TerminalTotalDifficulty = big.NewInt(0)
 		cfg.Genesis.Config.TerminalTotalDifficultyPassed = true
-		cfg.Genesis.ExtraData = make([]byte, 32) // no Clique signer in extra data
 		zero := uint64(0)
 		cfg.Genesis.Config.ShanghaiTime = &zero
 		cfg.Genesis.Config.CancunTime = &zero
@@ -2153,6 +2226,24 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 			panic(err)
 		}
 		downloadernat.DoNat(nodeConfig.P2P.NAT, cfg.Downloader.ClientConfig, logger)
+	}
+
+	if ctx.IsSet(ErigondbDomainStepsInFrozenFileFlag.Name) {
+		s := ctx.String(ErigondbDomainStepsInFrozenFileFlag.Name)
+		var v uint64
+		if strings.EqualFold(s, "inf") {
+			v = config3.UnboundedDomainMerge
+		} else {
+			parsed, err := strconv.ParseUint(s, 10, 64)
+			if err != nil {
+				Fatalf("invalid --%s value %q: must be a positive integer or \"Inf\"", ErigondbDomainStepsInFrozenFileFlag.Name, s)
+			}
+			if parsed == 0 {
+				Fatalf("invalid --%s value %q: must be a positive integer or \"Inf\"", ErigondbDomainStepsInFrozenFileFlag.Name, s)
+			}
+			v = parsed
+		}
+		cfg.ErigondbDomainStepsInFrozenFile = &v
 	}
 }
 

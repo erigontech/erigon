@@ -111,8 +111,14 @@ func timedExec(bench bool, execFunc func() ([]byte, uint64, error)) (output []by
 				if haveGasUsed != gasUsed {
 					panic(fmt.Sprintf("gas differs, have %v want %v", haveGasUsed, gasUsed))
 				}
-				if haveErr != err {
-					panic(fmt.Sprintf("err differs, have %v want %v", haveErr, err))
+				// Compare errors by their string representation because struct-based
+				// errors (e.g. &ErrStackUnderflow{stackLen: n, required: m}) are
+				// distinct pointer allocations on each call, so direct == fails.
+				if (haveErr == nil) != (err == nil) {
+					panic(fmt.Sprintf("err differs in nil-ness, have %v want %v", haveErr, err))
+				}
+				if haveErr != nil && err != nil && haveErr.Error() != err.Error() {
+					panic(fmt.Sprintf("err differs, have %q want %q", haveErr.Error(), err.Error()))
 				}
 			}
 		})
@@ -145,11 +151,11 @@ func runCmd(ctx *cli.Context) error {
 		log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(ctx.Int(VerbosityFlag.Name)), log.StderrHandler))
 	}
 	logconfig := &logger.LogConfig{
-		DisableMemory:     ctx.Bool(DisableMemoryFlag.Name),
-		DisableStack:      ctx.Bool(DisableStackFlag.Name),
-		DisableStorage:    ctx.Bool(DisableStorageFlag.Name),
-		DisableReturnData: ctx.Bool(DisableReturnDataFlag.Name),
-		Debug:             ctx.Bool(DebugFlag.Name),
+		EnableMemory:     !ctx.Bool(DisableMemoryFlag.Name),
+		DisableStack:     ctx.Bool(DisableStackFlag.Name),
+		DisableStorage:   ctx.Bool(DisableStorageFlag.Name),
+		EnableReturnData: !ctx.Bool(DisableReturnDataFlag.Name),
+		Debug:            ctx.Bool(DebugFlag.Name),
 	}
 
 	var (
@@ -309,7 +315,7 @@ func runCmd(ctx *cli.Context) error {
 		input = append(code, input...)
 		execFunc = func() ([]byte, uint64, error) {
 			output, _, gasLeft, err := runtime.Create(input, &runtimeConfig, 0)
-			return output, gasLeft.Total(), err
+			return output, initialGas - gasLeft.Total(), err
 		}
 	} else {
 		if len(code) > 0 {

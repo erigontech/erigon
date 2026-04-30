@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -219,4 +220,42 @@ func TestCreateGas(t *testing.T) {
 		domains.Close()
 	}
 	tx.Rollback()
+}
+
+// TestSystemCallZeroValueSkipsTransferChecks verifies that zero-value system
+// calls do not invoke CanTransfer or Transfer.
+func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
+	t.Parallel()
+
+	tx, sd := testTemporalTxSD(t)
+	txNum, _, err := sd.SeekCommitment(t.Context(), tx)
+	require.NoError(t, err)
+
+	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+	s := state.New(r)
+
+	address := accounts.InternAddress(common.BytesToAddress([]byte("callee")))
+
+	canTransferCalled := false
+	transferCalled := false
+	canTransferErr := errors.New("can transfer should not be called")
+	transferErr := errors.New("transfer should not be called")
+
+	vmctx := evmtypes.BlockContext{
+		CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) {
+			canTransferCalled = true
+			return false, canTransferErr
+		},
+		Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
+			transferCalled = true
+			return transferErr
+		},
+	}
+	_ = s.CommitBlock(vmctx.Rules(chain.TestChainBerlinConfig), w)
+
+	vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.TestChainBerlinConfig, vm.Config{})
+	_, _, err = vmenv.Call(params.SystemAddress, address, nil, mdgas.MdGas{Regular: math.MaxUint64}, uint256.Int{}, false /* bailout */)
+	require.NoError(t, err)
+	require.False(t, canTransferCalled, "CanTransfer should be skipped for zero-value system calls")
+	require.False(t, transferCalled, "Transfer should be skipped for zero-value system calls")
 }

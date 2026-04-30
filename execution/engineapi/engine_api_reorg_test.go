@@ -24,6 +24,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/hexutil"
+
 	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -218,14 +220,14 @@ func TestEthGetLogsDoNotGetAffectedAfterNewPayloadOnSideChain(t *testing.T) {
 		logs, err := eat.RpcApiClient.FilterLogs(ctx, ethereum.FilterQuery{BlockHash: &latestBlock.Hash})
 		require.NoError(t, err)
 		require.Len(t, logs, 1)
-		require.Equal(t, uint64(3), logs[0].BlockNumber)
+		require.Equal(t, hexutil.Uint64(3), logs[0].BlockNumber)
 		// now insert a new payload on the side chain and check the log is still present
 		_, err = eat.MockCl.InsertNewPayload(ctx, b2Side)
 		require.NoError(t, err)
 		logs, err = eat.RpcApiClient.FilterLogs(ctx, ethereum.FilterQuery{BlockHash: &latestBlock.Hash})
 		require.NoError(t, err)
 		require.Len(t, logs, 1)
-		require.Equal(t, uint64(3), logs[0].BlockNumber)
+		require.Equal(t, hexutil.Uint64(3), logs[0].BlockNumber)
 	})
 }
 
@@ -283,5 +285,93 @@ func TestNewPayloadShouldReturnValidWhenSideChainGoingBackIsLtMaxReorgDepth(t *t
 		ps, err := eatCanonical.MockCl.InsertNewPayload(ctx, sideChain)
 		require.NoError(t, err)
 		require.Equal(t, enginetypes.ValidStatus, ps.Status)
+	})
+}
+
+func TestFcuAllowsReorgBackOnCanonicalChainWhenAfterFinalisedHash(t *testing.T) {
+	// as per spec update: https://github.com/ethereum/execution-apis/pull/786
+	eat := engineapitester.DefaultEngineApiTester(t)
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		// deploy changer at b2
+		transactOpts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainId())
+		require.NoError(t, err)
+		transactOpts.GasLimit = params.MaxTxnGasLimit
+		_, txn, changer, err := contracts.DeployChanger(transactOpts, eat.ContractBackend)
+		require.NoError(t, err)
+		b2Canon, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, b2Canon.ExecutionPayload, txn.Hash())
+		require.NoError(t, err)
+		// change changer at b3
+		txn, err = changer.Change(transactOpts)
+		require.NoError(t, err)
+		b3Canon, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, b3Canon.ExecutionPayload, txn.Hash())
+		require.NoError(t, err)
+		blockNum, err := eat.RpcApiClient.BlockNumber()
+		require.NoError(t, err)
+		require.Equal(t, uint64(3), blockNum)
+		// unwind back to b2
+		err = eat.MockCl.UpdateForkChoice(ctx, b2Canon)
+		require.NoError(t, err)
+		// verify canonical head went back
+		blockNum, err = eat.RpcApiClient.BlockNumber()
+		require.NoError(t, err)
+		require.Equal(t, uint64(2), blockNum)
+	})
+}
+
+func TestFcuReturnsReorgTooDeepCode38006(t *testing.T) {
+	// as per spec update: https://github.com/ethereum/execution-apis/pull/786
+	genesis, coinbaseKey := engineapitester.DefaultEngineApiTesterGenesis(t)
+	eat := engineapitester.InitialiseEngineApiTester(t, engineapitester.EngineApiTesterInitArgs{
+		Logger:      testlog.Logger(t, log.LvlDebug),
+		DataDir:     t.TempDir(),
+		Genesis:     genesis,
+		CoinbaseKey: coinbaseKey,
+		EthConfigTweaker: func(config *ethconfig.Config) {
+			config.MaxReorgDepth = 2
+		},
+	})
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		// deploy changer at b2
+		transactOpts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainId())
+		require.NoError(t, err)
+		transactOpts.GasLimit = params.MaxTxnGasLimit
+		_, txn, changer, err := contracts.DeployChanger(transactOpts, eat.ContractBackend)
+		require.NoError(t, err)
+		b2Canon, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, b2Canon.ExecutionPayload, txn.Hash())
+		require.NoError(t, err)
+		// change changer at b3
+		txn, err = changer.Change(transactOpts)
+		require.NoError(t, err)
+		b3Canon, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, b3Canon.ExecutionPayload, txn.Hash())
+		require.NoError(t, err)
+		// change changer at b4
+		txn, err = changer.Change(transactOpts)
+		require.NoError(t, err)
+		b4Canon, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, b4Canon.ExecutionPayload, txn.Hash())
+		require.NoError(t, err)
+		// change changer at b5
+		txn, err = changer.Change(transactOpts)
+		require.NoError(t, err)
+		b5Canon, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, b5Canon.ExecutionPayload, txn.Hash())
+		require.NoError(t, err)
+		// unwind back to b2 should return "Too deep reorg" error with code 38006
+		err = eat.MockCl.UpdateForkChoice(ctx, b2Canon)
+		require.Error(t, err)
+		var rpcErr rpc.Error
+		require.ErrorAs(t, err, &rpcErr)
+		require.Equal(t, -38006, rpcErr.ErrorCode())
+		require.Equal(t, "Too deep reorg", rpcErr.Error())
 	})
 }

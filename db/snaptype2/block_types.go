@@ -199,13 +199,7 @@ var (
 				if !ok {
 					return fmt.Errorf("can't find files with vers by pattern %s for indexing in bodies", bodiesPathPattern)
 				}
-				if bVer.Less(statecfg.Schema.BodiesBlock.FileVersion.DataSeg.MinSupported) {
-					verToPanic := version.Versions{
-						Current:      bVer,
-						MinSupported: statecfg.Schema.BodiesBlock.FileVersion.DataSeg.MinSupported,
-					}
-					version.VersionTooLowPanic(filepath.Base(bodiesPath), verToPanic)
-				}
+				statecfg.Schema.BodiesBlock.FileVersion.DataSeg.MustSupport(bVer, filepath.Base(bodiesPath))
 				bodiesSegment, err := seg.NewDecompressor(bodiesPath)
 				if err != nil {
 					return fmt.Errorf("can't open %s for indexing in bodies: %w", sn.As(Bodies).Path, err)
@@ -228,13 +222,7 @@ var (
 				if !ok {
 					return fmt.Errorf("can't find files with vers by pattern %s for indexing in txs", txPathPattern)
 				}
-				if tVer.Less(statecfg.Schema.TransactionsBlock.FileVersion.DataSeg.MinSupported) {
-					verToPanic := version.Versions{
-						Current:      tVer,
-						MinSupported: statecfg.Schema.TransactionsBlock.FileVersion.DataSeg.MinSupported,
-					}
-					version.VersionTooLowPanic(filepath.Base(txPath), verToPanic)
-				}
+				statecfg.Schema.TransactionsBlock.FileVersion.DataSeg.MustSupport(tVer, filepath.Base(txPath))
 				d, err := seg.NewDecompressor(txPath)
 				if err != nil {
 					return fmt.Errorf("can't open %s for indexing in transactions: %w", sn.Path, err)

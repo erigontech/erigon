@@ -400,7 +400,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 		return nil
 	}
 
-	logger.Info(fmt.Sprintf("[%s] Unwind Execution", u.LogPrefix()), "from", s.BlockNumber, "to", u.UnwindPoint, "stack", dbg.Stack())
+	logger.Info(fmt.Sprintf("[%s] Unwind Execution", u.LogPrefix()), "from", s.BlockNumber, "to", u.UnwindPoint)
 
 	// Discard any pending deferred commitment updates from the previous
 	// (failed) execution. If left in place, the next ComputeCommitment
@@ -454,6 +454,9 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 }
 
 func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, timeout time.Duration, logger log.Logger) (err error) {
+	if dbg.NoPrune() {
+		return s.Done(tx)
+	}
 	// on chain-tip:
 	//  - can prune only between blocks (without blocking blocks processing)
 	//  - need also leave some time to prune blocks

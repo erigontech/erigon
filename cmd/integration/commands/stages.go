@@ -269,11 +269,6 @@ var cmdRunMigrations = &cobra.Command{
 		consensus := strings.Replace(chaindata, "chaindata", "aura", 1)
 		if exists, err := dir.Exist(consensus); err == nil && exists {
 			migrateDB(dbcfg.ConsensusDB, consensus)
-		} else {
-			consensus = strings.Replace(chaindata, "chaindata", "clique", 1)
-			if exists, err := dir.Exist(consensus); err == nil && exists {
-				migrateDB(dbcfg.ConsensusDB, consensus)
-			}
 		}
 		// Migrations must be applied also to the Bor heimdall and polygon-bridge DBs.
 		heimdall := strings.Replace(chaindata, "chaindata", "heimdall", 1)
@@ -609,6 +604,10 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 
 	cfg := stagedsync.StageSendersCfg(chainConfig, sync.Cfg(), false /* badBlockHalt */, tmpdir, pm, br, nil /* hd */)
 	if unwind > 0 {
+		if unwind > s.BlockNumber {
+			return errors.New("cannot unwind past 0")
+		}
+
 		u := sync.NewUnwindState(stages.Senders, s.BlockNumber-unwind, s.BlockNumber, true, false)
 		if err = stagedsync.UnwindSendersStage(u, tx, cfg, ctx); err != nil {
 			return err
@@ -982,6 +981,10 @@ func stageTxLookup(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) e
 	br, _ := blocksIO(db, logger)
 	cfg := stagedsync.StageTxLookupCfg(pm, dirs.Tmp, br)
 	if unwind > 0 {
+		if unwind > s.BlockNumber {
+			return errors.New("cannot unwind past 0")
+		}
+
 		u := sync.NewUnwindState(stages.TxLookup, s.BlockNumber-unwind, s.BlockNumber, true, false)
 		err = stagedsync.UnwindTxLookup(u, s, tx, cfg, ctx, logger)
 		if err != nil {
@@ -1071,6 +1074,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		_aggSingleton = dbstate.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings).MustOpen(ctx, db)
 
 		_aggSingleton.SetProduceMod(snapCfg.ProduceE3)
+		_aggSingleton.SetFrozenBlocksProvider(blockReader)
 
 		g := &errgroup.Group{}
 		g.Go(func() error {
@@ -1145,8 +1149,6 @@ func blocksIO(db kv.RoDB, logger log.Logger) (services.FullBlockReader, *blockio
 	return _blockReaderSingleton, _blockWriterSingleton
 }
 
-const blockBufferSize = 128
-
 func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.BuilderConfig, logger log.Logger) (
 	services.BlockRetire, rules.Engine, *vm.Config, *stagedsync.Sync,
 ) {
@@ -1216,7 +1218,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.
 		nil,
 		ethconfig.Defaults.Sync,
 		blockReader,
-		blockBufferSize,
+		sentry_multi_client.DefaultBlockBufferSize,
 		statusDataProvider,
 		false,
 		maxBlockBroadcastPeers,
@@ -1257,9 +1259,7 @@ func initRulesEngine(ctx context.Context, cc *chain2.Config, dir string, db kv.R
 	var heimdallClient heimdall.Client
 	var bridgeClient bridge.Client
 	var rulesConfig any
-	if cc.Clique != nil {
-		rulesConfig = chainspec.CliqueSnapshot
-	} else if cc.Aura != nil {
+	if cc.Aura != nil {
 		rulesConfig = &config.Aura
 	} else if cc.Bor != nil {
 		rulesConfig = cc.Bor

@@ -61,8 +61,48 @@ type CallContext struct {
 	stateGas uint64
 	input    []byte
 	Memory   Memory
+
+	// Opcode-scoped key/address intern cache. cacheGen is incremented once per
+	// opcode dispatch in the interpreter loop; cachedKeyGen/cachedAddrGen hold
+	// the generation at which the entry was populated. An entry is valid only
+	// when its gen equals cacheGen, giving the gas phase and execute phase of
+	// the same opcode a shared interned value without a second unique.Make call.
+	// Placed before Stack so these fields stay in L1D rather than being pushed
+	// out by Stack.data (32 KB).
+	cacheGen      uint64
+	cachedKeyGen  uint64
+	cachedAddrGen uint64
+	cachedKey     accounts.StorageKey
+	cachedAddr    accounts.Address
+
 	Stack    Stack
 	Contract Contract
+}
+
+// peekStorageKey returns the top-of-stack value as an interned StorageKey.
+// The result is cached for the lifetime of one opcode dispatch (gas phase +
+// execute phase share the same cacheGen), so unique.Make is called at most
+// once per opcode. Callers must invoke this before any stack mutation
+// (pop/push/swap) within the same dispatch — the cache is keyed by generation
+// only and will not detect a changed stack top within the same opcode.
+func (ctx *CallContext) peekStorageKey() accounts.StorageKey {
+	if ctx.cachedKeyGen == ctx.cacheGen {
+		return ctx.cachedKey
+	}
+	ctx.cachedKey = accounts.InternKey(ctx.Stack.peek().Bytes32())
+	ctx.cachedKeyGen = ctx.cacheGen
+	return ctx.cachedKey
+}
+
+// peekAddress returns the top-of-stack value as an interned Address.
+// Cached like peekStorageKey; same constraint: call before any stack mutation.
+func (ctx *CallContext) peekAddress() accounts.Address {
+	if ctx.cachedAddrGen == ctx.cacheGen {
+		return ctx.cachedAddr
+	}
+	ctx.cachedAddr = accounts.InternAddress(ctx.Stack.peek().Bytes20())
+	ctx.cachedAddrGen = ctx.cacheGen
+	return ctx.cachedAddr
 }
 
 var contextPool = sync.Pool{
@@ -87,6 +127,15 @@ func getCallContext(contract Contract, input []byte, gas mdgas.MdGas) *CallConte
 func (c *CallContext) put() {
 	c.Memory.reset()
 	c.Stack.Reset()
+	c.cacheGen = 0
+	// Use sentinel values so that a peek call before the first cacheGen++ is
+	// always a miss rather than returning a stale handle from a prior use.
+	c.cachedKeyGen = ^uint64(0)
+	c.cachedAddrGen = ^uint64(0)
+	// Zero the handles to release their canonMap pins while the context is
+	// idle in the pool; unique.Handle values keep interned entries alive.
+	c.cachedKey = accounts.NilKey
+	c.cachedAddr = accounts.NilAddress
 	contextPool.Put(c)
 }
 
@@ -378,6 +427,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 	anyTrace := dbg.TraceDynamicGas || debug || trace
 
 	for {
+		callContext.cacheGen++
 		if anyTrace {
 			// Capture pre-execution values for tracing.
 			logged, pcCopy, gasCopy = false, pc, callContext.gas

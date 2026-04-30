@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"runtime"
@@ -285,6 +286,15 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	}
 
 	updateCount := sdc.updates.Size()
+	start := time.Now()
+	defer func() {
+		took := time.Since(start)
+		var keysPerSec uint64
+		if took > 0 {
+			keysPerSec = uint64(float64(updateCount) / took.Seconds())
+		}
+		log.Debug("[commitment] processed", "block", blockNum, "txNum", txNum, "keys", common.PrettyCounter(updateCount), "keys/s", common.PrettyCounter(keysPerSec), "mode", sdc.updates.Mode(), "spent", took, "rootHash", hex.EncodeToString(rootHash))
+	}()
 	if updateCount == 0 {
 		rootHash, err = sdc.patriciaTrie.RootHash()
 		return rootHash, err
@@ -383,7 +393,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 			warmupConfig.CtxFactory = sdc.trieContextFactory(ctx, sdc.paraTrieDB, txNum)
 		}
 		warmupConfig.Enabled = sdc.trieWarmup
-		warmupConfig.NumWorkers = 16
+		warmupConfig.NumWorkers = dbg.TipTrieWarmupers
 		warmupConfig.MaxDepth = commitment.WarmupMaxDepth
 		warmupConfig.LogPrefix = logPrefix
 	}
@@ -556,7 +566,7 @@ var KeyCommitmentState = []byte(keyCommitmentStateS)
 
 var ErrBehindCommitment = errors.New("behind commitment")
 
-func _decodeTxBlockNums(v []byte) (txNum, blockNum uint64) {
+func DecodeTxBlockNums(v []byte) (txNum, blockNum uint64) {
 	return binary.BigEndian.Uint64(v), binary.BigEndian.Uint64(v[8:16])
 }
 
@@ -581,7 +591,7 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *Tr
 		return 0, 0, nil, nil
 	}
 
-	txNum, blockNum = _decodeTxBlockNums(state)
+	txNum, blockNum = DecodeTxBlockNums(state)
 	return blockNum, txNum, state, nil
 }
 
@@ -610,15 +620,6 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 		blockNum, txNum, err = sdc.restorePatriciaState(state)
 		if err != nil {
 			return 0, 0, err
-		}
-		if blockNum > 0 {
-			lastBn, _, err := rawdbv3.TxNums.Last(tx)
-			if err != nil {
-				return 0, 0, err
-			}
-			if lastBn < blockNum {
-				return 0, 0, fmt.Errorf("%w: TxNums index is at block %d and behind commitment %d", ErrBehindCommitment, lastBn, blockNum)
-			}
 		}
 		if err = sdc.enableConcurrentCommitmentIfPossible(); err != nil {
 			return 0, 0, err
@@ -906,9 +907,9 @@ func LatestBlockNumWithCommitment(tx kv.TemporalGetter) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	if len(stateVal) == 0 {
+	if len(stateVal) < 16 {
 		return 0, nil
 	}
-	_, minUnwindale := _decodeTxBlockNums(stateVal)
-	return minUnwindale, nil
+	_, minUnwindable := DecodeTxBlockNums(stateVal)
+	return minUnwindable, nil
 }

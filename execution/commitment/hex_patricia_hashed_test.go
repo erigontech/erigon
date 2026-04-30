@@ -1157,6 +1157,51 @@ func Test_HexPatriciaHashed_StateRestoreAndContinue(t *testing.T) {
 	require.Equal(t, withoutRestore, afterRestore)
 }
 
+func TestHexPatriciaHashedLoadStateIfNeededReturnsCounters(t *testing.T) {
+	t.Parallel()
+
+	ms := NewMockState(t)
+	addrHex := "00112233445566778899aabbccddeeff00112233"
+	slotHex := "0000000000000000000000000000000000000000000000000000000000000042"
+
+	plainKeys, updates := NewUpdateBuilder().
+		Balance(addrHex, 1).
+		Nonce(addrHex, 2).
+		Storage(addrHex, slotHex, "01").
+		Build()
+	require.NoError(t, ms.applyPlainUpdates(plainKeys, updates))
+
+	hph := NewHexPatriciaHashed(length.Addr, ms)
+
+	t.Run("account", func(t *testing.T) {
+		var accountCell cell
+		addr := common.FromHex("0x" + addrHex)
+		copy(accountCell.accountAddr[:], addr)
+		accountCell.accountAddrLen = int16(len(addr))
+
+		counters := skipStat{accSkipped: 3}
+		got, err := hph.loadStateIfNeeded(&accountCell, counters)
+		require.NoError(t, err)
+		require.Equal(t, uint64(1), got.accLoaded)
+		require.Equal(t, counters.accSkipped, got.accSkipped)
+		require.True(t, accountCell.loaded.account())
+	})
+
+	t.Run("storage", func(t *testing.T) {
+		var storageCell cell
+		storageKey := append(common.FromHex("0x"+addrHex), common.FromHex("0x"+slotHex)...)
+		copy(storageCell.storageAddr[:], storageKey)
+		storageCell.storageAddrLen = int16(len(storageKey))
+
+		counters := skipStat{storSkipped: 4}
+		got, err := hph.loadStateIfNeeded(&storageCell, counters)
+		require.NoError(t, err)
+		require.Equal(t, uint64(1), got.storLoaded)
+		require.Equal(t, counters.storSkipped, got.storSkipped)
+		require.True(t, storageCell.loaded.storage())
+	})
+}
+
 func Test_HexPatriciaHashed_RestoreAndContinue(t *testing.T) {
 	t.Parallel()
 

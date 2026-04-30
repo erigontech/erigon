@@ -89,6 +89,9 @@ func MakeTopics(query ...[]any) ([][]common.Hash, error) {
 				switch {
 				// static byte array
 				case val.Kind() == reflect.Array && reflect.TypeOf(rule).Elem().Kind() == reflect.Uint8:
+					if val.Len() > len(topic) {
+						return nil, fmt.Errorf("indexed byte array too large: [%d]byte", val.Len())
+					}
 					reflect.Copy(reflect.ValueOf(topic[:val.Len()]), val)
 				default:
 					return nil, fmt.Errorf("unsupported indexed type: %T", rule)

@@ -111,18 +111,20 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	var versionedHashes []common.Hash
 	if newPayload && f.engine != nil && block.Version() >= clparams.DenebVersion {
 		versionedHashes = []common.Hash{}
-		solid.RangeErr[*cltypes.KZGCommitment](block.Block.Body.BlobKzgCommitments, func(i1 int, k *cltypes.KZGCommitment, i2 int) error {
+		if err := solid.RangeErr[*cltypes.KZGCommitment](block.Block.Body.BlobKzgCommitments, func(i1 int, k *cltypes.KZGCommitment, i2 int) error {
 			versionedHash, err := utils.KzgCommitmentToVersionedHash(common.Bytes48(*k))
 			if err != nil {
 				return err
 			}
 			versionedHashes = append(versionedHashes, versionedHash)
 			return nil
-		})
+		}); err != nil {
+			return err
+		}
 	}
 
 	elHasBlobs := false
-	if f.engine != nil && checkDataAvaiability && block.Block.Body.BlobKzgCommitments.Len() > 0 && !f.peerDas.IsArchivedMode() {
+	if f.engine != nil && f.peerDas != nil && checkDataAvaiability && block.Block.Body.BlobKzgCommitments.Len() > 0 && !f.peerDas.IsArchivedMode() {
 		blobsWithProof, proofs, err := f.engine.GetBlobs(ctx, versionedHashes, block.Version())
 		if err != nil {
 			log.Warn("OnBlock: GetBlobs failed", "blockRoot", common.Hash(blockRoot), "err", err)
@@ -133,7 +135,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 
 	// Check if blob data is available (skip if blobs are in txpool)
 	if checkDataAvaiability && block.Block.Body.BlobKzgCommitments.Len() > 0 && !elHasBlobs {
-		if block.Version() >= clparams.FuluVersion {
+		if block.Version() >= clparams.FuluVersion && f.peerDas != nil {
 			available, err := f.peerDas.IsDataAvailable(block.Block.Slot, blockRoot)
 			if err != nil {
 				return err
@@ -330,10 +332,12 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		log.Debug("OnBlock", "elapsed", time.Since(start), "slot", block.Block.Slot)
 	}
 
-	if connectedValidators := f.localValidators.GetValidators(); len(connectedValidators) > 0 {
-		// update the custody requirement whenever we see a new block
-		custodyRequirement := state.GetValidatorsCustodyRequirement(lastProcessedState, connectedValidators)
-		f.peerDas.UpdateValidatorsCustody(custodyRequirement)
+	if f.peerDas != nil {
+		if connectedValidators := f.localValidators.GetValidators(); len(connectedValidators) > 0 {
+			// update the custody requirement whenever we see a new block
+			custodyRequirement := state.GetValidatorsCustodyRequirement(lastProcessedState, connectedValidators)
+			f.peerDas.UpdateValidatorsCustody(custodyRequirement)
+		}
 	}
 	return nil
 }

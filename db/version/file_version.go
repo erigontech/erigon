@@ -8,8 +8,11 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 /*
@@ -185,6 +188,29 @@ func (v Versions) Supports(ver Version) bool {
 	return ver.GreaterOrEqual(v.MinSupported) && ver.LessOrEqual(v.Current)
 }
 
+var mustSupportLogOnce sync.Once
+
+// MustSupport panics if ver is outside [MinSupported, Current].
+func (v Versions) MustSupport(ver Version, filename string) {
+	if v.Supports(ver) {
+		return
+	}
+	var msg string
+	if ver.Less(v.MinSupported) {
+		msg = fmt.Sprintf(
+			"Snapshot file is too old for this Erigon build: file=%s, minimum_required=%s. To fix, reset snapshots: `erigon snapshots reset --datadir $DATADIR --chain $CHAIN`",
+			filename, v.MinSupported,
+		)
+	} else {
+		msg = fmt.Sprintf(
+			"Snapshot file is newer than this Erigon build supports: file=%s, highest_supported=<%s. To fix, either upgrade Erigon to a newer release, or align snapshots by command: `erigon snapshots reset --datadir $DATADIR --chain $CHAIN`",
+			filename, ver,
+		)
+	}
+	mustSupportLogOnce.Do(func() { log.Error(msg) })
+	panic(msg)
+}
+
 // FindFilesWithVersionsByPattern return an filepath by pattern
 func FindFilesWithVersionsByPattern(pattern string) (string, Version, bool, error) {
 	matches, err := filepath.Glob(pattern)
@@ -310,13 +336,4 @@ func (v *Version) UnmarshalYAML(node *yaml.Node) error {
 	}
 	*v = ver
 	return nil
-}
-
-func VersionTooLowPanic(filename string, version Versions) {
-	panic(fmt.Sprintf(
-		"FileVersion is too low, try to run snapshot reset: `erigon --datadir $DATADIR --chain $CHAIN snapshots reset`. file=%s, min_supported=%s, current=%s",
-		filename,
-		version.MinSupported,
-		version.Current,
-	))
 }

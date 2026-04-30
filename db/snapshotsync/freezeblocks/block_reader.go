@@ -1320,13 +1320,18 @@ func (r *BlockReader) IterateFrozenBodies(f func(blockNum, baseTxNum, txCount ui
 	return nil
 }
 
-func (r *BlockReader) IntegrityTxnID(failFast bool) error {
+func (r *BlockReader) IntegrityTxnID(ctx context.Context, failFast bool) error {
 	defer log.Info("[integrity] BlocksTxnID done")
 	view := r.sn.View()
 	defer view.Close()
 
 	var expectedFirstTxnID uint64
-	for _, snb := range view.Bodies() {
+	for i, snb := range view.Bodies() {
+		if i%1000 == 0 {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+		}
 		if snb.Src() == nil {
 			continue
 		}

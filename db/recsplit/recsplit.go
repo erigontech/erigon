@@ -138,8 +138,8 @@ type RecSplit struct {
 
 	indexW          *bufio.Writer
 	indexF          *os.File
-	offsetEf        *eliasfano32.EliasFano // Elias Fano instance for encoding the offsets
-	bucketCollector *etl.Collector         // Collector that sorts by buckets
+	offsetEf        *eliasfano32.OffHeapBuilder // Elias Fano instance for encoding the offsets
+	bucketCollector *etl.Collector              // Collector that sorts by buckets
 
 	fileName string
 	filePath string
@@ -381,6 +381,10 @@ func (rs *RecSplit) Close() {
 	if rs.offsetWriter != nil {
 		putBufioWriter(rs.offsetWriter)
 		rs.offsetWriter = nil
+	}
+	if rs.offsetEf != nil {
+		rs.offsetEf.Close()
+		rs.offsetEf = nil
 	}
 }
 
@@ -826,8 +830,19 @@ func (rs *RecSplit) loadFuncBucket(k, v []byte, _ etl.CurrentTableReader, _ etl.
 }
 
 // buildOffsetEf mmaps the offset temp file and builds the Elias-Fano encoding.
-func (rs *RecSplit) buildOffsetEf() error {
-	rs.offsetEf = eliasfano32.NewEliasFano(rs.keysAdded, rs.maxOffset)
+// Uses off-heap EF to keep multi-GB backing buffers out of the Go heap.
+func (rs *RecSplit) buildOffsetEf() (retErr error) {
+	var err error
+	rs.offsetEf, err = eliasfano32.NewEliasFanoOffHeap(rs.keysAdded, rs.maxOffset, filepath.Join(rs.tmpDir, rs.fileName))
+	if err != nil {
+		return fmt.Errorf("new offset ef: %w", err)
+	}
+	defer func() {
+		if retErr != nil {
+			rs.offsetEf.Close()
+			rs.offsetEf = nil
+		}
+	}()
 	if err := rs.offsetWriter.Flush(); err != nil {
 		return fmt.Errorf("flush offset writer: %w", err)
 	}
@@ -954,6 +969,12 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		if err := rs.buildOffsetEf(); err != nil {
 			return err
 		}
+		defer func() {
+			if rs.offsetEf != nil {
+				rs.offsetEf.Close()
+				rs.offsetEf = nil
+			}
+		}()
 	}
 	rs.gr.appendFixed(1, 1) // Sentinel (avoids checking for parts of size 1)
 	// Construct Elias Fano index
@@ -1004,6 +1025,8 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		if err := rs.offsetEf.Write(rs.indexW); err != nil {
 			return fmt.Errorf("writing elias fano for offsets: %w", err)
 		}
+		rs.offsetEf.Close()
+		rs.offsetEf = nil
 	}
 	if err := rs.flushExistenceFilter(); err != nil {
 		return err
