@@ -146,14 +146,9 @@ func (s *executionPayloadBidService) ProcessMessage(ctx context.Context, _ *uint
 		return fmt.Errorf("%w: bid slot %d is not current (%d) or next slot", ErrIgnore, slot, currentSlot)
 	}
 
-	// [REJECT] bid.execution_payment is zero
-	if bid.ExecutionPayment != 0 {
-		return fmt.Errorf("bid execution_payment must be zero, got %d", bid.ExecutionPayment)
-	}
-
 	// [IGNORE] SignedProposerPreferences for bid.slot has been seen
-	preferences, preferencesFound := s.epbsPool.ProposerPreferences.Get(slot)
-	if !preferencesFound {
+	allPreferences := s.epbsPool.GetPreferencesForSlot(slot)
+	if len(allPreferences) == 0 {
 		// Queue as pending — preferences may arrive later
 		s.queuePendingBid(msg)
 		log.Trace("Queued execution payload bid waiting for proposer preferences",
@@ -161,7 +156,16 @@ func (s *executionPayloadBidService) ProcessMessage(ctx context.Context, _ *uint
 		return nil
 	}
 
-	return s.validateAndStoreBid(msg, preferences)
+	// Try all preferences for this slot (may differ by dependent_root / fork).
+	// Accept the bid if it validates against ANY of them.
+	var lastErr error
+	for _, pref := range allPreferences {
+		lastErr = s.validateAndStoreBid(msg, pref)
+		if lastErr == nil {
+			return nil
+		}
+	}
+	return lastErr
 }
 
 // validateAndStoreBid performs all remaining validation checks after preferences are confirmed.
@@ -173,12 +177,6 @@ func (s *executionPayloadBidService) validateAndStoreBid(
 	slot := bid.Slot
 	builderIndex := bid.BuilderIndex
 	prefs := preferences.Message
-
-	// [REJECT] bid.fee_recipient matches preferences
-	if bid.FeeRecipient != prefs.FeeRecipient {
-		return fmt.Errorf("bid fee_recipient %v does not match preferences %v",
-			bid.FeeRecipient, prefs.FeeRecipient)
-	}
 
 	// [REJECT] bid.gas_limit matches preferences
 	if bid.GasLimit != prefs.GasLimit {
@@ -274,8 +272,7 @@ func (s *executionPayloadBidService) validateAndStoreBid(
 		"slot", slot,
 		"builderIndex", builderIndex,
 		"value", bid.Value,
-		"parentBlockHash", bid.ParentBlockHash,
-		"feeRecipient", bid.FeeRecipient)
+		"parentBlockHash", bid.ParentBlockHash)
 
 	return nil
 }
@@ -359,20 +356,28 @@ func (s *executionPayloadBidService) processPendingBids() {
 		}
 
 		// Check if preferences have arrived
-		preferences, found := s.epbsPool.ProposerPreferences.Get(pendingKey.slot)
-		if !found {
+		allPreferences := s.epbsPool.GetPreferencesForSlot(pendingKey.slot)
+		if len(allPreferences) == 0 {
 			return true // Preferences still not here, keep waiting
 		}
 
-		// Preferences arrived, remove from pending and process
+		// Preferences arrived, remove from pending and process.
+		// Try all preferences (may differ by dependent_root / fork).
 		s.pendingBids.Delete(pendingKey)
 		s.pendingCount.Add(-1)
 
-		if err := s.validateAndStoreBid(job.msg, preferences); err != nil {
+		var lastErr error
+		for _, pref := range allPreferences {
+			lastErr = s.validateAndStoreBid(job.msg, pref)
+			if lastErr == nil {
+				break
+			}
+		}
+		if lastErr != nil {
 			log.Trace("Failed to process pending execution payload bid",
 				"slot", pendingKey.slot,
 				"builderIndex", pendingKey.builderIndex,
-				"err", err)
+				"err", lastErr)
 		}
 		return true
 	})

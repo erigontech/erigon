@@ -101,6 +101,15 @@ func (f *ForkChoiceStore) validateEnvelopeAgainstBlock(
 			requestsRoot, bid.Message.ExecutionRequestsRoot)
 	}
 
+	// Validate envelope.parent_beacon_block_root == state.latest_block_header.parent_root
+	if blockState != nil {
+		latestBlockHeader := blockState.LatestBlockHeader()
+		if envelope.ParentBeaconBlockRoot != latestBlockHeader.ParentRoot {
+			return fmt.Errorf("envelope parent_beacon_block_root %v != latest_block_header parent_root %v",
+				envelope.ParentBeaconBlockRoot, latestBlockHeader.ParentRoot)
+		}
+	}
+
 	// Verify builder signature
 	if err := f.verifyEnvelopeBuilderSignature(signedEnvelope, blockState, block.Block.Slot); err != nil {
 		return fmt.Errorf("invalid builder signature: %w", err)

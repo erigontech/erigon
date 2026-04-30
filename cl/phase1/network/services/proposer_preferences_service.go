@@ -10,8 +10,10 @@ import (
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
@@ -19,12 +21,14 @@ import (
 type seenProposerPreferencesKey struct {
 	validatorIndex uint64
 	slot           uint64
+	dependentRoot  common.Hash
 }
 
 const seenProposerPreferencesCacheSize = 128 // ~2 epochs of slots * some buffer
 
 type proposerPreferencesService struct {
 	syncedDataManager synced_data.SyncedData
+	forkchoiceStore   forkchoice.ForkChoiceStorageReader
 	ethClock          eth_clock.EthereumClock
 	beaconCfg         *clparams.BeaconChainConfig
 	epbsPool          *pool.EpbsPool
@@ -36,6 +40,7 @@ type proposerPreferencesService struct {
 // [New in Gloas:EIP7732]
 func NewProposerPreferencesService(
 	syncedDataManager synced_data.SyncedData,
+	forkchoiceStore forkchoice.ForkChoiceStorageReader,
 	ethClock eth_clock.EthereumClock,
 	beaconCfg *clparams.BeaconChainConfig,
 	epbsPool *pool.EpbsPool,
@@ -46,6 +51,7 @@ func NewProposerPreferencesService(
 	}
 	return &proposerPreferencesService{
 		syncedDataManager: syncedDataManager,
+		forkchoiceStore:   forkchoiceStore,
 		ethClock:          ethClock,
 		beaconCfg:         beaconCfg,
 		epbsPool:          epbsPool,
@@ -78,23 +84,37 @@ func (s *proposerPreferencesService) ProcessMessage(ctx context.Context, _ *uint
 		"proposalSlot", proposalSlot,
 		"validatorIndex", validatorIndex)
 
-	// [IGNORE] preferences.proposal_slot is in the next epoch
-	// i.e. compute_epoch_at_slot(preferences.proposal_slot) == get_current_epoch(state) + 1
+	// [IGNORE] preferences.proposal_slot is in the current or next epoch
+	// i.e. compute_epoch_at_slot(preferences.proposal_slot) in {get_current_epoch(state), get_current_epoch(state) + 1}
 	currentEpoch := s.ethClock.GetCurrentEpoch()
 	proposalEpoch := s.ethClock.GetEpochAtSlot(proposalSlot)
-	if proposalEpoch != currentEpoch+1 {
-		return fmt.Errorf("%w: proposal slot %d is in epoch %d, expected next epoch %d",
-			ErrIgnore, proposalSlot, proposalEpoch, currentEpoch+1)
+	if proposalEpoch != currentEpoch && proposalEpoch != currentEpoch+1 {
+		return fmt.Errorf("%w: proposal slot %d is in epoch %d, expected current epoch %d or next epoch %d",
+			ErrIgnore, proposalSlot, proposalEpoch, currentEpoch, currentEpoch+1)
 	}
 
-	// [IGNORE] First valid message from this validator+slot
+	// [IGNORE] The proposal slot has not already passed
+	currentSlot := s.ethClock.GetCurrentSlot()
+	if proposalSlot < currentSlot {
+		return fmt.Errorf("%w: proposal slot %d has already passed (current slot %d)",
+			ErrIgnore, proposalSlot, currentSlot)
+	}
+
+	// [IGNORE] First valid message from this (validator_index, proposal_slot, dependent_root)
 	seenKey := seenProposerPreferencesKey{
 		validatorIndex: validatorIndex,
 		slot:           proposalSlot,
+		dependentRoot:  preferences.DependentRoot,
 	}
 	if s.seenCache.Contains(seenKey) {
-		return fmt.Errorf("%w: already seen proposer preferences from validator %d for slot %d",
-			ErrIgnore, validatorIndex, proposalSlot)
+		return fmt.Errorf("%w: already seen proposer preferences from validator %d for slot %d with dependent root %v",
+			ErrIgnore, validatorIndex, proposalSlot, preferences.DependentRoot)
+	}
+
+	// [IGNORE] The dependent_root block has been seen in forkchoice
+	if _, ok := s.forkchoiceStore.GetHeader(preferences.DependentRoot); !ok {
+		return fmt.Errorf("%w: dependent_root %v not seen in forkchoice",
+			ErrIgnore, preferences.DependentRoot)
 	}
 
 	// [REJECT] is_valid_proposal_slot + [REJECT] BLS signature verification
@@ -148,7 +168,10 @@ func (s *proposerPreferencesService) ProcessMessage(ctx context.Context, _ *uint
 
 	// All checks passed — mark as seen and store in pool
 	s.seenCache.Add(seenKey, struct{}{})
-	s.epbsPool.ProposerPreferences.Add(proposalSlot, msg)
+	s.epbsPool.ProposerPreferences.Add(pool.ProposerPreferencesKey{
+		Slot:          proposalSlot,
+		DependentRoot: preferences.DependentRoot,
+	}, msg)
 
 	log.Trace("Processed proposer preferences via gossip",
 		"proposalSlot", proposalSlot,

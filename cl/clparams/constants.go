@@ -34,4 +34,7 @@ const (
 	// REORG_HEAD_WEIGHT_THRESHOLD is the percentage of committee weight below which
 	// the head is considered "weak" and eligible for reorging.
 	ReorgHeadWeightThreshold = uint64(20)
+	// REORG_PARENT_WEIGHT_THRESHOLD is the percentage of committee weight above which
+	// the parent is considered "strong" enough to support proposer-boost reorgs.
+	ReorgParentWeightThreshold = uint64(160)
 )

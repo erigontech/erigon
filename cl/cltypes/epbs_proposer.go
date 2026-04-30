@@ -21,6 +21,7 @@ var (
 // This is used in the gossip network to communicate proposer preferences to builders.
 // [New in Gloas:EIP7732]
 type ProposerPreferences struct {
+	DependentRoot  common.Hash    `json:"dependent_root"`
 	ProposalSlot   uint64         `json:"proposal_slot,string"`
 	ValidatorIndex uint64         `json:"validator_index,string"`
 	FeeRecipient   common.Address `json:"fee_recipient"`
@@ -29,6 +30,7 @@ type ProposerPreferences struct {
 
 func (p *ProposerPreferences) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(
+		p.DependentRoot[:],
 		p.ProposalSlot,
 		p.ValidatorIndex,
 		p.FeeRecipient[:],
@@ -37,7 +39,7 @@ func (p *ProposerPreferences) HashSSZ() ([32]byte, error) {
 }
 
 func (p *ProposerPreferences) EncodingSizeSSZ() int {
-	return 8 + 8 + length.Addr + 8
+	return length.Hash + 8 + 8 + length.Addr + 8
 }
 
 func (p *ProposerPreferences) Static() bool {
@@ -45,15 +47,16 @@ func (p *ProposerPreferences) Static() bool {
 }
 
 func (p *ProposerPreferences) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, p.ProposalSlot, p.ValidatorIndex, p.FeeRecipient[:], p.GasLimit)
+	return ssz2.MarshalSSZ(buf, p.DependentRoot[:], p.ProposalSlot, p.ValidatorIndex, p.FeeRecipient[:], p.GasLimit)
 }
 
 func (p *ProposerPreferences) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, &p.ProposalSlot, &p.ValidatorIndex, p.FeeRecipient[:], &p.GasLimit)
+	return ssz2.UnmarshalSSZ(buf, version, p.DependentRoot[:], &p.ProposalSlot, &p.ValidatorIndex, p.FeeRecipient[:], &p.GasLimit)
 }
 
 func (p *ProposerPreferences) Clone() clonable.Clonable {
 	return &ProposerPreferences{
+		DependentRoot:  p.DependentRoot,
 		ProposalSlot:   p.ProposalSlot,
 		ValidatorIndex: p.ValidatorIndex,
 		FeeRecipient:   p.FeeRecipient,

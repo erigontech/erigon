@@ -66,9 +66,7 @@ func newTestSignedExecutionPayloadBid(slot uint64, builderIndex uint64, value ui
 			ParentBlockHash:    common.HexToHash("0xaaaa"),
 			ParentBlockRoot:    common.HexToHash("0xbbbb"),
 			BlockHash:          common.HexToHash("0xcccc"),
-			FeeRecipient:       common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678"),
 			GasLimit:           30_000_000,
-			ExecutionPayment:   0,
 			BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
 		},
 		Signature: common.Bytes96{},
@@ -77,7 +75,9 @@ func newTestSignedExecutionPayloadBid(slot uint64, builderIndex uint64, value ui
 
 // addPreferencesToPool adds a SignedProposerPreferences to the pool for the given slot.
 func addPreferencesToPool(epbsPool *pool.EpbsPool, slot uint64) {
-	epbsPool.ProposerPreferences.Add(slot, &cltypes.SignedProposerPreferences{
+	epbsPool.ProposerPreferences.Add(pool.ProposerPreferencesKey{
+		Slot: slot,
+	}, &cltypes.SignedProposerPreferences{
 		Message: &cltypes.ProposerPreferences{
 			ProposalSlot:   slot,
 			ValidatorIndex: 99,
@@ -176,23 +176,6 @@ func TestExecutionPayloadBidServiceNextSlot(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestExecutionPayloadBidServiceNonZeroExecutionPayment(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	service, _, ethClockMock, _, _ := setupExecutionPayloadBidService(t, ctrl)
-
-	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
-	msg.Message.ExecutionPayment = 42 // Non-zero → REJECT
-
-	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
-
-	err := service.ProcessMessage(context.Background(), nil, msg)
-	require.Error(t, err)
-	require.False(t, errors.Is(err, ErrIgnore)) // REJECT, not IGNORE
-	require.Contains(t, err.Error(), "execution_payment must be zero")
-}
-
 func TestExecutionPayloadBidServiceNoPreferences(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -212,24 +195,6 @@ func TestExecutionPayloadBidServiceNoPreferences(t *testing.T) {
 	bidKey := pool.HighestBidKey{Slot: 100, ParentBlockHash: common.HexToHash("0xaaaa"), ParentBlockRoot: common.HexToHash("0xbbbb")}
 	_, found := epbsPool.HighestBids.Get(bidKey)
 	require.False(t, found)
-}
-
-func TestExecutionPayloadBidServiceFeeRecipientMismatch(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	service, _, ethClockMock, _, epbsPool := setupExecutionPayloadBidService(t, ctrl)
-
-	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
-	msg.Message.FeeRecipient = common.HexToAddress("0xdead") // Different from preferences
-
-	addPreferencesToPool(epbsPool, 100)
-	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
-
-	err := service.ProcessMessage(context.Background(), nil, msg)
-	require.Error(t, err)
-	require.False(t, errors.Is(err, ErrIgnore)) // REJECT
-	require.Contains(t, err.Error(), "fee_recipient")
 }
 
 func TestExecutionPayloadBidServiceGasLimitMismatch(t *testing.T) {
@@ -507,10 +472,8 @@ func TestExecutionPayloadBidServiceDecodeGossipMessage(t *testing.T) {
 	require.Equal(t, original.Message.Slot, decoded.Message.Slot)
 	require.Equal(t, original.Message.BuilderIndex, decoded.Message.BuilderIndex)
 	require.Equal(t, original.Message.Value, decoded.Message.Value)
-	require.Equal(t, original.Message.FeeRecipient, decoded.Message.FeeRecipient)
 	require.Equal(t, original.Message.GasLimit, decoded.Message.GasLimit)
 	require.Equal(t, original.Message.ParentBlockHash, decoded.Message.ParentBlockHash)
-	require.Equal(t, original.Message.ExecutionPayment, decoded.Message.ExecutionPayment)
 }
 
 func TestExecutionPayloadBidServiceDecodeGossipMessageInvalid(t *testing.T) {

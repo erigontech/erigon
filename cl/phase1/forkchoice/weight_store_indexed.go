@@ -19,6 +19,7 @@ package forkchoice
 import (
 	"sync"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/common"
 )
@@ -243,10 +244,23 @@ func (w *indexedWeightStore) GetProposerScore() uint64 {
 }
 
 // ShouldApplyProposerBoost returns whether the proposer boost should be applied
-// during weight calculation. This checks whether proposer_boost_root has been set
-// (which happens in record_block_timeliness via shouldApplyProposerBoost).
-// The time-awareness is handled at record time, not here.
+// during weight calculation.
+//
+// Pre-GLOAS: simple check that proposer_boost_root is set.
+// [New in Gloas:EIP7732] Post-GLOAS implements the full spec logic
+// (see weightStore.ShouldApplyProposerBoost for spec details).
 func (w *indexedWeightStore) ShouldApplyProposerBoost() bool {
 	proposerBoostRoot := w.f.ProposerBoostRoot()
-	return proposerBoostRoot != (common.Hash{})
+	if proposerBoostRoot == (common.Hash{}) {
+		return false
+	}
+
+	// Pre-GLOAS: just check if root is set
+	currentEpoch := w.f.computeEpochAtSlot(w.f.Slot())
+	if w.f.beaconCfg.GetCurrentStateVersion(currentEpoch) < clparams.GloasVersion {
+		return true
+	}
+
+	// [New in Gloas:EIP7732] Full spec logic
+	return w.f.shouldApplyProposerBoostGloas(proposerBoostRoot)
 }
