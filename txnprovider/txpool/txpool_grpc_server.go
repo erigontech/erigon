@@ -96,6 +96,9 @@ func (*GrpcDisabled) Status(ctx context.Context, request *txpoolproto.StatusRequ
 func (*GrpcDisabled) Nonce(ctx context.Context, request *txpoolproto.NonceRequest) (*txpoolproto.NonceReply, error) {
 	return nil, ErrPoolDisabled
 }
+func (*GrpcDisabled) GetBlobs(ctx context.Context, request *txpoolproto.GetBlobsRequest) (*txpoolproto.GetBlobsReply, error) {
+	return nil, ErrPoolDisabled
+}
 
 type GrpcServer struct {
 	txpoolproto.UnimplementedTxpoolServer

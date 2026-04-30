@@ -237,13 +237,12 @@ func (c *callback) call(ctx context.Context, method string, args []reflect.Value
 	if len(results) == 0 {
 		return nil, nil
 	}
-	if dbg.RpcDropResponse {
-		return nil, nil
-	}
 	if c.errPos >= 0 && !results[c.errPos].IsNil() {
-		// Method has returned non-nil error value.
 		err := results[c.errPos].Interface().(error)
 		return reflect.Value{}, err
+	}
+	if dbg.RpcDropResponse {
+		return nil, nil
 	}
 	return results[0].Interface(), nil
 }
