@@ -257,28 +257,7 @@ type wsConnAdapter struct {
 }
 
 func (a *wsConnAdapter) Close() error {
-	// Attempt a graceful WebSocket close handshake first, so the peer sees a clean
-	// 1000 (normal closure) instead of 1006 (abnormal). Keep the handshake fully async
-	// so server shutdown doesn't block per connection, and force-close after a bounded
-	// grace period if the peer doesn't complete the close promptly.
-	closeDone := make(chan struct{})
-	go func() {
-		defer close(closeDone)
-		_ = a.conn.Close(websocket.StatusNormalClosure, "")
-	}()
-
-	go func() {
-		timer := time.NewTimer(time.Second)
-		defer timer.Stop()
-
-		select {
-		case <-closeDone:
-		case <-timer.C:
-			_ = a.conn.CloseNow()
-		}
-	}()
-
-	return nil
+	return a.conn.Close(websocket.StatusNormalClosure, "")
 }
 
 func (a *wsConnAdapter) SetWriteDeadline(t time.Time) error {

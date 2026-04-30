@@ -42,6 +42,7 @@ type HttpEndpointConfig struct {
 	HTTPS    bool
 	CertFile string
 	KeyFile  string
+	Listener net.Listener // optional pre-created listener; if set, StartHTTPEndpoint uses it instead of creating a new one
 }
 
 // StartHTTPEndpoint starts the HTTP RPC endpoint.
@@ -51,12 +52,17 @@ func StartHTTPEndpoint(urlEndpoint string, cfg *HttpEndpointConfig, handler http
 		listener net.Listener
 		err      error
 	)
-	socketUrl, err := url.Parse(urlEndpoint)
-	if err != nil {
-		return nil, nil, fmt.Errorf("malformatted http listen url %s: %w", urlEndpoint, err)
-	}
-	if listener, err = net.Listen(socketUrl.Scheme, socketUrl.Host+socketUrl.EscapedPath()); err != nil {
-		return nil, nil, err
+	if cfg.Listener != nil {
+		listener = cfg.Listener
+	} else {
+		var socketUrl *url.URL
+		socketUrl, err = url.Parse(urlEndpoint)
+		if err != nil {
+			return nil, nil, fmt.Errorf("malformed http listen url %s: %w", urlEndpoint, err)
+		}
+		if listener, err = net.Listen(socketUrl.Scheme, socketUrl.Host+socketUrl.EscapedPath()); err != nil {
+			return nil, nil, err
+		}
 	}
 	// make sure timeout values are meaningful
 	CheckTimeouts(&cfg.Timeouts)
