@@ -898,6 +898,17 @@ func (cs *MultiClient) addBlockWitnesses(ctx context.Context, inreq *sentryproto
 	witnessTotalPages := make(map[common.Hash]uint64)
 
 	for _, pageResponse := range query.WitnessPacketResponse {
+		if pageResponse.TotalPages > wit.MaxWitnessPages {
+			return fmt.Errorf("witness response advertises TotalPages %d > max %d for hash %x", pageResponse.TotalPages, wit.MaxWitnessPages, pageResponse.Hash)
+		}
+		// Page >= TotalPages is the empty-response sentinel documented on
+		// wit.WitnessPageResponse.Page; skip without allocating.
+		if pageResponse.Page >= pageResponse.TotalPages {
+			continue
+		}
+		if prev, ok := witnessTotalPages[pageResponse.Hash]; ok && prev != pageResponse.TotalPages {
+			return fmt.Errorf("witness response has inconsistent TotalPages for hash %x: %d vs %d", pageResponse.Hash, prev, pageResponse.TotalPages)
+		}
 		if witnessPages[pageResponse.Hash] == nil {
 			witnessPages[pageResponse.Hash] = make(map[uint64][]byte)
 		}
