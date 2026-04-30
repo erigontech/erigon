@@ -99,12 +99,17 @@ type EVM struct {
 	// executionStateGas accumulates the EIP-8037 state-gas charges (and credits)
 	// across all frame commits in this tx. Charged at frame-commit time via the
 	// journal-walk-and-delta algorithm (see IntraBlockState.ComputeFrameStateBytes).
-	// Reset to 0 on top-level revert (depth==0 && err != nil).
-	executionStateGas uint64
+	// Reset to 0 on top-level revert (depth==0 && err != nil). Signed because
+	// per-tx refunds (EIP-6780 same-tx selfdestruct, EIP-7702 auth-list refund)
+	// can drive this counter negative; the block-level computation clamps to 0
+	// (block_state_gas_used = max(0, intrinsic_state + executionStateGas)).
+	executionStateGas int64
 	// committedChildBytes is a per-depth stack of running totals — when a child
 	// frame commits, its walkTotal is added to the parent's slot. Used at
 	// frame-commit to compute delta = walkTotal - committedChildBytes[depth].
-	committedChildBytes []uint64
+	// Signed because cleared-slot rules (EIP-8037) and child frames that net
+	// shrink state can produce negative walkTotals that propagate to parents.
+	committedChildBytes []int64
 }
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
@@ -167,7 +172,7 @@ func (evm *EVM) Cancelled() bool { return evm.abort.Load() }
 
 // ExecutionStateGas returns the EIP-8037 execution state gas accumulated across
 // all frame commits in the current tx. Reset to 0 on top-level revert.
-func (evm *EVM) ExecutionStateGas() uint64 { return evm.executionStateGas }
+func (evm *EVM) ExecutionStateGas() int64 { return evm.executionStateGas }
 
 // RegularGasConsumed returns the total regular gas charged during tx execution (for block-level accounting)
 func (evm *EVM) RegularGasConsumed() uint64 { return evm.regularGasConsumed }
@@ -188,7 +193,7 @@ func (evm *EVM) pushFrameAccumulator() {
 // popFrameAccumulator pops the top of committedChildBytes and returns its value.
 // At commit time the caller passes the popped value to the parent via
 // propagateChildBytes. On revert the caller discards it.
-func (evm *EVM) popFrameAccumulator() uint64 {
+func (evm *EVM) popFrameAccumulator() int64 {
 	n := len(evm.committedChildBytes)
 	if n == 0 {
 		return 0
@@ -200,20 +205,49 @@ func (evm *EVM) popFrameAccumulator() uint64 {
 
 // propagateChildBytes adds walkTotal to the parent's committedChildBytes slot
 // after a child frame commits. If we are at depth 0 (no parent) this is a no-op.
-func (evm *EVM) propagateChildBytes(walkTotal uint64) {
+//
+// Negative walkTotals (from EIP-8037 cleared-slot credits) are NOT propagated:
+// matching EELS, the reservoir credit happens at the child frame, while the
+// parent's `already_paid` (committedChildBytes) tracks only positive charges.
+// Reservoir gas itself is propagated via the gas return mechanism (the parent
+// receives the child's leftover gas, which includes any credited state gas).
+func (evm *EVM) propagateChildBytes(walkTotal int64) {
 	n := len(evm.committedChildBytes)
 	if n == 0 {
 		return
 	}
-	evm.committedChildBytes[n-1] += walkTotal
+	if walkTotal > 0 {
+		evm.committedChildBytes[n-1] += walkTotal
+	}
+}
+
+// adjustGasStateAndExecution applies a signed `restoreGas` adjustment to the
+// frame's state-gas reservoir (gas.State) and the running per-tx
+// `executionStateGas` counter. Used on frame revert to undo the per-byte effects
+// committed by descendants: positive `restoreGas` returns previously-charged
+// gas to the reservoir (and decrements executionStateGas); negative
+// `restoreGas` reverses a previously-credited descendant (e.g. EIP-8037
+// cleared-slot) and decrements the reservoir.
+func adjustGasStateAndExecution(gas *mdgas.MdGas, executionStateGas *int64, restoreGas int64) {
+	if restoreGas >= 0 {
+		gas.State += uint64(restoreGas)
+	} else {
+		sub := uint64(-restoreGas)
+		if gas.State >= sub {
+			gas.State -= sub
+		} else {
+			gas.State = 0
+		}
+	}
+	*executionStateGas -= restoreGas
 }
 
 // chargeFrameStateGas runs the EIP-8037 frame-end state-gas accounting for a
 // successful call/create commit, when Amsterdam is active and the EVM is not
-// in RestoreState mode. It walks the journal segment [frameStart, frameEnd), computes
-// delta = walkTotal - committedChildBytes[depth], and:
+// in RestoreState mode. It walks the journal segment [frameStart, frameEnd),
+// computes delta = walkTotal - committedChildBytes[depth] - accountRefund, and:
 //   - delta > 0 → charge delta×CPSB from gas.State (with spill into gas.Regular).
-//     On insufficient gas, returns ErrOutOfGas (caller must revert).
+//     On insufficient gas, returns ErrFrameStateGasOOG (caller treats as REVERT).
 //   - delta < 0 → credit |delta|×CPSB back to gas.State and decrement
 //     evm.executionStateGas.
 //
@@ -221,52 +255,73 @@ func (evm *EVM) propagateChildBytes(walkTotal uint64) {
 // accumulator. The caller is responsible for pushing/popping the per-depth
 // accumulator slot via pushFrameAccumulator/popFrameAccumulator.
 //
+// At depth==0 (top frame), the walk computes accountRefund — bytes for accounts
+// in (newlyCreated && selfdestructed), mirroring EELS's accounts_to_delete ∩
+// created_accounts refund. This naturally subsumes the per-tx
+// CREATE+SELFDESTRUCT case (e.g. test_selfdestruct_in_create_tx_initcode) and
+// the cross-frame CREATE-then-SELFDESTRUCT cases (cancun/eip6780_selfdestruct).
+//
 // excludeCreate is the contract address for top-level CREATE txs (depth==0
-// inside evm.create). NilAddress in all other cases.
+// inside evm.create) — its 112-byte account record is intrinsic-charged so
+// the walk skips it. NilAddress in all other cases.
 func (evm *EVM) chargeFrameStateGas(
 	gas *mdgas.MdGas,
 	frameStart int,
 	depth int,
 	excludeCreate accounts.Address,
-) (walkTotal uint64, err error) {
+) (walkTotal int64, err error) {
 	frameEnd := evm.intraBlockState.JournalLength()
 	applyFilter := depth == 0
-	walkTotal = evm.intraBlockState.ComputeFrameStateBytes(frameStart, frameEnd, applyFilter, excludeCreate)
+	var accountRefund uint64
+	walkTotal, accountRefund = evm.intraBlockState.ComputeFrameStateBytes(frameStart, frameEnd, applyFilter, excludeCreate)
 
 	n := len(evm.committedChildBytes)
-	var childTotal uint64
+	var childTotal int64
 	if n > 0 {
 		childTotal = evm.committedChildBytes[n-1]
 	}
 
-	if walkTotal == childTotal {
+	cpsb := evm.Context.CostPerStateByte
+	delta := walkTotal - childTotal - int64(accountRefund)
+	if delta == 0 {
 		return walkTotal, nil
 	}
 
-	cpsb := evm.Context.CostPerStateByte
-	if walkTotal > childTotal {
-		// Positive delta — charge it to gas.State, spilling into gas.Regular if
-		// the reservoir is insufficient. Tracking goes via useMdGas which
-		// increments evm.executionStateGas.
-		stateGas := (walkTotal - childTotal) * cpsb
+	if delta > 0 {
+		stateGas := uint64(delta) * cpsb
 		var ok bool
 		*gas, ok = useMdGas(evm, *gas, stateGas, mdgas.StateGas, evm.config.Tracer, tracing.GasChangeFrameStateGas)
 		if !ok {
-			return walkTotal, ErrOutOfGas
+			return walkTotal, ErrFrameStateGasOOG
 		}
 		return walkTotal, nil
 	}
-	// Negative delta — credit |delta|×CPSB back to gas.State and shrink the
-	// tx-level executionStateGas accordingly.
-	creditGas := (childTotal - walkTotal) * cpsb
+	creditGas := uint64(-delta) * cpsb
 	if evm.config.Tracer != nil && evm.config.Tracer.OnGasChange != nil {
 		evm.config.Tracer.OnGasChange(gas.State, gas.State+creditGas, tracing.GasChangeFrameStateGas)
 	}
 	gas.State += creditGas
-	if creditGas > evm.executionStateGas {
-		evm.executionStateGas = 0
-	} else {
-		evm.executionStateGas -= creditGas
+	// EIP-8037: when delta < 0 (cleared-slot credits, EIP-6780 same-tx
+	// selfdestruct refunds) we credit the reservoir but DO NOT decrement
+	// executionStateGas. This matches EELS's apply_frame_state_gas, where the
+	// negative this_call_cost path only updates state_gas_reservoir and leaves
+	// state_gas_used unchanged. The reservoir credit propagates to the parent
+	// via the gas return mechanism, while the per-tx executionStateGas counter
+	// only tracks positive charges (which determine block_state_gas_used).
+	//
+	// Exception: account-refund (EIP-6780 same-tx-CREATE+SELFDESTRUCT of an
+	// account that EXISTED at tx-entry) DOES need to drive executionStateGas
+	// negative to offset the intrinsic_state contribution. That refund is in
+	// `accountRefund`; the cleared-slot credit is the part beyond accountRefund.
+	if int64(accountRefund) > 0 {
+		// Decrement executionStateGas only by the accountRefund portion of
+		// the credit (capped by total credit). The remainder of the credit
+		// (cleared-slot rules) does not affect executionStateGas.
+		acctCreditGas := accountRefund * cpsb
+		if acctCreditGas > creditGas {
+			acctCreditGas = creditGas
+		}
+		evm.executionStateGas -= int64(acctCreditGas)
 	}
 	return walkTotal, nil
 }
@@ -277,12 +332,18 @@ func (evm *EVM) chargeFrameStateGas(
 // EIP-8037 state-gas accounting is journal-walk-based at frame commit, so a
 // reverted/halted frame contributes nothing — there's nothing to roll back
 // here for state gas (the frame-end charge never fired).
+//
+// ErrFrameStateGasOOG is treated like REVERT: state is rolled back but the
+// frame's remaining gas is preserved (returned to parent), matching EELS
+// where apply_frame_state_gas's OOG sets evm.error directly without raising
+// ExceptionalHalt.
 func (evm *EVM) handleFrameRevert(gas *mdgas.MdGas, err error, depth int, snapshot int) {
 	// 1. Revert state changes.
 	evm.intraBlockState.RevertToSnapshot(snapshot, err)
 
-	// 2. On exceptional halt (not REVERT), burn remaining regular gas.
-	if err != ErrExecutionReverted {
+	// 2. On exceptional halt (not REVERT, not soft OOG from frame-state-gas),
+	//    burn remaining regular gas.
+	if err != ErrExecutionReverted && err != ErrFrameStateGasOOG {
 		if evm.chainRules.IsAmsterdam {
 			evm.regularGasConsumed += gas.Regular
 		}
@@ -501,14 +562,9 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 			// results anyway). At depth==0 this also naturally zeroes
 			// evm.executionStateGas because the top frame's accumulator holds
 			// the sum of all charged bytes for the tx.
-			if !evm.config.RestoreState && evm.chainRules.IsAmsterdam && poppedChildBytes > 0 {
-				restoreGas := poppedChildBytes * evm.Context.CostPerStateByte
-				gas.State += restoreGas
-				if restoreGas > evm.executionStateGas {
-					evm.executionStateGas = 0
-				} else {
-					evm.executionStateGas -= restoreGas
-				}
+			if !evm.config.RestoreState && evm.chainRules.IsAmsterdam && poppedChildBytes != 0 {
+				restoreGas := poppedChildBytes * int64(evm.Context.CostPerStateByte)
+				adjustGasStateAndExecution(&gas, &evm.executionStateGas, restoreGas)
 			}
 		}
 		evm.handleFrameRevert(&gas, err, depth, snapshot)
@@ -780,14 +836,9 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 			// EIP-8037: on child revert or exceptional halt, restore all state
 			// gas consumed by committed descendants to this frame's reservoir.
 			// See evm.call() for the full rationale.
-			if !evm.config.RestoreState && evm.chainRules.IsAmsterdam && poppedChildBytes > 0 {
-				restoreGas := poppedChildBytes * evm.Context.CostPerStateByte
-				gasRemaining.State += restoreGas
-				if restoreGas > evm.executionStateGas {
-					evm.executionStateGas = 0
-				} else {
-					evm.executionStateGas -= restoreGas
-				}
+			if !evm.config.RestoreState && evm.chainRules.IsAmsterdam && poppedChildBytes != 0 {
+				restoreGas := poppedChildBytes * int64(evm.Context.CostPerStateByte)
+				adjustGasStateAndExecution(&gasRemaining, &evm.executionStateGas, restoreGas)
 			}
 		}
 		evm.handleFrameRevert(&gasRemaining, err, depth, snapshot)

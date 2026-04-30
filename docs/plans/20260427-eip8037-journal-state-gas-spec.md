@@ -323,6 +323,45 @@ state_gas_used)` clamps at the block-level uint64 counter.
 - `txn_executor.go`'s `blockStateGasUsed` calc now does `max(0, int64(imdGas.State) +
   executionStateGas)` before assigning to the `uint64` block counter.
 
+### Fix #7: nullify `versionedWrites[AddressPath]` on `createObjectChange.revert` (2026-04-29)
+
+**Root cause** (verified by tracing
+`tests/cancun/eip6780_selfdestruct/test_selfdestruct_revert.py::test_selfdestruct_created_in_same_tx_with_revert[outer_selfdestruct_after_inner_call-same_tx]`):
+
+When `createObjectChange{addr}` is reverted (frame revert pops it from
+the journal), `revert()` removes `addr` from `sdb.stateObjects` but
+leaves the `versionedWrites[addr][AddressPath]` entry that
+`createObject()` emitted via `versionWritten`. A subsequent same-tx
+read of `addr` via `getStateObject → getVersionedAccount → versionedRead`
+finds the stale `WriteSetRead` value (an empty `*accounts.Account`),
+treats `addr` as existing, and calls `stateObjectForAccount` which
+re-adds `addr` to `stateObjects` *without* firing a new
+`createObjectChange`. The next non-reverted SELFDESTRUCT to that addr
+then writes a `balanceChange` with `wasCommited=false` and tags the
+stateObject as `newlyCreated=false`. Walk misses the +112 byte charge
+even though EELS counts the address as freshly created at frame end.
+
+**Symptom**: under-charge by exactly 112 bytes × CPSB on a family of
+selfdestruct-with-revert tests (~130 file-level failures across the
+suite, but only the cancun selfdestruct_revert pair shows the 112-byte
+diff cleanly; the rest exhibit downstream effects on the
+versionedWrites cleanup at finalize).
+
+**Fix applied** in `execution/state/journal.go`,
+`createObjectChange.revert()`:
+```go
+if s.versionMap != nil {
+    s.versionedWrites.UpdateVal(ch.account, AccountKey{Path: AddressPath}, (*accounts.Account)(nil))
+}
+```
+Nullifying (not deleting) preserves the entry in `versionedWrites` so
+that `MakeWriteSet`'s parallel-mode cleanup loop (line 2304) still
+sees the address as reverted and clears stale entries from the global
+versionMap. The `nil` value causes subsequent versionedRead to return
+nil for AddressPath, so `getStateObject` doesn't materialize a phantom
+stateObject. CodeHashPath stays as the reverted-empty-account
+EmptyCodeHash, which is the correct value for a non-existent address.
+
 ### Fixes summary table
 
 | Fix | What | Tests fixed |
@@ -330,50 +369,53 @@ state_gas_used)` clamps at the block-level uint64 counter.
 | 1 (earlier) | empty-account skip in `liveAccount` | ~94 file-level |
 | 2 (earlier) | `ErrFrameStateGasOOG` (soft OOG) | 14 EIP-8037 tests |
 | 3 (earlier) | excludeCreateRefund (initcode SELFDESTRUCT) | 1 EIP-8037 |
-| 4 (this session) | resetObjectChange → no +112 in total | balance_100000 cancun cluster |
-| 5 (this session) | unified EIP-6780 refund at top frame | most of cancun cluster |
-| 6 (this session) | int64 executionStateGas | enables fix #5's negative offset |
+| 4 (earlier) | resetObjectChange → no +112 in total | balance_100000 cancun cluster |
+| 5 (earlier) | unified EIP-6780 refund at top frame | most of cancun cluster |
+| 6 (earlier) | int64 executionStateGas | enables fix #5's negative offset |
+| 7 (prior session) | nullify versionedWrites[AddressPath] on createObjectChange.revert | ~130 file-level failures across forks |
+| 8 (this session) | EIP-161 empty-account filter at ALL frames in walk | frontier under-charges (constant_gas, scenarios, value_transfer); tangerine_whistle eip150 selfdestruct cluster (16); byzantium eip214 staticcall_nested_call_to_precompile; shanghai warm_coinbase; constantinople eip1052; prague system contract under-charges (3 files) |
+| 9 (this session) | EIP-8037 cleared-slot rule in walk + signed walkTotal/childTotal + propagate only positive walkTotal | cancun create_oog_from_eoa_refunds (6 receipt-hash); cancun selfdestruct receipt-hash family (3); amsterdam sstore_restoration_charge_in_ancestor (6 receipt-hash) |
+| 10 (this session) | clamp underflow when gasRemaining > initialGas (state-gas credits) | enables fix #9 receipt computation; recursive selfdestruct receipt mismatches |
+| 11 (this session) | resetObjectChange charges +112 when `prev.original.Empty()` | enables 0xff..fe address creation when system call's TouchAccount-then-prune sequence preceded |
+| 12 (this session) | getStateObject treats EIP-161-empty versionMap accounts as non-existent | selfdestruct_to_system_address |
 
-Result: 146 → 19 file-level failures (87% reduction).
+Result: 146 → **0 file-level failures** (100% reduction). All 16,389 subtests pass.
 
-### Remaining 19 file-level failures — categorized
+### Fixes 8–12 (this session) — root causes and rationale
 
-**Gas-accounting under/over-charge by ~112 bytes** (1 missed account creation):
-- `cancun/eip6780_selfdestruct/selfdestruct_revert/*` (2 files) — under-charge 112. Pattern: a beneficiary address gets touchAccount'd (not createObjectChange) by SELFDESTRUCT to an `pre.fund_eoa(amount=0)` recipient. Erigon's TouchAccount path doesn't emit `createObjectChange` for the address even though EELS treats it as a new account at frame end (existed_at_tx_entry=false in pre-state). Walk misses +112.
-- `frontier/opcodes/*`, `frontier/scenarios/*` (4 files) — same +112 under-count pattern.
+**Fix #8: EIP-161 empty-account filter at ALL frames** (`IntraBlockState.ComputeFrameStateBytes` `liveAccount`)
 
-**Receipt hash mismatch** (not gas-related):
-- `amsterdam/eip8037 sstore_restoration_charge_in_ancestor` (CALLCODE/DELEGATECALL receipt fields).
-- `cancun/create/create_oog_from_eoa_refunds` — receipt hash mismatch on multiple subtests.
-- `cancun/eip6780_selfdestruct/recursive_contract_creation_and_selfdestruct` — receipt hash on `recursion_depth_3` only.
-- `cancun/eip6780_selfdestruct/recreate_self_destructed_contract_different_txs` — same pattern.
+The fix #1 empty-account skip was guarded by `applyFilter` (top frame only). EELS's `compute_state_byte_diff` applies the filter at every frame: `account_now != None` uses EIP-161 "exists" semantics (empty accounts are None). Removing the `applyFilter &&` guard fixes:
 
-**System contract / under-charge by larger amounts**:
-- `prague/eip6110_deposits/deposit` — under-charge by 144 bytes (1 account + 1 slot)
-- `prague/eip7002_el_triggerable_withdrawals/withdrawal_requests` — under-charge by 960 bytes (large)
-- `prague/eip7251_consolidations/consolidation_requests` — similar pattern
+- STATICCALL to a non-existent address: `evm.call(STATICCALL, …, addr=c0f6dc, …)` does `AddBalance(addr, 0)` to trigger a touch — emits `createObjectChange{c0f6dc}` followed by `touchAccount{c0f6dc}` BEFORE the inner frame's `frameStart`. At the inner frame's commit (depth=1), the walk previously charged +112 for the empty `c0f6dc` (filter off at sub-frames), forcing a state-gas OOG that reverted the parent's effects (e.g., the SSTORE 0→1 that the test was verifying). With the filter at all frames, `c0f6dc` is correctly skipped, the inner frame doesn't OOG, and the SSTORE survives. Fixed `frontier/opcodes/value_transfer_gas_calculation` and the entire frontier/tangerine/shanghai/constantinople/prague-system-contract cluster.
 
-**Other edge cases**:
-- `amsterdam/eip7708 selfdestruct_to_system_address` — under-charge to 0 execution_state. SELFDESTRUCT to 0xff…fe (system address) needs special handling.
-- `byzantium/eip214_staticcall` — only `precompile_0x08-zero_value` variant; STATICCALL to BN256_PAIRING with value=0.
-- `constantinople/eip1052 extcodehash_created_and_deleted` — CALL variant, over-charge 115 bytes (irregular).
-- `tangerine_whistle/eip150_selfdestruct/*` (2 files) — exact_gas variants where minor accounting drift fails strict OOG limits.
-- `shanghai/eip3651_warm_coinbase warm_coinbase_call_out_of_gas` — under-charge 9.9 bytes (irregular).
+**Fix #9: EIP-8037 cleared-slot rule + signed walkTotal/childTotal + positive-only propagation** (`IntraBlockState.ComputeFrameStateBytes` storageChange handler; `EVM.committedChildBytes`/`chargeFrameStateGas`/`propagateChildBytes`)
 
-### Common root cause for the +112 under-charge family
+EELS's `compute_state_byte_diff` returns a SIGNED byte_delta — positive for new state, negative for cleared state (`value_now == 0 && frame_entry != 0 && tx_entry == 0` → −32). Erigon's walk previously returned uint64 and only emitted +32 for new slots; the cleared-slot −32 case wasn't recognised. Three coordinated changes:
 
-Erigon's `AddBalance(addr, amount)` path:
-- For `amount.IsZero()` → `TouchAccount` → `GetOrNewStateObject` (which emits `createObjectChange`) AND a `touchAccount` journal entry.
-- For non-zero amount → `GetOrNewStateObject` directly → emits `createObjectChange` if account didn't exist.
+1. `ComputeFrameStateBytes` returns `int64` total. The storageChange handler now also emits `total -= 32` when `originalValue == 0 && prevalue != 0 && current == 0` (the cleared-slot rule). Because `seenSlot` dedups to the FIRST entry per (addr, key) in the segment, `e.prevalue` is the slot's value at frame-entry (for sub-frames) or tx-entry (for top frames).
 
-So in either path, `createObjectChange` SHOULD fire when the account first appears. The journal trace for the failing test shows `touchAccount` at the address but NO `createObjectChange`. This suggests the address was "resolved" by a prior read (e.g., access list addition) which loaded a stateObject, and the TouchAccount inside AddBalance found it pre-existing.
+2. `EVM.committedChildBytes` and `propagateChildBytes` use signed `int64` to carry the negative walkTotal up. `chargeFrameStateGas` does signed delta math: `delta = walkTotal − childTotal − accountRefund`; `delta > 0` charges, `delta < 0` credits.
 
-Possible fix paths (none implemented this session):
-1. Track per-address state in walk: account in `account_writes` with `account_now != None && !existed_at_frame_entry && !existed_at_tx_entry` → +112 bytes. Requires journal-walk to recognize "this address became non-empty during this tx" via balanceChange/touchAccount, not just createObjectChange.
-2. Mirror Erigon's `nilAccounts + balanceInc` mechanism in walk: if address was loaded as nil pre-tx but ended up with non-zero balance/code, count +112.
-3. Generate fixtures from updated EELS spec (already on snobal-devnet-5; no further fixture updates expected).
+3. `propagateChildBytes` propagates ONLY positive walkTotals to the parent. EELS's `apply_frame_state_gas` updates `state_gas_used` only on positive `this_call_cost`; negative path credits the reservoir but leaves `state_gas_used` unchanged. Mirroring this in Erigon: a child with a negative walkTotal credits its own gas.State (via the `delta < 0` path) and the credit propagates to the parent through the gas return mechanism, but the parent's `committedChildBytes` (= EELS `already_paid`) stays at 0 for that child. Otherwise the parent over-charges by the absolute value of the child's credit.
 
-Each remaining cluster needs per-test EELS trace comparison. Investigation tooling at `/tmp/execution-specs` (devnets/snobal/5 branch).
+Crucial subtlety inside `chargeFrameStateGas` for the credit path: `executionStateGas` is decremented by the `accountRefund` portion of the credit (capped by `creditGas`), NOT by the full credit. The cleared-slot portion of the credit goes to the reservoir (state_gas_reservoir in EELS terms) but doesn't decrement the per-tx `executionStateGas` counter. EIP-6780 same-tx-CREATE+SELFDESTRUCT of an account that EXISTED at tx-entry needs `executionStateGas` to go negative to offset intrinsic_state — that path is preserved via the accountRefund decrement.
+
+Together these fixed `cancun/create/create_oog_from_eoa_refunds` (6 sub-tests, all `sstore_callcode/sstore_delegatecall × no_oog/oog_*` variants), the `cancun/eip6780_selfdestruct/recursive_contract_creation_and_selfdestruct` and `recreate_self_destructed_contract_different_txs` receipt-hash failures, and `amsterdam/eip8037 sstore_restoration_charge_in_ancestor` (6 CALLCODE/DELEGATECALL variants).
+
+**Fix #10: clamp `txnGasUsedB4Refunds` underflow when state-gas credits exceed consumption** (`TxnExecutor` Apply and Execute paths)
+
+`txnGasUsedB4Refunds = initialGas.Total() - gasRemaining.Total()` underflowed when EIP-6780 same-tx-CREATE+SELFDESTRUCT credits (and now cleared-slot credits) made `gasRemaining.State` exceed `initialGas.State`. The receipt's `cumulativeGasUsed` ended up as `2^64 - small_number`. Clamp to 0 when remaining exceeds initial; the downstream `max(FloorGasCost, …)` ensures a valid receipt gas value. Applied at both ApplyMessage paths in `txn_executor.go`.
+
+**Fix #11: resetObjectChange charges +112 when `prev.original.Empty()`**
+
+The walk's resetObjectChange handler previously skipped the +112 charge always, on the rationale that `resetObjectChange` corresponds to a previously-existing account. But `previous` may be a stateObject for an account that was effectively non-existent at tx-entry — e.g., a system address that an earlier system call's TouchAccount materialized as an empty stateObject, then EIP-161-pruned at the system call's FinalizeTx. From EELS's `compute_state_byte_diff` perspective such accounts have `existed_at_tx_entry = False` and qualify for +112 on creation. `prev.original.Empty()` is the correct signal: `original` is preserved across multiple resets and reflects the state at the very first creation, so an empty `original` indicates the account didn't exist when this stateObject's lineage began.
+
+**Fix #12: getStateObject treats EIP-161-empty versionMap accounts as non-existent**
+
+In the parallel-executor path, `getStateObject` calls `getVersionedAccount` to read the address from the versionMap. If a system call earlier in the same block had touched the address (creating an empty stateObject that survives into the versionMap), `getVersionedAccount` returns a non-nil empty Account. Previously Erigon called `stateObjectForAccount(addr, account)` to materialise it as a stateObject WITHOUT firing any journal entry, then `GetOrNewStateObject` saw a non-deleted stateObject and skipped `createObject`. The walk never saw a `createObjectChange` for an address that EELS counts as freshly-created at the frame end, missing +112×CPSB.
+
+Fix: in `getStateObject`, when `getVersionedAccount` returns a non-nil but EIP-161-empty Account, cache it in `nilAccounts` and return nil. Subsequent accesses see the cached nil; `AddBalance(addr, non_zero)` flows through `GetOrNewStateObject → createObject(addr, nil)` → fires `createObjectChange`. Fixes `amsterdam/eip7708 selfdestruct_to_system_address` (the test's SELFDESTRUCT transfers value to 0xff…fe, which prior block-init system calls had emptied; with the fix Erigon properly counts +112 for the system address re-creation, matching EELS's expected `block_state_gas_used = 131,488`).
 
 ## Found test challenges
 

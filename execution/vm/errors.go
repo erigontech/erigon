@@ -46,6 +46,13 @@ var (
 	ErrReturnStackExceeded      = errors.New("return stack limit reached")
 	ErrInvalidCode              = errors.New("invalid code")
 	ErrNonceUintOverflow        = errors.New("nonce uint64 overflow")
+	// ErrFrameStateGasOOG is a soft OOG raised by EIP-8037 frame-end state-gas
+	// accounting when the combined state-gas reservoir + remaining regular gas
+	// cannot cover the per-frame state-gas charge. Per the EELS reference, this
+	// rolls back state changes for the frame but PRESERVES the frame's remaining
+	// gas (it is returned to the parent), unlike a true exceptional halt which
+	// burns it. Treated as a REVERT-equivalent in handleFrameRevert.
+	ErrFrameStateGasOOG = errors.New("frame state gas out of gas")
 
 	// errStopToken is an internal token indicating interpreter loop termination,
 	// never returned to outside callers.
