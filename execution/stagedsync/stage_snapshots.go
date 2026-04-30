@@ -431,6 +431,8 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 		return nil
 	}
 	freezingCfg := cfg.blockReader.FreezingCfg()
+	println("SNAPS CURRENT CYCLE INITIAL?", s.CurrentSyncCycle.IsInitialCycle)
+
 	if freezingCfg.ProduceE2 {
 		//TODO: initialSync maybe save files progress here
 
