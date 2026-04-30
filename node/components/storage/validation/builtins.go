@@ -143,6 +143,73 @@ func inferKindFromName(name string) (snapshot.FileKind, bool) {
 	return "", false
 }
 
+// ContentNotEmpty rejects files that are marked Local but yield zero
+// bytes when read. Catches a class of failure the downloader cannot
+// see: a producer-side build glitch (or, more rarely, a corrupted
+// download whose torrent ALSO claimed zero length) leaves a file on
+// disk that hashes to a "valid" empty payload — checksums agree,
+// torrent agrees, all integrity checks pass — but downstream readers
+// open it and crash with a pointer dereference because there are
+// no records to index into.
+//
+// Index files (.ef, .v, the locally-built accessors .vi/.efi/.kvi/.bt)
+// are the most common sufferers: an empty index is "valid bytes" by
+// every layer of byte-level verification and only fails when the
+// query layer reaches into it. This validator is a basic
+// consistency net catching the empty-file shape; deeper format-
+// specific validators (index-parses-and-yields-records, well-formed-
+// kv-btree, seg-magic-bytes-and-decompressible) belong in
+// externally-registered validators that import the format-aware
+// readers — same "external logic, internal lifecycle" pattern
+// described in feature-pluggable-validation-phase.md.
+//
+// Behaviour:
+//
+//   - file.Local = false  →  silently accept (peer-only entry, no
+//     local bytes to measure).
+//   - content = nil       →  silently accept (caller didn't supply
+//     content; same shape as SizeMatchesTorrent's missing-torrent
+//     case).
+//   - content opens but reads zero bytes  →  reject.
+//   - content fails to open with os.ErrNotExist  →  reject (file
+//     is marked Local but isn't on disk).
+//
+// No SnapDir field — the validator consumes whatever ContentSource
+// the storage adapter built (FileContent in production, BytesContent
+// in unit tests).
+type ContentNotEmpty struct{}
+
+// Name implements Validator.
+func (ContentNotEmpty) Name() string { return "content_not_empty" }
+
+// Validate implements Validator.
+func (ContentNotEmpty) Validate(file *snapshot.FileEntry, content ContentSource) error {
+	if file == nil {
+		return fmt.Errorf("nil file entry")
+	}
+	if !file.Local || content == nil {
+		return nil
+	}
+	rc, err := content.Open()
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("file %q marked Local but not present on disk", file.Name)
+		}
+		return fmt.Errorf("open content for %q: %w", file.Name, err)
+	}
+	defer rc.Close()
+
+	buf := make([]byte, 1)
+	n, err := rc.Read(buf)
+	if errors.Is(err, io.EOF) || (err == nil && n == 0) {
+		return fmt.Errorf("file %q is empty (zero bytes) — likely a producer build failure or corrupted source", file.Name)
+	}
+	if err != nil && !errors.Is(err, io.EOF) {
+		return fmt.Errorf("read content for %q: %w", file.Name, err)
+	}
+	return nil
+}
+
 // SizeMatchesTorrent verifies the file's byte count agrees with the
 // length declared in its .torrent metainfo sidecar. Catches the most
 // common real-bytes failure shapes: truncated downloads (partial

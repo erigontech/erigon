@@ -144,6 +144,109 @@ func TestSizeMatchesTorrent_NilContentErrors(t *testing.T) {
 	require.Contains(t, err.Error(), "nil content")
 }
 
+func TestContentNotEmpty_CleanFileAccepts(t *testing.T) {
+	dir := t.TempDir()
+	makeFileWithTorrent(t, dir, "v1.0-clean.kv",
+		[]byte("non-empty payload"))
+
+	v := ContentNotEmpty{}
+	file := &snapshot.FileEntry{Name: "v1.0-clean.kv", Local: true}
+	require.NoError(t, v.Validate(file, FileContent{Path: filepath.Join(dir, "v1.0-clean.kv")}))
+}
+
+// TestContentNotEmpty_EmptyFileRejects covers the index-shape failure
+// mode: a file that hashes to a "valid" payload (the torrent agreed
+// on Length=0, so SizeMatchesTorrent passes) but is functionally
+// broken — downstream readers open it and find no records to point
+// at. ContentNotEmpty is the basic-level catch.
+func TestContentNotEmpty_EmptyFileRejects(t *testing.T) {
+	dir := t.TempDir()
+	name := "v1.0-empty.ef"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte("seed"), 0o644))
+	// Truncate to zero — simulates the producer-side build glitch
+	// (or rare downloader edge case) where the file is reachable +
+	// hashes consistently but is actually empty.
+	truncateFile(t, filepath.Join(dir, name), 0)
+
+	v := ContentNotEmpty{}
+	file := &snapshot.FileEntry{Name: name, Local: true}
+	err := v.Validate(file, FileContent{Path: filepath.Join(dir, name)})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "empty (zero bytes)")
+}
+
+func TestContentNotEmpty_NonLocalSilentlyAccepts(t *testing.T) {
+	v := ContentNotEmpty{}
+	// Peer-only entry: Local=false, no on-disk content available.
+	file := &snapshot.FileEntry{Name: "v1.0-peer-only.kv", Local: false}
+	require.NoError(t, v.Validate(file, nil),
+		"peer-only entries have no local bytes to measure")
+}
+
+func TestContentNotEmpty_NilContentSilentlyAccepts(t *testing.T) {
+	v := ContentNotEmpty{}
+	file := &snapshot.FileEntry{Name: "x", Local: true}
+	require.NoError(t, v.Validate(file, nil),
+		"caller didn't supply content; can't measure but no panic either")
+}
+
+func TestContentNotEmpty_MissingFileRejects(t *testing.T) {
+	dir := t.TempDir()
+	v := ContentNotEmpty{}
+	file := &snapshot.FileEntry{Name: "ghost.kv", Local: true}
+	err := v.Validate(file, FileContent{Path: filepath.Join(dir, "ghost.kv")})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "marked Local but not present on disk")
+}
+
+// TestContentNotEmpty_ProducerGateBlocksEmptyIndex is the +ve/-ve
+// shape for the index-empty bug class. Producer-side: a build that
+// produced an empty .ef must not enter the published manifest. The
+// validator catches it at MarkAdvertisable time; Advertisable=false
+// stays false; downstream consumers never receive the broken index.
+func TestContentNotEmpty_ProducerGateBlocksEmptyIndex(t *testing.T) {
+	dir := t.TempDir()
+	good := "v1.0-accounts.0-1024.ef"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, good),
+		[]byte("non-empty index payload — pretend this is elias-fano data"), 0o644))
+
+	bad := "v1.0-accounts.1024-2048.ef"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, bad), []byte{}, 0o644))
+
+	inv := snapshot.NewInventory()
+	goodEntry := &snapshot.FileEntry{
+		Name: good, Domain: "accounts",
+		FromStep: 0, ToStep: 1024, Kind: snapshot.KindIdx,
+		Local: true,
+	}
+	badEntry := &snapshot.FileEntry{
+		Name: bad, Domain: "accounts",
+		FromStep: 1024, ToStep: 2048, Kind: snapshot.KindIdx,
+		Local: true,
+	}
+	inv.AddFile(goodEntry)
+	inv.AddFile(badEntry)
+
+	producer := &Producer{Chain: append(DefaultStage1Chain(), ContentNotEmpty{})}
+
+	// Good index: producer gate accepts.
+	changed, err := producer.MarkAdvertisable(inv, goodEntry,
+		FileContent{Path: filepath.Join(dir, good)})
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.True(t, goodEntry.Advertisable)
+
+	// Empty index: producer gate rejects with the structural reason.
+	changed, err = producer.MarkAdvertisable(inv, badEntry,
+		FileContent{Path: filepath.Join(dir, bad)})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "content_not_empty")
+	require.Contains(t, err.Error(), "empty (zero bytes)")
+	require.False(t, changed)
+	require.False(t, badEntry.Advertisable,
+		"empty index never enters the published manifest — swarm-blast-radius firewall")
+}
+
 // TestSizeMatchesTorrent_ProducerGateBlocksTruncatedFile is the
 // motivating end-to-end shape: a producer-side validation chain that
 // includes SizeMatchesTorrent rejects a truncated file at
