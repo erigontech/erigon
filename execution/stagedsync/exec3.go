@@ -666,6 +666,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 					Txs:             txs,
 					EvmBlockContext: blockContext,
 					Withdrawals:     b.Withdrawals(),
+					VMConfig:        te.cfg.evmConfigValue(),
 					// use history reader instead of state reader to catch up to the tx where we left off
 					HistoryExecution: lastFrozenTxNum > 0 && inputTxNum <= lastFrozenTxNum,
 					Config:           te.cfg.chainConfig,

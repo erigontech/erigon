@@ -87,6 +87,13 @@ type ExecuteBlockCfg struct {
 	experimentalBAL bool
 }
 
+func (cfg ExecuteBlockCfg) evmConfigValue() vm.Config {
+	if cfg.vmConfig == nil {
+		return vm.Config{}
+	}
+	return *cfg.vmConfig
+}
+
 func StageExecuteBlocksCfg(
 	db kv.TemporalRwDB,
 	pm prune.Mode,
@@ -388,7 +395,11 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		return nil
 	}
 
-	if err := ExecV3(ctx, s, u, cfg, doms, rwTx, dbg.Exec3Parallel || cfg.experimentalBAL, to, logger); err != nil {
+	parallel := dbg.Exec3Parallel || cfg.experimentalBAL
+	if cfg.evmConfigValue().UseGevm {
+		parallel = false
+	}
+	if err := ExecV3(ctx, s, u, cfg, doms, rwTx, parallel, to, logger); err != nil {
 		return err
 	}
 	return nil

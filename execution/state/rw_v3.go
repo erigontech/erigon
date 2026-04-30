@@ -386,6 +386,7 @@ var deleted accounts.Account
 type bufferedAccount struct {
 	data       *accounts.Account
 	code       []byte
+	codeSet    bool
 	storage    *btree.BTreeG[storageItem]
 	wasDeleted bool // set when DeleteAccount was called; survives UpdateAccountCode overwrite
 }
@@ -501,6 +502,7 @@ func (c *versionedWriteCollector) UpdateAccountCode(address accounts.Address, in
 		c.rs.accounts[address] = obj
 	}
 	obj.code = code
+	obj.codeSet = true
 	c.rs.accountsMutex.Unlock()
 
 	return nil
@@ -1132,6 +1134,7 @@ func (r *bufferedReader) HasStorage(address accounts.Address) (bool, error) {
 
 func (r *bufferedReader) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	var code []byte
+	var codeSet bool
 	r.bufferedState.accountsMutex.RLock()
 	so, ok := r.bufferedState.accounts[address]
 	if ok {
@@ -1140,13 +1143,14 @@ func (r *bufferedReader) ReadAccountCode(address accounts.Address) ([]byte, erro
 			return nil, nil
 		}
 
-		if len(so.code) != 0 {
+		if so.codeSet {
 			code = so.code
+			codeSet = true
 		}
 	}
 	r.bufferedState.accountsMutex.RUnlock()
 
-	if len(code) != 0 {
+	if codeSet {
 		return code, nil
 	}
 
@@ -1155,6 +1159,7 @@ func (r *bufferedReader) ReadAccountCode(address accounts.Address) ([]byte, erro
 
 func (r *bufferedReader) ReadAccountCodeSize(address accounts.Address) (int, error) {
 	var code []byte
+	var codeSet bool
 	r.bufferedState.accountsMutex.RLock()
 	so, ok := r.bufferedState.accounts[address]
 	if ok {
@@ -1163,14 +1168,15 @@ func (r *bufferedReader) ReadAccountCodeSize(address accounts.Address) (int, err
 			return 0, nil
 		}
 
-		if len(so.code) != 0 {
+		if so.codeSet {
 			code = so.code
+			codeSet = true
 		}
 	}
 
 	r.bufferedState.accountsMutex.RUnlock()
 
-	if len(code) != 0 {
+	if codeSet {
 		return len(code), nil
 	}
 

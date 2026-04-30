@@ -318,6 +318,7 @@ func (tx *LegacyTx) AsMessage(s Signer, _ *uint256.Int, _ *chain.Rules) (*Messag
 		to = accounts.InternAddress(*tx.To)
 	}
 	msg := Message{
+		txType:           LegacyTxType,
 		nonce:            tx.Nonce,
 		gasLimit:         tx.GasLimit,
 		gasPrice:         tx.GasPrice,

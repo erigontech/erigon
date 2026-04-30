@@ -23,6 +23,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
@@ -88,6 +89,7 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 
 	// Update the evm with the new transaction context.
 	evm.Reset(txContext, ibs)
+	evm.SetGevmStateWriter(stateWriter)
 	result, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 	if err != nil {
 		return nil, err
@@ -99,9 +101,11 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 		gasUsed.BlockState+result.BlockStateGasUsed) > header.GasLimit {
 		return nil, ErrGasLimitReached
 	}
-	// Update the state with pending changes
-	if err = ibs.FinalizeTx(rules, stateWriter); err != nil {
-		return nil, err
+	if !evm.UsesGevm() {
+		// Update the state with pending changes
+		if err = ibs.FinalizeTx(rules, stateWriter); err != nil {
+			return nil, err
+		}
 	}
 	gasUsed.Receipt += result.ReceiptGasUsed
 	gasUsed.BlockRegular += result.BlockRegularGasUsed
@@ -177,9 +181,20 @@ func MakeReceipt(
 		receipt.ContractAddress = types.CreateAddress(evm.Origin.Value(), txn.GetNonce())
 	}
 	// Set the receipt logs and create a bloom for filtering
-	receipt.Logs = ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), blockNumber.Uint64(), blockHash)
+	if evm.UsesGevm() {
+		receipt.Logs = result.Logs
+		for _, log := range receipt.Logs {
+			log.TxHash = txn.Hash()
+			log.BlockNumber = hexutil.Uint64(blockNumber.Uint64())
+			log.BlockHash = blockHash
+		}
+	} else {
+		receipt.Logs = ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), blockNumber.Uint64(), blockHash)
+	}
 	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
 	receipt.BlockNumber = blockNumber
-	receipt.TransactionIndex = uint(ibs.TxnIndex())
+	if ibs != nil && !evm.UsesGevm() {
+		receipt.TransactionIndex = uint(ibs.TxnIndex())
+	}
 	return receipt
 }

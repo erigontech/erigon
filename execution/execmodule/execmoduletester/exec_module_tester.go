@@ -343,6 +343,20 @@ func WithFcuBackgroundPrune() Option {
 	}
 }
 
+func WithGevm() Option {
+	return func(opts *options) {
+		useGevm := true
+		opts.useGevm = &useGevm
+	}
+}
+
+func WithoutGevm() Option {
+	return func(opts *options) {
+		useGevm := false
+		opts.useGevm = &useGevm
+	}
+}
+
 type options struct {
 	stepSize            *uint64
 	experimentalBAL     bool
@@ -356,6 +370,7 @@ type options struct {
 	enableDomains       []kv.Domain
 	fcuBackgroundCommit bool
 	fcuBackgroundPrune  bool
+	useGevm             *bool
 }
 
 func applyOptions(opts []Option) options {
@@ -393,6 +408,18 @@ func applyOptions(opts []Option) options {
 		}
 	}
 	return opt
+}
+
+func (opt options) useGevmEnabled() bool {
+	if opt.useGevm != nil {
+		return *opt.useGevm
+	}
+	switch os.Getenv("USE_GEVM") {
+	case "1", "true", "TRUE", "True", "yes", "YES", "Yes":
+		return true
+	default:
+		return false
+	}
 }
 
 // New creates an ExecModuleTester. When called with no options, it uses
@@ -434,6 +461,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	cfg.Genesis = gspec
 	cfg.Prune = pruneMode
 	cfg.ExperimentalBAL = opt.experimentalBAL
+	cfg.UseGevm = opt.useGevmEnabled()
 	cfg.FcuBackgroundPrune = opt.fcuBackgroundPrune
 	cfg.FcuBackgroundCommit = opt.fcuBackgroundCommit
 
@@ -629,7 +657,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			cfg.BatchSize,
 			mock.ChainConfig,
 			mock.Engine,
-			&vm.Config{},
+			&vm.Config{UseGevm: cfg.UseGevm, DisableGevmEnv: true},
 			mock.Notifications,
 			cfg.StateStream,
 			false, /*badBlockHalt*/
@@ -641,7 +669,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			false, /*experimentalBAL*/
 		),
 		nil, /*notifier*/
-		&vm.Config{},
+		&vm.Config{UseGevm: cfg.UseGevm, DisableGevmEnv: true},
 		dirs.Tmp,
 		mock.TxPool,
 		miningCancel,
@@ -666,7 +694,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 				cfg.BatchSize,
 				mock.ChainConfig,
 				mock.Engine,
-				&vm.Config{},
+				&vm.Config{UseGevm: cfg.UseGevm, DisableGevmEnv: true},
 				mock.Notifications,
 				cfg.StateStream,
 				false, /*badBlockHalt*/

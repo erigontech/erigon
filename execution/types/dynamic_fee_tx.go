@@ -281,6 +281,7 @@ func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *uint256.Int, rules
 		to = accounts.InternAddress(*tx.To)
 	}
 	msg := Message{
+		txType:           DynamicFeeTxType,
 		nonce:            tx.Nonce,
 		gasLimit:         tx.GasLimit,
 		gasPrice:         tx.FeeCap,

@@ -339,7 +339,7 @@ func insertValidateAndUfc1By1(ctx context.Context, exec *execmodule.ExecModule, 
 			return err
 		}
 		if vr.ValidationStatus != execmodule.ExecutionStatusSuccess {
-			return fmt.Errorf("unexpected validateChain status: %s", vr.ValidationStatus)
+			return fmt.Errorf("unexpected validateChain status: %s error: %s", vr.ValidationStatus, vr.ValidationError)
 		}
 		ur, err := updateForkChoice(ctx, exec, h)
 		if err != nil {

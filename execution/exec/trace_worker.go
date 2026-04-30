@@ -123,6 +123,9 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, 
 	if txn.Type() == types.AccountAbstractionTxType {
 		aaTxn := txn.(*types.AccountAbstractionTransaction)
 		evm := vm.NewEVM(*e.blockCtx, txContext, e.ibs, e.chainConfig, *e.vmConfig)
+		if evm.UsesGevm() {
+			return fmt.Errorf("account abstraction transactions are not supported by the GEVM transaction path")
+		}
 		paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, e.ibs, gp, e.header, evm, e.chainConfig)
 		if err != nil {
 			return err

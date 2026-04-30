@@ -873,7 +873,7 @@ func TestGasTracingNoUnderflowOnStateGas(t *testing.T) {
 	}
 
 	cfg := &Config{
-		EVMConfig: vm.Config{Tracer: hooks},
+		EVMConfig: vm.Config{Tracer: hooks, DisableGevmEnv: true},
 		GasLimit:  10_000_000,
 	}
 
@@ -942,7 +942,7 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 	cfg := &Config{
 		State:     statedb,
 		Origin:    systemAddr,
-		EVMConfig: vm.Config{Tracer: hooks},
+		EVMConfig: vm.Config{Tracer: hooks, DisableGevmEnv: true},
 		GasLimit:  10_000_000,
 	}
 	setDefaults(cfg)
@@ -986,4 +986,14 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 	// No balance-change events should have fired for SYSTEM_ADDRESS
 	// from the zero-value call path.
 	require.Empty(t, balChanges, "no balance-change events expected for SYSTEM_ADDRESS on zero-value syscall, got %v", balChanges)
+}
+
+func TestUseGevmEnvSelectsGevmRuntime(t *testing.T) {
+	t.Setenv("USE_GEVM", "1")
+
+	cfg := &Config{}
+	setDefaults(cfg)
+
+	require.True(t, cfg.EVMConfig.UseGevm)
+	require.True(t, NewEnv(cfg).UsesGevm())
 }

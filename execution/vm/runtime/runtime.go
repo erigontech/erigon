@@ -86,6 +86,12 @@ func setDefaults(cfg *Config) {
 			AmsterdamTime:         new(uint64),
 		}
 	}
+	if !cfg.EVMConfig.DisableGevmEnv {
+		switch os.Getenv("USE_GEVM") {
+		case "1", "true", "TRUE", "True", "yes", "YES", "on", "ON":
+			cfg.EVMConfig.UseGevm = true
+		}
+	}
 
 	if cfg.Origin.IsNil() {
 		cfg.Origin = accounts.ZeroAddress
@@ -150,14 +156,28 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxStart != nil {
 		cfg.EVMConfig.Tracer.OnTxStart(&tracing.VMContext{IntraBlockState: cfg.State}, nil, accounts.ZeroAddress)
 	}
-	ret, _, err := vmenv.Call(
-		sender,
-		contractAsAddress,
-		input,
-		mdgas.SplitTxnGasLimit(cfg.GasLimit, mdgas.MdGas{}, rules),
-		cfg.Value,
-		false, /* bailout */
-	)
+	var ret []byte
+	var err error
+	if vmenv.UsesGevm() {
+		ret, _, err = vmenv.RunCode(
+			sender,
+			contractAsAddress,
+			code,
+			input,
+			mdgas.SplitTxnGasLimit(cfg.GasLimit, mdgas.MdGas{}, rules),
+			cfg.Value,
+			false, /* readOnly */
+		)
+	} else {
+		ret, _, err = vmenv.Call(
+			sender,
+			contractAsAddress,
+			input,
+			mdgas.SplitTxnGasLimit(cfg.GasLimit, mdgas.MdGas{}, rules),
+			cfg.Value,
+			false, /* bailout */
+		)
+	}
 	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxEnd != nil {
 		cfg.EVMConfig.Tracer.OnTxEnd(nil, err)
 	}
@@ -238,14 +258,25 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, mdgas.Md
 	}
 
 	// Call the code with the given configuration.
-	ret, leftOverGas, err := vmenv.Call(
-		sender.Address(),
-		address,
-		input,
-		mdgas.SplitTxnGasLimit(cfg.GasLimit, mdgas.MdGas{}, rules),
-		cfg.Value,
-		false, /* bailout */
-	)
+	gas := mdgas.SplitTxnGasLimit(cfg.GasLimit, mdgas.MdGas{}, rules)
+	var ret []byte
+	var leftOverGas mdgas.MdGas
+	if vmenv.UsesGevm() {
+		code, codeErr := statedb.GetCode(address)
+		if codeErr != nil {
+			return nil, mdgas.MdGas{}, codeErr
+		}
+		ret, leftOverGas, err = vmenv.RunCode(sender.Address(), address, code, input, gas, cfg.Value, false)
+	} else {
+		ret, leftOverGas, err = vmenv.Call(
+			sender.Address(),
+			address,
+			input,
+			gas,
+			cfg.Value,
+			false, /* bailout */
+		)
+	}
 
 	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxEnd != nil {
 		cfg.EVMConfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: cfg.GasLimit - leftOverGas.Total()}, err)

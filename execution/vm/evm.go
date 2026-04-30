@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"sync/atomic"
 
+	gevmhost "github.com/Giulio2002/gevm/host"
 	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
 
@@ -39,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	gevmadapter "github.com/erigontech/erigon/execution/vm/gevm"
 )
 
 func (evm *EVM) precompile(addr accounts.Address) (PrecompiledContract, bool) {
@@ -98,6 +100,8 @@ type EVM struct {
 	stateGasConsumed   uint64 // total state gas charged during tx execution (restored on depth>0 revert, kept on depth-0)
 	regularGasConsumed uint64 // total regular gas charged during tx execution (for block-level accounting)
 	revertedSpillGas   uint64 // state gas that spilled to regular and was restored on depth-0 revert
+
+	gevm *gevmadapter.Instance
 }
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
@@ -108,15 +112,24 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state
 			blockCtx.BaseFee = uint256.Int{}
 		}
 	}
+	useGevm := useGevmInterpreter(vmConfig)
+	var intraBlockState *state.IntraBlockState
+	if !useGevm {
+		intraBlockState = ibs
+	}
 	evm := &EVM{
 		Context:         blockCtx,
 		TxContext:       txCtx,
-		intraBlockState: ibs,
+		intraBlockState: intraBlockState,
 		config:          vmConfig,
 		chainConfig:     chainConfig,
 		chainRules:      blockCtx.Rules(chainConfig),
 	}
 	evm.jt = jumpTable(evm.chainRules, vmConfig)
+	if useGevm {
+		evm.gevm = gevmadapter.New(blockCtx, txCtx, vmConfig.StateReader, chainConfig, evm.chainRules, vmConfig.ExtraEips)
+		evm.gevm.SetStateWriter(vmConfig.StateWriter)
+	}
 
 	return evm
 }
@@ -125,7 +138,21 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state
 // This is not threadsafe and should only be done very cautiously.
 func (evm *EVM) Reset(txCtx evmtypes.TxContext, ibs *state.IntraBlockState) {
 	evm.TxContext = txCtx
-	evm.intraBlockState = ibs
+	if useGevmInterpreter(evm.config) {
+		evm.intraBlockState = nil
+		if evm.gevm != nil {
+			evm.gevm.ResetTx(txCtx)
+		} else {
+			evm.gevm = gevmadapter.New(evm.Context, txCtx, evm.config.StateReader, evm.chainConfig, evm.chainRules, evm.config.ExtraEips)
+			evm.gevm.SetStateWriter(evm.config.StateWriter)
+		}
+	} else if evm.gevm != nil {
+		evm.intraBlockState = ibs
+		evm.gevm.Release()
+		evm.gevm = nil
+	} else {
+		evm.intraBlockState = ibs
+	}
 
 	// ensure the evm is reset to be used again
 	evm.abort.Store(false)
@@ -139,16 +166,62 @@ func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtype
 	}
 	evm.Context = blockCtx
 	evm.TxContext = txCtx
-	evm.intraBlockState = ibs
 	evm.config = vmConfig
 	evm.chainRules = chainRules
+	if useGevmInterpreter(vmConfig) {
+		evm.intraBlockState = nil
+	} else {
+		evm.intraBlockState = ibs
+	}
 
 	evm.depth = 0
 	evm.returnData = nil
 	evm.jt = jumpTable(chainRules, vmConfig)
+	if evm.gevm != nil {
+		evm.gevm.Release()
+	}
+	evm.gevm = nil
+	if useGevmInterpreter(vmConfig) {
+		evm.gevm = gevmadapter.New(blockCtx, txCtx, vmConfig.StateReader, evm.chainConfig, chainRules, vmConfig.ExtraEips)
+		evm.gevm.SetStateWriter(vmConfig.StateWriter)
+	}
 
 	// ensure the evm is reset to be used again
 	evm.abort.Store(false)
+}
+
+func useGevmInterpreter(cfg Config) bool {
+	return cfg.UseGevm
+}
+
+func (evm *EVM) UsesGevm() bool {
+	return evm.gevm != nil
+}
+
+func (evm *EVM) SetGevmStateWriter(writer state.StateWriter) {
+	if evm.gevm != nil {
+		evm.gevm.SetStateWriter(writer)
+	}
+}
+
+func (evm *EVM) TransactGevm(tx *gevmhost.Transaction) (gevmhost.ExecutionResult, error) {
+	if evm.gevm == nil {
+		return gevmhost.ExecutionResult{}, errors.New("gevm is not active")
+	}
+	return evm.gevm.Transact(tx)
+}
+
+func (evm *EVM) RunCode(caller accounts.Address, addr accounts.Address, code []byte, input []byte, gas mdgas.MdGas, value uint256.Int, readOnly bool) (ret []byte, leftOverGas mdgas.MdGas, err error) {
+	if evm.gevm == nil {
+		return nil, gas, errors.New("gevm is not active")
+	}
+	ret, leftOverGas, err = evm.gevm.RunCode(caller, addr, code, input, gas, value, readOnly)
+	if gevmadapter.IsExecutionReverted(err) {
+		err = ErrExecutionReverted
+	} else if gevmadapter.IsOutOfGas(err) {
+		err = ErrOutOfGas
+	}
+	return ret, leftOverGas, err
 }
 
 // Cancel cancels any running EVM operation. This may be called concurrently and
@@ -265,7 +338,25 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	if evm.abort.Load() {
 		return ret, leftOverGas, nil
 	}
-
+	useGevm := evm.gevm != nil
+	if useGevm {
+		if typ == CALL {
+			if _, ok := evm.precompile(addr); ok {
+				evm.gevm.TouchAccount(addr)
+			}
+		}
+		if typ == CALL && isSystemCall(caller) && value.IsZero() {
+			evm.gevm.TouchAccount(caller)
+		}
+		readOnly := typ == STATICCALL
+		ret, leftOverGas, err = evm.gevm.Call(typ.String(), caller, callerAddress, addr, input, gas, value, readOnly)
+		if gevmadapter.IsExecutionReverted(err) {
+			err = ErrExecutionReverted
+		} else if gevmadapter.IsOutOfGas(err) {
+			err = ErrOutOfGas
+		}
+		return ret, leftOverGas, err
+	}
 	depth := evm.depth
 
 	version := evm.intraBlockState.Version()
@@ -484,6 +575,19 @@ func (evm *EVM) OverlayCreate(caller accounts.Address, codeAndHash *codeAndHash,
 
 // create creates a new contract using code as deployment code.
 func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRemaining mdgas.MdGas, value uint256.Int, address accounts.Address, typ OpCode, incrementNonce bool, bailout bool) (ret []byte, createAddress accounts.Address, leftOverGas mdgas.MdGas, err error) {
+	if evm.gevm != nil {
+		if typ != CREATE {
+			return nil, accounts.NilAddress, gasRemaining, fmt.Errorf("gevm create helper cannot execute %s without its public Create parameters", typ)
+		}
+		var salt *uint256.Int
+		ret, createAddress, leftOverGas, err = evm.gevm.Create(caller, codeAndHash.code, gasRemaining, value, salt)
+		if gevmadapter.IsExecutionReverted(err) {
+			err = ErrExecutionReverted
+		} else if gevmadapter.IsOutOfGas(err) {
+			err = ErrOutOfGas
+		}
+		return ret, createAddress, leftOverGas, err
+	}
 	if dbg.TraceTransactionIO && (evm.intraBlockState.Trace() || dbg.TraceAccount(caller.Handle())) {
 		defer func() {
 			version := evm.intraBlockState.Version()
@@ -676,6 +780,15 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 // otherwise the usual sender-and-nonce-hash is used (CREATE).
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
 func (evm *EVM) Create(caller accounts.Address, code []byte, gasRemaining mdgas.MdGas, endowment uint256.Int, salt *uint256.Int, bailout bool) (ret []byte, contractAddr accounts.Address, leftOverGas mdgas.MdGas, err error) {
+	if evm.gevm != nil {
+		ret, contractAddr, leftOverGas, err = evm.gevm.Create(caller, code, gasRemaining, endowment, salt)
+		if gevmadapter.IsExecutionReverted(err) {
+			err = ErrExecutionReverted
+		} else if gevmadapter.IsOutOfGas(err) {
+			err = ErrOutOfGas
+		}
+		return ret, contractAddr, leftOverGas, err
+	}
 	ch := &codeAndHash{code: code}
 	op := CREATE
 	if salt != nil {

@@ -32,20 +32,26 @@ import (
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	gevmadapter "github.com/erigontech/erigon/execution/vm/gevm"
 )
 
 // Config are the configuration options for the Interpreter
 type Config struct {
-	Tracer        *tracing.Hooks
-	NoRecursion   bool // Disables call, callcode, delegate call and create
-	NoBaseFee     bool // Forces the EIP-1559 baseFee to 0 (needed for 0 price calls)
-	TraceJumpDest bool // Print transaction hashes where jumpdest analysis was useful
-	NoReceipts    bool // Do not calculate receipts
-	ReadOnly      bool // Do no perform any block finalisation
-	StatelessExec bool // true is certain conditions (like state trie root hash matching) need to be relaxed for stateless EVM execution
-	RestoreState  bool // Revert all changes made to the state (useful for constant system calls)
+	Tracer         *tracing.Hooks
+	NoRecursion    bool // Disables call, callcode, delegate call and create
+	NoBaseFee      bool // Forces the EIP-1559 baseFee to 0 (needed for 0 price calls)
+	UseGevm        bool // Runs the external GEVM interpreter instead of the legacy interpreter
+	DisableGevmEnv bool // Ignores the USE_GEVM test environment override
+	StateReader    state.StateReader
+	StateWriter    state.StateWriter
+	TraceJumpDest  bool // Print transaction hashes where jumpdest analysis was useful
+	NoReceipts     bool // Do not calculate receipts
+	ReadOnly       bool // Do no perform any block finalisation
+	StatelessExec  bool // true is certain conditions (like state trie root hash matching) need to be relaxed for stateless EVM execution
+	RestoreState   bool // Revert all changes made to the state (useful for constant system calls)
 
 	ExtraEips []int // Additional EIPS that are to be enabled
 }
@@ -355,6 +361,15 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 	// Don't bother with the execution if there's no code.
 	if len(contract.Code) == 0 {
 		return nil, gas, nil
+	}
+	if evm.gevm != nil {
+		ret, leftOverGas, err := evm.gevm.RunCode(contract.Caller(), contract.Address(), contract.Code, input, gas, contract.value, readOnly)
+		if gevmadapter.IsExecutionReverted(err) {
+			err = ErrExecutionReverted
+		} else if gevmadapter.IsOutOfGas(err) {
+			err = ErrOutOfGas
+		}
+		return ret, leftOverGas, err
 	}
 
 	// Reset the previous call's return data. It's unimportant to preserve the old buffer

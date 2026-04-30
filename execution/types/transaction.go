@@ -367,6 +367,7 @@ type TransactionsGroupedBySender []Transactions
 
 // Message is a fully derived transaction and implements core.Message
 type Message struct {
+	txType           uint8
 	to               accounts.Address
 	from             accounts.Address
 	nonce            uint64
@@ -391,6 +392,7 @@ func NewMessage(from accounts.Address, to accounts.Address, nonce uint64, amount
 	checkTransaction bool, checkGas bool, isFree bool, maxFeePerBlobGas *uint256.Int,
 ) *Message {
 	m := Message{
+		txType:           LegacyTxType,
 		from:             from,
 		to:               to,
 		nonce:            nonce,
@@ -420,6 +422,7 @@ func NewMessage(from accounts.Address, to accounts.Address, nonce uint64, amount
 
 func (m *Message) From() accounts.Address          { return m.from }
 func (m *Message) To() accounts.Address            { return m.to }
+func (m *Message) TxType() uint8                   { return m.txType }
 func (m *Message) GasPrice() *uint256.Int          { return &m.gasPrice }
 func (m *Message) FeeCap() *uint256.Int            { return &m.feeCap }
 func (m *Message) TipCap() *uint256.Int            { return &m.tipCap }

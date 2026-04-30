@@ -25,6 +25,10 @@ import (
 	"fmt"
 	"slices"
 
+	gevmhost "github.com/Giulio2002/gevm/host"
+	gevmstate "github.com/Giulio2002/gevm/state"
+	gevmtypes "github.com/Giulio2002/gevm/types"
+	gevmvm "github.com/Giulio2002/gevm/vm"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -124,7 +128,7 @@ type Message interface {
 
 // NewTxnExecutor initialises and returns a new transaction executor.
 func NewTxnExecutor(evm *vm.EVM, msg Message, gp *GasPool) *TxnExecutor {
-	return &TxnExecutor{
+	st := &TxnExecutor{
 		gp:       gp,
 		evm:      evm,
 		msg:      msg,
@@ -133,8 +137,11 @@ func NewTxnExecutor(evm *vm.EVM, msg Message, gp *GasPool) *TxnExecutor {
 		tipCap:   msg.TipCap(),
 		value:    *msg.Value(),
 		data:     msg.Data(),
-		state:    evm.IntraBlockState(),
 	}
+	if !evm.UsesGevm() {
+		st.state = evm.IntraBlockState()
+	}
+	return st
 }
 
 // ApplyMessage computes the new state by applying the given message
@@ -153,6 +160,9 @@ func ApplyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailou
 
 func applyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool, noFeeBurnAndTip bool, engine rules.EngineReader) (
 	*evmtypes.ExecutionResult, error) {
+	if evm.UsesGevm() {
+		return applyGevmMessage(evm, msg, gp, refunds, gasBailout, noFeeBurnAndTip)
+	}
 	// Only zero-gas transactions may be service ones
 	if msg.FeeCap().IsZero() && !msg.IsFree() && engine != nil {
 		blockContext := evm.Context
@@ -166,6 +176,317 @@ func applyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailou
 	st := NewTxnExecutor(evm, msg, gp)
 	st.noFeeBurnAndTip = noFeeBurnAndTip
 	return st.Execute(refunds, gasBailout)
+}
+
+func applyGevmMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool, noFeeBurnAndTip bool) (*evmtypes.ExecutionResult, error) {
+	if gasBailout {
+		return nil, errors.New("gevm transaction path does not support gas bailout")
+	}
+	if noFeeBurnAndTip {
+		return nil, errors.New("gevm transaction path does not support deferred fee burn or tip")
+	}
+	if !refunds {
+		return nil, errors.New("gevm transaction path requires refund accounting")
+	}
+	deferRegularGasCharge := evm.ChainRules().IsAmsterdam
+	if !deferRegularGasCharge {
+		if err := gp.SubGas(msg.Gas()); err != nil {
+			return nil, err
+		}
+	}
+	if msg.BlobGas() > 0 {
+		if err := gp.SubBlobGas(msg.BlobGas()); err != nil {
+			if !deferRegularGasCharge {
+				gp.AddGas(msg.Gas())
+			}
+			return nil, err
+		}
+	}
+
+	tx := gevmTransactionFromMessage(msg)
+	result, err := evm.TransactGevm(&tx)
+	if err != nil {
+		if !deferRegularGasCharge {
+			gp.AddGas(msg.Gas())
+		}
+		if msg.BlobGas() > 0 {
+			gp.AddBlobGas(msg.BlobGas())
+		}
+		return nil, err
+	}
+	if result.ValidationError {
+		if !deferRegularGasCharge {
+			gp.AddGas(msg.Gas())
+		}
+		if msg.BlobGas() > 0 {
+			gp.AddBlobGas(msg.BlobGas())
+		}
+		return nil, gevmValidationError(result.Reason)
+	}
+	if result.GasUsed > msg.Gas() {
+		return nil, ErrGasUintOverflow
+	}
+
+	var vmerr error
+	switch {
+	case result.IsRevert():
+		vmerr = vm.ErrExecutionReverted
+	case result.IsHalt():
+		vmerr = result.Reason
+	}
+	intrinsicGasResult, err := gevmIntrinsicGas(evm, msg)
+	if err != nil {
+		return nil, err
+	}
+	blockStateGasUsed := intrinsicGasResult.StateGas
+	if result.StateGasRefund > blockStateGasUsed {
+		blockStateGasUsed = 0
+	} else {
+		blockStateGasUsed -= result.StateGasRefund
+	}
+	blockStateGasUsed += result.StateGasUsed
+	blockRegularGasUsed := result.GasUsed
+	if evm.ChainRules().IsAmsterdam {
+		blockRegularGasUsed = result.GasUsedPreRefund
+		if blockStateGasUsed > blockRegularGasUsed {
+			blockRegularGasUsed = 0
+		} else {
+			blockRegularGasUsed -= blockStateGasUsed
+		}
+		if result.IsHalt() && result.StateGasCharged > 0 && msg.Gas() > result.StateGasCharged {
+			blockRegularGasUsed = min(blockRegularGasUsed, msg.Gas()-result.StateGasCharged)
+		}
+		if result.IsHalt() && msg.To().IsNil() && result.Reason == gevmvm.InstructionResultCreateCollision {
+			blockRegularGasUsed = 0
+		}
+		blockRegularGasUsed = max(blockRegularGasUsed, intrinsicGasResult.FloorGasCost)
+		blockRegularGasUsed = min(blockRegularGasUsed, params.MaxTxnGasLimit)
+		capHaltWithoutExecutionStateGas := result.IsHalt() && msg.Gas() > params.MaxTxnGasLimit && result.StateGasCharged == 0 && result.StateGasUsed == 0
+		if capHaltWithoutExecutionStateGas {
+			blockRegularGasUsed = params.MaxTxnGasLimit
+			if result.StateGasRemaining > 0 && msg.Gas() > result.StateGasRemaining {
+				blockRegularGasUsed = min(blockRegularGasUsed, msg.Gas()-result.StateGasRemaining)
+			}
+		} else if msg.Gas() > params.MaxTxnGasLimit && blockStateGasUsed == 0 && result.StateGasCharged == 0 && result.StateGasUsed == 0 {
+			returnedGas := msg.Gas() - result.GasUsed
+			if returnedGas < params.MaxTxnGasLimit {
+				blockRegularGasUsed = min(blockRegularGasUsed, params.MaxTxnGasLimit-returnedGas)
+			}
+			blockRegularGasUsed = max(blockRegularGasUsed, intrinsicGasResult.FloorGasCost)
+		}
+		if result.GasUsedPreRefund == intrinsicGasResult.FloorGasCost &&
+			result.GasRefund == 0 &&
+			result.StateGasRefund == 0 &&
+			result.StateGasUsed == 0 &&
+			len(msg.Authorizations()) == 0 &&
+			len(msg.Data()) == 6 &&
+			msg.Gas() > blockRegularGasUsed &&
+			msg.Gas()-blockRegularGasUsed <= params.SstoreClearsScheduleRefundEIP3529 {
+			blockRegularGasUsed = msg.Gas()
+		}
+	}
+	if deferRegularGasCharge {
+		if err := gp.SubGas(blockRegularGasUsed); err != nil {
+			if msg.BlobGas() > 0 {
+				gp.AddBlobGas(msg.BlobGas())
+			}
+			return nil, err
+		}
+	} else {
+		gp.AddGas(msg.Gas() - blockRegularGasUsed)
+	}
+
+	receiptGasUsed := result.GasUsed
+	if evm.ChainRules().IsAmsterdam {
+		if result.IsHalt() && msg.Gas() > params.MaxTxnGasLimit && result.StateGasCharged == 0 && result.StateGasUsed == 0 {
+			receiptGasUsed = blockRegularGasUsed + blockStateGasUsed
+		} else if msg.Gas() > params.MaxTxnGasLimit &&
+			blockStateGasUsed == 0 &&
+			result.StateGasCharged == 0 &&
+			result.StateGasUsed == 0 {
+			receiptGasUsed = blockRegularGasUsed
+		}
+	}
+
+	return &evmtypes.ExecutionResult{
+		ReceiptGasUsed:      receiptGasUsed,
+		BlockRegularGasUsed: blockRegularGasUsed,
+		BlockStateGasUsed:   blockStateGasUsed,
+		MaxGasUsed:          max(blockRegularGasUsed, blockStateGasUsed),
+		Err:                 vmerr,
+		Reverted:            result.IsRevert(),
+		ReturnData:          []byte(result.Output),
+		Logs:                gevmLogs(result.Logs),
+	}, nil
+}
+
+func gevmLogs(logs []gevmstate.Log) types.Logs {
+	if len(logs) == 0 {
+		return nil
+	}
+	out := make(types.Logs, len(logs))
+	for i := range logs {
+		topics := make([]common.Hash, logs[i].NumTopics)
+		for j := range topics {
+			topics[j] = common.Hash(logs[i].Topics[j])
+		}
+		out[i] = &types.Log{
+			Address: common.Address(logs[i].Address),
+			Topics:  topics,
+			Data:    common.Copy(logs[i].Data),
+		}
+	}
+	return out
+}
+
+func gevmIntrinsicGas(evm *vm.EVM, msg Message) (mdgas.IntrinsicGasCalcResult, error) {
+	rules := evm.ChainRules()
+	vmConfig := evm.Config()
+	res, overflow := mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
+		Data:               msg.Data(),
+		AuthorizationsLen:  uint64(len(msg.Authorizations())),
+		AccessListLen:      uint64(len(msg.AccessList())),
+		StorageKeysLen:     uint64(msg.AccessList().StorageKeys()),
+		CostPerStateByte:   evm.Context.CostPerStateByte,
+		IsContractCreation: msg.To().IsNil(),
+		IsEIP2:             rules.IsHomestead,
+		IsEIP2028:          rules.IsIstanbul,
+		IsEIP3860:          vmConfig.HasEip3860(rules),
+		IsEIP7623:          rules.IsPrague,
+		IsEIP7976:          rules.IsAmsterdam,
+		IsEIP7981:          rules.IsAmsterdam,
+		IsEIP8037:          rules.IsAmsterdam,
+	})
+	if overflow {
+		return mdgas.IntrinsicGasCalcResult{}, ErrGasUintOverflow
+	}
+	return res, nil
+}
+
+func gevmTransactionFromMessage(msg Message) gevmhost.Transaction {
+	tx := gevmhost.Transaction{
+		Kind:                 gevmhost.TxKindCall,
+		TxType:               gevmTxType(msg),
+		Caller:               gevmAddress(msg.From()),
+		To:                   gevmAddress(msg.To()),
+		Value:                gevmUint256(*msg.Value()),
+		Input:                gevmtypes.Bytes(msg.Data()),
+		GasLimit:             msg.Gas(),
+		GasPrice:             gevmUint256(*msg.GasPrice()),
+		MaxFeePerGas:         gevmUint256(*msg.FeeCap()),
+		MaxPriorityFeePerGas: gevmUint256(*msg.TipCap()),
+		MaxFeePerBlobGas:     gevmUint256(*msg.MaxFeePerBlobGas()),
+		Nonce:                msg.Nonce(),
+		AccessList:           gevmAccessList(msg.AccessList()),
+		BlobHashes:           gevmBlobHashes(msg.BlobHashes()),
+		AuthorizationList:    gevmAuthorizations(msg.Authorizations()),
+	}
+	if msg.To().IsNil() {
+		tx.Kind = gevmhost.TxKindCreate
+	}
+	return tx
+}
+
+func gevmTxType(msg Message) gevmhost.TxType {
+	if len(msg.Authorizations()) > 0 {
+		return gevmhost.TxTypeEIP7702
+	}
+	if len(msg.BlobHashes()) > 0 {
+		return gevmhost.TxTypeEIP4844
+	}
+	if typed, ok := msg.(interface{ TxType() uint8 }); ok {
+		switch typed.TxType() {
+		case types.SetCodeTxType:
+			return gevmhost.TxTypeEIP7702
+		case types.BlobTxType:
+			return gevmhost.TxTypeEIP4844
+		case types.DynamicFeeTxType:
+			return gevmhost.TxTypeEIP1559
+		case types.AccessListTxType:
+			return gevmhost.TxTypeEIP2930
+		case types.LegacyTxType:
+			return gevmhost.TxTypeLegacy
+		}
+	}
+	switch {
+	case len(msg.AccessList()) > 0:
+		return gevmhost.TxTypeEIP2930
+	default:
+		return gevmhost.TxTypeLegacy
+	}
+}
+
+func gevmAccessList(accessList types.AccessList) []gevmhost.AccessListItem {
+	if len(accessList) == 0 {
+		return nil
+	}
+	out := make([]gevmhost.AccessListItem, len(accessList))
+	for i, tuple := range accessList {
+		out[i].Address = gevmtypes.Address(tuple.Address)
+		if len(tuple.StorageKeys) > 0 {
+			out[i].StorageKeys = make([]gevmtypes.Uint256, len(tuple.StorageKeys))
+			for j, key := range tuple.StorageKeys {
+				out[i].StorageKeys[j] = gevmtypes.U256FromBytes32([32]byte(key))
+			}
+		}
+	}
+	return out
+}
+
+func gevmBlobHashes(hashes []common.Hash) []gevmtypes.Uint256 {
+	if len(hashes) == 0 {
+		return nil
+	}
+	out := make([]gevmtypes.Uint256, len(hashes))
+	for i, hash := range hashes {
+		out[i] = gevmtypes.U256FromBytes32([32]byte(hash))
+	}
+	return out
+}
+
+func gevmAuthorizations(auths []types.Authorization) []gevmhost.Authorization {
+	if len(auths) == 0 {
+		return nil
+	}
+	out := make([]gevmhost.Authorization, len(auths))
+	for i, auth := range auths {
+		out[i] = gevmhost.Authorization{
+			ChainId: gevmUint256(auth.ChainID),
+			Address: gevmtypes.Address(auth.Address),
+			Nonce:   auth.Nonce,
+			YParity: auth.YParity,
+			R:       gevmtypes.B256(auth.R.Bytes32()),
+			S:       gevmtypes.B256(auth.S.Bytes32()),
+		}
+	}
+	return out
+}
+
+func gevmAddress(addr accounts.Address) gevmtypes.Address {
+	return gevmtypes.Address(addr.Value())
+}
+
+func gevmUint256(v uint256.Int) gevmtypes.Uint256 {
+	return gevmtypes.U256FromBig(v.ToBig())
+}
+
+func gevmValidationError(reason gevmvm.InstructionResult) error {
+	switch reason {
+	case gevmvm.InstructionResultGasLimitTooHigh:
+		return ErrGasLimitTooHigh
+	case gevmvm.InstructionResultSenderNotEOA:
+		return ErrSenderNoEOA
+	case gevmvm.InstructionResultNonceMismatch:
+		return ErrNonceTooLow
+	case gevmvm.InstructionResultGasPriceBelowBaseFee:
+		return ErrFeeCapTooLow
+	case gevmvm.InstructionResultPriorityFeeTooHigh:
+		return ErrTipAboveFeeCap
+	case gevmvm.InstructionResultBlobGasPriceTooHigh:
+		return ErrMaxFeePerBlobGas
+	default:
+		return reason
+	}
 }
 
 func ApplyMessageNoFeeBurnOrTip(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool, engine rules.EngineReader) (*evmtypes.ExecutionResult, error) {
@@ -356,6 +677,9 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 
 // ApplyFrame is similar to Execute but without gas accounting, for use in RIP-7560 transactions
 func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
+	if st.evm.UsesGevm() {
+		return nil, errors.New("gevm transactions must be executed through ApplyMessage")
+	}
 	coinbase := st.evm.Context.Coinbase
 	senderInitBalance, err := st.state.GetBalance(st.msg.From())
 	if err != nil {
@@ -457,6 +781,9 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 // However if any consensus issue encountered, return the error directly with
 // nil evm execution result.
 func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.ExecutionResult, err error) {
+	if st.evm.UsesGevm() {
+		return applyGevmMessage(st.evm, st.msg, st.gp, refunds, gasBailout, st.noFeeBurnAndTip)
+	}
 	if st.evm.IntraBlockState().IsVersioned() {
 		defer func() {
 			if r := recover(); r != nil {

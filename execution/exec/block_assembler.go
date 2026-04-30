@@ -182,6 +182,10 @@ func (ba *BlockAssembler) AddTransactions(
 	// based on position in the block's transaction list).
 	txnIdx := len(ba.Txns)
 	header := ba.AssembledBlock.Header
+	localVMConfig := *vmConfig
+	localVMConfig.UseGevm = false
+	localVMConfig.DisableGevmEnv = true
+	vmConfig = &localVMConfig
 	// EIP-8037: initialize the pool from cumulative regular gas, not the
 	// bottleneck (max of regular, state) stored in header.GasUsed. This
 	// gives compute-heavy transactions access to the full regular gas

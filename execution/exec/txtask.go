@@ -17,16 +17,19 @@
 package exec
 
 import (
+	"bytes"
 	"container/heap"
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -216,6 +219,7 @@ type TxTask struct {
 	Header             *types.Header
 	Txs                types.Transactions
 	Uncles             []*types.Header
+	Receipts           types.Receipts
 	Withdrawals        types.Withdrawals
 	EvmBlockContext    evmtypes.BlockContext
 	HistoryExecution   bool // use history reader for that txn instead of state reader
@@ -226,6 +230,7 @@ type TxTask struct {
 	Hooks                 *tracing.Hooks
 	Config                *chain.Config
 	Engine                rules.Engine
+	VMConfig              vm.Config
 	Logger                log.Logger
 	Trace                 bool
 	AAValidationBatchSize uint64 // number of consecutive RIP-7560 transactions, should be 0 for single transactions and transactions that are not first in the transaction order
@@ -237,6 +242,10 @@ type TxTask struct {
 	signer       *types.Signer
 	dependencies []int
 	rules        *chain.Rules
+}
+
+func (t *TxTask) UnderlyingTxTask() *TxTask {
+	return t
 }
 
 func (t *TxTask) compare(other Task) int {
@@ -385,6 +394,11 @@ func (t *TxTask) ResetGasPool(gasPool *protocol.GasPool) {
 	t.gasPool = gasPool
 }
 
+func (t *TxTask) SetGevmStateIO(reader state.StateReader, writer state.StateWriter) {
+	t.VMConfig.StateReader = reader
+	t.VMConfig.StateWriter = writer
+}
+
 func (t *TxTask) Version() state.Version {
 	return state.Version{BlockNum: t.BlockNumber(), TxNum: t.TxNum, TxIndex: t.TxIndex}
 }
@@ -427,11 +441,13 @@ func (t *TxTask) IsHistoric() bool {
 
 func (t *TxTask) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *calltracer.CallTracer) error {
 	t.BalanceIncreaseSet = nil
-	ibs.Reset()
-	ibs.SetTxContext(t.BlockNumber(), t.TxIndex)
+	if !t.VMConfig.UseGevm {
+		ibs.Reset()
+		ibs.SetTxContext(t.BlockNumber(), t.TxIndex)
+	}
 
 	if t.TxIndex != -1 && !t.IsBlockEnd() {
-		var vmCfg vm.Config
+		vmCfg := t.VMConfig
 		if callTracer != nil {
 			vmCfg.Tracer = callTracer.Tracer().Hooks
 		}
@@ -462,7 +478,11 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 	calcFees bool) *TxResult {
 	var result TxResult
 
-	ibs.SetTrace(txTask.Trace)
+	usesGevm := evm.UsesGevm()
+	gevmTxExecuted := false
+	if !usesGevm {
+		ibs.SetTrace(txTask.Trace)
+	}
 
 	rules := txTask.Rules()
 
@@ -475,6 +495,13 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		if txTask.BlockNumber() == 0 {
 
 			//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
+			if usesGevm {
+				gevmTxExecuted = true
+				if genesis != nil {
+					result.Err = writeGenesisAllocGevm(genesis, stateWriter)
+				}
+				break
+			}
 			if genesis != nil {
 				_, ibs, err = genesiswrite.GenesisToBlock(nil, genesis, dirs, txTask.Logger)
 				if err != nil {
@@ -488,6 +515,11 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
+		if usesGevm {
+			gevmTxExecuted = true
+			result.Err = protocol.InitializeBlockExecutionGevm(chainConfig, engine, header, txTask.VMConfig.StateReader, stateWriter)
+			break
+		}
 		syscall := func(contract accounts.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 			ret, err := protocol.SysCallContract(contract, data, chainConfig, ibs, header, engine, constCall /* constCall */, evm.Config())
 			return ret, err
@@ -500,6 +532,13 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		if txTask.BlockNumber() == 0 {
 			break
 		}
+		if usesGevm {
+			gevmTxExecuted = true
+			result.Err = protocol.FinalizeBlockExecutionGevm(chainConfig, engine, header, txTask.Uncles, txTask.Receipts, txTask.Withdrawals, txTask.VMConfig.StateReader, stateWriter)
+			if result.Err != nil {
+				break
+			}
+		}
 
 		result.TraceTos = map[accounts.Address]struct{}{}
 		result.TraceTos[accounts.InternAddress(txTask.Header.Coinbase)] = struct{}{}
@@ -508,6 +547,10 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		}
 	default:
 		if txTask.Tx().Type() == types.AccountAbstractionTxType {
+			if usesGevm {
+				result.Err = errors.New("account abstraction transactions are not supported by the GEVM transaction path")
+				return &result
+			}
 			if !chainConfig.AllowAA {
 				result.Err = errors.New("account abstraction transactions are not allowed")
 				return &result
@@ -523,16 +566,22 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		}
 
 		result.Coinbase = evm.Context.Coinbase
+		gevmTxExecuted = usesGevm
 
 		// MA applytx
 		result.ExecutionResult, result.Err = func() (evmtypes.ExecutionResult, error) {
 			message, err := txTask.TxMessage()
 
 			if err != nil {
-				return evmtypes.ExecutionResult{}, protocol.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: err}
+				dependencyTxIndex := -1
+				if !usesGevm {
+					dependencyTxIndex = ibs.DepTxIndex()
+				}
+				return evmtypes.ExecutionResult{}, protocol.ErrExecAbortError{DependencyTxIndex: dependencyTxIndex, OriginError: err}
 			}
 
 			// Apply the transaction to the current state (included in the env).
+			evm.SetGevmStateWriter(stateWriter)
 			var applyRes *evmtypes.ExecutionResult
 			var applyErr error
 
@@ -544,37 +593,55 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 
 			if applyErr != nil {
 				if _, ok := applyErr.(protocol.ErrExecAbortError); !ok {
-					return evmtypes.ExecutionResult{}, protocol.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: applyErr}
+					dependencyTxIndex := -1
+					if !usesGevm {
+						dependencyTxIndex = ibs.DepTxIndex()
+					}
+					return evmtypes.ExecutionResult{}, protocol.ErrExecAbortError{DependencyTxIndex: dependencyTxIndex, OriginError: applyErr}
 				}
 
 				return evmtypes.ExecutionResult{}, applyErr
 			}
 
 			if applyRes == nil {
-				return evmtypes.ExecutionResult{}, protocol.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex()}
+				dependencyTxIndex := -1
+				if !usesGevm {
+					dependencyTxIndex = ibs.DepTxIndex()
+				}
+				return evmtypes.ExecutionResult{}, protocol.ErrExecAbortError{DependencyTxIndex: dependencyTxIndex}
+			}
+
+			if usesGevm {
+				result.TraceFroms = map[accounts.Address]struct{}{message.From(): {}}
+				if !message.To().IsNil() {
+					result.TraceTos = map[accounts.Address]struct{}{message.To(): {}}
+				}
 			}
 
 			return *applyRes, err
 		}()
 
 		if result.Err == nil {
-			// Capture residual-balance selfdestructs before SoftFinalise clears the
-			// journal.  These are accounts selfdestructed in this tx that also received
-			// ETH after the SELFDESTRUCT opcode (EIP-7708 case 2).  SoftFinalise calls
-			// clearJournalAndRefund, so GetRemovedAccountsWithBalance returns nothing
-			// afterwards.
-			result.ExecutionResult.SelfDestructedWithBalance = ibs.GetRemovedAccountsWithBalance()
+			if gevmTxExecuted {
+				result.Logs = result.ExecutionResult.Logs
+			} else {
+				// Capture residual-balance selfdestructs before SoftFinalise clears the
+				// journal.  These are accounts selfdestructed in this tx that also received
+				// ETH after the SELFDESTRUCT opcode (EIP-7708 case 2).  SoftFinalise calls
+				// clearJournalAndRefund, so GetRemovedAccountsWithBalance returns nothing
+				// afterwards.
+				result.ExecutionResult.SelfDestructedWithBalance = ibs.GetRemovedAccountsWithBalance()
 
-			// TODO these can be removed - use result instead
-			// Update the state with pending changes
-			ibs.SoftFinalise()
-			//txTask.Error = ibs.FinalizeTx(rules, noop)
-			result.Logs = ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())
+				// Update the state with pending changes
+				ibs.SoftFinalise()
+				//txTask.Error = ibs.FinalizeTx(rules, noop)
+				result.Logs = ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())
+			}
 		}
 
 	}
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
-	if result.Err == nil {
+	if result.Err == nil && !usesGevm && !gevmTxExecuted {
 		txTask.BalanceIncreaseSet = ibs.BalanceIncreaseSet()
 		if err = ibs.MakeWriteSet(rules, stateWriter); err != nil {
 			panic(err)
@@ -586,6 +653,58 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 	}
 
 	return &result
+}
+
+func writeGenesisAllocGevm(genesis *types.Genesis, stateWriter state.StateWriter) error {
+	if stateWriter == nil {
+		return nil
+	}
+	addrs := make([]common.Address, 0, len(genesis.Alloc))
+	for addr := range genesis.Alloc {
+		addrs = append(addrs, addr)
+	}
+	slices.SortFunc(addrs, func(a, b common.Address) int {
+		return bytes.Compare(a[:], b[:])
+	})
+
+	for _, addr := range addrs {
+		account := genesis.Alloc[addr]
+		balance, overflow := uint256.FromBig(account.Balance)
+		if overflow {
+			return fmt.Errorf("overflow at genesis alloc %x", addr)
+		}
+		address := accounts.InternAddress(addr)
+		next := accounts.NewAccount()
+		next.Balance = *balance
+		next.Nonce = account.Nonce
+		hasContractState := len(account.Code) > 0 || len(account.Storage) > 0 || len(account.Constructor) > 0
+		if hasContractState {
+			next.Incarnation = state.FirstContractIncarnation
+			if err := stateWriter.CreateContract(address); err != nil {
+				return err
+			}
+		}
+		if len(account.Code) > 0 {
+			next.CodeHash = accounts.InternCodeHash(common.BytesToHash(crypto.Keccak256(account.Code)))
+			if err := stateWriter.UpdateAccountCode(address, next.Incarnation, next.CodeHash, account.Code); err != nil {
+				return err
+			}
+		}
+		var slotValue uint256.Int
+		for key, value := range account.Storage {
+			slotValue.SetBytes(value.Bytes())
+			if err := stateWriter.WriteAccountStorage(address, next.Incarnation, accounts.InternKey(key), uint256.Int{}, slotValue); err != nil {
+				return err
+			}
+		}
+		if len(account.Constructor) > 0 {
+			return fmt.Errorf("GEVM genesis constructor allocations are not supported")
+		}
+		if err := stateWriter.UpdateAccountData(address, &accounts.Account{}, &next); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,

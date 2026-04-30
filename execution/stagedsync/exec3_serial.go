@@ -121,7 +121,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		header := b.HeaderNoCopy()
 		getHashFnMutex := sync.Mutex{}
 
-		if se.cfg.chainConfig.AmsterdamTime != nil && *se.cfg.chainConfig.AmsterdamTime > 0 && se.cfg.chainConfig.IsAmsterdam(header.Time) {
+		if !se.cfg.evmConfigValue().UseGevm && se.cfg.chainConfig.AmsterdamTime != nil && *se.cfg.chainConfig.AmsterdamTime > 0 && se.cfg.chainConfig.IsAmsterdam(header.Time) {
 			se.logger.Error(fmt.Sprintf("[%s] BLOCK PROCESSING FAILED: Amsterdam processing is not supported by serial exec", se.logPrefix), "fork-block", blockNum)
 			return nil, rwTx, fmt.Errorf("amsterdam processing is not supported by serial exec from block: %d", blockNum)
 		}
@@ -153,6 +153,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				Txs:             txs,
 				EvmBlockContext: blockContext,
 				Withdrawals:     b.Withdrawals(),
+				VMConfig:        se.cfg.evmConfigValue(),
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: lastFrozenTxNum > 0 && inputTxNum <= lastFrozenTxNum,
 				Trace:            dbg.TraceTx(blockNum, txIndex),
@@ -296,7 +297,7 @@ func (se *serialExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buf
 	if se.worker == nil {
 		se.taskExecMetrics = exec.NewWorkerMetrics()
 		se.worker = exec.NewWorker(context.Background(), false, se.taskExecMetrics,
-			se.cfg.db.(kv.TemporalRoDB), nil, se.cfg.blockReader, se.cfg.chainConfig, se.cfg.genesis, nil, se.cfg.engine, se.cfg.dirs, se.logger)
+			se.cfg.db.(kv.TemporalRoDB), nil, se.cfg.blockReader, se.cfg.chainConfig, se.cfg.genesis, nil, se.cfg.engine, se.cfg.evmConfigValue(), se.cfg.dirs, se.logger)
 	}
 
 	if se.applyTx != applyTx {
@@ -352,6 +353,9 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 		txTask.ResetGasPool(gasPool)
 		txTask.Config = se.cfg.chainConfig
 		txTask.Engine = se.cfg.engine
+		if txTask.IsBlockEnd() {
+			txTask.Receipts = blockReceipts
+		}
 
 		result := se.worker.RunTxTask(txTask)
 
@@ -371,13 +375,36 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				se.blobGasUsed += txTask.Tx().GetBlobGas()
 			}
 			if txTask.IsBlockEnd() && txTask.BlockNumber() > 0 {
+				if txTask.VMConfig.UseGevm {
+					if startTxIndex == 0 && !isInitialCycle {
+						se.cfg.notifications.RecentReceipts.Add(blockReceipts, txTask.Txs, txTask.Header)
+					}
+					checkReceipts := !se.cfg.vmConfig.StatelessExec && se.cfg.chainConfig.IsByzantium(txTask.BlockNumber()) && !se.cfg.vmConfig.NoReceipts
+					if txTask.BlockNumber() > 0 && startTxIndex == 0 {
+						blockGasUsed := max(se.blockGasUsed, se.blockStateGasUsed)
+						if err := se.getPostValidator().Process(blockGasUsed, se.blobGasUsed, checkReceipts, blockReceipts, txTask.Header, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {
+							return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err)
+						}
+						amsterdam := se.cfg.chainConfig.IsAmsterdam(txTask.Header.Time)
+						if amsterdam || se.cfg.experimentalBAL {
+							if err := ValidateStoredBAL(se.applyTx, txTask.Header, amsterdam, se.cfg.experimentalBAL); err != nil {
+								return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err)
+							}
+						}
+					}
+					return nil
+				}
 				//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 				// End of block transaction in a block
 				ibs := state.New(state.NewReaderV3(se.rs.Domains().AsGetter(se.applyTx)))
 				defer ibs.Release(true)
 				ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
+				// Pass se.accumulator so that AuRa / system-call nonce changes
+				// are included in the txpool state-diff batch (fixes empty block
+				// production on Gnosis Chain caused by stale pending txns).
+				stateWriter := state.NewWriter(se.doms.AsPutDel(se.applyTx), se.accumulator, txTask.TxNum)
 				syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-					ret, err := protocol.SysCallContract(contract, data, se.cfg.chainConfig, ibs, txTask.Header, se.cfg.engine, false /* constCall */, *se.cfg.vmConfig)
+					ret, err := protocol.SysCallContractWithStateWriter(contract, data, se.cfg.chainConfig, ibs, stateWriter, txTask.Header, se.cfg.engine, false /* constCall */, *se.cfg.vmConfig)
 					if err != nil {
 						return nil, err
 					}
@@ -431,11 +458,6 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 						return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 					}
 				}
-
-				// Pass se.accumulator so that AuRa / system-call nonce changes
-				// are included in the txpool state-diff batch (fixes empty block
-				// production on Gnosis Chain caused by stale pending txns).
-				stateWriter := state.NewWriter(se.doms.AsPutDel(se.applyTx), se.accumulator, txTask.TxNum)
 
 				if err = ibs.MakeWriteSet(txTask.Rules(), stateWriter); err != nil {
 					panic(err)

@@ -275,6 +275,10 @@ func (rw *HistoricalTraceWorker) execAATxn(txTask *TxTask, tracer *calltracer.Ca
 					break
 				}
 
+				if rw.evm.UsesGevm() {
+					outerErr = errors.New("account abstraction transactions are not supported by the GEVM transaction path")
+					break
+				}
 				paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, rw.ibs, rw.taskGasPool, txTask.Header, rw.evm, rw.execArgs.ChainConfig)
 				if err != nil {
 					outerErr = err

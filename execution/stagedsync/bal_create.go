@@ -151,3 +151,43 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, ams
 	}
 	return nil
 }
+
+func ValidateStoredBAL(tx kv.Getter, h *types.Header, amsterdam bool, experimental bool) error {
+	if !amsterdam && !experimental {
+		return nil
+	}
+	if h == nil {
+		return nil
+	}
+	blockNum := h.Number.Uint64()
+	if h.BlockAccessListHash == nil {
+		if amsterdam {
+			return fmt.Errorf("block %d: missing block access list hash", blockNum)
+		}
+		return nil
+	}
+	dbBALBytes, err := rawdb.ReadBlockAccessListBytes(tx, h.Hash(), blockNum)
+	if err != nil {
+		return fmt.Errorf("block %d: read stored block access list: %w", blockNum, err)
+	}
+	if dbBALBytes == nil {
+		return nil
+	}
+	dbBAL, err := types.DecodeBlockAccessListBytes(dbBALBytes)
+	if err != nil {
+		return fmt.Errorf("block %d: read stored block access list: %w", blockNum, err)
+	}
+	if err = dbBAL.Validate(); err != nil {
+		return fmt.Errorf("block %d: db block access list is invalid: %w", blockNum, err)
+	}
+	if amsterdam {
+		if err = dbBAL.ValidateMaxItems(h.GasLimit); err != nil {
+			return fmt.Errorf("block %d: stored block access list exceeds max items: %w", blockNum, err)
+		}
+	}
+	headerBALHash := *h.BlockAccessListHash
+	if headerBALHash != dbBAL.Hash() {
+		return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", blockNum, dbBAL.Hash(), headerBALHash)
+	}
+	return nil
+}

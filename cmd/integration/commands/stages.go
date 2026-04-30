@@ -321,6 +321,7 @@ func init() {
 	withBlock(cmdStageExec)
 	withPruneTo(cmdStageExec)
 	withTraceFlags(cmdStageExec)
+	withUseGevm(cmdStageExec)
 	withChainTipMode(cmdStageExec)
 	rootCmd.AddCommand(cmdStageExec)
 
@@ -650,6 +651,10 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
+	if noCommit && useGevm {
+		const gevmNoCommitBatchSize = 16 * datasize.GB
+		batchSize = max(batchSize, gevmNoCommitBatchSize)
+	}
 
 	var s *stagedsync.StageState
 	_ = db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
@@ -1155,6 +1160,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
 
 	vmConfig := &vm.Config{}
+	vmConfig.UseGevm = useGevm
 
 	genesis := readGenesis(chain)
 	chainConfig, genesisBlock, genesisErr := genesiswrite.CommitGenesisBlock(db, genesis, chain, dirs, logger)

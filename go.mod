@@ -128,6 +128,11 @@ require (
 )
 
 require (
+	github.com/Giulio2002/fastkeccak v0.0.0-20260211162430-e46f5da3471e // indirect
+	github.com/crate-crypto/go-kzg-4844 v1.1.0 // indirect
+)
+
+require (
 	4d63.com/gocheckcompilerdirectives v1.3.0 // indirect
 	4d63.com/gochecknoglobals v0.2.2 // indirect
 	cel.dev/expr v0.25.1 // indirect
@@ -146,6 +151,7 @@ require (
 	github.com/Antonboom/testifylint v1.6.4 // indirect
 	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/Djarvur/go-err113 v0.1.1 // indirect
+	github.com/Giulio2002/gevm v0.0.0-00010101000000-000000000000
 	github.com/Masterminds/goutils v1.1.1 // indirect
 	github.com/Masterminds/semver/v3 v3.4.0 // indirect
 	github.com/MirrexOne/unqueryvet v1.5.4 // indirect
@@ -477,3 +483,5 @@ tool (
 )
 
 replace github.com/crate-crypto/go-eth-kzg => github.com/erigontech/go-eth-kzg v0.0.0-20260401161010-070339460d07
+
+replace github.com/Giulio2002/gevm => /root/gevm-erigon/gevm

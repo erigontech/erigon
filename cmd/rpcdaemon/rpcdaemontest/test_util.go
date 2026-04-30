@@ -137,7 +137,7 @@ func CreateTestExecModule(t *testing.T) (*execmoduletester.ExecModuleTester, *bl
 		},
 		GasLimit: 10000000,
 	}
-	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(addresses.key))
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(addresses.key), execmoduletester.WithoutGevm())
 
 	if err := m.InsertChain(testOrphanedChain); err != nil {
 		t.Fatal(err)

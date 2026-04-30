@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -77,6 +78,9 @@ type btBlock struct {
 	Rlp             string
 	UncleHeaders    []*btHeader
 	BlockAccessList btBlockAccessList `json:"blockAccessList"`
+	RlpDecoded      struct {
+		BlockAccessList btBlockAccessList `json:"blockAccessList"`
+	} `json:"rlp_decoded"`
 }
 
 // btBlockAccessList and related types for parsing block access list data from test JSON.
@@ -349,11 +353,17 @@ func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) ([]btBlo
 			}
 		}
 		var balBytes []byte
-		if len(b.BlockAccessList) > 0 {
-			bal := b.BlockAccessList.toBAL()
+		if blockAccessList := b.blockAccessList(); len(blockAccessList) > 0 {
+			bal := blockAccessList.toBAL()
 			balBytes, err = types.EncodeBlockAccessListBytes(bal)
 			if err != nil {
+				if b.BlockHeader == nil {
+					continue
+				}
 				return nil, fmt.Errorf("block #%v encode block access list: %w", cb.Number(), err)
+			}
+			if b.BlockHeader == nil && strings.Contains(b.ExpectException, "INVALID_BLOCK_ACCESS_LIST") {
+				continue
 			}
 		}
 		// RLP decoding worked, try to insert into chain:
@@ -385,6 +395,13 @@ func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) ([]btBlo
 		validBlocks = append(validBlocks, b)
 	}
 	return validBlocks, nil
+}
+
+func (bb *btBlock) blockAccessList() btBlockAccessList {
+	if len(bb.BlockAccessList) > 0 {
+		return bb.BlockAccessList
+	}
+	return bb.RlpDecoded.BlockAccessList
 }
 
 // isCanonical reports whether block is the canonical block at its height.

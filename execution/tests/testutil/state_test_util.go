@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -175,7 +176,7 @@ func (t *StateTest) Subtests() []StateSubtest {
 
 // Run executes a specific subtest and verifies the post-state and logs
 func (t *StateTest) Run(tb testing.TB, tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (*state.IntraBlockState, common.Hash, error) {
-	state, root, _, err := t.RunNoVerify(tb, tx, subtest, vmconfig, dirs)
+	state, root, logsHash, _, err := t.runNoVerify(tb, tx, subtest, vmconfig, dirs)
 	if err != nil {
 		return state, empty.RootHash, err
 	}
@@ -185,42 +186,61 @@ func (t *StateTest) Run(tb testing.TB, tx kv.TemporalRwTx, subtest StateSubtest,
 	if root != common.Hash(post.Root) {
 		return state, root, fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root)
 	}
-	if logs := rlpHash(state.Logs()); logs != common.Hash(post.Logs) {
-		return state, root, fmt.Errorf("post state logs hash mismatch: got %x, want %x", logs, post.Logs)
+	if logsHash != common.Hash(post.Logs) {
+		return state, root, fmt.Errorf("post state logs hash mismatch: got %x, want %x", logsHash, post.Logs)
 	}
 	return state, root, nil
 }
 
 // RunNoVerify runs a specific subtest and returns the statedb, post-state root and gas used.
 func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (*state.IntraBlockState, common.Hash, uint64, error) {
+	state, root, _, gasUsed, err := t.runNoVerify(tb, tx, subtest, vmconfig, dirs)
+	return state, root, gasUsed, err
+}
+
+func (t *StateTest) runNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (*state.IntraBlockState, common.Hash, common.Hash, uint64, error) {
 	config, eips, err := GetChainConfig(subtest.Fork)
 	if err != nil {
-		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
+		return nil, common.Hash{}, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
 	}
 	vmconfig.ExtraEips = eips
 	block, _, err := genesiswrite.GenesisToBlock(nil, t.genesis(config), dirs, log.Root())
 	if err != nil {
-		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
+		return nil, common.Hash{}, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
 	}
 
 	readBlockNr := block.NumberU64()
 	writeBlockNr := readBlockNr + 1
 
-	_, err = MakePreState(&chain.Rules{}, tx, t.Json.Pre, readBlockNr)
+	if useGevmEnv() {
+		vmconfig.UseGevm = true
+	}
+	if vmconfig.UseGevm {
+		err = MakePreStateGevm(tx, t.Json.Pre, readBlockNr)
+	} else {
+		_, err = MakePreState(&chain.Rules{}, tx, t.Json.Pre, readBlockNr)
+	}
 	if err != nil {
-		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
+		return nil, common.Hash{}, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
 	}
 
 	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 	if err != nil {
-		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
+		return nil, common.Hash{}, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
 	}
 	defer domains.Close()
 	blockNum, txNum := readBlockNr, uint64(1)
 
 	r := rpchelper.NewLatestStateReader(tx)
 	w := rpchelper.NewLatestStateWriter(tx, domains, (*freezeblocks.BlockReader)(nil), writeBlockNr)
-	statedb := state.New(r)
+	if vmconfig.UseGevm {
+		vmconfig.StateReader = r
+		vmconfig.StateWriter = w
+	}
+	var statedb *state.IntraBlockState
+	if !vmconfig.UseGevm {
+		statedb = state.New(r)
+	}
 
 	var baseFee *uint256.Int
 	if config.IsLondon(0) {
@@ -234,7 +254,7 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	post := t.Json.Post[subtest.Fork][subtest.Index]
 	msg, err := toMessage(t.Json.Tx, post, baseFee)
 	if err != nil {
-		return nil, common.Hash{}, 0, err
+		return nil, common.Hash{}, common.Hash{}, 0, err
 	}
 
 	// Prepare the EVM.
@@ -258,7 +278,7 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	if config.IsCancun(block.Time()) && t.Json.Env.ExcessBlobGas != nil {
 		context.BlobBaseFee, err = misc.GetBlobGasPrice(config, *t.Json.Env.ExcessBlobGas, header.Time)
 		if err != nil {
-			return nil, common.Hash{}, 0, err
+			return nil, common.Hash{}, common.Hash{}, 0, err
 		}
 	}
 	evm := vm.NewEVM(context, txContext, statedb, config, vmconfig)
@@ -267,35 +287,56 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	}
 
 	// Execute the message.
-	snapshot := statedb.PushSnapshot()
 	gaspool := new(protocol.GasPool)
 	gaspool.AddGas(block.GasLimit()).AddBlobGas(config.GetMaxBlobGasPerBlock(header.Time))
+	snapshot := -1
+	if !vmconfig.UseGevm {
+		snapshot = statedb.PushSnapshot()
+	}
 	res, err := protocol.ApplyMessage(evm, msg, gaspool, true /* refunds */, false /* gasBailout */, nil /* engine */)
 	gasUsed := uint64(0)
+	logsHash := common.Hash{}
 	if res != nil {
 		gasUsed = res.ReceiptGasUsed
+		if vmconfig.UseGevm {
+			logsHash = rlpHash(res.Logs)
+		}
 	}
-	if err != nil {
+	if err != nil && !vmconfig.UseGevm {
 		statedb.RevertToSnapshot(snapshot, err)
 	}
-	statedb.PopSnapshot(snapshot)
+	if !vmconfig.UseGevm {
+		statedb.PopSnapshot(snapshot)
+	}
 	if vmconfig.Tracer != nil && vmconfig.Tracer.OnTxEnd != nil {
 		vmconfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: gasUsed}, nil)
 	}
 
-	if err = statedb.FinalizeTx(evm.ChainRules(), w); err != nil {
-		return nil, common.Hash{}, gasUsed, err
-	}
-	if err = statedb.CommitBlock(evm.ChainRules(), w); err != nil {
-		return nil, common.Hash{}, gasUsed, err
+	if !evm.UsesGevm() {
+		if err = statedb.FinalizeTx(evm.ChainRules(), w); err != nil {
+			return nil, common.Hash{}, common.Hash{}, gasUsed, err
+		}
+		if err = statedb.CommitBlock(evm.ChainRules(), w); err != nil {
+			return nil, common.Hash{}, common.Hash{}, gasUsed, err
+		}
+		logsHash = rlpHash(statedb.Logs())
 	}
 
 	var root common.Hash
 	rootBytes, err := domains.ComputeCommitment(context2.Background(), tx, true, blockNum, txNum, "", nil)
 	if err != nil {
-		return statedb, root, res.ReceiptGasUsed, fmt.Errorf("ComputeCommitment: %w", err)
+		return statedb, root, common.Hash{}, gasUsed, fmt.Errorf("ComputeCommitment: %w", err)
 	}
-	return statedb, common.BytesToHash(rootBytes), gasUsed, nil
+	return statedb, common.BytesToHash(rootBytes), logsHash, gasUsed, nil
+}
+
+func useGevmEnv() bool {
+	switch os.Getenv("USE_GEVM") {
+	case "1", "true", "TRUE", "True", "yes", "YES", "Yes":
+		return true
+	default:
+		return false
+	}
 }
 
 func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, alloc types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
@@ -351,6 +392,56 @@ func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, alloc types.GenesisAll
 		return nil, err
 	}
 	return statedb, nil
+}
+
+func MakePreStateGevm(tx kv.TemporalRwTx, alloc types.GenesisAlloc, blockNr uint64) error {
+	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	if err != nil {
+		return err
+	}
+	defer domains.Close()
+	latestTxNum, latestBlockNum, err := domains.SeekCommitment(context.Background(), tx)
+	if err != nil {
+		return err
+	}
+
+	w := rpchelper.NewLatestStateWriter(tx, domains, (*freezeblocks.BlockReader)(nil), blockNr-1)
+	for addr, a := range alloc {
+		address := accounts.InternAddress(addr)
+		account := accounts.NewAccount()
+		account.Nonce = a.Nonce
+		if a.Balance != nil {
+			_ = account.Balance.SetFromBig(a.Balance)
+		}
+		if len(a.Code) > 0 || len(a.Storage) > 0 {
+			account.Incarnation = state.FirstContractIncarnation
+		}
+		if len(a.Code) > 0 {
+			account.CodeHash = accounts.InternCodeHash(crypto.HashData(a.Code))
+		}
+		if err := w.UpdateAccountData(address, &accounts.Account{}, &account); err != nil {
+			return err
+		}
+		if len(a.Code) > 0 {
+			if err := w.UpdateAccountCode(address, account.Incarnation, account.CodeHash, a.Code); err != nil {
+				return err
+			}
+		}
+		for k, v := range a.Storage {
+			key := accounts.InternKey(k)
+			val := uint256.NewInt(0).SetBytes(v.Bytes())
+			if err := w.WriteAccountStorage(address, account.Incarnation, key, uint256.Int{}, *val); err != nil {
+				return err
+			}
+		}
+	}
+
+	_, err = domains.ComputeCommitment(context.Background(), tx, true, latestBlockNum, latestTxNum, "flush-commitment", nil)
+	if err != nil {
+		return err
+	}
+
+	return domains.Flush(context2.Background(), tx)
 }
 
 func (t *StateTest) genesis(config *chain.Config) *types.Genesis {

@@ -17,6 +17,7 @@
 package state
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -52,6 +53,40 @@ func (r *minimalStateReader) ReadAccountIncarnation(addr accounts.Address) (uint
 func (r *minimalStateReader) SetTrace(trace bool, tracePrefix string) {}
 func (r *minimalStateReader) Trace() bool                             { return false }
 func (r *minimalStateReader) TracePrefix() string                     { return "" }
+
+type codeStateReader struct {
+	minimalStateReader
+	code []byte
+}
+
+func (r *codeStateReader) ReadAccountCode(addr accounts.Address) ([]byte, error) {
+	return r.code, nil
+}
+
+func (r *codeStateReader) ReadAccountCodeSize(addr accounts.Address) (int, error) {
+	return len(r.code), nil
+}
+
+func TestBufferedReaderHonorsEmptyCodeWrite(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0x1234"))
+	rs := &StateV3Buffered{
+		accounts:      map[accounts.Address]*bufferedAccount{},
+		accountsMutex: &sync.RWMutex{},
+	}
+	writer := NewVersionedWriteCollector(rs)
+	require.NoError(t, writer.UpdateAccountCode(addr, 1, accounts.NilCodeHash, nil))
+
+	reader := NewBufferedReader(rs, &codeStateReader{code: []byte{0xef, 0x01, 0x00, 0xaa}})
+	code, err := reader.ReadAccountCode(addr)
+	require.NoError(t, err)
+	require.Empty(t, code)
+
+	size, err := reader.ReadAccountCodeSize(addr)
+	require.NoError(t, err)
+	require.Zero(t, size)
+}
 
 // TestAsBlockAccessList_SystemAddressExcludedWithoutChanges verifies that the
 // system address (0xff...fe) is excluded from the BAL when it has no actual

@@ -228,6 +228,13 @@ func NewWithVersionMap(stateReader StateReader, mvhm *VersionMap) *IntraBlockSta
 	return ibs
 }
 
+func (sdb *IntraBlockState) StateReader() StateReader {
+	if sdb == nil {
+		return nil
+	}
+	return sdb.stateReader
+}
+
 func (sdb *IntraBlockState) ReadDuration() time.Duration {
 	return sdb.accountReadDuration + sdb.storageReadDuration + sdb.codeReadDuration
 }

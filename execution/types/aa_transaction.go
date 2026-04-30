@@ -148,6 +148,7 @@ func (tx *AccountAbstractionTransaction) Type() byte {
 
 func (tx *AccountAbstractionTransaction) AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules) (*Message, error) {
 	return &Message{
+		txType:     AccountAbstractionTxType,
 		to:         accounts.NilAddress,
 		gasPrice:   *tx.FeeCap,
 		blobHashes: []common.Hash{},

@@ -121,6 +121,22 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 					return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: encode empty block access list, block %d: %s", height, err)
 				}
 			}
+			bal, err := types.DecodeBlockAccessListBytes(balBytes)
+			if err != nil {
+				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: decode block access list, block %d: %s", height, err)
+			}
+			if err := bal.Validate(); err != nil {
+				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: invalid block access list, block %d: %w", height, err)
+			}
+			if e.config.IsAmsterdam(header.Time) {
+				if err := bal.ValidateMaxItems(header.GasLimit); err != nil {
+					return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: block access list exceeds max items, block %d: %w", height, err)
+				}
+			}
+			headerBALHash := *header.BlockAccessListHash
+			if hash := bal.Hash(); hash != headerBALHash {
+				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: invalid block access list hash, block %d: got %s expected %s", height, hash, headerBALHash)
+			}
 			if err := rawdb.WriteBlockAccessListBytes(blockOverlay, header.Hash(), height, balBytes); err != nil {
 				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBlockAccessList, block %d: %s", height, err)
 			}

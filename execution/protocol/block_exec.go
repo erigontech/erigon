@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
@@ -231,6 +232,10 @@ func ExecuteBlockEphemerally(
 var rlpHash = types.RlpHash
 
 func SysCallContract(contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine rules.EngineReader, constCall bool, vmCfg vm.Config) (result []byte, err error) {
+	return SysCallContractWithStateWriter(contract, data, chainConfig, ibs, nil, header, engine, constCall, vmCfg)
+}
+
+func SysCallContractWithStateWriter(contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, engine rules.EngineReader, constCall bool, vmCfg vm.Config) (result []byte, err error) {
 	isBor := chainConfig.Bor != nil
 	var author accounts.Address
 	if isBor {
@@ -239,10 +244,14 @@ func SysCallContract(contract accounts.Address, data []byte, chainConfig *chain.
 		author = params.SystemAddress
 	}
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, author, chainConfig)
-	return SysCallContractWithBlockContext(contract, data, chainConfig, ibs, blockContext, constCall, vmCfg)
+	return SysCallContractWithBlockContextAndStateWriter(contract, data, chainConfig, ibs, stateWriter, blockContext, constCall, vmCfg)
 }
 
 func SysCallContractWithBlockContext(contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, blockContext evmtypes.BlockContext, constCall bool, vmCfg vm.Config) (result []byte, err error) {
+	return SysCallContractWithBlockContextAndStateWriter(contract, data, chainConfig, ibs, nil, blockContext, constCall, vmCfg)
+}
+
+func SysCallContractWithBlockContextAndStateWriter(contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, stateWriter state.StateWriter, blockContext evmtypes.BlockContext, constCall bool, vmCfg vm.Config) (result []byte, err error) {
 	isBor := chainConfig.Bor != nil
 	msg := types.NewMessage(
 		params.SystemAddress,
@@ -270,6 +279,7 @@ func SysCallContractWithBlockContext(contract accounts.Address, data []byte, cha
 		txContext = NewEVMTxContext(msg)
 	}
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
+	evm.SetGevmStateWriter(stateWriter)
 	mdGas := mdgas.MdGas{
 		Regular: msg.Gas(),
 		State:   0, // state gas reservoir will consume from regular gas for sys calls
@@ -336,7 +346,7 @@ func FinalizeBlockExecution(
 	tracer *tracing.Hooks,
 ) (newBlock *types.Block, retRequests types.FlatRequests, err error) {
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-		ret, err := SysCallContract(contract, data, cc, ibs, header, engine, false /* constCall */, vm.Config{})
+		ret, err := SysCallContractWithStateWriter(contract, data, cc, ibs, stateWriter, header, engine, false /* constCall */, vm.Config{})
 		return ret, err
 	}
 
@@ -360,18 +370,218 @@ func FinalizeBlockExecution(
 func InitializeBlockExecution(engine rules.Engine, chain rules.ChainHeaderReader, header *types.Header,
 	cc *chain.Config, ibs *state.IntraBlockState, stateWriter state.StateWriter, logger log.Logger, tracer *tracing.Hooks,
 ) error {
+	if stateWriter == nil {
+		stateWriter = state.NewNoopWriter()
+	}
 	err := engine.Initialize(cc, chain, header, ibs, func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-		ret, err := SysCallContract(contract, data, cc, ibState, header, engine, constCall, vm.Config{})
+		ret, err := SysCallContractWithStateWriter(contract, data, cc, ibState, stateWriter, header, engine, constCall, vm.Config{})
 		return ret, err
 	}, logger, tracer)
 	if err != nil {
 		return err
 	}
-	if stateWriter == nil {
-		stateWriter = state.NewNoopWriter()
-	}
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, accounts.NilAddress, cc)
 	return ibs.FinalizeTx(blockContext.Rules(cc), stateWriter)
+}
+
+func InitializeBlockExecutionGevm(cc *chain.Config, engine rules.Engine, header *types.Header, stateReader state.StateReader, stateWriter state.StateWriter) error {
+	if cc == nil || engine == nil || header == nil {
+		return nil
+	}
+	if stateReader == nil || stateWriter == nil {
+		return fmt.Errorf("gevm block initialization requires state reader and writer")
+	}
+
+	if misc.IsPoSHeader(header) {
+		if cc.IsCancun(header.Time) && header.ParentBeaconBlockRoot != nil {
+			if _, err := sysCallContractGevm(params.BeaconRootsAddress, header.ParentBeaconBlockRoot.Bytes(), cc, stateReader, stateWriter, header, engine, false); err != nil {
+				log.Warn("Failed to call beacon roots contract", "err", err)
+			}
+		}
+		if cc.IsPrague(header.Time) {
+			if err := storeBlockHashEip2935Gevm(header, stateReader, stateWriter); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	if engine.Type() != chain.EtHashRules {
+		return nil
+	}
+	if cc.DAOForkBlock == nil || header.Number.Uint64() != *cc.DAOForkBlock {
+		return nil
+	}
+
+	refundOriginal, err := readAccountOrZero(stateReader, misc.DAORefundContract)
+	if err != nil {
+		return err
+	}
+	refundAccount := refundOriginal
+
+	for _, addr := range misc.DAODrainList() {
+		original, err := readAccountOrZero(stateReader, addr)
+		if err != nil {
+			return err
+		}
+		if original.Balance.IsZero() {
+			continue
+		}
+		updated := original
+		refundAccount.Balance.Add(&refundAccount.Balance, &original.Balance)
+		updated.Balance = u256.N0
+		if err := stateWriter.UpdateAccountData(addr, &original, &updated); err != nil {
+			return err
+		}
+	}
+	return stateWriter.UpdateAccountData(misc.DAORefundContract, &refundOriginal, &refundAccount)
+}
+
+func sysCallContractGevm(contract accounts.Address, data []byte, chainConfig *chain.Config, stateReader state.StateReader, stateWriter state.StateWriter, header *types.Header, engine rules.EngineReader, constCall bool) ([]byte, error) {
+	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, params.SystemAddress, chainConfig)
+	return SysCallContractWithBlockContextAndStateWriter(contract, data, chainConfig, nil, stateWriter, blockContext, constCall, vm.Config{
+		UseGevm:        true,
+		DisableGevmEnv: true,
+		StateReader:    stateReader,
+		StateWriter:    stateWriter,
+	})
+}
+
+func storeBlockHashEip2935Gevm(header *types.Header, stateReader state.StateReader, stateWriter state.StateWriter) error {
+	codeSize, err := stateReader.ReadAccountCodeSize(params.HistoryStorageAddress)
+	if err != nil {
+		return err
+	}
+	if codeSize == 0 || header.Number.Uint64() == 0 {
+		return nil
+	}
+	slotNum := (header.Number.Uint64() - 1) % params.BlockHashHistoryServeWindow
+	storageSlot := accounts.InternKey(common.BytesToHash(uint256.NewInt(slotNum).Bytes()))
+	value := *uint256.NewInt(0).SetBytes32(header.ParentHash.Bytes())
+	original, _, err := stateReader.ReadAccountStorage(params.HistoryStorageAddress, storageSlot)
+	if err != nil {
+		return err
+	}
+	account, err := readAccountOrZero(stateReader, params.HistoryStorageAddress)
+	if err != nil {
+		return err
+	}
+	return stateWriter.WriteAccountStorage(params.HistoryStorageAddress, account.GetIncarnation(), storageSlot, original, value)
+}
+
+func FinalizeBlockExecutionGevm(cc *chain.Config, engine rules.Engine, header *types.Header, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, stateReader state.StateReader, stateWriter state.StateWriter) error {
+	if cc == nil || engine == nil || header == nil || stateReader == nil || stateWriter == nil {
+		return nil
+	}
+	if misc.IsPoSHeader(header) {
+		for _, w := range withdrawals {
+			if w.Amount == 0 {
+				continue
+			}
+			amountInWei := new(uint256.Int).Mul(uint256.NewInt(w.Amount), uint256.NewInt(common.GWei))
+			original, err := readAccountOrZero(stateReader, accounts.InternAddress(w.Address))
+			if err != nil {
+				return err
+			}
+			updated := original
+			updated.Balance.Add(&updated.Balance, amountInWei)
+			if err := stateWriter.UpdateAccountData(accounts.InternAddress(w.Address), &original, &updated); err != nil {
+				return err
+			}
+		}
+
+		if cc.IsPrague(header.Time) {
+			rs := make(types.FlatRequests, 0, 3)
+			var allLogs types.Logs
+			for i, rec := range receipts {
+				if rec == nil {
+					return fmt.Errorf("nil receipt: block %d, txId %d, receipts %s", header.Number, i, receipts)
+				}
+				allLogs = append(allLogs, rec.Logs...)
+			}
+			depositReqs, err := misc.ParseDepositLogs(allLogs, cc.DepositContract)
+			if err != nil {
+				return fmt.Errorf("error: could not parse requests logs: %v", err)
+			}
+			if depositReqs != nil {
+				rs = append(rs, *depositReqs)
+			}
+			withdrawalReq, err := dequeueRequestsGevm(cc.GetWithdrawalRequestContract(), types.WithdrawalRequestType, "[EIP-7002] Syscall failure: Empty Code at WithdrawalRequestAddress=%x", cc, stateReader, stateWriter, header, engine)
+			if err != nil {
+				return err
+			}
+			if withdrawalReq != nil {
+				rs = append(rs, *withdrawalReq)
+			}
+			consolidations, err := dequeueRequestsGevm(cc.GetConsolidationRequestContract(), types.ConsolidationRequestType, "[EIP-7251] Syscall failure: Empty Code at ConsolidationRequestAddress=%x", cc, stateReader, stateWriter, header, engine)
+			if err != nil {
+				return err
+			}
+			if consolidations != nil {
+				rs = append(rs, *consolidations)
+			}
+			if header.RequestsHash != nil {
+				rh := rs.Hash()
+				if *header.RequestsHash != *rh {
+					return fmt.Errorf("error: invalid requests root hash in header, expected: %v, got:%v", header.RequestsHash, rh)
+				}
+			}
+		}
+		return nil
+	}
+
+	if engine.Type() != chain.EtHashRules {
+		return nil
+	}
+
+	rewards, err := engine.CalculateRewards(cc, header, uncles, nil)
+	if err != nil {
+		return err
+	}
+	for _, reward := range rewards {
+		if reward.Amount.IsZero() {
+			continue
+		}
+		original, err := readAccountOrZero(stateReader, reward.Beneficiary)
+		if err != nil {
+			return err
+		}
+		updated := original
+		updated.Balance.Add(&updated.Balance, &reward.Amount)
+		if err := stateWriter.UpdateAccountData(reward.Beneficiary, &original, &updated); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func dequeueRequestsGevm(contract accounts.Address, requestType byte, emptyCodeErr string, chainConfig *chain.Config, stateReader state.StateReader, stateWriter state.StateWriter, header *types.Header, engine rules.EngineReader) (*types.FlatRequest, error) {
+	codeSize, err := stateReader.ReadAccountCodeSize(contract)
+	if err != nil {
+		return nil, err
+	}
+	if codeSize == 0 {
+		return nil, fmt.Errorf(emptyCodeErr, contract)
+	}
+	res, err := sysCallContractGevm(contract, nil, chainConfig, stateReader, stateWriter, header, engine, false)
+	if err != nil {
+		return nil, err
+	}
+	if res != nil {
+		return &types.FlatRequest{Type: requestType, RequestData: res}, nil
+	}
+	return nil, nil
+}
+
+func readAccountOrZero(stateReader state.StateReader, addr accounts.Address) (accounts.Account, error) {
+	account, err := stateReader.ReadAccountData(addr)
+	if err != nil {
+		return accounts.Account{}, err
+	}
+	if account == nil {
+		return accounts.NewAccount(), nil
+	}
+	return *account, nil
 }
 
 var alwaysSkipReceiptCheck = dbg.EnvBool("EXEC_SKIP_RECEIPT_CHECK", false)

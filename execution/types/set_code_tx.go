@@ -123,6 +123,7 @@ func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *uint256.Int, rules *c
 		to = accounts.InternAddress(*tx.To)
 	}
 	msg := Message{
+		txType:           SetCodeTxType,
 		nonce:            tx.Nonce,
 		gasLimit:         tx.GasLimit,
 		gasPrice:         tx.FeeCap,

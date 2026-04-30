@@ -126,7 +126,7 @@ type Worker struct {
 	metrics *WorkerMetrics
 }
 
-func NewWorker(ctx context.Context, background bool, metrics *WorkerMetrics, chainDb kv.TemporalRoDB, in *QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *ResultsQueue, engine rules.Engine, dirs datadir.Dirs, logger log.Logger) *Worker {
+func NewWorker(ctx context.Context, background bool, metrics *WorkerMetrics, chainDb kv.TemporalRoDB, in *QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *ResultsQueue, engine rules.Engine, vmConfig vm.Config, dirs datadir.Dirs, logger log.Logger) *Worker {
 	lock := &sync.RWMutex{}
 
 	w := &Worker{
@@ -146,7 +146,7 @@ func NewWorker(ctx context.Context, background bool, metrics *WorkerMetrics, cha
 		results:     results,
 		engine:      engine,
 
-		evm: vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
+		evm: vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vmConfig),
 
 		dirs:    dirs,
 		metrics: metrics,
@@ -426,6 +426,13 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 
 	rw.resetTxNum(txTask.Version().TxNum)
 
+	type gevmStateIOSetter interface {
+		SetGevmStateIO(state.StateReader, state.StateWriter)
+	}
+	if task, ok := txTask.(gevmStateIOSetter); ok {
+		task.SetGevmStateIO(rw.stateReader, rw.stateWriter)
+	}
+
 	if err := txTask.Reset(rw.evm, rw.ibs, callTracer); err != nil {
 		return &TxResult{
 			Task: txTask,
@@ -439,7 +446,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 		result.Task = txTask
 	}
 
-	if callTracer != nil {
+	if callTracer != nil && !rw.evm.UsesGevm() {
 		result.TraceFroms = callTracer.Froms()
 		result.TraceTos = callTracer.Tos()
 	}
@@ -449,6 +456,9 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 	// writes so finalize can use them directly without IBS reconstruction.
 	if lc, ok := rw.stateWriter.(*state.LightCollector); ok {
 		result.CollectorWrites = lc.TakeWrites()
+		if rw.evm.UsesGevm() {
+			result.TxOut = result.CollectorWrites
+		}
 	}
 
 	return result
@@ -456,7 +466,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 
 func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, background bool, chainDb kv.TemporalRoDB,
 	rs *state.StateV3Buffered, stateReader state.StateReader, stateWriter state.StateWriter, in *QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis,
-	engine rules.Engine, workerCount int, metrics *WorkerMetrics, dirs datadir.Dirs, logger log.Logger) (reconWorkers []*Worker, applyWorker *Worker, rws *ResultsQueue, clear func(), wait func(), err error) {
+	engine rules.Engine, vmConfig vm.Config, workerCount int, metrics *WorkerMetrics, dirs datadir.Dirs, logger log.Logger) (reconWorkers []*Worker, applyWorker *Worker, rws *ResultsQueue, clear func(), wait func(), err error) {
 	reconWorkers = make([]*Worker, workerCount)
 
 	resultsSize := workerCount * 8
@@ -464,7 +474,7 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 
 	g, gctx := errgroup.WithContext(ctx)
 	for i := 0; i < workerCount; i++ {
-		reconWorkers[i] = NewWorker(gctx, background, metrics, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, logger)
+		reconWorkers[i] = NewWorker(gctx, background, metrics, chainDb, in, blockReader, chainConfig, genesis, rws, engine, vmConfig, dirs, logger)
 
 		if rs != nil {
 			reader := stateReader
@@ -501,7 +511,7 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 		}
 		//applyWorker.ResetTx(nil)
 	}
-	applyWorker = NewWorker(ctx, false, nil, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, logger)
+	applyWorker = NewWorker(ctx, false, nil, chainDb, in, blockReader, chainConfig, genesis, rws, engine, vmConfig, dirs, logger)
 
 	return reconWorkers, applyWorker, rws, clear, wait, err
 }

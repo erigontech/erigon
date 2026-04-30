@@ -368,6 +368,7 @@ func (tx *AccessListTx) AsMessage(s Signer, _ *uint256.Int, rules *chain.Rules) 
 	}
 
 	msg := Message{
+		txType:           AccessListTxType,
 		nonce:            tx.Nonce,
 		gasLimit:         tx.GasLimit,
 		gasPrice:         tx.GasPrice,

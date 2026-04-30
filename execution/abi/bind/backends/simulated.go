@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -106,6 +107,8 @@ func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, confi
 	genesis := types.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
 	engine := ethash.NewFaker()
 	//SimulatedBackend - it's remote blockchain node. This is reason why it has own `MockSentry` and own `DB` (even if external unit-test have one already)
+	restoreGevmEnv := maskGevmEnv()
+	defer restoreGevmEnv()
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&genesis), execmoduletester.WithEngine(engine))
 
 	backend := &SimulatedBackend{
@@ -150,6 +153,8 @@ func (b *SimulatedBackend) Close() {
 func (b *SimulatedBackend) Commit() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	restoreGevmEnv := maskGevmEnv()
+	defer restoreGevmEnv()
 	if err := b.m.InsertChain(&blockgen.ChainPack{
 		Headers:  []*types.Header{b.pendingHeader},
 		Blocks:   []*types.Block{b.pendingBlock},
@@ -167,6 +172,18 @@ func (b *SimulatedBackend) Commit() {
 	b.emptyPendingBlock()
 }
 
+func maskGevmEnv() func() {
+	value, ok := os.LookupEnv("USE_GEVM")
+	if ok {
+		_ = os.Unsetenv("USE_GEVM")
+	}
+	return func() {
+		if ok {
+			_ = os.Setenv("USE_GEVM", value)
+		}
+	}
+}
+
 // Rollback aborts all pending transactions, reverting to the last committed state.
 func (b *SimulatedBackend) Rollback() {
 	b.mu.Lock()
@@ -176,6 +193,8 @@ func (b *SimulatedBackend) Rollback() {
 }
 
 func (b *SimulatedBackend) emptyPendingBlock() {
+	restoreGevmEnv := maskGevmEnv()
+	defer restoreGevmEnv()
 	blockChain, _ := blockgen.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(int, *blockgen.BlockGen) {})
 	b.pendingBlock = blockChain.Blocks[0]
 	b.pendingReceipts = blockChain.Receipts[0]
@@ -758,7 +777,7 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 	evmContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, b.getHeader), b.m.Engine, accounts.NilAddress, b.m.ChainConfig)
 	// Create a new environment which holds all relevant information
 	// about the transaction and calling mechanisms.
-	vmEnv := vm.NewEVM(evmContext, txContext, statedb, b.m.ChainConfig, vm.Config{})
+	vmEnv := vm.NewEVM(evmContext, txContext, statedb, b.m.ChainConfig, vm.Config{DisableGevmEnv: true})
 	gasPool := new(protocol.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
 
 	return protocol.NewTxnExecutor(vmEnv, msg, gasPool).Execute(true /* refunds */, false /* gasBailout */)
@@ -792,17 +811,21 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, txn types.Transa
 		b.pendingState, state.NewNoopWriter(),
 		b.pendingHeader, txn,
 		b.pendingGasUsed,
-		vm.Config{}); err != nil {
+		vm.Config{DisableGevmEnv: true}); err != nil {
 		return err
 	}
 	protocol.SetGasUsed(b.pendingHeader, b.pendingGasUsed)
 	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))
-	chain, err := blockgen.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(number int, block *blockgen.BlockGen) {
-		for _, txn := range b.pendingBlock.Transactions() {
+	chain, err := func() (*blockgen.ChainPack, error) {
+		restoreGevmEnv := maskGevmEnv()
+		defer restoreGevmEnv()
+		return blockgen.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(number int, block *blockgen.BlockGen) {
+			for _, txn := range b.pendingBlock.Transactions() {
+				block.AddTxWithChain(b.getHeader, b.m.Engine, txn)
+			}
 			block.AddTxWithChain(b.getHeader, b.m.Engine, txn)
-		}
-		block.AddTxWithChain(b.getHeader, b.m.Engine, txn)
-	})
+		})
+	}()
 	if err != nil {
 		return err
 	}
@@ -842,12 +865,16 @@ func (b *SimulatedBackend) AdjustTime(adjustment time.Duration) error {
 		return errors.New("could not adjust time on non-empty block")
 	}
 
-	chain, err := blockgen.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(number int, block *blockgen.BlockGen) {
-		for _, txn := range b.pendingBlock.Transactions() {
-			block.AddTxWithChain(b.getHeader, b.m.Engine, txn)
-		}
-		block.OffsetTime(int64(adjustment.Seconds()))
-	})
+	chain, err := func() (*blockgen.ChainPack, error) {
+		restoreGevmEnv := maskGevmEnv()
+		defer restoreGevmEnv()
+		return blockgen.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(number int, block *blockgen.BlockGen) {
+			for _, txn := range b.pendingBlock.Transactions() {
+				block.AddTxWithChain(b.getHeader, b.m.Engine, txn)
+			}
+			block.OffsetTime(int64(adjustment.Seconds()))
+		})
+	}()
 	if err != nil {
 		return err
 	}

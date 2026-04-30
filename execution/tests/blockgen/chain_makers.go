@@ -54,6 +54,7 @@ type BlockGen struct {
 	chain       []*types.Block
 	header      *types.Header
 	stateReader state.StateReader
+	stateWriter state.StateWriter
 	ibs         *state.IntraBlockState
 	versionMap  *state.VersionMap
 	blockIO     *state.VersionedIO
@@ -141,7 +142,7 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 	if b.gasUsed == nil {
 		b.gasUsed = new(protocol.GasUsed)
 	}
-	receipt, err := protocol.ApplyTransaction(b.config, protocol.GetHashFn(b.header, getHeader), engine, accounts.InternAddress(b.header.Coinbase), b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, b.gasUsed, vm.Config{})
+	receipt, err := protocol.ApplyTransaction(b.config, protocol.GetHashFn(b.header, getHeader), engine, accounts.InternAddress(b.header.Coinbase), b.gasPool, b.ibs, b.stateWriter, b.header, txn, b.gasUsed, vm.Config{})
 	protocol.SetGasUsed(b.header, b.gasUsed)
 	if err != nil {
 		panic(err)
@@ -173,7 +174,7 @@ func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number 
 	if b.gasUsed == nil {
 		b.gasUsed = new(protocol.GasUsed)
 	}
-	receipt, err := protocol.ApplyTransaction(b.config, protocol.GetHashFn(b.header, getHeader), engine, accounts.InternAddress(b.header.Coinbase), b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, b.gasUsed, vm.Config{})
+	receipt, err := protocol.ApplyTransaction(b.config, protocol.GetHashFn(b.header, getHeader), engine, accounts.InternAddress(b.header.Coinbase), b.gasPool, b.ibs, b.stateWriter, b.header, txn, b.gasUsed, vm.Config{})
 	protocol.SetGasUsed(b.header, b.gasUsed)
 	_ = err // accept failed transactions
 	b.txs = append(b.txs, txn)
@@ -463,6 +464,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			ibs:         ibs,
 			versionMap:  versionMap,
 			stateReader: stateReader,
+			stateWriter: stateWriter,
 			config:      config,
 			engine:      engine,
 			txs:         make([]types.Transaction, 0, 1),

@@ -718,8 +718,9 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 							return nil, nil
 						}
 
+						collector := state.NewVersionedWriteCollector(pe.rs)
 						syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-							ret, err := protocol.SysCallContract(contract, data, pe.cfg.chainConfig, ibs, txTask.Header, pe.cfg.engine, false, *pe.cfg.vmConfig)
+							ret, err := protocol.SysCallContractWithStateWriter(contract, data, pe.cfg.chainConfig, ibs, collector, txTask.Header, pe.cfg.engine, false, *pe.cfg.vmConfig)
 							if err != nil {
 								return nil, err
 							}
@@ -770,7 +771,6 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 							blockExecutor.versionMap.FlushVersionedWrites(finalWrites, true, "")
 						}
 
-						collector := state.NewVersionedWriteCollector(pe.rs)
 						if err = ibs.MakeWriteSet(txTask.EvmBlockContext.Rules(txTask.Config), collector); err != nil {
 							return nil, err
 						}
@@ -854,7 +854,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 		t := &execTask{
 			Task:               txTask,
 			index:              i,
-			shouldDelayFeeCalc: true,
+			shouldDelayFeeCalc: !pe.cfg.evmConfigValue().UseGevm,
 		}
 
 		blockNum := t.Version().BlockNum
@@ -985,7 +985,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	pe.execWorkers, _, pe.rws, pe.stopWorkers, pe.waitWorkers, err = exec.NewWorkersPool(
 		execLoopCtx, nil, true, pe.cfg.db, nil, nil, nil, pe.in,
 		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine,
-		pe.workerCount+1, pe.taskExecMetrics, pe.cfg.dirs, pe.logger)
+		pe.cfg.evmConfigValue(), pe.workerCount+1, pe.taskExecMetrics, pe.cfg.dirs, pe.logger)
 
 	if err != nil {
 		return execLoopCtx, execLoopCtxCancel, err
@@ -1128,7 +1128,6 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 	result.TxIn.Delete(result.ExecutionResult.BurntContractAddress, state.AccountKey{Path: state.BalancePath})
 
 	txTask, ok := task.Task.(*exec.TxTask)
-
 	if !ok {
 		return nil, nil, nil, nil
 	}
@@ -1136,13 +1135,19 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 	rules := txTask.EvmBlockContext.Rules(txTask.Config)
 
 	if txIndex < 0 || task.IsBlockEnd() {
-		return result.finalizeSystemTx(task, txTask, rules, vm, stateReader, stateWriter)
+		if !txTask.VMConfig.UseGevm {
+			return result.finalizeSystemTx(task, txTask, rules, vm, stateReader, stateWriter)
+		}
+		return nil, result.TxIn, result.TxOut, nil
 	}
 
-	// Always use the IBS-based finalize path. The direct finalizeTx path
-	// computes fee-adjusted balances arithmetically but produces incorrect
-	// state roots for non-Amsterdam blocks. finalizeWithIBS uses full
-	// IntraBlockState reconstruction which is correct for all forks.
+	if txTask.VMConfig.UseGevm {
+		return result.finalizeTx(task, txTask, prevReceipt, nil, vm, stateReader,
+			coinbaseDelta, coinbaseDeltaIncrease, hasCoinbaseDelta,
+			burntDelta, burntDeltaIncrease, hasBurntDelta,
+			rules, txTrace, tracePrefix)
+	}
+
 	result.CollectorWrites = nil
 	return result.finalizeWithIBS(task, txTask, prevReceipt, engine, vm, stateReader, stateWriter,
 		coinbaseDelta, coinbaseDeltaIncrease, hasCoinbaseDelta,
@@ -1305,11 +1310,9 @@ func (result *execResult) finalizeWithIBS(
 	return receipt, ibs.VersionedReads(), allWrites, nil
 }
 
-// finalizeTx computes fee-adjusted balances directly on the pre-computed
-// collector writes without reconstructing the full IBS. This avoids the
-// expensive ApplyVersionedWrites → IBS stateObject creation for ALL TX writes.
-// Only the fee-calc accounts (coinbase, burnt contract) are touched.
-// finalizeTx is retained for testing and potential fallback. Production always uses finalizeWithIBS.
+// finalizeTx computes fee-adjusted balances directly on pre-computed collector
+// writes. GEVM uses this path so the parallel executor can finalize receipts and
+// versioned writes without constructing IntraBlockState.
 func (result *execResult) finalizeTx(
 	task *taskVersion,
 	txTask *exec.TxTask,
@@ -1562,8 +1565,20 @@ type taskVersion struct {
 	statsMutex *sync.Mutex
 }
 
+type underlyingTxTask interface {
+	UnderlyingTxTask() *exec.TxTask
+}
+
+func txTaskOf(task exec.Task) *exec.TxTask {
+	if task, ok := task.(underlyingTxTask); ok {
+		return task.UnderlyingTxTask()
+	}
+	return nil
+}
+
 func (ev *taskVersion) Trace() bool {
-	return ev.Task.(*exec.TxTask).Trace
+	txTask := txTaskOf(ev.Task)
+	return txTask != nil && txTask.Trace
 }
 
 func (ev *taskVersion) Execute(evm *vm.EVM,
@@ -1589,7 +1604,18 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	result = ev.execTask.Execute(evm, engine, genesis, ibs, stateWriter,
 		chainConfig, chainReader, dirs, !ev.shouldDelayFeeCalc)
 
-	if ibs.HadInvalidRead() || result.Err != nil {
+	txTask := txTaskOf(ev.Task)
+	useGevm := txTask != nil && txTask.VMConfig.UseGevm
+	if result.Err != nil {
+		if err, ok := result.Err.(protocol.ErrExecAbortError); !ok {
+			dependencyTxIndex := -1
+			if !useGevm {
+				dependencyTxIndex = ibs.DepTxIndex()
+			}
+			result.Err = protocol.ErrExecAbortError{DependencyTxIndex: dependencyTxIndex, OriginError: err}
+		}
+	}
+	if !useGevm && ibs.HadInvalidRead() {
 		if err, ok := result.Err.(protocol.ErrExecAbortError); !ok {
 			result.Err = protocol.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: err}
 		}
@@ -1616,9 +1642,20 @@ func (ev *taskVersion) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer
 	if err := ev.execTask.Reset(evm, ibs, callTracer); err != nil {
 		return err
 	}
-	ibs.SetVersionMap(ev.versionMap)
-	ibs.SetVersion(ev.version.Incarnation)
+	txTask := txTaskOf(ev.Task)
+	if txTask == nil || !txTask.VMConfig.UseGevm {
+		ibs.SetVersionMap(ev.versionMap)
+		ibs.SetVersion(ev.version.Incarnation)
+	}
 	return nil
+}
+
+func (ev *taskVersion) SetGevmStateIO(reader state.StateReader, writer state.StateWriter) {
+	if setter, ok := ev.Task.(interface {
+		SetGevmStateIO(state.StateReader, state.StateWriter)
+	}); ok {
+		setter.SetGevmStateIO(reader, writer)
+	}
 }
 
 func (ev *taskVersion) Version() state.Version {

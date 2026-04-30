@@ -74,6 +74,7 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules)
 		stxTo = accounts.InternAddress(*stx.To)
 	}
 	msg := Message{
+		txType:           BlobTxType,
 		nonce:            stx.Nonce,
 		gasLimit:         stx.GasLimit,
 		gasPrice:         stx.FeeCap,

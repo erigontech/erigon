@@ -69,6 +69,7 @@ type configSnapshot struct {
 
 	// Feature flags
 	ExperimentalBAL                  bool `json:"experimental_bal"`
+	UseGevm                          bool `json:"use_gevm"`
 	KeepExecutionProofs              bool `json:"keep_execution_proofs"`
 	ExperimentalConcurrentCommitment bool `json:"experimental_concurrent_commitment"`
 
@@ -95,6 +96,7 @@ func snapshotConfig(cfg *ethconfig.Config) configSnapshot {
 		LoopBlockLimit:                   cfg.Sync.LoopBlockLimit,
 		ExecWorkerCount:                  cfg.Sync.ExecWorkerCount,
 		ExperimentalBAL:                  cfg.ExperimentalBAL,
+		UseGevm:                          cfg.UseGevm,
 		KeepExecutionProofs:              cfg.Sync.KeepExecutionProofs,
 		ExperimentalConcurrentCommitment: cfg.Sync.ExperimentalConcurrentCommitment,
 		SnapKeepBlocks:                   cfg.Snapshot.KeepBlocks,
@@ -117,6 +119,7 @@ func TestConfigDefaults(t *testing.T) {
 	require.True(t, snap.StateStream, "state stream should be enabled by default")
 	require.True(t, snap.InternalCL, "internal CL (Caplin) is on by default")
 	require.False(t, snap.ExperimentalBAL, "experimental BAL should be off by default")
+	require.False(t, snap.UseGevm, "GEVM should be off by default")
 	require.False(t, snap.KeepExecutionProofs, "keep execution proofs should be off by default")
 
 	// Snapshot defaults
@@ -147,6 +150,13 @@ func TestConfigWithFlags(t *testing.T) {
 			args: []string{"--experimental.bal"},
 			check: func(t *testing.T, snap configSnapshot) {
 				require.True(t, snap.ExperimentalBAL)
+			},
+		},
+		{
+			name: "use GEVM",
+			args: []string{"--use-gevm"},
+			check: func(t *testing.T, snap configSnapshot) {
+				require.True(t, snap.UseGevm)
 			},
 		},
 		{
@@ -211,5 +221,6 @@ func TestConfigSnapshotStability(t *testing.T) {
 	require.True(t, snap.SnapProduceE2)
 	require.True(t, snap.SnapProduceE3)
 	require.False(t, snap.ExperimentalBAL)
+	require.False(t, snap.UseGevm)
 	require.False(t, snap.NoDownloader)
 }

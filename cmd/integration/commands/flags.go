@@ -41,6 +41,7 @@ var (
 	file                          string
 	HeimdallURL                   string
 	txtrace                       bool   // Whether to trace the execution (should only be used together with `block`)
+	useGevm                       bool   // Whether to use GEVM for EVM execution
 	chain                         string // Which chain to use (mainnet, sepolia, etc.)
 	outputCsvFile                 string
 
@@ -176,6 +177,10 @@ func withMigration(cmd *cobra.Command) {
 
 func withTxTrace(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&txtrace, "txtrace", false, "enable tracing of transactions")
+}
+
+func withUseGevm(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&useGevm, "use-gevm", false, "use GEVM as the execution EVM instead of Erigon's legacy EVM")
 }
 
 func withChain(cmd *cobra.Command) {
