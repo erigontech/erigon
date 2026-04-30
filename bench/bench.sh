@@ -176,6 +176,9 @@ echo
 echo "Starting tmux session erigon-bench-$TS..."
 
 # --- Tmux launch ---
+# Unset to allow launching a fresh session even when bench.sh itself is invoked
+# from inside an existing tmux session.
+unset TMUX TMUX_PANE
 SESSION="erigon-bench-$TS"
 write_pane_script() {
   local side=$1 dir=$2 datadir=$3
