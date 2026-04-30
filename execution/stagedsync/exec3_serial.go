@@ -20,6 +20,7 @@ import (
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/receipts"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/types"
@@ -378,14 +379,40 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 
 				chainReader := consensuschain.NewReader(se.cfg.chainConfig, se.applyTx, se.cfg.blockReader, se.logger)
 
+				// For partial blocks (resuming from snapshot boundary), reconstruct
+				// prior receipts so Finalize receives the full receipt set for requests
+				// hash computation (deposit extraction from logs). See #20452.
+				finalizeReceipts := blockReceipts
+				if startTxIndex > 0 && len(txTask.Txs) > 0 {
+					// Use the first executed user tx task (not the block-end task) to
+					// derive blockStartTxNum, since the block-end task's TxIndex is
+					// len(txs) which would compute the wrong range.
+					firstTask := tasks[0].(*exec.TxTask)
+					blockStartTxNum := firstTask.TxNum - uint64(firstTask.TxIndex)
+					reader := state.NewHistoryReaderV3(se.applyTx, blockStartTxNum)
+					priorIbs := state.New(reader)
+					defer priorIbs.Release(true)
+					priorGp := protocol.NewGasPool(txTask.Header.GasLimit, se.cfg.chainConfig.GetMaxBlobGasPerBlock(txTask.Header.Time))
+					getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
+						return se.cfg.blockReader.Header(ctx, se.applyTx, hash, number)
+					}
+					priorReceipts, priorErr := receipts.DerivePriorReceipts(ctx, se.cfg.chainConfig, se.cfg.engine, txTask.Header, txTask.Txs, startTxIndex, priorIbs, priorGp, getHeader)
+					if priorErr != nil {
+						se.logger.Warn(fmt.Sprintf("[%s] failed to reconstruct prior receipts for partial block", se.logPrefix),
+							"block", txTask.BlockNumber(), "startTxIndex", startTxIndex, "err", priorErr)
+					} else {
+						finalizeReceipts = append(priorReceipts, blockReceipts...)
+					}
+				}
+
 				if se.isBlockProduction {
 					_, _, err = se.cfg.engine.FinalizeAndAssemble(
 						se.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles,
-						blockReceipts, txTask.Withdrawals, chainReader, syscall, nil, se.logger)
+						finalizeReceipts, txTask.Withdrawals, chainReader, syscall, nil, se.logger)
 				} else {
 					_, err = se.cfg.engine.Finalize(
 						se.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles,
-						blockReceipts, txTask.Withdrawals, chainReader, syscall, false, se.logger)
+						finalizeReceipts, txTask.Withdrawals, chainReader, syscall, false, se.logger)
 				}
 
 				if err != nil {
