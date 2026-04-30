@@ -114,7 +114,7 @@ func (b *IntegrityBridge) ValidateBatch(ctx context.Context) error {
 		if !ok {
 			return fmt.Errorf("IntegrityBridge[%s]: requires concrete *freezeblocks.BlockReader", b.Check)
 		}
-		return br.IntegrityTxnID(b.FailFast)
+		return br.IntegrityTxnID(ctx, b.FailFast)
 
 	case integrity.InvertedIndex:
 		return integrity.E3EfFiles(ctx, b.DB, b.FailFast, b.FromStep)
