@@ -2267,6 +2267,28 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 	sdb.transientStorage = newTransientStorage()
 	sdb.addressAccess = make(map[accounts.Address]*accessOptions)
 	sdb.recordAccess = true
+
+	// EIP-3651 makes the coinbase warm (Shanghai+). EIP-7928 BAL must include
+	// it even when the block has no priority-fee transfer to the coinbase
+	// (i.e. nothing else in the tx writes to the coinbase). Without this, txns
+	// that produce no fee for the coinbase leave its address out of the BAL
+	// and the validator-side BAL hash diverges from the spec sidecar.
+	// recordAccess was just enabled and addressAccess freshly allocated, so
+	// MarkAddressAccess will actually take effect here (unlike when called
+	// from verifyAuthorities, which runs before Prepare).
+	if rules.IsShanghai {
+		sdb.MarkAddressAccess(coinbase, true)
+	}
+	// EIP-7702 authorities: txn_executor.verifyAuthorities calls
+	// MarkAddressAccess for each recovered authority before Prepare runs, so
+	// that mark is a no-op. Re-mark here so the authority is captured in the
+	// BAL even when the EVM never touches the authority during execution
+	// (e.g. authorization fails the nonce check after recovery).
+	if rules.IsPrague {
+		for _, addr := range authorities {
+			sdb.MarkAddressAccess(addr, false)
+		}
+	}
 	return nil
 }
 
