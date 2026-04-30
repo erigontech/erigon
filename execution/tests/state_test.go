@@ -67,6 +67,9 @@ func TestLegacyCancunState(t *testing.T) {
 	st.Slow(`^stPreCompiledContracts/precompsEIP2929Cancun`)
 	// Very slow tests
 	st.SkipLoad(`^stTimeConsuming/`)
+	// EVM perf-stress fixtures (loopMul, loopExp, performanceTester) overrun
+	// the 1h package timeout under -race instrumentation.
+	st.SkipLoad(`^VMTests/vmPerformance/`)
 
 	// Pre-existing Constantinople-only divergences from geth — see
 	// https://github.com/erigontech/erigon/issues/20894. Geth's local runner
