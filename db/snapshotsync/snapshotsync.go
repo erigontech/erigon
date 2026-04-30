@@ -262,7 +262,7 @@ func isReceiptsSegmentPruned(ctx context.Context, tx kv.RwTx, txNumsReader rawdb
 	}
 	pruneHeight := pruneMode.Blocks.PruneTo(head) // if a receipt is below this height, it is pruned
 	if pruneMode.Blocks == prune.DefaultBlocksPruneMode && cc.MergeHeight != nil {
-		pruneHeight = cc.MergeHeight.Uint64()
+		pruneHeight = *cc.MergeHeight
 	}
 
 	// We use the pre-merge data policy.

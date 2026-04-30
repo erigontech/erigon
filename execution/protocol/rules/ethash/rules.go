@@ -118,11 +118,7 @@ func (ethash *Ethash) Author(header *types.Header) (accounts.Address, error) {
 // VerifyHeader checks whether a header conforms to the consensus rules of the
 // stock Ethereum ethash engine.
 func (ethash *Ethash) VerifyHeader(chain rules.ChainHeaderReader, header *types.Header, seal bool) error {
-	// Short circuit if the header is known, or its parent not
 	number := header.Number.Uint64()
-	if chain.GetHeader(header.Hash(), number) != nil {
-		return nil
-	}
 	if number == 0 {
 		return nil
 	}
@@ -415,7 +411,7 @@ func (ethash *Ethash) Prepare(chain rules.ChainHeaderReader, header *types.Heade
 
 func (ethash *Ethash) Initialize(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header,
 	state *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) error {
-	if config.DAOForkBlock != nil && header.Number.CmpBig(config.DAOForkBlock) == 0 {
+	if config.DAOForkBlock != nil && header.Number.Uint64() == *config.DAOForkBlock {
 		if err := misc.ApplyDAOHardFork(state); err != nil {
 			return err
 		}

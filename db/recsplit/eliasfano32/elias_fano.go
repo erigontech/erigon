@@ -22,12 +22,17 @@ import (
 	"io"
 	"math"
 	"math/bits"
+	"os"
 	"sort"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/edsrzf/mmap-go"
+
+	"github.com/erigontech/erigon/db/recsplit/efcommon"
 
 	"github.com/erigontech/erigon/common/bitutil"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/kv/stream"
 )
 
@@ -61,6 +66,34 @@ type EliasFano struct {
 	wordsUpperBits int
 }
 
+// OffHeapBuilder wraps *EliasFano with a mmapped temp file as the backing
+// buffer. OS resources (file descriptor + mmap) live here rather than on
+// EliasFano so heap-backed EliasFano carries no extra overhead.
+type OffHeapBuilder struct {
+	*EliasFano
+	backingMmap mmap.MMap
+	backingFile *os.File
+}
+
+func (b *OffHeapBuilder) Close() {
+	if b.backingMmap != nil {
+		_ = b.backingMmap.Unmap()
+		b.backingMmap = nil
+		// Nil the sub-slices so any use-after-Close panics immediately
+		// instead of silently reading unmapped memory.
+		b.EliasFano.data = nil
+		b.EliasFano.lowerBits = nil
+		b.EliasFano.upperBits = nil
+		b.EliasFano.jump = nil
+	}
+	if b.backingFile != nil {
+		name := b.backingFile.Name()
+		_ = b.backingFile.Close()
+		dir.RemoveFile(name)
+		b.backingFile = nil
+	}
+}
+
 func NewEliasFano(count uint64, maxOffset uint64) *EliasFano {
 	if count == 0 {
 		panic(fmt.Sprintf("too small count: %d", count))
@@ -73,6 +106,52 @@ func NewEliasFano(count uint64, maxOffset uint64) *EliasFano {
 	ef.u = maxOffset + 1
 	ef.wordsUpperBits = ef.deriveFields()
 	return ef
+}
+
+// fallocate extends f to size bytes and forces disk-block allocation. On
+// sparse-file filesystems (Linux ext4) an RDWR mmap write to an unallocated
+// region raises SIGBUS; this write surfaces ENOSPC as a normal error instead.
+func fallocate(f *os.File, size int64) error {
+	_, err := f.WriteAt([]byte{0}, size-1)
+	return err
+}
+
+// NewEliasFanoOffHeap is like NewEliasFano but backs the data buffer with a
+// mmapped temp file. Use when the buffer would be too large for the Go heap
+// (multi-GB EFs during snapshot builds). Caller MUST Close() after Write.
+func NewEliasFanoOffHeap(count uint64, maxOffset uint64, tmpFilePath string) (*OffHeapBuilder, error) {
+	if count == 0 {
+		panic(fmt.Sprintf("too small count: %d", count))
+	}
+	ef := &EliasFano{
+		count:     count - 1,
+		maxOffset: maxOffset,
+	}
+	ef.u = maxOffset + 1
+	_, _, _, totalWords := ef.computeLayout()
+	sizeBytes := int64(totalWords) * uint64Size
+	if sizeBytes > math.MaxInt {
+		return nil, fmt.Errorf("elias fano size %d exceeds platform mmap limit", sizeBytes)
+	}
+
+	f, err := dir.CreateTempWithExtension(tmpFilePath, "ef.tmp")
+	if err != nil {
+		return nil, fmt.Errorf("create ef tmp file %q: %w", tmpFilePath, err)
+	}
+	if err := fallocate(f, sizeBytes); err != nil {
+		f.Close()
+		dir.RemoveFile(f.Name())
+		return nil, fmt.Errorf("pre-allocate ef tmp file: %w", err)
+	}
+	m, err := mmap.MapRegion(f, int(sizeBytes), mmap.RDWR, 0, 0)
+	if err != nil {
+		f.Close()
+		dir.RemoveFile(f.Name())
+		return nil, fmt.Errorf("mmap ef tmp file: %w", err)
+	}
+	ef.data = unsafe.Slice((*uint64)(unsafe.Pointer(&m[0])), totalWords)
+	ef.wordsUpperBits = ef.deriveFields()
+	return &OffHeapBuilder{EliasFano: ef, backingMmap: m, backingFile: f}, nil
 }
 
 func (ef *EliasFano) Size() datasize.ByteSize { return datasize.ByteSize(len(ef.data) * 8) }
@@ -96,17 +175,22 @@ func (ef *EliasFano) jumpSizeWords() int {
 	return int(size)
 }
 
-func (ef *EliasFano) deriveFields() int {
-	if ef.u/(ef.count+1) == 0 {
-		ef.l = 0
-	} else {
-		ef.l = 63 ^ uint64(bits.LeadingZeros64(ef.u/(ef.count+1))) // pos of first non-zero bit
+// computeLayout returns the bit-width l and the word counts that partition ef.data.
+// Shared by deriveFields (heap path) and NewEliasFanoOffHeap (mmap pre-sizing).
+func (ef *EliasFano) computeLayout() (l uint64, wordsLowerBits, wordsUpperBits, totalWords int) {
+	if ef.u/(ef.count+1) != 0 {
+		l = 63 ^ uint64(bits.LeadingZeros64(ef.u/(ef.count+1)))
 	}
+	wordsLowerBits = int(((ef.count+1)*l+63)/64 + 1)
+	wordsUpperBits = int((ef.count + 1 + (ef.u >> l) + 63) / 64)
+	totalWords = wordsLowerBits + wordsUpperBits + ef.jumpSizeWords()
+	return
+}
+
+func (ef *EliasFano) deriveFields() int {
+	l, wordsLowerBits, wordsUpperBits, totalWords := ef.computeLayout()
+	ef.l = l
 	ef.lowerBitsMask = (uint64(1) << ef.l) - 1
-	wordsLowerBits := int(((ef.count+1)*ef.l+63)/64 + 1)
-	wordsUpperBits := int((ef.count + 1 + (ef.u >> ef.l) + 63) / 64)
-	jumpWords := ef.jumpSizeWords()
-	totalWords := wordsLowerBits + wordsUpperBits + jumpWords
 	//fmt.Printf("EF: %d, %d,%d,%d\n", totalWords, wordsLowerBits, wordsUpperBits, jumpWords)
 	if cap(ef.data) < totalWords {
 		alloc := totalWords
@@ -270,11 +354,7 @@ func (ef *EliasFano) searchForward(v uint64) (nextV uint64, nextI uint64, ok boo
 	//   - 63% have upper(0) >= hi
 	found := ef.upper(0) >= hi // fast-lane
 	if !found {
-		// interpolation-sort showed good results, but keeping `sort.Sort` for simplicity now
-		i := sort.Search(int(ef.count), func(i int) bool {
-			return ef.upper(uint64(i+1)) >= hi
-		})
-		lo = uint64(i + 1)
+		lo = ef.searchUpperForward(hi)
 	}
 	for j := lo; j <= ef.count; j++ {
 		val, _, _, _, _ := ef.get(j)
@@ -284,6 +364,104 @@ func (ef *EliasFano) searchForward(v uint64) (nextV uint64, nextI uint64, ok boo
 	}
 	return 0, 0, false
 }
+
+// searchUpperForward finds the first index j in [1, count] where upper(j) >= hi.
+// Interpolation guess + exponential search to find a tight bracket, then binary search.
+// For uniform data the guess is nearly exact: 1–3 upper() calls.
+// For non-uniform data degrades gracefully to ~binary search.
+func (ef *EliasFano) searchUpperForward(hi uint64) uint64 {
+	lo, hiIdx := uint64(0), ef.count
+	if maxUpper := ef.u >> ef.l; maxUpper > 0 {
+		guessHi, guessLo := bits.Mul64(hi, ef.count)
+		guess, _ := bits.Div64(guessHi, guessLo, maxUpper)
+		guess = min(guess, ef.count)
+		if guess == 0 {
+			guess = 1
+		}
+		if ef.upper(guess) >= hi {
+			// bracket backward: find lo where upper(lo) < hi
+			hiIdx = guess
+			for step := uint64(1); step <= guess; step <<= 1 {
+				if ef.upper(guess-step) < hi {
+					lo = guess - step
+					break
+				}
+				hiIdx = guess - step // tighten upper bound
+			}
+		} else {
+			// bracket forward: find hiIdx where upper(hiIdx) >= hi
+			lo = guess
+			for step := uint64(1); ; step <<= 1 {
+				pos := guess + step
+				if pos >= ef.count {
+					break
+				}
+				if ef.upper(pos) >= hi {
+					hiIdx = pos
+					break
+				}
+				lo = pos // tighten lower bound
+			}
+		}
+	}
+	n := int(hiIdx - lo)
+	if n <= 0 {
+		return lo + 1
+	}
+	i := sort.Search(n, func(i int) bool {
+		return ef.upper(lo+uint64(i)+1) >= hi
+	})
+	return lo + uint64(i) + 1
+}
+
+// searchUpperReverse finds the offset from count where upper(count-offset) <= hi.
+func (ef *EliasFano) searchUpperReverse(hi uint64) uint64 {
+	lo, hiIdx := uint64(0), ef.count
+	if maxUpper := ef.u >> ef.l; maxUpper > 0 && hi < maxUpper {
+		// guess how far back from count the answer is
+		rem := maxUpper - hi
+		guessHi, guessLo := bits.Mul64(rem, ef.count)
+		guess, _ := bits.Div64(guessHi, guessLo, maxUpper)
+		guess = min(guess, ef.count)
+		if guess == 0 {
+			guess = 1
+		}
+		if ef.upper(ef.count-guess) <= hi {
+			// bracket backward (toward count): find lo where upper(count-lo) > hi
+			hiIdx = guess
+			for step := uint64(1); step <= guess; step <<= 1 {
+				if ef.upper(ef.count-guess+step) > hi {
+					lo = guess - step
+					break
+				}
+				hiIdx = guess - step // tighten upper bound
+			}
+		} else {
+			// bracket forward (away from count)
+			lo = guess
+			for step := uint64(1); ; step <<= 1 {
+				pos := guess + step
+				if pos >= ef.count {
+					break
+				}
+				if ef.upper(ef.count-pos) <= hi {
+					hiIdx = pos
+					break
+				}
+				lo = pos // tighten lower bound
+			}
+		}
+	}
+	n := int(hiIdx - lo)
+	if n <= 0 {
+		return lo + 1
+	}
+	i := sort.Search(n+1, func(i int) bool {
+		return ef.upper(ef.count-lo-uint64(i)) <= hi
+	})
+	return lo + uint64(i)
+}
+
 func (ef *EliasFano) searchReverse(v uint64) (nextV uint64, nextI uint64, ok bool) {
 	if v == 0 {
 		return 0, 0, ef.Min() == 0 // .Max() touching `mmap`
@@ -301,10 +479,7 @@ func (ef *EliasFano) searchReverse(v uint64) (nextV uint64, nextI uint64, ok boo
 
 	found := ef.upper(ef.count) <= hi // fast-lane. 60% hit-rate
 	if !found {
-		i := sort.Search(int(ef.count+1), func(i int) bool {
-			return ef.upper(ef.count-uint64(i)) <= hi
-		})
-		lo = uint64(i)
+		lo = ef.searchUpperReverse(hi)
 	}
 	for j := lo; j <= ef.count; j++ {
 		idx := ef.count - j
@@ -666,37 +841,17 @@ type DoubleEliasFano struct {
 }
 
 func (ef *DoubleEliasFano) deriveFields() (int, int) {
-	if ef.uPosition/(ef.numBuckets+1) == 0 {
-		ef.lPosition = 0
-	} else {
-		ef.lPosition = 63 ^ uint64(bits.LeadingZeros64(ef.uPosition/(ef.numBuckets+1)))
-	}
-	if ef.uCumKeys/(ef.numBuckets+1) == 0 {
-		ef.lCumKeys = 0
-	} else {
-		ef.lCumKeys = 63 ^ uint64(bits.LeadingZeros64(ef.uCumKeys/(ef.numBuckets+1)))
-	}
-	//fmt.Printf("uPosition = %d, lPosition = %d, uCumKeys = %d, lCumKeys = %d\n", ef.uPosition, ef.lPosition, ef.uCumKeys, ef.lCumKeys)
-	if ef.lCumKeys*2+ef.lPosition > 56 {
-		panic(fmt.Sprintf("ef.lCumKeys (%d) * 2 + ef.lPosition (%d) > 56", ef.lCumKeys, ef.lPosition))
-	}
-	ef.lowerBitsMaskCumKeys = (uint64(1) << ef.lCumKeys) - 1
-	ef.lowerBitsMaskPosition = (uint64(1) << ef.lPosition) - 1
-	wordsLowerBits := int(((ef.numBuckets+1)*(ef.lCumKeys+ef.lPosition)+63)/64 + 1)
-	wordsCumKeys := int((ef.numBuckets + 1 + (ef.uCumKeys >> ef.lCumKeys) + 63) / 64)
-	wordsPosition := int((ef.numBuckets + 1 + (ef.uPosition >> ef.lPosition) + 63) / 64)
-	jumpWords := ef.jumpSizeWords()
-	totalWords := wordsLowerBits + wordsCumKeys + wordsPosition + jumpWords
-	if ef.data == nil {
-		ef.data = make([]uint64, totalWords)
-	} else {
-		ef.data = ef.data[:totalWords]
-	}
-	ef.lowerBits = ef.data[:wordsLowerBits]
-	ef.upperBitsCumKeys = ef.data[wordsLowerBits : wordsLowerBits+wordsCumKeys]
-	ef.upperBitsPosition = ef.data[wordsLowerBits+wordsCumKeys : wordsLowerBits+wordsCumKeys+wordsPosition]
-	ef.jump = ef.data[wordsLowerBits+wordsCumKeys+wordsPosition:]
-	return wordsCumKeys, wordsPosition
+	r := efcommon.DeriveDoubleEFFields(ef.numBuckets, ef.uCumKeys, ef.uPosition, ef.data, ef.jumpSizeWords())
+	ef.lPosition = r.LPosition
+	ef.lCumKeys = r.LCumKeys
+	ef.lowerBitsMaskCumKeys = r.LowerBitsMaskCumKeys
+	ef.lowerBitsMaskPosition = r.LowerBitsMaskPosition
+	ef.data = r.Data
+	ef.lowerBits = r.LowerBits
+	ef.upperBitsCumKeys = r.UpperBitsCumKeys
+	ef.upperBitsPosition = r.UpperBitsPosition
+	ef.jump = r.Jump
+	return r.WordsCumKeys, r.WordsPosition
 }
 
 // Build construct double Elias Fano index for two given sequences

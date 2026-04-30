@@ -161,7 +161,7 @@ func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.R
 }
 
 func (a *ProtoForkable) DataWriter(ctx context.Context, f *seg.Compressor, compress bool) *seg.PagedWriter {
-	return seg.NewPagedWriter(ctx, seg.NewWriter(f, a.cfg.Compression), compress)
+	return seg.NewPagedWriter(ctx, seg.NewWriter(f, a.cfg.Compression), compress, 1)
 }
 
 func (a *ProtoForkable) DataReader(f *seg.Decompressor, compress bool) *seg.Reader {
@@ -275,15 +275,15 @@ func (a *ProtoForkable) BeginFilesRo() *ProtoForkableTx {
 // take dirtyFiles lock before using this
 func (a *ProtoForkable) DebugBeginDirtyFilesRo() *forkableDirtyFilesRoTx {
 	var files []*FilesItem
-	a.snaps.dirtyFiles.Walk(func(items []*FilesItem) bool {
-		files = append(files, items...)
-		for _, item := range items {
-			if !item.frozen {
-				item.refcount.Add(1)
-			}
+	iter := a.snaps.dirtyFiles.Iter()
+	defer iter.Release()
+	for ok := iter.First(); ok; ok = iter.Next() {
+		item := iter.Item()
+		files = append(files, item)
+		if !item.frozen {
+			item.refcount.Add(1)
 		}
-		return true
-	})
+	}
 	return &forkableDirtyFilesRoTx{
 		p:     a,
 		files: files,

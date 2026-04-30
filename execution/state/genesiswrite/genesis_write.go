@@ -24,7 +24,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 	"runtime"
 	"slices"
 	"strings"
@@ -94,7 +93,7 @@ func CommitGenesisBlock(db kv.RwDB, genesis *types.Genesis, chainName string, di
 	return CommitGenesisBlockWithOverride(db, genesis, chainName, nil, nil, false, dirs, logger)
 }
 
-func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, chainName string, overrideOsakaTime, overrideAmsterdamTime *big.Int, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
+func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, chainName string, overrideOsakaTime, overrideAmsterdamTime *uint64, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return nil, nil, err
@@ -124,7 +123,7 @@ func configOrDefault(g *types.Genesis, chainName string, genesisHash common.Hash
 	return chain.AllProtocolChanges
 }
 
-func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, overrideOsakaTime, overrideAmsterdamTime *big.Int, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
+func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, overrideOsakaTime, overrideAmsterdamTime *uint64, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
 	if err := rawdb.WriteGenesisIfNotExist(tx, genesis); err != nil {
 		return nil, nil, err
 	}
@@ -132,6 +131,11 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 	var storedBlock *types.Block
 	if genesis != nil && genesis.Config == nil {
 		return chain.AllProtocolChanges, nil, types.ErrGenesisNoConfig
+	}
+	if genesis != nil && genesis.Config != nil {
+		if err := genesis.Config.Rules.Validate(); err != nil {
+			return nil, nil, err
+		}
 	}
 	// Just commit the new block if there is no stored genesis block.
 	storedHash, storedErr := rawdb.ReadCanonicalHash(tx, 0)
@@ -209,7 +213,14 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 	if genesis == nil {
 		if !keepStoredChainConfig {
 			spec, err := chainspec.ChainSpecByName(chainName)
-			keepStoredChainConfig = err != nil || spec.GenesisHash != storedHash
+			if err != nil {
+				// Unknown chain name — always keep stored config
+				keepStoredChainConfig = true
+			} else if spec.GenesisHash != (common.Hash{}) && spec.GenesisHash != storedHash {
+				// Known chain name but genesis hash doesn't match (e.g. custom
+				// genesis with chainId 1 in Hive tests) — keep stored config
+				keepStoredChainConfig = true
+			}
 		}
 		if keepStoredChainConfig {
 			newCfg = storedCfg

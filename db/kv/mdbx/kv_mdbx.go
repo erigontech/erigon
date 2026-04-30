@@ -46,7 +46,10 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
+
+var dbRoTxOverloaded = metrics.GetOrCreateCounter(`db_rotx_overloaded_total`)
 
 func init() {
 	mdbx.MapFullErrorMessage += " You can try remove the database files (e.g., by running rm -rf /path/to/db)"
@@ -352,7 +355,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	}
 
 	if opts.roTxsLimiter == nil {
-		targetSemCount := int64(runtime.GOMAXPROCS(-1) * 16)
+		targetSemCount := int64(9_000)
 		opts.roTxsLimiter = semaphore.NewWeighted(targetSemCount) // 1 less than max to allow unlocking to happen
 	}
 
@@ -582,8 +585,13 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		return nil, errors.New("db closed")
 	}
 
-	// will return nil err if context is cancelled (may appear to acquire the semaphore)
-	if semErr := db.roTxsLimiter.Acquire(ctx, 1); semErr != nil {
+	if kv.IsNonBlockingAcquire(ctx) {
+		if !db.roTxsLimiter.TryAcquire(1) {
+			db.trackTxEnd()
+			dbRoTxOverloaded.Inc()
+			return nil, kv.ErrReadTxLimitExceeded
+		}
+	} else if semErr := db.roTxsLimiter.Acquire(ctx, 1); semErr != nil {
 		db.trackTxEnd()
 		return nil, fmt.Errorf("mdbx.MdbxKV.BeginRo: roTxsLimiter error %w", semErr)
 	}
@@ -825,7 +833,7 @@ func NewAsyncTx(tx kv.Tx, queueSize int) *asyncTx {
 }
 
 func (a *asyncTx) Apply(ctx context.Context, f func(kv.Tx) error) error {
-	rc := make(chan error)
+	rc := make(chan error, 1)
 	a.requests <- &applyTx{rc, a.Tx, f}
 	select {
 	case err := <-rc:
@@ -849,7 +857,7 @@ func NewAsyncRwTx(tx kv.RwTx, queueSize int) *asyncRwTx {
 }
 
 func (a *asyncRwTx) Apply(ctx context.Context, f func(kv.Tx) error) error {
-	rc := make(chan error)
+	rc := make(chan error, 1)
 	a.requests <- &applyTx{rc, a.RwTx, f}
 	select {
 	case err := <-rc:
@@ -860,7 +868,7 @@ func (a *asyncRwTx) Apply(ctx context.Context, f func(kv.Tx) error) error {
 }
 
 func (a *asyncRwTx) ApplyRw(ctx context.Context, f func(kv.RwTx) error) error {
-	rc := make(chan error)
+	rc := make(chan error, 1)
 	a.requests <- &applyRwTx{rc, a.RwTx, f}
 	select {
 	case err := <-rc:
@@ -1229,14 +1237,9 @@ func (tx *MdbxTx) DBSize() (uint64, error) {
 
 func (tx *MdbxTx) RwCursor(bucket string) (kv.RwCursor, error) {
 	b := tx.db.buckets[bucket]
-	if b.AutoDupSortKeysConversion {
-		return tx.stdCursor(bucket)
-	}
-
 	if b.Flags&kv.DupSort != 0 {
 		return tx.RwCursorDupSort(bucket)
 	}
-
 	return tx.stdCursor(bucket)
 }
 
@@ -1607,7 +1610,16 @@ func (c *MdbxDupSortCursor) PutNoDupData(k, v []byte) error {
 	if err := c.c.Put(k, v, mdbx.NoDupData); err != nil {
 		return fmt.Errorf("label: %s, in PutNoDupData: %w", c.label, err)
 	}
+	return nil
+}
 
+// PutCurrent replaces the current dup entry in-place. The cursor must be
+// positioned (e.g. via SeekBothRange) on the entry to replace.
+// Saves one CGo call vs DeleteCurrent()+Put() for the update path.
+func (c *MdbxDupSortCursor) PutCurrent(k, v []byte) error {
+	if err := c.c.PutCurrent(k, v); err != nil {
+		return fmt.Errorf("label: %s, in PutCurrent: %w", c.label, err)
+	}
 	return nil
 }
 

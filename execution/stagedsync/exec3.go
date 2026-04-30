@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -198,24 +199,22 @@ func ExecV3(ctx context.Context,
 
 	doms.EnableParaTrieDB(cfg.db)
 	doms.EnableTrieWarmup(true)
-	// Do it only for chain-tip blocks!
-	doms.EnableWarmupCache(!isApplyingBlocks)
+	doms.EnableWarmupCache(true)
 	postValidator := newBlockPostExecutionValidator()
 	doms.SetDeferCommitmentUpdates(false)
 	if !isApplyingBlocks {
 		postValidator = newParallelBlockPostExecutionValidator()
 	}
-	// Enable deferred commitment updates for fork validation (both serial and parallel).
-	// Deferred updates batch commitment calculations to block boundaries rather than
-	// per-transaction, significantly reducing re-org validation overhead.
-	if isForkValidation {
-		doms.SetDeferCommitmentUpdates(true)
-	}
+	// Enable deferred commitment updates. Deferred updates batch commitment
+	// branch writes to a queue during fold(), avoiding per-write map insertion
+	// overhead. The queue is flushed into the correct block's changeset by
+	// SharedDomains.ComputeCommitment before the next block's commitment runs.
+	doms.SetDeferCommitmentUpdates(true)
 	defer doms.SetDeferCommitmentUpdates(false)
 	// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
 	// can't use OS-level ReadAhead - because Data >> RAM
 	// it also warmsup state a bit - by touching senders/coninbase accounts and code
-	if isApplyingBlocks {
+	if !execStage.CurrentSyncCycle.IsInitialCycle && isApplyingBlocks {
 		var clean func()
 
 		readAhead, clean = exec.BlocksReadAhead(ctx, 2, cfg.db, cfg.engine, cfg.blockReader)
@@ -237,7 +236,8 @@ func ExecV3(ctx context.Context,
 				hooks:             hooks,
 				postValidator:     postValidator,
 			},
-			workerCount: cfg.syncCfg.ExecWorkerCount,
+			workerCount:  cfg.syncCfg.ExecWorkerCount,
+			blockApplied: make(chan struct{}, 1),
 		}
 		pe.lastCommittedTxNum.Store(inputTxNum)
 		// blockNum is the next block to execute (from doms.BlockNum()), so the last
@@ -342,6 +342,13 @@ func ExecV3(ctx context.Context,
 
 	if false && !isForkValidation {
 		dumpPlainStateDebug(applyTx, doms)
+	}
+
+	// If execution already failed with ErrInvalidBlock, skip the step-frozen check
+	// and propagate the original error directly. The step-frozen check only makes
+	// sense when execution succeeded partially and we need to persist the commitment.
+	if execErr != nil && errors.Is(execErr, rules.ErrInvalidBlock) {
+		return execErr
 	}
 
 	lastCommitedStep := kv.Step((lastCommittedTxNum) / doms.StepSize())
@@ -587,6 +594,10 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 			}
 			go warmTxsHashes(b)
 
+			if stateCache := te.doms.GetStateCache(); stateCache != nil {
+				stateCache.ValidateAndPrepare(b.ParentHash(), b.Hash())
+			}
+
 			var dbBAL types.BlockAccessList
 			var data []byte
 			// Use a fresh read tx (not tx.Apply) so we can see BAL data
@@ -598,7 +609,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 			}); err != nil {
 				return err
 			}
-			if len(data) > 0 {
+			if len(data) > 0 && !dbg.IgnoreBAL {
 				dbBAL, err = types.DecodeBlockAccessListBytes(data)
 				if err != nil {
 					return fmt.Errorf("decode block access list: %w", err)
@@ -610,21 +621,32 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 
 			txs := b.Transactions()
 			header := b.HeaderNoCopy()
-			getHashFnMutex := sync.Mutex{}
 
-			blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, func(hash common.Hash, number uint64) (h *types.Header, err error) {
-				getHashFnMutex.Lock()
-				defer getHashFnMutex.Unlock()
-				err = tx.Apply(ctx, func(tx kv.Tx) (err error) {
-					h, err = te.cfg.blockReader.Header(ctx, tx, hash, number)
+			// BLOCKHASH looks back at most 256 blocks. During initial sync the
+			// headers for recently-inserted blocks live in the in-memory block
+			// overlay (see execmodule/inserters.go) and are not yet in the main
+			// DB; read them via an OverlayReadView so that the walk-back used by
+			// GetHashFn can find every header between (blockNum-256) and
+			// (blockNum-1).
+			blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
+				if overlay := te.doms.BlockOverlay(); overlay != nil {
+					roTx, err := te.cfg.db.BeginRo(ctx) //nolint:gocritic
+					if err != nil {
+						return nil, err
+					}
+					defer roTx.Rollback()
+					view := overlay.NewReadView(roTx)
+					return te.cfg.blockReader.Header(ctx, view, hash, number)
+				}
+				var h *types.Header
+				if err := te.cfg.db.View(ctx, func(roTx kv.Tx) error {
+					var err error
+					h, err = te.cfg.blockReader.Header(ctx, roTx, hash, number)
 					return err
-				})
-
-				if err != nil {
+				}); err != nil {
 					return nil, err
 				}
-
-				return h, err
+				return h, nil
 			}), te.cfg.engine, te.cfg.author, te.cfg.chainConfig)
 
 			var txTasks []exec.Task
@@ -827,16 +849,14 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 
 }
 
-func shouldGenerateChangeSets(cfg ExecuteBlockCfg, blockNum, maxBlockNum uint64, initialCycle bool) bool {
+func shouldGenerateChangeSets(cfg ExecuteBlockCfg, blockNum, maxBlockNum uint64) bool {
 	if cfg.syncCfg.AlwaysGenerateChangesets {
 		return true
 	}
 	if blockNum < cfg.blockReader.FrozenBlocks() {
 		return false
 	}
-	if initialCycle {
-		return false
-	}
-	// once past the initial cycle, make sure to generate changesets for the last blocks that fall in the reorg window
+	// Generate changesets for blocks within the reorg window of the batch end,
+	// so the node can handle reorgs at the tip.
 	return blockNum+cfg.syncCfg.MaxReorgDepth >= maxBlockNum
 }

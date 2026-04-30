@@ -54,9 +54,16 @@ func TestServerRegisterName(t *testing.T) {
 		t.Fatalf("Expected service calc to be registered")
 	}
 
-	wantCallbacks := 10
+	wantCallbacks := 11
 	if len(svc.callbacks) != wantCallbacks {
 		t.Errorf("Expected %d callbacks for service 'service', got %d", wantCallbacks, len(svc.callbacks))
+	}
+}
+
+func TestNewServerClampsZeroBatchConcurrency(t *testing.T) {
+	server := NewServer(0, false /* traceRequests */, false /* debugSingleRequests */, true, log.New(), 100)
+	if server.batchConcurrency != minBatchConcurrency {
+		t.Fatalf("expected batch concurrency %d, got %d", minBatchConcurrency, server.batchConcurrency)
 	}
 }
 

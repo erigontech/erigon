@@ -107,7 +107,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 	}
 	engine := api.engine()
 
-	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
+	err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), blockNumber)
 	if err != nil {
 		return err
 	}
@@ -115,6 +115,20 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 	ibs, blockCtx, _, rules, signer, err := transactions.ComputeBlockContext(ctx, engine, block.HeaderNoCopy(), chainConfig, api._blockReader, api.stateCache, api._txNumReader, tx, 0)
 	if err != nil {
 		return err
+	}
+
+	var precompiles vm.PrecompiledContracts
+	if config.BlockOverrides != nil {
+		if err := config.BlockOverrides.Override(&blockCtx); err != nil {
+			return err
+		}
+	}
+	if config.StateOverrides != nil {
+		rules = blockCtx.Rules(chainConfig)
+		precompiles = vm.ActivePrecompiledContracts(rules)
+		if err := config.StateOverrides.Override(ibs, precompiles, rules); err != nil {
+			return err
+		}
 	}
 
 	stream.WriteArrayStart()
@@ -192,7 +206,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 			gasUsed += _gasUsed
 		} else {
 			var _gasUsed uint64
-			_gasUsed, err = transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.Header().Number, block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout, nil)
+			_gasUsed, err = transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.Header().Number, block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout, precompiles)
 			gasUsed += _gasUsed
 		}
 		if err == nil {
@@ -243,26 +257,23 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 	}
 	// Retrieve the transaction and assemble its EVM context
 	var isBorStateSyncTxn bool
-	blockNum, _, ok, err := api.txnLookup(ctx, tx, hash)
+	blockNum, txNum, ok, err := api.txnLookup(ctx, tx, hash)
 	if err != nil {
 		return err
 	}
 
 	if !ok {
 		if chainConfig.Bor == nil {
-			stream.WriteNil()
-			return nil
+			return fmt.Errorf("transaction not found")
 		}
 
 		// otherwise this may be a bor state sync transaction - check
 		blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, hash)
 		if err != nil {
-			stream.WriteNil()
 			return err
 		}
 		if !ok {
-			stream.WriteNil()
-			return nil
+			return fmt.Errorf("transaction not found")
 		}
 		if config == nil || config.BorTraceEnabled == nil || !*config.BorTraceEnabled {
 			stream.WriteEmptyArray() // matches maticnetwork/bor API behaviour for consistency
@@ -291,21 +302,22 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 		stream.WriteNil()
 		return nil
 	}
+
 	var txnIndex int
-	var txn types.Transaction
-	for i := 0; i < block.Transactions().Len() && !isBorStateSyncTxn; i++ {
-		transaction := block.Transactions()[i]
-		if transaction.Hash() == hash {
-			txnIndex = i
-			txn = transaction
-			break
+	if isBorStateSyncTxn {
+		// bor state sync txn is appended at the end of the block
+		txnIndex = block.Transactions().Len()
+	} else {
+		txNumMin, err := api._txNumReader.Min(ctx, tx, blockNum)
+		if err != nil {
+			return err
 		}
-	}
-	if txn == nil {
-		if isBorStateSyncTxn {
-			// bor state sync txn is appended at the end of the block
-			txnIndex = block.Transactions().Len()
-		} else {
+		if txNumMin+1 > txNum {
+			stream.WriteNil()
+			return fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
+		}
+		txnIndex = int(txNum - txNumMin - 1)
+		if txnIndex >= block.Transactions().Len() {
 			stream.WriteNil()
 			return fmt.Errorf("transaction %#x not found", hash)
 		}
@@ -315,6 +327,22 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 	ibs, blockCtx, _, rules, signer, err := transactions.ComputeBlockContext(ctx, engine, block.HeaderNoCopy(), chainConfig, api._blockReader, api.stateCache, api._txNumReader, tx, txnIndex)
 	if err != nil {
 		return err
+	}
+
+	var precompiles vm.PrecompiledContracts
+	if config != nil {
+		if config.BlockOverrides != nil {
+			if err := config.BlockOverrides.Override(&blockCtx); err != nil {
+				return err
+			}
+		}
+		if config.StateOverrides != nil {
+			rules = blockCtx.Rules(chainConfig)
+			precompiles = vm.ActivePrecompiledContracts(rules)
+			if err := config.StateOverrides.Override(ibs, precompiles, rules); err != nil {
+				return err
+			}
+		}
 	}
 
 	if isBorStateSyncTxn {
@@ -344,10 +372,10 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 	if err != nil {
 		return err
 	}
-	txCtx.TxHash = txn.Hash()
+	txCtx.TxHash = hash
 
 	// Trace the transaction and return
-	_, err = transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.Header().Number, block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout, nil)
+	_, err = transactions.TraceTx(ctx, engine, block.Transactions()[txnIndex], msg, blockCtx, txCtx, &block.Header().Number, block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout, precompiles)
 	return err
 }
 
@@ -375,7 +403,7 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 		return err
 	}
 
-	err = rpchelper.CheckBlockExecuted(dbtx, blockNumber)
+	err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(dbtx), blockNumber)
 	if err != nil {
 		return err
 	}
@@ -516,7 +544,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 
 	var stateReader state.StateReader
 
-	err = rpchelper.CheckBlockExecuted(tx, blockNum)
+	err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), blockNum)
 	if err != nil {
 		return err
 	}
@@ -552,10 +580,10 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 
 	blockCtx = protocol.NewEVMBlockContext(header, getHash, api.engine(), accounts.NilAddress /* author */, chainConfig)
 	// Apply global block overrides as the baseline for all bundles.
+	// Use OverrideBlockContext (not Override) so that BlockHash overrides are also merged
+	// into overrideBlockHash and honoured by the getHash closure above.
 	if config.BlockOverrides != nil {
-		if err := config.BlockOverrides.Override(&blockCtx); err != nil {
-			return err
-		}
+		config.BlockOverrides.OverrideBlockContext(&blockCtx, overrideBlockHash)
 	}
 	// Get a new instance of the EVM
 	evm = vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{})

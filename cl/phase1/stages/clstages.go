@@ -18,6 +18,7 @@ package stages
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/erigontech/erigon/cl/antiquary"
@@ -26,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clstages"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/das"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
@@ -142,12 +144,20 @@ const (
 	ForkChoice               StageName = "ForkChoice"
 	CleanupAndPruning        StageName = "CleanupAndPruning"
 	SleepForSlot             StageName = "SleepForSlot"
+	WaitForPeers             StageName = "WaitForPeers"
 	DownloadHistoricalBlocks StageName = "DownloadHistoricalBlocks"
 )
 
 func MetaCatchingUp(args Args) StageName {
 	if !args.hasDownloaded {
 		return DownloadHistoricalBlocks
+	}
+	// If we have no peers, skip sync stages and go directly to ForkChoice.
+	// Sync stages (ForwardSync, ChainTipSync) require peers to download blocks
+	// and will just timeout. ForkChoice still needs to run so the head advances
+	// from blocks received via the beacon API (solo validator / single node).
+	if args.peers == 0 {
+		return ""
 	}
 	if args.seenEpoch < args.targetEpoch {
 		return ForwardSync
@@ -234,8 +244,11 @@ func ConsensusClStages(ctx context.Context,
 			args.seenSlot = cfg.forkChoice.HighestSeen()
 			args.seenEpoch = args.seenSlot / cfg.beaconCfg.SlotsPerEpoch
 			args.targetSlot = cfg.ethClock.GetCurrentSlot()
-			// Note that the target epoch is always one behind. this is because we are always behind in the current epoch, so it would not be very useful
-			args.targetEpoch = cfg.ethClock.GetCurrentEpoch() - 1
+			// Note that the target epoch is always one behind. this is because we are always behind in the current epoch, so it would not be very useful.
+			// Guard against uint64 underflow at genesis (GetCurrentEpoch() == 0).
+			if currentEpoch := cfg.ethClock.GetCurrentEpoch(); currentEpoch > 0 {
+				args.targetEpoch = currentEpoch - 1
+			}
 			return
 		},
 		Stages: map[string]clstages.Stage[*Cfg, Args]{
@@ -258,6 +271,17 @@ func ConsensusClStages(ctx context.Context,
 						return err
 					}
 					if cfg.state.Slot() == 0 {
+						// Initialize syncedData so Syncing() returns false at genesis.
+						// Without this, the VC gets 503 "beacon node is syncing" forever.
+						if err := cfg.syncedData.OnHeadState(cfg.state); err != nil {
+							return fmt.Errorf("failed to set genesis head state: %w", err)
+						}
+						// Mark forkchoice as synced so OnAttestation processes attestations.
+						cfg.forkChoice.SetSynced(true)
+						// Write genesis beacon block to DB so block production can find the parent block.
+						if err := writeGenesisBeaconBlock(ctx, cfg); err != nil {
+							return fmt.Errorf("failed to write genesis beacon block: %w", err)
+						}
 						cfg.state = nil // Release the state
 						return nil
 					}
@@ -265,7 +289,7 @@ func ConsensusClStages(ctx context.Context,
 					startingSlot := cfg.state.LatestBlockHeader().Slot
 					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc, cfg.sn, cfg.executionClient, cfg.indiciesDB)
 
-					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.beaconCfg, cfg.caplinConfig, false, startingRoot, startingSlot, cfg.dirs.Tmp, 600*time.Millisecond, cfg.blockCollector, cfg.blockReader, cfg.blobStore, logger, cfg.forkChoice, cfg.blobDownloader), context.Background(), logger); err != nil {
+					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.beaconCfg, cfg.caplinConfig, false, startingRoot, startingSlot, cfg.dirs.Tmp, 600*time.Millisecond, cfg.blockCollector, cfg.blockReader, cfg.blobStore, logger, cfg.forkChoice, cfg.blobDownloader), ctx, logger); err != nil {
 						cfg.hasDownloaded = false
 						return err
 					}
@@ -300,7 +324,7 @@ func ConsensusClStages(ctx context.Context,
 					if x := MetaCatchingUp(args); x != "" {
 						return x
 					}
-					return SleepForSlot
+					return CleanupAndPruning
 				},
 				ActionFunc: doForkchoiceRoutine,
 			},
@@ -313,6 +337,24 @@ func ConsensusClStages(ctx context.Context,
 					return SleepForSlot
 				},
 				ActionFunc: cleanupAndPruning,
+			},
+			WaitForPeers: {
+				Description: `brief wait for peer discovery when no peers are available`,
+				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
+					if x := MetaCatchingUp(args); x != "" {
+						return x
+					}
+					return ChainTipSync
+				},
+				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
+					// Wait 1 second before re-checking peers. Short enough to react
+					// quickly once peers appear, long enough to avoid busy-looping.
+					select {
+					case <-time.After(1 * time.Second):
+					case <-ctx.Done():
+					}
+					return nil
+				},
 			},
 			SleepForSlot: {
 				Description: `sleep until the next slot`,
@@ -331,4 +373,52 @@ func ConsensusClStages(ctx context.Context,
 			},
 		},
 	}
+}
+
+// writeGenesisBeaconBlock writes a synthetic genesis beacon block to the DB.
+// This allows block production to find the parent block when starting from genesis (slot 0).
+// The genesis beacon block body is reconstructed from the genesis state:
+//   - All lists are empty (no deposits, attestations, etc.)
+//   - ExecutionPayload is reconstructed from the genesis state's LatestExecutionPayloadHeader
+//   - SyncAggregate is all-zero (for Altair+)
+//
+// This works because for genesis the execution payload has empty transactions/withdrawals,
+// so Eth1Block.HashSSZ() == Eth1Header.HashSSZ() and body_root matches exactly.
+func writeGenesisBeaconBlock(ctx context.Context, cfg *Cfg) error {
+	if cfg.state == nil {
+		return nil
+	}
+	version := cfg.state.Version()
+	genesisBlock := cltypes.NewSignedBeaconBlock(cfg.beaconCfg, version)
+	blk := genesisBlock.Block
+	header := cfg.state.LatestBlockHeader()
+	blk.Slot = header.Slot
+	blk.ProposerIndex = header.ProposerIndex
+	blk.ParentRoot = header.ParentRoot
+	// header.Root (LatestBlockHeader.StateRoot) is zeroed during state transitions.
+	// We must fill in the actual state root so the block root matches syncedData.HeadRoot().
+	stateRoot, err := cfg.state.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("failed to compute genesis state root: %w", err)
+	}
+	blk.StateRoot = stateRoot
+
+	// The genesis block body is BeaconBlockBody() with all default/empty values per the spec.
+	// SyncAggregate needs preset-aware bitvector sizing; ExecutionPayload sub-fields
+	// must be initialized (non-nil) for SSZ encoding.
+	body := blk.Body
+	if version >= clparams.AltairVersion {
+		body.SyncAggregate = cltypes.NewSyncAggregateWithSize(int(cfg.beaconCfg.SyncCommitteeSize) / 8)
+	}
+	if version >= clparams.BellatrixVersion {
+		body.ExecutionPayload.Extra = solid.NewExtraData()
+		body.ExecutionPayload.Transactions = &solid.TransactionsSSZ{}
+		if version >= clparams.CapellaVersion {
+			body.ExecutionPayload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.beaconCfg.MaxWithdrawalsPerPayload), 44)
+		}
+	}
+
+	return cfg.indiciesDB.Update(ctx, func(tx kv.RwTx) error {
+		return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, genesisBlock, true)
+	})
 }

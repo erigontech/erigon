@@ -1,2 +1,0 @@
-- Remove/cleanup the stub CI names for the required checks
-- Merge workflows with similar triggers to reduce duplication.

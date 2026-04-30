@@ -60,6 +60,11 @@ type SnapshotsCfg struct {
 	caplinState        bool
 	syncConfig         ethconfig.Sync
 	prune              prune.Mode
+	// Called once after snapshot downloads complete on the first sync cycle.
+	afterDownload func(ctx context.Context) error
+	// manifestReady is closed when P2P manifest discovery completes (--snap.p2p-manifest).
+	// Nil when P2P manifest mode is not enabled.
+	manifestReady <-chan struct{}
 }
 
 // Returns a seeder client for block management, a noop implementation if no downloader is attached.
@@ -82,6 +87,8 @@ func StageSnapshotsCfg(db kv.TemporalRwDB,
 	blobs bool,
 	caplinState bool,
 	prune prune.Mode,
+	afterDownload func(ctx context.Context) error,
+	manifestReady <-chan struct{},
 ) SnapshotsCfg {
 	cfg := SnapshotsCfg{
 		db:                 db,
@@ -96,6 +103,8 @@ func StageSnapshotsCfg(db kv.TemporalRwDB,
 		blobs:              blobs,
 		prune:              prune,
 		caplinState:        caplinState,
+		afterDownload:      afterDownload,
+		manifestReady:      manifestReady,
 	}
 
 	return cfg
@@ -149,6 +158,26 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	log.Info("[OtterSync] Starting Ottersync")
+
+	// If P2P manifest mode is enabled, wait for chain.toml discovery before
+	// building download requests. Without this, the preverified registry is
+	// empty and OtterSync would complete instantly with nothing to download.
+	//
+	// Bounded wait: if discovery never succeeds (no peers with chain-toml ENR,
+	// unreachable info-hash, etc.) we fall through to the centralized preverified
+	// registry rather than stalling the sync indefinitely.
+	const manifestReadyTimeout = 5 * time.Minute
+	if cfg.manifestReady != nil {
+		log.Info(fmt.Sprintf("[%s] Waiting for P2P manifest discovery (timeout %s)...", s.LogPrefix(), manifestReadyTimeout))
+		select {
+		case <-cfg.manifestReady:
+			log.Info(fmt.Sprintf("[%s] P2P manifest ready, proceeding with download", s.LogPrefix()))
+		case <-time.After(manifestReadyTimeout):
+			log.Warn(fmt.Sprintf("[%s] P2P manifest discovery timed out after %s — falling back to preverified registry", s.LogPrefix(), manifestReadyTimeout))
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 
 	agg := cfg.db.(*temporal.DB).Agg().(*state.Aggregator)
 	// Download only the snapshots that are for the header chain.
@@ -209,7 +238,11 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
-	// want to add remaining snapshots here?
+	if cfg.afterDownload != nil {
+		if err := cfg.afterDownload(ctx); err != nil {
+			return fmt.Errorf("after snapshot download: %w", err)
+		}
+	}
 
 	{ // Now can open all files
 		if err := cfg.blockReader.Snapshots().OpenFolder(); err != nil {
@@ -427,15 +460,6 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 		if cfg.notifier != nil {
 			cfg.notifier.Events.OnRetirementStart(started)
 		}
-	}
-
-	// Build any missed E3 state accessors in the background.
-	// This is the counterpart to RetireBlocksInBackground → BuildMissedIndicesIfNeed for E2.
-	// On restart, buildOrDeferE3Accessors skips synchronous accessor building;
-	// this call ensures missing accessors are rebuilt in the background on every sync cycle.
-	if freezingCfg.ProduceE3 {
-		agg := cfg.db.(state.HasAgg).Agg().(*state.Aggregator)
-		agg.BuildMissedAccessorsInBackground(estimate.IndexSnapshot.Workers())
 	}
 
 	pruneLimit := 10

@@ -43,6 +43,12 @@ This mode uses **SSE (Server-Sent Events)** transport over HTTP and is the simpl
 
 A separate `mcp` binary that connects to an existing Erigon node either via its JSON-RPC endpoint or directly via the MDBX database. Supports both **stdio** (for Claude Desktop) and **SSE** transports.
 
+The `mcp` binary is available in the following ways:
+
+* **Official GitHub Releases**: The `mcp` binary is bundled with every official Erigon release on [GitHub Releases](https://github.com/erigontech/erigon/releases). Download the archive for your platform and find the binary alongside `erigon`.
+* **Docker image**: The binary is included in the official Erigon Docker image at `/usr/local/bin/mcp`.
+* **Build from source**:
+
 ```bash
 make mcp
 ./build/bin/mcp --help

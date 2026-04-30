@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -61,7 +62,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	var txs types.Transactions
 
 	for _, txHash := range txHashes {
-		blockNumber, _, ok, err := api.txnLookup(ctx, tx, txHash)
+		blockNumber, txNum, ok, err := api.txnLookup(ctx, tx, txHash)
 		if err != nil {
 			return nil, err
 		}
@@ -74,19 +75,17 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 			return nil, err
 		}
 
-		block, err := api.blockByNumberWithSenders(ctx, tx, blockNumber)
+		txNumMin, err := api._txNumReader.Min(ctx, tx, blockNumber)
 		if err != nil {
 			return nil, err
 		}
-		if block == nil {
-			return nil, fmt.Errorf("block not found %d", blockNumber)
+		if txNumMin+1 > txNum {
+			return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNumber)
 		}
-		var txn types.Transaction
-		for _, transaction := range block.Transactions() {
-			if transaction.Hash() == txHash {
-				txn = transaction
-				break
-			}
+		txnIndex := int(txNum - txNumMin - 1)
+		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNumber, txnIndex)
+		if err != nil {
+			return nil, err
 		}
 		if txn == nil {
 			return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
@@ -148,6 +147,11 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	// Get a new instance of the EVM
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{})
 
+	// evmPtr is updated atomically each time evm is recreated in the loop,
+	// so the AfterFunc callback always cancels the current instance.
+	var evmPtr atomic.Pointer[vm.EVM]
+	evmPtr.Store(evm)
+
 	timeoutMilliSeconds := int64(5000)
 	if timeoutMilliSecondsPtr != nil {
 		timeoutMilliSeconds = *timeoutMilliSecondsPtr
@@ -165,12 +169,8 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	// this makes sure resources are cleaned up.
 	defer cancel()
 
-	// Wait for the context to be done and cancel the evm. Even if the
-	// EVM has finished, cancelling may be done (repeatedly)
-	go func() {
-		<-ctx.Done()
-		evm.Cancel()
-	}()
+	stop := context.AfterFunc(ctx, func() { evmPtr.Load().Cancel() })
+	defer stop()
 
 	// Setup the gas pool (also for unmetered requests)
 	// and apply the message.
@@ -189,12 +189,12 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		msg.SetCheckGas(false)
 		// Recreate EVM with the correct txCtx for this transaction
 		evm = vm.NewEVM(blockCtx, protocol.NewEVMTxContext(msg), ibs, chainConfig, vm.Config{})
+		evmPtr.Store(evm)
 		// Execute the transaction message
 		result, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 		if err != nil {
 			return nil, err
 		}
-		// If the timer caused an abort, return an appropriate error message
 		if evm.Cancelled() {
 			return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
 		}
