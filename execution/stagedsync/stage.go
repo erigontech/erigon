@@ -116,6 +116,8 @@ type UnwindReason struct {
 	ErrBadBlock error
 	// If unwind is caused by some operational error, this error is not empty
 	ErrOperational error
+	// If unwind is caused by a batch boundary reset rather than a chain reorg
+	BatchBoundaryReset bool
 }
 
 func (u UnwindReason) IsBadBlock() bool {

@@ -371,7 +371,7 @@ func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.Te
 		return err
 	}
 
-	if err := e.pipelineExecutor.UnwindTo(unwindPoint, stagedsync.ExecUnwind, tx); err != nil {
+	if err := e.pipelineExecutor.UnwindTo(unwindPoint, stagedsync.UnwindReason{BatchBoundaryReset: true}, tx); err != nil {
 		return err
 	}
 	if err := e.pipelineExecutor.RunUnwind(sd, tx); err != nil {

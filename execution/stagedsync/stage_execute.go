@@ -400,7 +400,16 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 		return nil
 	}
 
-	logger.Info(fmt.Sprintf("[%s] Unwind Execution", u.LogPrefix()), "from", s.BlockNumber, "to", u.UnwindPoint)
+	var unwindLabel string
+	switch {
+	case u.Reason.BatchBoundaryReset:
+		unwindLabel = "Unwind Execution (batch boundary reset)"
+	case u.Reason.IsBadBlock():
+		unwindLabel = "Unwind Execution (bad block)"
+	default:
+		unwindLabel = "Unwind Execution"
+	}
+	logger.Info(fmt.Sprintf("[%s] %s", u.LogPrefix(), unwindLabel), "from", s.BlockNumber, "to", u.UnwindPoint)
 
 	// Discard any pending deferred commitment updates from the previous
 	// (failed) execution. If left in place, the next ComputeCommitment
