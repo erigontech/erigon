@@ -23,47 +23,47 @@ jobs:
         include:
           # consume-engine (stable)
           - sim: consume-engine
-            sim-limit: "tests/frontier/"
+            sim-limit: ".*tests/frontier/.*"
             shard: frontier
             pool-size: 0
           - sim: consume-engine
-            sim-limit: "tests/homestead/"
+            sim-limit: ".*tests/homestead/.*"
             shard: homestead
             pool-size: 0
           - sim: consume-engine
-            sim-limit: "tests/byzantium/"
+            sim-limit: ".*tests/byzantium/.*"
             shard: byzantium
             pool-size: 0
           - sim: consume-engine
-            sim-limit: "tests/constantinople/"
+            sim-limit: ".*tests/constantinople/.*"
             shard: constantinople
             pool-size: 0
           - sim: consume-engine
-            sim-limit: "tests/istanbul/"
+            sim-limit: ".*tests/istanbul/.*"
             shard: istanbul
             pool-size: 0
           - sim: consume-engine
-            sim-limit: "tests/berlin/"
+            sim-limit: ".*tests/berlin/.*"
             shard: berlin
             pool-size: 0
           - sim: consume-engine
-            sim-limit: "tests/paris/"
+            sim-limit: ".*tests/paris/.*"
             shard: paris
             pool-size: 0
           - sim: consume-engine
-            sim-limit: "tests/shanghai/"
+            sim-limit: ".*tests/shanghai/.*"
             shard: shanghai
             pool-size: 0
           - sim: consume-engine
-            sim-limit: "tests/cancun/"
+            sim-limit: ".*tests/cancun/.*"
             shard: cancun
             pool-size: 4
           - sim: consume-engine
-            sim-limit: "tests/prague/"
+            sim-limit: ".*tests/prague/.*"
             shard: prague
             pool-size: 4
           - sim: consume-engine
-            sim-limit: "tests/osaka/"
+            sim-limit: ".*tests/osaka/.*"
             shard: osaka
             pool-size: 4
           # consume-engine (devnet)
