@@ -2507,7 +2507,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		}
 
 		// Flush block state cache to sd.mem — all writes (per-TX + finalize) are now visible.
-		if err := be.blockStateCache.Flush(pe.rs.Domains(), applyTx, txTask.Version().TxNum); err != nil {
+		if err := be.blockStateCache.Flush(pe.rs.Domains(), applyTx); err != nil {
 			return nil, err
 		}
 

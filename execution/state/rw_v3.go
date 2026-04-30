@@ -214,7 +214,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 				}
 				enc := accounts.SerialiseV3(&acc)
 				if blockCache != nil {
-					blockCache.WriteAccount(addr, enc)
+					blockCache.WriteAccount(addr, enc, txNum)
 					if !domains.InlineTouchKeyDisabled() {
 						domains.GetCommitmentContext().TouchKey(kv.AccountsDomain, string(address[:]), enc)
 					}
@@ -234,7 +234,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 					fmt.Printf("%d apply:put code: %x %x\n", blockNum, addr, code)
 				}
 				if blockCache != nil {
-					blockCache.WriteCode(addr, d.code)
+					blockCache.WriteCode(addr, d.code, txNum)
 					if !domains.InlineTouchKeyDisabled() {
 						domains.GetCommitmentContext().TouchKey(kv.CodeDomain, string(address[:]), d.code)
 					}
@@ -254,7 +254,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 						fmt.Printf("%d apply:del storage: %x %x\n", blockNum, addr, item.key)
 					}
 					if blockCache != nil {
-						blockCache.WriteStorage(addr, item.key, nil)
+						blockCache.WriteStorage(addr, item.key, nil, txNum)
 						if !domains.InlineTouchKeyDisabled() {
 							domains.GetCommitmentContext().TouchKey(kv.StorageDomain, string(composite), nil)
 						}
@@ -268,7 +268,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 						fmt.Printf("%d apply:put storage: %x %x %x\n", blockNum, addr, item.key, &item.value)
 					}
 					if blockCache != nil {
-						blockCache.WriteStorage(addr, item.key, v)
+						blockCache.WriteStorage(addr, item.key, v, txNum)
 						if !domains.InlineTouchKeyDisabled() {
 							domains.GetCommitmentContext().TouchKey(kv.StorageDomain, string(composite), v)
 						}
@@ -315,7 +315,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 		acc.Balance.Add(&acc.Balance, &increase)
 		if emptyRemoval && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() {
 			if blockCache != nil {
-				blockCache.DeleteAccount(addr)
+				blockCache.DeleteAccount(addr, txNum)
 				if !domains.InlineTouchKeyDisabled() {
 					domains.GetCommitmentContext().TouchKey(kv.AccountsDomain, string(addrValue[:]), nil)
 				}
@@ -327,7 +327,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 		} else {
 			enc1 := accounts.SerialiseV3(&acc)
 			if blockCache != nil {
-				blockCache.WriteAccount(addr, enc1)
+				blockCache.WriteAccount(addr, enc1, txNum)
 				if !domains.InlineTouchKeyDisabled() {
 					domains.GetCommitmentContext().TouchKey(kv.AccountsDomain, string(addrValue[:]), enc1)
 				}
@@ -1028,16 +1028,49 @@ type BlockStateCache struct {
 	currentAccounts map[accounts.Address][]byte // serialized account blobs
 	currentStorage  map[accounts.Address]map[accounts.StorageKey][]byte
 
-	// dirty tracks which keys were modified (need flushing).
-	dirtyAccounts map[accounts.Address]bool
-	dirtyStorage  map[accounts.Address]map[accounts.StorageKey]bool
-
-	// deleted tracks accounts that were self-destructed.
-	deletedAccounts map[accounts.Address]bool
-
-	// code tracks code writes.
+	// currentCode is the latest code per address (for fast read access via
+	// GetCurrentCode-style fallback if added; today only currentAccounts /
+	// currentStorage are exposed for read).
 	currentCode map[accounts.Address][]byte
-	dirtyCode   map[accounts.Address]bool
+
+	// writeLog records every Write* / DeleteAccount call in order, each
+	// stamped with the txNum at which the write was made. Flush replays
+	// the log against SharedDomains at per-entry txNum so the AccountsDomain
+	// / StorageDomain / CodeDomain history is built per-tx — matching
+	// what the serial executor (and main's parallel executor) produce by
+	// calling DomainPut directly at per-tx txNum.
+	//
+	// Without per-entry txNum, Flush would stamp every write with one
+	// txNum (the block's finalize txNum), collapsing per-tx history
+	// entries into a single one and breaking history readers
+	// (sd.GetAsOf, eth_getBalance at historic blocks, intra-block
+	// commitment-domain reads) that ask for state at an intra-block
+	// txNum.
+	writeLog []bcWriteOp
+}
+
+// bcOpKind enumerates the operations recorded in BlockStateCache.writeLog.
+type bcOpKind uint8
+
+const (
+	bcOpPutAccount bcOpKind = iota + 1
+	bcOpPutCode
+	bcOpPutStorage    // val=nil means storage delete
+	bcOpDeleteAccount // self-destruct / empty-removal: del code + del storage prefix
+)
+
+// bcWriteOp is one entry in BlockStateCache.writeLog. txNum is the
+// per-tx txNum at the time of the write — Flush passes it to DomainPut /
+// DomainDel so the domain history matches the serial / main parallel
+// executor's per-tx DomainPut sequence. val is the serialized payload
+// (account blob, code, storage value); for delete-account ops val is
+// nil. key is set only for storage ops.
+type bcWriteOp struct {
+	kind  bcOpKind
+	addr  accounts.Address
+	key   accounts.StorageKey
+	val   []byte
+	txNum uint64
 }
 
 func NewBlockStateCache() *BlockStateCache {
@@ -1046,11 +1079,7 @@ func NewBlockStateCache() *BlockStateCache {
 		committedStorage:  make(map[accounts.Address]map[accounts.StorageKey][]byte),
 		currentAccounts:   make(map[accounts.Address][]byte),
 		currentStorage:    make(map[accounts.Address]map[accounts.StorageKey][]byte),
-		dirtyAccounts:     make(map[accounts.Address]bool),
-		dirtyStorage:      make(map[accounts.Address]map[accounts.StorageKey]bool),
-		deletedAccounts:   make(map[accounts.Address]bool),
 		currentCode:       make(map[accounts.Address][]byte),
-		dirtyCode:         make(map[accounts.Address]bool),
 	}
 }
 
@@ -1098,27 +1127,25 @@ func (c *BlockStateCache) PutCommittedStorage(addr accounts.Address, key account
 
 // --- Current (write buffer) methods ---
 
-// WriteAccount stores a serialized account blob in the write buffer.
-// Only marks the account dirty if the value differs from the committed
-// (pre-block) state — prevents the Flush from overwriting sd.mem with
-// stale read-only values when a TX loads but doesn't modify an account.
-func (c *BlockStateCache) WriteAccount(addr accounts.Address, enc []byte) {
+// WriteAccount records an account write at txNum. The serialized blob
+// is appended to writeLog and currentAccounts is updated for fast read
+// access by finalize-IBS readers (NewCurrentCachedReaderV3 /
+// HistoryReaderV3WithBlockCache). Flush will emit DomainPut at the
+// recorded txNum, matching the serial / main parallel executor's
+// per-tx DomainPut sequence.
+//
+// Multiple writes to the same address in one block produce multiple
+// log entries — Flush emits a DomainPut for each, building per-tx
+// AccountsDomain history.
+func (c *BlockStateCache) WriteAccount(addr accounts.Address, enc []byte, txNum uint64) {
 	c.mu.Lock()
 	c.currentAccounts[addr] = enc
-	if committed, ok := c.committedAccounts[addr]; ok && committed != nil {
-		committedEnc := accounts.SerialiseV3(committed)
-		if !bytes.Equal(committedEnc, enc) {
-			c.dirtyAccounts[addr] = true
-		}
-	} else {
-		// Not in committed cache — new account or first write, always dirty.
-		c.dirtyAccounts[addr] = true
-	}
+	c.writeLog = append(c.writeLog, bcWriteOp{kind: bcOpPutAccount, addr: addr, val: enc, txNum: txNum})
 	c.mu.Unlock()
 }
 
-// WriteStorage stores a storage value in the write buffer.
-func (c *BlockStateCache) WriteStorage(addr accounts.Address, key accounts.StorageKey, val []byte) {
+// WriteStorage records a storage write at txNum. val=nil means delete.
+func (c *BlockStateCache) WriteStorage(addr accounts.Address, key accounts.StorageKey, val []byte, txNum uint64) {
 	c.mu.Lock()
 	slots, ok := c.currentStorage[addr]
 	if !ok {
@@ -1126,27 +1153,24 @@ func (c *BlockStateCache) WriteStorage(addr accounts.Address, key accounts.Stora
 		c.currentStorage[addr] = slots
 	}
 	slots[key] = val
-	dirty, ok := c.dirtyStorage[addr]
-	if !ok {
-		dirty = make(map[accounts.StorageKey]bool)
-		c.dirtyStorage[addr] = dirty
-	}
-	dirty[key] = true
+	c.writeLog = append(c.writeLog, bcWriteOp{kind: bcOpPutStorage, addr: addr, key: key, val: val, txNum: txNum})
 	c.mu.Unlock()
 }
 
-// WriteCode stores code in the write buffer.
-func (c *BlockStateCache) WriteCode(addr accounts.Address, code []byte) {
+// WriteCode records a code write at txNum.
+func (c *BlockStateCache) WriteCode(addr accounts.Address, code []byte, txNum uint64) {
 	c.mu.Lock()
 	c.currentCode[addr] = code
-	c.dirtyCode[addr] = true
+	c.writeLog = append(c.writeLog, bcWriteOp{kind: bcOpPutCode, addr: addr, val: code, txNum: txNum})
 	c.mu.Unlock()
 }
 
-// DeleteAccount marks an account as self-destructed.
-func (c *BlockStateCache) DeleteAccount(addr accounts.Address) {
+// DeleteAccount records an account self-destruct / empty-removal at
+// txNum. Flush emits DomainDel(Code) + DomainDelPrefix(Storage) at the
+// recorded txNum.
+func (c *BlockStateCache) DeleteAccount(addr accounts.Address, txNum uint64) {
 	c.mu.Lock()
-	c.deletedAccounts[addr] = true
+	c.writeLog = append(c.writeLog, bcWriteOp{kind: bcOpDeleteAccount, addr: addr, txNum: txNum})
 	c.mu.Unlock()
 }
 
@@ -1191,76 +1215,55 @@ func (c *BlockStateCache) GetCurrentStorage(addr accounts.Address, key accounts.
 	return nil, false
 }
 
-// Flush writes all dirty entries to SharedDomains via DomainPut.
+// Flush replays writeLog against SharedDomains in write order. Each
+// entry is stamped with the txNum at which the write was originally
+// made, so the AccountsDomain / StorageDomain / CodeDomain history is
+// built per-tx — matching what serial executor (and main's parallel
+// executor) produce by calling DomainPut at per-tx txNum directly.
 // Called at block boundary after all TXs are applied.
-func (c *BlockStateCache) Flush(domains *execctx.SharedDomains, roTx kv.TemporalTx, txNum uint64) error {
+//
+// DomainPut/DomainDel internally no-op when the write matches the
+// current sd.mem value, so logging every Write* call (including ones
+// that don't change sd.mem) is safe.
+func (c *BlockStateCache) Flush(domains *execctx.SharedDomains, roTx kv.TemporalTx) error {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	// Flush deleted accounts (code + storage prefix delete).
-	for addr := range c.deletedAccounts {
-		addrVal := addr.Value()
-		if err := domains.DomainDel(kv.CodeDomain, roTx, addrVal[:], txNum, nil); err != nil {
-			return err
-		}
-		if err := domains.DomainDelPrefix(kv.StorageDomain, roTx, addrVal[:], txNum); err != nil {
-			return err
-		}
-	}
-
-	// Flush dirty accounts to sd.mem unconditionally.
-	// DomainPut internally skips when prevVal == enc (no-op writes).
-	for addr := range c.dirtyAccounts {
-		addrVal := addr.Value()
-		enc := c.currentAccounts[addr]
-		if err := domains.DomainPut(kv.AccountsDomain, roTx, addrVal[:], enc, txNum, nil); err != nil {
-			return err
-		}
-	}
-
-	// Flush dirty code.
-	for addr := range c.dirtyCode {
-		addrVal := addr.Value()
-		code := c.currentCode[addr]
-		if err := domains.DomainPut(kv.CodeDomain, roTx, addrVal[:], code, txNum, nil); err != nil {
-			return err
-		}
-	}
-
-	// Flush dirty storage to sd.mem.
-	//
-	// We deliberately do NOT dedup against c.committedStorage here. That map
-	// is populated lazily on first read per key and never refreshed, so
-	// across multiple blocks sharing one cache the "committed" entry keeps
-	// reflecting the *pre-batch* value — not the post-last-flush value. When
-	// an earlier block flushes a new value to sd.mem and a later block
-	// writes back the original pre-batch value, the stale committed entry
-	// made Flush skip the write and sd.mem was left at the earlier block's
-	// value. This produced the trie-root mismatch at block 24839762: the
-	// EIP-7002 predeploy's slots 0x01/0x03 accrued value 0x01 from an
-	// earlier block's dequeue accounting, and the later block's clearing
-	// SSTORE was skipped because committed still said "nil".
-	//
-	// DomainPut/DomainDel already no-op when the write matches the current
-	// sd.mem value, so dropping the skip costs little. See
-	// TestBlockStateCacheFlushClearsAcrossBlocks for the regression test.
-	for addr, slots := range c.dirtyStorage {
-		addrVal := addr.Value()
-		for key := range slots {
-			keyVal := key.Value()
+	for i := range c.writeLog {
+		op := &c.writeLog[i]
+		addrVal := op.addr.Value()
+		switch op.kind {
+		case bcOpDeleteAccount:
+			// self-destruct / empty-removal: code + storage prefix delete.
+			// The AccountsDomain delete itself is emitted by the caller of
+			// applyVersionedWrites' selfdestruct branch directly (it bypasses
+			// the cache for the AccountsDomain delete), so we don't emit
+			// DomainDel(AccountsDomain) here.
+			if err := domains.DomainDel(kv.CodeDomain, roTx, addrVal[:], op.txNum, nil); err != nil {
+				return err
+			}
+			if err := domains.DomainDelPrefix(kv.StorageDomain, roTx, addrVal[:], op.txNum); err != nil {
+				return err
+			}
+		case bcOpPutAccount:
+			if err := domains.DomainPut(kv.AccountsDomain, roTx, addrVal[:], op.val, op.txNum, nil); err != nil {
+				return err
+			}
+		case bcOpPutCode:
+			if err := domains.DomainPut(kv.CodeDomain, roTx, addrVal[:], op.val, op.txNum, nil); err != nil {
+				return err
+			}
+		case bcOpPutStorage:
+			keyVal := op.key.Value()
 			composite := make([]byte, 20+32)
 			copy(composite, addrVal[:])
 			copy(composite[20:], keyVal[:])
-			var val []byte
-			if addrSlots, ok := c.currentStorage[addr]; ok {
-				val = addrSlots[key]
-			}
-			if len(val) == 0 {
-				if err := domains.DomainDel(kv.StorageDomain, roTx, composite, txNum, nil); err != nil {
+			if len(op.val) == 0 {
+				if err := domains.DomainDel(kv.StorageDomain, roTx, composite, op.txNum, nil); err != nil {
 					return err
 				}
 			} else {
-				if err := domains.DomainPut(kv.StorageDomain, roTx, composite, val, txNum, nil); err != nil {
+				if err := domains.DomainPut(kv.StorageDomain, roTx, composite, op.val, op.txNum, nil); err != nil {
 					return err
 				}
 			}

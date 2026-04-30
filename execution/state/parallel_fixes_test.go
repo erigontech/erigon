@@ -320,18 +320,20 @@ func TestBlockStateCacheWriteAccount_NilCommitted(t *testing.T) {
 	enc := accounts.SerialiseV3(&acc)
 
 	assert.NotPanics(t, func() {
-		cache.WriteAccount(addr, enc)
+		cache.WriteAccount(addr, enc, 1)
 	}, "WriteAccount should not panic with nil committed account")
 
-	// Verify the account is marked dirty
+	// Verify the write is recorded.
 	current, ok := cache.GetCurrentAccount(addr)
 	assert.True(t, ok, "Should have current account")
 	assert.Equal(t, enc, current, "Current account should match written value")
 }
 
-// TestBlockStateCacheWriteAccount_DirtyTracking verifies that accounts
-// are only marked dirty when the value actually changes.
-func TestBlockStateCacheWriteAccount_DirtyTracking(t *testing.T) {
+// TestBlockStateCacheWriteAccountUpdatesCurrent verifies that successive
+// writes update the current view to the latest value (last write wins
+// for read access via GetCurrentAccount). The full per-tx history is
+// preserved in writeLog for Flush.
+func TestBlockStateCacheWriteAccountUpdatesCurrent(t *testing.T) {
 	cache := NewBlockStateCache()
 
 	addr := accounts.InternAddress([20]byte{0x55})
@@ -342,20 +344,18 @@ func TestBlockStateCacheWriteAccount_DirtyTracking(t *testing.T) {
 	acc.Nonce = 3
 	cache.PutCommittedAccount(addr, &acc)
 
-	// Write the same value — should NOT be dirty
 	enc := accounts.SerialiseV3(&acc)
-	cache.WriteAccount(addr, enc)
+	cache.WriteAccount(addr, enc, 3)
 
-	// Write a different value — should be dirty
 	acc2 := accounts.NewAccount()
 	acc2.Balance = *uint256.NewInt(600)
 	acc2.Nonce = 3
 	enc2 := accounts.SerialiseV3(&acc2)
-	cache.WriteAccount(addr, enc2)
+	cache.WriteAccount(addr, enc2, 5)
 
 	current, ok := cache.GetCurrentAccount(addr)
 	assert.True(t, ok)
-	assert.Equal(t, enc2, current, "Should have the updated value")
+	assert.Equal(t, enc2, current, "GetCurrentAccount should return the latest write")
 }
 
 // TestSelfDestructRecordsStorageDeletes verifies that when an account

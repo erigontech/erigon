@@ -133,29 +133,25 @@ func TestSystemCallStoragePropagation_BlockStateCache(t *testing.T) {
 				blockIdx, blockIdx-1, val, expectedVal)
 		}
 
-		// System call writes new value to cache
+		// System call writes new value to cache.
 		newVal := values[blockIdx]
-		cache.WriteStorage(addr, slot, newVal)
+		cache.WriteStorage(addr, slot, newVal, uint64(blockIdx*100+1))
 
-		// Flush cache to sd.mem (like the parallel Flush at end of block)
-		// This simulates the dirty check in Flush
-		if dirtySlots, ok := cache.dirtyStorage[addr]; ok {
-			if dirtySlots[slot] {
-				if currentVal, ok := cache.currentStorage[addr][slot]; ok {
-					// Check if different from committed
-					if committedSlots, ok := cache.committedStorage[addr]; ok {
-						if committedVal, ok := committedSlots[slot]; ok {
-							if bytes.Equal(committedVal, currentVal) {
-								t.Logf("Block %d: Flush SKIPPED (committed==current)", blockIdx)
-								continue
-							}
-						}
-					}
-					// Write to sd.mem
-					sdMem[string(composite)] = currentVal
-					t.Logf("Block %d: flushed slot4=%x to sd.mem", blockIdx, currentVal)
-				}
+		// Flush replays writeLog to sd.mem (simulated here as a map). For
+		// each storage write, push the latest value into the simulated
+		// sd.mem at the recorded txNum.
+		for i := range cache.writeLog {
+			op := &cache.writeLog[i]
+			if op.kind != bcOpPutStorage {
+				continue
 			}
+			opAddrVal := op.addr.Value()
+			opKeyVal := op.key.Value()
+			c := make([]byte, 20+32)
+			copy(c, opAddrVal[:])
+			copy(c[20:], opKeyVal[:])
+			sdMem[string(c)] = op.val
+			t.Logf("Block %d: flushed slot=%x val=%x at txNum=%d", blockIdx, opKeyVal, op.val, op.txNum)
 		}
 	}
 
@@ -165,78 +161,68 @@ func TestSystemCallStoragePropagation_BlockStateCache(t *testing.T) {
 		"Final sd.mem should have last written value: got %x, want %x", finalVal, values[4])
 }
 
-// TestBlockStateCacheStorageDirtyFlag verifies that WriteStorage marks
-// storage as dirty even when the value matches the committed value.
-// This is important for system call storage that gets written back with
-// a different value each block.
-func TestBlockStateCacheStorageDirtyFlag(t *testing.T) {
+// TestBlockStateCacheStorageWriteLog verifies that WriteStorage appends
+// to writeLog, including the case where a same-value rewrite is logged
+// (system-call storage relies on every write reaching the domain so the
+// commitment trie picks up the touch — DomainPut itself no-ops on
+// identical value).
+func TestBlockStateCacheStorageWriteLog(t *testing.T) {
 	cache := NewBlockStateCache()
 
 	addr := accounts.InternAddress([20]byte{0x42})
 	slot := accounts.InternKey([32]byte{0x01})
 
-	// Put a committed value
 	cache.PutCommittedStorage(addr, slot, []byte{0x01})
 
-	// Write same value — WriteStorage marks dirty unconditionally so the
-	// commitment flush sees this slot, even if the post-write value matches
-	// the committed value (system-call storage relies on this behaviour).
-	cache.WriteStorage(addr, slot, []byte{0x01})
+	// Write same value — must still produce a writeLog entry so Flush
+	// emits a DomainPut and the commitment touch is recorded.
+	cache.WriteStorage(addr, slot, []byte{0x01}, 7)
+	require.Len(t, cache.writeLog, 1)
+	assert.Equal(t, bcOpPutStorage, cache.writeLog[0].kind)
+	assert.Equal(t, uint64(7), cache.writeLog[0].txNum)
 
-	dirtySlots, ok := cache.dirtyStorage[addr]
-	require.True(t, ok, "Address should have dirty slots after same-value write")
-	assert.True(t, dirtySlots[slot], "WriteStorage should always set dirty flag, even when value unchanged")
+	// Different value — second writeLog entry preserved.
+	cache.WriteStorage(addr, slot, []byte{0x02}, 11)
+	require.Len(t, cache.writeLog, 2)
+	assert.Equal(t, uint64(11), cache.writeLog[1].txNum)
+	assert.Equal(t, []byte{0x02}, cache.writeLog[1].val)
 
-	// Write different value → still dirty.
-	cache.WriteStorage(addr, slot, []byte{0x02})
-
-	dirtySlots, ok = cache.dirtyStorage[addr]
-	require.True(t, ok, "Address should have dirty slots")
-	assert.True(t, dirtySlots[slot], "Different value should be dirty")
-
-	// Read current value
+	// Current view returns the latest write.
 	val, ok := cache.GetCurrentStorage(addr, slot)
-	require.True(t, ok, "Should find current storage")
-	assert.Equal(t, []byte{0x02}, val, "Should have the new value")
+	require.True(t, ok)
+	assert.Equal(t, []byte{0x02}, val, "Should have the latest value")
 }
 
-// TestBlockStateCacheFlushPreservesSystemCallWrites verifies that the Flush
-// correctly writes system call storage changes to sd.mem, including the
-// dirty check against committed values.
-func TestBlockStateCacheFlushPreservesSystemCallWrites(t *testing.T) {
+// TestBlockStateCacheWriteLogPerTxNum verifies the system-call storage
+// flow: the Flush replays per-tx writes against sd.mem with each entry's
+// recorded txNum, so the StorageDomain history retains per-tx
+// granularity that intra-block GetAsOf readers (commitment domain,
+// debug RPCs) depend on.
+func TestBlockStateCacheWriteLogPerTxNum(t *testing.T) {
 	cache := NewBlockStateCache()
 
 	addr := accounts.InternAddress([20]byte{0x42})
 	slot := accounts.InternKey([32]byte{0x04})
 
-	// Simulate: system call reads slot (populates committed), writes new value
 	oldVal := []byte{0x3f, 0x2f}
 	newVal := []byte{0x7c, 0x1f}
 
-	// Read populates committed
 	cache.PutCommittedStorage(addr, slot, oldVal)
+	cache.WriteStorage(addr, slot, newVal, 42)
 
-	// System call writes new value
-	cache.WriteStorage(addr, slot, newVal)
+	require.Len(t, cache.writeLog, 1)
+	op := cache.writeLog[0]
+	assert.Equal(t, bcOpPutStorage, op.kind)
+	assert.Equal(t, addr, op.addr)
+	assert.Equal(t, slot, op.key)
+	assert.Equal(t, newVal, op.val)
+	assert.Equal(t, uint64(42), op.txNum)
 
-	// Verify dirty flag is set
-	dirtySlots, ok := cache.dirtyStorage[addr]
-	require.True(t, ok)
-	assert.True(t, dirtySlots[slot])
-
-	// Verify current has new value
 	val, ok := cache.GetCurrentStorage(addr, slot)
 	require.True(t, ok)
 	assert.Equal(t, newVal, val)
 
-	// Verify committed has old value
-	val, ok = cache.GetCommittedStorage(addr, slot)
+	committed, ok := cache.GetCommittedStorage(addr, slot)
 	require.True(t, ok)
-	assert.Equal(t, oldVal, val)
-
-	// The Flush would check: committed != current → write to sd.mem
-	committed := cache.committedStorage[addr][slot]
-	current := cache.currentStorage[addr][slot]
-	assert.False(t, bytes.Equal(committed, current),
-		"Committed and current should differ: committed=%x current=%x", committed, current)
+	assert.Equal(t, oldVal, committed)
 }
