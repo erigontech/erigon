@@ -19,7 +19,6 @@ package execmodule
 import (
 	"context"
 	"fmt"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -27,7 +26,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
@@ -53,8 +51,6 @@ type PipelineExecutor struct {
 	dispatcher              *Dispatcher
 	logger                  log.Logger
 	knownTipHint            atomic.Uint64
-	knownTipHintReady       chan struct{}
-	knownTipHintOnce        sync.Once
 }
 
 // NewPipelineExecutor creates a new executor. validationSync may be nil
@@ -83,7 +79,6 @@ func NewPipelineExecutor(
 		validationNotifications: validationNotifications,
 		dispatcher:              dispatcher,
 		logger:                  logger,
-		knownTipHintReady:       make(chan struct{}),
 	}
 }
 
@@ -109,8 +104,8 @@ func (pe *PipelineExecutor) Sync() *stagedsync.Sync {
 // SetKnownTipHint records an external hint about where the chain head currently
 // is. The single in-process caller is Caplin at startup, propagating either
 // the latest beacon-state execution payload block number or a remote checkpoint
-// sync head. The value is monotonic (max wins) and the first set unblocks
-// waitKnownTipHint listeners.
+// sync head. The value is monotonic (max wins). Consumers (e.g. PruneInitialCycleFn)
+// read it asynchronously each iteration — there is no blocking wait.
 func (pe *PipelineExecutor) SetKnownTipHint(blockNum uint64) {
 	if blockNum == 0 {
 		return
@@ -118,41 +113,10 @@ func (pe *PipelineExecutor) SetKnownTipHint(blockNum uint64) {
 	if cur := pe.knownTipHint.Load(); blockNum > cur {
 		pe.knownTipHint.Store(blockNum)
 	}
-	pe.knownTipHintOnce.Do(func() { close(pe.knownTipHintReady) })
 }
 
 func (pe *PipelineExecutor) KnownTipHint() uint64 {
 	return pe.knownTipHint.Load()
-}
-
-// waitKnownTipHint blocks until the first SetKnownTipHint arrives, the timeout
-// elapses, or ctx is cancelled — whichever comes first. minBlock is a fast-path:
-// if a hint already exceeds it, return immediately without arming a timer.
-func (pe *PipelineExecutor) waitKnownTipHint(ctx context.Context, minBlock uint64, timeout time.Duration) {
-	if pe.KnownTipHint() > minBlock || timeout <= 0 {
-		return
-	}
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-	select {
-	case <-pe.knownTipHintReady:
-	case <-timer.C:
-	case <-ctx.Done():
-	}
-}
-
-func (pe *PipelineExecutor) knownTipHintFloor(tx kv.Getter) (uint64, error) {
-	headersProgress, err := stages.GetStageProgress(tx, stages.Headers)
-	if err != nil {
-		return 0, err
-	}
-	knownTip := stagedsync.KnownTip(headersProgress, pe.blockReader.FrozenBlocks())
-	if lastTipReachedBlock, ok, err := rawdb.ReadLastTipReachedBlock(tx); err != nil {
-		return 0, err
-	} else if ok {
-		knownTip = max(knownTip, lastTipReachedBlock)
-	}
-	return knownTip, nil
 }
 
 // UnwindTo sets the unwind point on the main pipeline.
@@ -291,12 +255,6 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 	if onlySnapDownload {
 		return nil
 	}
-
-	knownTipFloor, err := pe.knownTipHintFloor(tx)
-	if err != nil {
-		return err
-	}
-	pe.waitKnownTipHint(ctx, knownTipFloor, 500*time.Millisecond)
 
 	// If domains are ahead of block files, nothing to execute.
 	if execctx.IsDomainAheadOfBlocks(ctx, tx, pe.logger) {
