@@ -32,10 +32,9 @@ package freezeblocks
 // These benchmarks isolate each component so the saving is measurable
 // without needing real snapshot files:
 //
-//   BenchmarkCanonicalHash_MDBXLookup         – step 1: raw MDBX read; identical on both branches.
-//   BenchmarkCanonicalHash_HeaderHash_Minimal  – step 3 on a trivial header (not representative).
-//   BenchmarkCanonicalHash_HeaderHash_Realistic– step 3 on a full mainnet-like header.
-//   BenchmarkCanonicalHash_LRUCacheHit         – LRU lookup replacing steps 2+3 on this branch.
+//   BenchmarkCanonicalHash_MDBXLookup          – step 1: raw MDBX read; identical on both branches.
+//   BenchmarkCanonicalHash_HeaderHash_Realistic – step 3 on a full mainnet-like header.
+//   BenchmarkCanonicalHash_LRUCacheHit          – LRU lookup replacing steps 2+3 on this branch.
 //
 // Run with:
 //   go test -bench=BenchmarkCanonicalHash -benchmem ./db/snapshotsync/freezeblocks/

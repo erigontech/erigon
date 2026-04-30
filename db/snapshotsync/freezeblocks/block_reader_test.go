@@ -297,10 +297,10 @@ func TestCanonicalHashCache_SnapshotPath(t *testing.T) {
 	compressCfg.MinPatternScore = 100
 	c, err := seg.NewCompressor(t.Context(), "test", segPath, tmpDir, compressCfg, log.LvlDebug, logger)
 	require.NoError(t, err)
-	defer c.Close()
 	c.DisableFsync()
 	require.NoError(t, c.AddWord(word))
 	require.NoError(t, c.Compress())
+	c.Close()
 
 	// Build index with BaseDataID=from so OrdinalLookup(blockNum-from)=OrdinalLookup(0).
 	idxPath := filepath.Join(tmpDir, snaptype.IdxFileName(ver, from, to, snaptype2.Enums.Headers.String()))
@@ -314,10 +314,10 @@ func TestCanonicalHashCache_SnapshotPath(t *testing.T) {
 		Enums:      true,
 	}, logger)
 	require.NoError(t, err)
-	defer idx.Close()
 	idx.DisableFsync()
 	require.NoError(t, idx.AddKey([]byte{0}, 0))
 	require.NoError(t, idx.Build(t.Context()))
+	idx.Close()
 
 	// Bodies and Transactions segments are required for OpenFolder to recognise the range.
 	createTestSegmentFile(t, from, to, snaptype2.Enums.Bodies, tmpDir, ver, logger)
