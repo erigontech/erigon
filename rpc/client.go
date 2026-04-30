@@ -645,9 +645,11 @@ func (c *Client) dispatch(codec ServerCodec, connCtx context.Context) {
 			conn.handler.addRequestOp(op)
 
 		case err := <-c.reqSent:
-			if err != nil {
+			if err != nil && lastOp != nil {
 				// Remove response handlers for the last send. When the read loop
 				// goes down, it will signal all other current operations.
+				// lastOp can be nil if a fatal read error fired first and already
+				// cancelled the in-flight op.
 				conn.handler.removeRequestOp(lastOp)
 			}
 			// Let the next request in.
