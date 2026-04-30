@@ -129,14 +129,23 @@ func GetActivationExitChurnLimit(s abstract.BeaconState) uint64 {
 }
 
 func GetBalanceChurnLimit(s abstract.BeaconState) uint64 {
+	churnLimitQuotient := s.BeaconConfig().ChurnLimitQuotient
+	if s.Version() >= clparams.GloasVersion {
+		churnLimitQuotient = s.BeaconConfig().ChurnLimitQuotientGloas
+	}
 	churn := max(
 		s.BeaconConfig().MinPerEpochChurnLimitElectra,
-		s.GetTotalActiveBalance()/s.BeaconConfig().ChurnLimitQuotient,
+		s.GetTotalActiveBalance()/churnLimitQuotient,
 	)
 	return churn - churn%s.BeaconConfig().EffectiveBalanceIncrement
 }
 
 func GetConsolidationChurnLimit(s abstract.BeaconState) uint64 {
+	if s.Version() >= clparams.GloasVersion {
+		// [Modified in Gloas:EIP8061] Independent consolidation churn, no max() with min churn
+		churn := s.GetTotalActiveBalance() / s.BeaconConfig().ConsolidationChurnLimitQuotient
+		return churn - churn%s.BeaconConfig().EffectiveBalanceIncrement
+	}
 	return GetBalanceChurnLimit(s) - GetActivationExitChurnLimit(s)
 }
 

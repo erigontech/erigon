@@ -17,6 +17,7 @@
 package forkchoice
 
 import (
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/common"
@@ -164,9 +165,33 @@ func (w *weightStore) GetProposerScore() uint64 {
 }
 
 // ShouldApplyProposerBoost returns whether the proposer boost should be applied.
+//
+// Pre-GLOAS: simple check that proposer_boost_root is set.
+//
+// [New in Gloas:EIP7732] Post-GLOAS implements the full spec logic:
+//
+//	if proposer_boost_root == Root(): return False
+//	block = store.blocks[proposer_boost_root]
+//	parent = store.blocks[block.parent_root]
+//	if parent.slot + 1 < block.slot: return True           # parent not from previous slot
+//	if not is_head_weak(store, parent_root): return True    # parent not weak
+//	# parent is weak and from previous slot — check for equivocations
+//	equivocations = [ ... timely blocks by same proposer at same slot ]
+//	return len(equivocations) == 0
 func (w *weightStore) ShouldApplyProposerBoost() bool {
 	proposerBoostRoot := w.f.ProposerBoostRoot()
-	return proposerBoostRoot != (common.Hash{})
+	if proposerBoostRoot == (common.Hash{}) {
+		return false
+	}
+
+	// Pre-GLOAS: just check if root is set
+	currentEpoch := w.f.computeEpochAtSlot(w.f.Slot())
+	if w.f.beaconCfg.GetCurrentStateVersion(currentEpoch) < clparams.GloasVersion {
+		return true
+	}
+
+	// [New in Gloas:EIP7732] Full spec logic
+	return w.f.shouldApplyProposerBoostGloas(proposerBoostRoot)
 }
 
 // WeightStoreReader provides read-only access to weight calculations.

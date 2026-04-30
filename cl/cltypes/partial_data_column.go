@@ -149,6 +149,10 @@ func (s *PartialDataColumnSidecar) SetVersion(v clparams.StateVersion) {
 
 func (s *PartialDataColumnSidecar) getSchema() []any {
 	s.init()
+	if s.version >= clparams.GloasVersion {
+		// [Modified in Gloas:EIP7732] Removed `header`
+		return []any{s.CellsPresentBitmap, s.PartialColumn, s.KzgProofs}
+	}
 	return []any{s.CellsPresentBitmap, s.PartialColumn, s.KzgProofs, s.Header}
 }
 
@@ -164,10 +168,13 @@ func (s *PartialDataColumnSidecar) DecodeSSZ(buf []byte, version int) error {
 
 func (s *PartialDataColumnSidecar) EncodingSizeSSZ() int {
 	s.init()
-	return s.CellsPresentBitmap.EncodingSizeSSZ() +
+	size := s.CellsPresentBitmap.EncodingSizeSSZ() +
 		s.PartialColumn.EncodingSizeSSZ() +
-		s.KzgProofs.EncodingSizeSSZ() +
-		s.Header.EncodingSizeSSZ()
+		s.KzgProofs.EncodingSizeSSZ()
+	if s.version < clparams.GloasVersion {
+		size += s.Header.EncodingSizeSSZ()
+	}
+	return size
 }
 
 func (s *PartialDataColumnSidecar) HashSSZ() ([32]byte, error) {

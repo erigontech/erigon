@@ -127,9 +127,10 @@ type ApiHandler struct {
 	enableMemoizedHeadState          bool
 
 	// [New in Gloas:EIP7732]
-	epbsPool                   *pool.EpbsPool
-	executionPayloadBidService services.ExecutionPayloadBidService
-	payloadAttestationService  services.PayloadAttestationService
+	epbsPool                    *pool.EpbsPool
+	executionPayloadBidService  services.ExecutionPayloadBidService
+	payloadAttestationService   services.PayloadAttestationService
+	proposerPreferencesService  services.ProposerPreferencesService
 	// selfBuildPayloads caches the execution payload + requests built by the local
 	// EL during self-build block production, keyed by the execution block hash.
 	// When the validator publishes the signed block, broadcastBlock retrieves the
@@ -183,6 +184,7 @@ func NewApiHandler(
 	epbsPool *pool.EpbsPool,
 	executionPayloadBidService services.ExecutionPayloadBidService,
 	payloadAttestationService services.PayloadAttestationService,
+	proposerPreferencesService services.ProposerPreferencesService,
 ) *ApiHandler {
 	blobBundles, err := lru.New[common.Bytes48, BlobBundle]("blobs", maxBlobBundleCacheSize)
 	if err != nil {
@@ -246,6 +248,7 @@ func NewApiHandler(
 		epbsPool:                         epbsPool,
 		executionPayloadBidService:       executionPayloadBidService,
 		payloadAttestationService:        payloadAttestationService,
+		proposerPreferencesService:       proposerPreferencesService,
 		selfBuildPayloads:                selfBuildPayloads,
 		selfBuildEnvelopes:               selfBuildEnvelopes,
 	}
@@ -337,6 +340,8 @@ func (a *ApiHandler) init() {
 						// [New in Gloas:EIP7732]
 						r.Get("/payload_attestations", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconPoolPayloadAttestations))
 						r.Post("/payload_attestations", a.PostEthV1BeaconPoolPayloadAttestations)
+						r.Get("/proposer_preferences", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconPoolProposerPreferences))
+						r.Post("/proposer_preferences", a.PostEthV1BeaconPoolProposerPreferences)
 					})
 					r.Route("/light_client", func(r chi.Router) {
 						r.Get("/bootstrap/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconLightClientBootstrap))

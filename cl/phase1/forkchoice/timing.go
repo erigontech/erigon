@@ -76,7 +76,8 @@ func (f *ForkChoiceStore) getPayloadAttestationDueMs(_ uint64) uint64 {
 //
 // This is equivalent to checking block_timeliness[ATTESTATION_TIMELINESS_INDEX] at the
 // current store time. It is NOT the same as WeightStore.ShouldApplyProposerBoost(),
-// which simply checks whether proposer_boost_root has been set.
+// which implements the spec's should_apply_proposer_boost for weight calculation
+// (GLOAS: complex logic with equivocation checks; pre-GLOAS: checks proposer_boost_root != zero).
 func (f *ForkChoiceStore) shouldApplyProposerBoost() bool {
 	secondsSinceGenesis := f.time.Load() - f.genesisTime
 	timeIntoSlotMs := (secondsSinceGenesis % f.beaconCfg.SecondsPerSlot) * 1000
@@ -177,6 +178,100 @@ func (f *ForkChoiceStore) updateProposerBoostRoot(block *cltypes.BeaconBlock, bl
 	f.proposerBoostRoot.Store(blockRoot)
 }
 
+// shouldApplyProposerBoostGloas implements the GLOAS spec's should_apply_proposer_boost logic.
+// Called from WeightStore.ShouldApplyProposerBoost when in GLOAS mode.
+// proposerBoostRoot must not be zero (caller checks this).
+//
+// Spec (GLOAS fork-choice.md):
+//
+//	block = store.blocks[store.proposer_boost_root]
+//	parent_root = block.parent_root
+//	parent = store.blocks[parent_root]
+//	slot = block.slot
+//
+//	# Apply boost if parent not from previous slot
+//	if parent.slot + 1 < slot: return True
+//
+//	# Apply boost if parent not weak
+//	if not is_head_weak(store, parent_root): return True
+//
+//	# If parent is weak and from previous slot, apply if no early equivocations
+//	equivocations = [root for root, block in store.blocks.items()
+//	    if store.block_timeliness[root][PTC_TIMELINESS_INDEX]
+//	       and block.proposer_index == parent.proposer_index
+//	       and block.slot + 1 == slot
+//	       and root != parent_root]
+//	return len(equivocations) == 0
+//
+// [New in Gloas:EIP7732]
+func (f *ForkChoiceStore) shouldApplyProposerBoostGloas(proposerBoostRoot common.Hash) bool {
+	// Get the boosted block
+	boostBlock, ok := f.forkGraph.GetBlock(proposerBoostRoot)
+	if !ok || boostBlock == nil {
+		return false
+	}
+
+	parentRoot := boostBlock.Block.ParentRoot
+	slot := boostBlock.Block.Slot
+
+	// Get the parent block
+	parentBlock, ok := f.forkGraph.GetBlock(parentRoot)
+	if !ok || parentBlock == nil {
+		return false
+	}
+
+	// Apply boost if parent not from previous slot
+	if parentBlock.Block.Slot+1 < slot {
+		return true
+	}
+
+	// Apply boost if parent not weak
+	if !f.isHeadWeak(parentRoot) {
+		return true
+	}
+
+	// Parent is weak and from previous slot.
+	// Apply boost only if there are no equivocating blocks:
+	// blocks by the same proposer at the same slot that are PTC-timely.
+	parentProposerIndex := parentBlock.Block.ProposerIndex
+	hasEquivocation := false
+
+	// Iterate over all known head blocks to find equivocations.
+	// We check the headSet and also walk the fork graph's children to cover
+	// all blocks at relevant slots.
+	f.blockTimeliness.Range(func(key, value any) bool {
+		root := key.(common.Hash)
+		timeliness := value.([clparams.NumBlockTimelinessDeadlines]bool)
+
+		// Skip the parent root itself
+		if root == parentRoot {
+			return true
+		}
+
+		// Check PTC timeliness (block arrived before PTC deadline)
+		if !timeliness[clparams.PtcTimelinessIndex] {
+			return true
+		}
+
+		// Get the block to check proposer and slot
+		blk, blkOk := f.forkGraph.GetBlock(root)
+		if !blkOk || blk == nil {
+			return true
+		}
+
+		// Check same proposer, adjacent slot, and not the parent
+		if blk.Block.ProposerIndex == parentProposerIndex &&
+			blk.Block.Slot+1 == slot {
+			hasEquivocation = true
+			return false // stop iteration
+		}
+
+		return true
+	})
+
+	return !hasEquivocation
+}
+
 // isHeadLate returns true if the head block was not received on time.
 // Uses the block_timely element (index 0) of the timeliness vector.
 // [New in Gloas:EIP7732] Updated to use the two-element timeliness vector.
@@ -268,6 +363,50 @@ func (f *ForkChoiceStore) isHeadWeak(root common.Hash) bool {
 	}
 
 	return headWeight < reorgThreshold
+}
+
+// isParentStrong returns true if the parent of the block with the given root has
+// sufficient attestation support (above the REORG_PARENT_WEIGHT_THRESHOLD).
+//
+// Spec (GLOAS fork-choice.md):
+//
+//	parent_threshold = calculate_committee_fraction(justified_state, REORG_PARENT_WEIGHT_THRESHOLD)
+//	block = store.blocks[root]
+//	parent_payload_status = get_parent_payload_status(store, block)
+//	parent_node = ForkChoiceNode(root=block.parent_root, payload_status=parent_payload_status)
+//	parent_weight = get_attestation_score(store, parent_node, justified_state)
+//	return parent_weight > parent_threshold
+//
+// [New in Gloas:EIP7732]
+func (f *ForkChoiceStore) isParentStrong(root common.Hash) bool {
+	justifiedCheckpoint := f.JustifiedCheckpoint()
+	checkpointState, err := f.getCheckpointState(justifiedCheckpoint)
+	if err != nil || checkpointState == nil {
+		return false
+	}
+
+	// Calculate parent threshold: committee_weight * REORG_PARENT_WEIGHT_THRESHOLD / 100
+	committeeWeight := checkpointState.activeBalance / f.beaconCfg.SlotsPerEpoch
+	parentThreshold := committeeWeight * clparams.ReorgParentWeightThreshold / 100
+
+	// Get the block to determine parent payload status
+	block, ok := f.forkGraph.GetBlock(root)
+	if !ok || block == nil {
+		return false
+	}
+
+	// Get parent payload status and construct parent node
+	parentPayloadStatus := f.getParentPayloadStatus(block.Block)
+	parentNode := ForkChoiceNode{
+		Root:          block.Block.ParentRoot,
+		PayloadStatus: parentPayloadStatus,
+	}
+
+	// Get parent weight using WeightStore
+	ws := NewWeightStore(f)
+	parentWeight := ws.GetAttestationScore(parentNode)
+
+	return parentWeight > parentThreshold
 }
 
 // getBlockTimeliness returns the timeliness vector for a block root.

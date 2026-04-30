@@ -331,13 +331,16 @@ func (I *impl) ProcessWithdrawals(
 // processWithdrawalsGloas implements the Gloas version of process_withdrawals.
 // The payload parameter is removed; withdrawals are computed internally.
 func (I *impl) processWithdrawalsGloas(s abstract.BeaconState) error {
-	// [Modified in Gloas:EIP7732] Return early if the parent block is empty or genesis.
+	// [Modified in Gloas:EIP7732] Return early if the parent block is empty.
+	// Spec: if state.latest_block_hash != state.latest_execution_payload_bid.block_hash: return
 	latestBlockHash := s.GetLatestBlockHash()
 	bid := s.GetLatestExecutionPayloadBid()
 
-	isGenesisBlock := latestBlockHash == (common.Hash{})
-	isParentBlockEmpty := bid == nil || latestBlockHash != bid.BlockHash
-	if isGenesisBlock || isParentBlockEmpty {
+	bidBlockHash := common.Hash{}
+	if bid != nil {
+		bidBlockHash = bid.BlockHash
+	}
+	if latestBlockHash != bidBlockHash {
 		return nil
 	}
 
@@ -631,7 +634,8 @@ func (I *impl) ApplyParentExecutionPayload(s abstract.BeaconState, requests *clt
 		// previous epoch
 		paymentIndex = int(parentSlot % slotsPerEpoch)
 	} else if parentBid.Value > 0 {
-		// Parent epoch is too old for indexed payment — direct withdrawal
+		// Parent is older than the previous epoch, its payment entry has been
+		// evicted from builder_pending_payments. Append the withdrawal directly.
 		withdrawals := s.GetBuilderPendingWithdrawals()
 		withdrawals.Append(&cltypes.BuilderPendingWithdrawal{
 			FeeRecipient: parentBid.FeeRecipient,
@@ -641,11 +645,11 @@ func (I *impl) ApplyParentExecutionPayload(s abstract.BeaconState, requests *clt
 		s.SetBuilderPendingWithdrawals(withdrawals)
 		paymentIndex = -1
 	} else {
-		// Parent epoch is too old and bid value is zero — nothing to pay
 		paymentIndex = -1
 	}
 
 	if paymentIndex >= 0 {
+		// settle_builder_payment: move payment to withdrawals and clear the entry
 		payments := s.GetBuilderPendingPayments()
 		payment := payments.Get(paymentIndex)
 		if payment != nil && payment.Withdrawal != nil && payment.Withdrawal.Amount > 0 {
@@ -688,11 +692,11 @@ func (I *impl) ProcessParentExecutionPayload(s abstract.BeaconState, block cltyp
 	}
 	parentExecutionRequests := body.GetParentExecutionRequests()
 
-	// Determine if the parent block was genesis or empty
-	isGenesisBlock := parentBid.BlockHash == (common.Hash{})
+	// Determine if the parent block was empty
+	// Spec: is_parent_block_empty = bid.parent_block_hash != parent_bid.block_hash
 	isParentBlockEmpty := bid.ParentBlockHash != parentBid.BlockHash
 
-	if isGenesisBlock || isParentBlockEmpty {
+	if isParentBlockEmpty {
 		// Parent was EMPTY or genesis: assert no requests
 		if parentExecutionRequests != nil {
 			if (parentExecutionRequests.Deposits != nil && parentExecutionRequests.Deposits.Len() > 0) ||
@@ -783,6 +787,11 @@ func (I *impl) ProcessExecutionPayloadEnvelope(s abstract.BeaconState, signedEnv
 	}
 	if envelope.BeaconBlockRoot != headerRoot {
 		return fmt.Errorf("ProcessExecutionPayloadEnvelope: beacon_block_root %v does not match latest_block_header root %v", envelope.BeaconBlockRoot, headerRoot)
+	}
+
+	// Verify parent_beacon_block_root matches state.latest_block_header.parent_root
+	if envelope.ParentBeaconBlockRoot != latestBlockHeader.ParentRoot {
+		return fmt.Errorf("ProcessExecutionPayloadEnvelope: parent_beacon_block_root %v does not match latest_block_header parent_root %v", envelope.ParentBeaconBlockRoot, latestBlockHeader.ParentRoot)
 	}
 
 	// Verify slot_number matches state slot (EIP-7843: block.slot == envelope.payload.slot_number)
@@ -1966,5 +1975,6 @@ func (I *impl) ProcessPayloadAttestation(s abstract.BeaconState, payloadAttestat
 	if !valid {
 		return errors.New("ProcessPayloadAttestation: invalid indexed payload attestation")
 	}
+
 	return nil
 }

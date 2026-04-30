@@ -305,18 +305,16 @@ func (b *CachingBeaconState) UpgradeToGloas() error {
 	}
 
 	bid := &cltypes.ExecutionPayloadBid{
+		ParentBlockHash:       common.Hash{},
+		BlockHash:             latestBlockHash,
 		BuilderIndex:          0,
 		Slot:                  0,
-		PrevRandao:            common.Hash{},
-		ParentBlockHash:       common.Hash{},
-		ParentBlockRoot:       common.Hash{},
-		BlockHash:             latestBlockHash,
-		FeeRecipient:          common.Address{},
-		GasLimit:              0,
 		Value:                 0,
-		ExecutionPayment:      0,
 		BlobKzgCommitments:    *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
 		ExecutionRequestsRoot: emptyRequestsRoot,
+		PrevRandao:            common.Hash{},
+		GasLimit:              0,
+		ParentBlockRoot:       common.Hash{},
 	}
 	b.SetLatestExecutionPayloadBid(bid)
 

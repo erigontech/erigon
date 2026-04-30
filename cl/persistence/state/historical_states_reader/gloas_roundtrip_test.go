@@ -106,7 +106,7 @@ func TestReadCompressedSSZ_ExecutionPayloadBid(t *testing.T) {
 		ParentBlockRoot:       common.HexToHash("0x2222222222222222222222222222222222222222222222222222222222222222"),
 		BlockHash:             common.HexToHash("0x3333333333333333333333333333333333333333333333333333333333333333"),
 		PrevRandao:            common.HexToHash("0x4444444444444444444444444444444444444444444444444444444444444444"),
-		FeeRecipient:          common.HexToAddress("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+		FeeRecipient:          common.HexToAddress("0x6666666666666666666666666666666666666666"),
 		GasLimit:              30_000_000,
 		BuilderIndex:          7,
 		Slot:                  1000,

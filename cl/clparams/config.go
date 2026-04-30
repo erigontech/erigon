@@ -692,6 +692,8 @@ type BeaconChainConfig struct {
 	BalancePerAdditionalCustodyGroup uint64 `yaml:"BALANCE_PER_ADDITIONAL_CUSTODY_GROUP" spec:"true" json:"BALANCE_PER_ADDITIONAL_CUSTODY_GROUP,string"` // BalancePerAdditionalCustodyGroup defines the balance required per additional custody group.
 
 	// Gloas
+	ChurnLimitQuotientGloas            uint64     `yaml:"CHURN_LIMIT_QUOTIENT_GLOAS" spec:"true" json:"CHURN_LIMIT_QUOTIENT_GLOAS,string"`                         // ChurnLimitQuotientGloas replaces ChurnLimitQuotient for balance churn calculation in GLOAS+.
+	ConsolidationChurnLimitQuotient    uint64     `yaml:"CONSOLIDATION_CHURN_LIMIT_QUOTIENT" spec:"true" json:"CONSOLIDATION_CHURN_LIMIT_QUOTIENT,string"`         // ConsolidationChurnLimitQuotient is the independent quotient for consolidation churn in GLOAS+.
 	BuilderWithdrawalPrefix        ConfigByte `yaml:"-" json:"-"`
 	PtcSize                        uint64     `yaml:"PTC_SIZE" spec:"true" json:"PTC_SIZE,string"`                                                     // PtcSize is the number of validators in the Payload Timeliness Committee (preset: 512 mainnet, 16 minimal).
 	MaxPayloadAttestations         uint64     `yaml:"MAX_PAYLOAD_ATTESTATIONS" spec:"true" json:"MAX_PAYLOAD_ATTESTATIONS,string"`                     // MaxPayloadAttestations defines the maximum number of payload attestations in a block.
@@ -1039,6 +1041,8 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	},
 
 	// Gloas
+	ChurnLimitQuotientGloas:         1 << 15,
+	ConsolidationChurnLimitQuotient: 1 << 16,
 	BuilderWithdrawalPrefix:        0x03,
 	PtcSize:                        512,
 	MaxPayloadAttestations:         4,
