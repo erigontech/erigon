@@ -26,6 +26,9 @@ import (
 // overridden with that value so that t.TempDir() and os.MkdirTemp use it
 // (e.g. a RAM disk).
 func RunTestMain(m *testing.M) {
+	if os.Getenv("ERIGON_SKIP_EXECUTION_TESTS") != "" {
+		os.Exit(0)
+	}
 	if dir := os.Getenv("ERIGON_EXECUTION_TESTS_TMPDIR"); dir != "" {
 		setTestTmpDir(dir)
 	}
