@@ -292,7 +292,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							return fmt.Errorf("%w, block=%d, %v", rules.ErrInvalidBlock, applyResult.BlockNum, err) //same as in stage_exec.go
 						}
 
-						if !applyResult.isPartial && !execStage.CurrentSyncCycle.IsInitialCycle {
+						if !applyResult.isPartial && pe.accumulator != nil {
 							pe.cfg.notifications.RecentReceipts.Add(applyResult.Receipts, b.Transactions(), lastHeader)
 						}
 					}

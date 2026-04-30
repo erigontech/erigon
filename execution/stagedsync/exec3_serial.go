@@ -418,7 +418,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err)
 				}
 
-				if startTxIndex == 0 && !isInitialCycle {
+				if startTxIndex == 0 && se.accumulator != nil {
 					se.cfg.notifications.RecentReceipts.Add(blockReceipts, txTask.Txs, txTask.Header)
 				}
 				checkReceipts := !se.cfg.vmConfig.StatelessExec && se.cfg.chainConfig.IsByzantium(txTask.BlockNumber()) && !se.cfg.vmConfig.NoReceipts
