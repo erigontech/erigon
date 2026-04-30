@@ -706,7 +706,7 @@ var (
 	}
 	SnapSkipStateSnapshotDownloadFlag = cli.BoolFlag{
 		Name:  "snap.skip-state-snapshot-download",
-		Usage: "Skip state download and start from genesis block",
+		Usage: "Skip state snapshot download and re-execute from genesis to build state. Unlike --prune.mode=blocks which downloads state snapshots then prunes history, this flag skips the download entirely.",
 		Value: false,
 	}
 	SnapP2PManifestFlag = cli.BoolFlag{
@@ -1177,7 +1177,7 @@ var (
 	}
 	ExecNoPruneFlag = cli.BoolFlag{
 		Name:  "exec.no-prune",
-		Usage: "Disable state-aggregator pruning of historical steps (equivalent to NO_PRUNE=true). Diagnostic / perf-comparison use only.",
+		Usage: "Disable all DB pruning: state-aggregator (Domain/InvertedIndex/forkable) plus stage-level pruning (Execution: ChangeSets3/BlockAccessList; TxLookup; WitnessProcessing; Snapshots: PruneAncientBlocks/canonical markers/retirement) (equivalent to NO_PRUNE=true). Diagnostic / perf-comparison use only.",
 		Value: false,
 	}
 )

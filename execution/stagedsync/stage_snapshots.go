@@ -436,6 +436,9 @@ func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader services
 
 // SnapshotsPrune moving block data from db into snapshots, removing old snapshots (if --prune.* enabled)
 func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx, logger log.Logger) (err error) {
+	if dbg.NoPrune() {
+		return nil
+	}
 	freezingCfg := cfg.blockReader.FreezingCfg()
 	if freezingCfg.ProduceE2 {
 		//TODO: initialSync maybe save files progress here

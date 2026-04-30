@@ -762,6 +762,167 @@ func TestCalculateMergeStartTxNum(t *testing.T) {
 	}
 }
 
+func TestFindMergeRangeInFiles(t *testing.T) {
+	t.Parallel()
+
+	// fabricate synthetic visibleFile's without I/O internals only for testing of ranges
+	f := func(from, to uint64) visibleFile {
+		return visibleFile{
+			startTxNum: from,
+			endTxNum:   to,
+			src:        &FilesItem{startTxNum: from, endTxNum: to},
+		}
+	}
+
+	const stepSize = uint64(1)
+	const bigSpan = uint64(4096) // large enough not to clamp anything in these scenarios
+
+	t.Run("empty", func(t *testing.T) {
+		// (none) -> (no merge)
+		mr := findMergeRangeInFiles(nil, stepSize, 1024, bigSpan, false)
+		assert.False(t, mr.needMerge)
+	})
+
+	t.Run("single_aligned_file_skips", func(t *testing.T) {
+		// [0, 1024) ->
+		// [0, 1024)   (no merge — already at max-aligned span)
+		mr := findMergeRangeInFiles(visibleFiles{f(0, 1024)}, stepSize, 1024, bigSpan, false)
+		assert.False(t, mr.needMerge)
+	})
+
+	t.Run("two_singletons_merge_to_2", func(t *testing.T) {
+		// [0, 1), [1, 2) ->
+		// [0, 2)
+		mr := findMergeRangeInFiles(visibleFiles{f(0, 1), f(1, 2)}, stepSize, 2, bigSpan, false)
+		assert.True(t, mr.needMerge)
+		assert.Equal(t, uint64(0), mr.from)
+		assert.Equal(t, uint64(2), mr.to)
+	})
+
+	t.Run("maxEndTxNum_excludes_later_files", func(t *testing.T) {
+		// [0, 1), [1, 2), [2, 3) -> with maxEndTxNum=2
+		// [0, 2), [2, 3)   ([2, 3) is past the frontier and ignored)
+		files := visibleFiles{f(0, 1), f(1, 2), f(2, 3)}
+		mr := findMergeRangeInFiles(files, stepSize, 2, bigSpan, false)
+		assert.True(t, mr.needMerge)
+		assert.Equal(t, uint64(0), mr.from)
+		assert.Equal(t, uint64(2), mr.to)
+	})
+
+	t.Run("outer_merge_absorbs_inner", func(t *testing.T) {
+		// [0, 1), [1, 2), [2, 3), [3, 4) ->
+		// [0, 4)   ([1, 2) initially proposes {0,2}; [3, 4) widens it to {0,4} which absorbs everything)
+		files := visibleFiles{f(0, 1), f(1, 2), f(2, 3), f(3, 4)}
+		mr := findMergeRangeInFiles(files, stepSize, 4, bigSpan, false)
+		assert.True(t, mr.needMerge)
+		assert.Equal(t, uint64(0), mr.from)
+		assert.Equal(t, uint64(4), mr.to)
+	})
+
+	t.Run("maxSpan_caps_window", func(t *testing.T) {
+		// [0, 4), [4, 8) -> with maxSpan=2
+		// [0, 4), [4, 8)   (no merge: each file is wider than maxSpan, no aligned window
+		//                  ending at endTxNum reaches past startTxNum)
+		files := visibleFiles{f(0, 4), f(4, 8)}
+		const maxSpan = uint64(2)
+		mr := findMergeRangeInFiles(files, stepSize, 8, maxSpan, false)
+		assert.False(t, mr.needMerge)
+	})
+
+	// --- Hand-traced scenarios ---
+
+	t.Run("non_canonical_all_self_aligned_no_merge", func(t *testing.T) {
+		// [0, 1024), [1024, 1536), [1536, 1600), [1600, 1610), [1610, 1620) ->
+		// [0, 1024), [1024, 1536), [1536, 1600), [1600, 1610), [1610, 1620)   (no merge)
+		// Every file's startTxNum already covers the largest aligned span ending at its
+		// endTxNum, e.g. 1610 -> rightmost bit 2 -> start 1608 >= 1600.
+		files := visibleFiles{
+			f(0, 1024),
+			f(1024, 1536),
+			f(1536, 1600),
+			f(1600, 1610),
+			f(1610, 1620),
+		}
+		mr := findMergeRangeInFiles(files, stepSize, 1620, bigSpan, false)
+		assert.False(t, mr.needMerge)
+	})
+
+	t.Run("trailing_pair_creates_2step_merge", func(t *testing.T) {
+		// [0, 1024), [1024, 1536), [1536, 1600), [1600, 1610), [1610, 1620), [1620, 1621), [1621, 1622) ->
+		// [0, 1024), [1024, 1536), [1536, 1600), [1600, 1610), [1610, 1620), [1620, 1622)
+		// ([1621, 1622): 1622 -> rightmost bit 2 -> start 1620 < 1621, so window {1620,1622} is picked.)
+		files := visibleFiles{
+			f(0, 1024),
+			f(1024, 1536),
+			f(1536, 1600),
+			f(1600, 1610),
+			f(1610, 1620),
+			f(1620, 1621),
+			f(1621, 1622),
+		}
+		mr := findMergeRangeInFiles(files, stepSize, 1622, bigSpan, false)
+		assert.True(t, mr.needMerge)
+		assert.Equal(t, uint64(1620), mr.from)
+		assert.Equal(t, uint64(1622), mr.to)
+	})
+
+	t.Run("partial_overlap_must_not_be_selected", func(t *testing.T) {
+		// [0, 1024), [1024, 1536), [1536, 1600), [1600, 1618), [1618, 1620), [1620, 1621), [1621, 1622) ->
+		// [0, 1024), [1024, 1536), [1536, 1600), [1600, 1618), [1618, 1620), [1620, 1622)
+		// CORRECT BEHAVIOR: the {1616, 1620} window proposed by [1618, 1620) straddles the
+		// pre-existing [1600, 1618) (its startTxNum 1600 < window's from 1616). Selecting that
+		// window would either drop coverage of [1616, 1618) or create an overlap once
+		// staticFilesInRange filters [1600, 1618) out. The algorithm should skip this unsafe
+		// window and instead pick the trailing pair's safe window {1620, 1622}.
+		//
+		// TODO(#20878): findMergeRangeInFiles currently picks {1616, 1620} regardless.
+		// The "Flexible merge ranges" proposal in https://github.com/erigontech/erigon/issues/20878
+		// fixes this by clipping the candidate window's `from` to the smallest visible
+		// startTxNum >= the natural from, so a window can never straddle an existing file.
+		// Once that lands, unskip this test.
+		t.Skip("known pathology: findMergeRangeInFiles selects a window straddling an existing file; see #20878")
+
+		files := visibleFiles{
+			f(0, 1024),
+			f(1024, 1536),
+			f(1536, 1600),
+			f(1600, 1618),
+			f(1618, 1620),
+			f(1620, 1621),
+			f(1621, 1622),
+		}
+		mr := findMergeRangeInFiles(files, stepSize, 1622, bigSpan, false)
+		assert.True(t, mr.needMerge)
+		assert.Equal(t, uint64(1620), mr.from,
+			"window must not straddle [1600, 1618); the safe candidate is the trailing pair")
+		assert.Equal(t, uint64(1622), mr.to)
+	})
+
+	// --- superSetCheck (history / inverted-index branch) ---
+
+	t.Run("superSetCheck_resets_when_existing_file_covers_candidate", func(t *testing.T) {
+		// [0, 1), [1, 2), [0, 4), [4, 5) -> with superSetCheck=true
+		// [0, 1), [1, 2), [0, 4), [4, 5)   (no merge)
+		// [1, 2) initially proposes {0, 2}; [0, 4) has same startTxNum 0 and endTxNum 4 >= 2,
+		// so superSetCheck widens the candidate and clears needMerge. [4, 5) is self-aligned.
+		files := visibleFiles{f(0, 1), f(1, 2), f(0, 4), f(4, 5)}
+		mr := findMergeRangeInFiles(files, stepSize, 5, bigSpan, true)
+		assert.False(t, mr.needMerge)
+	})
+
+	t.Run("superSetCheck_smaller_later_file_revives_merge", func(t *testing.T) {
+		// [0, 1), [1, 2), [0, 4), [4, 5), [5, 6) -> with superSetCheck=true
+		// [0, 1), [1, 2), [0, 4), [4, 6)
+		// [0, 4) clears the {0, 2} candidate via superSetCheck; then [5, 6) has start 4 < 5
+		// and re-arms needMerge with {4, 6}.
+		files := visibleFiles{f(0, 1), f(1, 2), f(0, 4), f(4, 5), f(5, 6)}
+		mr := findMergeRangeInFiles(files, stepSize, 6, bigSpan, true)
+		assert.True(t, mr.needMerge)
+		assert.Equal(t, uint64(4), mr.from)
+		assert.Equal(t, uint64(6), mr.to)
+	})
+}
+
 func Test_mergeEliasFano(t *testing.T) {
 	t.Skip()
 
