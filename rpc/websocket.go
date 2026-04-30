@@ -272,19 +272,12 @@ func (a *wsConnAdapter) encode(v any) error {
 	dl := a.deadline
 	a.mu.Unlock()
 
-	var cancel context.CancelFunc
 	ctx := context.Background()
 	if !dl.IsZero() {
+		var cancel context.CancelFunc
 		ctx, cancel = context.WithDeadline(ctx, dl)
-	} else {
-		// Without a deadline the write can block indefinitely when the peer
-		// stops reading (e.g. server closes after oversized message). A blocked
-		// write holds the write mutex, preventing the read path from sending its
-		// own close-frame response, causing a deadlock. Use wsPingInterval as a
-		// generous upper bound — matching the dead-connection detection window.
-		ctx, cancel = context.WithTimeout(ctx, wsPingInterval)
+		defer cancel()
 	}
-	defer cancel()
 	data, err := json.Marshal(v)
 	if err != nil {
 		return err
@@ -346,6 +339,11 @@ func (wc *websocketCodec) peerInfo() PeerInfo {
 }
 
 func (wc *websocketCodec) WriteJSON(ctx context.Context, v any) error {
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, wsPingInterval)
+		defer cancel()
+	}
 	err := wc.jsonCodec.WriteJSON(ctx, v)
 	if err == nil {
 		// Notify pingLoop to delay the next idle ping.
