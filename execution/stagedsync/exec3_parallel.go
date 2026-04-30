@@ -1656,10 +1656,22 @@ func (result *execResult) finalizeTxSimple(
 	// Update CollectorWrites with fee-adjusted balances.
 	emptyRemoval := chainRules.IsSpuriousDragon
 	oldCoinbaseBalance := uint256.Int{}
+	coinbaseEmptyPre := coinbaseAcc == nil ||
+		(coinbaseAcc.Balance.IsZero() && coinbaseAcc.Nonce == 0 && coinbaseAcc.IsEmptyCodeHash())
 	if coinbaseAcc != nil {
 		oldCoinbaseBalance = coinbaseAcc.Balance
 	}
-	if newCoinbaseBalance != oldCoinbaseBalance {
+	// Match the serial executor: even when no fee is being credited
+	// (tipped == 0 means newBalance == oldBalance) the coinbase must be
+	// "touched" so the commitment calculator sees the EIP-161
+	// empty-removal delete. Without this touch the calculator never
+	// learns about the coinbase and the trie root diverges from serial,
+	// which always calls AddBalance(coinbase, 0) → TouchAccount → marks
+	// the empty coinbase dirty so MakeWriteSet emits a SelfDestructPath
+	// delete.
+	emitCoinbase := newCoinbaseBalance != oldCoinbaseBalance ||
+		(emptyRemoval && coinbaseEmptyPre && newCoinbaseBalance.IsZero())
+	if emitCoinbase {
 		result.CollectorWrites = result.CollectorWrites.SetAccountBalanceOrDelete(
 			result.Coinbase, coinbaseAcc, newCoinbaseBalance, tracing.BalanceIncreaseRewardTransactionFee, emptyRemoval)
 	}
@@ -1678,14 +1690,26 @@ func (result *execResult) finalizeTxSimple(
 	// fee credit) plus the fee-adjusted balance writes.
 	allWrites := make(state.VersionedWrites, len(result.TxOut), len(result.TxOut)+2)
 	copy(allWrites, result.TxOut)
-	if newCoinbaseBalance != oldCoinbaseBalance {
-		allWrites = append(allWrites, &state.VersionedWrite{
-			Address: result.Coinbase,
-			Path:    state.BalancePath,
-			Val:     newCoinbaseBalance,
-			Version: task.Version(),
-			Reason:  tracing.BalanceIncreaseRewardTransactionFee,
-		})
+	// Mirror the CollectorWrites emission above: emit the coinbase
+	// versionMap write either when balance actually changed OR when
+	// EIP-161 empty-removal will turn the empty coinbase into a delete.
+	if emitCoinbase {
+		if emptyRemoval && coinbaseEmptyPre && newCoinbaseBalance.IsZero() {
+			allWrites = append(allWrites, &state.VersionedWrite{
+				Address: result.Coinbase,
+				Path:    state.SelfDestructPath,
+				Val:     true,
+				Version: task.Version(),
+			})
+		} else {
+			allWrites = append(allWrites, &state.VersionedWrite{
+				Address: result.Coinbase,
+				Path:    state.BalancePath,
+				Val:     newCoinbaseBalance,
+				Version: task.Version(),
+				Reason:  tracing.BalanceIncreaseRewardTransactionFee,
+			})
+		}
 	}
 	if hasBurnt {
 		oldBurntBalance := uint256.Int{}

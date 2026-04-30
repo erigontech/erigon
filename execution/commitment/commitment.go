@@ -36,6 +36,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -1611,6 +1612,10 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 // receives aggregated state changes via channel instead of serialized bytes
 // from DomainPut.
 func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
+	if dbg.TraceTouchKey {
+		fmt.Printf("TOUCHDIRECT key=%x flags=%v balance=%d nonce=%d codeHash=%x\n",
+			key, update.Flags, &update.Balance, update.Nonce, update.CodeHash)
+	}
 	switch t.mode {
 	case ModeUpdate:
 		if existing, ok := t.treeIdx[key]; ok {

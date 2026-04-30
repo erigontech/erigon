@@ -245,6 +245,9 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 	if sdc.updates.Mode() == commitment.ModeDisabled {
 		return
 	}
+	if dbg.TraceTouchKey {
+		fmt.Printf("TOUCHKEY %s key=%x val=%x\n", d, key, val)
+	}
 
 	switch d {
 	case kv.AccountsDomain:

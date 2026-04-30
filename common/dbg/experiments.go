@@ -99,6 +99,7 @@ var (
 	TraceGas              = EnvBool("TRACE_GAS", false)
 	TraceDynamicGas       = EnvBool("TRACE_DYNAMIC_GAS", false)
 	TraceApply            = EnvBool("TRACE_APPLY", false)
+	TraceTouchKey         = EnvBool("TRACE_TOUCH_KEY", false)
 	TraceBlockAccessLists = EnvBool("TRACE_BLOCK_ACCESS_LISTS", false)
 	TraceBlocks           = EnvUints("TRACE_BLOCKS", ",", nil)
 	TraceTxIndexes        = EnvInts("TRACE_TXINDEXES", ",", nil)
