@@ -50,9 +50,38 @@ Run `make lint` before every push. The linter is non-deterministic — run it re
 
 **Important**: Always run `make lint` after making code changes and before committing. Fix any linter errors before proceeding. PRs must pass `make lint` before being opened or updated.
 
+## Code Style
+
+### Comments
+
+Prefer self-explanatory code over comments. Use clear names and small, focused functions so the code reads on its own. Default to writing no comment.
+
+Add a comment only when the code itself can't tell the reader *why*:
+- Workarounds for bugs in dependencies, the runtime, or other parts of the codebase (link the issue or commit when possible)
+- Non-obvious invariants or constraints not enforced by types
+- Surprising edge cases that are easy to miss when reading
+- Performance-sensitive choices where the straightforward implementation would be wrong
+
+Avoid:
+- Restating what the code does (`// increment counter`)
+- Referencing the current task, PR, or caller (`// added for the X flow`) — that belongs in the commit message
+- Documenting standard Go idioms or well-known library behavior
+- `// TODO` notes without a linked issue or owner
+
+When a comment is warranted, keep it short and focused on the *why*. If a reader could delete the comment without losing information, it shouldn't have been written.
+
 ## Pull Requests & Workflows
 
 When manually dispatching a workflow that is not part of the PR's automatic check list, add a comment on the PR explaining which workflow was dispatched, why it was chosen, and include a direct link to the workflow run.
+
+### Backport PRs to release branches
+
+When opening a PR against `release/3.4` (or another release branch):
+
+- **Title**: prefix with `[r3.4]` — e.g. `[r3.4] db/version: enforce upper-bound file version check`. Variants `[r34]` and `[3.4]` also appear but `[r3.4]` is the dominant form.
+- **Body**: keep it short. For a straight cherry-pick: `Cherry-pick of #<N> to release/3.4.` When release-branch adjustments were needed (different APIs, skipped tests, etc.), add a `## r3.4-specific adaptations` section listing the deltas. When the change is not a cherry-pick of a merged PR (e.g. a dependency bump pulling a fix), describe what's being pulled in and why it's needed on the release branch.
+- **Branch name**: keep a `3.4` marker. Common forms: `cherry-pick-<PR#>-to-release-3.4`, `cherry-pick-<PR#>-r34`, `cp/<PR#>-to-3.4`, or `<user>/<short>_34`.
+- **Base branch**: `release/3.4`.
 
 ## Pre-push
 
