@@ -280,21 +280,12 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		limitedBigJump = (fcuBlockNum-finishProgressBefore)+limitedBigJumpPadding > uint64(e.syncCfg.LoopBlockLimit)
 	}
 
-	knownTip := stagedsync.KnownTip(headersProgressBefore, e.blockReader.FrozenBlocks(), fcuBlockNum)
-	lifecycleInitialCycle, err := stagedsync.IsInitialCycleFromProgress(tx, knownTip, finishProgressBefore, e.syncCfg.InitialCycleBlockTTL)
-	if err != nil {
-		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-	}
-	initialCycle := limitedBigJump || lifecycleInitialCycle
+	initialCycle := limitedBigJump
 
 	isSynced := finishProgressBefore > 0 && finishProgressBefore > e.blockReader.FrozenBlocks() && finishProgressBefore == headersProgressBefore
-	if initialCycle {
-		isSynced = false
-	}
 	if limitedBigJump {
+		isSynced = false
 		e.logger.Info("[sync] limited big jump", "from", finishProgressBefore, "to", fcuHeader.Number.Uint64(), "amount", uint64(e.syncCfg.LoopBlockLimit), "padding", limitedBigJumpPadding)
-	} else if lifecycleInitialCycle {
-		e.logger.Debug("[sync] lifecycle initial cycle", "finish", finishProgressBefore, "knownTip", knownTip, "ttl", e.syncCfg.InitialCycleBlockTTL)
 	}
 
 	canonicalHash, err := e.canonicalHash(ctx, tx, fcuHeader.Number.Uint64())
@@ -506,9 +497,13 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	firstCycle := false
 
 	tx, err = e.pipelineExecutor.RunLoop(ctx, currentContext, tx, RunLoopConfig{
-		InitialCycle:    initialCycle,
-		FirstCycle:      firstCycle,
-		PruneTimeout:    500 * time.Millisecond,
+		InitialCycle: initialCycle,
+		FirstCycle:   firstCycle,
+		PruneTimeout: 500 * time.Millisecond,
+		PruneInitialCycleFn: func(curTx kv.TemporalRwTx) (bool, error) {
+			// Re-read Finish each iteration: CommitCycle may have advanced it.
+			return stagedsync.IsInitialCycle(curTx, e.syncCfg, e.blockReader.FrozenBlocks(), fcuBlockNum)
+		},
 		BeforeIteration: nil,
 		CommitCycle: func(ctx context.Context, sd *execctx.SharedDomains) (kv.TemporalRwTx, error) {
 			// Flush SD + overlay to a brief RwTx to relieve memory pressure.
@@ -658,7 +653,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				defer e.semaphore.Release(1)
 				defer bgSD.Close()
 				defer bgRoTx.Rollback()
-				err := e.runPostForkchoice(bgSD, finishProgressBefore, isSynced, initialCycle)
+				err := e.runPostForkchoice(bgSD, finishProgressBefore, isSynced, initialCycle, fcuBlockNum)
 				if err != nil && !errors.Is(err, context.Canceled) {
 					e.logger.Error("Error running background post forkchoice", "err", err)
 				}
@@ -681,7 +676,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		if !e.fcuBackgroundCommit {
 			if e.fcuBackgroundPrune {
 				go func() {
-					pruneTimings, err := e.runForkchoicePrune(initialCycle)
+					pruneTimings, err := e.runForkchoicePrune(initialCycle, fcuBlockNum)
 					if err != nil && !errors.Is(err, context.Canceled) {
 						e.logger.Error("Error running background prune", "err", err)
 					}
@@ -693,7 +688,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 					}
 				}()
 			} else {
-				pruneTimings, err := e.runForkchoicePrune(initialCycle)
+				pruneTimings, err := e.runForkchoicePrune(initialCycle, fcuBlockNum)
 				if err != nil {
 					return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 				}
@@ -718,7 +713,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 
 // runPostForkchoice runs flush+commit+UpdateHead+prune in a background goroutine.
 // Notifications have already been dispatched inline from the overlay.
-func (e *ExecModule) runPostForkchoice(sd *execctx.SharedDomains, finishProgressBefore uint64, isSynced bool, initialCycle bool) error {
+func (e *ExecModule) runPostForkchoice(sd *execctx.SharedDomains, finishProgressBefore uint64, isSynced bool, initialCycle bool, fcuBlockNum uint64) error {
 	var timings []any
 	if e.fcuBackgroundCommit && sd != nil {
 		commitTimings, err := e.runForkchoiceFlushCommit(sd, finishProgressBefore, isSynced)
@@ -728,7 +723,7 @@ func (e *ExecModule) runPostForkchoice(sd *execctx.SharedDomains, finishProgress
 		timings = append(timings, commitTimings...)
 	}
 	if e.fcuBackgroundPrune {
-		pruneTimings, err := e.runForkchoicePrune(initialCycle)
+		pruneTimings, err := e.runForkchoicePrune(initialCycle, fcuBlockNum)
 		if err != nil {
 			return err
 		}
@@ -823,7 +818,7 @@ func (e *ExecModule) runForkchoiceFlushCommit(sd *execctx.SharedDomains, finishP
 	return timings, nil
 }
 
-func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
+func (e *ExecModule) runForkchoicePrune(initialCycle bool, fcuBlockNum uint64) ([]any, error) {
 	var timings []any
 	pruneStart := time.Now()
 	defer UpdateForkChoicePruneDuration(pruneStart)
@@ -841,7 +836,11 @@ func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
 		}
 
 		pruneTimeout := time.Duration(e.config.SecondsPerSlot()*1000/3) * time.Millisecond / 2
-		if err := e.pipelineExecutor.RunPrune(e.bacgroundCtx, tx, initialCycle, pruneTimeout); err != nil {
+		pruneInitialCycle, err := stagedsync.IsInitialCycle(tx, e.syncCfg, e.blockReader.FrozenBlocks(), fcuBlockNum)
+		if err != nil {
+			return err
+		}
+		if err := e.pipelineExecutor.RunPrune(e.bacgroundCtx, tx, pruneInitialCycle, pruneTimeout); err != nil {
 			return err
 		}
 		return nil

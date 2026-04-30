@@ -179,11 +179,17 @@ type CommitCycleFn func(ctx context.Context, sd *execctx.SharedDomains) (kv.Temp
 // to check whether the loop should stop early. Return true to break.
 type ShouldBreakFn func(tx kv.TemporalRwTx) (bool, error)
 
-// InitialCycleFn is called before each pipeline Run when the caller needs
-// lifecycle state derived from the current transaction.
-type InitialCycleFn func(tx kv.TemporalRwTx) (bool, error)
+// PruneInitialCycleFn computes the initial-cycle flag passed to sync.RunPrune
+// on each iteration. It is independent from RunLoopConfig.InitialCycle (which
+// drives sync.Run / forward stages): forward keeps the original "true at startup,
+// false after the first fast iteration" semantics, while prune uses the
+// DB-backed lifecycle marker + --sync.initial-cycle-block-ttl. Returning true
+// asks RunPrune to use the long-prune timeouts and unbounded limits.
+type PruneInitialCycleFn func(tx kv.TemporalRwTx) (bool, error)
 
 // AfterPruneFn is called after a successful RunPrune, before any commit.
+// initialCycle is the value that was passed to RunPrune (the prune flag, not
+// the forward flag).
 type AfterPruneFn func(tx kv.TemporalRwTx, initialCycle bool) error
 
 // BeforeIterationFn is called before each pipeline Run (e.g. to set state cache).
@@ -191,14 +197,18 @@ type BeforeIterationFn func(sd *execctx.SharedDomains)
 
 // RunLoopConfig configures a single RunLoop invocation.
 type RunLoopConfig struct {
-	InitialCycle    bool
-	FirstCycle      bool
-	PruneTimeout    time.Duration
-	CommitCycle     CommitCycleFn     // required when hasMore
-	ShouldBreak     ShouldBreakFn     // optional early exit
-	InitialCycleFn  InitialCycleFn    // optional per-iteration initial-cycle decision
-	AfterPrune      AfterPruneFn      // optional post-prune hook
-	BeforeIteration BeforeIterationFn // optional per-iteration setup
+	// InitialCycle drives forward stages (sync.Run): true at startup, set to
+	// false by the caller after the first fast iteration. See StageLoop.
+	InitialCycle bool
+	FirstCycle   bool
+	PruneTimeout time.Duration
+	CommitCycle  CommitCycleFn // required when hasMore
+	ShouldBreak  ShouldBreakFn // optional early exit
+	// PruneInitialCycleFn picks the initial-cycle flag for sync.RunPrune. If
+	// nil, RunPrune is called with InitialCycle (legacy behaviour).
+	PruneInitialCycleFn PruneInitialCycleFn
+	AfterPrune          AfterPruneFn      // optional post-prune hook
+	BeforeIteration     BeforeIterationFn // optional per-iteration setup
 }
 
 // RunLoop executes the pipeline in a hasMore loop:
@@ -218,27 +228,26 @@ func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomai
 			cfg.BeforeIteration(sd)
 		}
 
-		initialCycle := cfg.InitialCycle
-		if cfg.InitialCycleFn != nil {
-			var err error
-			initialCycle, err = cfg.InitialCycleFn(tx)
+		var err error
+		hasMore, err = pe.sync.Run(sd, tx, cfg.InitialCycle, cfg.FirstCycle)
+		if err != nil {
+			return tx, err
+		}
+
+		pruneInitialCycle := cfg.InitialCycle
+		if cfg.PruneInitialCycleFn != nil {
+			pruneInitialCycle, err = cfg.PruneInitialCycleFn(tx)
 			if err != nil {
 				return tx, err
 			}
 		}
 
-		var err error
-		hasMore, err = pe.sync.Run(sd, tx, initialCycle, cfg.FirstCycle)
-		if err != nil {
-			return tx, err
-		}
-
-		if err := pe.sync.RunPrune(ctx, tx, initialCycle, cfg.PruneTimeout); err != nil {
+		if err := pe.sync.RunPrune(ctx, tx, pruneInitialCycle, cfg.PruneTimeout); err != nil {
 			return tx, err
 		}
 
 		if cfg.AfterPrune != nil {
-			if err := cfg.AfterPrune(tx, initialCycle); err != nil {
+			if err := cfg.AfterPrune(tx, pruneInitialCycle); err != nil {
 				return tx, err
 			}
 		}
@@ -316,9 +325,11 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 	}
 
 	tx, err = pe.RunLoop(ctx, doms, tx, RunLoopConfig{
+		// Forward stages: this is the snapshot-fill startup phase, always treat as initial.
+		InitialCycle: true,
 		FirstCycle:   false,
 		PruneTimeout: 0,
-		InitialCycleFn: func(curTx kv.TemporalRwTx) (bool, error) {
+		PruneInitialCycleFn: func(curTx kv.TemporalRwTx) (bool, error) {
 			return stagedsync.IsInitialCycle(curTx, pe.sync.Cfg(), pe.blockReader.FrozenBlocks(), pe.KnownTipHint())
 		},
 		AfterPrune: func(curTx kv.TemporalRwTx, _ bool) error {

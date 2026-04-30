@@ -1132,13 +1132,9 @@ func (hd *HeaderDownload) SetHeaderReader(headerReader rules.ChainHeaderReader) 
 }
 
 func (hd *HeaderDownload) AfterInitialCycle() {
-	hd.SetInitialCycle(false)
-}
-
-func (hd *HeaderDownload) SetInitialCycle(initialCycle bool) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	hd.initialCycle = initialCycle
+	hd.initialCycle = false
 }
 
 func (hd *HeaderDownload) SetFetchingNew(fetching bool) {

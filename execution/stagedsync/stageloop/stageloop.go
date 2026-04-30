@@ -68,14 +68,6 @@ func StageLoop(
 ) {
 	defer close(waitForDone)
 
-	if initialCycle, err := initialCycleFromDB(ctx, db, sync, blockReader.FrozenBlocks(), hd.Progress()); err == nil {
-		hd.SetInitialCycle(initialCycle)
-	} else if errors.Is(err, common.ErrStopped) || errors.Is(err, context.Canceled) {
-		return
-	} else {
-		logger.Error("Staged Sync", "err", err)
-	}
-
 	if err := ProcessFrozenBlocks(ctx, db, blockReader, sync, hook, false /* onlySnapDownload */, logger, hd.Progress()); err != nil {
 		if errors.Is(err, common.ErrStopped) || errors.Is(err, context.Canceled) {
 			return
@@ -88,6 +80,7 @@ func StageLoop(
 	}
 
 	logger.Debug("[stageloop] Starting iteration")
+	initialCycle := true
 	for {
 		start := time.Now()
 		select {
@@ -98,17 +91,8 @@ func StageLoop(
 		}
 		knownTipHint := hd.Progress()
 		hook.LastNewBlockSeen(knownTipHint)
-		initialCycle, err := initialCycleFromDB(ctx, db, sync, blockReader.FrozenBlocks(), knownTipHint)
-		if err != nil {
-			if errors.Is(err, common.ErrStopped) || errors.Is(err, context.Canceled) {
-				return
-			}
-			logger.Error("Staged Sync", "err", err)
-			time.Sleep(500 * time.Millisecond)
-			continue
-		}
-		hd.SetInitialCycle(initialCycle)
-		err = StageLoopIteration(ctx, db, sync, initialCycle, false, logger, blockReader, hook, knownTipHint)
+		t := time.Now()
+		err := StageLoopIteration(ctx, db, sync, initialCycle, false, logger, blockReader, hook, knownTipHint)
 		if err != nil {
 			if errors.Is(err, common.ErrStopped) || errors.Is(err, context.Canceled) {
 				return
@@ -127,6 +111,12 @@ func StageLoop(
 			time.Sleep(500 * time.Millisecond) // just to avoid too many similar error logs
 			continue
 		}
+		if time.Since(t) < 5*time.Minute {
+			initialCycle = false
+		}
+		if !initialCycle {
+			hd.AfterInitialCycle()
+		}
 		if loopMinTime != 0 {
 			waitTime := loopMinTime - time.Since(start)
 			logger.Info("Wait time until next loop", "for", waitTime)
@@ -138,18 +128,6 @@ func StageLoop(
 			}
 		}
 	}
-}
-
-func initialCycleFromDB(ctx context.Context, db kv.TemporalRwDB, sync *stagedsync.Sync, frozenBlocks uint64, knownTipHints ...uint64) (bool, error) {
-	initialCycle := true
-	if err := db.View(ctx, func(tx kv.Tx) error {
-		var err error
-		initialCycle, err = stagedsync.IsInitialCycle(tx, sync.Cfg(), frozenBlocks, knownTipHints...)
-		return err
-	}); err != nil {
-		return false, err
-	}
-	return initialCycle, nil
 }
 
 func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader services.FullBlockReader, sync *stagedsync.Sync, hook *Hook, onlySnapDownload bool, logger log.Logger, knownTipHints ...uint64) error {
@@ -194,18 +172,22 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 			return err
 		}
 	}
+	// Forward stages: this is the snapshot-fill startup phase, always treat as initial.
+	const forwardInitialCycle = true
 	firstCycle := false
 	for more := true; more; {
-		initialCycle, err := stagedsync.IsInitialCycle(tx, sync.Cfg(), blockReader.FrozenBlocks(), knownTipHints...)
-		if err != nil {
-			return err
-		}
-		more, err = sync.Run(doms, tx, initialCycle, firstCycle)
+		var err error
+		more, err = sync.Run(doms, tx, forwardInitialCycle, firstCycle)
 		if err != nil {
 			return fmt.Errorf("ProcessFrozenBlocks: %w", err)
 		}
 
-		if err := sync.RunPrune(ctx, tx, initialCycle, 0); err != nil {
+		// Prune flag: DB-marker + TTL (independent from forward).
+		pruneInitialCycle, err := stagedsync.IsInitialCycle(tx, sync.Cfg(), blockReader.FrozenBlocks(), knownTipHints...)
+		if err != nil {
+			return fmt.Errorf("ProcessFrozenBlocks: %w", err)
+		}
+		if err := sync.RunPrune(ctx, tx, pruneInitialCycle, 0); err != nil {
 			return fmt.Errorf("ProcessFrozenBlocks: %w", err)
 		}
 		if err := stagedsync.UpdateTipReached(tx, blockReader.FrozenBlocks(), knownTipHints...); err != nil {
@@ -355,7 +337,12 @@ func stageLoopIteration(ctx context.Context, sd *execctx.SharedDomains, tx kv.Te
 	logger.Info("Timings", logCtx...)
 	// -- send notifications END
 	// -- Prune+commit(sync)
-	err = sync.RunPrune(ctx, tx, initialCycle, 0)
+	// Prune uses the DB-marker + TTL flag, independent from the forward initialCycle.
+	pruneInitialCycle, err := stagedsync.IsInitialCycle(tx, sync.Cfg(), blockReader.FrozenBlocks(), knownTipHint)
+	if err != nil {
+		return false, err
+	}
+	err = sync.RunPrune(ctx, tx, pruneInitialCycle, 0)
 	if err != nil {
 		return false, err
 	}
