@@ -39,6 +39,11 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
 
+      - name: Read RPC version
+        run: |
+          source .github/workflows/scripts/rpc_version.env
+          echo "RPC_VERSION=$RPC_VERSION" >> $GITHUB_ENV
+
       - name: Set reference data dir based on branch
         run: |
           # For pull_request events base_ref is the target branch name; for push/dispatch parse from ref.

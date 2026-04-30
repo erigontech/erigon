@@ -257,7 +257,7 @@ type wsConnAdapter struct {
 }
 
 func (a *wsConnAdapter) Close() error {
-	return a.conn.CloseNow()
+	return a.conn.Close(websocket.StatusNormalClosure, "")
 }
 
 func (a *wsConnAdapter) SetWriteDeadline(t time.Time) error {

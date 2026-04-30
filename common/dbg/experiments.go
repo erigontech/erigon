@@ -116,7 +116,8 @@ var (
 	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
 	TraceDeletion         = EnvBool("TRACE_DELETION", false)
 
-	RpcDropResponse = EnvBool("RPC_DROP_RESPONSE", false)
+	RpcDropResponse  = EnvBool("RPC_DROP_RESPONSE", false)
+	TipTrieWarmupers = EnvInt("TIP_TRIE_WARMUPERS", runtime.NumCPU()*8) //io-bound (not cpu-bound). it's ok to have `io-threads > cpus`
 )
 
 func ReadMemStats(m *runtime.MemStats) {
