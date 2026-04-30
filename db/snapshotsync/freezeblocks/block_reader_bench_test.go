@@ -32,9 +32,10 @@ package freezeblocks
 // These benchmarks isolate each component so the saving is measurable
 // without needing real snapshot files:
 //
-//   BenchmarkCanonicalHash_MDBXLookup          – step 1: raw MDBX read; identical on both branches.
-//   BenchmarkCanonicalHash_HeaderHash_Realistic – step 3 on a full mainnet-like header.
-//   BenchmarkCanonicalHash_LRUCacheHit          – LRU lookup replacing steps 2+3 on this branch.
+//   BenchmarkCanonicalHash_MDBXLookup                  – step 1: raw MDBX read; identical on both branches.
+//   BenchmarkCanonicalHash_HeaderHash_Realistic         – step 3 on a full mainnet-like header.
+//   BenchmarkCanonicalHash_LRUCacheHit                  – LRU lookup replacing steps 2+3 on this branch.
+//   BenchmarkCanonicalHash_RealSnapshot_MainEquivalent  – main steady-state: headerByNumCache warm, no hash cache.
 //
 // Run with:
 //   go test -bench=BenchmarkCanonicalHash -benchmem ./db/snapshotsync/freezeblocks/
@@ -238,10 +239,79 @@ func BenchmarkCanonicalHash_RealSnapshot(b *testing.B) {
 	}
 }
 
+// BenchmarkCanonicalHash_RealSnapshot_MainEquivalent measures the steady-state cost
+// on main: headerByNumCache warm (full *Header cached), no canonicalHashCache.
+// Each call pays MDBX miss + headerByNumCache.Get + Header.Hash() atomic load.
+// Compare against BenchmarkCanonicalHash_RealSnapshot to see the actual per-call
+// delta this PR delivers when the working set fits in headerByNumCache (≤1,000 blocks).
+//
+//	ERIGON_SNAP_DIR=/datadisk/erigon34/datadir/snapshots \
+//	  go test -bench=BenchmarkCanonicalHash_RealSnapshot_MainEquivalent -benchmem -benchtime=5s \
+//	  ./db/snapshotsync/freezeblocks/
+func BenchmarkCanonicalHash_RealSnapshot_MainEquivalent(b *testing.B) {
+	snapDir := os.Getenv("ERIGON_SNAP_DIR")
+	if snapDir == "" {
+		b.Skip("set ERIGON_SNAP_DIR to a mainnet snapshots directory to run this benchmark")
+	}
+	if _, err := os.Stat(snapDir); err != nil {
+		b.Skipf("snapshot dir not accessible: %v", err)
+	}
+
+	logger := log.New()
+	cfg := ethconfig.Defaults.Snapshot
+	cfg.ChainName = networkname.Mainnet
+	snapshots := NewRoSnapshots(cfg, snapDir, logger)
+	if err := snapshots.OpenFolder(); err != nil {
+		b.Fatal(err)
+	}
+	defer snapshots.Close()
+
+	available := snapshots.BlocksAvailable()
+	if available == 0 {
+		b.Skip("no blocks available in snapshot dir")
+	}
+
+	blockReader := NewBlockReader(snapshots, nil)
+
+	db := memdb.NewTestDB(b, dbcfg.ChainDB)
+	ctx := context.Background()
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer tx.Rollback()
+
+	const startBlock = 500_000
+	const numBlocks = 1_000
+	if available < startBlock+numBlocks {
+		b.Skipf("need at least %d blocks in snapshots, got %d", startBlock+numBlocks, available)
+	}
+
+	// Warm headerByNumCache for all numBlocks via the full snapshot path.
+	for i := uint64(startBlock); i < startBlock+numBlocks; i++ {
+		if _, _, err := blockReader.CanonicalHash(ctx, tx, i); err != nil {
+			b.Fatal(err)
+		}
+	}
+	// Replace canonicalHashCache with a size-1 cache so it always misses when
+	// cycling through numBlocks distinct blocks — simulating main's steady state
+	// where only headerByNumCache is warm.
+	blockReader.canonicalHashCache, _ = lru.New[uint64, common.Hash](1)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		blockNum := uint64(startBlock + (i % numBlocks))
+		if _, _, err := blockReader.CanonicalHash(ctx, tx, blockNum); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 // BenchmarkCanonicalHash_RealSnapshot_Cold measures the full snapshot path with
-// no cache warmup. This is what every call costs on main (which has no LRU cache)
-// and what the first call costs on this branch. It cycles through enough distinct
-// block numbers to exceed the LRU cache capacity, forcing cache misses.
+// no cache warmup. This is what every call costs on main when the working set
+// exceeds headerByNumCache capacity, and what the first call costs on this branch.
+// It cycles through enough distinct block numbers to exceed both cache capacities.
 //
 //	ERIGON_SNAP_DIR=/datadisk/erigon34/datadir/snapshots \
 //	  go test -bench=BenchmarkCanonicalHash_RealSnapshot_Cold -benchmem -benchtime=5s \
