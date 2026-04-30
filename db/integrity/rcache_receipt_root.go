@@ -29,15 +29,16 @@ import (
 )
 
 // CheckReceiptRootIntegrity verifies that receipts from RCache domain produce
-// receipt roots matching block headers for a range of blocks with sampling.
+// receipt roots matching block headers. It auto-detects the range
+// [Byzantium, rcacheTip] and delegates to CheckRCacheRootAtBlkRange.
 //
 // Pre-Byzantium blocks are skipped: their consensus receipt encoding includes
 // the 32-byte intermediate state root (PostState), which Erigon does not
 // compute or persist at execution time, so RCache cannot reconstruct the
 // canonical receipt root for those blocks.
-func CheckReceiptRootIntegrity(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, blockReader services.FullBlockReader, cc *chain.Config, failFast bool) (err error) {
+func CheckReceiptRootIntegrity(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, blockReader services.FullBlockReader, cc *chain.Config, failFast bool, logger log.Logger) (err error) {
 	defer func() {
-		log.Info("[integrity] ReceiptRootIntegrity: done", "err", err)
+		logger.Info("[integrity] ReceiptRootIntegrity: done", "err", err)
 	}()
 
 	txNumsReader := blockReader.TxnumReader()
@@ -49,30 +50,56 @@ func CheckReceiptRootIntegrity(ctx context.Context, sc SamplerCfg, db kv.Tempora
 	defer tx.Rollback()
 
 	rcacheDomainProgress := tx.Debug().DomainProgress(kv.RCacheDomain)
-	fromBlock := uint64(1)
-	if cc.ByzantiumBlock != nil && *cc.ByzantiumBlock > fromBlock {
-		fromBlock = *cc.ByzantiumBlock
-	}
-	toBlock, _, _ := txNumsReader.FindBlockNum(ctx, tx, rcacheDomainProgress)
+	rcacheTip, _, _ := txNumsReader.FindBlockNum(ctx, tx, rcacheDomainProgress)
 
 	if err := ValidateDomainProgress(ctx, db, kv.RCacheDomain, txNumsReader); err != nil {
 		return err
 	}
+	tx.Rollback()
 
-	if fromBlock > toBlock {
-		log.Info("[integrity] ReceiptRootIntegrity skipped (no post-Byzantium blocks in RCache)", "byzantium", fromBlock, "rcacheTip", toBlock)
-		return nil
-	}
-	log.Info("[integrity] ReceiptRootIntegrity starting", "fromBlock", fromBlock, "toBlock", toBlock)
-
-	return parallelChunkCheck(ctx, sc.NewSampler(), fromBlock, toBlock, db, blockReader, failFast, string(ReceiptRootIntegrity), ReceiptRootIntegrityRange)
+	return CheckRCacheRootAtBlkRange(ctx, sc, db, blockReader, cc, 1, rcacheTip+1, failFast, logger)
 }
 
-// ReceiptRootIntegrityRange verifies receipt roots for a range of blocks.
-// It opens a single ReceiptCacheV2Stream covering [fromBlock, toBlock] and
-// walks blocks in lockstep with the stream's txNum cursor, so we avoid one
+// CheckRCacheRootAtBlk verifies the receipt root for a single block by
+// reconstructing receipts from RCache and comparing against the block header.
+// Pre-Byzantium blocks cannot be verified (see CheckReceiptRootIntegrity); for
+// such a block this logs a warning and returns nil.
+func CheckRCacheRootAtBlk(ctx context.Context, db kv.TemporalRoDB, blockReader services.FullBlockReader, cc *chain.Config, blockNum uint64, failFast bool, logger log.Logger) error {
+	if cc.ByzantiumBlock != nil && blockNum < *cc.ByzantiumBlock {
+		logger.Warn("[integrity] check-rcache-root-at-blk: skipping pre-Byzantium block (no PostState in RCache)",
+			"block", blockNum, "byzantium", *cc.ByzantiumBlock)
+		return nil
+	}
+	return checkRCacheRootAtBlkChunk(ctx, blockNum, blockNum, db, blockReader, failFast)
+}
+
+// CheckRCacheRootAtBlkRange verifies receipt roots over [from, to) using
+// sampling. Pre-Byzantium blocks are skipped; if `from` falls below Byzantium
+// it is clamped up with a warning.
+func CheckRCacheRootAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, blockReader services.FullBlockReader, cc *chain.Config, from, to uint64, failFast bool, logger log.Logger) error {
+	if from >= to {
+		logger.Info("[integrity] check-rcache-root-at-blk-range: empty range, skipping", "from", from, "to", to)
+		return nil
+	}
+	if cc.ByzantiumBlock != nil && from < *cc.ByzantiumBlock {
+		byzantium := *cc.ByzantiumBlock
+		logger.Warn("[integrity] check-rcache-root-at-blk-range: clamping from to Byzantium (pre-Byzantium blocks have no PostState in RCache)",
+			"from", from, "byzantium", byzantium)
+		from = byzantium
+		if from >= to {
+			logger.Info("[integrity] check-rcache-root-at-blk-range: range entirely pre-Byzantium, skipping", "to", to, "byzantium", byzantium)
+			return nil
+		}
+	}
+	logger.Info("[integrity] check-rcache-root-at-blk-range starting", "from", from, "to", to)
+	return parallelChunkCheck(ctx, sc.NewSampler(), from, to-1, db, blockReader, failFast, string(ReceiptRootIntegrity), checkRCacheRootAtBlkChunk)
+}
+
+// checkRCacheRootAtBlkChunk verifies receipt roots for an inclusive range of
+// blocks. It opens a single ReceiptCacheV2Stream covering [fromBlock, toBlock]
+// and walks blocks in lockstep with the stream's txNum cursor, so we avoid one
 // stream + one Min query per block.
-func ReceiptRootIntegrityRange(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
+func checkRCacheRootAtBlkChunk(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
 	if fromBlock > toBlock {
 		panic(fmt.Sprintf("fromBlock(%d) > toBlock(%d)", fromBlock, toBlock))
 	}
@@ -87,16 +114,16 @@ func ReceiptRootIntegrityRange(ctx context.Context, fromBlock, toBlock uint64, d
 
 	fromTxNum, err := txNumsReader.Min(ctx, tx, fromBlock)
 	if err != nil {
-		return fmt.Errorf("ReceiptRootIntegrity: failed to get minTxNum for block %d: %w", fromBlock, err)
+		return fmt.Errorf("check-rcache-root-at-blk: failed to get minTxNum for block %d: %w", fromBlock, err)
 	}
 	toTxNum, err := txNumsReader.Max(ctx, tx, toBlock)
 	if err != nil {
-		return fmt.Errorf("ReceiptRootIntegrity: failed to get maxTxNum for block %d: %w", toBlock, err)
+		return fmt.Errorf("check-rcache-root-at-blk: failed to get maxTxNum for block %d: %w", toBlock, err)
 	}
 
 	it, err := rawdb.ReceiptCacheV2Stream(tx, fromTxNum, toTxNum)
 	if err != nil {
-		return fmt.Errorf("ReceiptRootIntegrity: failed to stream receipts for blocks [%d,%d]: %w", fromBlock, toBlock, err)
+		return fmt.Errorf("check-rcache-root-at-blk: failed to stream receipts for blocks [%d,%d]: %w", fromBlock, toBlock, err)
 	}
 	defer it.Close()
 
@@ -107,17 +134,17 @@ func ReceiptRootIntegrityRange(ctx context.Context, fromBlock, toBlock uint64, d
 	}
 	header, err := blockReader.HeaderByNumber(ctx, tx, blockNum)
 	if err != nil {
-		return fmt.Errorf("ReceiptRootIntegrity: failed to get header for block %d: %w", blockNum, err)
+		return fmt.Errorf("check-rcache-root-at-blk: failed to get header for block %d: %w", blockNum, err)
 	}
 	if header == nil {
-		return fmt.Errorf("ReceiptRootIntegrity: missing header for block %d", blockNum)
+		return fmt.Errorf("check-rcache-root-at-blk: missing header for block %d", blockNum)
 	}
 	var receipts types.Receipts
 
 	verifyAndAdvance := func() error {
 		computedRoot := types.DeriveSha(receipts)
 		if computedRoot != header.ReceiptHash {
-			mismatch := fmt.Errorf("%w: ReceiptRootIntegrity: receipt root mismatch at block %d: computed=%s, header=%s",
+			mismatch := fmt.Errorf("%w: check-rcache-root-at-blk: receipt root mismatch at block %d: computed=%s, header=%s",
 				ErrIntegrity, blockNum, computedRoot, header.ReceiptHash)
 			if failFast {
 				return mismatch
@@ -135,10 +162,10 @@ func ReceiptRootIntegrityRange(ctx context.Context, fromBlock, toBlock uint64, d
 		}
 		header, err = blockReader.HeaderByNumber(ctx, tx, blockNum)
 		if err != nil {
-			return fmt.Errorf("ReceiptRootIntegrity: failed to get header for block %d: %w", blockNum, err)
+			return fmt.Errorf("check-rcache-root-at-blk: failed to get header for block %d: %w", blockNum, err)
 		}
 		if header == nil {
-			return fmt.Errorf("ReceiptRootIntegrity: missing header for block %d", blockNum)
+			return fmt.Errorf("check-rcache-root-at-blk: missing header for block %d", blockNum)
 		}
 		return nil
 	}
@@ -146,7 +173,7 @@ func ReceiptRootIntegrityRange(ctx context.Context, fromBlock, toBlock uint64, d
 	for it.HasNext() {
 		txNum, r, err := it.Next()
 		if err != nil {
-			return fmt.Errorf("ReceiptRootIntegrity: failed to read receipt: %w", err)
+			return fmt.Errorf("check-rcache-root-at-blk: failed to read receipt: %w", err)
 		}
 
 		for txNum > curMax && blockNum <= toBlock {
