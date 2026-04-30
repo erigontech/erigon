@@ -467,7 +467,6 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 	// because on slow disks - prune is slower. but for now - let's tune for nvme first, and add `tx.SpaceDirty()` check later https://github.com/erigontech/erigon/issues/11635
 	quickPruneTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*1000/3) * time.Millisecond / 2
 
-	println("EXEC CURRENT CYCLE INITIAL?", s.CurrentSyncCycle.IsInitialCycle)
 	if timeout > 0 && timeout > quickPruneTimeout {
 		quickPruneTimeout = timeout
 	}

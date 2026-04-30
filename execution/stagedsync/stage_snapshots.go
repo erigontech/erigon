@@ -437,7 +437,6 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 
 		var minBlockNumber uint64
 
-		println("SNAPS CURRENT CYCLE INITIAL?", s.CurrentSyncCycle.IsInitialCycle)
 		if s.CurrentSyncCycle.IsInitialCycle {
 			cfg.blockRetire.SetWorkers(estimate.CompressSnapshot.Workers())
 		} else {
