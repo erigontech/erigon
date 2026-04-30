@@ -1,15 +1,18 @@
 package eth
 
 import (
+	"bytes"
 	"context"
 	"testing"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
-
-	"github.com/erigontech/erigon/db/kv"
 )
 
 // mockReceiptsGetter implements ReceiptsGetter for tests using only the cache path.
@@ -527,6 +530,130 @@ func TestAnswerGetBlockHeadersQuery_HashModeSkip(t *testing.T) {
 	for i, h := range headers {
 		if h.Number.Uint64() != expectedNumbers[i] {
 			t.Fatalf("header %d: expected block %d, got %d", i, expectedNumbers[i], h.Number.Uint64())
+		}
+	}
+}
+
+// --- eth/71 AnswerGetBlockAccessListsQuery tests ---
+
+// balHeaderReader satisfies services.HeaderReader for BAL handler tests by
+// resolving hash → block number from a fixed map and panicking on every other
+// method (they're not called by AnswerGetBlockAccessListsQuery).
+type balHeaderReader map[common.Hash]uint64
+
+func (m balHeaderReader) HeaderNumber(_ context.Context, _ kv.Getter, hash common.Hash) (*uint64, error) {
+	n, ok := m[hash]
+	if !ok {
+		return nil, nil
+	}
+	return &n, nil
+}
+func (balHeaderReader) Header(context.Context, kv.Getter, common.Hash, uint64) (*types.Header, error) {
+	panic("not expected")
+}
+func (balHeaderReader) HeaderByNumber(context.Context, kv.Getter, uint64) (*types.Header, error) {
+	panic("not expected")
+}
+func (balHeaderReader) HeaderByHash(context.Context, kv.Getter, common.Hash) (*types.Header, error) {
+	panic("not expected")
+}
+func (balHeaderReader) ReadAncestor(kv.Getter, common.Hash, uint64, uint64, *uint64) (common.Hash, uint64) {
+	panic("not expected")
+}
+func (balHeaderReader) HeadersRange(context.Context, func(*types.Header) error) error {
+	panic("not expected")
+}
+func (balHeaderReader) Integrity(context.Context) error { panic("not expected") }
+
+// TestAnswerGetBlockAccessListsQuery_OrderedResponseWithMissing verifies that
+// the handler returns one entry per requested hash in request order, returning
+// the "not available" sentinel (0x80, an empty RLP string per EIP-8159 post-
+// ethereum/EIPs#11553) for any hash we don't have stored — including unknown
+// blocks and known blocks with no BAL recorded.
+func TestAnswerGetBlockAccessListsQuery_OrderedResponseWithMissing(t *testing.T) {
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRw(context.Background())
+	if err != nil {
+		t.Fatalf("begin rw: %v", err)
+	}
+	defer tx.Rollback()
+
+	hashKnownWithBAL := common.Hash{0x01}
+	hashKnownNoBAL := common.Hash{0x02}
+	hashUnknown := common.Hash{0x03}
+
+	reader := balHeaderReader{
+		hashKnownWithBAL: 100,
+		hashKnownNoBAL:   101,
+		// hashUnknown intentionally absent
+	}
+
+	bal := []byte{0xc3, 0x01, 0x02, 0x03} // short valid RLP payload (non-empty)
+	if err := rawdb.WriteBlockAccessListBytes(tx, hashKnownWithBAL, 100, bal); err != nil {
+		t.Fatalf("WriteBlockAccessListBytes: %v", err)
+	}
+
+	query := GetBlockAccessListsPacket{hashKnownWithBAL, hashUnknown, hashKnownNoBAL}
+	result := AnswerGetBlockAccessListsQuery(tx, query, reader)
+
+	if len(result) != 3 {
+		t.Fatalf("result len: have %d, want 3", len(result))
+	}
+	if !bytes.Equal(result[0], bal) {
+		t.Errorf("result[0] (known+BAL): have %x, want %x", result[0], bal)
+	}
+	if !bytes.Equal(result[1], []byte{0x80}) {
+		t.Errorf("result[1] (unknown block): have %x, want 0x80", result[1])
+	}
+	if !bytes.Equal(result[2], []byte{0x80}) {
+		t.Errorf("result[2] (known, no BAL): have %x, want 0x80", result[2])
+	}
+}
+
+// TestAnswerGetBlockAccessListsQuery_SoftSizeLimit verifies the handler
+// respects softResponseLimit by truncating the response (not padding).
+func TestAnswerGetBlockAccessListsQuery_SoftSizeLimit(t *testing.T) {
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRw(context.Background())
+	if err != nil {
+		t.Fatalf("begin rw: %v", err)
+	}
+	defer tx.Rollback()
+
+	// Each BAL just over 1 MiB so that three of them exceed softResponseLimit (2 MiB)
+	// but the first two plus the current entry still trigger the break after the
+	// second full BAL is appended.
+	balSize := 1024*1024 + 1
+	big := make([]byte, balSize)
+	for i := range big {
+		big[i] = byte(i)
+	}
+	// Wrap in a valid RLP byte-string so the wire is well-formed.
+	bal, err := rlp.EncodeToBytes(big)
+	if err != nil {
+		t.Fatalf("encode bal: %v", err)
+	}
+
+	reader := balHeaderReader{}
+	query := make(GetBlockAccessListsPacket, 0, 5)
+	for i := 0; i < 5; i++ {
+		h := common.Hash{byte(i + 1)}
+		num := uint64(1000 + i)
+		reader[h] = num
+		if err := rawdb.WriteBlockAccessListBytes(tx, h, num, bal); err != nil {
+			t.Fatalf("WriteBlockAccessListBytes: %v", err)
+		}
+		query = append(query, h)
+	}
+
+	result := AnswerGetBlockAccessListsQuery(tx, query, reader)
+	if len(result) < 1 || len(result) >= len(query) {
+		t.Fatalf("expected truncation: have %d entries, want 1..%d", len(result), len(query)-1)
+	}
+	// Every returned entry must be a full BAL (no padding, no partials).
+	for i, e := range result {
+		if !bytes.Equal(e, bal) {
+			t.Errorf("result[%d] mismatch (len=%d, want=%d)", i, len(e), len(bal))
 		}
 	}
 }

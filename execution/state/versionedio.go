@@ -1425,8 +1425,13 @@ func (account *accountState) updateRead(vr *VersionedRead) {
 		case BalancePath:
 			if val, ok := vr.Val.(uint256.Int); ok {
 				// Record the initial (pre-block) balance for net-zero detection.
-				// Only the first read is the original pre-block value.
-				if account.initialBalanceValue == nil {
+				// Only set from the first read AND only before any writes have
+				// been recorded. A read that arrives after a write (e.g. the
+				// block-end finalize in the parallel executor reading from a
+				// fresh IBS, or a BAL-prepopulated read of a tx's predicted
+				// write) reflects post-write state, not the pre-block balance,
+				// and must not be used for net-zero filtering.
+				if account.initialBalanceValue == nil && account.balanceValue == nil {
 					v := val
 					account.initialBalanceValue = &v
 				}
