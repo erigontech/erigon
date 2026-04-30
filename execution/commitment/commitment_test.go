@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math/bits"
 	"math/rand"
@@ -46,6 +47,132 @@ func (n *noopPatriciaContext) TxNum() uint64                            { return
 
 func noopCtxFactory() (PatriciaContext, func()) {
 	return &noopPatriciaContext{}, nil
+}
+
+type branchWrite struct {
+	prefix []byte
+	data   []byte
+	prev   []byte
+}
+
+type recordingPatriciaContext struct {
+	branches map[string][]byte
+	writes   []branchWrite
+}
+
+func (r *recordingPatriciaContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
+	if r.branches == nil {
+		return nil, 0, nil
+	}
+	return common.Copy(r.branches[string(prefix)]), 0, nil
+}
+
+func (r *recordingPatriciaContext) PutBranch(prefix, data, prevData []byte) error {
+	r.writes = append(r.writes, branchWrite{
+		prefix: common.Copy(prefix),
+		data:   common.Copy(data),
+		prev:   common.Copy(prevData),
+	})
+	return nil
+}
+
+func (r *recordingPatriciaContext) Account(plainKey []byte) (*Update, error) { return nil, nil }
+func (r *recordingPatriciaContext) Storage(plainKey []byte) (*Update, error) { return nil, nil }
+func (r *recordingPatriciaContext) TxNum() uint64                            { return 0 }
+
+func testCellEncodeData(seed byte) [16]cellEncodeData {
+	var cells [16]cellEncodeData
+	cell := &cells[1]
+	cell.accountAddrLen = int16(len(cell.accountAddr))
+	for i := range cell.accountAddr {
+		cell.accountAddr[i] = seed + byte(i)
+	}
+	cell.hashLen = int16(len(cell.hash))
+	for i := range cell.hash {
+		cell.hash[i] = seed ^ byte(i)
+	}
+	return cells
+}
+
+func testDeferredUpdate(prefix byte, seed byte) *DeferredBranchUpdate {
+	cells := testCellEncodeData(seed)
+	const bitmap = uint16(1 << 1)
+	return getDeferredUpdate([]byte{prefix}, bitmap, bitmap, bitmap, &cells, nil)
+}
+
+func collectDeferredWrites(tb testing.TB, updates []*DeferredBranchUpdate, workers int) (map[string][]byte, int, error) {
+	tb.Helper()
+
+	writes := make(map[string][]byte)
+	written, err := ApplyDeferredBranchUpdates(updates, workers, func(prefix []byte, data []byte, prevData []byte) error {
+		writes[string(prefix)] = common.Copy(data)
+		return nil
+	})
+	return writes, written, err
+}
+
+func TestApplyDeferredBranchUpdatesParallelMatchesSequential(t *testing.T) {
+	t.Parallel()
+
+	sequential := []*DeferredBranchUpdate{testDeferredUpdate(0x01, 0x10), testDeferredUpdate(0x02, 0x20)}
+	defer func() {
+		for _, upd := range sequential {
+			putDeferredUpdate(upd)
+		}
+	}()
+	parallel := []*DeferredBranchUpdate{testDeferredUpdate(0x01, 0x10), testDeferredUpdate(0x02, 0x20)}
+	defer func() {
+		for _, upd := range parallel {
+			putDeferredUpdate(upd)
+		}
+	}()
+
+	sequentialWrites, sequentialWritten, err := collectDeferredWrites(t, sequential, 1)
+	require.NoError(t, err)
+	parallelWrites, parallelWritten, err := collectDeferredWrites(t, parallel, 4)
+	require.NoError(t, err)
+
+	require.Equal(t, sequentialWritten, parallelWritten)
+	require.Equal(t, sequentialWrites, parallelWrites)
+}
+
+func TestApplyDeferredBranchUpdatesPropagatesPutBranchError(t *testing.T) {
+	t.Parallel()
+
+	update := testDeferredUpdate(0x01, 0x10)
+	defer putDeferredUpdate(update)
+
+	putErr := errors.New("put branch failed")
+	written, err := ApplyDeferredBranchUpdates([]*DeferredBranchUpdate{update}, 1, func(prefix []byte, data []byte, prevData []byte) error {
+		return putErr
+	})
+
+	require.ErrorIs(t, err, putErr)
+	require.Zero(t, written)
+}
+
+func TestCollectDeferredUpdateFlushesDuplicatePrefix(t *testing.T) {
+	t.Parallel()
+
+	ctx := &recordingPatriciaContext{}
+	encoder := NewBranchEncoder(1024)
+	encoder.SetDeferUpdates(true)
+	defer encoder.ClearDeferred()
+
+	cells := testCellEncodeData(0x10)
+	const bitmap = uint16(1 << 1)
+	prefix := []byte{0x01, 0x02}
+
+	require.NoError(t, encoder.CollectDeferredUpdate(ctx, prefix, bitmap, bitmap, bitmap, &cells))
+	require.Len(t, encoder.deferred, 1)
+	require.Empty(t, ctx.writes)
+	require.True(t, encoder.HasPendingPrefix(prefix))
+
+	require.NoError(t, encoder.CollectDeferredUpdate(ctx, prefix, bitmap, bitmap, bitmap, &cells))
+	require.Len(t, ctx.writes, 1)
+	require.Equal(t, prefix, ctx.writes[0].prefix)
+	require.Len(t, encoder.deferred, 1)
+	require.True(t, encoder.HasPendingPrefix(prefix))
 }
 
 func generateCellRow(tb testing.TB, size int) (row []*cell, bitmap uint16) {
