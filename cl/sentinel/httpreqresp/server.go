@@ -18,10 +18,13 @@
 package httpreqresp
 
 import (
+	"bytes"
+	"encoding/hex"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/host"
@@ -87,18 +90,39 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 			http.Error(w, "Invalid Peer Id", http.StatusBadRequest)
 			return
 		}
+		// Parse comma-separated topics for multistream protocol negotiation.
+		// The first topic is preferred; libp2p picks the first one the peer supports.
+		var protocolIDs []protocol.ID
+		for _, t := range strings.Split(topic, ",") {
+			if t = strings.TrimSpace(t); t != "" {
+				protocolIDs = append(protocolIDs, protocol.ID(t))
+			}
+		}
 		//  we can't connect to the peer - so we should disconnect them. send a code 4xx
-		stream, err := host.NewStream(r.Context(), peerId, protocol.ID(topic))
+		stream, err := host.NewStream(r.Context(), peerId, protocolIDs...)
 		if err != nil {
 			http.Error(w, "can't Connect to Peer: "+err.Error(), http.StatusBadRequest)
 			return
 		}
 		defer stream.Close()
+		// Update topic to the actually negotiated protocol so callers know which version was used.
+		topic = string(stream.Protocol())
 		// this write deadline is not part of the eth p2p spec, but we are implying it.
 		stream.SetWriteDeadline(time.Now().Add(5 * time.Second))
 		var bytesWritten int64
-		if r.Body != nil && r.ContentLength > 0 {
-			bytesWritten, err = io.Copy(stream, r.Body)
+		// When multiple protocols are offered, the request body matches the
+		// first (preferred) protocol. If the peer negotiated a different
+		// protocol, use the fallback body instead (hex-encoded in a header).
+		body := io.Reader(r.Body)
+		if len(protocolIDs) > 1 && stream.Protocol() != protocolIDs[0] {
+			if fbHex := r.Header.Get("REQRESP-FALLBACK-BODY"); fbHex != "" {
+				if fbBytes, err := hex.DecodeString(fbHex); err == nil {
+					body = bytes.NewReader(fbBytes)
+				}
+			}
+		}
+		if body != nil {
+			bytesWritten, err = io.Copy(stream, body)
 			if err != nil {
 				http.Error(w, "processing Stream: "+err.Error(), http.StatusBadRequest)
 				return

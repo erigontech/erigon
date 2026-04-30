@@ -19,6 +19,7 @@ package handshake
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -125,16 +126,31 @@ func (h *HandShaker) IsSet() bool {
 }
 
 func (h *HandShaker) ValidatePeer(id peer.ID) (bool, error) {
-	// Unprotected if it is not set
-	if !h.IsSet() {
-		return true, nil
-	}
+	// Always validate fork digest — the constructor initialises it from
+	// ethClock, so we can reject wrong-network peers even before the CL
+	// stages call SetStatus with finalized/head info.
 	status := h.Status()
 	topic := communication2.StatusProtocolV1
+	fallbackBodyHex := "" // hex-encoded v1 body for when peer negotiates v1
+
+	// For Fulu+, prefer v2 with v1 fallback. The primary body (r.Body) is
+	// v2-format (92 bytes SSZ); the fallback body (hex header) is v1-format
+	// (84 bytes SSZ). server.go selects the right body after negotiation.
 	if curEpoch := h.ethClock.GetCurrentEpoch(); curEpoch >= h.beaconConfig.FuluForkEpoch {
-		topic = communication2.StatusProtocolV2
+		// Build v1 fallback body (no EarliestAvailableSlot)
+		v1Status := *status
+		v1Status.EarliestAvailableSlot = nil
+		v1Buf := new(bytes.Buffer)
+		if err := ssz_snappy.EncodeAndWrite(v1Buf, &v1Status); err != nil {
+			return false, err
+		}
+		fallbackBodyHex = hex.EncodeToString(v1Buf.Bytes())
+		topic = communication2.StatusProtocolV2 + "," + communication2.StatusProtocolV1
+	} else {
+		// Pre-Fulu: strip EarliestAvailableSlot for v1-only
+		status.EarliestAvailableSlot = nil
 	}
-	// Encode our status
+
 	buf := new(bytes.Buffer)
 	if err := ssz_snappy.EncodeAndWrite(buf, status); err != nil {
 		return false, err
@@ -145,6 +161,9 @@ func (h *HandShaker) ValidatePeer(id peer.ID) (bool, error) {
 	}
 	req.Header.Set("REQRESP-PEER-ID", id.String())
 	req.Header.Set("REQRESP-TOPIC", topic)
+	if fallbackBodyHex != "" {
+		req.Header.Set("REQRESP-FALLBACK-BODY", fallbackBodyHex)
+	}
 	resp, err := httpreqresp.Do(h.handler, req)
 	if err != nil {
 		return false, err
@@ -157,7 +176,12 @@ func (h *HandShaker) ValidatePeer(id peer.ID) (bool, error) {
 	}
 	responseStatus := &cltypes.Status{}
 
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(resp.Body, responseStatus, clparams.Phase0Version); err != nil {
+	// Use the negotiated protocol to pick the right SSZ version for decoding.
+	respVersion := clparams.Phase0Version
+	if resp.Header.Get("REQRESP-TOPIC") == communication2.StatusProtocolV2 {
+		respVersion = clparams.FuluVersion
+	}
+	if err := ssz_snappy.DecodeAndReadNoForkDigest(resp.Body, responseStatus, respVersion); err != nil {
 		log.Debug("DecodeAndReadNoForkDigest", "error", err)
 		return false, nil
 	}
