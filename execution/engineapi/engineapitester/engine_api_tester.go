@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net"
 	"path"
 	"testing"
 	"time"
@@ -33,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/freeport"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
@@ -117,18 +117,33 @@ func DefaultEngineApiTesterGenesis(t *testing.T) (*types.Genesis, *ecdsa.Private
 	return genesis, coinbasePrivKey
 }
 
+// localhostEphemeral asks the kernel to pick a free TCP port on the loopback
+// interface. Used by the engine-api test harness to avoid TOCTOU races with
+// concurrent tests selecting the same port.
+const localhostEphemeral = "127.0.0.1:0"
+
 func InitialiseEngineApiTester(t testing.TB, args EngineApiTesterInitArgs) EngineApiTester {
 	ctx := t.Context()
 	logger := args.Logger
 	dirs := datadir.New(args.DataDir)
 	genesis := args.Genesis
-	sentryPort, err := freeport.NextFreePort()
+
+	// Pre-bind the HTTP listeners on a kernel-assigned port to avoid TOCTOU
+	// port races with concurrent tests. Each listener is held open until the
+	// matching server takes ownership of the socket. The t.Cleanup calls are
+	// safety nets if InitialiseEngineApiTester aborts before hand-off; on the
+	// happy path the http server's Shutdown closes the listener first and the
+	// cleanup is a silent no-op. The sentry/P2P stack picks its own kernel-
+	// assigned port directly via its config below, so no pre-bind there.
+	jsonRpcListener, err := net.Listen("tcp", localhostEphemeral)
 	require.NoError(t, err)
-	engineApiPort, err := freeport.NextFreePort()
+	t.Cleanup(func() { _ = jsonRpcListener.Close() })
+	jsonRpcPort := jsonRpcListener.Addr().(*net.TCPAddr).Port
+	engineApiListener, err := net.Listen("tcp", localhostEphemeral)
 	require.NoError(t, err)
-	jsonRpcPort, err := freeport.NextFreePort()
-	require.NoError(t, err)
-	logger.Debug("[engine-api-tester] selected ports", "sentry", sentryPort, "engineApi", engineApiPort, "jsonRpc", jsonRpcPort)
+	t.Cleanup(func() { _ = engineApiListener.Close() })
+	engineApiPort := engineApiListener.Addr().(*net.TCPAddr).Port
+	logger.Debug("[engine-api-tester] selected ports", "engineApi", engineApiPort, "jsonRpc", jsonRpcPort)
 
 	httpConfig := httpcfg.HttpCfg{
 		Enabled:                  true,
@@ -136,9 +151,11 @@ func InitialiseEngineApiTester(t testing.TB, args EngineApiTesterInitArgs) Engin
 		WebsocketEnabled:         true,
 		HttpListenAddress:        "127.0.0.1",
 		HttpPort:                 jsonRpcPort,
+		HttpListener:             jsonRpcListener,
 		API:                      []string{"eth"},
 		AuthRpcHTTPListenAddress: "127.0.0.1",
 		AuthRpcPort:              engineApiPort,
+		AuthRpcListener:          engineApiListener,
 		JWTSecretPath:            path.Join(args.DataDir, "jwt.hex"),
 		ReturnDataLimit:          100_000,
 		EvmCallTimeout:           rpccfg.DefaultEvmCallTimeout,
@@ -155,13 +172,13 @@ func InitialiseEngineApiTester(t testing.TB, args EngineApiTesterInitArgs) Engin
 		Dirs: dirs,
 		Http: httpConfig,
 		P2P: p2p.Config{
-			ListenAddr:      fmt.Sprintf("127.0.0.1:%d", sentryPort),
+			ListenAddr:      localhostEphemeral,
 			MaxPeers:        1,
 			MaxPendingPeers: 1,
 			NoDiscovery:     true,
 			NoDial:          true,
 			ProtocolVersion: []uint{direct.ETH68},
-			AllowedPorts:    []uint{uint(sentryPort)},
+			AllowedPorts:    []uint{0},
 			PrivateKey:      nodeKey,
 		},
 	}
@@ -249,8 +266,8 @@ func InitialiseEngineApiTester(t testing.TB, args EngineApiTesterInitArgs) Engin
 	if !args.NoEmptyBlock1 {
 		// build 1 empty block before proceeding to properly initialise everything
 		_, err = mockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
 	}
-	require.NoError(t, err)
 	return EngineApiTester{
 		GenesisBlock:         genesisBlock,
 		CoinbaseKey:          args.CoinbaseKey,
