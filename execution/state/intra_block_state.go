@@ -1519,6 +1519,18 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 	}
 
 	if account != nil {
+		if account.Empty() {
+			// EIP-161 + EIP-8037: an empty account loaded from versionMap
+			// (e.g., system address touched by a system call earlier in the
+			// block, or an account whose only state is a TouchAccount) was
+			// pruned by EIP-161 at its source tx's FinalizeTx. Treat as
+			// non-existent so that subsequent writes (AddBalance, SSTORE)
+			// fire a createObjectChange via createObject. This matches EELS
+			// compute_state_byte_diff's existed_at_tx_entry semantics, which
+			// uses EIP-161 "exists" (account_now != None).
+			sdb.nilAccounts[addr] = struct{}{}
+			return nil, nil
+		}
 		return sdb.stateObjectForAccount(addr, account), nil
 	}
 
@@ -1863,36 +1875,44 @@ func (sdb *IntraBlockState) JournalLength() int {
 }
 
 // ComputeFrameStateBytes walks the journal segment journal[start:end] and
-// returns the total state bytes attributable to that frame, per EIP-8037.
+// returns the total state bytes attributable to that frame, plus a refund
+// for accounts created and selfdestructed in the same tx (EIP-6780).
 //
 // Rules:
-//   - Account creations (createObjectChange / resetObjectChange), first per
-//     address: skip if account == excludeCreate. Skip if stateObject is nil.
-//     If applyFilter AND .newlyCreated && .selfdestructed, skip. Otherwise
-//     +StateBytesNewAccount.
-//   - Code deposits (codeChange), first per address: same selfdestruct filter.
+//   - createObjectChange (account didn't exist pre-tx), first per address:
+//     skip if account == excludeCreate, skip if stateObject is nil or empty
+//     (EIP-161 prune). Otherwise +StateBytesNewAccount.
+//   - resetObjectChange (account existed pre-tx with balance only): never
+//     contributes +112 — the account record was already paid for at the
+//     prior tx that funded it. (EELS compute_state_byte_diff: the +112
+//     condition requires not existed_at_tx_entry, which fails for any
+//     pre-existing account.)
+//   - Code deposits (codeChange), first per address: skip if not alive.
 //     If prevhash was empty AND current stateObject.code is non-empty,
 //     +len(code).
-//   - Storage 0→non-zero (storageChange), first per (address, key): same
-//     filter. Use the entry's originalValue (= tx-entry value) — when
+//   - Storage 0→non-zero (storageChange), first per (address, key): skip
+//     if not alive. Use the entry's originalValue (= tx-entry value) — when
 //     originalValue.IsZero() AND the current value is non-zero, +32.
 //
-// All other entry types (selfdestruct/balance/nonce/refund/log/access-list/
-// transient/touch/balanceIncrease/fakeStorage) are skipped.
-//
-// applyFilter is set true only at the top frame's commit (depth==0). Sub-frames
-// pass false so that EIP-6780 net-zero cases temporarily over-count and the
-// negative-delta credit at top frame compensates.
+// At the top frame (applyFilter=true), accountRefund mirrors EELS's
+// process_message_call refund for accounts in (created_accounts ∩
+// accounts_to_delete): for each address that's newlyCreated && selfdestructed,
+// 112 + code_bytes + non_zero_storage_bytes. The chargeFrameStateGas caller
+// subtracts this from the per-frame delta. This applies to both excludeCreate
+// (top-level CREATE C) and nested addresses uniformly.
 //
 // excludeCreate is the contract address of a top-level CREATE tx (already
-// covered by the 112×CPSB intrinsic). Pass NilAddress otherwise.
+// covered by the 112×CPSB intrinsic). Pass NilAddress otherwise. Bytes for
+// excludeCreate are not added to total, but ARE included in accountRefund
+// when the address is newlyCreated && selfdestructed (so that the intrinsic-
+// charged 112+code+storage gets refunded against the negative delta).
 func (sdb *IntraBlockState) ComputeFrameStateBytes(
 	start, end int,
 	applyFilter bool,
 	excludeCreate accounts.Address,
-) uint64 {
+) (total int64, accountRefund uint64) {
 	if start >= end {
-		return 0
+		return 0, 0
 	}
 	type slotKey struct {
 		addr accounts.Address
@@ -1902,43 +1922,103 @@ func (sdb *IntraBlockState) ComputeFrameStateBytes(
 	seenCode := make(map[accounts.Address]struct{})
 	seenSlot := make(map[slotKey]struct{})
 
+	// Per-address tracking for the top-frame refund. Only populated when
+	// applyFilter is true. The refund mirrors EELS's process_message_call
+	// `accounts_to_delete ∩ created_accounts` refund.
+	type acctTrack struct {
+		accountBytes uint64 // 112 if a create/reset entry was seen for this addr
+		codeBytes    uint64
+		storageBytes uint64
+	}
+	var acctData map[accounts.Address]*acctTrack
+	if applyFilter {
+		acctData = make(map[accounts.Address]*acctTrack)
+	}
+	track := func(addr accounts.Address) *acctTrack {
+		if a, ok := acctData[addr]; ok {
+			return a
+		}
+		a := &acctTrack{}
+		acctData[addr] = a
+		return a
+	}
+
+	// Pre-track excludeCreate at the top frame: its createObjectChange is
+	// emitted by evm.create() BEFORE frameStart is captured (the snapshot is
+	// pushed after CreateAccount), so the walk never sees it. The intrinsic
+	// charged 112×CPSB for this address; if it gets selfdestructed in the same
+	// tx, the refund needs to include 112 (matching EELS's accounts_to_delete
+	// refund). Code/storage are picked up normally by the walk if their
+	// journal entries fire after frameStart.
+	if applyFilter && excludeCreate != accounts.NilAddress {
+		track(excludeCreate).accountBytes = params.StateBytesNewAccount
+	}
+
 	// liveAccount returns the stateObject for addr and whether it should be
-	// counted, applying the EIP-6780 selfdestruct filter at the top frame.
+	// counted, applying the EIP-161 filter (empty accounts get pruned at tx
+	// finalize, so they shouldn't be charged for creation — e.g.
+	// AddBalance(X, 0) on a non-existent X creates a phantom empty
+	// stateObject). The filter applies at ALL frames, matching EELS's
+	// compute_state_byte_diff which uses `account_now != None` (EIP-161
+	// "exists" semantics). The EIP-6780 filter (newlyCreated &&
+	// selfdestructed) is NOT applied here — instead, those accounts are
+	// refunded explicitly via accountRefund (matching EELS's
+	// accounts_to_delete refund path).
 	liveAccount := func(addr accounts.Address) (*stateObject, bool) {
 		so := sdb.stateObjects[addr]
 		if so == nil {
 			return nil, false
 		}
-		if applyFilter && so.newlyCreated && so.selfdestructed {
+		if so.data.Empty() {
 			return so, false
 		}
 		return so, true
 	}
 
-	var total uint64
 	for i := start; i < end && i < len(sdb.journal.entries); i++ {
 		switch e := sdb.journal.entries[i].(type) {
 		case createObjectChange:
-			if e.account == excludeCreate {
-				continue
-			}
 			if _, ok := seenAccount[e.account]; ok {
 				continue
 			}
 			seenAccount[e.account] = struct{}{}
-			if _, alive := liveAccount(e.account); alive {
-				total += params.StateBytesNewAccount
+			_, alive := liveAccount(e.account)
+			if !alive {
+				continue
+			}
+			if e.account != excludeCreate {
+				total += int64(params.StateBytesNewAccount)
+			}
+			if applyFilter {
+				track(e.account).accountBytes = params.StateBytesNewAccount
 			}
 		case resetObjectChange:
-			if e.account == excludeCreate {
-				continue
-			}
 			if _, ok := seenAccount[e.account]; ok {
 				continue
 			}
 			seenAccount[e.account] = struct{}{}
-			if _, alive := liveAccount(e.account); alive {
-				total += params.StateBytesNewAccount
+			_, alive := liveAccount(e.account)
+			if !alive {
+				continue
+			}
+			// EIP-8037 +112 rule: charge for accounts that didn't exist at
+			// tx entry. resetObjectChange is fired by createObject when
+			// `previous != nil` — but `previous` may be a stateObject
+			// representing a DELETED account (e.g., system address pruned by
+			// EIP-161 in a prior tx, or any address whose only prior
+			// existence was an EIP-161-empty stateObject). Use
+			// `prev.original.Empty()` to detect when the address was
+			// effectively non-existent at tx start: original is the account
+			// state before any modifications, preserved across multiple
+			// resets in the same tx. If empty, the address did not exist at
+			// tx entry → charge +112 (matches EELS rule
+			// `account_now != None && !existed_at_frame_entry &&
+			// !existed_at_tx_entry`).
+			if e.prev != nil && e.prev.original.Empty() && e.account != excludeCreate {
+				total += int64(params.StateBytesNewAccount)
+			}
+			if applyFilter {
+				track(e.account).accountBytes = params.StateBytesNewAccount
 			}
 		case codeChange:
 			if _, ok := seenCode[e.account]; ok {
@@ -1949,10 +2029,12 @@ func (sdb *IntraBlockState) ComputeFrameStateBytes(
 			if !alive {
 				continue
 			}
-			// EIP-8037 code-deposit rule: counts only if prior code hash was
-			// empty and current code is non-empty.
 			if e.prevhash.IsEmpty() && len(so.code) > 0 {
-				total += uint64(len(so.code))
+				codeLen := uint64(len(so.code))
+				total += int64(codeLen)
+				if applyFilter {
+					track(e.account).codeBytes = codeLen
+				}
 			}
 		case storageChange:
 			k := slotKey{addr: e.account, key: e.key}
@@ -1964,19 +2046,53 @@ func (sdb *IntraBlockState) ComputeFrameStateBytes(
 			if !alive {
 				continue
 			}
-			// EIP-8037 new-slot rule: tx-entry zero AND current non-zero.
 			if !e.originalValue.IsZero() {
+				// tx-entry value is non-zero: no rule applies (neither
+				// new-slot nor cleared-slot-with-tx-entry-zero).
 				continue
 			}
+			// EIP-8037 four-case rule (matching EELS compute_state_byte_diff):
+			// - New slot: current != 0 && frame_entry == 0 && tx_entry == 0 → +32
+			// - Cleared slot, zero at tx start: current == 0 && frame_entry != 0
+			//   && tx_entry == 0 → -32
+			// - Other transitions: 0
+			//
+			// e.prevalue is the slot's value just before this storageChange.
+			// Because seenSlot dedups to the FIRST entry in the segment,
+			// e.prevalue is the slot's value at frame-entry (for sub-frames)
+			// or tx-entry (for top frame).
 			current, _ := so.GetState(e.key)
-			if !current.IsZero() {
+			if !current.IsZero() && e.prevalue.IsZero() {
 				total += 32
+				if applyFilter {
+					track(e.account).storageBytes += 32
+				}
+			} else if current.IsZero() && !e.prevalue.IsZero() {
+				// Cleared slot. Credit -32 to walkTotal (signed), so
+				// chargeFrameStateGas returns the gas to the reservoir.
+				// Mirrors EELS: a slot set in an ancestor frame and cleared
+				// in this frame nets out to 0 state bytes.
+				total -= 32
 			}
 		default:
 			// All other entry types are not state-bytes-relevant.
 		}
 	}
-	return total
+
+	if applyFilter {
+		for addr, a := range acctData {
+			so := sdb.stateObjects[addr]
+			if so == nil {
+				continue
+			}
+			if !(so.newlyCreated && so.selfdestructed) {
+				continue
+			}
+			accountRefund += a.accountBytes + a.codeBytes + a.storageBytes
+		}
+	}
+
+	return total, accountRefund
 }
 
 func (sdb *IntraBlockState) PopSnapshot(snapshot int) {

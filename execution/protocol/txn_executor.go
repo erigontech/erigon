@@ -408,9 +408,11 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	st.initialGas = st.gasRemaining.Plus(imdGas)
 	// EIP-8037 × EIP-7702: intrinsic_state_gas is worst-case (assumes all auths
 	// create new accounts). For each existing-account auth, 112 × cpsb is
-	// refunded to the reservoir so execution can draw from it; intrinsic_state_gas
-	// is immutable after validation, so the block-level state gas keeps the
-	// worst-case value.
+	// refunded to the reservoir so execution can draw from it. Per EIP-7778
+	// the block-level state gas keeps the worst-case value (no refund
+	// subtraction); the receipt-level deduction surfaces naturally because
+	// txnGasUsedB4Refunds = initialGas.Total() - gasRemaining.Total() and
+	// gasRemaining.Total() includes the refunded portion.
 	if stateIgasRefund > 0 && rules.IsAmsterdam {
 		st.gasRemaining.State += stateIgasRefund
 	}
@@ -614,8 +616,28 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		}
 		if rules.IsAmsterdam {
 			st.blockRegularGasUsed = max(imdGas.Regular+st.evm.RegularGasConsumed(), intrinsicGasResult.FloorGasCost)
-			st.blockStateGasUsed = imdGas.State + st.evm.ExecutionStateGas()
-			st.txnGasUsedB4Refunds = st.initialGas.Total() - st.gasRemaining.Total()
+			// EIP-7778: block_state_gas_used does NOT subtract refunds (including
+			// the EIP-7702 auth-list refund). intrinsic_state_gas is worst-case
+			// (assumes all auths create new accounts) and stays in the block-level
+			// total even when authority is non-empty; only the receipt-level
+			// txnGasUsedB4Refunds reflects the reservoir replenish (via lower
+			// gasRemaining usage).
+			// executionStateGas is signed (can be negative due to EIP-6780 refunds);
+			// clamp the sum to 0 since block_state_gas_used is a uint64 counter.
+			if execState := st.evm.ExecutionStateGas(); int64(imdGas.State)+execState > 0 {
+				st.blockStateGasUsed = uint64(int64(imdGas.State) + execState)
+			} else {
+				st.blockStateGasUsed = 0
+			}
+			// txnGasUsedB4Refunds: Total can underflow if EIP-6780 same-tx
+			// selfdestruct credits on gas.State (via chargeFrameStateGas) make
+			// gasRemaining.Total() exceed initialGas.Total(). Clamp at 0; the
+			// FloorGasCost max below ensures a valid receipt gas value.
+			if st.gasRemaining.Total() > st.initialGas.Total() {
+				st.txnGasUsedB4Refunds = 0
+			} else {
+				st.txnGasUsedB4Refunds = st.initialGas.Total() - st.gasRemaining.Total()
+			}
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Regular)
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
 		} else if rules.IsPrague {
@@ -632,11 +654,22 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		st.refundGas()
 	} else if rules.IsAmsterdam {
 		executionStateGas := st.evm.ExecutionStateGas()
-		blockState := imdGas.State + executionStateGas
+		// Clamp signed execution state gas to non-negative when summing with
+		// intrinsic for the block-level uint64 counter.
+		var blockState uint64
+		if int64(imdGas.State)+executionStateGas > 0 {
+			blockState = uint64(int64(imdGas.State) + executionStateGas)
+		}
 		blockRegular := imdGas.Regular + st.evm.RegularGasConsumed()
 		st.blockRegularGasUsed = max(blockRegular, intrinsicGasResult.FloorGasCost)
 		st.blockStateGasUsed = blockState
-		st.txnGasUsedB4Refunds = st.initialGas.Total() - st.gasRemaining.Total()
+		// txnGasUsedB4Refunds: clamp underflow when state-gas credits cause
+		// gasRemaining to exceed initialGas (see refunds branch above).
+		if st.gasRemaining.Total() > st.initialGas.Total() {
+			st.txnGasUsedB4Refunds = 0
+		} else {
+			st.txnGasUsedB4Refunds = st.initialGas.Total() - st.gasRemaining.Total()
+		}
 		st.txnGasUsed = max(st.txnGasUsedB4Refunds, intrinsicGasResult.FloorGasCost)
 	} else {
 		// No-refund path: gasBailout (trace_call) or !refunds.

@@ -206,6 +206,17 @@ func (ch createObjectChange) revert(s *IntraBlockState) error {
 	}
 	delete(s.stateObjects, ch.account)
 	delete(s.stateObjectsDirty, ch.account)
+	// Nullify the AddressPath versionedWrite that createObject emitted. Without
+	// this, a subsequent versionedRead in the same tx would see the stale
+	// write and re-materialize a stateObject for this address via
+	// stateObjectForAccount (no journal entry), causing EIP-8037 to miss the
+	// +112 byte charge when the address is then re-created in a later
+	// (non-reverted) frame. Keep the entry in the WriteSet (Val=nil) so that
+	// MakeWriteSet's parallel-mode cleanup can still see this address as
+	// reverted and clear stale entries from the global versionMap.
+	if s.versionMap != nil {
+		s.versionedWrites.UpdateVal(ch.account, AccountKey{Path: AddressPath}, (*accounts.Account)(nil))
+	}
 	return nil
 }
 

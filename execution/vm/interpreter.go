@@ -182,7 +182,7 @@ func useMdGas(evm *EVM, initial mdgas.MdGas, gas uint64, t mdgas.MdGasType, trac
 		initial.State, ok = useGas(initial.State, gas, tracer, reason)
 		if ok {
 			if evm != nil {
-				evm.executionStateGas += originalGas
+				evm.executionStateGas += int64(originalGas)
 			}
 			return initial, true
 		}
@@ -198,7 +198,7 @@ func useMdGas(evm *EVM, initial mdgas.MdGas, gas uint64, t mdgas.MdGasType, trac
 		initial.State = 0
 		initial.Regular, _ = useGas(initial.Regular, needFromRegular, tracer, reason)
 		if evm != nil {
-			evm.executionStateGas += originalGas
+			evm.executionStateGas += int64(originalGas)
 		}
 		return initial, true
 	case mdgas.RegularGas:
