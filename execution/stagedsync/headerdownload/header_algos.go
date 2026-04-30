@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/metrics"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/dataflow"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -944,38 +945,24 @@ func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader servic
 	td = new(big.Int).Add(parentTd, header.Difficulty.ToBig())
 
 	// Now we can decide whether this header will create a change in the canonical head
-	if td.Cmp(hi.localTd) >= 0 {
-		reorg := true
-
-		// TODO: Add bor check here if required
-		// Borrowed from https://github.com/maticnetwork/bor/blob/master/core/forkchoice.go#L81
-		if td.Cmp(hi.localTd) == 0 {
-			if blockHeight > hi.highest {
-				reorg = false
-			} else if blockHeight == hi.highest {
-				// Compare hashes of block in case of tie breaker. Lexicographically larger hash wins.
-				reorg = bytes.Compare(hi.highestHash.Bytes(), hash.Bytes()) < 0
-			}
+	// TODO: Add bor check here if required
+	if ethash.ShouldReorg(hi.localTd, hi.highest, hi.highestHash, td, blockHeight, hash) {
+		hi.newCanonical = true
+		forkingPoint, err := hi.ForkingPoint(db, header, parent)
+		if err != nil {
+			return nil, err
 		}
-
-		if reorg {
-			hi.newCanonical = true
-			forkingPoint, err := hi.ForkingPoint(db, header, parent)
-			if err != nil {
-				return nil, err
-			}
-			hi.highest = blockHeight
-			hi.highestHash = hash
-			hi.highestTimestamp = header.Time
-			hi.canonicalCache.Add(blockHeight, hash)
-			// See if the forking point affects the unwindPoint (the block number to which other stages will need to unwind before the new canonical chain is applied)
-			if forkingPoint < hi.unwindPoint {
-				hi.SetUnwindPoint(forkingPoint)
-				hi.unwind = true
-			}
-			// This makes sure we end up choosing the chain with the max total difficulty
-			hi.localTd.Set(td)
+		hi.highest = blockHeight
+		hi.highestHash = hash
+		hi.highestTimestamp = header.Time
+		hi.canonicalCache.Add(blockHeight, hash)
+		// See if the forking point affects the unwindPoint (the block number to which other stages will need to unwind before the new canonical chain is applied)
+		if forkingPoint < hi.unwindPoint {
+			hi.SetUnwindPoint(forkingPoint)
+			hi.unwind = true
 		}
+		// This makes sure we end up choosing the chain with the max total difficulty
+		hi.localTd.Set(td)
 	}
 	if err = rawdb.WriteTd(db, hash, blockHeight, td); err != nil {
 		return nil, fmt.Errorf("[%s] failed to WriteTd: %w", hi.logPrefix, err)
