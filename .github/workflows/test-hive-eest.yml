@@ -8,7 +8,7 @@ env:
   EEST_VERSION: 'v5.4.0'
 
 concurrency:
-  # Dynamic group to fill all available runners
+  # Dynamic group to fill all available runners
   group: hive-eest-tests-${{ github.run_id }}
   cancel-in-progress: false
 
@@ -21,22 +21,38 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # consume-engine: split by fork for parallelism (61k+ tests total).
-          # Engine API tests only exist from Paris (The Merge) onwards.
-          # Pattern format: "<suite-regex>/<test-regex>" — the leading ".*/""
-          # matches the suite name (eest/consume-engine) while the remainder
-          # filters individual pytest test IDs by fork parameter.
-          # pool-size: --client.pool.size for hive's warm-daemon client pool.
-          # Tuned per shard from a trace-instrumented dispatch (run 24938677388);
-          # the LRU hit-rate curve plateaus at ~50% past size=4 on the long
-          # consume-engine shards (reuse is essentially depth-2 consecutive),
-          # so 4 captures all available reuse and 24+ buys nothing. paris+shanghai
-          # and consume-rlp have ~unique pre-state per test (0% hit at any size).
-          # glamsterdam-devnet is the exception — its curve keeps climbing past
-          # 24, so it gets a larger pool.
+          # consume-engine (stable)
           - sim: consume-engine
-            sim-limit: ".*/.*fork_(Paris|Shanghai)"
-            shard: paris+shanghai
+            sim-limit: ".*/.*fork_Frontier"
+            shard: frontier
+            pool-size: 0
+          - sim: consume-engine
+            sim-limit: ".*/.*fork_Homestead"
+            shard: homestead
+            pool-size: 0
+          - sim: consume-engine
+            sim-limit: ".*/.*fork_Byzantium"
+            shard: byzantium
+            pool-size: 0
+          - sim: consume-engine
+            sim-limit: ".*/.*fork_Constantinople"
+            shard: constantinople
+            pool-size: 0
+          - sim: consume-engine
+            sim-limit: ".*/.*fork_Istanbul"
+            shard: istanbul
+            pool-size: 0
+          - sim: consume-engine
+            sim-limit: ".*/.*fork_Berlin"
+            shard: berlin
+            pool-size: 0
+          - sim: consume-engine
+            sim-limit: ".*/.*fork_Paris"
+            shard: paris
+            pool-size: 0
+          - sim: consume-engine
+            sim-limit: ".*/.*fork_Shanghai"
+            shard: shanghai
             pool-size: 0
           - sim: consume-engine
             sim-limit: ".*/.*fork_Cancun"
@@ -50,11 +66,7 @@ jobs:
             sim-limit: ".*/.*fork_Osaka"
             shard: osaka
             pool-size: 4
-          - sim: consume-rlp
-            sim-limit: ".*(eip2930_access_list|eip4844_blobs).*" # all tests take too long
-            shard: rlp
-            pool-size: 0
-          # Glamsterdam devnet: BAL EIPs against devnet fixtures
+          # consume-engine (devnet)
           - sim: consume-engine
             sim-limit: ".*(8024|7708|7778|7843|7928|7954|8037).*"
             shard: glamsterdam-devnet
@@ -65,6 +77,11 @@ jobs:
             # test_block_regular_gas_limit: error classification mismatch (GAS_USED_OVERFLOW vs GAS_ALLOWANCE_EXCEEDED)
             # transitioning to bal-devnet-4
             max-failures: 579
+          # consume-rlp (stable)
+          - sim: consume-rlp
+            sim-limit: ".*(eip2930_access_list|eip4844_blobs).*" # all tests take too long
+            shard: rlp
+            pool-size: 0
     steps:
       - name: Clean docker system
         run: |
