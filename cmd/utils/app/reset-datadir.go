@@ -121,6 +121,7 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 	r := reset.Reset{
 		Dirs:                 &dirs,
 		RemoveUnknown:        removeLocal,
+		RemoveLocal:          removeLocal,
 		Logger:               logger,
 		PreverifiedSnapshots: cfg.Preverified.Items,
 		RemoveFunc: func(osName reset.OsFilePath) error {
