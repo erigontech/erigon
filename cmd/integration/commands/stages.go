@@ -624,7 +624,7 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 }
 
 func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
-	dbg.Exec3Parallel = true
+	// dbg.Exec3Parallel = true // commented to honor EXEC3_PARALLEL/ERIGON_EXEC3_PARALLEL env var
 	if chainTipMode && noCommit {
 		return errors.New("--sync.mode.chaintip cannot work with --no-commit to be false")
 	}
