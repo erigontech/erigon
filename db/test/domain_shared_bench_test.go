@@ -17,7 +17,6 @@
 package test
 
 import (
-	"context"
 	"encoding/binary"
 	randOld "math/rand"
 	"math/rand/v2"
@@ -68,12 +67,12 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 	stepSize := uint64(100)
 	db, agg := testDbAndAggregatorBench(t, stepSize)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(context.Background(), rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	maxTx := stepSize * 258
@@ -151,12 +150,12 @@ func BenchmarkSharedDomains_ComputeCommitment(b *testing.B) {
 	stepSize := uint64(100)
 	db, _ := testDbAndAggregatorBench(b, stepSize)
 
-	ctx := context.Background()
+	ctx := b.Context()
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(b, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(context.Background(), rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(b.Context(), rwTx, log.New())
 	require.NoError(b, err)
 	defer domains.Close()
 
@@ -285,7 +284,7 @@ func BenchmarkPruneSmallBatches(b *testing.B) {
 	stepSize := uint64(100)
 	db, agg := testDbAndAggregatorBench(b, stepSize)
 
-	ctx := context.Background()
+	ctx := b.Context()
 	rnd := newRnd(0)
 
 	// Populate data: write enough txs to span several steps

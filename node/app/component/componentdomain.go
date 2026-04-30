@@ -87,7 +87,11 @@ type domainOptions struct {
 func WithDependentDomain(dependent ComponentDomain) app.Option {
 	return app.WithOption[domainOptions](
 		func(o *domainOptions) bool {
-			o.dependent = dependent.(*componentDomain)
+			cd, ok := dependent.(*componentDomain)
+			if !ok {
+				return false
+			}
+			o.dependent = cd
 			return true
 		})
 }
@@ -148,7 +152,7 @@ func NewComponentDomain(context context.Context, id string, options ...app.Optio
 		} else {
 			var poolSize int
 
-			if *opts.execPoolSize > 0 {
+			if opts.execPoolSize != nil && *opts.execPoolSize > 0 {
 				poolSize = *opts.execPoolSize
 			} else {
 				poolSize = int(float64(runtime.NumCPU()) * POOL_LOAD_FACTOR)

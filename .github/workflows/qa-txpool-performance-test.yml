@@ -388,7 +388,7 @@ jobs:
           fi
 
       - name: Clean test results
-        uses: gacts/run-and-post-run@v1.4.3
+        uses: gacts/run-and-post-run@v1.4.4
         if: always()
         with:
           post: |
