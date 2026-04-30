@@ -128,6 +128,8 @@ func (cs *MultiClient) RecvMessageLoop(
 		wit.ToProto[direct.WIT0][wit.NewWitnessMsg],
 		wit.ToProto[direct.WIT0][wit.WitnessMsg],
 		eth.ToProto[direct.ETH69][eth.BlockRangeUpdateMsg],
+		// eth/71 (EIP-8159) BAL responses to outbound GetBlockAccessLists requests
+		eth.ToProto[direct.ETH71][eth.BlockAccessListsMsg],
 	}
 	streamFactory := func(streamCtx context.Context, sentry sentryproto.SentryClient) (grpc.ClientStream, error) {
 		return sentry.Messages(streamCtx, &sentryproto.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
@@ -615,6 +617,11 @@ func (cs *MultiClient) getBlockHeaders66(ctx context.Context, inreq *sentryproto
 // Payload-hash validation lives in BALFetcher.FetchBlockAccessLists; peers
 // that return garbage are penalised there.
 func (cs *MultiClient) blockAccessLists71(_ context.Context, inreq *sentryproto.InboundMessage, _ sentryproto.SentryClient) error {
+	if cs.balFetcher == nil {
+		// MultiClient was constructed without a BAL fetcher (e.g. unit-test
+		// builds that build &MultiClient{} directly). Drop the message.
+		return nil
+	}
 	var packet eth.BlockAccessListsPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &packet); err != nil {
 		return fmt.Errorf("decoding blockAccessLists71: %w, data: %x", err, inreq.Data)

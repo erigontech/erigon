@@ -343,7 +343,7 @@ func pickEth71PeerFromSentries(ctx context.Context, sentries []sentryproto.Sentr
 		if ready, ok := sc.(interface{ Ready() bool }); ok && !ready.Ready() {
 			continue
 		}
-		reply, err := sc.Peers(ctx, &emptypb.Empty{}, grpc.EmptyCallOption{})
+		reply, err := sc.Peers(ctx, &emptypb.Empty{}, &grpc.EmptyCallOption{})
 		if err != nil {
 			logger.Debug("[bal-downloader] Peers() failed on sentry, skipping", "sentry", i, "err", err)
 			continue
