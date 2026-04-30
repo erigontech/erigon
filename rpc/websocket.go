@@ -272,12 +272,19 @@ func (a *wsConnAdapter) encode(v any) error {
 	dl := a.deadline
 	a.mu.Unlock()
 
+	var cancel context.CancelFunc
 	ctx := context.Background()
 	if !dl.IsZero() {
-		var cancel context.CancelFunc
 		ctx, cancel = context.WithDeadline(ctx, dl)
-		defer cancel()
+	} else {
+		// Without a deadline the write can block indefinitely when the peer
+		// stops reading (e.g. server closes after oversized message). A blocked
+		// write holds the write mutex, preventing the read path from sending its
+		// own close-frame response, causing a deadlock. Use wsPingInterval as a
+		// generous upper bound — matching the dead-connection detection window.
+		ctx, cancel = context.WithTimeout(ctx, wsPingInterval)
 	}
+	defer cancel()
 	data, err := json.Marshal(v)
 	if err != nil {
 		return err
