@@ -805,6 +805,19 @@ type FlushAndComputeCommitmentTimes struct {
 	ComputeCommitment time.Duration
 }
 
+var (
+	commTotalNanos atomic.Int64
+	commBlockCount atomic.Uint64
+)
+
+// recordCommitmentTime updates running totals and logs per-block + running-average commitment time.
+func recordCommitmentTime(blockNum uint64, took time.Duration, logger log.Logger, logPrefix string) {
+	total := commTotalNanos.Add(int64(took))
+	count := commBlockCount.Add(1)
+	avg := time.Duration(total / int64(count))
+	logger.Info(fmt.Sprintf("[%s] commitment", logPrefix), "block", blockNum, "took", took, "avg-per-block", avg, "blocks", count)
+}
+
 // computeAndCheckCommitmentV3 - does write state to db and then check commitment
 func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.TemporalRwTx, doms *execctx.SharedDomains, cfg ExecuteBlockCfg, e *StageState, parallel bool, logger log.Logger, u Unwinder) (ok bool, times FlushAndComputeCommitmentTimes, err error) {
 	if header == nil {
@@ -836,6 +849,7 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 	computedRootHash, err := doms.ComputeCommitment(ctx, applyTx, true, header.Number.Uint64(), blockTxNum, e.LogPrefix(), nil)
 
 	times.ComputeCommitment = time.Since(start)
+	recordCommitmentTime(header.Number.Uint64(), times.ComputeCommitment, logger, e.LogPrefix())
 	if err != nil {
 		return false, times, fmt.Errorf("compute commitment: %w", err)
 	}

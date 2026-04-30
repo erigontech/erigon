@@ -190,8 +190,10 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				se.doms.SetTrace(true, false)
 			}
 			// Warmup is enabled via EnableTrieWarmup at executor init
+			commStart := time.Now()
 			rh, err := se.doms.ComputeCommitment(ctx, se.applyTx, true, blockNum, inputTxNum-1, se.logPrefix, nil)
 			se.doms.SetTrace(false, false)
+			recordCommitmentTime(blockNum, time.Since(commStart), se.logger, se.logPrefix)
 
 			if err != nil {
 				return nil, rwTx, err

@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/tidwall/btree"
 
@@ -418,6 +419,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		return
 	}
 
+	mergeStart := time.Now()
 	fromStep, toStep := kv.Step(r.values.from/r.aggStep), kv.Step(r.values.to/r.aggStep)
 	kvFilePath := dt.d.kvNewFilePath(fromStep, toStep)
 
@@ -540,8 +542,11 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	if valuesIn.decompressor, err = seg.NewDecompressor(kvFilePath); err != nil {
 		return nil, nil, nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", dt.d.FilenameBase, r.values.from, r.values.to, err)
 	}
+	kvMergeTook := time.Since(mergeStart)
 
+	var btTook, kviTook, existenceTook time.Duration
 	if dt.d.Accessors.Has(statecfg.AccessorBTree) {
+		btStart := time.Now()
 		btPath := dt.d.kvBtAccessorNewFilePath(fromStep, toStep)
 		btM := btindex.DefaultBtreeM
 		if toStep == 0 && dt.d.FilenameBase == "commitment" {
@@ -551,17 +556,21 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", dt.d.FilenameBase, r.values.from, r.values.to, err)
 		}
+		btTook = time.Since(btStart)
 	}
 	if dt.d.Accessors.Has(statecfg.AccessorHashMap) {
+		kviStart := time.Now()
 		if err = dt.d.buildHashMapAccessor(ctx, fromStep, toStep, dt.dataReader(valuesIn.decompressor), ps); err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s buildHashMapAccessor [%d-%d]: %w", dt.d.FilenameBase, r.values.from, r.values.to, err)
 		}
 		if valuesIn.index, err = dt.d.openHashMapAccessor(dt.d.kviAccessorNewFilePath(fromStep, toStep)); err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s buildHashMapAccessor [%d-%d]: %w", dt.d.FilenameBase, r.values.from, r.values.to, err)
 		}
+		kviTook = time.Since(kviStart)
 	}
 
 	if dt.d.Accessors.Has(statecfg.AccessorExistence) {
+		exStart := time.Now()
 		bloomIndexPath := dt.d.kvExistenceIdxNewFilePath(fromStep, toStep)
 		exists, err := dir.FileExist(bloomIndexPath)
 		if err != nil {
@@ -573,7 +582,19 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 				return nil, nil, nil, fmt.Errorf("merge %s existence [%d-%d]: %w", dt.d.FilenameBase, r.values.from, r.values.to, err)
 			}
 		}
+		existenceTook = time.Since(exStart)
 	}
+
+	log.Info("[snapshots] merged kv",
+		"name", dt.d.FilenameBase,
+		"range", fmt.Sprintf("%d-%d", fromStep, toStep),
+		"files-in", len(domainFiles),
+		"kv-merge-took", kvMergeTook,
+		"bt-took", btTook,
+		"kvi-took", kviTook,
+		"existence-took", existenceTook,
+		"total", time.Since(mergeStart),
+	)
 
 	closeFiles = false
 	return
