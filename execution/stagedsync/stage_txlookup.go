@@ -201,6 +201,9 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 }
 
 func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Context, logger log.Logger) (err error) {
+	if dbg.NoPrune() {
+		return s.Done(tx)
+	}
 	logPrefix := s.LogPrefix()
 	blockFrom := s.PruneProgress
 	if blockFrom == 0 {
