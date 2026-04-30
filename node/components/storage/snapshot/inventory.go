@@ -81,6 +81,20 @@ type FileEntry struct {
 
 	// Seeding is true if the file is currently being seeded via BitTorrent.
 	Seeding bool
+
+	// Advertisable is true once the producer-side validation chain has
+	// approved this file for inclusion in the published V2 manifest.
+	// The field is set but not yet read by GenerateV2 — the
+	// chain.v2.<seq>.toml output still derives from Local + canonicity
+	// today. Once the producer-side gate is fully hooked into the
+	// retire/build pipeline, GenerateV2 will tighten its filter to
+	// require Advertisable=true and the manifest's "advertised content
+	// == validated content" invariant becomes a structural guarantee
+	// rather than a procedural one.
+	//
+	// See feature-pluggable-validation-phase.md for the producer-side
+	// design.
+	Advertisable bool
 }
 
 // Range returns the StepRange for this file entry.
@@ -353,6 +367,41 @@ func (inv *Inventory) Domains() []Domain {
 	}
 	sort.Slice(domains, func(i, j int) bool { return domains[i] < domains[j] })
 	return domains
+}
+
+// MarkAdvertisable flips a file's Advertisable flag to true. Returns
+// true if the flag was actually changed (false if the file was
+// already advertisable, or no file with that name is in the
+// inventory).
+//
+// Callers run the producer-side validation chain BEFORE invoking
+// this — the inventory itself doesn't enforce the gate, it just
+// records the verdict. validation.Producer is the recommended
+// caller; tests may flip the flag directly.
+func (inv *Inventory) MarkAdvertisable(name string) bool {
+	inv.mu.Lock()
+	defer inv.mu.Unlock()
+
+	for _, slice := range [][]*FileEntry{inv.blocks, inv.caplin, inv.meta, inv.salt} {
+		if e := findByName(slice, name); e != nil {
+			if !e.Advertisable {
+				e.Advertisable = true
+				return true
+			}
+			return false
+		}
+	}
+
+	for _, entries := range inv.domains {
+		if e := findByName(entries, name); e != nil {
+			if !e.Advertisable {
+				e.Advertisable = true
+				return true
+			}
+			return false
+		}
+	}
+	return false
 }
 
 // PromoteTrust promotes a file's trust level if the new level is higher.
