@@ -463,3 +463,19 @@ func TestParseTopicsIntoMap(t *testing.T) {
 		})
 	}
 }
+
+func TestParseTopicsIntoMapNilMap(t *testing.T) {
+	int8Type, _ := NewType("int8", "", nil)
+	fields := Arguments{Argument{
+		Name:    "int8Value",
+		Type:    int8Type,
+		Indexed: true,
+	}}
+	err := ParseTopicsIntoMap(nil, fields, []common.Hash{{0}})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if err.Error() != "abi: cannot unpack into a nil map" {
+		t.Fatalf("error = %v", err)
+	}
+}

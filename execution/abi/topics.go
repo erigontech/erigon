@@ -118,24 +118,25 @@ func genIntType(rule int64, size uint) []byte {
 
 // ParseTopics converts the indexed topic fields into actual log field values.
 func ParseTopics(out any, fields Arguments, topics []common.Hash) error {
+	outValue := reflect.ValueOf(out)
+	if outValue.Kind() != reflect.Pointer || outValue.IsNil() {
+		return fmt.Errorf("abi: cannot unmarshal indexed event fields into %T", out)
+	}
+	outValue = outValue.Elem()
+	if outValue.Kind() != reflect.Struct {
+		return fmt.Errorf("abi: cannot unmarshal indexed event fields into %T", out)
+	}
+
 	return parseTopicWithSetter(fields, topics,
 		func(arg Argument, reconstr any) error {
-			value := reflect.ValueOf(out)
-			if value.Kind() != reflect.Pointer || value.IsNil() {
-				return fmt.Errorf("abi: cannot unmarshal indexed event fields into %T", out)
-			}
-			value = value.Elem()
-			if value.Kind() != reflect.Struct {
-				return fmt.Errorf("abi: cannot unmarshal indexed event fields into %T", out)
-			}
-			field := value.FieldByName(ToCamelCase(arg.Name))
+			field := outValue.FieldByName(ToCamelCase(arg.Name))
 			if !field.IsValid() {
 				return fmt.Errorf("abi: field %s can't be found in the given value", arg.Name)
 			}
 			if !field.CanSet() {
 				return fmt.Errorf("abi: field %s cannot be set", arg.Name)
 			}
-			value = reflect.ValueOf(reconstr)
+			value := reflect.ValueOf(reconstr)
 			if !value.IsValid() || !value.Type().AssignableTo(field.Type()) {
 				return fmt.Errorf("abi: cannot unmarshal %T in to %v", reconstr, field.Type())
 			}
@@ -146,6 +147,9 @@ func ParseTopics(out any, fields Arguments, topics []common.Hash) error {
 
 // ParseTopicsIntoMap converts the indexed topic field-value pairs into map key-value pairs.
 func ParseTopicsIntoMap(out map[string]any, fields Arguments, topics []common.Hash) error {
+	if out == nil {
+		return errors.New("abi: cannot unpack into a nil map")
+	}
 	return parseTopicWithSetter(fields, topics,
 		func(arg Argument, reconstr any) error {
 			out[arg.Name] = reconstr
