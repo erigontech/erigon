@@ -23,6 +23,7 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -152,6 +153,9 @@ func UnwindWitnessProcessingStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx
 
 // PruneWitnessProcessingStage handles pruning for witness processing
 func PruneWitnessProcessingStage(p *PruneState, tx kv.RwTx, cfg WitnessProcessingCfg, ctx context.Context, logger log.Logger) error {
+	if dbg.NoPrune() {
+		return p.Done(tx)
+	}
 	// Prune old witness data based on retention policy
 	if err := cleanupOldWitnesses(tx, p.ForwardProgress, logger); err != nil {
 		return err
