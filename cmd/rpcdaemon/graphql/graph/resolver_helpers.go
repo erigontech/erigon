@@ -40,6 +40,7 @@ func (r *queryResolver) buildBlock(res map[string]any) (*model.Block, error) {
 	blk := absBlk.(map[string]any)
 
 	block.Difficulty = *convertDataToStringP(blk, "difficulty")
+	block.TotalDifficulty = *convertDataToStringP(blk, "totalDifficulty")
 	block.ExtraData = *convertDataToStringP(blk, "extraData")
 	block.GasLimit = uint64(*convertDataToUint64P(blk, "gasLimit"))
 	block.GasUsed = *convertDataToUint64P(blk, "gasUsed")

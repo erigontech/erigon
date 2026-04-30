@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/types/ethutils"
@@ -156,6 +157,16 @@ func (api *GraphQLAPIImpl) buildBlockDetailsResponse(ctx context.Context, tx kv.
 			transaction["status"] = hexutil.Uint64(0)
 		}
 		result = append(result, transaction)
+	}
+
+	td, err := rawdb.ReadTd(tx, block.Hash(), block.NumberU64())
+	if err != nil {
+		return nil, err
+	}
+	if td != nil {
+		getBlockRes["totalDifficulty"] = (*hexutil.Big)(td)
+	} else {
+		getBlockRes["totalDifficulty"] = (*hexutil.Big)(new(big.Int))
 	}
 
 	response := map[string]any{}

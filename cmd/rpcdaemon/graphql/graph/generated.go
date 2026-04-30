@@ -79,6 +79,7 @@ type ComplexityRoot struct {
 		ReceiptsRoot      func(childComplexity int) int
 		StateRoot         func(childComplexity int) int
 		Timestamp         func(childComplexity int) int
+		TotalDifficulty   func(childComplexity int) int
 		TransactionAt     func(childComplexity int, index int) int
 		TransactionCount  func(childComplexity int) int
 		Transactions      func(childComplexity int) int
@@ -440,6 +441,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Block.Timestamp(childComplexity), true
+	case "Block.totalDifficulty":
+		if e.ComplexityRoot.Block.TotalDifficulty == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Block.TotalDifficulty(childComplexity), true
 	case "Block.transactionAt":
 		if e.ComplexityRoot.Block.TransactionAt == nil {
 			break
@@ -1611,6 +1618,8 @@ func (ec *executionContext) fieldContext_Block_parent(_ context.Context, field g
 				return ec.fieldContext_Block_mixHash(ctx, field)
 			case "difficulty":
 				return ec.fieldContext_Block_difficulty(ctx, field)
+			case "totalDifficulty":
+				return ec.fieldContext_Block_totalDifficulty(ctx, field)
 			case "ommerCount":
 				return ec.fieldContext_Block_ommerCount(ctx, field)
 			case "ommers":
@@ -2102,6 +2111,35 @@ func (ec *executionContext) fieldContext_Block_difficulty(_ context.Context, fie
 	return fc, nil
 }
 
+func (ec *executionContext) _Block_totalDifficulty(ctx context.Context, field graphql.CollectedField, obj *model.Block) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Block_totalDifficulty,
+		func(ctx context.Context) (any, error) {
+			return obj.TotalDifficulty, nil
+		},
+		nil,
+		ec.marshalNBigInt2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Block_totalDifficulty(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Block",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type BigInt does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Block_ommerCount(ctx context.Context, field graphql.CollectedField, obj *model.Block) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -2191,6 +2229,8 @@ func (ec *executionContext) fieldContext_Block_ommers(_ context.Context, field g
 				return ec.fieldContext_Block_mixHash(ctx, field)
 			case "difficulty":
 				return ec.fieldContext_Block_difficulty(ctx, field)
+			case "totalDifficulty":
+				return ec.fieldContext_Block_totalDifficulty(ctx, field)
 			case "ommerCount":
 				return ec.fieldContext_Block_ommerCount(ctx, field)
 			case "ommers":
@@ -2284,6 +2324,8 @@ func (ec *executionContext) fieldContext_Block_ommerAt(ctx context.Context, fiel
 				return ec.fieldContext_Block_mixHash(ctx, field)
 			case "difficulty":
 				return ec.fieldContext_Block_difficulty(ctx, field)
+			case "totalDifficulty":
+				return ec.fieldContext_Block_totalDifficulty(ctx, field)
 			case "ommerCount":
 				return ec.fieldContext_Block_ommerCount(ctx, field)
 			case "ommers":
@@ -3488,6 +3530,8 @@ func (ec *executionContext) fieldContext_Query_block(ctx context.Context, field 
 				return ec.fieldContext_Block_mixHash(ctx, field)
 			case "difficulty":
 				return ec.fieldContext_Block_difficulty(ctx, field)
+			case "totalDifficulty":
+				return ec.fieldContext_Block_totalDifficulty(ctx, field)
 			case "ommerCount":
 				return ec.fieldContext_Block_ommerCount(ctx, field)
 			case "ommers":
@@ -3593,6 +3637,8 @@ func (ec *executionContext) fieldContext_Query_blocks(ctx context.Context, field
 				return ec.fieldContext_Block_mixHash(ctx, field)
 			case "difficulty":
 				return ec.fieldContext_Block_difficulty(ctx, field)
+			case "totalDifficulty":
+				return ec.fieldContext_Block_totalDifficulty(ctx, field)
 			case "ommerCount":
 				return ec.fieldContext_Block_ommerCount(ctx, field)
 			case "ommers":
@@ -4601,6 +4647,8 @@ func (ec *executionContext) fieldContext_Transaction_block(_ context.Context, fi
 				return ec.fieldContext_Block_mixHash(ctx, field)
 			case "difficulty":
 				return ec.fieldContext_Block_difficulty(ctx, field)
+			case "totalDifficulty":
+				return ec.fieldContext_Block_totalDifficulty(ctx, field)
 			case "ommerCount":
 				return ec.fieldContext_Block_ommerCount(ctx, field)
 			case "ommers":
@@ -6978,6 +7026,11 @@ func (ec *executionContext) _Block(ctx context.Context, sel ast.SelectionSet, ob
 			}
 		case "difficulty":
 			out.Values[i] = ec._Block_difficulty(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "totalDifficulty":
+			out.Values[i] = ec._Block_totalDifficulty(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
 				atomic.AddUint32(&out.Invalids, 1)
 			}
