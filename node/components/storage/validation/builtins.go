@@ -17,8 +17,14 @@
 package validation
 
 import (
+	"errors"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
+
+	"github.com/anacrolix/torrent/metainfo"
 
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
 )
@@ -137,14 +143,101 @@ func inferKindFromName(name string) (snapshot.FileKind, bool) {
 	return "", false
 }
 
+// SizeMatchesTorrent verifies the file's byte count agrees with the
+// length declared in its .torrent metainfo sidecar. Catches the most
+// common real-bytes failure shapes: truncated downloads (partial
+// transfer), inflated content (random extra bytes appended),
+// wholesale replacement with smaller/larger content. The first line
+// of defence against a node advertising junk into the swarm.
+//
+// Resolves the .torrent at <SnapDir>/<file.Name>.torrent. Missing
+// .torrent silently accepts — the validator can't measure what
+// isn't there. Pair with a TorrentExists validator (future) if a
+// stricter "every file must have a torrent" policy is needed.
+//
+// SnapDir is required at construction; the storage adapter passes
+// its dirs.Snap. Tests construct with a tempdir.
+type SizeMatchesTorrent struct {
+	SnapDir string
+}
+
+// Name implements Validator.
+func (SizeMatchesTorrent) Name() string { return "size_matches_torrent" }
+
+// Validate implements Validator.
+func (s SizeMatchesTorrent) Validate(file *snapshot.FileEntry, content ContentSource) error {
+	if file == nil {
+		return fmt.Errorf("nil file entry")
+	}
+	if s.SnapDir == "" {
+		return fmt.Errorf("empty SnapDir")
+	}
+
+	torrentPath := filepath.Join(s.SnapDir, file.Name+".torrent")
+	if _, err := os.Stat(torrentPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// No torrent sidecar → can't measure → accept silently.
+			// A different validator gates "torrent must exist".
+			return nil
+		}
+		return fmt.Errorf("stat %s: %w", torrentPath, err)
+	}
+
+	mi, err := metainfo.LoadFromFile(torrentPath)
+	if err != nil {
+		return fmt.Errorf("load metainfo from %s: %w", torrentPath, err)
+	}
+	miInfo, err := mi.UnmarshalInfo()
+	if err != nil {
+		return fmt.Errorf("parse info from %s: %w", torrentPath, err)
+	}
+
+	if content == nil {
+		return fmt.Errorf("nil content (cannot measure file %q against torrent length %d)",
+			file.Name, miInfo.Length)
+	}
+	rc, err := content.Open()
+	if err != nil {
+		return fmt.Errorf("open content for %q: %w", file.Name, err)
+	}
+	defer rc.Close()
+
+	n, err := io.Copy(io.Discard, rc)
+	if err != nil {
+		return fmt.Errorf("read content for %q: %w", file.Name, err)
+	}
+
+	if n != miInfo.Length {
+		return fmt.Errorf("content size %d != torrent length %d (likely truncated or tampered)",
+			n, miInfo.Length)
+	}
+	return nil
+}
+
 // DefaultStage1Chain returns the baseline stage-1 validator chain
 // every storage adapter starts with when stage-1 validation is
 // enabled. Operators with custom needs append to this slice — the
 // built-ins are the floor, deployment validators are the ceiling.
+//
+// This default contains only metadata-shape validators (no
+// configuration required). Disk-reading validators like
+// SizeMatchesTorrent need a SnapDir; callers append them
+// explicitly via DefaultStage1ChainWithDisk.
 func DefaultStage1Chain() Chain {
 	return Chain{
 		NameNotEmpty{},
 		RangeOrdering{},
 		KindConsistencyFromName{},
 	}
+}
+
+// DefaultStage1ChainWithDisk returns DefaultStage1Chain plus the
+// disk-reading validators configured against snapDir. The storage
+// adapter wires this when it has a real snap-dir to point at.
+func DefaultStage1ChainWithDisk(snapDir string) Chain {
+	chain := DefaultStage1Chain()
+	if snapDir != "" {
+		chain = append(chain, SizeMatchesTorrent{SnapDir: snapDir})
+	}
+	return chain
 }
