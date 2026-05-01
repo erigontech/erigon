@@ -808,10 +808,19 @@ type FlushAndComputeCommitmentTimes struct {
 var (
 	commTotalNanos atomic.Int64
 	commBlockCount atomic.Uint64
+	commLastBlock  atomic.Uint64
 )
 
 // recordCommitmentTime updates running totals and logs per-block + running-average commitment time.
+// Dedupes by blockNum: only the first call for a given block is recorded. The same block can be
+// committed twice on a batch boundary — once inside serialExecutor.exec's periodic check, then
+// again at exec3.go:~293 against lastHeader after ErrLoopExhausted — and we don't want to count
+// that as two blocks.
 func recordCommitmentTime(blockNum uint64, took time.Duration, logger log.Logger, logPrefix string) {
+	prev := commLastBlock.Load()
+	if prev == blockNum || !commLastBlock.CompareAndSwap(prev, blockNum) {
+		return
+	}
 	total := commTotalNanos.Add(int64(took))
 	count := commBlockCount.Add(1)
 	avg := time.Duration(total / int64(count))
