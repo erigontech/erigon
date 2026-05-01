@@ -149,10 +149,12 @@ type DependencyResolver interface {
 Resolver registered on Inventory at construction. Lookup happens at
 state-transition time, no per-entry storage cost.
 
-Recommendation: **Option A**. The dependencies are file-name-shaped
-and stable (purely a function of kind + name); storing them on the
-entry makes the inventory self-contained and serialisable for V2
-manifest emission. Option B's flexibility isn't load-bearing.
+**Decision: Option A.** Dependencies are file-name-shaped and stable
+(purely a function of kind + name); storing them on the entry makes the
+inventory self-contained and serialisable for V2 manifest emission.
+Option B's flexibility isn't load-bearing today; if a future kind
+needs computed dependencies, it can be added then without breaking
+existing serialisation.
 
 A new state field captures the lifecycle position:
 
@@ -166,14 +168,28 @@ const (
     LifecycleIndexing
     LifecycleIndexed      // primary + deps all local
     LifecycleValidating
-    LifecycleAdvertisable // == Ready
+    LifecycleAdvertisable // == Ready (internal + external)
 )
 ```
 
-`Local` becomes derived (`state >= LifecycleDownloaded`), not
-independently set. `Advertisable` becomes derived
-(`state == LifecycleAdvertisable`). Existing accessors keep their names
-and meanings; the underlying state is unified.
+`Local` stays as a derived "on disk" accessor (`state >= LifecycleDownloaded`)
+— the downloader and seeding paths need to know what bytes have been
+fetched, regardless of whether they're indexed/validated yet.
+`Advertisable` becomes the **single Ready gate** for both internal reads
+and external publication: `state == LifecycleAdvertisable`. A file that
+hasn't passed structural validation isn't served internally OR
+externally — validation is the same gate, we just hadn't been using it
+that way internally.
+
+This collapses what were two flags into one signal. `WaitForReady`
+becomes "wait for Advertisable" by default; the existing
+`requireAdvertisable=false` parameter in the current API stops being
+useful for production code (kept as a tooling back-door for
+operator-side debugging that wants pre-validation reads).
+
+`Seeding` stays as a separate orthogonal flag — operator policy on
+whether to actively serve the file via BitTorrent, independent of
+readiness.
 
 ## Per-stage orchestration
 
@@ -304,6 +320,9 @@ Existing commits stay. New work proceeds:
     drives the lifecycle. CLI tools and tests unchanged.
 11. **Stage code cleanup** — once cutover is stable, remove the old
     stage-driven calls (one commit, low-risk now that storage owns it).
+    The `LifecycleDrivenByStorage` feature flag survives this step as
+    a kill-switch; it is removed only after the storage-driven path
+    has accumulated production hours across multiple releases.
 
 ## Out of scope for this branch
 
@@ -333,13 +352,20 @@ Existing commits stay. New work proceeds:
     to storage; cadence is independent. Default 60s? Configurable?
     Pinned during implementation.
 
-  - **Reversibility of the cutover (step 6).** Config gate proposal:
-    new field `Snapshot.LifecycleDrivenByStorage` (bool, default
-    false at first, flipped to true after equivalence validation,
-    field removed when stage calls are deleted in step 11). Risk: a
-    bug in the storage driver leaves a node with neither side driving.
-    Mitigation: integration test the cutover explicitly, gate a
-    one-week soak before deletion of legacy code.
+  - **Reversibility of the cutover (step 6).** Decided: feature flag
+    `Snapshot.LifecycleDrivenByStorage` (bool, defaults to false at
+    merge), flipped to true once the storage driver is exercised in
+    integration tests and at least one canary deployment. The flag
+    **survives the bedding-in period** — step 11 (legacy removal) does
+    NOT delete the flag itself; the flag stays as a kill-switch
+    through subsequent releases until the storage-driven path has
+    accumulated enough production hours that we're confident the
+    fallback is no longer worth carrying.
+
+    Risk: a bug in the storage driver leaves a node with neither side
+    driving. Mitigation: integration test the cutover explicitly; the
+    feature flag is the operator-side rollback if a soak reveals
+    issues.
 
   - **Boundary with downloader.** Downloader currently reports file
     completion; storage takes it from there. If validation fails and
