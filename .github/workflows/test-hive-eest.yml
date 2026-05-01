@@ -66,6 +66,10 @@ jobs:
             sim-limit: ".*tests/osaka/.*"
             shard: osaka
             pool-size: 4
+          - sim: consume-engine
+            sim-limit: ".*tests/static/.*"
+            shard: static
+            pool-size: 0
           # consume-engine (devnet)
           - sim: consume-engine
             sim-limit: ".*(8024|7708|7778|7843|7928|7954|8037).*"
