@@ -260,6 +260,7 @@ var Schema = SchemaGen{
 
 		Accessors:           AccessorHashMap,
 		ReplaceKeysInValues: AggregatorSqueezeCommitmentValues, // when true, keys are replaced in values during merge once file range reaches threshold
+		LargeValues:         true,
 
 		Hist: HistCfg{
 			ValuesTable:   kv.TblCommitmentHistoryVals,
