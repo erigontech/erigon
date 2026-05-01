@@ -215,14 +215,19 @@ func (inv *Inventory) PendingDeletes() []string {
 	return out
 }
 
-// GetByName scans every category and returns the first entry matching
-// the name, or (nil, false) if no entry matches. Convenience for
-// callers that don't know which category a file lives in.
+// GetByName scans every category and returns a clone of the first entry
+// matching the name, or (nil, false) if no entry matches.
+//
+// The result is a clone — callers can safely read fields (Local,
+// Advertisable, Trust, etc.) without holding any lock, and concurrent
+// mutators (MarkLocal, MarkAdvertisable, etc.) will not race against
+// the caller. Mutating the returned clone does not affect the
+// inventory.
 func (inv *Inventory) GetByName(name string) (*FileEntry, bool) {
 	inv.mu.RLock()
 	defer inv.mu.RUnlock()
 	if e := inv.findByNameLocked(name); e != nil {
-		return e, true
+		return e.Clone(), true
 	}
 	return nil, false
 }

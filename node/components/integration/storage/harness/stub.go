@@ -18,16 +18,14 @@ package harness
 
 import (
 	"context"
-	"errors"
 
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
-	"github.com/erigontech/erigon/node/components/storage/views"
 )
 
-// ErrNotFound — the not-declared (Missing) outcome from a stub read.
-// Real read handles return their package-specific not-found error class;
-// the stub uses this sentinel so scenarios can assert with errors.Is.
-var ErrNotFound = errors.New("stub read: file not declared")
+// ErrNotFound is re-exported from snapshot for scenario assertions; the
+// stub returns whatever WaitForReady returns, including snapshot.ErrNotFound
+// for the Missing case.
+var ErrNotFound = snapshot.ErrNotFound
 
 // StubReadHandle simulates a read against (Inventory + optional held
 // view) embodying the wait-or-pending contract:
@@ -52,51 +50,33 @@ type StubReadHandle struct {
 }
 
 // Read attempts to read the named file. view may be nil for tests that
-// don't exercise held-view semantics.
+// don't exercise held-view semantics. Held views with a captured ready
+// clone short-circuit the wait — the refcount discipline keeps the file
+// readable through transitions. Otherwise the read delegates to
+// Inventory.WaitForReady, which is the canonical wait-or-pending
+// implementation that real read handles will reuse.
 func (h *StubReadHandle) Read(ctx context.Context, view snapshot.HeldView, name string) (string, error) {
 	if view != nil {
-		if e, ok := view.Get(name); ok && h.ready(e) {
+		if e, ok := view.Get(name); ok && readyEntry(e, h.RequireAdvertisable) {
 			return e.Name, nil
 		}
 	}
-
-	// Subscribe before re-checking live state to avoid lost-update races
-	// between "file just landed" and "we just started waiting".
-	sub, unsub := h.Inventory.Subscribe()
-	defer unsub()
-
-	if e, ok := h.Inventory.GetByName(name); ok && h.ready(e) {
-		return e.Name, nil
+	if err := h.Inventory.WaitForReady(ctx, name, h.RequireAdvertisable); err != nil {
+		return "", err
 	}
-	if _, ok := h.Inventory.GetByName(name); !ok {
-		if view == nil {
-			return "", ErrNotFound
-		}
-		if _, inView := view.Get(name); !inView {
-			return "", ErrNotFound
-		}
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			return "", views.ErrPending
-		case _, ok := <-sub:
-			if !ok {
-				return "", views.ErrPending
-			}
-			if e, ok := h.Inventory.GetByName(name); ok && h.ready(e) {
-				return e.Name, nil
-			}
-		}
-	}
+	e, _ := h.Inventory.GetByName(name)
+	return e.Name, nil
 }
 
-func (h *StubReadHandle) ready(e *snapshot.FileEntry) bool {
+// readyEntry mirrors snapshot.isReady (which is private to the snapshot
+// package) for the held-view short-circuit. Real read handles that have
+// access to the snapshot package's internals will use the package-private
+// helper directly; consumers outside snapshot reproduce the check here.
+func readyEntry(e *snapshot.FileEntry, requireAdvertisable bool) bool {
 	if !e.Local {
 		return false
 	}
-	if h.RequireAdvertisable && !e.Advertisable {
+	if requireAdvertisable && !e.Advertisable {
 		return false
 	}
 	return true
