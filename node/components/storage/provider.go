@@ -201,14 +201,27 @@ func (p *Provider) Initialize(deps Deps) error {
 	// Otherwise the existing stage-driven path remains authoritative;
 	// see execution/stagedsync/stage_snapshots.go.
 	//
-	// OnIndexing and OnValidation are left nil at this step; subsequent
-	// commits wire them to BlockRetire.BuildMissedIndices and the
-	// validator chain. The driver running with nil handlers is a
-	// safe no-op — the sweep iterates entries without dispatching.
+	// OnIndexing wraps a productionIndexBuilder that coalesces
+	// per-file calls into BlockRetire.BuildMissedIndicesIfNeed and
+	// Aggregator.BuildMissedAccessors invocations. OnValidation is
+	// left nil at this step; nodes that want producer-side
+	// validation wire a chain in their own setup. Reading nil for
+	// OnValidation means files advance Indexed → Advertisable
+	// without validation — matches today's pre-validation behaviour.
 	if deps.Inventory != nil && config.Snapshot.LifecycleDrivenByStorage {
+		// agg + indexWorkers wired in step 10 alongside backend.go
+		// passing them through Deps. Until then, the driver runs
+		// index-build for E2 (block snapshots) only; E3 (state
+		// accessors) stays on the stage path.
+		builder := &productionIndexBuilder{
+			blockRetire: p.BlockRetire,
+			notifier:    deps.DBEventNotifier,
+			logger:      logger,
+		}
 		p.LifecycleDriver = &lifecycle.Driver{
-			Inv:    deps.Inventory,
-			Logger: logger,
+			Inv:        deps.Inventory,
+			Logger:     logger,
+			OnIndexing: lifecycle.BuildOnIndexing(builder, deps.Inventory),
 		}
 		if err := p.LifecycleDriver.Start(ctx); err != nil {
 			return fmt.Errorf("storage: start lifecycle driver: %w", err)
