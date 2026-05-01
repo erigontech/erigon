@@ -124,7 +124,7 @@ func (iit *InvertedIndexRoTx) FirstStepNotInFiles() kv.Step {
 // (and underlying inverted index) merge. They are passed separately so that the
 // --erigondb.domain.steps-in-frozen-file CLI flag can relax the domain cap without affecting
 // history/II, which keep using the erigondb.toml stepsInFrozenFile value.
-func (dt *DomainRoTx) findMergeRange(maxEndTxNum, domainMaxSpan, maxSpan uint64) DomainRanges {
+func (dt *DomainRoTx) findMergeRange(maxEndTxNum, domainMaxSpan, historyMaxSpan uint64) DomainRanges {
 	r := DomainRanges{
 		name:    dt.name,
 		aggStep: dt.stepSize,
@@ -150,7 +150,7 @@ func (dt *DomainRoTx) findMergeRange(maxEndTxNum, domainMaxSpan, maxSpan uint64)
 	// merge History only if nothing to merge in Domain. to minimize amount of Domain files:
 	//  - to prioritize blocks execution perf (which needs only LatestState - Domains)
 	if !r.any() {
-		r.history = dt.ht.findMergeRange(maxEndTxNum, maxSpan)
+		r.history = dt.ht.findMergeRange(maxEndTxNum, historyMaxSpan)
 	}
 
 	return r

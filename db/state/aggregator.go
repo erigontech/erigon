@@ -1611,10 +1611,10 @@ func (v *aggregatorVisible) stateMinimaxTxNum() uint64 {
 }
 
 func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFile uint64) *Ranges {
-	maxSpan := stepSize * stepsInFrozenFile
+	historyMaxSpan := stepSize * stepsInFrozenFile
 
 	// Domain .kv files use infinity merge by default (no cap), matching pre-#20705 behaviour.
-	// history/II keep maxSpan. --erigondb.domain.steps-in-frozen-file can impose an explicit cap.
+	// history/II keep historyMaxSpan. --erigondb.domain.steps-in-frozen-file can impose an explicit cap.
 	domainMaxSpan := config3.UnboundedDomainMerge
 	if override := at.a.erigondbDomainStepsInFrozenFile; override != 0 && override != config3.UnboundedDomainMerge {
 		domainMaxSpan = stepSize * override
@@ -1638,7 +1638,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 		if d.d.Disable {
 			continue
 		}
-		r.domain[id] = d.findMergeRange(maxEndTxNum, domainMaxSpan, maxSpan)
+		r.domain[id] = d.findMergeRange(maxEndTxNum, domainMaxSpan, historyMaxSpan)
 	}
 
 	if commitmentUseReferencedBranches && r.domain[kv.CommitmentDomain].values.needMerge {
@@ -1684,10 +1684,10 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 		if ii.ii.Disable {
 			continue
 		}
-		r.invertedIndex[id] = ii.findMergeRange(maxEndTxNum, maxSpan)
+		r.invertedIndex[id] = ii.findMergeRange(maxEndTxNum, historyMaxSpan)
 	}
 
-	//log.Info(fmt.Sprintf("findMergeRange(%d, %d)=%s\n", maxEndTxNum/at.a.stepSize, maxSpan/at.a.stepSize, r))
+	//log.Info(fmt.Sprintf("findMergeRange(%d, %d)=%s\n", maxEndTxNum/at.a.stepSize, historyMaxSpan/at.a.stepSize, r))
 	return r
 }
 
