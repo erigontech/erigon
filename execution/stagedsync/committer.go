@@ -79,6 +79,15 @@ type commitmentCalculator struct {
 	// arrives after a per-block computation already covered this block.
 	lastComputedBlock uint64
 
+	// hasComputed disambiguates lastComputedBlock=0: without this flag,
+	// "never computed" and "computed block 0 (genesis)" both look like
+	// lastComputedBlock=0. The commitComputeRequest dedup check would
+	// then skip computing the very first batch when its lastBlockResult
+	// is block 0 — leaving the genesis commitment unwritten to sd, which
+	// breaks SeekCommitment for the next exec3 cycle (it falls back to
+	// stage progress instead of finding a commitment state).
+	hasComputed bool
+
 	// in receives the same applyResult stream as the apply loop,
 	// plus commitComputeRequest messages for explicit compute triggers.
 	in chan applyResult
@@ -196,13 +205,38 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 
 	case *commitComputeRequest:
 		// Explicit compute signal from the apply loop at batch boundary.
-		if cc.lastBlockResult != nil && cc.lastBlockResult.BlockNum > cc.lastComputedBlock {
+		if cc.shouldComputeOnRequest() {
 			cc.computeAndPublish(ctx, cc.lastBlockResult)
 		} else {
 			// Publish empty result so drainBeforeExit doesn't block forever
 			cc.publish(ctx, commitmentResult{blockNum: cc.lastComputedBlock})
 		}
 	}
+}
+
+// shouldComputeOnRequest decides whether a commitComputeRequest should
+// trigger a fresh ComputeCommitment vs. publish an empty result. Returns
+// true when there is a blockResult to compute against AND either:
+//
+//	(a) we haven't computed at all yet — covers the very first batch
+//	    which may be just genesis at blockNum=0; without this, the
+//	    genesis commitment would never be written to sd because
+//	    lastBlockResult.BlockNum=0 fails the > lastComputedBlock=0 check
+//	    (the same blockNum=0 ambiguity as SeekCommitment's stageProgress
+//	    fallback), leaving SeekCommitment in a subsequent exec3 cycle
+//	    to fall back to stage progress instead of finding a commitment
+//	    state — which then forces re-execution of block 0 and corrupts
+//	    the next batch's commitment.
+//
+//	(b) a new block boundary advanced past the last computed one.
+func (cc *commitmentCalculator) shouldComputeOnRequest() bool {
+	if cc.lastBlockResult == nil {
+		return false
+	}
+	if !cc.hasComputed {
+		return true
+	}
+	return cc.lastBlockResult.BlockNum > cc.lastComputedBlock
 }
 
 func (cc *commitmentCalculator) computeAndPublish(ctx context.Context, br *blockResult) {
@@ -238,6 +272,7 @@ func (cc *commitmentCalculator) computeAndPublish(ctx context.Context, br *block
 	}
 
 	cc.lastComputedBlock = br.BlockNum
+	cc.hasComputed = true
 	cc.publish(ctx, r)
 }
 
@@ -263,6 +298,7 @@ func (cc *commitmentCalculator) computeWithoutCheck(ctx context.Context, br *blo
 	_, _ = cc.doms.ComputeCommitment(ctx, cc.roTx, true, br.BlockNum, br.lastTxNum, cc.logPrefix, nil)
 
 	cc.lastComputedBlock = br.BlockNum
+	cc.hasComputed = true
 }
 
 func (cc *commitmentCalculator) computeAndCheck(ctx context.Context, br *blockResult) {
@@ -292,6 +328,7 @@ func (cc *commitmentCalculator) computeAndCheck(ctx context.Context, br *blockRe
 	}
 
 	cc.lastComputedBlock = br.BlockNum
+	cc.hasComputed = true
 
 	// Trim old version entries from sd.mem — only keeps the latest
 	// entry at or before this block's txNum. Reclaims memory from
