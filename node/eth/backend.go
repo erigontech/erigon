@@ -91,6 +91,8 @@ import (
 	"github.com/erigontech/erigon/node"
 	sentrycomp "github.com/erigontech/erigon/node/components/sentry"
 	storagecomp "github.com/erigontech/erigon/node/components/storage"
+	snapshotinv "github.com/erigontech/erigon/node/components/storage/snapshot"
+	"github.com/erigontech/erigon/node/components/storage/views"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/ethstats"
@@ -396,6 +398,14 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.blockSnapshots, backend.blockReader, backend.blockWriter = allSnapshots, blockReader, blockWriter
 	backend.chainDB = temporalDb
 
+	// Snapshot inventory — the metadata registry the storage component
+	// uses to model file lifecycle (Declared → Downloading → Downloaded
+	// → Indexing → Indexed → Validating → Advertisable). Created here
+	// because both storage.Provider.Initialize and the SetAwaiter calls
+	// below need a shared reference. See
+	// docs/plans/20260501-storage-lifecycle-spec.md.
+	inv := snapshotinv.NewInventory()
+
 	// Initialize extracted components.
 	//
 	// Downloader is initialized here; OnFilesChange file-change callbacks
@@ -428,10 +438,32 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		Config:               config,
 		DBEventNotifier:      backend.notifications.Events,
 		DownloaderClient:     backend.downloaderClient,
+		Inventory:            inv,
 		SegmentsBuildLimiter: segmentsBuildLimiter,
 		Logger:               logger,
 	}); err != nil {
 		return nil, err
+	}
+
+	// Wire wait-on-miss into the read handles. Awaiter is satisfied
+	// structurally by *snapshot.Inventory (single method,
+	// WaitForReady). RoSnapshots and Aggregator consult it on
+	// read-miss so declared-but-not-local files block on ctx instead
+	// of hard-failing. See
+	// docs/plans/20260501-readhandle-integration.md.
+	//
+	// Structural double-cast accommodates kv.TemporalRwDB being an
+	// interface — the concrete *temporal.DB exposes Agg() any, which
+	// returns *state.Aggregator. We avoid importing temporal/state
+	// here by reaching for SetAwaiter via the structural interface
+	// db/state.Aggregator implements.
+	allSnapshots.SetAwaiter(inv)
+	if dbWithAgg, ok := temporalDb.(interface{ Agg() any }); ok {
+		if agg, ok := dbWithAgg.Agg().(interface {
+			SetAwaiter(views.Awaiter)
+		}); ok {
+			agg.SetAwaiter(inv)
+		}
 	}
 
 	p2pConfig := stack.Config().P2P
