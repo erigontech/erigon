@@ -42,6 +42,8 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/components/storage/lifecycle"
+	"github.com/erigontech/erigon/node/components/storage/snapshot"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -65,6 +67,20 @@ type Provider struct {
 	CurrentBlockNumber   uint64
 	SegmentsBuildLimiter *semaphore.Weighted
 	BlockRetire          services.BlockRetire
+
+	// Inventory is the storage component's metadata registry of all
+	// known snapshot files (local + remote, per the snapshot-flow PR).
+	// Optional — nil for tools and tests that don't run the full
+	// snapshot-flow component. Populated by Deps.Inventory in
+	// Initialize. See node/components/storage/snapshot/inventory.go.
+	Inventory *snapshot.Inventory
+
+	// LifecycleDriver runs the storage-owned import lifecycle (per
+	// docs/plans/20260501-storage-lifecycle-spec.md). Created and
+	// started in Initialize ONLY when both Deps.Inventory is non-nil
+	// AND Config.Snapshot.LifecycleDrivenByStorage is true. Stopped
+	// via Provider.Stop. Nil otherwise.
+	LifecycleDriver *lifecycle.Driver
 
 	logger log.Logger
 }
@@ -98,6 +114,13 @@ type Deps struct {
 	// Downloader client for file-change callbacks (may be nil).
 	DownloaderClient downloader.Client
 
+	// Inventory is the storage component's metadata registry (per the
+	// snapshot-flow PR). Optional — nil for tools and tests that
+	// don't run the snapshot-flow component. When non-nil AND
+	// Config.Snapshot.LifecycleDrivenByStorage is true, Initialize
+	// constructs and starts a lifecycle.Driver.
+	Inventory *snapshot.Inventory
+
 	SegmentsBuildLimiter *semaphore.Weighted
 	Logger               log.Logger
 }
@@ -122,6 +145,7 @@ func (p *Provider) Initialize(deps Deps) error {
 	p.Genesis = deps.Genesis
 	p.GenesisHash = deps.Genesis.Hash()
 	p.SegmentsBuildLimiter = deps.SegmentsBuildLimiter
+	p.Inventory = deps.Inventory
 
 	// Read current block number. Use deps.Ctx so cancellation/shutdown
 	// propagates into this lookup instead of masking it with Background.
@@ -171,5 +195,35 @@ func (p *Provider) Initialize(deps Deps) error {
 		},
 	)
 
+	// Lifecycle driver — owns the import state machine when storage
+	// drives. Construct + start only when both Inventory is provided
+	// AND the operator has flipped the LifecycleDrivenByStorage flag.
+	// Otherwise the existing stage-driven path remains authoritative;
+	// see execution/stagedsync/stage_snapshots.go.
+	//
+	// OnIndexing and OnValidation are left nil at this step; subsequent
+	// commits wire them to BlockRetire.BuildMissedIndices and the
+	// validator chain. The driver running with nil handlers is a
+	// safe no-op — the sweep iterates entries without dispatching.
+	if deps.Inventory != nil && config.Snapshot.LifecycleDrivenByStorage {
+		p.LifecycleDriver = &lifecycle.Driver{
+			Inv:    deps.Inventory,
+			Logger: logger,
+		}
+		if err := p.LifecycleDriver.Start(ctx); err != nil {
+			return fmt.Errorf("storage: start lifecycle driver: %w", err)
+		}
+	}
+
 	return nil
+}
+
+// Stop releases the storage component's runtime resources. Currently
+// only the lifecycle driver needs explicit shutdown; other resources
+// (DB, BlockRetire, etc.) follow the framework's existing lifecycle.
+// Multi-call safe — Driver.Stop is idempotent.
+func (p *Provider) Stop() {
+	if p.LifecycleDriver != nil {
+		p.LifecycleDriver.Stop()
+	}
 }
