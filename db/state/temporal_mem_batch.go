@@ -25,10 +25,12 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
@@ -694,12 +696,16 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
 }
 
 func (sd *TemporalMemBatch) flushDiffSet(_ context.Context, tx kv.RwTx) error {
+	st := time.Now()
 	for key, changeSet := range sd.pastChangesAccumulator {
 		blockNum := binary.BigEndian.Uint64(common.ToBytesZeroCopy(key[:8]))
 		blockHash := common.BytesToHash(common.ToBytesZeroCopy(key[8:]))
 		if err := changeset.WriteDiffSet(tx, blockNum, blockHash, changeSet); err != nil {
 			return err
 		}
+	}
+	if took := time.Since(st); took > time.Millisecond {
+		log.Info("[dbg] diffset.flush", "t", took, "blocks", len(sd.pastChangesAccumulator))
 	}
 	return nil
 }

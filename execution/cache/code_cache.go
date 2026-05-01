@@ -22,8 +22,8 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
+
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
 )
 
@@ -258,18 +258,19 @@ func (c *CodeCache) PrintStatsAndReset() {
 	addrUsagePct := float64(addrSizeB) / float64(c.addrCapacityB) * 100
 	codeUsagePct := float64(codeSizeB) / float64(c.codeCapacityB) * 100
 
-	log.Debug("CodeCache stats",
-		"addr_hits", addrHits,
-		"addr_misses", addrMisses,
-		"addr_hit_rate", addrHitRate,
-		"code_hits", codeHits,
-		"code_misses", codeMisses,
-		"code_hit_rate", codeHitRate,
-		"addr_entries", c.addrToHash.Len(),
-		"code_entries", c.CodeLen(),
-		"addr_size_mb", addrSizeB/(1024*1024),
-		"addr_usage_pct", addrUsagePct,
-		"code_size_mb", codeSizeB/(1024*1024),
-		"code_usage_pct", codeUsagePct,
-	)
+	_, _, _, _ = addrHitRate, codeHitRate, addrUsagePct, codeUsagePct
+	//log.Debug("CodeCache stats",
+	//	"addr_hits", addrHits,
+	//	"addr_misses", addrMisses,
+	//	"addr_hit_rate", addrHitRate,
+	//	"code_hits", codeHits,
+	//	"code_misses", codeMisses,
+	//	"code_hit_rate", codeHitRate,
+	//	"addr_entries", c.addrToHash.Len(),
+	//	"code_entries", c.CodeLen(),
+	//	"addr_size_mb", addrSizeB/(1024*1024),
+	//	"addr_usage_pct", addrUsagePct,
+	//	"code_size_mb", codeSizeB/(1024*1024),
+	//	"code_usage_pct", codeUsagePct,
+	//)
 }
