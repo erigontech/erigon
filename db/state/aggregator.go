@@ -56,6 +56,7 @@ import (
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/node/components/storage/views"
 )
 
 type Aggregator struct {
@@ -119,6 +120,39 @@ type Aggregator struct {
 
 	// nil = no cap. See #20701.
 	frozenBlocks FrozenBlocksProvider
+
+	// awaiter — optional dependency for wait-on-miss read behaviour.
+	// Set via SetAwaiter by production wiring (storage.Provider);
+	// nil for tools and tests. See
+	// node/components/storage/views.Awaiter and
+	// docs/plans/20260501-readhandle-integration.md for the
+	// wrapper's contract. Wait-on-miss integration in specific read
+	// methods is staged separately; this commit lands the dependency
+	// only.
+	awaiterMu sync.RWMutex
+	awaiter   views.Awaiter
+}
+
+// SetAwaiter wires the wait-on-miss dependency. Production wiring
+// passes the inventory's Awaiter (typically *snapshot.Inventory).
+// Calling with nil clears the dependency; subsequent reads behave as
+// they do today (hard-fail on miss).
+//
+// Safe to call concurrently with reads; the awaiter is read under a
+// per-call lock, so SetAwaiter's effect is visible to all subsequent
+// reads.
+func (a *Aggregator) SetAwaiter(awaiter views.Awaiter) {
+	a.awaiterMu.Lock()
+	a.awaiter = awaiter
+	a.awaiterMu.Unlock()
+}
+
+// Awaiter returns the currently-configured Awaiter, or nil if not set.
+// Read methods use this to consult the wait-on-miss path.
+func (a *Aggregator) Awaiter() views.Awaiter {
+	a.awaiterMu.RLock()
+	defer a.awaiterMu.RUnlock()
+	return a.awaiter
 }
 
 type FrozenBlocksProvider interface {
