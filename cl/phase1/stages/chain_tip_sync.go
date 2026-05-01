@@ -344,8 +344,9 @@ func fetchParentEnvelopes(ctx context.Context, cfg *Cfg, roots [][32]byte) map[c
 
 // recoverMissingEnvelopes walks backwards from the highest-seen block root
 // and fetches execution payload envelopes for FULL GLOAS blocks that are missing them.
-// It stops when it finds a parent that already has its envelope, since prior blocks are
-// expected to be covered. Fetching runs in a background goroutine to avoid blocking the stage.
+// It walks all the way back to the finalized slot (or the GLOAS boundary) so that
+// non-contiguous gaps are recovered — a nearer FULL-with-envelope does not guarantee
+// that all earlier parents also have their envelopes.
 //
 // Uses HighestSeenRoot (O(1) gossip-tracked tip) instead of GetHead to avoid
 // running the full fork choice traversal, which is expensive for large trees.
@@ -367,10 +368,23 @@ func recoverMissingEnvelopes(ctx context.Context, cfg *Cfg) {
 	}
 
 	var missingRoots [][32]byte
+
+	// Also check the head block itself — if its envelope is missing, fork choice
+	// can only offer EMPTY, causing the next builder to build on the wrong path.
+	if !cfg.forkChoice.HasEnvelope(headRoot) {
+		missingRoots = append(missingRoots, [32]byte(headRoot))
+	}
+
+	finalizedSlot := cfg.forkChoice.FinalizedSlot()
+
 	for {
 		parentRoot := childBlock.Block.ParentRoot
 		parentBlock, ok := cfg.forkChoice.GetBlock(parentRoot)
 		if !ok {
+			break
+		}
+
+		if parentBlock.Block.Slot <= finalizedSlot {
 			break
 		}
 
@@ -387,14 +401,11 @@ func recoverMissingEnvelopes(ctx context.Context, cfg *Cfg) {
 		}
 
 		if childBid.Message.ParentBlockHash == parentBid.Message.BlockHash {
-			// Parent is FULL.
-			if cfg.forkChoice.HasEnvelope(common.Hash(parentRoot)) {
-				// Envelope already present; everything further back is covered.
-				break
+			// Parent is FULL — check whether its envelope is present.
+			if !cfg.forkChoice.HasEnvelope(common.Hash(parentRoot)) {
+				missingRoots = append(missingRoots, parentRoot)
 			}
-			missingRoots = append(missingRoots, parentRoot)
 		}
-		// Whether FULL (missing) or EMPTY, continue walking backwards.
 		childBlock = parentBlock
 	}
 
@@ -427,21 +438,16 @@ func pollForEnvelope(ctx context.Context, cfg *Cfg, headRoot common.Hash, timeou
 // chainTipSync synchronizes the chain tip by fetching blocks from the highest seen block up to the target slot by listening to incoming blocks.
 // or by fetching blocks that might have been missed by gossip after a delay.
 func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
-	// [GLOAS] When caught up on blocks, check for missing execution payload envelopes.
-	// The gossip service has a 30-second window to deliver envelopes; this is the fallback
-	// for when gossip permanently failed but the CL block arrived on time.
-	// Flush any collected blocks to the execution engine before proceeding.
-	// This must happen before ForkChoice, which calls engine_forkchoiceUpdated —
-	// the EL needs the execution payloads that ForwardSync collected via
-	// blockCollector.AddGloasBlock / AddBlock (with newPayload=false).
-	if cfg.executionClient != nil && cfg.executionClient.SupportInsertion() {
-		// [GLOAS] Recover any execution payload envelopes that were missed by gossip.
-		// This runs every cycle (not just when caught-up) because seenSlot < targetSlot
-		// is almost always true — by the time ChainTipSync finishes a slot, the next one
-		// has arrived.  Recovered envelopes are sent to EL via newPayload; if EL is behind,
-		// errELBehind queues them as pending, which DrainPendingELPayloads picks up below.
-		recoverMissingEnvelopes(ctx, cfg)
+	// [GLOAS] Recover any execution payload envelopes that were missed by gossip.
+	// This runs every cycle (not just when caught-up) because seenSlot < targetSlot
+	// is almost always true — by the time ChainTipSync finishes a slot, the next one
+	// has arrived. Recovery only needs P2P (cfg.rpc) and fork choice — no local EL
+	// insertion — so it must run regardless of SupportInsertion().
+	recoverMissingEnvelopes(ctx, cfg)
 
+	// Flush any collected blocks to the execution engine before ForkChoice.
+	// DrainPendingELPayloads and blockCollector require local insertion support.
+	if cfg.executionClient != nil && cfg.executionClient.SupportInsertion() {
 		// [New in Gloas:EIP7732] Drain execution blocks whose CL transition succeeded
 		// but whose EL newPayload failed (EL was behind).  Adding them to the collector
 		// before Flush ensures they are inserted into EL in block-number order, filling
@@ -468,9 +474,8 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 			if headRoot != (common.Hash{}) && !cfg.forkChoice.HasEnvelope(headRoot) {
 				pollForEnvelope(ctx, cfg, headRoot, 2*time.Second)
 			}
-			// NOTE: recoverMissingEnvelopes is called in the common path above
-			// (before DrainPendingELPayloads), so it runs every cycle regardless
-			// of whether we are caught up or not.
+			// NOTE: recoverMissingEnvelopes runs unconditionally above (before
+			// SupportInsertion check), so it covers every cycle.
 		}
 		return nil
 	}
