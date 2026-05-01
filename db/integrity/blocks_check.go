@@ -1,0 +1,52 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package integrity
+
+import (
+	"context"
+
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/services"
+)
+
+// BlocksCheck wraps SnapBlocksRead as a self-contained type that
+// implements the BatchValidator contract from the storage validation
+// package — Name() string and ValidateBatch(ctx) error.
+//
+// Replaces the IntegrityBridge dispatch entry for the Blocks check.
+// Per the extension-point design (see
+// node/components/storage/validation/EXTENDING.md), validators are
+// first-class types that consumers compose into a Chain by listing.
+// No enum, no central registry, no bridge.
+type BlocksCheck struct {
+	DB          kv.TemporalRoDB
+	BlockReader services.FullBlockReader
+	From, To    uint64
+	FailFast    bool
+}
+
+// Name returns the stable identifier used in error wrapping and log
+// output.
+func (BlocksCheck) Name() string { return "Blocks" }
+
+// ValidateBatch invokes SnapBlocksRead with the configured
+// dependencies. Returns any error the underlying check produces;
+// the producer-side gate's chain wraps Name around the error so
+// operators can attribute rejections without unwrapping.
+func (c BlocksCheck) ValidateBatch(ctx context.Context) error {
+	return SnapBlocksRead(ctx, c.DB, c.BlockReader, c.From, c.To, c.FailFast)
+}
