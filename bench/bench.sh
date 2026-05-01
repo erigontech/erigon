@@ -9,12 +9,18 @@ RUNS_BASE=~/bench-runs
 
 usage() {
   cat <<EOF
-usage: bench.sh <branchA> <branchB> <chain> [datadirA] [datadirB] [--reset]
+usage: bench.sh <branchA> <branchB> <chain> [datadirA] [datadirB] [flags]
 
   branchA, branchB     local branch, remote branch, tag, or SHA
   chain                e.g. mainnet, holesky, dev
   datadirA, datadirB   optional explicit datadirs (default: $DATADIR_BASE/A_<chain>, $DATADIR_BASE/B_<chain>)
-  --reset              run 'integration stage_exec --reset' before erigon (default: off)
+
+  --reset              run 'integration stage_exec --reset' before erigon
+  --mem-limit-32g      wrap each erigon launch in 'systemd-run --user -p MemoryMax=32G'
+  --no-deep-merge      export ERIGON_NO_DEEP_MERGE_HISTORY=true (skips deep history merges)
+  --block-limit-1      run 'erigon snapshots rm-state --latest' as pre-flight, then start
+                       erigon with --sync.loop.block.limit=1 (approximates chain-tip workload
+                       for measuring big-merge impact)
 
 The launcher exports ERIGON_KV_READ_METRICS=true so kv_get_{count,sum} and
 trie_state_levelled_{load,skip}_rate series are populated on /debug/metrics/prometheus.
@@ -23,12 +29,18 @@ EOF
 
 # --- Argv parsing ---
 RESET=false
+MEM_LIMIT_32G=false
+NO_DEEP_MERGE=false
+BLOCK_LIMIT_1=false
 POS=()
 for arg in "$@"; do
   case "$arg" in
-    --reset) RESET=true ;;
-    -h|--help) usage; exit 0 ;;
-    *) POS+=("$arg") ;;
+    --reset)            RESET=true ;;
+    --mem-limit-32g)    MEM_LIMIT_32G=true ;;
+    --no-deep-merge)    NO_DEEP_MERGE=true ;;
+    --block-limit-1)    BLOCK_LIMIT_1=true ;;
+    -h|--help)          usage; exit 0 ;;
+    *)                  POS+=("$arg") ;;
   esac
 done
 
@@ -161,6 +173,11 @@ $CHAIN
 
 ## Environment (exported in run_*.sh)
 - ERIGON_KV_READ_METRICS=true (enables kv_get_{count,sum} and trie_state_levelled_{load,skip}_rate)
+$([ "$NO_DEEP_MERGE" = true ] && echo "- ERIGON_NO_DEEP_MERGE_HISTORY=true (skip deep history merges)")
+
+## Wrappers / erigon args
+- mem-limit-32g: $MEM_LIMIT_32G $([ "$MEM_LIMIT_32G" = true ] && echo " — systemd-run --user -p MemoryMax=32G wraps erigon")
+- block-limit-1: $BLOCK_LIMIT_1 $([ "$BLOCK_LIMIT_1" = true ] && echo " — rm-state --latest pre-flight + --sync.loop.block.limit=1 erigon arg")
 
 ## Prep (runs in each pane before erigon)
 - exec-stage reset: $reset_note
@@ -182,29 +199,45 @@ unset TMUX TMUX_PANE
 SESSION="erigon-bench-$TS"
 write_pane_script() {
   local side=$1 dir=$2 datadir=$3
-  if $RESET; then
-    cat > "$RUNDIR/run_$side.sh" <<EOS
-#!/usr/bin/env bash
-set -o pipefail
-export ERIGON_KV_READ_METRICS=true
-cd "$dir" && {
-  echo "=== stage_exec --reset ===" &&
-  ./build/bin/integration stage_exec --datadir="$datadir" --chain="$CHAIN" --reset &&
-  echo "=== erigon ===" &&
-  ./build/bin/erigon --config="$RUNDIR/config_$side.toml" --datadir="$datadir" --chain="$CHAIN"
-} 2>&1 | tee "$RUNDIR/$side.log"
-EOS
-  else
-    cat > "$RUNDIR/run_$side.sh" <<EOS
-#!/usr/bin/env bash
-set -o pipefail
-export ERIGON_KV_READ_METRICS=true
-cd "$dir" && {
-  echo "=== erigon (no reset) ===" &&
-  ./build/bin/erigon --config="$RUNDIR/config_$side.toml" --datadir="$datadir" --chain="$CHAIN"
-} 2>&1 | tee "$RUNDIR/$side.log"
-EOS
+
+  # Build env-var exports
+  local exports='export ERIGON_KV_READ_METRICS=true'
+  if $NO_DEEP_MERGE; then
+    exports="$exports"$'\n'"export ERIGON_NO_DEEP_MERGE_HISTORY=true"
   fi
+
+  # Build optional pre-flight steps
+  local preflight=""
+  if $RESET; then
+    preflight+=$'\n'"  echo \"=== stage_exec --reset ===\" &&"
+    preflight+=$'\n'"  ./build/bin/integration stage_exec --datadir=\"$datadir\" --chain=\"$CHAIN\" --reset &&"
+  fi
+  if $BLOCK_LIMIT_1; then
+    preflight+=$'\n'"  echo \"=== erigon snapshots rm-state --latest ===\" &&"
+    preflight+=$'\n'"  echo 1 | ./build/bin/erigon snapshots rm-state --latest --datadir=\"$datadir\" &&"
+  fi
+
+  # Build erigon command (with optional systemd-run wrap and block-limit arg)
+  local erigon_args="--config=\"$RUNDIR/config_$side.toml\" --datadir=\"$datadir\" --chain=\"$CHAIN\""
+  if $BLOCK_LIMIT_1; then
+    erigon_args="$erigon_args --sync.loop.block.limit=1"
+  fi
+  local erigon_cmd
+  if $MEM_LIMIT_32G; then
+    erigon_cmd="systemd-run --user -P -t -G --wait -p MemoryMax=32G ./build/bin/erigon $erigon_args"
+  else
+    erigon_cmd="./build/bin/erigon $erigon_args"
+  fi
+
+  cat > "$RUNDIR/run_$side.sh" <<EOS
+#!/usr/bin/env bash
+set -o pipefail
+$exports
+cd "$dir" && {$preflight
+  echo "=== erigon ===" &&
+  $erigon_cmd
+} 2>&1 | tee "$RUNDIR/$side.log"
+EOS
   chmod +x "$RUNDIR/run_$side.sh"
 }
 write_pane_script A "$ERIGON_A" "$DATADIR_A"
