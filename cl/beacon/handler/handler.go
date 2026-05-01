@@ -127,10 +127,10 @@ type ApiHandler struct {
 	enableMemoizedHeadState          bool
 
 	// [New in Gloas:EIP7732]
-	epbsPool                    *pool.EpbsPool
-	executionPayloadBidService  services.ExecutionPayloadBidService
-	payloadAttestationService   services.PayloadAttestationService
-	proposerPreferencesService  services.ProposerPreferencesService
+	epbsPool                   *pool.EpbsPool
+	executionPayloadBidService services.ExecutionPayloadBidService
+	payloadAttestationService  services.PayloadAttestationService
+	proposerPreferencesService services.ProposerPreferencesService
 	// selfBuildPayloads caches the execution payload + requests built by the local
 	// EL during self-build block production, keyed by the execution block hash.
 	// When the validator publishes the signed block, broadcastBlock retrieves the
