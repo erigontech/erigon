@@ -17,6 +17,8 @@
 package cltypes
 
 import (
+	"encoding/json"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -123,6 +125,36 @@ func (l *LightClientHeader) Static() bool {
 
 func (l *LightClientHeader) Clone() clonable.Clonable {
 	return NewLightClientHeader(l.version)
+}
+
+func (l *LightClientHeader) MarshalJSON() ([]byte, error) {
+	if l.version >= clparams.GloasVersion {
+		return json.Marshal(struct {
+			Beacon             *BeaconBlockHeader  `json:"beacon"`
+			ExecutionBlockHash common.Hash         `json:"execution_block_hash"`
+			ExecutionBranch    solid.HashVectorSSZ `json:"execution_branch,omitempty"`
+		}{
+			Beacon:             l.Beacon,
+			ExecutionBlockHash: l.ExecutionBlockHash,
+			ExecutionBranch:    l.ExecutionBranch,
+		})
+	}
+	if l.version >= clparams.CapellaVersion {
+		return json.Marshal(struct {
+			Beacon                 *BeaconBlockHeader  `json:"beacon"`
+			ExecutionPayloadHeader *Eth1Header         `json:"execution_payload_header,omitempty"`
+			ExecutionBranch        solid.HashVectorSSZ `json:"execution_branch,omitempty"`
+		}{
+			Beacon:                 l.Beacon,
+			ExecutionPayloadHeader: l.ExecutionPayloadHeader,
+			ExecutionBranch:        l.ExecutionBranch,
+		})
+	}
+	return json.Marshal(struct {
+		Beacon *BeaconBlockHeader `json:"beacon"`
+	}{
+		Beacon: l.Beacon,
+	})
 }
 
 func (l *LightClientHeader) getSchema() []any {
