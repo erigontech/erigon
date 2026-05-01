@@ -29,10 +29,10 @@ const (
 	// FINALIZED_ROOT_GINDEX	get_generalized_index(altair.BeaconState, 'finalized_checkpoint', 'root') (= 105)
 	// CURRENT_SYNC_COMMITTEE_GINDEX	get_generalized_index(altair.BeaconState, 'current_sync_committee') (= 54)
 	// NEXT_SYNC_COMMITTEE_GINDEX	get_generalized_index(altair.BeaconState, 'next_sync_committee') (= 55)
-	ExecutionBranchSize            = 4
+	ExecutionBranchSize = 4
 	// EXECUTION_BLOCK_HASH_GINDEX_GLOAS = get_generalized_index(BeaconBlockBody, 'signed_execution_payload_bid', 'message', 'parent_block_hash') (= 832)
 	// floorlog2(832) = 9
-	ExecutionBranchSizeGloas = 9
+	ExecutionBranchSizeGloas       = 9
 	SyncCommitteeBranchSize        = 5
 	CurrentSyncCommitteeBranchSize = 5
 	FinalizedBranchSize            = 6

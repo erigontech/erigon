@@ -385,11 +385,11 @@ func (s *SignedExecutionPayloadBid) Clone() clonable.Clonable {
 
 // ExecutionPayloadEnvelope represents an execution payload envelope with associated metadata.
 type ExecutionPayloadEnvelope struct {
-	Payload              *Eth1Block         `json:"payload"`
-	ExecutionRequests    *ExecutionRequests `json:"execution_requests"`
-	BuilderIndex         uint64             `json:"builder_index,string"`
-	BeaconBlockRoot      common.Hash        `json:"beacon_block_root"`
-	ParentBeaconBlockRoot common.Hash       `json:"parent_beacon_block_root"`
+	Payload               *Eth1Block         `json:"payload"`
+	ExecutionRequests     *ExecutionRequests `json:"execution_requests"`
+	BuilderIndex          uint64             `json:"builder_index,string"`
+	BeaconBlockRoot       common.Hash        `json:"beacon_block_root"`
+	ParentBeaconBlockRoot common.Hash        `json:"parent_beacon_block_root"`
 
 	beaconCfg *clparams.BeaconChainConfig
 }
