@@ -472,11 +472,12 @@ type subscrigeResponse struct {
 // Processes the incoming requests from the diagnostics system.
 // Handle subscribe/unsubscribe and all other messages.
 func (nc *nodeConnection) processRequests(metricsClient *http.Client) {
-	for action := range nc.requestChannel {
+	for {
+		var action requestAction
 		select {
 		case <-nc.ctx.Done():
 			return
-		default:
+		case action = <-nc.requestChannel:
 		}
 
 		switch {
@@ -569,11 +570,12 @@ func (nc *nodeConnection) processRequests(metricsClient *http.Client) {
 // Sends responses to the diagnostics system.
 // (support cmd) ----> (diagnostics system)
 func (nc *nodeConnection) processResponses() {
-	for response := range nc.responseChannel {
+	for {
+		var response nodeResponse
 		select {
 		case <-nc.ctx.Done():
 			return
-		default:
+		case response = <-nc.responseChannel:
 		}
 
 		if err := nc.codec.WriteJSON(nc.ctx, response); err != nil {
