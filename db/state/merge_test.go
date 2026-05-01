@@ -534,9 +534,9 @@ func TestFindMergeRange_Optimal(t *testing.T) {
 
 	// -- Cases where the current algorithm is already optimal --
 
-	t.Run("domain/binary_decreasing_already_optimal", func(t *testing.T) {
-		// Files whose sizes are the binary digits of the total step count (endStep & -endStep).
-		// 32 = 100000₂ → single merge 0-32 in one pass.
+	t.Run("domain/rightmost_bit_already_optimal", func(t *testing.T) {
+		// Each file's span already equals its endStep's rightmost bit (endStep & -endStep).
+		// endStep=32, rightmost bit=32 → single merge 0-32 in one pass.
 		files := []visibleFile{
 			f(0, 16), f(16, 24), f(24, 28), f(28, 30), f(30, 31), f(31, 32),
 		}
@@ -545,7 +545,7 @@ func TestFindMergeRange_Optimal(t *testing.T) {
 		assert.Equal(t, 0, int(r.values.from))
 		assert.Equal(t, 32, int(r.values.to))
 	})
-	t.Run("ii/binary_decreasing_already_optimal", func(t *testing.T) {
+	t.Run("ii/rightmost_bit_already_optimal", func(t *testing.T) {
 		files := []visibleFile{
 			f(0, 16), f(16, 24), f(24, 28), f(28, 30), f(30, 31), f(31, 32),
 		}
@@ -676,7 +676,7 @@ func TestFindMergeRange_Optimal(t *testing.T) {
 		assert.Equal(t, 0, int(r.history.from))
 		assert.Equal(t, 4, int(r.history.to))
 	})
-	t.Run("history/natural_decreasing_already_optimal", func(t *testing.T) {
+	t.Run("history/rightmost_bit_already_optimal", func(t *testing.T) {
 		files := []visibleFile{
 			f(0, 16), f(16, 24), f(24, 28), f(28, 30), f(30, 31), f(31, 32),
 		}
