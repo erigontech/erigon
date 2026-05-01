@@ -246,7 +246,14 @@ func (evm *EVM) handleFrameRevert(gas *mdgas.MdGas, err error, depth int,
 	if !evm.chainRules.IsAmsterdam {
 		return
 	}
-	childStateConsumed := evm.stateGasConsumed - savedStateGasConsumed
+	// Inline credits inside the child (CreditStateGasRefund) decrement
+	// evm.stateGasConsumed globally, which can drag it below
+	// savedStateGasConsumed when the credit absorbs an ancestor's prior
+	// charge — clamp here so the delta is non-negative.
+	var childStateConsumed uint64
+	if evm.stateGasConsumed >= savedStateGasConsumed {
+		childStateConsumed = evm.stateGasConsumed - savedStateGasConsumed
+	}
 	// Inline state-gas refunds applied inside the child already inflated
 	// `gas.State` when they were credited. Unwind that inflation so the
 	// parent's reservoir reflects only the net-of-refund delta.
@@ -279,22 +286,50 @@ func (evm *EVM) handleFrameRevert(gas *mdgas.MdGas, err error, depth int,
 			spill := childStateConsumed - reservoirUsed
 			gas.Regular += spill
 			evm.revertedSpillGas += spill
-		}
-		// Top-level exceptional halt: gas.Regular already zeroed in step 2;
-		// reservoir stays as-is for block gas accounting.
-	} else {
-		// Child frame (depth > 0): restore all consumed state gas
-		// (reservoir-sourced + spill) to the reservoir, preserving any
-		// sub-child restorations already in the reservoir. Subtract the
-		// child's inline refunds to avoid leaking the bonus into the parent.
-		gas.State += childStateConsumed
-		if gas.State >= childStateGasRefund {
-			gas.State -= childStateGasRefund
 		} else {
-			gas.State = 0
+			// Top-level EXCEPTIONAL HALT: per snobal/6 spec, the spilled
+			// portion stays burned alongside `gas_left` (reclassified as
+			// regular gas usage). Only the reservoir-portion is restored.
+			// Mirrors the Python ref: `regular_gas_used += excess` where
+			// excess = state_gas_used + state_gas_left - reservoir.
+			// Includes any propagated spill from sub-revert restorations.
+			totalState := childStateConsumed + gas.State
+			var excess uint64
+			if totalState > initialChildState {
+				excess = totalState - initialChildState
+			}
+			evm.regularGasConsumed += excess
+			gas.State = initialChildState
 		}
-		// Regular gas: REVERT preserves it (step 2 doesn't apply);
-		// exceptional halt burns it (step 2 zeroed gas.Regular).
+	} else {
+		// Child frame (depth > 0).
+		if err == ErrExecutionReverted {
+			// REVERT: state changes rolled back; restore all consumed
+			// state gas (reservoir-sourced + spill) to the parent's
+			// reservoir. Subtract the child's inline refunds so the
+			// bonus does not leak across the revert boundary.
+			gas.State += childStateConsumed
+			if gas.State >= childStateGasRefund {
+				gas.State -= childStateGasRefund
+			} else {
+				gas.State = 0
+			}
+		} else {
+			// EXCEPTIONAL HALT: per snobal/6 spec, state-gas charges
+			// in excess of the original reservoir came from gas_left
+			// (spill) and are reclassified as regular gas usage. Spill
+			// MUST NOT inflate the parent's reservoir — only the
+			// reservoir-sourced portion is implicitly preserved by
+			// restoring gas.State to its pre-call value. Includes any
+			// propagated spill from sub-revert restorations.
+			totalState := childStateConsumed + gas.State
+			var excess uint64
+			if totalState > initialChildState {
+				excess = totalState - initialChildState
+			}
+			evm.regularGasConsumed += excess
+			gas.State = initialChildState
+		}
 	}
 }
 
