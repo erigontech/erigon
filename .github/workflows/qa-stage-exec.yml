@@ -1,6 +1,8 @@
 name: QA - Stage Exec Smoke Test
 
 on:
+  schedule:
+    - cron: '0 4 * * *'  # Run daily at 04:00 UTC
   workflow_dispatch:     # Run manually
 
 concurrency:
