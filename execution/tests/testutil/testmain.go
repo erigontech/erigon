@@ -26,12 +26,13 @@ import (
 // overridden with that value so that t.TempDir() and os.MkdirTemp use it
 // (e.g. a RAM disk).
 //
-// If ERIGON_SKIP_EXECUTION_TESTS is set, the entire package is skipped
-// immediately. This is set on macOS/Windows CI runners where the heavy
-// EVM/blockchain spec-test suites would time out; Linux is sufficient for
-// consensus-correctness coverage.
+// If ERIGON_SKIP_EXECUTION_TESTS is set to a non-empty value, the entire
+// package is skipped immediately. This is set on macOS/Windows CI runners
+// where the heavy EVM/blockchain spec-test suites would time out; Linux is
+// sufficient for consensus-correctness coverage.
 func RunTestMain(m *testing.M) {
 	if os.Getenv("ERIGON_SKIP_EXECUTION_TESTS") != "" {
+		_, _ = os.Stderr.WriteString("skipping execution tests: ERIGON_SKIP_EXECUTION_TESTS is set\n")
 		os.Exit(0)
 	}
 	if dir := os.Getenv("ERIGON_EXECUTION_TESTS_TMPDIR"); dir != "" {
