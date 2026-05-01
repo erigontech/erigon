@@ -788,25 +788,25 @@ func TestFindMergeRangeInFiles(t *testing.T) {
 	}
 
 	const stepSize = uint64(1)
-	const noCapSpan = config3.UnboundedDomainMerge // pass as maxSpan to disable clamping
+	const maxSpan = config3.UnboundedDomainMerge
 
 	t.Run("empty", func(t *testing.T) {
 		// (none) -> (no merge)
-		mr := findMergeRangeInFiles(nil, stepSize, 1024, noCapSpan, false)
+		mr := findMergeRangeInFiles(nil, stepSize, 1024, maxSpan, false)
 		assert.False(t, mr.needMerge)
 	})
 
 	t.Run("single_aligned_file_skips", func(t *testing.T) {
 		// [0, 1024) ->
 		// [0, 1024)   (no merge — already at max-aligned span)
-		mr := findMergeRangeInFiles(visibleFiles{f(0, 1024)}, stepSize, 1024, noCapSpan, false)
+		mr := findMergeRangeInFiles(visibleFiles{f(0, 1024)}, stepSize, 1024, maxSpan, false)
 		assert.False(t, mr.needMerge)
 	})
 
 	t.Run("two_singletons_merge_to_2", func(t *testing.T) {
 		// [0, 1), [1, 2) ->
 		// [0, 2)
-		mr := findMergeRangeInFiles(visibleFiles{f(0, 1), f(1, 2)}, stepSize, 2, noCapSpan, false)
+		mr := findMergeRangeInFiles(visibleFiles{f(0, 1), f(1, 2)}, stepSize, 2, maxSpan, false)
 		assert.True(t, mr.needMerge)
 		assert.Equal(t, uint64(0), mr.from)
 		assert.Equal(t, uint64(2), mr.to)
@@ -816,7 +816,7 @@ func TestFindMergeRangeInFiles(t *testing.T) {
 		// [0, 1), [1, 2), [2, 3) -> with maxEndTxNum=2
 		// [0, 2), [2, 3)   ([2, 3) is past the frontier and ignored)
 		files := visibleFiles{f(0, 1), f(1, 2), f(2, 3)}
-		mr := findMergeRangeInFiles(files, stepSize, 2, noCapSpan, false)
+		mr := findMergeRangeInFiles(files, stepSize, 2, maxSpan, false)
 		assert.True(t, mr.needMerge)
 		assert.Equal(t, uint64(0), mr.from)
 		assert.Equal(t, uint64(2), mr.to)
@@ -826,7 +826,7 @@ func TestFindMergeRangeInFiles(t *testing.T) {
 		// [0, 1), [1, 2), [2, 3), [3, 4) ->
 		// [0, 4)   ([1, 2) initially proposes {0,2}; [3, 4) widens it to {0,4} which absorbs everything)
 		files := visibleFiles{f(0, 1), f(1, 2), f(2, 3), f(3, 4)}
-		mr := findMergeRangeInFiles(files, stepSize, 4, noCapSpan, false)
+		mr := findMergeRangeInFiles(files, stepSize, 4, maxSpan, false)
 		assert.True(t, mr.needMerge)
 		assert.Equal(t, uint64(0), mr.from)
 		assert.Equal(t, uint64(4), mr.to)
@@ -856,7 +856,7 @@ func TestFindMergeRangeInFiles(t *testing.T) {
 			f(1600, 1610),
 			f(1610, 1620),
 		}
-		mr := findMergeRangeInFiles(files, stepSize, 1620, noCapSpan, false)
+		mr := findMergeRangeInFiles(files, stepSize, 1620, maxSpan, false)
 		assert.False(t, mr.needMerge)
 	})
 
@@ -873,7 +873,7 @@ func TestFindMergeRangeInFiles(t *testing.T) {
 			f(1620, 1621),
 			f(1621, 1622),
 		}
-		mr := findMergeRangeInFiles(files, stepSize, 1622, noCapSpan, false)
+		mr := findMergeRangeInFiles(files, stepSize, 1622, maxSpan, false)
 		assert.True(t, mr.needMerge)
 		assert.Equal(t, uint64(1620), mr.from)
 		assert.Equal(t, uint64(1622), mr.to)
@@ -902,7 +902,7 @@ func TestFindMergeRangeInFiles(t *testing.T) {
 			f(1620, 1621),
 			f(1621, 1622),
 		}
-		mr := findMergeRangeInFiles(files, stepSize, 1622, noCapSpan, false)
+		mr := findMergeRangeInFiles(files, stepSize, 1622, maxSpan, false)
 		assert.True(t, mr.needMerge)
 		assert.Equal(t, uint64(1620), mr.from,
 			"window must not straddle [1600, 1618); the safe candidate is the trailing pair")
@@ -917,7 +917,7 @@ func TestFindMergeRangeInFiles(t *testing.T) {
 		// [1, 2) initially proposes {0, 2}; [0, 4) has same startTxNum 0 and endTxNum 4 >= 2,
 		// so superSetCheck widens the candidate and clears needMerge. [4, 5) is self-aligned.
 		files := visibleFiles{f(0, 1), f(1, 2), f(0, 4), f(4, 5)}
-		mr := findMergeRangeInFiles(files, stepSize, 5, noCapSpan, true)
+		mr := findMergeRangeInFiles(files, stepSize, 5, maxSpan, true)
 		assert.False(t, mr.needMerge)
 	})
 
@@ -927,7 +927,7 @@ func TestFindMergeRangeInFiles(t *testing.T) {
 		// [0, 4) clears the {0, 2} candidate via superSetCheck; then [5, 6) has start 4 < 5
 		// and re-arms needMerge with {4, 6}.
 		files := visibleFiles{f(0, 1), f(1, 2), f(0, 4), f(4, 5), f(5, 6)}
-		mr := findMergeRangeInFiles(files, stepSize, 6, noCapSpan, true)
+		mr := findMergeRangeInFiles(files, stepSize, 6, maxSpan, true)
 		assert.True(t, mr.needMerge)
 		assert.Equal(t, uint64(4), mr.from)
 		assert.Equal(t, uint64(6), mr.to)
