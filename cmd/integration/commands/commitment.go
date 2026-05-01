@@ -281,9 +281,6 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	if clearCommitment && resume {
 		return errors.New("--clear-commitment and --resume are mutually exclusive")
 	}
-	if noHistory && resume {
-		return errors.New("--no-history and --resume are mutually exclusive")
-	}
 	if noHistory && clearCommitment {
 		return errors.New("--no-history and --clear-commitment are mutually exclusive")
 	}
@@ -321,8 +318,8 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 		statecfg.EnableHistoricalCommitment()
 	}
 
-	if resume && !commitmentHistoryEnabled {
-		return errors.New("--resume requires commitment history to be enabled")
+	if resume && !noHistory && !commitmentHistoryEnabled {
+		return errors.New("--resume requires commitment history to be enabled (or pass --no-history)")
 	}
 
 	withHistory := false
