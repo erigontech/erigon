@@ -15,18 +15,24 @@
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 // Package views holds the cross-cutting types shared by storage read
-// paths — the typed sentinel error returned on soft-fail, and the
+// paths — the typed sentinel error returned on soft-fail, the
 // availability vocabulary the forward-availability projection surfaces
-// to planners.
+// to planners, and the small Awaiter interface read handles depend on
+// for wait-on-miss behaviour.
 //
 // Held-view types (HeldView, ChangeSet, InventoryView) live in the
 // snapshot package alongside Inventory itself, because they describe
 // Inventory's surface and would create an import cycle if defined here.
 //
-// See docs/plans/20260430-storage-views-spec.md for the full contract.
+// See docs/plans/20260430-storage-views-spec.md for the full contract,
+// and docs/plans/20260501-readhandle-integration.md for the read-handle
+// wiring shape.
 package views
 
-import "errors"
+import (
+	"context"
+	"errors"
+)
 
 // ErrPending is returned by reads when a file is declared in inventory
 // and expected to land, but has not become Ready within the read's ctx
@@ -67,4 +73,25 @@ func (a AvailabilityState) String() string {
 		return "Missing"
 	}
 	return "unknown"
+}
+
+// Awaiter is the small interface read handles (RoSnapshots,
+// Aggregator) depend on at view construction so they can wait for a
+// declared-but-not-local file to become Ready on read-miss. The
+// interface is single-method and structurally satisfied by
+// *snapshot.Inventory — read handles never see the full Inventory
+// API; they see only what they need.
+//
+// Production wiring passes the inventory's Awaiter to RoSnapshots
+// and Aggregator via SetAwaiter (the post-construction setter shape;
+// see docs/plans/20260501-readhandle-integration.md). CLI tools and
+// tests that don't run the snapshot-flow component pass nil — read
+// handles fall back to today's hard-fail behaviour on miss.
+type Awaiter interface {
+	// WaitForReady blocks until the named file becomes Ready (Local
+	// AND, when requireAdvertisable is set, Advertisable too) in the
+	// inventory; or returns ErrPending when ctx expires; or returns
+	// the not-found error class when the file is not declared at the
+	// moment of call.
+	WaitForReady(ctx context.Context, name string, requireAdvertisable bool) error
 }
