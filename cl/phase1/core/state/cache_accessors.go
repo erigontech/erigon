@@ -513,10 +513,15 @@ func (b *CachingBeaconState) GetValidatorActivationChurnLimit() uint64 {
 
 // GetPTC returns the Payload Timeliness Committee for the given slot.
 // For Gloas and later, it reads from the precomputed ptcWindow.
-// For earlier versions, it computes on the fly.
+// Falls back to ComputePTC when the requested slot is outside the
+// ptcWindow's 3-epoch range (e.g. state advanced far past the parent).
 func (b *CachingBeaconState) GetPTC(slot uint64) ([]uint64, error) {
 	if b.Version() >= clparams.GloasVersion {
-		return b.getPTCFromWindow(slot)
+		ptc, err := b.getPTCFromWindow(slot)
+		if err == nil {
+			return ptc, nil
+		}
+		return b.ComputePTC(slot)
 	}
 	return b.ComputePTC(slot)
 }
@@ -525,14 +530,25 @@ func (b *CachingBeaconState) GetPTC(slot uint64) ([]uint64, error) {
 // Index calculation follows the spec's get_ptc:
 //   - previous epoch: index = slot % SLOTS_PER_EPOCH
 //   - current/lookahead: index = (epoch - state_epoch + 1) * SLOTS_PER_EPOCH + slot % SLOTS_PER_EPOCH
+//
+// The ptc_window only covers [stateEpoch-1, stateEpoch, stateEpoch+1]. Slots
+// outside this range return an error.
 func (b *CachingBeaconState) getPTCFromWindow(slot uint64) ([]uint64, error) {
 	cfg := b.BeaconConfig()
 	epoch := GetEpochAtSlot(cfg, slot)
 	stateEpoch := b.Slot() / cfg.SlotsPerEpoch
 	slotInEpoch := slot % cfg.SlotsPerEpoch
 
+	// ptcWindow covers exactly 3 epochs: [stateEpoch-1, stateEpoch, stateEpoch+1].
+	// Reject requests outside this range to avoid uint64 underflow in the index
+	// arithmetic (e.g. epoch=68, stateEpoch=70 → epoch-stateEpoch+1 underflows).
+	if epoch+1 < stateEpoch || epoch > stateEpoch+1 {
+		return nil, fmt.Errorf("getPTCFromWindow: slot %d (epoch %d) outside ptcWindow range [%d, %d]",
+			slot, epoch, stateEpoch-1, stateEpoch+1)
+	}
+
 	var index uint64
-	if epoch == stateEpoch-1 {
+	if stateEpoch > 0 && epoch == stateEpoch-1 {
 		// Previous epoch
 		index = slotInEpoch
 	} else {
@@ -541,7 +557,7 @@ func (b *CachingBeaconState) getPTCFromWindow(slot uint64) ([]uint64, error) {
 	}
 
 	ptcWindow := b.GetPtcWindow()
-	if int(index) >= ptcWindow.Length() {
+	if index >= uint64(ptcWindow.Length()) {
 		return nil, fmt.Errorf("getPTCFromWindow: index %d out of range (window size %d)", index, ptcWindow.Length())
 	}
 
