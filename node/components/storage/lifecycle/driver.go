@@ -1,0 +1,241 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// Package lifecycle owns the storage-side file-import driver: the
+// state machine that takes a file from Declared through Downloading,
+// Downloaded, Indexing, Indexed, Validating, to Advertisable.
+//
+// See docs/plans/20260501-storage-lifecycle-spec.md for the full
+// design. This package is the "Storage component lifecycle driver"
+// step in that spec; sequencing-wise it is wired in dormant behind a
+// feature flag (Snapshot.LifecycleDrivenByStorage), with the
+// existing stage-driven path remaining authoritative until cutover.
+package lifecycle
+
+import (
+	"context"
+	"sync"
+	"time"
+
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/node/components/storage/snapshot"
+)
+
+// DefaultSweepInterval is the cadence at which the driver scans the
+// inventory for files behind on transitions. The sweep is a safety net
+// for events that get lost or delivered out of order; the primary
+// driver of advancement is ChangeSet subscription, which wakes the
+// sweep loop on every inventory mutation.
+//
+// 60 seconds matches the spec's default proposal — short enough that
+// stalls are corrected promptly, long enough that idle nodes don't
+// burn CPU. Configurable via Driver.SweepInterval if needed.
+const DefaultSweepInterval = 60 * time.Second
+
+// Handler runs one transition's work for a single file. On success it
+// calls Inv.AdvanceTo to advance the entry's state; on failure it
+// returns the error and leaves the entry at its current state for the
+// next sweep to retry.
+type Handler func(ctx context.Context, e *snapshot.FileEntry) error
+
+// Driver runs the storage-owned import lifecycle state machine. It
+// subscribes to inventory ChangeSets, runs handlers for each
+// transition, and periodically sweeps to catch any file that fell
+// behind.
+//
+// The driver is stateless across restarts — its work is to advance
+// inventory entries via Inventory.AdvanceTo, which is the persistent
+// state. Stopping and restarting the driver is safe.
+type Driver struct {
+	// Inv is the inventory the driver advances. Required.
+	Inv *snapshot.Inventory
+
+	// Logger receives operational logs. nil → log.Root().
+	Logger log.Logger
+
+	// SweepInterval overrides DefaultSweepInterval if non-zero.
+	SweepInterval time.Duration
+
+	// OnIndexing handles the Downloaded → Indexed transition: build
+	// any dependent index files (.idx, .kvi, .ef, .efi). nil → no-op.
+	// Step 4 wires this to the existing index-build code from
+	// db/snapshotsync (BuildMissedIndices) and db/state (accessor
+	// builders), invoked from the storage component's clock instead
+	// of from execution/stagedsync.
+	OnIndexing Handler
+
+	// OnValidation handles the Indexed → Advertisable transition: run
+	// the producer-side validator chain. nil → no-op. Step 5 wires
+	// this to the validation chain (extension-point design from item
+	// #3 of app-integration-review-items.md).
+	OnValidation Handler
+
+	// Internal state.
+	mu       sync.Mutex
+	running  bool
+	stopFn   context.CancelFunc
+	doneCh   chan struct{}
+	subUnsub func() // returned by Inv.Subscribe; called on Stop
+}
+
+// Start launches the driver. It subscribes to inventory ChangeSets,
+// starts the periodic sweep, and returns immediately. Start is a no-op
+// if the driver is already running. The driver runs until Stop is
+// called (or until ctx is cancelled).
+func (d *Driver) Start(ctx context.Context) error {
+	d.mu.Lock()
+	if d.running {
+		d.mu.Unlock()
+		return nil
+	}
+
+	logger := d.Logger
+	if logger == nil {
+		logger = log.Root()
+	}
+	interval := d.SweepInterval
+	if interval == 0 {
+		interval = DefaultSweepInterval
+	}
+
+	runCtx, cancel := context.WithCancel(ctx)
+	sub, unsub := d.Inv.Subscribe()
+
+	d.running = true
+	d.stopFn = cancel
+	d.doneCh = make(chan struct{})
+	d.subUnsub = unsub
+	d.mu.Unlock()
+
+	go d.run(runCtx, sub, interval, logger)
+	return nil
+}
+
+// Stop signals the driver to shut down and waits for the sweep loop to
+// exit. Multi-call safe; subsequent calls return immediately.
+func (d *Driver) Stop() {
+	d.mu.Lock()
+	if !d.running {
+		d.mu.Unlock()
+		return
+	}
+	d.running = false
+	cancel := d.stopFn
+	doneCh := d.doneCh
+	unsub := d.subUnsub
+	d.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	if unsub != nil {
+		unsub()
+	}
+	if doneCh != nil {
+		<-doneCh
+	}
+}
+
+// run is the driver's main loop. Receives ChangeSet wake-ups, runs
+// periodic sweeps, exits on ctx cancellation.
+func (d *Driver) run(ctx context.Context, sub <-chan snapshot.ChangeSet, interval time.Duration, logger log.Logger) {
+	defer close(d.doneCh)
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	// Initial sweep on start so any files already past their declared
+	// state get processed without waiting for the first tick.
+	d.Sweep(ctx, logger)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case _, ok := <-sub:
+			if !ok {
+				// Subscription closed (Stop called). Drain through
+				// ctx.Done to ensure clean exit.
+				continue
+			}
+			d.Sweep(ctx, logger)
+		case <-ticker.C:
+			d.Sweep(ctx, logger)
+		}
+	}
+}
+
+// Sweep iterates the inventory, dispatching each entry to the handler
+// matching its current LifecycleState. Idempotent — running it
+// repeatedly produces the same result if no inputs changed. Handlers
+// own their own concurrency; Sweep itself is single-threaded.
+//
+// At step 3 of the lifecycle implementation (this commit), default
+// handlers are nil and dispatch is a no-op. Subsequent commits
+// (steps 4 and 5) wire OnIndexing and OnValidation up to
+// BuildMissedIndices and the validator chain respectively.
+//
+// logger may be nil; resolved to log.Root() inside.
+func (d *Driver) Sweep(ctx context.Context, logger log.Logger) {
+	if d.Inv == nil {
+		return
+	}
+	if logger == nil {
+		logger = log.Root()
+	}
+	view := d.Inv.View()
+	defer view.Close()
+
+	for _, domain := range []snapshot.Domain{
+		snapshot.DomainAccounts, snapshot.DomainStorage,
+		snapshot.DomainCode, snapshot.DomainCommitment,
+	} {
+		for _, e := range view.Files(domain) {
+			d.dispatch(ctx, e, logger)
+		}
+	}
+	for _, e := range view.BlockFiles() {
+		d.dispatch(ctx, e, logger)
+	}
+}
+
+// dispatch routes a single entry to the handler for its current state.
+// Each handler is responsible for advancing the entry on success via
+// Inv.AdvanceTo; on handler failure the entry stays at its current
+// state and will be retried on the next sweep.
+//
+// Other states (Declared, Downloading, Indexing, Validating,
+// Advertisable) are not driven by sweep — they're driven by external
+// triggers (downloader signals, in-progress handlers). Sweep only
+// kicks off transitions that have all their inputs ready.
+func (d *Driver) dispatch(ctx context.Context, e *snapshot.FileEntry, logger log.Logger) {
+	if ctx.Err() != nil {
+		return
+	}
+	switch e.State {
+	case snapshot.LifecycleDownloaded:
+		if d.OnIndexing == nil {
+			return
+		}
+		if err := d.OnIndexing(ctx, e); err != nil {
+			logger.Debug("[lifecycle] OnIndexing", "name", e.Name, "err", err)
+		}
+	case snapshot.LifecycleIndexed:
+		if d.OnValidation == nil {
+			return
+		}
+		if err := d.OnValidation(ctx, e); err != nil {
+			logger.Debug("[lifecycle] OnValidation", "name", e.Name, "err", err)
+		}
+	}
+}
