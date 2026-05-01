@@ -62,18 +62,21 @@ func (r *queryResolver) buildBlock(res map[string]any) (*model.Block, error) {
 	block.ReceiptsRoot = *convertDataToStringP(blk, "receiptsRoot")
 	block.StateRoot = *convertDataToStringP(blk, "stateRoot")
 	block.Timestamp = *convertDataToStringP(blk, "timestamp")
-	block.TransactionCount = convertDataToIntP(blk, "transactionCount")
+	block.TransactionCount = convertDataToUint64P(blk, "transactionCount")
 	block.TransactionsRoot = *convertDataToStringP(blk, "transactionsRoot")
 	block.BaseFeePerGas = convertDataToStringP(blk, "baseFeePerGas")
 	block.LogsBloom = "0x" + *convertDataToStringP(blk, "logsBloom")
 	block.OmmerHash = *convertDataToStringP(blk, "sha3Uncles")
+	block.WithdrawalsRoot = convertDataToStringP(blk, "withdrawalsRoot")
+	block.BlobGasUsed = convertDataToUint64P(blk, "blobGasUsed")
+	block.ExcessBlobGas = convertDataToUint64P(blk, "excessBlobGas")
 
 	uncles := blk["uncles"].([]common.Hash)
 	block.Ommers = make([]*model.Block, 0, len(uncles))
 	for _, ommerHash := range uncles {
 		block.Ommers = append(block.Ommers, &model.Block{Hash: ommerHash.String()})
 	}
-	ommerCount := len(block.Ommers)
+	ommerCount := uint64(len(block.Ommers))
 	block.OmmerCount = &ommerCount
 
 	rcp := res["receipts"].([]map[string]any)
@@ -83,15 +86,17 @@ func (r *queryResolver) buildBlock(res map[string]any) (*model.Block, error) {
 		block.Transactions = append(block.Transactions, trans)
 	}
 
-	withdrawals := res["withdrawals"].([]map[string]any)
-	block.Withdrawals = make([]*model.Withdrawal, 0, len(withdrawals))
-	for _, withdrawal := range withdrawals {
-		w := &model.Withdrawal{}
-		w.Index = *convertDataToIntP(withdrawal, "index")
-		w.Validator = *convertDataToIntP(withdrawal, "validator")
-		w.Address = *convertDataToStringP(withdrawal, "address")
-		w.Amount = *convertDataToStringP(withdrawal, "amount")
-		block.Withdrawals = append(block.Withdrawals, w)
+	if block.WithdrawalsRoot != nil {
+		withdrawals, _ := res["withdrawals"].([]map[string]any)
+		block.Withdrawals = make([]*model.Withdrawal, 0, len(withdrawals))
+		for _, withdrawal := range withdrawals {
+			w := &model.Withdrawal{}
+			w.Index = *convertDataToUint64P(withdrawal, "index")
+			w.Validator = *convertDataToUint64P(withdrawal, "validator")
+			w.Address = strings.ToLower(*convertDataToStringP(withdrawal, "address"))
+			w.Amount = *convertDataToStringP(withdrawal, "amount")
+			block.Withdrawals = append(block.Withdrawals, w)
+		}
 	}
 
 	return block, nil
@@ -109,9 +114,12 @@ func (r *queryResolver) buildTransaction(block *model.Block, transReceipt map[st
 	}
 	trans.GasUsed = convertDataToUint64P(transReceipt, "gasUsed")
 	trans.Hash = *convertDataToStringP(transReceipt, "transactionHash")
-	trans.Index = convertDataToIntP(transReceipt, "transactionIndex")
+	trans.Index = convertDataToUint64P(transReceipt, "transactionIndex")
 	trans.MaxFeePerGas = convertDataToStringP(transReceipt, "maxFeePerGas")
 	trans.MaxPriorityFeePerGas = convertDataToStringP(transReceipt, "maxPriorityFeePerGas")
+	trans.MaxFeePerBlobGas = convertDataToStringP(transReceipt, "maxFeePerBlobGas")
+	trans.BlobGasUsed = convertDataToUint64P(transReceipt, "blobGasUsed")
+	trans.BlobGasPrice = convertDataToStringP(transReceipt, "blobGasPrice")
 	if transNonce := convertDataToStringP(transReceipt, "nonce"); transNonce != nil {
 		trans.Nonce = *transNonce
 	}
@@ -123,7 +131,7 @@ func (r *queryResolver) buildTransaction(block *model.Block, transReceipt map[st
 	trans.Logs = make([]*model.Log, 0, len(logs))
 	for _, rlog := range logs {
 		tlog := model.Log{
-			Index: int(rlog.Index),
+			Index: uint64(rlog.Index),
 			Data:  hexutil.Encode(rlog.Data),
 		}
 		tlog.Account = model.NewAccountAtBlock(block.Number)

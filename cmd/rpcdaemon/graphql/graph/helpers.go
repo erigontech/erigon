@@ -45,10 +45,15 @@ func convertDataToStringP(abstractMap map[string]any, field string) *string {
 		result = v.String()
 	case common.Hash:
 		result = v.String()
+	case *common.Hash:
+		if v == nil {
+			return nil
+		}
+		result = v.String()
 	case types.Bloom:
 		result = hex.EncodeToString(v.Bytes())
 	case types.BlockNonce:
-		result = "0x" + fmt.Sprintf("%016x", int64(v.Uint64()))
+		result = "0x" + fmt.Sprintf("%016x", v.Uint64())
 	case []uint8:
 		result = "0x" + hex.EncodeToString(v)
 	case *uint256.Int:
@@ -111,6 +116,8 @@ func convertDataToUint64P(abstractMap map[string]any, field string) *uint64 {
 		} else {
 			result = resultUint
 		}
+	case *hexutil.Uint64:
+		result = uint64(*v)
 	case hexutil.Uint:
 		resultUint, err := hexutil.DecodeUint64(v.String())
 		if err != nil {

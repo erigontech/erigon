@@ -16,12 +16,22 @@ import (
 	"github.com/erigontech/erigon/rpc"
 )
 
+// Storage is the resolver for the storage field.
+func (r *accountResolver) Storage(ctx context.Context, obj *model.Account, slot string) (string, error) {
+	panic(fmt.Errorf("not implemented: Storage - storage"))
+}
+
 // TransactionAt is the resolver for the transactionAt field.
 func (r *blockResolver) TransactionAt(ctx context.Context, obj *model.Block, index int) (*model.Transaction, error) {
 	if index < 0 || index >= len(obj.Transactions) {
 		return nil, nil
 	}
 	return obj.Transactions[index], nil
+}
+
+// Logs is the resolver for the logs field.
+func (r *blockResolver) Logs(ctx context.Context, obj *model.Block, filter model.BlockFilterCriteria) ([]*model.Log, error) {
+	panic(fmt.Errorf("not implemented: Logs - logs"))
 }
 
 // Account is the resolver for the account field.
@@ -32,6 +42,16 @@ func (r *blockResolver) Account(ctx context.Context, obj *model.Block, address s
 	return r.resolveAccountAtBlock(ctx, address, obj.Number, nil)
 }
 
+// Call is the resolver for the call field.
+func (r *blockResolver) Call(ctx context.Context, obj *model.Block, data model.CallData) (*model.CallResult, error) {
+	panic(fmt.Errorf("not implemented: Call - call"))
+}
+
+// EstimateGas is the resolver for the estimateGas field.
+func (r *blockResolver) EstimateGas(ctx context.Context, obj *model.Block, data model.CallData) (uint64, error) {
+	panic(fmt.Errorf("not implemented: EstimateGas - estimateGas"))
+}
+
 // SendRawTransaction is the resolver for the sendRawTransaction field.
 func (r *mutationResolver) SendRawTransaction(ctx context.Context, data string) (string, error) {
 	panic("not implemented: SendRawTransaction - sendRawTransaction")
@@ -39,11 +59,18 @@ func (r *mutationResolver) SendRawTransaction(ctx context.Context, data string) 
 
 // Block is the resolver for the block field.
 func (r *queryResolver) Block(ctx context.Context, number *string, hash *string) (*model.Block, error) {
-	if hash != nil && number == nil {
+	if number != nil && hash != nil {
+		return nil, &rpc.InvalidParamsError{Message: "Invalid params"}
+	}
+
+	if hash != nil {
 		blockHash := common.HexToHash(*hash)
 		res, err := r.GraphQLAPI.GetBlockDetailsByHash(ctx, blockHash)
 		if err != nil {
 			return nil, err
+		}
+		if res == nil {
+			return nil, nil
 		}
 		return r.buildBlock(res)
 	}
@@ -70,26 +97,54 @@ func (r *queryResolver) Block(ctx context.Context, number *string, hash *string)
 	if err != nil {
 		return nil, err
 	}
+	if res == nil {
+		return nil, nil
+	}
 	return r.buildBlock(res)
 }
 
 // Blocks is the resolver for the blocks field.
 func (r *queryResolver) Blocks(ctx context.Context, from *uint64, to *uint64) ([]*model.Block, error) {
-	var blocks []*model.Block
-
-	const maxBlocks = 25
+	if from == nil {
+		return nil, &rpc.InvalidParamsError{Message: "Invalid params"}
+	}
 
 	fromBlockNumber := *from
-	toBlockNumber := *to
 
-	if toBlockNumber >= fromBlockNumber && (toBlockNumber-fromBlockNumber+1) < maxBlocks {
-		blocks = make([]*model.Block, 0, toBlockNumber-fromBlockNumber+1)
-		for i := fromBlockNumber; i <= toBlockNumber; i++ {
-			blockNumberStr := strconv.FormatUint(i, 10)
-			block, _ := r.Block(ctx, &blockNumberStr, nil)
-			if block != nil {
-				blocks = append(blocks, block)
-			}
+	var toBlockNumber uint64
+	if to != nil {
+		toBlockNumber = *to
+	} else {
+		latestRes, err := r.GraphQLAPI.GetBlockDetails(ctx, rpc.LatestBlockNumber)
+		if err != nil {
+			return nil, err
+		}
+		if latestRes == nil {
+			return nil, nil
+		}
+		blk, ok := latestRes["block"].(map[string]any)
+		if !ok {
+			return nil, nil
+		}
+		latestNum := *convertDataToUint64P(blk, "number")
+		toBlockNumber = latestNum
+	}
+
+	if toBlockNumber < fromBlockNumber {
+		return nil, &rpc.InvalidParamsError{Message: "Invalid params"}
+	}
+
+	const maxBlocks = 25
+	if toBlockNumber-fromBlockNumber+1 >= maxBlocks {
+		return nil, &rpc.InvalidParamsError{Message: "Invalid params"}
+	}
+
+	blocks := make([]*model.Block, 0, toBlockNumber-fromBlockNumber+1)
+	for i := fromBlockNumber; i <= toBlockNumber; i++ {
+		blockNumberStr := strconv.FormatUint(i, 10)
+		block, _ := r.Block(ctx, &blockNumberStr, nil)
+		if block != nil {
+			blocks = append(blocks, block)
 		}
 	}
 
@@ -152,7 +207,7 @@ func (r *queryResolver) MaxPriorityFeePerGas(ctx context.Context) (string, error
 
 // Syncing is the resolver for the syncing field.
 func (r *queryResolver) Syncing(ctx context.Context) (*model.SyncState, error) {
-	panic("not implemented: Syncing - syncing")
+	return nil, nil
 }
 
 // ChainID is the resolver for the chainID field.
@@ -178,6 +233,9 @@ func (r *transactionResolver) To(ctx context.Context, obj *model.Transaction, bl
 	return r.resolveAccountAtBlock(ctx, obj.To.Address, obj.Block.Number, block)
 }
 
+// Account returns AccountResolver implementation.
+func (r *Resolver) Account() AccountResolver { return &accountResolver{r} }
+
 // Block returns BlockResolver implementation.
 func (r *Resolver) Block() BlockResolver { return &blockResolver{r} }
 
@@ -190,6 +248,7 @@ func (r *Resolver) Query() QueryResolver { return &queryResolver{r} }
 // Transaction returns TransactionResolver implementation.
 func (r *Resolver) Transaction() TransactionResolver { return &transactionResolver{r} }
 
+type accountResolver struct{ *Resolver }
 type blockResolver struct{ *Resolver }
 type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }

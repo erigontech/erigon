@@ -109,7 +109,13 @@ func (api *GraphQLAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash commo
 	}
 	defer tx.Rollback()
 
-	block, err := api.blockByHashWithSenders(ctx, tx, hash)
+	blockNrOrHash := rpc.BlockNumberOrHashWithHash(hash, false)
+	blockHeight, blockHash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	if err != nil {
+		return nil, err
+	}
+
+	block, err := api.blockWithSenders(ctx, tx, blockHash, blockHeight)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +123,7 @@ func (api *GraphQLAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash commo
 		return nil, nil
 	}
 
-	getBlockRes, err := api.delegateGetBlockByNumber(tx, block, rpc.BlockNumber(block.NumberU64()), false)
+	getBlockRes, err := api.delegateGetBlockByNumber(tx, block, rpc.BlockNumber(blockHeight), false)
 	if err != nil {
 		return nil, err
 	}
@@ -147,15 +153,16 @@ func (api *GraphQLAPIImpl) buildBlockDetailsResponse(ctx context.Context, tx kv.
 		transaction["logs"] = receipt.Logs
 		transaction["gas"] = txn.GetGasLimit()
 		txType := txn.Type()
-		if txType == types.DynamicFeeTxType || txType == types.SetCodeTxType {
+		if txType == types.DynamicFeeTxType || txType == types.SetCodeTxType || txType == types.BlobTxType {
 			transaction["maxFeePerGas"] = txn.GetFeeCap()
 			transaction["maxPriorityFeePerGas"] = txn.GetTipCap()
 		}
-		transaction["accessList"] = txn.GetAccessList()
-		// Pre-Byzantium receipts have PostState instead of Status; default status to 0.
-		if _, hasStatus := transaction["status"]; !hasStatus {
-			transaction["status"] = hexutil.Uint64(0)
+		if txType == types.BlobTxType {
+			if blobTx, ok := txn.(*types.BlobTx); ok {
+				transaction["maxFeePerBlobGas"] = (*hexutil.Big)(blobTx.MaxFeePerBlobGas.ToBig())
+			}
 		}
+		transaction["accessList"] = txn.GetAccessList()
 		result = append(result, transaction)
 	}
 
@@ -316,7 +323,7 @@ func (api *GraphQLAPIImpl) delegateGetBlockByNumber(tx kv.Tx, b *types.Block, nu
 	if !inclTx {
 		delete(response, "transactions") // workaround for https://github.com/erigontech/erigon/issues/4989#issuecomment-1218415666
 	}
-	response["transactionCount"] = b.Transactions().Len()
+	response["transactionCount"] = hexutil.Uint64(b.Transactions().Len())
 
 	if err == nil && number == rpc.PendingBlockNumber {
 		// Pending blocks need to nil out a few fields

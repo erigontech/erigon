@@ -13,7 +13,7 @@ type Block struct {
 	Parent            *Block         `json:"parent,omitempty"`
 	Nonce             string         `json:"nonce"`
 	TransactionsRoot  string         `json:"transactionsRoot"`
-	TransactionCount  *int           `json:"transactionCount,omitempty"`
+	TransactionCount  *uint64        `json:"transactionCount,omitempty"`
 	StateRoot         string         `json:"stateRoot"`
 	ReceiptsRoot      string         `json:"receiptsRoot"`
 	Miner             *Account       `json:"miner"`
@@ -27,7 +27,7 @@ type Block struct {
 	MixHash           string         `json:"mixHash"`
 	Difficulty        string         `json:"difficulty"`
 	TotalDifficulty   string         `json:"totalDifficulty"`
-	OmmerCount        *int           `json:"ommerCount,omitempty"`
+	OmmerCount        *uint64        `json:"ommerCount,omitempty"`
 	Ommers            []*Block       `json:"ommers,omitempty"`
 	OmmerAt           *Block         `json:"ommerAt,omitempty"`
 	OmmerHash         string         `json:"ommerHash"`
@@ -39,6 +39,9 @@ type Block struct {
 	EstimateGas       uint64         `json:"estimateGas"`
 	RawHeader         string         `json:"rawHeader"`
 	Raw               string         `json:"raw"`
+	WithdrawalsRoot   *string        `json:"withdrawalsRoot,omitempty"`
+	BlobGasUsed       *uint64        `json:"blobGasUsed,omitempty"`
+	ExcessBlobGas     *uint64        `json:"excessBlobGas,omitempty"`
 	Withdrawals       []*Withdrawal  `json:"withdrawals,omitempty"`
 }
 
@@ -72,7 +75,7 @@ type FilterCriteria struct {
 }
 
 type Log struct {
-	Index       int          `json:"index"`
+	Index       uint64       `json:"index"`
 	Account     *Account     `json:"account"`
 	Topics      []string     `json:"topics"`
 	Data        string       `json:"data"`
@@ -83,7 +86,7 @@ type Mutation struct {
 }
 
 type Pending struct {
-	TransactionCount int            `json:"transactionCount"`
+	TransactionCount uint64         `json:"transactionCount"`
 	Transactions     []*Transaction `json:"transactions,omitempty"`
 	Account          *Account       `json:"account"`
 	Call             *CallResult    `json:"call,omitempty"`
@@ -102,7 +105,7 @@ type SyncState struct {
 type Transaction struct {
 	Hash                 string         `json:"hash"`
 	Nonce                string         `json:"nonce"`
-	Index                *int           `json:"index,omitempty"`
+	Index                *uint64        `json:"index,omitempty"`
 	From                 *Account       `json:"from"`
 	To                   *Account       `json:"to,omitempty"`
 	Value                string         `json:"value"`
@@ -126,11 +129,14 @@ type Transaction struct {
 	AccessList           []*AccessTuple `json:"accessList,omitempty"`
 	Raw                  string         `json:"raw"`
 	RawReceipt           string         `json:"rawReceipt"`
+	MaxFeePerBlobGas     *string        `json:"maxFeePerBlobGas,omitempty"`
+	BlobGasUsed          *uint64        `json:"blobGasUsed,omitempty"`
+	BlobGasPrice         *string        `json:"blobGasPrice,omitempty"`
 }
 
 type Withdrawal struct {
-	Index     int    `json:"index"`
-	Validator int    `json:"validator"`
+	Index     uint64 `json:"index"`
+	Validator uint64 `json:"validator"`
 	Address   string `json:"address"`
 	Amount    string `json:"amount"`
 }
