@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/node/components/storage/views"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
@@ -565,6 +566,42 @@ type RoSnapshots struct {
 	ready     ready
 	operators map[snaptype.Enum]*retireOperators
 	alignMin  bool // do we want to align all visible segments to the minimum available
+
+	// awaiter — optional dependency for wait-on-miss read behaviour.
+	// Set via SetAwaiter by production wiring; nil for tools and
+	// tests. Read methods that miss in the visible set consult the
+	// awaiter (when non-nil) before returning the existing not-found
+	// error class, giving declared-but-not-local files a chance to
+	// land within the read's ctx deadline.
+	//
+	// See node/components/storage/views.Awaiter and
+	// docs/plans/20260501-readhandle-integration.md for the wrapper's
+	// contract. Wait-on-miss integration in specific read methods is
+	// staged separately; this commit lands the dependency only.
+	awaiterMu sync.RWMutex
+	awaiter   views.Awaiter
+}
+
+// SetAwaiter wires the wait-on-miss dependency. Production wiring
+// passes the inventory's Awaiter (typically *snapshot.Inventory).
+// Calling with nil clears the dependency; subsequent reads behave as
+// they do today (hard-fail on miss).
+//
+// Safe to call concurrently with reads; the awaiter is read under a
+// per-call lock, so SetAwaiter's effect is visible to all subsequent
+// reads.
+func (s *RoSnapshots) SetAwaiter(a views.Awaiter) {
+	s.awaiterMu.Lock()
+	s.awaiter = a
+	s.awaiterMu.Unlock()
+}
+
+// Awaiter returns the currently-configured Awaiter, or nil if not set.
+// Read methods use this to consult the wait-on-miss path.
+func (s *RoSnapshots) Awaiter() views.Awaiter {
+	s.awaiterMu.RLock()
+	defer s.awaiterMu.RUnlock()
+	return s.awaiter
 }
 
 type snapshotVisible struct {
