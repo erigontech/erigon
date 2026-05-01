@@ -608,9 +608,12 @@ func (c *Client) dispatch(codec ServerCodec, connCtx context.Context) {
 
 		case err := <-c.readErr:
 			conn.handler.logger.Trace("RPC connection read error", "err", err)
-			// A read error is fatal for the connection, and all pending requests must be cancelled, including any
-			// that might still be considered in-flight.
-			conn.close(err, lastOp)
+			// A read error is fatal for the connection, and all pending requests must be cancelled,
+			// including any that might still be considered in-flight. Once the resp channel is closed
+			// here, a later reconnect must not re-register this op (sending on a closed channel would
+			// panic), so clear lastOp too.
+			conn.close(err, nil)
+			lastOp = nil
 			reading = false
 
 		// Reconnect:
@@ -629,7 +632,10 @@ func (c *Client) dispatch(codec ServerCodec, connCtx context.Context) {
 			reading = true
 			conn = c.newClientConn(newcodec, connCtx)
 			// Re-register the in-flight request on the new handler because that's where it will be sent.
-			conn.handler.addRequestOp(lastOp)
+			// lastOp is nil if a fatal read error already cancelled the op — nothing to transfer then.
+			if lastOp != nil {
+				conn.handler.addRequestOp(lastOp)
+			}
 
 		// Send path:
 		case op := <-reqInitLock:
@@ -639,9 +645,11 @@ func (c *Client) dispatch(codec ServerCodec, connCtx context.Context) {
 			conn.handler.addRequestOp(op)
 
 		case err := <-c.reqSent:
-			if err != nil {
+			if err != nil && lastOp != nil {
 				// Remove response handlers for the last send. When the read loop
 				// goes down, it will signal all other current operations.
+				// lastOp can be nil if a fatal read error fired first and already
+				// cancelled the in-flight op.
 				conn.handler.removeRequestOp(lastOp)
 			}
 			// Let the next request in.
