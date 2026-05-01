@@ -290,6 +290,26 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 		}
 	}
 
+	// Account doesn't exist in state reader and no AddressPath entry in
+	// versionMap. The BAL pre-population writes only BalancePath/NoncePath/
+	// CodePath/StoragePath entries (NOT AddressPath, by design — see
+	// validateRead invariant). For an account that is created mid-block
+	// purely by tip credits (e.g. fee_recipient with no pre-state and no
+	// transfers to it), the BAL has the post-tx balance at each TxIndex,
+	// but ReadAccountData would return nil because it only checks
+	// AddressPath / stateReader. Synthesize an empty account and let
+	// applyVersionedUpdates apply the BAL-preloaded fields.
+	if vr.versionMap != nil {
+		var synth accounts.Account
+		updated := vr.applyVersionedUpdates(address, synth)
+		// Only return the synthesized account if applyVersionedUpdates
+		// actually applied at least one field — otherwise we'd return a
+		// zero account for addresses that have no versionMap entries.
+		if updated != synth {
+			return &updated, nil
+		}
+	}
+
 	return nil, nil
 }
 
