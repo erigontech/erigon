@@ -1068,6 +1068,9 @@ func (a *ApiHandler) produceBeaconBody(
 		beaconBody.Attestations = a.findBestAttestationsForBlockProduction(baseState)
 	}()
 	// [New in Gloas:EIP7732] Aggregate PTC votes into PayloadAttestations.
+	// The spec requires data.slot + 1 == state.slot, so we collect PTC votes
+	// for slot targetSlot-1 (= state.slot - 1), NOT baseBlockSlot. When slots
+	// are skipped the two differ and using baseBlockSlot produces invalid blocks.
 	if stateVersion.AfterOrEqual(clparams.GloasVersion) {
 		wg.Add(1)
 		go func() {
@@ -1080,7 +1083,7 @@ func (a *ApiHandler) produceBeaconBody(
 				}
 				log.Info("BlockProduction: aggregatePayloadAttestations took", "duration", time.Since(start), "selectedPAs", paCount)
 			}()
-			beaconBody.PayloadAttestations = a.aggregatePayloadAttestations(baseState, baseBlockSlot, baseBlockRoot)
+			beaconBody.PayloadAttestations = a.aggregatePayloadAttestations(baseState, targetSlot-1, baseBlockRoot)
 		}()
 	}
 	wg.Wait()
