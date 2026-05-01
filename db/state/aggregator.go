@@ -1638,14 +1638,10 @@ func (v *aggregatorVisible) stateMinimaxTxNum() uint64 {
 func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFile uint64) *Ranges {
 	maxSpan := stepSize * stepsInFrozenFile
 
-	// --erigondb.domain.steps-in-frozen-file adjusts the domain cap only; history/II keep maxSpan.
-	domainMaxSpan := maxSpan
-	switch override := at.a.erigondbDomainStepsInFrozenFile; override {
-	case 0:
-		// no override
-	case config3.UnboundedDomainMerge:
-		domainMaxSpan = config3.UnboundedDomainMerge // no cap on domain merge
-	default:
+	// Domain .kv files use infinity merge by default (no cap), matching pre-#20705 behaviour.
+	// history/II keep maxSpan. --erigondb.domain.steps-in-frozen-file can impose an explicit cap.
+	domainMaxSpan := config3.UnboundedDomainMerge
+	if override := at.a.erigondbDomainStepsInFrozenFile; override != 0 && override != config3.UnboundedDomainMerge {
 		domainMaxSpan = stepSize * override
 	}
 
