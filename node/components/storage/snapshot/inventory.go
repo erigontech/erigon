@@ -92,9 +92,33 @@ type FileEntry struct {
 	// == validated content" invariant becomes a structural guarantee
 	// rather than a procedural one.
 	//
-	// See feature-pluggable-validation-phase.md for the producer-side
-	// design.
+	// Per docs/plans/20260501-storage-lifecycle-spec.md, Advertisable
+	// becomes the single Ready gate for both internal reads and
+	// external publication. Local stays as a derived "on disk"
+	// accessor; downloader/seeding still need to know what bytes have
+	// been fetched, regardless of whether they're indexed/validated yet.
 	Advertisable bool
+
+	// State is the file's position in the import lifecycle. Driven by
+	// the storage component's lifecycle driver (per
+	// docs/plans/20260501-storage-lifecycle-spec.md). Zero value is
+	// LifecycleDeclared — a freshly-AddFile'd entry without explicit
+	// state defaults there. AddFile derives State from existing Local +
+	// Advertisable for back-compat with callers that still set those
+	// flags directly.
+	State LifecycleState
+
+	// Dependencies names files that must also be Local for this entry
+	// to advance to LifecycleIndexed. Set explicitly by the caller of
+	// AddFile based on the file's kind:
+	//   - .kv (domain primary)  → ["<prefix>.kvi"]
+	//   - .seg (block primary)  → ["<prefix>.idx"]
+	//   - .v   (history primary)→ ["<prefix>.ef", "<prefix>.efi"]
+	//   - .ef  (idx primary)    → ["<prefix>.efi"]
+	//   - meta, salt, caplin    → empty
+	// Empty Dependencies means no dependent files are required —
+	// the entry can advance directly to LifecycleIndexed once Local.
+	Dependencies []string
 }
 
 // Range returns the StepRange for this file entry.
@@ -150,7 +174,17 @@ func NewInventory() *Inventory {
 //   - Kind=meta/salt/caplin: stored in their respective flat slice.
 //   - Kind=kv (default), history, or idx: stored under entry.Domain when
 //     non-empty, or in the blocks slice when Domain is empty.
+//
+// State derivation: if the caller did not set entry.State explicitly
+// (i.e. State == LifecycleDeclared, the zero value), it is derived
+// from the Local + Advertisable flags. This preserves back-compat with
+// callers that still populate flags directly. Callers that own the
+// lifecycle should set State explicitly and let applyStateToFlags
+// keep the flags consistent.
 func (inv *Inventory) AddFile(entry *FileEntry) {
+	if entry.State == LifecycleDeclared && (entry.Local || entry.Advertisable) {
+		entry.State = deriveStateFromFlags(entry.Local, entry.Advertisable)
+	}
 	inv.mu.Lock()
 	switch entry.Kind {
 	case KindCaplin:
@@ -422,7 +456,7 @@ func (inv *Inventory) MarkAdvertisable(name string) bool {
 	for _, slice := range [][]*FileEntry{inv.blocks, inv.caplin, inv.meta, inv.salt} {
 		if e := findByName(slice, name); e != nil {
 			if !e.Advertisable {
-				e.Advertisable = true
+				applyStateToFlags(e, LifecycleAdvertisable)
 				changed = true
 			}
 			inv.mu.Unlock()
@@ -435,7 +469,7 @@ func (inv *Inventory) MarkAdvertisable(name string) bool {
 	for _, entries := range inv.domains {
 		if e := findByName(entries, name); e != nil {
 			if !e.Advertisable {
-				e.Advertisable = true
+				applyStateToFlags(e, LifecycleAdvertisable)
 				changed = true
 			}
 			inv.mu.Unlock()

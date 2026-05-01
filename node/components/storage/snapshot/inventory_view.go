@@ -235,6 +235,10 @@ func (inv *Inventory) GetByName(name string) (*FileEntry, bool) {
 // MarkLocal flips Local=true on the named entry and notifies
 // subscribers. Returns true if the flag was actually changed (false if
 // already local, or no entry with that name exists).
+//
+// Internally advances LifecycleState to LifecycleDownloaded (the
+// minimum state for Local=true). If the entry was already past
+// LifecycleDownloaded (e.g. Indexed or Advertisable), this is a no-op.
 func (inv *Inventory) MarkLocal(name string) bool {
 	inv.mu.Lock()
 	e := inv.findByNameLocked(name)
@@ -242,7 +246,7 @@ func (inv *Inventory) MarkLocal(name string) bool {
 		inv.mu.Unlock()
 		return false
 	}
-	e.Local = true
+	applyStateToFlags(e, LifecycleDownloaded)
 	inv.mu.Unlock()
 	inv.notify(ChangeSet{Files: []string{name}})
 	return true
@@ -251,6 +255,9 @@ func (inv *Inventory) MarkLocal(name string) bool {
 // MarkNotLocal flips Local=false on the named entry and notifies
 // subscribers. Returns true if the flag was actually changed. Used by
 // callers that detect corruption and trigger a re-download.
+//
+// Internally resets LifecycleState to LifecycleDeclared — corruption
+// means re-fetch from scratch, not just back-tracking one step.
 func (inv *Inventory) MarkNotLocal(name string) bool {
 	inv.mu.Lock()
 	e := inv.findByNameLocked(name)
@@ -258,7 +265,7 @@ func (inv *Inventory) MarkNotLocal(name string) bool {
 		inv.mu.Unlock()
 		return false
 	}
-	e.Local = false
+	applyStateToFlags(e, LifecycleDeclared)
 	inv.mu.Unlock()
 	inv.notify(ChangeSet{Files: []string{name}})
 	return true
