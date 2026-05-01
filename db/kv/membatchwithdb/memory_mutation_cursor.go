@@ -297,6 +297,10 @@ func (m *memoryMutationCursor) PutNoDupData(key, value []byte) error {
 	panic("Not implemented")
 }
 
+func (m *memoryMutationCursor) PutCurrent(key, value []byte) error {
+	panic("Not implemented")
+}
+
 func (m *memoryMutationCursor) Delete(k []byte) error {
 	return m.mutation.Delete(m.table, k)
 }

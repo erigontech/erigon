@@ -24,10 +24,6 @@ jobs:
     name: assertoor_${{ matrix.suite }}_test
     if: ${{ !contains(github.event.pull_request.labels.*.name, 'skip-uncaching') }}
     runs-on: ubuntu-latest
-    # Per-suite gating: matrix entries with continue_on_error: true still execute
-    # and report status in the UI, but their failure does not fail the job —
-    # so they don't block ci-gate or PR merges.
-    continue-on-error: ${{ matrix.continue_on_error || false }}
     strategy:
       fail-fast: false
       matrix:
@@ -53,9 +49,6 @@ jobs:
             # Unpin to main once CI is upgraded to Kurtosis 1.18.1.
             ethereum_package_branch: "6.1.0"
             test_timeout_minutes: 20
-            # Glamsterdam (EIP-7928 / Block Access Lists devnet) is still stabilizing
-            # upstream. Run it for visibility but don't let failures block PR merges.
-            continue_on_error: true
           - suite: caplin-minimal
             package_args: .github/workflows/kurtosis/caplin-minimal-assertoor.io
             ethereum_package_url: "github.com/erigontech/ethereum-package"
@@ -160,9 +153,18 @@ jobs:
       - name: Upload Kurtosis enclave dump
         if: failure() && !inputs.cache-warming-only
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: kurtosis-dump-${{ matrix.suite }}-${{ github.run_id }}
           path: ${{ runner.temp }}/kurtosis-dump-${{ matrix.suite }}
           retention-days: 7
           if-no-files-found: warn
+
+      # In the merge queue, cancel the run on first failure so the gate
+      # doesn't stall waiting for still-running siblings. PR runs keep
+      # going so authors see the full failure picture.
+      - name: Cancel workflow run on failure
+        if: failure() && github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run cancel ${{ github.run_id }} || true

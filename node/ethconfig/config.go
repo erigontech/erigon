@@ -268,6 +268,12 @@ type Config struct {
 	FcuBackgroundCommit bool
 
 	MCPAddress string
+
+	// ErigondbDomainStepsInFrozenFile overrides erigondb.toml stepsInFrozenFile for the
+	// domain merge cap only (history/II are unaffected). nil = no override;
+	// config3.UnboundedDomainMerge disables the cap; any other positive value is used
+	// directly as the cap in steps.
+	ErigondbDomainStepsInFrozenFile *uint64 `toml:",omitempty"`
 }
 
 type Sync struct {

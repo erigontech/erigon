@@ -121,7 +121,7 @@ type Transaction struct {
 	R                    string         `json:"r"`
 	S                    string         `json:"s"`
 	V                    string         `json:"v"`
-	Type                 *int           `json:"type,omitempty"`
+	Type                 *uint64        `json:"type,omitempty"`
 	AccessList           []*AccessTuple `json:"accessList,omitempty"`
 	Raw                  string         `json:"raw"`
 	RawReceipt           string         `json:"rawReceipt"`

@@ -23,11 +23,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/node/app"
 	"github.com/erigontech/erigon/node/app/component"
 	"github.com/erigontech/erigon/node/app/event"
 	"github.com/erigontech/erigon/node/app/util"
-	"github.com/stretchr/testify/require"
 )
 
 // --- Test ExecPool (implements util.ExecPool) ---
@@ -290,18 +291,18 @@ func TestSyncHandlerTotalOrdering(t *testing.T) {
 // --- Component Lifecycle + Events Integration ---
 
 func TestComponentLifecycleWithEvents(t *testing.T) {
-	domain, err := component.NewComponentDomain(context.Background(), "evt-lifecycle")
+	domain, err := component.NewComponentDomain(t.Context(), "evt-lifecycle")
 	require.NoError(t, err)
 
 	tracker := &orderTracker{}
 
-	storage, err := component.NewComponent[eventProvider](context.Background(),
+	storage, err := component.NewComponent[eventProvider](t.Context(),
 		component.WithId("storage"),
 		component.WithDomain(domain),
 		component.WithProvider(&eventProvider{name: "storage", tracker: tracker}))
 	require.NoError(t, err)
 
-	dl, err := component.NewComponent[eventProvider](context.Background(),
+	dl, err := component.NewComponent[eventProvider](t.Context(),
 		component.WithId("downloader"),
 		component.WithDomain(domain),
 		component.WithProvider(&eventProvider{name: "downloader", tracker: tracker}),
@@ -309,17 +310,17 @@ func TestComponentLifecycleWithEvents(t *testing.T) {
 	require.NoError(t, err)
 
 	// Start
-	err = dl.Activate(context.Background())
+	err = dl.Activate(t.Context())
 	require.NoError(t, err)
-	_, err = dl.AwaitState(context.Background(), component.Active)
+	_, err = dl.AwaitState(t.Context(), component.Active)
 	require.NoError(t, err)
 	require.Equal(t, component.Active, storage.State())
 
 	// Stop
-	err = dl.Deactivate(context.Background())
+	err = dl.Deactivate(t.Context())
 	require.NoError(t, err)
 
-	waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	waitCtx, waitCancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer waitCancel()
 	_, err = dl.AwaitState(waitCtx, component.Deactivated)
 	require.NoError(t, err)

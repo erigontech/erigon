@@ -60,7 +60,7 @@ func TestFuzzLifecycleConcurrent(t *testing.T) {
 	t.Logf("seed=%d (reproduce with rand.NewSource(%d))", seed, seed)
 	rng := rand.New(rand.NewSource(seed))
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Build a fixed tree: 0 is root, each subsequent component depends on
 	// exactly one earlier component (DAG, no cycles).
@@ -167,7 +167,7 @@ func TestFuzzLifecycleSerial(t *testing.T) {
 	t.Logf("seed=%d", seed)
 	rng := rand.New(rand.NewSource(seed))
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	components := make([]component.Component[fuzzProvider], numComponents)
 	for i := 0; i < numComponents; i++ {
@@ -234,7 +234,7 @@ func TestFuzzAddRemoveConcurrent(t *testing.T) {
 	t.Logf("seed=%d", seed)
 	rng := rand.New(rand.NewSource(seed))
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	components := make([]component.Component[fuzzProvider], numComponents)
 	for i := 0; i < numComponents; i++ {

@@ -56,6 +56,9 @@ type mockIBS struct{}
 func (m *mockIBS) GetBalance(accounts.Address) (uint256.Int, error) { return uint256.Int{}, nil }
 func (m *mockIBS) GetNonce(accounts.Address) (uint64, error)        { return 0, nil }
 func (m *mockIBS) GetCode(accounts.Address) ([]byte, error)         { return nil, nil }
+func (m *mockIBS) GetCodeHash(accounts.Address) (accounts.CodeHash, error) {
+	return accounts.NilCodeHash, nil
+}
 func (m *mockIBS) GetState(accounts.Address, accounts.StorageKey) (uint256.Int, error) {
 	return uint256.Int{}, nil
 }
@@ -66,6 +69,10 @@ func (m *mockIBS) GetRefund() mdgas.MdGas               { return mdgas.MdGas{} }
 // It closes the stream the same way ExecuteTraceTx does after execution.
 // storageKey/storageVal are pushed onto the stack for SSTORE (top=key, below=val).
 func captureOnOpcode(t *testing.T, cfg *LogConfig, memory []byte, storageKey, storageVal *common.Hash) map[string]json.RawMessage {
+	return captureOnOpcodeWithReturnData(t, cfg, memory, nil, storageKey, storageVal)
+}
+
+func captureOnOpcodeWithReturnData(t *testing.T, cfg *LogConfig, memory []byte, rData []byte, storageKey, storageVal *common.Hash) map[string]json.RawMessage {
 	t.Helper()
 	var buf bytes.Buffer
 	stream := jsonstream.New(&buf)
@@ -84,7 +91,7 @@ func captureOnOpcode(t *testing.T, cfg *LogConfig, memory []byte, storageKey, st
 		scope.stack = []uint256.Int{val, key} // bottom=val, top=key
 	}
 
-	l.OnOpcode(0, byte(op), 100, 3, scope, nil, 1, nil)
+	l.OnOpcode(0, byte(op), 100, 3, scope, rData, 1, nil)
 
 	// Mirror what ExecuteTraceTx does to close the stream after execution.
 	stream.WriteArrayEnd()
@@ -153,7 +160,7 @@ func TestJsonStreamLogger_MemoryEncoding(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			obj := captureOnOpcode(t, nil, tt.memory, nil, nil)
+			obj := captureOnOpcode(t, &LogConfig{EnableMemory: true}, tt.memory, nil, nil)
 			raw, ok := obj["memory"]
 			if !ok {
 				t.Fatal("missing 'memory' field")
@@ -199,6 +206,54 @@ func TestJsonStreamLogger_StorageEncoding(t *testing.T) {
 	if gotVal != wantVal {
 		t.Errorf("storage value: got %s, want %s", gotVal, wantVal)
 	}
+}
+
+// TestJsonStreamLogger_EnableMemory verifies that the memory field is present when
+// EnableMemory is true and absent when false (the default).
+func TestJsonStreamLogger_EnableMemory(t *testing.T) {
+	mem := bytes.Repeat([]byte{0xab}, 32)
+
+	t.Run("enableMemory=true includes memory field", func(t *testing.T) {
+		obj := captureOnOpcode(t, &LogConfig{EnableMemory: true}, mem, nil, nil)
+		if _, ok := obj["memory"]; !ok {
+			t.Error("expected 'memory' field to be present, but it was absent")
+		}
+	})
+
+	t.Run("enableMemory=false excludes memory field", func(t *testing.T) {
+		obj := captureOnOpcode(t, &LogConfig{EnableMemory: false}, mem, nil, nil)
+		if _, ok := obj["memory"]; ok {
+			t.Error("expected 'memory' field to be absent, but it was present")
+		}
+	})
+}
+
+// TestJsonStreamLogger_EnableReturnData verifies that the returnData field is present
+// when EnableReturnData is true and absent when false (the default).
+func TestJsonStreamLogger_EnableReturnData(t *testing.T) {
+	rData := []byte{0xde, 0xad, 0xbe, 0xef}
+
+	t.Run("enableReturnData=true includes returnData field", func(t *testing.T) {
+		obj := captureOnOpcodeWithReturnData(t, &LogConfig{EnableReturnData: true}, nil, rData, nil, nil)
+		raw, ok := obj["returnData"]
+		if !ok {
+			t.Fatal("expected 'returnData' field to be present, but it was absent")
+		}
+		var got string
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatalf("cannot parse returnData: %v", err)
+		}
+		if got != "0xdeadbeef" {
+			t.Errorf("returnData: got %s, want 0xdeadbeef", got)
+		}
+	})
+
+	t.Run("enableReturnData=false excludes returnData field", func(t *testing.T) {
+		obj := captureOnOpcodeWithReturnData(t, &LogConfig{EnableReturnData: false}, nil, rData, nil, nil)
+		if _, ok := obj["returnData"]; ok {
+			t.Error("expected 'returnData' field to be absent, but it was present")
+		}
+	})
 }
 
 // TestStructLog_ErrorOmitempty verifies that the 'error' field is omitted from

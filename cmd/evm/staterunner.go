@@ -68,10 +68,10 @@ func stateTestCmd(ctx *cli.Context) error {
 
 	// Configure the EVM logger
 	config := &logger.LogConfig{
-		DisableMemory:     ctx.Bool(DisableMemoryFlag.Name),
-		DisableStack:      ctx.Bool(DisableStackFlag.Name),
-		DisableStorage:    ctx.Bool(DisableStorageFlag.Name),
-		DisableReturnData: ctx.Bool(DisableReturnDataFlag.Name),
+		EnableMemory:     !ctx.Bool(DisableMemoryFlag.Name),
+		DisableStack:     ctx.Bool(DisableStackFlag.Name),
+		DisableStorage:   ctx.Bool(DisableStorageFlag.Name),
+		EnableReturnData: !ctx.Bool(DisableReturnDataFlag.Name),
 	}
 	cfg := vm.Config{}
 	if machineFriendlyOutput {

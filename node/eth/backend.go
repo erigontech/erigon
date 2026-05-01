@@ -50,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/common/disk"
 	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/kv"
@@ -250,8 +251,6 @@ func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, logger log.Logger, dirs datadi
 	return nil
 }
 
-const blockBufferSize = 128
-
 // sentryMcDisableBlockDownload suppresses the MultiClient's internal header +
 // body downloaders. Blocks are fetched via the staged-sync download path
 // (engine API + snapshot-sync) instead. Also guards the mined-block
@@ -261,8 +260,6 @@ const sentryMcDisableBlockDownload = true
 // New creates a new Ethereum object (including the
 // initialisation of the common Ethereum object)
 func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger log.Logger, tracer *tracers.Tracer) (*Ethereum, error) {
-	go dbg.SaveHeapProfileNearOOMPeriodically(ctx, dbg.SaveHeapWithLogger(&logger))
-
 	dirs := stack.Config().Dirs
 
 	tmpdir := dirs.Tmp
@@ -679,7 +676,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		Dirs:                   stack.Config().Dirs,
 		Engine:                 backend.engine,
 		SyncCfg:                config.Sync,
-		BlockBufferSize:        blockBufferSize,
+		BlockBufferSize:        sentry_multi_client.DefaultBlockBufferSize,
 		LogPeerInfo:            stack.Config().SentryLogPeerInfo,
 		MaxBlockBroadcastPeers: maxBlockBroadcastPeers,
 		DisableBlockDownload:   sentryMcDisableBlockDownload,
@@ -1162,12 +1159,12 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		}
 	}
 
-	s.apiList = jsonrpc.APIList(chainKv, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &httpRpcCfg, s.engine, s.logger, s.polygonBridge, s.heimdallService)
-
+	var testingEntry *rpc.API
 	if slices.Contains(httpRpcCfg.API, "testing") {
-		s.logger.Warn("[HTTP API] testing_ RPC namespace is ENABLED — do not use on production networks")
-		s.apiList = append(s.apiList, engineapi.NewTestingRPCEntry(s.engineBackendRPC))
+		entry := engineapi.NewTestingRPCEntry(s.engineBackendRPC, s.logger, s.chainDB)
+		testingEntry = &entry
 	}
+	s.apiList = jsonrpc.APIList(chainKv, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &httpRpcCfg, s.engine, s.logger, s.polygonBridge, s.heimdallService, testingEntry)
 
 	s.bgComponentsEg.Go(func() error {
 		err := rpcdaemoncli.StartRpcServer(ctx, &httpRpcCfg, s.apiList, s.logger)
@@ -1286,12 +1283,23 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
-	agg, err := state.New(dirs).Logger(logger).SanityOldNaming().GenSaltIfNeed(createNewSaltFileIfNeeded).WithErigonDBSettings(erigonDBSettings).Open(ctx, db)
+	aggOpts := state.New(dirs).Logger(logger).SanityOldNaming().GenSaltIfNeed(createNewSaltFileIfNeeded).WithErigonDBSettings(erigonDBSettings)
+	if snConfig.ErigondbDomainStepsInFrozenFile != nil {
+		v := *snConfig.ErigondbDomainStepsInFrozenFile
+		stepsStr := "Inf"
+		if v != config3.UnboundedDomainMerge {
+			stepsStr = fmt.Sprintf("%d", v)
+		}
+		logger.Info("domain merge cap overridden", "steps_in_frozen_file", stepsStr)
+		aggOpts = aggOpts.ErigondbDomainStepsInFrozenFile(v)
+	}
+	agg, err := aggOpts.Open(ctx, db)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 	agg.SetProduceMod(snConfig.Snapshot.ProduceE3)
+	agg.SetFrozenBlocksProvider(blockReader)
 
 	allSegmentsDownloadComplete, err := rawdb.AllSegmentsDownloadCompleteFromDB(db)
 	if err != nil {

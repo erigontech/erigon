@@ -776,8 +776,7 @@ running:
 			}
 		case <-logTimer.C:
 			vals := []any{"protocol", srv.Config.Protocols[0].Version, "peers", len(peers), "trusted", len(trusted), "inbound", inboundCount}
-			vals = append(vals, srv.listErrors()...)
-
+			vals = append(vals, srv.listAndResetErrors()...)
 			srv.logger.Debug("[p2p] Server", vals...)
 		}
 	}
@@ -826,8 +825,6 @@ func (srv *Server) postHandshakeChecks(peers map[enode.ID]*Peer, inboundCount in
 // inbound connections.
 func (srv *Server) listenLoop(ctx context.Context) {
 	srv.logger.Trace("TCP listener up", "addr", srv.listener.Addr())
-
-	srv.resetErrors()
 
 	// The slots limit accepts of new connections.
 	slots := semaphore.NewWeighted(int64(srv.MaxPendingPeers))
@@ -967,7 +964,24 @@ func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *enode.Node) erro
 	if dialDest != nil {
 		c.node = dialDest
 	} else {
-		c.node = nodeFromConn(remotePubkey, c.fd)
+		// Inbound connection: there's no dial-time enode, so by default
+		// nodeFromConn fabricates a stub from pubkey + remote addr. That
+		// stub is missing any ENR entries the remote advertises. If the
+		// remote is a configured static peer we already hold its full
+		// enode, so prefer that — keeps custom ENR entries intact across
+		// inbound handshakes without requiring discv5 / discovery v5
+		// ENR resolution. Pure-discovery deployments (no static peers)
+		// keep the stub fallback.
+		c.node = nil
+		if srv.dialsched != nil {
+			id := enode.PubkeyToIDV4(remotePubkey)
+			if static := srv.dialsched.lookupStatic(id); static != nil {
+				c.node = static
+			}
+		}
+		if c.node == nil {
+			c.node = nodeFromConn(remotePubkey, c.fd)
+		}
 	}
 	clog := srv.logger.New("id", c.node.ID(), "addr", c.fd.RemoteAddr(), "conn", c.flags)
 	err = srv.checkpoint(c, srv.checkpointPostHandshake)
@@ -1139,13 +1153,7 @@ func (srv *Server) addError(err error) {
 	srv.errors[cleanError(err.Error())]++
 }
 
-func (srv *Server) resetErrors() {
-	srv.errorsMu.Lock()
-	srv.errors = map[string]uint{}
-	srv.errorsMu.Unlock()
-}
-
-func (srv *Server) listErrors() []any {
+func (srv *Server) listAndResetErrors() []any {
 	srv.errorsMu.Lock()
 	defer srv.errorsMu.Unlock()
 
@@ -1153,6 +1161,7 @@ func (srv *Server) listErrors() []any {
 	for err, count := range srv.errors {
 		list = append(list, err, count)
 	}
+	clear(srv.errors)
 	return list
 }
 
@@ -1164,6 +1173,12 @@ func cleanError(err string) string {
 		return "closed by remote"
 	case strings.HasSuffix(err, "connection reset by peer"):
 		return "closed by remote"
+	case strings.Contains(err, "broken pipe"):
+		return "broken pipe"
+	case strings.Contains(err, "connection refused"):
+		return "connection refused"
+	case strings.Contains(err, "no route to host"):
+		return "no route to host"
 	default:
 		return err
 	}

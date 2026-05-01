@@ -22,12 +22,13 @@ import (
 	"os"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+	"github.com/urfave/cli/v2"
+	"go.uber.org/mock/gomock"
+
 	liblog "github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/app"
 	"github.com/erigontech/erigon/node/app/component"
-	"github.com/stretchr/testify/require"
-	"github.com/urfave/cli/v2"
-	gomock "go.uber.org/mock/gomock"
 )
 
 func TestMain(m *testing.M) {
@@ -39,7 +40,7 @@ type provider struct {
 }
 
 func TestCreateComponent(t *testing.T) {
-	c, err := component.NewComponent[provider](context.Background())
+	c, err := component.NewComponent[provider](t.Context())
 	require.Nil(t, err)
 	require.NotNil(t, c)
 	require.Equal(t, "root:provider", c.Id().String())
@@ -48,7 +49,7 @@ func TestCreateComponent(t *testing.T) {
 	var p *provider = c.Provider()
 	require.NotNil(t, p)
 
-	c1, err := component.NewComponent[provider](context.Background(),
+	c1, err := component.NewComponent[provider](t.Context(),
 		component.WithId("my-id"),
 		component.WithName("my name"))
 	require.Nil(t, err)
@@ -56,7 +57,7 @@ func TestCreateComponent(t *testing.T) {
 	require.Equal(t, "root:my-id", c1.Id().String())
 	require.Equal(t, "my name", c1.Name())
 
-	c2, err := component.NewComponent[provider](context.Background(),
+	c2, err := component.NewComponent[provider](t.Context(),
 		component.WithId("my-id-2"),
 		component.WithDependencies(c, c1))
 	require.Nil(t, err)
@@ -71,16 +72,16 @@ func TestCreateComponent(t *testing.T) {
 }
 
 func TestCreateDomain(t *testing.T) {
-	d, err := component.NewComponentDomain(context.Background(), "domain")
+	d, err := component.NewComponentDomain(t.Context(), "domain")
 	require.Nil(t, err)
 	require.NotNil(t, d)
 	require.Equal(t, "root:domain", d.Id().String())
-	d1, err := component.NewComponentDomain(context.Background(), "domain-1",
+	d1, err := component.NewComponentDomain(t.Context(), "domain-1",
 		component.WithDependentDomain(d))
 	require.Nil(t, err)
 	require.NotNil(t, d1)
 	require.Equal(t, "domain:domain-1", d1.Id().String())
-	d2, err := component.NewComponentDomain(context.Background(), "domain-2",
+	d2, err := component.NewComponentDomain(t.Context(), "domain-2",
 		component.WithDependentDomain(d1))
 	require.Nil(t, err)
 	require.NotNil(t, d2)
@@ -88,12 +89,12 @@ func TestCreateDomain(t *testing.T) {
 }
 
 func TestCreateComponentInDomain(t *testing.T) {
-	d, err := component.NewComponentDomain(context.Background(), "domain")
+	d, err := component.NewComponentDomain(t.Context(), "domain")
 	require.Nil(t, err)
 	require.NotNil(t, d)
 	require.Equal(t, "root:domain", d.Id().String())
 
-	c, err := component.NewComponent[provider](context.Background(),
+	c, err := component.NewComponent[provider](t.Context(),
 		component.WithDomain(d))
 	require.Nil(t, err)
 	require.NotNil(t, c)
@@ -102,19 +103,19 @@ func TestCreateComponentInDomain(t *testing.T) {
 	var p *provider = c.Provider()
 	require.NotNil(t, p)
 
-	c1, err := component.NewComponent[provider](context.Background())
+	c1, err := component.NewComponent[provider](t.Context())
 	require.Nil(t, err)
 	require.NotNil(t, c)
 	require.Equal(t, "root:provider", c1.Id().String())
 
-	d1, err := component.NewComponentDomain(context.Background(), "domain-1",
+	d1, err := component.NewComponentDomain(t.Context(), "domain-1",
 		component.WithDependencies(c1))
 	require.Nil(t, err)
 	require.NotNil(t, d1)
 	require.Equal(t, "root:domain-1", d1.Id().String())
 	require.Equal(t, "domain-1:provider", c1.Id().String())
 
-	d2, err := component.NewComponentDomain(context.Background(), "domain-2",
+	d2, err := component.NewComponentDomain(t.Context(), "domain-2",
 		component.WithDependencies(c, c1))
 	require.Nil(t, err)
 	require.NotNil(t, d2)
@@ -159,37 +160,37 @@ func TestComponentLifecycle(t *testing.T) {
 	// instead of gomock.
 	t.Skip("Superseded by hierarchy_test.go — gomock incompatible with shared root domain")
 	ctrl := gomock.NewController(t)
-	testDomain, err := component.NewComponentDomain(context.Background(), "lifecycle")
+	testDomain, err := component.NewComponentDomain(t.Context(), "lifecycle")
 	require.Nil(t, err)
-	c, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+	c, err := component.NewComponent[component.MockComponentProvider](t.Context(),
 		component.WithProvider(mockProvider(ctrl, 1)),
 		component.WithDomain(testDomain))
 	require.Nil(t, err)
 	require.NotNil(t, c)
 	require.Equal(t, "lifecycle:mockcomponentprovider", c.Id().String())
 
-	err = c.Activate(context.Background())
+	err = c.Activate(t.Context())
 	require.Nil(t, err)
 
-	state, err := c.AwaitState(context.Background(), component.Active)
+	state, err := c.AwaitState(t.Context(), component.Active)
 	require.Nil(t, err)
 	require.Equal(t, component.Active, state)
 
-	err = c.Deactivate(context.Background())
+	err = c.Deactivate(t.Context())
 	require.Nil(t, err)
 
-	state, err = c.AwaitState(context.Background(), component.Deactivated)
+	state, err = c.AwaitState(t.Context(), component.Deactivated)
 	require.Nil(t, err)
 	require.Equal(t, component.Deactivated, state)
 
-	d, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+	d, err := component.NewComponent[component.MockComponentProvider](t.Context(),
 		component.WithId("d"), component.WithDomain(testDomain),
 		component.WithProvider(mockProvider(ctrl, 1)))
 	require.Nil(t, err)
 	require.NotNil(t, d)
 	require.Equal(t, "lifecycle:d", d.Id().String())
 
-	c1, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+	c1, err := component.NewComponent[component.MockComponentProvider](t.Context(),
 		component.WithId("c1"), component.WithDomain(testDomain),
 		component.WithProvider(mockProvider(ctrl, 1)),
 		component.WithDependencies(d))
@@ -197,46 +198,46 @@ func TestComponentLifecycle(t *testing.T) {
 	require.NotNil(t, c1)
 	require.Equal(t, "lifecycle:c1", c1.Id().String())
 
-	err = c1.Activate(context.Background())
+	err = c1.Activate(t.Context())
 	require.Nil(t, err)
 
-	state, err = c1.AwaitState(context.Background(), component.Active)
+	state, err = c1.AwaitState(t.Context(), component.Active)
 	require.Nil(t, err)
 	require.Equal(t, component.Active, state)
 	require.Equal(t, component.Active, d.State())
 	require.Equal(t, component.Deactivated, c.State())
 
-	err = c1.Deactivate(context.Background())
+	err = c1.Deactivate(t.Context())
 	require.Nil(t, err)
 
-	state, err = c1.AwaitState(context.Background(), component.Deactivated)
+	state, err = c1.AwaitState(t.Context(), component.Deactivated)
 	require.Nil(t, err)
 	require.Equal(t, component.Deactivated, state)
 	require.Equal(t, component.Deactivated, d.State())
 	require.Equal(t, component.Deactivated, c.State())
 
-	d1, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+	d1, err := component.NewComponent[component.MockComponentProvider](t.Context(),
 		component.WithId("d1"), component.WithDomain(testDomain),
 		component.WithProvider(mockProvider(ctrl, 1)))
 	require.Nil(t, err)
 	require.NotNil(t, d1)
 	require.Equal(t, "lifecycle:d1", d1.Id().String())
 
-	d2, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+	d2, err := component.NewComponent[component.MockComponentProvider](t.Context(),
 		component.WithId("d2"), component.WithDomain(testDomain),
 		component.WithProvider(mockProvider(ctrl, 1)))
 	require.Nil(t, err)
 	require.NotNil(t, d2)
 	require.Equal(t, "lifecycle:d2", d2.Id().String())
 
-	d3, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+	d3, err := component.NewComponent[component.MockComponentProvider](t.Context(),
 		component.WithId("d3"), component.WithDomain(testDomain),
 		component.WithProvider(mockProvider(ctrl, 1)))
 	require.Nil(t, err)
 	require.NotNil(t, d3)
 	require.Equal(t, "lifecycle:d3", d3.Id().String())
 
-	c2, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+	c2, err := component.NewComponent[component.MockComponentProvider](t.Context(),
 		component.WithId("c2"), component.WithDomain(testDomain),
 		component.WithProvider(mockProvider(ctrl, 1)),
 		component.WithDependencies(d1, d2, d3))
@@ -245,10 +246,10 @@ func TestComponentLifecycle(t *testing.T) {
 	require.NotNil(t, c2)
 	require.Equal(t, "lifecycle:c2", c2.Id().String())
 
-	err = c2.Activate(context.Background())
+	err = c2.Activate(t.Context())
 	require.Nil(t, err)
 
-	state, err = c2.AwaitState(context.Background(), component.Active)
+	state, err = c2.AwaitState(t.Context(), component.Active)
 	require.Nil(t, err)
 	require.Equal(t, component.Active, state)
 	require.Equal(t, component.Active, d1.State())
@@ -258,10 +259,10 @@ func TestComponentLifecycle(t *testing.T) {
 	require.Equal(t, component.Deactivated, c1.State())
 	require.Equal(t, component.Deactivated, c.State())
 
-	err = c2.Deactivate(context.Background())
+	err = c2.Deactivate(t.Context())
 	require.Nil(t, err)
 
-	state, err = c2.AwaitState(context.Background(), component.Deactivated)
+	state, err = c2.AwaitState(t.Context(), component.Deactivated)
 	require.Nil(t, err)
 	require.Equal(t, component.Deactivated, state)
 	require.Equal(t, component.Deactivated, d1.State())
@@ -280,28 +281,28 @@ func TestConfigre(t *testing.T) {
 		Return(nil).
 		Times(2)
 
-	c, err := component.NewComponent[component.MockConfigurable](context.Background(),
+	c, err := component.NewComponent[component.MockConfigurable](t.Context(),
 		component.WithProvider(p))
 	require.Nil(t, err)
 	require.NotNil(t, c)
 	require.Equal(t, "root:mockconfigurable", c.Id().String())
 
-	err = c.Activate(context.Background())
+	err = c.Activate(t.Context())
 	require.Nil(t, err)
 
-	state, err := c.AwaitState(context.Background(), component.Active)
+	state, err := c.AwaitState(t.Context(), component.Active)
 	require.Nil(t, err)
 	require.Equal(t, component.Active, state)
 	require.Equal(t, component.Active, c.State())
 
-	err = c.Configure(context.Background())
+	err = c.Configure(t.Context())
 	require.Nil(t, err)
 	require.Equal(t, component.Active, c.State())
 
-	err = c.Deactivate(context.Background())
+	err = c.Deactivate(t.Context())
 	require.Nil(t, err)
 
-	state, err = c.AwaitState(context.Background(), component.Deactivated)
+	state, err = c.AwaitState(t.Context(), component.Deactivated)
 	require.Nil(t, err)
 	require.Equal(t, component.Deactivated, state)
 	require.Equal(t, component.Deactivated, c.State())
@@ -312,20 +313,20 @@ func TestConfigre(t *testing.T) {
 		Return(nil).
 		Times(1)
 
-	c1, err := component.NewComponent[component.MockConfigurable](context.Background(),
+	c1, err := component.NewComponent[component.MockConfigurable](t.Context(),
 		component.WithProvider(p1))
 	require.Nil(t, err)
 	require.NotNil(t, c)
 	require.Equal(t, "root:mockconfigurable", c.Id().String())
 
-	err = c1.Configure(context.Background())
+	err = c1.Configure(t.Context())
 	require.Nil(t, err)
 	require.Equal(t, component.Configured, c1.State())
 
-	err = c1.Activate(context.Background())
+	err = c1.Activate(t.Context())
 	require.Nil(t, err)
 
-	state, err = c1.AwaitState(context.Background(), component.Active)
+	state, err = c1.AwaitState(t.Context(), component.Active)
 	require.Nil(t, err)
 	require.Equal(t, component.Active, state)
 	require.Equal(t, component.Active, c1.State())
@@ -333,13 +334,13 @@ func TestConfigre(t *testing.T) {
 
 func TestDomainLifecycle(t *testing.T) {
 	t.Skip("Superseded by hierarchy_test.go — gomock incompatible with shared root domain")
-	dom, err := component.NewComponentDomain(context.Background(), "domain")
+	dom, err := component.NewComponentDomain(t.Context(), "domain")
 	require.Nil(t, err)
 	require.NotNil(t, dom)
 	require.Equal(t, "root:domain", dom.Id().String())
 
 	ctrl := gomock.NewController(t)
-	c, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+	c, err := component.NewComponent[component.MockComponentProvider](t.Context(),
 		component.WithDependentDomain(dom),
 		component.WithId("c"),
 		component.WithProvider(mockProvider(ctrl, 1)))
@@ -347,14 +348,14 @@ func TestDomainLifecycle(t *testing.T) {
 	require.NotNil(t, c)
 	require.Equal(t, "domain:c", c.Id().String())
 
-	d, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+	d, err := component.NewComponent[component.MockComponentProvider](t.Context(),
 		component.WithId("d"),
 		component.WithProvider(mockProvider(ctrl, 1)))
 	require.Nil(t, err)
 	require.NotNil(t, d)
 	require.Equal(t, "root:d", d.Id().String())
 
-	c1, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+	c1, err := component.NewComponent[component.MockComponentProvider](t.Context(),
 		component.WithDependentDomain(dom),
 		component.WithId("c1"),
 		component.WithProvider(mockProvider(ctrl, 1)),
@@ -364,28 +365,28 @@ func TestDomainLifecycle(t *testing.T) {
 	require.Equal(t, "domain:c1", c1.Id().String())
 	require.Equal(t, "domain:d", d.Id().String())
 
-	d1, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+	d1, err := component.NewComponent[component.MockComponentProvider](t.Context(),
 		component.WithId("d1"),
 		component.WithProvider(mockProvider(ctrl, 1)))
 	require.Nil(t, err)
 	require.NotNil(t, d1)
 	require.Equal(t, "root:d1", d1.Id().String())
 
-	d2, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+	d2, err := component.NewComponent[component.MockComponentProvider](t.Context(),
 		component.WithId("d2"),
 		component.WithProvider(mockProvider(ctrl, 1)))
 	require.Nil(t, err)
 	require.NotNil(t, d2)
 	require.Equal(t, "root:d2", d2.Id().String())
 
-	d3, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+	d3, err := component.NewComponent[component.MockComponentProvider](t.Context(),
 		component.WithId("d3"),
 		component.WithProvider(mockProvider(ctrl, 1)))
 	require.Nil(t, err)
 	require.NotNil(t, d3)
 	require.Equal(t, "root:d3", d3.Id().String())
 
-	c2, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+	c2, err := component.NewComponent[component.MockComponentProvider](t.Context(),
 		component.WithDependentDomain(dom),
 		component.WithId("c2"),
 		component.WithProvider(mockProvider(ctrl, 1)),
@@ -397,10 +398,10 @@ func TestDomainLifecycle(t *testing.T) {
 	require.Equal(t, "domain:d2", d2.Id().String())
 	require.Equal(t, "domain:d3", d3.Id().String())
 
-	err = dom.Activate(context.Background())
+	err = dom.Activate(t.Context())
 	require.Nil(t, err)
 
-	state, err := dom.AwaitState(context.Background(), component.Active)
+	state, err := dom.AwaitState(t.Context(), component.Active)
 	require.Nil(t, err)
 	require.Equal(t, component.Active, state)
 	require.Equal(t, component.Active, dom.State())
@@ -412,10 +413,10 @@ func TestDomainLifecycle(t *testing.T) {
 	require.Equal(t, component.Active, c2.State())
 	require.Equal(t, component.Active, c.State())
 
-	err = dom.Deactivate(context.Background())
+	err = dom.Deactivate(t.Context())
 	require.Nil(t, err)
 
-	state, err = dom.AwaitState(context.Background(), component.Deactivated)
+	state, err = dom.AwaitState(t.Context(), component.Deactivated)
 	require.Nil(t, err)
 	require.Equal(t, component.Deactivated, state)
 	require.Equal(t, component.Deactivated, dom.State())
@@ -437,17 +438,17 @@ func TestLogger(t *testing.T) {
 
 	component.LogLevel(liblog.LvlTrace)
 
-	c, err := component.NewComponent[provider](context.Background())
+	c, err := component.NewComponent[provider](t.Context())
 	require.Nil(t, err)
 	require.NotNil(t, c)
 	require.Equal(t, "root:provider", c.Id().String())
 
-	c.Activate(context.Background())
-	c.AwaitState(context.Background(), component.Active)
+	c.Activate(t.Context())
+	c.AwaitState(t.Context(), component.Active)
 
 	liblog.Root().SetHandler(
 		liblog.DiscardHandler())
-	c, err = component.NewComponent[provider](context.Background(),
+	c, err = component.NewComponent[provider](t.Context(),
 		component.WithLogLabels("label"),
 		component.WithLogCtx("name", "value"),
 		component.WithLogLevel(liblog.LvlDebug))
@@ -456,8 +457,8 @@ func TestLogger(t *testing.T) {
 	require.NotNil(t, c)
 	require.Equal(t, "root:provider", c.Id().String())
 
-	c.Activate(context.Background())
-	c.AwaitState(context.Background(), component.Active)
+	c.Activate(t.Context())
+	c.AwaitState(t.Context(), component.Active)
 
 }
 
@@ -506,7 +507,7 @@ func (p ctxprovider) Activate(ctx context.Context) error {
 }
 
 func TestContext(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	c, err := component.NewComponent[ctxprovider](ctx,
 		component.WithId("c"),
 		component.WithProvider(&ctxprovider{t: t}))
@@ -516,15 +517,15 @@ func TestContext(t *testing.T) {
 
 	c.Provider().c = c
 
-	c.Configure(context.Background())
+	c.Configure(t.Context())
 
-	c.Activate(context.Background())
-	state, err := c.AwaitState(context.Background(), component.Active)
+	c.Activate(t.Context())
+	state, err := c.AwaitState(t.Context(), component.Active)
 	require.Nil(t, err)
 	require.Equal(t, component.Active, state)
 
 	cancel()
-	state, err = c.AwaitState(context.Background(), component.Deactivated)
+	state, err = c.AwaitState(t.Context(), component.Deactivated)
 	require.Nil(t, err)
 	require.Equal(t, component.Deactivated, state)
 	require.Equal(t, component.Deactivated, c.State())
@@ -543,7 +544,7 @@ func TestFlags(t *testing.T) {
 	var iflag *cli.IntFlag
 	var callcount int
 
-	c, err := component.NewComponent[ctxprovider](context.Background(),
+	c, err := component.NewComponent[ctxprovider](t.Context(),
 		component.WithId("c"),
 		component.WithFlag[*cli.StringFlag, cfgprovider](sflag,
 			func(f *cli.StringFlag, p *cfgprovider) bool {
@@ -562,12 +563,12 @@ func TestFlags(t *testing.T) {
 	require.NotNil(t, c)
 	require.Len(t, c.Flags(), 2)
 	require.Equal(t, 0, callcount)
-	c.Configure(context.Background())
+	c.Configure(t.Context())
 	require.Equal(t, 2, callcount)
 
 	callcount = 0
 
-	d, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+	d, err := component.NewComponent[component.MockComponentProvider](t.Context(),
 		component.WithId("d"),
 		component.WithFlag[*cli.StringFlag, cfgprovider](sflag,
 			func(f *cli.StringFlag, p *cfgprovider) bool {
@@ -580,7 +581,7 @@ func TestFlags(t *testing.T) {
 	require.NotNil(t, d)
 	require.Equal(t, "root:d", d.Id().String())
 
-	c1, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+	c1, err := component.NewComponent[component.MockComponentProvider](t.Context(),
 		component.WithId("c1"),
 		component.WithFlag[*cli.StringFlag, cfgprovider](sflag,
 			func(f *cli.StringFlag, p *cfgprovider) bool {
@@ -601,7 +602,7 @@ func TestFlags(t *testing.T) {
 	require.Equal(t, "root:c1", c1.Id().String())
 	require.Len(t, c1.Flags(), 3)
 	require.Equal(t, 0, callcount)
-	c1.Configure(context.Background())
+	c1.Configure(t.Context())
 	require.Equal(t, 3, callcount)
 }
 
@@ -629,7 +630,7 @@ func (h *handler) H2(s0 string, s1 string) {
 }
 
 func TestEvents(t *testing.T) {
-	c, err := component.NewComponent[eprovider](context.Background(),
+	c, err := component.NewComponent[eprovider](t.Context(),
 		component.WithId("c"),
 		component.WithProvider(&eprovider{}))
 	require.Nil(t, err)
@@ -710,27 +711,27 @@ func TestEvents(t *testing.T) {
 
 func TestMultipleDependents(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	c, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+	c, err := component.NewComponent[component.MockComponentProvider](t.Context(),
 		component.WithProvider(mockProvider(ctrl, 1)))
 	require.Nil(t, err)
 	require.NotNil(t, c)
 	require.Equal(t, "root:mockcomponentprovider", c.Id().String())
 
-	c1, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+	c1, err := component.NewComponent[component.MockComponentProvider](t.Context(),
 		component.WithId("c1"),
 		component.WithProvider(mockProvider(ctrl, 1)))
 	require.Nil(t, err)
 	require.NotNil(t, c1)
 	require.Equal(t, "root:c1", c1.Id().String())
 
-	d, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+	d, err := component.NewComponent[component.MockComponentProvider](t.Context(),
 		component.WithId("d"),
 		component.WithProvider(mockProvider(ctrl, 1)))
 	require.Nil(t, err)
 	require.NotNil(t, d)
 	require.Equal(t, "root:d", d.Id().String())
 
-	d1, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+	d1, err := component.NewComponent[component.MockComponentProvider](t.Context(),
 		component.WithId("d1"),
 		component.WithProvider(mockProvider(ctrl, 1)))
 	require.Nil(t, err)
@@ -742,40 +743,40 @@ func TestMultipleDependents(t *testing.T) {
 	c1.AddDependency(d)
 	c1.AddDependency(d1)
 
-	err = c.Activate(context.Background())
+	err = c.Activate(t.Context())
 	require.Nil(t, err)
 
-	state, err := c.AwaitState(context.Background(), component.Active)
+	state, err := c.AwaitState(t.Context(), component.Active)
 	require.Nil(t, err)
 	require.Equal(t, component.Active, state)
 	require.Equal(t, component.Active, d.State())
 	require.Equal(t, component.Active, d1.State())
 	require.Equal(t, component.Instantiated, c1.State())
 
-	err = c1.Activate(context.Background())
+	err = c1.Activate(t.Context())
 	require.Nil(t, err)
 
-	state, err = c1.AwaitState(context.Background(), component.Active)
+	state, err = c1.AwaitState(t.Context(), component.Active)
 	require.Nil(t, err)
 	require.Equal(t, component.Active, state)
 	require.Equal(t, component.Active, d.State())
 	require.Equal(t, component.Active, d1.State())
 	require.Equal(t, component.Active, c.State())
 
-	err = c.Deactivate(context.Background())
+	err = c.Deactivate(t.Context())
 	require.Nil(t, err)
 
-	state, err = c.AwaitState(context.Background(), component.Deactivated)
+	state, err = c.AwaitState(t.Context(), component.Deactivated)
 	require.Nil(t, err)
 	require.Equal(t, component.Deactivated, state)
 	require.Equal(t, component.Active, d.State())
 	require.Equal(t, component.Active, d1.State())
 	require.Equal(t, component.Active, c1.State())
 
-	err = c1.Deactivate(context.Background())
+	err = c1.Deactivate(t.Context())
 	require.Nil(t, err)
 
-	state, err = c1.AwaitState(context.Background(), component.Deactivated)
+	state, err = c1.AwaitState(t.Context(), component.Deactivated)
 	require.Nil(t, err)
 	require.Equal(t, component.Deactivated, state)
 	require.Equal(t, component.Deactivated, d.State())
@@ -786,20 +787,20 @@ func TestMultipleDependents(t *testing.T) {
 func TestAddRemoveDeps(t *testing.T) {
 	t.Skip("Superseded by hierarchy_test.go — gomock incompatible with shared root domain")
 	ctrl := gomock.NewController(t)
-	c, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+	c, err := component.NewComponent[component.MockComponentProvider](t.Context(),
 		component.WithProvider(mockProvider(ctrl, 1)))
 	require.Nil(t, err)
 	require.NotNil(t, c)
 	require.Equal(t, "root:mockcomponentprovider", c.Id().String())
 
-	d, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+	d, err := component.NewComponent[component.MockComponentProvider](t.Context(),
 		component.WithId("d"),
 		component.WithProvider(mockProvider(ctrl, 1)))
 	require.Nil(t, err)
 	require.NotNil(t, d)
 	require.Equal(t, "root:d", d.Id().String())
 
-	d1, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+	d1, err := component.NewComponent[component.MockComponentProvider](t.Context(),
 		component.WithId("d1"),
 		component.WithProvider(mockProvider(ctrl, 1)))
 	require.Nil(t, err)
@@ -809,10 +810,10 @@ func TestAddRemoveDeps(t *testing.T) {
 	c.AddDependency(d)
 	c.AddDependency(d1)
 
-	err = c.Activate(context.Background())
+	err = c.Activate(t.Context())
 	require.Nil(t, err)
 
-	state, err := c.AwaitState(context.Background(), component.Active)
+	state, err := c.AwaitState(t.Context(), component.Active)
 	require.Nil(t, err)
 	require.Equal(t, component.Active, state)
 	require.Equal(t, component.Active, d.State())
@@ -821,41 +822,41 @@ func TestAddRemoveDeps(t *testing.T) {
 
 	c.RemoveDependency(d1)
 
-	err = c.Deactivate(context.Background())
+	err = c.Deactivate(t.Context())
 	require.Nil(t, err)
 
-	state, err = c.AwaitState(context.Background(), component.Deactivated)
+	state, err = c.AwaitState(t.Context(), component.Deactivated)
 	require.Nil(t, err)
 	require.Equal(t, component.Deactivated, state)
 	require.Equal(t, component.Deactivated, d.State())
 	require.Equal(t, component.Active, d1.State())
 	require.Equal(t, component.Deactivated, c.State())
 
-	err = d1.Deactivate(context.Background())
+	err = d1.Deactivate(t.Context())
 	require.Nil(t, err)
 
-	state, err = d1.AwaitState(context.Background(), component.Deactivated)
+	state, err = d1.AwaitState(t.Context(), component.Deactivated)
 	require.Nil(t, err)
 	require.Equal(t, component.Deactivated, state)
 	require.Equal(t, component.Deactivated, d1.State())
 
-	c, err = component.NewComponent[component.MockComponentProvider](context.Background(),
+	c, err = component.NewComponent[component.MockComponentProvider](t.Context(),
 		component.WithProvider(mockProvider(ctrl, 1)))
 	require.Nil(t, err)
 	require.NotNil(t, c)
 	require.Equal(t, "root:mockcomponentprovider", c.Id().String())
 
-	d, err = component.NewComponent[component.MockComponentProvider](context.Background(),
+	d, err = component.NewComponent[component.MockComponentProvider](t.Context(),
 		component.WithId("d"),
 		component.WithProvider(mockProvider(ctrl, 1)))
 	require.Nil(t, err)
 	require.NotNil(t, d)
 	require.Equal(t, "root:d", d.Id().String())
 
-	err = c.Activate(context.Background())
+	err = c.Activate(t.Context())
 	require.Nil(t, err)
 
-	state, err = c.AwaitState(context.Background(), component.Active)
+	state, err = c.AwaitState(t.Context(), component.Active)
 	require.Nil(t, err)
 	require.Equal(t, component.Active, state)
 	require.Equal(t, component.Instantiated, d.State())
@@ -863,54 +864,54 @@ func TestAddRemoveDeps(t *testing.T) {
 
 	c.AddDependency(d)
 
-	state, err = d.AwaitState(context.Background(), component.Active)
+	state, err = d.AwaitState(t.Context(), component.Active)
 	require.Nil(t, err)
 	require.Equal(t, component.Active, state)
 	require.Equal(t, component.Active, d.State())
 	require.Equal(t, component.Active, c.State())
 
-	err = c.Deactivate(context.Background())
+	err = c.Deactivate(t.Context())
 	require.Nil(t, err)
 
-	state, err = c.AwaitState(context.Background(), component.Deactivated)
+	state, err = c.AwaitState(t.Context(), component.Deactivated)
 	require.Nil(t, err)
 	require.Equal(t, component.Deactivated, state)
 	require.Equal(t, component.Deactivated, d.State())
 	require.Equal(t, component.Deactivated, c.State())
 
-	c1, err := component.NewComponent[provider](context.Background(),
+	c1, err := component.NewComponent[provider](t.Context(),
 		component.WithProvider(&provider{}))
 	require.Nil(t, err)
 	require.NotNil(t, c1)
 	require.Equal(t, "root:provider", c1.Id().String())
 
-	d2, err := component.NewComponent[provider](context.Background(),
+	d2, err := component.NewComponent[provider](t.Context(),
 		component.WithId("d2"),
 		component.WithProvider(&provider{}))
 	require.Nil(t, err)
 	require.NotNil(t, d2)
 	require.Equal(t, "root:d2", d2.Id().String())
 
-	c1.Configure(context.Background())
+	c1.Configure(t.Context())
 	require.Equal(t, component.Configured, c1.State())
 
 	c1.AddDependency(d2)
 	require.Equal(t, component.Configured, c1.State())
 
-	c1, err = component.NewComponent[provider](context.Background(),
+	c1, err = component.NewComponent[provider](t.Context(),
 		component.WithProvider(&provider{}))
 	require.Nil(t, err)
 	require.NotNil(t, c1)
 	require.Equal(t, "root:provider", c1.Id().String())
 
-	d2, err = component.NewComponent[provider](context.Background(),
+	d2, err = component.NewComponent[provider](t.Context(),
 		component.WithId("d2"),
 		component.WithProvider(&provider{}))
 	require.Nil(t, err)
 	require.NotNil(t, d2)
 	require.Equal(t, "root:d2", d2.Id().String())
 
-	c1.Initialize(context.Background())
+	c1.Initialize(t.Context())
 	require.Equal(t, component.Initialised, c1.State())
 
 	c1.AddDependency(d2)
@@ -970,33 +971,33 @@ func (p errprovider) Deactivate(ctx context.Context) error {
 }
 
 func TestFails(t *testing.T) {
-	c, err := component.NewComponent[errprovider](context.Background(),
+	c, err := component.NewComponent[errprovider](t.Context(),
 		component.WithProvider(&errprovider{component.Configured}))
 	require.Nil(t, err)
 	require.NotNil(t, c)
 	require.Equal(t, "root:errprovider", c.Id().String())
 
-	err = c.Activate(context.Background())
+	err = c.Activate(t.Context())
 	require.NotNil(t, err)
 	require.Equal(t, "configure failed", err.Error())
 
-	c, err = component.NewComponent[errprovider](context.Background(),
+	c, err = component.NewComponent[errprovider](t.Context(),
 		component.WithProvider(&errprovider{component.Initialised}))
 	require.Nil(t, err)
 	require.NotNil(t, c)
 	require.Equal(t, "root:errprovider", c.Id().String())
 
-	err = c.Activate(context.Background())
+	err = c.Activate(t.Context())
 	require.NotNil(t, err)
 	require.Equal(t, "initialize failed", err.Error())
 
-	c, err = component.NewComponent[errprovider](context.Background(),
+	c, err = component.NewComponent[errprovider](t.Context(),
 		component.WithProvider(&errprovider{component.Activating}))
 	require.Nil(t, err)
 	require.NotNil(t, c)
 	require.Equal(t, "root:errprovider", c.Id().String())
 
-	err = c.Activate(context.Background(), component.ActivityHandlerFunc[errprovider](
+	err = c.Activate(t.Context(), component.ActivityHandlerFunc[errprovider](
 		func(ctx context.Context, c component.Component[errprovider], state component.State, err error) {
 			switch state {
 			case component.Configured,
@@ -1012,20 +1013,20 @@ func TestFails(t *testing.T) {
 		}))
 	require.Nil(t, err)
 
-	c.AwaitState(context.Background(), component.Failed)
+	c.AwaitState(t.Context(), component.Failed)
 
-	c, err = component.NewComponent[errprovider](context.Background(),
+	c, err = component.NewComponent[errprovider](t.Context(),
 		component.WithProvider(&errprovider{component.Deactivating}))
 	require.Nil(t, err)
 	require.NotNil(t, c)
 	require.Equal(t, "root:errprovider", c.Id().String())
 
-	err = c.Activate(context.Background())
+	err = c.Activate(t.Context())
 	require.Nil(t, err)
 
-	c.AwaitState(context.Background(), component.Active)
+	c.AwaitState(t.Context(), component.Active)
 
-	err = c.Deactivate(context.Background(), component.ActivityHandlerFunc[errprovider](
+	err = c.Deactivate(t.Context(), component.ActivityHandlerFunc[errprovider](
 		func(ctx context.Context, c component.Component[errprovider], state component.State, err error) {
 			switch state {
 			case component.Deactivating:
@@ -1039,5 +1040,5 @@ func TestFails(t *testing.T) {
 		}))
 	require.Nil(t, err)
 
-	c.AwaitState(context.Background(), component.Failed)
+	c.AwaitState(t.Context(), component.Failed)
 }

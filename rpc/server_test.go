@@ -60,6 +60,13 @@ func TestServerRegisterName(t *testing.T) {
 	}
 }
 
+func TestNewServerClampsZeroBatchConcurrency(t *testing.T) {
+	server := NewServer(0, false /* traceRequests */, false /* debugSingleRequests */, true, log.New(), 100)
+	if server.batchConcurrency != minBatchConcurrency {
+		t.Fatalf("expected batch concurrency %d, got %d", minBatchConcurrency, server.batchConcurrency)
+	}
+}
+
 func TestServer(t *testing.T) {
 	logger := log.New()
 	files, err := dir.ReadDir("testdata")

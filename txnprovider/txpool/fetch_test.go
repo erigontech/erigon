@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
@@ -510,6 +511,150 @@ func TestOversizedHashAnnouncement(t *testing.T) {
 			require.NoError(t, err, "oversized announcement should be handled gracefully")
 		})
 	}
+}
+
+// TestCheckPooledTxnAnnouncement verifies that a peer delivering a tx whose
+// type or size does not match what it previously announced is flagged, while
+// mismatches from an unrelated peer or without a prior announcement are not.
+func TestCheckPooledTxnAnnouncement(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+
+	ctrl := gomock.NewController(t)
+	sentryServer := sentryproto.NewMockSentryServer(ctrl)
+	pool := NewMockPool(ctrl)
+
+	m := NewMockSentry(ctx, sentryServer)
+	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
+	require.NoError(t, err)
+
+	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
+
+	otherPeer := gointerfaces.ConvertHashToH512([64]byte{0xfe, 0xed})
+
+	hash := [32]byte{0xaa, 0xbb}
+	slot := &TxnSlot{IDHash: hash, Size: 200, Txn: &types.DynamicFeeTransaction{}}
+	// No announcement yet — must be a no-op.
+	require.NoError(t, fetch.checkPooledTxnAnnouncement(peerID, slot))
+
+	// Record an announcement: peer promised (type=DynamicFee, size=200).
+	// Tests pass nil filter to record every announced hash.
+	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{200}, hash[:], nil)
+
+	// Same peer, matching (type, size) — ok.
+	require.NoError(t, fetch.checkPooledTxnAnnouncement(peerID, slot))
+
+	// After a successful match the entry is consumed; re-announce for further checks.
+	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{200}, hash[:], nil)
+
+	// Same peer, mismatching type (announcement says DynamicFee but we deliver Legacy).
+	badTypeSlot := &TxnSlot{IDHash: hash, Size: 200, Txn: &types.LegacyTx{}}
+	require.Error(t, fetch.checkPooledTxnAnnouncement(peerID, badTypeSlot),
+		"peer delivering wrong type should be flagged")
+
+	// After the mismatch, re-announce and check the size path.
+	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{200}, hash[:], nil)
+	badSizeSlot := &TxnSlot{IDHash: hash, Size: 999, Txn: &types.DynamicFeeTransaction{}}
+	require.Error(t, fetch.checkPooledTxnAnnouncement(peerID, badSizeSlot),
+		"peer delivering wrong size should be flagged")
+
+	// Size within the 8-byte slack is not a violation — RLP vs consensus-format
+	// accounting can disagree by a handful of bytes for legacy/typed txs. The
+	// check is symmetric: both announced-larger-than-delivered and
+	// announced-smaller-than-delivered are bounded by the same slack.
+	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{208}, hash[:], nil)
+	require.NoError(t, fetch.checkPooledTxnAnnouncement(peerID, slot),
+		"size diff of +8 bytes should be within slack")
+	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{209}, hash[:], nil)
+	require.Error(t, fetch.checkPooledTxnAnnouncement(peerID, slot),
+		"size diff of +9 bytes should exceed slack")
+	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{192}, hash[:], nil)
+	require.NoError(t, fetch.checkPooledTxnAnnouncement(peerID, slot),
+		"size diff of -8 bytes should be within slack")
+	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{191}, hash[:], nil)
+	require.Error(t, fetch.checkPooledTxnAnnouncement(peerID, slot),
+		"size diff of -9 bytes should exceed slack")
+
+	// Different peer delivering the same hash must not be penalized based on
+	// another peer's announcement.
+	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{200}, hash[:], nil)
+	require.NoError(t, fetch.checkPooledTxnAnnouncement(otherPeer, badTypeSlot))
+
+	// Filter subset: an announcement for a hash not in the filter is skipped.
+	//
+	//  - hashA is in the filter — its (type, size) should be recorded.
+	//  - hashB is absent from the filter — its entry must NOT be recorded,
+	//    so a subsequent check for hashB from the same peer is a no-op.
+	hashA := [32]byte{0xcc, 0x01}
+	hashB := [32]byte{0xcc, 0x02}
+	both := append(append([]byte{}, hashA[:]...), hashB[:]...)
+	filter := hashA[:] // only hashA survives FilterKnownIdHashes
+	fetch.recordAnnouncement(peerID,
+		[]byte{types.DynamicFeeTxType, types.DynamicFeeTxType},
+		[]uint32{200, 200}, both, filter)
+	require.NoError(t, fetch.checkPooledTxnAnnouncement(peerID,
+		&TxnSlot{IDHash: hashB, Size: 999, Txn: &types.DynamicFeeTransaction{}}),
+		"hashB was filtered out at record time, so no mismatch should fire")
+	require.Error(t, fetch.checkPooledTxnAnnouncement(peerID,
+		&TxnSlot{IDHash: hashA, Size: 999, Txn: &types.DynamicFeeTransaction{}}),
+		"hashA was recorded, so the wrong-size delivery must fire")
+
+	// Multi-peer clobber regression: peer A lies in its announcement, peer B
+	// then announces the same hash with correct metadata. Without a composite
+	// (hash, peer) LRU key, B's entry would overwrite A's and A's lie would
+	// slip through the check. Both announcements must survive so A's delivery
+	// is still matched against A's own record.
+	//
+	// Concretely: A announces (DynamicFee, wrong size), B announces
+	// (DynamicFee, correct size), A then delivers the real 200-byte tx. The
+	// mismatch against A's own announcement must still fire.
+	hashC := [32]byte{0xdd, 0x01}
+	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{999}, hashC[:], nil)
+	fetch.recordAnnouncement(otherPeer, []byte{types.DynamicFeeTxType}, []uint32{200}, hashC[:], nil)
+	require.Error(t, fetch.checkPooledTxnAnnouncement(peerID,
+		&TxnSlot{IDHash: hashC, Size: 200, Txn: &types.DynamicFeeTransaction{}}),
+		"peer A's own lying announcement must still match A's delivery after B also announces")
+	// Peer B's delivery against its own (truthful) announcement is clean.
+	require.NoError(t, fetch.checkPooledTxnAnnouncement(otherPeer,
+		&TxnSlot{IDHash: hashC, Size: 200, Txn: &types.DynamicFeeTransaction{}}),
+		"peer B's matching delivery must not fire")
+}
+
+// TestCheckBlobSidecar verifies that a blob tx whose wrapper commitments do not
+// match its blob_versioned_hashes is flagged, while a correctly-formed wrapper
+// and a non-blob tx pass through cleanly.
+func TestCheckBlobSidecar(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+
+	ctrl := gomock.NewController(t)
+	sentryServer := sentryproto.NewMockSentryServer(ctrl)
+	pool := NewMockPool(ctrl)
+	m := NewMockSentry(ctx, sentryServer)
+	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
+	require.NoError(t, err)
+	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
+
+	// Non-blob tx — unchecked.
+	require.NoError(t, fetch.checkBlobSidecar(&TxnSlot{Txn: &types.DynamicFeeTransaction{}}))
+
+	// Properly formed blob tx: a slot produced by makeBlobTxn() has both the
+	// inner BlobTx (with BlobVersionedHashes patched to match commitments) and
+	// the populated BlobBundles.
+	good := makeBlobTxn()
+	require.NoError(t, fetch.checkBlobSidecar(&good), "matching sidecar should pass")
+
+	// Corrupt a commitment so it no longer hashes to the versioned-hash.
+	bad := makeBlobTxn()
+	bad.BlobBundles[0].Commitment[0] ^= 0xff
+	require.Error(t, fetch.checkBlobSidecar(&bad), "mismatched commitment should be flagged")
+
+	// Blob tx arriving with no sidecar at all: the inner blob_versioned_hashes
+	// declares blobs but the wrapper delivers none. Treated as a protocol
+	// violation via the count-mismatch check (peer gets kicked).
+	missing := makeBlobTxn()
+	missing.BlobBundles = nil
+	require.Error(t, fetch.checkBlobSidecar(&missing), "blob tx with missing sidecar should be flagged")
 }
 
 // TestNoPenaltyOnInternalDBError verifies that when IdHashKnown returns a DB error
