@@ -124,12 +124,22 @@ type Inventory struct {
 	caplin  []*FileEntry            // caplin beacon archive (.seg)
 	meta    []*FileEntry            // erigondb.toml etc
 	salt    []*FileEntry            // salt-*.txt
+
+	// Held-view discipline: held views increment refcount on every
+	// captured entry; eviction (RemoveFile, ReplaceWithMerge of
+	// constituents) defers via pendingDeletes when refcount > 0. See
+	// inventory_view.go for the View / Close / Subscribe surface.
+	refcount       map[string]int
+	pendingDeletes map[string]*FileEntry
+	subs           []chan ChangeSet
 }
 
 // NewInventory creates an empty inventory.
 func NewInventory() *Inventory {
 	return &Inventory{
-		domains: make(map[Domain][]*FileEntry),
+		domains:        make(map[Domain][]*FileEntry),
+		refcount:       make(map[string]int),
+		pendingDeletes: make(map[string]*FileEntry),
 	}
 }
 
@@ -142,8 +152,6 @@ func NewInventory() *Inventory {
 //     non-empty, or in the blocks slice when Domain is empty.
 func (inv *Inventory) AddFile(entry *FileEntry) {
 	inv.mu.Lock()
-	defer inv.mu.Unlock()
-
 	switch entry.Kind {
 	case KindCaplin:
 		inv.caplin = replaceOrAppend(inv.caplin, entry)
@@ -158,14 +166,24 @@ func (inv *Inventory) AddFile(entry *FileEntry) {
 			inv.domains[entry.Domain] = replaceOrAppend(inv.domains[entry.Domain], entry)
 		}
 	}
+	inv.mu.Unlock()
+	inv.notify(ChangeSet{Files: []string{entry.Name}})
 }
 
 // RemoveFile removes a file entry by name. Scans every category since the
 // caller doesn't supply a kind hint.
+//
+// If a held view still references this file (refcount > 0), the entry
+// goes into pendingDeletes — held views continue to see their captured
+// clone, and the pending-delete clears when the last referencing view
+// closes. Subscribers receive a ChangeSet on completion.
 func (inv *Inventory) RemoveFile(name string) {
 	inv.mu.Lock()
-	defer inv.mu.Unlock()
-
+	if inv.refcount[name] > 0 {
+		if e := inv.findByNameLocked(name); e != nil {
+			inv.pendingDeletes[name] = e.Clone()
+		}
+	}
 	inv.blocks = removeByName(inv.blocks, name)
 	inv.caplin = removeByName(inv.caplin, name)
 	inv.meta = removeByName(inv.meta, name)
@@ -173,13 +191,19 @@ func (inv *Inventory) RemoveFile(name string) {
 	for domain, entries := range inv.domains {
 		inv.domains[domain] = removeByName(entries, name)
 	}
+	inv.mu.Unlock()
+	inv.notify(ChangeSet{Files: []string{name}})
 }
 
 // ReplaceWithMerge atomically replaces multiple small files with a single merged file.
 // Returns false if the merged file doesn't cover all replaced ranges.
+//
+// Constituents referenced by held views (refcount > 0) move into
+// pendingDeletes for deferred eviction; held views continue to read
+// their captured clones until close. Subscribers receive a single
+// ChangeSet covering both the merged file and the replaced names.
 func (inv *Inventory) ReplaceWithMerge(merged *FileEntry, replaced []string) bool {
 	inv.mu.Lock()
-	defer inv.mu.Unlock()
 
 	entries := inv.domains[merged.Domain]
 
@@ -187,7 +211,17 @@ func (inv *Inventory) ReplaceWithMerge(merged *FileEntry, replaced []string) boo
 	for _, name := range replaced {
 		for _, e := range entries {
 			if e.Name == name && !merged.Range().Covers(e.Range()) {
+				inv.mu.Unlock()
 				return false
+			}
+		}
+	}
+
+	// Held-view defer: snapshot constituents about to be evicted.
+	for _, name := range replaced {
+		if inv.refcount[name] > 0 {
+			if e := findByName(entries, name); e != nil {
+				inv.pendingDeletes[name] = e.Clone()
 			}
 		}
 	}
@@ -200,6 +234,10 @@ func (inv *Inventory) ReplaceWithMerge(merged *FileEntry, replaced []string) boo
 	// Add the merged file.
 	entries = replaceOrAppend(entries, merged)
 	inv.domains[merged.Domain] = entries
+	inv.mu.Unlock()
+
+	files := append([]string{merged.Name}, replaced...)
+	inv.notify(ChangeSet{Files: files})
 	return true
 }
 
@@ -380,55 +418,70 @@ func (inv *Inventory) Domains() []Domain {
 // caller; tests may flip the flag directly.
 func (inv *Inventory) MarkAdvertisable(name string) bool {
 	inv.mu.Lock()
-	defer inv.mu.Unlock()
-
+	changed := false
 	for _, slice := range [][]*FileEntry{inv.blocks, inv.caplin, inv.meta, inv.salt} {
 		if e := findByName(slice, name); e != nil {
 			if !e.Advertisable {
 				e.Advertisable = true
-				return true
+				changed = true
 			}
-			return false
+			inv.mu.Unlock()
+			if changed {
+				inv.notify(ChangeSet{Files: []string{name}})
+			}
+			return changed
 		}
 	}
-
 	for _, entries := range inv.domains {
 		if e := findByName(entries, name); e != nil {
 			if !e.Advertisable {
 				e.Advertisable = true
-				return true
+				changed = true
 			}
-			return false
+			inv.mu.Unlock()
+			if changed {
+				inv.notify(ChangeSet{Files: []string{name}})
+			}
+			return changed
 		}
 	}
+	inv.mu.Unlock()
 	return false
 }
 
 // PromoteTrust promotes a file's trust level if the new level is higher.
-// Returns true if the trust was actually changed.
+// Returns true if the trust was actually changed. Notifies subscribers
+// on change.
 func (inv *Inventory) PromoteTrust(name string, newTrust TrustLevel) bool {
 	inv.mu.Lock()
-	defer inv.mu.Unlock()
-
+	changed := false
 	for _, slice := range [][]*FileEntry{inv.blocks, inv.caplin, inv.meta, inv.salt} {
 		if e := findByName(slice, name); e != nil {
 			if newTrust > e.Trust {
 				e.Trust = newTrust
-				return true
+				changed = true
 			}
-			return false
+			inv.mu.Unlock()
+			if changed {
+				inv.notify(ChangeSet{Files: []string{name}})
+			}
+			return changed
 		}
 	}
-
 	for _, entries := range inv.domains {
 		if e := findByName(entries, name); e != nil {
 			if newTrust > e.Trust {
 				e.Trust = newTrust
-				return true
+				changed = true
 			}
-			return false
+			inv.mu.Unlock()
+			if changed {
+				inv.notify(ChangeSet{Files: []string{name}})
+			}
+			return changed
 		}
 	}
+	inv.mu.Unlock()
 	return false
 }
 

@@ -20,10 +20,11 @@
 // inventory mutations on a deterministic schedule and assert that the
 // consumer-facing read API behaves per the contract.
 //
-// Tests run against the harness's StubInventory + StubReadHandle. Item
-// #1 (held-view discipline on the real snapshot.Inventory) and the
-// follow-on read-handle work will swap the stubs for the production
-// implementations; the scenarios themselves stay unchanged.
+// Tests run against the production snapshot.Inventory (with the held-view
+// discipline added in item #1) plus the harness's StubReadHandle. The
+// stub stands in for what Aggregator and RoSnapshots will eventually do
+// natively when they grow an Inventory dependency at view construction;
+// the scenarios stay unchanged when those land.
 
 package scenarios_test
 
@@ -62,7 +63,7 @@ func fileEntry(name string, domain snapshot.Domain, fromStep, toStep uint64, loc
 
 // 1. Read of fully-local file → Ready immediately.
 func TestScenario01_LocalFileReadsImmediately(t *testing.T) {
-	inv := harness.NewStubInventory()
+	inv := snapshot.NewInventory()
 	h := &harness.StubReadHandle{Inventory: inv}
 
 	inv.AddFile(fileEntry("v1.0-accounts.0-256.kv", snapshot.DomainAccounts, 0, 256, true))
@@ -82,7 +83,7 @@ func TestScenario01_LocalFileReadsImmediately(t *testing.T) {
 
 // 2. Read of declared-but-not-local file: file lands inside ctx → Ready.
 func TestScenario02_PendingResolvesWhenFileLandsInCtx(t *testing.T) {
-	inv := harness.NewStubInventory()
+	inv := snapshot.NewInventory()
 	h := &harness.StubReadHandle{Inventory: inv}
 
 	inv.AddFile(fileEntry("v1.0-accounts.0-256.kv", snapshot.DomainAccounts, 0, 256, false))
@@ -110,7 +111,7 @@ func TestScenario02_PendingResolvesWhenFileLandsInCtx(t *testing.T) {
 
 // 3. Read of declared-but-not-local file: ctx expires before file lands → ErrPending.
 func TestScenario03_PendingTimesOutWithErrPending(t *testing.T) {
-	inv := harness.NewStubInventory()
+	inv := snapshot.NewInventory()
 	h := &harness.StubReadHandle{Inventory: inv}
 
 	inv.AddFile(fileEntry("v1.0-accounts.0-256.kv", snapshot.DomainAccounts, 0, 256, false))
@@ -131,7 +132,7 @@ func TestScenario03_PendingTimesOutWithErrPending(t *testing.T) {
 
 // 4. Read of not-declared file → not-found error, no wait.
 func TestScenario04_MissingReturnsNotFoundImmediately(t *testing.T) {
-	inv := harness.NewStubInventory()
+	inv := snapshot.NewInventory()
 	h := &harness.StubReadHandle{Inventory: inv}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
@@ -151,7 +152,7 @@ func TestScenario04_MissingReturnsNotFoundImmediately(t *testing.T) {
 // 5. View V held during merge: V continues to read constituents from the
 // captured pre-merge state; new view sees merged file.
 func TestScenario05_HeldViewSeesPreMergeStateThroughTransition(t *testing.T) {
-	inv := harness.NewStubInventory()
+	inv := snapshot.NewInventory()
 	h := &harness.StubReadHandle{Inventory: inv}
 
 	inv.AddFile(fileEntry("v1.0-accounts.0-128.kv", snapshot.DomainAccounts, 0, 128, true))
@@ -189,7 +190,7 @@ func TestScenario05_HeldViewSeesPreMergeStateThroughTransition(t *testing.T) {
 // 6. View V held during eviction: file remains visible to V; on Close,
 // pending-delete clears.
 func TestScenario06_EvictionDefersUntilHeldViewCloses(t *testing.T) {
-	inv := harness.NewStubInventory()
+	inv := snapshot.NewInventory()
 
 	inv.AddFile(fileEntry("v1.0-accounts.0-256.kv", snapshot.DomainAccounts, 0, 256, true))
 
@@ -218,7 +219,7 @@ func TestScenario06_EvictionDefersUntilHeldViewCloses(t *testing.T) {
 // 7. Phase-0 latest local; Phase-1 backfill not yet local. Reads of
 // latest succeed; reads of older Pending.
 func TestScenario07_PhaseBoundaryReadsSplitReadyAndPending(t *testing.T) {
-	inv := harness.NewStubInventory()
+	inv := snapshot.NewInventory()
 	h := &harness.StubReadHandle{Inventory: inv}
 
 	// Phase-0 latest: local. Phase-1 older: declared, not local.
@@ -245,7 +246,7 @@ func TestScenario07_PhaseBoundaryReadsSplitReadyAndPending(t *testing.T) {
 
 // 8. After backfill: every range local → all reads Ready.
 func TestScenario08_BackfillCompleteAllRangesReady(t *testing.T) {
-	inv := harness.NewStubInventory()
+	inv := snapshot.NewInventory()
 	h := &harness.StubReadHandle{Inventory: inv}
 
 	for from, to := uint64(0), uint64(256); to <= 768; from, to = from+256, to+256 {
@@ -272,7 +273,7 @@ func TestScenario08_BackfillCompleteAllRangesReady(t *testing.T) {
 
 // 9. File local but not advertisable → reads Pending until MarkAdvertisable.
 func TestScenario09_AdvertisableGateReadsPendingUntilPromoted(t *testing.T) {
-	inv := harness.NewStubInventory()
+	inv := snapshot.NewInventory()
 	h := &harness.StubReadHandle{Inventory: inv, RequireAdvertisable: true}
 
 	e := fileEntry("v1.0-accounts.0-256.kv", snapshot.DomainAccounts, 0, 256, true)
@@ -302,7 +303,7 @@ func TestScenario09_AdvertisableGateReadsPendingUntilPromoted(t *testing.T) {
 // 10. File was local, marked not-local (corruption-detected re-download),
 // then local again → reads Pending across the gap, Ready when re-download lands.
 func TestScenario10_ReDownloadAfterCorruptionResolvesPending(t *testing.T) {
-	inv := harness.NewStubInventory()
+	inv := snapshot.NewInventory()
 	h := &harness.StubReadHandle{Inventory: inv}
 
 	inv.AddFile(fileEntry("v1.0-accounts.0-256.kv", snapshot.DomainAccounts, 0, 256, true))
