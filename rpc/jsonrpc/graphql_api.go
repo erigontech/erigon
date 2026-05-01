@@ -33,9 +33,11 @@ import (
 
 type GraphQLAPI interface {
 	GetBlockDetails(ctx context.Context, number rpc.BlockNumber) (map[string]any, error)
+	GetBlockDetailsByHash(ctx context.Context, hash common.Hash) (map[string]any, error)
 	GetChainID(ctx context.Context) (*big.Int, error)
 	GetAccountInfo(ctx context.Context, address common.Address, blockNumber rpc.BlockNumber) (balance string, nonce uint64, code string, err error)
 	GetAccountStorage(ctx context.Context, address common.Address, slot string, blockNumber rpc.BlockNumber) (string, error)
+	GetBlockNumberForTx(ctx context.Context, hash common.Hash) (blockNum uint64, ok bool, err error)
 }
 
 type GraphQLAPIImpl struct {
@@ -48,6 +50,17 @@ func NewGraphQLAPI(base *BaseAPI, db kv.TemporalRoDB) *GraphQLAPIImpl {
 		BaseAPI: base,
 		db:      db,
 	}
+}
+
+func (api *GraphQLAPIImpl) GetBlockNumberForTx(ctx context.Context, hash common.Hash) (uint64, bool, error) {
+	tx, err := api.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return 0, false, err
+	}
+	defer tx.Rollback()
+
+	blockNum, _, ok, err := api.txnLookup(ctx, tx, hash)
+	return blockNum, ok, err
 }
 
 func (api *GraphQLAPIImpl) GetChainID(ctx context.Context) (*big.Int, error) {
@@ -85,6 +98,33 @@ func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.
 		return nil, err
 	}
 
+	return api.buildBlockDetailsResponse(ctx, tx, block, getBlockRes)
+}
+
+func (api *GraphQLAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash common.Hash) (map[string]any, error) {
+	tx, err := api.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	block, err := api.blockByHashWithSenders(ctx, tx, hash)
+	if err != nil {
+		return nil, err
+	}
+	if block == nil {
+		return nil, nil
+	}
+
+	getBlockRes, err := api.delegateGetBlockByNumber(tx, block, rpc.BlockNumber(block.NumberU64()), false)
+	if err != nil {
+		return nil, err
+	}
+
+	return api.buildBlockDetailsResponse(ctx, tx, block, getBlockRes)
+}
+
+func (api *GraphQLAPIImpl) buildBlockDetailsResponse(ctx context.Context, tx kv.TemporalTx, block *types.Block, getBlockRes map[string]any) (map[string]any, error) {
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -104,6 +144,17 @@ func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.
 		transaction["value"] = txn.GetValue()
 		transaction["data"] = txn.GetData()
 		transaction["logs"] = receipt.Logs
+		transaction["gas"] = txn.GetGasLimit()
+		txType := txn.Type()
+		if txType == types.DynamicFeeTxType || txType == types.SetCodeTxType {
+			transaction["maxFeePerGas"] = txn.GetFeeCap()
+			transaction["maxPriorityFeePerGas"] = txn.GetTipCap()
+		}
+		transaction["accessList"] = txn.GetAccessList()
+		// Pre-Byzantium receipts have PostState instead of Status; default status to 0.
+		if _, hasStatus := transaction["status"]; !hasStatus {
+			transaction["status"] = hexutil.Uint64(0)
+		}
 		result = append(result, transaction)
 	}
 
@@ -111,7 +162,6 @@ func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.
 	response["block"] = getBlockRes
 	response["receipts"] = result
 
-	// Withdrawals
 	wresult := make([]map[string]any, 0, len(block.Withdrawals()))
 	for _, withdrawal := range block.Withdrawals() {
 		wmap := make(map[string]any)
