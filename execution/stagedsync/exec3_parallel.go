@@ -1581,11 +1581,16 @@ func (result *execResult) finalizeTxSimple(
 	blockNum := task.Version().BlockNum
 	txIndex := task.Version().TxIndex
 
-	// Read coinbase/burnt base from the versionMap AFTER the worker's TxOut
-	// has been flushed. Use txIndex+1 so versionMap.Read(floor(txIndex))
-	// sees the current TX's execution effects (e.g. ETH transfers to/from
-	// the coinbase during EVM execution).
-	vsReader := state.NewVersionedStateReader(txIndex+1, nil, vm, stateReader)
+	// Read coinbase/burnt base from the versionMap. Use txIndex (NOT
+	// txIndex+1) so versionMap.Read(floor(txIndex)) returns the PRIOR
+	// tx's cumulative balance — the correct base before this tx's tip.
+	// When the block has a BAL sidecar, the versionMap is pre-populated
+	// with the BAL's per-tx cumulative values via NewVersionMap →
+	// WriteChanges. Reading at txIndex+1 would return THIS tx's BAL
+	// entry (already includes its own tip), and adding FeeTipped on top
+	// would double-count. The current tx's worker writes (e.g. ETH
+	// transfers to coinbase) are picked up below via CollectorWrites.
+	vsReader := state.NewVersionedStateReader(txIndex, nil, vm, stateReader)
 
 	// --- Coinbase: base (including execution effects) + FeeTipped ---
 	coinbaseAcc, err := vsReader.ReadAccountData(result.Coinbase)
