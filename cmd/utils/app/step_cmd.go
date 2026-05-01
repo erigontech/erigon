@@ -174,9 +174,6 @@ func stepRebase(cliCtx *cli.Context) error {
 // collectRenameList walks the snapshot domain directory and builds a list of
 // from/to file paths to be renamed according to the new step size rules.
 func collectRenameList(domainPath string, re *regexp.Regexp, decr bool, factor uint64) ([]string, error) {
-	if _, err := os.Stat(domainPath); os.IsNotExist(err) {
-		return nil, nil
-	}
 	renList := make([]string, 0, 100)
 
 	walkErr := fs.WalkDir(os.DirFS(domainPath), ".", func(path string, d fs.DirEntry, err error) error {
