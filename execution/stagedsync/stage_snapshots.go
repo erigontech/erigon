@@ -65,6 +65,26 @@ type SnapshotsCfg struct {
 	// manifestReady is closed when P2P manifest discovery completes (--snap.p2p-manifest).
 	// Nil when P2P manifest mode is not enabled.
 	manifestReady <-chan struct{}
+	// lifecycleDrivenByStorage gates the stage's index/accessor build
+	// calls. When true, the storage component's lifecycle driver
+	// owns those transitions; the stage no-ops. Set via
+	// SetLifecycleDrivenByStorage by production wiring (backend.go);
+	// defaults false. See ethconfig.BlocksFreezing.LifecycleDrivenByStorage
+	// for the operator-facing flag.
+	lifecycleDrivenByStorage bool
+}
+
+// SetLifecycleDrivenByStorage opts the stage out of driving
+// index/accessor builds. When set, the storage component's lifecycle
+// driver runs BuildMissedIndices and BuildMissedAccessors autonomously;
+// stage_snapshots.go's buildOrDeferE2Indices and buildOrDeferE3Accessors
+// become no-ops.
+//
+// Production wiring sources the value from
+// ethconfig.BlocksFreezing.LifecycleDrivenByStorage. Tests and tools
+// that don't run the storage component leave it false (the default).
+func (cfg *SnapshotsCfg) SetLifecycleDrivenByStorage(b bool) {
+	cfg.lifecycleDrivenByStorage = b
 }
 
 // Returns a seeder client for block management, a noop implementation if no downloader is attached.
@@ -334,7 +354,14 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 // on every sync cycle).
 // Exception: Bor chains always index synchronously because RetireBlocks has an early-exit
 // guard for Bor data readiness that may skip BuildMissedIndicesIfNeed.
+//
+// When cfg.lifecycleDrivenByStorage is true, this function no-ops —
+// the storage component's lifecycle.Driver owns the index-build path
+// and runs BuildMissedIndices on its own clock.
 func buildOrDeferE2Indices(ctx context.Context, s *StageState, cfg SnapshotsCfg, headersProgress uint64) error {
+	if cfg.lifecycleDrivenByStorage {
+		return nil
+	}
 	isBor := cfg.chainConfig.Bor != nil
 	canDefer := headersProgress > 0 && !isBor
 
@@ -359,6 +386,9 @@ func buildOrDeferE2Indices(ctx context.Context, s *StageState, cfg SnapshotsCfg,
 // Note: unlike E2, there is no Bor exception — the background path calls
 // BuildMissedAccessors directly without any Bor-specific early-exit guards.
 func buildOrDeferE3Accessors(ctx context.Context, s *StageState, cfg SnapshotsCfg, agg *state.Aggregator, headersProgress uint64) error {
+	if cfg.lifecycleDrivenByStorage {
+		return nil
+	}
 	canDefer := headersProgress > 0
 
 	indexWorkers := estimate.IndexSnapshot.Workers()

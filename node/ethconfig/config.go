@@ -157,6 +157,21 @@ type BlocksFreezing struct {
 	// ManifestReady is closed when P2P manifest discovery completes.
 	// Set by the backend when P2PManifest is enabled. Nil otherwise.
 	ManifestReady <-chan struct{}
+
+	// LifecycleDrivenByStorage cuts over file-import orchestration
+	// (BuildMissedIndices, BuildMissedAccessors) from the stage loop
+	// to the storage component's lifecycle driver. Defaults false:
+	// the existing stage-driven path is authoritative.
+	//
+	// When flipped to true, stage_snapshots.go's index-build calls
+	// no-op and storage.Provider's lifecycle.Driver runs
+	// runIndexing / runValidation autonomously.
+	//
+	// Survives the bedding-in period as a kill-switch (per
+	// docs/plans/20260501-storage-lifecycle-spec.md). Removed only
+	// after the storage-driven path has accumulated production hours
+	// across multiple releases.
+	LifecycleDrivenByStorage bool
 }
 
 func (s BlocksFreezing) String() string {
