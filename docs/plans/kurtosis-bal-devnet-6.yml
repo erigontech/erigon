@@ -1,0 +1,50 @@
+participants:
+  - cl_type: lighthouse
+    cl_image: ethpandaops/lighthouse:bal-devnet-6
+    supernode: true
+    cl_log_level: debug
+    el_type: geth
+    el_image: ethpandaops/geth:bal-devnet-6
+    el_extra_params: ["--history.state=0", "--gcmode=archive", "--syncmode=full"]
+    el_log_level: debug
+    count: 1
+  - cl_type: lighthouse
+    cl_image: ethpandaops/lighthouse:bal-devnet-6
+    supernode: true
+    cl_log_level: debug
+    el_type: erigon
+    el_image: ethpandaops/erigon:bal-devnet-6
+    el_log_level: debug
+    count: 1
+network_params:
+  preset: minimal
+  seconds_per_slot: 6
+  genesis_delay: 30
+  fulu_fork_epoch: 0
+  gloas_fork_epoch: 2
+  # 100M block gas limit per devnet-4 spec; also scales EIP-8037 cpsb correctly.
+  genesis_gaslimit: 100000000
+  gas_limit: 100000000
+snooper_enabled: true
+dora_params:
+  image: ethpandaops/dora:eip7928-support
+spamoor_params:
+  image: ethpandaops/spamoor:master
+  spammers:
+    - scenario: evm-fuzz
+      config: {funding_gas_limit: 2000000, throughput: 50, payload_seed: "0x0400"}
+    - scenario: eoatx
+      config: {funding_gas_limit: 2000000, throughput: 50, gas_limit: 200000}
+    - scenario: deploytx
+      config: {funding_gas_limit: 2000000, throughput: 10, bytecodes: "0x6000", gas_limit: 10000000}
+    - scenario: storagerefundtx
+      config: {funding_gas_limit: 2000000, throughput: 20, slots_per_call: 500}
+    - scenario: setcodetx
+      config: {funding_gas_limit: 2000000, throughput: 20}
+ethereum_genesis_generator_params:
+  image: ethpandaops/ethereum-genesis-generator:6.0.2
+additional_services: [dora, spamoor]
+port_publisher:
+  additional_services:
+    enabled: true
+    public_port_start: 64400
