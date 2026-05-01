@@ -657,11 +657,16 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			// without adding it back here the receipt would under-charge by
 			// the spill amount.
 			st.txnGasUsedB4Refunds = st.initialGas.Total() - st.gasRemaining.Total() + st.evm.RevertedSpillGas()
-			if vmerr != nil {
-				// Top-level error: subtract the execution state gas that is
-				// refunded to the reservoir (Python spec:
-				// `state_gas_left += state_gas_used; state_gas_used = 0`).
-				// This covers both the reservoir-drained and spill portions.
+			if vmerr != nil && errors.Is(vmerr, vm.ErrExecutionReverted) {
+				// Top-level REVERT: subtract the execution state gas
+				// (Python spec: `state_gas_left += state_gas_used;
+				// state_gas_used = 0` at tx-end). Covers both reservoir
+				// and spill portions.
+				// Top-level EXCEPTIONAL HALT does NOT subtract here:
+				// handleFrameRevert already reclassified the spill into
+				// regularGasConsumed and restored gas.State to the entry
+				// reservoir, so the formula above already yields the
+				// spec-defined `tx.gas - reservoir`.
 				st.txnGasUsedB4Refunds -= st.evm.StateGasConsumed()
 			}
 			// EIP-8037: only the regular gas refund flows through the
