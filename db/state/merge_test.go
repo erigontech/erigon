@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math"
 	"slices"
 	"testing"
 
@@ -593,15 +592,14 @@ func TestFindMergeRange_Optimal(t *testing.T) {
 		assert.Equal(t, 8, int(r.values.to))
 	})
 	t.Run("domain/infinity_merge_beyond_frozen_step_cap", func(t *testing.T) {
-		// Regression for #20705 regression: when domainMaxSpan is unbounded (math.MaxUint64),
-		// 8 files of 8 steps each must still merge further — endStep=64 has spanStep=64, so
-		// the natural window is 0-64. Capping domainMaxSpan at 8 would skip every file and
-		// incorrectly return needMerge=false.
+		// Regression for #20705: when domainMaxSpan is unbounded, 8 files of 8 steps each
+		// must still merge further — endStep=64 has spanStep=64, natural window is 0-64.
+		// Capping domainMaxSpan at 8 would skip every file and return needMerge=false.
 		files := []visibleFile{
 			f(0, 8), f(8, 16), f(16, 24), f(24, 32),
 			f(32, 40), f(40, 48), f(48, 56), f(56, 64),
 		}
-		r := newDomainRoTx(1, files).findMergeRange(64, math.MaxUint64, 8)
+		r := newDomainRoTx(1, files).findMergeRange(64, config3.UnboundedDomainMerge, 8)
 		assert.True(t, r.values.needMerge)
 		assert.Equal(t, 0, int(r.values.from))
 		assert.Equal(t, 64, int(r.values.to))
