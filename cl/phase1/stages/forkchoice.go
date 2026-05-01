@@ -187,7 +187,7 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 		}
 		reorgEvent := &beaconevents.ChainReorgData{
 			Slot:                headSlot,
-			Depth:               currentSlot - headSlot,
+			Depth:               headSlot - currentSlot,
 			OldHeadBlock:        oldCanonical,
 			NewHeadBlock:        headRoot,
 			OldHeadState:        oldStateRoot,
