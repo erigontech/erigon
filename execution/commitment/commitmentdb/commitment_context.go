@@ -771,10 +771,8 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 
 func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {
 	if sdc.stateReader.WithHistory() { // do not store branches if explicitly operate on history
-		fmt.Printf("[DEBUG PutBranch] SKIP (WithHistory) prefix=%x\n", prefix)
 		return nil
 	}
-	fmt.Printf("[DEBUG PutBranch] prefix=%x data_len=%d prevData_len=%d\n", prefix, len(data), len(prevData))
 	if sdc.trace {
 		fmt.Printf("[SDC] PutBranch: %x: %x\n", prefix, data)
 	}
