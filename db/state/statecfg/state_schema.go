@@ -255,10 +255,11 @@ var Schema = SchemaGen{
 		},
 	},
 	CommitmentDomain: DomainCfg{
-		Name: kv.CommitmentDomain, KeysTable: kv.TblCommitmentVals,
+		Name: kv.CommitmentDomain, KeysTable: kv.TblCommitmentKeys, ValsDataTable: kv.TblCommitmentVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressKeys,
 
 		Accessors:           AccessorHashMap,
+		LargeValues:         true,                              // DupSort KeysTable (bareKey → ~step+seq_id) + plain ValsDataTable (seq_id → value); same layout as Code/RCache; DupSort is required here because commitment trie path keys are variable-length
 		ReplaceKeysInValues: AggregatorSqueezeCommitmentValues, // when true, keys are replaced in values during merge once file range reaches threshold
 
 		Hist: HistCfg{
