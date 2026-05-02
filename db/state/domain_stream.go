@@ -138,10 +138,6 @@ func derefValsData(roTx kv.Tx, valsDataTable string, v []byte) ([]byte, error) {
 	return actual, nil
 }
 
-func (hi *DomainLatestIterFile) derefLargeVal(v []byte) ([]byte, error) {
-	return derefValsData(hi.roTx, hi.valsDataTable, v)
-}
-
 func (hi *DomainLatestIterFile) Close() {
 	if hi.h == nil {
 		return
@@ -260,7 +256,7 @@ func (hi *DomainLatestIterFile) initCursorOnDB(domainRoTx *DomainRoTx) error {
 			step := ^binary.BigEndian.Uint64(stepBytes)
 			endTxNum := step * domainRoTx.d.stepSize
 			if endTxNum >= hi.filesEndTxNum {
-				val, err := hi.derefLargeVal(value)
+				val, err := derefValsData(hi.roTx, hi.valsDataTable, value)
 				if err != nil {
 					return err
 				}
@@ -339,7 +335,7 @@ func (hi *DomainLatestIterFile) advanceLargeValsDBCursor(ci1 *CursorItem) error 
 		step := ^binary.BigEndian.Uint64(stepBytes)
 		endTxNum := step * hi.aggStep
 		if endTxNum >= hi.filesEndTxNum {
-			val, err := hi.derefLargeVal(v)
+			val, err := derefValsData(hi.roTx, hi.valsDataTable, v)
 			if err != nil {
 				return err
 			}

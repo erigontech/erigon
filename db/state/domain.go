@@ -441,7 +441,14 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		defer valsDataCursor.Close()
 
 		var seqIDBuf [8]byte
+		isCommitment := w.keysTable == "CommitmentVals"
+		if isCommitment {
+			fmt.Printf("[DEBUG Flush] domain=%s keysTable=%s valsDataTable=%s\n", w.keysTable, w.keysTable, w.valsDataTable)
+		}
 		if err := w.keys.Load(tx, w.keysTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			if isCommitment {
+				fmt.Printf("[DEBUG Flush callback] k=%x v_len=%d\n", k, len(v))
+			}
 			// k = domain_key+~step(8B), v = actual_value
 			existingKey, existingSeqID, err := valuesCursor.Seek(k)
 			if err != nil {
@@ -458,6 +465,9 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 				return err
 			}
 			binary.BigEndian.PutUint64(seqIDBuf[:], seqIDNum)
+			if isCommitment {
+				fmt.Printf("[DEBUG Flush write] k=%x seqID=%d v_len=%d\n", k, seqIDNum, len(v))
+			}
 			if err := valsDataCursor.Put(seqIDBuf[:], v); err != nil {
 				return err
 			}
@@ -810,18 +820,12 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 			if _, err = comp.Write(bareKey); err != nil {
 				return coll, fmt.Errorf("add %s values key [%x]: %w", d.FilenameBase, bareKey, err)
 			}
-			if d.ValsDataTable != "" {
-				actualVal, err := roTx.GetOne(d.ValsDataTable, v[:8])
-				if err != nil {
-					return coll, fmt.Errorf("collate %s ValsDataTable get [%x]: %w", d.FilenameBase, v[:8], err)
-				}
-				if _, err = comp.Write(actualVal); err != nil {
-					return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, bareKey, actualVal, err)
-				}
-			} else {
-				if _, err = comp.Write(v); err != nil {
-					return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, bareKey, v, err)
-				}
+			actualVal, err := derefValsData(roTx, d.ValsDataTable, v)
+			if err != nil {
+				return coll, fmt.Errorf("collate %s: %w", d.FilenameBase, err)
+			}
+			if _, err = comp.Write(actualVal); err != nil {
+				return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, bareKey, actualVal, err)
 			}
 		}
 	} else {
@@ -1311,36 +1315,38 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	}
 	unwindStepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(unwindStepBytes, ^uint64(unwindStep))
+	var seqIDBuf [8]byte
 
 	for i := range domainDiffs {
 		keyStr, value := domainDiffs[i].Key, domainDiffs[i].Value
 		key := common.ToBytesZeroCopy(keyStr)
 		if d.LargeValues {
-			// key = domain_key+~step(8B); delete at the write step.
+			// key = domain_key+~step(8B); delete the keysTable entry AND its ValsDataTable row.
+			oldSeqID, err := rwTx.GetOne(d.KeysTable, key)
+			if err != nil {
+				return err
+			}
+			if len(oldSeqID) > 0 {
+				if err := rwTx.Delete(d.ValsDataTable, oldSeqID[:8]); err != nil {
+					return err
+				}
+			}
 			if err := rwTx.Delete(d.KeysTable, key); err != nil {
 				return err
 			}
 			// nil = different step, skip; []byte{} = absent previously, write empty tombstone
 			if value != nil {
 				fullKey := key[:len(key)-8]
-				if d.ValsDataTable != "" {
-					// Allocate a new seq_id and write actual value to ValsDataTable.
-					seqIDNum, err := rwTx.IncrementSequence(d.ValsDataTable, 1)
-					if err != nil {
-						return err
-					}
-					var seqIDBuf [8]byte
-					binary.BigEndian.PutUint64(seqIDBuf[:], seqIDNum)
-					if err := rwTx.Put(d.ValsDataTable, seqIDBuf[:], value); err != nil {
-						return err
-					}
-					if err := rwTx.Put(d.KeysTable, append(fullKey, unwindStepBytes...), seqIDBuf[:]); err != nil {
-						return err
-					}
-				} else {
-					if err := rwTx.Put(d.KeysTable, append(fullKey, unwindStepBytes...), value); err != nil {
-						return err
-					}
+				seqIDNum, err := rwTx.IncrementSequence(d.ValsDataTable, 1)
+				if err != nil {
+					return err
+				}
+				binary.BigEndian.PutUint64(seqIDBuf[:], seqIDNum)
+				if err := rwTx.Put(d.ValsDataTable, seqIDBuf[:], value); err != nil {
+					return err
+				}
+				if err := rwTx.Put(d.KeysTable, append(fullKey, unwindStepBytes...), seqIDBuf[:]); err != nil {
+					return err
 				}
 			}
 			continue
@@ -1655,6 +1661,9 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 		if err != nil {
 			return nil, 0, false, fmt.Errorf("valsCursor.Seek: %w", err)
 		}
+		if dt.d.Name == kv.CommitmentDomain {
+			fmt.Printf("[DEBUG getLatestFromDb] domain=%s key=%x fullkey=%x v=%x\n", dt.d.Name, key, fullkey, v)
+		}
 		if len(fullkey) == 0 {
 			return nil, 0, false, nil // This key is not in DB
 		}
@@ -1662,11 +1671,13 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 			return nil, 0, false, nil // This key is not in DB
 		}
 		foundInvStep = fullkey[len(fullkey)-8:]
-		if dt.d.ValsDataTable != "" {
-			v, err = roTx.GetOne(dt.d.ValsDataTable, v[:8])
-			if err != nil {
-				return nil, 0, false, fmt.Errorf("getLatestFromDb ValsDataTable: %w", err)
-			}
+		seqID := v
+		v, err = derefValsData(roTx, dt.d.ValsDataTable, v)
+		if dt.d.Name == kv.CommitmentDomain {
+			fmt.Printf("[DEBUG getLatestFromDb] domain=%s key=%x seqID=%x valsData=%x err=%v\n", dt.d.Name, key, seqID, v, err)
+		}
+		if err != nil {
+			return nil, 0, false, fmt.Errorf("getLatestFromDb: %w", err)
 		}
 	} else {
 		_, stepWithVal, err := func() (_ []byte, _ []byte, err error) {
