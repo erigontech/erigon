@@ -177,10 +177,34 @@ is "what files are present at start" rather than "what prune mode".
   4. The set's content (which files are present, which aren't)
      defines the floor.
 
-**Expected boundary:** Phase 0 (latest-state files in
-ToStep-descending order) plus the minimum block-file range needed
-for the recent finalisation window. Anything earlier is Phase 1
-backfill that lazy loading can defer.
+**Expected boundary (sharper take):** the minimum is the **latest
+state slice** — the most recent step's `.kv` + `.kvi` per domain
+(accounts, storage, code, commitment) plus their existence-filter
+accessors. That set is enough for "normal state running":
+
+  - Execute new blocks as they arrive (read latest state, apply tx,
+    write new state).
+  - RPC queries about *current* state (eth_getBalance, eth_call at
+    latest, etc.).
+
+Block files (`.seg` headers/bodies/transactions) and history files
+(`.v` / `.ef` / `.efi`) are **NOT** needed for normal state running.
+They unlock distinct capabilities:
+
+  - Block files: historical block queries, block-by-hash, peer
+    serving of historical blocks via eth/68.
+  - History files: archive-style queries (`eth_getBalance` at past
+    block).
+
+Both can be lazy-loaded on demand once the architecture supports it
+— the minimum-viable-set test should confirm that reads against
+absent historical files return Pending (or whatever soft-fail
+shape) rather than crashing the node.
+
+If the test confirms this, the storage-component's "Ready for
+normal operation" gate is fundamentally simpler than today's
+"download everything before doing anything" assumption: latest
+state slice is the floor, everything else is enhancement.
 
 **Outputs to record:**
 
