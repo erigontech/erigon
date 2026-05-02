@@ -440,11 +440,16 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		//   keysTable (DupSort): bareKey -> invStep(8) + seqID(8)
 		//   valsTable (plain)  : seqID(8) -> value
 		// ETL collector key is bareKey+invStep (sorted); value is the raw value bytes.
-		// We allocate a fresh seqID per (bareKey, invStep) pair, write the value to
-		// the vals table, and put the (invStep+seqID) dup into the keys table.
-		// If a stale dup for the same (bareKey, invStep) already exists in DB, free
-		// its old seqID and replace via PutCurrent. A nil/empty value is recorded
-		// as a deletion marker with seqID = math.MaxUint64 (no vals row).
+		//
+		// Re-write strategy on (bareKey, invStep) collision (hot path: commitment
+		// branches re-flushed in the same step):
+		//   real -> real      : update vals row in place, leave keys dup unchanged
+		//                       (saves a vals Delete + a keys PutCurrent).
+		//   real -> deletion  : Delete vals, PutCurrent keys with seqID=MaxUint64.
+		//   deletion -> real  : Append fresh seqID, PutCurrent keys with new seqID.
+		//   deletion -> del.  : no-op.
+		// Fresh inserts use IncrementSequence + Append (strictly monotonic seqID).
+		// seqID=MaxUint64 is the deletion-marker sentinel (no row in valsTable).
 		keysCursor, err := tx.RwCursorDupSort(w.keysTable)
 		if err != nil {
 			return err
@@ -456,38 +461,62 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 			count++
 			bareKey := k[:len(k)-8]
 			invStep := k[len(k)-8:]
-			var seqID uint64
-			if len(v) == 0 {
-				seqID = math.MaxUint64 // deletion marker
-			} else {
+			newIsDeletion := len(v) == 0
+
+			existing, err := keysCursor.SeekBothRange(bareKey, invStep)
+			if err != nil {
+				return err
+			}
+			hasDup := len(existing) == 16 && bytes.Equal(existing[:8], invStep)
+
+			if hasDup {
+				oldSeqID := binary.BigEndian.Uint64(existing[8:])
+				oldIsDeletion := oldSeqID == math.MaxUint64
+				switch {
+				case !oldIsDeletion && !newIsDeletion:
+					// Update existing vals row in place; keys dup unchanged.
+					binary.BigEndian.PutUint64(seqIDBuf[:], oldSeqID)
+					return tx.Put(w.valsTable, seqIDBuf[:], v)
+				case !oldIsDeletion && newIsDeletion:
+					binary.BigEndian.PutUint64(seqIDBuf[:], oldSeqID)
+					if err := tx.Delete(w.valsTable, seqIDBuf[:]); err != nil {
+						return err
+					}
+					copy(dupBuf[:8], invStep)
+					binary.BigEndian.PutUint64(dupBuf[8:], math.MaxUint64)
+					return keysCursor.PutCurrent(bareKey, dupBuf[:])
+				case oldIsDeletion && !newIsDeletion:
+					newSeqID, err := tx.IncrementSequence(w.valsTable, 1)
+					if err != nil {
+						return err
+					}
+					binary.BigEndian.PutUint64(seqIDBuf[:], newSeqID)
+					if err := tx.Append(w.valsTable, seqIDBuf[:], v); err != nil {
+						return err
+					}
+					copy(dupBuf[:8], invStep)
+					binary.BigEndian.PutUint64(dupBuf[8:], newSeqID)
+					return keysCursor.PutCurrent(bareKey, dupBuf[:])
+				default: // deletion -> deletion
+					return nil
+				}
+			}
+
+			// Fresh insert.
+			var seqID uint64 = math.MaxUint64
+			if !newIsDeletion {
 				id, err := tx.IncrementSequence(w.valsTable, 1)
 				if err != nil {
 					return err
 				}
 				seqID = id
 				binary.BigEndian.PutUint64(seqIDBuf[:], seqID)
-				if err := tx.Put(w.valsTable, seqIDBuf[:], v); err != nil {
+				if err := tx.Append(w.valsTable, seqIDBuf[:], v); err != nil {
 					return err
 				}
 			}
 			copy(dupBuf[:8], invStep)
 			binary.BigEndian.PutUint64(dupBuf[8:], seqID)
-			existing, err := keysCursor.SeekBothRange(bareKey, invStep)
-			if err != nil {
-				return err
-			}
-			if len(existing) == 16 && bytes.Equal(existing[:8], invStep) {
-				// Same (bareKey, invStep) already in DB — free old seqID before replacing.
-				oldSeqID := binary.BigEndian.Uint64(existing[8:])
-				if oldSeqID != math.MaxUint64 {
-					var oldKey [8]byte
-					binary.BigEndian.PutUint64(oldKey[:], oldSeqID)
-					if err := tx.Delete(w.valsTable, oldKey[:]); err != nil {
-						return err
-					}
-				}
-				return keysCursor.PutCurrent(bareKey, dupBuf[:])
-			}
 			return keysCursor.Put(bareKey, dupBuf[:])
 		}, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 			return err
