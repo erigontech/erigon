@@ -442,6 +442,13 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 			return err
 		}
 		defer keysCursor.Close()
+		// Hold one valsTable cursor for the whole Load — preserves the cursor's
+		// position state across calls so sequential Append/Put skip B-tree descents.
+		valsCursor, err := tx.RwCursor(w.valsTable)
+		if err != nil {
+			return err
+		}
+		defer valsCursor.Close()
 		var seqIDBuf [8]byte
 		var dupBuf [dupRecordLen]byte
 		if err := w.values.Load(tx, w.valsTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
@@ -460,10 +467,10 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 				switch {
 				case !oldIsDeletion && !newIsDeletion:
 					copy(seqIDBuf[:], existing[8:])
-					return tx.Put(w.valsTable, seqIDBuf[:], v)
+					return valsCursor.Put(seqIDBuf[:], v)
 				case !oldIsDeletion && newIsDeletion:
 					copy(seqIDBuf[:], existing[8:])
-					if err := tx.Delete(w.valsTable, seqIDBuf[:]); err != nil {
+					if err := valsCursor.Delete(seqIDBuf[:]); err != nil {
 						return err
 					}
 					copy(dupBuf[:8], invStep)
@@ -475,7 +482,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 						return err
 					}
 					binary.BigEndian.PutUint64(seqIDBuf[:], newSeqID)
-					if err := tx.Append(w.valsTable, seqIDBuf[:], v); err != nil {
+					if err := valsCursor.Append(seqIDBuf[:], v); err != nil {
 						return err
 					}
 					copy(dupBuf[:8], invStep)
@@ -494,7 +501,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 				}
 				seqID = id
 				binary.BigEndian.PutUint64(seqIDBuf[:], seqID)
-				if err := tx.Append(w.valsTable, seqIDBuf[:], v); err != nil {
+				if err := valsCursor.Append(seqIDBuf[:], v); err != nil {
 					return err
 				}
 			}
@@ -1348,6 +1355,11 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			return err
 		}
 		defer keysCursor.Close()
+		valsCursor, err := rwTx.RwCursor(d.ValuesTable)
+		if err != nil {
+			return err
+		}
+		defer valsCursor.Close()
 		var seqKey [8]byte
 		var dup [dupRecordLen]byte
 		copy(dup[:8], unwindStepBytes[:])
@@ -1363,7 +1375,7 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			if len(existing) == dupRecordLen && bytes.Equal(existing[:8], invStep) {
 				if binary.BigEndian.Uint64(existing[8:]) != deletionSeqID {
 					copy(seqKey[:], existing[8:])
-					if err := rwTx.Delete(d.ValuesTable, seqKey[:]); err != nil {
+					if err := valsCursor.Delete(seqKey[:]); err != nil {
 						return err
 					}
 				}
@@ -1381,7 +1393,7 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 					return err
 				}
 				binary.BigEndian.PutUint64(seqKey[:], newSeqID)
-				if err := rwTx.Append(d.ValuesTable, seqKey[:], value); err != nil {
+				if err := valsCursor.Append(seqKey[:], value); err != nil {
 					return err
 				}
 			}
