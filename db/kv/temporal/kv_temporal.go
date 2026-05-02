@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 var ( // Compile time interface checks
@@ -82,10 +83,35 @@ type DB struct {
 	forkaggs   []*state.ForkableAgg
 
 	commitGate sync.RWMutex
+
+	commitGateWaitSeconds metrics.Summary
+	// Drained counters count attempts, including attempts that fail to open the underlying write tx.
+	commitGateDrainedSyncTotal          metrics.Counter
+	commitGateDrainedNosyncTotal        metrics.Counter
+	commitGateTryBeginTemporalRoSkipped metrics.Counter
+	commitGateTryViewSkipped            metrics.Counter
+	commitGateTryViewTemporalSkipped    metrics.Counter
+}
+
+type labeledDB interface {
+	GetLabel() kv.Label
 }
 
 func New(db kv.RwDB, agg *state.Aggregator, forkaggs ...*state.ForkableAgg) (*DB, error) {
-	tdb := &DB{RwDB: db, stateFiles: agg}
+	dbLabel := "unknown"
+	if labeled, ok := db.(labeledDB); ok {
+		dbLabel = string(labeled.GetLabel())
+	}
+	tdb := &DB{
+		RwDB:                                db,
+		stateFiles:                          agg,
+		commitGateWaitSeconds:               metrics.GetOrCreateSummary(fmt.Sprintf(`db_commit_gate_wait_seconds{db=%q}`, dbLabel)),
+		commitGateDrainedSyncTotal:          metrics.GetOrCreateCounter(fmt.Sprintf(`db_commit_gate_drained_total{db=%q,mode="sync"}`, dbLabel)),
+		commitGateDrainedNosyncTotal:        metrics.GetOrCreateCounter(fmt.Sprintf(`db_commit_gate_drained_total{db=%q,mode="nosync"}`, dbLabel)),
+		commitGateTryBeginTemporalRoSkipped: metrics.GetOrCreateCounter(fmt.Sprintf(`db_commit_gate_try_read_skipped_total{db=%q,method="begin_temporal_ro"}`, dbLabel)),
+		commitGateTryViewSkipped:            metrics.GetOrCreateCounter(fmt.Sprintf(`db_commit_gate_try_read_skipped_total{db=%q,method="view"}`, dbLabel)),
+		commitGateTryViewTemporalSkipped:    metrics.GetOrCreateCounter(fmt.Sprintf(`db_commit_gate_try_read_skipped_total{db=%q,method="view_temporal"}`, dbLabel)),
+	}
 	if len(forkaggs) > 0 {
 		arr := make([]*state.ForkableAgg, 0)
 		for _, forkagg := range forkaggs {
@@ -114,7 +140,14 @@ func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 }
 
 func (db *DB) TryBeginTemporalRo(ctx context.Context) (kv.TemporalTx, bool, error) {
+	return db.tryBeginTemporalRo(ctx, true)
+}
+
+func (db *DB) tryBeginTemporalRo(ctx context.Context, countBeginSkip bool) (kv.TemporalTx, bool, error) {
 	if !db.commitGate.TryRLock() {
+		if countBeginSkip {
+			db.commitGateTryBeginTemporalRoSkipped.Inc()
+		}
 		return nil, false, nil
 	}
 	kvTx, err := db.RwDB.BeginRo(ctx) //nolint:gocritic
@@ -147,8 +180,11 @@ func (db *DB) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) 
 }
 
 func (db *DB) TryViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) (bool, error) {
-	tx, ok, err := db.TryBeginTemporalRo(ctx)
+	tx, ok, err := db.tryBeginTemporalRo(ctx, false)
 	if err != nil || !ok {
+		if !ok && err == nil {
+			db.commitGateTryViewTemporalSkipped.Inc()
+		}
 		return ok, err
 	}
 	defer tx.Rollback()
@@ -169,8 +205,11 @@ func (db *DB) View(ctx context.Context, f func(tx kv.Tx) error) error {
 }
 
 func (db *DB) TryView(ctx context.Context, f func(tx kv.Tx) error) (bool, error) {
-	tx, ok, err := db.TryBeginTemporalRo(ctx)
+	tx, ok, err := db.tryBeginTemporalRo(ctx, false)
 	if err != nil || !ok {
+		if !ok && err == nil {
+			db.commitGateTryViewSkipped.Inc()
+		}
 		return ok, err
 	}
 	defer tx.Rollback()
@@ -198,8 +237,11 @@ func (db *DB) BeginTemporalRw(ctx context.Context) (kv.TemporalRwTx, error) {
 }
 
 func (db *DB) BeginTemporalRwDrained(ctx context.Context) (kv.TemporalRwTx, error) {
+	db.commitGateDrainedSyncTotal.Inc()
+	start := time.Now()
 	db.commitGate.Lock()
 	kvTx, err := db.RwDB.BeginRw(ctx) //nolint:gocritic
+	db.commitGateWaitSeconds.ObserveDuration(start)
 	db.commitGate.Unlock()
 	if err != nil {
 		return nil, err
@@ -243,8 +285,11 @@ func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.TemporalRwTx, error
 }
 
 func (db *DB) BeginTemporalRwNosyncDrained(ctx context.Context) (kv.TemporalRwTx, error) {
+	db.commitGateDrainedNosyncTotal.Inc()
+	start := time.Now()
 	db.commitGate.Lock()
 	kvTx, err := db.RwDB.BeginRwNosync(ctx) //nolint:gocritic
+	db.commitGateWaitSeconds.ObserveDuration(start)
 	db.commitGate.Unlock()
 	if err != nil {
 		return nil, err

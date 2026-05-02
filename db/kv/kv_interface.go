@@ -656,6 +656,23 @@ type DBGauges struct { // these gauges are shared by all MDBX instances, but nee
 	GcLeafMetric     *metrics.GaugeVec
 	GcOverflowMetric *metrics.GaugeVec
 	GcPagesMetric    *metrics.GaugeVec
+
+	DbReadersCount            *metrics.GaugeVec
+	DbReadersOldestTxID       *metrics.GaugeVec
+	DbReadersMaxLag           *metrics.GaugeVec
+	DbReadersMaxUsedBytes     *metrics.GaugeVec
+	DbReadersMaxRetainedBytes *metrics.GaugeVec
+	DbReadersSumRetainedBytes *metrics.GaugeVec
+	DbReadersParked           *metrics.GaugeVec
+	DbReadersOusted           *metrics.GaugeVec
+	GcAllocatedBytesMetric    *metrics.GaugeVec
+	GcBackedBytesMetric       *metrics.GaugeVec
+	GcTotalBytesMetric        *metrics.GaugeVec
+	GcPagesBytesMetric        *metrics.GaugeVec
+	GcReclaimableBytesMetric  *metrics.GaugeVec
+	GcRetainedBytesMetric     *metrics.GaugeVec
+	GcMaxReaderLagMetric      *metrics.GaugeVec
+	GcMaxRetainedBytesMetric  *metrics.GaugeVec
 }
 
 type DBSummaries struct { // the summaries are particular to a DB instance
@@ -688,6 +705,24 @@ func InitMDBXMGauges() *DBGauges {
 		GcLeafMetric:     metrics.GetOrCreateGaugeVec(`db_gc_leaf`, []string{dbLabelName}),
 		GcOverflowMetric: metrics.GetOrCreateGaugeVec(`db_gc_overflow`, []string{dbLabelName}),
 		GcPagesMetric:    metrics.GetOrCreateGaugeVec(`db_gc_pages`, []string{dbLabelName}),
+
+		DbReadersCount:            metrics.GetOrCreateGaugeVec(`db_readers_count`, []string{dbLabelName}),
+		DbReadersOldestTxID:       metrics.GetOrCreateGaugeVec(`db_readers_oldest_txid`, []string{dbLabelName}),
+		DbReadersMaxLag:           metrics.GetOrCreateGaugeVec(`db_readers_max_lag`, []string{dbLabelName}),
+		DbReadersMaxUsedBytes:     metrics.GetOrCreateGaugeVec(`db_readers_max_used_bytes`, []string{dbLabelName}),
+		DbReadersMaxRetainedBytes: metrics.GetOrCreateGaugeVec(`db_readers_max_retained_bytes`, []string{dbLabelName}),
+		DbReadersSumRetainedBytes: metrics.GetOrCreateGaugeVec(`db_readers_sum_retained_bytes`, []string{dbLabelName}),
+		DbReadersParked:           metrics.GetOrCreateGaugeVec(`db_readers_parked`, []string{dbLabelName}),
+		DbReadersOusted:           metrics.GetOrCreateGaugeVec(`db_readers_ousted`, []string{dbLabelName}),
+
+		GcAllocatedBytesMetric:   metrics.GetOrCreateGaugeVec(`db_gc_allocated_bytes`, []string{dbLabelName}),
+		GcBackedBytesMetric:      metrics.GetOrCreateGaugeVec(`db_gc_backed_bytes`, []string{dbLabelName}),
+		GcTotalBytesMetric:       metrics.GetOrCreateGaugeVec(`db_gc_total_bytes`, []string{dbLabelName}),
+		GcPagesBytesMetric:       metrics.GetOrCreateGaugeVec(`db_gc_pages_bytes`, []string{dbLabelName}),
+		GcReclaimableBytesMetric: metrics.GetOrCreateGaugeVec(`db_gc_reclaimable_bytes`, []string{dbLabelName}),
+		GcRetainedBytesMetric:    metrics.GetOrCreateGaugeVec(`db_gc_retained_bytes`, []string{dbLabelName}),
+		GcMaxReaderLagMetric:     metrics.GetOrCreateGaugeVec(`db_gc_max_reader_lag`, []string{dbLabelName}),
+		GcMaxRetainedBytesMetric: metrics.GetOrCreateGaugeVec(`db_gc_max_retained_bytes`, []string{dbLabelName}),
 	}
 }
 

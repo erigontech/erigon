@@ -241,6 +241,43 @@ func TestTemporalCommitGateTryViewsUnavailableWhileDrainedWriterWaits(t *testing
 	releaseTemporalWriter(t, release, done)
 }
 
+func TestTemporalCommitGateMetricsNoPanic(t *testing.T) {
+	ctx := t.Context()
+	temporalDb := newTemporalCommitGateTestDB(t, memdb.NewTestDB(t, dbcfg.ChainDB))
+
+	rwTx, err := temporalDb.BeginTemporalRwDrained(ctx)
+	require.NoError(t, err)
+	rwTx.Rollback()
+
+	rwTx, err = temporalDb.BeginTemporalRwNosyncDrained(ctx)
+	require.NoError(t, err)
+	rwTx.Rollback()
+
+	roTx, ok, err := temporalDb.TryBeginTemporalRo(ctx)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.NotNil(t, roTx)
+	roTx.Rollback()
+
+	called := false
+	ok, err = temporalDb.TryView(ctx, func(tx kv.Tx) error {
+		called = true
+		return nil
+	})
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.True(t, called)
+
+	called = false
+	ok, err = temporalDb.TryViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		called = true
+		return nil
+	})
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.True(t, called)
+}
+
 func TestTemporalCommitGateBeginTemporalRwDoesNotDrain(t *testing.T) {
 	ctx := t.Context()
 	temporalDb := newTemporalCommitGateTestDB(t, memdb.NewTestDB(t, dbcfg.ChainDB))

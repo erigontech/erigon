@@ -89,6 +89,55 @@ func BaseCase(t *testing.T) (kv.RwDB, kv.RwTx, kv.RwCursorDupSort) {
 	return db, tx, c
 }
 
+func TestCollectMetricsReaderStatsNoPanic(t *testing.T) {
+	ctx := t.Context()
+	const table = "MetricsTable"
+	db := New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).WithMetrics().WithTableCfg(func(kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{table: kv.TableCfgItem{}}
+	}).MustOpen()
+	t.Cleanup(db.Close)
+
+	roTx, err := db.BeginRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	rwTx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	require.NoError(t, rwTx.Put(table, []byte("key"), []byte("value")))
+	require.NoError(t, rwTx.Commit())
+}
+
+func TestCollectMetricsGCInfoNoPanic(t *testing.T) {
+	ctx := t.Context()
+	const table = "MetricsTable"
+	db := New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).WithMetrics().WithTableCfg(func(kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{table: kv.TableCfgItem{}}
+	}).MustOpen()
+	t.Cleanup(db.Close)
+
+	value := make([]byte, 512)
+	rwTx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	for i := uint64(0); i < 1024; i++ {
+		var key [8]byte
+		binary.BigEndian.PutUint64(key[:], i)
+		require.NoError(t, rwTx.Put(table, key[:], value))
+	}
+	require.NoError(t, rwTx.Commit())
+
+	rwTx, err = db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	for i := uint64(0); i < 1024; i++ {
+		var key [8]byte
+		binary.BigEndian.PutUint64(key[:], i)
+		require.NoError(t, rwTx.Delete(table, key[:]))
+	}
+	require.NoError(t, rwTx.Commit())
+}
+
 func iteration(t *testing.T, c kv.RwCursorDupSort, start []byte, val []byte) ([]string, []string) {
 	t.Helper()
 	var keys []string
