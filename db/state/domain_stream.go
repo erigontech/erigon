@@ -221,7 +221,7 @@ func (hi *DomainLatestIterFile) init(domainRoTx *DomainRoTx) error {
 
 func (hi *DomainLatestIterFile) initCursorOnDB(domainRoTx *DomainRoTx) error {
 	if domainRoTx.d.LargeValues {
-		valsCursor, err := hi.roTx.Cursor(domainRoTx.d.ValuesTable) //nolint:gocritic
+		valsCursor, err := hi.roTx.Cursor(domainRoTx.d.KeysTable) //nolint:gocritic
 		if err != nil {
 			return err
 		}
@@ -251,7 +251,7 @@ func (hi *DomainLatestIterFile) initCursorOnDB(domainRoTx *DomainRoTx) error {
 			}
 		}
 	} else {
-		valsCursor, err := hi.roTx.CursorDupSort(domainRoTx.d.ValuesTable) //nolint:gocritic
+		valsCursor, err := hi.roTx.CursorDupSort(domainRoTx.d.KeysTable) //nolint:gocritic
 		if err != nil {
 			return err
 		}
@@ -484,7 +484,7 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 		}
 	}
 
-	valsCursor, err := roTx.CursorDupSort(dt.d.ValuesTable)
+	valsCursor, err := roTx.CursorDupSort(dt.d.KeysTable)
 	if err != nil {
 		return err
 	}

@@ -199,7 +199,7 @@ func TestDomain_IteratePrefix_PrefersFilesOverDB(t *testing.T) {
 	tx, err = db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	c, err := tx.RwCursorDupSort(d.ValuesTable)
+	c, err := tx.RwCursorDupSort(d.KeysTable)
 	require.NoError(err)
 	defer c.Close()       //nolint:gocritic
 	var step1Dup [16]byte // [^step1 (8 bytes) | V1 (8 bytes)]
@@ -295,7 +295,7 @@ func TestDomainLatestIterFile_PrefersFilesOverDB(t *testing.T) {
 	tx, err = db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	c, err := tx.RwCursorDupSort(d.ValuesTable)
+	c, err := tx.RwCursorDupSort(d.KeysTable)
 	require.NoError(err)
 	defer c.Close()       //nolint:gocritic
 	var step1Dup [16]byte // [^step1 (8 bytes) | V1 (8 bytes)]
@@ -401,7 +401,7 @@ func TestDomainLatestIterFile_PrefersFilesOverDB_LargeValues(t *testing.T) {
 	var step1Key [16]byte // [userKey (8 bytes) || ^step1 (8 bytes)]
 	copy(step1Key[:8], key[:])
 	binary.BigEndian.PutUint64(step1Key[8:], ^uint64(1))
-	require.NoError(tx.Delete(d.ValuesTable, step1Key[:]))
+	require.NoError(tx.Delete(d.KeysTable, step1Key[:]))
 	require.NoError(tx.Commit())
 
 	// DebugRangeLatest (which uses DomainLatestIterFile) should return V1

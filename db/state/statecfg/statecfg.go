@@ -13,7 +13,7 @@ type DomainCfg struct {
 	Compression seg.FileCompression
 	CompressCfg seg.Cfg
 	Accessors   Accessors // list of indexes for given domain
-	ValuesTable string    // bucket to store domain values; key -> inverted_step + values (Dupsort)
+	KeysTable   string    // bucket to store domain values; key -> inverted_step + values (Dupsort)
 	LargeValues bool
 
 	// replaceKeysInValues allows to replace commitment branch values with shorter keys.
@@ -26,7 +26,7 @@ type DomainCfg struct {
 }
 
 func (d DomainCfg) Tables() []string {
-	return []string{d.ValuesTable, d.Hist.ValuesTable, d.Hist.IiCfg.KeysTable, d.Hist.IiCfg.ValuesTable}
+	return []string{d.KeysTable, d.Hist.ValuesTable, d.Hist.IiCfg.KeysTable, d.Hist.IiCfg.ValuesTable}
 }
 
 func (d DomainCfg) GetVersions() VersionTypes {

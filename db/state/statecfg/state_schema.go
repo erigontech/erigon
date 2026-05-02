@@ -191,7 +191,7 @@ var ExperimentalConcurrentCommitment = false // set true to use concurrent commi
 
 var Schema = SchemaGen{
 	AccountsDomain: DomainCfg{
-		Name: kv.AccountsDomain, ValuesTable: kv.TblAccountVals,
+		Name: kv.AccountsDomain, KeysTable: kv.TblAccountVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressNone,
 
 		Accessors: AccessorBTree | AccessorExistence,
@@ -212,7 +212,7 @@ var Schema = SchemaGen{
 		},
 	},
 	StorageDomain: DomainCfg{
-		Name: kv.StorageDomain, ValuesTable: kv.TblStorageVals,
+		Name: kv.StorageDomain, KeysTable: kv.TblStorageVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressKeys,
 
 		Accessors: AccessorBTree | AccessorExistence,
@@ -233,7 +233,7 @@ var Schema = SchemaGen{
 		},
 	},
 	CodeDomain: DomainCfg{
-		Name: kv.CodeDomain, ValuesTable: kv.TblCodeVals,
+		Name: kv.CodeDomain, KeysTable: kv.TblCodeVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressVals, // compressing Code with keys doesn't show any benefits. Compression of values shows 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
 
 		Accessors:   AccessorBTree | AccessorExistence,
@@ -255,7 +255,7 @@ var Schema = SchemaGen{
 		},
 	},
 	CommitmentDomain: DomainCfg{
-		Name: kv.CommitmentDomain, ValuesTable: kv.TblCommitmentVals,
+		Name: kv.CommitmentDomain, KeysTable: kv.TblCommitmentVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressKeys,
 
 		Accessors:           AccessorHashMap,
@@ -281,7 +281,7 @@ var Schema = SchemaGen{
 		},
 	},
 	ReceiptDomain: DomainCfg{
-		Name: kv.ReceiptDomain, ValuesTable: kv.TblReceiptVals,
+		Name: kv.ReceiptDomain, KeysTable: kv.TblReceiptVals,
 		CompressCfg: seg.DefaultCfg, Compression: seg.CompressNone,
 		LargeValues: false,
 
@@ -303,7 +303,7 @@ var Schema = SchemaGen{
 		},
 	},
 	RCacheDomain: DomainCfg{
-		Name: kv.RCacheDomain, ValuesTable: kv.TblRCacheVals,
+		Name: kv.RCacheDomain, KeysTable: kv.TblRCacheVals,
 		LargeValues: true,
 
 		Accessors:   AccessorHashMap,
