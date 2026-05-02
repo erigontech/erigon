@@ -91,16 +91,64 @@ population on real non-empty data.
 ### 5. Failure-injection scenarios pass
 
 The storage-driven path's value is precisely that it handles
-failure cases the stage path doesn't. Required tests:
+failure cases the stage path doesn't. Two classes of tests:
 
-  - **Mid-sync restart.** Stop, restart, lifecycle resumes
-    cleanly.
-  - **Corruption-detected re-download.** Delete an `.idx`;
-    storage driver detects and rebuilds.
+**Clean-stop scenarios** (SIGINT — process exits gracefully):
+
+  - **Mid-sync restart.** Stop SIGINT during initial download or
+    state catch-up, restart, lifecycle resumes cleanly.
+  - **Mid-retire restart.** Stop while a retire batch is mid-flight,
+    restart, retire resumes from where it stopped.
   - **Long soak.** 24h+ run, no leaks/drift/missed transitions.
 
-If these don't pass, the storage-driven path doesn't justify
-its existence vs the stage path.
+**Abnormal-termination scenarios** (SIGKILL / OOM / power loss —
+process dies without cleanup):
+
+  - **Kill during download.** Partial `.seg` left on disk. Restart
+    must detect "this isn't a complete file" and either
+    re-download or finish the partial — not treat the partial as
+    Downloaded. Today's `discoverNewFiles` adds any file with a
+    known extension at LifecycleDownloaded; a half-written file
+    would be misclassified. Either tighten discoverNewFiles
+    (size/checksum sanity vs torrent metadata) or rely on the
+    downloader's resume path. Test confirms we get a clean
+    restart, not a wedged inventory.
+  - **Kill during index build.** `.idx` partially written or
+    missing despite `.seg` present. Restart should retry the
+    build; the retry should succeed (BuildMissedIndices is
+    idempotent for most index types, but verify).
+  - **Kill during retire-merge.** Constituents and merged file
+    coexist on disk for a window; if killed during the window,
+    restart sees both. Held-view discipline + recalcVisibleFiles
+    should resolve cleanly, but verify across all lifecycle
+    states.
+  - **Kill while loading to tip.** Process dies during initial
+    sync (download phase, index-build phase, state-execution
+    phase). Each phase has different "in-flight" state on disk.
+    Restart must reach a clean-start state — node either picks up
+    where it left off or rolls back to a known-good earlier state,
+    no halfway-zombie.
+  - **Corruption-detected re-download.** Delete an `.idx` post-
+    sync; storage driver detects on next sweep and rebuilds.
+  - **Hardware-flush failure.** Snapshot file fully written from
+    erigon's perspective but lost in OS page cache before fsync
+    (simulate via dropping cache + truncating file by N bytes).
+    Restart should detect partial content and re-download.
+
+The clean-stop set validates the lifecycle's normal recovery path.
+The abnormal-termination set is what makes the storage-driven path
+worth the complexity — the stage path today struggles with these
+scenarios because it doesn't model file-level lifecycle state at
+all.
+
+Each abnormal-termination test follows the same shape: launch
+fresh sync → reach intended phase → SIGKILL → restart same datadir
+→ observe `[storage-lifecycle]` log lines + final sync state →
+declare pass/fail.
+
+If any of these don't pass, the storage-driven path doesn't
+justify its existence vs the stage path; we'd be carrying
+complexity without recovery payoff.
 
 ### 6. Performance characteristics measured
 
