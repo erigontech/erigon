@@ -207,11 +207,7 @@ func ExecV3(ctx context.Context,
 	doms.EnableTrieWarmup(true)
 	// Do it only for chain-tip blocks!
 	doms.EnableWarmupCache(!isApplyingBlocks)
-	postValidator := newBlockPostExecutionValidator()
 	doms.SetDeferCommitmentUpdates(false)
-	if !isApplyingBlocks {
-		postValidator = newParallelBlockPostExecutionValidator()
-	}
 	// Enable deferred commitment updates for fork validation and parallel initial sync.
 	// Deferred updates batch commitment calculations to block boundaries rather than
 	// per-transaction, significantly reducing re-org validation overhead.
@@ -244,7 +240,6 @@ func ExecV3(ctx context.Context,
 				progress:          NewProgress(blockNum, inputTxNum, commitThreshold, false, execStage.LogPrefix(), logger),
 				enableChaosMonkey: execStage.CurrentSyncCycle.IsInitialCycle,
 				hooks:             hooks,
-				postValidator:     postValidator,
 			},
 			workerCount: cfg.syncCfg.ExecWorkerCount,
 		}
@@ -294,7 +289,6 @@ func ExecV3(ctx context.Context,
 				progress:          NewProgress(blockNum, inputTxNum, commitThreshold, false, execStage.LogPrefix(), logger),
 				enableChaosMonkey: execStage.CurrentSyncCycle.IsInitialCycle,
 				hooks:             hooks,
-				postValidator:     postValidator,
 			}}
 		se.lastCommittedTxNum.Store(inputTxNum)
 		se.lastCommittedBlockNum.Store(blockNum)
@@ -317,9 +311,8 @@ func ExecV3(ctx context.Context,
 						return err
 					}
 
-					if err := se.getPostValidator().Wait(); err != nil {
-						return err
-					}
+					// Per-block validation runs inline inside each block's apply loop iteration
+					// (see blockValidator). No aggregate post-loop Wait needed.
 
 					se.lastCommittedBlockNum.Store(lastHeader.Number.Uint64())
 					// Get current txNum from the last executed block
@@ -431,18 +424,10 @@ type txExecutor struct {
 	writeCount   atomic.Int64
 
 	enableChaosMonkey bool
-	postValidator     BlockPostExecutionValidator
 }
 
 func (te *txExecutor) readState() *state.StateV3Buffered {
 	return te.rs
-}
-
-func (te *txExecutor) getPostValidator() BlockPostExecutionValidator {
-	if te.postValidator == nil {
-		return newBlockPostExecutionValidator()
-	}
-	return te.postValidator
 }
 
 func (te *txExecutor) domains() *execctx.SharedDomains {

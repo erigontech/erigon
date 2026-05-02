@@ -342,6 +342,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					// Cache flush happens in the execLoop (before blockResult is sent).
 					// sd.mem already has all TX writes when we reach here.
 
+					var blockValidatorWaiter *blockValidator
 					if applyResult.BlockNum > 0 && !applyResult.isPartial { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 						checkReceipts := !pe.cfg.vmConfig.StatelessExec &&
 							pe.cfg.chainConfig.IsByzantium(applyResult.BlockNum) &&
@@ -366,10 +367,11 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							return fmt.Errorf("block %d: applyCount mismatch: got: %d expected %d", applyResult.BlockNum, blockUpdateCount, applyResult.ApplyCount)
 						}
 
-						if err := pe.getPostValidator().Process(applyResult.BlockGasUsed, applyResult.BlobGasUsed, checkReceipts, applyResult.Receipts,
-							lastHeader, b.Transactions(), pe.cfg.chainConfig, pe.logger); err != nil {
-							return fmt.Errorf("%w, block=%d, %v", rules.ErrInvalidBlock, applyResult.BlockNum, err) //same as in stage_exec.go
-						}
+						// Spawn per-block validation in a goroutine — the result is
+						// joined via Wait() below, after the other per-result work
+						// has had a chance to run in parallel with validation.
+						blockValidatorWaiter = newBlockValidator(applyResult.BlockGasUsed, applyResult.BlobGasUsed, checkReceipts, applyResult.Receipts,
+							lastHeader, b.Transactions(), pe.cfg.chainConfig, pe.logger)
 
 						if !applyResult.isPartial && !execStage.CurrentSyncCycle.IsInitialCycle {
 							pe.cfg.notifications.RecentReceipts.Add(applyResult.Receipts, b.Transactions(), lastHeader)
@@ -391,10 +393,11 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					// The apply loop only does indexes.
 
 					// Commitment is computed by the commitmentCalculator goroutine.
-					// Post-execution validation (receipts, BAL) runs here.
-					err = pe.getPostValidator().Wait()
-					if err != nil {
-						return err
+					// Post-execution validation (receipts, BAL) runs here. The
+					// per-block blockValidator was spawned earlier (~30 LOC up)
+					// and runs concurrently with the work above; Wait() joins it.
+					if err := blockValidatorWaiter.Wait(); err != nil {
+						return fmt.Errorf("%w, block=%d, %v", rules.ErrInvalidBlock, applyResult.BlockNum, err)
 					}
 
 					if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) || pe.cfg.experimentalBAL {
