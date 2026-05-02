@@ -458,7 +458,10 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 				}
 				seqID = id
 				binary.BigEndian.PutUint64(seqIDBuf[:], seqID)
-				if err := tx.Put(w.valsTable, seqIDBuf[:], v); err != nil {
+				// Append: seqID comes from IncrementSequence and is strictly
+				// greater than every prior key in valsTable, so we skip the
+				// BTree search and bulk-append.
+				if err := tx.Append(w.valsTable, seqIDBuf[:], v); err != nil {
 					return err
 				}
 			}
