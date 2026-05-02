@@ -723,6 +723,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 							pe.Lock()
 							delete(pe.blockExecutors, blockResult.BlockNum)
 							pe.Unlock()
+							pe.scheduleNextPending(ctx)
 							if blockResult.BlockNum >= pe.maxBlockNum {
 								pe.reachedMaxBlock.Store(true)
 							}
@@ -786,6 +787,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				pe.Lock()
 				delete(pe.blockExecutors, blockResult.BlockNum)
 				pe.Unlock()
+				pe.scheduleNextPending(ctx)
 
 				// Use AfterCommitment estimate (2x) in per-block mode since
 				// commitment is already computed. BeforeCommitment (4x) is
@@ -939,6 +941,39 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 	}
 
 	return nil
+}
+
+// scheduleNextPending picks the lowest-numbered block still queued in
+// pe.blockExecutors and starts its execution. Called after a completed
+// block is removed from the map so that any block previously enqueued by
+// processRequest while the slot was busy actually gets scheduled. Without
+// this, processRequest only schedules when the map was empty at insert
+// time — a block enqueued while the previous block is still in flight
+// becomes orphaned in the map, the apply loop never receives its result,
+// and post-block validation silently never fires.
+func (pe *parallelExecutor) scheduleNextPending(ctx context.Context) {
+	pe.Lock()
+	if len(pe.blockExecutors) == 0 {
+		pe.Unlock()
+		return
+	}
+	var nextNum uint64
+	first := true
+	for n := range pe.blockExecutors {
+		if first || n < nextNum {
+			nextNum = n
+			first = false
+		}
+	}
+	next := pe.blockExecutors[nextNum]
+	pe.Unlock()
+	if next == nil || !next.execStarted.IsZero() {
+		// Already running (or scheduled).
+		return
+	}
+	pe.blockExecMetrics.BlockCount.Add(1)
+	next.execStarted = time.Now()
+	next.scheduleExecution(ctx, pe)
 }
 
 func (pe *parallelExecutor) processResults(ctx context.Context, applyTx kv.TemporalTx) (blockResult *blockResult, err error) {
