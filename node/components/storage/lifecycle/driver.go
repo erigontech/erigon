@@ -131,6 +131,11 @@ func (d *Driver) Start(ctx context.Context) error {
 	d.subUnsub = unsub
 	d.mu.Unlock()
 
+	logger.Info("[storage-lifecycle] driver started",
+		"sweep-interval", interval, "snap-dir", d.SnapDir,
+		"on-indexing-wired", d.OnIndexing != nil,
+		"on-validation-wired", d.OnValidation != nil)
+
 	go d.run(runCtx, sub, interval, logger)
 	return nil
 }
@@ -147,6 +152,7 @@ func (d *Driver) Stop() {
 	cancel := d.stopFn
 	doneCh := d.doneCh
 	unsub := d.subUnsub
+	logger := d.Logger
 	d.mu.Unlock()
 
 	if cancel != nil {
@@ -157,6 +163,9 @@ func (d *Driver) Stop() {
 	}
 	if doneCh != nil {
 		<-doneCh
+	}
+	if logger != nil {
+		logger.Info("[storage-lifecycle] driver stopped")
 	}
 }
 
@@ -242,15 +251,20 @@ var snapshotPrimaryExts = map[string]struct{}{
 // Idempotent: files already in Inventory are skipped. Adds new
 // entries with minimal metadata (Name, Local=true, no Domain/Kind);
 // follow-up wires populate richer metadata via OnFilesChange.
+//
+// Logs an Info summary if any new files were discovered, with the
+// count and an example name. Per-file Debug for the curious.
 func (d *Driver) discoverNewFiles(logger log.Logger) {
 	if d.SnapDir == "" {
 		return
 	}
 	entries, err := os.ReadDir(d.SnapDir)
 	if err != nil {
-		logger.Debug("[lifecycle] discoverNewFiles ReadDir", "dir", d.SnapDir, "err", err)
+		logger.Debug("[storage-lifecycle] discoverNewFiles ReadDir", "dir", d.SnapDir, "err", err)
 		return
 	}
+	added := 0
+	var firstAdded string
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
@@ -267,6 +281,15 @@ func (d *Driver) discoverNewFiles(logger log.Logger) {
 			Name:  name,
 			Local: true, // → derives LifecycleDownloaded
 		})
+		logger.Debug("[storage-lifecycle] discovered new file", "name", name)
+		added++
+		if firstAdded == "" {
+			firstAdded = name
+		}
+	}
+	if added > 0 {
+		logger.Info("[storage-lifecycle] discovered new on-disk files",
+			"count", added, "first", firstAdded, "dir", d.SnapDir)
 	}
 }
 
@@ -288,15 +311,17 @@ func (d *Driver) dispatch(ctx context.Context, e *snapshot.FileEntry, logger log
 		if d.OnIndexing == nil {
 			return
 		}
+		logger.Debug("[storage-lifecycle] dispatch OnIndexing", "name", e.Name)
 		if err := d.OnIndexing(ctx, e); err != nil {
-			logger.Debug("[lifecycle] OnIndexing", "name", e.Name, "err", err)
+			logger.Debug("[storage-lifecycle] OnIndexing failed", "name", e.Name, "err", err)
 		}
 	case snapshot.LifecycleIndexed:
 		if d.OnValidation == nil {
 			return
 		}
+		logger.Debug("[storage-lifecycle] dispatch OnValidation", "name", e.Name)
 		if err := d.OnValidation(ctx, e); err != nil {
-			logger.Debug("[lifecycle] OnValidation", "name", e.Name, "err", err)
+			logger.Debug("[storage-lifecycle] OnValidation failed", "name", e.Name, "err", err)
 		}
 	}
 }

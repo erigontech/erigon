@@ -19,6 +19,7 @@ package storage
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/services"
@@ -64,25 +65,51 @@ type productionIndexBuilder struct {
 //
 // Invokes BlockRetire.BuildMissedIndicesIfNeed for E2 (block) indices
 // and Aggregator.BuildMissedAccessors for E3 (state) accessors. The
-// primary parameter is unused — both builders scan globally for
-// missing files; a per-file API would require refactoring those
-// builders, which is out of scope for this branch.
+// primary parameter is logged for traceability — both builders scan
+// globally for missing files; a per-file API would require refactoring
+// those builders, which is out of scope for this branch.
+//
+// Logs at Info on entry and exit so operators can distinguish
+// storage-lifecycle-driven invocations from stage/retire-driven ones
+// (those use different prefixes).
 //
 // Returns the first error from either build. Caller (lifecycle.Driver)
 // leaves the file at LifecycleDownloaded for retry on next sweep.
-func (b *productionIndexBuilder) BuildMissedIndices(ctx context.Context, _ *snapshot.FileEntry) error {
+func (b *productionIndexBuilder) BuildMissedIndices(ctx context.Context, primary *snapshot.FileEntry) error {
 	b.inFlight.Lock()
 	defer b.inFlight.Unlock()
 
+	logger := b.logger
+	if logger == nil {
+		logger = log.Root()
+	}
+
+	primaryName := ""
+	if primary != nil {
+		primaryName = primary.Name
+	}
+	logger.Info("[storage-lifecycle] BuildMissedIndices start",
+		"trigger", primaryName,
+		"e2", b.blockRetire != nil,
+		"e3", b.agg != nil)
+	start := time.Now()
+
 	if b.blockRetire != nil {
-		if err := b.blockRetire.BuildMissedIndicesIfNeed(ctx, "lifecycle", b.notifier); err != nil {
+		if err := b.blockRetire.BuildMissedIndicesIfNeed(ctx, "storage-lifecycle", b.notifier); err != nil {
+			logger.Warn("[storage-lifecycle] E2 BuildMissedIndicesIfNeed failed",
+				"trigger", primaryName, "elapsed", time.Since(start), "err", err)
 			return err
 		}
 	}
 	if b.agg != nil {
 		if err := b.agg.BuildMissedAccessors(ctx, b.indexWorkers); err != nil {
+			logger.Warn("[storage-lifecycle] E3 BuildMissedAccessors failed",
+				"trigger", primaryName, "elapsed", time.Since(start), "err", err)
 			return err
 		}
 	}
+
+	logger.Info("[storage-lifecycle] BuildMissedIndices done",
+		"trigger", primaryName, "elapsed", time.Since(start))
 	return nil
 }
