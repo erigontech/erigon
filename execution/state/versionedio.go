@@ -263,12 +263,33 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 	// Check version map for AddressPath — handles accounts created by
 	// prior transactions in the same block that aren't in the read set.
 	if vr.versionMap != nil {
-		// A prior tx may have self-destructed this account. If so, the
-		// account must be treated as non-existent even if the version map
-		// still holds the pre-destruct AddressPath entry.
+		// A prior tx may have self-destructed this account. Honor the
+		// destruct ONLY if no subsequent write at a strictly higher
+		// TxIndex re-creates the account. EIP-161 emits a SelfDestruct
+		// for the coinbase when a TX touches it without tipping (Balance
+		// stays 0 → empty-account prune); a later TX that tips the same
+		// coinbase re-creates it, and we must surface the re-created
+		// account so finalize accumulates the prior cumulative value.
 		if res := vr.versionMap.Read(address, SelfDestructPath, accounts.NilKey, vr.txIndex); res.Status() == MVReadResultDone {
 			if destructed, ok := res.Value().(bool); ok && destructed {
-				return nil, nil
+				destructTxIndex := res.DepIdx()
+				revived := false
+				if hi, ok := vr.versionMap.LatestTxIndex(address, BalancePath, accounts.NilKey, vr.txIndex); ok && hi > destructTxIndex {
+					revived = true
+				}
+				if !revived {
+					if hi, ok := vr.versionMap.LatestTxIndex(address, NoncePath, accounts.NilKey, vr.txIndex); ok && hi > destructTxIndex {
+						revived = true
+					}
+				}
+				if !revived {
+					if hi, ok := vr.versionMap.LatestTxIndex(address, CodeHashPath, accounts.NilKey, vr.txIndex); ok && hi > destructTxIndex {
+						revived = true
+					}
+				}
+				if !revived {
+					return nil, nil
+				}
 			}
 		}
 		if acc, ok := versionedUpdate[*accounts.Account](vr.versionMap, address, AddressPath, accounts.NilKey, vr.txIndex); ok && acc != nil {

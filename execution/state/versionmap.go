@@ -256,6 +256,33 @@ func (vm *VersionMap) Read(addr accounts.Address, path AccountPath, key accounts
 	return
 }
 
+// LatestTxIndex returns the largest TxIndex (≤ txIdxLimit) at which a write
+// exists for the given (addr, path, key). Returns ok=false when no entry
+// exists at or below the limit. Used to detect account revival after a
+// SelfDestruct: any newer non-SelfDestruct write at a strictly higher
+// TxIndex re-creates the account.
+func (vm *VersionMap) LatestTxIndex(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdxLimit int) (int, bool) {
+	if vm == nil {
+		return 0, false
+	}
+	vm.mu.RLock()
+	defer vm.mu.RUnlock()
+
+	cells := vm.getKeyCells(addr, path, key, nil)
+	if cells == nil {
+		return 0, false
+	}
+	highest := UnknownDep
+	cells.Descend(txIdxLimit, func(k int, _ *WriteCell) bool {
+		highest = k
+		return false
+	})
+	if highest == UnknownDep {
+		return 0, false
+	}
+	return highest, true
+}
+
 // FlushVersionedWrites atomically flushes all writes to the version map
 // under a single lock acquisition. This prevents concurrent readers from
 // observing a partially-flushed state (e.g. seeing an AddressPath write
