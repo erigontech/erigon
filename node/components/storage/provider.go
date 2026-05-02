@@ -30,6 +30,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 
 	"golang.org/x/sync/semaphore"
 
@@ -259,6 +260,35 @@ func (p *Provider) Initialize(deps Deps) error {
 	// validation wire a chain in their own setup. Reading nil for
 	// OnValidation means files advance Indexed → Advertisable
 	// without validation — matches today's pre-validation behaviour.
+	// Bootstrap Inventory with files already on disk so the lifecycle
+	// driver doesn't start blind. Both AllSnapshots (block) and the
+	// Aggregator (state) expose visible-file enumeration; we mirror
+	// each as LifecycleAdvertisable since visibility implies the file
+	// is local AND indexed AND validated by recalcVisibleFiles's gate.
+	// Runs whenever Inventory is set, regardless of LifecycleDrivenByStorage,
+	// because non-driver consumers (manifest exchange, snapshot-flow) also
+	// benefit from a populated registry.
+	if deps.Inventory != nil {
+		if p.AllSnapshots != nil {
+			for _, name := range p.AllSnapshots.Files() {
+				deps.Inventory.AddFile(&snapshot.FileEntry{
+					Name:         filepath.Base(name),
+					Local:        true,
+					Advertisable: true,
+				})
+			}
+		}
+		if deps.Aggregator != nil {
+			for _, fullpath := range deps.Aggregator.Files() {
+				deps.Inventory.AddFile(&snapshot.FileEntry{
+					Name:         filepath.Base(fullpath),
+					Local:        true,
+					Advertisable: true,
+				})
+			}
+		}
+	}
+
 	if deps.Inventory != nil && config.Snapshot.LifecycleDrivenByStorage {
 		builder := &productionIndexBuilder{
 			blockRetire:  p.BlockRetire,
