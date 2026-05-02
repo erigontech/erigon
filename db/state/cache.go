@@ -64,7 +64,7 @@ func newDomainVisible(name kv.Domain, files visibleFiles) *domainVisible {
 		files: files,
 	}
 	limit := domainGetFromFileCacheLimit
-	if name == kv.CodeDomain {
+	if name == kv.CodeDomain || name == kv.CommitmentDomain {
 		limit = limit / 10 // CodeDomain has compressed values - means cache will store values (instead of pointers to mmap)
 	}
 	if limit == 0 {

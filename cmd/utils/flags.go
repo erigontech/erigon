@@ -2245,6 +2245,23 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		}
 		cfg.ErigondbDomainStepsInFrozenFile = &v
 	}
+	if ctx.IsSet(ErigondbDomainStepsInFrozenFileFlag.Name) {
+		s := ctx.String(ErigondbDomainStepsInFrozenFileFlag.Name)
+		var v uint64
+		if strings.EqualFold(s, "inf") {
+			v = config3.UnboundedDomainMerge
+		} else {
+			parsed, err := strconv.ParseUint(s, 10, 64)
+			if err != nil {
+				Fatalf("invalid --%s value %q: must be a positive integer or \"Inf\"", ErigondbDomainStepsInFrozenFileFlag.Name, s)
+			}
+			if parsed == 0 {
+				Fatalf("invalid --%s value %q: must be a positive integer or \"Inf\"", ErigondbDomainStepsInFrozenFileFlag.Name, s)
+			}
+			v = parsed
+		}
+		cfg.ErigondbDomainStepsInFrozenFile = &v
+	}
 }
 
 // Convenience type for optional flag value representing a rate limit that should print nicely for

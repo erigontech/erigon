@@ -2760,6 +2760,9 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		updatesCount = updates.Size()
 		start        = time.Now()
 		logEvery     = time.NewTicker(20 * time.Second)
+
+		lastKi      uint64
+		lastLogTime = start
 	)
 
 	//hph.trace = true
@@ -2807,10 +2810,17 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 				})
 			} else {
 				dbg.ReadMemStats(&m)
-				keysPerSec := uint64(float64(ki) / time.Since(start).Seconds())
+				now := time.Now()
+				keysPerSec := uint64(float64(ki-lastKi) / now.Sub(lastLogTime).Seconds())
+				lastKi = ki
+				lastLogTime = now
+				extra := []any{}
+				if warmuper != nil {
+					extra = append(extra, "wqueue", len(warmuper.work))
+				}
 				log.Info(fmt.Sprintf("[%s][agg] computing trie", logPrefix),
-					append(append([]any{"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(ki), common.PrettyCounter(updatesCount)), "keys/s", common.PrettyCounter(keysPerSec)},
-						hph.metrics.logMetrics()...), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))...)
+					append(append(append([]any{"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(ki), common.PrettyCounter(updatesCount)), "keys/s", common.PrettyCounter(keysPerSec)},
+						hph.metrics.logMetrics()...), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys)), extra...)...)
 			}
 		default:
 		}

@@ -477,11 +477,29 @@ func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if w.discard {
 		return nil
 	}
+	t := time.Now()
 	if err := w.ii.Flush(ctx, tx); err != nil {
 		return err
 	}
-	if err := w.historyVals.Load(tx, w.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if took := time.Since(t); took > time.Millisecond {
+		log.Info("[dbg] history.flush ii", "t", took, "tbl", w.historyValsTable)
+	}
+
+	t = time.Now()
+	var count uint64
+	if err := w.historyVals.Load(tx, w.historyValsTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		count++
+		return loadFunc(k, v, table, next)
+	}, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
+	}
+	took := time.Since(t)
+	var keysPerSec uint64
+	if took > 0 {
+		keysPerSec = uint64(float64(count) / took.Seconds())
+	}
+	if took > time.Millisecond && keysPerSec > 0 {
+		log.Info("[dbg] history.flush vals", "t", took, "keys/s", common.PrettyCounter(keysPerSec), "tbl", w.historyValsTable)
 	}
 	w.close()
 	return nil

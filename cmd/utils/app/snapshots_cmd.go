@@ -1459,7 +1459,10 @@ func doIntegrity(cliCtx *cli.Context) error {
 				continue
 			}
 
-			return fmt.Errorf("requested check %s not found", check)
+			err := fmt.Errorf("requested check %s not found", check)
+			logger.Warn(err.Error())
+			continue
+
 		}
 	} else {
 		requestedChecks = integrity.FastChecks
@@ -1481,6 +1484,11 @@ func doIntegrity(cliCtx *cli.Context) error {
 		}
 
 		requestedChecks = finalChecks
+	}
+
+	if len(requestedChecks) == 0 {
+		logger.Warn("[integrity] no checks to run (all filtered out)")
+		return nil
 	}
 
 	if len(requestedChecks) == 0 {
@@ -1622,6 +1630,9 @@ func doIntegrity(cliCtx *cli.Context) error {
 			}
 			scCopy := sc
 			scCopy.SampleRatio /= 100 // it's very slow check
+			if chainConfig.ChainName == networkname.Bloatnet {
+				scCopy.SampleRatio /= 10
+			}
 			return integrity.CheckCommitmentHistVal(ctx, scCopy, db, blockReader, failFast, logger)
 		case integrity.StateRootVerifyByHistory:
 			if !commitmentHistoryEnabled {
@@ -1634,6 +1645,9 @@ func doIntegrity(cliCtx *cli.Context) error {
 			}
 			scCopy := sc
 			scCopy.SampleRatio /= 100 // it's very slow check
+			if chainConfig.ChainName == networkname.Bloatnet {
+				scCopy.SampleRatio /= 10
+			}
 			return integrity.CheckCommitmentHistAtBlkRange(ctx, scCopy, db, blockReader, 1, to+1, logger)
 		case integrity.StateVerify:
 			return integrity.CheckStateVerify(ctx, db, failFast, fromStep, logger)
