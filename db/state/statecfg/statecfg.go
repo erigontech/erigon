@@ -9,12 +9,13 @@ import (
 type DomainCfg struct {
 	Hist HistCfg
 
-	Name        kv.Domain
-	Compression seg.FileCompression
-	CompressCfg seg.Cfg
-	Accessors   Accessors // list of indexes for given domain
-	ValuesTable string    // bucket to store domain values; key -> inverted_step + values (Dupsort)
-	LargeValues bool
+	Name          kv.Domain
+	Compression   seg.FileCompression
+	CompressCfg   seg.Cfg
+	Accessors     Accessors // list of indexes for given domain
+	ValuesTable   string    // bucket to store domain values; key -> inverted_step + values (Dupsort)
+	LargeValues   bool
+	ValsDataTable string // bucket to store large values separately; seqId -> value (only for LargeValues=true)
 
 	// replaceKeysInValues allows to replace commitment branch values with shorter keys.
 	// for commitment domain only
@@ -26,7 +27,11 @@ type DomainCfg struct {
 }
 
 func (d DomainCfg) Tables() []string {
-	return []string{d.ValuesTable, d.Hist.ValuesTable, d.Hist.IiCfg.KeysTable, d.Hist.IiCfg.ValuesTable}
+	tables := []string{d.ValuesTable, d.Hist.ValuesTable, d.Hist.IiCfg.KeysTable, d.Hist.IiCfg.ValuesTable}
+	if d.ValsDataTable != "" {
+		tables = append(tables, d.ValsDataTable)
+	}
+	return tables
 }
 
 func (d DomainCfg) GetVersions() VersionTypes {

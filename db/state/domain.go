@@ -372,32 +372,45 @@ func (w *DomainBufferedWriter) SetDiff(diff *kv.DomainDiff) { w.diff = diff }
 func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWriter {
 	discardHistory := discard || dt.d.HistoryDisabled
 
+	if asserts && dt.d.LargeValues && dt.d.ValsDataTable == "" {
+		panic(fmt.Sprintf("assert: domain %v has LargeValues=true but ValsDataTable is not set", dt.d.Name))
+	}
+
 	w := &DomainBufferedWriter{
-		discard:   discard,
-		aux:       make([]byte, 0, 128),
-		valsTable: dt.d.ValuesTable,
-		largeVals: dt.d.LargeValues,
-		h:         dt.ht.newWriter(tmpdir, discardHistory),
+		discard:       discard,
+		aux:           make([]byte, 0, 128),
+		valsTable:     dt.d.ValuesTable,
+		largeVals:     dt.d.LargeValues,
+		valsDataTable: dt.d.ValsDataTable,
+		h:             dt.ht.newWriter(tmpdir, discardHistory),
 	}
 	if !discard {
 		w.values = etl.NewCollectorWithAllocator(dt.d.Name.String()+"domain.flush", tmpdir, etl.SmallSortableBuffers, dt.d.logger).
 			LogLvl(log.LvlTrace).SortAndFlushInBackground(true)
+		if w.valsDataTable != "" && w.largeVals {
+			w.valsData = etl.NewCollectorWithAllocator(dt.d.Name.String()+"domain.data.flush", tmpdir, etl.SmallSortableBuffers, dt.d.logger).
+				LogLvl(log.LvlTrace).SortAndFlushInBackground(true)
+		}
 	}
 	return w
 }
 
 type DomainBufferedWriter struct {
-	values *etl.Collector
+	values   *etl.Collector
+	valsData *etl.Collector
 
 	discard bool
 
-	valsTable string
-	largeVals bool
+	valsTable     string
+	valsDataTable string
+	largeVals     bool
 
-	stepBytes [8]byte // current inverted step representation
-	aux       []byte  // auxilary buffer for key1 + key2
-	aux2      []byte  // auxilary buffer for step + val
-	diff      *kv.DomainDiff
+	seqIdCounter uint64  // auto-increment counter for large values
+	stepBytes    [8]byte // current inverted step representation
+	aux          []byte  // auxilary buffer for key1 + key2
+	aux2         []byte  // auxilary buffer for step + val
+	aux3         []byte  // auxilary buffer for seqId
+	diff         *kv.DomainDiff
 
 	h *historyBufferedWriter
 }
@@ -410,6 +423,9 @@ func (w *DomainBufferedWriter) Close() {
 	if w.values != nil {
 		w.values.Close()
 	}
+	if w.valsData != nil {
+		w.valsData.Close()
+	}
 }
 
 func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
@@ -421,6 +437,13 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	}
 
 	if w.largeVals {
+		// Flush valsData table first if it exists (separate large values table)
+		if w.valsDataTable != "" && w.valsData != nil {
+			if err := w.valsData.Load(tx, w.valsDataTable, loadFunc, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
+				return err
+			}
+		}
+		// Then flush values table (contains references to valsData if it exists)
 		if err := w.values.Load(tx, w.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 			return err
 		}
@@ -467,6 +490,33 @@ func (w *DomainBufferedWriter) addValue(k, value []byte, step kv.Step) error {
 			}
 		}
 
+		// If valsDataTable is set, store large values separately with auto-increment ID
+		if w.valsDataTable != "" && w.valsData != nil {
+			// Handle empty values (deletion markers)
+			if len(value) == 0 {
+				// Empty values are stored directly without seqId
+				if err := w.values.Collect(fullkey, value); err != nil {
+					return err
+				}
+				return nil
+			}
+
+			// Generate sequence ID for the value
+			w.seqIdCounter++
+			w.aux3 = binary.BigEndian.AppendUint64(w.aux3[:0], w.seqIdCounter)
+
+			// Store actual value in valsData table
+			if err := w.valsData.Collect(w.aux3, value); err != nil {
+				return err
+			}
+			// Store reference in values table
+			if err := w.values.Collect(fullkey, w.aux3); err != nil {
+				return err
+			}
+			return nil
+		}
+
+		// Fall back to old behavior if valsDataTable is not set
 		if err := w.values.Collect(fullkey, value); err != nil {
 			return err
 		}
@@ -614,7 +664,7 @@ func (d *Domain) dumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo kv.St
 		panic(fmt.Errorf("assert: stepFrom=%d > stepTo=%d", stepFrom, stepTo))
 	}
 
-	coll, err := d.collateETL(ctx, stepFrom, stepTo, wal.values, vt)
+	coll, err := d.collateETL(ctx, stepFrom, stepTo, wal.values, wal.valsData, vt)
 	defer wal.Close()
 	if err != nil {
 		return err
@@ -635,7 +685,7 @@ func (d *Domain) dumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo kv.St
 
 // [stepFrom; stepTo)
 // In contrast to collate function collateETL puts contents of wal into file.
-func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *etl.Collector, vt valueTransformer) (coll Collation, err error) {
+func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *etl.Collector, walsData *etl.Collector, vt valueTransformer) (coll Collation, err error) {
 	if d.Disable {
 		return Collation{}, err
 	}
@@ -667,12 +717,34 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *
 		fromTxNum = uint64(stepFrom-1) * d.stepSize
 	}
 
+	// If ValsDataTable is set, build a map from walsData for quick lookup
+	valsDataMap := make(map[string][]byte)
+	if d.ValsDataTable != "" && walsData != nil {
+		err = walsData.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			valsDataMap[string(k)] = v
+			return nil
+		}, etl.TransformArgs{Quit: ctx.Done()})
+		if err != nil {
+			return Collation{}, fmt.Errorf("load %s valsData: %w", d.FilenameBase, err)
+		}
+	}
+
 	err = wal.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if d.LargeValues {
 			bareKey := k[:len(k)-8]
 			val := v
+
+			// If ValsDataTable is set, v is a seqId and we need to look up actual value
+			if d.ValsDataTable != "" && len(v) > 0 && len(v) == 8 {
+				if actualVal, ok := valsDataMap[string(v)]; ok {
+					val = actualVal
+				} else {
+					// Empty value (deletion marker) - val remains empty
+				}
+			}
+
 			if vt != nil {
-				val, err = vt(v, fromTxNum, endTxNum)
+				val, err = vt(val, fromTxNum, endTxNum)
 				if err != nil {
 					return fmt.Errorf("vt: %w", err)
 				}
@@ -757,6 +829,17 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 			return Collation{}, fmt.Errorf("create %s values cursor: %w", d.FilenameBase, err)
 		}
 		defer valsCursor.Close()
+
+		// If ValsDataTable is set, values are seqIds and we need to look up actual values
+		var valsDataCursor kv.Cursor
+		if d.ValsDataTable != "" {
+			valsDataCursor, err = roTx.Cursor(d.ValsDataTable)
+			if err != nil {
+				return Collation{}, fmt.Errorf("create %s valsData cursor: %w", d.FilenameBase, err)
+			}
+			defer valsDataCursor.Close()
+		}
+
 		for k, v, err := valsCursor.First(); k != nil; k, v, err = valsCursor.Next() {
 			if err != nil {
 				return coll, err
@@ -765,11 +848,26 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 				continue
 			}
 			bareKey := k[:len(k)-8]
+			actualVal := v
+
+			// If ValsDataTable is set, v is a seqId, look up actual value
+			if d.ValsDataTable != "" && len(v) > 0 && len(v) == 8 {
+				_, luVal, err := valsDataCursor.SeekExact(v)
+				if err != nil {
+					return coll, fmt.Errorf("look up %s valsData for seqId %x: %w", d.FilenameBase, v, err)
+				}
+				if luVal != nil {
+					actualVal = luVal
+				} else if asserts {
+					panic(fmt.Sprintf("assert: seqId %x not found in %s valsData table", v, d.ValsDataTable))
+				}
+			}
+
 			if _, err = comp.Write(bareKey); err != nil {
 				return coll, fmt.Errorf("add %s values key [%x]: %w", d.FilenameBase, bareKey, err)
 			}
-			if _, err = comp.Write(v); err != nil {
-				return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, bareKey, v, err)
+			if _, err = comp.Write(actualVal); err != nil {
+				return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, bareKey, actualVal, err)
 			}
 		}
 	} else {
@@ -1256,6 +1354,22 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	unwindStepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(unwindStepBytes, ^uint64(unwindStep))
 
+	// If ValsDataTable is set for largeVals, we need to generate seqIds for restored values
+	var valsDataCursor kv.RwCursor
+	var seqIdCounter uint64
+	if d.LargeValues && d.ValsDataTable != "" {
+		var err error
+		valsDataCursor, err = rwTx.RwCursor(d.ValsDataTable)
+		if err != nil {
+			return fmt.Errorf("create %s valsData cursor for unwind: %w", d.FilenameBase, err)
+		}
+		defer valsDataCursor.Close()
+		// Get the max existing seqId
+		if lastK, _, err := valsDataCursor.Last(); err == nil && lastK != nil && len(lastK) == 8 {
+			seqIdCounter = binary.BigEndian.Uint64(lastK)
+		}
+	}
+
 	for i := range domainDiffs {
 		keyStr, value := domainDiffs[i].Key, domainDiffs[i].Value
 		key := common.ToBytesZeroCopy(keyStr)
@@ -1267,8 +1381,21 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			// nil = different step, skip; []byte{} = absent previously, write empty tombstone
 			if value != nil {
 				fullKey := key[:len(key)-8]
-				if err := rwTx.Put(d.ValuesTable, append(fullKey, unwindStepBytes...), value); err != nil {
-					return err
+				// If ValsDataTable is set, create seqId and store value there
+				if d.ValsDataTable != "" {
+					seqIdCounter++
+					seqIdBuf := make([]byte, 8)
+					binary.BigEndian.PutUint64(seqIdBuf, seqIdCounter)
+					if err := valsDataCursor.Put(seqIdBuf, value); err != nil {
+						return fmt.Errorf("put to %s valsData for unwind: %w", d.ValsDataTable, err)
+					}
+					if err := rwTx.Put(d.ValuesTable, append(fullKey, unwindStepBytes...), seqIdBuf); err != nil {
+						return err
+					}
+				} else {
+					if err := rwTx.Put(d.ValuesTable, append(fullKey, unwindStepBytes...), value); err != nil {
+						return err
+					}
 				}
 			}
 			continue
@@ -1590,6 +1717,25 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 			return nil, 0, false, nil // This key is not in DB
 		}
 		foundInvStep = fullkey[len(fullkey)-8:]
+
+		// If ValsDataTable is set, v is a seqId and we need to look up actual value
+		if dt.d.ValsDataTable != "" && len(v) > 0 && len(v) == 8 {
+			// For largeVals with separate data table, non-empty 8-byte values are seqIds
+			if valsDataC, err := roTx.Cursor(dt.d.ValsDataTable); err == nil {
+				defer valsDataC.Close()
+				if _, actualVal, err := valsDataC.SeekExact(v); err == nil && actualVal != nil {
+					v = actualVal
+				} else if err != nil {
+					return nil, 0, false, fmt.Errorf("look up %s valsData for seqId %x: %w", dt.d.FilenameBase, v, err)
+				} else {
+					// seqId not found - this shouldn't happen in normal operation
+					return nil, 0, false, fmt.Errorf("seqId %x not found in %s valsData table", v, dt.d.ValsDataTable)
+				}
+			} else {
+				// Table doesn't exist yet - return nil which indicates key is not in DB
+				return nil, 0, false, nil
+			}
+		}
 	} else {
 		_, stepWithVal, err := func() (_ []byte, _ []byte, err error) {
 			defer func() {
@@ -1944,7 +2090,11 @@ func (dt *DomainRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 }
 
 func (dt *DomainRoTx) Tables() (res []string) {
-	return []string{dt.d.ValuesTable, dt.ht.h.ValuesTable, dt.ht.iit.ii.KeysTable, dt.ht.iit.ii.ValuesTable}
+	tables := []string{dt.d.ValuesTable, dt.ht.h.ValuesTable, dt.ht.iit.ii.KeysTable, dt.ht.iit.ii.ValuesTable}
+	if dt.d.ValsDataTable != "" {
+		tables = append(tables, dt.d.ValsDataTable)
+	}
+	return tables
 }
 
 func (dt *DomainRoTx) Files() (res VisibleFiles) {

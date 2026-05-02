@@ -152,11 +152,13 @@ const (
 	TblStorageIdx         = "StorageIdx"
 
 	TblCodeVals        = "CodeVals"
+	TblCodeDataVals    = "CodeDataVals"
 	TblCodeHistoryKeys = "CodeHistoryKeys"
 	TblCodeHistoryVals = "CodeHistoryVals"
 	TblCodeIdx         = "CodeIdx"
 
 	TblCommitmentVals        = "CommitmentVals"
+	TblCommitmentDataVals    = "CommitmentDataVals"
 	TblCommitmentHistoryKeys = "CommitmentHistoryKeys"
 	TblCommitmentHistoryVals = "CommitmentHistoryVals"
 	TblCommitmentIdx         = "CommitmentIdx"
@@ -167,6 +169,7 @@ const (
 	TblReceiptIdx         = "ReceiptIdx"
 
 	TblRCacheVals        = "ReceiptCacheVals"
+	TblRCacheDataVals    = "ReceiptCacheDataVals"
 	TblRCacheHistoryKeys = "ReceiptCacheHistoryKeys"
 	TblRCacheHistoryVals = "ReceiptCacheHistoryVals"
 	TblRCacheIdx         = "ReceiptCacheIdx"
@@ -349,11 +352,13 @@ var ChaindataTables = []string{
 	TblStorageIdx,
 
 	TblCodeVals,
+	TblCodeDataVals,
 	TblCodeHistoryKeys,
 	TblCodeHistoryVals,
 	TblCodeIdx,
 
 	TblCommitmentVals,
+	TblCommitmentDataVals,
 	TblCommitmentHistoryKeys,
 	TblCommitmentHistoryVals,
 	TblCommitmentIdx,
@@ -364,6 +369,7 @@ var ChaindataTables = []string{
 	TblReceiptIdx,
 
 	TblRCacheVals,
+	TblRCacheDataVals,
 	TblRCacheHistoryKeys,
 	TblRCacheHistoryVals,
 	TblRCacheIdx,
@@ -504,10 +510,12 @@ var ChaindataTablesCfg = TableCfg{
 	TblStorageHistoryVals: {Flags: DupSort},
 	TblStorageIdx:         {Flags: DupSort},
 
+	TblCodeDataVals:    {Flags: 0}, // no DupSort for values data table
 	TblCodeHistoryKeys: {Flags: DupSort},
 	TblCodeIdx:         {Flags: DupSort},
 
 	TblCommitmentVals:        {Flags: DupSort},
+	TblCommitmentDataVals:    {Flags: 0}, // no DupSort for values data table
 	TblCommitmentHistoryKeys: {Flags: DupSort},
 	TblCommitmentHistoryVals: {Flags: DupSort},
 	TblCommitmentIdx:         {Flags: DupSort},
@@ -517,6 +525,7 @@ var ChaindataTablesCfg = TableCfg{
 	TblReceiptHistoryVals: {Flags: DupSort},
 	TblReceiptIdx:         {Flags: DupSort},
 
+	TblRCacheDataVals:    {Flags: 0}, // no DupSort for values data table
 	TblRCacheHistoryKeys: {Flags: DupSort},
 	TblRCacheIdx:         {Flags: DupSort},
 
