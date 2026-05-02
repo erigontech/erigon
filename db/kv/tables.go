@@ -152,11 +152,13 @@ const (
 	TblStorageIdx         = "StorageIdx"
 
 	TblCodeVals        = "CodeVals"
+	TblCodeValsData    = "CodeValsData"
 	TblCodeHistoryKeys = "CodeHistoryKeys"
 	TblCodeHistoryVals = "CodeHistoryVals"
 	TblCodeIdx         = "CodeIdx"
 
 	TblCommitmentVals        = "CommitmentVals"
+	TblCommitmentValsData    = "CommitmentValsData" // seq_id -> actual commitment value; TblCommitmentVals stores [~step][seq_id] refs
 	TblCommitmentHistoryKeys = "CommitmentHistoryKeys"
 	TblCommitmentHistoryVals = "CommitmentHistoryVals"
 	TblCommitmentIdx         = "CommitmentIdx"
@@ -167,6 +169,7 @@ const (
 	TblReceiptIdx         = "ReceiptIdx"
 
 	TblRCacheVals        = "ReceiptCacheVals"
+	TblRCacheValsData    = "ReceiptCacheValsData"
 	TblRCacheHistoryKeys = "ReceiptCacheHistoryKeys"
 	TblRCacheHistoryVals = "ReceiptCacheHistoryVals"
 	TblRCacheIdx         = "ReceiptCacheIdx"
@@ -349,11 +352,13 @@ var ChaindataTables = []string{
 	TblStorageIdx,
 
 	TblCodeVals,
+	TblCodeValsData,
 	TblCodeHistoryKeys,
 	TblCodeHistoryVals,
 	TblCodeIdx,
 
 	TblCommitmentVals,
+	TblCommitmentValsData,
 	TblCommitmentHistoryKeys,
 	TblCommitmentHistoryVals,
 	TblCommitmentIdx,
@@ -364,6 +369,7 @@ var ChaindataTables = []string{
 	TblReceiptIdx,
 
 	TblRCacheVals,
+	TblRCacheValsData,
 	TblRCacheHistoryKeys,
 	TblRCacheHistoryVals,
 	TblRCacheIdx,
@@ -504,10 +510,12 @@ var ChaindataTablesCfg = TableCfg{
 	TblStorageHistoryVals: {Flags: DupSort},
 	TblStorageIdx:         {Flags: DupSort},
 
+	TblCodeValsData:    {},
 	TblCodeHistoryKeys: {Flags: DupSort},
 	TblCodeIdx:         {Flags: DupSort},
 
-	TblCommitmentVals:        {Flags: DupSort},
+	TblCommitmentVals:        {},
+	TblCommitmentValsData:    {},
 	TblCommitmentHistoryKeys: {Flags: DupSort},
 	TblCommitmentHistoryVals: {Flags: DupSort},
 	TblCommitmentIdx:         {Flags: DupSort},
