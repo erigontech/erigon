@@ -29,7 +29,7 @@ import (
 // 5.0 - BlockTransaction table now has canonical ids (txs of non-canonical blocks moving to NonCanonicalTransaction table)
 // 6.0 - BlockTransaction table now has system-txs before and after block (records are absent if block has no system-tx, but sequence increasing)
 // 6.1 - Canonical/NonCanonical/BadBlock transitions now stored in same table: kv.EthTx. Add kv.BadBlockNumber table
-var DBSchemaVersion = typesproto.VersionReply{Major: 7, Minor: 0, Patch: 0}
+var DBSchemaVersion = typesproto.VersionReply{Major: 8, Minor: 0, Patch: 0}
 
 const ChangeSets3 = "ChangeSets3"
 
@@ -152,10 +152,12 @@ const (
 	TblStorageIdx         = "StorageIdx"
 
 	TblCodeVals        = "CodeVals"
+	TblCodeKeys        = "CodeKeys"
 	TblCodeHistoryKeys = "CodeHistoryKeys"
 	TblCodeHistoryVals = "CodeHistoryVals"
 	TblCodeIdx         = "CodeIdx"
 
+	TblCommitmentKeys        = "CommitmentKeys"
 	TblCommitmentVals        = "CommitmentVals"
 	TblCommitmentHistoryKeys = "CommitmentHistoryKeys"
 	TblCommitmentHistoryVals = "CommitmentHistoryVals"
@@ -166,6 +168,7 @@ const (
 	TblReceiptHistoryVals = "ReceiptHistoryVals"
 	TblReceiptIdx         = "ReceiptIdx"
 
+	TblRCacheKeys        = "ReceiptCacheKeys"
 	TblRCacheVals        = "ReceiptCacheVals"
 	TblRCacheHistoryKeys = "ReceiptCacheHistoryKeys"
 	TblRCacheHistoryVals = "ReceiptCacheHistoryVals"
@@ -348,11 +351,13 @@ var ChaindataTables = []string{
 	TblStorageHistoryVals,
 	TblStorageIdx,
 
+	TblCodeKeys,
 	TblCodeVals,
 	TblCodeHistoryKeys,
 	TblCodeHistoryVals,
 	TblCodeIdx,
 
+	TblCommitmentKeys,
 	TblCommitmentVals,
 	TblCommitmentHistoryKeys,
 	TblCommitmentHistoryVals,
@@ -363,6 +368,7 @@ var ChaindataTables = []string{
 	TblReceiptHistoryVals,
 	TblReceiptIdx,
 
+	TblRCacheKeys,
 	TblRCacheVals,
 	TblRCacheHistoryKeys,
 	TblRCacheHistoryVals,
@@ -504,10 +510,11 @@ var ChaindataTablesCfg = TableCfg{
 	TblStorageHistoryVals: {Flags: DupSort},
 	TblStorageIdx:         {Flags: DupSort},
 
+	TblCodeKeys:        {Flags: DupSort},
 	TblCodeHistoryKeys: {Flags: DupSort},
 	TblCodeIdx:         {Flags: DupSort},
 
-	TblCommitmentVals:        {Flags: DupSort},
+	TblCommitmentKeys:        {Flags: DupSort},
 	TblCommitmentHistoryKeys: {Flags: DupSort},
 	TblCommitmentHistoryVals: {Flags: DupSort},
 	TblCommitmentIdx:         {Flags: DupSort},
@@ -517,6 +524,7 @@ var ChaindataTablesCfg = TableCfg{
 	TblReceiptHistoryVals: {Flags: DupSort},
 	TblReceiptIdx:         {Flags: DupSort},
 
+	TblRCacheKeys:        {Flags: DupSort},
 	TblRCacheHistoryKeys: {Flags: DupSort},
 	TblRCacheIdx:         {Flags: DupSort},
 
