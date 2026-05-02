@@ -71,12 +71,12 @@ func (t *Tracer) Hooks() *tracing.Hooks {
 		OnFault:     t.OnFault,
 		OnGasChange: t.OnGasChange,
 		// Chain events
-		OnBlockchainInit:  t.OnBlockchainInit,
-		OnBlockStart:      t.OnBlockStart,
-		OnBlockEnd:        t.OnBlockEnd,
-		OnGenesisBlock:    t.OnGenesisBlock,
-		OnSystemCallStart: t.OnSystemCallStart,
-		OnSystemCallEnd:   t.OnSystemCallEnd,
+		OnBlockchainInit:    t.OnBlockchainInit,
+		OnBlockStart:        t.OnBlockStart,
+		OnBlockEnd:          t.OnBlockEnd,
+		OnGenesisBlock:      t.OnGenesisBlock,
+		OnSystemCallStartV2: t.OnSystemCallStartV2,
+		OnSystemCallEnd:     t.OnSystemCallEnd,
 		// State events
 		OnBalanceChange: t.OnBalanceChange,
 		OnNonceChange:   t.OnNonceChange,
@@ -373,13 +373,17 @@ func (t *Tracer) OnGenesisBlock(genesis *types.Block, alloc types.GenesisAlloc) 
 	})
 }
 
-func (t *Tracer) OnSystemCallStart() {
+func (t *Tracer) OnSystemCallStartV2(vm *tracing.VMContext) {
 	if t.recordOptions.DisableOnSystemCallStartRecording {
 		return
 	}
 
-	if t.wrapped != nil && t.wrapped.OnSystemCallStart != nil {
-		t.wrapped.OnSystemCallStart()
+	if t.wrapped != nil {
+		if t.wrapped.OnSystemCallStartV2 != nil {
+			t.wrapped.OnSystemCallStartV2(vm)
+		} else if t.wrapped.OnSystemCallStart != nil {
+			t.wrapped.OnSystemCallStart()
+		}
 	}
 
 	t.traces.Append(Trace{

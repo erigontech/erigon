@@ -52,15 +52,20 @@ func NewJSONLogger(cfg *LogConfig, writer io.Writer) *JSONLogger {
 func (l *JSONLogger) Tracer() *tracers.Tracer {
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
-			OnTxStart: l.OnTxStart,
-			OnExit:    l.OnExit,
-			OnOpcode:  l.OnOpcode,
-			OnFault:   l.OnFault,
+			OnTxStart:           l.OnTxStart,
+			OnSystemCallStartV2: l.OnSystemCallStart,
+			OnExit:              l.OnExit,
+			OnOpcode:            l.OnOpcode,
+			OnFault:             l.OnFault,
 		},
 	}
 }
 
 func (l *JSONLogger) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
+	l.env = env
+}
+
+func (l *JSONLogger) OnSystemCallStart(env *tracing.VMContext) {
 	l.env = env
 }
 

@@ -149,11 +149,12 @@ func NewStructLogger(cfg *LogConfig) *StructLogger {
 
 func (l *StructLogger) Hooks() *tracing.Hooks {
 	return &tracing.Hooks{
-		OnTxStart: l.OnTxStart,
-		OnTxEnd:   l.OnTxEnd,
-		OnExit:    l.OnExit,
-		OnOpcode:  l.OnOpcode,
-		Flush:     l.Flush,
+		OnTxStart:           l.OnTxStart,
+		OnSystemCallStartV2: l.OnSystemCallStart,
+		OnTxEnd:             l.OnTxEnd,
+		OnExit:              l.OnExit,
+		OnOpcode:            l.OnOpcode,
+		Flush:               l.Flush,
 	}
 }
 
@@ -166,6 +167,10 @@ func (l *StructLogger) Tracer() *tracers.Tracer {
 }
 
 func (l *StructLogger) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
+	l.env = env
+}
+
+func (l *StructLogger) OnSystemCallStart(env *tracing.VMContext) {
 	l.env = env
 }
 
@@ -395,15 +400,20 @@ func NewMarkdownLogger(cfg *LogConfig, writer io.Writer) *mdLogger {
 
 func (t *mdLogger) Hooks() *tracing.Hooks {
 	return &tracing.Hooks{
-		OnTxStart: t.OnTxStart,
-		OnEnter:   t.OnEnter,
-		OnExit:    t.OnExit,
-		OnOpcode:  t.OnOpcode,
-		OnFault:   t.OnFault,
+		OnTxStart:           t.OnTxStart,
+		OnSystemCallStartV2: t.OnSystemCallStart,
+		OnEnter:             t.OnEnter,
+		OnExit:              t.OnExit,
+		OnOpcode:            t.OnOpcode,
+		OnFault:             t.OnFault,
 	}
 }
 
 func (t *mdLogger) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
+	t.env = env
+}
+
+func (t *mdLogger) OnSystemCallStart(env *tracing.VMContext) {
 	t.env = env
 }
 

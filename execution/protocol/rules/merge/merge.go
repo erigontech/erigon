@@ -425,9 +425,18 @@ func (s *Merge) Initialize(config *chain.Config, chain rules.ChainHeaderReader, 
 	}
 
 	if config.IsCancun(header.Time) && header.ParentBeaconBlockRoot != nil {
+		random := header.MixDigest
+		vmContext := &tracing.VMContext{
+			Coinbase:        accounts.InternAddress(header.Coinbase),
+			BlockNumber:     header.Number.Uint64(),
+			Time:            header.Time,
+			Random:          &random,
+			ChainConfig:     config,
+			IntraBlockState: state,
+		}
 		misc.ApplyBeaconRootEip4788(header.ParentBeaconBlockRoot, func(addr accounts.Address, data []byte) ([]byte, error) {
 			return syscall(addr, data, state, header, false /* constCall */)
-		}, tracer)
+		}, tracer, vmContext)
 	}
 	if config.IsPrague(header.Time) {
 		if err := misc.StoreBlockHashesEip2935(header, state); err != nil {
