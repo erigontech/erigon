@@ -150,6 +150,49 @@ Once we have stable times:
   - The `LifecycleDrivenByStorage` flag's flip from default-false to
     default-true gates on these numbers being acceptable.
 
+## Companion scenario: minimum-viable-download for clean start
+
+A different question, related target: **what is the smallest set of
+snapshot files a node can clean-start against and still enter the
+sync cycle?** Time-to-tip measures speed; this measures *minimum-data
+floor*.
+
+**Why it matters now:** future lazy loading needs the system to
+operate against an incomplete file set. Knowing today's
+minimum-viable-set teaches us where the architecture currently
+demands all-or-nothing, and what the lazy path will have to provide
+for free. The testing methodology is the same as the time-to-tip
+runs (fresh datadir, hoodi, observe sync state); the input variable
+is "what files are present at start" rather than "what prune mode".
+
+**Process:**
+
+  1. Run a normal fresh sync (e.g. minimal mode). Stop SIGINT after
+     each phase boundary the production log identifies.
+  2. At each stop, copy the datadir, then restart with the
+     downloader disabled (`--snap.nodownload=true` or equivalent).
+     Observe whether the node enters the sync cycle.
+  3. The earliest stop point where a clean-restart (downloader off)
+     reaches `head validated age=0` is the minimum-viable-set.
+  4. The set's content (which files are present, which aren't)
+     defines the floor.
+
+**Expected boundary:** Phase 0 (latest-state files in
+ToStep-descending order) plus the minimum block-file range needed
+for the recent finalisation window. Anything earlier is Phase 1
+backfill that lazy loading can defer.
+
+**Outputs to record:**
+
+  - File names + total bytes in the minimum-viable-set
+  - The phase/step the production log claims it's in when restarted
+  - Time from clean-start to tip (compared against full-sync time)
+  - Any errors that appear if the set is one file short of viable
+
+This is a distinct target from min-time-to-tip but shares the
+testing harness. Run it after the minimal/archive baseline runs
+complete so we have a fair comparison point.
+
 ## Out of scope for this target
 
   - Cross-chain comparison (hoodi vs sepolia vs mainnet). Hoodi is
