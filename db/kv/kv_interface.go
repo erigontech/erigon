@@ -582,12 +582,24 @@ type TemporalRoDB interface {
 	BeginTemporalRo(ctx context.Context) (TemporalTx, error)
 	Debug() TemporalDebugDB
 }
+
+type TemporalRoDBTry interface {
+	TryBeginTemporalRo(ctx context.Context) (TemporalTx, bool, error)
+	TryView(ctx context.Context, f func(tx Tx) error) (bool, error)
+	TryViewTemporal(ctx context.Context, f func(tx TemporalTx) error) (bool, error)
+}
+
 type TemporalRwDB interface {
 	RwDB
 	TemporalRoDB
 	BeginTemporalRw(ctx context.Context) (TemporalRwTx, error)
 	BeginTemporalRwNosync(ctx context.Context) (TemporalRwTx, error)
 	UpdateTemporal(ctx context.Context, f func(tx TemporalRwTx) error) error
+}
+
+type TemporalRwDBDrainer interface {
+	BeginTemporalRwDrained(ctx context.Context) (TemporalRwTx, error)
+	BeginTemporalRwNosyncDrained(ctx context.Context) (TemporalRwTx, error)
 }
 
 // ---- non-important utilities

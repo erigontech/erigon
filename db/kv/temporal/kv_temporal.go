@@ -36,9 +36,11 @@ import (
 )
 
 var ( // Compile time interface checks
-	_ kv.TemporalRwDB    = (*DB)(nil)
-	_ kv.TemporalRwTx    = (*RwTx)(nil)
-	_ kv.TemporalDebugTx = (*Tx)(nil)
+	_ kv.TemporalRwDB        = (*DB)(nil)
+	_ kv.TemporalRoDBTry     = (*DB)(nil)
+	_ kv.TemporalRwDBDrainer = (*DB)(nil)
+	_ kv.TemporalRwTx        = (*RwTx)(nil)
+	_ kv.TemporalDebugTx     = (*Tx)(nil)
 )
 
 //Variables Naming:
@@ -78,6 +80,8 @@ type DB struct {
 	kv.RwDB
 	stateFiles *state.Aggregator
 	forkaggs   []*state.ForkableAgg
+
+	commitGate sync.RWMutex
 }
 
 func New(db kv.RwDB, agg *state.Aggregator, forkaggs ...*state.ForkableAgg) (*DB, error) {
@@ -100,12 +104,29 @@ func (db *DB) InternalDB() kv.RwDB              { return db.RwDB }
 func (db *DB) Debug() kv.TemporalDebugDB        { return kv.TemporalDebugDB(db) }
 
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	db.commitGate.RLock()
 	kvTx, err := db.RwDB.BeginRo(ctx) //nolint:gocritic
 	if err != nil {
+		db.commitGate.RUnlock()
 		return nil, err
 	}
-	tx := &Tx{Tx: kvTx, tx: tx{db: db, ctx: ctx}}
+	return db.newRoTx(kvTx, ctx, func() { db.commitGate.RUnlock() }), nil
+}
 
+func (db *DB) TryBeginTemporalRo(ctx context.Context) (kv.TemporalTx, bool, error) {
+	if !db.commitGate.TryRLock() {
+		return nil, false, nil
+	}
+	kvTx, err := db.RwDB.BeginRo(ctx) //nolint:gocritic
+	if err != nil {
+		db.commitGate.RUnlock()
+		return nil, false, err
+	}
+	return db.newRoTx(kvTx, ctx, func() { db.commitGate.RUnlock() }), true, nil
+}
+
+func (db *DB) newRoTx(kvTx kv.Tx, ctx context.Context, releaseCommitGate func()) *Tx {
+	tx := &Tx{Tx: kvTx, tx: tx{db: db, ctx: ctx, releaseCommitGate: releaseCommitGate}}
 	tx.aggtx = db.stateFiles.BeginFilesRo()
 
 	if len(db.forkaggs) > 0 {
@@ -114,7 +135,7 @@ func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 			tx.forkaggs[i] = forkagg.BeginTemporalTx()
 		}
 	}
-	return tx, nil
+	return tx
 }
 func (db *DB) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) error {
 	tx, err := db.BeginTemporalRo(ctx)
@@ -123,6 +144,15 @@ func (db *DB) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) 
 	}
 	defer tx.Rollback()
 	return f(tx)
+}
+
+func (db *DB) TryViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) (bool, error) {
+	tx, ok, err := db.TryBeginTemporalRo(ctx)
+	if err != nil || !ok {
+		return ok, err
+	}
+	defer tx.Rollback()
+	return true, f(tx)
 }
 
 // TODO: it's temporary method, allowing inject TemproalTx without changing code. But it's not type-safe.
@@ -136,6 +166,15 @@ func (db *DB) View(ctx context.Context, f func(tx kv.Tx) error) error {
 	}
 	defer tx.Rollback()
 	return f(tx)
+}
+
+func (db *DB) TryView(ctx context.Context, f func(tx kv.Tx) error) (bool, error) {
+	tx, ok, err := db.TryBeginTemporalRo(ctx)
+	if err != nil || !ok {
+		return ok, err
+	}
+	defer tx.Rollback()
+	return true, f(tx)
 }
 
 func (db *DB) newRwTx(kvTx kv.RwTx, ctx context.Context) *RwTx {
@@ -157,6 +196,17 @@ func (db *DB) BeginTemporalRw(ctx context.Context) (kv.TemporalRwTx, error) {
 	}
 	return db.newRwTx(kvTx, ctx), nil
 }
+
+func (db *DB) BeginTemporalRwDrained(ctx context.Context) (kv.TemporalRwTx, error) {
+	db.commitGate.Lock()
+	kvTx, err := db.RwDB.BeginRw(ctx) //nolint:gocritic
+	db.commitGate.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	return db.newRwTx(kvTx, ctx), nil
+}
+
 func (db *DB) BeginRw(ctx context.Context) (kv.RwTx, error) {
 	return db.BeginTemporalRw(ctx)
 }
@@ -191,6 +241,17 @@ func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.TemporalRwTx, error
 	}
 	return db.newRwTx(kvTx, ctx), nil
 }
+
+func (db *DB) BeginTemporalRwNosyncDrained(ctx context.Context) (kv.TemporalRwTx, error) {
+	db.commitGate.Lock()
+	kvTx, err := db.RwDB.BeginRwNosync(ctx) //nolint:gocritic
+	db.commitGate.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	return db.newRwTx(kvTx, ctx), nil
+}
+
 func (db *DB) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
 	return db.BeginTemporalRwNosync(ctx) //nolint:gocritic
 }
@@ -274,6 +335,10 @@ type tx struct {
 	resourcesToClose []kv.Closer
 	ctx              context.Context
 	mu               sync.RWMutex
+
+	closeOnce             sync.Once
+	releaseCommitGateOnce sync.Once
+	releaseCommitGate     func()
 }
 
 type Tx struct {
@@ -306,13 +371,14 @@ func (tx *Tx) Rollback() {
 		return
 	}
 	tx.autoClose()
-	if tx.Tx == nil { // invariant: it's safe to call Commit/Rollback multiple times
-		return
-	}
 	tx.mu.Lock()
 	rb := tx.Tx
 	tx.Tx = nil
 	tx.mu.Unlock()
+	if rb == nil { // invariant: it's safe to call Commit/Rollback multiple times
+		return
+	}
+	defer tx.releaseGate()
 	rb.Rollback()
 }
 
@@ -418,11 +484,13 @@ func (tx *RwTx) Rollback() {
 		return
 	}
 	tx.autoClose()
-	if tx.RwTx == nil { // invariant: it's safe to call Commit/Rollback multiple times
-		return
-	}
+	tx.mu.Lock()
 	rb := tx.RwTx
 	tx.RwTx = nil
+	tx.mu.Unlock()
+	if rb == nil { // invariant: it's safe to call Commit/Rollback multiple times
+		return
+	}
 	rb.Rollback()
 }
 
@@ -456,13 +524,24 @@ func (tx *asyncClone) Rollback() {
 }
 
 func (tx *tx) autoClose() {
-	for _, closer := range tx.resourcesToClose {
-		closer.Close()
-	}
-	tx.aggtx.Close()
-	for _, f := range tx.forkaggs {
-		f.Close()
-	}
+	tx.closeOnce.Do(func() {
+		for _, closer := range tx.resourcesToClose {
+			closer.Close()
+		}
+		tx.aggtx.Close()
+		for _, f := range tx.forkaggs {
+			f.Close()
+		}
+	})
+}
+
+func (tx *tx) releaseGate() {
+	tx.releaseCommitGateOnce.Do(func() {
+		if tx.releaseCommitGate != nil {
+			tx.releaseCommitGate()
+			tx.releaseCommitGate = nil
+		}
+	})
 }
 
 func (tx *RwTx) Commit() error {
@@ -470,11 +549,13 @@ func (tx *RwTx) Commit() error {
 		return nil
 	}
 	tx.autoClose()
-	if tx.RwTx == nil { // invariant: it's safe to call Commit/Rollback multiple times
-		return nil
-	}
+	tx.mu.Lock()
 	t := tx.RwTx
 	tx.RwTx = nil
+	tx.mu.Unlock()
+	if t == nil { // invariant: it's safe to call Commit/Rollback multiple times
+		return nil
+	}
 	return t.Commit()
 }
 

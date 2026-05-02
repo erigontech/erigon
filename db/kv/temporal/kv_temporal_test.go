@@ -1,7 +1,9 @@
 package temporal
 
 import (
+	"context"
 	"encoding/binary"
+	"errors"
 	"testing"
 	"time"
 
@@ -17,6 +19,288 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 )
+
+const temporalCommitGateTimeout = 2 * time.Second
+
+type beginRoFailDB struct {
+	kv.RwDB
+	err error
+}
+
+func (db beginRoFailDB) BeginRo(context.Context) (kv.Tx, error) {
+	return nil, db.err
+}
+
+func newTemporalCommitGateTestDB(t *testing.T, rwDB kv.RwDB) *DB {
+	t.Helper()
+
+	dirs := datadir.New(t.TempDir())
+	agg := state.NewTest(dirs).DisableHistory().MustOpen(t.Context(), rwDB)
+	t.Cleanup(agg.Close)
+
+	temporalDb, err := New(rwDB, agg)
+	require.NoError(t, err)
+	t.Cleanup(temporalDb.Close)
+	return temporalDb
+}
+
+func startTemporalWriter(t *testing.T, ctx context.Context, db *DB, drained bool) (<-chan struct{}, <-chan error, chan struct{}, <-chan struct{}) {
+	t.Helper()
+
+	attempting := make(chan struct{})
+	opened := make(chan error, 1)
+	release := make(chan struct{})
+	done := make(chan struct{})
+
+	go func() {
+		close(attempting)
+
+		var tx kv.TemporalRwTx
+		var err error
+		if drained {
+			tx, err = db.BeginTemporalRwDrained(ctx)
+		} else {
+			tx, err = db.BeginTemporalRw(ctx)
+		}
+		if err != nil {
+			opened <- err
+			close(done)
+			return
+		}
+
+		opened <- nil
+		<-release
+		tx.Rollback()
+		close(done)
+	}()
+
+	return attempting, opened, release, done
+}
+
+func requireTemporalWriterNotOpened(t *testing.T, opened <-chan error) {
+	t.Helper()
+
+	select {
+	case err := <-opened:
+		require.NoError(t, err)
+		t.Fatal("temporal writer opened before the reader released the commit gate")
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func requireTemporalWriterOpened(t *testing.T, opened <-chan error) {
+	t.Helper()
+
+	select {
+	case err := <-opened:
+		require.NoError(t, err)
+	case <-time.After(temporalCommitGateTimeout):
+		t.Fatal("temporal writer did not open")
+	}
+}
+
+func releaseTemporalWriter(t *testing.T, release chan struct{}, done <-chan struct{}) {
+	t.Helper()
+
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(temporalCommitGateTimeout):
+		t.Fatal("temporal writer did not close")
+	}
+}
+
+func waitForTemporalGateUnavailable(t *testing.T, ctx context.Context, db *DB) {
+	t.Helper()
+
+	deadline := time.After(temporalCommitGateTimeout)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		tx, ok, err := db.TryBeginTemporalRo(ctx)
+		require.NoError(t, err)
+		if !ok {
+			require.Nil(t, tx)
+			return
+		}
+		require.NotNil(t, tx)
+		tx.Rollback()
+
+		select {
+		case <-deadline:
+			t.Fatal("temporal commit gate did not become unavailable")
+		case <-ticker.C:
+		}
+	}
+}
+
+func TestTemporalCommitGateDrainedWriterWaitsForExistingTemporalReader(t *testing.T) {
+	ctx := t.Context()
+	temporalDb := newTemporalCommitGateTestDB(t, memdb.NewTestDB(t, dbcfg.ChainDB))
+
+	roTx, err := temporalDb.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	attempting, opened, release, done := startTemporalWriter(t, ctx, temporalDb, true)
+	<-attempting
+	waitForTemporalGateUnavailable(t, ctx, temporalDb)
+	requireTemporalWriterNotOpened(t, opened)
+
+	roTx.Rollback()
+	requireTemporalWriterOpened(t, opened)
+	releaseTemporalWriter(t, release, done)
+}
+
+func TestTemporalCommitGateDrainedWriterReleasesGateAfterOpeningRw(t *testing.T) {
+	ctx := t.Context()
+	temporalDb := newTemporalCommitGateTestDB(t, memdb.NewTestDB(t, dbcfg.ChainDB))
+
+	rwTx, err := temporalDb.BeginTemporalRwDrained(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	roOpened := make(chan error, 1)
+	go func() {
+		roTx, err := temporalDb.BeginTemporalRo(ctx)
+		if err != nil {
+			roOpened <- err
+			return
+		}
+		defer roTx.Rollback()
+		roOpened <- nil
+	}()
+
+	var roErr error
+	select {
+	case roErr = <-roOpened:
+	case <-time.After(temporalCommitGateTimeout):
+		rwTx.Rollback()
+		t.Fatal("temporal reader did not open while drained writer transaction was still open")
+	}
+
+	rwTx.Rollback()
+	require.NoError(t, roErr)
+}
+
+func TestTemporalCommitGateTryBeginTemporalRoUnavailableWhileDrainedWriterWaits(t *testing.T) {
+	ctx := t.Context()
+	temporalDb := newTemporalCommitGateTestDB(t, memdb.NewTestDB(t, dbcfg.ChainDB))
+
+	roTx, err := temporalDb.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	attempting, opened, release, done := startTemporalWriter(t, ctx, temporalDb, true)
+	<-attempting
+	waitForTemporalGateUnavailable(t, ctx, temporalDb)
+
+	tx, ok, err := temporalDb.TryBeginTemporalRo(ctx)
+	require.NoError(t, err)
+	require.False(t, ok)
+	require.Nil(t, tx)
+
+	roTx.Rollback()
+	requireTemporalWriterOpened(t, opened)
+	releaseTemporalWriter(t, release, done)
+}
+
+func TestTemporalCommitGateTryViewsUnavailableWhileDrainedWriterWaits(t *testing.T) {
+	ctx := t.Context()
+	temporalDb := newTemporalCommitGateTestDB(t, memdb.NewTestDB(t, dbcfg.ChainDB))
+
+	roTx, err := temporalDb.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	attempting, opened, release, done := startTemporalWriter(t, ctx, temporalDb, true)
+	<-attempting
+	waitForTemporalGateUnavailable(t, ctx, temporalDb)
+
+	called := false
+	ok, err := temporalDb.TryView(ctx, func(tx kv.Tx) error {
+		called = true
+		return nil
+	})
+	require.NoError(t, err)
+	require.False(t, ok)
+	require.False(t, called)
+
+	called = false
+	ok, err = temporalDb.TryViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		called = true
+		return nil
+	})
+	require.NoError(t, err)
+	require.False(t, ok)
+	require.False(t, called)
+
+	roTx.Rollback()
+	requireTemporalWriterOpened(t, opened)
+	releaseTemporalWriter(t, release, done)
+}
+
+func TestTemporalCommitGateBeginTemporalRwDoesNotDrain(t *testing.T) {
+	ctx := t.Context()
+	temporalDb := newTemporalCommitGateTestDB(t, memdb.NewTestDB(t, dbcfg.ChainDB))
+
+	roTx, err := temporalDb.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	attempting, opened, release, done := startTemporalWriter(t, ctx, temporalDb, false)
+	<-attempting
+	requireTemporalWriterOpened(t, opened)
+	releaseTemporalWriter(t, release, done)
+}
+
+func TestTemporalCommitGateReadRollbackIdempotent(t *testing.T) {
+	ctx := t.Context()
+	temporalDb := newTemporalCommitGateTestDB(t, memdb.NewTestDB(t, dbcfg.ChainDB))
+
+	roTx, err := temporalDb.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	roTx.Rollback()
+	roTx.Rollback()
+
+	attempting, opened, release, done := startTemporalWriter(t, ctx, temporalDb, true)
+	<-attempting
+	requireTemporalWriterOpened(t, opened)
+	releaseTemporalWriter(t, release, done)
+}
+
+func TestTemporalCommitGateBeginRoErrorReleasesGate(t *testing.T) {
+	ctx := t.Context()
+	beginRoErr := errors.New("begin ro failed")
+	underlying := memdb.NewTestDB(t, dbcfg.ChainDB)
+	temporalDb := newTemporalCommitGateTestDB(t, beginRoFailDB{RwDB: underlying, err: beginRoErr})
+
+	beginTx, err := temporalDb.BeginTemporalRo(ctx) //nolint:gocritic
+	defer func() {
+		if beginTx != nil {
+			beginTx.Rollback()
+		}
+	}()
+	require.ErrorIs(t, err, beginRoErr)
+	require.Nil(t, beginTx)
+
+	attempting, opened, release, done := startTemporalWriter(t, ctx, temporalDb, true)
+	<-attempting
+	requireTemporalWriterOpened(t, opened)
+	releaseTemporalWriter(t, release, done)
+
+	tryTx, ok, err := temporalDb.TryBeginTemporalRo(ctx)
+	require.ErrorIs(t, err, beginRoErr)
+	require.False(t, ok)
+	require.Nil(t, tryTx)
+
+	attempting, opened, release, done = startTemporalWriter(t, ctx, temporalDb, true)
+	<-attempting
+	requireTemporalWriterOpened(t, opened)
+	releaseTemporalWriter(t, release, done)
+}
 
 func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 	t.Parallel()
