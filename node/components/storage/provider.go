@@ -300,6 +300,7 @@ func (p *Provider) Initialize(deps Deps) error {
 		p.LifecycleDriver = &lifecycle.Driver{
 			Inv:          deps.Inventory,
 			Logger:       logger,
+			SnapDir:      config.Dirs.Snap,
 			OnIndexing:   lifecycle.BuildOnIndexing(builder, deps.Inventory),
 			OnValidation: lifecycle.BuildOnValidation(nil, nil, deps.Inventory),
 		}

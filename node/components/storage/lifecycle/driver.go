@@ -24,6 +24,9 @@ package lifecycle
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -65,6 +68,17 @@ type Driver struct {
 
 	// SweepInterval overrides DefaultSweepInterval if non-zero.
 	SweepInterval time.Duration
+
+	// SnapDir is the snapshots directory the driver scans on every
+	// sweep to discover files that landed on disk without firing an
+	// inventory event (e.g. stage retire creates a .seg before
+	// BuildMissedIndices runs; with LifecycleDrivenByStorage the
+	// driver itself runs BuildMissedIndices, so it needs a path to
+	// pick up the .seg first).
+	//
+	// Empty SnapDir → scan is skipped. Tests and lightweight setups
+	// can leave it empty and drive the inventory directly.
+	SnapDir string
 
 	// OnIndexing handles the Downloaded → Indexed transition: build
 	// any dependent index files (.idx, .kvi, .ef, .efi). nil → no-op.
@@ -193,6 +207,7 @@ func (d *Driver) Sweep(ctx context.Context, logger log.Logger) {
 	if logger == nil {
 		logger = log.Root()
 	}
+	d.discoverNewFiles(logger)
 	view := d.Inv.View()
 	defer view.Close()
 
@@ -206,6 +221,52 @@ func (d *Driver) Sweep(ctx context.Context, logger log.Logger) {
 	}
 	for _, e := range view.BlockFiles() {
 		d.dispatch(ctx, e, logger)
+	}
+}
+
+// snapshotPrimaryExts is the set of file extensions the disk-scan path
+// treats as "primary" — files whose presence triggers an Indexing
+// transition. Accessor files (.idx, .kvi, .ef, .efi) are picked up via
+// the post-recalc OnFilesChange wire, not the disk scan, because they
+// always follow a primary file's index build.
+var snapshotPrimaryExts = map[string]struct{}{
+	".seg": {},
+	".kv":  {},
+	".v":   {},
+}
+
+// discoverNewFiles scans SnapDir for primary files not yet in
+// Inventory and AddFile-s each at LifecycleDownloaded. Empty SnapDir
+// or read errors short-circuit silently — the next sweep retries.
+//
+// Idempotent: files already in Inventory are skipped. Adds new
+// entries with minimal metadata (Name, Local=true, no Domain/Kind);
+// follow-up wires populate richer metadata via OnFilesChange.
+func (d *Driver) discoverNewFiles(logger log.Logger) {
+	if d.SnapDir == "" {
+		return
+	}
+	entries, err := os.ReadDir(d.SnapDir)
+	if err != nil {
+		logger.Debug("[lifecycle] discoverNewFiles ReadDir", "dir", d.SnapDir, "err", err)
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		ext := strings.ToLower(filepath.Ext(name))
+		if _, ok := snapshotPrimaryExts[ext]; !ok {
+			continue
+		}
+		if _, ok := d.Inv.LifecycleState(name); ok {
+			continue
+		}
+		d.Inv.AddFile(&snapshot.FileEntry{
+			Name:  name,
+			Local: true, // → derives LifecycleDownloaded
+		})
 	}
 }
 
