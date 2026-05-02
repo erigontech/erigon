@@ -61,8 +61,6 @@ func TestDomainLatestIterFileInitCursorMDBXClosesDupCursorOutsideRange(t *testin
 }
 
 func TestDomainLatestIterFileInitCursorMDBXClosesCursorOutsideRangeForLargeValues(t *testing.T) {
-	// Indirect LargeValues: keys table is DupSort. Seek returns a bareKey that
-	// is >= hi.to, so the cursor must be closed without pushing onto the heap.
 	c := &testCursorDupSort{testCursor: testCursor{seekKey: []byte("b")}}
 	tx := &testTx{dupCursor: c}
 	hi := &DomainLatestIterFile{

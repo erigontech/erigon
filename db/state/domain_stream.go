@@ -221,8 +221,6 @@ func (hi *DomainLatestIterFile) init(domainRoTx *DomainRoTx) error {
 
 func (hi *DomainLatestIterFile) initCursorOnDB(domainRoTx *DomainRoTx) error {
 	if domainRoTx.d.LargeValues {
-		// Indirect layout: keys table is DupSort (bareKey -> invStep(8)+seqID(8));
-		// dereference seqID through valsTable.
 		keysCursor, err := hi.roTx.CursorDupSort(domainRoTx.d.KeysTable) //nolint:gocritic
 		if err != nil {
 			return err
@@ -238,7 +236,7 @@ func (hi *DomainLatestIterFile) initCursorOnDB(domainRoTx *DomainRoTx) error {
 			return err
 		}
 		for key != nil && (hi.to == nil || bytes.Compare(key, hi.to) < 0) {
-			if len(dup) != 16 {
+			if len(dup) != dupRecordLen {
 				key, dup, err = keysCursor.NextNoDup()
 				if err != nil {
 					return err
@@ -248,12 +246,9 @@ func (hi *DomainLatestIterFile) initCursorOnDB(domainRoTx *DomainRoTx) error {
 			step := ^binary.BigEndian.Uint64(dup[:8])
 			endTxNum := step * domainRoTx.d.stepSize
 			if endTxNum >= hi.filesEndTxNum {
-				seqID := binary.BigEndian.Uint64(dup[8:])
 				var v []byte
-				if seqID != math.MaxUint64 {
-					var seqKey [8]byte
-					binary.BigEndian.PutUint64(seqKey[:], seqID)
-					v, err = hi.roTx.GetOne(domainRoTx.d.ValuesTable, seqKey[:])
+				if binary.BigEndian.Uint64(dup[8:]) != deletionSeqID {
+					v, err = hi.roTx.GetOne(domainRoTx.d.ValuesTable, dup[8:])
 					if err != nil {
 						return err
 					}
@@ -316,18 +311,15 @@ func (hi *DomainLatestIterFile) advanceLargeValsDBCursor(ci1 *CursorItem) error 
 		if len(k) == 0 || !(hi.to == nil || bytes.Compare(k, hi.to) < 0) {
 			break
 		}
-		if len(dup) != 16 {
+		if len(dup) != dupRecordLen {
 			continue
 		}
 		step := ^binary.BigEndian.Uint64(dup[:8])
 		endTxNum := step * hi.aggStep
 		if endTxNum >= hi.filesEndTxNum {
-			seqID := binary.BigEndian.Uint64(dup[8:])
 			var v []byte
-			if seqID != math.MaxUint64 {
-				var seqKey [8]byte
-				binary.BigEndian.PutUint64(seqKey[:], seqID)
-				v, err = hi.roTx.GetOne(hi.valsTable, seqKey[:])
+			if binary.BigEndian.Uint64(dup[8:]) != deletionSeqID {
+				v, err = hi.roTx.GetOne(hi.valsTable, dup[8:])
 				if err != nil {
 					return err
 				}
