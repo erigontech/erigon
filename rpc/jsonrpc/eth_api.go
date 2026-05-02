@@ -110,6 +110,7 @@ type EthAPI interface {
 	ProtocolVersion(_ context.Context) (hexutil.Uint, error)
 	GasPrice(_ context.Context) (*hexutil.Big, error)
 	Config(ctx context.Context, timeArg *hexutil.Uint64) (*EthConfigResp, error)
+	Capabilities(ctx context.Context) (*CapabilitiesResult, error)
 
 	// Sending related (see ./eth_call.go)
 	Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, overrides *ethapi.StateOverrides, blockOverrides *ethapi.BlockOverrides) (hexutil.Bytes, error)
@@ -139,10 +140,11 @@ type BaseAPI struct {
 	stateCache kvcache.Cache
 	blocksLRU  *lru.Cache[common.Hash, *types.Block]
 
-	filters      *rpchelper.Filters
-	_chainConfig atomic.Pointer[chain.Config]
-	_genesis     atomic.Pointer[types.Block]
-	_pruneMode   atomic.Pointer[prune.Mode]
+	filters                   *rpchelper.Filters
+	_chainConfig              atomic.Pointer[chain.Config]
+	_genesis                  atomic.Pointer[types.Block]
+	_pruneMode                atomic.Pointer[prune.Mode]
+	_commitmentHistoryEnabled atomic.Pointer[bool]
 
 	_blockReader services.FullBlockReader
 	_txNumReader rawdbv3.TxNumsReader
@@ -422,6 +424,23 @@ func (api *BaseAPI) pruneMode(tx kv.Tx) (*prune.Mode, error) {
 	api._pruneMode.Store(&mode)
 
 	return &mode, nil
+}
+
+// commitmentHistoryEnabled returns whether --prune.include-commitment-history was set at node
+// startup. The flag is written once and never changed, so the result is cached after first read.
+// If the DB key is absent (node not yet initialised) the value is not cached and false is returned.
+func (api *BaseAPI) commitmentHistoryEnabled(tx kv.Tx) (bool, error) {
+	if p := api._commitmentHistoryEnabled.Load(); p != nil {
+		return *p, nil
+	}
+	enabled, ok, err := rawdb.ReadDBCommitmentHistoryEnabled(tx)
+	if err != nil {
+		return false, err
+	}
+	if ok {
+		api._commitmentHistoryEnabled.Store(&enabled)
+	}
+	return enabled, nil
 }
 
 type bridgeReader interface {

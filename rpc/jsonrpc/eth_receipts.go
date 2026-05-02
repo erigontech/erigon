@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/ethutils"
@@ -565,7 +564,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	}
 
 	// Check if we have commitment history: this is required to know if state root will be computed for historical state.
-	commitmentHistory, _, err := rawdb.ReadDBCommitmentHistoryEnabled(tx)
+	commitmentHistory, err := api.commitmentHistoryEnabled(tx)
 	if err != nil {
 		return nil, err
 	}

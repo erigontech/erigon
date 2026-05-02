@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/go-cmp/cmp"
@@ -62,6 +63,8 @@ type Generator struct {
 
 	commitmentReplay *rpchelper.CommitmentReplay
 	filters          *rpchelper.Filters
+
+	_commitmentHistoryEnabled atomic.Pointer[bool]
 }
 
 type ReceiptEnv struct {
@@ -115,6 +118,20 @@ func NewGenerator(dirs datadir.Dirs, blockReader services.FullBlockReader, engin
 		commitmentReplay: rpchelper.NewCommitmentReplay(dirs, txNumReader, log.Root()),
 		filters:          f,
 	}
+}
+
+func (g *Generator) commitmentHistoryEnabled(tx kv.Tx) (bool, error) {
+	if p := g._commitmentHistoryEnabled.Load(); p != nil {
+		return *p, nil
+	}
+	enabled, ok, err := rawdb.ReadDBCommitmentHistoryEnabled(tx)
+	if err != nil {
+		return false, err
+	}
+	if ok {
+		g._commitmentHistoryEnabled.Store(&enabled)
+	}
+	return enabled, nil
 }
 
 func (g *Generator) LogStats() {
@@ -484,7 +501,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 
 	// Check if we have commitment history: this is required to know if state root will be computed or left zero for historical state.
 	var commitmentHistory bool
-	commitmentHistory, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
+	commitmentHistory, err = g.commitmentHistoryEnabled(tx)
 	if err != nil {
 		return nil, err
 	}

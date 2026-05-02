@@ -40,6 +40,77 @@ import (
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
+// CapabilityField describes availability of a data category: when Disabled is true the node
+// does not hold that data at all; otherwise OldestBlock is the lowest block number available.
+type CapabilityField struct {
+	Disabled    bool            `json:"disabled"`
+	OldestBlock *hexutil.Uint64 `json:"oldestBlock,omitempty"`
+}
+
+// CapabilitiesResult is the response type of eth_capabilities.
+type CapabilitiesResult struct {
+	State       CapabilityField `json:"state"`
+	Tx          CapabilityField `json:"tx"`
+	Logs        CapabilityField `json:"logs"`
+	Receipts    CapabilityField `json:"receipts"`
+	Blocks      CapabilityField `json:"blocks"`
+	StateProofs CapabilityField `json:"stateproofs"`
+}
+
+// Capabilities implements eth_capabilities.
+// stateproofs is only available when --prune.include-commitment-history was set at node startup;
+// otherwise it is disabled regardless of prune mode.
+func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, error) {
+	tx, err := api.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	pruneMode, err := api.pruneMode(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	keepExecutionProofs, err := api.commitmentHistoryEnabled(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	headBlock, err := rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(tx))
+	if err != nil {
+		return nil, err
+	}
+
+	avail := func(oldest uint64) CapabilityField {
+		o := hexutil.Uint64(oldest)
+		return CapabilityField{OldestBlock: &o}
+	}
+
+	// PruneTo returns 0 when the distance is MaxUint64 (archive/full-blocks), so these two
+	// lines handle all prune modes without branching.
+	stateOldest := pruneMode.History.PruneTo(headBlock)
+	blocksOldest := pruneMode.Blocks.PruneTo(headBlock)
+
+	var stateproofs CapabilityField
+	if keepExecutionProofs {
+		stateproofs = avail(stateOldest)
+	} else {
+		stateproofs = CapabilityField{Disabled: true}
+	}
+
+	return &CapabilitiesResult{
+		State: avail(stateOldest),
+		Tx:    avail(blocksOldest),
+		Logs:  avail(stateOldest),
+		// receipts are read from DB (RCacheDomain) if --persist.receipts is enabled, otherwise
+		// recalculated via re-execution; in both cases the available range matches state history
+		Receipts:    avail(stateOldest),
+		Blocks:      avail(blocksOldest),
+		StateProofs: stateproofs,
+	}, nil
+}
+
 // BlockNumber implements eth_blockNumber. Returns the block number of most recent block.
 func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)

@@ -32,12 +32,158 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 )
+
+func TestCapabilities(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	t.Parallel()
+
+	// Use a small prune distance so tests don't need to generate 100k blocks.
+	const chainSize = 20
+	const testPruneDistance = uint64(10)
+
+	testFullMode := prune.Mode{
+		Initialised: true,
+		History:     prune.Distance(testPruneDistance),
+		Blocks:      prune.DefaultBlocksPruneMode, // MaxUint64 = keeps all block snapshots
+	}
+	testMinimalMode := prune.Mode{
+		Initialised: true,
+		History:     prune.Distance(testPruneDistance),
+		Blocks:      prune.Distance(testPruneDistance),
+	}
+
+	setupAPI := func(t *testing.T, pruneMode prune.Mode, commitmentHistory bool) (*APIImpl, uint64) {
+		t.Helper()
+		key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		addr := crypto.PubkeyToAddress(key.PublicKey)
+		gspec := &types.Genesis{
+			Config: chain.TestChainBerlinConfig,
+			Alloc:  types.GenesisAlloc{addr: {Balance: big.NewInt(math.MaxInt64)}},
+		}
+		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
+
+		// Generate and insert blocks so Execution stage progress is set.
+		signer := types.LatestSigner(gspec.Config)
+		c, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainSize, func(i int, b *blockgen.BlockGen) {
+			b.SetCoinbase(common.Address{1})
+			tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), common.HexToAddress("deadbeef"), uint256.NewInt(1), 21000, uint256.NewInt(uint64(i+1)*common.GWei), nil), *signer, key)
+			if txErr != nil {
+				t.Fatal(txErr)
+			}
+			b.AddTx(tx)
+		})
+		require.NoError(t, err)
+		require.NoError(t, m.InsertChain(c))
+
+		// Write prune mode and commitment history flag.
+		// prune.EnsureNotChanged writes on empty keys; execmoduletester never pre-populates them.
+		ctx := t.Context()
+		tx, err := m.DB.BeginTemporalRw(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+		_, err = prune.EnsureNotChanged(tx, pruneMode)
+		require.NoError(t, err)
+		require.NoError(t, rawdb.WriteDBCommitmentHistoryEnabled(tx, commitmentHistory))
+		require.NoError(t, tx.Commit())
+
+		roTx, err := m.DB.BeginTemporalRo(ctx)
+		require.NoError(t, err)
+		defer roTx.Rollback()
+		head, err := stages.GetStageProgress(roTx, stages.Execution)
+		require.NoError(t, err)
+
+		return newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil), head
+	}
+
+	oldest := func(t *testing.T, f CapabilityField) uint64 {
+		t.Helper()
+		require.NotNil(t, f.OldestBlock)
+		return uint64(*f.OldestBlock)
+	}
+
+	t.Run("archive_no_commitment", func(t *testing.T) {
+		t.Parallel()
+		api, _ := setupAPI(t, prune.ArchiveMode, false)
+		result, err := api.Capabilities(t.Context())
+		require.NoError(t, err)
+		require.Equal(t, uint64(0), oldest(t, result.State))
+		require.Equal(t, uint64(0), oldest(t, result.Tx))
+		require.Equal(t, uint64(0), oldest(t, result.Logs))
+		require.Equal(t, uint64(0), oldest(t, result.Receipts))
+		require.Equal(t, uint64(0), oldest(t, result.Blocks))
+		require.True(t, result.StateProofs.Disabled)
+		require.Nil(t, result.StateProofs.OldestBlock)
+	})
+
+	t.Run("archive_with_commitment", func(t *testing.T) {
+		t.Parallel()
+		api, _ := setupAPI(t, prune.ArchiveMode, true)
+		result, err := api.Capabilities(t.Context())
+		require.NoError(t, err)
+		require.Equal(t, uint64(0), oldest(t, result.State))
+		require.False(t, result.StateProofs.Disabled)
+		require.Equal(t, uint64(0), oldest(t, result.StateProofs))
+	})
+
+	t.Run("full_no_commitment", func(t *testing.T) {
+		t.Parallel()
+		api, head := setupAPI(t, testFullMode, false)
+		result, err := api.Capabilities(t.Context())
+		require.NoError(t, err)
+		pruned := head - testPruneDistance
+		// state/logs/receipts limited to history prune distance
+		require.Equal(t, pruned, oldest(t, result.State))
+		require.Equal(t, pruned, oldest(t, result.Logs))
+		require.Equal(t, pruned, oldest(t, result.Receipts))
+		// full keeps all block snapshots: tx and blocks start from 0
+		require.Equal(t, uint64(0), oldest(t, result.Tx))
+		require.Equal(t, uint64(0), oldest(t, result.Blocks))
+		require.True(t, result.StateProofs.Disabled)
+	})
+
+	t.Run("full_with_commitment", func(t *testing.T) {
+		t.Parallel()
+		api, head := setupAPI(t, testFullMode, true)
+		result, err := api.Capabilities(t.Context())
+		require.NoError(t, err)
+		require.Equal(t, head-testPruneDistance, oldest(t, result.StateProofs))
+		require.False(t, result.StateProofs.Disabled)
+	})
+
+	t.Run("minimal_no_commitment", func(t *testing.T) {
+		t.Parallel()
+		api, head := setupAPI(t, testMinimalMode, false)
+		result, err := api.Capabilities(t.Context())
+		require.NoError(t, err)
+		pruned := head - testPruneDistance
+		// minimal prunes everything including blocks and tx
+		require.Equal(t, pruned, oldest(t, result.State))
+		require.Equal(t, pruned, oldest(t, result.Tx))
+		require.Equal(t, pruned, oldest(t, result.Logs))
+		require.Equal(t, pruned, oldest(t, result.Receipts))
+		require.Equal(t, pruned, oldest(t, result.Blocks))
+		require.True(t, result.StateProofs.Disabled)
+	})
+
+	t.Run("minimal_with_commitment", func(t *testing.T) {
+		t.Parallel()
+		api, head := setupAPI(t, testMinimalMode, true)
+		result, err := api.Capabilities(t.Context())
+		require.NoError(t, err)
+		require.Equal(t, head-testPruneDistance, oldest(t, result.StateProofs))
+		require.False(t, result.StateProofs.Disabled)
+	})
+}
 
 func TestGasPrice(t *testing.T) {
 	if testing.Short() {
