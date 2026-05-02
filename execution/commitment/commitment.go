@@ -1959,12 +1959,19 @@ type KeyUpdate struct {
 	update    *Update
 }
 
-// keyUpdateLessFn orders KeyUpdate entries by plainKey. This matches main
-// and is intentional: entries created by TouchHashedKey have an empty plainKey
-// and need to coexist in the same btree without a non-nil hashedKey requirement.
-// Trie traversal order is enforced downstream by the etl collector keyed on
-// hashedKey, not by this btree.
+// keyUpdateLessFn orders KeyUpdate entries by hashedKey. Process requires
+// updates to arrive in hashedKey-sorted order so fold/unfold operates on
+// adjacent trie paths; iterating by plainKey produces a different trie
+// traversal sequence and yields a divergent root hash. ModeDirect achieves
+// this via its etl collector keyed on hashedKey; ModeUpdate's btree must
+// match that order.
+//
+// plainKey is used only as a tiebreaker (e.g. for TouchHashedKey entries
+// that share their hashedKey with a "real" entry).
 func keyUpdateLessFn(i, j *KeyUpdate) bool {
+	if c := bytes.Compare(i.hashedKey, j.hashedKey); c != 0 {
+		return c < 0
+	}
 	return i.plainKey < j.plainKey
 }
 
