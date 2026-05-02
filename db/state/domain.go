@@ -453,6 +453,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		var seqIDBuf [8]byte
 		var dupBuf [16]byte
 		if err := w.values.Load(tx, w.valsTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			count++
 			bareKey := k[:len(k)-8]
 			invStep := k[len(k)-8:]
 			var seqID uint64
