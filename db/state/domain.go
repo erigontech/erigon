@@ -326,7 +326,13 @@ func (d *Domain) calcVisibleFiles(toTxNum uint64) (*domainVisible, visibleFiles,
 	return dv, hv, hiv
 }
 
-func (d *Domain) Tables() []string { return append(d.History.Tables(), d.KeysTable) }
+func (d *Domain) Tables() []string {
+	tables := append(d.History.Tables(), d.KeysTable)
+	if d.ValsDataTable != "" {
+		tables = append(tables, d.ValsDataTable)
+	}
+	return tables
+}
 
 func (d *Domain) Close() {
 	if d == nil {
@@ -373,11 +379,12 @@ func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWrit
 	discardHistory := discard || dt.d.HistoryDisabled
 
 	w := &DomainBufferedWriter{
-		discard:   discard,
-		aux:       make([]byte, 0, 128),
-		keysTable: dt.d.KeysTable,
-		largeVals: dt.d.LargeValues,
-		h:         dt.ht.newWriter(tmpdir, discardHistory),
+		discard:       discard,
+		aux:           make([]byte, 0, 128),
+		keysTable:     dt.d.KeysTable,
+		largeVals:     dt.d.LargeValues,
+		valsDataTable: dt.d.ValsDataTable,
+		h:             dt.ht.newWriter(tmpdir, discardHistory),
 	}
 	if !discard {
 		w.keys = etl.NewCollectorWithAllocator(dt.d.Name.String()+"domain.flush", tmpdir, etl.SmallSortableBuffers, dt.d.logger).
@@ -391,8 +398,9 @@ type DomainBufferedWriter struct {
 
 	discard bool
 
-	keysTable string
-	largeVals bool
+	keysTable     string
+	largeVals     bool
+	valsDataTable string // when non-empty: actual values stored in ValsDataTable; keysTable stores [~step][seq_id] refs
 
 	stepBytes [8]byte // current inverted step representation
 	aux       []byte  // auxilary buffer for key1 + key2
@@ -421,7 +429,40 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	}
 
 	if w.largeVals {
-		if err := w.keys.Load(tx, w.keysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
+		valuesCursor, err := tx.RwCursor(w.keysTable)
+		if err != nil {
+			return err
+		}
+		defer valuesCursor.Close()
+		valsDataCursor, err := tx.RwCursor(w.valsDataTable)
+		if err != nil {
+			return err
+		}
+		defer valsDataCursor.Close()
+
+		var seqIDBuf [8]byte
+		if err := w.keys.Load(tx, w.keysTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			// k = domain_key+~step(8B), v = actual_value
+			existingKey, existingSeqID, err := valuesCursor.Seek(k)
+			if err != nil {
+				return err
+			}
+			if bytes.Equal(existingKey, k) {
+				// Same (key,step) already exists: reuse seq_id, just update the value.
+				return valsDataCursor.Put(existingSeqID, v)
+			}
+
+			// New (key,step): allocate a fresh seq_id and write both tables.
+			seqIDNum, err := tx.IncrementSequence(w.valsDataTable, 1)
+			if err != nil {
+				return err
+			}
+			binary.BigEndian.PutUint64(seqIDBuf[:], seqIDNum)
+			if err := valsDataCursor.Put(seqIDBuf[:], v); err != nil {
+				return err
+			}
+			return valuesCursor.Put(k, seqIDBuf[:])
+		}, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 			return err
 		}
 		w.Close()
@@ -433,6 +474,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		return err
 	}
 	defer valuesCursor.Close()
+
 	if err := w.keys.Load(tx, w.keysTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		foundVal, err := valuesCursor.SeekBothRange(k, v[:8])
 		if err != nil {
@@ -768,8 +810,18 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 			if _, err = comp.Write(bareKey); err != nil {
 				return coll, fmt.Errorf("add %s values key [%x]: %w", d.FilenameBase, bareKey, err)
 			}
-			if _, err = comp.Write(v); err != nil {
-				return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, bareKey, v, err)
+			if d.ValsDataTable != "" {
+				actualVal, err := roTx.GetOne(d.ValsDataTable, v[:8])
+				if err != nil {
+					return coll, fmt.Errorf("collate %s ValsDataTable get [%x]: %w", d.FilenameBase, v[:8], err)
+				}
+				if _, err = comp.Write(actualVal); err != nil {
+					return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, bareKey, actualVal, err)
+				}
+			} else {
+				if _, err = comp.Write(v); err != nil {
+					return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, bareKey, v, err)
+				}
 			}
 		}
 	} else {
@@ -1229,11 +1281,15 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	logEvery := time.NewTicker(time.Second * 30)
 	defer logEvery.Stop()
 
-	valsCursor, err := rwTx.RwCursorDupSort(d.KeysTable)
-	if err != nil {
-		return err
+	var valsCursor kv.RwCursorDupSort
+	if !d.LargeValues {
+		var err error
+		valsCursor, err = rwTx.RwCursorDupSort(d.KeysTable)
+		if err != nil {
+			return err
+		}
+		defer valsCursor.Close()
 	}
-	defer valsCursor.Close()
 	// Revert keys using diff entries.
 	// Always: delete current entry at the write step, restore prevValue at unwind target step.
 	//
@@ -1259,16 +1315,32 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	for i := range domainDiffs {
 		keyStr, value := domainDiffs[i].Key, domainDiffs[i].Value
 		key := common.ToBytesZeroCopy(keyStr)
-		if dt.d.LargeValues {
-			// Delete the entry at the write step
+		if d.LargeValues {
+			// key = domain_key+~step(8B); delete at the write step.
 			if err := rwTx.Delete(d.KeysTable, key); err != nil {
 				return err
 			}
 			// nil = different step, skip; []byte{} = absent previously, write empty tombstone
 			if value != nil {
 				fullKey := key[:len(key)-8]
-				if err := rwTx.Put(d.KeysTable, append(fullKey, unwindStepBytes...), value); err != nil {
-					return err
+				if d.ValsDataTable != "" {
+					// Allocate a new seq_id and write actual value to ValsDataTable.
+					seqIDNum, err := rwTx.IncrementSequence(d.ValsDataTable, 1)
+					if err != nil {
+						return err
+					}
+					var seqIDBuf [8]byte
+					binary.BigEndian.PutUint64(seqIDBuf[:], seqIDNum)
+					if err := rwTx.Put(d.ValsDataTable, seqIDBuf[:], value); err != nil {
+						return err
+					}
+					if err := rwTx.Put(d.KeysTable, append(fullKey, unwindStepBytes...), seqIDBuf[:]); err != nil {
+						return err
+					}
+				} else {
+					if err := rwTx.Put(d.KeysTable, append(fullKey, unwindStepBytes...), value); err != nil {
+						return err
+					}
 				}
 			}
 			continue
@@ -1590,6 +1662,12 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 			return nil, 0, false, nil // This key is not in DB
 		}
 		foundInvStep = fullkey[len(fullkey)-8:]
+		if dt.d.ValsDataTable != "" {
+			v, err = roTx.GetOne(dt.d.ValsDataTable, v[:8])
+			if err != nil {
+				return nil, 0, false, fmt.Errorf("getLatestFromDb ValsDataTable: %w", err)
+			}
+		}
 	} else {
 		_, stepWithVal, err := func() (_ []byte, _ []byte, err error) {
 			defer func() {
@@ -1607,8 +1685,8 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 			return nil, 0, false, nil
 		}
 
-		v = stepWithVal[8:]
 		foundInvStep = stepWithVal[:8]
+		v = stepWithVal[8:]
 	}
 
 	foundStep := kv.Step(^binary.BigEndian.Uint64(foundInvStep))
@@ -1684,12 +1762,13 @@ func (dt *DomainRoTx) RangeAsOf(ctx context.Context, tx kv.Tx, fromKey, toKey []
 func (dt *DomainRoTx) DebugRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit int) (*DomainLatestIterFile, error) {
 	s := &DomainLatestIterFile{
 		from: fromKey, to: toKey, limit: limit,
-		orderAscend: order.Asc,
-		aggStep:     dt.stepSize,
-		roTx:        roTx,
-		valsTable:   dt.d.KeysTable,
-		logger:      dt.d.logger,
-		h:           &CursorHeap{},
+		orderAscend:   order.Asc,
+		aggStep:       dt.stepSize,
+		roTx:          roTx,
+		valsTable:     dt.d.KeysTable,
+		valsDataTable: dt.d.ValsDataTable,
+		logger:        dt.d.logger,
+		h:             &CursorHeap{},
 	}
 	if err := s.init(dt); err != nil {
 		s.Close() //it's responsibility of constructor (our) to close resource on error
@@ -1912,6 +1991,29 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 
 	prg.KeyProgress = prune.Done // domains don't have key tables
 
+	if dt.d.ValsDataTable != "" {
+		// CommitmentDomain: prune plain keysTable and ValsDataTable together.
+		// keysTable key = domain_key+~step(8B), value = seq_id(8B).
+		// Delete ValsDataTable entry before deleting the keysTable entry.
+		pruneStat, err := dt.pruneWithValsData(ctx, rwTx, valsCursor, txFrom, txTo, limit, logEvery, prg)
+		if err != nil {
+			return stat, err
+		}
+		defer func() {
+			pruneStat.TxFrom, pruneStat.TxTo = txFrom, txTo
+			err = SavePruneValProgress(rwTx, dt.d.KeysTable, pruneStat)
+			if err != nil {
+				dt.d.logger.Error("prune val progress", "name", dt.name, "err", err)
+			}
+		}()
+		mxPruneSizeDomain.AddUint64(pruneStat.PruneCountValues)
+		stat.MinStep = kv.Step(pruneStat.MinTxNum / dt.stepSize)
+		stat.MaxStep = kv.Step(pruneStat.MaxTxNum / dt.stepSize)
+		stat.Values = pruneStat.PruneCountValues
+		stat.Progress = pruneStat.ValueProgress
+		return stat, err
+	}
+
 	pruneStat, err := prune.TableScanningPrune(ctx, "domain "+dt.name.String(), dt.d.FilenameBase, txFrom, txTo, limit, dt.stepSize,
 		logEvery, dt.d.logger, nil, valsCursor, asserts, prg, mode)
 	if err != nil {
@@ -1939,12 +2041,93 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	return stat, err
 }
 
+// pruneWithValsData prunes the plain (non-DupSort) keysTable and companion ValsDataTable together.
+// keysTable key = domain_key+~step(8B), value = seq_id(8B).
+// The seq_id entry in ValsDataTable is deleted before the keysTable entry.
+func (dt *DomainRoTx) pruneWithValsData(
+	ctx context.Context,
+	rwTx kv.RwTx,
+	keysCursor kv.PseudoDupSortRwCursor,
+	txFrom, txTo, limit uint64,
+	logEvery *time.Ticker,
+	prg *prune.Stat,
+) (stat *prune.Stat, err error) {
+	stat = &prune.Stat{MinTxNum: math.MaxUint64}
+
+	valsDataRw, err := rwTx.RwCursor(dt.d.ValsDataTable)
+	if err != nil {
+		return stat, fmt.Errorf("open %s ValsDataTable cursor: %w", dt.name.String(), err)
+	}
+	defer valsDataRw.Close()
+
+	var k, v []byte
+	switch prg.ValueProgress {
+	case prune.InProgress:
+		k, v, err = keysCursor.Seek(prg.LastPrunedValue)
+	case prune.First:
+		k, v, err = keysCursor.First()
+	default:
+		return stat, nil
+	}
+	if err != nil {
+		return stat, fmt.Errorf("seek %s cursor: %w", dt.name.String(), err)
+	}
+
+	var pruned uint64
+	for k != nil && pruned < limit {
+		if ctx.Err() != nil {
+			stat.LastPrunedValue = common.Copy(k)
+			stat.ValueProgress = prune.InProgress
+			return stat, nil
+		}
+
+		if len(k) >= 8 {
+			stepNum := kv.Step(^binary.BigEndian.Uint64(k[len(k)-8:]))
+			txNum := uint64(stepNum) * dt.stepSize
+			if txNum >= txFrom && txNum < txTo {
+				if delErr := valsDataRw.Delete(v[:8]); delErr != nil {
+					return stat, fmt.Errorf("delete %s ValsDataTable seq_id: %w", dt.name.String(), delErr)
+				}
+				if err = keysCursor.DeleteCurrent(); err != nil {
+					return stat, fmt.Errorf("delete %s keysTable entry: %w", dt.name.String(), err)
+				}
+				stat.MinTxNum = min(stat.MinTxNum, txNum)
+				stat.MaxTxNum = max(stat.MaxTxNum, txNum)
+				pruned++
+				stat.PruneCountValues++
+
+				select {
+				case <-logEvery.C:
+					dt.d.logger.Info("[snapshots] prune domain+valsdata", "name", dt.name, "pruned", pruned)
+				default:
+				}
+			}
+		}
+		k, v, err = keysCursor.Next()
+		if err != nil {
+			return stat, fmt.Errorf("next %s cursor: %w", dt.name.String(), err)
+		}
+	}
+
+	if pruned < limit {
+		stat.ValueProgress = prune.Done
+	} else {
+		stat.LastPrunedValue = common.Copy(k)
+		stat.ValueProgress = prune.InProgress
+	}
+	return stat, nil
+}
+
 func (dt *DomainRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 	return dt.ht.iit.stepsRangeInDB(tx)
 }
 
 func (dt *DomainRoTx) Tables() (res []string) {
-	return []string{dt.d.KeysTable, dt.ht.h.ValuesTable, dt.ht.iit.ii.KeysTable, dt.ht.iit.ii.ValuesTable}
+	tables := []string{dt.d.KeysTable, dt.ht.h.ValuesTable, dt.ht.iit.ii.KeysTable, dt.ht.iit.ii.ValuesTable}
+	if dt.d.ValsDataTable != "" {
+		tables = append(tables, dt.d.ValsDataTable)
+	}
+	return tables
 }
 
 func (dt *DomainRoTx) Files() (res VisibleFiles) {

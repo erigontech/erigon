@@ -108,6 +108,7 @@ type DomainLatestIterFile struct {
 	filesEndTxNum uint64 // files are authoritative for steps below this txNum
 	roTx          kv.Tx
 	valsTable     string
+	valsDataTable string // when set, KeysTable values are seq_id(8B) refs; actual values are in valsDataTable
 
 	limit       int
 	largeVals   bool
@@ -121,6 +122,24 @@ type DomainLatestIterFile struct {
 	k, v, kBackup, vBackup []byte
 
 	logger log.Logger
+}
+
+// derefValsData resolves the actual domain value from a plain-cursor value.
+// When valsDataTable is non-empty, v is a seq_id(8B) reference into valsDataTable;
+// otherwise v IS the actual value.
+func derefValsData(roTx kv.Tx, valsDataTable string, v []byte) ([]byte, error) {
+	if valsDataTable == "" {
+		return v, nil
+	}
+	actual, err := roTx.GetOne(valsDataTable, v[:8])
+	if err != nil {
+		return nil, fmt.Errorf("derefValsData: %w", err)
+	}
+	return actual, nil
+}
+
+func (hi *DomainLatestIterFile) derefLargeVal(v []byte) ([]byte, error) {
+	return derefValsData(hi.roTx, hi.valsDataTable, v)
 }
 
 func (hi *DomainLatestIterFile) Close() {
@@ -241,7 +260,11 @@ func (hi *DomainLatestIterFile) initCursorOnDB(domainRoTx *DomainRoTx) error {
 			step := ^binary.BigEndian.Uint64(stepBytes)
 			endTxNum := step * domainRoTx.d.stepSize
 			if endTxNum >= hi.filesEndTxNum {
-				heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(value), cNonDup: valsCursor, endTxNum: endTxNum, reverse: true})
+				val, err := hi.derefLargeVal(value)
+				if err != nil {
+					return err
+				}
+				heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(val), cNonDup: valsCursor, endTxNum: endTxNum, reverse: true})
 				pushed = true
 				break
 			}
@@ -267,11 +290,10 @@ func (hi *DomainLatestIterFile) initCursorOnDB(domainRoTx *DomainRoTx) error {
 		}
 		for key != nil && (hi.to == nil || bytes.Compare(key, hi.to) < 0) {
 			stepBytes := value[:8]
-			val := value[8:]
 			step := ^binary.BigEndian.Uint64(stepBytes)
 			endTxNum := step * domainRoTx.d.stepSize
 			if endTxNum >= hi.filesEndTxNum {
-				heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(key), val: common.Copy(val), cDup: valsCursor, endTxNum: endTxNum, reverse: true})
+				heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(key), val: common.Copy(value[8:]), cDup: valsCursor, endTxNum: endTxNum, reverse: true})
 				pushed = true
 				break
 			}
@@ -317,9 +339,13 @@ func (hi *DomainLatestIterFile) advanceLargeValsDBCursor(ci1 *CursorItem) error 
 		step := ^binary.BigEndian.Uint64(stepBytes)
 		endTxNum := step * hi.aggStep
 		if endTxNum >= hi.filesEndTxNum {
+			val, err := hi.derefLargeVal(v)
+			if err != nil {
+				return err
+			}
 			ci1.key = common.Copy(k[:len(k)-8])
 			ci1.endTxNum = endTxNum
-			ci1.val = common.Copy(v)
+			ci1.val = common.Copy(val)
 			heap.Push(hi.h, ci1)
 			pushed = true
 			break
@@ -344,13 +370,12 @@ func (hi *DomainLatestIterFile) advanceDupSortDBCursor(ci1 *CursorItem) error {
 			break
 		}
 		stepBytes := stepBytesWithValue[:8]
-		v := stepBytesWithValue[8:]
 		step := ^binary.BigEndian.Uint64(stepBytes)
 		endTxNum := step * hi.aggStep
 		if endTxNum >= hi.filesEndTxNum {
 			ci1.key = common.Copy(k)
 			ci1.endTxNum = endTxNum
-			ci1.val = common.Copy(v)
+			ci1.val = common.Copy(stepBytesWithValue[8:])
 			heap.Push(hi.h, ci1)
 			pushed = true
 			break
@@ -471,7 +496,6 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 		}
 	}()
 	var k, v []byte
-	var err error
 	filesEndTxNum := dt.files.EndTxNum()
 
 	if ramIter.Seek(string(prefix)) {
@@ -484,24 +508,50 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 		}
 	}
 
-	valsCursor, err := roTx.CursorDupSort(dt.d.KeysTable)
-	if err != nil {
-		return err
-	}
-	defer valsCursor.Close()
-	if k, v, err = valsCursor.Seek(prefix); err != nil {
-		return err
-	}
-	// Skip DB entries whose step falls within the file range — files are authoritative there.
-	for len(k) > 0 && bytes.HasPrefix(k, prefix) {
-		step := kv.Step(^binary.BigEndian.Uint64(v[:8]))
-		if step.ToTxNum(dt.stepSize) >= filesEndTxNum {
-			val := v[8:]
-			heap.Push(cpPtr, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(val), cDup: valsCursor, endTxNum: step.ToTxNum(dt.stepSize), reverse: true})
-			break
-		}
-		if k, v, err = valsCursor.NextNoDup(); err != nil {
+	if dt.d.LargeValues {
+		// Plain cursor: key = domain_key+~step(8B), value = actual_value or seq_id(8B).
+		plainCursor, err := roTx.Cursor(dt.d.KeysTable)
+		if err != nil {
 			return err
+		}
+		defer plainCursor.Close()
+		if k, v, err = plainCursor.Seek(prefix); err != nil {
+			return err
+		}
+		for len(k) >= 8 && bytes.HasPrefix(k[:len(k)-8], prefix) {
+			step := kv.Step(^binary.BigEndian.Uint64(k[len(k)-8:]))
+			if step.ToTxNum(dt.stepSize) >= filesEndTxNum {
+				bareKey := k[:len(k)-8]
+				val, err := derefValsData(roTx, dt.d.ValsDataTable, v)
+				if err != nil {
+					return fmt.Errorf("debugIteratePrefixLatest: %w", err)
+				}
+				heap.Push(cpPtr, &CursorItem{t: DB_CURSOR, key: common.Copy(bareKey), val: common.Copy(val), cNonDup: plainCursor, endTxNum: step.ToTxNum(dt.stepSize), reverse: true})
+				break
+			}
+			if k, v, err = plainCursor.Next(); err != nil {
+				return err
+			}
+		}
+	} else {
+		valsCursor, err := roTx.CursorDupSort(dt.d.KeysTable)
+		if err != nil {
+			return err
+		}
+		defer valsCursor.Close()
+		if k, v, err = valsCursor.Seek(prefix); err != nil {
+			return err
+		}
+		// Skip DB entries whose step falls within the file range — files are authoritative there.
+		for len(k) > 0 && bytes.HasPrefix(k, prefix) {
+			step := kv.Step(^binary.BigEndian.Uint64(v[:8]))
+			if step.ToTxNum(dt.stepSize) >= filesEndTxNum {
+				heap.Push(cpPtr, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(v[8:]), cDup: valsCursor, endTxNum: step.ToTxNum(dt.stepSize), reverse: true})
+				break
+			}
+			if k, v, err = valsCursor.NextNoDup(); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -569,26 +619,55 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 				}
 			case DB_CURSOR:
 				var pushed bool
-				for {
-					k, v, err := ci1.cDup.NextNoDup()
-					if err != nil {
-						return err
+				if dt.d.LargeValues {
+					for {
+						k, v, err := ci1.cNonDup.Next()
+						if err != nil {
+							return err
+						}
+						if len(k) < 8 || !bytes.HasPrefix(k[:len(k)-8], prefix) {
+							break
+						}
+						step := kv.Step(^binary.BigEndian.Uint64(k[len(k)-8:]))
+						if step.ToTxNum(dt.stepSize) >= filesEndTxNum {
+							bareKey := k[:len(k)-8]
+							val, err := derefValsData(roTx, dt.d.ValsDataTable, v)
+							if err != nil {
+								return fmt.Errorf("debugIteratePrefixLatest: %w", err)
+							}
+							ci1.key = common.Copy(bareKey)
+							ci1.endTxNum = step.ToTxNum(dt.stepSize)
+							ci1.val = common.Copy(val)
+							heap.Push(cpPtr, ci1)
+							pushed = true
+							break
+						}
 					}
-					if len(k) == 0 || !bytes.HasPrefix(k, prefix) {
-						break
+					if !pushed {
+						ci1.cNonDup.Close()
 					}
-					step := kv.Step(^binary.BigEndian.Uint64(v[:8]))
-					if step.ToTxNum(dt.stepSize) >= filesEndTxNum {
-						ci1.key = common.Copy(k)
-						ci1.endTxNum = step.ToTxNum(dt.stepSize)
-						ci1.val = common.Copy(v[8:])
-						heap.Push(cpPtr, ci1)
-						pushed = true
-						break
+				} else {
+					for {
+						k, v, err := ci1.cDup.NextNoDup()
+						if err != nil {
+							return err
+						}
+						if len(k) == 0 || !bytes.HasPrefix(k, prefix) {
+							break
+						}
+						step := kv.Step(^binary.BigEndian.Uint64(v[:8]))
+						if step.ToTxNum(dt.stepSize) >= filesEndTxNum {
+							ci1.key = common.Copy(k)
+							ci1.endTxNum = step.ToTxNum(dt.stepSize)
+							ci1.val = common.Copy(v[8:])
+							heap.Push(cpPtr, ci1)
+							pushed = true
+							break
+						}
 					}
-				}
-				if !pushed {
-					ci1.cDup.Close()
+					if !pushed {
+						ci1.cDup.Close()
+					}
 				}
 			}
 		}
