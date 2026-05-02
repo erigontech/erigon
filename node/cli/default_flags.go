@@ -126,6 +126,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.SnapStateStopFlag,
 	&utils.SnapSkipStateSnapshotDownloadFlag,
 	&utils.SnapP2PManifestFlag,
+	&utils.SnapLifecycleDrivenByStorageFlag,
 	&utils.SnapDownloadToBlockFlag,
 	&utils.DbPageSizeFlag,
 	&utils.DbSizeLimitFlag,
