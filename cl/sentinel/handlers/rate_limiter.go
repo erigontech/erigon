@@ -125,7 +125,7 @@ func newPeerRateLimiter() *peerRateLimiter {
 	// Lighthouse uses ~128 tokens per 10s for block requests, 5/15s for status, etc.
 	blockRate := protocolRateConfig{maxTokens: 128, refillRate: 12.8}   // 128 per 10s
 	blobRate := protocolRateConfig{maxTokens: 72, refillRate: 7.2}      // 72 per 10s
-	dataColRate := protocolRateConfig{maxTokens: 128, refillRate: 12.8} // 128 per 10s
+	dataColRate := protocolRateConfig{maxTokens: 16384, refillRate: 1638.4} // 16384 per 10s (proportional to blockRate × NumberOfColumns)
 	lcRate := protocolRateConfig{maxTokens: 128, refillRate: 12.8}      // 128 per 10s
 	pingRate := protocolRateConfig{maxTokens: 2, refillRate: 0.2}       // 2 per 10s
 	goodbyeRate := protocolRateConfig{maxTokens: 1, refillRate: 0.1}    // 1 per 10s

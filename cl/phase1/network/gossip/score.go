@@ -319,13 +319,12 @@ func (g *GossipManager) committeeCountPerSlot() uint64 {
 }
 
 // maxScore attainable by a peer.
-// TODO: make fork-aware to include GLOAS weights (executionPayloadWeight,
-// executionPayloadBidWeight, payloadAttestationWeight, proposerPreferencesWeight)
-// only when running on a GLOAS-era fork, so pre-GLOAS forks are not affected.
 func maxScore() float64 {
 	totalWeight := beaconBlockWeight + aggregateWeight + syncContributionWeight +
 		attestationTotalWeight + syncCommitteesTotalWeight + attesterSlashingWeight +
-		proposerSlashingWeight + voluntaryExitWeight + blsToExecutionChangeWeight
+		proposerSlashingWeight + voluntaryExitWeight + blsToExecutionChangeWeight +
+		executionPayloadWeight + executionPayloadBidWeight +
+		payloadAttestationWeight + proposerPreferencesWeight
 	return (maxInMeshScore + maxFirstDeliveryScore) * totalWeight
 }
 
