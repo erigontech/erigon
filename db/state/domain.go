@@ -810,18 +810,12 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 			if _, err = comp.Write(bareKey); err != nil {
 				return coll, fmt.Errorf("add %s values key [%x]: %w", d.FilenameBase, bareKey, err)
 			}
-			if d.ValsDataTable != "" {
-				actualVal, err := roTx.GetOne(d.ValsDataTable, v[:8])
-				if err != nil {
-					return coll, fmt.Errorf("collate %s ValsDataTable get [%x]: %w", d.FilenameBase, v[:8], err)
-				}
-				if _, err = comp.Write(actualVal); err != nil {
-					return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, bareKey, actualVal, err)
-				}
-			} else {
-				if _, err = comp.Write(v); err != nil {
-					return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, bareKey, v, err)
-				}
+			actualVal, err := derefValsData(roTx, d.ValsDataTable, v)
+			if err != nil {
+				return coll, fmt.Errorf("collate %s: %w", d.FilenameBase, err)
+			}
+			if _, err = comp.Write(actualVal); err != nil {
+				return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, bareKey, actualVal, err)
 			}
 		}
 	} else {
@@ -1311,36 +1305,38 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	}
 	unwindStepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(unwindStepBytes, ^uint64(unwindStep))
+	var seqIDBuf [8]byte
 
 	for i := range domainDiffs {
 		keyStr, value := domainDiffs[i].Key, domainDiffs[i].Value
 		key := common.ToBytesZeroCopy(keyStr)
 		if d.LargeValues {
-			// key = domain_key+~step(8B); delete at the write step.
+			// key = domain_key+~step(8B); delete the keysTable entry AND its ValsDataTable row.
+			oldSeqID, err := rwTx.GetOne(d.KeysTable, key)
+			if err != nil {
+				return err
+			}
+			if len(oldSeqID) > 0 {
+				if err := rwTx.Delete(d.ValsDataTable, oldSeqID[:8]); err != nil {
+					return err
+				}
+			}
 			if err := rwTx.Delete(d.KeysTable, key); err != nil {
 				return err
 			}
 			// nil = different step, skip; []byte{} = absent previously, write empty tombstone
 			if value != nil {
 				fullKey := key[:len(key)-8]
-				if d.ValsDataTable != "" {
-					// Allocate a new seq_id and write actual value to ValsDataTable.
-					seqIDNum, err := rwTx.IncrementSequence(d.ValsDataTable, 1)
-					if err != nil {
-						return err
-					}
-					var seqIDBuf [8]byte
-					binary.BigEndian.PutUint64(seqIDBuf[:], seqIDNum)
-					if err := rwTx.Put(d.ValsDataTable, seqIDBuf[:], value); err != nil {
-						return err
-					}
-					if err := rwTx.Put(d.KeysTable, append(fullKey, unwindStepBytes...), seqIDBuf[:]); err != nil {
-						return err
-					}
-				} else {
-					if err := rwTx.Put(d.KeysTable, append(fullKey, unwindStepBytes...), value); err != nil {
-						return err
-					}
+				seqIDNum, err := rwTx.IncrementSequence(d.ValsDataTable, 1)
+				if err != nil {
+					return err
+				}
+				binary.BigEndian.PutUint64(seqIDBuf[:], seqIDNum)
+				if err := rwTx.Put(d.ValsDataTable, seqIDBuf[:], value); err != nil {
+					return err
+				}
+				if err := rwTx.Put(d.KeysTable, append(fullKey, unwindStepBytes...), seqIDBuf[:]); err != nil {
+					return err
 				}
 			}
 			continue
@@ -1655,18 +1651,36 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 		if err != nil {
 			return nil, 0, false, fmt.Errorf("valsCursor.Seek: %w", err)
 		}
-		if len(fullkey) == 0 {
-			return nil, 0, false, nil // This key is not in DB
+		// For variable-length domain keys (e.g. commitment trie prefixes), Seek(key) may
+		// land on a longer stored key that has 'key' as a byte prefix, because in MDBX
+		// shorter keys sort before longer ones with the same prefix. Scan forward until we
+		// find the stored entry whose domain-key part is exactly 'key', or determine it
+		// is absent by overshooting past key+0xff…ff (the max stored key for this domain key).
+		maxKey := make([]byte, len(key)+8)
+		copy(maxKey, key)
+		for i := len(key); i < len(maxKey); i++ {
+			maxKey[i] = 0xff
 		}
-		if !bytes.Equal(fullkey[:len(fullkey)-8], key) {
-			return nil, 0, false, nil // This key is not in DB
+		for len(fullkey) > 0 {
+			if len(fullkey) >= 8 && bytes.Equal(fullkey[:len(fullkey)-8], key) {
+				break
+			}
+			if bytes.Compare(fullkey, maxKey) > 0 {
+				fullkey = nil
+				break
+			}
+			fullkey, v, err = valsC.Next()
+			if err != nil {
+				return nil, 0, false, fmt.Errorf("valsCursor.Next: %w", err)
+			}
+		}
+		if len(fullkey) == 0 {
+			return nil, 0, false, nil
 		}
 		foundInvStep = fullkey[len(fullkey)-8:]
-		if dt.d.ValsDataTable != "" {
-			v, err = roTx.GetOne(dt.d.ValsDataTable, v[:8])
-			if err != nil {
-				return nil, 0, false, fmt.Errorf("getLatestFromDb ValsDataTable: %w", err)
-			}
+		v, err = derefValsData(roTx, dt.d.ValsDataTable, v)
+		if err != nil {
+			return nil, 0, false, fmt.Errorf("getLatestFromDb: %w", err)
 		}
 	} else {
 		_, stepWithVal, err := func() (_ []byte, _ []byte, err error) {

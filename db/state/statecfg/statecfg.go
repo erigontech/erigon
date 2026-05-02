@@ -16,9 +16,8 @@ type DomainCfg struct {
 	KeysTable   string    // bucket to store domain values; key -> inverted_step + values (DupSort, or plain when ValsDataTable is set)
 	LargeValues bool
 
-	// ValsDataTable - when set, KeysTable is plain (non-DupSort): domain_key+~step -> seq_id(8B).
-	// Actual values live in ValsDataTable keyed by auto-increment seq_id.
-	// Used by CommitmentDomain to eliminate DupSort overhead on large branch values.
+	// ValsDataTable - eliminates DupSort overhead for large values: keysTable stores seq_id refs,
+	// actual values live here keyed by auto-increment seq_id.
 	ValsDataTable string
 
 	// replaceKeysInValues allows to replace commitment branch values with shorter keys.
