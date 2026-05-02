@@ -146,9 +146,36 @@ fresh sync → reach intended phase → SIGKILL → restart same datadir
 → observe `[storage-lifecycle]` log lines + final sync state →
 declare pass/fail.
 
-If any of these don't pass, the storage-driven path doesn't
-justify its existence vs the stage path; we'd be carrying
-complexity without recovery payoff.
+**Connection to existing validation infrastructure.** The built-in
+per-file validators we already shipped (`SizeMatchesTorrent`,
+`ContentNotEmpty`, `NameNotEmpty`, `RangeOrdering`,
+`KindConsistencyFromName` — see
+`node/components/storage/validation/builtins.go`) are precisely the
+right shape for partial-file detection. They don't run as a startup
+phase today, but they could:
+
+  - **Wire A** (Provider startup population) runs a per-file
+    Validator chain over each on-disk entry before AddFile-ing it.
+    A partial or corrupt file (size mismatch with torrent metadata,
+    empty content where there should be bytes) gets rejected →
+    AddFile skipped or entered at a quarantined state → next sweep
+    triggers a re-download.
+  - **Wire E** (driver disk scan) similarly: validate before
+    classifying a freshly-discovered file as Downloaded. A
+    SIGKILL-induced partial fails `SizeMatchesTorrent` and stays
+    out of the Ready pipeline.
+
+This reuses existing infrastructure (the extension-point validation
+framework) for a use case it was designed for but isn't yet applied
+to. No new validators needed — just running the existing chain at
+the right moments. The abnormal-termination tests will tell us
+whether this wiring is sufficient or whether additional validators
+are needed for cases the current built-ins don't cover (e.g.
+half-written indexes that pass size check but fail recsplit-parse).
+
+If the abnormal-termination tests don't pass, the storage-driven
+path doesn't justify its existence vs the stage path; we'd be
+carrying complexity without recovery payoff.
 
 ### 6. Performance characteristics measured
 
