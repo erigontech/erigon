@@ -441,14 +441,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		defer valsDataCursor.Close()
 
 		var seqIDBuf [8]byte
-		isCommitment := w.keysTable == "CommitmentVals"
-		if isCommitment {
-			fmt.Printf("[DEBUG Flush] domain=%s keysTable=%s valsDataTable=%s\n", w.keysTable, w.keysTable, w.valsDataTable)
-		}
 		if err := w.keys.Load(tx, w.keysTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			if isCommitment {
-				fmt.Printf("[DEBUG Flush callback] k=%x v_len=%d\n", k, len(v))
-			}
 			// k = domain_key+~step(8B), v = actual_value
 			existingKey, existingSeqID, err := valuesCursor.Seek(k)
 			if err != nil {
@@ -465,9 +458,6 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 				return err
 			}
 			binary.BigEndian.PutUint64(seqIDBuf[:], seqIDNum)
-			if isCommitment {
-				fmt.Printf("[DEBUG Flush write] k=%x seqID=%d v_len=%d\n", k, seqIDNum, len(v))
-			}
 			if err := valsDataCursor.Put(seqIDBuf[:], v); err != nil {
 				return err
 			}
@@ -1661,21 +1651,34 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 		if err != nil {
 			return nil, 0, false, fmt.Errorf("valsCursor.Seek: %w", err)
 		}
-		if dt.d.Name == kv.CommitmentDomain {
-			fmt.Printf("[DEBUG getLatestFromDb] domain=%s key=%x fullkey=%x v=%x\n", dt.d.Name, key, fullkey, v)
+		// For variable-length domain keys (e.g. commitment trie prefixes), Seek(key) may
+		// land on a longer stored key that has 'key' as a byte prefix, because in MDBX
+		// shorter keys sort before longer ones with the same prefix. Scan forward until we
+		// find the stored entry whose domain-key part is exactly 'key', or determine it
+		// is absent by overshooting past key+0xff…ff (the max stored key for this domain key).
+		maxKey := make([]byte, len(key)+8)
+		copy(maxKey, key)
+		for i := len(key); i < len(maxKey); i++ {
+			maxKey[i] = 0xff
+		}
+		for len(fullkey) > 0 {
+			if len(fullkey) >= 8 && bytes.Equal(fullkey[:len(fullkey)-8], key) {
+				break
+			}
+			if bytes.Compare(fullkey, maxKey) > 0 {
+				fullkey = nil
+				break
+			}
+			fullkey, v, err = valsC.Next()
+			if err != nil {
+				return nil, 0, false, fmt.Errorf("valsCursor.Next: %w", err)
+			}
 		}
 		if len(fullkey) == 0 {
-			return nil, 0, false, nil // This key is not in DB
-		}
-		if !bytes.Equal(fullkey[:len(fullkey)-8], key) {
-			return nil, 0, false, nil // This key is not in DB
+			return nil, 0, false, nil
 		}
 		foundInvStep = fullkey[len(fullkey)-8:]
-		seqID := v
 		v, err = derefValsData(roTx, dt.d.ValsDataTable, v)
-		if dt.d.Name == kv.CommitmentDomain {
-			fmt.Printf("[DEBUG getLatestFromDb] domain=%s key=%x seqID=%x valsData=%x err=%v\n", dt.d.Name, key, seqID, v, err)
-		}
 		if err != nil {
 			return nil, 0, false, fmt.Errorf("getLatestFromDb: %w", err)
 		}

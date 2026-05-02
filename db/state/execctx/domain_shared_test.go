@@ -433,12 +433,13 @@ func TestSharedDomain_RepeatedUnwindAcrossStepBoundary(t *testing.T) {
 	defer c.Close()
 	offending := 0
 	var exampleStep uint64
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+	for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
 		require.NoError(err)
-		if len(v) < 8 {
+		// CommitmentVals is LargeValues: key = domainKey+~step(8B), value = seq_id
+		if len(k) < 8 {
 			continue
 		}
-		step := ^binary.BigEndian.Uint64(v[:8])
+		step := ^binary.BigEndian.Uint64(k[len(k)-8:])
 		if step > maxStep {
 			if offending == 0 {
 				exampleStep = step
@@ -581,7 +582,9 @@ func TestSharedDomain_MergeUnwindAcrossStepBoundary(t *testing.T) {
 	// (while corrupting the restored value), so this assertion is mostly
 	// belt-and-braces — still worth guarding against a future regression
 	// that drops entries outright instead of just mis-writing them.
-	checkTableForOrphans := func(table string) {
+	// largeVals=true: CommitmentVals stores key=domainKey+~step, value=seq_id (step is in the key).
+	// largeVals=false: AccountVals stores key=domainKey, value=~step+actual (step is in the value).
+	checkTableForOrphans := func(table string, largeVals bool) {
 		c, err := rwTx.Cursor(table)
 		require.NoError(err)
 		defer c.Close()
@@ -589,10 +592,18 @@ func TestSharedDomain_MergeUnwindAcrossStepBoundary(t *testing.T) {
 		var exampleStep uint64
 		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			require.NoError(err)
-			if len(v) < 8 {
-				continue
+			var step uint64
+			if largeVals {
+				if len(k) < 8 {
+					continue
+				}
+				step = ^binary.BigEndian.Uint64(k[len(k)-8:])
+			} else {
+				if len(v) < 8 {
+					continue
+				}
+				step = ^binary.BigEndian.Uint64(v[:8])
 			}
-			step := ^binary.BigEndian.Uint64(v[:8])
 			if step > maxStep {
 				if offending == 0 {
 					exampleStep = step
@@ -604,8 +615,8 @@ func TestSharedDomain_MergeUnwindAcrossStepBoundary(t *testing.T) {
 			"table %s has %d orphan values entries at step > %d after Merge+Flush (e.g. step %d)",
 			table, offending, maxStep, exampleStep)
 	}
-	checkTableForOrphans(kv.TblAccountVals)
-	checkTableForOrphans(kv.TblCommitmentVals)
+	checkTableForOrphans(kv.TblAccountVals, false)
+	checkTableForOrphans(kv.TblCommitmentVals, true)
 }
 
 // TestSharedDomain_UnwindAcrossStepBoundary reproduces the mainnet corruption
@@ -715,12 +726,13 @@ func TestSharedDomain_UnwindAcrossStepBoundary(t *testing.T) {
 	require.NoError(err)
 	defer c.Close()
 	offending := 0
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+	for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
 		require.NoError(err)
-		if len(v) < 8 {
+		// CommitmentVals is LargeValues: key = domainKey+~step(8B), value = seq_id
+		if len(k) < 8 {
 			continue
 		}
-		step := ^binary.BigEndian.Uint64(v[:8])
+		step := ^binary.BigEndian.Uint64(k[len(k)-8:])
 		if step > maxStep {
 			offending++
 		}
