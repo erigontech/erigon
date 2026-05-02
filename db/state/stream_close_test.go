@@ -61,8 +61,10 @@ func TestDomainLatestIterFileInitCursorMDBXClosesDupCursorOutsideRange(t *testin
 }
 
 func TestDomainLatestIterFileInitCursorMDBXClosesCursorOutsideRangeForLargeValues(t *testing.T) {
-	c := &testCursor{seekKey: []byte("b\x00\x00\x00\x00\x00\x00\x00\x00")}
-	tx := &testTx{cursor: c}
+	// Indirect LargeValues: keys table is DupSort. Seek returns a bareKey that
+	// is >= hi.to, so the cursor must be closed without pushing onto the heap.
+	c := &testCursorDupSort{testCursor: testCursor{seekKey: []byte("b")}}
+	tx := &testTx{dupCursor: c}
 	hi := &DomainLatestIterFile{
 		roTx: tx,
 		to:   []byte("b"),
@@ -70,7 +72,7 @@ func TestDomainLatestIterFileInitCursorMDBXClosesCursorOutsideRangeForLargeValue
 	}
 	domainRoTx := &DomainRoTx{
 		stepSize: 1,
-		d:        &Domain{DomainCfg: statecfg.DomainCfg{LargeValues: true, ValuesTable: "vals"}},
+		d:        &Domain{DomainCfg: statecfg.DomainCfg{LargeValues: true, KeysTable: "keys", ValuesTable: "vals"}},
 	}
 
 	err := hi.initCursorOnDB(domainRoTx)
