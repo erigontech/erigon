@@ -51,12 +51,13 @@ func newParallelBlockPostExecutionValidator() BlockPostExecutionValidator {
 func (v *parallelBlockPostExecutionValidator) Process(blockGasUsed, blobGasUsed uint64, checkReceipts bool, receipts types.Receipts,
 	header *types.Header, txns types.Transactions,
 	chainConfig *chain.Config, logger log.Logger) error {
-	v.wg.Add(1)
 	v.mu.Lock()
 	if v.err != nil {
+		err := v.err
 		v.mu.Unlock()
-		return v.err
+		return err
 	}
+	v.wg.Add(1)
 	v.mu.Unlock()
 	go func() {
 		defer v.wg.Done()
