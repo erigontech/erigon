@@ -63,7 +63,7 @@ Initial measurement target on hoodi:
 | Smoke 2 | default (full) | on | ~47 min | 97/29 | ~30 GB | unobserved (pre-observability) |
 | Item 1 | default (full) | on + tight gate | ~44 min | 97/64 | ~30 GB | 3901 BMI / 188 idx / 188 adv |
 | **Minimal** | minimal | on + tight gate | **18 min 30 s** | 127/n.a. | TBD | 1705 BMI / 209 idx / 209 adv |
-| **Archive** | archive | on + tight gate | TBD | TBD | TBD | TBD |
+| **Archive** | archive | on + tight gate | **24 min 27 s** | 127/n.a. | TBD | 3822 BMI / 216 idx / 216 adv |
 
 BMI = BuildMissedIndices invocations; idx = advanced-to-Indexed
 transitions; adv = advanced-to-Advertisable transitions. With the
@@ -80,6 +80,34 @@ lines in the minimal run), every BMI invocation is storage-driven.
     of a global builder).
   - Tight gate working as intended; storage-driven path is the
     only builder.
+
+**Archive mode observations** (run 2026-05-02 21:48:09 → 22:12:36):
+
+  - Time-to-tip 24 min 27 s. **~32% slower than minimal (+5 min 57 s
+    over baseline).** Architectural target = constant time-to-tip
+    across modes; this gap IS the optimization target.
+  - Lifecycle counts: 3822 BMI, 216 idx, 216 adv. Transitions ~7 more
+    than minimal (consistent with archive's larger expected file
+    set). BMI more than 2× (3822 vs 1705) confirms the
+    per-Downloaded-file invocation issue scales with retained data.
+  - The ~6-min gap maps to download time for archive-mode-only files
+    (`.v` history, `.ef` / `.efi` accessors) that minimal mode skips.
+    Per the architectural target, those should download in the
+    BACKGROUND after tip is declared, not before.
+
+**Direct minimal vs archive comparison:**
+
+| Metric | Minimal | Archive | Delta |
+|---|---|---|---|
+| Time-to-tip | 18 min 30 s | 24 min 27 s | +5 min 57 s (+32%) |
+| BuildMissedIndices | 1705 | 3822 | +2117 (+124%) |
+| Advanced to Indexed | 209 | 216 | +7 |
+| Advanced to Advertisable | 209 | 216 | +7 |
+
+The transition delta (+7) is small — the ADDITIONAL files archive
+keeps don't dominate the lifecycle work. The time delta (+6 min)
+is mostly download time. Optimization target: defer those
+historical-file downloads until after tip.
 
 Smoke 1 vs Smoke 2 difference (3h vs 47m) is mostly network /
 peer-warmup variance, not architectural — both produced snapshots,
