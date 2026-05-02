@@ -375,7 +375,7 @@ func (f *ForkChoiceStore) applyEnvelopeLocked(ctx context.Context, signedEnvelop
 		// Return an error so callers can distinguish "queued" from "applied".
 		f.pendingEnvelopes.Add(beaconBlockRoot, signedEnvelope)
 		log.Debug("OnExecutionPayload: block not found, queuing envelope for later", "beaconBlockRoot", common.Hash(beaconBlockRoot))
-		return false, fmt.Errorf("OnExecutionPayload: block state not found for beacon_block_root %v", common.Hash(beaconBlockRoot))
+		return false, fmt.Errorf("%w: block state not found for beacon_block_root %v", ErrIgnore, common.Hash(beaconBlockRoot))
 	}
 
 	// Get the block to verify it exists
@@ -383,7 +383,7 @@ func (f *ForkChoiceStore) applyEnvelopeLocked(ctx context.Context, signedEnvelop
 	if !ok || block == nil {
 		f.pendingEnvelopes.Add(beaconBlockRoot, signedEnvelope)
 		log.Debug("OnExecutionPayload: block not found in fork graph, queuing envelope", "beaconBlockRoot", common.Hash(beaconBlockRoot))
-		return false, fmt.Errorf("OnExecutionPayload: block not found in fork graph for beacon_block_root %v", common.Hash(beaconBlockRoot))
+		return false, fmt.Errorf("%w: block not found in fork graph for beacon_block_root %v", ErrIgnore, common.Hash(beaconBlockRoot))
 	}
 
 	// Validate envelope against block (bid matching + signature verification)
