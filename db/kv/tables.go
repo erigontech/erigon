@@ -157,8 +157,8 @@ const (
 	TblCodeHistoryVals = "CodeHistoryVals"
 	TblCodeIdx         = "CodeIdx"
 
-	TblCommitmentVals        = "CommitmentVals"
-	TblCommitmentValsData    = "CommitmentValsData" // seq_id -> actual commitment value; TblCommitmentVals stores [~step][seq_id] refs
+	TblCommitmentKeys        = "CommitmentKeys" // DupSort: bareKey → ~step(8)+seq_id(8); required because commitment trie paths are variable-length
+	TblCommitmentVals        = "CommitmentVals" // plain: seq_id(8) → commitment value (referenced by TblCommitmentKeys)
 	TblCommitmentHistoryKeys = "CommitmentHistoryKeys"
 	TblCommitmentHistoryVals = "CommitmentHistoryVals"
 	TblCommitmentIdx         = "CommitmentIdx"
@@ -358,7 +358,6 @@ var ChaindataTables = []string{
 	TblCodeIdx,
 
 	TblCommitmentVals,
-	TblCommitmentValsData,
 	TblCommitmentHistoryKeys,
 	TblCommitmentHistoryVals,
 	TblCommitmentIdx,
@@ -514,8 +513,7 @@ var ChaindataTablesCfg = TableCfg{
 	TblCodeHistoryKeys: {Flags: DupSort},
 	TblCodeIdx:         {Flags: DupSort},
 
-	TblCommitmentVals:        {},
-	TblCommitmentValsData:    {},
+	TblCommitmentVals:        {Flags: DupSort},
 	TblCommitmentHistoryKeys: {Flags: DupSort},
 	TblCommitmentHistoryVals: {Flags: DupSort},
 	TblCommitmentIdx:         {Flags: DupSort},

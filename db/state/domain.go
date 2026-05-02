@@ -1666,29 +1666,7 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 		if err != nil {
 			return nil, 0, false, fmt.Errorf("valsCursor.Seek: %w", err)
 		}
-		// For variable-length domain keys (e.g. commitment trie prefixes), Seek(key) may
-		// land on a longer stored key that has 'key' as a byte prefix, because in MDBX
-		// shorter keys sort before longer ones with the same prefix. Scan forward to find
-		// the stored entry whose domain-key part is exactly 'key', stopping when we
-		// overshoot past key+0xff…ff (the max stored key for this domain key).
-		if len(fullkey) > 0 && !(len(fullkey) >= 8 && bytes.Equal(fullkey[:len(fullkey)-8], key)) {
-			// maxKey is key + 8×0xff; allocate only when scan is actually needed.
-			maxKey := append(key[:len(key):len(key)], 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff)
-			for {
-				if bytes.Compare(fullkey, maxKey) > 0 {
-					fullkey = nil
-					break
-				}
-				fullkey, v, err = valsC.Next()
-				if err != nil {
-					return nil, 0, false, fmt.Errorf("valsCursor.Next: %w", err)
-				}
-				if len(fullkey) == 0 || (len(fullkey) >= 8 && bytes.Equal(fullkey[:len(fullkey)-8], key)) {
-					break
-				}
-			}
-		}
-		if len(fullkey) == 0 {
+		if len(fullkey) < 8+len(key) || !bytes.Equal(fullkey[:len(key)], key) {
 			return nil, 0, false, nil
 		}
 		foundInvStep = fullkey[len(fullkey)-8:]
