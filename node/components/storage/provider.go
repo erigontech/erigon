@@ -182,10 +182,38 @@ func (p *Provider) Initialize(deps Deps) error {
 	// deleted snapshots are removed from the swarm.
 	notifications := deps.DBEventNotifier
 	downloaderClient := deps.DownloaderClient
+	inv := deps.Inventory // may be nil for tools/tests
 	p.ChainDB.OnFilesChange(
 		func(frozenFileNames []string) {
 			p.logger.Debug("files changed...sending notification")
 			notifications.OnNewSnapshot()
+
+			// Reflect the post-build / post-recalc state into Inventory:
+			// OnFilesChange fires AFTER recalcVisibleFiles, so by the time
+			// we see these names they are local AND indexed AND visible —
+			// the lifecycle's "Advertisable" condition. Drives the
+			// storage-component import-lifecycle state machine; harmless
+			// no-op when Inventory is nil.
+			if inv != nil {
+				for _, name := range frozenFileNames {
+					if state, ok := inv.LifecycleState(name); ok {
+						if state < snapshot.LifecycleAdvertisable {
+							inv.AdvanceTo(name, snapshot.LifecycleAdvertisable)
+						}
+					} else {
+						// First time we hear about this file. Minimal
+						// entry — Domain/Kind/Size land via the disk
+						// scan path when the lifecycle driver populates
+						// Inventory more thoroughly.
+						inv.AddFile(&snapshot.FileEntry{
+							Name:         name,
+							Local:        true,
+							Advertisable: true,
+						})
+					}
+				}
+			}
+
 			if config.Downloader != nil && config.Downloader.ChainName == "" {
 				return
 			}
@@ -197,6 +225,15 @@ func (p *Provider) Initialize(deps Deps) error {
 			}
 		},
 		func(deletedFiles []string) {
+			// Drop deleted files from Inventory. RemoveFile defers the
+			// drop when held views still reference the file, so reads
+			// in flight stay coherent.
+			if inv != nil {
+				for _, name := range deletedFiles {
+					inv.RemoveFile(name)
+				}
+			}
+
 			if config.Downloader != nil && config.Downloader.ChainName == "" {
 				return
 			}
