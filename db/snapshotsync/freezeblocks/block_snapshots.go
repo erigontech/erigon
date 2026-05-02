@@ -471,8 +471,20 @@ func (br *BlockRetire) RetireBlocks(
 		return nil
 	}
 
-	if err := br.BuildMissedIndicesIfNeed(ctx, "RetireBlocks", br.notifier); err != nil {
-		return err
+	// When the storage component owns the import lifecycle, the
+	// lifecycle.Driver runs BuildMissedIndices on its own clock; calling
+	// it inline here would pre-empt the driver and leave its
+	// productionIndexBuilder with no work to do (the symptom that smoke
+	// test 2 surfaced). Skip the inline build and let the driver pick up
+	// the new files via its disk scan + per-file dispatch.
+	//
+	// See docs/plans/20260501-storage-lifecycle-spec.md +
+	// docs/plans/20260502-app-integration-completion.md (item 1) for
+	// the rationale.
+	if br.config != nil && !br.config.Snapshot.LifecycleDrivenByStorage {
+		if err := br.BuildMissedIndicesIfNeed(ctx, "RetireBlocks", br.notifier); err != nil {
+			return err
+		}
 	}
 
 	if includeBor {

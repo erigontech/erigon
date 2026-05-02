@@ -301,8 +301,8 @@ func (p *Provider) Initialize(deps Deps) error {
 			Inv:          deps.Inventory,
 			Logger:       logger,
 			SnapDir:      config.Dirs.Snap,
-			OnIndexing:   lifecycle.BuildOnIndexing(builder, deps.Inventory),
-			OnValidation: lifecycle.BuildOnValidation(nil, nil, deps.Inventory),
+			OnIndexing:   lifecycle.BuildOnIndexing(builder, deps.Inventory, logger),
+			OnValidation: lifecycle.BuildOnValidation(nil, nil, deps.Inventory, logger),
 		}
 		if err := p.LifecycleDriver.Start(ctx); err != nil {
 			return fmt.Errorf("storage: start lifecycle driver: %w", err)

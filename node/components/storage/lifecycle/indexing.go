@@ -19,6 +19,7 @@ package lifecycle
 import (
 	"context"
 
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
 )
 
@@ -57,7 +58,11 @@ type IndexBuilder interface {
 //
 // Builder errors propagate to the caller, which logs them at Debug
 // per Driver.dispatch's contract.
-func BuildOnIndexing(builder IndexBuilder, inv *snapshot.Inventory) Handler {
+//
+// logger may be nil; on successful advance the handler emits an Info
+// log line "advanced X to LifecycleIndexed" so each completed step is
+// observable. nil logger silently skips the line.
+func BuildOnIndexing(builder IndexBuilder, inv *snapshot.Inventory, logger log.Logger) Handler {
 	return func(ctx context.Context, e *snapshot.FileEntry) error {
 		if err := builder.BuildMissedIndices(ctx, e); err != nil {
 			return err
@@ -69,8 +74,9 @@ func BuildOnIndexing(builder IndexBuilder, inv *snapshot.Inventory) Handler {
 				return nil
 			}
 		}
-		// All deps present (or no deps required) → advance.
-		inv.AdvanceTo(e.Name, snapshot.LifecycleIndexed)
+		if inv.AdvanceTo(e.Name, snapshot.LifecycleIndexed) && logger != nil {
+			logger.Info("[storage-lifecycle] advanced", "file", e.Name, "to", "Indexed")
+		}
 		return nil
 	}
 }

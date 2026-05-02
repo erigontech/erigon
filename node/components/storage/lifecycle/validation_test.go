@@ -49,7 +49,7 @@ func TestBuildOnValidation_EmptyChainAdvancesUnconditionally(t *testing.T) {
 	}
 	inv.AddFile(e)
 
-	require.NoError(t, BuildOnValidation(nil, nil, inv)(context.Background(), e))
+	require.NoError(t, BuildOnValidation(nil, nil, inv, nil)(context.Background(), e))
 
 	state, _ := inv.LifecycleState("a.kv")
 	require.Equal(t, snapshot.LifecycleAdvertisable, state,
@@ -68,7 +68,7 @@ func TestBuildOnValidation_PassingChainAdvances(t *testing.T) {
 	v2 := &stubValidator{name: "range-ordering"}
 	chain := validation.Chain{v1, v2}
 
-	require.NoError(t, BuildOnValidation(chain, nil, inv)(context.Background(), e))
+	require.NoError(t, BuildOnValidation(chain, nil, inv, nil)(context.Background(), e))
 
 	state, _ := inv.LifecycleState("a.kv")
 	require.Equal(t, snapshot.LifecycleAdvertisable, state)
@@ -88,7 +88,7 @@ func TestBuildOnValidation_FailingChainHaltsAtIndexed(t *testing.T) {
 	v := &stubValidator{name: "size-matches-torrent", err: wantErr}
 	chain := validation.Chain{v}
 
-	err := BuildOnValidation(chain, nil, inv)(context.Background(), e)
+	err := BuildOnValidation(chain, nil, inv, nil)(context.Background(), e)
 	require.Error(t, err)
 	require.ErrorIs(t, err, wantErr)
 	// Failing validator's name is in the error message per Chain.Validate.
@@ -123,7 +123,7 @@ func TestBuildOnValidation_ContentSourceFactoryFires(t *testing.T) {
 	v := &contentAssertingValidator{expected: expectedContent}
 	chain := validation.Chain{v}
 
-	require.NoError(t, BuildOnValidation(chain, contentFor, inv)(
+	require.NoError(t, BuildOnValidation(chain, contentFor, inv, nil)(
 		context.Background(), e,
 	))
 	require.Equal(t, 1, contentCalled,

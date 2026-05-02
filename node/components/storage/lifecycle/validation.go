@@ -19,6 +19,7 @@ package lifecycle
 import (
 	"context"
 
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
 	"github.com/erigontech/erigon/node/components/storage/validation"
 )
@@ -51,7 +52,11 @@ type ContentSourceFor func(*snapshot.FileEntry) validation.ContentSource
 // contentFor may be nil; in that case validators receive nil
 // ContentSource, which is permitted for stage-1 validators that don't
 // need bytes.
-func BuildOnValidation(chain validation.Chain, contentFor ContentSourceFor, inv *snapshot.Inventory) Handler {
+//
+// logger may be nil; on successful advance the handler emits an Info
+// log line "advanced X to LifecycleAdvertisable" so each completed
+// step is observable. nil logger silently skips the line.
+func BuildOnValidation(chain validation.Chain, contentFor ContentSourceFor, inv *snapshot.Inventory, logger log.Logger) Handler {
 	return func(_ context.Context, e *snapshot.FileEntry) error {
 		var content validation.ContentSource
 		if contentFor != nil {
@@ -60,7 +65,9 @@ func BuildOnValidation(chain validation.Chain, contentFor ContentSourceFor, inv 
 		if err := chain.Validate(e, content); err != nil {
 			return err
 		}
-		inv.AdvanceTo(e.Name, snapshot.LifecycleAdvertisable)
+		if inv.AdvanceTo(e.Name, snapshot.LifecycleAdvertisable) && logger != nil {
+			logger.Info("[storage-lifecycle] advanced", "file", e.Name, "to", "Advertisable")
+		}
 		return nil
 	}
 }

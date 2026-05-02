@@ -64,7 +64,7 @@ func TestBuildOnIndexing_AdvancesToIndexedWhenDepsPresent(t *testing.T) {
 	inv.AddFile(primary)
 
 	builder := &fakeBuilder{inv: inv}
-	handler := BuildOnIndexing(builder, inv)
+	handler := BuildOnIndexing(builder, inv, nil)
 
 	require.NoError(t, handler(context.Background(), primary))
 	state, _ := inv.LifecycleState(primary.Name)
@@ -84,7 +84,7 @@ func TestBuildOnIndexing_HandlesNoDependencies(t *testing.T) {
 	inv.AddFile(primary)
 
 	builder := &fakeBuilder{inv: inv}
-	require.NoError(t, BuildOnIndexing(builder, inv)(context.Background(), primary))
+	require.NoError(t, BuildOnIndexing(builder, inv, nil)(context.Background(), primary))
 
 	state, _ := inv.LifecycleState(primary.Name)
 	require.Equal(t, snapshot.LifecycleIndexed, state,
@@ -109,7 +109,7 @@ func TestBuildOnIndexing_BuilderErrorPropagates(t *testing.T) {
 		},
 	}
 
-	err := BuildOnIndexing(builder, inv)(context.Background(), primary)
+	err := BuildOnIndexing(builder, inv, nil)(context.Background(), primary)
 	require.ErrorIs(t, err, wantErr)
 
 	// State stays at Downloaded — driver leaves it there for retry.
@@ -132,7 +132,7 @@ func TestBuildOnIndexing_DepsNotYetPropagatedNoOps(t *testing.T) {
 
 	// noopIndexBuilder reports success without producing the dep.
 	// Handler should return nil but NOT advance.
-	require.NoError(t, BuildOnIndexing(noopIndexBuilder{}, inv)(
+	require.NoError(t, BuildOnIndexing(noopIndexBuilder{}, inv, nil)(
 		context.Background(), primary,
 	))
 
@@ -164,7 +164,7 @@ func TestBuildOnIndexing_PartialDepsNoOps(t *testing.T) {
 	// Builder no-ops (doesn't add anything). Use a builder with no
 	// auto-add behaviour.
 	noopBuilder := noopIndexBuilder{}
-	require.NoError(t, BuildOnIndexing(noopBuilder, inv)(context.Background(), primary))
+	require.NoError(t, BuildOnIndexing(noopBuilder, inv, nil)(context.Background(), primary))
 
 	state, _ := inv.LifecycleState(primary.Name)
 	require.Equal(t, snapshot.LifecycleDownloaded, state,
