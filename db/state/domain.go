@@ -61,6 +61,12 @@ var (
 )
 var traceGetLatest, _ = kv.String2Domain(dbg.EnvString("AGG_TRACE_GET_LATEST", ""))
 
+// LargeValues indirect-layout constants.
+const (
+	dupRecordLen  = 16             // invStep(8) + seqID(8)
+	deletionSeqID = math.MaxUint64 // sentinel: dup with this seqID has no row in valsTable
+)
+
 // Domain is a part of the state (examples are Accounts, Storage, Code)
 // Domain should not have any go routines or locks
 //
@@ -185,8 +191,6 @@ func (d *Domain) maxStepInDBNoHistory(tx kv.Tx) (lstInDb kv.Step) {
 	if len(firstKey) == 0 {
 		return 0
 	}
-	// Both layouts: keysTable is DupSort with bareKey -> invStep+suffix.
-	// FirstKey returns the table-key (bareKey); fetch the dup value to read invStep.
 	firstVal, err := tx.GetOne(keysTable, firstKey)
 	if err != nil {
 		d.logger.Warn("[agg] Domain.maxStepInDBNoHistory", "firstKey", firstKey, "err", err)
@@ -429,27 +433,17 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	}
 
 	if w.largeVals {
-		// Indirect layout (see DomainCfg.LargeValues comment):
-		//   keysTable (DupSort): bareKey -> invStep(8) + seqID(8)
-		//   valsTable (plain)  : seqID(8) -> value
-		// ETL collector key is bareKey+invStep (sorted); value is the raw value bytes.
-		//
-		// Re-write strategy on (bareKey, invStep) collision (hot path: commitment
-		// branches re-flushed in the same step):
-		//   real -> real      : update vals row in place, leave keys dup unchanged
-		//                       (saves a vals Delete + a keys PutCurrent).
-		//   real -> deletion  : Delete vals, PutCurrent keys with seqID=MaxUint64.
-		//   deletion -> real  : Append fresh seqID, PutCurrent keys with new seqID.
-		//   deletion -> del.  : no-op.
-		// Fresh inserts use IncrementSequence + Append (strictly monotonic seqID).
-		// seqID=MaxUint64 is the deletion-marker sentinel (no row in valsTable).
+		// On (bareKey, invStep) collision the hot path is real->real: update the vals
+		// row in place and leave the keys dup alone (saves a vals Delete + a keys
+		// PutCurrent per re-flush, common for commitment branches re-written in the
+		// same step). Other transitions still need the full delete/append/replace.
 		keysCursor, err := tx.RwCursorDupSort(w.keysTable)
 		if err != nil {
 			return err
 		}
 		defer keysCursor.Close()
 		var seqIDBuf [8]byte
-		var dupBuf [16]byte
+		var dupBuf [dupRecordLen]byte
 		if err := w.values.Load(tx, w.valsTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			bareKey := k[:len(k)-8]
 			invStep := k[len(k)-8:]
@@ -459,23 +453,21 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 			if err != nil {
 				return err
 			}
-			hasDup := len(existing) == 16 && bytes.Equal(existing[:8], invStep)
+			hasDup := len(existing) == dupRecordLen && bytes.Equal(existing[:8], invStep)
 
 			if hasDup {
-				oldSeqID := binary.BigEndian.Uint64(existing[8:])
-				oldIsDeletion := oldSeqID == math.MaxUint64
+				oldIsDeletion := binary.BigEndian.Uint64(existing[8:]) == deletionSeqID
 				switch {
 				case !oldIsDeletion && !newIsDeletion:
-					// Update existing vals row in place; keys dup unchanged.
-					binary.BigEndian.PutUint64(seqIDBuf[:], oldSeqID)
+					copy(seqIDBuf[:], existing[8:])
 					return tx.Put(w.valsTable, seqIDBuf[:], v)
 				case !oldIsDeletion && newIsDeletion:
-					binary.BigEndian.PutUint64(seqIDBuf[:], oldSeqID)
+					copy(seqIDBuf[:], existing[8:])
 					if err := tx.Delete(w.valsTable, seqIDBuf[:]); err != nil {
 						return err
 					}
 					copy(dupBuf[:8], invStep)
-					binary.BigEndian.PutUint64(dupBuf[8:], math.MaxUint64)
+					binary.BigEndian.PutUint64(dupBuf[8:], deletionSeqID)
 					return keysCursor.PutCurrent(bareKey, dupBuf[:])
 				case oldIsDeletion && !newIsDeletion:
 					newSeqID, err := tx.IncrementSequence(w.valsTable, 1)
@@ -487,15 +479,14 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 						return err
 					}
 					copy(dupBuf[:8], invStep)
-					binary.BigEndian.PutUint64(dupBuf[8:], newSeqID)
+					copy(dupBuf[8:], seqIDBuf[:])
 					return keysCursor.PutCurrent(bareKey, dupBuf[:])
 				default: // deletion -> deletion
 					return nil
 				}
 			}
 
-			// Fresh insert.
-			var seqID uint64 = math.MaxUint64
+			seqID := uint64(deletionSeqID)
 			if !newIsDeletion {
 				id, err := tx.IncrementSequence(w.valsTable, 1)
 				if err != nil {
@@ -841,29 +832,25 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 	stepVal := ^uint64(step)
 
 	if d.LargeValues {
-		// keysCursor: bareKey -> invStep+seqID (DupSort). For collation we walk
-		// every (bareKey, dup) pair, filter by step, then dereference seqID via
-		// a single GetOne on the vals table.
 		keysCursor, err := roTx.CursorDupSort(d.KeysTable)
 		if err != nil {
 			return Collation{}, fmt.Errorf("create %s keys cursor: %w", d.FilenameBase, err)
 		}
 		defer keysCursor.Close()
+		var seqKey [8]byte
 		for k, dupVal, err := keysCursor.First(); k != nil; k, dupVal, err = keysCursor.Next() {
 			if err != nil {
 				return coll, err
 			}
-			if len(dupVal) != 16 {
+			if len(dupVal) != dupRecordLen {
 				continue
 			}
 			if binary.BigEndian.Uint64(dupVal[:8]) != stepVal {
 				continue
 			}
-			seqID := binary.BigEndian.Uint64(dupVal[8:])
 			var v []byte
-			if seqID != math.MaxUint64 {
-				var seqKey [8]byte
-				binary.BigEndian.PutUint64(seqKey[:], seqID)
+			if binary.BigEndian.Uint64(dupVal[8:]) != deletionSeqID {
+				copy(seqKey[:], dupVal[8:])
 				v, err = roTx.GetOne(d.ValuesTable, seqKey[:])
 				if err != nil {
 					return coll, err
@@ -1352,8 +1339,8 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	if currentFilesEndStep > unwindStep {
 		unwindStep = currentFilesEndStep
 	}
-	unwindStepBytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(unwindStepBytes, ^uint64(unwindStep))
+	var unwindStepBytes [8]byte
+	binary.BigEndian.PutUint64(unwindStepBytes[:], ^uint64(unwindStep))
 
 	if dt.d.LargeValues {
 		keysCursor, err := rwTx.RwCursorDupSort(d.KeysTable)
@@ -1362,20 +1349,20 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		}
 		defer keysCursor.Close()
 		var seqKey [8]byte
+		var dup [dupRecordLen]byte
+		copy(dup[:8], unwindStepBytes[:])
 		for i := range domainDiffs {
 			keyStr, value := domainDiffs[i].Key, domainDiffs[i].Value
 			key := common.ToBytesZeroCopy(keyStr)
 			bareKey := key[:len(key)-8]
 			invStep := key[len(key)-8:]
-			// Delete dup at the write step (and free its vals row).
 			existing, err := keysCursor.SeekBothRange(bareKey, invStep)
 			if err != nil {
 				return err
 			}
-			if len(existing) == 16 && bytes.Equal(existing[:8], invStep) {
-				oldSeqID := binary.BigEndian.Uint64(existing[8:])
-				if oldSeqID != math.MaxUint64 {
-					binary.BigEndian.PutUint64(seqKey[:], oldSeqID)
+			if len(existing) == dupRecordLen && bytes.Equal(existing[:8], invStep) {
+				if binary.BigEndian.Uint64(existing[8:]) != deletionSeqID {
+					copy(seqKey[:], existing[8:])
 					if err := rwTx.Delete(d.ValuesTable, seqKey[:]); err != nil {
 						return err
 					}
@@ -1384,27 +1371,22 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 					return err
 				}
 			}
-			// nil = different step, skip restore; non-nil = write at unwindStep.
 			if value == nil {
 				continue
 			}
-			var newSeqID uint64
-			if len(value) == 0 {
-				newSeqID = math.MaxUint64
-			} else {
+			newSeqID := uint64(deletionSeqID)
+			if len(value) > 0 {
 				newSeqID, err = rwTx.IncrementSequence(d.ValuesTable, 1)
 				if err != nil {
 					return err
 				}
 				binary.BigEndian.PutUint64(seqKey[:], newSeqID)
-				if err := rwTx.Put(d.ValuesTable, seqKey[:], value); err != nil {
+				if err := rwTx.Append(d.ValuesTable, seqKey[:], value); err != nil {
 					return err
 				}
 			}
-			dup := make([]byte, 16)
-			copy(dup[:8], unwindStepBytes)
 			binary.BigEndian.PutUint64(dup[8:], newSeqID)
-			if err := keysCursor.Put(bareKey, dup); err != nil {
+			if err := keysCursor.Put(bareKey, dup[:]); err != nil {
 				return err
 			}
 		}
@@ -1441,7 +1423,7 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 
 		// nil = different step, skip; []byte{} = absent previously, write empty tombstone
 		if value != nil {
-			if err := valsCursor.Put(fullKey, append(unwindStepBytes, value...)); err != nil {
+			if err := valsCursor.Put(fullKey, append(unwindStepBytes[:], value...)); err != nil {
 				return err
 			}
 		}
@@ -1728,26 +1710,19 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 	var v, foundInvStep []byte
 
 	if dt.d.LargeValues {
-		// keys table is DupSort: bareKey -> invStep(8)+seqID(8). DupSort returns
-		// dup values sorted ascending, so SeekBoth at the smallest invStep finds
-		// the latest step (smallest invStep == highest actual step).
-		dupSeek := make([]byte, 8) // smallest possible invStep prefix = all zero
-		dupVal, err := valsC.SeekBothRange(key, dupSeek)
+		// SeekBoth at smallest invStep returns the dup with smallest invStep =
+		// highest actual step = latest write.
+		var dupSeek [8]byte
+		dupVal, err := valsC.SeekBothRange(key, dupSeek[:])
 		if err != nil {
 			return nil, 0, false, fmt.Errorf("valsCursor.SeekBothRange: %w", err)
 		}
-		if len(dupVal) != 16 {
-			return nil, 0, false, nil // This key is not in DB
+		if len(dupVal) != dupRecordLen {
+			return nil, 0, false, nil
 		}
 		foundInvStep = dupVal[:8]
-		seqID := binary.BigEndian.Uint64(dupVal[8:])
-		if seqID == math.MaxUint64 {
-			// deletion marker: key is "found" with empty value
-			v = nil
-		} else {
-			var seqKey [8]byte
-			binary.BigEndian.PutUint64(seqKey[:], seqID)
-			v, err = roTx.GetOne(dt.d.ValuesTable, seqKey[:])
+		if binary.BigEndian.Uint64(dupVal[8:]) != deletionSeqID {
+			v, err = roTx.GetOne(dt.d.ValuesTable, dupVal[8:])
 			if err != nil {
 				return nil, 0, false, fmt.Errorf("vals lookup: %w", err)
 			}
@@ -2094,10 +2069,10 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	return stat, err
 }
 
-// indirectKeysCursor wraps a DupSort cursor over a LargeValues domain's keys
-// table (bareKey -> invStep(8)+seqID(8)) and intercepts Delete operations to
-// also free the dup's seqID row from the vals table. This lets prune flow
-// through TableScanningPrune unchanged.
+// indirectKeysCursor lets prune flow through TableScanningPrune by overriding
+// the delete methods to also free the dup's seqID row from the vals table.
+// Mutators not overridden (Append, Put, PutNoOverwrite) bypass the seqID free —
+// the prune path doesn't use them, but callers must not.
 type indirectKeysCursor struct {
 	kv.RwCursorDupSort
 	rwTx      kv.RwTx
@@ -2105,16 +2080,13 @@ type indirectKeysCursor struct {
 }
 
 func (c *indirectKeysCursor) freeSeqOf(dup []byte) error {
-	if len(dup) != 16 {
+	if len(dup) != dupRecordLen {
 		return nil
 	}
-	seqID := binary.BigEndian.Uint64(dup[8:])
-	if seqID == math.MaxUint64 {
+	if binary.BigEndian.Uint64(dup[8:]) == deletionSeqID {
 		return nil
 	}
-	var seqKey [8]byte
-	binary.BigEndian.PutUint64(seqKey[:], seqID)
-	return c.rwTx.Delete(c.valsTable, seqKey[:])
+	return c.rwTx.Delete(c.valsTable, dup[8:])
 }
 
 func (c *indirectKeysCursor) DeleteCurrent() error {
@@ -2129,14 +2101,6 @@ func (c *indirectKeysCursor) DeleteCurrent() error {
 }
 
 func (c *indirectKeysCursor) DeleteCurrentDuplicates() error {
-	k, _, err := c.RwCursorDupSort.Current()
-	if err != nil {
-		return err
-	}
-	if k == nil {
-		return nil
-	}
-	keyCopy := common.Copy(k)
 	dup, err := c.RwCursorDupSort.FirstDup()
 	if err != nil {
 		return err
@@ -2150,9 +2114,6 @@ func (c *indirectKeysCursor) DeleteCurrentDuplicates() error {
 			return err
 		}
 	}
-	if _, _, err := c.RwCursorDupSort.SeekExact(keyCopy); err != nil {
-		return err
-	}
 	return c.RwCursorDupSort.DeleteCurrentDuplicates()
 }
 
@@ -2161,7 +2122,7 @@ func (c *indirectKeysCursor) DeleteExact(k1, k2 []byte) error {
 	if err != nil {
 		return err
 	}
-	if len(dup) != 16 || !bytes.HasPrefix(dup, k2) {
+	if len(dup) != dupRecordLen || !bytes.HasPrefix(dup, k2) {
 		return nil
 	}
 	if err := c.freeSeqOf(dup); err != nil {

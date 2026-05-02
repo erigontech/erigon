@@ -21,15 +21,12 @@ type DomainCfg struct {
 	// LargeValues=true: two-table indirect layout.
 	//   KeysTable   (DupSort): bareKey   -> invStep(8) + seqID(8)
 	//   ValuesTable (plain)  : seqID(8)  -> value
-	//   DupSort is required on the keys table because variable-length bareKeys
+	//   DupSort on the keys table is required because variable-length bareKeys
 	//   (e.g. commitment branch nibble paths) can be prefixes of each other —
 	//   a flat `bareKey + invStep` plain table would mis-route Seek(bareKey)
-	//   to a longer-prefixed sibling. DupSort puts bareKey in the table key
-	//   and the per-step record in the dup value, so prefix collisions don't
-	//   arise. The Vals table is plain so Flush is a sequential append keyed
-	//   by an MDBX auto-increment seqID — no per-key SeekBothRange against
-	//   full-size value bytes. seqID = math.MaxUint64 marks deletion (no
-	//   corresponding row in the Vals table).
+	//   to a longer-prefixed sibling. The Vals table is plain so Flush is a
+	//   sequential append keyed by an MDBX auto-increment seqID, avoiding a
+	//   per-key SeekBothRange over full-size value bytes.
 	KeysTable   string
 	ValuesTable string
 	LargeValues bool
