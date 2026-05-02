@@ -31,7 +31,6 @@ import (
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
-	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/prune"
 
 	"github.com/erigontech/erigon/common"
@@ -813,24 +812,39 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 	stepVal := ^uint64(step)
 
 	if d.LargeValues {
-		valsCursor, err := roTx.Cursor(d.ValuesTable)
+		// keysCursor: bareKey -> invStep+seqID (DupSort). For collation we walk
+		// every (bareKey, dup) pair, filter by step, then dereference seqID via
+		// a single GetOne on the vals table.
+		keysCursor, err := roTx.CursorDupSort(d.KeysTable)
 		if err != nil {
-			return Collation{}, fmt.Errorf("create %s values cursor: %w", d.FilenameBase, err)
+			return Collation{}, fmt.Errorf("create %s keys cursor: %w", d.FilenameBase, err)
 		}
-		defer valsCursor.Close()
-		for k, v, err := valsCursor.First(); k != nil; k, v, err = valsCursor.Next() {
+		defer keysCursor.Close()
+		for k, dupVal, err := keysCursor.First(); k != nil; k, dupVal, err = keysCursor.Next() {
 			if err != nil {
 				return coll, err
 			}
-			if binary.BigEndian.Uint64(k[len(k)-8:]) != stepVal {
+			if len(dupVal) != 16 {
 				continue
 			}
-			bareKey := k[:len(k)-8]
-			if _, err = comp.Write(bareKey); err != nil {
-				return coll, fmt.Errorf("add %s values key [%x]: %w", d.FilenameBase, bareKey, err)
+			if binary.BigEndian.Uint64(dupVal[:8]) != stepVal {
+				continue
+			}
+			seqID := binary.BigEndian.Uint64(dupVal[8:])
+			var v []byte
+			if seqID != math.MaxUint64 {
+				var seqKey [8]byte
+				binary.BigEndian.PutUint64(seqKey[:], seqID)
+				v, err = roTx.GetOne(d.ValuesTable, seqKey[:])
+				if err != nil {
+					return coll, err
+				}
+			}
+			if _, err = comp.Write(k); err != nil {
+				return coll, fmt.Errorf("add %s values key [%x]: %w", d.FilenameBase, k, err)
 			}
 			if _, err = comp.Write(v); err != nil {
-				return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, bareKey, v, err)
+				return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, k, v, err)
 			}
 		}
 	} else {
@@ -1290,11 +1304,6 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	logEvery := time.NewTicker(time.Second * 30)
 	defer logEvery.Stop()
 
-	valsCursor, err := rwTx.RwCursorDupSort(d.ValuesTable)
-	if err != nil {
-		return err
-	}
-	defer valsCursor.Close()
 	// Revert keys using diff entries.
 	// Always: delete current entry at the write step, restore prevValue at unwind target step.
 	//
@@ -1317,23 +1326,74 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	unwindStepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(unwindStepBytes, ^uint64(unwindStep))
 
-	for i := range domainDiffs {
-		keyStr, value := domainDiffs[i].Key, domainDiffs[i].Value
-		key := common.ToBytesZeroCopy(keyStr)
-		if dt.d.LargeValues {
-			// Delete the entry at the write step
-			if err := rwTx.Delete(d.ValuesTable, key); err != nil {
+	if dt.d.LargeValues {
+		keysCursor, err := rwTx.RwCursorDupSort(d.KeysTable)
+		if err != nil {
+			return err
+		}
+		defer keysCursor.Close()
+		var seqKey [8]byte
+		for i := range domainDiffs {
+			keyStr, value := domainDiffs[i].Key, domainDiffs[i].Value
+			key := common.ToBytesZeroCopy(keyStr)
+			bareKey := key[:len(key)-8]
+			invStep := key[len(key)-8:]
+			// Delete dup at the write step (and free its vals row).
+			existing, err := keysCursor.SeekBothRange(bareKey, invStep)
+			if err != nil {
 				return err
 			}
-			// nil = different step, skip; []byte{} = absent previously, write empty tombstone
-			if value != nil {
-				fullKey := key[:len(key)-8]
-				if err := rwTx.Put(d.ValuesTable, append(fullKey, unwindStepBytes...), value); err != nil {
+			if len(existing) == 16 && bytes.Equal(existing[:8], invStep) {
+				oldSeqID := binary.BigEndian.Uint64(existing[8:])
+				if oldSeqID != math.MaxUint64 {
+					binary.BigEndian.PutUint64(seqKey[:], oldSeqID)
+					if err := rwTx.Delete(d.ValuesTable, seqKey[:]); err != nil {
+						return err
+					}
+				}
+				if err := keysCursor.DeleteCurrent(); err != nil {
 					return err
 				}
 			}
-			continue
+			// nil = different step, skip restore; non-nil = write at unwindStep.
+			if value == nil {
+				continue
+			}
+			var newSeqID uint64
+			if len(value) == 0 {
+				newSeqID = math.MaxUint64
+			} else {
+				newSeqID, err = rwTx.IncrementSequence(d.ValuesTable, 1)
+				if err != nil {
+					return err
+				}
+				binary.BigEndian.PutUint64(seqKey[:], newSeqID)
+				if err := rwTx.Put(d.ValuesTable, seqKey[:], value); err != nil {
+					return err
+				}
+			}
+			dup := make([]byte, 16)
+			copy(dup[:8], unwindStepBytes)
+			binary.BigEndian.PutUint64(dup[8:], newSeqID)
+			if err := keysCursor.Put(bareKey, dup); err != nil {
+				return err
+			}
 		}
+		if _, err := dt.ht.prune(ctx, rwTx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, true, logEvery); err != nil {
+			return fmt.Errorf("[domain][%s] unwinding, prune history to txNum=%d, step %d: %w", dt.d.FilenameBase, txNumUnwindTo, step, err)
+		}
+		return nil
+	}
+
+	valsCursor, err := rwTx.RwCursorDupSort(d.ValuesTable)
+	if err != nil {
+		return err
+	}
+	defer valsCursor.Close()
+
+	for i := range domainDiffs {
+		keyStr, value := domainDiffs[i].Key, domainDiffs[i].Value
+		key := common.ToBytesZeroCopy(keyStr)
 		stepBytes := key[len(key)-8:]
 		fullKey := key[:len(key)-8]
 		// Delete the current entry at the write step
@@ -1955,26 +2015,65 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	mxPruneInProgress.Inc()
 	defer mxPruneInProgress.Dec()
 	defer mxPruneTookDomain.ObserveDuration(time.Now())
+
+	if dt.d.LargeValues {
+		// Indirect layout: walk keys table dups, free vals row per seqID, delete dup.
+		// (Inline because TableScanningPrune doesn't know about the indirection.)
+		keysCursor, err := rwTx.RwCursorDupSort(dt.d.KeysTable)
+		if err != nil {
+			return stat, fmt.Errorf("create %s keys cursor: %w", dt.name.String(), err)
+		}
+		defer keysCursor.Close()
+		var seqKey [8]byte
+		var minTxNum uint64 = math.MaxUint64
+		var maxTxNum uint64
+		var pruneCount uint64
+		for k, dup, err := keysCursor.First(); k != nil && pruneCount < limit; k, dup, err = keysCursor.Next() {
+			if err != nil {
+				return stat, fmt.Errorf("iterate %s keys: %w", dt.name.String(), err)
+			}
+			if len(dup) != 16 {
+				continue
+			}
+			step := kv.Step(^binary.BigEndian.Uint64(dup[:8]))
+			stepTxNum := step.ToTxNum(dt.stepSize)
+			if stepTxNum < txFrom || stepTxNum >= txTo {
+				continue
+			}
+			seqID := binary.BigEndian.Uint64(dup[8:])
+			if seqID != math.MaxUint64 {
+				binary.BigEndian.PutUint64(seqKey[:], seqID)
+				if err := rwTx.Delete(dt.d.ValuesTable, seqKey[:]); err != nil {
+					return stat, err
+				}
+			}
+			if err := keysCursor.DeleteCurrent(); err != nil {
+				return stat, err
+			}
+			if stepTxNum < minTxNum {
+				minTxNum = stepTxNum
+			}
+			if stepTxNum > maxTxNum {
+				maxTxNum = stepTxNum
+			}
+			pruneCount++
+			if ctx.Err() != nil {
+				break
+			}
+		}
+		if minTxNum != math.MaxUint64 {
+			stat.MinStep = kv.Step(minTxNum / dt.stepSize)
+			stat.MaxStep = kv.Step(maxTxNum / dt.stepSize)
+		}
+		stat.Values = pruneCount
+		stat.Progress = prune.Done
+		mxPruneSizeDomain.AddUint64(pruneCount)
+		return stat, nil
+	}
+
 	var valsCursor kv.PseudoDupSortRwCursor
 	var mode prune.StorageMode
-	if dt.d.LargeValues {
-		mode = prune.StepKeyStorageMode
-		valsRwCursor, err := rwTx.RwCursor(dt.d.ValuesTable)
-		if err != nil {
-			return stat, fmt.Errorf("create %s domain values cursor: %w", dt.name.String(), err)
-		}
-		defer valsRwCursor.Close()
-
-		switch c := valsRwCursor.(type) {
-		case *mdbx2.MdbxCursor:
-			valsCursor = &mdbx2.MdbxCursorPseudoDupSort{MdbxCursor: c}
-		case *mdbx2.MdbxDupSortCursor:
-			valsCursor = valsRwCursor.(*mdbx2.MdbxDupSortCursor)
-		default:
-			valsCursor = &kv.RwCursorPseudoDupSort{RwCursor: c}
-		}
-		defer valsCursor.Close()
-	} else {
+	{
 		mode = prune.StepValueStorageMode
 		valsCursor, err = rwTx.RwCursorDupSort(dt.d.ValuesTable)
 		if err != nil {
