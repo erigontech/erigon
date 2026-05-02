@@ -6,22 +6,52 @@
 `head validated ... age=0` log line. That's "reached tip" — node is
 processing fresh blocks as they arrive.
 
-**Two modes to track separately:**
+**The architectural target: time-to-tip should be CONSTANT across
+pruning modes.**
 
-  - **Minimal** (`--prune.mode=minimal`): aggressive pruning, smallest
-    disk footprint. Fastest possible sync.
-  - **Archive** (`--prune.mode=archive`): full historical state.
-    Slowest sync; storage-driven lifecycle does the most work.
+Pruning mode determines what's retained AFTER sync, not what's
+required to REACH tip. Once a node has the latest state slice
+(Phase 0 from the orchestrator design) + the ability to receive
+new blocks from peers, it's at tip. Anything else — historical
+blocks, archive history — is enhancement that pruning mode chooses
+whether to keep.
 
-Track both because:
+Therefore:
 
-  - Minimal is the operator-best-case (what's possible if you only
-    need to follow chain).
-  - Archive is the storage-component-stress-case (most files, most
-    transitions, most opportunity for the lifecycle path to misbehave).
+  - **Minimal** (`--prune.mode=minimal`): keep latest state, prune
+    historical files aggressively. Time-to-tip should = baseline.
+  - **Full** (`--prune.mode=full`, default): keep blocks + some
+    history. Time-to-tip should = baseline.
+  - **Archive** (`--prune.mode=archive`): keep everything. Time-to-tip
+    should = baseline.
 
-The DELTA between the two tells us where the lifecycle path's cost
-scales with retained data.
+If the measurements show meaningful differences, the architecture is
+downloading / processing / blocking on data that isn't required for
+"ready", and the gap IS the target for optimization. Each mode's
+time-to-tip should converge to the time the network takes to deliver
+the latest state slice + Caplin's catch-up to the beacon head.
+
+We track all three modes separately and watch the delta close as we
+optimize. Constant time-to-tip across modes = architectural success.
+
+**The actual difference between modes is which RPCs are answerable
+afterward, not when sync completes:**
+
+  - **Minimal:** current-state RPCs only (`eth_getBalance` at latest,
+    `eth_call` at latest, `eth_getBlockByNumber` for very recent
+    blocks). Historical block / state queries return Pending or
+    NotFound.
+  - **Full:** + historical block queries (`eth_getBlockByNumber` for
+    any block, `eth_getTransactionByHash`, `eth_getLogs` over recent
+    history). Archive-style state queries (`eth_getBalance` at past
+    block) NOT available.
+  - **Archive:** + all archive-style state queries.
+
+Pruning mode = RPC capability surface. It is NOT a knob for "how
+fast can I sync". Today the modes appear to affect sync time
+because they affect what gets downloaded *before* tip is declared;
+the architectural fix is to defer historical-only downloads until
+AFTER tip while still allowing them to catch up in the background.
 
 ## Baseline (to be measured)
 
