@@ -357,6 +357,7 @@ var ChaindataTables = []string{
 	TblCodeHistoryVals,
 	TblCodeIdx,
 
+	TblCommitmentKeys,
 	TblCommitmentVals,
 	TblCommitmentHistoryKeys,
 	TblCommitmentHistoryVals,
@@ -509,11 +510,13 @@ var ChaindataTablesCfg = TableCfg{
 	TblStorageHistoryVals: {Flags: DupSort},
 	TblStorageIdx:         {Flags: DupSort},
 
-	TblCodeValsData:    {},
+	TblCodeVals:        {Flags: DupSort}, // LargeValues: bareKey → ~step(8)+seq_id(8)
+	TblCodeValsData:    {},               // LargeValues: seq_id(8) → code
 	TblCodeHistoryKeys: {Flags: DupSort},
 	TblCodeIdx:         {Flags: DupSort},
 
-	TblCommitmentVals:        {Flags: DupSort},
+	TblCommitmentKeys:        {Flags: DupSort}, // LargeValues: bareKey → ~step(8)+seq_id(8); DupSort required for variable-length trie path keys
+	TblCommitmentVals:        {},               // LargeValues: seq_id(8) → commitment value
 	TblCommitmentHistoryKeys: {Flags: DupSort},
 	TblCommitmentHistoryVals: {Flags: DupSort},
 	TblCommitmentIdx:         {Flags: DupSort},
@@ -523,6 +526,7 @@ var ChaindataTablesCfg = TableCfg{
 	TblReceiptHistoryVals: {Flags: DupSort},
 	TblReceiptIdx:         {Flags: DupSort},
 
+	TblRCacheVals:        {Flags: DupSort}, // LargeValues: bareKey → ~step(8)+seq_id(8)
 	TblRCacheHistoryKeys: {Flags: DupSort},
 	TblRCacheIdx:         {Flags: DupSort},
 
