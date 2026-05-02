@@ -242,6 +242,30 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 		// calculator.Start call). Per-block accumulator save/clear/install
 		// transitions are driven from the exec loop's blockResult handler.
 
+		// appliedBlocks tracks blockNums that completed full apply-loop
+		// processing (including post-block validation). Used at exit to
+		// detect "the channel closed cleanly but a block was silently
+		// missed" — i.e. block N's blockResult never arrived and we
+		// returned nil anyway. Without this check those bugs silently let
+		// invalid blocks become canonical.
+		appliedBlocks := make(map[uint64]struct{})
+
+		// txResultBlocks tracks every blockNum that had AT LEAST ONE
+		// tx-result reach the apply loop. The completeness check at
+		// channel-close compares this against appliedBlocks: any block
+		// whose tx-results arrived but whose blockResult never did is a
+		// silent failure (validator never fired for it).
+		txResultBlocks := make(map[uint64]struct{})
+
+		// rootResultsClosed records whether the calculator's rootResults
+		// channel has closed. We disable that select-arm by setting the
+		// local rootResults variable to nil (nil channels are never
+		// ready), but later code that drains rootResults after
+		// applyResults closes must skip the drain entirely if the
+		// channel is already known closed — `for cr := range nilChan`
+		// would hang forever.
+		rootResultsClosed := false
+
 		// blockUpdateCount/blockApplyCount count individual VersionedWrite entries
 		// (balance, nonce, incarnation, codeHash, code, storage, selfDestruct are
 		// separate entries).  This differs from the old StateUpdates count which
@@ -281,10 +305,15 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 			case applyResult, ok := <-applyResults:
 				if !ok {
 					// Exec loop closed the channel — batch is complete.
-					// Drain calculator results, then exit.
-					for cr := range rootResults {
-						if err := handleCommitResult(cr); err != nil {
-							return err
+					// Drain calculator results, then exit. Skip the drain
+					// if rootResults already closed (its select-arm was
+					// disabled by setting rootResults=nil; ranging a nil
+					// channel hangs forever).
+					if !rootResultsClosed {
+						for cr := range rootResults {
+							if err := handleCommitResult(cr); err != nil {
+								return err
+							}
 						}
 					}
 					if lastBlockResult.BlockNum > 0 {
@@ -299,6 +328,51 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					// Fork validation (StateStep, single-block batches) only ever hits
 					// case (2); returning ErrLoopExhausted there causes the stage loop
 					// to error with "unexpected state step has more work".
+					// Completeness check: when the exec loop closes the apply channel,
+					// every block whose tx-results arrived must also have produced a
+					// blockResult. Otherwise the per-block validator never fires for
+					// it and an invalid block becomes canonical.
+					//
+					// We track this two ways:
+					//   - appliedBlocks: blockResults we fully processed (validated)
+					//   - txResultBlocks: any block we saw at least one tx-result for
+					// A block in txResultBlocks but not in appliedBlocks means
+					// its tx-results arrived but the trailing blockResult never did
+					// — exactly the silent-failure mode this catches.
+					//
+					// Also flag the case where maxBlockNum was never reached at all
+					// (no blockResult for it) but the channel closed cleanly: that
+					// means the exec loop signaled "done" without delivering the
+					// final block.
+					{
+						var missing []uint64
+						for n := range txResultBlocks {
+							if _, ok := appliedBlocks[n]; !ok {
+								missing = append(missing, n)
+							}
+						}
+						if !pe.reachedMaxBlock.Load() {
+							if _, ok := appliedBlocks[pe.maxBlockNum]; !ok {
+								// maxBlockNum was never validated — even if no
+								// txResults arrived for it, this is a silent
+								// "exec gave up before delivering the goal" failure.
+								addMissing := true
+								for _, m := range missing {
+									if m == pe.maxBlockNum {
+										addMissing = false
+										break
+									}
+								}
+								if addMissing {
+									missing = append(missing, pe.maxBlockNum)
+								}
+							}
+						}
+						if len(missing) > 0 {
+							return fmt.Errorf("%w: apply loop exited (reachedMaxBlock=%v lastBlockResult=%d maxBlockNum=%d) but %d block(s) had tx-results without a blockResult or were never delivered: %v",
+								rules.ErrInvalidBlock, pe.reachedMaxBlock.Load(), lastBlockResult.BlockNum, pe.maxBlockNum, len(missing), missing)
+						}
+					}
 					if pe.reachedMaxBlock.Load() {
 						return nil
 					}
@@ -306,6 +380,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 				}
 				switch applyResult := applyResult.(type) {
 				case *txResult:
+					txResultBlocks[applyResult.blockNum] = struct{}{}
 					uncommittedGas += applyResult.blockGasUsed
 					uncommittedTransactions++
 					if dbg.TraceApply && dbg.TraceBlock(applyResult.blockNum) {
@@ -407,6 +482,12 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						}
 					}
 
+					// Mark this block as fully applied. The exit-completeness
+					// check at channel-close compares this set against the
+					// expected [startBlockNum, maxBlockNum] range to detect
+					// "block silently missed".
+					appliedBlocks[applyResult.BlockNum] = struct{}{}
+
 					// SavePastChangesetAccumulator + SetChangesetAccumulator(nil) +
 					// rotation-to-next-block accumulator are all driven by the exec
 					// loop now (see execLoop's blockResult handling), so the apply
@@ -424,8 +505,22 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 			case cr, ok := <-rootResults:
 				if !ok {
-					// rootResults closed by the calculator on Stop — exit the apply loop cleanly.
-					return nil
+					// rootResults closed by the calculator on Stop.
+					//
+					// Do NOT return here. The apply loop must keep draining
+					// applyResults until the EXEC LOOP closes that channel —
+					// otherwise we race with sendResult and drop the trailing
+					// blockResult, which makes invalid blocks become canonical
+					// without ever reaching the per-block validator.
+					//
+					// Switch the rootResults case to the never-ready nil channel
+					// so this select arm doesn't busy-spin on the closed channel.
+					// rootResultsClosed makes the applyResults-close branch
+					// skip the `for cr := range rootResults` drain (which would
+					// hang forever on the nil channel).
+					rootResults = nil
+					rootResultsClosed = true
+					continue
 				}
 				if err := handleCommitResult(cr); err != nil {
 					return err
@@ -702,10 +797,13 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				select {
 				case nextResult, ok := <-pe.rws.ResultCh():
 					if !ok {
-						return nil
+						return pe.execLoopExitCheck("ctx-done-drain: rws.ResultCh closed")
 					}
 					if closed, err := pe.rws.Drain(ctx, nextResult); err != nil || closed {
-						return err
+						if err != nil {
+							return err
+						}
+						return pe.execLoopExitCheck("ctx-done-drain: rws.Drain returned closed")
 					}
 					blockResult, err := pe.processResults(ctx, applyTx)
 					if err != nil {
@@ -730,19 +828,19 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						}
 					}
 				default:
-					return nil
+					return pe.execLoopExitCheck("ctx-done-drain: no more pending results")
 				}
 			}
 		case nextResult, ok := <-pe.rws.ResultCh():
 			if !ok {
-				return nil
+				return pe.execLoopExitCheck("main-select: rws.ResultCh closed")
 			}
 			closed, err := pe.rws.Drain(ctx, nextResult)
 			if err != nil {
 				return err
 			}
 			if closed {
-				return nil
+				return pe.execLoopExitCheck("main-select: rws.Drain returned closed")
 			}
 		}
 
@@ -940,6 +1038,36 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 		scheduleable.scheduleExecution(ctx, pe)
 	}
 
+	return nil
+}
+
+// execLoopExitCheck enforces the completeness invariant for the exec
+// loop's clean exit paths: all blocks the loop was asked to process must
+// be drained from pe.blockExecutors. A non-empty map at exit means a
+// block was scheduled (or queued) but never produced a blockResult,
+// which previously caused "block accepted when it should have been
+// rejected" failures (the apply loop never received the block, post-
+// validation never fired). Converts that silent-success path into a
+// loud InvalidBlock error so the failure surfaces through InsertChain.
+//
+// The reason argument tags the call site (which silent-return path
+// triggered the check) so a failure log identifies the exit path
+// involved without needing a stack trace.
+func (pe *parallelExecutor) execLoopExitCheck(reason string) error {
+	pe.RLock()
+	pendingBlocks := len(pe.blockExecutors)
+	var pendingNums []uint64
+	if pendingBlocks > 0 {
+		pendingNums = make([]uint64, 0, pendingBlocks)
+		for n := range pe.blockExecutors {
+			pendingNums = append(pendingNums, n)
+		}
+	}
+	pe.RUnlock()
+	if pendingBlocks > 0 {
+		return fmt.Errorf("%w: parallel exec loop exited with %d block(s) still pending in pe.blockExecutors %v (reason=%s)",
+			rules.ErrInvalidBlock, pendingBlocks, pendingNums, reason)
+	}
 	return nil
 }
 
