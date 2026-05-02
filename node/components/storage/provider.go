@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/components/storage/lifecycle"
@@ -120,6 +121,19 @@ type Deps struct {
 	// Config.Snapshot.LifecycleDrivenByStorage is true, Initialize
 	// constructs and starts a lifecycle.Driver.
 	Inventory *snapshot.Inventory
+
+	// Aggregator is the state Aggregator (db/state). Optional;
+	// productionIndexBuilder uses it to build E3 (state) accessors
+	// when the lifecycle driver runs. nil → only E2 (block) indexes
+	// are built via the storage-driven path; E3 stays on the stage
+	// path until this is wired.
+	Aggregator *state.Aggregator
+
+	// IndexWorkers is the parallelism for accessor builds. Sourced
+	// from estimate.IndexSnapshot.Workers() in production. Zero →
+	// productionIndexBuilder skips the E3 build (Aggregator's
+	// BuildMissedAccessors interprets workers strictly).
+	IndexWorkers int
 
 	SegmentsBuildLimiter *semaphore.Weighted
 	Logger               log.Logger
@@ -209,19 +223,18 @@ func (p *Provider) Initialize(deps Deps) error {
 	// OnValidation means files advance Indexed → Advertisable
 	// without validation — matches today's pre-validation behaviour.
 	if deps.Inventory != nil && config.Snapshot.LifecycleDrivenByStorage {
-		// agg + indexWorkers wired in step 10 alongside backend.go
-		// passing them through Deps. Until then, the driver runs
-		// index-build for E2 (block snapshots) only; E3 (state
-		// accessors) stays on the stage path.
 		builder := &productionIndexBuilder{
-			blockRetire: p.BlockRetire,
-			notifier:    deps.DBEventNotifier,
-			logger:      logger,
+			blockRetire:  p.BlockRetire,
+			agg:          deps.Aggregator,
+			notifier:     deps.DBEventNotifier,
+			logger:       logger,
+			indexWorkers: deps.IndexWorkers,
 		}
 		p.LifecycleDriver = &lifecycle.Driver{
-			Inv:        deps.Inventory,
-			Logger:     logger,
-			OnIndexing: lifecycle.BuildOnIndexing(builder, deps.Inventory),
+			Inv:          deps.Inventory,
+			Logger:       logger,
+			OnIndexing:   lifecycle.BuildOnIndexing(builder, deps.Inventory),
+			OnValidation: lifecycle.BuildOnValidation(nil, nil, deps.Inventory),
 		}
 		if err := p.LifecycleDriver.Start(ctx); err != nil {
 			return fmt.Errorf("storage: start lifecycle driver: %w", err)

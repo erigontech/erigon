@@ -41,6 +41,11 @@ import (
 // stage_snapshots.go's buildOrDeferE2Indices /
 // buildOrDeferE3Accessors. Activated only when
 // Config.Snapshot.LifecycleDrivenByStorage is true.
+//
+// E2 path uses BlockRetire.BuildMissedIndicesIfNeed; E3 path uses
+// Aggregator.BuildMissedAccessors. Both are nil-safe: a nil
+// dependency skips that side of the build (useful for tests and
+// tools that only construct one half of the storage stack).
 type productionIndexBuilder struct {
 	blockRetire  services.BlockRetire
 	agg          *state.Aggregator

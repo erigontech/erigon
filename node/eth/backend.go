@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/disk"
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
@@ -424,6 +425,15 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.kvRPC = kvRPC
 
 	// Storage component: owns DB references, file-change callbacks, block retire.
+	// Aggregator + IndexWorkers feed productionIndexBuilder when the lifecycle
+	// driver is active (LifecycleDrivenByStorage). The structural cast through
+	// kv.TemporalRwDB.Agg() avoids importing temporal/state at this layer.
+	var agg *state.Aggregator
+	if dbWithAgg, ok := temporalDb.(interface{ Agg() any }); ok {
+		if a, ok := dbWithAgg.Agg().(*state.Aggregator); ok {
+			agg = a
+		}
+	}
 	if err := backend.components.BuildStorage(storagecomp.Deps{
 		Ctx:                  ctx,
 		ChainDB:              temporalDb,
@@ -439,6 +449,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		DBEventNotifier:      backend.notifications.Events,
 		DownloaderClient:     backend.downloaderClient,
 		Inventory:            inv,
+		Aggregator:           agg,
+		IndexWorkers:         estimate.IndexSnapshot.Workers(),
 		SegmentsBuildLimiter: segmentsBuildLimiter,
 		Logger:               logger,
 	}); err != nil {
