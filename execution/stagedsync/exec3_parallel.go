@@ -344,34 +344,9 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					// (no blockResult for it) but the channel closed cleanly: that
 					// means the exec loop signaled "done" without delivering the
 					// final block.
-					{
-						var missing []uint64
-						for n := range txResultBlocks {
-							if _, ok := appliedBlocks[n]; !ok {
-								missing = append(missing, n)
-							}
-						}
-						if !pe.reachedMaxBlock.Load() {
-							if _, ok := appliedBlocks[pe.maxBlockNum]; !ok {
-								// maxBlockNum was never validated — even if no
-								// txResults arrived for it, this is a silent
-								// "exec gave up before delivering the goal" failure.
-								addMissing := true
-								for _, m := range missing {
-									if m == pe.maxBlockNum {
-										addMissing = false
-										break
-									}
-								}
-								if addMissing {
-									missing = append(missing, pe.maxBlockNum)
-								}
-							}
-						}
-						if len(missing) > 0 {
-							return fmt.Errorf("%w: apply loop exited (reachedMaxBlock=%v lastBlockResult=%d maxBlockNum=%d) but %d block(s) had tx-results without a blockResult or were never delivered: %v",
-								rules.ErrInvalidBlock, pe.reachedMaxBlock.Load(), lastBlockResult.BlockNum, pe.maxBlockNum, len(missing), missing)
-						}
+					if missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks, pe.reachedMaxBlock.Load(), pe.maxBlockNum); len(missing) > 0 {
+						return fmt.Errorf("%w: apply loop exited (reachedMaxBlock=%v lastBlockResult=%d maxBlockNum=%d) but %d block(s) had tx-results without a blockResult or were never delivered: %v",
+							rules.ErrInvalidBlock, pe.reachedMaxBlock.Load(), lastBlockResult.BlockNum, pe.maxBlockNum, len(missing), missing)
 					}
 					if pe.reachedMaxBlock.Load() {
 						return nil
@@ -1039,6 +1014,40 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 	}
 
 	return nil
+}
+
+// applyLoopMissingBlocks returns the blockNums in txResultBlocks that
+// did not produce a corresponding blockResult — meaning the per-block
+// validator never fired for them and an invalid block could become
+// canonical. If reachedMaxBlock is false and maxBlockNum was never
+// applied, that block is added too (the exec loop signaled "done"
+// without delivering the goal). Returns nil if the apply loop's exit
+// satisfies the completeness invariant.
+//
+// Pure function — extracted from the apply loop's channel-close branch
+// so the invariant is unit-testable. See TestApplyLoopMissingBlocks.
+func applyLoopMissingBlocks(txResultBlocks, appliedBlocks map[uint64]struct{}, reachedMaxBlock bool, maxBlockNum uint64) []uint64 {
+	var missing []uint64
+	for n := range txResultBlocks {
+		if _, ok := appliedBlocks[n]; !ok {
+			missing = append(missing, n)
+		}
+	}
+	if !reachedMaxBlock {
+		if _, ok := appliedBlocks[maxBlockNum]; !ok {
+			seen := false
+			for _, m := range missing {
+				if m == maxBlockNum {
+					seen = true
+					break
+				}
+			}
+			if !seen {
+				missing = append(missing, maxBlockNum)
+			}
+		}
+	}
+	return missing
 }
 
 // execLoopExitCheck enforces the completeness invariant for the exec
