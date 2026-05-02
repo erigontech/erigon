@@ -27,13 +27,29 @@ scales with retained data.
 
 Initial measurement target on hoodi:
 
-| Run | Prune | Flag | Time-to-tip | Peers (Caplin/eth) | Disk |
-|---|---|---|---|---|---|
-| Smoke 1 | default (full) | off | ~3h | 127/32 | ~30 GB |
-| Smoke 2 | default (full) | on | ~47 min | 97/29 | ~30 GB |
-| Item 1 | default (full) | on + tight gate | ~44 min | 97/64 | ~30 GB |
-| **Minimal** | minimal | on + tight gate | TBD | TBD | TBD |
-| **Archive** | archive | on + tight gate | TBD | TBD | TBD |
+| Run | Prune | Flag | Time-to-tip | Peers (Caplin/eth) | Disk | Lifecycle counts |
+|---|---|---|---|---|---|---|
+| Smoke 1 | default (full) | off | ~3h | 127/32 | ~30 GB | n/a (flag off) |
+| Smoke 2 | default (full) | on | ~47 min | 97/29 | ~30 GB | unobserved (pre-observability) |
+| Item 1 | default (full) | on + tight gate | ~44 min | 97/64 | ~30 GB | 3901 BMI / 188 idx / 188 adv |
+| **Minimal** | minimal | on + tight gate | **18 min 30 s** | 127/n.a. | TBD | 1705 BMI / 209 idx / 209 adv |
+| **Archive** | archive | on + tight gate | TBD | TBD | TBD | TBD |
+
+BMI = BuildMissedIndices invocations; idx = advanced-to-Indexed
+transitions; adv = advanced-to-Advertisable transitions. With the
+tight gate confirmed (zero `RetireBlocks`-prefixed BuildMissed
+lines in the minimal run), every BMI invocation is storage-driven.
+
+**Minimal mode observations** (run 2026-05-02 17:05:30 → 17:24:00):
+
+  - Time-to-tip 18 min 30 s. ~2.4× faster than default mode (item 1).
+    Less data to retain → faster sync.
+  - Lifecycle ratio: 1705 BMI / 209 advances = ~8 invocations per
+    transition. Smaller ratio than item 1's ~21:1 (3901/188), but
+    same architectural inefficiency (per-Downloaded-file invocation
+    of a global builder).
+  - Tight gate working as intended; storage-driven path is the
+    only builder.
 
 Smoke 1 vs Smoke 2 difference (3h vs 47m) is mostly network /
 peer-warmup variance, not architectural — both produced snapshots,
