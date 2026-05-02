@@ -1206,8 +1206,8 @@ func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, va
 		testHook(rs)
 	}
 
-	for {
-		// Reset positions at the start of each iteration to handle collision retries correctly
+	var prevKey []byte // for duplicate-key detection
+	for attempt := 0; ; attempt++ {
 		var keyPos, valPos uint64
 		word := make([]byte, 0, 256)
 		if err := ctx.Err(); err != nil {
@@ -1215,9 +1215,16 @@ func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, va
 		}
 		g.Reset(0)
 		rs.SetProgress(p)
+		prevKey = prevKey[:0]
 
 		for g.HasNext() {
 			word, valPos = g.Next(word[:0])
+			if asserts {
+				if bytes.Equal(word, prevKey) {
+					return fmt.Errorf("buildHashMapAccessor: duplicate key %x in %s", word, fileName)
+				}
+				prevKey = append(prevKey[:0], word...)
+			}
 			if values {
 				if err = rs.AddKey(word, valPos); err != nil {
 					return fmt.Errorf("add idx key [%x]: %w", word, err)
@@ -1233,6 +1240,9 @@ func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, va
 		}
 		if err = rs.Build(ctx); err != nil {
 			if rs.Collision() {
+				if attempt >= 99 {
+					return fmt.Errorf("buildHashMapAccessor: too many recsplit collisions (likely duplicate keys) in %s keys=%d", fileName, count)
+				}
 				logger.Info("Building recsplit. Collision happened. It's ok. Restarting...", "file", fileName, "keys", count)
 				rs.ResetNextSalt()
 			} else {
