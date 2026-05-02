@@ -501,6 +501,8 @@ func (tx *AccountAbstractionTransaction) PreTransactionGasCost(rules *chain.Rule
 		IsEIP2028:         rules.IsIstanbul,
 		IsEIP3860:         hasEIP3860,
 		IsEIP7623:         rules.IsPrague,
+		IsEIP7976:         rules.IsAmsterdam,
+		IsEIP7981:         rules.IsAmsterdam,
 		IsEIP8037:         rules.IsAmsterdam,
 		IsAATxn:           true,
 	})

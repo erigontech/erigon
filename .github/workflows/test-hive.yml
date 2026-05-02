@@ -22,30 +22,31 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # `sim` is the simulator path passed to `hive --sim`. Most simulators
+        # live under simulators/ethereum/, but a few (e.g. devp2p) are top-level.
         include:
-          - sim: engine
-            sim-limit: exchange-capabilities
+          - sim: ethereum/engine
+            sim-limit: exchange-capabilities|auth
             max-allowed-failures: 0
-          - sim: engine
+          - sim: ethereum/engine
             sim-limit: withdrawals
             max-allowed-failures: 0
-          - sim: engine
+          - sim: ethereum/engine
             sim-limit: cancun
-            # 2 failures (not due to us, but due to Hive/Geth secondary client)
-            # will remove once resolved by STEEL team (these 2 tests are failing on all clients)
-            # see https://discord.com/channels/1359927674746835211/1410592782258540565/1462699469824065560
-            # 3rd allowed failure: "Blob Transaction Ordering, Multiple Clients (Cancun)" is a
-            # known flake under --sim.parallelism=8 due to timing/resource contention; passes
-            # cleanly in isolation (--sim.parallelism=1)
-            max-allowed-failures: 3
-          - sim: engine
+            max-allowed-failures: 0
+          - sim: ethereum/engine
             sim-limit: api
             max-allowed-failures: 0
-          - sim: engine
-            sim-limit: auth
-            max-allowed-failures: 0
-          - sim: rpc-compat
+          - sim: ethereum/rpc-compat
             sim-limit: ".*"
+            max-allowed-failures: 0
+          # devp2p/eth: regression guard for eth wire protocol handlers
+          # (GetBlockHeaders skip traversal, BlockRangeUpdate invalid-packet kick,
+          # blob-sidecar commitment check, eth/68 announcement size/type check).
+          # The sibling devp2p suites (snap, discv4, discv5) are intentionally
+          # excluded — they have unrelated pre-existing failures.
+          - sim: devp2p
+            sim-limit: eth
             max-allowed-failures: 0
     steps:
       - name: Checkout Erigon meta
@@ -98,6 +99,7 @@ jobs:
       - name: Get dependencies and build hive
         env:
           SOURCE_REPO: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          EXECUTION_APIS_REF: ${{ steps.hive-version.outputs.execution_apis_ref }}
         run: |
           cd hive
           go get . >> buildlogs.log
@@ -112,10 +114,15 @@ jobs:
           sed -i "s|golang:[0-9.]*-|golang:${go_version}-|" clients/erigon/Dockerfile
           # Pin the execution-apis ref used by the rpc-compat simulator so that
           # upstream test additions don't break CI unexpectedly.
-          execution_apis_ref="${{ steps.hive-version.outputs.execution_apis_ref }}"
-          if [ -n "$execution_apis_ref" ]; then
-            echo "Pinning rpc-compat execution-apis ref to ${execution_apis_ref}"
-            sed -i "s/^ARG branch=main$/ARG branch=${execution_apis_ref}/" simulators/ethereum/rpc-compat/Dockerfile
+          # SECURITY: value comes from hive-versions.json which fork PRs can modify;
+          # validate it is a 40-char hex SHA before use to prevent injection.
+          if [ -n "$EXECUTION_APIS_REF" ]; then
+            if ! echo "$EXECUTION_APIS_REF" | grep -qE '^[0-9a-f]{40}$'; then
+              echo "Error: execution_apis_ref is not a valid git SHA: $EXECUTION_APIS_REF"
+              exit 1
+            fi
+            echo "Pinning rpc-compat execution-apis ref to ${EXECUTION_APIS_REF}"
+            sed -i "s/^ARG branch=main$/ARG branch=${EXECUTION_APIS_REF}/" simulators/ethereum/rpc-compat/Dockerfile
           fi
           go build . >> buildlogs.log
       # Depends on the last line of hive output that prints the number of suites, tests and failed
@@ -134,7 +141,7 @@ jobs:
             echo -e "\n\n============================================================"
             echo "Running test: ${1}-${2}"
             echo -e "\n"
-            ./hive -docker.auth --sim ethereum/"${1}" --sim.limit="${2}" --sim.limit.exact=false --sim.parallelism=8 --sim.timelimit 15m --docker.output --client erigon 2>&1 | tee output.log || {
+            ./hive -docker.auth --sim "${1}" --sim.limit="${2}" --sim.limit.exact=false --sim.parallelism=8 --sim.timelimit 15m --docker.output --client erigon 2>&1 | tee output.log || {
               if [ $? -gt 0 ]; then
                 echo "Exitcode gt 0"
               fi
@@ -144,12 +151,12 @@ jobs:
             if [ -z "$suites" ]; then
               status_line=$(tail -1 output.log | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g")
               suites=$(echo "$status_line" | sed -n 's/.*suites=\([0-9]*\).*/\1/p')
-            fi 
+            fi
             tests=$(echo "$status_line" | sed -n 's/.*tests=\([0-9]*\).*/\1/p')
             failed=$(echo "$status_line" | sed -n 's/.*failed=\([0-9]*\).*/\1/p')
 
             echo -e "\n"
-            echo "-----------   Results for ${1}-${2}    -----------" 
+            echo "-----------   Results for ${1}-${2}    -----------"
             echo "Tests: $tests, Failed: $failed"
             echo -e "\n\n============================================================"
 
@@ -198,3 +205,12 @@ jobs:
           echo "Pruning docker..."
           docker system prune -af --volumes
         if: always()
+
+      # In the merge queue, cancel the run on first failure so the gate
+      # doesn't stall waiting for still-running siblings. PR runs keep
+      # going so authors see the full failure picture.
+      - name: Cancel workflow run on failure
+        if: failure() && github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run cancel ${{ github.run_id }} || true

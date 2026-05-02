@@ -45,6 +45,12 @@ func TestMakeTopics(t *testing.T) {
 			false,
 		},
 		{
+			"support fixed byte boundary type of 32 bytes",
+			args{[][]any{{[32]byte{0: 1, 31: 2}}}},
+			[][]common.Hash{{common.Hash{0: 1, 31: 2}}},
+			false,
+		},
+		{
 			"reject fixed byte types longer than 32 bytes",
 			args{[][]any{{[33]byte{1}}}},
 			nil,
@@ -72,6 +78,24 @@ func TestMakeTopics(t *testing.T) {
 			"support negative *big.Int types in topics",
 			args{[][]any{{big.NewInt(-1)}}},
 			[][]common.Hash{{common.HexToHash("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")}},
+			false,
+		},
+		{
+			"support minimum int256 boundary in topics",
+			args{[][]any{{new(big.Int).Lsh(big.NewInt(-1), 255)}}},
+			[][]common.Hash{{common.HexToHash("0x8000000000000000000000000000000000000000000000000000000000000000")}},
+			false,
+		},
+		{
+			"support maximum int256 boundary in topics",
+			args{[][]any{{new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 255), big.NewInt(1))}}},
+			[][]common.Hash{{common.HexToHash("0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")}},
+			false,
+		},
+		{
+			"truncate values exceeding 256 bits in topics",
+			args{[][]any{{new(big.Int).Lsh(big.NewInt(1), 256)}}},
+			[][]common.Hash{{common.Hash{}}},
 			false,
 		},
 		{

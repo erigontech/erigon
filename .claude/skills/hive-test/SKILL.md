@@ -28,6 +28,7 @@ The user may specify one or more test suites in any combination:
 | `rpc-compat` | ethereum/rpc | RPC compatibility |
 | `eest` | ethereum/eels/consume-engine | Execution Spec Tests (version auto-discovered) |
 | `eest-bal` | ethereum/eels/consume-engine | EEST BAL amsterdam fixtures (version auto-discovered) |
+| `eest-rlp` | ethereum/eels/consume-rlp | EEST RLP block import (BlockchainTest, all forks) |
 
 ### Groups
 | Group name | Expands to |
@@ -41,6 +42,7 @@ The user may specify one or more test suites in any combination:
 - `/hive-test engine` - Run all engine suites
 - `/hive-test engine rpc-compat` - Run all engine suites plus rpc-compat
 - `/hive-test eest-bal` - Run BAL-specific EEST tests
+- `/hive-test eest-rlp` - Run EEST RLP block-import tests
 - `/hive-test all` - Run everything
 
 ### Options
@@ -53,19 +55,27 @@ The user may specify one or more test suites in any combination:
 
 ## Expected Failures (CI thresholds)
 
+Sources of truth: `.github/workflows/test-hive.yml` (`max-allowed-failures` per matrix
+entry) for engine + rpc-compat suites, `.github/workflows/test-hive-eest.yml`
+(`max-failures`, default 0) for eest shards.
+
 | Suite | Max Allowed Failures |
 |-------|---------------------|
 | exchange-capabilities | 0 |
 | withdrawals | 0 |
-| cancun | 3 |
+| cancun | 3 (2 known Hive/Geth secondary-client failures + 1 known parallelism flake) |
 | api | 0 |
 | auth | 0 |
-| rpc-compat | 23 |
+| rpc-compat | 0 |
 | eest (consume-engine) | 0 |
-| eest-bal | 4 (upstream BPO2ToAmsterdamAtTime15k fork transition) |
+| eest-rlp | 0 |
+| eest-bal (CI shard: `glamsterdam-devnet`) | 1 (`test_block_regular_gas_limit` — `GAS_USED_OVERFLOW` vs `GAS_ALLOWANCE_EXCEEDED` error classification mismatch) |
 
 Note: Failure counts are version-dependent and may change with newer fixtures.
-The eest-bal fork transition failures are a known upstream issue, not Erigon bugs.
+The CI `glamsterdam-devnet` shard runs BAL EIPs (`8024|7708|7778|7843|7928|7954|8037`)
+against `bal@v5.6.1/fixtures_bal.tar.gz` from the `devnets/bal/3` branch, with
+`--experimental.bal` enabled on the erigon side. Reproduce locally by aligning
+the `eest-bal` invocation with these arguments.
 
 ## Procedure
 
@@ -143,7 +153,6 @@ EEST: $EEST_VERSION | BAL: $BAL_TAG (branch: $BAL_BRANCH) | Strict matching: ena
    - Base image: `golang:1.25.7-trixie` (Debian, not Alpine)
    - Build command: `make erigon`
    - Runtime: `debian:13-slim` with `bash curl jq libstdc++6 libgcc-s1`
-   - P2P protocol: `erigon.sh` must include `--p2p.protocol 68,69`
 
    If `clients/erigon/Dockerfile.local` doesn't already exist, write the correct version:
    ```dockerfile
@@ -168,9 +177,7 @@ EEST: $EEST_VERSION | BAL: $BAL_TAG (branch: $BAL_BRANCH) | Strict matching: ena
    ```
 
 6. **P2P protocol configuration:**
-   Do NOT add `--p2p.protocol` flags to erigon.sh. The hive devp2p simulator
-   does not yet support eth/69, so advertising it causes Fork ID test failures
-   (`rlp: expected input list for devp2p.Disconnect`). Let erigon use its default
+   Do NOT add `--p2p.protocol` flags to erigon.sh. Let erigon use its default
    protocol negotiation.
 
 6b. **Parallel execution for Amsterdam (BAL) blocks:**
@@ -246,6 +253,30 @@ with `--sim.limit "suite1|suite2|..."`.
   --sim.timelimit 60m
 ```
 
+**EEST RLP** (sim: `ethereum/eels/consume-rlp`):
+
+Tests block import via RLP-encoded blocks loaded at client startup (the historical
+sync code path). Uses the `BlockchainTest` fixture format and covers all forks
+including pre-merge, complementary to consume-engine which only covers Paris+.
+See https://eest.ethereum.org/main/running_tests/running/#engine-vs-rlp-simulator.
+
+The full RLP test set is too large to run end-to-end in CI — always pass a
+`--sim.limit` regex narrowing the scope. CI mirrors this by running only
+`.*eip2930_access_list.*`. For local debugging, target a single EIP / opcode
+group similarly. Fixtures come from the same `fixtures_develop.tar.gz` archive
+as consume-engine.
+
+```bash
+# $EEST_VERSION discovered in Phase 0 (e.g. v5.4.0), or user-provided via eest-version=
+# Replace the sim.limit regex to scope to the area under test.
+./hive --client-file erigon-local.yaml \
+  --sim ethereum/eels/consume-rlp \
+  --sim.limit=".*eip2930_access_list.*" \
+  --sim.parallelism=12 --docker.nocache=true \
+  --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/${EEST_VERSION}/fixtures_develop.tar.gz \
+  --sim.timelimit 60m
+```
+
 Note: The `disable_strict_exception_matching` flag is only added when Phase 0 detects
 that the EEST `ErigonExceptionMapper` at the discovered tag is missing required entries
 (e.g. `BlockException.GAS_USED_OVERFLOW`, BAL exception types). Once upstream updates
@@ -281,9 +312,6 @@ docker image prune -f
 ```
 
 ## Troubleshooting
-
-### Fork ID test failures: "rlp: expected input list for devp2p.Disconnect"
-The erigon.sh is missing eth/69 support. Ensure `--p2p.protocol 68,69`.
 
 ### Timeout failures
 Run suites separately instead of combining them. Increase `--sim.timelimit` if needed.

@@ -22,14 +22,17 @@ import (
 	"io"
 	"math"
 	"math/bits"
+	"os"
 	"sort"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/edsrzf/mmap-go"
 
 	"github.com/erigontech/erigon/db/recsplit/efcommon"
 
 	"github.com/erigontech/erigon/common/bitutil"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/kv/stream"
 )
 
@@ -63,6 +66,34 @@ type EliasFano struct {
 	wordsUpperBits int
 }
 
+// OffHeapBuilder wraps *EliasFano with a mmapped temp file as the backing
+// buffer. OS resources (file descriptor + mmap) live here rather than on
+// EliasFano so heap-backed EliasFano carries no extra overhead.
+type OffHeapBuilder struct {
+	*EliasFano
+	backingMmap mmap.MMap
+	backingFile *os.File
+}
+
+func (b *OffHeapBuilder) Close() {
+	if b.backingMmap != nil {
+		_ = b.backingMmap.Unmap()
+		b.backingMmap = nil
+		// Nil the sub-slices so any use-after-Close panics immediately
+		// instead of silently reading unmapped memory.
+		b.EliasFano.data = nil
+		b.EliasFano.lowerBits = nil
+		b.EliasFano.upperBits = nil
+		b.EliasFano.jump = nil
+	}
+	if b.backingFile != nil {
+		name := b.backingFile.Name()
+		_ = b.backingFile.Close()
+		dir.RemoveFile(name)
+		b.backingFile = nil
+	}
+}
+
 func NewEliasFano(count uint64, maxOffset uint64) *EliasFano {
 	if count == 0 {
 		panic(fmt.Sprintf("too small count: %d", count))
@@ -75,6 +106,52 @@ func NewEliasFano(count uint64, maxOffset uint64) *EliasFano {
 	ef.u = maxOffset + 1
 	ef.wordsUpperBits = ef.deriveFields()
 	return ef
+}
+
+// fallocate extends f to size bytes and forces disk-block allocation. On
+// sparse-file filesystems (Linux ext4) an RDWR mmap write to an unallocated
+// region raises SIGBUS; this write surfaces ENOSPC as a normal error instead.
+func fallocate(f *os.File, size int64) error {
+	_, err := f.WriteAt([]byte{0}, size-1)
+	return err
+}
+
+// NewEliasFanoOffHeap is like NewEliasFano but backs the data buffer with a
+// mmapped temp file. Use when the buffer would be too large for the Go heap
+// (multi-GB EFs during snapshot builds). Caller MUST Close() after Write.
+func NewEliasFanoOffHeap(count uint64, maxOffset uint64, tmpFilePath string) (*OffHeapBuilder, error) {
+	if count == 0 {
+		panic(fmt.Sprintf("too small count: %d", count))
+	}
+	ef := &EliasFano{
+		count:     count - 1,
+		maxOffset: maxOffset,
+	}
+	ef.u = maxOffset + 1
+	_, _, _, totalWords := ef.computeLayout()
+	sizeBytes := int64(totalWords) * uint64Size
+	if sizeBytes > math.MaxInt {
+		return nil, fmt.Errorf("elias fano size %d exceeds platform mmap limit", sizeBytes)
+	}
+
+	f, err := dir.CreateTempWithExtension(tmpFilePath, "ef.tmp")
+	if err != nil {
+		return nil, fmt.Errorf("create ef tmp file %q: %w", tmpFilePath, err)
+	}
+	if err := fallocate(f, sizeBytes); err != nil {
+		f.Close()
+		dir.RemoveFile(f.Name())
+		return nil, fmt.Errorf("pre-allocate ef tmp file: %w", err)
+	}
+	m, err := mmap.MapRegion(f, int(sizeBytes), mmap.RDWR, 0, 0)
+	if err != nil {
+		f.Close()
+		dir.RemoveFile(f.Name())
+		return nil, fmt.Errorf("mmap ef tmp file: %w", err)
+	}
+	ef.data = unsafe.Slice((*uint64)(unsafe.Pointer(&m[0])), totalWords)
+	ef.wordsUpperBits = ef.deriveFields()
+	return &OffHeapBuilder{EliasFano: ef, backingMmap: m, backingFile: f}, nil
 }
 
 func (ef *EliasFano) Size() datasize.ByteSize { return datasize.ByteSize(len(ef.data) * 8) }
@@ -98,17 +175,22 @@ func (ef *EliasFano) jumpSizeWords() int {
 	return int(size)
 }
 
-func (ef *EliasFano) deriveFields() int {
-	if ef.u/(ef.count+1) == 0 {
-		ef.l = 0
-	} else {
-		ef.l = 63 ^ uint64(bits.LeadingZeros64(ef.u/(ef.count+1))) // pos of first non-zero bit
+// computeLayout returns the bit-width l and the word counts that partition ef.data.
+// Shared by deriveFields (heap path) and NewEliasFanoOffHeap (mmap pre-sizing).
+func (ef *EliasFano) computeLayout() (l uint64, wordsLowerBits, wordsUpperBits, totalWords int) {
+	if ef.u/(ef.count+1) != 0 {
+		l = 63 ^ uint64(bits.LeadingZeros64(ef.u/(ef.count+1)))
 	}
+	wordsLowerBits = int(((ef.count+1)*l+63)/64 + 1)
+	wordsUpperBits = int((ef.count + 1 + (ef.u >> l) + 63) / 64)
+	totalWords = wordsLowerBits + wordsUpperBits + ef.jumpSizeWords()
+	return
+}
+
+func (ef *EliasFano) deriveFields() int {
+	l, wordsLowerBits, wordsUpperBits, totalWords := ef.computeLayout()
+	ef.l = l
 	ef.lowerBitsMask = (uint64(1) << ef.l) - 1
-	wordsLowerBits := int(((ef.count+1)*ef.l+63)/64 + 1)
-	wordsUpperBits := int((ef.count + 1 + (ef.u >> ef.l) + 63) / 64)
-	jumpWords := ef.jumpSizeWords()
-	totalWords := wordsLowerBits + wordsUpperBits + jumpWords
 	//fmt.Printf("EF: %d, %d,%d,%d\n", totalWords, wordsLowerBits, wordsUpperBits, jumpWords)
 	if cap(ef.data) < totalWords {
 		alloc := totalWords

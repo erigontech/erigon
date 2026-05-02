@@ -91,26 +91,6 @@ var (
 		Name:  "prune.distance.blocks",
 		Usage: `Keep block history for the latest N blocks (default: everything)`,
 	}
-	// mTLS flags
-	TLSFlag = cli.BoolFlag{
-		Name:  "tls",
-		Usage: "Enable TLS handshake",
-	}
-	TLSCertFlag = cli.StringFlag{
-		Name:  "tls.cert",
-		Usage: "Specify certificate",
-		Value: "",
-	}
-	TLSKeyFlag = cli.StringFlag{
-		Name:  "tls.key",
-		Usage: "Specify key file",
-		Value: "",
-	}
-	TLSCACertFlag = cli.StringFlag{
-		Name:  "tls.cacert",
-		Usage: "Specify certificate authority",
-		Value: "",
-	}
 	StateStreamDisableFlag = cli.BoolFlag{
 		Name:  "state.stream.disable",
 		Usage: "Disable streaming of state changes from core to RPC daemon",
@@ -150,11 +130,6 @@ var (
 		Name:  "bad.block",
 		Usage: "Marks block with given hex string as bad and forces initial reorg before normal staged sync",
 		Value: "",
-	}
-
-	HealthCheckFlag = cli.BoolFlag{
-		Name:  "healthcheck",
-		Usage: "Enable grpc health check",
 	}
 
 	HTTPReadTimeoutFlag = cli.DurationFlag{
@@ -552,9 +527,9 @@ func setPrivateApi(ctx *cli.Context, cfg *nodecfg.Config) {
 		log.Warn("private.api.ratelimit is too big", "force", maxRateLimit)
 		cfg.PrivateApiRateLimit = maxRateLimit
 	}
-	if ctx.Bool(TLSFlag.Name) {
-		certFile := ctx.String(TLSCertFlag.Name)
-		keyFile := ctx.String(TLSKeyFlag.Name)
+	if ctx.Bool(utils.TLSFlag.Name) {
+		certFile := ctx.String(utils.TLSCertFlag.Name)
+		keyFile := ctx.String(utils.TLSKeyFlag.Name)
 		if certFile == "" {
 			log.Warn("Could not establish TLS grpc: missing certificate")
 			return
@@ -565,7 +540,7 @@ func setPrivateApi(ctx *cli.Context, cfg *nodecfg.Config) {
 		cfg.TLSConnection = true
 		cfg.TLSCertFile = certFile
 		cfg.TLSKeyFile = keyFile
-		cfg.TLSCACert = ctx.String(TLSCACertFlag.Name)
+		cfg.TLSCACert = ctx.String(utils.TLSCACertFlag.Name)
 	}
-	cfg.HealthCheck = ctx.Bool(HealthCheckFlag.Name)
+	cfg.HealthCheck = ctx.Bool(utils.HealthCheckFlag.Name)
 }

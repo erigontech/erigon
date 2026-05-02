@@ -50,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/common/disk"
 	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/kv"
@@ -249,8 +250,6 @@ func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, logger log.Logger, dirs datadi
 	}
 	return nil
 }
-
-const blockBufferSize = 128
 
 // sentryMcDisableBlockDownload suppresses the MultiClient's internal header +
 // body downloaders. Blocks are fetched via the staged-sync download path
@@ -677,7 +676,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		Dirs:                   stack.Config().Dirs,
 		Engine:                 backend.engine,
 		SyncCfg:                config.Sync,
-		BlockBufferSize:        blockBufferSize,
+		BlockBufferSize:        sentry_multi_client.DefaultBlockBufferSize,
 		LogPeerInfo:            stack.Config().SentryLogPeerInfo,
 		MaxBlockBroadcastPeers: maxBlockBroadcastPeers,
 		DisableBlockDownload:   sentryMcDisableBlockDownload,
@@ -1284,12 +1283,23 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
-	agg, err := state.New(dirs).Logger(logger).SanityOldNaming().GenSaltIfNeed(createNewSaltFileIfNeeded).WithErigonDBSettings(erigonDBSettings).Open(ctx, db)
+	aggOpts := state.New(dirs).Logger(logger).SanityOldNaming().GenSaltIfNeed(createNewSaltFileIfNeeded).WithErigonDBSettings(erigonDBSettings)
+	if snConfig.ErigondbDomainStepsInFrozenFile != nil {
+		v := *snConfig.ErigondbDomainStepsInFrozenFile
+		stepsStr := "Inf"
+		if v != config3.UnboundedDomainMerge {
+			stepsStr = fmt.Sprintf("%d", v)
+		}
+		logger.Info("domain merge cap overridden", "steps_in_frozen_file", stepsStr)
+		aggOpts = aggOpts.ErigondbDomainStepsInFrozenFile(v)
+	}
+	agg, err := aggOpts.Open(ctx, db)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 	agg.SetProduceMod(snConfig.Snapshot.ProduceE3)
+	agg.SetFrozenBlocksProvider(blockReader)
 
 	allSegmentsDownloadComplete, err := rawdb.AllSegmentsDownloadCompleteFromDB(db)
 	if err != nil {

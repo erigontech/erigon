@@ -137,3 +137,55 @@ curl -s --data '{"jsonrpc":"2.0","method":"admin_removePeer","params":["enode://
 | Boolean | True if the peer was successfully removed, false otherwise |
 
 ***
+
+## **admin\_addTrustedPeer**
+
+Adds a peer to the trusted peers list. Trusted peers are exempt from the maximum peer count limit and will always be connected, even when the node has reached its peer limit.
+
+**Parameters**
+
+| Parameter | Type   | Description                                                              |
+| --------- | ------ | ------------------------------------------------------------------------ |
+| enode     | STRING | The enode URL of the trusted peer to add (format: enode://pubkey@ip:port) |
+
+**Example**
+
+{% code overflow="wrap" %}
+```bash
+curl -s --data '{"jsonrpc":"2.0","method":"admin_addTrustedPeer","params":["enode://a979fb575495b8d6db44f750317d0f4622bf4c2aa3365d6af7c284339968eef29b69ad0dce72a4d8db5ebb4968de0e3bec910127f134779fbcb0cb6d3331163c@52.16.188.185:30303"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
+```
+{% endcode %}
+
+**Returns**
+
+| Type    | Description                                                       |
+| ------- | ----------------------------------------------------------------- |
+| Boolean | True if the trusted peer was successfully added, false otherwise  |
+
+***
+
+## **admin\_removeTrustedPeer**
+
+Removes a peer from the trusted peers list. The peer may still remain connected if slots are available, but will no longer bypass the peer limit.
+
+**Parameters**
+
+| Parameter | Type   | Description                                                                 |
+| --------- | ------ | --------------------------------------------------------------------------- |
+| enode     | STRING | The enode URL of the trusted peer to remove (format: enode://pubkey@ip:port) |
+
+**Example**
+
+{% code overflow="wrap" %}
+```bash
+curl -s --data '{"jsonrpc":"2.0","method":"admin_removeTrustedPeer","params":["enode://a979fb575495b8d6db44f750317d0f4622bf4c2aa3365d6af7c284339968eef29b69ad0dce72a4d8db5ebb4968de0e3bec910127f134779fbcb0cb6d3331163c@52.16.188.185:30303"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
+```
+{% endcode %}
+
+**Returns**
+
+| Type    | Description                                                          |
+| ------- | -------------------------------------------------------------------- |
+| Boolean | True if the trusted peer was successfully removed, false otherwise   |
+
+***
