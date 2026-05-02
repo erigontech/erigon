@@ -709,9 +709,14 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *
 		fromTxNum = uint64(stepFrom-1) * d.stepSize
 	}
 
+	var prevBareKey []byte // for LargeValues: ETL sorts by domainKey+~step; keep only the first (= latest step) per key
 	err = wal.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if d.LargeValues {
 			bareKey := k[:len(k)-8]
+			if bytes.Equal(bareKey, prevBareKey) {
+				return nil // same domain key at an older step — skip
+			}
+			prevBareKey = append(prevBareKey[:0], bareKey...)
 			val := v
 			if vt != nil {
 				val, err = vt(v, fromTxNum, endTxNum)
