@@ -324,7 +324,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 
 		if err = rs.Build(ctx); err != nil {
 			if rs.Collision() {
-				log.Info("Building recsplit. Collision happened. It's ok. Restarting...")
+				log.Info("Building recsplit. Collision happened. It's ok. Restarting...", "file", fName, "keys", cnt)
 				rs.ResetNextSalt()
 			} else {
 				return fmt.Errorf("build idx: %w", err)

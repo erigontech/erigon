@@ -1233,7 +1233,7 @@ func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, va
 		}
 		if err = rs.Build(ctx); err != nil {
 			if rs.Collision() {
-				logger.Info("Building recsplit. Collision happened. It's ok. Restarting...")
+				logger.Info("Building recsplit. Collision happened. It's ok. Restarting...", "file", fileName, "keys", count)
 				rs.ResetNextSalt()
 			} else {
 				return fmt.Errorf("build idx: %w", err)
