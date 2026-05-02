@@ -44,12 +44,12 @@ func domainStat(cliCtx *cli.Context) error {
 	domainCfg := statecfg.Schema.GetDomainCfg(kv.Domain(domain))
 	var cursor kv.Cursor
 	if domainCfg.LargeValues {
-		cursor, err = tx.Cursor(domainCfg.ValuesTable)
+		cursor, err = tx.Cursor(domainCfg.KeysTable)
 		if err != nil {
 			return err
 		}
 	} else {
-		cursor, err = tx.CursorDupSort(domainCfg.ValuesTable)
+		cursor, err = tx.CursorDupSort(domainCfg.KeysTable)
 		if err != nil {
 			return err
 		}

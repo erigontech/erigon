@@ -2269,7 +2269,7 @@ func TestDomain_PruneProgress(t *testing.T) {
 		TxFrom:          0,
 		TxTo:            stepSize,
 	}
-	err = SavePruneValProgress(rwTx, d.ValuesTable, injected)
+	err = SavePruneValProgress(rwTx, d.KeysTable, injected)
 	require.NoError(t, err)
 
 	stat, err := domainRoTx.prune(ctx, rwTx, 0, 0, stepSize, math.MaxUint64, logEvery)
@@ -2279,13 +2279,13 @@ func TestDomain_PruneProgress(t *testing.T) {
 	require.LessOrEqual(t, stat.Values+stat.Dups, uint64(keyCount/2),
 		"only entries at/after the cursor position should be deleted")
 
-	prg, err := GetPruneValProgress(rwTx, []byte(d.ValuesTable))
+	prg, err := GetPruneValProgress(rwTx, []byte(d.KeysTable))
 	require.NoError(t, err)
 	require.Equal(t, prune.Done, prg.ValueProgress)
 	require.Nil(t, prg.LastPrunedValue, "cursor must be nil after a completed rotation")
 
 	// Verify the first half of keys still exists (before the cursor, not pruned).
-	remaining := countDupSortKeys(t, rwTx, d.ValuesTable)
+	remaining := countDupSortKeys(t, rwTx, d.KeysTable)
 	require.Equal(t, int(keyCount/2), remaining,
 		"keys 0..keyCount/2-1 skipped by rolling cursor must remain")
 
@@ -2296,7 +2296,7 @@ func TestDomain_PruneProgress(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, prune.Done, stat2.Progress)
 	require.Zero(t, stat2.Values+stat2.Dups, "early-exit must do no deletions")
-	require.Equal(t, int(keyCount/2), countDupSortKeys(t, rwTx, d.ValuesTable),
+	require.Equal(t, int(keyCount/2), countDupSortKeys(t, rwTx, d.KeysTable),
 		"early-exit must not change table contents")
 
 	// --- Part 3: new rotation when txTo advances ---------------------------
@@ -2308,9 +2308,9 @@ func TestDomain_PruneProgress(t *testing.T) {
 	require.Equal(t, prune.Done, stat3.Progress)
 	require.EqualValues(t, keyCount/2, stat3.Values+stat3.Dups,
 		"new rotation must clean the first half skipped in rotation 1")
-	require.Zero(t, countDupSortKeys(t, rwTx, d.ValuesTable), "all step-0 entries must be gone")
+	require.Zero(t, countDupSortKeys(t, rwTx, d.KeysTable), "all step-0 entries must be gone")
 
-	prg3, err := GetPruneValProgress(rwTx, []byte(d.ValuesTable))
+	prg3, err := GetPruneValProgress(rwTx, []byte(d.KeysTable))
 	require.NoError(t, err)
 	require.Equal(t, prune.Done, prg3.ValueProgress)
 }
@@ -2379,9 +2379,9 @@ func TestDomain_PruneRollingCursorProgress(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, prune.Done, stat0.Progress)
 	require.NotZero(t, stat0.Values+stat0.Dups, "step-0 entries must have been deleted")
-	require.Zero(t, countDupSortKeys(t, rwTx, d.ValuesTable), "table must be empty after step-0 prune")
+	require.Zero(t, countDupSortKeys(t, rwTx, d.KeysTable), "table must be empty after step-0 prune")
 
-	prg, err := GetPruneValProgress(rwTx, []byte(d.ValuesTable))
+	prg, err := GetPruneValProgress(rwTx, []byte(d.KeysTable))
 	require.NoError(t, err)
 	require.Equal(t, prune.Done, prg.ValueProgress)
 	require.EqualValues(t, stepSize, prg.TxTo)
@@ -2401,9 +2401,9 @@ func TestDomain_PruneRollingCursorProgress(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, prune.Done, stat1.Progress)
 	require.NotZero(t, stat1.Values+stat1.Dups, "step-1 entries must be deleted in new rotation")
-	require.Zero(t, countDupSortKeys(t, rwTx, d.ValuesTable), "table must be empty after both rotations")
+	require.Zero(t, countDupSortKeys(t, rwTx, d.KeysTable), "table must be empty after both rotations")
 
-	prg1, err := GetPruneValProgress(rwTx, []byte(d.ValuesTable))
+	prg1, err := GetPruneValProgress(rwTx, []byte(d.KeysTable))
 	require.NoError(t, err)
 	require.Equal(t, prune.Done, prg1.ValueProgress)
 	require.Nil(t, prg1.LastPrunedValue, "cursor reset after rotation completion")
@@ -2424,7 +2424,7 @@ func TestDomain_PruneRollingCursorProgress(t *testing.T) {
 		TxFrom:          txFrom2,
 		TxTo:            txTo2,
 	}
-	require.NoError(t, SavePruneValProgress(rwTx, d.ValuesTable, injected))
+	require.NoError(t, SavePruneValProgress(rwTx, d.KeysTable, injected))
 
 	// Call with the same txTo2 (InProgress, not Done → no reset).
 	stat2, err := domRoTx.prune(ctx, rwTx, 2, txFrom2, txTo2, math.MaxUint64, logEvery)
@@ -2434,7 +2434,7 @@ func TestDomain_PruneRollingCursorProgress(t *testing.T) {
 	require.LessOrEqual(t, stat2.Values+stat2.Dups, uint64(keyCount/2),
 		"cursor started at midKey so only the second half of keys could be deleted")
 	// First half still in table (cursor skipped them).
-	require.Equal(t, int(keyCount/2), countDupSortKeys(t, rwTx, d.ValuesTable),
+	require.Equal(t, int(keyCount/2), countDupSortKeys(t, rwTx, d.KeysTable),
 		"first half of step-2 keys must remain (before cursor position)")
 }
 

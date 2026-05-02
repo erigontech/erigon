@@ -174,7 +174,7 @@ func (d *Domain) maxStepInDB(tx kv.Tx) (lstInDb kv.Step) {
 // maxStepInDBNoHistory - return latest available step in db (at-least 1 value in such step)
 // Does not use history table to find the latest step
 func (d *Domain) maxStepInDBNoHistory(tx kv.Tx) (lstInDb kv.Step) {
-	firstKey, err := kv.FirstKey(tx, d.ValuesTable)
+	firstKey, err := kv.FirstKey(tx, d.KeysTable)
 	if err != nil {
 		d.logger.Warn("[agg] Domain.maxStepInDBNoHistory", "firstKey", firstKey, "err", err)
 		return 0
@@ -186,7 +186,7 @@ func (d *Domain) maxStepInDBNoHistory(tx kv.Tx) (lstInDb kv.Step) {
 		stepBytes := firstKey[len(firstKey)-8:]
 		return kv.Step(^binary.BigEndian.Uint64(stepBytes))
 	}
-	firstVal, err := tx.GetOne(d.ValuesTable, firstKey)
+	firstVal, err := tx.GetOne(d.KeysTable, firstKey)
 	if err != nil {
 		d.logger.Warn("[agg] Domain.maxStepInDBNoHistory", "firstKey", firstKey, "err", err)
 		return 0
@@ -326,7 +326,7 @@ func (d *Domain) calcVisibleFiles(toTxNum uint64) (*domainVisible, visibleFiles,
 	return dv, hv, hiv
 }
 
-func (d *Domain) Tables() []string { return append(d.History.Tables(), d.ValuesTable) }
+func (d *Domain) Tables() []string { return append(d.History.Tables(), d.KeysTable) }
 
 func (d *Domain) Close() {
 	if d == nil {
@@ -375,23 +375,23 @@ func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWrit
 	w := &DomainBufferedWriter{
 		discard:   discard,
 		aux:       make([]byte, 0, 128),
-		valsTable: dt.d.ValuesTable,
+		keysTable: dt.d.KeysTable,
 		largeVals: dt.d.LargeValues,
 		h:         dt.ht.newWriter(tmpdir, discardHistory),
 	}
 	if !discard {
-		w.values = etl.NewCollectorWithAllocator(dt.d.Name.String()+"domain.flush", tmpdir, etl.SmallSortableBuffers, dt.d.logger).
+		w.keys = etl.NewCollectorWithAllocator(dt.d.Name.String()+"domain.flush", tmpdir, etl.SmallSortableBuffers, dt.d.logger).
 			LogLvl(log.LvlTrace).SortAndFlushInBackground(true)
 	}
 	return w
 }
 
 type DomainBufferedWriter struct {
-	values *etl.Collector
+	keys *etl.Collector
 
 	discard bool
 
-	valsTable string
+	keysTable string
 	largeVals bool
 
 	stepBytes [8]byte // current inverted step representation
@@ -407,8 +407,8 @@ func (w *DomainBufferedWriter) Close() {
 		return
 	}
 	w.h.close()
-	if w.values != nil {
-		w.values.Close()
+	if w.keys != nil {
+		w.keys.Close()
 	}
 }
 
@@ -422,13 +422,13 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		return err
 	}
 	if took := time.Since(t); took > time.Millisecond {
-		log.Info("[dbg] domain.flush history", "t", took, "tbl", w.valsTable)
+		log.Info("[dbg] domain.flush history", "t", took, "tbl", w.keysTable)
 	}
 
 	t = time.Now()
 	var count uint64
 	if w.largeVals {
-		if err := w.values.Load(tx, w.valsTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		if err := w.keys.Load(tx, w.keysTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			count++
 			return loadFunc(k, v, table, next)
 		}, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
@@ -437,18 +437,18 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		took := time.Since(t)
 		keysPerSec := uint64(float64(count) / took.Seconds())
 		if took > time.Millisecond && keysPerSec > 0 {
-			log.Info("[dbg] domain.flush vals", "t", took, "keys", common.PrettyCounter(count), "keys/s", common.PrettyCounter(keysPerSec), "tbl", w.valsTable)
+			log.Info("[dbg] domain.flush vals", "t", took, "keys", common.PrettyCounter(count), "keys/s", common.PrettyCounter(keysPerSec), "tbl", w.keysTable)
 		}
 		w.Close()
 		return nil
 	}
 
-	valuesCursor, err := tx.RwCursorDupSort(w.valsTable)
+	valuesCursor, err := tx.RwCursorDupSort(w.keysTable)
 	if err != nil {
 		return err
 	}
 	defer valuesCursor.Close()
-	if err := w.values.Load(tx, w.valsTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	if err := w.keys.Load(tx, w.keysTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		count++
 		foundVal, err := valuesCursor.SeekBothRange(k, v[:8])
 		if err != nil {
@@ -464,7 +464,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	took := time.Since(t)
 	keysPerSec := uint64(float64(count) / took.Seconds())
 	if took > time.Millisecond && keysPerSec > 0 {
-		log.Info("[dbg] domain.flush vals", "t", took, "keys", common.PrettyCounter(count), "keys/s", common.PrettyCounter(keysPerSec), "tbl", w.valsTable)
+		log.Info("[dbg] domain.flush vals", "t", took, "keys", common.PrettyCounter(count), "keys/s", common.PrettyCounter(keysPerSec), "tbl", w.keysTable)
 	}
 	w.Close()
 
@@ -488,7 +488,7 @@ func (w *DomainBufferedWriter) addValue(k, value []byte, step kv.Step) error {
 			}
 		}
 
-		if err := w.values.Collect(fullkey, value); err != nil {
+		if err := w.keys.Collect(fullkey, value); err != nil {
 			return err
 		}
 		return nil
@@ -507,7 +507,7 @@ func (w *DomainBufferedWriter) addValue(k, value []byte, step kv.Step) error {
 	//	fmt.Printf("addValue     [%p;tx=%d] '%x' -> '%x'\n", w, w.h.ii.txNum, fullkey, value)
 	//}()
 
-	if err := w.values.Collect(k, w.aux2); err != nil {
+	if err := w.keys.Collect(k, w.aux2); err != nil {
 		return err
 	}
 	return nil
@@ -635,7 +635,7 @@ func (d *Domain) dumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo kv.St
 		panic(fmt.Errorf("assert: stepFrom=%d > stepTo=%d", stepFrom, stepTo))
 	}
 
-	coll, err := d.collateETL(ctx, stepFrom, stepTo, wal.values, vt)
+	coll, err := d.collateETL(ctx, stepFrom, stepTo, wal.keys, vt)
 	defer wal.Close()
 	if err != nil {
 		return err
@@ -773,7 +773,7 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 	stepVal := ^uint64(step)
 
 	if d.LargeValues {
-		valsCursor, err := roTx.Cursor(d.ValuesTable)
+		valsCursor, err := roTx.Cursor(d.KeysTable)
 		if err != nil {
 			return Collation{}, fmt.Errorf("create %s values cursor: %w", d.FilenameBase, err)
 		}
@@ -794,7 +794,7 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 			}
 		}
 	} else {
-		valsCursor, err := roTx.CursorDupSort(d.ValuesTable)
+		valsCursor, err := roTx.CursorDupSort(d.KeysTable)
 		if err != nil {
 			return Collation{}, fmt.Errorf("create %s values cursorDupsort: %w", d.FilenameBase, err)
 		}
@@ -1250,7 +1250,7 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	logEvery := time.NewTicker(time.Second * 30)
 	defer logEvery.Stop()
 
-	valsCursor, err := rwTx.RwCursorDupSort(d.ValuesTable)
+	valsCursor, err := rwTx.RwCursorDupSort(d.KeysTable)
 	if err != nil {
 		return err
 	}
@@ -1282,13 +1282,13 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		key := common.ToBytesZeroCopy(keyStr)
 		if dt.d.LargeValues {
 			// Delete the entry at the write step
-			if err := rwTx.Delete(d.ValuesTable, key); err != nil {
+			if err := rwTx.Delete(d.KeysTable, key); err != nil {
 				return err
 			}
 			// nil = different step, skip; []byte{} = absent previously, write empty tombstone
 			if value != nil {
 				fullKey := key[:len(key)-8]
-				if err := rwTx.Put(d.ValuesTable, append(fullKey, unwindStepBytes...), value); err != nil {
+				if err := rwTx.Put(d.KeysTable, append(fullKey, unwindStepBytes...), value); err != nil {
 					return err
 				}
 			}
@@ -1580,10 +1580,10 @@ func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 		dt.valCViewID = tx.ViewID()
 	}
 	if dt.d.LargeValues {
-		dt.valsC, err = tx.Cursor(dt.d.ValuesTable)
+		dt.valsC, err = tx.Cursor(dt.d.KeysTable)
 		return dt.valsC, err
 	}
-	dt.valsC, err = tx.CursorDupSort(dt.d.ValuesTable)
+	dt.valsC, err = tx.CursorDupSort(dt.d.KeysTable)
 	return dt.valsC, err
 }
 
@@ -1709,7 +1709,7 @@ func (dt *DomainRoTx) DebugRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit 
 		orderAscend: order.Asc,
 		aggStep:     dt.stepSize,
 		roTx:        roTx,
-		valsTable:   dt.d.ValuesTable,
+		valsTable:   dt.d.KeysTable,
 		logger:      dt.d.logger,
 		h:           &CursorHeap{},
 	}
@@ -1758,7 +1758,7 @@ func (dt *DomainRoTx) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can bool, 
 	if untilTx > 0 {
 		untilStep = kv.Step((untilTx - 1) / dt.stepSize)
 	}
-	sm, err := GetExecV3PrunableProgress(tx, []byte(dt.d.ValuesTable))
+	sm, err := GetExecV3PrunableProgress(tx, []byte(dt.d.KeysTable))
 	if err != nil {
 		dt.d.logger.Error("get domain pruning progress", "name", dt.d.FilenameBase, "error", err)
 		return false, maxStepToPrune
@@ -1787,7 +1787,7 @@ func (dt *DomainRoTx) canScanPruneDomainTables(tx kv.Tx, untilTx uint64) (can bo
 		maxStepToPrune = kv.Step((m - 1) / dt.stepSize)
 	}
 
-	prg, err := GetPruneValProgress(tx, []byte(dt.d.ValuesTable))
+	prg, err := GetPruneValProgress(tx, []byte(dt.d.KeysTable))
 	if err != nil {
 		dt.d.logger.Error("get domain pruning progress", "name", dt.d.FilenameBase, "error", err)
 		return false, maxStepToPrune
@@ -1880,7 +1880,7 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	if stat.History, err = dt.ht.Prune(ctx, rwTx, txFrom, txTo, limit, false, logEvery); err != nil {
 		return nil, fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
 	}
-	prg, err := GetPruneValProgress(rwTx, []byte(dt.d.ValuesTable))
+	prg, err := GetPruneValProgress(rwTx, []byte(dt.d.KeysTable))
 	if err != nil {
 		return stat, err
 	}
@@ -1908,7 +1908,7 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	var mode prune.StorageMode
 	if dt.d.LargeValues {
 		mode = prune.StepKeyStorageMode
-		valsRwCursor, err := rwTx.RwCursor(dt.d.ValuesTable)
+		valsRwCursor, err := rwTx.RwCursor(dt.d.KeysTable)
 		if err != nil {
 			return stat, fmt.Errorf("create %s domain values cursor: %w", dt.name.String(), err)
 		}
@@ -1925,7 +1925,7 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 		defer valsCursor.Close()
 	} else {
 		mode = prune.StepValueStorageMode
-		valsCursor, err = rwTx.RwCursorDupSort(dt.d.ValuesTable)
+		valsCursor, err = rwTx.RwCursorDupSort(dt.d.KeysTable)
 		if err != nil {
 			return stat, fmt.Errorf("create %s domain values cursor: %w", dt.name.String(), err)
 		}
@@ -1941,7 +1941,7 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	}
 	defer func() {
 		pruneStat.TxFrom, pruneStat.TxTo = txFrom, txTo
-		err = SavePruneValProgress(rwTx, dt.d.ValuesTable, pruneStat)
+		err = SavePruneValProgress(rwTx, dt.d.KeysTable, pruneStat)
 		if err != nil {
 			dt.d.logger.Error("prune val progress", "name", dt.name, "err", err)
 		}
@@ -1966,7 +1966,7 @@ func (dt *DomainRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 }
 
 func (dt *DomainRoTx) Tables() (res []string) {
-	return []string{dt.d.ValuesTable, dt.ht.h.ValuesTable, dt.ht.iit.ii.KeysTable, dt.ht.iit.ii.ValuesTable}
+	return []string{dt.d.KeysTable, dt.ht.h.ValuesTable, dt.ht.iit.ii.KeysTable, dt.ht.iit.ii.ValuesTable}
 }
 
 func (dt *DomainRoTx) Files() (res VisibleFiles) {
