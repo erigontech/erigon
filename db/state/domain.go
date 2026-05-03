@@ -1386,6 +1386,25 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			if value == nil {
 				continue
 			}
+			// Evict any existing dup already at unwindStep (left by a previous
+			// unwind cycle). Put() on a DupSort cursor appends a NEW dup when the
+			// seqID differs, so without this we'd accumulate duplicate dups at the
+			// same invStep across repeated unwind cycles.
+			existingAtUnwind, err := keysCursor.SeekBothRange(bareKey, unwindStepBytes[:])
+			if err != nil {
+				return err
+			}
+			if len(existingAtUnwind) == dupRecordLen && bytes.Equal(existingAtUnwind[:8], unwindStepBytes[:]) {
+				if binary.BigEndian.Uint64(existingAtUnwind[8:]) != deletionSeqID {
+					copy(seqKey[:], existingAtUnwind[8:])
+					if err := valsCursor.Delete(seqKey[:]); err != nil {
+						return err
+					}
+				}
+				if err := keysCursor.DeleteCurrent(); err != nil {
+					return err
+				}
+			}
 			newSeqID := uint64(deletionSeqID)
 			if len(value) > 0 {
 				newSeqID, err = rwTx.IncrementSequence(d.ValuesTable, 1)
