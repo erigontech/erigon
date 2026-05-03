@@ -229,6 +229,11 @@ func printStages(tx kv.TemporalTx, snapshots *freezeblocks.RoSnapshots, borSn *h
 		fmt.Fprintf(w, "%s \t\t - \t\t %d \t\t %d \t\t db_steps=%.02f\n", ii.String(), txNum, step, keysSteps)
 	}
 	fmt.Fprintf(w, "--\n")
+	w.Flush()
+
+	if err := printDomainSizes(tx); err != nil {
+		return err
+	}
 
 	//fmt.Printf("==== state =====\n")
 	//db.ForEach(kv.PlainState, nil, func(k, v []byte) error {
@@ -257,4 +262,157 @@ func u64or0(in []byte) (v uint64) {
 		v = binary.BigEndian.Uint64(in)
 	}
 	return v
+}
+
+// domainSizeStats walks the live DB tables for one domain and reports:
+//   - per-key duplicate counts (how many invStep entries each bareKey has)
+//   - value-size distribution
+//
+// Only the live MDBX state is inspected; frozen .kv files are excluded.
+type domainSizeStats struct {
+	uniqueKeys uint64
+	entries    uint64 // total dups in keys table (real values + deletion sentinels)
+	values     uint64 // rows in vals table
+	totalBytes uint64
+	minSize    int
+	maxSize    int
+	sizeHist   [12]uint64 // [0], [1-15], [16-31], [32-63], [64-127], [128-255], [256-511], [.5K-1K], [1K-2K], [2K-4K], [4K-8K], [8K+]
+}
+
+func (s *domainSizeStats) addSize(n int) {
+	s.values++
+	s.totalBytes += uint64(n)
+	if s.values == 1 || n < s.minSize {
+		s.minSize = n
+	}
+	if n > s.maxSize {
+		s.maxSize = n
+	}
+	switch {
+	case n == 0:
+		s.sizeHist[0]++
+	case n < 16:
+		s.sizeHist[1]++
+	case n < 32:
+		s.sizeHist[2]++
+	case n < 64:
+		s.sizeHist[3]++
+	case n < 128:
+		s.sizeHist[4]++
+	case n < 256:
+		s.sizeHist[5]++
+	case n < 512:
+		s.sizeHist[6]++
+	case n < 1024:
+		s.sizeHist[7]++
+	case n < 2048:
+		s.sizeHist[8]++
+	case n < 4096:
+		s.sizeHist[9]++
+	case n < 8192:
+		s.sizeHist[10]++
+	default:
+		s.sizeHist[11]++
+	}
+}
+
+func (s *domainSizeStats) avg() uint64 {
+	if s.values == 0 {
+		return 0
+	}
+	return s.totalBytes / s.values
+}
+
+func collectDomainSizeStats(tx kv.Tx, cfg statecfg.DomainCfg) (*domainSizeStats, error) {
+	stats := &domainSizeStats{}
+	if cfg.ValuesTable == "" {
+		return stats, nil
+	}
+
+	if cfg.LargeValues {
+		// keysTable (DupSort): bareKey -> invStep(8) + seqID(8)
+		// valsTable (plain) : seqID(8) -> value
+		kc, err := tx.CursorDupSort(cfg.KeysTable)
+		if err != nil {
+			return nil, err
+		}
+		defer kc.Close()
+		for k, _, err := kc.First(); k != nil; k, _, err = kc.NextNoDup() {
+			if err != nil {
+				return nil, err
+			}
+			stats.uniqueKeys++
+			cnt, err := kc.CountDuplicates()
+			if err != nil {
+				return nil, err
+			}
+			stats.entries += cnt
+		}
+
+		vc, err := tx.Cursor(cfg.ValuesTable)
+		if err != nil {
+			return nil, err
+		}
+		defer vc.Close()
+		for k, v, err := vc.First(); k != nil; k, v, err = vc.Next() {
+			if err != nil {
+				return nil, err
+			}
+			stats.addSize(len(v))
+		}
+		return stats, nil
+	}
+
+	// LargeValues=false: single DupSort table where dup = invStep(8) + value
+	c, err := tx.CursorDupSort(cfg.ValuesTable)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return nil, err
+		}
+		stats.entries++
+		valLen := len(v) - 8
+		if valLen < 0 {
+			valLen = 0
+		}
+		stats.addSize(valLen)
+	}
+	// second pass for unique-key count via NextNoDup is cheap relative to the full scan above
+	for k, _, err := c.First(); k != nil; k, _, err = c.NextNoDup() {
+		if err != nil {
+			return nil, err
+		}
+		stats.uniqueKeys++
+	}
+	return stats, nil
+}
+
+func printDomainSizes(tx kv.Tx) error {
+	w := new(tabwriter.Writer)
+	w.Init(os.Stdout, 8, 8, 0, '\t', 0)
+	defer w.Flush()
+	fmt.Fprintf(w, "\ndomain DB stats (live MDBX only, frozen .kv files excluded; full table scan)\n")
+	fmt.Fprintf(w, "domain \t keys \t entries \t dups \t values \t bytes \t min \t avg \t max \t [0] \t [1-15] \t [16-31] \t [32-63] \t [64-127] \t [128-255] \t [256-511] \t [.5K-1K] \t [1K-2K] \t [2K-4K] \t [4K-8K] \t [8K+]\n")
+	for i := 0; i < int(kv.DomainLen); i++ {
+		d := kv.Domain(i)
+		cfg := statecfg.Schema.GetDomainCfg(d)
+		s, err := collectDomainSizeStats(tx, cfg)
+		if err != nil {
+			return fmt.Errorf("domain stats %s: %w", d, err)
+		}
+		dups := uint64(0)
+		if s.entries > s.uniqueKeys {
+			dups = s.entries - s.uniqueKeys
+		}
+		fmt.Fprintf(w, "%s \t %d \t %d \t %d \t %d \t %d \t %d \t %d \t %d",
+			d, s.uniqueKeys, s.entries, dups, s.values, s.totalBytes, s.minSize, s.avg(), s.maxSize)
+		for _, b := range s.sizeHist {
+			fmt.Fprintf(w, " \t %d", b)
+		}
+		fmt.Fprintf(w, "\n")
+	}
+	return nil
 }
