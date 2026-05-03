@@ -591,6 +591,18 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}()
 
 		if backend.config.Snapshot.P2PManifest {
+			// Enable the manifestReady channel so the snapshot stage
+			// can wait for the first chain.toml discovery before
+			// building download requests. Without this, the stage
+			// would proceed against (potentially-stale) preverified
+			// before the V2 manifest replaces it.
+			//
+			// The downloader exposes the channel via ManifestReady();
+			// we propagate to Snapshot.ManifestReady so stageloop's
+			// StageSnapshotsCfg passes it into the stage's gate at
+			// stage_snapshots.go:190.
+			dl.EnableP2PManifest()
+			backend.config.Snapshot.ManifestReady = dl.ManifestReady()
 			dl.StartChainTomlDiscovery(ctx, backend.config.Snapshot.ChainName)
 		}
 
