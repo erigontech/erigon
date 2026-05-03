@@ -34,6 +34,11 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 )
 
+// ErrDBWiped is returned by a migration's Up function when it has closed the
+// database and removed its directory. Apply catches this sentinel, calls
+// Migrator.ReopenDB to obtain a fresh handle, and continues.
+var ErrDBWiped = errors.New("db wiped")
+
 // migrations apply sequentially in order of this array, skips applied migrations
 // it allows - don't worry about merge conflicts and use switch branches
 // see also dbutils.Migrations - it stores context in which each transaction was exectured - useful for bug-reports
@@ -51,6 +56,7 @@ import (
 //   - write test - and check that it's safe to apply same migration twice
 var migrations = map[kv.Label][]Migration{
 	dbcfg.ChainDB: {
+		chaindataWipeBelowV8,
 		dbSchemaVersion5,
 		ResetStageTxnLookup,
 		dbSchemaVersion6,
@@ -92,6 +98,9 @@ func NewMigrator(label kv.Label) *Migrator {
 
 type Migrator struct {
 	Migrations []Migration
+	// ReopenDB opens a fresh exclusive handle to the target database. Required
+	// when any migration may return ErrDBWiped (e.g. chaindataWipeBelowV8).
+	ReopenDB func() (kv.RwDB, error)
 }
 
 // AppliedMigrations returns the set of migration names that have already been recorded as
@@ -171,13 +180,8 @@ func (m *Migrator) VerifyVersion(db kv.RwDB, chaindata string) error {
 				if minor > kv.DBSchemaVersion.Minor {
 					return fmt.Errorf("cannot downgrade minor DB version from %d.%d to %d.%d", major, minor, kv.DBSchemaVersion.Major, kv.DBSchemaVersion.Major)
 				}
-			} else {
-				if kv.DBSchemaVersion.Major != major {
-					return fmt.Errorf(
-						"cannot switch major DB version, db: %d, erigon: %d, try \"rm -rf %s\" if you are sure that you are running right version of erigon on right datadir",
-						major, kv.DBSchemaVersion.Major, chaindata)
-				}
 			}
+			// major < DBSchemaVersion.Major: upgrade handled by migrations
 		}
 		return nil
 	}); err != nil {
@@ -187,16 +191,18 @@ func (m *Migrator) VerifyVersion(db kv.RwDB, chaindata string) error {
 	return nil
 }
 
-// Apply runs all pending migrations in order.
+// Apply runs all pending migrations in order and returns the (possibly reopened)
+// target DB handle. Callers must use the returned handle rather than the one passed
+// in, because a wipe migration may have closed and replaced it.
 //
 //   - db is the target database being migrated (e.g. chaindata).
 //   - migrationsDB is the dedicated migrations-tracking database (opened via OpenMigrationsDB).
 //     Applied-migration records are written here, so they survive deletion of the target DB.
 //   - dataDir is the root data directory (used to set up per-migration temp dirs).
 //   - chaindata is the path to the target DB directory (used only in error messages).
-func (m *Migrator) Apply(db kv.RwDB, migrationsDB kv.RwDB, dataDir, chaindata string, logger log.Logger) error {
+func (m *Migrator) Apply(db kv.RwDB, migrationsDB kv.RwDB, dataDir, chaindata string, logger log.Logger) (kv.RwDB, error) {
 	if len(m.Migrations) == 0 {
-		return nil
+		return db, nil
 	}
 	dirs := datadir.New(dataDir)
 
@@ -209,10 +215,10 @@ func (m *Migrator) Apply(db kv.RwDB, migrationsDB kv.RwDB, dataDir, chaindata st
 		}
 		return nil
 	}); err != nil {
-		return err
+		return db, err
 	}
 	if err := m.VerifyVersion(db, chaindata); err != nil {
-		return fmt.Errorf("migrator.Apply: %w", err)
+		return db, fmt.Errorf("migrator.Apply: %w", err)
 	}
 
 	// migration names must be unique, protection against people's mistake
@@ -220,7 +226,7 @@ func (m *Migrator) Apply(db kv.RwDB, migrationsDB kv.RwDB, dataDir, chaindata st
 	for i := range m.Migrations {
 		_, ok := uniqueNameCheck[m.Migrations[i].Name]
 		if ok {
-			return fmt.Errorf("%w, duplicate: %s", ErrMigrationNonUniqueName, m.Migrations[i].Name)
+			return db, fmt.Errorf("%w, duplicate: %s", ErrMigrationNonUniqueName, m.Migrations[i].Name)
 		}
 		uniqueNameCheck[m.Migrations[i].Name] = true
 	}
@@ -239,7 +245,7 @@ func (m *Migrator) Apply(db kv.RwDB, migrationsDB kv.RwDB, dataDir, chaindata st
 			progress, err = tx.GetOne(kv.Migrations, []byte("_progress_"+v.Name))
 			return err
 		}); err != nil {
-			return fmt.Errorf("migrator.Apply: %w", err)
+			return db, fmt.Errorf("migrator.Apply: %w", err)
 		}
 
 		// Each migration gets its own sub-directory inside dirs.Migrations for ETL temp files.
@@ -272,16 +278,30 @@ func (m *Migrator) Apply(db kv.RwDB, migrationsDB kv.RwDB, dataDir, chaindata st
 				return migTx.Delete(kv.Migrations, []byte("_progress_"+v.Name))
 			})
 		}, logger); err != nil {
-			return fmt.Errorf("migrator.Apply.Up: %s, %w", v.Name, err)
+			if errors.Is(err, ErrDBWiped) {
+				// Migration closed and removed the target DB. Reopen a fresh handle.
+				if m.ReopenDB == nil {
+					return nil, fmt.Errorf("migrator.Apply: migration %s wiped DB but ReopenDB is not set", v.Name)
+				}
+				var newDB kv.RwDB
+				var reopenErr error
+				newDB, reopenErr = m.ReopenDB()
+				if reopenErr != nil {
+					return nil, fmt.Errorf("migrator.Apply: reopen after wipe: %w", reopenErr)
+				}
+				db = newDB
+			} else {
+				return db, fmt.Errorf("migrator.Apply.Up: %s, %w", v.Name, err)
+			}
 		}
 
 		if !callbackCalled {
-			return fmt.Errorf("%w: %s", ErrMigrationCommitNotCalled, v.Name)
+			return db, fmt.Errorf("%w: %s", ErrMigrationCommitNotCalled, v.Name)
 		}
 		logger.Info("Applied migration", "name", v.Name)
 	}
 	if err := db.Update(context.Background(), rawdb.WriteDBSchemaVersion); err != nil {
-		return fmt.Errorf("migrator.Apply: %w", err)
+		return db, fmt.Errorf("migrator.Apply: %w", err)
 	}
 	logger.Info(
 		"Updated DB schema to",
@@ -293,5 +313,5 @@ func (m *Migrator) Apply(db kv.RwDB, migrationsDB kv.RwDB, dataDir, chaindata st
 			kv.DBSchemaVersion.Patch,
 		),
 	)
-	return nil
+	return db, nil
 }

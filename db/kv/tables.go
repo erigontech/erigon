@@ -29,6 +29,7 @@ import (
 // 5.0 - BlockTransaction table now has canonical ids (txs of non-canonical blocks moving to NonCanonicalTransaction table)
 // 6.0 - BlockTransaction table now has system-txs before and after block (records are absent if block has no system-tx, but sequence increasing)
 // 6.1 - Canonical/NonCanonical/BadBlock transitions now stored in same table: kv.EthTx. Add kv.BadBlockNumber table
+// 8.0 - LargeValues domain layout (Code/RCache/Commitment): keysTable DupSort `bareKey -> invStep+seqID` + valsTable plain `seqID -> value`.
 var DBSchemaVersion = typesproto.VersionReply{Major: 8, Minor: 0, Patch: 0}
 
 const ChangeSets3 = "ChangeSets3"
