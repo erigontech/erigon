@@ -283,23 +283,18 @@ func (idx *Index) init() (err error) {
 }
 func (idx *Index) ForceExistenceFilterWillNeed() {
 	if idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0 {
-		log.Debug("[agg] fuse.ForceExistenceFilterWillNeed", "file", idx.fileName, "keys", idx.keyCount)
 		idx.existenceV1.MadvWillNeed()
-	} else {
-		log.Debug("[agg] fuse.ForceExistenceFilterWillNeed", "file", idx.fileName, "idx.dataStructureVersion", idx.dataStructureVersion, "idx.lessFalsePositives", idx.lessFalsePositives)
 	}
 	return
 }
 func (idx *Index) ForceExistenceFilterNormal() {
 	if idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0 {
-		log.Debug("[agg] fuse.ForceExistenceFilterNormal", "file", idx.fileName, "keys", idx.keyCount)
 		idx.existenceV1.MadvNormal()
 	}
 	return
 }
 func (idx *Index) ForceExistenceFilterInRAM() datasize.ByteSize {
 	if idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0 {
-		log.Debug("[agg] fuse.ForceExistenceFilterInRAM", "file", idx.fileName, "keys", idx.keyCount)
 		return idx.existenceV1.ForceInMem()
 	}
 	return 0
