@@ -258,19 +258,6 @@ func ExecV3(ctx context.Context,
 		lastHeader, applyTx, execErr = pe.exec(ctx, execStage, u, startBlockNum, offsetFromBlockBeginning, maxBlockNum, blockLimit,
 			initialTxNum, inputTxNum, initialCycle, applyTx, stepsInDb, accumulator, readAhead, logEvery)
 
-		if execErr != nil && errors.Is(execErr, rules.ErrInvalidBlock) {
-			if lastHeader != nil && cfg.hd != nil && cfg.hd.POSSync() {
-				cfg.hd.ReportBadHeaderPoS(lastHeader.Hash(), lastHeader.ParentHash)
-			}
-			if cfg.badBlockHalt && dbg.BadBlockHalt {
-				logger.Error(fmt.Sprintf("[%s] BAD_BLOCK_HALT: halting on invalid block (debug mode, no commit)", execStage.LogPrefix()), "err", execErr)
-				// Intentional os.Exit: BAD_BLOCK_HALT is a debug switch whose whole purpose is
-				// to freeze process state at the bad block. Returning would run deferred
-				// rollback/commit/flush paths and overwrite the very state we want to inspect.
-				os.Exit(1)
-			}
-		}
-
 		lastCommittedBlockNum = pe.lastCommittedBlockNum.Load()
 		lastCommittedTxNum = pe.lastCommittedTxNum.Load()
 	} else {
@@ -359,6 +346,21 @@ func ExecV3(ctx context.Context,
 	// and propagate the original error directly. The step-frozen check only makes
 	// sense when execution succeeded partially and we need to persist the commitment.
 	if execErr != nil && errors.Is(execErr, rules.ErrInvalidBlock) {
+		// BAD_BLOCK_HALT (env var) gates the os.Exit path; cfg.badBlockHalt alone
+		// (set by NewInMemoryExecution for fork validation) must NOT exit — it
+		// expects the error to propagate so the caller can finish in-memory
+		// validation. Both flags must be true.
+		//
+		// Intentional os.Exit: BAD_BLOCK_HALT is a debug switch whose whole purpose
+		// is to freeze process state at the bad block. Returning would run deferred
+		// rollback/commit/flush paths and overwrite the very state we want to
+		// inspect. Mirrors the design documented in PR #19803. Applies to both
+		// serial and parallel paths uniformly — pe.exec / se.executeBlock already
+		// call ReportBadHeaderPoS internally before returning ErrInvalidBlock.
+		if cfg.badBlockHalt && dbg.BadBlockHalt {
+			logger.Error(fmt.Sprintf("[%s] BAD_BLOCK_HALT: halting on invalid block (debug mode, no commit)", execStage.LogPrefix()), "err", execErr)
+			os.Exit(1)
+		}
 		return execErr
 	}
 

@@ -471,9 +471,13 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 					if dbg.StopAfterBlock > 0 && applyResult.BlockNum == dbg.StopAfterBlock {
 						pe.logger.Warn(fmt.Sprintf("[%s] STOP_AFTER_BLOCK reached, exiting without commit (debug mode)", pe.logPrefix), "block", applyResult.BlockNum)
-						// Intentional os.Exit: STOP_AFTER_BLOCK is a debug switch used to capture
-						// state at exactly N blocks executed. Returning would let deferred commit
-						// paths flush past the requested stop point, defeating the harness.
+						// Intentional os.Exit: STOP_AFTER_BLOCK is a debug switch used to
+						// capture state at exactly N blocks executed. The DB is left as it
+						// was *before* this block was applied so the next run reproduces
+						// the stop point with the same input. Returning would run deferred
+						// commit/flush paths and overwrite the very state we want to
+						// preserve. Mirrors the design documented in PR #19803 — debug
+						// only, never set in production.
 						os.Exit(0)
 					}
 				}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -209,8 +210,15 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		}
 
 		if dbg.StopAfterBlock > 0 && blockNum == dbg.StopAfterBlock {
-			panic(fmt.Sprintf("stopping: block %d complete", blockNum))
-			//return fmt.Errorf("stopping: block %d complete", blockNum)
+			se.logger.Warn(fmt.Sprintf("[%s] STOP_AFTER_BLOCK reached, exiting without commit (debug mode)", se.logPrefix), "block", blockNum)
+			// Intentional os.Exit: STOP_AFTER_BLOCK is a debug switch used to
+			// capture state at exactly N blocks executed. The DB is left as it
+			// was *before* this block was applied so the next run reproduces
+			// the stop point with the same input. panic() (the prior implementation)
+			// unwinds defers and fires the very commit we're trying to skip.
+			// Mirrors the design documented in PR #19803 — debug only, never set
+			// in production.
+			os.Exit(0)
 		}
 
 		if offsetFromBlockBeginning > 0 {
