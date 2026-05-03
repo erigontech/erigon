@@ -45,6 +45,13 @@ import (
 // burn CPU. Configurable via Driver.SweepInterval if needed.
 const DefaultSweepInterval = 60 * time.Second
 
+// defaultQuarantineThreshold is the per-file failure cap before sweep
+// stops retrying. 5 gives a handler enough chances to recover from
+// transient state (download finishing, segment-loading completing)
+// without flooding the log if the underlying problem is permanent.
+// See completion plan §5c.
+const defaultQuarantineThreshold = 5
+
 // Handler runs one transition's work for a single file. On success it
 // calls Inv.AdvanceTo to advance the entry's state; on failure it
 // returns the error and leaves the entry at its current state for the
@@ -94,12 +101,26 @@ type Driver struct {
 	// #3 of app-integration-review-items.md).
 	OnValidation Handler
 
+	// QuarantineThreshold caps how many consecutive handler failures
+	// for the same file dispatch before the driver stops retrying it.
+	// After this many failures the file is "quarantined" — sweep
+	// skips it, an Info log fires once. ChangeSet for that file
+	// re-enables retries (clears the counter), so legitimate
+	// transitions (download landing, manual fix-up) recover.
+	//
+	// Zero → use defaultQuarantineThreshold. See completion plan §5c
+	// for the future structured-error classification that supersedes
+	// this stop-the-symptom mechanism.
+	QuarantineThreshold int
+
 	// Internal state.
-	mu       sync.Mutex
-	running  bool
-	stopFn   context.CancelFunc
-	doneCh   chan struct{}
-	subUnsub func() // returned by Inv.Subscribe; called on Stop
+	mu          sync.Mutex
+	running     bool
+	stopFn      context.CancelFunc
+	doneCh      chan struct{}
+	subUnsub    func() // returned by Inv.Subscribe; called on Stop
+	failures    map[string]int
+	quarantined map[string]bool
 }
 
 // Start launches the driver. It subscribes to inventory ChangeSets,
@@ -185,11 +206,17 @@ func (d *Driver) run(ctx context.Context, sub <-chan snapshot.ChangeSet, interva
 		select {
 		case <-ctx.Done():
 			return
-		case _, ok := <-sub:
+		case cs, ok := <-sub:
 			if !ok {
 				// Subscription closed (Stop called). Drain through
 				// ctx.Done to ensure clean exit.
 				continue
+			}
+			// Clear failure / quarantine for the named files so a fresh
+			// ChangeSet can re-trigger dispatch — the underlying state
+			// changed, the previous failure may no longer apply.
+			for _, name := range cs.Files {
+				d.clearFailure(name)
 			}
 			d.Sweep(ctx, logger)
 		case <-ticker.C:
@@ -306,6 +333,11 @@ func (d *Driver) dispatch(ctx context.Context, e *snapshot.FileEntry, logger log
 	if ctx.Err() != nil {
 		return
 	}
+	if d.isQuarantined(e.Name) {
+		// Quarantined files stay skipped until a ChangeSet for them
+		// clears the counter (run loop's wake handler does this).
+		return
+	}
 	switch e.State {
 	case snapshot.LifecycleDownloaded:
 		if d.OnIndexing == nil {
@@ -314,6 +346,9 @@ func (d *Driver) dispatch(ctx context.Context, e *snapshot.FileEntry, logger log
 		logger.Debug("[storage-lifecycle] dispatch OnIndexing", "name", e.Name)
 		if err := d.OnIndexing(ctx, e); err != nil {
 			logger.Debug("[storage-lifecycle] OnIndexing failed", "name", e.Name, "err", err)
+			d.recordFailure(e.Name, "OnIndexing", logger)
+		} else {
+			d.clearFailure(e.Name)
 		}
 	case snapshot.LifecycleIndexed:
 		if d.OnValidation == nil {
@@ -322,6 +357,55 @@ func (d *Driver) dispatch(ctx context.Context, e *snapshot.FileEntry, logger log
 		logger.Debug("[storage-lifecycle] dispatch OnValidation", "name", e.Name)
 		if err := d.OnValidation(ctx, e); err != nil {
 			logger.Debug("[storage-lifecycle] OnValidation failed", "name", e.Name, "err", err)
+			d.recordFailure(e.Name, "OnValidation", logger)
+		} else {
+			d.clearFailure(e.Name)
 		}
 	}
+}
+
+// recordFailure increments the per-file failure counter. When the
+// counter reaches QuarantineThreshold the file is moved to the
+// quarantine map and an Info log fires once. Subsequent failures for
+// the same file are silently absorbed.
+func (d *Driver) recordFailure(name, phase string, logger log.Logger) {
+	threshold := d.QuarantineThreshold
+	if threshold == 0 {
+		threshold = defaultQuarantineThreshold
+	}
+	d.mu.Lock()
+	if d.failures == nil {
+		d.failures = make(map[string]int)
+	}
+	d.failures[name]++
+	count := d.failures[name]
+	hitThreshold := count == threshold
+	if hitThreshold {
+		if d.quarantined == nil {
+			d.quarantined = make(map[string]bool)
+		}
+		d.quarantined[name] = true
+	}
+	d.mu.Unlock()
+	if hitThreshold {
+		logger.Info("[storage-lifecycle] quarantining file after repeated failures",
+			"file", name, "phase", phase, "failures", count,
+			"hint", "the underlying handler keeps failing — operator should investigate (missing segments, corrupt file, etc.); ChangeSet for this file clears the quarantine")
+	}
+}
+
+// clearFailure resets the failure counter and quarantine flag for a
+// file. Called on successful dispatch and on ChangeSet receive.
+func (d *Driver) clearFailure(name string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	delete(d.failures, name)
+	delete(d.quarantined, name)
+}
+
+// isQuarantined returns whether the named file is currently quarantined.
+func (d *Driver) isQuarantined(name string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.quarantined[name]
 }
