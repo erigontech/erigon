@@ -109,6 +109,18 @@ type Cfg struct {
 	// ourselves.
 	ManualDataVerification bool
 
+	// BootstrapFromPreverified marks this node as a bootstrap publisher.
+	// When true, ApplyDiscoveredChainToml uses preverified.toml as the
+	// merge base and the downloader publishes preverified ∪ local-files
+	// in its chain.toml. When false (default), V2 discovery REPLACES
+	// preverified — the published chain.toml contains only local files
+	// and the discovery merge base is empty.
+	//
+	// See docs/plans/20260502-app-integration-completion.md §5b for the
+	// architectural rule. Set on bootstrap publishers (initial chain
+	// rollout / recovery); leave default for regular V2 nodes.
+	BootstrapFromPreverified bool
+
 	LogPrefix string
 }
 

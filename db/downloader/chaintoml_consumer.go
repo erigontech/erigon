@@ -175,32 +175,63 @@ func (a ipPortAddr) String() string {
 	return net.JoinHostPort(a.IP.String(), fmt.Sprintf("%d", a.Port))
 }
 
-// ApplyDiscoveredChainToml merges discovered chain.toml entries into the preverified registry.
-// Returns the count of new entries added.
-func ApplyDiscoveredChainToml(networkName string, discoveredToml []byte, snapDir string) (int, error) {
+// ApplyDiscoveredChainToml integrates discovered chain.toml entries into
+// the registry. Behaviour depends on bootstrapFromPreverified:
+//
+//   - bootstrap=true: merges discovered into existing-from-preverified
+//     (existing wins on conflict). Used by bootstrap publishers — the
+//     published manifest = preverified ∪ local files ∪ discovered.
+//   - bootstrap=false: REPLACES existing with discovered. preverified
+//     is ignored — V2 nodes use peer-discovered manifest as the sole
+//     source of truth, per
+//     docs/plans/20260502-app-integration-completion.md §5b.
+//
+// Returns the count of newly-added entries (relative to the previous
+// registry state).
+func ApplyDiscoveredChainToml(networkName string, discoveredToml []byte, snapDir string, bootstrapFromPreverified bool) (int, error) {
 	discovered, err := ParseChainToml(discoveredToml)
 	if err != nil {
 		return 0, err
 	}
 
-	// Build existing map from current preverified registry
-	existing := make(map[string]string)
-	if cfg, known := snapcfg.KnownCfg(networkName); known {
-		for _, item := range cfg.Preverified.Items {
-			existing[item.Name] = item.Hash
+	var merged map[string]string
+	var newCount int
+
+	if bootstrapFromPreverified {
+		// Bootstrap mode: preverified is the merge base; discovered adds.
+		existing := make(map[string]string)
+		if cfg, known := snapcfg.KnownCfg(networkName); known {
+			for _, item := range cfg.Preverified.Items {
+				existing[item.Name] = item.Hash
+			}
+		}
+		merged, newCount = MergeChainToml(existing, discovered)
+	} else {
+		// V2-only mode: discovered IS the registry. preverified ignored.
+		merged = discovered
+		// newCount is the delta vs the current registry — important so
+		// the caller's "no new entries → skip" optimisation still works.
+		current := make(map[string]string)
+		if cfg, known := snapcfg.KnownCfg(networkName); known {
+			for _, item := range cfg.Preverified.Items {
+				current[item.Name] = item.Hash
+			}
+		}
+		for k, v := range discovered {
+			if existing, ok := current[k]; !ok || existing != v {
+				newCount++
+			}
 		}
 	}
 
-	merged, newCount := MergeChainToml(existing, discovered)
-	if newCount == 0 {
+	if newCount == 0 && bootstrapFromPreverified {
+		// Bootstrap mode preserves the optimisation — nothing changed.
 		return 0, nil
 	}
 
-	// Update the global registry with merged entries
 	mergedToml := BuildTomlFromMap(merged)
 	snapcfg.SetToml(networkName, mergedToml, false)
 
-	// Save merged chain.toml locally
 	if err := SaveChainToml(snapDir, mergedToml); err != nil {
 		return newCount, fmt.Errorf("saving merged chain.toml: %w", err)
 	}
@@ -295,7 +326,7 @@ func (d *Downloader) acquireChainToml(ctx context.Context, networkName string, n
 		return
 	}
 
-	newCount, err := ApplyDiscoveredChainToml(networkName, tomlBytes, d.snapDir())
+	newCount, err := ApplyDiscoveredChainToml(networkName, tomlBytes, d.snapDir(), d.cfg.BootstrapFromPreverified)
 	if err != nil {
 		d.logger.Warn("[chaintoml] failed to apply chain.toml", "err", err)
 		return

@@ -172,6 +172,21 @@ type BlocksFreezing struct {
 	// after the storage-driven path has accumulated production hours
 	// across multiple releases.
 	LifecycleDrivenByStorage bool
+
+	// BootstrapFromPreverified opts a node into using preverified.toml
+	// as its initial download set + the seed of its published
+	// chain.toml. Default false — V2 nodes use peer-discovered
+	// chain.toml exclusively.
+	//
+	// Operators set this on the initial publisher for a chain rollout
+	// or for recovery scenarios. Once running, the bootstrap publishes
+	// chain.toml = preverified ∪ local-files via P2P; subsequent V2
+	// nodes inherit that view. preverified is invisible to non-bootstrap
+	// V2 nodes.
+	//
+	// See docs/plans/20260502-app-integration-completion.md §5b for the
+	// behaviour matrix. Active only when P2PManifest is true.
+	BootstrapFromPreverified bool
 }
 
 func (s BlocksFreezing) String() string {

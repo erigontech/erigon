@@ -723,6 +723,10 @@ var (
 		Name:  "snap.lifecycle-driven-by-storage",
 		Usage: "Cut over file-import orchestration (BuildMissedIndices, BuildMissedAccessors) from the stage loop to the storage component's lifecycle driver. Defaults false (stage drives). Kill-switch — flip back to false to revert if the storage-driven path misbehaves.",
 	}
+	SnapBootstrapFromPreverifiedFlag = cli.BoolFlag{
+		Name:  "snap.bootstrap-from-preverified",
+		Usage: "Opt this node into bootstrap-publisher mode: use preverified.toml as the initial download set AND seed it into the published chain.toml. Default false — V2 nodes (--snap.p2p-manifest) use peer-discovered chain.toml exclusively. Set this on initial publishers / chain rollout / recovery scenarios.",
+	}
 	SnapDownloadToBlockFlag = cli.Uint64Flag{
 		Name:    "snap.download.to.block",
 		Usage:   "Download snapshots up to the given block number (exclusive). Disabled by default. Useful for testing and shadow forks.",
@@ -1968,6 +1972,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.Snapshot.NoDownloader = ctx.Bool(NoDownloaderFlag.Name)
 	cfg.Snapshot.P2PManifest = ctx.Bool(SnapP2PManifestFlag.Name)
 	cfg.Snapshot.LifecycleDrivenByStorage = ctx.Bool(SnapLifecycleDrivenByStorageFlag.Name)
+	cfg.Snapshot.BootstrapFromPreverified = ctx.Bool(SnapBootstrapFromPreverifiedFlag.Name)
 	cfg.Snapshot.DownloaderAddr = strings.TrimSpace(ctx.String(DownloaderAddrFlag.Name))
 	cfg.Snapshot.ChainName = chain
 	nodeConfig.Http.Snap = cfg.Snapshot
@@ -2235,6 +2240,13 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		)
 		if err != nil {
 			panic(err)
+		}
+		// Propagate bootstrap mode from Snapshot config — controls
+		// ApplyDiscoveredChainToml behaviour. Default false (regular V2
+		// node ignores preverified). Bootstrap publishers opt in via
+		// --snap.bootstrap-from-preverified.
+		if cfg.Downloader != nil {
+			cfg.Downloader.BootstrapFromPreverified = cfg.Snapshot.BootstrapFromPreverified
 		}
 		downloadernat.DoNat(nodeConfig.P2P.NAT, cfg.Downloader.ClientConfig, logger)
 	}
