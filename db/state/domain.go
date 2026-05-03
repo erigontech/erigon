@@ -149,6 +149,19 @@ func (d *Domain) kvBtAccessorNewFilePath(fromStep, toStep kv.Step) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.bt", d.FileVersion.AccessorBT.String(), d.FilenameBase, fromStep, toStep))
 }
 
+var domainExistenceForceInMem = dbg.EnvBool("DOMAIN_EXISTENCE_MEM", false)
+
+func (d *Domain) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
+	accessor, err := recsplit.OpenIndex(fPath)
+	if err != nil {
+		return nil, err
+	}
+	if invIdxExistenceForceInMem {
+		accessor.ForceExistenceFilterInRAM()
+	}
+	return accessor, nil
+}
+
 func (d *Domain) kvFileNameMask(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("*-%s.%d-%d.kv", d.FilenameBase, fromStep, toStep)
 }

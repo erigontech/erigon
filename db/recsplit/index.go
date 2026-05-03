@@ -285,6 +285,7 @@ func (idx *Index) init() (err error) {
 
 func (idx *Index) ForceExistenceFilterInRAM() datasize.ByteSize {
 	if idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0 {
+		log.Debug("[agg] fuse.forceInMem", "file", idx.fileName, "keys", idx.keyCount)
 		return idx.existenceV1.ForceInMem()
 	}
 	return 0
