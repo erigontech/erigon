@@ -34,10 +34,9 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 )
 
-// ErrDBWiped is returned by a migration's Up function when it has closed the
-// database and removed its directory. Apply catches this sentinel, calls
-// Migrator.ReopenDB to obtain a fresh handle, and continues.
-var ErrDBWiped = errors.New("db wiped")
+// errDBWiped is returned by a migration's Up when it has closed the DB and
+// removed its directory. Apply reopens via Migrator.ReopenDB and continues.
+var errDBWiped = errors.New("db wiped")
 
 // migrations apply sequentially in order of this array, skips applied migrations
 // it allows - don't worry about merge conflicts and use switch branches
@@ -98,9 +97,7 @@ func NewMigrator(label kv.Label) *Migrator {
 
 type Migrator struct {
 	Migrations []Migration
-	// ReopenDB opens a fresh exclusive handle to the target database. Required
-	// when any migration may return ErrDBWiped (e.g. chaindataWipeBelowV8).
-	ReopenDB func() (kv.RwDB, error)
+	ReopenDB   func() (kv.RwDB, error)
 }
 
 // AppliedMigrations returns the set of migration names that have already been recorded as
@@ -278,16 +275,13 @@ func (m *Migrator) Apply(db kv.RwDB, migrationsDB kv.RwDB, dataDir, chaindata st
 				return migTx.Delete(kv.Migrations, []byte("_progress_"+v.Name))
 			})
 		}, logger); err != nil {
-			if errors.Is(err, ErrDBWiped) {
-				// Migration closed and removed the target DB. Reopen a fresh handle.
+			if errors.Is(err, errDBWiped) {
 				if m.ReopenDB == nil {
 					return nil, fmt.Errorf("migrator.Apply: migration %s wiped DB but ReopenDB is not set", v.Name)
 				}
-				var newDB kv.RwDB
-				var reopenErr error
-				newDB, reopenErr = m.ReopenDB()
-				if reopenErr != nil {
-					return nil, fmt.Errorf("migrator.Apply: reopen after wipe: %w", reopenErr)
+				newDB, err := m.ReopenDB()
+				if err != nil {
+					return nil, fmt.Errorf("migrator.Apply: reopen after wipe: %w", err)
 				}
 				db = newDB
 			} else {
