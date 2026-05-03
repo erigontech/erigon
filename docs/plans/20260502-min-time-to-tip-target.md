@@ -256,40 +256,113 @@ the **Phase 0 download set** — the file set that must arrive
 BEFORE the node enters its sync cycle. Phase 1 is everything else,
 which downloads in the background.
 
-**The set is invariant.** Whether sourced from preverified.toml
-or from peer chain.toml, the SAME canonical files are needed for
-phase 0. The two sources are delivery mechanisms; they MUST agree
-on file content (in terms of relative steps from tip). A publisher
-whose chain.toml differs from the canonical phase 0 set —
-e.g. because pruning has dropped mid-history files — is a broken
-publisher: V2 nodes consuming its manifest will end up with
-incomplete downloads and stuck index builds.
+**Phase 0 is the trigger, not the gating set.** What phase 0
+defines is:
 
-This implies a constraint on what a publisher can publish:
+  - the ORDER files are requested in (latest-first within domain,
+    state before block, etc.)
+  - the TRIGGER for sync to start (when the phase 0 subset is local,
+    sync cycle can begin)
 
-  - Archive publishers: chain.toml may include everything.
-  - Minimal publishers: chain.toml must still cover the canonical
-    phase 0 set (latest state + recent blocks). They can publish
-    that even if they've pruned older history.
-  - Bootstrap publishers (with `--snap.bootstrap-from-preverified`):
-    same constraint — chain.toml = local + preverified-seed must
-    align with the canonical phase 0 set, no gaps.
+Phase 0 does NOT determine which files the publisher supplies, or
+which files the downloader fetches. The publisher offers whatever
+it has (a coherent set, ideally archive-shaped); the downloader
+fetches everything in that set. Time-to-tip is measured by when
+the phase-0 subset arrives, even though the rest continues to
+download in the background and the node is happily processing new
+blocks while it does.
 
-If a publisher can't satisfy this (e.g. it's pruned data still
-required for the canonical set), it shouldn't act as a publisher.
-Detection: a node receiving a chain.toml with gaps relative to its
-canonical view should refuse, log the discrepancy, and fall through
-to another publisher.
+Net implications:
 
-**The 2026-05-03 V2 test result confirmed this.** A minimal-mode
-publisher with bootstrap=true advertised preverified ∪ local-files;
-its chain.toml had a gap from step ~200 to step ~2730 (everything
-the publisher's minimal mode had pruned). The V2-only test node
-downloaded what the publisher advertised, hit the gap, and the
-storage-lifecycle BuildMissedIndices retried 7942 times against the
-gap before being stopped. Discovery, manifestReady gate, and
-V2-only registry replacement all worked correctly; the failure was
-the publisher's chain.toml content not matching the canonical set.
+  - A correctly-configured publisher offers a complete coherent set
+    (no internal gaps relative to the canonical chain). Archive mode
+    is the safe default.
+  - A pruning publisher (minimal/full) is not necessarily wrong, but
+    the merged published manifest must remain coherent — a publisher
+    that drops mid-history files from BOTH disk AND its published
+    chain.toml is broken from a downstream consumer's perspective
+    because the consumer can't index ranges covered by the gap.
+  - V2 nodes don't filter the publisher's offering; they fetch it
+    all. The phase-0 ordering decides which arrive first, and the
+    sync-cycle trigger fires once that subset is local.
+
+**Operators can extend the phase-0 trigger set.** The default is
+the minimum-viable subset (latest state slice + recent blocks) so
+nodes reach "ready" as quickly as possible. Operators with stricter
+"ready" requirements specify additional files via env / flag
+(shape TBD when the configurable mechanism lands):
+
+  - RPC operator who wants historical block queries answerable
+    without Pending: extend phase 0 to include some range of block
+    files.
+  - Archive operator who wants archive-style queries answerable
+    immediately: extend phase 0 to include history (.v / .ef / .efi).
+  - Test fixture: pin an explicit phase 0 set for deterministic
+    measurement.
+
+Extending phase 0 doesn't change what gets downloaded — the full
+publisher offering still arrives. It changes only what's gated on
+before sync starts. Trade-off: stricter phase 0 → longer
+time-to-tip (more files must arrive first); looser phase 0 →
+faster tip but more reads return Pending until backfill catches up.
+
+**The 2026-05-03 V2 test result.** All the V2 mechanisms worked
+end-to-end (discovery, manifestReady gate, registry replacement).
+What broke wasn't the V2 wiring — it was the test environment:
+
+  - The publisher (minimal mode + bootstrap=true) advertised
+    preverified ∪ local-files = mostly preverified. The test node
+    received a manifest only 12 entries different from preverified.
+  - Download proceeded against that merged set; webseed served
+    nearly everything (peer-download stayed 0 B/s). 422/423 files
+    landed.
+  - One file didn't complete and/or the storage-lifecycle driver
+    started BuildMissedIndices retries against ranges that had
+    incomplete coverage; 7942 "not all snapshot segments are
+    available" warnings accumulated.
+  - The test was stopped before tip because the loop wasn't making
+    forward progress.
+
+The takeaway is procedural rather than architectural: a meaningful
+V2 minimal-set test requires a publisher whose offered set is
+coherent AND meaningfully smaller than preverified. A
+fully-archive publisher with bootstrap=false would advertise just
+its local files; that's the comparison run that would surface a
+real time-to-tip difference. The minimal-mode bootstrap publisher
+we used didn't meet that bar.
+
+**There IS a real engineering finding from the test:** the
+lifecycle driver's reaction to "not all snapshot segments are
+available" is wrong. It just hammers BuildMissedIndices retry
+after retry (7942 times in our test) instead of reasoning about
+why the build failed. The proper behaviour should be:
+
+  - On build failure, identify the missing segments.
+  - If the missing segments are in the active download queue:
+    SUSPEND the build for that range. Resume when the downloads
+    complete (e.g. wait on inventory ChangeSet for the names).
+  - If the missing segments are not yet in any queue but are
+    available from a publisher / preverified / webseed: TRIGGER
+    a download for them via the storage component's lifecycle
+    driver, then suspend until they arrive.
+  - If the missing segments are unavailable anywhere: log a
+    structured error, stop retrying, surface the gap to the
+    operator. This is the "invalid manifest / broken publisher"
+    case the operator needs to know about.
+
+Today's behaviour (tight retry loop with no reasoning) wastes CPU,
+floods the log, and provides no signal to the operator. The fix
+moves the driver from "blind retry" to "informed dispatch". This
+is a follow-up engineering item, not a one-line tweak — requires:
+
+  - Structured error from BuildMissedIndices listing missing
+    segments (currently it's an opaque error string).
+  - Driver-side inventory consultation to classify each missing
+    segment (queued / available-but-unqueued / unavailable).
+  - Per-classification action: suspend / download-and-suspend /
+    log-and-stop.
+
+Worth tracking as a completion-plan addendum.
 
 **Source-of-truth rule:**
 
