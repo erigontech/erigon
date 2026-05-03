@@ -50,6 +50,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.ExecBatchedIOFlag,
 	&utils.ExecStateCacheFlag,
 	&utils.ExecWorkersFlag,
+	&utils.ExecSerialFlag,
 	&utils.ExecNoMergeFlag,
 	&utils.ExecNoPruneFlag,
 	&BatchSizeFlag,
