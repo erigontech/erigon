@@ -212,7 +212,7 @@ func OpenFilter(filePath string, useFuse bool) (idx *Filter, err error) {
 	}
 	idx.filter = filter
 	if sz := datasize.ByteSize(filter.M() / 8); sz > datasize.MB {
-		log.Debug("[agg] bloom filter opened", "file", fileName, "ram", common.ByteCount(sz))
+		log.Debug("[agg] bloom filter opened", "file", fileName, "ram", common.ByteCount(sz.Bytes()))
 	}
 	validationPassed = true
 	return idx, nil
