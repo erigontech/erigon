@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/c2h5oh/datasize"
 	bloomfilter "github.com/holiman/bloomfilter/v2"
 
 	"github.com/erigontech/erigon/common"
@@ -210,7 +211,9 @@ func OpenFilter(filePath string, useFuse bool) (idx *Filter, err error) {
 		return nil, fmt.Errorf("OpenFilter: %w, %s", err, fileName)
 	}
 	idx.filter = filter
-	log.Debug("[agg] bloom filter opened", "file", fileName, "ram", common.ByteCount(filter.M()/8))
+	if sz := datasize.ByteSize(filter.M() / 8); sz > datasize.MB {
+		log.Debug("[agg] bloom filter opened", "file", fileName, "ram", common.ByteCount(sz))
+	}
 	validationPassed = true
 	return idx, nil
 }
