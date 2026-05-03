@@ -269,39 +269,51 @@ Without it, Strategy B from the time-to-tip target document
 measures preverified + augment, not consensus-latest, and the
 architectural claim cannot be tested.
 
-### 5c. Lifecycle driver: classify missing segments, suspend not retry
+### 5c. Lifecycle driver: inventory-driven build dispatch
 
-Surfaced by the 2026-05-03 V2 test (see
-`docs/plans/20260502-min-time-to-tip-target.md`). When
-`BuildMissedIndices` fails with "not all snapshot segments are
-available", today's lifecycle driver tight-retries — 7942 retries
-in our run before the test was stopped. The driver should reason
-about WHY the build failed and act per classification:
+**Symptom-fix landed (`e956ea1193`):** per-file quarantine after N
+consecutive failures stops the 7942-retries flood. Operators get a
+clear signal; the log isn't drowned. ChangeSet receive clears
+quarantine so legitimate state changes recover.
 
-  - **Missing segments are in the active download queue** → suspend
-    the build for that range; resume on inventory ChangeSet for the
-    expected names.
-  - **Missing segments are available but not yet queued** (publisher
-    has them, webseed has them, etc.) → trigger downloads for them
-    via the lifecycle driver's existing path; suspend until they
-    arrive.
-  - **Missing segments are unavailable anywhere** → log a structured
-    error, stop retrying, surface to operator. This is the "broken
-    publisher / invalid manifest" case operators need to know about.
+**Real architectural fix (still pending — needs more analysis):**
+the driver calling BuildMissedIndices per-file is the wrong shape.
+BuildMissedIndices is a GLOBAL operation that scans everything for
+missing indexes. The driver dispatches it once per file at
+LifecycleDownloaded → the same global scan runs N times per sweep
+even though the first call already covered all missing work.
 
-Required code changes:
+The right model is **inventory-driven**:
 
-  - `BuildMissedIndices` returns a structured error that lists the
-    missing segments by name (today it's an opaque error string).
-  - Driver-side handler classifies each missing segment by consulting
-    Inventory state + downloader queue.
-  - Per-classification action (suspend / download-and-suspend /
-    log-and-stop). Replaces the current "Debug log + next-sweep retry"
-    behaviour.
+  - The driver iterates Inventory entries at LifecycleDownloaded.
+  - For each, it consults `FileEntry.Dependencies` to determine
+    what the entry's "ready" state requires.
+  - It checks Inventory for the dependency names — are they present?
+    At what state?
+  - If all deps present: advance the entry to LifecycleIndexed.
+  - If deps missing: dispatch a specific build for the missing
+    dependency, NOT a global BuildMissedIndices call.
 
-Effort: medium. Touches `db/snapshotsync` (build error shape),
-`node/components/storage/lifecycle` (driver dispatch logic),
-possibly `db/state` for Aggregator's BuildMissedAccessors equivalent.
+This requires changes the symptom-fix doesn't:
+
+  - Build paths exposed at granularity matching FileEntry.Dependencies.
+    Today only global "BuildMissedIndices" / "BuildMissedAccessors"
+    exist. Need per-file or per-dependency-name builders.
+  - Driver tracks in-flight builds so it doesn't dispatch the same
+    work twice (e.g. waiting on the dep landing).
+  - Inventory reflects build progress as state transitions on the
+    DEPENDENCY entries, not the primary — so when the dep advances,
+    the primary's sweep can act.
+
+The structured-error / classify-missing-segments approach in the
+earlier draft of §5c is a halfway shape — it acknowledges the
+existing global builder and works around it. The inventory-driven
+approach replaces it. More analysis required before implementing —
+specifically, what API the build subsystems should expose to fit
+the lifecycle's per-file dispatch model.
+
+Until then, the symptom-fix quarantine prevents log flooding and
+gives operators visibility. That's the floor.
 
 ### 5d. Downloader: initiate recent files first
 
