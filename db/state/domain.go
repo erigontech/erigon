@@ -437,28 +437,13 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if w.discard {
 		return nil
 	}
-
-	t := time.Now()
 	if err := w.h.Flush(ctx, tx); err != nil {
 		return err
 	}
-	if took := time.Since(t); took > time.Millisecond {
-		log.Info("[dbg] domain.flush history", "t", took, "tbl", w.valsTable)
-	}
 
-	t = time.Now()
-	var count uint64
 	if w.largeVals {
-		if err := w.values.Load(tx, w.valsTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			count++
-			return loadFunc(k, v, table, next)
-		}, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
+		if err := w.values.Load(tx, w.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 			return err
-		}
-		took := time.Since(t)
-		keysPerSec := uint64(float64(count) / took.Seconds())
-		if took > time.Millisecond && keysPerSec > 0 {
-			log.Info("[dbg] domain.flush vals", "t", took, "keys", common.PrettyCounter(count), "keys/s", common.PrettyCounter(keysPerSec), "tbl", w.valsTable)
 		}
 		w.Close()
 		return nil
@@ -470,7 +455,6 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	}
 	defer valuesCursor.Close()
 	if err := w.values.Load(tx, w.valsTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		count++
 		foundVal, err := valuesCursor.SeekBothRange(k, v[:8])
 		if err != nil {
 			return err
@@ -481,11 +465,6 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		return valuesCursor.PutCurrent(k, v) // DeleteCurrent+Put
 	}, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 		return err
-	}
-	took := time.Since(t)
-	keysPerSec := uint64(float64(count) / took.Seconds())
-	if took > time.Millisecond && keysPerSec > 0 {
-		log.Info("[dbg] domain.flush vals", "t", took, "keys", common.PrettyCounter(count), "keys/s", common.PrettyCounter(keysPerSec), "tbl", w.valsTable)
 	}
 	w.Close()
 
@@ -1357,8 +1336,7 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 		maxTxNum = math.MaxUint64
 	}
 	useExistenceFilter := dt.d.Accessors.Has(statecfg.AccessorExistence)
-	//useCache := dt.name != kv.CommitmentDomain && maxTxNum == math.MaxUint64
-	useCache := maxTxNum == math.MaxUint64
+	useCache := dt.name != kv.CommitmentDomain && maxTxNum == math.MaxUint64
 
 	hi, lo := dt.ht.iit.hashKey(k)
 
