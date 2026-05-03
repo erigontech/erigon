@@ -23,10 +23,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/c2h5oh/datasize"
 	bloomfilter "github.com/holiman/bloomfilter/v2"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -64,7 +62,6 @@ func NewFilter(keysCount uint64, filePath string, useFuse bool) (*Filter, error)
 		if err != nil {
 			return nil, fmt.Errorf("%w, %s", err, fileName)
 		}
-		log.Debug("[agg] bloom filter created", "file", fileName, "keys", keysCount, "ram", common.ByteCount(m/8))
 	}
 	return e, nil
 }
@@ -211,9 +208,6 @@ func OpenFilter(filePath string, useFuse bool) (idx *Filter, err error) {
 		return nil, fmt.Errorf("OpenFilter: %w, %s", err, fileName)
 	}
 	idx.filter = filter
-	if sz := datasize.ByteSize(filter.M() / 8); sz > 100*datasize.MB {
-		log.Debug("[agg] bloom filter opened", "file", fileName, "ram", common.ByteCount(sz.Bytes()))
-	}
 	validationPassed = true
 	return idx, nil
 }
