@@ -55,12 +55,10 @@ func TestExecutionSpecWitness(t *testing.T) {
 
 	dir := filepath.Join("..", "execution-spec-tests", "blockchain_tests_zkevm")
 	bt := new(testutil.TestMatcher)
-	// Serialize subtests: each fixture spins up a fresh MDBX env + historical
-	// commitment state; running them in parallel multiplies memory/pagefile
-	// pressure (especially on Windows and under -race) for little wall-clock
-	// win on the 93-fixture zkevm corpus. See docs/plans/20260427-eest-witness-ci.md.
 	bt.NoParallel = true
 
+	// Keep the corpus serial: each fixture spins up fresh MDBX/state machinery,
+	// and parallel execution only amplifies memory/pagefile pressure for this suite.
 	// All 93 fixtures fail on State node ordering and/or Codes ordering mismatches
 	// (tracked by #20442). Headers field was fixed by including the parent header
 	// and sorting ascending (#20534), but no fixture passes yet because every one
