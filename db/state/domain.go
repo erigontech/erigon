@@ -156,7 +156,7 @@ func (d *Domain) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
 	if err != nil {
 		return nil, err
 	}
-	if invIdxExistenceForceInMem {
+	if domainExistenceForceInMem {
 		accessor.ForceExistenceFilterInRAM()
 	}
 	return accessor, nil
