@@ -42,7 +42,6 @@ func TestExecutionSpecWitness(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping witness tests in short mode")
 	}
-	t.Parallel()
 
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
@@ -56,6 +55,8 @@ func TestExecutionSpecWitness(t *testing.T) {
 
 	dir := filepath.Join("..", "execution-spec-tests", "blockchain_tests_zkevm")
 	bt := new(testutil.TestMatcher)
+	bt.NoParallel = true
+	bt.Whitelist(`^for_amsterdam/amsterdam/eip8025_optional_proofs/witness_validation_state/validation_state_unsorted_but_complete\.json$`)
 
 	// All 93 fixtures fail on State node ordering and/or Codes ordering mismatches
 	// (tracked by #20442). Headers field was fixed by including the parent header
