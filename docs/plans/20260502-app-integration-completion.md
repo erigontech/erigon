@@ -177,6 +177,50 @@ If the abnormal-termination tests don't pass, the storage-driven
 path doesn't justify its existence vs the stage path; we'd be
 carrying complexity without recovery payoff.
 
+### 5b. V2-only mode (preverified is bootstrap-only)
+
+**Rule:** when `--snap.p2p-manifest` is set, the node uses peer-discovered
+chain.toml as the **sole source** for the download set. preverified.toml
+is the bootstrap convention for the initial publisher; once chain.toml
+data is available from peers, all other nodes should ignore preverified
+entirely.
+
+**Today's behavior is wrong.** [db/downloader/chaintoml_consumer.go:52
+`MergeChainToml`](../db/downloader/chaintoml_consumer.go#L52) merges
+existing (preverified) with discovered (P2P), with existing winning on
+conflict. So a V2-enabled node still downloads preverified's full set
+and only ADDS P2P-discovered entries that aren't in preverified.
+
+**Why this matters for the time-to-tip target:** preverified grows with
+chain age. As long as it's the floor, time-to-tip scales with chain
+age. The "constant time-to-tip across modes" architectural target
+requires V2-only mode where the download set is bounded by what
+peer publishers currently advertise (latest state slice + recent
+ranges).
+
+**Required correction:**
+
+  - When `Snapshot.P2PManifest` is true, the snapshot stage's
+    `RequestSnapshotsDownload` flow should use the P2P-discovered set
+    EXCLUSIVELY, not preverified ∪ discovered.
+  - `snapcfg.KnownCfgOrDevnet(...)`'s preverified entries should be
+    replaced (not merged) by whatever the chain.toml discovery loop
+    has assembled.
+  - The bootstrap exception: a publisher node that's the FIRST one
+    online for a chain has no peers to discover from. It still
+    needs preverified as its source. So the rule is:
+    - V2 enabled + at least one peer with chain.toml discovered →
+      use P2P set exclusively
+    - V2 enabled + no peers discovered yet → wait for first
+      discovery (today's `manifestReady` channel already does this
+      gate)
+    - V2 disabled → preverified path (today's default)
+
+This change is required to validate the constant-time-to-tip target.
+Without it, Strategy B from the time-to-tip target document
+measures preverified + augment, not consensus-latest, and the
+architectural claim cannot be tested.
+
 ### 6. Performance characteristics measured
 
 "Optimised" means we measured and the numbers are acceptable:

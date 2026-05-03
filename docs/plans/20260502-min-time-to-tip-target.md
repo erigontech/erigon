@@ -256,6 +256,20 @@ the **Phase 0 download set** — the file set that must arrive
 BEFORE the node enters its sync cycle. Phase 1 is everything else,
 which downloads in the background.
 
+**Source-of-truth rule:**
+
+  - Bootstrap publisher (initial node, no peers yet): uses
+    preverified.toml. This is the convention for chain rollout.
+  - All other nodes (with `--snap.p2p-manifest`): use peer-discovered
+    chain.toml EXCLUSIVELY. preverified is ignored. See completion
+    plan §5b for the required code correction — today's
+    `MergeChainToml` augments rather than replaces, which is wrong.
+
+The Phase 0 set therefore = whatever the publisher peers currently
+advertise via chain.toml. With a tip-running publisher, that set is
+just the latest step's state files + recent block range. Bounded.
+Constant.
+
 This set should ultimately be **configurable** by the operator
 (env var or flag). Different deployments have different "ready to
 sync" thresholds:
