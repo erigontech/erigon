@@ -990,8 +990,19 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	// incomplete torrents. There's still the issue of having torrents not in the preverified set:
 	// snapshots not in that set could cause issues. That's an unsolved issue and probably requires
 	// always resetting before resuming/starting a sync.
+	//
+	// Gated on LifecycleDrivenByStorage: when storage owns the
+	// import lifecycle, disk-discovery is the lifecycle driver's
+	// job (wire E in node/components/storage/lifecycle/driver.go),
+	// and seeding setup happens via OnFilesChange in
+	// storage.Provider. Calling AddTorrentsFromDisk in that mode
+	// duplicates work the storage component now owns and causes
+	// the chain.toml/chain.toml.torrent collision (#20615 +
+	// completion plan §5e). Per the architectural rule: the
+	// downloader takes its file list from the storage component,
+	// not from disk.
 	var afterSnapshotDownload func(ctx context.Context) error
-	if backend.components.Downloader != nil && backend.components.Downloader.Downloader != nil {
+	if backend.components.Downloader != nil && backend.components.Downloader.Downloader != nil && !backend.config.Snapshot.LifecycleDrivenByStorage {
 		afterSnapshotDownload = func(ctx context.Context) (err error) {
 			incomplete, err := backend.components.Downloader.Downloader.AddTorrentsFromDisk(ctx)
 			if err != nil {
