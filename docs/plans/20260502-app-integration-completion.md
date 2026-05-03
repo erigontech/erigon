@@ -269,6 +269,72 @@ Without it, Strategy B from the time-to-tip target document
 measures preverified + augment, not consensus-latest, and the
 architectural claim cannot be tested.
 
+### 5c. Lifecycle driver: classify missing segments, suspend not retry
+
+Surfaced by the 2026-05-03 V2 test (see
+`docs/plans/20260502-min-time-to-tip-target.md`). When
+`BuildMissedIndices` fails with "not all snapshot segments are
+available", today's lifecycle driver tight-retries — 7942 retries
+in our run before the test was stopped. The driver should reason
+about WHY the build failed and act per classification:
+
+  - **Missing segments are in the active download queue** → suspend
+    the build for that range; resume on inventory ChangeSet for the
+    expected names.
+  - **Missing segments are available but not yet queued** (publisher
+    has them, webseed has them, etc.) → trigger downloads for them
+    via the lifecycle driver's existing path; suspend until they
+    arrive.
+  - **Missing segments are unavailable anywhere** → log a structured
+    error, stop retrying, surface to operator. This is the "broken
+    publisher / invalid manifest" case operators need to know about.
+
+Required code changes:
+
+  - `BuildMissedIndices` returns a structured error that lists the
+    missing segments by name (today it's an opaque error string).
+  - Driver-side handler classifies each missing segment by consulting
+    Inventory state + downloader queue.
+  - Per-classification action (suspend / download-and-suspend /
+    log-and-stop). Replaces the current "Debug log + next-sweep retry"
+    behaviour.
+
+Effort: medium. Touches `db/snapshotsync` (build error shape),
+`node/components/storage/lifecycle` (driver dispatch logic),
+possibly `db/state` for Aggregator's BuildMissedAccessors equivalent.
+
+### 5d. Downloader: initiate recent files first
+
+Per the Phase 0 / Phase 1 ordering rule from
+`docs/plans/20260502-min-time-to-tip-target.md`. The downloader must
+INITIATE download of recent files before older files. Today the
+list of files to download is built and passed to the torrent client
+in arbitrary order (or in the order the snapshot stage produces);
+the torrent client downloads in parallel which can result in older
+files completing first, delaying when the phase-0 trigger files are
+local.
+
+The required behaviour:
+
+  - Downloader sorts the download list by step (descending — latest
+    first) within each domain class before adding torrents.
+  - Torrent client priorities are set so recent torrents have higher
+    priority than older ones (anacrolix/torrent supports
+    per-torrent priority).
+  - Phase 1 (older ranges) doesn't begin its torrent fetches until
+    Phase 0 has completed, OR is allocated lower bandwidth so it
+    doesn't compete with Phase 0 throughput.
+
+This is the production-downloader equivalent of the orchestrator's
+`requestGapsFor` ordering already exercised in the in-process
+scenario harness. The mechanism exists at the orchestrator level;
+it needs to extend into the actual torrent client's queueing.
+
+Effort: medium. Touches `db/downloader` (torrent priority + ordering
+logic). The orchestrator-level changes required to source the
+ordering from the storage component already landed via the
+snapshot-flow PR.
+
 ### 6. Performance characteristics measured
 
 "Optimised" means we measured and the numbers are acceptable:
