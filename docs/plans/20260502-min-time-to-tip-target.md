@@ -256,6 +256,41 @@ the **Phase 0 download set** — the file set that must arrive
 BEFORE the node enters its sync cycle. Phase 1 is everything else,
 which downloads in the background.
 
+**The set is invariant.** Whether sourced from preverified.toml
+or from peer chain.toml, the SAME canonical files are needed for
+phase 0. The two sources are delivery mechanisms; they MUST agree
+on file content (in terms of relative steps from tip). A publisher
+whose chain.toml differs from the canonical phase 0 set —
+e.g. because pruning has dropped mid-history files — is a broken
+publisher: V2 nodes consuming its manifest will end up with
+incomplete downloads and stuck index builds.
+
+This implies a constraint on what a publisher can publish:
+
+  - Archive publishers: chain.toml may include everything.
+  - Minimal publishers: chain.toml must still cover the canonical
+    phase 0 set (latest state + recent blocks). They can publish
+    that even if they've pruned older history.
+  - Bootstrap publishers (with `--snap.bootstrap-from-preverified`):
+    same constraint — chain.toml = local + preverified-seed must
+    align with the canonical phase 0 set, no gaps.
+
+If a publisher can't satisfy this (e.g. it's pruned data still
+required for the canonical set), it shouldn't act as a publisher.
+Detection: a node receiving a chain.toml with gaps relative to its
+canonical view should refuse, log the discrepancy, and fall through
+to another publisher.
+
+**The 2026-05-03 V2 test result confirmed this.** A minimal-mode
+publisher with bootstrap=true advertised preverified ∪ local-files;
+its chain.toml had a gap from step ~200 to step ~2730 (everything
+the publisher's minimal mode had pruned). The V2-only test node
+downloaded what the publisher advertised, hit the gap, and the
+storage-lifecycle BuildMissedIndices retried 7942 times against the
+gap before being stopped. Discovery, manifestReady gate, and
+V2-only registry replacement all worked correctly; the failure was
+the publisher's chain.toml content not matching the canonical set.
+
 **Source-of-truth rule:**
 
 Bootstrap is **opt-in via flag**, not the default. Behaviour matrix:
