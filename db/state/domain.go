@@ -2113,6 +2113,15 @@ func (c *indirectKeysCursor) DeleteCurrent() error {
 }
 
 func (c *indirectKeysCursor) DeleteCurrentDuplicates() error {
+	// NextDup on some cursor implementations (e.g. memStoreCursor) advances past
+	// the current key when no more dups remain — the cursor then sits on the
+	// *next* key, and a follow-up DeleteCurrentDuplicates would delete that
+	// key's dups instead. Capture the key up front and re-seek before deleting.
+	k, _, err := c.RwCursorDupSort.Current()
+	if err != nil {
+		return err
+	}
+	keyCopy := common.Copy(k)
 	dup, err := c.RwCursorDupSort.FirstDup()
 	if err != nil {
 		return err
@@ -2125,6 +2134,9 @@ func (c *indirectKeysCursor) DeleteCurrentDuplicates() error {
 		if err != nil {
 			return err
 		}
+	}
+	if _, _, err := c.RwCursorDupSort.SeekExact(keyCopy); err != nil {
+		return err
 	}
 	return c.RwCursorDupSort.DeleteCurrentDuplicates()
 }
