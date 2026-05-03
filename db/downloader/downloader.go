@@ -32,6 +32,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -799,12 +800,52 @@ func (d *Downloader) webSeedUrlStrs() iter.Seq[string] {
 	return slices.Values(d.cfg.WebSeedUrls)
 }
 
+// sortItemsLatestFirst orders the download batch so files for higher
+// step ranges are added to the torrent client FIRST. The torrent
+// client parallelizes downloads, but the order we add torrents
+// affects when each starts fetching — getting the latest-step
+// torrents in first gives them a head-start, which matters for
+// time-to-tip (per docs/plans/20260502-min-time-to-tip-target.md:
+// phase 0 = order + trigger, not gating set).
+//
+// Sort key: snaptype-parsed (From, To) range descending. Items the
+// parser can't understand go to the end with their relative order
+// preserved (sort is stable). Common cause of unparseable: chain
+// metadata files like erigondb.toml, salt-*.txt — these are tiny
+// and don't dominate time-to-tip regardless of when they're added.
+func sortItemsLatestFirst(items []preverifiedSnapshot) {
+	sort.SliceStable(items, func(i, j int) bool {
+		iInfo, _, iOk := snaptype.ParseFileName("", items[i].Name)
+		jInfo, _, jOk := snaptype.ParseFileName("", items[j].Name)
+		switch {
+		case !iOk && !jOk:
+			return false // both unparseable; preserve relative order
+		case !iOk:
+			return false // unparseable goes to end
+		case !jOk:
+			return true // parseable comes before unparseable
+		case iInfo.To != jInfo.To:
+			return iInfo.To > jInfo.To // higher To = more recent first
+		default:
+			return iInfo.From > jInfo.From // tiebreak by From descending
+		}
+	})
+}
+
 // Download the provided snapshots in their entirety. No consumers should do this asynchronously.
 // Logging is bound specific and bound to the lifetime of the call. Target is a name for what we're
 // syncing.
 func (d *Downloader) DownloadSnapshots(ctx context.Context, items []preverifiedSnapshot, target string) (err error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	// Latest-first ordering: sort the batch by step descending so recent
+	// files have their downloads INITIATED first. The torrent client
+	// downloads in parallel once added; getting recent torrents into the
+	// client first gives them a head-start. Per docs/plans/20260502-app-
+	// integration-completion.md §5d. Items unparseable by snaptype go
+	// to the end of the batch (lowest initiation priority); their
+	// relative order is preserved.
+	sortItemsLatestFirst(items)
 	wait, err := d.startSnapshotsDownload(ctx, items, target)
 	if err != nil {
 		return
