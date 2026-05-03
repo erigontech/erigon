@@ -251,6 +251,27 @@ is "what files are present at start" rather than "what prune mode".
   4. The set's content (which files are present, which aren't)
      defines the floor.
 
+**Architectural framing.** What this scenario actually defines is
+the **Phase 0 download set** — the file set that must arrive
+BEFORE the node enters its sync cycle. Phase 1 is everything else,
+which downloads in the background.
+
+This set should ultimately be **configurable** by the operator
+(env var or flag). Different deployments have different "ready to
+sync" thresholds:
+
+  - A consumer-facing RPC node may want stricter Phase 0 (latest
+    state + recent blocks) so reads don't surface Pending.
+  - A relay / forwarding node may accept thinner Phase 0 (latest
+    state only) and lazy-load everything else on demand.
+  - A test fixture may define an explicit minimum to validate
+    behaviour without varying environmental conditions.
+
+Configurability also gives us a forward-compatible knob for lazy
+loading: as more code paths handle absent files via Pending, the
+default Phase 0 set shrinks. Operators can opt into a thinner set
+ahead of the default.
+
 **Expected boundary (sharper take):** the minimum is the **latest
 state slice** — the most recent step's `.kv` + `.kvi` per domain
 (accounts, storage, code, commitment) plus their existence-filter
