@@ -150,27 +150,38 @@ func buildChainTomlTorrentByName(fileName, snapDir string, torrentFS *AtomicTorr
 // 4. Call ENR updater with the new info-hash
 //
 // enrUpdater may be nil if P2P is not yet available.
-// chainName is used to include preverified entries from the snapcfg registry.
-func PublishChainToml(snapDir string, torrentFS *AtomicTorrentFS, chainName string, enrUpdater func(enr.ChainToml)) error {
+// chainName is used to compute AuthoritativeBlocks from the snapcfg
+// registry.
+//
+// bootstrapFromPreverified controls whether preverified entries are
+// merged INTO the published chain.toml. When true (bootstrap publishers),
+// the published manifest = local files ∪ preverified — propagating the
+// chain rollout's seed to peers. When false (regular V2 nodes), the
+// published manifest = local files only — preverified is invisible to
+// the network. See completion plan §5b.
+func PublishChainToml(snapDir string, torrentFS *AtomicTorrentFS, chainName string, bootstrapFromPreverified bool, enrUpdater func(enr.ChainToml)) error {
 	// Start from local .torrent files.
 	tomlBytes, err := GenerateChainToml(snapDir)
 	if err != nil {
 		return fmt.Errorf("generating chain.toml: %w", err)
 	}
 
-	// Merge in preverified entries from the registry (covers files without .torrent files).
-	// Also compute AuthoritativeBlocks from the registry's ExpectBlocks.
+	// Read AuthoritativeBlocks from the registry regardless — it's chain
+	// metadata, not preverified file content. Optionally merge in
+	// preverified entries when bootstrapping.
 	var authoritativeTx uint64
 	if chainName != "" {
-		localMap, _ := ParseChainToml(tomlBytes)
 		if cfg, known := snapcfg.KnownCfg(chainName); known {
 			authoritativeTx = cfg.ExpectBlocks
-			preverified := make(map[string]string, len(cfg.Preverified.Items))
-			for _, item := range cfg.Preverified.Items {
-				preverified[item.Name] = item.Hash
+			if bootstrapFromPreverified {
+				localMap, _ := ParseChainToml(tomlBytes)
+				preverified := make(map[string]string, len(cfg.Preverified.Items))
+				for _, item := range cfg.Preverified.Items {
+					preverified[item.Name] = item.Hash
+				}
+				merged, _ := MergeChainToml(localMap, preverified)
+				tomlBytes = BuildTomlFromMap(merged)
 			}
-			merged, _ := MergeChainToml(localMap, preverified)
-			tomlBytes = BuildTomlFromMap(merged)
 		}
 	}
 

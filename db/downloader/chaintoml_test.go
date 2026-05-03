@@ -164,7 +164,7 @@ func TestPublishChainToml(t *testing.T) {
 		receivedENR = ct
 	}
 
-	err := PublishChainToml(snapDir, torrentFS, "", updater)
+	err := PublishChainToml(snapDir, torrentFS, "", false, updater)
 	require.NoError(t, err)
 
 	// Verify chain.toml was created.
@@ -184,7 +184,7 @@ func TestPublishChainToml_NilUpdater(t *testing.T) {
 	createTestTorrent(t, snapDir, "v1-000000-000500-headers.seg")
 
 	// Should not panic with nil updater.
-	err := PublishChainToml(snapDir, torrentFS, "", nil)
+	err := PublishChainToml(snapDir, torrentFS, "", false, nil)
 	require.NoError(t, err)
 }
 

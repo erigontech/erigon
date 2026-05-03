@@ -426,7 +426,7 @@ func (d *Downloader) PublishLocalChainToml() error {
 	updater := d.enrUpdater
 	d.lock.RUnlock()
 
-	if err := PublishChainToml(d.snapDir(), d.torrentFS, d.cfg.ChainName, updater); err != nil {
+	if err := PublishChainToml(d.snapDir(), d.torrentFS, d.cfg.ChainName, d.cfg.BootstrapFromPreverified, updater); err != nil {
 		return err
 	}
 
