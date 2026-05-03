@@ -165,7 +165,7 @@ func (d *Domain) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
 		accessor.ForceExistenceFilterWillNeed()
 	}
 	if domainExistenceForceNormal {
-		accessor.ForceExistenceFilterInRAM()
+		accessor.ForceExistenceFilterNormal()
 	}
 	return accessor, nil
 }
