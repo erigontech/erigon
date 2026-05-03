@@ -108,7 +108,10 @@ func (r *Reader) ForceInMem() datasize.ByteSize {
 }
 
 func (r *Reader) MadvWillNeed() {
-	if r == nil || r.m == nil || len(r.m) == 0 || r.keepInMem {
+	if r == nil || r.f == nil || r.m == nil || len(r.m) == 0 || r.keepInMem {
+		// r.f == nil means r.m is a slice of someone else's mmap (e.g. fuse
+		// embedded in .kvi). madvise needs a page-aligned address; a
+		// mid-mapping slice fails with EINVAL on Linux.
 		return
 	}
 	if err := mm.MadviseWillNeed(r.m); err != nil {
@@ -116,7 +119,7 @@ func (r *Reader) MadvWillNeed() {
 	}
 }
 func (r *Reader) MadvNormal() {
-	if r == nil || r.m == nil || len(r.m) == 0 || r.keepInMem {
+	if r == nil || r.f == nil || r.m == nil || len(r.m) == 0 || r.keepInMem {
 		return
 	}
 	if err := mm.MadviseNormal(r.m); err != nil {
