@@ -651,9 +651,9 @@ func domainReadMetric(name kv.Domain, level int) metrics.Summary {
 }
 
 func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte, hi, lo uint64) (v []byte, ok bool, offset uint64, err error) {
-	if dbg.KVReadLevelledMetrics {
-		defer domainReadMetric(dt.name, i).ObserveDuration(time.Now())
-	}
+	//if dbg.KVReadLevelledMetrics {
+	//	defer domainReadMetric(dt.name, i).ObserveDuration(time.Now())
+	//}
 
 	if dt.d.Accessors.Has(statecfg.AccessorBTree) {
 		_, v, offset, ok, err = dt.statelessBtree(i).Get(filekey, dt.reusableReader(i))
