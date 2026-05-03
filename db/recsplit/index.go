@@ -290,7 +290,6 @@ func (idx *Index) ForceExistenceFilterWillNeed() {
 		idx.existenceV1.MadvWillNeed()
 	} else {
 		log.Debug("[agg] fuse.ForceExistenceFilterWillNeed", "file", idx.fileName, "idx.dataStructureVersion", idx.dataStructureVersion, "idx.lessFalsePositives", idx.lessFalsePositives)
-		panic(1)
 	}
 	return
 }
