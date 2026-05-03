@@ -315,6 +315,51 @@ the lifecycle's per-file dispatch model.
 Until then, the symptom-fix quarantine prevents log flooding and
 gives operators visibility. That's the floor.
 
+### 5e. V2 chain.toml torrent-name collision (existing bug)
+
+Surfaced by the 2026-05-03 V2 rerun. When a node downloads
+chain.toml via the V2 manifest path, the resulting `chain.toml`
+file on disk collides with `AddTorrentsFromDisk`'s scan in a way
+that aborts the snapshot stage:
+
+```
+adding torrent for chain.toml.torrent:
+snapshot exists with a different name: "chain.toml"
+```
+
+After the error, a runtime fault crashes the process — the error
+handling path itself appears to be broken. Stack trace points at
+`anacrolix/torrent` socket cleanup during error rollback.
+
+This bug **predates this branch.** The comment at
+`node/eth/backend.go:511` references issue `#20615` and gates the
+V2 wiring behind a flag because of this exact collision. The
+2026-05-03 V2 rerun hit it because the test node successfully
+discovered the publisher's chain.toml and downloaded it — which is
+when the AddTorrentsFromDisk code path triggers the collision.
+
+Required fix:
+
+  - Resolve the chain.toml file vs chain.toml.torrent naming
+    collision in `AddTorrentsFromDisk`. Either:
+    - Rename the on-disk chain.toml file (or the torrent) so the
+      pair has distinct names, OR
+    - Skip chain.toml from the AddTorrentsFromDisk pass; track its
+      torrent separately, OR
+    - Recognize the collision and treat the existing file as the
+      authoritative version.
+  - Fix the fault crash on the error path. The current behaviour
+    fails ungracefully; whatever is dereferenced incorrectly during
+    rollback should be guarded.
+
+Effort: bounded — requires a focused look at `db/downloader`'s
+torrent-disk reconciliation code. The fault stack trace points to
+specific functions to instrument.
+
+This is BLOCKING the constant-time-to-tip test. Until it's fixed,
+no V2-from-fresh-datadir test can complete; the V2 mechanism works
+end-to-end up until the moment AddTorrentsFromDisk runs.
+
 ### 5d. Downloader: initiate recent files first
 
 Per the Phase 0 / Phase 1 ordering rule from
