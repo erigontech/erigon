@@ -2032,30 +2032,41 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	defer mxPruneInProgress.Dec()
 	defer mxPruneTookDomain.ObserveDuration(time.Now())
 
-	var valsCursor kv.PseudoDupSortRwCursor
-	mode := prune.StepValueStorageMode
 	if dt.d.LargeValues {
-		// Indirect layout: keys table is DupSort over bareKey -> invStep+seqID;
-		// each Delete on this cursor must also free the corresponding seqID's
-		// row in the vals table.
-		raw, err := rwTx.RwCursorDupSort(dt.d.KeysTable)
-		if err != nil {
-			return stat, fmt.Errorf("create %s keys cursor: %w", dt.name.String(), err)
+		// LargeValues indirect layout: CommitmentKeys is DupSort(bareKey ->
+		// invStep+seqID). TableScanningPrune uses NextNoDup() for its outer loop,
+		// so it only ever sees the FIRST (newest) dup per bareKey.  If that dup is
+		// beyond the prune range, the entire key is skipped — leaving older-step
+		// dups and their corresponding vals orphaned. Use Next() instead so every
+		// (bareKey, invStep+seqID) pair is examined independently.
+		pruneStat, pruneErr := dt.pruneLargeValues(ctx, rwTx, txFrom, txTo, limit, logEvery, prg)
+		defer func() {
+			pruneStat.TxFrom, pruneStat.TxTo = txFrom, txTo
+			if saveErr := SavePruneValProgress(rwTx, dt.d.ValuesTable, pruneStat); saveErr != nil {
+				dt.d.logger.Error("prune val progress", "name", dt.name, "err", saveErr)
+			}
+		}()
+		if pruneErr != nil {
+			return stat, pruneErr
 		}
-		defer raw.Close()
-		valsCursor = &indirectKeysCursor{RwCursorDupSort: raw, rwTx: rwTx, valsTable: dt.d.ValuesTable}
-	} else {
-		valsCursor, err = rwTx.RwCursorDupSort(dt.d.ValuesTable)
-		if err != nil {
-			return stat, fmt.Errorf("create %s domain values cursor: %w", dt.name.String(), err)
-		}
-		defer valsCursor.Close()
+		mxPruneSizeDomain.AddUint64(pruneStat.PruneCountValues)
+		stat.MinStep = kv.Step(pruneStat.MinTxNum / dt.stepSize)
+		stat.MaxStep = kv.Step(pruneStat.MaxTxNum / dt.stepSize)
+		stat.Values = pruneStat.PruneCountValues
+		stat.Progress = pruneStat.ValueProgress
+		return stat, nil
 	}
+
+	valsCursor, err := rwTx.RwCursorDupSort(dt.d.ValuesTable)
+	if err != nil {
+		return stat, fmt.Errorf("create %s domain values cursor: %w", dt.name.String(), err)
+	}
+	defer valsCursor.Close()
 
 	prg.KeyProgress = prune.Done // domains don't have key tables
 
 	pruneStat, err := prune.TableScanningPrune(ctx, "domain "+dt.name.String(), dt.d.FilenameBase, txFrom, txTo, limit, dt.stepSize,
-		logEvery, dt.d.logger, nil, valsCursor, asserts, prg, mode)
+		logEvery, dt.d.logger, nil, valsCursor, asserts, prg, prune.StepValueStorageMode)
 	if err != nil {
 		return stat, err
 	}
@@ -2081,78 +2092,90 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	return stat, err
 }
 
-// indirectKeysCursor lets prune flow through TableScanningPrune by overriding
-// the delete methods to also free the dup's seqID row from the vals table.
-// Mutators not overridden (Append, Put, PutNoOverwrite) bypass the seqID free —
-// the prune path doesn't use them, but callers must not.
-type indirectKeysCursor struct {
-	kv.RwCursorDupSort
-	rwTx      kv.RwTx
-	valsTable string
-}
+// pruneLargeValues prunes CommitmentKeys+CommitmentVals for a LargeValues domain by
+// scanning every (bareKey, invStep+seqID) dup with Next() instead of NextNoDup().
+// NextNoDup() only sees the first (newest) dup per bareKey; when that dup is beyond
+// the prune range, it would skip the entire key even if older-step dups are in range.
+func (dt *DomainRoTx) pruneLargeValues(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, prg *prune.Stat) (stat *prune.Stat, err error) {
+	stat = &prune.Stat{MinTxNum: math.MaxUint64, ValueProgress: prune.Done}
 
-func (c *indirectKeysCursor) freeSeqOf(dup []byte) error {
-	if len(dup) != dupRecordLen {
-		return nil
+	keysC, err := rwTx.RwCursorDupSort(dt.d.KeysTable)
+	if err != nil {
+		return stat, fmt.Errorf("create %s keys cursor: %w", dt.name.String(), err)
 	}
-	if binary.BigEndian.Uint64(dup[8:]) == deletionSeqID {
-		return nil
-	}
-	return c.rwTx.Delete(c.valsTable, dup[8:])
-}
+	defer keysC.Close()
 
-func (c *indirectKeysCursor) DeleteCurrent() error {
-	_, dup, err := c.RwCursorDupSort.Current()
+	var bareKey, dupVal []byte
+	if prg.ValueProgress == prune.InProgress && len(prg.LastPrunedValue) > 0 {
+		bareKey, dupVal, err = keysC.Seek(prg.LastPrunedValue)
+	} else {
+		bareKey, dupVal, err = keysC.First()
+	}
 	if err != nil {
-		return err
+		return stat, err
 	}
-	if err := c.freeSeqOf(dup); err != nil {
-		return err
-	}
-	return c.RwCursorDupSort.DeleteCurrent()
-}
 
-func (c *indirectKeysCursor) DeleteCurrentDuplicates() error {
-	// NextDup on some cursor implementations (e.g. memStoreCursor) advances past
-	// the current key when no more dups remain — the cursor then sits on the
-	// *next* key, and a follow-up DeleteCurrentDuplicates would delete that
-	// key's dups instead. Capture the key up front and re-seek before deleting.
-	k, _, err := c.RwCursorDupSort.Current()
-	if err != nil {
-		return err
-	}
-	keyCopy := common.Copy(k)
-	dup, err := c.RwCursorDupSort.FirstDup()
-	if err != nil {
-		return err
-	}
-	for dup != nil {
-		if err := c.freeSeqOf(dup); err != nil {
-			return err
-		}
-		_, dup, err = c.RwCursorDupSort.NextDup()
+	var pruned uint64
+	for ; bareKey != nil; bareKey, dupVal, err = keysC.Next() {
 		if err != nil {
-			return err
+			return stat, err
+		}
+		if len(dupVal) != dupRecordLen {
+			continue
+		}
+
+		select {
+		case <-ctx.Done():
+			stat.LastPrunedValue = common.Copy(bareKey)
+			stat.ValueProgress = prune.InProgress
+			return stat, nil
+		default:
+		}
+
+		step := kv.Step(^binary.BigEndian.Uint64(dupVal[:8]))
+		txNum := step.ToTxNum(dt.stepSize)
+		if txNum < txFrom || txNum >= txTo {
+			continue
+		}
+
+		seqID := dupVal[8:]
+		if binary.BigEndian.Uint64(seqID) != deletionSeqID {
+			if err = rwTx.Delete(dt.d.ValuesTable, seqID); err != nil {
+				return stat, err
+			}
+		}
+		if err = keysC.DeleteCurrent(); err != nil {
+			return stat, err
+		}
+
+		stat.PruneCountValues++
+		if txNum < stat.MinTxNum {
+			stat.MinTxNum = txNum
+		}
+		if txNum > stat.MaxTxNum {
+			stat.MaxTxNum = txNum
+		}
+		pruned++
+
+		select {
+		case <-logEvery.C:
+			dt.d.logger.Info("[snapshots] prune domain", "name", dt.d.FilenameBase, "pruned", stat.PruneCountValues)
+		default:
+		}
+
+		if pruned >= limit {
+			stat.LastPrunedValue = common.Copy(bareKey)
+			stat.ValueProgress = prune.InProgress
+			return stat, nil
 		}
 	}
-	if _, _, err := c.RwCursorDupSort.SeekExact(keyCopy); err != nil {
-		return err
-	}
-	return c.RwCursorDupSort.DeleteCurrentDuplicates()
-}
-
-func (c *indirectKeysCursor) DeleteExact(k1, k2 []byte) error {
-	dup, err := c.RwCursorDupSort.SeekBothRange(k1, k2)
 	if err != nil {
-		return err
+		return stat, err
 	}
-	if len(dup) != dupRecordLen || !bytes.HasPrefix(dup, k2) {
-		return nil
-	}
-	if err := c.freeSeqOf(dup); err != nil {
-		return err
-	}
-	return c.RwCursorDupSort.DeleteCurrent()
+
+	stat.ValueProgress = prune.Done
+	stat.LastPrunedValue = nil
+	return stat, nil
 }
 
 func (dt *DomainRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {

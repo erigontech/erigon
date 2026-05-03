@@ -55,7 +55,7 @@ var errDBWiped = errors.New("db wiped")
 //   - write test - and check that it's safe to apply same migration twice
 var migrations = map[kv.Label][]Migration{
 	dbcfg.ChainDB: {
-		chaindataWipeBelowV8,
+		domainLargeValuesLayout,
 		dbSchemaVersion5,
 		ResetStageTxnLookup,
 		dbSchemaVersion6,

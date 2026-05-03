@@ -27,16 +27,15 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 )
 
-// chaindataWipeMinMajor is the first DBSchemaVersion.Major that uses the new
+// domainLargeValuesMinMajor is the first DBSchemaVersion.Major that uses the
 // LargeValues two-table indirect layout (Code/RCache/Commitment domains:
 // keysTable DupSort `bareKey -> invStep+seqID` + valsTable plain `seqID -> value`).
-// A v7 chaindata cannot be migrated in place — its values reference seqIDs that
-// don't exist on the old layout. Re-syncing live state from snapshots is the
-// only safe path.
-const chaindataWipeMinMajor uint32 = 8
+// A pre-v8 chaindata cannot be migrated in place — its values reference seqIDs
+// that don't exist on the old layout. Re-syncing from snapshots is the only safe path.
+const domainLargeValuesMinMajor uint32 = 8
 
-var chaindataWipeBelowV8 = Migration{
-	Name: "chaindata_wipe_below_v8",
+var domainLargeValuesLayout = Migration{
+	Name: "domain_large_values_layout",
 	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) error {
 		tx, err := db.BeginRw(context.Background())
 		if err != nil {
@@ -46,7 +45,7 @@ var chaindataWipeBelowV8 = Migration{
 
 		major, _, _, ok, err := rawdb.ReadDBSchemaVersion(tx)
 		if err != nil {
-			return fmt.Errorf("chaindata_wipe_below_v8: %w", err)
+			return fmt.Errorf("domain_large_values_layout: %w", err)
 		}
 
 		if err := BeforeCommit(tx, nil, true); err != nil {
@@ -56,16 +55,16 @@ var chaindataWipeBelowV8 = Migration{
 			return err
 		}
 
-		if !ok || major >= chaindataWipeMinMajor {
+		if !ok || major >= domainLargeValuesMinMajor {
 			return nil
 		}
 
 		chaindataPath := db.Path()
-		logger.Warn("[migration] chaindata schema major below cutoff — wiping chaindata; live state will be re-synced from snapshots",
-			"db_major", major, "cutoff_major", chaindataWipeMinMajor, "path", chaindataPath)
+		logger.Warn("[migration] chaindata predates domain LargeValues layout — wiping; live state will be re-synced from snapshots",
+			"db_major", major, "min_major", domainLargeValuesMinMajor, "path", chaindataPath)
 		db.Close()
 		if err := dir.RemoveAll(chaindataPath); err != nil {
-			return fmt.Errorf("chaindata_wipe_below_v8: remove %s: %w", chaindataPath, err)
+			return fmt.Errorf("domain_large_values_layout: remove %s: %w", chaindataPath, err)
 		}
 		return errDBWiped
 	},

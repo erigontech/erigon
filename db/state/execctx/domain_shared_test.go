@@ -714,24 +714,26 @@ func TestSharedDomain_UnwindAcrossStepBoundary(t *testing.T) {
 	require.LessOrEqualf(postBlock, unwindTarget,
 		"post-unwind: commitment state blockNum=%d must be ≤ unwindTarget=%d (txNum=%d)",
 		postBlock, unwindTarget, postTxNum)
-	// Fix: also confirm no values table entries exist above the unwind-target step.
+	// Confirm no CommitmentKeys dups remain above the unwind-target step.
+	// TblCommitmentVals stores seqID→value with no step encoding; check the
+	// keys table (DupSort: bareKey → invStep+seqID) instead.
 	maxStep := unwindTarget / stepSize // step 0 for target 4
-	c, err := rwTx.Cursor(kv.TblCommitmentVals)
+	kc, err := rwTx.CursorDupSort(kv.TblCommitmentKeys)
 	require.NoError(err)
-	defer c.Close()
+	defer kc.Close()
 	offending := 0
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+	for bareKey, dupVal, err := kc.First(); bareKey != nil; bareKey, dupVal, err = kc.Next() {
 		require.NoError(err)
-		if len(v) < 8 {
+		if len(dupVal) < 8 {
 			continue
 		}
-		step := ^binary.BigEndian.Uint64(v[:8])
+		step := ^binary.BigEndian.Uint64(dupVal[:8])
 		if step > maxStep {
 			offending++
 		}
 	}
 	require.Zerof(offending,
-		"post-unwind: %d commitment values entries have step > %d (maxStep for unwindTarget=%d)",
+		"post-unwind: %d commitment keys dups have step > %d (maxStep for unwindTarget=%d)",
 		offending, maxStep, unwindTarget)
 }
 
