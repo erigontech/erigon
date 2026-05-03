@@ -315,50 +315,70 @@ the lifecycle's per-file dispatch model.
 Until then, the symptom-fix quarantine prevents log flooding and
 gives operators visibility. That's the floor.
 
-### 5e. V2 chain.toml torrent-name collision (existing bug)
+### 5e. Remove AddTorrentsFromDisk — storage owns disk-discovery
 
-Surfaced by the 2026-05-03 V2 rerun. When a node downloads
-chain.toml via the V2 manifest path, the resulting `chain.toml`
-file on disk collides with `AddTorrentsFromDisk`'s scan in a way
-that aborts the snapshot stage:
+Surfaced by the 2026-05-03 V2 rerun. The crash symptom was a
+collision in `AddTorrentsFromDisk`:
 
 ```
 adding torrent for chain.toml.torrent:
 snapshot exists with a different name: "chain.toml"
+fatal error: fault
 ```
 
-After the error, a runtime fault crashes the process — the error
-handling path itself appears to be broken. Stack trace points at
-`anacrolix/torrent` socket cleanup during error rollback.
+But the **right fix** isn't patching the collision — it's removing
+`AddTorrentsFromDisk` entirely. The downloader shouldn't discover
+files internally now that the storage component owns the inventory.
 
-This bug **predates this branch.** The comment at
-`node/eth/backend.go:511` references issue `#20615` and gates the
-V2 wiring behind a flag because of this exact collision. The
-2026-05-03 V2 rerun hit it because the test node successfully
-discovered the publisher's chain.toml and downloaded it — which is
-when the AddTorrentsFromDisk code path triggers the collision.
+`AddTorrentsFromDisk` does two things, both now redundant:
 
-Required fix:
+1. **Walks the snap dir** looking for `.torrent` files to add to
+   the torrent client's tracking. Storage's lifecycle driver
+   already discovers new files via wire E (`discoverNewFiles`).
+   Two independent disk scans is the source of the collision —
+   they fight each other when chain.toml lands.
 
-  - Resolve the chain.toml file vs chain.toml.torrent naming
-    collision in `AddTorrentsFromDisk`. Either:
-    - Rename the on-disk chain.toml file (or the torrent) so the
-      pair has distinct names, OR
-    - Skip chain.toml from the AddTorrentsFromDisk pass; track its
-      torrent separately, OR
-    - Recognize the collision and treat the existing file as the
-      authoritative version.
-  - Fix the fault crash on the error path. The current behaviour
-    fails ungracefully; whatever is dereferenced incorrectly during
-    rollback should be guarded.
+2. **Sets up seeding** for files already on disk. Storage already
+   triggers `downloader.Seed(name)` via the `OnFilesChange`
+   callback in `storage.Provider` (wire B) when files reach
+   `LifecycleAdvertisable`. The downloader is a worker driven by
+   storage; it shouldn't independently re-create the seed-list.
 
-Effort: bounded — requires a focused look at `db/downloader`'s
-torrent-disk reconciliation code. The fault stack trace points to
-specific functions to instrument.
+The architectural rule: **the downloader takes its file list from
+the storage component, not from disk.** Storage scans disk (wire E),
+populates Inventory, drives lifecycle. When a file reaches
+Advertisable, storage tells the downloader to seed it. New files
+land via storage-driven AddFile. The downloader never independently
+walks the snap dir.
 
-This is BLOCKING the constant-time-to-tip test. Until it's fixed,
-no V2-from-fresh-datadir test can complete; the V2 mechanism works
-end-to-end up until the moment AddTorrentsFromDisk runs.
+Required changes:
+
+  - Remove the `AddTorrentsFromDisk` call from `backend.go:996`'s
+    `afterSnapshotDownload` callback.
+  - Remove the call from `cmd/downloader/main.go:331` (standalone
+    downloader binary). Replace with explicit Seed calls driven by
+    a CLI-side scan (the standalone use case is operator-driven
+    seeding; it can do its own discovery without going through
+    AddTorrentsFromDisk).
+  - Once unused, remove `AddTorrentsFromDisk` itself from
+    `db/downloader/downloader.go`. The associated
+    `addTorrentIfComplete` and helpers can stay if used elsewhere,
+    or be inlined into the explicit seeding path.
+
+Side-effect of removal: the chain.toml collision and the runtime
+fault on the error path both go away — the code path that triggered
+them no longer runs.
+
+Effort: medium. Touches `db/downloader`, `node/eth/backend.go`,
+`cmd/downloader/main.go`. The replacement seeding-driver work
+already exists in storage (Provider's OnFilesChange + lifecycle
+driver's discoverNewFiles); we just stop calling the redundant
+disk-walk path.
+
+This unblocks the V2-from-fresh-datadir test — without
+AddTorrentsFromDisk in the way, the test node would proceed past
+the chain.toml-download moment and the lifecycle would drive
+indexing as designed.
 
 ### 5d. Downloader: initiate recent files first
 
