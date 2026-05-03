@@ -131,6 +131,26 @@ func TestEstimateGasBlockOverridesBlobBaseFee(t *testing.T) {
 	require.ErrorIs(t, err, protocol.ErrMaxFeePerBlobGas)
 }
 
+func TestEstimateGasBlockOverridesBlobBaseFeeSkipsZeroBlobFeeCap(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	m, bankAddr, contractAddr, _ := chainWithDeployedContractAndConfig(t, chain.AllProtocolChanges)
+	api := newTestEthAPIWithFilters(t, m)
+
+	callData := hexutil.Bytes(contractInvocationData(1))
+	_, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
+		From:                &bankAddr,
+		To:                  &contractAddr,
+		Data:                &callData,
+		BlobVersionedHashes: []common.Hash{{1}},
+	}, nil, nil, &ethapi.BlockOverrides{
+		BlobBaseFee: (*hexutil.Big)(big.NewInt(11)),
+	})
+	require.NoError(t, err)
+}
+
 func TestEthCallBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
