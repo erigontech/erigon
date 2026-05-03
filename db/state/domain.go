@@ -149,8 +149,8 @@ func (d *Domain) kvBtAccessorNewFilePath(fromStep, toStep kv.Step) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.bt", d.FileVersion.AccessorBT.String(), d.FilenameBase, fromStep, toStep))
 }
 
-var domainExistenceForceInMem = dbg.EnvBool("DOMAIN_EXISTENCE_MEM", false)
-var domainExistenceForceWillNeed = dbg.EnvBool("DOMAIN_EXISTENCE_WILLNEED", true)
+var domainExistenceForceInMem = dbg.EnvBool("DOMAIN_EXISTENCE_MEM", true)
+var domainExistenceForceWillNeed = dbg.EnvBool("DOMAIN_EXISTENCE_WILLNEED", false)
 var domainExistenceForceNormal = dbg.EnvBool("DOMAIN_EXISTENCE_NORMAL", false)
 
 func (d *Domain) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
@@ -566,9 +566,9 @@ func domainReadMetric(name kv.Domain, level int) metrics.Summary {
 }
 
 func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte, hi, lo uint64) (v []byte, ok bool, offset uint64, err error) {
-	if dbg.KVReadLevelledMetrics {
-		defer domainReadMetric(dt.name, i).ObserveDuration(time.Now())
-	}
+	//if dbg.KVReadLevelledMetrics {
+	//	defer domainReadMetric(dt.name, i).ObserveDuration(time.Now())
+	//}
 
 	if dt.d.Accessors.Has(statecfg.AccessorBTree) {
 		_, v, offset, ok, err = dt.statelessBtree(i).Get(filekey, dt.reusableReader(i))
@@ -1357,8 +1357,8 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 		maxTxNum = math.MaxUint64
 	}
 	useExistenceFilter := dt.d.Accessors.Has(statecfg.AccessorExistence)
-	//useCache := dt.name != kv.CommitmentDomain && maxTxNum == math.MaxUint64
-	useCache := maxTxNum == math.MaxUint64
+	useCache := dt.name != kv.CommitmentDomain && maxTxNum == math.MaxUint64
+	//useCache := maxTxNum == math.MaxUint64
 
 	hi, lo := dt.ht.iit.hashKey(k)
 
@@ -1692,14 +1692,14 @@ func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, maxStep kv.Step, metrics
 	}
 	if found && foundStep <= maxStep {
 		if metrics != nil && dbg.KVReadLevelledMetrics {
-			metrics.UpdateDbReads(dt.name, start)
+			//metrics.UpdateDbReads(dt.name, start)
 		}
 		return v, foundStep, true, nil
 	}
 
 	v, foundInFile, _, endTxNum, err := dt.getLatestFromFiles(key, 0)
 	if metrics != nil && dbg.KVReadLevelledMetrics {
-		metrics.UpdateFileReads(dt.name, start)
+		//metrics.UpdateFileReads(dt.name, start)
 	}
 
 	if err != nil {
