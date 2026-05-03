@@ -176,6 +176,18 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 				}
 				return highestBlockProcessed, nil
 			}
+			if errors.Is(err, forkchoice.ErrNotFinalizedDescendant) {
+				// Block is on a different fork than our finalized chain.
+				// Common on devnets with stalled finality where the beacon API
+				// may return blocks from different forks at different slots.
+				// Skip this block but still advance progress so the downloader
+				// doesn't retry the same slot range indefinitely.
+				logger.Debug("[Caplin] forward sync: block not on finalized chain, skipping", "blockSlot", block.Block.Slot)
+				if newHighestBlockProcessed < block.Block.Slot {
+					newHighestBlockProcessed = block.Block.Slot
+				}
+				continue
+			}
 			// Return an error if block processing fails
 			err = fmt.Errorf("bad blocks segment received: %w", err)
 			return
@@ -254,7 +266,7 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 		shouldInsert  = cfg.executionClient != nil && cfg.executionClient.SupportInsertion() // Check if the execution client supports insertion
 		secsPerLog    = 30                                                                   // Interval in seconds for logging progress
 		logTicker     = time.NewTicker(time.Duration(secsPerLog) * time.Second)              // Ticker for logging progress
-		downloader    = network2.NewForwardBeaconDownloader(ctx, cfg.rpc)                    // Initialize a new forward beacon downloader
+		downloader    = network2.NewForwardBeaconDownloader(ctx, cfg.rpc, cfg.beaconCfg)      // Initialize a new forward beacon downloader
 		currentSlot   atomic.Uint64                                                          // Atomic variable to track the current slot
 		startSlot     = cfg.forkChoice.HighestSeen()
 		maxReorgRange = uint64(300) // if node falls too much out of sync, we allow a maximum reorg range of 300 slots
@@ -275,6 +287,11 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 	// the parent's envelope on disk so ProcessParentExecutionPayload can resolve it.
 	if err := ensureAnchorEnvelopeOnce(ctx, cfg); err != nil {
 		logger.Warn("[Caplin] Failed to fetch anchor envelope (will retry)", "err", err)
+	}
+
+	// Set HTTP fallback URL for when P2P blocks_by_range fails.
+	if urls := clparams.ConfigurableCheckpointsURLs; len(urls) > 0 {
+		downloader.SetHTTPFallbackURL(urls[0])
 	}
 
 	// Initialize the slot to download from the finalized checkpoint

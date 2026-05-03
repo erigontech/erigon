@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -63,6 +64,8 @@ type BackwardBeaconDownloader struct {
 	// [New in Gloas:EIP7732] highest block from the previous batch, used as lookahead
 	// to determine FULL/EMPTY status of the highest block in the current batch.
 	prevBatchTopBlock *cltypes.SignedBeaconBlock
+	httpFallbackURL   string      // beacon API base URL for HTTP fallback when P2P fails
+	httpPreferred     atomic.Bool // set after first HTTP success; skips P2P probing
 
 	mu sync.Mutex
 }
@@ -113,6 +116,19 @@ func (b *BackwardBeaconDownloader) SetBlockChecker(checker BlockChecker) {
 	b.blockChecker = checker
 }
 
+// SetHTTPFallbackURL sets the beacon API base URL for HTTP-based block fetching
+// when P2P blocks_by_range requests fail. Derived from the checkpoint sync URL.
+func (b *BackwardBeaconDownloader) SetHTTPFallbackURL(checkpointSyncURL string) {
+	if checkpointSyncURL == "" {
+		return
+	}
+	idx := strings.Index(checkpointSyncURL, "/eth/")
+	if idx < 0 {
+		return
+	}
+	b.httpFallbackURL = checkpointSyncURL[:idx]
+}
+
 // SetShouldStopAtFn sets the stop condition.
 func (b *BackwardBeaconDownloader) SetOnNewBlock(onNewBlock OnNewBlock) {
 	b.mu.Lock()
@@ -159,6 +175,7 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 }
 
 // fetchBlockRange requests a range of blocks from peers and waits for a response.
+// Falls back to the beacon API when P2P is unavailable and an HTTP URL is configured.
 func (b *BackwardBeaconDownloader) fetchBlockRange(ctx context.Context) ([]*cltypes.SignedBeaconBlock, error) {
 	const count = uint64(64)
 	start := b.slotToDownload.Load() - count + 1
@@ -166,9 +183,23 @@ func (b *BackwardBeaconDownloader) fetchBlockRange(ctx context.Context) ([]*clty
 		start = 0
 	}
 
+	// Fast path: when HTTP has been working, skip P2P probing entirely.
+	if b.httpPreferred.Load() && b.httpFallbackURL != "" {
+		blocks, err := fetchBlocksFromBeaconAPI(ctx, b.httpFallbackURL, start, count, b.beaconCfg)
+		if err == nil && len(blocks) > 0 {
+			log.Info("[BackwardBeaconDownloader] fetched blocks from beacon API", "fromSlot", start, "count", len(blocks))
+			return blocks, nil
+		}
+		// HTTP failed — fall back to P2P probing.
+		b.httpPreferred.Store(false)
+	}
+
 	// Buffered channel prevents goroutine leaks
 	received := make(chan []*cltypes.SignedBeaconBlock, 1)
 	var requestSent atomic.Bool
+
+	p2pDeadline := time.NewTimer(10 * time.Second)
+	defer p2pDeadline.Stop()
 
 	for {
 		select {
@@ -183,6 +214,22 @@ func (b *BackwardBeaconDownloader) fetchBlockRange(ctx context.Context) ([]*clty
 
 		case responses := <-received:
 			return responses, nil
+
+		case <-p2pDeadline.C:
+			if b.httpFallbackURL == "" {
+				p2pDeadline.Reset(10 * time.Second)
+				continue
+			}
+			blocks, err := fetchBlocksFromBeaconAPI(ctx, b.httpFallbackURL, start, count, b.beaconCfg)
+			if err == nil && len(blocks) > 0 {
+				log.Info("[BackwardBeaconDownloader] P2P failed, fetched blocks from beacon API", "fromSlot", start, "count", len(blocks))
+				b.httpPreferred.Store(true)
+				return blocks, nil
+			}
+			if err != nil {
+				log.Debug("[BackwardBeaconDownloader] HTTP fallback also failed", "err", err)
+			}
+			p2pDeadline.Reset(10 * time.Second)
 		}
 	}
 }
@@ -221,7 +268,9 @@ func (b *BackwardBeaconDownloader) sendBlockRequest(
 // processResponses processes downloaded blocks in reverse order.
 func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, responses []*cltypes.SignedBeaconBlock) error {
 	// [New in Gloas:EIP7732] Fetch envelopes for GLOAS FULL blocks before processing.
+	log.Debug("[BackwardBeaconDownloader] processResponses start", "blocks", len(responses), "slotToDownload", b.slotToDownload.Load(), "expectedRoot", b.expectedRoot)
 	envelopes := b.fetchGloasEnvelopes(ctx, responses)
+	log.Debug("[BackwardBeaconDownloader] envelopes fetched", "count", len(envelopes))
 
 	for i := len(responses) - 1; i >= 0; i-- {
 		if b.finished.Load() {
@@ -236,10 +285,10 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 		}
 
 		if blockRoot != b.expectedRoot {
-			log.Trace("Unexpected root", "slot", block.Block.Slot, "version", block.Version(), "got", common.Hash(blockRoot), "expected", b.expectedRoot)
+			log.Trace("[BackwardBeaconDownloader] root mismatch", "slot", block.Block.Slot, "got", common.Hash(blockRoot), "expected", b.expectedRoot)
 			continue
 		}
-		log.Debug("Block matched", "slot", block.Block.Slot, "root", common.Hash(blockRoot))
+		log.Debug("[BackwardBeaconDownloader] block matched", "slot", block.Block.Slot, "root", common.Hash(blockRoot))
 
 		var envelope *cltypes.SignedExecutionPayloadEnvelope
 		if envelopes != nil {
@@ -309,7 +358,10 @@ func (b *BackwardBeaconDownloader) fetchGloasEnvelopes(ctx context.Context, resp
 		return nil
 	}
 	defer func() {
-		b.prevBatchTopBlock = responses[len(responses)-1]
+		// The backward download processes from high to low slots. The next batch
+		// has lower slots than this one, so its highest block needs the block just
+		// above it as a lookahead. That's this batch's lowest block (responses[0]).
+		b.prevBatchTopBlock = responses[0]
 	}()
 
 	fullRoots := determineGloasFullRoots(responses, b.prevBatchTopBlock)
@@ -317,9 +369,29 @@ func (b *BackwardBeaconDownloader) fetchGloasEnvelopes(ctx context.Context, resp
 		return nil
 	}
 
+	// When HTTP has been working, skip the slow P2P envelope fetch entirely.
+	if b.httpPreferred.Load() && b.httpFallbackURL != "" {
+		envelopes := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, len(fullRoots))
+		fetched := fetchEnvelopesFromBeaconAPI(ctx, b.httpFallbackURL, responses, fullRoots, envelopes, b.beaconCfg)
+		if fetched > 0 {
+			log.Info("[BackwardBeaconDownloader] fetched envelopes from beacon API", "count", fetched)
+		}
+		return envelopes
+	}
+
 	envelopes, err := RequestEnvelopesFrantically(ctx, b.rpc, fullRoots)
 	if err != nil {
-		log.Debug("[BackwardBeaconDownloader] failed to fetch GLOAS envelopes", "err", err)
+		log.Debug("[BackwardBeaconDownloader] failed to fetch GLOAS envelopes via P2P", "err", err)
+	}
+	// Fill in missing envelopes from the beacon API when an HTTP URL is configured.
+	if b.httpFallbackURL != "" && len(envelopes) < len(fullRoots) {
+		if envelopes == nil {
+			envelopes = make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, len(fullRoots))
+		}
+		fetched := fetchEnvelopesFromBeaconAPI(ctx, b.httpFallbackURL, responses, fullRoots, envelopes, b.beaconCfg)
+		if fetched > 0 {
+			log.Info("[BackwardBeaconDownloader] fetched envelopes from beacon API", "count", fetched)
+		}
 	}
 	return envelopes
 }
@@ -407,7 +479,11 @@ func (b *BackwardBeaconDownloader) canSkipSlot(ctx context.Context, tx kv.Tx, el
 	}
 
 	blockHash, err := beacon_indicies.ReadExecutionBlockHash(tx, b.expectedRoot)
-	if err != nil || blockHash == (common.Hash{}) {
+	if err != nil {
+		log.Warn("Failed to read execution block hash", "err", err)
+		return false
+	}
+	if blockHash == (common.Hash{}) {
 		// [New in Gloas:EIP7732] GLOAS EMPTY blocks have no execution hash (no payload delivered).
 		// If this slot is in the GLOAS era, no EL processing is needed, so we can skip.
 		epoch := slot / b.beaconCfg.SlotsPerEpoch

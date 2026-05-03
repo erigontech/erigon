@@ -167,7 +167,8 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_d
 	f := &forkGraphDisk{
 		fs: aferoFs,
 		// current state data
-		currentState: anchorState,
+		currentState:          anchorState,
+		currentStateBlockRoot: anchorRoot,
 		// configuration
 		beaconCfg:   anchorState.BeaconConfig(),
 		genesisTime: anchorState.GenesisTime(),
