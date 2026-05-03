@@ -177,7 +177,12 @@ If the abnormal-termination tests don't pass, the storage-driven
 path doesn't justify its existence vs the stage path; we'd be
 carrying complexity without recovery payoff.
 
-### 5b. V2-only mode (preverified is bootstrap-only)
+### 5b. V2-only mode (preverified is bootstrap-only) — IMPLEMENTED
+
+**Status: landed in commits `31038b0e0c` (core) + `ec6d030a4c`
+(PublishChainToml).** What follows describes the design that landed.
+
+
 
 **Rule:** when `--snap.p2p-manifest` is set, the node uses peer-discovered
 chain.toml as the **sole source** for the download set. preverified.toml
