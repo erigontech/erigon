@@ -288,6 +288,8 @@ func (idx *Index) ForceExistenceFilterWillNeed() {
 	if idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0 {
 		log.Debug("[agg] fuse.ForceExistenceFilterWillNeed", "file", idx.fileName, "keys", idx.keyCount)
 		idx.existenceV1.MadvWillNeed()
+	} else {
+		log.Debug("[agg] fuse.ForceExistenceFilterWillNeed", "file", idx.fileName, "idx.dataStructureVersion", idx.dataStructureVersion, "idx.lessFalsePositives", idx.lessFalsePositives)
 	}
 	return
 }
