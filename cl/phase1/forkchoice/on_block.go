@@ -51,6 +51,7 @@ var (
 	ErrNewPayloadNoStatus            = errors.New("newPayload returned no status")
 	ErrMissingSegment                = errors.New("missing segment: parent state not available")
 	ErrParentEnvelopePending         = errors.New("parent execution payload envelope not yet available")
+	ErrNotFinalizedDescendant        = errors.New("block is not a descendant of the finalized checkpoint")
 )
 
 func verifyKzgCommitmentsAgainstTransactions(cfg *clparams.BeaconChainConfig, block *cltypes.BeaconBlock) error {
@@ -112,12 +113,19 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	// Check that block is later than the finalized epoch slot (optimization to reduce calls to get_ancestor)
 	finalizedCheckpoint := f.finalizedCheckpoint.Load().(solid.Checkpoint)
 	finalizedSlot := f.computeStartSlotAtEpoch(finalizedCheckpoint.Epoch)
+	// After checkpoint sync, the anchor block may sit inside (not at the start of)
+	// the finalized epoch. The fork graph only contains the anchor and its descendants,
+	// so Ancestor() cannot trace past the anchor. Cap finalizedSlot to the anchor slot
+	// so the descendant check stays within the fork graph's horizon.
+	if anchorSlot := f.forkGraph.AnchorSlot(); finalizedSlot < anchorSlot {
+		finalizedSlot = anchorSlot
+	}
 	if block.Block.Slot <= finalizedSlot {
 		return nil
 	}
 	// Check block is a descendant of the finalized block at the checkpoint finalized slot
 	if ancestorNode := f.Ancestor(block.Block.ParentRoot, finalizedSlot); ancestorNode.Root != finalizedCheckpoint.Root {
-		return fmt.Errorf("block is not a descendant of the finalized checkpoint")
+		return ErrNotFinalizedDescendant
 	}
 
 	// Validate parent payload status path early (before expensive operations)

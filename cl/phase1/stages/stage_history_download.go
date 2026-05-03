@@ -244,7 +244,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		}
 		return hasDownloadEnoughForImmediateBlobsBackfilling &&
 				(!cfg.caplinConfig.ArchiveBlocks || slot <= cfg.sn.SegmentsMax()) &&
-				(slot <= destinationSlotForEL || isInElSnapshots),
+				((destinationSlotForEL != math.MaxUint64 && slot <= destinationSlotForEL) || isInElSnapshots),
 			tx.Commit()
 	})
 
@@ -348,7 +348,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	go func() {
 		for !cfg.downloader.Finished() {
 			if err := cfg.downloader.RequestMore(ctx); err != nil {
-				log.Debug("closing backfilling routine", "err", err)
+				log.Warn("closing backfilling routine", "err", err)
 				return
 			}
 		}

@@ -153,15 +153,14 @@ func MetaCatchingUp(args Args) StageName {
 	if !args.hasDownloaded {
 		return DownloadHistoricalBlocks
 	}
-	// If we have no peers, skip sync stages and go directly to ForkChoice.
-	// Sync stages (ForwardSync, ChainTipSync) require peers to download blocks
-	// and will just timeout. ForkChoice still needs to run so the head advances
-	// from blocks received via the beacon API (solo validator / single node).
-	if args.peers == 0 {
-		return ""
-	}
+	// ForwardSync can work without peers via the beacon API HTTP fallback,
+	// so allow it even when peers == 0.
 	if args.seenEpoch < args.targetEpoch {
 		return ForwardSync
+	}
+	// ChainTipSync relies on gossip for real-time updates, skip it without peers.
+	if args.peers == 0 {
+		return ""
 	}
 	if args.seenSlot < args.targetSlot {
 		return ChainTipSync
@@ -300,6 +299,9 @@ func ConsensusClStages(ctx context.Context,
 						"blockRoot", startingRoot,
 					)
 					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc, cfg.sn, cfg.executionClient, cfg.indiciesDB, cfg.beaconCfg)
+					if urls := clparams.ConfigurableCheckpointsURLs; len(urls) > 0 {
+						downloader.SetHTTPFallbackURL(urls[0])
+					}
 
 					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.beaconCfg, cfg.caplinConfig, false, startingRoot, startingSlot, cfg.dirs.Tmp, 600*time.Millisecond, cfg.blockCollector, cfg.blockReader, cfg.blobStore, logger, cfg.forkChoice, cfg.blobDownloader), ctx, logger); err != nil {
 						cfg.hasDownloaded = false

@@ -111,13 +111,14 @@ func (r *RemoteCheckpointSync) FetchFinalizedEnvelope(ctx context.Context) (*clt
 
 func (r *RemoteCheckpointSync) fetchEnvelope(ctx context.Context, stateURI string) (*cltypes.SignedExecutionPayloadEnvelope, error) {
 	// Derive the envelope URL from the state URL.
-	// State:    .../eth/v2/debug/beacon/states/finalized
-	// Envelope: .../eth/v1/beacon/execution_payload_envelope/finalized
+	// State:    .../eth/v2/debug/beacon/states/{state_id}
+	// Envelope: .../eth/v1/beacon/execution_payload_envelope/{state_id}
 	idx := strings.Index(stateURI, "/eth/")
 	if idx < 0 {
 		return nil, fmt.Errorf("cannot derive envelope URL from %s", stateURI)
 	}
-	envelopeURI := stateURI[:idx] + "/eth/v1/beacon/execution_payload_envelope/finalized"
+	stateId := stateURI[strings.LastIndex(stateURI, "/")+1:]
+	envelopeURI := stateURI[:idx] + "/eth/v1/beacon/execution_payload_envelope/" + stateId
 
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, r.timeout)
 	defer cancel()
