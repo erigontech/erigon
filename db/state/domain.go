@@ -150,6 +150,8 @@ func (d *Domain) kvBtAccessorNewFilePath(fromStep, toStep kv.Step) string {
 }
 
 var domainExistenceForceInMem = dbg.EnvBool("DOMAIN_EXISTENCE_MEM", false)
+var domainExistenceForceWillNeed = dbg.EnvBool("DOMAIN_EXISTENCE_WILLNEED", false)
+var domainExistenceForceNormal = dbg.EnvBool("DOMAIN_EXISTENCE_NORMAL", false)
 
 func (d *Domain) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
 	accessor, err := recsplit.OpenIndex(fPath)
@@ -158,6 +160,12 @@ func (d *Domain) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
 	}
 	if domainExistenceForceInMem {
 		accessor.ForceExistenceFilterInRAM()
+	}
+	if domainExistenceForceWillNeed {
+		accessor.ForceExistenceFilterWillNeed()
+	}
+	if domainExistenceForceNormal {
+		accessor.ForceExistenceFilterNormal()
 	}
 	return accessor, nil
 }
