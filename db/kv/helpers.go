@@ -51,7 +51,6 @@ func NewGatedRoDB(inner RoDB, gate *sync.RWMutex) RoDB {
 }
 
 type gatedRoDB struct {
-	RoDB
 	inner RoDB
 	gate  *sync.RWMutex
 }

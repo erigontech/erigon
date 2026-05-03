@@ -902,7 +902,14 @@ func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
 	// opens its own RW tx and calls the pruneFn callback inside it.
 	if hasAgg, ok := e.db.(dbstate.HasAgg); ok {
 		if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok && agg != nil {
-			pruneTimeout := time.Duration(e.config.SecondsPerSlot()*1000/3) * time.Millisecond / 2
+			// Same adaptive prune budget as PruneExecutionStage (stage_execute.go):
+			// base = SecondsPerSlot/3, +200ms per 100 prunable steps, capped at 2/3 slot.
+			baseTimeout := time.Duration(e.config.SecondsPerSlot()*1000/3) * time.Millisecond
+			maxTimeout := time.Duration(e.config.SecondsPerSlot()*2000/3) * time.Millisecond
+			pruneTimeout := baseTimeout + time.Duration(agg.MaxPrunableStepsBacklog()/100)*200*time.Millisecond
+			if pruneTimeout > maxTimeout {
+				pruneTimeout = maxTimeout
+			}
 			if err := agg.CollateAndPruneIfNeeded(e.bacgroundCtx, e.db, func(tx kv.TemporalRwTx) error {
 				return e.pipelineExecutor.RunPrune(e.bacgroundCtx, tx, initialCycle, pruneTimeout)
 			}, e.logger); err != nil {

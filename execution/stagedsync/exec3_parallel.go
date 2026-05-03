@@ -2137,10 +2137,15 @@ type blockExecutor struct {
 // Channels may be closed by executeBlocks — recover from panic.
 func (be *blockExecutor) sendResult(ctx context.Context, r applyResult) (err error) {
 	defer func() {
+		// "send on closed channel" panics here are benign — executeBlocks
+		// finished and closed applyResults/commitResults during batch
+		// shutdown. Re-raise anything else so real bugs still surface.
 		if rec := recover(); rec != nil {
-			// Channel closed — executeBlocks finished and closed channels.
-			// This is normal during batch shutdown.
-			err = context.Canceled
+			if e, ok := rec.(runtime.Error); ok && strings.Contains(e.Error(), "send on closed channel") {
+				err = context.Canceled
+				return
+			}
+			panic(rec)
 		}
 	}()
 	select {

@@ -3358,13 +3358,12 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 // not hashed. A stale cached cell in the trie could cause the sibling to
 // be hashed instead of inlined, producing a different branch encoding.
 func Test_ModeUpdate_SiblingConsistency(t *testing.T) {
-	// TODO(#20805): ModeUpdate produces a different root than ModeDirect when
+	// TODO(#20961): ModeUpdate produces a different root than ModeDirect when
 	// only a subset of sibling accounts is touched in a follow-up block — the
 	// untouched sibling cell is being hashed instead of inlined, so the branch
 	// node's encoding diverges. Failing test left as the regression marker.
-	// Fix is non-trivial (cell-cache invalidation in HexPatriciaHashed) and
-	// out of scope for the PR-cleanup commit; tracked separately.
-	t.Skip("known parallel-calc sibling-encoding bug, see TODO above")
+	// Fix is non-trivial (cell-cache invalidation in HexPatriciaHashed).
+	t.Skip("known parallel-calc sibling-encoding bug, see #20961")
 	t.Parallel()
 	ctx := context.Background()
 

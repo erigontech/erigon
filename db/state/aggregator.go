@@ -2129,20 +2129,23 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 			defer a.snapshotBuildSema.Release(1)
 		}
 
-		a.commitGate.RLock()
-		lastInDB := max(
-			lastIdInDB(a.db, a.d[kv.AccountsDomain]),
-			lastIdInDB(a.db, a.d[kv.CodeDomain]),
-			lastIdInDB(a.db, a.d[kv.StorageDomain]),
-			lastIdInDB(a.db, a.d[kv.CommitmentDomain]))
-		// Sanity check: the DB should not have data at steps beyond where
-		// execution is currently at. If it does, collating those steps
-		// would capture intermediate state.
-		execStep := kv.Step(txNum / a.StepSize())
-		if lastInDB > execStep {
-			a.logger.Warn("BuildFilesInBackground: lastInDB beyond execStep", "lastInDB", lastInDB, "execStep", execStep, "txNum", txNum)
-		}
-		a.commitGate.RUnlock()
+		lastInDB, execStep := func() (kv.Step, kv.Step) {
+			a.commitGate.RLock()
+			defer a.commitGate.RUnlock()
+			lastInDB := max(
+				lastIdInDB(a.db, a.d[kv.AccountsDomain]),
+				lastIdInDB(a.db, a.d[kv.CodeDomain]),
+				lastIdInDB(a.db, a.d[kv.StorageDomain]),
+				lastIdInDB(a.db, a.d[kv.CommitmentDomain]))
+			// Sanity check: the DB should not have data at steps beyond where
+			// execution is currently at. If it does, collating those steps
+			// would capture intermediate state.
+			execStep := kv.Step(txNum / a.StepSize())
+			if lastInDB > execStep {
+				a.logger.Warn("BuildFilesInBackground: lastInDB beyond execStep", "lastInDB", lastInDB, "execStep", execStep, "txNum", txNum)
+			}
+			return lastInDB, execStep
+		}()
 		a.logger.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB, "execStep", execStep)
 
 		// Stagger aggregation across fleet nodes to prevent synchronized I/O stalls.
