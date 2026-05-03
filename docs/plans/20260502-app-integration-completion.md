@@ -200,21 +200,37 @@ ranges).
 
 **Required correction:**
 
-  - When `Snapshot.P2PManifest` is true, the snapshot stage's
-    `RequestSnapshotsDownload` flow should use the P2P-discovered set
-    EXCLUSIVELY, not preverified ∪ discovered.
-  - `snapcfg.KnownCfgOrDevnet(...)`'s preverified entries should be
-    replaced (not merged) by whatever the chain.toml discovery loop
-    has assembled.
-  - The bootstrap exception: a publisher node that's the FIRST one
-    online for a chain has no peers to discover from. It still
-    needs preverified as its source. So the rule is:
-    - V2 enabled + at least one peer with chain.toml discovered →
-      use P2P set exclusively
-    - V2 enabled + no peers discovered yet → wait for first
-      discovery (today's `manifestReady` channel already does this
-      gate)
-    - V2 disabled → preverified path (today's default)
+The default V2 node uses peer-discovered chain.toml exclusively. The
+bootstrap role is **opt-in** via a new flag — operators declare
+they're a bootstrap publisher, otherwise they're a regular V2 node.
+
+Proposed flag: `--snap.bootstrap-from-preverified` (boolean,
+default false).
+
+Behaviour matrix:
+
+  | V2 (`--snap.p2p-manifest`) | bootstrap flag | Source of download set |
+  |---|---|---|
+  | off | (any) | preverified.toml (today's default) |
+  | on  | off (default) | peer-discovered chain.toml only |
+  | on  | on | preverified.toml + augment from peers |
+
+The bootstrap mode is the legacy / initial-publisher path. Most
+production nodes run with `--snap.p2p-manifest` and the bootstrap
+flag OFF — pure V2.
+
+Code changes:
+
+  - Add `BlocksFreezing.BootstrapFromPreverified` field +
+    `--snap.bootstrap-from-preverified` flag.
+  - Snapshot stage's `RequestSnapshotsDownload` flow gates on
+    these:
+    - If V2 is off OR bootstrap-from-preverified is on → use
+      preverified (and merge P2P-discovered when V2 is on too).
+    - If V2 is on AND bootstrap-from-preverified is off → use
+      ONLY P2P-discovered set. preverified is ignored entirely.
+  - `manifestReady` channel already gates the V2 path on at least
+    one chain.toml discovery; that stays.
 
 This change is required to validate the constant-time-to-tip target.
 Without it, Strategy B from the time-to-tip target document

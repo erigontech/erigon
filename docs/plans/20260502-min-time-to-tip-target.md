@@ -258,12 +258,21 @@ which downloads in the background.
 
 **Source-of-truth rule:**
 
-  - Bootstrap publisher (initial node, no peers yet): uses
-    preverified.toml. This is the convention for chain rollout.
-  - All other nodes (with `--snap.p2p-manifest`): use peer-discovered
-    chain.toml EXCLUSIVELY. preverified is ignored. See completion
-    plan §5b for the required code correction — today's
-    `MergeChainToml` augments rather than replaces, which is wrong.
+Bootstrap is **opt-in via flag**, not the default. Behaviour matrix:
+
+  | V2 (`--snap.p2p-manifest`) | bootstrap flag | Source |
+  |---|---|---|
+  | off | any | preverified.toml (legacy) |
+  | on  | off (default) | peer-discovered chain.toml only |
+  | on  | on | preverified.toml + augment from peers |
+
+  - Default V2 node: peer-discovered only. preverified ignored.
+  - Bootstrap publisher: opts in via
+    `--snap.bootstrap-from-preverified`. Used for initial chain
+    rollout / recovery.
+  - Today's behavior is the third row by accident — V2 augments
+    preverified rather than replacing it. See completion plan §5b
+    for the required correction.
 
 The Phase 0 set therefore = whatever the publisher peers currently
 advertise via chain.toml. With a tip-running publisher, that set is
