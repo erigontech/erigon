@@ -249,7 +249,7 @@ func (idx *Index) init() (err error) {
 		if err != nil {
 			return fmt.Errorf("NewReaderOnBytes: %w, %s", err, idx.fileName)
 		}
-		if took := datasize.ByteSize(sz); took > 10*datasize.MB {
+		if took := datasize.ByteSize(sz); took > 100*datasize.MB {
 			log.Debug("[agg] fuse filter opened", "file", idx.fileName, "keys", idx.keyCount, "size", common.ByteCount(uint64(sz)))
 		}
 		if fusefilter.MadvWillNeedByDefault {
