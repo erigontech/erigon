@@ -207,30 +207,57 @@ they're a bootstrap publisher, otherwise they're a regular V2 node.
 Proposed flag: `--snap.bootstrap-from-preverified` (boolean,
 default false).
 
+**Bootstrap behaviour:** a bootstrap node is an active publisher
+that *seeds* itself from preverified, then EXTENDS the published
+manifest with its own locally-produced files. The published
+chain.toml = preverified ∪ local-files. Over time, as the bootstrap
+operates and produces new files (retire, merge), its published
+chain.toml grows beyond preverified.
+
+So:
+
+  - At t=0, bootstrap's chain.toml = preverified set (chain rollout
+    convention).
+  - At t>0, bootstrap's chain.toml = preverified + everything the
+    bootstrap has produced since.
+  - Other V2 nodes never see preverified directly; they pull the
+    bootstrap's accumulated chain.toml. preverified is invisible
+    after the bootstrap-publisher relays it.
+
+This is a chain-of-custody model — preverified is the seed, the
+bootstrap publisher is the active source of truth, V2 nodes inherit
+from the bootstrap (or any other publisher with the same view).
+
 Behaviour matrix:
 
-  | V2 (`--snap.p2p-manifest`) | bootstrap flag | Source of download set |
-  |---|---|---|
-  | off | (any) | preverified.toml (today's default) |
-  | on  | off (default) | peer-discovered chain.toml only |
-  | on  | on | preverified.toml + augment from peers |
+  | V2 (`--snap.p2p-manifest`) | bootstrap flag | Source of download set | Published chain.toml |
+  |---|---|---|---|
+  | off | (any) | preverified.toml (legacy) | none (no V2 publishing) |
+  | on  | off (default) | peer-discovered chain.toml only | local files only |
+  | on  | on (bootstrap) | preverified.toml as seed + adds local files | preverified + local files |
 
-The bootstrap mode is the legacy / initial-publisher path. Most
-production nodes run with `--snap.p2p-manifest` and the bootstrap
-flag OFF — pure V2.
+Most production nodes run V2 + bootstrap=OFF. Bootstraps are
+relatively rare — the initial chain rollout, recovery scenarios,
+or operators explicitly choosing to be a preverified-rooted
+publisher.
 
 Code changes:
 
   - Add `BlocksFreezing.BootstrapFromPreverified` field +
     `--snap.bootstrap-from-preverified` flag.
-  - Snapshot stage's `RequestSnapshotsDownload` flow gates on
-    these:
-    - If V2 is off OR bootstrap-from-preverified is on → use
-      preverified (and merge P2P-discovered when V2 is on too).
-    - If V2 is on AND bootstrap-from-preverified is off → use
-      ONLY P2P-discovered set. preverified is ignored entirely.
+  - Snapshot stage's `RequestSnapshotsDownload` flow gates on these:
+    - V2 off → use preverified (today's default).
+    - V2 on AND bootstrap=on → use preverified as seed for download
+      AND for the published chain.toml.
+    - V2 on AND bootstrap=off → use ONLY peer-discovered chain.toml.
+      preverified is ignored entirely.
   - `manifestReady` channel already gates the V2 path on at least
     one chain.toml discovery; that stays.
+  - `PublishLocalChainToml` already merges local files with
+    preverified registry when generating the published manifest —
+    matches the bootstrap behaviour. For non-bootstrap V2 nodes,
+    `PublishLocalChainToml` should NOT include preverified entries,
+    only local files.
 
 This change is required to validate the constant-time-to-tip target.
 Without it, Strategy B from the time-to-tip target document
