@@ -108,7 +108,7 @@ func (r *Reader) ForceInMem() datasize.ByteSize {
 }
 
 func (r *Reader) MadvWillNeed() {
-	if r == nil || r.m == nil || len(r.m) == 0 || r.keepInMem {
+	if r == nil || r.f == nil || r.m == nil || len(r.m) == 0 || r.keepInMem {
 		return
 	}
 	if err := mm.MadviseWillNeed(r.m); err != nil {
@@ -116,7 +116,7 @@ func (r *Reader) MadvWillNeed() {
 	}
 }
 func (r *Reader) MadvNormal() {
-	if r == nil || r.m == nil || len(r.m) == 0 || r.keepInMem {
+	if r == nil || r.f == nil || r.m == nil || len(r.m) == 0 || r.keepInMem {
 		return
 	}
 	if err := mm.MadviseNormal(r.m); err != nil {
