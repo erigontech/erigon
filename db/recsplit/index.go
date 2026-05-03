@@ -285,7 +285,7 @@ func (idx *Index) init() (err error) {
 	return nil
 }
 func (idx *Index) ForceExistenceFilterWillNeed() {
-	if idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0 {
+	if idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0 && idx.existenceV1 != nil {
 		log.Debug("[agg] fuse.ForceExistenceFilterWillNeed", "file", idx.fileName, "keys", idx.keyCount)
 		idx.existenceV1.MadvWillNeed()
 	} else {
@@ -294,14 +294,14 @@ func (idx *Index) ForceExistenceFilterWillNeed() {
 	return
 }
 func (idx *Index) ForceExistenceFilterNormal() {
-	if idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0 {
+	if idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0 && idx.existenceV1 != nil {
 		log.Debug("[agg] fuse.ForceExistenceFilterNormal", "file", idx.fileName, "keys", idx.keyCount)
 		idx.existenceV1.MadvNormal()
 	}
 	return
 }
 func (idx *Index) ForceExistenceFilterInRAM() datasize.ByteSize {
-	if idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0 {
+	if idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0 && idx.existenceV1 != nil {
 		log.Debug("[agg] fuse.ForceExistenceFilterInRAM", "file", idx.fileName, "keys", idx.keyCount)
 		return idx.existenceV1.ForceInMem()
 	}
