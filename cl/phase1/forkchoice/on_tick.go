@@ -32,7 +32,7 @@ func (f *ForkChoiceStore) OnTick(time uint64) {
 	f.onTickPerSlot(time)
 }
 
-// onTickPerSlot handles ticks
+// onTickPerSlot implements the spec's on_tick_per_slot (consensus-specs/fork_choice).
 func (f *ForkChoiceStore) onTickPerSlot(time uint64) {
 	previousSlot := f.Slot()
 	f.time.Store(time)
@@ -47,6 +47,14 @@ func (f *ForkChoiceStore) onTickPerSlot(time uint64) {
 	// If this is a new slot, reset store.proposer_boost_root
 	f.proposerBoostRoot.Store(common.Hash{})
 	if f.computeSlotsSinceEpochStart(currentSlot) == 0 {
-		f.updateCheckpoints(f.unrealizedJustifiedCheckpoint.Load().(solid.Checkpoint), f.unrealizedFinalizedCheckpoint.Load().(solid.Checkpoint))
+		// Only promote unrealized checkpoints when the node is synced (processing
+		// blocks at the chain tip).  During forward sync, the highest-seen slot lags
+		// far behind the wall clock.  Promoting unrealized finalization at that point
+		// can jump the realized finalized checkpoint ahead of the blocks the fork
+		// graph actually contains, causing Ancestor() to fail with
+		// ErrNotFinalizedDescendant for subsequent blocks.
+		if f.highestSeen.Load()+2*f.beaconCfg.SlotsPerEpoch >= currentSlot {
+			f.updateCheckpoints(f.unrealizedJustifiedCheckpoint.Load().(solid.Checkpoint), f.unrealizedFinalizedCheckpoint.Load().(solid.Checkpoint))
+		}
 	}
 }

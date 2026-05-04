@@ -185,9 +185,13 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 			log.Warn("failed to read state root by block root", "err", err, "block_root", headRoot)
 			return nil
 		}
+		reorgDepth := uint64(0)
+		if headSlot > currentSlot {
+			reorgDepth = headSlot - currentSlot
+		}
 		reorgEvent := &beaconevents.ChainReorgData{
 			Slot:                headSlot,
-			Depth:               currentSlot - headSlot,
+			Depth:               reorgDepth,
 			OldHeadBlock:        oldCanonical,
 			NewHeadBlock:        headRoot,
 			OldHeadState:        oldStateRoot,

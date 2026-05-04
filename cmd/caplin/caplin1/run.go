@@ -641,7 +641,6 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		csn,
 		rcsn,
 		dirs,
-		config.LoopBlockLimit,
 		config,
 		syncedDataManager,
 		emitters,

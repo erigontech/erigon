@@ -100,7 +100,7 @@ func newFlushTestHarness(t *testing.T, frozen uint64) *flushTestHarness {
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil).AnyTimes()
 
 	persistDir := filepath.Join(t.TempDir(), "collector")
-	c := NewPersistentBlockCollector(log.New(), engine, &clparams.MainnetBeaconConfig, 1, persistDir)
+	c := NewPersistentBlockCollector(log.New(), engine, &clparams.MainnetBeaconConfig, persistDir)
 	require.NotNil(t, c)
 	t.Cleanup(func() { _ = c.Close() })
 

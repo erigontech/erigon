@@ -259,6 +259,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	// latest slot even if AddChainSegment returns PreValidated.
 	if block.Block.Slot > f.highestSeen.Load() {
 		f.highestSeen.Store(block.Block.Slot)
+		f.highestSeenRoot.Store(common.Hash(blockRoot))
 	}
 	startStateProcess := time.Now()
 

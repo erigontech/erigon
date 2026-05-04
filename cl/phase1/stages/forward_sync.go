@@ -266,7 +266,7 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 		shouldInsert  = cfg.executionClient != nil && cfg.executionClient.SupportInsertion() // Check if the execution client supports insertion
 		secsPerLog    = 30                                                                   // Interval in seconds for logging progress
 		logTicker     = time.NewTicker(time.Duration(secsPerLog) * time.Second)              // Ticker for logging progress
-		downloader    = network2.NewForwardBeaconDownloader(ctx, cfg.rpc, cfg.beaconCfg)      // Initialize a new forward beacon downloader
+		downloader    = network2.NewForwardBeaconDownloader(ctx, cfg.rpc, cfg.beaconCfg)     // Initialize a new forward beacon downloader
 		currentSlot   atomic.Uint64                                                          // Atomic variable to track the current slot
 		startSlot     = cfg.forkChoice.HighestSeen()
 		maxReorgRange = uint64(300) // if node falls too much out of sync, we allow a maximum reorg range of 300 slots
@@ -309,9 +309,16 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 		}
 		currentSlot.Store(highestSlotProcessed)
 		// Update advertised status so peers don't disconnect us for being too far behind.
+		// Use the actual head root (not the finalized root) so headRoot corresponds to
+		// headSlot. Peers like Lighthouse penalize us when headRoot maps to a slot far
+		// below headSlot ("useless peer").
 		if highestSlotProcessed > initialHighestSlotProcessed {
 			fc := cfg.forkChoice.FinalizedCheckpoint()
-			if err2 := cfg.rpc.SetStatus(fc.Root, fc.Epoch, fc.Root, highestSlotProcessed); err2 != nil {
+			headRoot := cfg.forkChoice.HighestSeenRoot()
+			if headRoot == (common.Hash{}) {
+				headRoot = fc.Root
+			}
+			if err2 := cfg.rpc.SetStatus(fc.Root, fc.Epoch, headRoot, highestSlotProcessed); err2 != nil {
 				logger.Debug("Could not update status during forward sync", "err", err2)
 			}
 		}
