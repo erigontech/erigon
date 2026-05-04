@@ -226,7 +226,7 @@ func (br *BlockRetire) borSnapshots() *heimdall.RoSnapshots {
 }
 
 func CanRetire(curBlockNum uint64, blocksInSnapshots uint64, snapType snaptype.Enum, snCfg *snapcfg.Cfg) (blockFrom, blockTo uint64, can bool) {
-	var keep uint64 = 1024 //TODO: we will increase it to params.FullImmutabilityThreshold after some db optimizations
+	var keep uint64 = dbg.MaxReorgDepth
 	if curBlockNum <= keep {
 		return
 	}
