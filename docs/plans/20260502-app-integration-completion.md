@@ -340,7 +340,26 @@ consecutive failures stops the 7942-retries flood. Operators get a
 clear signal; the log isn't drowned. ChangeSet receive clears
 quarantine so legitimate state changes recover.
 
-**Real architectural fix (still pending — needs more analysis):**
+**Architectural fix landed 2026-05-04:** `BuildOnIndexing` now
+pre-checks the inventory before calling the builder. When all of an
+entry's dependencies are already `Local`, the handler advances
+straight to `LifecycleIndexed` with zero builder invocations. Only
+when at least one dependency is missing does it call
+`builder.BuildMissedIndices`. This eliminates the redundant
+invocations the global-scan dispatch produced (776 → ~22 in the
+pre-fix hoodi rerun).
+
+**What was deferred:** per-file builder APIs at the
+`RoSnapshots` / `Aggregator` level (`BuildIndicesForFile(name)`,
+`BuildAccessorsForFile(name)`). Today the underlying builders still
+scan globally and skip already-indexed files via cheap pointer
+checks (`segment.IsIndexed()` for E2,
+`FilesWithMissedAccessors()` for E3), so the dispatch-side fix
+captures the architectural intent without the surgery on the
+builder side. Per-file builders become a follow-up if profiling on
+mainnet shows the global scan itself is a bottleneck.
+
+**The original analysis** (preserved for context):
 the driver calling BuildMissedIndices per-file is the wrong shape.
 BuildMissedIndices is a GLOBAL operation that scans everything for
 missing indexes. The driver dispatches it once per file at

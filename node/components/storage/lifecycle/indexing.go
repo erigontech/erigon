@@ -46,9 +46,20 @@ type IndexBuilder interface {
 }
 
 // BuildOnIndexing returns a Handler suitable for Driver.OnIndexing.
-// The handler invokes builder.BuildMissedIndices, then verifies the
-// primary's Dependencies are all Local in the inventory. On full
-// dependency satisfaction, it advances the entry to LifecycleIndexed.
+//
+// Inventory-driven dispatch: the handler first checks whether all of
+// the entry's Dependencies are already Local in the inventory. If
+// they are, it advances directly to LifecycleIndexed without calling
+// the builder. Only when at least one dependency is missing does the
+// handler invoke builder.BuildMissedIndices.
+//
+// This is §5c of the app-integration completion plan: skipping the
+// build call when the inventory already reflects satisfied deps
+// drops invocation counts from N (every Downloaded file every sweep)
+// to ~K (one per file that genuinely needs work). In the 2026-05-04
+// hoodi rerun pre-fix, the driver fired 776 BuildMissedIndices calls
+// to advance 22 files; the pre-check removes the 754 redundant
+// invocations.
 //
 // If a dependency is still missing after the build (e.g. because the
 // production OnFilesChange path hasn't yet propagated the new file
@@ -64,19 +75,35 @@ type IndexBuilder interface {
 // observable. nil logger silently skips the line.
 func BuildOnIndexing(builder IndexBuilder, inv *snapshot.Inventory, logger log.Logger) Handler {
 	return func(ctx context.Context, e *snapshot.FileEntry) error {
+		if depsAllLocal(inv, e.Dependencies) {
+			advance(inv, e.Name, logger)
+			return nil
+		}
+
 		if err := builder.BuildMissedIndices(ctx, e); err != nil {
 			return err
 		}
-		for _, depName := range e.Dependencies {
-			dep, ok := inv.GetByName(depName)
-			if !ok || !dep.Local {
-				// Dep not yet propagated; wait for next sweep.
-				return nil
-			}
+
+		if !depsAllLocal(inv, e.Dependencies) {
+			return nil
 		}
-		if inv.AdvanceTo(e.Name, snapshot.LifecycleIndexed) && logger != nil {
-			logger.Info("[storage-lifecycle] advanced", "file", e.Name, "to", "Indexed")
-		}
+		advance(inv, e.Name, logger)
 		return nil
+	}
+}
+
+func depsAllLocal(inv *snapshot.Inventory, deps []string) bool {
+	for _, depName := range deps {
+		dep, ok := inv.GetByName(depName)
+		if !ok || !dep.Local {
+			return false
+		}
+	}
+	return true
+}
+
+func advance(inv *snapshot.Inventory, name string, logger log.Logger) {
+	if inv.AdvanceTo(name, snapshot.LifecycleIndexed) && logger != nil {
+		logger.Info("[storage-lifecycle] advanced", "file", name, "to", "Indexed")
 	}
 }

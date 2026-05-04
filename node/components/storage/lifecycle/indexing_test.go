@@ -53,12 +53,16 @@ func (f *fakeBuilder) BuildMissedIndices(_ context.Context, primary *snapshot.Fi
 	return nil
 }
 
-func TestBuildOnIndexing_AdvancesToIndexedWhenDepsPresent(t *testing.T) {
+func TestBuildOnIndexing_BuildsThenAdvancesWhenDepsMissing(t *testing.T) {
+	// Deps are NOT pre-added to the inventory, so the handler invokes
+	// the builder. fakeBuilder simulates production behaviour by
+	// adding the deps as Local during the call. Post-build the
+	// pre-check sees them present and advances.
 	inv := snapshot.NewInventory()
 	primary := &snapshot.FileEntry{
 		Name:         "v1.0-accounts.0-256.kv",
 		Domain:       snapshot.DomainAccounts,
-		Local:        true, // → derives LifecycleDownloaded
+		Local:        true,
 		Dependencies: []string{"v1.0-accounts.0-256.kvi"},
 	}
 	inv.AddFile(primary)
@@ -69,12 +73,43 @@ func TestBuildOnIndexing_AdvancesToIndexedWhenDepsPresent(t *testing.T) {
 	require.NoError(t, handler(context.Background(), primary))
 	state, _ := inv.LifecycleState(primary.Name)
 	require.Equal(t, snapshot.LifecycleIndexed, state,
-		"primary must advance to Indexed once its deps are Local")
-	require.Equal(t, 1, builder.calls)
+		"primary advances after the build call propagates deps")
+	require.Equal(t, 1, builder.calls,
+		"missing deps require a build invocation")
+}
+
+func TestBuildOnIndexing_DepsAlreadyLocal_SkipsBuild(t *testing.T) {
+	// §5c pre-check: when all deps are already Local in the
+	// inventory, the handler advances WITHOUT invoking the global
+	// builder. Eliminates the 776→22 redundant invocations from the
+	// pre-fix hoodi run.
+	inv := snapshot.NewInventory()
+	primary := &snapshot.FileEntry{
+		Name:         "v1.0-accounts.0-256.kv",
+		Domain:       snapshot.DomainAccounts,
+		Local:        true,
+		Dependencies: []string{"v1.0-accounts.0-256.kvi"},
+	}
+	inv.AddFile(primary)
+	inv.AddFile(&snapshot.FileEntry{
+		Name:   "v1.0-accounts.0-256.kvi",
+		Domain: snapshot.DomainAccounts,
+		Local:  true,
+	})
+
+	builder := &fakeBuilder{inv: inv}
+	require.NoError(t, BuildOnIndexing(builder, inv, nil)(context.Background(), primary))
+
+	state, _ := inv.LifecycleState(primary.Name)
+	require.Equal(t, snapshot.LifecycleIndexed, state)
+	require.Equal(t, 0, builder.calls,
+		"pre-check must skip the builder when deps already Local")
 }
 
 func TestBuildOnIndexing_HandlesNoDependencies(t *testing.T) {
 	// Files with no deps (caplin / meta / salt) advance directly.
+	// The pre-check trivially passes for an empty Dependencies slice,
+	// so the builder is not called.
 	inv := snapshot.NewInventory()
 	primary := &snapshot.FileEntry{
 		Name:  "salt-state.txt",
@@ -87,8 +122,9 @@ func TestBuildOnIndexing_HandlesNoDependencies(t *testing.T) {
 	require.NoError(t, BuildOnIndexing(builder, inv, nil)(context.Background(), primary))
 
 	state, _ := inv.LifecycleState(primary.Name)
-	require.Equal(t, snapshot.LifecycleIndexed, state,
-		"file with no deps advances immediately after the build call")
+	require.Equal(t, snapshot.LifecycleIndexed, state)
+	require.Equal(t, 0, builder.calls,
+		"no deps means no build call")
 }
 
 func TestBuildOnIndexing_BuilderErrorPropagates(t *testing.T) {
