@@ -136,7 +136,7 @@ func (dt *DomainRoTx) findMergeRange(maxEndTxNum, domainMaxSpan, maxSpan uint64)
 		endStep := item.endTxNum / dt.stepSize
 		spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
 		span := min(spanStep*dt.stepSize, domainMaxSpan)
-		fromTxNum := item.endTxNum - span
+		fromTxNum := clipMergeStartToFileBoundary(dt.files, item.endTxNum-span)
 		if fromTxNum >= item.startTxNum {
 			continue
 		}
@@ -175,7 +175,7 @@ func (ht *HistoryRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges
 		endStep := item.endTxNum / ht.stepSize
 		spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
 		span := min(spanStep*ht.stepSize, maxSpan)
-		startTxNum := item.endTxNum - span
+		startTxNum := clipMergeStartToFileBoundary(ht.files, item.endTxNum-span)
 
 		foundSuperSet := r.history.from == item.startTxNum && item.endTxNum >= r.history.to
 		if foundSuperSet {
@@ -228,7 +228,7 @@ func (iit *InvertedIndexRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Merge
 		endStep := item.endTxNum / iit.stepSize
 		spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
 		span := min(spanStep*iit.stepSize, maxSpan)
-		start := item.endTxNum - span
+		start := clipMergeStartToFileBoundary(iit.files, item.endTxNum-span)
 		foundSuperSet := startTxNum == item.startTxNum && item.endTxNum >= endTxNum
 		if foundSuperSet {
 			minFound = false
@@ -250,6 +250,24 @@ func (iit *InvertedIndexRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Merge
 		panic(fmt.Sprintf("assert: startTxNum(%d) == endTxNum(%d)", startTxNum, endTxNum))
 	}
 	return &MergeRange{iit.name.String(), minFound, startTxNum, endTxNum}
+}
+
+// clipMergeStartToFileBoundary bumps start up to the endTxNum of any visible
+// file that straddles it (startTxNum < start < endTxNum). visibleFiles are
+// non-overlapping, so at most one straddling file can exist; the loop returns
+// as soon as it is found. Files are sorted by endTxNum ascending, so the first
+// file with endTxNum > start is the only straddler candidate.
+func clipMergeStartToFileBoundary(files visibleFiles, start uint64) uint64 {
+	for _, f := range files {
+		if f.endTxNum <= start {
+			continue
+		}
+		if f.startTxNum < start {
+			return f.endTxNum
+		}
+		return start
+	}
+	return start
 }
 
 type HistoryRanges struct {
