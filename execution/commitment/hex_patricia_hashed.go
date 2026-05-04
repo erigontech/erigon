@@ -2504,6 +2504,40 @@ func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 	return rootHash[1:], nil // first byte is 128+hash_len=160
 }
 
+// unfoldKeyPath drives hph.unfold in a loop until the trie is unfolded
+// far enough that the cell at hashedKey can be updated — i.e. until
+// needUnfolding returns 0. This is the per-key traversal primitive
+// that follows the fold step in followAndUpdate.
+//
+// Extracted as a primitive so future orchestrators can drive
+// unfold-only traversals (e.g. cache populators that walk a touched-key
+// path to fill cell state without doing a fold/update). HashSort's
+// per-key followAndUpdate is the sequential orchestrator over this
+// primitive today; future concurrent / parallel orchestrators (each
+// with their own HexPatriciaHashed instance) can reuse it.
+//
+// plainKey is used only for per-key metrics labelling (StartUnfolding).
+// Pass an empty/nil slice if no metric attribution is needed.
+func (hph *HexPatriciaHashed) unfoldKeyPath(hashedKey, plainKey []byte) error {
+	for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
+		printLater := hph.currentKeyLen == 0 && hph.mounted && hph.trace
+		var unfoldDone func()
+		if dbg.KVReadLevelledMetrics {
+			unfoldDone = hph.metrics.StartUnfolding(plainKey)
+		}
+		if err := hph.unfold(hashedKey, unfolding); err != nil {
+			return fmt.Errorf("unfold: %w", err)
+		}
+		if unfoldDone != nil {
+			unfoldDone()
+		}
+		if printLater {
+			fmt.Printf("[%x] subtrie pref '%x' d=%d\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hph.depths[max(0, hph.activeRows-1)])
+		}
+	}
+	return nil
+}
+
 func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateUpdate *Update) (err error) {
 	//if hph.trace {
 	// fmt.Printf("mnt: %0x current: %x path %x\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hashedKey)
@@ -2521,23 +2555,9 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 			foldDone()
 		}
 	}
-	// Now unfold until we step on an empty cell
-	for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
-		printLater := hph.currentKeyLen == 0 && hph.mounted && hph.trace
-		var unfoldDone func()
-		if dbg.KVReadLevelledMetrics {
-			unfoldDone = hph.metrics.StartUnfolding(plainKey)
-		}
-		if err := hph.unfold(hashedKey, unfolding); err != nil {
-			return fmt.Errorf("unfold: %w", err)
-		}
-		if unfoldDone != nil {
-			unfoldDone()
-		}
-		if printLater {
-			fmt.Printf("[%x] subtrie pref '%x' d=%d\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hph.depths[max(0, hph.activeRows-1)])
-		}
-		// fmt.Printf("mnt: %0x current: %x path %x\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hashedKey)
+	// Now unfold the path so the cell at hashedKey is reachable.
+	if err := hph.unfoldKeyPath(hashedKey, plainKey); err != nil {
+		return err
 	}
 
 	if stateUpdate == nil {
