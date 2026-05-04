@@ -1,6 +1,6 @@
 # Min time to tip — target + process
 
-## Headline (validated 2026-05-03)
+## Headline (validated 2026-05-03 on hoodi)
 
 **V2 mode reaches tip on hoodi in ~10 minutes from a clean datadir.**
 Validated end-to-end with the §5b (V2-only) + §5c (quarantine) +
@@ -8,12 +8,12 @@ Validated end-to-end with the §5b (V2-only) + §5c (quarantine) +
 on this branch. Measured: **10 min 25 s** on minimal-mode prune,
 fresh datadir, V2 manifest with bootstrap publisher.
 
-This is the headline functional delivery for V2: a clean-datadir
-hoodi node reaches tip ~4× faster than the pre-V2 baseline (~44 min)
-and ~2× faster than minimal-mode-with-preverified (18:30). The
-delta is the V2 mechanism short-circuiting preverified.toml — the
-node only fetches what its peers' chain.toml advertises rather than
-the full preverified set.
+This is the headline functional delivery for V2 on hoodi: a
+clean-datadir node reaches tip ~4× faster than the pre-V2 baseline
+(~44 min) and ~2× faster than minimal-mode-with-preverified (18:30).
+The delta is the V2 mechanism short-circuiting preverified.toml —
+the node only fetches what its peers' chain.toml advertises rather
+than the full preverified set.
 
 **Target across modes: 10 min default.** Per the constant-time-to-tip
 architectural rule, minimal / full / archive should converge here.
@@ -21,6 +21,58 @@ Today only the V2 path achieves it; the preverified path scales with
 chain age and varies by mode. The fix is making V2 the default and
 keeping preverified for the bootstrap publisher only (§5b is the
 flag-shape that supports this).
+
+## Next milestone: reproduce on Ethereum mainnet
+
+Hoodi is the proof-of-concept. The real target is **10 min to tip
+on Ethereum mainnet**. Demonstrating that on a chain with ~22M+
+blocks, multiple TB of state history, and full peer diversity is
+the architectural claim that makes V2 production-significant.
+
+What changes from the hoodi run:
+
+  - **Phase 0 download size.** On hoodi, the latest state slice
+    is small (~MB-scale per domain). On mainnet it's GB-scale per
+    domain. Time-to-tip becomes bandwidth-bound rather than
+    coordination-bound. Constant 10 min target requires the Phase 0
+    subset to fit in ~10-min worth of bandwidth at the operator's
+    network capacity.
+  - **Publisher availability.** Mainnet has no single bootstrap
+    publisher; many nodes serve chain.toml. The V2 mechanism's
+    "first peer with chain.toml ENR" should find one quickly. Set
+    a longer manifestReady timeout (e.g. 5 min stays appropriate)
+    in case some peers have stale or partial manifests.
+  - **Caplin / beacon catch-up.** Mainnet's beacon archive download
+    is substantial. Even with EL at tip via snapshots, Caplin has
+    to catch up to mainnet's beacon head. May extend wall-clock
+    measurement of "ready to operate" beyond just EL tip.
+  - **Disk space.** Minimal mode on mainnet is ~hundreds of GB.
+    Archive mode is multi-TB. Tests need pre-allocated capacity.
+  - **Network sustained throughput.** 300+ MB/s sustained for 10
+    min would deliver the snapshot bytes; many networks won't
+    sustain that. The "10 min target" is conditional on adequate
+    bandwidth.
+
+Before launching a mainnet test:
+
+  - Confirm at least one mainnet peer advertises chain.toml ENR
+    (V2-published). May require an Erigon V2 node to be running on
+    mainnet acting as bootstrap.
+  - Pre-allocate disk: at least 500 GB for minimal, 2+ TB for
+    archive on hoodi-test-fixture-style location.
+  - Network capacity check: sustained 300 MB/s or be honest about
+    expected longer time-to-tip.
+  - Plan the publisher: either find an existing V2-publishing
+    mainnet node, or run our own. The bootstrap-from-preverified
+    flag works for the publisher; that's what hoodi used.
+
+Open question: do we run the mainnet test on this branch's
+current code, or after additional hardening (e.g. the §5c full
+inventory-driven dispatch)? The hoodi result with the symptom-fix
+quarantine works; mainnet may surface different failure modes the
+quarantine handles less gracefully. Worth iterating: hoodi
+validated → mainnet attempt → diagnose → iterate. Don't wait for
+"perfect"; learn from real numbers.
 
 ## Target
 
