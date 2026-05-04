@@ -504,7 +504,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 	fileName := filepath.Base(file.Fullpath())
 	startTxNum := file.StartRootNum()
 	endTxNum := file.EndRootNum()
-	if !state.MayContainValuesPlainKeyReferencing(stepSize, startTxNum, endTxNum) {
+	if !state.ValuesPlainKeyReferencingThresholdReached(stepSize, startTxNum, endTxNum) {
 		logger.Info(
 			"[integrity] CommitmentKvDeref skipped, file not above min steps",
 			"file", fileName,
@@ -1256,7 +1256,7 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 	expectedAccounts := uint64(accDecomp.Count()) / 2
 	expectedStorages := uint64(stoDecomp.Count()) / 2
 
-	isReferencing := state.MayContainValuesPlainKeyReferencing(stepSize, startTxNum, endTxNum)
+	isReferencing := state.ValuesPlainKeyReferencingThresholdReached(stepSize, startTxNum, endTxNum)
 
 	// Track unique keys found in commitment branches via ETL collectors (disk-spilling dedup).
 	accCollector := etl.NewCollector("[integrity] StateVerify acc", "", etl.NewOldestEntryBuffer(etl.BufferOptimalSize), logger)
@@ -1854,7 +1854,7 @@ func extractCommitmentRefsToCollectors(ctx context.Context, file state.VisibleFi
 	commReader := seg.NewReader(commDecomp.MakeGetter(), commCompression)
 
 	// Always open domain readers for dereferencing (commitment files may contain
-	// reference keys regardless of MayContainValuesPlainKeyReferencing result)
+	// reference keys regardless of ValuesPlainKeyReferencingThresholdReached result)
 	_, nextAccReader, nextAccClose, err := deriveDecompAndReaderForOtherDomain(file.Fullpath(), kv.CommitmentDomain, kv.AccountsDomain)
 	if err != nil {
 		return err
@@ -1951,7 +1951,7 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 	startTxNum := file.StartRootNum()
 	endTxNum := file.EndRootNum()
 
-	isReferencing := state.MayContainValuesPlainKeyReferencing(stepSize, startTxNum, endTxNum)
+	isReferencing := state.ValuesPlainKeyReferencingThresholdReached(stepSize, startTxNum, endTxNum)
 
 	logger.Info("[integrity] StateVerify hash verification starting",
 		"kv", fileName, "workers", numWorkers, "referencing", isReferencing)
