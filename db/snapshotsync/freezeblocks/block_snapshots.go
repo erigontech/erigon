@@ -295,9 +295,8 @@ func (br *BlockRetire) retireBlocks(
 		} else if !has {
 			return false, nil
 		}
-		retireRange := fmt.Sprintf("%s-%s", common.PrettyCounter(blockFrom), common.PrettyCounter(blockTo))
-		logger.Log(lvl, "[snapshots] Retire Blocks start", "range", retireRange)
-		retireStart := time.Now()
+		logger.Log(lvl, "[snapshots] Retire Blocks", "range",
+			fmt.Sprintf("%s-%s", common.PrettyCounter(blockFrom), common.PrettyCounter(blockTo)))
 		// in future we will do it in background
 		if err := DumpBlocks(ctx, blockFrom, blockTo, br.chainConfig, tmpDir, snapshots.Dir(), db, int(workers), lvl, logger, blockReader, br.snCfg); err != nil {
 			return ok, fmt.Errorf("DumpBlocks: %w", err)
@@ -306,7 +305,6 @@ func (br *BlockRetire) retireBlocks(
 		if err := snapshots.OpenFolder(); err != nil {
 			return ok, fmt.Errorf("open: %w", err)
 		}
-		logger.Log(lvl, "[snapshots] Retire Blocks done", "range", retireRange, "took", time.Since(retireStart))
 		snapshots.LogStat("blocks:retire")
 		if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 			notifier.OnNewSnapshot()
