@@ -61,8 +61,8 @@ const MaxLeafSize = 24
 //	2 = BinaryFuse[uint8] sharded by keyHash>>56 (256 shards; reduces build-time RAM 256×)
 const ExistenceFilterVersion version.DataStructureVersion = 1
 
-func newExistenceFilterWriter(filePath string) (v1 *fusefilter.WriterOffHeap, v2 *fusefilter.WriterSharded, err error) {
-	if ExistenceFilterVersion == 2 {
+func newExistenceFilterWriter(filePath string, v version.DataStructureVersion) (v1 *fusefilter.WriterOffHeap, v2 *fusefilter.WriterSharded, err error) {
+	if v == 2 {
 		v2, err = fusefilter.NewWriterSharded(filePath)
 		return
 	}
@@ -301,7 +301,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 
 	}
 	if args.KeyCount > 0 && rs.lessFalsePositives && rs.dataStructureVersion >= 1 {
-		rs.existenceFV1, rs.existenceFV2, err = newExistenceFilterWriter(rs.filePath)
+		rs.existenceFV1, rs.existenceFV2, err = newExistenceFilterWriter(rs.filePath, rs.dataStructureVersion)
 		if err != nil {
 			return nil, err
 		}
