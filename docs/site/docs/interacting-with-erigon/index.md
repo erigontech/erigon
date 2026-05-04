@@ -1,6 +1,7 @@
 ---
 title: "Interacting with Erigon"
 sidebar_position: 4
+description: "Complete API reference for Erigon — JSON-RPC namespaces, GraphQL, and gRPC interfaces for querying and controlling your node."
 ---
 
 # RPC Service
