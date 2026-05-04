@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/components/storage/lifecycle"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
+	"github.com/erigontech/erigon/node/components/storage/validation"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -255,11 +256,14 @@ func (p *Provider) Initialize(deps Deps) error {
 	//
 	// OnIndexing wraps a productionIndexBuilder that coalesces
 	// per-file calls into BlockRetire.BuildMissedIndicesIfNeed and
-	// Aggregator.BuildMissedAccessors invocations. OnValidation is
-	// left nil at this step; nodes that want producer-side
-	// validation wire a chain in their own setup. Reading nil for
-	// OnValidation means files advance Indexed → Advertisable
-	// without validation — matches today's pre-validation behaviour.
+	// Aggregator.BuildMissedAccessors invocations. OnValidation
+	// runs validation.DefaultStage1ChainWithDisk against each freshly
+	// indexed file before advertising it — catches name/range/kind
+	// shape errors plus disk-side truncation/inflation via the
+	// torrent-length comparison. Files already on disk at startup
+	// skip the validation chain because they're entered as
+	// Advertisable directly (see bootstrap below) — they were
+	// validated by a previous run or by the visibility gate.
 	// Bootstrap Inventory with files already on disk so the lifecycle
 	// driver doesn't start blind. Both AllSnapshots (block) and the
 	// Aggregator (state) expose visible-file enumeration; we mirror
@@ -297,12 +301,17 @@ func (p *Provider) Initialize(deps Deps) error {
 			logger:       logger,
 			indexWorkers: deps.IndexWorkers,
 		}
+		snapDir := config.Dirs.Snap
+		chain := validation.DefaultStage1ChainWithDisk(snapDir)
+		contentFor := func(e *snapshot.FileEntry) validation.ContentSource {
+			return validation.FileContent{Path: filepath.Join(snapDir, e.Name)}
+		}
 		p.LifecycleDriver = &lifecycle.Driver{
 			Inv:          deps.Inventory,
 			Logger:       logger,
-			SnapDir:      config.Dirs.Snap,
+			SnapDir:      snapDir,
 			OnIndexing:   lifecycle.BuildOnIndexing(builder, deps.Inventory, logger),
-			OnValidation: lifecycle.BuildOnValidation(nil, nil, deps.Inventory, logger),
+			OnValidation: lifecycle.BuildOnValidation(chain, contentFor, deps.Inventory, logger),
 		}
 		if err := p.LifecycleDriver.Start(ctx); err != nil {
 			return fmt.Errorf("storage: start lifecycle driver: %w", err)

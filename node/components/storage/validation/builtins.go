@@ -301,8 +301,14 @@ func DefaultStage1Chain() Chain {
 // DefaultStage1ChainWithDisk returns DefaultStage1Chain plus the
 // disk-reading validators configured against snapDir. The storage
 // adapter wires this when it has a real snap-dir to point at.
+//
+// Includes ContentNotEmpty (catches zero-byte files masquerading as
+// valid output — index builds and producer glitches both produce
+// these) and SizeMatchesTorrent (catches truncation/inflation against
+// torrent metadata).
 func DefaultStage1ChainWithDisk(snapDir string) Chain {
 	chain := DefaultStage1Chain()
+	chain = append(chain, ContentNotEmpty{})
 	if snapDir != "" {
 		chain = append(chain, SizeMatchesTorrent{SnapDir: snapDir})
 	}
