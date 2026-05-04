@@ -2,10 +2,74 @@
 
 ## Status
 
-This branch is **not complete**. To be complete it must be a
-**working optimised system** — that's the bar. Two smoke tests
-on hoodi told us the basics don't crash; they did NOT tell us the
-system is working as designed.
+**2026-05-04 — V2 mechanism end-to-end validated on hoodi.** Post-§5e
+rerun reached tip in **10 min 25 s** (start 23:12:23 UTC, first
+`age=0` at 23:22:48 UTC), sustained tip through 13:00 UTC, zero
+collision crashes, zero `Adding torrents from disk` lines, 22
+files advanced through Indexed → Advertisable, 143 quarantine
+activations (vs the pre-5d 7942-retries flood). The branch is
+**ready for draft PR review** — outstanding items below are split
+into "in this PR" and "follow-up PR" buckets.
+
+For the headline target + benchmarks see
+`docs/plans/20260502-min-time-to-tip-target.md`. Operational guide
+for the V2 path: `docs/plans/20260504-v2-operational-guide.md`.
+
+## What completed
+
+  - **Item 1 — Tight retire gate.** ✅ V2 rerun observed
+    productionIndexBuilder driving 22 advance-to-Indexed and
+    advance-to-Advertisable transitions; retire's inline path no
+    longer pre-empts the lifecycle when the flag is on.
+  - **Item 2 — Observability.** ✅ `[storage-lifecycle]` and
+    `[chaintoml]` log prefixes in place; verification log lines
+    documented in `20260504-v2-operational-guide.md`.
+  - **Item 5b — V2-only mode + bootstrap-from-preverified flag.** ✅
+  - **Item 5d — Latest-first download ordering.** ✅ landed.
+  - **Item 5e — Disk-walk gate.** ✅ AddTorrentsFromDisk gated on
+    LifecycleDrivenByStorage; collision crash gone. Full removal of
+    the function is follow-up cleanup.
+
+## What ships in this PR (verification-only)
+
+  - **Item 3 — Download-order verification.** Scenarios tests cover
+    the ordering invariant; production hoodi sync exhibited the
+    expected latest-first ordering during the §5d soak. PR
+    description carries a log excerpt as evidence; no code change
+    needed for this item beyond what already landed.
+  - **Item 4 — Fast-start fixture.** The post-§5e datadir
+    (`/erigon/tmp/erigon-v2post5e.8q0gep`) and the minimal-mode
+    publisher datadir (`/erigon/tmp/erigon-min.OZiquQ`) are usable
+    fast-start fixtures going forward. Wire A's startup population
+    is exercised on every restart.
+
+## What follows up in subsequent PRs
+
+  - **Item 5 — Abnormal-termination scenarios.** Clean-stop is small
+    enough to land here; SIGKILL / OOM / power-loss matrix is its own
+    workstream and should not gate this PR.
+  - **Item 5c — Full inventory-driven build dispatch.** Symptom-fix
+    quarantine is sufficient floor; the per-file dispatch refactor
+    needs more API analysis (build subsystem granularity).
+  - **Item 6 — Mainnet performance measurement.** Hoodi numbers are
+    in hand (10 min 25 s). Reproducing on Ethereum mainnet is the
+    headline next milestone — see
+    `docs/plans/20260503-mainnet-time-to-tip.md`.
+  - **DID-based UCAN publisher identity.** New scope item — the
+    publisher needs a verifiable identity so consumers can target
+    it as a trusted source. Distribute the publisher's DID with the
+    Erigon executable so default-trust roots are available without
+    operator configuration. Plan:
+    `docs/plans/20260504-publisher-did-ucan.md`. Promote to an active
+    branch after this PR lands.
+  - **Testnet / forked-chain implementation.** Next concrete delivery
+    after this PR merges; per the user's roadmap.
+
+## Pre-PR background — what the smoke tests showed
+
+The text below describes the state PRIOR to the V2 post-§5e
+validation; kept for context on what each completion-plan item was
+solving.
 
 ## What the smoke tests showed
 
