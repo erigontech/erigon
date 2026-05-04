@@ -17,6 +17,7 @@
 package commitment
 
 import (
+	"fmt"
 	"sync/atomic"
 
 	"github.com/erigontech/erigon/common/maphash"
@@ -44,6 +45,13 @@ type WarmupCache struct {
 	branches *maphash.Map[*branchEntry]
 	accounts *maphash.Map[*accountEntry]
 	storage  *maphash.Map[*storageEntry]
+
+	// Observability counters. Updated by Get/Put paths; read by Stats().
+	// Atomic so warmup-worker reads and main-trie reads don't race.
+	branchHits, branchMisses, branchEvicted atomic.Uint64
+	branchBytesServed                       atomic.Uint64
+	accountHits, accountMisses              atomic.Uint64
+	storageHits, storageMisses              atomic.Uint64
 }
 
 // NewWarmupCache creates a new warmup cache instance.
@@ -67,19 +75,33 @@ func (c *WarmupCache) PutBranch(prefix []byte, data []byte) {
 // GetBranch retrieves branch data from the cache.
 func (c *WarmupCache) GetBranch(prefix []byte) ([]byte, bool) {
 	entry, found := c.branches.Get(prefix)
-	if !found || entry.isEvicted.Load() {
+	if !found {
+		c.branchMisses.Add(1)
 		return nil, false
 	}
+	if entry.isEvicted.Load() {
+		c.branchEvicted.Add(1)
+		return nil, false
+	}
+	c.branchHits.Add(1)
+	c.branchBytesServed.Add(uint64(len(entry.data)))
 	return entry.data, true
 }
 
 // GetAndEvictBranch retrieves branch data and marks the entry as evicted in one operation.
 func (c *WarmupCache) GetAndEvictBranch(prefix []byte) ([]byte, bool) {
 	entry, found := c.branches.Get(prefix)
-	if !found || entry.isEvicted.Load() {
+	if !found {
+		c.branchMisses.Add(1)
+		return nil, false
+	}
+	if entry.isEvicted.Load() {
+		c.branchEvicted.Add(1)
 		return nil, false
 	}
 	entry.isEvicted.Store(true)
+	c.branchHits.Add(1)
+	c.branchBytesServed.Add(uint64(len(entry.data)))
 	return entry.data, true
 }
 
@@ -105,8 +127,10 @@ func (c *WarmupCache) PutAccount(plainKey []byte, update *Update) {
 func (c *WarmupCache) GetAccount(plainKey []byte) (*Update, bool) {
 	entry, found := c.accounts.Get(plainKey)
 	if !found || entry.isEvicted.Load() {
+		c.accountMisses.Add(1)
 		return nil, false
 	}
+	c.accountHits.Add(1)
 	return entry.update, true
 }
 
@@ -143,8 +167,10 @@ func (c *WarmupCache) PutStorage(plainKey []byte, update *Update) {
 func (c *WarmupCache) GetStorage(plainKey []byte) (*Update, bool) {
 	entry, found := c.storage.Get(plainKey)
 	if !found || entry.isEvicted.Load() {
+		c.storageMisses.Add(1)
 		return nil, false
 	}
+	c.storageHits.Add(1)
 	return entry.update, true
 }
 
@@ -178,9 +204,46 @@ func (c *WarmupCache) EvictPlainKey(plainKey []byte) {
 	}
 }
 
-// Clear clears all cached data.
+// Clear clears all cached data and resets stats counters.
 func (c *WarmupCache) Clear() {
 	c.branches = maphash.NewMap[*branchEntry]()
 	c.accounts = maphash.NewMap[*accountEntry]()
 	c.storage = maphash.NewMap[*storageEntry]()
+	c.ResetStats()
+}
+
+// Stats returns a one-line summary of cache hit/miss counters.
+// Format matches the per-block log line: branch, account, storage with
+// hit-percentages and bytes served. Useful in commitment debug logs and
+// for the per-Process LogCommitments line.
+func (c *WarmupCache) Stats() string {
+	bh, bm, be := c.branchHits.Load(), c.branchMisses.Load(), c.branchEvicted.Load()
+	bb := c.branchBytesServed.Load()
+	ah, am := c.accountHits.Load(), c.accountMisses.Load()
+	sh, sm := c.storageHits.Load(), c.storageMisses.Load()
+	pct := func(hit, miss uint64) float64 {
+		total := hit + miss
+		if total == 0 {
+			return 0
+		}
+		return 100.0 * float64(hit) / float64(total)
+	}
+	return fmt.Sprintf(
+		"branch hit=%d miss=%d evict=%d (%.1f%%, %.1f MiB) | acct hit=%d miss=%d (%.1f%%) | stor hit=%d miss=%d (%.1f%%)",
+		bh, bm, be, pct(bh, bm), float64(bb)/1024/1024,
+		ah, am, pct(ah, am),
+		sh, sm, pct(sh, sm),
+	)
+}
+
+// ResetStats zeros out all hit/miss/byte counters without touching cached data.
+func (c *WarmupCache) ResetStats() {
+	c.branchHits.Store(0)
+	c.branchMisses.Store(0)
+	c.branchEvicted.Store(0)
+	c.branchBytesServed.Store(0)
+	c.accountHits.Store(0)
+	c.accountMisses.Store(0)
+	c.storageHits.Store(0)
+	c.storageMisses.Store(0)
 }

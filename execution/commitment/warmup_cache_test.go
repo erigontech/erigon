@@ -301,3 +301,94 @@ func BenchmarkComparison_Map_100k(b *testing.B) {
 		cache.GetStorage(keys[i%len(keys)])
 	}
 }
+
+// TestWarmupCache_Stats verifies that hit/miss/evict counters are updated
+// correctly across the Get/Put/Evict paths and that Stats() returns a
+// deterministic format.
+func TestWarmupCache_Stats(t *testing.T) {
+	cache := NewWarmupCache()
+
+	// Branch hits + misses + bytes-served
+	bk := []byte("k-branch")
+	bd := []byte("branch-data-12345")
+	cache.PutBranch(bk, bd)
+	if _, ok := cache.GetBranch(bk); !ok {
+		t.Fatal("expected branch hit")
+	}
+	if _, ok := cache.GetBranch([]byte("missing-branch")); ok {
+		t.Fatal("expected branch miss")
+	}
+
+	// Branch eviction
+	cache.EvictBranch(bk)
+	if _, ok := cache.GetBranch(bk); ok {
+		t.Fatal("expected branch evicted miss")
+	}
+
+	// Account hits + misses
+	ak := []byte("k-acct")
+	cache.PutAccount(ak, &Update{})
+	if _, ok := cache.GetAccount(ak); !ok {
+		t.Fatal("expected account hit")
+	}
+	if _, ok := cache.GetAccount([]byte("missing-acct")); ok {
+		t.Fatal("expected account miss")
+	}
+
+	// Storage hits + misses
+	sk := []byte("k-stor")
+	cache.PutStorage(sk, &Update{})
+	if _, ok := cache.GetStorage(sk); !ok {
+		t.Fatal("expected storage hit")
+	}
+	if _, ok := cache.GetStorage([]byte("missing-stor")); ok {
+		t.Fatal("expected storage miss")
+	}
+
+	// Counters: branch hit=1 miss=1 evict=1 bytes=17, acct hit=1 miss=1, stor hit=1 miss=1
+	if got := cache.branchHits.Load(); got != 1 {
+		t.Fatalf("branchHits: got %d, want 1", got)
+	}
+	if got := cache.branchMisses.Load(); got != 1 {
+		t.Fatalf("branchMisses: got %d, want 1", got)
+	}
+	if got := cache.branchEvicted.Load(); got != 1 {
+		t.Fatalf("branchEvicted: got %d, want 1", got)
+	}
+	if got := cache.branchBytesServed.Load(); got != uint64(len(bd)) {
+		t.Fatalf("branchBytesServed: got %d, want %d", got, len(bd))
+	}
+	if got := cache.accountHits.Load(); got != 1 {
+		t.Fatalf("accountHits: got %d, want 1", got)
+	}
+	if got := cache.accountMisses.Load(); got != 1 {
+		t.Fatalf("accountMisses: got %d, want 1", got)
+	}
+	if got := cache.storageHits.Load(); got != 1 {
+		t.Fatalf("storageHits: got %d, want 1", got)
+	}
+	if got := cache.storageMisses.Load(); got != 1 {
+		t.Fatalf("storageMisses: got %d, want 1", got)
+	}
+
+	// Stats() format
+	stats := cache.Stats()
+	for _, want := range []string{
+		"branch hit=1 miss=1 evict=1",
+		"acct hit=1 miss=1",
+		"stor hit=1 miss=1",
+	} {
+		if !bytes.Contains([]byte(stats), []byte(want)) {
+			t.Errorf("Stats() missing %q\nfull: %s", want, stats)
+		}
+	}
+
+	// ResetStats zeros counters but leaves data intact
+	cache.ResetStats()
+	if got := cache.branchHits.Load(); got != 0 {
+		t.Fatalf("branchHits after Reset: got %d, want 0", got)
+	}
+	if _, ok := cache.GetAccount(ak); !ok {
+		t.Fatal("account data should survive ResetStats")
+	}
+}
