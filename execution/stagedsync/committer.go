@@ -122,7 +122,13 @@ func newCommitmentCalculator(
 	if err != nil {
 		return nil, fmt.Errorf("commitmentCalculator: open roTx: %w", err)
 	}
-	// roTx lives for the calculator's lifetime — rolled back in Stop(), not deferred here.
+	// roTx lives for the calculator's lifetime — rolled back in Stop(), not
+	// deferred here. Safe across collate/prune cycles because the calculator
+	// is constructed in pe.exec() and its `defer Stop()` runs *before* the
+	// stageloop's rwTx.Commit(), and CollateAndPruneIfNeeded only fires
+	// between batches via FCU. So this roTx never spans a prune — by the
+	// time prune holds commitGate.Lock(), Stop() has already rolled this tx
+	// back and the calculator goroutine is gone.
 
 	// Single asOfStateReader shared by calcState (lazy-load) and compute
 	// methods (fold/unfold sibling reads). Uses GetAsOf for account/storage

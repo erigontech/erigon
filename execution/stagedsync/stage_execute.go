@@ -488,7 +488,12 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 		quickPruneTimeout = timeout
 	}
 
-	if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth {
+	// AlwaysGenerateChangesets disables this prune so the node retains
+	// changesets for unwinds deeper than MaxReorgDepth (debug / integration
+	// tool / explicit --experimental.always-generate-changesets flag).
+	// Without the guard, the flag still controls *generation* but every
+	// generated changeset is pruned 96 blocks later, defeating the point.
+	if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth && !cfg.syncCfg.AlwaysGenerateChangesets {
 		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
 		// Some blocks on bor-mainnet have 400 chunks of diff = 3mb
 		var pruneDiffsLimitOnChainTip = 1_000
