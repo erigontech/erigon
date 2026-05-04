@@ -61,6 +61,7 @@ var (
 	noMergeHistory           = EnvBool("NO_MERGE_HISTORY", false)             // don't merge Hist/II but still merge Domain
 	noDeepMergeHistory       = EnvBool("NO_DEEP_MERGE_HISTORY", false)        // merge Hist/II only up to 2 steps (small+fast), skip larger merges
 	noCommitmentKeysInValues = EnvBool("NO_COMMITMENT_KEYS_IN_VALUES", false) // disable ReplaceKeysInValues feature on the commitment domain
+	noBuildFiles             = EnvBool("NO_BUILD_FILES", false)               // skip collation/build of state files (no .kv/.ef/.v produced)
 	discardCommitment        = EnvBool("DISCARD_COMMITMENT", false)
 	pruneTotalDifficulty     = EnvBool("PRUNE_TOTAL_DIFFICULTY", true)
 
@@ -136,6 +137,7 @@ func NoMergeDomain() bool            { return noMergeDomain }
 func NoMergeHistory() bool           { return noMergeHistory }
 func NoDeepMergeHistory() bool       { return noDeepMergeHistory }
 func NoCommitmentKeysInValues() bool { return noCommitmentKeysInValues }
+func NoBuildFiles() bool             { return noBuildFiles }
 func PruneTotalDifficulty() bool     { return pruneTotalDifficulty }
 
 // CLI-override setters for the performance toggles that also have env-var

@@ -1933,7 +1933,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan struct{} {
 	fin := make(chan struct{})
 
-	if !a.produce {
+	if !a.produce || dbg.NoBuildFiles() {
 		close(fin)
 		return fin
 	}
