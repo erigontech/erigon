@@ -212,7 +212,12 @@ func (etp *EncryptedTxnsPool) watchSubmissions(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case err := <-submissionEventSub.Err():
-			return err
+			if err != nil {
+				return err
+			}
+			etp.logger.Warn("encrypted txn submission subscription closed, waiting for shutdown")
+			<-ctx.Done()
+			return ctx.Err()
 		case event := <-submissionEventC:
 			err := etp.handleEncryptedTxnSubmissionEvent(event)
 			if err != nil {
