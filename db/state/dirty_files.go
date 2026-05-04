@@ -378,7 +378,7 @@ func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 				if ok {
 					fName := filepath.Base(fPath)
 					d.FileVersion.AccessorKVI.MustSupport(fileVer, fName)
-					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
+					if item.index, err = d.openHashMapAccessor(fPath); err != nil {
 						d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
 					}

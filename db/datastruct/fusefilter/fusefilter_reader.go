@@ -102,13 +102,15 @@ func NewReaderOnBytes(m []byte, fName string) (*Reader, int, error) {
 }
 
 func (r *Reader) ForceInMem() datasize.ByteSize {
-	r.inner.Fingerprints = bytes.Clone(r.inner.Fingerprints)
+	cpy := make([]byte, len(r.inner.Fingerprints)) //don't use bytes.Clone - to see ram owner on heap profiler
+	copy(cpy, r.inner.Fingerprints)
+	r.inner.Fingerprints = cpy
 	r.keepInMem = true
 	return datasize.ByteSize(len(r.inner.Fingerprints))
 }
 
 func (r *Reader) MadvWillNeed() {
-	if r == nil || r.m == nil || len(r.m) == 0 || r.keepInMem {
+	if r == nil || r.f == nil || r.m == nil || len(r.m) == 0 || r.keepInMem {
 		return
 	}
 	if err := mm.MadviseWillNeed(r.m); err != nil {
@@ -116,7 +118,7 @@ func (r *Reader) MadvWillNeed() {
 	}
 }
 func (r *Reader) MadvNormal() {
-	if r == nil || r.m == nil || len(r.m) == 0 || r.keepInMem {
+	if r == nil || r.f == nil || r.m == nil || len(r.m) == 0 || r.keepInMem {
 		return
 	}
 	if err := mm.MadviseNormal(r.m); err != nil {
