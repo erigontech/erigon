@@ -116,6 +116,13 @@ type Aggregator struct {
 	configured   bool
 	savedSalt    *uint32
 	disableFsync bool
+
+	// nil = no cap. See #20701.
+	frozenBlocks FrozenBlocksProvider
+}
+
+type FrozenBlocksProvider interface {
+	FrozenBlocks() uint64
 }
 
 func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
@@ -958,6 +965,7 @@ func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastB
 	if a.reorgBlockDepth == 0 {
 		return 0, 0, 0, true, nil
 	}
+
 	err = a.db.View(ctx, func(tx kv.Tx) error {
 		lastBlockInStep, ok, err = rawdbv3.TxNums.FindBlockNum(ctx, tx, lastTxNumOfStep(step, a.stepSize.Load()))
 		if err != nil {
@@ -966,9 +974,29 @@ func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastB
 		if !ok {
 			lastBlockInStep = 0
 		}
-		lastTxInDB, lastBlockInDB, err = rawdbv3.TxNums.Last(tx)
+		lastBlockInDB, lastTxInDB, err = rawdbv3.TxNums.Last(tx)
 		return err
 	})
+	if err != nil {
+		return 0, 0, 0, false, err
+	}
+	if a.frozenBlocks != nil {
+		var capTxNum uint64
+		if err = a.db.View(ctx, func(tx kv.Tx) error {
+			var err error
+			capTxNum, err = rawdbv3.TxNums.Max(ctx, tx, a.frozenBlocks.FrozenBlocks())
+			return err
+		}); err != nil {
+			return 0, 0, 0, false, fmt.Errorf("read max collatable txNum: %w", err)
+		}
+		if uint64(step+1)*a.StepSize() > capTxNum {
+			lastStepInDb := kv.Step(lastTxInDB / a.StepSize())
+			a.logger.Info("[snapshots] holding state collation at block snapshot boundary",
+				"blockSnapshotsStepCompleted", capTxNum/a.StepSize()-1,
+				"lastCollatableStepInDb", lastStepInDb-1)
+			return 0, 0, 0, false, nil
+		}
+	}
 	ok = err == nil && lastBlockInDB > lastBlockInStep+a.reorgBlockDepth
 	return
 }
@@ -1886,6 +1914,12 @@ func (a *Aggregator) SetProduceMod(produce bool) {
 	a.produce = produce
 }
 
+// SetFrozenBlocksProvider caps state collation at the block-snapshots boundary.
+// Without it, state files may advance past block files — recovery requires
+// `erigon seg rm-state --latest`. See #20701.
+func (a *Aggregator) SetFrozenBlocksProvider(p FrozenBlocksProvider) {
+	a.frozenBlocks = p
+}
 func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 	return a.buildFilesInBackground(txNum, true)
 }
