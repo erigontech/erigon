@@ -346,8 +346,27 @@ entry's dependencies are already `Local`, the handler advances
 straight to `LifecycleIndexed` with zero builder invocations. Only
 when at least one dependency is missing does it call
 `builder.BuildMissedIndices`. This eliminates the redundant
-invocations the global-scan dispatch produced (776 → ~22 in the
-pre-fix hoodi rerun).
+invocations the global-scan dispatch produced.
+
+**2026-05-04 hoodi verification (run #2 in datadir
+`erigon-v2-5c.gdwRko`):**
+
+  - BMI invocations: **0** (vs 776 pre-§5c).
+  - advance-to-Indexed: 156, advance-to-Advertisable: 156.
+  - Quarantining: 0 (vs 143 pre-§5c).
+  - 0 `Adding torrents from disk` lines (§5e gate active).
+  - Time-to-tip: 13 min 17 s (start 14:06:31 → first age=0
+    14:19:48). Slower than the 10m25s pre-fix baseline because
+    Tier 1+2 validation runs on every Indexed→Advertisable
+    transition (this run had it wired); validation perf profile
+    captured separately in `20260504-validation-flow.md`.
+  - Validation chain: `on-validation-wired=true` in driver-start
+    log; 156 files passed Tier 1+2 validators with zero
+    rejections.
+
+The 0 BMI count proves the inventory pre-check is the correct
+shape — every file's deps were already Local at advance time, so
+the global builder never had to fire on the consumer side.
 
 **What was deferred:** per-file builder APIs at the
 `RoSnapshots` / `Aggregator` level (`BuildIndicesForFile(name)`,
