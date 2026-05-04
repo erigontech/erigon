@@ -1180,6 +1180,11 @@ var (
 		Usage: "Disable all DB pruning: state-aggregator (Domain/InvertedIndex/forkable) plus stage-level pruning (Execution: ChangeSets3/BlockAccessList; TxLookup; WitnessProcessing; Snapshots: PruneAncientBlocks/canonical markers/retirement) (equivalent to NO_PRUNE=true). Diagnostic / perf-comparison use only.",
 		Value: false,
 	}
+	ExecNoBackgroundMaintenanceFlag = cli.BoolFlag{
+		Name:  "exec.no-background-maintenance",
+		Usage: "Suppress background state-aggregator file build, merge, and snapshot retirement goroutines so execution is not perturbed by housekeeping work (equivalent to NO_BACKGROUND_E3_BUILD=true). Diagnostic / focused-performance-testing use only — NOT an operational setting.",
+		Value: false,
+	}
 )
 
 var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag}
@@ -1990,7 +1995,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	// Executor performance toggles. When the user explicitly sets the CLI
 	// flag, it overrides the env-var default that dbg read at package init.
 	// Otherwise env vars (IGNORE_BAL, USE_STATE_CACHE, EXEC3_WORKERS,
-	// NO_MERGE, NO_PRUNE) remain the source of truth.
+	// NO_MERGE, NO_PRUNE, NO_BACKGROUND_E3_BUILD) remain the source of truth.
 	if ctx.IsSet(ExecBatchedIOFlag.Name) {
 		// --exec.batched-io toggles two BAL-driven optimisations together:
 		// read-ahead pre-warming (ReadAhead) and version-map pre-population
@@ -2018,6 +2023,9 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	}
 	if ctx.IsSet(ExecNoPruneFlag.Name) {
 		dbg.SetNoPrune(ctx.Bool(ExecNoPruneFlag.Name))
+	}
+	if ctx.IsSet(ExecNoBackgroundMaintenanceFlag.Name) {
+		dbg.SetNoBackgroundE3Build(ctx.Bool(ExecNoBackgroundMaintenanceFlag.Name))
 	}
 	if ctx.IsSet(RPCGlobalGasCapFlag.Name) {
 		cfg.RPCGasCap = ctx.Uint64(RPCGlobalGasCapFlag.Name)
