@@ -3307,6 +3307,12 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
+	// Wait for any background build/merge work kicked off by BuildFiles or MergeLoop
+	// to drain before returning — otherwise "Done" is logged while goroutines are
+	// still producing files.
+	logger.Info("waiting for background build/merge to drain")
+	agg.WaitForFiles()
+
 	return nil
 }
 
