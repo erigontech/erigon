@@ -1,10 +1,13 @@
 package stagedsync
 
 import (
+	"fmt"
+
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/state"
@@ -77,14 +80,31 @@ type calcState struct {
 
 	// domainReader provides lazy-load from the domain via asOfStateReader.
 	domainReader *calcDomainReader
+
+	// lazyLoadErr captures the first error encountered during ensureAccount /
+	// ensureStorage. Sticky — never cleared — so the calculator can fail the
+	// next compute instead of silently producing wrong updates from a missing
+	// baseline. Surface via LazyLoadErr().
+	lazyLoadErr error
+
+	logger    log.Logger
+	logPrefix string
 }
 
-func newCalcState(reader *asOfStateReader) *calcState {
+// LazyLoadErr returns the first error encountered during ensureAccount /
+// ensureStorage lazy-loads, or nil. The calculator must check this before
+// computing — a missing baseline yields a wrong trie root that is hard to
+// attribute back to the original I/O error.
+func (cs *calcState) LazyLoadErr() error { return cs.lazyLoadErr }
+
+func newCalcState(reader *asOfStateReader, logger log.Logger, logPrefix string) *calcState {
 	return &calcState{
 		accounts:     make(map[accounts.Address]*calcAccountState),
 		storageState: make(map[accounts.Address]map[accounts.StorageKey]uint256.Int),
 		storageDirty: make(map[accounts.Address]map[accounts.StorageKey]bool),
 		domainReader: &calcDomainReader{reader: reader},
+		logger:       logger,
+		logPrefix:    logPrefix,
 	}
 }
 
@@ -98,7 +118,17 @@ func (cs *calcState) ensureAccount(addr accounts.Address) *calcAccountState {
 		CodeHash: empty.CodeHash,
 	}
 	if cs.domainReader != nil {
-		if dbAcc, err := cs.domainReader.ReadAccountData(addr); err == nil && dbAcc != nil {
+		dbAcc, err := cs.domainReader.ReadAccountData(addr)
+		if err != nil {
+			// Sticky — recorded so the next compute fails fast instead of
+			// silently producing wrong updates on top of zero state.
+			if cs.lazyLoadErr == nil {
+				cs.lazyLoadErr = fmt.Errorf("ensureAccount(%x): %w", addr.Value(), err)
+			}
+			if cs.logger != nil {
+				cs.logger.Warn("["+cs.logPrefix+"] commitmentCalculator: lazy-load ReadAccountData failed", "addr", addr, "err", err)
+			}
+		} else if dbAcc != nil {
 			acc.Balance = dbAcc.Balance
 			acc.Nonce = dbAcc.Nonce
 			acc.CodeHash = dbAcc.CodeHash.Value()
@@ -121,7 +151,16 @@ func (cs *calcState) ensureStorage(addr accounts.Address, key accounts.StorageKe
 
 	var val uint256.Int
 	if cs.domainReader != nil {
-		if v, found, err := cs.domainReader.ReadAccountStorage(addr, key); err == nil && found {
+		v, found, err := cs.domainReader.ReadAccountStorage(addr, key)
+		if err != nil {
+			// See ensureAccount: sticky so the next compute fails fast.
+			if cs.lazyLoadErr == nil {
+				cs.lazyLoadErr = fmt.Errorf("ensureStorage(%x/%x): %w", addr.Value(), key.Value(), err)
+			}
+			if cs.logger != nil {
+				cs.logger.Warn("["+cs.logPrefix+"] commitmentCalculator: lazy-load ReadAccountStorage failed", "addr", addr, "key", key, "err", err)
+			}
+		} else if found {
 			val = v
 		}
 	}

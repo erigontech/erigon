@@ -1422,11 +1422,13 @@ type Updates struct {
 	hasher keyHasher
 	keys   map[string]struct{} // plain keys to keep only unique keys in etl
 	etl    *etl.Collector      // all-in-one collector
-	// Sorted by plainKey (see keyUpdateLessFn). Trie traversal order is established
-	// later when entries are emitted into the etl collector keyed by hashedKey;
-	// this btree is only for in-memory dedup/lookup in ModeUpdate. Keeping plainKey
-	// ordering matches main and avoids regressing TouchPlainKey/TouchHashedKey
-	// callers that mix entries with and without a hashedKey.
+	// Sorted by hashedKey first, with plainKey as a tiebreaker (see
+	// keyUpdateLessFn). Trie traversal must happen in hashedKey order so
+	// Process's fold/unfold operates on adjacent paths; iterating by
+	// plainKey produced a divergent root and was the root cause of the
+	// eip1153/eip7778/eip7976/eip7825 wrong-trie-root failures. ModeDirect
+	// achieves the same ordering via its etl collector keyed on hashedKey;
+	// this btree must match.
 	tree    *btree.BTreeG[*KeyUpdate]
 	treeIdx map[string]*KeyUpdate // plainKey → btree entry for O(1) lookup in ModeUpdate
 	mode    Mode

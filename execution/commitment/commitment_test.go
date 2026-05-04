@@ -509,9 +509,10 @@ func TestUpdates_TouchStorageClearsDeleteOnRewrite(t *testing.T) {
 	updates.TouchPlainKey(key, []byte("value"), updates.TouchStorage)
 
 	// Look up via treeIdx (the plainKey→KeyUpdate map). The btree's
-	// comparator (keyUpdateLessFn) orders entries by hashedKey only, so
-	// scanning the tree with a pivot that has only plainKey set returns
-	// nothing — treeIdx is the right access path for plainKey lookups.
+	// comparator (keyUpdateLessFn) orders entries by hashedKey first with
+	// plainKey as a tiebreaker, so scanning the tree with a pivot that has
+	// only plainKey set returns nothing — treeIdx is the right access path
+	// for plainKey lookups.
 	entry, ok := updates.treeIdx[key]
 	require.True(t, ok, "key should be present after TouchPlainKey rewrite")
 	got := entry.update

@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -51,6 +52,7 @@ type commitmentCalculator struct {
 	doms      *execctx.SharedDomains
 	db        kv.TemporalRoDB
 	logPrefix string
+	logger    log.Logger
 
 	// updates is the calculator's OWN buffer — never shared with the
 	// execLoop or apply loop. Only this goroutine reads/writes it.
@@ -103,6 +105,7 @@ func newCommitmentCalculator(
 	doms *execctx.SharedDomains,
 	db kv.TemporalRoDB,
 	logPrefix string,
+	logger log.Logger,
 	in chan applyResult,
 	out chan commitmentResult,
 ) (*commitmentCalculator, error) {
@@ -131,8 +134,9 @@ func newCommitmentCalculator(
 		doms:       doms,
 		db:         db,
 		logPrefix:  logPrefix,
+		logger:     logger,
 		updates:    calcUpdates,
-		state:      newCalcState(asOfReader),
+		state:      newCalcState(asOfReader, logger, logPrefix),
 		asOfReader: asOfReader,
 		roTx:       roTx,
 		in:         in,
@@ -240,6 +244,14 @@ func (cc *commitmentCalculator) shouldComputeOnRequest() bool {
 }
 
 func (cc *commitmentCalculator) computeAndPublish(ctx context.Context, br *blockResult) {
+	if err := cc.state.LazyLoadErr(); err != nil {
+		cc.publish(ctx, commitmentResult{
+			blockNum: br.BlockNum,
+			txNum:    br.lastTxNum,
+			err:      fmt.Errorf("commitmentCalculator: lazy-load failed: %w", err),
+		})
+		return
+	}
 	cc.state.FlushToUpdates(cc.updates)
 	cc.state.ResetBlockFlags()
 
@@ -285,6 +297,14 @@ func (cc *commitmentCalculator) computeAndPublish(ctx context.Context, br *block
 // computeWithoutCheck computes commitment but doesn't verify the root.
 // Used for the first partial block where the trie state doesn't match the header.
 func (cc *commitmentCalculator) computeWithoutCheck(ctx context.Context, br *blockResult) {
+	if err := cc.state.LazyLoadErr(); err != nil {
+		cc.publish(ctx, commitmentResult{
+			blockNum: br.BlockNum,
+			txNum:    br.lastTxNum,
+			err:      fmt.Errorf("commitmentCalculator: lazy-load failed: %w", err),
+		})
+		return
+	}
 	cc.state.FlushToUpdates(cc.updates)
 	cc.state.ResetBlockFlags()
 
@@ -295,13 +315,28 @@ func (cc *commitmentCalculator) computeWithoutCheck(ctx context.Context, br *blo
 	cc.asOfReader.txNum = br.lastTxNum + 1
 	sdCtx.SetStateReader(cc.asOfReader)
 
-	_, _ = cc.doms.ComputeCommitment(ctx, cc.roTx, true, br.BlockNum, br.lastTxNum, cc.logPrefix, nil)
+	if _, err := cc.doms.ComputeCommitment(ctx, cc.roTx, true, br.BlockNum, br.lastTxNum, cc.logPrefix, nil); err != nil {
+		// Partial-block compute is intentionally not verified (no header root
+		// to compare against), but a real ComputeCommitment failure leaves
+		// later trie state suspect — log so the failure isn't silent.
+		if cc.logger != nil {
+			cc.logger.Warn("["+cc.logPrefix+"] commitmentCalculator: computeWithoutCheck failed", "block", br.BlockNum, "txNum", br.lastTxNum, "err", err)
+		}
+	}
 
 	cc.lastComputedBlock = br.BlockNum
 	cc.hasComputed = true
 }
 
 func (cc *commitmentCalculator) computeAndCheck(ctx context.Context, br *blockResult) {
+	if err := cc.state.LazyLoadErr(); err != nil {
+		cc.publish(ctx, commitmentResult{
+			blockNum: br.BlockNum,
+			txNum:    br.lastTxNum,
+			err:      fmt.Errorf("commitmentCalculator: lazy-load failed: %w", err),
+		})
+		return
+	}
 	// Flush accumulated local state to the trie's Updates buffer.
 	// This produces one Update per dirty account/slot with the final
 	// block-end values — not intermediate per-TX values.

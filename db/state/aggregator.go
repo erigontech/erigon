@@ -1633,9 +1633,11 @@ func (a *Aggregator) CollateAndPrune(ctx context.Context, db kv.TemporalRwDB, pr
 	for {
 		// Prune already-collated steps. RunPrune includes block retirement
 		// which advances FrozenBlocks, so update the collation cap after.
-		a.commitGate.Lock()
-		err := db.UpdateTemporal(ctx, pruneFn)
-		a.commitGate.Unlock()
+		err := func() error {
+			a.commitGate.Lock()
+			defer a.commitGate.Unlock()
+			return db.UpdateTemporal(ctx, pruneFn)
+		}()
 		if err != nil {
 			return err
 		}
@@ -1681,9 +1683,8 @@ func (a *Aggregator) CollateAndPruneIfNeeded(ctx context.Context, db kv.Temporal
 	if stepsInDB <= 1.5 {
 		// Still run one prune pass for any already-collated data.
 		a.commitGate.Lock()
-		err = db.UpdateTemporal(ctx, pruneFn)
-		a.commitGate.Unlock()
-		return err
+		defer a.commitGate.Unlock()
+		return db.UpdateTemporal(ctx, pruneFn)
 	}
 	return a.CollateAndPrune(ctx, db, pruneFn, logger)
 }

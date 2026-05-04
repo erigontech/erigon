@@ -226,8 +226,19 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 
 		// Lock commitGate so background collation RO txs are closed
 		// before we commit — MDBX GC needs openTxs=1 to reclaim pages.
+		// defer the unlock so every error path (begin, overlay flush,
+		// doms flush, commit) releases the gate; otherwise a flush error
+		// would leave the gate held in write mode and deadlock every
+		// subsequent reader/writer (DB-wide blast radius).
+		var collationLocked bool
 		if a, ok := db.(state.HasAgg); ok {
 			a.Agg().(*state.Aggregator).LockCollation()
+			collationLocked = true
+			defer func() {
+				if collationLocked {
+					a.Agg().(*state.Aggregator).UnlockCollation()
+				}
+			}()
 		}
 
 		// Flush execution state + overlay via brief RwTx, then commit.
@@ -246,14 +257,14 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		}
 		doms.Close()
 		if err := commitTx.Commit(); err != nil {
-			if a, ok := db.(state.HasAgg); ok {
-				a.Agg().(*state.Aggregator).UnlockCollation()
-			}
 			return err
 		}
+		// Release the collation gate as early as possible so the post-commit
+		// RO read below (and downstream collation) doesn't wait on it.
 		if a, ok := db.(state.HasAgg); ok {
-			agg := a.Agg().(*state.Aggregator)
-			agg.UnlockCollation()
+			a.Agg().(*state.Aggregator).UnlockCollation()
+			collationLocked = false
+			_ = a
 		}
 
 		// Read the actual committed txNum from the DB "state" key.
