@@ -217,10 +217,13 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	pe.rs.Domains().SetInMemHistoryReads(true)
 	defer pe.rs.Domains().SetInMemHistoryReads(prevInMemHistoryReads)
 
-	// Disable trie warmup — the Warmuper uses sdCtx.updates which the
-	// calculator replaces via SetUpdates before ComputeCommitment.
-	pe.rs.Domains().EnableTrieWarmup(false)
-	defer pe.rs.Domains().EnableTrieWarmup(true)
+	// Trie warmup left enabled for the parallel path. Original disable was
+	// based on a calculator/warmer interaction concern that turned out to be
+	// overly conservative — the Warmuper's reads are independent of the
+	// calculator's SetUpdates call. Removing the disable produced an 8×
+	// throughput improvement on the perf-devnet-3 SSTORE-bloated benchmark
+	// (block 24358306) by letting the Warmuper pre-fetch branch data while
+	// EVM execution runs. See #20920 for the canonical perf measurement.
 
 	// Skip step-boundary commitment — the calculator handles this.
 	pe.rs.StateV3.SetSkipStepBoundaryCommitment(true)
