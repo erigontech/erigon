@@ -52,45 +52,44 @@ func (f *FileEntry) StepKey() StepKey {
 }
 
 // IsMinimum reports whether this file is part of its step's
-// minimum publishable subset.
+// minimum publishable subset. Delegates to IsMinimumByName after
+// gating on step presence — a file with no step has no
+// minimum/extras dimension.
 //
-// The mapping is fixed by file-name pattern + Domain presence. See
-// docs/plans/20260504-step-and-minimum-unified.md for the unified
-// definition. Initial scope:
+// See docs/plans/20260504-step-and-minimum-unified.md for the
+// unified definition.
+func (f *FileEntry) IsMinimum() bool {
+	if f == nil || f.StepKey().IsZero() {
+		return false
+	}
+	return IsMinimumByName(f.Name)
+}
+
+// IsMinimumByName is the name-only flavour of FileEntry.IsMinimum.
+// Used by callers (downloader sort, chain.toml ordering) that have
+// a name but not a full FileEntry.
 //
-//   - State step (Domain non-empty): .kv (domain primary) and
-//     .kvi (its accessor) are minimum. History files (.v, .ef,
-//     .efi) are extras.
-//   - Block step (Domain empty): files matching `headers.seg` or
-//     `headers.idx` are minimum. Bodies, transactions, and their
-//     accessors are extras.
+// Mapping (from docs/plans/20260504-step-and-minimum-unified.md):
+//
+//   - State step minimum: .kv (domain primary), .kvi / .bt
+//     (accessors). History files (.v, .ef, .efi) are extras.
+//   - Block step minimum: files matching `-headers.seg` or
+//     `-headers.idx`. Bodies, transactions, and their accessors
+//     are extras.
 //   - Non-stepped (caplin, meta, salt) and unrecognised patterns
 //     return false.
 //
-// Future work refines this with per-kind tables when more file
-// kinds are introduced or when the consumer's "what's minimum"
-// requirements diverge from the producer's. Today's mapping is
-// "headers + state primary" — the smallest publishable subset that
-// supports a useful consumer (header-only / current-state-query
-// users).
-func (f *FileEntry) IsMinimum() bool {
-	if f == nil {
-		return false
+// Initial mapping is "headers + state primary" — the smallest
+// publishable subset that supports a useful consumer (header-only /
+// current-state-query users).
+func IsMinimumByName(name string) bool {
+	if strings.HasSuffix(name, ".kv") ||
+		strings.HasSuffix(name, ".kvi") ||
+		strings.HasSuffix(name, ".bt") {
+		return true
 	}
-	if f.StepKey().IsZero() {
-		return false
-	}
-	if f.Domain != "" {
-		// State step: minimum is the domain primary + its accessor.
-		// History files (.v, .ef, .efi) are extras.
-		return strings.HasSuffix(f.Name, ".kv") ||
-			strings.HasSuffix(f.Name, ".kvi") ||
-			strings.HasSuffix(f.Name, ".bt")
-	}
-	// Block step: minimum is headers.seg + headers.idx. The Name
-	// pattern is "v<ver>-<from>-<to>-headers.seg" etc.
-	return strings.HasSuffix(f.Name, "-headers.seg") ||
-		strings.HasSuffix(f.Name, "-headers.idx")
+	return strings.HasSuffix(name, "-headers.seg") ||
+		strings.HasSuffix(name, "-headers.idx")
 }
 
 // StepGroup is the set of FileEntries that share a step key.

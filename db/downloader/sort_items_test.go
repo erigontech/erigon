@@ -22,6 +22,42 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestSortItemsLatestFirst_MinimumBeforeExtrasWithinSameStep(t *testing.T) {
+	// Same step, mix of minimum and extras. Minimum (kv, kvi) goes
+	// first; history (.v) goes after even though same step range.
+	items := []preverifiedSnapshot{
+		{Name: "v1.0-accountsHistory.0-256.v"},
+		{Name: "v1.0-accounts.0-256.kv"},
+		{Name: "v1.0-accountsHistory.0-256.ef"},
+		{Name: "v1.0-accounts.0-256.kvi"},
+	}
+	sortItemsLatestFirst(items)
+	// First two are the minimum subset (kv + kvi). Order between them
+	// is stable (input order preserved at equal sort key).
+	minimum := []string{items[0].Name, items[1].Name}
+	require.ElementsMatch(t,
+		[]string{"v1.0-accounts.0-256.kv", "v1.0-accounts.0-256.kvi"},
+		minimum, "minimum-tier files come first")
+	// Last two are extras.
+	extras := []string{items[2].Name, items[3].Name}
+	require.ElementsMatch(t,
+		[]string{"v1.0-accountsHistory.0-256.v", "v1.0-accountsHistory.0-256.ef"},
+		extras, "extras-tier files come after minimum")
+}
+
+func TestSortItemsLatestFirst_MinimumLatestStepBeatsExtrasOlderStep(t *testing.T) {
+	// Minimum file at OLDER step still beats extras file at NEWER
+	// step — the IsMinimum tier outranks the To-desc tiebreak.
+	items := []preverifiedSnapshot{
+		{Name: "v1.0-accountsHistory.512-768.v"}, // extras, latest
+		{Name: "v1.0-accounts.0-256.kv"},         // minimum, oldest
+	}
+	sortItemsLatestFirst(items)
+	require.Equal(t, "v1.0-accounts.0-256.kv", items[0].Name,
+		"minimum @ older step beats extras @ newer step")
+	require.Equal(t, "v1.0-accountsHistory.512-768.v", items[1].Name)
+}
+
 func TestSortItemsLatestFirst_StateFiles(t *testing.T) {
 	items := []preverifiedSnapshot{
 		{Name: "v1.0-accounts.0-256.kv"},

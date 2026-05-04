@@ -66,6 +66,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
+	storagesnapshot "github.com/erigontech/erigon/node/components/storage/snapshot"
 	"github.com/erigontech/erigon/p2p/enr"
 )
 
@@ -808,11 +809,16 @@ func (d *Downloader) webSeedUrlStrs() iter.Seq[string] {
 // time-to-tip (per docs/plans/20260502-min-time-to-tip-target.md:
 // phase 0 = order + trigger, not gating set).
 //
-// Sort key: snaptype-parsed (From, To) range descending. Items the
-// parser can't understand go to the end with their relative order
-// preserved (sort is stable). Common cause of unparseable: chain
-// metadata files like erigondb.toml, salt-*.txt — these are tiny
-// and don't dominate time-to-tip regardless of when they're added.
+// Sort key: (IsMinimum desc, ToStep desc, FromStep desc). The
+// IsMinimum tier prioritises files that constitute a step's minimum
+// publishable subset (headers+index for blocks, domain primary +
+// accessor for state) — see docs/plans/20260504-step-and-minimum-
+// unified.md. Within each minimum/extras tier, latest steps come
+// first. Items the parser can't understand go to the end with their
+// relative order preserved (sort is stable). Common cause of
+// unparseable: chain metadata files like erigondb.toml, salt-*.txt
+// — these are tiny and don't dominate time-to-tip regardless of when
+// they're added.
 func sortItemsLatestFirst(items []preverifiedSnapshot) {
 	sort.SliceStable(items, func(i, j int) bool {
 		iInfo, _, iOk := snaptype.ParseFileName("", items[i].Name)
@@ -824,6 +830,16 @@ func sortItemsLatestFirst(items []preverifiedSnapshot) {
 			return false // unparseable goes to end
 		case !jOk:
 			return true // parseable comes before unparseable
+		}
+		// Minimum-first within parseable items. The IsMinimum
+		// classification is name-pattern-based and shared with the
+		// lifecycle's per-step batch validation — one source of truth.
+		iMin := storagesnapshot.IsMinimumByName(items[i].Name)
+		jMin := storagesnapshot.IsMinimumByName(items[j].Name)
+		if iMin != jMin {
+			return iMin // minimum files come before extras
+		}
+		switch {
 		case iInfo.To != jInfo.To:
 			return iInfo.To > jInfo.To // higher To = more recent first
 		default:
