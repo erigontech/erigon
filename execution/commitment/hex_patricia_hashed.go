@@ -1750,28 +1750,19 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted boo
 		return fmt.Errorf("empty branch data read during unfold, compact prefix %x nibbles %x", key, hph.currentKey[:hph.currentKeyLen])
 	}
 	hph.branchBefore[row] = true
-	bitmap := binary.BigEndian.Uint16(branchData[0:])
-	pos := 2
-	if deleted { // All cells come as deleted (touched but not present after)
-		hph.touchMap[row], hph.afterMap[row] = bitmap, 0
-	} else {
-		hph.touchMap[row], hph.afterMap[row] = 0, bitmap
+	maps, err := DecodeBranchInto(branchData, deleted, &hph.grid[row])
+	if err != nil {
+		return fmt.Errorf("prefix [%x] branchData[%x]: %w", hph.currentKey[:hph.currentKeyLen], branchData, err)
 	}
-	//fmt.Printf("unfoldBranchNode prefix '%x' [%x], afterMap = [%016b], touchMap = [%016b]\n", key, branchData, hph.afterMap[row], hph.touchMap[row])
-	// Loop iterating over the set bits of modMask
-	for bitset, j := bitmap, 0; bitset != 0; j++ {
+	hph.touchMap[row] = maps.TouchMap
+	hph.afterMap[row] = maps.AfterMap
+	for bitset := maps.Bitmap; bitset != 0; {
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
 		cell := &hph.grid[row][nibble]
-		fieldBits := branchData[pos]
-		pos++
-		if pos, err = cell.fillFromFields(branchData, pos, cellFields(fieldBits)); err != nil {
-			return fmt.Errorf("prefix [%x] branchData[%x]: %w", hph.currentKey[:hph.currentKeyLen], branchData, err)
-		}
 		if hph.trace {
 			fmt.Printf("cell (%d, %x, depth=%d) %s\n", row, nibble, depth, cell.FullString())
 		}
-
 		// relies on plain account/storage key so need to be dereferenced before hashing
 		if err = cell.deriveHashedKeys(depth, hph.keccak, hph.accountKeyLen, hph.cellHashBuf[:]); err != nil {
 			return err
