@@ -109,7 +109,7 @@ func (dkp *DecryptionKeysProcessor) processKeys(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case msg := <-dkp.queue:
-			err := dkp.process(msg)
+			err := dkp.process(ctx, msg)
 			if err != nil {
 				return err
 			}
@@ -117,7 +117,7 @@ func (dkp *DecryptionKeysProcessor) processKeys(ctx context.Context) error {
 	}
 }
 
-func (dkp *DecryptionKeysProcessor) process(msg *proto.DecryptionKeys) error {
+func (dkp *DecryptionKeysProcessor) process(ctx context.Context, msg *proto.DecryptionKeys) error {
 	processingTimeStart := time.Now()
 	slot := msg.GetGnosis().Slot
 	eonIndex := EonIndex(msg.Eon)
@@ -143,6 +143,22 @@ func (dkp *DecryptionKeysProcessor) process(msg *proto.DecryptionKeys) error {
 			"to", processedMark.To,
 		)
 		return nil
+	}
+
+	if from < to {
+		lastIdx := to - 1
+		waitTimeout := time.Duration(dkp.slotCalculator.SecondsPerSlot()) * time.Second
+		waitCtx, waitCancel := context.WithTimeout(ctx, waitTimeout)
+		err := dkp.encryptedTxnsPool.WaitForTxnIndex(waitCtx, eonIndex, lastIdx)
+		waitCancel()
+		if err != nil {
+			dkp.logger.Warn(
+				"timeout waiting for encrypted txn submissions",
+				"eon", eonIndex,
+				"txnIndex", lastIdx,
+				"timeout", waitTimeout,
+			)
+		}
 	}
 
 	encryptedTxns, err := dkp.encryptedTxnsPool.Txns(eonIndex, from, to, dkp.config.EncryptedGasLimit)

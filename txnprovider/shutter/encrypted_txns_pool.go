@@ -39,7 +39,7 @@ type EncryptedTxnsPool struct {
 	config            shuttercfg.Config
 	sequencerContract *contracts.Sequencer
 	blockListener     *BlockListener
-	mu                sync.RWMutex
+	cond              *sync.Cond
 	submissions       *btree.BTreeG[EncryptedTxnSubmission]
 	initialLoadDone   chan struct{}
 }
@@ -51,11 +51,13 @@ func NewEncryptedTxnsPool(logger log.Logger, config shuttercfg.Config, cb bind.C
 		panic(fmt.Errorf("failed to create shutter sequencer contract: %w", err))
 	}
 
+	var mu sync.Mutex
 	return &EncryptedTxnsPool{
 		logger:            logger,
 		config:            config,
 		sequencerContract: sequencerContract,
 		blockListener:     bl,
+		cond:              sync.NewCond(&mu),
 		submissions:       btree.NewG[EncryptedTxnSubmission](32, EncryptedTxnSubmissionLess),
 		initialLoadDone:   make(chan struct{}),
 	}
@@ -104,8 +106,8 @@ func (etp *EncryptedTxnsPool) Txns(eon EonIndex, from, to TxnIndex, gasLimit uin
 	var totalGasLimit uint64
 	var idxOffset TxnIndex
 	var err error
-	etp.mu.RLock()
-	defer etp.mu.RUnlock()
+	etp.cond.L.Lock()
+	defer etp.cond.L.Unlock()
 	etp.submissions.AscendRange(fromKey, toKey, func(item EncryptedTxnSubmission) bool {
 		newTotalGasLimit := totalGasLimit + item.GasLimit.Uint64()
 		if newTotalGasLimit > gasLimit {
@@ -153,8 +155,8 @@ func (etp *EncryptedTxnsPool) Txns(eon EonIndex, from, to TxnIndex, gasLimit uin
 }
 
 func (etp *EncryptedTxnsPool) AllSubmissions() []EncryptedTxnSubmission {
-	etp.mu.RLock()
-	defer etp.mu.RUnlock()
+	etp.cond.L.Lock()
+	defer etp.cond.L.Unlock()
 	submissions := make([]EncryptedTxnSubmission, 0, etp.submissions.Len())
 	etp.submissions.Ascend(func(item EncryptedTxnSubmission) bool {
 		submissions = append(submissions, item)
@@ -164,8 +166,8 @@ func (etp *EncryptedTxnsPool) AllSubmissions() []EncryptedTxnSubmission {
 }
 
 func (etp *EncryptedTxnsPool) DeleteUpTo(eon EonIndex, to TxnIndex) {
-	etp.mu.Lock()
-	defer etp.mu.Unlock()
+	etp.cond.L.Lock()
+	defer etp.cond.L.Unlock()
 
 	var toDelete []EncryptedTxnSubmission
 	pivot := EncryptedTxnSubmission{EonIndex: eon, TxnIndex: to}
@@ -232,8 +234,8 @@ func (etp *EncryptedTxnsPool) handleEncryptedTxnSubmissionEvent(event *contracts
 		"unwind", event.Raw.Removed,
 	)
 
-	etp.mu.Lock()
-	defer etp.mu.Unlock()
+	etp.cond.L.Lock()
+	defer etp.cond.L.Unlock()
 
 	if event.Raw.Removed {
 		etp.deleteSubmission(encryptedTxnSubmission)
@@ -314,8 +316,8 @@ func (etp *EncryptedTxnsPool) watchFirstBlockAfterInit(ctx context.Context) erro
 }
 
 func (etp *EncryptedTxnsPool) loadPastSubmissionsOnFirstBlock(blockNum uint64) error {
-	etp.mu.Lock()
-	defer etp.mu.Unlock()
+	etp.cond.L.Lock()
+	defer etp.cond.L.Unlock()
 
 	var start uint64
 	end := blockNum
@@ -383,6 +385,28 @@ func (etp *EncryptedTxnsPool) addSubmission(submission EncryptedTxnSubmission) {
 	encryptedTxnsPoolTotalCount.Inc()
 	encryptedTxnsPoolTotalBytes.Add(encryptedTxnSize)
 	encryptedTxnSizeBytes.Observe(encryptedTxnSize)
+	etp.cond.Broadcast()
+}
+
+func (etp *EncryptedTxnsPool) WaitForTxnIndex(ctx context.Context, eon EonIndex, txnIndex TxnIndex) error {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		etp.cond.L.Lock()
+		defer etp.cond.L.Unlock()
+		key := EncryptedTxnSubmission{EonIndex: eon, TxnIndex: txnIndex}
+		for !etp.submissions.Has(key) && ctx.Err() == nil {
+			etp.cond.Wait()
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		etp.cond.Broadcast()
+	case <-done:
+	}
+
+	return ctx.Err()
 }
 
 func (etp *EncryptedTxnsPool) deleteSubmission(submission EncryptedTxnSubmission) {
