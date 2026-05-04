@@ -113,6 +113,81 @@ If you instead see `Adding torrents from disk` (no `[storage-lifecycle]`
 prefix), the legacy path is active. Confirm
 `--snap.lifecycle-driven-by-storage` is set.
 
+## Validation tiers
+
+Files transitioning `Indexed → Advertisable` go through a per-file
+validation chain. Tiers correspond to cost and coverage; operators
+pick the floor by flag combination.
+
+### Tier 1 — Metadata shape (always-on, ~µs / file)
+
+Field-only checks against `FileEntry`:
+
+  - `name_not_empty`
+  - `range_ordering` (`FromStep < ToStep` for stepped files)
+  - `kind_consistency_from_name`
+
+No I/O. No flag. Always on.
+
+### Tier 2 — Disk shape (default-on, ~10 ms – 1 s / file)
+
+Reads file metadata + bytes:
+
+  - `content_not_empty` (rejects zero-byte files — common producer
+    glitch)
+  - `size_matches_torrent` (compares file size to torrent metadata
+    length — catches truncation / inflation / wholesale
+    replacement)
+
+Default-on for both publisher and consumer. Disabling is
+debugging-only.
+
+### Tier 3 — Format integrity (opt-in, slow, NOT YET WIRED)
+
+Per-file format-aware validators (parse the file, check structure).
+Reserved scope; implementation is follow-up work tracked in
+`20260504-validation-flow.md`. Once the validators land, the flag
+`--snap.validate-format` enables them. The plan is for publishers
+to default this on (publisher attests to format correctness on
+publish) and consumers to default off (trust the publisher's
+attestation; redundant work otherwise).
+
+### What runs today
+
+When `--snap.lifecycle-driven-by-storage` is set, every newly
+downloaded file gets Tier 1 + Tier 2 before being advertised. Files
+that fail validation stay at `LifecycleIndexed`; the next sweep
+retries; persistent failures quarantine the file. No-flag-needed
+default.
+
+Look for these in the log:
+
+  - `[storage-lifecycle] driver started ... on-validation-wired=true`
+    — confirms the chain is wired.
+  - `[storage-lifecycle] advanced file=X to=Advertisable` — the
+    chain accepted the file and it's now advertisable.
+  - `[storage-lifecycle] dispatch file=X err=...` (Debug level) —
+    a validator rejected the file; error wrapped with the failing
+    validator's Name (e.g. `size_matches_torrent: content size N != torrent length M`).
+
+### Failure recovery (validation-driven)
+
+When a validator rejects a file, the lifecycle keeps it at
+`LifecycleIndexed` and the next sweep retries. The recovery action
+depends on which validator failed:
+
+  - `name/range/kind_consistency` — producer bug, can't recover
+    automatically; quarantine after repeated failures.
+  - `content_not_empty` / `size_matches_torrent` — bytes are wrong;
+    re-download recovers (mark Missing, downloader fetches fresh).
+  - Tier 3 (when wired) — format-corrupt source: re-download
+    typically resolves.
+
+Persistent quarantine after 5 consecutive rejections is logged at
+Info: `[storage-lifecycle] quarantining file ...`. Operator alerts
+should fire on this — it indicates the file can't be made valid by
+the automatic flow.
+
 ## Failure modes + debugging
 
   - **manifestReady times out** (5 min, falls back to preverified).
