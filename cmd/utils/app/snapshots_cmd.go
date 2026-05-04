@@ -3300,18 +3300,18 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		}
 	}
 
+	// Wait for any background build/merge work kicked off by BuildFiles to drain
+	// before MergeLoop — otherwise MergeLoop's mergingFiles CAS would lose to the
+	// background merge and return immediately without doing anything.
+	logger.Info("waiting for background build/merge to drain")
+	agg.WaitForFiles()
+
 	if err = agg.MergeLoop(ctx); err != nil {
 		return err
 	}
 	if err = agg.RemoveOverlapsAfterMerge(ctx); err != nil {
 		return err
 	}
-
-	// Wait for any background build/merge work kicked off by BuildFiles or MergeLoop
-	// to drain before returning — otherwise "Done" is logged while goroutines are
-	// still producing files.
-	logger.Info("waiting for background build/merge to drain")
-	agg.WaitForFiles()
 
 	return nil
 }
