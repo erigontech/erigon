@@ -75,20 +75,126 @@ publisher**. Use cases:
   - Researchers / community publishers running parallel snapshot
     distributions.
 
-The doc covers:
+The doc is layered: simplest setup first, public-distribution setup
+second. Operators pick the tier that matches their deployment.
 
-  - How to mint a `did:web:<your-domain>` document (key generation,
-    JSON template, hosting requirement, well-known path).
-  - Which verificationMethod entries to populate, with reference to
-    the Erigon snapshotter's three-role split.
-  - How to compute the trust-root fingerprint your consumers need.
-  - How consumers add your fingerprint via
-    `--snap.publisher-trust-roots`.
-  - How to sign chain.toml manifests on publish using the same
-    Erigon publisher binary (the signing key is the only thing
-    different between Erigon Tech's snapshotter and a third-party
-    one).
-  - Rotation procedure for your own keys.
+### Tier 0 — Webpeers (distribution-only, no identity)
+
+Before the trust tiers, note the existing role: any V2 node that
+holds files can serve them via BitTorrent. These **webpeers** are
+distribution-only — they speed up downloads by adding seed
+capacity, but they do NOT mint chain.toml manifests or get a DID.
+A webpeer's chain.toml is whatever it received from a trusted
+publisher; it cannot rewrite that manifest.
+
+You do **not** need a DID, a keypair, or operator setup to run a
+webpeer. Just run an Erigon V2 node with `--snap.p2p-manifest`. It
+will download what it's told to download, then serve those files to
+peers automatically. This is the lowest-effort way to contribute to
+snapshot distribution.
+
+The DID-based trust tiers below apply only to operators who want to
+**mint authoritative chain.toml entries** — i.e. tell consumers
+"these are the files I attest to". Distribution and trust are
+orthogonal: a webpeer redistributes a publisher's signed manifest
+without itself being a publisher.
+
+### Tier 1 — Closed deployment (you control all your nodes)
+
+Skip DIDs. Generate an Ed25519 keypair, distribute the public-key
+fingerprint to your fleet via your existing configuration
+management. No web hosting needed.
+
+  1. `erigon snap publisher-key generate` (one command, writes
+     `publisher.key` private + `publisher.pub` public).
+  2. Compute fingerprint: `erigon snap publisher-key fingerprint
+     publisher.pub` → emits a hex SHA-256 line.
+  3. Distribute the fingerprint to your fleet:
+     `--snap.publisher-trust-roots=/path/to/fingerprints.txt` on each
+     consumer node. Same file shape as Erigon's embedded constant —
+     one fingerprint per line.
+  4. Run your publisher: `--snap.bootstrap-from-preverified
+     --snap.publisher-signing-key=publisher.key`.
+
+This is the **happy path for in-house operators**. Trust is rooted in
+whatever already deploys configuration to your hosts; the
+publisher's identity never leaves your network.
+
+### Tier 2 — Public publisher with did:web
+
+For operators distributing snapshots to nodes outside their direct
+control (testnets, mirrors, community publishers). Adds a
+DID document hosted on your domain so consumers verify against a
+human-readable, rotation-friendly identifier.
+
+  1. Mint the keypair (same as Tier 1).
+  2. Author a `did.json` document containing your
+     `#bootstrap-publisher` verification method; example template
+     ships with the doc. Optionally include `#root` (cold,
+     delegation) and `#release` (reserved) following the Erigon
+     pattern.
+  3. Host at `https://<your-domain>/.well-known/did.json` over HTTPS
+     with a valid certificate.
+  4. Compute the fingerprint of `#bootstrap-publisher`. Distribute
+     it via `--snap.publisher-trust-roots` (same flag as Tier 1) OR
+     publish your DID identifier on a registry / website your
+     consumers' operators read.
+  5. Document the rotation procedure: replace the
+     verificationMethod, publish updated did.json, communicate the
+     new fingerprint to your consumer-operators.
+
+This is the **recommended path for public publishers**. Web-based
+DIDs are the simplest publishable identity (no DID-method-specific
+infrastructure beyond an HTTPS endpoint).
+
+### Tier 3 — Cloud publish (managed deployment)
+
+For operators running the publisher on cloud infrastructure
+(AWS / GCP / Azure / etc.) where key custody is delegated to a
+cloud-managed key service. Builds on Tier 2 (public did:web doc); the
+difference is *where* the signing key lives and *how* the publisher
+binary signs.
+
+  - **Cloud KMS for the hot key.** The `#bootstrap-publisher`
+    private key never leaves the cloud KMS — neither on disk on the
+    publisher host nor in any config file. The publisher binary
+    calls the KMS sign API with the manifest digest; the KMS
+    returns the signature. Compromise of the publisher host does
+    not leak the key.
+  - **Provider integration.** `--snap.publisher-signing-key` accepts
+    a URI (e.g. `kms://aws/us-east-1/key-id`,
+    `kms://gcp/projects/<p>/locations/global/keyRings/<r>/cryptoKeys/<k>`)
+    in addition to the local-file form. Provider auth comes from
+    the host's IAM role (no embedded credentials).
+  - **DID document hosted on the same cloud.** Static-site hosting
+    on S3 / GCS behind CloudFront / Cloud CDN with the
+    `.well-known/did.json` mapping. ACME-issued cert via the
+    provider's certificate manager.
+  - **Multi-region failover.** Run multiple publisher instances
+    using the same KMS-backed key across regions. A consumer that
+    can't reach one publisher's torrent endpoint falls back to
+    another; chain.toml content is identical (same key signs).
+  - **Audit + rotation.** KMS rotation rotates the underlying key
+    material; the DID-doc verificationMethod is updated to point at
+    the new key reference. Audit trail is the KMS access log.
+
+Cloud publish is the **operationally hardest of the three tiers**
+but the right shape for high-availability public publishers (e.g.
+the Erigon-Tech snapshotter at full production scale, or a paid-SLA
+mirror service). It's optional — Tier 2 with a local key file works
+for most public publishers.
+
+### Why three tiers
+
+The DID document is overhead for closed deployments. An in-house
+operator already knows their own publisher's public key — they don't
+need a self-resolved DID document to discover it. Conversely a
+public operator needs the human-readable identifier so consumers can
+configure trust without out-of-band fingerprint exchange. Cloud
+custody adds operational hardening (KMS, multi-region) on top of the
+public-publisher shape; not every public publisher needs it. Tiering
+the doc respects that — operators pick the tier that matches their
+deployment surface.
 
 This makes DID-based publisher identity a documented, reusable
 pattern rather than an Erigon-Tech-only mechanism — aligning with
