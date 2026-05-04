@@ -992,7 +992,7 @@ func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastB
 		if uint64(step+1)*a.StepSize() > capTxNum {
 			lastStepInDb := kv.Step(lastTxInDB / a.StepSize())
 			a.logger.Info("[snapshots] holding state collation at block snapshot boundary",
-				"blockSnapshotsStep", capTxNum/a.StepSize(),
+				"blockSnapshotsStepCompleted", capTxNum/a.StepSize()-1,
 				"lastCollatableStepInDb", lastStepInDb-1)
 			return 0, 0, 0, false, nil
 		}
