@@ -209,6 +209,54 @@ func TestAdvanceStep_Idempotent(t *testing.T) {
 		"already-at-target files don't get re-advanced or re-notified")
 }
 
+func TestPopulateFromName_StateFile(t *testing.T) {
+	e := &FileEntry{Name: "v1.0-accounts.0-256.kv"}
+	require.True(t, PopulateFromName(e))
+	require.Equal(t, uint64(0), e.FromStep)
+	require.Equal(t, uint64(256), e.ToStep)
+	require.Equal(t, DomainAccounts, e.Domain)
+	require.Equal(t, KindKV, e.Kind)
+}
+
+func TestPopulateFromName_HistoryFile(t *testing.T) {
+	e := &FileEntry{Name: "v1.0-accountsHistory.0-256.v"}
+	require.True(t, PopulateFromName(e))
+	require.Equal(t, DomainAccounts, e.Domain,
+		"History suffix is stripped for domain mapping")
+	require.Equal(t, KindHistory, e.Kind)
+}
+
+func TestPopulateFromName_BlockFile(t *testing.T) {
+	e := &FileEntry{Name: "v1.1-000900-001000-headers.seg"}
+	require.True(t, PopulateFromName(e))
+	require.Equal(t, Domain(""), e.Domain, "block files have empty Domain")
+	// Block files are in block-units after snaptype.ParseFileName's
+	// *1000 multiplier. Step-unit conversion is follow-up work; for
+	// now the units differ between block and state files but
+	// sibling grouping still works.
+	require.Equal(t, uint64(900_000), e.FromStep)
+	require.Equal(t, uint64(1_000_000), e.ToStep)
+	require.Equal(t, KindKV, e.Kind, ".seg without caplin/ → KindKV")
+}
+
+func TestPopulateFromName_PreservesExistingFields(t *testing.T) {
+	e := &FileEntry{
+		Name:     "v1.0-accounts.0-256.kv",
+		Domain:   DomainStorage, // wrong-but-explicit; preserved
+		FromStep: 99,
+		ToStep:   200,
+	}
+	PopulateFromName(e)
+	require.Equal(t, DomainStorage, e.Domain, "explicit Domain preserved")
+	require.Equal(t, uint64(99), e.FromStep, "explicit FromStep preserved")
+	require.Equal(t, uint64(200), e.ToStep, "explicit ToStep preserved")
+}
+
+func TestPopulateFromName_NilOrEmpty(t *testing.T) {
+	require.False(t, PopulateFromName(nil))
+	require.False(t, PopulateFromName(&FileEntry{}))
+}
+
 func TestAdvanceStep_ZeroKeyNoOp(t *testing.T) {
 	inv := NewInventory()
 	inv.AddFile(&FileEntry{Name: "erigondb.toml", Kind: KindMeta, State: LifecycleIndexed})

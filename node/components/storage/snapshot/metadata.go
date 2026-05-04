@@ -19,6 +19,8 @@ package snapshot
 import (
 	"fmt"
 	"strings"
+
+	"github.com/erigontech/erigon/db/snaptype"
 )
 
 // ValidateMetadata is the Tier-0 per-file invariant check, applied
@@ -75,6 +77,87 @@ func ValidateMetadata(entry *FileEntry) error {
 // ValidateMetadata to check consistency when Kind is explicit.
 func InferKind(name string) (FileKind, bool) {
 	return inferKindFromName(name)
+}
+
+// PopulateFromName fills in FromStep, ToStep, Domain (and Kind, if
+// not set) on a FileEntry by parsing its Name. The single seam every
+// caller goes through to derive step + domain metadata from a
+// snapshot file name; centralises the parsing + (eventually)
+// block→txnum→step unit conversion.
+//
+// Today the implementation calls snaptype.ParseFileName and copies
+// the result. Block files end up with FromStep/ToStep in
+// block-number units (multiplied by 1000 by ParseFileName), state
+// files in step-number units. Sibling grouping works in either
+// unit because step-siblings share the same name pattern and thus
+// the same parsed numbers. Cross-kind comparisons (block vs state)
+// are NOT meaningful in current units — proper block→txnum→step
+// conversion (using the chain's actual block→txnum mapping + step
+// size) is follow-up work that lives behind this seam.
+//
+// Caller-facing contract:
+//   - Name must already be set on the entry.
+//   - Existing non-zero Domain / Kind / FromStep / ToStep on the
+//     entry are preserved.
+//   - On unrecognised name patterns the entry is left alone.
+//
+// Returns true when at least one field was populated.
+func PopulateFromName(entry *FileEntry) bool {
+	if entry == nil || entry.Name == "" {
+		return false
+	}
+	info, _, _ := snaptype.ParseFileName("", entry.Name)
+	populated := false
+	if entry.FromStep == 0 && entry.ToStep == 0 && info.To > 0 {
+		entry.FromStep = info.From
+		entry.ToStep = info.To
+		populated = true
+	}
+	if entry.Domain == "" {
+		if domain := domainFromTypeString(info.TypeString); domain != "" {
+			entry.Domain = domain
+			populated = true
+		}
+	}
+	if entry.Kind == "" {
+		if k, ok := InferKind(entry.Name); ok {
+			entry.Kind = k
+			populated = true
+		}
+	}
+	return populated
+}
+
+// domainFromTypeString maps a snaptype TypeString (like "accounts",
+// "accountsHistory", "storage") to the FileEntry's Domain. History /
+// Idx suffixes are stripped because Erigon's inventory groups
+// primary + history + idx files for the same state slice under the
+// same Domain — they're step-siblings of one retire cycle.
+//
+// Returns "" for typeStrings that don't map to any state Domain
+// (e.g. "headers", "bodies" — block files have empty Domain).
+func domainFromTypeString(typeString string) Domain {
+	if typeString == "" {
+		return ""
+	}
+	base := typeString
+	for _, suffix := range []string{"History", "Idx"} {
+		if strings.HasSuffix(base, suffix) {
+			base = base[:len(base)-len(suffix)]
+			break
+		}
+	}
+	switch base {
+	case "accounts":
+		return DomainAccounts
+	case "storage":
+		return DomainStorage
+	case "code":
+		return DomainCode
+	case "commitment":
+		return DomainCommitment
+	}
+	return ""
 }
 
 // inferKindFromName maps a snapshot file's name to the Kind the

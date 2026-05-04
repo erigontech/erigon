@@ -217,7 +217,61 @@ batch hook, publisher gate) uses these.
 
 Items 1–4 land in this PR; 5–6 follow.
 
-## What this rules out
+## Block-to-step unit conversion (staged)
+
+The current naming has `FileEntry.FromStep` / `ToStep` overloaded:
+
+  - State files: literal step numbers (e.g. 0, 256, 512).
+  - Block files: block numbers (multiplied by 1000 by
+    `snaptype.ParseFileName` for the `<from>-<to>-<type>` pattern).
+
+For sibling grouping within a step, this works — siblings share the
+parsed numbers. For cross-kind comparisons (block step vs state
+step), the units don't agree.
+
+The proper conversion uses the **commitment file as the source of
+truth for block ↔ step**:
+
+  - Each commitment domain file at step `[N, M)` records the
+    state at the END of step `M`.
+  - The state at that point includes the canonical block number.
+  - Reading the commitment file's last block number yields a
+    concrete `(step, block)` pair.
+  - Multiple commitment files give multiple boundary pairs; block
+    ranges interpolate.
+
+This is a legitimate batch-validation operation: it's exactly the
+moment we have the commitment file open with full read context.
+
+### Stage 1 (this PR)
+
+`snapshot.PopulateFromName` derives `FromStep` / `ToStep` / `Domain`
+/ `Kind` from a file's name via `snaptype.ParseFileName`. Block
+files end up in block-units, state files in step-units. Mixed but
+sufficient for sibling grouping (the batch hook only needs same
+key for siblings, not cross-kind unit alignment). Wires into
+`discoverNewFiles` (lifecycle driver), bootstrap (provider), and
+populate.go (LiveInventory).
+
+Validates the end-to-end per-step batch flow on hoodi.
+
+### Stage 2 (follow-up)
+
+`CommitmentBlockBinding` batch validator: when a commitment domain
+step batch validates, it opens `commitment.kv` and reads the block
+number for the step's end. Stores the boundary in the inventory
+(`Inventory.RegisterStepBlockBoundary(step, block)`).
+
+`Inventory.BlockToStep(block) (step, ok)` answers the conversion
+query. `PopulateFromName` for block files calls this and rewrites
+`FromStep` / `ToStep` to canonical step units. After this lands,
+all `FileEntry` step fields are in one unit and cross-kind
+operations are meaningful.
+
+Bootstrapping: until at least one commitment-step batch has
+validated, block files use block-unit fallback. This is acceptable
+because cross-kind operations don't fire during initial bootstrap
+(the consumer is downloading files, not comparing them).
 
   - A separate "minimum-set" type defined in the time-to-tip plan
     that doesn't share the inventory model.

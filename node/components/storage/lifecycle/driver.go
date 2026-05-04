@@ -304,10 +304,17 @@ func (d *Driver) discoverNewFiles(logger log.Logger) {
 		if _, ok := d.Inv.LifecycleState(name); ok {
 			continue
 		}
-		d.Inv.AddFile(&snapshot.FileEntry{
+		entry := &snapshot.FileEntry{
 			Name:  name,
 			Local: true, // → derives LifecycleDownloaded
-		})
+		}
+		// Populate step + domain + kind from the name so the entry
+		// joins the right step group (drives batch validation
+		// dispatch). Returns false silently for unrecognised
+		// patterns; the entry still gets added with whatever fields
+		// we set.
+		snapshot.PopulateFromName(entry)
+		_ = d.Inv.AddFile(entry)
 		logger.Debug("[storage-lifecycle] discovered new file", "name", name)
 		added++
 		if firstAdded == "" {

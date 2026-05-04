@@ -279,22 +279,28 @@ func (p *Provider) Initialize(deps Deps) error {
 	// because non-driver consumers (manifest exchange, snapshot-flow) also
 	// benefit from a populated registry.
 	if deps.Inventory != nil {
+		addBootstrapFile := func(name string) {
+			entry := &snapshot.FileEntry{
+				Name:         filepath.Base(name),
+				Local:        true,
+				Advertisable: true,
+			}
+			// Populate step + domain + kind so cross-component
+			// queries (per-step grouping, IsMinimum sort) work.
+			// Bootstrap files are already Advertisable so they
+			// don't go through the lifecycle, but their metadata
+			// is read by other consumers.
+			snapshot.PopulateFromName(entry)
+			_ = deps.Inventory.AddFile(entry)
+		}
 		if p.AllSnapshots != nil {
 			for _, name := range p.AllSnapshots.Files() {
-				deps.Inventory.AddFile(&snapshot.FileEntry{
-					Name:         filepath.Base(name),
-					Local:        true,
-					Advertisable: true,
-				})
+				addBootstrapFile(name)
 			}
 		}
 		if deps.Aggregator != nil {
 			for _, fullpath := range deps.Aggregator.Files() {
-				deps.Inventory.AddFile(&snapshot.FileEntry{
-					Name:         filepath.Base(fullpath),
-					Local:        true,
-					Advertisable: true,
-				})
+				addBootstrapFile(fullpath)
 			}
 		}
 	}
