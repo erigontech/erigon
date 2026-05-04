@@ -41,6 +41,145 @@ func (s *stubValidator) Validate(_ *snapshot.FileEntry, _ validation.ContentSour
 	return s.err
 }
 
+// stubStepValidator tracks call count + group size for batch tests.
+type stubStepValidator struct {
+	name      string
+	err       error
+	calls     int
+	lastGroup snapshot.StepGroup
+}
+
+func (s *stubStepValidator) Name() string { return s.name }
+func (s *stubStepValidator) ValidateStep(_ context.Context, group snapshot.StepGroup) error {
+	s.calls++
+	s.lastGroup = group
+	return s.err
+}
+
+func TestBuildOnBatchValidation_StepCompleteAdvancesAtomically(t *testing.T) {
+	inv := snapshot.NewInventory()
+	primary := &snapshot.FileEntry{
+		Name: "v1.0-accounts.0-256.kv", Domain: snapshot.DomainAccounts,
+		FromStep: 0, ToStep: 256,
+		State: snapshot.LifecycleIndexed, Local: true,
+	}
+	dep := &snapshot.FileEntry{
+		Name: "v1.0-accounts.0-256.kvi", Domain: snapshot.DomainAccounts,
+		FromStep: 0, ToStep: 256,
+		State: snapshot.LifecycleIndexed, Local: true,
+	}
+	inv.AddFile(primary)
+	inv.AddFile(dep)
+
+	v := &stubStepValidator{name: "presence"}
+	err := BuildOnBatchValidation(validation.StepChain{v}, inv, nil)(context.Background(), primary)
+	require.NoError(t, err)
+	require.Equal(t, 1, v.calls, "batch validator runs once for the step")
+	require.Len(t, v.lastGroup.Files, 2, "validator received both step-siblings")
+
+	for _, name := range []string{primary.Name, dep.Name} {
+		state, _ := inv.LifecycleState(name)
+		require.Equal(t, snapshot.LifecycleAdvertisable, state,
+			"step-sibling %q must advance atomically", name)
+	}
+}
+
+func TestBuildOnBatchValidation_IncompleteStepNoOps(t *testing.T) {
+	inv := snapshot.NewInventory()
+	primary := &snapshot.FileEntry{
+		Name: "v1.0-accounts.0-256.kv", Domain: snapshot.DomainAccounts,
+		FromStep: 0, ToStep: 256,
+		State: snapshot.LifecycleIndexed, Local: true,
+	}
+	// Sibling still at Downloaded — step is not complete.
+	dep := &snapshot.FileEntry{
+		Name: "v1.0-accounts.0-256.kvi", Domain: snapshot.DomainAccounts,
+		FromStep: 0, ToStep: 256,
+		State: snapshot.LifecycleDownloaded, Local: true,
+	}
+	inv.AddFile(primary)
+	inv.AddFile(dep)
+
+	v := &stubStepValidator{name: "presence"}
+	require.NoError(t, BuildOnBatchValidation(validation.StepChain{v}, inv, nil)(context.Background(), primary))
+	require.Equal(t, 0, v.calls,
+		"step incomplete (sibling below Indexed) → batch validator does not run")
+
+	state, _ := inv.LifecycleState(primary.Name)
+	require.Equal(t, snapshot.LifecycleIndexed, state,
+		"primary stays at Indexed waiting for siblings")
+}
+
+func TestBuildOnBatchValidation_ValidationFailureLeavesStepAtIndexed(t *testing.T) {
+	inv := snapshot.NewInventory()
+	primary := &snapshot.FileEntry{
+		Name: "v1.0-accounts.0-256.kv", Domain: snapshot.DomainAccounts,
+		FromStep: 0, ToStep: 256,
+		State: snapshot.LifecycleIndexed, Local: true,
+	}
+	dep := &snapshot.FileEntry{
+		Name: "v1.0-accounts.0-256.kvi", Domain: snapshot.DomainAccounts,
+		FromStep: 0, ToStep: 256,
+		State: snapshot.LifecycleIndexed, Local: true,
+	}
+	inv.AddFile(primary)
+	inv.AddFile(dep)
+
+	wantErr := errors.New("simulated batch failure")
+	v := &stubStepValidator{name: "presence", err: wantErr}
+	err := BuildOnBatchValidation(validation.StepChain{v}, inv, nil)(context.Background(), primary)
+	require.ErrorIs(t, err, wantErr)
+
+	for _, name := range []string{primary.Name, dep.Name} {
+		state, _ := inv.LifecycleState(name)
+		require.Equal(t, snapshot.LifecycleIndexed, state,
+			"validation failure leaves the step at Indexed; sweep retries")
+	}
+}
+
+func TestBuildOnBatchValidation_SingletonAdvancesDirectly(t *testing.T) {
+	// Non-stepped file (caplin / meta / salt) — has no step-siblings,
+	// advances individually.
+	inv := snapshot.NewInventory()
+	e := &snapshot.FileEntry{
+		Name: "erigondb.toml", Kind: snapshot.KindMeta,
+		State: snapshot.LifecycleIndexed, Local: true,
+	}
+	inv.AddFile(e)
+
+	v := &stubStepValidator{name: "presence"}
+	require.NoError(t, BuildOnBatchValidation(validation.StepChain{v}, inv, nil)(context.Background(), e))
+
+	state, _ := inv.LifecycleState(e.Name)
+	require.Equal(t, snapshot.LifecycleAdvertisable, state,
+		"singletons skip the batch path and advance directly")
+	require.Equal(t, 0, v.calls,
+		"batch validator is not invoked for singletons")
+}
+
+func TestBuildOnBatchValidation_EmptyChainAcceptsCompleteStep(t *testing.T) {
+	inv := snapshot.NewInventory()
+	primary := &snapshot.FileEntry{
+		Name: "v1.0-accounts.0-256.kv", Domain: snapshot.DomainAccounts,
+		FromStep: 0, ToStep: 256,
+		State: snapshot.LifecycleIndexed, Local: true,
+	}
+	dep := &snapshot.FileEntry{
+		Name: "v1.0-accounts.0-256.kvi", Domain: snapshot.DomainAccounts,
+		FromStep: 0, ToStep: 256,
+		State: snapshot.LifecycleIndexed, Local: true,
+	}
+	inv.AddFile(primary)
+	inv.AddFile(dep)
+
+	require.NoError(t, BuildOnBatchValidation(nil, inv, nil)(context.Background(), primary))
+
+	for _, name := range []string{primary.Name, dep.Name} {
+		state, _ := inv.LifecycleState(name)
+		require.Equal(t, snapshot.LifecycleAdvertisable, state)
+	}
+}
+
 func TestBuildOnValidation_EmptyChainAdvancesUnconditionally(t *testing.T) {
 	inv := snapshot.NewInventory()
 	e := &snapshot.FileEntry{
