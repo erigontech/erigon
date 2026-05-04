@@ -17,6 +17,7 @@
 package snapshot
 
 import (
+	"fmt"
 	"sort"
 	"sync"
 )
@@ -170,6 +171,14 @@ func NewInventory() *Inventory {
 // AddFile adds a file entry to the inventory. If an entry with the same name
 // already exists, it is replaced (useful for trust promotion or re-scan).
 //
+// Tier-0 metadata gate: ValidateMetadata is called before insertion;
+// entries with empty Name, inverted/empty step ranges, or Kind that
+// disagrees with the name's pattern are rejected and NOT added. The
+// returned error reports the reason. Callers that don't care about
+// the rejection cause may ignore the return value (Go's error-return
+// is opt-in to inspect); the inventory will simply not contain the
+// rejected entry.
+//
 // Routing:
 //   - Kind=meta/salt/caplin: stored in their respective flat slice.
 //   - Kind=kv (default), history, or idx: stored under entry.Domain when
@@ -181,7 +190,18 @@ func NewInventory() *Inventory {
 // callers that still populate flags directly. Callers that own the
 // lifecycle should set State explicitly and let applyStateToFlags
 // keep the flags consistent.
-func (inv *Inventory) AddFile(entry *FileEntry) {
+func (inv *Inventory) AddFile(entry *FileEntry) error {
+	if err := ValidateMetadata(entry); err != nil {
+		return fmt.Errorf("AddFile: %w", err)
+	}
+	// Auto-fill Kind from name pattern when caller didn't set one
+	// explicitly. Resolves the KindKV-zero-value ambiguity (see the
+	// note on ValidateMetadata).
+	if entry.Kind == "" {
+		if inferred, ok := InferKind(entry.Name); ok {
+			entry.Kind = inferred
+		}
+	}
 	if entry.State == LifecycleDeclared && (entry.Local || entry.Advertisable) {
 		entry.State = deriveStateFromFlags(entry.Local, entry.Advertisable)
 	}
@@ -202,6 +222,7 @@ func (inv *Inventory) AddFile(entry *FileEntry) {
 	}
 	inv.mu.Unlock()
 	inv.notify(ChangeSet{Files: []string{entry.Name}})
+	return nil
 }
 
 // RemoveFile removes a file entry by name. Scans every category since the

@@ -256,14 +256,20 @@ func (p *Provider) Initialize(deps Deps) error {
 	//
 	// OnIndexing wraps a productionIndexBuilder that coalesces
 	// per-file calls into BlockRetire.BuildMissedIndicesIfNeed and
-	// Aggregator.BuildMissedAccessors invocations. OnValidation
-	// runs validation.DefaultStage1ChainWithDisk against each freshly
-	// indexed file before advertising it — catches name/range/kind
-	// shape errors plus disk-side truncation/inflation via the
-	// torrent-length comparison. Files already on disk at startup
-	// skip the validation chain because they're entered as
-	// Advertisable directly (see bootstrap below) — they were
-	// validated by a previous run or by the visibility gate.
+	// Aggregator.BuildMissedAccessors invocations.
+	//
+	// OnValidation runs PER-STEP batch validation: when an entry
+	// reaches LifecycleIndexed the handler waits until every file in
+	// its step group is also at Indexed, then runs the StepChain,
+	// then atomically advances the whole step to Advertisable. The
+	// default chain is just AllFilesPresent — a stat-level check
+	// that every file is actually on disk. Heavier checks (Tier 2
+	// content shape, Tier 3 format integrity) plug in via separate
+	// flag-gated chains, not yet wired.
+	//
+	// Files already on disk at startup are entered as Advertisable
+	// directly during bootstrap (see below) — they bypass the batch
+	// path because previous runs validated them.
 	// Bootstrap Inventory with files already on disk so the lifecycle
 	// driver doesn't start blind. Both AllSnapshots (block) and the
 	// Aggregator (state) expose visible-file enumeration; we mirror
@@ -302,16 +308,13 @@ func (p *Provider) Initialize(deps Deps) error {
 			indexWorkers: deps.IndexWorkers,
 		}
 		snapDir := config.Dirs.Snap
-		chain := validation.DefaultStage1ChainWithDisk(snapDir)
-		contentFor := func(e *snapshot.FileEntry) validation.ContentSource {
-			return validation.FileContent{Path: filepath.Join(snapDir, e.Name)}
-		}
+		batchChain := validation.DefaultStepChain(snapDir)
 		p.LifecycleDriver = &lifecycle.Driver{
 			Inv:          deps.Inventory,
 			Logger:       logger,
 			SnapDir:      snapDir,
 			OnIndexing:   lifecycle.BuildOnIndexing(builder, deps.Inventory, logger),
-			OnValidation: lifecycle.BuildOnValidation(chain, contentFor, deps.Inventory, logger),
+			OnValidation: lifecycle.BuildOnBatchValidation(batchChain, deps.Inventory, logger),
 		}
 		if err := p.LifecycleDriver.Start(ctx); err != nil {
 			return fmt.Errorf("storage: start lifecycle driver: %w", err)

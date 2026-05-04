@@ -192,7 +192,7 @@ func TestInventoryNonKVKinds(t *testing.T) {
 	inv := NewInventory()
 
 	// Caplin, meta, salt — each goes to its own bucket and back-out via the kind accessor.
-	inv.AddFile(&FileEntry{Kind: KindCaplin, Name: "v1.1-000000-000010-beaconblocks.seg", Local: true, Trust: TrustVerified})
+	inv.AddFile(&FileEntry{Kind: KindCaplin, Name: "caplin/v1.1-000000-000010-beaconblocks.seg", Local: true, Trust: TrustVerified})
 	inv.AddFile(&FileEntry{Kind: KindMeta, Name: "erigondb.toml", Local: true, Trust: TrustVerified})
 	inv.AddFile(&FileEntry{Kind: KindSalt, Name: "salt-blocks.txt", Local: true, Trust: TrustVerified})
 
