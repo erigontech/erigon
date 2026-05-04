@@ -966,23 +966,6 @@ func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastB
 		return 0, 0, 0, true, nil
 	}
 
-	if a.frozenBlocks != nil {
-		var capTxNum uint64
-		if err = a.db.View(ctx, func(tx kv.Tx) error {
-			var err error
-			capTxNum, err = rawdbv3.TxNums.Max(ctx, tx, a.frozenBlocks.FrozenBlocks())
-			return err
-		}); err != nil {
-			return 0, 0, 0, false, fmt.Errorf("read max collatable txNum: %w", err)
-		}
-		if uint64(step+1)*a.StepSize() > capTxNum {
-			a.logger.Info("[snapshots] holding state collation at block snapshot boundary",
-				"step", step,
-				"stepEndTxNum", fmt.Sprintf("%d (step %d)", uint64(step+1)*a.StepSize(), uint64(step+1)),
-				"blockSnapshotsTxNum", fmt.Sprintf("%d (step %d)", capTxNum, capTxNum/a.StepSize()))
-			return 0, 0, 0, false, nil
-		}
-	}
 	err = a.db.View(ctx, func(tx kv.Tx) error {
 		lastBlockInStep, ok, err = rawdbv3.TxNums.FindBlockNum(ctx, tx, lastTxNumOfStep(step, a.stepSize.Load()))
 		if err != nil {
@@ -994,6 +977,26 @@ func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastB
 		lastTxInDB, lastBlockInDB, err = rawdbv3.TxNums.Last(tx)
 		return err
 	})
+	if err != nil {
+		return 0, 0, 0, false, err
+	}
+	if a.frozenBlocks != nil {
+		var capTxNum uint64
+		if err = a.db.View(ctx, func(tx kv.Tx) error {
+			var err error
+			capTxNum, err = rawdbv3.TxNums.Max(ctx, tx, a.frozenBlocks.FrozenBlocks())
+			return err
+		}); err != nil {
+			return 0, 0, 0, false, fmt.Errorf("read max collatable txNum: %w", err)
+		}
+		if uint64(step+1)*a.StepSize() > capTxNum {
+			lastStepInDb := kv.Step(lastTxInDB / a.StepSize())
+			a.logger.Info("[snapshots] holding state collation at block snapshot boundary",
+				"blockSnapshotsStep", capTxNum/a.StepSize(),
+				"lastCollatableStepInDb", lastStepInDb-1)
+			return 0, 0, 0, false, nil
+		}
+	}
 	ok = err == nil && lastBlockInDB > lastBlockInStep+a.reorgBlockDepth
 	return
 }
