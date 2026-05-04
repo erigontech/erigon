@@ -26,7 +26,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -44,67 +43,88 @@ import (
 )
 
 func TestStateCornerCases(t *testing.T) {
-	t.Parallel()
+	stateTestSetup(t)
+	runStateTests(t, new(testutil.TestMatcher), filepath.Join(cornersDir, "state"))
+}
 
-	defer log.Root().SetHandler(log.Root().GetHandler())
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
-	if runtime.GOOS == "windows" {
-		t.Skip("fix me on win please") // it's too slow on win and stops on macos, need generally improve speed of this tests
+// TestLegacyCancunState runs legacy ethereum/tests GeneralStateTests fixtures
+// (state-test format, non-EEST) at the Cancun-era snapshot, under
+// legacy-tests/LegacyTests/Cancun/GeneralStateTests. The fixtures cover all
+// pre-merge fork variants (Frontier through London, plus Paris/Shanghai/Cancun)
+// — TestState only walks EEST static_tests, which don't carry every variant
+// (e.g. RevertPrecompiledTouch_d3 in Berlin/Istanbul/London catches the
+// ripemd-touch state-clearing path that the Hive `legacy-cancun` simulator
+// flagged). Run them locally so that class of regression is caught on CI
+// rather than only by the weekly out-of-tree Hive run.
+func TestLegacyCancunState(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
 	}
+	stateTestSetup(t)
 
 	st := new(testutil.TestMatcher)
+	// Slow tests
+	st.Slow(`^stPreCompiledContracts/precompsEIP2929Cancun`)
+	// Very slow tests
+	st.SkipLoad(`^stTimeConsuming/`)
+	// EVM perf-stress fixtures (loopMul, loopExp, performanceTester) overrun
+	// the 1h package timeout under -race instrumentation.
+	st.SkipLoad(`^VMTests/vmPerformance/`)
 
-	testDir := path.Join(cornersDir, "state")
-	st.Walk(t, testDir, func(t *testing.T, name string, test *testutil.StateTest) {
-		tmpDir, err := os.MkdirTemp("", "erigon-test-*")
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { dir.RemoveAll(tmpDir) })
-		dirs := datadir.New(tmpDir)
-		db := temporaltest.NewTestDB(t, dirs)
-		for _, subtest := range test.Subtests() {
-			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
-			t.Run(key, func(t *testing.T) {
-				withTrace(t, func(vmconfig vm.Config) error {
-					tx := beginRwNoContention(t, db)
-					defer tx.Rollback()
-					_, _, err = test.Run(t, tx, subtest, vmconfig, dirs)
-					tx.Rollback()
-					if err != nil && len(test.Json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
-						// Ignore expected errors
-						return nil
-					}
-					return st.CheckFailure(t, err)
-				})
-			})
-		}
-	})
+	// Pre-existing Constantinople-only divergences from geth — see
+	// https://github.com/erigontech/erigon/issues/20894. Geth's local runner
+	// walks LegacyTests/Constantinople/GeneralStateTests (an older snapshot
+	// that doesn't include these fixtures) so it never exercises them
+	// locally even though it generated them. Skip-loading the whole file
+	// means we lose non-Constantinople coverage of these six fixtures, which
+	// is acceptable: the d3 RIPEMD-160 touch case this test was added to
+	// catch is in stRevertTest/RevertPrecompiledTouch.json, not these.
+	st.SkipLoad(`^stSStoreTest/sstoreGas\.json`)
+	st.SkipLoad(`^stCreateTest/CREATE_HighNonce\.json`)
+	st.SkipLoad(`^stCreate2/CREATE2_HighNonce\.json`)
+	st.SkipLoad(`^stCreate2/CREATE2_HighNonceDelegatecall\.json`)
+	st.SkipLoad(`^stPreCompiledContracts2/CallEcrecover_Overflow\.json`)
+	st.SkipLoad(`^stPreCompiledContracts2/ecrecoverShortBuff\.json`)
+
+	runStateTests(t, st, filepath.Join(legacyDir, "LegacyTests", "Cancun", "GeneralStateTests"))
 }
 
 func TestState(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	t.Parallel()
-
-	if runtime.GOOS == "windows" {
-		t.Skip("fix me on win please") // it's too slow on win and stops on macos, need generally improve speed of this tests
-	}
-	defer log.Root().SetHandler(log.Root().GetHandler())
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
+	stateTestSetup(t)
 
 	st := new(testutil.TestMatcher)
-	// Corresponds to GeneralStateTests from ethereum/tests:
-	// see https://github.com/ethereum/execution-spec-tests/releases/tag/v5.0.0
-	testDir := filepath.Join(eestDir, "state_tests", "static", "state_tests")
-
 	// Slow tests
 	st.Slow(`^stPreCompiledContracts/precompsEIP2929Cancun`)
-
 	// Very slow tests
 	st.SkipLoad(`^stTimeConsuming/`)
 
+	// Corresponds to GeneralStateTests from ethereum/tests:
+	// see https://github.com/ethereum/execution-spec-tests/releases/tag/v5.0.0
+	runStateTests(t, st, filepath.Join(eestDir, "state_tests", "static", "state_tests"))
+}
+
+// stateTestSetup applies the parallel/log/Windows-skip boilerplate shared by
+// state-test runners.
+func stateTestSetup(t *testing.T) {
+	t.Helper()
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please") // it's too slow on win and stops on macos, need generally improve speed of this tests
+	}
+	prev := log.Root().GetHandler()
+	t.Cleanup(func() { log.Root().SetHandler(prev) })
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
+}
+
+// runStateTests walks testDir and runs each StateTest's subtests through the
+// shared per-subtest harness (temp datadir, fresh DB, withTrace). The matcher
+// is supplied by the caller pre-configured with any Slow/SkipLoad/Whitelist
+// patterns.
+func runStateTests(t *testing.T, st *testutil.TestMatcher, testDir string) {
+	t.Helper()
 	st.Walk(t, testDir, func(t *testing.T, name string, test *testutil.StateTest) {
 		tmpDir, err := os.MkdirTemp("", "erigon-test-*")
 		if err != nil {
@@ -174,7 +194,7 @@ func withTrace(t *testing.T, test func(vm.Config) error) {
 	t.Error(err)
 	buf := new(bytes.Buffer)
 	w := bufio.NewWriter(buf)
-	tracer := logger.NewJSONLogger(&logger.LogConfig{DisableMemory: true}, w)
+	tracer := logger.NewJSONLogger(&logger.LogConfig{EnableMemory: false}, w)
 	config.Tracer = tracer.Tracer().Hooks
 	err2 := test(config)
 	if !reflect.DeepEqual(err, err2) {

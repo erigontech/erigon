@@ -23,6 +23,15 @@ jobs:
       - id: load
         run: echo "groups=$(./tools/test-groups names)" >> $GITHUB_OUTPUT
 
+      # In the merge queue, cancel the run on first failure so the gate
+      # doesn't stall waiting for still-running siblings. PR runs keep
+      # going so authors see the full failure picture.
+      - name: Cancel workflow run on failure
+        if: failure() && github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run cancel ${{ github.run_id }} || true
+
   tests-linux:
     needs: load-matrix
     timeout-minutes: 90
@@ -62,3 +71,12 @@ jobs:
 
       - uses: ./.github/actions/cleanup-erigon
         if: always()
+
+      # In the merge queue, cancel the run on first failure so the gate
+      # doesn't stall waiting for still-running siblings. PR runs keep
+      # going so authors see the full failure picture.
+      - name: Cancel workflow run on failure
+        if: failure() && github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run cancel ${{ github.run_id }} || true

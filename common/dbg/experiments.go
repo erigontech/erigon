@@ -111,11 +111,13 @@ var (
 	UseTxDependencies     = EnvBool("USE_TX_DEPENDENCIES", false)
 	UseStateCache         = EnvBool("USE_STATE_CACHE", true)
 	AssertStateCache      = EnvBool("ASSERT_STATE_CACHE", false)
+	ReadAhead             = EnvBool("READ_AHEAD", true)
 
 	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
 	TraceDeletion         = EnvBool("TRACE_DELETION", false)
 
-	RpcDropResponse = EnvBool("RPC_DROP_RESPONSE", false)
+	RpcDropResponse  = EnvBool("RPC_DROP_RESPONSE", false)
+	TipTrieWarmupers = EnvInt("TIP_TRIE_WARMUPERS", runtime.NumCPU()*8) //io-bound (not cpu-bound). it's ok to have `io-threads > cpus`
 )
 
 func ReadMemStats(m *runtime.MemStats) {
@@ -131,6 +133,16 @@ func NoMerge() bool              { return noMerge }
 func NoMergeHistory() bool       { return noMergeHistory }
 func NoDeepMergeHistory() bool   { return noDeepMergeHistory }
 func PruneTotalDifficulty() bool { return pruneTotalDifficulty }
+
+// CLI-override setters for the performance toggles that also have env-var
+// twins. The env var sets the initial value at package init; the CLI layer
+// calls these at node startup only when the user explicitly set the flag.
+func SetIgnoreBAL(b bool)     { IgnoreBAL = b }
+func SetUseStateCache(b bool) { UseStateCache = b }
+func SetReadAhead(b bool)     { ReadAhead = b }
+func SetExec3Workers(n int)   { Exec3Workers = n }
+func SetNoPrune(b bool)       { noPrune = b }
+func SetNoMerge(b bool)       { noMerge = b }
 
 var (
 	dirtySace     uint64

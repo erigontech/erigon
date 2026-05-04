@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/FastFilter/xorfilter"
 	"github.com/stretchr/testify/require"
 )
 
@@ -483,6 +484,42 @@ func TestWriterShardedMmapMutationOnDuplicates(t *testing.T) {
 	for i := 0; i < unique; i++ {
 		require.True(r.ContainsHash(uint64(i)))
 	}
+}
+
+// requireFilterEqual asserts every header field and fingerprint count match between two filters.
+func requireFilterEqual(t *testing.T, expected, got *xorfilter.BinaryFuse[uint8]) {
+	t.Helper()
+	require.Equal(t, expected.SegmentCount, got.SegmentCount)
+	require.Equal(t, expected.SegmentCountLength, got.SegmentCountLength)
+	require.Equal(t, expected.Seed, got.Seed)
+	require.Equal(t, expected.SegmentLength, got.SegmentLength)
+	require.Equal(t, expected.SegmentLengthMask, got.SegmentLengthMask)
+	require.Equal(t, len(expected.Fingerprints), len(got.Fingerprints))
+}
+
+// Regression: reader previously decoded SegmentCount from offset 8 instead of 4, silently reading SegmentCountLength.
+func TestHeaderRoundTrip(t *testing.T) {
+	require := require.New(t)
+
+	w, err := NewWriterOffHeap(filepath.Join(t.TempDir(), "hdr_rt"))
+	require.NoError(err)
+	defer w.Close()
+
+	for i := uint64(0); i < 50; i++ {
+		require.NoError(w.AddHash(i))
+	}
+
+	original, err := w.build()
+	require.NoError(err)
+
+	var buf bytes.Buffer
+	_, err = writeFilter(w.features, original, &buf)
+	require.NoError(err)
+
+	r, _, err := NewReaderOnBytes(buf.Bytes(), "test")
+	require.NoError(err)
+
+	requireFilterEqual(t, original, r.inner)
 }
 
 func TestMultipleFilters(t *testing.T) {

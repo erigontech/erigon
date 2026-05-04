@@ -47,7 +47,7 @@ func checkClockDrift() {
 		log.Warn(fmt.Sprintf("[p2p] System clock seems off by %v, which can prevent network connectivity", drift))
 		log.Warn("[p2p] Please enable network time synchronisation in system settings.")
 	} else {
-		log.Debug("[p2p] NTP sanity check done", "drift", drift)
+		log.Trace("[p2p] NTP sanity check done", "drift", drift)
 	}
 }
 

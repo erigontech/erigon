@@ -195,12 +195,13 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		attestation *solid.Attestation // SingleAttestation will be transformed to Attestation struct with given member index in committee
 	)
 	if err := s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
-		// If our head state is at a different epoch than the attestation, committee
+		// If our head state is too far from the attestation epoch, committee
 		// computations will use a stale RANDAO mix and produce wrong results.
-		// Ignore early to avoid wasted work and false rejections.
-		if state.Epoch(headState) != attEpoch {
-			return fmt.Errorf("head epoch %d != attestation epoch %d: %w",
-				state.Epoch(headState), attEpoch, ErrIgnore)
+		// Allow current and previous epoch (spec permits both).
+		headEpoch := state.Epoch(headState)
+		if attEpoch != headEpoch && attEpoch != state.PreviousEpoch(headState) {
+			return fmt.Errorf("head epoch %d too far from attestation epoch %d: %w",
+				headEpoch, attEpoch, ErrIgnore)
 		}
 		// [REJECT] The committee index is within the expected range
 		committeeCount := computeCommitteeCountPerSlot(headState, slot, s.beaconCfg.SlotsPerEpoch)

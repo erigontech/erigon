@@ -17,6 +17,7 @@
 package txpool
 
 import (
+	"bytes"
 	"fmt"
 	"strconv"
 	"testing"
@@ -24,7 +25,10 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 var hashParseTests = []struct {
@@ -193,6 +197,118 @@ var tpEncodeTests = []struct {
 		},
 		encoded: "f8d2f867088504a817c8088302e2489435353535353535353535353535353535353535358202008025a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10f867098504a817c809830334509435353535353535353535353535353535353535358202d98025a052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afba052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb", expectedErr: false, chainID: 1,
 	},
+}
+
+// TestEIP7702BatchPoisoning is a regression test for
+// https://github.com/ethereum-bounty/erigon/issues/7. A single EIP-7702
+// SetCode transaction carrying one auth tuple with an unrecoverable signature
+// must not cause sibling transactions in the same Transactions / PooledTransactions
+// devp2p packet to be dropped, nor invalidate the SetCode transaction itself.
+// Per the EIP, "if any step fails for a tuple, processing continues to the
+// next one" — invalid auth tuples are skipped at execution time and the
+// enclosing transaction remains valid (the sender still pays for every tuple).
+func TestEIP7702BatchPoisoning(t *testing.T) {
+	chainID := uint256.NewInt(1)
+	signer := types.LatestSignerForChainID(chainID.ToBig())
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+
+	to := common.Address{0x42}
+
+	mkDynFee := func(nonce uint64) types.Transaction {
+		unsigned := &types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{
+				Nonce:    nonce,
+				GasLimit: 21000,
+				To:       &to,
+			},
+			ChainID: *chainID,
+			TipCap:  *uint256.NewInt(1_000_000),
+			FeeCap:  *uint256.NewInt(1_000_000),
+		}
+		signed, signErr := types.SignTx(unsigned, *signer, key)
+		require.NoError(t, signErr)
+		return signed
+	}
+
+	// SetCode tx with one auth tuple whose signature is unrecoverable (R=S=0).
+	// The sender's signature on the transaction itself is still valid.
+	setCodeUnsigned := &types.SetCodeTransaction{
+		DynamicFeeTransaction: types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{
+				Nonce:    1,
+				GasLimit: 100_000,
+				To:       &to,
+			},
+			ChainID: *chainID,
+			TipCap:  *uint256.NewInt(1_000_000),
+			FeeCap:  *uint256.NewInt(1_000_000),
+		},
+		Authorizations: []types.Authorization{{
+			ChainID: *chainID,
+			Address: common.Address{0x99},
+			Nonce:   0,
+			YParity: 0,
+			// R and S left zero — RecoverSigner rejects the tuple.
+		}},
+	}
+	setCode, err := types.SignTx(setCodeUnsigned, *signer, key)
+	require.NoError(t, err)
+
+	// Three-tx batch: sibling, poisoned SetCode, sibling.
+	txns := []types.Transaction{mkDynFee(0), setCode, mkDynFee(2)}
+	txnsRlp := make([][]byte, len(txns))
+	for i, txn := range txns {
+		buf := bytes.NewBuffer(nil)
+		require.NoError(t, txn.MarshalBinary(buf))
+		txnsRlp[i] = buf.Bytes()
+	}
+
+	cases := []struct {
+		name   string
+		encode func() []byte
+		parse  func(payload []byte, slots *TxnSlots) error
+	}{
+		{
+			name:   "Transactions",
+			encode: func() []byte { return EncodeTransactions(txnsRlp, nil) },
+			parse: func(payload []byte, slots *TxnSlots) error {
+				ctx := NewTxnParseContext(*chainID)
+				_, parseErr := ParseTransactions(payload, 0, ctx, slots, nil)
+				return parseErr
+			},
+		},
+		{
+			name:   "PooledTransactions66",
+			encode: func() []byte { return EncodePooledTransactions66(txnsRlp, 1, nil) },
+			parse: func(payload []byte, slots *TxnSlots) error {
+				ctx := NewTxnParseContext(*chainID)
+				_, _, parseErr := ParsePooledTransactions66(payload, 0, ctx, slots, nil)
+				return parseErr
+			},
+		},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			r := require.New(t)
+			slots := &TxnSlots{}
+			r.NoError(tt.parse(tt.encode(), slots))
+			// All three txns survive — no batch poisoning.
+			r.Len(slots.Txns, 3)
+
+			// Siblings parsed normally.
+			r.Equal(byte(DynamicFeeTxnType), slots.Txns[0].TxType())
+			r.Equal(byte(DynamicFeeTxnType), slots.Txns[2].TxType())
+
+			// SetCode tx is accepted, but its single auth tuple was skipped.
+			// Gas billing still sees the original auth list (length 1) because
+			// per EIP-7702 the sender pays for every tuple regardless of validity.
+			setCodeSlot := slots.Txns[1]
+			r.Equal(byte(SetCodeTxnType), setCodeSlot.TxType())
+			r.Len(setCodeSlot.Txn.GetAuthorizations(), 1)
+			r.Empty(setCodeSlot.AuthAndNonces)
+		})
+	}
 }
 
 func TestTransactionsPacket(t *testing.T) {
