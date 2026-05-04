@@ -54,7 +54,7 @@ type ForwardBeaconDownloader struct {
 	rpc                   *rpc.BeaconRpcP2P
 	process               ProcessFn
 	beaconCfg             *clparams.BeaconChainConfig
-	httpFallbackURL       string // beacon API base URL for HTTP fallback when P2P fails
+	httpFallbackURL       string      // beacon API base URL for HTTP fallback when P2P fails
 	httpPreferred         atomic.Bool // set after first HTTP fallback success; skips P2P probing
 
 	mu sync.Mutex
@@ -124,123 +124,123 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 	}
 
 	{
-	// Start with a base interval; backoff increases it on repeated failures.
-	baseInterval := 300 * time.Millisecond
-	var consecutiveFailures atomic.Int32
-	reqInterval := time.NewTicker(baseInterval)
-	defer reqInterval.Stop()
-	// Timeout: if no blocks received within this duration, return to let the caller
-	// run stale detection and potentially switch to ChainTipSync.
-	requestTimeout := time.NewTimer(30 * time.Second)
-	defer requestTimeout.Stop()
+		// Start with a base interval; backoff increases it on repeated failures.
+		baseInterval := 300 * time.Millisecond
+		var consecutiveFailures atomic.Int32
+		reqInterval := time.NewTicker(baseInterval)
+		defer reqInterval.Stop()
+		// Timeout: if no blocks received within this duration, return to let the caller
+		// run stale detection and potentially switch to ChainTipSync.
+		requestTimeout := time.NewTimer(30 * time.Second)
+		defer requestTimeout.Stop()
 
-Loop:
-	for {
-		select {
-		case <-reqInterval.C:
-			go func() {
+	Loop:
+		for {
+			select {
+			case <-reqInterval.C:
+				go func() {
+					if len(atomicResp.Load().(peerAndBlocks).blocks) > 0 {
+						return
+					}
+					var reqSlot uint64
+					if f.highestSlotProcessed > 2 {
+						reqSlot = f.highestSlotProcessed - 2
+					}
+					// Request one extra block beyond the batch for GLOAS lookahead:
+					// the extra block lets determineFullGloasRoots check whether the
+					// last batch block is FULL or EMPTY, instead of guessing FULL.
+					reqCount := count + 1
+
+					// Cap the request at the next fork epoch boundary. The Eth2 spec
+					// says peers SHOULD NOT serve blocks across fork boundaries in a
+					// single BeaconBlocksByRange response.
+					if f.beaconCfg != nil {
+						reqSlot, reqCount = f.capAtForkBoundary(reqSlot, reqCount)
+					}
+
+					// leave a warning if we are stuck for more than 90 seconds
+					if time.Since(f.highestSlotUpdateTime) > 90*time.Second {
+						log.Trace("Forward beacon downloader gets stuck", "time", time.Since(f.highestSlotUpdateTime).Seconds(), "highestSlotProcessed", f.highestSlotProcessed)
+					}
+					responses, peerId, err := f.rpc.SendBeaconBlocksByRangeReq(ctx, reqSlot, reqCount)
+					if err != nil {
+						if errors.Is(err, peers.ErrNoPeers) {
+							log.Debug("[Caplin] no peers available for beacon blocks by range request", "slot", reqSlot, "reqCount", reqCount)
+						} else {
+							// Peer returned an error response (e.g. rate limited, invalid request).
+							// Do NOT ban — apply backoff instead.
+							log.Debug("Beacon blocks by range request failed", "err", err, "peer", peerId, "slot", reqSlot, "reqCount", reqCount)
+						}
+						// Exponential backoff: 300ms, 600ms, 1.2s, 2.4s, capped at 5s
+						failures := int(consecutiveFailures.Add(1))
+
+						// HTTP fallback: after many consecutive P2P failures, try beacon API.
+						// Start from highestSlotProcessed+1 (not reqSlot which includes overlap
+						// before the anchor that would fail with ErrMissingSegment).
+						// Request extra slots beyond count for GLOAS lookahead (sparse slots may
+						// leave no block at exactly count+1; extra range ensures the lookahead).
+						if failures >= 5 && f.httpFallbackURL != "" {
+							if len(atomicResp.Load().(peerAndBlocks).blocks) > 0 {
+								return
+							}
+							httpStart := f.highestSlotProcessed + 1
+							httpBlocks, httpErr := fetchBlocksFromBeaconAPI(ctx, f.httpFallbackURL, httpStart, count+10, f.beaconCfg)
+							if httpErr == nil && len(httpBlocks) > 0 {
+								log.Info("[ForwardBeaconDownloader] P2P failed, fetched blocks from beacon API",
+									"fromSlot", httpStart, "count", len(httpBlocks))
+								consecutiveFailures.Store(0)
+								f.httpPreferred.Store(true)
+								atomicResp.Store(peerAndBlocks{"http-fallback", httpBlocks})
+								return
+							}
+							if httpErr != nil {
+								log.Debug("[ForwardBeaconDownloader] HTTP fallback also failed", "err", httpErr)
+							}
+						}
+
+						backoff := baseInterval * time.Duration(1<<uint(min(failures, 4)))
+						if backoff > 5*time.Second {
+							backoff = 5 * time.Second
+						}
+						reqInterval.Reset(backoff)
+						return
+					}
+					if responses == nil {
+						return
+					}
+					if len(responses) == 0 {
+						// Empty response: no blocks in this slot range.
+						// Advance past the requested range so we don't get stuck requesting the same empty range.
+						f.mu.Lock()
+						newSlot := reqSlot + count
+						if newSlot > f.highestSlotProcessed {
+							log.Debug("Empty block range response, advancing past gap", "from", f.highestSlotProcessed, "to", newSlot, "peer", peerId)
+							f.highestSlotProcessed = newSlot
+							f.highestSlotUpdateTime = time.Now()
+						}
+						f.mu.Unlock()
+						return
+					}
+					// Success: reset backoff
+					consecutiveFailures.Store(0)
+					reqInterval.Reset(baseInterval)
+					if len(atomicResp.Load().(peerAndBlocks).blocks) > 0 {
+						return
+					}
+					atomicResp.Store(peerAndBlocks{peerId, responses})
+				}()
+			case <-ctx.Done():
+				return
+			case <-requestTimeout.C:
+				// No blocks received in time — return to let stale detection run.
+				return
+			default:
 				if len(atomicResp.Load().(peerAndBlocks).blocks) > 0 {
-					return
+					break Loop
 				}
-				var reqSlot uint64
-				if f.highestSlotProcessed > 2 {
-					reqSlot = f.highestSlotProcessed - 2
-				}
-				// Request one extra block beyond the batch for GLOAS lookahead:
-				// the extra block lets determineFullGloasRoots check whether the
-				// last batch block is FULL or EMPTY, instead of guessing FULL.
-				reqCount := count + 1
-
-				// Cap the request at the next fork epoch boundary. The Eth2 spec
-				// says peers SHOULD NOT serve blocks across fork boundaries in a
-				// single BeaconBlocksByRange response.
-				if f.beaconCfg != nil {
-					reqSlot, reqCount = f.capAtForkBoundary(reqSlot, reqCount)
-				}
-
-				// leave a warning if we are stuck for more than 90 seconds
-				if time.Since(f.highestSlotUpdateTime) > 90*time.Second {
-					log.Trace("Forward beacon downloader gets stuck", "time", time.Since(f.highestSlotUpdateTime).Seconds(), "highestSlotProcessed", f.highestSlotProcessed)
-				}
-				responses, peerId, err := f.rpc.SendBeaconBlocksByRangeReq(ctx, reqSlot, reqCount)
-				if err != nil {
-					if errors.Is(err, peers.ErrNoPeers) {
-						log.Debug("[Caplin] no peers available for beacon blocks by range request", "slot", reqSlot, "reqCount", reqCount)
-					} else {
-						// Peer returned an error response (e.g. rate limited, invalid request).
-						// Do NOT ban — apply backoff instead.
-						log.Debug("Beacon blocks by range request failed", "err", err, "peer", peerId, "slot", reqSlot, "reqCount", reqCount)
-					}
-					// Exponential backoff: 300ms, 600ms, 1.2s, 2.4s, capped at 5s
-					failures := int(consecutiveFailures.Add(1))
-
-					// HTTP fallback: after many consecutive P2P failures, try beacon API.
-					// Start from highestSlotProcessed+1 (not reqSlot which includes overlap
-					// before the anchor that would fail with ErrMissingSegment).
-					// Request extra slots beyond count for GLOAS lookahead (sparse slots may
-					// leave no block at exactly count+1; extra range ensures the lookahead).
-					if failures >= 5 && f.httpFallbackURL != "" {
-						if len(atomicResp.Load().(peerAndBlocks).blocks) > 0 {
-							return
-						}
-						httpStart := f.highestSlotProcessed + 1
-						httpBlocks, httpErr := fetchBlocksFromBeaconAPI(ctx, f.httpFallbackURL, httpStart, count+10, f.beaconCfg)
-						if httpErr == nil && len(httpBlocks) > 0 {
-							log.Info("[ForwardBeaconDownloader] P2P failed, fetched blocks from beacon API",
-								"fromSlot", httpStart, "count", len(httpBlocks))
-							consecutiveFailures.Store(0)
-							f.httpPreferred.Store(true)
-							atomicResp.Store(peerAndBlocks{"http-fallback", httpBlocks})
-							return
-						}
-						if httpErr != nil {
-							log.Debug("[ForwardBeaconDownloader] HTTP fallback also failed", "err", httpErr)
-						}
-					}
-
-					backoff := baseInterval * time.Duration(1<<uint(min(failures, 4)))
-					if backoff > 5*time.Second {
-						backoff = 5 * time.Second
-					}
-					reqInterval.Reset(backoff)
-					return
-				}
-				if responses == nil {
-					return
-				}
-				if len(responses) == 0 {
-					// Empty response: no blocks in this slot range.
-					// Advance past the requested range so we don't get stuck requesting the same empty range.
-					f.mu.Lock()
-					newSlot := reqSlot + count
-					if newSlot > f.highestSlotProcessed {
-						log.Debug("Empty block range response, advancing past gap", "from", f.highestSlotProcessed, "to", newSlot, "peer", peerId)
-						f.highestSlotProcessed = newSlot
-						f.highestSlotUpdateTime = time.Now()
-					}
-					f.mu.Unlock()
-					return
-				}
-				// Success: reset backoff
-				consecutiveFailures.Store(0)
-				reqInterval.Reset(baseInterval)
-				if len(atomicResp.Load().(peerAndBlocks).blocks) > 0 {
-					return
-				}
-				atomicResp.Store(peerAndBlocks{peerId, responses})
-			}()
-		case <-ctx.Done():
-			return
-		case <-requestTimeout.C:
-			// No blocks received in time — return to let stale detection run.
-			return
-		default:
-			if len(atomicResp.Load().(peerAndBlocks).blocks) > 0 {
-				break Loop
+				time.Sleep(10 * time.Millisecond)
 			}
-			time.Sleep(10 * time.Millisecond)
 		}
-	}
 	} // end P2P probing block
 
 Process:
