@@ -102,7 +102,9 @@ func NewReaderOnBytes(m []byte, fName string) (*Reader, int, error) {
 }
 
 func (r *Reader) ForceInMem() datasize.ByteSize {
-	r.inner.Fingerprints = bytes.Clone(r.inner.Fingerprints)
+	cpy := make([]byte, len(r.inner.Fingerprints)) //don't use bytes.Clone - to see ram owner on heap profiler
+	copy(cpy, r.inner.Fingerprints)
+	r.inner.Fingerprints = cpy
 	r.keepInMem = true
 	return datasize.ByteSize(len(r.inner.Fingerprints))
 }
