@@ -288,12 +288,6 @@ func (cc *commitmentCalculator) computeAndPublish(ctx context.Context, br *block
 	cc.publish(ctx, r)
 }
 
-// computeAndCheck computes per-block commitment and validates the root.
-// Only publishes errors to the output channel — successful results are
-// tracked internally. This avoids filling the output channel buffer
-// (which would deadlock the pipeline when batch size > buffer size).
-// Uses the SharedDomains' roTx (not a separate DB connection) to ensure
-// consistency between sd.mem and the trie node reads.
 // computeWithoutCheck computes commitment but doesn't verify the root.
 // Used for the first partial block where the trie state doesn't match the header.
 func (cc *commitmentCalculator) computeWithoutCheck(ctx context.Context, br *blockResult) {
@@ -328,6 +322,12 @@ func (cc *commitmentCalculator) computeWithoutCheck(ctx context.Context, br *blo
 	cc.hasComputed = true
 }
 
+// computeAndCheck computes per-block commitment and validates the root.
+// Only publishes errors to the output channel — successful results are
+// tracked internally. This avoids filling the output channel buffer
+// (which would deadlock the pipeline when batch size > buffer size).
+// Uses the SharedDomains' roTx (not a separate DB connection) to ensure
+// consistency between sd.mem and the trie node reads.
 func (cc *commitmentCalculator) computeAndCheck(ctx context.Context, br *blockResult) {
 	if err := cc.state.LazyLoadErr(); err != nil {
 		cc.publish(ctx, commitmentResult{

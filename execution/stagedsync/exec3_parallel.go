@@ -283,8 +283,16 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 		// rootResults case in the main select can use it.
 		handleCommitResult := func(cr commitmentResult) error {
 			if cr.err != nil {
-				pe.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x",
-					pe.logPrefix, cr.blockNum, cr.rootHash))
+				// Lazy-load / ComputeCommitment errors from the calculator
+				// don't wrap ErrWrongTrieRoot. Treating them as a wrong-root
+				// would mark a valid block as bad (ReportBadHeaderPoS) and
+				// trigger an unwind that throws away valid state. Fail fast
+				// instead and preserve the original error in the message.
+				if !errors.Is(cr.err, ErrWrongTrieRoot) {
+					return fmt.Errorf("[%s] commitment: %w", pe.logPrefix, cr.err)
+				}
+				pe.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x (%v)",
+					pe.logPrefix, cr.blockNum, cr.rootHash, cr.err))
 				if initialCycle {
 					return fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, cr.blockNum)
 				}

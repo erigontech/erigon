@@ -264,7 +264,6 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		if a, ok := db.(state.HasAgg); ok {
 			a.Agg().(*state.Aggregator).UnlockCollation()
 			collationLocked = false
-			_ = a
 		}
 
 		// Read the actual committed txNum from the DB "state" key.
