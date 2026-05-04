@@ -124,62 +124,78 @@ func (p *Pool) Run(ctx context.Context) error {
 	})
 	defer unregisterDkpObserver()
 
-	eg, ctx := errgroup.WithContext(ctx)
+	var eg errgroup.Group
 
 	eg.Go(func() error {
 		err := p.blockListener.Run(ctx)
 		if err != nil {
+			p.logger.Error("block listener goroutine exiting", "err", err)
 			return fmt.Errorf("block listener issue: %w", err)
 		}
+		p.logger.Warn("block listener goroutine exiting with nil")
 		return nil
 	})
 
 	eg.Go(func() error {
 		err := p.blockTracker.Run(ctx)
 		if err != nil {
+			p.logger.Error("block tracker goroutine exiting", "err", err)
 			return fmt.Errorf("block tracker issue: %w", err)
 		}
+		p.logger.Warn("block tracker goroutine exiting with nil")
 		return nil
 	})
 
 	eg.Go(func() error {
 		err := p.eonTracker.Run(ctx)
 		if err != nil {
+			p.logger.Error("eon tracker goroutine exiting", "err", err)
 			return fmt.Errorf("eon tracker issue: %w", err)
 		}
+		p.logger.Warn("eon tracker goroutine exiting with nil")
 		return nil
 	})
 
 	eg.Go(func() error {
 		err := p.decryptionKeysListener.Run(ctx)
 		if err != nil {
+			p.logger.Error("decryption keys listener goroutine exiting", "err", err)
 			return fmt.Errorf("decryption keys listener issue: %w", err)
 		}
+		p.logger.Warn("decryption keys listener goroutine exiting with nil")
 		return nil
 	})
 
 	eg.Go(func() error {
 		err := p.decryptionKeysProcessor.Run(ctx)
 		if err != nil {
+			p.logger.Error("decryption keys processor goroutine exiting", "err", err)
 			return fmt.Errorf("decryption keys processor issue: %w", err)
 		}
+		p.logger.Warn("decryption keys processor goroutine exiting with nil")
 		return nil
 	})
 
 	eg.Go(func() error {
 		err := p.encryptedTxnsPool.Run(ctx)
 		if err != nil {
+			p.logger.Error("encrypted txns pool goroutine exiting", "err", err)
 			return fmt.Errorf("encrypted txns pool issue: %w", err)
 		}
+		p.logger.Warn("encrypted txns pool goroutine exiting with nil")
 		return nil
 	})
 
-	return eg.Wait()
+	err := eg.Wait()
+	if err != nil {
+		p.logger.Error("pool errgroup exiting with error", "err", err)
+	}
+	return err
 }
 
 func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
 	if p.stopped.Load() {
-		p.logger.Error("cannot provide shutter transactions - pool stopped")
+		p.logger.Warn("pool stopped, falling back to base txn provider")
 		return p.baseTxnProvider.ProvideTxns(ctx, opts...)
 	}
 
