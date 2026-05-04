@@ -365,6 +365,7 @@ func NewForkChoiceStore(
 	f.proposerBoostRoot.Store(common.Hash{})
 
 	f.highestSeen.Store(anchorState.Slot())
+	f.highestSeenRoot.Store(common.Hash(anchorRoot))
 	f.time.Store(anchorState.GenesisTime() + anchorState.BeaconConfig().SecondsPerSlot*anchorState.Slot())
 
 	// [New in Gloas:EIP7732] Initialize payload timeliness and data availability votes

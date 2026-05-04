@@ -111,7 +111,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	var initialEth1Progress atomic.Int64
 
 	destinationSlotForEL := uint64(math.MaxUint64)
-	if cfg.engine != nil && cfg.engine.SupportInsertion() && cfg.beaconCfg.DenebForkEpoch != math.MaxUint64 && clparams.SupportBackfilling(cfg.beaconCfg.DepositNetworkID) {
+	if cfg.engine != nil && cfg.engine.SupportInsertion() && cfg.beaconCfg.DenebForkEpoch != math.MaxUint64 {
 		destinationSlotForEL = cfg.beaconCfg.BellatrixForkEpoch * cfg.beaconCfg.SlotsPerEpoch
 	}
 	// Set up onNewBlock callback
@@ -324,7 +324,11 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				logger.Debug(logMsg, logArgs...)
 
 				if !isDownloadingForBeacon {
-					toprocess := highestBlockSeen - lowestBlockToReach
+					// Genesis block (0) is never collected, so the lowest reachable
+					// EL block number is 1. Clamp to avoid an off-by-one that makes
+					// progress stall at N-1/N.
+					effectiveLowest := max(lowestBlockToReach, 1)
+					toprocess := highestBlockSeen - effectiveLowest
 					processed := highestBlockSeen - uint64(currEth1Progress.Load())
 					remaining := float64(toprocess - processed)
 					log.Info("Downloading Execution History", "progress",

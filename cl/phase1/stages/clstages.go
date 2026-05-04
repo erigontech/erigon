@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/attestation_producer"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -91,7 +92,6 @@ func ClStagesCfg(
 	sn *freezeblocks.CaplinSnapshots,
 	blockReader freezeblocks.BeaconSnapshotReader,
 	dirs datadir.Dirs,
-	syncBackLoopLimit uint64,
 	caplinConfig clparams.CaplinConfig,
 	syncedData *synced_data.SyncedDataManager,
 	emitters *beaconevents.EventEmitter,
@@ -132,7 +132,7 @@ func ClStagesCfg(
 		syncedData:              syncedData,
 		emitter:                 emitters,
 		blobStore:               blobStore,
-		blockCollector:          block_collector.NewPersistentBlockCollector(log.Root(), executionClient, beaconCfg, syncBackLoopLimit, dirs.CaplinHistory),
+		blockCollector:          block_collector.NewPersistentBlockCollector(log.Root(), executionClient, beaconCfg, dirs.CaplinHistory),
 		attestationDataProducer: attestationDataProducer,
 	}
 }
@@ -462,12 +462,15 @@ func refreshStatusFromForkChoice(cfg *Cfg) {
 	// head_slot as "useless peers".
 	headRoot, headSlot, err := cfg.forkChoice.GetHead(nil)
 	if err != nil {
-		// Fallback: use the finalized checkpoint root at slot 0.
-		// Do NOT inflate head_slot to the clock slot — the head_root would
-		// still point to slot 0, creating a root/slot mismatch that causes
-		// Lighthouse to penalize us as a "useless peer".
-		headSlot = 0
-		headRoot = fc.Root
+		// GetHead can fail during initial sync when the fork graph is sparse.
+		// Fall back to the highest-seen block root/slot so peers see a
+		// consistent head rather than slot 0 which would get us banned.
+		headSlot = cfg.forkChoice.HighestSeen()
+		headRoot = cfg.forkChoice.HighestSeenRoot()
+		if headRoot == (common.Hash{}) {
+			headRoot = fc.Root
+			headSlot = fc.Epoch * cfg.beaconCfg.SlotsPerEpoch
+		}
 	}
 	if err := cfg.rpc.SetStatus(fc.Root, fc.Epoch, headRoot, headSlot); err != nil {
 		log.Trace("Could not refresh status", "err", err)
