@@ -1,5 +1,27 @@
 # Min time to tip — target + process
 
+## Headline (validated 2026-05-03)
+
+**V2 mode reaches tip on hoodi in ~10 minutes from a clean datadir.**
+Validated end-to-end with the §5b (V2-only) + §5c (quarantine) +
+§5d (latest-first ordering) + §5e (gate AddTorrentsFromDisk) work
+on this branch. Measured: **10 min 25 s** on minimal-mode prune,
+fresh datadir, V2 manifest with bootstrap publisher.
+
+This is the headline functional delivery for V2: a clean-datadir
+hoodi node reaches tip ~4× faster than the pre-V2 baseline (~44 min)
+and ~2× faster than minimal-mode-with-preverified (18:30). The
+delta is the V2 mechanism short-circuiting preverified.toml — the
+node only fetches what its peers' chain.toml advertises rather than
+the full preverified set.
+
+**Target across modes: 10 min default.** Per the constant-time-to-tip
+architectural rule, minimal / full / archive should converge here.
+Today only the V2 path achieves it; the preverified path scales with
+chain age and varies by mode. The fix is making V2 the default and
+keeping preverified for the bootstrap publisher only (§5b is the
+flag-shape that supports this).
+
 ## Target
 
 **Metric:** wall-clock time from `erigon` process start to the first
@@ -62,8 +84,9 @@ Initial measurement target on hoodi:
 | Smoke 1 | default (full) | off | ~3h | 127/32 | ~30 GB | n/a (flag off) |
 | Smoke 2 | default (full) | on | ~47 min | 97/29 | ~30 GB | unobserved (pre-observability) |
 | Item 1 | default (full) | on + tight gate | ~44 min | 97/64 | ~30 GB | 3901 BMI / 188 idx / 188 adv |
-| **Minimal** | minimal | on + tight gate | **18 min 30 s** | 127/n.a. | TBD | 1705 BMI / 209 idx / 209 adv |
-| **Archive** | archive | on + tight gate | **24 min 27 s** | 127/n.a. | TBD | 3822 BMI / 216 idx / 216 adv |
+| **Minimal (preverified)** | minimal | on + tight gate | 18 min 30 s | 127/n.a. | TBD | 1705 BMI / 209 idx / 209 adv |
+| **Archive (preverified)** | archive | on + tight gate | 24 min 27 s | 127/n.a. | TBD | 3822 BMI / 216 idx / 216 adv |
+| **V2 post-§5e (minimal)** | minimal | on + tight gate + V2 + §5e | **10 min 25 s** | varies | TBD | 773 BMI / 19 idx / 19 adv |
 
 BMI = BuildMissedIndices invocations; idx = advanced-to-Indexed
 transitions; adv = advanced-to-Advertisable transitions. With the
