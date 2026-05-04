@@ -205,51 +205,58 @@ func (i *FilesItem) closeFilesAndRemove() {
 	// Delete accessors before the data file. If the process is killed between
 	// deleting the data file and accessors, the accessor files become
 	// permanently orphaned.
-	if i.index != nil {
-		i.index.Close()
+	idx := i.index
+	i.index = nil
+	if idx != nil {
+		idx.Close()
 		// paranoic-mode on: don't delete frozen files
 		if !i.frozen {
-			if err := dir.RemoveFile(i.index.FilePath()); err != nil {
-				log.Trace("remove after close", "err", err, "file", i.index.FileName())
+			if err := dir.RemoveFile(idx.FilePath()); err != nil {
+				log.Trace("remove after close", "err", err, "file", idx.FileName())
 			}
-			if err := dir.RemoveFile(i.index.FilePath() + ".torrent"); err != nil {
-				log.Trace("remove after close", "err", err, "file", i.index.FileName())
+			if err := dir.RemoveFile(idx.FilePath() + ".torrent"); err != nil {
+				log.Trace("remove after close", "err", err, "file", idx.FileName())
 			}
 		}
-		i.index = nil
 	}
-	if i.bindex != nil {
-		i.bindex.Close()
-		if err := dir.RemoveFile(i.bindex.FilePath()); err != nil {
-			log.Trace("remove after close", "err", err, "file", i.bindex.FileName())
+
+	btidx := i.bindex
+	i.bindex = nil
+	if btidx != nil {
+		btidx.Close()
+		if err := dir.RemoveFile(btidx.FilePath()); err != nil {
+			log.Trace("remove after close", "err", err, "file", btidx.FileName())
 		}
-		if err := dir.RemoveFile(i.bindex.FilePath() + ".torrent"); err != nil {
-			log.Trace("remove after close", "err", err, "file", i.bindex.FileName())
+		if err := dir.RemoveFile(btidx.FilePath() + ".torrent"); err != nil {
+			log.Trace("remove after close", "err", err, "file", btidx.FileName())
 		}
-		i.bindex = nil
 	}
-	if i.existence != nil {
-		i.existence.Close()
-		if err := dir.RemoveFile(i.existence.FilePath); err != nil {
-			log.Trace("remove after close", "err", err, "file", i.existence.FileName)
+
+	eidx := i.existence
+	i.existence = nil
+	if eidx != nil {
+		eidx.Close()
+		if err := dir.RemoveFile(eidx.FilePath); err != nil {
+			log.Trace("remove after close", "err", err, "file", eidx.FileName)
 		}
-		if err := dir.RemoveFile(i.existence.FilePath + ".torrent"); err != nil {
-			log.Trace("remove after close", "err", err, "file", i.existence.FilePath)
+		if err := dir.RemoveFile(eidx.FilePath + ".torrent"); err != nil {
+			log.Trace("remove after close", "err", err, "file", eidx.FilePath)
 		}
-		i.existence = nil
 	}
-	if i.decompressor != nil {
-		i.decompressor.Close()
+
+	datafile := i.decompressor
+	i.decompressor = nil
+	if datafile != nil {
+		datafile.Close()
 		// paranoic-mode on: don't delete frozen files
 		if !i.frozen {
-			if err := dir.RemoveFile(i.decompressor.FilePath()); err != nil {
-				log.Trace("remove after close", "err", err, "file", i.decompressor.FileName())
+			if err := dir.RemoveFile(datafile.FilePath()); err != nil {
+				log.Trace("remove after close", "err", err, "file", datafile.FileName())
 			}
-			if err := dir.RemoveFile(i.decompressor.FilePath() + ".torrent"); err != nil {
-				log.Trace("remove after close", "err", err, "file", i.decompressor.FileName()+".torrent")
+			if err := dir.RemoveFile(datafile.FilePath() + ".torrent"); err != nil {
+				log.Trace("remove after close", "err", err, "file", datafile.FileName()+".torrent")
 			}
 		}
-		i.decompressor = nil
 	}
 }
 
