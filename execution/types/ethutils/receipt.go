@@ -97,7 +97,9 @@ func MarshalReceipt(
 		fields["effectiveGasPrice"] = (*hexutil.Big)(txn.GetTipCap().ToBig())
 	} else {
 		baseFee := header.BaseFee
-		gasPrice := new(uint256.Int).Add(baseFee, txn.GetEffectiveGasTip(baseFee))
+		effectiveTip := txn.GetEffectiveGasTip(baseFee)
+		var gasPrice uint256.Int
+		gasPrice.Add(baseFee, &effectiveTip)
 		fields["effectiveGasPrice"] = (*hexutil.Big)(gasPrice.ToBig())
 	}
 

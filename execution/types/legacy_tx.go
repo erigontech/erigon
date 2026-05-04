@@ -116,7 +116,7 @@ type LegacyTx struct {
 
 func (tx *LegacyTx) GetTipCap() *uint256.Int { return &tx.GasPrice }
 func (tx *LegacyTx) GetFeeCap() *uint256.Int { return &tx.GasPrice }
-func (tx *LegacyTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
+func (tx *LegacyTx) GetEffectiveGasTip(baseFee *uint256.Int) uint256.Int {
 	return CalcEffectiveGasTip(baseFee, tx.GetTipCap, tx.GetFeeCap)
 }
 
