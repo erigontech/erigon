@@ -974,7 +974,7 @@ func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastB
 		if !ok {
 			lastBlockInStep = 0
 		}
-		lastTxInDB, lastBlockInDB, err = rawdbv3.TxNums.Last(tx)
+		lastBlockInDB, lastTxInDB, err = rawdbv3.TxNums.Last(tx)
 		return err
 	})
 	if err != nil {
