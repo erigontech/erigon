@@ -1368,20 +1368,8 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			key := common.ToBytesZeroCopy(keyStr)
 			bareKey := key[:len(key)-8]
 			invStep := key[len(key)-8:]
-			existing, err := keysCursor.SeekBothRange(bareKey, invStep)
-			if err != nil {
+			if err := deleteLargeValuesDup(keysCursor, valsCursor, bareKey, invStep); err != nil {
 				return err
-			}
-			if len(existing) == dupRecordLen && bytes.Equal(existing[:8], invStep) {
-				if binary.BigEndian.Uint64(existing[8:]) != deletionSeqID {
-					copy(seqKey[:], existing[8:])
-					if err := valsCursor.Delete(seqKey[:]); err != nil {
-						return err
-					}
-				}
-				if err := keysCursor.DeleteCurrent(); err != nil {
-					return err
-				}
 			}
 			if value == nil {
 				continue
@@ -1390,20 +1378,8 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			// unwind cycle). Put() on a DupSort cursor appends a NEW dup when the
 			// seqID differs, so without this we'd accumulate duplicate dups at the
 			// same invStep across repeated unwind cycles.
-			existingAtUnwind, err := keysCursor.SeekBothRange(bareKey, unwindStepBytes[:])
-			if err != nil {
+			if err := deleteLargeValuesDup(keysCursor, valsCursor, bareKey, unwindStepBytes[:]); err != nil {
 				return err
-			}
-			if len(existingAtUnwind) == dupRecordLen && bytes.Equal(existingAtUnwind[:8], unwindStepBytes[:]) {
-				if binary.BigEndian.Uint64(existingAtUnwind[8:]) != deletionSeqID {
-					copy(seqKey[:], existingAtUnwind[8:])
-					if err := valsCursor.Delete(seqKey[:]); err != nil {
-						return err
-					}
-				}
-				if err := keysCursor.DeleteCurrent(); err != nil {
-					return err
-				}
 			}
 			newSeqID := uint64(deletionSeqID)
 			if len(value) > 0 {
@@ -2111,6 +2087,23 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	return stat, err
 }
 
+// deleteLargeValuesDup removes the dup at invStep for bareKey from a LargeValues DupSort
+// keys cursor, deleting the corresponding vals row when the seqID is not the deletion sentinel.
+func deleteLargeValuesDup(keysCursor kv.RwCursorDupSort, valsCursor kv.RwCursor, bareKey, invStep []byte) error {
+	existing, err := keysCursor.SeekBothRange(bareKey, invStep)
+	if err != nil || len(existing) != dupRecordLen || !bytes.Equal(existing[:8], invStep) {
+		return err
+	}
+	if binary.BigEndian.Uint64(existing[8:]) != deletionSeqID {
+		var seqKey [8]byte
+		copy(seqKey[:], existing[8:])
+		if err := valsCursor.Delete(seqKey[:]); err != nil {
+			return err
+		}
+	}
+	return keysCursor.DeleteCurrent()
+}
+
 // pruneLargeValues prunes CommitmentKeys+CommitmentVals for a LargeValues domain by
 // scanning every (bareKey, invStep+seqID) dup with Next() instead of NextNoDup().
 // NextNoDup() only sees the first (newest) dup per bareKey; when that dup is beyond
@@ -2134,7 +2127,6 @@ func (dt *DomainRoTx) pruneLargeValues(ctx context.Context, rwTx kv.RwTx, txFrom
 		return stat, err
 	}
 
-	var pruned uint64
 	for ; bareKey != nil; bareKey, dupVal, err = keysC.Next() {
 		if err != nil {
 			return stat, err
@@ -2157,9 +2149,10 @@ func (dt *DomainRoTx) pruneLargeValues(ctx context.Context, rwTx kv.RwTx, txFrom
 			continue
 		}
 
-		seqID := dupVal[8:]
-		if binary.BigEndian.Uint64(seqID) != deletionSeqID {
-			if err = rwTx.Delete(dt.d.ValuesTable, seqID); err != nil {
+		var seqKey [8]byte
+		copy(seqKey[:], dupVal[8:])
+		if binary.BigEndian.Uint64(seqKey[:]) != deletionSeqID {
+			if err = rwTx.Delete(dt.d.ValuesTable, seqKey[:]); err != nil {
 				return stat, err
 			}
 		}
@@ -2174,7 +2167,6 @@ func (dt *DomainRoTx) pruneLargeValues(ctx context.Context, rwTx kv.RwTx, txFrom
 		if txNum > stat.MaxTxNum {
 			stat.MaxTxNum = txNum
 		}
-		pruned++
 
 		select {
 		case <-logEvery.C:
@@ -2182,7 +2174,7 @@ func (dt *DomainRoTx) pruneLargeValues(ctx context.Context, rwTx kv.RwTx, txFrom
 		default:
 		}
 
-		if pruned >= limit {
+		if stat.PruneCountValues >= limit {
 			stat.LastPrunedValue = common.Copy(bareKey)
 			stat.ValueProgress = prune.InProgress
 			return stat, nil
@@ -2193,7 +2185,6 @@ func (dt *DomainRoTx) pruneLargeValues(ctx context.Context, rwTx kv.RwTx, txFrom
 	}
 
 	stat.ValueProgress = prune.Done
-	stat.LastPrunedValue = nil
 	return stat, nil
 }
 
