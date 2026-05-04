@@ -1,46 +1,112 @@
-# Real validation flow — publisher and consumer
+# Real validation flow — per-step batch model
 
 Pre-PR feature-completeness item raised 2026-05-04. The lifecycle's
-`OnValidation` slot was previously wired with a `nil` chain (accept
-all) — the framework existed but no checks ran. This plan defines
-the real validation flow, splits the chain into switchable tiers by
-performance cost, and documents the publisher vs consumer
-expectations.
+`OnValidation` slot was wired with a `nil` chain (accept all). This
+plan defines the validation flow.
+
+## Scope (revised 2026-05-04)
+
+**Validation is per-step, not per-file.** The publisher publishes
+*coherent sets of files* for a step (e.g. `headers.seg` + `bodies.seg`
++ `transactions.seg` + their indexes for one block step). Validation
+runs **across the whole step** before any file in it is advertised.
+Files do not advance individually — the step does, atomically.
+
+**Timing matters.** The default batch check must be cheap. Heavy
+checks are switchable. The simplest meaningful default is
+"are all files for this step present?" — a stat-level completeness
+check across the grouped file set. Anything deeper is opt-in.
+
+**Indexes are step-siblings.** A `.seg` and its `.idx` files (or a
+`.kv` and its `.kvi`, a `.v` and its `.ef` / `.efi`, etc.) are
+members of the same step. The presence check rejects any step where
+the dependent index files are absent — the publisher must NOT
+advertise a seg whose indexes haven't built. This is what the
+existing `FileEntry.Dependencies` field encodes; the per-step
+presence check verifies that every primary file's deps are also
+present (Local) before the step advances. No orphan-seg outcome is
+possible.
+
+**Minimum vs all (availability refinement).** A step's file set has
+two sub-tiers:
+
+  - **Minimum:** enough files to publish a coherent unit that
+    consumers can use immediately (e.g. headers + their index for
+    a block step; the domain `.kv` + `.kvi` for a state step).
+    Validating the minimum first lets the publisher advertise it
+    while the rest of the step is still downloading or building.
+  - **All:** the remaining files that complete the step (bodies +
+    transactions for blocks; history `.v` + `.ef` + `.efi` for
+    state).
+
+Validating + publishing minimum before all improves availability —
+consumers operating at tip get the minimum quickly without waiting
+for the full step. Publisher publishes minimum first, then rest as
+they validate.
+
+For the initial implementation: the data model carries a
+`MinimumSet` flag on `FileEntry` (or equivalent), but the default
+mapping treats minimum = whole step (single-tier). The
+two-sub-tier refinement lands as a follow-up once the per-kind
+"what's minimum" is concretely defined (likely in the same
+follow-up that finalises the minimum-set companion-scenario in
+`20260502-min-time-to-tip-target.md`).
 
 ## Tiers
 
-Validation is a layered chain. Each tier adds cost and catches a
-different class of problem. Operators pick the floor that matches
-their tolerance for the cost / coverage tradeoff.
+The model has three levels of cost.
 
-### Tier 1 — Metadata shape (always-on)
+### Tier 0 — Per-file metadata (always-on, at AddFile)
 
-Cheap checks against `FileEntry` fields, no I/O:
+Runs at the moment a `FileEntry` enters the inventory, not at
+advertise time. Cheap checks against fields, no I/O:
 
   - `NameNotEmpty` — empty Name is a producer bug.
   - `RangeOrdering` — `FromStep < ToStep` for stepped files.
   - `KindConsistencyFromName` — Kind agrees with the name's pattern.
 
-Cost: ~µs per file. No flag — always runs.
+Cost: ~µs per file. Rejects malformed entries before they pollute
+the inventory. No flag — always runs.
 
-### Tier 2 — Disk shape (default-on)
+### Tier 1 — Per-step presence (default, batch)
 
-Reads file metadata + a byte or two. Catches truncation, zero-byte
-producer failures, mismatched torrent length:
+The default batch check across a step's grouped file set:
 
-  - `ContentNotEmpty` — opens file, reads 1 byte, rejects if EOF.
-  - `SizeMatchesTorrent` — opens `<file>.torrent` sidecar, reads
-    full file, compares byte count.
+  - All primary files for the step are present in inventory at
+    `LifecycleIndexed`.
+  - Each primary's `Dependencies` (its index files) are also
+    present and `Local`.
+  - Stat-level disk check that every Named file is openable (no
+    orphan torrent without bytes).
 
-Cost: O(file size) bytes copied (the SizeMatches read), but linear
-and disk-cache-friendly. Hundreds of MB/s on SSD; Erigon's snapshot
-files are 100s of MB to 1 GB each. Per-file: <1 s.
+Cost: O(files-in-step) stat calls. ~ms total per step. No content
+read.
 
-Default-on for both publisher and consumer. Disabling tier 2 is
-opt-out via `--snap.validate-disk=false` (escape hatch for
-debugging; not a production posture).
+This is the **producer attestation** floor. A step that passes
+Tier 1 means the publisher has all the files it claims to have for
+that step + their indexes — no orphan segs, no missing accessors.
+It does NOT mean the bytes are intrinsically valid; for that, run
+Tier 2 or 3.
 
-### Tier 3 — Format integrity (opt-in, slow)
+### Tier 2 — Per-step disk shape (opt-in, batch, ~1 s/step)
+
+Reads file content. Catches truncation, zero-byte producer
+failures, mismatched torrent length:
+
+  - `ContentNotEmpty` per file in step.
+  - `SizeMatchesTorrent` per file in step (uses `os.Stat` against
+    torrent metadata length — single syscall per file, not a full
+    read).
+
+Cost: O(files-in-step) stat calls (or single-byte reads for
+ContentNotEmpty). Sub-second per step.
+
+Switchable: `--snap.validate-disk` (default false on consumer,
+default true on publisher). Lightweight enough that publishers
+should run it; consumers can skip when trust-rooted to the
+publisher's signature.
+
+### Tier 3 — Per-step format integrity (opt-in, slow)
 
 Parses the file's content according to its format and verifies
 internal structure. The validators wrapping `db/integrity/`:
@@ -179,14 +245,17 @@ the flag-interface section above: publisher defaults to Tier 3 on
 
 ## Flag interface
 
-  - `--snap.validate-format` (bool, default false; see publisher
-    note above) — enables Tier 3.
-  - `--snap.validate-disk` (bool, default true) — escape hatch for
-    Tier 2; disabling is operator-debugging only.
+  - `--snap.validate-disk` (bool, default false on consumer,
+    default true on publisher) — enables Tier 2 batch validators
+    (content + size).
+  - `--snap.validate-format` (bool, default false on consumer,
+    default true on publisher) — enables Tier 3 batch validators.
   - `--snap.validate-cross-file` (bool, default false) —
     placeholder for Tier 4 (no-op until implemented).
 
-Tier 1 has no flag (always-on, free).
+Tier 0 (per-file metadata at AddFile) and Tier 1 (per-step
+presence) are always-on and have no flag. They are the floor that
+makes "advertised step = coherent file set" true.
 
 ## Performance profile (to measure)
 
@@ -222,22 +291,40 @@ For the PR:
 
 ## Implementation sequence
 
-  1. Wire DefaultStage1ChainWithDisk (Tier 1 + Tier 2) into
-     OnValidation. **DONE.**
-  2. Add `--snap.validate-format` flag + ethconfig field.
-  3. Convert remaining `db/integrity` checks to Validator types
-     (incremental — start with the highest-value ones:
-     CommitmentIntegrity, EFFiles).
-  4. Construct the Tier 3 chain from the converted validators when
-     `--snap.validate-format` is set; append to the default chain.
-  5. Set publisher default true / consumer default false based on
-     `--snap.bootstrap-from-preverified`.
-  6. Hoodi measurement run (publisher with Tier 3 on; consumer
-     with Tier 3 off) → fill in the perf table.
-  7. Update operational guide.
+  1. **Per-file Tier 0 at AddFile.** Move the existing per-file
+     name/range/kind chain from `OnValidation` (lifecycle hook) to
+     the inventory's `AddFile` path. Files that fail metadata
+     checks never enter the inventory.
+  2. **Per-step batch hook on Driver.** Replace `OnValidation`
+     (per-file) with `OnBatchValidation` (per-step). The driver
+     iterates files at `LifecycleIndexed`, groups them by their
+     step key (`FromStep`, `ToStep`, `Domain`), and for each
+     complete step (all primary files at Indexed AND all deps
+     Local) runs the batch chain, then atomically advances the
+     whole step to `LifecycleAdvertisable`.
+  3. **Default Tier 1 batch validator: `AllFilesPresent`.** Stat
+     every file in the step + every dependency. Pass = step is
+     coherent. Fail = log + leave at Indexed for retry; persistent
+     failures quarantine the step.
+  4. **Tier 2 batch validators: `BatchContentNotEmpty` +
+     `BatchSizeMatchesTorrent`.** Wrap the per-file equivalents to
+     run across the step. Gated on `--snap.validate-disk`.
+  5. **Tier 3 batch validators.** Plug existing
+     `db/integrity.BlocksCheck` and `InvertedIndexCheck` into the
+     batch chain when `--snap.validate-format` is set. They're
+     already `BatchValidator`s; just need wiring.
+  6. **Flag plumbing.** `--snap.validate-disk` and
+     `--snap.validate-format` on `cmd/utils/flags.go`,
+     `node/ethconfig/config.go`. Defaults derived from
+     `BootstrapFromPreverified` (publisher = true, consumer = false).
+  7. **Hoodi measurement run** with the new flow → record the
+     per-step batch timings; confirm the presence-only default
+     stays sub-second per step.
+  8. **Update operational guide** with the per-step model + flag
+     defaults.
 
-Items 2–7 land as additional commits before the draft PR opens.
-Tier 4 stays out-of-scope.
+Items 1–8 land as commits before the draft PR opens. Tier 4 stays
+out-of-scope.
 
 ## Open questions
 
