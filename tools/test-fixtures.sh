@@ -41,4 +41,4 @@ while IFS=$'\t' read -r name url want; do
 	fi
 	mv "$path.tmp" "$path"
 	echo "$name: ok"
-done < <(jq -r 'to_entries | sort_by(.key) | .[] | "\(.key)\t\(.value.url)\t\(.value.sha256)"' "$manifest")
+done < <(jq -r 'to_entries | sort_by(.key) | .[] | "\(.key)\t\(.value.url)\t\(.value.sha256)"' "$manifest" | tr -d '\r')
