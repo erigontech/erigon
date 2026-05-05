@@ -279,7 +279,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 	baseFee := test.Context.BaseFee
 	txContext := evmtypes.TxContext{
 		Origin:   origin,
-		GasPrice: *tx.GetEffectiveGasTip(baseFee),
+		GasPrice: tx.GetEffectiveGasTip(baseFee),
 	}
 	m := execmoduletester.New(b)
 	dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
