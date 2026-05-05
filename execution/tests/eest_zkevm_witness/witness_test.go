@@ -75,6 +75,7 @@ func TestExecutionSpecWitness(t *testing.T) {
 		if test.M == nil {
 			t.Fatal("ExecModuleTester not set after BlockTest.Run")
 		}
+		defer test.M.Close()
 
 		// Set up the debug API using the test's ExecModuleTester.
 		base := jsonrpc.NewBaseApi(
