@@ -247,7 +247,7 @@ func (s *p2pManager) UpdateENRAttSubnets(subnetIndex int, on bool) {
 		subnetField[subnetIndex/8] &^= 1 << (subnetIndex % 8)
 	}
 	s.udpv5.LocalNode().Set(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &subnetField))
-	log.Info("[Sentinel] Updated att subnet", "subnetIndex", subnetIndex, "on", on)
+	log.Debug("[Sentinel] Updated att subnet", "subnetIndex", subnetIndex, "on", on)
 }
 
 func (s *p2pManager) UpdateENRSyncNets(subnetIndex int, on bool) {
@@ -268,5 +268,5 @@ func (s *p2pManager) UpdateENRSyncNets(subnetIndex int, on bool) {
 		subnetField[subnetIndex/8] &^= 1 << (subnetIndex % 8)
 	}
 	s.udpv5.LocalNode().Set(enr.WithEntry(s.cfg.NetworkConfig.SyncCommsSubnetKey, &subnetField))
-	log.Info("[Sentinel] Updated sync subnet", "subnetIndex", subnetIndex, "on", on)
+	log.Debug("[Sentinel] Updated sync subnet", "subnetIndex", subnetIndex, "on", on)
 }

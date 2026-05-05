@@ -278,7 +278,7 @@ func (f *ForkChoiceStore) validatePayloadWithEL(
 	parentBlockRoot := block.Block.ParentRoot
 	payloadStatus, err := f.engine.NewPayload(ctx, envelope.Payload, &parentBlockRoot, versionedHashes, executionRequestsList)
 	monitor.ObserveNewPayloadTime(timeStartExec)
-	log.Debug("[validatePayloadWithEL] NewPayload", "status", payloadStatus, "beaconBlockRoot", beaconBlockRoot)
+	log.Trace("[validatePayloadWithEL] NewPayload", "status", payloadStatus, "beaconBlockRoot", beaconBlockRoot)
 
 	// Track payload status by execution block hash for parent payload validation
 	executionBlockHash := envelope.Payload.BlockHash
@@ -297,7 +297,7 @@ func (f *ForkChoiceStore) validatePayloadWithEL(
 		}
 		return errELBehind
 	case execution_client.PayloadStatusNotValidated:
-		log.Debug("validatePayloadWithEL: payload is not validated yet", "beaconBlockRoot", beaconBlockRoot)
+		log.Trace("validatePayloadWithEL: payload is not validated yet", "beaconBlockRoot", beaconBlockRoot)
 		// optimistic block candidate
 		if err := f.optimisticStore.AddOptimisticCandidate(block.Block); err != nil {
 			return fmt.Errorf("failed to add block to optimistic store: %v", err)
@@ -374,7 +374,7 @@ func (f *ForkChoiceStore) applyEnvelopeLocked(ctx context.Context, signedEnvelop
 		// Per spec: assert envelope.beacon_block_root in store.block_states
 		// Return an error so callers can distinguish "queued" from "applied".
 		f.pendingEnvelopes.Add(beaconBlockRoot, signedEnvelope)
-		log.Debug("OnExecutionPayload: block not found, queuing envelope for later", "beaconBlockRoot", common.Hash(beaconBlockRoot))
+		log.Trace("OnExecutionPayload: block not found, queuing envelope for later", "beaconBlockRoot", common.Hash(beaconBlockRoot))
 		return false, fmt.Errorf("%w: block state not found for beacon_block_root %v", ErrIgnore, common.Hash(beaconBlockRoot))
 	}
 
@@ -382,7 +382,7 @@ func (f *ForkChoiceStore) applyEnvelopeLocked(ctx context.Context, signedEnvelop
 	block, ok := f.forkGraph.GetBlock(beaconBlockRoot)
 	if !ok || block == nil {
 		f.pendingEnvelopes.Add(beaconBlockRoot, signedEnvelope)
-		log.Debug("OnExecutionPayload: block not found in fork graph, queuing envelope", "beaconBlockRoot", common.Hash(beaconBlockRoot))
+		log.Trace("OnExecutionPayload: block not found in fork graph, queuing envelope", "beaconBlockRoot", common.Hash(beaconBlockRoot))
 		return false, fmt.Errorf("%w: block not found in fork graph for beacon_block_root %v", ErrIgnore, common.Hash(beaconBlockRoot))
 	}
 

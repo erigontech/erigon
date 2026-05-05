@@ -166,7 +166,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 				log.Warn("OnBlock: GetBlobs failed", "blockRoot", common.Hash(blockRoot), "err", err)
 			}
 			elHasBlobs = err == nil && len(blobsWithProof) == len(versionedHashes) && len(proofs) == len(versionedHashes)
-			log.Debug("OnBlock: EL blob data availability", "blockRoot", common.Hash(blockRoot), "elHasBlobs", elHasBlobs)
+			log.Trace("OnBlock: EL blob data availability", "blockRoot", common.Hash(blockRoot), "elHasBlobs", elHasBlobs)
 		}
 
 		// Check if blob data is available (skip if blobs are in txpool)
@@ -217,7 +217,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			timeStartExec := time.Now()
 			payloadStatus, err := f.engine.NewPayload(ctx, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes, executionRequestsList)
 			monitor.ObserveNewPayloadTime(timeStartExec)
-			log.Debug("[OnBlock] NewPayload", "status", payloadStatus, "blockSlot", block.Block.Slot)
+			log.Trace("[OnBlock] NewPayload", "status", payloadStatus, "blockSlot", block.Block.Slot)
 
 			// Track payload status by execution block hash for GLOAS parent payload validation
 			executionBlockHash := block.Block.Body.ExecutionPayload.BlockHash
@@ -228,7 +228,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 				log.Debug("OnBlock: EL failed to process block", "block", common.Hash(blockRoot), "err", err)
 				return fmt.Errorf("%w: %v", ErrNewPayloadNoStatus, err)
 			case execution_client.PayloadStatusNotValidated:
-				log.Debug("OnBlock: block is not validated yet", "block", common.Hash(blockRoot))
+				log.Trace("OnBlock: block is not validated yet", "block", common.Hash(blockRoot))
 				// optimistic block candidate
 				if err := f.optimisticStore.AddOptimisticCandidate(blockRoot, block.Block); err != nil {
 					return fmt.Errorf("failed to add block to optimistic store: %v", err)
@@ -339,7 +339,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		// incremental hash cache to diverge.
 		if pending, ok := f.pendingEnvelopes.Get(common.Hash(blockRoot)); ok {
 			f.pendingEnvelopes.Remove(common.Hash(blockRoot))
-			log.Debug("OnBlock: processing pending envelope", "blockRoot", common.Hash(blockRoot))
+			log.Trace("OnBlock: processing pending envelope", "blockRoot", common.Hash(blockRoot))
 			// Always validate payload with EL for pending envelopes, regardless of the caller's newPayload flag.
 			// During forward sync newPayload is false, but the envelope still needs to reach the EL;
 			// otherwise the EL never learns about this block and the chain stalls.

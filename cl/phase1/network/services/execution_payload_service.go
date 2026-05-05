@@ -130,7 +130,7 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 	beaconBlockRoot := envelope.BeaconBlockRoot
 	builderIndex := envelope.BuilderIndex
 
-	log.Debug("Received execution payload via gossip",
+	log.Trace("Received execution payload via gossip",
 		"beaconBlockRoot", beaconBlockRoot,
 		"builderIndex", builderIndex)
 
@@ -148,7 +148,7 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 		// marks the envelope as processed without ever notifying the EL, permanently
 		// breaking the chain.
 		s.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, false, true)
-		log.Debug("Queued execution payload envelope for later processing",
+		log.Trace("Queued execution payload envelope for later processing",
 			"beaconBlockRoot", beaconBlockRoot,
 			"builderIndex", builderIndex)
 		return ErrIgnore
@@ -189,7 +189,7 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 		BlockRoot: beaconBlockRoot,
 	})
 
-	log.Debug("Processed execution payload via gossip",
+	log.Trace("Processed execution payload via gossip",
 		"slot", block.Block.Slot,
 		"beaconBlockRoot", beaconBlockRoot,
 		"builderIndex", builderIndex)
@@ -269,7 +269,7 @@ func (s *executionPayloadService) processPendingEnvelopes(ctx context.Context) {
 		if time.Since(job.creationTime) > pendingEnvelopeExpiry {
 			s.pendingEnvelopes.Delete(pendingKey)
 			s.pendingCount.Add(-1)
-			log.Debug("Pending envelope expired", "blockRoot", pendingKey.blockRoot)
+			log.Trace("Pending envelope expired", "blockRoot", pendingKey.blockRoot)
 			return true
 		}
 
@@ -285,7 +285,7 @@ func (s *executionPayloadService) processPendingEnvelopes(ctx context.Context) {
 
 		// Re-run full validation via ProcessMessage
 		if err := s.ProcessMessage(ctx, nil, job.envelope); err != nil {
-			log.Debug("Failed to process pending envelope", "blockRoot", pendingKey.blockRoot, "err", err)
+			log.Trace("Failed to process pending envelope", "blockRoot", pendingKey.blockRoot, "err", err)
 		}
 		return true
 	})

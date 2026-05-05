@@ -1081,7 +1081,7 @@ func (a *ApiHandler) produceBeaconBody(
 				if beaconBody.PayloadAttestations != nil {
 					paCount = beaconBody.PayloadAttestations.Len()
 				}
-				log.Info("BlockProduction: aggregatePayloadAttestations took", "duration", time.Since(start), "selectedPAs", paCount)
+				log.Debug("BlockProduction: aggregatePayloadAttestations took", "duration", time.Since(start), "selectedPAs", paCount)
 			}()
 			beaconBody.PayloadAttestations = a.aggregatePayloadAttestations(baseState, targetSlot-1, baseBlockRoot)
 		}()
@@ -1761,7 +1761,7 @@ func (a *ApiHandler) broadcastSelfBuildEnvelope(ctx context.Context, blk *cltype
 	if validatorSignedEnvelope != nil && validatorSignedEnvelope.Message != nil {
 		// Use the validator-signed envelope directly (real BLS signature).
 		signedEnvelope = validatorSignedEnvelope
-		log.Info("BlockPublishing: using validator-signed execution payload envelope",
+		log.Debug("BlockPublishing: using validator-signed execution payload envelope",
 			"slot", blk.Block.Slot, "blockRoot", blockRoot)
 	} else {
 		// Fallback: reconstruct from cache. This path uses InfiniteSignature and will
@@ -1772,7 +1772,7 @@ func (a *ApiHandler) broadcastSelfBuildEnvelope(ctx context.Context, blk *cltype
 			return fmt.Errorf("self-build payload not found in cache for block hash %v", bid.Message.BlockHash)
 		}
 
-		log.Warn("BlockPublishing: no validator-signed envelope provided, falling back to InfiniteSignature (will fail BLS verification on peers)",
+		log.Debug("BlockPublishing: no validator-signed envelope provided, falling back to InfiniteSignature (will fail BLS verification on peers)",
 			"slot", blk.Block.Slot, "blockRoot", blockRoot, "blockHash", bid.Message.BlockHash)
 
 		execReqs := cached.ExecutionRequests
@@ -1809,7 +1809,7 @@ func (a *ApiHandler) broadcastSelfBuildEnvelope(ctx context.Context, blk *cltype
 	// pre-signed envelope) will fail BLS verification on peers, causing them to
 	// penalize and ban us. Process locally only until the VC supports envelope signing.
 	if signedEnvelope.Signature == common.Bytes96(bls.InfiniteSignature) {
-		log.Warn("BlockPublishing: skipping gossip of self-build envelope with InfiniteSignature (no valid BLS signature)",
+		log.Debug("BlockPublishing: skipping gossip of self-build envelope with InfiniteSignature (no valid BLS signature)",
 			"slot", blk.Block.Slot, "blockRoot", blockRoot, "blockHash", bid.Message.BlockHash)
 	} else {
 		// Broadcast the envelope on the execution_payload gossip topic
@@ -1820,7 +1820,7 @@ func (a *ApiHandler) broadcastSelfBuildEnvelope(ctx context.Context, blk *cltype
 		if err := a.gossipManager.Publish(ctx, gossip.TopicNameExecutionPayload, encodedSSZ); err != nil {
 			a.logger.Error("Failed to publish self-build execution payload envelope", "err", err, "blockRoot", blockRoot)
 		} else {
-			log.Info("BlockPublishing: broadcast self-build execution payload envelope",
+			log.Debug("BlockPublishing: broadcast self-build execution payload envelope",
 				"slot", blk.Block.Slot,
 				"blockRoot", blockRoot,
 				"blockHash", bid.Message.BlockHash)

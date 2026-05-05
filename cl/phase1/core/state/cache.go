@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/log/v3"
 )
 
 const (
@@ -95,9 +94,6 @@ func (b *CachingBeaconState) BlockRoot() ([32]byte, error) {
 }
 
 func (b *CachingBeaconState) SetPreviousStateRoot(root common.Hash) {
-	if root != (common.Hash{}) {
-		log.Debug("SetPreviousStateRoot", "slot", b.Slot(), "root", root)
-	}
 	b.previousStateRoot = root
 }
 

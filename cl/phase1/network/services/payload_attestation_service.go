@@ -129,7 +129,7 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 	validatorIndex := msg.ValidatorIndex
 	blockRoot := data.BeaconBlockRoot
 
-	log.Debug("Received payload attestation message via gossip",
+	log.Trace("Received payload attestation message via gossip",
 		"slot", slot,
 		"validatorIndex", validatorIndex,
 		"blockRoot", blockRoot)
@@ -153,7 +153,7 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 	if _, ok := s.forkchoiceStore.GetHeader(blockRoot); !ok {
 		// Block hasn't arrived yet, queue attestation for later processing
 		s.queuePendingAttestation(blockRoot, msg)
-		log.Debug("Queued payload attestation for later processing",
+		log.Trace("Queued payload attestation for later processing",
 			"blockRoot", blockRoot,
 			"validatorIndex", validatorIndex)
 		return nil
@@ -178,7 +178,7 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 	// Emit SSE event for payload_attestation_message [New in Gloas:EIP7732]
 	s.emitters.Operation().SendPayloadAttestationMessage(msg)
 
-	log.Debug("Processed payload attestation message via gossip",
+	log.Trace("Processed payload attestation message via gossip",
 		"slot", slot,
 		"validatorIndex", validatorIndex,
 		"blockRoot", blockRoot,
@@ -252,7 +252,7 @@ func (s *payloadAttestationService) processPendingAttestations(ctx context.Conte
 		if time.Since(job.creationTime) > pendingPayloadAttestationExpiry {
 			s.pendingAttestations.Delete(pendingKey)
 			s.pendingCount.Add(-1)
-			log.Debug("Pending payload attestation expired", "blockRoot", pendingKey.blockRoot)
+			log.Trace("Pending payload attestation expired", "blockRoot", pendingKey.blockRoot)
 			return true
 		}
 
@@ -260,7 +260,7 @@ func (s *payloadAttestationService) processPendingAttestations(ctx context.Conte
 		if !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(job.msg.Data.Slot) {
 			s.pendingAttestations.Delete(pendingKey)
 			s.pendingCount.Add(-1)
-			log.Debug("Pending payload attestation slot mismatch", "blockRoot", pendingKey.blockRoot)
+			log.Trace("Pending payload attestation slot mismatch", "blockRoot", pendingKey.blockRoot)
 			return true
 		}
 
@@ -275,7 +275,7 @@ func (s *payloadAttestationService) processPendingAttestations(ctx context.Conte
 
 		// Re-run validation via ProcessMessage
 		if err := s.ProcessMessage(ctx, nil, job.msg); err != nil {
-			log.Debug("Failed to process pending payload attestation", "blockRoot", pendingKey.blockRoot, "err", err)
+			log.Trace("Failed to process pending payload attestation", "blockRoot", pendingKey.blockRoot, "err", err)
 		}
 		return true
 	})

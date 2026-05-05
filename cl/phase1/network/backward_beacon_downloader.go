@@ -187,7 +187,7 @@ func (b *BackwardBeaconDownloader) fetchBlockRange(ctx context.Context) ([]*clty
 	if b.httpPreferred.Load() && b.httpFallbackURL != "" {
 		blocks, err := fetchBlocksFromBeaconAPI(ctx, b.httpFallbackURL, start, count, b.beaconCfg)
 		if err == nil && len(blocks) > 0 {
-			log.Info("[BackwardBeaconDownloader] fetched blocks from beacon API", "fromSlot", start, "count", len(blocks))
+			log.Debug("[BackwardBeaconDownloader] fetched blocks from beacon API", "fromSlot", start, "count", len(blocks))
 			return blocks, nil
 		}
 		// HTTP failed — fall back to P2P probing.
@@ -222,7 +222,7 @@ func (b *BackwardBeaconDownloader) fetchBlockRange(ctx context.Context) ([]*clty
 			}
 			blocks, err := fetchBlocksFromBeaconAPI(ctx, b.httpFallbackURL, start, count, b.beaconCfg)
 			if err == nil && len(blocks) > 0 {
-				log.Info("[BackwardBeaconDownloader] P2P failed, fetched blocks from beacon API", "fromSlot", start, "count", len(blocks))
+				log.Debug("[BackwardBeaconDownloader] P2P failed, fetched blocks from beacon API", "fromSlot", start, "count", len(blocks))
 				b.httpPreferred.Store(true)
 				return blocks, nil
 			}
@@ -374,7 +374,7 @@ func (b *BackwardBeaconDownloader) fetchGloasEnvelopes(ctx context.Context, resp
 		envelopes := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, len(fullRoots))
 		fetched := fetchEnvelopesFromBeaconAPI(ctx, b.httpFallbackURL, responses, fullRoots, envelopes, b.beaconCfg)
 		if fetched > 0 {
-			log.Info("[BackwardBeaconDownloader] fetched envelopes from beacon API", "count", fetched)
+			log.Debug("[BackwardBeaconDownloader] fetched envelopes from beacon API", "count", fetched)
 		}
 		return envelopes
 	}
@@ -390,7 +390,7 @@ func (b *BackwardBeaconDownloader) fetchGloasEnvelopes(ctx context.Context, resp
 		}
 		fetched := fetchEnvelopesFromBeaconAPI(ctx, b.httpFallbackURL, responses, fullRoots, envelopes, b.beaconCfg)
 		if fetched > 0 {
-			log.Info("[BackwardBeaconDownloader] fetched envelopes from beacon API", "count", fetched)
+			log.Debug("[BackwardBeaconDownloader] fetched envelopes from beacon API", "count", fetched)
 		}
 	}
 	return envelopes
