@@ -20,6 +20,8 @@ import (
 	"bytes"
 	"crypto/rand"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // TestWarmupCache_Basic tests basic put/get operations
@@ -391,4 +393,58 @@ func TestWarmupCache_Stats(t *testing.T) {
 	if _, ok := cache.GetAccount(ak); !ok {
 		t.Fatal("account data should survive ResetStats")
 	}
+}
+
+// TestWarmupCache_DirtyFlag verifies the dirty flag scaffolding —
+// MarkBranchDirty + PutBranchIfClean — that prevents late writers from
+// clobbering fresh data once cross-block persistence is wired up.
+func TestWarmupCache_DirtyFlag(t *testing.T) {
+	cache := NewWarmupCache()
+	key := []byte("k-branch")
+	v1 := []byte("first-value")
+	v2 := []byte("second-value-skipped")
+
+	// First Put always succeeds (no existing entry to be dirty).
+	require.True(t, cache.PutBranchIfClean(key, v1))
+	got, ok := cache.GetBranch(key)
+	require.True(t, ok)
+	require.Equal(t, v1, got)
+
+	// Marking dirty doesn't remove the entry — Get still returns it.
+	cache.MarkBranchDirty(key)
+	got, ok = cache.GetBranch(key)
+	require.True(t, ok, "MarkBranchDirty should not evict; consumers decide what to do with dirty data")
+	require.Equal(t, v1, got)
+
+	// PutBranchIfClean refuses to overwrite a dirty entry.
+	require.False(t, cache.PutBranchIfClean(key, v2),
+		"PutBranchIfClean must skip when entry is dirty")
+	got, ok = cache.GetBranch(key)
+	require.True(t, ok)
+	require.Equal(t, v1, got, "dirty value must be preserved (write was rejected)")
+
+	// PutBranch (non-If-Clean variant) overwrites unconditionally — used
+	// by the fold encoder path that holds the canonical new value.
+	cache.PutBranch(key, v2)
+	got, ok = cache.GetBranch(key)
+	require.True(t, ok)
+	require.Equal(t, v2, got)
+
+	// After unconditional overwrite, the new entry is no longer dirty
+	// (fresh entry replaces the dirty one).
+	require.True(t, cache.PutBranchIfClean(key, []byte("third-value")),
+		"PutBranchIfClean must accept after unconditional Put cleared the dirty entry")
+}
+
+// TestWarmupCache_DirtyFlag_MarkAbsentKey verifies that marking a key
+// dirty when no entry exists is a no-op (no panic, no entry created).
+func TestWarmupCache_DirtyFlag_MarkAbsentKey(t *testing.T) {
+	cache := NewWarmupCache()
+	cache.MarkBranchDirty([]byte("never-stored"))
+	_, ok := cache.GetBranch([]byte("never-stored"))
+	require.False(t, ok, "MarkBranchDirty on absent key should not create an entry")
+
+	// PutBranchIfClean for the same absent key should succeed (no dirty
+	// entry exists, so the write proceeds).
+	require.True(t, cache.PutBranchIfClean([]byte("never-stored"), []byte("v")))
 }
