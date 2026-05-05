@@ -32,13 +32,11 @@ func TestAllFilesPresent_AcceptsExistingFiles(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.kv"), []byte("x"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.kvi"), []byte("y"), 0o644))
 
-	group := snapshot.StepGroup{
-		Files: []*snapshot.FileEntry{
-			{Name: "a.kv", Local: true},
-			{Name: "a.kvi", Local: true},
-		},
+	files := []*snapshot.FileEntry{
+		{Name: "a.kv", Local: true},
+		{Name: "a.kvi", Local: true},
 	}
-	err := AllFilesPresent{SnapDir: dir}.ValidateStep(context.Background(), group)
+	err := AllFilesPresent{SnapDir: dir}.ValidateStep(context.Background(), files)
 	require.NoError(t, err)
 }
 
@@ -47,13 +45,11 @@ func TestAllFilesPresent_RejectsMissingFile(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.kv"), []byte("x"), 0o644))
 	// a.kvi missing.
 
-	group := snapshot.StepGroup{
-		Files: []*snapshot.FileEntry{
-			{Name: "a.kv", Local: true},
-			{Name: "a.kvi", Local: true},
-		},
+	files := []*snapshot.FileEntry{
+		{Name: "a.kv", Local: true},
+		{Name: "a.kvi", Local: true},
 	}
-	err := AllFilesPresent{SnapDir: dir}.ValidateStep(context.Background(), group)
+	err := AllFilesPresent{SnapDir: dir}.ValidateStep(context.Background(), files)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "a.kvi")
 	require.Contains(t, err.Error(), "missing on disk")
@@ -63,19 +59,17 @@ func TestAllFilesPresent_SkipsNonLocalFiles(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.kv"), []byte("x"), 0o644))
 
-	group := snapshot.StepGroup{
-		Files: []*snapshot.FileEntry{
-			{Name: "a.kv", Local: true},
-			{Name: "peer-only.kvi", Local: false}, // peer-advertised, not yet downloaded
-		},
+	files := []*snapshot.FileEntry{
+		{Name: "a.kv", Local: true},
+		{Name: "peer-only.kvi", Local: false}, // peer-advertised, not yet downloaded
 	}
-	err := AllFilesPresent{SnapDir: dir}.ValidateStep(context.Background(), group)
+	err := AllFilesPresent{SnapDir: dir}.ValidateStep(context.Background(), files)
 	require.NoError(t, err,
 		"non-local files are skipped; they're not expected to be on disk yet")
 }
 
 func TestAllFilesPresent_RejectsEmptySnapDir(t *testing.T) {
-	err := AllFilesPresent{SnapDir: ""}.ValidateStep(context.Background(), snapshot.StepGroup{})
+	err := AllFilesPresent{SnapDir: ""}.ValidateStep(context.Background(), nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "empty SnapDir")
 }
@@ -86,12 +80,12 @@ type stubStepValidator struct {
 }
 
 func (s stubStepValidator) Name() string { return s.name }
-func (s stubStepValidator) ValidateStep(_ context.Context, _ snapshot.StepGroup) error {
+func (s stubStepValidator) ValidateStep(_ context.Context, _ []*snapshot.FileEntry) error {
 	return s.err
 }
 
 func TestStepChain_AcceptsEmptyChain(t *testing.T) {
-	require.NoError(t, StepChain{}.Validate(context.Background(), snapshot.StepGroup{}))
+	require.NoError(t, StepChain{}.Validate(context.Background(), nil))
 }
 
 func TestStepChain_FailsFastOnFirstError(t *testing.T) {
@@ -103,7 +97,7 @@ func TestStepChain_FailsFastOnFirstError(t *testing.T) {
 		stubStepValidator{name: "third", err: assertError("rejected by third")},
 		recordingValidator{name: "fourth", record: &called},
 	}
-	err := chain.Validate(context.Background(), snapshot.StepGroup{})
+	err := chain.Validate(context.Background(), nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "third")
 	require.Contains(t, err.Error(), "rejected by third")
@@ -118,7 +112,7 @@ type recordingValidator struct {
 }
 
 func (r recordingValidator) Name() string { return r.name }
-func (r recordingValidator) ValidateStep(_ context.Context, _ snapshot.StepGroup) error {
+func (r recordingValidator) ValidateStep(_ context.Context, _ []*snapshot.FileEntry) error {
 	*r.record = append(*r.record, r.name)
 	return r.err
 }

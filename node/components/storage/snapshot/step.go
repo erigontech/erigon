@@ -41,14 +41,41 @@ func (k StepKey) IsZero() bool {
 }
 
 // StepKey returns the file's step group identifier. For non-stepped
-// files (caplin, meta, salt) the result is the zero StepKey, which
-// callers should treat as "this file is a singleton, no batch
-// grouping applies".
+// files (caplin, meta, salt, block files without a binding) the
+// result is the zero StepKey, which callers should treat as
+// "this file isn't grouped by step right now".
 func (f *FileEntry) StepKey() StepKey {
 	if f == nil {
 		return StepKey{}
 	}
 	return StepKey{FromStep: f.FromStep, ToStep: f.ToStep, Domain: f.Domain}
+}
+
+// BlockKey identifies a block-range group: block files (headers.seg,
+// bodies.seg, transactions.seg + their indexes) covering the same
+// block range share a BlockKey. This is the secondary indexing axis
+// for block files, parallel to StepKey for state files.
+//
+// IsZero returns true when neither bound is set — block-range
+// grouping doesn't apply (state files, caplin, meta, salt).
+type BlockKey struct {
+	FromBlock uint64
+	ToBlock   uint64
+}
+
+// IsZero reports whether this key refers to a non-block-grouped file.
+func (k BlockKey) IsZero() bool {
+	return k.FromBlock == 0 && k.ToBlock == 0
+}
+
+// BlockKey returns the file's block-range group identifier. For
+// state / caplin / meta / salt files the result is the zero
+// BlockKey.
+func (f *FileEntry) BlockKey() BlockKey {
+	if f == nil {
+		return BlockKey{}
+	}
+	return BlockKey{FromBlock: f.FromBlock, ToBlock: f.ToBlock}
 }
 
 // IsMinimum reports whether this file is part of its step's
@@ -239,4 +266,72 @@ func (inv *Inventory) AdvanceFiles(names []string, target LifecycleState) []stri
 		inv.notify(ChangeSet{Files: advanced})
 	}
 	return advanced
+}
+
+// BlockGroup is the set of block files (headers.seg + bodies.seg +
+// transactions.seg + their indexes) sharing a BlockKey — the
+// block-range analogue of StepGroup.
+//
+// Block files are grouped on a different axis from state files;
+// see docs/plans/20260504-step-and-minimum-unified.md "Block-to-step
+// unit conversion" for the model. The lifecycle's per-step batch
+// hook dispatches to FilesAtStep or FilesAtBlockRange based on
+// whether the entry's Domain is set.
+type BlockGroup struct {
+	Key   BlockKey
+	Files []*FileEntry
+}
+
+// Minimum returns entries flagged IsMinimum (block-step minimum =
+// headers.seg + headers.idx). Order matches Files.
+func (g BlockGroup) Minimum() []*FileEntry {
+	var out []*FileEntry
+	for _, e := range g.Files {
+		if e.IsMinimum() {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// Extras returns entries NOT flagged IsMinimum. Order matches Files.
+func (g BlockGroup) Extras() []*FileEntry {
+	var out []*FileEntry
+	for _, e := range g.Files {
+		if !e.IsMinimum() {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// AllAtState reports whether every file in the group is at the given
+// lifecycle state OR a later one. Empty group returns true (vacuously
+// satisfied).
+func (g BlockGroup) AllAtState(state LifecycleState) bool {
+	for _, e := range g.Files {
+		if e.State < state {
+			return false
+		}
+	}
+	return true
+}
+
+// FilesAtBlockRange returns the BlockGroup for a key. Mirrors
+// FilesAtStep but for the block-range axis. Returns an empty group
+// (Files == nil) when the key is the zero BlockKey or no files
+// match.
+func (inv *Inventory) FilesAtBlockRange(key BlockKey) BlockGroup {
+	if key.IsZero() {
+		return BlockGroup{Key: key}
+	}
+	inv.mu.RLock()
+	defer inv.mu.RUnlock()
+	var matching []*FileEntry
+	for _, e := range inv.blocks {
+		if e.BlockKey() == key {
+			matching = append(matching, e.Clone())
+		}
+	}
+	return BlockGroup{Key: key, Files: matching}
 }

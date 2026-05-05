@@ -79,26 +79,23 @@ func InferKind(name string) (FileKind, bool) {
 	return inferKindFromName(name)
 }
 
-// PopulateFromName fills in FromStep, ToStep, Domain (and Kind, if
-// not set) on a FileEntry by parsing its Name. The single seam every
-// caller goes through to derive step + domain metadata from a
-// snapshot file name; centralises the parsing + (eventually)
-// block→txnum→step unit conversion.
+// PopulateFromName fills in step / block range, Domain, and Kind on
+// a FileEntry by parsing its Name. The single seam every caller goes
+// through to derive metadata from a snapshot file name.
 //
-// Today the implementation calls snaptype.ParseFileName and copies
-// the result. Block files end up with FromStep/ToStep in
-// block-number units (multiplied by 1000 by ParseFileName), state
-// files in step-number units. Sibling grouping works in either
-// unit because step-siblings share the same name pattern and thus
-// the same parsed numbers. Cross-kind comparisons (block vs state)
-// are NOT meaningful in current units — proper block→txnum→step
-// conversion (using the chain's actual block→txnum mapping + step
-// size) is follow-up work that lives behind this seam.
+// The two range axes are mutually exclusive: state files populate
+// FromStep/ToStep + Domain; block files populate FromBlock/ToBlock
+// (no Domain). A block file's step range is unknown until a
+// commitment-derived (step, block) binding maps it — until then,
+// FromStep/ToStep stay zero, which truthfully reflects "we don't
+// know the step yet". Block files beyond the last validated step
+// legitimately sit in this state until either a peer's commitment
+// validates or this node's own retire produces one.
 //
 // Caller-facing contract:
 //   - Name must already be set on the entry.
-//   - Existing non-zero Domain / Kind / FromStep / ToStep on the
-//     entry are preserved.
+//   - Existing non-zero Domain / Kind / FromStep / ToStep / FromBlock
+//     / ToBlock on the entry are preserved.
 //   - On unrecognised name patterns the entry is left alone.
 //
 // Returns true when at least one field was populated.
@@ -108,10 +105,13 @@ func PopulateFromName(entry *FileEntry) bool {
 	}
 	info, _, _ := snaptype.ParseFileName("", entry.Name)
 	populated := false
-	if entry.FromStep == 0 && entry.ToStep == 0 && info.To > 0 {
-		entry.FromStep = info.From
-		entry.ToStep = info.To
-		populated = true
+
+	// Determine the kind first — drives which range axis to populate.
+	if entry.Kind == "" {
+		if k, ok := InferKind(entry.Name); ok {
+			entry.Kind = k
+			populated = true
+		}
 	}
 	if entry.Domain == "" {
 		if domain := domainFromTypeString(info.TypeString); domain != "" {
@@ -119,11 +119,28 @@ func PopulateFromName(entry *FileEntry) bool {
 			populated = true
 		}
 	}
-	if entry.Kind == "" {
-		if k, ok := InferKind(entry.Name); ok {
-			entry.Kind = k
+
+	// State files (have a Domain, derived from typeString):
+	// populate the STEP axis. snaptype's parser yields step units
+	// directly for these.
+	if entry.Domain != "" {
+		if entry.FromStep == 0 && entry.ToStep == 0 && info.To > 0 {
+			entry.FromStep = info.From
+			entry.ToStep = info.To
 			populated = true
 		}
+		return populated
+	}
+
+	// Block files (no Domain, but parser succeeded with non-zero
+	// range): populate the BLOCK axis. snaptype's parser yields
+	// block units (multiplied ×1000 internally) for these.
+	// FromStep/ToStep stay zero — explicitly "step unknown" until a
+	// commitment binding establishes it.
+	if info.To > 0 && entry.FromBlock == 0 && entry.ToBlock == 0 {
+		entry.FromBlock = info.From
+		entry.ToBlock = info.To
+		populated = true
 	}
 	return populated
 }

@@ -230,12 +230,17 @@ func TestPopulateFromName_BlockFile(t *testing.T) {
 	e := &FileEntry{Name: "v1.1-000900-001000-headers.seg"}
 	require.True(t, PopulateFromName(e))
 	require.Equal(t, Domain(""), e.Domain, "block files have empty Domain")
-	// Block files are in block-units after snaptype.ParseFileName's
-	// *1000 multiplier. Step-unit conversion is follow-up work; for
-	// now the units differ between block and state files but
-	// sibling grouping still works.
-	require.Equal(t, uint64(900_000), e.FromStep)
-	require.Equal(t, uint64(1_000_000), e.ToStep)
+	// Block files populate the block-axis (FromBlock/ToBlock) — NOT
+	// the step axis. FromStep/ToStep stay zero until a commitment-
+	// derived (step, block) binding establishes the step.
+	require.Equal(t, uint64(0), e.FromStep,
+		"block files don't carry step until commitment binds them")
+	require.Equal(t, uint64(0), e.ToStep,
+		"block files don't carry step until commitment binds them")
+	require.Equal(t, uint64(900_000), e.FromBlock,
+		"block files populate the block-axis")
+	require.Equal(t, uint64(1_000_000), e.ToBlock,
+		"block files populate the block-axis")
 	require.Equal(t, KindKV, e.Kind, ".seg without caplin/ → KindKV")
 }
 

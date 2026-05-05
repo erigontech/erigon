@@ -100,70 +100,105 @@ func BuildOnValidation(chain validation.Chain, contentFor ContentSourceFor, inv 
 // log lines distinguishing the minimum pass from the extras pass.
 func BuildOnBatchValidation(chain validation.StepChain, inv *snapshot.Inventory, logger log.Logger) Handler {
 	return func(ctx context.Context, e *snapshot.FileEntry) error {
-		key := e.StepKey()
-		if key.IsZero() {
-			if inv.AdvanceTo(e.Name, snapshot.LifecycleAdvertisable) && logger != nil {
-				logger.Info("[storage-lifecycle] advanced", "file", e.Name, "to", "Advertisable")
-			}
-			return nil
+		// Dispatch by file kind:
+		//   - state file (Domain != "") → step-axis grouping
+		//   - block file (FromBlock/ToBlock set) → block-range axis
+		//   - everything else (caplin, meta, salt) → singleton path
+		if e.Domain != "" {
+			return runStepGroup(ctx, e, chain, inv, logger)
 		}
-
-		group := inv.FilesAtStep(key)
-		if len(group.Files) == 0 {
-			return nil
+		if !e.BlockKey().IsZero() {
+			return runBlockGroup(ctx, e, chain, inv, logger)
 		}
-
-		// Block-domain steps (empty Domain) advance only after a
-		// commitment-derived (step, block) binding covers their block
-		// range. Without that binding the publisher can't attest, and
-		// the consumer can't verify, that the block range corresponds
-		// to a known canonical step. The binding is registered by
-		// CommitmentDomainValidator when commitment.kv steps batch-
-		// validate. Until then, block files wait at Indexed —
-		// returning nil here yields no error, no quarantine, just
-		// "try again next sweep / ChangeSet".
-		//
-		// FileEntry.ToStep is in block-units for block files (per
-		// snaptype.ParseFileName's *1000 multiplier), so we can pass
-		// it directly to BlockToStep.
-		if key.Domain == "" {
-			if _, hasBinding := inv.BlockToStep(key.ToStep); !hasBinding {
-				return nil
-			}
+		// Singleton: advance directly.
+		if inv.AdvanceTo(e.Name, snapshot.LifecycleAdvertisable) && logger != nil {
+			logger.Info("[storage-lifecycle] advanced", "file", e.Name, "to", "Advertisable")
 		}
-
-		// Pass 1: minimum subset, if any.
-		minimum := group.Minimum()
-		if needsValidation(minimum) {
-			minGroup := snapshot.StepGroup{Key: key, Files: minimum}
-			if err := chain.Validate(ctx, minGroup); err != nil {
-				return err
-			}
-			advanced := inv.AdvanceFiles(fileNames(minimum), snapshot.LifecycleAdvertisable)
-			if logger != nil && len(advanced) > 0 {
-				logger.Info("[storage-lifecycle] step minimum advanced",
-					"from", key.FromStep, "to", key.ToStep, "domain", string(key.Domain),
-					"files", len(advanced))
-			}
-		}
-
-		// Pass 2: extras, once full step is Indexed.
-		extras := group.Extras()
-		if needsValidation(extras) && group.AllAtState(snapshot.LifecycleIndexed) {
-			extrasGroup := snapshot.StepGroup{Key: key, Files: extras}
-			if err := chain.Validate(ctx, extrasGroup); err != nil {
-				return err
-			}
-			advanced := inv.AdvanceFiles(fileNames(extras), snapshot.LifecycleAdvertisable)
-			if logger != nil && len(advanced) > 0 {
-				logger.Info("[storage-lifecycle] step extras advanced",
-					"from", key.FromStep, "to", key.ToStep, "domain", string(key.Domain),
-					"files", len(advanced))
-			}
-		}
-
 		return nil
 	}
+}
+
+func runStepGroup(ctx context.Context, e *snapshot.FileEntry, chain validation.StepChain, inv *snapshot.Inventory, logger log.Logger) error {
+	key := e.StepKey()
+	group := inv.FilesAtStep(key)
+	if len(group.Files) == 0 {
+		return nil
+	}
+
+	// Pass 1: minimum subset, if any.
+	if minimum := group.Minimum(); needsValidation(minimum) {
+		if err := chain.Validate(ctx, minimum); err != nil {
+			return err
+		}
+		advanced := inv.AdvanceFiles(fileNames(minimum), snapshot.LifecycleAdvertisable)
+		if logger != nil && len(advanced) > 0 {
+			logger.Info("[storage-lifecycle] step minimum advanced",
+				"from", key.FromStep, "to", key.ToStep, "domain", string(key.Domain),
+				"files", len(advanced))
+		}
+	}
+
+	// Pass 2: extras, once full step is Indexed.
+	if extras := group.Extras(); needsValidation(extras) && group.AllAtState(snapshot.LifecycleIndexed) {
+		if err := chain.Validate(ctx, extras); err != nil {
+			return err
+		}
+		advanced := inv.AdvanceFiles(fileNames(extras), snapshot.LifecycleAdvertisable)
+		if logger != nil && len(advanced) > 0 {
+			logger.Info("[storage-lifecycle] step extras advanced",
+				"from", key.FromStep, "to", key.ToStep, "domain", string(key.Domain),
+				"files", len(advanced))
+		}
+	}
+	return nil
+}
+
+func runBlockGroup(ctx context.Context, e *snapshot.FileEntry, chain validation.StepChain, inv *snapshot.Inventory, logger log.Logger) error {
+	key := e.BlockKey()
+
+	// Block files advance only after a commitment-derived
+	// (step, block) binding covers their block range. Without that
+	// binding the publisher can't attest, and the consumer can't
+	// verify, that the block range corresponds to a known canonical
+	// step. Block files beyond the last validated step legitimately
+	// wait here — they either get a step from a future commitment
+	// binding (consumer path) or from local execution producing
+	// commitment for them (publisher path).
+	if _, hasBinding := inv.BlockToStep(key.ToBlock); !hasBinding {
+		return nil
+	}
+
+	group := inv.FilesAtBlockRange(key)
+	if len(group.Files) == 0 {
+		return nil
+	}
+
+	// Pass 1: minimum subset (headers.seg + headers.idx).
+	if minimum := group.Minimum(); needsValidation(minimum) {
+		if err := chain.Validate(ctx, minimum); err != nil {
+			return err
+		}
+		advanced := inv.AdvanceFiles(fileNames(minimum), snapshot.LifecycleAdvertisable)
+		if logger != nil && len(advanced) > 0 {
+			logger.Info("[storage-lifecycle] block-range minimum advanced",
+				"fromBlock", key.FromBlock, "toBlock", key.ToBlock,
+				"files", len(advanced))
+		}
+	}
+
+	// Pass 2: extras (bodies, transactions, accessors).
+	if extras := group.Extras(); needsValidation(extras) && group.AllAtState(snapshot.LifecycleIndexed) {
+		if err := chain.Validate(ctx, extras); err != nil {
+			return err
+		}
+		advanced := inv.AdvanceFiles(fileNames(extras), snapshot.LifecycleAdvertisable)
+		if logger != nil && len(advanced) > 0 {
+			logger.Info("[storage-lifecycle] block-range extras advanced",
+				"fromBlock", key.FromBlock, "toBlock", key.ToBlock,
+				"files", len(advanced))
+		}
+	}
+	return nil
 }
 
 // needsValidation reports whether the given subset is fully at

@@ -41,18 +41,18 @@ func (s *stubValidator) Validate(_ *snapshot.FileEntry, _ validation.ContentSour
 	return s.err
 }
 
-// stubStepValidator tracks call count + group size for batch tests.
+// stubStepValidator tracks call count + file-list snapshot for batch tests.
 type stubStepValidator struct {
 	name      string
 	err       error
 	calls     int
-	lastGroup snapshot.StepGroup
+	lastFiles []*snapshot.FileEntry
 }
 
 func (s *stubStepValidator) Name() string { return s.name }
-func (s *stubStepValidator) ValidateStep(_ context.Context, group snapshot.StepGroup) error {
+func (s *stubStepValidator) ValidateStep(_ context.Context, files []*snapshot.FileEntry) error {
 	s.calls++
-	s.lastGroup = group
+	s.lastFiles = files
 	return s.err
 }
 
@@ -75,7 +75,7 @@ func TestBuildOnBatchValidation_StepCompleteAdvancesAtomically(t *testing.T) {
 	err := BuildOnBatchValidation(validation.StepChain{v}, inv, nil)(context.Background(), primary)
 	require.NoError(t, err)
 	require.Equal(t, 1, v.calls, "batch validator runs once for the step")
-	require.Len(t, v.lastGroup.Files, 2, "validator received both step-siblings")
+	require.Len(t, v.lastFiles, 2, "validator received both step-siblings")
 
 	for _, name := range []string{primary.Name, dep.Name} {
 		state, _ := inv.LifecycleState(name)
@@ -228,7 +228,7 @@ func TestBuildOnBatchValidation_ExtrasAdvanceOnSecondPass(t *testing.T) {
 	state, _ := inv.LifecycleState(extras.Name)
 	require.Equal(t, snapshot.LifecycleAdvertisable, state,
 		"extras advance once full step is Indexed")
-	require.Len(t, v.lastGroup.Files, 1, "chain runs across extras-only on second pass")
+	require.Len(t, v.lastFiles, 1, "chain runs across extras-only on second pass")
 }
 
 func TestBuildOnBatchValidation_BothPassesInOneCall(t *testing.T) {
@@ -263,14 +263,15 @@ func TestBuildOnBatchValidation_BlockStepWaitsForCommitmentBinding(t *testing.T)
 	inv := snapshot.NewInventory()
 	headers := &snapshot.FileEntry{
 		Name: "v1.1-000900-001000-headers.seg",
-		// Block files have empty Domain. FromStep/ToStep are in
-		// block-units (after snaptype.ParseFileName's *1000).
-		FromStep: 900_000, ToStep: 1_000_000,
+		// Block files have empty Domain. They populate the block axis
+		// (FromBlock/ToBlock); FromStep/ToStep stay zero until a
+		// commitment binding establishes the step.
+		FromBlock: 900_000, ToBlock: 1_000_000,
 		State: snapshot.LifecycleIndexed, Local: true,
 	}
 	headersIdx := &snapshot.FileEntry{
-		Name:     "v1.1-000900-001000-headers.idx",
-		FromStep: 900_000, ToStep: 1_000_000,
+		Name:      "v1.1-000900-001000-headers.idx",
+		FromBlock: 900_000, ToBlock: 1_000_000,
 		State: snapshot.LifecycleIndexed, Local: true,
 	}
 	require.NoError(t, inv.AddFile(headers))
@@ -299,13 +300,13 @@ func TestBuildOnBatchValidation_BlockStepAdvancesAfterBindingRegistered(t *testi
 	inv.RegisterStepBlockBoundary(1024 /* commitment ToStep */, 1_000_000 /* block at end */)
 
 	headers := &snapshot.FileEntry{
-		Name:     "v1.1-000900-001000-headers.seg",
-		FromStep: 900_000, ToStep: 1_000_000,
+		Name:      "v1.1-000900-001000-headers.seg",
+		FromBlock: 900_000, ToBlock: 1_000_000,
 		State: snapshot.LifecycleIndexed, Local: true,
 	}
 	headersIdx := &snapshot.FileEntry{
-		Name:     "v1.1-000900-001000-headers.idx",
-		FromStep: 900_000, ToStep: 1_000_000,
+		Name:      "v1.1-000900-001000-headers.idx",
+		FromBlock: 900_000, ToBlock: 1_000_000,
 		State: snapshot.LifecycleIndexed, Local: true,
 	}
 	require.NoError(t, inv.AddFile(headers))

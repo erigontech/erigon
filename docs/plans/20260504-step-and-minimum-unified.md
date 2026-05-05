@@ -217,6 +217,43 @@ batch hook, publisher gate) uses these.
 
 Items 1–4 land in this PR; 5–6 follow.
 
+## Last-step high-water mark (download-priority rationale)
+
+The manifest tells us the publisher's highest step. Once the
+commitment file FOR THAT STEP validates locally, we have the
+canonical `(step, block)` boundary at the tip of state coverage —
+the **high-water mark**. Concretely:
+
+  - `manifest.LastStep` (already in chain.toml) names the highest
+    step the publisher advertises.
+  - `commitment.kv` for that step, once batch-validated, gives
+    `(LastStep, blockNum)` via `KeyCommitmentState`.
+  - Inventory exposes this as the high-water mark:
+    `Inventory.LastStepBoundary() (StepBlockBoundary, bool)` —
+    derives from `StepBlockBoundaries()` filtered to the maximum
+    `ToStep`.
+
+Downstream:
+
+  - **Block files at or below the mark** have a knowable step (via
+    further commitment validations as they arrive).
+  - **Block files beyond the mark** are post-tip, no step yet, and
+    legitimately wait — they can be advertised once future
+    commitment files extend coverage, OR (publisher path) once
+    local execution produces commitment for them.
+
+**This is why download orders backwards from the highest step.**
+Pulling the latest commitment first establishes the mark early, so
+the rest of the download / validation flow can classify blocks
+relative to it. A mid-step commitment doesn't tell you where tip
+is; the latest one does.
+
+Initial implementation defers the explicit `LastStepBoundary`
+accessor — `BlockToStep` answers individual queries, and that's
+sufficient for the wait-for-binding gate. The accessor lands
+when the bandwidth-aware orchestrator needs it for priority
+shaping.
+
 ## Block-to-step unit conversion (staged)
 
 The current naming has `FileEntry.FromStep` / `ToStep` overloaded:

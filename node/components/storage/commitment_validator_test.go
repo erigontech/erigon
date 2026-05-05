@@ -36,29 +36,32 @@ import (
 func TestCommitmentDomainValidator_NonCommitmentStepIsNoOp(t *testing.T) {
 	// Validator with nil dependencies — would panic if it tried to
 	// open a tx. Non-commitment domains must short-circuit before
-	// reaching the DB.
+	// reaching the DB. The validator introspects files[0].Domain.
 	v := CommitmentDomainValidator{}
 
-	for _, key := range []snapshot.StepKey{
-		{FromStep: 0, ToStep: 256, Domain: snapshot.DomainAccounts},
-		{FromStep: 0, ToStep: 256, Domain: snapshot.DomainStorage},
-		{FromStep: 0, ToStep: 256, Domain: snapshot.DomainCode},
-		{}, // zero key (singleton)
+	for _, domain := range []snapshot.Domain{
+		snapshot.DomainAccounts,
+		snapshot.DomainStorage,
+		snapshot.DomainCode,
 	} {
-		group := snapshot.StepGroup{Key: key}
-		err := v.ValidateStep(context.Background(), group)
+		files := []*snapshot.FileEntry{
+			{Domain: domain, FromStep: 0, ToStep: 256},
+		}
+		err := v.ValidateStep(context.Background(), files)
 		require.NoError(t, err,
-			"non-commitment domain (%v) must short-circuit without reaching DB", key)
+			"non-commitment domain (%v) must short-circuit without reaching DB", domain)
 	}
+	// Empty file list also short-circuits.
+	require.NoError(t, v.ValidateStep(context.Background(), nil))
 }
 
 func TestCommitmentDomainValidator_CommitmentStepRequiresDB(t *testing.T) {
 	// Commitment step with nil DB → explicit error, not a panic.
 	v := CommitmentDomainValidator{}
-	group := snapshot.StepGroup{
-		Key: snapshot.StepKey{FromStep: 0, ToStep: 256, Domain: snapshot.DomainCommitment},
+	files := []*snapshot.FileEntry{
+		{Domain: snapshot.DomainCommitment, FromStep: 0, ToStep: 256},
 	}
-	err := v.ValidateStep(context.Background(), group)
+	err := v.ValidateStep(context.Background(), files)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "nil DB")
 }

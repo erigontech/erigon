@@ -59,10 +59,26 @@ type FileEntry struct {
 	// set, .seg when Domain is empty.
 	Kind FileKind
 
-	// Step range [FromStep, ToStep) covered by this file. Zero for files
-	// that don't carry step semantics (caplin, meta, salt).
+	// Step range [FromStep, ToStep) covered by this file, in step
+	// units. Populated for state files (kv, kvi, v, ef, efi) directly
+	// from the name. Zero for block files, caplin, meta, salt — block
+	// files use FromBlock/ToBlock instead, and only acquire a step
+	// range once a commitment-derived (step, block) binding maps
+	// their block range into step units.
 	FromStep uint64
 	ToStep   uint64
+
+	// Block range [FromBlock, ToBlock) covered by this file, in block
+	// units. Populated for block files (headers.seg, bodies.seg,
+	// transactions.seg + their indexes) directly from the name. Zero
+	// for state, caplin, meta, salt files.
+	//
+	// Block range is the secondary indexing axis for block files —
+	// distinct from FromStep/ToStep which only carry step units.
+	// Caplin files will gain a similar FromSlot/ToSlot pair when the
+	// caplin storage path is wired through the lifecycle.
+	FromBlock uint64
+	ToBlock   uint64
 
 	// File name (relative to snapshots directory; may include subdirs).
 	Name string

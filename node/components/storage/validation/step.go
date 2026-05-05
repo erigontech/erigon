@@ -26,18 +26,23 @@ import (
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
 )
 
-// StepValidator runs across the grouped set of files for one step
-// (the natural unit of one retire / merge cycle). It receives the
-// full StepGroup at validation time — distinct from the per-file
-// Validator (which sees one file at a time) and from the
-// configure-once BatchValidator (which knows its inputs from its
-// constructor).
+// StepValidator runs across the grouped set of files for one batch
+// (a step group, a block-range group, or any other coherent set the
+// retire / merge cycle produces). It receives the file list at
+// validation time — distinct from the per-file Validator (which sees
+// one file at a time) and from the configure-once BatchValidator
+// (which knows its inputs from its constructor).
 //
 // Used by the lifecycle's per-step validation hook
-// (lifecycle.BuildOnBatchValidation): when a step's files are all at
-// LifecycleIndexed, the chain runs once across the group; on pass
-// the whole step advances to LifecycleAdvertisable atomically; on
-// fail the step stays at Indexed for the next sweep to retry.
+// (lifecycle.BuildOnBatchValidation): when a group's files are all
+// at LifecycleIndexed, the chain runs once across the file list; on
+// pass the whole group advances to LifecycleAdvertisable atomically;
+// on fail the group stays at Indexed for the next sweep to retry.
+//
+// Validators that need group-key info (Domain, FromStep, ToStep,
+// FromBlock, ToBlock) introspect the first file's fields — within a
+// group all files share the relevant axis. Empty file lists
+// short-circuit.
 //
 // Validators should be cheap when possible — the timing target is
 // "fast enough to not delay publication". Heavy checks belong behind
@@ -48,7 +53,7 @@ type StepValidator interface {
 	Name() string
 	// ValidateStep returns nil on accept. On reject, the wrapped
 	// error should identify which file(s) failed and why.
-	ValidateStep(ctx context.Context, group snapshot.StepGroup) error
+	ValidateStep(ctx context.Context, files []*snapshot.FileEntry) error
 }
 
 // StepChain runs StepValidators in order, returning the first
@@ -58,9 +63,9 @@ type StepChain []StepValidator
 
 // Validate runs every validator in chain order. Stops on first
 // failure.
-func (c StepChain) Validate(ctx context.Context, group snapshot.StepGroup) error {
+func (c StepChain) Validate(ctx context.Context, files []*snapshot.FileEntry) error {
 	for _, v := range c {
-		if err := v.ValidateStep(ctx, group); err != nil {
+		if err := v.ValidateStep(ctx, files); err != nil {
 			return fmt.Errorf("%s: %w", v.Name(), err)
 		}
 	}
@@ -88,16 +93,15 @@ type AllFilesPresent struct {
 // Name implements StepValidator.
 func (AllFilesPresent) Name() string { return "all_files_present" }
 
-// ValidateStep implements StepValidator. Each file in the group
-// must stat-able (i.e. exists, accessible, not zero-byte if the
-// filesystem reports back ENOENT for empty files). Files marked
-// Local=false are skipped (the validator can't speak to bytes that
-// aren't supposed to be local yet).
-func (a AllFilesPresent) ValidateStep(_ context.Context, group snapshot.StepGroup) error {
+// ValidateStep implements StepValidator. Each file must be stat-able
+// (i.e. exists, accessible). Files marked Local=false are skipped —
+// the validator can't speak to bytes that aren't supposed to be on
+// disk yet.
+func (a AllFilesPresent) ValidateStep(_ context.Context, files []*snapshot.FileEntry) error {
 	if a.SnapDir == "" {
 		return fmt.Errorf("AllFilesPresent: empty SnapDir")
 	}
-	for _, f := range group.Files {
+	for _, f := range files {
 		if !f.Local {
 			continue
 		}

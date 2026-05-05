@@ -65,13 +65,15 @@ type CommitmentDomainValidator struct {
 // Name implements validation.StepValidator.
 func (CommitmentDomainValidator) Name() string { return "commitment_domain_state_at_end" }
 
-// ValidateStep implements validation.StepValidator. Returns nil for
-// non-commitment-domain steps (the validator has nothing to say
-// about them). For commitment steps, runs the three checks above.
-func (v CommitmentDomainValidator) ValidateStep(ctx context.Context, group snapshot.StepGroup) error {
-	if group.Key.Domain != snapshot.DomainCommitment {
+// ValidateStep implements validation.StepValidator. Short-circuits
+// for non-commitment-domain groups (introspects files[0] for the
+// domain — within a group all files share the relevant axis).
+func (v CommitmentDomainValidator) ValidateStep(ctx context.Context, files []*snapshot.FileEntry) error {
+	if len(files) == 0 || files[0].Domain != snapshot.DomainCommitment {
 		return nil
 	}
+	fromStep := files[0].FromStep
+	toStep := files[0].ToStep
 	if v.DB == nil {
 		return fmt.Errorf("CommitmentDomainValidator: nil DB")
 	}
@@ -88,7 +90,7 @@ func (v CommitmentDomainValidator) ValidateStep(ctx context.Context, group snaps
 	// The step covers txnum range [FromStep*S, ToStep*S). Look up the
 	// latest commitment state at-or-before maxTxNum = ToStep*S - 1.
 	stepSize := tx.Debug().StepSize()
-	endTxNum := group.Key.ToStep * stepSize
+	endTxNum := toStep * stepSize
 	if endTxNum == 0 {
 		return fmt.Errorf("commitment step has zero ToStep — invalid step key")
 	}
@@ -101,21 +103,18 @@ func (v CommitmentDomainValidator) ValidateStep(ctx context.Context, group snaps
 	}
 	if !ok {
 		return fmt.Errorf("KeyCommitmentState not found for step [%d, %d)",
-			group.Key.FromStep, group.Key.ToStep)
+			fromStep, toStep)
 	}
 
-	// Verify the file boundary aligns with this step. GetLatestFromFiles
-	// returns the file (start, end) txnum range alongside the value;
-	// for a correctly-named commitment.kv covering [FromStep, ToStep),
-	// we expect start = FromStep*S and end = ToStep*S.
-	expectedStart := group.Key.FromStep * stepSize
+	// Verify the file boundary aligns with this step.
+	expectedStart := fromStep * stepSize
 	if fileStart != expectedStart {
 		return fmt.Errorf("commitment file startTxNum mismatch: got %d, want %d (step [%d, %d))",
-			fileStart, expectedStart, group.Key.FromStep, group.Key.ToStep)
+			fileStart, expectedStart, fromStep, toStep)
 	}
 	if fileEnd != endTxNum {
 		return fmt.Errorf("commitment file endTxNum mismatch: got %d, want %d (step [%d, %d))",
-			fileEnd, endTxNum, group.Key.FromStep, group.Key.ToStep)
+			fileEnd, endTxNum, fromStep, toStep)
 	}
 
 	rootHashBytes, blockNum, txNum, err := commitment.HexTrieExtractStateRoot(val)
@@ -124,17 +123,17 @@ func (v CommitmentDomainValidator) ValidateStep(ctx context.Context, group snaps
 	}
 	if len(rootHashBytes) == 0 {
 		return fmt.Errorf("decoded commitment root is empty for step [%d, %d)",
-			group.Key.FromStep, group.Key.ToStep)
+			fromStep, toStep)
 	}
 
 	// Sanity: txNum lies within the file's declared range.
 	if txNum >= fileEnd {
 		return fmt.Errorf("commitment txNum %d is gte fileEnd %d (step [%d, %d))",
-			txNum, fileEnd, group.Key.FromStep, group.Key.ToStep)
+			txNum, fileEnd, fromStep, toStep)
 	}
 	if txNum < fileStart {
 		return fmt.Errorf("commitment txNum %d is lt fileStart %d (step [%d, %d))",
-			txNum, fileStart, group.Key.FromStep, group.Key.ToStep)
+			txNum, fileStart, fromStep, toStep)
 	}
 
 	// State-at-end-of-file check: the recorded state must sit at the
@@ -148,14 +147,14 @@ func (v CommitmentDomainValidator) ValidateStep(ctx context.Context, group snaps
 	}
 	if txNum != blockMaxTxNum {
 		return fmt.Errorf("commitment state is not at end-of-block: txNum=%d, blockMaxTxNum=%d, blockNum=%d, step=[%d, %d)",
-			txNum, blockMaxTxNum, blockNum, group.Key.FromStep, group.Key.ToStep)
+			txNum, blockMaxTxNum, blockNum, fromStep, toStep)
 	}
 
 	// All checks passed — register the (step, block) binding for
 	// downstream consumers (block→step mapping in PopulateFromName,
 	// orchestrator policy decisions).
 	if v.Inventory != nil {
-		v.Inventory.RegisterStepBlockBoundary(group.Key.ToStep, blockNum)
+		v.Inventory.RegisterStepBlockBoundary(toStep, blockNum)
 	}
 	return nil
 }
