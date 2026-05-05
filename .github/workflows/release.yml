@@ -429,7 +429,13 @@ jobs:
   build-debian-pkg:
     name: Debian packages
     needs: [ build-release, test-release ]
-    if: always() && contains(needs.build-release.result, 'success') && !contains(needs.test-release.result, 'failure')
+    # !cancelled() short-circuits the job when the operator cancels the workflow.
+    # Without it, always() lets this job dispatch onto a runner even after a cancel
+    # (because 'cancelled' does not match the 'failure' substring in the test-release check).
+    if: >-
+      !cancelled() &&
+      contains(needs.build-release.result, 'success') &&
+      !contains(needs.test-release.result, 'failure')
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -549,10 +555,16 @@ jobs:
     needs: [ build-release, test-release ]
     permissions:
       contents: read  # actions/checkout without custom token
-    if: always() && contains(needs.build-release.result, 'success') && !contains(needs.test-release.result, 'failure')
+    # !cancelled() short-circuits the job when the operator cancels the workflow.
+    # Without it, always() lets this job dispatch onto a runner even after a cancel
+    # (because 'cancelled' does not match the 'failure' substring in the test-release check).
+    if: >-
+      !cancelled() &&
+      contains(needs.build-release.result, 'success') &&
+      !contains(needs.test-release.result, 'failure')
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    name: Docker image        
+    name: Docker image
 
     steps:
 
@@ -597,7 +609,14 @@ jobs:
 
   publish-release:
     needs: [ build-debian-pkg, publish-docker-image, build-release ]
-    if: always() && contains(needs.build-release.result, 'success') && contains(needs.build-debian-pkg.result, 'success') && contains(needs.publish-docker-image.result, 'success')
+    # !cancelled() short-circuits the job when the operator cancels the workflow.
+    # Without it, always() lets this job dispatch onto a runner even after a cancel
+    # in the window between all upstreams finishing as 'success' and this job starting.
+    if: >-
+      !cancelled() &&
+      contains(needs.build-release.result, 'success') &&
+      contains(needs.build-debian-pkg.result, 'success') &&
+      contains(needs.publish-docker-image.result, 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     name: Publish release notes
@@ -723,18 +742,16 @@ jobs:
 
 
   In-case-of-failure:
-    name: "In case of failure: remove remote git tag pointing to the new version."
+    name: "Rollback: remove remote git tag if release did not publish successfully"
     needs: [ publish-release, build-release, test-release, build-debian-pkg, publish-docker-image ]
+    # Run whenever the release didn't fully publish — covers failure, cancellation,
+    # and skipped-due-to-upstream cases uniformly. Also runs when build-release was
+    # cancelled mid-flight (the tag may already have been pushed by then).
     if: >-
       always() &&
       inputs.perform_release &&
-      contains(needs.build-release.result, 'success') &&
-      (
-        contains(needs.test-release.result, 'failure') ||
-        contains(needs.build-debian-pkg.result, 'failure') ||
-        contains(needs.publish-docker-image.result, 'failure') ||
-        contains(needs.publish-release.result, 'failure')
-      )
+      inputs.release_version != '' &&
+      needs.publish-release.result != 'success'
     runs-on: ubuntu-latest
     env:
       RELEASE_VERSION: ${{ inputs.release_version }}
@@ -756,8 +773,13 @@ jobs:
           path: 'erigon'
           token: ${{ steps.generate_token_rollback.outputs.token }}
 
-      - name: Rollback - remove git tag ${{ inputs.release_version }}
-        if: ${{ (inputs.perform_release) && (inputs.release_version != '') }}
+      - name: Rollback - remove git tag ${{ inputs.release_version }} if it exists on remote
         run: |
           cd erigon
-          git push -d origin ${RELEASE_VERSION}
+          if git ls-remote --exit-code --quiet --tags origin "${RELEASE_VERSION}"; then
+            echo "Tag ${RELEASE_VERSION} exists on remote — removing."
+            git push -d origin "${RELEASE_VERSION}"
+            echo "Tag ${RELEASE_VERSION} removed."
+          else
+            echo "Tag ${RELEASE_VERSION} not present on remote — nothing to rollback."
+          fi
