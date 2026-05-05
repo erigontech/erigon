@@ -180,7 +180,17 @@ func NewSharedDomainsWithTrieVariant(ctx context.Context, tx kv.TemporalTx, logg
 	}
 
 	sd.mem = tx.Debug().NewMemBatch(&sd.metrics)
-	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv, tx.Debug().Dirs().Tmp)
+
+	// Fetch the aggregator-scope branch cache (lives on the commitment
+	// Domain, shared across all SharedDomains derived from this
+	// aggregator). The duck-typed BranchCacheProvider lookup avoids
+	// importing db/state directly — db/state already imports execctx, so
+	// the reverse import would create a cycle.
+	var branchCache *commitment.BranchCache
+	if p, ok := tx.AggTx().(commitment.BranchCacheProvider); ok {
+		branchCache = p.BranchCache()
+	}
+	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv, tx.Debug().Dirs().Tmp, branchCache)
 
 	_, blockNum, err := sd.SeekCommitment(ctx, tx)
 	if err != nil {
