@@ -14,5 +14,10 @@
     "url": "https://github.com/ethereum/execution-spec-tests/releases/download/v5.4.0/fixtures_develop.tar.gz",
     "sha256": "3e2b02d49fe903eda4fd8caca5cbf0d139c470e97e1de9a85299b1b034f97099",
     "size": 422845437
+  },
+  "mainnet.tar.gz": {
+    "url": "https://github.com/ethereum/consensus-spec-tests/releases/download/v1.6.0-alpha.6/mainnet.tar.gz",
+    "sha256": "dc7ee6bb9c84f851b3d96aff9dcf0d77d684bbddd8a04a6c62d9f4cc14a87831",
+    "size": 677742673
   }
 }

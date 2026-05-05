@@ -14,10 +14,10 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-// eest-fixtures downloads and verifies execution-spec-tests fixture tarballs
-// pinned by manifest into a local cache directory. Re-running is a no-op when
-// the cached files already match the manifest's sha256 — files are not touched
-// (mtime preserved) so Go test caching stays valid across runs.
+// test-fixtures downloads and verifies test fixture tarballs pinned by a
+// manifest into a local cache directory. Re-running is a no-op when the cached
+// files already match the manifest's sha256 — files are not touched (mtime
+// preserved) so Go test caching stays valid across runs.
 package main
 
 import (
@@ -42,8 +42,8 @@ type entry struct {
 }
 
 func main() {
-	manifestPath := flag.String("manifest", "execution/tests/eest-fixtures.json", "path to manifest JSON")
-	outDir := flag.String("out", "execution/tests/eest-cache", "output directory for cached tarballs")
+	manifestPath := flag.String("manifest", "test-fixtures.json", "path to manifest JSON")
+	outDir := flag.String("out", "test-fixtures-cache", "output directory for cached tarballs")
 	timeout := flag.Duration("timeout", 10*time.Minute, "per-download timeout")
 	flag.Parse()
 
@@ -133,6 +133,6 @@ func download(ctx context.Context, url, path string) error {
 }
 
 func die(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, "eest-fixtures: "+format+"\n", args...)
+	fmt.Fprintf(os.Stderr, "test-fixtures: "+format+"\n", args...)
 	os.Exit(1)
 }

@@ -18,7 +18,7 @@ func TestExecutionSpecBlockchainOsakaCLZ(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
 	bt := new(testutil.TestMatcher)
-	tarPath := filepath.Join("..", "eest-cache", "fixtures_develop.tar.gz")
+	tarPath := filepath.Join("..", "..", "..", "test-fixtures-cache", "fixtures_develop.tar.gz")
 	bt.Whitelist(`^osaka/eip7939_count_leading_zeros/test_clz_opcode_scenarios\.json`)
 	bt.WalkTar(t, tarPath, "fixtures/blockchain_tests/", func(t *testing.T, name string, test *testutil.BlockTest) {
 		if err := bt.CheckFailure(t, test.Run(t)); err != nil {

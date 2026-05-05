@@ -1,9 +1,8 @@
 .PHONY: clean setup example run clean
 
 tests:
-	curl -sSL -o mainnet.tar.gz https://github.com/ethereum/consensus-spec-tests/releases/download/v1.6.0-alpha.6/mainnet.tar.gz
-	tar xf mainnet.tar.gz
-	rm mainnet.tar.gz
+	cd ../.. && $(MAKE) test-fixtures
+	tar xf ../../test-fixtures-cache/mainnet.tar.gz
 	# not needed for now
 	rm -rf tests/mainnet/eip6110
 	rm -rf tests/mainnet/whisk

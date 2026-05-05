@@ -89,7 +89,7 @@ jobs:
           sparse-checkout: |
             go.mod
             .github/workflows/hive-versions.json
-            execution/tests/eest-fixtures.json
+            test-fixtures.json
           sparse-checkout-cone-mode: false
           path: erigon-src
 
@@ -162,8 +162,8 @@ jobs:
       # We also fail if more than half the tests fail
       - name: Run hive tests and parse output
         run: |
-          fixtures_url=$(jq -r --arg t '${{ matrix.fixtures-tarball }}' '.[$t].url' erigon-src/execution/tests/eest-fixtures.json)
-          branch=$(jq -r --arg t '${{ matrix.fixtures-tarball }}' '.[$t].branch // empty' erigon-src/execution/tests/eest-fixtures.json)
+          fixtures_url=$(jq -r --arg t '${{ matrix.fixtures-tarball }}' '.[$t].url' erigon-src/test-fixtures.json)
+          branch=$(jq -r --arg t '${{ matrix.fixtures-tarball }}' '.[$t].branch // empty' erigon-src/test-fixtures.json)
           branch_arg=""
           if [ -n "$branch" ]; then
             branch_arg="--sim.buildarg branch=$branch"

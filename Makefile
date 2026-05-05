@@ -231,12 +231,12 @@ test-short: override GO_FLAGS += -short -failfast
 test-short: test-filtered
 
 test-all: override GO_FLAGS := -timeout $(default_test_timeout) $(GO_FLAGS)
-test-all: eest-fixtures test-filtered
+test-all: test-fixtures test-filtered
 
-## eest-fixtures:                      download & verify the execution-spec-tests fixture tarballs
-.PHONY: eest-fixtures
-eest-fixtures:
-	$(GO) run ./cmd/eest-fixtures
+## test-fixtures:                      download & verify pinned test fixture tarballs
+.PHONY: test-fixtures
+test-fixtures:
+	$(GO) run ./cmd/test-fixtures
 
 ## test-bench:                         check the benchmarks compile and run
 test-bench: override GO_FLAGS += -run=^$$ -bench=. -benchtime=1x -short -timeout=5m
@@ -293,10 +293,10 @@ test-hive:
 		act -j test-hive -s GITHUB_TOKEN=$(GITHUB_TOKEN) ; \
 	fi
 
-# Pull the pinned bal tarball URL and branch straight from eest-fixtures.json
+# Pull the pinned bal tarball URL and branch straight from test-fixtures.json
 # so this target stays in sync with whatever the rest of the test suite uses.
-EEST_FIXTURES_BAL_URL := $(shell jq -r '."fixtures_bal.tar.gz".url' execution/tests/eest-fixtures.json)
-EEST_FIXTURES_BAL_BRANCH := $(shell jq -r '."fixtures_bal.tar.gz".branch' execution/tests/eest-fixtures.json)
+EEST_FIXTURES_BAL_URL := $(shell jq -r '."fixtures_bal.tar.gz".url' test-fixtures.json)
+EEST_FIXTURES_BAL_BRANCH := $(shell jq -r '."fixtures_bal.tar.gz".branch' test-fixtures.json)
 
 eest-bal:
 	@if [ ! -d "temp" ]; then mkdir temp; fi
@@ -351,9 +351,9 @@ hive-local:
 	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,auth)
 	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,rpc-compat,)
 
-# Pull the pinned develop tarball URL straight from eest-fixtures.json
+# Pull the pinned develop tarball URL straight from test-fixtures.json
 # so this target stays in sync with the rest of the test suite.
-EEST_FIXTURES_DEVELOP_URL := $(shell jq -r '."fixtures_develop.tar.gz".url' execution/tests/eest-fixtures.json)
+EEST_FIXTURES_DEVELOP_URL := $(shell jq -r '."fixtures_develop.tar.gz".url' test-fixtures.json)
 
 eest-hive:
 	@if [ ! -d "temp" ]; then mkdir temp; fi
