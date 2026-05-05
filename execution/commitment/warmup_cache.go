@@ -18,13 +18,31 @@ package commitment
 
 import (
 	"fmt"
+	"sync"
 	"sync/atomic"
 
 	"github.com/erigontech/erigon/common/maphash"
 )
 
 type branchEntry struct {
-	data      []byte
+	// data is the canonical encoded form (with the leading 2-byte touch-map
+	// prefix). Always populated by PutBranch / PutBranchIfClean.
+	data []byte
+
+	// Lazy-decoded form. Populated on the first GetBranchDecoded call for
+	// this entry; subsequent calls return the cached decode. decodeOnce
+	// ensures decode runs at most once per entry even under concurrent
+	// reads.
+	//
+	// Encoded form is the source of truth; decoded form is derived. When
+	// data is replaced (PutBranch overwrites), the new entry starts fresh
+	// — next decoded read re-derives from the new bytes.
+	decodeOnce   sync.Once
+	cells        [16]cell
+	cellsBitmap  uint16
+	decodedReady bool
+	decodeErr    error
+
 	isEvicted atomic.Bool
 	// dirty signals "the canonical store has been written to since this
 	// entry was populated; treat as stale until cleared." Read paths
@@ -135,6 +153,62 @@ func (c *WarmupCache) GetBranch(prefix []byte) ([]byte, bool) {
 	c.branchHits.Add(1)
 	c.branchBytesServed.Add(uint64(len(entry.data)))
 	return entry.data, true
+}
+
+// GetBranchDecoded retrieves the cached branch in decoded form. Lazy-decodes
+// on first access for each entry; subsequent reads return the cached cells
+// pointer without redoing the parse work.
+//
+// Returns the bitmap of present children plus a pointer to the populated
+// cells array. The caller derives touchMap/afterMap from the bitmap based
+// on its own context (deleted vs present-after) — the cache stores cells
+// independent of that context so the same entry serves both readers.
+//
+// Returns ok=false on miss or eviction (same semantics as GetBranch). Also
+// returns ok=false if the cached bytes fail to decode — in that case the
+// caller should fall through to a re-read from the canonical store.
+//
+// The returned *[16]cell pointer aliases storage owned by the cache entry
+// — the caller MUST NOT modify the cells in place. Read-only consumption
+// is safe across concurrent GetBranchDecoded calls (decode runs at most
+// once per entry; subsequent reads see the populated cells).
+func (c *WarmupCache) GetBranchDecoded(prefix []byte) (bitmap uint16, cells *[16]cell, ok bool) {
+	entry, found := c.branches.Get(prefix)
+	if !found {
+		c.branchMisses.Add(1)
+		return 0, nil, false
+	}
+	if entry.isEvicted.Load() {
+		c.branchEvicted.Add(1)
+		return 0, nil, false
+	}
+	entry.decodeOnce.Do(func() {
+		// PutBranch stores bytes WITH the leading 2-byte touch-map prefix;
+		// DecodeBranchInto consumes bytes WITHOUT it (matching the
+		// unfoldBranchNode call pattern that strips the prefix before
+		// decoding).
+		if len(entry.data) < 2 {
+			entry.decodeErr = fmt.Errorf("branch entry too short for touch-map prefix: %d bytes", len(entry.data))
+			return
+		}
+		maps, err := DecodeBranchInto(entry.data[2:], false /* deleted derived per-caller */, &entry.cells)
+		if err != nil {
+			entry.decodeErr = err
+			return
+		}
+		entry.cellsBitmap = maps.Bitmap
+		entry.decodedReady = true
+	})
+	if !entry.decodedReady {
+		// Decode failed — caller should re-read from canonical store.
+		// Don't count as hit (the entry is mechanically present but
+		// unusable). Don't increment misses either — the caller will
+		// observe ok=false and decide.
+		return 0, nil, false
+	}
+	c.branchHits.Add(1)
+	c.branchBytesServed.Add(uint64(len(entry.data)))
+	return entry.cellsBitmap, &entry.cells, true
 }
 
 // GetAndEvictBranch retrieves branch data and marks the entry as evicted in one operation.
