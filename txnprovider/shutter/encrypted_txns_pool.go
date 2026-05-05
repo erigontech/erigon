@@ -211,10 +211,16 @@ func (etp *EncryptedTxnsPool) watchSubmissions(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case err := <-submissionEventSub.Err():
-			if err != nil {
+		case err, ok := <-submissionEventSub.Err():
+			if ok {
 				return err
 			}
+			//
+			// TODO: re-establish the subscription with backoff instead of waiting for ctx.
+			//       A graceful close (e.g. websocket reconnect) currently leaves the pool in a
+			//       silently degraded state — new submissions stop being ingested until the
+			//       process restarts. Tracking issue: TODO file one.
+			//
 			etp.logger.Warn("encrypted txn submission subscription closed, waiting for shutdown")
 			<-ctx.Done()
 			return ctx.Err()

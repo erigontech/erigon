@@ -346,10 +346,16 @@ func (et *KsmEonTracker) trackFutureEons(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case err := <-keyperSetAddedEventSub.Err():
-			if err != nil {
+		case err, ok := <-keyperSetAddedEventSub.Err():
+			if ok {
 				return err
 			}
+			//
+			// TODO: re-establish the subscription with backoff instead of waiting for ctx.
+			//       A graceful close (e.g. websocket reconnect) currently leaves the tracker in
+			//       a silently degraded state — new keyper sets stop being observed until the
+			//       process restarts. Tracking issue: TODO file one.
+			//
 			et.logger.Warn("keyper set added subscription closed, waiting for shutdown")
 			<-ctx.Done()
 			return ctx.Err()

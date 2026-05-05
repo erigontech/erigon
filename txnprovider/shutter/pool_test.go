@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
@@ -361,12 +362,17 @@ func TestPoolSurvivesEonReadFailure(t *testing.T) {
 	t.Parallel()
 	pt := PoolTest{t}
 	pt.Run(func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle) {
+		// snapshot the global counter — other parallel tests may also touch it, so assert delta
+		errCounter := metrics.GetOrCreateCounter("shutter_eon_tracker_block_event_errors")
+		errCountBefore := errCounter.GetValueUint64()
+
 		// first block: deliberately omit the eon-read mocks so readEonAtNewBlockEvent fails
 		handle.SimulateFilterLogs(common.HexToAddress(handle.config.SequencerContractAddress), []types.Log{})
 		err := handle.SimulateNewBlockChange(ctx)
 		require.NoError(t, err)
 		synctest.Wait()
 		require.True(t, handle.logHandler.Contains("failed to read eon at block event"))
+		require.Greater(t, errCounter.GetValueUint64(), errCountBefore)
 
 		// pool is still alive — verify by completing a normal flow on the next block
 		ekg, err := testhelpers.MockEonKeyGeneration(shutter.EonIndex(0), 1, 2, 1)
@@ -396,6 +402,10 @@ func TestPoolSurvivesCleanupSlotCalcFailure(t *testing.T) {
 	t.Parallel()
 	pt := PoolTest{t}
 	pt.Run(func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle) {
+		// snapshot the global counter — other parallel tests may also touch it, so assert delta
+		errCounter := metrics.GetOrCreateCounter("shutter_cleanup_block_event_errors")
+		errCountBefore := errCounter.GetValueUint64()
+
 		ekg, err := testhelpers.MockEonKeyGeneration(shutter.EonIndex(0), 1, 2, 1)
 		require.NoError(t, err)
 		handle.SimulateInitialEonRead(t, ekg)
@@ -414,6 +424,7 @@ func TestPoolSurvivesCleanupSlotCalcFailure(t *testing.T) {
 		require.NoError(t, err)
 		synctest.Wait()
 		require.True(t, handle.logHandler.Contains("failed to calc slot for cleanup, skipping"))
+		require.Greater(t, errCounter.GetValueUint64(), errCountBefore)
 
 		// pool is still alive — verify by completing a normal flow on the next block
 		handle.nextBlockNum = 2
