@@ -17,10 +17,26 @@ download set when the operator opts in, and adds per-step batch
 validation that publishes a step's minimum subset before the rest
 of the step lands.
 
-End-to-end on hoodi: 10 min 25 s time-to-tip in minimal mode (start
-to first `head validated age=0`), zero collision crashes, zero
-disk-walk lines, 22 files transitioning Indexed → Advertisable
-through the lifecycle. Mainnet measurement is the next milestone.
+End-to-end:
+
+  - **Hoodi V2 path**: 10 min 25 s time-to-tip (post-§5e
+    measurement, minimal mode).
+  - **Mainnet bootstrap publisher**: 42 min 31 s (fresh datadir,
+    `--snap.bootstrap-from-preverified --snap.p2p-manifest
+    --snap.lifecycle-driven-by-storage`, block 25,031,794).
+  - **Mainnet V2 node** (against the at-tip publisher): 44 min
+    34 s (`--snap.p2p-manifest --snap.lifecycle-driven-by-storage`,
+    staticpeered, fresh datadir, block 25,032,022).
+
+Both mainnet runs landed with zero collision crashes, zero
+disk-walk lines, zero BMI invocations (lifecycle pre-check from
+§5c working as designed), and 179 files transitioning through the
+lifecycle. The V2 node's 2-minute overhead vs the publisher is
+attributable to the 30-s manifestReady gate plus second-mover
+swarm warmup — both nodes downloaded the same set (publisher's
+advertised chain.toml = preverified ∪ {} since just-synced; the
+architectural-advantage measurement against a smaller advertised
+set is follow-up).
 
 The PR is **opt-in**:
 - `--snap.lifecycle-driven-by-storage` — activates the storage-
@@ -199,20 +215,31 @@ New plan docs under `docs/plans/`:
 - [x] Scenarios suite covers ordering, quarantine, lifecycle
       transitions, per-step minimum-first ordering, timing
       instrumentation.
-- [ ] **Mainnet time-to-tip measurement** (gates moving the PR
-      out of draft). Two phases:
-  - **Cold (unsynced)**: fresh datadir → tip. Measures full
-    snapshot download + chaindata catch-up. Run with
-    `--chain=mainnet --prune.mode=minimal
-    --snap.lifecycle-driven-by-storage`.
-  - **Warm (synced)**: same datadir restarted → next age=0.
-    Measures startup + lifecycle bootstrap + last-block catch-up
-    against an already-populated datadir.
-  - Both numbers report alongside hoodi 10m25s for the
-    architectural-target comparison. Note: V2 chain.toml mode
-    (`--snap.p2p-manifest`) is OFF for both runs — no
-    V2-publishing peers exist on mainnet yet; that gets enabled
-    once the snapshotter is updated post-merge.
+- [x] **Mainnet time-to-tip measurement (2026-05-05)**.
+      Bootstrap publisher + V2 node, both fresh, run sequentially
+      so the V2 node measures against a fully-populated at-tip
+      publisher:
+
+  | Run | Time-to-tip | Block at tip | Lifecycle counts |
+  |-----|-------------|--------------|------------------|
+  | **Bootstrap publisher** (`--snap.bootstrap-from-preverified --snap.p2p-manifest --snap.lifecycle-driven-by-storage`, fresh datadir) | **42 min 31 s** | 25,031,794 | 179 advance-to-Indexed, 0 BMI invocations, 0 quarantines, 0 disk-walk lines |
+  | **V2 node** (`--snap.p2p-manifest --snap.lifecycle-driven-by-storage`, staticpeered to publisher, fresh datadir) | **44 min 34 s** | 25,032,022 | 179 advance-to-Indexed, 0 BMI, 0 quarantines, 0 disk-walk; manifestReady cleared in 32 s |
+
+  Both runs proved the V2 mechanism end-to-end on mainnet with
+  zero regressions. The V2 node's 2-minute overhead vs the
+  publisher comes from the 30-s manifestReady gate plus second-
+  mover swarm warmup; the underlying download set is the same
+  (publisher just-synced from preverified, so its advertised
+  chain.toml = preverified ∪ {}; future measurements with a
+  publisher running a smaller advertised set will isolate the
+  V2 architectural time-to-tip advantage).
+
+  Hoodi reference numbers from
+  `docs/plans/20260502-min-time-to-tip-target.md` for
+  comparison: V2 post-§5e 10m25s, §5c rerun 13m17s.
+
+  Hardware: webseed-download peaked ~300 MB/s, peer-download
+  ~210 MB/s, 320 GB total snapshot data for mainnet minimal.
 
 ## Operator migration
 

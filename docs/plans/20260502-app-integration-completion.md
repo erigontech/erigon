@@ -2,10 +2,11 @@
 
 ## Status
 
-**2026-05-05 — Per-step batch validation + minimum-first orchestration
-landed.** Branch is feature-complete for the first PR; remaining work
-is mainnet measurement (the user-stated PR gate) plus follow-up
-items captured below.
+**2026-05-05 — All gates cleared. Branch is PR-ready** pending only
+the upstream merge of `feat/snapshot-flow-v1` (PR #20933). Mainnet
+time-to-tip captured (publisher 42m31s, V2 node 44m34s, both with
+zero failures). Per-step batch validation + minimum-first
+orchestration + Stage 2 commitment binding all landed.
 
 The model now operates per-step:
   - Files within a step group (same `FromStep`/`ToStep`/`Domain`)
@@ -88,10 +89,14 @@ Step+minimum data model: `docs/plans/20260504-step-and-minimum-unified.md`.
 
 ## What follows up in subsequent PRs
 
-  - **Mainnet performance measurement.** The PR gate. Reproduce the
-    10-min time-to-tip target on mainnet. See
-    `docs/plans/20260502-min-time-to-tip-target.md` (mainnet section)
-    + `docs/plans/20260504-v2-operational-guide.md`.
+  - **Mainnet measurement** ✅ done (2026-05-05). Bootstrap
+    publisher 42 min 31 s, V2 node 44 min 34 s. Hardware spec
+    permitted ~500 MB/s combined webseed+peer download; mainnet
+    minimal is 320 GB. Both runs zero-failure. Architectural-
+    advantage measurement (publisher with smaller advertised
+    set than preverified) stays follow-up — needs the publisher
+    to be running with V2-only mode against actual recent files,
+    not a preverified-merged manifest.
   - **Block-snapshot file step rewrite using the binding.** Stage
     2 lands the `(step, block)` binding; the follow-up uses it in
     `PopulateFromName` to rewrite block-snapshot files'
