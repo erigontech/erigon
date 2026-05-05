@@ -44,7 +44,7 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	t.Parallel()
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
-	dir := filepath.Join("..", "execution-spec-tests", "blockchain_tests_devnet")
+	tarPath := filepath.Join("..", "execution-spec-tests", "fixtures_bal.tar.gz")
 	bt := new(testutil.TestMatcher)
 	// to run only tests for 1 eip do:
 	//bt.Whitelist(`.*amsterdam/eip8024_dupn_swapn_exchange.*`)
@@ -262,7 +262,7 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	bt.SkipLoad(`^for_amsterdam/tangerine_whistle/eip150_operation_gas_costs/eip150_selfdestruct/selfdestruct_to_self.json`)                                                  // block=1, gas used by execution: 133836, in header: 35188
 	bt.SkipLoad(`^for_amsterdam/tangerine_whistle/eip150_operation_gas_costs/eip150_selfdestruct/selfdestruct_to_system_contract.json`)                                       // block=1, gas used by execution: 152620, in header: 38869
 
-	bt.Walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
+	bt.WalkTar(t, tarPath, "fixtures/blockchain_tests/", func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root
 		test.ExperimentalBAL = true // TODO eventually remove this from BlockTest and run normally
 		if err := bt.CheckFailure(t, test.Run(t)); err != nil {
