@@ -105,6 +105,13 @@ type HexPatriciaHashed struct {
 	cache             *WarmupCache
 	enableWarmupCache bool // if true, enables warmup cache during Process (false by default)
 
+	// branchCache is the BranchCache instance attached via SetBranchCache.
+	// Wired into branchFromCacheOrDB as Level-2 (between WarmupCache and DB)
+	// and into branchEncoder for write-back. Today created per-Process by
+	// InitializeTrieAndUpdates; future cross-block persistence work lifts
+	// this to aggTx scope. See branch_cache.go's concurrency contract.
+	branchCache *BranchCache
+
 	// leaveDeferredForCaller when true, Process() leaves deferred updates on the branchEncoder
 	// for the caller to handle via TakeDeferredUpdates(). When false (default), Process()
 	// applies deferred updates inline.
@@ -2943,6 +2950,20 @@ func (hph *HexPatriciaHashed) SetTrace(trace bool)           { hph.trace = trace
 func (hph *HexPatriciaHashed) SetTraceDomain(trace bool)     { hph.traceDomain = trace }
 func (hph *HexPatriciaHashed) EnableWarmupCache(enable bool) { hph.enableWarmupCache = enable }
 
+// SetBranchCache attaches a BranchCache for branch read-through and
+// write-through. Also propagates to the trie's BranchEncoder so encoder
+// writes update the cache via mark-dirty-then-Put (see CollectUpdate).
+//
+// nil disables — both this trie's branchFromCacheOrDB Level-2 and the
+// encoder's cache write-back become no-ops.
+func (hph *HexPatriciaHashed) SetBranchCache(c *BranchCache) {
+	hph.branchCache = c
+	hph.branchEncoder.branchCache = c
+}
+
+// BranchCache returns the attached BranchCache, or nil if none is set.
+func (hph *HexPatriciaHashed) BranchCache() *BranchCache { return hph.branchCache }
+
 func (hph *HexPatriciaHashed) GetCapture(truncate bool) []string {
 	capture := hph.capture
 	if truncate {
@@ -3003,6 +3024,14 @@ func (hph *HexPatriciaHashed) Reset() {
 	hph.rootTouched = false
 	hph.rootChecked = false
 	hph.rootPresent = true
+
+	// Clear the BranchCache only when this is the root trie (not a
+	// mounted subtrie). Mounted subtries share the root's cache; clearing
+	// from a mount would dump entries the root still expects to see.
+	// Carries the invariant established in PR #19954 commit 1612d5608c.
+	if hph.branchCache != nil && !hph.mounted {
+		hph.branchCache.Clear()
+	}
 }
 
 func (hph *HexPatriciaHashed) ResetContext(ctx PatriciaContext) {
@@ -3014,7 +3043,20 @@ func (hph *HexPatriciaHashed) Cache() *WarmupCache {
 	return hph.cache
 }
 
-// branchFromCacheOrDB reads branch data from cache if available, otherwise from DB.
+// branchFromCacheOrDB reads branch data via the cache hierarchy:
+//   - L1: WarmupCache (ephemeral, populated by warmup workers ahead of fold)
+//   - L2: BranchCache (longer-lived; per-Process today, will be aggTx-scoped
+//     once the cross-block-persistence step lands)
+//   - L3: ctx.Branch (canonical store)
+//
+// On L2 hit no further work happens. On L3 read with a non-empty result the
+// bytes are populated into BranchCache so subsequent reads (within the cache's
+// lifetime) hit L2 instead.
+//
+// L1 (WarmupCache) is intentionally checked FIRST: warmup workers may have
+// pre-fetched the branch with prefix-walk-derived freshness guarantees
+// (see warmuper.go), and L1 entries are short-lived enough that staleness
+// is bounded by Process duration.
 func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
 	if hph.cache != nil {
 		if data, found := hph.cache.GetBranch(key); found {
@@ -3027,8 +3069,19 @@ func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
 			hph.metrics.missBranch.Add(1)
 		}
 	}
+	if hph.branchCache != nil {
+		if data, found := hph.branchCache.Get(key); found {
+			return data, nil
+		}
+	}
 	data, _, err := hph.ctx.Branch(key)
-	return data, err
+	if err != nil {
+		return nil, err
+	}
+	if hph.branchCache != nil && len(data) > 0 {
+		hph.branchCache.Put(key, data)
+	}
+	return data, nil
 }
 
 // accountFromCacheOrDB reads account data from cache if available, otherwise from DB.
