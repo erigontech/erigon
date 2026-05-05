@@ -128,24 +128,24 @@ func ReadMemStats(m *runtime.MemStats) {
 	runtime.ReadMemStats(m)
 }
 
-func DiscardCommitment() bool    { return discardCommitment }
-func NoPrune() bool              { return noPrune }
-func NoMerge() bool              { return noMerge }
-func NoBackgroundE3Build() bool  { return noBackgroundE3Build }
-func NoMergeHistory() bool       { return noMergeHistory }
-func NoDeepMergeHistory() bool   { return noDeepMergeHistory }
-func PruneTotalDifficulty() bool { return pruneTotalDifficulty }
+func DiscardCommitment() bool       { return discardCommitment }
+func NoPrune() bool                 { return noPrune }
+func NoMerge() bool                 { return noMerge }
+func NoBackgroundMaintenance() bool { return noBackgroundE3Build }
+func NoMergeHistory() bool          { return noMergeHistory }
+func NoDeepMergeHistory() bool      { return noDeepMergeHistory }
+func PruneTotalDifficulty() bool    { return pruneTotalDifficulty }
 
 // CLI-override setters for the performance toggles that also have env-var
 // twins. The env var sets the initial value at package init; the CLI layer
 // calls these at node startup only when the user explicitly set the flag.
-func SetIgnoreBAL(b bool)           { IgnoreBAL = b }
-func SetUseStateCache(b bool)       { UseStateCache = b }
-func SetReadAhead(b bool)           { ReadAhead = b }
-func SetExec3Workers(n int)         { Exec3Workers = n }
-func SetNoPrune(b bool)             { noPrune = b }
-func SetNoMerge(b bool)             { noMerge = b }
-func SetNoBackgroundE3Build(b bool) { noBackgroundE3Build = b }
+func SetIgnoreBAL(b bool)               { IgnoreBAL = b }
+func SetUseStateCache(b bool)           { UseStateCache = b }
+func SetReadAhead(b bool)               { ReadAhead = b }
+func SetExec3Workers(n int)             { Exec3Workers = n }
+func SetNoPrune(b bool)                 { noPrune = b }
+func SetNoMerge(b bool)                 { noMerge = b }
+func SetNoBackgroundMaintenance(b bool) { noBackgroundE3Build = b }
 
 var (
 	dirtySace     uint64

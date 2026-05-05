@@ -111,7 +111,7 @@ func TestExecPerfFlags_OverrideDbg(t *testing.T) {
 	origExec3Workers := dbg.Exec3Workers
 	origNoPrune := dbg.NoPrune()
 	origNoMerge := dbg.NoMerge()
-	origNoBackgroundE3Build := dbg.NoBackgroundE3Build()
+	origNoBackgroundMaintenance := dbg.NoBackgroundMaintenance()
 	t.Cleanup(func() {
 		dbg.SetIgnoreBAL(origIgnoreBAL)
 		dbg.SetReadAhead(origReadAhead)
@@ -119,7 +119,7 @@ func TestExecPerfFlags_OverrideDbg(t *testing.T) {
 		dbg.SetExec3Workers(origExec3Workers)
 		dbg.SetNoPrune(origNoPrune)
 		dbg.SetNoMerge(origNoMerge)
-		dbg.SetNoBackgroundE3Build(origNoBackgroundE3Build)
+		dbg.SetNoBackgroundMaintenance(origNoBackgroundMaintenance)
 	})
 
 	apply := func(ctx *cli.Context) error {
@@ -144,7 +144,7 @@ func TestExecPerfFlags_OverrideDbg(t *testing.T) {
 			dbg.SetNoPrune(ctx.Bool(ExecNoPruneFlag.Name))
 		}
 		if ctx.IsSet(ExecNoBackgroundMaintenanceFlag.Name) {
-			dbg.SetNoBackgroundE3Build(ctx.Bool(ExecNoBackgroundMaintenanceFlag.Name))
+			dbg.SetNoBackgroundMaintenance(ctx.Bool(ExecNoBackgroundMaintenanceFlag.Name))
 		}
 		return nil
 	}
@@ -166,7 +166,7 @@ func TestExecPerfFlags_OverrideDbg(t *testing.T) {
 		dbg.SetExec3Workers(42)
 		dbg.SetNoMerge(false)
 		dbg.SetNoPrune(false)
-		dbg.SetNoBackgroundE3Build(false)
+		dbg.SetNoBackgroundMaintenance(false)
 		run()
 		require.Equal(t, false, dbg.IgnoreBAL)
 		require.Equal(t, true, dbg.ReadAhead)
@@ -174,7 +174,7 @@ func TestExecPerfFlags_OverrideDbg(t *testing.T) {
 		require.Equal(t, 42, dbg.Exec3Workers)
 		require.Equal(t, false, dbg.NoMerge())
 		require.Equal(t, false, dbg.NoPrune())
-		require.Equal(t, false, dbg.NoBackgroundE3Build())
+		require.Equal(t, false, dbg.NoBackgroundMaintenance())
 	})
 
 	t.Run("batched-io=false disables read-ahead and sets IgnoreBAL", func(t *testing.T) {
@@ -233,9 +233,9 @@ func TestExecPerfFlags_OverrideDbg(t *testing.T) {
 		require.True(t, dbg.NoPrune())
 	})
 
-	t.Run("no-background-maintenance flips NoBackgroundE3Build", func(t *testing.T) {
-		dbg.SetNoBackgroundE3Build(false)
+	t.Run("no-background-maintenance flips NoBackgroundMaintenance", func(t *testing.T) {
+		dbg.SetNoBackgroundMaintenance(false)
 		run("--exec.no-background-maintenance=true")
-		require.True(t, dbg.NoBackgroundE3Build())
+		require.True(t, dbg.NoBackgroundMaintenance())
 	})
 }

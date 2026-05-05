@@ -1119,7 +1119,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}
 
-	if !dbg.NoBackgroundE3Build() {
+	if !dbg.NoBackgroundMaintenance() {
 		go func() {
 			if err := temporalDb.Debug().MergeLoop(ctx); err != nil {
 				logger.Error("snapashot merge loop error", "err", err)

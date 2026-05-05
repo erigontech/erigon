@@ -1928,7 +1928,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan struct{} {
 	fin := make(chan struct{})
 
-	if dbg.NoBackgroundE3Build() {
+	if dbg.NoBackgroundMaintenance() {
 		close(fin)
 		return fin
 	}

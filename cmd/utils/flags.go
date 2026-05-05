@@ -1182,7 +1182,7 @@ var (
 	}
 	ExecNoBackgroundMaintenanceFlag = cli.BoolFlag{
 		Name:  "exec.no-background-maintenance",
-		Usage: "Suppress background state-aggregator file build, merge, and snapshot retirement goroutines so execution is not perturbed by housekeeping work (equivalent to NO_BACKGROUND_E3_BUILD=true). Diagnostic / focused-performance-testing use only — NOT an operational setting.",
+		Usage: "Suppress background state-aggregator (Domain/Hist/II + forkable) file build/merge and E2 block-snapshot retirement goroutines so execution is not perturbed by housekeeping work (legacy env var: NO_BACKGROUND_E3_BUILD=true). Diagnostic / focused-performance-testing use only — NOT an operational setting.",
 		Value: false,
 	}
 )
@@ -2025,7 +2025,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		dbg.SetNoPrune(ctx.Bool(ExecNoPruneFlag.Name))
 	}
 	if ctx.IsSet(ExecNoBackgroundMaintenanceFlag.Name) {
-		dbg.SetNoBackgroundE3Build(ctx.Bool(ExecNoBackgroundMaintenanceFlag.Name))
+		dbg.SetNoBackgroundMaintenance(ctx.Bool(ExecNoBackgroundMaintenanceFlag.Name))
 	}
 	if ctx.IsSet(RPCGlobalGasCapFlag.Name) {
 		cfg.RPCGasCap = ctx.Uint64(RPCGlobalGasCapFlag.Name)
