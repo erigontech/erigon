@@ -102,6 +102,12 @@ type Trie interface {
 	EnableCsvMetrics(filePathPrefix string)
 	// EnableWarmupCache enables/disables warmup cache during Process (false by default)
 	EnableWarmupCache(bool)
+	// SetBranchCache attaches a BranchCache instance for branch read/write
+	// caching across the trie + branchEncoder. ConcurrentPatriciaHashed
+	// implementations propagate the same instance to all mounts so the
+	// concurrency contract documented in branch_cache.go is respected
+	// (single shared cache, partitioned-by-prefix writers).
+	SetBranchCache(*BranchCache)
 
 	// Variant returns commitment trie variant
 	Variant() TrieVariant
@@ -155,6 +161,7 @@ func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *
 	case VariantConcurrentHexPatricia:
 		root := NewHexPatriciaHashed(length.Addr, nil)
 		trie := NewConcurrentPatriciaHashed(root, nil)
+		trie.SetBranchCache(NewBranchCache(DefaultBranchCacheTailCapacity))
 		tree := NewUpdates(mode, tmpdir, KeyToHexNibbleHash)
 		// tree.SetConcurrentCommitment(true) // first run always sequential
 		return trie, tree
@@ -169,6 +176,7 @@ func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *
 	default:
 
 		trie := NewHexPatriciaHashed(length.Addr, nil)
+		trie.SetBranchCache(NewBranchCache(DefaultBranchCacheTailCapacity))
 		tree := NewUpdates(mode, tmpdir, KeyToHexNibbleHash)
 		return trie, tree
 	}
@@ -350,6 +358,10 @@ type BranchEncoder struct {
 	deferred        []*DeferredBranchUpdate
 	pendingPrefixes *maphash.NonConcurrentMap[struct{}] // tracks pending prefixes to detect duplicates
 	cache           *WarmupCache
+	// branchCache, when set, receives mark-dirty-before-encode + Put-after-
+	// canonical-write so the cache stays consistent with ctx.PutBranch.
+	// Set via HexPatriciaHashed.SetBranchCache (which propagates here).
+	branchCache *BranchCache
 }
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
@@ -570,6 +582,15 @@ func (be *BranchEncoder) CollectUpdate(
 	var foundInCache bool
 	var err error
 
+	// Mark the BranchCache entry dirty BEFORE doing the encode work. Any
+	// concurrent warmer-style writer that races into PutIfClean for this
+	// prefix between now and our final Put below will see the dirty flag
+	// and skip — preventing a stale read from overwriting our fresh
+	// canonical write. See branch_cache.go's Concurrency Contract.
+	if be.branchCache != nil {
+		be.branchCache.MarkDirty(prefix)
+	}
+
 	if be.cache != nil {
 		prev, foundInCache = be.cache.GetAndEvictBranch(prefix)
 		if foundInCache && be.metrics != nil {
@@ -605,6 +626,13 @@ func (be *BranchEncoder) CollectUpdate(
 	}
 	if be.cache != nil {
 		be.cache.PutBranch(prefixCopy, updateCopy)
+	}
+	// Put on BranchCache replaces the (now dirty) prior entry with the
+	// fresh canonical bytes — clears the dirty flag in the process
+	// (the new entry is born clean). Single writer per prefix per fold
+	// invariant means no concurrent Put races on this key.
+	if be.branchCache != nil {
+		be.branchCache.Put(prefixCopy, updateCopy)
 	}
 	if be.metrics != nil {
 		be.metrics.updateBranch.Add(1)
