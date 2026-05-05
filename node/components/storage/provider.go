@@ -315,6 +315,19 @@ func (p *Provider) Initialize(deps Deps) error {
 		}
 		snapDir := config.Dirs.Snap
 		batchChain := validation.DefaultStepChain(snapDir)
+		// Stage-2 commitment-domain validator: opens commitment.kv on
+		// commitment-step batches, asserts state is at end of block,
+		// registers (step, block) binding. No-op for non-commitment
+		// steps. Runs only when the underlying ChainDB + BlockReader
+		// are available (tools / tests may construct a Provider
+		// without them).
+		if p.ChainDB != nil && p.BlockReader != nil {
+			batchChain = append(batchChain, CommitmentDomainValidator{
+				DB:          p.ChainDB,
+				BlockReader: p.BlockReader,
+				Inventory:   deps.Inventory,
+			})
+		}
 		p.LifecycleDriver = &lifecycle.Driver{
 			Inv:          deps.Inventory,
 			Logger:       logger,

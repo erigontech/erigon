@@ -164,6 +164,12 @@ type Inventory struct {
 	// derived StepTimings view.
 	timings map[string]*FileTimings
 
+	// stepBlockBoundaries maps a commitment step's ToStep to the
+	// canonical block number whose end-state is recorded at that
+	// boundary. Populated by Stage-2 commitment-domain batch
+	// validation. See step_block_binding.go.
+	stepBlockBoundaries map[uint64]uint64
+
 	// nowFn lets tests inject deterministic timestamps. Production
 	// leaves this nil and time.Now() is used. Set via WithClock.
 	nowFn func() time.Time
