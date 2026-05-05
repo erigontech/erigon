@@ -51,6 +51,79 @@ import (
 // warmup-fill hot-read patterns within one Process. BranchCache is
 // designed for the longer-lived cache lifetime that the cross-block
 // persistence work needs.
+//
+// # Concurrency contract — caller invariants
+//
+// Internally, the LRU tail is thread-safe (hashicorp/golang-lru/v2) and
+// the pinned root slot is an atomic.Pointer. So any combination of
+// concurrent Get / GetDecoded / Put / PutIfClean / MarkDirty / Invalidate
+// is mechanically safe — no panics, no torn reads. But "mechanically safe"
+// is NOT the same as "logically consistent across writers." The cache is
+// designed to be used under the following caller invariants:
+//
+//  1. Single writer per prefix at any moment. The cache does not coordinate
+//     concurrent writes to the same key — last-Put-wins semantics, with no
+//     guarantee that the winning value is the one the application wanted.
+//
+//  2. Mark-dirty-then-Put discipline for writers that may race with
+//     readers. Caller calls MarkDirty BEFORE producing the new bytes, then
+//     Put AFTER the canonical-store write succeeds. This is the
+//     deferred-encoding-friendly alternative to inline invalidation
+//     (motivated by the prototype investigation that found inline
+//     invalidate is incompatible with deferred encoding — see
+//     agentspecs/commitment-cache-prototype-dev-context.md).
+//
+//  3. Decoded cells returned by GetDecoded MUST NOT be mutated. The
+//     *[16]cell pointer aliases entry-owned storage and is shared across
+//     readers; in-place mutation breaks consistency for all subsequent
+//     readers of that prefix.
+//
+// # Concurrency contract — how the existing concurrent trie satisfies it
+//
+// The current ConcurrentPatriciaHashed (parallel commitment calculator)
+// satisfies all three caller invariants by construction:
+//
+//   - Mounts partition the prefix space by FIRST NIBBLE. Mount N's
+//     encoder only writes branches whose key starts with [0x0N ...].
+//     Different mounts therefore never write to the same prefix.
+//     (See hex_concurrent_patricia_hashed.go: NewConcurrentPatriciaHashed
+//     creates 16 mounts via SpawnSubTrie; each mount has its own HPH,
+//     own BranchEncoder, own PatriciaContext / roTx.)
+//
+//   - Root branch (prefix [0x00]) is written by the single root fold
+//     that runs SEQUENTIALLY after errgroup.Wait() in ParallelHashSort.
+//     One writer for the pinned root slot.
+//
+//   - Mount→root grid roll-up is mutex-protected via
+//     ConcurrentPatriciaHashed.rootMu — but that updates IN-MEMORY grid
+//     cells, not the cache. The cache only sees the eventual root
+//     branch when the post-Wait root fold encodes it.
+//
+// # Concurrency contract — what future parallel fold work must preserve
+//
+// Stage F (parallel tree-reduce fold), described in
+// agentspecs/trie-data-pipeline-complexity-tax.md, would change condition
+// 2 above: the parent fold (incl. root) would no longer be a single
+// post-Wait sequential pass. Multiple goroutines would compute parent
+// branches in parallel as their children complete. This MUST not violate
+// "single writer per prefix" — any future Stage F design needs an
+// explicit per-prefix coordination layer (atomic counter on parent
+// "children remaining"; only the last-decrementer writes the parent).
+// The dirty-flag + PutIfClean primitives in this cache are sufficient
+// for that coordination layer; the cache itself does NOT add per-prefix
+// locking because that would be wasted work for the current architecture.
+//
+// If you are implementing parallel fold (or any other architecture that
+// breaks the "single writer per prefix" invariant), do NOT relax the
+// invariant by adding internal locking to the cache. Add the
+// coordination at the orchestrator layer where the partitioning logic
+// lives. The cache stays simple; the orchestrator owns the discipline.
+//
+// Likewise if you change the prefix partitioning (e.g. by-second-nibble
+// mounts, depth-based partitioning, anything other than first-nibble),
+// re-validate that distinct workers continue to write disjoint prefix
+// spaces. Re-read the partitioning code in
+// hex_concurrent_patricia_hashed.go and confirm.
 type BranchCache struct {
 	// Pinned tier — single slot for the root branch. Atomic-pointer
 	// access so no lock is needed for the hot read path.
