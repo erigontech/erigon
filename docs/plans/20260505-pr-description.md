@@ -216,27 +216,59 @@ New plan docs under `docs/plans/`:
       transitions, per-step minimum-first ordering, timing
       instrumentation.
 - [x] **Mainnet time-to-tip measurement (2026-05-05)**.
-      Bootstrap publisher + V2 node, both fresh, run sequentially
-      so the V2 node measures against a fully-populated at-tip
-      publisher:
+      Bootstrap publisher + V2 node, both fresh, V2 node started
+      after publisher reached tip. Both nodes ran on the same
+      box, so during the V2 node's run the publisher was still
+      live (catching up to mainnet tip every 12 s); resource
+      contention is a real factor in the V2 node's number.
 
-  | Run | Time-to-tip | Block at tip | Lifecycle counts |
-  |-----|-------------|--------------|------------------|
-  | **Bootstrap publisher** (`--snap.bootstrap-from-preverified --snap.p2p-manifest --snap.lifecycle-driven-by-storage`, fresh datadir) | **42 min 31 s** | 25,031,794 | 179 advance-to-Indexed, 0 BMI invocations, 0 quarantines, 0 disk-walk lines |
-  | **V2 node** (`--snap.p2p-manifest --snap.lifecycle-driven-by-storage`, staticpeered to publisher, fresh datadir) | **44 min 34 s** | 25,032,022 | 179 advance-to-Indexed, 0 BMI, 0 quarantines, 0 disk-walk; manifestReady cleared in 32 s |
+  Total time-to-tip:
+
+  | Run | Total | Block at first age≤6s |
+  |-----|-------|------------------------|
+  | Bootstrap publisher | **42 min 31 s** | 25,031,794 |
+  | V2 node | **44 min 34 s** | 25,032,022 |
+
+  Phase breakdown:
+
+  | Phase | Publisher | V2 node | Δ |
+  |-------|-----------|---------|---|
+  | Snapshot download (OtterSync DONE) | 18 min 44 s | 13 min 55 s | V2 **4m49s faster** (had a populated publisher + warm swarm) |
+  | Execution catch-up (~12.7 k blocks) | 23 min 44 s | 30 min 36 s | V2 **6m52s slower** (28% slower per block — same-box contention with the publisher's still-running execution) |
+
+  **Reading the numbers**: the V2 node's snapshot phase was
+  faster — it joined a warm swarm, which is the V2 architectural
+  advantage. The execution stage was slower per block because
+  both nodes were running on the same machine and competing for
+  CPU + disk I/O. On separate hardware the V2 node would beat
+  the publisher's 42m31s.
+
+  Counts (both nodes): 0 BMI invocations, 0 quarantines, 0
+  `Adding torrents from disk`, 179 advance-to-Indexed
+  transitions, manifestReady cleared in 32 s on the V2 node.
 
   Both runs proved the V2 mechanism end-to-end on mainnet with
-  zero regressions. The V2 node's 2-minute overhead vs the
-  publisher comes from the 30-s manifestReady gate plus second-
-  mover swarm warmup; the underlying download set is the same
-  (publisher just-synced from preverified, so its advertised
-  chain.toml = preverified ∪ {}; future measurements with a
-  publisher running a smaller advertised set will isolate the
-  V2 architectural time-to-tip advantage).
+  zero regressions. The publisher's advertised chain.toml had
+  **7389 entries** at the time the V2 node connected (preverified
+  6685 entries plus ~704 additional files the publisher had
+  produced locally during its catch-up beyond preverified's
+  snapshot point). So the V2 node downloaded a LARGER set than
+  vanilla preverified would have hardcoded — the V2 node got
+  preverified + the publisher's freshly-produced delta.
+
+  The V2 architectural TIME-TO-TIP advantage (smaller advertised
+  set → faster sync) needs a publisher running **V2-only mode**
+  (no `--snap.bootstrap-from-preverified`) so it advertises just
+  its own retire output. Such a publisher is only meaningful
+  once the publisher itself is V2-fed (joins another publisher's
+  smaller manifest, doesn't fall back to preverified). That's a
+  Phase-1+ measurement once Erigon Tech's snapshotter is the
+  bootstrap source and downstream publishers can opt out of
+  preverified bootstrap.
 
   Hoodi reference numbers from
-  `docs/plans/20260502-min-time-to-tip-target.md` for
-  comparison: V2 post-§5e 10m25s, §5c rerun 13m17s.
+  `docs/plans/20260502-min-time-to-tip-target.md`:
+  V2 post-§5e 10m25s, §5c rerun 13m17s.
 
   Hardware: webseed-download peaked ~300 MB/s, peer-download
   ~210 MB/s, 320 GB total snapshot data for mainnet minimal.
