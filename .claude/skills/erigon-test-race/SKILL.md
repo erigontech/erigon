@@ -7,15 +7,18 @@ description: Run Erigon tests with Go race detector to find data races and concu
 
 Runs the full test suite with Go's `-race` flag. Catches concurrency bugs that normal tests miss. Takes 30–60 minutes.
 
-## Prerequisite: Update Submodules
+## Prerequisite: Test fixtures
 
-Before running `make test-all-race`, always sync git submodules:
+`make test-all-race` ultimately runs the same packages as `make test-all`, which depends on `test-fixtures` (tarballs pinned in `test-fixtures.json` are downloaded into `test-fixtures-cache/` automatically). `make test-all-race` itself doesn't carry that dep — run `make test-fixtures` once first if your local cache is empty.
+
+Two side prerequisites still apply:
 
 ```bash
-git submodule update --init --recursive --force
+git submodule update --init --recursive --force            # only for legacy-tests (TestLegacyCancunState)
+git lfs pull --include='execution/tests/test-corners/**'   # for TestInvalidReceiptHashHighMgas
 ```
 
-Most tests in `execution/tests` load test fixtures from a git submodule (`execution/tests/execution-spec-tests`). Without this step the fixture files are missing or stale and tests will fail or skip silently. The CI workflow clones submodules automatically (`submodules: true` in `test-all-erigon-race.yml`); locally you must do it yourself.
+The CI workflow handles both in `setup-erigon`; locally you must do them yourself.
 
 ## Prerequisite: Create RAM Disk
 
@@ -79,7 +82,7 @@ Areas historically susceptible to races in Erigon:
 
 - After changes to the parallel executor or concurrent code paths
 - For concurrency-sensitive fixes before merging
-- Race check gate: `git submodule update --init --recursive --force && path=$(bash tools/create-ramdisk) && make lint && ERIGON_EXECUTION_TESTS_TMPDIR=$path make test-all-race`
+- Race check gate: `git submodule update --init --recursive --force && git lfs pull --include='execution/tests/test-corners/**' && make test-fixtures && path=$(bash tools/create-ramdisk) && make lint && ERIGON_EXECUTION_TESTS_TMPDIR=$path make test-all-race`
 
 ## CI Equivalent
 

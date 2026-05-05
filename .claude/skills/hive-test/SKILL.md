@@ -73,9 +73,11 @@ entry) for engine + rpc-compat suites, `.github/workflows/test-hive-eest.yml`
 
 Note: Failure counts are version-dependent and may change with newer fixtures.
 The CI `glamsterdam-devnet` shard runs BAL EIPs (`8024|7708|7778|7843|7928|7954|8037`)
-against `bal@v5.6.1/fixtures_bal.tar.gz` from the `devnets/bal/3` branch, with
+against the `fixtures_bal.tar.gz` URL and hive `branch` pinned in
+`test-fixtures.json` (currently `bal@v5.7.0` / `devnets/bal/4`), with
 `--experimental.bal` enabled on the erigon side. Reproduce locally by aligning
-the `eest-bal` invocation with these arguments.
+the `eest-bal` invocation with those values — `make eest-bal` reads them from
+the manifest via `jq` and applies them automatically.
 
 ## Procedure
 

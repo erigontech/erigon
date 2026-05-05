@@ -117,9 +117,9 @@ cd temp/<hive-dir>/hive
 # Run with a specific test pattern
 ./hive --sim ethereum/engine --sim.limit=".*cancun.*" --sim.parallelism=4 --client erigon
 
-# Run EEST engine simulator
+# Run EEST engine simulator (URL pinned in test-fixtures.json)
 ./hive --sim ethereum/eels/consume-engine --sim.limit="" --client erigon \
-  --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v5.3.0/fixtures_develop.tar.gz
+  --sim.buildarg fixtures=$(jq -r '."fixtures_develop.tar.gz".url' test-fixtures.json)
 ```
 
 ## Suites Covered
@@ -166,6 +166,6 @@ gh workflow run "Test Hive" --ref <branch>
 | `GITHUB_TOKEN` not set | `export GITHUB_TOKEN=$(gh auth token)` |
 | Docker build fails | Ensure `make erigon` succeeded first (builds binary used in Docker image) |
 | Hive clone fails | Check network; hive is cloned fresh each run into `temp/` |
-| EEST fixtures 404 | Check `EEST_VERSION` in Makefile; fixtures URL must match a released tag |
+| EEST fixtures 404 | Check the URL pinned in `test-fixtures.json`; the version must match a released tag |
 | Disk full / OOM | Run `docker system prune -af --volumes` — previous hive runs left dangling images/containers |
 | Containers stuck running | `docker ps --filter "name=hive" -q \| xargs -r docker stop` |
