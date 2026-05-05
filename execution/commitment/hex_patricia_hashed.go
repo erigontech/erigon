@@ -3018,17 +3018,25 @@ func (hph *HexPatriciaHashed) SetLeaveDeferredForCaller(leave bool) {
 	hph.leaveDeferredForCaller = leave
 }
 
-// Reset allows HexPatriciaHashed instance to be reused for the new commitment calculation
+// Reset allows HexPatriciaHashed instance to be reused for the new commitment calculation.
+//
+// The BranchCache is intentionally NOT cleared here: with aggregator-scope
+// lifetime the cache must survive between commitment calculations to deliver
+// cross-block hits. Callers that need to invalidate the cache (unwind, fork
+// validation) MUST call ClearBranchCache explicitly.
 func (hph *HexPatriciaHashed) Reset() {
 	hph.root.reset()
 	hph.rootTouched = false
 	hph.rootChecked = false
 	hph.rootPresent = true
+}
 
-	// Clear the BranchCache only when this is the root trie (not a
-	// mounted subtrie). Mounted subtries share the root's cache; clearing
-	// from a mount would dump entries the root still expects to see.
-	// Carries the invariant established in PR #19954 commit 1612d5608c.
+// ClearBranchCache drops every entry in the attached BranchCache. Use on
+// unwind or fork-validation paths where the cached branches diverge from
+// the canonical store. No-op when no cache is attached or when this is a
+// mounted subtrie (the root trie owns the clear, mounts share the same
+// cache pointer).
+func (hph *HexPatriciaHashed) ClearBranchCache() {
 	if hph.branchCache != nil && !hph.mounted {
 		hph.branchCache.Clear()
 	}

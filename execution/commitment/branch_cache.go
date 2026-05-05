@@ -164,6 +164,19 @@ type branchCacheEntry struct {
 // at typical mainnet branch sizes.
 const DefaultBranchCacheTailCapacity = 50000
 
+// BranchCacheProvider exposes the long-lived BranchCache attached to the
+// commitment domain. Implemented by *db/state.AggregatorRoTx (via duck
+// typing) so callers in the SharedDomains construction path can fetch the
+// cache without forcing db/state/execctx to import db/state — that import
+// would create a cycle since db/state imports execctx (squeeze.go,
+// trie_reader_integration_test.go, …).
+//
+// Returning nil is permitted; callers MUST treat nil as "no shared cache,
+// behave as if disabled" rather than panic.
+type BranchCacheProvider interface {
+	BranchCache() *BranchCache
+}
+
 // NewBranchCache constructs a BranchCache with the given LRU tail capacity.
 // Capacity <= 0 panics — pass a positive value or DefaultBranchCacheTailCapacity.
 func NewBranchCache(tailCapacity int) *BranchCache {

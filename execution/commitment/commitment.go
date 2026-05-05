@@ -156,12 +156,21 @@ const (
 	VariantConcurrentHexPatricia TrieVariant = "hex-concurrent-patricia-hashed"
 )
 
-func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *Updates) {
+// InitializeTrieAndUpdates constructs the trie + updates buffer for a
+// SharedDomainsCommitmentContext. The branchCache argument is the
+// long-lived (aggregator-scope) cache shared across SDs — pass the cache
+// returned by BranchCacheProvider on the AggregatorRoTx. When nil (test
+// helpers, isolated benchmarks), a fresh per-init cache is created so the
+// trie still has a valid cache to read/write through.
+func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string, branchCache *BranchCache) (Trie, *Updates) {
+	if branchCache == nil {
+		branchCache = NewBranchCache(DefaultBranchCacheTailCapacity)
+	}
 	switch tv {
 	case VariantConcurrentHexPatricia:
 		root := NewHexPatriciaHashed(length.Addr, nil)
 		trie := NewConcurrentPatriciaHashed(root, nil)
-		trie.SetBranchCache(NewBranchCache(DefaultBranchCacheTailCapacity))
+		trie.SetBranchCache(branchCache)
 		tree := NewUpdates(mode, tmpdir, KeyToHexNibbleHash)
 		// tree.SetConcurrentCommitment(true) // first run always sequential
 		return trie, tree
@@ -176,7 +185,7 @@ func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *
 	default:
 
 		trie := NewHexPatriciaHashed(length.Addr, nil)
-		trie.SetBranchCache(NewBranchCache(DefaultBranchCacheTailCapacity))
+		trie.SetBranchCache(branchCache)
 		tree := NewUpdates(mode, tmpdir, KeyToHexNibbleHash)
 		return trie, tree
 	}

@@ -185,12 +185,17 @@ func (sdc *SharedDomainsCommitmentContext) EnableCsvMetrics(filePathPrefix strin
 	sdc.patriciaTrie.EnableCsvMetrics(filePathPrefix)
 }
 
-func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, trieVariant commitment.TrieVariant, tmpDir string) *SharedDomainsCommitmentContext {
+// NewSharedDomainsCommitmentContext constructs a per-SharedDomains
+// commitment context. branchCache is the aggregator-scope cache shared
+// across all SDs derived from the same Aggregator; pass nil from test
+// helpers that don't have an aggregator (a fresh per-init cache will be
+// created inside InitializeTrieAndUpdates as a fallback).
+func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, trieVariant commitment.TrieVariant, tmpDir string, branchCache *commitment.BranchCache) *SharedDomainsCommitmentContext {
 	ctx := &SharedDomainsCommitmentContext{
 		sharedDomains: sd,
 		tmpDir:        tmpDir,
 	}
-	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(trieVariant, mode, tmpDir)
+	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(trieVariant, mode, tmpDir, branchCache)
 	return ctx
 }
 
