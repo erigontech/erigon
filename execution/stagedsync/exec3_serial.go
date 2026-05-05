@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -209,8 +210,15 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		}
 
 		if dbg.StopAfterBlock > 0 && blockNum == dbg.StopAfterBlock {
-			panic(fmt.Sprintf("stopping: block %d complete", blockNum))
-			//return fmt.Errorf("stopping: block %d complete", blockNum)
+			se.logger.Warn(fmt.Sprintf("[%s] STOP_AFTER_BLOCK reached, exiting without commit (debug mode)", se.logPrefix), "block", blockNum)
+			// Intentional os.Exit: STOP_AFTER_BLOCK is a debug switch used to
+			// capture state at exactly N blocks executed. The DB is left as it
+			// was *before* this block was applied so the next run reproduces
+			// the stop point with the same input. panic() (the prior implementation)
+			// unwinds defers and fires the very commit we're trying to skip.
+			// Mirrors the design documented in PR #19803 — debug only, never set
+			// in production.
+			os.Exit(0)
 		}
 
 		if offsetFromBlockBeginning > 0 {
@@ -427,7 +435,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					//Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 					// Block gas = max(regular, state). Pre-Amsterdam: blockStateGasUsed is 0.
 					blockGasUsed := max(se.blockGasUsed, se.blockStateGasUsed)
-					if err := se.getPostValidator().Process(blockGasUsed, se.blobGasUsed, checkReceipts, blockReceipts, txTask.Header, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {
+					if err := protocol.BlockPostValidation(blockGasUsed, se.blobGasUsed, checkReceipts, blockReceipts, txTask.Header, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {
 						return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 					}
 				}
@@ -552,7 +560,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 
 		if !txTask.HistoryExecution {
 			if err := se.rs.ApplyStateWrites(ctx, se.applyTx, txTask.BlockNumber(), txTask.TxNum, nil,
-				txTask.BalanceIncreaseSet, txTask.Rules()); err != nil {
+				txTask.BalanceIncreaseSet, txTask.Rules(), nil); err != nil {
 				return false, err
 			}
 			if err := se.rs.ApplyTxIndexes(se.applyTx, txTask.TxNum, applyReceipt, se.blobGasUsed,
