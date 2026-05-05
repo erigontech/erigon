@@ -302,18 +302,17 @@ func (dkp *DecryptionKeysProcessor) cleanupLoop(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case blockEvent := <-blockEventC:
-			err := dkp.processBlockEventCleanup(blockEvent)
-			if err != nil {
-				return err
-			}
+			dkp.processBlockEventCleanup(blockEvent)
 		}
 	}
 }
 
-func (dkp *DecryptionKeysProcessor) processBlockEventCleanup(blockEvent BlockEvent) error {
+func (dkp *DecryptionKeysProcessor) processBlockEventCleanup(blockEvent BlockEvent) {
 	slot, err := dkp.slotCalculator.CalcSlot(blockEvent.LatestBlockTime)
 	if err != nil {
-		return err
+		cleanupBlockEventErrors.Inc()
+		dkp.logger.Warn("failed to calc slot for cleanup, skipping", "blockTime", blockEvent.LatestBlockTime, "err", err)
+		return
 	}
 
 	// decryptedTxnsPool is not re-org aware since it is slot based - we can clean it up straight away
@@ -345,8 +344,6 @@ func (dkp *DecryptionKeysProcessor) processBlockEventCleanup(blockEvent BlockEve
 		dkp.processed.Remove(mark)
 		dkp.encryptedTxnsPool.DeleteUpTo(mark.Eon, mark.To)
 	}
-
-	return nil
 }
 
 type ProcessedMark struct {
