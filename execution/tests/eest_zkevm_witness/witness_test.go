@@ -56,13 +56,13 @@ func TestExecutionSpecWitness(t *testing.T) {
 	dir := filepath.Join("..", "execution-spec-tests", "blockchain_tests_zkevm")
 	bt := new(testutil.TestMatcher)
 	bt.NoParallel = true
-	bt.SkipLoad(".")
 
 	// Skip the entire zkevm corpus for this CI probe.
 	// If the suite still fails after this, the regression is elsewhere.
 	bt.Fails(".", "witness State/Codes ordering mismatch (#20442, #20534): state nodes and bytecodes emitted in wrong order")
 
 	bt.Walk(t, dir, func(t *testing.T, name string, test *testutil.WitnessBlockTest) {
+		fmt.Printf("eest_zkevm_witness fixture: %s\n", name)
 		// Amsterdam fixtures require experimental block access list support.
 		test.ExperimentalBAL = true
 
