@@ -182,6 +182,7 @@ func (inv *Inventory) AdvanceStep(key StepKey, target LifecycleState) []string {
 		return nil
 	}
 	inv.mu.Lock()
+	now := inv.now()
 	var advanced []string
 	apply := func(slice []*FileEntry) {
 		for _, e := range slice {
@@ -190,6 +191,7 @@ func (inv *Inventory) AdvanceStep(key StepKey, target LifecycleState) []string {
 			}
 			if e.State < target {
 				applyStateToFlags(e, target)
+				inv.recordTimingTransition(e.Name, target, now)
 				advanced = append(advanced, e.Name)
 			}
 		}
@@ -198,6 +200,39 @@ func (inv *Inventory) AdvanceStep(key StepKey, target LifecycleState) []string {
 		apply(inv.blocks)
 	} else {
 		apply(inv.domains[key.Domain])
+	}
+	inv.mu.Unlock()
+	if len(advanced) > 0 {
+		inv.notify(ChangeSet{Files: advanced})
+	}
+	return advanced
+}
+
+// AdvanceFiles atomically transitions every named file whose current
+// state is < target to target. Returns the names that actually changed
+// state. Used by the per-step batch hook to advance a SUBSET of a
+// step group (e.g. just the minimum files, leaving extras at their
+// current state for a separate later transition).
+//
+// Idempotent: files already at-or-past target are unchanged. Files
+// that don't exist in the inventory are silently skipped.
+func (inv *Inventory) AdvanceFiles(names []string, target LifecycleState) []string {
+	if len(names) == 0 {
+		return nil
+	}
+	inv.mu.Lock()
+	now := inv.now()
+	var advanced []string
+	for _, name := range names {
+		e := inv.findByNameLocked(name)
+		if e == nil {
+			continue
+		}
+		if e.State < target {
+			applyStateToFlags(e, target)
+			inv.recordTimingTransition(name, target, now)
+			advanced = append(advanced, name)
+		}
 	}
 	inv.mu.Unlock()
 	if len(advanced) > 0 {

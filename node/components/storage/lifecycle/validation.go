@@ -62,42 +62,46 @@ func BuildOnValidation(chain validation.Chain, contentFor ContentSourceFor, inv 
 	}
 }
 
-// BuildOnBatchValidation returns a Handler that runs a per-step
-// (StepChain) validation: when an entry reaches LifecycleIndexed, the
-// handler waits until ALL files in the entry's step group are also at
-// LifecycleIndexed (or beyond); then runs the StepChain across the
-// group; on success atomically advances every file in the group to
-// LifecycleAdvertisable.
+// BuildOnBatchValidation returns a Handler that runs per-step
+// (StepChain) validation in TWO passes — minimum first, extras second —
+// so the step's minimum publishable subset becomes Advertisable as
+// soon as it's locally Indexed, without waiting for the rest of the
+// step.
 //
-// This is the production wiring for V2 publication coherence. The
-// publisher's chain.toml entries are gated on Advertisable, so a step
-// that fails batch validation never gets advertised — and the
-// step-sibling rule means a `.seg` whose `.idx` is broken or missing
-// never advances on its own.
+// Pass 1 (minimum-first):
+//
+//	When the step's minimum subset (per FileEntry.IsMinimum) is fully
+//	at LifecycleIndexed (or beyond) but at least one minimum file is
+//	still below LifecycleAdvertisable, the chain runs across just the
+//	minimum subset. On pass, those files advance to Advertisable. The
+//	publisher can advertise / consumers can use the minimum
+//	immediately — extras may still be downloading or building.
+//
+// Pass 2 (extras / full step):
+//
+//	When ALL files in the step are at LifecycleIndexed (or beyond)
+//	but at least one extras file is still below Advertisable, the
+//	chain runs across the extras subset. On pass, extras advance to
+//	Advertisable.
+//
+// Both passes can fire in the same handler invocation — pass 1
+// advances the minimum, pass 2 then sees the extras ready and
+// advances them.
 //
 // Singletons (caplin / meta / salt — files with zero StepKey) bypass
-// the batch path: they advance individually since they have no
-// step-siblings. This preserves the existing behaviour for non-stepped
-// files.
+// the batch path entirely; they advance individually.
 //
-// Idempotence: the handler may be called for multiple files in the
-// same step in one sweep cycle. Whichever fires first runs validation
-// + advances the step; subsequent calls see the files already past
-// LifecycleIndexed and short-circuit (the driver's dispatch only
-// fires OnValidation when state == LifecycleIndexed).
+// On step-incomplete (the relevant subset hasn't all reached Indexed):
+// the handler returns nil — no error, no advance, sweep retries.
+// On chain failure: returns the wrapped error; driver logs at Debug
+// and increments the file's failure counter.
 //
-// On step-incomplete (some siblings still below Indexed): handler
-// returns nil — no error, no advance, sweep retries next cycle.
-// On chain failure: handler returns the wrapped error; driver logs at
-// Debug and increments the file's failure counter.
-//
-// logger may be nil; on successful step advance the handler emits an
-// Info log "step advanced" naming the step key + file count.
+// logger may be nil; on successful advance the handler emits Info
+// log lines distinguishing the minimum pass from the extras pass.
 func BuildOnBatchValidation(chain validation.StepChain, inv *snapshot.Inventory, logger log.Logger) Handler {
 	return func(ctx context.Context, e *snapshot.FileEntry) error {
 		key := e.StepKey()
 		if key.IsZero() {
-			// Non-stepped singleton: advance directly.
 			if inv.AdvanceTo(e.Name, snapshot.LifecycleAdvertisable) && logger != nil {
 				logger.Info("[storage-lifecycle] advanced", "file", e.Name, "to", "Advertisable")
 			}
@@ -105,22 +109,67 @@ func BuildOnBatchValidation(chain validation.StepChain, inv *snapshot.Inventory,
 		}
 
 		group := inv.FilesAtStep(key)
-		if len(group.Files) == 0 || !group.AllAtState(snapshot.LifecycleIndexed) {
-			// Step incomplete: at least one sibling not yet at Indexed.
-			// Wait for next sweep / ChangeSet.
+		if len(group.Files) == 0 {
 			return nil
 		}
 
-		if err := chain.Validate(ctx, group); err != nil {
-			return err
+		// Pass 1: minimum subset, if any.
+		minimum := group.Minimum()
+		if needsValidation(minimum) {
+			minGroup := snapshot.StepGroup{Key: key, Files: minimum}
+			if err := chain.Validate(ctx, minGroup); err != nil {
+				return err
+			}
+			advanced := inv.AdvanceFiles(fileNames(minimum), snapshot.LifecycleAdvertisable)
+			if logger != nil && len(advanced) > 0 {
+				logger.Info("[storage-lifecycle] step minimum advanced",
+					"from", key.FromStep, "to", key.ToStep, "domain", string(key.Domain),
+					"files", len(advanced))
+			}
 		}
 
-		advanced := inv.AdvanceStep(key, snapshot.LifecycleAdvertisable)
-		if logger != nil && len(advanced) > 0 {
-			logger.Info("[storage-lifecycle] step advanced",
-				"from", key.FromStep, "to", key.ToStep, "domain", string(key.Domain),
-				"files", len(advanced))
+		// Pass 2: extras, once full step is Indexed.
+		extras := group.Extras()
+		if needsValidation(extras) && group.AllAtState(snapshot.LifecycleIndexed) {
+			extrasGroup := snapshot.StepGroup{Key: key, Files: extras}
+			if err := chain.Validate(ctx, extrasGroup); err != nil {
+				return err
+			}
+			advanced := inv.AdvanceFiles(fileNames(extras), snapshot.LifecycleAdvertisable)
+			if logger != nil && len(advanced) > 0 {
+				logger.Info("[storage-lifecycle] step extras advanced",
+					"from", key.FromStep, "to", key.ToStep, "domain", string(key.Domain),
+					"files", len(advanced))
+			}
 		}
+
 		return nil
 	}
+}
+
+// needsValidation reports whether the given subset is fully at
+// LifecycleIndexed (or beyond) AND at least one file is still below
+// LifecycleAdvertisable. False for empty subsets.
+func needsValidation(files []*snapshot.FileEntry) bool {
+	if len(files) == 0 {
+		return false
+	}
+	someBelowAdvertisable := false
+	for _, f := range files {
+		if f.State < snapshot.LifecycleIndexed {
+			return false
+		}
+		if f.State < snapshot.LifecycleAdvertisable {
+			someBelowAdvertisable = true
+		}
+	}
+	return someBelowAdvertisable
+}
+
+func fileNames(files []*snapshot.FileEntry) []string {
+	out := make([]string, len(files))
+	for i, f := range files {
+		out[i] = f.Name
+	}
+	return out
 }

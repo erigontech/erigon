@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 )
 
 // Domain identifies a state domain (accounts, storage, code, commitment, etc).
@@ -157,6 +158,15 @@ type Inventory struct {
 	refcount       map[string]int
 	pendingDeletes map[string]*FileEntry
 	subs           []chan ChangeSet
+
+	// Per-file lifecycle timestamps — feeds the future bandwidth-aware
+	// download orchestrator. See timings.go for the shape and the
+	// derived StepTimings view.
+	timings map[string]*FileTimings
+
+	// nowFn lets tests inject deterministic timestamps. Production
+	// leaves this nil and time.Now() is used. Set via WithClock.
+	nowFn func() time.Time
 }
 
 // NewInventory creates an empty inventory.
@@ -206,6 +216,23 @@ func (inv *Inventory) AddFile(entry *FileEntry) error {
 		entry.State = deriveStateFromFlags(entry.Local, entry.Advertisable)
 	}
 	inv.mu.Lock()
+	now := inv.now()
+	inv.recordEnqueue(entry.Name, now)
+	// If the entry arrives at a non-Declared state (typical for
+	// bootstrap and disk-discovery paths), stamp the corresponding
+	// timing slots so the orchestrator's timeline has a starting
+	// reference. Records all states up to and including the entry's
+	// current state — a file that lands at Advertisable on bootstrap
+	// gets all four timestamps set to "now".
+	if entry.State >= LifecycleDownloaded {
+		inv.recordTimingTransition(entry.Name, LifecycleDownloaded, now)
+	}
+	if entry.State >= LifecycleIndexed {
+		inv.recordTimingTransition(entry.Name, LifecycleIndexed, now)
+	}
+	if entry.State >= LifecycleAdvertisable {
+		inv.recordTimingTransition(entry.Name, LifecycleAdvertisable, now)
+	}
 	switch entry.Kind {
 	case KindCaplin:
 		inv.caplin = replaceOrAppend(inv.caplin, entry)

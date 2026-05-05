@@ -157,6 +157,104 @@ func TestBuildOnBatchValidation_SingletonAdvancesDirectly(t *testing.T) {
 		"batch validator is not invoked for singletons")
 }
 
+func TestBuildOnBatchValidation_MinimumAdvancesBeforeExtras(t *testing.T) {
+	// Step has minimum (.kv + .kvi) Indexed AND extras (.v) still
+	// Downloaded — minimum should advance to Advertisable, extras
+	// should stay at Downloaded.
+	inv := snapshot.NewInventory()
+	primary := &snapshot.FileEntry{
+		Name: "v1.0-accounts.0-256.kv", Domain: snapshot.DomainAccounts,
+		FromStep: 0, ToStep: 256,
+		State: snapshot.LifecycleIndexed, Local: true,
+	}
+	primaryAcc := &snapshot.FileEntry{
+		Name: "v1.0-accounts.0-256.kvi", Domain: snapshot.DomainAccounts,
+		FromStep: 0, ToStep: 256,
+		State: snapshot.LifecycleIndexed, Local: true,
+	}
+	extras := &snapshot.FileEntry{
+		Name: "v1.0-accountsHistory.0-256.v", Domain: snapshot.DomainAccounts, Kind: snapshot.KindHistory,
+		FromStep: 0, ToStep: 256,
+		State: snapshot.LifecycleDownloaded, Local: true,
+	}
+	require.NoError(t, inv.AddFile(primary))
+	require.NoError(t, inv.AddFile(primaryAcc))
+	require.NoError(t, inv.AddFile(extras))
+
+	v := &stubStepValidator{name: "presence"}
+	require.NoError(t, BuildOnBatchValidation(validation.StepChain{v}, inv, nil)(context.Background(), primary))
+
+	// Minimum advanced.
+	state, _ := inv.LifecycleState(primary.Name)
+	require.Equal(t, snapshot.LifecycleAdvertisable, state, "primary advances")
+	state, _ = inv.LifecycleState(primaryAcc.Name)
+	require.Equal(t, snapshot.LifecycleAdvertisable, state, "accessor advances")
+
+	// Extras did NOT advance.
+	state, _ = inv.LifecycleState(extras.Name)
+	require.Equal(t, snapshot.LifecycleDownloaded, state,
+		"extras stay at Downloaded; not yet ready for batch validation")
+
+	require.Equal(t, 1, v.calls,
+		"chain ran once across the minimum subset")
+}
+
+func TestBuildOnBatchValidation_ExtrasAdvanceOnSecondPass(t *testing.T) {
+	// Minimum already at Advertisable from a previous handler invocation;
+	// extras now at Indexed → second pass advances extras.
+	inv := snapshot.NewInventory()
+	primary := &snapshot.FileEntry{
+		Name: "v1.0-accounts.0-256.kv", Domain: snapshot.DomainAccounts,
+		FromStep: 0, ToStep: 256,
+		State: snapshot.LifecycleAdvertisable, Local: true, Advertisable: true,
+	}
+	primaryAcc := &snapshot.FileEntry{
+		Name: "v1.0-accounts.0-256.kvi", Domain: snapshot.DomainAccounts,
+		FromStep: 0, ToStep: 256,
+		State: snapshot.LifecycleAdvertisable, Local: true, Advertisable: true,
+	}
+	extras := &snapshot.FileEntry{
+		Name: "v1.0-accountsHistory.0-256.v", Domain: snapshot.DomainAccounts, Kind: snapshot.KindHistory,
+		FromStep: 0, ToStep: 256,
+		State: snapshot.LifecycleIndexed, Local: true,
+	}
+	require.NoError(t, inv.AddFile(primary))
+	require.NoError(t, inv.AddFile(primaryAcc))
+	require.NoError(t, inv.AddFile(extras))
+
+	v := &stubStepValidator{name: "presence"}
+	require.NoError(t, BuildOnBatchValidation(validation.StepChain{v}, inv, nil)(context.Background(), extras))
+
+	state, _ := inv.LifecycleState(extras.Name)
+	require.Equal(t, snapshot.LifecycleAdvertisable, state,
+		"extras advance once full step is Indexed")
+	require.Len(t, v.lastGroup.Files, 1, "chain runs across extras-only on second pass")
+}
+
+func TestBuildOnBatchValidation_BothPassesInOneCall(t *testing.T) {
+	// All files at Indexed simultaneously. Single handler invocation
+	// fires both passes: minimum first (advances minimum), then extras
+	// (advances extras).
+	inv := snapshot.NewInventory()
+	files := []*snapshot.FileEntry{
+		{Name: "v1.0-accounts.0-256.kv", Domain: snapshot.DomainAccounts, FromStep: 0, ToStep: 256, State: snapshot.LifecycleIndexed, Local: true},
+		{Name: "v1.0-accounts.0-256.kvi", Domain: snapshot.DomainAccounts, FromStep: 0, ToStep: 256, State: snapshot.LifecycleIndexed, Local: true},
+		{Name: "v1.0-accountsHistory.0-256.v", Domain: snapshot.DomainAccounts, Kind: snapshot.KindHistory, FromStep: 0, ToStep: 256, State: snapshot.LifecycleIndexed, Local: true},
+	}
+	for _, f := range files {
+		require.NoError(t, inv.AddFile(f))
+	}
+
+	v := &stubStepValidator{name: "presence"}
+	require.NoError(t, BuildOnBatchValidation(validation.StepChain{v}, inv, nil)(context.Background(), files[0]))
+
+	for _, f := range files {
+		state, _ := inv.LifecycleState(f.Name)
+		require.Equal(t, snapshot.LifecycleAdvertisable, state)
+	}
+	require.Equal(t, 2, v.calls, "chain runs twice — once per pass")
+}
+
 func TestBuildOnBatchValidation_EmptyChainAcceptsCompleteStep(t *testing.T) {
 	inv := snapshot.NewInventory()
 	primary := &snapshot.FileEntry{
