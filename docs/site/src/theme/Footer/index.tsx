@@ -31,7 +31,7 @@ export default function Footer(): React.ReactElement {
   return (
     <footer style={{background: '#000000', color: '#ffffff', fontFamily: "'Nunito Sans', sans-serif"}}>
       {/* Top section */}
-      <div style={{
+      <div className="footer-top-grid" style={{
         maxWidth: '1280px',
         margin: '0 auto',
         padding: '3.5rem 2rem 2.5rem',
@@ -154,7 +154,7 @@ export default function Footer(): React.ReactElement {
       <div style={{borderTop: '1px solid rgba(255,255,255,0.08)', margin: '0 2rem'}} />
 
       {/* Bottom bar */}
-      <div style={{
+      <div className="footer-bottom-bar" style={{
         maxWidth: '1280px',
         margin: '0 auto',
         padding: '1.25rem 2rem',

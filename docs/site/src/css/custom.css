@@ -446,6 +446,29 @@ details.alert.alert--info summary {
   box-shadow: 0 4px 12px rgba(239,119,22,0.15);
 }
 
+/* ─── Footer responsive (mobile) ────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .footer-top-grid {
+    grid-template-columns: 1fr !important;
+    padding: 2.5rem 1.5rem 2rem !important;
+    gap: 2.5rem !important;
+  }
+
+  .footer-bottom-bar {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    padding: 1.25rem 1.5rem !important;
+    gap: 1rem !important;
+  }
+
+  .footer-bottom-bar > div {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 0.6rem !important;
+  }
+}
+
 /* ─── Version dropdown ───────────────────────────────────────────────────── */
 
 .navbar__item.dropdown .navbar__link[data-toggle="dropdown"],
