@@ -26,6 +26,15 @@ import (
 type branchEntry struct {
 	data      []byte
 	isEvicted atomic.Bool
+	// dirty signals "the canonical store has been written to since this
+	// entry was populated; treat as stale until cleared." Read paths
+	// MAY return miss when dirty is set; write paths MUST set dirty.
+	// Used together with PutBranchIfClean to prevent late warmup writes
+	// from clobbering fresh fold writes (TOCTOU race documented in the
+	// reth-research §4 dirty-flag pattern). Ephemeral cache today does
+	// not have the race because warmup completes before fold begins;
+	// invariant is in place ahead of cross-block persistence work.
+	dirty atomic.Bool
 }
 
 type accountEntry struct {
@@ -70,6 +79,46 @@ func (c *WarmupCache) PutBranch(prefix []byte, data []byte) {
 	copy(dataCopy, data)
 
 	c.branches.Set(prefix, &branchEntry{data: dataCopy})
+}
+
+// PutBranchIfClean stores branch data in the cache only if no existing entry
+// is marked dirty. Returns true on store, false if a dirty entry was present
+// (indicating the canonical store has been updated since the caller last
+// read, and the caller's data is potentially stale).
+//
+// Use from warmup-style writers that may race with fold writes — the fold
+// path marks branches dirty before its own write completes, so a warmup
+// worker that reads pre-fold then attempts to write post-fold will see
+// dirty=true and skip the store.
+//
+// Today's call sites (warmup workers in HexPatriciaHashed.Process) do not
+// race with fold because warmup completes before HashSort begins. Invariant
+// is in place for future cross-block persistence work where warmup-style
+// writes can outlive their parent Process.
+func (c *WarmupCache) PutBranchIfClean(prefix []byte, data []byte) bool {
+	if existing, found := c.branches.Get(prefix); found && existing.dirty.Load() {
+		return false
+	}
+	dataCopy := make([]byte, len(data))
+	copy(dataCopy, data)
+	c.branches.Set(prefix, &branchEntry{data: dataCopy})
+	return true
+}
+
+// MarkBranchDirty flags a branch entry as stale-until-cleared. The next
+// PutBranchIfClean for this prefix will skip; reads (GetBranch /
+// GetAndEvictBranch) currently return the entry regardless — the dirty
+// signal is consumed only on the write path today.
+//
+// Use from fold/encoder paths that have decided to overwrite a branch but
+// haven't yet captured the new bytes. The mark-dirty + later actual-write
+// pattern is the deferred-encoding-friendly alternative to inline
+// invalidate, motivated by the prototype investigation that found inline
+// invalidate breaks update-in-place semantics under deferred encoding.
+func (c *WarmupCache) MarkBranchDirty(prefix []byte) {
+	if entry, found := c.branches.Get(prefix); found {
+		entry.dirty.Store(true)
+	}
 }
 
 // GetBranch retrieves branch data from the cache.
