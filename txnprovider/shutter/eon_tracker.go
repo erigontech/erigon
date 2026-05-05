@@ -171,6 +171,7 @@ func (et *KsmEonTracker) handleBlockEvent(blockEvent BlockEvent) {
 	blockNum := blockEvent.LatestBlockNum
 	eon, ok, err := et.readEonAtNewBlockEvent(blockNum)
 	if err != nil {
+		eonTrackerBlockEventErrors.Inc()
 		et.logger.Warn("failed to read eon at block event, will retry on next block", "blockNum", blockNum, "err", err)
 		return
 	}
