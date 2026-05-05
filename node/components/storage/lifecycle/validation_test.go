@@ -255,6 +255,74 @@ func TestBuildOnBatchValidation_BothPassesInOneCall(t *testing.T) {
 	require.Equal(t, 2, v.calls, "chain runs twice — once per pass")
 }
 
+func TestBuildOnBatchValidation_BlockStepWaitsForCommitmentBinding(t *testing.T) {
+	// Block-domain step (empty Domain) at Indexed but no commitment
+	// binding registered yet → handler returns nil, files stay at
+	// Indexed. This is the "block files wait until verified via
+	// commitment" semantics — no quarantine, no advance, just wait.
+	inv := snapshot.NewInventory()
+	headers := &snapshot.FileEntry{
+		Name: "v1.1-000900-001000-headers.seg",
+		// Block files have empty Domain. FromStep/ToStep are in
+		// block-units (after snaptype.ParseFileName's *1000).
+		FromStep: 900_000, ToStep: 1_000_000,
+		State: snapshot.LifecycleIndexed, Local: true,
+	}
+	headersIdx := &snapshot.FileEntry{
+		Name:     "v1.1-000900-001000-headers.idx",
+		FromStep: 900_000, ToStep: 1_000_000,
+		State: snapshot.LifecycleIndexed, Local: true,
+	}
+	require.NoError(t, inv.AddFile(headers))
+	require.NoError(t, inv.AddFile(headersIdx))
+
+	v := &stubStepValidator{name: "presence"}
+	require.NoError(t, BuildOnBatchValidation(validation.StepChain{v}, inv, nil)(context.Background(), headers))
+
+	// Files stay at Indexed — no binding means no verification possible.
+	state, _ := inv.LifecycleState(headers.Name)
+	require.Equal(t, snapshot.LifecycleIndexed, state,
+		"block files wait at Indexed until a commitment binding covers their range")
+	require.Equal(t, 0, v.calls,
+		"validator chain doesn't run when waiting for binding")
+}
+
+func TestBuildOnBatchValidation_BlockStepAdvancesAfterBindingRegistered(t *testing.T) {
+	// Same setup as the wait test, but with a commitment binding
+	// registered FIRST. Now the block step is verifiable; the chain
+	// runs and the step advances.
+	inv := snapshot.NewInventory()
+
+	// Commitment validator would have registered (step, block) for a
+	// step covering blocks up to (or beyond) 1_000_000. We simulate
+	// that by registering a binding directly.
+	inv.RegisterStepBlockBoundary(1024 /* commitment ToStep */, 1_000_000 /* block at end */)
+
+	headers := &snapshot.FileEntry{
+		Name:     "v1.1-000900-001000-headers.seg",
+		FromStep: 900_000, ToStep: 1_000_000,
+		State: snapshot.LifecycleIndexed, Local: true,
+	}
+	headersIdx := &snapshot.FileEntry{
+		Name:     "v1.1-000900-001000-headers.idx",
+		FromStep: 900_000, ToStep: 1_000_000,
+		State: snapshot.LifecycleIndexed, Local: true,
+	}
+	require.NoError(t, inv.AddFile(headers))
+	require.NoError(t, inv.AddFile(headersIdx))
+
+	v := &stubStepValidator{name: "presence"}
+	require.NoError(t, BuildOnBatchValidation(validation.StepChain{v}, inv, nil)(context.Background(), headers))
+
+	for _, name := range []string{headers.Name, headersIdx.Name} {
+		state, _ := inv.LifecycleState(name)
+		require.Equal(t, snapshot.LifecycleAdvertisable, state,
+			"%s should advance once commitment binding covers its range", name)
+	}
+	require.GreaterOrEqual(t, v.calls, 1,
+		"validator chain runs once binding is registered")
+}
+
 func TestBuildOnBatchValidation_EmptyChainAcceptsCompleteStep(t *testing.T) {
 	inv := snapshot.NewInventory()
 	primary := &snapshot.FileEntry{

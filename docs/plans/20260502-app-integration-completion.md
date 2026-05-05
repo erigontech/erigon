@@ -71,6 +71,13 @@ Step+minimum data model: `docs/plans/20260504-step-and-minimum-unified.md`.
     `Inventory.BlockToStep` accessor lets block-snapshot callers
     map block ranges to step units once enough commitment steps
     have validated.
+  - **Block-step wait-for-binding gate.** ✅ Block-domain steps
+    (empty Domain) advance to Advertisable only after a
+    `(step, block)` binding covers their block range. Until then
+    the batch hook returns nil — files wait at Indexed without
+    quarantine. This makes the publisher's attestation real:
+    block files are advertised only when commitment-derived state
+    can verify their step boundary.
 
 ## What ships in this PR (verification-only)
 

@@ -122,6 +122,18 @@ A node started with the defaults today operates exactly as pre-PR.
   `StepChain` — failure on either side blocks step advance to
   Advertisable.
 
+### Block-step wait-for-binding gate
+
+- Block-domain steps (empty `Domain`) advance to Advertisable only
+  after a commitment-derived `(step, block)` binding covers their
+  block range.
+- Until a binding exists for the range, the batch hook returns
+  nil — files wait at Indexed, no quarantine, no failure.
+- Net effect: a block file is never advertised until commitment-
+  derived state has verified its step boundary. Block files that
+  download early during initial sync wait for the corresponding
+  commitment steps to validate before advancing.
+
 ### Inventory pre-check before BuildMissedIndices (§5c)
 
 - `BuildOnIndexing` consults the inventory before invoking the

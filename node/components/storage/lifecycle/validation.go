@@ -113,6 +113,25 @@ func BuildOnBatchValidation(chain validation.StepChain, inv *snapshot.Inventory,
 			return nil
 		}
 
+		// Block-domain steps (empty Domain) advance only after a
+		// commitment-derived (step, block) binding covers their block
+		// range. Without that binding the publisher can't attest, and
+		// the consumer can't verify, that the block range corresponds
+		// to a known canonical step. The binding is registered by
+		// CommitmentDomainValidator when commitment.kv steps batch-
+		// validate. Until then, block files wait at Indexed —
+		// returning nil here yields no error, no quarantine, just
+		// "try again next sweep / ChangeSet".
+		//
+		// FileEntry.ToStep is in block-units for block files (per
+		// snaptype.ParseFileName's *1000 multiplier), so we can pass
+		// it directly to BlockToStep.
+		if key.Domain == "" {
+			if _, hasBinding := inv.BlockToStep(key.ToStep); !hasBinding {
+				return nil
+			}
+		}
+
 		// Pass 1: minimum subset, if any.
 		minimum := group.Minimum()
 		if needsValidation(minimum) {
