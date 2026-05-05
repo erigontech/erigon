@@ -295,8 +295,8 @@ test-hive:
 
 # Pull the pinned bal tarball URL and branch straight from test-fixtures.json
 # so this target stays in sync with whatever the rest of the test suite uses.
-EEST_FIXTURES_BAL_URL := $(shell jq -r '."fixtures_bal.tar.gz".url' test-fixtures.json)
-EEST_FIXTURES_BAL_BRANCH := $(shell jq -r '."fixtures_bal.tar.gz".branch' test-fixtures.json)
+FIXTURES_BAL_URL := $(shell jq -r '."fixtures_bal.tar.gz".url' test-fixtures.json)
+FIXTURES_BAL_BRANCH := $(shell jq -r '."fixtures_bal.tar.gz".branch' test-fixtures.json)
 
 eest-bal:
 	@if [ ! -d "temp" ]; then mkdir temp; fi
@@ -308,7 +308,7 @@ eest-bal:
 		sed -i'' -e "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
-	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-engine,".*amsterdam.*",--sim.buildarg branch=$(EEST_FIXTURES_BAL_BRANCH) --sim.buildarg fixtures=$(EEST_FIXTURES_BAL_URL))
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-engine,".*amsterdam.*",--sim.buildarg branch=$(FIXTURES_BAL_BRANCH) --sim.buildarg fixtures=$(FIXTURES_BAL_URL))
 
 # Define the run_suite function
 define run_suite
@@ -353,7 +353,7 @@ hive-local:
 
 # Pull the pinned develop tarball URL straight from test-fixtures.json
 # so this target stays in sync with the rest of the test suite.
-EEST_FIXTURES_DEVELOP_URL := $(shell jq -r '."fixtures_develop.tar.gz".url' test-fixtures.json)
+FIXTURES_DEVELOP_URL := $(shell jq -r '."fixtures_develop.tar.gz".url' test-fixtures.json)
 
 eest-hive:
 	@if [ ! -d "temp" ]; then mkdir temp; fi
@@ -365,7 +365,7 @@ eest-hive:
 		sed -i'' -e "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
-	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-engine,"",--sim.buildarg fixtures=$(EEST_FIXTURES_DEVELOP_URL))
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-engine,"",--sim.buildarg fixtures=$(FIXTURES_DEVELOP_URL))
 
 # define kurtosis assertoor runner
 define run-kurtosis-assertoor

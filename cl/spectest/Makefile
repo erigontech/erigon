@@ -1,7 +1,7 @@
 .PHONY: clean setup example run clean
 
 tests:
-	cd ../.. && $(MAKE) test-fixtures
+	../../tools/test-fixtures.sh ../../test-fixtures.json ../../test-fixtures-cache
 	tar xf ../../test-fixtures-cache/mainnet.tar.gz
 	# not needed for now
 	rm -rf tests/mainnet/eip6110
