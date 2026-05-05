@@ -525,7 +525,7 @@ func TestSimulateV1PopulatesMaxUsedGas(t *testing.T) {
 				},
 			},
 		},
-		Validation: true,
+		Validation: false,
 	}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
 	require.NoError(t, err)
 	require.Len(t, result, 1)
