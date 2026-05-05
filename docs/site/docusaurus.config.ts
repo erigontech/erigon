@@ -98,6 +98,7 @@ export default async function createConfig(): Promise<Config> {
           searchBarPosition: 'right',
         },
       ],
+      'docusaurus-plugin-llms-txt',
     ],
 
     presets: [
