@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
+	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 )
 
 // BenchmarkEngineXInstruction measures payload execution time per instruction category,
@@ -55,13 +56,13 @@ func benchmarkEngineX(b *testing.B, category string) {
 	testsDir := filepath.Join(engineXDir, "benchmark", "compute", category)
 	preAllocDir := filepath.Join(engineXDir, "pre_alloc")
 
-	runner, err := NewEngineXTestRunner(b, logger, preAllocDir)
+	runner, err := engineapitester.NewEngineXTestRunner(b, logger, preAllocDir)
 	require.NoError(b, err)
 
 	// Parse all test files, group by subcategory.
 	type testEntry struct {
 		name string
-		def  EngineXTestDefinition
+		def  engineapitester.EngineXTestDefinition
 	}
 	subcategories := make(map[string][]testEntry)
 	err = filepath.WalkDir(testsDir, func(path string, d os.DirEntry, err error) error {
@@ -72,7 +73,7 @@ func benchmarkEngineX(b *testing.B, category string) {
 		if err != nil {
 			return err
 		}
-		var tests map[string]EngineXTestDefinition
+		var tests map[string]engineapitester.EngineXTestDefinition
 		if err := json.Unmarshal(data, &tests); err != nil {
 			return nil
 		}

@@ -151,6 +151,23 @@ func (sdc *SharedDomainsCommitmentContext) SetTrace(trace bool) {
 	sdc.patriciaTrie.SetTrace(trace)
 }
 
+// SetCapture enables/disables trie operation capture for diagnosis.
+func (sdc *SharedDomainsCommitmentContext) SetCapture(capture []string) {
+	sdc.patriciaTrie.SetCapture(capture)
+}
+
+// GetUpdates returns the current updates buffer. Used by the commitment
+// calculator to swap in its accumulated touches.
+func (sdc *SharedDomainsCommitmentContext) GetUpdates() *commitment.Updates {
+	return sdc.updates
+}
+
+// SetUpdates replaces the updates buffer. Used by the commitment calculator
+// to install its accumulated touches before calling ComputeCommitment.
+func (sdc *SharedDomainsCommitmentContext) SetUpdates(updates *commitment.Updates) {
+	sdc.updates = updates
+}
+
 // EnableWarmupCache enables/disables warmup cache during commitment processing.
 func (sdc *SharedDomainsCommitmentContext) EnableWarmupCache(enable bool) {
 	sdc.patriciaTrie.EnableWarmupCache(enable)
@@ -227,6 +244,9 @@ func (sdc *SharedDomainsCommitmentContext) Trie() commitment.Trie {
 func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val []byte) {
 	if sdc.updates.Mode() == commitment.ModeDisabled {
 		return
+	}
+	if dbg.TraceTouchKey {
+		fmt.Printf("TOUCHKEY %s key=%x val=%x\n", d, key, val)
 	}
 
 	switch d {
@@ -633,10 +653,17 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 	}
 	if len(bnBytes) == 8 {
 		blockNum = binary.BigEndian.Uint64(bnBytes)
-		txNum = uint64(0)
-		if blockNum > 0 {
-			txNum, err = rawdbv3.TxNums.Max(ctx, tx, blockNum)
-		}
+		// blockNum=0 means genesis (block 0) executed — NOT "no progress".
+		// The "no progress" case is len(bnBytes)==0 (no SyncStageProgress
+		// entry at all) which is handled by the outer if branch leaving
+		// blockNum/txNum at their zero defaults. When the entry exists,
+		// blockNum is the last executed block and TxNums.Max(blockNum)
+		// returns its last txNum — for genesis, that's 1 (txIndex=-1 at
+		// txNum=0 + block-end at txNum=1, per genesiswrite.WriteGenesisBesideState
+		// which calls TxNums.Append(tx, 0, len(txs)+1)). Returning txNum=0
+		// for blockNum=0 would falsely match the "never executed" case and
+		// make exec3.go's skip logic re-execute genesis on subsequent cycles.
+		txNum, err = rawdbv3.TxNums.Max(ctx, tx, blockNum)
 		if err != nil {
 			return 0, 0, err
 		}
