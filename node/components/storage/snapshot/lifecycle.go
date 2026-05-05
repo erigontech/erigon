@@ -162,7 +162,7 @@ func (inv *Inventory) AdvanceTo(name string, target LifecycleState) bool {
 	}
 
 	applyStateToFlags(e, target)
-	inv.recordTimingTransition(name, target, inv.now())
+	inv.recordTimingTransitionLocked(name, target, inv.now())
 	inv.mu.Unlock()
 
 	inv.notify(ChangeSet{Files: []string{name}})

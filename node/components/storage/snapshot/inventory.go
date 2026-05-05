@@ -217,7 +217,7 @@ func (inv *Inventory) AddFile(entry *FileEntry) error {
 	}
 	inv.mu.Lock()
 	now := inv.now()
-	inv.recordEnqueue(entry.Name, now)
+	inv.recordEnqueueLocked(entry.Name, now)
 	// If the entry arrives at a non-Declared state (typical for
 	// bootstrap and disk-discovery paths), stamp the corresponding
 	// timing slots so the orchestrator's timeline has a starting
@@ -225,13 +225,13 @@ func (inv *Inventory) AddFile(entry *FileEntry) error {
 	// current state — a file that lands at Advertisable on bootstrap
 	// gets all four timestamps set to "now".
 	if entry.State >= LifecycleDownloaded {
-		inv.recordTimingTransition(entry.Name, LifecycleDownloaded, now)
+		inv.recordTimingTransitionLocked(entry.Name, LifecycleDownloaded, now)
 	}
 	if entry.State >= LifecycleIndexed {
-		inv.recordTimingTransition(entry.Name, LifecycleIndexed, now)
+		inv.recordTimingTransitionLocked(entry.Name, LifecycleIndexed, now)
 	}
 	if entry.State >= LifecycleAdvertisable {
-		inv.recordTimingTransition(entry.Name, LifecycleAdvertisable, now)
+		inv.recordTimingTransitionLocked(entry.Name, LifecycleAdvertisable, now)
 	}
 	switch entry.Kind {
 	case KindCaplin:
@@ -265,6 +265,11 @@ func (inv *Inventory) RemoveFile(name string) {
 		if e := inv.findByNameLocked(name); e != nil {
 			inv.pendingDeletes[name] = e.Clone()
 		}
+	} else {
+		// No held view referencing this file → clean timings
+		// immediately. Held-view case is handled in view.Close
+		// when refcount drops to zero.
+		delete(inv.timings, name)
 	}
 	inv.blocks = removeByName(inv.blocks, name)
 	inv.caplin = removeByName(inv.caplin, name)
@@ -300,11 +305,15 @@ func (inv *Inventory) ReplaceWithMerge(merged *FileEntry, replaced []string) boo
 	}
 
 	// Held-view defer: snapshot constituents about to be evicted.
+	// Files with no held view drop their timings immediately; the
+	// held-view case is handled in view.Close when refcount drops.
 	for _, name := range replaced {
 		if inv.refcount[name] > 0 {
 			if e := findByName(entries, name); e != nil {
 				inv.pendingDeletes[name] = e.Clone()
 			}
+		} else {
+			delete(inv.timings, name)
 		}
 	}
 

@@ -167,6 +167,13 @@ func (v *InventoryView) Close() {
 		v.inv.refcount[name]--
 		if v.inv.refcount[name] <= 0 {
 			delete(v.inv.refcount, name)
+			// Only drop timings if the file was actually evicted
+			// (had a pending delete). Re-added files keep their
+			// timings — the orchestrator wants the original
+			// EnqueuedAt, not the re-add time.
+			if _, evicted := v.inv.pendingDeletes[name]; evicted {
+				delete(v.inv.timings, name)
+			}
 			delete(v.inv.pendingDeletes, name)
 		}
 	}

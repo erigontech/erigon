@@ -191,7 +191,7 @@ func (inv *Inventory) AdvanceStep(key StepKey, target LifecycleState) []string {
 			}
 			if e.State < target {
 				applyStateToFlags(e, target)
-				inv.recordTimingTransition(e.Name, target, now)
+				inv.recordTimingTransitionLocked(e.Name, target, now)
 				advanced = append(advanced, e.Name)
 			}
 		}
@@ -230,7 +230,7 @@ func (inv *Inventory) AdvanceFiles(names []string, target LifecycleState) []stri
 		}
 		if e.State < target {
 			applyStateToFlags(e, target)
-			inv.recordTimingTransition(name, target, now)
+			inv.recordTimingTransitionLocked(name, target, now)
 			advanced = append(advanced, name)
 		}
 	}

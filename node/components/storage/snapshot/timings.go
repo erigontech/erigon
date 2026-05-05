@@ -103,29 +103,63 @@ func (inv *Inventory) FileTimings(name string) (FileTimings, bool) {
 // StepTimings derives the per-step timing view from the per-file
 // timings of the step's group members. Returns the zero StepTimings
 // (with Key set) if no files match the key.
+//
+// Acquires inv.mu.RLock once and snapshots the timings + group
+// membership under that lock — derivation runs lock-free over local
+// copies. Important when the orchestrator queries StepTimings on
+// every sweep across many steps.
 func (inv *Inventory) StepTimings(key StepKey) StepTimings {
 	out := StepTimings{Key: key}
 	if key.IsZero() {
 		return out
 	}
-	group := inv.FilesAtStep(key)
-	if len(group.Files) == 0 {
-		return out
-	}
-	minimum := group.Minimum()
 
-	// Helpers — track the running min/max across the relevant subset.
-	// Zero in any file's relevant timestamp means "not all files in
-	// that subset have reached the corresponding state yet"; the
-	// derived timestamp stays zero in that case.
-	minTs := func(set []*FileEntry, pick func(FileTimings) time.Time) time.Time {
-		var out time.Time
-		for _, f := range set {
-			t, ok := inv.FileTimings(f.Name)
-			if !ok {
+	// Single RLock: snapshot the group's names + their timings.
+	type fileSnapshot struct {
+		name      string
+		isMinimum bool
+		timings   FileTimings
+		known     bool
+	}
+	var snap []fileSnapshot
+	inv.mu.RLock()
+	collect := func(slice []*FileEntry) {
+		for _, e := range slice {
+			if e.StepKey() != key {
 				continue
 			}
-			ts := pick(t)
+			fs := fileSnapshot{name: e.Name, isMinimum: e.IsMinimum()}
+			if t, ok := inv.timings[e.Name]; ok {
+				fs.timings = *t
+				fs.known = true
+			}
+			snap = append(snap, fs)
+		}
+	}
+	if key.Domain == "" {
+		collect(inv.blocks)
+	} else {
+		collect(inv.domains[key.Domain])
+	}
+	inv.mu.RUnlock()
+
+	if len(snap) == 0 {
+		return out
+	}
+
+	// Derive timings lock-free over the snapshot. minTs ignores
+	// missing/zero entries; maxTs returns zero if any file lacks the
+	// timestamp (the "not yet complete" semantics).
+	minTs := func(includeMinimumOnly bool, pick func(FileTimings) time.Time) time.Time {
+		var out time.Time
+		for _, fs := range snap {
+			if includeMinimumOnly && !fs.isMinimum {
+				continue
+			}
+			if !fs.known {
+				continue
+			}
+			ts := pick(fs.timings)
 			if ts.IsZero() {
 				continue
 			}
@@ -135,16 +169,18 @@ func (inv *Inventory) StepTimings(key StepKey) StepTimings {
 		}
 		return out
 	}
-	maxTs := func(set []*FileEntry, pick func(FileTimings) time.Time) time.Time {
+	maxTs := func(includeMinimumOnly bool, pick func(FileTimings) time.Time) time.Time {
 		var out time.Time
-		for _, f := range set {
-			t, ok := inv.FileTimings(f.Name)
-			if !ok {
-				return time.Time{} // missing file → not yet complete
+		for _, fs := range snap {
+			if includeMinimumOnly && !fs.isMinimum {
+				continue
 			}
-			ts := pick(t)
+			if !fs.known {
+				return time.Time{}
+			}
+			ts := pick(fs.timings)
 			if ts.IsZero() {
-				return time.Time{} // unfinished file → not yet complete
+				return time.Time{}
 			}
 			if ts.After(out) {
 				out = ts
@@ -153,24 +189,25 @@ func (inv *Inventory) StepTimings(key StepKey) StepTimings {
 		return out
 	}
 
-	out.FirstFileSeenAt = minTs(group.Files, func(t FileTimings) time.Time { return t.EnqueuedAt })
+	out.FirstFileSeenAt = minTs(false, func(t FileTimings) time.Time { return t.EnqueuedAt })
 
-	out.MinimumDownloadedAt = maxTs(minimum, func(t FileTimings) time.Time { return t.DownloadCompletedAt })
-	out.AllDownloadedAt = maxTs(group.Files, func(t FileTimings) time.Time { return t.DownloadCompletedAt })
+	out.MinimumDownloadedAt = maxTs(true, func(t FileTimings) time.Time { return t.DownloadCompletedAt })
+	out.AllDownloadedAt = maxTs(false, func(t FileTimings) time.Time { return t.DownloadCompletedAt })
 
-	out.MinimumIndexedAt = maxTs(minimum, func(t FileTimings) time.Time { return t.IndexedAt })
-	out.AllIndexedAt = maxTs(group.Files, func(t FileTimings) time.Time { return t.IndexedAt })
+	out.MinimumIndexedAt = maxTs(true, func(t FileTimings) time.Time { return t.IndexedAt })
+	out.AllIndexedAt = maxTs(false, func(t FileTimings) time.Time { return t.IndexedAt })
 
-	out.MinimumValidatedAt = maxTs(minimum, func(t FileTimings) time.Time { return t.ValidatedAt })
-	out.AllValidatedAt = maxTs(group.Files, func(t FileTimings) time.Time { return t.ValidatedAt })
+	out.MinimumValidatedAt = maxTs(true, func(t FileTimings) time.Time { return t.ValidatedAt })
+	out.AllValidatedAt = maxTs(false, func(t FileTimings) time.Time { return t.ValidatedAt })
 
 	return out
 }
 
-// recordTimingTransition is called from inventory mutation paths to
-// stamp the appropriate timestamp when state transitions occur.
-// Caller must hold inv.mu.Lock().
-func (inv *Inventory) recordTimingTransition(name string, target LifecycleState, now time.Time) {
+// recordTimingTransitionLocked stamps the appropriate timestamp when
+// a state transition occurs. The "Locked" suffix is the Go convention
+// for "caller already holds inv.mu.Lock()" — direct callers from
+// within mutation methods that already hold the write lock.
+func (inv *Inventory) recordTimingTransitionLocked(name string, target LifecycleState, now time.Time) {
 	if inv.timings == nil {
 		inv.timings = make(map[string]*FileTimings)
 	}
@@ -195,9 +232,11 @@ func (inv *Inventory) recordTimingTransition(name string, target LifecycleState,
 	}
 }
 
-// recordEnqueue stamps EnqueuedAt the first time the inventory sees
-// a file. Caller must hold inv.mu.Lock().
-func (inv *Inventory) recordEnqueue(name string, now time.Time) {
+// recordEnqueueLocked stamps EnqueuedAt the first time the inventory
+// sees a file. The "Locked" suffix is the Go convention for "caller
+// already holds inv.mu.Lock()" — direct callers from within AddFile
+// that already hold the write lock.
+func (inv *Inventory) recordEnqueueLocked(name string, now time.Time) {
 	if inv.timings == nil {
 		inv.timings = make(map[string]*FileTimings)
 	}
