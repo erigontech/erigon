@@ -226,7 +226,7 @@ func (br *BlockRetire) borSnapshots() *heimdall.RoSnapshots {
 }
 
 func CanRetire(curBlockNum uint64, blocksInSnapshots uint64, snapType snaptype.Enum, snCfg *snapcfg.Cfg) (blockFrom, blockTo uint64, can bool) {
-	var keep uint64 = dbg.MaxReorgDepth
+	var keep uint64 = 1024 //TODO: increase to params.FullImmutabilityThreshold after db optimizations; MaxReorgDepth(96) caused sync regression (CI: sync-with-externalcl timeout)
 	if curBlockNum <= keep {
 		return
 	}
