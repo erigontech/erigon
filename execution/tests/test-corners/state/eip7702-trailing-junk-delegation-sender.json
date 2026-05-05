@@ -1,0 +1,74 @@
+{
+  "delegation-sender-malformed-trailing-junk-rejected": {
+    "env": {
+      "currentCoinbase": "b94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+      "currentDifficulty": "0x200000",
+      "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000200000",
+      "currentGasLimit": "0x26e1f476fe1e22",
+      "currentNumber": "0x1",
+      "currentTimestamp": "0x3e8",
+      "previousHash": "0x044852b2a670ade5407e78fb2863c51de9fcb96542a07186fe3aeda6bb8a116d",
+      "currentBaseFee": "0x10"
+    },
+    "pre": {
+      "0x77020000000000000000000000000000000000d1": {
+        "code": "0x600161ff00553361ff12553061ff13553461ff145560006000f3",
+        "storage": {},
+        "balance": "0x1",
+        "nonce": "0x1"
+      },
+      "0x77020000000000000000000000000000000000d2": {
+        "code": "0x00",
+        "storage": {},
+        "balance": "0x1",
+        "nonce": "0x0"
+      },
+      "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+        "code": "0xef010077020000000000000000000000000000000000d2ff",
+        "storage": {},
+        "balance": "0x5f5e100",
+        "nonce": "0xfffffffffffffffe"
+      }
+    },
+    "config": {
+      "blobSchedule": {
+        "Prague": {
+          "target": "0x6",
+          "max": "0x9",
+          "baseFeeUpdateFraction": "0x4c6964"
+        }
+      }
+    },
+    "transaction": {
+      "gasPrice": "0x10",
+      "nonce": "0xfffffffffffffffe",
+      "to": "0x77020000000000000000000000000000000000d1",
+      "data": [
+        "0x"
+      ],
+      "gasLimit": [
+        "0xf4240"
+      ],
+      "value": [
+        "0x0"
+      ],
+      "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8",
+      "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"
+    },
+    "out": "0x",
+    "post": {
+      "Prague": [
+        {
+          "hash": "0xad6d42019639ca66d9cd9a1d7bf459b9268850e09584c50eedffadafd8ed82b8",
+          "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+          "expectException": "delegation-indicator sender code must be exactly 23 bytes long",
+          "indexes": {
+            "data": 0,
+            "gas": 0,
+            "value": 0
+          }
+        }
+      ]
+    }
+  }
+}
