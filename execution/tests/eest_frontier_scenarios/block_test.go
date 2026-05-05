@@ -18,9 +18,9 @@ func TestExecutionSpecBlockchainFrontierScenarios(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
 	bt := new(testutil.TestMatcher)
-	dir := filepath.Join("..", "execution-spec-tests", "blockchain_tests")
+	tarPath := filepath.Join("..", "eest-cache", "fixtures_develop.tar.gz")
 	bt.Whitelist(`^frontier/scenarios/test_scenarios\.json`)
-	bt.Walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
+	bt.WalkTar(t, tarPath, "fixtures/blockchain_tests/", func(t *testing.T, name string, test *testutil.BlockTest) {
 		if err := bt.CheckFailure(t, test.Run(t)); err != nil {
 			t.Error(err)
 		}
