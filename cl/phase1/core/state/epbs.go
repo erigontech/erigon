@@ -40,7 +40,7 @@ func ConvertValidatorIndexToBuilderIndex(validatorIndex uint64) uint64 {
 func IsActiveBuilder(state abstract.BeaconState, builderIndex uint64) bool {
 	builders := state.GetBuilders()
 	if builders == nil {
-		log.Warn("builders is nil")
+		log.Debug("builders is nil")
 		return false
 	}
 	if int(builderIndex) >= builders.Len() {
@@ -48,7 +48,7 @@ func IsActiveBuilder(state abstract.BeaconState, builderIndex uint64) bool {
 	}
 	builder := builders.Get(int(builderIndex))
 	if builder == nil {
-		log.Warn("builder is nil", "builderIndex", builderIndex)
+		log.Debug("builder is nil", "builderIndex", builderIndex)
 		return false
 	}
 	finalizedEpoch := state.FinalizedCheckpoint().Epoch
@@ -117,7 +117,7 @@ func IsValidIndexedPayloadAttestation(s abstract.BeaconState, attestation *cltyp
 func CanBuilderCoverBid(s abstract.BeaconState, builderIndex uint64, bidAmount uint64) bool {
 	builders := s.GetBuilders()
 	if builders == nil {
-		log.Warn("builders is nil")
+		log.Debug("builders is nil")
 		return false
 	}
 	if int(builderIndex) >= builders.Len() {
@@ -125,7 +125,7 @@ func CanBuilderCoverBid(s abstract.BeaconState, builderIndex uint64, bidAmount u
 	}
 	builder := builders.Get(int(builderIndex))
 	if builder == nil {
-		log.Warn("builder is nil", "builderIndex", builderIndex)
+		log.Debug("builder is nil", "builderIndex", builderIndex)
 		return false
 	}
 
@@ -155,7 +155,7 @@ func GetPendingBalanceToWithdrawForBuilder(s abstract.BeaconState, builderIndex 
 			return true
 		})
 	} else {
-		log.Warn("builder_pending_withdrawals is nil")
+		log.Debug("builder_pending_withdrawals is nil")
 	}
 
 	// Sum from builder_pending_payments
@@ -168,7 +168,7 @@ func GetPendingBalanceToWithdrawForBuilder(s abstract.BeaconState, builderIndex 
 			return true
 		})
 	} else {
-		log.Warn("builder_pending_payments is nil")
+		log.Debug("builder_pending_payments is nil")
 	}
 
 	return total

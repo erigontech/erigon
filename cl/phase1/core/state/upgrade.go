@@ -280,7 +280,6 @@ func (b *CachingBeaconState) UpgradeToFulu() error {
 }
 
 func (b *CachingBeaconState) UpgradeToGloas() error {
-	log.Debug("UpgradeToGloas: clearing previousStateRoot", "slot", b.Slot(), "wasSet", b.previousStateRoot != common.Hash{})
 	b.previousStateRoot = common.Hash{}
 	epoch := Epoch(b.BeaconState)
 	cfg := b.BeaconConfig()

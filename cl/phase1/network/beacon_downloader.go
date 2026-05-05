@@ -186,7 +186,7 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 							httpStart := f.highestSlotProcessed + 1
 							httpBlocks, httpErr := fetchBlocksFromBeaconAPI(ctx, f.httpFallbackURL, httpStart, count+10, f.beaconCfg)
 							if httpErr == nil && len(httpBlocks) > 0 {
-								log.Info("[ForwardBeaconDownloader] P2P failed, fetched blocks from beacon API",
+								log.Debug("[ForwardBeaconDownloader] P2P failed, fetched blocks from beacon API",
 									"fromSlot", httpStart, "count", len(httpBlocks))
 								consecutiveFailures.Store(0)
 								f.httpPreferred.Store(true)
@@ -280,7 +280,7 @@ Process:
 				envelopes = make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
 				httpEnvs := fetchEnvelopesFromBeaconAPI(ctx, f.httpFallbackURL, processBlocks, fullRoots, envelopes, f.beaconCfg)
 				if httpEnvs > 0 {
-					log.Info("[ForwardBeaconDownloader] fetched envelopes from beacon API", "count", httpEnvs)
+					log.Debug("[ForwardBeaconDownloader] fetched envelopes from beacon API", "count", httpEnvs)
 				}
 			} else {
 				var envErr error
@@ -295,7 +295,7 @@ Process:
 					}
 					httpEnvs := fetchEnvelopesFromBeaconAPI(ctx, f.httpFallbackURL, processBlocks, fullRoots, envelopes, f.beaconCfg)
 					if httpEnvs > 0 {
-						log.Info("[ForwardBeaconDownloader] fetched envelopes from beacon API", "count", httpEnvs)
+						log.Debug("[ForwardBeaconDownloader] fetched envelopes from beacon API", "count", httpEnvs)
 					}
 				}
 			}

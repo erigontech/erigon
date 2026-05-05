@@ -168,16 +168,16 @@ func (b *CachingBeaconState) ComputeExitEpochAndUpdateChurn(exitBalance uint64) 
 func (b *CachingBeaconState) InitiateBuilderExit(builderIndex uint64) {
 	builders := b.GetBuilders()
 	if builders == nil {
-		log.Warn("builders is nil")
+		log.Debug("builders is nil")
 		return
 	}
 	if int(builderIndex) >= builders.Len() {
-		log.Warn("builder index out of range", "builderIndex", builderIndex, "len", builders.Len())
+		log.Debug("builder index out of range", "builderIndex", builderIndex, "len", builders.Len())
 		return
 	}
 	builder := builders.Get(int(builderIndex))
 	if builder == nil {
-		log.Warn("builder is nil", "builderIndex", builderIndex)
+		log.Debug("builder is nil", "builderIndex", builderIndex)
 		return
 	}
 	if builder.WithdrawableEpoch != b.BeaconConfig().FarFutureEpoch {

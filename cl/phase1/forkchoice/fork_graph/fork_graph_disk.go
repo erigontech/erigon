@@ -238,7 +238,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 			currentStateRoot, _ = f.currentState.BlockRoot()
 			currentStateSlot = f.currentState.Slot()
 		}
-		log.Warn("AddChainSegment: missing segment",
+		log.Debug("AddChainSegment: missing segment",
 			"slot", block.Slot,
 			"blockRoot", common.Hash(blockRoot),
 			"parentRoot", block.ParentRoot,

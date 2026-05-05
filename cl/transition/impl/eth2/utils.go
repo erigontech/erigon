@@ -23,7 +23,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/log/v3"
 )
 
 func computeSigningRootEpoch(epoch uint64, domain []byte) (common.Hash, error) {
@@ -43,9 +42,6 @@ func transitionSlot(s abstract.BeaconState) error {
 		if err != nil {
 			return err
 		}
-		log.Debug("transitionSlot: PreviousStateRoot was ZERO, fell back to HashSSZ", "slot", slot, "hashSSZ", previousStateRoot)
-	} else {
-		log.Debug("transitionSlot: using PreviousStateRoot", "slot", slot, "root", previousStateRoot)
 	}
 
 	beaconConfig := s.BeaconConfig()
