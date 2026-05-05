@@ -2,68 +2,104 @@
 
 ## Status
 
-**2026-05-04 — V2 mechanism end-to-end validated on hoodi.** Post-§5e
-rerun reached tip in **10 min 25 s** (start 23:12:23 UTC, first
-`age=0` at 23:22:48 UTC), sustained tip through 13:00 UTC, zero
-collision crashes, zero `Adding torrents from disk` lines, 22
-files advanced through Indexed → Advertisable, 143 quarantine
-activations (vs the pre-5d 7942-retries flood). The branch is
-**ready for draft PR review** — outstanding items below are split
-into "in this PR" and "follow-up PR" buckets.
+**2026-05-05 — Per-step batch validation + minimum-first orchestration
+landed.** Branch is feature-complete for the first PR; remaining work
+is mainnet measurement (the user-stated PR gate) plus follow-up
+items captured below.
 
-For the headline target + benchmarks see
-`docs/plans/20260502-min-time-to-tip-target.md`. Operational guide
-for the V2 path: `docs/plans/20260504-v2-operational-guide.md`.
+The model now operates per-step:
+  - Files within a step group (same `FromStep`/`ToStep`/`Domain`)
+    advance together to `Advertisable`.
+  - Two-pass minimum-first hook: minimum subset (headers+index for
+    blocks, domain-primary+accessor for state) advances as soon as
+    its files are Indexed, ahead of extras.
+  - Per-file + per-step timing instrumentation
+    (`FileTimings`, `StepTimings`) feeds the future bandwidth-aware
+    download orchestrator.
+  - Tier-0 metadata gate at `AddFile`; per-step batch validation
+    chain at `Advertisable` transition (default chain:
+    `AllFilesPresent` presence check).
+
+Hoodi end-to-end validations:
+  - **2026-05-04 V2 post-§5e rerun:** 10 min 25 s to tip, 22 files
+    advanced, 0 collision crashes.
+  - **2026-05-04 §5c rerun:** 13 min 17 s to tip, 0 BMI invocations
+    (vs prior 776), 156 files advanced through Indexed →
+    Advertisable. Per-step batch hook firing was confirmed once
+    `PopulateFromName` wired step metadata into discovery
+    (`step-batch2.aj0XRO`: 99 step-advanced log lines).
+
+Operational guide: `docs/plans/20260504-v2-operational-guide.md`.
+Validation flow + tier defaults: `docs/plans/20260504-validation-flow.md`.
+Step+minimum data model: `docs/plans/20260504-step-and-minimum-unified.md`.
 
 ## What completed
 
-  - **Item 1 — Tight retire gate.** ✅ V2 rerun observed
-    productionIndexBuilder driving 22 advance-to-Indexed and
-    advance-to-Advertisable transitions; retire's inline path no
-    longer pre-empts the lifecycle when the flag is on.
-  - **Item 2 — Observability.** ✅ `[storage-lifecycle]` and
-    `[chaintoml]` log prefixes in place; verification log lines
-    documented in `20260504-v2-operational-guide.md`.
+  - **Item 1 — Tight retire gate.** ✅
+  - **Item 2 — Observability.** ✅ `[storage-lifecycle]` log prefixes
+    + per-state advance lines + step-advanced lines.
   - **Item 5b — V2-only mode + bootstrap-from-preverified flag.** ✅
-  - **Item 5d — Latest-first download ordering.** ✅ landed.
-  - **Item 5e — Disk-walk gate.** ✅ AddTorrentsFromDisk gated on
-    LifecycleDrivenByStorage; collision crash gone. Full removal of
-    the function is follow-up cleanup.
+  - **Item 5c — Inventory pre-check for build dispatch.** ✅ §5c
+    pre-check eliminates redundant BMI invocations (776 → 0 in the
+    last hoodi rerun). Per-file dispatch refactor stays follow-up.
+  - **Item 5d — Latest-first download ordering.** ✅ Now uses the
+    unified `IsMinimum` classifier — `(IsMinimum desc, ToStep desc)`.
+  - **Item 5e — Disk-walk gate.** ✅ Full removal of
+    `AddTorrentsFromDisk` is follow-up cleanup.
+  - **Step + minimum unified data model.** ✅ `StepKey`, `IsMinimum`,
+    `StepGroup`, `FilesAtStep`, `AdvanceStep`, `AdvanceFiles` —
+    one set of types used by lifecycle batch validation, downloader
+    sort, and (future) publisher gate.
+  - **Per-step batch validation.** ✅ `StepValidator` interface,
+    `AllFilesPresent` default validator, `BuildOnBatchValidation`
+    handler with two-pass minimum-first dispatch.
+  - **Per-file/per-step timing instrumentation.** ✅ Feeds the
+    future bandwidth-aware orchestrator.
+  - **Tier-0 metadata gate at AddFile.** ✅ Auto-Kind-from-name +
+    `PopulateFromName` seam for step/domain/kind population.
+  - **Default validation chain wired in production.** ✅ Per-step
+    presence check active when `--snap.lifecycle-driven-by-storage`
+    is set.
 
 ## What ships in this PR (verification-only)
 
-  - **Item 3 — Download-order verification.** Scenarios tests cover
-    the ordering invariant; production hoodi sync exhibited the
-    expected latest-first ordering during the §5d soak. PR
-    description carries a log excerpt as evidence; no code change
-    needed for this item beyond what already landed.
-  - **Item 4 — Fast-start fixture.** The post-§5e datadir
-    (`/erigon/tmp/erigon-v2post5e.8q0gep`) and the minimal-mode
-    publisher datadir (`/erigon/tmp/erigon-min.OZiquQ`) are usable
-    fast-start fixtures going forward. Wire A's startup population
-    is exercised on every restart.
+  - **Item 3 — Download-order verification.** Scenarios tests +
+    hoodi observation. No additional code.
+  - **Item 4 — Fast-start fixture.** Existing hoodi datadirs
+    serve as fixtures.
 
 ## What follows up in subsequent PRs
 
+  - **Mainnet performance measurement.** The PR gate. Reproduce the
+    10-min time-to-tip target on mainnet. See
+    `docs/plans/20260502-min-time-to-tip-target.md` (mainnet section)
+    + `docs/plans/20260504-v2-operational-guide.md`.
+  - **Stage 2 — commitment-file block→step binding.** A step's
+    `commitment.kv` records the canonical block number at the step's
+    end (per Erigon's existing `KeyCommitmentState` encoding). A
+    follow-up batch validator opens commitment.kv during validation
+    and registers a verifiable `(step, block)` binding in the
+    inventory — gives unified step-units across blocks + state.
+    Plan section: `docs/plans/20260504-step-and-minimum-unified.md`
+    "Block-to-step unit conversion (staged)".
+  - **Bandwidth-aware download orchestrator.** Backwards-vs-sideways
+    priority shaping using the per-step / per-file timings landed
+    in this PR. Real-time torrent-throughput integration (option A)
+    plugs into the same accessors. Drives the
+    "don't overload torrents at startup, then saturate available
+    bandwidth" model the user described.
   - **Item 5 — Abnormal-termination scenarios.** Clean-stop is small
     enough to land here; SIGKILL / OOM / power-loss matrix is its own
     workstream and should not gate this PR.
-  - **Item 5c — Full inventory-driven build dispatch.** Symptom-fix
-    quarantine is sufficient floor; the per-file dispatch refactor
-    needs more API analysis (build subsystem granularity).
-  - **Item 6 — Mainnet performance measurement.** Hoodi numbers are
-    in hand (10 min 25 s). Reproducing on Ethereum mainnet is the
-    headline next milestone — see
-    `docs/plans/20260503-mainnet-time-to-tip.md`.
-  - **DID-based UCAN publisher identity.** New scope item — the
-    publisher needs a verifiable identity so consumers can target
-    it as a trusted source. Distribute the publisher's DID with the
-    Erigon executable so default-trust roots are available without
-    operator configuration. Plan:
-    `docs/plans/20260504-publisher-did-ucan.md`. Promote to an active
-    branch after this PR lands.
-  - **Testnet / forked-chain implementation.** Next concrete delivery
-    after this PR merges; per the user's roadmap.
+  - **Item 5c — Full inventory-driven build dispatch.** Pre-check
+    landed; per-file dispatch (vs global BMI sweep) is follow-up.
+  - **DID-based UCAN publisher identity.** Stays in its own PR per
+    user direction. Plan:
+    `docs/plans/20260504-publisher-did-ucan.md`.
+  - **Item 5e full removal.** Once V2 path is established, remove
+    `AddTorrentsFromDisk` entirely (today gated, not deleted).
+  - **Testnet / forked-chain implementation.** Per the user's
+    roadmap, after this PR merges.
 
 ## Pre-PR background — what the smoke tests showed
 
