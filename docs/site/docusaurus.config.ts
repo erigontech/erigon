@@ -173,6 +173,16 @@ export default async function createConfig(): Promise<Config> {
         ],
         copyright: `Copyright © ${new Date().getFullYear()} Erigon. Built with Docusaurus.`,
       },
+      metadata: [
+        {name: 'description', content: 'Official documentation for Erigon — the efficient, modular Ethereum execution client built for performance and low disk footprint.'},
+        {property: 'og:type', content: 'website'},
+        {property: 'og:site_name', content: 'Erigon Documentation'},
+        {property: 'og:image', content: 'https://docs.erigon.tech/img/og-image.png'},
+        {name: 'twitter:card', content: 'summary_large_image'},
+        {name: 'twitter:site', content: '@erigoneth'},
+        {name: 'twitter:image', content: 'https://docs.erigon.tech/img/og-image.png'},
+      ],
+
       prism: {
         theme: prismThemes.github,
         darkTheme: prismThemes.dracula,
