@@ -106,7 +106,7 @@ func AnswerGetBlockHeadersQuery(db kv.Tx, query *GetBlockHeadersPacket, blockRea
 				log.Warn("[p2p] GetBlockHeaders skip overflow attack", "current", current, "skip", query.Skip, "next", next)
 				unknown = true
 			} else {
-				header, err := blockReader.HeaderByNumber(context.Background(), db, query.Origin.Number)
+				header, err := blockReader.HeaderByNumber(context.Background(), db, next)
 				if err != nil {
 					return nil, err
 				}

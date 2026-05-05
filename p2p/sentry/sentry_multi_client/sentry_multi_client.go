@@ -1035,6 +1035,13 @@ func (cs *MultiClient) blockRange69(ctx context.Context, inreq *sentryproto.Inbo
 		return fmt.Errorf("decoding blockRange69: %w, data: %x", err, inreq.Data)
 	}
 	if err := query.Validate(); err != nil {
+		cs.logger.Debug("Kick peer for invalid BlockRangeUpdate", "peer", inreq.PeerId.String(), "err", err)
+		if _, err1 := sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{
+			PeerId:  inreq.PeerId,
+			Penalty: sentryproto.PenaltyKind_Kick,
+		}, &grpc.EmptyCallOption{}); err1 != nil {
+			cs.logger.Error("Could not send penalty", "err", err1)
+		}
 		return err
 	}
 

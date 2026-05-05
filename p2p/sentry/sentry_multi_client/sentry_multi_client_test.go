@@ -148,6 +148,7 @@ type mockSentryClient struct {
 	sendMessageByIdFunc  func(ctx context.Context, req *proto_sentry.SendMessageByIdRequest, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error)
 	sendMessageToAllFunc func(ctx context.Context, req *proto_sentry.OutboundMessageData, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error)
 	handShakeFunc        func(ctx context.Context, req *emptypb.Empty, opts ...grpc.CallOption) (*proto_sentry.HandShakeReply, error)
+	penalizePeerFunc     func(ctx context.Context, req *proto_sentry.PenalizePeerRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 }
 
 func (m *mockSentryClient) SendMessageById(ctx context.Context, req *proto_sentry.SendMessageByIdRequest, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error) {
@@ -162,8 +163,62 @@ func (m *mockSentryClient) HandShake(ctx context.Context, req *emptypb.Empty, op
 	return m.handShakeFunc(ctx, req, opts...)
 }
 
+func (m *mockSentryClient) PenalizePeer(ctx context.Context, req *proto_sentry.PenalizePeerRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	if m.penalizePeerFunc == nil {
+		return &emptypb.Empty{}, nil
+	}
+	return m.penalizePeerFunc(ctx, req, opts...)
+}
+
 type mockBlockReader struct {
 	services.FullBlockReader
+}
+
+// TestBlockRange69_InvalidPacketKicksPeer verifies that an invalid
+// BlockRangeUpdate (e.g. Earliest > Latest) causes the peer to be penalized.
+// This mirrors the Hive `TestBlockRangeUpdateInvalid` simulator check.
+func TestBlockRange69_InvalidPacketKicksPeer(t *testing.T) {
+	ctx := context.Background()
+
+	peerId := &proto_types.H512{
+		Hi: &proto_types.H256{Hi: &proto_types.H128{}, Lo: &proto_types.H128{}},
+		Lo: &proto_types.H256{Hi: &proto_types.H128{}, Lo: &proto_types.H128{}},
+	}
+
+	// Packet with Earliest > Latest is invalid per BlockRangeUpdatePacket.Validate.
+	invalid := eth.BlockRangeUpdatePacket{
+		Earliest:   10,
+		Latest:     8,
+		LatestHash: common.HexToHash("0xdeadbeef"),
+	}
+	payload, err := rlp.EncodeToBytes(&invalid)
+	if err != nil {
+		t.Fatalf("encode packet: %v", err)
+	}
+
+	var penalized *proto_sentry.PenalizePeerRequest
+	mockSentry := &mockSentryClient{
+		penalizePeerFunc: func(_ context.Context, req *proto_sentry.PenalizePeerRequest, _ ...grpc.CallOption) (*emptypb.Empty, error) {
+			penalized = req
+			return &emptypb.Empty{}, nil
+		},
+	}
+
+	cs := &MultiClient{logger: log.New()}
+
+	if err := cs.blockRange69(ctx, &proto_sentry.InboundMessage{
+		PeerId: peerId,
+		Data:   payload,
+	}, mockSentry); err == nil {
+		t.Fatal("expected validation error, got nil")
+	}
+
+	if penalized == nil {
+		t.Fatal("expected PenalizePeer to be called, got nil")
+	}
+	if penalized.Penalty != proto_sentry.PenaltyKind_Kick {
+		t.Fatalf("expected Kick penalty, got %v", penalized.Penalty)
+	}
 }
 
 type mockReceiptsGenerator struct {
