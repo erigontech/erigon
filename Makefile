@@ -236,7 +236,7 @@ test-all: test-fixtures test-filtered
 ## test-fixtures:                      download & verify pinned test fixture tarballs
 .PHONY: test-fixtures
 test-fixtures:
-	$(GO) run ./cmd/test-fixtures
+	tools/test-fixtures.sh
 
 ## test-bench:                         check the benchmarks compile and run
 test-bench: override GO_FLAGS += -run=^$$ -bench=. -benchtime=1x -short -timeout=5m
