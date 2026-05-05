@@ -252,19 +252,36 @@ New plan docs under `docs/plans/`:
   **7389 entries** at the time the V2 node connected (preverified
   6685 entries plus ~704 additional files the publisher had
   produced locally during its catch-up beyond preverified's
-  snapshot point). So the V2 node downloaded a LARGER set than
-  vanilla preverified would have hardcoded — the V2 node got
-  preverified + the publisher's freshly-produced delta.
+  snapshot point). The V2 node downloaded the same set as a
+  preverified-driven node would have — set sizes are
+  approximately equal because preverified itself grows over time
+  (each release ships a larger list, with more entries near tip
+  where unmerged-step files accumulate).
 
-  The V2 architectural TIME-TO-TIP advantage (smaller advertised
-  set → faster sync) needs a publisher running **V2-only mode**
-  (no `--snap.bootstrap-from-preverified`) so it advertises just
-  its own retire output. Such a publisher is only meaningful
-  once the publisher itself is V2-fed (joins another publisher's
-  smaller manifest, doesn't fall back to preverified). That's a
-  Phase-1+ measurement once Erigon Tech's snapshotter is the
-  bootstrap source and downstream publishers can opt out of
-  preverified bootstrap.
+  **What V2 actually changes** vs preverified isn't manifest size
+  but four different things:
+
+    1. **Liveness** — V2 chain.toml is updated by publishers
+       continuously; preverified is frozen at binary build time.
+       Without V2, post-preverified files have to be fetched via
+       ad-hoc stage retire; with V2, they're authoritatively in
+       the manifest.
+    2. **Trust** — V2 chain.toml is signable + verifiable
+       per-publisher (follow-up DID/UCAN PR); preverified is
+       "trust the binary."
+    3. **Decentralization** — V2 has multiple potential publishers;
+       preverified has one canonical source.
+    4. **Selectability** (post-PR scope) — V2 consumers can opt
+       to download only `IsMinimum` files of recent steps
+       (Phase 0 per `docs/plans/20260502-min-time-to-tip-target.md`),
+       skipping historical extras. Preverified can't be
+       partially-skipped. This IS the future "faster than
+       preverified" path but it's not in scope for this PR.
+
+  For total time-to-tip specifically, our two mainnet runs
+  downloaded the same files — V2's 4m49s download-phase advantage
+  vs the publisher came purely from a warm swarm + populated
+  peer, not from a smaller manifest.
 
   Hoodi reference numbers from
   `docs/plans/20260502-min-time-to-tip-target.md`:

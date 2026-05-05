@@ -435,19 +435,30 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}
 	if err := backend.components.BuildStorage(storagecomp.Deps{
-		Ctx:                  ctx,
-		ChainDB:              temporalDb,
-		BlockReader:          blockReader,
-		BlockWriter:          blockWriter,
-		AllSnapshots:         allSnapshots,
-		AllBorSnapshots:      allBorSnapshots,
-		BridgeStore:          bridgeStore,
-		HeimdallStore:        heimdallStore,
-		ChainConfig:          chainConfig,
-		Genesis:              genesis,
-		Config:               config,
-		DBEventNotifier:      backend.notifications.Events,
-		DownloaderClient:     backend.downloaderClient,
+		Ctx:              ctx,
+		ChainDB:          temporalDb,
+		BlockReader:      blockReader,
+		BlockWriter:      blockWriter,
+		AllSnapshots:     allSnapshots,
+		AllBorSnapshots:  allBorSnapshots,
+		BridgeStore:      bridgeStore,
+		HeimdallStore:    heimdallStore,
+		ChainConfig:      chainConfig,
+		Genesis:          genesis,
+		Config:           config,
+		DBEventNotifier:  backend.notifications.Events,
+		DownloaderClient: backend.downloaderClient,
+		RepublishChainToml: func() error {
+			// Re-publish the publisher's chain.toml after retire/merge
+			// produces fresh snapshot files (called from
+			// OnFilesChange). nil-safe — no-ops on consumer-only
+			// nodes whose downloader isn't a publisher.
+			if backend.components == nil || backend.components.Downloader == nil ||
+				backend.components.Downloader.Downloader == nil {
+				return nil
+			}
+			return backend.components.Downloader.Downloader.PublishLocalChainToml()
+		},
 		Inventory:            inv,
 		Aggregator:           agg,
 		IndexWorkers:         estimate.IndexSnapshot.Workers(),
