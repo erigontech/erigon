@@ -4,9 +4,6 @@ on:
   workflow_call:
   workflow_dispatch:
 
-env:
-  EEST_VERSION: 'v5.4.0'
-
 concurrency:
   # Dynamic group to fill all available runners
   group: hive-eest-tests-${{ github.run_id }}
@@ -59,7 +56,7 @@ jobs:
             sim-limit: ".*(8024|7708|7778|7843|7928|7954|8037).*"
             shard: glamsterdam-devnet
             pool-size: 24
-            fixtures-url: "https://github.com/ethereum/execution-spec-tests/releases/download/bal@v5.7.0/fixtures_bal.tar.gz"
+            fixtures-tarball: fixtures_bal.tar.gz
             extra-hive-flags: "--sim.buildarg branch=devnets/bal/4 --sim.loglevel=3 --client.checktimelimit=300s"
             erigon-extra-flags: "--experimental.bal"
             # test_block_regular_gas_limit: error classification mismatch (GAS_USED_OVERFLOW vs GAS_ALLOWANCE_EXCEEDED)
@@ -87,6 +84,7 @@ jobs:
           sparse-checkout: |
             go.mod
             .github/workflows/hive-versions.json
+            execution/tests/eest-fixtures.json
           sparse-checkout-cone-mode: false
           path: erigon-src
 
@@ -159,12 +157,10 @@ jobs:
       # We also fail if more than half the tests fail
       - name: Run hive tests and parse output
         run: |
+          fixtures_tarball='${{ matrix.fixtures-tarball }}'
+          fixtures_url=$(jq -r --arg t "${fixtures_tarball:-fixtures_develop.tar.gz}" '.[$t].url' erigon-src/execution/tests/eest-fixtures.json)
           cd hive
           docker ps
-          fixtures_url="${{ matrix.fixtures-url }}"
-          if [ -z "$fixtures_url" ]; then
-            fixtures_url="https://github.com/ethereum/execution-spec-tests/releases/download/${{ env.EEST_VERSION }}/fixtures_develop.tar.gz"
-          fi
           run_suite() {
             echo -e "\n\n============================================================"
             echo "Running test: ${1}"
