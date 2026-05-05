@@ -354,7 +354,7 @@ func (et *KsmEonTracker) trackFutureEons(ctx context.Context) error {
 			// TODO: re-establish the subscription with backoff instead of waiting for ctx.
 			//       A graceful close (e.g. websocket reconnect) currently leaves the tracker in
 			//       a silently degraded state — new keyper sets stop being observed until the
-			//       process restarts. Tracking issue: TODO file one.
+			//       process restarts. Tracking issue: https://github.com/erigontech/erigon/issues/20999
 			//
 			et.logger.Warn("keyper set added subscription closed, waiting for shutdown")
 			<-ctx.Done()
