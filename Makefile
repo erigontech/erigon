@@ -293,6 +293,11 @@ test-hive:
 		act -j test-hive -s GITHUB_TOKEN=$(GITHUB_TOKEN) ; \
 	fi
 
+# Pull the pinned bal tarball URL and tag straight from eest-fixtures.json
+# so this target stays in sync with whatever the rest of the test suite uses.
+EEST_FIXTURES_BAL_URL := $(shell jq -r '."fixtures_bal.tar.gz".url' execution/tests/eest-fixtures.json)
+EEST_FIXTURES_BAL_TAG := $(shell echo '$(EEST_FIXTURES_BAL_URL)' | sed -E 's|.*/(bal)%40([^/]+)/.*|\1@\2|')
+
 eest-bal:
 	@if [ ! -d "temp" ]; then mkdir temp; fi
 	docker build -t "test/erigon:$(SHORT_COMMIT)" .
@@ -303,7 +308,7 @@ eest-bal:
 		sed -i'' -e "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
-	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-engine,".*amsterdam.*",--sim.buildarg branch=hive --sim.buildarg branch=tests-bal@v5.7.0 --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/bal%40v5.7.0/fixtures_bal.tar.gz)
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-engine,".*amsterdam.*",--sim.buildarg branch=hive --sim.buildarg branch=tests-$(EEST_FIXTURES_BAL_TAG) --sim.buildarg fixtures=$(EEST_FIXTURES_BAL_URL))
 
 # Define the run_suite function
 define run_suite
