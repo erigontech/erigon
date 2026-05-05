@@ -69,7 +69,7 @@ func benchmarkEngineX(b *testing.B, category string) {
 	preAllocs := make(map[engineapitester.PreAllocHash]*engineapitester.PreAlloc)
 	subcategories := make(map[string][]testEntry)
 
-	tarPath := filepath.Join(eestDir, "fixtures_benchmark.tar.gz")
+	tarPath := filepath.Join("eest-cache", "fixtures_benchmark.tar.gz")
 	f, err := os.Open(tarPath)
 	require.NoError(b, err)
 	defer f.Close()

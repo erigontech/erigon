@@ -25,6 +25,9 @@ docs/readthedocs/build
 .project
 .settings
 
+# Lazy-downloaded execution-spec-tests fixture tarballs (see Makefile target eest-fixtures)
+/execution/tests/eest-cache/
+
 # Used by mdbx Makefile
 /ethdb/mdbx/dist/CMakeFiles/*
 /ethdb/mdbx/dist/CMakeCache*

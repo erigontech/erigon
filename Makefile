@@ -231,7 +231,12 @@ test-short: override GO_FLAGS += -short -failfast
 test-short: test-filtered
 
 test-all: override GO_FLAGS := -timeout $(default_test_timeout) $(GO_FLAGS)
-test-all: test-filtered
+test-all: eest-fixtures test-filtered
+
+## eest-fixtures:                      download & verify the execution-spec-tests fixture tarballs
+.PHONY: eest-fixtures
+eest-fixtures:
+	$(GO) run ./cmd/eest-fixtures
 
 ## test-bench:                         check the benchmarks compile and run
 test-bench: override GO_FLAGS += -run=^$$ -bench=. -benchtime=1x -short -timeout=5m

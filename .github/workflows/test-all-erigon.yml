@@ -46,6 +46,14 @@ jobs:
           cleanup-space: true
           ramdisk: true
 
+      - name: Cache eest-fixtures tarballs
+        uses: actions/cache@v4
+        with:
+          path: execution/tests/eest-cache
+          key: eest-fixtures-${{ runner.os }}-${{ hashFiles('execution/tests/eest-fixtures.json') }}
+          restore-keys: |
+            eest-fixtures-${{ runner.os }}-
+
       - name: Run all tests on ${{ matrix.os }}
         env:
           SKIP_FLAKY_TESTS: 'true'

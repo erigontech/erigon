@@ -183,7 +183,7 @@ func (tm *TestMatcher) WalkTar(t *testing.T, tarPath, prefix string, runTest any
 	f, err := os.Open(tarPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			fmt.Fprintf(os.Stderr, "can't find tarball %s, did you initialise the submodule?\n", tarPath)
+			fmt.Fprintf(os.Stderr, "can't find tarball %s, run `make eest-fixtures` to download\n", tarPath)
 			t.Skip("missing tarball")
 		}
 		t.Fatal(err)
