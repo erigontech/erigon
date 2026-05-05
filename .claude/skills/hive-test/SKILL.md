@@ -50,7 +50,7 @@ The user may specify one or more test suites in any combination:
 - **branch=BRANCH** - Clone erigon from a remote branch instead of using the local
   working directory. The branch is cloned from `https://github.com/erigontech/erigon.git`
   into the hive client directory. Example: `/hive-test api branch=fix/my-feature`
-- **eest-version=VERSION** - Pin EEST fixtures version (e.g. `v5.3.0`). Default: auto-discover latest.
+- **develop-version=VERSION** - Pin `fixtures_develop.tar.gz` version (e.g. `v5.4.0`). Default: auto-discover latest.
 - **bal-version=VERSION** - Pin BAL fixtures version (e.g. `bal@v5.1.0`). Default: auto-discover latest.
 
 ## Expected Failures (CI thresholds)
@@ -83,12 +83,13 @@ the manifest via `jq` and applies them automatically.
 
 ### Phase 0: Discover Versions
 
-Before setup, discover the latest EEST fixture versions from GitHub. Skip this phase
-if the user provided explicit version overrides (`eest-version=`, `bal-version=`).
+Before setup, discover the latest fixture versions from execution-spec-tests
+GitHub releases. Skip this phase if the user provided explicit version
+overrides (`develop-version=`, `bal-version=`).
 
 ```bash
-# Latest standard EEST fixtures (tag matching v*.*.*)
-EEST_VERSION=$(curl -s https://api.github.com/repos/ethereum/execution-spec-tests/releases \
+# Latest fixtures_develop tarball (tag matching v*.*.*)
+DEVELOP_VERSION=$(curl -s https://api.github.com/repos/ethereum/execution-spec-tests/releases \
   | jq -r '[.[] | select(.tag_name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))][0].tag_name')
 
 # Latest BAL fixtures (tag matching bal@v*.*.*)
@@ -116,7 +117,7 @@ fi
 
 Log the discovered versions:
 ```
-EEST: $EEST_VERSION | BAL: $BAL_TAG (branch: $BAL_BRANCH) | Strict matching: enabled/disabled
+Develop: $DEVELOP_VERSION | BAL: $BAL_TAG (branch: $BAL_BRANCH) | Strict matching: enabled/disabled
 ```
 
 ### Phase 1: Setup
@@ -233,11 +234,11 @@ with `--sim.limit "suite1|suite2|..."`.
 
 **EEST** (sim: `ethereum/eels/consume-engine`):
 ```bash
-# $EEST_VERSION discovered in Phase 0 (e.g. v5.4.0), or user-provided via eest-version=
+# $DEVELOP_VERSION discovered in Phase 0 (e.g. v5.4.0), or user-provided via develop-version=
 ./hive --client-file erigon-local.yaml \
   --sim ethereum/eels/consume-engine \
   --sim.parallelism=12 --docker.nocache=true \
-  --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/${EEST_VERSION}/fixtures_develop.tar.gz \
+  --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/${DEVELOP_VERSION}/fixtures_develop.tar.gz \
   --sim.timelimit 60m
 ```
 
@@ -269,13 +270,13 @@ group similarly. Fixtures come from the same `fixtures_develop.tar.gz` archive
 as consume-engine.
 
 ```bash
-# $EEST_VERSION discovered in Phase 0 (e.g. v5.4.0), or user-provided via eest-version=
+# $DEVELOP_VERSION discovered in Phase 0 (e.g. v5.4.0), or user-provided via develop-version=
 # Replace the sim.limit regex to scope to the area under test.
 ./hive --client-file erigon-local.yaml \
   --sim ethereum/eels/consume-rlp \
   --sim.limit=".*eip2930_access_list.*" \
   --sim.parallelism=12 --docker.nocache=true \
-  --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/${EEST_VERSION}/fixtures_develop.tar.gz \
+  --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/${DEVELOP_VERSION}/fixtures_develop.tar.gz \
   --sim.timelimit 60m
 ```
 
