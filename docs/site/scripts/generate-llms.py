@@ -53,13 +53,15 @@ def strip_mdx(text):
     """Remove MDX-specific syntax, leaving clean prose markdown."""
     # Remove import/export statements
     text = re.sub(r"^(import|export)\s+.+$", "", text, flags=re.MULTILINE)
-    # Strip all HTML/JSX tags (both PascalCase components and lowercase html)
+    # Strip self-closing and opening HTML/JSX tags
     text = re.sub(r"<[A-Za-z][^>]*/?>", "", text)
     text = re.sub(r"</[A-Za-z][^>]*>", "", text)
     # Remove {/* comments */}
     text = re.sub(r"\{/\*.*?\*/\}", "", text, flags=re.DOTALL)
     # Remove leftover JSX expressions like {foo.bar}
     text = re.sub(r"\{[^}]{1,120}\}", "", text)
+    # Strip leading whitespace from each line — orphaned indented text from JSX component bodies
+    text = "\n".join(line.lstrip() for line in text.splitlines())
     # Collapse 3+ blank lines to 2
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()

@@ -2,60 +2,28 @@
 URL: https://docs.erigon.tech/
 
 Erigon Client Documentation
-  An efficient, modular Ethereum execution client built for performance, low disk footprint, and flexible deployment.
+An efficient, modular Ethereum execution client built for performance, low disk footprint, and flexible deployment.
 
-  
-    
-  
-  Get Started
-  Hardware requirements, installation options, and first-run guides to get your node online fast.
+Get Started
+Hardware requirements, installation options, and first-run guides to get your node online fast.
 
-  
-    
-  
-  Easy Nodes
-  One-command guided setup for Ethereum mainnet, Gnosis Chain, and Polygon nodes with sensible defaults.
+Easy Nodes
+One-command guided setup for Ethereum mainnet, Gnosis Chain, and Polygon nodes with sensible defaults.
 
-  
-    
-    
-  
-  Fundamentals
-  Sync modes, configuration, Docker, JWT, logging, storage optimization, and day-to-day operations.
+Fundamentals
+Sync modes, configuration, Docker, JWT, logging, storage optimization, and day-to-day operations.
 
-  
-    
-    
-    
-    
-  
-  Modules
-  Run RPC daemon, TxPool, Sentry, and Downloader as independent processes for scalable cluster setups.
+Modules
+Run RPC daemon, TxPool, Sentry, and Downloader as independent processes for scalable cluster setups.
 
-  
-    
-    
-    
-    
-    
-  
-  Staking
-  Solo staking with Caplin (built-in consensus layer) or pair Erigon with any external consensus client.
+Staking
+Solo staking with Caplin (built-in consensus layer) or pair Erigon with any external consensus client.
 
-  
-    
-    
-  
-  Interacting with Erigon
-  JSON-RPC and gRPC API reference — eth, debug, trace, engine, txpool, and other namespaces.
+Interacting with Erigon
+JSON-RPC and gRPC API reference — eth, debug, trace, engine, txpool, and other namespaces.
 
-  
-    
-    
-  
-  
-    Why Erigon?
-    Architecture advantages, performance benchmarks, and disk savings — understand what sets Erigon apart from other Ethereum execution clients.
+Why Erigon?
+Architecture advantages, performance benchmarks, and disk savings — understand what sets Erigon apart from other Ethereum execution clients.
 
 ---
 
@@ -102,31 +70,31 @@ To communicate with Erigon, the execution endpoint must be specified as `:8551`,
 
 1.  Lighthouse must point to the [JWT secret](../../../fundamentals/jwt) automatically created by Erigon in the `--datadir` directory. In the following example the default data directory is used.
 
-    Copy
+Copy
 
-    ```
-     lighthouse \
-     --network gnosis beacon_node \
-     --datadir=data \
-     --http \
-     --execution-endpoint http://localhost:8551 \
-     --execution-jwt /home/user/.local/share/erigon/jwt.hex \
-     --checkpoint-sync-url "https://checkpoint.gnosischain.com"
-    ```
+```
+lighthouse \
+--network gnosis beacon_node \
+--datadir=data \
+--http \
+--execution-endpoint http://localhost:8551 \
+--execution-jwt /home/user/.local/share/erigon/jwt.hex \
+--checkpoint-sync-url "https://checkpoint.gnosischain.com"
+```
 
-    Here is an example of Lighthouse running the Chiado testnet:
+Here is an example of Lighthouse running the Chiado testnet:
 
-    Copy
+Copy
 
-    ```
-     lighthouse \
-     --network chiado \
-     --datadir=data \
-     --http \
-     --execution-endpoint http://localhost:8551 \
-     --execution-jwt /home/user/.local/share/erigon/jwt.hex \
-     --checkpoint-sync-url "https://checkpoint.chiadochain.net"
-    ```
+```
+lighthouse \
+--network chiado \
+--datadir=data \
+--http \
+--execution-endpoint http://localhost:8551 \
+--execution-jwt /home/user/.local/share/erigon/jwt.hex \
+--checkpoint-sync-url "https://checkpoint.chiadochain.net"
+```
 
 Check the Erigon and Lightouse logs to make sure that the EL and CL are communicating and that your is syncing correctly.
 
@@ -143,45 +111,45 @@ You can use **Prysm**, **Lighthouse**, or any other Consensus Layer client with 
 
 1.  Start Erigon adding the `--externalcl` flag:
 
-    ```bash
-    erigon --externalcl
-    ```
+```bash
+erigon --externalcl
+```
 
-    If your Consensus Layer (CL) client is on a different device, add the following flags:
+If your Consensus Layer (CL) client is on a different device, add the following flags:
 
-    * `--authrpc.addr 0.0.0.0`, since the Engine API listens on localhost by default;
-    * `--authrpc.vhosts ` where \ is the source host or the appropriate hostname that your CL client is using.
+* `--authrpc.addr 0.0.0.0`, since the Engine API listens on localhost by default;
+* `--authrpc.vhosts ` where \ is the source host or the appropriate hostname that your CL client is using.
 2.  Install and run **Prysm** by following the official guide: [https://docs.prylabs.network/docs/install/install-with-script](https://docs.prylabs.network/docs/install/install-with-script).
 
-    Prysm must fully synchronize before Erigon can start syncing, since Erigon requires an existing target head to sync to. The quickest way to get Prysm synced is to use a public checkpoint synchronization endpoint from the list at [https://eth-clients.github.io/checkpoint-sync-endpoints](https://eth-clients.github.io/checkpoint-sync-endpoints).
+Prysm must fully synchronize before Erigon can start syncing, since Erigon requires an existing target head to sync to. The quickest way to get Prysm synced is to use a public checkpoint synchronization endpoint from the list at [https://eth-clients.github.io/checkpoint-sync-endpoints](https://eth-clients.github.io/checkpoint-sync-endpoints).
 3. To communicate with Erigon, the `--execution-endpoint` must be specified as `:8551`, where `` is either `http://localhost` or the IP address of the device running Erigon.
 4.  Prysm must point to the [JWT secret](../../../fundamentals/jwt) automatically created by Erigon in the `--datadir` directory.
 
-    ```bash
-    ./prysm.sh beacon-chain \
-    --execution-endpoint http://localhost:8551 \
-    --mainnet --jwt-secret=/jwt.hex \
-    --checkpoint-sync-url=https://beaconstate.info \
-    --genesis-beacon-api-url=https://beaconstate.info
-    ```
+```bash
+./prysm.sh beacon-chain \
+--execution-endpoint http://localhost:8551 \
+--mainnet --jwt-secret=/jwt.hex \
+--checkpoint-sync-url=https://beaconstate.info \
+--genesis-beacon-api-url=https://beaconstate.info
+```
 
 1.  Start Erigon adding the `--externalcl` flag:
 
-    ```bash
-    ./build/bin/erigon --externalcl
-    ```
+```bash
+./build/bin/erigon --externalcl
+```
 2. Install and run Lighthouse by following the official guide: [https://lighthouse-book.sigmaprime.io/installation.html](https://lighthouse-book.sigmaprime.io/installation.html)
 3. Because Erigon needs a target head in order to sync, Lighthouse must be synced before Erigon can synchronize. The fastest way to synchronize Lighthouse is to use one of the many public checkpoint synchronization endpoints at [https://eth-clients.github.io/checkpoint-sync-endpoints](https://eth-clients.github.io/checkpoint-sync-endpoints).
 4. To communicate with Erigon, the `--execution-endpoint` must be specified as `:8551`, where `` is either `http://localhost` or the IP address of the device running Erigon.
 5.  Lighthouse must point to the [JWT secret](../../../fundamentals/jwt) automatically created by Erigon in the `--datadir` directory.
 
-    ```bash
-    lighthouse bn \
-    --network mainnet \
-    --execution-endpoint http://localhost:8551 \
-    --execution-jwt /jwt.hex \
-    --checkpoint-sync-url https://mainnet.checkpoint.sigp.io \
-    ```
+```bash
+lighthouse bn \
+--network mainnet \
+--execution-endpoint http://localhost:8551 \
+--execution-jwt /jwt.hex \
+--checkpoint-sync-url https://mainnet.checkpoint.sigp.io \
+```
 
 Check Erigon and your chosen CL logs to make sure that the EL and CL are communicating and that your node is syncing correctly.
 
@@ -196,8 +164,8 @@ URL: https://docs.erigon.tech/get-started/easy-nodes/how-to-run-an-ethereum-node
 
 1. Confirm your machine meets the necessary [Hardware Requirements](/get-started/hardware-requirements) based on your desired sync mode.
 2. **Install Docker**:
-   * For Linux, install [Docker Engine](https://docs.docker.com/engine/install).
-   * For macOS or Windows, install [Docker Desktop](https://docs.docker.com/desktop/).
+* For Linux, install [Docker Engine](https://docs.docker.com/engine/install).
+* For macOS or Windows, install [Docker Desktop](https://docs.docker.com/desktop/).
 
 ## 2. Configure and Launch Erigon
 
@@ -209,29 +177,29 @@ Create a new file named `docker-compose.yml` in a directory where you want to ma
 
 ```sh
 services:
-  erigon:
-    image: erigontech/erigon:v
-    container_name: erigon-node
-    restart: always
-    command:
-      # --- Basic Configuration ---
-      - --chain=mainnet
-      - --http.addr="0.0.0.0"
-      - --http.api=eth,web3,net,debug,trace,txpool
-      # --- Performance Tweaks ---
-      - --torrent.download.rate=512mb
-      # --- Sync Mode (Optional) ---
-      # To change Sync Mode, uncomment the line below:
-      # - --prune.mode=archive
-      # or
-      # - --prune.mode=minimal
-    ports:
-      - "8545:8545" # Exposes the RPC port (needed for wallets/dApps)
-    volumes:
-      # *** IMPORTANT: CHANGE THIS PATH! ***
-      # Replace the path below with an actual directory on your machine 
-      # where you want the blockchain data stored (e.g., /mnt/ssd/erigon-data)
-      - /path/to/erigon/data:/var/lib/erigon
+erigon:
+image: erigontech/erigon:v
+container_name: erigon-node
+restart: always
+command:
+# --- Basic Configuration ---
+- --chain=mainnet
+- --http.addr="0.0.0.0"
+- --http.api=eth,web3,net,debug,trace,txpool
+# --- Performance Tweaks ---
+- --torrent.download.rate=512mb
+# --- Sync Mode (Optional) ---
+# To change Sync Mode, uncomment the line below:
+# - --prune.mode=archive
+# or
+# - --prune.mode=minimal
+ports:
+- "8545:8545" # Exposes the RPC port (needed for wallets/dApps)
+volumes:
+# *** IMPORTANT: CHANGE THIS PATH! ***
+# Replace the path below with an actual directory on your machine 
+# where you want the blockchain data stored (e.g., /mnt/ssd/erigon-data)
+- /path/to/erigon/data:/var/lib/erigon
 ```
 
 :::warning
@@ -352,104 +320,54 @@ Erigon is an Ethereum execution client focused on performance, low disk usage, a
 
 A core benefit of Erigon is its **reduced disk footprint** across all available sync modes — achieved through efficient state storage and compression, making node operation feasible on consumer-grade hardware. It also features an **integrated Consensus Layer (Caplin)**, eliminating the need for separate CL software, and a **BitTorrent-based protocol** for decentralised historical data distribution.
 
-  ,
-    ,
-    ,
-    ,
-  ].map(() => (
-    
-      
-      
-    
-  ))}
+,
+,
+,
+,
+].map(() => (
+
+))}
 
 ## Key Architectural & Performance Advantages
 
 Erigon's architecture provides measurable improvements in cost, performance, and reliability.
 
-  
-    
-  
-  Integrated Consensus Layer (Caplin)
-  Built-in consensus client — no need to run and manage separate software like Lighthouse. One binary handles both execution and consensus, simplifying setup for stakers and node runners.
+Integrated Consensus Layer (Caplin)
+Built-in consensus client — no need to run and manage separate software like Lighthouse. One binary handles both execution and consensus, simplifying setup for stakers and node runners.
 
-  
-    
-    
-    
-  
-  State Storage (Flat DB)
-  Replaces the Merkle Patricia Trie with a flat key-value database. Faster reads and writes, and a smaller on-disk footprint for any node type.
+State Storage (Flat DB)
+Replaces the Merkle Patricia Trie with a flat key-value database. Faster reads and writes, and a smaller on-disk footprint for any node type.
 
-  
-    
-    
-  
-  Immutable, Decentralised Data
-  Historical data lives in immutable files distributed via BitTorrent — up to 10× cheaper to backup, repair, and distribute. No double-disk usage, no complex serialisation.
+Immutable, Decentralised Data
+Historical data lives in immutable files distributed via BitTorrent — up to 10× cheaper to backup, repair, and distribute. No double-disk usage, no complex serialisation.
 
-  
-    
-    
-  
-  Staged Sync
-  Splits data processing into specialised stages, minimising random disk I/O and write amplification. Efficiently integrates large datasets into Erigon's flat DB.
+Staged Sync
+Splits data processing into specialised stages, minimising random disk I/O and write amplification. Efficiently integrates large datasets into Erigon's flat DB.
 
-  
-    
-  
-  Predictable RPC Performance
-  No background compaction means no unpredictable resource spikes. RPC throughput stays stable and consistent — critical for providers and validators who cannot afford surprises.
+Predictable RPC Performance
+No background compaction means no unpredictable resource spikes. RPC throughput stays stable and consistent — critical for providers and validators who cannot afford surprises.
 
-  
-    
-    
-  
-  Modularity
-  Core node, RPC daemon, and tx pool run as independent processes with per-component resource limits. If one crashes the rest stay alive. Run multiple instances without downtime.
+Modularity
+Core node, RPC daemon, and tx pool run as independent processes with per-component resource limits. If one crashes the rest stay alive. Run multiple instances without downtime.
 
-  
-    
-  
-  OtterSync
-  Shifts initial sync from CPU-intensive transaction re-execution to network download — similar to BitTorrent for state data. Reduces sync time for both full and Archive nodes.
+OtterSync
+Shifts initial sync from CPU-intensive transaction re-execution to network download — similar to BitTorrent for state data. Reduces sync time for both full and Archive nodes.
 
-  
-    
-    
-    
-    
-    
-  
-  Flexible Pruning
-  --prune.mode=minimal gives a smaller-than-full-node footprint that still satisfies all validator requirements. Right-size your storage without sacrificing functionality.
+Flexible Pruning
+--prune.mode=minimal gives a smaller-than-full-node footprint that still satisfies all validator requirements. Right-size your storage without sacrificing functionality.
 
 ---
 
 ## Benefits by Audience
 
-  
-    
-    
-    
-    
-  
-  RPC Providers & Large Stakers
-  Modular architecture and predictable performance handle high-volume traffic with low latency. Smaller database cuts hardware costs. Caplin reduces missed attestations and slashing risk.
+RPC Providers & Large Stakers
+Modular architecture and predictable performance handle high-volume traffic with low latency. Smaller database cuts hardware costs. Caplin reduces missed attestations and slashing risk.
 
-  
-    
-    
-  
-  Home Users & Solo Stakers
-  Run a full or archive node on a consumer SSD. Fast sync cuts setup from days to hours. No third-party servers — your node, your keys, your contribution to decentralisation.
+Home Users & Solo Stakers
+Run a full or archive node on a consumer SSD. Fast sync cuts setup from days to hours. No third-party servers — your node, your keys, your contribution to decentralisation.
 
-  
-    
-    
-  
-  Developers
-  Full trace_ namespace, historical eth_getProof, historical blobs, and gRPC API. Modular components let you update, extend, or replace parts without rebuilding the whole stack.
+Developers
+Full trace_ namespace, historical eth_getProof, historical blobs, and gRPC API. Modular components let you update, extend, or replace parts without rebuilding the whole stack.
 
 ---
 
@@ -457,14 +375,14 @@ Erigon's architecture provides measurable improvements in cost, performance, and
 
 Erigon ships a built-in **[Model Context Protocol (MCP) server](../fundamentals/mcp)**, enabled by default on `127.0.0.1:8553`. Connect any MCP-compatible AI assistant — Claude Code, Claude Desktop, or OpenAI Codex — directly to your node and query it in plain English, with zero integration overhead.
 
-  {[
-    "What is the ETH balance of vitalik.eth right now?",
-    "Show all ERC-20 transfers in the last 100 blocks.",
-    "Which tx in block 21,000,000 used the most gas?",
-    "My node seems stuck — check sync status and recent logs.",
-  ].map((q) => (
-    
-  ))}
+{[
+"What is the ETH balance of vitalik.eth right now?",
+"Show all ERC-20 transfers in the last 100 blocks.",
+"Which tx in block 21,000,000 used the most gas?",
+"My node seems stuck — check sync status and recent logs.",
+].map((q) => (
+
+))}
 
 The interface is **read-only** and localhost-bound — no risk of unintended state changes. For developers this means instant on-chain lookups during development, natural-language log triage, and a complete RPC surface accessible without writing a single line of code.
 
@@ -484,8 +402,8 @@ URL: https://docs.erigon.tech/get-started/easy-nodes/how-to-run-a-gnosis-chain-n
 
 1. Confirm your machine meets the necessary [Hardware Requirements](/get-started/hardware-requirements) based on your desired sync mode.
 2. **Install Docker**:
-   * For Linux, install [Docker Engine](https://docs.docker.com/engine/install).
-   * For macOS or Windows, install [Docker Desktop](https://docs.docker.com/desktop/).
+* For Linux, install [Docker Engine](https://docs.docker.com/engine/install).
+* For macOS or Windows, install [Docker Desktop](https://docs.docker.com/desktop/).
 
 ## 2. Configure and Launch Erigon
 
@@ -497,29 +415,29 @@ Create a new file named `docker-compose.yml` in a directory where you want to ma
 
 ```sh
 services:
-  erigon:
-    image: erigontech/erigon:v
-    container_name: erigon-node
-    restart: always
-    command:
-      # --- Basic Configuration ---
-      - --chain=gnosis
-      - --http.addr="0.0.0.0"
-      - --http.api=eth,web3,net,debug,trace,txpool
-      # --- Performance Tweaks ---
-      - --torrent.download.rate=512mb
-      # --- Sync Mode (Optional) ---
-      # To change Sync Mode, uncomment the line below:
-      # - --prune.mode=archive
-      # or
-      # - --prune.mode=minimal
-    ports:
-      - "8545:8545" # Exposes the RPC port (needed for wallets/dApps)
-    volumes:
-      # *** IMPORTANT: CHANGE THIS PATH! ***
-      # Replace the path below with an actual directory on your machine 
-      # where you want the blockchain data stored (e.g., /mnt/ssd/erigon-data)
-      - /path/to/erigon/data:/var/lib/erigon
+erigon:
+image: erigontech/erigon:v
+container_name: erigon-node
+restart: always
+command:
+# --- Basic Configuration ---
+- --chain=gnosis
+- --http.addr="0.0.0.0"
+- --http.api=eth,web3,net,debug,trace,txpool
+# --- Performance Tweaks ---
+- --torrent.download.rate=512mb
+# --- Sync Mode (Optional) ---
+# To change Sync Mode, uncomment the line below:
+# - --prune.mode=archive
+# or
+# - --prune.mode=minimal
+ports:
+- "8545:8545" # Exposes the RPC port (needed for wallets/dApps)
+volumes:
+# *** IMPORTANT: CHANGE THIS PATH! ***
+# Replace the path below with an actual directory on your machine 
+# where you want the blockchain data stored (e.g., /mnt/ssd/erigon-data)
+- /path/to/erigon/data:/var/lib/erigon
 ```
 
 :::warning
@@ -617,58 +535,25 @@ Your internet bandwidth is also an important factor, particularly for sync speed
 URL: https://docs.erigon.tech/get-started
 
 Get Started
-  Everything you need to go from zero to a running Erigon node — requirements, installation, and guided setups.
+Everything you need to go from zero to a running Erigon node — requirements, installation, and guided setups.
 
-  
-    
-  
-  Why Erigon?
-  Performance benchmarks, disk savings, and architecture advantages over other Ethereum clients.
+Why Erigon?
+Performance benchmarks, disk savings, and architecture advantages over other Ethereum clients.
 
-  
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-  
-  Hardware Requirements
-  Minimum and recommended specs for mainnet, testnets, and archive mode.
+Hardware Requirements
+Minimum and recommended specs for mainnet, testnets, and archive mode.
 
-  
-    
-    
-    
-  
-  Installation
-  Binary releases, building from source, Docker images, and upgrade instructions.
+Installation
+Binary releases, building from source, Docker images, and upgrade instructions.
 
-  
-    
-  
-  Easy Nodes
-  One-command guided setup for Ethereum, Gnosis Chain, and Polygon nodes with sensible defaults.
+Easy Nodes
+One-command guided setup for Ethereum, Gnosis Chain, and Polygon nodes with sensible defaults.
 
-  
-    
-    
-    
-    
-  
-  Migrating from Geth
-  Switch from go-ethereum to Erigon — what changes, what stays the same, and how to preserve your data.
+Migrating from Geth
+Switch from go-ethereum to Erigon — what changes, what stays the same, and how to preserve your data.
 
-  
-    
-    
-  
-  Interacting with Erigon
-  JSON-RPC and gRPC API reference — eth, debug, trace, engine, txpool, and other namespaces.
+Interacting with Erigon
+JSON-RPC and gRPC API reference — eth, debug, trace, engine, txpool, and other namespaces.
 
 ---
 
@@ -685,8 +570,8 @@ URL: https://docs.erigon.tech/get-started/easy-nodes/how-to-run-a-polygon-node
 
 1. Confirm your machine meets the necessary [Hardware Requirements](../hardware-requirements) based on your desired sync mode.
 2. **Install Docker**:
-   * For Linux, install [Docker Engine](https://docs.docker.com/engine/install).
-   * For macOS or Windows, install [Docker Desktop](https://docs.docker.com/desktop/).
+* For Linux, install [Docker Engine](https://docs.docker.com/engine/install).
+* For macOS or Windows, install [Docker Desktop](https://docs.docker.com/desktop/).
 
 ## 2. Configure and Launch Erigon
 
@@ -698,30 +583,30 @@ Create a new file named `docker-compose.yml` in a directory where you want to ma
 
 ```sh
 services:
-  erigon:
-    image: erigontech/erigon:v
-    container_name: erigon-node
-    restart: always
-    command:
-      # --- Basic Configuration ---
-      - --chain=bor-mainnet
-      - --bor.heimdall=https://heimdall-api.polygon.technology
-      - --http.addr="0.0.0.0"
-      - --http.api=eth,web3,net,debug,trace,txpool
-      # --- Performance Tweaks ---
-      - --torrent.download.rate=512mb
-      # --- Sync Mode (Optional) ---
-      # To change Sync Mode, uncomment the line below:
-      # - --prune.mode=archive
-      # or
-      # - --prune.mode=minimal
-    ports:
-      - "8545:8545" # Exposes the RPC port (needed for wallets/dApps)
-    volumes:
-      # *** IMPORTANT: CHANGE THIS PATH! ***
-      # Replace the path below with an actual directory on your machine 
-      # where you want the blockchain data stored (e.g., /mnt/ssd/erigon-data)
-      - /path/to/erigon/data:/var/lib/erigon
+erigon:
+image: erigontech/erigon:v
+container_name: erigon-node
+restart: always
+command:
+# --- Basic Configuration ---
+- --chain=bor-mainnet
+- --bor.heimdall=https://heimdall-api.polygon.technology
+- --http.addr="0.0.0.0"
+- --http.api=eth,web3,net,debug,trace,txpool
+# --- Performance Tweaks ---
+- --torrent.download.rate=512mb
+# --- Sync Mode (Optional) ---
+# To change Sync Mode, uncomment the line below:
+# - --prune.mode=archive
+# or
+# - --prune.mode=minimal
+ports:
+- "8545:8545" # Exposes the RPC port (needed for wallets/dApps)
+volumes:
+# *** IMPORTANT: CHANGE THIS PATH! ***
+# Replace the path below with an actual directory on your machine 
+# where you want the blockchain data stored (e.g., /mnt/ssd/erigon-data)
+- /path/to/erigon/data:/var/lib/erigon
 ```
 
 :::warning
@@ -741,7 +626,7 @@ Now you can relax and watch your Erigon Polygon node sync!
 ## Flag explanation
 
 * `--chain=bor-mainnet` and `--bor.heimdall=https://heimdall-api.polygon.technologyspecifies` specify respectively the Polygon mainnet and the API endpoint for the Heimdall network
-  * to use Amoy tesnet replace with flags `--chain=amoy --bor.heimdall=https://heimdall-api-amoy.polygon.technology`
+* to use Amoy tesnet replace with flags `--chain=amoy --bor.heimdall=https://heimdall-api-amoy.polygon.technology`
 * Add `--prune.mode=minimal` to run minimal [Sync Mode](../../fundamentals/sync-modes) or `--prune.mode=archive` to run an archive node
 * `--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](../../fundamentals/web3-wallet);
 * `--torrent.download.rate=512mb` to increase download speed. While the default downloading speed is 128mb, with this flag Erigon will use as much download speed as it can, up to a maximum of 512 megabytes per second. This means it will try to download data as quickly as possible, but it won't exceed the 512 MB/s limit you've set.
@@ -758,26 +643,26 @@ Additional flags can be added to [configure](../../fundamentals/configuring-erig
 URL: https://docs.erigon.tech/get-started/installation
 
 const el = document.getElementById(id);
-  if (!el) return;
-  const scroll = () => el.scrollIntoView();
-  if (!el.open) );
-    el.open = true;
-  } else 
+if (!el) return;
+const scroll = () => el.scrollIntoView();
+if (!el.open) );
+el.open = true;
+} else 
 };
 
 # Installation
 
 To install Erigon, begin by choosing an installation method suited to your operating system and technical preference. Options range from the simplest to the most complex, including pre-built images, containers, or source compilation.
 
-   }>Pre-built Binaries — Fastest way to get started. Download and run a pre-compiled binary for your architecture.
-   }>Docker — Run Erigon in an isolated container. Recommended for most users.
-   }>Build from Source — Full control over the build. Requires Go, C++ compiler, and CLI experience.
+}>Pre-built Binaries — Fastest way to get started. Download and run a pre-compiled binary for your architecture.
+}>Docker — Run Erigon in an isolated container. Recommended for most users.
+}>Build from Source — Full control over the build. Requires Go, C++ compiler, and CLI experience.
 
-   }>Docker — Run Erigon in an isolated container. The recommended method on macOS.
-   }>Build from Source — Compile directly on your Mac. Requires Go, Clang/GCC, and CLI experience.
+}>Docker — Run Erigon in an isolated container. The recommended method on macOS.
+}>Build from Source — Compile directly on your Mac. Requires Go, Clang/GCC, and CLI experience.
 
-   }>Native Compilation — Compile and run Erigon directly on Windows using Chocolatey, MinGW, and Go.
-   }>WSL (Windows Subsystem for Linux) — Run a full Linux environment on Windows. Recommended for best performance.
+}>Native Compilation — Compile and run Erigon directly on Windows using Chocolatey, MinGW, and Go.
+}>WSL (Windows Subsystem for Linux) — Run a full Linux environment on Windows. Recommended for best performance.
 
 ### All Operating Systems
 
@@ -904,16 +789,16 @@ This method uses your distribution's package manager (like dpkg) to install Erig
 
 1.  Navigate to the directory where you downloaded the pre-built binary, e.g. Downloads:
 
-    ```bash
-    cd ~/Downloads
-    ```
+```bash
+cd ~/Downloads
+```
 2.  Install the package:
 
-    ```bash
-    sudo dpkg -i erigon_3.x.x_amd64.deb
-    ```
+```bash
+sudo dpkg -i erigon_3.x.x_amd64.deb
+```
 
-    (Replace the filename with your downloaded version)
+(Replace the filename with your downloaded version)
 
 **b. Using Compressed Archive (`.tar.gz`)**
 
@@ -921,16 +806,16 @@ This method gives you a standalone executable that can be run from any directory
 
 1.  Extract the archive:
 
-    ```bash
-    tar -xzf erigon_v3.x.x_linux_amd64.tar.gz
-    ```
+```bash
+tar -xzf erigon_v3.x.x_linux_amd64.tar.gz
+```
 
-    (Replace the filename with your downloaded version)
+(Replace the filename with your downloaded version)
 2.  Move the resulting `erigon` executable to a directory included in your system's $PATH(e.g., $/usr/local/bin) to run it from anywhere:
 
-    ```bash
-    sudo mv erigon /usr/local/bin/
-    ```
+```bash
+sudo mv erigon /usr/local/bin/
+```
 
 **4. Running Erigon**
 
@@ -1087,7 +972,7 @@ Look down at the "**System variables**" box and double click on "**Path**" to ad
 Then click on the "**New**" button and paste the following path:
 
 ```bash
- C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin
+C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin
 ```
 
 **2. Clone the Erigon repository**
@@ -1223,7 +1108,7 @@ The recommended approach involves running and syncing an **Erigon node alongside
 #### Choosing Your Migration Strategy
 
 * [Option 1](#option-1-sync-erigon-alongside-geth-and-its-cl): If you run a critical process and have enough disk space, syncing Erigon alongside Geth or any other EL is the recommended choice, and is essential for validators and RPC providers.
-  * If disk space is limited and downtime is not an option, consider syncing Erigon on a separate machine.
+* If disk space is limited and downtime is not an option, consider syncing Erigon on a separate machine.
 * [Option 2](#option-2-remove-old-el-and-sync-erigon-downtime-accepted): If you are a home user or standard node runner (not running a validator), and the disk space is limited and downtime is acceptable, choose this option to remove your EL and the existing CL first.
 
 | **Node Runner Type**                                            | **Recommended Path (If Disk Space Allows)**                                                                                        | **Rationale**                                        |
@@ -1243,18 +1128,18 @@ This path offers the simplest validator configuration by using Erigon's embedded
 1. **Preparation**: [Install](installation/) Erigon.
 2. **Configuration Check** (No Conflict): Ensure Erigon's standard [ports](../fundamentals/default-ports) (JSON-RPC, P2P) are different from Geth's. These ports are configured via the `--port` and `--p2p.allowed-ports` command-line options. For example:
 
-    ```sh
-    erigon \
-      --datadir=/data/erigon \
-      --chain=mainnet \
-      --port=30304 \
-      --p2p.allowed-ports=30310,30311,30312,30313,30314,30315,30316
-    ```
+```sh
+erigon \
+--datadir=/data/erigon \
+--chain=mainnet \
+--port=30304 \
+--p2p.allowed-ports=30310,30311,30312,30313,30314,30315,30316
+```
 3. **Synchronization**: Start syncing Erigon. Monitor the sync status using the `eth_syncing` JSON-[RPC method](../interacting-with-erigon/) or a health check.
 4. **Validator Swap**: Once Erigon is fully synced, shut down Geth and the external CL client.
 5. **Reconfiguration and Restart**:
-   * To restart Erigon, there's no need to specify `--port` or `--P2P.allowed-ports`. Refer to this [guide](../fundamentals/caplin) for additional Erigon + Caplin configuration recommendations.
-   * Crucially, reconfigure your **validator keys manager** to point directly to the Erigon Beacon API, as Erigon/Caplin now handles both layers internally).
+* To restart Erigon, there's no need to specify `--port` or `--P2P.allowed-ports`. Refer to this [guide](../fundamentals/caplin) for additional Erigon + Caplin configuration recommendations.
+* Crucially, reconfigure your **validator keys manager** to point directly to the Erigon Beacon API, as Erigon/Caplin now handles both layers internally).
 6. **Decommission Old Setup**: Verify Erigon/Caplin is proposing and attesting blocks correctly. If confirmed, safely remove Geth, the external CL client, and all their data, including the old JWT secret.
 
 Switch to an Erigon Execution Layer (EL) while keeping your current external Consensus Layer (CL) client (e.g., Prysm, Lighthouse) and your existing JWT secret. Start by syncing Erigon with Caplin as the CL, then configure it to use the external CL.
@@ -1263,15 +1148,15 @@ Switch to an Erigon Execution Layer (EL) while keeping your current external Con
 
 1. **Preparation**: [Install](installation/) Erigon.
 2. **Configuration Check**: run Erigon + Caplin simultaneously with Geth (or any other EL) for fast, parallel syncing and assign unique ports for its P2P networking via `--port` and `--p2p.allowed-ports` (check which ports your present
-   EL is using). For example:
+EL is using). For example:
 
-    ```sh
-    erigon \
-      --datadir=/data/erigon \
-      --chain=mainnet \
-      --port=30304 \
-      --p2p.allowed-ports=30310,30311,30312,30313,30314,30315,30316
-    ```
+```sh
+erigon \
+--datadir=/data/erigon \
+--chain=mainnet \
+--port=30304 \
+--p2p.allowed-ports=30310,30311,30312,30313,30314,30315,30316
+```
 3. **Synchronization**: Monitor the sync status using the `eth_syncing` JSON-RPC method or a health check.
 4. **Validator Swap**: Once Erigon is fully synced, **shut down** both Geth and Erigon. **Keep the external CL client running.**
 5. **Reconfiguration and Restart**: Restart Erigon, ensuring it uses the **original Engine API port and JWT secret** that your old EL client used. See [here](../staking/external-consensus-client-as-validator) for details.
@@ -1300,23 +1185,23 @@ This path retains your existing **external Consensus Layer (CL)** client (e.g., 
 2. **Installation**: [Install](installation/) Erigon.
 3.  **Configuration** (JWT and Ports): Ensure Erigon uses the same Engine API [port](../fundamentals/default-ports) (`--authrpc.port`) and JWT secret (`--authrpc.jwtsecret`) that the old EL client previously used. For example:\\
 
-    ```sh
-    erigon \
-      --externalcl \
-      --datadir=/data/erigon \
-      --chain=mainnet \
-      --authrpc.port=8551 \
-      --authrpc.jwtsecret=/jwt \
-      --authrpc.addr=0.0.0.0 \
-      --http \
-      --http.addr=0.0.0.0 \
-      --http.port=8545 \
-      --http.api=engine,eth,net,web3 \
-      --ws \
-      --ws.port=8546
-    ```
+```sh
+erigon \
+--externalcl \
+--datadir=/data/erigon \
+--chain=mainnet \
+--authrpc.port=8551 \
+--authrpc.jwtsecret=/jwt \
+--authrpc.addr=0.0.0.0 \
+--http \
+--http.addr=0.0.0.0 \
+--http.port=8545 \
+--http.api=engine,eth,net,web3 \
+--ws \
+--ws.port=8546
+```
 
-    _(Otherwise, you must reconfigure your external CL client to match Erigon's default settings)_
+_(Otherwise, you must reconfigure your external CL client to match Erigon's default settings)_
 4. **Synchronization**: Start syncing Erigon. Your external CL client will automatically connect to Erigon once Erigon is running and reachable on the Engine API port.
 5. **Monitoring and Verification**: Once Erigon is fully synced, check the logs of both Erigon and the external CL client to verify correct chain following.
 
@@ -1330,19 +1215,16 @@ See [Basic Usage](../fundamentals/basic-usage) and [Configuring Erigon](../funda
 URL: https://docs.erigon.tech/get-started/easy-nodes
 
 Easy Nodes
-  Guided setup for running a complete node with sensible defaults — pick your network and follow along.
+Guided setup for running a complete node with sensible defaults — pick your network and follow along.
 
-  
-  Ethereum Node
-  Run a full Ethereum mainnet node using Caplin (built-in consensus layer) or connect an external CL client.
+Ethereum Node
+Run a full Ethereum mainnet node using Caplin (built-in consensus layer) or connect an external CL client.
 
-  
-  Gnosis Chain Node
-  Run a full Gnosis Chain node with Erigon's embedded consensus layer or an external CL client.
+Gnosis Chain Node
+Run a full Gnosis Chain node with Erigon's embedded consensus layer or an external CL client.
 
-  
-  Polygon Node
-  Step-by-step guide to running an Erigon node on the Polygon PoS network.
+Polygon Node
+Step-by-step guide to running an Erigon node on the Polygon PoS network.
 
 ---
 
@@ -1362,7 +1244,7 @@ erigon [options]
 * You can use Docker Compose like in this [example](/get-started/easy-nodes/how-to-run-an-ethereum-node#a-create-the-configuration-file)
 *   Alternatively you can use the Docker syntax, for example:
 
-    `docker run -it erigontech/erigon:v [options]`
+`docker run -it erigontech/erigon:v [options]`
 
 Open your terminal and move to the directory where you installed Erigon
 
@@ -1406,25 +1288,25 @@ To run Erigon with RPCDaemon, TxPool, and other components in a single process i
 
 ```sh
 ./build/bin/erigon --datadir=/desired/path/to/datadir \
- --chain=mainnet \
- --port=30304 \
- --http.port=8546 \
- --torrent.port=42068 \
- --private.api.addr=127.0.0.1:9091 \
- --http \
- --ws \
- --http.api=eth,debug,net,trace,web3,erigon \
- --log.dir.path=/desired/path/to/logs
- --torrent.download.rate=512mb
+--chain=mainnet \
+--port=30304 \
+--http.port=8546 \
+--torrent.port=42068 \
+--private.api.addr=127.0.0.1:9091 \
+--http \
+--ws \
+--http.api=eth,debug,net,trace,web3,erigon \
+--log.dir.path=/desired/path/to/logs
+--torrent.download.rate=512mb
 ```
 
 ### Flags of Interest
 
 *   Default data directory is `/home/usr/.local/share/erigon`. If you want to store Erigon files in a non-default location, use the flag:
 
-    ```bash
-    --datadir=/desired/path/to/datadir
-    ```
+```bash
+--datadir=/desired/path/to/datadir
+```
 * The `--chain=mainnet` flag is set by default for Erigon to sync with the Ethereum mainnet. To explore other network options, check the [Supported Networks](supported-networks) section. For quick testing, consider selecting a testnet.
 * `--log.dir.path` dictates where [logs](logs) will be output - useful for sending reports to the Erigon team when issues occur.
 * Based on the [sync mode](sync-modes) you want to run you can add `--prune.mode=archive` to run a archive node, `--prune.mode=full` for a full node (default value) or `--prune.mode=minimal` for a minimal node.
@@ -1448,39 +1330,39 @@ make help
 This command will display a list of convenience commands available in the Makefile, along with their descriptions.
 
 ```
- go-version:                        print and verify go version
- validate_docker_build_args:        ensure docker build args are valid
- docker:                            validate, update submodules and build with docker
- setup_xdg_data_home:               TODO
- docker-compose:                    validate build args, setup xdg data home, and run docker-compose up
- dbg                                debug build allows see C stack traces, run it with GOTRACEBACK=crash. You don't need debug build for C pit for profiling. To profile C code use SETCGOTRCKEBACK=1
- erigon:                            build erigon
- all:                               run erigon with all commands
- db-tools:                          build db tools
- test:                              run unit tests with a 100s timeout
- test-integration:                  run integration tests with a 30m timeout
- lint-deps:                         install lint dependencies
- lintci:                            run golangci-lint linters
- lint:                              run all linters
- clean:                             cleans the go cache, build dir, libmdbx db dir
- devtools:                          installs dev tools (and checks for npm installation etc.)
- mocks:                             generate test mocks
- mocks-clean:                       cleans all generated test mocks
- solc:                              generate all solidity contracts
- abigen:                            generate abis using abigen
- gencodec:                          generate marshalling code using gencodec
- graphql:                           generate graphql code
- gen:                               generate all auto-generated code in the codebase
- bindings:                          generate test contracts and core contracts
- prometheus:                        run prometheus and grafana with docker-compose
- escape:                            run escape path= to check for memory leaks e.g. run escape path=cmd/erigon
- git-submodules:                    update git submodules
- install:                           copies binaries and libraries to DIST
- user_linux:                        create "erigon" user (Linux)
- user_macos:                        create "erigon" user (MacOS)
- hive:                              run hive test suite locally using docker e.g. OUTPUT_DIR=~/results/hive SIM=ethereum/engine make hive
- automated-tests                    run automated tests (BUILD_ERIGON=0 to prevent erigon build with local image tag)
- help:                              print commands help
+go-version:                        print and verify go version
+validate_docker_build_args:        ensure docker build args are valid
+docker:                            validate, update submodules and build with docker
+setup_xdg_data_home:               TODO
+docker-compose:                    validate build args, setup xdg data home, and run docker-compose up
+dbg                                debug build allows see C stack traces, run it with GOTRACEBACK=crash. You don't need debug build for C pit for profiling. To profile C code use SETCGOTRCKEBACK=1
+erigon:                            build erigon
+all:                               run erigon with all commands
+db-tools:                          build db tools
+test:                              run unit tests with a 100s timeout
+test-integration:                  run integration tests with a 30m timeout
+lint-deps:                         install lint dependencies
+lintci:                            run golangci-lint linters
+lint:                              run all linters
+clean:                             cleans the go cache, build dir, libmdbx db dir
+devtools:                          installs dev tools (and checks for npm installation etc.)
+mocks:                             generate test mocks
+mocks-clean:                       cleans all generated test mocks
+solc:                              generate all solidity contracts
+abigen:                            generate abis using abigen
+gencodec:                          generate marshalling code using gencodec
+graphql:                           generate graphql code
+gen:                               generate all auto-generated code in the codebase
+bindings:                          generate test contracts and core contracts
+prometheus:                        run prometheus and grafana with docker-compose
+escape:                            run escape path= to check for memory leaks e.g. run escape path=cmd/erigon
+git-submodules:                    update git submodules
+install:                           copies binaries and libraries to DIST
+user_linux:                        create "erigon" user (Linux)
+user_macos:                        create "erigon" user (MacOS)
+hive:                              run hive test suite locally using docker e.g. OUTPUT_DIR=~/results/hive SIM=ethereum/engine make hive
+automated-tests                    run automated tests (BUILD_ERIGON=0 to prevent erigon build with local image tag)
+help:                              print commands help
 
 ```
 
@@ -1640,91 +1522,91 @@ The `--help` flag listing is reproduced below for your convenience.
 rpcdaemon is JSON RPC server that connects to Erigon node for remote DB access
 
 Usage:
-  rpcdaemon [flags]
+rpcdaemon [flags]
 
 Flags:
-      --datadir string                              path to Erigon working directory
-      --db.read.concurrency int                     Does limit amount of parallel db reads. Default: equal to GOMAXPROCS (or number of CPU) (default 1408)
-      --diagnostics.disabled                        Disable diagnostics
-      --diagnostics.endpoint.addr string            Diagnostics HTTP server listening interface (default "127.0.0.1")
-      --diagnostics.endpoint.port uint              Diagnostics HTTP server listening port (default 6062)
-      --diagnostics.speedtest                       Enable speed test
-      --graphql                                     enables graphql endpoint (disabled by default)
-      --grpc                                        Enable GRPC server
-      --grpc.addr string                            GRPC server listening interface (default "localhost")
-      --grpc.healthcheck                            Enable GRPC health check
-      --grpc.port int                               GRPC server listening port (default 8547)
-  -h, --help                                        help for rpcdaemon
-      --http.addr string                            HTTP server listening interface (default "localhost")
-      --http.api strings                            API's offered over the RPC interface: eth,erigon,web3,net,debug,trace,txpool,db. Supported methods: https://github.com/erigontech/erigon/tree/main/cmd/rpcdaemon (default [eth,erigon])
-      --http.compression                            Disable http compression (default true)
-      --http.corsdomain strings                     Comma separated list of domains from which to accept cross origin requests (browser enforced)
-      --http.dbg.single                             Allow pass HTTP header 'dbg: true' to printt more detailed logs - how this request was executed
-      --http.enabled                                enable http server (default true)
-      --http.port int                               HTTP server listening port (default 8545)
-      --http.timeouts.idle duration                 Maximum amount of time to wait for the next request when keep-alives are enabled. If http.timeouts.idle is zero, the value of http.timeouts.read is used (default 2m0s)
-      --http.timeouts.read duration                 Maximum duration for reading the entire request, including the body. (default 30s)
-      --http.timeouts.write duration                Maximum duration before timing out writes of the response. It is reset whenever a new request's header is read (default 30m0s)
-      --http.trace                                  Trace HTTP requests with INFO level
-      --http.url string                             HTTP server listening url. will OVERRIDE http.addr and http.port. will NOT respect http paths. prefix supported are tcp, unix
-      --http.vhosts strings                         Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard. (default [localhost])
-      --https.addr string                           rpc HTTPS server listening interface (default "localhost")
-      --https.cert string                           certificate for rpc HTTPS server
-      --https.enabled                               enable http server
-      --https.key string                            key file for rpc HTTPS server
-      --https.port int                              rpc HTTPS server listening port. default to http+363 if not set
-      --https.url string                            rpc HTTPS server listening url. will OVERRIDE https.addr and https.port. will NOT respect paths. prefix supported are tcp, unix
-      --log.console.json                            Format console logs with JSON
-      --log.console.verbosity string                Set the log level for console logs (default "info")
-      --log.delays                                  Enable block delay logging
-      --log.dir.disable                             disable disk logging
-      --log.dir.json                                Format file logs with JSON
-      --log.dir.path string                         Path to store user and error logs to disk
-      --log.dir.prefix string                       The file name prefix for logs stored to disk
-      --log.dir.verbosity string                    Set the log verbosity for logs stored to disk (default "info")
-      --log.json                                    Format console logs with JSON
-      --metrics                                     Enable metrics collection and reporting
-      --metrics.addr string                         Enable stand-alone metrics HTTP server listening interface (default "127.0.0.1")
-      --metrics.port int                            Metrics HTTP server listening port (default 6061)
-      --ots.search.max.pagesize uint                Max allowed page size for search methods (default 25)
-      --polygon.sync                                Enable if Erigon has been synced using the new polygon sync component
-      --pprof                                       Enable the pprof HTTP server
-      --pprof.addr string                           pprof HTTP server listening interface (default "127.0.0.1")
-      --pprof.cpuprofile string                     Write CPU profile to the given file
-      --pprof.port int                              pprof HTTP server listening port (default 6060)
-      --private.api.addr string                     Erigon's components (txpool, rpcdaemon, sentry, downloader, ...) can be deployed as independent Processes on same/another server. Then components will connect to erigon by this internal grpc API. Example: 127.0.0.1:9090 (default "127.0.0.1:9090")
-      --rpc.accessList string                       Specify granular (method-by-method) API allowlist
-      --rpc.allow-unprotected-txs                   Allow for unprotected (non-EIP155 signed) transactions to be submitted via RPC
-      --rpc.batch.concurrency uint                  Does limit amount of goroutines to process 1 batch request. Means 1 bach request can't overload server. 1 batch still can have unlimited amount of request (default 2)
-      --rpc.batch.limit int                         Maximum number of requests in a batch (default 100)
-      --rpc.evmtimeout duration                     Maximum amount of time to wait for the answer from EVM call. (default 5m0s)
-      --rpc.gascap uint                             Sets a cap on gas that can be used in eth_call/estimateGas (default 50000000)
-      --rpc.maxgetproofrewindblockcount.limit int   Max GetProof rewind block count (default 100000)
-      --rpc.overlay.getlogstimeout duration         Maximum amount of time to wait for the answer from the overlay_getLogs call. (default 5m0s)
-      --rpc.overlay.replayblocktimeout duration     Maximum amount of time to wait for the answer to replay a single block when called from an overlay_getLogs call. (default 10s)
-      --rpc.returndata.limit int                    Maximum number of bytes returned from eth_call or similar invocations (default 100000)
-      --rpc.slow duration                           Print in logs RPC requests slower than given threshold: 100ms, 1s, 1m. Excluded methods: eth_getBlock,eth_getBlockByNumber,eth_getBlockByHash,eth_blockNumber,erigon_blockNumber,erigon_getHeaderByNumber,erigon_getHeaderByHash,erigon_getBlockByTimestamp,eth_call
-      --rpc.streaming.disable                       Erigon has enabled json streaming for some heavy endpoints (like trace_*). It's a trade-off: greatly reduce amount of RAM (in some cases from 30GB to 30mb), but it produce invalid json format if error happened in the middle of streaming (because json is not streaming-friendly format)
-      --rpc.subscription.filters.maxaddresses int   Maximum number of addresses per subscription to filter logs by.
-      --rpc.subscription.filters.maxheaders int     Maximum number of block headers to store per subscription.
-      --rpc.subscription.filters.maxlogs int        Maximum number of logs to store per subscription.
-      --rpc.subscription.filters.maxtopics int      Maximum number of topics per subscription to filter logs by.
-      --rpc.subscription.filters.maxtxs int         Maximum number of transactions to store per subscription.
-      --rpc.txfeecap float                          Sets a cap on transaction fee (in ether) that can be sent via the RPC APIs (0 = no cap) (default 1)
-      --socket.enabled                              Enable IPC server
-      --socket.url string                           IPC server listening url. prefix supported are tcp, unix (default "unix:///var/run/erigon.sock")
-      --state.cache string                          Amount of data to store in StateCache (enabled if no --datadir set). Set 0 to disable StateCache. Defaults to 0MB RAM (default "0MB")
-      --tls.cacert string                           CA certificate for client side TLS handshake for GRPC
-      --tls.cert string                             certificate for client side TLS handshake for GRPC
-      --tls.key string                              key file for client side TLS handshake for GRPC
-      --trace string                                Write execution trace to the given file
-      --trace.compat                                Bug for bug compatibility with OE for trace_ routines
-      --trace.maxtraces uint                        Sets a limit on traces that can be returned in trace_filter (default 200)
-      --txpool.api.addr string                      txpool api network address, for example: 127.0.0.1:9090 (default: use value of --private.api.addr)
-      --verbosity string                            Set the log level for console logs (default "info")
-      --ws                                          Enable Websockets - Same port as HTTP[S]
-      --ws.api.subscribelogs.channelsize int        Size of the channel used for websocket logs subscriptions (default 8192)
-      --ws.compression                              Enable Websocket compression (RFC 7692)
+--datadir string                              path to Erigon working directory
+--db.read.concurrency int                     Does limit amount of parallel db reads. Default: equal to GOMAXPROCS (or number of CPU) (default 1408)
+--diagnostics.disabled                        Disable diagnostics
+--diagnostics.endpoint.addr string            Diagnostics HTTP server listening interface (default "127.0.0.1")
+--diagnostics.endpoint.port uint              Diagnostics HTTP server listening port (default 6062)
+--diagnostics.speedtest                       Enable speed test
+--graphql                                     enables graphql endpoint (disabled by default)
+--grpc                                        Enable GRPC server
+--grpc.addr string                            GRPC server listening interface (default "localhost")
+--grpc.healthcheck                            Enable GRPC health check
+--grpc.port int                               GRPC server listening port (default 8547)
+-h, --help                                        help for rpcdaemon
+--http.addr string                            HTTP server listening interface (default "localhost")
+--http.api strings                            API's offered over the RPC interface: eth,erigon,web3,net,debug,trace,txpool,db. Supported methods: https://github.com/erigontech/erigon/tree/main/cmd/rpcdaemon (default [eth,erigon])
+--http.compression                            Disable http compression (default true)
+--http.corsdomain strings                     Comma separated list of domains from which to accept cross origin requests (browser enforced)
+--http.dbg.single                             Allow pass HTTP header 'dbg: true' to printt more detailed logs - how this request was executed
+--http.enabled                                enable http server (default true)
+--http.port int                               HTTP server listening port (default 8545)
+--http.timeouts.idle duration                 Maximum amount of time to wait for the next request when keep-alives are enabled. If http.timeouts.idle is zero, the value of http.timeouts.read is used (default 2m0s)
+--http.timeouts.read duration                 Maximum duration for reading the entire request, including the body. (default 30s)
+--http.timeouts.write duration                Maximum duration before timing out writes of the response. It is reset whenever a new request's header is read (default 30m0s)
+--http.trace                                  Trace HTTP requests with INFO level
+--http.url string                             HTTP server listening url. will OVERRIDE http.addr and http.port. will NOT respect http paths. prefix supported are tcp, unix
+--http.vhosts strings                         Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard. (default [localhost])
+--https.addr string                           rpc HTTPS server listening interface (default "localhost")
+--https.cert string                           certificate for rpc HTTPS server
+--https.enabled                               enable http server
+--https.key string                            key file for rpc HTTPS server
+--https.port int                              rpc HTTPS server listening port. default to http+363 if not set
+--https.url string                            rpc HTTPS server listening url. will OVERRIDE https.addr and https.port. will NOT respect paths. prefix supported are tcp, unix
+--log.console.json                            Format console logs with JSON
+--log.console.verbosity string                Set the log level for console logs (default "info")
+--log.delays                                  Enable block delay logging
+--log.dir.disable                             disable disk logging
+--log.dir.json                                Format file logs with JSON
+--log.dir.path string                         Path to store user and error logs to disk
+--log.dir.prefix string                       The file name prefix for logs stored to disk
+--log.dir.verbosity string                    Set the log verbosity for logs stored to disk (default "info")
+--log.json                                    Format console logs with JSON
+--metrics                                     Enable metrics collection and reporting
+--metrics.addr string                         Enable stand-alone metrics HTTP server listening interface (default "127.0.0.1")
+--metrics.port int                            Metrics HTTP server listening port (default 6061)
+--ots.search.max.pagesize uint                Max allowed page size for search methods (default 25)
+--polygon.sync                                Enable if Erigon has been synced using the new polygon sync component
+--pprof                                       Enable the pprof HTTP server
+--pprof.addr string                           pprof HTTP server listening interface (default "127.0.0.1")
+--pprof.cpuprofile string                     Write CPU profile to the given file
+--pprof.port int                              pprof HTTP server listening port (default 6060)
+--private.api.addr string                     Erigon's components (txpool, rpcdaemon, sentry, downloader, ...) can be deployed as independent Processes on same/another server. Then components will connect to erigon by this internal grpc API. Example: 127.0.0.1:9090 (default "127.0.0.1:9090")
+--rpc.accessList string                       Specify granular (method-by-method) API allowlist
+--rpc.allow-unprotected-txs                   Allow for unprotected (non-EIP155 signed) transactions to be submitted via RPC
+--rpc.batch.concurrency uint                  Does limit amount of goroutines to process 1 batch request. Means 1 bach request can't overload server. 1 batch still can have unlimited amount of request (default 2)
+--rpc.batch.limit int                         Maximum number of requests in a batch (default 100)
+--rpc.evmtimeout duration                     Maximum amount of time to wait for the answer from EVM call. (default 5m0s)
+--rpc.gascap uint                             Sets a cap on gas that can be used in eth_call/estimateGas (default 50000000)
+--rpc.maxgetproofrewindblockcount.limit int   Max GetProof rewind block count (default 100000)
+--rpc.overlay.getlogstimeout duration         Maximum amount of time to wait for the answer from the overlay_getLogs call. (default 5m0s)
+--rpc.overlay.replayblocktimeout duration     Maximum amount of time to wait for the answer to replay a single block when called from an overlay_getLogs call. (default 10s)
+--rpc.returndata.limit int                    Maximum number of bytes returned from eth_call or similar invocations (default 100000)
+--rpc.slow duration                           Print in logs RPC requests slower than given threshold: 100ms, 1s, 1m. Excluded methods: eth_getBlock,eth_getBlockByNumber,eth_getBlockByHash,eth_blockNumber,erigon_blockNumber,erigon_getHeaderByNumber,erigon_getHeaderByHash,erigon_getBlockByTimestamp,eth_call
+--rpc.streaming.disable                       Erigon has enabled json streaming for some heavy endpoints (like trace_*). It's a trade-off: greatly reduce amount of RAM (in some cases from 30GB to 30mb), but it produce invalid json format if error happened in the middle of streaming (because json is not streaming-friendly format)
+--rpc.subscription.filters.maxaddresses int   Maximum number of addresses per subscription to filter logs by.
+--rpc.subscription.filters.maxheaders int     Maximum number of block headers to store per subscription.
+--rpc.subscription.filters.maxlogs int        Maximum number of logs to store per subscription.
+--rpc.subscription.filters.maxtopics int      Maximum number of topics per subscription to filter logs by.
+--rpc.subscription.filters.maxtxs int         Maximum number of transactions to store per subscription.
+--rpc.txfeecap float                          Sets a cap on transaction fee (in ether) that can be sent via the RPC APIs (0 = no cap) (default 1)
+--socket.enabled                              Enable IPC server
+--socket.url string                           IPC server listening url. prefix supported are tcp, unix (default "unix:///var/run/erigon.sock")
+--state.cache string                          Amount of data to store in StateCache (enabled if no --datadir set). Set 0 to disable StateCache. Defaults to 0MB RAM (default "0MB")
+--tls.cacert string                           CA certificate for client side TLS handshake for GRPC
+--tls.cert string                             certificate for client side TLS handshake for GRPC
+--tls.key string                              key file for client side TLS handshake for GRPC
+--trace string                                Write execution trace to the given file
+--trace.compat                                Bug for bug compatibility with OE for trace_ routines
+--trace.maxtraces uint                        Sets a limit on traces that can be returned in trace_filter (default 200)
+--txpool.api.addr string                      txpool api network address, for example: 127.0.0.1:9090 (default: use value of --private.api.addr)
+--verbosity string                            Set the log level for console logs (default "info")
+--ws                                          Enable Websockets - Same port as HTTP[S]
+--ws.api.subscribelogs.channelsize int        Size of the channel used for websocket logs subscriptions (default 8192)
+--ws.compression                              Enable Websocket compression (RFC 7692)
 ```
 
 ---
@@ -1811,52 +1693,52 @@ The `--help` flag listing is reproduced below for your convenience.
 Launch external Transaction Pool instance - same as built-into Erigon, but as independent Process
 
 Usage:
-  txpool [flags]
+txpool [flags]
 
 Flags:
-      --datadir string                     Data directory for the databases (default "/home/user/.local/share/erigon")
-      --db.writemap                        Enable WRITE_MAP feature for fast database writes and fast commit times (default true)
-      --diagnostics.disabled               Disable diagnostics
-      --diagnostics.endpoint.addr string   Diagnostics HTTP server listening interface (default "127.0.0.1")
-      --diagnostics.endpoint.port uint     Diagnostics HTTP server listening port (default 6062)
-      --diagnostics.speedtest              Enable speed test
-  -h, --help                               help for txpool
-      --log.console.json                   Format console logs with JSON
-      --log.console.verbosity string       Set the log level for console logs (default "info")
-      --log.delays                         Enable block delay logging
-      --log.dir.disable                    disable disk logging
-      --log.dir.json                       Format file logs with JSON
-      --log.dir.path string                Path to store user and error logs to disk
-      --log.dir.prefix string              The file name prefix for logs stored to disk
-      --log.dir.verbosity string           Set the log verbosity for logs stored to disk (default "info")
-      --log.json                           Format console logs with JSON
-      --metrics                            Enable metrics collection and reporting
-      --metrics.addr string                Enable stand-alone metrics HTTP server listening interface (default "127.0.0.1")
-      --metrics.port int                   Metrics HTTP server listening port (default 6061)
-      --pprof                              Enable the pprof HTTP server
-      --pprof.addr string                  pprof HTTP server listening interface (default "127.0.0.1")
-      --pprof.cpuprofile string            Write CPU profile to the given file
-      --pprof.port int                     pprof HTTP server listening port (default 6060)
-      --private.api.addr string            execution service : (default "localhost:9090")
-      --sentry.api.addr strings            comma separated sentry addresses ':,:' (default [localhost:9091])
-      --tls.cacert string                  CA certificate for client side TLS handshake
-      --tls.cert string                    certificate for client side TLS handshake
-      --tls.key string                     key file for client side TLS handshake
-      --trace string                       Write execution trace to the given file
-      --txpool.accountslots uint           Minimum number of executable transaction slots guaranteed per account (default 16)
-      --txpool.api.addr string             txpool service : (default "localhost:9094")
-      --txpool.blobpricebump uint          Price bump percentage to replace an existing blob (type-3) transaction (default 100)
-      --txpool.blobslots uint              Max allowed total number of blobs (within type-3 txs) per account (default 48)
-      --txpool.commit.every duration       How often transactions should be committed to the storage (default 15s)
-      --txpool.globalbasefeeslots int      Maximum number of non-executable transactions where only not enough baseFee (default 30000)
-      --txpool.globalqueue int             Maximum number of non-executable transaction slots for all accounts (default 30000)
-      --txpool.globalslots int             Maximum number of executable transaction slots for all accounts (default 10000)
-      --txpool.gossip.disable              Disabling p2p gossip of txs. Any txs received by p2p - will be dropped. Some networks like 'Optimism execution engine'/'Optimistic Rollup' - using it to protect against MEV attacks
-      --txpool.pricebump uint              Price bump percentage to replace an already existing transaction (default 10)
-      --txpool.pricelimit uint             Minimum gas price (fee cap) limit to enforce for acceptance into the pool (default 1)
-      --txpool.totalblobpoollimit uint     Total limit of number of all blobs in txs within the txpool (default 480)
-      --txpool.trace.senders strings       Comma separated list of addresses, whose transactions will traced in transaction pool with debug printing
-      --verbosity string                   Set the log level for console logs (default "info")
+--datadir string                     Data directory for the databases (default "/home/user/.local/share/erigon")
+--db.writemap                        Enable WRITE_MAP feature for fast database writes and fast commit times (default true)
+--diagnostics.disabled               Disable diagnostics
+--diagnostics.endpoint.addr string   Diagnostics HTTP server listening interface (default "127.0.0.1")
+--diagnostics.endpoint.port uint     Diagnostics HTTP server listening port (default 6062)
+--diagnostics.speedtest              Enable speed test
+-h, --help                               help for txpool
+--log.console.json                   Format console logs with JSON
+--log.console.verbosity string       Set the log level for console logs (default "info")
+--log.delays                         Enable block delay logging
+--log.dir.disable                    disable disk logging
+--log.dir.json                       Format file logs with JSON
+--log.dir.path string                Path to store user and error logs to disk
+--log.dir.prefix string              The file name prefix for logs stored to disk
+--log.dir.verbosity string           Set the log verbosity for logs stored to disk (default "info")
+--log.json                           Format console logs with JSON
+--metrics                            Enable metrics collection and reporting
+--metrics.addr string                Enable stand-alone metrics HTTP server listening interface (default "127.0.0.1")
+--metrics.port int                   Metrics HTTP server listening port (default 6061)
+--pprof                              Enable the pprof HTTP server
+--pprof.addr string                  pprof HTTP server listening interface (default "127.0.0.1")
+--pprof.cpuprofile string            Write CPU profile to the given file
+--pprof.port int                     pprof HTTP server listening port (default 6060)
+--private.api.addr string            execution service : (default "localhost:9090")
+--sentry.api.addr strings            comma separated sentry addresses ':,:' (default [localhost:9091])
+--tls.cacert string                  CA certificate for client side TLS handshake
+--tls.cert string                    certificate for client side TLS handshake
+--tls.key string                     key file for client side TLS handshake
+--trace string                       Write execution trace to the given file
+--txpool.accountslots uint           Minimum number of executable transaction slots guaranteed per account (default 16)
+--txpool.api.addr string             txpool service : (default "localhost:9094")
+--txpool.blobpricebump uint          Price bump percentage to replace an existing blob (type-3) transaction (default 100)
+--txpool.blobslots uint              Max allowed total number of blobs (within type-3 txs) per account (default 48)
+--txpool.commit.every duration       How often transactions should be committed to the storage (default 15s)
+--txpool.globalbasefeeslots int      Maximum number of non-executable transactions where only not enough baseFee (default 30000)
+--txpool.globalqueue int             Maximum number of non-executable transaction slots for all accounts (default 30000)
+--txpool.globalslots int             Maximum number of executable transaction slots for all accounts (default 10000)
+--txpool.gossip.disable              Disabling p2p gossip of txs. Any txs received by p2p - will be dropped. Some networks like 'Optimism execution engine'/'Optimistic Rollup' - using it to protect against MEV attacks
+--txpool.pricebump uint              Price bump percentage to replace an already existing transaction (default 10)
+--txpool.pricelimit uint             Minimum gas price (fee cap) limit to enforce for acceptance into the pool (default 1)
+--txpool.totalblobpoollimit uint     Total limit of number of all blobs in txs within the txpool (default 480)
+--txpool.trace.senders strings       Comma separated list of addresses, whose transactions will traced in transaction pool with debug printing
+--verbosity string                   Set the log level for console logs (default "info")
 ```
 
 ---
@@ -1937,125 +1819,125 @@ Flags can be combined freely, providing a high degree of customization. Here's a
 These flags cover the general behavior and configuration of the Erigon client.
 
 * `--datadir value`: Specifies the data directory for the databases.
-  * Default: `/home/usr/.local/share/erigon`
+* Default: `/home/usr/.local/share/erigon`
 * `--ethash.dagdir value`: Sets the directory to store the ethash mining DAGs.
-  * Default: `/home/usr/.local/share/erigon-ethash`
+* Default: `/home/usr/.local/share/erigon-ethash`
 * `--config value`: Sets Erigon flags using a YAML/TOML file.
 * `--version, -v`: Prints the version information.
 * `--help, -h`: Displays help information.
 * `--chain value`: Sets the name of the [network](/fundamentals/supported-networks) to join.
-  * Default: `mainnet`
+* Default: `mainnet`
 * `--networkid value`: Explicitly sets the network ID.
-  * Default: `1`
+* Default: `1`
 * `--identity value`: Sets a custom node name.
 * `--externalcl`: Enables the external consensus layer.
-  * Default: `false`, means that Caplin is enabled.
+* Default: `false`, means that Caplin is enabled.
 * `--override.osaka value`: Manually specifies the Osaka fork time.
-  * Default: `0`
+* Default: `0`
 * `--override.amsterdam value`: Manually specifies the Amsterdam fork time.
-  * Default: `0`
+* Default: `0`
 * `--vmdebug`: Records information for VM and contract debugging.
-  * Default: `false`
+* Default: `false`
 * `--gdbme`: Restarts Erigon under gdb for debugging.
-  * Default: `false`
+* Default: `false`
 * `--ethstats value`: The reporting URL for an ethstats service.
 * `--trusted-setup-file value`: Absolute path to a `trusted_setup.json` file.
 * `--persist.receipts, --experiment.persist.receipts.v2`: Downloads historical receipts.
-  * Default: `true` for minimal and full nodes, `false` for archive nodes
+* Default: `true` for minimal and full nodes, `false` for archive nodes
 
 ### Database and Caching
 
 These flags control database performance and memory usage.
 
 * `--db.pagesize value`: Sets the fixed page size for the database.
-  * Default: `16KB`
+* Default: `16KB`
 * `--db.size.limit value`: Sets a runtime limit on the chaindata database size.
-  * Default: `1TB`
+* Default: `1TB`
 * `--db.writemap`: Enables `WRITE_MAP` for fast database writes.
-  * Default: `true`
+* Default: `true`
 * `--db.read.concurrency value`: Limits the number of parallel database reads. Default: equal to GOMAXPROCS (or number of CPU)
-  * Default: `1408`
+* Default: `1408`
 * `--database.verbosity value`: Enables internal database logs.
-  * Default: `2`
+* Default: `2`
 * `--batchSize value`: Sets the batch size for the execution stage.
-  * Default: `512M`
+* Default: `512M`
 * `--bodies.cache value`: Sets the size limit for the block bodies cache.
-  * Default: `268435456`
+* Default: `268435456`
 * `--state.cache value`: Sets the amount of data to store in the StateCache.
-  * Default: `0MB`
+* Default: `0MB`
 * `--sync.parallel-state-flushing`: Enables parallel state flushing.
-  * Default: `true`
+* Default: `true`
 
 ### Pruning and Snapshots
 
 Flags for managing how old chain data is handled and stored.
 
 * `--prune.mode value`: Selects a pruning preset (`full`, `archive`, `minimal`, `blocks`). See also [Sync Modes](/fundamentals/sync-modes)
-  * Default: `"full"`
+* Default: `"full"`
 * `--prune.distance value`: Keeps state history for the latest `N` blocks.
-  * Default: `0`
+* Default: `0`
 * `--prune.distance.blocks value`: Keeps block history for the latest `N` blocks.
-  * Default: `0`
+* Default: `0`
 * `--prune.include-commitment-history, --prune.experimental.include-commitment-history, --experimental.commitment-history`: Enables fast `eth_getProof` for executed blocks by storing commitment history. Requires +32 GB RAM. See [`eth_getProof`](/interacting-with-erigon/eth#eth_getproof).
-  * Default: `false`
+* Default: `false`
 * `--snap.keepblocks`: Keeps ancient blocks in the database for debugging.
-  * Default: `false`
+* Default: `false`
 * `--snap.stop`: Stops generating new snapshots.
-  * Default: `false`
+* Default: `false`
 * `--snap.state.stop`: Stops generating new state files.
-  * Default: `false`
+* Default: `false`
 * `--snap.skip-state-snapshot-download`: Skips state download and starts from genesis.
-  * Default: `false`
+* Default: `false`
 
 ### Transaction Pool (TxPool)
 
 Options for configuring the transaction pool.
 
 * `--txpool.api.addr value`: The TxPool API network address.
-  * Default: Uses the value of `--private.api.addr`
+* Default: Uses the value of `--private.api.addr`
 * `--txpool.disable`: Disables the internal transaction pool.
-  * Default: `false`
+* Default: `false`
 * `--txpool.pricelimit value`: Sets the minimum gas price for acceptance into the pool.
-  * Default: `1`
+* Default: `1`
 * `--txpool.pricebump value`: Sets the price bump percentage to replace a transaction.
-  * Default: `10`
+* Default: `10`
 * `--txpool.blobpricebump value`: Sets the price bump percentage for replacing a type-3 blob transaction.
-  * Default: `100`
+* Default: `100`
 * `--txpool.accountslots value`: Sets the number of executable transaction slots per account.
-  * Default: `16`
+* Default: `16`
 * `--txpool.blobslots value`: Sets the maximum number of blobs per account.
-  * Default: `540`
+* Default: `540`
 * `--txpool.totalblobpoollimit value`: Sets the total limit on the number of all blobs in the pool.
-  * Default: `5400`
+* Default: `5400`
 * `--txpool.globalslots value`: Sets the maximum number of executable transaction slots for all accounts.
-  * Default: `10000`
+* Default: `10000`
 * `--txpool.globalbasefeeslots value`: Sets the maximum number of non-executable transactions with insufficient base fees.
-  * Default: `30000`
+* Default: `30000`
 * `--txpool.globalqueue value`: Sets the maximum number of non-executable transaction slots for all accounts.
-  * Default: `30000`
+* Default: `30000`
 * `--txpool.trace.senders value`: A comma-separated list of addresses whose transactions will be traced.
 * `--txpool.commit.every value`: Sets how often transactions are committed to storage.
-  * Default: `15s`
+* Default: `15s`
 * `--txpool.gossip.disable`: Disables P2P gossip of transactions.
-  * Default: `false`
+* Default: `false`
 
 ### Network and Peers
 
 These flags manage network connectivity, peer discovery, and traffic control.
 
 * `--port value`: The main network listening port.
-  * Default: `30303`
+* Default: `30303`
 * `--p2p.protocol value`: The version of the `eth` P2P protocol.
-  * Default: `68`, `69`
+* Default: `68`, `69`
 * `--p2p.allowed-ports value`: A comma-separated list of allowed ports for different P2P protocols.
-  * Default: `30303, 30304, 30305, 30306, 30307`
+* Default: `30303, 30304, 30305, 30306, 30307`
 * `--nat value`: The NAT port mapping mechanism (See [here](/fundamentals/configuring-erigon/nat) for more details).
 * `--nodiscover`: Disables peer discovery.
-  * Default: `false`
+* Default: `false`
 * `--discovery.v4`, `--discv4`: Enables the Node Discovery Protocol v4 (Discv4) for managed ENRs and topic discovery.
-  * Default: `false` (disabled by default since v3.4; discv5 is now the default discovery protocol)
+* Default: `false` (disabled by default since v3.4; discv5 is now the default discovery protocol)
 * `--discovery.v5`, `--discv5`, `--v5disc`: Enables the Node Discovery Protocol v5 (Discv5) for managed ENRs and topic discovery.
-  * Default: `true` (enabled by default since v3.4)
+* Default: `true` (enabled by default since v3.4)
 * `--netrestrict value`: Restricts network communication to specific IP networks.
 * `--nodekey value`: The P2P node key file.
 * `--nodekeyhex value`: The P2P node key as a hexadecimal string.
@@ -2064,104 +1946,104 @@ These flags manage network connectivity, peer discovery, and traffic control.
 * `--staticpeers value`: Comma-separated enode URLs to connect to.
 * `--trustedpeers value`: Comma-separated enode URLs for trusted peers.
 * `--maxpeers value`: The maximum number of network peers.
-  * Default: `32`
+* Default: `32`
 
 ### RPC & API
 
 Flags for configuring various RPC servers and their behavior.
 
 * `--private.api.addr value`: The internal gRPC API address for Erigon's components.
-  * Default: `127.0.0.1:9090`
+* Default: `127.0.0.1:9090`
 * `--private.api.ratelimit value`: Limits the number of simultaneous internal API requests.
-  * Default: `31872`
+* Default: `31872`
 * `--http`: Enables the JSON-RPC HTTP server.
-  * Default: `true`
+* Default: `true`
 * `--http.enabled`: An alternative flag to enable the HTTP server.
-  * Default: `true`
+* Default: `true`
 * `--graphql`: Enables the GraphQL endpoint.
-  * Default: `false`
+* Default: `false`
 * `--http.addr value`: The HTTP-RPC server listening interface.
-  * Default: `localhost`
+* Default: `localhost`
 * `--http.port value`: The HTTP-RPC server listening port.
-  * Default: `8545`
+* Default: `8545`
 * `--authrpc.addr value`: The HTTP-RPC server listening interface for the Engine API.
-  * Default: `localhost`
+* Default: `localhost`
 * `--authrpc.port value`: The HTTP-RPC server listening port for the Engine API.
-  * Default: `8551`
+* Default: `8551`
 * `--authrpc.jwtsecret value`: The path to the JWT secret file for the consensus layer.
 * `--http.compression`: Enables compression over HTTP-RPC.
-  * Default: `true`
+* Default: `true`
 * `--http.corsdomain value`: A comma-separated list of domains for cross-origin requests.
 * `--http.vhosts value`: A comma-separated list of virtual hostnames.
-  * Default: `localhost`
+* Default: `localhost`
 * `--authrpc.vhosts value`: A comma-separated list of virtual hostnames for the Engine API.
-  * Default: `localhost`
+* Default: `localhost`
 * `--http.api value`: The APIs offered over the HTTP-RPC interface.
-  * Default: `eth,erigon,engine`
+* Default: `eth,erigon,engine`
 * `--ws`: Enables the WS-RPC server.
-  * Default: `false`
+* Default: `false`
 * `--ws.port value`: The WS-RPC server listening port.
-  * Default: `8546`
+* Default: `8546`
 * `--ws.compression`: Enables compression over WebSocket.
-  * Default: `true`
+* Default: `true`
 * `--rpc.batch.concurrency value`: Limits the number of goroutines for batch requests.
-  * Default: `2`
+* Default: `2`
 * `--rpc.max.concurrency value`: Maximum number of concurrent HTTP RPC requests (HTTP admission control).
-  * Default: `0` (inherits value from `--db.read.concurrency`)
-  * Set to `-1` to disable admission control (unlimited)
+* Default: `0` (inherits value from `--db.read.concurrency`)
+* Set to `-1` to disable admission control (unlimited)
 * `--rpc.streaming.disable`: Disables JSON streaming for heavy endpoints.
-  * Default: `false`
+* Default: `false`
 * `--rpc.accessList value`: Specifies a granular API allowlist.
 * `--rpc.gascap value`: Sets a cap on gas usage for `eth_call`/`estimateGas`.
-  * Default: `50000000`
+* Default: `50000000`
 * `--rpc.batch.limit value`: Sets the maximum number of requests in a batch.
-  * Default: `100`
+* Default: `100`
 * `--rpc.blockrange.limit value`: Sets the maximum block range for `eth_getLogs` and similar range queries.
-  * Default: `1000`
-  * Applies to: `eth_getLogs`, `erigon_getLogs`
+* Default: `1000`
+* Applies to: `eth_getLogs`, `erigon_getLogs`
 * `--rpc.logs.maxresults value`: Sets the maximum number of log results returned per query.
-  * Default: `20000`
-  * Applies to: `eth_getLogs`, `erigon_getLogs`, `erigon_getLatestLogs`
-  * Set to `0` to remove the limit entirely (use with caution on large ranges).
-  * Works in tandem with `--rpc.blockrange.limit`: both constraints apply independently — a query can be blocked by either limit.
+* Default: `20000`
+* Applies to: `eth_getLogs`, `erigon_getLogs`, `erigon_getLatestLogs`
+* Set to `0` to remove the limit entirely (use with caution on large ranges).
+* Works in tandem with `--rpc.blockrange.limit`: both constraints apply independently — a query can be blocked by either limit.
 * `--rpc.returndata.limit value`: Sets the maximum return data size for `eth_call`.
-  * Default: `100000`
+* Default: `100000`
 * `--rpc.allow-unprotected-txs`: Allows unprotected transactions via RPC.
-  * Default: `false`
+* Default: `false`
 * `--rpc.txfeecap value`: Sets a cap on transaction fees in ether.
-  * Default: `1`
+* Default: `1`
 * `--rpc.slow value`: Logs RPC requests slower than the specified threshold.
-  * Default: `0s`
+* Default: `0s`
 * `--rpc.evmtimeout value`: The maximum time to wait for an EVM call.
-  * Default: `5m0s`
+* Default: `5m0s`
 * `--rpc.overlay.getlogstimeout value`: The maximum time to wait for `overlay_getLogs`.
-  * Default: `5m0s`
+* Default: `5m0s`
 * `--rpc.overlay.replayblocktimeout value`: The maximum time to wait to replay a single block.
-  * Default: `10s`
+* Default: `10s`
 * `--rpc.subscription.filters.maxlogs value`: Maximum logs to store per subscription.
-  * Default: `0`
+* Default: `0`
 * `--rpc.subscription.filters.maxheaders value`: Maximum block headers to store per subscription.
-  * Default: `0`
+* Default: `0`
 * `--rpc.subscription.filters.maxtxs value`: Maximum transactions to store per subscription.
-  * Default: `0`
+* Default: `0`
 * `--rpc.subscription.filters.maxaddresses value`: Maximum addresses per subscription to filter logs by.
-  * Default: `0`
+* Default: `0`
 * `--rpc.subscription.filters.maxtopics value`: Maximum topics per subscription to filter logs by.
-  * Default: `0`
+* Default: `0`
 * `--http.timeouts.read value`: Maximum duration for reading a request.
-  * Default: `30s`
+* Default: `30s`
 * `--http.timeouts.write value`: Maximum duration before timing out a response write.
-  * Default: `30m0s`
+* Default: `30m0s`
 * `--http.timeouts.idle value`: Maximum idle time for a connection with keep-alives enabled.
-  * Default: `2m0s`
+* Default: `2m0s`
 * `--authrpc.timeouts.read value`: Maximum read duration for an Engine API request.
-  * Default: `30s`
+* Default: `30s`
 * `--authrpc.timeouts.write value`: Maximum write duration for an Engine API response.
-  * Default: `30m0s`
+* Default: `30m0s`
 * `--authrpc.timeouts.idle value`: Maximum idle time for an Engine API connection.
-  * Default: `2m0s`
+* Default: `2m0s`
 * `--healthcheck`: Enables gRPC health checks.
-  * Default: `false`
+* Default: `false`
 
 ### MCP Server
 
@@ -2169,82 +2051,82 @@ Flags for configuring the Model Context Protocol (MCP) server. The embedded MCP 
 `127.0.0.1:8553`. Pass `--mcp.disable` to turn it off.
 
 * `--mcp.disable`: Disables the embedded MCP server.
-    * Default: `false`
+* Default: `false`
 * `--mcp.addr value`: The MCP server listening address.
-  * Default: `127.0.0.1`
+* Default: `127.0.0.1`
 * `--mcp.port value`: The MCP server listening port.
-  * Default: `8553`
+* Default: `8553`
 
 ### Logging and Profiling
 
 Flags for controlling logging and performance profiling.
 
 * `--log.json`: Formats console logs with JSON.
-  * Default: `false`
+* Default: `false`
 * `--log.console.json`: Formats console logs with JSON.
-  * Default: `false`
+* Default: `false`
 * `--log.dir.json`: Formats file logs with JSON.
-  * Default: `false`
+* Default: `false`
 * `--verbosity value`: Sets the log level for console logs.
-  * Default: `info`
+* Default: `info`
 * `--log.console.verbosity value`: Sets the log level for console logs.
-  * Default: `info`
+* Default: `info`
 * `--log.dir.disable`: Disables disk logging.
-  * Default: `false`
+* Default: `false`
 * `--log.dir.path value`: The path to store user and error logs.
 * `--log.dir.prefix value`: The file name prefix for logs stored on disk.
 * `--log.dir.verbosity value`: Sets the log verbosity for disk logs.
-  * Default: `dbug`
+* Default: `dbug`
 * `--log.delays`: Enables block delay logging.
-  * Default: `false`
+* Default: `false`
 * `--pprof`: Enables the pprof HTTP server.
-  * Default: `false`
+* Default: `false`
 * `--pprof.addr value`: The pprof HTTP server listening interface.
-  * Default: `127.0.0.1`
+* Default: `127.0.0.1`
 * `--pprof.port value`: The pprof HTTP server listening port.
-  * Default: `6060`
+* Default: `6060`
 * `--pprof.cpuprofile value`: Writes a CPU profile to a file.
 * `--trace value`: Writes an execution trace to a file.
 * `--vmtrace value`: Sets the provider tracer.
 * `--vmtrace.jsonconfig value`: Sets the tracer's configuration.
 * `--metrics`: Enables metrics collection and reporting.
-  * Default: `false`
+* Default: `false`
 * `--metrics.addr value`: The stand-alone metrics HTTP server listening interface.
-  * Default: `127.0.0.1`
+* Default: `127.0.0.1`
 * `--metrics.port value`: The metrics HTTP server listening port.
-  * Default: `6061`
+* Default: `6061`
 
 ### Consensus and Forks
 
 Flags related to consensus mechanisms and network forks.
 
 * `--clique.checkpoint value`: The number of blocks after which to save the vote snapshot.
-  * Default: `10`
+* Default: `10`
 * `--clique.snapshots value`: The number of recent vote snapshots to keep in memory.
-  * Default: `1024`
+* Default: `1024`
 * `--clique.signatures value`: The number of recent block signatures to keep in memory.
-  * Default: `16384`
+* Default: `16384`
 * `--clique.datadir value`: The path to the clique database folder.
 * `--fakepow`: Disables proof-of-work verification.
-  * Default: `false`
+* Default: `false`
 * `--gpo.blocks value`: The number of recent blocks to check for gas prices.
-  * Default: `20`
+* Default: `20`
 * `--gpo.percentile value`: The percentile of recent transaction gas prices to use for a suggested gas price.
-  * Default: `60`
+* Default: `60`
 * `--proposer.disable`: Disables the PoS proposer.
-  * Default: `false`
+* Default: `false`
 * `--bor.heimdall value`: The URL of the Heimdall service.
-  * Default: `http://localhost:1317`
+* Default: `http://localhost:1317`
 * `--bor.withoutheimdall`: Runs without the Heimdall service.
-  * Default: `false`
+* Default: `false`
 * `--bor.period`: Overrides the bor block period.
-  * Default: `false`
+* Default: `false`
 * `--bor.minblocksize`: Ignores the bor block period and waits for `blocksize` transactions.
-  * Default: `false`
+* Default: `false`
 * `--polygon.pos.ssf`: Enables Polygon PoS Single Slot Finality.
-  * Default: `false`
+* Default: `false`
 * `--polygon.pos.ssf.block value`: Enables Polygon PoS Single Slot Finality from a specific block.
-  * Default: `0`
+* Default: `0`
 
 ### Sentry
 
@@ -2252,11 +2134,11 @@ Flags for configuring the Sentry component.
 
 * `--sentry.api.addr value`: A comma-separated list of sentry addresses.
 * `--sentry.log-peer-info`: Logs detailed peer info when a peer connects or disconnects.
-  * Default: `false`
+* Default: `false`
 * `--sentinel.addr value`: The address for the sentinel component.
-  * Default: `localhost`
+* Default: `localhost`
 * `--sentinel.port value`: The port for the sentinel component.
-  * Default: `7777`
+* Default: `7777`
 * `--sentinel.bootnodes value`: Comma-separated enode URLs for P2P discovery bootstrap for the sentinel.
 * `--sentinel.staticpeers value`: Connects to comma-separated consensus static peers.
 
@@ -2268,16 +2150,16 @@ These flags control the block synchronization and data downloading process, incl
 
 * `--downloader.api.addr value`: The downloader address.
 * `--downloader.disable.ipv4`: Disables IPv4 for the downloader.
-  * Default: `false`
+* Default: `false`
 * `--downloader.disable.ipv6`: Disables IPv6 for the downloader.
-  * Default: `false`
+* Default: `false`
 * `--no-downloader`: Disables the downloader component.
-  * Default: `false`
+* Default: `false`
 * `--downloader.verify`: Verifies snapshots on startup.
-  * Default: `false`
+* Default: `false`
 * `--sync.loop.throttle value`: Sets the minimum time between sync loop starts.
 * `--sync.loop.block.limit value`: Sets the maximum number of blocks to process per loop iteration.
-  * Default: `5000`
+* Default: `5000`
 * `--sync.loop.break.after value`: Sets the last stage of the sync loop to run.
 * `--bad.block value`: Marks a block as bad and forces a reorg.
 * `--webseed value`: Comma-separated URLs for network support infrastructure.
@@ -2285,86 +2167,86 @@ These flags control the block synchronization and data downloading process, incl
 #### BitTorrent Options
 
 * `--torrent.port value`: The port to listen for the BitTorrent protocol.
-  * Default: `42069`
+* Default: `42069`
 * `--torrent.maxpeers value`: An unused parameter.
-  * Default: `100`
+* Default: `100`
 * `--torrent.conns.perfile value`: The number of connections per file.
-  * Default: `10`
+* Default: `10`
 * `--torrent.trackers.disable`: Disables conventional BitTorrent trackers.
-  * Default: `false`
+* Default: `false`
 * `--torrent.upload.rate value`: The upload rate in bytes per second.
-  * Default: `16mb`
+* Default: `16mb`
 * `--torrent.download.rate value`: The download rate in bytes per second.
-  * Default: `512mb`
+* Default: `512mb`
 * `--torrent.webseed.download.rate value`: The download rate for webseeds. If not set, rate limit is shared with torrent.
 * `--torrent.verbosity value`: Sets the verbosity level for BitTorrent logs. 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (must set `--verbosity` to equal or higher level)
-  * Default: `1`
+* Default: `1`
 
 ### Fork Choice Update (FCU)
 
 Flags for configuring Fork Choice Update behavior.
 
 * `--fcu.timeout value`: FCU timeout before switching to async processing (use `0` to disable).
-  * Default: `1s`
+* Default: `1s`
 * `--fcu.background.prune`: Enables background pruning after FCU.
-  * Default: `true`
+* Default: `true`
 * `--fcu.background.commit`: Enables background flush and commit after FCU.
-  * Default: `false`
+* Default: `false`
 
 ### Caplin (Consensus Layer)
 
 Flags for configuring the Caplin consensus layer.
 
 * `--caplin.discovery.addr value`: The address for the Caplin DISCV5 protocol.
-  * Default: `0.0.0.0`
+* Default: `0.0.0.0`
 * `--caplin.discovery.port value`: The port for the Caplin DISCV5 protocol.
-  * Default: `4000`
+* Default: `4000`
 * `--caplin.discovery.tcpport value`: The TCP port for the Caplin DISCV5 protocol.
-  * Default: `4001`
+* Default: `4001`
 * `--caplin.checkpoint-sync-url value`: The checkpoint sync endpoint.
 * `--caplin.subscribe-all-topics`: Subscribes to all gossip topics.
-  * Default: `false`
+* Default: `false`
 * `--caplin.max-peer-count value`: The maximum number of peers to connect to.
-  * Default: `128`
+* Default: `128`
 * `--caplin.enable-upnp`: Enables NAT porting for Caplin.
-  * Default: `false`
+* Default: `false`
 * `--caplin.max-inbound-traffic-per-peer value`: The maximum inbound traffic per second per peer.
-  * Default: `1MB`
+* Default: `1MB`
 * `--caplin.max-outbound-traffic-per-peer value`: The maximum outbound traffic per second per peer.
-  * Default: `1MB`
+* Default: `1MB`
 * `--caplin.adaptable-maximum-traffic-requirements`: Makes the node adaptable to traffic based on the number of validators.
-  * Default: `true`
+* Default: `true`
 * `--caplin.blocks-archive`: Enables backfilling for blocks.
-  * Default: `false`
+* Default: `false`
 * `--caplin.blobs-archive`: Enables backfilling for blobs.
-  * Default: `false`
+* Default: `false`
 * `--caplin.states-archive`: Enables the archival node for historical states.
-  * Default: `false`
+* Default: `false`
 * `--caplin.blobs-immediate-backfill`: Tells Caplin to immediately backfill blobs.
-  * Default: `false`
+* Default: `false`
 * `--caplin.blobs-no-pruning`: Disables blob pruning.
-  * Default: `false`
+* Default: `false`
 * `--caplin.checkpoint-sync.disable`: Disables checkpoint sync.
-  * Default: `false`
+* Default: `false`
 * `--caplin.snapgen`: Enables snapshot generation.
-  * Default: `false`
+* Default: `false`
 * `--caplin.mev-relay-url value`: The MEV relay endpoint.
 * `--caplin.validator-monitor`: Enables Caplin validator monitoring metrics.
-  * Default: `false`
+* Default: `false`
 * `--caplin.custom-config value`: Sets a custom config for Caplin.
 * `--caplin.custom-genesis value`: Sets a custom genesis for Caplin.
 * `--caplin.use-engine-api`: Uses the Engine API for internal Caplin.
-  * Default: `false`
+* Default: `false`
 
 ### Shutter Network Encrypted Transactions
 
 Flags for configuring the Shutter Network encrypted transactions mempool.
 
 * `--shutter`: Enables the Shutter encrypted transactions mempool.
-  * Default: `false`
+* Default: `false`
 * `--shutter.p2p.bootstrap.nodes value`: Overrides the default P2P bootstrap nodes.
 * `--shutter.p2p.listen.port value`: Overrides the default P2P listen port.
-  * Default: `0`
+* Default: `0`
 
 ## Configuration file
 
@@ -2488,68 +2370,31 @@ make docker-compose
 URL: https://docs.erigon.tech/fundamentals
 
 Fundamentals
-  Core concepts and day-to-day operations for running a healthy Erigon node.
+Core concepts and day-to-day operations for running a healthy Erigon node.
 
-  
-    
-    
-  
-  Basic Usage
-  Command-line flags, common arguments, and first steps running the Erigon binary.
+Basic Usage
+Command-line flags, common arguments, and first steps running the Erigon binary.
 
-  
-    
-    
-    
-  
-  Sync Modes
-  Full, minimal, and archive sync explained — choose the right mode for your use case.
+Sync Modes
+Full, minimal, and archive sync explained — choose the right mode for your use case.
 
-  
-    
-    
-  
-  Configuration
-  Full CLI flag reference, config file format, and per-component tuning options.
+Configuration
+Full CLI flag reference, config file format, and per-component tuning options.
 
-  
-    
-    
-    
-  
-  Supported Networks
-  All chains and testnets supported by Erigon, with network-specific flags and notes.
+Supported Networks
+All chains and testnets supported by Erigon, with network-specific flags and notes.
 
-  
-    
-    
-    
-  
-  Optimizing Storage
-  Pruning, snapshots, and techniques to minimize disk footprint.
+Optimizing Storage
+Pruning, snapshots, and techniques to minimize disk footprint.
 
-  
-    
-    
-    
-  
-  Docker Compose
-  Run Erigon and all its modules together with Docker Compose.
+Docker Compose
+Run Erigon and all its modules together with Docker Compose.
 
-  
-    
-  
-  Security
-  Firewall rules, API exposure best practices, and hardening recommendations.
+Security
+Firewall rules, API exposure best practices, and hardening recommendations.
 
-  
-    
-    
-    
-    
-  
-  Modules
-  Run RPC daemon, TxPool, Sentry, and Downloader as independent processes for scalable setups.
+Modules
+Run RPC daemon, TxPool, Sentry, and Downloader as independent processes for scalable setups.
 
 ---
 
@@ -2561,14 +2406,14 @@ URL: https://docs.erigon.tech/fundamentals/modules/sentry
 Sentry connects Erigon to the Ethereum P2P network, enabling the discovery of other participants across the Internet and secure communication with them. It performs these main functions:
 
 * Peer discovery via the following:
-  * Kademlia DHT
-  * DNS lookup
-  * Configured static peers
-  * Node info saved in the database
-  * Boot nodes pre-configured in the source code
+* Kademlia DHT
+* DNS lookup
+* Configured static peers
+* Node info saved in the database
+* Boot nodes pre-configured in the source code
 * Peer management:
-  * handshakes
-  * holding p2p connection even if Erigon is restarted
+* handshakes
+* holding p2p connection even if Erigon is restarted
 
 The ETH core interacts with the Ethereum p2p network through the Sentry component. Sentry provides a simple interface to the core, with functions to download data, receive notifications about gossip messages, upload data on request from peers, and broadcast gossip messages either to a selected set of peers or to all peers.
 
@@ -2631,55 +2476,55 @@ The `--help` flag listing is reproduced below for your convenience.
 Run p2p sentry
 
 Usage:
-  sentry [flags]
+sentry [flags]
 
 Flags:
-      --datadir string                     Data directory for the databases (default "/home/user/.local/share/erigon")
-      --diagnostics.disabled               Disable diagnostics
-      --diagnostics.endpoint.addr string   Diagnostics HTTP server listening interface (default "127.0.0.1")
-      --diagnostics.endpoint.port uint     Diagnostics HTTP server listening port (default 6062)
-      --diagnostics.speedtest              Enable speed test
-      --discovery.dns strings              Sets DNS discovery entry points (use "" to disable DNS)
-      --healthcheck                        Enabling grpc health check
-  -h, --help                               help for sentry
-      --log.console.json                   Format console logs with JSON
-      --log.console.verbosity string       Set the log level for console logs (default "info")
-      --log.delays                         Enable block delay logging
-      --log.dir.disable                    disable disk logging
-      --log.dir.json                       Format file logs with JSON
-      --log.dir.path string                Path to store user and error logs to disk
-      --log.dir.prefix string              The file name prefix for logs stored to disk
-      --log.dir.verbosity string           Set the log verbosity for logs stored to disk (default "info")
-      --log.json                           Format console logs with JSON
-      --maxpeers int                       Maximum number of network peers (network disabled if set to 0) (default 32)
-      --maxpendpeers int                   Maximum number of TCP connections pending to become connected peers (default 1000)
-      --metrics                            Enable metrics collection and reporting
-      --metrics.addr string                Enable stand-alone metrics HTTP server listening interface (default "127.0.0.1")
-      --metrics.port int                   Metrics HTTP server listening port (default 6061)
-      --nat string                         NAT port mapping mechanism (any|none|upnp|pmp|stun|extip:)
-                                           			 "" or "none"         Default - do not nat
-                                           			 "extip:77.12.33.4"   Will assume the local machine is reachable on the given IP
-                                           			 "any"                Uses the first auto-detected mechanism
-                                           			 "upnp"               Uses the Universal Plug and Play protocol
-                                           			 "pmp"                Uses NAT-PMP with an auto-detected gateway address
-                                           			 "pmp:192.168.0.1"    Uses NAT-PMP with the given gateway address
-                                           			 "stun"               Uses STUN to detect an external IP using a default server
-                                           			 "stun:"      Uses STUN to detect an external IP using the given server (host:port)
-                                           
-      --netrestrict string                 Restricts network communication to the given IP networks (CIDR masks)
-      --nodiscover                         Disables the peer discovery mechanism (manual peer addition)
-      --p2p.allowed-ports uints            Allowed ports to pick for different eth p2p protocol versions as follows ,,.., (default [30303,30304,30305,30306,30307])
-      --p2p.protocol uint                  Version of eth p2p protocol (default 68)
-      --port int                           Network listening port (default 30303)
-      --pprof                              Enable the pprof HTTP server
-      --pprof.addr string                  pprof HTTP server listening interface (default "127.0.0.1")
-      --pprof.cpuprofile string            Write CPU profile to the given file
-      --pprof.port int                     pprof HTTP server listening port (default 6060)
-      --sentry.api.addr string             grpc addresses (default "localhost:9091")
-      --staticpeers strings                Comma separated enode URLs to connect to
-      --trace string                       Write execution trace to the given file
-      --trustedpeers strings               Comma separated enode URLs which are always allowed to connect, even above the peer limit
-      --verbosity string                   Set the log level for console logs (default "info")
+--datadir string                     Data directory for the databases (default "/home/user/.local/share/erigon")
+--diagnostics.disabled               Disable diagnostics
+--diagnostics.endpoint.addr string   Diagnostics HTTP server listening interface (default "127.0.0.1")
+--diagnostics.endpoint.port uint     Diagnostics HTTP server listening port (default 6062)
+--diagnostics.speedtest              Enable speed test
+--discovery.dns strings              Sets DNS discovery entry points (use "" to disable DNS)
+--healthcheck                        Enabling grpc health check
+-h, --help                               help for sentry
+--log.console.json                   Format console logs with JSON
+--log.console.verbosity string       Set the log level for console logs (default "info")
+--log.delays                         Enable block delay logging
+--log.dir.disable                    disable disk logging
+--log.dir.json                       Format file logs with JSON
+--log.dir.path string                Path to store user and error logs to disk
+--log.dir.prefix string              The file name prefix for logs stored to disk
+--log.dir.verbosity string           Set the log verbosity for logs stored to disk (default "info")
+--log.json                           Format console logs with JSON
+--maxpeers int                       Maximum number of network peers (network disabled if set to 0) (default 32)
+--maxpendpeers int                   Maximum number of TCP connections pending to become connected peers (default 1000)
+--metrics                            Enable metrics collection and reporting
+--metrics.addr string                Enable stand-alone metrics HTTP server listening interface (default "127.0.0.1")
+--metrics.port int                   Metrics HTTP server listening port (default 6061)
+--nat string                         NAT port mapping mechanism (any|none|upnp|pmp|stun|extip:)
+"" or "none"         Default - do not nat
+"extip:77.12.33.4"   Will assume the local machine is reachable on the given IP
+"any"                Uses the first auto-detected mechanism
+"upnp"               Uses the Universal Plug and Play protocol
+"pmp"                Uses NAT-PMP with an auto-detected gateway address
+"pmp:192.168.0.1"    Uses NAT-PMP with the given gateway address
+"stun"               Uses STUN to detect an external IP using a default server
+"stun:"      Uses STUN to detect an external IP using the given server (host:port)
+
+--netrestrict string                 Restricts network communication to the given IP networks (CIDR masks)
+--nodiscover                         Disables the peer discovery mechanism (manual peer addition)
+--p2p.allowed-ports uints            Allowed ports to pick for different eth p2p protocol versions as follows ,,.., (default [30303,30304,30305,30306,30307])
+--p2p.protocol uint                  Version of eth p2p protocol (default 68)
+--port int                           Network listening port (default 30303)
+--pprof                              Enable the pprof HTTP server
+--pprof.addr string                  pprof HTTP server listening interface (default "127.0.0.1")
+--pprof.cpuprofile string            Write CPU profile to the given file
+--pprof.port int                     pprof HTTP server listening port (default 6060)
+--sentry.api.addr string             grpc addresses (default "localhost:9091")
+--staticpeers strings                Comma separated enode URLs to connect to
+--trace string                       Write execution trace to the given file
+--trustedpeers strings               Comma separated enode URLs which are always allowed to connect, even above the peer limit
+--verbosity string                   Set the log level for console logs (default "info")
 ```
 
 ---
@@ -2729,76 +2574,76 @@ The `--help` flag listing is reproduced below for your convenience.
 snapshot downloader
 
 Usage:
-   [flags]
-   [command]
+[flags]
+[command]
 
 Examples:
 go run ./cmd/downloader --datadir  --downloader.api.addr 127.0.0.1:9093
 
 Available Commands:
-  completion      Generate the autocompletion script for the specified shell
-  help            Help about any command
-  manifest        
-  manifest-verify 
-  torrent_cat     
-  torrent_clean   Remove all .torrent files from datadir directory
-  torrent_create  
-  torrent_hashes  
-  torrent_magnet  
+completion      Generate the autocompletion script for the specified shell
+help            Help about any command
+manifest        
+manifest-verify 
+torrent_cat     
+torrent_clean   Remove all .torrent files from datadir directory
+torrent_create  
+torrent_hashes  
+torrent_magnet  
 
 Flags:
-      --chain string                       name of the network to join (default "mainnet")
-      --datadir string                     Data directory for the databases (default "/home/admin/.local/share/erigon")
-      --db.writemap                        Enable WRITE_MAP feature for fast database writes and fast commit times (default true)
-      --diagnostics.disabled               Disable diagnostics
-      --diagnostics.endpoint.addr string   Diagnostics HTTP server listening interface (default "127.0.0.1")
-      --diagnostics.endpoint.port uint     Diagnostics HTTP server listening port (default 6062)
-      --diagnostics.speedtest              Enable speed test
-      --downloader.api.addr string         external downloader api network address, for example: 127.0.0.1:9093 serves remote downloader interface (default "127.0.0.1:9093")
-      --downloader.disable.ipv4            Turns off ipv4 for the downloader
-      --downloader.disable.ipv6            Turns off ipv6 for the downloader
-  -h, --help                               help for this command
-      --log.console.json                   Format console logs with JSON
-      --log.console.verbosity string       Set the log level for console logs (default "info")
-      --log.delays                         Enable block delay logging
-      --log.dir.disable                    disable disk logging
-      --log.dir.json                       Format file logs with JSON
-      --log.dir.path string                Path to store user and error logs to disk
-      --log.dir.prefix string              The file name prefix for logs stored to disk
-      --log.dir.verbosity string           Set the log verbosity for logs stored to disk (default "info")
-      --log.json                           Format console logs with JSON
-      --metrics                            Enable metrics collection and reporting
-      --metrics.addr string                Enable stand-alone metrics HTTP server listening interface (default "127.0.0.1")
-      --metrics.port int                   Metrics HTTP server listening port (default 6061)
-      --nat string                         NAT port mapping mechanism (any|none|upnp|pmp|stun|extip:)
-                                           			 "" or "none"         Default - do not nat
-                                           			 "extip:77.12.33.4"   Will assume the local machine is reachable on the given IP
-                                           			 "any"                Uses the first auto-detected mechanism
-                                           			 "upnp"               Uses the Universal Plug and Play protocol
-                                           			 "pmp"                Uses NAT-PMP with an auto-detected gateway address
-                                           			 "pmp:192.168.0.1"    Uses NAT-PMP with the given gateway address
-                                           			 "stun"               Uses STUN to detect an external IP using a default server
-                                           			 "stun:"      Uses STUN to detect an external IP using the given server (host:port)
-                                           
-      --pprof                              Enable the pprof HTTP server
-      --pprof.addr string                  pprof HTTP server listening interface (default "127.0.0.1")
-      --pprof.cpuprofile string            Write CPU profile to the given file
-      --pprof.port int                     pprof HTTP server listening port (default 6060)
-      --seedbox                            Turns downloader into independent (doesn't need Erigon) software which discover/download/seed new files - useful for Erigon network, and can work on very cheap hardware. It will: 1) download .torrent from webseed 2) download new files after upgrade 3) we planing add discovery of new files soon
-      --torrent.conns.perfile int          Number of connections per file (default 10)
-      --torrent.download.rate string       Bytes per second, example: 32mb (default "512mb")
-      --torrent.download.slots int         (DEPRECATED: No longer has any effect) Amount of files to download in parallel. (default 32)
-      --torrent.maxpeers int               Unused parameter (reserved for future use) (default 100)
-      --torrent.port int                   Port to listen and serve BitTorrent protocol (default 42069)
-      --torrent.staticpeers string         Comma separated host:port to connect to
-      --torrent.upload.rate string         Bytes per second, example: 32mb (default "16mb")
-      --torrent.verbosity int              0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (must set --verbosity to equal or higher level and has default: 2) (default 2)
-      --trace string                       Write execution trace to the given file
-      --verbosity string                   Set the log level for console logs (default "info")
-      --verify                             Verify snapshots on startup. It will not report problems found, but re-download broken pieces.
-      --verify.failfast                    Stop on first found error. Report it and exit
-      --verify.files string                Limit list of files to verify
-      --webseed string                     Comma-separated URL's, holding metadata about network-support infrastructure (like S3 buckets with snapshots, bootnodes, etc...)
+--chain string                       name of the network to join (default "mainnet")
+--datadir string                     Data directory for the databases (default "/home/admin/.local/share/erigon")
+--db.writemap                        Enable WRITE_MAP feature for fast database writes and fast commit times (default true)
+--diagnostics.disabled               Disable diagnostics
+--diagnostics.endpoint.addr string   Diagnostics HTTP server listening interface (default "127.0.0.1")
+--diagnostics.endpoint.port uint     Diagnostics HTTP server listening port (default 6062)
+--diagnostics.speedtest              Enable speed test
+--downloader.api.addr string         external downloader api network address, for example: 127.0.0.1:9093 serves remote downloader interface (default "127.0.0.1:9093")
+--downloader.disable.ipv4            Turns off ipv4 for the downloader
+--downloader.disable.ipv6            Turns off ipv6 for the downloader
+-h, --help                               help for this command
+--log.console.json                   Format console logs with JSON
+--log.console.verbosity string       Set the log level for console logs (default "info")
+--log.delays                         Enable block delay logging
+--log.dir.disable                    disable disk logging
+--log.dir.json                       Format file logs with JSON
+--log.dir.path string                Path to store user and error logs to disk
+--log.dir.prefix string              The file name prefix for logs stored to disk
+--log.dir.verbosity string           Set the log verbosity for logs stored to disk (default "info")
+--log.json                           Format console logs with JSON
+--metrics                            Enable metrics collection and reporting
+--metrics.addr string                Enable stand-alone metrics HTTP server listening interface (default "127.0.0.1")
+--metrics.port int                   Metrics HTTP server listening port (default 6061)
+--nat string                         NAT port mapping mechanism (any|none|upnp|pmp|stun|extip:)
+"" or "none"         Default - do not nat
+"extip:77.12.33.4"   Will assume the local machine is reachable on the given IP
+"any"                Uses the first auto-detected mechanism
+"upnp"               Uses the Universal Plug and Play protocol
+"pmp"                Uses NAT-PMP with an auto-detected gateway address
+"pmp:192.168.0.1"    Uses NAT-PMP with the given gateway address
+"stun"               Uses STUN to detect an external IP using a default server
+"stun:"      Uses STUN to detect an external IP using the given server (host:port)
+
+--pprof                              Enable the pprof HTTP server
+--pprof.addr string                  pprof HTTP server listening interface (default "127.0.0.1")
+--pprof.cpuprofile string            Write CPU profile to the given file
+--pprof.port int                     pprof HTTP server listening port (default 6060)
+--seedbox                            Turns downloader into independent (doesn't need Erigon) software which discover/download/seed new files - useful for Erigon network, and can work on very cheap hardware. It will: 1) download .torrent from webseed 2) download new files after upgrade 3) we planing add discovery of new files soon
+--torrent.conns.perfile int          Number of connections per file (default 10)
+--torrent.download.rate string       Bytes per second, example: 32mb (default "512mb")
+--torrent.download.slots int         (DEPRECATED: No longer has any effect) Amount of files to download in parallel. (default 32)
+--torrent.maxpeers int               Unused parameter (reserved for future use) (default 100)
+--torrent.port int                   Port to listen and serve BitTorrent protocol (default 42069)
+--torrent.staticpeers string         Comma separated host:port to connect to
+--torrent.upload.rate string         Bytes per second, example: 32mb (default "16mb")
+--torrent.verbosity int              0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (must set --verbosity to equal or higher level and has default: 2) (default 2)
+--trace string                       Write execution trace to the given file
+--verbosity string                   Set the log level for console logs (default "info")
+--verify                             Verify snapshots on startup. It will not report problems found, but re-download broken pieces.
+--verify.failfast                    Stop on first found error. Report it and exit
+--verify.files string                Limit list of files to verify
+--webseed string                     Comma-separated URL's, holding metadata about network-support infrastructure (like S3 buckets with snapshots, bootnodes, etc...)
 
 Use " [command] --help" for more information about a command.
 ```
@@ -2946,9 +2791,9 @@ To run an op-node alongside Erigon, follow these steps:
 
 1.  **Start Erigon with Caplin Enabled**: If Caplin is running as the consensus layer (CL), use the `--caplin.blobs-immediate-backfill` flag to ensure the last 18 days of blobs are backfilled, which is critical for proper synchronization with the op-node, assuming you start from a snapshot.
 
-    ```bash
-    ./build/bin/erigon --caplin.blobs-immediate-backfill
-    ```
+```bash
+./build/bin/erigon --caplin.blobs-immediate-backfill
+```
 2. **Run the Op-Node**: Configure the op-node with the `--l1.trustrpc` flag to trust the Erigon RPC layer as the L1 node. This setup ensures smooth communication and synchronization.
 
 This configuration enables the op-node to function effectively with Erigon serving as both the L1 node and the CL.
@@ -3042,10 +2887,10 @@ On the **slow disk** place `datadir` folder with the following structure:
 
 * `chaindata` (linked to fast disk)
 * `snapshots`
-  * `domain` (linked to fast disk)
-  * `history`
-  * `idx`
-  * `accessor`
+* `domain` (linked to fast disk)
+* `history`
+* `idx`
+* `accessor`
 * `temp`
 
 ### Step 2
@@ -3449,29 +3294,29 @@ Here's how to run mainnet and sepolia instances simultaneously:
 ```bash
 # Mainnet instance
 ./build/bin/erigon \
-  --datadir="" \
-  --chain=mainnet \
-  --port=30303 \
-  --http.port=8545 \
-  --authrpc.port=8551 \
-  --torrent.port=42069 \
-  --private.api.addr=127.0.0.1:9090 \
-  --mcp.port=8553 \
-  --http --ws \
-  --http.api=eth,debug,net,trace,web3,erigon
+--datadir="" \
+--chain=mainnet \
+--port=30303 \
+--http.port=8545 \
+--authrpc.port=8551 \
+--torrent.port=42069 \
+--private.api.addr=127.0.0.1:9090 \
+--mcp.port=8553 \
+--http --ws \
+--http.api=eth,debug,net,trace,web3,erigon
 
 # Sepolia instance
 ./build/bin/erigon \
-  --datadir="" \
-  --chain=sepolia \
-  --port=30304 \
-  --http.port=8546 \
-  --authrpc.port=8552 \
-  --torrent.port=42068 \
-  --private.api.addr=127.0.0.1:9091 \
-  --mcp.port=8554 \
-  --http --ws \
-  --http.api=eth,debug,net,trace,web3,erigon
+--datadir="" \
+--chain=sepolia \
+--port=30304 \
+--http.port=8546 \
+--authrpc.port=8552 \
+--torrent.port=42068 \
+--private.api.addr=127.0.0.1:9091 \
+--mcp.port=8554 \
+--http --ws \
+--http.api=eth,debug,net,trace,web3,erigon
 ```
 
 ## Docker Compose Multi-Instance Setup
@@ -3588,8 +3433,8 @@ echo 1 > /proc/sys/vm/compact_memory
 What can be done:
 
 * reduce disk latency (not throughput, not iops)
-  * use latency-critical cloud-drives
-  * or attached-NVMe (at least for initial sync)
+* use latency-critical cloud-drives
+* or attached-NVMe (at least for initial sync)
 * increase RAM
 * if you throw enough RAM, then can set env variable `SNAPSHOT_MADV_RND=false`
 * Use `--db.pagesize=64kb` (less fragmentation, more IO)
@@ -3609,47 +3454,47 @@ Erigon will utilize all available RAM, but this memory will not be directly owne
 Erigon itself consumes less than 2GB of RAM. Therefore, Erigon will benefit from having more RAM available, as it can use all of it without needing any reconfiguration. The same PageCache can be shared by other processes running on the same machine, simply by opening the same DB file. For example, if RPCDaemon is started with the `--datadir` option, it will open Erigon's DB and utilize the same PageCache. This means that if data A is already in RAM because it is frequently accessed and RPCDaemon reads it, it will read it from RAM rather than from the disk, leveraging shared memory.
 
 ```go
-	// These are set to prevent disk and page size churn which can be excessive
-	// when running multiple nodes
-	// MdbxGrowthStep impacts disk usage, MdbxDBSizeLimit impacts page file usage
-	n.nodeCfg.MdbxGrowthStep = 32 * datasize.MB
-	n.nodeCfg.MdbxDBSizeLimit = 512 * datasize.MB
+// These are set to prevent disk and page size churn which can be excessive
+// when running multiple nodes
+// MdbxGrowthStep impacts disk usage, MdbxDBSizeLimit impacts page file usage
+n.nodeCfg.MdbxGrowthStep = 32 * datasize.MB
+n.nodeCfg.MdbxDBSizeLimit = 512 * datasize.MB
 ```
 
 ```yaml
-      --datadir=/home/erigon/.local/share/erigon --chain=dev --private.api.addr=0.0.0.0:9090 --mine --log.dir.path=/logs/node1
-    ports:
-      - "8551:8551"
-    volumes:
-      - datadir:/home/erigon/.local/share/erigon
-      - ./logdir:/logs
-    user: $:$
-    restart: unless-stopped
-    mem_swappiness: 0
+--datadir=/home/erigon/.local/share/erigon --chain=dev --private.api.addr=0.0.0.0:9090 --mine --log.dir.path=/logs/node1
+ports:
+- "8551:8551"
+volumes:
+- datadir:/home/erigon/.local/share/erigon
+- ./logdir:/logs
+user: $:$
+restart: unless-stopped
+mem_swappiness: 0
 
-  erigon-node2:
-    profiles:
-      - second
-    image: erigontech/erigon:$ERIGON_TAG
-    command: |
-      --datadir=/home/erigon/.local/share/erigon --chain=dev --private.api.addr=0.0.0.0:9090 --staticpeers=$ENODE --log.dir.path=/logs/node2
+erigon-node2:
+profiles:
+- second
+image: erigontech/erigon:$ERIGON_TAG
+command: |
+--datadir=/home/erigon/.local/share/erigon --chain=dev --private.api.addr=0.0.0.0:9090 --staticpeers=$ENODE --log.dir.path=/logs/node2
 ```
 
 ```yaml
-      - targets:
-          - erigon:6060 # If Erigon runned by default docker-compose, then it's available on `erigon` host.
-          - erigon:6061
-          - erigon:6062
-          - 46.149.164.51:6060
-          - host.docker.internal:6060 # this is how docker-for-mac allow to access host machine
-          - host.docker.internal:6061
-          - host.docker.internal:6062
-          - 192.168.255.134:6060
-          - 192.168.255.134:6061
-          - 192.168.255.134:6062
-          - 192.168.255.138:6060
-          - 192.168.255.138:6061
-          - 192.168.255.138:6062
+- targets:
+- erigon:6060 # If Erigon runned by default docker-compose, then it's available on `erigon` host.
+- erigon:6061
+- erigon:6062
+- 46.149.164.51:6060
+- host.docker.internal:6060 # this is how docker-for-mac allow to access host machine
+- host.docker.internal:6061
+- host.docker.internal:6062
+- 192.168.255.134:6060
+- 192.168.255.134:6061
+- 192.168.255.134:6062
+- 192.168.255.138:6060
+- 192.168.255.138:6061
+- 192.168.255.138:6062
 ```
 
 ---
@@ -3658,41 +3503,19 @@ Erigon itself consumes less than 2GB of RAM. Therefore, Erigon will benefit from
 URL: https://docs.erigon.tech/fundamentals/modules
 
 Modules
-  Erigon's internal components can run as separate processes for scalability, security, or custom deployments. Only split them when you have a clear reason to.
+Erigon's internal components can run as separate processes for scalability, security, or custom deployments. Only split them when you have a clear reason to.
 
-  
-    
-    
-    
-  
-  RPC Daemon
-  Serve JSON-RPC requests as a separate, remoteable process — the most battle-tested external component.
+RPC Daemon
+Serve JSON-RPC requests as a separate, remoteable process — the most battle-tested external component.
 
-  
-    
-    
-    
-    
-    
-    
-  
-  TxPool
-  Manage the pending transaction pool as a standalone service, decoupled from the main node process.
+TxPool
+Manage the pending transaction pool as a standalone service, decoupled from the main node process.
 
-  
-    
-    
-  
-  Sentry
-  Erigon's network-facing peer-to-peer communication layer, isolatable for security or multi-node setups.
+Sentry
+Erigon's network-facing peer-to-peer communication layer, isolatable for security or multi-node setups.
 
-  
-    
-    
-    
-  
-  Downloader
-  Fetch and verify Erigon snapshots from the BitTorrent network — handles historical data retrieval.
+Downloader
+Fetch and verify Erigon snapshots from the BitTorrent network — handles historical data retrieval.
 
 ---
 
@@ -3844,22 +3667,22 @@ Add the following to your Claude Desktop configuration file (`~/.config/claude-d
 
 ```json
 {
-  "mcpServers": {
-    "erigon": 
-  }
+"mcpServers": {
+"erigon": 
+}
 }
 ```
 
 ```json
 {
-  "mcpServers": 
-  }
+"mcpServers": 
+}
 }
 ```
 
 ```json
 
-  }
+}
 }
 ```
 
@@ -3904,18 +3727,18 @@ claude mcp remove erigon
 
 ```yaml
 mcp_servers:
-  erigon:
-    type: sse
-    url: http://127.0.0.1:8553/sse
+erigon:
+type: sse
+url: http://127.0.0.1:8553/sse
 ```
 
 ```yaml
 mcp_servers:
-  erigon:
-    command: /path/to/build/bin/mcp
-    args:
-      - --port
-      - "8545"
+erigon:
+command: /path/to/build/bin/mcp
+args:
+- --port
+- "8545"
 ```
 
 Save the file and start a new Codex session. The Erigon tools are loaded automatically — you can query your node in natural language alongside any coding task.
@@ -4225,11 +4048,11 @@ To configure your local Metamask wallet (browser extension):
 * Click on the **network selector button**. This will display a list of networks to which you're already connected
 * Click **Add network**
 * A new browser tab will open, displaying various fields to fill out. Complete the fields with the proper information, in this example for Ethereum network:
-  * **Network Name**: `Ethereum on E3` (or any name of your choice)
-  * **Chain ID**: `1` for chain ID parameter see [Supported Networks](supported-networks)
-  * **New RPC URL**: `http://127.0.0.1:8545`
-  * **Currency Symbol**: `ETH`
-  * **Block Explorer URL**: `https://www.etherscan.io` (or any explorer of your choice)
+* **Network Name**: `Ethereum on E3` (or any name of your choice)
+* **Chain ID**: `1` for chain ID parameter see [Supported Networks](supported-networks)
+* **New RPC URL**: `http://127.0.0.1:8545`
+* **Currency Symbol**: `ETH`
+* **Block Explorer URL**: `https://www.etherscan.io` (or any explorer of your choice)
 
 After performing the above steps, you will be able to see the custom network the next time you access the network selector.
 
@@ -4787,18 +4610,18 @@ Test your IPC connection using curl:
 
 ```bash
 curl --unix-socket /erigon.ipc \
-     -X POST http://localhost/ \
-     -H "Content-Type: application/json" \
-     --data ''
+-X POST http://localhost/ \
+-H "Content-Type: application/json" \
+--data ''
 ```
 
 Or use the HTTP endpoint (enabled by default on port 8545):
 
 ```bash
 curl http://127.0.0.1:8545 \
-     -X POST \
-     -H "Content-Type: application/json" \
-     --data ''
+-X POST \
+-H "Content-Type: application/json" \
+--data ''
 ```
 
 ### gRPC
@@ -5375,10 +5198,10 @@ i.e. if the trace is:
 
 ```
 A
-  CALLs B
-    CALLs G
-  CALLs C
-    CALLs G
+CALLs B
+CALLs G
+CALLs C
+CALLs G
 ```
 
 then it should look something like:
@@ -5430,16 +5253,16 @@ Response
 
 ```js
 {
-  "id": 1,
-  "jsonrpc": "2.0",
-  "result": ,
-      "result": ,
-      "subtraces": 0,
-      "traceAddress": [],
-      "type": "call"
-    }],
-    "vmTrace": null
-  }
+"id": 1,
+"jsonrpc": "2.0",
+"result": ,
+"result": ,
+"subtraces": 0,
+"traceAddress": [],
+"type": "call"
+}],
+"vmTrace": null
+}
 }
 ```
 
@@ -5456,25 +5279,25 @@ Performs multiple call traces on top of the same block. i.e. transaction `n` wil
 
 ```js
 params: [
-  [
-    [
-      {
-        "from": "0x407d73d8a49eeb85d32cf465507dd71d507100c1",
-        "to": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
-        "value": "0x186a0"
-      },
-      ["trace"]
-    ],
-    [
-      {
-        "from": "0x407d73d8a49eeb85d32cf465507dd71d507100c1",
-        "to": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
-        "value": "0x186a0"
-      },
-      ["trace"]
-    ]
-  ],
-  "latest"
+[
+[
+{
+"from": "0x407d73d8a49eeb85d32cf465507dd71d507100c1",
+"to": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+"value": "0x186a0"
+},
+["trace"]
+],
+[
+{
+"from": "0x407d73d8a49eeb85d32cf465507dd71d507100c1",
+"to": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+"value": "0x186a0"
+},
+["trace"]
+]
+],
+"latest"
 ]
 ```
 
@@ -5494,48 +5317,48 @@ Response
 
 ```js
 {
-  "id": 1,
-  "jsonrpc": "2.0",
-  "result": [
-    {
-      "output": "0x",
-      "stateDiff": null,
-      "trace": [{
-        "action": {
-          "callType": "call",
-          "from": "0x407d73d8a49eeb85d32cf465507dd71d507100c1",
-          "gas": "0x1dcd12f8",
-          "input": "0x",
-          "to": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
-          "value": "0x186a0"
-        },
-        "result": ,
-        "subtraces": 0,
-        "traceAddress": [],
-        "type": "call"
-      }],
-      "vmTrace": null
-    },
-    {
-      "output": "0x",
-      "stateDiff": null,
-      "trace": [{
-        "action": {
-          "callType": "call",
-          "from": "0x407d73d8a49eeb85d32cf465507dd71d507100c1",
-          "gas": "0x1dcd12f8",
-          "input": "0x",
-          "to": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
-          "value": "0x186a0"
-        },
-        "result": ,
-        "subtraces": 0,
-        "traceAddress": [],
-        "type": "call"
-      }],
-      "vmTrace": null
-    }
-  ]
+"id": 1,
+"jsonrpc": "2.0",
+"result": [
+{
+"output": "0x",
+"stateDiff": null,
+"trace": [{
+"action": {
+"callType": "call",
+"from": "0x407d73d8a49eeb85d32cf465507dd71d507100c1",
+"gas": "0x1dcd12f8",
+"input": "0x",
+"to": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+"value": "0x186a0"
+},
+"result": ,
+"subtraces": 0,
+"traceAddress": [],
+"type": "call"
+}],
+"vmTrace": null
+},
+{
+"output": "0x",
+"stateDiff": null,
+"trace": [{
+"action": {
+"callType": "call",
+"from": "0x407d73d8a49eeb85d32cf465507dd71d507100c1",
+"gas": "0x1dcd12f8",
+"input": "0x",
+"to": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+"value": "0x186a0"
+},
+"result": ,
+"subtraces": 0,
+"traceAddress": [],
+"type": "call"
+}],
+"vmTrace": null
+}
+]
 }
 ```
 
@@ -5552,8 +5375,8 @@ Traces a call to `eth_sendRawTransaction` without making the call, returning the
 
 ```js
 params: [
-  "0xd46e8dd67c5d32be8d46e8dd67c5d32be8058bb8eb970870f072445675058bb8eb970870f072445675",
-  ["trace"]
+"0xd46e8dd67c5d32be8d46e8dd67c5d32be8058bb8eb970870f072445675058bb8eb970870f072445675",
+["trace"]
 ]
 ```
 
@@ -5573,16 +5396,16 @@ Response
 
 ```js
 {
-  "id": 1,
-  "jsonrpc": "2.0",
-  "result": ,
-      "result": ,
-      "subtraces": 0,
-      "traceAddress": [],
-      "type": "call"
-    }],
-    "vmTrace": null
-  }
+"id": 1,
+"jsonrpc": "2.0",
+"result": ,
+"result": ,
+"subtraces": 0,
+"traceAddress": [],
+"type": "call"
+}],
+"vmTrace": null
+}
 }
 ```
 
@@ -5599,8 +5422,8 @@ Replays all transactions in a block returning the requested traces for each tran
 
 ```js
 params: [
-  "0x2ed119",
-  ["trace"]
+"0x2ed119",
+["trace"]
 ]
 ```
 
@@ -5620,20 +5443,20 @@ Response
 
 ```js
 {
-  "id": 1,
-  "jsonrpc": "2.0",
-  "result": [
-    ,
-        "result": ,
-        "subtraces": 0,
-        "traceAddress": [],
-        "type": "call"
-      }],
-      "transactionHash": "0x...",
-      "vmTrace": null
-    },
-    
-  ]
+"id": 1,
+"jsonrpc": "2.0",
+"result": [
+,
+"result": ,
+"subtraces": 0,
+"traceAddress": [],
+"type": "call"
+}],
+"transactionHash": "0x...",
+"vmTrace": null
+},
+
+]
 }
 ```
 
@@ -5650,8 +5473,8 @@ Replays a transaction, returning the traces.
 
 ```js
 params: [
-  "0x02d4a872e096445e80d05276ee756cefef7f3b376bcec14246469c0cd97dad8f",
-  ["trace"]
+"0x02d4a872e096445e80d05276ee756cefef7f3b376bcec14246469c0cd97dad8f",
+["trace"]
 ]
 ```
 
@@ -5671,16 +5494,16 @@ Response
 
 ```js
 {
-  "id": 1,
-  "jsonrpc": "2.0",
-  "result": ,
-      "result": ,
-      "subtraces": 0,
-      "traceAddress": [],
-      "type": "call"
-    }],
-    "vmTrace": null
-  }
+"id": 1,
+"jsonrpc": "2.0",
+"result": ,
+"result": ,
+"subtraces": 0,
+"traceAddress": [],
+"type": "call"
+}],
+"vmTrace": null
+}
 }
 ```
 
@@ -5696,7 +5519,7 @@ Returns traces created at given block.
 
 ```js
 params: [
-  "0x2ed119" // 3068185
+"0x2ed119" // 3068185
 ]
 ```
 
@@ -5716,29 +5539,29 @@ Response
 
 ```js
 {
-  "id": 1,
-  "jsonrpc": "2.0",
-  "result": [
-    {
-      "action": {
-        "callType": "call",
-        "from": "0xaa7b131dc60b80d3cf5e59b5a21a666aa039c951",
-        "gas": "0x0",
-        "input": "0x",
-        "to": "0xd40aba8166a212d6892125f079c33e6f5ca19814",
-        "value": "0x4768d7effc3fbe"
-      },
-      "blockHash": "0x7eb25504e4c202cf3d62fd585d3e238f592c780cca82dacb2ed3cb5b38883add",
-      "blockNumber": 3068185,
-      "result": ,
-      "subtraces": 0,
-      "traceAddress": [],
-      "transactionHash": "0x07da28d752aba3b9dd7060005e554719c6205c8a3aea358599fc9b245c52f1f6",
-      "transactionPosition": 0,
-      "type": "call"
-    },
-    ...
-  ]
+"id": 1,
+"jsonrpc": "2.0",
+"result": [
+{
+"action": {
+"callType": "call",
+"from": "0xaa7b131dc60b80d3cf5e59b5a21a666aa039c951",
+"gas": "0x0",
+"input": "0x",
+"to": "0xd40aba8166a212d6892125f079c33e6f5ca19814",
+"value": "0x4768d7effc3fbe"
+},
+"blockHash": "0x7eb25504e4c202cf3d62fd585d3e238f592c780cca82dacb2ed3cb5b38883add",
+"blockNumber": 3068185,
+"result": ,
+"subtraces": 0,
+"traceAddress": [],
+"transactionHash": "0x07da28d752aba3b9dd7060005e554719c6205c8a3aea358599fc9b245c52f1f6",
+"transactionPosition": 0,
+"type": "call"
+},
+...
+]
 }
 ```
 
@@ -5751,21 +5574,21 @@ Returns traces matching given filter
 #### Parameters
 
 1. `Object` - The filter object
-   * `fromBlock`: `Quantity` or `Tag` - (optional) From this block.
-   * `toBlock`: `Quantity` or `Tag` - (optional) To this block.
-   * `fromAddress`: `Array` - (optional) Sent from these addresses.
-   * `toAddress`: `Address` - (optional) Sent to these addresses.
-   * `after`: `Quantity` - (optional) The offset trace number
-   * `count`: `Quantity` - (optional) Integer number of traces to display in a batch.
-   * `mode`: `String` - (optional) Default is `"union"`, meaning traces matching either address filter are returned. Set to `"intersection"` to only return traces that satisfy both `fromAddress` and `toAddress` filters simultaneously.
+* `fromBlock`: `Quantity` or `Tag` - (optional) From this block.
+* `toBlock`: `Quantity` or `Tag` - (optional) To this block.
+* `fromAddress`: `Array` - (optional) Sent from these addresses.
+* `toAddress`: `Address` - (optional) Sent to these addresses.
+* `after`: `Quantity` - (optional) The offset trace number
+* `count`: `Quantity` - (optional) Integer number of traces to display in a batch.
+* `mode`: `String` - (optional) Default is `"union"`, meaning traces matching either address filter are returned. Set to `"intersection"` to only return traces that satisfy both `fromAddress` and `toAddress` filters simultaneously.
 
 ```js
 params: [{
-  "fromBlock": "0x2ed0c4", // 3068100
-  "toBlock": "0x2ed128", // 3068200
-  "toAddress": ["0x8bbB73BCB5d553B5A556358d27625323Fd781D37"],
-  "after": 1000,
-  "count": 100
+"fromBlock": "0x2ed0c4", // 3068100
+"toBlock": "0x2ed128", // 3068200
+"toAddress": ["0x8bbB73BCB5d553B5A556358d27625323Fd781D37"],
+"after": 1000,
+"count": 100
 }]
 ```
 
@@ -5785,29 +5608,29 @@ Response
 
 ```js
 {
-  "id": 1,
-  "jsonrpc": "2.0",
-  "result": [
-    {
-      "action": {
-        "callType": "call",
-        "from": "0x32be343b94f860124dc4fee278fdcbd38c102d88",
-        "gas": "0x4c40d",
-        "input": "0x",
-        "to": "0x8bbb73bcb5d553b5a556358d27625323fd781d37",
-        "value": "0x3f0650ec47fd240000"
-      },
-      "blockHash": "0x86df301bcdd8248d982dbf039f09faf792684e1aeee99d5b58b77d620008b80f",
-      "blockNumber": 3068183,
-      "result": ,
-      "subtraces": 0,
-      "traceAddress": [],
-      "transactionHash": "0x3321a7708b1083130bd78da0d62ead9f6683033231617c9d268e2c7e3fa6c104",
-      "transactionPosition": 3,
-      "type": "call"
-    },
-    ...
-  ]
+"id": 1,
+"jsonrpc": "2.0",
+"result": [
+{
+"action": {
+"callType": "call",
+"from": "0x32be343b94f860124dc4fee278fdcbd38c102d88",
+"gas": "0x4c40d",
+"input": "0x",
+"to": "0x8bbb73bcb5d553b5a556358d27625323fd781d37",
+"value": "0x3f0650ec47fd240000"
+},
+"blockHash": "0x86df301bcdd8248d982dbf039f09faf792684e1aeee99d5b58b77d620008b80f",
+"blockNumber": 3068183,
+"result": ,
+"subtraces": 0,
+"traceAddress": [],
+"transactionHash": "0x3321a7708b1083130bd78da0d62ead9f6683033231617c9d268e2c7e3fa6c104",
+"transactionPosition": 3,
+"type": "call"
+},
+...
+]
 }
 ```
 
@@ -5824,8 +5647,8 @@ Returns trace at given position.
 
 ```js
 params: [
-  "0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3",
-  ["0x0"]
+"0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3",
+["0x0"]
 ]
 ```
 
@@ -5845,28 +5668,28 @@ Response
 
 ```js
 {
-  "id": 1,
-  "jsonrpc": "2.0",
-  "result": {
-    "action": {
-      "callType": "call",
-      "from": "0x1c39ba39e4735cb65978d4db400ddd70a72dc750",
-      "gas": "0x13e99",
-      "input": "0x16c72721",
-      "to": "0x2bd2326c993dfaef84f696526064ff22eba5b362",
-      "value": "0x0"
-    },
-    "blockHash": "0x7eb25504e4c202cf3d62fd585d3e238f592c780cca82dacb2ed3cb5b38883add",
-    "blockNumber": 3068185,
-    "result": ,
-    "subtraces": 0,
-    "traceAddress": [
-      0
-    ],
-    "transactionHash": "0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3",
-    "transactionPosition": 2,
-    "type": "call"
-  }
+"id": 1,
+"jsonrpc": "2.0",
+"result": {
+"action": {
+"callType": "call",
+"from": "0x1c39ba39e4735cb65978d4db400ddd70a72dc750",
+"gas": "0x13e99",
+"input": "0x16c72721",
+"to": "0x2bd2326c993dfaef84f696526064ff22eba5b362",
+"value": "0x0"
+},
+"blockHash": "0x7eb25504e4c202cf3d62fd585d3e238f592c780cca82dacb2ed3cb5b38883add",
+"blockNumber": 3068185,
+"result": ,
+"subtraces": 0,
+"traceAddress": [
+0
+],
+"transactionHash": "0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3",
+"transactionPosition": 2,
+"type": "call"
+}
 }
 ```
 
@@ -5900,34 +5723,34 @@ Response
 
 ```js
 {
-  "id": 1,
-  "jsonrpc": "2.0",
-  "result": [
-    {
-      "action": {
-        "callType": "call",
-        "from": "0x1c39ba39e4735cb65978d4db400ddd70a72dc750",
-        "gas": "0x13e99",
-        "input": "0x16c72721",
-        "to": "0x2bd2326c993dfaef84f696526064ff22eba5b362",
-        "value": "0x0"
-      },
-      "blockHash": "0x7eb25504e4c202cf3d62fd585d3e238f592c780cca82dacb2ed3cb5b38883add",
-      "blockNumber": 3068185,
-      "result": {
-        "gasUsed": "0x183",
-        "output": "0x0000000000000000000000000000000000000000000000000000000000000001"
-      },
-      "subtraces": 0,
-      "traceAddress": [
-        0
-      ],
-      "transactionHash": "0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3",
-      "transactionPosition": 2,
-      "type": "call"
-    },
-    ...
-  ]
+"id": 1,
+"jsonrpc": "2.0",
+"result": [
+{
+"action": {
+"callType": "call",
+"from": "0x1c39ba39e4735cb65978d4db400ddd70a72dc750",
+"gas": "0x13e99",
+"input": "0x16c72721",
+"to": "0x2bd2326c993dfaef84f696526064ff22eba5b362",
+"value": "0x0"
+},
+"blockHash": "0x7eb25504e4c202cf3d62fd585d3e238f592c780cca82dacb2ed3cb5b38883add",
+"blockNumber": 3068185,
+"result": {
+"gasUsed": "0x183",
+"output": "0x0000000000000000000000000000000000000000000000000000000000000001"
+},
+"subtraces": 0,
+"traceAddress": [
+0
+],
+"transactionHash": "0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3",
+"transactionPosition": 2,
+"type": "call"
+},
+...
+]
 }
 ```
 
@@ -6799,21 +6622,21 @@ Array of log objects (same structure as `eth_getLogs`).
 
 ```bash
 curl -X POST http://localhost:8545 \
-  -H "Content-Type: application/json" \
-  -d '{
-    "jsonrpc": "2.0",
-    "method": "overlay_getLogs",
-    "params": [
-      {
-        "fromBlock": "0x1000000",
-        "toBlock":   "0x1000010",
-        "address":   "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
-      },
-      
-      }
-    ],
-    "id": 1
-  }'
+-H "Content-Type: application/json" \
+-d '{
+"jsonrpc": "2.0",
+"method": "overlay_getLogs",
+"params": [
+{
+"fromBlock": "0x1000000",
+"toBlock":   "0x1000010",
+"address":   "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+},
+
+}
+],
+"id": 1
+}'
 ```
 
 Blocks in the requested range are replayed concurrently (up to `runtime.NumCPU()` workers). Each block is independently replayed from the state at `blockNumber - 1`.
@@ -6843,16 +6666,16 @@ This is useful for understanding what a contract would have initialised to if it
 
 ```bash
 curl -X POST http://localhost:8545 \
-  -H "Content-Type: application/json" \
-  -d '{
-    "jsonrpc": "2.0",
-    "method": "overlay_callConstructor",
-    "params": [
-      "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-      "0x"
-    ],
-    "id": 1
-  }'
+-H "Content-Type: application/json" \
+-d '{
+"jsonrpc": "2.0",
+"method": "overlay_callConstructor",
+"params": [
+"0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+"0x"
+],
+"id": 1
+}'
 ```
 
 Internally, this method:
@@ -6907,18 +6730,18 @@ Array of storage key hashes (`Bytes[]`).
 
 ```bash
 curl -X POST http://localhost:8545 \
-  -H "Content-Type: application/json" \
-  -d '{
-    "jsonrpc": "2.0",
-    "method": "parity_listStorageKeys",
-    "params": [
-      "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-      10,
-      null,
-      "latest"
-    ],
-    "id": 1
-  }'
+-H "Content-Type: application/json" \
+-d '{
+"jsonrpc": "2.0",
+"method": "parity_listStorageKeys",
+"params": [
+"0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+10,
+null,
+"latest"
+],
+"id": 1
+}'
 ```
 
 ---
@@ -6957,17 +6780,17 @@ The schema includes queries for blocks, transactions, accounts, logs, and pendin
 
 ```graphql
 
-      to 
-      value
-    }
-  }
+to 
+value
+}
+}
 }
 ```
 
 ```bash
 curl -X POST http://localhost:8545/graphql \
-  -H "Content-Type: application/json" \
-  -d ' }"}'
+-H "Content-Type: application/json" \
+-d ' }"}'
 ```
 
 ---
@@ -6987,28 +6810,28 @@ The following command starts Erigon with the embedded Caplin consensus layer wit
 
 ```bash
 erigon \
-  --datadir=/data/erigon \
-  --http \
-  --http.addr=0.0.0.0 \
-  --http.port=8545 \
-  --http.api=engine,eth,net,web3 \
-  --ws \
-  --ws.port=8546 \
-  --caplin.enable-upnp \
-  --caplin.discovery.addr=0.0.0.0 \
-  --caplin.discovery.port=4000 \
-  --caplin.discovery.tcpport=4001 \
-  --beacon.api=beacon,validator,builder,config,debug,events,node,lighthouse 
+--datadir=/data/erigon \
+--http \
+--http.addr=0.0.0.0 \
+--http.port=8545 \
+--http.api=engine,eth,net,web3 \
+--ws \
+--ws.port=8546 \
+--caplin.enable-upnp \
+--caplin.discovery.addr=0.0.0.0 \
+--caplin.discovery.port=4000 \
+--caplin.discovery.tcpport=4001 \
+--beacon.api=beacon,validator,builder,config,debug,events,node,lighthouse 
 ```
 
 **Flags Explanation**:
 
 * Execution Layer (Erigon):
-  * `--http.api=engine,eth,net,web3`: enables the necessary APIs for external clients and Caplin.
-  * `--ws`: enables WebSocket-based communication (optional).
+* `--http.api=engine,eth,net,web3`: enables the necessary APIs for external clients and Caplin.
+* `--ws`: enables WebSocket-based communication (optional).
 * Consensus Layer (Caplin):
-  * `--caplin.discovery.addr` and `--caplin.discovery.port`: configures Caplin's gossip and discovery layer.
-  * `--beacon.api=beacon,validator,builder,config,debug,events,node,lighthouse`: enables all possible API endpoints for the validator client.
+* `--caplin.discovery.addr` and `--caplin.discovery.port`: configures Caplin's gossip and discovery layer.
+* `--beacon.api=beacon,validator,builder,config,debug,events,node,lighthouse`: enables all possible API endpoints for the validator client.
 
 ## 2. Set Up Lighthouse Validator Client
 
@@ -7032,9 +6855,9 @@ Start the validator client and connect it to the Caplin CL:
 
 ```bash
 lighthouse vc \
-  --network mainnet \
-  --beacon-nodes http://127.0.0.1:5555 \
-  --suggested-fee-recipient=
+--network mainnet \
+--beacon-nodes http://127.0.0.1:5555 \
+--suggested-fee-recipient=
 ```
 
 **Flags Explanation**:
@@ -7085,17 +6908,17 @@ The following example demonstrates how to configure Erigon to run with an extern
 
 ```bash
 erigon \
-  --externalcl \
-  --datadir=/data/erigon \
-  --chain=sepolia \
-  --authrpc.jwtsecret=/jwt
-  --authrpc.addr=0.0.0.0 \
-  --http \
-  --http.addr=0.0.0.0 \
-  --http.port=8545 \
-  --http.api=engine,eth,net,web3 \
-  --ws \
-  --ws.port=8546 \
+--externalcl \
+--datadir=/data/erigon \
+--chain=sepolia \
+--authrpc.jwtsecret=/jwt
+--authrpc.addr=0.0.0.0 \
+--http \
+--http.addr=0.0.0.0 \
+--http.port=8545 \
+--http.api=engine,eth,net,web3 \
+--ws \
+--ws.port=8546 \
 ```
 
 ## Flags explanation:
@@ -7138,33 +6961,33 @@ To participate in the Shutter encrypted transaction pool as a validator using Er
 
 1.  **Set Up Your Validator**
 
-    Deposit your stake and register your validator on Gnosis Chain reby following the [Gnosis Chain Validator Setup](https://docs.gnosischain.com/node/manual/validator/deposit).
+Deposit your stake and register your validator on Gnosis Chain reby following the [Gnosis Chain Validator Setup](https://docs.gnosischain.com/node/manual/validator/deposit).
 2.  **Register as a Shutterized Validator**
 
-    Complete the validator registration for Shutter using the tool provided in the [Shutter Validator Registration Guide](https://github.com/shutter-network/shutter-validator-registration).
+Complete the validator registration for Shutter using the tool provided in the [Shutter Validator Registration Guide](https://github.com/shutter-network/shutter-validator-registration).
 3.  **Verify Registration**
 
-    Use the Erigon CLI command to verify that your registration was successful:
+Use the Erigon CLI command to verify that your registration was successful:
 ```bash
-    erigon shutter-validator-reg-check --chain  --el-url  --validator-info-file 
-    ```
+erigon shutter-validator-reg-check --chain  --el-url  --validator-info-file 
+```
 * `--chain` valid values are `gnosis` or `chiado`
-    * `--el-url`, in case you are using Erigon default ports is `http://localhost:8545`
-    * `` is the file generated during registration.
+* `--el-url`, in case you are using Erigon default ports is `http://localhost:8545`
+* `` is the file generated during registration.
 
-    for example:
+for example:
 ```bash
-    erigon shutter-validator-reg-check --chain gnosis --el-url http://localhost:8545 --validator-info-file /path/validatorInfo.json
-    ```
+erigon shutter-validator-reg-check --chain gnosis --el-url http://localhost:8545 --validator-info-file /path/validatorInfo.json
+```
 4. **Run Erigon with Shutter Support**
 
-    Start Erigon as usual, but add the `--shutter` flag to enable Shutterized Validator mode:
+Start Erigon as usual, but add the `--shutter` flag to enable Shutterized Validator mode:
 
-    ```bash
-    erigon --shutter [other options...]
-    ```
+```bash
+erigon --shutter [other options...]
+```
 
-    This works with Erigon's internal CL Caplin (enabled by default) or with an external CL client using `--externalcl`.
+This works with Erigon's internal CL Caplin (enabled by default) or with an external CL client using `--externalcl`.
 
 ## Shutter Network Default Ports
 
@@ -7185,25 +7008,16 @@ Bootstrap nodes are used to help new nodes discover other nodes in the network. 
 URL: https://docs.erigon.tech/staking
 
 Staking
-  Run an Ethereum validator with Erigon — using the built-in Caplin consensus layer or any external CL client.
+Run an Ethereum validator with Erigon — using the built-in Caplin consensus layer or any external CL client.
 
-  
-    
-    
-  
-  Caplin (Built-in CL)
-  Configure Erigon's embedded consensus layer as a full validator — no external CL dependency required.
+Caplin (Built-in CL)
+Configure Erigon's embedded consensus layer as a full validator — no external CL dependency required.
 
-  
-    
-    
-  
-  External Consensus Client
-  Connect Lighthouse, Prysm, Teku, or Nimbus via the Engine API for split EL/CL validator setups.
+External Consensus Client
+Connect Lighthouse, Prysm, Teku, or Nimbus via the Engine API for split EL/CL validator setups.
 
-  
-  Shutter Network
-  Privacy-preserving mempool protection — shield validator transactions from front-running and MEV.
+Shutter Network
+Privacy-preserving mempool protection — shield validator transactions from front-running and MEV.
 
 ---
 
@@ -7219,18 +7033,18 @@ The Erigon node software is developed in the [erigontech/erigon](https://github.
 ### Getting started
 
 1. Fork the repository and clone your fork:
-   ```bash
-   git clone https://github.com//erigon.git
-   cd erigon
-   ```
+```bash
+git clone https://github.com//erigon.git
+cd erigon
+```
 2. Build the project (requires Go 1.24+ and a C++ compiler):
-   ```bash
-   make erigon
-   ```
+```bash
+make erigon
+```
 3. Run the test suite:
-   ```bash
-   go test ./...
-   ```
+```bash
+go test ./...
+```
 
 ### Reporting bugs and requesting features
 
@@ -7264,15 +7078,15 @@ Open an issue in the repository to suggest corrections, flag outdated content, o
 ### Editing locally
 
 1. Clone the repository and install dependencies:
-   ```bash
-   git clone https://github.com/erigontech/erigon.git
-   cd erigon/docs/site
-   npm install
-   ```
+```bash
+git clone https://github.com/erigontech/erigon.git
+cd erigon/docs/site
+npm install
+```
 2. Start the local dev server:
-   ```bash
-   npm run start
-   ```
+```bash
+npm run start
+```
 3. Open `http://localhost:3000` in your browser — changes to Markdown files hot-reload automatically.
 
 ### Submitting a pull request
@@ -7310,34 +7124,16 @@ The Erigon team does not take any responsibility for losses or damages occurred 
 URL: https://docs.erigon.tech/about
 
 About
-  Learn about the project, how to get involved, and the license terms.
+Learn about the project, how to get involved, and the license terms.
 
-  
-    
-    
-    
-    
-  
-  Contributing
-  How to contribute code, report bugs, write docs, and submit pull requests to the Erigon project.
+Contributing
+How to contribute code, report bugs, write docs, and submit pull requests to the Erigon project.
 
-  
-    
-    
-    
-  
-  Disclaimer
-  Important notices about software maturity, stability expectations, and intended use.
+Disclaimer
+Important notices about software maturity, stability expectations, and intended use.
 
-  
-    
-    
-    
-    
-    
-  
-  License
-  Erigon's open-source licensing terms and third-party attribution.
+License
+Erigon's open-source licensing terms and third-party attribution.
 
 ---
 
@@ -7720,50 +7516,24 @@ This glossary provides concise definitions for essential terms related to the Er
 URL: https://docs.erigon.tech/help-center
 
 Help Center
-  Everything you need to run Erigon smoothly — from quick answers to deep diagnostics.
+Everything you need to run Erigon smoothly — from quick answers to deep diagnostics.
 
-  
-    
-    
-    
-  
-  FAQ
-  Answers to the most common questions about installing, syncing, and operating Erigon.
+FAQ
+Answers to the most common questions about installing, syncing, and operating Erigon.
 
-  
-    
-  
-  Troubleshooting
-  Step-by-step diagnostic guides for the most frequent runtime and sync issues.
+Troubleshooting
+Step-by-step diagnostic guides for the most frequent runtime and sync issues.
 
-  
-    
-    
-    
-  
-  Known Issues
-  Current confirmed bugs, limitations, and active workarounds for this release.
+Known Issues
+Current confirmed bugs, limitations, and active workarounds for this release.
 
-  
-    
-    
-  
-  Best Practices
-  Recommended configurations, operational patterns, and tips for stable long-running nodes.
+Best Practices
+Recommended configurations, operational patterns, and tips for stable long-running nodes.
 
-  
-    
-    
-    
-  
-  Common Errors & Solutions
-  Error messages decoded — causes explained and actionable fixes provided.
+Common Errors & Solutions
+Error messages decoded — causes explained and actionable fixes provided.
 
-  
-    
-    
-  
-  Glossary
-  Definitions of Erigon-specific and Ethereum ecosystem terminology used throughout the docs.
+Glossary
+Definitions of Erigon-specific and Ethereum ecosystem terminology used throughout the docs.
 
 ---
