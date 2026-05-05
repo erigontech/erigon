@@ -848,7 +848,7 @@ func TestApplyVersionedWrites_NonceWriteGeneratesBalanceRead(t *testing.T) {
 // TestApplyVersionedWrites_MultipleAccountsAllGetBalanceReads verifies that
 // when multiple existing accounts have writes of different types, ALL accounts
 // get BalancePath reads.
-func TestApplyVersionedWrites_MultipleAccountsAllGetBalanceReads(t *testing.T) {		
+func TestApplyVersionedWrites_MultipleAccountsAllGetBalanceReads(t *testing.T) {
 	t.Parallel()
 
 	addrA := accounts.InternAddress(common.HexToAddress("0xF200"))
