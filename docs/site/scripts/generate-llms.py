@@ -251,8 +251,14 @@ def build():
 
     # ── Write ─────────────────────────────────────────────────────────────────
     OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Docusaurus static dir (served at site root)
     (OUT_DIR / "llms.txt").write_text(llms_txt, encoding="utf-8")
     (OUT_DIR / "llms-full.txt").write_text(llms_full_txt, encoding="utf-8")
+
+    # Repo root — exact copies, for LLMs/tools that read the GitHub repo directly
+    (REPO_ROOT / "llms.txt").write_text(llms_txt, encoding="utf-8")
+    (REPO_ROOT / "llms-full.txt").write_text(llms_full_txt, encoding="utf-8")
 
     WARN_BYTES = 1_500_000  # 1.5 MB
     full_bytes = len(llms_full_txt.encode("utf-8"))
@@ -260,6 +266,7 @@ def build():
 
     print(f"llms.txt      {len(llms_txt.encode('utf-8')):>8,} bytes  {len(all_pages)} pages")
     print(f"llms-full.txt {full_bytes:>8,} bytes{size_note}")
+    print(f"→ written to {OUT_DIR} and {REPO_ROOT}")
     print()
     print("--- llms.txt preview (first 80 lines) ---")
     for line in llms_txt.splitlines()[:80]:
