@@ -41,8 +41,9 @@ func TestInvalidReceiptHashHighMgas(t *testing.T) {
 	testDir := path.Join(cornersDir, "invalid-receipt-hash-high-mgas")
 	preAllocsDir := path.Join(testDir, "pre_alloc")
 	payloadsDir := path.Join(testDir, "payloads")
-	engineXRunner, err := engineapitester.NewEngineXTestRunner(t, logger, preAllocsDir)
+	preAllocs, err := engineapitester.LoadPreAllocsFromDir(preAllocsDir)
 	require.NoError(t, err)
+	engineXRunner := engineapitester.NewEngineXTestRunner(t, logger, preAllocs)
 	tm := testutil.TestMatcher{}
 	tm.Walk(t, payloadsDir, func(t *testing.T, name string, test engineapitester.EngineXTestDefinition) {
 		err := engineXRunner.Run(ctx, test)
