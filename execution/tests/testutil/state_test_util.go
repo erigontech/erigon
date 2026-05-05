@@ -426,8 +426,8 @@ func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, alloc types.GenesisAll
 	statedb.SetTxContext(blockNr, 0)
 	for addr, a := range alloc {
 		address := accounts.InternAddress(addr)
-		statedb.SetCode(address, a.Code)
-		statedb.SetNonce(address, a.Nonce)
+		statedb.SetCode(address, a.Code, tracing.CodeChangeUnspecified)
+		statedb.SetNonce(address, a.Nonce, tracing.NonceChangeGenesis)
 		var balance uint256.Int
 		if a.Balance != nil {
 			_ = balance.SetFromBig(a.Balance)

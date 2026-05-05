@@ -61,6 +61,11 @@ func newMuxTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Tracer, e
 	}
 
 	t := &muxTracer{names: names, tracers: objects}
+	return t.tracer(), nil
+}
+
+// tracer wires up all muxTracer methods into a tracers.Tracer.
+func (t *muxTracer) tracer() *tracers.Tracer {
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
 			OnTxStart:           t.OnTxStart,
@@ -71,8 +76,8 @@ func newMuxTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Tracer, e
 			OnFault:             t.OnFault,
 			OnGasChange:         t.OnGasChange,
 			OnBalanceChange:     t.OnBalanceChange,
-			OnNonceChange:       t.OnNonceChange,
-			OnCodeChange:        t.OnCodeChange,
+			OnNonceChangeV2:     t.OnNonceChangeV2,
+			OnCodeChangeV2:      t.OnCodeChangeV2,
 			OnStorageChange:     t.OnStorageChange,
 			OnLog:               t.OnLog,
 			OnSystemCallStartV2: t.OnSystemCallStart,
@@ -80,7 +85,7 @@ func newMuxTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Tracer, e
 		},
 		GetResult: t.GetResult,
 		Stop:      t.Stop,
-	}, nil
+	}
 }
 
 func (t *muxTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
@@ -147,17 +152,21 @@ func (t *muxTracer) OnBalanceChange(a accounts.Address, prev, new uint256.Int, r
 	}
 }
 
-func (t *muxTracer) OnNonceChange(a accounts.Address, prev, new uint64) {
+func (t *muxTracer) OnNonceChangeV2(a accounts.Address, prev, new uint64, reason tracing.NonceChangeReason) {
 	for _, t := range t.tracers {
-		if t.OnNonceChange != nil {
+		if t.OnNonceChangeV2 != nil {
+			t.OnNonceChangeV2(a, prev, new, reason)
+		} else if t.OnNonceChange != nil {
 			t.OnNonceChange(a, prev, new)
 		}
 	}
 }
 
-func (t *muxTracer) OnCodeChange(a accounts.Address, prevCodeHash accounts.CodeHash, prev []byte, codeHash accounts.CodeHash, code []byte) {
+func (t *muxTracer) OnCodeChangeV2(a accounts.Address, prevCodeHash accounts.CodeHash, prev []byte, codeHash accounts.CodeHash, code []byte, reason tracing.CodeChangeReason) {
 	for _, t := range t.tracers {
-		if t.OnCodeChange != nil {
+		if t.OnCodeChangeV2 != nil {
+			t.OnCodeChangeV2(a, prevCodeHash, prev, codeHash, code, reason)
+		} else if t.OnCodeChange != nil {
 			t.OnCodeChange(a, prevCodeHash, prev, codeHash, code)
 		}
 	}
