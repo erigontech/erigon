@@ -448,3 +448,76 @@ func TestWarmupCache_DirtyFlag_MarkAbsentKey(t *testing.T) {
 	// entry exists, so the write proceeds).
 	require.True(t, cache.PutBranchIfClean([]byte("never-stored"), []byte("v")))
 }
+
+// TestWarmupCache_GetBranchDecoded verifies the lazy-decode read path:
+// stored encoded bytes are decoded on first decoded-read and cached for
+// subsequent reads, returning cells equivalent to direct DecodeBranchInto.
+func TestWarmupCache_GetBranchDecoded(t *testing.T) {
+	cache := NewWarmupCache()
+
+	// Encode a branch the same way BranchEncoder would, so our test
+	// data has the canonical [touchMap | bitmap | cells...] layout.
+	row, bm := generateCellRow(t, 16)
+	be := NewBranchEncoder(1024)
+	cellData := generateCellEncodeDataRow(t, row, bm)
+	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
+	require.NoError(t, err)
+
+	prefix := []byte{0x12, 0x34}
+	cache.PutBranch(prefix, enc)
+
+	// First decoded-read decodes lazily.
+	bitmap, cells, ok := cache.GetBranchDecoded(prefix)
+	require.True(t, ok)
+	require.Equal(t, bm, bitmap)
+	require.NotNil(t, cells)
+
+	// Cells should match what direct DecodeBranchInto would produce
+	// from the same encoded bytes (skip the 2-byte touchMap prefix).
+	var expected [16]cell
+	expectedMaps, err := DecodeBranchInto(enc[2:], false, &expected)
+	require.NoError(t, err)
+	require.Equal(t, expectedMaps.Bitmap, bitmap)
+	for i := range cells {
+		require.Equal(t, expected[i].extLen, cells[i].extLen, "cell %d extLen", i)
+		require.Equal(t, expected[i].extension[:expected[i].extLen], cells[i].extension[:cells[i].extLen], "cell %d extension", i)
+		require.Equal(t, expected[i].accountAddr[:expected[i].accountAddrLen], cells[i].accountAddr[:cells[i].accountAddrLen], "cell %d accountAddr", i)
+		require.Equal(t, expected[i].storageAddr[:expected[i].storageAddrLen], cells[i].storageAddr[:cells[i].storageAddrLen], "cell %d storageAddr", i)
+		require.Equal(t, expected[i].hash[:expected[i].hashLen], cells[i].hash[:cells[i].hashLen], "cell %d hash", i)
+	}
+
+	// Second decoded-read returns the SAME cells pointer — lazy decode
+	// runs at most once per entry.
+	bitmap2, cells2, ok := cache.GetBranchDecoded(prefix)
+	require.True(t, ok)
+	require.Equal(t, bm, bitmap2)
+	require.Same(t, cells, cells2, "expected cached cells pointer to be reused")
+
+	// Encoded form is unchanged after decoded reads.
+	encGot, ok := cache.GetBranch(prefix)
+	require.True(t, ok)
+	require.Equal(t, []byte(enc), encGot, "encoded form unchanged by decoded reads")
+}
+
+// TestWarmupCache_GetBranchDecoded_Miss verifies that misses on
+// GetBranchDecoded behave the same as misses on GetBranch.
+func TestWarmupCache_GetBranchDecoded_Miss(t *testing.T) {
+	cache := NewWarmupCache()
+	_, _, ok := cache.GetBranchDecoded([]byte("never-stored"))
+	require.False(t, ok)
+}
+
+// TestWarmupCache_GetBranchDecoded_TruncatedData verifies the decode-error
+// path — corrupt entry returns ok=false rather than panicking.
+func TestWarmupCache_GetBranchDecoded_TruncatedData(t *testing.T) {
+	cache := NewWarmupCache()
+	// One byte is shorter than the touchMap prefix; decode will error.
+	cache.PutBranch([]byte("k"), []byte{0x42})
+	_, _, ok := cache.GetBranchDecoded([]byte("k"))
+	require.False(t, ok, "truncated entry should return ok=false, not panic")
+
+	// Encoded form still retrievable for callers that don't need decode.
+	got, ok := cache.GetBranch([]byte("k"))
+	require.True(t, ok)
+	require.Equal(t, []byte{0x42}, got)
+}
