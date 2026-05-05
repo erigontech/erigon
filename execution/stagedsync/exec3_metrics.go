@@ -867,6 +867,25 @@ func (p *Progress) LogComplete(rs *state.StateV3, ex executor, stepsInDb float64
 	diffBlocks := max(int64(lastBlockNum)-int64(p.initialBlockNum)+1, 0)
 
 	p.log("done", suffix, te, rs, interval, lastBlockNum, diffBlocks, lastTxNum-p.initialTxNum, txSec, gasSec, 0, stepsInDb, nil)
+
+	// Cumulative across ExecV3 invocations. Each ExecV3 call has its own Progress/txExecutor,
+	// so per-call gas/s "resets" — particularly visible in chaintip mode where each block is its
+	// own invocation. These counters survive across invocations.
+	cumGas := cumulativeExecGas.Add(int64(gas))
+	cumBlocks := cumulativeExecBlocks.Add(diffBlocks)
+	cumNanos := cumulativeExecNanos.Add(int64(interval))
+	cumSec := float64(cumNanos) / 1e9
+	var cumGasSec uint64
+	if cumSec > 0 {
+		cumGasSec = uint64(float64(cumGas) / cumSec)
+	}
+	p.logger.Info(
+		fmt.Sprintf("[%s] cumulative", p.logPrefix),
+		"blocks", cumBlocks,
+		"gas", common.PrettyCounter(cumGas),
+		"elapsed", time.Duration(cumNanos),
+		"gas/s", common.PrettyCounter(cumGasSec),
+	)
 }
 
 func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.StateV3, interval time.Duration,

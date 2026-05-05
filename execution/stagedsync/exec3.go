@@ -809,6 +809,12 @@ var (
 	commTotalNanos atomic.Int64
 	commBlockCount atomic.Uint64
 	commLastBlock  atomic.Uint64
+
+	// cumulative ExecV3 counters — survive across ExecV3 invocations so that
+	// per-block runs (chaintip mode) can still report a true running total.
+	cumulativeExecGas    atomic.Int64
+	cumulativeExecBlocks atomic.Int64
+	cumulativeExecNanos  atomic.Int64
 )
 
 // recordCommitmentTime updates running totals and logs per-block + running-average commitment time.
