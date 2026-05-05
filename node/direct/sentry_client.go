@@ -35,6 +35,7 @@ const (
 	ETH68 = 68
 	ETH69 = 69
 	ETH70 = 70
+	ETH71 = 71
 
 	WIT0 = 1
 )
@@ -44,11 +45,13 @@ var (
 		sentryproto.Protocol_ETH68: ETH68,
 		sentryproto.Protocol_ETH69: ETH69,
 		sentryproto.Protocol_ETH70: ETH70,
+		sentryproto.Protocol_ETH71: ETH71,
 	}
 	UintToProtocolMap = map[uint]sentryproto.Protocol{
 		ETH68: sentryproto.Protocol_ETH68,
 		ETH69: sentryproto.Protocol_ETH69,
 		ETH70: sentryproto.Protocol_ETH70,
+		ETH71: sentryproto.Protocol_ETH71,
 	}
 	SupportedSideProtocols = map[sentryproto.Protocol]struct{}{
 		sentryproto.Protocol_WIT0: {},
