@@ -108,6 +108,20 @@ A node started with the defaults today operates exactly as pre-PR.
   to derive step + domain + kind metadata; centralises parsing
   + the future block→txnum→step unit conversion.
 
+### Stage 2 — Commitment-derived (step, block) binding + state-at-end consistency check
+
+- New `CommitmentDomainValidator` runs on commitment-step batches:
+  opens `commitment.kv`, decodes `KeyCommitmentState`, verifies
+  the recorded state sits at the END of its block (txNum ==
+  blockMaxTxNum) — catches files mis-named or built against the
+  wrong step boundary.
+- On success, registers `(toStep, blockNum)` binding in the
+  inventory. `Inventory.BlockToStep(block)` answers the inverse
+  query for block-snapshot callers.
+- Runs identically on publisher and consumer via the shared
+  `StepChain` — failure on either side blocks step advance to
+  Advertisable.
+
 ### Inventory pre-check before BuildMissedIndices (§5c)
 
 - `BuildOnIndexing` consults the inventory before invoking the
@@ -138,11 +152,13 @@ New plan docs under `docs/plans/`:
 
 - **Mainnet performance measurement.** The PR gate. 10-min
   time-to-tip needs to be reproduced on Ethereum mainnet.
-- **Stage 2 — commitment-file block→step binding.** A batch
-  validator that opens the commitment.kv during validation,
-  reads `KeyCommitmentState` to extract the canonical block
-  number for the step's end, and registers a verifiable
-  `(step, block)` binding in the inventory.
+- **Block-file step-unit rewrite using the (step, block)
+  binding.** Stage 2 produces the binding; using it in
+  `PopulateFromName` to rewrite block-snapshot files'
+  `FromStep`/`ToStep` from block-units into step-units is the
+  follow-up. Today block files keep block-unit numbers — sibling
+  grouping works because step-siblings share parsed numbers, but
+  cross-kind comparisons aren't aligned until this lands.
 - **Bandwidth-aware download orchestrator.** Backwards-vs-
   sideways priority shaping using the per-step timings landed
   here. Real-time torrent throughput integration plugs into the

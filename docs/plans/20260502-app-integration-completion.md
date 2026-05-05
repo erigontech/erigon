@@ -60,6 +60,17 @@ Step+minimum data model: `docs/plans/20260504-step-and-minimum-unified.md`.
   - **Default validation chain wired in production.** ✅ Per-step
     presence check active when `--snap.lifecycle-driven-by-storage`
     is set.
+  - **Stage 2 — Commitment-derived (step, block) binding +
+    state-at-end consistency check.** ✅ `CommitmentDomainValidator`
+    opens commitment.kv on commitment-step batches, decodes
+    `KeyCommitmentState`, verifies the recorded state is at the
+    end of its block (txNum == blockMaxTxNum), and registers a
+    `(toStep, blockNum)` binding in the inventory. Runs identically
+    on publisher and consumer via the shared StepChain — failure
+    prevents the step from advancing to Advertisable. The
+    `Inventory.BlockToStep` accessor lets block-snapshot callers
+    map block ranges to step units once enough commitment steps
+    have validated.
 
 ## What ships in this PR (verification-only)
 
@@ -74,14 +85,13 @@ Step+minimum data model: `docs/plans/20260504-step-and-minimum-unified.md`.
     10-min time-to-tip target on mainnet. See
     `docs/plans/20260502-min-time-to-tip-target.md` (mainnet section)
     + `docs/plans/20260504-v2-operational-guide.md`.
-  - **Stage 2 — commitment-file block→step binding.** A step's
-    `commitment.kv` records the canonical block number at the step's
-    end (per Erigon's existing `KeyCommitmentState` encoding). A
-    follow-up batch validator opens commitment.kv during validation
-    and registers a verifiable `(step, block)` binding in the
-    inventory — gives unified step-units across blocks + state.
-    Plan section: `docs/plans/20260504-step-and-minimum-unified.md`
-    "Block-to-step unit conversion (staged)".
+  - **Block-snapshot file step rewrite using the binding.** Stage
+    2 lands the `(step, block)` binding; the follow-up uses it in
+    `PopulateFromName` to rewrite block-snapshot files'
+    `FromStep`/`ToStep` from block-units into step-units, giving
+    uniform cross-kind step semantics. Defers until enough
+    commitment steps have validated to populate the lookup
+    (chicken-and-egg at first sync).
   - **Bandwidth-aware download orchestrator.** Backwards-vs-sideways
     priority shaping using the per-step / per-file timings landed
     in this PR. Real-time torrent-throughput integration (option A)
